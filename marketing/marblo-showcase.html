@@ -1,0 +1,1610 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Marblo — 라이브 오케스트레이션 쇼케이스</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%236e9bff'/%3E%3C/svg%3E"
+    />
+    <style>
+      /* ============================================================
+   Marblo Showcase — self-contained animated product film
+   Design tokens: dark-first (film source), light supported.
+   Motif: marbles (구슬) flowing through orchestration lanes.
+   ============================================================ */
+
+      :root {
+        --bg: #0b0e13;
+        --bg-elev: #131824;
+        --bg-elev2: #1a2130;
+        --ink: #e9ebef;
+        --ink-dim: #98a1b1;
+        --ink-faint: #5c6577;
+        --line: rgba(233, 235, 239, 0.1);
+        --line-strong: rgba(233, 235, 239, 0.18);
+        --signal: #6e9bff;
+        --signal-soft: rgba(110, 155, 255, 0.14);
+        --ok: #58c08a;
+        --warn: #d9a84e;
+        --m-claude: #e07856;
+        --m-codex: #4fb8a8;
+        --m-grok: #9aa7b8;
+        --m-minimax: #d96fa0;
+        --m-kimi: #d9a84e;
+        --shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+        --font-display: "Iowan Old Style", "Palatino Nova", Palatino,
+          "Book Antiqua", Georgia, serif;
+        --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+          "Segoe UI", "Helvetica Neue", Arial, "Apple SD Gothic Neo",
+          "Malgun Gothic", sans-serif;
+        --font-mono: ui-monospace, "SF Mono", Menlo, "Cascadia Code", Consolas,
+          monospace;
+        color-scheme: dark;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f5f6f9;
+          --bg-elev: #ffffff;
+          --bg-elev2: #eef0f5;
+          --ink: #181d28;
+          --ink-dim: #586274;
+          --ink-faint: #8b93a5;
+          --line: rgba(24, 29, 40, 0.1);
+          --line-strong: rgba(24, 29, 40, 0.2);
+          --signal: #3d6fe0;
+          --signal-soft: rgba(61, 111, 224, 0.1);
+          --shadow: 0 24px 60px rgba(24, 29, 40, 0.12);
+          color-scheme: light;
+        }
+      }
+      :root[data-theme="dark"] {
+        --bg: #0b0e13;
+        --bg-elev: #131824;
+        --bg-elev2: #1a2130;
+        --ink: #e9ebef;
+        --ink-dim: #98a1b1;
+        --ink-faint: #5c6577;
+        --line: rgba(233, 235, 239, 0.1);
+        --line-strong: rgba(233, 235, 239, 0.18);
+        --signal: #6e9bff;
+        --signal-soft: rgba(110, 155, 255, 0.14);
+        --shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+        color-scheme: dark;
+      }
+      :root[data-theme="light"] {
+        --bg: #f5f6f9;
+        --bg-elev: #ffffff;
+        --bg-elev2: #eef0f5;
+        --ink: #181d28;
+        --ink-dim: #586274;
+        --ink-faint: #8b93a5;
+        --line: rgba(24, 29, 40, 0.1);
+        --line-strong: rgba(24, 29, 40, 0.2);
+        --signal: #3d6fe0;
+        --signal-soft: rgba(61, 111, 224, 0.1);
+        --shadow: 0 24px 60px rgba(24, 29, 40, 0.12);
+        color-scheme: light;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--font-body);
+        font-size: 16px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
+      }
+
+      /* ---------- scene scaffold ---------- */
+      .scene {
+        position: relative;
+        min-height: 100vh;
+        min-height: 100svh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: clamp(56px, 9vh, 110px) clamp(20px, 6vw, 72px);
+        overflow: hidden;
+      }
+      .wrap {
+        position: relative;
+        width: 100%;
+        max-width: 1080px;
+      }
+
+      .kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--ink-dim);
+      }
+      .kicker::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: radial-gradient(
+          circle at 35% 30%,
+          color-mix(in srgb, var(--signal) 55%, #fff),
+          var(--signal) 70%
+        );
+        box-shadow: 0 0 12px var(--signal-soft);
+      }
+      h1,
+      h2 {
+        font-family: var(--font-display);
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        text-wrap: balance;
+      }
+      h1 {
+        font-size: clamp(34px, 5.6vw, 68px);
+        line-height: 1.12;
+      }
+      h2 {
+        font-size: clamp(26px, 3.8vw, 44px);
+        line-height: 1.18;
+      }
+      .lede {
+        max-width: 34em;
+        color: var(--ink-dim);
+        font-size: clamp(15px, 1.4vw, 18px);
+      }
+
+      /* ---------- reveal system ---------- */
+      .fx {
+        opacity: 0;
+        transform: translateY(26px);
+        transition: opacity 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+          transform 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+        transition-delay: var(--d, 0s);
+      }
+      .scene.in .fx {
+        opacity: 1;
+        transform: none;
+      }
+
+      /* ============================================================
+   Scene 1 — Hero
+   ============================================================ */
+      #hero {
+        text-align: center;
+      }
+      #hero canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 0;
+      }
+      #hero .wrap {
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 26px;
+      }
+      #hero .lede {
+        margin-inline: auto;
+      }
+      .hero-models {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px 18px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        color: var(--ink-faint);
+      }
+      .hero-models span {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .orb {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: radial-gradient(
+          circle at 35% 30%,
+          rgba(255, 255, 255, 0.75),
+          var(--c) 65%
+        );
+        flex: none;
+      }
+      .scroll-hint {
+        position: absolute;
+        bottom: 28px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: var(--ink-faint);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        z-index: 1;
+      }
+      .scroll-hint::after {
+        content: "";
+        width: 1px;
+        height: 34px;
+        background: linear-gradient(var(--ink-faint), transparent);
+        animation: drip 2.4s ease-in-out infinite;
+      }
+      @keyframes drip {
+        0% {
+          transform: scaleY(0);
+          transform-origin: top;
+          opacity: 0;
+        }
+        35% {
+          transform: scaleY(1);
+          opacity: 1;
+        }
+        100% {
+          transform: scaleY(1);
+          transform-origin: top;
+          opacity: 0;
+        }
+      }
+
+      /* ============================================================
+   Shared: panels & mock UI
+   ============================================================ */
+      .scene-head {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        margin-bottom: clamp(36px, 5vh, 56px);
+      }
+      .panel-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 20px;
+      }
+      .panel {
+        background: var(--bg-elev);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 26px 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        box-shadow: var(--shadow);
+      }
+      .panel h3 {
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .panel p {
+        color: var(--ink-dim);
+        font-size: 14.5px;
+      }
+      .mock {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--bg);
+        padding: 14px;
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        color: var(--ink-dim);
+        overflow: hidden;
+      }
+
+      /* chips */
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+      .chip {
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        padding: 4px 11px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        color: var(--ink-dim);
+        white-space: nowrap;
+      }
+      .chip.on {
+        color: var(--signal);
+        border-color: var(--signal);
+        background: var(--signal-soft);
+      }
+
+      /* Scene 2 — store chips cascade in */
+      .scene.in .chip {
+        animation: chipIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+        animation-delay: calc(0.5s + var(--i, 0) * 0.09s);
+      }
+      @keyframes chipIn {
+        from {
+          opacity: 0;
+          transform: translateY(8px) scale(0.96);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      /* sidebar mock */
+      .side-tabs {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+      .side-tabs b {
+        font-weight: 500;
+        font-size: 10.5px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        padding: 4px 10px;
+        border-radius: 6px;
+        color: var(--ink-faint);
+      }
+      .side-tabs b.on {
+        background: var(--signal-soft);
+        color: var(--signal);
+      }
+      .file-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 0;
+      }
+      .file-row i {
+        font-style: normal;
+        width: 10px;
+        height: 10px;
+        border: 1px solid var(--ink-faint);
+        border-radius: 2px;
+        flex: none;
+      }
+      /* start-here mock */
+      .steps-mock {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .steps-mock div {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .steps-mock .dot {
+        width: 15px;
+        height: 15px;
+        border-radius: 50%;
+        border: 1px solid var(--line-strong);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 9px;
+        color: var(--ok);
+        flex: none;
+      }
+      .scene.in .steps-mock div {
+        animation: chipIn 0.5s both;
+        animation-delay: calc(0.6s + var(--i) * 0.25s);
+      }
+      .steps-mock .dot.done {
+        border-color: var(--ok);
+      }
+
+      /* ============================================================
+   Scene 3 — workspace tabs
+   ============================================================ */
+      .tabbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--bg-elev);
+        padding: 6px;
+        margin-bottom: 26px;
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        color: var(--ink-faint);
+      }
+      .tabbar span {
+        padding: 5px 11px;
+        border-radius: 6px;
+        white-space: nowrap;
+      }
+      .tabbar span.hot {
+        color: var(--ink);
+        background: var(--bg-elev2);
+      }
+
+      .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 20px;
+      }
+
+      /* board mini: a card hops TODO→IN_PROGRESS→REVIEW→DONE */
+      .board-mini {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        position: relative;
+      }
+      .board-col {
+        border: 1px dashed var(--line-strong);
+        border-radius: 7px;
+        min-height: 74px;
+        padding: 5px;
+      }
+      .board-col em {
+        font-style: normal;
+        font-size: 9px;
+        letter-spacing: 0.08em;
+        color: var(--ink-faint);
+      }
+      .board-ghost {
+        height: 17px;
+        border-radius: 4px;
+        background: var(--bg-elev2);
+        margin-top: 5px;
+      }
+      .board-track {
+        position: absolute;
+        inset: 14px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        pointer-events: none;
+      }
+      .board-card {
+        grid-column: 1;
+        align-self: start;
+        margin: 25px 5px 0;
+        height: 17px;
+        border-radius: 4px;
+        background: var(--signal);
+        opacity: 0.9;
+        animation: hop 7s cubic-bezier(0.6, 0, 0.3, 1) infinite;
+      }
+      @keyframes hop {
+        0%,
+        16% {
+          transform: translateX(0);
+        }
+        25%,
+        41% {
+          transform: translateX(calc(100% + 18px));
+        }
+        50%,
+        66% {
+          transform: translateX(calc(200% + 36px));
+        }
+        75%,
+        96% {
+          transform: translateX(calc(300% + 54px));
+        }
+        100% {
+          transform: translateX(calc(300% + 54px));
+          opacity: 0;
+        }
+      }
+
+      /* code mini: diff lines type in */
+      .code-mini div {
+        height: 8px;
+        border-radius: 3px;
+        background: var(--bg-elev2);
+        margin: 7px 0;
+        width: var(--w);
+      }
+      .code-mini div.add {
+        background: color-mix(in srgb, var(--ok) 38%, var(--bg-elev2));
+        animation: grow 3.6s ease infinite;
+        transform-origin: left;
+      }
+      @keyframes grow {
+        0%,
+        20% {
+          transform: scaleX(0);
+        }
+        55%,
+        100% {
+          transform: scaleX(1);
+        }
+      }
+
+      /* worktree mini: branches draw out from trunk */
+      .wt-mini {
+        position: relative;
+        height: 86px;
+      }
+      .wt-trunk {
+        position: absolute;
+        left: 12px;
+        top: 6px;
+        bottom: 6px;
+        width: 1.5px;
+        background: var(--line-strong);
+      }
+      .wt-branch {
+        position: absolute;
+        left: 12px;
+        height: 1.5px;
+        width: 62%;
+        background: var(--c);
+        transform-origin: left;
+        animation: draw 5s ease infinite;
+        animation-delay: var(--d2);
+        opacity: 0.85;
+      }
+      .wt-branch::after {
+        content: attr(data-label);
+        position: absolute;
+        right: -6px;
+        top: -14px;
+        font-size: 9px;
+        color: var(--ink-faint);
+        letter-spacing: 0.05em;
+      }
+      @keyframes draw {
+        0% {
+          transform: scaleX(0);
+        }
+        30%,
+        85% {
+          transform: scaleX(1);
+        }
+        100% {
+          transform: scaleX(1);
+          opacity: 0;
+        }
+      }
+
+      /* history mini: rows check off */
+      .hist-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 0;
+      }
+      .hist-row s {
+        text-decoration: none;
+        color: var(--ok);
+        font-size: 11px;
+      }
+      .scene.in .hist-row {
+        animation: chipIn 0.45s both;
+        animation-delay: calc(0.7s + var(--i) * 0.3s);
+      }
+
+      /* lanes mini */
+      .lane-btn {
+        display: inline-block;
+        border: 1px solid var(--signal);
+        color: var(--signal);
+        border-radius: 7px;
+        padding: 5px 12px;
+        font-size: 11.5px;
+        margin-bottom: 10px;
+      }
+      .lane-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--ink-dim);
+        font-size: 11px;
+      }
+      .lane-badge::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--ok);
+        animation: pulse 2s ease infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 0.5;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+
+      /* ============================================================
+   Scene 4 — live orchestration (centerpiece)
+   ============================================================ */
+      #orch .stagegrid {
+        display: grid;
+        grid-template-columns: minmax(230px, 320px) 1fr;
+        gap: clamp(24px, 4vw, 56px);
+        align-items: start;
+      }
+      .steplist {
+        display: flex;
+        flex-direction: column;
+      }
+      .step {
+        position: relative;
+        padding: 13px 0 13px 26px;
+        color: var(--ink-faint);
+        transition: color 0.5s;
+        font-size: 15px;
+      }
+      .step + .step {
+        border-top: 1px solid var(--line);
+      }
+      .step::before {
+        content: "";
+        position: absolute;
+        left: 2px;
+        top: 21px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        border: 1px solid var(--ink-faint);
+        transition: all 0.5s;
+      }
+      .step b {
+        display: block;
+        font-weight: 600;
+        font-size: 15px;
+        letter-spacing: -0.01em;
+      }
+      .step small {
+        display: block;
+        font-size: 13px;
+        line-height: 1.5;
+        margin-top: 2px;
+        max-height: 0;
+        opacity: 0;
+        overflow: hidden;
+        transition: max-height 0.6s ease, opacity 0.6s ease;
+      }
+      .step.on {
+        color: var(--ink);
+      }
+      .step.on::before {
+        background: var(--signal);
+        border-color: var(--signal);
+        box-shadow: 0 0 10px var(--signal-soft);
+      }
+      .step.on small {
+        max-height: 80px;
+        opacity: 1;
+        color: var(--ink-dim);
+      }
+      .step.done {
+        color: var(--ink-dim);
+      }
+      .step.done::before {
+        background: var(--ok);
+        border-color: var(--ok);
+      }
+
+      .stage {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: var(--bg-elev);
+        box-shadow: var(--shadow);
+        padding: clamp(18px, 3vw, 30px);
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        min-height: 380px;
+      }
+      .stage .g {
+        opacity: 0;
+        transform: translateY(12px);
+        transition: opacity 0.6s ease, transform 0.6s ease;
+      }
+      .stage.s1 .g1,
+      .stage.s2 .g2,
+      .stage.s3 .g3,
+      .stage.s4 .g4,
+      .stage.s5 .g5,
+      .stage.s6 .g6 {
+        opacity: 1;
+        transform: none;
+      }
+
+      .mission-line {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        color: var(--ink);
+        background: var(--bg);
+        border: 1px solid var(--line-strong);
+        border-radius: 9px;
+        padding: 11px 14px;
+        display: flex;
+        gap: 9px;
+        align-items: baseline;
+      }
+      .mission-line i {
+        font-style: normal;
+        color: var(--signal);
+      }
+      .caret {
+        display: inline-block;
+        width: 7px;
+        height: 14px;
+        background: var(--signal);
+        vertical-align: middle;
+        animation: blink 1.1s steps(2) infinite;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+
+      .tickets {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 9px;
+      }
+      .ticket {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--bg);
+        padding: 9px 11px;
+        font-size: 11.5px;
+        color: var(--ink-dim);
+      }
+      .ticket em {
+        display: block;
+        font-style: normal;
+        font-family: var(--font-mono);
+        font-size: 9.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--signal);
+        margin-bottom: 3px;
+      }
+      .stage.s2 .ticket {
+        animation: chipIn 0.5s both;
+        animation-delay: calc(var(--i) * 0.12s);
+      }
+
+      .lanes {
+        display: flex;
+        flex-direction: column;
+        gap: 11px;
+      }
+      .lane {
+        display: grid;
+        grid-template-columns: 118px 1fr auto;
+        gap: 12px;
+        align-items: center;
+        font-size: 12px;
+      }
+      .lane .who {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        color: var(--ink-dim);
+        white-space: nowrap;
+      }
+      .bar {
+        height: 5px;
+        border-radius: 999px;
+        background: var(--bg-elev2);
+        overflow: hidden;
+      }
+      .bar i {
+        display: block;
+        height: 100%;
+        width: 0;
+        border-radius: 999px;
+        background: var(--c);
+        transition: width 2.6s cubic-bezier(0.3, 0, 0.2, 1);
+      }
+      .stage.s4 .bar i {
+        width: var(--p1);
+      }
+      .stage.s6 .bar i {
+        width: 100%;
+      }
+      .lane .st {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        color: var(--ink-faint);
+        min-width: 74px;
+        text-align: right;
+      }
+      /* watchdog heal on the stalled lane */
+      .stage.s5 .lane.stall .who .orb {
+        animation: heal 1.6s ease infinite;
+      }
+      .stage.s5 .lane.stall .st {
+        color: var(--warn);
+      }
+      .stage.s6 .lane.stall .st {
+        color: var(--ink-faint);
+      }
+      @keyframes heal {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(217, 168, 78, 0);
+        }
+        50% {
+          box-shadow: 0 0 0 6px rgba(217, 168, 78, 0.22);
+        }
+      }
+      .watchnote {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 12.5px;
+        color: var(--warn);
+        border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+        background: color-mix(in srgb, var(--warn) 8%, transparent);
+        border-radius: 9px;
+        padding: 9px 13px;
+      }
+      .stage.s6 .g5 {
+        opacity: 0.35;
+      }
+      .mergenote {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 13px;
+        color: var(--ok);
+        border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent);
+        background: color-mix(in srgb, var(--ok) 8%, transparent);
+        border-radius: 9px;
+        padding: 11px 14px;
+        font-family: var(--font-mono);
+      }
+      .mergenote b {
+        font-weight: 600;
+      }
+
+      /* ============================================================
+   Scene 5 — CTA
+   ============================================================ */
+      #cta {
+        text-align: center;
+      }
+      #cta .wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 24px;
+      }
+      .dl {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        font-family: var(--font-mono);
+        font-size: clamp(15px, 2vw, 19px);
+        letter-spacing: 0.03em;
+        color: var(--bg);
+        background: var(--ink);
+        border-radius: 999px;
+        padding: 15px 34px;
+        text-decoration: none;
+        transition: transform 0.25s ease, box-shadow 0.25s ease;
+      }
+      .dl:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 34px rgba(0, 0, 0, 0.35);
+      }
+      .dl:focus-visible {
+        outline: 2px solid var(--signal);
+        outline-offset: 3px;
+      }
+      .dl::after {
+        content: "↗";
+        font-size: 0.9em;
+      }
+      .cta-sub {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        letter-spacing: 0.16em;
+        color: var(--ink-faint);
+        text-transform: uppercase;
+      }
+      .cta-models {
+        border-top: 1px solid var(--line);
+        padding-top: 22px;
+      }
+
+      /* ============================================================
+   Autoplay control (for screen recording)
+   ============================================================ */
+      #play {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        z-index: 10;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        color: var(--ink-dim);
+        background: var(--bg-elev);
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        padding: 9px 16px;
+        cursor: pointer;
+        transition: color 0.2s, border-color 0.2s, opacity 0.4s;
+      }
+      #play:hover {
+        color: var(--ink);
+        border-color: var(--ink-dim);
+      }
+      #play:focus-visible {
+        outline: 2px solid var(--signal);
+        outline-offset: 2px;
+      }
+      body.presenting #play {
+        opacity: 0;
+        pointer-events: none;
+      }
+      body.presenting {
+        scrollbar-width: none;
+      }
+      body.presenting::-webkit-scrollbar {
+        display: none;
+      }
+
+      /* ============================================================
+   Responsive — vertical (SNS) & narrow
+   ============================================================ */
+      @media (max-width: 760px) {
+        #orch .stagegrid {
+          grid-template-columns: 1fr;
+        }
+        .steplist {
+          flex-direction: column;
+        }
+        .step {
+          padding: 10px 0 10px 24px;
+          font-size: 14px;
+        }
+        .step small {
+          font-size: 12px;
+        }
+        .stage {
+          min-height: 330px;
+        }
+        .lane {
+          grid-template-columns: 96px 1fr;
+        }
+        .lane .st {
+          display: none;
+        }
+        .tabbar {
+          font-size: 10.5px;
+        }
+        .panel-grid,
+        .feature-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* ============================================================
+   Reduced motion — everything lands settled
+   ============================================================ */
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+        * {
+          animation: none !important;
+          transition: none !important;
+        }
+        .fx,
+        .scene .chip,
+        .scene .steps-mock div,
+        .scene .hist-row {
+          opacity: 1 !important;
+          transform: none !important;
+        }
+        .stage .g {
+          opacity: 1 !important;
+          transform: none !important;
+        }
+        .bar i {
+          width: 100% !important;
+        }
+        .board-card {
+          display: none;
+        }
+        #play {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ============ Scene 1 · Hero ============ -->
+    <section class="scene in" id="hero">
+      <canvas id="orbs" aria-hidden="true"></canvas>
+      <div class="wrap">
+        <p class="kicker fx" style="--d: 0.05s">Marblo</p>
+        <h1 class="fx" style="--d: 0.18s">
+          Live orchestration<br />for AI-native teams
+        </h1>
+        <p class="lede fx" style="--d: 0.34s">
+          임무 한 줄이 티켓이 되고, 티켓이 모델별 에이전트 팀이 되어 병렬로
+          움직입니다. 그 전 과정을 한 화면에서 실시간으로 지휘하세요.
+        </p>
+        <div class="hero-models fx" style="--d: 0.5s" aria-label="지원 모델">
+          <span><i class="orb" style="--c: var(--m-claude)"></i>Claude</span>
+          <span><i class="orb" style="--c: var(--m-codex)"></i>Codex</span>
+          <span><i class="orb" style="--c: var(--m-grok)"></i>Grok</span>
+          <span><i class="orb" style="--c: var(--m-minimax)"></i>MiniMax</span>
+          <span><i class="orb" style="--c: var(--m-kimi)"></i>Kimi</span>
+          <span><i class="orb" style="--c: var(--ink-faint)"></i>Local</span>
+        </div>
+      </div>
+      <div class="scroll-hint" aria-hidden="true">Scroll</div>
+    </section>
+
+    <!-- ============ Scene 2 · New UX ============ -->
+    <section class="scene" id="ux">
+      <div class="wrap">
+        <div class="scene-head">
+          <p class="kicker fx">New in Marblo</p>
+          <h2 class="fx" style="--d: 0.12s">
+            처음 여는 순간부터,<br />팀의 작업대까지
+          </h2>
+        </div>
+        <div class="panel-grid">
+          <article class="panel fx" style="--d: 0.2s">
+            <h3>시작하기</h3>
+            <p>
+              첫 실행에서 바로 첫 임무까지. CLI 연결부터 에이전트 스폰까지
+              순서대로 안내하는 온보딩 탭.
+            </p>
+            <div class="mock steps-mock" aria-hidden="true">
+              <div style="--i: 0"><span class="dot done">✓</span> CLI 연결</div>
+              <div style="--i: 1">
+                <span class="dot done">✓</span> 첫 임무 입력
+              </div>
+              <div style="--i: 2"><span class="dot">3</span> 에이전트 스폰</div>
+            </div>
+          </article>
+          <article class="panel fx" style="--d: 0.32s">
+            <h3>스토어</h3>
+            <p>
+              공개 레지스트리의 스킬·MCP·에이전트 카탈로그 — 워크플로·스터디
+              레퍼런스와 로컬 모델까지 한 곳에서.
+            </p>
+            <div class="mock" aria-hidden="true">
+              <div class="chips">
+                <span class="chip on" style="--i: 0">전체</span>
+                <span class="chip" style="--i: 1">MCP</span>
+                <span class="chip" style="--i: 2">스킬</span>
+                <span class="chip" style="--i: 3">에이전트</span>
+                <span class="chip" style="--i: 4">워크플로</span>
+                <span class="chip" style="--i: 5">스터디</span>
+                <span class="chip" style="--i: 6">로컬 모델</span>
+              </div>
+            </div>
+          </article>
+          <article class="panel fx" style="--d: 0.44s">
+            <h3>사이드바</h3>
+            <p>
+              파일 · 명령어 · 채팅 — 작업 컨텍스트와 팀 대화를 화면 곁에 두는 세
+              개의 탭.
+            </p>
+            <div class="mock" aria-hidden="true">
+              <div class="side-tabs">
+                <b class="on">파일</b><b>명령어</b><b>채팅</b>
+              </div>
+              <div class="file-row"><i></i> src/components/</div>
+              <div class="file-row"><i></i> electron/</div>
+              <div class="file-row"><i></i> package.json</div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Scene 3 · Workspace tabs ============ -->
+    <section class="scene" id="tabs">
+      <div class="wrap">
+        <div class="scene-head">
+          <p class="kicker fx">The workspace</p>
+          <h2 class="fx" style="--d: 0.12s">
+            탭 하나하나가<br />하나의 관제실
+          </h2>
+        </div>
+        <div class="tabbar fx" style="--d: 0.2s" aria-label="워크스페이스 탭">
+          <span>시작하기</span><span>가이드</span><span class="hot">보드</span
+          ><span class="hot">코드</span><span class="hot">퀵레인</span
+          ><span>에이전트</span><span class="hot">워크트리</span
+          ><span class="hot">완료 이력</span><span>사용량</span
+          ><span>스토어</span><span>하네스</span><span>설정</span>
+        </div>
+        <div class="feature-grid">
+          <article class="panel fx" style="--d: 0.26s">
+            <h3>보드</h3>
+            <p>
+              티켓이 흐르는 칸반. TODO에서 DONE까지, 에이전트가 직접 카드를
+              옮깁니다.
+            </p>
+            <div class="mock board-mini" aria-hidden="true">
+              <div class="board-col">
+                <em>TODO</em>
+                <div class="board-ghost"></div>
+              </div>
+              <div class="board-col"><em>IN&nbsp;PROG</em></div>
+              <div class="board-col"><em>REVIEW</em></div>
+              <div class="board-col">
+                <em>DONE</em>
+                <div class="board-ghost"></div>
+              </div>
+              <div class="board-track"><div class="board-card"></div></div>
+            </div>
+          </article>
+          <article class="panel fx" style="--d: 0.36s">
+            <h3>코드</h3>
+            <p>
+              에이전트가 만든 변경을 워크트리별로 그 자리에서 확인하고
+              리뷰합니다.
+            </p>
+            <div class="mock code-mini" aria-hidden="true">
+              <div style="--w: 82%"></div>
+              <div class="add" style="--w: 64%"></div>
+              <div class="add" style="--w: 74%; animation-delay: 0.5s"></div>
+              <div style="--w: 48%"></div>
+            </div>
+          </article>
+          <article class="panel fx" style="--d: 0.46s">
+            <h3>워크트리</h3>
+            <p>
+              티켓마다 격리된 git 워크트리. 에이전트들이 서로의 작업을 밟지
+              않습니다.
+            </p>
+            <div class="mock wt-mini" aria-hidden="true">
+              <div class="wt-trunk"></div>
+              <div
+                class="wt-branch"
+                data-label="ticket-a"
+                style="--c: var(--m-claude); --d2: 0s; top: 20px"
+              ></div>
+              <div
+                class="wt-branch"
+                data-label="ticket-b"
+                style="--c: var(--m-codex); --d2: 0.7s; top: 46px"
+              ></div>
+              <div
+                class="wt-branch"
+                data-label="ticket-c"
+                style="--c: var(--m-minimax); --d2: 1.4s; top: 72px"
+              ></div>
+            </div>
+          </article>
+          <article class="panel fx" style="--d: 0.56s">
+            <h3>완료 이력</h3>
+            <p>끝난 일의 기록이 남고, 다음 모델 선택의 근거가 됩니다.</p>
+            <div class="mock" aria-hidden="true">
+              <div class="hist-row" style="--i: 0">
+                <s>✓</s> 로그인 버그 수리 — 머지됨
+              </div>
+              <div class="hist-row" style="--i: 1">
+                <s>✓</s> 온보딩 배너 개선 — 머지됨
+              </div>
+              <div class="hist-row" style="--i: 2">
+                <s>✓</s> 결제 웹훅 검증 — 머지됨
+              </div>
+            </div>
+          </article>
+          <article class="panel fx" style="--d: 0.66s">
+            <h3>퀵레인</h3>
+            <p>
+              메인 작업과 병렬로 — 떠오른 개선점을 독립 워크트리에서 빠르게.
+            </p>
+            <div class="mock" aria-hidden="true">
+              <span class="lane-btn">＋ 빠른 작업</span>
+              <div class="lane-badge">3개 병렬 실행 중</div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Scene 4 · Live orchestration ============ -->
+    <section class="scene" id="orch">
+      <div class="wrap">
+        <div class="scene-head">
+          <p class="kicker fx">Live orchestration</p>
+          <h2 class="fx" style="--d: 0.12s">
+            핵심은,<br />라이브 오케스트레이션
+          </h2>
+          <p class="lede fx" style="--d: 0.22s">
+            지시하고 기다리는 도구가 아니라 — 분해하고, 배치하고, 지키고,
+            판단하는 지휘 체계입니다.
+          </p>
+        </div>
+        <div class="stagegrid fx" style="--d: 0.3s">
+          <div class="steplist" role="list">
+            <div class="step" role="listitem" data-n="1">
+              <b>임무</b><small>임무를 한 줄로 말하면</small>
+            </div>
+            <div class="step" role="listitem" data-n="2">
+              <b>분해</b
+              ><small
+                >오케스트레이터가 요구사항을 분석해 역할별 티켓으로
+                나눕니다</small
+              >
+            </div>
+            <div class="step" role="listitem" data-n="3">
+              <b>스폰</b
+              ><small
+                >난이도(simple · standard · complex)에 맞는 모델을 자동 선택해
+                에이전트를 배치</small
+              >
+            </div>
+            <div class="step" role="listitem" data-n="4">
+              <b>병렬 실행</b
+              ><small>각자 격리된 워크트리에서 동시에 작업</small>
+            </div>
+            <div class="step" role="listitem" data-n="5">
+              <b>자가치유</b
+              ><small
+                >멈추거나 침묵한 에이전트는 와치독이 깨우거나 다시 스폰</small
+              >
+            </div>
+            <div class="step" role="listitem" data-n="6">
+              <b>머지 판단</b
+              ><small
+                >PR이 실제로 머지됐는지 확인한 뒤에야 DONE — 남은 일이 있으면
+                붙잡습니다</small
+              >
+            </div>
+          </div>
+          <div
+            class="stage s1"
+            id="stage"
+            aria-label="오케스트레이션 애니메이션"
+          >
+            <div class="g g1 mission-line">
+              <i>›</i> 결제 실패 알림을 개선해줘<span class="caret"></span>
+            </div>
+            <div class="g g2 tickets">
+              <div class="ticket" style="--i: 0">
+                <em>backend</em>웹훅 재시도 로직
+              </div>
+              <div class="ticket" style="--i: 1">
+                <em>frontend</em>실패 배너 UI
+              </div>
+              <div class="ticket" style="--i: 2">
+                <em>test</em>실패 시나리오 테스트
+              </div>
+              <div class="ticket" style="--i: 3">
+                <em>devops</em>알림 라우팅
+              </div>
+            </div>
+            <div class="g g3 lanes">
+              <div class="lane">
+                <span class="who"
+                  ><i class="orb" style="--c: var(--m-claude)"></i>Claude</span
+                ><span class="bar" style="--c: var(--m-claude)"
+                  ><i style="--p1: 72%"></i></span
+                ><span class="st">complex</span>
+              </div>
+              <div class="lane">
+                <span class="who"
+                  ><i class="orb" style="--c: var(--m-codex)"></i>Codex</span
+                ><span class="bar" style="--c: var(--m-codex)"
+                  ><i style="--p1: 58%"></i></span
+                ><span class="st">standard</span>
+              </div>
+              <div class="lane stall">
+                <span class="who"
+                  ><i class="orb" style="--c: var(--m-grok)"></i>Grok</span
+                ><span class="bar" style="--c: var(--m-grok)"
+                  ><i style="--p1: 34%"></i></span
+                ><span class="st">standard</span>
+              </div>
+              <div class="lane">
+                <span class="who"
+                  ><i class="orb" style="--c: var(--m-minimax)"></i
+                  >MiniMax</span
+                ><span class="bar" style="--c: var(--m-minimax)"
+                  ><i style="--p1: 66%"></i></span
+                ><span class="st">simple</span>
+              </div>
+              <div class="lane">
+                <span class="who"
+                  ><i class="orb" style="--c: var(--m-kimi)"></i>Kimi</span
+                ><span class="bar" style="--c: var(--m-kimi)"
+                  ><i style="--p1: 49%"></i></span
+                ><span class="st">simple</span>
+              </div>
+            </div>
+            <div class="g g5 watchnote">
+              와치독 — 침묵한 에이전트를 감지, 진행 재개를 지시했습니다
+            </div>
+            <div class="g g6 mergenote">
+              <b>merge_and_close</b> PR 머지 확인 → 티켓 DONE · 워크트리 정리
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Scene 5 · CTA ============ -->
+    <section class="scene" id="cta">
+      <div class="wrap">
+        <p class="kicker fx">Get Marblo</p>
+        <h2 class="fx" style="--d: 0.14s">
+          지금, 당신의<br />AI 팀을 지휘하세요
+        </h2>
+        <a class="dl fx" style="--d: 0.3s" href="https://marblo.app/download"
+          >marblo.app/download</a
+        >
+        <p class="cta-sub fx" style="--d: 0.42s">macOS · Windows</p>
+        <div
+          class="hero-models cta-models fx"
+          style="--d: 0.54s"
+          aria-label="지원 모델"
+        >
+          <span><i class="orb" style="--c: var(--m-claude)"></i>Claude</span>
+          <span><i class="orb" style="--c: var(--m-codex)"></i>Codex</span>
+          <span><i class="orb" style="--c: var(--m-grok)"></i>Grok</span>
+          <span><i class="orb" style="--c: var(--m-minimax)"></i>MiniMax</span>
+          <span><i class="orb" style="--c: var(--m-kimi)"></i>Kimi</span>
+          <span
+            ><i class="orb" style="--c: var(--ink-faint)"></i>Local models</span
+          >
+        </div>
+      </div>
+    </section>
+
+    <button id="play" type="button">▶ 자동 재생 (화면녹화)</button>
+
+    <script>
+      (function () {
+        "use strict";
+        var reduced = window.matchMedia(
+          "(prefers-reduced-motion: reduce)"
+        ).matches;
+
+        /* ---------- scene reveal ---------- */
+        var scenes = Array.prototype.slice.call(
+          document.querySelectorAll(".scene")
+        );
+        if ("IntersectionObserver" in window && !reduced) {
+          var io = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (e) {
+                if (e.isIntersecting) e.target.classList.add("in");
+              });
+            },
+            { threshold: 0.25 }
+          );
+          scenes.forEach(function (s) {
+            io.observe(s);
+          });
+        } else {
+          scenes.forEach(function (s) {
+            s.classList.add("in");
+          });
+        }
+
+        /* ---------- scene 4 step timeline ---------- */
+        var stage = document.getElementById("stage");
+        var steps = Array.prototype.slice.call(
+          document.querySelectorAll(".step")
+        );
+        var orchScene = document.getElementById("orch");
+        var cur = 0,
+          timer = null;
+        var STEP_MS = 2600,
+          HOLD_MS = 3400;
+
+        function setStep(n) {
+          cur = n;
+          stage.className = "stage";
+          for (var i = 1; i <= n; i++) stage.classList.add("s" + i);
+          steps.forEach(function (el, idx) {
+            el.classList.toggle("on", idx === n - 1);
+            el.classList.toggle("done", idx < n - 1);
+          });
+        }
+        function tick() {
+          if (cur >= 6) {
+            timer = setTimeout(function () {
+              setStep(1);
+              timer = setTimeout(tick, STEP_MS);
+            }, HOLD_MS);
+          } else {
+            setStep(cur + 1);
+            timer = setTimeout(tick, STEP_MS);
+          }
+        }
+        function startTimeline() {
+          if (timer) return;
+          setStep(1);
+          timer = setTimeout(tick, STEP_MS);
+        }
+        function stopTimeline() {
+          if (timer) {
+            clearTimeout(timer);
+            timer = null;
+          }
+        }
+        if (reduced) {
+          setStep(6);
+          steps.forEach(function (el) {
+            el.classList.add("on");
+            el.classList.remove("done");
+          });
+        } else if ("IntersectionObserver" in window) {
+          new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (e) {
+                if (e.isIntersecting) startTimeline();
+                else stopTimeline();
+              });
+            },
+            { threshold: 0.35 }
+          ).observe(orchScene);
+        } else {
+          startTimeline();
+        }
+
+        /* ---------- hero ambient marbles ---------- */
+        var canvas = document.getElementById("orbs");
+        var ctx = canvas.getContext("2d");
+        var css = getComputedStyle(document.documentElement);
+        function palette() {
+          return [
+            css.getPropertyValue("--m-claude").trim(),
+            css.getPropertyValue("--m-codex").trim(),
+            css.getPropertyValue("--m-grok").trim(),
+            css.getPropertyValue("--m-minimax").trim(),
+            css.getPropertyValue("--m-kimi").trim(),
+            css.getPropertyValue("--signal").trim(),
+          ];
+        }
+        var W = 0,
+          H = 0,
+          dpr = Math.min(window.devicePixelRatio || 1, 2);
+        var orbs = [];
+        function seed() {
+          var cols = palette();
+          orbs = [];
+          var n = Math.round(Math.max(14, Math.min(30, W / 46)));
+          for (var i = 0; i < n; i++) {
+            orbs.push({
+              x: Math.random() * W,
+              y: H * (0.12 + Math.random() * 0.76),
+              r: 1.4 + Math.random() * 2.8,
+              v: 0.12 + Math.random() * 0.3,
+              amp: 6 + Math.random() * 18,
+              ph: Math.random() * Math.PI * 2,
+              c: cols[i % cols.length],
+              a: 0.16 + Math.random() * 0.3,
+            });
+          }
+        }
+        function resize() {
+          var hero = document.getElementById("hero");
+          W = hero.clientWidth;
+          H = hero.clientHeight;
+          canvas.width = W * dpr;
+          canvas.height = H * dpr;
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          seed();
+        }
+        var t0 = 0;
+        function frame(t) {
+          if (!t0) t0 = t;
+          var dt = (t - t0) / 1000;
+          ctx.clearRect(0, 0, W, H);
+          /* faint horizontal lanes */
+          ctx.strokeStyle =
+            css.getPropertyValue("--line").trim() || "rgba(255,255,255,0.06)";
+          ctx.lineWidth = 1;
+          for (var l = 1; l <= 4; l++) {
+            var ly = H * (0.16 + l * 0.16);
+            ctx.beginPath();
+            ctx.moveTo(0, ly);
+            ctx.lineTo(W, ly);
+            ctx.globalAlpha = 0.15;
+            ctx.stroke();
+          }
+          ctx.globalAlpha = 1;
+          orbs.forEach(function (o) {
+            o.x += o.v;
+            if (o.x > W + 8) o.x = -8;
+            var y = o.y + Math.sin(dt * 0.7 + o.ph) * o.amp;
+            ctx.globalAlpha = o.a;
+            ctx.beginPath();
+            ctx.arc(o.x, y, o.r, 0, Math.PI * 2);
+            ctx.fillStyle = o.c;
+            ctx.fill();
+          });
+          ctx.globalAlpha = 1;
+          requestAnimationFrame(frame);
+        }
+        resize();
+        window.addEventListener("resize", resize);
+        if (!reduced) {
+          requestAnimationFrame(frame);
+        } else {
+          /* settled single render */
+          orbs.forEach(function (o) {
+            ctx.globalAlpha = o.a;
+            ctx.beginPath();
+            ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2);
+            ctx.fillStyle = o.c;
+            ctx.fill();
+          });
+        }
+
+        /* ---------- autoplay for screen recording ---------- */
+        var playBtn = document.getElementById("play");
+        var playing = false,
+          playTimers = [];
+        var SEQ = [
+          { id: "hero", hold: 4200 },
+          { id: "ux", hold: 7000 },
+          { id: "tabs", hold: 9500 },
+          { id: "orch", hold: 20000 },
+          { id: "cta", hold: 0 },
+        ];
+        function stopPlay() {
+          playing = false;
+          document.body.classList.remove("presenting");
+          playTimers.forEach(clearTimeout);
+          playTimers = [];
+        }
+        playBtn.addEventListener("click", function () {
+          if (playing) return;
+          playing = true;
+          document.body.classList.add("presenting");
+          var at = 0;
+          SEQ.forEach(function (s) {
+            playTimers.push(
+              setTimeout(function () {
+                document
+                  .getElementById(s.id)
+                  .scrollIntoView({ behavior: reduced ? "auto" : "smooth" });
+              }, at)
+            );
+            at += s.hold;
+          });
+          playTimers.push(setTimeout(stopPlay, at + 2000));
+        });
+        window.addEventListener("keydown", function (e) {
+          if (e.key === "Escape") stopPlay();
+        });
+      })();
+    </script>
+  </body>
+</html>
