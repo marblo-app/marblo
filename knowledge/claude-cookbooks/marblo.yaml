@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: claude-cookbooks
+name: Claude Cookbooks
+type: knowledge-pack
+version: 1.0.0
+description: Official Anthropic examples for Claude application patterns, including tool use, retrieval, vision, extended thinking, and evaluation.
+
+publisher:
+  name: Anthropic
+  tier: verified
+  url: https://github.com/anthropics
+
+source:
+  repository: https://github.com/anthropics/claude-cookbooks
+  ref: 85016cacf5b7923aa62aa2b514399325e9d159e9
+
+keywords:
+  - claude
+  - agents
+  - tool-use
+  - rag
+
+license: MIT
+homepage: https://github.com/anthropics/claude-cookbooks

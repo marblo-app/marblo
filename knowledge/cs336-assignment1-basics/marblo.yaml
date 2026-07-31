@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: cs336-assignment1-basics
+name: "Stanford CS336 Assignment 1: Basics"
+type: knowledge-pack
+version: 1.0.0
+description: The Stanford CS336 basics assignment, implementing core language-model components such as tokenization, attention, and training primitives.
+
+publisher:
+  name: Stanford CS336
+  tier: verified
+  url: https://github.com/stanford-cs336
+
+source:
+  repository: https://github.com/stanford-cs336/assignment1-basics
+  ref: a158843b20107949f1a8d7df1b05cd33b9166712
+
+keywords:
+  - course
+  - foundations
+  - language-models
+  - from-scratch
+
+license: MIT
+homepage: https://github.com/stanford-cs336/assignment1-basics

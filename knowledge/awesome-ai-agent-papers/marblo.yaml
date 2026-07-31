@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: awesome-ai-agent-papers
+name: Awesome AI Agent Papers
+type: knowledge-pack
+version: 1.0.0
+description: A community-maintained reading list of papers and resources on LLM agents, planning, tool use, memory, multi-agent systems, and evaluation.
+
+publisher:
+  name: VoltAgent
+  tier: community
+  url: https://github.com/VoltAgent
+
+source:
+  repository: https://github.com/VoltAgent/awesome-ai-agent-papers
+  ref: aa50c0c304c7bfb833e4b329a8c8d518f6771f42
+
+keywords:
+  - agents
+  - papers
+  - planning
+  - tool-use
+
+license: MIT
+homepage: https://github.com/VoltAgent/awesome-ai-agent-papers

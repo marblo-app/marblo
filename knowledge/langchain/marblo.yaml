@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: langchain
+name: LangChain
+type: knowledge-pack
+version: 1.0.0
+description: A framework and reference implementation for composing LLM applications with models, prompts, retrievers, tools, agents, and structured workflows.
+
+publisher:
+  name: LangChain
+  tier: verified
+  url: https://github.com/langchain-ai
+
+source:
+  repository: https://github.com/langchain-ai/langchain
+  ref: 725489f135458c37c668919b0d08652ebd04f131
+
+keywords:
+  - agents
+  - tools
+  - rag
+  - workflows
+
+license: MIT
+homepage: https://github.com/langchain-ai/langchain

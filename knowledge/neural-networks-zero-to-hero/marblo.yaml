@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: neural-networks-zero-to-hero
+name: "Neural Networks: Zero to Hero"
+type: knowledge-pack
+version: 1.0.0
+description: A code-first lecture series that builds neural networks, language models, and a GPT-style model from scratch.
+
+publisher:
+  name: Andrej Karpathy
+  tier: verified
+  url: https://github.com/karpathy
+
+source:
+  repository: https://github.com/karpathy/nn-zero-to-hero
+  ref: 73c3fcc741f0ec104ca850b1fb0df90e7e8d4cde
+
+keywords:
+  - foundations
+  - language-models
+  - course
+  - from-scratch
+
+license: MIT
+homepage: https://github.com/karpathy/nn-zero-to-hero

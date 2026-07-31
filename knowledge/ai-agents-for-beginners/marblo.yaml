@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: ai-agents-for-beginners
+name: AI Agents for Beginners
+type: knowledge-pack
+version: 1.0.0
+description: A structured beginner course on AI-agent concepts and implementations, with lessons on orchestration, tools, memory, planning, and multi-agent systems.
+
+publisher:
+  name: Microsoft
+  tier: verified
+  url: https://github.com/microsoft
+
+source:
+  repository: https://github.com/microsoft/ai-agents-for-beginners
+  ref: 15ad10ca60577b75199c1ba828887ab7e66bac87
+
+keywords:
+  - agents
+  - tools
+  - orchestration
+  - course
+
+license: MIT
+homepage: https://github.com/microsoft/ai-agents-for-beginners

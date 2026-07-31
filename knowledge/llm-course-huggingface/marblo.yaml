@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: llm-course-huggingface
+name: Hugging Face LLM Course
+type: knowledge-pack
+version: 1.0.0
+description: A practical course covering transformer models, datasets, tokenizers, fine-tuning, demos, and advanced LLM topics with runnable notebooks.
+
+publisher:
+  name: Hugging Face
+  tier: verified
+  url: https://github.com/huggingface
+
+source:
+  repository: https://github.com/huggingface/llm-course
+  ref: aaee936e5bbc959b5ab06f9b35406729efe74d1e
+
+keywords:
+  - foundations
+  - transformers
+  - fine-tuning
+  - course
+
+license: Apache-2.0
+homepage: https://github.com/huggingface/llm-course

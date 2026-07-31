@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: awesome-rag
+name: Awesome RAG
+type: knowledge-pack
+version: 1.0.0
+description: A community index of retrieval-augmented generation papers, implementations, datasets, tutorials, and related techniques.
+
+publisher:
+  name: awesome-rag
+  tier: community
+  url: https://github.com/awesome-rag
+
+source:
+  repository: https://github.com/awesome-rag/awesome-rag
+  ref: cca6aa9ad7f62288eafbb99de908ca7917f36347
+
+keywords:
+  - rag
+  - retrieval
+  - papers
+  - datasets
+
+license: Apache-2.0
+homepage: https://github.com/awesome-rag/awesome-rag

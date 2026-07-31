@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: awesome-mcp-servers
+name: Awesome MCP Servers
+type: knowledge-pack
+version: 1.0.0
+description: A broad, community-maintained directory of MCP servers for connecting agents to tools, data sources, and services.
+
+publisher:
+  name: punkpeye
+  tier: community
+  url: https://github.com/punkpeye
+
+source:
+  repository: https://github.com/punkpeye/awesome-mcp-servers
+  ref: 375407c7290dd99d305938983f37adffa9d44275
+
+keywords:
+  - agents
+  - mcp
+  - tools
+  - directory
+
+license: MIT
+homepage: https://github.com/punkpeye/awesome-mcp-servers

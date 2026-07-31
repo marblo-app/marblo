@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: peft
+name: Parameter-Efficient Fine-Tuning
+type: knowledge-pack
+version: 1.0.0
+description: Hugging Face methods and examples for adapting large models with low-rank and other parameter-efficient fine-tuning techniques.
+
+publisher:
+  name: Hugging Face
+  tier: verified
+  url: https://github.com/huggingface
+
+source:
+  repository: https://github.com/huggingface/peft
+  ref: 9f1fe21d8131a24634d6d23c13efa2aae72b6cca
+
+keywords:
+  - fine-tuning
+  - lora
+  - adaptation
+  - transformers
+
+license: Apache-2.0
+homepage: https://github.com/huggingface/peft

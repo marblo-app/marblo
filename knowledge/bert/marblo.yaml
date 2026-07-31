@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: bert
+name: BERT
+type: knowledge-pack
+version: 1.0.0
+description: The original BERT implementation and pretrained-model release, a compact reference for bidirectional pretraining and language representation learning.
+
+publisher:
+  name: Google Research
+  tier: verified
+  url: https://github.com/google-research
+
+source:
+  repository: https://github.com/google-research/bert
+  ref: eedf5716ce1268e56f0a50264a88cafad334ac61
+
+keywords:
+  - foundations
+  - transformers
+  - pretraining
+  - papers
+
+license: Apache-2.0
+homepage: https://github.com/google-research/bert
