@@ -7,6 +7,11 @@ version: 6.2.0
 status: active
 description: Applies test-driven development to skill authoring — run the pressure scenario first to see the agent fail, write the skill against the exact rationalisations observed, then verify compliance and close loopholes. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "스킬 작성 (Superpowers)"
+    description: "스킬 작성에 테스트 주도 개발을 적용 — 압박 시나리오를 먼저 실행해 에이전트가 실패하는 모습을 보고, 관찰된 정당화 논리에 맞춰 스킬을 작성한 뒤, 준수 여부를 검증하고 빠져나갈 구멍을 막는다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Jesse Vincent (obra)
   tier: community

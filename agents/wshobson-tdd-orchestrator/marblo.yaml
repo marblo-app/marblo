@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Enforcement subagent for red-green-refactor across a team — test-first compliance checking, cycle-time measurement, coverage governance, and coordination of multiple agents working the same TDD flow. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "TDD 오케스트레이터 (wshobson)"
+    description: "팀 전체의 red-green-refactor를 강제하는 서브에이전트 — 테스트 우선 준수 확인, 사이클타임 측정, 커버리지 거버넌스, 같은 TDD 흐름에서 일하는 여러 에이전트 조율. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

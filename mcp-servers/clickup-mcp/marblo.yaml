@@ -7,6 +7,10 @@ version: 1.6.2
 status: active
 description: Searches, creates, and updates ClickUp tasks from the agent, plus comments and time tracking, with a read-only mode for workspaces that should not be written to. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "에이전트에서 ClickUp 태스크를 검색·생성·수정하고 댓글·시간추적까지 다룬다. 쓰기가 금지돼야 할 워크스페이스를 위한 읽기전용 모드 제공. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: hauptsache.net
   tier: community

@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Data-layer design subagent — engine selection across SQL/NoSQL/time-series, schema and normalization decisions, migration planning, and performance-first modeling for greenfield or re-architecture. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "데이터베이스 아키텍트 (wshobson)"
+    description: "데이터 레이어 설계 서브에이전트 — SQL/NoSQL/시계열 엔진 선택, 스키마·정규화 결정, 마이그레이션 계획, 신규 구축이나 재설계를 위한 성능 우선 모델링. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

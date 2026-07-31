@@ -7,6 +7,11 @@ version: 6.2.0
 status: active
 description: Ensures work happens in an isolated workspace — detect existing isolation first (with a submodule guard), prefer the harness's native worktree tooling, fall back to plain git worktrees only when there is none. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "Git 워크트리 사용 (Superpowers)"
+    description: "작업이 격리된 워크스페이스에서 이뤄지도록 보장 — 기존 격리를 먼저 감지(서브모듈 가드 포함), 하네스 네이티브 워크트리 도구를 우선 사용, 없을 때만 순수 git worktree로 폴백. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Jesse Vincent (obra)
   tier: community

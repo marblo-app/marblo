@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: SRE incident-command subagent — first-five-minutes severity triage, blast-radius assessment, comms cadence, mitigation before root cause, and blameless post-mortem with error-budget accounting. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "인시던트 리스폰더 (wshobson)"
+    description: "SRE 인시던트 커맨드 서브에이전트 — 초기 5분 심각도 분류, 파급범위 평가, 커뮤니케이션 주기, 근본원인보다 우선하는 완화조치, 에러버짓을 반영한 무결점 포스트모템. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

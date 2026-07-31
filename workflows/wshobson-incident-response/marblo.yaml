@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Multi-agent incident orchestration by severity — triage, parallel investigation, mitigation, then a postmortem, with checkpoints between phases. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "인시던트 대응 (wshobson)"
+    description: "심각도별 멀티 에이전트 인시던트 오케스트레이션 — 트리아지, 병렬 조사, 완화조치, 이어지는 포스트모템까지 단계 사이마다 체크포인트. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

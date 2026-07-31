@@ -7,6 +7,10 @@ version: 1.6.0
 status: active
 description: Works Asana from the agent — search and read tasks, projects, and portfolios, then create tasks, post comments, and update status. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "에이전트에서 Asana를 다룬다 — 태스크·프로젝트·포트폴리오 검색·조회 후 태스크 생성, 댓글 작성, 상태 업데이트. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: roychri
   tier: community

@@ -7,6 +7,10 @@ version: 2.5.0
 status: active
 description: Drive-scoped file operations — search, read, create, and edit files in Drive, Docs, Sheets, and Slides — for teams that do not want a full Workspace grant. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "전체 Workspace 권한을 원하지 않는 팀을 위한 Drive 범위 파일 작업 — Drive·Docs·Sheets·Slides의 파일 검색·읽기·생성·수정. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: piotr-agier
   tier: community

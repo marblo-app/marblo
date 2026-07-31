@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Anthropic's own reference for building on the Claude API — current model ids and pricing, streaming, tool use, MCP, prompt caching, token counting, and migration notes, with SDK snippets in nine languages. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "Claude API 레퍼런스 (Anthropic)"
+    description: "Claude API 기반 개발을 위한 Anthropic 공식 레퍼런스 — 최신 모델 ID와 가격, 스트리밍, 툴 사용, MCP, 프롬프트 캐싱, 토큰 계산, 마이그레이션 노트, 9개 언어 SDK 예제 포함. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Anthropic
   tier: community

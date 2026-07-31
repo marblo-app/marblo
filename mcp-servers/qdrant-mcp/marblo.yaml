@@ -7,6 +7,10 @@ version: 0.8.1
 status: active
 description: Qdrant's official server — store and semantically retrieve text with its metadata, embedding on the fly, so the agent gets a memory layer it can query in natural language. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "Qdrant 공식 서버 — 텍스트를 메타데이터와 함께 저장·시맨틱 검색하며 즉석에서 임베딩해, 에이전트가 자연어로 질의할 수 있는 메모리 레이어를 제공. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Qdrant
   tier: community

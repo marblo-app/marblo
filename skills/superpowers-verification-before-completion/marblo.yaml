@@ -7,6 +7,11 @@ version: 6.2.0
 status: active
 description: No completion claim without fresh evidence — run the command, read the output, then say it passes. A single-file guard against agents reporting success they never checked.
 
+i18n:
+  ko:
+    name: "완료 전 검증 (Superpowers)"
+    description: "새로운 증거 없이는 완료 선언 금지 — 명령을 실행하고, 출력을 읽은 다음에야 통과했다고 말한다. 확인한 적 없는 성공을 보고하는 에이전트를 막는 단일 파일 가드."
+
 publisher:
   name: Jesse Vincent (obra)
   tier: community

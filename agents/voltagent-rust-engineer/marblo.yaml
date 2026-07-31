@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Rust 2021 subagent — ownership and lifetime design, trait and zero-cost abstraction work, auditing `unsafe`, and async or embedded performance tuning inside an existing Cargo workspace. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "Rust 엔지니어 (VoltAgent)"
+    description: "Rust 2021 서브에이전트 — 소유권·라이프타임 설계, 트레이트·제로코스트 추상화 작업, unsafe 감사, 기존 Cargo 워크스페이스 내 비동기·임베디드 성능 튜닝. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: VoltAgent
   tier: community

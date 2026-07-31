@@ -7,6 +7,10 @@ version: 1.0.0
 status: active
 description: Reaches thousands of SaaS apps through Zapier's hosted MCP endpoint over OAuth. The server is remote; the pinned repo is Zapier's official client-side plugin. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "OAuth를 통해 Zapier의 호스팅 MCP 엔드포인트로 수천 개의 SaaS 앱에 접근한다. 서버 자체는 원격이며, 고정된 저장소는 Zapier의 공식 클라이언트 측 플러그인이다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Zapier
   tier: community

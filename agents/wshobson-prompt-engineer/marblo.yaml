@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Prompt-design subagent — chain-of-thought and few-shot construction, constitutional patterns, system-prompt authoring, and evaluation of prompt changes against production behaviour. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "프롬프트 엔지니어 (wshobson)"
+    description: "프롬프트 설계 서브에이전트 — 사고사슬(chain-of-thought)·퓨샷 구성, 컨스티튜셔널 패턴, 시스템 프롬프트 작성, 프로덕션 동작 대비 프롬프트 변경 평가. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

@@ -7,6 +7,11 @@ version: 1.8.0
 status: active
 description: One MCP server that fronts many databases, with the queries an agent may run declared up front in a tools file instead of handed to the model as raw SQL. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "데이터베이스용 MCP 툴박스"
+    description: "여러 데이터베이스 앞단의 단일 MCP 서버 — 에이전트가 실행할 수 있는 쿼리를 모델에게 원시 SQL로 넘기는 대신 툴 파일에 미리 선언해둔다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Google APIs
   tier: community

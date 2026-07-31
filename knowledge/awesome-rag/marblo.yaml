@@ -6,6 +6,11 @@ type: knowledge-pack
 version: 1.0.0
 description: A community index of retrieval-augmented generation papers, implementations, datasets, tutorials, and related techniques.
 
+i18n:
+  ko:
+    name: "어썸 RAG"
+    description: "검색증강생성(RAG) 논문, 구현체, 데이터셋, 튜토리얼, 관련 기법을 모은 커뮤니티 색인."
+
 publisher:
   name: awesome-rag
   tier: community

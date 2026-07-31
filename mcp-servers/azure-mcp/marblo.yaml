@@ -7,6 +7,10 @@ version: 3.0.0-beta.30
 status: active
 description: Microsoft's official Azure server — query and manage storage, Cosmos DB, Key Vault, AKS, Monitor, and the rest of the resource surface from the agent using your existing Azure sign-in. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "Microsoft의 공식 Azure 서버 — 기존 Azure 로그인을 이용해 에이전트에서 스토리지, Cosmos DB, Key Vault, AKS, Monitor 등 리소스 전반을 조회·관리. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Microsoft
   tier: community

@@ -7,6 +7,10 @@ version: 1.4.1
 status: active
 description: Reads and writes Linear from the agent — issues, comments, projects, cycles, and status transitions — over Linear's GraphQL API with a personal token. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "개인 토큰으로 Linear의 GraphQL API를 통해 에이전트에서 Linear를 읽고 쓴다 — 이슈, 댓글, 프로젝트, 사이클, 상태 전환. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: tacticlaunch
   tier: community

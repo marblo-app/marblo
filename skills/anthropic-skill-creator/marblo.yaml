@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Author, edit, and measure skills — drafts a SKILL.md, builds an eval set, runs it, and reports where the description fails to trigger. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "스킬 크리에이터 (Anthropic)"
+    description: "스킬을 작성·수정·측정한다 — SKILL.md 초안 작성, 평가셋 구축·실행, description이 트리거에 실패하는 지점을 보고. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Anthropic
   tier: community

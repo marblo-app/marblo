@@ -7,6 +7,10 @@ version: 3.2.5
 status: active
 description: Pulls version-correct library documentation and code examples into the agent's context on demand, so it stops citing APIs that were removed two releases ago. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "버전이 정확히 맞는 라이브러리 문서·코드 예제를 필요할 때 에이전트 컨텍스트로 끌어와, 두 릴리스 전에 제거된 API를 계속 인용하는 문제를 막는다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Upstash
   tier: community

@@ -7,6 +7,10 @@ version: 1.0.0
 status: active
 description: Neon's official remote server for serverless Postgres — create projects and branches, run SQL, and drive branch-per-change migrations from the agent. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "서버리스 Postgres를 위한 Neon 공식 원격 서버 — 프로젝트·브랜치 생성, SQL 실행, 에이전트에서 브랜치 단위 마이그레이션 수행. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Neon
   tier: community

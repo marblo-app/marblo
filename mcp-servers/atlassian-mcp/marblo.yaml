@@ -7,6 +7,10 @@ version: 0.23.0
 status: active
 description: Reads and writes Jira issues and Confluence pages from the agent, against both Atlassian Cloud and Server/Data Center deployments. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "Atlassian Cloud와 Server/Data Center 배포 모두를 대상으로 에이전트에서 Jira 이슈와 Confluence 페이지를 읽고 쓴다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: sooperset
   tier: community

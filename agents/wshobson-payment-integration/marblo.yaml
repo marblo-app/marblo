@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Payments subagent for Stripe, PayPal, and Square — checkout and subscription flows, webhook handling, idempotency, PCI-conscious data handling, and the refund/dispute/failure edge cases. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "결제 연동 (wshobson)"
+    description: "Stripe·PayPal·Square용 결제 서브에이전트 — 체크아웃·구독 플로우, 웹훅 처리, 멱등성, PCI를 의식한 데이터 처리, 환불·분쟁·실패 엣지케이스. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

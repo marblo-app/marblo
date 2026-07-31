@@ -7,6 +7,10 @@ version: 2026.7.4
 status: active
 description: A structured scratchpad for multi-step reasoning — the agent records numbered thoughts, revises earlier ones, and branches alternatives instead of holding a plan in prose. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "다단계 추론을 위한 구조화된 스크래치패드 — 에이전트가 번호 매긴 생각을 기록하고, 이전 생각을 수정하고, 산문으로 된 계획을 유지하는 대신 대안을 분기시킨다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Model Context Protocol (Linux Foundation)
   tier: community

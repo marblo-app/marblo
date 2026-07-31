@@ -7,6 +7,10 @@ version: 1.0.0
 status: active
 description: Drives a Discord bot from the agent — send and read channel messages, manage channels and roles, and add reactions on a server you administer. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "에이전트에서 Discord 봇을 조작한다 — 관리 권한이 있는 서버에서 채널 메시지 송수신, 채널·역할 관리, 리액션 추가. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: SaseQ
   tier: community

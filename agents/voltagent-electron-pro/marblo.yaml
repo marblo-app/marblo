@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Desktop-app subagent for Electron — main/renderer process boundaries, context isolation and IPC hardening, native OS integration, memory budgets, and signed cross-platform installers. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "일렉트론 프로 (VoltAgent)"
+    description: "Electron 데스크톱 앱 전용 서브에이전트 — 메인/렌더러 프로세스 경계, 컨텍스트 격리 및 IPC 강화, 네이티브 OS 통합, 메모리 예산, 서명된 크로스플랫폼 인스톨러. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: VoltAgent
   tier: community

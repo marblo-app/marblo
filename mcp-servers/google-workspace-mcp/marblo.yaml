@@ -7,6 +7,10 @@ version: 1.22.2
 status: active
 description: One server across Gmail, Calendar, Drive, Docs, Sheets, Slides, Forms, Tasks, and Chat, authenticating with your own Google OAuth client. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "직접 발급한 Google OAuth 클라이언트로 인증하는, Gmail·Calendar·Drive·Docs·Sheets·Slides·Forms·Tasks·Chat를 아우르는 단일 서버. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: taylorwilsdon
   tier: community

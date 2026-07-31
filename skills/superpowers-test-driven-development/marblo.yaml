@@ -7,6 +7,11 @@ version: 6.2.0
 status: active
 description: RED-GREEN-REFACTOR held to the letter — if you did not watch the test fail, you do not know it tests anything. Includes a guide to writing tests worth keeping. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "테스트 주도 개발 (Superpowers)"
+    description: "RED-GREEN-REFACTOR를 글자 그대로 지킨다 — 테스트가 실패하는 걸 보지 않았다면 그게 무언가를 테스트하는지 알 수 없다. 남겨둘 가치가 있는 테스트를 작성하는 가이드 포함. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Jesse Vincent (obra)
   tier: community

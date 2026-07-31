@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Compact root-cause subagent for errors, test failures, and unexpected behaviour — capture the trace, isolate the failure, form and test a hypothesis, apply the minimal fix, verify. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "디버거 (wshobson)"
+    description: "오류·테스트 실패·예상치 못한 동작을 위한 소형 근본원인 서브에이전트 — 트레이스 수집, 실패 격리, 가설 수립·검증, 최소 수정 적용, 검증. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

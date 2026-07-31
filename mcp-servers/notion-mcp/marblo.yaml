@@ -7,6 +7,10 @@ version: 2.5.0
 status: active
 description: Official Notion server — lets an agent search, read, and update pages and databases in a workspace you explicitly share with it. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "Notion 공식 서버 — 명시적으로 공유한 워크스페이스 내 페이지·데이터베이스를 에이전트가 검색·읽기·수정할 수 있게 한다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Notion
   tier: community

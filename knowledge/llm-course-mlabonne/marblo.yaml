@@ -6,6 +6,11 @@ type: knowledge-pack
 version: 1.0.0
 description: A broad self-study curriculum spanning transformer foundations, fine-tuning, quantization, RAG, agents, and practical LLM engineering.
 
+i18n:
+  ko:
+    name: "MLABONNE의 LLM 코스"
+    description: "트랜스포머 기초, 파인튜닝, 양자화, RAG, 에이전트, 실전 LLM 엔지니어링까지 아우르는 폭넓은 독학 커리큘럼."
+
 publisher:
   name: MLABONNE
   tier: community

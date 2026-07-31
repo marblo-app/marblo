@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Drive a local web app with native Playwright scripts — verify frontend behaviour, capture screenshots, and read browser logs instead of guessing why the UI is wrong. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "웹앱 테스팅 (Anthropic)"
+    description: "네이티브 Playwright 스크립트로 로컬 웹 앱을 직접 구동 — 프론트엔드 동작 검증, 스크린샷 캡처, 브라우저 로그 확인으로 UI가 왜 잘못됐는지 추측하지 않는다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Anthropic
   tier: community

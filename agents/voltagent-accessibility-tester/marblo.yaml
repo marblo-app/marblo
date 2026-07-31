@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: WCAG 2.1/3.0 audit subagent — compliance checks across visual, auditory, motor, and cognitive dimensions, assistive-technology support review, and prioritised remediation guidance. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "접근성 감사관 (VoltAgent)"
+    description: "WCAG 2.1/3.0 감사 서브에이전트 — 시각·청각·운동·인지 영역 전반의 준수성 점검, 보조기술 지원 검토, 우선순위가 매겨진 개선 가이드 제공. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: VoltAgent
   tier: community

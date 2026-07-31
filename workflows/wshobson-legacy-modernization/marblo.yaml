@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: A checkpointed strangler-fig migration pipeline — plan the replacement, migrate by feature or by layer, upgrade dependencies with breaking-change paths, and stop for approval between phases. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "레거시 현대화 (wshobson)"
+    description: "체크포인트가 있는 스트랭글러 피그(strangler-fig) 마이그레이션 파이프라인 — 교체 계획 수립, 기능별·레이어별 마이그레이션, 브레이킹 체인지 경로를 포함한 의존성 업그레이드, 단계 사이 승인 대기. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

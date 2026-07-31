@@ -7,6 +7,10 @@ version: 0.3.3
 status: active
 description: Stripe's own MCP server — read and act on customers, subscriptions, invoices, payments, and refunds through the Stripe API, scoped by the restricted key you hand it. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "Stripe 자체 MCP 서버 — 넘겨준 제한된 키 범위 내에서 Stripe API를 통해 고객, 구독, 인보이스, 결제, 환불을 조회·처리. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Stripe
   tier: community

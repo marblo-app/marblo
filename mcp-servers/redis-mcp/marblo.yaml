@@ -7,6 +7,10 @@ version: 0.5.0
 status: active
 description: Redis' official server — read and write strings, hashes, lists, sets, streams, JSON, and vector indexes, so the agent can use Redis as working memory or inspect a live cache. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "Redis 공식 서버 — 문자열, 해시, 리스트, 셋, 스트림, JSON, 벡터 인덱스를 읽고 써서, 에이전트가 Redis를 작업 메모리로 쓰거나 라이브 캐시를 점검하게 한다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Redis
   tier: community

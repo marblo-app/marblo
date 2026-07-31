@@ -7,6 +7,10 @@ version: 2.1.43
 status: active
 description: Reads and writes GitLab from the agent — merge requests, issues, pipelines, files, and wiki — against gitlab.com or a self-managed instance. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "gitlab.com 또는 자체 호스팅 인스턴스를 대상으로 에이전트에서 GitLab을 읽고 쓴다 — 머지 리퀘스트, 이슈, 파이프라인, 파일, 위키. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: zereight
   tier: community

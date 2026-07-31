@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: End-to-end feature orchestration across database, backend, frontend, and infrastructure, with testing, security, and performance agents fanned out in parallel before a deployment pass. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "풀스택 기능 개발 (wshobson)"
+    description: "데이터베이스·백엔드·프론트엔드·인프라를 아우르는 엔드투엔드 기능 오케스트레이션 — 테스트·보안·성능 에이전트를 병렬로 펼친 뒤 배포 단계로. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

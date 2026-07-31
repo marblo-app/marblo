@@ -7,6 +7,10 @@ version: 0.9.0
 status: active
 description: Official Supabase server — inspect schemas, run queries, manage migrations and branches, and fetch logs, with a read-only flag and per-project scoping. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "Supabase 공식 서버 — 스키마 조회, 쿼리 실행, 마이그레이션·브랜치 관리, 로그 조회를 읽기전용 플래그와 프로젝트별 범위 지정으로 수행. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Supabase
   tier: community

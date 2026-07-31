@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Service-boundary and API design subagent — REST/GraphQL/gRPC contracts, microservice decomposition, event-driven and resilience patterns, and observability designed in before the first endpoint ships. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "백엔드 아키텍트 (wshobson)"
+    description: "서비스 경계·API 설계 서브에이전트 — REST/GraphQL/gRPC 계약, 마이크로서비스 분해, 이벤트 기반·복원력 패턴, 첫 엔드포인트가 나가기 전에 설계되는 관측성. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

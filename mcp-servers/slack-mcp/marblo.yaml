@@ -7,6 +7,10 @@ version: 1.3.0
 status: active
 description: Reads and posts Slack messages from the agent — channels, DMs, group DMs, and threads — without asking a workspace admin to approve a bot app first. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "워크스페이스 관리자에게 봇 앱 승인을 먼저 요청하지 않고도, 에이전트에서 Slack 메시지(채널·DM·그룹DM·스레드)를 읽고 게시. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: korotovsky
   tier: community

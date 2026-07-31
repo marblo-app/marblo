@@ -7,6 +7,10 @@ version: 0.0.78
 status: active
 description: Drives a real browser from the agent using Playwright's accessibility tree rather than screenshots, so page interaction is structured text instead of vision guesswork. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "스크린샷 대신 Playwright의 접근성 트리를 이용해 에이전트에서 실제 브라우저를 조작 — 페이지 상호작용이 비전 추측이 아닌 구조화된 텍스트가 된다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Microsoft
   tier: community

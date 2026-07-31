@@ -7,6 +7,11 @@ version: 6.2.0
 status: active
 description: Executes an implementation plan by dispatching a fresh subagent per task, reviewing each result for spec compliance and code quality, and closing with a whole-branch review. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "서브에이전트 주도 개발 (Superpowers)"
+    description: "태스크마다 새 서브에이전트를 디스패치해 구현 계획을 실행하고, 각 결과를 스펙 준수·코드 품질 기준으로 리뷰한 뒤 브랜치 전체 리뷰로 마무리. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Jesse Vincent (obra)
   tier: community

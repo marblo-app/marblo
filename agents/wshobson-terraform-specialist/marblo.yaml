@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Terraform/OpenTofu subagent for module composition, remote state and locking, policy as code, multi-cloud provider work, and Terraform-to-OpenTofu migration. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "Terraform 스페셜리스트 (wshobson)"
+    description: "모듈 구성, 원격 state·잠금, 정책 as 코드, 멀티클라우드 프로바이더 작업, Terraform→OpenTofu 마이그레이션을 위한 Terraform/OpenTofu 서브에이전트. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

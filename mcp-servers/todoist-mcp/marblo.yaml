@@ -7,6 +7,10 @@ version: 12.1.2
 status: active
 description: Manages Todoist tasks, projects, sections, and labels from the agent, published by Doist themselves rather than a third party. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "타사가 아닌 Doist가 직접 배포하는, 에이전트에서 Todoist 태스크·프로젝트·섹션·라벨을 관리하는 서버. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Doist
   tier: community

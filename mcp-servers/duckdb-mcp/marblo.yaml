@@ -7,6 +7,10 @@ version: 1.0.7
 status: active
 description: MotherDuck's official server — run DuckDB SQL against an in-memory database, a local .duckdb file, or a MotherDuck cloud database, so the agent can analyse CSV and Parquet without a warehouse. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "MotherDuck의 공식 서버 — 인메모리 DB, 로컬 .duckdb 파일, MotherDuck 클라우드 DB 어디에도 DuckDB SQL을 실행해, 웨어하우스 없이도 에이전트가 CSV·Parquet를 분석하게 한다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: MotherDuck
   tier: community

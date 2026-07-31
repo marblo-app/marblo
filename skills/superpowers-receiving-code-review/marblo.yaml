@@ -7,6 +7,11 @@ version: 6.2.0
 status: active
 description: A protocol for acting on review feedback — read fully, restate the requirement, verify it against the codebase, push back with reasoning when it is wrong, and implement one item at a time. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "코드 리뷰 수신 (Superpowers)"
+    description: "리뷰 피드백에 대응하는 프로토콜 — 전체를 읽고, 요구사항을 재진술하고, 코드베이스 대비 검증하고, 틀렸으면 근거를 들어 반박하고, 한 번에 하나씩 구현. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Jesse Vincent (obra)
   tier: community

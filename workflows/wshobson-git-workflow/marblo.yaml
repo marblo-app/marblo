@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: A ten-step pipeline from review to opened PR — quality gate, breaking-change scan, tests, conventional commit, branch push, PR description. Every step persists to disk and the push and PR steps stop for confirmation. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "Git 워크플로 (wshobson)"
+    description: "리뷰부터 PR 오픈까지 10단계 파이프라인 — 품질 게이트, 브레이킹 체인지 스캔, 테스트, 컨벤셔널 커밋, 브랜치 푸시, PR 설명. 모든 단계가 파일로 남고 푸시·PR 단계는 확인을 위해 멈춘다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

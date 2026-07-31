@@ -7,6 +7,10 @@ version: 1.6.1
 status: active
 description: Symbol-level code retrieval and editing over Language Server Protocol, so an agent can find and change a definition without reading whole files. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "Language Server Protocol 기반 심벌 단위 코드 조회·수정 — 파일 전체를 읽지 않고도 에이전트가 정의를 찾아 변경할 수 있다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Oraios AI
   tier: community

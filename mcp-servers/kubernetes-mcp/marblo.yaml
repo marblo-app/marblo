@@ -7,6 +7,10 @@ version: 0.0.65
 status: active
 description: Talks to a Kubernetes or OpenShift cluster through your existing kubeconfig — list, inspect, apply, and delete resources, read pod logs, and run events triage. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "기존 kubeconfig를 통해 Kubernetes·OpenShift 클러스터와 통신 — 리소스 목록·조회·적용·삭제, 파드 로그 읽기, 이벤트 트리아지. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Containers (Open Repository for Container Tools)
   tier: community

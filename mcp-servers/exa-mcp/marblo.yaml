@@ -7,6 +7,10 @@ version: 3.2.1
 status: active
 description: Neural web search and crawling built for agents rather than humans, returning page contents instead of a list of blue links. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "사람이 아닌 에이전트를 위해 만들어진 신경망 기반 웹 검색·크롤링 — 링크 목록 대신 페이지 본문 내용을 반환한다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Exa Labs
   tier: community

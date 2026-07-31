@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Shared-state subagent for multi-agent runs — storing and retrieving project context, keeping several agents reading the same facts, and governing what is written back. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "컨텍스트 매니저 (VoltAgent)"
+    description: "멀티 에이전트 실행을 위한 공유 상태 서브에이전트 — 프로젝트 컨텍스트를 저장·조회하고, 여러 에이전트가 같은 사실을 읽도록 유지하며, 무엇을 다시 기록할지 통제한다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: VoltAgent
   tier: community

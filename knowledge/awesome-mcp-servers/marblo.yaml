@@ -6,6 +6,11 @@ type: knowledge-pack
 version: 1.0.0
 description: A broad, community-maintained directory of MCP servers for connecting agents to tools, data sources, and services.
 
+i18n:
+  ko:
+    name: "어썸 MCP 서버 모음"
+    description: "에이전트를 도구·데이터소스·서비스에 연결하는 MCP 서버를 폭넓게 정리한 커뮤니티 관리 디렉터리."
+
 publisher:
   name: punkpeye
   tier: community

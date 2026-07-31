@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: React 18+ specialist subagent — render-performance work, advanced hook and concurrent patterns, state-management architecture, and untangling component trees that outgrew their original design. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "React 스페셜리스트 (VoltAgent)"
+    description: "React 18+ 전문 서브에이전트 — 렌더링 성능 작업, 고급 훅·동시성 패턴, 상태관리 아키텍처, 원래 설계보다 비대해진 컴포넌트 트리 정리. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: VoltAgent
   tier: community
