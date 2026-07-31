@@ -15,6 +15,14 @@
  *      그 경로 자체가 없다(내장 카탈로그 전용).
  *   7. uninstall 은 원장 기반 — 설치 후 편집된 manifest 가 삭제를 못 돌린다.
  *   8. 모든 정규식은 anchored + 길이 한도, 초과는 잘라내지 않고 거부.
+ *   9. ★community files 설치는 3자 source repo 에서 받는다(no-vendor). 그 fetch 는
+ *      (a) https://github.com/<owner>/<repo> 로 파싱된 좌표에서 앱이 조립한
+ *      raw.githubusercontent.com URL 로만 나가고(호스트 allowlist — manifest 가
+ *      URL 을 실어 보낼 방법이 없다), (b) ref 는 불변 핀(40-hex SHA 또는
+ *      버전태그)만 — main/HEAD 등 가변 브랜치는 거부, (c) 파일 **전수**가
+ *      manifest integrity(sha256)와 대조된다 — 태그는 이동 가능하므로 digest 가
+ *      실질적인 핀이다. consent 게이트(assertInstallableItem)는 이 경로에도
+ *      동일하게 선행한다.
  */
 import crypto from "crypto";
 import fs from "fs";
@@ -23,6 +31,7 @@ import path from "path";
 import { CATALOG } from "./harness-catalog";
 import { readClaudeJson, writeClaudeJsonAtomic } from "./harness-manager";
 import {
+  fetchRawFile,
   fetchRawRegistryFile,
   type RegistryFilesInstall,
   type RegistryIndex,
@@ -323,6 +332,104 @@ export function buildMcpServerEntry(install: RegistryMcpInstall): {
   return { command: install.runner, args, env };
 }
 
+// ── §4.4 rule 9 — community source fetch (3자 repo, pinned only) ───
+//
+// registry-client 에 같은 모양의 판정이 있지만(정직한 UI 용) 여기서 **독립
+// 재구현**한다 — 이 파일이 보안 경계다. client 쪽이 느슨해져도 설치는 여기서
+// 막힌다. 세 함수 전부: 실패는 throw, 어떤 것도 fetch 하지 않는다.
+
+const SOURCE_FETCH_ALLOWED_HOSTS = new Set(["raw.githubusercontent.com"]);
+const SRC_REF_SHA_RE = /^[0-9a-f]{40}$/;
+/** 공개 스키마 source.ref 버전태그 패턴과 1:1 — main/master/HEAD/develop 불일치. */
+const SRC_REF_TAG_RE = /^v?\d+(\.\d+)*([.-][0-9A-Za-z.-]+)?$/;
+const SRC_OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})?$/;
+const SRC_REPO_NAME_RE = /^[A-Za-z0-9._-]{1,100}$/;
+
+export function assertPinnedSourceRef(ref: unknown): string {
+  if (typeof ref !== "string" || ref.length === 0 || ref.length > 120) {
+    throw new Error("설치 거부: source.ref 없음 또는 길이 위반");
+  }
+  if (!SRC_REF_SHA_RE.test(ref) && !SRC_REF_TAG_RE.test(ref)) {
+    throw new Error(
+      `설치 거부: source.ref "${ref}" 는 pinned 참조가 아님(40-hex SHA 또는 버전태그만 — 브랜치/HEAD 불가)`,
+    );
+  }
+  return ref;
+}
+
+export function parseSourceRepositoryOrThrow(repository: unknown): {
+  owner: string;
+  repo: string;
+} {
+  if (typeof repository !== "string" || repository.length > 200) {
+    throw new Error("설치 거부: source.repository 없음 또는 길이 위반");
+  }
+  const m = /^https:\/\/github\.com\/([^/]+)\/([^/]+?)\/?$/.exec(repository);
+  if (!m) {
+    throw new Error(
+      `설치 거부: source.repository "${repository}" 는 https://github.com/<owner>/<repo> 형식이 아님`,
+    );
+  }
+  const owner = m[1];
+  let repo = m[2];
+  if (repo.endsWith(".git")) repo = repo.slice(0, -4);
+  if (
+    !SRC_OWNER_RE.test(owner) ||
+    !SRC_REPO_NAME_RE.test(repo) ||
+    repo === "." ||
+    repo === ".."
+  ) {
+    throw new Error(
+      `설치 거부: source.repository "${repository}" 의 owner/repo 형식 위반`,
+    );
+  }
+  return { owner, repo };
+}
+
+/**
+ * community 항목의 source 좌표 → raw fetch base URL. manifest 는 URL 을 실을 수
+ * 없다 — owner/repo/ref/path 를 각각 charset 검증한 뒤 앱이 조립하고, 조립
+ * 결과를 URL 파서로 재검사해 허용 호스트만 통과시킨다(스푸핑·인젝션 방어).
+ */
+export function buildCommunitySourceBase(
+  item: Pick<RegistryItem, "sourceRepository" | "sourceRef" | "sourcePath">,
+): string {
+  const { owner, repo } = parseSourceRepositoryOrThrow(item.sourceRepository);
+  const ref = assertPinnedSourceRef(item.sourceRef);
+  let prefix = "";
+  if (item.sourcePath !== undefined) {
+    // 경로탈출·절대경로·역슬래시·dot 세그먼트 거부 — files 와 같은 규칙.
+    validateRelFilePath(item.sourcePath);
+    prefix = `/${item.sourcePath}`;
+  }
+  const base = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}${prefix}`;
+  assertAllowedSourceUrl(base);
+  return base;
+}
+
+/** 파일 하나의 최종 fetch URL — rel 은 이미 allowlist 검증됐지만, 조립 결과를
+ *  다시 URL 파서로 재검사한다(방어 심층 — 어떤 조합도 허용 호스트를 못 벗어난다). */
+function sourceFileUrl(base: string, rel: string): string {
+  const url = `${base}/${rel}`;
+  assertAllowedSourceUrl(url);
+  return url;
+}
+
+function assertAllowedSourceUrl(url: string): void {
+  const parsed = new URL(url);
+  if (
+    parsed.protocol !== "https:" ||
+    !SOURCE_FETCH_ALLOWED_HOSTS.has(parsed.hostname) ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.port !== ""
+  ) {
+    throw new Error(
+      `설치 거부: source fetch URL "${url}" 은 허용 호스트가 아님`,
+    );
+  }
+}
+
 // ── 공통 게이트 ────────────────────────────────────────────────────
 
 function assertInstallableItem(item: RegistryItem, opts: InstallOptions): void {
@@ -387,6 +494,22 @@ async function installFiles(
       `설치 거부: dest "${install.dest}" 는 내장 카탈로그 스킬과 충돌(가림 금지)`,
     );
   }
+  // ★§4.4 rule 9 — community 페이로드는 레지스트리 레포에 없다(no-vendor).
+  // 3자 source repo 의 pinned ref 에서만 받고, 파일 전수를 manifest integrity 와
+  // 대조한다(태그 핀은 이동 가능 — digest 가 실질적인 핀이다). base URL 검증
+  // 실패·핀 아님·integrity 누락은 전부 여기서, 네트워크에 나가기 전에 죽는다.
+  const sourceBase =
+    item.tier === "community" ? buildCommunitySourceBase(item) : null;
+  if (sourceBase) {
+    for (const rel of install.files) {
+      if (!install.integrity?.[rel]) {
+        throw new Error(
+          `설치 거부: community 설치는 파일 전수 integrity 필수("${rel}" digest 누락)`,
+        );
+      }
+    }
+  }
+
   fs.mkdirSync(rootDir, { recursive: true });
   const target = resolveContainedDest(rootDir, install.dest);
 
@@ -428,12 +551,18 @@ async function installFiles(
   try {
     fs.mkdirSync(staging, { recursive: true });
     for (const rel of install.files) {
-      const buf = await fetchRawRegistryFile(
-        fetchImpl,
-        item.commit,
-        `${item.path}/${rel}`,
-        MAX_FILE_BYTES,
-      );
+      const buf = sourceBase
+        ? await fetchRawFile(
+            fetchImpl,
+            sourceFileUrl(sourceBase, rel),
+            MAX_FILE_BYTES,
+          )
+        : await fetchRawRegistryFile(
+            fetchImpl,
+            item.commit,
+            `${item.path}/${rel}`,
+            MAX_FILE_BYTES,
+          );
       total += buf.byteLength;
       if (total > MAX_TOTAL_BYTES) {
         throw new Error("설치 거부: 페이로드 총 크기 한도 초과");
@@ -462,6 +591,11 @@ async function installFiles(
     manifestVersion: item.version,
     commit: item.commit,
     install: { kind: "files", root: install.root, dest: install.dest },
+    // 감사 추적: community 는 설치 바이트가 어느 3자 repo 의 어느 핀에서
+    // 왔는지를 원장에 남긴다(레지스트리 커밋만으로는 답할 수 없는 질문).
+    ...(sourceBase
+      ? { sourceRepository: item.sourceRepository, sourceRef: item.sourceRef }
+      : {}),
     files: written,
     permissionsGranted: item.permissions,
     installedAt: new Date().toISOString(),

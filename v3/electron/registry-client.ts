@@ -147,6 +147,8 @@ export interface RegistryItem {
   permissionsDeclared: boolean;
   sourceRepository?: string;
   sourceRef?: string;
+  /** source repo 안의 서브경로(디렉터리 prefix) — files 는 여기 기준 상대경로. */
+  sourcePath?: string;
   license?: string;
   homepage?: string;
   /** repo 내 항목 경로 (예: skills/code-review). */
@@ -319,10 +321,12 @@ export function parseManifest(
 
   let sourceRepository: string | undefined;
   let sourceRef: string | undefined;
+  let sourcePath: string | undefined;
   if (m.source && typeof m.source === "object" && !Array.isArray(m.source)) {
     const src = m.source as Record<string, unknown>;
     sourceRepository = asString(src.repository, 200) ?? undefined;
     sourceRef = asString(src.ref, 120) ?? undefined;
+    sourcePath = asString(src.path, 300) ?? undefined;
   }
 
   const item: RegistryItem = {
@@ -341,6 +345,7 @@ export function parseManifest(
     permissionsDeclared,
     sourceRepository,
     sourceRef,
+    sourcePath,
     license: asString(m.license, 40) ?? undefined,
     homepage: asString(m.homepage, 200) ?? undefined,
     path: itemPath,
@@ -366,7 +371,96 @@ export function parseManifest(
     // v2 는 install 이 필수다(§3.2). 없으면 설치 계약 없음.
     item.notInstallableReason = "install 블록이 없음(schema v2 필수)";
   }
+
+  // ★community files 설치의 페이로드는 레지스트리 레포에 없다(no-vendor 정책) —
+  // 설치 바이트는 3자 source repo 의 pinned ref 에서만 온다. pinned source 가
+  // 없으면 설치 버튼이 눌리는 순간 installer 가 반드시 거부하므로, 여기서 미리
+  // 떨궈 죽은 버튼을 만들지 않는다(정직한 UI — 강제는 installer 가 독립으로
+  // 다시 한다).
+  if (
+    item.tier === "community" &&
+    item.install?.kind === "files" &&
+    !hasInstallableCommunitySource(item)
+  ) {
+    item.install = null;
+    item.notInstallableReason =
+      "community 설치는 pinned source(GitHub, 40-hex SHA/버전태그) 필수";
+  }
   return item;
+}
+
+// ── Community source pin (3자 repo 설치 참조) ──────────────────────
+//
+// community files 설치는 marblo-app/marblo 가 아니라 **게시자의 source repo**
+// 에서 받는다(no-vendor). 그 참조가 안전하려면 세 가지가 전부 필요하다:
+//   (1) repository 가 github.com 의 owner/repo 로 정확히 파싱된다(호스트를
+//       manifest 가 고르지 못한다 — raw URL 은 앱이 조립한다),
+//   (2) ref 가 불변 핀이다(40-hex SHA 또는 버전태그 — 공개 스키마 source.ref
+//       패턴과 1:1). main/HEAD 같은 가변 브랜치는 "내일 다른 코드"가 된다,
+//   (3) path 가 경로탈출 없는 상대 디렉터리 prefix 다.
+// 여기 함수들은 파서의 정직한-UI 판정용이고, installer 가 설치 직전에 같은
+// 규칙을 독립적으로 다시 강제한다(§4.4 — client 파싱 결과 불신).
+
+const SOURCE_REF_SHA_RE = /^[0-9a-f]{40}$/;
+/** 공개 스키마 source.ref 의 버전태그 패턴과 1:1. main/master/HEAD 는 불일치. */
+const SOURCE_REF_TAG_RE = /^v?\d+(\.\d+)*([.-][0-9A-Za-z.-]+)?$/;
+const SOURCE_OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})?$/;
+const SOURCE_REPO_NAME_RE = /^[A-Za-z0-9._-]{1,100}$/;
+
+export function isPinnedSourceRef(ref: unknown): ref is string {
+  if (typeof ref !== "string" || ref.length === 0 || ref.length > 120) {
+    return false;
+  }
+  return SOURCE_REF_SHA_RE.test(ref) || SOURCE_REF_TAG_RE.test(ref);
+}
+
+/**
+ * `https://github.com/<owner>/<repo>` 만 통과 — 그 외 호스트/스킴/모양은 null.
+ * raw URL 은 여기서 얻은 owner/repo 로 앱이 직접 조립하므로, manifest 가
+ * 임의 호스트로 fetch 를 돌릴 방법이 없다.
+ */
+export function parseGitHubSourceRepository(
+  repository: unknown,
+): { owner: string; repo: string } | null {
+  if (typeof repository !== "string" || repository.length > 200) return null;
+  const m = /^https:\/\/github\.com\/([^/]+)\/([^/]+?)\/?$/.exec(repository);
+  if (!m) return null;
+  const owner = m[1];
+  let repo = m[2];
+  if (repo.endsWith(".git")) repo = repo.slice(0, -4);
+  if (!SOURCE_OWNER_RE.test(owner)) return null;
+  if (!SOURCE_REPO_NAME_RE.test(repo) || repo === "." || repo === "..") {
+    return null;
+  }
+  return { owner, repo };
+}
+
+/** source.path 는 상대 디렉터리 prefix — 절대경로·역슬래시·dot 세그먼트 거부. */
+export function isSafeSourcePath(p: unknown): boolean {
+  if (p === undefined) return true;
+  if (typeof p !== "string" || p.length === 0 || p.length > 300) return false;
+  if (p.includes("\\") || p.startsWith("/") || /^[A-Za-z]:/.test(p)) {
+    return false;
+  }
+  const segments = p.split("/");
+  if (segments.length > 8) return false;
+  return segments.every(
+    (seg) =>
+      seg !== "" &&
+      seg !== "." &&
+      seg !== ".." &&
+      /^[A-Za-z0-9_][A-Za-z0-9._-]{0,254}$/.test(seg),
+  );
+}
+
+export function hasInstallableCommunitySource(
+  item: Pick<RegistryItem, "sourceRepository" | "sourceRef" | "sourcePath">,
+): boolean {
+  return (
+    parseGitHubSourceRepository(item.sourceRepository) !== null &&
+    isPinnedSourceRef(item.sourceRef) &&
+    isSafeSourcePath(item.sourcePath)
+  );
 }
 
 /**
@@ -471,6 +565,15 @@ export function deriveFilesInstallFromTree(
   // manifest 가 계약을 선언했는데 거부된 경우(reason 이 이미 붙어 있다) 파생하지
   // 않는다 — 선언된 것과 다른 페이로드를 대신 설치하게 되기 때문.
   if (item.notInstallableReason) return;
+  // ★community 는 트리 파생 설치가 없다: 파생 allowlist 에는 integrity 가 없어
+  // installer 의 "community 는 파일 전수 digest 대조" 규칙에 반드시 걸린다 —
+  // 여기서 파생해 주면 누르면 거부되는 죽은 버튼이 된다. community 는 pinned
+  // source + integrity 를 **선언**한 항목만 설치 가능하다.
+  if (item.tier === "community") {
+    item.notInstallableReason =
+      "community 는 트리 파생 설치 불가 — install 계약(pinned source+integrity) 선언 필요";
+    return;
+  }
   const prefix = `${item.path}/`;
   const files: string[] = [];
   let total = 0;
@@ -576,25 +679,30 @@ async function fetchJson(
   return res.json();
 }
 
+/** 단일 raw URL fetch + 크기 상한(초과는 잘라내지 않고 거부). URL 검증은 caller 몫. */
+export async function fetchRawFile(
+  fetchImpl: typeof fetch,
+  url: string,
+  maxBytes: number,
+): Promise<Buffer> {
+  const res = await fetchWithTimeout(fetchImpl, url, "*/*");
+  if (!res.ok) throw new Error(`raw fetch ${url} → ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.byteLength > maxBytes) {
+    throw new Error(
+      `raw fetch ${url} → ${buf.byteLength}B > 한도 ${maxBytes}B`,
+    );
+  }
+  return buf;
+}
+
 export async function fetchRawRegistryFile(
   fetchImpl: typeof fetch,
   commit: string,
   repoPath: string,
   maxBytes: number,
 ): Promise<Buffer> {
-  const res = await fetchWithTimeout(
-    fetchImpl,
-    `${RAW_BASE}/${commit}/${repoPath}`,
-    "*/*",
-  );
-  if (!res.ok) throw new Error(`raw fetch ${repoPath} → ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.byteLength > maxBytes) {
-    throw new Error(
-      `raw fetch ${repoPath} → ${buf.byteLength}B > 한도 ${maxBytes}B`,
-    );
-  }
-  return buf;
+  return fetchRawFile(fetchImpl, `${RAW_BASE}/${commit}/${repoPath}`, maxBytes);
 }
 
 async function mapLimit<T, R>(

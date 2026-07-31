@@ -417,6 +417,95 @@ describe("install contract on schema_version 1 (public registry shape)", () => {
   });
 });
 
+// community files 설치는 3자 source repo 에서 받는다(no-vendor). 파서의 몫은
+// 정직한 UI 다: pinned GitHub source 가 없는 community 설치 계약은 눌리는 순간
+// installer 가 거부하므로, 여기서 미리 설치불가로 떨궈 죽은 버튼을 없앤다.
+// (강제는 installer 가 독립적으로 다시 한다 — 그 스펙은 installer 테스트에.)
+describe("community source pin (정직한 UI 게이트)", () => {
+  const COMMUNITY_SKILL_WITH_SOURCE = V1_SKILL_WITH_INSTALL.replace(
+    "  tier: official",
+    "  tier: community",
+  ).replace(
+    "install:",
+    `source:
+  repository: https://github.com/acme/claude-skills
+  ref: ${"f".repeat(40)}
+  path: skills/ext
+install:`,
+  );
+
+  it("keeps the declared install when the community source is pinned to GitHub", () => {
+    const item = parseManifest(
+      COMMUNITY_SKILL_WITH_SOURCE,
+      "skills/code-review",
+      "skill",
+      COMMIT,
+    )!;
+    expect(item.tier).toBe("community");
+    expect(item.install?.kind).toBe("files");
+    expect(item.sourceRepository).toBe("https://github.com/acme/claude-skills");
+    expect(item.sourceRef).toBe("f".repeat(40));
+    expect(item.sourcePath).toBe("skills/ext");
+  });
+
+  it.each(["main", "HEAD", "feature/x"])(
+    "drops the install button when source.ref is the moving ref %j",
+    (ref) => {
+      const raw = COMMUNITY_SKILL_WITH_SOURCE.replace(
+        `ref: ${"f".repeat(40)}`,
+        `ref: ${ref}`,
+      );
+      const item = parseManifest(raw, "skills/code-review", "skill", COMMIT)!;
+      expect(item.install).toBeNull();
+      expect(item.notInstallableReason).toMatch(/pinned source/);
+    },
+  );
+
+  it("drops the install button when the repository is not github.com", () => {
+    const raw = COMMUNITY_SKILL_WITH_SOURCE.replace(
+      "https://github.com/acme/claude-skills",
+      "https://evil.example/acme/claude-skills",
+    );
+    const item = parseManifest(raw, "skills/code-review", "skill", COMMIT)!;
+    expect(item.install).toBeNull();
+  });
+
+  it("drops the install button when the community item has no source at all", () => {
+    const raw = V1_SKILL_WITH_INSTALL.replace(
+      "  tier: official",
+      "  tier: community",
+    );
+    const item = parseManifest(raw, "skills/code-review", "skill", COMMIT)!;
+    expect(item.install).toBeNull();
+    expect(item.notInstallableReason).toMatch(/pinned source/);
+  });
+
+  it("official installs are untouched by the source gate", () => {
+    const item = parseManifest(
+      V1_SKILL_WITH_INSTALL,
+      "skills/code-review",
+      "skill",
+      COMMIT,
+    )!;
+    expect(item.install?.kind).toBe("files");
+  });
+
+  it("never tree-derives an install for a community skill (no integrity → dead button)", () => {
+    const raw = V1_SKILL.replace("  tier: official", "  tier: community");
+    const item = parseManifest(raw, "skills/code-review", "skill", COMMIT)!;
+    deriveFilesInstallFromTree(item, [
+      {
+        path: "skills/code-review/SKILL.md",
+        mode: "100644",
+        type: "blob",
+        size: 10,
+      },
+    ]);
+    expect(item.install).toBeNull();
+    expect(item.notInstallableReason).toMatch(/트리 파생/);
+  });
+});
+
 describe("deriveFilesInstallFromTree", () => {
   function baseItem(): RegistryItem {
     return parseManifest(V1_SKILL, "skills/code-review", "skill", COMMIT)!;

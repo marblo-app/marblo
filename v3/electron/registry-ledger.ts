@@ -30,6 +30,9 @@ export interface LedgerEntry {
   manifestVersion: string;
   /** 설치 페이로드를 받은 레지스트리 커밋. */
   commit: string;
+  /** community source-fetch 전용: 설치 바이트를 받은 3자 repo 와 pinned ref. */
+  sourceRepository?: string;
+  sourceRef?: string;
   install: LedgerInstallRecord;
   /** kind=files 전용: 설치 시점에 실제로 쓴 파일과 해시 — 삭제는 이 목록만. */
   files?: LedgerFileEntry[];

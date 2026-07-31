@@ -5,6 +5,7 @@
  * 임의 커맨드, env 유출, 내장 카탈로그 가림, 원장 기반 uninstall.
  * 하나라도 빠지면 untrusted manifest 가 사용자 머신을 쓸 수 있게 된다.
  */
+import crypto from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -373,14 +374,16 @@ describe("tier and status gates", () => {
   });
 
   it("installs community-tier items when consent is explicitly given", async () => {
-    const { deps, root } = makeEnv();
-    await installRegistryItem(skillItem({ tier: "community" }), deps, {
+    // community 는 §4.4 rule 9 에 따라 pinned source + integrity 도 필요하다 —
+    // 이 스펙의 관심사는 동의 플로우이므로 그 요건을 채운 픽스처를 쓴다.
+    const { deps, root } = makeEnv(stubFetch({ "SKILL.md": "# ext skill" }));
+    await installRegistryItem(communityItem(), deps, {
       acknowledgeUnreviewed: true,
     });
     expect(
-      fs.readFileSync(path.join(root, "test-skill", "SKILL.md"), "utf-8"),
-    ).toBe("# skill");
-    expect(readLedger(deps.ledgerPath).items["test-skill"]).toBeDefined();
+      fs.readFileSync(path.join(root, "ext-skill", "SKILL.md"), "utf-8"),
+    ).toBe("# ext skill");
+    expect(readLedger(deps.ledgerPath).items["ext-skill"]).toBeDefined();
   });
 
   it("consent does not bypass the revoked gate", async () => {
@@ -555,6 +558,241 @@ describe("files install + ledger-driven uninstall", () => {
       },
     });
     await expect(installRegistryItem(item, deps)).rejects.toThrow(/integrity/);
+  });
+});
+
+// ── CRITICAL: community source fetch (§4.4 rule 9) ─────────────────
+//
+// community 페이로드는 레지스트리 레포가 아니라 **3자 source repo** 에서 온다.
+// 이 블록은 그 경로의 공급망 가드 명세다: pinned ref 강제(가변 브랜치 거부),
+// 호스트 allowlist(앱이 URL 을 조립 — manifest 는 좌표만), 파일 전수 integrity,
+// consent 게이트 불변. 하나라도 빠지면 "설치되는 바이트 ≠ 리뷰된 바이트"다.
+
+const SRC_SHA = "f".repeat(40);
+
+function communityItem(overrides: Partial<RegistryItem> = {}): RegistryItem {
+  return skillItem({
+    id: "ext-skill",
+    tier: "community",
+    path: "skills/ext-skill",
+    sourceRepository: "https://github.com/acme/claude-skills",
+    sourceRef: SRC_SHA,
+    sourcePath: "skills/ext",
+    install: {
+      kind: "files",
+      root: "claude-skills",
+      dest: "ext-skill",
+      files: ["SKILL.md"],
+      integrity: { "SKILL.md": sha256Hex("# ext skill") },
+    },
+    installDerived: false,
+    ...overrides,
+  });
+}
+
+function sha256Hex(s: string): string {
+  return crypto
+    .createHash("sha256")
+    .update(Buffer.from(s, "utf-8"))
+    .digest("hex");
+}
+
+/** 스텁 fetch + 요청 URL 캡처 — "어디로 나갔는가"가 이 블록의 단언 대상이다. */
+function capturingStubFetch(filesByUrlSuffix: Record<string, string>): {
+  fetchImpl: typeof fetch;
+  urls: string[];
+} {
+  const urls: string[] = [];
+  const base = stubFetch(filesByUrlSuffix);
+  const fetchImpl = (async (url: unknown, init?: unknown) => {
+    urls.push(String(url));
+    return (base as (u: unknown, i?: unknown) => Promise<Response>)(url, init);
+  }) as typeof fetch;
+  return { fetchImpl, urls };
+}
+
+describe("community source fetch (§4.4 rule 9)", () => {
+  const CONSENT = { acknowledgeUnreviewed: true };
+
+  it("fetches from the pinned 3rd-party source URL, not the registry repo", async () => {
+    const { fetchImpl, urls } = capturingStubFetch({
+      "SKILL.md": "# ext skill",
+    });
+    const { deps, root } = makeEnv(fetchImpl);
+    await installRegistryItem(communityItem(), deps, CONSENT);
+    expect(urls).toEqual([
+      `https://raw.githubusercontent.com/acme/claude-skills/${SRC_SHA}/skills/ext/SKILL.md`,
+    ]);
+    expect(
+      fs.readFileSync(path.join(root, "ext-skill", "SKILL.md"), "utf-8"),
+    ).toBe("# ext skill");
+    const entry = readLedger(deps.ledgerPath).items["ext-skill"];
+    expect(entry.sourceRepository).toBe(
+      "https://github.com/acme/claude-skills",
+    );
+    expect(entry.sourceRef).toBe(SRC_SHA);
+  });
+
+  it("accepts a version-tag pin and omits the path prefix when sourcePath is absent", async () => {
+    const { fetchImpl, urls } = capturingStubFetch({
+      "SKILL.md": "# ext skill",
+    });
+    const { deps } = makeEnv(fetchImpl);
+    await installRegistryItem(
+      communityItem({ sourceRef: "v1.7.0", sourcePath: undefined }),
+      deps,
+      CONSENT,
+    );
+    expect(urls).toEqual([
+      "https://raw.githubusercontent.com/acme/claude-skills/v1.7.0/SKILL.md",
+    ]);
+  });
+
+  it("official installs keep fetching from the registry repo at the pinned commit", async () => {
+    const { fetchImpl, urls } = capturingStubFetch({ "SKILL.md": "# skill" });
+    const { deps } = makeEnv(fetchImpl);
+    await installRegistryItem(skillItem(), deps);
+    expect(urls).toEqual([
+      `https://raw.githubusercontent.com/marblo-app/marblo/${COMMIT}/skills/test-skill/SKILL.md`,
+    ]);
+    const entry = readLedger(deps.ledgerPath).items["test-skill"];
+    expect(entry.sourceRepository).toBeUndefined();
+  });
+
+  it("★the consent gate is unchanged — no acknowledgeUnreviewed, no fetch at all", async () => {
+    const { fetchImpl, urls } = capturingStubFetch({
+      "SKILL.md": "# ext skill",
+    });
+    const { deps } = makeEnv(fetchImpl);
+    await expect(installRegistryItem(communityItem(), deps)).rejects.toThrow(
+      /acknowledgeUnreviewed/,
+    );
+    expect(urls).toEqual([]);
+  });
+
+  it.each([
+    "main",
+    "master",
+    "HEAD",
+    "develop",
+    "feature/x",
+    "refs/heads/main",
+  ])(
+    "rejects the moving ref %j (pinned SHA or version tag only)",
+    async (ref) => {
+      const { deps } = makeEnv();
+      await expect(
+        installRegistryItem(communityItem({ sourceRef: ref }), deps, CONSENT),
+      ).rejects.toThrow(/pinned 참조가 아님/);
+    },
+  );
+
+  it("rejects a community item with no source coordinates at all", async () => {
+    const { deps } = makeEnv();
+    await expect(
+      installRegistryItem(
+        communityItem({ sourceRepository: undefined, sourceRef: undefined }),
+        deps,
+        CONSENT,
+      ),
+    ).rejects.toThrow(/source\.repository/);
+  });
+
+  it.each([
+    "https://evil.com/acme/skills",
+    "http://github.com/acme/skills",
+    "https://github.com.evil.com/acme/skills",
+    "https://github.com/acme/skills/extra",
+    "https://raw.githubusercontent.com/acme/skills",
+    "git@github.com:acme/skills",
+    "https://github.com/acme/..",
+    "https://github.com/-bad/skills",
+  ])("rejects the non-allowlisted repository %j", async (repository) => {
+    const { deps } = makeEnv();
+    await expect(
+      installRegistryItem(
+        communityItem({ sourceRepository: repository }),
+        deps,
+        CONSENT,
+      ),
+    ).rejects.toThrow(/source\.repository|허용 호스트/);
+  });
+
+  it.each(["../up", "a/../b", "/abs", "a\\b", ".hidden/x"])(
+    "rejects the traversal-shaped sourcePath %j",
+    async (sourcePath) => {
+      const { deps } = makeEnv();
+      await expect(
+        installRegistryItem(communityItem({ sourcePath }), deps, CONSENT),
+      ).rejects.toThrow(/설치 거부/);
+    },
+  );
+
+  it("requires an integrity digest for every file — a tag pin alone is not a pin", async () => {
+    const { deps } = makeEnv();
+    const item = communityItem();
+    (item.install as { integrity?: Record<string, string> }).integrity = {};
+    await expect(installRegistryItem(item, deps, CONSENT)).rejects.toThrow(
+      /전수 integrity/,
+    );
+  });
+
+  it("rejects bytes that do not match the reviewed digest", async () => {
+    const { fetchImpl } = capturingStubFetch({ "SKILL.md": "tampered bytes" });
+    const { deps, root } = makeEnv(fetchImpl);
+    await expect(
+      installRegistryItem(communityItem(), deps, CONSENT),
+    ).rejects.toThrow(/integrity 불일치/);
+    expect(fs.existsSync(path.join(root, "ext-skill"))).toBe(false);
+  });
+
+  it("enforces the per-file size cap on source fetches (reject, not truncate)", async () => {
+    const big = Buffer.alloc(5 * 1024 * 1024 + 1);
+    const fetchImpl = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        arrayBuffer: async () =>
+          big.buffer.slice(big.byteOffset, big.byteOffset + big.byteLength),
+      }) as unknown as Response) as typeof fetch;
+    const { deps } = makeEnv(fetchImpl);
+    await expect(
+      installRegistryItem(communityItem(), deps, CONSENT),
+    ).rejects.toThrow(/한도/);
+  });
+
+  it("community agents install from source into the agents root", async () => {
+    const { fetchImpl, urls } = capturingStubFetch({
+      "electron-pro.md": "# agent persona",
+    });
+    const { deps, root } = makeEnv(fetchImpl);
+    const agentsRoot = path.join(path.dirname(root), "agents-root");
+    deps.rootsOverride = { "claude-skills": root, "claude-agents": agentsRoot };
+    const item = communityItem({
+      id: "voltagent-electron-pro",
+      type: "agent",
+      path: "agents/voltagent-electron-pro",
+      sourceRepository:
+        "https://github.com/VoltAgent/awesome-claude-code-subagents",
+      sourcePath: "categories/01-core-development",
+      install: {
+        kind: "files",
+        root: "claude-agents",
+        dest: "voltagent-electron-pro",
+        files: ["electron-pro.md"],
+        integrity: { "electron-pro.md": sha256Hex("# agent persona") },
+      },
+    });
+    await installRegistryItem(item, deps, CONSENT);
+    expect(urls).toEqual([
+      `https://raw.githubusercontent.com/VoltAgent/awesome-claude-code-subagents/${SRC_SHA}/categories/01-core-development/electron-pro.md`,
+    ]);
+    expect(
+      fs.readFileSync(
+        path.join(agentsRoot, "voltagent-electron-pro", "electron-pro.md"),
+        "utf-8",
+      ),
+    ).toBe("# agent persona");
   });
 });
 
