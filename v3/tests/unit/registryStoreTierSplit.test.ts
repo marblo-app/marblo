@@ -11,6 +11,9 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  categorizeRegistryType,
+  isReferenceOnlyRegistryType,
+  isRegistryItemConsentInstallable,
   isRegistryItemInstallable,
   localizedItemText,
   splitRegistryByTier,
@@ -99,15 +102,16 @@ describe("splitRegistryByTier", () => {
 });
 
 /**
- * ★설치 게이트(§6.3) — 이 스위트가 진짜 보안 불변식이다. 스토어가 community 를
- * 보여주게 된 뒤로 "목록에서 안 보임" 이 더는 차단이 아니므로, 차단은 오직
- * 여기서만 일어난다. 이 테스트가 빨개지면 미검수 페이로드에 원클릭 설치 버튼이
- * 달린 것이다.
+ * ★설치 판정(§6.3) — (a) 원클릭(official/verified)과 (b) community '동의 필요'
+ * 는 상호 배타적인 두 판정으로 분리돼 있다. 이 스위트가 빨개지면 미검수
+ * 페이로드에 **동의 절차 없는** 원클릭 설치 버튼이 달린 것이다. UI 판정은
+ * 편의일 뿐이고, 실제 강제는 메인 프로세스 registry-installer 가 한다
+ * (registry-installer-security.test.ts 의 consent 게이트 스위트).
  */
-describe("isRegistryItemInstallable", () => {
+describe("isRegistryItemInstallable (one-click)", () => {
   const contract = { kind: "files" as const };
 
-  it("official/verified + 설치계약 + active 만 설치 가능", () => {
+  it("official/verified + 설치계약 + active 만 원클릭 설치 가능", () => {
     expect(
       isRegistryItemInstallable({
         tier: "official",
@@ -124,7 +128,7 @@ describe("isRegistryItemInstallable", () => {
     ).toBe(true);
   });
 
-  it("★community 는 설치계약이 있어도 절대 설치 불가", () => {
+  it("★community 는 설치계약이 있어도 원클릭 불가(동의 경로만)", () => {
     expect(
       isRegistryItemInstallable({
         tier: "community",
@@ -177,6 +181,100 @@ describe("isRegistryItemInstallable", () => {
     const { visible } = splitRegistryByTier([community]);
     expect(visible).toHaveLength(1);
     expect(isRegistryItemInstallable(visible[0])).toBe(false);
+  });
+});
+
+/**
+ * ★(b) community '동의 필요' 판정 — 설치 계약이 있는 미검수 항목에만 경고
+ * 모달을 거치는 설치 버튼이 달린다. (a)와 상호 배타여야 한다: 같은 항목이
+ * 원클릭이면서 동의 필요일 수는 없다.
+ */
+describe("isRegistryItemConsentInstallable (community consent)", () => {
+  const contract = { kind: "files" as const };
+
+  it("community + 설치계약 + active 만 동의-후-설치 대상", () => {
+    expect(
+      isRegistryItemConsentInstallable({
+        tier: "community",
+        install: contract,
+        status: "active",
+      }),
+    ).toBe(true);
+  });
+
+  it("official/verified 는 동의 경로가 아니다(원클릭 경로)", () => {
+    for (const tier of ["official", "verified"] as const) {
+      expect(
+        isRegistryItemConsentInstallable({
+          tier,
+          install: contract,
+          status: "active",
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("설치계약 없는 community 는 동의로도 설치 대상이 아니다", () => {
+    expect(
+      isRegistryItemConsentInstallable({
+        tier: "community",
+        install: null,
+        status: "active",
+      }),
+    ).toBe(false);
+  });
+
+  it("★revoked 는 동의 경로도 닫힌다", () => {
+    expect(
+      isRegistryItemConsentInstallable({
+        tier: "community",
+        install: contract,
+        status: "revoked",
+      }),
+    ).toBe(false);
+  });
+
+  it("두 판정은 상호 배타 — 어떤 tier·상태 조합도 둘 다 true 일 수 없다", () => {
+    const tiers = ["official", "verified", "community"] as const;
+    const statuses = ["active", "deprecated", "revoked"] as const;
+    for (const tier of tiers) {
+      for (const status of statuses) {
+        for (const install of [contract, null]) {
+          const probe = { tier, status, install };
+          expect(
+            isRegistryItemInstallable(probe) &&
+              isRegistryItemConsentInstallable(probe),
+          ).toBe(false);
+        }
+      }
+    }
+  });
+});
+
+/**
+ * 카테고리 탭 분류 — 알려진 타입은 각자의 탭으로, '기타'는 진짜 미지 타입만.
+ * knowledge→스터디 같은 제품 라벨 매핑이 흔들리면 탭이 조용히 빈 칸이 된다.
+ */
+describe("categorizeRegistryType", () => {
+  it("알려진 타입은 정식 카테고리로 매핑된다", () => {
+    expect(categorizeRegistryType("mcp-server")).toBe("mcp");
+    expect(categorizeRegistryType("skill")).toBe("skills");
+    expect(categorizeRegistryType("agent")).toBe("agents");
+    expect(categorizeRegistryType("workflow")).toBe("workflows");
+    expect(categorizeRegistryType("knowledge")).toBe("study");
+  });
+
+  it("진짜 미지 타입만 '기타'로 간다", () => {
+    expect(categorizeRegistryType("hologram")).toBe("other");
+    expect(categorizeRegistryType("")).toBe("other");
+  });
+
+  it("참조 전용 타입은 workflow/knowledge 뿐이다 — 설치형 타입이 새면 안 된다", () => {
+    expect(isReferenceOnlyRegistryType("workflow")).toBe(true);
+    expect(isReferenceOnlyRegistryType("knowledge")).toBe(true);
+    for (const installable of ["skill", "mcp-server", "agent"]) {
+      expect(isReferenceOnlyRegistryType(installable)).toBe(false);
+    }
   });
 });
 

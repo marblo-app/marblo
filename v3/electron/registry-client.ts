@@ -20,14 +20,17 @@ import path from "path";
 import { parse as parseYaml } from "yaml";
 
 // ── Registry source ────────────────────────────────────────────────
-// Phase 1a 는 skill(files)과 mcp-server(config) 2종만 소비한다(§2 scope).
-// agents/·workflows/·knowledge/ 는 1b — 디렉터리 자체를 읽지 않는다.
+// 설치 계약이 있는 타입은 skill·mcp-server·agent 뿐이다. workflow·knowledge 는
+// 인덱싱·표시(참조 전용)만 한다 — 스토어가 카테고리 탭으로 전 타입을 브라우징
+// 하는 화면이 된 이상, 디렉터리를 아예 안 읽으면 그 카테고리가 항상 빈 칸이 된다.
 const REGISTRY_REPO = "marblo-app/marblo";
 const REGISTRY_BRANCH = "main";
-const PHASE_1A_DIRS: Record<string, RegistryItemType> = {
+const INDEXED_DIRS: Record<string, RegistryItemType> = {
   skills: "skill",
   "mcp-servers": "mcp-server",
   agents: "agent",
+  workflows: "workflow",
+  knowledge: "knowledge",
 };
 
 /**
@@ -58,7 +61,12 @@ const MANIFEST_FETCH_CONCURRENCY = 8;
 const INDEX_MEMO_TTL_MS = 10 * 60 * 1000;
 
 export type RegistryTier = "official" | "verified" | "community";
-export type RegistryItemType = "skill" | "mcp-server" | "agent";
+export type RegistryItemType =
+  | "skill"
+  | "mcp-server"
+  | "agent"
+  | "workflow"
+  | "knowledge";
 export type RegistryItemStatus = "active" | "deprecated" | "revoked";
 
 /**
@@ -610,7 +618,7 @@ async function mapLimit<T, R>(
   return out;
 }
 
-/** 트리에서 Phase 1a manifest 후보를 고른다: <dir>/<name>/marblo.yaml 정확히 2단. */
+/** 트리에서 인덱싱 대상 manifest 후보를 고른다: <dir>/<name>/marblo.yaml 정확히 2단. */
 export function selectManifestEntries(
   tree: TreeEntry[],
 ): Array<{ path: string; dir: string; type: RegistryItemType }> {
@@ -621,7 +629,7 @@ export function selectManifestEntries(
       /^([a-z-]+)\/([a-z0-9]+(?:-[a-z0-9]+)*)\/marblo\.yaml$/,
     );
     if (!m) continue;
-    const itemType = PHASE_1A_DIRS[m[1]];
+    const itemType = INDEXED_DIRS[m[1]];
     if (!itemType) continue;
     if ((e.size ?? 0) > MAX_MANIFEST_BYTES) continue;
     out.push({ path: e.path, dir: `${m[1]}/${m[2]}`, type: itemType });
@@ -686,6 +694,12 @@ async function fetchFreshIndex(
         ) {
           item.notInstallableReason ??=
             "manifest 에 설치 계약 없음 — 수동 설치만 가능";
+        }
+        // workflow/knowledge 는 설치 계약 자체가 없는 참조 전용 타입이다 —
+        // 스토어는 링크만 제공한다(가짜 설치 버튼 금지).
+        if (item && (item.type === "workflow" || item.type === "knowledge")) {
+          item.install = null;
+          item.notInstallableReason ??= "참조 전용 타입 — 인앱 설치 없음";
         }
         return item;
       } catch (err) {

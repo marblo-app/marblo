@@ -123,6 +123,13 @@ export interface InstallerDeps {
 export interface InstallOptions {
   /** update 시 로컬 수정 감지에도 덮어쓰기(사용자가 명시 확인한 경우만). */
   overwriteLocalChanges?: boolean;
+  /**
+   * ★community(미검수) 항목 설치에 대한 명시 동의. 렌더러의 경고 모달이 이
+   * 플래그를 세우지만, **강제는 여기(메인 프로세스)가 한다** — 렌더러 UI 를
+   * 우회한 IPC 호출이 플래그 없이 community 를 설치할 수 없다. official/verified
+   * 원클릭과 revoked 차단에는 이 플래그가 아무 영향도 주지 않는다.
+   */
+  acknowledgeUnreviewed?: boolean;
 }
 
 function roots(deps: InstallerDeps): Record<string, string> {
@@ -318,16 +325,21 @@ export function buildMcpServerEntry(install: RegistryMcpInstall): {
 
 // ── 공통 게이트 ────────────────────────────────────────────────────
 
-function assertInstallableItem(item: RegistryItem): void {
+function assertInstallableItem(item: RegistryItem, opts: InstallOptions): void {
+  // revoked 는 어떤 동의로도 뚫리지 않는다 — tier 게이트보다 먼저 본다.
   if (item.status === "revoked") {
     throw new Error("설치 거부: 회수(revoked)된 항목");
   }
-  // §6.3 — community 는 리뷰되지 않은 텍스트 페이로드다. 목록·공시만 하고
-  // 설치는 막는다(1a 에는 opt-in 설정도 두지 않는다 — 기본 차단이 룰).
+  // §6.3 — community 는 리뷰되지 않은 텍스트 페이로드다. 설치는 사용자가
+  // 경고를 지나 명시 동의(acknowledgeUnreviewed)를 준 요청만 통과한다.
+  // 플래그 강제는 이 함수(메인 프로세스)가 한다 — 렌더러 UI 는 신뢰하지 않는다.
   if (item.tier === "community") {
-    throw new Error("설치 거부: community tier 는 목록·공시만 지원(미검수)");
-  }
-  if (item.tier !== "official" && item.tier !== "verified") {
+    if (opts.acknowledgeUnreviewed !== true) {
+      throw new Error(
+        "설치 거부: community tier 는 미검수 — 경고 동의(acknowledgeUnreviewed) 없는 설치 불가",
+      );
+    }
+  } else if (item.tier !== "official" && item.tier !== "verified") {
     throw new Error(`설치 거부: 알 수 없는 tier "${item.tier}"`);
   }
   if (!item.install) {
@@ -498,7 +510,7 @@ export async function installRegistryItem(
   deps: InstallerDeps,
   opts: InstallOptions = {},
 ): Promise<void> {
-  assertInstallableItem(item);
+  assertInstallableItem(item, opts);
   const install = item.install!;
   let entry: LedgerEntry;
   if (install.kind === "files") {

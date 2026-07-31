@@ -171,12 +171,16 @@ export const harness = {
   // --- Public registry store (marblo-app/marblo) ---
   // 최상위 스토어 탭 헤더
   "store.tab.title": "스토어",
-  "store.tab.subtitle": "공개 레지스트리의 스킬·MCP 카탈로그",
+  "store.tab.subtitle": "공개 레지스트리의 스킬·MCP·에이전트 카탈로그",
   "harness.store.registry.title": "공개 레지스트리",
   "harness.store.registry.subtitle":
-    "공개 레지스트리(marblo-app/marblo)의 전체 카탈로그입니다. 앱에서 설치할 수 있는 것은 공식·검증됨 tier 뿐이고, 커뮤니티 tier 는 목록·공시만 제공합니다. tier 와 권한은 공시이며, 설치 후 동작을 제한하지 않습니다.",
+    "공개 레지스트리(marblo-app/marblo)의 전체 카탈로그입니다. 공식·검증됨 tier 는 원클릭 설치되고, 커뮤니티 tier 는 미검수라 경고에 동의해야만 설치됩니다. tier 와 권한은 공시이며, 설치 후 동작을 제한하지 않습니다.",
+  "harness.store.registry.category.all": "전체",
   "harness.store.registry.skills": "스킬",
-  "harness.store.registry.mcp": "MCP 서버",
+  "harness.store.registry.mcp": "MCP",
+  "harness.store.registry.agents": "에이전트",
+  "harness.store.registry.workflows": "워크플로",
+  "harness.store.registry.study": "스터디",
   "harness.store.registry.other": "기타",
   "harness.store.registry.stale":
     "레지스트리에 연결하지 못해 마지막으로 확인한 목록을 표시 중입니다.",
@@ -186,8 +190,14 @@ export const harness = {
   "harness.store.registry.tier.official": "공식",
   "harness.store.registry.tier.verified": "검증됨",
   "harness.store.registry.tier.community": "커뮤니티",
-  "harness.store.registry.communityListOnly":
-    "커뮤니티 tier 는 미검수 — 목록·공시만 제공하며 설치할 수 없습니다.",
+  "harness.store.registry.referenceOnly":
+    "참조 전용 — 인앱 설치 없이 링크로 열람합니다.",
+  "harness.store.registry.communityWarnTitle": "미검수 항목 설치",
+  "harness.store.registry.communityWarnBody":
+    "이 항목은 커뮤니티 tier 로, Marblo 가 내용을 검수하지 않았습니다. 설치하면 {source} 의 콘텐츠가 내 머신에 내려받아져 에이전트가 로드할 수 있습니다. 출처를 직접 확인한 뒤에만 진행하세요.",
+  "harness.store.registry.communityWarnConsent":
+    "위 출처({source})를 신뢰하고 설치합니다.",
+  "harness.store.registry.communityWarnConfirm": "동의하고 설치",
   "harness.store.registry.permissions": "요구 권한(공시)",
   "harness.store.registry.permissionsNone": "권한 필요 없음(명시)",
   "harness.store.registry.permissionsUndeclared": "권한 미신고",
@@ -212,9 +222,9 @@ export const harness = {
   "harness.store.registry.uninstallFail": "제거에 실패했습니다.",
   "harness.store.registry.source": "소스",
   "harness.store.registry.loadFail": "레지스트리 목록을 불러오지 못했습니다.",
-  // 커뮤니티 tier 는 목록에는 뜨지만 설치는 안 된다 — 그 사실을 한 줄로 공시한다.
+  // 커뮤니티 tier 는 목록에 뜨고, 설치엔 별도 동의가 필요하다 — 한 줄로 공시.
   "harness.store.registry.communityListedNote":
-    "이 중 커뮤니티 {count}개는 참조 전용(설치 불가)",
+    "이 중 커뮤니티 {count}개는 미검수 — 설치 시 별도 동의 필요",
   "harness.store.registry.githubCatalog": "GitHub 전체 카탈로그 →",
   "harness.store.registry.emptyCatalog":
     "표시할 자산이 없습니다. 전체 카탈로그는 GitHub에서 볼 수 있습니다.",

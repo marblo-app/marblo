@@ -172,12 +172,16 @@ export const harness: Record<keyof typeof koHarness, string> = {
   // --- Public registry store (marblo-app/marblo) ---
   // Top-level Store tab header
   "store.tab.title": "Store",
-  "store.tab.subtitle": "Skill and MCP catalog from the public registry",
+  "store.tab.subtitle": "Skill, MCP and agent catalog from the public registry",
   "harness.store.registry.title": "Public registry",
   "harness.store.registry.subtitle":
-    "The full catalog of the public registry (marblo-app/marblo). Only official and verified tiers are installable in-app; community tier is listed for disclosure only. Tier and permissions are disclosures — they do not restrict what an item does once installed.",
+    "The full catalog of the public registry (marblo-app/marblo). Official and verified tiers install in one click; community tier is unreviewed and installs only after you acknowledge a warning. Tier and permissions are disclosures — they do not restrict what an item does once installed.",
+  "harness.store.registry.category.all": "All",
   "harness.store.registry.skills": "Skills",
-  "harness.store.registry.mcp": "MCP servers",
+  "harness.store.registry.mcp": "MCP",
+  "harness.store.registry.agents": "Agents",
+  "harness.store.registry.workflows": "Workflows",
+  "harness.store.registry.study": "Study",
   "harness.store.registry.other": "Other",
   "harness.store.registry.stale":
     "Could not reach the registry — showing the last fetched list.",
@@ -187,8 +191,14 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.registry.tier.official": "Official",
   "harness.store.registry.tier.verified": "Verified",
   "harness.store.registry.tier.community": "Community",
-  "harness.store.registry.communityListOnly":
-    "Community tier is unreviewed — listed for disclosure only, not installable.",
+  "harness.store.registry.referenceOnly":
+    "Reference only — browse via link, no in-app install.",
+  "harness.store.registry.communityWarnTitle": "Install unreviewed item",
+  "harness.store.registry.communityWarnBody":
+    "This item is community tier — Marblo has not reviewed its contents. Installing downloads content from {source} onto your machine, where agents can load it. Proceed only after verifying the source yourself.",
+  "harness.store.registry.communityWarnConsent":
+    "I trust the source above ({source}) and want to install.",
+  "harness.store.registry.communityWarnConfirm": "Acknowledge & install",
   "harness.store.registry.permissions": "Declared permissions",
   "harness.store.registry.permissionsNone": "Needs nothing (declared)",
   "harness.store.registry.permissionsUndeclared": "Permissions undeclared",
@@ -213,9 +223,9 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.registry.uninstallFail": "Uninstall failed.",
   "harness.store.registry.source": "Source",
   "harness.store.registry.loadFail": "Failed to load the registry list.",
-  // Community tier is listed but never installable — say so in one line.
+  // Community tier is listed; installing it needs explicit consent — one line.
   "harness.store.registry.communityListedNote":
-    "{count} of these are community, reference-only (not installable)",
+    "{count} of these are community (unreviewed) — installing requires explicit consent",
   "harness.store.registry.githubCatalog": "Full catalog on GitHub →",
   "harness.store.registry.emptyCatalog":
     "No assets to show. The full catalog is on GitHub.",

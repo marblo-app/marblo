@@ -6994,7 +6994,12 @@ ipcMain.handle(
   "registry:install",
   async (
     _event,
-    payload: { id: string; type: string; overwriteLocalChanges?: boolean },
+    payload: {
+      id: string;
+      type: string;
+      overwriteLocalChanges?: boolean;
+      acknowledgeUnreviewed?: boolean;
+    },
   ) => {
     try {
       if (!payload || typeof payload.id !== "string") {
@@ -7007,8 +7012,11 @@ ipcMain.handle(
         (i) => i.id === payload.id && i.type === payload.type,
       );
       if (!item) throw new Error(`레지스트리에 없는 항목: ${payload.id}`);
+      // acknowledgeUnreviewed 는 그대로 전달만 한다 — community 설치를 실제로
+      // 거부하는 것은 registry-installer 의 tier 게이트다(렌더러 불신 원칙).
       await installRegistryItem(item, registryInstallerDeps(), {
         overwriteLocalChanges: !!payload.overwriteLocalChanges,
+        acknowledgeUnreviewed: payload.acknowledgeUnreviewed === true,
       });
       return { success: true };
     } catch (err) {

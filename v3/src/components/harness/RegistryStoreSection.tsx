@@ -12,14 +12,16 @@ import { useTranslation, t as translate, type Locale } from "../../lib/i18n";
  *
  * 표시 원칙:
  *  - tier·permissions 는 **공시**다. UI 카피가 "강제 아님"을 명시한다(§4.6).
- *  - ★community tier 는 **보이되 설치 불가**다(§6.3 기본 차단). 한때는 목록에서도
- *    빼서 개수만 GitHub 으로 보냈는데, 스토어가 탭으로 격상되면서 카탈로그를
- *    브라우징하는 화면이 됐다 — 카탈로그가 자기 카탈로그의 대부분을 감추면
- *    브라우징이 안 된다. 그래서 **표시 정책만** 바뀌었고 **설치 게이트
- *    (`installable`)는 그대로**다: 미검수 페이로드에 원클릭 설치를 달지 않는다.
- *    이 둘이 분리돼 있는 게 요점 — 표시를 열어도 차단은 유지된다.
+ *  - 목록은 상단 카테고리 탭(전체·MCP·스킬·에이전트·워크플로·스터디)으로
+ *    브라우징한다 — 활성 카테고리의 그리드만 그린다.
+ *  - ★community tier 는 보이고, 설치 계약이 있으면 설치 버튼도 달린다 — 단
+ *    반드시 미검수 경고 모달(출처 신뢰 체크박스)을 지나야 하고, 동의 플래그
+ *    (`acknowledgeUnreviewed`)의 **강제는 메인 프로세스 installer 가 한다**.
+ *    이 UI 는 동의를 수집할 뿐 보안 경계가 아니다(§6.3) — 목록 표시 정책과
+ *    설치 게이트는 계속 분리돼 있고, 표시를 열어도 차단은 main 이 유지한다.
  *  - install 계약이 없는 항목(v1 mcp-server 등)은 "자동 설치 불가"로 정직하게
- *    표시하고 홈페이지 링크만 준다 — 가짜 설치 버튼 금지.
+ *    표시하고 홈페이지 링크만 준다 — 가짜 설치 버튼 금지. workflow/knowledge
+ *    타입은 계약 자체가 없는 **참조 전용**이라 항상 링크만 준다.
  *  - 설치 전에는 항상 권한 공시 모달을 지난다. 고위험 스코프는 강조.
  *  - 레지스트리 실패는 이 섹션 안에서만 표현된다(스토어 전체는 항상 열림).
  */
@@ -34,14 +36,61 @@ const HIGH_RISK_RE = /^(shell:exec|secrets:read|repository:write)/;
 /** 공개 레지스트리 저장소 — 전체 카탈로그의 정본. */
 const REGISTRY_CATALOG_URL = "https://github.com/marblo-app/marblo";
 
+// ── 카테고리 모델 ──────────────────────────────────────────────────
+
 /**
- * 타입 필터를 지난 항목을 "화면에 그릴 목록" 과 "그 중 참조 전용(community)
- * 개수" 로 가른다. 둘을 **같은 모집단**에서 뽑는 게 요점 — 카운트가 화면의
- * 필터와 어긋나면 "커뮤니티 N개" 가 거짓말이 된다.
+ * 스토어 상단 탭의 카테고리. 레지스트리 타입과 1:1 이 아니라 **표시명 공간**이다
+ * (knowledge→스터디 처럼 제품 라벨이 타입명과 다르다). "other" 는 우리 빌드가
+ * 모르는 진짜 미지 타입만 담는다 — 알려진 타입을 여기로 흘리면 새 카테고리를
+ * 추가할 때 조용히 '기타'로 새는 회귀를 못 잡는다.
+ */
+export type StoreCategoryKey =
+  | "mcp"
+  | "skills"
+  | "agents"
+  | "workflows"
+  | "study"
+  | "other";
+
+const CATEGORY_FOR_TYPE: Record<string, StoreCategoryKey> = {
+  "mcp-server": "mcp",
+  skill: "skills",
+  agent: "agents",
+  workflow: "workflows",
+  knowledge: "study",
+};
+
+export function categorizeRegistryType(type: string): StoreCategoryKey {
+  return CATEGORY_FOR_TYPE[type] ?? "other";
+}
+
+/** 탭 표시 순서. "other" 는 해당 항목이 실제로 있을 때만 탭이 생긴다. */
+const CATEGORY_ORDER: StoreCategoryKey[] = [
+  "mcp",
+  "skills",
+  "agents",
+  "workflows",
+  "study",
+  "other",
+];
+
+/**
+ * 설치 계약이 존재할 수 없는 참조 전용 타입 — 카드에 설치 버튼 대신 링크만
+ * 붙는다(가짜 설치 버튼 금지). 판정은 타입 기준이다: install 유무로만 가르면
+ * 미래에 이 타입들이 계약을 싣기 시작했을 때 검토 없이 설치 버튼이 생긴다.
+ */
+export function isReferenceOnlyRegistryType(type: string): boolean {
+  return type === "workflow" || type === "knowledge";
+}
+
+/**
+ * 타입 필터를 지난 항목을 "화면에 그릴 목록" 과 "그 중 community 개수" 로
+ * 가른다. 둘을 **같은 모집단**에서 뽑는 게 요점 — 카운트가 화면의 필터와
+ * 어긋나면 "커뮤니티 N개" 가 거짓말이 된다.
  *
- * ★ community 는 이제 `visible` 에 **들어간다**. 설치 차단은 여기가 아니라
- * 카드의 `installable` 판정이 한다 — 목록 정책과 설치 게이트를 같은 곳에서
- * 결정하면, 목록을 여는 변경이 조용히 설치까지 열어버린다.
+ * ★ community 는 `visible` 에 **들어간다**. 설치 차단은 여기가 아니라 카드의
+ * 설치 판정 + 메인 프로세스 installer 가 한다 — 목록 정책과 설치 게이트를 같은
+ * 곳에서 결정하면, 목록을 여는 변경이 조용히 설치까지 열어버린다.
  */
 const TIER_RANK: Record<RegistryStoreItem["tier"], number> = {
   official: 0,
@@ -68,21 +117,37 @@ export function splitRegistryByTier(
 }
 
 /**
- * ★설치 게이트(§6.3). 인앱 원클릭 설치는 세 조건을 **모두** 만족할 때만 열린다:
- *  1. tier 가 official/verified — community 는 미검수 페이로드라 표시만 한다,
+ * ★(a) 원클릭 설치 판정(§6.3). 동의 절차 없이 설치 버튼이 바로 설치로 이어지는
+ * 것은 세 조건을 **모두** 만족할 때만이다:
+ *  1. tier 가 official/verified — 리뷰를 통과한 페이로드,
  *  2. 설치 계약(`install`)이 실제로 있다 — 없으면 "자동 설치 불가"로 정직하게,
  *  3. 회수(revoked)되지 않았다.
  *
- * 목록 필터(`splitRegistryByTier`)와 **일부러 분리**돼 있다. 예전엔 community 를
- * 목록에서 빼는 것이 사실상의 2차 방어선처럼 보였지만, 그건 착시였다 — 표시
- * 정책이 바뀌면 같이 사라지는 방어선은 방어선이 아니다. 실제 차단은 항상 이
- * 함수 하나였고, 스토어가 community 를 보여주게 된 지금도 그대로다.
+ * 목록 필터(`splitRegistryByTier`)와 **일부러 분리**돼 있다 — 표시 정책이
+ * 바뀌면 같이 사라지는 방어선은 방어선이 아니다. 그리고 이 함수 자체도 UI
+ * 편의일 뿐, 실제 강제는 메인 프로세스 installer 가 같은 규칙으로 다시 한다.
  */
 export function isRegistryItemInstallable(
   item: Pick<RegistryStoreItem, "tier" | "install" | "status">,
 ): boolean {
   return (
-    item.tier !== "community" && !!item.install && item.status !== "revoked"
+    (item.tier === "official" || item.tier === "verified") &&
+    !!item.install &&
+    item.status !== "revoked"
+  );
+}
+
+/**
+ * ★(b) community '동의 필요' 판정. 설치 계약이 있는 미검수 항목 — 설치 버튼은
+ * 달리지만 반드시 경고 모달(출처 신뢰 체크)을 지나 `acknowledgeUnreviewed`
+ * 플래그와 함께 요청된다. (a)와 상호 배타적이다: 같은 항목이 원클릭이면서
+ * 동의 필요일 수 없다. revoked 는 동의로도 열리지 않는다(installer 도 거부).
+ */
+export function isRegistryItemConsentInstallable(
+  item: Pick<RegistryStoreItem, "tier" | "install" | "status">,
+): boolean {
+  return (
+    item.tier === "community" && !!item.install && item.status !== "revoked"
   );
 }
 
@@ -125,6 +190,72 @@ function tierLabel(tier: RegistryStoreItem["tier"]): string {
   );
 }
 
+function categoryLabel(key: StoreCategoryKey | "all"): string {
+  const i18nKey =
+    key === "all"
+      ? "harness.store.registry.category.all"
+      : key === "mcp"
+        ? "harness.store.registry.mcp"
+        : key === "skills"
+          ? "harness.store.registry.skills"
+          : key === "agents"
+            ? "harness.store.registry.agents"
+            : key === "workflows"
+              ? "harness.store.registry.workflows"
+              : key === "study"
+                ? "harness.store.registry.study"
+                : "harness.store.registry.other";
+  return translate(i18nKey as Parameters<typeof translate>[0]);
+}
+
+/** 경고 모달에 보여줄 출처 문자열 — 없으면 레지스트리 내 경로가 정직한 폴백. */
+function communitySourceLabel(item: RegistryStoreItem): string {
+  if (item.sourceRepository) {
+    return item.sourceRef
+      ? `${item.sourceRepository}@${item.sourceRef}`
+      : item.sourceRepository;
+  }
+  return `${REGISTRY_CATALOG_URL.replace("https://github.com/", "")}/${
+    item.path
+  }`;
+}
+
+function PermissionBadges({ item }: { item: RegistryStoreItem }) {
+  const { t } = useTranslation();
+  if (!item.permissionsDeclared) {
+    return (
+      <span className="rounded bg-[#f9e2af]/15 px-1.5 py-0.5 text-[10px] text-[#f9e2af]">
+        {t("harness.store.registry.permissionsUndeclared")}
+      </span>
+    );
+  }
+  if (item.permissions.length === 0) {
+    return (
+      <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8]">
+        {t("harness.store.registry.permissionsNone")}
+      </span>
+    );
+  }
+  return (
+    <>
+      {item.permissions.map((perm) => (
+        <span
+          key={perm}
+          className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
+            HIGH_RISK_RE.test(perm)
+              ? "bg-[#f38ba8]/15 text-[#f38ba8]"
+              : "bg-[#313244] text-[#a6adc8]"
+          }`}
+        >
+          {HIGH_RISK_RE.test(perm)
+            ? `⚠ ${perm} (${t("harness.store.registry.highRisk")})`
+            : perm}
+        </span>
+      ))}
+    </>
+  );
+}
+
 export function RegistryStoreSection({
   typeFilter,
 }: RegistryStoreSectionProps) {
@@ -134,6 +265,7 @@ export function RegistryStoreSection({
   const [available, setAvailable] = useState(true);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [category, setCategory] = useState<StoreCategoryKey | "all">("all");
   const [notice, setNotice] = useState<{
     kind: "info" | "error";
     text: string;
@@ -141,6 +273,10 @@ export function RegistryStoreSection({
   const [disclosureFor, setDisclosureFor] = useState<RegistryStoreItem | null>(
     null,
   );
+  // community 미검수 경고 모달 — 권한 공시 모달과 별개 상태다. 체크박스 동의는
+  // 모달을 열 때마다 리셋된다(한 번의 동의가 다른 항목으로 이월되지 않게).
+  const [consentFor, setConsentFor] = useState<RegistryStoreItem | null>(null);
+  const [consentChecked, setConsentChecked] = useState(false);
 
   const load = useCallback(async (refresh?: boolean) => {
     setLoading(true);
@@ -167,34 +303,46 @@ export function RegistryStoreSection({
     () => splitRegistryByTier(items, typeFilter),
     [items, typeFilter],
   );
-  const groups = useMemo(() => {
-    const skills = visible.filter((i) => i.type === "skill");
-    const mcps = visible.filter((i) => i.type === "mcp-server");
-    // 레지스트리는 우리 빌드보다 먼저 새 타입(agent/workflow/…)을 낼 수 있다.
-    // 알려진 두 그룹만 그리면 그런 항목은 조용히 사라진다 — 카탈로그 화면에서
-    // "없는 것"과 "우리가 못 그리는 것"은 다르다. 남는 건 여기로 모은다.
-    const known = new Set(["skill", "mcp-server"]);
-    const others = visible.filter((i) => !known.has(i.type));
-    return [
-      {
-        key: "skills",
-        label: t("harness.store.registry.skills"),
-        rows: skills,
-      },
-      { key: "mcp", label: t("harness.store.registry.mcp"), rows: mcps },
-      { key: "other", label: t("harness.store.registry.other"), rows: others },
-    ].filter((g) => g.rows.length > 0);
-  }, [visible, t]);
+  const countByCategory = useMemo(() => {
+    const counts = new Map<StoreCategoryKey, number>();
+    for (const item of visible) {
+      const key = categorizeRegistryType(item.type);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [visible]);
+  // "other" 탭은 진짜 미지 타입이 실제로 왔을 때만 나타난다. 나머지 카테고리는
+  // 비어 있어도 탭을 유지한다 — 탭이 사라졌다 생겼다 하면 카탈로그 구조를
+  // 학습할 수 없다.
+  const categoryTabs = useMemo(
+    () =>
+      (["all", ...CATEGORY_ORDER] as Array<StoreCategoryKey | "all">).filter(
+        (key) => key !== "other" || (countByCategory.get("other") ?? 0) > 0,
+      ),
+    [countByCategory],
+  );
+  const shown = useMemo(
+    () =>
+      category === "all"
+        ? visible
+        : visible.filter((i) => categorizeRegistryType(i.type) === category),
+    [visible, category],
+  );
 
   const runInstall = useCallback(
-    async (item: RegistryStoreItem) => {
+    async (item: RegistryStoreItem, acknowledgeUnreviewed: boolean) => {
       setDisclosureFor(null);
+      setConsentFor(null);
+      setConsentChecked(false);
       setNotice(null);
       setBusy(item.id);
       try {
+        // 이 플래그는 요청에 실릴 뿐이다 — community 를 실제로 거부/허용하는
+        // 것은 메인 프로세스 registry-installer 의 tier 게이트다.
         const res = await window.electronAPI.registry.install({
           id: item.id,
           type: item.type,
+          ...(acknowledgeUnreviewed ? { acknowledgeUnreviewed: true } : {}),
         });
         if (res.success) {
           setNotice({
@@ -283,6 +431,39 @@ export function RegistryStoreSection({
         {t("harness.store.registry.subtitle")}
       </p>
 
+      {/* 카테고리 탭바 — 활성 카테고리의 그리드만 그린다. typeFilter 를 받는
+          레거시 임베드(현재 호출자 없음)에서는 탭이 의미가 없어 숨긴다. */}
+      {!typeFilter && (
+        <div className="mb-3 flex flex-wrap items-center gap-1">
+          {categoryTabs.map((key) => {
+            const count =
+              key === "all" ? visible.length : (countByCategory.get(key) ?? 0);
+            const active = category === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setCategory(key)}
+                className={`rounded px-2.5 py-1 text-xs transition-colors ${
+                  active
+                    ? "bg-[#89b4fa]/20 font-semibold text-[#89b4fa]"
+                    : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]"
+                }`}
+              >
+                {categoryLabel(key)}
+                <span
+                  className={`ml-1 text-[10px] ${
+                    active ? "text-[#89b4fa]/80" : "text-[#6c7086]"
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {notice && (
         <div
           className={`mb-3 rounded border px-3 py-2 text-xs ${
@@ -301,168 +482,152 @@ export function RegistryStoreSection({
         </p>
       )}
       {/* 빈 상태 = 레지스트리에서 이 화면 조건에 맞는 항목이 하나도 안 왔다는
-          뜻이다(이제 tier 로 감추는 항목이 없으므로 정말로 비어 있는 것). */}
-      {available && !loading && visible.length === 0 && (
+          뜻이다(tier 로 감추는 항목이 없으므로, 활성 카테고리가 정말 빈 것). */}
+      {available && !loading && shown.length === 0 && (
         <p className="text-xs text-[#6c7086]">
           {t("harness.store.registry.emptyCatalog")}
         </p>
       )}
 
-      {groups.map((group) => (
-        <div key={group.key} className="mb-3 last:mb-0">
-          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#6c7086]">
-            {group.label}
-            <span className="ml-1.5 rounded bg-[#585b70]/30 px-1.5 py-0.5 text-[10px] font-medium text-[#a6adc8]">
-              {group.rows.length}
-            </span>
-          </h4>
-          <div className="grid gap-3 md:grid-cols-2">
-            {group.rows.map((item) => {
-              const isBusy = busy === item.id;
-              const display = localizedItemText(item, locale);
-              const installed =
-                item.installState === "installed" ||
-                item.installState === "outdated";
-              const communityListOnly = item.tier === "community";
-              const installable = isRegistryItemInstallable(item);
-              return (
-                <div
-                  key={`${item.type}:${item.id}`}
-                  className="rounded-md border border-[#313244] bg-[#181825] p-3 transition-colors hover:border-[#45475a]"
-                >
-                  <div className="mb-1 flex items-start justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <span className="truncate text-sm font-semibold text-[#cdd6f4]">
-                        {display.name}
-                      </span>
-                      <span className="flex-shrink-0 text-[10px] text-[#6c7086]">
-                        v{item.version}
-                      </span>
-                    </div>
-                    <div className="flex flex-shrink-0 items-center gap-1">
-                      <span
-                        className={`rounded px-1.5 py-0.5 text-[10px] ${tierBadgeClass(
-                          item.tier,
-                        )}`}
-                      >
-                        {tierLabel(item.tier)}
-                      </span>
-                      {item.status === "revoked" && (
-                        <span className="rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] text-[#f38ba8]">
-                          {t("harness.store.registry.revoked")}
-                        </span>
-                      )}
-                      {item.status === "deprecated" && (
-                        <span className="rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] text-[#f38ba8]">
-                          {t("harness.store.deprecated")}
-                        </span>
-                      )}
-                      {installed && (
-                        <span className="rounded bg-[#a6e3a1]/20 px-1.5 py-0.5 text-[10px] text-[#a6e3a1]">
-                          {item.installState === "outdated"
-                            ? t("harness.store.registry.outdated")
-                            : t("harness.store.registry.installed")}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <p className="mb-2 text-xs text-[#bac2de]">
-                    {display.description}
-                  </p>
-
-                  {/* 권한 공시 — 스코프 문자열 verbatim, 고위험은 강조(§4.6) */}
-                  <div className="mb-2 flex flex-wrap items-center gap-1">
-                    {!item.permissionsDeclared ? (
-                      <span className="rounded bg-[#f9e2af]/15 px-1.5 py-0.5 text-[10px] text-[#f9e2af]">
-                        {t("harness.store.registry.permissionsUndeclared")}
-                      </span>
-                    ) : item.permissions.length === 0 ? (
-                      <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8]">
-                        {t("harness.store.registry.permissionsNone")}
-                      </span>
-                    ) : (
-                      item.permissions.map((perm) => (
-                        <span
-                          key={perm}
-                          className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
-                            HIGH_RISK_RE.test(perm)
-                              ? "bg-[#f38ba8]/15 text-[#f38ba8]"
-                              : "bg-[#313244] text-[#a6adc8]"
-                          }`}
-                        >
-                          {perm}
-                        </span>
-                      ))
-                    )}
-                  </div>
-
-                  {item.sourceRepository && (
-                    <p className="mb-2 truncate text-[10px] text-[#6c7086]">
-                      {t("harness.store.registry.source")}:{" "}
-                      {item.sourceRepository}
-                      {item.sourceRef ? ` @ ${item.sourceRef}` : ""}
-                    </p>
-                  )}
-
-                  <div className="flex items-center gap-2">
-                    {communityListOnly ? (
-                      <span className="text-[10px] text-[#f9e2af]">
-                        {t("harness.store.registry.communityListOnly")}
-                      </span>
-                    ) : !installed && installable ? (
-                      <button
-                        onClick={() => setDisclosureFor(item)}
-                        disabled={isBusy}
-                        className="rounded bg-[#89b4fa]/20 px-2.5 py-1 text-xs text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/30 disabled:opacity-50"
-                      >
-                        {isBusy
-                          ? t("harness.store.registry.installing")
-                          : t("harness.store.registry.install")}
-                      </button>
-                    ) : !installed ? (
-                      <span
-                        className="text-[10px] text-[#6c7086]"
-                        title={item.notInstallableReason}
-                      >
-                        {t("harness.store.registry.notInstallable")}
-                        {item.notInstallableReason
-                          ? ` — ${item.notInstallableReason}`
-                          : ""}
-                      </span>
-                    ) : null}
-                    {installed && (
-                      <button
-                        onClick={() => void runUninstall(item)}
-                        disabled={isBusy}
-                        className="rounded bg-[#f38ba8]/20 px-2.5 py-1 text-xs text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/30 disabled:opacity-50"
-                      >
-                        {isBusy
-                          ? t("harness.store.processing")
-                          : t("harness.store.registry.uninstall")}
-                      </button>
-                    )}
-                    {item.homepage && (
-                      <a
-                        href={item.homepage}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="ml-auto text-xs text-[#6c7086] hover:text-[#89b4fa]"
-                      >
-                        {t("harness.store.docs")}
-                      </a>
-                    )}
-                  </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        {shown.map((item) => {
+          const isBusy = busy === item.id;
+          const display = localizedItemText(item, locale);
+          const installed =
+            item.installState === "installed" ||
+            item.installState === "outdated";
+          const referenceOnly = isReferenceOnlyRegistryType(item.type);
+          const oneClick = isRegistryItemInstallable(item);
+          const needsConsent =
+            !referenceOnly && isRegistryItemConsentInstallable(item);
+          return (
+            <div
+              key={`${item.type}:${item.id}`}
+              className="rounded-md border border-[#313244] bg-[#181825] p-3 transition-colors hover:border-[#45475a]"
+            >
+              <div className="mb-1 flex items-start justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate text-sm font-semibold text-[#cdd6f4]">
+                    {display.name}
+                  </span>
+                  <span className="flex-shrink-0 text-[10px] text-[#6c7086]">
+                    v{item.version}
+                  </span>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      ))}
+                <div className="flex flex-shrink-0 items-center gap-1">
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[10px] ${tierBadgeClass(
+                      item.tier,
+                    )}`}
+                  >
+                    {tierLabel(item.tier)}
+                  </span>
+                  {item.status === "revoked" && (
+                    <span className="rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] text-[#f38ba8]">
+                      {t("harness.store.registry.revoked")}
+                    </span>
+                  )}
+                  {item.status === "deprecated" && (
+                    <span className="rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] text-[#f38ba8]">
+                      {t("harness.store.deprecated")}
+                    </span>
+                  )}
+                  {installed && (
+                    <span className="rounded bg-[#a6e3a1]/20 px-1.5 py-0.5 text-[10px] text-[#a6e3a1]">
+                      {item.installState === "outdated"
+                        ? t("harness.store.registry.outdated")
+                        : t("harness.store.registry.installed")}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <p className="mb-2 text-xs text-[#bac2de]">
+                {display.description}
+              </p>
+
+              {/* 권한 공시 — 스코프 문자열 verbatim, 고위험은 강조(§4.6) */}
+              <div className="mb-2 flex flex-wrap items-center gap-1">
+                <PermissionBadges item={item} />
+              </div>
+
+              {item.sourceRepository && (
+                <p className="mb-2 truncate text-[10px] text-[#6c7086]">
+                  {t("harness.store.registry.source")}: {item.sourceRepository}
+                  {item.sourceRef ? ` @ ${item.sourceRef}` : ""}
+                </p>
+              )}
+
+              <div className="flex items-center gap-2">
+                {referenceOnly ? (
+                  <span className="text-[10px] text-[#6c7086]">
+                    {t("harness.store.registry.referenceOnly")}
+                  </span>
+                ) : !installed && oneClick ? (
+                  <button
+                    onClick={() => setDisclosureFor(item)}
+                    disabled={isBusy}
+                    className="rounded bg-[#89b4fa]/20 px-2.5 py-1 text-xs text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/30 disabled:opacity-50"
+                  >
+                    {isBusy
+                      ? t("harness.store.registry.installing")
+                      : t("harness.store.registry.install")}
+                  </button>
+                ) : !installed && needsConsent ? (
+                  <button
+                    onClick={() => {
+                      setConsentChecked(false);
+                      setConsentFor(item);
+                    }}
+                    disabled={isBusy}
+                    className="rounded bg-[#f9e2af]/15 px-2.5 py-1 text-xs text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/25 disabled:opacity-50"
+                  >
+                    {isBusy
+                      ? t("harness.store.registry.installing")
+                      : `⚠ ${t("harness.store.registry.install")}`}
+                  </button>
+                ) : !installed ? (
+                  <span
+                    className="text-[10px] text-[#6c7086]"
+                    title={item.notInstallableReason}
+                  >
+                    {t("harness.store.registry.notInstallable")}
+                    {item.notInstallableReason
+                      ? ` — ${item.notInstallableReason}`
+                      : ""}
+                  </span>
+                ) : null}
+                {installed && (
+                  <button
+                    onClick={() => void runUninstall(item)}
+                    disabled={isBusy}
+                    className="rounded bg-[#f38ba8]/20 px-2.5 py-1 text-xs text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/30 disabled:opacity-50"
+                  >
+                    {isBusy
+                      ? t("harness.store.processing")
+                      : t("harness.store.registry.uninstall")}
+                  </button>
+                )}
+                {item.homepage && (
+                  <a
+                    href={item.homepage}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-auto text-xs text-[#6c7086] hover:text-[#89b4fa]"
+                  >
+                    {t("harness.store.docs")}
+                  </a>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       {/* 전체 카탈로그의 정본은 GitHub 이다. 목록에 섞여 있는 community 항목이
-          몇 개인지도 여기서 한 번 더 공시한다 — 카드마다 붙는 '참조 전용' 배지를
-          훑지 않아도 "이 중 N개는 설치가 안 된다"가 한 줄로 읽히게. 레지스트리에
-          닿지 못한 상태(!available)에선 개수가 0 이라 링크만 남는다. */}
+          몇 개인지도 여기서 한 번 더 공시한다 — 카드마다 붙는 배지를 훑지
+          않아도 "이 중 N개는 미검수라 동의를 거쳐야 설치된다"가 한 줄로
+          읽히게. 레지스트리에 닿지 못한 상태(!available)에선 개수가 0 이라
+          링크만 남는다. */}
       {available && !loading && (
         <p className="mt-3 text-[11px] text-[#6c7086]">
           {communityCount > 0 && (
@@ -484,7 +649,7 @@ export function RegistryStoreSection({
         </p>
       )}
 
-      {/* 설치 전 권한 공시 모달 (§4.6) */}
+      {/* 설치 전 권한 공시 모달 (§4.6) — official/verified 원클릭 경로 */}
       {disclosureFor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="w-full max-w-md rounded-lg border border-[#313244] bg-[#1e1e2e] p-4 shadow-2xl">
@@ -496,30 +661,7 @@ export function RegistryStoreSection({
               {t("harness.store.registry.disclosureNote")}
             </p>
             <div className="mb-4 flex flex-wrap gap-1">
-              {!disclosureFor.permissionsDeclared ? (
-                <span className="rounded bg-[#f9e2af]/15 px-1.5 py-0.5 text-[10px] text-[#f9e2af]">
-                  {t("harness.store.registry.permissionsUndeclared")}
-                </span>
-              ) : disclosureFor.permissions.length === 0 ? (
-                <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8]">
-                  {t("harness.store.registry.permissionsNone")}
-                </span>
-              ) : (
-                disclosureFor.permissions.map((perm) => (
-                  <span
-                    key={perm}
-                    className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
-                      HIGH_RISK_RE.test(perm)
-                        ? "bg-[#f38ba8]/15 text-[#f38ba8]"
-                        : "bg-[#313244] text-[#a6adc8]"
-                    }`}
-                  >
-                    {HIGH_RISK_RE.test(perm)
-                      ? `⚠ ${perm} (${t("harness.store.registry.highRisk")})`
-                      : perm}
-                  </span>
-                ))
-              )}
+              <PermissionBadges item={disclosureFor} />
             </div>
             <div className="flex justify-end gap-2">
               <button
@@ -529,10 +671,64 @@ export function RegistryStoreSection({
                 {t("harness.store.registry.disclosureCancel")}
               </button>
               <button
-                onClick={() => void runInstall(disclosureFor)}
+                onClick={() => void runInstall(disclosureFor, false)}
                 className="rounded bg-[#89b4fa]/20 px-2.5 py-1 text-xs text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/30"
               >
                 {t("harness.store.registry.disclosureConfirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ★community 미검수 경고 모달 — 출처 신뢰 체크박스를 켜야만 설치 버튼이
+          활성화되고, 그때 acknowledgeUnreviewed=true 로 요청한다. 이 모달은
+          동의 수집 UI 일 뿐이다: 플래그 없는 community 설치는 메인 프로세스
+          installer 가 거부한다. */}
+      {consentFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-md rounded-lg border border-[#f9e2af]/40 bg-[#1e1e2e] p-4 shadow-2xl">
+            <h4 className="mb-1 text-sm font-semibold text-[#f9e2af]">
+              ⚠ {t("harness.store.registry.communityWarnTitle")} —{" "}
+              {localizedItemText(consentFor, locale).name}
+            </h4>
+            <p className="mb-3 text-xs text-[#bac2de]">
+              {t("harness.store.registry.communityWarnBody", {
+                source: communitySourceLabel(consentFor),
+              })}
+            </p>
+            <div className="mb-3 flex flex-wrap gap-1">
+              <PermissionBadges item={consentFor} />
+            </div>
+            <label className="mb-4 flex cursor-pointer items-start gap-2 text-xs text-[#cdd6f4]">
+              <input
+                type="checkbox"
+                checked={consentChecked}
+                onChange={(e) => setConsentChecked(e.target.checked)}
+                className="mt-0.5 accent-[#f9e2af]"
+              />
+              <span>
+                {t("harness.store.registry.communityWarnConsent", {
+                  source: communitySourceLabel(consentFor),
+                })}
+              </span>
+            </label>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setConsentFor(null);
+                  setConsentChecked(false);
+                }}
+                className="rounded bg-[#313244] px-2.5 py-1 text-xs text-[#a6adc8] transition-colors hover:bg-[#45475a]"
+              >
+                {t("harness.store.registry.disclosureCancel")}
+              </button>
+              <button
+                onClick={() => void runInstall(consentFor, true)}
+                disabled={!consentChecked}
+                className="rounded bg-[#f9e2af]/20 px-2.5 py-1 text-xs text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/30 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {t("harness.store.registry.communityWarnConfirm")}
               </button>
             </div>
           </div>

@@ -729,6 +729,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       id: string;
       type: string;
       overwriteLocalChanges?: boolean;
+      /** community(미검수) 설치 동의 — 강제는 메인 프로세스 installer 가 한다. */
+      acknowledgeUnreviewed?: boolean;
     }) =>
       ipcRenderer.invoke("registry:install", payload) as Promise<{
         success: boolean;

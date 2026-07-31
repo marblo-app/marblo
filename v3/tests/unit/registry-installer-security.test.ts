@@ -356,11 +356,58 @@ describe("env exfiltration defenses", () => {
 // ── 게이트: tier / status ──────────────────────────────────────────
 
 describe("tier and status gates", () => {
-  it("refuses community-tier installs (list/disclosure only)", async () => {
+  // ★렌더러의 경고 모달은 UI 일 뿐이다 — community 차단의 강제는 여기(메인
+  // 프로세스 installer)다. 이 두 케이스가 빨개지면 IPC 를 직접 때리는 호출이
+  // 동의 없이 미검수 페이로드를 설치할 수 있게 된 것이다.
+  it("refuses community-tier installs without explicit consent", async () => {
     const { deps } = makeEnv();
     await expect(
       installRegistryItem(skillItem({ tier: "community" }), deps),
-    ).rejects.toThrow(/community/);
+    ).rejects.toThrow(/community.*acknowledgeUnreviewed/);
+    // truthy 로는 부족하다 — 명시적 true 만 동의다(직렬화 사고 방어).
+    await expect(
+      installRegistryItem(skillItem({ tier: "community" }), deps, {
+        acknowledgeUnreviewed: "yes" as unknown as boolean,
+      }),
+    ).rejects.toThrow(/acknowledgeUnreviewed/);
+  });
+
+  it("installs community-tier items when consent is explicitly given", async () => {
+    const { deps, root } = makeEnv();
+    await installRegistryItem(skillItem({ tier: "community" }), deps, {
+      acknowledgeUnreviewed: true,
+    });
+    expect(
+      fs.readFileSync(path.join(root, "test-skill", "SKILL.md"), "utf-8"),
+    ).toBe("# skill");
+    expect(readLedger(deps.ledgerPath).items["test-skill"]).toBeDefined();
+  });
+
+  it("consent does not bypass the revoked gate", async () => {
+    const { deps } = makeEnv();
+    await expect(
+      installRegistryItem(
+        skillItem({ tier: "community", status: "revoked" }),
+        deps,
+        { acknowledgeUnreviewed: true },
+      ),
+    ).rejects.toThrow(/회수/);
+  });
+
+  it("consent does not admit unknown tiers", async () => {
+    const { deps } = makeEnv();
+    await expect(
+      installRegistryItem(skillItem({ tier: "sketchy" as "community" }), deps, {
+        acknowledgeUnreviewed: true,
+      }),
+    ).rejects.toThrow(/알 수 없는 tier/);
+  });
+
+  it("official/verified one-click stays consent-free", async () => {
+    const { deps } = makeEnv();
+    await expect(
+      installRegistryItem(skillItem({ tier: "official" }), deps),
+    ).resolves.toBeUndefined();
   });
 
   it("refuses revoked items", async () => {
