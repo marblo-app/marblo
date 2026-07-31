@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation, t as translate, type Locale } from "../../lib/i18n";
+import { LocalModelsSection } from "../store/LocalModelsSection";
 
 /**
  * **공개 레지스트리 스토어** 섹션 (marblo-app/marblo). 최상위 스토어 탭
@@ -73,6 +74,14 @@ const CATEGORY_ORDER: StoreCategoryKey[] = [
   "study",
   "other",
 ];
+
+/**
+ * 스토어 상단 탭의 전체 키 공간. `"localModels"` 는 레지스트리 파생 카테고리가
+ * **아니라** first-party 탭이다(§4.4 신뢰경계) — 그래서 `StoreCategoryKey` 와
+ * `categorizeRegistryType` 에는 절대 넣지 않는다. 레지스트리 타입이 이 탭으로
+ * 매핑되는 순간 untrusted 항목이 first-party 원클릭 경로에 섞인다.
+ */
+export type StoreTabKey = StoreCategoryKey | "all" | "localModels";
 
 /**
  * 설치 계약이 존재할 수 없는 참조 전용 타입 — 카드에 설치 버튼 대신 링크만
@@ -190,7 +199,7 @@ function tierLabel(tier: RegistryStoreItem["tier"]): string {
   );
 }
 
-function categoryLabel(key: StoreCategoryKey | "all"): string {
+function categoryLabel(key: StoreTabKey): string {
   const i18nKey =
     key === "all"
       ? "harness.store.registry.category.all"
@@ -204,7 +213,9 @@ function categoryLabel(key: StoreCategoryKey | "all"): string {
               ? "harness.store.registry.workflows"
               : key === "study"
                 ? "harness.store.registry.study"
-                : "harness.store.registry.other";
+                : key === "localModels"
+                  ? "harness.store.local.tab"
+                  : "harness.store.registry.other";
   return translate(i18nKey as Parameters<typeof translate>[0]);
 }
 
@@ -265,7 +276,7 @@ export function RegistryStoreSection({
   const [available, setAvailable] = useState(true);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
-  const [category, setCategory] = useState<StoreCategoryKey | "all">("all");
+  const [category, setCategory] = useState<StoreTabKey>("all");
   const [notice, setNotice] = useState<{
     kind: "info" | "error";
     text: string;
@@ -313,19 +324,26 @@ export function RegistryStoreSection({
   }, [visible]);
   // "other" 탭은 진짜 미지 타입이 실제로 왔을 때만 나타난다. 나머지 카테고리는
   // 비어 있어도 탭을 유지한다 — 탭이 사라졌다 생겼다 하면 카탈로그 구조를
-  // 학습할 수 없다.
-  const categoryTabs = useMemo(
-    () =>
-      (["all", ...CATEGORY_ORDER] as Array<StoreCategoryKey | "all">).filter(
-        (key) => key !== "other" || (countByCategory.get("other") ?? 0) > 0,
-      ),
-    [countByCategory],
-  );
+  // 학습할 수 없다. '로컬 모델' 은 레지스트리 모집단과 무관한 first-party 탭이라
+  // 항상 있고, '기타' 바로 앞에 선다(레지스트리 실패에도 이 탭은 살아 있다).
+  const categoryTabs = useMemo(() => {
+    const tabs: StoreTabKey[] = (
+      ["all", ...CATEGORY_ORDER] as StoreTabKey[]
+    ).filter(
+      (key) => key !== "other" || (countByCategory.get("other") ?? 0) > 0,
+    );
+    const otherIdx = tabs.indexOf("other");
+    if (otherIdx >= 0) tabs.splice(otherIdx, 0, "localModels");
+    else tabs.push("localModels");
+    return tabs;
+  }, [countByCategory]);
   const shown = useMemo(
     () =>
       category === "all"
         ? visible
-        : visible.filter((i) => categorizeRegistryType(i.type) === category),
+        : category === "localModels"
+          ? [] // 로컬 모델 탭은 레지스트리 그리드를 그리지 않는다(§4.4 분리)
+          : visible.filter((i) => categorizeRegistryType(i.type) === category),
     [visible, category],
   );
 
@@ -406,29 +424,44 @@ export function RegistryStoreSection({
     [load, locale],
   );
 
+  // '로컬 모델' 탭 활성 시 레지스트리 전용 표면(새로고침·stale·그리드·푸터)을
+  // 전부 숨긴다 — 두 모집단은 데이터 소스가 다르고, 여기 컨트롤이 로컬 탭에
+  // 보이면 레지스트리 상태가 로컬 카탈로그의 상태인 것처럼 읽힌다.
+  const isLocalTab = category === "localModels";
+
   return (
     <section className="border-b border-[#313244] px-4 py-3">
       <div className="mb-1 flex flex-wrap items-center gap-2">
-        <span className="text-base">🛍️</span>
+        <span className="text-base">{isLocalTab ? "🖥️" : "🛍️"}</span>
         <h3 className="text-sm font-semibold text-[#cdd6f4]">
-          {t("harness.store.registry.title")}
+          {t(
+            isLocalTab
+              ? "harness.store.local.title"
+              : "harness.store.registry.title",
+          )}
         </h3>
-        <button
-          type="button"
-          onClick={() => void load(true)}
-          disabled={loading}
-          className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8] transition-colors hover:bg-[#45475a] disabled:opacity-50"
-        >
-          {t("harness.store.registry.refresh")}
-        </button>
-        {stale && (
+        {!isLocalTab && (
+          <button
+            type="button"
+            onClick={() => void load(true)}
+            disabled={loading}
+            className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8] transition-colors hover:bg-[#45475a] disabled:opacity-50"
+          >
+            {t("harness.store.registry.refresh")}
+          </button>
+        )}
+        {!isLocalTab && stale && (
           <span className="rounded bg-[#f9e2af]/20 px-1.5 py-0.5 text-[10px] text-[#f9e2af]">
             {t("harness.store.registry.stale")}
           </span>
         )}
       </div>
       <p className="mb-3 text-xs text-[#7f849c]">
-        {t("harness.store.registry.subtitle")}
+        {t(
+          isLocalTab
+            ? "harness.store.local.subtitle"
+            : "harness.store.registry.subtitle",
+        )}
       </p>
 
       {/* 카테고리 탭바 — 활성 카테고리의 그리드만 그린다. typeFilter 를 받는
@@ -436,8 +469,14 @@ export function RegistryStoreSection({
       {!typeFilter && (
         <div className="mb-3 flex flex-wrap items-center gap-1">
           {categoryTabs.map((key) => {
+            // '로컬 모델' 탭엔 개수 배지를 달지 않는다 — 이 숫자들은 레지스트리
+            // 모집단 카운트라, first-party 카탈로그 개수를 섞으면 거짓말이 된다.
             const count =
-              key === "all" ? visible.length : (countByCategory.get(key) ?? 0);
+              key === "all"
+                ? visible.length
+                : key === "localModels"
+                  ? null
+                  : (countByCategory.get(key) ?? 0);
             const active = category === key;
             return (
               <button
@@ -451,20 +490,26 @@ export function RegistryStoreSection({
                 }`}
               >
                 {categoryLabel(key)}
-                <span
-                  className={`ml-1 text-[10px] ${
-                    active ? "text-[#89b4fa]/80" : "text-[#6c7086]"
-                  }`}
-                >
-                  {count}
-                </span>
+                {count !== null && (
+                  <span
+                    className={`ml-1 text-[10px] ${
+                      active ? "text-[#89b4fa]/80" : "text-[#6c7086]"
+                    }`}
+                  >
+                    {count}
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
       )}
 
-      {notice && (
+      {/* '로컬 모델' 탭은 first-party 섹션으로 통째 대체 — 레지스트리 상태
+          (unavailable/stale/빈 상태)와 무관하게 항상 동작한다(§4.4). */}
+      {isLocalTab && <LocalModelsSection />}
+
+      {!isLocalTab && notice && (
         <div
           className={`mb-3 rounded border px-3 py-2 text-xs ${
             notice.kind === "error"
@@ -476,14 +521,14 @@ export function RegistryStoreSection({
         </div>
       )}
 
-      {!available && (
+      {!isLocalTab && !available && (
         <p className="text-xs text-[#6c7086]">
           {t("harness.store.registry.unavailable")}
         </p>
       )}
       {/* 빈 상태 = 레지스트리에서 이 화면 조건에 맞는 항목이 하나도 안 왔다는
           뜻이다(tier 로 감추는 항목이 없으므로, 활성 카테고리가 정말 빈 것). */}
-      {available && !loading && shown.length === 0 && (
+      {!isLocalTab && available && !loading && shown.length === 0 && (
         <p className="text-xs text-[#6c7086]">
           {t("harness.store.registry.emptyCatalog")}
         </p>
@@ -628,7 +673,7 @@ export function RegistryStoreSection({
           않아도 "이 중 N개는 미검수라 동의를 거쳐야 설치된다"가 한 줄로
           읽히게. 레지스트리에 닿지 못한 상태(!available)에선 개수가 0 이라
           링크만 남는다. */}
-      {available && !loading && (
+      {!isLocalTab && available && !loading && (
         <p className="mt-3 text-[11px] text-[#6c7086]">
           {communityCount > 0 && (
             <>

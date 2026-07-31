@@ -229,4 +229,55 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.registry.githubCatalog": "Full catalog on GitHub →",
   "harness.store.registry.emptyCatalog":
     "No assets to show. The full catalog is on GitHub.",
+
+  // --- Store 'Local models' (Ollama) tab — first-party curation (§4.4) ---
+  "harness.store.local.tab": "Local models",
+  "harness.store.local.title": "Local models (Ollama)",
+  "harness.store.local.subtitle":
+    "A first-party curation of small models that run free on your machine. Your system memory is measured so only models that fit install in one click (ollama pull); installed models become selectable under Local Model when adding an agent.",
+  "harness.store.local.guideTitle": "Memory & quantization guide",
+  "harness.store.local.guideRam":
+    "Recommended RAM = model residency + OS/app headroom. Macs use unified memory, so the GPU shares the same RAM — the more headroom above the listed minimum, the more stable.",
+  "harness.store.local.guideQuant":
+    "Catalog sizes are for ollama's default 4-bit quantizations (Q4_K_M etc.). Lower-bit quantization is smaller and faster but slightly lower quality.",
+  "harness.store.local.guideContext":
+    "The context shown is the model's maximum. At runtime the default context is smaller (ollama defaults to ~4K), and raising it costs proportionally more memory.",
+  "harness.store.local.hardwareLine": "This machine's memory: {gb} GB",
+  "harness.store.local.unifiedMemoryNote": "unified memory (shared with GPU)",
+  "harness.store.local.ollamaMissing":
+    "Ollama is not installed, so one-click install is unavailable. Install Ollama first:",
+  "harness.store.local.ollamaInstallLink": "ollama.com/download →",
+  "harness.store.local.ollamaMissingShort": "Ollama not installed",
+  "harness.store.local.daemonStopped":
+    "Ollama is installed but its daemon is not running. Start the Ollama app (or `ollama serve`) and refresh.",
+  "harness.store.local.daemonStoppedShort": "Ollama daemon stopped",
+  "harness.store.local.loading": "Checking local model status…",
+  "harness.store.local.loadFail": "Could not check local model status.",
+  "harness.store.local.installed": "Installed",
+  "harness.store.local.fits": "Fits this machine",
+  "harness.store.local.insufficientRam": "Not enough ({gb} GB needed)",
+  "harness.store.local.downloadSize": "Download",
+  "harness.store.local.minRam": "Min RAM",
+  "harness.store.local.context": "Context",
+  "harness.store.local.pull": "Install (ollama pull)",
+  "harness.store.local.cancel": "Cancel",
+  "harness.store.local.pullDone":
+    "{id} installed — selectable under Local Model when adding an agent.",
+  "harness.store.local.pullCancelled":
+    "Cancelled installing {id} (partial downloads resume on retry).",
+  "harness.store.local.pullFail": "Failed to install {id}: {error}",
+  "harness.store.local.installedHint":
+    "Pick this model under Add agent → Local Model.",
+  "harness.store.local.desc.qwen25_05b":
+    "The lightest smoke-test model — instant responses even on low-end machines.",
+  "harness.store.local.desc.qwen25_15b":
+    "A balance of weight and quality — good for simple tasks like summarizing and classifying.",
+  "harness.store.local.desc.llama32_1b":
+    "Meta's tiniest model — the smallest one supporting a 128K context.",
+  "harness.store.local.desc.llama32_3b":
+    "Top quality among the small ones — runs comfortably on 8GB+ machines.",
+  "harness.store.local.desc.phi3_mini":
+    "Microsoft's 3.8B model — strong reasoning quality for its size.",
+  "harness.store.local.desc.gemma2_2b":
+    "Google's 2B model — good for short conversations and drafts.",
 };

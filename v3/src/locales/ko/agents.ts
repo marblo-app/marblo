@@ -112,6 +112,12 @@ export const agents = {
   "agents.addModal.model.custom": "커스텀 (직접 입력)",
   "agents.addModal.localHint":
     "CLI 명령어를 ollama / lms / llama 등 본인 환경에 맞게 변경",
+  "agents.addModal.localModel": "로컬 모델 (ollama 설치됨)",
+  "agents.addModal.localModelHint":
+    "(ollama list 실측 — 설치된 모델만 선택 가능)",
+  "agents.addModal.localModelNone":
+    "설치된 로컬 모델이 없습니다. 스토어 → 로컬 모델 탭에서 원클릭 설치하세요.",
+  "agents.addModal.localModelLoading": "설치된 로컬 모델 확인 중…",
   "agents.addModal.name": "이름",
   "agents.addModal.modelSelect": "모델 선택",
   "agents.addModal.role": "역할",

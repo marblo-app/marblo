@@ -94,6 +94,14 @@ import {
   type InstallerDeps,
 } from "./registry-installer";
 import { readLedger, registryLedgerPath } from "./registry-ledger";
+import {
+  LOCAL_MODEL_CATALOG,
+  LocalModelPullManager,
+  catalogEntry,
+  evaluateLocalModelCards,
+  localHardwareInfo,
+  syncInstalledLocalModels,
+} from "./local-models";
 import { FlowRunner } from "./flow-engine/flow-runner";
 import { KanbanBridge } from "./flow-engine/kanban-bridge";
 import { createLLMProvider } from "./flow-engine/llm-provider";
@@ -5128,8 +5136,29 @@ ipcMain.handle(
     //
     // ★게이트보다 **먼저** 해석한다: env-swap 벤더(GLM/MiniMax/Kimi)로 뜨는 스폰의
     // 인증 축은 Anthropic 계정이 아니라 벤더 크레덴셜이고, 그 판정에 이 핀이 필요하다.
+    // ★로컬(Ollama) 핀은 레지스트리에 **런타임 등록**돼 있어야 해석된다 — 앱
+    // 재시작 후 첫 launch 가 UI(스토어/모달)를 안 거쳤을 수 있으므로, 스폰 직전에
+    // `ollama list` 실측을 한 번 동기화한다(10초 캐시, 실패해도 스폰은 계속).
+    if (agent.model === "local" && modelPin) {
+      try {
+        await syncInstalledLocalModels();
+      } catch (err) {
+        console.warn(
+          "[agent:launch] 로컬 모델 동기화 실패(핀 미해석 가능):",
+          err,
+        );
+      }
+    }
     const pin = modelPin ? resolveModelPin(String(modelPin)) : undefined;
-    const pinApplies = pin?.harness === agent.model;
+    const pinApplies =
+      pin?.harness === agent.model ||
+      // ★local 에이전트 예외: 로컬(Ollama) 행은 env-swap 이라 하네스가 "claude"
+      //   로 접힌다(harnessForLaunch 와 같은 접힘). 벤더가 local 인 행에 한해서만
+      //   허용한다 — 다른 벤더의 claude 행이 local 에이전트로 새면 우리 Anthropic
+      //   쿼터가 "로컬" 이라는 이름으로 타는 실패모드라 그대로 막는다.
+      (agent.model === "local" &&
+        pin?.harness === "claude" &&
+        pin?.vendor === "local");
     if (pin && !pinApplies) {
       console.warn("[agent:launch] 모델 핀이 하네스와 어긋나 무시", {
         agent: agent.name,
@@ -7045,6 +7074,78 @@ ipcMain.handle(
     }
   },
 );
+
+// --- Local model (Ollama) IPC Handlers (스토어 '로컬 모델' 탭) ---
+//
+// 공개 레지스트리 경로와 **분리**된 first-party 축이다(§4.4) — 카탈로그는 앱
+// 상수이고, pull 대상 id 는 카탈로그 화이트리스트로만 해석한다(렌더러 불신).
+// pull 완료 후 레지스트리 등록은 syncInstalledLocalModels 가 `ollama list`
+// 실측으로만 한다(유령비용 방지).
+
+const localModelPullManager = new LocalModelPullManager();
+
+ipcMain.handle("localModels:info", async () => {
+  const hardware = localHardwareInfo();
+  const detection = await syncInstalledLocalModels(true);
+  return {
+    hardware,
+    ollama: {
+      installed: detection.installed,
+      version: detection.version,
+      daemonRunning: detection.daemonRunning,
+    },
+    installedIds: detection.installedIds,
+    cards: evaluateLocalModelCards(
+      hardware.totalMemGB,
+      detection,
+      detection.installedIds,
+      LOCAL_MODEL_CATALOG,
+    ),
+  };
+});
+
+ipcMain.handle("localModels:pull", async (_event, payload: { id: string }) => {
+  const entry =
+    payload && typeof payload.id === "string"
+      ? catalogEntry(payload.id)
+      : undefined;
+  if (!entry) {
+    // 카탈로그 밖 id 는 실행하지 않는다 — first-party 큐레이션이 원클릭의
+    // 정당성이므로(티켓 §4.4), 임의 문자열은 argv 근처에도 못 간다.
+    return { success: false, error: "not-in-catalog" };
+  }
+  const hardware = localHardwareInfo();
+  if (hardware.totalMemGB < entry.minRamGB) {
+    // UI 가 이미 비활성화하지만, 게이트는 렌더러를 신뢰하지 않는다.
+    return { success: false, error: "insufficient-ram" };
+  }
+  const detection = await syncInstalledLocalModels();
+  if (!detection.installed || !detection.command) {
+    return { success: false, error: "ollama-missing" };
+  }
+  if (!detection.daemonRunning) {
+    return { success: false, error: "daemon-stopped" };
+  }
+  const result = await localModelPullManager.pull(
+    detection.command,
+    entry.id,
+    (ev) => broadcast("localModels:pullProgress", ev),
+  );
+  if (result.success) {
+    // ★등록은 pull 성공 후 `ollama list` 재실측으로만 — pull 이 정확히 어떤
+    // id 를 만들었는지의 정본은 요청값이 아니라 목록이다.
+    await syncInstalledLocalModels(true);
+  }
+  return result;
+});
+
+ipcMain.handle("localModels:cancelPull", (_event, payload: { id: string }) => {
+  const cancelled =
+    !!payload &&
+    typeof payload.id === "string" &&
+    localModelPullManager.cancel(payload.id);
+  return { success: cancelled };
+});
 
 // Account-global rate-limit snapshots for the Usage tab. Independent of any
 // agent: claude is probed headlessly, codex/gpt is read from the newest

@@ -71,6 +71,8 @@ export function AgentsTab() {
     cwd: string;
     initialPrompt?: string;
     assignedTaskId?: string;
+    /** local(Ollama) 설치 실측 모델 핀 — AgentAddModal 이 목록에서 고른 값. */
+    modelPin?: string;
   }) => {
     if (!user || !projectId) return;
     // Plan throttle: gate before creating the Firestore doc. handleLaunch
@@ -105,6 +107,7 @@ export function AgentsTab() {
         undefined,
         projectId,
         data.assignedTaskId,
+        data.modelPin,
       );
       // Spawn blocked: this model's CLI is not installed / not logged in.
       // Open the CLI setup gate rather than attaching an empty terminal.

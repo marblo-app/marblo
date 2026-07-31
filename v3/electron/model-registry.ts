@@ -1012,6 +1012,71 @@ export function envProfileForModel(idOrAlias?: string): Record<string, string> {
   return profile ? { ...profile } : {};
 }
 
+// ── 로컬(Ollama) 모델 런타임 등록 ────────────────────────────────
+//
+// 스토어 '로컬 모델' 원클릭 pull 이 끝나면 그 실측 id 를 여기로 등록한다.
+// PR#608 설계 그대로 **(B)형 env-swap 1행**이다: 하네스는 claude, 벤더는 local,
+// env 는 Ollama 의 Anthropic 호환 엔드포인트(/v1/messages)로 갈아끼운다.
+//
+// ★정적 MODEL_REGISTRY 배열에는 넣지 않는다 — 그 배열은 검증된 벤더 사실의
+// 정본이고 부팅 가드·퀵레인 카탈로그·단가표가 순회한다. 런타임 행은 조회 축
+// (BY_ID → getModel/harnessForModel/envProfileForModel/resolveModelPin)에만
+// 합류해, 핀·스폰·게이트는 통하되 정적 카탈로그 표면은 오염하지 않는다.
+//
+// ★유령비용 방지: 호출자는 반드시 `ollama list` **실측 출력**만 넘겨야 한다
+// (local-models.syncInstalledLocalModels 가 단일 창구). 요청값·추측 id 를
+// 등록하면 "설치 안 된 모델이 핀 가능" 이 되는, 이 축이 막으려던 실패모드가 된다.
+
+/**
+ * Ollama Anthropic 호환 엔드포인트 프로파일. `ANTHROPIC_AUTH_TOKEN` 은 더미다 —
+ * ollama 는 인증을 무시하지만, 이 키가 비면 claude CLI 가 **우리 Anthropic
+ * 크레덴셜을 그대로 들고** 로컬 엔드포인트로 가므로(부분 주입 금지와 같은 사유)
+ * 명시적으로 갈아끼운다. 시크릿이 아니라서 `${...}` 참조가 아닌 리터럴이다.
+ */
+export const LOCAL_OLLAMA_ENV_PROFILE: VendorEnvProfile = {
+  ANTHROPIC_BASE_URL: "http://localhost:11434",
+  ANTHROPIC_AUTH_TOKEN: "ollama-local",
+};
+
+const RUNTIME_LOCAL_MODEL_IDS = new Set<string>();
+
+/**
+ * `ollama list` 실측 id 들을 스폰 축에 등록한다(멱등). 정적 레지스트리와 id 가
+ * 충돌하면 정적 행이 이긴다 — 검증된 벤더 사실이 로컬 별칭에 덮이지 않게.
+ */
+export function registerLocalOllamaModels(ids: readonly string[]): void {
+  for (const rawId of ids) {
+    const id = rawId.trim();
+    if (!id) continue;
+    const key = norm(id);
+    if (BY_ID.has(key)) continue; // 정적 행 우선 + 재등록 멱등
+    const entry: ModelRegistryEntry = {
+      id,
+      harness: "claude",
+      provider: "local",
+      envProfile: LOCAL_OLLAMA_ENV_PROFILE,
+      aliases: [],
+      capability: "cheap",
+      efforts: [],
+      // 로컬 추론은 API 과금이 없다 — 0 요율은 사실이지 미측정이 아니다.
+      pricing: { inputPer1M: 0, outputPer1M: 0 },
+      verified: {
+        at: new Date().toISOString().slice(0, 10),
+        cli: "n/a (ollama)",
+        method: "ollama list 실측 — 스토어 로컬모델 설치 경로가 등록",
+      },
+      status: "active",
+    };
+    BY_ID.set(key, entry);
+    RUNTIME_LOCAL_MODEL_IDS.add(id);
+  }
+}
+
+/** 런타임 등록된 로컬(Ollama) 모델 id 들(정적 행 제외). */
+export function registeredLocalOllamaModelIds(): string[] {
+  return [...RUNTIME_LOCAL_MODEL_IDS].sort();
+}
+
 /** 이 모델이 해당 effort 를 지원하는가. effort 축이 없는 모델은 항상 false. */
 export function supportsEffort(idOrAlias: string, effort: string): boolean {
   const entry = getModel(idOrAlias);

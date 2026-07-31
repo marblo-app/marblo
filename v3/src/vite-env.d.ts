@@ -889,6 +889,50 @@ interface RegistryIndexResponse {
   items: RegistryStoreItem[];
 }
 
+/** 스토어 '로컬 모델' 카드 — electron local-models.evaluateLocalModelCards 직렬화. */
+interface LocalModelCard {
+  /** ollama 공식 라이브러리 태그(`ollama pull <id>`). */
+  id: string;
+  displayName: string;
+  downloadSizeMB: number;
+  minRamGB: number;
+  contextTokens: number;
+  /** 이 기기 메모리(minRamGB ≤ totalMemGB)로 충분한가. */
+  fits: boolean;
+  installed: boolean;
+  action:
+    | "pull"
+    | "installed"
+    | "insufficient-ram"
+    | "ollama-missing"
+    | "daemon-stopped";
+}
+
+interface LocalModelsInfoResponse {
+  hardware: { totalMemGB: number; platform: string; unifiedMemory: boolean };
+  ollama: { installed: boolean; version?: string; daemonRunning: boolean };
+  /** `ollama list` 실측 — 이 목록만 local provider 로 등록된다(유령비용 방지). */
+  installedIds: string[];
+  cards: LocalModelCard[];
+}
+
+interface LocalModelsPullEvent {
+  id: string;
+  phase: "progress" | "done" | "error" | "cancelled";
+  percent?: number;
+  error?: string;
+}
+
+interface LocalModelsAPI {
+  info: () => Promise<LocalModelsInfoResponse>;
+  pull: (payload: {
+    id: string;
+  }) => Promise<{ success: boolean; cancelled?: boolean; error?: string }>;
+  cancelPull: (payload: { id: string }) => Promise<{ success: boolean }>;
+  onPullProgress: (callback: (ev: LocalModelsPullEvent) => void) => void;
+  offPullProgress: () => void;
+}
+
 interface RegistryAPI {
   index: (opts?: { refresh?: boolean }) => Promise<RegistryIndexResponse>;
   install: (payload: {
@@ -1032,6 +1076,7 @@ interface ElectronAPI {
   claude: ClaudeAPI;
   harness: HarnessAPI;
   registry: RegistryAPI;
+  localModels: LocalModelsAPI;
   usage: UsageAPI;
   send: (channel: string, data: unknown) => void;
   on: (channel: string, callback: (...args: unknown[]) => void) => void;

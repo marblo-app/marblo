@@ -228,4 +228,55 @@ export const harness = {
   "harness.store.registry.githubCatalog": "GitHub 전체 카탈로그 →",
   "harness.store.registry.emptyCatalog":
     "표시할 자산이 없습니다. 전체 카탈로그는 GitHub에서 볼 수 있습니다.",
+
+  // --- 스토어 '로컬 모델'(Ollama) 탭 — first-party 큐레이션(§4.4) ---
+  "harness.store.local.tab": "로컬 모델",
+  "harness.store.local.title": "로컬 모델 (Ollama)",
+  "harness.store.local.subtitle":
+    "내 기기에서 무료로 도는 소형 모델의 first-party 큐레이션입니다. 시스템 메모리를 실측해 맞는 모델만 원클릭(ollama pull)으로 설치되고, 설치된 모델은 에이전트 추가의 Local Model 에서 고를 수 있습니다.",
+  "harness.store.local.guideTitle": "메모리·양자화 가이드",
+  "harness.store.local.guideRam":
+    "권장 RAM = 모델 상주 메모리 + OS/앱 여유입니다. Mac 은 통합메모리라 GPU 가 같은 RAM 을 씁니다 — 표기된 최소 권장치보다 여유가 있을수록 안정적입니다.",
+  "harness.store.local.guideQuant":
+    "카탈로그 크기는 ollama 기본 4bit 계열 양자화(Q4_K_M 등) 기준입니다. 양자화 비트가 낮을수록 작고 빠르지만 품질이 조금 떨어집니다.",
+  "harness.store.local.guideContext":
+    "컨텍스트 표기는 모델의 최대치입니다. 실행 시 기본 컨텍스트는 이보다 작게 잡히며(ollama 기본 ~4K), 컨텍스트를 키우면 그만큼 메모리를 더 씁니다.",
+  "harness.store.local.hardwareLine": "이 기기 메모리: {gb} GB",
+  "harness.store.local.unifiedMemoryNote": "통합메모리(GPU 공유)",
+  "harness.store.local.ollamaMissing":
+    "Ollama 가 설치되어 있지 않아 원클릭 설치를 할 수 없습니다. 먼저 Ollama 를 설치하세요:",
+  "harness.store.local.ollamaInstallLink": "ollama.com/download →",
+  "harness.store.local.ollamaMissingShort": "Ollama 미설치",
+  "harness.store.local.daemonStopped":
+    "Ollama 는 설치되어 있지만 데몬이 실행 중이 아닙니다. Ollama 앱을 실행하거나 `ollama serve` 를 켠 뒤 새로고침하세요.",
+  "harness.store.local.daemonStoppedShort": "Ollama 데몬 정지",
+  "harness.store.local.loading": "로컬 모델 상태 확인 중…",
+  "harness.store.local.loadFail": "로컬 모델 상태를 확인하지 못했습니다.",
+  "harness.store.local.installed": "설치됨",
+  "harness.store.local.fits": "내 기기에 맞음",
+  "harness.store.local.insufficientRam": "부족 ({gb} GB 필요)",
+  "harness.store.local.downloadSize": "다운로드",
+  "harness.store.local.minRam": "최소 RAM",
+  "harness.store.local.context": "컨텍스트",
+  "harness.store.local.pull": "설치 (ollama pull)",
+  "harness.store.local.cancel": "취소",
+  "harness.store.local.pullDone":
+    "{id} 설치 완료 — 에이전트 추가의 Local Model 에서 선택할 수 있습니다.",
+  "harness.store.local.pullCancelled":
+    "{id} 설치를 취소했습니다(부분 다운로드는 재시도 시 이어받습니다).",
+  "harness.store.local.pullFail": "{id} 설치 실패: {error}",
+  "harness.store.local.installedHint":
+    "에이전트 추가 → Local Model 에서 이 모델을 선택하세요.",
+  "harness.store.local.desc.qwen25_05b":
+    "가장 가벼운 시험용 — 저사양 기기에서도 즉시 응답을 확인할 수 있습니다.",
+  "harness.store.local.desc.qwen25_15b":
+    "가벼움과 품질의 균형 — 요약·분류 같은 단순 작업에 적합합니다.",
+  "harness.store.local.desc.llama32_1b":
+    "Meta 의 초소형 모델 — 128K 컨텍스트를 지원하는 가장 작은 축입니다.",
+  "harness.store.local.desc.llama32_3b":
+    "소형 중 상위 품질 — 8GB 이상 기기에서 무난하게 돕니다.",
+  "harness.store.local.desc.phi3_mini":
+    "Microsoft 의 3.8B 모델 — 크기 대비 추론 품질이 좋습니다.",
+  "harness.store.local.desc.gemma2_2b":
+    "Google 의 2B 모델 — 짧은 대화·초안 작성에 적합합니다.",
 };

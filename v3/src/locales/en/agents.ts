@@ -120,6 +120,12 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.addModal.model.custom": "Custom (manual entry)",
   "agents.addModal.localHint":
     "Change the CLI command to match your setup (ollama / lms / llama, etc.)",
+  "agents.addModal.localModel": "Local model (installed via ollama)",
+  "agents.addModal.localModelHint":
+    "(measured via ollama list — only installed models are selectable)",
+  "agents.addModal.localModelNone":
+    "No local models installed. Install one from Store → Local models.",
+  "agents.addModal.localModelLoading": "Checking installed local models…",
   "agents.addModal.name": "Name",
   "agents.addModal.modelSelect": "Select Model",
   "agents.addModal.role": "Role",

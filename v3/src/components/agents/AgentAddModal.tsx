@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ModelType } from "../../types/agent";
 import type { Task } from "../../types/task";
 import { useEditorStore } from "../../stores/editorStore";
@@ -16,6 +16,12 @@ interface AgentAddModalProps {
     cwd: string;
     initialPrompt?: string;
     assignedTaskId?: string;
+    /**
+     * 구체 모델 핀(`<modelId>`) — 현재는 local(Ollama)에서만 쓴다. `ollama list`
+     * 실측 목록에서 고른 값만 들어오므로 미설치 id 가 핀되는 일이 없다
+     * (유령비용 방지). 메인 프로세스가 레지스트리로 재검증한다.
+     */
+    modelPin?: string;
   }) => Promise<void>;
   onClose: () => void;
 }
@@ -101,6 +107,29 @@ export default function AgentAddModal({
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const [customPrompt, setCustomPrompt] = useState("");
   const [launching, setLaunching] = useState(false);
+  // local(Ollama) 전용: `ollama list` 실측 목록. null = 아직 미조회.
+  const [localModels, setLocalModels] = useState<string[] | null>(null);
+  const [selectedLocalModel, setSelectedLocalModel] = useState("");
+
+  // local 선택 시에만 설치된 로컬 모델을 실측한다 — 이 목록이 곧 핀 후보의
+  // 전부다(스토어 pull 완료분 포함, 미설치 id 는 후보에 없다).
+  useEffect(() => {
+    if (model !== "local" || localModels !== null) return;
+    let cancelled = false;
+    void window.electronAPI.localModels
+      .info()
+      .then((info) => {
+        if (cancelled) return;
+        setLocalModels(info.installedIds);
+        setSelectedLocalModel((prev) => prev || (info.installedIds[0] ?? ""));
+      })
+      .catch(() => {
+        if (!cancelled) setLocalModels([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [model, localModels]);
 
   // Available tasks (TODO or CLAIMED, not already done)
   const availableTasks = tasks.filter(
@@ -143,6 +172,12 @@ export default function AgentAddModal({
         cwd: cwd.trim(),
         initialPrompt,
         assignedTaskId: selectedTaskId || undefined,
+        // local 은 설치 실측 목록에서 고른 모델만 핀한다. 다른 모델 타입은
+        // 종전대로 핀 없음(complexity 티어 정책 / CLI 기본 모델).
+        modelPin:
+          model === "local" && selectedLocalModel
+            ? selectedLocalModel
+            : undefined,
       });
       onClose();
     } catch {
@@ -234,6 +269,40 @@ export default function AgentAddModal({
               ))}
             </div>
           </div>
+
+          {/* Local(Ollama) 설치 모델 선택 — `ollama list` 실측 목록만 후보다.
+              스토어 '로컬 모델' 탭에서 pull 한 모델이 여기 나타난다. */}
+          {model === "local" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                {t("agents.addModal.localModel")}
+                <span className="ml-1 text-xs text-gray-500">
+                  {t("agents.addModal.localModelHint")}
+                </span>
+              </label>
+              {localModels === null ? (
+                <p className="text-xs text-gray-500">
+                  {t("agents.addModal.localModelLoading")}
+                </p>
+              ) : localModels.length > 0 ? (
+                <select
+                  value={selectedLocalModel}
+                  onChange={(e) => setSelectedLocalModel(e.target.value)}
+                  className="w-full rounded bg-gray-700 border border-gray-600 px-3 py-2 text-sm text-gray-100 font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  {localModels.map((id) => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <p className="text-xs text-gray-500">
+                  {t("agents.addModal.localModelNone")}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Role */}
           <div>

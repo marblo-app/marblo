@@ -742,6 +742,50 @@ contextBridge.exposeInMainWorld("electronAPI", {
         error?: string;
       }>,
   },
+  // 스토어 '로컬 모델'(Ollama) — 공개 레지스트리와 분리된 first-party 축(§4.4).
+  // 카탈로그·하드웨어 게이트·pull 실행은 전부 메인 프로세스에서 한다.
+  localModels: {
+    info: () =>
+      ipcRenderer.invoke("localModels:info") as Promise<{
+        hardware: {
+          totalMemGB: number;
+          platform: string;
+          unifiedMemory: boolean;
+        };
+        ollama: {
+          installed: boolean;
+          version?: string;
+          daemonRunning: boolean;
+        };
+        installedIds: string[];
+        cards: unknown[];
+      }>,
+    pull: (payload: { id: string }) =>
+      ipcRenderer.invoke("localModels:pull", payload) as Promise<{
+        success: boolean;
+        cancelled?: boolean;
+        error?: string;
+      }>,
+    cancelPull: (payload: { id: string }) =>
+      ipcRenderer.invoke("localModels:cancelPull", payload) as Promise<{
+        success: boolean;
+      }>,
+    onPullProgress: (
+      callback: (ev: {
+        id: string;
+        phase: "progress" | "done" | "error" | "cancelled";
+        percent?: number;
+        error?: string;
+      }) => void,
+    ) => {
+      ipcRenderer.on("localModels:pullProgress", (_event, data) =>
+        callback(data),
+      );
+    },
+    offPullProgress: () => {
+      ipcRenderer.removeAllListeners("localModels:pullProgress");
+    },
+  },
   usage: {
     // Account-global rate-limit snapshots, independent of any running agent.
     // null per provider = no information (logged out / probe failed), never 0%.
