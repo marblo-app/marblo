@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: trl
+name: Transformer Reinforcement Learning
+type: knowledge-pack
+version: 1.0.0
+description: Hugging Face tooling and examples for post-training language models with supervised fine-tuning, preference optimization, and reinforcement-learning methods.
+
+publisher:
+  name: Hugging Face
+  tier: verified
+  url: https://github.com/huggingface
+
+source:
+  repository: https://github.com/huggingface/trl
+  ref: 922dc584664d87482935e1fa7d958930fc5223cf
+
+keywords:
+  - fine-tuning
+  - rlhf
+  - alignment
+  - post-training
+
+license: Apache-2.0
+homepage: https://github.com/huggingface/trl

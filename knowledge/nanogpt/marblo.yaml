@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: nanogpt
+name: nanoGPT
+type: knowledge-pack
+version: 1.0.0
+description: A compact repository for training and fine-tuning medium-sized GPT models, useful for studying the core language-model training loop.
+
+publisher:
+  name: Andrej Karpathy
+  tier: verified
+  url: https://github.com/karpathy
+
+source:
+  repository: https://github.com/karpathy/nanoGPT
+  ref: 3adf61e154c3fe3fca428ad6bc3818b27a3b8291
+
+keywords:
+  - language-models
+  - gpt
+  - training
+  - from-scratch
+
+license: MIT
+homepage: https://github.com/karpathy/nanoGPT

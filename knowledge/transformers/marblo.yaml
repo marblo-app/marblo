@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: transformers
+name: Hugging Face Transformers
+type: knowledge-pack
+version: 1.0.0
+description: The central model and training library for modern transformer architectures, pretrained models, tokenizers, inference, and fine-tuning workflows.
+
+publisher:
+  name: Hugging Face
+  tier: verified
+  url: https://github.com/huggingface
+
+source:
+  repository: https://github.com/huggingface/transformers
+  ref: 71c6f699ac9b3f8fc42a6a3e9dc59034c349a678
+
+keywords:
+  - transformers
+  - foundations
+  - fine-tuning
+  - inference
+
+license: Apache-2.0
+homepage: https://github.com/huggingface/transformers

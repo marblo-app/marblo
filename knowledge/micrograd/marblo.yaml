@@ -1,0 +1,24 @@
+schema_version: 1
+
+id: micrograd
+name: Micrograd
+type: knowledge-pack
+version: 1.0.0
+description: A tiny scalar-valued autograd engine and neural-network library that makes reverse-mode automatic differentiation understandable from first principles.
+
+publisher:
+  name: Andrej Karpathy
+  tier: verified
+  url: https://github.com/karpathy
+
+source:
+  repository: https://github.com/karpathy/micrograd
+  ref: c911406e5ace8742e5841a7e0df113ecb5d54685
+
+keywords:
+  - foundations
+  - autodiff
+  - neural-networks
+
+license: MIT
+homepage: https://github.com/karpathy/micrograd

@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: llamaindex
+name: LlamaIndex
+type: knowledge-pack
+version: 1.0.0
+description: A framework and reference implementation for context augmentation, document ingestion, indexing, retrieval, and agent workflows over private data.
+
+publisher:
+  name: LlamaIndex
+  tier: verified
+  url: https://github.com/run-llama
+
+source:
+  repository: https://github.com/run-llama/llama_index
+  ref: c864fcfa2c1d1f987ccdbcdab7b18e395c01ba86
+
+keywords:
+  - rag
+  - agents
+  - retrieval
+  - indexing
+
+license: MIT
+homepage: https://github.com/run-llama/llama_index

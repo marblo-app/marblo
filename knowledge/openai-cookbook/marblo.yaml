@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: openai-cookbook
+name: OpenAI Cookbook
+type: knowledge-pack
+version: 1.0.0
+description: Practical examples for building LLM applications, including prompting, structured outputs, embeddings, retrieval, agents, and evaluation.
+
+publisher:
+  name: OpenAI
+  tier: verified
+  url: https://github.com/openai
+
+source:
+  repository: https://github.com/openai/openai-cookbook
+  ref: 0a796c4b95457a82dc090d0e31392deaf3b07f28
+
+keywords:
+  - prompting
+  - agents
+  - rag
+  - evaluation
+
+license: MIT
+homepage: https://github.com/openai/openai-cookbook

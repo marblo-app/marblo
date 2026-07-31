@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: model-context-protocol-docs
+name: Model Context Protocol Documentation
+type: knowledge-pack
+version: 1.0.0
+description: The official documentation for MCP, covering the protocol concepts, architecture, tools, resources, prompts, and implementation guidance.
+
+publisher:
+  name: Model Context Protocol
+  tier: verified
+  url: https://github.com/modelcontextprotocol
+
+source:
+  repository: https://github.com/modelcontextprotocol/docs
+  ref: 573dc60c2e7aab2605b29d0bf27194aa7b02e4fb
+
+keywords:
+  - agents
+  - mcp
+  - tool-use
+  - protocol
+
+license: MIT
+homepage: https://github.com/modelcontextprotocol/docs

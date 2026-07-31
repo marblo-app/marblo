@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: lm-evaluation-harness
+name: Language Model Evaluation Harness
+type: knowledge-pack
+version: 1.0.0
+description: A unified framework for running reproducible language-model evaluations across many tasks, models, and benchmark configurations.
+
+publisher:
+  name: EleutherAI
+  tier: verified
+  url: https://github.com/EleutherAI
+
+source:
+  repository: https://github.com/EleutherAI/lm-evaluation-harness
+  ref: f4d4b3de3ee6741a7151a9fe74945ee515262f4c
+
+keywords:
+  - evaluation
+  - benchmarks
+  - language-models
+  - research
+
+license: MIT
+homepage: https://github.com/EleutherAI/lm-evaluation-harness

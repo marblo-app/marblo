@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: cs336-assignment2-systems
+name: "Stanford CS336 Assignment 2: Systems"
+type: knowledge-pack
+version: 1.0.0
+description: The Stanford CS336 systems assignment, focused on the systems work needed to train and serve language models efficiently.
+
+publisher:
+  name: Stanford CS336
+  tier: verified
+  url: https://github.com/stanford-cs336
+
+source:
+  repository: https://github.com/stanford-cs336/assignment2-systems
+  ref: ca8bc81a59b70516f7ebb2da4808daade877c736
+
+keywords:
+  - course
+  - systems
+  - language-models
+  - performance
+
+license: MIT
+homepage: https://github.com/stanford-cs336/assignment2-systems

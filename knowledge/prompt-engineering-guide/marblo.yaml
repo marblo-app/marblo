@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: prompt-engineering-guide
+name: Prompt Engineering Guide
+type: knowledge-pack
+version: 1.0.0
+description: A large reference guide to prompt-engineering techniques, reasoning patterns, model-specific practices, and related papers and resources.
+
+publisher:
+  name: dair-ai
+  tier: community
+  url: https://github.com/dair-ai
+
+source:
+  repository: https://github.com/dair-ai/Prompt-Engineering-Guide
+  ref: 57673726396dd94acb23bdb1e67f27c78ee85a8e
+
+keywords:
+  - prompting
+  - context-engineering
+  - papers
+  - reference
+
+license: MIT
+homepage: https://github.com/dair-ai/Prompt-Engineering-Guide

@@ -1,0 +1,26 @@
+schema_version: 1
+
+id: llm-course-mlabonne
+name: LLM Course by MLABONNE
+type: knowledge-pack
+version: 1.0.0
+description: A broad self-study curriculum spanning transformer foundations, fine-tuning, quantization, RAG, agents, and practical LLM engineering.
+
+publisher:
+  name: MLABONNE
+  tier: community
+  url: https://github.com/mlabonne
+
+source:
+  repository: https://github.com/mlabonne/llm-course
+  ref: 7abd96e8284bfae232048fdb77b52397a2114847
+
+keywords:
+  - foundations
+  - fine-tuning
+  - rag
+  - agents
+  - curriculum
+
+license: Apache-2.0
+homepage: https://github.com/mlabonne/llm-course

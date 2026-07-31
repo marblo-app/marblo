@@ -1,0 +1,25 @@
+schema_version: 1
+
+id: haystack
+name: Haystack
+type: knowledge-pack
+version: 1.0.0
+description: An open-source framework for production-ready LLM pipelines, retrieval-augmented generation, document search, and agentic applications.
+
+publisher:
+  name: deepset
+  tier: verified
+  url: https://github.com/deepset-ai
+
+source:
+  repository: https://github.com/deepset-ai/haystack
+  ref: 5add74ecda75c78271b26feeef7d897bfb4e7796
+
+keywords:
+  - rag
+  - retrieval
+  - agents
+  - pipelines
+
+license: Apache-2.0
+homepage: https://github.com/deepset-ai/haystack
