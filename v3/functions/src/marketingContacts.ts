@@ -41,11 +41,7 @@ export type UnsubscribeStatus = "subscribed" | "unsubscribed";
 export type LifecycleStage = "lead" | "signup" | "founder" | "subscriber";
 
 export type ContactSource =
-  | "auth_signup"
-  | "waitlist"
-  | "founder"
-  | "subscription"
-  | "manual";
+  "auth_signup" | "waitlist" | "founder" | "subscription" | "manual";
 
 export interface EmailMarketingConsent {
   status: ConsentStatus;
@@ -256,11 +252,7 @@ export function buildUnsubscribeUrl(
 export interface EmailableVerdict {
   ok: boolean;
   reason:
-    | "ok"
-    | "no_contact"
-    | "consent_not_granted"
-    | "unsubscribed"
-    | "no_email";
+    "ok" | "no_contact" | "consent_not_granted" | "unsubscribed" | "no_email";
 }
 
 export function isEmailable(
@@ -515,6 +507,52 @@ export function backfillConsentGrantFromUserDoc(
       consentedAt: action.consentedAt,
     },
   };
+}
+
+// ─── waitlist(베타신청) 폼 → 마케팅 동의 판정 ─────────────────────────
+/**
+ * betatester50_waitlist/{docId} 문서 형태 — 훅 판정에 필요한 필드만.
+ *
+ *  - agreed: "활동/인용 동의"(파운더 활동·설문·리뷰 인용). 마케팅 수신동의가
+ *    아니다(COMPLIANCE-AUDIT.md D2) — grant 근거로 쓰지 않는다.
+ *  - marketingConsent: 폼의 별도 마케팅 수신동의 체크박스(★기본 unchecked).
+ *    이것만 explicit_opt_in grant 의 근거다.
+ */
+export interface WaitlistDocRaw {
+  agreed?: unknown;
+  marketingConsent?: unknown;
+  marketingConsentVersion?: unknown;
+  marketingConsentAt?: unknown;
+}
+
+export type WaitlistConsentDecision =
+  | { kind: "grant"; version: string; consentedAt: unknown | null }
+  | { kind: "pending" }
+  | { kind: "none" };
+
+/**
+ * waitlist 신청 문서 하나를 보고 컨택트 consent 를 어떻게 다뤄야 하는지
+ * 판정한다. 훅(syncMarketingContactOnWaitlistCreate)이 이 결과를
+ * upsertMarketingContact 의 grantConsent/markPending 요청으로 그대로 옮긴다.
+ *
+ * 우선순위: marketingConsent=true 만 grant. 그 외 agreed=true 는 여전히
+ * pending(재동의 대상 풀)까지만 — grant 근거가 아니다. 둘 다 없으면 none.
+ */
+export function decideWaitlistConsentGrant(
+  data: WaitlistDocRaw,
+): WaitlistConsentDecision {
+  if (data.marketingConsent === true) {
+    return {
+      kind: "grant",
+      version:
+        typeof data.marketingConsentVersion === "string"
+          ? data.marketingConsentVersion
+          : "",
+      consentedAt: data.marketingConsentAt ?? null,
+    };
+  }
+  if (data.agreed === true) return { kind: "pending" };
+  return { kind: "none" };
 }
 
 // ─── lifecycle·세그먼트 파생 ────────────────────────────────────────

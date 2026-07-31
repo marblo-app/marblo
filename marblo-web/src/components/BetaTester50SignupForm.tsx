@@ -10,6 +10,9 @@ import { trackGenerateLead } from "@/lib/gtag";
 
 const COLLECTION = "betatester50_waitlist";
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+// 이 문구/체크박스가 바뀌면 올린다 → functions 훅(decideWaitlistConsentGrant)이
+// 새 grant 에 이 버전을 실어 재동의 캠페인 대상 구분에 쓴다.
+const MARKETING_CONSENT_VERSION = "2026-07-31";
 
 type Status = "idle" | "submitting" | "success" | "error";
 type Locale = "ko" | "en" | "ja";
@@ -32,6 +35,9 @@ export default function BetaTester50SignupForm({
   const [email, setEmail] = useState("");
   const [agreed, setAgreed] = useState(false);
   const [ageConfirmed, setAgeConfirmed] = useState(false);
+  // ★마케팅 수신동의 — 기본 unchecked(강제 opt-in 금지). agreed(활동/인용
+  // 동의)와 별개 축이며, 신청 자체를 막지 않는 선택 항목이다.
+  const [marketingConsent, setMarketingConsent] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -66,6 +72,14 @@ export default function BetaTester50SignupForm({
         source,
         agreed: true,
         agreedAt: serverTimestamp(),
+        // ★marketingConsent 는 별도 opt-in 체크박스의 결과만 싣는다 — agreed
+        // 를 근거로 승격하지 않는다(COMPLIANCE-AUDIT.md D2). unchecked 면
+        // false 로 명시 기록해, 훅이 grant 가 아닌 pending 으로만 편입한다.
+        marketingConsent,
+        marketingConsentVersion: marketingConsent
+          ? MARKETING_CONSENT_VERSION
+          : null,
+        marketingConsentAt: marketingConsent ? serverTimestamp() : null,
         createdAt: serverTimestamp(),
       });
       // GA4 generate_lead — waitlist 문서 쓰기 성공 직후에만 발화.
@@ -191,6 +205,26 @@ export default function BetaTester50SignupForm({
             {t("consent_privacy_view")}
           </Link>
         </span>
+      </label>
+
+      <label
+        className={
+          compact
+            ? "flex items-start gap-2 text-xs text-indigo-100/90 cursor-pointer select-none"
+            : "flex items-start gap-2 text-sm text-zinc-300 cursor-pointer select-none"
+        }
+      >
+        <input
+          type="checkbox"
+          checked={marketingConsent}
+          onChange={(e) => {
+            setMarketingConsent(e.target.checked);
+            if (status === "error") setStatus("idle");
+          }}
+          disabled={isSubmitting}
+          className="mt-0.5 w-4 h-4 rounded border-zinc-600 bg-zinc-900 text-indigo-500 focus:ring-indigo-500/40"
+        />
+        <span className="leading-snug">{t("marketing_consent_label")}</span>
       </label>
 
       {errorMsg && (

@@ -34,10 +34,13 @@
 **status 의미** (발송 가능 = `granted` 하나뿐):
 
 - `granted`: 유효한 마케팅 수신동의 (`legalBasis=explicit_opt_in`)
-- `pending`: **재동의 캠페인 대상 풀 — 발송 불가**. waitlist 폼 체크박스는
-  "파운더 활동/인용 동의"이지 개인정보(이메일) 수집·이용/마케팅 수신동의가 아니다
+- `pending`: **재동의 캠페인 대상 풀 — 발송 불가**. waitlist 폼의 "활동/인용 동의"
+  (`agreed`) 체크박스는 개인정보(이메일) 수집·이용/마케팅 수신동의가 아니다
   (`marblo-web/docs/COMPLIANCE-AUDIT.md` **D2**, PIPA Med — 처리방침 링크·수집목적 미명시).
-  따라서 waitlist 41명은 granted 로 승격하지 않고 pending 으로만 적재한다(사장님 결정 2026-07-18).
+  `agreed` 만 있고 별도 마케팅 체크박스가 unchecked 인 신청은 granted 로 승격하지 않고
+  pending 으로만 적재한다(사장님 결정 2026-07-18). ★2026-07-31(zaLMLwYf) 부터 폼에
+  별도 `marketingConsent` 체크박스(기본 unchecked)가 추가돼, 이걸 체크한 신청자는
+  `pending` 이 아니라 바로 `granted` 로 적재된다 — 아래 "waitlist 폼 마케팅 동의" 참고.
 - `unknown`: 동의 증거 없음(Auth-만 가입자) → 발송 불가
 - `revoked`: 철회/수신거부 → 발송 불가. 훅은 revoked 를 절대 되살리지 않는다.
 
@@ -62,6 +65,26 @@
   - saveConsent 먼저 → 이 훅이 컨택트를 `granted` 로 생성 → 뒤늦은 onCreate 는 `grantConsent` 없이 upsert 하므로 `mergeEmailConsent` 가 granted 를 보존
 - **미체크는 건드리지 않는다** — 승격도 철회도 없다(`never_opted_in`). `true→false` 전이만 철회다.
 - 무관한 users 문서 write 는 `unchanged`/`no_consent_record` 로 조기 반환 — Firestore 읽기도 Auth 호출도 하지 않는다.
+
+### waitlist 폼 마케팅 동의 (훅 2, `zaLMLwYf1kQfeQJqdAkz`)
+
+`betatester50_waitlist/{docId}` 는 인증 전(uid 없음) 이메일 캡처라 훅 1b 경로(users
+문서)를 못 탄다 — 그래서 별도 축으로 배선한다.
+
+- 폼(`marblo-web/src/components/BetaTester50SignupForm.tsx`)에 `agreed`(활동/인용
+  동의, 필수)와 별개로 `marketingConsent`(마케팅 수신동의, **★기본 unchecked**,
+  선택 — 미체크해도 신청 자체는 진행)를 신설. 체크 시에만
+  `marketingConsent: true` + `marketingConsentVersion` + `marketingConsentAt` 을
+  문서에 함께 기록한다.
+- 판정은 순수 함수 `marketingContacts.decideWaitlistConsentGrant(doc)` 하나로 수렴
+  (`grant` | `pending` | `none`) — `syncMarketingContactOnWaitlistCreate` 훅은 이
+  결과를 그대로 `upsertMarketingContact` 의 `grantConsent`/`markPending` 에 옮긴다.
+  - `marketingConsent === true` → `grantConsent`(`legalBasis=explicit_opt_in`,
+    `source=waitlist_form_marketing_optin`) — **grant 근거는 이것 하나뿐**.
+  - `marketingConsent` 없이 `agreed === true` → 기존과 동일하게 `markPending`.
+  - 둘 다 없으면 아무것도 하지 않음.
+- `agreed` 는 여전히 grant 근거로 쓰지 않는다(D2 판정 유지) — 두 체크박스는 완전히
+  분리된 동의다.
 
 ## 발송 게이트
 
@@ -95,6 +118,28 @@
 5. 이후는 훅 5개(`syncMarketingContactOn{AuthCreate,WaitlistCreate,FounderWrite,SubscriptionWrite}` + `syncMarketingConsentOnUserWrite`)가 실시간 유지.
    ★기존 사용자의 동의 백필은 별도 티켓(N8sAY4Tj). 훅 1b 는 **신규 write 만** 처리한다 — 이미 동의했지만 컨택트가 unknown 인 기존 사용자는 users 문서를 다시 쓰기 전까지 승격되지 않는다.
 
+## 기존 파운더 재동의 — 설계만(구현 보류, 사장님 승인 필요)
+
+`zaLMLwYf1kQfeQJqdAkz` 범위: 이번 티켓은 **신규** opt-in 수집 경로만 구현한다. 기존
+파운더(현재 미동의 ~30명, `emailMarketingConsent.status=unknown`)를 재동의시키는
+구현은 여기 포함하지 않는다 — 아래는 다음 승인 시 고를 두 경로의 설계다.
+
+- **안 A — 다음 로그인 시 배너(권장)**: v3 앱/marblo-web 이 로그인 직후
+  `emailMarketingConsent.status==="unknown"` 인 실가입 파운더에게 얇은 배너로
+  "마케팅 소식 받아보기" opt-in 을 노출. 체크 시 `users/{uid}.webPrivacyConsent.marketing=true`
+  를 쓰는 기존 훅 1b(`syncMarketingConsentOnUserWrite`) 경로를 그대로 재사용 —
+  **새 훅이 필요 없다**. 장점: 코드 재사용 최대, PIPA 상 능동적 opt-in 요건을
+  가장 깔끔히 충족. 단점: 로그인해야만 노출되므로 휴면 파운더는 못 잡는다.
+- **안 B — 트랜잭션 메일 opt-in 링크**: 파운더 접근 안내 등 기존 transactional
+  메일(게이트 비대상이라 발송 가능) 본문에 "마케팅 소식도 받아보기" 링크를 추가.
+  클릭 시 `unsubscribeMarketingEmail` 과 대칭인 신규 HTTPS 엔드포인트가
+  `grantConsent(explicit_opt_in, source=reconsent_email_link)` 를 호출. 장점:
+  휴면 파운더도 도달. 단점: 신규 엔드포인트(HMAC 토큰 설계 포함) 필요 — 구현 비용 A 보다 큼.
+- 두 경로 모두 **grant 근거는 클릭/체크 그 자체**(explicit_opt_in) — 이번 백필/과거
+  `agreed` 를 근거로 소급 승격하지 않는다(D2 불변식 유지).
+- 실발송(re-consent 캠페인 자체를 트리거하는 관리자 액션)은 별도 결정 사안 — 이
+  설계는 opt-in 수집 경로만 다룬다.
+
 ## 배포
 
 ```bash
@@ -108,7 +153,7 @@ GCLOUD_PROJECT=marblo-2253d firebase deploy --only functions,firestore:rules --p
 ## 테스트
 
 ```bash
-cd v3/functions && npm run test:marketing      # 순수 로직 25 케이스 (의존성 0, node --test)
+cd v3/functions && npm run test:marketing      # 순수 로직 34 케이스 (의존성 0, node --test)
 cd v3/functions && npm run test:consent-sync   # 동의 배선 28 케이스 (Firestore+Auth 에뮬레이터)
 ```
 

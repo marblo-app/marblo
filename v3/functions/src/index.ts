@@ -56,7 +56,9 @@ import {
   mergeEmailConsent,
   decideMarketingConsentSync,
   backfillConsentGrantFromUserDoc,
+  decideWaitlistConsentGrant,
   type UserDocRaw,
+  type WaitlistDocRaw,
   type ContactFlags,
   type ContactSource,
   type ContactSubscription,
@@ -160,12 +162,7 @@ async function runAdminAnalyticsQueries(
 }
 
 type MergeChangeType =
-  | "docs"
-  | "test"
-  | "config"
-  | "code"
-  | "mixed"
-  | "unknown";
+  "docs" | "test" | "config" | "code" | "mixed" | "unknown";
 
 interface GitHubMergeHistoryPayload {
   prNumber?: unknown;
@@ -2931,10 +2928,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
 //   no_account     — 계정 X (미가입=미다운로드/미로그인)          → 다운로드 팔로업
 
 type FounderSegment =
-  | "active"
-  | "sub_expired"
-  | "account_no_sub"
-  | "no_account";
+  "active" | "sub_expired" | "account_no_sub" | "no_account";
 
 // 순수 분류기(테스트용 export). 부수효과 없음.
 export function classifyFounderActivation(opts: {
@@ -5264,8 +5258,7 @@ const TELEGRAM_BETA_WEBHOOK_SECRET =
   process.env.TELEGRAM_BETA_WEBHOOK_SECRET || "";
 
 type TgInlineButton =
-  | { text: string; callback_data: string }
-  | { text: string; url: string };
+  { text: string; callback_data: string } | { text: string; url: string };
 type TgInlineKeyboard = TgInlineButton[][];
 
 interface TgCallbackQuery {
@@ -8534,15 +8527,15 @@ export const syncMarketingConsentOnUserWrite = functions.firestore
     }
   });
 
-// ─── write 훅 2: waitlist 신청 → 컨택트 upsert(pending — 발송 불가) ──
+// ─── write 훅 2: waitlist 신청 → 컨택트 upsert ───────────────────────
 // ★waitlist 폼의 agreed=true 는 "활동/인용 동의"이지 마케팅 수신동의가 아니다
 // (marblo-web/docs/COMPLIANCE-AUDIT.md D2, PIPA Med — 처리방침 링크·수집목적
-// 미명시). 따라서 granted 로 승격하지 않고 pending(재동의 대상 풀)으로만
+// 미명시). 그것만으로는 granted 로 승격하지 않고 pending(재동의 대상 풀)으로만
 // 적재한다.
-// ★waitlist 폼에는 아직 마케팅 전용 체크박스가 없다 — 붙기 전까지 pending 이
-// 정답이다. 가입 폼(users/{uid}.webPrivacyConsent)의 마케팅 체크박스는 훅 1b
-// (syncMarketingConsentOnUserWrite)가 explicit_opt_in 으로 처리한다. 그쪽
-// 경로를 이 훅에 끌어오지 말 것 — 동의의 출처가 다르다.
+// ★폼에 별도 마케팅 수신동의 체크박스(marketingConsent, 기본 unchecked)가
+// 추가됐다(zaLMLwYf) — 이것만 explicit_opt_in grant 의 근거다. 판정은
+// decideWaitlistConsentGrant 단일 함수로 한다(단위테스트 가능, marketingContacts.ts).
+// agreed 를 grant 근거로 끌어오지 말 것 — 동의의 출처가 다르다.
 export const syncMarketingContactOnWaitlistCreate = functions.firestore
   .document("betatester50_waitlist/{docId}")
   .onCreate(async (snap) => {
@@ -8550,12 +8543,22 @@ export const syncMarketingContactOnWaitlistCreate = functions.firestore
       const data = snap.data() || {};
       const email = typeof data.email === "string" ? data.email : "";
       if (!email) return;
+      const decision = decideWaitlistConsentGrant(data as WaitlistDocRaw);
       await upsertMarketingContact({
         email,
         source: "waitlist",
         locale: typeof data.locale === "string" ? data.locale : null,
+        grantConsent:
+          decision.kind === "grant"
+            ? {
+                source: "waitlist_form_marketing_optin",
+                version: decision.version,
+                legalBasis: "explicit_opt_in",
+                consentedAt: decision.consentedAt,
+              }
+            : null,
         markPending:
-          data.agreed === true
+          decision.kind === "pending"
             ? {
                 source: "waitlist_form",
                 detail:

@@ -412,6 +412,7 @@
     "age_confirm_label": "[Required] I am 14 years of age or older.",
     "consent_label": "[Required] I consent to the collection and use of my personal data (email address) and to the Founder role. (Collected: email address · Purpose: Founder recruitment and selection notice · submit a thoughtful survey after using the beta; some answers may be quoted in reviews and promotion)",
     "consent_privacy_view": "Privacy Policy",
+    "marketing_consent_label": "[Optional] I agree to receive marketing emails (new features, beta updates, etc.). Declining does not affect your Founder application, and you can unsubscribe anytime via the link in any email.",
     "receive_heading": "💎 What Founders get",
     "receive_item1": "✓ Free beta — full Marblo feature access before public launch",
     "receive_item2": "✓ 3 months of Marblo Pro free when you submit the thoughtful survey and pass operator review (6 months if a top respondent completes an interview)",

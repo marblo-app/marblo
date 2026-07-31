@@ -22,6 +22,7 @@ import {
   mergeEmailConsent,
   decideMarketingConsentSync,
   backfillConsentGrantFromUserDoc,
+  decideWaitlistConsentGrant,
   UNKNOWN_CONSENT,
   type ContactFlags,
   type EmailMarketingConsent,
@@ -553,5 +554,77 @@ test("★revoke 후에는 isEmailable=false", () => {
       emailEnc: "e",
     }).ok,
     false,
+  );
+});
+
+// ─── decideWaitlistConsentGrant (베타신청 폼 마케팅 동의 판정) ──────────
+// 회귀 방지: 티켓 zaLMLwYf1kQfeQJqdAkz — 베타신청 폼에 grantConsent 호출부가
+// 0건이라 marketing_contacts 를 백필해도 emailable 이 0→0 이던 문제.
+test("decideWaitlistConsentGrant: marketingConsent=true → grant(버전·동의시각 전달)", () => {
+  const consentedAt = new Date("2026-07-31T00:00:00Z");
+  const decision = decideWaitlistConsentGrant({
+    agreed: true,
+    marketingConsent: true,
+    marketingConsentVersion: "2026-07-31",
+    marketingConsentAt: consentedAt,
+  });
+  assert.equal(decision.kind, "grant");
+  if (decision.kind === "grant") {
+    assert.equal(decision.version, "2026-07-31");
+    assert.equal(decision.consentedAt, consentedAt);
+  }
+});
+
+test("★decideWaitlistConsentGrant: agreed(활동/인용 동의)만으로는 grant 근거가 아니다 — pending 까지만", () => {
+  const decision = decideWaitlistConsentGrant({ agreed: true });
+  assert.equal(decision.kind, "pending");
+});
+
+test("decideWaitlistConsentGrant: 아무 동의도 없으면 none", () => {
+  assert.equal(decideWaitlistConsentGrant({}).kind, "none");
+  assert.equal(
+    decideWaitlistConsentGrant({ agreed: false, marketingConsent: false }).kind,
+    "none",
+  );
+});
+
+test("★decideWaitlistConsentGrant: marketingConsent 이 truthy 지만 true 가 아니면 grant 하지 않는다", () => {
+  assert.equal(
+    decideWaitlistConsentGrant({ marketingConsent: "1" as unknown as boolean })
+      .kind,
+    "none",
+  );
+});
+
+test("★신규 waitlist 마케팅 동의자는 grant → isEmailable=ok(0→0 회귀 방지)", () => {
+  const decision = decideWaitlistConsentGrant({
+    agreed: true,
+    marketingConsent: true,
+    marketingConsentVersion: "2026-07-31",
+    marketingConsentAt: NOW,
+  });
+  assert.equal(decision.kind, "grant");
+  if (decision.kind !== "grant") return;
+  const merged = mergeEmailConsent(
+    UNKNOWN_CONSENT,
+    {
+      grant: {
+        source: "waitlist_form_marketing_optin",
+        version: decision.version,
+        legalBasis: "explicit_opt_in",
+        consentedAt: decision.consentedAt,
+      },
+    },
+    NOW,
+  );
+  assert.equal(merged.consent.status, "granted");
+  assert.equal(merged.consent.legalBasis, "explicit_opt_in");
+  assert.equal(
+    isEmailable({
+      emailMarketingConsent: merged.consent,
+      unsubscribe: subscribed,
+      emailEnc: "e",
+    }).ok,
+    true,
   );
 });
