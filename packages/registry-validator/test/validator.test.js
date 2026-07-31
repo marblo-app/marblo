@@ -621,6 +621,152 @@ test("invalid manifest requirements are reported", () => {
   }
 });
 
+// ── community source-referenced installs ────────────────────────────────────
+// Community payloads are never vendored (CONTRIBUTING), so their install
+// digests are verified against the bytes at the pinned upstream ref — exactly
+// what the app will fetch. These tests inject the fetcher; nothing goes to the
+// network.
+
+/** A community skill whose payload lives upstream, not in this repo. */
+function writeCommunitySourceItem(
+  fixture,
+  dir,
+  { ref, repository, path, body }
+) {
+  const itemDir = join(fixture, "skills", dir);
+  mkdirSync(itemDir, { recursive: true });
+  const digest = createHash("sha256").update(body).digest("hex");
+  writeFileSync(
+    join(itemDir, "marblo.yaml"),
+    [
+      "schema_version: 1",
+      `id: ${dir}`,
+      "name: Fixture External Skill",
+      "type: skill",
+      "version: 1.0.0",
+      "description: fixture",
+      "publisher:",
+      "  name: Example",
+      "  tier: community",
+      "source:",
+      `  repository: ${repository ?? "https://github.com/example/skills"}`,
+      `  ref: ${ref ?? "f".repeat(40)}`,
+      ...(path === undefined
+        ? ["  path: skills/fixture"]
+        : path === null
+        ? []
+        : [`  path: ${path}`]),
+      "license: MIT",
+      "permissions: []",
+      "install:",
+      "  kind: files",
+      "  root: claude-skills",
+      `  dest: ${dir}`,
+      "  files:",
+      "    - SKILL.md",
+      "  integrity:",
+      "    algorithm: sha256",
+      "    files:",
+      `      SKILL.md: ${digest}`,
+    ].join("\n") + "\n"
+  );
+  return digest;
+}
+
+test("a community install verifies digests against the pinned upstream bytes", () => {
+  withFixture((fixture) => {
+    writeCommunitySourceItem(fixture, "external-skill", { body: "upstream\n" });
+    const fetched = [];
+    const result = validateRegistry({
+      repoRoot: fixture,
+      checkSources: false,
+      checkRemoteInstalls: true,
+      fetchRemoteFile: (url) => {
+        fetched.push(url);
+        return Buffer.from("upstream\n");
+      },
+    });
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(fetched, [
+      `https://raw.githubusercontent.com/example/skills/${"f".repeat(
+        40
+      )}/skills/fixture/SKILL.md`,
+    ]);
+  });
+});
+
+test("a community install fails when the upstream bytes do not match the digest", () => {
+  withFixture((fixture) => {
+    writeCommunitySourceItem(fixture, "tampered-skill", { body: "reviewed\n" });
+    const result = validateRegistry({
+      repoRoot: fixture,
+      checkSources: false,
+      checkRemoteInstalls: true,
+      fetchRemoteFile: () => Buffer.from("tampered\n"),
+    });
+    assert.ok(
+      result.errors.some((error) =>
+        error.includes("does not match the pinned source bytes")
+      )
+    );
+  });
+});
+
+test("a community install fails when a file is not fetchable at the pin", () => {
+  withFixture((fixture) => {
+    writeCommunitySourceItem(fixture, "missing-upstream-skill", {
+      body: "gone\n",
+    });
+    const result = validateRegistry({
+      repoRoot: fixture,
+      checkSources: false,
+      checkRemoteInstalls: true,
+      fetchRemoteFile: () => null,
+    });
+    assert.ok(
+      result.errors.some((error) =>
+        error.includes("not fetchable at the pinned source ref")
+      )
+    );
+  });
+});
+
+test("a community install requires a github.com source even offline", () => {
+  withFixture((fixture) => {
+    writeCommunitySourceItem(fixture, "offsite-skill", {
+      body: "x\n",
+      repository: "https://evil.example/acme/skills",
+    });
+    assert.ok(
+      errorsFor(fixture).some((error) =>
+        error.includes("https://github.com/<owner>/<repo>")
+      )
+    );
+  });
+});
+
+test("a community install rejects a traversal-shaped source.path even offline", () => {
+  withFixture((fixture) => {
+    writeCommunitySourceItem(fixture, "traversal-source-skill", {
+      body: "x\n",
+      path: "../../etc",
+    });
+    assert.ok(
+      errorsFor(fixture).some((error) =>
+        error.includes("escapes the source repo")
+      )
+    );
+  });
+});
+
+test("a community install does not require its payload on disk (no vendoring)", () => {
+  withFixture((fixture) => {
+    writeCommunitySourceItem(fixture, "manifest-only-skill", { body: "x\n" });
+    // Offline run: structural checks only — no on-disk payload, no error.
+    assert.deepEqual(errorsFor(fixture), []);
+  });
+});
+
 // ── i18n overlay ────────────────────────────────────────────────────────────
 // The base name/description stay English and are always valid on their own; the
 // overlay is additive. These assert both directions: a well-formed overlay does

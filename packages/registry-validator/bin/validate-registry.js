@@ -78,7 +78,66 @@ const envDenylist = new Set([
   "AWS_SESSION_TOKEN",
 ]);
 
-function checkFilesInstall(install, manifest, manifestPath, label, errors) {
+/**
+ * Where a files install's bytes actually come from, mirrored 1:1 with the app:
+ * `community` items are never vendored (CONTRIBUTING), so the app fetches their
+ * payload from the pinned `source` ref — this validator therefore verifies the
+ * digests against the **upstream bytes at that pin**, not against this repo.
+ * `official`/`verified` payloads live in this repo and are verified on disk.
+ */
+function communitySourceRawBase(manifest, label, errors) {
+  const repository = manifest?.source?.repository;
+  const ref = manifest?.source?.ref ?? "";
+  const sourcePath = manifest?.source?.path;
+  const apiPath = repositoryApiPath(repository);
+  if (!apiPath) {
+    errors.push(
+      `${label}: a community files install requires source.repository to be an https://github.com/<owner>/<repo> URL`
+    );
+    return null;
+  }
+  if (!pinnedRef.test(ref)) {
+    errors.push(
+      `${label}: a community files install requires a tag or 40-character SHA source.ref`
+    );
+    return null;
+  }
+  if (sourcePath !== undefined) {
+    if (
+      typeof sourcePath !== "string" ||
+      !relFilePath.test(sourcePath) ||
+      sourcePath.length > 300
+    ) {
+      errors.push(
+        `${label}: source.path '${sourcePath}' escapes the source repo or has an illegal segment`
+      );
+      return null;
+    }
+  }
+  const slug = apiPath.replace(/^repos\//, "");
+  const prefix = sourcePath ? `/${sourcePath}` : "";
+  return `https://raw.githubusercontent.com/${slug}/${ref}${prefix}`;
+}
+
+/** Default remote fetcher — curl keeps the validator synchronous like `gh api`. */
+function curlFetchRemoteFile(url) {
+  const result = spawnSync("curl", ["-sfL", "--max-time", "30", url], {
+    timeout: 45_000,
+    maxBuffer: 6 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.error || result.status !== 0 || !result.stdout) return null;
+  return result.stdout;
+}
+
+function checkFilesInstall(
+  install,
+  manifest,
+  manifestPath,
+  label,
+  errors,
+  remote
+) {
   if (!installRoots.has(install.root)) {
     errors.push(
       `${label}: install.root '${install.root}' is not an app-controlled root`
@@ -107,6 +166,10 @@ function checkFilesInstall(install, manifest, manifestPath, label, errors) {
   }
   const digests = install.integrity?.files ?? {};
   const itemDir = dirname(manifestPath);
+  const community = manifest?.publisher?.tier === "community";
+  const rawBase = community
+    ? communitySourceRawBase(manifest, label, errors)
+    : null;
   let totalBytes = 0;
 
   for (const file of files) {
@@ -121,6 +184,36 @@ function checkFilesInstall(install, manifest, manifestPath, label, errors) {
       continue;
     }
     noRuntimeExpansion(file, `files[${file}]`, errors, label);
+    const expected = digests[file];
+    if (typeof expected !== "string" || !sha256Hex.test(expected)) {
+      errors.push(
+        `${label}: install.integrity.files is missing a sha256 digest for '${file}'`
+      );
+      continue;
+    }
+    if (community) {
+      // Community payloads are never in this repo (CONTRIBUTING: no vendoring).
+      // The bytes the app will install live upstream at the pinned source ref,
+      // so that is what the digest is checked against. Skipped when remote
+      // verification is off (offline test runs) — the structural requirements
+      // above still hold.
+      if (!rawBase || !remote?.enabled) continue;
+      const bytes = remote.fetchRemoteFile(`${rawBase}/${file}`);
+      if (!bytes) {
+        errors.push(
+          `${label}: install.files entry '${file}' is not fetchable at the pinned source ref`
+        );
+        continue;
+      }
+      totalBytes += bytes.length;
+      const actual = createHash("sha256").update(bytes).digest("hex");
+      if (actual !== expected) {
+        errors.push(
+          `${label}: install.integrity digest for '${file}' does not match the pinned source bytes (expected ${actual})`
+        );
+      }
+      continue;
+    }
     const onDisk = join(itemDir, file);
     if (!existsSync(onDisk) || !statSync(onDisk).isFile()) {
       errors.push(
@@ -129,13 +222,6 @@ function checkFilesInstall(install, manifest, manifestPath, label, errors) {
       continue;
     }
     totalBytes += statSync(onDisk).size;
-    const expected = digests[file];
-    if (typeof expected !== "string" || !sha256Hex.test(expected)) {
-      errors.push(
-        `${label}: install.integrity.files is missing a sha256 digest for '${file}'`
-      );
-      continue;
-    }
     const actual = createHash("sha256")
       .update(readFileSync(onDisk))
       .digest("hex");
@@ -218,7 +304,14 @@ function checkMcpInstall(install, manifest, label, errors) {
  * `main` or a force-movable tag means the bytes installed tomorrow are not the
  * bytes reviewed today.
  */
-function checkInstallBlock(manifest, manifestPath, label, errors, dests) {
+function checkInstallBlock(
+  manifest,
+  manifestPath,
+  label,
+  errors,
+  dests,
+  remote
+) {
   const install = manifest?.install;
   if (install === undefined || install === null) return;
   if (typeof install !== "object" || Array.isArray(install)) {
@@ -248,7 +341,7 @@ function checkInstallBlock(manifest, manifestPath, label, errors, dests) {
   }
 
   if (install.kind === "files") {
-    checkFilesInstall(install, manifest, manifestPath, label, errors);
+    checkFilesInstall(install, manifest, manifestPath, label, errors, remote);
     const key = `${install.root}/${install.dest}`;
     const original = dests.get(key);
     if (original)
@@ -385,7 +478,15 @@ export function findManifests(repoRoot) {
     .sort();
 }
 
-export function validateRegistry({ repoRoot, checkSources = true } = {}) {
+export function validateRegistry({
+  repoRoot,
+  checkSources = true,
+  // Community install digests are verified against upstream bytes. Follows
+  // `checkSources` by default; tests flip it independently with an injected
+  // fetcher so they stay fully offline.
+  checkRemoteInstalls = checkSources,
+  fetchRemoteFile = curlFetchRemoteFile,
+} = {}) {
   const root = resolve(
     repoRoot ?? join(dirname(new URL(import.meta.url).pathname), "../../..")
   );
@@ -451,7 +552,10 @@ export function validateRegistry({ repoRoot, checkSources = true } = {}) {
         `${label}: license must be a non-empty SPDX identifier string`
       );
     }
-    checkInstallBlock(manifest, manifestPath, label, errors, installTargets);
+    checkInstallBlock(manifest, manifestPath, label, errors, installTargets, {
+      enabled: checkRemoteInstalls,
+      fetchRemoteFile,
+    });
     checkI18nBlock(manifest, label, errors, warnings);
     if (checkSources && manifest?.source?.repository) {
       const warning = checkRepository(manifest.source.repository);

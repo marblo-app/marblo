@@ -84,13 +84,17 @@ function pinCell(manifest) {
 
 /**
  * Two different facts, deliberately two columns. `tier` is the policy gate —
- * community items can never be one-click, by design (SECURITY.md). `install`
- * is whether THIS item's install contract is actually written yet. Collapsing
- * them would claim eight installable items where the manifests declare two.
+ * community items are never ONE-CLICK: their install contract exists, but the
+ * app only runs it after an explicit unreviewed-content consent step
+ * (SECURITY.md). `install` is whether THIS item's install contract is actually
+ * written yet. Collapsing the columns would hide which of the two gates an
+ * install goes through.
  */
 const installCell = (manifest) =>
   manifest.install
-    ? `⚡ one-click (\`${manifest.install.kind}\`)`
+    ? manifest.publisher?.tier === "community"
+      ? `🔶 consent-gated (\`${manifest.install.kind}\`)`
+      : `⚡ one-click (\`${manifest.install.kind}\`)`
     : "— reference";
 
 const isKorea = (manifest) =>
@@ -175,13 +179,19 @@ export function renderCatalog(groups) {
         "community"
       )} external, listed and pinned but not reviewed.`,
     "",
-    `**Install** — ⚡ **one-click in the app** for ${count((item) =>
-      Boolean(item.manifest.install)
-    )} items whose ` +
-      "install contract is written and digest-verified. Everything else is **— reference**: " +
-      "listed, linked, and pinned, installed by following the item's own README. `community` items are " +
-      "reference-only by policy and stay that way until the app ships a permission gate " +
-      "([why](SECURITY.md#why-community-items-cannot-be-installed-with-one-click)).",
+    `**Install** — ⚡ **one-click in the app** for ${count(
+      (item) =>
+        Boolean(item.manifest.install) &&
+        item.manifest.publisher?.tier !== "community"
+    )} reviewed items · 🔶 **consent-gated** for ${count(
+      (item) =>
+        Boolean(item.manifest.install) &&
+        item.manifest.publisher?.tier === "community"
+    )} community items — ` +
+      "their install contract is written and digest-verified against the pinned upstream, but the app " +
+      "installs them only after an explicit \"unreviewed content\" warning is acknowledged " +
+      "([why](SECURITY.md#why-community-items-cannot-be-installed-with-one-click)). Everything else is " +
+      "**— reference**: listed, linked, and pinned, installed by following the item's own README.",
     "",
     `**🇰🇷** marks the ${count((item) =>
       isKorea(item.manifest)

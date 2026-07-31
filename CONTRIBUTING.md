@@ -27,7 +27,7 @@ Every pull request runs the registry validator. It checks the manifest schema, u
 
 A second job regenerates the root README's catalog block from the manifests and fails if it drifted — that is what step 6 above prevents. If it fails, run `npm run gen:catalog` and commit the result; there is nothing to fix by hand.
 
-**External items merge as `community` tier, which means listed, not installable.** They are discoverable and linked to their source, but the app will not one-click-install them until it ships a permission gate. This is deliberate — [SECURITY.md](SECURITY.md) explains why a pinned commit does not make an unreviewed text payload safe. Promotion to `verified` follows a maintainer review of the payload itself.
+**External items merge as `community` tier, which means consent-gated, never one-click.** They are discoverable and linked to their source, and — when the manifest carries an `install` block with per-file digests (run `node scripts/gen-community-installs.mjs` to generate one from the pinned `source` ref; nothing is vendored into this repo) — the app installs them only after the user explicitly acknowledges an "unreviewed content" warning. [SECURITY.md](SECURITY.md) explains why a pinned commit does not make an unreviewed text payload safe, and why those two install surfaces stay visibly different. Promotion to `verified` follows a maintainer review of the payload itself.
 
 We would rather tell you this up front than have you discover it after the merge.
 
