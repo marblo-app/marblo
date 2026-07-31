@@ -30,4 +30,20 @@ export const legal = {
   "legal.consent.later": "나중에",
   "legal.consent.saving": "저장 중...",
   "legal.consent.allow": "허용",
+
+  // ── 마케팅 수신동의(선택) — 위 텔레메트리 동의와 별개 축 ──
+  "legal.consent.marketing.label":
+    "마케팅 정보 수신 동의 (선택) — 제품 소식·업데이트·이벤트 안내 메일",
+  "legal.consent.marketing.hint":
+    "수신처: 가입 이메일. 동의하지 않아도 모든 기능을 동일하게 이용할 수 있고, 동의 후에도 메일 하단 수신거부 링크로 언제든 철회할 수 있습니다.",
+
+  // ── 기존 사용자 재동의 배너 (MarketingReconsentBanner) ──
+  "legal.reconsent.label": "마케팅 소식 받아보기",
+  "legal.reconsent.basis":
+    "제품 소식·업데이트·이벤트 안내를 가입 이메일로 받습니다. 선택 항목이며 메일 하단 수신거부로 언제든 철회할 수 있습니다.",
+  "legal.reconsent.submit": "동의 저장",
+  "legal.reconsent.saving": "저장 중...",
+  "legal.reconsent.savedNotice": "동의가 저장됐습니다. 감사합니다!",
+  "legal.reconsent.saveFailed": "저장 실패 — 잠시 후 다시 시도해 주세요.",
+  "legal.reconsent.dismiss": "다시 안 보기",
 };

@@ -118,13 +118,46 @@
 5. 이후는 훅 5개(`syncMarketingContactOn{AuthCreate,WaitlistCreate,FounderWrite,SubscriptionWrite}` + `syncMarketingConsentOnUserWrite`)가 실시간 유지.
    ★기존 사용자의 동의 백필은 별도 티켓(N8sAY4Tj). 훅 1b 는 **신규 write 만** 처리한다 — 이미 동의했지만 컨택트가 unknown 인 기존 사용자는 users 문서를 다시 쓰기 전까지 승격되지 않는다.
 
-## 기존 파운더 재동의 — 설계만(구현 보류, 사장님 승인 필요)
+## 앱(v3) 마케팅 opt-in 2곳 (`SnJ4WbpSbypzAyMT62tc`)
 
-`zaLMLwYf1kQfeQJqdAkz` 범위: 이번 티켓은 **신규** opt-in 수집 경로만 구현한다. 기존
-파운더(현재 미동의 ~30명, `emailMarketingConsent.status=unknown`)를 재동의시키는
-구현은 여기 포함하지 않는다 — 아래는 다음 승인 시 고를 두 경로의 설계다.
+데스크탑 앱에도 동의 수집 창구를 냈다. **둘 다 새 훅 없이** 기존
+`users/{uid}.webPrivacyConsent.marketing` → 훅 1b 경로를 그대로 탄다.
 
-- **안 A — 다음 로그인 시 배너(권장)**: v3 앱/marblo-web 이 로그인 직후
+1. **온보딩 체크박스** — `PrivacyConsentModal`(첫 실행 플로우 ② 단계, 정책 버전
+   상승 시 재노출) 맨 아래 "마케팅 정보 수신 동의 (선택)". ★기본 unchecked.
+   - 체크 후 "허용" → `saveMarketingOptIn` 이 `webPrivacyConsent`
+     (`marketing:true`, `version`, `locale`, `acceptedAt`) 를 merge write.
+   - 미체크(또는 "나중에") → **아무것도 쓰지 않는다**. `marketing:false` 를 쓰는
+     경로 자체가 앱에 없다 — 훅은 그것을 `never_opted_in` 으로 접는다.
+   - 로그인 전 단계라 uid 가 없으므로 답은 `marblo:pendingMarketingConsent` 로
+     park 되고 `PrivacyConsentGate` 가 uid 등장 시 flush(프라이버시 동의 파킹과
+     **별도 키**: flush 대상 문서 필드가 다르다). write 성공 시에만 park 을 지운다.
+   - 위 텔레메트리 동의(`privacyConsent`)와는 완전히 분리된 축 — 서로를 근거로
+     쓰지 않는다.
+2. **기존 파운더 재동의 배너** — `MarketingReconsentBanner`(Layout·WorkspaceShell
+   상단 1줄, 모달 아님). 아래 "안 A" 를 그대로 구현한 것.
+   - 노출 게이트: `emailMarketingConsent.status==="unknown"` **이고** 파운더이며
+     수신거부가 아닐 때만. `granted`/`pending`/`revoked`/컨택트 없음은 미노출 —
+     특히 수신거부자에게 다시 조르지 않는다(unsub 왕복 유지).
+   - `marketing_contacts` 는 클라이언트 차단이라 상태는 onCall
+     `getMyMarketingConsentStatus` 로만 읽는다. 응답은 `{status, unsubscribed,
+isFounder, shouldPromptReconsent}` 뿐 — **이메일은 평문·암호문·해시 모두 없다**.
+     조회 실패는 "미동의" 가 아니라 "모름" 이라 배너를 띄우지 않는다.
+   - 체크박스 ★기본 unchecked, 체크해야 "동의 저장" 버튼이 활성. "다시 안 보기"
+     는 uid 별 localStorage 억제일 뿐 동의/거부 기록이 아니다.
+   - 판정은 순수 함수로 이중 고정: 서버 `marketingConsentStatusView` +
+     `shouldPromptReconsent`, 렌더러 `shouldShowReconsentBanner`.
+   - ★배너는 **수동 노출 UI 일 뿐**이다. 재동의 캠페인 메일을 쏘는 관리자 액션은
+     범위 밖(별도 승인).
+
+## 기존 파운더 재동의 — 설계
+
+`zaLMLwYf1kQfeQJqdAkz` 범위: **신규** opt-in 수집 경로만 구현했고, 기존
+파운더(당시 미동의 ~30명, `emailMarketingConsent.status=unknown`) 재동의는
+아래 두 설계 중 **안 A 가 `SnJ4WbpSbypzAyMT62tc` 에서 구현**됐다(위 참고).
+안 B 는 여전히 미구현.
+
+- **안 A — 다음 로그인 시 배너(★구현됨)**: v3 앱이 로그인 직후
   `emailMarketingConsent.status==="unknown"` 인 실가입 파운더에게 얇은 배너로
   "마케팅 소식 받아보기" opt-in 을 노출. 체크 시 `users/{uid}.webPrivacyConsent.marketing=true`
   를 쓰는 기존 훅 1b(`syncMarketingConsentOnUserWrite`) 경로를 그대로 재사용 —
@@ -153,8 +186,9 @@ GCLOUD_PROJECT=marblo-2253d firebase deploy --only functions,firestore:rules --p
 ## 테스트
 
 ```bash
-cd v3/functions && npm run test:marketing      # 순수 로직 34 케이스 (의존성 0, node --test)
+cd v3/functions && npm run test:marketing      # 순수 로직 42 케이스 (의존성 0, node --test)
 cd v3/functions && npm run test:consent-sync   # 동의 배선 28 케이스 (Firestore+Auth 에뮬레이터)
+cd v3 && npx vitest run tests/unit/marketingConsent.test.ts   # 앱측 배너/파킹 판정 13 케이스
 ```
 
 `test:consent-sync` 는 컴파일된 `lib/index.js` 의 실제 훅을 에뮬레이터에 붙여 문서 전이를

@@ -39,6 +39,10 @@ import {
   readPendingConsent,
   type ConsentFlags,
 } from "../../services/privacyConsentService";
+import {
+  rememberPendingMarketingOptIn,
+  clearPendingMarketingOptIn,
+} from "../../services/marketingConsent";
 import { usePrivacyConsentStore } from "../../stores/privacyConsentStore";
 import { PrivacyConsentModal } from "../legal/PrivacyConsentModal";
 import { LanguageFirstRun } from "./LanguageFirstRun";
@@ -68,8 +72,17 @@ export function FirstRunFlow({ onComplete }: FirstRunFlowProps) {
     }
   }, [step, onComplete]);
 
-  const handleConsent = async (flags: ConsentFlags, locale: string) => {
+  const handleConsent = async (
+    flags: ConsentFlags,
+    locale: string,
+    marketing: boolean,
+  ) => {
     rememberPendingConsent(flags, locale);
+    // 마케팅 동의는 별도 레코드로 park 된다 — flush 대상 문서 필드가 다르기
+    // 때문이다(privacyConsent ↔ webPrivacyConsent). 체크했을 때만 남기고,
+    // 미체크면 이전 실행에서 남은 park 를 지운다(없는 동의를 flush 하지 않도록).
+    if (marketing) rememberPendingMarketingOptIn(locale);
+    else clearPendingMarketingOptIn();
     // Reflect the answer in-session too, so the optional-SDK gates in
     // PrivacyConsentGate act on it as soon as they mount rather than on the
     // all-off default until the Firestore flush lands.

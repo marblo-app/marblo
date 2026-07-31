@@ -31,4 +31,20 @@ export const legal: Record<keyof typeof koLegal, string> = {
   "legal.consent.later": "Later",
   "legal.consent.saving": "Saving...",
   "legal.consent.allow": "Allow",
+
+  // ── Marketing email opt-in (optional) — separate from telemetry consent ──
+  "legal.consent.marketing.label":
+    "Marketing emails (optional) — product news, updates, and event invites",
+  "legal.consent.marketing.hint":
+    "Sent to your sign-up email. All features work the same if you decline, and you can withdraw any time via the unsubscribe link in every email.",
+
+  // ── Re-consent banner for existing users (MarketingReconsentBanner) ──
+  "legal.reconsent.label": "Get product news by email",
+  "legal.reconsent.basis":
+    "Product news, updates, and event invites sent to your sign-up email. Optional — withdraw any time via the unsubscribe link in every email.",
+  "legal.reconsent.submit": "Save consent",
+  "legal.reconsent.saving": "Saving...",
+  "legal.reconsent.savedNotice": "Consent saved. Thank you!",
+  "legal.reconsent.saveFailed": "Save failed — please try again later.",
+  "legal.reconsent.dismiss": "Don't show again",
 };

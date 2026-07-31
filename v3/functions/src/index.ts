@@ -57,6 +57,8 @@ import {
   decideMarketingConsentSync,
   backfillConsentGrantFromUserDoc,
   decideWaitlistConsentGrant,
+  marketingConsentStatusView,
+  shouldPromptReconsent,
   type UserDocRaw,
   type WaitlistDocRaw,
   type ContactFlags,
@@ -162,7 +164,12 @@ async function runAdminAnalyticsQueries(
 }
 
 type MergeChangeType =
-  "docs" | "test" | "config" | "code" | "mixed" | "unknown";
+  | "docs"
+  | "test"
+  | "config"
+  | "code"
+  | "mixed"
+  | "unknown";
 
 interface GitHubMergeHistoryPayload {
   prNumber?: unknown;
@@ -2928,7 +2935,10 @@ export const previewFounderSurveyOffer = functions.https.onCall(
 //   no_account     — 계정 X (미가입=미다운로드/미로그인)          → 다운로드 팔로업
 
 type FounderSegment =
-  "active" | "sub_expired" | "account_no_sub" | "no_account";
+  | "active"
+  | "sub_expired"
+  | "account_no_sub"
+  | "no_account";
 
 // 순수 분류기(테스트용 export). 부수효과 없음.
 export function classifyFounderActivation(opts: {
@@ -5258,7 +5268,8 @@ const TELEGRAM_BETA_WEBHOOK_SECRET =
   process.env.TELEGRAM_BETA_WEBHOOK_SECRET || "";
 
 type TgInlineButton =
-  { text: string; callback_data: string } | { text: string; url: string };
+  | { text: string; callback_data: string }
+  | { text: string; url: string };
 type TgInlineKeyboard = TgInlineButton[][];
 
 interface TgCallbackQuery {
@@ -8526,6 +8537,52 @@ export const syncMarketingConsentOnUserWrite = functions.firestore
       console.warn("[marketing-contacts] users onWrite 훅 실패:", uid, err);
     }
   });
+
+// ─── 조회: 내 마케팅 동의 상태(재동의 배너 게이트) ────────────────────
+//
+// 앱의 재동의 배너는 "아직 아무 결정도 안 한 파운더" 에게만 떠야 한다. 그런데
+// marketing_contacts 는 Firestore 룰에서 클라이언트 접근 전면 차단(Admin SDK
+// 전용)이라 렌더러가 직접 못 읽는다 — 그래서 상태 플래그만 돌려주는 이 얇은
+// onCall 을 둔다.
+//
+// ★쓰기는 하지 않는다. 이 호출은 순수 read 이고, 동의 grant 는 여전히
+//   users/{uid}.webPrivacyConsent.marketing → 훅 1b 경로 하나뿐이다(새 훅 없음).
+// ★응답에 이메일은 없다 — 평문도, emailEnc 도, 해시도. 배너 판정에 불필요하다.
+// ★판정은 순수 함수 marketingContacts.{marketingConsentStatusView,
+//   shouldPromptReconsent} 로 수렴(단위테스트로 고정) — 여기선 IO 만 한다.
+export const getMyMarketingConsentStatus = functions.https.onCall(
+  async (_data, context) => {
+    const uid = context.auth?.uid;
+    if (!uid) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다.",
+      );
+    }
+    // 이메일은 Auth 를 SoT 로 삼는다(훅 1b 와 동일). custom-token 에이전트
+    // 계정은 isRealSignupUser 가 걸러낸다 — 배너 대상이 아니다.
+    let user: admin.auth.UserRecord;
+    try {
+      user = await admin.auth().getUser(uid);
+    } catch (err) {
+      if ((err as { code?: string }).code === "auth/user-not-found") {
+        return { status: "no_contact", unsubscribed: false, isFounder: false };
+      }
+      throw err;
+    }
+    if (!isRealSignupUser(user)) {
+      return { status: "no_contact", unsubscribed: false, isFounder: false };
+    }
+
+    const snap = await marketingContactRef(
+      contactIdForEmail(user.email as string),
+    ).get();
+    const view = marketingConsentStatusView(
+      snap.exists ? (snap.data() as Partial<MarketingContactDoc>) : null,
+    );
+    return { ...view, shouldPromptReconsent: shouldPromptReconsent(view) };
+  },
+);
 
 // ─── write 훅 2: waitlist 신청 → 컨택트 upsert ───────────────────────
 // ★waitlist 폼의 agreed=true 는 "활동/인용 동의"이지 마케팅 수신동의가 아니다

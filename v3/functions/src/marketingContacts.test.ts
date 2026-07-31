@@ -23,6 +23,8 @@ import {
   decideMarketingConsentSync,
   backfillConsentGrantFromUserDoc,
   decideWaitlistConsentGrant,
+  marketingConsentStatusView,
+  shouldPromptReconsent,
   UNKNOWN_CONSENT,
   type ContactFlags,
   type EmailMarketingConsent,
@@ -627,4 +629,164 @@ test("★신규 waitlist 마케팅 동의자는 grant → isEmailable=ok(0→0 �
     }).ok,
     true,
   );
+});
+
+// ─── 앱 마케팅 opt-in 2곳(온보딩 체크박스 + 기존 파운더 재동의 배너) ──────
+// 둘 다 users/{uid}.webPrivacyConsent.marketing=true 를 쓰고 훅 1b
+// (decideMarketingConsentSync)가 grant 로 잇는다 — 새 훅 없음.
+
+test("★앱 온보딩 opt-in: webPrivacyConsent.marketing=true → grant → isEmailable=ok", () => {
+  const action = decideMarketingConsentSync(null, {
+    webPrivacyConsent: {
+      marketing: true,
+      version: "2026-07-31",
+      locale: "ko",
+      acceptedAt: NOW,
+    },
+  });
+  assert.equal(action.kind, "grant");
+  if (action.kind !== "grant") return;
+  const merged = mergeEmailConsent(
+    UNKNOWN_CONSENT,
+    {
+      grant: {
+        source: "web_privacy_consent",
+        version: action.version,
+        legalBasis: "explicit_opt_in",
+        consentedAt: action.consentedAt,
+      },
+    },
+    NOW,
+  );
+  assert.equal(merged.consent.status, "granted");
+  assert.equal(merged.consent.legalBasis, "explicit_opt_in");
+  assert.equal(
+    isEmailable({
+      emailMarketingConsent: merged.consent,
+      unsubscribe: subscribed,
+      emailEnc: "e",
+    }).ok,
+    true,
+  );
+});
+
+test("★온보딩에서 체크 안 하면 아무 write 도 없고, 설령 문서가 있어도 승격되지 않는다", () => {
+  // 앱은 미체크 시 webPrivacyConsent 자체를 쓰지 않는다 → no_consent_record.
+  assert.equal(
+    decideMarketingConsentSync(null, { someOtherField: 1 }).kind,
+    "none",
+  );
+  // 어떤 경로로 marketing:false 가 들어와도 never_opted_in — granted 로 올리지 않는다.
+  const action = decideMarketingConsentSync(null, {
+    webPrivacyConsent: { marketing: false, version: "2026-07-31" },
+  });
+  assert.equal(action.kind, "none");
+  if (action.kind === "none") assert.equal(action.reason, "never_opted_in");
+  // 컨택트는 unknown 그대로 → 발송 불가.
+  assert.equal(
+    isEmailable({
+      emailMarketingConsent: UNKNOWN_CONSENT,
+      unsubscribe: subscribed,
+      emailEnc: "e",
+    }).reason,
+    "consent_not_granted",
+  );
+});
+
+test("marketingConsentStatusView: 컨택트 없으면 no_contact(배너 대상 아님)", () => {
+  const view = marketingConsentStatusView(null);
+  assert.deepEqual(view, {
+    status: "no_contact",
+    unsubscribed: false,
+    isFounder: false,
+  });
+  assert.equal(shouldPromptReconsent(view), false);
+});
+
+test("marketingConsentStatusView: 세그먼트/founderStatus 중 하나만 있어도 파운더로 본다", () => {
+  assert.equal(
+    marketingConsentStatusView({ segments: ["auth_user", "founder"] })
+      .isFounder,
+    true,
+  );
+  assert.equal(
+    marketingConsentStatusView({ founderStatus: "selected" }).isFounder,
+    true,
+  );
+  // rejected 는 파운더가 아니다(deriveSegments 와 같은 기준).
+  assert.equal(
+    marketingConsentStatusView({ founderStatus: "rejected" }).isFounder,
+    false,
+  );
+  assert.equal(marketingConsentStatusView({ segments: [] }).isFounder, false);
+});
+
+test("★재동의 배너: status unknown 인 파운더에게만 노출", () => {
+  const founderUnknown = {
+    emailMarketingConsent: UNKNOWN_CONSENT,
+    unsubscribe: subscribed,
+    segments: ["founder"],
+  };
+  assert.equal(
+    shouldPromptReconsent(marketingConsentStatusView(founderUnknown)),
+    true,
+  );
+  // 파운더가 아니면 미노출 — 신규 가입자는 온보딩 체크박스에서 이미 물었다.
+  assert.equal(
+    shouldPromptReconsent(
+      marketingConsentStatusView({
+        ...founderUnknown,
+        segments: ["auth_user"],
+      }),
+    ),
+    false,
+  );
+});
+
+test("★재동의 배너: status≠unknown 이면 전부 미노출(granted/pending/revoked)", () => {
+  for (const status of ["granted", "pending", "revoked"] as const) {
+    const view = marketingConsentStatusView({
+      emailMarketingConsent: { ...UNKNOWN_CONSENT, status },
+      unsubscribe: subscribed,
+      segments: ["founder"],
+    });
+    assert.equal(view.status, status);
+    assert.equal(
+      shouldPromptReconsent(view),
+      false,
+      `${status} 인 사람에게 배너가 떴다`,
+    );
+  }
+});
+
+test("★재동의 배너: 수신거부자에게는 절대 노출하지 않는다(unsub 왕복 유지)", () => {
+  // status 가 어쩌다 unknown 으로 남아 있어도 unsubscribed 가 이긴다.
+  const view = marketingConsentStatusView({
+    emailMarketingConsent: UNKNOWN_CONSENT,
+    unsubscribe: unsubscribed,
+    segments: ["founder"],
+  });
+  assert.equal(view.unsubscribed, true);
+  assert.equal(shouldPromptReconsent(view), false);
+});
+
+test("★재동의 배너 opt-in 도 같은 경로로 granted — 단, revoked 는 되살리지 않는다", () => {
+  const grant = {
+    source: "web_privacy_consent",
+    version: "2026-07-31",
+    legalBasis: "explicit_opt_in" as const,
+    consentedAt: NOW,
+  };
+  // unknown(배너 노출 대상) → granted
+  const promoted = mergeEmailConsent(UNKNOWN_CONSENT, { grant }, NOW);
+  assert.equal(promoted.consent.status, "granted");
+  assert.equal(promoted.event?.type, "granted");
+  // revoked 인 사람은 애초에 배너를 못 보지만, 설령 write 가 흘러와도 안 되살아난다.
+  const revoked = mergeEmailConsent(
+    { ...UNKNOWN_CONSENT, status: "revoked" },
+    { grant },
+    NOW,
+  );
+  assert.equal(revoked.consent.status, "revoked");
+  assert.equal(revoked.event, null);
 });

@@ -18,6 +18,16 @@
  * false disclosure. The marketing website uses GA4 separately under its own
  * cookie consent — see PrivacyPolicyPage. The ga4/mixpanel flags remain in
  * the consent schema (always false) for forward-compat.
+ *
+ * ── 마케팅 수신동의(별개 축) ─────────────────────────────────────────
+ * 맨 아래 체크박스 하나가 마케팅 수신동의다. 위 텔레메트리 동의와 **완전히
+ * 분리된 동의**이며 서로를 근거로 쓰지 않는다:
+ *   - 저장 위치가 다르다: 텔레메트리 = users/{uid}.privacyConsent,
+ *     마케팅 = users/{uid}.webPrivacyConsent.marketing (marblo-web 가입 폼/
+ *     설정 화면과 같은 필드 → functions 훅 1b 가 발송 게이트까지 잇는다).
+ *   - ★기본 unchecked. 체크한 경우에만 write 한다. "나중에"(거절)는 물론이고
+ *     "허용" 을 눌러도 이 칸이 꺼져 있으면 마케팅 쪽은 아무것도 쓰지 않는다 —
+ *     없는 동의를 만들지 않는다(PIPA 옵트인).
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "../../hooks/useAuth";
@@ -25,6 +35,7 @@ import { usePrivacyConsentStore } from "../../stores/privacyConsentStore";
 import { useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
 import type { ConsentFlags } from "../../services/privacyConsentService";
+import { saveMarketingOptIn } from "../../services/marketingConsentService";
 import { PrivacyPolicyPage } from "./PrivacyPolicyPage";
 
 type CheckboxId = "sentry" | "ga4" | "mixpanel" | "overseasTransfer";
@@ -65,8 +76,15 @@ interface PrivacyConsentModalProps {
    * keyed by uid). The first-run flow runs this modal *before* sign-in — there
    * is no uid yet — so it injects a handler that parks the answer locally and
    * lets PrivacyConsentGate flush it once a uid exists.
+   *
+   * `marketing` is the marketing opt-in, carried alongside (not inside) the
+   * telemetry flags because it lands in a different document field entirely.
    */
-  onSubmit?: (flags: ConsentFlags, locale: string) => Promise<void> | void;
+  onSubmit?: (
+    flags: ConsentFlags,
+    locale: string,
+    marketing: boolean,
+  ) => Promise<void> | void;
 }
 
 export function PrivacyConsentModal({
@@ -83,6 +101,9 @@ export function PrivacyConsentModal({
     mixpanel: false,
     overseasTransfer: false,
   });
+  // ★기본 unchecked — pre-check 금지(PIPA 옵트인). 위 flags 와 별도 state 인
+  // 이유는 저장되는 문서 필드가 아예 다르기 때문이다(webPrivacyConsent).
+  const [marketing, setMarketing] = useState(false);
   const [showPolicy, setShowPolicy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,12 +123,18 @@ export function PrivacyConsentModal({
    * write. The record carries the locale the user actually read the policy in
    * — this modal now runs right after the language picker, so that is known.
    */
-  const submit = async (answer: ConsentFlags) => {
+  const submit = async (answer: ConsentFlags, marketingOptIn: boolean) => {
     if (!onSubmit && !user) return;
     setSubmitting(true);
     try {
-      if (onSubmit) await onSubmit(answer, locale);
-      else if (user) await save(user.uid, answer, locale);
+      if (onSubmit) await onSubmit(answer, locale, marketingOptIn);
+      else if (user) {
+        await save(user.uid, answer, locale);
+        // 마케팅은 별도 write — 체크했을 때만. 텔레메트리 저장이 실패해도
+        // (fail-open) 사용자가 켠 마케팅 동의는 따로 기록되고, 반대로 마케팅
+        // write 가 실패해도 텔레메트리 동의는 이미 저장돼 있다.
+        if (marketingOptIn) await saveMarketingOptIn(user.uid, locale);
+      }
     } catch (err) {
       // Fail-open: Firestore write 실패해도 모달은 닫는다. store.save 가
       // local state 까지 안 채웠다면 다음 부팅 때 다시 묻힐 뿐 — 사용자
@@ -129,19 +156,23 @@ export function PrivacyConsentModal({
       setError(t("legal.consent.overseasRequired"));
       return;
     }
-    await submit({ firstPartyTelemetry: true, ...flags });
+    await submit({ firstPartyTelemetry: true, ...flags }, marketing);
   };
 
   // "나중에" = explicit decline. Save zero flags so we don't re-prompt
   // on every launch (only when policy version bumps).
+  // ★마케팅도 함께 거절로 본다 — 이 버튼은 "지금은 아무것도 동의 안 함" 이다.
   const later = async () =>
-    submit({
-      firstPartyTelemetry: true,
-      sentry: false,
-      ga4: false,
-      mixpanel: false,
-      overseasTransfer: false,
-    });
+    submit(
+      {
+        firstPartyTelemetry: true,
+        sentry: false,
+        ga4: false,
+        mixpanel: false,
+        overseasTransfer: false,
+      },
+      false,
+    );
 
   if (showPolicy) {
     return (
@@ -211,6 +242,27 @@ export function PrivacyConsentModal({
               </div>
             </label>
           ))}
+
+          <div className="my-3 border-t border-[#313244]" />
+
+          {/* 마케팅 수신동의 — 위 텔레메트리 동의와 완전히 별개 축.
+              ★기본 unchecked, 선택. 끄고 진행해도 모든 기능은 동일하다. */}
+          <label className="flex cursor-pointer gap-3 rounded p-2 hover:bg-[#262640]">
+            <input
+              type="checkbox"
+              checked={marketing}
+              onChange={(e) => setMarketing(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-[#a6e3a1]"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-[#cdd6f4]">
+                {t("legal.consent.marketing.label")}
+              </div>
+              <div className="text-[11px] leading-snug text-[#6c7086]">
+                {t("legal.consent.marketing.hint")}
+              </div>
+            </div>
+          </label>
 
           {error && (
             <div className="rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-3 py-2 text-[11px] text-[#f38ba8]">

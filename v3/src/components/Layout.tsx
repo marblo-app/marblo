@@ -27,6 +27,7 @@ import { StoreTab } from "./store/StoreTab";
 import { GuideTab } from "./guide/GuideTab";
 import { ActivityStreamPanel } from "./activity/ActivityStreamPanel";
 import { PrivacyConsentGate } from "./legal/PrivacyConsentGate";
+import { MarketingReconsentBanner } from "./legal/MarketingReconsentBanner";
 import { CliSetupGate } from "./onboarding/CliSetupGate";
 import { ProjectSetupBanners } from "./onboarding/ProjectSetupBanners";
 import { FirstProjectSurvey } from "./onboarding/FirstProjectSurvey";
@@ -443,6 +444,10 @@ export function Layout() {
           is available / downloading / downloaded. Hotfix releases show
           a forced-restart countdown. */}
       <UpdateBanner />
+
+      {/* 기존 파운더 재동의 배너 — 마케팅 동의가 아직 unknown 인 파운더에게만
+          뜨는 얇은 opt-in 줄. 이미 동의/철회한 사람에겐 조회 단계에서 걸러진다. */}
+      <MarketingReconsentBanner />
 
       {/* Project-setup prompts (register-or-browse choice, name-your-project).
           Rendered here so they surface no matter which panel / sidebar state

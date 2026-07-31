@@ -19,6 +19,11 @@ import {
   readPendingConsent,
   clearPendingConsent,
 } from "../../services/privacyConsentService";
+import {
+  readPendingMarketingOptIn,
+  clearPendingMarketingOptIn,
+} from "../../services/marketingConsent";
+import { saveMarketingOptIn } from "../../services/marketingConsentService";
 import { PrivacyConsentModal } from "./PrivacyConsentModal";
 
 export function PrivacyConsentGate() {
@@ -66,6 +71,26 @@ export function PrivacyConsentGate() {
       console.warn("[PrivacyConsentGate] load failed:", err);
     });
   }, [user?.uid, load, save]);
+
+  // 가입 전 첫 실행 플로우에서 켠 마케팅 opt-in 을 uid 가 생기는 순간 flush.
+  //
+  // ★프라이버시 동의 flush 와 분리된 효과다: 저장 위치가 다르고(privacyConsent
+  //   ↔ webPrivacyConsent), 한쪽 실패가 다른 쪽을 막으면 안 된다. write 가
+  //   성공했을 때만 park 을 지운다 — 실패 시 다음 실행에서 다시 시도한다
+  //   (동의를 받고도 잃어버리는 것이 최악).
+  useEffect(() => {
+    if (!user?.uid) return;
+    const pendingMarketing = readPendingMarketingOptIn();
+    if (!pendingMarketing) return;
+    saveMarketingOptIn(user.uid, pendingMarketing.locale)
+      .then(() => clearPendingMarketingOptIn())
+      .catch((err) => {
+        console.warn(
+          "[PrivacyConsentGate] pending marketing opt-in flush failed:",
+          err,
+        );
+      });
+  }, [user?.uid]);
 
   // Drive SDK init based on current consent. maybeInitSentry is idempotent.
   useEffect(() => {

@@ -5,6 +5,7 @@ import { UpdateBanner } from "../UpdateBanner";
 import { ProjectSetupBanners } from "../onboarding/ProjectSetupBanners";
 import { CliSetupHost } from "../onboarding/CliSetupHost";
 import { PrivacyConsentGate } from "../legal/PrivacyConsentGate";
+import { MarketingReconsentBanner } from "../legal/MarketingReconsentBanner";
 import { ChatToastHost } from "../chat/ChatToastHost";
 import { BugReportNoticeToast } from "../chat/BugReportNoticeToast";
 import { UpgradeModal } from "../settings/UpgradeModal";
@@ -219,6 +220,8 @@ export function WorkspaceShell() {
     <div className="relative flex h-screen flex-col bg-gray-900 text-gray-100">
       <Header onNavigateToSettings={() => setActiveTab("settings")} />
       <UpdateBanner />
+      {/* 기존 파운더 재동의 배너 — status unknown 인 파운더에게만 노출. */}
+      <MarketingReconsentBanner />
       <ProjectSetupBanners {...projectSetup} />
       {/* Onboarding: no modal here. This host runs the CLI setup engine and
           surfaces a non-blocking banner that deep-links to the 시작하기 tab. */}

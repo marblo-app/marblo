@@ -41,7 +41,11 @@ export type UnsubscribeStatus = "subscribed" | "unsubscribed";
 export type LifecycleStage = "lead" | "signup" | "founder" | "subscriber";
 
 export type ContactSource =
-  "auth_signup" | "waitlist" | "founder" | "subscription" | "manual";
+  | "auth_signup"
+  | "waitlist"
+  | "founder"
+  | "subscription"
+  | "manual";
 
 export interface EmailMarketingConsent {
   status: ConsentStatus;
@@ -252,7 +256,11 @@ export function buildUnsubscribeUrl(
 export interface EmailableVerdict {
   ok: boolean;
   reason:
-    "ok" | "no_contact" | "consent_not_granted" | "unsubscribed" | "no_email";
+    | "ok"
+    | "no_contact"
+    | "consent_not_granted"
+    | "unsubscribed"
+    | "no_email";
 }
 
 export function isEmailable(
@@ -553,6 +561,60 @@ export function decideWaitlistConsentGrant(
   }
   if (data.agreed === true) return { kind: "pending" };
   return { kind: "none" };
+}
+
+// ─── 내 동의 상태 조회(재동의 배너 게이트) ───────────────────────────
+/**
+ * 클라이언트에 돌려줄 "내 마케팅 컨택트 상태" — ★상태 플래그만.
+ *
+ * `marketing_contacts` 는 Firestore 룰에서 클라이언트 접근이 전면 차단이라
+ * (Admin SDK 전용) 앱은 이 뷰를 onCall(`getMyMarketingConsentStatus`)로만 본다.
+ * 이메일은 평문도, `emailEnc` 암호문도, `normalizedEmailHash` 도 넘기지 않는다 —
+ * 배너를 띄울지 판정하는 데 필요 없는 정보다.
+ */
+export interface MarketingConsentStatusView {
+  /** 컨택트 문서가 아예 없으면 no_contact(배너 대상 아님). */
+  status: ConsentStatus | "no_contact";
+  unsubscribed: boolean;
+  isFounder: boolean;
+}
+
+export function marketingConsentStatusView(
+  contact: Partial<MarketingContactDoc> | null | undefined,
+): MarketingConsentStatusView {
+  if (!contact) {
+    return { status: "no_contact", unsubscribed: false, isFounder: false };
+  }
+  const founderStatus = contact.founderStatus ?? null;
+  return {
+    status: contact.emailMarketingConsent?.status ?? "unknown",
+    unsubscribed: contact.unsubscribe?.status === "unsubscribed",
+    // 세그먼트가 1차 근거. 백필 순서에 따라 세그먼트가 아직 안 붙은 컨택트도
+    // founderStatus 미러로 잡는다(rejected 는 제외 — deriveSegments 와 동일 기준).
+    isFounder:
+      (Array.isArray(contact.segments) &&
+        contact.segments.includes("founder")) ||
+      (!!founderStatus && founderStatus !== "rejected"),
+  };
+}
+
+/**
+ * 재동의 배너 노출 판정(서버측 단일소스 — 렌더러의 shouldShowReconsentBanner 와
+ * 같은 규칙을 서버에서도 고정해 단위테스트로 지킨다).
+ *
+ * ★`unknown` 하나만 노출 대상이다:
+ *   - granted: 이미 동의 — 다시 물을 이유가 없다.
+ *   - pending: 재동의 캠페인 풀. 별도 승인 캠페인 소관이지 로그인 배너가 아니다.
+ *   - revoked: 철회/수신거부. 여기에 배너를 띄우면 unsubscribe 왕복이 무의미해진다.
+ *   - no_contact: 판정 근거 자체가 없다.
+ * ★unsubscribed 는 status 와 무관하게 즉시 차단한다.
+ */
+export function shouldPromptReconsent(
+  view: MarketingConsentStatusView,
+): boolean {
+  if (view.unsubscribed) return false;
+  if (view.status !== "unknown") return false;
+  return view.isFounder;
 }
 
 // ─── lifecycle·세그먼트 파생 ────────────────────────────────────────
