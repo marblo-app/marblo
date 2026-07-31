@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.core.config import settings
-from backend.api import payments, channels, cache
+from backend.api import channels, cache
 from backend.db.base import engine, Base
 import logging
 import sentry_sdk
@@ -43,7 +43,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(payments.router)
 app.include_router(channels.router)
 app.include_router(cache.router)
 

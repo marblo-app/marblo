@@ -1,25 +1,15 @@
-# Marblo Payment Backend API
+# Marblo Backend API
 
-Toss Payments를 활용한 결제 시스템 백엔드 API
+내부용 FastAPI 서비스. 채널 데이터 조회와 BigQuery 캐시 계층을 제공한다.
+
+> **결제 API는 이 백엔드에 없다.** 예전에는 Toss/NaverPay 라우터가 여기 있었으나 호출하는
+> 클라이언트가 0건인 죽은 코드여서 제거했다. 라이브 결제 경로는 **Cloud Functions**(`v3/functions`)
+> 와 **marblo-web** 이며, 시크릿도 그쪽에서만 관리한다.
 
 ## 기능
 
-- **결제 처리**
-  - 결제 요청/승인/취소
-  - 부분 취소 지원
-  - 결제 상태 조회
-  - 결제 내역 관리
-
-- **구독 관리**
-  - 정기결제 등록/해지
-  - 구독 플랜 변경
-  - 빌링 키 관리
-  - 결제 실패 재시도
-
-- **웹훅 처리**
-  - 결제 상태 변경 자동 반영
-  - 빌링 키 업데이트
-  - 비동기 처리
+- **채널 데이터** — 쿠팡 상품/대시보드 조회
+- **캐시 계층** — Redis 기반 API·BigQuery 쿼리 캐시, 캐시 통계/무효화
 
 ## 시작하기
 
@@ -34,9 +24,8 @@ cp .env.example .env
 2. 필수 환경 변수 설정:
 
 - `DATABASE_URL`: PostgreSQL 연결 정보
-- `TOSS_CLIENT_KEY`: Toss Payments 클라이언트 키
-- `TOSS_SECRET_KEY`: Toss Payments 시크릿 키
-- `TOSS_WEBHOOK_SECRET`: 웹훅 검증용 시크릿
+- `SECRET_KEY`: 앱 서명 키
+- `GOOGLE_CLOUD_PROJECT`: BigQuery 프로젝트 ID
 
 ### Docker Compose로 실행
 
@@ -73,27 +62,21 @@ uvicorn main:app --reload --port 8001
 
 ## 주요 엔드포인트
 
-### 결제 API
+### 채널
 
-- `POST /api/v1/payments/request` - 결제 요청
-- `POST /api/v1/payments/confirm` - 결제 승인
-- `POST /api/v1/payments/cancel` - 결제 취소
-- `GET /api/v1/payments/status/{payment_key}` - 결제 상태 조회
-- `GET /api/v1/payments/history` - 결제 내역 조회
+- `GET /api/channels/coupang/products` - 쿠팡 상품 조회
+- `GET /api/channels/coupang/dashboard` - 쿠팡 대시보드
 
-### 구독 API
+### 캐시
 
-- `POST /api/v1/payments/billing/register` - 빌링 키 등록
-- `POST /api/v1/payments/subscriptions` - 구독 생성
-- `PATCH /api/v1/payments/subscriptions/{id}` - 구독 수정
-- `POST /api/v1/payments/subscriptions/{id}/cancel` - 구독 취소
-- `GET /api/v1/payments/subscriptions/current` - 현재 구독 조회
+- `GET /cache/status` - 캐시 상태
+- `GET /cache/stats` - 캐시 통계
+- `GET /cache/keys` - 캐시 키 목록
+- `DELETE /cache/keys/{key}` - 개별 키 삭제
+- `POST /cache/invalidate` - 캐시 무효화
+- `GET /cache/bigquery/metrics` - BigQuery 캐시 메트릭
+- `GET /cache/performance/report` - 캐시 성능 리포트
 
-### 웹훅
+### 헬스체크
 
-- `POST /api/v1/payments/webhook` - Toss Payments 웹훅 처리
-
-### 통계
-
-- `GET /api/v1/payments/statistics/payments` - 결제 통계
-- `GET /api/v1/payments/statistics/subscriptions` - 구독 통계
+- `GET /health` - 서비스 상태

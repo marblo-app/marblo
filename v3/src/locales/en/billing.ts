@@ -66,7 +66,7 @@ export const billing: Record<keyof typeof koBilling, string> = {
   // ── Data-as-label: payment provider display name ─────────
   "billing.data.provider.toss": "TossPayments",
 
-  // ── Data-as-label: PaymentMethod enum (types/payment.ts) ──
+  // ── Data-as-label: payment method codes ──────────────────
   "billing.data.paymentMethod.CARD": "Card",
   "billing.data.paymentMethod.VIRTUAL_ACCOUNT": "Virtual account",
   "billing.data.paymentMethod.TRANSFER": "Bank transfer",

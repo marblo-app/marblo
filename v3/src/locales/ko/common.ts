@@ -46,15 +46,7 @@ export const common = {
   "common.team.updateRoleFailed": "역할 변경 실패",
   "common.team.removeMemberFailed": "멤버 제거 실패",
 
-  // — payment (services/paymentClient, services/billingService) —
-  "common.payment.status.pending": "결제 대기",
-  "common.payment.status.ready": "결제 준비",
-  "common.payment.status.inProgress": "결제 진행중",
-  "common.payment.status.done": "결제 완료",
-  "common.payment.status.canceled": "결제 취소",
-  "common.payment.status.partialCanceled": "부분 취소",
-  "common.payment.status.aborted": "결제 중단",
-  "common.payment.status.expired": "결제 만료",
+  // — payment (services/billingService) —
   "common.payment.sdkLoadFailed": "Paddle SDK 로드 실패",
   "common.payment.checkoutCanceled": "결제 취소",
 

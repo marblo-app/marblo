@@ -43,14 +43,6 @@ export const common: Record<keyof typeof koCommon, string> = {
   "common.team.removeMemberFailed": "Failed to remove member",
 
   // — payment —
-  "common.payment.status.pending": "Payment pending",
-  "common.payment.status.ready": "Payment ready",
-  "common.payment.status.inProgress": "Payment in progress",
-  "common.payment.status.done": "Payment complete",
-  "common.payment.status.canceled": "Payment canceled",
-  "common.payment.status.partialCanceled": "Partially canceled",
-  "common.payment.status.aborted": "Payment aborted",
-  "common.payment.status.expired": "Payment expired",
   "common.payment.sdkLoadFailed": "Failed to load Paddle SDK",
   "common.payment.checkoutCanceled": "Payment canceled",
 

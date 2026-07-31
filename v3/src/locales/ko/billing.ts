@@ -68,7 +68,7 @@ export const billing = {
   // ── Data-as-label: payment provider display name ─────────
   "billing.data.provider.toss": "토스페이먼츠",
 
-  // ── Data-as-label: PaymentMethod enum (types/payment.ts) ──
+  // ── Data-as-label: payment method codes ──────────────────
   // Enum internal values are English code identifiers; these are the
   // human-facing labels for each method code.
   "billing.data.paymentMethod.CARD": "카드",

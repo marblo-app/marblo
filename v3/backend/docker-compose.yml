@@ -35,9 +35,6 @@ services:
       DATABASE_URL: postgresql://marblo_user:marblo_password@postgres:5432/marblo_payment
       REDIS_URL: redis://redis:6379
       SECRET_KEY: change-this-secret-key-in-production
-      TOSS_CLIENT_KEY: ${TOSS_CLIENT_KEY}
-      TOSS_SECRET_KEY: ${TOSS_SECRET_KEY}
-      TOSS_WEBHOOK_SECRET: ${TOSS_WEBHOOK_SECRET}
     volumes:
       - ./:/app
 

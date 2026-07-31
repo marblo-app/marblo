@@ -4,7 +4,7 @@ from pydantic import Field
 
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "Marblo Payment API"
+    PROJECT_NAME: str = "Marblo Backend API"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = Field(default="development", env="ENVIRONMENT")
@@ -14,17 +14,10 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
-    TOSS_CLIENT_KEY: str = Field(..., env="TOSS_CLIENT_KEY")
-    TOSS_SECRET_KEY: str = Field(..., env="TOSS_SECRET_KEY")
-    TOSS_API_URL: str = Field(default="https://api.tosspayments.com/v1", env="TOSS_API_URL")
-    TOSS_WEBHOOK_SECRET: str = Field(..., env="TOSS_WEBHOOK_SECRET")
-
-    NAVERPAY_ENABLED: bool = Field(default=False, env="NAVERPAY_ENABLED")
-    NAVERPAY_MERCHANT_ID: Optional[str] = Field(default=None, env="NAVERPAY_MERCHANT_ID")
-    NAVERPAY_API_KEY: Optional[str] = Field(default=None, env="NAVERPAY_API_KEY")
-    NAVERPAY_SECRET_KEY: Optional[str] = Field(default=None, env="NAVERPAY_SECRET_KEY")
-    NAVERPAY_API_URL: str = Field(default="https://pay.naver.com/api/v1", env="NAVERPAY_API_URL")
-    NAVERPAY_WEBHOOK_SECRET: Optional[str] = Field(default=None, env="NAVERPAY_WEBHOOK_SECRET")
+    # NOTE: Payment (Toss / NaverPay) credentials used to be read here for the
+    # FastAPI payments router. That router and its services were dead code with
+    # zero callers, so they were removed along with these settings — the live
+    # payment path is Cloud Functions + marblo-web, which hold their own secrets.
 
     REDIS_URL: str = Field(default="redis://localhost:6379", env="REDIS_URL")
 
