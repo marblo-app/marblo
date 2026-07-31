@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Defense-in-depth hardening pass across application layers, with selectable depth and OWASP/SOC2/GDPR/PCI-DSS compliance framings, plus STRIDE and attack-tree skills. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "보안 강화 (wshobson)"
+    description: "애플리케이션 레이어 전반의 심층방어 강화 패스 — 선택 가능한 깊이와 OWASP/SOC2/GDPR/PCI-DSS 컴플라이언스 프레이밍, STRIDE·공격 트리 스킬 포함. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: A WCAG audit pipeline — axe-core automation driven through a headless browser, manual keyboard and screen-reader verification, and remediation guidance ranked by user impact. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "접근성 감사 (wshobson)"
+    description: "WCAG 감사 파이프라인 — 헤드리스 브라우저로 구동되는 axe-core 자동화, 수동 키보드·스크린리더 검증, 사용자 영향도 순으로 정리된 개선 가이드. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

@@ -7,6 +7,11 @@ version: 2026.07.20260728181317
 status: active
 description: AWS Labs' collection of MCP servers — one per service area (API, docs, pricing, CloudWatch, EKS, DynamoDB, and ~55 more), installed individually from the same repo. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "AWS MCP 서버 모음"
+    description: "AWS Labs의 MCP 서버 모음 — 서비스 영역별(API, 문서, 가격, CloudWatch, EKS, DynamoDB 등 약 55개 이상)로 나뉘며 같은 저장소에서 개별 설치. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: AWS Labs
   tier: community

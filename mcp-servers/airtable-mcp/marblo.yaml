@@ -7,6 +7,10 @@ version: 1.14.0
 status: active
 description: Reads and writes Airtable bases from the agent — list bases and tables, inspect schema, then query, create, update, and delete records. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "에이전트에서 Airtable 베이스를 읽고 쓴다 — 베이스·테이블 목록 조회, 스키마 확인 후 레코드 쿼리·생성·수정·삭제. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: domdomegg
   tier: community

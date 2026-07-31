@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: A phase-gated red-green-refactor orchestration — each step writes its output to disk, checkpoints wait for your approval, and any failure halts the run. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "TDD 사이클 (wshobson)"
+    description: "단계별 게이트가 있는 red-green-refactor 오케스트레이션 — 각 단계가 결과를 파일로 기록하고, 체크포인트는 승인을 기다리며, 실패 시 전체 실행이 중단된다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

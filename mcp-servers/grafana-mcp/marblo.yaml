@@ -7,6 +7,10 @@ version: 1.0.0
 status: active
 description: Official Grafana server — query dashboards, Prometheus and Loki data sources, incidents, and alert rules from the agent while debugging. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "Grafana 공식 서버 — 디버깅 중 에이전트에서 대시보드, Prometheus·Loki 데이터소스, 인시던트, 알림 규칙을 조회. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Grafana Labs
   tier: community

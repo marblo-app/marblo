@@ -7,6 +7,10 @@ version: 1.4.2
 status: active
 description: Snowflake Labs' server for querying warehouses and driving Cortex Search, Analyst, and Agent services from the agent, with a config file that allowlists which SQL statement types are permitted. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "Snowflake Labs의 서버 — 에이전트에서 웨어하우스를 쿼리하고 Cortex Search·Analyst·Agent 서비스를 구동하며, 허용할 SQL 문 유형을 지정하는 설정 파일 제공. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Snowflake Labs
   tier: community

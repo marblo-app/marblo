@@ -6,6 +6,11 @@ type: knowledge-pack
 version: 1.0.0
 description: A community-maintained reading list of papers and resources on LLM agents, planning, tool use, memory, multi-agent systems, and evaluation.
 
+i18n:
+  ko:
+    name: "어썸 AI 에이전트 논문집"
+    description: "LLM 에이전트, 플래닝, 툴 사용, 메모리, 멀티에이전트 시스템, 평가에 관한 논문·자료를 커뮤니티가 관리하는 읽기 목록."
+
 publisher:
   name: VoltAgent
   tier: community

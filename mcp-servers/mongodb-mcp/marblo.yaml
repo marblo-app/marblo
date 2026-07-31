@@ -7,6 +7,10 @@ version: 1.14.0
 status: active
 description: MongoDB's official server — explore collections, run queries and aggregations, inspect indexes, and drive Atlas cluster administration, with a --readOnly flag that disables every mutating tool. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "MongoDB 공식 서버 — 컬렉션 탐색, 쿼리·집계 실행, 인덱스 점검, Atlas 클러스터 관리까지, 모든 변경 툴을 비활성화하는 --readOnly 플래그 제공. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: MongoDB
   tier: community

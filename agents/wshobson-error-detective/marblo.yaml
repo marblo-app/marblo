@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Log-forensics subagent — regex extraction over log streams, cross-language stack-trace reading, error correlation across distributed services, and anomaly hunting in Elasticsearch or Splunk queries. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "에러 디텍티브 (wshobson)"
+    description: "로그 포렌식 서브에이전트 — 로그 스트림에서 정규식 추출, 여러 언어에 걸친 스택트레이스 해독, 분산 서비스 간 에러 상관분석, Elasticsearch·Splunk 쿼리에서의 이상탐지. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

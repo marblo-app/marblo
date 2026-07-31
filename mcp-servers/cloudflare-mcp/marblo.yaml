@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Cloudflare's official remote MCP servers — docs, Workers bindings and builds, observability, Radar, AI Gateway, AutoRAG, audit logs, and more, each at its own hosted endpoint. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "Cloudflare MCP 서버 모음"
+    description: "Cloudflare의 공식 원격 MCP 서버 모음 — 문서, Workers 바인딩·빌드, 관측성, Radar, AI Gateway, AutoRAG, 감사로그 등이 각각 별도 호스팅 엔드포인트로 제공. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Cloudflare
   tier: community

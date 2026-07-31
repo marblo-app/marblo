@@ -7,6 +7,11 @@ version: 6.2.0
 status: active
 description: One rule, enforced — no fix before root cause. Root-cause tracing, condition-based waiting instead of sleeps, and a test-polluter finder for flaky suites. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "체계적 디버깅 (Superpowers)"
+    description: "규칙은 하나, 반드시 지킨다 — 근본원인 없이 수정 없음. 근본원인 추적, sleep 대신 조건 기반 대기, 불안정한(flaky) 테스트 스위트를 위한 오염원 탐지기. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Jesse Vincent (obra)
   tier: community

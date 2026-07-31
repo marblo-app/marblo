@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Designs coordination for concurrent agents — inter-agent messaging, task dependency graphs, parallel execution control, deadlock and partial-failure handling. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "멀티 에이전트 코디네이터 (VoltAgent)"
+    description: "동시 실행 에이전트들의 조정을 설계 — 에이전트 간 메시징, 작업 의존성 그래프, 병렬 실행 제어, 교착·부분실패 처리. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: VoltAgent
   tier: community

@@ -6,6 +6,11 @@ type: knowledge-pack
 version: 1.0.0
 description: A large reference guide to prompt-engineering techniques, reasoning patterns, model-specific practices, and related papers and resources.
 
+i18n:
+  ko:
+    name: "프롬프트 엔지니어링 가이드"
+    description: "프롬프트 엔지니어링 기법, 추론 패턴, 모델별 실전 요령, 관련 논문·자료를 아우르는 대형 레퍼런스 가이드."
+
 publisher:
   name: dair-ai
   tier: community

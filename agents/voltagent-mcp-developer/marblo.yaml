@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Model Context Protocol subagent — server and client implementation against the JSON-RPC 2.0 contract, SDK usage, transport and auth choices, and debugging a server that a harness refuses to load. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "MCP 개발자 (VoltAgent)"
+    description: "Model Context Protocol 서브에이전트 — JSON-RPC 2.0 규약에 맞춘 서버·클라이언트 구현, SDK 사용법, 트랜스포트·인증 선택, 하네스가 로드를 거부하는 서버 디버깅. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: VoltAgent
   tier: community

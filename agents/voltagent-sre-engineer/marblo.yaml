@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Site-reliability subagent — SLI/SLO definition, error-budget policy, toil reduction and automation, capacity planning, chaos experiments, and sustainable on-call design. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "SRE 엔지니어 (VoltAgent)"
+    description: "사이트 신뢰성 서브에이전트 — SLI/SLO 정의, 에러버짓 정책, 반복작업 감소·자동화, 용량 계획, 카오스 실험, 지속 가능한 온콜 설계. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: VoltAgent
   tier: community

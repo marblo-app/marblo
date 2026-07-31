@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Quality-strategy subagent — test planning across the delivery cycle, coverage-gap and risk analysis, defect-pattern review, and quality metrics that survive contact with a real backlog. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "QA 전문가 (VoltAgent)"
+    description: "품질 전략 서브에이전트 — 딜리버리 사이클 전반의 테스트 계획, 커버리지 갭·리스크 분석, 결함 패턴 검토, 실제 백로그에서도 유효한 품질 지표. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: VoltAgent
   tier: community

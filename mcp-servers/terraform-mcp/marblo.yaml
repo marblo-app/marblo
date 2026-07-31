@@ -7,6 +7,10 @@ version: 1.1.0
 status: active
 description: Official HashiCorp server — looks up provider schemas, resource arguments, and modules from the Terraform Registry so generated HCL matches the real provider version. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "HashiCorp 공식 서버 — Terraform Registry에서 프로바이더 스키마, 리소스 인자, 모듈을 조회해 생성된 HCL이 실제 프로바이더 버전과 맞도록 한다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: HashiCorp
   tier: community

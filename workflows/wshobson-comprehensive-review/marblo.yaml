@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Multi-dimensional review orchestration — quality, architecture, and security passes run by separate specialist subagents, each writing its findings to disk before the next begins. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "종합 리뷰 (wshobson)"
+    description: "다차원 리뷰 오케스트레이션 — 품질·아키텍처·보안 패스를 각각 별도 전문 서브에이전트가 수행하며, 다음 단계로 넘어가기 전 각자 발견사항을 파일로 기록. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

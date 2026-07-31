@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: TypeScript 5+ subagent for the type system itself — complex generics, conditional and mapped types, type-level programming, and end-to-end type safety across a full-stack boundary. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "TypeScript 프로 (VoltAgent)"
+    description: "타입 시스템 자체를 다루는 TypeScript 5+ 서브에이전트 — 복잡한 제네릭, 조건부·매핑 타입, 타입 레벨 프로그래밍, 풀스택 경계 전체의 타입 안전성. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: VoltAgent
   tier: community

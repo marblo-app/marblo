@@ -7,6 +7,10 @@ version: 0.2.6
 status: active
 description: Chroma's official server for its embedding database — create collections, add documents, and run semantic, keyword, or metadata queries, against an in-memory, on-disk, or hosted Chroma. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "임베딩 데이터베이스 Chroma의 공식 서버 — 컬렉션 생성, 문서 추가, 시맨틱·키워드·메타데이터 쿼리 실행(메모리·디스크·호스팅 Chroma 모두 지원). 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Chroma
   tier: community

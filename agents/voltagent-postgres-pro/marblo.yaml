@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: PostgreSQL operations subagent — query and index tuning, configuration work, replication and high-availability design, backup strategy, and diagnosing databases already under load. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "Postgres 프로 (VoltAgent)"
+    description: "PostgreSQL 운영 서브에이전트 — 쿼리·인덱스 튜닝, 설정 작업, 복제 및 고가용성 설계, 백업 전략, 이미 부하가 걸린 데이터베이스 진단. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: VoltAgent
   tier: community

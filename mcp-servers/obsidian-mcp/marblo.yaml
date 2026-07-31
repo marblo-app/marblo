@@ -7,6 +7,10 @@ version: 0.2.2
 status: active
 description: Searches and edits an Obsidian vault through the Local REST API plugin, so notes reach the agent without handing it raw filesystem access. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "Local REST API 플러그인을 통해 Obsidian 볼트를 검색·수정 — 원시 파일시스템 접근을 주지 않고도 노트를 에이전트에 전달. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Markus Pfundstein
   tier: community

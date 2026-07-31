@@ -7,6 +7,10 @@ version: 1.10.0
 status: active
 description: Google Cloud's official server for deploying and inspecting Cloud Run services — deploy a local folder or container, list services, read logs, from the agent. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "Cloud Run 서비스를 배포·조회하는 Google Cloud 공식 서버 — 로컬 폴더나 컨테이너 배포, 서비스 목록, 로그 확인을 에이전트에서 수행. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Google Cloud Platform
   tier: community

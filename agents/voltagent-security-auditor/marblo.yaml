@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Read-only audit subagent — systematic vulnerability analysis, security-control and configuration review, compliance gap identification, and evidence-backed findings with remediation steps. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "보안 감사관 (VoltAgent)"
+    description: "읽기 전용 감사 서브에이전트 — 체계적 취약점 분석, 보안 통제·설정 검토, 컴플라이언스 갭 식별, 근거 기반 발견사항과 개선 조치. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: VoltAgent
   tier: community

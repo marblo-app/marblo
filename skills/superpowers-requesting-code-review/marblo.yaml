@@ -7,6 +7,11 @@ version: 6.2.0
 status: active
 description: Dispatches a reviewer subagent with a purpose-built prompt and an explicit commit range instead of inherited session history, and sorts the returned findings into critical, important, and minor. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "코드 리뷰 요청 (Superpowers)"
+    description: "세션 히스토리를 물려받는 대신, 목적에 맞게 작성된 프롬프트와 명시적 커밋 범위로 리뷰어 서브에이전트를 디스패치하고, 반환된 발견사항을 critical·important·minor로 분류. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Jesse Vincent (obra)
   tier: community

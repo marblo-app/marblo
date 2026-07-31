@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Incident-response subagent for production debugging — log analysis, distributed tracing, Kubernetes and container failures, and root-cause write-ups. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "DevOps 트러블슈터 (wshobson)"
+    description: "프로덕션 디버깅을 위한 인시던트 대응 서브에이전트 — 로그 분석, 분산 트레이싱, Kubernetes·컨테이너 장애, 근본원인 보고서 작성. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

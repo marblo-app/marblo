@@ -7,6 +7,10 @@ version: 0.43.3
 status: active
 description: One MCP endpoint in front of many servers — Docker's CLI plugin runs catalog servers in isolated containers, holds their secrets, and exposes the merged tool set to the client. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    description: "여러 서버 앞의 단일 MCP 엔드포인트 — Docker의 CLI 플러그인이 카탈로그 서버를 격리된 컨테이너에서 실행하고 시크릿을 보관하며, 병합된 툴셋을 클라이언트에 노출한다. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Docker
   tier: community

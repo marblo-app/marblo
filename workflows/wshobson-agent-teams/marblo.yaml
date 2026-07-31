@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Seven slash commands for spawning and running a multi-agent team — preset compositions, parallel multi-dimension review, hypothesis-split debugging, and file-ownership-partitioned feature work. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "에이전트 팀 (wshobson)"
+    description: "멀티 에이전트 팀을 생성·실행하는 7개의 슬래시 커맨드 — 프리셋 구성, 병렬 다차원 리뷰, 가설 분할 디버깅, 파일 소유권 기반 기능 개발 분담. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

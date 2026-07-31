@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Next.js 14+ App Router subagent — server components and server actions, rendering-strategy choices, Core Web Vitals work, and SEO-sensitive production deploys. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "Next.js 개발자 (VoltAgent)"
+    description: "Next.js 14+ App Router 서브에이전트 — 서버 컴포넌트·서버 액션, 렌더링 전략 선택, Core Web Vitals 작업, SEO에 민감한 프로덕션 배포. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: VoltAgent
   tier: community

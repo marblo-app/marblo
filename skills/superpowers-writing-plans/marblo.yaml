@@ -7,6 +7,11 @@ version: 6.2.0
 status: active
 description: Turns an approved spec into a bite-sized implementation plan written for an engineer with zero context — file-by-file decomposition, per-task tests, and frequent commits. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "계획 작성 (Superpowers)"
+    description: "승인된 스펙을 컨텍스트가 전혀 없는 엔지니어를 위한 잘게 쪼갠 구현 계획으로 바꾼다 — 파일 단위 분해, 태스크별 테스트, 잦은 커밋. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Jesse Vincent (obra)
   tier: community

@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Cloud-native platform subagent — EKS/AKS/GKE/OKE cluster design, GitOps with ArgoCD or Flux, service mesh, progressive delivery, multi-tenancy, and cluster-level cost and security posture. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "Kubernetes 아키텍트 (wshobson)"
+    description: "클라우드 네이티브 플랫폼 서브에이전트 — EKS/AKS/GKE/OKE 클러스터 설계, ArgoCD·Flux 기반 GitOps, 서비스 메시, 점진적 배포, 멀티테넌시, 클러스터 단위 비용·보안 태세. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

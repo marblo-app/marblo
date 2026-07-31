@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Builds the monitoring you wish you had before the outage — metrics, structured logging, distributed tracing, and SLI/SLO definitions with alerting that is actionable. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "옵저버빌리티 엔지니어 (wshobson)"
+    description: "장애가 나기 전에 갖췄어야 할 모니터링을 구축 — 메트릭, 구조화 로깅, 분산 트레이싱, 실행 가능한 알림을 갖춘 SLI/SLO 정의. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Multi-cloud design subagent covering AWS/Azure/GCP/OCI — landing zones, IaC strategy, FinOps cost modelling, disaster recovery, and the serverless-vs-containers call. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "클라우드 아키텍트 (wshobson)"
+    description: "AWS/Azure/GCP/OCI를 아우르는 멀티클라우드 설계 서브에이전트 — 랜딩존, IaC 전략, FinOps 비용 모델링, 재해복구, 서버리스 대 컨테이너 판단. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Design-time security subagent — STRIDE and PASTA analysis, attack-tree construction, data-flow diagram review, security-requirement extraction, and risk-ranked mitigation mapping. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "위협 모델링 전문가 (wshobson)"
+    description: "설계 단계 보안 서브에이전트 — STRIDE·PASTA 분석, 공격 트리 구성, 데이터흐름도 검토, 보안 요구사항 추출, 위험 순위가 매겨진 완화 매핑. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

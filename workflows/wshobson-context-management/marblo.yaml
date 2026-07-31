@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Two commands that serialise a working session — capture architecture decisions, state, and open threads to disk, then rehydrate them in a later session or a different agent. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "컨텍스트 저장·복원 (wshobson)"
+    description: "작업 세션을 직렬화하는 두 개의 커맨드 — 아키텍처 결정·상태·미해결 사안을 파일로 캡처한 뒤, 이후 세션이나 다른 에이전트에서 복원. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Seth Hobson (wshobson)
   tier: community

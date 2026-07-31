@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Anthropic's guidance for giving new UI a deliberate visual identity — aesthetic direction, typography, and palette choices that do not read as templated defaults. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "프론트엔드 디자인 (Anthropic)"
+    description: "새 UI에 뚜렷한 시각적 정체성을 부여하는 Anthropic의 가이드 — 템플릿 느낌이 나지 않는 미학적 방향, 타이포그래피, 팔레트 선택. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Anthropic
   tier: community

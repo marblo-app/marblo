@@ -7,6 +7,11 @@ version: 6.2.0
 status: active
 description: A hard gate before any implementation — one question at a time, two or three approaches with trade-offs, then a written design doc the user approves. No code until the design lands. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "브레인스토밍 (Superpowers)"
+    description: "구현 이전에 반드시 거쳐야 하는 관문 — 한 번에 질문 하나씩, 트레이드오프가 있는 2~3가지 접근법 제시 후 사용자가 승인하는 설계 문서 작성. 설계가 나오기 전엔 코드 없음. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Jesse Vincent (obra)
   tier: community

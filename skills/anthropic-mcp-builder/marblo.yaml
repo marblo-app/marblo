@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Anthropic's own guide to building MCP servers — tool design for LLM ergonomics, Python (FastMCP) and Node/TypeScript scaffolds, and an evaluation harness. Referenced by manifest; not vendored.
 
+i18n:
+  ko:
+    name: "MCP 빌더 (Anthropic)"
+    description: "MCP 서버 구축을 위한 Anthropic 자체 가이드 — LLM 사용성을 고려한 툴 설계, Python(FastMCP)·Node/TypeScript 스캐폴드, 평가 하네스. 매니페스트로 참조되며 벤더링되지 않음."
+
 publisher:
   name: Anthropic
   tier: community
