@@ -22,7 +22,7 @@ import {
 } from "../../lib/splitWorkspaceLayout";
 import { TerminalColumn } from "./TerminalColumn";
 import { WorkTabs } from "./WorkTabs";
-import { FileTree } from "../sidebar/FileTree";
+import { Sidebar } from "../sidebar/Sidebar";
 import { ActivityStreamPanel } from "../activity/ActivityStreamPanel";
 
 /**
@@ -231,42 +231,13 @@ export function WorkspaceShell() {
           sits outside it too, but inside the measured WORK AREA, because its
           width is budgeted against what the board needs. */}
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        {/* Far-left file-tree toggle rail (always present) + panel. */}
-        <div className="flex h-full w-8 flex-shrink-0 flex-col items-center border-r border-gray-700 bg-gray-800 py-2">
-          <button
-            type="button"
-            onClick={toggleFileTree}
-            title={t(
-              fileTreeOpen ? "workspace.hideFiles" : "workspace.showFiles",
-            )}
-            aria-label={t(
-              fileTreeOpen ? "workspace.hideFiles" : "workspace.showFiles",
-            )}
-            aria-pressed={fileTreeOpen}
-            className={`rounded p-1.5 hover:bg-gray-700 hover:text-gray-200 ${
-              fileTreeOpen ? "text-blue-400" : "text-gray-400"
-            }`}
-          >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-              />
-            </svg>
-          </button>
-        </div>
-        {fileTreeOpen && (
-          <div className="flex w-60 min-w-0 flex-shrink-0 flex-col overflow-hidden border-r border-gray-700 bg-gray-900">
-            <FileTree />
-          </div>
-        )}
+        {/* Far-left sidebar — files/commands/chat tabs (restored from the
+            legacy Layout's <Sidebar>; PR#577 had left this slot as a bare
+            <FileTree/>, dropping the tf slash-command guide and team chat).
+            isOpen/onToggle are the same fileTreeOpen/toggleFileTree state the
+            rest of the shell already persists, so the split ratio math and
+            narrow-collapse breakpoint are unaffected. */}
+        <Sidebar isOpen={fileTreeOpen} onToggle={toggleFileTree} />
 
         {/* Work area — measured (workAreaRefCb) so the Activity panel can be
             sized against what is actually left for it. */}
