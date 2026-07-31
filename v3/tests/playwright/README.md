@@ -101,6 +101,22 @@ test("@unit 새 기능이 회귀 없이 동작한다", async ({ marblo }) => {
 
 지금은 워크플로우 자동 활성 안 함 — 안정화 후 사용자가 enable.
 
+### 프로젝트 협업 E2E
+
+`cleanroom/team-collaboration.spec.ts`는 기존 cleanroom 하네스를 사용해
+두 멤버가 포함된 프로젝트의 공유 보드 가시성과 `userData`/`HOME` 격리를
+검증한다. 초대·수락·채팅 라운드트립·프레즌스 스트림은
+`tests/integration/team-collaboration.test.ts`에서 두 개의 명시적인 사용자
+신원과 live in-memory listener backend로 검증한다.
+
+완전한 두 Electron 인증 프로필을 Firestore 에뮬레이터에 연결하는 경로는
+현재 CI 자동화 범위가 아니다. 실제 Firebase 인증/보안 규칙까지 포함한 수동
+검증은 두 별도 userData 프로필로 다음 순서로 수행한다: A가 TeamManagement에서
+B의 이메일을 초대 → B가 InvitationBanner에서 수락 → A가 B를 Members에서
+확인 → A가 팀 채팅을 보내고 B 창에서 수신 → B가 접속한 공유 보드에서
+PresenceIndicator를 확인한다. 이 구간은 테스트에서 조용히 생략하지 않고
+수동 검증으로 명시한다.
+
 ---
 
 ## 디버깅 팁
