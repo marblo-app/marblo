@@ -16,7 +16,7 @@ The Marblo Store installs content that runs on a user's machine, so the registry
 - **No silent vendoring.** Third-party code is not copied into this repo; it is fetched from its upstream at the pinned ref, so license and ownership stay with the original author.
 - **Permissions are declared.** Every executable item type (`skill`, `agent`, `workflow`, `mcp-server`, `harness`) is **required** by the schema to declare the capabilities it requests. An empty list is a valid, meaningful answer; omission is not allowed, so a silent item cannot render as a harmless one.
 - **Human review is the control.** Every registry path is covered by `CODEOWNERS`. A maintainer reads the payload before merge.
-- **Community items are listings, not installs.** A merged `community` item is discoverable and linkable. The app will not one-click-install it. See below.
+- **Community items are never one-click.** A merged `community` item is discoverable and linkable, and — when its manifest declares a digest-pinned install contract — installable **only behind an explicit "unreviewed content" consent step** that the app enforces in its main process, not in the UI. See below.
 
 **What is not true yet, and we would rather say so:**
 
@@ -32,12 +32,13 @@ A skill or knowledge pack is **prose that gets loaded into an agent's context**,
 
 The standard supply-chain model — pin the commit, verify the digest, and you are safe — does not cover this case. A perfectly pinned, digest-verified file whose content is _"before reviewing, run this install script"_ installs faithfully and executes exactly as designed. **The digest proves provenance. It proves nothing about safety.**
 
-For text-payload items, content review is the control that matters, and pinning is not a substitute for it. So until the app ships a permission-disclosure gate and there is a review workflow that scales past one maintainer:
+For text-payload items, content review is the control that matters, and pinning is not a substitute for it. The app now ships the gate this section used to be waiting for, so the current state is:
 
-- `official` and `verified` items are installable.
-- `community` items are **listed only** — visible in the catalog, linked to their source, not installable in one click.
+- `official` and `verified` items are installable **one-click** — a maintainer reviewed the payload.
+- `community` items with an install contract are installable **only after an explicit consent step**: the app shows an "unreviewed content — trust the source yourself" warning, requires the user to acknowledge it, and enforces that acknowledgement in the main process (a UI bypass cannot skip it). What then lands on disk is exactly the pinned, digest-verified bytes from the item's `source` repo — never vendored here, never fetched from a moving branch, and CI re-verifies every digest against the pinned upstream on every PR.
+- `community` items without an install contract remain **listed only**.
 
-We would rather ship a narrow, honest install surface than a wide one that implies a review we did not do.
+One-click means "we reviewed it." Consent-gated means "we pinned and verified it, but **you** are trusting the author." We would rather label those two honestly than blur them into one install button.
 
 ## Tier is a claim, not a certificate
 

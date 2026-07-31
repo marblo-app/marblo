@@ -111,7 +111,7 @@
           ]
         },
         "path": {
-          "description": "Subpath within the source repo, if not the root.",
+          "description": "Subpath within the source repo, if not the root. When the item declares a `files` install, this must be the DIRECTORY the install.files entries are relative to.",
           "type": "string"
         }
       },
@@ -191,7 +191,7 @@
                 "maxLength": 64
               },
               "files": {
-                "description": "Explicit allowlist of files to copy, relative to this manifest's directory. Nothing outside this list is ever written.",
+                "description": "Explicit allowlist of files to copy. Nothing outside this list is ever written. For vendored (official) payloads the paths are relative to this manifest's directory; for source-referenced (community) payloads they are relative to `source.path` in the source repo at the pinned `source.ref` — the app builds the fetch URL itself and only ever talks to raw.githubusercontent.com.",
                 "type": "array",
                 "minItems": 1,
                 "maxItems": 200,
