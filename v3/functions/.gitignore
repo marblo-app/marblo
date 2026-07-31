@@ -1,3 +1,7 @@
 
 # test build artifacts (npm run test:marketing)
 .test-out/
+.t/
+.t2/
+.script-out/
+.preview/
