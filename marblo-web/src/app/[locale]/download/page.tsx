@@ -22,14 +22,14 @@ import {
 
 // 버전 고정 다운로드 링크 — 새 빌드 릴리스 시 이 값만 갱신.
 // 실제 릴리스 자산 파일명 패턴: Marblo-<ver>-arm64.dmg / Marblo-Setup-<ver>.exe
-const APP_VERSION = "v3.0.19";
+const APP_VERSION = "v3.0.20";
 // 파일명에 쓰는 버전(선행 v 없는 SemVer). APP_VERSION 에서 파생.
 const VERSION = APP_VERSION.replace(/^v/, "");
 const RELEASE_BASE = `https://github.com/melocream/marblo-releases/releases/download/${APP_VERSION}`;
 
 type MacArch = "universal" | "arm64" | "x64";
 
-// v3.0.2 릴리스는 arm64 DMG 단일 산출이다(universal 빌드는 깨져서 미산출됨).
+// 릴리스는 arm64 DMG 단일 산출이다(universal/x64 자산은 산출되지 않는다).
 // 따라서 세 아키 키 모두 실체인 arm64 DMG(Apple Silicon 대상)로 매핑한다.
 // per-arch/universal 자산이 다시 산출되면 이 맵만 바꾸면 된다.
 const MAC_DMG_URLS: Record<MacArch, string> = {
@@ -69,12 +69,11 @@ function detectMacArch(): MacArch {
   return "universal";
 }
 
-// 감지된 아키에 대응하는 칩 라벨 i18n 키.
-const MAC_ARCH_LABEL_KEY: Record<MacArch, string> = {
-  universal: "mac_arch_universal",
-  arm64: "mac_arch_apple",
-  x64: "mac_arch_intel",
-};
+// 카드에 노출하는 칩 라벨은 감지값이 아니라 **실제 자산**을 따른다.
+// 자산이 arm64 DMG 단일이므로 항상 "Apple Silicon" 으로 고정한다 —
+// 감지값(Intel/Universal)을 그대로 라벨로 쓰면 arm64 DMG 를 "Intel" 로
+// 잘못 표기하게 된다. 감지값은 라벨이 아니라 텔레메트리(arch)로만 쓴다.
+const MAC_ARCH_LABEL_KEY = "mac_arch_apple";
 
 // 소프트(인지) 게이트 상태. 바이너리는 공개 릴리스라 하드 차단이 아니라,
 // 미로그인/비선정 사용자에게 다운로드 대신 적절한 다음 행동을 안내한다.
@@ -86,7 +85,8 @@ export default function DownloadPage() {
   const locale = useLocale();
   const [state, setState] = useState<AccessState>("loading");
   // 서버/하이드레이션 일치를 위해 초기값은 universal 키. 마운트 후 클라이언트에서
-  // 감지해 칩 라벨만 정밀화한다 — 현재 세 키 모두 같은 arm64 DMG 로 매핑된다.
+  // 감지한다 — 현재 세 키 모두 같은 arm64 DMG 로 매핑되므로 링크는 바뀌지 않고,
+  // 감지값은 다운로드 텔레메트리(arch)에만 실린다.
   const [macArch, setMacArch] = useState<MacArch>("universal");
 
   useEffect(() => {
@@ -233,8 +233,7 @@ export default function DownloadPage() {
                   {t("macos")}
                 </span>
                 <span className="text-xs text-zinc-400">
-                  {t(MAC_ARCH_LABEL_KEY[macArch])} · {t("mac_sub")} ·{" "}
-                  {APP_VERSION}
+                  {t(MAC_ARCH_LABEL_KEY)} · {t("mac_sub")} · {APP_VERSION}
                 </span>
                 <span className="mt-1 inline-flex items-center gap-2 bg-indigo-600 group-hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
                   <Download className="w-4 h-4" />
