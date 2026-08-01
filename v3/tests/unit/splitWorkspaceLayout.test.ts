@@ -29,9 +29,13 @@ import {
   DIVIDER_WIDTH,
   ACTIVITY_PANEL_WIDTH,
   ACTIVITY_MIN_PANEL_WIDTH,
+  ACTIVITY_MAX_FRACTION,
   ACTIVITY_COLLAPSE_BREAKPOINT,
+  MAX_TERMINAL_YIELD,
+  WORK_VIEW_MIN_WIDTH,
   activityPanelWidth,
   ratioWithActivityOpen,
+  storedRatioFromDrag,
 } from "../../src/lib/splitWorkspaceLayout";
 
 describe("clampRatio", () => {
@@ -313,9 +317,18 @@ describe("activityPanelWidth", () => {
     expect(activityPanelWidth(1600)).toBe(ACTIVITY_PANEL_WIDTH);
   });
 
-  it("never exceeds 30% of the work area in the mid band", () => {
-    // 900 * 0.3 = 270 — narrower than the preferred 280.
-    expect(activityPanelWidth(900)).toBe(270);
+  it("stays inside the narrow band the CEO asked for (ticket PJ8Hz66n)", () => {
+    // The panel is a glanceable feed, not a work surface. If a future change
+    // wants it wider than this, that is a product decision, not a tweak.
+    expect(ACTIVITY_PANEL_WIDTH).toBeLessThanOrEqual(280);
+    expect(ACTIVITY_MIN_PANEL_WIDTH).toBeLessThanOrEqual(ACTIVITY_PANEL_WIDTH);
+  });
+
+  it("never exceeds its max fraction of the work area in the mid band", () => {
+    // 900 * 0.25 = 225 — narrower than the preferred 260.
+    expect(activityPanelWidth(900)).toBe(
+      Math.floor(900 * ACTIVITY_MAX_FRACTION),
+    );
     expect(activityPanelWidth(900)).toBeLessThan(ACTIVITY_PANEL_WIDTH);
   });
 
@@ -347,48 +360,132 @@ describe("activityPanelWidth", () => {
 });
 
 describe("ratioWithActivityOpen", () => {
-  // The whole point: the work view keeps BOARD_MIN_WIDTH so the board's four
-  // columns (TODO / CLAIMED / IN PROGRESS / REVIEW) all stay on screen.
+  // The whole point (ticket PJ8Hz66n): opening the Activity panel takes its
+  // width out of the WORK VIEW, not out of the terminal column. The terminal —
+  // the pane the user is actually working in — may give up at most
+  // MAX_TERMINAL_YIELD of itself, and only when the work view would otherwise
+  // be starved past WORK_VIEW_MIN_WIDTH.
+  function terminalPx(splitWidth: number, ratio: number): number {
+    return splitWidth * ratio;
+  }
   function workViewWidth(splitWidth: number, ratio: number): number {
     return splitWidth * (1 - ratio) - DIVIDER_WIDTH;
   }
+  /** The terminal's pixel width before the panel docked. */
+  function closedTerminalPx(workArea: number, stored: number): number {
+    return workArea * stored;
+  }
 
-  it("leaves a ratio that already fits untouched", () => {
-    // 3000 * 0.6 - 4 = 1796 ≫ 880 — no cap needed.
-    expect(ratioWithActivityOpen(0.4, 3000)).toBe(0.4);
-  });
-
-  it("caps the terminal ratio so the board keeps its four columns", () => {
-    // 1200 * 0.6 - 4 = 716 — 36px short of the four-column minimum, so the
-    // terminal column has to give those 36px back.
-    const splitWidth = 1200;
-    const capped = ratioWithActivityOpen(DEFAULT_RATIO, splitWidth);
-    expect(capped).toBeLessThan(DEFAULT_RATIO);
-    expect(workViewWidth(splitWidth, capped)).toBeGreaterThanOrEqual(
-      BOARD_MIN_WIDTH,
+  it("the work-view floor is one board column plus the board's padding", () => {
+    expect(WORK_VIEW_MIN_WIDTH).toBe(
+      BOARD_COLUMN_MIN_WIDTH + 2 * BOARD_PADDING,
     );
+    // Deliberately far below the comfortable four-column width: the board
+    // scrolls, the terminal does not.
+    expect(WORK_VIEW_MIN_WIDTH).toBeLessThan(BOARD_MIN_WIDTH);
   });
 
-  it("preserves the board minimum across the realistic width band", () => {
-    for (let splitWidth = 1000; splitWidth <= 3000; splitWidth += 100) {
-      const r = ratioWithActivityOpen(MAX_RATIO, splitWidth);
-      expect(workViewWidth(splitWidth, r)).toBeGreaterThanOrEqual(
-        BOARD_MIN_WIDTH,
-      );
+  it("keeps the terminal's pixel width — the panel comes out of the work view", () => {
+    const workArea = 1600;
+    const panel = activityPanelWidth(workArea)!;
+    const splitWidth = workArea - panel;
+    const r = ratioWithActivityOpen(DEFAULT_RATIO, splitWidth, panel);
+
+    // Same pixels as before the panel docked, at a larger fraction of a
+    // smaller split.
+    expect(terminalPx(splitWidth, r)).toBeCloseTo(
+      closedTerminalPx(workArea, DEFAULT_RATIO),
+      6,
+    );
+    expect(r).toBeGreaterThan(DEFAULT_RATIO);
+    // The work view is what absorbed the panel.
+    const closedWorkView = workViewWidth(workArea, DEFAULT_RATIO);
+    expect(closedWorkView - workViewWidth(splitWidth, r)).toBeCloseTo(panel, 6);
+  });
+
+  it("is the regression it exists to prevent: no 60% amputation", () => {
+    // The old rule reserved BOARD_MIN_WIDTH for the work view, which cut a
+    // 480px terminal down to 184px on a 1200px work area. Now it keeps 480.
+    const workArea = 1200;
+    const panel = activityPanelWidth(workArea)!;
+    const splitWidth = workArea - panel;
+    const r = ratioWithActivityOpen(DEFAULT_RATIO, splitWidth, panel);
+    expect(terminalPx(splitWidth, r)).toBeCloseTo(480, 6);
+  });
+
+  it("never yields more than MAX_TERMINAL_YIELD across the realistic band", () => {
+    for (let workArea = 900; workArea <= 3000; workArea += 50) {
+      const panel = activityPanelWidth(workArea);
+      if (panel == null) continue;
+      const splitWidth = workArea - panel;
+      // Below the breakpoint the column is a rail and this ratio is unused.
+      if (splitWidth < NARROW_BREAKPOINT) continue;
+      for (const stored of [MIN_RATIO, 0.3, DEFAULT_RATIO, 0.55, MAX_RATIO]) {
+        const r = ratioWithActivityOpen(stored, splitWidth, panel);
+        const closed = closedTerminalPx(workArea, stored);
+        expect(terminalPx(splitWidth, r)).toBeGreaterThanOrEqual(
+          closed * (1 - MAX_TERMINAL_YIELD) - 0.5,
+        );
+        expect(workViewWidth(splitWidth, r)).toBeGreaterThan(0);
+      }
     }
   });
 
-  it("never drops below MIN_RATIO even when the board cannot fit", () => {
-    // 600px of split cannot host a 752px board at any ratio — the terminal
-    // column stops shrinking at MIN_RATIO and the board scrolls, exactly as it
-    // already does at that width with the panel closed.
-    expect(ratioWithActivityOpen(0.4, 600)).toBe(MIN_RATIO);
-    expect(ratioWithActivityOpen(0.4, 100)).toBe(MIN_RATIO);
+  it("gives ground only as far as the work-view floor needs", () => {
+    // 880 split + 260 panel, stored 0.65 → the terminal wants 741px but the
+    // work view floor only leaves 675px, so it yields exactly that much (8.9%)
+    // — under the 10% cap, so the floor is honoured.
+    const panel = 260;
+    const splitWidth = 880;
+    const stored = 0.65;
+    const r = ratioWithActivityOpen(stored, splitWidth, panel);
+    const closed = closedTerminalPx(splitWidth + panel, stored);
+    expect(terminalPx(splitWidth, r)).toBeLessThan(closed);
+    expect(workViewWidth(splitWidth, r)).toBeGreaterThanOrEqual(
+      WORK_VIEW_MIN_WIDTH,
+    );
+    expect(terminalPx(splitWidth, r)).toBeGreaterThan(
+      closed * (1 - MAX_TERMINAL_YIELD),
+    );
   });
 
-  it("never widens the terminal column beyond what was stored", () => {
-    for (const stored of [0.2, 0.3, 0.4, 0.55, 0.7]) {
-      expect(ratioWithActivityOpen(stored, 4000)).toBeLessThanOrEqual(stored);
+  it("stops at the 10% floor even when the work view is still starved", () => {
+    // A 10% cap a narrow window can talk you out of is not a cap: here the
+    // work view stays under its floor and the board scrolls instead.
+    const panel = 260;
+    const splitWidth = 900;
+    const r = ratioWithActivityOpen(MAX_RATIO, splitWidth, panel);
+    const closed = closedTerminalPx(splitWidth + panel, MAX_RATIO);
+    expect(terminalPx(splitWidth, r)).toBeCloseTo(
+      closed * (1 - MAX_TERMINAL_YIELD),
+      6,
+    );
+    expect(workViewWidth(splitWidth, r)).toBeLessThan(WORK_VIEW_MIN_WIDTH);
+    expect(workViewWidth(splitWidth, r)).toBeGreaterThan(0);
+  });
+
+  it("is a no-op when no panel is docked (closed-state geometry preserved)", () => {
+    // The shell only calls this while the panel is open, but a zero panel must
+    // still answer "the terminal was already this wide".
+    expect(ratioWithActivityOpen(DEFAULT_RATIO, 1200, 0)).toBeCloseTo(
+      DEFAULT_RATIO,
+      6,
+    );
+    expect(ratioWithActivityOpen(MAX_RATIO, 3000, 0)).toBeCloseTo(MAX_RATIO, 6);
+  });
+
+  it("never drops below MIN_RATIO", () => {
+    for (const splitWidth of [100, 600, 900, 1400, 3000]) {
+      expect(
+        ratioWithActivityOpen(MIN_RATIO, splitWidth, 260),
+      ).toBeGreaterThanOrEqual(MIN_RATIO);
+    }
+  });
+
+  it("leaves room for the divider even at absurd widths", () => {
+    for (const splitWidth of [10, 100, 300]) {
+      const r = ratioWithActivityOpen(MAX_RATIO, splitWidth, 260);
+      expect(terminalPx(splitWidth, r)).toBeLessThanOrEqual(splitWidth);
     }
   });
 
@@ -396,5 +493,40 @@ describe("ratioWithActivityOpen", () => {
     expect(ratioWithActivityOpen(0.4, 0)).toBe(0.4);
     expect(ratioWithActivityOpen(0.4, Number.NaN)).toBe(0.4);
     expect(ratioWithActivityOpen(9, 0)).toBe(MAX_RATIO);
+  });
+});
+
+describe("storedRatioFromDrag", () => {
+  it("round-trips through ratioWithActivityOpen — no jump on release", () => {
+    const panel = 260;
+    const splitWidth = 1340;
+    for (const pointer of [0.25, 0.35, 0.5, 0.6]) {
+      const stored = storedRatioFromDrag(pointer, splitWidth, panel);
+      // Where the pointer left it is where it stays once the drag ends.
+      expect(ratioWithActivityOpen(stored, splitWidth, panel)).toBeCloseTo(
+        pointer,
+        6,
+      );
+    }
+  });
+
+  it("stores a fraction of the work area, not of the split", () => {
+    const stored = storedRatioFromDrag(0.5, 1340, 260);
+    expect(stored).toBeCloseTo((0.5 * 1340) / 1600, 6);
+    expect(stored).toBeLessThan(0.5);
+  });
+
+  it("keeps the stored value inside the legal band", () => {
+    for (const pointer of [-1, 0, 0.05, 0.5, 0.95, 2]) {
+      const stored = storedRatioFromDrag(pointer, 1340, 260);
+      expect(stored).toBeGreaterThanOrEqual(MIN_RATIO);
+      expect(stored).toBeLessThanOrEqual(MAX_RATIO);
+    }
+  });
+
+  it("degrades to the clamped pointer ratio when unmeasured", () => {
+    expect(storedRatioFromDrag(0.4, 0, 0)).toBe(0.4);
+    expect(storedRatioFromDrag(0.4, Number.NaN, 260)).toBe(0.4);
+    expect(storedRatioFromDrag(9, 0, 0)).toBe(MAX_RATIO);
   });
 });

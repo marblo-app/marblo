@@ -68,7 +68,7 @@ export const RIGHT_TABS = [
   "deploy",
   "settings",
 ] as const;
-export type RightTabId = typeof RIGHT_TABS[number];
+export type RightTabId = (typeof RIGHT_TABS)[number];
 
 /**
  * Tabs hidden in production — surfaced only when VITE_DEV_FEATURES lists the id.
@@ -76,7 +76,7 @@ export type RightTabId = typeof RIGHT_TABS[number];
  * feature-flagged views identically.
  */
 export const DEV_ONLY_RIGHT_TABS: ReadonlySet<RightTabId> = new Set<RightTabId>(
-  ["missions", "flows", "deploy"]
+  ["missions", "flows", "deploy"],
 );
 
 /**
@@ -85,7 +85,7 @@ export const DEV_ONLY_RIGHT_TABS: ReadonlySet<RightTabId> = new Set<RightTabId>(
  */
 export function visibleRightTabs(devFeatures: string[]): RightTabId[] {
   return RIGHT_TABS.filter(
-    (t) => !DEV_ONLY_RIGHT_TABS.has(t) || devFeatures.includes(t)
+    (t) => !DEV_ONLY_RIGHT_TABS.has(t) || devFeatures.includes(t),
   );
 }
 
@@ -144,24 +144,33 @@ export const BOARD_PADDING = 16;
  *   4 × 168 + 3 × 16 + 2 × 16 = 752
  *
  * Below this the columns stop shrinking and the last one (REVIEW) slides behind
- * the horizontal scroll — the exact symptom this constant exists to prevent.
+ * the horizontal scroll.
+ *
+ * ★ This is the COMFORTABLE width, not a reservation the layout enforces. It
+ * used to be one — `ratioWithActivityOpen` guaranteed it by amputating the
+ * terminal column, which the CEO rejected (see that function). The docked
+ * Activity panel now respects WORK_VIEW_MIN_WIDTH instead and the board scrolls
+ * below this number, as it always has on a narrow window.
  */
 export const BOARD_MIN_WIDTH = 752;
 
 /**
  * Activity Stream panel width band. The panel is the FOURTH region of the shell
  * (files · terminals · work view · activity), not an overlay and not a shove:
- * it is deliberately narrower than the 320px it used to claim, because the
- * width it takes comes straight out of the work view.
+ * it is deliberately narrow — it went 320 → 280 → 260 — because the width it
+ * takes comes straight out of the panes the user is actually working in. It is
+ * a glanceable feed, not a work surface; the full-size view is the Macro mode
+ * inside it, not a wider dock.
  */
-export const ACTIVITY_PANEL_WIDTH = 280;
-export const ACTIVITY_MIN_PANEL_WIDTH = 220;
+export const ACTIVITY_PANEL_WIDTH = 260;
+export const ACTIVITY_MIN_PANEL_WIDTH = 200;
 
 /**
- * Fraction of the work area the Activity panel may never exceed. Guards the
- * mid-width band where a fixed 280px would be most of the window.
+ * Fraction of the work area the Activity panel may never exceed — the max-width
+ * ceiling that keeps it from over-claiming in the mid-width band, where a fixed
+ * 260px would already be a quarter of the window.
  */
-const ACTIVITY_MAX_FRACTION = 0.3;
+export const ACTIVITY_MAX_FRACTION = 0.25;
 
 /**
  * Below this work-area width (px) the panel cannot usefully coexist with
@@ -189,38 +198,105 @@ export function activityPanelWidth(availableWidth: number): number | null {
   const cap = Math.floor(availableWidth * ACTIVITY_MAX_FRACTION);
   return Math.max(
     ACTIVITY_MIN_PANEL_WIDTH,
-    Math.min(ACTIVITY_PANEL_WIDTH, cap)
+    Math.min(ACTIVITY_PANEL_WIDTH, cap),
   );
 }
 
 /**
+ * The most of its own width the terminal column may give up when the Activity
+ * panel docks. The terminal is the pane the user is actually working in — the
+ * CEO's rule is that opening a side feed may cost it a sliver, never a third of
+ * itself.
+ */
+export const MAX_TERMINAL_YIELD = 0.1;
+
+/**
+ * The hard floor for the work view while Activity is docked: one board column
+ * plus the board's own padding. This is NOT the comfortable four-column width
+ * (BOARD_MIN_WIDTH) — it is the point past which the work view stops being a
+ * pane at all. The board is `overflow-x-auto` and scrolls below it, exactly as
+ * it already does on a narrow window with the panel closed.
+ */
+export const WORK_VIEW_MIN_WIDTH = BOARD_COLUMN_MIN_WIDTH + 2 * BOARD_PADDING;
+
+/**
  * The terminal-pane fraction to actually render while the Activity panel is
- * open: the stored ratio, capped so the work view keeps at least
- * BOARD_MIN_WIDTH. Opening Activity must never be what pushes a board column
- * out of view — the space comes from the terminal column instead, which the
- * user can always drag back or collapse.
+ * open.
+ *
+ * ★ WHERE THE PANEL'S WIDTH COMES FROM — this used to be the other way round.
+ * The first version capped the terminal so the work view kept BOARD_MIN_WIDTH
+ * (752px), which reads fine as a rule and was wrong in practice: at a 1200px
+ * split a 0.4 terminal was cut from 480px to 184px — a 60% amputation of the
+ * most important pane in the app — just to keep a board column that the board
+ * can perfectly well scroll to. The CEO's call (ticket PJ8Hz66n) inverts it:
+ *
+ *   1. the terminal keeps its pixel width; the panel's width comes out of the
+ *      WORK VIEW (the board), which absorbs it by scrolling;
+ *   2. only if that would starve the work view past WORK_VIEW_MIN_WIDTH does
+ *      the terminal give anything back — and never more than
+ *      MAX_TERMINAL_YIELD (10%) of what it had;
+ *   3. past that the work view scrolls. Rule 2's floor is hard: a 10% cap that
+ *      a narrow window can talk you out of is not a cap.
+ *
+ * `splitWidth` is the region left for terminal+divider+work view (i.e. already
+ * net of the panel); `activityWidth` is the docked panel's width, which is what
+ * lets this reconstruct the terminal's panel-CLOSED pixel width. Passing 0
+ * degrades to "the terminal was already this wide", which is the right answer
+ * before anything is measured.
  *
  * The stored ratio is NOT mutated: close the panel and the drag the user chose
- * returns verbatim. When the split is so narrow that even a zero-width terminal
- * column couldn't reach BOARD_MIN_WIDTH, clampRatio's floor (MIN_RATIO) wins —
- * the board scrolls, exactly as it already does at that width with the panel
- * closed. Only called when the panel is open, so the panel-closed geometry is
- * untouched.
+ * returns verbatim. Only called when the panel is open, so the panel-closed
+ * geometry is untouched.
  */
 export function ratioWithActivityOpen(
   storedRatio: number,
-  splitWidth: number
+  splitWidth: number,
+  activityWidth = 0,
 ): number {
-  if (!Number.isFinite(splitWidth) || splitWidth <= 0) {
-    return clampRatio(storedRatio);
+  const stored = clampRatio(storedRatio);
+  if (!Number.isFinite(splitWidth) || splitWidth <= 0) return stored;
+  const panel =
+    Number.isFinite(activityWidth) && activityWidth > 0 ? activityWidth : 0;
+
+  // What the terminal column measured with the panel closed. The stored ratio
+  // is a fraction of the WORK AREA, which the panel is carved out of.
+  const closedTerminalPx = stored * (splitWidth + panel);
+  // Rule 2: the floor it may never sink below.
+  const flooredTerminalPx = closedTerminalPx * (1 - MAX_TERMINAL_YIELD);
+  // Rule 1: what the work view can spare down to its own floor. One extra pixel
+  // reserved — the quotient round-trips through binary floating point
+  // (ratio → flex-basis → remaining width) and can land a hair under.
+  const sparePx = splitWidth - DIVIDER_WIDTH - WORK_VIEW_MIN_WIDTH - 1;
+
+  const terminalPx = Math.max(
+    flooredTerminalPx,
+    Math.min(closedTerminalPx, sparePx),
+  );
+  // Absolute guard: the work view may be squeezed, never negative.
+  const bounded = Math.max(0, Math.min(terminalPx, splitWidth - DIVIDER_WIDTH));
+  return Math.max(MIN_RATIO, bounded / splitWidth);
+}
+
+/**
+ * The ratio to STORE for a divider drag made while the Activity panel is
+ * docked.
+ *
+ * The pointer fraction is relative to the split area (panel already carved
+ * out), but the stored ratio is always a fraction of the whole work area — that
+ * is the invariant `ratioWithActivityOpen` reads back. Storing the raw pointer
+ * fraction would make the pane jump wider the moment the drag ended, because
+ * the read-back would re-expand it against the panel-closed width.
+ */
+export function storedRatioFromDrag(
+  pointerRatio: number,
+  splitWidth: number,
+  activityWidth: number,
+): number {
+  const total = splitWidth + activityWidth;
+  if (!Number.isFinite(total) || total <= 0 || !(splitWidth > 0)) {
+    return clampRatio(pointerRatio);
   }
-  // Reserve one extra pixel. The exact quotient round-trips through binary
-  // floating point (ratio → flex-basis → remaining width) and can land a hair
-  // UNDER the reservation — 879.9999999999999px — which is all it takes for the
-  // browser to start the horizontal scroll this function exists to avoid.
-  const maxTerminalRatio =
-    (splitWidth - DIVIDER_WIDTH - BOARD_MIN_WIDTH - 1) / splitWidth;
-  return clampRatio(Math.min(storedRatio, maxTerminalRatio));
+  return clampRatio((clampRatio(pointerRatio) * splitWidth) / total);
 }
 
 /** Clamp a raw fraction into [MIN, MAX]; non-finite falls back to the default. */
@@ -264,7 +340,7 @@ export function parseStoredTab(raw: string | null | undefined): RightTabId {
 export function initialActiveTab(
   rawTab: string | null | undefined,
   landOnStartHere: boolean,
-  onboardingComplete = false
+  onboardingComplete = false,
 ): RightTabId {
   if (isRightTab(rawTab)) {
     return rawTab === "startHere" && onboardingComplete ? "board" : rawTab;
@@ -283,7 +359,7 @@ export function parseStoredCollapsed(raw: string | null | undefined): boolean {
  */
 export function isTerminalCollapsed(
   manualCollapsed: boolean,
-  containerWidth: number
+  containerWidth: number,
 ): boolean {
   return manualCollapsed || containerWidth < NARROW_BREAKPOINT;
 }
@@ -295,7 +371,7 @@ export function isTerminalCollapsed(
 export function ratioFromPointer(
   clientX: number,
   left: number,
-  width: number
+  width: number,
 ): number {
   if (!(width > 0)) return DEFAULT_RATIO;
   return clampRatio((clientX - left) / width);
@@ -309,7 +385,7 @@ export function clampVerticalRatio(n: number): number {
 
 /** Parse a persisted vertical-ratio string; anything invalid → DEFAULT_V_RATIO. */
 export function parseStoredVerticalRatio(
-  raw: string | null | undefined
+  raw: string | null | undefined,
 ): number {
   if (raw == null) return DEFAULT_V_RATIO;
   const n = Number.parseFloat(raw);
@@ -323,7 +399,7 @@ export function parseStoredVerticalRatio(
 export function verticalRatioFromPointer(
   clientY: number,
   top: number,
-  height: number
+  height: number,
 ): number {
   if (!(height > 0)) return DEFAULT_V_RATIO;
   return clampVerticalRatio((clientY - top) / height);

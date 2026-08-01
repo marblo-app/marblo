@@ -278,10 +278,11 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
 
 interface ActivityStreamPanelProps {
   /**
-   * Rendered width in px. The Workspace shell sizes the panel to whatever is
-   * left after the board's four columns are guaranteed
-   * (splitWorkspaceLayout.activityPanelWidth); the legacy Layout doesn't
-   * measure anything and takes the default.
+   * Rendered width in px. The Workspace shell sizes the panel from its own
+   * budget (splitWorkspaceLayout.activityPanelWidth: a narrow preferred width,
+   * capped at ACTIVITY_MAX_FRACTION of the work area so it can never over-claim
+   * on a mid-width window); the legacy Layout doesn't measure anything and takes
+   * the default.
    */
   width?: number;
 }

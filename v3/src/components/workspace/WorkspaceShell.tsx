@@ -19,6 +19,7 @@ import {
   isTerminalCollapsed,
   ratioFromPointer,
   ratioWithActivityOpen,
+  storedRatioFromDrag,
   NARROW_BREAKPOINT,
 } from "../../lib/splitWorkspaceLayout";
 import { TerminalColumn } from "./TerminalColumn";
@@ -107,19 +108,22 @@ export function WorkspaceShell() {
   // beside the work view (→ slim rail). `open` stays true through an
   // auto-collapse, so widening the window brings the panel straight back.
   const activityWidth = activityOpen ? activityPanelWidth(workAreaWidth) : null;
-  const activityDocked = activityWidth != null;
 
-  // While the panel is docked, cap the terminal fraction so the board keeps its
-  // four columns — the panel's width comes out of the terminal column, never
-  // out of the board. The STORED ratio is untouched: closing the panel restores
-  // the user's drag verbatim.
-  const effectiveRatio = activityDocked
-    ? ratioWithActivityOpen(ratio, bodyWidth)
-    : ratio;
+  // While the panel is docked, re-solve the terminal fraction so the terminal
+  // KEEPS its pixel width: the panel's width is recovered from the work view
+  // (board), and the terminal yields at most MAX_TERMINAL_YIELD of itself and
+  // only when the work view would otherwise be starved. The STORED ratio is
+  // untouched — closing the panel restores the user's drag verbatim, so the
+  // panel-closed layout is pixel-identical to before.
+  const effectiveRatio =
+    activityWidth != null
+      ? ratioWithActivityOpen(ratio, bodyWidth, activityWidth)
+      : ratio;
 
-  // Divider drag → set the left pane fraction, clamped to the legal band (and,
-  // while Activity is docked, to the board-preserving cap so the pane lands
-  // where the pointer left it instead of snapping back on release).
+  // Divider drag → set the left pane fraction, clamped to the legal band. While
+  // Activity is docked the pointer fraction is relative to the split area, but
+  // the store holds a fraction of the whole work area — convert, or the pane
+  // jumps wider the instant the drag ends.
   const onDividerDown = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
@@ -128,7 +132,11 @@ export function WorkspaceShell() {
       const move = (ev: MouseEvent) => {
         const rect = el.getBoundingClientRect();
         const raw = ratioFromPointer(ev.clientX, rect.left, rect.width);
-        setRatio(activityDocked ? ratioWithActivityOpen(raw, rect.width) : raw);
+        setRatio(
+          activityWidth != null
+            ? storedRatioFromDrag(raw, rect.width, activityWidth)
+            : raw,
+        );
       };
       const up = () => {
         window.removeEventListener("mousemove", move);
@@ -139,7 +147,7 @@ export function WorkspaceShell() {
       window.addEventListener("mousemove", move);
       window.addEventListener("mouseup", up);
     },
-    [setRatio, activityDocked, bodyElRef],
+    [setRatio, activityWidth, bodyElRef],
   );
 
   // Deep-link to Settings (e.g. Upgrade modal CTA) → surface the Settings tab.
