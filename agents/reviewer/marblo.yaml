@@ -22,6 +22,23 @@ compatibility:
     - claude-code
     - codex
 
+# AGENT.md is a plain subagent definition, so the Store copies it straight out of
+# this repo at the reviewed commit. `root` is an enum key the app maps to the
+# harness subagents directory — the manifest never carries a path — and the digest
+# below is what the bytes are checked against before anything lands on disk.
+# README.md is repo documentation, not payload: it has no subagent frontmatter, so
+# it is deliberately not installed into the agents tree.
+install:
+  kind: files
+  root: claude-agents
+  dest: reviewer
+  files:
+    - AGENT.md
+  integrity:
+    algorithm: sha256
+    files:
+      AGENT.md: 83d23b32d310601d73588c3cd79da9205972df83b232f166f77d918ce8db5a98
+
 permissions:
   - repository:read
 
@@ -31,4 +48,4 @@ keywords:
   - quality-gate
 
 license: MIT
-homepage: https://marblo.app
+homepage: https://github.com/marblo-app/marblo/tree/main/agents/reviewer
