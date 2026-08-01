@@ -41,6 +41,7 @@ import { terminal } from "./terminal";
 import { workspace } from "./workspace";
 import { diffComment } from "./diffComment";
 import { collaboration } from "./collaboration";
+import { project } from "./project";
 
 export const ko = {
   ...header,
@@ -73,6 +74,7 @@ export const ko = {
   ...workspace,
   ...diffComment,
   ...collaboration,
+  ...project,
 };
 
 export type MessageKey = keyof typeof ko;

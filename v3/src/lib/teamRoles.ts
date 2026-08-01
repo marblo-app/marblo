@@ -19,6 +19,22 @@ export function canMergeAsRole(
   return ROLE_PERMISSIONS[role]?.includes("merge") ?? false;
 }
 
+/**
+ * 구성원별 작업량(프로젝트 탭)을 볼 수 있는가.
+ *
+ * 멤버 관리와 **같은 게이트**다 — 작업량 표는 "누가 무엇을 얼마나 했나" 라는
+ * 인사 성격의 정보라서, 멤버를 관리할 수 없는 사람에게 열어 줄 이유가 없다.
+ * firestore.rules 의 isAdminOrOwner(=owner/admin) 와 같은 판정을 UI 에서
+ * 재사용하기 위해 ROLE_PERMISSIONS 의 manage_members 에서 파생한다 — 별도
+ * 목록을 두면 룰과 UI 가 조용히 갈라진다.
+ */
+export function canViewWorkload(
+  role: InvitationRole | null | undefined,
+): boolean {
+  if (!role) return false;
+  return ROLE_PERMISSIONS[role]?.includes("manage_members") ?? false;
+}
+
 /** 이 role 의 사용자가 다른 멤버에게 부여할 수 있는 role 목록. */
 export function assignableRolesFor(
   currentRole: InvitationRole,

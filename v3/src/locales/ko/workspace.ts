@@ -20,6 +20,7 @@ export const workspace = {
   "workspace.tab.startHere": "시작하기",
   "workspace.tab.board": "보드",
   "workspace.tab.agents": "에이전트",
+  "workspace.tab.project": "프로젝트",
   "workspace.tab.settings": "설정",
   "workspace.tab.code": "코드",
   "workspace.tab.worktrees": "워크트리",

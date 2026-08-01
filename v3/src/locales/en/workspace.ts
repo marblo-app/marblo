@@ -22,6 +22,7 @@ export const workspace: Record<keyof typeof koWorkspace, string> = {
   "workspace.tab.startHere": "Start here",
   "workspace.tab.board": "Board",
   "workspace.tab.agents": "Agents",
+  "workspace.tab.project": "Project",
   "workspace.tab.settings": "Settings",
   "workspace.tab.code": "Code",
   "workspace.tab.worktrees": "Worktrees",

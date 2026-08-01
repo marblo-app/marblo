@@ -43,6 +43,14 @@
  * path cannot be behind the slow ones. `tests/unit/splitWorkspaceLayout.test.ts`
  * pins the adjacency so a future insertion doesn't quietly bury it again.
  *
+ * `project` sits immediately after `agents` because the two answer the same
+ * question about different populations: `agents` is the machine fleet working
+ * this project, `project` is the PEOPLE on it — members, their roles, and how
+ * much of the work each one is carrying. Before it existed the three halves of
+ * that answer lived apart (invites buried in Settings → Team, per-agent counts
+ * on the Agents dashboard, merges in the history tab), so nobody could see who
+ * was carrying what. Adjacency is pinned in the unit test.
+ *
  * `store` sits immediately BEFORE `harness` for the same reason. The public
  * registry store used to be a section buried inside the Harness tab, below the
  * CLI/vendor connection setup — a browsable catalog behind a settings screen,
@@ -58,6 +66,7 @@ export const RIGHT_TABS = [
   "code",
   "lanes",
   "agents",
+  "project",
   "worktrees",
   "history",
   "usage",

@@ -47,6 +47,9 @@ export const settings = {
   "settings.team.you": "(나)",
   "settings.team.remove": "제거",
   "settings.team.empty": "아직 멤버가 없습니다.",
+  "settings.team.projectTabHint":
+    "구성원별 작업량(에이전트 · 진행중 · 리뷰 · 완료 · 머지)은 프로젝트 탭에서 함께 볼 수 있습니다.",
+  "settings.team.projectTabCta": "프로젝트 탭 열기",
 
   // ── Invitation banner (InvitationBanner) ─────────────────
   "settings.invitation.invitedYou": "{inviter}님이 {project}에 초대했습니다",

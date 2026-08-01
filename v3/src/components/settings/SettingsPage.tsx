@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useWorkspaceModeStore } from "../../stores/workspaceModeStore";
 import { useProjectStore } from "../../stores/projectStore";
+import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import {
   ORCHESTRATOR_HARNESS_DESC,
   ORCHESTRATOR_HARNESS_OPTIONS,
@@ -137,6 +138,11 @@ export function SettingsPage() {
         {activeTab === "team" &&
           (currentProject ? (
             <PlanGate feature="team_members">
+              {/* 같은 <TeamManagement /> 가 프로젝트 탭에도 걸려 있다 — 그쪽은
+                  여기에 없는 구성원별 작업량까지 함께 보여주므로 길만 열어 준다
+                  (UI 복제 아님). 레거시 Layout 에는 프로젝트 탭이 없으므로 셸이
+                  켜져 있을 때만 노출한다. */}
+              <ProjectTabPointer />
               <TeamManagement projectId={currentProject.id} />
             </PlanGate>
           ) : (
@@ -156,6 +162,37 @@ export function SettingsPage() {
         {activeTab === "language" && <LanguageSection />}
         {activeTab === "bugreport" && <BugReportSection />}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Settings → Team 에서 프로젝트 탭으로 보내는 안내 줄. 초대·역할 UI 자체는
+ * 두 화면이 <TeamManagement /> 하나를 공유하므로, 여기서 굳이 다시 그리지 않고
+ * "작업량까지 보려면 저쪽" 만 알려 준다.
+ *
+ * 레거시 Layout(워크스페이스 셸 OFF)에는 프로젝트 탭이 없어 이동시킬 곳이 없다
+ * — 그때는 아무것도 렌더하지 않는다(막다른 버튼 금지).
+ */
+function ProjectTabPointer() {
+  const { t } = useTranslation();
+  const shellEnabled = useWorkspaceModeStore((s) => s.enabled);
+  if (!shellEnabled) return null;
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-700 bg-gray-800/60 px-4 py-2.5">
+      <span className="text-xs text-gray-400">
+        {t("settings.team.projectTabHint")}
+      </span>
+      <button
+        type="button"
+        onClick={() =>
+          useSplitWorkspaceStore.getState().setActiveTab("project")
+        }
+        className="rounded border border-gray-600 px-3 py-1 text-xs font-medium text-gray-200 transition-colors hover:border-blue-500 hover:text-blue-400"
+      >
+        {t("settings.team.projectTabCta")}
+      </button>
     </div>
   );
 }

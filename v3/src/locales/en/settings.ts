@@ -49,6 +49,9 @@ export const settings: Record<keyof typeof koSettings, string> = {
   "settings.team.you": "(You)",
   "settings.team.remove": "Remove",
   "settings.team.empty": "No members yet.",
+  "settings.team.projectTabHint":
+    "Workload per member (agents, in progress, review, done, merges) lives alongside this list on the Project tab.",
+  "settings.team.projectTabCta": "Open Project tab",
 
   // ── Invitation banner (InvitationBanner) ─────────────────
   "settings.invitation.invitedYou": "{inviter} invited you to {project}",

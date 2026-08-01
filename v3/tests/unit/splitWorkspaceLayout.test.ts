@@ -256,6 +256,26 @@ describe("visibleRightTabs", () => {
     expect(visibleRightTabs([])).toContain("store");
   });
 
+  // The Project tab (members · roles · workload) answers "who is on this
+  // project and what is each one carrying". It sits next to `agents` — the
+  // machine fleet — so the two populations read as a pair. Before it existed
+  // the three halves of that answer were scattered (invites in Settings →
+  // Team, counts on the Agents dashboard, merges in History).
+  it("★places Project immediately after Agents", () => {
+    const agentsIndex = RIGHT_TABS.indexOf("agents");
+    expect(agentsIndex).toBeGreaterThanOrEqual(0);
+    expect(RIGHT_TABS[agentsIndex + 1]).toBe("project");
+  });
+
+  it("★Project is always visible — never dev-flag gated", () => {
+    expect(DEV_ONLY_RIGHT_TABS.has("project")).toBe(false);
+    expect(visibleRightTabs([])).toContain("project");
+    // Neither neighbour is dev-gated, so the adjacency survives the
+    // production filter — the bar users actually see.
+    const visible = visibleRightTabs([]);
+    expect(visible[visible.indexOf("agents") + 1]).toBe("project");
+  });
+
   it("★Quick Lanes stays adjacent to Code once dev-only tabs are hidden", () => {
     // Neither `code` nor `lanes` is dev-gated, so the adjacency has to survive
     // the production filter too — the bar users actually see.

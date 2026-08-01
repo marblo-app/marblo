@@ -18,6 +18,7 @@ import { MissionsTab } from "../tabs/MissionsTab";
 import { DeployTab } from "../tabs/DeployTab";
 import { FlowsTab } from "../tabs/FlowsTab";
 import { AgentsTab } from "../tabs/AgentsTab";
+import { ProjectTab } from "../project/ProjectTab";
 import { SettingsPage } from "../settings/SettingsPage";
 import { StartHereTab } from "../onboarding/StartHereTab";
 import { PlanGate } from "../settings/PlanGate";
@@ -54,6 +55,10 @@ const TAB_COMPONENTS: Record<RightTabId, () => JSX.Element> = {
   startHere: StartHereTab,
   board: BoardTab,
   agents: AgentsTab,
+  // People side of the project: members, roles, invites, and per-member
+  // workload. Shares TeamManagement with Settings → Team rather than
+  // reimplementing the invite/role UI.
+  project: ProjectTab,
   // Settings is ALSO reachable from the Header gear (which opens the shell's
   // full-screen overlay). It gets a tab too because with the overlay as the
   // only entry point users never found it (ticket 0JVQcUxd).
@@ -75,6 +80,7 @@ const TAB_LABEL_KEY = {
   startHere: "workspace.tab.startHere",
   board: "workspace.tab.board",
   agents: "workspace.tab.agents",
+  project: "workspace.tab.project",
   settings: "workspace.tab.settings",
   code: "workspace.tab.code",
   worktrees: "workspace.tab.worktrees",
