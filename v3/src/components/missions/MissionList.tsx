@@ -1,7 +1,7 @@
 import type { Mission } from "../../types/mission";
 import { useTranslation } from "../../lib/i18n";
 import { MissionStatusBadge } from "./MissionStatusBadge";
-import { TEMPLATE_META } from "./templates";
+import { templateMeta } from "./templates";
 
 type TranslateFn = ReturnType<typeof useTranslation>["t"];
 
@@ -38,7 +38,7 @@ export function MissionList({
   return (
     <ul className="space-y-2">
       {missions.map((m) => {
-        const meta = TEMPLATE_META[m.templateId];
+        const meta = templateMeta(m.templateId);
         const total = m.steps.length;
         const completed = m.steps.filter(
           (s) => s.status === "success" || s.status === "skipped",

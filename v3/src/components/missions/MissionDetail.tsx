@@ -8,7 +8,7 @@ import type { Task, TaskStatus } from "../../types/task";
 import type { Agent } from "../../types/agent";
 import { MissionStatusBadge } from "./MissionStatusBadge";
 import { MissionTimeline } from "./MissionTimeline";
-import { TEMPLATE_META } from "./templates";
+import { templateMeta } from "./templates";
 import { useTranslation } from "../../lib/i18n";
 import { useTaskStore } from "../../stores/taskStore";
 import { useAgentStore } from "../../stores/agentStore";
@@ -44,7 +44,7 @@ export function MissionDetail({
   onDelete,
 }: MissionDetailProps) {
   const { t, locale } = useTranslation();
-  const meta = TEMPLATE_META[mission.templateId];
+  const meta = templateMeta(mission.templateId);
 
   // 미션 task 는 보드(KanbanBoard)에도 contextId=missionId 로 섞여 표시되지만
   // (TaskCard 의 🎯 카드), 미션탭은 보드 task 를 구독하지 않으므로 여기서 직접

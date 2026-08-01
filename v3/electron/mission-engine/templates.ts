@@ -1,4 +1,5 @@
 import type {
+  MissionLaunchTemplateId,
   MissionStep,
   MissionStepFailurePolicy,
   MissionStepType,
@@ -16,7 +17,7 @@ type StepSpec = {
 };
 
 export interface MissionTemplate {
-  id: MissionTemplateId;
+  id: MissionLaunchTemplateId;
   label: string;
   emoji: string;
   weight: "light" | "medium" | "heavy";
@@ -29,7 +30,12 @@ export interface MissionTemplate {
 // - 의사결정 단계 (plan-*/office-hours) → 명시 없음 = retry (default)
 // - terminal 단계 (ship) → escalate — 실패 시 사용자 보고 필요
 // - 조사 단계 (investigate) → escalate — 결과 없이 fix 진행 불가
-export const MISSION_TEMPLATES: Record<MissionTemplateId, MissionTemplate> = {
+// ★런치 템플릿만 담는다(`MissionLaunchTemplateId`). 암묵적 미션의 "adhoc" 은
+// 실행 계획이 없어 여기 없고, 그래서 listTemplates()/런치 다이얼로그에도 안 뜬다.
+export const MISSION_TEMPLATES: Record<
+  MissionLaunchTemplateId,
+  MissionTemplate
+> = {
   "quick-fix": {
     id: "quick-fix",
     label: "Quick Fix",
@@ -103,13 +109,13 @@ export const MISSION_TEMPLATES: Record<MissionTemplateId, MissionTemplate> = {
   },
 };
 
-export function getTemplate(id: MissionTemplateId): MissionTemplate {
+export function getTemplate(id: MissionLaunchTemplateId): MissionTemplate {
   const t = MISSION_TEMPLATES[id];
   if (!t) throw new Error(`Unknown mission template: ${id}`);
   return t;
 }
 
-export function instantiateSteps(id: MissionTemplateId): MissionStep[] {
+export function instantiateSteps(id: MissionLaunchTemplateId): MissionStep[] {
   return getTemplate(id).steps.map((spec, index) => ({
     type: spec.type,
     skill: spec.skill,
@@ -119,6 +125,18 @@ export function instantiateSteps(id: MissionTemplateId): MissionStep[] {
     status: "pending" as const,
     retryCount: 0,
   }));
+}
+
+/**
+ * 미션 문서의 templateId 로 템플릿 찾기 — 없으면 `undefined`.
+ * 암묵적 미션("adhoc")처럼 런치 템플릿이 아닌 값이 들어와도 터지지 않는다.
+ */
+export function findTemplate(
+  id: MissionTemplateId,
+): MissionTemplate | undefined {
+  return (
+    MISSION_TEMPLATES as Partial<Record<MissionTemplateId, MissionTemplate>>
+  )[id];
 }
 
 export function listTemplates(): MissionTemplate[] {

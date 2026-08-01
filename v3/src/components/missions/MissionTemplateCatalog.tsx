@@ -1,10 +1,10 @@
-import type { MissionTemplateId } from "../../types/mission";
+import type { MissionLaunchTemplateId } from "../../types/mission";
 import { useTranslation } from "../../lib/i18n";
 import { listTemplates, TEMPLATE_DESC_KEY } from "./templates";
 
 interface MissionTemplateCatalogProps {
-  onSelect: (id: MissionTemplateId) => void;
-  highlighted?: MissionTemplateId | null;
+  onSelect: (id: MissionLaunchTemplateId) => void;
+  highlighted?: MissionLaunchTemplateId | null;
 }
 
 const WEIGHT_LABEL: Record<"light" | "medium" | "heavy", string> = {

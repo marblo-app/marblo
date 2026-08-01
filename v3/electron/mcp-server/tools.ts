@@ -19,6 +19,7 @@ import {
   limit as fsLimit,
   runTransaction,
   waitForPendingWrites,
+  arrayUnion,
   Timestamp,
   type QueryConstraint,
   type QuerySnapshot,
@@ -55,6 +56,16 @@ import {
   taskBodyStorageFields,
   composeTaskBody,
 } from "./task-body.js";
+import {
+  buildImplicitMissionDoc,
+  implicitAdoptionError,
+  implicitAdoptionPatch,
+  isImplicitMissionDoc,
+  normalizeMissionLabel,
+  selectJoinableImplicitMission,
+  shouldCloseImplicitMission,
+  type ImplicitMissionCandidate,
+} from "./implicit-mission.js";
 import { evaluateDeleteGuards, type DeleteMode } from "./task-delete.js";
 import {
   appendQuestion,
@@ -355,7 +366,9 @@ async function fetchModelGuidanceStatic(): Promise<{
   } catch (err) {
     return {
       payload: null,
-      error: `브리지 호출 실패: ${err instanceof Error ? err.message : String(err)}`,
+      error: `브리지 호출 실패: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
     };
   }
 }
@@ -1227,6 +1240,234 @@ async function ensureTaskMissionContext(
 
   return null;
 }
+
+// ── 암묵적 미션 (ad-hoc 배치 → Replay 단위) ────────────────────
+//
+// 설계: `docs/MISSION-REPLAY-DESIGN.md` §2.1. 규칙은 전부 순수 모듈
+// (`implicit-mission.ts`)에 있고 여기는 Firestore I/O 만 한다.
+//
+// 핵심: 새 그룹핑 경로를 만들지 않는다. 오케가 라벨을 주면 가벼운 미션 문서를
+// 만들고 그 배치의 티켓 contextId 를 그 missionId 로 돌려놓는다 — 그러면
+// 기존 Replay 파이프라인(tasks where contextId == missionId)이 그대로 잡는다.
+
+const MISSIONS_COLLECTION = "missions";
+
+/** 라벨 → missionId. 같은 라벨의 열린 미션이 있으면 합류, 없으면 생성. */
+async function resolveImplicitMissionId(
+  projectId: string,
+  rawLabel: string,
+  rawGoal: string | undefined,
+): Promise<{ missionId: string; created: boolean }> {
+  const label = normalizeMissionLabel(rawLabel);
+  if (!label) throw new Error("mission_label is empty after normalization.");
+
+  // 동등비교만 쓴다(projectId + implicitLabel). Firestore 는 equality-only
+  // 쿼리를 단일필드 인덱스 병합으로 처리하므로 복합 인덱스를 새로 만들 필요가
+  // 없다. 정렬(최근 활동순)은 메모리에서 — orderBy 를 붙이는 순간 복합
+  // 인덱스가 필요해지고, 그건 배포 절차를 하나 더 만드는 값이다.
+  const snap = await getDocs(
+    query(
+      collection(db, MISSIONS_COLLECTION),
+      where("projectId", "==", projectId),
+      where("implicitLabel", "==", label),
+    ),
+  );
+  const candidates: ImplicitMissionCandidate[] = snap.docs.map((d) => {
+    const data = d.data() as Record<string, unknown>;
+    const lastActivity = data.lastActivityAt;
+    return {
+      id: d.id,
+      status: typeof data.status === "string" ? data.status : undefined,
+      missionKind:
+        typeof data.missionKind === "string" ? data.missionKind : undefined,
+      implicitLabel:
+        typeof data.implicitLabel === "string" ? data.implicitLabel : undefined,
+      projectId:
+        typeof data.projectId === "string" ? data.projectId : undefined,
+      lastActivityMs:
+        lastActivity instanceof Timestamp ? lastActivity.toMillis() : 0,
+    };
+  });
+
+  const joinable = selectJoinableImplicitMission(candidates, label, projectId);
+  if (joinable) return { missionId: joinable.id, created: false };
+
+  const ref = await addDoc(
+    collection(db, MISSIONS_COLLECTION),
+    buildImplicitMissionDoc({
+      projectId,
+      label,
+      goal: rawGoal,
+      ownerOrchestratorSessionId:
+        MARBLO_ORCHESTRATOR_PTY_SESSION_ID || MARBLO_AGENT_ID || "",
+      now: new Date(),
+    }),
+  );
+  return { missionId: ref.id, created: true };
+}
+
+/** 미션의 보조 인덱스(taskIds) 갱신. 1급 조인키는 task.contextId 라 실패해도 치명적이지 않다. */
+async function appendImplicitMissionTaskIds(
+  missionId: string,
+  taskIds: readonly string[],
+): Promise<void> {
+  if (taskIds.length === 0) return;
+  try {
+    await updateDoc(doc(db, MISSIONS_COLLECTION, missionId), {
+      taskIds: arrayUnion(...taskIds),
+      lastActivityAt: Timestamp.now(),
+    });
+  } catch (err) {
+    // taskIds 는 설계상 **보조 인덱스**다(§2.1: 배열이라 드리프트 가능).
+    // 집계는 contextId 로 하므로 여기서 실패해도 Replay 는 성립한다.
+    console.warn("[implicit-mission] taskIds append failed:", err);
+  }
+}
+
+/**
+ * 이미 있는 티켓을 암묵적 미션에 입양. 성공하면 `null`, 거부하면 사유 문자열.
+ * 보드 티켓만 입양한다 — 레인/명시적 미션 소속은 절대 덮지 않는다.
+ */
+async function adoptTaskIntoImplicitMission(
+  taskId: string,
+  task: { contextId?: string; missionId?: string },
+  missionId: string,
+): Promise<string | null> {
+  const refusal = implicitAdoptionError(taskId, task, missionId);
+  if (refusal) return refusal;
+
+  const patch = implicitAdoptionPatch(task, missionId);
+  if (Object.keys(patch).length > 0) {
+    await updateDoc(doc(db, "tasks", taskId), {
+      ...patch,
+      updatedAt: Timestamp.now(),
+    });
+  }
+  await appendImplicitMissionTaskIds(missionId, [taskId]);
+  return null;
+}
+
+/**
+ * 배치가 다 끝났으면 암묵적 미션을 completed 로 닫는다 → 그 순간 Replay 에 뜬다.
+ *
+ * DONE 전이 직후에만 부른다. 실패해도 호출부의 상태 전이는 이미 커밋됐으므로
+ * 절대 throw 하지 않는다(Replay 라벨 갱신이 티켓 진행을 막으면 안 된다).
+ *
+ * @returns 이 호출이 실제로 미션을 닫았으면 missionId, 아니면 null.
+ */
+async function closeImplicitMissionIfComplete(
+  contextId: string | undefined,
+): Promise<string | null> {
+  if (!contextId || contextId === "board" || isLaneContextId(contextId)) {
+    return null;
+  }
+  try {
+    const missionRef = doc(db, MISSIONS_COLLECTION, contextId);
+    const missionSnap = await getDoc(missionRef);
+    if (!missionSnap.exists()) return null;
+    const mission = missionSnap.data() as Record<string, unknown>;
+    if (!isImplicitMissionDoc(mission as { missionKind?: string })) return null;
+
+    const tasksSnap = await getDocs(
+      query(collection(db, "tasks"), where("contextId", "==", contextId)),
+    );
+    const tasks = tasksSnap.docs.map((d) => ({
+      status: String((d.data() as Record<string, unknown>).status ?? ""),
+    }));
+
+    if (
+      !shouldCloseImplicitMission(
+        mission as { status?: string; missionKind?: string },
+        tasks,
+      )
+    ) {
+      return null;
+    }
+
+    const now = Timestamp.now();
+    await updateDoc(missionRef, {
+      status: "completed",
+      completedAt: now,
+      lastActivityAt: now,
+    });
+    return contextId;
+  } catch (err) {
+    console.warn("[implicit-mission] close check failed:", err);
+    return null;
+  }
+}
+
+/**
+ * `mission_label` 파라미터 처리 — 라벨이 없으면 아무 일도 안 한다(기존 동작 불변).
+ *
+ * 명시적 미션 컨텍스트(MARBLO_CONTEXT=missionId) 안에서는 라벨을 **무시하고
+ * 그 사실을 문장으로 돌려준다**. 이미 진짜 미션에 속한 티켓을 라벨로 다시
+ * 묶으면 소속이 둘이 되고, 그건 조용히 넘길 일이 아니다.
+ */
+async function resolveImplicitMissionForWrite(
+  projectId: string,
+  rawLabel: string | undefined,
+  rawGoal: string | undefined,
+): Promise<{ missionId: string | null; note: string }> {
+  const label = normalizeMissionLabel(rawLabel);
+  if (!label) return { missionId: null, note: "" };
+
+  if (!projectId) {
+    return {
+      missionId: null,
+      note: `mission_label '${label}' ignored — no project context (MARBLO_PROJECT unset).`,
+    };
+  }
+  if (resolveMissionContextForWrite()) {
+    return {
+      missionId: null,
+      note: `mission_label '${label}' ignored — this session already runs inside an explicit mission context.`,
+    };
+  }
+  const contextId = resolveContextForWrite();
+  if (isLaneContextId(contextId)) {
+    return {
+      missionId: null,
+      note: `mission_label '${label}' ignored — Quick Lane tasks keep their lane context.`,
+    };
+  }
+  try {
+    const { missionId, created } = await resolveImplicitMissionId(
+      projectId,
+      label,
+      rawGoal,
+    );
+    return {
+      missionId,
+      note: created
+        ? `Mission Replay: 새 묶음 '${label}' 생성 (missionId=${missionId}).`
+        : `Mission Replay: 기존 묶음 '${label}' 에 합류 (missionId=${missionId}).`,
+    };
+  } catch (err) {
+    return {
+      missionId: null,
+      note: `mission_label '${label}' 적용 실패 — ${
+        err instanceof Error ? err.message : String(err)
+      } (티켓은 보드에 그대로 생성됩니다).`,
+    };
+  }
+}
+
+/** create_task / create_tasks_bulk / dispatch_task 공용 라벨 파라미터. */
+const missionLabelParamShape = {
+  mission_label: z
+    .string()
+    .optional()
+    .describe(
+      "★Mission Replay 묶음 라벨. 서로 연관된 ad-hoc 배치에 같은 라벨을 주면 그 묶음이 하나의 '암묵적 미션'이 되고, 배치가 전부 끝나는 순간 완료이력 탭의 Mission Replay 로 잡힌다. 라벨을 안 주면 티켓은 그냥 보드에 남는다(기존 동작).",
+    ),
+  mission_goal: z
+    .string()
+    .optional()
+    .describe(
+      "그 묶음의 goal — 사장님 의도/지시 요약 1~2문장. 묶음을 처음 만들 때만 쓰이고(이후 호출에서는 무시), Replay 헤드라인에 그대로 뜬다. 생략하면 라벨을 goal 로 쓴다.",
+    ),
+};
 
 // ── Audit Logging ─────────────────────────────────────────────
 
@@ -2149,6 +2390,7 @@ export function registerTools(server: McpServer): void {
         ),
       context: z.string().optional().describe("Environment constraints"),
       scope: z.array(z.string()).optional().describe("File paths to modify"),
+      ...missionLabelParamShape,
     },
     async ({
       title,
@@ -2163,6 +2405,8 @@ export function registerTools(server: McpServer): void {
       project_id,
       context,
       scope,
+      mission_label,
+      mission_goal,
     }) => {
       // W7: honor an explicit project_id (valid id or resolvable name) instead
       // of silently filing under the bound project → no more ghost tasks.
@@ -2228,8 +2472,27 @@ export function registerTools(server: McpServer): void {
       const missionContextError = applyMissionContextTags(data);
       if (missionContextError) return text(`Error: ${missionContextError}`);
 
+      // ★Mission Replay 라벨 — 라벨이 있으면 이 티켓의 contextId 를 암묵적
+      // 미션으로 돌려놓는다. 라벨이 없으면 위에서 정한 contextId 그대로(무변경).
+      const implicit = await resolveImplicitMissionForWrite(
+        projectId,
+        mission_label,
+        mission_goal,
+      );
+      if (implicit.missionId) {
+        data.contextId = implicit.missionId;
+        data.missionId = implicit.missionId;
+      }
+
       await setDoc(ref, data);
-      const notes2 = [warning, resolvedProject.warning].filter(Boolean);
+      if (implicit.missionId) {
+        await appendImplicitMissionTaskIds(implicit.missionId, [ref.id]);
+      }
+      const notes2 = [
+        warning,
+        resolvedProject.warning,
+        implicit.note || undefined,
+      ].filter(Boolean);
       return text(
         `Task created successfully!\nID: ${
           ref.id
@@ -2260,8 +2523,9 @@ export function registerTools(server: McpServer): void {
         .describe(
           "Array of task objects, or a JSON array string when clients serialize array params",
         ),
+      ...missionLabelParamShape,
     },
-    async ({ tasks_json, tasks }) => {
+    async ({ tasks_json, tasks, mission_label, mission_goal }) => {
       const normalized = normalizeBulkTasksPayload({ tasks_json, tasks });
       if (normalized.error) return text(normalized.error);
       const taskList = normalized.tasks ?? [];
@@ -2303,6 +2567,11 @@ export function registerTools(server: McpServer): void {
       const indexToId: Record<number, string> = {};
       const results: string[] = [];
       let successCount = 0;
+      // ★Mission Replay 라벨 — projectId → 해석된 암묵적 missionId(캐시),
+      // missionId → 이 배치에서 실제로 만들어진 taskId 들(보조 인덱스 갱신용).
+      const implicitByProject = new Map<string, string | null>();
+      const implicitTaskIds = new Map<string, string[]>();
+      const implicitNotes: string[] = [];
 
       const indexedTasks = taskList.map((task, index) => ({ task, index }));
       for (const chunk of chunkBulkTasks(indexedTasks)) {
@@ -2470,12 +2739,39 @@ export function registerTools(server: McpServer): void {
             continue;
           }
 
+          // ★Mission Replay 라벨 — 배치 전체를 하나의 암묵적 미션으로 묶는다.
+          // 항목별 project_id 오버라이드가 가능하므로 프로젝트 단위로 해석하고
+          // 같은 호출 안에서는 캐시한다(같은 라벨로 미션이 여럿 생기지 않게).
+          const itemProjectId = String(data.projectId ?? "");
+          if (mission_label && itemProjectId) {
+            if (!implicitByProject.has(itemProjectId)) {
+              const resolved = await resolveImplicitMissionForWrite(
+                itemProjectId,
+                mission_label,
+                mission_goal,
+              );
+              implicitByProject.set(itemProjectId, resolved.missionId);
+              if (resolved.note) implicitNotes.push(resolved.note);
+            }
+            const missionId = implicitByProject.get(itemProjectId) ?? null;
+            if (missionId) {
+              data.contextId = missionId;
+              data.missionId = missionId;
+            }
+          }
+
           try {
             // Pre-generate id + seed projection so the board shows it instantly.
             const ref = doc(collection(db, "tasks"));
             data.projection = seedProjectionForCreate(ref.id, now);
             await setDoc(ref, data);
             indexToId[i] = ref.id;
+            const joinedMissionId = data.missionId;
+            if (typeof joinedMissionId === "string" && joinedMissionId) {
+              const bucket = implicitTaskIds.get(joinedMissionId) ?? [];
+              bucket.push(ref.id);
+              implicitTaskIds.set(joinedMissionId, bucket);
+            }
             results.push(
               `  [${ref.id}] ${data.title} (role=${data.role}, priority=${data.priority})`,
             );
@@ -2490,6 +2786,10 @@ export function registerTools(server: McpServer): void {
         }
       }
 
+      for (const [missionId, ids] of implicitTaskIds.entries()) {
+        await appendImplicitMissionTaskIds(missionId, ids);
+      }
+
       const depMappings: string[] = [];
       for (const [label, idx] of Object.entries(aliasMap)) {
         if (idx in indexToId)
@@ -2501,6 +2801,7 @@ export function registerTools(server: McpServer): void {
       } tasks:\n${results.join("\n")}`;
       if (depMappings.length > 0)
         output += `\n\nDependency ID mappings:\n${depMappings.join("\n")}`;
+      if (implicitNotes.length > 0) output += `\n\n${implicitNotes.join("\n")}`;
       return text(output);
     },
   );
@@ -2690,6 +2991,17 @@ export function registerTools(server: McpServer): void {
       const unblockedNote =
         unblocked > 0 ? ` Unblocked ${unblocked} dependent task(s).` : "";
 
+      // ★암묵적 미션(Replay 묶음)은 소속 티켓이 전부 끝나는 순간 닫힌다.
+      // 그 전이가 있어야 완료이력 탭의 Mission Replay 에 뜬다(대상 판정이
+      // status === "completed" 이므로). 실패해도 위 상태 전이는 이미 커밋됨.
+      const closedMission =
+        newStatus === "DONE"
+          ? await closeImplicitMissionIfComplete(task.contextId)
+          : null;
+      const replayNote = closedMission
+        ? ` 이 묶음의 마지막 티켓입니다 — Mission Replay 생성됨 (missionId=${closedMission}).`
+        : "";
+
       // 완료 보고 규약 — REVIEW/DONE 으로 닫을 때만. 보고 누락은 soft nudge 로만
       // 보완 요청하고, 상태 전이는 위에서 이미 커밋됐다(절대 블록 안 함).
       const completionNudge =
@@ -2698,7 +3010,7 @@ export function registerTools(server: McpServer): void {
           : "";
 
       return text(
-        `Task '${task.title}' status updated to ${newStatus}.${unblockedNote}${completionNudge}`,
+        `Task '${task.title}' status updated to ${newStatus}.${unblockedNote}${replayNote}${completionNudge}`,
       );
     },
   );
@@ -3832,6 +4144,7 @@ export function registerTools(server: McpServer): void {
         .describe(
           "명시적 opt-in 논리 서브에이전트 모드. true이고 complexity='simple'일 때만 오케 내부 logical 처리로 단락한다. 기본 false: simple도 물리 에이전트+보드 티켓.",
         ),
+      ...missionLabelParamShape,
     },
     async ({
       role,
@@ -3848,6 +4161,8 @@ export function registerTools(server: McpServer): void {
       stages,
       isolate,
       use_logical,
+      mission_label,
+      mission_goal,
     }) => {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
@@ -4181,6 +4496,38 @@ export function registerTools(server: McpServer): void {
         // every binding action (spawned/restarted/reused/mixed) — not 'logical'
         // (internal sub-agent, no real agent to bind).
         const boundTaskId = result.taskId ?? dispatchTaskId;
+
+        // ★Mission Replay 라벨 — dispatch 시점이 오케가 "이 티켓들은 한 묶음"
+        // 이라고 아는 유일한 순간이다. 여기서 붙여야 보드에 이미 있던 티켓도,
+        // bridge 가 방금 만든 ad-hoc 티켓(result.taskId)도 같은 묶음이 된다.
+        // 실패해도 dispatch 는 이미 성공했으므로 문장으로만 알린다.
+        let implicitNote = "";
+        if (mission_label && boundTaskId) {
+          const implicit = await resolveImplicitMissionForWrite(
+            DEFAULT_PROJECT,
+            mission_label,
+            mission_goal,
+          );
+          implicitNote = implicit.note;
+          if (implicit.missionId) {
+            try {
+              const target = await fetchTask(boundTaskId);
+              const refusal = target
+                ? await adoptTaskIntoImplicitMission(
+                    boundTaskId,
+                    target,
+                    implicit.missionId,
+                  )
+                : `Task ${boundTaskId} not found — implicit label skipped.`;
+              if (refusal) implicitNote = refusal;
+            } catch (err) {
+              implicitNote = `mission_label 적용 실패 — ${
+                err instanceof Error ? err.message : String(err)
+              }`;
+            }
+          }
+        }
+
         if (result.agentId && boundTaskId && result.action !== "logical") {
           try {
             // Rebind claimedBy AND advance TODO → CLAIMED so the dispatched task
@@ -4201,6 +4548,7 @@ export function registerTools(server: McpServer): void {
           // ★게이트 결과를 맨 앞에 붙인다 — effort 를 무시했다는 사실을 호출자가
           // 못 보고 지나가면 그게 곧 "조용한 무시" 다.
           ...(gateNote ? [gateNote.trimEnd()] : []),
+          ...(implicitNote ? [implicitNote] : []),
           `Dispatch: ${result.action}`,
           `  Reason: ${result.reason}`,
         ];
@@ -4964,7 +5312,9 @@ export function registerTools(server: McpServer): void {
     return {
       reason: `effort "${effort}" 는 사용자 승인이 필요한 고비용 칸이고, 티켓 ${taskId} 에 ${
         requestedModel ? `${stripEffortSuffix(requestedModel)} 용 ` : ""
-      }미소진 승인이 없습니다(승인 예산 사용 ${approvalBudgetSpent(records)}/${MAX_GATED_APPROVALS_PER_TASK}).`,
+      }미소진 승인이 없습니다(승인 예산 사용 ${approvalBudgetSpent(
+        records,
+      )}/${MAX_GATED_APPROVALS_PER_TASK}).`,
     };
   }
 
@@ -5089,7 +5439,9 @@ export function registerTools(server: McpServer): void {
       return text(
         `질문 등록: question_id=${entry.id} (status=open${
           entry.blocking ? ", blocking" : ""
-        }, 판정=${verdict.audience}/${verdict.rule})\n${deliveryNote}${truncNote}\n답이 오면 이 에이전트 PTY 로 자동 주입됩니다. 그 사이 무관한 잔여 작업은 계속하세요.`,
+        }, 판정=${verdict.audience}/${
+          verdict.rule
+        })\n${deliveryNote}${truncNote}\n답이 오면 이 에이전트 PTY 로 자동 주입됩니다. 그 사이 무관한 잔여 작업은 계속하세요.`,
       );
     },
   );
@@ -5336,7 +5688,9 @@ export function registerTools(server: McpServer): void {
       }
       if (entry.status === "answered") {
         return text(
-          `Question ${question_id} 은 이미 답변됐습니다(${entry.answeredBy ?? "unknown"}). 사장님을 깨우지 않았습니다.`,
+          `Question ${question_id} 은 이미 답변됐습니다(${
+            entry.answeredBy ?? "unknown"
+          }). 사장님을 깨우지 않았습니다.`,
         );
       }
 
@@ -5371,12 +5725,17 @@ export function registerTools(server: McpServer): void {
       try {
         await applyProjection(db, taskId, {
           lastAgentId: "",
-          lastActivitySummary: `[사장님 승격] ${question_id} ${sent.ok ? "전달됨" : "전달실패"}`,
+          lastActivitySummary: `[사장님 승격] ${question_id} ${
+            sent.ok ? "전달됨" : "전달실패"
+          }`,
           activityPayload: {
             agentId: MARBLO_AGENT_ID || "orchestrator",
             message:
-              `[사장님 승격 ${question_id}] ${sent.ok ? "텔레그램 전달됨" : `전달 실패: ${sent.error ?? "unknown"}`}` +
-              (note ? `\n메모: ${note}` : ""),
+              `[사장님 승격 ${question_id}] ${
+                sent.ok
+                  ? "텔레그램 전달됨"
+                  : `전달 실패: ${sent.error ?? "unknown"}`
+              }` + (note ? `\n메모: ${note}` : ""),
           },
         });
       } catch (err) {
@@ -5390,7 +5749,9 @@ export function registerTools(server: McpServer): void {
         );
       }
       return text(
-        `사장님께 전달됨(chat ${sent.chatId ?? "default"}, question_id=${question_id})${
+        `사장님께 전달됨(chat ${
+          sent.chatId ?? "default"
+        }, question_id=${question_id})${
           body.truncated ? " ⚠️ 텔레그램 4096자 한도로 뒷부분이 잘렸습니다" : ""
         }.\n` +
           `사장님 답장은 '[Telegram inbound ...]' 로 도착합니다. 그 답을 answer_question(question_id="${question_id}", answer="...") 로 넣으면 질문한 에이전트 PTY 로 자동 전달됩니다.`,
@@ -5610,7 +5971,9 @@ export function registerTools(server: McpServer): void {
         if (outcome.failure === "already-decided") {
           const prev = outcome.record;
           return text(
-            `이 요청은 이미 ${prev?.decision === "approved" ? "승인" : "거부"}됐습니다(${prev?.decidedBy ?? "unknown"}${
+            `이 요청은 이미 ${
+              prev?.decision === "approved" ? "승인" : "거부"
+            }됐습니다(${prev?.decidedBy ?? "unknown"}${
               prev?.decidedFor ? `, 판단=${prev.decidedFor}` : ""
             }). 덮어쓰지 않았습니다 — 새 결정이 필요하면 새 요청을 받으세요.`,
           );
@@ -5695,7 +6058,9 @@ export function registerTools(server: McpServer): void {
           ? `승인 예산: 1/${MAX_GATED_APPROVALS_PER_TASK} 사용(1회용 — 스폰에 쓰이면 소진).`
           : "거부는 예산을 쓰지 않습니다.";
       return text(
-        `${label} → ${record.decision}${record.decidedFor ? ` (판단=${record.decidedFor})` : ""}.${answerNote}\n${budgetLine}\n${deliveryNote}`,
+        `${label} → ${record.decision}${
+          record.decidedFor ? ` (판단=${record.decidedFor})` : ""
+        }.${answerNote}\n${budgetLine}\n${deliveryNote}`,
       );
     },
   );
@@ -6333,6 +6698,16 @@ export function registerTools(server: McpServer): void {
         );
         if (unblocked > 0) {
           lines.push(`의존 태스크 ${unblocked}건 해제됨.`);
+        }
+        // update_task_status 와 같은 자리 — DONE 에 이르는 두 경로가 암묵적
+        // 미션 마감에서 갈리면 merge_and_close 로 닫은 묶음만 Replay 가 안 뜬다.
+        const closedMission = await closeImplicitMissionIfComplete(
+          task.contextId,
+        );
+        if (closedMission) {
+          lines.push(
+            `Mission Replay: 묶음 완료 — missionId=${closedMission} 가 완료이력 탭에 뜹니다.`,
+          );
         }
       }
 

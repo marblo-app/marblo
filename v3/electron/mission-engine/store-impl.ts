@@ -11,6 +11,7 @@ import {
 } from "firebase/firestore";
 import type {
   Mission,
+  MissionKind,
   MissionStatus,
   MissionStep,
   MissionTemplateId,
@@ -34,6 +35,8 @@ interface MissionDoc {
   goal: string;
   templateId: MissionTemplateId;
   status: MissionStatus;
+  missionKind?: MissionKind;
+  implicitLabel?: string;
   ownerOrchestratorSessionId: string;
   steps: MissionStep[];
   currentStepIndex: number;
@@ -59,11 +62,17 @@ function summarizeEventPayload(event: TimelineEvent): string {
   };
   switch (event.type) {
     case "step.started":
-      return `Step ${Number(pick("index")) + 1} · ${pick("skill") || pick("type")}`;
+      return `Step ${Number(pick("index")) + 1} · ${
+        pick("skill") || pick("type")
+      }`;
     case "step.completed":
-      return `Step ${Number(pick("index")) + 1} · ${pick("skill") || pick("type")} 완료`;
+      return `Step ${Number(pick("index")) + 1} · ${
+        pick("skill") || pick("type")
+      } 완료`;
     case "step.failed":
-      return `Step ${Number(pick("index")) + 1} 실패 · ${pick("error") || "unknown"}`;
+      return `Step ${Number(pick("index")) + 1} 실패 · ${
+        pick("error") || "unknown"
+      }`;
     case "agent.dispatched":
       return `Task ${pick("taskId")} dispatched`;
     case "agent.completed":
@@ -90,6 +99,10 @@ export function rawToMission(id: string, raw: MissionDoc): Mission {
     goal: raw.goal,
     templateId: raw.templateId,
     status: raw.status,
+    // 암묵적 미션 마커는 반드시 살려서 넘긴다 — 이 값을 떨어뜨리면 엔진 쪽
+    // 제외 판정(isImplicitMission)이 통째로 무력화된다.
+    missionKind: raw.missionKind,
+    implicitLabel: raw.implicitLabel,
     ownerOrchestratorSessionId: raw.ownerOrchestratorSessionId,
     steps: (raw.steps ?? []).map((s) => ({
       ...s,

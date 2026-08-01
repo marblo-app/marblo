@@ -10,6 +10,7 @@ import {
 } from "firebase/firestore";
 import type { MissionEventBus } from "./ports";
 import { getMissionDriver } from "./conductor-driver";
+import { isImplicitMission } from "./types";
 
 // Wait-step wakeup 메커니즘.
 // MissionEngine 은 wait step 진입 시 sleeping 으로 전환되고, eventBus 에 들어오는
@@ -164,6 +165,10 @@ export class MissionEventForwarder {
       const projectId = String(data.projectId ?? "");
       const status = String(data.status ?? "");
       if (!projectId || !status) continue;
+      // ★암묵적 미션(Replay 라벨)은 대기 스텝도 지휘자도 없다. 활성 미션으로
+      // 세면 그 프로젝트의 tasks 구독이 켜지고 wait-wakeup 신호가 갈 곳 없이
+      // 흐른다 — 엔진 구동 대상이 아니라는 규칙을 여기서도 지킨다.
+      if (isImplicitMission(data)) continue;
       next.set(d.id, {
         missionId: d.id,
         projectId,

@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import type {
   Mission,
   MissionAccessMode,
+  MissionLaunchTemplateId,
   MissionTargetRepository,
-  MissionTemplateId,
 } from "../../types/mission";
+import { isImplicitMission } from "../../types/mission";
 import * as missionService from "../../services/missionService";
 import * as taskService from "../../services/taskService";
 import { useProjectStore } from "../../stores/projectStore";
@@ -13,7 +14,10 @@ import { MissionDetail } from "../missions/MissionDetail";
 import { MissionTemplateCatalog } from "../missions/MissionTemplateCatalog";
 import { MissionLaunchDialog } from "../missions/MissionLaunchDialog";
 import { MissionOrchestratorPanel } from "../missions/MissionOrchestratorPanel";
-import { instantiateTemplateSteps } from "../missions/templates";
+import {
+  instantiateTemplateSteps,
+  isLaunchTemplateId,
+} from "../missions/templates";
 import { useTranslation } from "../../lib/i18n";
 
 // Step 5 wiring 전 단계:
@@ -36,7 +40,7 @@ export function MissionsTab() {
   // 사용자가 archive 미션을 보기 위해 클릭한 경우 새 active 가 떠도 자동 전환 안 함.
   const [userPickedId, setUserPickedId] = useState<string | null>(null);
   const [launchTemplate, setLaunchTemplate] =
-    useState<MissionTemplateId | null>(null);
+    useState<MissionLaunchTemplateId | null>(null);
 
   useEffect(() => {
     if (!projectId) {
@@ -45,7 +49,11 @@ export function MissionsTab() {
     }
     const unsubscribe = missionService.subscribeToMissions(
       projectId,
-      setMissions
+      // ★암묵적 미션(오케가 ad-hoc 배치에 붙인 Replay 라벨)은 이 탭에 띄우지
+      // 않는다. 실행 계획(steps)이 없어 진행바·일시정지·재실행이 전부 무의미한
+      // 0-스텝 카드가 되고, 미션탭은 '런치 가능한 자동화 미션'의 집이다.
+      // 그 묶음이 보이는 곳은 완료이력 탭의 Mission Replay 다.
+      (next) => setMissions(next.filter((m) => !isImplicitMission(m)))
     );
     return () => unsubscribe();
   }, [projectId]);
@@ -118,7 +126,7 @@ export function MissionsTab() {
     targetAccessMode,
   }: {
     goal: string;
-    templateId: MissionTemplateId;
+    templateId: MissionLaunchTemplateId;
     targetRepository?: MissionTargetRepository;
     targetBranch?: string;
     targetAccessMode?: MissionAccessMode;
@@ -208,11 +216,16 @@ export function MissionsTab() {
   // 기존 archive 항목은 그대로 두고 새 mission 이 active 로 떠서 사용자가 그쪽을 본다.
   const handleRestart = async (source: Mission) => {
     if (!projectId) return;
-    const steps = instantiateTemplateSteps(source.templateId);
+    // 암묵적 미션은 실행 계획이 아니라 라벨이라 '다시 실행'할 대상이 없다.
+    // (이 탭은 이미 암묵적 미션을 걸러내므로 도달하지 않지만, 타입 좁히기를
+    //  캐스팅으로 때우지 않고 규칙으로 표현해 둔다.)
+    if (!isLaunchTemplateId(source.templateId)) return;
+    const templateId = source.templateId;
+    const steps = instantiateTemplateSteps(templateId);
     const id = await missionService.createMission({
       projectId,
       goal: source.goal,
-      templateId: source.templateId,
+      templateId,
       status: "planning",
       ownerOrchestratorSessionId: "pending",
       steps,
@@ -226,9 +239,7 @@ export function MissionsTab() {
           ts: new Date(),
           type: "supervisor.note",
           payload: {
-            message: `Re-run from ${source.id.slice(0, 8)} · template=${
-              source.templateId
-            }`,
+            message: `Re-run from ${source.id.slice(0, 8)} · template=${templateId}`,
             goal: source.goal,
           },
         },

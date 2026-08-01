@@ -1,5 +1,6 @@
 import type {
   Mission,
+  MissionLaunchTemplateId,
   MissionStatus,
   MissionTemplateId,
   TimelineEventType,
@@ -7,7 +8,12 @@ import type {
 import type { MissionEngineDeps, MissionEngineEvent } from "./ports";
 import { assertMissionTransition, isTerminalMission } from "./state-machine";
 import { executeStep, WAIT_PENDING } from "./step-executor";
-import { instantiateSteps, MISSION_TEMPLATES, getTemplate } from "./templates";
+import {
+  findTemplate,
+  instantiateSteps,
+  MISSION_TEMPLATES,
+  getTemplate,
+} from "./templates";
 import { verifyStepGate } from "./gates";
 import {
   createConductorDriver,
@@ -94,7 +100,7 @@ export class MissionEngine {
   async launch(input: {
     projectId: string;
     goal: string;
-    templateId: MissionTemplateId;
+    templateId: MissionLaunchTemplateId;
   }): Promise<Mission> {
     const template = getTemplate(input.templateId);
     const orch = await this.deps.orchestrators.ensureSession({
@@ -867,7 +873,7 @@ export class MissionEngine {
           : synthesisNote
           ? "Mission completed · 종합 보고서 작성됨 (파일 경로 미확인)"
           : "Mission completed",
-        templateLabel: MISSION_TEMPLATES[mission.templateId]?.label,
+        templateLabel: findTemplate(mission.templateId)?.label,
         synthesisPath: synthesisPath ?? null,
         // 파일 읽기 없이도 Firestore 만으로 보고서 미리보기 가능하도록 4000자 보관.
         synthesisExcerpt: synthesisNote ? synthesisNote.slice(-4000) : null,

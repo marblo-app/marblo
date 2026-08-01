@@ -2,18 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   MissionAccessMode,
   MissionTargetRepository,
-  MissionTemplateId,
+  MissionLaunchTemplateId,
 } from "../../types/mission";
 import { useTranslation } from "../../lib/i18n";
 import { TEMPLATE_DESC_KEY, TEMPLATE_META, listTemplates } from "./templates";
 
 interface MissionLaunchDialogProps {
   projectId: string;
-  initialTemplateId?: MissionTemplateId;
+  initialTemplateId?: MissionLaunchTemplateId;
   onCancel: () => void;
   onLaunch: (input: {
     goal: string;
-    templateId: MissionTemplateId;
+    templateId: MissionLaunchTemplateId;
     targetRepository?: MissionTargetRepository;
     targetBranch?: string;
     targetAccessMode?: MissionAccessMode;
@@ -82,7 +82,7 @@ export function MissionLaunchDialog({
 }: MissionLaunchDialogProps) {
   const { t } = useTranslation();
   const [goal, setGoal] = useState("");
-  const [templateId, setTemplateId] = useState<MissionTemplateId>(
+  const [templateId, setTemplateId] = useState<MissionLaunchTemplateId>(
     initialTemplateId ?? "feature",
   );
   const [connections, setConnections] = useState<LaunchConnection[]>([]);

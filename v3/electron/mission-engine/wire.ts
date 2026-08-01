@@ -18,6 +18,7 @@ import { createOrchestratorRegistry } from "./orch-registry-impl";
 import { MissionEventForwarder } from "./event-forwarder";
 import { createConductorDriver, getMissionDriver } from "./conductor-driver";
 import { verifyStepGate } from "./gates";
+import { isImplicitMission } from "./types";
 
 // MissionEngine 팩토리 — main.ts wiring 진입점.
 //
@@ -175,6 +176,9 @@ export function buildMissionEngine(
           );
           for (const d of snap.docs) {
             if (pickedUp.has(d.id)) continue;
+            // ★암묵적 미션(오케가 ad-hoc 배치에 붙인 Replay 라벨)은 실행 계획이
+            // 없다(steps=[]). 엔진이 이어받으면 0-스텝 미션을 헛돌린다.
+            if (isImplicitMission(d.data())) continue;
             pickedUp.add(d.id);
             console.log(
               `[MissionEngine] recovering in-flight mission ${d.id} (status=${status})`,
@@ -215,6 +219,9 @@ export function buildMissionEngine(
             }
             const id = change.doc.id;
             if (pickedUp.has(id)) continue;
+            // 암묵적 미션은 planning 으로 만들어지지 않지만(생성 시 active),
+            // 같은 이유로 여기서도 방어한다 — 엔진 픽업의 단일 제외 규칙.
+            if (isImplicitMission(change.doc.data())) continue;
             pickedUp.add(id);
             console.log(
               `[MissionEngine] picking up planning mission ${id} (change=${change.type})`,

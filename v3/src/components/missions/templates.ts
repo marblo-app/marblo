@@ -1,4 +1,5 @@
 import type {
+  MissionLaunchTemplateId,
   MissionStep,
   MissionStepFailurePolicy,
   MissionStepType,
@@ -19,7 +20,7 @@ type StepSpec = {
 };
 
 export interface MissionTemplateMeta {
-  id: MissionTemplateId;
+  id: MissionLaunchTemplateId;
   label: string;
   emoji: string;
   weight: "light" | "medium" | "heavy";
@@ -27,7 +28,12 @@ export interface MissionTemplateMeta {
   steps: StepSpec[];
 }
 
-export const TEMPLATE_META: Record<MissionTemplateId, MissionTemplateMeta> = {
+// ★런치 가능한 템플릿만. 암묵적 미션의 "adhoc" 은 실행 계획이 없어 여기 없고,
+// 그래서 listTemplates()(런치 다이얼로그 목록)에도 나타나지 않는다.
+export const TEMPLATE_META: Record<
+  MissionLaunchTemplateId,
+  MissionTemplateMeta
+> = {
   "quick-fix": {
     id: "quick-fix",
     label: "Quick Fix",
@@ -107,7 +113,7 @@ export const TEMPLATE_META: Record<MissionTemplateId, MissionTemplateMeta> = {
  * electron-engine mirror), but the UI renders the localized copy via t() with
  * these keys. Typed `MessageKey` so a missing locale entry is a compile error.
  */
-export const TEMPLATE_DESC_KEY: Record<MissionTemplateId, MessageKey> = {
+export const TEMPLATE_DESC_KEY: Record<MissionLaunchTemplateId, MessageKey> = {
   "quick-fix": "missions.template.quick-fix.desc",
   polish: "missions.template.polish.desc",
   feature: "missions.template.feature.desc",
@@ -115,11 +121,25 @@ export const TEMPLATE_DESC_KEY: Record<MissionTemplateId, MessageKey> = {
   research: "missions.template.research.desc",
 };
 
+/**
+ * 미션 문서의 templateId → 메타. 런치 템플릿이 아니면(암묵적 미션의 "adhoc")
+ * `undefined` — 호출부는 이미 전부 `meta?.` 로 읽고 있다.
+ */
+export function templateMeta(
+  id: MissionTemplateId,
+): MissionTemplateMeta | undefined {
+  return (
+    TEMPLATE_META as Partial<Record<MissionTemplateId, MissionTemplateMeta>>
+  )[id];
+}
+
 export function listTemplates(): MissionTemplateMeta[] {
   return Object.values(TEMPLATE_META);
 }
 
-export function instantiateTemplateSteps(id: MissionTemplateId): MissionStep[] {
+export function instantiateTemplateSteps(
+  id: MissionLaunchTemplateId,
+): MissionStep[] {
   // Firestore 는 undefined 필드를 거부하므로 명시적으로 set 된 키만 포함시킨다.
   return TEMPLATE_META[id].steps.map((spec, index) => {
     const step: MissionStep = {
@@ -133,4 +153,11 @@ export function instantiateTemplateSteps(id: MissionTemplateId): MissionStep[] {
     if (spec.onFailure !== undefined) step.onFailure = spec.onFailure;
     return step;
   });
+}
+
+/** 런치 가능한 템플릿 id 인가 — 미션 문서의 넓은 templateId 를 좁히는 게이트. */
+export function isLaunchTemplateId(
+  id: MissionTemplateId,
+): id is MissionLaunchTemplateId {
+  return id in TEMPLATE_META;
 }

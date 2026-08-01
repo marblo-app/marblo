@@ -11,12 +11,26 @@ export type MissionStatus =
   | "completed"
   | "abandoned";
 
-export type MissionTemplateId =
+/** 사용자가 런치 다이얼로그에서 고를 수 있는 자동화 템플릿(=실행 계획이 있는 것). */
+export type MissionLaunchTemplateId =
   | "quick-fix"
   | "polish"
   | "feature"
   | "full-feature"
   | "research";
+
+/**
+ * 미션 문서가 실을 수 있는 templateId 전부. `"adhoc"` 은 암묵적 미션 전용이며
+ * `MISSION_TEMPLATES` 에 없다 — 실행 계획이 없기 때문이다.
+ */
+export type MissionTemplateId = MissionLaunchTemplateId | "adhoc";
+
+/**
+ * 미션의 출처. 생략/`"explicit"` = 기존 미션(엔진·지휘자 구동 대상).
+ * `"implicit"` = 오케가 ad-hoc 배치에 붙인 라벨. **엔진은 구동하지 않는다.**
+ * 설계: `docs/MISSION-REPLAY-DESIGN.md` §2.1.
+ */
+export type MissionKind = "explicit" | "implicit";
 
 export type MissionStepType = "gstack" | "dispatch" | "wait" | "fix";
 
@@ -81,6 +95,11 @@ export interface Mission {
   templateId: MissionTemplateId;
   status: MissionStatus;
 
+  /** 생략 = "explicit". "implicit" 은 엔진 픽업 대상이 아니다. */
+  missionKind?: MissionKind;
+  /** 암묵적 미션의 라벨(오케가 배치에 붙인 이름). */
+  implicitLabel?: string;
+
   ownerOrchestratorSessionId: string;
   steps: MissionStep[];
   currentStepIndex: number;
@@ -115,4 +134,11 @@ export type AllowedSkill = (typeof ALLOWED_SKILLS)[number];
 
 export function isAllowedSkill(s: string): s is AllowedSkill {
   return (ALLOWED_SKILLS as readonly string[]).includes(s);
+}
+
+/** 암묵적 미션인가 — 엔진 픽업 경로의 단일 제외 판정. */
+export function isImplicitMission(mission: {
+  missionKind?: MissionKind | string | null;
+}): boolean {
+  return mission.missionKind === "implicit";
 }

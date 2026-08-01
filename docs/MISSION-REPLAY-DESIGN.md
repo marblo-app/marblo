@@ -109,6 +109,46 @@ v3/src/services/missionReplayService.ts   # Firestore 구독 (읽기 전용)
 **Replay 대상 = `status === "completed"` 인 미션.** (`abandoned` 는 Phase 1 에서 리스트에
 회색으로 노출하되 익스포트 대상 아님 — "실패도 콘텐츠"는 Phase 3 이후 별도 판단.)
 
+#### 암묵적 미션 (implicit mission) — ad-hoc 보드 작업도 Replay 로 (P1-4, 사장님 확정)
+
+실사용의 대부분은 명시적 미션 런치가 아니라 **ad-hoc 보드 티켓**이다(`contextId = "board"`).
+그것들이 Replay 로 안 잡히면 이 기능은 텅 빈 화면이 되고 "쓸 때마다 공유 콘텐츠가 저절로
+생긴다"는 전제가 무너진다.
+
+그래서 미션의 정의를 하나 넓힌다:
+
+> **암묵적 미션** = 오케스트레이터가 **dispatch 시점에** 서로 연관된 ad-hoc 티켓 묶음에
+> 부여한 **라벨**. 실행 계획(`steps`)이 없는 가벼운 `missions/{id}` 문서 1건이며,
+> `missionKind: "implicit"` / `templateId: "adhoc"` / `implicitLabel: <라벨>` 로 식별된다.
+
+★**새 그룹핑 경로를 만들지 않는다.** 라벨이 붙는 순간 그 티켓들의 `contextId` 가 해당
+`missionId` 로 바뀌고, 그러면 위의 1급 조인키(`tasks.contextId === missionId`)가 그대로
+성립한다 — P1-1(집계)·P1-2(구독)·P1-3(뷰)는 **한 줄도 바뀌지 않는다.**
+
+| 축                 | 규칙                                                                                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 경계를 누가 정하나 | **오케**. `create_task` / `create_tasks_bulk` / `dispatch_task` 의 `mission_label`(+ 최초 1회 `mission_goal`). 사장님 지시 1건 = 라벨 1개                     |
+| 합류               | 같은 프로젝트에서 같은 라벨의 **열린**(planning/active/waiting_for_human/sleeping) 암묵적 미션이 있으면 거기 합류, 없으면 새로 생성                           |
+| 마감               | 소속 티켓이 **전부 종단(DONE/FAILED)이고 DONE 이 1건 이상**이면 자동으로 `completed` + `completedAt`. 그 순간 Replay 에 뜬다                                  |
+| 라벨 재사용        | 끝난 묶음에는 합류하지 않는다 → 같은 라벨을 다시 써도 새 미션. **발행된 Replay 에 뒤늦은 티켓이 섞이지 않는다**                                               |
+| 입양 대상          | **보드 티켓만**(`contextId` 가 `"board"` 이거나 미설정). Quick Lane(`lane:*`)·명시적 미션 소속 티켓은 **거부**(레인 격리·미션 소속은 회귀 금지)               |
+| 엔진               | **엔진이 절대 구동하지 않는다.** `missionKind: "implicit"` 마커로 `wire.ts`(부팅 in-flight 복구 / planning 구독)와 `event-forwarder`(활성 미션 집계)에서 제외 |
+| 미션 탭            | 목록에서 제외한다. 진행바·일시정지·재실행이 무의미한 0-스텝 카드가 되기 때문. 이 묶음이 보이는 곳은 **완료이력 탭의 Replay** 다                               |
+
+**왜 시간·세션으로 안 묶나.** "최근 N분 안의 보드 티켓"류 기계적 시간묶기는 서로 무관한 두
+지시를 한 Replay 로 붙이고 하나의 지시를 점심시간에 둘로 쪼갠다. 오케 세션 id 로 묶는 것은
+바로 위 "왜 오케 세션이 아니라 미션 문서인가"가 이미 배제했다(세션은 재시작되고, 한 세션이
+여러 묶음을 병렬로 굴린다). 어느 티켓들이 한 덩어리인지는 **오케만 아는 사실**이고, 기계가
+추측할 자리가 아니다.
+
+**라벨이 안 붙은 잔여 보드 티켓은 그대로 둔다.** 억지 '미분류' 미션을 만들면 수백 티켓짜리
+쓰레기통 Replay 1건이 생길 뿐이다. 라벨 없는 티켓은 보드에 남고 Replay 에 안 뜬다 —
+정직한 빈칸이지 결함이 아니다. 사후에 묶고 싶으면 그 티켓을 라벨과 함께 다시 dispatch 하면
+된다(이미 있는 보드 티켓도 입양된다).
+
+구현: `v3/electron/mcp-server/implicit-mission.ts`(규칙 전부 — 순수 함수) + `tools.ts`(I/O).
+계약 테스트: `v3/tests/unit/mission-implicit-grouping.test.ts`.
+
 #### 왜 오케 세션이 아니라 미션 문서인가
 
 `ownerOrchestratorSessionId` 로 키잉하지 않는 이유:
