@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useChatStore } from "../../stores/chatStore";
+import { writeChatReadWatermark } from "../../stores/chatReadWatermark";
 import { useProjectStore } from "../../stores/projectStore";
 import { useAgentStore } from "../../stores/agentStore";
 import { useAuth } from "../../hooks/useAuth";
@@ -154,7 +155,12 @@ export function ProjectChat() {
   // Reset unread when visible
   useEffect(() => {
     resetUnread();
-  }, [messages.length, resetUnread]);
+    writeChatReadWatermark(
+      typeof window === "undefined" ? null : window.localStorage,
+      currentProject?.id ?? null,
+      messages.length > 0 ? messages[messages.length - 1] : null,
+    );
+  }, [currentProject?.id, messages, resetUnread]);
 
   // Build mention targets
   const mentionTargets: MentionTarget[] = [

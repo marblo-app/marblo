@@ -3,6 +3,10 @@ import { createPortal } from "react-dom";
 import { MessageCircle, X } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import { useChatStore } from "../../stores/chatStore";
+import {
+  getMessagesAfterWatermark,
+  readChatReadWatermark,
+} from "../../stores/chatReadWatermark";
 import { useProjectStore } from "../../stores/projectStore";
 import type { ChatMessage } from "../../types/chat";
 
@@ -78,7 +82,7 @@ export function ChatToastHost() {
   const [isLeaving, setIsLeaving] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const hydratedRef = useRef(false);
-  const lastSeenMessageIdRef = useRef<string | null>(null);
+  const snapshotBaselineRef = useRef<ChatMessage | null>(null);
   const dismissTimerRef = useRef<number | null>(null);
   const exitTimerRef = useRef<number | null>(null);
 
@@ -88,7 +92,7 @@ export function ChatToastHost() {
 
   useEffect(() => {
     hydratedRef.current = false;
-    lastSeenMessageIdRef.current = null;
+    snapshotBaselineRef.current = null;
     setToast(null);
     setIsLeaving(false);
     setIsPaused(false);
@@ -143,22 +147,32 @@ export function ChatToastHost() {
 
     if (!hydratedRef.current) {
       hydratedRef.current = true;
-      lastSeenMessageIdRef.current = latestMessage?.id ?? null;
+      snapshotBaselineRef.current = latestMessage;
       return;
     }
 
-    const latestMessageId = latestMessage?.id ?? null;
-    if (latestMessageId === lastSeenMessageIdRef.current) return;
+    if (latestMessage?.id === snapshotBaselineRef.current?.id) return;
 
-    const previousMessageId = lastSeenMessageIdRef.current;
-    lastSeenMessageIdRef.current = latestMessageId;
+    const baselineMessages = getMessagesAfterWatermark(
+      messages,
+      snapshotBaselineRef.current
+        ? {
+            messageId: snapshotBaselineRef.current.id,
+            timestamp: snapshotBaselineRef.current.createdAt.getTime(),
+          }
+        : null,
+    );
+    snapshotBaselineRef.current = latestMessage;
 
-    const previousIndex = previousMessageId
-      ? messages.findIndex((msg) => msg.id === previousMessageId)
-      : -1;
-    const newMessages =
-      previousIndex >= 0 ? messages.slice(previousIndex + 1) : messages;
-    const incomingAll = newMessages.filter(
+    const persistentWatermark = readChatReadWatermark(
+      typeof window === "undefined" ? null : window.localStorage,
+      projectId,
+    );
+    const candidates = getMessagesAfterWatermark(
+      baselineMessages,
+      persistentWatermark,
+    );
+    const incomingAll = candidates.filter(
       (msg): msg is ChatMessage =>
         msg.type === "user" &&
         (!user?.uid || msg.senderId !== user.uid) &&
