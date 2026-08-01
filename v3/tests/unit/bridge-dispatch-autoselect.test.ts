@@ -15,6 +15,18 @@
  * ★결정성: `MARBLO_ROUTING_EXPLORE=0` 으로 ε-greedy 를 끈다. 탐색 자체의 증명은
  * 순수 유닛(model-autoselect.test.ts)이 주입 난수로 한다 — 통합에서 확률을
  * 굴리면 CI 가 6~7번에 한 번 빨개진다.
+ *
+ * ★결정성 2 — **라이브 기기 상태를 이 파일에서 끊는다**(티켓 QtZDho1d).
+ * dispatch 경로는 두 군데서 실제 기기 상태를 읽는다:
+ *   · `getAccountRateLimits()` — 이 기기 구독 계정의 **실제 잔여 쿼터**.
+ *   · `loadRoutingGraph()` — `~/.marblo/routing-graph.json` **실파일**.
+ * 둘 다 모킹하지 않으면 같은 코드가 기기마다 다른 칸을 고른다. 실제로 잔량이
+ * 41% 인 개발 Mac 에서 "opus5 편중 해소" 테스트가 결정적으로 빨개졌다 —
+ * `model-autoselect` 는 잔량 50% 미만이면 `conserving` 로 판단해 **동률 회전과
+ * ε 탐색을 의도적으로 끄기** 때문이다(탐색은 미래를 위한 지출인데, 쿼터가 마르면
+ * 그 지출이 다음 티켓의 스폰 자체를 막는다). 라이브 로직은 정상이고 harness 가
+ * 다양성 발동 조건을 못 만든 것이었다. 그래서 아래 두 mock 이 쿼터·그래프를
+ * **테스트가 지정하는 값**으로 고정하고, 다양성은 그 조건을 세팅해 검증한다.
  */
 import {
   describe,
@@ -44,12 +56,67 @@ vi.mock("../../electron/telemetry", () => ({
   sendTelemetry: vi.fn(),
 }));
 
+/**
+ * 이 기기 구독 계정의 실제 잔여 쿼터를 끊는다. 기본값은 **넉넉한 잔량**(5% 사용)
+ * — 라우팅이 탐색·회전을 살려 두는 정상 운용 구간이다. 반대쪽(쿼터 고갈 →
+ * conserving)은 아래 "★쿼터가 마르면" 케이스가 이 값을 갈아끼워 증명한다.
+ */
+const account = vi.hoisted(() => ({
+  claudeUsedPercent: 5 as number | null,
+}));
+vi.mock("../../electron/account-usage", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../electron/account-usage")>();
+  return {
+    ...actual,
+    getAccountRateLimits: async () => ({
+      claude:
+        account.claudeUsedPercent === null
+          ? null
+          : ({
+              planType: "max",
+              primaryPercent: account.claudeUsedPercent,
+              primaryResetAt: null,
+              primaryWindowDurationMins: null,
+              secondaryPercent: null,
+              secondaryResetAt: null,
+              secondaryWindowDurationMins: null,
+            } as never),
+      gpt: null,
+      grok: null,
+    }),
+  };
+});
+
+/**
+ * `~/.marblo/routing-graph.json`(개발 기기의 **실제 학습 결과**)을 끊는다.
+ * 기본은 콜드(빈 그래프)고, 관측이 필요한 케이스가 `routing.graph` 에 직접
+ * 만들어 넣는다 — UCB1 저표본 보너스가 실제로 배선돼 있는지는 관측이 있어야만
+ * 보이기 때문이다.
+ */
+const routing = vi.hoisted(() => ({
+  graph: null as unknown,
+}));
+vi.mock("../../electron/routing-graph", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../electron/routing-graph")>();
+  return {
+    ...actual,
+    loadRoutingGraph: () => routing.graph ?? actual.emptyRoutingGraph(),
+  };
+});
+
 import { BridgeServer } from "../../electron/bridge-server";
 import { AgentConfigGenerator } from "../../electron/agent-config";
 import type { AgentInstance, AgentStatus } from "../../electron/agent-manager";
 import { spawnedModelFromArgs } from "../../electron/agent-manager";
 import { resetAutoSelectRotation } from "../../electron/model-autoselect";
 import { entryRung } from "../../electron/model-ladder";
+import {
+  applyOutcome,
+  emptyRoutingGraph,
+  type GraphContext,
+} from "../../electron/routing-graph";
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-autoselect-"));
 
@@ -242,6 +309,8 @@ beforeAll(() => {
 beforeEach(() => {
   for (const fn of Object.values(telemetry)) fn.mockClear();
   resetAutoSelectRotation();
+  account.claudeUsedPercent = 5;
+  routing.graph = null;
   for (const k of ENV_SWAP_KEYS) {
     savedEnvSwapKeys[k] = process.env[k];
     delete process.env[k];
@@ -279,20 +348,80 @@ describe("★단순 → 저단가 / 복잡 → 고성능 (실제 argv)", () => {
 });
 
 describe("★standard opus5 편중 해소", () => {
+  /**
+   * 다양성이 **어떤 조건에서** 도는지가 이 케이스의 핵심이다. standard 진입칸
+   * (opus5)과 그 아래 칸(sonnet5)의 점수차는 TIE_BAND(5) 안이라 근거상 동률이고,
+   * 그래서 `tie-rotate` 가 두 칸을 번갈아 낸다. 단 그 회전은 **쿼터가 넉넉할
+   * 때만** 산다(conserving 가드) — 위 mock 이 그 조건을 고정한다.
+   */
   it("연속 dispatch 가 opus5 한 칸에 고이지 않는다", async () => {
     const picks: string[] = [];
+    const modes: string[] = [];
     for (let i = 0; i < 4; i++) {
       picks.push((await dispatchOnce({ complexity: "standard" })).model);
+      modes.push(String(lastDecision().decisionReason));
     }
     expect(new Set(picks).size).toBeGreaterThan(1);
     expect(picks).toContain("claude-sonnet-5");
     // 종전 고정 동작(opus5)도 여전히 나온다 — 강제 분산이 아니라 근거 기반이다.
     expect(picks).toContain("claude-opus-5");
+    // 그리고 그 분산의 사유가 회전(동률)이라는 것이 근거 문자열에 남는다.
+    expect(modes.every((r) => r.includes("mode=tie-rotate"))).toBe(true);
+  });
+
+  /**
+   * ★반대쪽 — 쿼터가 마르면 회전을 사지 않는다. `costPressureForHeadroom > 1`
+   * (잔량 50% 미만)이면 `selectAutoModel` 은 conserving 로 판단해 탐색·회전을
+   * 끄고 근거상 최선만 쓴다. 개발 기기에서 이 파일이 빨갛던 이유가 정확히
+   * 이것이라, 버그가 아니라 **정책**임을 여기서 못박는다.
+   */
+  it("쿼터가 마르면(잔량<50%) 회전을 사지 않고 진입칸을 유지한다", async () => {
+    account.claudeUsedPercent = 59; // 잔량 41%
+    const picks: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      picks.push((await dispatchOnce({ complexity: "standard" })).model);
+    }
+    expect(new Set(picks)).toEqual(new Set(["claude-opus-5"]));
+    expect(String(lastDecision().decisionReason)).toContain("mode=top-score");
   });
 
   it("난도 미지정(기본 standard)도 같은 경로를 탄다", async () => {
     const { model } = await dispatchOnce({});
     expect(["claude-sonnet-5", "claude-opus-5"]).toContain(model);
+  });
+
+  /**
+   * ★UCB1 저표본 보너스가 **실물 dispatch 경로까지 배선돼 있나**. 순수 유닛은
+   * `diversityBonus()` 를 직접 부르지만, 여기서 보고 싶은 것은 브리지가 넘긴
+   * 그래프에서 `observationCountForModel` 이 읽힌 뒤 그 n 이 선택 근거에 실려
+   * 나오는가다(콜드 그래프만 쓰면 언제나 `n=0, tot=0` 이라 이 배선이 죽어도
+   * 테스트가 못 잡는다).
+   */
+  it("관측이 쌓이면 다양성 성분이 그 n 을 실제로 읽는다", async () => {
+    const graph = emptyRoutingGraph();
+    const ctx: GraphContext = {
+      role: "backend",
+      tags: [],
+      complexity: "standard",
+    };
+    const at = Date.now();
+    for (let i = 0; i < 6; i++) {
+      applyOutcome(graph, {
+        model: "claude-opus-5",
+        mode: "success",
+        ctx,
+        taskId: `T-opus-${i}`,
+        agentId: `a-${i}`,
+        atMs: at,
+      });
+    }
+    routing.graph = graph;
+
+    await dispatchOnce({ complexity: "standard" });
+    const reason = String(lastDecision().decisionReason);
+    // 콜드가 아니다 — kg 는 관측 수를 밝히고, diversity 는 tot>0 위에서 계산된다.
+    expect(reason).not.toContain("(cold)");
+    expect(reason).toMatch(/diversity [+-][\d.]+ \(n=\d+, tot=[1-9]\d*\)/);
   });
 });
 
