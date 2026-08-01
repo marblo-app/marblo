@@ -23,6 +23,8 @@ import { TaskDetailModal } from "../board/TaskDetailModal";
 import { periodLabel } from "../common/PeriodSelector";
 import { ShareCard } from "./ShareCard";
 import { WorkHistoryFilterBar } from "./WorkHistoryFilterBar";
+import { MissionReplayList } from "./replay/MissionReplayList";
+import { MissionReplayDetail } from "./replay/MissionReplayDetail";
 
 // 완료 보고를 추적할 최근 완료 태스크 상한. task 당 Firestore activities 리스너가
 // 하나씩 생기므로, 무한정 구독하지 않도록 최신순으로 잘라 둔다.
@@ -35,6 +37,14 @@ import { WorkHistoryFilterBar } from "./WorkHistoryFilterBar";
 // 동일**했다. 그래서 리스트와 집계는 필터 결과 **전체**에 걸고, 이 상한은
 // activities 구독에만 남긴다.
 const MAX_TRACKED = 50;
+
+/**
+ * 이 탭이 그리는 두 축 — 태스크 단위(기존)와 미션 단위 Replay(신규).
+ *
+ * 신규 탭을 만들지 않고 같은 탭 안에서 토글하는 것은 설계 §1 확정 사항이다.
+ * "완료된 일을 보여주는 집"이 이미 여기고, Replay 는 그 집의 미션 단위 뷰다.
+ */
+type WorkHistoryView = "tasks" | "replay";
 
 function relativeTime(date: Date): string {
   const diffMs = Date.now() - date.getTime();
@@ -248,6 +258,12 @@ export function WorkHistoryTab() {
     return () => unsub();
   }, [currentProject?.id, subscribeToTasks]);
 
+  // Replay 는 **추가 뷰**다 — 기존 태스크 뷰의 상태·구독은 그대로 두고, 미션
+  // 구독(useReplayableMissions/useMissionReplay)은 Replay 를 실제로 열었을 때만
+  // 마운트된다(리스너를 안 쓰는 화면에 켜 두지 않는다).
+  const [view, setView] = useState<WorkHistoryView>("tasks");
+  const [replayMissionId, setReplayMissionId] = useState<string | null>(null);
+
   const [filter, setFilter] = useState<WorkHistoryFilter>(
     DEFAULT_WORK_HISTORY_FILTER,
   );
@@ -362,71 +378,114 @@ export function WorkHistoryTab() {
         <h1 className="text-sm font-semibold text-gray-200">
           {t("workHistory.title")}
         </h1>
-        <span className="text-xs text-gray-500">
-          {/* 필터가 걸려 있으면 "필터 N / 전체 M" 로 분모를 같이 보여준다 —
-              숫자 하나만 바뀌면 완료 이력이 사라진 것처럼 읽힌다. */}
-          {countTrimmed
-            ? t("workHistory.filteredCount", {
-                count: doneTasks.length,
-                total: doneTotal,
-                period: periodLabel(filter.periodId, t),
-              })
-            : t("workHistory.doneCount", { count: doneTotal })}
-          {doneTasks.length > MAX_TRACKED &&
-            ` ${t("workHistory.reportWindow", { count: MAX_TRACKED })}`}
-        </span>
-      </div>
+        {view === "tasks" && (
+          <span className="text-xs text-gray-500">
+            {/* 필터가 걸려 있으면 "필터 N / 전체 M" 로 분모를 같이 보여준다 —
+                숫자 하나만 바뀌면 완료 이력이 사라진 것처럼 읽힌다. */}
+            {countTrimmed
+              ? t("workHistory.filteredCount", {
+                  count: doneTasks.length,
+                  total: doneTotal,
+                  period: periodLabel(filter.periodId, t),
+                })
+              : t("workHistory.doneCount", { count: doneTotal })}
+            {doneTasks.length > MAX_TRACKED &&
+              ` ${t("workHistory.reportWindow", { count: MAX_TRACKED })}`}
+          </span>
+        )}
 
-      <WorkHistoryFilterBar
-        filter={filter}
-        onChange={patchFilter}
-        onReset={() => setFilter(DEFAULT_WORK_HISTORY_FILTER)}
-      />
-
-      <ShareCard stats={shareStats} />
-
-      {doneTasks.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center py-12">
-          <div className="rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
-            {/* 완료가 아예 없는 것과 필터에 안 걸린 것은 다른 상태다 —
-                후자에서 "완료된 작업이 없습니다" 는 거짓말이 된다. */}
-            <p className="text-sm text-gray-300">
-              {filterOn && doneTotal > 0
-                ? t("workHistory.empty.filtered.title")
-                : t("workHistory.empty.title")}
-            </p>
-            <p className="mt-1 text-xs text-gray-500">
-              {filterOn && doneTotal > 0
-                ? t("workHistory.empty.filtered.hint")
-                : t("workHistory.empty.hint")}
-            </p>
-            {filterOn && doneTotal > 0 && (
-              <button
-                type="button"
-                onClick={() => setFilter(DEFAULT_WORK_HISTORY_FILTER)}
-                className="mt-3 rounded border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition hover:bg-gray-800"
-              >
-                {t("workHistory.filter.reset")}
-              </button>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-1.5">
-          {/* 필터 결과 전체를 그린다(리스너 창으로 자르지 않는다) — 그래야 기간을
-              좁힌 게 화면에 남는다. 행 자체는 접힌 상태에서 버튼 하나라 가볍고,
-              무거운 쪽(activities 구독)은 여전히 MAX_TRACKED 로 묶여 있다. */}
-          {doneTasks.map((task) => (
-            <WorkHistoryRow
-              key={task.id}
-              task={task}
-              report={reports[task.id] ?? null}
-              reportTracked={trackedIdSet.has(task.id)}
-              mergeEntry={mergeByTask[task.id] ?? null}
-              commitRepoRoot={currentProject.folderPath}
-            />
+        <div className="ml-auto flex flex-shrink-0 gap-1">
+          {(["tasks", "replay"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => {
+                setView(mode);
+                // 목록으로 돌아갈 때 이전 선택이 남아 있으면, 다음에 Replay 를
+                // 열었을 때 고르지도 않은 미션이 펼쳐진다.
+                if (mode === "tasks") setReplayMissionId(null);
+              }}
+              className={`rounded border px-2 py-0.5 text-xs transition ${
+                view === mode
+                  ? "border-gray-500 bg-gray-800 text-gray-100"
+                  : "border-gray-700 text-gray-400 hover:bg-gray-800"
+              }`}
+            >
+              {mode === "tasks"
+                ? t("workHistory.view.tasks")
+                : t("workHistory.view.missions")}
+            </button>
           ))}
         </div>
+      </div>
+
+      {view === "replay" ? (
+        replayMissionId ? (
+          <MissionReplayDetail
+            missionId={replayMissionId}
+            projectId={currentProject.id}
+            onBack={() => setReplayMissionId(null)}
+          />
+        ) : (
+          <MissionReplayList
+            projectId={currentProject.id}
+            onSelect={setReplayMissionId}
+          />
+        )
+      ) : (
+        <>
+          <WorkHistoryFilterBar
+            filter={filter}
+            onChange={patchFilter}
+            onReset={() => setFilter(DEFAULT_WORK_HISTORY_FILTER)}
+          />
+
+          <ShareCard stats={shareStats} />
+
+          {doneTasks.length === 0 ? (
+            <div className="flex flex-1 items-center justify-center py-12">
+              <div className="rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
+                {/* 완료가 아예 없는 것과 필터에 안 걸린 것은 다른 상태다 —
+                    후자에서 "완료된 작업이 없습니다" 는 거짓말이 된다. */}
+                <p className="text-sm text-gray-300">
+                  {filterOn && doneTotal > 0
+                    ? t("workHistory.empty.filtered.title")
+                    : t("workHistory.empty.title")}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  {filterOn && doneTotal > 0
+                    ? t("workHistory.empty.filtered.hint")
+                    : t("workHistory.empty.hint")}
+                </p>
+                {filterOn && doneTotal > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setFilter(DEFAULT_WORK_HISTORY_FILTER)}
+                    className="mt-3 rounded border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition hover:bg-gray-800"
+                  >
+                    {t("workHistory.filter.reset")}
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {/* 필터 결과 전체를 그린다(리스너 창으로 자르지 않는다) — 그래야 기간을
+                  좁힌 게 화면에 남는다. 행 자체는 접힌 상태에서 버튼 하나라 가볍고,
+                  무거운 쪽(activities 구독)은 여전히 MAX_TRACKED 로 묶여 있다. */}
+              {doneTasks.map((task) => (
+                <WorkHistoryRow
+                  key={task.id}
+                  task={task}
+                  report={reports[task.id] ?? null}
+                  reportTracked={trackedIdSet.has(task.id)}
+                  mergeEntry={mergeByTask[task.id] ?? null}
+                  commitRepoRoot={currentProject.folderPath}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

@@ -87,7 +87,7 @@ export const useLocaleStore = create<LocaleState>((set) => ({
 function format(template: string, vars?: Record<string, string | number>) {
   if (!vars) return template;
   return template.replace(/\{(\w+)\}/g, (_, k: string) =>
-    Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : `{${k}}`
+    Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : `{${k}}`,
   );
 }
 
@@ -97,7 +97,7 @@ function format(template: string, vars?: Record<string, string | number>) {
  */
 export function t(
   key: MessageKey,
-  vars?: Record<string, string | number>
+  vars?: Record<string, string | number>,
 ): string {
   const locale = useLocaleStore.getState().locale;
   const table = MESSAGES[locale];
@@ -114,10 +114,19 @@ export function useTranslation() {
   const table = MESSAGES[locale];
   const translate = (
     key: MessageKey,
-    vars?: Record<string, string | number>
+    vars?: Record<string, string | number>,
   ): string => {
     const raw = table[key] ?? MESSAGES.ko[key] ?? key;
     return format(raw, vars);
   };
   return { t: translate, locale, setLocale };
 }
+
+/**
+ * `useTranslation().t` 의 타입.
+ *
+ * 컴포넌트 밖의 순수 헬퍼(포맷터 등)가 번역 함수를 인자로 받아야 할 때 쓴다 —
+ * 훅을 못 부르는 자리에서 `(key: string) => string` 로 넓히면 오타난 키가
+ * 컴파일을 통과하므로, `MessageKey` 좁힘을 그대로 물려주는 별칭을 둔다.
+ */
+export type TFunction = ReturnType<typeof useTranslation>["t"];
