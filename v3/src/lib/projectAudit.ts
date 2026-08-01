@@ -20,6 +20,18 @@ import type { TaskStatus } from "../types/task";
 export const PROJECT_AUDIT_DEFAULT_LIMIT = 100;
 export const PROJECT_AUDIT_MAX_LIMIT = 500;
 
+/**
+ * 캡처가 처음 들어간 앱 버전. 빈 화면 안내에 그대로 박힌다.
+ *
+ * ★현재 버전(package.json)이 아니라 **고정된 역사적 사실**이다 — 버전이 올라도
+ * 따라 올라가면 안 된다. "3.0.30 부터 쌓입니다"로 바뀌는 순간 3.0.22~3.0.29 에
+ * 쌓인 실제 기록을 없는 것처럼 설명하게 된다.
+ *
+ * 상수로 빼두는 이유는 ko/en 두 문구에 같은 값이 들어가서다(한쪽만 고치는
+ * 드리프트 방지).
+ */
+export const PROJECT_AUDIT_SINCE_VERSION = "3.0.22";
+
 /** 런타임에서도 종류 집합을 알아야 하는 곳(필터 UI·검증)이 있어 배열로도 노출한다. */
 export const PROJECT_AUDIT_EVENT_TYPES: readonly ProjectAuditEventType[] = [
   "chat.message.sent",

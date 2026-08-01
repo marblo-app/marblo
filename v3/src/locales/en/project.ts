@@ -44,9 +44,16 @@ export const project: Record<keyof typeof koProject, string> = {
   "project.audit.filterType": "Filter by type",
   "project.audit.filterTypeAll": "All types",
   "project.audit.count": "{count} events",
-  "project.audit.emptyTitle": "No activity recorded",
+  // An empty panel must say *why* it's empty. A bare "no records" reads as a
+  // broken feature — which is exactly how this got reported.
+  "project.audit.emptyTitle": "No records yet",
   "project.audit.emptyDesc":
-    "Sending chat, changing a ticket's status, or spawning an agent shows up here.",
+    "The audit log starts collecting from version {version}. Anything that happened before then was never recorded.",
+  "project.audit.emptyAgentNote":
+    "Tickets moved by agents appear in the activity stream, not here. This table records only what members do in the app themselves — sending chat, changing a ticket's status, and spawning an agent.",
+  "project.audit.emptyFilteredTitle": "No records match",
+  "project.audit.emptyFilteredDesc":
+    'Nothing matches the selected member and type. Reset the filters to "All" to see every record that exists.',
   "project.audit.denied": "You can't view the audit log",
   "project.audit.deniedDesc":
     "Member action records are visible to owners and admins only.",

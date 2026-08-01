@@ -42,9 +42,16 @@ export const project = {
   "project.audit.filterType": "종류 필터",
   "project.audit.filterTypeAll": "전체 종류",
   "project.audit.count": "{count}건",
-  "project.audit.emptyTitle": "기록 없음",
+  // 빈 화면은 "왜 비었나"를 반드시 말한다. 그냥 '기록 없음'만 띄우면 owner 가
+  // 기능 고장으로 읽는다(실제로 그렇게 접수됐다).
+  "project.audit.emptyTitle": "아직 기록이 없습니다",
   "project.audit.emptyDesc":
-    "채팅을 보내거나 티켓 상태를 바꾸거나 에이전트를 띄우면 여기에 남습니다.",
+    "감사 로그는 {version} 버전부터 쌓입니다. 그 이전에 있었던 활동은 기록이 남아 있지 않습니다.",
+  "project.audit.emptyAgentNote":
+    "에이전트가 옮긴 티켓은 여기가 아니라 액티비티 스트림에 남습니다. 이 표에는 구성원이 앱에서 직접 한 행위(채팅 전송·티켓 상태 변경·에이전트 스폰)만 기록됩니다.",
+  "project.audit.emptyFilteredTitle": "조건에 맞는 기록이 없습니다",
+  "project.audit.emptyFilteredDesc":
+    "선택한 구성원·종류에 해당하는 기록이 없습니다. 필터를 '전체'로 되돌리면 남아 있는 기록을 모두 볼 수 있습니다.",
   "project.audit.denied": "감사 로그를 볼 권한이 없습니다",
   "project.audit.deniedDesc":
     "구성원 행위 기록은 소유자·관리자만 볼 수 있습니다.",

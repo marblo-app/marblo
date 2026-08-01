@@ -13,8 +13,14 @@ import {
   resolveActorLabel,
   isPermissionDenied,
   auditStateFromError,
+  auditEmptyKind,
 } from "../../src/lib/projectAuditView";
-import { PROJECT_AUDIT_EVENT_TYPES } from "../../src/lib/projectAudit";
+import {
+  PROJECT_AUDIT_EVENT_TYPES,
+  PROJECT_AUDIT_SINCE_VERSION,
+} from "../../src/lib/projectAudit";
+import { ko } from "../../src/locales/ko";
+import { en } from "../../src/locales/en";
 
 describe("auditTypeLabelKey — 라벨", () => {
   it("알려진 종류 전부에 라벨 키가 있다", () => {
@@ -129,5 +135,64 @@ describe("권한 분기 — denied 와 error 는 다른 값", () => {
     // 감사에서 "못 본다"와 "없다"가 같은 화면이면 안 된다.
     const denied = auditStateFromError({ code: "permission-denied" });
     expect(denied).not.toMatchObject({ status: "ready" });
+  });
+});
+
+describe("auditEmptyKind — 빈 화면이 '왜' 비었는지", () => {
+  it("필터가 없으면 진짜 0건(noRecordsYet)", () => {
+    expect(auditEmptyKind({})).toBe("noRecordsYet");
+    expect(auditEmptyKind({ actorUid: undefined, type: undefined })).toBe(
+      "noRecordsYet",
+    );
+  });
+
+  it("구성원/종류 어느 쪽이든 걸려 있으면 filtered", () => {
+    expect(auditEmptyKind({ actorUid: "u1" })).toBe("filtered");
+    expect(auditEmptyKind({ type: "chat.message.sent" })).toBe("filtered");
+    expect(auditEmptyKind({ actorUid: "u1", type: "agent.spawned" })).toBe(
+      "filtered",
+    );
+  });
+
+  it("★필터 탓인 빈 화면을 '아직 기록 없음'으로 뭉개지 않는다", () => {
+    // 필터를 걸어놓고 "이 버전부터 쌓입니다"를 읽으면 owner 는 "기록이 통째로
+    // 없다"는 엉뚱한 결론에 도달한다. 전체로는 기록이 있을 수 있다.
+    expect(auditEmptyKind({ actorUid: "u1" })).not.toBe(auditEmptyKind({}));
+  });
+});
+
+describe("빈 화면 안내 문구 — 감사에서 '없음'과 '못 봄'을 가른다", () => {
+  const KEYS = [
+    "project.audit.emptyTitle",
+    "project.audit.emptyDesc",
+    "project.audit.emptyAgentNote",
+    "project.audit.emptyFilteredTitle",
+    "project.audit.emptyFilteredDesc",
+  ] as const;
+
+  it("ko/en 양쪽에 문구가 다 있다", () => {
+    for (const key of KEYS) {
+      expect(ko[key]?.trim()).toBeTruthy();
+      expect(en[key]?.trim()).toBeTruthy();
+    }
+  });
+
+  it("emptyDesc 는 {version} 을 치환받는다 — 하드코딩 금지", () => {
+    // 버전을 문구에 직접 박으면 ko/en 한쪽만 고치는 드리프트가 난다.
+    expect(ko["project.audit.emptyDesc"]).toContain("{version}");
+    expect(en["project.audit.emptyDesc"]).toContain("{version}");
+    expect(PROJECT_AUDIT_SINCE_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  it("★안내가 '에이전트 행위는 여기 안 잡힌다'를 말한다", () => {
+    // 이 패널이 정상 운영 중에도 자주 비는 진짜 이유. 말해주지 않으면
+    // 기능 고장으로 접수된다(이 티켓이 그렇게 시작됐다).
+    expect(ko["project.audit.emptyAgentNote"]).toContain("에이전트");
+    expect(en["project.audit.emptyAgentNote"].toLowerCase()).toContain("agent");
+  });
+
+  it("★'권한 없음' 문구와 '기록 없음' 문구가 서로 다르다", () => {
+    expect(ko["project.audit.emptyTitle"]).not.toBe(ko["project.audit.denied"]);
+    expect(en["project.audit.emptyTitle"]).not.toBe(en["project.audit.denied"]);
   });
 });

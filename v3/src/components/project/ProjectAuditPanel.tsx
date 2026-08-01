@@ -2,8 +2,12 @@ import { useMemo, useState, type ReactNode } from "react";
 import type { User } from "../../types/user";
 import type { ProjectAuditEventType } from "../../types/projectAudit";
 import { useTranslation } from "../../lib/i18n";
-import { PROJECT_AUDIT_EVENT_TYPES } from "../../lib/projectAudit";
 import {
+  PROJECT_AUDIT_EVENT_TYPES,
+  PROJECT_AUDIT_SINCE_VERSION,
+} from "../../lib/projectAudit";
+import {
+  auditEmptyKind,
   auditMetadataSummary,
   auditTypeLabelKey,
   resolveActorLabel,
@@ -44,10 +48,13 @@ export function ProjectAuditPanel({
   const [actorUid, setActorUid] = useState<string>(ALL);
   const [type, setType] = useState<string>(ALL);
 
+  const actorFilter = actorUid === ALL ? undefined : actorUid;
+  const typeFilter = type === ALL ? undefined : (type as ProjectAuditEventType);
+
   const { state, actors, reload } = useProjectAuditLog(
     projectId,
-    actorUid === ALL ? undefined : actorUid,
-    type === ALL ? undefined : (type as ProjectAuditEventType),
+    actorFilter,
+    typeFilter,
   );
 
   const nameByUid = useMemo(
@@ -139,14 +146,7 @@ export function ProjectAuditPanel({
 
       {state.status === "ready" &&
         (state.events.length === 0 ? (
-          <div className="rounded border border-dashed border-gray-700 bg-gray-900/50 px-4 py-8 text-center">
-            <p className="text-sm text-gray-400">
-              {t("project.audit.emptyTitle")}
-            </p>
-            <p className="mt-1 text-xs text-gray-500">
-              {t("project.audit.emptyDesc")}
-            </p>
-          </div>
+          <EmptyState actorUid={actorFilter} type={typeFilter} />
         ) : (
           <ul className="divide-y divide-gray-800">
             {state.events.map((event) => {
@@ -181,6 +181,59 @@ export function ProjectAuditPanel({
           </ul>
         ))}
     </Shell>
+  );
+}
+
+/**
+ * 빈 목록 안내.
+ *
+ * ★"기록 없음" 한 줄로 끝내지 않는 이유: 이 패널은 **정상 운영 중에도 자주
+ * 비어 있다.** 보드 이동의 대다수가 에이전트발인데 그건 MCP 가 Firestore 를
+ * 직접 write 해서 렌더러 캡처를 타지 않기 때문이다(설계상 의도 —
+ * services/taskService.ts 의 주석 참조). 그래서 owner 가 보는 빈 화면은 거의
+ * 항상 "고장"이 아니라 "여기 안 잡히는 종류의 활동만 있었음"인데, 그걸 말해
+ * 주지 않으면 기능 고장으로 접수된다.
+ *
+ * 필터 탓인 빈 화면과 진짜 0건을 가르는 것도 같은 이유다 — 필터를 걸어놓고
+ * "{version} 부터 쌓입니다"를 읽으면 전혀 엉뚱한 결론에 도달한다.
+ */
+function EmptyState({
+  actorUid,
+  type,
+}: {
+  actorUid?: string;
+  type?: ProjectAuditEventType;
+}) {
+  const { t } = useTranslation();
+  const kind = auditEmptyKind({ actorUid, type });
+
+  return (
+    <div className="rounded border border-dashed border-gray-700 bg-gray-900/50 px-4 py-8 text-center">
+      {kind === "filtered" ? (
+        <>
+          <p className="text-sm text-gray-400">
+            {t("project.audit.emptyFilteredTitle")}
+          </p>
+          <p className="mx-auto mt-1 max-w-lg text-xs text-gray-500">
+            {t("project.audit.emptyFilteredDesc")}
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-gray-400">
+            {t("project.audit.emptyTitle")}
+          </p>
+          <p className="mx-auto mt-1 max-w-lg text-xs text-gray-500">
+            {t("project.audit.emptyDesc", {
+              version: PROJECT_AUDIT_SINCE_VERSION,
+            })}
+          </p>
+          <p className="mx-auto mt-2 max-w-lg text-xs text-gray-600">
+            {t("project.audit.emptyAgentNote")}
+          </p>
+        </>
+      )}
+    </div>
   );
 }
 

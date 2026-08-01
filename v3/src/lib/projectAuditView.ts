@@ -97,6 +97,30 @@ export function auditMetadataSummary(
   return null;
 }
 
+// ── 빈 목록 분기 ─────────────────────────────────────────────────
+
+/**
+ * 목록이 비었을 때 **왜** 비었는가.
+ *
+ * ★`denied` 를 `ready([])` 와 가르는 것과 같은 이유로 이 둘도 가른다. 감사에서
+ * 빈 화면은 세 가지 전혀 다른 사실일 수 있고("못 본다" / "조건에 안 맞는다" /
+ * "아직 아무 기록도 없다"), 하나의 "기록 없음"으로 뭉개면 owner 는 그걸 전부
+ * **기능 고장**으로 읽는다(이 티켓이 그렇게 시작됐다).
+ *
+ * - `filtered`     — 필터가 걸려 있다. 전체로는 기록이 있을 수 있으니 필터를
+ *                    되돌리라고 안내해야 한다.
+ * - `noRecordsYet` — 필터 없이도 0건. 이때만 "언제부터 쌓이는지 / 무엇이 여기
+ *                    안 잡히는지"를 설명한다.
+ */
+export type AuditEmptyKind = "filtered" | "noRecordsYet";
+
+export function auditEmptyKind(filters: {
+  actorUid?: string;
+  type?: string;
+}): AuditEmptyKind {
+  return filters.actorUid || filters.type ? "filtered" : "noRecordsYet";
+}
+
 // ── 에러 분기 ────────────────────────────────────────────────────
 
 /**
