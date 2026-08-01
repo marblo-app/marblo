@@ -23,7 +23,8 @@ import { LocalModelsSection } from "../store/LocalModelsSection";
  *  - install 계약이 없는 항목(v1 mcp-server 등)은 "자동 설치 불가"로 정직하게
  *    표시하고 홈페이지 링크만 준다 — 가짜 설치 버튼 금지. workflow/knowledge
  *    타입은 계약 자체가 없는 **참조 전용**이라 항상 링크만 준다.
- *  - 설치 전에는 항상 권한 공시 모달을 지난다. 고위험 스코프는 강조.
+ *  - 설치 전에는 항상 권한 공시 모달을 지난다. 고위험 스코프는 community
+ *    항목에서만 경고로 강조하고, official/verified 는 정보성 공시로 표시한다.
  *  - 레지스트리 실패는 이 섹션 안에서만 표현된다(스토어 전체는 항상 열림).
  */
 
@@ -33,6 +34,18 @@ interface RegistryStoreSectionProps {
 }
 
 const HIGH_RISK_RE = /^(shell:exec|secrets:read|repository:write)/;
+
+/**
+ * 권한 문자열은 모든 tier 에서 그대로 공시한다. 다만 이 스코프가 위험 경고로
+ * 읽혀야 하는 것은 미검수 community 항목뿐이다. 이 판정은 카드와 설치 전 공시
+ * 모달이 공유해 두 표면의 위험 톤이 달라지지 않게 한다.
+ */
+export function isCommunityHighRiskPermission(
+  item: Pick<RegistryStoreItem, "tier">,
+  permission: string,
+): boolean {
+  return item.tier === "community" && HIGH_RISK_RE.test(permission);
+}
 
 /** 공개 레지스트리 저장소 — 전체 카탈로그의 정본. */
 const REGISTRY_CATALOG_URL = "https://github.com/marblo-app/marblo";
@@ -249,20 +262,23 @@ function PermissionBadges({ item }: { item: RegistryStoreItem }) {
   }
   return (
     <>
-      {item.permissions.map((perm) => (
-        <span
-          key={perm}
-          className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
-            HIGH_RISK_RE.test(perm)
-              ? "bg-[#f38ba8]/15 text-[#f38ba8]"
-              : "bg-[#313244] text-[#a6adc8]"
-          }`}
-        >
-          {HIGH_RISK_RE.test(perm)
-            ? `⚠ ${perm} (${t("harness.store.registry.highRisk")})`
-            : perm}
-        </span>
-      ))}
+      {item.permissions.map((perm) => {
+        const highRisk = isCommunityHighRiskPermission(item, perm);
+        return (
+          <span
+            key={perm}
+            className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
+              highRisk
+                ? "bg-[#f38ba8]/15 text-[#f38ba8]"
+                : "bg-[#313244] text-[#a6adc8]"
+            }`}
+          >
+            {highRisk
+              ? `⚠ ${perm} (${t("harness.store.registry.highRisk")})`
+              : perm}
+          </span>
+        );
+      })}
     </>
   );
 }
@@ -590,7 +606,8 @@ export function RegistryStoreSection({
                 {display.description}
               </p>
 
-              {/* 권한 공시 — 스코프 문자열 verbatim, 고위험은 강조(§4.6) */}
+              {/* 권한 공시 — 스코프 문자열은 모든 tier 에서 verbatim, 경고 톤은
+                  미검수 community 의 고위험 스코프에만 적용한다(§4.6). */}
               <div className="mb-2 flex flex-wrap items-center gap-1">
                 <PermissionBadges item={item} />
               </div>

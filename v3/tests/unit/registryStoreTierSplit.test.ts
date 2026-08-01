@@ -12,6 +12,7 @@
 import { describe, it, expect } from "vitest";
 import {
   categorizeRegistryType,
+  isCommunityHighRiskPermission,
   isReferenceOnlyRegistryType,
   isRegistryItemConsentInstallable,
   isRegistryItemInstallable,
@@ -98,6 +99,32 @@ describe("splitRegistryByTier", () => {
     const { visible, communityCount } = splitRegistryByTier([]);
     expect(visible).toEqual([]);
     expect(communityCount).toBe(0);
+  });
+});
+
+describe("isCommunityHighRiskPermission", () => {
+  it("community 의 고위험 권한만 경고 톤으로 판정한다", () => {
+    expect(
+      isCommunityHighRiskPermission({ tier: "community" }, "shell:exec"),
+    ).toBe(true);
+    expect(
+      isCommunityHighRiskPermission({ tier: "community" }, "repository:write"),
+    ).toBe(true);
+  });
+
+  it("official/verified 는 같은 권한도 정보성 공시로 판정한다", () => {
+    for (const tier of ["official", "verified"] as const) {
+      expect(isCommunityHighRiskPermission({ tier }, "shell:exec")).toBe(false);
+      expect(isCommunityHighRiskPermission({ tier }, "repository:write")).toBe(
+        false,
+      );
+    }
+  });
+
+  it("community 라도 일반 권한은 경고하지 않는다", () => {
+    expect(
+      isCommunityHighRiskPermission({ tier: "community" }, "filesystem:read"),
+    ).toBe(false);
   });
 });
 
