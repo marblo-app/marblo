@@ -641,5 +641,115 @@ service cloud.firestore {
     match /push_tokens/{tokenId} {
       allow read, write: if false;
     }
+
+    // ===== Public Mission Replay (공개 Replay — 유일한 anon read 표면) =====
+    //
+    // 설계 단일소스: docs/MISSION-REPLAY-DESIGN.md §7.1 · §5.7 F6.
+    //
+    // ★이 앱에서 **미인증 사용자가 읽을 수 있는 유일한 컬렉션**이다. 그래서
+    //   나머지 룰보다 좁게 쓴다. 두 문서로 쪼갠 이유:
+    //
+    //   publicReplays/{replayId}      = 공개. 비식별판 payload + 등급 + 발행시각.
+    //                                   **내부 식별자가 하나도 없다** (projectId·
+    //                                   missionId·uid 전부 없음). 비식별화 엔진이
+    //                                   payload 안의 id 를 다 지워 놓고 문서 봉투에
+    //                                   원본 id 를 적으면 아무 의미가 없다(R16/R2b).
+    //   publicReplayOwners/{replayId} = 비공개 소유권 인덱스. 룰의 write 판정 근거
+    //                                   이자 앱의 발행 목록. 프로젝트 멤버만 read.
+    //
+    // ★fail-closed 세 겹 (F6 — 해제 후 캐시 잔존 + id 열거로 취소본 접근):
+    //   1) replayId 가 130비트 crypto 난수다(services/publicReplayService).
+    //   2) `allow list: if false` — 컬렉션 열거 자체가 불가능하다. get 만 된다.
+    //   3) read 는 status == 'published' 인 문서만. 문서가 없으면(=해제됨) 룰이
+    //      거부로 떨어지므로 "존재하지만 비공개" 와 "없음" 을 구분해 주지 않는다.
+    //
+    // ★공개 문서는 **불변**이다(update: if false). 이미 공유된 URL 의 내용이
+    //   나중에 바뀌면 L1 로 공유한 링크가 조용히 L3 가 될 수 있다. 등급 변경은
+    //   해제 후 **새 replayId 로 재발행**이다 — 옛 링크는 죽는다.
+    //
+    // ★정직한 한계: 룰은 "이 바이트가 비식별화을 통과했는가"를 알 수 없다.
+    //   그건 기기에서 끝난다(설계 불변식). 룰이 강제하는 것은 필드 allowlist·
+    //   등급 enum·크기 상한·상태값·소유권까지다. 사용자당 발행 수 상한과
+    //   레이트리밋(§7.3)은 후속 functions 티켓이다.
+
+    function publicReplayOwnerExists(replayId) {
+      return exists(/databases/$(database)/documents/publicReplayOwners/$(replayId));
+    }
+
+    function publicReplayOwnerDoc(replayId) {
+      return get(/databases/$(database)/documents/publicReplayOwners/$(replayId)).data;
+    }
+
+    // 공개 문서를 만들거나 지울 수 있는 주체 = 소유권 문서가 가리키는 프로젝트의
+    // owner/admin (Q4). 소유권 문서가 없으면 판정 근거가 없으므로 거부한다.
+    function canManagePublicReplay(replayId) {
+      return isAuthenticated()
+        && publicReplayOwnerExists(replayId)
+        && isAdminOrOwner(publicReplayOwnerDoc(replayId).projectId);
+    }
+
+    // payload 상한 512000자 = services/publicReplayService.ts 의
+    // PUBLIC_REPLAY_MAX_PAYLOAD_CHARS 와 같은 수. 클라이언트에만 두면 패치된
+    // 클라이언트가 Firestore 1MiB 한도까지 밀어 넣는다.
+    function isValidPublicReplayDoc() {
+      return request.resource.data.keys().hasOnly(
+          ['schemaVersion', 'replayVersion', 'level', 'status', 'payload', 'publishedAt'])
+        && request.resource.data.keys().hasAll(
+          ['schemaVersion', 'replayVersion', 'level', 'status', 'payload', 'publishedAt'])
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.replayVersion == 1
+        && request.resource.data.level in ['L1', 'L2', 'L3']
+        && request.resource.data.status == 'published'
+        && request.resource.data.payload is string
+        && request.resource.data.payload.size() > 0
+        && request.resource.data.payload.size() <= 512000
+        && request.resource.data.publishedAt is timestamp;
+    }
+
+    match /publicReplays/{replayId} {
+      // 미인증 read 허용 — 단 발행된 문서 1건 get 만. 열거는 막는다.
+      allow get: if resource.data.get('status', '') == 'published';
+      allow list: if false;
+
+      allow create: if canManagePublicReplay(replayId)
+        && isValidPublicReplayDoc()
+        // 소유권 문서가 published 상태이고 등급이 일치해야 한다. 해제된 id 를
+        // 되살려 다시 공개하는 경로를 닫는다(해제는 되돌릴 수 없다).
+        && publicReplayOwnerDoc(replayId).status == 'published'
+        && publicReplayOwnerDoc(replayId).level == request.resource.data.level;
+      allow update: if false;
+      allow delete: if canManagePublicReplay(replayId);
+    }
+
+    match /publicReplayOwners/{replayId} {
+      // 발행 이력은 프로젝트 내부 정보다(해제분 포함). 멤버만 읽는다.
+      allow read: if isAuthenticated()
+        && isProjectMember(resource.data.projectId);
+
+      allow create: if isAuthenticated()
+        && request.resource.data.keys().hasOnly([
+          'replayId', 'projectId', 'missionId', 'publisherUid', 'level',
+          'includeCost', 'status', 'publishedAt', 'unpublishedAt'
+        ])
+        && request.resource.data.replayId == replayId
+        && request.resource.data.publisherUid == request.auth.uid
+        && request.resource.data.status == 'published'
+        && request.resource.data.level in ['L1', 'L2', 'L3']
+        && request.resource.data.publishedAt is timestamp
+        && isAdminOrOwner(request.resource.data.projectId);
+
+      // 허용되는 전이는 published → unpublished **한 방향뿐**이다. 되살리기를
+      // 룰에서 막아 두면, 해제된 URL 이 다시 살아나는 경로가 존재하지 않는다.
+      allow update: if isAuthenticated()
+        && isAdminOrOwner(resource.data.projectId)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'unpublishedAt'])
+        && resource.data.status == 'published'
+        && request.resource.data.status == 'unpublished';
+
+      // 삭제 금지 — 발행했다는 사실 자체가 감사 기록이다(캐시 잔존 경고를
+      // 나중에도 사용자에게 보여줄 수 있어야 한다).
+      allow delete: if false;
+    }
   }
 }

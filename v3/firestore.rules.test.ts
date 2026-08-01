@@ -69,6 +69,38 @@ function unauthContext(): RulesTestContext {
   return testEnv.unauthenticatedContext();
 }
 
+// ===== 공개 Replay 시드 (Phase 4-1) =====
+// 실제 발행 경로가 만드는 id 는 130비트 난수다(publicReplayService). 테스트는
+// 값을 고정해야 하므로 같은 모양(접두사 r + base32 26자)의 상수를 쓴다.
+const PUBLISHED_REPLAY_ID = "r0123456789abcdefghjkmnpqr";
+const UNPUBLISHED_REPLAY_ID = "rzyxwvtsrqpnmkjhgfedcba987";
+
+function publicReplayOwnerSeed(status: "published" | "unpublished") {
+  return {
+    replayId: PUBLISHED_REPLAY_ID,
+    projectId: PROJECT_ID,
+    missionId: "mission-1",
+    publisherUid: OWNER_ID,
+    level: "L2",
+    includeCost: false,
+    status,
+    publishedAt: new Date(),
+    unpublishedAt: null,
+  };
+}
+
+function publicReplayDocSeed(overrides: Record<string, unknown> = {}) {
+  return {
+    schemaVersion: 1,
+    replayVersion: 1,
+    level: "L2",
+    status: "published",
+    payload: '{"goal":"redacted goal"}',
+    publishedAt: new Date(),
+    ...overrides,
+  };
+}
+
 beforeAll(async () => {
   testEnv = await initializeTestEnvironment({
     projectId: "marblo-test",
@@ -322,6 +354,22 @@ beforeEach(async () => {
       projectId: OTHER_PROJECT_ID,
       event: "task:merged",
       createdAt: new Date(),
+    });
+
+    // ===== 공개 Replay (Phase 4-1) =====
+    // 발행 중인 1건 + 해제된 1건. 해제본은 소유권 기록만 남고 공개 문서는 없다.
+    await setDoc(
+      doc(db, "publicReplayOwners", PUBLISHED_REPLAY_ID),
+      publicReplayOwnerSeed("published"),
+    );
+    await setDoc(
+      doc(db, "publicReplays", PUBLISHED_REPLAY_ID),
+      publicReplayDocSeed(),
+    );
+    await setDoc(doc(db, "publicReplayOwners", UNPUBLISHED_REPLAY_ID), {
+      ...publicReplayOwnerSeed("unpublished"),
+      replayId: UNPUBLISHED_REPLAY_ID,
+      unpublishedAt: new Date(),
     });
   });
 });
@@ -1992,6 +2040,281 @@ describe("activities collection", () => {
         message: "Unauthorized",
         createdAt: new Date(),
       }),
+    );
+  });
+});
+
+// ===== 공개 Replay (Phase 4-1) =====
+//
+// 설계: docs/MISSION-REPLAY-DESIGN.md §7.1 · §5.7 F6.
+// 이 앱에서 미인증 read 가 열리는 **유일한** 표면이라 가장 촘촘히 핀한다.
+
+const NEW_REPLAY_ID = "rnewnewnewnewnewnewnewnew1";
+
+/**
+ * 새 발행 1건을 룰을 통과하는 순서(소유권 → 공개)로 만든다.
+ *
+ * ★db 인스턴스를 인자로 받는다 — 같은 RulesTestContext 에서 `.firestore()` 를
+ * 두 번 부르면 SDK 가 "settings can no longer be changed" 로 죽는다.
+ */
+async function seedOwnerDocAs(
+  db: ReturnType<RulesTestContext["firestore"]>,
+  replayId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return setDoc(doc(db, "publicReplayOwners", replayId), {
+    replayId,
+    projectId: PROJECT_ID,
+    missionId: "mission-2",
+    publisherUid: OWNER_ID,
+    level: "L2",
+    includeCost: false,
+    status: "published",
+    publishedAt: new Date(),
+    unpublishedAt: null,
+    ...overrides,
+  });
+}
+
+describe("publicReplays — anon read (발행된 것만)", () => {
+  it("★미인증 사용자도 발행된 Replay 를 읽을 수 있다", async () => {
+    const db = unauthContext().firestore();
+    await assertSucceeds(getDoc(doc(db, "publicReplays", PUBLISHED_REPLAY_ID)));
+  });
+
+  it("★해제된(=문서 없는) replayId 는 읽을 수 없다 — fail-closed", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(getDoc(doc(db, "publicReplays", UNPUBLISHED_REPLAY_ID)));
+  });
+
+  it("★열거 불가 — 컬렉션 list 는 미인증·로그인 사용자 모두 거부된다(F6)", async () => {
+    await assertFails(
+      getDocs(collection(unauthContext().firestore(), "publicReplays")),
+    );
+    await assertFails(
+      getDocs(
+        collection(
+          getContext(OWNER_ID, OWNER_EMAIL).firestore(),
+          "publicReplays",
+        ),
+      ),
+    );
+  });
+
+  it("★status 가 published 가 아닌 문서는 읽히지 않는다", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(context.firestore(), "publicReplays", "rtamperedtamperedtampered1"),
+        publicReplayDocSeed({ status: "unpublished" }),
+      );
+    });
+    await assertFails(
+      getDoc(
+        doc(
+          unauthContext().firestore(),
+          "publicReplays",
+          "rtamperedtamperedtampered1",
+        ),
+      ),
+    );
+  });
+});
+
+describe("publicReplays — write 는 owner/admin 만 (Q4)", () => {
+  it("owner 는 소유권 문서를 만든 뒤 공개 문서를 발행할 수 있다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(seedOwnerDocAs(db, NEW_REPLAY_ID));
+    await assertSucceeds(
+      setDoc(doc(db, "publicReplays", NEW_REPLAY_ID), publicReplayDocSeed()),
+    );
+  });
+
+  it("admin 도 발행할 수 있다", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertSucceeds(
+      seedOwnerDocAs(db, NEW_REPLAY_ID, { publisherUid: ADMIN_ID }),
+    );
+    await assertSucceeds(
+      setDoc(doc(db, "publicReplays", NEW_REPLAY_ID), publicReplayDocSeed()),
+    );
+  });
+
+  it("★일반 멤버는 발행할 수 없다 — 회사 작업 공개는 거버넌스 사안이다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      seedOwnerDocAs(db, NEW_REPLAY_ID, { publisherUid: MEMBER_ID }),
+    );
+  });
+
+  it("★소유권 문서 없이는 공개 문서를 만들 수 없다(판정 근거 부재 = 거부)", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "publicReplays", "rorphanorphanorphanorpha1"),
+        publicReplayDocSeed(),
+      ),
+    );
+  });
+
+  it("★해제된 replayId 는 되살릴 수 없다(소유권이 unpublished)", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "publicReplays", UNPUBLISHED_REPLAY_ID),
+        publicReplayDocSeed(),
+      ),
+    );
+  });
+
+  it("소유권 문서와 등급이 다르면 거부된다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await seedOwnerDocAs(db, NEW_REPLAY_ID, { level: "L1" });
+    await assertFails(
+      setDoc(
+        doc(db, "publicReplays", NEW_REPLAY_ID),
+        publicReplayDocSeed({ level: "L3" }),
+      ),
+    );
+  });
+
+  it("★스키마를 벗어난 문서는 거부된다(필드 추가·등급 오타·상태 위조)", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await seedOwnerDocAs(db, NEW_REPLAY_ID);
+    const ref = doc(db, "publicReplays", NEW_REPLAY_ID);
+
+    // 내부 식별자를 몰래 실어 보내는 시도 — 공개 문서엔 봉투조차 없어야 한다.
+    await assertFails(
+      setDoc(ref, publicReplayDocSeed({ projectId: PROJECT_ID })),
+    );
+    await assertFails(setDoc(ref, publicReplayDocSeed({ level: "L4" })));
+    await assertFails(setDoc(ref, publicReplayDocSeed({ status: "draft" })));
+    await assertFails(setDoc(ref, publicReplayDocSeed({ payload: "" })));
+    await assertFails(setDoc(ref, publicReplayDocSeed({ payload: 42 })));
+    await assertFails(setDoc(ref, publicReplayDocSeed({ schemaVersion: 2 })));
+  });
+
+  it("★payload 상한(512000자)을 넘으면 거부된다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await seedOwnerDocAs(db, NEW_REPLAY_ID);
+    await assertFails(
+      setDoc(
+        doc(db, "publicReplays", NEW_REPLAY_ID),
+        publicReplayDocSeed({ payload: "x".repeat(512001) }),
+      ),
+    );
+  });
+
+  it("★공개 문서는 불변이다 — 이미 공유된 URL 의 내용이 바뀌지 않는다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "publicReplays", PUBLISHED_REPLAY_ID), {
+        payload: '{"goal":"swapped"}',
+      }),
+    );
+  });
+
+  it("해제(삭제)는 owner/admin 만, 멤버·미인증은 불가", async () => {
+    await assertFails(
+      deleteDoc(
+        doc(unauthContext().firestore(), "publicReplays", PUBLISHED_REPLAY_ID),
+      ),
+    );
+    await assertFails(
+      deleteDoc(
+        doc(
+          getContext(MEMBER_ID, MEMBER_EMAIL).firestore(),
+          "publicReplays",
+          PUBLISHED_REPLAY_ID,
+        ),
+      ),
+    );
+    await assertSucceeds(
+      deleteDoc(
+        doc(
+          getContext(OWNER_ID, OWNER_EMAIL).firestore(),
+          "publicReplays",
+          PUBLISHED_REPLAY_ID,
+        ),
+      ),
+    );
+  });
+});
+
+describe("publicReplayOwners — 비공개 소유권 인덱스", () => {
+  it("프로젝트 멤버는 발행 이력을 읽을 수 있다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      getDoc(doc(db, "publicReplayOwners", PUBLISHED_REPLAY_ID)),
+    );
+  });
+
+  it("★외부인·미인증은 소유권 인덱스를 읽을 수 없다(내부 id 노출 차단)", async () => {
+    await assertFails(
+      getDoc(
+        doc(
+          getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore(),
+          "publicReplayOwners",
+          PUBLISHED_REPLAY_ID,
+        ),
+      ),
+    );
+    await assertFails(
+      getDoc(
+        doc(
+          unauthContext().firestore(),
+          "publicReplayOwners",
+          PUBLISHED_REPLAY_ID,
+        ),
+      ),
+    );
+  });
+
+  it("발행자 uid 를 위조할 수 없다", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertFails(
+      seedOwnerDocAs(db, NEW_REPLAY_ID, { publisherUid: OWNER_ID }),
+    );
+  });
+
+  it("published → unpublished 전이는 허용된다(해제)", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "publicReplayOwners", PUBLISHED_REPLAY_ID), {
+        status: "unpublished",
+        unpublishedAt: new Date(),
+      }),
+    );
+  });
+
+  it("★unpublished → published 되살리기는 거부된다(해제는 되돌릴 수 없다)", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "publicReplayOwners", UNPUBLISHED_REPLAY_ID), {
+        status: "published",
+        unpublishedAt: null,
+      }),
+    );
+  });
+
+  it("★projectId·publisherUid 를 나중에 바꿔치기할 수 없다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "publicReplayOwners", PUBLISHED_REPLAY_ID), {
+        projectId: OTHER_PROJECT_ID,
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db, "publicReplayOwners", PUBLISHED_REPLAY_ID), {
+        status: "unpublished",
+        publisherUid: MEMBER_ID,
+      }),
+    );
+  });
+
+  it("★소유권 기록은 삭제할 수 없다(발행했다는 사실 자체가 감사 기록)", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      deleteDoc(doc(db, "publicReplayOwners", PUBLISHED_REPLAY_ID)),
     );
   });
 });

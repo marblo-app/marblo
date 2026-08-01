@@ -1,0 +1,65 @@
+rules_version = '2';
+
+// Firebase Storage — 공개 Replay 미디어 버킷 (Phase 4-1).
+//
+// 설계 단일소스: docs/MISSION-REPLAY-DESIGN.md §7.1
+//   미디어(카드/GIF/영상) → `public-replays/{replayId}/{contentHash}.{ext}`, 공개 read.
+//
+// ★★★ 배포 주의 (티켓 제약 · 406_failclosed 교훈) ★★★
+//   이 파일은 **아직 배포되지 않는다.** 그래서 firebase.json 의 "storage" 항목도
+//   일부러 비워 뒀다 — 항목이 있으면 인자 없는 `firebase deploy` 가 이 룰까지
+//   실어 나른다. 검토가 끝나면 배포 담당자가 firebase.json 에
+//   `"storage": { "rules": "storage.rules" }` 를 추가하고
+//   `firebase deploy --only storage` 로 **단독** 배포한다.
+//   firestore 룰 배포(--only firestore:rules,firestore:indexes)에 절대 섞지 않는다.
+//
+// ─────────────────────────────────────────────────────────────────
+// 접근 모델
+// ─────────────────────────────────────────────────────────────────
+// read  = 전면 공개. OG 카드는 크롤러(트위터·슬랙·카카오)가 **미인증으로**
+//         가져가야 하고, 그게 이 버킷의 존재 이유다.
+// write = Firestore 소유권 문서(`publicReplayOwners/{replayId}`)를 조회해
+//         **그 replay 를 실제로 발행한 사용자**에게만 연다. 인증만 확인하면
+//         로그인한 아무나 남의 replayId 경로에 이미지를 덮어써서 공개 카드를
+//         바꿔칠 수 있다(공개 표면의 defacement).
+//
+// 미디어 생성 자체는 Phase 3(공유카드 PNG) 산출물이다. 여기서는 그 업로드가
+// 도착할 자리와 경계만 fail-closed 로 먼저 못 박는다.
+//
+// ★L3 등급이어도 이 버킷에 올라가는 건 비식별판에서 렌더한 이미지뿐이다 —
+//   원본 스크린샷·터미널 캡처를 여기 올리는 경로는 만들지 않는다.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function ownerDoc(replayId) {
+      return firestore.get(/databases/(default)/documents/publicReplayOwners/$(replayId)).data;
+    }
+
+    function isPublisherOf(replayId) {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/publicReplayOwners/$(replayId))
+        && ownerDoc(replayId).publisherUid == request.auth.uid;
+    }
+
+    match /public-replays/{replayId}/{fileName} {
+      allow read: if true;
+
+      // create/update — 발행 상태일 때만. 해제된 replay 에 새 카드를 붙일 수 없다.
+      allow write: if isPublisherOf(replayId)
+        && ownerDoc(replayId).status == 'published'
+        && request.resource != null
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType == 'image/png';
+
+      // delete(= request.resource 가 null 인 write)는 해제 흐름에서 필요하므로
+      // 발행 상태를 요구하지 않는다. 발행자 본인이면 언제든 지울 수 있어야 한다.
+      allow delete: if isPublisherOf(replayId);
+    }
+
+    // 그 외 전부 차단 — 이 버킷에 다른 용도의 경로를 조용히 만들지 못하게 한다.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
