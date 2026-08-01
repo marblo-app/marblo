@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { useProjectStore } from "../stores/projectStore";
 import { useEditorStore } from "../stores/editorStore";
@@ -10,6 +10,73 @@ import { BugReportModal } from "./settings/BugReportModal";
 import { InvitationBanner } from "./settings/InvitationBanner";
 import { PresenceIndicator } from "./collaboration/PresenceIndicator";
 import marbloMark from "../assets/marblo-mark.svg";
+import type { Project } from "../types/project";
+
+const RECENT_PROJECTS_KEY = "marblo.header.recentProjectIds";
+const MAX_RECENT_PROJECTS = 8;
+
+function readRecentProjectIds(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(RECENT_PROJECTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is string => typeof id === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function recordRecentProjectId(id: string): string[] {
+  const next = [
+    id,
+    ...readRecentProjectIds().filter((existing) => existing !== id),
+  ].slice(0, MAX_RECENT_PROJECTS);
+  try {
+    localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(next));
+  } catch {
+    // private mode / storage quota — recent list just won't persist this session
+  }
+  return next;
+}
+
+/** 이름·멤버가 없는 깨진 문서. 데이터 정리(5492HUZy/AZN2XATv) 전까지 항상 숨김 — 검색해도 안 나옴. */
+function isGhostProject(p: Project): boolean {
+  return !p.name?.trim() || !p.members || p.members.length === 0;
+}
+
+/** 로컬 폴더·원격 저장소 연결이 전혀 없는 프로젝트. 기본 섹션엔 숨기되 검색으론 여전히 찾을 수 있다. */
+function hasNoLinkedActivity(p: Project): boolean {
+  return (
+    !p.folderPath &&
+    !p.legacyFolderPath &&
+    !p.gitRemoteUrl &&
+    (!p.folderPaths || Object.keys(p.folderPaths).length === 0)
+  );
+}
+
+function ProjectMenuItem({
+  project,
+  onSelect,
+}: {
+  project: Project;
+  onSelect: (project: Project) => void;
+}) {
+  return (
+    <button
+      onClick={() => onSelect(project)}
+      className="flex w-full flex-col px-3 py-2 text-left text-sm text-gray-300 hover:bg-gray-700"
+    >
+      <span>{project.name}</span>
+      {project.folderPath && (
+        <span className="truncate text-[10px] text-gray-500">
+          {project.folderPath.replace(/^\/Users\/[^/]+/, "~")}
+        </span>
+      )}
+    </button>
+  );
+}
 
 interface HeaderProps {
   onNavigateToSettings?: () => void;
@@ -95,7 +162,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
   const setRootPath = useEditorStore((s) => s.setRootPath);
   const getPlan = useSubscriptionStore((s) => s.getPlan);
 
-  const handleSelectProject = (project: (typeof projects)[number]) => {
+  const handleSelectProject = (project: typeof projects[number]) => {
     if (currentProject?.id === project.id) {
       setShowProjectMenu(false);
       return;
@@ -114,8 +181,58 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
   const [showProjectMenu, setShowProjectMenu] = useState(false);
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+  const [projectSearch, setProjectSearch] = useState("");
+  const [recentProjectIds, setRecentProjectIds] = useState<string[]>(() =>
+    readRecentProjectIds()
+  );
   const userMenuRef = useRef<HTMLDivElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
+
+  const toggleProjectMenu = () => {
+    const next = !showProjectMenu;
+    setShowProjectMenu(next);
+    if (next) setProjectSearch("");
+  };
+
+  // "최근" 신호: 선택할 때마다 갱신되는 로컬 히스토리(이 기기 한정, 데이터 정리와 무관).
+  useEffect(() => {
+    if (!currentProject) return;
+    setRecentProjectIds(recordRecentProjectId(currentProject.id));
+  }, [currentProject?.id]);
+
+  const projectMenuGroups = useMemo(() => {
+    const query = projectSearch.trim().toLowerCase();
+    const visible = projects.filter(
+      (p) => !isGhostProject(p) && p.id !== currentProject?.id
+    );
+
+    if (query) {
+      return {
+        searchResults: visible.filter((p) =>
+          p.name.toLowerCase().includes(query)
+        ),
+        recent: [] as Project[],
+        mine: [] as Project[],
+      };
+    }
+
+    const visibleById = new Map(visible.map((p) => [p.id, p]));
+    const recent = recentProjectIds
+      .map((id) => visibleById.get(id))
+      .filter((p): p is Project => Boolean(p));
+    const recentIds = new Set(recent.map((p) => p.id));
+
+    const mine = visible.filter(
+      (p) => !recentIds.has(p.id) && !hasNoLinkedActivity(p)
+    );
+
+    // Fallback: nobody counts as "recent" or "linked" yet (fresh account) —
+    // surface everything rather than showing an empty-looking dropdown.
+    const shown = new Set([...recentIds, ...mine.map((p) => p.id)]);
+    const rest = visible.filter((p) => !shown.has(p.id));
+
+    return { searchResults: [] as Project[], recent, mine: [...mine, ...rest] };
+  }, [projects, currentProject?.id, projectSearch, recentProjectIds]);
 
   const handleCreateProject = async () => {
     if (!newProjectName.trim() || !user) return;
@@ -173,7 +290,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
         >
           <div className="relative" ref={projectMenuRef}>
             <button
-              onClick={() => setShowProjectMenu(!showProjectMenu)}
+              onClick={toggleProjectMenu}
               className="flex items-center gap-1 rounded px-2 py-1 text-sm text-gray-300 hover:bg-gray-800"
             >
               <span>{currentProject?.name || t("header.selectProject")}</span>
@@ -193,25 +310,82 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
             </button>
 
             {showProjectMenu && (
-              <div className="absolute left-1/2 -translate-x-1/2 top-full z-50 mt-1 w-56 border border-gray-700 bg-gray-800 py-1 shadow-lg rounded">
-                {projects.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => handleSelectProject(p)}
-                    className={`flex w-full flex-col px-3 py-2 text-left text-sm hover:bg-gray-700 ${
-                      currentProject?.id === p.id
-                        ? "text-blue-400"
-                        : "text-gray-300"
-                    }`}
-                  >
-                    <span>{p.name}</span>
-                    {p.folderPath && (
-                      <span className="truncate text-[10px] text-gray-500">
-                        {p.folderPath.replace(/^\/Users\/[^/]+/, "~")}
-                      </span>
-                    )}
-                  </button>
-                ))}
+              <div className="absolute left-1/2 -translate-x-1/2 top-full z-50 mt-1 w-64 border border-gray-700 bg-gray-800 py-1 shadow-lg rounded">
+                {currentProject && (
+                  <div className="border-b border-gray-700 px-3 py-2">
+                    <div className="flex flex-col text-left text-sm text-blue-400">
+                      <span>{currentProject.name}</span>
+                      {currentProject.folderPath && (
+                        <span className="truncate text-[10px] text-gray-500">
+                          {currentProject.folderPath.replace(
+                            /^\/Users\/[^/]+/,
+                            "~"
+                          )}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className="px-2 py-2">
+                  <input
+                    type="text"
+                    value={projectSearch}
+                    onChange={(e) => setProjectSearch(e.target.value)}
+                    placeholder={t("header.searchProjects")}
+                    className="w-full rounded bg-gray-700 border border-gray-600 px-2 py-1 text-sm text-gray-200 focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="max-h-72 overflow-y-auto">
+                  {projectSearch.trim() ? (
+                    projectMenuGroups.searchResults.length > 0 ? (
+                      projectMenuGroups.searchResults.map((p) => (
+                        <ProjectMenuItem
+                          key={p.id}
+                          project={p}
+                          onSelect={handleSelectProject}
+                        />
+                      ))
+                    ) : (
+                      <p className="px-3 py-2 text-xs text-gray-500">
+                        {t("header.noSearchResults")}
+                      </p>
+                    )
+                  ) : (
+                    <>
+                      {projectMenuGroups.recent.length > 0 && (
+                        <div>
+                          <p className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-gray-500">
+                            {t("header.recentProjects")}
+                          </p>
+                          {projectMenuGroups.recent.map((p) => (
+                            <ProjectMenuItem
+                              key={p.id}
+                              project={p}
+                              onSelect={handleSelectProject}
+                            />
+                          ))}
+                        </div>
+                      )}
+                      {projectMenuGroups.mine.length > 0 && (
+                        <div>
+                          <p className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-gray-500">
+                            {t("header.myProjects")}
+                          </p>
+                          {projectMenuGroups.mine.map((p) => (
+                            <ProjectMenuItem
+                              key={p.id}
+                              project={p}
+                              onSelect={handleSelectProject}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
                 <div className="border-t border-gray-700 mt-1 pt-1">
                   {showNewProject ? (
                     <div className="px-3 py-2 flex gap-2">

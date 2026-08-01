@@ -11,4 +11,8 @@ export const header = {
   "header.settings": "설정",
   "header.logout": "로그아웃",
   "header.planBadge.suffix": "플랜",
+  "header.searchProjects": "프로젝트 검색",
+  "header.recentProjects": "최근",
+  "header.myProjects": "내 프로젝트",
+  "header.noSearchResults": "검색 결과 없음",
 };

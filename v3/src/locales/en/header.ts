@@ -13,4 +13,8 @@ export const header: Record<keyof typeof koHeader, string> = {
   "header.settings": "Settings",
   "header.logout": "Log out",
   "header.planBadge.suffix": "Plan",
+  "header.searchProjects": "Search projects",
+  "header.recentProjects": "Recent",
+  "header.myProjects": "My Projects",
+  "header.noSearchResults": "No matching projects",
 };
