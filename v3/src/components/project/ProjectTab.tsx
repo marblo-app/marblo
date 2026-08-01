@@ -5,6 +5,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { useTeam } from "../../hooks/useTeam";
 import { useTranslation } from "../../lib/i18n";
 import { canViewAuditLog, canViewWorkload } from "../../lib/teamRoles";
+import { sortMembersByRole } from "../../lib/teamMembers";
 import { TeamManagement } from "../settings/TeamManagement";
 import { PlanGate } from "../settings/PlanGate";
 import { MemberWorkloadPanel } from "./MemberWorkloadPanel";
@@ -43,6 +44,17 @@ export function ProjectTab() {
    * 가장 흔한 1인 프로젝트가 빈 표로 보인다. 목록에 없으면 로그인 프로필로
    * 한 줄 채워 넣는다 — 역할은 useTeam 이 이미 owner 로 판정해 둔 값을 쓴다.
    */
+  const workloadRoles = useMemo(
+    () =>
+      user && !memberRoles[user.uid]
+        ? { ...memberRoles, [user.uid]: currentRole }
+        : memberRoles,
+    [user, memberRoles, currentRole]
+  );
+
+  // ★ useTeam 이 이미 role 우선 정렬(owner→admin→member→viewer)해 돌려주지만,
+  // 위 백필로 self 를 앞에 끼워 넣으면 그 순서가 다시 깨진다 — 여기서 한 번 더
+  // sortMembersByRole 을 통과시켜 오너가 항상 맨 위에 오도록 보장한다.
   const workloadMembers = useMemo<User[]>(() => {
     if (!user || members.some((m) => m.id === user.uid)) return members;
     const self: User = {
@@ -52,16 +64,8 @@ export function ProjectTab() {
       photoURL: user.photoURL || "",
       createdAt: new Date(),
     };
-    return [self, ...members];
-  }, [user, members]);
-
-  const workloadRoles = useMemo(
-    () =>
-      user && !memberRoles[user.uid]
-        ? { ...memberRoles, [user.uid]: currentRole }
-        : memberRoles,
-    [user, memberRoles, currentRole],
-  );
+    return sortMembersByRole([self, ...members], workloadRoles);
+  }, [user, members, workloadRoles]);
 
   if (!projectId) {
     return (

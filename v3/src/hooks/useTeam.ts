@@ -8,6 +8,11 @@ import {
   convertTimestamps,
 } from "../services/firestore";
 import * as teamService from "../services/teamService";
+import { subscribeToPresence } from "../services/collaborationService";
+import {
+  resolveMemberDisplayName,
+  sortMembersByRole,
+} from "../lib/teamMembers";
 import { useAuth } from "./useAuth";
 import { t } from "../lib/i18n";
 
@@ -25,6 +30,13 @@ export function useTeam(projectId: string) {
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // uid → presence 문서의 displayName. users/{uid} 문서는 오너 외 멤버에서
+  // displayName 이 비어 있는 경우가 흔해(그 필드를 채우는 쓰기 경로가 이 앱
+  // 어디에도 없다), usePresenceSync 가 60초마다 Firebase Auth 값으로 갱신하는
+  // 프로젝트 스코프 presence 문서를 이름 폴백 소스로 쓴다.
+  const [presenceNames, setPresenceNames] = useState<Record<string, string>>(
+    {}
+  );
 
   // 멤버 목록 로드 (프로젝트 변경 시)
   useEffect(() => {
@@ -81,6 +93,36 @@ export function useTeam(projectId: string) {
 
     return () => unsubscribe();
   }, [projectId]);
+
+  // 프로젝트 스코프 presence 구독 — 이름 폴백 소스(위 주석 참조).
+  useEffect(() => {
+    if (!projectId) {
+      setPresenceNames({});
+      return;
+    }
+
+    const unsubscribe = subscribeToPresence(projectId, (presence) => {
+      const next: Record<string, string> = {};
+      for (const p of presence) next[p.userId] = p.displayName;
+      setPresenceNames(next);
+    });
+
+    return () => unsubscribe();
+  }, [projectId]);
+
+  // 표시용 멤버 목록 — 이름 해석(users → presence → email → uid) + role 우선
+  // 정렬(owner→admin→member→viewer, 동률은 이름순). lib/teamMembers.ts 참조.
+  const displayMembers = useMemo(
+    () =>
+      sortMembersByRole(
+        members.map((m) => ({
+          ...m,
+          displayName: resolveMemberDisplayName(m, presenceNames[m.id]),
+        })),
+        memberRoles
+      ),
+    [members, memberRoles, presenceNames]
+  );
 
   const currentRole = useMemo(() => {
     if (!user) return "viewer" as InvitationRole;
@@ -195,7 +237,7 @@ export function useTeam(projectId: string) {
   );
 
   return {
-    members,
+    members: displayMembers,
     memberRoles,
     invitations,
     loading,
