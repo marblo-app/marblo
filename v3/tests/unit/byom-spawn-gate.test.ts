@@ -197,7 +197,7 @@ describe("BYOM 스폰 게이트 — env-swap 벤더의 인증 축", () => {
     // env-swap 벤더도 결국 우리 claude 바이너리로 뜬다.
     expect(gate.ok).toBe(false);
     expect(gate.reason).toBe("not-installed");
-    expect(gate.action).toBe("npm install -g @anthropic-ai/claude-code");
+    expect(gate.action).toBe("curl -fsSL https://claude.ai/install.sh | bash");
   });
 
   it("하네스가 어긋난 핀은 벤더 판정에서 제외한다(스폰 쪽도 그 핀을 버린다)", async () => {

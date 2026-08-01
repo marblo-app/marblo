@@ -275,6 +275,7 @@ async function runPostInstallExec(
 const TRUSTED_SHELL_INSTALLER_HOSTS = new Set<string>([
   "antigravity.google",
   "x.ai",
+  "claude.ai",
 ]);
 
 async function installShell(strategy: InstallStrategy): Promise<void> {
@@ -948,7 +949,7 @@ export async function probeCliAuth(
       return {
         installed: false,
         authenticated: false,
-        action: "npm install -g @anthropic-ai/claude-code",
+        action: "curl -fsSL https://claude.ai/install.sh | bash",
       };
     }
     let authed = claudeAuthenticatedSync();

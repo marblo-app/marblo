@@ -111,12 +111,12 @@ export const CATALOG: HarnessPackage[] = [
     id: "cli-claude-code",
     name: "Claude Code CLI",
     description:
-      "오케스트레이터 및 Claude 에이전트 실행에 필요한 CLI. `npm install -g @anthropic-ai/claude-code`. 설치 후 `claude` 첫 실행 시 OAuth 또는 API 키로 인증.",
+      "오케스트레이터 및 Claude 에이전트 실행에 필요한 CLI. 공식 네이티브 인스톨러(`curl -fsSL https://claude.ai/install.sh | bash`, npm 불필요)로 설치 — `~/.local/bin/claude` 에 배치되고 백그라운드에서 자동 업데이트됨. 설치 후 `claude` 첫 실행 시 OAuth 또는 API 키로 인증.",
     type: "cli",
     category: "required",
     install: {
-      kind: "npm-global",
-      source: "@anthropic-ai/claude-code",
+      kind: "shell",
+      source: "https://claude.ai/install.sh",
       postInstall:
         "설치 후 터미널에서 `claude` 한 번 실행해서 Anthropic 계정 OAuth 또는 API 키 인증을 완료하세요. 그 후 Marblo 재시작.",
     },

@@ -117,7 +117,7 @@ describe("probeCliAuth", () => {
     await expect(probeCliAuth("claude")).resolves.toEqual({
       installed: false,
       authenticated: false,
-      action: "npm install -g @anthropic-ai/claude-code",
+      action: "curl -fsSL https://claude.ai/install.sh | bash",
     });
   });
 

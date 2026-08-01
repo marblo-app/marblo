@@ -169,7 +169,7 @@ describe("checkSpawnAuthGate", () => {
     const gate = await checkSpawnAuthGate("claude");
     expect(gate.ok).toBe(false);
     expect(gate.reason).toBe("not-installed");
-    expect(gate.action).toBe("npm install -g @anthropic-ai/claude-code");
+    expect(gate.action).toBe("curl -fsSL https://claude.ai/install.sh | bash");
   });
 
   it("blocks claude (gpt→codex) when installed but not logged in", async () => {
