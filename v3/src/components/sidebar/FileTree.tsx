@@ -1721,41 +1721,153 @@ export function FileTree() {
       {/* Project path header + toolbar */}
       <div className="flex flex-col border-b border-gray-700">
         <div className="flex items-center gap-1 px-2 pt-1">
-          <span
-            className="truncate text-[11px] font-medium text-gray-300"
-            title={rootView?.fullPath ?? rootPath}
-          >
-            {rootView?.label ?? basename(rootPath)}
-          </span>
-          {rootView?.kind === "worktree" && (
+          <div className="flex min-w-0 flex-1 items-center gap-1">
             <span
-              className="flex-shrink-0 rounded bg-purple-500/20 px-1 text-[9px] font-bold uppercase tracking-wide text-purple-300"
-              title={t("sidebar.tree.activeWorktree")}
+              className="min-w-0 truncate text-[11px] font-medium text-gray-300"
+              title={rootView?.fullPath ?? rootPath}
             >
-              {rootView.detail ? `WT · ${rootView.detail}` : "WT"}
+              {rootView?.label ?? basename(rootPath)}
             </span>
-          )}
-          {rootView?.kind === "project" && (
-            <span
-              className="flex-shrink-0 rounded bg-gray-600/40 px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400"
-              title={t("sidebar.tree.projectRoot")}
-            >
-              ROOT
-            </span>
-          )}
-          <span className="flex-1" />
-          {/* Open Folder — primary button auto-registers the picked folder as a
+            {rootView?.kind === "worktree" && (
+              <span
+                className="flex-shrink-0 rounded bg-purple-500/20 px-1 text-[9px] font-bold uppercase tracking-wide text-purple-300"
+                title={t("sidebar.tree.activeWorktree")}
+              >
+                {rootView.detail ? `WT · ${rootView.detail}` : "WT"}
+              </span>
+            )}
+            {rootView?.kind === "project" && (
+              <span
+                className="flex-shrink-0 rounded bg-gray-600/40 px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400"
+                title={t("sidebar.tree.projectRoot")}
+              >
+                ROOT
+              </span>
+            )}
+          </div>
+          <div className="flex flex-shrink-0 items-center gap-1">
+            {/* Open Folder — primary button auto-registers the picked folder as a
               project and boots the orchestrator (one click). The chevron opens a
               dropdown with the non-blocking "browse read-only" alternative and a
               recents list. Its own zone, divided from the worktree switch and
               file-ops below. */}
-          <div ref={recentMenuRef} className="relative flex items-center">
+            <div ref={recentMenuRef} className="relative flex items-center">
+              <button
+                onClick={() =>
+                  window.dispatchEvent(new CustomEvent("marblo:select-folder"))
+                }
+                className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
+                title={t("sidebar.tree.openFolder")}
+              >
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                  />
+                </svg>
+              </button>
+              <button
+                ref={recentButtonRef}
+                onClick={() => setShowRecentMenu((v) => !v)}
+                className={`rounded p-0.5 hover:bg-gray-700 hover:text-gray-300 ${
+                  showRecentMenu ? "text-gray-300" : "text-gray-500"
+                }`}
+                title={t("sidebar.tree.openFolderMore")}
+                aria-haspopup="menu"
+                aria-expanded={showRecentMenu}
+              >
+                <svg
+                  className="h-3 w-3"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </button>
+              {/* Body portal + position:fixed (left-anchored, viewport-clamped via
+                calculateWorktreeMenuPosition) so the menu can't be clipped by
+                the narrow, overflow-hidden sidebar — same fix as #146/#147 for
+                the worktree switch. */}
+              {showRecentMenu &&
+                recentMenuPosition &&
+                createPortal(
+                  <div
+                    ref={recentPortalMenuRef}
+                    className="z-50 max-h-64 w-[min(80vw,360px)] min-w-[224px] overflow-auto rounded border border-gray-700 bg-gray-800 py-1 shadow-lg"
+                    style={{
+                      position: "fixed",
+                      left: `${recentMenuPosition.left}px`,
+                      top: `${recentMenuPosition.top}px`,
+                    }}
+                    role="menu"
+                  >
+                    {/* Non-blocking secondary action: browse a folder read-only
+                      without registering it as a project. */}
+                    <button
+                      onClick={handleBrowseReadonly}
+                      className="block w-full truncate px-2 py-1 text-left text-[11px] text-gray-300 hover:bg-gray-700"
+                      role="menuitem"
+                    >
+                      {t("sidebar.tree.browseReadonly")}
+                    </button>
+                    {recentFolders.length > 0 && (
+                      <>
+                        <div className="mt-1 border-t border-gray-700 px-2 pb-1 pt-1 text-[9px] font-bold uppercase tracking-wide text-gray-500">
+                          {t("sidebar.tree.recentFolders")}
+                        </div>
+                        {recentFolders.map((path) => (
+                          <button
+                            key={path}
+                            onClick={() => handleOpenRecent(path)}
+                            className="block w-full truncate px-2 py-1 text-left text-[11px] text-gray-300 hover:bg-gray-700"
+                            title={path}
+                            role="menuitem"
+                          >
+                            {folderLabel(path)}
+                            <span className="ml-1 text-[9px] text-gray-500">
+                              {path}
+                            </span>
+                          </button>
+                        ))}
+                      </>
+                    )}
+                  </div>,
+                  document.body,
+                )}
+            </div>
+            <span className="mx-0.5 h-3.5 w-px bg-gray-700" />
+            {rootSwitch && (
+              <>
+                <WorktreeSwitch
+                  toMain={rootSwitch.toMain}
+                  toTasks={rootSwitch.toTasks}
+                  open={showWorktreeMenu}
+                  setOpen={setShowWorktreeMenu}
+                  menuRef={worktreeMenuRef}
+                  portalMenuRef={worktreePortalMenuRef}
+                  onSwitch={handleSwitchRoot}
+                  onGoMain={handleResetToMain}
+                />
+                <span className="mx-0.5 h-3.5 w-px bg-gray-700" />
+              </>
+            )}
             <button
-              onClick={() =>
-                window.dispatchEvent(new CustomEvent("marblo:select-folder"))
-              }
+              onClick={() => handleCreate("file")}
               className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-              title={t("sidebar.tree.openFolder")}
+              title={t("sidebar.tree.newFileShortcut")}
             >
               <svg
                 className="h-3.5 w-3.5"
@@ -1767,22 +1879,17 @@ export function FileTree() {
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth={2}
-                  d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                  d="M9 13h6m-3-3v6m-7 4h14a2 2 0 002-2V8a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
                 />
               </svg>
             </button>
             <button
-              ref={recentButtonRef}
-              onClick={() => setShowRecentMenu((v) => !v)}
-              className={`rounded p-0.5 hover:bg-gray-700 hover:text-gray-300 ${
-                showRecentMenu ? "text-gray-300" : "text-gray-500"
-              }`}
-              title={t("sidebar.tree.openFolderMore")}
-              aria-haspopup="menu"
-              aria-expanded={showRecentMenu}
+              onClick={() => handleCreate("directory")}
+              className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
+              title={t("sidebar.tree.newFolderShortcut")}
             >
               <svg
-                className="h-3 w-3"
+                className="h-3.5 w-3.5"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -1791,177 +1898,73 @@ export function FileTree() {
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth={2}
-                  d="M19 9l-7 7-7-7"
+                  d="M12 11v4m-2-2h4m6 5a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 2h7a2 2 0 012 2v11z"
                 />
               </svg>
             </button>
-            {/* Body portal + position:fixed (left-anchored, viewport-clamped via
-                calculateWorktreeMenuPosition) so the menu can't be clipped by
-                the narrow, overflow-hidden sidebar — same fix as #146/#147 for
-                the worktree switch. */}
-            {showRecentMenu &&
-              recentMenuPosition &&
-              createPortal(
-                <div
-                  ref={recentPortalMenuRef}
-                  className="z-50 max-h-64 w-[min(80vw,360px)] min-w-[224px] overflow-auto rounded border border-gray-700 bg-gray-800 py-1 shadow-lg"
-                  style={{
-                    position: "fixed",
-                    left: `${recentMenuPosition.left}px`,
-                    top: `${recentMenuPosition.top}px`,
-                  }}
-                  role="menu"
-                >
-                  {/* Non-blocking secondary action: browse a folder read-only
-                      without registering it as a project. */}
-                  <button
-                    onClick={handleBrowseReadonly}
-                    className="block w-full truncate px-2 py-1 text-left text-[11px] text-gray-300 hover:bg-gray-700"
-                    role="menuitem"
-                  >
-                    {t("sidebar.tree.browseReadonly")}
-                  </button>
-                  {recentFolders.length > 0 && (
-                    <>
-                      <div className="mt-1 border-t border-gray-700 px-2 pb-1 pt-1 text-[9px] font-bold uppercase tracking-wide text-gray-500">
-                        {t("sidebar.tree.recentFolders")}
-                      </div>
-                      {recentFolders.map((path) => (
-                        <button
-                          key={path}
-                          onClick={() => handleOpenRecent(path)}
-                          className="block w-full truncate px-2 py-1 text-left text-[11px] text-gray-300 hover:bg-gray-700"
-                          title={path}
-                          role="menuitem"
-                        >
-                          {folderLabel(path)}
-                          <span className="ml-1 text-[9px] text-gray-500">
-                            {path}
-                          </span>
-                        </button>
-                      ))}
-                    </>
-                  )}
-                </div>,
-                document.body,
-              )}
-          </div>
-          <span className="mx-0.5 h-3.5 w-px bg-gray-700" />
-          {rootSwitch && (
-            <>
-              <WorktreeSwitch
-                toMain={rootSwitch.toMain}
-                toTasks={rootSwitch.toTasks}
-                open={showWorktreeMenu}
-                setOpen={setShowWorktreeMenu}
-                menuRef={worktreeMenuRef}
-                portalMenuRef={worktreePortalMenuRef}
-                onSwitch={handleSwitchRoot}
-                onGoMain={handleResetToMain}
-              />
-              <span className="mx-0.5 h-3.5 w-px bg-gray-700" />
-            </>
-          )}
-          <button
-            onClick={() => handleCreate("file")}
-            className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-            title={t("sidebar.tree.newFileShortcut")}
-          >
-            <svg
-              className="h-3.5 w-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 13h6m-3-3v6m-7 4h14a2 2 0 002-2V8a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-              />
-            </svg>
-          </button>
-          <button
-            onClick={() => handleCreate("directory")}
-            className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-            title={t("sidebar.tree.newFolderShortcut")}
-          >
-            <svg
-              className="h-3.5 w-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 11v4m-2-2h4m6 5a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 2h7a2 2 0 012 2v11z"
-              />
-            </svg>
-          </button>
-          {/* 숨김 항목 표시 토글 — .venv 처럼 dotfile 이거나 루트 .gitignore 에
+            {/* 숨김 항목 표시 토글 — .venv 처럼 dotfile 이거나 루트 .gitignore 에
               걸린 폴더는 켜야만 보인다(티켓 D8yiihCWgDMd3AU7xkEy). 기본 OFF 라
               켜지 않은 사용자의 트리는 이전과 픽셀 동일하다. */}
-          <button
-            onClick={toggleShowHidden}
-            className={`rounded p-0.5 hover:bg-gray-700 hover:text-gray-300 ${
-              showHidden ? "text-blue-400" : "text-gray-500"
-            }`}
-            title={
-              showHidden
-                ? t("sidebar.tree.hideHidden")
-                : t("sidebar.tree.showHidden")
-            }
-            aria-pressed={showHidden}
-          >
-            <svg
-              className="h-3.5 w-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+            <button
+              onClick={toggleShowHidden}
+              className={`rounded p-0.5 hover:bg-gray-700 hover:text-gray-300 ${
+                showHidden ? "text-blue-400" : "text-gray-500"
+              }`}
+              title={
+                showHidden
+                  ? t("sidebar.tree.hideHidden")
+                  : t("sidebar.tree.showHidden")
+              }
+              aria-pressed={showHidden}
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-              />
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-              />
-              {!showHidden && (
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth={2}
-                  d="M3 3l18 18"
+                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
                 />
-              )}
-            </svg>
-          </button>
-          <button
-            onClick={handleRefresh}
-            className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-            title={t("sidebar.tree.refresh")}
-          >
-            <svg
-              className="h-3.5 w-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                />
+                {!showHidden && (
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M3 3l18 18"
+                  />
+                )}
+              </svg>
+            </button>
+            <button
+              onClick={handleRefresh}
+              className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
+              title={t("sidebar.tree.refresh")}
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
-          </button>
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+            </button>
+          </div>
         </div>
         {/* Full path of the root currently being viewed — makes a worktree
             switch unmistakable (basenames are often generated ids). */}
