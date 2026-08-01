@@ -123,7 +123,6 @@ function getEventMessages(event: unknown): string[] {
 }
 
 function shouldDropSentryEvent(event: unknown): boolean {
-  if (ENVIRONMENT === DEVELOPMENT_ENVIRONMENT) return true;
   const haystack = getEventMessages(event).join("\n");
   return (
     haystack.includes(
