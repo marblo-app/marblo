@@ -70,6 +70,11 @@ export const sidebar = {
   "sidebar.tree.newFileShortcut": "새 파일 (⌘N)",
   "sidebar.tree.newFolderShortcut": "새 폴더 (⇧⌘N)",
   "sidebar.tree.refresh": "새로고침",
+  "sidebar.tree.showHidden": "숨김 항목 표시 (.venv 등)",
+  "sidebar.tree.hideHidden": "숨김 항목 감추기",
+  "sidebar.tree.hiddenNotWalked": "숨김 폴더 — 내용은 터미널에서",
+  "sidebar.tree.revealedHidden":
+    "'{name}' 은(는) 숨김 규칙에 걸려 있어 숨김 항목 표시를 켰습니다.",
   "sidebar.tree.loading": "로딩 중...",
   // Confirm dialog
   "sidebar.tree.confirm": "확인",

@@ -73,6 +73,11 @@ export const sidebar: Record<keyof typeof koSidebar, string> = {
   "sidebar.tree.newFileShortcut": "New file (⌘N)",
   "sidebar.tree.newFolderShortcut": "New folder (⇧⌘N)",
   "sidebar.tree.refresh": "Refresh",
+  "sidebar.tree.showHidden": "Show hidden items (.venv, …)",
+  "sidebar.tree.hideHidden": "Hide hidden items",
+  "sidebar.tree.hiddenNotWalked": "Hidden folder — browse it in the terminal",
+  "sidebar.tree.revealedHidden":
+    "'{name}' matches a hidden/ignored rule, so hidden items are now shown.",
   "sidebar.tree.loading": "Loading...",
   // Confirm dialog
   "sidebar.tree.confirm": "OK",

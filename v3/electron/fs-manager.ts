@@ -9,7 +9,38 @@ export interface FileNode {
   type: "file" | "directory";
   children?: FileNode[];
   gitStatus?: string;
+  /**
+   * 숨김/gitignore 규칙 때문에 드러난 디렉터리라서 **내용을 걷지 않았다**는 표시.
+   * `children: []` 이 "빈 폴더"라는 거짓말로 읽히지 않게 하려는 플래그.
+   * 왜 안 걷나 — {@link ReadTreeOptions.showHidden} 참조.
+   */
+  truncated?: boolean;
 }
+
+export interface ReadTreeOptions {
+  /**
+   * 숨김 항목(`.` 으로 시작하는 이름)과 루트의 .gitignore 항목까지 나열한다.
+   * 기본 false — 켜지 않으면 기존과 **완전히 동일한** 트리다.
+   *
+   * 왜 필요한가(티켓 D8yiihCWgDMd3AU7xkEy): 파이썬 사용자가 `.venv` 를 만들면
+   * 디스크에는 만들어지는데 트리엔 절대 안 나타나 "폴더 생성이 안 된다"로
+   * 보였다. `venv` 도 .gitignore 에 있으면 같은 결과였다.
+   *
+   * ★단, 이 옵션으로 **드러난** 디렉터리는 나열만 하고 재귀하지 않는다
+   * (truncated=true). venv/site-packages 는 파일 수만 명 단위이고 FileTree 는
+   * 이 트리를 5초마다 다시 읽으므로, 재귀하면 메인 프로세스가 폴링마다 수만
+   * 개를 동기 순회한다. "폴더가 보인다"는 목적은 나열만으로 달성된다.
+   */
+  showHidden?: boolean;
+}
+
+/** 한 엔트리의 표시 판정. */
+type Visibility =
+  /** 항상 감춤 — 성능·소음 목적(node_modules/.git/dist…). showHidden 도 못 켠다. */
+  | "blocked"
+  /** 기본은 감춤, showHidden 이면 나열(단 디렉터리는 재귀 안 함). */
+  | "hidden"
+  | "visible";
 
 // Directories/files to always ignore
 const DEFAULT_IGNORES = new Set([
@@ -63,27 +94,45 @@ export class FsManager {
   }
 
   /**
-   * Check if a name should be ignored
+   * Classify one entry: always-hidden (perf/noise), hideable, or plain visible.
+   *
+   * `gitignored` carries only the .gitignore-derived names (root depth); the
+   * always-blocked DEFAULT_IGNORES are checked separately so `showHidden` can
+   * reveal the former without ever unleashing node_modules on the tree walk.
    */
-  private shouldIgnore(name: string, ignores: Set<string>): boolean {
+  private classify(name: string, gitignored: Set<string>): Visibility {
     // Env config files (.env, .env.local, .env.production, .env.example, …)
     // are always shown, even though they're dotfiles and usually gitignored —
     // users need to see and edit them in the tree. This wins over BOTH the
-    // blanket dotfile hide below AND the gitignore-derived `ignores` set
-    // (which lists .env / .env.* from .gitignore).
-    if (name === ".env" || name.startsWith(".env.")) return false;
-    if (name.startsWith(".")) return true;
-    return ignores.has(name);
+    // blanket dotfile hide below AND the gitignore-derived set.
+    if (name === ".env" || name.startsWith(".env.")) return "visible";
+    if (DEFAULT_IGNORES.has(name)) return "blocked";
+    if (name.startsWith(".")) return "hidden";
+    return gitignored.has(name) ? "hidden" : "visible";
   }
 
   /**
-   * Recursively read directory tree
+   * Recursively read directory tree.
+   *
+   * @param options {@link ReadTreeOptions} — `showHidden` reveals dotfiles and
+   * root .gitignore entries. Omitted/false reproduces the previous tree exactly.
    */
-  readTree(rootPath: string, depth = 0, maxDepth = 10): FileNode[] {
+  readTree(rootPath: string, options: ReadTreeOptions = {}): FileNode[] {
+    return this.readTreeAt(rootPath, options.showHidden === true, 0, 10);
+  }
+
+  private readTreeAt(
+    rootPath: string,
+    showHidden: boolean,
+    depth: number,
+    maxDepth: number,
+  ): FileNode[] {
     if (depth > maxDepth) return [];
 
-    const ignores =
-      depth === 0 ? this.readGitignore(rootPath) : new Set(DEFAULT_IGNORES);
+    // .gitignore only applies at the root, as before — reading one per level
+    // would be a different (and much more expensive) feature.
+    const gitignored =
+      depth === 0 ? this.readGitignore(rootPath) : new Set<string>();
 
     try {
       const entries = fs.readdirSync(rootPath, { withFileTypes: true });
@@ -97,16 +146,25 @@ export class FsManager {
       });
 
       for (const entry of sorted) {
-        if (this.shouldIgnore(entry.name, ignores)) continue;
+        const visibility = this.classify(entry.name, gitignored);
+        if (visibility === "blocked") continue;
+        if (visibility === "hidden" && !showHidden) continue;
 
         const fullPath = path.join(rootPath, entry.name);
 
         if (entry.isDirectory()) {
+          // A directory revealed ONLY by showHidden is listed but not walked —
+          // see ReadTreeOptions.showHidden for why (a .venv can hold 10⁵ files
+          // and this tree is re-read every 5s by the FileTree poll).
+          const truncated = visibility === "hidden";
           nodes.push({
             name: entry.name,
             path: fullPath,
             type: "directory",
-            children: this.readTree(fullPath, depth + 1, maxDepth),
+            children: truncated
+              ? []
+              : this.readTreeAt(fullPath, showHidden, depth + 1, maxDepth),
+            ...(truncated ? { truncated: true } : {}),
           });
         } else {
           nodes.push({
@@ -206,8 +264,8 @@ export class FsManager {
             new Error(
               `git ${args[0]} exited ${code}${
                 errOut.trim() ? `: ${errOut.trim()}` : ""
-              }`
-            )
+              }`,
+            ),
           );
       });
     });
@@ -234,7 +292,7 @@ export class FsManager {
    */
   async getWorktreeChanges(
     rootPath: string,
-    baseRef: string
+    baseRef: string,
   ): Promise<{
     baseSha: string;
     files: Array<{ relPath: string; status: string }>;
@@ -253,11 +311,11 @@ export class FsManager {
 
     const nameStatus = await this.git(
       ["diff", "--name-status", "--no-renames", baseSha],
-      rootPath
+      rootPath,
     );
     const untracked = await this.git(
       ["ls-files", "--others", "--exclude-standard"],
-      rootPath
+      rootPath,
     );
 
     const files = new Map<string, string>();
@@ -292,7 +350,7 @@ export class FsManager {
    */
   async getGitDiff(
     filePath: string,
-    baseSha?: string
+    baseSha?: string,
   ): Promise<{ original: string; modified: string }> {
     const dir = path.dirname(filePath);
     return new Promise((resolve) => {
@@ -304,10 +362,10 @@ export class FsManager {
             "show",
             `${baseSha ?? "HEAD"}:${path.relative(
               this.findGitRoot(dir),
-              filePath
+              filePath,
             )}`,
           ],
-          { cwd: dir }
+          { cwd: dir },
         );
         let original = "";
 
@@ -462,7 +520,7 @@ export class FsManager {
   watchDirectory(
     token: string,
     rootPath: string,
-    callback: (event: string, filePath: string) => void
+    callback: (event: string, filePath: string) => void,
   ): void {
     const existing = this.watchers.get(token);
     if (existing) existing.close();
@@ -479,7 +537,7 @@ export class FsManager {
             if (parts.some((p) => DEFAULT_IGNORES.has(p))) return;
             callback(eventType, fullPath);
           }
-        }
+        },
       );
       this.watchers.set(token, watcher);
     } catch {

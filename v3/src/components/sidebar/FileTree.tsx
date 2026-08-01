@@ -10,7 +10,7 @@ import {
 import { createPortal } from "react-dom";
 import { useEditorStore } from "../../stores/editorStore";
 import { useProjectStore } from "../../stores/projectStore";
-import { useFileTreeStore } from "../../stores/fileTreeStore";
+import { useFileTreeStore, isShowHidden } from "../../stores/fileTreeStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import {
@@ -21,6 +21,7 @@ import {
   resolveLocalMainTarget,
   isStrayWorktreeContainerRoot,
   treeSignature,
+  containsPath,
 } from "../../lib/fileTreeView";
 import { useArchiveSignals } from "../../hooks/useArchiveSignals";
 import type {
@@ -149,6 +150,7 @@ function FileTreeNode({
   onContextMenu,
   onMoveByDrop,
 }: FileTreeNodeProps) {
+  const { t } = useTranslation();
   const openFile = useEditorStore((s) => s.openFile);
   const activeFilePath = useEditorStore((s) => s.activeFilePath);
   const requestJump = useNavigationStore((s) => s.requestJump);
@@ -412,6 +414,18 @@ function FileTreeNode({
           }}
           onCancel={() => setPendingCreate(null)}
         />
+      )}
+
+      {/* 숨김이라 드러났을 뿐 내용은 안 걷은 디렉터리(.venv 등). 빈 폴더처럼
+          보이면 거짓말이므로 왜 비어 보이는지 한 줄로 밝힌다 — 실제 내용은
+          이 폴더를 cwd 로 하는 터미널에서 다룬다. */}
+      {node.type === "directory" && isOpen && node.truncated && (
+        <div
+          className="truncate px-1 py-0.5 text-[11px] italic text-gray-500"
+          style={{ paddingLeft: `${(depth + 1) * 12 + 22}px` }}
+        >
+          {t("sidebar.tree.hiddenNotWalked")}
+        </div>
       )}
 
       {/* Children */}
@@ -753,6 +767,9 @@ export function FileTree() {
     onConfirm: () => void;
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // 에러가 아닌 안내(예: 만든 폴더가 숨김이라 표시를 켰다). 빨간 에러 토스트와
+  // 같은 자리를 쓰되 색으로 구분한다 — 성공한 동작을 실패처럼 보이게 하지 않는다.
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
 
   const rootPath = useEditorStore((s) => s.rootPath);
   const setRootPath = useEditorStore((s) => s.setRootPath);
@@ -768,10 +785,23 @@ export function FileTree() {
   const copyToClipboard = useFileTreeStore((s) => s.copyToClipboard);
   const cutToClipboard = useFileTreeStore((s) => s.cutToClipboard);
   const clearClipboard = useFileTreeStore((s) => s.clearClipboard);
+  const showHiddenByScope = useFileTreeStore((s) => s.showHiddenByScope);
+  const setShowHiddenForScope = useFileTreeStore((s) => s.setShowHidden);
+  const toggleShowHiddenForScope = useFileTreeStore((s) => s.toggleShowHidden);
 
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
   const findByPathOrRemote = useProjectStore((s) => s.findByPathOrRemote);
   const currentProject = useProjectStore((s) => s.currentProject);
+
+  // "숨김 항목 표시" 는 프로젝트 단위로 기억한다(티켓 D8yiihCWgDMd3AU7xkEy).
+  // 프로젝트에 안 묶인 폴더(둘러보기 read-only)는 그 폴더 경로를 스코프로 쓴다 —
+  // 순수 로컬 폴더 작업이 바로 이 티켓의 대상이라 그쪽도 기억돼야 한다.
+  const showHiddenScope = currentProject?.id ?? rootPath ?? "";
+  const showHidden = isShowHidden(showHiddenByScope, showHiddenScope);
+  const toggleShowHidden = useCallback(
+    () => toggleShowHiddenForScope(showHiddenScope),
+    [toggleShowHiddenForScope, showHiddenScope],
+  );
 
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const ensureFreshWorktrees = useWorktreeStore((s) => s.ensureFresh);
@@ -899,30 +929,45 @@ export function FileTree() {
     return map;
   }, [tree]);
 
-  const loadTree = useCallback(async (dirPath: string, showLoading = true) => {
-    const seq = ++loadSeqRef.current;
-    if (showLoading) setLoading(true);
-    try {
-      const [nodes, statuses] = await Promise.all([
-        window.electronAPI.fs.readTree(dirPath),
-        window.electronAPI.fs.gitStatus(dirPath),
-      ]);
-      // A newer load (worktree switch / forced refresh) superseded us — discard
-      // this stale result so it can't overwrite fresher data.
-      if (seq !== loadSeqRef.current) return;
-      const signature = treeSignature(nodes, statuses);
-      if (signature !== lastSignatureRef.current) {
-        lastSignatureRef.current = signature;
-        setTree(nodes);
-        setGitStatuses(statuses);
+  // 방금 읽은 노드를 돌려준다 — commitCreate 가 "만든 게 트리에 실제로
+  // 나타났는지"를 상태 반영을 기다리지 않고 그 자리에서 확인하기 위함
+  // (티켓 D8yiihCWgDMd3AU7xkEy). 중복 서명으로 setTree 를 건너뛴 경우에도
+  // 읽은 값 자체는 그대로 돌려준다.
+  const loadTree = useCallback(
+    async (
+      dirPath: string,
+      showLoading = true,
+      overrideShowHidden?: boolean,
+    ): Promise<FileNode[] | null> => {
+      const seq = ++loadSeqRef.current;
+      if (showLoading) setLoading(true);
+      try {
+        const [nodes, statuses] = await Promise.all([
+          window.electronAPI.fs.readTree(dirPath, {
+            showHidden: overrideShowHidden ?? showHidden,
+          }),
+          window.electronAPI.fs.gitStatus(dirPath),
+        ]);
+        // A newer load (worktree switch / forced refresh) superseded us —
+        // discard this stale result so it can't overwrite fresher data.
+        if (seq !== loadSeqRef.current) return null;
+        const signature = treeSignature(nodes, statuses);
+        if (signature !== lastSignatureRef.current) {
+          lastSignatureRef.current = signature;
+          setTree(nodes);
+          setGitStatuses(statuses);
+        }
+        return nodes;
+      } catch (err) {
+        if (seq === loadSeqRef.current)
+          console.error("Failed to load file tree:", err);
+        return null;
+      } finally {
+        if (seq === loadSeqRef.current && showLoading) setLoading(false);
       }
-    } catch (err) {
-      if (seq === loadSeqRef.current)
-        console.error("Failed to load file tree:", err);
-    } finally {
-      if (seq === loadSeqRef.current && showLoading) setLoading(false);
-    }
-  }, []);
+    },
+    [showHidden],
+  );
 
   // Keep the worktree list fresh so the header can name the current root.
   // Light (topology-only) with a TTL: naming the root needs enumeration, never
@@ -969,6 +1014,13 @@ export function FileTree() {
     const t = setTimeout(() => setErrorMessage(null), 3500);
     return () => clearTimeout(t);
   }, [errorMessage]);
+
+  // Auto-dismiss notice (조금 더 길게 — 설명을 읽을 시간이 필요하다)
+  useEffect(() => {
+    if (!noticeMessage) return;
+    const t = setTimeout(() => setNoticeMessage(null), 6000);
+    return () => clearTimeout(t);
+  }, [noticeMessage]);
 
   // Close the worktree-switch menu on outside click / Escape.
   useEffect(() => {
@@ -1081,7 +1133,18 @@ export function FileTree() {
         } else {
           await window.electronAPI.fs.createDirectory(rootPath, newPath);
         }
-        await loadTree(rootPath, false);
+        const nodes = await loadTree(rootPath, false);
+        // ★사용자가 방금 만든 건 무조건 보여야 한다 (티켓 D8yiihCWgDMd3AU7xkEy).
+        // `.venv` 같은 숨김 이름이나 루트 .gitignore 에 걸린 이름(`venv`)은
+        // 디스크에 만들어지고도 트리에서 걸러져 "생성이 안 된다"로 보였다.
+        // 규칙을 렌더러에서 추측하지 않고, 방금 읽은 트리에 실제로 없으면
+        // 숨김 표시를 켜고 다시 읽는다 — 근거 기반.
+        if (nodes && !containsPath(nodes, newPath) && !showHidden) {
+          setShowHiddenForScope(showHiddenScope, true);
+          lastSignatureRef.current = "";
+          await loadTree(rootPath, false, true);
+          setNoticeMessage(translate("sidebar.tree.revealedHidden", { name }));
+        }
         setSelected(newPath);
         if (type === "file") {
           openFile(newPath);
@@ -1095,7 +1158,16 @@ export function FileTree() {
         setErrorMessage(translate("sidebar.tree.createFailMsg", { msg }));
       }
     },
-    [rootPath, loadTree, setSelected, openFile, requestJump],
+    [
+      rootPath,
+      loadTree,
+      setSelected,
+      openFile,
+      requestJump,
+      showHidden,
+      setShowHiddenForScope,
+      showHiddenScope,
+    ],
   );
 
   const commitRename = useCallback(
@@ -1717,6 +1789,49 @@ export function FileTree() {
               />
             </svg>
           </button>
+          {/* 숨김 항목 표시 토글 — .venv 처럼 dotfile 이거나 루트 .gitignore 에
+              걸린 폴더는 켜야만 보인다(티켓 D8yiihCWgDMd3AU7xkEy). 기본 OFF 라
+              켜지 않은 사용자의 트리는 이전과 픽셀 동일하다. */}
+          <button
+            onClick={toggleShowHidden}
+            className={`rounded p-0.5 hover:bg-gray-700 hover:text-gray-300 ${
+              showHidden ? "text-blue-400" : "text-gray-500"
+            }`}
+            title={
+              showHidden
+                ? t("sidebar.tree.hideHidden")
+                : t("sidebar.tree.showHidden")
+            }
+            aria-pressed={showHidden}
+          >
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+              />
+              {!showHidden && (
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 3l18 18"
+                />
+              )}
+            </svg>
+          </button>
           <button
             onClick={handleRefresh}
             className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
@@ -1844,6 +1959,13 @@ export function FileTree() {
       {errorMessage && (
         <div className="border-t border-red-500/30 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">
           {errorMessage}
+        </div>
+      )}
+
+      {/* Notice — 성공한 동작에 대한 설명이므로 에러 색을 쓰지 않는다 */}
+      {noticeMessage && (
+        <div className="border-t border-blue-500/30 bg-blue-500/10 px-3 py-2 text-[12px] text-blue-200">
+          {noticeMessage}
         </div>
       )}
 

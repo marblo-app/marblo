@@ -10,10 +10,16 @@ interface FileNode {
   type: "file" | "directory";
   children?: FileNode[];
   gitStatus?: string;
+  /** 숨김이라 드러났을 뿐이라 내용은 걷지 않은 디렉터리(빈 폴더가 아님). */
+  truncated?: boolean;
 }
 
 interface FsAPI {
-  readTree: (rootPath: string) => Promise<FileNode[]>;
+  /** `showHidden` 을 켜면 숨김 항목·루트 .gitignore 항목까지 나열한다(기본 false). */
+  readTree: (
+    rootPath: string,
+    options?: { showHidden?: boolean },
+  ) => Promise<FileNode[]>;
   readFile: (rootPath: string, filePath: string) => Promise<string>;
   writeFile: (
     rootPath: string,

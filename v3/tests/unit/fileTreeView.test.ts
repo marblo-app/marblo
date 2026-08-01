@@ -9,6 +9,7 @@ import {
   resolveLocalMainPath,
   resolveRootSwitch,
   treeSignature,
+  containsPath,
 } from "../../src/lib/fileTreeView";
 import type { Worktree } from "../../src/types/worktree";
 
@@ -534,5 +535,53 @@ describe("treeSignature", () => {
     const c = treeSignature([{ path: "/a" }], { "/a": "??" });
     expect(a).toBe(b);
     expect(a).not.toBe(c);
+  });
+});
+
+// 티켓 D8yiihCWgDMd3AU7xkEy — "만든 폴더가 트리에 실제로 나타났나"를 규칙
+// 예측이 아니라 결과 확인으로 판정하기 위한 조회기.
+describe("containsPath", () => {
+  const tree: FileNode[] = [
+    {
+      name: "src",
+      path: "/p/src",
+      type: "directory",
+      children: [
+        { name: "app.ts", path: "/p/src/app.ts", type: "file" },
+        {
+          name: "nested",
+          path: "/p/src/nested",
+          type: "directory",
+          children: [
+            { name: "deep.ts", path: "/p/src/nested/deep.ts", type: "file" },
+          ],
+        },
+      ],
+    },
+    { name: "README.md", path: "/p/README.md", type: "file" },
+  ];
+
+  it("finds a top-level entry", () => {
+    expect(containsPath(tree, "/p/README.md")).toBe(true);
+  });
+
+  it("finds a deeply nested entry", () => {
+    expect(containsPath(tree, "/p/src/nested/deep.ts")).toBe(true);
+  });
+
+  it("★필터에 걸려 빠진 항목은 없다고 답한다 (.venv 케이스)", () => {
+    expect(containsPath(tree, "/p/.venv")).toBe(false);
+  });
+
+  it("children 이 비어도(truncated) 터지지 않는다", () => {
+    const truncated: FileNode[] = [
+      { name: ".venv", path: "/p/.venv", type: "directory", children: [] },
+    ];
+    expect(containsPath(truncated, "/p/.venv")).toBe(true);
+    expect(containsPath(truncated, "/p/.venv/bin")).toBe(false);
+  });
+
+  it("빈 트리는 false", () => {
+    expect(containsPath([], "/p/anything")).toBe(false);
   });
 });

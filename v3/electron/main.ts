@@ -4284,9 +4284,12 @@ ipcMain.handle(
 );
 
 // --- File System IPC Handlers ---
-ipcMain.handle("fs:readTree", (_event, rootPath: string) => {
-  return fsManager.readTree(rootPath);
-});
+ipcMain.handle(
+  "fs:readTree",
+  (_event, rootPath: string, options?: { showHidden?: boolean }) => {
+    return fsManager.readTree(rootPath, options ?? {});
+  },
+);
 
 ipcMain.handle(
   "fs:readFile",

@@ -69,11 +69,18 @@ const terminalStore = create<TerminalState>((set, get) => ({
     set((s) => ({ sessions: [...s.sessions, session], activeSessionId: id }));
     // 영속화: name 기준 dedup 으로 useTerminalRestore 가 재spawn 시 같은
     // entry 를 다시 push 하지 않음. 프로젝트 단위 키.
+    //
+    // ★resolvedCwd 가 아니라 **명시적으로 받은 cwd 만** 저장한다
+    // (티켓 D8yiihCWgDMd3AU7xkEy). resolvedCwd 를 저장하면 생성 시점의
+    // rootPath 가 핀으로 박히고, name dedup 때문에 그 값이 영구히 이긴다 —
+    // 워크트리를 한 번 본 뒤 연 터미널이 이후 모든 재시작에서 그 워크트리로
+    // 뜨던 실버그의 원인. cwd 없이 저장된 탭은 복구 시 그때의 rootPath 를
+    // 따라간다 = "지금 열려 있는 폴더에서 터미널이 뜬다".
     const projectId = useProjectStore.getState().currentProject?.id;
     if (projectId) {
       addPersistedTerminal(projectId, {
         name,
-        cwd: resolvedCwd,
+        ...(cwd ? { cwd } : {}),
         command,
         args,
       });

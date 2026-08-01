@@ -812,7 +812,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       }>,
   },
   fs: {
-    readTree: (rootPath: string) => ipcRenderer.invoke("fs:readTree", rootPath),
+    readTree: (rootPath: string, options?: { showHidden?: boolean }) =>
+      ipcRenderer.invoke("fs:readTree", rootPath, options),
     readFile: (rootPath: string, filePath: string) =>
       ipcRenderer.invoke("fs:readFile", { rootPath, filePath }),
     writeFile: (rootPath: string, filePath: string, content: string) =>

@@ -437,3 +437,18 @@ export function treeSignature(
 ): string {
   return JSON.stringify([nodes, statuses]);
 }
+
+/**
+ * 방금 읽은 트리에 이 경로가 실제로 들어있나.
+ *
+ * 숨김/gitignore 필터는 메인 프로세스(FsManager)에 있으므로, "내가 만든 폴더가
+ * 트리에 보이는가"를 렌더러가 규칙을 흉내내서 예측하면 반드시 어긋난다. 대신
+ * 읽어온 결과를 그대로 확인한다 (티켓 D8yiihCWgDMd3AU7xkEy).
+ */
+export function containsPath(nodes: FileNode[], target: string): boolean {
+  for (const node of nodes) {
+    if (node.path === target) return true;
+    if (node.children && containsPath(node.children, target)) return true;
+  }
+  return false;
+}

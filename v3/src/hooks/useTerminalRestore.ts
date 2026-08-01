@@ -1,7 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useTerminalStore } from "../stores/terminalStore";
 import { useProjectStore } from "../stores/projectStore";
-import { readPersistedTerminals } from "../lib/terminalPersist";
+import {
+  readPersistedTerminals,
+  resolveRestoreCwd,
+} from "../lib/terminalPersist";
 
 /**
  * 앱 시작 / 프로젝트 전환 시, 그 프로젝트의 영속화된 사용자 spawn 터미널
@@ -40,16 +43,22 @@ export function useTerminalRestore(): void {
         skipped++;
         continue;
       }
-      createSession(t.name, t.command, t.args, t.cwd).catch((err) => {
-        console.warn(
-          `[TerminalRestore] failed to spawn '${t.name}' (non-fatal):`,
-          err
-        );
-      });
+      // cwd 는 명시적 핀일 때만 살아있다(terminalPersist v2). 핀이 없거나
+      // 그 경로가 사라졌으면 undefined 를 넘겨 createSession 이 **현재**
+      // rootPath 로 스폰하게 한다 — 죽은 워크트리 경로로 스폰하면 메인의
+      // notifyRootPathMissing 이 살아있는 창의 rootPath 까지 갈아치운다.
+      resolveRestoreCwd(t.cwd, window.electronAPI.fs.pathExists)
+        .then((cwd) => createSession(t.name, t.command, t.args, cwd))
+        .catch((err) => {
+          console.warn(
+            `[TerminalRestore] failed to spawn '${t.name}' (non-fatal):`,
+            err,
+          );
+        });
       restored++;
     }
     console.debug(
-      `[TerminalRestore] project=${projectId}: ${restored} respawned, ${skipped} already-present`
+      `[TerminalRestore] project=${projectId}: ${restored} respawned, ${skipped} already-present`,
     );
   }, [currentProject?.id, sessions, createSession]);
 }
