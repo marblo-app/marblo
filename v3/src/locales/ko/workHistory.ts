@@ -30,6 +30,8 @@ export const workHistory = {
   "workHistory.badge.report": "보고",
   "workHistory.noReport":
     '이 완료 태스크에는 구조화된 "✅ 완료 보고" 가 없습니다.',
+  "workHistory.reportNotLoaded":
+    "완료 보고는 최신 {count}건만 불러옵니다 — 기간·역할·검색으로 좁히면 이 항목도 포함됩니다.",
   "workHistory.openPr": "PR 열기",
   "workHistory.openTicket": "티켓 보기",
   "workHistory.diff.view": "diff 보기",
@@ -40,7 +42,7 @@ export const workHistory = {
   "workHistory.title": "작업내역",
   "workHistory.doneCount": "완료 {count}건",
   "workHistory.filteredCount": "{period} · {count}건 / 전체 완료 {total}건",
-  "workHistory.recentAggregate": "· 최근 {count}건 집계",
+  "workHistory.reportWindow": "· 완료 보고는 최신 {count}건만 로드",
 
   // — filter bar —
   "workHistory.filter.role": "역할",
@@ -61,6 +63,8 @@ export const workHistory = {
   // — share card —
   "workHistory.share.subtitle":
     "완료 {count}건 집계 · 테스트통과/리스크는 완료 보고 키워드 추정값",
+  "workHistory.share.subtitleWindowed":
+    "완료 {count}건 집계 · 테스트통과/리스크는 완료 보고를 읽은 {scanned}건 기준 키워드 추정값",
   "workHistory.share.copyTitle": "공유용 markdown 복사",
   "workHistory.share.copied": "복사됨 ✓",
   "workHistory.share.copy": "markdown 복사",

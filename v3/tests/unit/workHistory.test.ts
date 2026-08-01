@@ -139,6 +139,7 @@ describe("computeShareStats", () => {
       testsPassed: 0,
       riskFlags: 0,
       doneTasks: 0,
+      reportsScanned: 0,
     });
   });
 });
@@ -153,6 +154,7 @@ describe("buildShareMarkdown", () => {
         testsPassed: 12,
         riskFlags: 1,
         doneTasks: 5,
+        reportsScanned: 5,
       }),
     ).toBe(
       "Shipped with Marblo: 1 parallel agent · 37 files changed · 12 tests passed · 1 risky deps flagged",

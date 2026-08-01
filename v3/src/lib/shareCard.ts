@@ -26,6 +26,15 @@ export interface ShareStats {
   riskFlags: number;
   /** 집계 대상 완료 태스크 총수. */
   doneTasks: number;
+  /**
+   * 완료 보고를 **읽어본** 태스크 수(= reports 맵에 키가 있는 수).
+   *
+   * ★testsPassed/riskFlags 는 완료 보고에서만 나온다. 탭은 activities 리스너
+   * 폭발을 막으려고 최신 N건의 보고만 구독하므로, 집계 대상이 그보다 많으면 이
+   * 두 축의 분모는 `doneTasks` 가 아니라 이 값이다. 카드가 "N건 집계" 라고만
+   * 말하면 12/207 을 12/207 처럼 읽히게 만든다 — 분모를 같이 내보낸다.
+   */
+  reportsScanned: number;
 }
 
 /** 검증 필드에서 "테스트/빌드 통과" 신호로 보는 키워드. */
@@ -56,9 +65,15 @@ export function computeShareStats(
   let prs = 0;
   let testsPassed = 0;
   let riskFlags = 0;
+  let reportsScanned = 0;
 
   for (const task of doneTasks) {
     const report = reports[task.id] ?? null;
+    // 키 존재 여부로 "보고를 읽었는데 없더라"(값 null)와 "아직 안 읽었다"(키 부재)
+    // 를 가른다. 후자는 heuristic 축의 분모에서 빠져야 한다.
+    if (Object.prototype.hasOwnProperty.call(reports, task.id)) {
+      reportsScanned += 1;
+    }
 
     if (task.claimedBy) agentIds.add(task.claimedBy);
 
@@ -88,6 +103,7 @@ export function computeShareStats(
     testsPassed,
     riskFlags,
     doneTasks: doneTasks.length,
+    reportsScanned,
   };
 }
 

@@ -49,7 +49,15 @@ export function ShareCard({ stats }: ShareCardProps) {
             Shipped with Marblo
           </h2>
           <p className="mt-0.5 text-[11px] text-gray-500">
-            {t("workHistory.share.subtitle", { count: stats.doneTasks })}
+            {/* tests/riskFlags 는 완료 보고에서만 나오는데, 보고는 최신 N건만
+                구독한다. 분모가 다르면 그 사실을 부제에 밝힌다 — 안 밝히면
+                "207건 중 12 tests" 가 "207건 전수 검사" 로 읽힌다. */}
+            {stats.reportsScanned < stats.doneTasks
+              ? t("workHistory.share.subtitleWindowed", {
+                  count: stats.doneTasks,
+                  scanned: stats.reportsScanned,
+                })
+              : t("workHistory.share.subtitle", { count: stats.doneTasks })}
           </p>
         </div>
         <button

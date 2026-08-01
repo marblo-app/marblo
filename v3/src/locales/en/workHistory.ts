@@ -22,6 +22,8 @@ export const workHistory: Record<keyof typeof koWorkHistory, string> = {
   "workHistory.badge.report": "Report",
   "workHistory.noReport":
     'This completed task has no structured "✅ Completion report".',
+  "workHistory.reportNotLoaded":
+    "Completion reports are loaded for the {count} most recent tasks only — narrow by period, role, or search to include this one.",
   "workHistory.openPr": "Open PR",
   "workHistory.openTicket": "View ticket",
   "workHistory.diff.view": "View diff",
@@ -32,7 +34,8 @@ export const workHistory: Record<keyof typeof koWorkHistory, string> = {
   "workHistory.title": "Work History",
   "workHistory.doneCount": "{count} completed",
   "workHistory.filteredCount": "{period} · {count} of {total} completed",
-  "workHistory.recentAggregate": "· latest {count} aggregated",
+  "workHistory.reportWindow":
+    "· completion reports loaded for the latest {count}",
 
   // — filter bar —
   "workHistory.filter.role": "Role",
@@ -52,6 +55,8 @@ export const workHistory: Record<keyof typeof koWorkHistory, string> = {
   // — share card —
   "workHistory.share.subtitle":
     "{count} completed · tests-passed/risk are estimates from completion-report keywords",
+  "workHistory.share.subtitleWindowed":
+    "{count} completed · tests-passed/risk are keyword estimates over the {scanned} tasks whose reports were loaded",
   "workHistory.share.copyTitle": "Copy share markdown",
   "workHistory.share.copied": "Copied ✓",
   "workHistory.share.copy": "Copy markdown",

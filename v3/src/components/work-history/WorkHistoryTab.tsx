@@ -26,6 +26,14 @@ import { WorkHistoryFilterBar } from "./WorkHistoryFilterBar";
 
 // 완료 보고를 추적할 최근 완료 태스크 상한. task 당 Firestore activities 리스너가
 // 하나씩 생기므로, 무한정 구독하지 않도록 최신순으로 잘라 둔다.
+//
+// ★이건 **리스너 상한이지 렌더/집계 상한이 아니다.** 예전엔 이 슬라이스 결과를
+// 리스트와 공유카드에도 그대로 먹였는데, 그러면 기간 필터가 화면에서 사라진다:
+// 컷오프는 **오래된 쪽만** 잘라내므로 어떤 기간이든 50건 이상 남아 있으면 "최신
+// 50건" 이 전부 같은 50건이 된다. 라이브 실측(이 프로젝트 DONE 938건): 7일 164 /
+// 30일 588 / 전체 938 — 셋 다 50을 넘어 **세 기간의 리스트와 Shipped 카드가 완전히
+// 동일**했다. 그래서 리스트와 집계는 필터 결과 **전체**에 걸고, 이 상한은
+// activities 구독에만 남긴다.
 const MAX_TRACKED = 50;
 
 function relativeTime(date: Date): string {
@@ -57,11 +65,14 @@ function ProvenanceField({ label, value }: { label: string; value?: string }) {
 function WorkHistoryRow({
   task,
   report,
+  reportTracked,
   mergeEntry,
   commitRepoRoot,
 }: {
   task: Task;
   report: ParsedCompletionReport | null;
+  /** 이 태스크의 activities 를 구독했는가(= report 가 null 이면 "정말 없음"). */
+  reportTracked: boolean;
   mergeEntry: MergeHistoryEntry | null;
   commitRepoRoot?: string;
 }) {
@@ -156,8 +167,12 @@ function WorkHistoryRow({
                 />
               </>
             ) : (
+              // "보고가 없다" 와 "보고를 아직 안 읽었다" 는 다른 상태다 —
+              // 리스너 창(MAX_TRACKED) 밖의 행에서 전자를 말하면 거짓말이 된다.
               <p className="text-xs text-gray-500">
-                {t("workHistory.noReport")}
+                {reportTracked
+                  ? t("workHistory.noReport")
+                  : t("workHistory.reportNotLoaded", { count: MAX_TRACKED })}
               </p>
             )}
 
@@ -265,6 +280,8 @@ export function WorkHistoryTab() {
     [trackedTasks],
   );
 
+  const trackedIdSet = useMemo(() => new Set(trackedIds), [trackedIds]);
+
   const activitiesMap = useTaskActivities(trackedIds);
 
   // 추적 태스크별 최신 "✅ 완료 보고" 를 파싱.
@@ -313,14 +330,20 @@ export function WorkHistoryTab() {
     return () => unsub();
   }, [currentProject?.id]);
 
-  // 공유카드는 **현재 보이는 집합**(필터+슬라이스)을 집계한다 — 화면의 리스트와
-  // 카드 수치가 어긋나지 않게.
+  // 공유카드는 **필터 결과 전체**를 집계한다 — 리스너 창(최신 50건)으로 좁히면
+  // 기간을 바꿔도 수치가 안 움직인다(파일 상단 MAX_TRACKED 주석). 리스트도 같은
+  // 집합을 그리므로 카드와 화면은 여전히 일치한다. 보고 기반 축
+  // (tests/riskFlags)만 분모가 다르고, 그건 stats.reportsScanned 로 카드가 밝힌다.
   const shareStats = useMemo(
-    () => computeShareStats(trackedTasks, reports),
-    [trackedTasks, reports],
+    () => computeShareStats(doneTasks, reports),
+    [doneTasks, reports],
   );
 
   const filterOn = isFilterActive(filter);
+  // ★카운트는 "필터가 기본값과 다른가" 가 아니라 "실제로 잘렸는가" 로 가른다.
+  // 기본값이 30일이라 전자로 가르면 30일 컷을 걸어 놓고 전체 건수를 표시하게 되고
+  // (=거짓말), "전체" 로 바꿔도 숫자가 그대로라 기간 선택기가 죽은 것처럼 보인다.
+  const countTrimmed = doneTasks.length !== doneTotal;
 
   if (!currentProject) {
     return (
@@ -342,7 +365,7 @@ export function WorkHistoryTab() {
         <span className="text-xs text-gray-500">
           {/* 필터가 걸려 있으면 "필터 N / 전체 M" 로 분모를 같이 보여준다 —
               숫자 하나만 바뀌면 완료 이력이 사라진 것처럼 읽힌다. */}
-          {filterOn
+          {countTrimmed
             ? t("workHistory.filteredCount", {
                 count: doneTasks.length,
                 total: doneTotal,
@@ -350,7 +373,7 @@ export function WorkHistoryTab() {
               })
             : t("workHistory.doneCount", { count: doneTotal })}
           {doneTasks.length > MAX_TRACKED &&
-            ` ${t("workHistory.recentAggregate", { count: MAX_TRACKED })}`}
+            ` ${t("workHistory.reportWindow", { count: MAX_TRACKED })}`}
         </span>
       </div>
 
@@ -390,11 +413,15 @@ export function WorkHistoryTab() {
         </div>
       ) : (
         <div className="space-y-1.5">
-          {trackedTasks.map((task) => (
+          {/* 필터 결과 전체를 그린다(리스너 창으로 자르지 않는다) — 그래야 기간을
+              좁힌 게 화면에 남는다. 행 자체는 접힌 상태에서 버튼 하나라 가볍고,
+              무거운 쪽(activities 구독)은 여전히 MAX_TRACKED 로 묶여 있다. */}
+          {doneTasks.map((task) => (
             <WorkHistoryRow
               key={task.id}
               task={task}
               report={reports[task.id] ?? null}
+              reportTracked={trackedIdSet.has(task.id)}
               mergeEntry={mergeByTask[task.id] ?? null}
               commitRepoRoot={currentProject.folderPath}
             />
