@@ -1050,5 +1050,38 @@
     },
     "app_hint": "You can also view your subscription status from the account menu in the desktop app.",
     "back_to_account": "Back to account"
+  },
+  "replay": {
+    "notFoundTitle": "Replay not found",
+    "untitled": "Untitled mission",
+    "redactedBadge": "Redacted public copy",
+    "level": {
+      "L1": "L1 · Process only",
+      "L2": "L2 · Partial",
+      "L3": "L3 · Full"
+    },
+    "duration": "Took {duration}",
+    "completedAt": "Completed {at}",
+    "castTitle": "Agent cast",
+    "unknownAgent": "Anonymous agent",
+    "tasksCompleted": "{count} tasks completed",
+    "timelineTitle": "Timeline",
+    "beatsOmitted": "{count} further entries are not shown.",
+    "prTitle": "Pull requests",
+    "creditedTo": "Credited to",
+    "privacyNote": "This page is a public copy that the Marblo app redacted on the author's machine. Secrets, local paths, and personal data are removed at every visibility level. If the author unpublishes it, copies may still remain in external caches and social previews.",
+    "cta": "Explore Marblo",
+    "ogDescription": "A mission replay: {agents} agents completed {tasks} tasks.",
+    "stats": {
+      "tasksDone": "Tasks done",
+      "agents": "Agents",
+      "prs": "PRs",
+      "filesChanged": "Files changed",
+      "lines": "Lines changed",
+      "testsPassed": "Reports with tests passing",
+      "riskFlags": "Risk flags",
+      "retries": "Retries",
+      "costTotal": "Cost"
+    }
   }
 }

@@ -1050,5 +1050,38 @@
     },
     "app_hint": "デスクトップアプリのアカウントメニューからもサブスクリプション状況を確認できます。",
     "back_to_account": "アカウントに戻る"
+  },
+  "replay": {
+    "notFoundTitle": "リプレイが見つかりません",
+    "untitled": "無題のミッション",
+    "redactedBadge": "匿名化された公開版",
+    "level": {
+      "L1": "L1 · 過程のみ",
+      "L2": "L2 · 一部公開",
+      "L3": "L3 · 全体公開"
+    },
+    "duration": "所要 {duration}",
+    "completedAt": "完了 {at}",
+    "castTitle": "エージェント一覧",
+    "unknownAgent": "匿名エージェント",
+    "tasksCompleted": "{count}件のタスクを完了",
+    "timelineTitle": "タイムライン",
+    "beatsOmitted": "以降の{count}件は表示していません。",
+    "prTitle": "プルリクエスト",
+    "creditedTo": "作成者",
+    "privacyNote": "このページは、Marbloアプリが作成者の端末で匿名化した公開版です。シークレット・ローカルパス・個人情報は公開レベルに関わらず削除されます。公開を取り消しても、外部キャッシュやSNSプレビューには複製が残ることがあります。",
+    "cta": "Marbloを見る",
+    "ogDescription": "ミッションリプレイ：{agents}体のエージェントが{tasks}件のタスクを完了。",
+    "stats": {
+      "tasksDone": "完了タスク",
+      "agents": "エージェント",
+      "prs": "PR",
+      "filesChanged": "変更ファイル",
+      "lines": "変更行数",
+      "testsPassed": "テスト通過レポート",
+      "riskFlags": "リスクフラグ",
+      "retries": "リトライ",
+      "costTotal": "コスト"
+    }
   }
 }
