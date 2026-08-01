@@ -35,6 +35,25 @@ export function canViewWorkload(
   return ROLE_PERMISSIONS[role]?.includes("manage_members") ?? false;
 }
 
+/**
+ * 감사 로그(구성원의 앱 내 행위 기록)를 볼 수 있는가.
+ *
+ * 작업량과 **같은 게이트**를 그대로 쓴다 — firestore.rules 가 projectAuditLog
+ * read 를 isAdminOrOwner 로 잠가 두었고(services/projectAuditService), 그건
+ * 작업량 게이트(canViewWorkload)가 파생하는 manage_members 와 같은 판정이다.
+ * 별도 목록을 만들면 룰과 UI 가 조용히 갈라진다. 이름을 따로 두는 이유는
+ * 호출부에서 "작업량 권한으로 감사를 열었다"로 읽히지 않게 하기 위함이고,
+ * 나중에 두 게이트가 갈라져야 하면 여기 한 줄만 바꾸면 된다.
+ *
+ * ★UI 게이트는 1차 필터일 뿐 최종 권한이 아니다. 룰이 최종이라 화면 쪽에서도
+ * permission-denied 를 반드시 처리해야 한다(ProjectAuditPanel).
+ */
+export function canViewAuditLog(
+  role: InvitationRole | null | undefined,
+): boolean {
+  return canViewWorkload(role);
+}
+
 /** 이 role 의 사용자가 다른 멤버에게 부여할 수 있는 role 목록. */
 export function assignableRolesFor(
   currentRole: InvitationRole,

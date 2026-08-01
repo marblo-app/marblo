@@ -4,10 +4,11 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useAuth } from "../../hooks/useAuth";
 import { useTeam } from "../../hooks/useTeam";
 import { useTranslation } from "../../lib/i18n";
-import { canViewWorkload } from "../../lib/teamRoles";
+import { canViewAuditLog, canViewWorkload } from "../../lib/teamRoles";
 import { TeamManagement } from "../settings/TeamManagement";
 import { PlanGate } from "../settings/PlanGate";
 import { MemberWorkloadPanel } from "./MemberWorkloadPanel";
+import { ProjectAuditPanel } from "./ProjectAuditPanel";
 
 /**
  * 프로젝트 탭 — 이 프로젝트의 **사람** 쪽 전부를 한 화면에 모은다: 누가 있고
@@ -85,6 +86,7 @@ export function ProjectTab() {
   }
 
   const showWorkload = canViewWorkload(currentRole);
+  const showAudit = canViewAuditLog(currentRole);
 
   return (
     <div className="h-full overflow-auto p-4">
@@ -116,13 +118,26 @@ export function ProjectTab() {
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
           </div>
         ) : (
-          showWorkload && (
-            <MemberWorkloadPanel
-              projectId={projectId}
-              members={workloadMembers}
-              memberRoles={workloadRoles}
-            />
-          )
+          <>
+            {showWorkload && (
+              <MemberWorkloadPanel
+                projectId={projectId}
+                members={workloadMembers}
+                memberRoles={workloadRoles}
+              />
+            )}
+
+            {/* 감사 로그 — 작업량(결과) 바로 아래에 행위를 둔다. 둘을 나란히
+                보면 구성원별로 "얼마나 지고 있나 + 실제로 무엇을 했나"가
+                한 화면에서 맞물린다. 게이트는 작업량과 같은 owner/admin 이고,
+                룰이 최종 권한이라 패널이 permission-denied 도 스스로 처리한다. */}
+            {showAudit && (
+              <ProjectAuditPanel
+                projectId={projectId}
+                members={workloadMembers}
+              />
+            )}
+          </>
         )}
 
         {/* 멤버 · 역할 · 초대 — Settings → Team 과 같은 컴포넌트를 공유한다. */}

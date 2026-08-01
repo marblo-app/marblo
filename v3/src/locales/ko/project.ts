@@ -34,6 +34,28 @@ export const project = {
   "project.workload.unattributedHint":
     "선점자가 없거나, 이미 나간 멤버의 에이전트이거나, 에이전트 이름이 겹쳐 소유자를 특정할 수 없는 항목입니다.",
 
+  // Audit log (사람 행위 — owner/admin 전용)
+  "project.audit.heading": "감사 로그",
+  "project.audit.sourceNote": "구성원의 앱 내 행위 기준 · 최신순",
+  "project.audit.filterActor": "구성원 필터",
+  "project.audit.filterActorAll": "전체 구성원",
+  "project.audit.filterType": "종류 필터",
+  "project.audit.filterTypeAll": "전체 종류",
+  "project.audit.count": "{count}건",
+  "project.audit.emptyTitle": "기록 없음",
+  "project.audit.emptyDesc":
+    "채팅을 보내거나 티켓 상태를 바꾸거나 에이전트를 띄우면 여기에 남습니다.",
+  "project.audit.denied": "감사 로그를 볼 권한이 없습니다",
+  "project.audit.deniedDesc":
+    "구성원 행위 기록은 소유자·관리자만 볼 수 있습니다.",
+  "project.audit.error": "감사 로그를 불러오지 못했습니다",
+  "project.audit.retry": "다시 시도",
+  "project.audit.type.chatMessageSent": "채팅 전송",
+  "project.audit.type.agentSpawned": "에이전트 스폰",
+  "project.audit.type.taskClaimed": "티켓 선점",
+  "project.audit.type.taskStatusChanged": "상태 변경",
+  "project.audit.type.unknown": "알 수 없음",
+
   // Presence
   "project.presence.online": "온라인",
   "project.presence.idle": "자리비움",

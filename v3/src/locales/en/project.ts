@@ -36,6 +36,28 @@ export const project: Record<keyof typeof koProject, string> = {
   "project.workload.unattributedHint":
     "Items with no claimant, owned by an agent whose member has left, or whose owner can't be determined because agent names collide.",
 
+  // Audit log (human actions — owner/admin only)
+  "project.audit.heading": "Audit log",
+  "project.audit.sourceNote": "In-app member actions, newest first",
+  "project.audit.filterActor": "Filter by member",
+  "project.audit.filterActorAll": "All members",
+  "project.audit.filterType": "Filter by type",
+  "project.audit.filterTypeAll": "All types",
+  "project.audit.count": "{count} events",
+  "project.audit.emptyTitle": "No activity recorded",
+  "project.audit.emptyDesc":
+    "Sending chat, changing a ticket's status, or spawning an agent shows up here.",
+  "project.audit.denied": "You can't view the audit log",
+  "project.audit.deniedDesc":
+    "Member action records are visible to owners and admins only.",
+  "project.audit.error": "Couldn't load the audit log",
+  "project.audit.retry": "Retry",
+  "project.audit.type.chatMessageSent": "Chat sent",
+  "project.audit.type.agentSpawned": "Agent spawned",
+  "project.audit.type.taskClaimed": "Ticket claimed",
+  "project.audit.type.taskStatusChanged": "Status changed",
+  "project.audit.type.unknown": "Unknown",
+
   // Presence
   "project.presence.online": "Online",
   "project.presence.idle": "Idle",
