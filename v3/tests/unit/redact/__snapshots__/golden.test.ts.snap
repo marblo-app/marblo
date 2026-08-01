@@ -1,0 +1,353 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`golden snapshots — 1 mission × 3 levels > level L1 1`] = `
+{
+  "findings": [
+    {
+      "action": "RELATIVIZE",
+      "path": "startedAt",
+      "rule": "R15",
+    },
+    {
+      "action": "RELATIVIZE",
+      "path": "endedAt",
+      "rule": "R15",
+    },
+    {
+      "action": "DROP",
+      "path": "costTotal",
+      "rule": "R14",
+    },
+    {
+      "action": "ANON",
+      "path": "actorName",
+      "rule": "R2b",
+    },
+    {
+      "action": "DROP",
+      "path": "repoUrl",
+      "rule": "R11",
+    },
+    {
+      "action": "DROP",
+      "path": "branch",
+      "rule": "R11",
+    },
+    {
+      "action": "ANON",
+      "path": "tasks[0].id",
+      "rule": "R16",
+    },
+    {
+      "action": "ANON",
+      "path": "tasks[0].title",
+      "rule": "R16",
+    },
+    {
+      "action": "ANON",
+      "path": "tasks[0].agentId",
+      "rule": "R2c",
+    },
+    {
+      "action": "RELATIVIZE",
+      "path": "tasks[0].startedAt",
+      "rule": "R15",
+    },
+    {
+      "action": "DROP",
+      "path": "tasks[0].scope",
+      "rule": "R13",
+    },
+    {
+      "action": "DROP",
+      "path": "tasks[0].prUrl",
+      "rule": "R11",
+    },
+    {
+      "action": "ANON",
+      "path": "tasks[1].id",
+      "rule": "R16",
+    },
+    {
+      "action": "ANON",
+      "path": "tasks[1].agentId",
+      "rule": "R2c",
+    },
+    {
+      "action": "RELATIVIZE",
+      "path": "tasks[1].startedAt",
+      "rule": "R15",
+    },
+    {
+      "action": "DROP",
+      "path": "tasks[1].scope",
+      "rule": "R13",
+    },
+  ],
+  "payload": {
+    "actorName": "member-1",
+    "endedAt": "+04:00",
+    "goal": "Ship the replay redaction engine safely",
+    "startedAt": "+00:00",
+    "stats": {
+      "fileCount": 7,
+      "lineCount": 1450,
+      "stepCount": 5,
+    },
+    "status": "DONE",
+    "tasks": [
+      {
+        "agentId": "agent-1",
+        "durationMs": 5400000,
+        "id": "T-1",
+        "model": "claude-fable-5",
+        "startedAt": "+00:30",
+        "status": "REVIEW",
+        "summary": {
+          "approach": "Two independent scan passes with default-deny",
+          "problem": "Secrets could leak into shared replays",
+          "verification": "tsc and vitest green, corpus suite passes",
+        },
+        "title": "Implement redaction core T-2",
+        "vendor": "claude",
+      },
+      {
+        "agentId": "agent-2",
+        "durationMs": 1800000,
+        "id": "T-3",
+        "model": "gpt-5.5",
+        "startedAt": "+01:30",
+        "status": "DONE",
+        "summary": {
+          "approach": "Adversarial review of rule ordering",
+          "problem": "Cross-check for missed bypass vectors",
+          "verification": "No additional bypass found",
+        },
+        "title": "Review pass by second agent",
+        "vendor": "gpt",
+      },
+    ],
+    "template": "feature-dev",
+  },
+}
+`;
+
+exports[`golden snapshots — 1 mission × 3 levels > level L2 1`] = `
+{
+  "findings": [
+    {
+      "action": "RELATIVIZE",
+      "path": "startedAt",
+      "rule": "R15",
+    },
+    {
+      "action": "RELATIVIZE",
+      "path": "endedAt",
+      "rule": "R15",
+    },
+    {
+      "action": "DROP",
+      "path": "costTotal",
+      "rule": "R14",
+    },
+    {
+      "action": "ANON",
+      "path": "actorName",
+      "rule": "R2b",
+    },
+    {
+      "action": "DROP",
+      "path": "branch",
+      "rule": "R11",
+    },
+    {
+      "action": "ANON",
+      "path": "tasks[0].id",
+      "rule": "R16",
+    },
+    {
+      "action": "ANON",
+      "path": "tasks[0].agentId",
+      "rule": "R2c",
+    },
+    {
+      "action": "RELATIVIZE",
+      "path": "tasks[0].startedAt",
+      "rule": "R15",
+    },
+    {
+      "action": "DROP",
+      "path": "tasks[0].prUrl",
+      "rule": "R11",
+    },
+    {
+      "action": "ANON",
+      "path": "tasks[1].id",
+      "rule": "R16",
+    },
+    {
+      "action": "ANON",
+      "path": "tasks[1].agentId",
+      "rule": "R2c",
+    },
+    {
+      "action": "RELATIVIZE",
+      "path": "tasks[1].startedAt",
+      "rule": "R15",
+    },
+  ],
+  "payload": {
+    "actorName": "member-1",
+    "endedAt": "+04:00",
+    "goal": "Ship the replay redaction engine safely",
+    "repoUrl": "https://github.com/marblo-app/marblo",
+    "startedAt": "+00:00",
+    "stats": {
+      "fileCount": 7,
+      "lineCount": 1450,
+      "stepCount": 5,
+    },
+    "status": "DONE",
+    "tasks": [
+      {
+        "agentId": "agent-1",
+        "durationMs": 5400000,
+        "id": "T-1",
+        "model": "claude-fable-5",
+        "scope": [
+          "src/lib/redact/redact.ts",
+          "src/types/redact.ts",
+        ],
+        "startedAt": "+00:30",
+        "status": "REVIEW",
+        "summary": {
+          "approach": "Two independent scan passes with default-deny",
+          "problem": "Secrets could leak into shared replays",
+          "verification": "tsc and vitest green, corpus suite passes",
+        },
+        "title": "Implement redaction core #731",
+        "vendor": "claude",
+      },
+      {
+        "agentId": "agent-2",
+        "durationMs": 1800000,
+        "id": "T-2",
+        "model": "gpt-5.5",
+        "scope": [
+          "tests/unit/redact",
+        ],
+        "startedAt": "+01:30",
+        "status": "DONE",
+        "summary": {
+          "approach": "Adversarial review of rule ordering",
+          "problem": "Cross-check for missed bypass vectors",
+          "verification": "No additional bypass found",
+        },
+        "title": "Review pass by second agent",
+        "vendor": "gpt",
+      },
+    ],
+    "template": "feature-dev",
+  },
+}
+`;
+
+exports[`golden snapshots — 1 mission × 3 levels > level L3 1`] = `
+{
+  "findings": [
+    {
+      "action": "DROP",
+      "path": "costTotal",
+      "rule": "R14",
+    },
+    {
+      "action": "ANON",
+      "path": "actorName",
+      "rule": "R2b",
+    },
+    {
+      "action": "DROP",
+      "path": "branch",
+      "rule": "R11",
+    },
+    {
+      "action": "ANON",
+      "path": "tasks[0].id",
+      "rule": "R16",
+    },
+    {
+      "action": "ANON",
+      "path": "tasks[0].agentId",
+      "rule": "R2c",
+    },
+    {
+      "action": "DROP",
+      "path": "tasks[0].prUrl",
+      "rule": "R11",
+    },
+    {
+      "action": "ANON",
+      "path": "tasks[1].id",
+      "rule": "R16",
+    },
+    {
+      "action": "ANON",
+      "path": "tasks[1].agentId",
+      "rule": "R2c",
+    },
+  ],
+  "payload": {
+    "actorName": "member-1",
+    "endedAt": 1753939200000,
+    "goal": "Ship the replay redaction engine safely",
+    "repoUrl": "https://github.com/marblo-app/marblo",
+    "startedAt": 1753924800000,
+    "stats": {
+      "fileCount": 7,
+      "lineCount": 1450,
+      "stepCount": 5,
+    },
+    "status": "DONE",
+    "tasks": [
+      {
+        "agentId": "agent-1",
+        "durationMs": 5400000,
+        "id": "T-1",
+        "model": "claude-fable-5",
+        "scope": [
+          "src/lib/redact/redact.ts",
+          "src/types/redact.ts",
+        ],
+        "startedAt": 1753926600000,
+        "status": "REVIEW",
+        "summary": {
+          "approach": "Two independent scan passes with default-deny",
+          "problem": "Secrets could leak into shared replays",
+          "verification": "tsc and vitest green, corpus suite passes",
+        },
+        "title": "Implement redaction core #731",
+        "vendor": "claude",
+      },
+      {
+        "agentId": "agent-2",
+        "durationMs": 1800000,
+        "id": "T-2",
+        "model": "gpt-5.5",
+        "scope": [
+          "tests/unit/redact",
+        ],
+        "startedAt": 1753930200000,
+        "status": "DONE",
+        "summary": {
+          "approach": "Adversarial review of rule ordering",
+          "problem": "Cross-check for missed bypass vectors",
+          "verification": "No additional bypass found",
+        },
+        "title": "Review pass by second agent",
+        "vendor": "gpt",
+      },
+    ],
+    "template": "feature-dev",
+  },
+}
+`;
