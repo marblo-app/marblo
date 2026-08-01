@@ -245,6 +245,28 @@ beforeEach(async () => {
       updatedAt: new Date(),
     });
 
+    // projectAuditLog: 사람 행위 감사(owner/admin 전용 read)
+    await setDoc(doc(db, "projectAuditLog", "paudit-ours"), {
+      projectId: PROJECT_ID,
+      actorUid: MEMBER_ID,
+      actorName: "Member",
+      type: "chat.message.sent",
+      taskId: null,
+      targetId: "msg-1",
+      metadata: { messageType: "user", contentLength: 12 },
+      createdAt: new Date(),
+    });
+    await setDoc(doc(db, "projectAuditLog", "paudit-other-tenant"), {
+      projectId: OTHER_PROJECT_ID,
+      actorUid: OUTSIDER_ID,
+      actorName: "Outsider",
+      type: "chat.message.sent",
+      taskId: null,
+      targetId: "msg-x",
+      metadata: { messageType: "user", contentLength: 5 },
+      createdAt: new Date(),
+    });
+
     // audit_logs: 우리 프로젝트 정상 레코드 / 타 테넌트 레코드 / projectId="" 유실 마커
     await setDoc(doc(db, "audit_logs", "audit-ours"), {
       projectId: PROJECT_ID,
@@ -1727,6 +1749,122 @@ describe("audit_logs — L2 read 스코프", () => {
   it("미인증 사용자는 감사로그를 읽을 수 없다", async () => {
     const db = unauthContext().firestore();
     await assertFails(getDoc(doc(db, "audit_logs", "audit-ours")));
+  });
+});
+
+describe("projectAuditLog — owner/admin 전용 감사 조회", () => {
+  it("owner 는 자기 프로젝트 감사로그를 읽을 수 있다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "projectAuditLog", "paudit-ours")));
+  });
+
+  it("admin 은 자기 프로젝트 감사로그를 읽을 수 있다", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "projectAuditLog", "paudit-ours")));
+  });
+
+  it("★일반 멤버는 감사로그를 읽을 수 없다 (이 티켓의 핵심 게이트)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "projectAuditLog", "paudit-ours")));
+  });
+
+  it("★자기 자신이 행위자인 레코드라도 일반 멤버는 못 읽는다", async () => {
+    // paudit-ours 의 actorUid 는 MEMBER_ID 다. "내 기록이니까 볼 수 있다"는
+    // 예외를 두지 않는다 — 감사 대상이 감사 범위를 스스로 확인할 수 있으면
+    // 무엇이 기록되는지 보고 회피 행동을 맞출 수 있다.
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "projectAuditLog", "paudit-ours")));
+  });
+
+  it("★owner 라도 타 테넌트 감사로그는 읽을 수 없다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      getDoc(doc(db, "projectAuditLog", "paudit-other-tenant")),
+    );
+  });
+
+  it("외부인은 읽을 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "projectAuditLog", "paudit-ours")));
+  });
+
+  it("미인증 사용자는 읽을 수 없다", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(getDoc(doc(db, "projectAuditLog", "paudit-ours")));
+  });
+
+  it("플랫폼 admin 이라고 백도어로 읽히지 않는다", async () => {
+    // isAdminOrOwner 는 프로젝트 역할이지 플랫폼 역할이 아니다.
+    const db = adminContext().firestore();
+    await assertFails(getDoc(doc(db, "projectAuditLog", "paudit-ours")));
+  });
+
+  it("멤버는 자기 행위를 기록할 수 있다 (read 는 못 해도 write 는 됨)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      addDoc(collection(db, "projectAuditLog"), {
+        projectId: PROJECT_ID,
+        actorUid: MEMBER_ID,
+        actorName: "Member",
+        type: "task.claimed",
+        taskId: "task-1",
+        targetId: "agent-1",
+        metadata: { from: "TODO", to: "CLAIMED" },
+        createdAt: new Date(),
+      }),
+    );
+  });
+
+  it("★남을 사칭한 기록은 거부된다 (actorUid != auth.uid)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      addDoc(collection(db, "projectAuditLog"), {
+        projectId: PROJECT_ID,
+        actorUid: OWNER_ID, // 사칭
+        actorName: "Owner",
+        type: "task.claimed",
+        taskId: "task-1",
+        targetId: "agent-1",
+        metadata: {},
+        createdAt: new Date(),
+      }),
+    );
+  });
+
+  it("★비멤버는 타 프로젝트에 감사기록을 주입할 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      addDoc(collection(db, "projectAuditLog"), {
+        projectId: PROJECT_ID,
+        actorUid: OUTSIDER_ID,
+        actorName: "Outsider",
+        type: "chat.message.sent",
+        taskId: null,
+        targetId: "msg-forged",
+        metadata: {},
+        createdAt: new Date(),
+      }),
+    );
+  });
+
+  it("★append-only — owner 도 감사기록을 수정할 수 없다", async () => {
+    // 사후 수정이 가능하면 감사가 아니다. owner 예외를 두지 않는다.
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projectAuditLog", "paudit-ours"), {
+        type: "task.claimed",
+      }),
+    );
+  });
+
+  it("★append-only — owner 도 감사기록을 삭제할 수 없다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(deleteDoc(doc(db, "projectAuditLog", "paudit-ours")));
+  });
+
+  it("★행위자 본인도 자기 기록을 지울 수 없다 (증거인멸 방지)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(deleteDoc(doc(db, "projectAuditLog", "paudit-ours")));
   });
 });
 

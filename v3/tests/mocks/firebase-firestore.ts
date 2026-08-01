@@ -173,6 +173,13 @@ export function orderBy(_field: string, _direction?: string) {
   return { type: "orderBy" };
 }
 
+// 제약을 값으로 되돌려준다 — 서버 사이드 필터/정렬/limit 이 실제로 쿼리에 실렸는지
+// 검사하는 테스트(projectAuditService)가 이 모양에 의존한다. 없으면 `limit(...)`
+// 이 undefined 호출이 되어 TypeError 로 죽는다.
+export function limit(count: number) {
+  return { type: "limit", count };
+}
+
 export function onSnapshot(
   _query: unknown,
   _callback: (snap: unknown) => void,

@@ -334,6 +334,37 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ===== Project Audit Log (협업 구성원 행위 감사) =====
+    // 렌더러(사람)발 행위를 projectId + actorUid 로 귀속 기록한다
+    // (src/services/projectAuditService.ts). `audit_logs` 원장과 **다른
+    // 컬렉션인 이유는 접근등급이 다르기 때문**이다:
+    //   - audit_logs      = MCP 툴 호출(AI 행위). read = 프로젝트 멤버 전원
+    //                       (canReadLedgerDoc) — ActivityStreamPanel 이 소비.
+    //   - projectAuditLog = 사람 행위 감사. read = **owner/admin 전용.**
+    // 하나로 합치면 둘 중 하나가 반드시 깨진다: audit_logs 를 admin 전용으로
+    // 조이면 일반 멤버의 액티비티 스트림이 죽고, 반대로 이 컬렉션을 멤버 read 로
+    // 열면 "관리자만 감사 조회" 요구가 깨진다. 한 컬렉션을 필드별로 다른 등급으로
+    // 게이팅하는 것도 불가 — Firestore 는 쿼리 결과의 모든 문서가 통과해야
+    // 쿼리를 허용하므로 클라이언트 제약이 룰 분기와 어긋나는 순간 쿼리 전체가
+    // permission-denied 로 죽는다(#406/#428 에서 겪은 실패 모드).
+    //
+    // read: isAdminOrOwner 재사용(owner 또는 memberRoles 의 admin).
+    // create: 멤버 누구나 **자기 행위만** 기록할 수 있다. 감사 대상이 곧 writer
+    //   라는 구조상 불가피한 부분 — 그래서 actorUid == request.auth.uid 로
+    //   사칭을 막는다(남의 이름으로 기록 불가). 기록을 **생략**하는 것까지는
+    //   클라이언트 캡처로 막을 수 없다(서비스 파일 상단 "신뢰 경계" 주석 참조).
+    // update/delete: 금지 — append-only. 감사 로그를 사후에 고칠 수 있으면
+    //   감사가 아니다. owner/admin 도 예외 없다.
+    match /projectAuditLog/{eventId} {
+      allow read: if isAuthenticated()
+        && isAdminOrOwner(resource.data.projectId);
+      allow create: if isAuthenticated()
+        && isProjectMember(request.resource.data.projectId)
+        && request.resource.data.actorUid == request.auth.uid;
+      allow update: if false;
+      allow delete: if false;
+    }
+
     // ===== Merge History (worktree audit trail) =====
     // Append-only record of completed (squash-merged) worktrees. Written by the
     // Electron main process at the merge chokepoint; read by the cockpit's

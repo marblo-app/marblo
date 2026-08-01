@@ -16,6 +16,8 @@ import {
   observeTaskSnapshot,
   resetTaskOutcomeObserver,
 } from "./taskOutcomeReporter";
+import { recordProjectAuditEvent } from "./projectAuditService";
+import { taskStatusAuditMetadata } from "../lib/projectAudit";
 
 const COLLECTION = "tasks";
 const DATE_FIELDS = [
@@ -213,6 +215,13 @@ export async function claimTask(
   });
 
   telemetry.taskStatusChanged(taskId, previousStatus, "CLAIMED", agentId);
+  recordProjectAuditEvent({
+    projectId: task.projectId,
+    type: "task.claimed",
+    taskId,
+    targetId: agentId,
+    metadata: taskStatusAuditMetadata(previousStatus, "CLAIMED"),
+  });
 }
 
 /**
@@ -265,6 +274,19 @@ export async function updateTaskStatus(
       : undefined;
     telemetry.taskCompleted(taskId, durationMs, task.claimedBy ?? undefined);
   }
+
+  // 사람이 UI 로 옮긴 티켓의 감사 귀속. 이 함수는 **렌더러 경로 전용**이다 —
+  // 에이전트는 MCP 서버로 상태를 바꾸고 그쪽은 Firestore 를 직접 write 하므로
+  // 여기 오지 않는다(바로 아래 task_outcomes 노트가 설명하는 것과 같은 구조).
+  // 그래서 여기서 잡는 것은 정확히 "사람이 한 이동"이고, 에이전트가 한 이동은
+  // `audit_logs` 원장이 이미 actorUid 와 함께 잡는다 — 중복 기록이 아니다.
+  recordProjectAuditEvent({
+    projectId: task.projectId,
+    type: "task.status_changed",
+    taskId,
+    targetId: taskId,
+    metadata: taskStatusAuditMetadata(currentStatus, status),
+  });
 
   // NOTE: the task_outcomes ML row is NOT written here. It used to be, which
   // meant only UI-driven completions were ever labelled — agents report status

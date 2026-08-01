@@ -9,6 +9,8 @@ import {
   toTimestamp,
   convertTimestamps,
 } from "./firestore";
+import { recordProjectAuditEvent } from "./projectAuditService";
+import { agentSpawnAuditMetadata } from "../lib/projectAudit";
 
 const COLLECTION = "agents";
 const DATE_FIELDS = ["createdAt"];
@@ -33,10 +35,23 @@ export async function getAgent(agentId: string): Promise<Agent | null> {
 export async function createAgent(
   data: Omit<Agent, "id" | "createdAt">,
 ): Promise<string> {
-  return createDocument(COLLECTION, {
+  const agentId = await createDocument(COLLECTION, {
     ...data,
     createdAt: toTimestamp(new Date()),
   });
+
+  // 스폰 감사 귀속. 여기가 렌더러의 단일 스폰 초크포인트라 UI 표면(Agents 탭 /
+  // 카드 ▶ Start / Lanes / 재시작)이 몇 개든 한 번만 잡힌다 — 각 컴포넌트를
+  // 계측하면 표면이 늘 때마다 누락되거나 중복된다.
+  recordProjectAuditEvent({
+    projectId: data.projectId,
+    type: "agent.spawned",
+    taskId: data.currentTaskId ?? null,
+    targetId: agentId,
+    metadata: agentSpawnAuditMetadata(data.name, data.model, data.role),
+  });
+
+  return agentId;
 }
 
 /**
