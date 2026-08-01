@@ -15,6 +15,9 @@
  *   - codex/gpt: the authenticated `codex app-server --stdio`
  *     account/rateLimits/read RPC (codex-usage-probe.ts), with rollout JSONL
  *     parsing as fallback for older/failed CLIs.
+ *   - grok: measured Grok Build CLI exposes no usage/account/quota command
+ *     today (grok-usage-probe.ts), so the value is null and the UI renders an
+ *     explicit unsupported/no-data state.
  *
  * null always means "no information" (logged out / probe failed / no rollout),
  * NEVER zero usage. Results are TTL-cached so a UI mount doesn't spawn a probe
@@ -29,6 +32,7 @@ import {
   type ClaudeUsageSnapshot,
 } from "./claude-usage-probe";
 import { probeCodexUsage } from "./codex-usage-probe";
+import { probeGrokUsage } from "./grok-usage-probe";
 import { resolveClaudeBinary, CONFIG_DIR } from "./agent-config";
 import {
   parseSessionDelta,
@@ -39,6 +43,7 @@ import {
 export interface AccountRateLimits {
   claude: RateLimitInfo | null;
   gpt: RateLimitInfo | null;
+  grok: RateLimitInfo | null;
 }
 
 // Serve a cached claude snapshot for this long before re-probing (the probe
@@ -54,6 +59,8 @@ let claudeCache: ClaudeUsageSnapshot | null = null;
 let claudeInFlight: Promise<RateLimitInfo | null> | null = null;
 let gptCache: { at: number; info: RateLimitInfo | null } | null = null;
 let gptInFlight: Promise<RateLimitInfo | null> | null = null;
+let grokCache: { at: number; info: RateLimitInfo | null } | null = null;
+let grokInFlight: Promise<RateLimitInfo | null> | null = null;
 
 function snapToInfo(s: ClaudeUsageSnapshot): RateLimitInfo {
   return {
@@ -230,11 +237,35 @@ export async function getAccountGptRateLimit(): Promise<RateLimitInfo | null> {
   return gptInFlight;
 }
 
+/**
+ * Account-global Grok/SuperGrok plan utilization, or null when there's no
+ * information. The current CLI exposes no quota command; this wrapper keeps
+ * the IPC shape ready without letting the renderer invent a number.
+ */
+export async function getAccountGrokRateLimit(): Promise<RateLimitInfo | null> {
+  if (grokCache && Date.now() - grokCache.at < GPT_FRESH_MS)
+    return grokCache.info;
+  if (grokInFlight) return grokInFlight;
+
+  grokInFlight = (async () => {
+    try {
+      const snap = await probeGrokUsage();
+      const info = snap ? snapToInfo(snap) : null;
+      grokCache = { at: Date.now(), info };
+      return info;
+    } finally {
+      grokInFlight = null;
+    }
+  })();
+  return grokInFlight;
+}
+
 /** Both account-level snapshots for the Usage tab rate-limit panel. */
 export async function getAccountRateLimits(): Promise<AccountRateLimits> {
-  const [claude, gpt] = await Promise.all([
+  const [claude, gpt, grok] = await Promise.all([
     getAccountClaudeRateLimit(),
     getAccountGptRateLimit(),
+    getAccountGrokRateLimit(),
   ]);
-  return { claude, gpt };
+  return { claude, gpt, grok };
 }

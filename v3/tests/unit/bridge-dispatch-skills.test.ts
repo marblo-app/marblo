@@ -38,7 +38,7 @@ import { clearSkillRegistryCache } from "../../electron/mcp-server/skill-registr
 // 수십 초가 걸린다. 중립 스냅샷으로 고정해 budgetBias 를 0으로 만든다 —
 // 스킬 게이트만 남겨 판정한다.
 vi.mock("../../electron/account-usage", () => ({
-  getAccountRateLimits: async () => ({ claude: null, gpt: null }),
+  getAccountRateLimits: async () => ({ claude: null, gpt: null, grok: null }),
 }));
 
 // ── 스킬 픽스처 ─────────────────────────────────────────────

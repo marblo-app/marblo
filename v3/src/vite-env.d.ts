@@ -1089,6 +1089,7 @@ interface UsageAPI {
   accountRateLimits: () => Promise<{
     claude: RateLimitSnapshot | null;
     gpt: RateLimitSnapshot | null;
+    grok: RateLimitSnapshot | null;
   }>;
 }
 

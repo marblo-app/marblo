@@ -845,6 +845,7 @@ export function DailyTrend({
 const RATE_LIMIT_GUIDANCE: Record<string, { label: string; icon: string }> = {
   claude: { label: "Claude Code", icon: "🟣" },
   gpt: { label: "Codex CLI", icon: "🟢" },
+  grok: { label: "Grok Build", icon: "⚡" },
   gemini: { label: "Gemini CLI", icon: "🔵" },
   antigravity: { label: "Antigravity (agy)", icon: "🟠" },
 };
@@ -852,6 +853,7 @@ const RATE_LIMIT_GUIDANCE: Record<string, { label: string; icon: string }> = {
 const RATE_LIMIT_NOTE_KEYS: Record<string, MessageKey> = {
   claude: "usage.rateLimit.note.claude",
   gpt: "usage.rateLimit.note.gpt",
+  grok: "usage.rateLimit.note.grok",
   gemini: "usage.rateLimit.note.gemini",
   antigravity: "usage.rateLimit.note.antigravity",
 };
@@ -971,6 +973,7 @@ function RateLimitPanel({
   const [account, setAccount] = useState<{
     claude: RateLimitSnapshot | null;
     gpt: RateLimitSnapshot | null;
+    grok: RateLimitSnapshot | null;
   } | null>(null);
 
   useEffect(() => {
@@ -1087,7 +1090,9 @@ function RateLimitPanel({
               ? account?.claude
               : row.probe === "gpt"
                 ? account?.gpt
-                : null;
+                : row.probe === "grok"
+                  ? account?.grok
+                  : null;
           // Account snapshot is canonical. When it is duration-aware, the set
           // of windows it carries is authoritative — a stale per-agent doc must
           // not resurrect a window (e.g. a bogus 5h gauge on a weekly-only

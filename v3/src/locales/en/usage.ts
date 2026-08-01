@@ -96,6 +96,8 @@ export const usage: Record<keyof typeof koUsage, string> = {
     "Max plan: 5-hour/weekly limits (managed by the CLI) · Pro: daily limit",
   "usage.rateLimit.note.gpt":
     "rate_limits from rollout (5h/weekly window, used_percent) — live display coming soon",
+  "usage.rateLimit.note.grok":
+    "Measured on Grok Build CLI 0.2.117: no usage/account/quota command — SuperGrok remaining-limit data is not exposed",
   "usage.rateLimit.note.gemini":
     "Free: per-minute/daily request limits · process exits when exceeded",
   "usage.rateLimit.note.antigravity":
@@ -105,7 +107,7 @@ export const usage: Record<keyof typeof koUsage, string> = {
   "usage.rateLimit.unavailableTip":
     "This vendor publishes no remaining-limit API — the number is left empty rather than invented. Check actual consumption via the vendor console link under 'Vendor credits · quota' above.",
   "usage.rateLimit.footer":
-    "Rows are per vendor — GLM, MiniMax and Kimi have their own quotas even though they spawn the same claude binary. Numbers are shown only for vendors with a real account probe (Claude/Anthropic, Codex/OpenAI); the rest publish no query API and stay empty. Claude weekly limit display is wired up later (Phase 1b, statusline capture).",
+    "Rows are per vendor — GLM, MiniMax and Kimi have their own quotas even though they spawn the same claude binary. Numbers are shown only for vendors with a real account probe (Claude/Anthropic, Codex/OpenAI); Grok/xAI is empty because the measured CLI exposes no remaining-limit command, and the rest publish no query API. Claude weekly limit display is wired up later (Phase 1b, statusline capture).",
 
   // ── Model fact sheet (collapsible, collapsed by default) ─
   // Benchmark names (SWE-bench Verified/Pro …) and harness names stay literal —

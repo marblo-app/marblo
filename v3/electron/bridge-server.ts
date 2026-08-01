@@ -2011,7 +2011,11 @@ export class BridgeServer {
     // 둘 다 연결돼 있어야만 usage 프로브를 돌린다(불필요한 CLI 스폰 회피).
     if (!claudeEnabled || !gptEnabled) return null;
 
-    let rateLimits: AccountRateLimits = { claude: null, gpt: null };
+    let rateLimits: AccountRateLimits = {
+      claude: null,
+      gpt: null,
+      grok: null,
+    };
     try {
       rateLimits = await getAccountRateLimits();
     } catch (err) {

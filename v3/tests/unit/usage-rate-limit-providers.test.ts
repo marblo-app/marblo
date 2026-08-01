@@ -16,12 +16,17 @@ import {
 describe("buildRateLimitRows", () => {
   it("에이전트가 없어도 설치된 CLI 는 행을 갖는다(계정 프로브가 실수치를 준다)", () => {
     const rows = buildRateLimitRows({
-      connectedModels: ["claude", "gpt"],
+      connectedModels: ["claude", "gpt", "grok"],
       agents: [],
     });
-    expect(rows.map((r) => r.vendor)).toEqual(["anthropic", "openai"]);
-    expect(rows.every((r) => r.source === "account-probe")).toBe(true);
-    expect(rows.map((r) => r.probe)).toEqual(["claude", "gpt"]);
+    expect(rows.map((r) => r.vendor)).toEqual(["anthropic", "openai", "xai"]);
+    expect(rows.map((r) => r.key)).toEqual(["anthropic", "openai", "xai"]);
+    expect(rows.map((r) => r.source)).toEqual([
+      "account-probe",
+      "account-probe",
+      "unavailable",
+    ]);
+    expect(rows.map((r) => r.probe)).toEqual(["claude", "gpt", null]);
   });
 
   it("설치 목록에 없어도 실제로 쓴 하네스는 남는다", () => {

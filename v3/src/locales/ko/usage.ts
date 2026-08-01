@@ -98,6 +98,8 @@ export const usage = {
     "Max 구독: 5시간/주간 한도 (CLI 자체 관리) · Pro: 일일 제한",
   "usage.rateLimit.note.gpt":
     "rollout 의 rate_limits(5h/주간 window, used_percent) — 라이브 표시 후속",
+  "usage.rateLimit.note.grok":
+    "Grok Build CLI 0.2.117 실측: usage/account/quota 명령 없음 — SuperGrok 잔여 한도 수치 미제공",
   "usage.rateLimit.note.gemini":
     "무료: 분당/일일 요청 한도 · 초과 시 프로세스 종료",
   "usage.rateLimit.note.antigravity":
@@ -107,7 +109,7 @@ export const usage = {
   "usage.rateLimit.unavailableTip":
     "이 벤더는 잔여 한도 조회 API 를 제공하지 않습니다 — 수치를 지어내지 않고 비웁니다. 실제 소진 현황은 위 '벤더 크레딧 · 쿼터' 의 벤더 콘솔 링크에서 확인하세요.",
   "usage.rateLimit.footer":
-    "행은 벤더 단위입니다 — 같은 claude 바이너리로 떠도 GLM·MiniMax·Kimi 는 별도 쿼터입니다. 수치는 계정 프로브가 실재하는 Claude(Anthropic)·Codex(OpenAI) 만 표시하고, 나머지 벤더는 조회 API 가 없어 비웁니다. Claude 주간 한도 표기는 후속(Phase 1b, statusline 캡처)에서 연결됩니다.",
+    "행은 벤더 단위입니다 — 같은 claude 바이너리로 떠도 GLM·MiniMax·Kimi 는 별도 쿼터입니다. 수치는 계정 프로브가 실재하는 Claude(Anthropic)·Codex(OpenAI) 만 표시하고, Grok(xAI)은 CLI 실측상 잔여 한도 명령이 없어 미지원으로 비웁니다. 나머지 벤더도 조회 API 가 없어 비웁니다. Claude 주간 한도 표기는 후속(Phase 1b, statusline 캡처)에서 연결됩니다.",
 
   // ── Model fact sheet (접이식 · 기본 접힘) ────────────────
   // 벤치 이름(SWE-bench Verified/Pro …)과 하네스 이름은 고유명사라 번역하지

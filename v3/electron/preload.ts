@@ -809,6 +809,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
           secondaryResetAt: number | null;
           secondaryWindowDurationMins?: number | null;
         } | null;
+        grok: {
+          planType: string | null;
+          primaryPercent: number | null;
+          primaryResetAt: number | null;
+          primaryWindowDurationMins?: number | null;
+          secondaryPercent: number | null;
+          secondaryResetAt: number | null;
+          secondaryWindowDurationMins?: number | null;
+        } | null;
       }>,
   },
   fs: {

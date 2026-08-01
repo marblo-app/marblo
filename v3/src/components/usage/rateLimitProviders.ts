@@ -25,6 +25,14 @@ import type { Agent } from "../../types/agent";
 export const CONNECTED_RATE_LIMIT_PACKAGES: Record<string, Agent["model"]> = {
   "cli-claude-code": "claude",
   "cli-codex": "gpt",
+  "cli-grok": "grok",
+};
+
+/** 설치된 네이티브 CLI 하네스 → 벤더. 프로브 보유 여부와 별도 축이다. */
+const CONNECTED_RATE_LIMIT_VENDOR: Readonly<Record<string, string>> = {
+  claude: "anthropic",
+  gpt: "openai",
+  grok: "xai",
 };
 
 /**
@@ -50,7 +58,7 @@ export interface RateLimitRow {
   /** 이 벤더를 띄운 하네스들(첫 관측 순서). 라벨·아이콘·설명 문구에 쓴다. */
   harnesses: string[];
   /** 수치를 읽어올 계정 프로브 키(claude/gpt). 없으면 null. */
-  probe: "claude" | "gpt" | null;
+  probe: "claude" | "gpt" | "grok" | null;
   source: RateLimitQuotaSource;
 }
 
@@ -86,7 +94,7 @@ export function buildRateLimitRows(input: {
     if (!row) {
       const probeHarness = Object.keys(ACCOUNT_PROBE_VENDOR).find(
         (h) => ACCOUNT_PROBE_VENDOR[h] === key,
-      ) as "claude" | "gpt" | undefined;
+      ) as "claude" | "gpt" | "grok" | undefined;
       row = {
         key,
         vendor: isKnownVendor(vendor) ? key : "",
@@ -100,10 +108,10 @@ export function buildRateLimitRows(input: {
       row.harnesses.push(harness);
   };
 
-  // 설치된 CLI 는 에이전트가 하나도 없어도 보여야 한다(로그인만 되어 있으면
-  // 계정 프로브가 실수치를 준다). 이 하네스들의 벤더는 네이티브 = 프로브 벤더다.
+  // 설치된 CLI 는 에이전트가 하나도 없어도 보여야 한다. 계정 프로브가 있는
+  // 하네스는 실수치를, 없는 하네스(grok 등)는 명시적인 미지원 상태를 그린다.
   for (const harness of input.connectedModels) {
-    upsert(ACCOUNT_PROBE_VENDOR[harness] ?? "", harness);
+    upsert(CONNECTED_RATE_LIMIT_VENDOR[harness] ?? "", harness);
   }
 
   for (const agent of input.agents) {
