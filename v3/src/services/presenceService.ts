@@ -1,5 +1,6 @@
 import type { Unsubscribe } from "firebase/firestore";
 import type { User } from "../types/user";
+import { USER_DATE_FIELDS } from "../types/user";
 import {
   updateDocument,
   subscribeToDocument,
@@ -8,7 +9,6 @@ import {
 } from "./firestore";
 
 const COLLECTION = "users";
-const DATE_FIELDS = ["createdAt", "lastHeartbeatAt"];
 
 /**
  * Refresh the calling user's heartbeat. Best-effort: failures are logged
@@ -44,7 +44,7 @@ export function subscribeToUserPresence(
         callback(null);
         return;
       }
-      const u = convertTimestamps<User>(raw, DATE_FIELDS);
+      const u = convertTimestamps<User>(raw, USER_DATE_FIELDS);
       callback(u.lastHeartbeatAt ?? null);
     },
   );

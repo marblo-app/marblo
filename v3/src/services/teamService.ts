@@ -1,6 +1,7 @@
 import { where } from "firebase/firestore";
 import type { Invitation, InvitationRole } from "../types/invitation";
 import type { User } from "../types/user";
+import { USER_DATE_FIELDS } from "../types/user";
 import { ROLE_PERMISSIONS } from "../types/invitation";
 import {
   getDocument,
@@ -19,7 +20,9 @@ import { t } from "../lib/i18n";
 const INVITATIONS = "invitations";
 const USERS = "users";
 const INVITATION_DATE_FIELDS = ["createdAt", "expiresAt"];
-const USER_DATE_FIELDS = ["createdAt"];
+// `users` 날짜 필드 목록은 types/user 의 USER_DATE_FIELDS 하나뿐이다 —
+// presenceService 도 같은 상수를 쓴다. 여기 로컬 목록을 다시 두면 두 경로가
+// 갈라지고, 빠뜨린 쪽 User 만 raw Timestamp 를 품은 채 `Date` 로 타이핑된다.
 
 function toInvitation(raw: Record<string, unknown>): Invitation {
   return convertTimestamps<Invitation>(raw, INVITATION_DATE_FIELDS);
