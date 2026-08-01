@@ -156,3 +156,19 @@ export interface MissionReplay {
     generatedAt: Date;
   };
 }
+
+/** The only shape that may cross a future export/publish boundary. */
+export interface RedactedReplay {
+  level: Exclude<ReplayVisibilityLevel, "L0">;
+  payload: unknown;
+  /** Exact bytes consumed by preview and, later, the publisher. */
+  serialized: string;
+  removed: RedactionRemoval[];
+  verified: boolean;
+}
+
+export interface RedactionRemoval {
+  path: string;
+  rule: string;
+  action: string;
+}
