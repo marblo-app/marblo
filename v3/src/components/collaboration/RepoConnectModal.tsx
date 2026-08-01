@@ -5,6 +5,7 @@ import { useEditorStore } from "../../stores/editorStore";
 import { normalizeGitRemoteUrl } from "../../services/projectService";
 import {
   shouldOfferRepoConnect,
+  repoConnectMode,
   repoDirNameFromUrl,
 } from "../../lib/repoConnect";
 import telemetry from "../../services/telemetryService";
@@ -20,6 +21,14 @@ import type { MessageKey } from "../../locales/ko";
  * 노출 판정은 shouldOfferRepoConnect(순수 함수)가 담당한다: 이미 연결된
  * 멤버(resolution kind === "own")나 machineId 미도착 시점에는 절대 뜨지
  * 않아 기존 화면이 픽셀 단위로 불변이다.
+ *
+ * 두 모드 (티켓 r8vIviEcwHFbFJ88RqZ7):
+ *  - `clone`  — 프로젝트가 repo 주소를 안다. 기존 동작 그대로.
+ *  - `manual` — 주소를 모른다(owner 가 한 번도 로컬 git 폴더를 안 붙인
+ *    프로젝트). 예전엔 이 경우 모달이 아예 안 떠서 멤버가 코드에 손도 못
+ *    댔다. 이제 주소 입력란을 띄우고, [기존 폴더 연결]은 고른 폴더의 origin
+ *    을 그대로 채택한다. 어느 쪽이든 확인된 주소를 프로젝트에 backfill 해
+ *    다음 멤버부터는 clone 모드가 된다.
  */
 
 /** clone 실패 종류 → 안내 문구 키. */
@@ -29,7 +38,7 @@ const ERROR_KEY: Record<string, MessageKey> = {
   network: "collab.repoConnect.errorNetwork",
   exists: "collab.repoConnect.errorExists",
   git: "collab.repoConnect.errorGeneric",
-  "invalid-url": "collab.repoConnect.errorGeneric",
+  "invalid-url": "collab.repoConnect.errorInvalidUrl",
 };
 
 export function RepoConnectModal() {
@@ -49,6 +58,8 @@ export function RepoConnectModal() {
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [parentDir, setParentDir] = useState<string | null>(null);
   const [defaultParent, setDefaultParent] = useState<string | null>(null);
+  // manual 모드에서만 쓰는 주소 입력값(clone 모드에선 프로젝트 값이 이긴다).
+  const [manualUrl, setManualUrl] = useState("");
 
   const visible =
     shouldOfferRepoConnect(currentProject, machineId) &&
@@ -72,21 +83,28 @@ export function RepoConnectModal() {
     };
   }, [visible, defaultParent]);
 
-  // 프로젝트가 바뀌면 이전 에러/위치 선택을 비운다.
+  // 프로젝트가 바뀌면 이전 에러/위치 선택/입력값을 비운다.
   useEffect(() => {
     setErrorKey(null);
     setErrorDetail(null);
     setParentDir(null);
+    setManualUrl("");
   }, [currentProject?.id]);
 
   if (!visible || !currentProject) return null;
 
-  const repoUrl = currentProject.gitRemoteUrl!;
+  const connectMode = repoConnectMode(currentProject);
+  // clone 모드에선 프로젝트 값, manual 모드에선 사용자가 입력한 값.
+  const repoUrl =
+    connectMode === "clone"
+      ? currentProject.gitRemoteUrl!.trim()
+      : manualUrl.trim();
   const projectId = currentProject.id;
   const effectiveParent = parentDir ?? defaultParent;
-  const destPreview = effectiveParent
-    ? `${effectiveParent}/${repoDirNameFromUrl(repoUrl)}`
-    : null;
+  const destPreview =
+    effectiveParent && repoUrl
+      ? `${effectiveParent}/${repoDirNameFromUrl(repoUrl)}`
+      : null;
 
   const fail = (key: MessageKey, detail?: string | null) => {
     setErrorKey(key);
@@ -105,7 +123,25 @@ export function RepoConnectModal() {
     telemetry.folderConnected(mode, true);
   };
 
+  /**
+   * manual 모드에서 확인된 주소를 프로젝트에 기록한다(fail-soft).
+   * 이걸 해야 이 팀의 **다음** 멤버는 수동입력 없이 clone 모드로 받는다.
+   * clone 모드(이미 주소를 아는 프로젝트)에서는 아무것도 덮지 않는다.
+   */
+  const backfillRepoUrl = async (url: string) => {
+    if (connectMode !== "manual" || !url) return;
+    try {
+      await useProjectStore.getState().updateProject(projectId, {
+        gitRemoteUrl: url,
+      });
+    } catch (err) {
+      // 기록 실패가 연결을 막아선 안 된다 — 이 기기는 이미 연결된 상태다.
+      console.error("Failed to backfill project gitRemoteUrl:", err);
+    }
+  };
+
   const handleClone = async () => {
+    if (!repoUrl) return;
     setBusy(true);
     setErrorKey(null);
     setErrorDetail(null);
@@ -116,6 +152,7 @@ export function RepoConnectModal() {
         parentDir: effectiveParent,
       });
       if (result.ok && result.path) {
+        await backfillRepoUrl(repoUrl);
         await connectPath(result.path, "member-clone");
       } else {
         fail(
@@ -146,10 +183,17 @@ export function RepoConnectModal() {
         fail("collab.repoConnect.errorNoRemote");
         return;
       }
-      if (normalizeGitRemoteUrl(origin) !== normalizeGitRemoteUrl(repoUrl)) {
+      // 대조 상대가 있을 때만 대조한다. manual 모드에서 주소를 아직 안 적었
+      // 다면 방금 고른 폴더의 origin 이 곧 이 프로젝트의 저장소다 — 그걸
+      // 프로젝트에 기록해 다음 멤버부터 clone 모드가 되게 한다.
+      if (
+        repoUrl &&
+        normalizeGitRemoteUrl(origin) !== normalizeGitRemoteUrl(repoUrl)
+      ) {
         fail("collab.repoConnect.errorMismatch", origin);
         return;
       }
+      await backfillRepoUrl(origin);
       // 이 머신의 연결 단일 진실원에도 기록(fail-soft — Harness 탭 소비용).
       window.electronAPI.connection
         .upsert({ projectId, localPath: dir })
@@ -182,16 +226,33 @@ export function RepoConnectModal() {
 
         <div className="p-5 space-y-4">
           <p className="text-sm text-gray-300">
-            {t("collab.repoConnect.description")}
+            {t(
+              connectMode === "manual"
+                ? "collab.repoConnect.manualDescription"
+                : "collab.repoConnect.description",
+            )}
           </p>
 
           <div>
             <div className="mb-1 text-xs font-medium text-gray-400">
               {t("collab.repoConnect.repoLabel")}
             </div>
-            <div className="rounded bg-gray-900 border border-gray-700 px-3 py-2 text-sm text-gray-200 font-mono break-all">
-              {repoUrl}
-            </div>
+            {connectMode === "manual" ? (
+              <input
+                type="text"
+                value={manualUrl}
+                onChange={(e) => setManualUrl(e.target.value)}
+                disabled={busy}
+                spellCheck={false}
+                autoFocus
+                placeholder={t("collab.repoConnect.urlPlaceholder")}
+                className="w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-sm text-gray-200 font-mono placeholder-gray-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+              />
+            ) : (
+              <div className="rounded bg-gray-900 border border-gray-700 px-3 py-2 text-sm text-gray-200 font-mono break-all">
+                {repoUrl}
+              </div>
+            )}
           </div>
 
           <div>
@@ -249,7 +310,7 @@ export function RepoConnectModal() {
               </button>
               <button
                 onClick={() => void handleClone()}
-                disabled={busy}
+                disabled={busy || !repoUrl}
                 className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
               >
                 {busy

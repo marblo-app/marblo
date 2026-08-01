@@ -6,7 +6,10 @@ export const collaboration = {
   "collab.repoConnect.title": "Connect repository",
   "collab.repoConnect.description":
     "This project's code isn't on this computer yet. Clone the team repository to use the Code and Worktree tabs.",
+  "collab.repoConnect.manualDescription":
+    "This project doesn't have a repository URL yet. Paste the team repository URL to clone it, or connect a folder you already cloned.",
   "collab.repoConnect.repoLabel": "Project repository",
+  "collab.repoConnect.urlPlaceholder": "https://github.com/org/repo.git",
   "collab.repoConnect.locationLabel": "Clone location",
   "collab.repoConnect.changeLocation": "Change location",
   "collab.repoConnect.cloneAndConnect": "Clone & connect",
@@ -24,6 +27,8 @@ export const collaboration = {
   "collab.repoConnect.errorExists":
     "The target folder already exists. Use [Connect existing folder] to link it, or pick another location.",
   "collab.repoConnect.errorGeneric": "Clone failed.",
+  "collab.repoConnect.errorInvalidUrl":
+    "That repository URL isn't valid. Enter an https://… or git@… URL.",
   "collab.repoConnect.errorMismatch":
     "The selected folder's git origin differs from the project repository. Pick the folder where you cloned this repo.",
   "collab.repoConnect.errorNoRemote":

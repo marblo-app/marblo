@@ -6,7 +6,10 @@ export const collaboration = {
   "collab.repoConnect.title": "저장소 연결",
   "collab.repoConnect.description":
     "이 프로젝트의 코드가 아직 이 컴퓨터에 없습니다. 팀 저장소를 clone 해 연결하면 코드·워크트리 탭을 사용할 수 있습니다.",
+  "collab.repoConnect.manualDescription":
+    "이 프로젝트에 저장소 주소가 아직 등록되지 않았습니다. 팀 저장소 주소를 붙여넣어 clone 하거나, 이미 clone 해 둔 폴더를 연결하세요.",
   "collab.repoConnect.repoLabel": "프로젝트 저장소",
+  "collab.repoConnect.urlPlaceholder": "https://github.com/org/repo.git",
   "collab.repoConnect.locationLabel": "Clone 위치",
   "collab.repoConnect.changeLocation": "위치 변경",
   "collab.repoConnect.cloneAndConnect": "Clone & 연결",
@@ -24,6 +27,8 @@ export const collaboration = {
   "collab.repoConnect.errorExists":
     "대상 폴더가 이미 존재합니다. [기존 폴더 연결]로 그 폴더를 연결하거나 다른 위치를 선택하세요.",
   "collab.repoConnect.errorGeneric": "clone 에 실패했습니다.",
+  "collab.repoConnect.errorInvalidUrl":
+    "저장소 주소 형식이 올바르지 않습니다. https://… 또는 git@… 주소를 입력하세요.",
   "collab.repoConnect.errorMismatch":
     "선택한 폴더의 git origin 이 프로젝트 저장소와 다릅니다. 올바른 클론 폴더를 선택하세요.",
   "collab.repoConnect.errorNoRemote":

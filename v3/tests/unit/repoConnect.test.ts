@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  repoConnectMode,
   repoDirNameFromUrl,
   shouldOfferRepoConnect,
 } from "../../src/lib/repoConnect";
 import type { ProjectPathResolution } from "../../src/lib/projectPaths";
 
-// "저장소 연결" 모달 노출 판정 (티켓 r8VggohxLGciDVXV2rf6).
-// 핵심 계약: 이미 연결된 멤버(own)·machineId 미도착·repo URL 부재에서는
-// 절대 true 가 되지 않는다 — 기존 화면 픽셀 불변의 근거.
+// "저장소 연결" 모달 노출 판정 (티켓 r8VggohxLGciDVXV2rf6,
+// 게이트 완화 r8vIviEcwHFbFJ88RqZ7).
+// 핵심 계약: 이미 연결된 멤버(own)·machineId 미도착에서는 절대 true 가 되지
+// 않는다 — 기존 화면 픽셀 불변의 근거. repo URL 부재는 더 이상 차단 사유가
+// 아니라 모드(clone vs manual) 결정 요인이다.
 
 const REPO = "https://github.com/acme/app.git";
 const MACHINE = "mac-abc-123";
@@ -56,8 +59,21 @@ describe("shouldOfferRepoConnect", () => {
     expect(shouldOfferRepoConnect(project("foreign-only"), null)).toBe(false);
   });
 
-  it("never offers without a repo URL (nothing to clone)", () => {
+  // ★실버그(r8vIviEcwHFbFJ88RqZ7): owner 가 로컬 git 폴더를 한 번도 안 붙인
+  // 프로젝트는 gitRemoteUrl 이 비어 있고, 초대받은 멤버는 로컬 repo 가 없어
+  // 스스로 채울 수도 없다 — 예전 게이트에선 모달이 영영 안 떴다.
+  it("still offers without a repo URL (manual entry fallback)", () => {
     expect(shouldOfferRepoConnect(project("foreign-only", null), MACHINE)).toBe(
+      true,
+    );
+    expect(shouldOfferRepoConnect(project("unregistered", null), MACHINE)).toBe(
+      true,
+    );
+  });
+
+  it("keeps the own-machine invariant even without a repo URL", () => {
+    expect(shouldOfferRepoConnect(project("own", null), MACHINE)).toBe(false);
+    expect(shouldOfferRepoConnect(project("foreign-only", null), null)).toBe(
       false,
     );
   });
@@ -65,6 +81,18 @@ describe("shouldOfferRepoConnect", () => {
   it("never offers without a project or resolution", () => {
     expect(shouldOfferRepoConnect(null, MACHINE)).toBe(false);
     expect(shouldOfferRepoConnect(project(undefined), MACHINE)).toBe(false);
+  });
+});
+
+describe("repoConnectMode", () => {
+  it("uses clone mode when the project knows its repo URL", () => {
+    expect(repoConnectMode({ gitRemoteUrl: REPO })).toBe("clone");
+  });
+
+  it("falls back to manual entry when the URL is missing or blank", () => {
+    expect(repoConnectMode({ gitRemoteUrl: undefined })).toBe("manual");
+    expect(repoConnectMode({ gitRemoteUrl: "   " })).toBe("manual");
+    expect(repoConnectMode(null)).toBe("manual");
   });
 });
 

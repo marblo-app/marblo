@@ -13,6 +13,7 @@ import {
   subscribeToCollection,
 } from "./firestore";
 import * as projectService from "./projectService";
+import { resolveProjectFolderPath } from "../lib/projectPaths";
 import { t } from "../lib/i18n";
 
 const INVITATIONS = "invitations";
@@ -42,6 +43,102 @@ export function invitationDocId(projectId: string, email: string): string {
   return `${projectId}_${normalizeInviteEmail(email)}`;
 }
 
+/**
+ * 초대 시점의 저장소 주소 캡처 (티켓 r8vIviEcwHFbFJ88RqZ7).
+ *
+ * ★왜 여기서 하나: 멤버 기기의 "저장소 연결" 모달은 project.gitRemoteUrl 을
+ * 보고 clone 을 제안하는데, 그 필드는 **로컬 git 폴더가 붙은 기기에서 폴더를
+ * 고를 때만** 채워진다(useProjectSetup 의 생성/backfill 경로). 그래서 owner 가
+ * 그 경로를 한 번도 지나지 않은 프로젝트는 URL 이 비어 있고, 초대받은 멤버는
+ * 로컬 repo 가 없어 스스로 채울 수도 없다 — 모달이 clone 대상을 영영 모른다.
+ * 초대는 owner 기기에서 일어나므로 여기가 URL 을 확보할 자연스러운 지점이다.
+ *
+ * 전 구간 fail-soft: 캡처 실패가 초대를 막아선 안 된다. 못 얻으면 모달의
+ * 수동입력 폴백이 받아준다(shouldOfferRepoConnect 는 URL 없이도 노출한다).
+ *
+ * @returns 확보한 원본 URL(정규화하지 않은 그대로), 없으면 null.
+ */
+export async function captureProjectRepoUrl(
+  projectId: string,
+): Promise<string | null> {
+  let project: Awaited<ReturnType<typeof projectService.getProject>> = null;
+  try {
+    project = await projectService.getProject(projectId);
+  } catch {
+    return null;
+  }
+  if (!project) return null;
+  if (project.gitRemoteUrl) return project.gitRemoteUrl;
+
+  // 이 기기 칸의 경로만 본다 — 다른 기기의 경로는 이 디스크에 없다
+  // (projectPaths 의 "폴백 금지" 불변식).
+  const localPath = resolveProjectFolderPath(
+    { folderPath: project.folderPath, folderPaths: project.folderPaths },
+    await thisMachineId(),
+  );
+  const origin = localPath ? await localGitRemoteUrl(localPath) : null;
+  if (!origin) return null;
+
+  try {
+    await projectService.updateProject(projectId, { gitRemoteUrl: origin });
+  } catch (err) {
+    // 프로젝트 문서에 못 써도(권한·오프라인) 초대 문서에 실어 전파한다.
+    console.warn(
+      "[teamService] project gitRemoteUrl backfill failed (fail-soft):",
+      err,
+    );
+  }
+  return origin;
+}
+
+/** 이 기기의 machineId. 렌더러 밖(테스트·미도착)에서는 null 로 degrade. */
+async function thisMachineId(): Promise<string | null> {
+  try {
+    const id = await window.electronAPI?.getMachineId?.();
+    return typeof id === "string" && id ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 로컬 폴더의 git origin. 읽을 수 없으면 null(useProjectSetup 과 같은 API). */
+async function localGitRemoteUrl(path: string): Promise<string | null> {
+  try {
+    const url = await window.electronAPI?.fs?.gitRemoteUrl?.(path);
+    return typeof url === "string" && url ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 초대 문서에 실린 저장소 주소를 프로젝트로 승격한다(수락 직후, fail-soft).
+ *
+ * ★반드시 addMember 뒤에 부른다 — projects 업데이트는 멤버에게만 허용되므로
+ * (firestore.rules `allow update: isProjectMember`), 멤버가 되기 전에 부르면
+ * permission-denied 다. 이미 URL 이 있는 프로젝트는 건드리지 않는다: owner 가
+ * 정한 값이 항상 이긴다.
+ */
+async function propagateInvitationRepoUrl(
+  invitation: Invitation,
+): Promise<void> {
+  const url = invitation.gitRemoteUrl;
+  // 정규화가 null 이면 URL 로서 의미가 없는 값 — 쓰지 않는다.
+  if (!url || !projectService.normalizeGitRemoteUrl(url)) return;
+  try {
+    const project = await projectService.getProject(invitation.projectId);
+    if (!project || project.gitRemoteUrl) return;
+    await projectService.updateProject(invitation.projectId, {
+      gitRemoteUrl: url,
+    });
+  } catch (err) {
+    console.warn(
+      "[teamService] invitation gitRemoteUrl propagation failed (fail-soft):",
+      err,
+    );
+  }
+}
+
 export async function createInvitation(
   projectId: string,
   email: string,
@@ -63,6 +160,9 @@ export async function createInvitation(
     throw new Error(t("common.team.duplicateInvite"));
   }
 
+  // owner 기기에서만 얻을 수 있는 값이라 초대를 쓰기 전에 확보한다.
+  const gitRemoteUrl = await captureProjectRepoUrl(projectId);
+
   const docId = invitationDocId(projectId, email);
   await setDocument(INVITATIONS, docId, {
     projectId,
@@ -70,6 +170,8 @@ export async function createInvitation(
     invitedBy,
     role,
     status: "pending",
+    // 없을 때 undefined 를 실으면 Firestore 가 거부한다 — 아예 빼고 쓴다.
+    ...(gitRemoteUrl ? { gitRemoteUrl } : {}),
     createdAt: toTimestamp(now),
     expiresAt: toTimestamp(expiresAt),
   });
@@ -101,6 +203,10 @@ export async function acceptInvitation(
   // addMember 가 permission-denied 로 죽는다. addMember 성공 후 status 전이가
   // 실패해도 재시도(arrayUnion no-op)가 룰상 멱등 통과한다.
   await projectService.addMember(invitation.projectId, userId);
+
+  // 초대에 실려온 저장소 주소를 프로젝트로 승격(티켓 r8vIviEcwHFbFJ88RqZ7).
+  // 멤버가 된 직후가 이 쓰기가 룰상 허용되는 첫 시점이다.
+  await propagateInvitationRepoUrl(invitation);
 
   // 초대 상태 업데이트
   await updateDocument(INVITATIONS, invitationId, { status: "accepted" });
