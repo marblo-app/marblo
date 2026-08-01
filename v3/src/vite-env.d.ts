@@ -1032,7 +1032,32 @@ interface RepoAPI {
     projectId?: string;
     repoUrl: string;
     parentDir?: string | null;
+    userId?: string;
   }) => Promise<RepoCloneResult>;
+}
+
+interface GitHubDeviceStartResult {
+  ok: boolean;
+  error?: string;
+  sessionId?: string;
+  userCode?: string;
+  verificationUri?: string;
+  verificationUriComplete?: string;
+  expiresIn?: number;
+  interval?: number;
+}
+
+interface GitHubDevicePollResult {
+  kind: "pending" | "slow_down" | "expired" | "denied" | "success" | "error";
+  nextIntervalSeconds?: number;
+  message?: string;
+}
+
+interface GitHubAPI {
+  deviceStart: (userId: string) => Promise<GitHubDeviceStartResult>;
+  devicePoll: (sessionId: string) => Promise<GitHubDevicePollResult>;
+  status: (userId: string) => Promise<{ connected: boolean }>;
+  disconnect: (userId: string) => Promise<{ ok: boolean }>;
 }
 
 interface UpdaterStatus {
@@ -1147,6 +1172,7 @@ interface ElectronAPI {
   system: SystemAPI;
   connection: ConnectionAPI;
   repo: RepoAPI;
+  github: GitHubAPI;
   updater: UpdaterAPI;
   sentry: SentryBridgeAPI;
   kg: KgBridgeAPI;

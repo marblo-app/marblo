@@ -15,6 +15,7 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import http from "http";
+import crypto from "node:crypto";
 import { execFile, execSync, spawn } from "node:child_process";
 import dotenv from "dotenv";
 import { PtyManager, isBusySignal } from "./pty-manager";
@@ -189,6 +190,16 @@ import {
   type AccessMode,
 } from "./connection-store";
 import { cloneRepo, defaultCloneParentDir } from "./repo-clone";
+import {
+  pollGitHubDeviceCode,
+  requestGitHubDeviceCode,
+  type GitHubDeviceCode,
+} from "./github-device-oauth";
+import {
+  getGitHubToken,
+  removeGitHubToken,
+  saveGitHubToken,
+} from "./github-token-store";
 
 type ConnectionCheckStatus = "pass" | "warn" | "fail";
 
@@ -4436,6 +4447,93 @@ function normalizeGitRemoteForCompare(url: string): string {
 
 ipcMain.handle("repo:defaultCloneParent", () => defaultCloneParentDir());
 
+interface GitHubDeviceSession {
+  userId: string;
+  deviceCode: string;
+  intervalSeconds: number;
+  expiresAt: number;
+}
+
+const githubDeviceSessions = new Map<string, GitHubDeviceSession>();
+
+function validGitHubOAuthUserId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9:_-]{1,128}$/.test(value);
+}
+
+function githubOAuthClientId(): string | null {
+  return process.env.GITHUB_OAUTH_CLIENT_ID?.trim() || null;
+}
+
+/** Device-flow 시작. 토큰은 이 IPC 응답에 절대 포함되지 않는다. */
+ipcMain.handle("github:deviceStart", async (_event, input: unknown) => {
+  const userId =
+    input && typeof input === "object" ? (input as { userId?: unknown }).userId : undefined;
+  const clientId = githubOAuthClientId();
+  if (!validGitHubOAuthUserId(userId)) return { ok: false, error: "유효한 사용자 정보가 필요합니다." };
+  if (!clientId) return { ok: false, error: "GitHub 연결이 아직 설정되지 않았습니다." };
+  try {
+    const code = await requestGitHubDeviceCode(clientId);
+    const sessionId = crypto.randomUUID();
+    githubDeviceSessions.set(sessionId, {
+      userId,
+      deviceCode: code.deviceCode,
+      intervalSeconds: code.interval,
+      expiresAt: Date.now() + code.expiresIn * 1000,
+    });
+    return {
+      ok: true,
+      sessionId,
+      userCode: code.userCode,
+      verificationUri: code.verificationUri,
+      verificationUriComplete: code.verificationUriComplete,
+      expiresIn: code.expiresIn,
+      interval: code.interval,
+    };
+  } catch {
+    return { ok: false, error: "GitHub 디바이스 코드를 시작하지 못했습니다." };
+  }
+});
+
+/** 한 번의 polling. pending/slow_down은 renderer가 nextInterval 후 재호출한다. */
+ipcMain.handle("github:devicePoll", async (_event, sessionId: unknown) => {
+  if (typeof sessionId !== "string") return { kind: "error", message: "연결 세션이 올바르지 않습니다." };
+  const session = githubDeviceSessions.get(sessionId);
+  const clientId = githubOAuthClientId();
+  if (!session || !clientId) return { kind: "error", message: "연결 세션이 만료되었습니다. 다시 시작하세요." };
+  if (Date.now() >= session.expiresAt) {
+    githubDeviceSessions.delete(sessionId);
+    return { kind: "expired" };
+  }
+  const result = await pollGitHubDeviceCode(clientId, session.deviceCode, session.intervalSeconds);
+  if (result.kind === "pending" || result.kind === "slow_down") {
+    session.intervalSeconds = result.nextIntervalSeconds;
+    return result;
+  }
+  githubDeviceSessions.delete(sessionId);
+  if (result.kind !== "success") return result;
+  try {
+    saveGitHubToken(safeStorage, session.userId, result.accessToken);
+    return { kind: "success" };
+  } catch {
+    return { kind: "error", message: "OS 키체인에 GitHub 연결 정보를 저장하지 못했습니다." };
+  }
+});
+
+ipcMain.handle("github:status", (_event, userId: unknown) => {
+  if (!validGitHubOAuthUserId(userId)) return { connected: false };
+  return { connected: !!getGitHubToken(safeStorage, userId) };
+});
+
+ipcMain.handle("github:disconnect", (_event, userId: unknown) => {
+  if (!validGitHubOAuthUserId(userId)) return { ok: false };
+  try {
+    removeGitHubToken(safeStorage, userId);
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+});
+
 ipcMain.handle(
   "repo:clone",
   async (
@@ -4444,9 +4542,13 @@ ipcMain.handle(
       projectId,
       repoUrl,
       parentDir,
-    }: { projectId?: string; repoUrl: string; parentDir?: string | null }
+      userId,
+    }: { projectId?: string; repoUrl: string; parentDir?: string | null; userId?: string }
   ) => {
-    const result = await cloneRepo({ repoUrl, parentDir });
+    const githubToken = validGitHubOAuthUserId(userId)
+      ? getGitHubToken(safeStorage, userId)
+      : null;
+    const result = await cloneRepo({ repoUrl, parentDir, githubToken });
     // 성공 시 이 머신의 연결 단일 진실원(connection-store)에도 기록해
     // Harness 탭/미션 선택이 즉시 연결 상태를 본다. repoUrl/defaultBranch
     // 는 connect() 가 git 으로 자동 채운다. fail-soft — 기록 실패가

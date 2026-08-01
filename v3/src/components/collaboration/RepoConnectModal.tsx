@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import { useProjectStore } from "../../stores/projectStore";
 import { useEditorStore } from "../../stores/editorStore";
+import { useAuth } from "../../hooks/useAuth";
 import { normalizeGitRemoteUrl } from "../../services/projectService";
 import {
   shouldOfferRepoConnect,
@@ -56,6 +57,7 @@ export const REPO_CONNECT_OPEN_EVENT = "marblo:open-repo-connect";
 
 export function RepoConnectModal() {
   const { t } = useTranslation();
+  const { user } = useAuth();
   const currentProject = useProjectStore((s) => s.currentProject);
   const machineId = useProjectStore((s) => s.machineId);
   const setFolderPathForThisMachine = useProjectStore(
@@ -73,6 +75,15 @@ export function RepoConnectModal() {
   const [defaultParent, setDefaultParent] = useState<string | null>(null);
   // manual 모드에서만 쓰는 주소 입력값(clone 모드에선 프로젝트 값이 이긴다).
   const [manualUrl, setManualUrl] = useState("");
+  const [githubConnected, setGithubConnected] = useState(false);
+  const [githubMessage, setGithubMessage] = useState<string | null>(null);
+  const [deviceSession, setDeviceSession] = useState<{
+    sessionId: string;
+    userCode: string;
+    verificationUri: string;
+    verificationUriComplete?: string;
+    intervalSeconds: number;
+  } | null>(null);
 
   // own 폴더의 실제 상태(빈 폴더/원격 불일치/정상). own 이 아닐 땐 의미 없음.
   // ★null = 검사 전/실패 — shouldOfferRepoConnect 가 "own 이면 표시 안 함"
@@ -174,6 +185,51 @@ export function RepoConnectModal() {
     };
   }, [visible, defaultParent]);
 
+  useEffect(() => {
+    if (!user?.uid) {
+      setGithubConnected(false);
+      return;
+    }
+    let cancelled = false;
+    window.electronAPI.github.status(user.uid).then(({ connected }) => {
+      if (!cancelled) setGithubConnected(connected);
+    }).catch(() => {
+      if (!cancelled) setGithubConnected(false);
+    });
+    return () => { cancelled = true; };
+  }, [user?.uid, visible]);
+
+  useEffect(() => {
+    if (!deviceSession) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      window.electronAPI.github.devicePoll(deviceSession.sessionId).then((result) => {
+        if (cancelled) return;
+        if (result.kind === "pending" || result.kind === "slow_down") {
+          setDeviceSession({ ...deviceSession, intervalSeconds: result.nextIntervalSeconds ?? deviceSession.intervalSeconds });
+          return;
+        }
+        setDeviceSession(null);
+        if (result.kind === "success") {
+          setGithubConnected(true);
+          setGithubMessage("GitHub가 연결되었습니다. 이제 private 저장소를 clone할 수 있습니다.");
+        } else if (result.kind === "denied") {
+          setGithubMessage("GitHub 연결이 취소되었습니다.");
+        } else if (result.kind === "expired") {
+          setGithubMessage("GitHub 연결 코드가 만료되었습니다. 다시 시도하세요.");
+        } else {
+          setGithubMessage(result.message ?? "GitHub 연결에 실패했습니다.");
+        }
+      }).catch(() => {
+        if (!cancelled) {
+          setDeviceSession(null);
+          setGithubMessage("GitHub 연결에 실패했습니다.");
+        }
+      });
+    }, deviceSession.intervalSeconds * 1000);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [deviceSession]);
+
   // 프로젝트가 바뀌면 이전 에러/위치 선택/입력값을 비운다. forceOpen 도
   // 새 프로젝트에 대해 다시 신호를 줘야 하므로 유지한다 — 단 visible 이
   // false 가 되면 다음 effect 에서 정리된다.
@@ -261,6 +317,7 @@ export function RepoConnectModal() {
         projectId,
         repoUrl,
         parentDir: effectiveParent,
+        userId: user?.uid,
       });
       if (result.ok && result.path) {
         await backfillRepoUrl(repoUrl);
@@ -317,6 +374,23 @@ export function RepoConnectModal() {
 
   const handleLater = () => {
     setDismissed((prev) => new Set(prev).add(projectId));
+  };
+
+  const handleGitHubConnect = async () => {
+    if (!user?.uid) return;
+    setGithubMessage(null);
+    const result = await window.electronAPI.github.deviceStart(user.uid);
+    if (!result.ok || !result.sessionId || !result.userCode || !result.verificationUri || !result.interval) {
+      setGithubMessage(result.error ?? "GitHub 연결을 시작하지 못했습니다.");
+      return;
+    }
+    setDeviceSession({
+      sessionId: result.sessionId,
+      userCode: result.userCode,
+      verificationUri: result.verificationUri,
+      verificationUriComplete: result.verificationUriComplete,
+      intervalSeconds: result.interval,
+    });
   };
 
   return (
@@ -404,6 +478,20 @@ export function RepoConnectModal() {
           <p className="text-xs text-gray-500">
             {t("collab.repoConnect.privateHint")}
           </p>
+
+          <div className="rounded border border-gray-700 bg-gray-900/60 px-3 py-3 text-sm text-gray-300">
+            {githubConnected ? (
+              <span className="text-green-400">GitHub 연결됨</span>
+            ) : deviceSession ? (
+              <div className="space-y-2">
+                <div>GitHub에서 다음 코드를 입력하세요: <strong className="font-mono text-white">{deviceSession.userCode}</strong></div>
+                <a className="text-blue-400 hover:text-blue-300" href={deviceSession.verificationUriComplete ?? deviceSession.verificationUri} target="_blank" rel="noreferrer">GitHub 열기</a>
+              </div>
+            ) : (
+              <button onClick={() => void handleGitHubConnect()} disabled={busy || !user} className="text-blue-400 hover:text-blue-300 disabled:opacity-50">GitHub 연결</button>
+            )}
+            {githubMessage && <div className="mt-2 text-xs text-gray-400">{githubMessage}</div>}
+          </div>
 
           <div className="flex items-center justify-between gap-2 pt-1">
             <button

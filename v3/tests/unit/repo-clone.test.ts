@@ -7,6 +7,7 @@ import {
   cloneRepo,
   defaultCloneParentDir,
   deriveRepoDirName,
+  tokenizedGitHubCloneUrl,
   validateCloneUrl,
   type GitRunner,
 } from "../../electron/repo-clone";
@@ -109,6 +110,17 @@ describe("classifyCloneError", () => {
   });
 });
 
+describe("tokenizedGitHubCloneUrl", () => {
+  it("adds the device-flow token only to GitHub HTTPS URLs", () => {
+    expect(tokenizedGitHubCloneUrl("https://github.com/acme/app.git", "secret-token")).toBe(
+      "https://oauth2:secret-token@github.com/acme/app.git",
+    );
+    expect(tokenizedGitHubCloneUrl("git@github.com:acme/app.git", "secret-token")).toBe(
+      "git@github.com:acme/app.git",
+    );
+  });
+});
+
 describe("cloneRepo", () => {
   const okRunner: GitRunner = async (args) => {
     // 성공 러너 — git 이 만들 폴더를 흉내낸다.
@@ -188,6 +200,17 @@ describe("cloneRepo", () => {
     expect(r.ok).toBe(false);
     expect(r.errorKind).toBe("auth");
     expect(r.message).toContain("Authentication failed");
+  });
+
+  it("redacts device-flow tokens and gives an access-specific 404 message", async () => {
+    const token = "sensitive-device-token";
+    const r = await cloneRepo(
+      { repoUrl: "https://github.com/acme/private.git", parentDir: tmpDir(), githubToken: token },
+      async () => ({ code: 128, stderr: `remote: Repository not found. ${token}` }),
+    );
+    expect(r.errorKind).toBe("not-found");
+    expect(r.message).toContain("콜라보레이터");
+    expect(r.message).not.toContain(token);
   });
 
   it("default clone parent is an absolute path under the home dir", () => {

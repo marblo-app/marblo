@@ -128,6 +128,29 @@ export function classifyCloneError(stderr: string): CloneErrorKind {
   return "git";
 }
 
+/**
+ * GitHub HTTPS URL에만 device-flow token을 붙인다. SSH와 다른 Git host는
+ * 기존 gh auth/SSH fallback을 그대로 사용한다.
+ */
+export function tokenizedGitHubCloneUrl(url: string, token?: string | null): string {
+  if (!token) return url;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || parsed.hostname.toLowerCase() !== "github.com") {
+      return url;
+    }
+    parsed.username = "oauth2";
+    parsed.password = token;
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function redactToken(value: string, token?: string | null): string {
+  return token ? value.split(token).join("[redacted]") : value;
+}
+
 /** 테스트 주입용 git 실행기 — 실제 구현은 spawn("git", ...). */
 export type GitRunner = (
   args: string[],
@@ -178,12 +201,12 @@ const realGitRunner: GitRunner = (args, { cwd, timeoutMs }) =>
   });
 
 /** stderr 꼬리(마지막 비어있지 않은 줄들)를 모달 표시용으로 요약. */
-function summarizeStderr(stderr: string): string {
+function summarizeStderr(stderr: string, token?: string | null): string {
   const lines = stderr
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  return lines.slice(-3).join(" · ").slice(0, 500);
+  return redactToken(lines.slice(-3).join(" · ").slice(0, 500), token);
 }
 
 /**
@@ -191,7 +214,7 @@ function summarizeStderr(stderr: string): string {
  * 실행하지 않는다(exists). 절대 throw 하지 않고 CloneResult 로 돌려준다.
  */
 export async function cloneRepo(
-  input: { repoUrl: string; parentDir?: string | null },
+  input: { repoUrl: string; parentDir?: string | null; githubToken?: string | null },
   runner: GitRunner = realGitRunner,
 ): Promise<CloneResult> {
   const url = validateCloneUrl(input.repoUrl);
@@ -230,16 +253,23 @@ export async function cloneRepo(
     };
   }
 
-  const r = await runner(["clone", "--", url, dest], {
+  const cloneUrl = tokenizedGitHubCloneUrl(url, input.githubToken);
+  const r = await runner(["clone", "--", cloneUrl, dest], {
     cwd: parent,
     timeoutMs: CLONE_TIMEOUT_MS,
   });
   if (r.code === 0 && fs.existsSync(dest)) {
     return { ok: true, path: dest };
   }
+  const errorKind = classifyCloneError(r.stderr);
   return {
     ok: false,
-    errorKind: classifyCloneError(r.stderr),
-    message: summarizeStderr(r.stderr),
+    errorKind,
+    // GitHub는 권한이 없는 private repo도 404로 숨긴다. raw git 오류는
+    // 토큰을 포함할 수 있으므로 노출하지 않고 다음 행동만 안내한다.
+    message:
+      errorKind === "not-found" && !!input.githubToken
+        ? "저장소 접근 권한이 없습니다. 오너에게 콜라보레이터 추가를 요청하세요."
+        : summarizeStderr(r.stderr, input.githubToken),
   };
 }
