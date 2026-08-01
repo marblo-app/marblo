@@ -35,4 +35,12 @@ export const collaboration = {
     "No git origin found in the selected folder. Pick the folder where you cloned this repo.",
   "collab.repoConnect.connectFailed":
     "Failed to record the path on the project.",
+  // own-but-empty hardening (ticket r8vg9pMWCRtdnUzR3KyX). Self-diagnosis
+  // shown when the registered own folder is empty or points at a different
+  // git remote than the project. Helps the user see why the modal re-appeared
+  // and pick "Clone & connect" or "Connect existing folder" to fix it.
+  "collab.repoConnect.ownIssue.empty":
+    "The folder linked to this project on this machine is empty — `{{path}}`. Clone the project repository into it, or connect a different folder where you already cloned it.",
+  "collab.repoConnect.ownIssue.mismatch":
+    "The folder linked to this project on this machine has a different git repository — `{{path}}`. Connect a folder where this project's repository is cloned.",
 };

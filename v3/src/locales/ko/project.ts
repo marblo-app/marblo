@@ -7,6 +7,10 @@ export const project = {
   "project.subtitle": "멤버 · 역할 · 작업량을 한 곳에서",
   "project.memberCount": "멤버 {count}명",
   "project.myRole": "내 역할",
+  // 수동 재호출 진입점 (티켓 r8vg9pMWCRtdnUzR3KyX). 자동 모달을 닫았거나
+  // 빈 폴더 자동 등록으로 영구히 코드 탭에 못 들어오던 멤버가 여기서
+  // 모달을 다시 띄울 수 있다.
+  "project.repoConnectCta": "저장소 연결",
 
   // No project selected
   "project.noProject.title": "선택된 프로젝트가 없습니다",

@@ -10,6 +10,7 @@ import { TeamManagement } from "../settings/TeamManagement";
 import { PlanGate } from "../settings/PlanGate";
 import { MemberWorkloadPanel } from "./MemberWorkloadPanel";
 import { ProjectAuditPanel } from "./ProjectAuditPanel";
+import { REPO_CONNECT_OPEN_EVENT } from "../collaboration/RepoConnectModal";
 
 /**
  * 프로젝트 탭 — 이 프로젝트의 **사람** 쪽 전부를 한 화면에 모은다: 누가 있고
@@ -106,6 +107,19 @@ export function ProjectTab() {
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-500">
+            {/* ★수동 재호출 진입점 (티켓 r8vg9pMWCRtdnUzR3KyX):
+                자동 모달을 닫았거나 빈 폴더로 own 이 된 멤버가 여기서
+                모달을 다시 띄울 수 있다. RepoConnectModal 이 이 이벤트를
+                받아 dismissed 상태를 무시하고 표시한다. */}
+            <button
+              type="button"
+              onClick={() =>
+                window.dispatchEvent(new CustomEvent(REPO_CONNECT_OPEN_EVENT))
+              }
+              className="rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-gray-200 hover:border-gray-500 hover:bg-gray-700"
+            >
+              {t("project.repoConnectCta")}
+            </button>
             <span>
               {t("project.memberCount", { count: workloadMembers.length })}
             </span>

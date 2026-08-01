@@ -9,6 +9,10 @@ export const project: Record<keyof typeof koProject, string> = {
   "project.subtitle": "Members, roles, and workload in one place",
   "project.memberCount": "{count} members",
   "project.myRole": "My role",
+  // Manual re-open entry point (ticket r8vg9pMWCRtdnUzR3KyX). Members who
+  // dismissed the auto-modal or were auto-registered to an empty folder
+  // can re-open the connect-repo modal from here.
+  "project.repoConnectCta": "Connect repository",
 
   // No project selected
   "project.noProject.title": "No project selected",

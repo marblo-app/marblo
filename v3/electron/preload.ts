@@ -27,7 +27,7 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 if (typeof __SENTRY_PRELOAD_ENABLED__ === "undefined") {
   console.warn(
     "[preload] not esbuild-bundled — Sentry renderer bridge inactive. " +
-      "Run `node scripts/bundle-preload.mjs` (build scripts do this after tsc).",
+      "Run `node scripts/bundle-preload.mjs` (build scripts do this after tsc)."
   );
 } else if (__SENTRY_PRELOAD_ENABLED__) {
   try {
@@ -36,7 +36,7 @@ if (typeof __SENTRY_PRELOAD_ENABLED__ === "undefined") {
   } catch (err) {
     console.warn(
       "[preload] @sentry/electron/preload unavailable — skipping Sentry renderer bridge",
-      err,
+      err
     );
   }
 }
@@ -119,7 +119,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       error?: string;
     }> => ipcRenderer.invoke("auth:googleLoopback"),
     syncAgentCustomToken: (
-      customToken: string,
+      customToken: string
     ): Promise<{ ok: boolean; uid?: string; error?: string }> =>
       ipcRenderer.invoke("auth:syncAgentCustomToken", { customToken }),
     clearAgentCustomToken: (): Promise<{
@@ -163,7 +163,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     writeAndSubmit: (
       id: string,
       data: string,
-      bracketedPaste?: boolean,
+      bracketedPaste?: boolean
     ): Promise<void> => {
       ipcRenderer.send("pty:writeAndSubmit", { id, data, bracketedPaste });
       return Promise.resolve();
@@ -202,7 +202,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       projectId?: string,
       taskId?: string,
       /** 명시 모델 핀 `<modelId>[@<effort>]` (퀵레인 모델 셀렉터). */
-      modelPin?: string,
+      modelPin?: string
     ) =>
       ipcRenderer.invoke("agent:launch", {
         agent,
@@ -219,7 +219,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     list: (projectId?: string) => ipcRenderer.invoke("agent:list", projectId),
     remove: (id: string) => ipcRenderer.invoke("agent:remove", id),
     onStatusChange: (
-      callback: (data: { agentId: string; status: string }) => void,
+      callback: (data: { agentId: string; status: string }) => void
     ) => {
       ipcRenderer.on("agent:statusChanged", (_event, data) => callback(data));
     },
@@ -229,12 +229,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
         agentId: string;
         attempt: number;
         maxAttempts: number;
-      }) => void,
+      }) => void
     ) => {
       ipcRenderer.on("agent:restartAttempt", (_event, data) => callback(data));
     },
     onRestartFailed: (
-      callback: (data: { agentId: string; exitCode: number }) => void,
+      callback: (data: { agentId: string; exitCode: number }) => void
     ) => {
       ipcRenderer.on("agent:restartFailed", (_event, data) => callback(data));
     },
@@ -253,7 +253,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         rateLimitResetAt?: number;
         rateLimitWeeklyPercent?: number;
         rateLimitWeeklyResetAt?: number;
-      }) => void,
+      }) => void
     ) => {
       ipcRenderer.on("cost:update", (_event, data) => callback(data));
     },
@@ -269,7 +269,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         command: string;
       }>,
       rootPath: string,
-      projectId: string,
+      projectId: string
     ) => ipcRenderer.invoke("agent:reconnect", { agents, rootPath, projectId }),
     onSyncStatus: (
       callback: (data: {
@@ -277,7 +277,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         agentName: string;
         status: string;
         currentTaskId: string | null;
-      }) => void,
+      }) => void
     ) => {
       ipcRenderer.on("agent:syncStatus", (_event, data) => callback(data));
     },
@@ -354,23 +354,23 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke(
         "missionOrchestrator:stopForMission",
         projectId,
-        missionId,
+        missionId
       ),
     // 직전 mission 오케스트레이터 세션 id (kind=mission) — 없으면 null. 부팅 시
     // 자동 재연결(resume) 여부 판단용. board 의 resolvePrevious 와 동일 패턴.
     // projectId 를 주면 main 이 프로젝트별 모델(codex 등)을 인지해 해석한다.
     resolvePrevious: (
       rootPath: string,
-      projectId?: string,
+      projectId?: string
     ): Promise<string | null> =>
       ipcRenderer.invoke(
         "missionOrchestrator:resolvePrevious",
         rootPath,
-        projectId,
+        projectId
       ),
     onStatusChange: (callback: (data: { status: string }) => void) => {
       ipcRenderer.on("missionOrchestrator:statusChanged", (_event, data) =>
-        callback(data),
+        callback(data)
       );
     },
     removeStatusListener: () => {
@@ -386,10 +386,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
         kind: "pty_input_required" | "escalate";
         question?: string;
         skill?: string | null;
-      }) => void,
+      }) => void
     ) => {
       ipcRenderer.on("mission:needsInput", (_event, notice) =>
-        callback(notice),
+        callback(notice)
       );
     },
     removeNeedsInputListener: () => {
@@ -408,7 +408,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         depends_on: string[];
         scope: string[];
         estimatedHours: number;
-      }>,
+      }>
     ) => ipcRenderer.invoke("orchestrator:createTasks", tasks),
     // In-process, project-resolved delivery of a free-form instruction to the
     // project's orchestrator PTY. Returns a REAL ack ({ delivered, reason }) so
@@ -416,7 +416,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // unlike the fire-and-forget pty.writeAndSubmit it replaces.
     injectMessage: (
       projectId: string,
-      message: string,
+      message: string
     ): Promise<{ delivered: boolean; reason?: string }> =>
       ipcRenderer.invoke("orchestrator:injectMessage", { projectId, message }),
   },
@@ -427,7 +427,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       projectId: string,
       rootPath: string,
       resumeSessionId?: string,
-      model?: string,
+      model?: string
     ) =>
       ipcRenderer.invoke("orchestratorSession:launch", {
         projectId,
@@ -450,16 +450,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // before proposing a Codex resume.
     resolvePrevious: (
       rootPath: string,
-      projectId?: string,
+      projectId?: string
     ): Promise<string | null> =>
       ipcRenderer.invoke(
         "orchestratorSession:resolvePrevious",
         rootPath,
-        projectId,
+        projectId
       ),
     onStatusChange: (callback: (data: { status: string }) => void) => {
       ipcRenderer.on("orchestrator:statusChanged", (_event, data) =>
-        callback(data),
+        callback(data)
       );
     },
     onAgentSpawned: (
@@ -472,7 +472,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         /** 실제로 뜬 구체 모델(`model@effort`). 모델을 핀하지 않은 스폰이면
          * 없다 — 수신 측은 벤더(model) 표시로 fallback 해야 한다. */
         spawnedModel?: string;
-      }) => void,
+      }) => void
     ) => {
       ipcRenderer.on("agent:spawned", (_event, data) => callback(data));
     },
@@ -483,7 +483,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     pause: (runId: string) => ipcRenderer.invoke("flow:pause", { runId }),
     resume: (
       runId: string,
-      humanInput?: { nodeId: string; approved: boolean; data?: unknown },
+      humanInput?: { nodeId: string; approved: boolean; data?: unknown }
     ) => ipcRenderer.invoke("flow:resume", { runId, humanInput }),
     cancel: (runId: string) => ipcRenderer.invoke("flow:cancel", { runId }),
     getState: (runId: string) => ipcRenderer.invoke("flow:getState", { runId }),
@@ -543,7 +543,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // 않는다** — 반환값은 마스킹된 스냅샷뿐이고, 평문은 set 의 입력으로만 흐른다.
     getVendorSecrets: () =>
       ipcRenderer.invoke(
-        "vendorSecrets:list",
+        "vendorSecrets:list"
       ) as Promise<VendorSecretsSnapshot>,
     setVendorSecret: (envKey: string, value: string) =>
       ipcRenderer.invoke("vendorSecrets:set", { envKey, value }) as Promise<{
@@ -631,7 +631,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         monthlyFlatUsd: number;
         monthlyTokenAllowance?: number;
         overagePerToken?: { inputPer1M: number; outputPer1M: number };
-      }>,
+      }>
     ) =>
       ipcRenderer.invoke("subscriptionPlans:save", plans) as Promise<{
         success: boolean;
@@ -776,10 +776,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
         phase: "progress" | "done" | "error" | "cancelled";
         percent?: number;
         error?: string;
-      }) => void,
+      }) => void
     ) => {
       ipcRenderer.on("localModels:pullProgress", (_event, data) =>
-        callback(data),
+        callback(data)
       );
     },
     offPullProgress: () => {
@@ -837,13 +837,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("fs:gitDiff", filePath, baseSha),
     gitRemoteUrl: (rootPath: string) =>
       ipcRenderer.invoke("fs:gitRemoteUrl", rootPath),
+    // 연결된 own 폴더가 실제 코드 탭을 쓸 수 있는 상태인지 한 번에 검사
+    // (티켓 r8vg9pMWCRtdnUzR3KyX, own-but-empty 보강). 빈 폴더·origin
+    // 불일치를 가른다.
+    checkFolderValidity: (input: {
+      folderPath: string;
+      expectedRemoteUrl?: string | null;
+    }) => ipcRenderer.invoke("fs:checkFolderValidity", input),
     selectDirectory: () => ipcRenderer.invoke("fs:selectDirectory"),
     pathExists: (targetPath: string): Promise<boolean> =>
       ipcRenderer.invoke("fs:pathExists", targetPath),
     watch: (rootPath: string) => ipcRenderer.invoke("fs:watch", rootPath),
     onFileChange: (callback: (event: string, filePath: string) => void) => {
       ipcRenderer.on("fs:change", (_event, ev, fp) =>
-        callback(ev as string, fp as string),
+        callback(ev as string, fp as string)
       );
     },
     offFileChange: () => {

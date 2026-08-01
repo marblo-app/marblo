@@ -7,10 +7,11 @@ import {
 import type { ProjectPathResolution } from "../../src/lib/projectPaths";
 
 // "저장소 연결" 모달 노출 판정 (티켓 r8VggohxLGciDVXV2rf6,
-// 게이트 완화 r8vIviEcwHFbFJ88RqZ7).
+// 게이트 완화 r8vIviEcwHFbFJ88RqZ7, own-but-empty 보강 r8vg9pMWCRtdnUzR3KyX).
 // 핵심 계약: 이미 연결된 멤버(own)·machineId 미도착에서는 절대 true 가 되지
 // 않는다 — 기존 화면 픽셀 불변의 근거. repo URL 부재는 더 이상 차단 사유가
-// 아니라 모드(clone vs manual) 결정 요인이다.
+// 아니라 모드(clone vs manual) 결정 요인이다. 단, own 으로 표시된 폴더가
+// 비어 있거나 프로젝트와 다른 git 을 가리키면 예외적으로 모달을 띄운다.
 
 const REPO = "https://github.com/acme/app.git";
 const MACHINE = "mac-abc-123";
@@ -18,27 +19,27 @@ const MACHINE = "mac-abc-123";
 function project(
   kind: ProjectPathResolution["kind"] | undefined,
   // null = "URL 없음"(기본 파라미터가 undefined 를 삼키는 함정 회피용 센티널)
-  gitRemoteUrlOrNull: string | null = REPO,
+  gitRemoteUrlOrNull: string | null = REPO
 ) {
   const gitRemoteUrl = gitRemoteUrlOrNull ?? undefined;
   const folderPathResolution: ProjectPathResolution | undefined =
     kind === "own"
       ? { kind, path: "/Users/me/app", source: "machine" }
       : kind === "foreign-only"
-        ? {
-            kind,
-            otherMachines: [
-              {
-                path: "C:\\Users\\owner\\app",
-                platform: "win32",
-                machineId: "win-1",
-                updatedAt: 1,
-              },
-            ],
-          }
-        : kind === "unregistered"
-          ? { kind }
-          : undefined;
+      ? {
+          kind,
+          otherMachines: [
+            {
+              path: "C:\\Users\\owner\\app",
+              platform: "win32",
+              machineId: "win-1",
+              updatedAt: 1,
+            },
+          ],
+        }
+      : kind === "unregistered"
+      ? { kind }
+      : undefined;
   return { gitRemoteUrl, folderPathResolution };
 }
 
@@ -64,23 +65,57 @@ describe("shouldOfferRepoConnect", () => {
   // 스스로 채울 수도 없다 — 예전 게이트에선 모달이 영영 안 떴다.
   it("still offers without a repo URL (manual entry fallback)", () => {
     expect(shouldOfferRepoConnect(project("foreign-only", null), MACHINE)).toBe(
-      true,
+      true
     );
     expect(shouldOfferRepoConnect(project("unregistered", null), MACHINE)).toBe(
-      true,
+      true
     );
   });
 
   it("keeps the own-machine invariant even without a repo URL", () => {
     expect(shouldOfferRepoConnect(project("own", null), MACHINE)).toBe(false);
     expect(shouldOfferRepoConnect(project("foreign-only", null), null)).toBe(
-      false,
+      false
     );
   });
 
   it("never offers without a project or resolution", () => {
     expect(shouldOfferRepoConnect(null, MACHINE)).toBe(false);
     expect(shouldOfferRepoConnect(project(undefined), MACHINE)).toBe(false);
+  });
+
+  // ★own-but-empty 보강 (티켓 r8vg9pMWCRtdnUzR3KyX).
+  // 자동 등록된 빈 폴더/잘못된 git 으로 인해 영구히 코드 탭에 못 들어오던
+  // 갭을 막는다. 정상 own(코드 있고 프로젝트와 매칭)은 여전히 표시 안 됨
+  // — 픽셀 불변.
+  it("does not offer when own folder is valid (pixel-invariant)", () => {
+    expect(shouldOfferRepoConnect(project("own"), MACHINE, "valid")).toBe(
+      false
+    );
+  });
+
+  it("offers when own folder is empty (auto-registered empty dir)", () => {
+    expect(shouldOfferRepoConnect(project("own"), MACHINE, "empty")).toBe(true);
+  });
+
+  it("offers when own folder has a mismatching git remote", () => {
+    expect(shouldOfferRepoConnect(project("own"), MACHINE, "mismatch")).toBe(
+      true
+    );
+  });
+
+  it("treats own + null (preflight pending) as no-offer (boot flash guard)", () => {
+    // IPC 가 아직 안 돌아온 첫 프레임엔 null — 깜빡임 방지.
+    expect(shouldOfferRepoConnect(project("own"), MACHINE, null)).toBe(false);
+  });
+
+  it("ignores ownValidity for non-own kinds (foreign-only / unregistered keep offering)", () => {
+    expect(
+      shouldOfferRepoConnect(project("foreign-only"), MACHINE, "empty")
+    ).toBe(true);
+    expect(
+      shouldOfferRepoConnect(project("unregistered"), MACHINE, "mismatch")
+    ).toBe(true);
   });
 });
 
@@ -100,7 +135,7 @@ describe("repoDirNameFromUrl", () => {
   it("matches the electron-side derivation for display", () => {
     expect(repoDirNameFromUrl("https://github.com/acme/app.git")).toBe("app");
     expect(repoDirNameFromUrl("git@github.com:acme/my-repo.git")).toBe(
-      "my-repo",
+      "my-repo"
     );
     expect(repoDirNameFromUrl("https://github.com/acme/....git")).toBe("repo");
   });

@@ -34,4 +34,12 @@ export const collaboration = {
   "collab.repoConnect.errorNoRemote":
     "선택한 폴더에서 git origin 을 찾지 못했습니다. 프로젝트 저장소를 clone 한 폴더를 선택하세요.",
   "collab.repoConnect.connectFailed": "프로젝트에 경로를 기록하지 못했습니다.",
+  // own-but-empty 보강 (티켓 r8vg9pMWCRtdnUzR3KyX). 자동 등록된 빈 폴더
+  // 또는 프로젝트와 다른 git 을 가리키는 own 폴더일 때 보여주는 자기 진단.
+  // 사용자가 "내 폴더가 비어 있다" / "내 폴더는 있는데 저장소가 다르다" 를
+  // 한눈에 보고 바로 Clone & 연결 또는 다른 폴더 선택으로 바로잡게 한다.
+  "collab.repoConnect.ownIssue.empty":
+    "이 기기에 등록된 폴더가 비어 있습니다 — `{{path}}`. 프로젝트 저장소를 이 위치에 clone 하거나, 이미 clone 해 둔 폴더로 다시 연결해 주세요.",
+  "collab.repoConnect.ownIssue.mismatch":
+    "이 기기에 등록된 폴더의 git 저장소가 프로젝트와 다릅니다 — `{{path}}`. 같은 저장소를 clone 한 폴더로 다시 연결해 주세요.",
 };

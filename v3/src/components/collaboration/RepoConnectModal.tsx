@@ -7,12 +7,14 @@ import {
   shouldOfferRepoConnect,
   repoConnectMode,
   repoDirNameFromUrl,
+  type OwnValidity,
 } from "../../lib/repoConnect";
 import telemetry from "../../services/telemetryService";
 import type { MessageKey } from "../../locales/ko";
 
 /**
- * 저장소 연결 모달 (티켓 r8VggohxLGciDVXV2rf6).
+ * 저장소 연결 모달 (티켓 r8VggohxLGciDVXV2rf6,
+ * 게이트 완화 r8vIviEcwHFbFJ88RqZ7, own-but-empty 보강 r8vg9pMWCRtdnUzR3KyX).
  *
  * 초대 수락한 멤버가 프로젝트에 진입했는데 이 기기에 rootPath 가 없으면
  * project.gitRemoteUrl 을 보여주고 [Clone & 연결] 원클릭을 제공한다.
@@ -20,7 +22,9 @@ import type { MessageKey } from "../../locales/ko";
  *
  * 노출 판정은 shouldOfferRepoConnect(순수 함수)가 담당한다: 이미 연결된
  * 멤버(resolution kind === "own")나 machineId 미도착 시점에는 절대 뜨지
- * 않아 기존 화면이 픽셀 단위로 불변이다.
+ * 않아 기존 화면이 픽셀 단위로 불변이다. 단, own 으로 표시된 폴더가
+ * 비어 있거나 프로젝트와 다른 git 을 가리키면 예외적으로 다시 띄운다 —
+ * 빈 폴더 자동 등록으로 영구히 코드 탭에 못 들어오던 갭을 막는다.
  *
  * 두 모드 (티켓 r8vIviEcwHFbFJ88RqZ7):
  *  - `clone`  — 프로젝트가 repo 주소를 안다. 기존 동작 그대로.
@@ -29,6 +33,12 @@ import type { MessageKey } from "../../locales/ko";
  *    댔다. 이제 주소 입력란을 띄우고, [기존 폴더 연결]은 고른 폴더의 origin
  *    을 그대로 채택한다. 어느 쪽이든 확인된 주소를 프로젝트에 backfill 해
  *    다음 멤버부터는 clone 모드가 된다.
+ *
+ * ★수동 재호출 (티켓 r8vg9pMWCRtdnUzR3KyX):
+ * `window.dispatchEvent(new CustomEvent("marblo:open-repo-connect"))` 로
+ * dismissed 상태를 리셋해 모달을 띄울 수 있다. 모달을 닫았거나 빈 폴더
+ * 자동 등록으로 own 인 사용자가 설정/프로젝트 메뉴에서 수동으로 다시
+ * 들어올 때 쓴다.
  */
 
 /** clone 실패 종류 → 안내 문구 키. */
@@ -40,6 +50,9 @@ const ERROR_KEY: Record<string, MessageKey> = {
   git: "collab.repoConnect.errorGeneric",
   "invalid-url": "collab.repoConnect.errorInvalidUrl",
 };
+
+/** 수동 재호출 진입점에서 보낼 커스텀 이벤트. */
+export const REPO_CONNECT_OPEN_EVENT = "marblo:open-repo-connect";
 
 export function RepoConnectModal() {
   const { t } = useTranslation();
@@ -61,8 +74,86 @@ export function RepoConnectModal() {
   // manual 모드에서만 쓰는 주소 입력값(clone 모드에선 프로젝트 값이 이긴다).
   const [manualUrl, setManualUrl] = useState("");
 
+  // own 폴더의 실제 상태(빈 폴더/원격 불일치/정상). own 이 아닐 땐 의미 없음.
+  // ★null = 검사 전/실패 — shouldOfferRepoConnect 가 "own 이면 표시 안 함"
+  // 기존 동작을 유지하므로 부팅 시 깜빡임이 없다.
+  const [ownValidity, setOwnValidity] = useState<OwnValidity>(null);
+
+  // 수동 재호출 플래그. dismissed 와 무관하게 모달을 띄운다. 라운드 종료
+  // 시(모달이 닫히거나 다시 정상 own 이 되면) 자동 해제된다.
+  const [forceOpen, setForceOpen] = useState(false);
+
+  // 수동 재호출 이벤트 리스너.
+  useEffect(() => {
+    const handler = () => setForceOpen(true);
+    window.addEventListener(REPO_CONNECT_OPEN_EVENT, handler);
+    return () => window.removeEventListener(REPO_CONNECT_OPEN_EVENT, handler);
+  }, []);
+
+  // kind === "own" 일 때만 폴더 상태를 한 번 검사한다. foreign-only /
+  // unregistered 는 어차피 모달이 떠야 하니 검사할 이유가 없다.
+  useEffect(() => {
+    const kind = currentProject?.folderPathResolution?.kind;
+    if (kind !== "own" || !currentProject) {
+      setOwnValidity(null);
+      return;
+    }
+    const resolution = currentProject.folderPathResolution;
+    if (!resolution || resolution.kind !== "own") {
+      setOwnValidity(null);
+      return;
+    }
+    const ownPath = resolution.path;
+    if (!ownPath) {
+      setOwnValidity(null);
+      return;
+    }
+    let cancelled = false;
+    setOwnValidity(null); // 새 검사 시작 — 깜빡임 방지로 일단 null
+    window.electronAPI.fs
+      ?.checkFolderValidity?.({
+        folderPath: ownPath,
+        expectedRemoteUrl: currentProject.gitRemoteUrl ?? null,
+      })
+      .then((result) => {
+        if (cancelled || !result) return;
+        if (!result.exists) {
+          // 폴더가 사라졌다 — 사용자가 정리한 케이스. 빈 폴더로 간주.
+          setOwnValidity("empty");
+          return;
+        }
+        if (result.isEmpty) {
+          setOwnValidity("empty");
+          return;
+        }
+        if (result.remoteUrl && result.matches === false) {
+          setOwnValidity("mismatch");
+          return;
+        }
+        // origin 이 같거나 비교 상대가 없을 때(프로젝트에 URL 없음)는 valid.
+        setOwnValidity("valid");
+      })
+      .catch(() => {
+        // IPC 실패 — 기존 동작 유지.
+        if (!cancelled) setOwnValidity(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentProject?.id,
+    currentProject?.folderPathResolution,
+    currentProject?.gitRemoteUrl,
+  ]);
+
+  const isOwn = currentProject?.folderPathResolution?.kind === "own";
+  const offered = shouldOfferRepoConnect(
+    currentProject,
+    machineId,
+    ownValidity,
+  );
   const visible =
-    shouldOfferRepoConnect(currentProject, machineId) &&
+    (offered || (forceOpen && isOwn)) &&
     !!currentProject &&
     !dismissed.has(currentProject.id);
 
@@ -83,7 +174,9 @@ export function RepoConnectModal() {
     };
   }, [visible, defaultParent]);
 
-  // 프로젝트가 바뀌면 이전 에러/위치 선택/입력값을 비운다.
+  // 프로젝트가 바뀌면 이전 에러/위치 선택/입력값을 비운다. forceOpen 도
+  // 새 프로젝트에 대해 다시 신호를 줘야 하므로 유지한다 — 단 visible 이
+  // false 가 되면 다음 effect 에서 정리된다.
   useEffect(() => {
     setErrorKey(null);
     setErrorDetail(null);
@@ -91,9 +184,27 @@ export function RepoConnectModal() {
     setManualUrl("");
   }, [currentProject?.id]);
 
+  // 모달이 보이지 않게 되는 순간 forceOpen 을 풀어 다음 자동 게이트가 깨끗
+  // 하게 시작되게 한다(수동 신호는 한 번 쓰고 버림).
+  useEffect(() => {
+    if (!visible) setForceOpen(false);
+  }, [visible]);
+
   if (!visible || !currentProject) return null;
 
   const connectMode = repoConnectMode(currentProject);
+  // own-empty/mismatch 케이스에서 보여줄 자기 진단. valid 면 표시 안 함.
+  const ownIssue =
+    isOwn && ownValidity === "empty"
+      ? "empty"
+      : isOwn && ownValidity === "mismatch"
+        ? "mismatch"
+        : null;
+  const ownPath =
+    currentProject.folderPathResolution &&
+    currentProject.folderPathResolution.kind === "own"
+      ? currentProject.folderPathResolution.path
+      : "";
   // clone 모드에선 프로젝트 값, manual 모드에선 사용자가 입력한 값.
   const repoUrl =
     connectMode === "clone"
@@ -226,11 +337,13 @@ export function RepoConnectModal() {
 
         <div className="p-5 space-y-4">
           <p className="text-sm text-gray-300">
-            {t(
-              connectMode === "manual"
-                ? "collab.repoConnect.manualDescription"
-                : "collab.repoConnect.description",
-            )}
+            {ownIssue
+              ? t(`collab.repoConnect.ownIssue.${ownIssue}`, { path: ownPath })
+              : t(
+                  connectMode === "manual"
+                    ? "collab.repoConnect.manualDescription"
+                    : "collab.repoConnect.description",
+                )}
           </p>
 
           <div>

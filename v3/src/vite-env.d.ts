@@ -18,13 +18,13 @@ interface FsAPI {
   /** `showHidden` 을 켜면 숨김 항목·루트 .gitignore 항목까지 나열한다(기본 false). */
   readTree: (
     rootPath: string,
-    options?: { showHidden?: boolean },
+    options?: { showHidden?: boolean }
   ) => Promise<FileNode[]>;
   readFile: (rootPath: string, filePath: string) => Promise<string>;
   writeFile: (
     rootPath: string,
     filePath: string,
-    content: string,
+    content: string
   ) => Promise<void>;
   gitStatus: (rootPath: string) => Promise<Record<string, string>>;
   /**
@@ -34,16 +34,31 @@ interface FsAPI {
    */
   gitWorktreeChanges?: (
     rootPath: string,
-    baseRef: string,
+    baseRef: string
   ) => Promise<{
     baseSha: string;
     files: Array<{ relPath: string; status: string }>;
   }>;
   gitDiff: (
     filePath: string,
-    baseSha?: string,
+    baseSha?: string
   ) => Promise<{ original: string; modified: string }>;
   gitRemoteUrl: (rootPath: string) => Promise<string | null>;
+  /**
+   * 연결된 own 폴더가 실제 코드 탭을 쓸 수 있는 상태인지 한 번에 검사
+   * (티켓 r8vg9pMWCRtdnUzR3KyX, own-but-empty 보강). 빈 폴더·origin
+   * 불일치를 가른다. IPC 실패나 빈 응답은 호출자가 `OwnValidity = null`
+   * 로 취급해 기존 동작을 유지한다.
+   */
+  checkFolderValidity: (input: {
+    folderPath: string;
+    expectedRemoteUrl?: string | null;
+  }) => Promise<{
+    exists: boolean;
+    isEmpty: boolean;
+    remoteUrl: string | null;
+    matches: boolean | null;
+  }>;
   selectDirectory: () => Promise<string | null>;
   /** 디렉터리 존재 확인(읽기 전용). 레거시 경로 마이그레이션 소유권 판정용. */
   pathExists: (targetPath: string) => Promise<boolean>;
@@ -52,25 +67,25 @@ interface FsAPI {
   offFileChange: () => void;
   createFile: (
     rootPath: string,
-    filePath: string,
+    filePath: string
   ) => Promise<{ success: boolean; path: string }>;
   createDirectory: (
     rootPath: string,
-    dirPath: string,
+    dirPath: string
   ) => Promise<{ success: boolean; path: string }>;
   rename: (
     rootPath: string,
     fromPath: string,
-    toPath: string,
+    toPath: string
   ) => Promise<{ success: boolean; fromPath: string; toPath: string }>;
   remove: (
     rootPath: string,
-    targetPath: string,
+    targetPath: string
   ) => Promise<{ success: boolean; path: string }>;
   copy: (
     rootPath: string,
     fromPath: string,
-    toPath: string,
+    toPath: string
   ) => Promise<{ success: boolean; fromPath: string; toPath: string }>;
   revealInFinder: (targetPath: string) => Promise<{ success: boolean }>;
   readFileBase64: (rootPath: string, filePath: string) => Promise<string>;
@@ -94,7 +109,7 @@ interface PtyAPI {
   writeAndSubmit: (
     id: string,
     data: string,
-    bracketedPaste?: boolean,
+    bracketedPaste?: boolean
   ) => Promise<void>;
   resize: (id: string, cols: number, rows: number) => Promise<void>;
   kill: (id: string) => Promise<void>;
@@ -125,7 +140,7 @@ interface AgentAPI {
      * 생략하면 종전 동작(complexity 티어 정책 / CLI 기본 모델)이 그대로 돈다.
      * 핀의 하네스가 `agent.model` 과 다르면 main 이 버린다(spawn 보호).
      */
-    modelPin?: string,
+    modelPin?: string
   ) => Promise<{
     id: string;
     ptySessionId: string;
@@ -140,7 +155,7 @@ interface AgentAPI {
   }>;
   stop: (id: string) => Promise<void>;
   restart: (
-    id: string,
+    id: string
   ) => Promise<{ id: string; ptySessionId: string; status: string } | null>;
   status: (id: string) => Promise<string>;
   list: (projectId?: string) => Promise<
@@ -155,7 +170,7 @@ interface AgentAPI {
   >;
   remove: (id: string) => Promise<{ success: boolean }>;
   onStatusChange: (
-    callback: (data: { agentId: string; status: string }) => void,
+    callback: (data: { agentId: string; status: string }) => void
   ) => void;
   healthStatus: (id: string) => Promise<{
     status: string;
@@ -167,10 +182,10 @@ interface AgentAPI {
       agentId: string;
       attempt: number;
       maxAttempts: number;
-    }) => void,
+    }) => void
   ) => void;
   onRestartFailed: (
-    callback: (data: { agentId: string; exitCode: number }) => void,
+    callback: (data: { agentId: string; exitCode: number }) => void
   ) => void;
   onCostUpdate: (
     callback: (data: {
@@ -190,7 +205,7 @@ interface AgentAPI {
       rateLimitResetAt?: number;
       rateLimitWeeklyPercent?: number;
       rateLimitWeeklyResetAt?: number;
-    }) => void,
+    }) => void
   ) => void;
   offCostUpdate: () => void;
   reconnect: (
@@ -202,7 +217,7 @@ interface AgentAPI {
       command: string;
     }>,
     rootPath: string,
-    projectId: string,
+    projectId: string
   ) => Promise<
     Array<{
       agentId: string;
@@ -230,7 +245,7 @@ interface AgentAPI {
       agentName: string;
       status: string;
       currentTaskId: string | null;
-    }) => void,
+    }) => void
   ) => void;
 }
 
@@ -253,7 +268,7 @@ interface DecompositionResultDTO {
 interface OrchestratorAPI {
   decompose: (text: string) => Promise<DecompositionResultDTO>;
   createTasks: (
-    tasks: DecomposedTaskDTO[],
+    tasks: DecomposedTaskDTO[]
   ) => Promise<{ tasks: DecomposedTaskDTO[]; layers: string[][] }>;
   /**
    * Inject a free-form instruction into the project's orchestrator PTY in-process
@@ -263,7 +278,7 @@ interface OrchestratorAPI {
    */
   injectMessage: (
     projectId: string,
-    message: string,
+    message: string
   ) => Promise<{ delivered: boolean; reason?: string }>;
 }
 
@@ -289,7 +304,7 @@ interface MissionOrchestratorAPI {
   stopForMission: (projectId: string, missionId: string) => Promise<void>;
   resolvePrevious: (
     rootPath: string,
-    projectId?: string,
+    projectId?: string
   ) => Promise<string | null>;
   onStatusChange: (callback: (data: { status: string }) => void) => void;
   removeStatusListener: () => void;
@@ -301,7 +316,7 @@ interface MissionOrchestratorAPI {
       kind: "pty_input_required" | "escalate";
       question?: string;
       skill?: string | null;
-    }) => void,
+    }) => void
   ) => void;
   removeNeedsInputListener: () => void;
 }
@@ -313,7 +328,7 @@ interface OrchestratorSessionAPI {
     resumeSessionId?: string,
     /** 이번 launch 의 명시 모델(패널 Start). 생략 시 main 이
      * 프로젝트별 저장 모델 → 전역 설정 순으로 결정. */
-    model?: string,
+    model?: string
   ) => Promise<{
     sessionId: string;
     ptySessionId: string;
@@ -366,7 +381,7 @@ interface OrchestratorSessionAPI {
   >;
   resolvePrevious: (
     rootPath: string,
-    projectId?: string,
+    projectId?: string
   ) => Promise<string | null>;
   onStatusChange: (callback: (data: { status: string }) => void) => void;
   onAgentSpawned: (
@@ -380,7 +395,7 @@ interface OrchestratorSessionAPI {
        * "gpt-5.6-sol@high"). 벤더(model)와 별개 축이며, 모델을 핀하지 않은
        * 스폰이면 없다 — 표시는 벤더로 graceful fallback. */
       spawnedModel?: string;
-    }) => void,
+    }) => void
   ) => void;
 }
 
@@ -398,12 +413,12 @@ type FlowEvent =
 interface FlowAPI {
   run: (
     flow: unknown,
-    inputs?: Record<string, unknown>,
+    inputs?: Record<string, unknown>
   ) => Promise<{ runId: string }>;
   pause: (runId: string) => Promise<void>;
   resume: (
     runId: string,
-    humanInput?: { nodeId: string; approved: boolean; data?: unknown },
+    humanInput?: { nodeId: string; approved: boolean; data?: unknown }
   ) => Promise<void>;
   cancel: (runId: string) => Promise<void>;
   getState: (runId: string) => Promise<unknown>;
@@ -426,10 +441,10 @@ interface SettingsAPI {
   getVendorSecrets: () => Promise<VendorSecretsSnapshot>;
   setVendorSecret: (
     envKey: string,
-    value: string,
+    value: string
   ) => Promise<{ success: boolean; snapshot: VendorSecretsSnapshot }>;
   deleteVendorSecret: (
-    envKey: string,
+    envKey: string
   ) => Promise<{ success: boolean; snapshot: VendorSecretsSnapshot }>;
 }
 
@@ -465,7 +480,7 @@ interface VendorSecretKeyStatus {
 interface CodeAPI {
   format: (
     content: string,
-    filePath: string,
+    filePath: string
   ) => Promise<{ formatted: string; error: string | null }>;
 }
 
@@ -625,7 +640,7 @@ interface SubscriptionPlanEntry {
 interface SubscriptionPlansAPI {
   list: () => Promise<SubscriptionPlanEntry[]>;
   save: (
-    plans: SubscriptionPlanEntry[],
+    plans: SubscriptionPlanEntry[]
   ) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -746,19 +761,19 @@ interface WorktreeAPI {
   remove: (
     repoRoot: string,
     path: string,
-    deleteBranch?: boolean,
+    deleteBranch?: boolean
   ) => Promise<{ success: boolean }>;
   prune: (repoRoot: string) => Promise<{ success: boolean }>;
   cleanupStale: (
     repoRoot: string,
-    maxIdleDays?: number,
+    maxIdleDays?: number
   ) => Promise<{
     removed: string[];
     failed: { path: string; error: string }[];
   }>;
   rebase: (
     path: string,
-    baseRef: string,
+    baseRef: string
   ) => Promise<{ ok: boolean; conflicts?: string[] }>;
   merge: (args: WorktreeMergeArgs) => Promise<{
     ok: boolean;
@@ -776,7 +791,7 @@ interface WorktreeAPI {
   showCommit: (
     repoRoot: string,
     sha: string,
-    projectId?: string,
+    projectId?: string
   ) => Promise<{ ok: boolean; diff: string }>;
 }
 
@@ -808,7 +823,7 @@ interface WindowAPI {
   /** Pop a tab (Board/Code) out into its own detached window. The new window
    * inherits this window's folder/project so it opens on the same data. */
   popOutTab: (
-    view: "board" | "code" | "history",
+    view: "board" | "code" | "history"
   ) => Promise<{ success: boolean }>;
 }
 
@@ -852,7 +867,7 @@ interface HarnessAPI {
   install: (id: string) => Promise<{ success: boolean; error?: string }>;
   uninstall: (id: string) => Promise<{ success: boolean; error?: string }>;
   cliAuthCheck: (
-    model: "claude" | "codex" | "grok" | "antigravity",
+    model: "claude" | "codex" | "grok" | "antigravity"
   ) => Promise<CliAuthResult>;
 }
 
@@ -988,11 +1003,11 @@ interface ConnectionAPI {
     input: Partial<ProjectConnection> & {
       projectId: string;
       localPath: string;
-    },
+    }
   ) => Promise<ProjectConnection>;
   touchLastRun: (
     projectId: string,
-    at?: number,
+    at?: number
   ) => Promise<ProjectConnection | null>;
   check: (projectId: string) => Promise<ConnectionCheckResult>;
 }
@@ -1067,7 +1082,7 @@ interface AuthAPI {
     error?: string;
   }>;
   syncAgentCustomToken: (
-    customToken: string,
+    customToken: string
   ) => Promise<{ ok: boolean; uid?: string; error?: string }>;
   clearAgentCustomToken: () => Promise<{ ok: boolean; error?: string }>;
 }
