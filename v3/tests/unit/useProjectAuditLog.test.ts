@@ -14,18 +14,32 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const getProjectAuditLog = vi.hoisted(() => vi.fn());
 const getProjectAuditActors = vi.hoisted(() => vi.fn());
+const getProjectLedgerLog = vi.hoisted(() => vi.fn());
+const getProjectLedgerActors = vi.hoisted(() => vi.fn());
 
 vi.mock("../../src/services/projectAuditService", () => ({
   getProjectAuditLog: (...args: unknown[]) => getProjectAuditLog(...args),
   getProjectAuditActors: (...args: unknown[]) => getProjectAuditActors(...args),
+  getProjectLedgerLog: (...args: unknown[]) => getProjectLedgerLog(...args),
+  getProjectLedgerActors: (...args: unknown[]) =>
+    getProjectLedgerActors(...args),
 }));
 
-const { fetchAuditLogState, fetchAuditActors } =
-  await import("../../src/hooks/useProjectAuditLog");
+const {
+  fetchAuditLogState,
+  fetchAuditActors,
+  fetchLedgerLogState,
+  fetchUnifiedAuditSources,
+  fetchUnifiedAuditOptions,
+} = await import("../../src/hooks/useProjectAuditLog");
 
 beforeEach(() => {
   getProjectAuditLog.mockReset().mockResolvedValue([]);
   getProjectAuditActors.mockReset().mockResolvedValue([]);
+  getProjectLedgerLog.mockReset().mockResolvedValue([]);
+  getProjectLedgerActors
+    .mockReset()
+    .mockResolvedValue({ actors: [], toolNames: [] });
 });
 
 describe("fetchAuditLogState — 조회", () => {
@@ -111,5 +125,208 @@ describe("fetchAuditActors — 부가 정보라 실패를 삼킨다", () => {
     getProjectAuditActors.mockRejectedValue({ code: "permission-denied" });
 
     await expect(fetchAuditActors("p1")).resolves.toEqual([]);
+  });
+});
+
+// ── 두 소스 병합 로딩 ────────────────────────────────────────────
+
+const LEDGER_ROW = {
+  id: "a1",
+  projectId: "p1",
+  agentId: "agent-1",
+  toolName: "update_task_status",
+  params: {},
+  result: "ok",
+  duration: 1,
+  success: true,
+  actorUid: "u1",
+  model: "claude",
+  taskId: "t1",
+  createdAt: new Date("2026-08-01T11:00:00Z"),
+};
+
+const HUMAN_ROW = {
+  id: "h1",
+  projectId: "p1",
+  actorUid: "u1",
+  actorName: "John",
+  type: "chat.message.sent",
+  taskId: null,
+  targetId: "m1",
+  metadata: {},
+  createdAt: new Date("2026-08-01T10:00:00Z"),
+};
+
+describe("fetchLedgerLogState — 원장 조회", () => {
+  it("성공하면 ready + 건수", async () => {
+    getProjectLedgerLog.mockResolvedValue([LEDGER_ROW]);
+
+    const result = await fetchLedgerLogState("p1");
+
+    expect(result.state).toEqual({ status: "ready", count: 1 });
+    expect(result.events).toEqual([LEDGER_ROW]);
+  });
+
+  it("★permission-denied 를 빈 목록으로 위장하지 않는다", async () => {
+    getProjectLedgerLog.mockRejectedValue({ code: "permission-denied" });
+
+    expect((await fetchLedgerLogState("p1")).state).toEqual({
+      status: "denied",
+    });
+  });
+
+  it("★어떤 실패에도 throw 하지 않는다", async () => {
+    getProjectLedgerLog.mockRejectedValue(new Error("boom"));
+
+    await expect(fetchLedgerLogState("p1")).resolves.toMatchObject({
+      state: { status: "error" },
+    });
+  });
+});
+
+describe("fetchUnifiedAuditSources — 두 소스 병렬", () => {
+  it("필터 없으면 두 소스를 모두 읽는다", async () => {
+    getProjectAuditLog.mockResolvedValue([HUMAN_ROW]);
+    getProjectLedgerLog.mockResolvedValue([LEDGER_ROW]);
+
+    const result = await fetchUnifiedAuditSources("p1");
+
+    expect(getProjectAuditLog).toHaveBeenCalled();
+    expect(getProjectLedgerLog).toHaveBeenCalled();
+    expect(result.human).toEqual([HUMAN_ROW]);
+    expect(result.agent).toEqual([LEDGER_ROW]);
+    expect(result.sources).toEqual({
+      human: { status: "ready", count: 1 },
+      agent: { status: "ready", count: 1 },
+    });
+  });
+
+  it("★구성원 필터는 두 소스에 같이 걸린다", async () => {
+    // 원장 actorUid = 발주한 사람의 uid. 축이 같아서 병합이 성립한다.
+    await fetchUnifiedAuditSources("p1", { actorUid: "u2" });
+
+    expect(getProjectAuditLog).toHaveBeenCalledWith(
+      "p1",
+      expect.objectContaining({ actorUid: "u2" }),
+    );
+    expect(getProjectLedgerLog).toHaveBeenCalledWith(
+      "p1",
+      expect.objectContaining({ actorUid: "u2" }),
+    );
+  });
+
+  it("사람 종류를 고르면 원장은 조회조차 하지 않고 skipped", async () => {
+    const result = await fetchUnifiedAuditSources("p1", {
+      typeFilter: "agent.spawned",
+    });
+
+    expect(getProjectAuditLog).toHaveBeenCalledWith(
+      "p1",
+      expect.objectContaining({ type: "agent.spawned" }),
+    );
+    expect(getProjectLedgerLog).not.toHaveBeenCalled();
+    // ★ready(0) 이 아니다 — 조회 안 한 소스를 "0건"이라 말하면 거짓이 된다.
+    expect(result.sources.agent).toEqual({ status: "skipped" });
+  });
+
+  it("툴 이름을 고르면 사람 쪽은 조회조차 하지 않고 skipped", async () => {
+    const result = await fetchUnifiedAuditSources("p1", {
+      typeFilter: "tool:spawn_agent",
+    });
+
+    expect(getProjectLedgerLog).toHaveBeenCalledWith(
+      "p1",
+      expect.objectContaining({ toolName: "spawn_agent" }),
+    );
+    expect(getProjectAuditLog).not.toHaveBeenCalled();
+    expect(result.sources.human).toEqual({ status: "skipped" });
+  });
+
+  it("★사람 소스가 거부돼도 원장은 그대로 살아 있다", async () => {
+    // 원장은 멤버 전원 read 다. 사람 쪽 거부 하나로 통째로 가리면 볼 수 있는
+    // 것을 못 보게 만드는 회귀(#406/#428 계열).
+    getProjectAuditLog.mockRejectedValue({ code: "permission-denied" });
+    getProjectLedgerLog.mockResolvedValue([LEDGER_ROW]);
+
+    const result = await fetchUnifiedAuditSources("p1");
+
+    expect(result.sources.human).toEqual({ status: "denied" });
+    expect(result.sources.agent).toEqual({ status: "ready", count: 1 });
+    expect(result.agent).toEqual([LEDGER_ROW]);
+  });
+
+  it("★원장이 거부돼도 사람 쪽은 그대로 살아 있다", async () => {
+    getProjectLedgerLog.mockRejectedValue({ code: "permission-denied" });
+    getProjectAuditLog.mockResolvedValue([HUMAN_ROW]);
+
+    const result = await fetchUnifiedAuditSources("p1");
+
+    expect(result.sources.agent).toEqual({ status: "denied" });
+    expect(result.human).toEqual([HUMAN_ROW]);
+  });
+
+  it("★한 소스가 throw 해도 다른 소스가 시도조차 못 하는 일이 없다", async () => {
+    // 직렬로 읽으면 앞 소스의 throw 가 뒤 소스를 통째로 막는다.
+    getProjectAuditLog.mockRejectedValue(new Error("boom"));
+    getProjectLedgerLog.mockResolvedValue([LEDGER_ROW]);
+
+    const result = await fetchUnifiedAuditSources("p1");
+
+    expect(getProjectLedgerLog).toHaveBeenCalled();
+    expect(result.sources.human).toMatchObject({ status: "error" });
+    expect(result.agent).toHaveLength(1);
+  });
+
+  it("둘 다 거부면 둘 다 denied(빈 목록 위장 없음)", async () => {
+    getProjectAuditLog.mockRejectedValue({ code: "permission-denied" });
+    getProjectLedgerLog.mockRejectedValue({ code: "permission-denied" });
+
+    const result = await fetchUnifiedAuditSources("p1");
+
+    expect(result.sources).toEqual({
+      human: { status: "denied" },
+      agent: { status: "denied" },
+    });
+  });
+});
+
+describe("fetchUnifiedAuditOptions — 필터 옵션 병합", () => {
+  it("두 소스의 행위자를 uid 로 합산한다", async () => {
+    getProjectAuditActors.mockResolvedValue([
+      { actorUid: "u1", actorName: "John", count: 3 },
+    ]);
+    getProjectLedgerActors.mockResolvedValue({
+      actors: [{ actorUid: "u1", actorName: null, count: 40 }],
+      toolNames: ["spawn_agent"],
+    });
+
+    const options = await fetchUnifiedAuditOptions("p1");
+
+    expect(options.actors).toEqual([
+      { actorUid: "u1", actorName: "John", count: 43 },
+    ]);
+    expect(options.toolNames).toEqual(["spawn_agent"]);
+  });
+
+  it("원장 옵션이 실패해도 사람 쪽 옵션은 남는다", async () => {
+    getProjectAuditActors.mockResolvedValue([
+      { actorUid: "u1", actorName: "John", count: 3 },
+    ]);
+    getProjectLedgerActors.mockRejectedValue({ code: "permission-denied" });
+
+    const options = await fetchUnifiedAuditOptions("p1");
+
+    expect(options.actors).toHaveLength(1);
+    expect(options.toolNames).toEqual([]);
+  });
+
+  it("★부가 정보라 실패해도 throw 하지 않는다", async () => {
+    getProjectAuditActors.mockRejectedValue(new Error("boom"));
+    getProjectLedgerActors.mockRejectedValue(new Error("boom"));
+
+    await expect(fetchUnifiedAuditOptions("p1")).resolves.toEqual({
+      actors: [],
+      toolNames: [],
+    });
   });
 });

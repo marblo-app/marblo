@@ -1,25 +1,43 @@
 /**
- * 감사 로그 로딩 훅 — 조회 API 를 화면 상태로 바꾼다.
+ * 감사 로그 로딩 훅 — 두 소스를 병렬로 읽어 하나의 화면 상태로 접는다.
  *
- * ★원장(`audit_logs`)이나 `projectAuditLog` 컬렉션을 직접 읽지 않는다. 오직
- * services/projectAuditService 의 getProjectAuditLog / getProjectAuditActors
- * 만 부른다 — 컬렉션을 직접 쿼리하면 owner/admin 게이트와 서버사이드 필터가
- * 화면마다 갈라지고(#406/#428 의 실패 모드), 룰과 클라이언트 제약이 어긋나는
- * 순간 쿼리 전체가 permission-denied 로 죽는다.
+ * 소스는 둘이다:
+ *   - `projectAuditLog` — 렌더러발 **사람** 행위 (owner/admin read)
+ *   - `audit_logs`      — MCP 툴 호출 = **오케/에이전트** 행위 (멤버 전원 read)
+ *
+ * ★컬렉션을 직접 쿼리하지 않는다. 오직 services/projectAuditService 의 조회 API
+ * (getProjectAuditLog / getProjectAuditActors / getProjectLedgerLog /
+ * getProjectLedgerActors)만 부른다 — 컬렉션을 화면마다 직접 짜면 게이트와
+ * 서버사이드 필터가 갈라지고, 룰과 클라이언트 제약이 어긋나는 순간 쿼리 전체가
+ * permission-denied 로 죽는다(#406/#428 의 실패 모드).
+ *
+ * ★소스별 에러를 **격리**한다. 한 소스가 거부돼도 다른 소스는 그대로 보여주고,
+ * 무엇이 빠졌는지는 안내로 말한다. 하나가 죽었다고 둘 다 숨기면, 멤버 전원이
+ * 읽을 수 있는 원장까지 사람 쪽 거부 하나 때문에 안 보이게 된다.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
-  ProjectAuditEventType,
+  ProjectAuditEvent,
   ProjectAuditLogQuery,
 } from "../types/projectAudit";
+import type { AuditLog } from "../types/audit";
 import {
   getProjectAuditLog,
   getProjectAuditActors,
+  getProjectLedgerLog,
+  getProjectLedgerActors,
 } from "../services/projectAuditService";
 import {
   auditStateFromError,
+  buildAuditRows,
+  mergeAuditActors,
+  parseAuditTypeFilter,
+  type AuditActorTally,
   type AuditLoadState,
+  type AuditSources,
+  type AuditSourceState,
+  type UnifiedAuditRow,
 } from "../lib/projectAuditView";
 
 export interface AuditActorOption {
@@ -64,61 +82,205 @@ export async function fetchAuditActors(
   }
 }
 
+/** 원장 조회 1회 → 상태 + 이벤트. 사람 쪽과 같은 이유로 throw 하지 않는다. */
+export async function fetchLedgerLogState(
+  projectId: string,
+  query: { actorUid?: string; toolName?: string; limit?: number } = {},
+): Promise<{ state: AuditSourceState; events: AuditLog[] }> {
+  try {
+    const events = await getProjectLedgerLog(projectId, query);
+    return { state: { status: "ready", count: events.length }, events };
+  } catch (err) {
+    return { state: auditStateFromError(err), events: [] };
+  }
+}
+
+export interface UnifiedAuditQuery {
+  actorUid?: string;
+  /** 종류 필터의 raw 값(사람 type 또는 `tool:<toolName>`). undefined = 전체. */
+  typeFilter?: string;
+  limit?: number;
+}
+
+export interface UnifiedAuditFetch {
+  human: ProjectAuditEvent[];
+  agent: AuditLog[];
+  sources: AuditSources;
+}
+
+/**
+ * 두 소스를 **병렬로** 읽는다.
+ *
+ * 직렬로 읽으면 느린 것도 문제지만 더 나쁜 건 실패 전파다 — 앞 소스가 throw
+ * 하면 뒤 소스는 아예 시도조차 안 된다. `Promise.all` 로 묶되 각 갈래가 자기
+ * try/catch 를 들고 있어서 **어느 쪽도 다른 쪽을 죽이지 못한다.**
+ *
+ * 종류 필터가 한 소스를 고르면 다른 소스는 조회하지 않고 `skipped` 로 둔다 —
+ * `ready(0)` 로 쓰면 "조회했는데 0건"이라는 없는 사실을 단정하게 된다.
+ */
+export async function fetchUnifiedAuditSources(
+  projectId: string,
+  query: UnifiedAuditQuery = {},
+): Promise<UnifiedAuditFetch> {
+  const filter = parseAuditTypeFilter(query.typeFilter);
+  const wantHuman = filter.source !== "agent";
+  const wantAgent = filter.source !== "human";
+
+  const [human, agent] = await Promise.all([
+    wantHuman
+      ? fetchAuditLogState(projectId, {
+          actorUid: query.actorUid,
+          type: filter.source === "human" ? filter.type : undefined,
+          limit: query.limit,
+        })
+      : Promise.resolve<AuditLoadState | null>(null),
+    wantAgent
+      ? fetchLedgerLogState(projectId, {
+          actorUid: query.actorUid,
+          toolName: filter.source === "agent" ? filter.toolName : undefined,
+          limit: query.limit,
+        })
+      : Promise.resolve(null),
+  ]);
+
+  return {
+    human: human?.status === "ready" ? human.events : [],
+    agent: agent?.events ?? [],
+    sources: {
+      human: human ? toSourceState(human) : { status: "skipped" },
+      agent: agent ? agent.state : { status: "skipped" },
+    },
+  };
+}
+
+function toSourceState(state: AuditLoadState): AuditSourceState {
+  return state.status === "ready"
+    ? { status: "ready", count: state.events.length }
+    : state;
+}
+
+export interface UnifiedAuditOptions {
+  /** 필터 UI 에 쓸 행위자 목록(두 소스 합산). */
+  actors: AuditActorTally[];
+  /** 종류 필터에 실을 오케 행위 종류 = 창에 실제 등장한 툴 이름. */
+  toolNames: string[];
+}
+
+/**
+ * 필터 옵션 — 두 소스의 행위자를 합치고 툴 이름을 모은다.
+ *
+ * 실패는 양쪽 다 빈 목록으로 접는다(위 fetchAuditActors 와 같은 이유: 부가
+ * 정보라서 여기서 에러를 띄우면 정작 목록은 잘 보이는데 화면만 시끄러워진다).
+ */
+export async function fetchUnifiedAuditOptions(
+  projectId: string,
+): Promise<UnifiedAuditOptions> {
+  const [human, agent] = await Promise.all([
+    fetchAuditActors(projectId),
+    getProjectLedgerActors(projectId).catch(() => ({
+      actors: [] as AuditActorTally[],
+      toolNames: [] as string[],
+    })),
+  ]);
+
+  return {
+    actors: mergeAuditActors(human, agent.actors),
+    toolNames: agent.toolNames,
+  };
+}
+
 export interface UseProjectAuditLogResult {
-  state: AuditLoadState;
-  actors: AuditActorOption[];
+  rows: UnifiedAuditRow[];
+  sources: AuditSources;
+  actors: AuditActorTally[];
+  toolNames: string[];
   reload: () => void;
 }
 
 /**
  * @param projectId 빈 문자열이면 아무것도 조회하지 않는다(프로젝트 미선택).
- * @param actorUid  구성원 필터. undefined = 전체.
- * @param type      종류 필터. undefined = 전체.
+ * @param actorUid  구성원 필터. undefined = 전체. **두 소스에 같이 걸린다** —
+ *                  원장의 actorUid 도 "발주한 사람"이라 축이 같다.
+ * @param typeFilter 종류 필터 raw 값. 사람 종류 또는 `tool:<toolName>`.
+ * @param nameByUid 이름 메꿈용(원장엔 이름이 없고, 사람 쪽도 비어 있을 수 있다).
  */
 export function useProjectAuditLog(
   projectId: string,
   actorUid?: string,
-  type?: ProjectAuditEventType,
+  typeFilter?: string,
+  nameByUid: Record<string, string> = {},
 ): UseProjectAuditLogResult {
-  const [state, setState] = useState<AuditLoadState>({ status: "loading" });
-  const [actors, setActors] = useState<AuditActorOption[]>([]);
+  const [fetched, setFetched] = useState<UnifiedAuditFetch>({
+    human: [],
+    agent: [],
+    sources: { human: { status: "loading" }, agent: { status: "loading" } },
+  });
+  const [options, setOptions] = useState<UnifiedAuditOptions>({
+    actors: [],
+    toolNames: [],
+  });
   const [nonce, setNonce] = useState(0);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 
   useEffect(() => {
     if (!projectId) {
-      setState({ status: "ready", events: [] });
+      setFetched({
+        human: [],
+        agent: [],
+        sources: {
+          human: { status: "ready", count: 0 },
+          agent: { status: "ready", count: 0 },
+        },
+      });
       return;
     }
     let cancelled = false;
-    setState({ status: "loading" });
-    fetchAuditLogState(projectId, { actorUid, type }).then((next) => {
-      if (!cancelled) setState(next);
-    });
+    setFetched((prior) => ({
+      ...prior,
+      sources: { human: { status: "loading" }, agent: { status: "loading" } },
+    }));
+    fetchUnifiedAuditSources(projectId, { actorUid, typeFilter }).then(
+      (next) => {
+        if (!cancelled) setFetched(next);
+      },
+    );
     return () => {
       cancelled = true;
     };
-  }, [projectId, actorUid, type, nonce]);
+  }, [projectId, actorUid, typeFilter, nonce]);
 
   /**
-   * 행위자 목록은 **필터와 무관하게** 프로젝트 단위로만 다시 읽는다. 필터를
-   * 걸 때마다 갱신하면 "u1 로 필터" → 목록이 u1 하나로 줄어들어 다른 사람으로
-   * 바꿀 수단이 사라진다(자기 자신을 가두는 필터).
+   * 필터 옵션은 **필터와 무관하게** 프로젝트 단위로만 다시 읽는다. 필터를 걸
+   * 때마다 갱신하면 "u1 로 필터" → 목록이 u1 하나로 줄어들어 다른 사람으로
+   * 바꿀 수단이 사라진다(자기 자신을 가두는 필터). 툴 이름도 같은 이유.
    */
   useEffect(() => {
     if (!projectId) {
-      setActors([]);
+      setOptions({ actors: [], toolNames: [] });
       return;
     }
     let cancelled = false;
-    fetchAuditActors(projectId).then((next) => {
-      if (!cancelled) setActors(next);
+    fetchUnifiedAuditOptions(projectId).then((next) => {
+      if (!cancelled) setOptions(next);
     });
     return () => {
       cancelled = true;
     };
   }, [projectId, nonce]);
 
-  return { state, actors, reload };
+  // 병합은 순수함수라 렌더 중에 접어도 안전하다. 이름 메꿈이 members 에 걸려
+  // 있어서 members 가 바뀌면 행 라벨만 다시 계산된다(재조회 없음).
+  const rows = useMemo(
+    () => buildAuditRows(fetched.human, fetched.agent, nameByUid),
+    [fetched, nameByUid],
+  );
+
+  return {
+    rows,
+    sources: fetched.sources,
+    actors: options.actors,
+    toolNames: options.toolNames,
+    reload,
+  };
 }

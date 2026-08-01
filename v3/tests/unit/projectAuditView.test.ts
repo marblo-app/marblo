@@ -14,7 +14,21 @@ import {
   isPermissionDenied,
   auditStateFromError,
   auditEmptyKind,
+  agentAuditRow,
+  agentTypeFilterValue,
+  auditLedgerDetail,
+  auditSourceNotices,
+  buildAuditRows,
+  humanAuditRow,
+  isAuditLoading,
+  isFullyDenied,
+  mergeAuditActors,
+  mergeAuditRows,
+  parseAuditTypeFilter,
+  type UnifiedAuditRow,
 } from "../../src/lib/projectAuditView";
+import type { AuditLog } from "../../src/types/audit";
+import type { ProjectAuditEvent } from "../../src/types/projectAudit";
 import {
   PROJECT_AUDIT_EVENT_TYPES,
   PROJECT_AUDIT_SINCE_VERSION,
@@ -194,5 +208,335 @@ describe("빈 화면 안내 문구 — 감사에서 '없음'과 '못 봄'을 가
   it("★'권한 없음' 문구와 '기록 없음' 문구가 서로 다르다", () => {
     expect(ko["project.audit.emptyTitle"]).not.toBe(ko["project.audit.denied"]);
     expect(en["project.audit.emptyTitle"]).not.toBe(en["project.audit.denied"]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// 통합 뷰 — 사람(projectAuditLog) + 오케(audit_logs 원장) 읽기병합
+// ═══════════════════════════════════════════════════════════════════
+
+function humanEvent(over: Partial<ProjectAuditEvent> = {}): ProjectAuditEvent {
+  return {
+    id: "h1",
+    projectId: "p1",
+    actorUid: "u1",
+    actorName: "John",
+    type: "chat.message.sent",
+    taskId: null,
+    targetId: "m1",
+    metadata: { messageType: "text" },
+    createdAt: new Date("2026-08-01T10:00:00Z"),
+    ...over,
+  };
+}
+
+function ledgerEvent(over: Partial<AuditLog> = {}): AuditLog {
+  return {
+    id: "a1",
+    projectId: "p1",
+    agentId: "agent-1",
+    toolName: "update_task_status",
+    params: { task_id: "t1", secret: "should-never-render" },
+    result: "ok",
+    duration: 12,
+    success: true,
+    createdAt: new Date("2026-08-01T11:00:00Z"),
+    kind: "action",
+    actorUid: "u1",
+    model: "claude",
+    tier: "complex",
+    instructionHash: "sha256:deadbeef",
+    taskId: "t1",
+    worktreeId: "p1/t1",
+    ...over,
+  };
+}
+
+describe("humanAuditRow / agentAuditRow — 소스 태깅", () => {
+  it("사람 행은 actorKind='human' 이고 모델이 없다", () => {
+    const row = humanAuditRow(humanEvent());
+
+    expect(row.actorKind).toBe("human");
+    expect(row.model).toBeNull();
+    expect(row.failed).toBe(false);
+    expect(row.label).toEqual({
+      kind: "i18n",
+      key: "project.audit.type.chatMessageSent",
+    });
+  });
+
+  it("오케 행은 actorKind='agent' 이고 라벨이 번역되지 않은 toolName 이다", () => {
+    // 툴 이름은 앱·문서·MCP 스펙에서 원문으로 통용된다. 번역하면 대조 불가.
+    const row = agentAuditRow(ledgerEvent());
+
+    expect(row.actorKind).toBe("agent");
+    expect(row.label).toEqual({ kind: "raw", text: "update_task_status" });
+    expect(row.model).toBe("claude");
+    expect(row.taskId).toBe("t1");
+  });
+
+  it("★오케 행의 이름은 '에이전트'가 아니라 **발주한 사람**이다", () => {
+    // 원장의 actorUid = 그 에이전트를 발주한 사람의 uid. 이게 두 소스가
+    // 같은 구성원 축으로 병합될 수 있는 이유다.
+    const row = agentAuditRow(ledgerEvent({ actorUid: "u2" }), {
+      u2: "Jane",
+    });
+
+    expect(row.actorUid).toBe("u2");
+    expect(row.actorLabel).toBe("Jane");
+  });
+
+  it("이름을 못 메꾸면 uid 앞자리로 떨어진다 — 사람 쪽과 같은 규칙", () => {
+    // 같은 사람이 두 소스에서 다른 이름으로 보이면 안 된다.
+    const uid = "abcdefghijklmnop";
+    expect(agentAuditRow(ledgerEvent({ actorUid: uid })).actorLabel).toBe(
+      humanAuditRow(humanEvent({ actorUid: uid, actorName: null })).actorLabel,
+    );
+  });
+
+  it("★귀속 불가(actorUid 없음) 행도 버리지 않는다", () => {
+    // 원장 확장 이전 문서엔 actorUid 필드가 아예 없다. 행을 떨구면 오래된
+    // 기록이 조용히 사라진다 — 감사에서 가장 나쁜 실패.
+    const row = agentAuditRow(ledgerEvent({ actorUid: undefined }));
+
+    expect(row.actorUid).toBeNull();
+    expect(row.actorLabel).toBeNull(); // 호출부가 "귀속 불가"를 그린다
+    expect(row.label).toEqual({ kind: "raw", text: "update_task_status" });
+  });
+
+  it("실패한 툴 호출을 표시한다 — 단, success 부재를 실패로 단정하지 않는다", () => {
+    expect(agentAuditRow(ledgerEvent({ success: false })).failed).toBe(true);
+    expect(
+      agentAuditRow(ledgerEvent({ success: undefined as never })).failed,
+    ).toBe(false);
+  });
+
+  it("★두 소스의 key 가 문서 id 가 같아도 충돌하지 않는다", () => {
+    // 컬렉션이 다르면 id 네임스페이스도 다르다. 충돌하면 React 가 행을 조용히
+    // 덮어써서 감사 기록이 화면에서 사라진다.
+    const same = "SAME_ID";
+    expect(humanAuditRow(humanEvent({ id: same })).key).not.toBe(
+      agentAuditRow(ledgerEvent({ id: same })).key,
+    );
+  });
+});
+
+describe("★프라이버시 경계 — 원장 원문은 뷰로 새지 않는다", () => {
+  it("params 원문도 instructionHash 도 행에 담기지 않는다", () => {
+    // 툴 인자에는 지시문·경로·티켓 본문이 그대로 들어오고 거기 자격증명이
+    // 섞일 수 있다. 원장은 불변이라 한번 새면 되돌릴 수 없다.
+    const row = agentAuditRow(
+      ledgerEvent({ params: { token: "sk-live-super-secret" } }),
+    );
+
+    expect(JSON.stringify(row)).not.toContain("sk-live-super-secret");
+    expect(JSON.stringify(row)).not.toContain("deadbeef");
+  });
+
+  it("detail 은 티어만 싣는다(model·toolName·taskId 는 전용 칸)", () => {
+    expect(auditLedgerDetail({ tier: "complex" })).toBe("complex");
+    expect(auditLedgerDetail({ tier: null })).toBeNull();
+    expect(auditLedgerDetail({ tier: "   " })).toBeNull();
+  });
+});
+
+describe("mergeAuditRows / buildAuditRows — 병합", () => {
+  it("★두 소스를 하나의 최신순 타임라인으로 접는다", () => {
+    // 이어붙이기만 하면 경계에서 시간이 뒤섞인다(사람 3건 뒤에 오케 100건).
+    const rows = buildAuditRows(
+      [
+        humanEvent({ id: "h1", createdAt: new Date("2026-08-01T09:00:00Z") }),
+        humanEvent({ id: "h2", createdAt: new Date("2026-08-01T12:00:00Z") }),
+      ],
+      [
+        ledgerEvent({ id: "a1", createdAt: new Date("2026-08-01T10:00:00Z") }),
+        ledgerEvent({ id: "a2", createdAt: new Date("2026-08-01T13:00:00Z") }),
+      ],
+    );
+
+    expect(rows.map((r) => r.key)).toEqual([
+      "agent:a2",
+      "human:h2",
+      "agent:a1",
+      "human:h1",
+    ]);
+  });
+
+  it("한쪽이 비어도 나머지가 그대로 나온다", () => {
+    expect(buildAuditRows([humanEvent()], [])).toHaveLength(1);
+    expect(buildAuditRows([], [ledgerEvent()])).toHaveLength(1);
+    expect(buildAuditRows([], [])).toEqual([]);
+  });
+
+  it("createdAt 이 깨져도 터지지 않고 맨 뒤로 간다", () => {
+    const broken = {
+      key: "x",
+      actorKind: "agent",
+      createdAt: new Date("nope"),
+      actorLabel: null,
+      actorUid: null,
+      label: { kind: "raw", text: "t" },
+      detail: null,
+      taskId: null,
+      model: null,
+      failed: false,
+    } as UnifiedAuditRow;
+
+    const rows = mergeAuditRows([broken], [humanAuditRow(humanEvent())]);
+    expect(rows.at(-1)!.key).toBe("x");
+  });
+});
+
+describe("parseAuditTypeFilter — 종류 필터가 소스를 가른다", () => {
+  it("빈 값은 두 소스 모두", () => {
+    expect(parseAuditTypeFilter(undefined)).toEqual({ source: "both" });
+    expect(parseAuditTypeFilter("")).toEqual({ source: "both" });
+  });
+
+  it("사람 종류를 고르면 사람 소스만", () => {
+    expect(parseAuditTypeFilter("agent.spawned")).toEqual({
+      source: "human",
+      type: "agent.spawned",
+    });
+  });
+
+  it("툴 이름을 고르면 원장 소스만", () => {
+    expect(parseAuditTypeFilter(agentTypeFilterValue("spawn_agent"))).toEqual({
+      source: "agent",
+      toolName: "spawn_agent",
+    });
+  });
+
+  it("★두 네임스페이스가 섞여도 갈린다", () => {
+    // 사람 종류 'agent.spawned' 와 툴 이름 'spawn_agent' 는 서로 다른 축이다.
+    expect(parseAuditTypeFilter("agent.spawned").source).toBe("human");
+    expect(parseAuditTypeFilter("tool:agent.spawned").source).toBe("agent");
+  });
+
+  it("모르는 값은 '아무것도 안 보임'이 아니라 전체로 접는다", () => {
+    // 옛 선택값이 남으면 화면이 영구히 0건이 되고 사용자는 기록 없음으로 읽는다.
+    expect(parseAuditTypeFilter("task.exploded")).toEqual({ source: "both" });
+    expect(parseAuditTypeFilter("tool:")).toEqual({ source: "both" });
+  });
+});
+
+describe("★소스별 에러 격리 — 한 소스가 다른 소스를 죽이지 않는다", () => {
+  const ready = { status: "ready", count: 3 } as const;
+  const denied = { status: "denied" } as const;
+  const failed = { status: "error", message: "index missing" } as const;
+
+  it("한쪽만 거부면 전체 거부 화면이 아니다", () => {
+    // 원장은 멤버 전원 read 인데 사람 쪽 거부 하나로 통째로 가리면,
+    // 볼 수 있는 것을 못 보게 만드는 회귀가 된다.
+    expect(isFullyDenied({ human: denied, agent: ready })).toBe(false);
+    expect(isFullyDenied({ human: ready, agent: denied })).toBe(false);
+    expect(isFullyDenied({ human: denied, agent: denied })).toBe(true);
+  });
+
+  it("거부와 에러가 섞이면 전체 거부가 아니다", () => {
+    // 서로 다른 사실이라 한 문장으로 뭉개면 권한 문제를 장애로 읽는다.
+    expect(isFullyDenied({ human: denied, agent: failed })).toBe(false);
+  });
+
+  it("죽은 소스마다 안내를 하나씩 남긴다 — 조용한 부분 목록 금지", () => {
+    const notices = auditSourceNotices({ human: denied, agent: failed });
+
+    expect(notices).toEqual([
+      { source: "human", state: { status: "denied" } },
+      { source: "agent", state: { status: "error", message: "index missing" } },
+    ]);
+  });
+
+  it("살아 있는/건너뛴 소스는 안내를 만들지 않는다", () => {
+    expect(
+      auditSourceNotices({ human: ready, agent: { status: "skipped" } }),
+    ).toEqual([]);
+  });
+
+  it("skipped 는 ready(0) 과 다른 값이다", () => {
+    // 조회조차 안 한 소스를 "0건"이라 말하면 없는 사실을 단정하게 된다.
+    const skipped = { status: "skipped" } as const;
+    expect(isAuditLoading({ human: skipped, agent: ready })).toBe(false);
+    expect(auditSourceNotices({ human: skipped, agent: skipped })).toEqual([]);
+  });
+
+  it("한 소스라도 로딩 중이면 로딩이다", () => {
+    expect(isAuditLoading({ human: { status: "loading" }, agent: ready })).toBe(
+      true,
+    );
+    expect(isAuditLoading({ human: ready, agent: ready })).toBe(false);
+  });
+});
+
+describe("mergeAuditActors — 구성원 축은 하나다", () => {
+  it("★같은 사람의 사람 행위 + 오케 발주를 한 줄로 합산한다", () => {
+    // 두 줄로 갈리면 고르는 순간 반쪽 타임라인이 나온다.
+    const merged = mergeAuditActors(
+      [{ actorUid: "u1", actorName: "John", count: 3 }],
+      [{ actorUid: "u1", actorName: null, count: 40 }],
+    );
+
+    expect(merged).toEqual([{ actorUid: "u1", actorName: "John", count: 43 }]);
+  });
+
+  it("이름이 있는 쪽이 이긴다(원장엔 이름이 없다)", () => {
+    const merged = mergeAuditActors(
+      [{ actorUid: "u2", actorName: null, count: 1 }],
+      [{ actorUid: "u2", actorName: "Jane", count: 2 }],
+    );
+
+    expect(merged[0].actorName).toBe("Jane");
+  });
+
+  it("건수 내림차순으로 정렬한다", () => {
+    const merged = mergeAuditActors(
+      [{ actorUid: "u1", actorName: null, count: 1 }],
+      [{ actorUid: "u2", actorName: null, count: 9 }],
+    );
+
+    expect(merged.map((a) => a.actorUid)).toEqual(["u2", "u1"]);
+  });
+});
+
+describe("통합 뷰 i18n — ko/en 짝이 맞는가", () => {
+  const KEYS = [
+    "project.audit.filterTypeHumanGroup",
+    "project.audit.filterTypeAgentGroup",
+    "project.audit.actor.human",
+    "project.audit.actor.agentHint",
+    "project.audit.actor.agentModelUnknown",
+    "project.audit.actor.unknown",
+    "project.audit.failed",
+    "project.audit.notice.humanDenied",
+    "project.audit.notice.agentDenied",
+    "project.audit.notice.humanError",
+    "project.audit.notice.agentError",
+  ] as const;
+
+  it("ko/en 양쪽에 문구가 다 있다", () => {
+    for (const key of KEYS) {
+      expect(ko[key]?.trim()).toBeTruthy();
+      expect(en[key]?.trim()).toBeTruthy();
+    }
+  });
+
+  it("★부분 실패 안내가 '거부'와 '장애'를 다른 문구로 말한다", () => {
+    expect(ko["project.audit.notice.humanDenied"]).not.toBe(
+      ko["project.audit.notice.humanError"],
+    );
+    expect(en["project.audit.notice.agentDenied"]).not.toBe(
+      en["project.audit.notice.agentError"],
+    );
+  });
+
+  it("★빈 화면 안내가 더 이상 '에이전트 행위는 여기 안 잡힌다'고 말하지 않는다", () => {
+    // 이제 잡힌다. 옛 문구를 그대로 두면 안내 자체가 거짓이 된다.
+    expect(ko["project.audit.emptyAgentNote"]).not.toContain(
+      "액티비티 스트림에 남습니다",
+    );
+    expect(en["project.audit.emptyAgentNote"]).not.toContain("not here");
+    // 대신 여전히 안 잡히는 것을 말한다.
+    expect(ko["project.audit.emptyAgentNote"]).toContain("MCP");
+    expect(en["project.audit.emptyAgentNote"]).toContain("MCP");
   });
 });

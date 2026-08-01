@@ -34,21 +34,40 @@ export const project = {
   "project.workload.unattributedHint":
     "선점자가 없거나, 이미 나간 멤버의 에이전트이거나, 에이전트 이름이 겹쳐 소유자를 특정할 수 없는 항목입니다.",
 
-  // Audit log (사람 행위 — owner/admin 전용)
+  // Audit log (사람 행위 + 오케 행위 병합 — owner/admin 전용)
   "project.audit.heading": "감사 로그",
-  "project.audit.sourceNote": "구성원의 앱 내 행위 기준 · 최신순",
+  "project.audit.sourceNote": "구성원 · 오케 행위 기준 · 최신순",
   "project.audit.filterActor": "구성원 필터",
   "project.audit.filterActorAll": "전체 구성원",
   "project.audit.filterType": "종류 필터",
   "project.audit.filterTypeAll": "전체 종류",
+  "project.audit.filterTypeHumanGroup": "사람 행위",
+  "project.audit.filterTypeAgentGroup": "오케 행위 (MCP 툴)",
   "project.audit.count": "{count}건",
+  // 사람/오케 구분 — 뭉개면 "이 사람이 티켓 40개를 옮겼다"로 읽히는데 실제로는
+  // 그가 발주한 에이전트가 옮긴 것이다.
+  "project.audit.actor.human": "사람",
+  "project.audit.actor.agentHint":
+    "오케(에이전트)가 한 행위입니다. 옆의 이름은 이 에이전트를 발주한 구성원입니다.",
+  "project.audit.actor.agentModelUnknown": "모델 미상",
+  "project.audit.actor.unknown": "귀속 불가",
+  "project.audit.failed": "실패",
+  // 소스별 부분 실패 — 거부와 장애를 다른 문구로 가른다.
+  "project.audit.notice.humanDenied":
+    "사람 행위 기록은 볼 권한이 없어 빠져 있습니다. 아래 목록은 오케 행위만 담고 있습니다.",
+  "project.audit.notice.agentDenied":
+    "오케 행위 기록은 볼 권한이 없어 빠져 있습니다. 아래 목록은 사람 행위만 담고 있습니다.",
+  "project.audit.notice.humanError":
+    "사람 행위 기록을 불러오지 못했습니다. 아래 목록에는 빠져 있습니다.",
+  "project.audit.notice.agentError":
+    "오케 행위 기록을 불러오지 못했습니다. 아래 목록에는 빠져 있습니다.",
   // 빈 화면은 "왜 비었나"를 반드시 말한다. 그냥 '기록 없음'만 띄우면 owner 가
   // 기능 고장으로 읽는다(실제로 그렇게 접수됐다).
   "project.audit.emptyTitle": "아직 기록이 없습니다",
   "project.audit.emptyDesc":
     "감사 로그는 {version} 버전부터 쌓입니다. 그 이전에 있었던 활동은 기록이 남아 있지 않습니다.",
   "project.audit.emptyAgentNote":
-    "에이전트가 옮긴 티켓은 여기가 아니라 액티비티 스트림에 남습니다. 이 표에는 구성원이 앱에서 직접 한 행위(채팅 전송·티켓 상태 변경·에이전트 스폰)만 기록됩니다.",
+    "이 표에는 구성원이 앱에서 직접 한 행위(채팅 전송·티켓 상태 변경·에이전트 스폰)와 에이전트가 MCP 툴로 한 행위가 함께 기록됩니다. 앱 밖에서 한 일이나 MCP 툴을 거치지 않은 파일 수정은 여기 남지 않습니다.",
   "project.audit.emptyFilteredTitle": "조건에 맞는 기록이 없습니다",
   "project.audit.emptyFilteredDesc":
     "선택한 구성원·종류에 해당하는 기록이 없습니다. 필터를 '전체'로 되돌리면 남아 있는 기록을 모두 볼 수 있습니다.",

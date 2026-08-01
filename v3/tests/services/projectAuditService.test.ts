@@ -29,10 +29,16 @@ vi.mock("../../src/services/firestore", () => ({
   convertTimestamps: (raw: Record<string, unknown>) => raw,
 }));
 
-const { recordProjectAuditEvent, getProjectAuditLog, getProjectAuditActors } =
-  await import("../../src/services/projectAuditService");
+const {
+  recordProjectAuditEvent,
+  getProjectAuditLog,
+  getProjectAuditActors,
+  getProjectLedgerLog,
+  getProjectLedgerActors,
+} = await import("../../src/services/projectAuditService");
 
 const COLLECTION = "projectAuditLog";
+const LEDGER_COLLECTION = "audit_logs";
 
 type Constraint = {
   type: string;
@@ -236,5 +242,154 @@ describe("getProjectAuditActors", () => {
     // 프로젝트 멤버 전체로 그리면 기록 0건인 사람도 필터에 뜬다 — 그건 다른 질문.
     queryDocuments.mockResolvedValue([]);
     expect(await getProjectAuditActors("p1")).toEqual([]);
+  });
+});
+
+// ── 원장(audit_logs) 읽기병합 ────────────────────────────────────
+
+describe("getProjectLedgerLog — 원장 조회", () => {
+  it("★원장 컬렉션을 읽는다 — 사람 컬렉션이 아니다", async () => {
+    await getProjectLedgerLog("p1");
+
+    expect(queryDocuments.mock.calls.at(-1)![0]).toBe(LEDGER_COLLECTION);
+    expect(queryDocuments.mock.calls.at(-1)![0]).not.toBe(COLLECTION);
+  });
+
+  it("필터 없으면 projectId 로만 스코프한다", async () => {
+    await getProjectLedgerLog("p1");
+
+    expect(whereOn("projectId")).toMatchObject({ op: "==", value: "p1" });
+    expect(whereOn("actorUid")).toBeUndefined();
+    expect(whereOn("toolName")).toBeUndefined();
+  });
+
+  it("★actorUid(발주자) 필터가 서버 사이드로 나간다", async () => {
+    // 기존 auditService.subscribeToAuditLogs 는 limit 로 자른 뒤 클라이언트에서
+    // 거른다. 그 함정을 답습하면 "이 구성원이 발주한 행위"가 조용히 축소된다.
+    await getProjectLedgerLog("p1", { actorUid: "u2" });
+
+    expect(whereOn("actorUid")).toMatchObject({ op: "==", value: "u2" });
+  });
+
+  it("toolName 필터도 서버 사이드로 나간다", async () => {
+    await getProjectLedgerLog("p1", { toolName: "update_task_status" });
+
+    expect(whereOn("toolName")).toMatchObject({
+      op: "==",
+      value: "update_task_status",
+    });
+  });
+
+  it("actorUid + toolName 을 함께 걸 수 있다", async () => {
+    await getProjectLedgerLog("p1", {
+      actorUid: "u2",
+      toolName: "spawn_agent",
+    });
+
+    expect(whereOn("actorUid")).toMatchObject({ value: "u2" });
+    expect(whereOn("toolName")).toMatchObject({ value: "spawn_agent" });
+  });
+
+  it("★`kind` 로는 절대 필터하지 않는다", async () => {
+    // kind 는 원장 확장(§5) 이후 필드라 옛 문서엔 아예 없다. Firestore 는 없는
+    // 필드를 equality 로 맞출 수 없어서 where(kind==…) 는 legacy 를 조용히
+    // 누락시킨다 — 감사 뷰에서 가장 나쁜 실패.
+    await getProjectLedgerLog("p1", { actorUid: "u2", toolName: "x" });
+
+    expect(whereOn("kind")).toBeUndefined();
+  });
+
+  it("limit 을 사람 쪽과 같은 규칙으로 정규화한다", async () => {
+    await getProjectLedgerLog("p1", { limit: 10_000 });
+    expect(
+      constraintsOfLastQuery().find((c) => c.type === "limit"),
+    ).toMatchObject({ count: 500 });
+
+    await getProjectLedgerLog("p1", { limit: -1 });
+    expect(
+      constraintsOfLastQuery().find((c) => c.type === "limit"),
+    ).toMatchObject({ count: 100 });
+  });
+
+  it("결과를 최신순으로 돌려준다", async () => {
+    queryDocuments.mockResolvedValue([
+      { id: "a", toolName: "t", createdAt: new Date("2026-01-01") },
+      { id: "c", toolName: "t", createdAt: new Date("2026-03-01") },
+      { id: "b", toolName: "t", createdAt: new Date("2026-02-01") },
+    ]);
+
+    expect((await getProjectLedgerLog("p1")).map((e) => e.id)).toEqual([
+      "c",
+      "b",
+      "a",
+    ]);
+  });
+
+  it("★권한 거부를 빈 배열로 삼키지 않는다", async () => {
+    queryDocuments.mockRejectedValue(new Error("permission-denied"));
+
+    await expect(getProjectLedgerLog("p1")).rejects.toThrow(
+      "permission-denied",
+    );
+  });
+});
+
+describe("getProjectLedgerActors — 필터 옵션", () => {
+  beforeEach(() => {
+    queryDocuments.mockResolvedValue([
+      {
+        id: "1",
+        toolName: "update_task_status",
+        actorUid: "u1",
+        createdAt: new Date("2026-03-01"),
+      },
+      {
+        id: "2",
+        toolName: "spawn_agent",
+        actorUid: "u2",
+        createdAt: new Date("2026-02-01"),
+      },
+      {
+        id: "3",
+        toolName: "update_task_status",
+        actorUid: "u1",
+        createdAt: new Date("2026-01-01"),
+      },
+    ]);
+  });
+
+  it("발주자를 건수 내림차순으로 집계한다", async () => {
+    const { actors } = await getProjectLedgerActors("p1");
+
+    // 원장엔 표시용 이름이 없다(uid 만). 이름 메꿈은 호출부 몫.
+    expect(actors).toEqual([
+      { actorUid: "u1", actorName: null, count: 2 },
+      { actorUid: "u2", actorName: null, count: 1 },
+    ]);
+  });
+
+  it("등장한 툴 이름을 중복 없이 정렬해 돌려준다", async () => {
+    const { toolNames } = await getProjectLedgerActors("p1");
+
+    // 전체 툴 목록을 박아두면 고르는 족족 0건이라 필터가 고장난 것처럼 보인다.
+    expect(toolNames).toEqual(["spawn_agent", "update_task_status"]);
+  });
+
+  it("★귀속 불가(actorUid 없음)는 필터 후보로 올리지 않는다", async () => {
+    queryDocuments.mockResolvedValue([
+      { id: "1", toolName: "get_task", createdAt: new Date("2026-03-01") },
+      {
+        id: "2",
+        toolName: "get_task",
+        actorUid: null,
+        createdAt: new Date("2026-02-01"),
+      },
+    ]);
+
+    const { actors, toolNames } = await getProjectLedgerActors("p1");
+
+    // 고를 수 없는 값이라 옵션이 되면 0건만 돌려준다. 툴 이름은 그대로 남는다.
+    expect(actors).toEqual([]);
+    expect(toolNames).toEqual(["get_task"]);
   });
 });

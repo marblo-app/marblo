@@ -26,6 +26,16 @@
  * 기록이 있고(electron main 의 머지 초크포인트가 write), 그걸 복제하면 정확히
  * "중복 신설"이 된다. 감사 뷰는 두 소스를 함께 읽으면 된다.
  *
+ * ★그 "함께 읽는다"가 이제 실제로 구현돼 있다 — 아래 `getProjectLedgerLog` /
+ * `getProjectLedgerActors` 가 `audit_logs` 를 **읽기 전용**으로 조회하고,
+ * hooks/useProjectAuditLog 가 두 소스를 병합한다. 위 분리 결정은 그대로 유효하다:
+ * **write 는 여전히 각자의 초크포인트**(원장 = mcp-server/tools.ts 의
+ * auditedTool, 이 컬렉션 = recordProjectAuditEvent)이고 합쳐지는 건 읽기뿐이다.
+ * 접근등급도 손대지 않는다 — `audit_logs` read 는 `canReadLedgerDoc()`(멤버
+ * 전원) 그대로 두고, owner/admin 패널이 **상위집합을 읽는** 방향으로만 간다.
+ * 반대 방향(원장 read 를 owner/admin 으로 조이기)은 그 룰을 구독하는 우측
+ * ActivityStreamPanel 을 통째로 죽이는 회귀다(#406/#428).
+ *
  * ─────────────────────────────────────────────────────────────────
  * ★신뢰 경계 (정직한 한계)
  * ─────────────────────────────────────────────────────────────────
@@ -44,6 +54,7 @@ import type {
   ProjectAuditEvent,
   ProjectAuditLogQuery,
 } from "../types/projectAudit";
+import type { AuditLog } from "../types/audit";
 import {
   buildProjectAuditEvent,
   normalizeAuditLimit,
@@ -59,10 +70,16 @@ import {
 import { auth } from "../lib/firebase";
 
 const COLLECTION = "projectAuditLog";
+/** 원장. **읽기만 한다** — write 초크포인트는 mcp-server/tools.ts 의 auditedTool. */
+const LEDGER_COLLECTION = "audit_logs";
 const DATE_FIELDS = ["createdAt"];
 
 function toProjectAuditEvent(raw: Record<string, unknown>): ProjectAuditEvent {
   return convertTimestamps<ProjectAuditEvent>(raw, DATE_FIELDS);
+}
+
+function toAuditLog(raw: Record<string, unknown>): AuditLog {
+  return convertTimestamps<AuditLog>(raw, DATE_FIELDS);
 }
 
 /**
@@ -191,4 +208,105 @@ export async function getProjectAuditActors(
     }
   }
   return [...byUid.values()].sort((a, b) => b.count - a.count);
+}
+
+// ── 원장(audit_logs) 조회 — 오케/에이전트 행위 ────────────────────
+
+/** 원장 조회 필터. 사람 쪽 `ProjectAuditLogQuery` 와 축이 다르다(type ↔ toolName). */
+export interface ProjectLedgerLogQuery {
+  /** 이 에이전트를 **발주한 사람**의 uid. 두 소스가 공유하는 유일한 축이다. */
+  actorUid?: string;
+  toolName?: string;
+  /** 기본 100, 상한 500 — 사람 쪽과 같은 정규화를 쓴다. */
+  limit?: number;
+}
+
+/**
+ * 프로젝트 원장 조회 — 최신순. **읽기 전용이다.**
+ *
+ * 권한: `firestore.rules` 의 `canReadLedgerDoc()` = 프로젝트 멤버 전원 read.
+ * 즉 이 조회는 owner/admin 게이트보다 **넓고**, 감사 패널은 그 상위집합을
+ * 읽는 쪽이다. ★이 함수 때문에 원장 read 룰을 좁히면 안 된다 — 우측
+ * ActivityStreamPanel(services/activityStreamService.ts)이 같은 컬렉션을
+ * 구독하므로 좁히는 순간 일반 멤버의 액티비티 스트림이 통째로 죽는다.
+ *
+ * permission-denied 는 그대로 throw 한다 — 사람 쪽과 같은 이유로 "못 본다"와
+ * "기록 없다"를 절대 같은 값으로 접지 않는다. 훅이 소스별로 따로 받아서
+ * 한 소스의 거부가 다른 소스까지 죽이지 않게 한다.
+ *
+ * ★필터는 **서버 사이드**다. 기존 auditService.subscribeToAuditLogs 는 limit
+ * 으로 자른 뒤 클라이언트에서 거르는데(그 파일 주석의 "composite index
+ * limitation"), 그러면 "이 구성원이 발주한 행위"를 물었을 때 최근 100건 안에
+ * 그 사람이 3건뿐이면 3건만 나온다 — 500건이 더 있어도. 구성원별 조회가 이
+ * 패널의 핵심 용례라 그 함정을 답습하지 않았다. 대신 조합별 복합 인덱스가
+ * 필요하다(firestore.indexes.json 에 3개 추가, `--only firestore:indexes` 배포 필요).
+ *
+ * ★한계(정직하게): `actorUid` 필터는 **그 필드가 있는 문서만** 돌려준다.
+ * actorUid 는 원장 확장(ledger.ts §5) 이후 필드라 그 전에 쌓인 문서에는 아예
+ * 없고, Firestore 는 없는 필드를 equality 로 맞출 수 없다. 필터를 풀면(전체
+ * 구성원) 다시 보인다 — 그래서 필터 걸린 빈 화면과 진짜 0건을 UI 가 가른다.
+ */
+export async function getProjectLedgerLog(
+  projectId: string,
+  options: ProjectLedgerLogQuery = {},
+): Promise<AuditLog[]> {
+  const max = normalizeAuditLimit(options.limit);
+
+  const constraints = [
+    where("projectId", "==", projectId),
+    ...(options.actorUid ? [where("actorUid", "==", options.actorUid)] : []),
+    ...(options.toolName ? [where("toolName", "==", options.toolName)] : []),
+    orderBy("createdAt", "desc"),
+    limitTo(max),
+  ];
+
+  const docs = await queryDocuments<Record<string, unknown>>(
+    LEDGER_COLLECTION,
+    ...constraints,
+  );
+  return sortAuditEventsDesc(docs.map(toAuditLog));
+}
+
+/**
+ * 원장 창(window) 안에 등장한 발주자 uid + 툴 이름.
+ *
+ * 사람 쪽 `getProjectAuditActors` 와 같은 방침이다 — "전체 구성원/전체 툴"이
+ * 아니라 **조회한 창 안에 실제로 등장한 것**만 돌려준다. 기록이 하나도 없는
+ * 항목이 필터에 뜨면 고르는 족족 0건이라 필터가 고장난 것처럼 보인다.
+ *
+ * 툴 이름을 여기서 뽑는 이유: 종류 필터의 오케 쪽 축이 `toolName` 이기 때문.
+ * 원장의 `kind`(action/lifecycle/deploy)를 쓰지 않은 건 의도적이다 — 그 필드도
+ * 확장 이후 필드라 `where("kind","==",…)` 가 옛 문서를 **조용히 누락**시킨다.
+ * 감사 뷰에서 가장 나쁜 실패라 축 자체를 항상 존재하는 필드로 잡았다.
+ */
+export async function getProjectLedgerActors(
+  projectId: string,
+  options: Pick<ProjectLedgerLogQuery, "limit"> = {},
+): Promise<{
+  actors: Array<{ actorUid: string; actorName: string | null; count: number }>;
+  toolNames: string[];
+}> {
+  const events = await getProjectLedgerLog(projectId, options);
+
+  const byUid = new Map<string, { actorUid: string; count: number }>();
+  const tools = new Set<string>();
+  for (const event of events) {
+    if (event.toolName) tools.add(event.toolName);
+    // 귀속 불가(null/필드 이전)는 필터 후보로 올리지 않는다 — 고를 수 없는
+    // 값이라 옵션으로 띄우면 0건만 돌려준다. 행 자체는 목록에 그대로 남는다.
+    const uid = event.actorUid;
+    if (!uid) continue;
+    const prior = byUid.get(uid);
+    if (prior) prior.count += 1;
+    else byUid.set(uid, { actorUid: uid, count: 1 });
+  }
+
+  return {
+    // 원장엔 표시용 이름이 없다(uid 만). 이름은 호출부가 멤버 목록으로 메꾼다 —
+    // 여기서 users 조인을 하면 조회 1회가 N+1 이 된다.
+    actors: [...byUid.values()]
+      .map((a) => ({ ...a, actorName: null }))
+      .sort((a, b) => b.count - a.count),
+    toolNames: [...tools].sort(),
+  };
 }
