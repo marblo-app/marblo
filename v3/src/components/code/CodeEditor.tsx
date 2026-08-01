@@ -362,6 +362,12 @@ export function CodeEditor({
     return () => {
       removeComposer();
       removeTrigger();
+      try {
+        editorRef.current?.setModel(null);
+      } catch {
+        // Monaco may already be disposing during HMR or rapid tab teardown.
+      }
+      editorRef.current = null;
     };
   }, [removeComposer, removeTrigger]);
 

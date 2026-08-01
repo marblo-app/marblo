@@ -232,6 +232,11 @@ export function DiffSurface({
       clearZone();
       disposablesRef.current.forEach((d) => d.dispose());
       disposablesRef.current = [];
+      try {
+        editorRef.current?.setModel(null);
+      } catch {
+        // Monaco may already be disposing during HMR or rapid tab teardown.
+      }
       editorRef.current = null;
     };
   }, [filePath]);

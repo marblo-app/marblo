@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
-import { DiffEditor } from "@monaco-editor/react";
+import { useState, useEffect, useRef } from "react";
+import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
+import type { editor } from "monaco-editor";
 import { useTranslation } from "../../lib/i18n";
 
 interface DiffViewerProps {
@@ -16,6 +17,7 @@ export function DiffViewer({
   const { t } = useTranslation();
   const [original, setOriginal] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const editorRef = useRef<editor.IStandaloneDiffEditor | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,6 +43,22 @@ export function DiffViewer({
     };
   }, [filePath]);
 
+  const handleMount: DiffOnMount = (diffEditor) => {
+    editorRef.current = diffEditor;
+  };
+
+  useEffect(() => {
+    return () => {
+      const diffEditor = editorRef.current;
+      editorRef.current = null;
+      try {
+        diffEditor?.setModel(null);
+      } catch {
+        // Monaco can already be mid-dispose during HMR unmount.
+      }
+    };
+  }, [filePath]);
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-gray-500">
@@ -56,6 +74,7 @@ export function DiffViewer({
       original={original}
       modified={currentContent}
       theme="vs-dark"
+      onMount={handleMount}
       options={{
         readOnly: true,
         minimap: { enabled: false },

@@ -144,6 +144,46 @@ function scrubMainEvent(event: unknown): unknown {
   return e;
 }
 
+function getEventMessages(event: unknown): string[] {
+  if (!event || typeof event !== "object") return [];
+  const e = event as Record<string, unknown>;
+  const messages: string[] = [];
+  if (typeof e.message === "string") messages.push(e.message);
+
+  const exception = e.exception as { values?: unknown } | undefined;
+  if (exception && Array.isArray(exception.values)) {
+    for (const value of exception.values) {
+      if (!value || typeof value !== "object") continue;
+      const entry = value as Record<string, unknown>;
+      if (typeof entry.value === "string") messages.push(entry.value);
+      if (typeof entry.stacktrace === "string") messages.push(entry.stacktrace);
+      const stacktrace = entry.stacktrace as { frames?: unknown } | undefined;
+      if (stacktrace && Array.isArray(stacktrace.frames)) {
+        for (const frame of stacktrace.frames) {
+          if (!frame || typeof frame !== "object") continue;
+          const f = frame as Record<string, unknown>;
+          for (const key of ["filename", "module", "function"]) {
+            if (typeof f[key] === "string") messages.push(f[key]);
+          }
+        }
+      }
+    }
+  }
+  return messages;
+}
+
+function shouldDropSentryEvent(event: unknown, environment: string): boolean {
+  if (environment === DEFAULT_ENVIRONMENT) return true;
+  const haystack = getEventMessages(event).join("\n");
+  return (
+    haystack.includes(
+      "TextModel got disposed before DiffEditorWidget model got reset",
+    ) ||
+    (haystack.includes("@react-refresh") &&
+      haystack.includes("performReactRefresh"))
+  );
+}
+
 /**
  * Initialize main-process Sentry. Idempotent; no-op without a DSN. Called from
  * the `sentry:init-main` IPC handler once the renderer confirms consent.
@@ -186,7 +226,10 @@ export async function initMainSentry(
       tracesSampleRate: 0.1,
       // Never attach automatic PII (IP, cookies, etc.).
       sendDefaultPii: false,
-      beforeSend: (event: unknown): unknown => scrubMainEvent(event),
+      beforeSend: (event: unknown): unknown => {
+        if (shouldDropSentryEvent(event, environment)) return null;
+        return scrubMainEvent(event);
+      },
     });
     initialized = true;
     console.info(
