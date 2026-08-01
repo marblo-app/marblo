@@ -27,6 +27,7 @@ import {
   deleteDoc,
   collection,
   addDoc,
+  arrayUnion,
   query,
   where,
   orderBy,
@@ -203,6 +204,19 @@ beforeEach(async () => {
 
     // 초대
     await setDoc(doc(db, "invitations", "inv-1"), {
+      projectId: PROJECT_ID,
+      invitedEmail: OUTSIDER_EMAIL,
+      invitedBy: OWNER_ID,
+      role: "member",
+      status: "pending",
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+
+    // B2 self-join 룰이 조회하는 결정적 ID({projectId}_{소문자 이메일}) 초대 —
+    // teamService.invitationDocId 규약과 동일. inv-1(레거시 랜덤 ID)은
+    // 초대 문서 자체의 read/update 테스트용으로 그대로 둔다.
+    await setDoc(doc(db, "invitations", `${PROJECT_ID}_${OUTSIDER_EMAIL}`), {
       projectId: PROJECT_ID,
       invitedEmail: OUTSIDER_EMAIL,
       invitedBy: OWNER_ID,
@@ -927,6 +941,288 @@ describe("invitations collection", () => {
   it("일반 멤버는 초대를 삭제할 수 없다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(deleteDoc(doc(db, "invitations", "inv-1")));
+  });
+
+  it("초대 대상자는 status 외 다른 필드를 함께 바꿀 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "invitations", "inv-1"), {
+        status: "accepted",
+        role: "admin",
+      }),
+    );
+  });
+});
+
+// ===== B2: 초대 수락 self-join (projects.members 자가 추가) =====
+//
+// acceptInvitation 의 실제 쓰기 경로: 결정적 ID({projectId}_{소문자 이메일})의
+// pending 초대를 근거로, 아직 멤버가 아닌 초대 대상자가 자신의 uid 만
+// members 에 추가한다(arrayUnion + updatedAt).
+
+describe("projects self-join via invitation (B2)", () => {
+  const BASE_MEMBERS = [OWNER_ID, ADMIN_ID, MEMBER_ID];
+
+  it("(a) 유효한 pending 초대가 있으면 자신의 uid 를 members 에 추가할 수 있다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        members: arrayUnion(OUTSIDER_ID),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("(a') 재시도(이미 멤버) no-op 도 멱등 통과한다", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), "projects", PROJECT_ID), {
+        members: [...BASE_MEMBERS, OUTSIDER_ID],
+      });
+    });
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        members: arrayUnion(OUTSIDER_ID),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("(b) 초대가 없는 사용자의 self-join 은 거부된다", async () => {
+    const db = getContext("stranger-user", "stranger@test.com").firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        members: arrayUnion("stranger-user"),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("(c) 초대가 있어도 타인 uid 를 함께 추가할 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        members: [...BASE_MEMBERS, OUTSIDER_ID, "smuggled-user"],
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("(c') 초대가 있어도 자신 대신 타인 uid 만 추가할 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        members: [...BASE_MEMBERS, "smuggled-user"],
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("초대가 있어도 기존 멤버를 제거할 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        members: [OWNER_ID, ADMIN_ID, OUTSIDER_ID], // MEMBER_ID 제거 시도
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("초대가 있어도 members/updatedAt 외 필드는 함께 바꿀 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        members: arrayUnion(OUTSIDER_ID),
+        updatedAt: new Date(),
+        name: "pwned",
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        members: arrayUnion(OUTSIDER_ID),
+        updatedAt: new Date(),
+        ownerId: OUTSIDER_ID,
+      }),
+    );
+  });
+
+  it("만료된 초대로는 self-join 이 거부된다", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(
+        doc(
+          context.firestore(),
+          "invitations",
+          `${PROJECT_ID}_${OUTSIDER_EMAIL}`,
+        ),
+        { expiresAt: new Date(Date.now() - 60_000) },
+      );
+    });
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        members: arrayUnion(OUTSIDER_ID),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("이미 처리된(accepted) 초대로는 self-join 이 거부된다", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(
+        doc(
+          context.firestore(),
+          "invitations",
+          `${PROJECT_ID}_${OUTSIDER_EMAIL}`,
+        ),
+        { status: "accepted" },
+      );
+    });
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        members: arrayUnion(OUTSIDER_ID),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("초대가 다른 프로젝트 것이면 self-join 이 거부된다", async () => {
+    // 결정적 ID 는 대상 프로젝트 기준이지만 필드 projectId 를 위조한 문서 —
+    // ID 규약과 문서 필드가 함께 검증되는지 확인. (OUTSIDER 가 멤버가 아닌
+    // 전용 프로젝트를 시드 — OTHER_PROJECT 는 OUTSIDER 소유라 부적합)
+    const THIRD_PROJECT_ID = "third-project";
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const adminDb = context.firestore();
+      await setDoc(doc(adminDb, "projects", THIRD_PROJECT_ID), {
+        name: "Third Tenant",
+        ownerId: OWNER_ID,
+        members: [OWNER_ID],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await setDoc(
+        doc(adminDb, "invitations", `${THIRD_PROJECT_ID}_${OUTSIDER_EMAIL}`),
+        {
+          projectId: PROJECT_ID,
+          invitedEmail: OUTSIDER_EMAIL,
+          invitedBy: OWNER_ID,
+          role: "member",
+          status: "pending",
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+      );
+    });
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", THIRD_PROJECT_ID), {
+        members: arrayUnion(OUTSIDER_ID),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("기존 멤버의 일반 update 는 계속 허용된다 (회귀 없음)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "projects", PROJECT_ID), { name: "Renamed" }),
+    );
+  });
+});
+
+// ===== B3: Presence =====
+
+describe("presence collection (B3)", () => {
+  const presenceDoc = (
+    db: ReturnType<RulesTestContext["firestore"]>,
+    userId: string,
+  ) => doc(db, "presence", PROJECT_ID, "users", userId);
+
+  it("프로젝트 멤버는 자기 presence 를 쓸 수 있다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(presenceDoc(db, MEMBER_ID), {
+        userId: MEMBER_ID,
+        displayName: "Member",
+        photoURL: "",
+        location: "app",
+        lastSeen: new Date(),
+      }),
+    );
+  });
+
+  it("타인의 presence 문서에는 쓸 수 없다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      setDoc(presenceDoc(db, OWNER_ID), {
+        userId: OWNER_ID,
+        displayName: "Fake Owner",
+        photoURL: "",
+        location: "app",
+        lastSeen: new Date(),
+      }),
+    );
+  });
+
+  it("자기 문서라도 userId 필드는 위조할 수 없다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      setDoc(presenceDoc(db, MEMBER_ID), {
+        userId: OWNER_ID,
+        displayName: "Member",
+        photoURL: "",
+        location: "app",
+        lastSeen: new Date(),
+      }),
+    );
+  });
+
+  it("비멤버는 presence 를 쓸 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(presenceDoc(db, OUTSIDER_ID), {
+        userId: OUTSIDER_ID,
+        displayName: "Outsider",
+        photoURL: "",
+        location: "app",
+        lastSeen: new Date(),
+      }),
+    );
+  });
+
+  it("프로젝트 멤버는 멤버들의 presence 를 읽을 수 있다", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(presenceDoc(context.firestore(), OWNER_ID), {
+        userId: OWNER_ID,
+        displayName: "Owner",
+        photoURL: "",
+        location: "app",
+        lastSeen: new Date(),
+      });
+    });
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      getDocs(collection(db, "presence", PROJECT_ID, "users")),
+    );
+  });
+
+  it("비멤버는 presence 를 읽을 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(getDocs(collection(db, "presence", PROJECT_ID, "users")));
+  });
+
+  it("본인 presence 문서는 삭제할 수 있다", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(presenceDoc(context.firestore(), MEMBER_ID), {
+        userId: MEMBER_ID,
+        displayName: "Member",
+        photoURL: "",
+        location: "app",
+        lastSeen: new Date(),
+      });
+    });
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(deleteDoc(presenceDoc(db, MEMBER_ID)));
   });
 });
 

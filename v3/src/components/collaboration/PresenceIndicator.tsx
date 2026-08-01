@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import { useAuth } from '../../hooks/useAuth';
-import type { UserPresence } from '../../types/collaboration';
-import { subscribeToPresence } from '../../services/collaborationService';
+import { useEffect, useState } from "react";
+import { useAuth } from "../../hooks/useAuth";
+import { usePresenceSync } from "../../hooks/usePresenceSync";
+import type { UserPresence } from "../../types/collaboration";
+import { subscribeToPresence } from "../../services/collaborationService";
 
 interface PresenceIndicatorProps {
   projectId: string;
@@ -11,6 +12,10 @@ export function PresenceIndicator({ projectId }: PresenceIndicatorProps) {
   const { user } = useAuth();
   const [presenceList, setPresenceList] = useState<UserPresence[]>([]);
   const [hoveredUserId, setHoveredUserId] = useState<string | null>(null);
+
+  // 내 presence 문서 주기 갱신 — 이 컴포넌트가 presence 의 유일한 마운트
+  // 지점(Header)이므로 읽기(구독)와 쓰기(하트비트)를 같이 배선한다.
+  usePresenceSync(projectId);
 
   useEffect(() => {
     if (!projectId) return;
@@ -47,7 +52,7 @@ export function PresenceIndicator({ projectId }: PresenceIndicatorProps) {
             />
           ) : (
             <div className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-green-500 bg-gray-600 text-xs font-medium text-white">
-              {p.displayName?.[0] || '?'}
+              {p.displayName?.[0] || "?"}
             </div>
           )}
 

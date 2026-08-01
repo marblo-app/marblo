@@ -44,9 +44,7 @@ function TopToast({
         onMouseEnter={() => onPauseChange(true)}
         onMouseLeave={() => onPauseChange(false)}
         className={`pointer-events-auto flex w-full max-w-md items-start gap-3 rounded-lg border border-gray-700 bg-gray-900/95 px-4 py-3 text-left shadow-2xl shadow-black/30 backdrop-blur transition-all duration-200 ${
-          isLeaving
-            ? "-translate-y-2 opacity-0"
-            : "translate-y-0 opacity-100"
+          isLeaving ? "-translate-y-2 opacity-0" : "translate-y-0 opacity-100"
         }`}
       >
         <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-blue-500/15 text-blue-300">
@@ -160,16 +158,22 @@ export function ChatToastHost() {
       : -1;
     const newMessages =
       previousIndex >= 0 ? messages.slice(previousIndex + 1) : messages;
-    const incoming = [...newMessages]
-      .reverse()
-      .find(
-        (msg): msg is ChatMessage =>
-          msg.type === "user" &&
-          (!user?.uid || msg.senderId !== user.uid) &&
-          msg.content.trim().length > 0,
-      );
+    const incomingAll = newMessages.filter(
+      (msg): msg is ChatMessage =>
+        msg.type === "user" &&
+        (!user?.uid || msg.senderId !== user.uid) &&
+        msg.content.trim().length > 0,
+    );
 
-    if (!incoming) return;
+    if (incomingAll.length === 0) return;
+
+    // B4: 사이드바 CHAT 패널이 닫혀 있으면 미읽음 배지 증가. 이 컴포넌트가
+    // 전역 채팅 리스너의 단일 소유자라 신규 수신 판정을 여기서 재사용한다.
+    // (패널이 열려 있으면 ProjectChat 이 즉시 읽음 처리하므로 세지 않는다.)
+    const { chatPanelOpen, incrementUnread } = useChatStore.getState();
+    if (!chatPanelOpen) incrementUnread(incomingAll.length);
+
+    const incoming = incomingAll[incomingAll.length - 1];
 
     clearTimers();
     setIsLeaving(false);

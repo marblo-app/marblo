@@ -108,13 +108,41 @@ service cloud.firestore {
     //   개수 한도는 functions 의 onCreate 트리거 `enforceProjectLimit` 가 강제한다
     //   — Free 소유자가 2번째+ 프로젝트를 직접 write 로 만들면 즉시 삭제된다.
     //   여기서는 소유자/멤버 무결성만 검사한다(우회 write 도 ownerId 위조는 불가).
+
+    // B2: 초대 수락 self-join 의 근거가 되는 초대 문서 검증.
+    // 룰은 컬렉션 쿼리가 불가하므로 초대 문서를 결정적 ID
+    // ({projectId}_{소문자 이메일}, teamService.invitationDocId 와 동일 규약)로
+    // get 한다. 문서가 없으면 get 이 에러 → 전체 조건이 거부로 떨어진다.
+    function hasValidPendingInvite(projectId) {
+      let inv = get(/databases/$(database)/documents/invitations/$(projectId + '_' + request.auth.token.email.lower())).data;
+      return inv.projectId == projectId
+        && inv.invitedEmail.lower() == request.auth.token.email.lower()
+        && inv.status == 'pending'
+        && request.time < inv.expiresAt;
+    }
+
+    // B2: 아직 멤버가 아닌 초대 대상자가 "자신의 uid 만" members 에 추가하는
+    // 단일 전이. 함께 금지되는 것:
+    //  - members/updatedAt 외 필드 변경(ownerId·name 위조 차단)
+    //  - 타인 uid 추가(hasOnly: 결과가 기존 ∪ {본인}을 벗어날 수 없음)
+    //  - 기존 멤버 제거(hasAll: 기존 멤버 전원이 결과에 남아야 함)
+    // arrayUnion 재시도(이미 멤버)는 no-op 으로 통과해 멱등 수락이 성립한다.
+    function isInvitedSelfJoin(projectId) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'updatedAt'])
+        && request.resource.data.members.hasAll(resource.data.members)
+        && request.resource.data.members.hasOnly(resource.data.members.concat([request.auth.uid]))
+        && request.auth.uid in request.resource.data.members
+        && hasValidPendingInvite(projectId);
+    }
+
     match /projects/{projectId} {
       allow read: if isAuthenticated()
         && request.auth.uid in resource.data.members;
       allow create: if isAuthenticated()
         && request.resource.data.ownerId == request.auth.uid
         && request.auth.uid in request.resource.data.members;
-      allow update: if isAuthenticated() && isProjectMember(projectId);
+      allow update: if isAuthenticated()
+        && (isProjectMember(projectId) || isInvitedSelfJoin(projectId));
       allow delete: if isAuthenticated() && isProjectOwner(projectId);
     }
 
@@ -341,12 +369,16 @@ service cloud.firestore {
         && request.resource.data.status == 'pending';
 
       // The invited user can accept/reject, project admin+ can cancel (update status)
+      // B2 하드닝: 초대 대상자는 status 필드만 바꿀 수 있다(role/projectId 조작
+      // 차단). 'expired' 는 acceptInvitation 이 만료 초대를 정리하는 전이.
+      // 이메일 비교는 대소문자 무시 — invitedEmail 은 소문자 정규화로 저장된다.
       allow update: if isAuthenticated()
         && (
           // Invited user accepting or rejecting
-          (resource.data.invitedEmail == request.auth.token.email
+          (resource.data.invitedEmail.lower() == request.auth.token.email.lower()
            && resource.data.status == 'pending'
-           && request.resource.data.status in ['accepted', 'rejected'])
+           && request.resource.data.status in ['accepted', 'rejected', 'expired']
+           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']))
           ||
           // Admin/owner updating (e.g., expire)
           isAdminOrOwner(resource.data.projectId)
@@ -355,6 +387,21 @@ service cloud.firestore {
       // Admin+ can delete (cancel) pending invitations
       allow delete: if isAuthenticated()
         && isAdminOrOwner(resource.data.projectId);
+    }
+
+    // ===== Presence (B3: 프로젝트 접속 표시) =====
+    // presence/{projectId}/users/{userId} — collaborationService.updatePresence
+    // 가 주기적으로 setDoc 하고 subscribeToPresence(PresenceIndicator)가 구독.
+    // 이전엔 match 자체가 없어 기본 거부였다. 멤버끼리만 서로 보이고,
+    // 쓰기는 본인 문서만(userId 필드 위조 동시 차단).
+    match /presence/{projectId}/users/{userId} {
+      allow read: if isAuthenticated() && isProjectMember(projectId);
+      allow create, update: if isAuthenticated()
+        && isOwner(userId)
+        && isProjectMember(projectId)
+        && request.resource.data.userId == userId;
+      // 본인 문서 정리는 멤버 탈퇴 후에도 가능해야 하므로 멤버십을 요구하지 않는다.
+      allow delete: if isAuthenticated() && isOwner(userId);
     }
 
     // ===== Member Roles =====

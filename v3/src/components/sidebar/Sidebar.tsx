@@ -61,6 +61,14 @@ export function Sidebar({
     };
   }, []);
 
+  // CHAT 패널 가시성을 chatStore 에 동기화 — ChatToastHost 가 "패널이 닫혀
+  // 있을 때 도착한 메시지"만 미읽음으로 세도록(B4). 사이드바 접힘도 닫힘으로
+  // 취급하고, 언마운트 시(다른 셸 전환 등) false 로 되돌린다.
+  useEffect(() => {
+    useChatStore.getState().setChatPanelOpen(isOpen && activePanel === "chat");
+    return () => useChatStore.getState().setChatPanelOpen(false);
+  }, [isOpen, activePanel]);
+
   // "이 워크트리 보기" (viewWorktree) nudges the sidebar to its Files panel — and
   // opens it if the user had collapsed it — so a file-tree root switch is never
   // invisible. A single window-level listener with clean teardown; it keys off
