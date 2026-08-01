@@ -767,6 +767,9 @@ export function FileTree() {
     onConfirm: () => void;
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // OS 클립보드에 파일이 들어있나 (Finder/탐색기에서 ⌘C). 컨텍스트 메뉴를 열 때
+  // 갱신해 "붙여넣기" 항목이 외부 클립보드에도 살아있게 한다.
+  const [osClipboardHasFiles, setOsClipboardHasFiles] = useState(false);
   // 에러가 아닌 안내(예: 만든 폴더가 숨김이라 표시를 켰다). 빨간 에러 토스트와
   // 같은 자리를 쓰되 색으로 구분한다 — 성공한 동작을 실패처럼 보이게 하지 않는다.
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
@@ -1231,11 +1234,93 @@ export function FileTree() {
     ],
   );
 
+  /**
+   * ⌘V of files copied *outside* the app (Finder / Explorer).
+   *
+   * The in-app clipboard (cut/copy inside the tree) only ever holds a path we
+   * put there, so when it is empty ⌘V used to be a no-op — a Finder ⌘C landed
+   * nowhere. Read the OS clipboard's file list instead and import it through
+   * the very same `fs.importPaths` the Finder drag-and-drop path uses (#706),
+   * so collision renaming ("foo copy"), recursive folder copy and the fsGuard
+   * root check behave identically for drop and paste.
+   *
+   * An empty OS clipboard is silent, not an error: ⌘V with nothing to paste
+   * should do nothing, exactly as before.
+   */
+  const pasteFromOsClipboard = useCallback(
+    async (dir: string): Promise<void> => {
+      if (!rootPath) return;
+      let srcPaths: string[] = [];
+      try {
+        srcPaths =
+          (await window.electronAPI?.clipboard?.getFilePaths?.()) ?? [];
+      } catch {
+        return; // no file clipboard on this platform / read failed
+      }
+      srcPaths = srcPaths.filter(Boolean);
+      if (srcPaths.length === 0) return;
+      // Pasting a folder into itself or a descendant would recurse.
+      const cyclic = srcPaths.some(
+        (src) =>
+          dir === src ||
+          dir.startsWith(`${src}/`) ||
+          dir.startsWith(`${src}\\`),
+      );
+      if (cyclic) {
+        setErrorMessage(translate("sidebar.tree.pasteSelf"));
+        return;
+      }
+      try {
+        const result = await window.electronAPI.fs.importPaths({
+          rootPath,
+          destDir: dir,
+          srcPaths,
+        });
+        const imported = result?.imported ?? [];
+        const nodes = await loadTree(rootPath, false);
+        // 방금 붙여넣은 건 무조건 보여야 한다 — `.env` 같은 숨김 이름은
+        // 복사되고도 트리에서 걸러져 "안 됐다"로 보인다. commitCreate 와 같은
+        // 근거 기반 처리(티켓 D8yiihCWgDMd3AU7xkEy).
+        const missing = imported.find((p) => nodes && !containsPath(nodes, p));
+        if (missing && !showHidden) {
+          setShowHiddenForScope(showHiddenScope, true);
+          lastSignatureRef.current = "";
+          await loadTree(rootPath, false, true);
+          setNoticeMessage(
+            translate("sidebar.tree.revealedHidden", {
+              name: basename(missing),
+            }),
+          );
+        }
+        if (imported.length > 0) setSelected(imported[imported.length - 1]);
+      } catch (err) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : translate("sidebar.tree.pasteFail");
+        setErrorMessage(translate("sidebar.tree.pasteFailMsg", { msg }));
+      }
+    },
+    [
+      rootPath,
+      loadTree,
+      setSelected,
+      showHidden,
+      setShowHiddenForScope,
+      showHiddenScope,
+    ],
+  );
+
   const handlePaste = useCallback(
     async (targetDir?: string) => {
-      if (!rootPath || !clipboardPath || !clipboardOp) return;
+      if (!rootPath) return;
       const dir = targetDir ?? resolveTargetDirectory(selectedPath);
       if (!dir) return;
+      // Nothing in the in-app clipboard → this ⌘V is an external paste.
+      if (!clipboardPath || !clipboardOp) {
+        await pasteFromOsClipboard(dir);
+        return;
+      }
       // Prevent pasting a directory into itself or its descendant
       if (dir === clipboardPath || dir.startsWith(clipboardPath + "/")) {
         setErrorMessage(translate("sidebar.tree.pasteSelf"));
@@ -1274,6 +1359,7 @@ export function FileTree() {
       handlePathRenamed,
       clearClipboard,
       loadTree,
+      pasteFromOsClipboard,
     ],
   );
 
@@ -1359,7 +1445,7 @@ export function FileTree() {
       items.push({
         label: translate("sidebar.tree.paste"),
         shortcut: "⌘V",
-        disabled: !clipboardPath,
+        disabled: !clipboardPath && !osClipboardHasFiles,
         onClick: () => handlePaste(node && isDir ? node.path : undefined),
       });
 
@@ -1392,6 +1478,7 @@ export function FileTree() {
     [
       rootPath,
       clipboardPath,
+      osClipboardHasFiles,
       handleCreate,
       cutToClipboard,
       copyToClipboard,
@@ -1402,11 +1489,30 @@ export function FileTree() {
     ],
   );
 
+  /**
+   * Keep the context menu's "Paste" item enabled for an *external* clipboard.
+   *
+   * The item was gated on the in-app clipboard alone, so a file ⌘C'd in Finder
+   * left it greyed out even though ⌘V now works. Probing the OS clipboard is an
+   * IPC round-trip (osascript on macOS), so it is fired when the menu opens and
+   * the menu re-renders with the answer — the items are rebuilt on every render,
+   * not frozen at open time.
+   */
+  const refreshOsClipboardFiles = useCallback(() => {
+    if (clipboardPath) return; // in-app clipboard already enables Paste
+    const getFilePaths = window.electronAPI?.clipboard?.getFilePaths;
+    if (!getFilePaths) return;
+    getFilePaths()
+      .then((paths) => setOsClipboardHasFiles((paths?.length ?? 0) > 0))
+      .catch(() => setOsClipboardHasFiles(false));
+  }, [clipboardPath]);
+
   const handleNodeContextMenu = useCallback(
     (e: React.MouseEvent, node: FileNode) => {
       setContextMenu({ x: e.clientX, y: e.clientY, node });
+      refreshOsClipboardFiles();
     },
-    [],
+    [refreshOsClipboardFiles],
   );
 
   const handleEmptyContextMenu = useCallback(
@@ -1414,8 +1520,9 @@ export function FileTree() {
       e.preventDefault();
       setSelected(null);
       setContextMenu({ x: e.clientX, y: e.clientY, node: null });
+      refreshOsClipboardFiles();
     },
-    [setSelected],
+    [setSelected, refreshOsClipboardFiles],
   );
 
   // ---------- Keyboard shortcuts (when tree has focus) ----------
@@ -1496,6 +1603,10 @@ export function FileTree() {
     const target = resolveLocalMainTarget(
       currentProjectWorktrees,
       currentProject?.folderPath ?? null,
+      // 3rd fallback: a plain local folder (opened via "Open Folder", no git /
+      // no project binding) has neither a worktree list nor a projectRootPath —
+      // home for it is itself, not an amber "main unresolved" warning.
+      rootPath,
     );
     if (!target.ok) {
       setMainResetError(target.reason);

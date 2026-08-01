@@ -15,7 +15,7 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import http from "http";
-import { execSync, spawn } from "node:child_process";
+import { execFile, execSync, spawn } from "node:child_process";
 import dotenv from "dotenv";
 import { PtyManager, isBusySignal } from "./pty-manager";
 import {
@@ -6761,25 +6761,98 @@ ipcMain.handle("clipboard:getImagePath", async () => {
   return filePath;
 });
 
-ipcMain.handle("clipboard:getFilePaths", () => {
+/**
+ * Read the macOS pasteboard's file URLs directly (JXA → NSPasteboard).
+ *
+ * Replaces an AppleScript coercion (`the clipboard as «class furl»`) that was
+ * wrong in three measured ways — all of which the file-tree ⌘V paste turns into
+ * real damage rather than a cosmetic glitch:
+ *
+ *  - a single copied file came back TWICE (the furl branch and the list branch
+ *    both matched), so a paste produced "a.txt" *and* "a.txt copy";
+ *  - a Finder multi-select copy came back as the FIRST file only, duplicated —
+ *    AppleScript's `the clipboard` exposes one pasteboard item, so items 2..n
+ *    were silently dropped;
+ *  - plain *text* coerced into a path: with "/tmp" on the clipboard the handler
+ *    returned "/tmp", which exists, so pasting copied text would have copied
+ *    the whole directory.
+ *
+ * `readObjectsForClasses` returns every item, and `FileURLsOnly` makes text
+ * (including a copied http URL) return nothing. Measured ~46ms.
+ */
+const MACOS_CLIPBOARD_FILE_URLS_JXA = `
+ObjC.import('AppKit');
+const pb = $.NSPasteboard.generalPasteboard;
+const opts = $.NSDictionary.dictionaryWithObjectForKey(
+  $.NSNumber.numberWithBool(true),
+  $.NSPasteboardURLReadingFileURLsOnlyKey,
+);
+const objs = pb.readObjectsForClassesOptions($.NSArray.arrayWithObject($.NSURL), opts);
+const out = [];
+if (objs) { for (let i = 0; i < objs.count; i++) out.push(ObjC.unwrap(objs.objectAtIndex(i).path)); }
+out.join('\\n')
+`;
+
+/** Run a helper and capture stdout; any failure (missing binary, timeout,
+ * non-zero exit) resolves to "" so the caller just sees an empty clipboard. */
+function captureStdout(
+  command: string,
+  args: string[],
+  timeout: number,
+): Promise<string> {
+  return new Promise((resolve) => {
+    execFile(
+      command,
+      args,
+      { encoding: "utf-8", timeout, windowsHide: true },
+      (error, stdout) => resolve(error ? "" : String(stdout ?? "")),
+    );
+  });
+}
+
+ipcMain.handle("clipboard:getFilePaths", async () => {
+  let raw = "";
   if (process.platform === "darwin") {
-    try {
-      // Use osascript (AppleScript) — no compilation needed, fast
-      const result = execSync(
-        `osascript -e 'set filePaths to {}' -e 'try' -e 'set theClip to the clipboard as «class furl»' -e 'set end of filePaths to POSIX path of theClip' -e 'end try' -e 'try' -e 'set fileList to the clipboard as list' -e 'repeat with f in fileList' -e 'try' -e 'set end of filePaths to POSIX path of (f as «class furl»)' -e 'end try' -e 'end repeat' -e 'end try' -e 'set text item delimiters to linefeed' -e 'filePaths as text'`,
-        { encoding: "utf-8", timeout: 2000 },
-      ).trim();
-      if (result) {
-        return result
-          .split("\n")
-          .map((p: string) => p.trim())
-          .filter((p: string) => p && fs.existsSync(p));
+    raw = await captureStdout(
+      "osascript",
+      ["-l", "JavaScript", "-e", MACOS_CLIPBOARD_FILE_URLS_JXA],
+      2000,
+    );
+  } else if (process.platform === "win32") {
+    // CF_HDROP (Explorer Ctrl+C, multi-select aware). Windows PowerShell 5.1 is
+    // present on every supported Windows; `Get-Clipboard -Format FileDropList`
+    // is a 5.1-only parameter, hence powershell.exe and not pwsh.
+    raw = await captureStdout(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Get-Clipboard -Format FileDropList | ForEach-Object { $_.FullName }",
+      ],
+      5000,
+    );
+    if (!raw.trim()) {
+      // Apps that advertise only CF_UNICODETEXT's FileNameW (single file).
+      try {
+        const buf = clipboard.readBuffer("FileNameW");
+        if (buf && buf.length > 0)
+          raw = buf.toString("utf16le").replace(/\0+$/, "");
+      } catch {
+        /* format not on the clipboard */
       }
-    } catch {
-      /* not file clipboard */
     }
   }
-  return [];
+
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  for (const line of raw.split("\n")) {
+    const p = line.trim();
+    if (!p || seen.has(p)) continue;
+    seen.add(p);
+    if (fs.existsSync(p)) paths.push(p);
+  }
+  return paths;
 });
 
 // --- Model Preset ---

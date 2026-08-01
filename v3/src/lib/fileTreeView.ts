@@ -170,10 +170,27 @@ export function resolveMainWorktree(
  * main worktree can be identified we fall back to the Firestore
  * `projectRootPath` *only when it exists locally as a known root*, and
  * otherwise report the failure instead of navigating somewhere arbitrary.
+ *
+ * Resolution order:
+ *
+ *  1. the local main worktree (see {@link resolveMainWorktree})
+ *  2. `projectRootPath` — the Firestore project folder
+ *  3. `currentRootPath` — the folder the tree is *already* showing
+ *
+ * (3) exists for the plain "Open Folder" browse case (#706's local-folder work):
+ * a non-git folder opened read-only has no worktrees and no project binding, so
+ * (1) and (2) are both empty and home used to render `no-worktrees` amber text
+ * on a tree that is perfectly fine. Home for such a root is that root — a
+ * no-op, but a *correct* one. It is deliberately restricted to the
+ * `no-worktrees` reason: `ambiguous` means candidates exist and nothing
+ * distinguishes them, and that has to stay visible rather than resolve to
+ * wherever the user happens to be standing (the silent-wrong-jump failure this
+ * module keeps regressing into).
  */
 export function resolveLocalMainTarget(
   worktrees: Worktree[],
   projectRootPath: string | null,
+  currentRootPath: string | null = null,
 ): { ok: true; path: string } | { ok: false; reason: MainResolutionFailure } {
   const resolved = resolveMainWorktree(worktrees, projectRootPath);
   if (resolved.ok) return { ok: true, path: resolved.worktree.path };
@@ -182,6 +199,9 @@ export function resolveLocalMainTarget(
   // written by whichever machine registered the project), so it is a fallback,
   // never a preference.
   if (projectRootPath) return { ok: true, path: projectRootPath };
+  // (3) Pure local folder: no worktrees, no project. The open folder itself.
+  if (resolved.reason === "no-worktrees" && currentRootPath)
+    return { ok: true, path: currentRootPath };
   return { ok: false, reason: resolved.reason };
 }
 

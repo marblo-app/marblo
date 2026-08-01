@@ -107,7 +107,11 @@ describe("resolveMainWorktree — git's isMain is authoritative", () => {
   it("prefers the project-folder match when duplicate groups flag two mains", () => {
     // Same projectId enumerated under two repoRoots yields the main entry twice.
     const worktrees = [
-      wt({ path: "/other/checkout", repoRoot: "/other/checkout", isMain: true }),
+      wt({
+        path: "/other/checkout",
+        repoRoot: "/other/checkout",
+        isMain: true,
+      }),
       wt({ path: MAIN, repoRoot: MAIN, isMain: true }),
     ];
     expect(findMainWorktree(worktrees, MAIN)?.path).toBe(MAIN);
@@ -149,6 +153,63 @@ describe("resolveMainWorktree — explicit failure instead of a silent wrong jum
 
   it("falls back to the project folder when no worktrees are known", () => {
     expect(resolveLocalMainTarget([], MAIN)).toEqual({ ok: true, path: MAIN });
+  });
+});
+
+/**
+ * 3rd fallback — the plain "Open Folder" browse case (#706 local-folder work).
+ *
+ * A non-git folder opened read-only has no worktrees AND no project binding, so
+ * both earlier steps come up empty and the home button used to render the amber
+ * "main unresolved" warning on a perfectly healthy tree. Home for such a root is
+ * that root.
+ */
+describe("resolveLocalMainTarget — pure local folder falls back to the open folder", () => {
+  const FOLDER = "/Users/dev/Documents/some-plain-folder";
+
+  it("resolves to the currently open folder when there is no worktree and no project", () => {
+    expect(resolveLocalMainTarget([], null, FOLDER)).toEqual({
+      ok: true,
+      path: FOLDER,
+    });
+  });
+
+  it("still reports no-worktrees when there is no open folder either", () => {
+    expect(resolveLocalMainTarget([], null, null)).toEqual({
+      ok: false,
+      reason: "no-worktrees",
+    });
+    // Omitting the argument entirely keeps the pre-existing behaviour.
+    expect(resolveLocalMainTarget([], null)).toEqual({
+      ok: false,
+      reason: "no-worktrees",
+    });
+  });
+
+  it("never outranks the main worktree or the project folder", () => {
+    const worktrees = enumerated([MAIN, WT_A], MAIN);
+    // (1) main worktree wins over the open folder...
+    expect(resolveLocalMainTarget(worktrees, null, WT_A)).toEqual({
+      ok: true,
+      path: MAIN,
+    });
+    // ...and (2) the project folder wins too, even from a foreign-machine path.
+    expect(resolveLocalMainTarget([], MAIN, FOLDER)).toEqual({
+      ok: true,
+      path: MAIN,
+    });
+  });
+
+  it("keeps 'ambiguous' visible instead of resolving to wherever the user stands", () => {
+    // Candidates exist and nothing distinguishes them: silently sending home to
+    // the current worktree would hide exactly the failure this guard exists for.
+    const worktrees = [MAIN, WT_A, WT_B].map((path) =>
+      wt({ path, repoRoot: WT_A, taskId: null }),
+    );
+    expect(resolveLocalMainTarget(worktrees, null, WT_A)).toEqual({
+      ok: false,
+      reason: "ambiguous",
+    });
   });
 });
 
