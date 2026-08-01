@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { User } from "../../types/user";
 import { useProjectStore } from "../../stores/projectStore";
 import { useAuth } from "../../hooks/useAuth";
@@ -11,6 +11,7 @@ import { PlanGate } from "../settings/PlanGate";
 import { MemberWorkloadPanel } from "./MemberWorkloadPanel";
 import { ProjectAuditPanel } from "./ProjectAuditPanel";
 import { REPO_CONNECT_OPEN_EVENT } from "../collaboration/RepoConnectModal";
+import { githubCollaboratorsUrl } from "../../lib/githubWebUrl";
 
 /**
  * 프로젝트 탭 — 이 프로젝트의 **사람** 쪽 전부를 한 화면에 모은다: 누가 있고
@@ -34,6 +35,16 @@ export function ProjectTab() {
   const projectId = currentProject?.id || "";
   const { user } = useAuth();
   const { members, memberRoles, currentRole, loading } = useTeam(projectId);
+  const [invitationCreated, setInvitationCreated] = useState(false);
+
+  useEffect(() => {
+    const onInvitationCreated = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string }>).detail;
+      if (detail?.projectId === projectId) setInvitationCreated(true);
+    };
+    window.addEventListener("marblo:team-invitation-created", onInvitationCreated);
+    return () => window.removeEventListener("marblo:team-invitation-created", onInvitationCreated);
+  }, [projectId]);
 
   /**
    * 작업량 표에 넘길 멤버 목록.
@@ -128,6 +139,20 @@ export function ProjectTab() {
             </span>
           </div>
         </div>
+
+        {invitationCreated && githubCollaboratorsUrl(currentProject?.gitRemoteUrl) && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+            <span>이 프로젝트는 private 저장소와 연결됨. 초대한 멤버가 코드를 받으려면 GitHub 콜라보레이터로도 추가하세요</span>
+            <a
+              href={githubCollaboratorsUrl(currentProject?.gitRemoteUrl) ?? undefined}
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 underline hover:text-white"
+            >
+              협업자 페이지 열기
+            </a>
+          </div>
+        )}
 
         {/* 작업량 — owner/admin 전용. 로딩 중에는 역할 판정이 아직 'viewer'
             기본값이라 게이트를 걸면 한 프레임 깜빡이므로 로딩을 먼저 본다. */}

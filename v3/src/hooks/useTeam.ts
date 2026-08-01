@@ -134,6 +134,9 @@ export function useTeam(projectId: string) {
       try {
         if (!user) throw new Error(t("common.loginRequired"));
         await teamService.createInvitation(projectId, email, role, user.uid);
+        window.dispatchEvent(new CustomEvent("marblo:team-invitation-created", {
+          detail: { projectId },
+        }));
       } catch (err) {
         const msg =
           err instanceof Error ? err.message : t("common.team.inviteFailed");

@@ -68,6 +68,14 @@ export function githubRepoWebBase(
   return `https://${GITHUB_HOST}/${parsed.repo.owner}/${parsed.repo.repo}`;
 }
 
+/** GitHub repository access settings page for an owner adding collaborators. */
+export function githubCollaboratorsUrl(
+  remoteUrl: string | null | undefined,
+): string | null {
+  const base = githubRepoWebBase(remoteUrl);
+  return base ? `${base}/settings/access` : null;
+}
+
 /** Encode a branch for a URL path, keeping `/` separators (feat/x → feat/x). */
 function encodeBranch(branch: string): string {
   return branch.split("/").map(encodeURIComponent).join("/");
