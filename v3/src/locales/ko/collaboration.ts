@@ -1,0 +1,32 @@
+/**
+ * Korean — `collab.*` namespace. 팀 협업의 저장소 연결(Clone & 연결) 모달
+ * (티켓 r8VggohxLGciDVXV2rf6). ../en/collaboration.ts 에 같은 키를 추가할 것.
+ */
+export const collaboration = {
+  "collab.repoConnect.title": "저장소 연결",
+  "collab.repoConnect.description":
+    "이 프로젝트의 코드가 아직 이 컴퓨터에 없습니다. 팀 저장소를 clone 해 연결하면 코드·워크트리 탭을 사용할 수 있습니다.",
+  "collab.repoConnect.repoLabel": "프로젝트 저장소",
+  "collab.repoConnect.locationLabel": "Clone 위치",
+  "collab.repoConnect.changeLocation": "위치 변경",
+  "collab.repoConnect.cloneAndConnect": "Clone & 연결",
+  "collab.repoConnect.cloning": "Clone 중…",
+  "collab.repoConnect.connectExisting": "기존 폴더 연결",
+  "collab.repoConnect.later": "나중에",
+  "collab.repoConnect.privateHint":
+    "비공개 저장소는 GitHub 인증이 필요합니다. 터미널에서 `gh auth login`을 실행하거나 SSH 키를 등록한 뒤 다시 시도하세요.",
+  "collab.repoConnect.errorAuth":
+    "저장소 인증에 실패했습니다. 비공개 저장소라면 GitHub 인증(gh auth login 또는 SSH 키) 후 다시 시도하세요.",
+  "collab.repoConnect.errorNotFound":
+    "저장소를 찾을 수 없습니다. 주소가 맞는지, 접근 권한이 있는지 확인하세요.",
+  "collab.repoConnect.errorNetwork":
+    "네트워크 오류로 clone 하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도하세요.",
+  "collab.repoConnect.errorExists":
+    "대상 폴더가 이미 존재합니다. [기존 폴더 연결]로 그 폴더를 연결하거나 다른 위치를 선택하세요.",
+  "collab.repoConnect.errorGeneric": "clone 에 실패했습니다.",
+  "collab.repoConnect.errorMismatch":
+    "선택한 폴더의 git origin 이 프로젝트 저장소와 다릅니다. 올바른 클론 폴더를 선택하세요.",
+  "collab.repoConnect.errorNoRemote":
+    "선택한 폴더에서 git origin 을 찾지 못했습니다. 프로젝트 저장소를 clone 한 폴더를 선택하세요.",
+  "collab.repoConnect.connectFailed": "프로젝트에 경로를 기록하지 못했습니다.",
+};

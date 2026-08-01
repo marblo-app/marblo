@@ -29,6 +29,7 @@ import { ActivityStreamPanel } from "./activity/ActivityStreamPanel";
 import { PrivacyConsentGate } from "./legal/PrivacyConsentGate";
 import { MarketingReconsentBanner } from "./legal/MarketingReconsentBanner";
 import { CliSetupGate } from "./onboarding/CliSetupGate";
+import { RepoConnectModal } from "./collaboration/RepoConnectModal";
 import { ProjectSetupBanners } from "./onboarding/ProjectSetupBanners";
 import { FirstProjectSurvey } from "./onboarding/FirstProjectSurvey";
 import { UpdateBanner } from "./UpdateBanner";
@@ -509,6 +510,11 @@ export function Layout() {
           time when Claude auth is needed, or when a spawn is blocked. An
           already-set-up user never sees it. */}
       <CliSetupGate />
+
+      {/* 팀 멤버 저장소 연결 — 초대 수락한 멤버가 rootPath 미연결 프로젝트에
+          진입하면 Clone & 연결 원클릭 모달. 이미 연결된 멤버에겐 렌더되지
+          않는다(픽셀 불변). ★자동풀 아님 — 명시적 버튼에서만 clone. */}
+      <RepoConnectModal />
 
       {/* First project completion micro-survey */}
       <FirstProjectSurvey />

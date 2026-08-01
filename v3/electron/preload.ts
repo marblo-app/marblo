@@ -877,6 +877,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     remove: (projectId: string) =>
       ipcRenderer.invoke("connection:remove", projectId),
   },
+  // 팀 멤버 "Clone & 연결" 원클릭 (티켓 r8VggohxLGciDVXV2rf6). ★자동풀 아님 —
+  // RepoConnectModal 의 명시적 버튼에서만 호출된다.
+  repo: {
+    defaultCloneParent: (): Promise<string> =>
+      ipcRenderer.invoke("repo:defaultCloneParent"),
+    clone: (input: {
+      projectId?: string;
+      repoUrl: string;
+      parentDir?: string | null;
+    }) => ipcRenderer.invoke("repo:clone", input),
+  },
   // 오케스트레이터↔Telegram 채널 연결 (텔레그램 T1·보안 민감). T2 설정 UI 가
   // 소비한다. set 은 로컬 설정 경로 — 여기서만 권한 파일(access.json)이 갱신된다.
   // status.canEnable=false (chatId 없음 등)면 프론트가 토글을 잠가야 한다.

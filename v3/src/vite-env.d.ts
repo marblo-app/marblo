@@ -991,6 +991,29 @@ interface ConnectionAPI {
   check: (projectId: string) => Promise<ConnectionCheckResult>;
 }
 
+/** 팀 멤버 "Clone & 연결" 원클릭 (티켓 r8VggohxLGciDVXV2rf6). */
+interface RepoCloneResult {
+  ok: boolean;
+  path?: string;
+  errorKind?:
+    | "invalid-url"
+    | "exists"
+    | "auth"
+    | "not-found"
+    | "network"
+    | "git";
+  message?: string;
+}
+
+interface RepoAPI {
+  defaultCloneParent: () => Promise<string>;
+  clone: (input: {
+    projectId?: string;
+    repoUrl: string;
+    parentDir?: string | null;
+  }) => Promise<RepoCloneResult>;
+}
+
 interface UpdaterStatus {
   status:
     | "checking"
@@ -1101,6 +1124,7 @@ interface ElectronAPI {
   appState: AppStateAPI;
   system: SystemAPI;
   connection: ConnectionAPI;
+  repo: RepoAPI;
   updater: UpdaterAPI;
   sentry: SentryBridgeAPI;
   kg: KgBridgeAPI;

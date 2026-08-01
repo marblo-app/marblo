@@ -188,6 +188,7 @@ import {
   type ProjectConnectionInput,
   type AccessMode,
 } from "./connection-store";
+import { cloneRepo, defaultCloneParentDir } from "./repo-clone";
 
 type ConnectionCheckStatus = "pass" | "warn" | "fail";
 
@@ -4340,6 +4341,39 @@ ipcMain.handle(
 ipcMain.handle("fs:gitRemoteUrl", async (_event, rootPath: string) => {
   return fsManager.getGitRemoteUrl(rootPath);
 });
+
+// --- Repo clone (팀 멤버 "Clone & 연결" 원클릭, 티켓 r8VggohxLGciDVXV2rf6) ---
+//
+// ★완전 자동풀 아님 — RepoConnectModal 의 명시적 버튼에서만 호출된다.
+// URL 검증·대상 경로 조합·에러 분류는 전부 repo-clone.ts 가 담당한다.
+
+ipcMain.handle("repo:defaultCloneParent", () => defaultCloneParentDir());
+
+ipcMain.handle(
+  "repo:clone",
+  async (
+    _event,
+    {
+      projectId,
+      repoUrl,
+      parentDir,
+    }: { projectId?: string; repoUrl: string; parentDir?: string | null },
+  ) => {
+    const result = await cloneRepo({ repoUrl, parentDir });
+    // 성공 시 이 머신의 연결 단일 진실원(connection-store)에도 기록해
+    // Harness 탭/미션 선택이 즉시 연결 상태를 본다. repoUrl/defaultBranch
+    // 는 connect() 가 git 으로 자동 채운다. fail-soft — 기록 실패가
+    // clone 성공을 가리면 안 된다.
+    if (result.ok && result.path && projectId) {
+      try {
+        await upsertProjectConnection({ projectId, localPath: result.path });
+      } catch (err) {
+        console.warn("[repo:clone] connection upsert failed (non-fatal):", err);
+      }
+    }
+    return result;
+  },
+);
 
 // 이 기기의 안정적 식별자를 렌더러에 넘긴다. 프로젝트 폴더 경로를 기기별로
 // 저장하려면(티켓 sHyHC9RoutYHDt97UOEm) 렌더러가 자기 machineId 를 알아야

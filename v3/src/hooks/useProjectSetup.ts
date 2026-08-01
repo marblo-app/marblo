@@ -191,6 +191,20 @@ export function useProjectSetup(): ProjectSetup {
           console.error("Failed to record this machine's folder path:", err);
         }
       }
+      // repo URL backfill (티켓 r8VggohxLGciDVXV2rf6): 생성 시점에 remote 가
+      // 없었거나 구버전으로 만들어진 프로젝트가 처음으로 git 폴더와 연결될 때
+      // gitRemoteUrl 을 기록한다 — 이 값이 있어야 초대된 멤버의 기기에서
+      // "저장소 연결(Clone & 연결)" 모달이 repo 를 자동 표시할 수 있다.
+      if (!existing.gitRemoteUrl && remoteUrl) {
+        try {
+          await useProjectStore
+            .getState()
+            .updateProject(existing.id, { gitRemoteUrl: remoteUrl });
+        } catch (err) {
+          // backfill 실패가 프로젝트 열기를 막아선 안 된다(fail-soft).
+          console.error("Failed to backfill project gitRemoteUrl:", err);
+        }
+      }
       // `existing` 은 쓰기 이전의 스냅샷이라 folderPath 가 아직 비어 있다.
       // 스토어가 낙관적으로 갱신한 최신본을 다시 집어야 오케 자동기동이
       // 방금 고른 경로를 본다.
