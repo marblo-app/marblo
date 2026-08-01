@@ -26,6 +26,8 @@ import {
   getTaskDispatchMeta,
   updateTaskStatus,
 } from "./services/taskService";
+import { getMemberRole } from "./services/teamService";
+import { canMergeAsRole } from "./lib/teamRoles";
 import { buildBusyTaskIds } from "./lib/archiveSignals";
 import {
   logTelemetry,
@@ -309,6 +311,22 @@ function AppContent() {
     // Per-session dedup; the graph's persistent `seen` guard handles the rest.
     const forwarded = new Set<string>();
     const completed = new Set<string>();
+    const uid = user.uid;
+    // 머지 role-gate: merged→DONE 화해(머지성 write)는 owner/admin 클라이언트만
+    // 수행한다. member 클라이언트가 시도해도 Firestore 룰(REVIEW→DONE 게이트)이
+    // 거부하지만, 여기서 걸러 불필요한 permission-denied 를 만들지 않는다.
+    // 판정 실패는 fail-closed(member 취급) — admin 클라이언트가 대신 화해한다.
+    const mergeRoleCache = new Map<string, Promise<boolean>>();
+    const canMergeInProject = (projectId: string): Promise<boolean> => {
+      let cached = mergeRoleCache.get(projectId);
+      if (!cached) {
+        cached = getMemberRole(projectId, uid)
+          .then(canMergeAsRole)
+          .catch(() => false);
+        mergeRoleCache.set(projectId, cached);
+      }
+      return cached;
+    };
     const unsub = subscribeToMergeHistory(
       (entries) => {
         if (kg) {
@@ -349,6 +367,9 @@ function AppContent() {
                   ),
                 })
               ) {
+                return;
+              }
+              if (!task || !(await canMergeInProject(task.projectId))) {
                 return;
               }
               await updateTaskStatus(candidate.taskId, "DONE");

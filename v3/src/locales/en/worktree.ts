@@ -21,6 +21,8 @@ export const worktree: Record<keyof typeof koWorktree, string> = {
   // Row actions
   "worktree.action.resolveOnlyConflict":
     "Resolve is only available in a conflict state",
+  "worktree.action.mergeAdminOnly":
+    "Only project admins (owner/admin) can merge",
   "worktree.action.openInCode": "Open this worktree in the Code tab",
   "worktree.action.removeCleanup": "Remove worktree and clean up branch",
   "worktree.row.aheadTip": "ahead (commits ahead of base)",

@@ -19,6 +19,8 @@ export const worktree = {
 
   // Row actions
   "worktree.action.resolveOnlyConflict": "충돌 상태에서만 Resolve 가능",
+  "worktree.action.mergeAdminOnly":
+    "머지는 프로젝트 관리자(owner/admin)만 가능합니다",
   "worktree.action.openInCode": "Code 탭에서 이 worktree 열기",
   "worktree.action.removeCleanup": "워크트리 제거 및 브랜치 cleanup",
   "worktree.row.aheadTip": "ahead (base 대비 앞선 커밋)",

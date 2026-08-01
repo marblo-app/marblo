@@ -149,6 +149,17 @@ service cloud.firestore {
     // ===== Tasks =====
     // 크로스테넌트 누출 차단: renderer, Electron main, MCP 서버 모두 실제 사용자
     // uid 로 인증한 뒤 자기 프로젝트 task 만 읽고 쓸 수 있다.
+
+    // 머지성 write 게이트: REVIEW→DONE 전이는 "리뷰 통과 후 머지 완료 처리"다
+    // (renderer 의 merged→DONE 화해 shouldMarkMergedTaskDone 이 허용하는 유일한
+    // 전이). 코드 머지는 관리자(owner/admin)만 — member 는 REVIEW 제출까지.
+    // 상태머신 전체를 룰로 강제하진 않는다(다단 우회 차단은 전이 그래프 전체가
+    // 필요) — 핵심 머지 전이만 룰로 잠그고 1차 게이트는 UI/렌더러가 맡는다.
+    function isMergeCloseoutTransition() {
+      return resource.data.get('status', '') == 'REVIEW'
+        && request.resource.data.get('status', '') == 'DONE';
+    }
+
     match /tasks/{taskId} {
       allow read: if isAuthenticated()
         && isProjectMember(resource.data.projectId);
@@ -156,7 +167,9 @@ service cloud.firestore {
         && isProjectMember(request.resource.data.projectId);
       allow update: if isAuthenticated()
         && isProjectMember(resource.data.projectId)
-        && request.resource.data.projectId == resource.data.projectId;
+        && request.resource.data.projectId == resource.data.projectId
+        && (!isMergeCloseoutTransition()
+            || isAdminOrOwner(resource.data.projectId));
       allow delete: if isAuthenticated()
         && isProjectMember(resource.data.projectId);
     }
@@ -406,21 +419,45 @@ service cloud.firestore {
 
     // ===== Member Roles =====
     // Document ID format: {projectId}_{userId}
+    //
+    // ★docId ↔ 본문 결속: isAdminOrOwner()/getMemberRole() 은 docId 규약으로
+    //   문서를 get 하는데, 이전 룰은 "본문 projectId 의 admin 이면 아무 docId 로나
+    //   생성"을 허용했다 → A 프로젝트 admin 이 docId="B_자기uid" + 본문
+    //   projectId=A 로 위조 문서를 만들어 B 프로젝트 admin 권한을 얻는
+    //   크로스프로젝트 권한상승 구멍. docId == {본문 projectId}_{본문 userId} 를
+    //   강제해 닫는다(update 시 projectId/userId 불변 포함).
+    // ★admin 승격/강등은 owner 전용: "admin=owner 가 지정". admin 은 member/
+    //   viewer role 만 만들고 바꿀 수 있으며, admin role 문서의 생성·변경·삭제
+    //   (삭제=사실상 member 로 강등)는 owner 만 가능하다.
+    function memberRoleDocIdMatches(docId) {
+      return docId == request.resource.data.projectId + '_' + request.resource.data.userId;
+    }
+
     match /memberRoles/{docId} {
       allow read: if isAuthenticated()
         && isProjectMember(resource.data.projectId);
 
-      // Only owner/admin can create or update roles
       allow create: if isAuthenticated()
+        && memberRoleDocIdMatches(docId)
         && isAdminOrOwner(request.resource.data.projectId)
-        && request.resource.data.role != 'owner';
+        && request.resource.data.role != 'owner'
+        && (request.resource.data.role != 'admin'
+            || isProjectOwner(request.resource.data.projectId));
 
       allow update: if isAuthenticated()
+        && memberRoleDocIdMatches(docId)
+        && request.resource.data.projectId == resource.data.projectId
+        && request.resource.data.userId == resource.data.userId
         && isAdminOrOwner(resource.data.projectId)
-        && request.resource.data.role != 'owner';
+        && request.resource.data.role != 'owner'
+        && ((request.resource.data.role != 'admin'
+             && resource.data.get('role', '') != 'admin')
+            || isProjectOwner(resource.data.projectId));
 
       allow delete: if isAuthenticated()
-        && isAdminOrOwner(resource.data.projectId);
+        && isAdminOrOwner(resource.data.projectId)
+        && (resource.data.get('role', '') != 'admin'
+            || isProjectOwner(resource.data.projectId));
     }
 
     // ===== Subscriptions =====

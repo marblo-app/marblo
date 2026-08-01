@@ -27,6 +27,7 @@ import {
 import { githubRepoWebBase, worktreeGithubUrl } from "../../lib/githubWebUrl";
 import { routeInstructionToOrchestrator } from "../../services/orchestratorInstructionService";
 import { useAuth } from "../../hooks/useAuth";
+import { useMergePermission } from "../../hooks/useMergePermission";
 import { useArchiveSignals } from "../../hooks/useArchiveSignals";
 import { t, useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
@@ -223,6 +224,7 @@ function RowActions({
   category,
   githubUrl,
   ticketAvailable,
+  canMerge,
   busyAction,
   onAction,
 }: {
@@ -231,6 +233,7 @@ function RowActions({
   category: WorktreeCategory;
   githubUrl: string | null;
   ticketAvailable: boolean;
+  canMerge: boolean;
   busyAction: RowAction | null;
   onAction: (worktree: Worktree, action: RowAction) => void;
 }) {
@@ -255,9 +258,15 @@ function RowActions({
         {busyAction === "rebase" ? "Rebasing" : "Rebase"}
       </ActionButton>
       {mergeable ? (
+        // 머지 role-gate: 코드 머지는 owner/admin 전용. member 에겐 비활성
+        // (Firestore 룰의 REVIEW→DONE 게이트와 짝 — UI 는 1차 방어선).
         <ActionButton
-          disabled={disabled}
-          title={`Squash-merge ${worktree.branch}`}
+          disabled={disabled || !canMerge}
+          title={
+            canMerge
+              ? `Squash-merge ${worktree.branch}`
+              : t("worktree.action.mergeAdminOnly")
+          }
           tone="ready"
           onClick={() => onAction(worktree, "merge")}
         >
@@ -387,6 +396,7 @@ function WorktreeRow({
   category,
   githubUrl,
   ticketAvailable,
+  canMerge,
   archived,
   signals,
   busyAction,
@@ -398,6 +408,7 @@ function WorktreeRow({
   category: WorktreeCategory;
   githubUrl: string | null;
   ticketAvailable: boolean;
+  canMerge: boolean;
   archived: boolean;
   signals: ArchiveSignals;
   busyAction: RowAction | null;
@@ -467,6 +478,7 @@ function WorktreeRow({
             category={category}
             githubUrl={githubUrl}
             ticketAvailable={ticketAvailable}
+            canMerge={canMerge}
             busyAction={busyAction}
             onAction={onAction}
           />
@@ -698,6 +710,7 @@ export function WorktreeTab() {
   const tasks = useTaskStore((s) => s.tasks);
   const subscribeToTasks = useTaskStore((s) => s.subscribeToTasks);
   const { user } = useAuth();
+  const { canMergeInProject } = useMergePermission();
   const { t } = useTranslation();
 
   const [projectFilter, setProjectFilter] = useState<string>(() =>
@@ -1008,6 +1021,13 @@ export function WorktreeTab() {
   const handleAction = async (worktree: Worktree, action: RowAction) => {
     setActionError(null);
     setActionMessage(null);
+
+    // 머지 role-gate 2차 방어선: 버튼 비활성이 뚫려도(스테일 상태 등) 여기서
+    // 차단한다. 최종 강제는 Firestore 룰(REVIEW→DONE = owner/admin).
+    if (action === "merge" && !canMergeInProject(worktree.projectId)) {
+      setActionError(t("worktree.action.mergeAdminOnly"));
+      return;
+    }
 
     if (action === "open") {
       openWorktree(worktree);
@@ -1398,6 +1418,7 @@ export function WorktreeTab() {
                       ticketAvailable={
                         wt.taskId != null && taskById.has(wt.taskId)
                       }
+                      canMerge={canMergeInProject(wt.projectId)}
                       archived={isWorktreeArchived(
                         wt,
                         archiveOverrides,

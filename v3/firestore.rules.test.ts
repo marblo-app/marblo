@@ -524,6 +524,68 @@ describe("tasks collection", () => {
   });
 });
 
+// ===== Tasks — 머지성 write 게이트 (코드 머지 = owner/admin 만) =====
+// REVIEW→DONE 전이는 renderer 의 merged→DONE 화해(shouldMarkMergedTaskDone)가
+// 수행하는 "머지 완료 처리"다. member 는 REVIEW 제출까지, 랜딩은 관리자만.
+
+describe("tasks — 머지성 write 게이트 (REVIEW→DONE)", () => {
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, "tasks", "task-review"), {
+        projectId: PROJECT_ID,
+        title: "Reviewed Task",
+        status: "REVIEW",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+  });
+
+  it("owner 는 REVIEW→DONE 전이(머지 완료)가 가능하다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "tasks", "task-review"), { status: "DONE" }),
+    );
+  });
+
+  it("admin 은 REVIEW→DONE 전이(머지 완료)가 가능하다", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "tasks", "task-review"), { status: "DONE" }),
+    );
+  });
+
+  it("member 는 REVIEW→DONE 전이(머지 완료)를 할 수 없다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "tasks", "task-review"), { status: "DONE" }),
+    );
+  });
+
+  it("member 도 REVIEW 태스크의 비머지성 수정(제목 등)은 가능하다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "tasks", "task-review"), { title: "retitled" }),
+    );
+  });
+
+  it("member 도 REVIEW→IN_PROGRESS(반려/재작업) 전이는 가능하다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "tasks", "task-review"), { status: "IN_PROGRESS" }),
+    );
+  });
+
+  it("member 의 비-REVIEW 태스크 DONE 전이는 여전히 가능하다(머지성 아님)", async () => {
+    // task-1 은 TODO — 오케/에이전트의 일반 완료 흐름을 깨지 않는다.
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "tasks", "task-1"), { status: "DONE" }),
+    );
+  });
+});
+
 // ===== Chat Messages (크로스테넌트 격리) =====
 
 describe("chatMessages collection", () => {
@@ -1300,6 +1362,105 @@ describe("memberRoles collection", () => {
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertSucceeds(
       deleteDoc(doc(db, "memberRoles", `${PROJECT_ID}_${MEMBER_ID}`)),
+    );
+  });
+});
+
+// ===== Member Roles — admin 승격/강등 owner 전용 + docId 결속 =====
+
+describe("memberRoles — admin 승격/강등 owner 전용 + docId 결속", () => {
+  it("Owner 는 멤버를 admin 으로 승격할 수 있다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "memberRoles", `${PROJECT_ID}_${MEMBER_ID}`), {
+        role: "admin",
+      }),
+    );
+  });
+
+  it("Admin 은 다른 멤버를 admin 으로 승격할 수 없다(owner 전용)", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "memberRoles", `${PROJECT_ID}_${MEMBER_ID}`), {
+        role: "admin",
+      }),
+    );
+  });
+
+  it("Admin 은 admin role 문서를 신규 생성할 수 없다(owner 전용)", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertFails(
+      setDoc(doc(db, "memberRoles", `${PROJECT_ID}_new-admin`), {
+        projectId: PROJECT_ID,
+        userId: "new-admin",
+        role: "admin",
+      }),
+    );
+  });
+
+  it("Owner 는 admin role 문서를 신규 생성할 수 있다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(doc(db, "memberRoles", `${PROJECT_ID}_new-admin`), {
+        projectId: PROJECT_ID,
+        userId: "new-admin",
+        role: "admin",
+      }),
+    );
+  });
+
+  it("Admin 은 다른 admin 을 강등할 수 없다(owner 전용)", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "memberRoles", `${PROJECT_ID}_${ADMIN_ID}`), {
+        role: "member",
+      }),
+    );
+  });
+
+  it("Owner 는 admin 을 member 로 강등할 수 있다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "memberRoles", `${PROJECT_ID}_${ADMIN_ID}`), {
+        role: "member",
+      }),
+    );
+  });
+
+  it("Admin 은 admin role 문서를 삭제(사실상 강등)할 수 없다", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertFails(
+      deleteDoc(doc(db, "memberRoles", `${PROJECT_ID}_${ADMIN_ID}`)),
+    );
+  });
+
+  it("Owner 는 admin role 문서를 삭제할 수 있다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      deleteDoc(doc(db, "memberRoles", `${PROJECT_ID}_${ADMIN_ID}`)),
+    );
+  });
+
+  it("docId 와 본문(projectId,userId) 불일치 문서는 생성할 수 없다(크로스프로젝트 권한상승 차단)", async () => {
+    // A 프로젝트(PROJECT_ID) owner 가 본문 projectId=A 로 권한검사를 통과시키며
+    // docId 는 B 프로젝트(OTHER_PROJECT_ID) 규약으로 위조하는 공격 — 이전 룰의
+    // 실제 구멍. docId 결속으로 거부돼야 한다.
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      setDoc(doc(db, "memberRoles", `${OTHER_PROJECT_ID}_${OWNER_ID}`), {
+        projectId: PROJECT_ID,
+        userId: OWNER_ID,
+        role: "admin",
+      }),
+    );
+  });
+
+  it("update 로 projectId 를 갈아끼울 수 없다(불변)", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "memberRoles", `${PROJECT_ID}_${MEMBER_ID}`), {
+        projectId: OTHER_PROJECT_ID,
+      }),
     );
   });
 });

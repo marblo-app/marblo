@@ -3,6 +3,7 @@ import type { InvitationRole } from "../../types/invitation";
 import { useTeam } from "../../hooks/useTeam";
 import { useAuth } from "../../hooks/useAuth";
 import { useTranslation } from "../../lib/i18n";
+import { assignableRolesFor, canEditMemberRole } from "../../lib/teamRoles";
 
 const ROLE_BADGE_COLORS: Record<InvitationRole, string> = {
   owner: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
@@ -18,8 +19,6 @@ const ROLE_LABELS: Record<InvitationRole, string> = {
   viewer: "Viewer",
 };
 
-const ASSIGNABLE_ROLES: InvitationRole[] = ["admin", "member", "viewer"];
-
 interface TeamManagementProps {
   projectId: string;
 }
@@ -33,6 +32,7 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
     invitations,
     loading,
     error,
+    currentRole,
     invite,
     cancelInvitation,
     updateRole,
@@ -47,6 +47,10 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
 
   const canManageMembers = checkPermission("manage_members");
+  // admin 승격/강등은 owner 전용("admin=owner 가 지정") — admin 은 member/viewer
+  // role 만 부여·변경할 수 있고, 다른 admin 은 건드릴 수 없다. Firestore 룰
+  // (memberRoles: admin grant/revoke = owner)과 동일 판정.
+  const assignableRoles = assignableRolesFor(currentRole);
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -143,7 +147,7 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
                 }
                 className="w-full rounded border border-gray-600 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 focus:border-blue-500 focus:outline-none"
               >
-                {ASSIGNABLE_ROLES.map((role) => (
+                {assignableRoles.map((role) => (
                   <option key={role} value={role}>
                     {ROLE_LABELS[role]}
                   </option>
@@ -211,7 +215,12 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
           {members.map((member) => {
             const role = memberRoles[member.id] || "member";
             const isCurrentUser = user?.uid === member.id;
-            const isOwner = role === "owner";
+            // owner 자신 강등 불가(isCurrentUser)·owner role 편집 불가·admin 의
+            // admin 강등 불가는 전부 canEditMemberRole 판정 하나로 수렴한다.
+            const canEditThisMember =
+              canManageMembers &&
+              !isCurrentUser &&
+              canEditMemberRole(currentRole, role);
 
             return (
               <div
@@ -250,7 +259,7 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
 
                 <div className="flex items-center gap-3">
                   {/* Role */}
-                  {canManageMembers && !isOwner && !isCurrentUser ? (
+                  {canEditThisMember ? (
                     <select
                       value={role}
                       onChange={(e) =>
@@ -261,7 +270,7 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
                       }
                       className="rounded border border-gray-600 bg-gray-800 px-2 py-1 text-xs text-gray-300 focus:border-blue-500 focus:outline-none"
                     >
-                      {ASSIGNABLE_ROLES.map((r) => (
+                      {assignableRoles.map((r) => (
                         <option key={r} value={r}>
                           {ROLE_LABELS[r]}
                         </option>
@@ -277,7 +286,7 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
                   </span>
 
                   {/* Remove button */}
-                  {canManageMembers && !isOwner && !isCurrentUser && (
+                  {canEditThisMember && (
                     <>
                       {confirmRemove === member.id ? (
                         <div className="flex items-center gap-1">
