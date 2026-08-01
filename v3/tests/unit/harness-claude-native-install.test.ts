@@ -93,11 +93,11 @@ describe("Claude Code native (curl|bash) installer", () => {
     }
   });
 
-  it("Codex stays on npm-global (this ticket is Claude Code only)", async () => {
+  it("Codex is on the official native installer too (follow-up ticket feWGFNNw)", async () => {
     const { CATALOG } = await loadHarnessWithSpawnMock([]);
     const codex = CATALOG.find((p) => p.id === "cli-codex");
-    expect(codex!.install.kind).toBe("npm-global");
-    expect(codex!.install.source).toBe("@openai/codex");
+    expect(codex!.install.kind).toBe("shell");
+    expect(codex!.install.source).toBe("https://chatgpt.com/codex/install.sh");
   });
 
   it("probeCliAuth reports the native curl|bash command when claude isn't on PATH", async () => {

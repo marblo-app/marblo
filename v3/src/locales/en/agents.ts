@@ -91,7 +91,7 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.guide.setup.title": "Setup Guide",
   "agents.guide.setup.step1.title": "Install CLI",
   "agents.guide.setup.step1.code":
-    "npm install -g @anthropic-ai/claude-code  # Claude\nnpm install -g @openai/codex               # Codex\nnpm install -g @google/gemini-cli           # Gemini",
+    "curl -fsSL https://claude.ai/install.sh | bash        # Claude\ncurl -fsSL https://chatgpt.com/codex/install.sh | sh   # Codex\nnpm install -g @google/gemini-cli                      # Gemini",
   "agents.guide.setup.step2.title": "Configure Authentication",
   "agents.guide.setup.step2.code":
     "# Claude: ANTHROPIC_API_KEY env var or Pro/Max plan\n# Codex:  run codex, then OAuth browser sign-in\n# Gemini: get an API key from Google AI Studio",

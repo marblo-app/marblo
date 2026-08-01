@@ -21,19 +21,29 @@ export interface InstallStrategy {
    * `bundled`    — installed automatically by bundle-installer (no-op here)
    * `manual`     — show instructions only (cannot auto-install)
    * `npm-global` — `npm install -g <package>` for CLI binaries (e.g.
-   *                Codex, Gemini). Installs into the user's npm global
-   *                prefix; requires Node + npm on PATH.
-   * `shell`      — Run a curl-pipe-bash installer script (e.g. Antigravity's
-   *                `curl -fsSL https://antigravity.google/cli/install.sh | bash`).
-   *                URL in `source` must be HTTPS and from a whitelisted host
-   *                (enforced by harness-manager). Same trust level as
-   *                `npm-global` — runs upstream code as the user. Use only
-   *                when upstream doesn't ship an npm package.
+   *                Gemini). Installs into the user's npm global prefix;
+   *                requires Node + npm on PATH. When the global prefix
+   *                isn't user-writable (system Node → EACCES), the
+   *                installer falls back to `--prefix ~/.npm-global`.
+   *                Use only when upstream ships no native installer.
+   * `shell`      — Run the vendor's official native installer script.
+   *                macOS/Linux: `curl -fsSL <source> | bash`. Windows:
+   *                PowerShell `irm <winSource> | iex` — only when the
+   *                vendor publishes a Windows installer (`winSource`);
+   *                otherwise the install fails honestly as unsupported.
+   *                URLs must be HTTPS and from a whitelisted host
+   *                (enforced by harness-manager, both platforms). Same
+   *                trust level as `npm-global` — runs upstream code as
+   *                the user.
    */
   kind: "git" | "mcp" | "bundled" | "manual" | "npm-global" | "shell";
   /** For kind=git: repo URL; for kind=mcp: command to run; for npm-global:
-   *  package name; for shell: HTTPS URL of installer script. */
+   *  package name; for shell: HTTPS URL of the macOS/Linux installer script. */
   source?: string;
+  /** For kind=shell only: HTTPS URL of the vendor's official Windows
+   *  PowerShell installer (run as `irm <url> | iex`). Absent = the vendor
+   *  ships no Windows installer → Windows install is refused honestly. */
+  winSource?: string;
   /** For kind=git: subdirectory under ~/.claude/skills/ */
   dest?: string;
   /** For kind=mcp: env vars to set */
@@ -105,8 +115,10 @@ export const CATALOG: HarnessPackage[] = [
 
   // ── Required CLIs (heterogeneous-agent core) ────────────────────
   // Marblo 오케스트레이터와 워커 에이전트는 모두 `claude` / `codex` /
-  // `gemini` 바이너리에 의존. 없으면 spawn 즉시 fast-fail. npm 글로벌
-  // 설치라 사용자 동의 후 1-click.
+  // `gemini` 바이너리에 의존. 없으면 spawn 즉시 fast-fail. 각 벤더의
+  // 공식 네이티브 인스톨러(shell)라 npm 전역 권한(EACCES) 문제 없이
+  // 사용자 동의 후 1-click. 네이티브 인스톨러가 없는 벤더(Gemini)만
+  // npm-global 유지.
   {
     id: "cli-claude-code",
     name: "Claude Code CLI",
@@ -117,6 +129,7 @@ export const CATALOG: HarnessPackage[] = [
     install: {
       kind: "shell",
       source: "https://claude.ai/install.sh",
+      winSource: "https://claude.ai/install.ps1",
       postInstall:
         "설치 후 터미널에서 `claude` 한 번 실행해서 Anthropic 계정 OAuth 또는 API 키 인증을 완료하세요. 그 후 Marblo 재시작.",
     },
@@ -127,12 +140,13 @@ export const CATALOG: HarnessPackage[] = [
     id: "cli-codex",
     name: "OpenAI Codex CLI",
     description:
-      "Codex (gpt) 에이전트 실행에 필요한 CLI. `npm install -g @openai/codex`. 설치 후 `codex login`으로 인증. /goal 기능은 설치 시 자동 활성화됩니다.",
+      "Codex (gpt) 에이전트 실행에 필요한 CLI. 공식 네이티브 인스톨러(`curl -fsSL https://chatgpt.com/codex/install.sh | sh`, npm 불필요)로 설치. 설치 후 `codex login`으로 인증. /goal 기능은 설치 시 자동 활성화됩니다.",
     type: "cli",
     category: "required",
     install: {
-      kind: "npm-global",
-      source: "@openai/codex",
+      kind: "shell",
+      source: "https://chatgpt.com/codex/install.sh",
+      winSource: "https://chatgpt.com/codex/install.ps1",
       postInstall:
         "설치 후 터미널에서 `codex login` 실행해서 OpenAI 계정 인증을 완료하세요. /goal 기능이 자동 활성화됐으니, 인증 후 Codex 세션에서 `/goal <목표>`로 자율 모드 사용 가능.",
       postInstallExec: [
@@ -158,6 +172,7 @@ export const CATALOG: HarnessPackage[] = [
     install: {
       kind: "shell",
       source: "https://x.ai/cli/install.sh",
+      winSource: "https://x.ai/cli/install.ps1",
       postInstall:
         "설치 후 터미널에서 `grok login` 또는 `grok`를 실행해 브라우저 인증을 완료하세요. 인증 후 Marblo 재시작.",
     },
@@ -198,6 +213,7 @@ export const CATALOG: HarnessPackage[] = [
     install: {
       kind: "shell",
       source: "https://antigravity.google/cli/install.sh",
+      winSource: "https://antigravity.google/cli/install.ps1",
       postInstall:
         "설치 후 터미널에서 `agy` 한 번 실행해서 OAuth 브라우저 인증을 완료하세요. 바이너리는 `~/.local/bin/agy` 에 설치되고 shell rc 의 PATH 가 업데이트됩니다. 인증 후 Marblo 재시작. 첫 agy 워커 스폰 시 `~/.gemini/antigravity-cli/mcp_config.json` 에 Marblo MCP 항목이 자동 머지됩니다 (기존 MCP 항목 보존).",
     },

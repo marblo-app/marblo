@@ -162,7 +162,7 @@ describe("probeCliAuth", () => {
     await expect(probeCliAuth("codex")).resolves.toEqual({
       installed: false,
       authenticated: false,
-      action: "npm install -g @openai/codex",
+      action: "curl -fsSL https://chatgpt.com/codex/install.sh | bash",
     });
   });
 

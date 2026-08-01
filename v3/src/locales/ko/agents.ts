@@ -84,7 +84,7 @@ export const agents = {
   "agents.guide.setup.title": "설치 가이드",
   "agents.guide.setup.step1.title": "CLI 설치",
   "agents.guide.setup.step1.code":
-    "npm install -g @anthropic-ai/claude-code  # Claude\nnpm install -g @openai/codex               # Codex\nnpm install -g @google/gemini-cli           # Gemini",
+    "curl -fsSL https://claude.ai/install.sh | bash        # Claude\ncurl -fsSL https://chatgpt.com/codex/install.sh | sh   # Codex\nnpm install -g @google/gemini-cli                      # Gemini",
   "agents.guide.setup.step2.title": "인증 설정",
   "agents.guide.setup.step2.code":
     "# Claude: ANTHROPIC_API_KEY 환경변수 또는 Pro/Max 구독\n# Codex:  codex 실행 후 OAuth 브라우저 인증\n# Gemini: Google AI Studio에서 API 키 발급",

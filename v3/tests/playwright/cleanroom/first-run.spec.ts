@@ -214,7 +214,7 @@ test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
 
       const body = cr.page.locator("body");
       await expect(body).toContainText(
-        "npm install -g @anthropic-ai/claude-code",
+        "curl -fsSL https://claude.ai/install.sh | bash",
       );
       await cr.shot("B-install-failed-guidance");
 

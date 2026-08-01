@@ -6,8 +6,10 @@
  *   - mcp:        `~/.claude.json` mcpServers entry (atomic merge)
  *   - bundled:    no-op (handled by bundle-installer)
  *   - manual:     no-op (UI shows instructions only)
- *   - npm-global: `npm install -g <package>` for CLI binaries (Codex,
- *                 Gemini, etc.) — detection via PATH/PATHEXT
+ *   - npm-global: `npm install -g <package>` for CLI binaries (Gemini) —
+ *                 detection via PATH/PATHEXT, user-prefix fallback on EACCES
+ *   - shell:      vendor's official native installer — curl|bash on
+ *                 macOS/Linux, PowerShell irm|iex on Windows (winSource)
  */
 import fs from "fs";
 import os from "os";
@@ -276,21 +278,19 @@ const TRUSTED_SHELL_INSTALLER_HOSTS = new Set<string>([
   "antigravity.google",
   "x.ai",
   "claude.ai",
+  "chatgpt.com",
 ]);
 
-async function installShell(strategy: InstallStrategy): Promise<void> {
-  if (!strategy.source) {
-    throw new Error("shell install requires installer URL in source");
-  }
+function assertTrustedInstallerUrl(rawUrl: string): URL {
   let url: URL;
   try {
-    url = new URL(strategy.source);
+    url = new URL(rawUrl);
   } catch {
-    throw new Error(`Invalid installer URL: ${strategy.source}`);
+    throw new Error(`Invalid installer URL: ${rawUrl}`);
   }
   if (url.protocol !== "https:") {
     throw new Error(
-      `Shell installer URL must be HTTPS (got ${url.protocol}): ${strategy.source}`,
+      `Shell installer URL must be HTTPS (got ${url.protocol}): ${rawUrl}`,
     );
   }
   if (!TRUSTED_SHELL_INSTALLER_HOSTS.has(url.host)) {
@@ -299,41 +299,94 @@ async function installShell(strategy: InstallStrategy): Promise<void> {
         `Allowed: ${[...TRUSTED_SHELL_INSTALLER_HOSTS].join(", ")}`,
     );
   }
-  // Windows 는 bash 기반 curl-pipe 인스톨러를 자동 실행하지 않는다. 호스트별로
-  // 예외를 두지 않는다 — x.ai/antigravity 둘 다 bash 스크립트라 win32 에서는
-  // 어차피 못 돈다. 호스트를 붙여 어떤 CLI 를 수동 설치해야 하는지만 알려준다.
-  if (process.platform === "win32") {
-    throw new Error(
-      `Windows에서는 bash 기반 shell 인스톨러를 자동 실행하지 않습니다(${url.host}). ` +
-        "해당 CLI의 Windows용 공식 설치 안내에 따라 수동 설치 후 다시 시도하세요.",
-    );
+  return url;
+}
+
+/**
+ * Pure: pick the platform-appropriate official installer invocation for a
+ * `shell` strategy. macOS/Linux run `curl -fsSL <source> | bash`; Windows
+ * runs PowerShell `irm <winSource> | iex` — but ONLY when the vendor
+ * actually publishes a Windows installer (`winSource`). No winSource on
+ * win32 = honest "unsupported" error, never a guessed URL. The trusted-host
+ * allowlist applies to both platforms.
+ */
+export function resolveShellInstallerSpawn(
+  strategy: InstallStrategy,
+  platform: NodeJS.Platform,
+): { url: string; command: string; args: string[] } {
+  if (!strategy.source) {
+    throw new Error("shell install requires installer URL in source");
   }
+  if (platform === "win32") {
+    if (!strategy.winSource) {
+      const host = assertTrustedInstallerUrl(strategy.source).host;
+      throw new Error(
+        `이 CLI(${host})는 Windows용 공식 인스톨러를 제공하지 않습니다. ` +
+          "해당 CLI의 공식 설치 안내에 따라 수동 설치 후 다시 시도하세요.",
+      );
+    }
+    assertTrustedInstallerUrl(strategy.winSource);
+    // PowerShell single quotes are literal — no interpolation of URL chars.
+    const installCmd = `irm '${strategy.winSource}' | iex`;
+    return {
+      url: strategy.winSource,
+      command: "powershell.exe",
+      args: [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        installCmd,
+      ],
+    };
+  }
+  assertTrustedInstallerUrl(strategy.source);
+  // bash -c "curl -fsSL <url> | bash". Single-quoted URL so shell metachars
+  // in the URL (unlikely but defensive) don't expand. Whitelist already
+  // rejected anything not from a known host.
+  return {
+    url: strategy.source,
+    command: "bash",
+    args: ["-c", `curl -fsSL '${strategy.source}' | bash`],
+  };
+}
+
+async function installShell(strategy: InstallStrategy): Promise<void> {
+  const spawnPlan = resolveShellInstallerSpawn(strategy, process.platform);
 
   const enrichedPath = getEnrichedPathForDetection();
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: enrichedPath };
 
-  // Pre-flight: bash + curl on PATH? Both are universal on macOS/Linux
-  // but we still check to give a clean error message rather than a cryptic
-  // ENOENT on spawn.
   const pathDirs = getPathDirs(enrichedPath);
   const hasBin = (name: string) =>
     pathDirs.some((dir) => fileExists(path.join(dir, name)));
-  if (!hasBin("bash")) {
-    throw new Error(
-      "bash 를 찾을 수 없습니다. shell 인스톨러를 실행할 수 없습니다.",
-    );
-  }
-  if (!hasBin("curl")) {
-    throw new Error(
-      "curl 을 찾을 수 없습니다. shell 인스톨러를 실행할 수 없습니다.",
-    );
+  if (process.platform === "win32") {
+    // powershell.exe lives in System32 which is always on PATH; check anyway
+    // for a clean error instead of a cryptic ENOENT on spawn.
+    if (!hasBin("powershell.exe")) {
+      throw new Error(
+        "PowerShell 을 찾을 수 없습니다. shell 인스톨러를 실행할 수 없습니다.",
+      );
+    }
+  } else {
+    // Pre-flight: bash + curl on PATH? Both are universal on macOS/Linux
+    // but we still check to give a clean error message rather than a cryptic
+    // ENOENT on spawn.
+    if (!hasBin("bash")) {
+      throw new Error(
+        "bash 를 찾을 수 없습니다. shell 인스톨러를 실행할 수 없습니다.",
+      );
+    }
+    if (!hasBin("curl")) {
+      throw new Error(
+        "curl 을 찾을 수 없습니다. shell 인스톨러를 실행할 수 없습니다.",
+      );
+    }
   }
 
-  // bash -c "curl -fsSL <url> | bash". Single-quoted URL so shell metachars
-  // in the URL (unlikely but defensive) don't expand. Whitelist already
-  // rejected anything not from a known host.
-  const installCmd = `curl -fsSL '${strategy.source}' | bash`;
-  console.log(`[harness] installShell: ${installCmd}`);
+  console.log(
+    `[harness] installShell: ${spawnPlan.command} ${spawnPlan.args.join(" ")}`,
+  );
 
   const result = await new Promise<{
     code: number;
@@ -342,7 +395,7 @@ async function installShell(strategy: InstallStrategy): Promise<void> {
   }>((resolve) => {
     let stdout = "";
     let stderr = "";
-    const child = spawn("bash", ["-c", installCmd], { env });
+    const child = spawn(spawnPlan.command, spawnPlan.args, { env });
     child.stdout.on("data", (d) => (stdout += d.toString()));
     child.stderr.on("data", (d) => (stderr += d.toString()));
     child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
@@ -357,7 +410,7 @@ async function installShell(strategy: InstallStrategy): Promise<void> {
       .slice(-10)
       .join("\n");
     throw new Error(
-      `Shell installer 실패 (${strategy.source}, exit ${result.code})\n${tail}`,
+      `Shell installer 실패 (${spawnPlan.url}, exit ${result.code})\n${tail}`,
     );
   }
   // Best-effort post-install hooks (e.g. environment setup). Most shell
@@ -422,6 +475,37 @@ async function isNpmGlobalManaged(binary: string): Promise<boolean> {
   return isPathUnderNpmPrefix(real, prefix);
 }
 
+/**
+ * Is the npm global prefix writable by this user? Checks the deepest
+ * existing directory npm would write into (`lib/node_modules` on POSIX,
+ * `node_modules` on Windows, then the prefix itself). A system-Node prefix
+ * like /usr/local or /usr fails this → `npm i -g` would EACCES.
+ */
+export function isNpmPrefixWritable(prefix: string): boolean {
+  const candidates = [
+    path.join(prefix, "lib", "node_modules"),
+    path.join(prefix, "node_modules"),
+    path.join(prefix, "lib"),
+    prefix,
+  ];
+  for (const p of candidates) {
+    if (!fileExists(p)) continue;
+    try {
+      fs.accessSync(p, fs.constants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/** User-writable npm prefix used when the global prefix would EACCES.
+ *  `~/.npm-global/bin` is already on the enriched detection PATH. */
+export function userNpmPrefixFallback(): string {
+  return path.join(HOME, ".npm-global");
+}
+
 async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
   if (!strategy.source) {
     throw new Error("npm-global install requires a package name in source");
@@ -437,6 +521,20 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
       "npm을 찾을 수 없습니다. Node.js / npm 설치 후 다시 시도하세요. (https://nodejs.org)",
     );
   }
+  // EACCES 회피: 시스템 전역 prefix(/usr/local 등)가 사용자 쓰기 불가면
+  // sudo 를 요구하는 대신 사용자 홈의 ~/.npm-global prefix 로 설치한다.
+  // 그 bin 은 enriched PATH 에 이미 있어 감지·스폰이 그대로 동작한다.
+  const globalPrefix = await getNpmGlobalPrefix();
+  const prefixArgs =
+    globalPrefix && !isNpmPrefixWritable(globalPrefix)
+      ? ["--prefix", userNpmPrefixFallback()]
+      : [];
+  if (prefixArgs.length) {
+    console.log(
+      `[harness] npm global prefix not writable (${globalPrefix}) — ` +
+        `falling back to --prefix ${userNpmPrefixFallback()}`,
+    );
+  }
   const result = await new Promise<{
     code: number;
     stdout: string;
@@ -447,6 +545,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
     const command = commandForSpawn(npmPath, [
       "install",
       "-g",
+      ...prefixArgs,
       strategy.source!,
     ]);
     const child = spawn(command.command, command.args, { env });
@@ -937,6 +1036,29 @@ function antigravityAuthenticated(): boolean {
 }
 
 /**
+ * Human-runnable install command for a catalog CLI, derived from the same
+ * `install` strategy `installPackage` executes (single source of truth).
+ * Platform-aware: win32 gets the vendor's PowerShell one-liner when one
+ * exists, and an honest "unsupported" note when it doesn't.
+ */
+export function officialInstallCommand(catalogId: string): string {
+  const pkg = CATALOG.find((p) => p.id === catalogId);
+  const install = pkg?.install;
+  if (!install) return `unknown package: ${catalogId}`;
+  if (install.kind === "npm-global") {
+    return `npm install -g ${install.source}`;
+  }
+  if (process.platform === "win32") {
+    return install.winSource
+      ? `irm ${install.winSource} | iex`
+      : `이 CLI는 Windows용 공식 인스톨러가 없습니다 — 공식 설치 안내 참고: ${
+          pkg.url ?? install.source
+        }`;
+  }
+  return `curl -fsSL ${install.source} | bash`;
+}
+
+/**
  * Live-probe install + login state for a required CLI. Fast and
  * non-interactive: PATH lookup + env/file checks, with a single guarded
  * keychain existence check on macOS for Claude. Never spawns the CLI itself.
@@ -949,7 +1071,7 @@ export async function probeCliAuth(
       return {
         installed: false,
         authenticated: false,
-        action: "curl -fsSL https://claude.ai/install.sh | bash",
+        action: officialInstallCommand("cli-claude-code"),
       };
     }
     let authed = claudeAuthenticatedSync();
@@ -963,7 +1085,7 @@ export async function probeCliAuth(
       return {
         installed: false,
         authenticated: false,
-        action: "npm install -g @openai/codex",
+        action: officialInstallCommand("cli-codex"),
       };
     }
     return codexAuthenticated()
@@ -975,7 +1097,7 @@ export async function probeCliAuth(
       return {
         installed: false,
         authenticated: false,
-        action: "curl -fsSL https://x.ai/cli/install.sh | bash",
+        action: officialInstallCommand("cli-grok"),
       };
     }
     return grokAuthenticated()
@@ -987,7 +1109,7 @@ export async function probeCliAuth(
       return {
         installed: false,
         authenticated: false,
-        action: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+        action: officialInstallCommand("cli-antigravity"),
       };
     }
     // agy completes login by running `agy` once (opens the OAuth browser flow).

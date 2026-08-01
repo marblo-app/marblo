@@ -124,30 +124,67 @@ describe("harness manager Windows PATH handling", () => {
     });
   });
 
-  it("runs npm.cmd through cmd.exe for global installs and post-install hooks", async () => {
+  it("runs npm.cmd through cmd.exe for npm-global installs (gemini)", async () => {
     const npmShim = touchWindowsShim(currentHome, "npm");
-    const codexShim = touchWindowsShim(currentHome, "codex");
     process.env.PATH = `C:\\Program Files\\nodejs;${path.dirname(npmShim)}`;
+    const spawnCalls: SpawnCall[] = [];
+    const { installPackage } = await loadHarnessWithWindowsMocks(spawnCalls);
+
+    await installPackage("cli-gemini");
+
+    // 첫 spawn 은 EACCES 폴백 판정용 `npm prefix -g` (mock stdout 빈값 →
+    // prefix 미상 → 폴백 없이 기본 전역 설치).
+    expect(spawnCalls[0]).toEqual({
+      command: "cmd.exe",
+      args: ["/c", npmShim, "prefix", "-g"],
+    });
+    expect(spawnCalls[1]).toEqual({
+      command: "cmd.exe",
+      args: ["/c", npmShim, "install", "-g", "@google/gemini-cli"],
+    });
+  });
+
+  it("runs the official PowerShell installer (irm|iex) for shell CLIs on Windows", async () => {
+    // powershell.exe pre-flight 는 enriched PATH 의 실제 파일을 확인한다.
+    const psDir = path.join(currentHome, "System32");
+    writeFile(path.join(psDir, "powershell.exe"), "");
+    const codexShim = touchWindowsShim(currentHome, "codex");
+    process.env.PATH = `${psDir};${path.dirname(codexShim)}`;
     const spawnCalls: SpawnCall[] = [];
     const { installPackage } = await loadHarnessWithWindowsMocks(spawnCalls);
 
     await installPackage("cli-codex");
 
     expect(spawnCalls[0]).toEqual({
-      command: "cmd.exe",
-      args: ["/c", npmShim, "install", "-g", "@openai/codex"],
+      command: "powershell.exe",
+      args: [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "irm 'https://chatgpt.com/codex/install.ps1' | iex",
+      ],
     });
+    // postInstallExec (codex features enable goals) 는 shell 설치 후에도 돈다.
     expect(spawnCalls[1]).toEqual({
       command: "cmd.exe",
       args: ["/c", codexShim, "features", "enable", "goals"],
     });
+    expect(spawnCalls[0].args.join(" ")).not.toMatch(/curl|bash|npm/);
   });
 
-  it("skips the bash shell installer on Windows with a clear message", async () => {
-    const { installPackage } = await loadHarnessWithWindowsMocks([]);
-
-    await expect(installPackage("cli-antigravity")).rejects.toThrow(
-      /Windows에서는 bash 기반 shell 인스톨러를 자동 실행하지 않습니다/,
-    );
+  it("refuses honestly on Windows when the vendor ships no Windows installer", async () => {
+    const harness = await loadHarnessWithWindowsMocks([]);
+    const { CATALOG } = await import("../../electron/harness-catalog");
+    const agy = CATALOG.find((p) => p.id === "cli-antigravity")!;
+    const originalWinSource = agy.install.winSource;
+    delete agy.install.winSource;
+    try {
+      await expect(harness.installPackage("cli-antigravity")).rejects.toThrow(
+        /Windows용 공식 인스톨러를 제공하지 않습니다/,
+      );
+    } finally {
+      agy.install.winSource = originalWinSource;
+    }
   });
 });

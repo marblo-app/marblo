@@ -726,7 +726,7 @@ function AgentGuide() {
                   {t("agents.guide.cliCompare.claude.strength")}
                 </td>
                 <td className="py-2 font-mono text-[10px] text-gray-500">
-                  npm i -g @anthropic-ai/claude-code
+                  curl -fsSL https://claude.ai/install.sh | bash
                 </td>
               </tr>
               <tr className="border-b border-gray-700/50">
@@ -741,7 +741,7 @@ function AgentGuide() {
                   {t("agents.guide.cliCompare.codex.strength")}
                 </td>
                 <td className="py-2 font-mono text-[10px] text-gray-500">
-                  npm i -g @openai/codex
+                  curl -fsSL https://chatgpt.com/codex/install.sh | sh
                 </td>
               </tr>
               <tr>
@@ -953,7 +953,7 @@ const CLI_GUIDES: {
   {
     name: "Claude Code",
     icon: "🟣",
-    install: "npm install -g @anthropic-ai/claude-code",
+    install: "curl -fsSL https://claude.ai/install.sh | bash",
     run: "claude --dangerously-skip-permissions",
     noteKey: "agents.setupGuide.note.claude",
     color: "border-purple-500/30",
@@ -961,7 +961,7 @@ const CLI_GUIDES: {
   {
     name: "OpenAI Codex CLI",
     icon: "🟢",
-    install: "npm install -g @openai/codex",
+    install: "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
     run: "codex --full-auto",
     noteKey: "agents.setupGuide.note.codex",
     color: "border-green-500/30",

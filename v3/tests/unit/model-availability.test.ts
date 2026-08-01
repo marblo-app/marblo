@@ -25,7 +25,7 @@ const notAuthed = {
 const notInstalled = {
   installed: false,
   authenticated: false,
-  action: "npm install -g @openai/codex",
+  action: "curl -fsSL https://chatgpt.com/codex/install.sh | bash",
 };
 
 /** claude=OK, codex=OK, grok=인증깨짐 — 라이브에서 실제로 나온 모양. */
@@ -55,7 +55,7 @@ describe("★미인증 하네스 제외", () => {
     });
     expect(r.available).toEqual(["claude"]);
     expect(r.excluded[0].reason).toBe("미설치");
-    expect(r.excluded[0].action).toContain("npm install");
+    expect(r.excluded[0].action).toContain("codex/install.sh");
   });
 
   it("게이트가 없는 하네스는 건드리지 않는다(무회귀)", async () => {

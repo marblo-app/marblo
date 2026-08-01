@@ -400,11 +400,11 @@ export async function launchCleanRoom(
       cli: {
         claude: stateToProbe(
           scenario.claude ?? "missing",
-          "npm install -g @anthropic-ai/claude-code",
+          "curl -fsSL https://claude.ai/install.sh | bash",
         ),
         codex: stateToProbe(
           scenario.codex ?? "missing",
-          "npm install -g @openai/codex",
+          "curl -fsSL https://chatgpt.com/codex/install.sh | bash",
         ),
         grok: stateToProbe(
           scenario.grok ?? "missing",

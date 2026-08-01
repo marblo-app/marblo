@@ -65,8 +65,8 @@ export const ROWS: CliRow[] = [
  * Reused by the version-check advisory when an installed CLI is behind, and as
  * the manual install fallback when auto-install fails. */
 export const UPDATE_CMD: Record<CliModel, string> = {
-  claude: "npm install -g @anthropic-ai/claude-code",
-  codex: "npm install -g @openai/codex",
+  claude: "curl -fsSL https://claude.ai/install.sh | bash",
+  codex: "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
   grok: "curl -fsSL https://x.ai/cli/install.sh | bash",
   antigravity: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
 };
@@ -74,8 +74,8 @@ export const UPDATE_CMD: Record<CliModel, string> = {
 /** Official install/docs page per CLI — the "official method" fallback link
  * shown next to the manual command when auto-install fails. */
 export const DOCS_URL: Record<CliModel, string> = {
-  claude: "https://www.npmjs.com/package/@anthropic-ai/claude-code",
-  codex: "https://www.npmjs.com/package/@openai/codex",
+  claude: "https://code.claude.com/docs/en/setup",
+  codex: "https://github.com/openai/codex",
   grok: "https://x.ai/cli",
   antigravity: "https://antigravity.google",
 };
