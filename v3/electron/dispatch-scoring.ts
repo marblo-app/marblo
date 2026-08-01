@@ -188,9 +188,47 @@ const COST_EFFICIENCY_MAX = 15;
 const BUDGET_BIAS_MAX = 20;
 
 /**
+ * 잔여 쿼터(%) → 프로바이더 축 bias. **구간상수가 아니라 연속(단조) 곡선**이다.
+ *
+ * ★왜 바꿨나(라이브 측정, 2026-08-01): 종전 4구간 상수(+6/+2/-8/-16)는 잔여
+ * 50% 를 1%만 지나도 claude 가 tie-band 50% 에서 0% 로 떨어지는 절벽을 만들고,
+ * 정작 잔여 25~50% 구간은 +2 로 평평해 아무것도 안 움직이는 죽은 구간이었다.
+ * 절벽은 "쿼터가 조금 줄었다" 를 "하네스를 통째로 갈아탄다" 로 번역하고, 죽은
+ * 구간은 사장님이 원한 "주요 팩터" 를 그 구간에서 무력화한다. 곡선을 연속으로
+ * 만들면 두 병이 같이 사라진다 — 잔여가 줄수록 **점진적으로** 밀린다.
+ *
+ * 마디값(잔여 기준):
+ *   · ≥50%  → +6 **평평**. ★과반응 금지 지점이다. 쿼터가 넉넉할 땐 라우팅을
+ *             능력·단가·KG 가 주도해야 하고 쿼터는 발언권이 없어야 한다.
+ *             종전과 **같은 값**이라 이 구간은 무회귀다.
+ *   · 25%   →  0  — 부호가 바뀌는 **변곡점**. 여기부터 쿼터가 감점으로 돈다.
+ *   · 10%   → -12
+ *   ·  0%   → -20 (= BUDGET_BIAS_MAX). graphBias 와 같은 ±20 스케일의 끝까지
+ *             쓴다 — 이 지점의 쿼터는 다른 어떤 정적신호보다 우선해야 한다
+ *             (base 최대차 20, costEff 최대차 12 를 혼자 뒤집는 크기).
+ *
+ * 0% 는 도달 전에 `remaining <= 0` 하드게이트(bias=null)가 먼저 잡는다.
+ */
+function budgetBiasCurve(remaining: number): number {
+  // 구간 [저잔여, 고잔여] → [저잔여 bias, 고잔여 bias] 선형보간.
+  const lerp = (lo: number, hi: number, at: number, to: number): number =>
+    at + ((remaining - lo) / (hi - lo)) * (to - at);
+  if (remaining >= 50) return 6;
+  if (remaining >= 25) return lerp(25, 50, 0, 6);
+  if (remaining >= 10) return lerp(10, 25, -12, 0);
+  return lerp(0, 10, -20, -12);
+}
+
+/**
  * Real-time budget signal for dispatch scoring. This is intentionally separate
  * from costEfficiencyScore(): cost-eff is static/unit-price prior, while this
  * reads the current account quota headroom. Missing data is neutral.
+ *
+ * ★no-data 는 0(중립)이지 0% 잔여가 아니다. grok 이 오늘 여기로 온다 —
+ * Grok Build CLI 0.2.117 에 usage/quota 명령이 없어(#713) account-usage 가
+ * null 을 주고, 그 null 은 bridge-server 스냅샷에서 아예 빠진다. 즉 grok 은
+ * **budget 팩터 밖**이며 그게 정상이다(없는 숫자를 지어내지 않는다). grok 이
+ * usage 를 노출하면 스냅샷에 grok 을 넣는 것만으로 이 곡선을 그대로 탄다.
  */
 export function budgetBiasScore(
   model: ModelType,
@@ -207,18 +245,25 @@ export function budgetBiasScore(
     return { bias: null, reason: "budget exhausted" };
   }
 
-  let bias: number;
-  if (remaining >= 50) bias = 6;
-  else if (remaining >= 25) bias = 2;
-  else if (remaining >= 10) bias = -8;
-  else bias = -16;
-
+  const bias = Math.round(budgetBiasCurve(remaining) * 10) / 10;
   const safeBias = Math.max(-BUDGET_BIAS_MAX, Math.min(BUDGET_BIAS_MAX, bias));
   const sign = safeBias >= 0 ? "+" : "";
   return {
     bias: safeBias,
     reason: `budget ${sign}${safeBias}(${Math.round(remaining)}% left)`,
   };
+}
+
+/**
+ * 이 bias 가 "쿼터가 실제 제약이 됐다" 를 뜻하는가.
+ *
+ * 곡선의 변곡점(잔여 25%)을 넘어 **감점 구간**에 들어왔다는 뜻이다. 이 술어가
+ * 필요한 이유는 budget 의 중립값이 0 이 아니기 때문이다 — 잔여가 넉넉해도 +6 이
+ * 붙으므로 graphBias 처럼 `!== 0` 으로 "신호 있음" 을 판정하면 쿼터 데이터가
+ * 있는 모든 기기에서 항상 참이 된다(= 다양성 회전이 영구 사망).
+ */
+function budgetIsConstraining(bias: number | null): boolean {
+  return typeof bias === "number" && bias < 0;
 }
 
 /**
@@ -788,6 +833,19 @@ export function scoreModelsDetailed(
     const costEff = costEfficiencyScore(model, tags);
     const budget = budgetBiasScore(model, budgets);
     if (budget.bias === null) continue;
+    // ★쿼터 압박은 아래 "무태그 → 순수 round-robin" 분기를 우회한다.
+    //
+    // 라이브 측정(2026-08-01)에서 나온 결함: 태그 없는 dispatch(오케 기본 경로)는
+    // hasTags=false 라 **점수를 통째로 무시**하고 회전만 했다. 그래서 claude 잔여가
+    // 1% 여도(bias -16) claude 가 3분의 1 확률로 계속 뽑혔다 — budget 을 계산해
+    // 놓고 버린 것이다. 헤드룸 0~99% 전 구간에서 분포가 한 톨도 안 변했다.
+    //
+    // graphBias·agyBias 에는 이미 같은 탈출구가 있다(바로 아래/위). budget 에만
+    // 없었다. 다만 `!== 0` 이 아니라 **감점 구간일 때만** 연다: 잔여가 넉넉하면
+    // +6 이 상시로 붙어 있어서 `!== 0` 로 열면 다양성 회전이 영구히 죽는다.
+    // 즉 잔여 25% 밑으로 내려간 후보가 하나라도 있을 때만 회전을 멈추고 점수
+    // 경쟁으로 간다. 그 위에서는 종전과 완전히 동일하다(무회귀).
+    if (budgetIsConstraining(budget.bias)) hasTags = true;
     // §C: simple → antigravity 소프트 가점(0 이면 no-op).
     const thisAgyBias = model === "antigravity" ? agyBias : 0;
     // Live knowledge-graph learned prior (spec 2026-07-22). Same additive

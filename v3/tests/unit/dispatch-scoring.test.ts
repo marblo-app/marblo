@@ -710,6 +710,101 @@ describe("budgetBiasScore", () => {
     expect(result.bias).toBeNull();
     expect(result.reason).toContain("exhausted");
   });
+
+  // ── ★P2 튜닝(티켓 Aki3gavI) — 연속 곡선 ────────────────────────────
+  //
+  // 종전 4구간 상수(+6/+2/-8/-16)는 잔여 50%→49% 에서 절벽을 만들고 25~50% 를
+  // 죽은 구간으로 뒀다. 곡선을 연속·단조로 바꾸되 잔여 50% 이상은 불변이다.
+
+  it("★잔여 50% 이상은 종전과 같은 +6 이다 — 넉넉할 땐 쿼터가 라우팅을 주도하지 않는다", () => {
+    for (const used of [0, 10, 25, 40, 50]) {
+      expect(
+        budgetBiasScore("claude", { claude: { usedPercent: used } }).bias,
+      ).toBe(6);
+    }
+  });
+
+  it("★잔여가 줄수록 단조 감소하고 1%p 절벽이 없다", () => {
+    let prev = budgetBiasScore("gpt", { gpt: { usedPercent: 0 } }).bias!;
+    for (let used = 1; used < 100; used++) {
+      const bias = budgetBiasScore("gpt", { gpt: { usedPercent: used } }).bias!;
+      expect(bias).toBeLessThanOrEqual(prev);
+      // 종전엔 잔여 50→49 에서 6→2(4점), 25→24 에서 2→-8(10점)이 한 번에 떨어졌다.
+      expect(prev - bias).toBeLessThan(1.5);
+      prev = bias;
+    }
+  });
+
+  it("★잔여 25% 가 변곡점(0)이고 바닥은 ±20 스케일 끝까지 간다", () => {
+    expect(
+      budgetBiasScore("claude", { claude: { usedPercent: 75 } }).bias,
+    ).toBe(0);
+    // 잔여 1% — 종전 -16 보다 강하게, base(최대차 20)를 혼자 뒤집는 크기.
+    expect(
+      budgetBiasScore("claude", { claude: { usedPercent: 99 } }).bias!,
+    ).toBeLessThan(-16);
+    expect(
+      budgetBiasScore("claude", { claude: { usedPercent: 99 } }).bias!,
+    ).toBeGreaterThanOrEqual(-20);
+  });
+});
+
+// ★라이브 실측(2026-08-01)에서 잡힌 최대 결함: 태그 없는 dispatch 는
+// round-robin-no-tags 로 **점수를 통째로 무시**해 budget 을 계산해 놓고 버렸다.
+// 잔여 1% 인 claude 가 3분의 1 확률로 계속 뽑히던 경로다.
+describe("★budget pressure escapes the tag-blind round-robin", () => {
+  const healthy = { claude: { usedPercent: 10 }, gpt: { usedPercent: 10 } };
+
+  it("무태그여도 쿼터가 마른 후보가 있으면 점수 경쟁으로 간다", () => {
+    const selection = scoreModelsDetailed(
+      ["claude", "gpt"],
+      [], // ← 태그 없음: 종전엔 여기서 점수가 버려졌다
+      "standard",
+      { claude: { usedPercent: 95 }, gpt: { usedPercent: 10 } },
+    );
+    expect(selection.mode).not.toBe("round-robin-no-tags");
+    expect(selection.selected).toBe("gpt");
+  });
+
+  it("쿼터가 마른 모델은 무태그 20회 추첨에서 한 번도 안 뽑힌다", () => {
+    const picks = new Set<string>();
+    for (let i = 0; i < 20; i++) {
+      picks.add(
+        scoreModelsDetailed(["claude", "gpt"], [], "standard", {
+          claude: { usedPercent: 95 },
+          gpt: { usedPercent: 10 },
+        }).selected,
+      );
+    }
+    expect(picks.has("claude")).toBe(false);
+  });
+
+  it("★잔여가 다들 넉넉하면 종전대로 회전한다(무회귀) — 다양성을 죽이지 않는다", () => {
+    const picks = new Set<string>();
+    for (let i = 0; i < 20; i++) {
+      picks.add(
+        scoreModelsDetailed(["claude", "gpt"], [], "standard", healthy)
+          .selected,
+      );
+    }
+    expect(picks.size).toBeGreaterThan(1);
+    expect(
+      scoreModelsDetailed(["claude", "gpt"], [], "standard", healthy).mode,
+    ).toBe("round-robin-no-tags");
+  });
+
+  it("★grok 은 usage 미노출(#713)이라 budget 팩터 밖 — no-data 는 중립이지 소진이 아니다", () => {
+    // bridge-server 스냅샷에 grok 키가 아예 없는 상태를 그대로 재현한다.
+    const selection = scoreModelsDetailed(["grok", "claude"], [], "standard", {
+      claude: { usedPercent: 95 },
+    });
+    expect(selection.scores.find((s) => s.model === "grok")?.budgetBias).toBe(
+      0,
+    );
+    // 중립이므로 후보에서 빠지지도(소진 취급) 않는다.
+    expect(selection.scores.map((s) => s.model)).toContain("grok");
+    expect(selection.selected).toBe("grok");
+  });
 });
 
 describe("scoreAgents budget-bias integration", () => {

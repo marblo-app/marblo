@@ -74,6 +74,22 @@ function rateLimitToBudgetInfo(
   return { usedPercent: Math.max(...readings) };
 }
 
+/**
+ * 계정 쿼터 실측 → 라우팅이 읽는 예산 스냅샷.
+ *
+ * ★grok 이 여기 없는 것은 누락이 아니다. Grok Build CLI(측정 0.2.117)에는
+ * usage/account/quota 를 내주는 명령이 없어서(#713) `getAccountGrokRateLimit()`
+ * 이 구조적으로 null 만 돌려준다 — `account-usage.ts` 헤더에 같은 사실이 적혀
+ * 있다. null 을 0% 사용으로 접으면 "쿼터 무한" 이라는 **없는 사실**을 라우터에
+ * 먹이는 것이고, 100% 로 접으면 grok 을 영구 차단한다. 그래서 키 자체를 넣지
+ * 않고, `budgetBiasScore` 가 no-data → bias 0(중립)으로 처리하게 둔다. 즉
+ * **grok 은 오늘 budget 팩터 밖에서 능력·단가·KG 로만 경쟁한다.**
+ *
+ * grok 이 usage 를 노출하는 날의 편입 비용은 이 함수에 두 줄이다(별도 티켓):
+ * `rateLimitToBudgetInfo(rateLimits.grok)` 를 grok 키에 넣으면 1층 곡선도
+ * 2층 헤드룸 스케일도 그대로 적용된다 — 아래 프로브 게이트에 "grok" 을 추가하는
+ * 것도 잊지 말 것(안 그러면 grok 단독 dispatch 가 프로브를 건너뛴다).
+ */
 function accountRateLimitsToBudgetSnapshot(
   rateLimits: AccountRateLimits,
 ): ModelBudgetSnapshot {

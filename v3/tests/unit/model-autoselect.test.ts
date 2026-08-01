@@ -18,6 +18,7 @@ import {
   autoCandidates,
   resetAutoSelectRotation,
   costPressureForHeadroom,
+  subscriptionCostScaleForHeadroom,
   resolveEpsilon,
   modelGuidance,
   DEFAULT_EPSILON,
@@ -597,6 +598,57 @@ describe("★잔여예산 — 쿼터가 마르면 싼 칸이 유리해진다", (
         })!.model,
       );
     expect(picks.size).toBeGreaterThan(1);
+  });
+
+  // ── ★P2 튜닝(티켓 Aki3gavI) — 잔여량을 '주요 팩터'로 ────────────────
+  //
+  // 라이브 실측(dist-electron, claude 실 usage-probe 60% 사용)에서 나온 두 결함을
+  // 잠근다: (a) 잔여 25~50% 가 scale 0.08 로 평평해 아무 칸도 안 움직이던 죽은
+  // 구간, (b) 잔여 20% 에서 한 번에 터지던 절벽. 곡선을 연속·단조로 만들되
+  // **잔여 50% 이상은 종전 값 그대로**(과반응 금지)여야 한다.
+
+  it("★잔여 50% 이상은 종전과 동일하다 — 넉넉할 땐 쿼터가 발언권을 갖지 않는다", () => {
+    // 종전 구간상수의 마디값. 이 구간이 움직이면 '평소엔 능력/단가가 주도'가 깨진다.
+    for (const used of [0, 10, 25, 40, 50]) {
+      expect(subscriptionCostScaleForHeadroom(used)).toBe(0.02);
+      expect(costPressureForHeadroom(used)).toBe(1);
+    }
+  });
+
+  it("★스케일·압력은 잔여가 줄수록 단조 증가하고 절벽이 없다", () => {
+    let prevScale = -Infinity;
+    let prevPressure = -Infinity;
+    // used 오름차순 = 잔여 내림차순.
+    for (let used = 0; used <= 100; used++) {
+      const scale = subscriptionCostScaleForHeadroom(used);
+      const pressure = costPressureForHeadroom(used);
+      expect(scale).toBeGreaterThanOrEqual(prevScale);
+      expect(pressure).toBeGreaterThanOrEqual(prevPressure);
+      // 1%p 만에 2배 넘게 뛰는 지점이 없어야 한다(= 절벽 없음). 종전 구간상수는
+      // 잔여 25→24 에서 0.08→0.35(4.4배)로 뛰었다.
+      if (prevScale > 0) expect(scale / prevScale).toBeLessThan(2);
+      prevScale = scale;
+      prevPressure = pressure;
+    }
+  });
+
+  it("★잔여 25% 마디가 종전 <25% 값에 도달한다 — '25%부터 체감'", () => {
+    // 종전엔 잔여 25% 에서 0.08(죽은 구간)이었고 0.35 는 잔여 10~25% 에서야 닿았다.
+    expect(subscriptionCostScaleForHeadroom(75)).toBeCloseTo(0.35, 5);
+    // 잔여 40% 는 그 중간 어딘가 — 평평하지도(0.02), 다 오르지도(0.35) 않는다.
+    const mid = subscriptionCostScaleForHeadroom(60);
+    expect(mid).toBeGreaterThan(0.02);
+    expect(mid).toBeLessThan(0.35);
+  });
+
+  it("★잔여 25% 에서 standard 진입칸(opus5)이 실제로 밀린다 — 종전엔 잔여 20% 까지 안 밀렸다", () => {
+    const at25 = plan("claude", "standard", { budgetUsedPercent: 75 })!;
+    expect(costIndexForModel(at25.model)!).toBeLessThan(
+      costIndexForModel(entryRung("claude", "standard")!.model)!,
+    );
+    // 그런데 잔여 40% 에서는 아직 진입칸을 지킨다(과반응 금지 경계).
+    const at40 = plan("claude", "standard", { budgetUsedPercent: 60 })!;
+    expect(at40.model).toBe(entryRung("claude", "standard")!.model);
   });
 
   it("★키 있으면 잔량이 말라도 env-swap 최저단가 칸이 sonnet5 보다 더 유리하다", () => {

@@ -178,27 +178,63 @@ export function subscriptionCostScaleForHeadroom(
     return 0.02;
   }
   const remaining = 100 - Math.min(100, Math.max(0, usedPercent));
+  return geoScale(remaining);
+}
+
+/**
+ * 잔여(%) → 구독 effective 단가 배수. **기하보간(연속·단조)** 이다.
+ *
+ * ★왜 기하인가: 이 값은 `log2Ratio` 안으로 들어간다. 로그 안에서 기하보간은
+ * 점수 축에서 **선형**이 된다 — 즉 잔여가 1%p 줄 때마다 단가 성분이 일정하게
+ * 움직인다. 산술보간이면 저잔여 구간에서만 점수가 폭발한다.
+ *
+ * ★왜 바꿨나(라이브 측정, 2026-08-01): 종전 구간상수는 잔여 25~50% 에서 0.08 로
+ * 평평해 **아무 칸도 안 움직였고**, 실제 이동은 잔여 20% 에서 절벽처럼 한 번에
+ * 일어났다(opus5 → minimax-m2.7). 사장님 요구는 "25% 부터 체감이 더 크게" 이므로
+ * 25% 마디를 종전 <25% 값(0.35)까지 끌어올리고 그 사이를 연속으로 이었다.
+ *
+ * 마디값(잔여 기준):
+ *   · ≥50% → 0.02 **평평** — ★과반응 금지. 종전과 같은 값이라 무회귀다.
+ *   ·  25% → 0.35 (종전엔 잔여 10~25% 에서야 닿던 값)
+ *   ·  10% → 2.0
+ *   ·   0% → 12   (종전 소진값과 동일)
+ */
+function geoScale(remaining: number): number {
+  // [lo,hi] 구간의 기하보간. 로그공간 선형 = 점수공간 선형.
+  const geo = (lo: number, hi: number, at: number, to: number): number =>
+    at * Math.pow(to / at, (remaining - lo) / (hi - lo));
   if (remaining >= 50) return 0.02;
-  if (remaining >= 25) return 0.08;
-  if (remaining >= 10) return 0.35;
-  if (remaining > 0) return 4;
-  return 12;
+  if (remaining >= 25) return geo(25, 50, 0.35, 0.02);
+  if (remaining >= 10) return geo(10, 25, 2, 0.35);
+  return geo(0, 10, 12, 2);
 }
 
 /**
  * 잔여 쿼터 → 단가 민감도 배수. 이 값도 cost 항 안에서만 쓰며, 별도 budget 점수로
  * 더하지 않는다. 구독 쿼터가 마를수록 같은 구독형 내부의 고단가 칸도 더 강하게
  * 벌해야 해서 effective 단가 스케일과 함께 cost log-ratio 를 증폭한다.
+ *
+ * scale 과 마찬가지로 연속·단조다. 마디: 잔여 ≥50% → 1(평평, ★과반응 금지 +
+ * 무회귀) / 25% → 1.5 / 10% → 2.2 / 0% → 3.2.
+ *
+ * ★상한을 2.6 → 3.2 로 올린 이유는 측정이다: complex 티어(COST_WEIGHT=2)에서
+ * 종전 상한은 FIT down 감점(12/칸)을 어떤 잔여에서도 못 이겨 claude-fable-5 가
+ * 잔여 1% 까지 고정이었다(사다리 전 구간 이동 0건). 다만 이것만으로 complex 가
+ * 뒤집히지는 않는다 — complex 의 quota 방어선은 **1층**(하네스를 아예 안 고름)
+ * 이고, 그게 맞다(어려운 티켓을 약한 모델로 돌린 실패는 재작업이라 절약분보다
+ * 비싸다 — FIT_PENALTY 주석과 같은 논리).
  */
 export function costPressureForHeadroom(usedPercent?: number | null): number {
   if (typeof usedPercent !== "number" || !Number.isFinite(usedPercent)) {
     return 1;
   }
   const remaining = 100 - Math.min(100, Math.max(0, usedPercent));
+  const lerp = (lo: number, hi: number, at: number, to: number): number =>
+    at + ((remaining - lo) / (hi - lo)) * (to - at);
   if (remaining >= 50) return 1;
-  if (remaining >= 25) return 1.4;
-  if (remaining >= 10) return 2;
-  return 2.6;
+  if (remaining >= 25) return lerp(25, 50, 1.5, 1);
+  if (remaining >= 10) return lerp(10, 25, 2.2, 1.5);
+  return lerp(0, 10, 3.2, 2.2);
 }
 
 export function isSubscriptionMeteredModel(modelId: string): boolean {
