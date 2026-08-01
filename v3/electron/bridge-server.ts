@@ -2735,8 +2735,14 @@ export class BridgeServer {
       resolvedTaskId ?? undefined,
     );
 
+    // ★근거를 스폰 로그에 동봉한다. 종전엔 `spawned '<name>' (model=claude)` 만
+    // 남아서, "왜 이 하네스·이 칸이었나" 를 사후에 되짚을 방법이 로그에 없었다
+    // (dispatchReason 은 에이전트 doc·텔레메트리에만 있어 콘솔 감사로는 안 보인다).
+    // 이 티켓의 진단이 실물 모듈 재현으로만 가능했던 이유가 정확히 그것이다.
+    // 여기 한 줄이면 다음 편중 신고는 로그만으로 판정된다 — 1층 모드·점수,
+    // 가용성 제외 사유, 2층 칸 근거가 전부 이 문자열에 이미 들어 있다.
     console.log(
-      `[BridgeServer] Dispatch: spawned '${agentName}' (model=${selectedModel})`,
+      `[BridgeServer] Dispatch: spawned '${agentName}' (model=${selectedModel}) — ${spawnDecisionReason}`,
     );
     // Decision snapshot: fresh spawn. When the model was scored (no explicit
     // hint) carry the full per-model breakdown + selection mode; an explicit

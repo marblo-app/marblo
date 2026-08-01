@@ -6,6 +6,8 @@ import {
   scoreAgents,
   scoreModels,
   scoreModelsDetailed,
+  resolvePreset,
+  MODEL_PRESETS,
   resolveSimpleAgyBias,
   checkSpawnConstraints,
   costEfficiencyScore,
@@ -27,6 +29,7 @@ import {
   type AgentStatus,
   type ModelType,
 } from "../../electron/dispatch-scoring";
+import { filterAvailableHarnesses } from "../../electron/model-availability";
 
 // ── Test Helpers ────────────────────────────────────────────
 
@@ -359,14 +362,12 @@ describe("scoreModels", () => {
           .model,
       ).toBe("gpt");
       expect(
-        scoreModelsDetailed(["claude", "gpt", "gemini"], ["research"])
-          .scores[0].model,
+        scoreModelsDetailed(["claude", "gpt", "gemini"], ["research"]).scores[0]
+          .model,
       ).toBe("gemini");
       expect(
-        scoreModelsDetailed(
-          ["claude", "gpt", "antigravity"],
-          ["agentic"],
-        ).scores[0].model,
+        scoreModelsDetailed(["claude", "gpt", "antigravity"], ["agentic"])
+          .scores[0].model,
       ).toBe("antigravity");
     });
 
@@ -681,9 +682,9 @@ describe("scoreAgents cost-efficiency integration", () => {
 describe("budgetBiasScore", () => {
   it("returns neutral bias when no usage information exists", () => {
     expect(budgetBiasScore("claude").bias).toBe(0);
-    expect(budgetBiasScore("gemini", { claude: { usedPercent: 10 } }).bias).toBe(
-      0,
-    );
+    expect(
+      budgetBiasScore("gemini", { claude: { usedPercent: 10 } }).bias,
+    ).toBe(0);
   });
 
   it("adds only a weak positive bias when plenty of quota remains", () => {
@@ -1327,5 +1328,166 @@ describe("scoreModelsDetailed", () => {
     const custom = result.scores[0];
     expect(custom.tagBonus).toBe(0);
     expect(custom.tagPenalty).toBe(0);
+  });
+});
+
+// ── Fleet diversity: grok was a dead cell (ticket pNYgTYW3gafGJBKL6Hl3) ──
+//
+// Live symptom: "spawns are all opus5, grok/codex never appear". Measured on
+// the running build (dist-electron, ELECTRON_RUN_AS_NODE), the two-layer model
+// choice was already healthy — layer 2 (model-autoselect) split claude/standard
+// as sonnet5 48% / opus5 44%, and layer 1 gave gpt 100% of `simple-fix` and
+// `test`. grok, however, scored 0% in EVERY row — not because it lost, but
+// because no multi-model preset listed it, and the preset table is the only
+// live source of dispatch candidates (the per-project `enabledModels` channel
+// is dead wiring: preload never sends it).
+//
+// These tests pin the two properties that failure needed:
+//   1. every multi-model preset carries grok (it can enter the competition);
+//   2. it enters on the axis it has actually produced work on, and loses the
+//      complex in-repo coding axis where its live record is "no output".
+describe("fleet diversity — grok is a live dispatch candidate", () => {
+  // costEfficiencyScore reads ~/.marblo/subscription-plans.json, and a
+  // registered Claude plan pushes claude's cost-eff to MAX — which would move
+  // the tie bands these tests assert on. Run hermetically against "no plans"
+  // and put the developer's real file back afterwards.
+  const PLANS_FILE = path.join(
+    os.homedir(),
+    ".marblo",
+    "subscription-plans.json",
+  );
+  let savedPlans: string | null = null;
+
+  beforeEach(() => {
+    savedPlans = fs.existsSync(PLANS_FILE)
+      ? fs.readFileSync(PLANS_FILE, "utf-8")
+      : null;
+    if (savedPlans !== null) fs.unlinkSync(PLANS_FILE);
+  });
+
+  afterEach(() => {
+    if (savedPlans !== null) fs.writeFileSync(PLANS_FILE, savedPlans, "utf-8");
+  });
+
+  it("every multi-model preset includes grok (dead-cell regression guard)", () => {
+    for (const [name, preset] of Object.entries(MODEL_PRESETS)) {
+      if (preset.models.length === 1) continue; // *-only presets are single by design
+      expect(preset.models, `preset '${name}' must let grok compete`).toContain(
+        "grok",
+      );
+    }
+  });
+
+  it("the live default preset (no env) contains grok", () => {
+    // resolvePreset(undefined) is what dispatchTask falls back to on every live
+    // dispatch, because projectEnabledModels is never populated.
+    expect(resolvePreset(undefined)).toContain("grok");
+    expect(resolvePreset("nonsense-preset")).toContain("grok");
+  });
+
+  it("grok actually gets selected from the live candidate set", () => {
+    const enabled = resolvePreset(undefined);
+    const picked = new Set<ModelType>();
+    // No tags → pure round-robin over the enabled list; 60 calls covers the
+    // rotation regardless of where the module counter happens to start.
+    for (let i = 0; i < 60; i++) {
+      picked.add(scoreModelsDetailed(enabled, []).selected);
+    }
+    expect(picked.has("grok")).toBe(true);
+    // …and the rest of the fleet is still reachable (no new monoculture).
+    expect(picked.has("claude")).toBe(true);
+    expect(picked.has("gpt")).toBe(true);
+    expect(picked.has("antigravity")).toBe(true);
+  });
+
+  it("grok joins the `coding` tie-band instead of dominating it", () => {
+    const result = scoreModelsDetailed(
+      ["claude", "gpt", "grok"],
+      ["coding"],
+      "standard",
+    );
+    const totals = Object.fromEntries(
+      result.scores.map((s) => [s.model, s.total]),
+    );
+    // claude 50+22+3, gpt 45+20+10, grok 45+20+8 → all within TIED_SCORE_BAND.
+    expect(result.contenders).toContain("grok");
+    expect(totals.claude).toBeGreaterThanOrEqual(totals.grok);
+    expect(result.mode).toBe("tie-band-round-robin");
+  });
+
+  it("grok does NOT win the complex in-repo coding axis (live: no output there)", () => {
+    // The removed multi-file / complex-edit / refactor bonuses are exactly what
+    // let grok take these tickets. `complex-edit` was the worst: grok 66 vs
+    // claude 52, an outright win on a tag claude has no bonus for.
+    for (const tags of [
+      ["complex-edit"],
+      ["multi-file"],
+      ["architecture", "multi-file"],
+      ["refactor"],
+    ]) {
+      const result = scoreModelsDetailed(
+        ["claude", "gpt", "grok"],
+        tags,
+        "complex",
+      );
+      const grok = result.scores.find((s) => s.model === "grok")!;
+      const claude = result.scores.find((s) => s.model === "claude")!;
+      expect(
+        claude.total,
+        `claude must outscore grok on [${tags.join(",")}]`,
+      ).toBeGreaterThan(grok.total);
+      // Grok must never LEAD this axis. We assert on the scores, not on
+      // `selected`: `complex-edit` alone leaves every model within the tie
+      // band (no model carries a bonus for it), and rotating a genuine tie is
+      // the designed behavior — asserting the winner there would only pin
+      // wherever the module round-robin counter happened to be.
+      const top = Math.max(...result.scores.map((s) => s.total));
+      expect(grok.total, `[${tags.join(",")}]`).toBeLessThan(top);
+    }
+  });
+
+  it("keeps grok on the axis it has produced work on (agentic / autonomous)", () => {
+    for (const tag of ["agentic", "autonomous"]) {
+      const result = scoreModelsDetailed(["claude", "grok"], [tag], "standard");
+      const grok = result.scores.find((s) => s.model === "grok")!;
+      const claude = result.scores.find((s) => s.model === "claude")!;
+      expect(grok.total, tag).toBeGreaterThan(claude.total);
+    }
+  });
+});
+
+// The preset change is inert until the harness can actually spawn: dispatchTask
+// runs filterAvailableHarnesses BEFORE scoring, and that filter preserves the
+// duplicate entries the `recommended` weighting depends on. On a machine
+// without `grok login` (measured live: excluded, action "grok login") the mix
+// is therefore byte-identical to the pre-change table.
+describe("availability filter keeps the preset change a no-op until grok logs in", () => {
+  it("drops an unauthenticated grok and preserves the claude weighting", async () => {
+    const filtered = await filterAvailableHarnesses(resolvePreset(undefined), {
+      ttlMs: 0,
+      probe: async (model) =>
+        model === "grok"
+          ? { installed: true, authenticated: false, action: "grok login" }
+          : { installed: true, authenticated: true },
+    });
+    expect(filtered.applied).toBe(true);
+    expect(filtered.available).toEqual([
+      "claude",
+      "claude",
+      "claude",
+      "antigravity",
+      "gpt",
+    ]);
+    expect(filtered.excluded.map((e) => e.harness)).toEqual(["grok"]);
+    expect(filtered.note).toContain("grok");
+  });
+
+  it("keeps grok once it is authenticated", async () => {
+    const filtered = await filterAvailableHarnesses(resolvePreset(undefined), {
+      ttlMs: 0,
+      probe: async () => ({ installed: true, authenticated: true }),
+    });
+    expect(filtered.applied).toBe(false); // nothing excluded
+    expect(filtered.available).toContain("grok");
   });
 });

@@ -366,12 +366,19 @@ export const MODEL_TAG_BONUSES: Record<string, Record<string, number>> = {
     test: 15,
     boilerplate: 15,
   },
+  // Grok's bonuses are scoped to the axis where it has actually produced work.
+  // Live observation (fleet log): grok drives orchestration, simple edits and
+  // open-ended/creative work fine, but **complex in-repo coding runs ended with
+  // no output**. It used to also carry multi-file / complex-edit / refactor
+  // bonuses (15 each), which is the one place that record contradicts: with
+  // `complex-edit` it won outright (grok 66 vs claude 52) because Claude has no
+  // bonus on that tag. Those three are removed — not down-weighted — because
+  // there is no evidence behind them, and a spawn on that axis costs a whole
+  // ticket's rework. coding (20) stays: it only ties Claude/Codex into the
+  // tie-band rotation, it never dominates.
   grok: {
     coding: 20,
     agentic: 20,
-    "multi-file": 15,
-    "complex-edit": 15,
-    refactor: 15,
     autonomous: 15,
   },
   antigravity: {
@@ -428,6 +435,27 @@ export type ModelPreset =
   | "grok-only"
   | "antigravity-only";
 
+// ★A preset is the ONLY live source of dispatch candidates.
+//
+// `BridgeServer.dispatchTask` resolves enabledModels as
+//   request body → per-project lookup → resolvePreset(MARBLO_MODEL_PRESET).
+// The middle link is dead wiring: main.ts's `orchestratorSession:launch`
+// handler accepts `enabledModels`, but preload's launch() has no such
+// parameter and nothing in src/ ever sets it — so `projectEnabledModels` is
+// permanently empty. With no saved preset either, every live dispatch runs on
+// `recommended`. That is why a harness missing from these lists never spawns:
+// it isn't losing the score, it never enters the competition.
+//
+// Grok was exactly that dead cell — registered in model-registry (verified),
+// on the ladder, with tag bonuses, base score, an orchestrator setting and a
+// harness-catalog "recommended" row, yet present in no multi-model preset.
+// Measured live (dist-electron, 200 dispatch scorings per row): grok 0% across
+// every tag set and complexity.
+//
+// Adding it is safe by construction: `filterAvailableHarnesses` drops an
+// unauthenticated/uninstalled harness BEFORE scoring (preserving duplicates),
+// so on a machine without `grok login` the resulting mix is byte-identical to
+// the old table. The change only takes effect once grok can actually spawn.
 export const MODEL_PRESETS: Record<
   ModelPreset,
   { label: string; models: ModelType[]; description: string }
@@ -439,13 +467,14 @@ export const MODEL_PRESETS: Record<
   },
   recommended: {
     label: "Marblo Recommended",
-    models: ["claude", "claude", "claude", "antigravity", "gpt"],
-    description: "Claude 60% + Antigravity 20% + Codex 20% (cost-optimized)",
+    models: ["claude", "claude", "claude", "antigravity", "gpt", "grok"],
+    description:
+      "Claude 50% + Antigravity / Codex / Grok ~17% each (cost-optimized)",
   },
   balanced: {
     label: "Balanced",
-    models: ["claude", "antigravity", "gpt"],
-    description: "Equal rotation across Claude / Antigravity / Codex",
+    models: ["claude", "antigravity", "gpt", "grok"],
+    description: "Equal rotation across Claude / Antigravity / Codex / Grok",
   },
   "codex-only": {
     label: "Codex 100%",
