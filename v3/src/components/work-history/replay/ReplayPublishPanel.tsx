@@ -23,6 +23,8 @@ import type {
   ReplayVisibilityLevel,
 } from "../../../types/missionReplay";
 import type { PublicReplayRef } from "../../../services/publicReplayService";
+import { buildReplayCardModel } from "../../../lib/replay/export/card";
+import { buildReplayShareIntents } from "../../../lib/replay/shareIntents";
 
 /** 발행 전·해제 전 양쪽에 같은 문장을 쓴다 — 사용자가 두 번 읽어야 한다. */
 export const REPLAY_CACHE_RESIDUAL_WARNING =
@@ -117,6 +119,7 @@ export function ReplayPublishPanel({
   const [confirmingUnpublish, setConfirmingUnpublish] = useState(false);
   // ★L3 재확인은 발행 1회에 한정된다. 컴포넌트가 살아 있어도 발행이 끝나면 버린다.
   const [l3Acknowledged, setL3Acknowledged] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const gate = publishGateState({
     verified: redacted.verified,
@@ -145,6 +148,26 @@ export function ReplayPublishPanel({
     setConfirmingUnpublish(false);
     await onUnpublish?.();
   };
+
+  const copyPublicLink = async () => {
+    if (!publication) return;
+    try {
+      await navigator.clipboard.writeText(publication.url);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 1800);
+    } catch {
+      // 클립보드 거부(권한/포커스) — 조용히 무시. URL 은 화면에 그대로 보인다.
+    }
+  };
+
+  // ★공유는 항상 공개 URL 만 넘긴다 — OG 카드가 미리보기를 붙여준다(#739).
+  //   원본 카드 바이트·비식별화 전 payload 는 이 컴포넌트도 만지지 않는다.
+  const shareIntents = publication
+    ? buildReplayShareIntents(
+        publication.url,
+        `${buildReplayCardModel(redacted).goal} — Mission Replay`
+      )
+    : [];
 
   return (
     <section
@@ -191,6 +214,35 @@ export function ReplayPublishPanel({
           <p className="break-all text-[11px] text-gray-500">
             {publication.url}
           </p>
+
+          {/* ★공유는 공개 URL 만 넘긴다(OG 카드가 미리보기를 붙여준다, #739).
+              Threads intent 는 URL 파라미터가 없어 실패 여지가 있으므로
+              링크복사를 플랫폼 버튼과 항상 나란히 둔다(shareIntents.ts 참고). */}
+          <div
+            role="group"
+            aria-label="공개 URL 공유"
+            className="flex flex-wrap items-center gap-2"
+          >
+            {shareIntents.map((intent) => (
+              <a
+                key={intent.platform}
+                href={intent.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-200 hover:border-gray-500"
+              >
+                {intent.label}
+              </a>
+            ))}
+            <button
+              type="button"
+              onClick={() => void copyPublicLink()}
+              className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-200 hover:border-gray-500"
+            >
+              {linkCopied ? "복사됨" : "링크 복사"}
+            </button>
+          </div>
+
           <button
             type="button"
             disabled={busy}
