@@ -259,6 +259,193 @@ describe("publishReplay — 저장되는 바이트", () => {
   });
 });
 
+describe("publishReplay — 미션 카드 이미지 첨부 (best-effort)", () => {
+  const FAKE_PNG_BYTES = new Uint8Array([1, 2, 3, 4]);
+  const FAKE_IMAGE_URL =
+    "https://firebasestorage.googleapis.com/v0/b/marblo/o/public-replays%2Frzzz%2Fdeadbeef.png?alt=media";
+
+  function cardDeps(rec: Recorder, overrides: Partial<PublicReplayDeps> = {}) {
+    const uploadCalls: Array<{
+      replayId: string;
+      fileName: string;
+      bytes: Uint8Array;
+    }> = [];
+    const deps: PublicReplayDeps = {
+      ...rec.deps,
+      async renderCardImage() {
+        return new Blob([FAKE_PNG_BYTES], { type: "image/png" });
+      },
+      async hashCardImageBytes() {
+        return "deadbeef";
+      },
+      async uploadCardImage(replayId, fileName, bytes) {
+        uploadCalls.push({ replayId, fileName, bytes });
+        return FAKE_IMAGE_URL;
+      },
+      ...overrides,
+    };
+    return { deps, uploadCalls };
+  }
+
+  it("카드 PNG 를 렌더·업로드하고 payload 에 card.imageUrl 을 얹는다", async () => {
+    const rec = recorder();
+    const { deps, uploadCalls } = cardDeps(rec);
+    const redacted = makeRedacted();
+
+    const ref = await publishReplay(
+      { replay: makeReplay(), redacted, publisherUid: PUBLISHER_UID },
+      deps,
+    );
+
+    expect(uploadCalls).toEqual([
+      {
+        replayId: ref.replayId,
+        fileName: "deadbeef.png",
+        bytes: FAKE_PNG_BYTES,
+      },
+    ]);
+
+    const publicDoc = rec.writes[1].data as Record<string, unknown>;
+    const payload = JSON.parse(publicDoc.payload as string);
+    expect(payload.card).toEqual({ imageUrl: FAKE_IMAGE_URL });
+    // 원본 payload 필드는 그대로 보존된다 — 얹기만 하고 덮지 않는다.
+    expect(payload.goal).toBe("Ship the public replay layer");
+
+    // 소유권 문서에 해제 시 지울 파일명이 기록된다.
+    const cardImageUpdate = rec.updates.find(
+      (u) => u.docId === ref.replayId && "cardImagePath" in u.data,
+    );
+    expect(cardImageUpdate?.data).toMatchObject({
+      cardImagePath: "deadbeef.png",
+    });
+  });
+
+  it("★uploadCardImage 가 없으면(테스트·미배포 환경) 카드 단계를 통째로 건너뛴다 — payload 는 원본 그대로", async () => {
+    const rec = recorder();
+    const redacted = makeRedacted();
+    const ref = await publishReplay(
+      { replay: makeReplay(), redacted, publisherUid: PUBLISHER_UID },
+      rec.deps,
+    );
+    const publicDoc = rec.writes[1].data as Record<string, unknown>;
+    expect(publicDoc.payload).toBe(redacted.serialized);
+    const owner = rec.writes[0].data as PublicReplayOwnerRecord;
+    expect(owner.cardImagePath).toBeNull();
+    expect(rec.updates.find((u) => u.docId === ref.replayId)).toBeUndefined();
+  });
+
+  it("업로드가 실패해도 발행은 계속된다 — 카드 없이 기본 OG 로 발행", async () => {
+    const rec = recorder();
+    const { deps } = cardDeps(rec, {
+      async uploadCardImage() {
+        throw new Error("storage/unauthorized");
+      },
+    });
+    const redacted = makeRedacted();
+    const ref = await publishReplay(
+      { replay: makeReplay(), redacted, publisherUid: PUBLISHER_UID },
+      deps,
+    );
+    expect(ref.replayId).toBeTruthy();
+    const publicDoc = rec.writes[1].data as Record<string, unknown>;
+    expect(publicDoc.payload).toBe(redacted.serialized);
+    const owner = rec.writes[0].data as PublicReplayOwnerRecord;
+    expect(owner.cardImagePath).toBeNull();
+  });
+
+  it("렌더러가 실패해도 발행은 계속된다", async () => {
+    const rec = recorder();
+    const { deps } = cardDeps(rec, {
+      async renderCardImage() {
+        throw new Error("2D canvas context unavailable");
+      },
+    });
+    const redacted = makeRedacted();
+    await expect(
+      publishReplay(
+        { replay: makeReplay(), redacted, publisherUid: PUBLISHER_UID },
+        deps,
+      ),
+    ).resolves.toMatchObject({ level: "L2" });
+  });
+});
+
+describe("unpublishReplay — 카드 이미지 삭제", () => {
+  it("저장된 cardImagePath 로 정확한 오브젝트만 지운다(list 없이)", async () => {
+    const rec = recorder();
+    const deleteCalls: Array<{ replayId: string; fileName: string }> = [];
+    const deps: PublicReplayDeps = {
+      ...rec.deps,
+      async getDoc() {
+        return {
+          cardImagePath: "deadbeef.png",
+        } as unknown as PublicReplayOwnerRecord;
+      },
+      async deleteCardImage(replayId, fileName) {
+        deleteCalls.push({ replayId, fileName });
+      },
+    };
+    await unpublishReplay("rzzz", deps);
+    expect(deleteCalls).toEqual([
+      { replayId: "rzzz", fileName: "deadbeef.png" },
+    ]);
+    expect(rec.deletes).toEqual([
+      { collection: PUBLIC_REPLAYS_COLLECTION, docId: "rzzz" },
+    ]);
+  });
+
+  it("카드 이미지가 없었으면 삭제를 시도하지 않는다", async () => {
+    const rec = recorder();
+    let deleteCardImageCalled = false;
+    const deps: PublicReplayDeps = {
+      ...rec.deps,
+      async getDoc() {
+        return { cardImagePath: null } as unknown as PublicReplayOwnerRecord;
+      },
+      async deleteCardImage() {
+        deleteCardImageCalled = true;
+      },
+    };
+    await unpublishReplay("rzzz", deps);
+    expect(deleteCardImageCalled).toBe(false);
+  });
+
+  it("이미지 삭제가 실패해도 해제는 계속된다(상태는 unpublished 로 갱신)", async () => {
+    const rec = recorder();
+    const deps: PublicReplayDeps = {
+      ...rec.deps,
+      async getDoc() {
+        return {
+          cardImagePath: "deadbeef.png",
+        } as unknown as PublicReplayOwnerRecord;
+      },
+      async deleteCardImage() {
+        throw new Error("storage/object-not-found");
+      },
+    };
+    await unpublishReplay("rzzz", deps);
+    expect(rec.updates[0]).toMatchObject({
+      collection: PUBLIC_REPLAY_OWNERS_COLLECTION,
+      docId: "rzzz",
+      data: { status: "unpublished" },
+    });
+  });
+
+  it("deleteCardImage 가 없으면(테스트·미배포 환경) 카드 조회 자체를 생략한다", async () => {
+    const rec = recorder();
+    let getDocCalled = false;
+    const deps: PublicReplayDeps = {
+      ...rec.deps,
+      async getDoc() {
+        getDocCalled = true;
+        return null;
+      },
+    };
+    await unpublishReplay("rzzz", deps);
+    expect(getDocCalled).toBe(false);
+  });
+});
+
 describe("publishReplay — 중단 조건 (fail-closed)", () => {
   it("★2차 검증 실패는 발행 중단이다", async () => {
     const rec = recorder();

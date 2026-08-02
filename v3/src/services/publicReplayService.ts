@@ -63,12 +63,21 @@
 
 import { orderBy, where, limit as limitTo } from "firebase/firestore";
 import type { QueryConstraint } from "firebase/firestore";
+import {
+  getStorage,
+  ref as storageObjectRef,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject,
+} from "firebase/storage";
 import type {
   MissionReplay,
   RedactedReplay,
   ReplayVisibilityLevel,
 } from "../types/missionReplay";
 import { isReplayPublicationCandidate } from "../lib/replay/redactReplay";
+import { renderReplayCardPng } from "../lib/replay/export/card";
+import { app } from "../lib/firebase";
 import {
   deleteDocument,
   getDocument,
@@ -140,6 +149,13 @@ export interface PublicReplayOwnerRecord {
   status: "published" | "unpublished";
   publishedAt: Date;
   unpublishedAt: Date | null;
+  /**
+   * 업로드된 미션 카드 이미지의 Storage 파일명(`{contentHash}.png`). 해제 시
+   * 이 값으로 정확한 오브젝트를 지운다 — replayId 폴더를 list 하지 않는다
+   * (Storage 룰이 `list` 를 별도로 열어주지 않으므로, 아는 경로만 delete 한다).
+   * 카드 업로드가 없었거나 실패했으면 null.
+   */
+  cardImagePath: string | null;
 }
 
 export interface PublicReplayRef {
@@ -188,6 +204,26 @@ export interface PublicReplayDeps {
   /** 암호학적 난수 n 바이트. 없으면 던진다 — 폴백 금지. */
   randomBytes(size: number): Uint8Array;
   now(): Date;
+  /**
+   * 발행 카드 PNG 렌더러. 기본은 `lib/replay/export/card.ts`(브라우저 canvas).
+   * 없으면 카드 첨부 단계 자체가 스킵된다(★공개 URL 발행은 카드 없이도 성립).
+   * 테스트가 DOM 없이 이 경로를 고정할 수 있도록 주입 가능하게 둔다.
+   */
+  renderCardImage?(redacted: RedactedReplay): Promise<Blob>;
+  /**
+   * 카드 PNG 바이트를 `public-replays/{replayId}/{fileName}` 에 올리고 공개
+   * 다운로드 URL 을 돌려준다. 없으면(테스트·아직 storage.rules 미배포 환경)
+   * 카드 이미지 단계 전체를 건너뛴다 — ★발행 자체는 막지 않는다.
+   */
+  uploadCardImage?(
+    replayId: string,
+    fileName: string,
+    bytes: Uint8Array,
+  ): Promise<string>;
+  /** 해제 시 카드 이미지 삭제. 애초에 없었어도(업로드 실패 등) 조용히 넘어간다. */
+  deleteCardImage?(replayId: string, fileName: string): Promise<void>;
+  /** PNG 바이트 → 콘텐츠 해시(파일명용). 기본 SHA-256. */
+  hashCardImageBytes?(bytes: Uint8Array): Promise<string>;
 }
 
 function defaultRandomBytes(size: number): Uint8Array {
@@ -201,6 +237,65 @@ function defaultRandomBytes(size: number): Uint8Array {
   return webCrypto.getRandomValues(new Uint8Array(size));
 }
 
+// ── 카드 이미지 저장소 (Storage) ─────────────────────────────────
+//
+// ★storage.rules 배포 전에는 이 경로가 전부 거부된다(티켓 제약). 그래서 카드
+// 이미지 단계는 처음부터 "실패해도 발행은 계속된다" best-effort 로 설계한다 —
+// 업로드가 막혀도 기본 정적 OG(P4-2 A안)로 조용히 폴백한다.
+
+let cachedStorage: ReturnType<typeof getStorage> | null = null;
+function replayStorage(): ReturnType<typeof getStorage> {
+  if (!cachedStorage) cachedStorage = getStorage(app);
+  return cachedStorage;
+}
+
+function cardImageStoragePath(replayId: string, fileName: string): string {
+  return `public-replays/${replayId}/${fileName}`;
+}
+
+async function defaultRenderCardImage(redacted: RedactedReplay): Promise<Blob> {
+  return renderReplayCardPng(redacted);
+}
+
+async function defaultUploadCardImage(
+  replayId: string,
+  fileName: string,
+  bytes: Uint8Array,
+): Promise<string> {
+  const objectRef = storageObjectRef(
+    replayStorage(),
+    cardImageStoragePath(replayId, fileName),
+  );
+  await uploadBytes(objectRef, bytes, { contentType: "image/png" });
+  return getDownloadURL(objectRef);
+}
+
+async function defaultDeleteCardImage(
+  replayId: string,
+  fileName: string,
+): Promise<void> {
+  await deleteObject(
+    storageObjectRef(replayStorage(), cardImageStoragePath(replayId, fileName)),
+  );
+}
+
+async function defaultHashCardImageBytes(bytes: Uint8Array): Promise<string> {
+  const webCrypto = globalThis.crypto;
+  if (!webCrypto?.subtle) {
+    throw new Error(
+      "Web Crypto subtle 을 쓸 수 없어 카드 이미지 해시를 만들 수 없습니다.",
+    );
+  }
+  const digest = await webCrypto.subtle.digest(
+    "SHA-256",
+    bytes as unknown as BufferSource,
+  );
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 32);
+}
+
 const defaultDeps: PublicReplayDeps = {
   setDoc: (collection, docId, data) => setDocument(collection, docId, data),
   updateDoc: (collection, docId, data) =>
@@ -212,6 +307,10 @@ const defaultDeps: PublicReplayDeps = {
     queryDocuments<T>(collection, ...constraints),
   randomBytes: defaultRandomBytes,
   now: () => new Date(),
+  renderCardImage: defaultRenderCardImage,
+  uploadCardImage: defaultUploadCardImage,
+  deleteCardImage: defaultDeleteCardImage,
+  hashCardImageBytes: defaultHashCardImageBytes,
 };
 
 // ── id ─────────────────────────────────────────────────────────
@@ -258,8 +357,77 @@ export interface PublishReplayInput {
 }
 
 /**
+ * `redacted.serialized`(검증을 통과한 바로 그 문자열)에 `card.imageUrl` 을
+ * 얹는다. 원본 문자열을 다시 파싱해서 고치는 이유 — `redacted.payload` 는
+ * `unknown` 이라 `serialized` 와 구조가 1:1 이라는 보장이 없고, 검증은
+ * `serialized` 위에서 돌았다(§5.2 P4). 배열/비객체 JSON 이거나 상한을 넘기면
+ * `null` — 이 경우 카드 없이 원래 문자열 그대로 발행한다(가리는 게 아니라
+ * 조용한 기능 축소).
+ */
+function embedCardImageUrl(
+  serialized: string,
+  imageUrl: string,
+): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(serialized);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const patched = JSON.stringify({
+    ...(parsed as Record<string, unknown>),
+    card: { imageUrl },
+  });
+  if (patched.length > PUBLIC_REPLAY_MAX_PAYLOAD_CHARS) return null;
+  return patched;
+}
+
+/**
+ * P3 카드 → PNG 렌더 → 콘텐츠 해시 파일명 → Storage 업로드 → payload 에
+ * `card.imageUrl` 첨부까지. **best-effort** — 어느 단계든 실패하면(가장 흔한
+ * 경우: storage.rules 미배포로 write 거부) `null` 을 돌려주고 호출부는 카드
+ * 없이 발행을 계속한다. 이 기능은 바이럴 훅(OG 미리보기)이지 발행의 필수
+ * 조건이 아니다.
+ *
+ * ★F7 준수: 실패 로그는 사유만 남기고 payload·이미지 바이트를 싣지 않는다.
+ */
+async function attachReplayCard(
+  replayId: string,
+  redacted: RedactedReplay,
+  deps: PublicReplayDeps,
+): Promise<{ payload: string; fileName: string } | null> {
+  if (!deps.uploadCardImage) return null;
+  try {
+    const blob = await (deps.renderCardImage ?? defaultRenderCardImage)(
+      redacted,
+    );
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const hash = await (deps.hashCardImageBytes ?? defaultHashCardImageBytes)(
+      bytes,
+    );
+    const fileName = `${hash}.png`;
+    const imageUrl = await deps.uploadCardImage(replayId, fileName, bytes);
+    const payload = embedCardImageUrl(redacted.serialized, imageUrl);
+    return payload ? { payload, fileName } : null;
+  } catch (error) {
+    console.warn(
+      "[publicReplayService] 카드 이미지 첨부 실패 — 기본 OG 로 발행을 계속합니다.",
+      error instanceof Error ? error.message : String(error),
+    );
+    return null;
+  }
+}
+
+/**
  * 발행. 순서가 계약이다:
- *   1) 소유권 문서 생성 — 룰이 공개 문서 write 를 판정할 근거가 먼저 있어야 한다.
+ *   1) 소유권 문서 생성 — 룰이 공개 문서 write 를 판정할 근거가 먼저 있어야 한다
+ *      (Storage 룰의 `isPublisherOf` 도 이 문서를 읽는다 — 카드 업로드가
+ *      가능해지는 것도 이 시점부터다).
+ *   1.5) (best-effort) 미션 카드 PNG 렌더 → Storage 업로드 → payload 에
+ *      `card.imageUrl` 첨부. 실패해도 발행은 막지 않는다.
  *   2) 공개 문서 생성 — 이 시점에 URL 이 살아난다.
  * 2)가 실패하면 소유권 문서를 `unpublished` 로 되돌린다(삭제는 룰이 막는다 —
  * 발행 시도 자체가 감사 기록으로 남아야 하기 때문).
@@ -315,15 +483,30 @@ export async function publishReplay(
     status: "published",
     publishedAt,
     unpublishedAt: null,
+    cardImagePath: null,
   };
   await deps.setDoc(PUBLIC_REPLAY_OWNERS_COLLECTION, replayId, owner);
+
+  // ★owner 문서가 committed 된 뒤에만 시도한다 — Storage 룰의 isPublisherOf 가
+  // 이 문서를 읽어 write 를 판정한다(§storage.rules). best-effort: 실패해도
+  // payload 는 원본 serialized 그대로 발행된다.
+  let payload = redacted.serialized;
+  const card = await attachReplayCard(replayId, redacted, deps);
+  if (card) {
+    payload = card.payload;
+    await deps
+      .updateDoc(PUBLIC_REPLAY_OWNERS_COLLECTION, replayId, {
+        cardImagePath: card.fileName,
+      })
+      .catch(() => undefined); // 인덱스만 놓친다 — 발행 자체는 이미 유효하다
+  }
 
   const publicDoc: PublicReplayDocument = {
     schemaVersion: PUBLIC_REPLAY_SCHEMA_VERSION,
     replayVersion: 1,
     level: redacted.level,
     status: "published",
-    payload: redacted.serialized,
+    payload,
     publishedAt,
   };
   try {
@@ -354,6 +537,11 @@ export async function publishReplay(
  * 해제. 공개 문서를 먼저 지운다 — 그게 실제로 URL 을 죽이는 유일한 동작이고,
  * 소유권 상태 갱신이 실패해도 공개 표면은 이미 닫혀 있어야 하기 때문이다.
  *
+ * 카드 이미지가 있었으면 함께 지운다. **아는 경로만** 지운다(소유권 문서의
+ * `cardImagePath`) — replayId 폴더를 list 하지 않는다(Storage 룰이 `list` 를
+ * 열어주지 않는다, §storage.rules). 삭제 실패는 삼킨다 — 이미지 하나 남는 게
+ * 해제 자체를 막을 이유는 아니다(어차피 캐시 잔존은 되돌릴 수 없다, §7.1).
+ *
  * ★이 함수는 캐시를 지우지 못한다. CDN·소셜 카드·검색 인덱스·스크린샷에 남은
  * 사본은 되돌릴 수 없다(설계 §7.1, R7/F6). 그 사실은 UI 가 **해제 전에**
  * 사용자에게 말해야 한다 — `ReplayPublishPanel` 이 담당한다.
@@ -363,6 +551,21 @@ export async function unpublishReplay(
   deps: PublicReplayDeps = defaultDeps,
 ): Promise<void> {
   await deps.deleteDoc(PUBLIC_REPLAYS_COLLECTION, replayId);
+
+  if (deps.deleteCardImage) {
+    const owner = await deps
+      .getDoc<PublicReplayOwnerRecord>(
+        PUBLIC_REPLAY_OWNERS_COLLECTION,
+        replayId,
+      )
+      .catch(() => null);
+    if (owner?.cardImagePath) {
+      await deps
+        .deleteCardImage(replayId, owner.cardImagePath)
+        .catch(() => undefined);
+    }
+  }
+
   await deps.updateDoc(PUBLIC_REPLAY_OWNERS_COLLECTION, replayId, {
     status: "unpublished",
     unpublishedAt: deps.now(),
