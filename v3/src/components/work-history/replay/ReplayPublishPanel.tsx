@@ -103,6 +103,8 @@ export interface ReplayPublishPanelProps {
   busy?: boolean;
   /** 발행/해제 실패 사유. payload 원문은 절대 담기지 않는다(F7). */
   errorMessage?: string | null;
+  /** Guided flows can defer channel choices to their dedicated final step. */
+  showShareControls?: boolean;
 }
 
 export function ReplayPublishPanel({
@@ -114,6 +116,7 @@ export function ReplayPublishPanel({
   onUnpublish,
   busy = false,
   errorMessage = null,
+  showShareControls = true,
 }: ReplayPublishPanelProps) {
   const [confirmingPublish, setConfirmingPublish] = useState(false);
   const [confirmingUnpublish, setConfirmingUnpublish] = useState(false);
@@ -218,30 +221,32 @@ export function ReplayPublishPanel({
           {/* ★공유는 공개 URL 만 넘긴다(OG 카드가 미리보기를 붙여준다, #739).
               Threads intent 는 URL 파라미터가 없어 실패 여지가 있으므로
               링크복사를 플랫폼 버튼과 항상 나란히 둔다(shareIntents.ts 참고). */}
-          <div
-            role="group"
-            aria-label="공개 URL 공유"
-            className="flex flex-wrap items-center gap-2"
-          >
-            {shareIntents.map((intent) => (
-              <a
-                key={intent.platform}
-                href={intent.url}
-                target="_blank"
-                rel="noopener noreferrer"
+          {showShareControls && (
+            <div
+              role="group"
+              aria-label="공개 URL 공유"
+              className="flex flex-wrap items-center gap-2"
+            >
+              {shareIntents.map((intent) => (
+                <a
+                  key={intent.platform}
+                  href={intent.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-200 hover:border-gray-500"
+                >
+                  {intent.label}
+                </a>
+              ))}
+              <button
+                type="button"
+                onClick={() => void copyPublicLink()}
                 className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-200 hover:border-gray-500"
               >
-                {intent.label}
-              </a>
-            ))}
-            <button
-              type="button"
-              onClick={() => void copyPublicLink()}
-              className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-200 hover:border-gray-500"
-            >
-              {linkCopied ? "복사됨" : "링크 복사"}
-            </button>
-          </div>
+                {linkCopied ? "복사됨" : "링크 복사"}
+              </button>
+            </div>
+          )}
 
           <button
             type="button"

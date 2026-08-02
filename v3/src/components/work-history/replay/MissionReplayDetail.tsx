@@ -12,13 +12,14 @@
  * 없이 그릴 수 있어야 한다 — 서비스 계층이 `MissionReplayDeps` 주입을 지원하는
  * 것과 같은 이유다(`services/missionReplayService.ts` 헤더).
  *
- * ★공유·공개·익스포트·remix 버튼은 이 화면에 하나도 없다. Phase 2(레닭션)를
- * 통과하지 않은 바이트는 앱 밖으로 나가지 않는다는 설계 §4 불변식을, "버튼을
- * 만들지 않는 것"으로 지킨다. PR 링크는 이미 공개된 GitHub URL 을 여는 것이라
- * 새 공개 경로가 아니다(완료이력 탭이 이미 같은 링크를 연다).
+ * 공유는 별도의 `ReplayShareFlow`에서만 연다. 해당 흐름은 먼저 레닭션과 독립
+ * 검증을 거치며, 원본 `MissionReplay`를 export/publish 경계로 넘기지 않는다.
  */
 
+import { useState } from "react";
 import { useTranslation, type TFunction } from "../../../lib/i18n";
+import { useAuth } from "../../../hooks/useAuth";
+import { useMergePermission } from "../../../hooks/useMergePermission";
 import { useMissionReplay } from "../../../hooks/useMissionReplay";
 import type {
   MissionReplayOptions,
@@ -29,6 +30,7 @@ import { ReplayCast } from "./ReplayCast";
 import { ReplayHeadline } from "./ReplayHeadline";
 import { ReplayStatsGrid, countHumanInterventions } from "./ReplayStatsGrid";
 import { ReplayTimeline } from "./ReplayTimeline";
+import { ReplayShareFlow } from "./ReplayShareFlow";
 
 function Panel({ children }: { children: React.ReactNode }) {
   return (
@@ -138,6 +140,7 @@ export interface MissionReplayDetailViewProps {
   state: MissionReplayState;
   onBack: () => void;
   onReload: () => void;
+  onShare?: () => void;
   t: TFunction;
 }
 
@@ -146,6 +149,7 @@ export function MissionReplayDetailView({
   state,
   onBack,
   onReload,
+  onShare,
   t,
 }: MissionReplayDetailViewProps) {
   const header = (
@@ -158,6 +162,15 @@ export function MissionReplayDetailView({
       >
         {t("workHistory.replay.reload")}
       </button>
+      {onShare && state.status === "ready" && (
+        <button
+          type="button"
+          onClick={onShare}
+          className="rounded border border-violet-500/50 px-2 py-1 text-xs text-violet-200 transition hover:bg-violet-500/10"
+        >
+          공유하기
+        </button>
+      )}
     </div>
   );
 
@@ -225,16 +238,32 @@ export function MissionReplayDetail({
   options,
 }: MissionReplayDetailProps) {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const { canMergeInProject } = useMergePermission();
+  const [shareOpen, setShareOpen] = useState(false);
   const { state, reload } = useMissionReplay(missionId, {
     ...options,
     projectId,
   });
   return (
-    <MissionReplayDetailView
-      state={state}
-      onBack={onBack}
-      onReload={reload}
-      t={t}
-    />
+    <>
+      <MissionReplayDetailView
+        state={state}
+        onBack={onBack}
+        onReload={reload}
+        onShare={() => setShareOpen(true)}
+        t={t}
+      />
+      {shareOpen && state.status === "ready" && (
+        <div className="mt-4">
+          <ReplayShareFlow
+            replay={state.replay}
+            canPublish={canMergeInProject(state.replay.projectId)}
+            publisherUid={user?.uid}
+            onClose={() => setShareOpen(false)}
+          />
+        </div>
+      )}
+    </>
   );
 }

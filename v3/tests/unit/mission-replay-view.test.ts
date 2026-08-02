@@ -4,9 +4,8 @@
  * 핀하는 계약:
  *   - 실데이터 1건으로 헤드라인·통계·타임라인·최종결과·캐스트가 전부 렌더된다
  *     (설계 §4 Phase 1 완료 기준).
- *   - ★공유/공개/익스포트/remix 표면이 **하나도 없다**. Phase 2(레닭션)를 통과하지
- *     않은 바이트는 앱 밖으로 나가면 안 되고, 그 불변식을 지키는 가장 확실한 방법은
- *     버튼을 만들지 않는 것이다 — 그래서 "버튼이 생겼는가"를 테스트가 지킨다.
+ *   - 순수 뷰에는 공유 경로가 없다. 컨테이너가 명시적으로 `onShare`를 주입할
+ *     때만 별도 레닭션 마법사의 진입점이 나타난다.
  *   - `denied`(권한 없음)와 `empty`(기록 0건)가 **다른 화면**으로 그려진다. 이게
  *     P1-1/P1-2 가 타입·구독 계층에서 지켜 온 구분의 마지막 구간이다(설계 C2/R4).
  *   - 못 읽은 소스에서 나온 수치는 `0` 이 아니라 `—` 다("사람 개입 0회"라는 거짓말 금지).
@@ -200,12 +199,13 @@ function makeReplay(
   return replay;
 }
 
-function renderDetail(state: MissionReplayState): string {
+function renderDetail(state: MissionReplayState, onShare?: () => void): string {
   return renderToStaticMarkup(
     createElement(MissionReplayDetailView, {
       state,
       onBack: () => {},
       onReload: () => {},
+      onShare,
       t,
     }),
   );
@@ -284,7 +284,7 @@ describe("Replay 상세 — 실데이터 렌더", () => {
   });
 });
 
-describe("★공유 표면 부재 (Phase 1 불변식)", () => {
+describe("순수 뷰의 공유 경계", () => {
   it("공유·공개·익스포트·remix 버튼이 하나도 없다", () => {
     const surfaces = clickableSurfaces(renderReady(makeReplay()));
     for (const surface of surfaces) {
@@ -303,6 +303,20 @@ describe("★공유 표면 부재 (Phase 1 불변식)", () => {
       (m) => m[1],
     );
     expect(hrefs).toEqual(["https://github.com/melocream/marblo/pull/999"]);
+  });
+});
+
+describe("공유 마법사 진입점", () => {
+  it("컨테이너가 onShare를 주입한 완료 미션에만 공유하기 버튼을 렌더한다", () => {
+    expect(renderDetail({ status: "loading" }, () => {})).not.toContain(
+      "공유하기",
+    );
+    expect(
+      renderDetail(
+        { status: "ready", replay: makeReplay(), sourceErrors: {} },
+        () => {},
+      ),
+    ).toContain("공유하기");
   });
 });
 
