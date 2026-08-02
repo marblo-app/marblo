@@ -15,6 +15,13 @@
  *     no real WebCodecs).
  *   - `isReplayMotionWebmSupported` is a `VideoEncoder`-presence check with
  *     no fallback encoder.
+ *
+ * ★This file pins the **`"stats"` template** — the original #741 cut. The
+ * default is now the narrative storyboard, so the two encoder tests below pass
+ * `template: "stats"` explicitly (the storyboard's timing knob is
+ * `durationScale`, not the per-segment seconds this file exercises). The
+ * storyboard cut and the routing between them live in
+ * `mission-replay-export-storyboard.test.ts`.
  */
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -347,6 +354,7 @@ describe("renderReplayMotionGif", () => {
     const expectedFrameCount = planReplayMotionFrames(0, FAST_TIMING).length;
 
     const blob = await renderReplayMotionGif(redacted, {
+      template: "stats",
       createCanvas: () => canvas,
       timing: FAST_TIMING,
     });
@@ -409,6 +417,7 @@ describe("renderReplayMotionWebm", () => {
     const blob = await renderReplayMotionWebm(
       makeRedacted({ goal: "x", beats: [] }),
       {
+        template: "stats",
         timing: FAST_TIMING,
         createCanvas: () => fakeCanvas,
         createMuxer: () => muxer,

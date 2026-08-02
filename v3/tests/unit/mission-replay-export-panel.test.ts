@@ -16,6 +16,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ReplayExportPanel } from "../../src/components/work-history/replay/ReplayExportPanel";
+import { REPLAY_EXPORT_TEMPLATES } from "../../src/lib/replay/export/gifStoryboard";
 import type { RedactedReplay } from "../../src/types/missionReplay";
 
 function makeRedacted(overrides: Partial<RedactedReplay> = {}): RedactedReplay {
@@ -83,6 +84,49 @@ describe("ReplayExportPanel", () => {
     expect(markup).toContain(
       '<div data-testid="replay-export-webm" data-status="unsupported"',
     );
+  });
+
+  it("offers all three scenario templates, defaulting to the narrative cut", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ReplayExportPanel, { redacted: makeRedacted() }),
+    );
+    expect(markup).toContain('data-testid="replay-export-templates"');
+    for (const template of REPLAY_EXPORT_TEMPLATES) {
+      expect(markup).toContain(
+        `data-testid="replay-export-template-${template.id}"`,
+      );
+      expect(markup).toContain(template.label);
+    }
+    expect(markup).toContain(
+      '<button type="button" role="radio" aria-checked="true" data-testid="replay-export-template-story"',
+    );
+    expect(markup).toContain(
+      'data-testid="replay-export-template-stats" data-selected="false"',
+    );
+  });
+
+  it("honors an explicit default template", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ReplayExportPanel, {
+        redacted: makeRedacted(),
+        defaultTemplate: "cast",
+      }),
+    );
+    expect(markup).toContain(
+      'data-testid="replay-export-template-cast" data-selected="true"',
+    );
+    expect(markup).toContain(
+      'data-testid="replay-export-template-story" data-selected="false"',
+    );
+  });
+
+  it("never shows the template picker when verification failed", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ReplayExportPanel, {
+        redacted: makeRedacted({ verified: false }),
+      }),
+    );
+    expect(markup).not.toContain('data-testid="replay-export-templates"');
   });
 
   it("never shows the motion section when verification failed", () => {

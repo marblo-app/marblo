@@ -22,6 +22,16 @@
  * card's own theme tokens — never the app's dark-fixed shell theme (design §4
  * Phase 3 렌더 주의: "익스포트 캔버스는 앱 테마를 상속하지 말고 자체 테마
  * 토큰을 갖는다").
+ *
+ * ★Templates. This file owns encoding; *what* gets drawn is a template choice:
+ *   - `"story"` (default) / `"cast"` → `gifStoryboard.ts`, the narrative cut
+ *     (mission → orchestrate → parallel in-flight → ship → stamp). This is the
+ *     shape that reads as "several agents on several models shipped this".
+ *   - `"stats"` → the original #741 shape kept intact below
+ *     (`planReplayMotionFrames` + `drawReplayMotionFrame`): headline → stats →
+ *     timeline.
+ * Both paths take the identical `RedactedReplay` input and go through the
+ * identical encoder; only the frame plan and the drawer differ.
  */
 
 import { applyPalette, GIFEncoder, quantize } from "gifenc";
@@ -42,56 +52,36 @@ import {
   type ReplayCardModel,
   type ReplayCardTheme,
 } from "./card";
+import {
+  buildReplayStoryBeats,
+  buildReplayStoryboard,
+  drawReplayStoryboardFrame,
+  isReplayStoryTemplate,
+  planReplayStoryboardFrames,
+  REPLAY_EXPORT_DEFAULT_TEMPLATE,
+  REPLAY_STORY_MAX_BEATS,
+  REPLAY_STORY_THEME,
+  type ReplayExportTemplateId,
+  type ReplayStoryBeat,
+  type ReplayStoryTheme,
+} from "./gifStoryboard";
 import type { RedactedReplay } from "../../../types/missionReplay";
 
 export const REPLAY_MOTION_WIDTH = REPLAY_CARD_WIDTH;
 export const REPLAY_MOTION_HEIGHT = REPLAY_CARD_HEIGHT;
 export const REPLAY_MOTION_FPS = 10;
-export const REPLAY_MOTION_MAX_BEATS = 6;
+export const REPLAY_MOTION_MAX_BEATS = REPLAY_STORY_MAX_BEATS;
 
 // ---------------------------------------------------------------------------
 // Beats — the one piece of the motion export the static card doesn't need.
-// Same defensive-parsing posture as `card.ts`'s payload readers: `payload`
-// is `unknown`, redaction may mask/drop any field, so every read falls back
-// instead of throwing.
+// The reader itself lives in `gifStoryboard.ts`: both templates need the same
+// `{title, lane}`-only view of `payload.beats[]`, and keeping exactly one
+// payload reader is what makes the 비식별 boundary auditable by reading one
+// file. Re-exported here so the `"stats"` template's call sites are unchanged.
 // ---------------------------------------------------------------------------
 
-export interface ReplayMotionBeat {
-  title: string;
-  lane: string | null;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function asNonEmptyString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-/** Reads `redacted.payload.beats[]`, capped to `max`. Missing/malformed beats are skipped, never thrown on. */
-export function buildReplayMotionBeats(
-  redacted: RedactedReplay,
-  max: number = REPLAY_MOTION_MAX_BEATS,
-): ReplayMotionBeat[] {
-  const root = asRecord(redacted.payload) ?? {};
-  const beatsRaw = root.beats;
-  if (!Array.isArray(beatsRaw) || max <= 0) return [];
-
-  const beats: ReplayMotionBeat[] = [];
-  for (const entry of beatsRaw) {
-    const rec = asRecord(entry);
-    const title = asNonEmptyString(rec?.title);
-    if (!title) continue;
-    beats.push({ title, lane: asNonEmptyString(rec?.lane) });
-    if (beats.length >= max) break;
-  }
-  return beats;
-}
+export type ReplayMotionBeat = ReplayStoryBeat;
+export const buildReplayMotionBeats = buildReplayStoryBeats;
 
 // ---------------------------------------------------------------------------
 // Timing plan — pure, deterministic, unit-testable without a canvas. Three
@@ -106,6 +96,12 @@ export interface ReplayMotionTimingOptions {
   headlineSeconds?: number;
   statsSeconds?: number;
   timelineSeconds?: number;
+  /**
+   * Storyboard templates only — shrinks every scene proportionally. The
+   * `"stats"` template has explicit per-segment seconds instead, so it ignores
+   * this. Exists so tests can encode a whole storyboard in a few frames.
+   */
+  durationScale?: number;
 }
 
 export interface ReplayMotionFrame {
@@ -298,6 +294,74 @@ export function drawReplayMotionFrame(
 }
 
 // ---------------------------------------------------------------------------
+// Template routing — the one place that decides "which frames, drawn how".
+// Both encoders below consume a `ReplayMotionRenderPlan` and know nothing
+// about templates, so adding a template never touches encoding.
+// ---------------------------------------------------------------------------
+
+export interface ReplayMotionRenderPlan {
+  template: ReplayExportTemplateId;
+  fps: number;
+  /** One entry per frame; `tSeconds` is what the WebM muxer timestamps with. */
+  frames: ReadonlyArray<{ tSeconds: number }>;
+  /** Draws frame `index` onto `ctx`. Closed over the already-built view model. */
+  draw(ctx: ReplayCardDrawContext, index: number): void;
+}
+
+export interface ReplayMotionTemplateOptions {
+  template?: ReplayExportTemplateId;
+  theme?: ReplayCardTheme;
+  timing?: ReplayMotionTimingOptions;
+}
+
+/**
+ * Builds the frame plan + drawer for a template. Storyboard templates get the
+ * narrative cut; `"stats"` keeps the original #741 headline→stats→timeline cut.
+ *
+ * Note both branches read the same `RedactedReplay` and nothing else — the
+ * template choice can widen the *story*, never the data.
+ */
+export function buildReplayMotionRenderPlan(
+  redacted: RedactedReplay,
+  options: ReplayMotionTemplateOptions = {},
+): ReplayMotionRenderPlan {
+  const template = options.template ?? REPLAY_EXPORT_DEFAULT_TEMPLATE;
+  const fps = options.timing?.fps ?? REPLAY_MOTION_FPS;
+
+  if (isReplayStoryTemplate(template)) {
+    const storyboard = buildReplayStoryboard(redacted, template);
+    const frames = planReplayStoryboardFrames(storyboard, {
+      fps,
+      durationScale: options.timing?.durationScale,
+    });
+    // A card-theme override still applies — the storyboard theme is a superset.
+    const theme: ReplayStoryTheme = {
+      ...REPLAY_STORY_THEME,
+      ...(options.theme ?? {}),
+    };
+    return {
+      template,
+      fps,
+      frames,
+      draw: (ctx, index) =>
+        drawReplayStoryboardFrame(ctx, storyboard, frames[index], theme),
+    };
+  }
+
+  const model = buildReplayCardModel(redacted);
+  const beats = buildReplayMotionBeats(redacted);
+  const theme = options.theme ?? REPLAY_CARD_THEME;
+  const frames = planReplayMotionFrames(beats.length, options.timing);
+  return {
+    template,
+    fps,
+    frames,
+    draw: (ctx, index) =>
+      drawReplayMotionFrame(ctx, model, beats, frames[index], theme),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // GIF encoding — canvas pixel readback → gifenc (pure JS, no native encoder).
 // `createCanvas` is injectable so the pipeline is unit-testable in Node
 // without a real DOM (same pattern as `card.ts`'s `renderReplayCardPng`).
@@ -316,9 +380,7 @@ export interface ReplayMotionCanvasLike {
   getContext(type: "2d"): ReplayMotionCanvasContext | null;
 }
 
-export interface RenderReplayMotionGifOptions {
-  theme?: ReplayCardTheme;
-  timing?: ReplayMotionTimingOptions;
+export interface RenderReplayMotionGifOptions extends ReplayMotionTemplateOptions {
   createCanvas?: () => ReplayMotionCanvasLike;
 }
 
@@ -340,21 +402,17 @@ export async function renderReplayMotionGif(
   redacted: RedactedReplay,
   options: RenderReplayMotionGifOptions = {},
 ): Promise<Blob> {
-  const model = buildReplayCardModel(redacted);
-  const beats = buildReplayMotionBeats(redacted);
-  const theme = options.theme ?? REPLAY_CARD_THEME;
-  const fps = options.timing?.fps ?? REPLAY_MOTION_FPS;
-  const frames = planReplayMotionFrames(beats.length, options.timing);
+  const plan = buildReplayMotionRenderPlan(redacted, options);
 
   const canvas = (options.createCanvas ?? createDefaultMotionCanvas)();
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Replay motion: 2D canvas context unavailable");
 
   const encoder = GIFEncoder();
-  const delayMs = Math.round(1000 / fps);
+  const delayMs = Math.round(1000 / plan.fps);
 
-  for (const frame of frames) {
-    drawReplayMotionFrame(ctx, model, beats, frame, theme);
+  for (let index = 0; index < plan.frames.length; index += 1) {
+    plan.draw(ctx, index);
     const imageData = ctx.getImageData(
       0,
       0,
@@ -396,9 +454,7 @@ export interface ReplayMotionMuxerLike {
   };
 }
 
-export interface RenderReplayMotionWebmOptions {
-  theme?: ReplayCardTheme;
-  timing?: ReplayMotionTimingOptions;
+export interface RenderReplayMotionWebmOptions extends ReplayMotionTemplateOptions {
   createCanvas?: () => HTMLCanvasElement | OffscreenCanvas;
   createMuxer?: (
     canvas: HTMLCanvasElement | OffscreenCanvas,
@@ -432,11 +488,7 @@ export async function renderReplayMotionWebm(
   redacted: RedactedReplay,
   options: RenderReplayMotionWebmOptions = {},
 ): Promise<Blob> {
-  const model = buildReplayCardModel(redacted);
-  const beats = buildReplayMotionBeats(redacted);
-  const theme = options.theme ?? REPLAY_CARD_THEME;
-  const fps = options.timing?.fps ?? REPLAY_MOTION_FPS;
-  const frames = planReplayMotionFrames(beats.length, options.timing);
+  const plan = buildReplayMotionRenderPlan(redacted, options);
 
   const canvas = (options.createCanvas ?? createDefaultRealCanvas)();
   const ctx = canvas.getContext("2d") as ReplayCardDrawContext | null;
@@ -447,10 +499,10 @@ export async function renderReplayMotionWebm(
   );
 
   await output.start();
-  const frameDuration = 1 / fps;
-  for (const frame of frames) {
-    drawReplayMotionFrame(ctx, model, beats, frame, theme);
-    await videoSource.add(frame.tSeconds, frameDuration);
+  const frameDuration = 1 / plan.fps;
+  for (let index = 0; index < plan.frames.length; index += 1) {
+    plan.draw(ctx, index);
+    await videoSource.add(plan.frames[index].tSeconds, frameDuration);
   }
   videoSource.close();
   await output.finalize();
@@ -471,14 +523,22 @@ export function isReplayMotionWebmSupported(): boolean {
   );
 }
 
+/**
+ * `marblo-replay-<goal-slug>[-<template>].<ext>`. The template suffix is
+ * omitted when no template is given, so existing callers keep their filenames;
+ * the panel passes one so two cuts of the same mission don't collide in the
+ * downloads folder.
+ */
 export function buildReplayMotionFileName(
   model: ReplayCardModel,
   extension: "gif" | "webm",
+  template?: ReplayExportTemplateId,
 ): string {
   const slug = model.goal
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 40);
-  return `marblo-replay-${slug || "mission"}.${extension}`;
+  const suffix = template ? `-${template}` : "";
+  return `marblo-replay-${slug || "mission"}${suffix}.${extension}`;
 }

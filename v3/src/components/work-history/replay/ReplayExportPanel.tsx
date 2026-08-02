@@ -11,12 +11,19 @@ import {
   renderReplayMotionGif,
   renderReplayMotionWebm,
 } from "../../../lib/replay/export/gif";
+import {
+  REPLAY_EXPORT_DEFAULT_TEMPLATE,
+  REPLAY_EXPORT_TEMPLATES,
+  type ReplayExportTemplateId,
+} from "../../../lib/replay/export/gifStoryboard";
 import type { RedactedReplay } from "../../../types/missionReplay";
 
 export interface ReplayExportPanelProps {
   redacted: RedactedReplay;
   /** Override for tests/stories. Production callers rely on the card's own default theme. */
   theme?: ReplayCardTheme;
+  /** Override for tests/stories. Production defaults to the narrative cut. */
+  defaultTemplate?: ReplayExportTemplateId;
 }
 
 type ExportState =
@@ -45,8 +52,18 @@ type MotionState =
  * ★영상(WebM)은 WebCodecs 를 쓰는 런타임(Chromium/Electron)에서만 만들어진다
  * — 지원하지 않는 런타임에서는 폴백 인코더 없이 "unsupported" 로 명시하고,
  * GIF 다운로드는 그대로 제공한다.
+ *
+ * ★시나리오 템플릿은 **모션에만** 적용된다 — PNG 공유카드는 `card.ts` 의 한
+ * 가지 레이아웃 그대로다. 템플릿을 바꾸면 GIF/영상만 다시 인코딩된다(PNG
+ * effect 의 deps 에 template 이 없는 이유).
  */
-export function ReplayExportPanel({ redacted, theme }: ReplayExportPanelProps) {
+export function ReplayExportPanel({
+  redacted,
+  theme,
+  defaultTemplate = REPLAY_EXPORT_DEFAULT_TEMPLATE,
+}: ReplayExportPanelProps) {
+  const [template, setTemplate] =
+    useState<ReplayExportTemplateId>(defaultTemplate);
   const [state, setState] = useState<ExportState>(
     redacted.verified ? { status: "rendering" } : { status: "blocked" },
   );
@@ -100,7 +117,7 @@ export function ReplayExportPanel({ redacted, theme }: ReplayExportPanelProps) {
     let objectUrl: string | null = null;
     setGifState({ status: "rendering" });
 
-    renderReplayMotionGif(redacted, { theme })
+    renderReplayMotionGif(redacted, { theme, template })
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
@@ -118,7 +135,7 @@ export function ReplayExportPanel({ redacted, theme }: ReplayExportPanelProps) {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [redacted, theme]);
+  }, [redacted, theme, template]);
 
   useEffect(() => {
     if (!redacted.verified) {
@@ -134,7 +151,7 @@ export function ReplayExportPanel({ redacted, theme }: ReplayExportPanelProps) {
     let objectUrl: string | null = null;
     setWebmState({ status: "rendering" });
 
-    renderReplayMotionWebm(redacted, { theme })
+    renderReplayMotionWebm(redacted, { theme, template })
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
@@ -152,7 +169,7 @@ export function ReplayExportPanel({ redacted, theme }: ReplayExportPanelProps) {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [redacted, theme]);
+  }, [redacted, theme, template]);
 
   const cardModel = useMemo(() => buildReplayCardModel(redacted), [redacted]);
   const fileName = useMemo(
@@ -160,12 +177,12 @@ export function ReplayExportPanel({ redacted, theme }: ReplayExportPanelProps) {
     [cardModel],
   );
   const gifFileName = useMemo(
-    () => buildReplayMotionFileName(cardModel, "gif"),
-    [cardModel],
+    () => buildReplayMotionFileName(cardModel, "gif", template),
+    [cardModel, template],
   );
   const webmFileName = useMemo(
-    () => buildReplayMotionFileName(cardModel, "webm"),
-    [cardModel],
+    () => buildReplayMotionFileName(cardModel, "webm", template),
+    [cardModel, template],
   );
 
   const handleDownload = () => {
@@ -247,11 +264,50 @@ export function ReplayExportPanel({ redacted, theme }: ReplayExportPanelProps) {
         <div className="space-y-3 border-t border-gray-800 pt-3">
           <div>
             <h4 className="text-xs font-semibold text-gray-300">
-              모션 (헤드라인 → 통계 → 타임라인, 5–10초)
+              모션 스토리보드
             </h4>
             <p className="mt-1 text-[11px] text-gray-500">
-              SNS 공유용 · 앱 다크 테마와 무관한 카드 자체 테마
+              SNS 공유용 · 앱 다크 테마와 무관한 자체 브랜드 테마 · 비식별
+              지표만(디프 원문 없음)
             </p>
+          </div>
+
+          <div
+            role="radiogroup"
+            aria-label="모션 시나리오 템플릿"
+            data-testid="replay-export-templates"
+            className="grid gap-2 sm:grid-cols-3"
+          >
+            {REPLAY_EXPORT_TEMPLATES.map((option) => {
+              const selected = option.id === template;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  data-testid={`replay-export-template-${option.id}`}
+                  data-selected={selected ? "true" : "false"}
+                  onClick={() => setTemplate(option.id)}
+                  className={`rounded-lg border px-3 py-2 text-left transition ${
+                    selected
+                      ? "border-violet-500/60 bg-violet-500/10"
+                      : "border-gray-800 bg-gray-800/30 hover:border-gray-700"
+                  }`}
+                >
+                  <span
+                    className={`block text-xs font-semibold ${
+                      selected ? "text-violet-200" : "text-gray-300"
+                    }`}
+                  >
+                    {option.label}
+                  </span>
+                  <span className="mt-0.5 block text-[11px] leading-snug text-gray-500">
+                    {option.description}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           <MotionExportRow
