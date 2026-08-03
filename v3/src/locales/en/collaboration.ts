@@ -21,7 +21,7 @@ export const collaboration = {
   "collab.repoConnect.errorAuth":
     "Repository authentication failed. For a private repo, authenticate with GitHub (gh auth login or an SSH key) and try again.",
   "collab.repoConnect.errorNotFound":
-    "Repository not found. Check the URL and your access permissions.",
+    "Repository not found. Check the URL — and if it's private, ask the project owner to add you as a GitHub collaborator.",
   "collab.repoConnect.errorNetwork":
     "Clone failed due to a network error. Check your connection and try again.",
   "collab.repoConnect.errorExists":

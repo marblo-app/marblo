@@ -21,7 +21,7 @@ export const collaboration = {
   "collab.repoConnect.errorAuth":
     "저장소 인증에 실패했습니다. 비공개 저장소라면 GitHub 인증(gh auth login 또는 SSH 키) 후 다시 시도하세요.",
   "collab.repoConnect.errorNotFound":
-    "저장소를 찾을 수 없습니다. 주소가 맞는지, 접근 권한이 있는지 확인하세요.",
+    "저장소를 찾을 수 없습니다. 주소가 맞는지 확인하고, private 저장소라면 프로젝트 오너에게 GitHub 콜라보레이터로 추가해달라고 요청하세요.",
   "collab.repoConnect.errorNetwork":
     "네트워크 오류로 clone 하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도하세요.",
   "collab.repoConnect.errorExists":

@@ -58,6 +58,11 @@ export const settings: Record<keyof typeof koSettings, string> = {
   "settings.invitation.fallbackProject": "a project",
   "settings.invitation.accept": "Accept",
   "settings.invitation.reject": "Decline",
+  "settings.invitation.joined": "Joined {project}. Switching over…",
+  "settings.invitation.acceptFailed":
+    "Couldn't accept the invitation. Please try again.",
+  "settings.invitation.rejectFailed":
+    "Couldn't decline the invitation. Please try again.",
 
   // ── Plan gate (PlanGate) ─────────────────────────────────
   "settings.planGate.requiresPlan":

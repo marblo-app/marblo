@@ -56,6 +56,11 @@ export const settings = {
   "settings.invitation.fallbackProject": "프로젝트",
   "settings.invitation.accept": "수락",
   "settings.invitation.reject": "거절",
+  "settings.invitation.joined": "{project}에 합류했습니다. 이동 중…",
+  "settings.invitation.acceptFailed":
+    "초대 수락에 실패했습니다. 다시 시도해주세요.",
+  "settings.invitation.rejectFailed":
+    "초대 거절에 실패했습니다. 다시 시도해주세요.",
 
   // ── Plan gate (PlanGate) ─────────────────────────────────
   "settings.planGate.requiresPlan":
