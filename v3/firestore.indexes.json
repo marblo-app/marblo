@@ -53,6 +53,15 @@
       ]
     },
     {
+      "collectionGroup": "audit_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "worktreeId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "projectAuditLog",
       "queryScope": "COLLECTION",
       "fields": [
@@ -119,6 +128,15 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "mergedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "merge_history",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "taskId", "order": "ASCENDING" },
         { "fieldPath": "mergedAt", "order": "DESCENDING" }
       ]
     },

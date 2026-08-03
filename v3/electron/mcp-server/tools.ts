@@ -137,7 +137,21 @@ import {
   summarizeListing,
   compareTasksForListing,
 } from "./task-listing.js";
-import { staleBuildNotice } from "./build-info.js";
+import { staleBuildNotice, bakedBuildStamp } from "./build-info.js";
+import {
+  classifyWorktreeDir,
+  unionKnownWorktrees,
+  buildWorktreeAuditRows,
+  summarizeSealStatus,
+  pickLatestMerge,
+  describeProcessLiveness,
+  describeSafeToDelete,
+  describeActivityAtDecisionTime,
+  type WorktreeAuditEvent,
+  type MergeHistoryRow,
+  type MergeInfo,
+  type ActivityWindowEvent,
+} from "./worktree-audit.js";
 import {
   MAX_SKILLS_PER_DISPATCH,
   resolveSkillRouting,
@@ -151,6 +165,7 @@ import {
   buildLedgerEvent,
   readAgentRuntimeContext,
   worktreeAttributionCwd,
+  worktreesRoot,
   type LedgerEventKind,
 } from "./ledger.js";
 import {
@@ -1997,6 +2012,377 @@ async function boundedGetDocs(
     );
     return getDocs(query(collection(db, collectionName), ...baseConstraints));
   }
+}
+
+// ── 워크트리 감사 뷰 + 오케용 조회 (L4, 설계 §9 4단계 · §15) ──────
+//
+// 순수 판정 로직은 worktree-audit.ts. 여기는 그 판정에 넣을 근거를 모으는
+// 불순물(fs/git/Firestore/bridge HTTP)만 담당한다.
+
+/** `<root>/<projectId>/<taskId>` 규약에서 이 프로젝트의 워크트리 디렉터리를 스캔한다. */
+function scanDiskWorktreeIds(projectId: string): string[] {
+  const home = os.homedir();
+  const projectDir = path.join(worktreesRoot(home), projectId);
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(projectDir, { withFileTypes: true });
+  } catch {
+    return []; // 프로젝트 버킷이 아직 없음 — 정상(워크트리를 한 번도 안 만든 프로젝트)
+  }
+  const ids: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const classified = classifyWorktreeDir(path.join(projectDir, entry.name), {
+      homeDir: home,
+    });
+    if (classified.worktreeId) ids.push(classified.worktreeId);
+  }
+  return ids;
+}
+
+function worktreeDiskPath(worktreeId: string): string {
+  const [projectId, taskId] = worktreeId.split("/");
+  return path.join(worktreesRoot(os.homedir()), projectId, taskId);
+}
+
+function worktreeExistsOnDisk(worktreeId: string): boolean {
+  return fs.existsSync(worktreeDiskPath(worktreeId));
+}
+
+function auditLogDocToEvent(
+  data: Record<string, unknown>,
+): WorktreeAuditEvent & {
+  taskId: string | null;
+  success: boolean;
+  kind: string;
+} {
+  const createdAt = data.createdAt as { toMillis?: () => number } | undefined;
+  return {
+    agentId: typeof data.agentId === "string" ? data.agentId : "",
+    occurredAtMs:
+      typeof createdAt?.toMillis === "function" ? createdAt.toMillis() : 0,
+    toolName: typeof data.toolName === "string" ? data.toolName : "",
+    taskId: typeof data.taskId === "string" ? data.taskId : null,
+    success: data.success !== false,
+    kind: typeof data.kind === "string" ? data.kind : "action",
+    seq: typeof data.seq === "number" ? data.seq : undefined,
+    prevHash: typeof data.prevHash === "string" ? data.prevHash : undefined,
+    hash: typeof data.hash === "string" ? data.hash : undefined,
+  };
+}
+
+/** 프로젝트 스코프 원장에서 최근 창(cap) 안의 이벤트를 읽는다.
+ *  ★스캔 상한 밖의(더 오래된) 워크트리 활동은 이 창에 안 잡힐 수 있다 —
+ *  호출부가 결과에 그 한계를 명시해야 한다(설계 §15 — 모른다를 괜찮다로 답 금지). */
+const WORKTREE_LEDGER_SCAN_CAP = 500;
+async function scanLedgerAuditWindow(projectId: string): Promise<{
+  events: Array<
+    WorktreeAuditEvent & { worktreeId: string; taskId: string | null }
+  >;
+  scanned: number;
+  capped: boolean;
+}> {
+  const snap = await boundedGetDocs(
+    "audit_logs",
+    [where("projectId", "==", projectId)],
+    [orderBy("createdAt", "desc"), fsLimit(WORKTREE_LEDGER_SCAN_CAP)],
+    "worktree_audit:scan",
+  );
+  const events: Array<
+    WorktreeAuditEvent & { worktreeId: string; taskId: string | null }
+  > = [];
+  for (const d of snap.docs) {
+    const data = d.data() as Record<string, unknown>;
+    const worktreeId = data.worktreeId;
+    if (typeof worktreeId !== "string" || !worktreeId) continue;
+    events.push({ ...auditLogDocToEvent(data), worktreeId });
+  }
+  return {
+    events,
+    scanned: snap.size,
+    capped: snap.size >= WORKTREE_LEDGER_SCAN_CAP,
+  };
+}
+
+const WORKTREE_EVENT_CAP = 200;
+/** 워크트리 하나의 원장 이벤트를 전용 쿼리로 읽는다(project 스코프 스캔 창보다
+ *  넓게 — 한 워크트리 딥다이브는 project 전체 최근창에 안 잡혀도 봐야 한다). */
+async function fetchWorktreeLedgerEvents(
+  projectId: string,
+  worktreeId: string,
+): Promise<
+  Array<
+    WorktreeAuditEvent & {
+      taskId: string | null;
+      success: boolean;
+      kind: string;
+    }
+  >
+> {
+  const snap = await boundedGetDocs(
+    "audit_logs",
+    [
+      where("projectId", "==", projectId),
+      where("worktreeId", "==", worktreeId),
+    ],
+    [orderBy("createdAt", "desc"), fsLimit(WORKTREE_EVENT_CAP)],
+    "get_worktree_audit:events",
+  );
+  return snap.docs.map((d) =>
+    auditLogDocToEvent(d.data() as Record<string, unknown>),
+  );
+}
+
+/** 한 티켓의 머지 기록(최근 것 우선). orderBy 를 쓰므로 복합 색인이 없으면
+ *  boundedGetDocs 가 project+taskId 만으로 무순 폴백한다 — 여전히 정확하다. */
+async function fetchMergeHistoryForTask(
+  projectId: string,
+  taskId: string,
+): Promise<MergeHistoryRow[]> {
+  const snap = await boundedGetDocs(
+    "merge_history",
+    [where("projectId", "==", projectId), where("taskId", "==", taskId)],
+    [orderBy("mergedAt", "desc"), fsLimit(10)],
+    "worktree_audit:merge_history",
+  );
+  return snap.docs.map((d) => {
+    const data = d.data() as Record<string, unknown>;
+    const mergedAt = data.mergedAt as { toMillis?: () => number } | undefined;
+    return {
+      taskId: typeof data.taskId === "string" ? data.taskId : null,
+      branch: typeof data.branch === "string" ? data.branch : null,
+      headSha: typeof data.headSha === "string" ? data.headSha : null,
+      mergedAtMs:
+        typeof mergedAt?.toMillis === "function" ? mergedAt.toMillis() : null,
+    };
+  });
+}
+
+/** 여러 티켓의 머지 기록을 태스크당 개별 쿼리로 읽는다(순수 동등비교만 써서
+ *  `in` + 복합색인 요구를 피한다 — 목록 뷰는 row 수가 이미 limit 로 상한돼 있다). */
+async function fetchMergeInfoByTaskId(
+  projectId: string,
+  taskIds: readonly string[],
+): Promise<Map<string, MergeInfo | null>> {
+  const unique = [...new Set(taskIds)];
+  const rows = await Promise.all(
+    unique.map(async (taskId) => {
+      try {
+        const snap = await boundedGetDocs(
+          "merge_history",
+          [where("projectId", "==", projectId), where("taskId", "==", taskId)],
+          [fsLimit(5)],
+          "list_worktree_audit:merge_history",
+        );
+        return snap.docs.map((d) => {
+          const data = d.data() as Record<string, unknown>;
+          const mergedAt = data.mergedAt as
+            | { toMillis?: () => number }
+            | undefined;
+          return {
+            taskId,
+            branch: typeof data.branch === "string" ? data.branch : null,
+            headSha: typeof data.headSha === "string" ? data.headSha : null,
+            mergedAtMs:
+              typeof mergedAt?.toMillis === "function"
+                ? mergedAt.toMillis()
+                : null,
+          } as MergeHistoryRow;
+        });
+      } catch {
+        return [] as MergeHistoryRow[];
+      }
+    }),
+  );
+  const byTaskId = new Map<string, MergeInfo | null>();
+  unique.forEach((taskId, i) => byTaskId.set(taskId, pickLatestMerge(rows[i])));
+  return byTaskId;
+}
+
+interface GitRunResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** `runGh` 와 같은 모양의 git 실행기. 인자를 배열로 넘겨 셸 인젝션 경로가 없다. */
+function runGit(
+  args: string[],
+  cwd: string,
+  timeoutMs = 8_000,
+): Promise<GitRunResult> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn("git", args, {
+        cwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: process.env,
+      });
+    } catch (e) {
+      resolve({
+        code: -1,
+        stdout: "",
+        stderr: e instanceof Error ? e.message : String(e),
+      });
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const done = (r: GitRunResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* already gone */
+      }
+      done({ code: -1, stdout, stderr: `git timed out after ${timeoutMs}ms` });
+    }, timeoutMs);
+    child.stdout?.on("data", (d) => {
+      stdout += String(d);
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += String(d);
+    });
+    child.on("error", (e) =>
+      done({ code: -1, stdout, stderr: e.message || String(e) }),
+    );
+    child.on("close", (code) => done({ code: code ?? -1, stdout, stderr }));
+  });
+}
+
+/** dirty/unpushed 를 읽기 전용으로 관측한다. 삭제 정책 자체는 여기서 판단하지
+ *  않는다(worktree-manager.ts `reapSafety()` 담당, 설계 §2 재구현 금지). */
+async function gitWorktreeSafetyEvidence(
+  worktreePath: string,
+): Promise<{ dirty: boolean | null; unpushedCount: number | null }> {
+  const status = await runGit(["status", "--porcelain"], worktreePath);
+  const dirty = status.code === 0 ? status.stdout.trim().length > 0 : null;
+
+  const upstream = await runGit(
+    ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    worktreePath,
+  );
+  if (upstream.code !== 0) {
+    return { dirty, unpushedCount: null };
+  }
+  const count = await runGit(
+    ["rev-list", "--count", "@{u}..HEAD"],
+    worktreePath,
+  );
+  const unpushedCount =
+    count.code === 0 && /^\d+$/.test(count.stdout.trim())
+      ? parseInt(count.stdout.trim(), 10)
+      : null;
+  return { dirty, unpushedCount };
+}
+
+/** headSha 가 이 프로세스가 실행 중인 빌드 커밋의 조상인지 확인한다.
+ *  `mergedSha`(=squash 뒤 base HEAD)를 쓰므로 squash 로 인해 브랜치 자체 커밋이
+ *  base 의 조상이 되지 않는 함정(merge_and_close 주석 참조)에 걸리지 않는다. */
+async function checkAncestor(
+  repoCwd: string,
+  ancestorSha: string,
+  descendantSha: string,
+): Promise<"ancestor" | "not-ancestor" | "unknown"> {
+  const res = await runGit(
+    ["merge-base", "--is-ancestor", ancestorSha, descendantSha],
+    repoCwd,
+  );
+  if (res.code === 0) return "ancestor";
+  if (res.code === 1) return "not-ancestor";
+  return "unknown"; // 128 등 — shallow clone 등으로 커밋을 아예 못 찾음
+}
+
+/** 담당 에이전트가 지금 활동 중인지. ★Firestore `agents.status` 는 신뢰하지
+ *  않는다 — `normalizeFirestoreFallbackAgentStatus` 가 이미 그 필드를 stale 로
+ *  취급한다(agent-status-labels.ts). 브리지(실시간)가 없으면 unknown 을 낸다. */
+async function checkAgentBusy(
+  agentId: string | null,
+  projectId: string,
+): Promise<boolean | null> {
+  if (!agentId) return null;
+  const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+  if (!bridgePort) return null;
+  try {
+    const url = `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(
+      projectId,
+    )}`;
+    const response = await fetch(url, { headers: bridgeHeaders() });
+    const data = (await response.json()) as {
+      agents: Array<{ id: string; status: string }>;
+    };
+    const found = data.agents?.find((a) => a.id === agentId);
+    if (!found) return null; // 못 찾음 = 미상(다른 창/재시작 등일 수 있음) — false 아님
+    if (found.status === "working") return true;
+    if (
+      found.status === "idle" ||
+      found.status === "error" ||
+      found.status === "stopped"
+    ) {
+      return false;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** worktree_id/task_id 입력을 (projectId, taskId, worktreeId) 로 정규화한다. */
+/**
+ * worktree_id/task_id 입력을 (taskId, worktreeId) 로 정규화한다.
+ *
+ * ★projectId 는 호출부가 `enforceProjectLock()` 으로 이미 잠근 값을 받는다 —
+ * 여기서 다시 잠그지 않는다. project-lock-surface.test.ts 는 `project_id` 를
+ * 선언한 "locked" 툴의 **등록 블록 본문에** `enforceProjectLock(` 리터럴이
+ * 있는지 정적으로 스캔한다(조용한 무시 회귀 방지 가드). 그 호출을 이 헬퍼
+ * 안으로 숨기면 스캔이 못 보므로, 각 툴 핸들러가 자기 블록에서 직접 부른다.
+ */
+function resolveWorktreeTarget(
+  lockedProjectId: string,
+  input: { worktree_id?: string; task_id?: string },
+):
+  | { projectId: string; taskId: string; worktreeId: string }
+  | { error: string } {
+  if (!input.worktree_id && !input.task_id) {
+    return { error: "worktree_id 또는 task_id 중 하나는 있어야 합니다." };
+  }
+  if (input.worktree_id) {
+    const parts = input.worktree_id.split("/");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      return {
+        error: `worktree_id 형식이 올바르지 않습니다(<projectId>/<taskId> 기대): ${input.worktree_id}`,
+      };
+    }
+    const [wProjectId, wTaskId] = parts;
+    if (wProjectId !== lockedProjectId) {
+      return {
+        error: `worktree_id 의 projectId(${wProjectId})가 세션 프로젝트(${lockedProjectId})와 다릅니다.`,
+      };
+    }
+    if (input.task_id && input.task_id !== wTaskId) {
+      return {
+        error: `worktree_id 의 taskId(${wTaskId})가 task_id(${input.task_id})와 다릅니다.`,
+      };
+    }
+    return {
+      projectId: lockedProjectId,
+      taskId: wTaskId,
+      worktreeId: input.worktree_id,
+    };
+  }
+  const taskId = input.task_id as string;
+  return {
+    projectId: lockedProjectId,
+    taskId,
+    worktreeId: `${lockedProjectId}/${taskId}`,
+  };
 }
 
 // ── 완료 보고(completion report) 규약 ──
@@ -6470,6 +6856,244 @@ export function registerTools(server: McpServer): void {
           `이전 기동분은 디스크 스풀로 복원된 것에 한해 포함됩니다. ` +
           `다른 에이전트 프로세스의 스풀은 여기서 보이지 않습니다.`,
       );
+      return text(lines.join("\n"));
+    },
+    { userFacing: false },
+  );
+
+  // ── 감사 뷰: 워크트리 목록 (L4, 설계 §9 4단계) ──
+  //
+  // 진입점은 워크트리 목록이다(설계 문서 지시). 디스크에 실재하는 워크트리와
+  // 원장에서만 관측되는(물리 삭제된) 워크트리를 합쳐 보여준다 — ★삭제됐다고
+  // 감사 대상에서 빠지면 안 된다는 것이 이 뷰의 핵심 요구다.
+  auditedTool(
+    "list_worktree_audit",
+    "Audit view entry point: lists worktrees for this project — both ones that still exist on disk AND ones only known from the ledger (physically deleted, but their audit trail survives). Each row shows last agent/activity, chain-seal coverage (preLedger = unguaranteed), and merge status. Use this before drilling into get_worktree_audit for a specific one.",
+    {
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Project ID. Locked to this orchestrator session's project like other list tools.",
+        ),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Max rows to return (default 50)."),
+    },
+    async ({ project_id, limit }) => {
+      const projectId = await enforceProjectLock(
+        "list_worktree_audit",
+        project_id,
+      );
+      const rowLimit = limit ?? LIST_LIMIT_DEFAULT;
+
+      const diskIds = scanDiskWorktreeIds(projectId);
+      const {
+        events: scanned,
+        scanned: scannedCount,
+        capped,
+      } = await scanLedgerAuditWindow(projectId);
+      const ledgerIds = [...new Set(scanned.map((e) => e.worktreeId))];
+
+      const known = unionKnownWorktrees(diskIds, ledgerIds);
+      const eventsByWorktreeId = new Map<string, WorktreeAuditEvent[]>();
+      for (const e of scanned) {
+        const list = eventsByWorktreeId.get(e.worktreeId) ?? [];
+        list.push(e);
+        eventsByWorktreeId.set(e.worktreeId, list);
+      }
+      const taskIds = known.map((k) => k.worktreeId.split("/")[1] ?? "");
+      const mergeByTaskId = await fetchMergeInfoByTaskId(projectId, taskIds);
+
+      const rows = buildWorktreeAuditRows({
+        known,
+        eventsByWorktreeId,
+        mergeByTaskId,
+      });
+      const shown = rows.slice(0, rowLimit);
+
+      if (rows.length === 0) {
+        return text(
+          `이 프로젝트(${projectId})에서 워크트리를 찾지 못했습니다 — 디스크에도, ` +
+            `최근 ${WORKTREE_LEDGER_SCAN_CAP}건 원장 스캔에도 없습니다.`,
+        );
+      }
+
+      const lines = shown.map((r) => {
+        const originTag =
+          r.origin === "ledger"
+            ? " [물리삭제됨]"
+            : r.origin === "disk"
+              ? " [원장활동없음]"
+              : "";
+        const merge = r.merged
+          ? ` merged@${
+              r.mergedAtMs ? new Date(r.mergedAtMs).toISOString() : "?"
+            }`
+          : "";
+        const seal =
+          r.preLedger > 0 ? ` seal=${r.sealed}/preLedger=${r.preLedger}` : "";
+        const last =
+          r.lastAgentId && r.lastEventAtMs
+            ? `last=${r.lastAgentId}@${new Date(r.lastEventAtMs).toISOString()}`
+            : "last=(스캔 창 안에 활동 없음)";
+        return `- ${r.worktreeId}${originTag} ${last}${seal}${merge}`;
+      });
+
+      const footer: string[] = [];
+      footer.push(
+        `\n원장 스캔: 최근 ${scannedCount}건${
+          capped
+            ? `(상한 ${WORKTREE_LEDGER_SCAN_CAP}건 도달 — 그 이전에만 활동한 워크트리는 [원장활동없음]/누락일 수 있음)`
+            : ""
+        }.`,
+      );
+      if (rows.length > shown.length) {
+        footer.push(
+          `${rows.length - shown.length}개 행이 limit=${rowLimit} 에 가려짐.`,
+        );
+      }
+      footer.push(
+        "각 워크트리 딥다이브(지금 프로세스에 들어있는지/지워도 안전한지/그 " +
+          "시점에 뭐가 돌았는지)는 get_worktree_audit(worktree_id=...) 를 쓰세요.",
+      );
+
+      return text([lines.join("\n"), ...footer].join("\n"));
+    },
+    { userFacing: false },
+  );
+
+  // ── 오케용 조회: 워크트리 딥다이브 (L4, 설계 §15 3질문) ──
+  //
+  // 설계 §15 가 명시한 3질문에 답한다:
+  //   Q1 이 수정이 지금 도는 프로세스에 실제 들어있나
+  //   Q2 이 워크트리는 어느 티켓·에이전트·PR 이고 지워도 안전한가
+  //   Q3 이 결정이 내려진 시점에 무엇이 돌고 있었나
+  // ★근거가 없으면 "unknown" 이라고 답한다 — 절대 괜찮다고 반올림하지 않는다.
+  auditedTool(
+    "get_worktree_audit",
+    "Answers the orchestrator's 3 questions about ONE worktree/task, backed by the audit ledger + live checks. Q1 liveness: is this task's merged fix an ancestor of the commit THIS MCP process is running (git merge-base check against merge_history + the build's baked commit) — 'not-merged'/'unknown' when evidence is missing, never guessed. Q2 identity+safety: which task/agent(s)/PR touched this worktree (ledger join) and whether it looks safe to delete (dirty/unpushed/agent-busy evidence — 'unknown' wins over 'safe' when any axis is unconfirmed; final delete policy still belongs to the main process's reapSafety()). Q3 activity window: ledger action-events near a given timestamp (default: latest event), with an explicit caveat that lifecycle 'process started' events are not produced yet so an empty window is NOT proof nothing was running.",
+    {
+      worktree_id: z
+        .string()
+        .optional()
+        .describe("<projectId>/<taskId>. Either this or task_id is required."),
+      task_id: z
+        .string()
+        .optional()
+        .describe("Task ID. Either this or worktree_id is required."),
+      project_id: z
+        .string()
+        .optional()
+        .describe("Project ID. Locked to this orchestrator session's project."),
+      at_ms: z
+        .number()
+        .optional()
+        .describe(
+          "Epoch ms for Q3's decision-time window. Defaults to the worktree's latest ledger event time.",
+        ),
+    },
+    async ({ worktree_id, task_id, project_id, at_ms }) => {
+      const projectId = await enforceProjectLock(
+        "get_worktree_audit",
+        project_id,
+      );
+      const target = resolveWorktreeTarget(projectId, { worktree_id, task_id });
+      if ("error" in target) return text(`Error: ${target.error}`);
+      const { taskId, worktreeId } = target;
+
+      const [events, mergeRows, task] = await Promise.all([
+        fetchWorktreeLedgerEvents(projectId, worktreeId),
+        fetchMergeHistoryForTask(projectId, taskId),
+        fetchTask(taskId),
+      ]);
+      const mergeInfo = pickLatestMerge(mergeRows);
+      const existsOnDisk = worktreeExistsOnDisk(worktreeId);
+      const agentIds = [
+        ...new Set(events.map((e) => e.agentId).filter(Boolean)),
+      ];
+      const sortedDesc = [...events].sort(
+        (a, b) => b.occurredAtMs - a.occurredAtMs,
+      );
+      const lastAgentId = sortedDesc[0]?.agentId ?? task?.claimedBy ?? null;
+
+      // Q1
+      const bakedCommit = bakedBuildStamp()?.commit ?? null;
+      const ancestorResult =
+        mergeInfo?.headSha && bakedCommit
+          ? await checkAncestor(ghWorkingDir(), mergeInfo.headSha, bakedCommit)
+          : "unknown";
+      const liveness = describeProcessLiveness({
+        mergeInfo,
+        bakedCommit,
+        ancestorResult,
+      });
+
+      // Q2
+      const gitEvidence = existsOnDisk
+        ? await gitWorktreeSafetyEvidence(worktreeDiskPath(worktreeId))
+        : { dirty: null, unpushedCount: null };
+      const agentBusy = await checkAgentBusy(lastAgentId, projectId);
+      const safety = describeSafeToDelete({
+        existsOnDisk,
+        dirty: gitEvidence.dirty,
+        unpushedCount: gitEvidence.unpushedCount,
+        agentBusy,
+      });
+
+      // Q3
+      const windowEvents: ActivityWindowEvent[] = events.map((e) => ({
+        toolName: e.toolName,
+        occurredAtMs: e.occurredAtMs,
+        agentId: e.agentId,
+        success: e.success,
+        kind: e.kind,
+      }));
+      const atMs = at_ms ?? sortedDesc[0]?.occurredAtMs ?? Date.now();
+      const activity = describeActivityAtDecisionTime(
+        windowEvents,
+        atMs,
+        10 * 60_000,
+      );
+
+      const { sealed, preLedger } = summarizeSealStatus(events);
+
+      const lines = [
+        `워크트리: ${worktreeId} (exists on disk: ${existsOnDisk})`,
+        `티켓: ${taskId}${
+          task ? ` — ${task.title} [${task.status}]` : " (태스크 문서 없음)"
+        }`,
+        `원장에서 관측된 에이전트: ${
+          agentIds.length ? agentIds.join(", ") : "(없음)"
+        }`,
+        `PR: ${task?.prUrl || "(none)"}${
+          mergeInfo
+            ? ` / merge_history: branch=${mergeInfo.branch ?? "?"} headSha=${
+                mergeInfo.headSha ?? "?"
+              } mergedAt=${new Date(mergeInfo.mergedAtMs).toISOString()}`
+            : " / merge_history: (기록 없음)"
+        }`,
+        `체인 커버리지: sealed=${sealed} preLedger(무결성 미보증)=${preLedger}`,
+        "",
+        `Q1. 지금 도는 프로세스에 들어있나 → [${liveness.status}] ${liveness.detail}`,
+        `Q2. 지워도 안전한가 → [${safety.verdict}] ${safety.reasons.join(" ")}`,
+        `Q3. ${new Date(atMs).toISOString()} 시점 활동(±10분) → ${
+          activity.events.length
+            ? activity.events
+                .map(
+                  (e) =>
+                    `${new Date(e.occurredAtMs).toISOString()} ${e.agentId} ${
+                      e.toolName
+                    }${e.success ? "" : "(fail)"}`,
+                )
+                .join("; ")
+            : "(창 안에 기록된 활동 없음)"
+        }\n    ${activity.caveat}`,
+      ];
       return text(lines.join("\n"));
     },
     { userFacing: false },
