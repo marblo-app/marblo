@@ -4,7 +4,11 @@ import path from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { authReady } from "./firebase.js";
-import { registerTools, restoreLedgerSpool } from "./tools.js";
+import {
+  registerTools,
+  restoreLedgerChain,
+  restoreLedgerSpool,
+} from "./tools.js";
 import { registerPrompts } from "./prompts.js";
 import { bakedBuildStamp, entryPath, formatBootBanner } from "./build-info.js";
 
@@ -129,6 +133,16 @@ async function main() {
   // 항상 OK 로 보여 진짜 실패를 가렸다). 인증은 이제 tools.ts 의 각 도구 호출부
   // (auditedTool)에서 개별적으로 await 하므로, Firestore 접근은 여전히 인증 완료를
   // 기다리되 도구 노출(discovery)은 인증에 막히지 않는다.
+  // ★체인 머리는 connect **전에** 이어받는다(L3, §6). 로컬 파일 한 번 읽기라
+  // 네트워크를 타지 않고 핸드셰이크를 유의미하게 늦추지 않는다 — 아래 스풀 재적재
+  // (네트워크 쓰기)를 await 하지 않는 것과 대비된다.
+  //
+  // 여기가 아니라 아래(스풀 재적재 자리)에 두면 connect 와 `await authReady`
+  // (최대 ~10s) 사이에 도착한 툴 호출이 seq 0 부터 봉인되고, 그 뒤 복원이 머리를
+  // 이전 기동 값으로 덮어써 **원장에 같은 자리가 두 벌** 생긴다. 검증이 duplicate-seq
+  // 로 잡아내긴 하지만, 매 재기동마다 나는 경보는 진짜 사고를 묻는다.
+  await restoreLedgerChain();
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Marblo MCP Server v3.0 started (stdio)");

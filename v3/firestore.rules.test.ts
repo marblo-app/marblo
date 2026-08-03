@@ -344,6 +344,41 @@ beforeEach(async () => {
       mergedAt: new Date(),
     });
 
+    // ledger_checkpoints (L3 머클 체크포인트): 우리 프로젝트 / 타 테넌트.
+    // 명부만 새어도 타 테넌트의 에이전트 id·활동량이 드러나므로 read 게이트는
+    // audit_logs 와 같아야 한다.
+    await setDoc(doc(db, "ledger_checkpoints", "cp-ours"), {
+      projectId: PROJECT_ID,
+      kind: "periodic",
+      seqNo: 1,
+      atMs: 1_700_000_000_000,
+      chains: [
+        { projectId: PROJECT_ID, agentId: "agent-1", seq: 4, hash: "sha256:a" },
+      ],
+      merkleRoot: "sha256:root",
+      prevCheckpointHash: "sha256:prev",
+      hash: "sha256:cp",
+      createdAt: new Date(),
+    });
+    await setDoc(doc(db, "ledger_checkpoints", "cp-other-tenant"), {
+      projectId: OTHER_PROJECT_ID,
+      kind: "periodic",
+      seqNo: 1,
+      atMs: 1_700_000_000_000,
+      chains: [
+        {
+          projectId: OTHER_PROJECT_ID,
+          agentId: "agent-x",
+          seq: 9,
+          hash: "sha256:x",
+        },
+      ],
+      merkleRoot: "sha256:root-x",
+      prevCheckpointHash: "sha256:prev-x",
+      hash: "sha256:cp-x",
+      createdAt: new Date(),
+    });
+
     // telemetry_events: 우리 프로젝트 / 타 테넌트
     await setDoc(doc(db, "telemetry_events", "telemetry-ours"), {
       projectId: PROJECT_ID,
@@ -1743,6 +1778,92 @@ describe("audit_logs collection", () => {
     const db = unauthContext().firestore();
     await assertFails(getDoc(doc(db, "audit_logs", LOG_ID)));
     await assertFails(setDoc(doc(db, "audit_logs", LOG_ID), auditDoc()));
+  });
+});
+
+describe("ledger_checkpoints collection (L3 머클 체크포인트)", () => {
+  const CP_ID = "test-project_7";
+  const checkpointDoc = () => ({
+    projectId: PROJECT_ID,
+    kind: "periodic",
+    seqNo: 7,
+    atMs: 1_700_000_100_000,
+    chains: [
+      { projectId: PROJECT_ID, agentId: "agent-1", seq: 4, hash: "sha256:a" },
+    ],
+    merkleRoot: "sha256:root",
+    prevCheckpointHash: "sha256:prev",
+    hash: "sha256:cp7",
+    createdAt: new Date("2026-07-20T00:00:00.000Z"),
+  });
+
+  it("인증 사용자(메인 프로세스)는 체크포인트를 생성할 수 있다", async () => {
+    // ★멤버 스코프로 조이지 않는 이유: 쓰는 쪽이 메인 프로세스이고 그 인증 경로는
+    // 렌더러와 다르다(#406 이 정확히 이 지점에서 터졌다). 위조 체크포인트를 끼워
+    // 넣어도 prevCheckpointHash 사슬이 어긋나 검증에서 드러난다 — 무결성은 룰이
+    // 아니라 해시가 보증한다.
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(doc(db, "ledger_checkpoints", CP_ID), checkpointDoc()),
+    );
+  });
+
+  it("★체크포인트는 고칠 수 없다 — 고칠 수 있으면 봉인이 아니다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(doc(db, "ledger_checkpoints", CP_ID), checkpointDoc()),
+    );
+
+    // 명부에서 체인 하나를 빼 삭제를 정당화하려는 시도.
+    await assertFails(
+      setDoc(doc(db, "ledger_checkpoints", CP_ID), {
+        ...checkpointDoc(),
+        chains: [],
+      }),
+    );
+    // 머클 루트 갈아끼우기.
+    await assertFails(
+      updateDoc(doc(db, "ledger_checkpoints", CP_ID), {
+        merkleRoot: "sha256:조작됨",
+      }),
+    );
+    // ★audit_logs 와 달리 **동일 내용 재쓰기도** 막는다. 체크포인트 쓰기는
+    // 결정적 id 로 1회만 일어나고 스풀 재시도 경로를 타지 않아, L1.6 고착을
+    // 부르는 멱등 재시도 요구가 없다.
+    await assertFails(
+      setDoc(doc(db, "ledger_checkpoints", CP_ID), checkpointDoc()),
+    );
+  });
+
+  it("체크포인트는 삭제할 수 없다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(doc(db, "ledger_checkpoints", CP_ID), checkpointDoc()),
+    );
+    await assertFails(deleteDoc(doc(db, "ledger_checkpoints", CP_ID)));
+  });
+
+  it("프로젝트 멤버는 자기 프로젝트 체크포인트를 읽을 수 있다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "ledger_checkpoints", "cp-ours")));
+  });
+
+  it("★타 테넌트 체크포인트는 읽을 수 없다 — 명부만 새어도 에이전트 구성이 드러난다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "ledger_checkpoints", "cp-other-tenant")));
+  });
+
+  it("비멤버는 읽을 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "ledger_checkpoints", "cp-ours")));
+  });
+
+  it("미인증 사용자는 읽지도 쓰지도 못한다", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(getDoc(doc(db, "ledger_checkpoints", "cp-ours")));
+    await assertFails(
+      setDoc(doc(db, "ledger_checkpoints", CP_ID), checkpointDoc()),
+    );
   });
 });
 

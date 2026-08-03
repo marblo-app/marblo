@@ -76,10 +76,38 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import type { LedgerEventWrite } from "./ledger.js";
+import type { ChainFields } from "./ledger-chain.js";
 
 // ── 파일 포맷 ────────────────────────────────────────────────────
 
 export const SPOOL_FILE_VERSION = 1;
+
+/**
+ * 스풀이 나르는 이벤트. L3 가 봉인하면 체인 필드가 붙는다.
+ *
+ * `Partial` 인 이유: 봉인기가 주입되지 않은 경로(테스트·L3 이전 기동)에서도 스풀은
+ * 그대로 돌아야 한다. 체인 필드의 **부재**가 곧 "이 기록은 무결성 미보증"이라는
+ * 뜻이고(§10), 그 구분은 필드 존재 여부로 읽힌다.
+ */
+export type SpoolEvent = LedgerEventWrite & Partial<ChainFields>;
+
+/**
+ * 이벤트를 체인에 봉인한다(L3). 스풀은 **봉인 방식을 모른다** — 주입만 받는다.
+ *
+ * `seq`/`prevHash` 가 주어지면 **자리를 옮기지 않고 다시 봉인**하라는 뜻이다.
+ * 스풀의 메타 마커는 큐에 있는 동안 내용이 갱신되는데(유실 구간이 넓어지면
+ * 카운트가 커진다), 그때 해시를 다시 계산하지 않으면 저장 내용과 해시가 어긋나
+ * 멀쩡한 마커가 변조로 보고된다.
+ */
+export type SpoolSeal = (
+  event: SpoolEvent,
+  meta: {
+    id: string;
+    occurredAtMs: number;
+    seq?: number;
+    prevHash?: string;
+  },
+) => SpoolEvent;
 
 /**
  * 스풀에 담기는 한 건.
@@ -96,7 +124,7 @@ export const SPOOL_FILE_VERSION = 1;
 export interface SpoolRecord {
   id: string;
   occurredAtMs: number;
-  event: LedgerEventWrite;
+  event: SpoolEvent;
 }
 
 /**
@@ -272,6 +300,20 @@ export interface LedgerSpoolOptions {
    * 반올림하면 진짜 유실을 숨긴다. 모르는 건 모른다고 남긴다.
    */
   verify?: (rec: SpoolRecord, err: unknown) => Promise<boolean | null>;
+  /**
+   * L3 체인 봉인기. 주입되면 `enqueue()` 가 **동기적으로** 이벤트를 봉인한다.
+   *
+   * ★봉인 지점이 여기여야 하는 이유(§6, 파일 상단 "L3 와의 정합"): 스풀은 30분 뒤에
+   * 재적재될 수 있어 **write 순서 ≠ 발생 순서**다. sink 에서 봉인하면 오프라인
+   * 구간의 이벤트가 복구 시점 순서로 seq 를 받아 원장이 발생 순서를 잃는다.
+   * `enqueue()` 는 이 프로세스의 단일 직렬화 지점이므로 여기가 유일하게 맞는 자리다.
+   *
+   * 부수 효과로 **멱등 재시도가 유지된다**: 봉인이 1회로 끝나 재시도 페이로드가
+   * 결정적으로 동일하고, 그래서 룰의 `request.resource.data == resource.data` 를
+   * 그대로 통과한다. sink 에서 봉인했다면 재시도마다 해시가 달라져 update 가
+   * 거부되고 큐가 고착됐을 것이다(L1.6 회귀).
+   */
+  seal?: SpoolSeal;
 }
 
 export interface SpoolNotice {
@@ -391,10 +433,11 @@ const isUnresolvedMarker = (e: Entry): boolean =>
  */
 export class LedgerSpool {
   private readonly opts: Required<
-    Omit<LedgerSpoolOptions, "onNotice" | "verify">
+    Omit<LedgerSpoolOptions, "onNotice" | "verify" | "seal">
   > & {
     onNotice?: (n: SpoolNotice) => void;
     verify?: (rec: SpoolRecord, err: unknown) => Promise<boolean | null>;
+    seal?: SpoolSeal;
   };
   private readonly queue: Entry[] = [];
   private queuedBytes = 0;
@@ -438,7 +481,48 @@ export class LedgerSpool {
       isTerminal: options.isTerminal ?? (() => false),
       onNotice: options.onNotice,
       verify: options.verify,
+      seal: options.seal,
     };
+  }
+
+  /**
+   * 봉인기가 있으면 봉인하고, 없으면 그대로 둔다.
+   *
+   * 봉인 실패가 감사 이벤트를 삼키면 안 된다 — 체인이 없는 기록은 "무결성 미보증"
+   * 이지만, 기록이 아예 없는 것은 조용한 유실이다. 후자가 훨씬 나쁘므로 봉인이
+   * 터지면 미봉인 상태로라도 큐에 넣고 그 사실을 남긴다.
+   */
+  private sealEvent(
+    event: SpoolEvent,
+    meta: { id: string; occurredAtMs: number; seq?: number; prevHash?: string },
+  ): SpoolEvent {
+    if (!this.opts.seal) return event;
+    try {
+      return this.opts.seal(event, meta);
+    } catch (err) {
+      console.error(
+        `[Audit] ★체인 봉인 실패 — 이 이벤트는 무결성 미보증으로 원장에 ` +
+          `들어갑니다(기록을 버리지는 않습니다): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+      );
+      return event;
+    }
+  }
+
+  /**
+   * 큐에 있는 레코드의 내용을 갈아끼우고 **같은 자리에서** 다시 봉인한다.
+   *
+   * 봉인 전(체인 필드 없음)이면 새 자리를 받는다 — 봉인기가 없는 구성에서는
+   * sealEvent 가 그대로 통과시키므로 결과적으로 아무 일도 일어나지 않는다.
+   */
+  private resealInPlace(rec: SpoolRecord, next: SpoolEvent): SpoolEvent {
+    return this.sealEvent(next, {
+      id: rec.id,
+      occurredAtMs: rec.occurredAtMs,
+      seq: rec.event.seq,
+      prevHash: rec.event.prevHash,
+    });
   }
 
   get spoolPath(): string {
@@ -450,11 +534,15 @@ export class LedgerSpool {
    *
    * 반환하는 id 는 Firestore 문서 id 이기도 하다(재시도 멱등).
    */
-  enqueue(event: LedgerEventWrite, occurredAtMs?: number): string {
+  enqueue(event: SpoolEvent, occurredAtMs?: number): string {
+    const id = this.opts.newId();
+    const at = occurredAtMs ?? this.opts.now();
+    // ★봉인은 여기서 1회. id 와 발생 시각이 확정된 뒤여야 둘 다 해시에 들어가
+    // 문서 갈아끼우기·시각 조작이 탐지된다.
     const rec: SpoolRecord = {
-      id: this.opts.newId(),
-      occurredAtMs: occurredAtMs ?? this.opts.now(),
-      event,
+      id,
+      occurredAtMs: at,
+      event: this.sealEvent(event, { id, occurredAtMs: at }),
     };
     this.push({ rec, size: byteLen(rec), tombstone: false });
     void this.drain();
@@ -539,21 +627,31 @@ export class LedgerSpool {
       const prevFrom =
         typeof p.firstDroppedAtMs === "number" ? p.firstDroppedAtMs : fromMs;
       this.queuedBytes -= head.size;
-      head.rec.event = this.tombstoneEvent(
-        prevCount + dropped,
-        prevFrom,
-        toMs,
-        head.rec.event,
+      // 내용이 바뀌었으므로 **자리는 그대로 두고** 해시만 다시 계산한다. 아직 원장에
+      // 나가지 않은 레코드라 뒤 이벤트가 이 해시를 참조한 적이 없어 안전하다.
+      head.rec.event = this.resealInPlace(
+        head.rec,
+        this.tombstoneEvent(
+          prevCount + dropped,
+          prevFrom,
+          toMs,
+          head.rec.event,
+        ),
       );
       head.size = byteLen(head.rec);
       this.queuedBytes += head.size;
       return;
     }
 
+    const id = this.opts.newId();
+    const at = fromMs ?? this.opts.now();
     const rec: SpoolRecord = {
-      id: this.opts.newId(),
-      occurredAtMs: fromMs ?? this.opts.now(),
-      event: this.tombstoneEvent(dropped, fromMs, toMs, null),
+      id,
+      occurredAtMs: at,
+      event: this.sealEvent(this.tombstoneEvent(dropped, fromMs, toMs, null), {
+        id,
+        occurredAtMs: at,
+      }),
     };
     const entry: Entry = { rec, size: byteLen(rec), tombstone: true };
     this.queue.unshift(entry);
@@ -571,7 +669,7 @@ export class LedgerSpool {
     droppedCount: number,
     firstDroppedAtMs: number | null,
     lastDroppedAtMs: number | null,
-    prior: LedgerEventWrite | null,
+    prior: SpoolEvent | null,
   ): LedgerEventWrite {
     return {
       projectId: prior?.projectId ?? "",
@@ -798,27 +896,34 @@ export class LedgerSpool {
           ? p.firstUnresolvedAtMs
           : parked.occurredAtMs;
       this.queuedBytes -= head.size;
-      head.rec.event = this.unresolvedEvent(
-        prev + 1,
-        prevFrom,
-        parked.occurredAtMs,
-        verified,
-        head.rec.event,
+      head.rec.event = this.resealInPlace(
+        head.rec,
+        this.unresolvedEvent(
+          prev + 1,
+          prevFrom,
+          parked.occurredAtMs,
+          verified,
+          head.rec.event,
+        ),
       );
       head.size = byteLen(head.rec);
       this.queuedBytes += head.size;
       return;
     }
 
+    const id = this.opts.newId();
     const rec: SpoolRecord = {
-      id: this.opts.newId(),
+      id,
       occurredAtMs: parked.occurredAtMs,
-      event: this.unresolvedEvent(
-        1,
-        parked.occurredAtMs,
-        parked.occurredAtMs,
-        verified,
-        parked.event,
+      event: this.sealEvent(
+        this.unresolvedEvent(
+          1,
+          parked.occurredAtMs,
+          parked.occurredAtMs,
+          verified,
+          parked.event,
+        ),
+        { id, occurredAtMs: parked.occurredAtMs },
       ),
     };
     const entry: Entry = { rec, size: byteLen(rec), tombstone: true };
@@ -831,7 +936,7 @@ export class LedgerSpool {
     firstUnresolvedAtMs: number | null,
     lastUnresolvedAtMs: number | null,
     verified: false | null,
-    prior: LedgerEventWrite | null,
+    prior: SpoolEvent | null,
   ): LedgerEventWrite {
     return {
       projectId: prior?.projectId ?? "",

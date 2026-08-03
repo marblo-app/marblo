@@ -163,6 +163,11 @@ import {
   type SpoolRecord,
 } from "./ledger-spool.js";
 import {
+  ChainHeadStore,
+  LedgerChainSealer,
+  GENESIS_PREV_HASH,
+} from "./ledger-chain.js";
+import {
   evaluateMergeCloseout,
   parsePrNumber,
   branchMatchesTask,
@@ -1715,10 +1720,104 @@ async function verifyLedgerRecord(rec: SpoolRecord): Promise<boolean | null> {
   }
 }
 
+// ── 감사 원장 체인 (L3, §6) ──────────────────────────────────────
+
+/**
+ * 이 프로세스의 체인 봉인기. **프로세스당 하나**이고, 그래서 `(projectId, agentId)`
+ * 체인의 writer 가 하나뿐이라는 §6 의 전제가 성립한다 — 잠금도 트랜잭션도 없이
+ * 체인이 성립하는 근거가 이것이다.
+ *
+ * 스풀과 같은 디렉터리에 머리를 남긴다. 재기동 시 이어받지 않으면 매번 seq 0 부터
+ * 다시 시작해 원장에 같은 자리가 여러 벌 생긴다.
+ */
+let chainSealerSingleton: LedgerChainSealer | null = null;
+let chainHeadStoreSingleton: ChainHeadStore | null = null;
+
+function chainSealer(): LedgerChainSealer {
+  if (!chainSealerSingleton) {
+    chainSealerSingleton = new LedgerChainSealer(MARBLO_AGENT_ID);
+  }
+  return chainSealerSingleton;
+}
+
+function chainHeadStore(): ChainHeadStore {
+  if (!chainHeadStoreSingleton) {
+    chainHeadStoreSingleton = new ChainHeadStore(
+      defaultSpoolDir(),
+      MARBLO_AGENT_ID,
+    );
+  }
+  return chainHeadStoreSingleton;
+}
+
+/**
+ * 스풀에 꽂는 봉인 훅. **동기**이고 디스크를 기다리지 않는다 — 머리 저장은
+ * write-behind 로 예약만 한다(§6 비차단 성질).
+ */
+const sealLedgerEvent: NonNullable<
+  ConstructorParameters<typeof LedgerSpool>[0]["seal"]
+> = (event, meta) => {
+  const sealer = chainSealer();
+  const sealed =
+    typeof meta.seq === "number"
+      ? // 자리를 옮기지 않는 재봉인(스풀 메타 마커의 내용 갱신).
+        sealer.reseal(event, {
+          id: meta.id,
+          occurredAtMs: meta.occurredAtMs,
+          seq: meta.seq,
+          prevHash: meta.prevHash ?? GENESIS_PREV_HASH,
+        })
+      : sealer.seal(event, {
+          id: meta.id,
+          occurredAtMs: meta.occurredAtMs,
+        });
+  if (sealer.takeDirty()) chainHeadStore().save(sealer.snapshot());
+  return sealed;
+};
+
+/**
+ * 기동 시 이전 프로세스의 체인 머리를 이어받는다.
+ *
+ * ★멱등이다. index.ts 가 connect 전에 부르고 restoreLedgerSpool 도 안전망으로
+ * 부르는데, 두 번째 복원이 그 사이 봉인된 이벤트의 머리를 이전 기동 값으로
+ * 덮어쓰면 원장에 같은 자리가 두 벌 생긴다. 한 번만 이어받는다.
+ */
+let chainRestored = false;
+export async function restoreLedgerChain(): Promise<number> {
+  if (chainRestored) return 0;
+  chainRestored = true;
+  try {
+    const snapshot = await chainHeadStore().load();
+    const n = chainSealer().restoreFrom(snapshot);
+    if (n > 0) {
+      console.error(
+        `[Audit] 체인 머리 ${n}개를 이어받았습니다 — seq 가 이전 기동에 이어집니다.`,
+      );
+    } else if (snapshot) {
+      console.error(
+        `[Audit] 체인 머리 파일은 있었으나 이어받을 체인이 없습니다 — ` +
+          `이 프로세스의 체인은 seq 0 에서 시작합니다.`,
+      );
+    }
+    return n;
+  } catch (err) {
+    // 이어받기 실패를 삼키면 seq 가 조용히 0 으로 되돌아가 원장에 같은 자리가
+    // 두 벌 생긴다. 최소한 로그로는 드러낸다 — 검증은 duplicate-seq 로 잡는다.
+    console.error(
+      `[Audit] ★체인 머리 복원 실패 — 이 프로세스의 체인은 새로 시작되고, ` +
+        `그 불연속은 검증에서 중복/구멍으로 드러납니다: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+    );
+    return 0;
+  }
+}
+
 function ledgerSpool(): LedgerSpool {
   if (spoolSingleton) return spoolSingleton;
   spoolSingleton = new LedgerSpool({
     dir: defaultSpoolDir(),
+    seal: sealLedgerEvent,
     // ★스풀 정체는 **프로세스 정체**이지 보드 담당자 귀속이 아니다.
     // attributionAgentId() 는 오케 id 를 의도적으로 "" 로 떨어뜨리는 함수라
     // (보드에서 오케가 다수 task 의 담당자로 표시되는 것을 막기 위해),
@@ -1763,6 +1862,11 @@ let lastSpoolNotice: SpoolNotice | null = null;
 /** 기동 시 이전 프로세스가 남긴 스풀을 복원한다(순서 보존 재적재). */
 export async function restoreLedgerSpool(): Promise<number> {
   try {
+    // ★체인 머리를 **먼저** 이어받는다. 스풀에서 복원되는 레코드는 이전 기동에서
+    // 이미 봉인돼 있으므로 다시 봉인하지 않지만, 복원 직후 들어오는 새 이벤트는
+    // 이어받은 머리에서 seq 를 받아야 한다. 순서가 뒤바뀌면 새 이벤트가 seq 0 을
+    // 다시 발급받아 원장에 같은 자리가 두 벌 생긴다.
+    await restoreLedgerChain();
     return await ledgerSpool().restore();
   } catch (err) {
     console.error(

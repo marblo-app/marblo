@@ -123,6 +123,14 @@
       ]
     },
     {
+      "collectionGroup": "ledger_checkpoints",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "seqNo", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "tasks",
       "queryScope": "COLLECTION",
       "fields": [

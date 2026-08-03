@@ -334,6 +334,31 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ===== Ledger Checkpoints (L3 머클 체크포인트) =====
+    // 그 시점 모든 체인 머리를 머클 루트 하나로 봉인한 명부. 메인 프로세스가
+    // 주기적으로 쓴다(electron/ledger-checkpointer.ts). 체인 통째 삭제는 이
+    // 명부와 대조해야만 탐지된다 — 체인이 사라지면 체인 내부 검증에는 검증할
+    // 대상 자체가 남지 않기 때문이다(설계 §6 표 아래 칸).
+    //
+    // read: audit_logs 와 같은 게이트(canReadLedgerDoc). 체크포인트만 따로 열면
+    //   타 테넌트의 에이전트 id·활동량이 명부로 새어나간다 — 원장 본문을 막아
+    //   놓고 목차를 여는 셈이다.
+    // create: isAuthenticated. 쓰는 쪽이 **메인 프로세스**라 여기를 멤버 스코프로
+    //   조이면 #406 이 그대로 재현된다(메인의 인증 경로는 렌더러와 다르다).
+    //   L2 가 audit_logs create 를 열어 둔 것과 같은 판단이며, 위조 체크포인트를
+    //   끼워 넣어도 prevCheckpointHash 사슬이 어긋나 검증에서 드러난다 —
+    //   무결성은 룰이 아니라 해시가 보증한다.
+    // ★update/delete: 금지. 체크포인트는 봉인이므로 고칠 수 있으면 봉인이 아니다.
+    //   audit_logs 와 달리 no-op update 도 허용하지 않는다 — 체크포인트 쓰기는
+    //   `${projectId}_${seqNo}` 결정적 id 로 1회만 일어나고 스풀 재시도 경로를
+    //   타지 않아서, L1.6 고착을 부르는 멱등 재시도 요구가 없다.
+    match /ledger_checkpoints/{checkpointId} {
+      allow read: if canReadLedgerDoc();
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if false;
+    }
+
     // ===== Project Audit Log (협업 구성원 행위 감사) =====
     // 렌더러(사람)발 행위를 projectId + actorUid 로 귀속 기록한다
     // (src/services/projectAuditService.ts). `audit_logs` 원장과 **다른
