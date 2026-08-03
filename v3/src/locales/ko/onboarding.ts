@@ -384,6 +384,14 @@ export const onboarding = {
   "onboarding.cliGate.firstTicket.creating": "오케스트레이터에게 전달하는 중…",
   "onboarding.cliGate.firstTicket.sent":
     "첫 프롬프트를 전달했어요 — 오케스트레이터가 첫 티켓을 준비합니다. 잠시 지켜봐 주세요.",
+  "onboarding.cliGate.firstTicket.result.delivered.title":
+    "첫 티켓이 시작됩니다",
+  "onboarding.cliGate.firstTicket.result.queued.title":
+    "오케스트레이터가 켜질 때까지 아무 작업도 시작되지 않습니다",
+  "onboarding.cliGate.firstTicket.result.failed.title":
+    "첫 티켓이 만들어지지 않았습니다",
+  "onboarding.cliGate.firstTicket.retry": "다시 시도",
+  "onboarding.cliGate.firstTicket.retrying": "다시 시도하는 중…",
   // ★queued ≠ 전달됨. 로컬 오케에 못 넣어서 대기열에만 쌓아 둔 상태다 — 이걸
   //   'sent' 와 같은 초록 문구로 쓰면 신규 유저는 아무 일도 안 일어나는 화면을
   //   성공으로 읽고 이탈한다(활성화 F3). 다음 액션은 아래 needOrch.* 가 안내한다.

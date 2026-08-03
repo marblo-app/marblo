@@ -549,7 +549,13 @@ function StepBody({
           {t("onboarding.cliGate.firstTicket.needProject")}
         </p>
       )}
-      {ticketMsg && <FirstTicketResultNote result={ticketMsg} />}
+      {ticketMsg && (
+        <FirstTicketResultNote
+          result={ticketMsg}
+          onRetry={onFirstTicket}
+          retrying={sendingTicket}
+        />
+      )}
     </>
   );
 }

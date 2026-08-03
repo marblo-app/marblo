@@ -496,6 +496,14 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.cliGate.firstTicket.creating": "Sending to the orchestrator…",
   "onboarding.cliGate.firstTicket.sent":
     "First prompt sent — the orchestrator is preparing your first ticket. Hang tight.",
+  "onboarding.cliGate.firstTicket.result.delivered.title":
+    "First ticket is starting",
+  "onboarding.cliGate.firstTicket.result.queued.title":
+    "Nothing will happen until the orchestrator starts",
+  "onboarding.cliGate.firstTicket.result.failed.title":
+    "The first ticket was not created",
+  "onboarding.cliGate.firstTicket.retry": "Try again",
+  "onboarding.cliGate.firstTicket.retrying": "Trying again…",
   // ★queued ≠ delivered: it only landed in the durable queue because no local
   //   orchestrator accepted it. Showing this as a green "sent" is what made a
   //   dead screen read as success (activation F3). needOrch.* is the next step.

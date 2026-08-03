@@ -323,7 +323,13 @@ export function CliSetupGate() {
                 {t("onboarding.cliGate.firstTicket.needProject")}
               </p>
             )}
-            {ticketMsg && <FirstTicketResultNote result={ticketMsg} />}
+            {ticketMsg && (
+              <FirstTicketResultNote
+                result={ticketMsg}
+                onRetry={() => void handleFirstTicket()}
+                retrying={sendingTicket}
+              />
+            )}
           </div>
         )}
 
