@@ -338,7 +338,7 @@ export const onboarding = {
   // 프로젝트/실행 스텝
   "onboarding.cliGate.project.title": "프로젝트 연결 · 첫 실행",
   "onboarding.cliGate.project.body":
-    "작업할 폴더를 연결하면 오케스트레이터가 자동으로 열립니다. 처음이라면 샘플 PRD로 시작해 첫 티켓을 만들어 보세요.",
+    "오케스트레이터가 맡을 작업이면 폴더를 프로젝트로 연결하세요. 처음이라면 샘플 PRD로 시작해 첫 티켓을 만들어 보세요.",
   "onboarding.cliGate.project.connectFolder": "폴더 연결하고 시작",
   "onboarding.cliGate.project.seedPrd": "샘플 PRD 만들기",
   "onboarding.cliGate.project.seeding": "생성 중…",
@@ -348,7 +348,9 @@ export const onboarding = {
   "onboarding.cliGate.project.connected": "연결됨",
   "onboarding.cliGate.project.launching": "오케스트레이터를 실행하는 중…",
   "onboarding.cliGate.project.hint":
-    "폴더를 연결하면 이 마법사는 자동으로 닫히고 오케스트레이터가 첫 인사를 건넵니다.",
+    "이 버튼은 폴더를 프로젝트로 등록하고 오케스트레이터를 자동으로 엽니다.",
+  "onboarding.cliGate.project.localFolderHint":
+    "그냥 로컬 폴더를 열어 파일만 보려면 왼쪽 파일 트리의 폴더 열기 옵션에서 ‘둘러보기’를 선택하세요.",
   "onboarding.cliGate.done": "완료",
 
   // — CliSetupGate 선형 4스텝 활성화 위저드 (ticket ir94m9C6) —
@@ -375,7 +377,7 @@ export const onboarding = {
   // ③ 샘플 PRD
   "onboarding.cliGate.prd.title": "③ 샘플 PRD",
   "onboarding.cliGate.prd.body":
-    "작업할 폴더를 연결하고 샘플 PRD로 시작하세요. 폴더를 연결하면 오케스트레이터가 자동으로 열립니다.",
+    "오케스트레이터에게 맡길 폴더를 프로젝트로 연결하고 샘플 PRD로 시작하세요.",
   // ④ 첫 티켓 (아하 모먼트)
   "onboarding.cliGate.firstTicket.title": "④ 첫 티켓 만들기",
   "onboarding.cliGate.firstTicket.body":
@@ -447,7 +449,7 @@ export const onboarding = {
   "onboarding.startHere.why.auth":
     "이미 쓰고 계신 AI 계정을 연결하는 단계입니다. 인증이 없으면 스폰이 조용히 실패합니다.",
   "onboarding.startHere.why.prd":
-    "작업할 폴더를 연결해야 오케스트레이터가 코드를 읽고 티켓을 만들 수 있습니다.",
+    "작업을 맡길 때는 프로젝트 연결이 필요합니다. 단순히 로컬 폴더를 열어 보는 길은 파일 트리에 따로 있습니다.",
   "onboarding.startHere.why.firstTicket":
     "첫 티켓을 만들어 봐야 마블로가 실제로 무엇을 해주는지 보입니다.",
   // 막혔을 때의 대안 — 단계마다 한 줄
@@ -456,7 +458,7 @@ export const onboarding = {
   "onboarding.startHere.alt.auth":
     "Claude Code 와 Codex 중 하나만 로그인하면 됩니다. 브라우저 인증이 막히면 명령을 복사해 터미널에서 직접 실행하세요.",
   "onboarding.startHere.alt.prd":
-    "아무 폴더나 괜찮습니다. 빈 폴더로 시작해도 되고, PRD 는 나중에 직접 써도 됩니다.",
+    "빈 폴더로 시작해도 됩니다. 비워크트리 폴더를 보기만 하려면 파일 트리의 ‘폴더 열기 옵션’에서 둘러보기를 쓰세요.",
   "onboarding.startHere.alt.firstTicket":
     "전달이 실패하면 오케스트레이터 터미널이 떠 있는지 확인한 뒤 다시 눌러 주세요.",
   // 인라인 배너(모달 대체) — 온보딩이 아직 남아 있는 순간.

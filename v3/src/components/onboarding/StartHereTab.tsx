@@ -495,6 +495,9 @@ function StepBody({
             <p className="text-xs text-[#7f849c]">
               {t("onboarding.cliGate.project.hint")}
             </p>
+            <p className="text-xs text-[#7f849c]">
+              {t("onboarding.cliGate.project.localFolderHint")}
+            </p>
           </>
         ) : (
           <>

@@ -305,7 +305,7 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.startHere.why.auth":
     "This connects the AI account you already pay for. Without it, spawns fail silently.",
   "onboarding.startHere.why.prd":
-    "The orchestrator needs a connected folder before it can read your code and file tickets.",
+    "Project connection is for work you want to delegate. Plain local-folder browsing stays in the file tree.",
   "onboarding.startHere.why.firstTicket":
     "Creating one ticket is what makes it obvious what Marblo actually does for you.",
   // One line per step: what to do when you're stuck
@@ -314,7 +314,7 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.startHere.alt.auth":
     "You only need ONE of Claude Code or Codex. If the browser flow is blocked, copy the command and run it in a terminal.",
   "onboarding.startHere.alt.prd":
-    "Any folder works — an empty one is fine, and you can write the PRD yourself later.",
+    "An empty folder is fine. For a non-worktree folder you only want to inspect, use Open folder options in the file tree and choose Browse.",
   "onboarding.startHere.alt.firstTicket":
     "If sending fails, check that the orchestrator terminal is running and try again.",
   // Inline banner (the modal's replacement) — onboarding still has work left.
@@ -450,7 +450,7 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   // Project / launch step
   "onboarding.cliGate.project.title": "Connect a project · first run",
   "onboarding.cliGate.project.body":
-    "Connect a folder to work in and the orchestrator opens automatically. New here? Start with a sample PRD to create your first ticket.",
+    "Connect a folder as a project when you want the orchestrator to work on it. New here? Start with a sample PRD to create your first ticket.",
   "onboarding.cliGate.project.connectFolder": "Connect a folder & start",
   "onboarding.cliGate.project.seedPrd": "Create a sample PRD",
   "onboarding.cliGate.project.seeding": "Creating…",
@@ -459,7 +459,9 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.cliGate.project.connected": "Connected",
   "onboarding.cliGate.project.launching": "Launching the orchestrator…",
   "onboarding.cliGate.project.hint":
-    "Once a folder is connected this wizard closes automatically and the orchestrator says hello.",
+    "This button registers the folder as a project and opens the orchestrator automatically.",
+  "onboarding.cliGate.project.localFolderHint":
+    "To just open a local folder and browse files, use Open folder options in the file tree and choose Browse.",
   "onboarding.cliGate.done": "Done",
 
   // — CliSetupGate linear 4-step activation wizard (ticket ir94m9C6) —
@@ -486,7 +488,7 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   // ③ Sample PRD
   "onboarding.cliGate.prd.title": "③ Sample PRD",
   "onboarding.cliGate.prd.body":
-    "Connect a folder to work in and start from a sample PRD. Connecting a folder opens the orchestrator automatically.",
+    "Connect the folder you want the orchestrator to work on as a project, then start from a sample PRD.",
   // ④ First ticket (the aha moment)
   "onboarding.cliGate.firstTicket.title": "④ Create your first ticket",
   "onboarding.cliGate.firstTicket.body":
