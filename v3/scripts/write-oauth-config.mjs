@@ -37,6 +37,7 @@ dotenv.config({ path: resolve(ROOT, ".env") });
 const config = {
   clientId: process.env.VITE_GOOGLE_DESKTOP_OAUTH_CLIENT_ID || "",
   clientSecret: process.env.GOOGLE_DESKTOP_OAUTH_CLIENT_SECRET || "",
+  githubClientId: process.env.GITHUB_OAUTH_CLIENT_ID || "",
 };
 
 const outDir = resolve(ROOT, "build-resources");
@@ -47,6 +48,7 @@ writeFileSync(outPath, JSON.stringify(config, null, 2) + "\n");
 const present = [
   config.clientId ? "clientId" : null,
   config.clientSecret ? "clientSecret" : null,
+  config.githubClientId ? "githubClientId" : null,
 ].filter(Boolean);
 console.log(
   `[write-oauth-config] wrote ${outPath} (${

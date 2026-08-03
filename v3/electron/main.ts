@@ -77,6 +77,7 @@ import {
 } from "./orchestrator-switch";
 import { installBundledHarness } from "./bundle-installer";
 import { runGoogleLoopbackOAuth } from "./google-oauth";
+import { applyPackagedOAuthConfig, type PackagedOAuthConfig } from "./oauth-config-env";
 import {
   listCatalog,
   installPackage,
@@ -244,16 +245,8 @@ if (firebaseConfigEnvResult.status === "loaded") {
 if (app.isPackaged) {
   try {
     const cfgPath = path.join(process.resourcesPath, "oauth-config.json");
-    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) as {
-      clientId?: string;
-      clientSecret?: string;
-    };
-    if (cfg.clientId && !process.env.VITE_GOOGLE_DESKTOP_OAUTH_CLIENT_ID) {
-      process.env.VITE_GOOGLE_DESKTOP_OAUTH_CLIENT_ID = cfg.clientId;
-    }
-    if (cfg.clientSecret && !process.env.GOOGLE_DESKTOP_OAUTH_CLIENT_SECRET) {
-      process.env.GOOGLE_DESKTOP_OAUTH_CLIENT_SECRET = cfg.clientSecret;
-    }
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) as PackagedOAuthConfig;
+    applyPackagedOAuthConfig(cfg);
   } catch {
     // Missing/malformed (dev build, or OAuth not configured) — the loopback
     // flow will surface a clear "Desktop OAuth client 미설정" error if used.
