@@ -72,6 +72,12 @@ export const workHistory = {
   "workHistory.view.tasks": "태스크",
   "workHistory.view.missions": "미션 Replay",
 
+  // — first-mission → Replay/공유 널지 (1회성, chatReadWatermark 패턴) —
+  "workHistory.firstMissionNudge.message":
+    "첫 미션을 완료했어요! Replay로 이 순간을 다시 보고, 원하면 살짝 공유해보세요.",
+  "workHistory.firstMissionNudge.cta": "Replay 보기",
+  "workHistory.firstMissionNudge.dismiss": "닫기",
+
   // — Mission Replay (Phase 1 인앱 뷰) —
   // ★공유/공개/익스포트/remix 문구는 없다 — Phase 2(레닭션) 전에는 그 경로 자체를
   //   만들지 않기 때문에 라벨도 존재하지 않는다.

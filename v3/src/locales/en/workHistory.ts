@@ -64,6 +64,12 @@ export const workHistory: Record<keyof typeof koWorkHistory, string> = {
   "workHistory.view.tasks": "Tasks",
   "workHistory.view.missions": "Mission Replay",
 
+  // — first-mission → Replay/share nudge (one-time, chatReadWatermark pattern) —
+  "workHistory.firstMissionNudge.message":
+    "Your first mission is done! Watch the replay, and share it if you feel like it.",
+  "workHistory.firstMissionNudge.cta": "View replay",
+  "workHistory.firstMissionNudge.dismiss": "Dismiss",
+
   // — Mission Replay (Phase 1, in-app only) —
   "workHistory.replay.list.loading": "Loading completed missions…",
   "workHistory.replay.list.denied":

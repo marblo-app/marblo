@@ -23,6 +23,7 @@ import { TaskDetailModal } from "../board/TaskDetailModal";
 import { periodLabel } from "../common/PeriodSelector";
 import { ShareCard } from "./ShareCard";
 import { WorkHistoryFilterBar } from "./WorkHistoryFilterBar";
+import { FirstMissionShareNudge } from "./FirstMissionShareNudge";
 import { MissionReplayList } from "./replay/MissionReplayList";
 import { MissionReplayDetail } from "./replay/MissionReplayDetail";
 
@@ -434,6 +435,15 @@ export function WorkHistoryTab() {
         )
       ) : (
         <>
+          <FirstMissionShareNudge
+            key={currentProject.id}
+            projectId={currentProject.id}
+            onOpenReplay={(missionId) => {
+              setView("replay");
+              setReplayMissionId(missionId);
+            }}
+          />
+
           <WorkHistoryFilterBar
             filter={filter}
             onChange={patchFilter}
