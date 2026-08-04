@@ -56,6 +56,12 @@ export const project: Record<keyof typeof koProject, string> = {
   "project.audit.actor.agentHint":
     "Done by an agent. The name next to it is the member who dispatched that agent.",
   "project.audit.actor.agentModelUnknown": "model unknown",
+  // The orchestrator calling an MCP tool directly, with no spawned agent.
+  // Kept distinct from "model unknown" (which reads as an error) — this is a
+  // normal, expected category.
+  "project.audit.actor.orchestrator": "Orchestrator action",
+  "project.audit.actor.orchestratorHint":
+    "Done by the orchestrator directly calling an MCP tool, with no spawned agent (no model).",
   "project.audit.actor.unknown": "Unattributed",
   "project.audit.failed": "failed",
   // Per-source partial failure — denial and breakage get different wording.
@@ -87,6 +93,63 @@ export const project: Record<keyof typeof koProject, string> = {
   "project.audit.type.taskClaimed": "Ticket claimed",
   "project.audit.type.taskStatusChanged": "Status changed",
   "project.audit.type.unknown": "Unknown",
+
+  // Agent (tool) labels — the raw toolName used to print verbatim in the audit
+  // view; this translates it into something a person can read (owner
+  // dogfooding feedback). The raw toolName isn't hidden — it moves to the
+  // badge's title (hover) for anyone who needs to cross-reference it.
+  "project.audit.tool.acknowledgeFeedback": "Acknowledged feedback",
+  "project.audit.tool.addActivity": "Note",
+  "project.audit.tool.addPendingInstruction": "Queued instruction",
+  "project.audit.tool.answerQuestion": "Answered question",
+  "project.audit.tool.askOrchestrator": "Asked orchestrator",
+  "project.audit.tool.checkFeedback": "Checked feedback",
+  "project.audit.tool.claimTask": "Claimed task",
+  "project.audit.tool.cleanupAgents": "Cleaned up agents",
+  "project.audit.tool.createFlow": "Created flow",
+  "project.audit.tool.createTask": "Created task",
+  "project.audit.tool.createTasksBulk": "Bulk-created tasks",
+  "project.audit.tool.deleteTask": "Deleted task",
+  "project.audit.tool.dispatchTask": "Dispatched task",
+  "project.audit.tool.escalateToOwner": "Escalated to owner",
+  "project.audit.tool.getAgentSkill": "Read agent skill",
+  "project.audit.tool.getAgents": "Listed agents",
+  "project.audit.tool.getAllTasks": "Listed tasks",
+  "project.audit.tool.getAvailableTasks": "Listed available tasks",
+  "project.audit.tool.getFlows": "Listed flows",
+  "project.audit.tool.getLedgerSpoolStatus": "Checked ledger spool status",
+  "project.audit.tool.getModelGuidance": "Read model guidance",
+  "project.audit.tool.getOpenQuestions": "Listed open questions",
+  "project.audit.tool.getPendingInstructions": "Listed pending instructions",
+  "project.audit.tool.getProjection": "Read projection",
+  "project.audit.tool.getRoutingEffectiveness": "Read routing effectiveness",
+  "project.audit.tool.getTaskActivities": "Listed task activity",
+  "project.audit.tool.getTaskDependencies": "Listed task dependencies",
+  "project.audit.tool.getTask": "Read task",
+  "project.audit.tool.getWorktreeAudit": "Read worktree audit",
+  "project.audit.tool.killAgent": "Killed agent",
+  "project.audit.tool.listWorktreeAudit": "Listed worktree audit",
+  "project.audit.tool.markInstructionDelivered": "Marked instruction delivered",
+  "project.audit.tool.mergeAndClose": "Merged and closed",
+  "project.audit.tool.missionStepDone": "Completed mission step",
+  "project.audit.tool.requestModelEscalation": "Requested model escalation",
+  "project.audit.tool.resolveModelEscalation": "Resolved model escalation",
+  "project.audit.tool.reuseAgent": "Reused agent",
+  "project.audit.tool.runSkill": "Ran skill",
+  "project.audit.tool.searchTasks": "Searched tasks",
+  "project.audit.tool.sendTelegramMessage": "Sent Telegram message",
+  "project.audit.tool.spawnAgent": "Spawned agent",
+  "project.audit.tool.submitForReview": "Submitted for review",
+  "project.audit.tool.updateFlow": "Updated flow",
+  "project.audit.tool.updateTaskStatus": "Changed status",
+
+  // Noise folding — consecutive add_activity on the same ticket collapses
+  // into one group. Capture is untouched (the ledger is immutable);
+  // expanding shows every original row again.
+  "project.audit.group.badge": "Note bundle",
+  "project.audit.group.count": "{count} events",
+  "project.audit.group.expand": "Expand",
+  "project.audit.group.collapse": "Collapse",
 
   // Presence
   "project.presence.online": "Online",

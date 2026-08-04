@@ -27,6 +27,7 @@ import {
   getProjectAuditActors,
   getProjectLedgerLog,
   getProjectLedgerActors,
+  getProjectTaskTitles,
 } from "../services/projectAuditService";
 import {
   auditStateFromError,
@@ -79,6 +80,21 @@ export async function fetchAuditActors(
     return await getProjectAuditActors(projectId);
   } catch {
     return [];
+  }
+}
+
+/**
+ * 필터 UI 안 쓰이는 부가 정보 — 티켓 제목 조인용 맵. `fetchAuditActors` 와
+ * 같은 이유로 실패는 빈 맵으로 접는다(부가 정보라 별도 에러 화면을 만들지
+ * 않는다).
+ */
+export async function fetchProjectTaskTitles(
+  projectId: string,
+): Promise<Record<string, string>> {
+  try {
+    return await getProjectTaskTitles(projectId);
+  } catch {
+    return {};
   }
 }
 
@@ -164,28 +180,34 @@ export interface UnifiedAuditOptions {
   actors: AuditActorTally[];
   /** 종류 필터에 실을 오케 행위 종류 = 창에 실제 등장한 툴 이름. */
   toolNames: string[];
+  /** 티켓 제목 조인용 맵(현재 tasks 스냅샷). 없는 id 는 호출부가 해시로 떨군다. */
+  taskTitleById: Record<string, string>;
 }
 
 /**
- * 필터 옵션 — 두 소스의 행위자를 합치고 툴 이름을 모은다.
+ * 필터 옵션 — 두 소스의 행위자를 합치고 툴 이름을 모은다. 티켓 제목 맵도
+ * 여기서 같이 읽는다 — **필터와 무관하게 프로젝트 단위로만** 갱신돼야 하는
+ * 성질이 actors/toolNames 와 같다(훅 아래 useEffect 주석 참조).
  *
- * 실패는 양쪽 다 빈 목록으로 접는다(위 fetchAuditActors 와 같은 이유: 부가
+ * 실패는 전부 빈 값으로 접는다(위 fetchAuditActors 와 같은 이유: 부가
  * 정보라서 여기서 에러를 띄우면 정작 목록은 잘 보이는데 화면만 시끄러워진다).
  */
 export async function fetchUnifiedAuditOptions(
   projectId: string,
 ): Promise<UnifiedAuditOptions> {
-  const [human, agent] = await Promise.all([
+  const [human, agent, taskTitleById] = await Promise.all([
     fetchAuditActors(projectId),
     getProjectLedgerActors(projectId).catch(() => ({
       actors: [] as AuditActorTally[],
       toolNames: [] as string[],
     })),
+    fetchProjectTaskTitles(projectId),
   ]);
 
   return {
     actors: mergeAuditActors(human, agent.actors),
     toolNames: agent.toolNames,
+    taskTitleById,
   };
 }
 
@@ -194,6 +216,7 @@ export interface UseProjectAuditLogResult {
   sources: AuditSources;
   actors: AuditActorTally[];
   toolNames: string[];
+  taskTitleById: Record<string, string>;
   reload: () => void;
 }
 
@@ -218,6 +241,7 @@ export function useProjectAuditLog(
   const [options, setOptions] = useState<UnifiedAuditOptions>({
     actors: [],
     toolNames: [],
+    taskTitleById: {},
   });
   const [nonce, setNonce] = useState(0);
 
@@ -257,7 +281,7 @@ export function useProjectAuditLog(
    */
   useEffect(() => {
     if (!projectId) {
-      setOptions({ actors: [], toolNames: [] });
+      setOptions({ actors: [], toolNames: [], taskTitleById: {} });
       return;
     }
     let cancelled = false;
@@ -281,6 +305,7 @@ export function useProjectAuditLog(
     sources: fetched.sources,
     actors: options.actors,
     toolNames: options.toolNames,
+    taskTitleById: options.taskTitleById,
     reload,
   };
 }

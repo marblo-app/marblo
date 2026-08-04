@@ -7,12 +7,16 @@ import {
 } from "../../lib/projectAudit";
 import {
   agentTypeFilterValue,
+  auditBadgeKind,
   auditEmptyKind,
   auditSourceNotices,
   auditTypeLabelKey,
+  foldAuditRows,
   isAuditLoading,
   isFullyDenied,
   resolveActorLabel,
+  resolveTaskLabel,
+  type AuditRowGroup,
   type AuditRowLabel,
   type AuditSourceNotice,
   type UnifiedAuditRow,
@@ -75,15 +79,25 @@ export function ProjectAuditPanel({
     [members],
   );
 
-  const { rows, sources, actors, toolNames, reload } = useProjectAuditLog(
-    projectId,
-    actorFilter,
-    typeFilter,
-    nameByUid,
-  );
+  const { rows, sources, actors, toolNames, taskTitleById, reload } =
+    useProjectAuditLog(projectId, actorFilter, typeFilter, nameByUid);
 
   const notices = auditSourceNotices(sources);
   const loading = isAuditLoading(sources);
+
+  // 노이즈 접기 — 같은 티켓에 연속으로 쌓인 add_activity 를 한 그룹으로 접는다.
+  // 순수함수라 렌더 중에 접어도 안전(재조회 없음).
+  const displayRows = useMemo(() => foldAuditRows(rows), [rows]);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const toggleGroup = (key: string) =>
+    setExpandedGroups((prior) => {
+      const next = new Set(prior);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   // 두 소스가 **모두** 거부됐을 때만 전체 거부 화면. 한쪽만 거부면 살아남은
   // 쪽을 보여준다 — 조용히 사라지면 owner 가 "감사 기능이 없어졌나?" 로 읽는다.
@@ -183,12 +197,90 @@ export function ProjectAuditPanel({
           )
         ) : (
           <ul className="divide-y divide-gray-800">
-            {rows.map((row) => (
-              <AuditRow key={row.key} row={row} locale={locale} />
-            ))}
+            {displayRows.map((displayRow) =>
+              displayRow.kind === "group" ? (
+                <AuditGroupRow
+                  key={displayRow.key}
+                  group={displayRow}
+                  expanded={expandedGroups.has(displayRow.key)}
+                  onToggle={() => toggleGroup(displayRow.key)}
+                  locale={locale}
+                  taskTitleById={taskTitleById}
+                />
+              ) : (
+                <AuditRow
+                  key={displayRow.row.key}
+                  row={displayRow.row}
+                  locale={locale}
+                  taskTitleById={taskTitleById}
+                />
+              ),
+            )}
           </ul>
         ))}
     </Shell>
+  );
+}
+
+/**
+ * 뱃지 하나 — 사람 / 오케(에이전트, 모델 있음) / 오케(컨트롤플레인, 모델 없음).
+ *
+ * ★세 갈래로 가르는 이유: 지금 오케가 사장님 uid 로 행동해 사람 행과 오케 행이
+ * 이름만으로는 안 갈린다("John Kim" 이 둘 다에 뜬다). `actorKind`+`model` 로
+ * 시각 구분을 강제한다. 모델이 없는 오케 행은 "모델 미상"(오류처럼 읽힘)이
+ * 아니라 "오케 조작"(정상 분류 — 스폰된 에이전트 없이 오케 자신이 MCP 툴을
+ * 직접 호출한 행위)으로 구분한다.
+ */
+function AuditBadge({
+  row,
+}: {
+  row: Pick<UnifiedAuditRow, "actorKind" | "model">;
+}) {
+  const { t } = useTranslation();
+  const kind = auditBadgeKind(row);
+
+  if (kind === "human") {
+    return (
+      <span className="flex-shrink-0 rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-400">
+        {t("project.audit.actor.human")}
+      </span>
+    );
+  }
+  if (kind === "agentModel") {
+    return (
+      <span
+        className="flex-shrink-0 rounded border border-purple-800/70 bg-purple-950/40 px-1.5 py-0.5 text-[10px] text-purple-300"
+        title={t("project.audit.actor.agentHint")}
+      >
+        {`🤖 ${row.model}`}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="flex-shrink-0 rounded border border-blue-800/70 bg-blue-950/40 px-1.5 py-0.5 text-[10px] text-blue-300"
+      title={t("project.audit.actor.orchestratorHint")}
+    >
+      {`🎛️ ${t("project.audit.actor.orchestrator")}`}
+    </span>
+  );
+}
+
+/** 티켓 칸 — 제목이 있으면 제목, 없으면(물리 삭제) 해시. 원문 id 는 hover 로. */
+function AuditTaskLabel({
+  taskId,
+  taskTitleById,
+}: {
+  taskId: string;
+  taskTitleById: Record<string, string>;
+}) {
+  return (
+    <span
+      className="max-w-[220px] truncate text-xs text-gray-500"
+      title={`#${taskId}`}
+    >
+      {resolveTaskLabel(taskId, taskTitleById)}
+    </span>
   );
 }
 
@@ -199,26 +291,25 @@ export function ProjectAuditPanel({
  * 티켓 40개를 옮겼다"처럼 읽히는데, 실제로는 김대표가 **발주한 에이전트**가
  * 옮긴 것이다. 감사에서 그 둘을 뭉개면 기록 자체가 오해의 근거가 된다.
  */
-function AuditRow({ row, locale }: { row: UnifiedAuditRow; locale: string }) {
+function AuditRow({
+  row,
+  locale,
+  taskTitleById,
+}: {
+  row: UnifiedAuditRow;
+  locale: string;
+  taskTitleById: Record<string, string>;
+}) {
   const { t } = useTranslation();
-  const isAgent = row.actorKind === "agent";
 
   return (
     <li className="flex flex-wrap items-baseline gap-x-2 gap-y-1 py-2">
-      <span
-        className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] ${
-          isAgent
-            ? "border border-purple-800/70 bg-purple-950/40 text-purple-300"
-            : "border border-gray-700 bg-gray-900 text-gray-400"
-        }`}
-        title={isAgent ? t("project.audit.actor.agentHint") : undefined}
-      >
-        {isAgent
-          ? `🤖 ${row.model ?? t("project.audit.actor.agentModelUnknown")}`
-          : t("project.audit.actor.human")}
-      </span>
+      <AuditBadge row={row} />
 
-      <span className="rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-400">
+      <span
+        className="rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-400"
+        title={row.label.kind === "tool" ? row.label.toolName : undefined}
+      >
         <RowLabel label={row.label} />
       </span>
 
@@ -237,9 +328,7 @@ function AuditRow({ row, locale }: { row: UnifiedAuditRow; locale: string }) {
       )}
 
       {row.taskId && (
-        <span className="font-mono text-[10px] text-gray-600">
-          #{row.taskId.slice(0, 8)}
-        </span>
+        <AuditTaskLabel taskId={row.taskId} taskTitleById={taskTitleById} />
       )}
 
       <span className="ml-auto flex-shrink-0 text-xs tabular-nums text-gray-500">
@@ -249,11 +338,88 @@ function AuditRow({ row, locale }: { row: UnifiedAuditRow; locale: string }) {
   );
 }
 
-/** 사람 행위는 번역하고, 툴 이름은 코드 값 그대로 찍는다(모노스페이스). */
+/**
+ * 사람 행위·아는 툴은 번역한 라벨을, 모르는 툴은 코드 값 그대로 찍는다
+ * (모노스페이스). 아는 툴의 원문 toolName 은 감춘 게 아니라 감싸는 배지의
+ * `title` 로 옮겨졌다(hover 로 대조 가능) — AuditRow 참조.
+ */
 function RowLabel({ label }: { label: AuditRowLabel }) {
   const { t } = useTranslation();
-  if (label.kind === "i18n") return <>{t(label.key)}</>;
+  if (label.kind === "i18n" || label.kind === "tool")
+    return <>{t(label.key)}</>;
   return <span className="font-mono">{label.text}</span>;
+}
+
+/**
+ * 접힌 add_activity 그룹 — 요약 줄 하나 + 펼치면 원본 행 전부.
+ *
+ * ★캡처는 그대로다. 그룹은 이미 만들어진 `UnifiedAuditRow[]` 를 감싸기만
+ * 할 뿐 값을 합치거나 지우지 않는다 — 펼치면 원문 그대로 다시 보인다.
+ *
+ * 집계 정보(모델·발주자)를 요약 줄에 올리지 않는다 — 연속 조건은 같은
+ * 티켓·같은 툴만 강제할 뿐 같은 에이전트/발주자까지는 강제하지 않아서,
+ * 대표 하나를 뽑아 보여주면 "이 사람이/이 모델이 다 했다"는 오귀속이 될 수
+ * 있다. 정확한 귀속은 펼쳤을 때 행 단위로만 보여준다.
+ */
+function AuditGroupRow({
+  group,
+  expanded,
+  onToggle,
+  locale,
+  taskTitleById,
+}: {
+  group: AuditRowGroup;
+  expanded: boolean;
+  onToggle: () => void;
+  locale: string;
+  taskTitleById: Record<string, string>;
+}) {
+  const { t } = useTranslation();
+  const latest = group.rows[0];
+
+  return (
+    <li className="py-2">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="flex w-full flex-wrap items-baseline gap-x-2 gap-y-1 text-left"
+      >
+        <span className="flex-shrink-0 rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-400">
+          {t("project.audit.group.badge")}
+        </span>
+
+        <AuditTaskLabel taskId={group.taskId} taskTitleById={taskTitleById} />
+
+        <span className="text-xs text-gray-500">
+          {t("project.audit.group.count", { count: group.rows.length })}
+        </span>
+
+        <span className="flex-shrink-0 text-[11px] text-blue-400 underline">
+          {expanded
+            ? t("project.audit.group.collapse")
+            : t("project.audit.group.expand")}
+        </span>
+
+        <span className="ml-auto flex-shrink-0 text-xs tabular-nums text-gray-500">
+          {formatAuditTime(latest.createdAt, locale)}
+        </span>
+      </button>
+
+      {expanded && (
+        <ul className="mt-1 ml-4 divide-y divide-gray-800 border-l border-gray-800 pl-3">
+          {group.rows.map((row) => (
+            <AuditRow
+              key={row.key}
+              row={row}
+              locale={locale}
+              taskTitleById={taskTitleById}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
 }
 
 /**

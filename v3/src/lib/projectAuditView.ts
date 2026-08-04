@@ -46,6 +46,79 @@ export function auditTypeLabelKey(type: string): MessageKey {
     : "project.audit.type.unknown";
 }
 
+// ── 오케(툴) 라벨 ────────────────────────────────────────────────
+//
+// ★기존(#730) 방침 뒤집기: 예전엔 툴 이름을 "코드 값 그대로" 보여줬다(대조
+// 가능성 우선). 이 티켓(사장님 도그푸딩 피드백)은 그 반대를 요구한다 — raw
+// `create_task` 는 사람이 읽는 감사 뷰로선 의미가 안 보인다. 그래서 사람이
+// 읽는 라벨을 1급으로 올리되, 대조가 필요한 사람을 위해 원문 toolName 은
+// 버리지 않고 `AuditRowLabel`(kind:"tool")에 같이 싣는다 — 화면은 tooltip 으로,
+// 필터 <select>(agentTypeFilterValue)는 여전히 raw toolName 을 값으로 쓴다.
+//
+// 열거형이 아니라 `Record<string, MessageKey>` 로 느슨하게 두는 이유는
+// AUDIT_TYPE_LABEL_KEYS 와 다르다 — toolName 은 새 MCP 툴이 계속 추가되는
+// 열린 집합이라 여기 없는 이름이 오는 게 정상이다. 그때는 라벨 없이(raw)
+// 행을 남긴다 — 모르는 걸 숨기지 않는다는 원칙은 그대로.
+export const AUDIT_TOOL_LABEL_KEYS: Record<string, MessageKey> = {
+  acknowledge_feedback: "project.audit.tool.acknowledgeFeedback",
+  add_activity: "project.audit.tool.addActivity",
+  add_pending_instruction: "project.audit.tool.addPendingInstruction",
+  answer_question: "project.audit.tool.answerQuestion",
+  ask_orchestrator: "project.audit.tool.askOrchestrator",
+  check_feedback: "project.audit.tool.checkFeedback",
+  claim_task: "project.audit.tool.claimTask",
+  cleanup_agents: "project.audit.tool.cleanupAgents",
+  create_flow: "project.audit.tool.createFlow",
+  create_task: "project.audit.tool.createTask",
+  create_tasks_bulk: "project.audit.tool.createTasksBulk",
+  delete_task: "project.audit.tool.deleteTask",
+  dispatch_task: "project.audit.tool.dispatchTask",
+  escalate_to_owner: "project.audit.tool.escalateToOwner",
+  get_agent_skill: "project.audit.tool.getAgentSkill",
+  get_agents: "project.audit.tool.getAgents",
+  get_all_tasks: "project.audit.tool.getAllTasks",
+  get_available_tasks: "project.audit.tool.getAvailableTasks",
+  get_flows: "project.audit.tool.getFlows",
+  get_ledger_spool_status: "project.audit.tool.getLedgerSpoolStatus",
+  get_model_guidance: "project.audit.tool.getModelGuidance",
+  get_open_questions: "project.audit.tool.getOpenQuestions",
+  get_pending_instructions: "project.audit.tool.getPendingInstructions",
+  get_projection: "project.audit.tool.getProjection",
+  get_routing_effectiveness: "project.audit.tool.getRoutingEffectiveness",
+  get_task_activities: "project.audit.tool.getTaskActivities",
+  get_task_dependencies: "project.audit.tool.getTaskDependencies",
+  get_task: "project.audit.tool.getTask",
+  get_worktree_audit: "project.audit.tool.getWorktreeAudit",
+  kill_agent: "project.audit.tool.killAgent",
+  list_worktree_audit: "project.audit.tool.listWorktreeAudit",
+  mark_instruction_delivered: "project.audit.tool.markInstructionDelivered",
+  merge_and_close: "project.audit.tool.mergeAndClose",
+  mission_step_done: "project.audit.tool.missionStepDone",
+  request_model_escalation: "project.audit.tool.requestModelEscalation",
+  resolve_model_escalation: "project.audit.tool.resolveModelEscalation",
+  reuse_agent: "project.audit.tool.reuseAgent",
+  run_skill: "project.audit.tool.runSkill",
+  search_tasks: "project.audit.tool.searchTasks",
+  send_telegram_message: "project.audit.tool.sendTelegramMessage",
+  spawn_agent: "project.audit.tool.spawnAgent",
+  submit_for_review: "project.audit.tool.submitForReview",
+  update_flow: "project.audit.tool.updateFlow",
+  update_task_status: "project.audit.tool.updateTaskStatus",
+};
+
+/** 알려진 툴 이름인가. 모르면 raw 로 떨어지므로 화면에서 행이 사라지지 않는다. */
+export function auditToolLabelKey(toolName: string): MessageKey | null {
+  return AUDIT_TOOL_LABEL_KEYS[toolName] ?? null;
+}
+
+/** 오케 행 라벨 조립. 아는 툴은 사람이 읽는 라벨 + 원문(툴이름)을 같이 싣는다. */
+export function toolRowLabel(toolName: string): AuditRowLabel {
+  const key = auditToolLabelKey(toolName);
+  return key
+    ? { kind: "tool", key, toolName }
+    : { kind: "raw", text: toolName || "?" };
+}
+
 // ── 표시용 파생 ──────────────────────────────────────────────────
 
 /**
@@ -204,13 +277,15 @@ export type AuditActorKind = "human" | "agent";
 /**
  * 행 종류 라벨.
  *
- * 사람 행위는 유한한 유니온이라 i18n 키로 번역하고, 오케 행위는 `toolName`
- * (`update_task_status`, `spawn_agent` …)이라 **번역하지 않고 코드 값 그대로**
- * 보여준다. 툴 이름은 앱 전체·문서·MCP 스펙에서 원문으로 통용되므로 번역하면
- * 오히려 대조가 불가능해진다(상태코드를 번역하지 않는 것과 같은 이유).
+ * 사람 행위는 유한한 유니온이라 i18n 키로 번역한다("i18n"). 오케 행위는
+ * `toolName`(`update_task_status`, `spawn_agent` …)인데, 아는 툴은 사람이 읽는
+ * 라벨로 번역하되 **원문 toolName 도 같이 싣는다**("tool") — 대조가 필요한
+ * 사람(문서·MCP 스펙과 맞춰보는)을 위해 원문을 버리지 않는다. 모르는 툴(새
+ * MCP 툴 추가 등)은 예전처럼 raw 그대로("raw") — 행을 숨기지 않는다.
  */
 export type AuditRowLabel =
   | { kind: "i18n"; key: MessageKey }
+  | { kind: "tool"; key: MessageKey; toolName: string }
   | { kind: "raw"; text: string };
 
 /** 통합 타임라인 한 행. 두 소스가 이 모양으로 접힌 뒤에는 구분이 `actorKind` 뿐이다. */
@@ -255,6 +330,46 @@ export function auditLedgerDetail(
   return tier ? tier : null;
 }
 
+/** update_task_status 가 유효 상태로 검증한 뒤에만 write 하는 7개 값. tools.ts 의 TASK_STATUS_VALUES 와 같은 집합. */
+const TASK_STATUS_VALUES = new Set([
+  "TODO",
+  "CLAIMED",
+  "IN_PROGRESS",
+  "REVIEW",
+  "BLOCKED",
+  "FAILED",
+  "DONE",
+]);
+
+/**
+ * `update_task_status` 호출의 목표 상태만 뽑는다. **화이트리스트 예외** —
+ * 위 `auditLedgerDetail` 의 "params 는 절대 담지 않는다" 원칙은 유지하되, 이
+ * 한 필드만 예외로 둔다. 근거: `status` 는 서버(tools.ts `isTaskStatus`)가
+ * 고정 7-원소 enum 중 하나로 검증한 **뒤에만** write 되므로 자유 텍스트·
+ * 자격증명이 섞일 길이 없다(다른 params 필드 — comment 등 — 는 여전히 담지
+ * 않는다). "from" 은 원장에 아예 없다(캡처가 저장하지 않는다) — 캡처를
+ * 건드리지 않는 이 티켓의 제약상 화살표는 목표 쪽만 보여준다.
+ */
+export function auditStatusTarget(
+  event: Pick<AuditLog, "toolName" | "params">,
+): string | null {
+  if (event.toolName !== "update_task_status") return null;
+  const raw = event.params?.status;
+  return typeof raw === "string" && TASK_STATUS_VALUES.has(raw) ? raw : null;
+}
+
+/** 오케 행 detail 전체 — 상태 목표(있으면) + 티어(있으면). */
+function agentRowDetail(
+  event: Pick<AuditLog, "tier" | "toolName" | "params">,
+): string | null {
+  const target = auditStatusTarget(event);
+  const tier = auditLedgerDetail(event);
+  const parts = [target ? `→ ${target}` : null, tier].filter(
+    (v): v is string => !!v,
+  );
+  return parts.length ? parts.join(" · ") : null;
+}
+
 /** 사람 행위 한 건 → 통합 행. */
 export function humanAuditRow(
   event: ProjectAuditEvent,
@@ -297,8 +412,8 @@ export function agentAuditRow(
       ? resolveActorLabel({ actorUid, actorName: null }, nameByUid)
       : null,
     actorUid,
-    label: { kind: "raw", text: event.toolName || "?" },
-    detail: auditLedgerDetail(event),
+    label: toolRowLabel(event.toolName || "?"),
+    detail: agentRowDetail(event),
     taskId: event.taskId?.trim() || null,
     model: event.model?.trim() || null,
     // success 는 원장 초창기부터 있던 필드라 undefined 면 옛 문서가 아니라
@@ -504,4 +619,129 @@ export function mergeAuditActors(
     }
   }
   return [...byUid.values()].sort((a, b) => b.count - a.count);
+}
+
+// ── 태스크 제목 해석 ─────────────────────────────────────────────
+
+/**
+ * 행의 티켓 id → 표시용 라벨(제목 우선, 없으면 해시).
+ *
+ * `titleById` 는 현재 `tasks` 컬렉션 스냅샷이다(services/projectAuditService.ts
+ * `getProjectTaskTitles`). ★소프트 삭제된 티켓은 문서가 그대로 남아 title 도
+ * 살아 있어서 여기 잡힌다 — 삭제돼도 제목이 보이는 이유다. **물리 삭제**된
+ * 티켓만 맵에서 빠지고, 그때는 해시로 떨어진다(원장에 title 스냅샷 필드가
+ * 없어 그 이상은 복구할 수 없다 — 캡처를 건드리지 않는 이 티켓의 한계).
+ *
+ * 사람 쪽 `resolveActorLabel`(이름 메꿈)과 같은 모양의 함수다: 있으면 쓰고,
+ * 없으면 조용히 사라지지 않게 판별 가능한 형태(해시)로 떨어진다.
+ */
+export function resolveTaskLabel(
+  taskId: string | null,
+  titleById: Record<string, string> = {},
+): string | null {
+  if (!taskId) return null;
+  const title = titleById[taskId]?.trim();
+  return title ? title : `#${taskId.slice(0, 8)}`;
+}
+
+// ── 행위자 뱃지 종류 ─────────────────────────────────────────────
+
+/**
+ * 뱃지 3분류: 사람 / 오케(에이전트, 모델 있음) / 오케(컨트롤플레인, 모델 없음).
+ *
+ * 지금은 오케가 사장님 uid 로 행동해 사람 행과 오케 행이 이름만으로는 안
+ * 갈린다(actorLabel 이 둘 다 "John Kim"). `actorKind`+`model` 로 시각 구분을
+ * 강제한다 — 원래 #730 취지를 이어받아, 스폰된 에이전트가 한 일(모델이 실림)과
+ * 오케 자신이 MCP 툴을 직접 호출한 일(모델 없음 — 스폰 없이 발생)을 또 가른다.
+ * 후자를 "모델 미상"(오류처럼 읽힘)이 아니라 "오케 조작"(정상 분류)으로 표기하는
+ * 이유가 이것이다.
+ */
+export type AuditBadgeKind =
+  | "human"
+  | "agentModel"
+  | "orchestratorControlPlane";
+
+export function auditBadgeKind(
+  row: Pick<UnifiedAuditRow, "actorKind" | "model">,
+): AuditBadgeKind {
+  if (row.actorKind === "human") return "human";
+  return row.model ? "agentModel" : "orchestratorControlPlane";
+}
+
+// ── 노이즈 접기 ──────────────────────────────────────────────────
+
+/** 접기 대상 툴. `add_activity` 는 진행 메모라 같은 티켓에 연속으로 쌓이기 쉽다. */
+const FOLDABLE_TOOL_NAME = "add_activity";
+
+/** 행의 raw 툴 이름. i18n(사람 종류) 행엔 툴 이름 개념이 없어 null. */
+function auditRowToolName(row: UnifiedAuditRow): string | null {
+  if (row.label.kind === "tool") return row.label.toolName;
+  if (row.label.kind === "raw") return row.label.text;
+  return null;
+}
+
+function isFoldableAuditRow(row: UnifiedAuditRow): boolean {
+  return (
+    row.actorKind === "agent" &&
+    !!row.taskId &&
+    auditRowToolName(row) === FOLDABLE_TOOL_NAME
+  );
+}
+
+/** 접힌 그룹 하나. 원본 행(`rows`)은 그대로 들고 있다 — 펼치면 캡처와 1:1로 대응한다. */
+export interface AuditRowGroup {
+  kind: "group";
+  key: string;
+  taskId: string;
+  rows: UnifiedAuditRow[];
+}
+
+export type AuditDisplayRow =
+  | { kind: "row"; row: UnifiedAuditRow }
+  | AuditRowGroup;
+
+/**
+ * 최신순으로 이미 정렬된 행 목록을 화면 표시 단위로 접는다. **순수함수, 뷰 전용.**
+ *
+ * ★캡처는 그대로다 — `rows` 는 이미 buildAuditRows 가 만든 값을 그대로 들고
+ * 있을 뿐, 원본 이벤트를 지우거나 합치지 않는다. 접힌 그룹을 펼치면 원문
+ * 그대로 다시 보인다(완결성 유지, 표현만 접는다).
+ *
+ * 같은 티켓의 **연속된**(사이에 다른 티켓/사람 행이 안 끼는) `add_activity` 가
+ * `minGroupSize`(기본 2) 건 이상일 때만 접는다. 1건뿐이면 접어봐야 화면만
+ * 복잡해지므로 그대로 낱개 행으로 남긴다.
+ */
+export function foldAuditRows(
+  rows: readonly UnifiedAuditRow[],
+  minGroupSize = 2,
+): AuditDisplayRow[] {
+  const out: AuditDisplayRow[] = [];
+  let i = 0;
+  while (i < rows.length) {
+    const row = rows[i];
+    if (isFoldableAuditRow(row)) {
+      let j = i + 1;
+      while (
+        j < rows.length &&
+        isFoldableAuditRow(rows[j]) &&
+        rows[j].taskId === row.taskId
+      ) {
+        j++;
+      }
+      const group = rows.slice(i, j);
+      if (group.length >= minGroupSize) {
+        out.push({
+          kind: "group",
+          key: `group:${row.key}`,
+          taskId: row.taskId!,
+          rows: group,
+        });
+        i = j;
+        continue;
+      }
+    }
+    out.push({ kind: "row", row });
+    i++;
+  }
+  return out;
 }

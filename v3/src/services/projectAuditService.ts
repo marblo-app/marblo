@@ -72,6 +72,8 @@ import { auth } from "../lib/firebase";
 const COLLECTION = "projectAuditLog";
 /** 원장. **읽기만 한다** — write 초크포인트는 mcp-server/tools.ts 의 auditedTool. */
 const LEDGER_COLLECTION = "audit_logs";
+/** 태스크 제목 조인용. **읽기만 한다** — write 초크포인트는 taskService.ts. */
+const TASKS_COLLECTION = "tasks";
 const DATE_FIELDS = ["createdAt"];
 
 function toProjectAuditEvent(raw: Record<string, unknown>): ProjectAuditEvent {
@@ -309,4 +311,35 @@ export async function getProjectLedgerActors(
       .sort((a, b) => b.count - a.count),
     toolNames: [...tools].sort(),
   };
+}
+
+// ── 태스크 제목 조인(뷰 전용) ────────────────────────────────────
+
+/**
+ * 이 프로젝트의 티켓 id → 제목 맵. **읽기 전용, `tasks` write 초크포인트는
+ * 여기가 아니다**(taskService.ts).
+ *
+ * 감사 뷰가 해시(#KU0rarbG)만이 아니라 "무엇에 대한 티켓인지"를 보여주려고
+ * 조인한다. ★소프트 삭제(taskService.softDeleteTask)는 문서를 지우지 않고
+ * 플래그만 세우므로 title 이 그대로 남아 여기 잡힌다 — 삭제된 티켓도 제목이
+ * 보이는 이유. **물리 삭제**(deleteTask)만 이 맵에서 완전히 빠지고, 그때는
+ * 호출부가 해시로 fallback 한다(lib/projectAuditView.ts resolveTaskLabel).
+ *
+ * 실패는 빈 맵으로 접는다 — getProjectAuditActors 와 같은 이유로 이건 부가
+ * 정보라, 못 가져왔다고 별도 에러 화면을 띄우면 정작 타임라인은 잘 보이는데
+ * 화면만 시끄러워진다.
+ */
+export async function getProjectTaskTitles(
+  projectId: string,
+): Promise<Record<string, string>> {
+  const docs = await queryDocuments<{ id: string; title?: unknown }>(
+    TASKS_COLLECTION,
+    where("projectId", "==", projectId),
+  );
+  const titleById: Record<string, string> = {};
+  for (const doc of docs) {
+    const title = typeof doc.title === "string" ? doc.title.trim() : "";
+    if (title) titleById[doc.id] = title;
+  }
+  return titleById;
 }

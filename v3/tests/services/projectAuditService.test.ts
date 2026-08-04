@@ -35,6 +35,7 @@ const {
   getProjectAuditActors,
   getProjectLedgerLog,
   getProjectLedgerActors,
+  getProjectTaskTitles,
 } = await import("../../src/services/projectAuditService");
 
 const COLLECTION = "projectAuditLog";
@@ -391,5 +392,53 @@ describe("getProjectLedgerActors — 필터 옵션", () => {
     // 고를 수 없는 값이라 옵션이 되면 0건만 돌려준다. 툴 이름은 그대로 남는다.
     expect(actors).toEqual([]);
     expect(toolNames).toEqual(["get_task"]);
+  });
+});
+
+describe("getProjectTaskTitles — 티켓 제목 조인(뷰 전용, 읽기만)", () => {
+  it("id → title 맵을 만든다", async () => {
+    queryDocuments.mockResolvedValue([
+      { id: "t1", title: "Foo", projectId: "p1" },
+      { id: "t2", title: "Bar", projectId: "p1" },
+    ]);
+
+    expect(await getProjectTaskTitles("p1")).toEqual({
+      t1: "Foo",
+      t2: "Bar",
+    });
+  });
+
+  it("projectId 로만 필터한다 — write 초크포인트는 여전히 taskService", async () => {
+    queryDocuments.mockResolvedValue([]);
+    await getProjectTaskTitles("p1");
+
+    expect(whereOn("projectId")).toMatchObject({ op: "==", value: "p1" });
+  });
+
+  it("제목이 비었거나 문자열이 아니면 맵에서 뺀다 — fallback 이 해시로 안전하게 떨어진다", async () => {
+    queryDocuments.mockResolvedValue([
+      { id: "t1", title: "  ", projectId: "p1" },
+      { id: "t2", title: 123, projectId: "p1" },
+      { id: "t3", projectId: "p1" },
+      { id: "t4", title: "Real title", projectId: "p1" },
+    ]);
+
+    expect(await getProjectTaskTitles("p1")).toEqual({ t4: "Real title" });
+  });
+
+  it("★소프트 삭제된 티켓도 문서가 남아 있으면 제목이 잡힌다", async () => {
+    // softDeleteTask 는 deleted 플래그만 세우고 문서를 지우지 않는다.
+    queryDocuments.mockResolvedValue([
+      {
+        id: "t1",
+        title: "Deleted but snapshotted",
+        projectId: "p1",
+        deleted: true,
+      },
+    ]);
+
+    expect(await getProjectTaskTitles("p1")).toEqual({
+      t1: "Deleted but snapshotted",
+    });
   });
 });

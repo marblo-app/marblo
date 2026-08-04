@@ -7,10 +7,15 @@ import { describe, it, expect } from "vitest";
  * 타면 VITE_FIREBASE_* 부재로 모듈 로드 시점에 죽는다.
  */
 import {
+  AUDIT_TOOL_LABEL_KEYS,
   AUDIT_TYPE_LABEL_KEYS,
+  auditBadgeKind,
   auditTypeLabelKey,
+  auditToolLabelKey,
   auditMetadataSummary,
+  auditStatusTarget,
   resolveActorLabel,
+  resolveTaskLabel,
   isPermissionDenied,
   auditStateFromError,
   auditEmptyKind,
@@ -19,6 +24,7 @@ import {
   auditLedgerDetail,
   auditSourceNotices,
   buildAuditRows,
+  foldAuditRows,
   humanAuditRow,
   isAuditLoading,
   isFullyDenied,
@@ -265,14 +271,26 @@ describe("humanAuditRow / agentAuditRow — 소스 태깅", () => {
     });
   });
 
-  it("오케 행은 actorKind='agent' 이고 라벨이 번역되지 않은 toolName 이다", () => {
-    // 툴 이름은 앱·문서·MCP 스펙에서 원문으로 통용된다. 번역하면 대조 불가.
+  it("오케 행은 actorKind='agent' 이고 아는 툴은 사람이 읽는 라벨로 번역된다", () => {
+    // ★#730 방침을 이 티켓(사장님 도그푸딩 피드백)이 뒤집는다 — raw toolName
+    // 은 감사 뷰로선 의미가 안 보인다. 원문은 버리지 않고 라벨에 같이 싣는다
+    // (kind:"tool" — 화면은 title/hover 로 대조).
     const row = agentAuditRow(ledgerEvent());
 
     expect(row.actorKind).toBe("agent");
-    expect(row.label).toEqual({ kind: "raw", text: "update_task_status" });
+    expect(row.label).toEqual({
+      kind: "tool",
+      key: "project.audit.tool.updateTaskStatus",
+      toolName: "update_task_status",
+    });
     expect(row.model).toBe("claude");
     expect(row.taskId).toBe("t1");
+  });
+
+  it("모르는 툴은 예전처럼 raw 그대로 — 새 MCP 툴이 추가돼도 행이 숨지 않는다", () => {
+    const row = agentAuditRow(ledgerEvent({ toolName: "some_future_tool" }));
+
+    expect(row.label).toEqual({ kind: "raw", text: "some_future_tool" });
   });
 
   it("★오케 행의 이름은 '에이전트'가 아니라 **발주한 사람**이다", () => {
@@ -301,7 +319,11 @@ describe("humanAuditRow / agentAuditRow — 소스 태깅", () => {
 
     expect(row.actorUid).toBeNull();
     expect(row.actorLabel).toBeNull(); // 호출부가 "귀속 불가"를 그린다
-    expect(row.label).toEqual({ kind: "raw", text: "update_task_status" });
+    expect(row.label).toEqual({
+      kind: "tool",
+      key: "project.audit.tool.updateTaskStatus",
+      toolName: "update_task_status",
+    });
   });
 
   it("실패한 툴 호출을 표시한다 — 단, success 부재를 실패로 단정하지 않는다", () => {
@@ -505,6 +527,8 @@ describe("통합 뷰 i18n — ko/en 짝이 맞는가", () => {
     "project.audit.actor.human",
     "project.audit.actor.agentHint",
     "project.audit.actor.agentModelUnknown",
+    "project.audit.actor.orchestrator",
+    "project.audit.actor.orchestratorHint",
     "project.audit.actor.unknown",
     "project.audit.failed",
     "project.audit.notice.humanDenied",
@@ -538,5 +562,187 @@ describe("통합 뷰 i18n — ko/en 짝이 맞는가", () => {
     // 대신 여전히 안 잡히는 것을 말한다.
     expect(ko["project.audit.emptyAgentNote"]).toContain("MCP");
     expect(en["project.audit.emptyAgentNote"]).toContain("MCP");
+  });
+});
+
+describe("auditToolLabelKey / AUDIT_TOOL_LABEL_KEYS — 오케 툴 라벨", () => {
+  it("★티켓이 예로 든 4개 툴에 라벨이 있다", () => {
+    for (const tool of [
+      "create_task",
+      "submit_for_review",
+      "update_task_status",
+      "add_activity",
+    ]) {
+      expect(auditToolLabelKey(tool)).toBeTruthy();
+    }
+  });
+
+  it("모르는 툴은 null — 호출부가 raw 로 떨어진다", () => {
+    expect(auditToolLabelKey("some_future_tool")).toBeNull();
+  });
+
+  it("등록된 라벨 키 전부가 ko/en 에 실제로 존재한다", () => {
+    for (const key of Object.values(AUDIT_TOOL_LABEL_KEYS)) {
+      expect(ko[key]?.trim()).toBeTruthy();
+      expect(en[key]?.trim()).toBeTruthy();
+    }
+  });
+});
+
+describe("auditStatusTarget — update_task_status 목표 상태만 화이트리스트로", () => {
+  it("update_task_status + 유효 enum 이면 목표 상태를 뽑는다", () => {
+    expect(
+      auditStatusTarget({
+        toolName: "update_task_status",
+        params: { status: "DONE" },
+      }),
+    ).toBe("DONE");
+  });
+
+  it("다른 툴이면 params 에 status 가 있어도 null", () => {
+    expect(
+      auditStatusTarget({
+        toolName: "create_task",
+        params: { status: "DONE" },
+      }),
+    ).toBeNull();
+  });
+
+  it("enum 밖 값은 null — 지어내지 않는다", () => {
+    expect(
+      auditStatusTarget({
+        toolName: "update_task_status",
+        params: { status: "banana" },
+      }),
+    ).toBeNull();
+  });
+
+  it("★params 의 다른 필드(자유 텍스트일 수 있는 comment 등)는 절대 새지 않는다", () => {
+    const row = agentAuditRow(
+      ledgerEvent({
+        toolName: "update_task_status",
+        params: { status: "DONE", comment: "sk-live-super-secret" },
+      }),
+    );
+    expect(row.detail).toContain("DONE");
+    expect(JSON.stringify(row)).not.toContain("sk-live-super-secret");
+  });
+});
+
+describe("resolveTaskLabel — 티켓 제목 조인", () => {
+  it("제목이 있으면 제목", () => {
+    expect(resolveTaskLabel("t1", { t1: "Foo" })).toBe("Foo");
+  });
+
+  it("★없으면(물리 삭제 등) 해시로 떨어진다 — 조용히 사라지지 않는다", () => {
+    expect(resolveTaskLabel("abcdefghijkl", {})).toBe("#abcdefgh");
+  });
+
+  it("taskId 가 없으면 null — 호출부가 칸을 비운다", () => {
+    expect(resolveTaskLabel(null, { t1: "Foo" })).toBeNull();
+  });
+});
+
+describe("auditBadgeKind — 사람 / 오케(모델) / 오케(컨트롤플레인) 3분류", () => {
+  it("사람 행은 항상 human", () => {
+    expect(auditBadgeKind({ actorKind: "human", model: null })).toBe("human");
+  });
+
+  it("모델이 있는 오케 행은 agentModel", () => {
+    expect(auditBadgeKind({ actorKind: "agent", model: "claude" })).toBe(
+      "agentModel",
+    );
+  });
+
+  it("★모델이 없는 오케 행은 '모델 미상'이 아니라 orchestratorControlPlane", () => {
+    // 스폰된 에이전트 없이 오케 자신이 MCP 툴을 직접 호출한 정상 케이스다 —
+    // 오류처럼 읽히는 분류에 섞이면 안 된다.
+    expect(auditBadgeKind({ actorKind: "agent", model: null })).toBe(
+      "orchestratorControlPlane",
+    );
+  });
+});
+
+describe("foldAuditRows — 같은 티켓의 연속 add_activity 접기", () => {
+  it("2건 이상 연속되면 한 그룹으로 접는다", () => {
+    const rows = [
+      agentAuditRow(
+        ledgerEvent({ id: "m3", toolName: "add_activity", taskId: "t1" }),
+      ),
+      agentAuditRow(
+        ledgerEvent({ id: "m2", toolName: "add_activity", taskId: "t1" }),
+      ),
+      agentAuditRow(
+        ledgerEvent({ id: "m1", toolName: "add_activity", taskId: "t1" }),
+      ),
+    ];
+
+    const display = foldAuditRows(rows);
+
+    expect(display).toHaveLength(1);
+    expect(display[0]).toMatchObject({ kind: "group", taskId: "t1" });
+    if (display[0].kind === "group") {
+      expect(display[0].rows).toHaveLength(3);
+    }
+  });
+
+  it("1건뿐이면 접지 않는다 — 접어봐야 화면만 복잡해진다", () => {
+    const rows = [
+      agentAuditRow(
+        ledgerEvent({ id: "m1", toolName: "add_activity", taskId: "t1" }),
+      ),
+    ];
+
+    expect(foldAuditRows(rows)).toEqual([{ kind: "row", row: rows[0] }]);
+  });
+
+  it("★다른 티켓이 끼면 그룹이 갈린다 — 연속성은 같은 티켓 안에서만", () => {
+    const rows = [
+      agentAuditRow(
+        ledgerEvent({ id: "a1", toolName: "add_activity", taskId: "t1" }),
+      ),
+      agentAuditRow(
+        ledgerEvent({ id: "a2", toolName: "add_activity", taskId: "t2" }),
+      ),
+      agentAuditRow(
+        ledgerEvent({ id: "a3", toolName: "add_activity", taskId: "t1" }),
+      ),
+    ];
+
+    const display = foldAuditRows(rows);
+    // 셋 다 1건짜리 "그룹"이라 접히지 않고 낱개 행 3개로 남는다.
+    expect(display.every((d) => d.kind === "row")).toBe(true);
+  });
+
+  it("사람 행·다른 툴은 접기 대상이 아니다", () => {
+    const rows = [
+      humanAuditRow(humanEvent({ id: "h1", taskId: "t1" })),
+      humanAuditRow(humanEvent({ id: "h2", taskId: "t1" })),
+      agentAuditRow(
+        ledgerEvent({ id: "s1", toolName: "spawn_agent", taskId: "t1" }),
+      ),
+      agentAuditRow(
+        ledgerEvent({ id: "s2", toolName: "spawn_agent", taskId: "t1" }),
+      ),
+    ];
+
+    expect(foldAuditRows(rows).every((d) => d.kind === "row")).toBe(true);
+  });
+
+  it("★캡처는 그대로다 — 그룹을 펼치면 원본 행 값이 그대로 다시 나온다", () => {
+    const original = [
+      agentAuditRow(
+        ledgerEvent({ id: "m2", toolName: "add_activity", taskId: "t1" }),
+      ),
+      agentAuditRow(
+        ledgerEvent({ id: "m1", toolName: "add_activity", taskId: "t1" }),
+      ),
+    ];
+
+    const [display] = foldAuditRows(original);
+    expect(display.kind).toBe("group");
+    if (display.kind === "group") {
+      expect(display.rows).toEqual(original);
+    }
   });
 });

@@ -16,6 +16,7 @@ const getProjectAuditLog = vi.hoisted(() => vi.fn());
 const getProjectAuditActors = vi.hoisted(() => vi.fn());
 const getProjectLedgerLog = vi.hoisted(() => vi.fn());
 const getProjectLedgerActors = vi.hoisted(() => vi.fn());
+const getProjectTaskTitles = vi.hoisted(() => vi.fn());
 
 vi.mock("../../src/services/projectAuditService", () => ({
   getProjectAuditLog: (...args: unknown[]) => getProjectAuditLog(...args),
@@ -23,12 +24,14 @@ vi.mock("../../src/services/projectAuditService", () => ({
   getProjectLedgerLog: (...args: unknown[]) => getProjectLedgerLog(...args),
   getProjectLedgerActors: (...args: unknown[]) =>
     getProjectLedgerActors(...args),
+  getProjectTaskTitles: (...args: unknown[]) => getProjectTaskTitles(...args),
 }));
 
 const {
   fetchAuditLogState,
   fetchAuditActors,
   fetchLedgerLogState,
+  fetchProjectTaskTitles,
   fetchUnifiedAuditSources,
   fetchUnifiedAuditOptions,
 } = await import("../../src/hooks/useProjectAuditLog");
@@ -40,6 +43,7 @@ beforeEach(() => {
   getProjectLedgerActors
     .mockReset()
     .mockResolvedValue({ actors: [], toolNames: [] });
+  getProjectTaskTitles.mockReset().mockResolvedValue({});
 });
 
 describe("fetchAuditLogState — 조회", () => {
@@ -290,6 +294,20 @@ describe("fetchUnifiedAuditSources — 두 소스 병렬", () => {
   });
 });
 
+describe("fetchProjectTaskTitles — 티켓 제목 조인용, 부가 정보라 실패를 삼킨다", () => {
+  it("성공하면 맵을 그대로 돌려준다", async () => {
+    getProjectTaskTitles.mockResolvedValue({ t1: "Foo" });
+
+    expect(await fetchProjectTaskTitles("p1")).toEqual({ t1: "Foo" });
+  });
+
+  it("실패하면 빈 맵 — 제목을 못 가져와도 타임라인 자체는 그대로 보여야 한다", async () => {
+    getProjectTaskTitles.mockRejectedValue(new Error("boom"));
+
+    await expect(fetchProjectTaskTitles("p1")).resolves.toEqual({});
+  });
+});
+
 describe("fetchUnifiedAuditOptions — 필터 옵션 병합", () => {
   it("두 소스의 행위자를 uid 로 합산한다", async () => {
     getProjectAuditActors.mockResolvedValue([
@@ -308,6 +326,14 @@ describe("fetchUnifiedAuditOptions — 필터 옵션 병합", () => {
     expect(options.toolNames).toEqual(["spawn_agent"]);
   });
 
+  it("티켓 제목 맵도 같이 실어 온다", async () => {
+    getProjectTaskTitles.mockResolvedValue({ t1: "Foo", t2: "Bar" });
+
+    const options = await fetchUnifiedAuditOptions("p1");
+
+    expect(options.taskTitleById).toEqual({ t1: "Foo", t2: "Bar" });
+  });
+
   it("원장 옵션이 실패해도 사람 쪽 옵션은 남는다", async () => {
     getProjectAuditActors.mockResolvedValue([
       { actorUid: "u1", actorName: "John", count: 3 },
@@ -323,10 +349,12 @@ describe("fetchUnifiedAuditOptions — 필터 옵션 병합", () => {
   it("★부가 정보라 실패해도 throw 하지 않는다", async () => {
     getProjectAuditActors.mockRejectedValue(new Error("boom"));
     getProjectLedgerActors.mockRejectedValue(new Error("boom"));
+    getProjectTaskTitles.mockRejectedValue(new Error("boom"));
 
     await expect(fetchUnifiedAuditOptions("p1")).resolves.toEqual({
       actors: [],
       toolNames: [],
+      taskTitleById: {},
     });
   });
 });

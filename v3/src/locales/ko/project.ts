@@ -54,6 +54,11 @@ export const project = {
   "project.audit.actor.agentHint":
     "오케(에이전트)가 한 행위입니다. 옆의 이름은 이 에이전트를 발주한 구성원입니다.",
   "project.audit.actor.agentModelUnknown": "모델 미상",
+  // 오케가 스폰된 에이전트 없이 MCP 툴을 직접 호출한 행위. "모델 미상"(오류처럼
+  // 읽힘)과 갈라야 정상 분류로 읽힌다.
+  "project.audit.actor.orchestrator": "오케 조작",
+  "project.audit.actor.orchestratorHint":
+    "스폰된 에이전트 없이 오케가 직접 MCP 툴을 호출한 행위입니다(모델 없음).",
   "project.audit.actor.unknown": "귀속 불가",
   "project.audit.failed": "실패",
   // 소스별 부분 실패 — 거부와 장애를 다른 문구로 가른다.
@@ -85,6 +90,61 @@ export const project = {
   "project.audit.type.taskClaimed": "티켓 선점",
   "project.audit.type.taskStatusChanged": "상태 변경",
   "project.audit.type.unknown": "알 수 없음",
+
+  // 오케(툴) 라벨 — 사람이 읽는 감사 뷰로 raw toolName 이 그대로 찍히던 것을
+  // 의미 단위로 번역한다(사장님 도그푸딩 피드백). 원문 toolName 은 배지의
+  // title(hover)로 남긴다 — 대조가 필요한 사람을 위해.
+  "project.audit.tool.acknowledgeFeedback": "피드백 확인 처리",
+  "project.audit.tool.addActivity": "메모",
+  "project.audit.tool.addPendingInstruction": "지시 예약",
+  "project.audit.tool.answerQuestion": "질문 답변",
+  "project.audit.tool.askOrchestrator": "오케 질문",
+  "project.audit.tool.checkFeedback": "피드백 확인",
+  "project.audit.tool.claimTask": "태스크 선점",
+  "project.audit.tool.cleanupAgents": "에이전트 정리",
+  "project.audit.tool.createFlow": "플로우 생성",
+  "project.audit.tool.createTask": "태스크 생성",
+  "project.audit.tool.createTasksBulk": "태스크 일괄 생성",
+  "project.audit.tool.deleteTask": "태스크 삭제",
+  "project.audit.tool.dispatchTask": "태스크 배정",
+  "project.audit.tool.escalateToOwner": "오너 에스컬레이션",
+  "project.audit.tool.getAgentSkill": "스킬 조회",
+  "project.audit.tool.getAgents": "에이전트 목록 조회",
+  "project.audit.tool.getAllTasks": "태스크 목록 조회",
+  "project.audit.tool.getAvailableTasks": "작업 가능 태스크 조회",
+  "project.audit.tool.getFlows": "플로우 조회",
+  "project.audit.tool.getLedgerSpoolStatus": "원장 스풀 상태 조회",
+  "project.audit.tool.getModelGuidance": "모델 가이드 조회",
+  "project.audit.tool.getOpenQuestions": "미답변 질문 조회",
+  "project.audit.tool.getPendingInstructions": "예약 지시 조회",
+  "project.audit.tool.getProjection": "프로젝션 조회",
+  "project.audit.tool.getRoutingEffectiveness": "라우팅 효과 조회",
+  "project.audit.tool.getTaskActivities": "태스크 활동 조회",
+  "project.audit.tool.getTaskDependencies": "태스크 의존성 조회",
+  "project.audit.tool.getTask": "태스크 조회",
+  "project.audit.tool.getWorktreeAudit": "워크트리 감사 조회",
+  "project.audit.tool.killAgent": "에이전트 종료",
+  "project.audit.tool.listWorktreeAudit": "워크트리 감사 목록 조회",
+  "project.audit.tool.markInstructionDelivered": "지시 전달 처리",
+  "project.audit.tool.mergeAndClose": "머지·완료",
+  "project.audit.tool.missionStepDone": "미션 단계 완료",
+  "project.audit.tool.requestModelEscalation": "모델 상향 요청",
+  "project.audit.tool.resolveModelEscalation": "모델 상향 처리",
+  "project.audit.tool.reuseAgent": "에이전트 재사용",
+  "project.audit.tool.runSkill": "스킬 실행",
+  "project.audit.tool.searchTasks": "태스크 검색",
+  "project.audit.tool.sendTelegramMessage": "텔레그램 메시지 발송",
+  "project.audit.tool.spawnAgent": "에이전트 스폰",
+  "project.audit.tool.submitForReview": "리뷰 제출",
+  "project.audit.tool.updateFlow": "플로우 수정",
+  "project.audit.tool.updateTaskStatus": "상태 변경",
+
+  // 노이즈 접기 — 같은 티켓의 연속 add_activity 를 한 그룹으로 접는다. 캡처는
+  // 그대로고(원장 불변), 펼치면 원본 행이 전부 그대로 다시 보인다.
+  "project.audit.group.badge": "메모 묶음",
+  "project.audit.group.count": "{count}건",
+  "project.audit.group.expand": "펼치기",
+  "project.audit.group.collapse": "접기",
 
   // Presence
   "project.presence.online": "온라인",
