@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   repoConnectMode,
   repoDirNameFromUrl,
+  resolveRepoConnectVisible,
   shouldOfferRepoConnect,
 } from "../../src/lib/repoConnect";
 import type { ProjectPathResolution } from "../../src/lib/projectPaths";
@@ -19,27 +20,27 @@ const MACHINE = "mac-abc-123";
 function project(
   kind: ProjectPathResolution["kind"] | undefined,
   // null = "URL 없음"(기본 파라미터가 undefined 를 삼키는 함정 회피용 센티널)
-  gitRemoteUrlOrNull: string | null = REPO
+  gitRemoteUrlOrNull: string | null = REPO,
 ) {
   const gitRemoteUrl = gitRemoteUrlOrNull ?? undefined;
   const folderPathResolution: ProjectPathResolution | undefined =
     kind === "own"
       ? { kind, path: "/Users/me/app", source: "machine" }
       : kind === "foreign-only"
-      ? {
-          kind,
-          otherMachines: [
-            {
-              path: "C:\\Users\\owner\\app",
-              platform: "win32",
-              machineId: "win-1",
-              updatedAt: 1,
-            },
-          ],
-        }
-      : kind === "unregistered"
-      ? { kind }
-      : undefined;
+        ? {
+            kind,
+            otherMachines: [
+              {
+                path: "C:\\Users\\owner\\app",
+                platform: "win32",
+                machineId: "win-1",
+                updatedAt: 1,
+              },
+            ],
+          }
+        : kind === "unregistered"
+          ? { kind }
+          : undefined;
   return { gitRemoteUrl, folderPathResolution };
 }
 
@@ -65,17 +66,17 @@ describe("shouldOfferRepoConnect", () => {
   // 스스로 채울 수도 없다 — 예전 게이트에선 모달이 영영 안 떴다.
   it("still offers without a repo URL (manual entry fallback)", () => {
     expect(shouldOfferRepoConnect(project("foreign-only", null), MACHINE)).toBe(
-      true
+      true,
     );
     expect(shouldOfferRepoConnect(project("unregistered", null), MACHINE)).toBe(
-      true
+      true,
     );
   });
 
   it("keeps the own-machine invariant even without a repo URL", () => {
     expect(shouldOfferRepoConnect(project("own", null), MACHINE)).toBe(false);
     expect(shouldOfferRepoConnect(project("foreign-only", null), null)).toBe(
-      false
+      false,
     );
   });
 
@@ -90,7 +91,7 @@ describe("shouldOfferRepoConnect", () => {
   // — 픽셀 불변.
   it("does not offer when own folder is valid (pixel-invariant)", () => {
     expect(shouldOfferRepoConnect(project("own"), MACHINE, "valid")).toBe(
-      false
+      false,
     );
   });
 
@@ -100,7 +101,7 @@ describe("shouldOfferRepoConnect", () => {
 
   it("offers when own folder has a mismatching git remote", () => {
     expect(shouldOfferRepoConnect(project("own"), MACHINE, "mismatch")).toBe(
-      true
+      true,
     );
   });
 
@@ -111,11 +112,28 @@ describe("shouldOfferRepoConnect", () => {
 
   it("ignores ownValidity for non-own kinds (foreign-only / unregistered keep offering)", () => {
     expect(
-      shouldOfferRepoConnect(project("foreign-only"), MACHINE, "empty")
+      shouldOfferRepoConnect(project("foreign-only"), MACHINE, "empty"),
     ).toBe(true);
     expect(
-      shouldOfferRepoConnect(project("unregistered"), MACHINE, "mismatch")
+      shouldOfferRepoConnect(project("unregistered"), MACHINE, "mismatch"),
     ).toBe(true);
+  });
+});
+
+describe("resolveRepoConnectVisible", () => {
+  // ★회귀가드: 수동 재호출(forceOpen)은 project kind 와 무관하게 항상 모달을
+  // 열 수 있어야 한다. forceOpen 을 isOwn 에 묶으면 non-own/undefined
+  // 프로젝트에서 수동 재호출 버튼이 죽는다(진범 RepoConnectModal.tsx:166-167).
+  it("forceOpen alone opens the modal regardless of project kind", () => {
+    expect(resolveRepoConnectVisible(false, true)).toBe(true);
+  });
+
+  it("offered alone still opens the modal", () => {
+    expect(resolveRepoConnectVisible(true, false)).toBe(true);
+  });
+
+  it("neither offered nor forceOpen keeps the modal closed", () => {
+    expect(resolveRepoConnectVisible(false, false)).toBe(false);
   });
 });
 
@@ -135,7 +153,7 @@ describe("repoDirNameFromUrl", () => {
   it("matches the electron-side derivation for display", () => {
     expect(repoDirNameFromUrl("https://github.com/acme/app.git")).toBe("app");
     expect(repoDirNameFromUrl("git@github.com:acme/my-repo.git")).toBe(
-      "my-repo"
+      "my-repo",
     );
     expect(repoDirNameFromUrl("https://github.com/acme/....git")).toBe("repo");
   });

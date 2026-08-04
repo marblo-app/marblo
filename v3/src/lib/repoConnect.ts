@@ -42,7 +42,7 @@ export function shouldOfferRepoConnect(
   project: Pick<Project, "gitRemoteUrl" | "folderPathResolution"> | null,
   machineId: string | null,
   // kind === "own" 일 때만 의미가 있다. 그 외엔 무시된다.
-  ownValidity: OwnValidity = null
+  ownValidity: OwnValidity = null,
 ): boolean {
   if (!project || !machineId) return false;
   const kind = project.folderPathResolution?.kind;
@@ -57,12 +57,24 @@ export function shouldOfferRepoConnect(
 }
 
 /**
+ * 모달 최종 노출 여부(offered/forceOpen 결합). 수동 재호출(forceOpen)은
+ * project kind 와 무관하게 항상 모달을 열 수 있어야 한다 — own 에 묶으면
+ * non-own/undefined 프로젝트에서 수동 재호출 버튼이 죽는다.
+ */
+export function resolveRepoConnectVisible(
+  offered: boolean,
+  forceOpen: boolean,
+): boolean {
+  return offered || forceOpen;
+}
+
+/**
  * 모달이 어떤 모드로 떠야 하나.
  *  - `clone`  — 프로젝트가 repo 주소를 안다. 주소를 보여주고 [Clone & 연결].
  *  - `manual` — 주소를 모른다. 주소 입력란 + [기존 폴더 연결]로 받아낸다.
  */
 export function repoConnectMode(
-  project: Pick<Project, "gitRemoteUrl"> | null
+  project: Pick<Project, "gitRemoteUrl"> | null,
 ): "clone" | "manual" {
   return project?.gitRemoteUrl?.trim() ? "clone" : "manual";
 }

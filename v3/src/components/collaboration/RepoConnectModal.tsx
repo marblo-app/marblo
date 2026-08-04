@@ -6,6 +6,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { normalizeGitRemoteUrl } from "../../services/projectService";
 import {
   shouldOfferRepoConnect,
+  resolveRepoConnectVisible,
   repoConnectMode,
   repoDirNameFromUrl,
   type OwnValidity,
@@ -164,7 +165,7 @@ export function RepoConnectModal() {
     ownValidity,
   );
   const visible =
-    (offered || (forceOpen && isOwn)) &&
+    resolveRepoConnectVisible(offered, forceOpen) &&
     !!currentProject &&
     !dismissed.has(currentProject.id);
 
@@ -191,43 +192,62 @@ export function RepoConnectModal() {
       return;
     }
     let cancelled = false;
-    window.electronAPI.github.status(user.uid).then(({ connected }) => {
-      if (!cancelled) setGithubConnected(connected);
-    }).catch(() => {
-      if (!cancelled) setGithubConnected(false);
-    });
-    return () => { cancelled = true; };
+    window.electronAPI.github
+      .status(user.uid)
+      .then(({ connected }) => {
+        if (!cancelled) setGithubConnected(connected);
+      })
+      .catch(() => {
+        if (!cancelled) setGithubConnected(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [user?.uid, visible]);
 
   useEffect(() => {
     if (!deviceSession) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      window.electronAPI.github.devicePoll(deviceSession.sessionId).then((result) => {
-        if (cancelled) return;
-        if (result.kind === "pending" || result.kind === "slow_down") {
-          setDeviceSession({ ...deviceSession, intervalSeconds: result.nextIntervalSeconds ?? deviceSession.intervalSeconds });
-          return;
-        }
-        setDeviceSession(null);
-        if (result.kind === "success") {
-          setGithubConnected(true);
-          setGithubMessage("GitHub가 연결되었습니다. 이제 private 저장소를 clone할 수 있습니다.");
-        } else if (result.kind === "denied") {
-          setGithubMessage("GitHub 연결이 취소되었습니다.");
-        } else if (result.kind === "expired") {
-          setGithubMessage("GitHub 연결 코드가 만료되었습니다. 다시 시도하세요.");
-        } else {
-          setGithubMessage(result.message ?? "GitHub 연결에 실패했습니다.");
-        }
-      }).catch(() => {
-        if (!cancelled) {
+      window.electronAPI.github
+        .devicePoll(deviceSession.sessionId)
+        .then((result) => {
+          if (cancelled) return;
+          if (result.kind === "pending" || result.kind === "slow_down") {
+            setDeviceSession({
+              ...deviceSession,
+              intervalSeconds:
+                result.nextIntervalSeconds ?? deviceSession.intervalSeconds,
+            });
+            return;
+          }
           setDeviceSession(null);
-          setGithubMessage("GitHub 연결에 실패했습니다.");
-        }
-      });
+          if (result.kind === "success") {
+            setGithubConnected(true);
+            setGithubMessage(
+              "GitHub가 연결되었습니다. 이제 private 저장소를 clone할 수 있습니다.",
+            );
+          } else if (result.kind === "denied") {
+            setGithubMessage("GitHub 연결이 취소되었습니다.");
+          } else if (result.kind === "expired") {
+            setGithubMessage(
+              "GitHub 연결 코드가 만료되었습니다. 다시 시도하세요.",
+            );
+          } else {
+            setGithubMessage(result.message ?? "GitHub 연결에 실패했습니다.");
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setDeviceSession(null);
+            setGithubMessage("GitHub 연결에 실패했습니다.");
+          }
+        });
     }, deviceSession.intervalSeconds * 1000);
-    return () => { cancelled = true; window.clearTimeout(timer); };
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [deviceSession]);
 
   // 프로젝트가 바뀌면 이전 에러/위치 선택/입력값을 비운다. forceOpen 도
@@ -380,7 +400,13 @@ export function RepoConnectModal() {
     if (!user?.uid) return;
     setGithubMessage(null);
     const result = await window.electronAPI.github.deviceStart(user.uid);
-    if (!result.ok || !result.sessionId || !result.userCode || !result.verificationUri || !result.interval) {
+    if (
+      !result.ok ||
+      !result.sessionId ||
+      !result.userCode ||
+      !result.verificationUri ||
+      !result.interval
+    ) {
       setGithubMessage(result.error ?? "GitHub 연결을 시작하지 못했습니다.");
       return;
     }
@@ -484,13 +510,36 @@ export function RepoConnectModal() {
               <span className="text-green-400">GitHub 연결됨</span>
             ) : deviceSession ? (
               <div className="space-y-2">
-                <div>GitHub에서 다음 코드를 입력하세요: <strong className="font-mono text-white">{deviceSession.userCode}</strong></div>
-                <a className="text-blue-400 hover:text-blue-300" href={deviceSession.verificationUriComplete ?? deviceSession.verificationUri} target="_blank" rel="noreferrer">GitHub 열기</a>
+                <div>
+                  GitHub에서 다음 코드를 입력하세요:{" "}
+                  <strong className="font-mono text-white">
+                    {deviceSession.userCode}
+                  </strong>
+                </div>
+                <a
+                  className="text-blue-400 hover:text-blue-300"
+                  href={
+                    deviceSession.verificationUriComplete ??
+                    deviceSession.verificationUri
+                  }
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  GitHub 열기
+                </a>
               </div>
             ) : (
-              <button onClick={() => void handleGitHubConnect()} disabled={busy || !user} className="text-blue-400 hover:text-blue-300 disabled:opacity-50">GitHub 연결</button>
+              <button
+                onClick={() => void handleGitHubConnect()}
+                disabled={busy || !user}
+                className="text-blue-400 hover:text-blue-300 disabled:opacity-50"
+              >
+                GitHub 연결
+              </button>
             )}
-            {githubMessage && <div className="mt-2 text-xs text-gray-400">{githubMessage}</div>}
+            {githubMessage && (
+              <div className="mt-2 text-xs text-gray-400">{githubMessage}</div>
+            )}
           </div>
 
           <div className="flex items-center justify-between gap-2 pt-1">
