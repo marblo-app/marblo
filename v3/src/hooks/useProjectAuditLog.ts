@@ -32,14 +32,17 @@ import {
 import {
   auditStateFromError,
   buildAuditRows,
+  buildTicketLedgerRows,
   mergeAuditActors,
   parseAuditTypeFilter,
   type AuditActorTally,
   type AuditLoadState,
   type AuditSources,
   type AuditSourceState,
+  type TicketLedgerRow,
   type UnifiedAuditRow,
 } from "../lib/projectAuditView";
+import { PROJECT_AUDIT_MAX_LIMIT } from "../lib/projectAudit";
 
 export interface AuditActorOption {
   actorUid: string;
@@ -101,7 +104,12 @@ export async function fetchProjectTaskTitles(
 /** 원장 조회 1회 → 상태 + 이벤트. 사람 쪽과 같은 이유로 throw 하지 않는다. */
 export async function fetchLedgerLogState(
   projectId: string,
-  query: { actorUid?: string; toolName?: string; limit?: number } = {},
+  query: {
+    actorUid?: string;
+    toolName?: string;
+    taskId?: string;
+    limit?: number;
+  } = {},
 ): Promise<{ state: AuditSourceState; events: AuditLog[] }> {
   try {
     const events = await getProjectLedgerLog(projectId, query);
@@ -115,6 +123,8 @@ export interface UnifiedAuditQuery {
   actorUid?: string;
   /** 종류 필터의 raw 값(사람 type 또는 `tool:<toolName>`). undefined = 전체. */
   typeFilter?: string;
+  /** 티켓 상세 패널이 쓰는 축 — 이 티켓에 속한 이벤트만. 두 소스에 같이 걸린다. */
+  taskId?: string;
   limit?: number;
 }
 
@@ -147,6 +157,7 @@ export async function fetchUnifiedAuditSources(
       ? fetchAuditLogState(projectId, {
           actorUid: query.actorUid,
           type: filter.source === "human" ? filter.type : undefined,
+          taskId: query.taskId,
           limit: query.limit,
         })
       : Promise.resolve<AuditLoadState | null>(null),
@@ -154,6 +165,7 @@ export async function fetchUnifiedAuditSources(
       ? fetchLedgerLogState(projectId, {
           actorUid: query.actorUid,
           toolName: filter.source === "agent" ? filter.toolName : undefined,
+          taskId: query.taskId,
           limit: query.limit,
         })
       : Promise.resolve(null),
@@ -308,4 +320,74 @@ export function useProjectAuditLog(
     taskTitleById: options.taskTitleById,
     reload,
   };
+}
+
+export interface UseTaskAuditTrailResult {
+  /** 이 티켓에 속한 이력, 최신순. 봉인 상태·워크트리 필드 상태를 함께 싣는다. */
+  rows: TicketLedgerRow[];
+  sources: AuditSources;
+  reload: () => void;
+}
+
+/**
+ * 티켓 상세 패널(원장 상세) 전용 — 한 티켓의 **전체** 이력.
+ *
+ * `useProjectAuditLog` 와 다른 점은 둘이다: (1) actor/type 필터 대신 `taskId`
+ * 로 서버 사이드 필터하고(축은 다르지만 부정행위 방지 원칙은 같다 —
+ * `services/projectAuditService.ts` 의 `taskId` where 절), (2) 필터 옵션 목록
+ * (actors/toolNames)을 조회하지 않는다 — 상세 패널엔 필터 UI 가 없다.
+ *
+ * limit 을 명시적으로 상한(`PROJECT_AUDIT_MAX_LIMIT`)까지 준다 — "이 티켓의
+ * 전체 이력"이라는 진입점의 약속을 지키려면 기본 100건 한도로 잘려서는 안 된다
+ * (한 티켓에 500건을 넘는 원장 행이 쌓이는 것은 사실상 없다고 봐도 되고, 그
+ * 드문 경우에도 최신 500건이 잘린다는 사실을 잃지 않는다 — 침묵하는 절단이
+ * 아니라 이 파일의 상한 정책 그대로다).
+ */
+export function useTaskAuditTrail(
+  projectId: string,
+  taskId: string,
+  nameByUid: Record<string, string> = {},
+): UseTaskAuditTrailResult {
+  const [fetched, setFetched] = useState<UnifiedAuditFetch>({
+    human: [],
+    agent: [],
+    sources: { human: { status: "loading" }, agent: { status: "loading" } },
+  });
+  const [nonce, setNonce] = useState(0);
+  const reload = useCallback(() => setNonce((n) => n + 1), []);
+
+  useEffect(() => {
+    if (!projectId || !taskId) {
+      setFetched({
+        human: [],
+        agent: [],
+        sources: {
+          human: { status: "ready", count: 0 },
+          agent: { status: "ready", count: 0 },
+        },
+      });
+      return;
+    }
+    let cancelled = false;
+    setFetched((prior) => ({
+      ...prior,
+      sources: { human: { status: "loading" }, agent: { status: "loading" } },
+    }));
+    fetchUnifiedAuditSources(projectId, {
+      taskId,
+      limit: PROJECT_AUDIT_MAX_LIMIT,
+    }).then((next) => {
+      if (!cancelled) setFetched(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, taskId, nonce]);
+
+  const rows = useMemo(
+    () => buildTicketLedgerRows(fetched.human, fetched.agent, nameByUid),
+    [fetched, nameByUid],
+  );
+
+  return { rows, sources: fetched.sources, reload };
 }

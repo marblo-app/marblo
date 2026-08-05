@@ -13,6 +13,7 @@ import {
   auditTypeLabelKey,
   auditToolLabelKey,
   auditMetadataSummary,
+  auditSealStatus,
   auditStatusTarget,
   resolveActorLabel,
   resolveTaskLabel,
@@ -24,10 +25,12 @@ import {
   auditLedgerDetail,
   auditSourceNotices,
   buildAuditRows,
+  buildTicketLedgerRows,
   foldAuditRows,
   humanAuditRow,
   isAuditLoading,
   isFullyDenied,
+  ledgerFieldValue,
   mergeAuditActors,
   mergeAuditRows,
   parseAuditTypeFilter,
@@ -406,6 +409,95 @@ describe("mergeAuditRows / buildAuditRows — 병합", () => {
 
     const rows = mergeAuditRows([broken], [humanAuditRow(humanEvent())]);
     expect(rows.at(-1)!.key).toBe("x");
+  });
+});
+
+// ── 티켓 원장 상세(티켓 U6ITRR38Z3c4MGLyg2PU) ───────────────────────
+
+/** §5 확장 필드가 아예 없는 문서 — 원장 확장 이전에 쓰인 기록의 실제 모양. */
+function preLedgerEvent(over: Partial<AuditLog> = {}): AuditLog {
+  const event = ledgerEvent(over);
+  const {
+    kind: _kind,
+    actorUid: _actorUid,
+    model: _model,
+    tier: _tier,
+    instructionHash: _instructionHash,
+    taskId: _taskId,
+    worktreeId: _worktreeId,
+    ...rest
+  } = event;
+  return rest as AuditLog;
+}
+
+describe("ledgerFieldValue — preLedger vs 규약 밖 vs 값 있음", () => {
+  it("필드 자체가 없으면 preLedger", () => {
+    expect(ledgerFieldValue(preLedgerEvent(), "worktreeId")).toEqual({
+      state: "preLedger",
+    });
+  });
+
+  it("필드는 있는데 null 이면 outOfConvention", () => {
+    expect(
+      ledgerFieldValue(ledgerEvent({ worktreeId: null }), "worktreeId"),
+    ).toEqual({ state: "outOfConvention" });
+  });
+
+  it("값이 있으면 그대로 싣는다", () => {
+    expect(
+      ledgerFieldValue(ledgerEvent({ worktreeId: "p1/t1" }), "worktreeId"),
+    ).toEqual({ state: "value", value: "p1/t1" });
+  });
+
+  it("preLedger 와 outOfConvention 을 같은 값으로 접지 않는다", () => {
+    // "확실한 척 금지" — 둘 다 "없음"으로 보이면 안 된다(스펙 요구사항).
+    const a = ledgerFieldValue(preLedgerEvent(), "worktreeId");
+    const b = ledgerFieldValue(ledgerEvent({ worktreeId: null }), "worktreeId");
+    expect(a).not.toEqual(b);
+  });
+});
+
+describe("auditSealStatus — 체인 봉인 상태", () => {
+  it("seq/prevHash/hash 가 셋 다 있어야 sealed", () => {
+    expect(auditSealStatus({ seq: 1, prevHash: "aa", hash: "bb" })).toBe(
+      "sealed",
+    );
+  });
+
+  it("★L3 미배선이라 지금은 항상 unsealed — 지어내지 않는다", () => {
+    expect(auditSealStatus(ledgerEvent())).toBe("unsealed");
+    expect(auditSealStatus({ seq: 1 })).toBe("unsealed");
+    expect(auditSealStatus({ prevHash: "aa", hash: "bb" })).toBe("unsealed");
+  });
+});
+
+describe("buildTicketLedgerRows — 티켓 상세 병합", () => {
+  it("사람 행은 sealStatus/worktree 가 null(체인·워크트리 개념이 없다)", () => {
+    const [row] = buildTicketLedgerRows([humanEvent()], []);
+    expect(row.sealStatus).toBeNull();
+    expect(row.worktree).toBeNull();
+  });
+
+  it("오케 행은 sealStatus/worktree 가 채워진다", () => {
+    const [row] = buildTicketLedgerRows(
+      [],
+      [ledgerEvent({ worktreeId: "p1/t1" })],
+    );
+    expect(row.sealStatus).toBe("unsealed");
+    expect(row.worktree).toEqual({ state: "value", value: "p1/t1" });
+  });
+
+  it("preLedger 오케 행도 버리지 않고 표시 상태만 preLedger 로 싣는다", () => {
+    const [row] = buildTicketLedgerRows([], [preLedgerEvent()]);
+    expect(row.worktree).toEqual({ state: "preLedger" });
+  });
+
+  it("최신순 병합은 buildAuditRows 와 같은 규칙을 따른다", () => {
+    const rows = buildTicketLedgerRows(
+      [humanEvent({ id: "h1", createdAt: new Date("2026-08-01T09:00:00Z") })],
+      [ledgerEvent({ id: "a1", createdAt: new Date("2026-08-01T10:00:00Z") })],
+    );
+    expect(rows.map((r) => r.key)).toEqual(["agent:a1", "human:h1"]);
   });
 });
 

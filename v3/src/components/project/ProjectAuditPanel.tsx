@@ -22,6 +22,7 @@ import {
   type UnifiedAuditRow,
 } from "../../lib/projectAuditView";
 import { useProjectAuditLog } from "../../hooks/useProjectAuditLog";
+import { ProjectAuditTicketDetail } from "./ProjectAuditTicketDetail";
 
 /**
  * 감사 로그 — 프로젝트 탭의 세 번째 블록.
@@ -98,6 +99,11 @@ export function ProjectAuditPanel({
       else next.add(key);
       return next;
     });
+
+  // 티켓 클릭 → 그 티켓의 원장 상세(티켓 U6ITRR38Z3c4MGLyg2PU). 목록 조회와는
+  // 별개의 taskId 스코프 조회라 여기 state 하나로만 열고 닫는다 — 목록의
+  // 필터·페이지네이션과 무관.
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   // 두 소스가 **모두** 거부됐을 때만 전체 거부 화면. 한쪽만 거부면 살아남은
   // 쪽을 보여준다 — 조용히 사라지면 owner 가 "감사 기능이 없어졌나?" 로 읽는다.
@@ -206,6 +212,7 @@ export function ProjectAuditPanel({
                   onToggle={() => toggleGroup(displayRow.key)}
                   locale={locale}
                   taskTitleById={taskTitleById}
+                  onOpenTicket={setSelectedTaskId}
                 />
               ) : (
                 <AuditRow
@@ -213,11 +220,22 @@ export function ProjectAuditPanel({
                   row={displayRow.row}
                   locale={locale}
                   taskTitleById={taskTitleById}
+                  onOpenTicket={setSelectedTaskId}
                 />
               ),
             )}
           </ul>
         ))}
+
+      {selectedTaskId && (
+        <ProjectAuditTicketDetail
+          projectId={projectId}
+          taskId={selectedTaskId}
+          taskTitle={resolveTaskLabel(selectedTaskId, taskTitleById)}
+          nameByUid={nameByUid}
+          onClose={() => setSelectedTaskId(null)}
+        />
+      )}
     </Shell>
   );
 }
@@ -231,7 +249,7 @@ export function ProjectAuditPanel({
  * 아니라 "오케 조작"(정상 분류 — 스폰된 에이전트 없이 오케 자신이 MCP 툴을
  * 직접 호출한 행위)으로 구분한다.
  */
-function AuditBadge({
+export function AuditBadge({
   row,
 }: {
   row: Pick<UnifiedAuditRow, "actorKind" | "model">;
@@ -266,21 +284,42 @@ function AuditBadge({
   );
 }
 
-/** 티켓 칸 — 제목이 있으면 제목, 없으면(물리 삭제) 해시. 원문 id 는 hover 로. */
+/**
+ * 티켓 칸 — 제목이 있으면 제목, 없으면(물리 삭제) 해시. 원문 id 는 hover 로.
+ *
+ * `onOpenTicket` 이 있으면 버튼이 된다 — 그 티켓의 원장 상세(티켓
+ * U6ITRR38Z3c4MGLyg2PU)를 연다. 물리 삭제된 티켓도 원장엔 남아 있으므로 클릭은
+ * 항상 유효하다(해시로 표시될 뿐, 조회 자체는 taskId 로만 걸린다).
+ */
 function AuditTaskLabel({
   taskId,
   taskTitleById,
+  onOpenTicket,
 }: {
   taskId: string;
   taskTitleById: Record<string, string>;
+  onOpenTicket?: (taskId: string) => void;
 }) {
+  const label = resolveTaskLabel(taskId, taskTitleById);
+  if (!onOpenTicket) {
+    return (
+      <span
+        className="max-w-[220px] truncate text-xs text-gray-500"
+        title={`#${taskId}`}
+      >
+        {label}
+      </span>
+    );
+  }
   return (
-    <span
-      className="max-w-[220px] truncate text-xs text-gray-500"
+    <button
+      type="button"
+      onClick={() => onOpenTicket(taskId)}
+      className="max-w-[220px] truncate text-xs text-gray-500 underline decoration-dotted underline-offset-2 hover:text-gray-300"
       title={`#${taskId}`}
     >
-      {resolveTaskLabel(taskId, taskTitleById)}
-    </span>
+      {label}
+    </button>
   );
 }
 
@@ -295,10 +334,12 @@ function AuditRow({
   row,
   locale,
   taskTitleById,
+  onOpenTicket,
 }: {
   row: UnifiedAuditRow;
   locale: string;
   taskTitleById: Record<string, string>;
+  onOpenTicket?: (taskId: string) => void;
 }) {
   const { t } = useTranslation();
 
@@ -328,7 +369,11 @@ function AuditRow({
       )}
 
       {row.taskId && (
-        <AuditTaskLabel taskId={row.taskId} taskTitleById={taskTitleById} />
+        <AuditTaskLabel
+          taskId={row.taskId}
+          taskTitleById={taskTitleById}
+          onOpenTicket={onOpenTicket}
+        />
       )}
 
       <span className="ml-auto flex-shrink-0 text-xs tabular-nums text-gray-500">
@@ -343,7 +388,7 @@ function AuditRow({
  * (모노스페이스). 아는 툴의 원문 toolName 은 감춘 게 아니라 감싸는 배지의
  * `title` 로 옮겨졌다(hover 로 대조 가능) — AuditRow 참조.
  */
-function RowLabel({ label }: { label: AuditRowLabel }) {
+export function RowLabel({ label }: { label: AuditRowLabel }) {
   const { t } = useTranslation();
   if (label.kind === "i18n" || label.kind === "tool")
     return <>{t(label.key)}</>;
@@ -367,12 +412,14 @@ function AuditGroupRow({
   onToggle,
   locale,
   taskTitleById,
+  onOpenTicket,
 }: {
   group: AuditRowGroup;
   expanded: boolean;
   onToggle: () => void;
   locale: string;
   taskTitleById: Record<string, string>;
+  onOpenTicket?: (taskId: string) => void;
 }) {
   const { t } = useTranslation();
   const latest = group.rows[0];
@@ -389,6 +436,9 @@ function AuditGroupRow({
           {t("project.audit.group.badge")}
         </span>
 
+        {/* onOpenTicket 을 안 넘긴다 — 이 라벨은 이미 <button onClick={onToggle}>
+            안에 있어서, 클릭형으로 바꾸면 버튼 중첩(무효 HTML)이 된다. 펼치면
+            아래 개별 행의 라벨이 클릭 가능하다. */}
         <AuditTaskLabel taskId={group.taskId} taskTitleById={taskTitleById} />
 
         <span className="text-xs text-gray-500">
@@ -414,6 +464,7 @@ function AuditGroupRow({
               row={row}
               locale={locale}
               taskTitleById={taskTitleById}
+              onOpenTicket={onOpenTicket}
             />
           ))}
         </ul>
@@ -546,7 +597,7 @@ function Shell({ children }: { children: ReactNode }) {
  *
  * createdAt 이 Date 가 아닌 경우(변환 실패)에도 터지지 않게 방어한다.
  */
-function formatAuditTime(value: Date, locale: string): string {
+export function formatAuditTime(value: Date, locale: string): string {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleString(locale === "ko" ? "ko-KR" : "en-US", {

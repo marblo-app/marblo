@@ -151,6 +151,24 @@ export const project: Record<keyof typeof koProject, string> = {
   "project.audit.group.expand": "Expand",
   "project.audit.group.collapse": "Collapse",
 
+  // Ticket ledger detail (click a ticket in the audit log) — ticket
+  // U6ITRR38Z3c4MGLyg2PU.
+  "project.audit.ticket.subtitle": "This ticket's full history, newest first",
+  "project.audit.ticket.partialNotice":
+    "Some sources are missing due to permissions or an error — check the notices in the main list.",
+  "project.audit.ticket.empty": "No records for this ticket.",
+  "project.audit.ticket.sealHint":
+    "Chain sealing (seq/prevHash/hash) isn't wired up yet — every row is unsealed.",
+  "project.audit.ticket.sealed": "Sealed",
+  "project.audit.ticket.unsealed": "Unsealed",
+  // "No pretending to be certain" — old records missing the field entirely
+  // get different wording than ones where the field exists but is
+  // unresolved.
+  "project.audit.ticket.worktreePreLedger": "Predates ledger extension",
+  "project.audit.ticket.worktreeOutOfConvention": "Outside worktree convention",
+  "project.audit.ticket.viewCode": "View code",
+  "project.audit.ticket.viewReplay": "View replay",
+
   // Presence
   "project.presence.online": "Online",
   "project.presence.idle": "Idle",

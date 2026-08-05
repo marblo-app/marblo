@@ -17,7 +17,13 @@ export type JumpTarget =
   // Worktrees surface — the escape hatch from the Code tab's per-file diff to
   // the whole-branch diff, for work the agent already committed (which the
   // per-file working-tree diff cannot show). Both shells handle it.
-  | { type: "worktrees" };
+  | { type: "worktrees" }
+  // Audit ticket detail's "Replay 보기" cross-link → History tab, Mission
+  // Replay view, this mission expanded. Consumed by WorkHistoryTab itself
+  // (mirrors how BoardTab consumes "task"); Layout only switches the tab.
+  // ★Legacy shell (Layout.tsx) only — the opt-in WorkspaceShell is out of
+  // scope for this ticket (owned by a concurrent shell-wiring ticket).
+  | { type: "missionReplay"; missionId: string };
 
 interface NavigationState {
   pendingJump: JumpTarget | null;

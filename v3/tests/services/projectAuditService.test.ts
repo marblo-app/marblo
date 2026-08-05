@@ -179,6 +179,13 @@ describe("getProjectAuditLog — 조회 필터", () => {
     expect(whereOn("type")).toMatchObject({ value: "task.status_changed" });
   });
 
+  it("★taskId 필터(티켓 상세)도 서버 사이드로 나간다", async () => {
+    // 티켓 U6ITRR38Z3c4MGLyg2PU — 감사 로그 티켓 클릭 → 원장 상세.
+    await getProjectAuditLog("p1", { taskId: "t1" });
+
+    expect(whereOn("taskId")).toMatchObject({ op: "==", value: "t1" });
+  });
+
   it("limit 을 정규화해서 싣는다", async () => {
     await getProjectAuditLog("p1", { limit: 10_000 });
     expect(
@@ -289,6 +296,12 @@ describe("getProjectLedgerLog — 원장 조회", () => {
 
     expect(whereOn("actorUid")).toMatchObject({ value: "u2" });
     expect(whereOn("toolName")).toMatchObject({ value: "spawn_agent" });
+  });
+
+  it("★taskId 필터(티켓 상세)도 서버 사이드로 나간다", async () => {
+    await getProjectLedgerLog("p1", { taskId: "t1" });
+
+    expect(whereOn("taskId")).toMatchObject({ op: "==", value: "t1" });
   });
 
   it("★`kind` 로는 절대 필터하지 않는다", async () => {

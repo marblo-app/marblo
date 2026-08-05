@@ -172,6 +172,11 @@ export function Layout() {
       // Same shape as "code": nothing downstream consumes it, so clear here.
       setActiveTab("worktrees");
       consumeJump();
+    } else if (pendingJump.type === "missionReplay") {
+      // Audit ticket detail's "Replay 보기" → bring History forward.
+      // WorkHistoryTab reads the missionId itself and consumes the jump
+      // (same hand-off shape as the "task" case above and BoardTab).
+      setActiveTab("history");
     }
   }, [pendingJump, consumeJump]);
 

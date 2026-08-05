@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { t, useTranslation } from "../../lib/i18n";
 import { useProjectStore } from "../../stores/projectStore";
 import { useTaskStore } from "../../stores/taskStore";
+import { useNavigationStore } from "../../stores/navigationStore";
 import { subscribeToMergeHistory } from "../../services/mergeHistoryService";
 import type { MergeHistoryEntry } from "../../types/mergeHistory";
 import type { Task } from "../../types/task";
@@ -264,6 +265,18 @@ export function WorkHistoryTab() {
   // 마운트된다(리스너를 안 쓰는 화면에 켜 두지 않는다).
   const [view, setView] = useState<WorkHistoryView>("tasks");
   const [replayMissionId, setReplayMissionId] = useState<string | null>(null);
+
+  // 감사 로그 티켓 상세의 "Replay 보기" 크로스링크 → Layout 이 이 탭을
+  // 앞으로 가져온 뒤, 여기서 missionId 를 직접 읽어 Replay 뷰를 연다
+  // (BoardTab 이 "task" 잡을 소비하는 것과 같은 hand-off 모양).
+  const pendingJump = useNavigationStore((s) => s.pendingJump);
+  const consumeJump = useNavigationStore((s) => s.consumeJump);
+  useEffect(() => {
+    if (!pendingJump || pendingJump.type !== "missionReplay") return;
+    setView("replay");
+    setReplayMissionId(pendingJump.missionId);
+    consumeJump();
+  }, [pendingJump, consumeJump]);
 
   const [filter, setFilter] = useState<WorkHistoryFilter>(
     DEFAULT_WORK_HISTORY_FILTER,

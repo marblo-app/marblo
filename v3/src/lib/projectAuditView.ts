@@ -700,6 +700,109 @@ export type AuditDisplayRow =
   | { kind: "row"; row: UnifiedAuditRow }
   | AuditRowGroup;
 
+// ═══════════════════════════════════════════════════════════════════
+// 티켓 상세 — 한 티켓의 원장 상세(#754 확장, 티켓 U6ITRR38Z3c4MGLyg2PU)
+// ═══════════════════════════════════════════════════════════════════
+//
+// 목록 행(`UnifiedAuditRow`)은 요약이라 seq/prevHash/hash·kind 같은 원장 원본
+// 필드를 담지 않는다. 티켓 상세 패널은 그 원본을 그대로 보여줘야 하므로, 목록용
+// 타입을 오염시키지 않고 **상세 전용 파생**을 여기 따로 둔다.
+
+/**
+ * 원장 확장 필드(§5) 하나의 표시 상태.
+ *
+ * ★"없음"을 한 종류로 뭉개지 않는다 — 세 사실이 서로 다르다:
+ *   - `preLedger`      — 문서에 그 **필드 자체가 없다**(원장 확장 이전에 쓰인 기록).
+ *   - `outOfConvention`— 필드는 있는데 값이 null(예: 워크트리 경로 규약 밖이라
+ *                        `parseWorktreePath` 가 null 을 write 했다 — ledger.ts §8).
+ *   - `value`          — 실제 값이 있다.
+ * 티켓 스펙의 "확실한 척 금지"가 이 세 갈래를 요구한다 — `outOfConvention` 을
+ * `preLedger` 로 보여주면 "이 기록엔 원래 워크트리 개념이 없었다"는 거짓말이 되고,
+ * 반대로 접으면 "판별에 실패했다"는 사실이 "정상적으로 없다"로 읽힌다.
+ */
+export type LedgerFieldValue =
+  | { state: "preLedger" }
+  | { state: "outOfConvention" }
+  | { state: "value"; value: string };
+
+/** 원장 확장(§5) 필드 중 상세 패널이 표시하는 것. */
+type LedgerExtensionField =
+  | "actorUid"
+  | "model"
+  | "tier"
+  | "taskId"
+  | "worktreeId"
+  | "instructionHash";
+
+/**
+ * 확장 필드 하나의 표시 상태를 뽑는다.
+ *
+ * `field in event` 로 **필드 부재**(원장 확장 이전 문서)를 판별한다 —
+ * `convertTimestamps`(services/firestore.ts)가 raw Firestore 문서를 그대로
+ * spread 하므로, Firestore 에 없던 필드는 여기서도 진짜로 없다(값이 `undefined`
+ * 인 게 아니라 키 자체가 없다). 그래서 옵셔널 체이닝(`event.field == null`)이
+ * 아니라 `in` 을 쓴다 — 그래야 "없다"와 "있는데 null 이다"가 갈린다.
+ */
+export function ledgerFieldValue(
+  event: AuditLog,
+  field: LedgerExtensionField,
+): LedgerFieldValue {
+  if (!(field in event)) return { state: "preLedger" };
+  const raw = event[field];
+  if (raw === null || raw === undefined || raw === "") {
+    return { state: "outOfConvention" };
+  }
+  return { state: "value", value: String(raw) };
+}
+
+/**
+ * 봉인(체인) 상태. `seq`/`prevHash`/`hash` 는 L3 가 채우는 필드고(ledger.ts §6
+ * 주석: "이번 슬라이스는 write 하지 않는다"), 지금은 항상 비어 있어 모든 행이
+ * `unsealed` 다 — 그게 사실이므로 그대로 보여준다("봉인됨"으로 지어내지 않는다).
+ * L3 가 배선되면 이 함수 하나만 바뀌면 되도록 판정을 여기 모아 둔다.
+ */
+export function auditSealStatus(
+  event: Pick<AuditLog, "seq" | "prevHash" | "hash">,
+): "sealed" | "unsealed" {
+  return event.seq != null && !!event.prevHash && !!event.hash
+    ? "sealed"
+    : "unsealed";
+}
+
+/** 티켓 상세 패널의 원장 행 한 건 — 목록 행 + 원장 전용 필드. */
+export interface TicketLedgerRow extends UnifiedAuditRow {
+  /** 사람 행은 체인 개념이 없다 — null. */
+  sealStatus: "sealed" | "unsealed" | null;
+  /** 사람 행은 워크트리 개념이 없다 — null. */
+  worktree: LedgerFieldValue | null;
+}
+
+/**
+ * 한 티켓의 통합 이력. **순수함수.** `buildAuditRows` 와 같은 병합 규칙(최신순,
+ * 소스 태깅)을 쓰되, 오케 행에는 봉인 상태·워크트리 필드 상태를 더 싣는다.
+ *
+ * 호출부가 이미 `taskId` 로 필터된 두 소스를 넘긴다고 가정한다(서버 사이드
+ * 필터는 `services/projectAuditService.ts` 의 `taskId` 축) — 여기서 다시
+ * 거르지 않는다.
+ */
+export function buildTicketLedgerRows(
+  human: readonly ProjectAuditEvent[],
+  agent: readonly AuditLog[],
+  nameByUid: Record<string, string> = {},
+): TicketLedgerRow[] {
+  const humanRows: TicketLedgerRow[] = human.map((event) => ({
+    ...humanAuditRow(event, nameByUid),
+    sealStatus: null,
+    worktree: null,
+  }));
+  const agentRows: TicketLedgerRow[] = agent.map((event) => ({
+    ...agentAuditRow(event, nameByUid),
+    sealStatus: auditSealStatus(event),
+    worktree: ledgerFieldValue(event, "worktreeId"),
+  }));
+  return mergeAuditRows(humanRows, agentRows) as TicketLedgerRow[];
+}
+
 /**
  * 최신순으로 이미 정렬된 행 목록을 화면 표시 단위로 접는다. **순수함수, 뷰 전용.**
  *

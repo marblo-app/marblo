@@ -58,6 +58,8 @@ export interface ProjectAuditEvent extends ProjectAuditEventWrite {
 export interface ProjectAuditLogQuery {
   actorUid?: string;
   type?: ProjectAuditEventType;
+  /** 티켓 상세 패널(원장 상세)이 쓰는 축. 이 티켓에 속한 이벤트만. */
+  taskId?: string;
   /** 기본 100, 상한 500(PROJECT_AUDIT_MAX_LIMIT). */
   limit?: number;
 }

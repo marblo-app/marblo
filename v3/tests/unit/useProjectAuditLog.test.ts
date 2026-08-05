@@ -219,6 +219,19 @@ describe("fetchUnifiedAuditSources — 두 소스 병렬", () => {
     );
   });
 
+  it("★taskId 필터(티켓 상세)도 두 소스에 같이 걸린다", async () => {
+    await fetchUnifiedAuditSources("p1", { taskId: "t1" });
+
+    expect(getProjectAuditLog).toHaveBeenCalledWith(
+      "p1",
+      expect.objectContaining({ taskId: "t1" }),
+    );
+    expect(getProjectLedgerLog).toHaveBeenCalledWith(
+      "p1",
+      expect.objectContaining({ taskId: "t1" }),
+    );
+  });
+
   it("사람 종류를 고르면 원장은 조회조차 하지 않고 skipped", async () => {
     const result = await fetchUnifiedAuditSources("p1", {
       typeFilter: "agent.spawned",

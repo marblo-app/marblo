@@ -146,6 +146,21 @@ export const project = {
   "project.audit.group.expand": "펼치기",
   "project.audit.group.collapse": "접기",
 
+  // 티켓 원장 상세(감사 로그에서 티켓 클릭) — 티켓 U6ITRR38Z3c4MGLyg2PU.
+  "project.audit.ticket.subtitle": "이 티켓의 전체 이력 · 최신순",
+  "project.audit.ticket.partialNotice":
+    "일부 소스는 권한/장애로 빠져 있습니다. 위 목록보다 목록의 알림을 함께 확인하세요.",
+  "project.audit.ticket.empty": "이 티켓에 대한 기록이 없습니다.",
+  "project.audit.ticket.sealHint":
+    "체인 봉인(seq/prevHash/hash)은 아직 배선되지 않았습니다 — 모든 행이 봉인 전입니다.",
+  "project.audit.ticket.sealed": "봉인됨",
+  "project.audit.ticket.unsealed": "봉인 전",
+  // "확실한 척 금지" — 필드가 아예 없던 옛 기록과 판별 불가를 다른 문구로 가른다.
+  "project.audit.ticket.worktreePreLedger": "원장 확장 이전 기록",
+  "project.audit.ticket.worktreeOutOfConvention": "워크트리 규약 밖",
+  "project.audit.ticket.viewCode": "코드 보기",
+  "project.audit.ticket.viewReplay": "Replay 보기",
+
   // Presence
   "project.presence.online": "온라인",
   "project.presence.idle": "자리비움",

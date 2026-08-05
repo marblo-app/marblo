@@ -163,6 +163,7 @@ export async function getProjectAuditLog(
     where("projectId", "==", projectId),
     ...(options.actorUid ? [where("actorUid", "==", options.actorUid)] : []),
     ...(options.type ? [where("type", "==", options.type)] : []),
+    ...(options.taskId ? [where("taskId", "==", options.taskId)] : []),
     orderBy("createdAt", "desc"),
     limitTo(max),
   ];
@@ -219,6 +220,8 @@ export interface ProjectLedgerLogQuery {
   /** 이 에이전트를 **발주한 사람**의 uid. 두 소스가 공유하는 유일한 축이다. */
   actorUid?: string;
   toolName?: string;
+  /** 티켓 상세 패널(원장 상세)이 쓰는 축. 이 티켓에 속한 이벤트만. */
+  taskId?: string;
   /** 기본 100, 상한 500 — 사람 쪽과 같은 정규화를 쓴다. */
   limit?: number;
 }
@@ -258,6 +261,7 @@ export async function getProjectLedgerLog(
     where("projectId", "==", projectId),
     ...(options.actorUid ? [where("actorUid", "==", options.actorUid)] : []),
     ...(options.toolName ? [where("toolName", "==", options.toolName)] : []),
+    ...(options.taskId ? [where("taskId", "==", options.taskId)] : []),
     orderBy("createdAt", "desc"),
     limitTo(max),
   ];
