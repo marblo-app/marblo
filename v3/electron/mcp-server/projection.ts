@@ -163,15 +163,37 @@ async function recomputeMissionCounts(
   db: Firestore,
   missionId: string,
 ): Promise<Record<string, number>> {
-  const snap = await getDocs(
+  const byMissionId = await getDocs(
     query(collection(db, "tasks"), where("missionId", "==", missionId)),
   );
+  const byContextId = await getDocs(
+    query(collection(db, "tasks"), where("contextId", "==", missionId)),
+  );
+  const rows = new Map<string, { status?: string }>();
+  byMissionId.forEach((d) => {
+    rows.set(d.id, d.data() as { status?: string });
+  });
+  byContextId.forEach((d) => {
+    rows.set(d.id, d.data() as { status?: string });
+  });
   const counts: Record<string, number> = {};
-  snap.forEach((d) => {
-    const s = (d.data() as { status?: string }).status;
+  rows.forEach((data) => {
+    const s = data.status;
     if (s) counts[s] = (counts[s] ?? 0) + 1;
   });
   return counts;
+}
+
+function missionIdFromTaskContext(task: {
+  missionId?: string;
+  contextId?: string;
+}): string | undefined {
+  if (task.missionId) return task.missionId;
+  const contextId = task.contextId;
+  if (!contextId || contextId === "board" || isLaneContext(contextId)) {
+    return undefined;
+  }
+  return contextId;
 }
 
 /**
@@ -201,7 +223,9 @@ export async function applyProjection(
   let seedCounts: Record<string, number> | undefined;
   const preTask = await getDoc(taskRef);
   const preMissionId = preTask.exists()
-    ? (preTask.data() as { missionId?: string }).missionId
+    ? missionIdFromTaskContext(
+        preTask.data() as { missionId?: string; contextId?: string },
+      )
     : undefined;
   if (preMissionId) {
     const preMission = await getDoc(doc(db, "missions", preMissionId));
@@ -222,6 +246,7 @@ export async function applyProjection(
     const taskData = taskSnap.data() as Record<string, unknown> & {
       status: TaskStatus;
       missionId?: string;
+      contextId?: string;
       projection?: TaskProjection;
     };
     const oldStatus = taskData.status;
@@ -243,7 +268,7 @@ export async function applyProjection(
       );
     }
 
-    const missionId = taskData.missionId;
+    const missionId = missionIdFromTaskContext(taskData);
     const missionRef = missionId ? doc(db, "missions", missionId) : null;
     // Firestore 트랜잭션은 모든 read 가 첫 write 이전이어야 함.
     const missionSnap = missionRef ? await txn.get(missionRef) : null;
@@ -264,11 +289,14 @@ export async function applyProjection(
       updatedAt: now,
     };
     if (mut.newStatus) taskUpdate.status = mut.newStatus;
+    if (missionId && !taskData.missionId) taskUpdate.missionId = missionId;
+    if (missionId && !taskData.contextId) taskUpdate.contextId = missionId;
     txn.update(taskRef, taskUpdate);
 
     if (activityRef && mut.activityPayload) {
       txn.set(activityRef, {
         taskId,
+        ...(missionId ? { missionId } : {}),
         agentId: mut.activityPayload.agentId,
         message: mut.activityPayload.message,
         createdAt: now,
@@ -276,7 +304,10 @@ export async function applyProjection(
     }
 
     if (missionRef && missionSnap?.exists()) {
-      const mData = missionSnap.data() as { projection?: MissionProjection };
+      const mData = missionSnap.data() as {
+        projection?: MissionProjection;
+        taskIds?: unknown;
+      };
       // seed 우선순위: 트랜잭션 내 실제 값 > 진입 전 재계산 seed. seedCounts 는 이
       // task 가 아직 oldStatus 인 현재 상태를 반영하므로, delta 가 old→new 를 마저
       // 적용하면 최종 카운트가 맞다.
@@ -284,9 +315,17 @@ export async function applyProjection(
       const nextCounts = mut.newStatus
         ? applyMissionStatusDelta(base, oldStatus, mut.newStatus)
         : { ...(base ?? {}) };
+      const taskIds = Array.isArray(mData.taskIds)
+        ? mData.taskIds.filter((id): id is string => typeof id === "string")
+        : [];
+      const nextTaskIds = taskIds.includes(taskId)
+        ? taskIds
+        : [...taskIds, taskId];
       txn.update(missionRef, {
+        taskIds: nextTaskIds,
         "projection.statusCounts": nextCounts,
         "projection.lastTaskActivityAt": now,
+        lastActivityAt: now,
       });
     }
   });

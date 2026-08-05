@@ -62,6 +62,28 @@ function resolveDeps(
   return out;
 }
 
+async function appendMissionTaskIds(
+  db: Firestore,
+  missionId: string,
+  taskIds: readonly string[],
+): Promise<void> {
+  if (taskIds.length === 0) return;
+  const missionRef = doc(db, "missions", missionId);
+  const snap = await getDoc(missionRef);
+  if (!snap.exists()) {
+    throw new Error(`Mission not found while attaching taskIds: ${missionId}`);
+  }
+  const data = snap.data() as { taskIds?: unknown };
+  const existing = Array.isArray(data.taskIds)
+    ? data.taskIds.filter((id): id is string => typeof id === "string")
+    : [];
+  const merged = Array.from(new Set([...existing, ...taskIds]));
+  await updateDoc(missionRef, {
+    taskIds: merged,
+    lastActivityAt: Timestamp.now(),
+  });
+}
+
 export function createTaskDispatcher(
   deps: TaskDispatcherDeps,
 ): TaskDispatcher & MissionBoardPort {
@@ -141,6 +163,11 @@ export function createTaskDispatcher(
       indexToId[i] = ref.id;
       orderedTaskIds.push(ref.id);
     }
+
+    // taskIds 는 Mission Replay 캡처의 조인 가드다. 상위 엔진도 dispatch 성공
+    // 뒤 merge 하지만, 여기서 먼저 붙여 create→dispatch 사이/직후 크래시가
+    // taskIds=0 미션을 남기지 않게 한다.
+    await appendMissionTaskIds(db, input.missionId, orderedTaskIds);
 
     // 3) Dispatch only tasks with no dependencies (initial layer). Downstream
     //    tasks become dispatchable when their deps complete — wait-step logic
