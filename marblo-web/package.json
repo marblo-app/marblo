@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\""
+    "test": "tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
+    "smoke:waitlist": "tsx scripts/waitlist-public-smoke.ts"
   },
   "dependencies": {
     "@tosspayments/tosspayments-sdk": "^2.6.0",
