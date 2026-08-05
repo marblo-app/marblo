@@ -1675,6 +1675,99 @@ describe("marketing_contacts collection", () => {
   });
 });
 
+describe("betatester50_waitlist collection (marblo-web public signup)", () => {
+  // marblo-web BetaTester50SignupForm 이 실제로 보내는 9필드 payload.
+  const validPayload = (overrides: Record<string, unknown> = {}) => ({
+    email: "test@example.com",
+    locale: "ko",
+    source: "home",
+    agreed: true,
+    agreedAt: new Date(),
+    createdAt: new Date(),
+    marketingConsent: false,
+    marketingConsentVersion: null,
+    marketingConsentAt: null,
+    ...overrides,
+  });
+
+  it("미인증 사용자가 마케팅 동의 미체크(9필드, null 2개)로 신청할 수 있다", async () => {
+    const db = unauthContext().firestore();
+    await assertSucceeds(
+      addDoc(collection(db, "betatester50_waitlist"), validPayload()),
+    );
+  });
+
+  it("미인증 사용자가 마케팅 동의 체크(9필드, 값 채움)로 신청할 수 있다", async () => {
+    const db = unauthContext().firestore();
+    await assertSucceeds(
+      addDoc(
+        collection(db, "betatester50_waitlist"),
+        validPayload({
+          marketingConsent: true,
+          marketingConsentVersion: "2026-07-31",
+          marketingConsentAt: new Date(),
+        }),
+      ),
+    );
+  });
+
+  it("marketingConsent 가 bool 이 아니면 거부된다", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(
+      addDoc(
+        collection(db, "betatester50_waitlist"),
+        validPayload({ marketingConsent: "true" }),
+      ),
+    );
+  });
+
+  it("marketingConsentVersion 이 string/null 이 아니면 거부된다", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(
+      addDoc(
+        collection(db, "betatester50_waitlist"),
+        validPayload({ marketingConsentVersion: 123 }),
+      ),
+    );
+  });
+
+  it("marketingConsentAt 이 timestamp/null 이 아니면 거부된다", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(
+      addDoc(
+        collection(db, "betatester50_waitlist"),
+        validPayload({ marketingConsentAt: "2026-07-31" }),
+      ),
+    );
+  });
+
+  it("스키마에 없는 추가 필드가 섞이면 거부된다", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(
+      addDoc(
+        collection(db, "betatester50_waitlist"),
+        validPayload({ utmCampaign: "x" }),
+      ),
+    );
+  });
+
+  it("이메일 형식이 틀리면 거부된다", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(
+      addDoc(
+        collection(db, "betatester50_waitlist"),
+        validPayload({ email: "not-an-email" }),
+      ),
+    );
+  });
+
+  it("list/get 은 여전히 전면 차단(존재해도 열람 불가)", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(getDocs(collection(db, "betatester50_waitlist")));
+    await assertFails(getDoc(doc(db, "betatester50_waitlist", "any-id")));
+  });
+});
+
 describe("push_tokens collection", () => {
   it("클라이언트에서 푸시 토큰을 읽거나 쓸 수 없다", async () => {
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
