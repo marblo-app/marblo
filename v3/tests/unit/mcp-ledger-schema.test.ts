@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { createHash } from "node:crypto";
 import {
   buildLedgerEvent,
+  deriveLedgerWorktreeId,
   deriveWorktreeId,
   hashInstruction,
   parseWorktreePath,
@@ -146,6 +147,42 @@ describe("worktreeAttributionCwd — 귀속 근거는 cwd 뿐 (회귀 가드)", 
   });
 });
 
+describe("deriveLedgerWorktreeId — cwd 우선, taskId 근거 보강", () => {
+  it("규약 cwd 가 있으면 경로에서 파생한 worktreeId 를 우선한다", () => {
+    const pathProject = "uVJL1vnoiCpqbCUbFxTd";
+    expect(
+      deriveLedgerWorktreeId({
+        cwd: wt(pathProject, TASK),
+        homeDir: HOME,
+        projectId: PROJECT,
+        taskId: TASK,
+      }),
+    ).toBe(`${pathProject}/${TASK}`);
+  });
+
+  it("규약 밖 cwd 여도 taskId 근거가 있으면 projectId/taskId 로 귀속한다", () => {
+    expect(
+      deriveLedgerWorktreeId({
+        cwd: "/tmp/manual-checkout",
+        homeDir: HOME,
+        projectId: PROJECT,
+        taskId: TASK,
+      }),
+    ).toBe(`${PROJECT}/${TASK}`);
+  });
+
+  it("규약 밖 cwd 이고 taskId 근거도 없으면 null 을 유지한다", () => {
+    expect(
+      deriveLedgerWorktreeId({
+        cwd: "/tmp/manual-checkout",
+        homeDir: HOME,
+        projectId: PROJECT,
+        taskId: null,
+      }),
+    ).toBeNull();
+  });
+});
+
 describe("hashInstruction — 원문 대신 해시 (§5)", () => {
   it("sha256 해시를 접두사와 함께 낸다", () => {
     const text = "티켓 IEQ… 작업 지시";
@@ -273,7 +310,17 @@ describe("buildLedgerEvent — 스키마 조립 (§5/§15)", () => {
     });
   });
 
-  it("규약 밖 cwd 에서는 worktreeId 가 null 로 남는다", () => {
+  it("규약 밖 cwd 여도 taskId 가 있으면 projectId/taskId 로 귀속한다", () => {
+    const event = buildLedgerEvent({
+      ...baseInput,
+      params: { task_id: TASK },
+      cwd: "/tmp/manual-checkout",
+      homeDir: HOME,
+    });
+    expect(event.worktreeId).toBe(`${PROJECT}/${TASK}`);
+  });
+
+  it("규약 밖 cwd 이고 taskId 가 없으면 worktreeId 가 null 로 남는다", () => {
     const event = buildLedgerEvent({
       ...baseInput,
       cwd: "/tmp/manual-checkout",

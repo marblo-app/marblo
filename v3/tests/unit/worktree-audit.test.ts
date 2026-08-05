@@ -3,7 +3,8 @@
  *
  * 티켓의 핵심 요구를 그대로 못박는다:
  *   - 물리 삭제된 워크트리도 조회된다(origin="ledger")
- *   - worktreeId=null(규약 외)은 억지 귀속되지 않는다
+ *   - 규약 밖이어도 taskId 근거가 있으면 projectId/taskId 로 귀속한다
+ *   - worktreeId=null(규약 외+taskId 없음)은 억지 귀속되지 않는다
  *   - preLedger 구간은 무결성 미보증으로 별도 집계된다
  *   - 오케 3질문(Q1 지금 도는가/Q2 지워도 안전한가/Q3 그때 뭐가 돌았나)은
  *     근거가 없으면 반드시 "unknown" — 절대 추측하지 않는다
@@ -39,6 +40,17 @@ describe("classifyWorktreeDir", () => {
     expect(r.worktreeId).toBeNull();
     expect(r.identity).toBeNull();
     expect(r.offConventionReason).toMatch(/규약/);
+  });
+
+  it("규약 밖 경로라도 taskId 근거가 있으면 티켓 워크트리로 귀속한다", () => {
+    const r = classifyWorktreeDir("/tmp/manual-checkout", {
+      homeDir: HOME,
+      projectId: "proj1",
+      taskId: "task1",
+    });
+    expect(r.worktreeId).toBe("proj1/task1");
+    expect(r.identity).toEqual({ projectId: "proj1", taskId: "task1" });
+    expect(r.offConventionReason).toMatch(/taskId/);
   });
 });
 

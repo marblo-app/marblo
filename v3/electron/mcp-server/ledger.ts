@@ -60,7 +60,7 @@ export interface LedgerEvent {
   instructionHash: string | null;
   /** 이 행위가 속한 티켓. */
   taskId: string | null;
-  /** 경로 규약에서 파생된 결정적 문자열(§8). 규약 밖이면 null. */
+  /** 경로 규약에서 우선 파생하고, 규약 밖이면 taskId 근거로 보강한 결정적 문자열(§8). */
   worktreeId: string | null;
 
   // ── 체인(§6) — L3 가 채운다. 이번 슬라이스는 write 하지 않는다 ──
@@ -113,8 +113,10 @@ export interface WorktreeIdentity {
  * 하위 디렉터리도 받는다 — 에이전트 CLI 의 cwd 가 워크트리 루트가 아니라
  * `<worktree>/v3` 같은 하위일 수 있는데, 앞 두 조각은 그래도 결정적이다.
  *
- * 규약 밖 경로(수동 생성, /tmp/ 등)는 **null**. 억지로 귀속시키지 않는다 —
- * 판별 불가한 것을 확실한 것처럼 보이게 만드는 게 감사에서는 가장 나쁘다(§8).
+ * 규약 밖 경로(수동 생성, /tmp/ 등)는 **null**. 이 함수 단독으로는 억지로
+ * 귀속시키지 않는다 — 판별 불가한 것을 확실한 것처럼 보이게 만드는 게 감사에서는
+ * 가장 나쁘다(§8). 단, 원장 이벤트 조립 단계에서는 별도 taskId 근거가 있으면
+ * `deriveLedgerWorktreeId` 가 `<projectId>/<taskId>` 로 보강한다.
  */
 export function parseWorktreePath(
   absPath: string,
@@ -151,6 +153,39 @@ export function deriveWorktreeId(
   return identity ? `${identity.projectId}/${identity.taskId}` : null;
 }
 
+/**
+ * 원장 이벤트의 worktreeId 를 결정한다.
+ *
+ * 1. cwd 가 워크트리 규약 안이면 cwd 가 최우선 근거다. 이중 등록 프로젝트처럼 앱
+ *    상태와 경로가 어긋난 경우에도 경로 접두사를 숨기지 않는다.
+ * 2. cwd 가 규약 밖이어도 taskId 가 있으면 완료내역과 같은 단위인
+ *    `<projectId>/<taskId>` 로 귀속한다. 에이전트가 per-task 워크트리 밖에서
+ *    MCP 툴을 호출한 경우 감사 뷰가 "Outside worktree convention" 으로 떠버리는
+ *    것을 막기 위한 명시적 정책이다.
+ * 3. taskId 근거도 없으면 null 로 둔다. 이 경우는 여전히 억지 귀속 금지다.
+ */
+export function deriveLedgerWorktreeId(input: {
+  cwd?: string;
+  homeDir?: string;
+  projectId: string;
+  taskId: string | null;
+}): string | null {
+  const fromCwd =
+    input.cwd && input.homeDir
+      ? deriveWorktreeId(input.cwd, { homeDir: input.homeDir })
+      : null;
+  if (fromCwd) return fromCwd;
+
+  if (
+    looksLikeDocId(input.projectId) &&
+    input.taskId &&
+    looksLikeDocId(input.taskId)
+  ) {
+    return `${input.projectId}/${input.taskId}`;
+  }
+  return null;
+}
+
 // ── 지시문 해시 (§5) ──────────────────────────────────────────────
 
 export const INSTRUCTION_HASH_PREFIX = "sha256:";
@@ -177,7 +212,7 @@ export function hashInstruction(
 // ── 워크트리 귀속의 근거 경로 ────────────────────────────────────
 
 /**
- * worktreeId 를 파생시킬 때 근거로 삼는 경로 = **이 프로세스의 cwd 뿐이다.**
+ * worktreeId 를 파생시킬 때 첫 근거로 삼는 경로 = **이 프로세스의 cwd 뿐이다.**
  *
  * 근거: 에이전트 CLI 는 워크트리를 cwd 로 스폰되고(bridge-server.ts
  * `cwd: req.worktreePath`) MCP 서버는 그 cwd 를 상속한다. 그래서 cwd 가
@@ -190,6 +225,9 @@ export function hashInstruction(
  * 폴백으로 두면 그 env 가 설정되는 순간 모든 이벤트의 worktreeId 가 조용히
  * null 이 된다 — 귀속이 통째로 죽는데 아무 신호가 없다. 감사 원장에서 판별
  * 가능한 것을 판별 불가로 만들고 그 사실조차 안 보이는 게 최악의 실패 모드다.
+ *
+ * cwd 가 규약 밖이면 원장 조립 단계에서 taskId 근거로 보강할 수 있지만,
+ * `MARBLO_PROJECT_ROOT` 같은 env 경로는 여전히 근거가 아니다.
  *
  * env 를 인자로 받으면서 쓰지 않는 것이 이 함수의 요점이다 — 시그니처 자체가
  * "여기에 env 폴백을 다시 넣지 말 것"을 못 박는 회귀 가드이고, 테스트가 그
@@ -281,6 +319,7 @@ export function buildLedgerEvent(
 ): LedgerEventWrite {
   const homeDir = input.homeDir;
   const cwd = input.cwd;
+  const taskId = input.taskId ?? taskIdFromParams(input.params);
   return {
     projectId: input.projectId,
     agentId: input.agentId,
@@ -294,7 +333,12 @@ export function buildLedgerEvent(
     model: input.runtime?.model ?? null,
     tier: input.runtime?.tier ?? null,
     instructionHash: input.runtime?.instructionHash ?? null,
-    taskId: input.taskId ?? taskIdFromParams(input.params),
-    worktreeId: cwd && homeDir ? deriveWorktreeId(cwd, { homeDir }) : null,
+    taskId,
+    worktreeId: deriveLedgerWorktreeId({
+      cwd,
+      homeDir,
+      projectId: input.projectId,
+      taskId,
+    }),
   };
 }

@@ -16,7 +16,11 @@
  * 실패 모드다(오늘 오판의 상당수가 "머지됨"을 "동작함"의 근거로 승격시킨 데서 났다).
  */
 
-import { parseWorktreePath, type WorktreeIdentity } from "./ledger.js";
+import {
+  deriveLedgerWorktreeId,
+  parseWorktreePath,
+  type WorktreeIdentity,
+} from "./ledger.js";
 
 // ── 워크트리 경로 분류 ───────────────────────────────────────────
 
@@ -32,20 +36,39 @@ export interface WorktreeDirClassification {
  * 를 그대로 재사용한다(§2 재구현 금지) — 원장에 이벤트를 적재할 때 쓰는 것과
  * 완전히 같은 판별기라야 감사 뷰와 원장이 같은 worktreeId 를 말한다.
  *
- * 규약 밖 경로는 **worktreeId=null** 로 두고 억지 귀속하지 않는다(§8).
+ * 규약 밖 경로라도 taskId 근거가 있으면 `<projectId>/<taskId>` 로 귀속한다.
+ * taskId 근거도 없을 때만 **worktreeId=null** 로 두고 억지 귀속하지 않는다(§8).
  */
 export function classifyWorktreeDir(
   absPath: string,
-  opts: { homeDir: string },
+  opts: { homeDir: string; projectId?: string | null; taskId?: string | null },
 ): WorktreeDirClassification {
   const identity = parseWorktreePath(absPath, opts);
   if (!identity) {
+    const fallbackWorktreeId =
+      opts.projectId && opts.taskId
+        ? deriveLedgerWorktreeId({
+            cwd: absPath,
+            homeDir: opts.homeDir,
+            projectId: opts.projectId,
+            taskId: opts.taskId,
+          })
+        : null;
+    if (fallbackWorktreeId && opts.projectId && opts.taskId) {
+      return {
+        worktreeId: fallbackWorktreeId,
+        identity: { projectId: opts.projectId, taskId: opts.taskId },
+        offConventionReason:
+          "경로가 <root>/<projectId>/<taskId> 규약과 다르지만 taskId 근거가 있어 " +
+          "티켓 워크트리로 귀속합니다 (설계 §8).",
+      };
+    }
     return {
       worktreeId: null,
       identity: null,
       offConventionReason:
         "경로가 <root>/<projectId>/<taskId> 규약과 다릅니다 — 규약 외로 표기합니다 " +
-        "(원장 조인 불가, 억지 귀속 금지: 설계 §8).",
+        "(taskId 근거 없음, 억지 귀속 금지: 설계 §8).",
     };
   }
   return {
