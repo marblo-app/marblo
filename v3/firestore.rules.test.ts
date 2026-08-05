@@ -474,6 +474,27 @@ describe("projects collection", () => {
     await assertFails(getDoc(doc(db, "projects", PROJECT_ID)));
   });
 
+  it("레거시 프로젝트에서 ownerId는 members 누락이어도 프로젝트를 읽을 수 있다", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, "projects", "legacy-project-owner-only"), {
+        name: "Legacy Owner Only",
+        ownerId: OWNER_ID,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+
+    const ownerDb = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    const outsiderDb = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertSucceeds(
+      getDoc(doc(ownerDb, "projects", "legacy-project-owner-only")),
+    );
+    await assertFails(
+      getDoc(doc(outsiderDb, "projects", "legacy-project-owner-only")),
+    );
+  });
+
   it("프로젝트 생성 시 ownerId가 본인이어야 한다", async () => {
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
     await assertSucceeds(
@@ -526,7 +547,7 @@ describe("tasks collection", () => {
     await assertSucceeds(getDoc(doc(db, "tasks", "task-1")));
   });
 
-  it("owner라도 project.members에 없으면 태스크를 읽을 수 없다", async () => {
+  it("레거시 프로젝트에서 ownerId는 members 누락이어도 태스크를 읽고 쓸 수 있다", async () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
       await setDoc(doc(db, "projects", "legacy-no-members"), {
@@ -545,7 +566,34 @@ describe("tasks collection", () => {
     });
 
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
-    await assertFails(getDoc(doc(db, "tasks", "legacy-task-no-members")));
+    await assertSucceeds(getDoc(doc(db, "tasks", "legacy-task-no-members")));
+    await assertSucceeds(
+      updateDoc(doc(db, "tasks", "legacy-task-no-members"), {
+        status: "IN_PROGRESS",
+      }),
+    );
+    await assertSucceeds(
+      addDoc(collection(db, "activities"), {
+        taskId: "legacy-task-no-members",
+        agentId: "agent-legacy",
+        message: "owner write via legacy project",
+        createdAt: new Date(),
+      }),
+    );
+    await assertSucceeds(
+      addDoc(collection(db, "pendingInstructions"), {
+        projectId: "legacy-no-members",
+        taskId: "legacy-task-no-members",
+        targetAgentId: "agent-legacy",
+        message: "continue",
+        fromUserId: OWNER_ID,
+        fromUserName: "owner",
+        sourceType: "orchestrator",
+        isDelivered: false,
+        createdAt: new Date(),
+        deliveredAt: null,
+      }),
+    );
   });
 
   it("owner가 project.members에 백필되면 태스크를 읽을 수 있다", async () => {

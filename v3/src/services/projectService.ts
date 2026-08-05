@@ -96,8 +96,12 @@ export async function createProject(
   data: Omit<Project, "id" | "createdAt" | "updatedAt">,
 ): Promise<string> {
   const now = new Date();
+  const members = data.members.includes(data.ownerId)
+    ? data.members
+    : [data.ownerId, ...data.members];
   return createDocument(COLLECTION, {
     ...data,
+    members,
     createdAt: toTimestamp(now),
     updatedAt: toTimestamp(now),
   });

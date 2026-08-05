@@ -25,7 +25,9 @@ service cloud.firestore {
     }
 
     function isProjectMember(projectId) {
-      return request.auth.uid in getProject(projectId).members;
+      let project = getProject(projectId);
+      return request.auth.uid in project.get('members', [])
+        || request.auth.uid == project.ownerId;
     }
 
     function isTaskProjectMember(taskId) {
@@ -137,7 +139,8 @@ service cloud.firestore {
 
     match /projects/{projectId} {
       allow read: if isAuthenticated()
-        && request.auth.uid in resource.data.members;
+        && (request.auth.uid in resource.data.get('members', [])
+            || request.auth.uid == resource.data.ownerId);
       allow create: if isAuthenticated()
         && request.resource.data.ownerId == request.auth.uid
         && request.auth.uid in request.resource.data.members;
