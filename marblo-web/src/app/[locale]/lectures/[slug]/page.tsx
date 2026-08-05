@@ -181,10 +181,10 @@ export default function LectureDetailPage() {
       displayLabel: locale === 'ko' ? '기본 구성' : locale === 'ja' ? '基本構成' : 'Standard Edition',
       highlighted: true,
       features: locale === 'ko'
-        ? ['전체 8모듈 15.5시간 강의', '완성 소스코드 2개 프로젝트', '디스코드 커뮤니티 액세스', '마블로 Pro 6개월 무료 쿠폰', '마블로 초기 앰배서더 인증서', '평생 업데이트 무료']
+        ? ['전체 8모듈 15.5시간 강의', '완성 소스코드 2개 프로젝트', '디스코드 커뮤니티 액세스', '마블로 Pro 6개월 무료 쿠폰', '마블로 초기 앰배서더 인증서', '구매 후 1년간 업데이트 무료']
         : locale === 'ja'
-          ? ['全8モジュール 15.5時間講座', '完成ソースコード2プロジェクト', 'Discordコミュニティアクセス', 'Marblo Pro 6ヶ月無料クーポン', 'Marblo初期アンバサダー認定証', '永久無料アップデート']
-          : ['All 8 modules, 15.5h video', '2 complete project source codes', 'Discord community access', 'Marblo Pro 6-month free coupon', 'Marblo Early Ambassador Certificate', 'Lifetime free updates'],
+          ? ['全8モジュール 15.5時間講座', '完成ソースコード2プロジェクト', 'Discordコミュニティアクセス', 'Marblo Pro 6ヶ月無料クーポン', 'Marblo初期アンバサダー認定証', '購入後1年間アップデート無料']
+          : ['All 8 modules, 15.5h video', '2 complete project source codes', 'Discord community access', 'Marblo Pro 6-month free coupon', 'Marblo Early Ambassador Certificate', 'Free updates for 1 year after purchase'],
     },
     {
       key: 'proBudle' as const,

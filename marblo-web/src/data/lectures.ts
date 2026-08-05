@@ -144,7 +144,7 @@ From weather dashboard warmup → AI SaaS main project → GCP deployment → Sa
       "마블로 Pro 6개월 무료 쿠폰",
       "디스코드 커뮤니티 + 월간 라이브 Q&A",
       "마블로 초기 앰배서더 인증서 (추후 지속 혜택)",
-      "평생 업데이트 무료",
+      "구매 후 1년간 업데이트 무료",
     ],
     features_en: [
       "Full 8 modules, 15.5 hours of video",
@@ -155,7 +155,7 @@ From weather dashboard warmup → AI SaaS main project → GCP deployment → Sa
       "Marblo Pro 6-month free coupon",
       "Discord community + monthly live Q&A",
       "Marblo Early Ambassador Certificate (ongoing perks)",
-      "Lifetime free updates",
+      "Free updates for 1 year after purchase",
     ],
     requirements: [
       "프로그래밍 기초 (어떤 언어든 OK)",
