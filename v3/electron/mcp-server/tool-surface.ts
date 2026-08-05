@@ -48,6 +48,7 @@ export const PROJECT_ID_TOOL_CONTRACTS: Readonly<
   create_flow: "locked",
   get_flows: "locked",
   add_pending_instruction: "locked",
+  get_pending_instructions: "locked",
   get_open_questions: "locked",
   get_routing_effectiveness: "locked",
   get_model_guidance: "locked",

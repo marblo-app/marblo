@@ -469,6 +469,78 @@ async function notifyOrchestratorAwaited(
   }
 }
 
+interface BridgeAgentSummary {
+  id: string;
+  name?: string;
+  status?: string;
+}
+
+async function findLocalBridgeAgent(
+  projectId: string,
+  agentId: string,
+): Promise<
+  | { state: "found"; agent: BridgeAgentSummary }
+  | { state: "not_found" }
+  | { state: "unknown"; error: string }
+> {
+  const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+  if (!bridgePort) return { state: "unknown", error: "no bridge port" };
+  try {
+    const url = new URL(`http://127.0.0.1:${bridgePort}/agents`);
+    if (projectId) url.searchParams.set("projectId", projectId);
+    const res = await fetch(url, { headers: bridgeHeaders() });
+    if (!res.ok)
+      return { state: "unknown", error: `bridge HTTP ${res.status}` };
+    const body = (await res.json()) as { agents?: unknown };
+    const agents = Array.isArray(body.agents) ? body.agents : [];
+    for (const raw of agents) {
+      if (typeof raw !== "object" || raw === null) continue;
+      const a = raw as Record<string, unknown>;
+      if (a.id !== agentId) continue;
+      return {
+        state: "found",
+        agent: {
+          id: String(a.id),
+          name: typeof a.name === "string" ? a.name : undefined,
+          status: typeof a.status === "string" ? a.status : undefined,
+        },
+      };
+    }
+    return { state: "not_found" };
+  } catch (err) {
+    return {
+      state: "unknown",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+async function requireReadableProjectMember(projectId: string): Promise<
+  | { ok: true }
+  | {
+      ok: false;
+      message: string;
+    }
+> {
+  try {
+    const snap = await getDoc(doc(db, "projects", projectId));
+    if (!snap.exists()) {
+      return { ok: false, message: `Error: Project ${projectId} not found.` };
+    }
+    return { ok: true };
+  } catch (err) {
+    const uid = getCurrentAuthUid() || "unknown";
+    const code = (err as { code?: unknown } | null)?.code;
+    const suffix = typeof code === "string" ? ` (code=${code})` : "";
+    return {
+      ok: false,
+      message:
+        `Error: Firebase uid ${uid} is not authorized for project ${projectId}${suffix}. ` +
+        "MCP task/activity/pendingInstructions tools use the client Firebase SDK and must pass firestore.rules isProjectMember(projectId); this is a project membership/auth path failure, not a rules-shape issue.",
+    };
+  }
+}
+
 /**
  * B안 Phase 2 보고 채널 — 오케스트레이터의 `mission_step_done` 을 미션 지휘자
  * (Conductor) 로 전달한다.
@@ -5544,11 +5616,14 @@ export function registerTools(server: McpServer): void {
           "Error: projectId could not be resolved. Pass project_id or set MARBLO_PROJECT.",
         );
       }
+      const membership = await requireReadableProjectMember(projectId);
+      if (!membership.ok) return text(membership.message);
 
       const callerUid = getCurrentAuthUid();
       if (!callerUid) {
         return text("Error: Firebase auth is not ready for send_instruction.");
       }
+      const localAgent = await findLocalBridgeAgent(projectId, target_agent_id);
       const ref = await addDoc(collection(db, "pendingInstructions"), {
         projectId,
         taskId: task_id ?? null,
@@ -5561,7 +5636,25 @@ export function registerTools(server: McpServer): void {
         createdAt: Timestamp.now(),
         deliveredAt: null,
       });
-      return text(`Pending instruction queued: ${ref.id}`);
+      const listenerLine =
+        localAgent.state === "found"
+          ? `listener=local agent_status=${
+              localAgent.agent.status ?? "unknown"
+            }`
+          : localAgent.state === "not_found"
+          ? "listener=no_listener (not hosted by this Marblo app; a teammate's app may still deliver it if signed in as a project member)"
+          : `listener=unknown (${localAgent.error})`;
+      const status =
+        localAgent.state === "not_found" ? "queued/no_listener" : "queued";
+      return text(
+        `Pending instruction ${status}: ${ref.id}\n` +
+          `status=${status}\n` +
+          `instruction_id=${ref.id}\n` +
+          `project=${projectId}\n` +
+          `target_agent=${target_agent_id}\n` +
+          `${listenerLine}\n` +
+          `verify_with=get_pending_instructions(target_agent_id="${target_agent_id}", project_id="${projectId}", include_delivered=true)`,
+      );
     },
   );
 
@@ -5579,13 +5672,31 @@ export function registerTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe("Include already-delivered entries (default: false)"),
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+        ),
       limit: z
         .number()
         .optional()
         .describe("Max entries to return (default: 50)"),
     },
-    async ({ target_agent_id, include_delivered, limit }) => {
+    async ({ target_agent_id, include_delivered, project_id, limit }) => {
+      const projectId = await enforceProjectLock(
+        "get_pending_instructions",
+        project_id,
+      );
+      if (!projectId) {
+        return text(
+          "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter.",
+        );
+      }
+      const membership = await requireReadableProjectMember(projectId);
+      if (!membership.ok) return text(membership.message);
       const constraints: QueryConstraint[] = [
+        where("projectId", "==", projectId),
         where("targetAgentId", "==", target_agent_id),
       ];
       if (!include_delivered) {
@@ -5594,7 +5705,10 @@ export function registerTools(server: McpServer): void {
       const q = query(collection(db, "pendingInstructions"), ...constraints);
       const snap = await getDocs(q);
 
-      if (snap.empty) return text("No pending instructions.");
+      if (snap.empty)
+        return text(
+          `No pending instructions for target_agent=${target_agent_id} in project=${projectId}.`,
+        );
 
       const max = typeof limit === "number" && limit > 0 ? limit : 50;
       const docs = snap.docs
@@ -5610,7 +5724,7 @@ export function registerTools(server: McpServer): void {
         const delivered = d.isDelivered ? " [delivered]" : "";
         const who = d.fromUserName || d.fromUserId || "system";
         const src = d.sourceType || "other";
-        return `- ${d.id} (from=${who}, src=${src})${delivered}: ${d.message}`;
+        return `- ${d.id} (project=${projectId}, from=${who}, src=${src})${delivered}: ${d.message}`;
       });
       return text(lines.join("\n"));
     },
