@@ -9,6 +9,7 @@ import { isImplicitMission } from "../../types/mission";
 import * as missionService from "../../services/missionService";
 import * as taskService from "../../services/taskService";
 import { useProjectStore } from "../../stores/projectStore";
+import { useNavigationStore } from "../../stores/navigationStore";
 import { MissionList } from "../missions/MissionList";
 import { MissionDetail } from "../missions/MissionDetail";
 import { MissionTemplateCatalog } from "../missions/MissionTemplateCatalog";
@@ -41,6 +42,8 @@ export function MissionsTab() {
   const [userPickedId, setUserPickedId] = useState<string | null>(null);
   const [launchTemplate, setLaunchTemplate] =
     useState<MissionLaunchTemplateId | null>(null);
+  const pendingJump = useNavigationStore((s) => s.pendingJump);
+  const consumeJump = useNavigationStore((s) => s.consumeJump);
 
   useEffect(() => {
     if (!projectId) {
@@ -90,6 +93,13 @@ export function MissionsTab() {
 
     setSelectedId(candidate?.id ?? null);
   }, [missions, selectedId, userPickedId]);
+
+  useEffect(() => {
+    if (pendingJump?.type !== "mission") return;
+    setSelectedId(pendingJump.missionId);
+    setUserPickedId(pendingJump.missionId);
+    consumeJump();
+  }, [pendingJump, consumeJump]);
 
   // 사용자가 list 에서 클릭 — userPickedId 도 함께 업데이트.
   const handleSelect = (id: string | null) => {

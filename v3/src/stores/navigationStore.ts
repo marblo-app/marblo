@@ -12,6 +12,7 @@ import { create } from "zustand";
  */
 export type JumpTarget =
   | { type: "task"; id: string }
+  | { type: "mission"; missionId: string }
   | { type: "agent"; id: string }
   | { type: "code" }
   // Worktrees surface — the escape hatch from the Code tab's per-file diff to

@@ -19,6 +19,19 @@ export const lanes = {
   "lanes.header.runningCount": "{count}개 병렬 실행 중",
   "lanes.newButton": "＋ 빠른 작업",
 
+  // Unified Quick Lanes + Missions view
+  "lanes.section.quickLanes": "빠른 작업",
+  "lanes.section.missions": "미션",
+  "lanes.kind.quickLane": "레인",
+  "lanes.kind.mission": "미션",
+  "lanes.missions.empty.title": "아직 진행 중인 미션이 없습니다.",
+  "lanes.missions.empty.hint":
+    "템플릿을 골라 첫 미션을 시작하면 오케스트레이터가 여러 작업을 나누고 진행 상황을 여기서 보여줍니다.",
+  "lanes.missions.empty.cta": "첫 미션 시작",
+  "lanes.missions.openDetail": "{title} 미션 상세 열기",
+  "lanes.missions.model.orchestrator": "Orchestrator",
+  "lanes.missions.taskCount": "task {count}개",
+
   // 낙관적(pending) 카드 — 티켓/에이전트 doc 이 돌아오기 전 단계 표시
   "lanes.pending.creating": "티켓 생성 중…",
   "lanes.pending.spawning": "에이전트 스폰 · 워크트리 준비 중…",

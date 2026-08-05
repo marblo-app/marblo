@@ -9,8 +9,10 @@ import { useUiStore } from "../../stores/uiStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useAgentSessionMap } from "../../stores/agentSessionMap";
+import { useNavigationStore } from "../../stores/navigationStore";
 import * as taskService from "../../services/taskService";
 import * as agentService from "../../services/agentService";
+import * as missionService from "../../services/missionService";
 import { checkAgentSpawn } from "../../lib/planLimits";
 import { buildLaneContextId, isLaneContext } from "../../lib/laneContext";
 import { laneStatusPill } from "../../lib/laneStatus";
@@ -28,6 +30,10 @@ import {
 } from "../../lib/spawnedModelLabel";
 import type { Agent } from "../../types/agent";
 import type { ModelType } from "../../types/agent";
+import type { Mission } from "../../types/mission";
+import type { TaskStatus } from "../../types/task";
+import { MissionStatusBadge } from "../missions/MissionStatusBadge";
+import { templateMeta } from "../missions/templates";
 import { LaneCreateModal, type LaneLaunchInput } from "./LaneCreateModal";
 import { LaneDeleteConfirmModal } from "./LaneDeleteConfirmModal";
 import { LaneDetailDrawer } from "./LaneDetailDrawer";
@@ -44,6 +50,16 @@ const isLaneRow = (contextId: string | undefined | null): boolean =>
   isLaneContext(contextId);
 
 type LaneRowAction = "delete" | "restart";
+
+const TASK_STATUS_ORDER: TaskStatus[] = [
+  "TODO",
+  "CLAIMED",
+  "IN_PROGRESS",
+  "REVIEW",
+  "BLOCKED",
+  "FAILED",
+  "DONE",
+];
 
 /**
  * 아직 보드/에이전트 스토어에 나타나기 전의 레인 — **낙관적 카드**.
@@ -67,6 +83,67 @@ interface PendingLane {
   /** 티켓이 만들어진 뒤 채워진다 — 진짜 레인 행이 나타나면 이 카드를 걷는다. */
   taskId?: string;
   error?: string;
+}
+
+interface MissionProgress {
+  done: number;
+  total: number;
+  percent: number;
+  label: string;
+  statusCounts: Array<{ status: TaskStatus; count: number }>;
+}
+
+function missionTitle(mission: Mission): string {
+  const raw =
+    mission.implicitLabel || templateMeta(mission.templateId)?.label || "";
+  return raw ? `${raw}: ${mission.goal}` : mission.goal;
+}
+
+function missionProgress(mission: Mission): MissionProgress {
+  const rawCounts = mission.projection?.statusCounts ?? {};
+  const statusCounts = TASK_STATUS_ORDER.map((status) => ({
+    status,
+    count: Number(rawCounts[status] ?? 0),
+  })).filter((item) => item.count > 0);
+  const countedTotal = statusCounts.reduce((sum, item) => sum + item.count, 0);
+
+  if (countedTotal > 0 || mission.taskIds.length > 0) {
+    const total = Math.max(countedTotal, mission.taskIds.length);
+    const done = Number(rawCounts.DONE ?? 0);
+    const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+    return {
+      done,
+      total,
+      percent,
+      label: `${done}/${total} tasks`,
+      statusCounts,
+    };
+  }
+
+  const total = mission.steps.length;
+  const done = mission.steps.filter(
+    (step) => step.status === "success" || step.status === "skipped",
+  ).length;
+  const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+  return {
+    done,
+    total,
+    percent,
+    label: total > 0 ? `${done}/${total} steps` : "No dispatched tasks",
+    statusCounts: [],
+  };
+}
+
+function missionTaskModelLabels(
+  mission: Mission,
+  agents: readonly Agent[],
+): string[] {
+  const taskIds = new Set(mission.taskIds);
+  const labels = agents
+    .filter((agent) => agent.currentTaskId && taskIds.has(agent.currentTaskId))
+    .map((agent) => spawnedModelLabel(agent.spawnedModel) || agent.model)
+    .filter((label): label is string => Boolean(label));
+  return Array.from(new Set(labels)).slice(0, 3);
 }
 
 function hasWorktreeConflict(worktree: Worktree | null): boolean {
@@ -108,6 +185,7 @@ export function LanesTab() {
   const refreshWorktrees = useWorktreeStore((s) => s.refresh);
   const removeWorktree = useWorktreeStore((s) => s.remove);
   const restartAgent = useAgentStore((s) => s.restartAgent);
+  const requestJump = useNavigationStore((s) => s.requestJump);
   const { t } = useTranslation();
 
   const [showCreate, setShowCreate] = useState(false);
@@ -122,6 +200,7 @@ export function LanesTab() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingLane[]>([]);
+  const [missions, setMissions] = useState<Mission[]>([]);
   const [busy, setBusy] = useState<{
     taskId: string;
     action: LaneRowAction;
@@ -133,13 +212,18 @@ export function LanesTab() {
     );
 
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId) {
+      setMissions([]);
+      return;
+    }
     const u1 = subscribeTasks(projectId);
     const u2 = subscribeAgents(projectId);
+    const u3 = missionService.subscribeToMissions(projectId, setMissions);
     refreshWorktrees().catch(() => {});
     return () => {
       u1?.();
       u2?.();
+      u3?.();
     };
   }, [projectId, subscribeTasks, subscribeAgents, refreshWorktrees]);
 
@@ -161,6 +245,15 @@ export function LanesTab() {
    * 유닛 테스트가 전수로 검증한다.
    */
   const laneGroups = useMemo(() => groupLaneRows(laneRows), [laneRows]);
+
+  const visibleMissions = useMemo(
+    () =>
+      missions.filter(
+        (mission) =>
+          mission.status !== "completed" || (mission.taskIds?.length ?? 0) > 0,
+      ),
+    [missions],
+  );
 
   /** 드로우가 보는 행 — 매 렌더 되찾아 라이브 상태를 따라간다. */
   const detailRow = useMemo(
@@ -570,22 +663,33 @@ export function LanesTab() {
         </div>
       )}
 
-      {laneRows.length === 0 && activePending.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
-          <div>
-            <p className="text-sm text-gray-300">{t("lanes.empty.title")}</p>
-            <p className="mt-1 text-xs text-gray-500">
-              {t("lanes.empty.hint")}
-            </p>
+      <div className="flex-1 space-y-5 overflow-y-auto">
+        <section>
+          <div className="mb-2 flex items-center gap-2">
+            <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-300">
+              {t("lanes.kind.quickLane")}
+            </span>
+            <h3 className="text-xs font-semibold text-gray-300">
+              {t("lanes.section.quickLanes")}
+            </h3>
+            <span className="h-px flex-1 bg-gray-800" />
           </div>
-        </div>
-      ) : (
+          {laneRows.length === 0 && activePending.length === 0 ? (
+            <div className="flex min-h-[160px] items-center justify-center rounded-lg border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
+              <div>
+                <p className="text-sm text-gray-300">{t("lanes.empty.title")}</p>
+                <p className="mt-1 text-xs text-gray-500">
+                  {t("lanes.empty.hint")}
+                </p>
+              </div>
+            </div>
+          ) : (
         // ★라인(상태 레인)별로 접어 둔다. 라인 안에서는 여전히 **카드 그리드**다:
         // 병렬로 도는 레인들이 세로로 한 줄씩 쌓이면 "큐" 처럼 읽히고, 나란히
         // 서면 "동시에 도는 것들" 로 읽힌다(그 판단은 그대로 유지). 라인이 바꾸는
         // 것은 카드의 배치가 아니라 묶음 — "지금 굴러가는 것"과 "치우면 되는 것"을
         // 카드마다 pill 을 읽어 가려내지 않아도 되게 한다.
-        <div className="flex-1 space-y-4 overflow-y-auto">
+        <div className="space-y-4">
           {renderGroups.map(({ def, rows }) => {
             const pendingHere = def.id === "active" ? activePending : [];
             const count = rows.length + pendingHere.length;
@@ -777,7 +881,135 @@ export function LanesTab() {
             );
           })}
         </div>
-      )}
+          )}
+        </section>
+
+        <section data-testid="lanes-missions-section">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-sky-300">
+              {t("lanes.kind.mission")}
+            </span>
+            <h3 className="text-xs font-semibold text-gray-300">
+              {t("lanes.section.missions")}
+            </h3>
+            <span className="text-[11px] text-gray-500">
+              {visibleMissions.length}
+            </span>
+            <span className="h-px flex-1 bg-gray-800" />
+          </div>
+
+          {visibleMissions.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-sky-500/25 bg-sky-500/5 p-5">
+              <p className="text-sm font-medium text-gray-200">
+                {t("lanes.missions.empty.title")}
+              </p>
+              <p className="mt-1 max-w-2xl text-xs text-gray-500">
+                {t("lanes.missions.empty.hint")}
+              </p>
+              <button
+                type="button"
+                onClick={() =>
+                  window.dispatchEvent(new CustomEvent("marblo:open-missions"))
+                }
+                className="mt-3 rounded border border-sky-500/40 px-3 py-1.5 text-xs font-medium text-sky-300 transition hover:bg-sky-500/10"
+              >
+                {t("lanes.missions.empty.cta")}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {visibleMissions.map((mission) => {
+                const progress = missionProgress(mission);
+                const modelLabels = missionTaskModelLabels(mission, agents);
+                const taskCount = mission.taskIds?.length ?? 0;
+                return (
+                  <div
+                    key={mission.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() =>
+                      requestJump({ type: "mission", missionId: mission.id })
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        requestJump({
+                          type: "mission",
+                          missionId: mission.id,
+                        });
+                      }
+                    }}
+                    className="cursor-pointer rounded-lg border border-gray-700/60 bg-gray-800/40 p-3 transition hover:border-sky-500/50 hover:bg-gray-800/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60"
+                    aria-label={t("lanes.missions.openDetail", {
+                      title: mission.goal,
+                    })}
+                  >
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="truncate text-sm font-medium text-gray-100">
+                            {missionTitle(mission)}
+                          </span>
+                          <MissionStatusBadge status={mission.status} compact />
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {mission.goal}
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          {modelLabels.length > 0 ? (
+                            modelLabels.map((label) => (
+                              <span
+                                key={label}
+                                className="rounded border border-[#45475a] bg-[#181825] px-1.5 py-0.5 font-mono text-[10px] text-[#a6adc8]"
+                              >
+                                {label}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="rounded border border-gray-700 bg-gray-900/60 px-1.5 py-0.5 text-[10px] text-gray-500">
+                              {t("lanes.missions.model.orchestrator")}
+                            </span>
+                          )}
+                          <span className="text-[11px] text-gray-500">
+                            {t("lanes.missions.taskCount", {
+                              count: String(taskCount),
+                            })}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="w-full shrink-0 lg:w-72">
+                        <div className="mb-1 flex items-center justify-between text-[11px] text-gray-500">
+                          <span>{progress.label}</span>
+                          <span>{progress.percent}%</span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-gray-900">
+                          <div
+                            className="h-full rounded-full bg-sky-400"
+                            style={{ width: `${progress.percent}%` }}
+                          />
+                        </div>
+                        {progress.statusCounts.length > 0 && (
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {progress.statusCounts.map((item) => (
+                              <span
+                                key={item.status}
+                                className="rounded bg-gray-900/70 px-1.5 py-0.5 text-[10px] text-gray-400"
+                              >
+                                {item.status} {item.count}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </div>
 
       {detailRow && (
         <LaneDetailDrawer

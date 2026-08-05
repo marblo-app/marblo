@@ -5,6 +5,8 @@ import { useAgentStore } from "./stores/agentStore";
 import { useProjectStore } from "./stores/projectStore";
 import { useOrchestratorStore } from "./stores/orchestratorStore";
 import { useTaskStore } from "./stores/taskStore";
+import { usePaneStore } from "./stores/paneStore";
+import { useSplitWorkspaceStore } from "./stores/splitWorkspaceStore";
 
 // Test hatch — Playwright e2e fixture 가 zustand store 를 직접 manipulate 할
 // 수 있도록 window.__marbloTest 에 노출. main process 가
@@ -20,6 +22,8 @@ if (window.electronAPI?.testMode?.bypassAuth) {
       project: useProjectStore,
       orchestrator: useOrchestratorStore,
       task: useTaskStore,
+      pane: usePaneStore,
+      splitWorkspace: useSplitWorkspaceStore,
     },
   };
   console.debug("[TestHatch] window.__marbloTest exposed (bypassAuth mode)");

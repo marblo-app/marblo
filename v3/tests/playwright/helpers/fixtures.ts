@@ -50,6 +50,7 @@ export interface MarbloHandle {
       | "guide"
       | "startHere"
       | "board"
+      | "lanes"
       | "missions"
       | "code"
       | "agents"
@@ -642,6 +643,7 @@ function labelOf(tabId: string): string {
     guide: "Guide",
     startHere: "Start here",
     board: "Board",
+    lanes: "Quick Lanes",
     missions: "Missions",
     code: "Code",
     agents: "Agents",
@@ -669,6 +671,7 @@ function shellLabelOf(tabId: string): string {
     guide: "가이드",
     startHere: "시작하기",
     board: "보드",
+    lanes: "퀵레인",
     missions: "미션",
     code: "코드",
     agents: "에이전트",

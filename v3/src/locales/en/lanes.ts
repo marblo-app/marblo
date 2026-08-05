@@ -20,6 +20,19 @@ export const lanes: Record<keyof typeof koLanes, string> = {
   "lanes.header.runningCount": "{count} running in parallel",
   "lanes.newButton": "＋ Quick task",
 
+  // Unified Quick Lanes + Missions view
+  "lanes.section.quickLanes": "Quick tasks",
+  "lanes.section.missions": "Missions",
+  "lanes.kind.quickLane": "Lane",
+  "lanes.kind.mission": "Mission",
+  "lanes.missions.empty.title": "No missions in progress yet.",
+  "lanes.missions.empty.hint":
+    "Pick a template to start your first mission. The orchestrator will split it into tasks and show progress here.",
+  "lanes.missions.empty.cta": "Start first mission",
+  "lanes.missions.openDetail": "Open mission details for {title}",
+  "lanes.missions.model.orchestrator": "Orchestrator",
+  "lanes.missions.taskCount": "{count} tasks",
+
   // Optimistic (pending) cards — stages before the task/agent docs come back
   "lanes.pending.creating": "Creating ticket…",
   "lanes.pending.spawning": "Spawning agent · preparing worktree…",

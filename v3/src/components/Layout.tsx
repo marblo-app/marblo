@@ -153,7 +153,7 @@ export function Layout() {
   // Plus a custom event so future Sidebar/Header buttons can trigger Harness.
   const toggleActivityStream = useActivityStreamStore((s) => s.toggle);
 
-  // When Activity Stream requests a jump (task / agent), switch to the right
+  // When Activity Stream requests a jump (task / agent / mission), switch to the right
   // tab. The destination tab consumes the latched target on mount via
   // useNavigationStore.consumeJump() and applies its own selection.
   const pendingJump = useNavigationStore((s) => s.pendingJump);
@@ -161,6 +161,7 @@ export function Layout() {
   useEffect(() => {
     if (!pendingJump) return;
     if (pendingJump.type === "task") setActiveTab("board");
+    else if (pendingJump.type === "mission") setActiveTab("missions");
     else if (pendingJump.type === "agent") setActiveTab("agents");
     else if (pendingJump.type === "code") {
       // Sidebar file click → bring the Code tab forward. Nothing downstream

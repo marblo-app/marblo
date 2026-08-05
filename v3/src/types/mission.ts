@@ -124,6 +124,12 @@ export interface Mission {
    *  activity 로 쌓는다. 한 번 만들면 재생성하지 않는 멱등 키. */
   missionCardTaskId?: string;
 
+  /** Projector rollup (#775): mission.taskIds 와 task 상태 분포를 빠르게 그린다. */
+  projection?: {
+    statusCounts?: Partial<Record<string, number>>;
+    lastTaskActivityAt?: Date;
+  };
+
   launchedAt: Date;
   lastActivityAt: Date;
   completedAt: Date | null;

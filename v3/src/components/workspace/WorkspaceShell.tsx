@@ -6,6 +6,7 @@ import { GlobalOverlays } from "../GlobalOverlays";
 import { useAppLifecycle } from "../../hooks/useAppLifecycle";
 import { useUiStore } from "../../stores/uiStore";
 import { useNavigationStore } from "../../stores/navigationStore";
+import { usePaneStore } from "../../stores/paneStore";
 import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { useActivityStreamStore } from "../../stores/activityStreamStore";
 import {
@@ -161,11 +162,15 @@ export function WorkspaceShell() {
   // terminal column for an agent jump (agents live in the left column).
   const pendingJump = useNavigationStore((s) => s.pendingJump);
   const consumeJump = useNavigationStore((s) => s.consumeJump);
+  const addPane = usePaneStore((s) => s.addPane);
   useEffect(() => {
     if (!pendingJump) return;
     if (pendingJump.type === "task") {
       setActiveTab("board");
       consumeJump();
+    } else if (pendingJump.type === "mission") {
+      setActiveTab("missions");
+      addPane("missions");
     } else if (pendingJump.type === "code") {
       setActiveTab("code");
       consumeJump();
@@ -179,6 +184,7 @@ export function WorkspaceShell() {
   }, [
     pendingJump,
     consumeJump,
+    addPane,
     setActiveTab,
     terminalCollapsed,
     toggleTerminalCollapsed,
