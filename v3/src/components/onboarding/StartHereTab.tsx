@@ -101,14 +101,14 @@ export function StartHereTab() {
       byomInstalled: byom.installed,
       byomReady: byom.ready,
     }),
-    [requiredInstalled, ready, hasProject, byom.installed, byom.ready]
+    [requiredInstalled, ready, hasProject, byom.installed, byom.ready],
   );
 
   const views = useMemo(() => stepViews(progress, live), [progress, live]);
   const resume = useMemo(() => resumeStep(progress, live), [progress, live]);
   const complete = useMemo(
     () => isOnboardingComplete(progress, live),
-    [progress, live]
+    [progress, live],
   );
 
   // Which step's body is expanded. Starts at the resume point; the user can
@@ -140,7 +140,7 @@ export function StartHereTab() {
       setCurrent(step);
       telemetry.cliSetupStep(step, "enter");
     },
-    [setCurrent]
+    [setCurrent],
   );
 
   const skipStep = useCallback(
@@ -156,7 +156,7 @@ export function StartHereTab() {
       const next = WIZARD_STEPS[idx + 1];
       if (next) selectStep(next);
     },
-    [markSkipped, selectStep]
+    [markSkipped, selectStep],
   );
 
   const handleSeed = useCallback(async () => {
@@ -394,8 +394,8 @@ function StepBadge({ status, index }: { status: StepStatus; index: number }) {
     status === "done"
       ? "bg-[#a6e3a1] text-[#1e1e2e]"
       : status === "current"
-      ? "bg-[#89b4fa] text-[#1e1e2e]"
-      : "bg-[#313244] text-[#7f849c]";
+        ? "bg-[#89b4fa] text-[#1e1e2e]"
+        : "bg-[#313244] text-[#7f849c]";
   return (
     <span
       className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${cls}`}
@@ -477,7 +477,14 @@ function StepBody({
         {/* ②단계의 대안 — Claude·Codex 계정이 둘 다 없어도 시작하는 길(F4).
             ①단계에는 두지 않는다: 저 CLI 들은 어차피 자동 설치되고, 벤더 선택은
             "무슨 계정으로 붙을까" 라는 ②단계의 질문이다. */}
-        {step === "auth" && <ByomStartSection />}
+        {step === "auth" && (
+          <>
+            <p className="rounded-md border border-[#45475a] bg-[#11111b]/35 px-3 py-2 text-xs text-[#a6adc8]">
+              {t("onboarding.cliGate.subscription.byomBridge")}
+            </p>
+            <ByomStartSection />
+          </>
+        )}
       </>
     );
   }

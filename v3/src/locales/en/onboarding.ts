@@ -427,6 +427,17 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.cliGate.runLogin": "Run sign-in",
   "onboarding.cliGate.runLoginHint":
     "Runs in a terminal · detected automatically when done",
+  "onboarding.cliGate.subscription.title": "No subscription yet?",
+  "onboarding.cliGate.subscription.body":
+    "Open the official subscription page to choose a plan. One subscription is a fixed plan: no surprise per-token billing, and safe use within the plan's usage limits.",
+  "onboarding.cliGate.subscription.byomComplement":
+    "Subscriptions sign in with a Claude Code/Codex account; vendor keys are a separate path for providers you bring yourself.",
+  "onboarding.cliGate.subscription.byomBridge":
+    "Claude/Codex subscription sign-in and vendor-key setup are complementary paths. Subscriptions run within official plan limits; BYOM keys are managed separately below.",
+  "onboarding.cliGate.subscription.openClaude":
+    "Go to the official Claude Pro/Max page",
+  "onboarding.cliGate.subscription.openCodex":
+    "Go to the official ChatGPT Plus/Pro page",
 
   // — CliSetupGate connection wizard steps (ticket CecrriY8) —
   "onboarding.cliGate.step.notice": "Notice",

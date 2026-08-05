@@ -315,6 +315,17 @@ export const onboarding = {
   "onboarding.cliGate.runLogin": "인증 실행",
   "onboarding.cliGate.runLoginHint":
     "터미널에서 자동 실행 · 완료되면 자동 인식됩니다",
+  "onboarding.cliGate.subscription.title": "구독 없으신가요?",
+  "onboarding.cliGate.subscription.body":
+    "공식 구독 페이지로 이동해 플랜을 선택할 수 있습니다. 한 번 구독하면 정액으로, per-token 깜짝 청구 없이 플랜 사용한도 내에서 안전하게 사용합니다.",
+  "onboarding.cliGate.subscription.byomComplement":
+    "구독제는 Claude Code/Codex 계정으로 로그인하는 길이고, 벤더 키는 별도 공급자의 키를 등록하는 길입니다.",
+  "onboarding.cliGate.subscription.byomBridge":
+    "Claude/Codex 구독 로그인과 벤더 키 등록은 서로 보완되는 두 경로입니다. 구독제는 공식 플랜 한도 안에서 쓰고, 벤더 키는 아래 BYOM 설정에서 별도로 관리합니다.",
+  "onboarding.cliGate.subscription.openClaude":
+    "Claude Pro/Max 공식 페이지로 이동",
+  "onboarding.cliGate.subscription.openCodex":
+    "ChatGPT Plus/Pro 공식 페이지로 이동",
 
   // — CliSetupGate 연결 마법사 스텝 (ticket CecrriY8) —
   "onboarding.cliGate.step.notice": "안내",

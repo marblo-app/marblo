@@ -20,6 +20,11 @@ import { launchLogin } from "../../services/cliSetupActions";
 
 type TFn = ReturnType<typeof useTranslation>["t"];
 
+const SUBSCRIPTION_URL: Partial<Record<CliRow["model"], string>> = {
+  claude: "https://claude.com/pricing",
+  codex: "https://chatgpt.com/pricing/",
+};
+
 /** Copy-to-clipboard command box with a transient "복사됨" confirmation. */
 export function CommandBox({ cmd }: { cmd: string }) {
   const { t } = useTranslation();
@@ -117,6 +122,7 @@ export function CliRowCard({ row, phase, onLoginLaunched }: CliRowCardProps) {
 
   const cmd = state?.action ?? "";
   const manualCmd = cmd || UPDATE_CMD[row.model];
+  const subscriptionUrl = SUBSCRIPTION_URL[row.model];
 
   return (
     <div className="rounded-lg border border-[#313244] bg-[#181825] p-4">
@@ -215,6 +221,38 @@ export function CliRowCard({ row, phase, onLoginLaunched }: CliRowCardProps) {
               </span>
             </div>
             <CommandBox cmd={cmd} />
+          </div>
+        )}
+
+      {phase === "auth" &&
+        subscriptionUrl &&
+        state &&
+        !state.checking &&
+        !state.authenticated && (
+          <div
+            data-testid={`subscription-helper-${row.model}`}
+            className="mt-3 rounded-md border border-[#45475a] bg-[#11111b]/45 px-3 py-2.5"
+          >
+            <p className="text-xs font-medium text-[#cdd6f4]">
+              {t("onboarding.cliGate.subscription.title")}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-[#a6adc8]">
+              {t("onboarding.cliGate.subscription.body")}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-[#7f849c]">
+              {t("onboarding.cliGate.subscription.byomComplement")}
+            </p>
+            <a
+              href={subscriptionUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-block text-xs font-medium text-[#89b4fa] underline decoration-dotted hover:text-[#74c7ec]"
+            >
+              {row.model === "claude"
+                ? t("onboarding.cliGate.subscription.openClaude")
+                : t("onboarding.cliGate.subscription.openCodex")}{" "}
+              ↗
+            </a>
           </div>
         )}
 

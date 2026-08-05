@@ -255,7 +255,14 @@ export function CliSetupGate() {
               />
             ))}
             {/* ②단계의 대안 — 시작하기 탭과 같은 컴포넌트(F4). */}
-            {step === "auth" && <ByomStartSection />}
+            {step === "auth" && (
+              <>
+                <p className="rounded-md border border-[#45475a] bg-[#11111b]/35 px-3 py-2 text-xs text-[#a6adc8]">
+                  {t("onboarding.cliGate.subscription.byomBridge")}
+                </p>
+                <ByomStartSection />
+              </>
+            )}
           </div>
         )}
 

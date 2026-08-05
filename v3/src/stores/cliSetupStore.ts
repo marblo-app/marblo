@@ -82,6 +82,8 @@ export const DOCS_URL: Record<CliModel, string> = {
 
 export type CliState = CliAuthResult & { checking: boolean };
 
+const TEST_CLI_AUTH_OVERRIDES_KEY = "marblo:test:cliAuthOverrides";
+
 export function isCliReady(s: CliState | undefined): boolean {
   return !!s && s.installed && s.authenticated;
 }
@@ -94,6 +96,29 @@ export function cliLabel(model: CliModel): string {
       : model === "grok"
         ? "Grok Build"
         : "Antigravity (agy)";
+}
+
+function testCliAuthOverride(model: CliModel): CliAuthResult | null {
+  if (!window.electronAPI?.testMode?.bypassAuth) return null;
+  try {
+    const raw = localStorage.getItem(TEST_CLI_AUTH_OVERRIDES_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const override = parsed[model] as Partial<CliAuthResult> | undefined;
+    if (!override || typeof override !== "object") return null;
+    return {
+      installed: override.installed === true,
+      authenticated: override.authenticated === true,
+      action:
+        typeof override.action === "string"
+          ? override.action
+          : model === "codex"
+            ? "codex login"
+            : `${model} login`,
+    };
+  } catch {
+    return null;
+  }
 }
 
 interface CliSetupState {
@@ -147,7 +172,9 @@ export const useCliSetupStore = create<CliSetupState>((set, get) => ({
       },
     }));
     try {
-      const res = await window.electronAPI.harness.cliAuthCheck(model);
+      const res =
+        testCliAuthOverride(model) ??
+        (await window.electronAPI.harness.cliAuthCheck(model));
       set((s) => ({
         results: { ...s.results, [id]: res },
         states: { ...s.states, [id]: { ...res, checking: false } },
