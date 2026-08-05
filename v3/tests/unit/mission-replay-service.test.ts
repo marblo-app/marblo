@@ -32,6 +32,10 @@ const {
   subscribeToMissionReplay,
   subscribeToReplayableMissions,
 } = await import("../../src/services/missionReplayService");
+const {
+  buildLightweightReplayFromCompletedTasks,
+  LIGHTWEIGHT_REPLAY_MISSION_ID,
+} = await import("../../src/hooks/useMissionReplay");
 type MissionReplayDeps =
   import("../../src/services/missionReplayService").MissionReplayDeps;
 type MissionReplayState =
@@ -259,6 +263,42 @@ describe("selectReplayableMissions", () => {
       makeMission({ id: "abandoned", status: "abandoned" }),
     ]);
     expect(list.map((m) => m.id)).toEqual(["new", "old"]);
+  });
+});
+
+describe("buildLightweightReplayFromCompletedTasks", () => {
+  it("DONE 작업을 원본 변경 없이 경량 완료 미션 Replay 로 조립한다", () => {
+    const task = makeTask({ contextId: null as unknown as string });
+    const built = buildLightweightReplayFromCompletedTasks({
+      projectId: "proj-1",
+      tasks: [task],
+      activitiesByTaskId: { "task-a": [makeActivity()] },
+      mergeHistoryByTaskId: { "task-a": makeMergeEntry() },
+      now: NOW,
+    });
+
+    expect(built).not.toBeNull();
+    expect(task.contextId).not.toBe(LIGHTWEIGHT_REPLAY_MISSION_ID);
+    expect(built!.mission.id).toBe(LIGHTWEIGHT_REPLAY_MISSION_ID);
+    expect(built!.mission.status).toBe("completed");
+    expect(built!.replay.missionId).toBe(LIGHTWEIGHT_REPLAY_MISSION_ID);
+    expect(built!.replay.stats.tasksDone).toBe(1);
+    expect(built!.replay.stats.filesChanged).toBe(3);
+    expect(
+      built!.replay.beats.some(
+        (beat) => beat.kind === "task.completion_report",
+      ),
+    ).toBe(true);
+  });
+
+  it("DONE 작업이 없으면 fallback 을 만들지 않는다", () => {
+    expect(
+      buildLightweightReplayFromCompletedTasks({
+        projectId: "proj-1",
+        tasks: [makeTask({ status: "IN_PROGRESS" })],
+        now: NOW,
+      }),
+    ).toBeNull();
   });
 });
 

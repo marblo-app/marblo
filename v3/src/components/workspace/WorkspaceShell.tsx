@@ -150,6 +150,13 @@ export function WorkspaceShell() {
     if (pendingSettingsSection) setActiveTab("settings");
   }, [pendingSettingsSection, setActiveTab]);
 
+  useEffect(() => {
+    const onOpenMissions = () => setActiveTab("missions");
+    window.addEventListener("marblo:open-missions", onOpenMissions);
+    return () =>
+      window.removeEventListener("marblo:open-missions", onOpenMissions);
+  }, [setActiveTab]);
+
   // Activity Stream jump → surface the matching right tab, or expand the
   // terminal column for an agent jump (agents live in the left column).
   const pendingJump = useNavigationStore((s) => s.pendingJump);

@@ -218,12 +218,17 @@ function renderReady(
   return renderDetail({ status: "ready", replay, sourceErrors });
 }
 
-function renderList(state: ReplayMissionsState): string {
+function renderList(
+  state: ReplayMissionsState,
+  fallbackMissions: Mission[] = [],
+): string {
   return renderToStaticMarkup(
     createElement(MissionReplayListView, {
       state,
+      fallbackMissions,
       onSelect: () => {},
       onReload: () => {},
+      onCreateMission: () => {},
       t,
     }),
   );
@@ -439,6 +444,28 @@ describe("Replay 목록", () => {
     expect(markup).toContain(
       msg("workHistory.replay.list.count", { count: 1 }),
     );
+  });
+
+  it("missions 가 비어도 완료 작업 fallback 이 있으면 경량 Replay 카드를 보여준다", () => {
+    const markup = renderList({ status: "ready", missions: [] }, [
+      makeMission({
+        id: "__work_history_done_summary__",
+        goal: "완료 작업 요약 1건",
+        templateId: "adhoc",
+        missionKind: "implicit",
+      }),
+    ]);
+    expect(markup).toContain(msg("workHistory.replay.list.lightweight.title"));
+    expect(markup).toContain("완료 작업 요약 1건");
+    expect(markup).toContain(msg("workHistory.replay.list.empty.cta"));
+    expect(markup).not.toContain(msg("workHistory.replay.list.empty.title"));
+  });
+
+  it("빈 상태는 첫 미션 생성 CTA 와 방법을 같이 보여준다", () => {
+    const markup = renderList({ status: "ready", missions: [] });
+    expect(markup).toContain(msg("workHistory.replay.list.empty.title"));
+    expect(markup).toContain(msg("workHistory.replay.list.empty.createHint"));
+    expect(markup).toContain(msg("workHistory.replay.list.empty.cta"));
   });
 
   it("목록에도 공유·익스포트 표면이 없다", () => {

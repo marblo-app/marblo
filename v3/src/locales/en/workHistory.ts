@@ -82,6 +82,13 @@ export const workHistory: Record<keyof typeof koWorkHistory, string> = {
   "workHistory.replay.list.empty.title": "No completed missions yet.",
   "workHistory.replay.list.empty.hint":
     "When a mission completes, its replay shows up here.",
+  "workHistory.replay.list.empty.createHint":
+    "Open the Missions tab and choose Quick Fix, Polish, or Feature to start the first mission.",
+  "workHistory.replay.list.empty.cta": "Create first mission",
+  "workHistory.replay.list.lightweight.title":
+    "Showing a completed-work replay summary first.",
+  "workHistory.replay.list.lightweight.hint":
+    "Even before a completed mission document exists, DONE tasks and completion reports can be grouped into a lightweight replay.",
 
   "workHistory.replay.back": "← Missions",
   "workHistory.replay.reload": "Refresh",

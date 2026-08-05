@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { t, useTranslation } from "../../lib/i18n";
+import { useAuth } from "../../hooks/useAuth";
+import { useMergePermission } from "../../hooks/useMergePermission";
 import { useProjectStore } from "../../stores/projectStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useNavigationStore } from "../../stores/navigationStore";
@@ -25,8 +27,16 @@ import { periodLabel } from "../common/PeriodSelector";
 import { ShareCard } from "./ShareCard";
 import { WorkHistoryFilterBar } from "./WorkHistoryFilterBar";
 import { FirstMissionShareNudge } from "./FirstMissionShareNudge";
+import {
+  buildLightweightReplayFromCompletedTasks,
+  LIGHTWEIGHT_REPLAY_MISSION_ID,
+} from "../../hooks/useMissionReplay";
 import { MissionReplayList } from "./replay/MissionReplayList";
-import { MissionReplayDetail } from "./replay/MissionReplayDetail";
+import {
+  MissionReplayDetail,
+  MissionReplayDetailView,
+} from "./replay/MissionReplayDetail";
+import { ReplayShareFlow } from "./replay/ReplayShareFlow";
 
 // 완료 보고를 추적할 최근 완료 태스크 상한. task 당 Firestore activities 리스너가
 // 하나씩 생기므로, 무한정 구독하지 않도록 최신순으로 잘라 둔다.
@@ -248,6 +258,8 @@ function WorkHistoryRow({
 
 export function WorkHistoryTab() {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const { canMergeInProject } = useMergePermission();
   const currentProject = useProjectStore((s) => s.currentProject);
   const tasks = useTaskStore((s) => s.tasks);
   const subscribeToTasks = useTaskStore((s) => s.subscribeToTasks);
@@ -265,6 +277,7 @@ export function WorkHistoryTab() {
   // 마운트된다(리스너를 안 쓰는 화면에 켜 두지 않는다).
   const [view, setView] = useState<WorkHistoryView>("tasks");
   const [replayMissionId, setReplayMissionId] = useState<string | null>(null);
+  const [lightweightShareOpen, setLightweightShareOpen] = useState(false);
 
   // 감사 로그 티켓 상세의 "Replay 보기" 크로스링크 → Layout 이 이 탭을
   // 앞으로 가져온 뒤, 여기서 missionId 를 직접 읽어 Replay 뷰를 연다
@@ -369,6 +382,20 @@ export function WorkHistoryTab() {
     [doneTasks, reports],
   );
 
+  const lightweightReplay = useMemo(() => {
+    if (!currentProject) return null;
+    return buildLightweightReplayFromCompletedTasks({
+      projectId: currentProject.id,
+      tasks: doneTasks,
+      activitiesByTaskId: activitiesMap,
+      mergeHistoryByTaskId: mergeByTask,
+    });
+  }, [currentProject?.id, doneTasks, activitiesMap, mergeByTask]);
+
+  const openMissionCreator = () => {
+    window.dispatchEvent(new CustomEvent("marblo:open-missions"));
+  };
+
   const filterOn = isFilterActive(filter);
   // ★카운트는 "필터가 기본값과 다른가" 가 아니라 "실제로 잘렸는가" 로 가른다.
   // 기본값이 30일이라 전자로 가르면 30일 컷을 걸어 놓고 전체 건수를 표시하게 되고
@@ -434,7 +461,37 @@ export function WorkHistoryTab() {
       </div>
 
       {view === "replay" ? (
-        replayMissionId ? (
+        replayMissionId === LIGHTWEIGHT_REPLAY_MISSION_ID &&
+        lightweightReplay ? (
+          <>
+            <MissionReplayDetailView
+              state={{
+                status: "ready",
+                replay: lightweightReplay.replay,
+                sourceErrors: {},
+              }}
+              onBack={() => {
+                setReplayMissionId(null);
+                setLightweightShareOpen(false);
+              }}
+              onReload={() => undefined}
+              onShare={() => setLightweightShareOpen(true)}
+              t={t}
+            />
+            {lightweightShareOpen && (
+              <div className="mt-4">
+                <ReplayShareFlow
+                  replay={lightweightReplay.replay}
+                  canPublish={canMergeInProject(
+                    lightweightReplay.replay.projectId,
+                  )}
+                  publisherUid={user?.uid}
+                  onClose={() => setLightweightShareOpen(false)}
+                />
+              </div>
+            )}
+          </>
+        ) : replayMissionId ? (
           <MissionReplayDetail
             missionId={replayMissionId}
             projectId={currentProject.id}
@@ -443,7 +500,11 @@ export function WorkHistoryTab() {
         ) : (
           <MissionReplayList
             projectId={currentProject.id}
+            fallbackMissions={
+              lightweightReplay ? [lightweightReplay.mission] : []
+            }
             onSelect={setReplayMissionId}
+            onCreateMission={openMissionCreator}
           />
         )
       ) : (

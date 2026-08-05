@@ -72,16 +72,20 @@ function MissionCard({
 
 export interface MissionReplayListViewProps {
   state: ReplayMissionsState;
+  fallbackMissions?: readonly Mission[];
   onSelect: (missionId: string) => void;
   onReload: () => void;
+  onCreateMission?: () => void;
   t: TFunction;
 }
 
 /** 상태 → 화면. 구독을 모른다(테스트가 이 함수만 호출한다). */
 export function MissionReplayListView({
   state,
+  fallbackMissions = [],
   onSelect,
   onReload,
+  onCreateMission,
   t,
 }: MissionReplayListViewProps) {
   if (state.status === "loading") {
@@ -111,7 +115,14 @@ export function MissionReplayListView({
     );
   }
 
-  if (state.missions.length === 0) {
+  const missions =
+    state.status === "ready" && state.missions.length === 0
+      ? fallbackMissions
+      : state.status === "ready"
+        ? state.missions
+        : [];
+
+  if (state.missions.length === 0 && fallbackMissions.length === 0) {
     // 읽기는 성공했는데 완료 미션이 0건 — denied 와 다른 사실이라 문구도 다르다.
     return (
       <div className="rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
@@ -121,17 +132,49 @@ export function MissionReplayListView({
         <p className="mt-1 text-xs text-gray-500">
           {t("workHistory.replay.list.empty.hint")}
         </p>
+        <p className="mt-3 text-xs text-gray-400">
+          {t("workHistory.replay.list.empty.createHint")}
+        </p>
+        {onCreateMission && (
+          <button
+            type="button"
+            onClick={onCreateMission}
+            className="mt-3 rounded border border-sky-500/50 px-3 py-1.5 text-xs font-medium text-sky-200 transition hover:bg-sky-500/10"
+          >
+            {t("workHistory.replay.list.empty.cta")}
+          </button>
+        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-2">
-      <p className="text-[11px] text-gray-500">
-        {t("workHistory.replay.list.count", { count: state.missions.length })}
-      </p>
+      {state.missions.length === 0 ? (
+        <div className="rounded-lg border border-sky-500/30 bg-sky-950/20 p-3">
+          <p className="text-xs font-medium text-sky-100">
+            {t("workHistory.replay.list.lightweight.title")}
+          </p>
+          <p className="mt-1 text-[11px] text-sky-100/70">
+            {t("workHistory.replay.list.lightweight.hint")}
+          </p>
+          {onCreateMission && (
+            <button
+              type="button"
+              onClick={onCreateMission}
+              className="mt-2 rounded border border-sky-500/40 px-2.5 py-1 text-[11px] text-sky-100 transition hover:bg-sky-500/10"
+            >
+              {t("workHistory.replay.list.empty.cta")}
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="text-[11px] text-gray-500">
+          {t("workHistory.replay.list.count", { count: missions.length })}
+        </p>
+      )}
       <div className="space-y-1.5">
-        {state.missions.map((mission) => (
+        {missions.map((mission) => (
           <MissionCard
             key={mission.id}
             mission={mission}
@@ -146,20 +189,26 @@ export function MissionReplayListView({
 
 export interface MissionReplayListProps {
   projectId: string | null | undefined;
+  fallbackMissions?: readonly Mission[];
   onSelect: (missionId: string) => void;
+  onCreateMission?: () => void;
 }
 
 export function MissionReplayList({
   projectId,
+  fallbackMissions,
   onSelect,
+  onCreateMission,
 }: MissionReplayListProps) {
   const { t } = useTranslation();
   const { state, reload } = useReplayableMissions(projectId);
   return (
     <MissionReplayListView
       state={state}
+      fallbackMissions={fallbackMissions}
       onSelect={onSelect}
       onReload={reload}
+      onCreateMission={onCreateMission}
       t={t}
     />
   );

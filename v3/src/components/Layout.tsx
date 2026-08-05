@@ -201,11 +201,14 @@ export function Layout() {
       }
     };
     const onOpenHarness = () => setShowHarnessStore(true);
+    const onOpenMissions = () => setActiveTab("missions");
     window.addEventListener("keydown", onKey);
     window.addEventListener("marblo:open-harness", onOpenHarness);
+    window.addEventListener("marblo:open-missions", onOpenMissions);
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("marblo:open-harness", onOpenHarness);
+      window.removeEventListener("marblo:open-missions", onOpenMissions);
     };
   }, [toggleActivityStream]);
 

@@ -93,6 +93,13 @@ export const workHistory = {
   "workHistory.replay.list.empty.title": "완료된 미션이 없습니다.",
   "workHistory.replay.list.empty.hint":
     "미션이 완료되면 여기에서 그 미션의 Replay 를 볼 수 있습니다.",
+  "workHistory.replay.list.empty.createHint":
+    "Missions 탭에서 Quick Fix, Polish, Feature 같은 템플릿을 골라 첫 미션을 시작하세요.",
+  "workHistory.replay.list.empty.cta": "첫 미션 만들기",
+  "workHistory.replay.list.lightweight.title":
+    "완료 작업 요약 Replay 를 먼저 보여줍니다.",
+  "workHistory.replay.list.lightweight.hint":
+    "아직 완료 미션 문서가 없어도 DONE 작업과 완료 보고를 묶어 공유 가능한 경량 Replay 로 볼 수 있습니다.",
 
   "workHistory.replay.back": "← 미션 목록",
   "workHistory.replay.reload": "새로고침",
