@@ -8,8 +8,11 @@ import {
   rememberConsentAccepted,
   CURRENT_POLICY_VERSION,
   type ConsentFlags,
+  type GetConsentResult,
   type PrivacyConsent,
 } from "../services/privacyConsentService";
+
+type ConsentReadOutcome = GetConsentResult["status"] | "not_loaded";
 
 interface PrivacyConsentState {
   consent: PrivacyConsent;
@@ -28,6 +31,8 @@ interface PrivacyConsentState {
    * authoritative resolution.
    */
   hasLoaded: boolean;
+  lastReadOutcome: ConsentReadOutcome;
+  lastReadCode: string | null;
   load: (uid: string) => Promise<void>;
   save: (uid: string, flags: ConsentFlags, locale?: string) => Promise<void>;
   /** Local update without Firestore write — used for optimistic UI in
@@ -47,20 +52,39 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
     loading: false,
     needsPrompt: true,
     hasLoaded: false,
+    lastReadOutcome: "not_loaded",
+    lastReadCode: null,
 
     load: async (uid: string) => {
       set({ loading: true });
       const result = await getConsentWithRetry(uid);
+      const cacheHit = hasAcceptedConsentCached(uid, CURRENT_POLICY_VERSION);
+
+      const diagnose = (needsPrompt: boolean, storedVersion: string | null) => {
+        console.info("[PrivacyConsentStore] load outcome", {
+          readOutcome: result.status,
+          readCode: result.status === "error" ? result.code : null,
+          storedVersion,
+          currentVersion: CURRENT_POLICY_VERSION,
+          versionCurrent: storedVersion === CURRENT_POLICY_VERSION,
+          cacheHit,
+          needsPrompt,
+        });
+      };
 
       if (result.status === "ok") {
         // Authoritative read. Re-prompt only if the stored version is stale.
         const { consent } = result;
+        const needsPrompt = !isConsentCurrent(consent);
         set({
           consent,
           loading: false,
           hasLoaded: true,
-          needsPrompt: !isConsentCurrent(consent),
+          needsPrompt,
+          lastReadOutcome: result.status,
+          lastReadCode: null,
         });
+        diagnose(needsPrompt, consent.version);
         // Keep the proof-of-consent cache in sync so a later read failure
         // (sleep/resume, offline) won't re-prompt this already-consented user.
         if (isConsentCurrent(consent)) {
@@ -76,7 +100,10 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
           loading: false,
           hasLoaded: true,
           needsPrompt: true,
+          lastReadOutcome: result.status,
+          lastReadCode: null,
         });
+        diagnose(true, null);
         return;
       }
 
@@ -86,10 +113,23 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
       // accepted the CURRENT policy version, keep the modal hidden; otherwise
       // hold the existing needsPrompt (don't surface the modal off a failure).
       // PIPA 옵트인 정설: 실패 시 '동의 간주'가 아니라 '이미 동의자 재프롬프트 안 함'.
-      if (hasAcceptedConsentCached(uid, CURRENT_POLICY_VERSION)) {
-        set({ loading: false, hasLoaded: true, needsPrompt: false });
+      if (cacheHit) {
+        set({
+          loading: false,
+          hasLoaded: true,
+          needsPrompt: false,
+          lastReadOutcome: result.status,
+          lastReadCode: result.code,
+        });
+        diagnose(false, get().consent.version || null);
       } else {
-        set({ loading: false, hasLoaded: true });
+        set({
+          loading: false,
+          hasLoaded: true,
+          lastReadOutcome: result.status,
+          lastReadCode: result.code,
+        });
+        diagnose(get().needsPrompt, get().consent.version || null);
       }
     },
 

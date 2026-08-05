@@ -162,6 +162,61 @@ export async function getConsentWithRetry(
   return last;
 }
 
+class ConsentWriteVerificationError extends Error {
+  constructor(
+    readonly uid: string,
+    readonly result: GetConsentResult,
+  ) {
+    super(
+      `Privacy consent write verification failed: ${result.status}${
+        result.status === "ok" ? `:${result.consent.version}` : ""
+      }`,
+    );
+    this.name = "ConsentWriteVerificationError";
+  }
+}
+
+function describeReadOutcome(result: GetConsentResult): {
+  outcome: GetConsentResult["status"];
+  code: string | null;
+  storedVersion: string | null;
+} {
+  return {
+    outcome: result.status,
+    code: result.status === "error" ? result.code : null,
+    storedVersion: result.status === "ok" ? result.consent.version : null,
+  };
+}
+
+function logConsentWriteVerification(
+  uid: string,
+  result: GetConsentResult,
+): void {
+  console.error("[PrivacyConsent:saveConsent] read-back verification failed", {
+    requestedUid: uid,
+    ...describeReadOutcome(result),
+    currentVersion: CURRENT_POLICY_VERSION,
+  });
+}
+
+async function verifySavedConsent(uid: string): Promise<void> {
+  const result = await getConsentWithRetry(uid, 3, 250);
+  if (
+    result.status === "ok" &&
+    result.consent.version === CURRENT_POLICY_VERSION
+  ) {
+    console.info("[PrivacyConsent:saveConsent] read-back verified", {
+      requestedUid: uid,
+      storedVersion: result.consent.version,
+      currentVersion: CURRENT_POLICY_VERSION,
+    });
+    return;
+  }
+
+  logConsentWriteVerification(uid, result);
+  throw new ConsentWriteVerificationError(uid, result);
+}
+
 /**
  * Local proof-of-consent cache.
  *
@@ -298,26 +353,33 @@ export async function saveConsent(
   flags: ConsentFlags,
   locale: string = "ko",
 ): Promise<void> {
-  try {
-    await setDoc(
-      doc(db, "users", uid),
-      {
-        privacyConsent: {
-          ...flags,
-          version: CURRENT_POLICY_VERSION,
-          acceptedAt: serverTimestamp(),
-          locale,
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await setDoc(
+        doc(db, "users", uid),
+        {
+          privacyConsent: {
+            ...flags,
+            version: CURRENT_POLICY_VERSION,
+            acceptedAt: serverTimestamp(),
+            locale,
+          },
         },
-      },
-      { merge: true },
-    );
-    // Server write succeeded → arm the proof-of-consent cache so a later read
-    // failure (sleep/resume, offline) won't re-prompt this user.
-    rememberConsentAccepted(uid, CURRENT_POLICY_VERSION);
-  } catch (err) {
-    logFirestoreError("saveConsent", err, uid);
-    throw err;
+        { merge: true },
+      );
+      await verifySavedConsent(uid);
+      // Server write is durably observable → arm the proof-of-consent cache so
+      // a later read failure (sleep/resume, offline) won't re-prompt this user.
+      rememberConsentAccepted(uid, CURRENT_POLICY_VERSION);
+      return;
+    } catch (err) {
+      lastError = err;
+      logFirestoreError(`saveConsent attempt ${attempt}`, err, uid);
+      if (attempt < 2) await sleep(300 * attempt);
+    }
   }
+  throw lastError;
 }
 
 /** True if the user has seen the current policy version. */

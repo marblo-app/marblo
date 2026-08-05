@@ -4,7 +4,7 @@
  * Core invariant: a transient read failure must NEVER flip needsPrompt to true.
  * The modal may only appear for a genuinely missing record or a stale version.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Stub Firebase boot so importing the real service (for isConsentCurrent /
 // DEFAULT_CONSENT / CURRENT_POLICY_VERSION) doesn't touch the network.
@@ -53,6 +53,7 @@ const UID = "user-123";
 
 function currentConsent(): PrivacyConsent {
   return {
+    firstPartyTelemetry: true,
     sentry: true,
     ga4: false,
     mixpanel: false,
@@ -72,7 +73,13 @@ beforeEach(() => {
     loading: false,
     needsPrompt: true,
     hasLoaded: false,
+    lastReadOutcome: "not_loaded",
+    lastReadCode: null,
   });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("hasLoaded — modal must not surface before the first resolution", () => {
@@ -122,6 +129,8 @@ describe("load — ok results are authoritative", () => {
 
     const s = usePrivacyConsentStore.getState();
     expect(s.needsPrompt).toBe(false);
+    expect(s.lastReadOutcome).toBe("ok");
+    expect(s.lastReadCode).toBeNull();
     expect(s.consent.version).toBe(CURRENT_POLICY_VERSION);
     expect(rememberConsentAccepted).toHaveBeenCalledWith(
       UID,
@@ -137,7 +146,10 @@ describe("load — ok results are authoritative", () => {
 
     await usePrivacyConsentStore.getState().load(UID);
 
-    expect(usePrivacyConsentStore.getState().needsPrompt).toBe(true);
+    const s = usePrivacyConsentStore.getState();
+    expect(s.needsPrompt).toBe(true);
+    expect(s.lastReadOutcome).toBe("ok");
+    expect(s.consent.version).toBe("2020-01-01");
   });
 });
 
@@ -148,7 +160,10 @@ describe("load — missing means genuinely not consented", () => {
 
     await usePrivacyConsentStore.getState().load(UID);
 
-    expect(usePrivacyConsentStore.getState().needsPrompt).toBe(true);
+    const s = usePrivacyConsentStore.getState();
+    expect(s.needsPrompt).toBe(true);
+    expect(s.lastReadOutcome).toBe("missing");
+    expect(s.lastReadCode).toBeNull();
   });
 });
 
@@ -168,6 +183,8 @@ describe("load — transient failure must not surface the modal", () => {
 
     const s = usePrivacyConsentStore.getState();
     expect(s.needsPrompt).toBe(false);
+    expect(s.lastReadOutcome).toBe("error");
+    expect(s.lastReadCode).toBe("unavailable");
     // Consent state preserved, NOT downgraded to DEFAULT.
     expect(s.consent.version).toBe(CURRENT_POLICY_VERSION);
   });
@@ -188,7 +205,10 @@ describe("load — transient failure must not surface the modal", () => {
       UID,
       CURRENT_POLICY_VERSION,
     );
-    expect(usePrivacyConsentStore.getState().needsPrompt).toBe(false);
+    const s = usePrivacyConsentStore.getState();
+    expect(s.needsPrompt).toBe(false);
+    expect(s.lastReadOutcome).toBe("error");
+    expect(s.lastReadCode).toBe("unauthenticated");
   });
 
   it("error + no cache + unknown user (needsPrompt true) → held at true (fail-safe)", async () => {
@@ -201,6 +221,27 @@ describe("load — transient failure must not surface the modal", () => {
     // Never fabricates consent: an unknown user with a failed read is not
     // silently suppressed.
     expect(usePrivacyConsentStore.getState().needsPrompt).toBe(true);
+  });
+
+  it("logs a single diagnostic line with read outcome and version comparison", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    getConsentWithRetry.mockResolvedValue({
+      status: "ok",
+      consent: { ...currentConsent(), version: "2020-01-01" },
+    });
+
+    await usePrivacyConsentStore.getState().load(UID);
+
+    expect(info).toHaveBeenCalledWith(
+      "[PrivacyConsentStore] load outcome",
+      expect.objectContaining({
+        readOutcome: "ok",
+        storedVersion: "2020-01-01",
+        currentVersion: CURRENT_POLICY_VERSION,
+        versionCurrent: false,
+        needsPrompt: true,
+      }),
+    );
   });
 
   it("error never throws out of load()", async () => {

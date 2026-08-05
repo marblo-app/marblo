@@ -48,6 +48,16 @@ function installLocalStorage(): void {
 
 const UID = "user-123";
 
+function consentFlags() {
+  return {
+    firstPartyTelemetry: true,
+    sentry: true,
+    ga4: false,
+    mixpanel: false,
+    overseasTransfer: false,
+  };
+}
+
 function seedConsentDoc(version: string): void {
   // Seed users/<uid>.privacyConsent via the firestore mock's setDoc.
   firestore.setDoc(
@@ -150,28 +160,42 @@ describe("getConsentWithRetry — retries transient failures", () => {
 describe("proof-of-consent cache", () => {
   it("saveConsent arms the version-scoped cache on success", async () => {
     expect(hasAcceptedConsentCached(UID, CURRENT_POLICY_VERSION)).toBe(false);
-    await saveConsent(UID, {
-      sentry: true,
-      ga4: false,
-      mixpanel: false,
-      overseasTransfer: false,
-    });
+    await saveConsent(UID, consentFlags());
     expect(hasAcceptedConsentCached(UID, CURRENT_POLICY_VERSION)).toBe(true);
   });
 
   it("does not arm the cache when the save write fails", async () => {
-    vi.spyOn(firestore, "setDoc").mockRejectedValueOnce(
+    vi.spyOn(firestore, "setDoc").mockRejectedValue(
       Object.assign(new Error("denied"), { code: "permission-denied" }),
     );
-    await expect(
-      saveConsent(UID, {
-        sentry: true,
-        ga4: false,
-        mixpanel: false,
-        overseasTransfer: false,
-      }),
-    ).rejects.toThrow();
+    await expect(saveConsent(UID, consentFlags())).rejects.toThrow();
     expect(hasAcceptedConsentCached(UID, CURRENT_POLICY_VERSION)).toBe(false);
+  });
+
+  it("does not arm the cache when read-back verification cannot observe the write", async () => {
+    const setDoc = vi.spyOn(firestore, "setDoc").mockResolvedValue(undefined);
+
+    await expect(saveConsent(UID, consentFlags())).rejects.toThrow(
+      "Privacy consent write verification failed",
+    );
+
+    expect(setDoc).toHaveBeenCalledTimes(2);
+    expect(hasAcceptedConsentCached(UID, CURRENT_POLICY_VERSION)).toBe(false);
+  });
+
+  it("retries the write when the first write fails and later verification succeeds", async () => {
+    const realSetDoc = firestore.setDoc;
+    const setDoc = vi
+      .spyOn(firestore, "setDoc")
+      .mockRejectedValueOnce(
+        Object.assign(new Error("offline"), { code: "unavailable" }),
+      )
+      .mockImplementation((ref: never, data: never) => realSetDoc(ref, data));
+
+    await saveConsent(UID, consentFlags());
+
+    expect(setDoc).toHaveBeenCalledTimes(2);
+    expect(hasAcceptedConsentCached(UID, CURRENT_POLICY_VERSION)).toBe(true);
   });
 
   it("cache is version-scoped — a different version is not proven", () => {

@@ -16,6 +16,7 @@ import { usePrivacyConsentStore } from "../../stores/privacyConsentStore";
 import { maybeInitSentry } from "../../lib/telemetry/sentry";
 import { setTelemetryEnabled } from "../../services/telemetryService";
 import {
+  CURRENT_POLICY_VERSION,
   readPendingConsent,
   clearPendingConsent,
 } from "../../services/privacyConsentService";
@@ -30,6 +31,9 @@ export function PrivacyConsentGate() {
   const { user } = useAuth();
   const needsPrompt = usePrivacyConsentStore((s) => s.needsPrompt);
   const hasLoaded = usePrivacyConsentStore((s) => s.hasLoaded);
+  const storedVersion = usePrivacyConsentStore((s) => s.consent.version);
+  const lastReadOutcome = usePrivacyConsentStore((s) => s.lastReadOutcome);
+  const lastReadCode = usePrivacyConsentStore((s) => s.lastReadCode);
   const sentryConsent = usePrivacyConsentStore((s) => s.consent.sentry);
   const firstPartyTelemetry = usePrivacyConsentStore(
     (s) => s.consent.firstPartyTelemetry,
@@ -91,6 +95,28 @@ export function PrivacyConsentGate() {
         );
       });
   }, [user?.uid]);
+
+  useEffect(() => {
+    console.info("[PrivacyConsentGate] evaluation", {
+      hasUser: !!user,
+      uid: user?.uid ?? null,
+      hasLoaded,
+      needsPrompt,
+      showPrompt: !!user && hasLoaded && needsPrompt,
+      readOutcome: lastReadOutcome,
+      readCode: lastReadCode,
+      storedVersion: storedVersion || null,
+      currentVersion: CURRENT_POLICY_VERSION,
+      versionCurrent: storedVersion === CURRENT_POLICY_VERSION,
+    });
+  }, [
+    user,
+    hasLoaded,
+    needsPrompt,
+    lastReadOutcome,
+    lastReadCode,
+    storedVersion,
+  ]);
 
   // Drive SDK init based on current consent. maybeInitSentry is idempotent.
   useEffect(() => {
