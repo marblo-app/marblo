@@ -1,97 +1,264 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 900" width="1440" height="900">
-<rect x="6" y="6" width="1428" height="888" rx="16" fill="#0a0c12" stroke="#23283a"/>
-<circle cx="34" cy="30" r="6.5" fill="#ff5f57"/><circle cx="56" cy="30" r="6.5" fill="#febc2e"/><circle cx="78" cy="30" r="6.5" fill="#28c840"/>
-<text x="720" y="36" text-anchor="middle" font-size="15" fill="#8b93a7" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Marblo · Workspace</text>
-<rect x="1352" y="18" width="72" height="24" rx="6" fill="#161a26"/><text x="1388" y="34" text-anchor="middle" font-size="12" fill="#9aa2b4" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Settings</text>
-<line x1="6" y1="52" x2="1434" y2="52" stroke="#23283a"/>
-<rect x="6" y="52" width="296" height="842" fill="#0d1017"/><line x1="302" y1="52" x2="302" y2="894" stroke="#23283a"/>
-<text x="26" y="82" font-size="13" font-weight="700" fill="#e4e7ee" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Files</text><rect x="24" y="90" width="34" height="2.5" fill="#6366f1"/>
-<text x="98" y="82" font-size="13" fill="#7b8496" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Commands</text><text x="195.2" y="82" font-size="13" fill="#7b8496" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Chat</text>
-<text x="24" y="124" font-size="13" fill="#8b93a7" font-family="ui-monospace,'SF Mono',Menlo,monospace">▸</text><text x="38" y="124" font-size="13" fill="#c2c8d4" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">marblo</text><text x="42" y="151" font-size="13" fill="#8b93a7" font-family="ui-monospace,'SF Mono',Menlo,monospace">▸</text><text x="56" y="151" font-size="13" fill="#c2c8d4" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">v3</text><text x="60" y="178" font-size="13" fill="#8b93a7" font-family="ui-monospace,'SF Mono',Menlo,monospace">▸</text><text x="74" y="178" font-size="13" fill="#c2c8d4" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">src</text><text x="78" y="205" font-size="13" fill="#8b93a7" font-family="ui-monospace,'SF Mono',Menlo,monospace">▸</text><text x="92" y="205" font-size="13" fill="#c2c8d4" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">components</text>
-<rect x="10" y="217" width="284" height="24" rx="5" fill="#1b2740"/><text x="96" y="232" font-size="13" fill="#5aa9e6" font-family="ui-monospace,'SF Mono',Menlo,monospace">TX</text><text x="116" y="232" font-size="13" fill="#fff" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">WorkspaceShell.tsx</text>
-<text x="96" y="259" font-size="13" fill="#5aa9e6" font-family="ui-monospace,'SF Mono',Menlo,monospace">TX</text><text x="116" y="259" font-size="13" fill="#c2c8d4" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">WorkTabs.tsx</text>
-<text x="96" y="286" font-size="13" fill="#5aa9e6" font-family="ui-monospace,'SF Mono',Menlo,monospace">TX</text><text x="116" y="286" font-size="13" fill="#c2c8d4" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">TerminalColumn.tsx</text>
-<text x="42" y="313" font-size="13" fill="#8b93a7" font-family="ui-monospace,'SF Mono',Menlo,monospace">▸</text><text x="56" y="313" font-size="13" fill="#c2c8d4" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">marblo-web</text>
-<text x="60" y="340" font-size="13" fill="#e0a458" font-family="ui-monospace,'SF Mono',Menlo,monospace">MD</text><text x="80" y="340" font-size="13" fill="#c2c8d4" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">README.md</text>
-<line x1="722" y1="52" x2="722" y2="894" stroke="#23283a"/>
-<text x="316" y="78" font-size="11" font-weight="700" letter-spacing="0.08em" fill="#5b6478" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">TERMINALS</text>
-<svg x="316" y="94" width="30" height="30" viewBox="0 0 64 64">
-<defs><radialGradient id="mbg-316-94" cx="50%" cy="24%" r="80%"><stop offset="0%" stop-color="#20202f"/><stop offset="55%" stop-color="#121220"/><stop offset="100%" stop-color="#08080e"/></radialGradient>
-<linearGradient id="mspec-316-94" gradientUnits="userSpaceOnUse" x1="14" y1="12" x2="50" y2="52"><stop offset="0" stop-color="#FF6FB5"/><stop offset="0.3" stop-color="#C86BFF"/><stop offset="0.55" stop-color="#8A7CFF"/><stop offset="0.8" stop-color="#4AA8FF"/><stop offset="1" stop-color="#38E0E8"/></linearGradient></defs>
-<rect width="64" height="64" rx="15" fill="url(#mbg-316-94)"/><circle cx="32" cy="32" r="20" fill="none" stroke="url(#mspec-316-94)" stroke-width="2.6"/>
-<path d="M24 26 L30 32 L24 38" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><rect x="33.5" y="26" width="4.4" height="12" rx="1.6" fill="#fff"/>
-<circle cx="32" cy="12" r="4.2" fill="#FFB020"/><circle cx="49.3" cy="42" r="4.2" fill="#22D3EE"/><circle cx="14.7" cy="42" r="4.2" fill="#34D399"/></svg>
-<text x="356" y="108" font-size="15" font-weight="700" fill="#e8ebf2" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Orchestrator</text><text x="356" y="124" font-size="11.5" fill="#8b93a7" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">agent terminal · auto-routing</text>
-<circle cx="676" cy="104" r="4" fill="#22c55e"/><text x="688" y="108" font-size="11.5" fill="#22c55e" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">live</text>
-<rect x="316" y="150" width="398" height="30" rx="9" fill="#1a1f2e"/><text x="330" y="170" font-size="12.5" fill="#c7ccd8" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Ship the audit view across the board.</text>
-<circle cx="322" cy="201" r="3.4" fill="#818cf8"/><text x="334" y="205" font-size="12.5" fill="#d7dbe4" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Decomposed it and dispatched Agent A + Agent</text><circle cx="322" cy="247" r="3.4" fill="#818cf8"/><text x="334" y="251" font-size="12.5" fill="#d7dbe4" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Received work updates from Agent A and Agent</text><circle cx="322" cy="293" r="3.4" fill="#818cf8"/><text x="334" y="297" font-size="12.5" fill="#d7dbe4" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">checking progress, reviewing diffs now.</text><circle cx="322" cy="319" r="3.4" fill="#818cf8"/><text x="334" y="323" font-size="12.5" fill="#d7dbe4" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">I'll report back and merge once tests pass.</text><circle cx="322" cy="341" r="3.4" fill="#818cf8"/><text x="334" y="345" font-size="12.5" fill="#8b93a7" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">working…</text>
-<text x="334" y="225" font-size="12.5" fill="#d7dbe4" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">B.</text><text x="334" y="271" font-size="12.5" fill="#d7dbe4" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">B —</text><rect x="404" y="336" width="7" height="14" fill="#818cf8" opacity="0.8"/>
-<rect x="312" y="366" width="402" height="32" rx="9" fill="#12151f" stroke="#23283a"/><text x="328" y="387" font-size="12.5" fill="#5b6478" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Message the orchestrator…</text>
-<text x="318" y="424" font-size="14.5" font-weight="700" fill="#e4e7ee" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Agents</text><text x="712" y="424" text-anchor="end" font-size="11.5" fill="#8b93a7" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">8 active</text><line x1="308" y1="434" x2="716" y2="434" stroke="#20242f"/>
-<rect x="312" y="444" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
-<circle cx="330" cy="465" r="5.5" fill="#d97757"/><text x="346" y="463" font-size="13.5" font-weight="600" fill="#e7eaf1" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Claude</text>
-<circle cx="350" cy="478" r="3.2" fill="#22c55e"/><text x="359" y="481" font-size="11" fill="#22c55e" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">running</text>
-<text x="702" y="481" text-anchor="end" font-size="11.5" fill="#8b93a7" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Audit view UI</text><rect x="312" y="492" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
-<circle cx="330" cy="513" r="5.5" fill="#10a37f"/><text x="346" y="511" font-size="13.5" font-weight="600" fill="#e7eaf1" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Codex 5.6</text>
-<circle cx="350" cy="526" r="3.2" fill="#22c55e"/><text x="359" y="529" font-size="11" fill="#22c55e" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">running</text>
-<text x="702" y="529" text-anchor="end" font-size="11.5" fill="#8b93a7" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Board query fix</text><rect x="312" y="540" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
-<circle cx="330" cy="561" r="5.5" fill="#f59e0b"/><text x="346" y="559" font-size="13.5" font-weight="600" fill="#e7eaf1" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Opus 5</text>
-<circle cx="350" cy="574" r="3.2" fill="#f59e0b"/><text x="359" y="577" font-size="11" fill="#f59e0b" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">reviewing</text>
-<text x="702" y="577" text-anchor="end" font-size="11.5" fill="#8b93a7" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Payment webhook</text><rect x="312" y="588" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
-<circle cx="330" cy="609" r="5.5" fill="#94a3b8"/><text x="346" y="607" font-size="13.5" font-weight="600" fill="#e7eaf1" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Grok</text>
-<circle cx="350" cy="622" r="3.2" fill="#22c55e"/><text x="359" y="625" font-size="11" fill="#22c55e" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">running</text>
-<text x="702" y="625" text-anchor="end" font-size="11.5" fill="#8b93a7" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Docs sweep</text><rect x="312" y="636" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
-<circle cx="330" cy="657" r="5.5" fill="#ec4899"/><text x="346" y="655" font-size="13.5" font-weight="600" fill="#e7eaf1" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Fable 5</text>
-<circle cx="350" cy="670" r="3.2" fill="#22c55e"/><text x="359" y="673" font-size="11" fill="#22c55e" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">running</text>
-<text x="702" y="673" text-anchor="end" font-size="11.5" fill="#8b93a7" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Design review</text><rect x="312" y="684" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
-<circle cx="330" cy="705" r="5.5" fill="#3b82f6"/><text x="346" y="703" font-size="13.5" font-weight="600" fill="#e7eaf1" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Kimi 3</text>
-<circle cx="350" cy="718" r="3.2" fill="#22c55e"/><text x="359" y="721" font-size="11" fill="#22c55e" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">running</text>
-<text x="702" y="721" text-anchor="end" font-size="11.5" fill="#8b93a7" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">i18n sweep</text><rect x="312" y="732" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
-<circle cx="330" cy="753" r="5.5" fill="#06b6d4"/><text x="346" y="751" font-size="13.5" font-weight="600" fill="#e7eaf1" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">MiniMax</text>
-<circle cx="350" cy="766" r="3.2" fill="#6b7280"/><text x="359" y="769" font-size="11" fill="#6b7280" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">idle</text>
-<text x="702" y="769" text-anchor="end" font-size="11.5" fill="#8b93a7" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">queued</text><rect x="312" y="780" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
-<circle cx="330" cy="801" r="5.5" fill="#c084fc"/><text x="346" y="799" font-size="13.5" font-weight="600" fill="#e7eaf1" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Luna</text>
-<circle cx="350" cy="814" r="3.2" fill="#22c55e"/><text x="359" y="817" font-size="11" fill="#22c55e" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">running</text>
-<text x="702" y="817" text-anchor="end" font-size="11.5" fill="#8b93a7" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Replay capture</text>
-<text x="738" y="82" font-size="12.5" font-weight="400" fill="#7b8496" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Start Here</text><text x="831" y="82" font-size="12.5" font-weight="400" fill="#7b8496" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Board</text><text x="888.5" y="82" font-size="12.5" font-weight="700" fill="#e4e7ee" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Agents</text><rect x="886.5" y="90" width="43.2" height="2.5" fill="#6366f1"/><text x="953.1" y="82" font-size="12.5" font-weight="400" fill="#7b8496" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Project</text><text x="1024.8" y="82" font-size="12.5" font-weight="400" fill="#7b8496" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Code</text><text x="1075.2" y="82" font-size="12.5" font-weight="400" fill="#7b8496" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Worktrees</text><text x="1161.1" y="82" font-size="12.5" font-weight="400" fill="#7b8496" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">History</text><line x1="722" y1="96" x2="1434" y2="96" stroke="#23283a"/>
-<text x="738" y="128" font-size="15" font-weight="700" fill="#e4e7ee" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Agents</text><text x="1300" y="128" text-anchor="end" font-size="12" fill="#8b93a7" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">8 active · PRO plan</text><rect x="1312" y="112" width="108" height="26" rx="7" fill="#4f46e5"/><text x="1366" y="129" text-anchor="middle" font-size="12.5" font-weight="600" fill="#fff" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">+ Add Agent</text>
-<rect x="738" y="150" width="684" height="36" rx="9" fill="#181825" stroke="#313244"/><text x="754" y="173" font-size="12.5" fill="#bac2de" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Active 8 / 12 · PRO plan</text><text x="1404" y="173" text-anchor="end" font-size="12" fill="#8b93a7" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">spawn slots available</text>
-<rect x="738" y="206" width="330" height="108" rx="10" fill="#12151d" stroke="#23283a"/>
-<circle cx="760" cy="230" r="7" fill="#d97757"/><text x="778" y="230" font-size="14" font-weight="700" fill="#e7eaf1" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Claude</text>
-<rect x="984" y="217" width="68" height="24" rx="12" fill="#d97757" opacity="0.18" stroke="#d97757" stroke-opacity="0.35"/><text x="1018" y="233" text-anchor="middle" font-size="11.5" font-weight="600" fill="#d97757" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">frontend</text>
-<text x="754" y="262" font-size="12.5" fill="#c7ccd8" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Audit view UI</text><text x="754" y="284" font-size="11.5" fill="#22c55e" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">terminal attached · running</text>
-<rect x="754" y="294" width="298" height="6" rx="3" fill="#20242f"/><rect x="754" y="294" width="250" height="6" rx="3" fill="#d97757"/><rect x="1088" y="206" width="330" height="108" rx="10" fill="#12151d" stroke="#23283a"/>
-<circle cx="1110" cy="230" r="7" fill="#10a37f"/><text x="1128" y="230" font-size="14" font-weight="700" fill="#e7eaf1" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Codex 5.6</text>
-<rect x="1334" y="217" width="68" height="24" rx="12" fill="#10a37f" opacity="0.18" stroke="#10a37f" stroke-opacity="0.35"/><text x="1368" y="233" text-anchor="middle" font-size="11.5" font-weight="600" fill="#10a37f" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">frontend</text>
-<text x="1104" y="262" font-size="12.5" fill="#c7ccd8" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Board query fix</text><text x="1104" y="284" font-size="11.5" fill="#22c55e" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">terminal attached · running</text>
-<rect x="1104" y="294" width="298" height="6" rx="3" fill="#20242f"/><rect x="1104" y="294" width="203" height="6" rx="3" fill="#10a37f"/><rect x="738" y="338" width="330" height="108" rx="10" fill="#12151d" stroke="#23283a"/>
-<circle cx="760" cy="362" r="7" fill="#f59e0b"/><text x="778" y="362" font-size="14" font-weight="700" fill="#e7eaf1" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Opus 5</text>
-<rect x="984" y="349" width="68" height="24" rx="12" fill="#f59e0b" opacity="0.18" stroke="#f59e0b" stroke-opacity="0.35"/><text x="1018" y="365" text-anchor="middle" font-size="11.5" font-weight="600" fill="#f59e0b" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">backend</text>
-<text x="754" y="394" font-size="12.5" fill="#c7ccd8" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Payment webhook</text><text x="754" y="416" font-size="11.5" fill="#22c55e" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">terminal attached · running</text>
-<rect x="754" y="426" width="298" height="6" rx="3" fill="#20242f"/><rect x="754" y="426" width="155" height="6" rx="3" fill="#f59e0b"/><rect x="1088" y="338" width="330" height="108" rx="10" fill="#12151d" stroke="#23283a"/>
-<circle cx="1110" cy="362" r="7" fill="#ec4899"/><text x="1128" y="362" font-size="14" font-weight="700" fill="#e7eaf1" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Fable 5</text>
-<rect x="1334" y="349" width="68" height="24" rx="12" fill="#ec4899" opacity="0.18" stroke="#ec4899" stroke-opacity="0.35"/><text x="1368" y="365" text-anchor="middle" font-size="11.5" font-weight="600" fill="#ec4899" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">design</text>
-<text x="1104" y="394" font-size="12.5" fill="#c7ccd8" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Design review</text><text x="1104" y="416" font-size="11.5" fill="#22c55e" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">terminal attached · running</text>
-<rect x="1104" y="426" width="298" height="6" rx="3" fill="#20242f"/><rect x="1104" y="426" width="226" height="6" rx="3" fill="#ec4899"/><rect x="738" y="470" width="330" height="108" rx="10" fill="#12151d" stroke="#23283a"/>
-<circle cx="760" cy="494" r="7" fill="#3b82f6"/><text x="778" y="494" font-size="14" font-weight="700" fill="#e7eaf1" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Kimi 3</text>
-<rect x="984" y="481" width="68" height="24" rx="12" fill="#3b82f6" opacity="0.18" stroke="#3b82f6" stroke-opacity="0.35"/><text x="1018" y="497" text-anchor="middle" font-size="11.5" font-weight="600" fill="#3b82f6" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">frontend</text>
-<text x="754" y="526" font-size="12.5" fill="#c7ccd8" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">i18n sweep</text><text x="754" y="548" font-size="11.5" fill="#22c55e" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">terminal attached · running</text>
-<rect x="754" y="558" width="298" height="6" rx="3" fill="#20242f"/><rect x="754" y="558" width="131" height="6" rx="3" fill="#3b82f6"/><rect x="1088" y="470" width="330" height="108" rx="10" fill="#12151d" stroke="#23283a"/>
-<circle cx="1110" cy="494" r="7" fill="#eab308"/><text x="1128" y="494" font-size="14" font-weight="700" fill="#e7eaf1" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Sol</text>
-<rect x="1334" y="481" width="68" height="24" rx="12" fill="#eab308" opacity="0.18" stroke="#eab308" stroke-opacity="0.35"/><text x="1368" y="497" text-anchor="middle" font-size="11.5" font-weight="600" fill="#eab308" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">review</text>
-<text x="1104" y="526" font-size="12.5" fill="#c7ccd8" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Repo connect</text><text x="1104" y="548" font-size="11.5" fill="#22c55e" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">terminal attached · running</text>
-<rect x="1104" y="558" width="298" height="6" rx="3" fill="#20242f"/><rect x="1104" y="558" width="271" height="6" rx="3" fill="#eab308"/>
-<rect x="738" y="626" width="684" height="196" rx="10" fill="#10131c" stroke="#23283a"/>
-<text x="754" y="655" font-size="14" font-weight="700" fill="#e4e7ee" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Launch queue</text><text x="1404" y="655" text-anchor="end" font-size="12" fill="#8b93a7" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">2 queued</text>
-<rect x="754" y="678" width="318" height="56" rx="10" fill="#12151d" stroke="#23283a"/>
-<text x="767" y="702" font-size="12.5" fill="#dde1e9" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Replay capture</text>
-<text x="767" y="718" font-size="11.5" fill="#aeb6c6" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Luna · waiting for review gate</text>
-<circle cx="1057" cy="694" r="3.6" fill="#c084fc"/><rect x="1088" y="678" width="318" height="56" rx="10" fill="#12151d" stroke="#23283a"/>
-<text x="1101" y="702" font-size="12.5" fill="#dde1e9" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Docs sweep</text>
-<text x="1101" y="718" font-size="11.5" fill="#aeb6c6" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">Grok · rerun requested</text>
-<circle cx="1391" cy="694" r="3.6" fill="#94a3b8"/>
-<rect x="754" y="748" width="652" height="48" rx="10" fill="#12151d" stroke="#23283a"/>
-<text x="767" y="768" font-size="12.5" fill="#dde1e9" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">MiniMax</text>
-<text x="767" y="786" font-size="11.5" fill="#aeb6c6" font-family="system-ui,-apple-system,'Segoe UI',sans-serif">idle · available for next ticket</text>
-<circle cx="1391" cy="764" r="3.6" fill="#06b6d4"/>
+  <defs>
+    <radialGradient id="mbg" cx="50%" cy="24%" r="80%">
+      <stop offset="0%" stop-color="#20202f"/>
+      <stop offset="55%" stop-color="#121220"/>
+      <stop offset="100%" stop-color="#08080e"/>
+    </radialGradient>
+    <linearGradient id="mspec" gradientUnits="userSpaceOnUse" x1="14" y1="12" x2="50" y2="52">
+      <stop offset="0" stop-color="#FF6FB5"/>
+      <stop offset="0.3" stop-color="#C86BFF"/>
+      <stop offset="0.55" stop-color="#8A7CFF"/>
+      <stop offset="0.8" stop-color="#4AA8FF"/>
+      <stop offset="1" stop-color="#38E0E8"/>
+    </linearGradient>
+    <style>
+      .ui{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+      .mono{font-family:ui-monospace,"SF Mono",Menlo,monospace}
+      .title{fill:#e4e7ee;font-weight:700}
+      .body{fill:#c7ccd8}
+      .muted{fill:#8b93a7}
+      .dim{fill:#5b6478}
+      .xs{font-size:11.5px}
+      .sm{font-size:12.5px}
+      .md{font-size:13.5px}
+      .lg{font-size:15px}
+    </style>
+  </defs>
+
+  <rect x="6" y="6" width="1428" height="888" rx="16" fill="#0a0c12" stroke="#23283a"/>
+  <circle cx="34" cy="30" r="6.5" fill="#ff5f57"/>
+  <circle cx="56" cy="30" r="6.5" fill="#febc2e"/>
+  <circle cx="78" cy="30" r="6.5" fill="#28c840"/>
+  <text x="720" y="36" text-anchor="middle" class="ui lg muted">Marblo - Workspace</text>
+  <rect x="1352" y="18" width="72" height="24" rx="6" fill="#161a26"/>
+  <text x="1388" y="34" text-anchor="middle" class="ui xs muted">Settings</text>
+  <line x1="6" y1="52" x2="1434" y2="52" stroke="#23283a"/>
+
+  <rect x="6" y="52" width="296" height="842" fill="#0d1017"/>
+  <line x1="302" y1="52" x2="302" y2="894" stroke="#23283a"/>
+  <text x="26" y="82" class="ui md title">Files</text>
+  <rect x="24" y="90" width="34" height="2.5" fill="#6366f1"/>
+  <text x="98" y="82" class="ui md muted">Commands</text>
+  <text x="195" y="82" class="ui md muted">Chat</text>
+  <text x="24" y="124" class="mono md muted">&gt;</text>
+  <text x="38" y="124" class="ui md body">marblo</text>
+  <text x="42" y="151" class="mono md muted">&gt;</text>
+  <text x="56" y="151" class="ui md body">v3</text>
+  <text x="60" y="178" class="mono md muted">&gt;</text>
+  <text x="74" y="178" class="ui md body">src</text>
+  <text x="78" y="205" class="mono md muted">&gt;</text>
+  <text x="92" y="205" class="ui md body">components</text>
+  <rect x="10" y="217" width="284" height="24" rx="5" fill="#1b2740"/>
+  <text x="96" y="232" class="mono md" fill="#5aa9e6">TX</text>
+  <text x="116" y="232" class="ui md" fill="#ffffff">AgentsTab.tsx</text>
+  <text x="96" y="259" class="mono md" fill="#5aa9e6">TX</text>
+  <text x="116" y="259" class="ui md body">AgentDashboard.tsx</text>
+  <text x="96" y="286" class="mono md" fill="#5aa9e6">TX</text>
+  <text x="116" y="286" class="ui md body">AgentStatusCard.tsx</text>
+  <text x="96" y="313" class="mono md" fill="#5aa9e6">TX</text>
+  <text x="116" y="313" class="ui md body">AgentAddModal.tsx</text>
+  <text x="42" y="340" class="mono md muted">&gt;</text>
+  <text x="56" y="340" class="ui md body">marblo-web</text>
+  <text x="60" y="367" class="mono md" fill="#e0a458">MD</text>
+  <text x="80" y="367" class="ui md body">README.md</text>
+
+  <line x1="722" y1="52" x2="722" y2="894" stroke="#23283a"/>
+  <text x="316" y="78" class="ui xs dim" font-weight="700" letter-spacing="0.08em">TERMINALS</text>
+  <svg x="316" y="94" width="30" height="30" viewBox="0 0 64 64">
+    <rect width="64" height="64" rx="15" fill="url(#mbg)"/>
+    <circle cx="32" cy="32" r="20" fill="none" stroke="url(#mspec)" stroke-width="2.6"/>
+    <path d="M24 26 L30 32 L24 38" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="33.5" y="26" width="4.4" height="12" rx="1.6" fill="#fff"/>
+    <circle cx="32" cy="12" r="4.2" fill="#FFB020"/>
+    <circle cx="49.3" cy="42" r="4.2" fill="#22D3EE"/>
+    <circle cx="14.7" cy="42" r="4.2" fill="#34D399"/>
+  </svg>
+  <text x="356" y="108" class="ui lg title">Orchestrator</text>
+  <text x="356" y="124" class="ui xs muted">agent terminal - auto-routing</text>
+  <circle cx="676" cy="104" r="4" fill="#22c55e"/>
+  <text x="688" y="108" class="ui xs" fill="#22c55e">live</text>
+  <rect x="316" y="150" width="398" height="30" rx="9" fill="#1a1f2e"/>
+  <text x="330" y="170" class="ui sm body">Ship the Agents tab mockup package.</text>
+  <circle cx="322" cy="201" r="3.4" fill="#818cf8"/>
+  <text x="334" y="205" class="ui sm body">Opened the workspace-board anchor and kept the</text>
+  <text x="334" y="225" class="ui sm body">file tree plus orchestrator terminal layout.</text>
+  <circle cx="322" cy="247" r="3.4" fill="#818cf8"/>
+  <text x="334" y="251" class="ui sm body">Mapped AgentsTab to dashboard, quota badge,</text>
+  <text x="334" y="271" class="ui sm body">agent cards, model chips, and spawn action.</text>
+  <circle cx="322" cy="293" r="3.4" fill="#818cf8"/>
+  <text x="334" y="297" class="ui sm body">Rendering the final SVG to a real screenshot.</text>
+  <circle cx="322" cy="319" r="3.4" fill="#818cf8"/>
+  <text x="334" y="323" class="ui sm body">Commit and PR follow after pixel verification.</text>
+  <circle cx="322" cy="341" r="3.4" fill="#818cf8"/>
+  <text x="334" y="345" class="mono sm muted">working...</text>
+  <rect x="404" y="336" width="7" height="14" fill="#818cf8" opacity="0.8"/>
+  <rect x="312" y="366" width="402" height="32" rx="9" fill="#12151f" stroke="#23283a"/>
+  <text x="328" y="387" class="ui sm dim">Message the orchestrator...</text>
+  <text x="318" y="424" class="ui lg title">Agents</text>
+  <text x="712" y="424" text-anchor="end" class="ui xs muted">8 active</text>
+  <line x1="308" y1="434" x2="716" y2="434" stroke="#20242f"/>
+
+  <g id="rail-agent-list">
+    <rect x="312" y="444" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
+    <circle cx="330" cy="465" r="5.5" fill="#d97757"/><text x="346" y="463" class="ui md title">Claude</text>
+    <circle cx="350" cy="478" r="3.2" fill="#22c55e"/><text x="359" y="481" class="ui xs" fill="#22c55e">running</text>
+    <text x="702" y="481" text-anchor="end" class="ui xs muted">Audit view UI</text>
+    <rect x="312" y="492" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
+    <circle cx="330" cy="513" r="5.5" fill="#10a37f"/><text x="346" y="511" class="ui md title">Codex 5.6</text>
+    <circle cx="350" cy="526" r="3.2" fill="#22c55e"/><text x="359" y="529" class="ui xs" fill="#22c55e">running</text>
+    <text x="702" y="529" text-anchor="end" class="ui xs muted">Board query fix</text>
+    <rect x="312" y="540" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
+    <circle cx="330" cy="561" r="5.5" fill="#f59e0b"/><text x="346" y="559" class="ui md title">Opus 5</text>
+    <circle cx="350" cy="574" r="3.2" fill="#f59e0b"/><text x="359" y="577" class="ui xs" fill="#f59e0b">reviewing</text>
+    <text x="702" y="577" text-anchor="end" class="ui xs muted">Payment webhook</text>
+    <rect x="312" y="588" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
+    <circle cx="330" cy="609" r="5.5" fill="#94a3b8"/><text x="346" y="607" class="ui md title">Grok</text>
+    <circle cx="350" cy="622" r="3.2" fill="#22c55e"/><text x="359" y="625" class="ui xs" fill="#22c55e">running</text>
+    <text x="702" y="625" text-anchor="end" class="ui xs muted">Docs sweep</text>
+    <rect x="312" y="636" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
+    <circle cx="330" cy="657" r="5.5" fill="#ec4899"/><text x="346" y="655" class="ui md title">Fable 5</text>
+    <circle cx="350" cy="670" r="3.2" fill="#22c55e"/><text x="359" y="673" class="ui xs" fill="#22c55e">running</text>
+    <text x="702" y="673" text-anchor="end" class="ui xs muted">Design review</text>
+    <rect x="312" y="684" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
+    <circle cx="330" cy="705" r="5.5" fill="#3b82f6"/><text x="346" y="703" class="ui md title">Kimi 3</text>
+    <circle cx="350" cy="718" r="3.2" fill="#22c55e"/><text x="359" y="721" class="ui xs" fill="#22c55e">running</text>
+    <text x="702" y="721" text-anchor="end" class="ui xs muted">i18n sweep</text>
+    <rect x="312" y="732" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
+    <circle cx="330" cy="753" r="5.5" fill="#06b6d4"/><text x="346" y="751" class="ui md title">MiniMax</text>
+    <circle cx="350" cy="766" r="3.2" fill="#6b7280"/><text x="359" y="769" class="ui xs" fill="#6b7280">idle</text>
+    <text x="702" y="769" text-anchor="end" class="ui xs muted">queued</text>
+    <rect x="312" y="780" width="402" height="42" rx="10" fill="#10131c" stroke="#1c2130"/>
+    <circle cx="330" cy="801" r="5.5" fill="#c084fc"/><text x="346" y="799" class="ui md title">Luna</text>
+    <circle cx="350" cy="814" r="3.2" fill="#22c55e"/><text x="359" y="817" class="ui xs" fill="#22c55e">running</text>
+    <text x="702" y="817" text-anchor="end" class="ui xs muted">Replay capture</text>
+  </g>
+
+  <g id="agents-main">
+    <text x="738" y="82" class="ui sm muted">Start Here</text>
+    <text x="831" y="82" class="ui sm muted">Board</text>
+    <text x="888.5" y="82" class="ui sm title">Agents</text>
+    <rect x="888" y="90" width="47" height="2.5" fill="#6366f1"/>
+    <text x="953" y="82" class="ui sm muted">Project</text>
+    <text x="1025" y="82" class="ui sm muted">Code</text>
+    <text x="1075" y="82" class="ui sm muted">Worktrees</text>
+    <text x="1161" y="82" class="ui sm muted">History</text>
+    <line x1="722" y1="96" x2="1434" y2="96" stroke="#23283a"/>
+
+    <rect x="722" y="96" width="712" height="31" fill="#181825"/>
+    <line x1="722" y1="127" x2="1434" y2="127" stroke="#313244"/>
+    <text x="742" y="117" class="ui xs body">7 active / 8 limit - PRO plan</text>
+    <text x="1418" y="117" text-anchor="end" class="ui xs muted">spawn capacity available</text>
+
+    <text x="738" y="164" class="ui" font-size="22" font-weight="700" fill="#f4f6fb">Agents</text>
+    <text x="738" y="187" class="ui sm muted">Monitor spawned model sessions, assignments, and live status.</text>
+    <rect x="1124" y="145" width="86" height="28" rx="7" fill="#111827" stroke="#374151"/>
+    <text x="1141" y="164" class="ui xs body">List</text>
+    <rect x="1164" y="149" width="42" height="20" rx="5" fill="#283142"/>
+    <text x="1185" y="163" text-anchor="middle" class="ui xs title">Grid</text>
+    <rect x="1222" y="143" width="92" height="32" rx="7" fill="#1f2937" stroke="#ef4444" stroke-opacity=".35"/>
+    <text x="1268" y="164" text-anchor="middle" class="ui xs" fill="#f87171">Cleanup 1</text>
+    <rect x="1328" y="143" width="92" height="32" rx="7" fill="#2563eb"/>
+    <path d="M1350 153v12M1344 159h12" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
+    <text x="1382" y="164" text-anchor="middle" class="ui xs" fill="#ffffff" font-weight="700">Spawn</text>
+
+    <rect x="738" y="212" width="162" height="74" rx="8" fill="#10131c" stroke="#23283a"/>
+    <text x="754" y="237" class="ui xs muted">WORKING</text>
+    <text x="754" y="266" class="ui" font-size="26" font-weight="750" fill="#e4e7ee">5</text>
+    <rect x="824" y="254" width="60" height="8" rx="4" fill="#16251f"/>
+    <rect x="824" y="254" width="47" height="8" rx="4" fill="#22c55e"/>
+    <rect x="912" y="212" width="162" height="74" rx="8" fill="#10131c" stroke="#23283a"/>
+    <text x="928" y="237" class="ui xs muted">REVIEW</text>
+    <text x="928" y="266" class="ui" font-size="26" font-weight="750" fill="#e4e7ee">2</text>
+    <rect x="998" y="254" width="60" height="8" rx="4" fill="#2a2116"/>
+    <rect x="998" y="254" width="24" height="8" rx="4" fill="#f59e0b"/>
+    <rect x="1086" y="212" width="162" height="74" rx="8" fill="#10131c" stroke="#23283a"/>
+    <text x="1102" y="237" class="ui xs muted">IDLE</text>
+    <text x="1102" y="266" class="ui" font-size="26" font-weight="750" fill="#e4e7ee">1</text>
+    <rect x="1172" y="254" width="60" height="8" rx="4" fill="#1f242d"/>
+    <rect x="1172" y="254" width="12" height="8" rx="4" fill="#64748b"/>
+    <rect x="1260" y="212" width="162" height="74" rx="8" fill="#10131c" stroke="#23283a"/>
+    <text x="1276" y="237" class="ui xs muted">DONE TASKS</text>
+    <text x="1276" y="266" class="ui" font-size="26" font-weight="750" fill="#e4e7ee">18</text>
+    <text x="1337" y="264" class="ui xs muted">this week</text>
+
+    <g id="model-chips">
+      <rect x="738" y="306" width="74" height="26" rx="13" fill="#171923" stroke="#d97757" stroke-opacity=".5"/><circle cx="753" cy="319" r="4" fill="#d97757"/><text x="764" y="323" class="ui xs body">Claude</text>
+      <rect x="820" y="306" width="94" height="26" rx="13" fill="#171923" stroke="#10a37f" stroke-opacity=".5"/><circle cx="835" cy="319" r="4" fill="#10a37f"/><text x="846" y="323" class="ui xs body">Codex 5.6</text>
+      <rect x="922" y="306" width="76" height="26" rx="13" fill="#171923" stroke="#f59e0b" stroke-opacity=".5"/><circle cx="937" cy="319" r="4" fill="#f59e0b"/><text x="948" y="323" class="ui xs body">Opus 5</text>
+      <rect x="1006" y="306" width="62" height="26" rx="13" fill="#171923" stroke="#94a3b8" stroke-opacity=".5"/><circle cx="1021" cy="319" r="4" fill="#94a3b8"/><text x="1032" y="323" class="ui xs body">Grok</text>
+      <rect x="1076" y="306" width="76" height="26" rx="13" fill="#171923" stroke="#ec4899" stroke-opacity=".5"/><circle cx="1091" cy="319" r="4" fill="#ec4899"/><text x="1102" y="323" class="ui xs body">Fable 5</text>
+      <rect x="1160" y="306" width="68" height="26" rx="13" fill="#171923" stroke="#3b82f6" stroke-opacity=".5"/><circle cx="1175" cy="319" r="4" fill="#3b82f6"/><text x="1186" y="323" class="ui xs body">Kimi 3</text>
+      <rect x="1236" y="306" width="84" height="26" rx="13" fill="#171923" stroke="#06b6d4" stroke-opacity=".5"/><circle cx="1251" cy="319" r="4" fill="#06b6d4"/><text x="1262" y="323" class="ui xs body">MiniMax</text>
+      <rect x="1328" y="306" width="48" height="26" rx="13" fill="#171923" stroke="#c084fc" stroke-opacity=".5"/><circle cx="1343" cy="319" r="4" fill="#c084fc"/><text x="1354" y="323" class="ui xs body">Luna</text>
+      <rect x="1381" y="306" width="41" height="26" rx="13" fill="#171923" stroke="#eab308" stroke-opacity=".5"/><circle cx="1395" cy="319" r="4" fill="#eab308"/><text x="1405" y="323" class="ui xs body">Sol</text>
+    </g>
+
+    <g id="agent-cards">
+      <rect x="738" y="352" width="334" height="112" rx="8" fill="#11151f" stroke="#263044"/><rect x="738" y="352" width="4" height="112" fill="#d97757"/>
+      <circle cx="764" cy="379" r="12" fill="#d97757" fill-opacity=".18"/><text x="764" y="384" text-anchor="middle" class="ui xs" fill="#d97757" font-weight="700">C</text>
+      <text x="786" y="377" class="ui md title">Claude</text><text x="786" y="396" class="ui xs muted">frontend agent</text>
+      <rect x="948" y="365" width="80" height="22" rx="11" fill="#2b211d"/><text x="988" y="380" text-anchor="middle" class="ui xs" fill="#d97757">claude</text>
+      <circle cx="786" cy="424" r="3.8" fill="#22c55e"/><text x="798" y="428" class="ui xs" fill="#22c55e">running</text><text x="918" y="428" class="ui xs muted">Audit view UI</text>
+      <rect x="786" y="444" width="206" height="6" rx="3" fill="#1f2937"/><rect x="786" y="444" width="154" height="6" rx="3" fill="#22c55e"/>
+
+      <rect x="1088" y="352" width="334" height="112" rx="8" fill="#11151f" stroke="#263044"/><rect x="1088" y="352" width="4" height="112" fill="#10a37f"/>
+      <circle cx="1114" cy="379" r="12" fill="#10a37f" fill-opacity=".18"/><text x="1114" y="384" text-anchor="middle" class="ui xs" fill="#10a37f" font-weight="700">5.6</text>
+      <text x="1136" y="377" class="ui md title">Codex 5.6</text><text x="1136" y="396" class="ui xs muted">coding agent</text>
+      <rect x="1292" y="365" width="88" height="22" rx="11" fill="#132620"/><text x="1336" y="380" text-anchor="middle" class="ui xs" fill="#10a37f">gpt-5.6</text>
+      <circle cx="1136" cy="424" r="3.8" fill="#22c55e"/><text x="1148" y="428" class="ui xs" fill="#22c55e">running</text><text x="1268" y="428" class="ui xs muted">Board query fix</text>
+      <rect x="1136" y="444" width="206" height="6" rx="3" fill="#1f2937"/><rect x="1136" y="444" width="174" height="6" rx="3" fill="#22c55e"/>
+
+      <rect x="738" y="480" width="334" height="112" rx="8" fill="#11151f" stroke="#263044"/><rect x="738" y="480" width="4" height="112" fill="#f59e0b"/>
+      <circle cx="764" cy="507" r="12" fill="#f59e0b" fill-opacity=".18"/><text x="764" y="512" text-anchor="middle" class="ui xs" fill="#f59e0b" font-weight="700">O</text>
+      <text x="786" y="505" class="ui md title">Opus 5</text><text x="786" y="524" class="ui xs muted">review agent</text>
+      <rect x="948" y="493" width="82" height="22" rx="11" fill="#2a2116"/><text x="989" y="508" text-anchor="middle" class="ui xs" fill="#f59e0b">opus-5</text>
+      <circle cx="786" cy="552" r="3.8" fill="#f59e0b"/><text x="798" y="556" class="ui xs" fill="#f59e0b">reviewing</text><text x="918" y="556" class="ui xs muted">Payment webhook</text>
+      <rect x="786" y="572" width="206" height="6" rx="3" fill="#1f2937"/><rect x="786" y="572" width="110" height="6" rx="3" fill="#f59e0b"/>
+
+      <rect x="1088" y="480" width="334" height="112" rx="8" fill="#11151f" stroke="#263044"/><rect x="1088" y="480" width="4" height="112" fill="#94a3b8"/>
+      <circle cx="1114" cy="507" r="12" fill="#94a3b8" fill-opacity=".16"/><text x="1114" y="512" text-anchor="middle" class="ui xs" fill="#94a3b8" font-weight="700">G</text>
+      <text x="1136" y="505" class="ui md title">Grok</text><text x="1136" y="524" class="ui xs muted">docs agent</text>
+      <rect x="1292" y="493" width="62" height="22" rx="11" fill="#202631"/><text x="1323" y="508" text-anchor="middle" class="ui xs" fill="#94a3b8">grok</text>
+      <circle cx="1136" cy="552" r="3.8" fill="#22c55e"/><text x="1148" y="556" class="ui xs" fill="#22c55e">running</text><text x="1268" y="556" class="ui xs muted">Docs sweep</text>
+      <rect x="1136" y="572" width="206" height="6" rx="3" fill="#1f2937"/><rect x="1136" y="572" width="132" height="6" rx="3" fill="#22c55e"/>
+
+      <rect x="738" y="608" width="334" height="112" rx="8" fill="#11151f" stroke="#263044"/><rect x="738" y="608" width="4" height="112" fill="#ec4899"/>
+      <circle cx="764" cy="635" r="12" fill="#ec4899" fill-opacity=".18"/><text x="764" y="640" text-anchor="middle" class="ui xs" fill="#ec4899" font-weight="700">F</text>
+      <text x="786" y="633" class="ui md title">Fable 5</text><text x="786" y="652" class="ui xs muted">design agent</text>
+      <rect x="948" y="621" width="78" height="22" rx="11" fill="#2a1725"/><text x="987" y="636" text-anchor="middle" class="ui xs" fill="#ec4899">fable-5</text>
+      <circle cx="786" cy="680" r="3.8" fill="#f59e0b"/><text x="798" y="684" class="ui xs" fill="#f59e0b">reviewing</text><text x="918" y="684" class="ui xs muted">Design review</text>
+      <rect x="786" y="700" width="206" height="6" rx="3" fill="#1f2937"/><rect x="786" y="700" width="185" height="6" rx="3" fill="#f59e0b"/>
+
+      <rect x="1088" y="608" width="334" height="112" rx="8" fill="#11151f" stroke="#263044"/><rect x="1088" y="608" width="4" height="112" fill="#3b82f6"/>
+      <circle cx="1114" cy="635" r="12" fill="#3b82f6" fill-opacity=".18"/><text x="1114" y="640" text-anchor="middle" class="ui xs" fill="#3b82f6" font-weight="700">K</text>
+      <text x="1136" y="633" class="ui md title">Kimi 3</text><text x="1136" y="652" class="ui xs muted">i18n agent</text>
+      <rect x="1292" y="621" width="70" height="22" rx="11" fill="#14233a"/><text x="1327" y="636" text-anchor="middle" class="ui xs" fill="#3b82f6">kimi-3</text>
+      <circle cx="1136" cy="680" r="3.8" fill="#22c55e"/><text x="1148" y="684" class="ui xs" fill="#22c55e">running</text><text x="1268" y="684" class="ui xs muted">i18n sweep</text>
+      <rect x="1136" y="700" width="206" height="6" rx="3" fill="#1f2937"/><rect x="1136" y="700" width="146" height="6" rx="3" fill="#22c55e"/>
+
+      <rect x="738" y="736" width="334" height="94" rx="8" fill="#11151f" stroke="#263044"/><rect x="738" y="736" width="4" height="94" fill="#06b6d4"/>
+      <circle cx="764" cy="763" r="12" fill="#06b6d4" fill-opacity=".18"/><text x="764" y="768" text-anchor="middle" class="ui xs" fill="#06b6d4" font-weight="700">M</text>
+      <text x="786" y="761" class="ui md title">MiniMax</text><text x="786" y="780" class="ui xs muted">queued agent</text>
+      <rect x="948" y="749" width="82" height="22" rx="11" fill="#102630"/><text x="989" y="764" text-anchor="middle" class="ui xs" fill="#06b6d4">minimax</text>
+      <circle cx="786" cy="808" r="3.8" fill="#64748b"/><text x="798" y="812" class="ui xs" fill="#64748b">idle</text><text x="918" y="812" class="ui xs muted">waiting for slot</text>
+
+      <rect x="1088" y="736" width="160" height="94" rx="8" fill="#11151f" stroke="#263044"/><rect x="1088" y="736" width="4" height="94" fill="#c084fc"/>
+      <circle cx="1114" cy="763" r="12" fill="#c084fc" fill-opacity=".18"/><text x="1114" y="768" text-anchor="middle" class="ui xs" fill="#c084fc" font-weight="700">L</text>
+      <text x="1136" y="761" class="ui md title">Luna</text><text x="1136" y="780" class="ui xs muted">replay</text>
+      <circle cx="1136" cy="808" r="3.8" fill="#22c55e"/><text x="1148" y="812" class="ui xs" fill="#22c55e">running</text>
+      <rect x="1262" y="736" width="160" height="94" rx="8" fill="#11151f" stroke="#263044"/><rect x="1262" y="736" width="4" height="94" fill="#eab308"/>
+      <circle cx="1288" cy="763" r="12" fill="#eab308" fill-opacity=".18"/><text x="1288" y="768" text-anchor="middle" class="ui xs" fill="#eab308" font-weight="700">S</text>
+      <text x="1310" y="761" class="ui md title">Sol</text><text x="1310" y="780" class="ui xs muted">merge</text>
+      <circle cx="1310" cy="808" r="3.8" fill="#64748b"/><text x="1322" y="812" class="ui xs" fill="#64748b">idle</text>
+    </g>
+
+    <rect x="738" y="848" width="684" height="28" rx="8" fill="#10131c" stroke="#23283a"/>
+    <text x="754" y="867" class="ui xs title">Activity</text>
+    <text x="812" y="867" class="ui xs muted">Audit Trail</text>
+    <text x="894" y="867" class="ui xs muted">Guide</text>
+    <circle cx="1038" cy="862" r="3.4" fill="#10a37f"/>
+    <text x="1050" y="866" class="ui xs body">Codex 5.6 added activity to Board query fix</text>
+    <text x="1410" y="866" text-anchor="end" class="ui xs dim">live feed</text>
+  </g>
 </svg>
