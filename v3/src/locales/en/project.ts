@@ -50,6 +50,12 @@ export const project: Record<keyof typeof koProject, string> = {
   "project.audit.filterTypeHumanGroup": "Member actions",
   "project.audit.filterTypeAgentGroup": "Agent actions (MCP tools)",
   "project.audit.count": "{count} events",
+  // Low-signal (Telegram sends, memos) default-hidden toggle. Capture is
+  // untouched — this only affects display.
+  "project.audit.lowSignalToggle": "Include Telegram/memos",
+  "project.audit.lowSignalHiddenCount": " ({count} hidden)",
+  "project.audit.lowSignalOnlyEmpty":
+    "No high-signal events — {count} Telegram/memo events are hidden. Click to show.",
   // Human vs agent. Blur the two and "she moved 40 tickets" reads as her doing
   // it by hand, when an agent she dispatched did the moving.
   "project.audit.actor.human": "Person",

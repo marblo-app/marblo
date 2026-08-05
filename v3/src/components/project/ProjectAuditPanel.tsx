@@ -14,6 +14,7 @@ import {
   foldAuditRows,
   isAuditLoading,
   isFullyDenied,
+  isLowSignalAuditRow,
   resolveActorLabel,
   resolveTaskLabel,
   type AuditRowGroup,
@@ -86,9 +87,20 @@ export function ProjectAuditPanel({
   const notices = auditSourceNotices(sources);
   const loading = isAuditLoading(sources);
 
+  // 저신호 기본 숨김 — 텔레그램 발송·메모(add_activity)는 커뮤니케이션
+  // 부산물이라 기본으로 접어둔다. 캡처(audit_logs)는 그대로고 표시만 가린다 —
+  // 토글을 켜면 즉시 다시 보인다.
+  const [showLowSignal, setShowLowSignal] = useState(false);
+  const visibleRows = useMemo(
+    () =>
+      showLowSignal ? rows : rows.filter((row) => !isLowSignalAuditRow(row)),
+    [rows, showLowSignal],
+  );
+  const hiddenLowSignalCount = rows.length - visibleRows.length;
+
   // 노이즈 접기 — 같은 티켓에 연속으로 쌓인 add_activity 를 한 그룹으로 접는다.
   // 순수함수라 렌더 중에 접어도 안전(재조회 없음).
-  const displayRows = useMemo(() => foldAuditRows(rows), [rows]);
+  const displayRows = useMemo(() => foldAuditRows(visibleRows), [visibleRows]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
     () => new Set(),
   );
@@ -169,11 +181,30 @@ export function ProjectAuditPanel({
           )}
         </select>
 
-        {!loading && rows.length > 0 && (
+        {!loading && visibleRows.length > 0 && (
           <span className="text-xs text-gray-600">
-            {t("project.audit.count", { count: rows.length })}
+            {t("project.audit.count", { count: visibleRows.length })}
           </span>
         )}
+
+        {/* 저신호(텔레그램 발송·메모) 기본 숨김 토글 — 캡처는 그대로고 표시만
+            가린다. 무엇이 숨었는지 항상 말한다(감사에서 조용한 절단은 최악). */}
+        <label className="ml-auto flex flex-shrink-0 items-center gap-1 text-[11px] text-gray-500">
+          <input
+            type="checkbox"
+            checked={showLowSignal}
+            onChange={(e) => setShowLowSignal(e.target.checked)}
+            className="h-3 w-3 rounded border-gray-600 bg-gray-900"
+          />
+          {t("project.audit.lowSignalToggle")}
+          {!showLowSignal && hiddenLowSignalCount > 0 && (
+            <span className="text-gray-600">
+              {t("project.audit.lowSignalHiddenCount", {
+                count: hiddenLowSignalCount,
+              })}
+            </span>
+          )}
+        </label>
       </div>
 
       {/* 부분 실패 안내 — 살아남은 소스는 보여주되 무엇이 빠졌는지 항상 말한다.
@@ -201,6 +232,20 @@ export function ProjectAuditPanel({
           notices.length === 0 && (
             <EmptyState actorUid={actorFilter} type={typeFilter} />
           )
+        ) : visibleRows.length === 0 ? (
+          // 필터 탓 빈 화면과 진짜 0건을 가르는 것과 같은 이유 — 전부 저신호라
+          // 숨겨졌을 뿐 기록 자체가 없는 게 아니다. 빈 박스 대신 토글 안내를 보여준다.
+          <div className="rounded border border-dashed border-gray-700 bg-gray-900/50 px-4 py-6 text-center">
+            <button
+              type="button"
+              onClick={() => setShowLowSignal(true)}
+              className="text-xs text-gray-400 underline decoration-dotted hover:text-gray-300"
+            >
+              {t("project.audit.lowSignalOnlyEmpty", {
+                count: hiddenLowSignalCount,
+              })}
+            </button>
+          </div>
         ) : (
           <ul className="divide-y divide-gray-800">
             {displayRows.map((displayRow) =>
@@ -304,7 +349,7 @@ function AuditTaskLabel({
   if (!onOpenTicket) {
     return (
       <span
-        className="max-w-[220px] truncate text-xs text-gray-500"
+        className="min-w-0 break-words text-xs text-gray-500"
         title={`#${taskId}`}
       >
         {label}
@@ -315,7 +360,7 @@ function AuditTaskLabel({
     <button
       type="button"
       onClick={() => onOpenTicket(taskId)}
-      className="max-w-[220px] truncate text-xs text-gray-500 underline decoration-dotted underline-offset-2 hover:text-gray-300"
+      className="min-w-0 break-words text-left text-xs text-gray-500 underline decoration-dotted underline-offset-2 hover:text-gray-300"
       title={`#${taskId}`}
     >
       {label}
@@ -359,7 +404,9 @@ function AuditRow({
       </span>
 
       {row.detail && (
-        <span className="truncate text-xs text-gray-500">{row.detail}</span>
+        <span className="min-w-0 break-words text-xs text-gray-500">
+          {row.detail}
+        </span>
       )}
 
       {row.failed && (

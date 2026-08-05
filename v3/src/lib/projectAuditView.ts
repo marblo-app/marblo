@@ -390,6 +390,23 @@ export function humanAuditRow(
 }
 
 /**
+ * `create_task` 성공 결과 텍스트에서 새로 만들어진 태스크 id 를 뽑는다.
+ *
+ * ★캡처 갭: ledger.ts `taskIdFromParams` 은 **요청** params 의 `task_id` 만
+ * 읽는데, `create_task` 는 호출 시점엔 아직 id 가 없다(새로 발급) — 그래서
+ * 원장의 `taskId` 필드가 이 툴에서는 항상 null 이고, 감사 뷰에 제목 대신
+ * 해시만 보인다. 캡처(electron/mcp-server, audit_logs)는 건드리지 않고, 이미
+ * 저장돼 있는 `result` 원문(tools.ts create_task 핸들러가 성공 시 항상
+ * `ID: <id>` 줄을 찍는다)에서 뷰가 파싱해 메꾼다 — 새 write 도 새 필드도 없다.
+ */
+const CREATE_TASK_RESULT_ID_RE = /(?:^|\n)ID:\s*(\S+)/;
+
+export function taskIdFromCreateTaskResult(result: string): string | null {
+  const match = CREATE_TASK_RESULT_ID_RE.exec(result);
+  return match ? match[1].trim() : null;
+}
+
+/**
  * 원장 이벤트 한 건 → 통합 행.
  *
  * 이름은 원장에 없다(uid 만 있다). 그래서 `nameByUid`(현재 멤버 목록)로만 메꾸고,
@@ -404,6 +421,11 @@ export function agentAuditRow(
   nameByUid: Record<string, string> = {},
 ): UnifiedAuditRow {
   const actorUid = event.actorUid?.trim() || null;
+  const taskId =
+    event.taskId?.trim() ||
+    (event.toolName === "create_task"
+      ? taskIdFromCreateTaskResult(event.result)
+      : null);
   return {
     key: `agent:${event.id}`,
     actorKind: "agent",
@@ -414,7 +436,7 @@ export function agentAuditRow(
     actorUid,
     label: toolRowLabel(event.toolName || "?"),
     detail: agentRowDetail(event),
-    taskId: event.taskId?.trim() || null,
+    taskId,
     model: event.model?.trim() || null,
     // success 는 원장 초창기부터 있던 필드라 undefined 면 옛 문서가 아니라
     // 손상된 문서다. 그때는 실패로 단정하지 않는다(없는 사실을 지어내지 않음).
@@ -686,6 +708,27 @@ function isFoldableAuditRow(row: UnifiedAuditRow): boolean {
     !!row.taskId &&
     auditRowToolName(row) === FOLDABLE_TOOL_NAME
   );
+}
+
+// ── 저신호 기본 숨김 ─────────────────────────────────────────────
+
+/**
+ * 기본 뷰에서 접어두는 저신호 오케 행위. 텔레그램 발송·메모(add_activity)는
+ * 실제로 무엇이 바뀌었나(상태전이·스폰·머지)가 아니라 커뮤니케이션 부산물이라,
+ * 매 세션 수십 건씩 쌓여 신호 있는 행을 밀어낸다(사장님 도그푸딩 피드백).
+ *
+ * ★캡처는 그대로다 — 이 필터는 표시 여부만 가른다. `audit_logs` 원문은 지우지도
+ * 새로 쓰지도 않고, 토글(`showLowSignal`)을 켜면 즉시 그대로 다시 보인다.
+ */
+const LOW_SIGNAL_TOOL_NAMES = new Set([
+  "send_telegram_message",
+  "add_activity",
+]);
+
+export function isLowSignalAuditRow(row: UnifiedAuditRow): boolean {
+  if (row.actorKind !== "agent") return false;
+  const toolName = auditRowToolName(row);
+  return toolName ? LOW_SIGNAL_TOOL_NAMES.has(toolName) : false;
 }
 
 /** 접힌 그룹 하나. 원본 행(`rows`)은 그대로 들고 있다 — 펼치면 캡처와 1:1로 대응한다. */

@@ -48,6 +48,11 @@ export const project = {
   "project.audit.filterTypeHumanGroup": "사람 행위",
   "project.audit.filterTypeAgentGroup": "오케 행위 (MCP 툴)",
   "project.audit.count": "{count}건",
+  // 저신호(텔레그램 발송·메모) 기본 숨김 토글 — 캡처는 그대로고 표시만 가린다.
+  "project.audit.lowSignalToggle": "텔레그램·메모 포함",
+  "project.audit.lowSignalHiddenCount": " ({count}건 숨김)",
+  "project.audit.lowSignalOnlyEmpty":
+    "고신호 기록이 없습니다 — 텔레그램·메모 {count}건이 숨겨져 있습니다. 눌러서 보기",
   // 사람/오케 구분 — 뭉개면 "이 사람이 티켓 40개를 옮겼다"로 읽히는데 실제로는
   // 그가 발주한 에이전트가 옮긴 것이다.
   "project.audit.actor.human": "사람",

@@ -30,10 +30,12 @@ import {
   humanAuditRow,
   isAuditLoading,
   isFullyDenied,
+  isLowSignalAuditRow,
   ledgerFieldValue,
   mergeAuditActors,
   mergeAuditRows,
   parseAuditTypeFilter,
+  taskIdFromCreateTaskResult,
   type UnifiedAuditRow,
 } from "../../src/lib/projectAuditView";
 import type { AuditLog } from "../../src/types/audit";
@@ -627,6 +629,9 @@ describe("통합 뷰 i18n — ko/en 짝이 맞는가", () => {
     "project.audit.notice.agentDenied",
     "project.audit.notice.humanError",
     "project.audit.notice.agentError",
+    "project.audit.lowSignalToggle",
+    "project.audit.lowSignalHiddenCount",
+    "project.audit.lowSignalOnlyEmpty",
   ] as const;
 
   it("ko/en 양쪽에 문구가 다 있다", () => {
@@ -836,5 +841,90 @@ describe("foldAuditRows — 같은 티켓의 연속 add_activity 접기", () => 
     if (display.kind === "group") {
       expect(display.rows).toEqual(original);
     }
+  });
+});
+
+describe("isLowSignalAuditRow — 텔레그램 발송·메모는 저신호", () => {
+  it("send_telegram_message 는 저신호", () => {
+    const row = agentAuditRow(
+      ledgerEvent({ toolName: "send_telegram_message" }),
+    );
+    expect(isLowSignalAuditRow(row)).toBe(true);
+  });
+
+  it("add_activity 는 저신호", () => {
+    const row = agentAuditRow(ledgerEvent({ toolName: "add_activity" }));
+    expect(isLowSignalAuditRow(row)).toBe(true);
+  });
+
+  it("다른 오케 툴은 저신호가 아니다", () => {
+    const row = agentAuditRow(ledgerEvent({ toolName: "update_task_status" }));
+    expect(isLowSignalAuditRow(row)).toBe(false);
+  });
+
+  it("사람 행은 저신호 판정 대상이 아니다(항상 false)", () => {
+    const row = humanAuditRow(humanEvent());
+    expect(isLowSignalAuditRow(row)).toBe(false);
+  });
+});
+
+describe("taskIdFromCreateTaskResult — create_task 결과에서 새 태스크 id 메꿈", () => {
+  it("★캡처 갭: create_task 는 params 에 task_id 가 없어 원장 taskId 가 항상 null", () => {
+    // taskIdFromParams(ledger.ts)가 params.task_id 만 읽는데 create_task 호출
+    // 시점엔 그 필드 자체가 없다 — 이 갭이 감사 뷰에서 제목이 안 뜨던 원인.
+    const row = agentAuditRow(
+      ledgerEvent({
+        toolName: "create_task",
+        taskId: null,
+        params: { title: "새 태스크", role: "frontend" },
+        result: "ok",
+      }),
+    );
+    expect(row.taskId).toBeNull();
+  });
+
+  it("성공 결과 텍스트의 'ID: <id>' 줄에서 id 를 뽑는다", () => {
+    const result =
+      "Task created successfully!\nID: abc123\nTitle: 새 태스크\nRole: frontend\nPriority: 0\nProject: p1";
+    expect(taskIdFromCreateTaskResult(result)).toBe("abc123");
+  });
+
+  it("agentAuditRow 가 create_task 행의 taskId 를 result 에서 메꾼다", () => {
+    const row = agentAuditRow(
+      ledgerEvent({
+        toolName: "create_task",
+        taskId: null,
+        params: { title: "새 태스크", role: "frontend" },
+        result:
+          "Task created successfully!\nID: abc123\nTitle: 새 태스크\nRole: frontend\nPriority: 0\nProject: p1",
+      }),
+    );
+    expect(row.taskId).toBe("abc123");
+  });
+
+  it("원장에 taskId 가 이미 있으면 그대로 쓰고 result 는 보지 않는다", () => {
+    const row = agentAuditRow(
+      ledgerEvent({
+        toolName: "create_task",
+        taskId: "t1",
+        result: "Task created successfully!\nID: abc123\n",
+      }),
+    );
+    expect(row.taskId).toBe("t1");
+  });
+
+  it("create_task 가 아닌 툴은 result 에 'ID:' 가 있어도 뽑지 않는다", () => {
+    const row = agentAuditRow(
+      ledgerEvent({
+        toolName: "update_task_status",
+        taskId: null,
+        result: "ID: abc123",
+      }),
+    );
+    expect(row.taskId).toBeNull();
+  });
+
+  it("실패 결과 등 'ID:' 가 없으면 null — 지어내지 않는다", () => {
+    expect(taskIdFromCreateTaskResult("Error: No project context.")).toBeNull();
   });
 });
