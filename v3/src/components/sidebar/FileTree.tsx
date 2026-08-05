@@ -392,7 +392,11 @@ function FileTreeNode({
             className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-left"
             title={node.path}
           >
-            <span className={`min-w-0 flex-1 truncate ${statusColor}`}>
+            <span
+              className={`min-w-0 flex-1 truncate ${statusColor}`}
+              data-testid="file-tree-node-label"
+              title={node.path}
+            >
               {node.name}
             </span>
             {gitStatus && (
@@ -709,9 +713,7 @@ function WorktreeMenuButton({
                   t.path
                 }`}
               >
-                <span className="min-w-0 flex-1 whitespace-normal break-words leading-snug">
-                  {t.label}
-                </span>
+                <span className="min-w-0 flex-1 truncate">{t.label}</span>
                 {t.taskId && (
                   <span
                     className="ml-auto max-w-[45%] flex-shrink-0 truncate rounded bg-purple-500/20 px-1 text-[9px] font-bold uppercase tracking-wide text-purple-300"
@@ -1732,7 +1734,8 @@ export function FileTree() {
         <div className="flex items-start gap-1 px-2 pt-1">
           <div className="flex min-w-0 flex-1 items-start gap-1">
             <span
-              className="min-w-0 flex-1 whitespace-normal break-words text-[11px] font-medium leading-snug text-gray-300"
+              className="min-w-0 flex-1 truncate text-[11px] font-medium leading-snug text-gray-300"
+              data-testid="file-tree-root-label"
               title={rootView?.fullPath ?? rootPath}
             >
               {rootView?.label ?? basename(rootPath)}
@@ -1845,10 +1848,10 @@ export function FileTree() {
                             title={path}
                             role="menuitem"
                           >
-                            <span className="min-w-0 whitespace-normal break-words leading-snug">
+                            <span className="min-w-0 truncate leading-snug">
                               {folderLabel(path)}
                             </span>
-                            <span className="min-w-0 whitespace-normal break-words text-[9px] leading-snug text-gray-500">
+                            <span className="min-w-0 truncate text-[9px] leading-snug text-gray-500">
                               {path}
                             </span>
                           </button>
@@ -1981,6 +1984,7 @@ export function FileTree() {
             switch unmistakable (basenames are often generated ids). */}
         <div
           className="whitespace-normal break-words px-2 pb-1 text-[10px] leading-snug text-gray-500"
+          data-testid="file-tree-root-path"
           title={rootView?.fullPath ?? rootPath}
         >
           {rootView?.fullPath ?? rootPath}

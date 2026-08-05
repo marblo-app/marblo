@@ -7,6 +7,7 @@ import { useOrchestratorStore } from "./stores/orchestratorStore";
 import { useTaskStore } from "./stores/taskStore";
 import { usePaneStore } from "./stores/paneStore";
 import { useSplitWorkspaceStore } from "./stores/splitWorkspaceStore";
+import { useEditorStore } from "./stores/editorStore";
 
 // Test hatch — Playwright e2e fixture 가 zustand store 를 직접 manipulate 할
 // 수 있도록 window.__marbloTest 에 노출. main process 가
@@ -24,6 +25,7 @@ if (window.electronAPI?.testMode?.bypassAuth) {
       task: useTaskStore,
       pane: usePaneStore,
       splitWorkspace: useSplitWorkspaceStore,
+      editor: useEditorStore,
     },
   };
   console.debug("[TestHatch] window.__marbloTest exposed (bypassAuth mode)");
@@ -42,7 +44,7 @@ if (import.meta.hot) {
   import.meta.hot.on("vite:ws:connect", () => {
     if (wasDisconnected) {
       console.debug(
-        "[HMR] WebSocket reconnected after disconnect — state preserved"
+        "[HMR] WebSocket reconnected after disconnect — state preserved",
       );
       wasDisconnected = false;
     }
