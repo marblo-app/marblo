@@ -12,6 +12,7 @@ import { MemberWorkloadPanel } from "./MemberWorkloadPanel";
 import { ProjectAuditPanel } from "./ProjectAuditPanel";
 import { REPO_CONNECT_OPEN_EVENT } from "../collaboration/RepoConnectModal";
 import { githubCollaboratorsUrl } from "../../lib/githubWebUrl";
+import { FirstShareNudge } from "../work-history/FirstMissionShareNudge";
 
 /**
  * 프로젝트 탭 — 이 프로젝트의 **사람** 쪽 전부를 한 화면에 모은다: 누가 있고
@@ -107,6 +108,12 @@ export function ProjectTab() {
   return (
     <div className="h-full overflow-auto p-4">
       <div className="mx-auto max-w-4xl space-y-6">
+        <FirstShareNudge
+          projectId={projectId}
+          surface="project"
+          enabled={currentProject?.ownerId === user?.uid}
+        />
+
         {/* Header */}
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <div>

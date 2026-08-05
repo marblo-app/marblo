@@ -14,12 +14,14 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useSubscriptionStore } from "../../stores/subscriptionStore";
 import { useNavigationStore } from "../../stores/navigationStore";
+import { useAuth } from "../../hooks/useAuth";
 import { KanbanColumn } from "./KanbanColumn";
 import { StuckLane } from "./StuckLane";
 import { TaskCard } from "./TaskCard";
 import { TaskCreateModal } from "./TaskCreateModal";
 import { TaskDetailModal } from "./TaskDetailModal";
 import { OrchestratorChat } from "../orchestrator/OrchestratorChat";
+import { FirstShareNudge } from "../work-history/FirstMissionShareNudge";
 import { getNextStatuses, canTransition } from "../../services/stateMachine";
 import { updateTaskStatus } from "../../services/taskService";
 import { useStuckLane } from "../../hooks/useStuckLane";
@@ -36,6 +38,7 @@ const ROLES: AgentRole[] = ["backend", "frontend", "test", "devops"];
 
 export function KanbanBoard() {
   const { t } = useTranslation();
+  const { user } = useAuth();
   const currentProject = useProjectStore((s) => s.currentProject);
   const projectsLoading = useProjectStore((s) => s.loading);
   const projectsHydrated = useProjectStore((s) => s.projectsHydrated);
@@ -245,6 +248,14 @@ export function KanbanBoard() {
 
   return (
     <div className="flex flex-col h-full">
+      <div className="px-4 pt-3">
+        <FirstShareNudge
+          projectId={currentProject.id}
+          surface="board"
+          enabled={currentProject.ownerId === user?.uid}
+        />
+      </div>
+
       {/* Toolbar */}
       <div className="flex items-center gap-4 px-4 py-3 border-b border-gray-700/50 flex-shrink-0">
         {/* Project name (read-only, selection now in Header) */}

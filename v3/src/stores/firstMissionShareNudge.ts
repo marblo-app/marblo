@@ -9,29 +9,37 @@
 
 const STORAGE_PREFIX = "marblo:work-history:first-mission-nudge";
 
+export type FirstShareNudgeSurface = "mission" | "board" | "project";
+
 export type FirstMissionShareNudgeStorage = Pick<
   Storage,
   "getItem" | "setItem"
 >;
 
-function storageKey(projectId: string): string {
-  return `${STORAGE_PREFIX}:${projectId}`;
+function storageKey(
+  projectId: string,
+  surface: FirstShareNudgeSurface = "mission",
+): string {
+  if (surface === "mission") return `${STORAGE_PREFIX}:${projectId}`;
+  return `${STORAGE_PREFIX}:${surface}:${projectId}`;
 }
 
 /** 이 프로젝트에서 널지를 이미 보여줬거나 닫았는가. */
 export function hasSeenFirstMissionShareNudge(
   storage: FirstMissionShareNudgeStorage | null,
   projectId: string | null,
+  surface: FirstShareNudgeSurface = "mission",
 ): boolean {
   if (!storage || !projectId) return false;
-  return storage.getItem(storageKey(projectId)) !== null;
+  return storage.getItem(storageKey(projectId, surface)) !== null;
 }
 
 /** 널지를 봤다고 기록한다 — 멱등(여러 번 불러도 안전). */
 export function markFirstMissionShareNudgeSeen(
   storage: FirstMissionShareNudgeStorage | null,
   projectId: string | null,
+  surface: FirstShareNudgeSurface = "mission",
 ): void {
   if (!storage || !projectId) return;
-  storage.setItem(storageKey(projectId), "1");
+  storage.setItem(storageKey(projectId, surface), "1");
 }

@@ -2,6 +2,7 @@ import { UpdateBanner } from "./UpdateBanner";
 import { MarketingReconsentBanner } from "./legal/MarketingReconsentBanner";
 import { ProjectSetupBanners } from "./onboarding/ProjectSetupBanners";
 import { RepoConnectModal } from "./collaboration/RepoConnectModal";
+import { FirstSharedProjectModal } from "./collaboration/FirstSharedProjectModal";
 import { FirstProjectSurvey } from "./onboarding/FirstProjectSurvey";
 import { PrivacyConsentGate } from "./legal/PrivacyConsentGate";
 import { ChatToastHost } from "./chat/ChatToastHost";
@@ -58,6 +59,9 @@ export function GlobalOverlays({ projectSetup }: GlobalOverlaysProps) {
           진입하면 Clone & 연결 원클릭 모달. 이미 연결된 멤버에겐 렌더되지
           않는다(픽셀 불변). */}
       <RepoConnectModal />
+
+      {/* 공유받는 멤버의 첫 프로젝트 진입 맥락 — 공유 범위와 로컬 코드 원칙. */}
+      <FirstSharedProjectModal />
 
       {/* First project completion micro-survey */}
       <FirstProjectSurvey />

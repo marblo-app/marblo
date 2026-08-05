@@ -13,61 +13,17 @@
  * 좁혀서 지킨다. 널지를 본 뒤에는 이 컴포넌트가 다시 리스너를 켤 일이 없다.
  */
 import { useEffect, useState } from "react";
-import { useTranslation, type TFunction } from "../../lib/i18n";
+import { useTranslation } from "../../lib/i18n";
 import { useReplayableMissions } from "../../hooks/useMissionReplay";
-import type { Mission } from "../../types/mission";
 import {
   hasSeenFirstMissionShareNudge,
   markFirstMissionShareNudgeSeen,
   type FirstMissionShareNudgeStorage,
+  type FirstShareNudgeSurface,
 } from "../../stores/firstMissionShareNudge";
+import { FirstMissionShareNudgeView } from "./FirstShareNudgeView";
 
-export interface FirstMissionShareNudgeViewProps {
-  /** 보여줄 첫 미션. `null` 이면 아무것도 그리지 않는다. */
-  mission: Mission | null;
-  onOpenReplay: (missionId: string) => void;
-  onDismiss: () => void;
-  t: TFunction;
-}
-
-/** 상태 → 화면. 구독/localStorage 를 모른다(테스트가 이 함수만 호출한다). */
-export function FirstMissionShareNudgeView({
-  mission,
-  onOpenReplay,
-  onDismiss,
-  t,
-}: FirstMissionShareNudgeViewProps) {
-  if (!mission) return null;
-
-  return (
-    <div
-      role="status"
-      className="flex items-center gap-3 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2"
-    >
-      <span aria-hidden className="text-base">
-        🎉
-      </span>
-      <p className="min-w-0 flex-1 text-xs text-violet-100">
-        {t("workHistory.firstMissionNudge.message")}
-      </p>
-      <button
-        type="button"
-        onClick={() => onOpenReplay(mission.id)}
-        className="flex-shrink-0 rounded border border-violet-400/60 px-2 py-1 text-xs font-medium text-violet-200 transition hover:bg-violet-500/20"
-      >
-        {t("workHistory.firstMissionNudge.cta")}
-      </button>
-      <button
-        type="button"
-        onClick={onDismiss}
-        aria-label={t("workHistory.firstMissionNudge.dismiss")}
-        className="flex-shrink-0 text-violet-300/70 transition hover:text-violet-100"
-      >
-        ×
-      </button>
-    </div>
-  );
-}
+export { FirstMissionShareNudgeView } from "./FirstShareNudgeView";
 
 function safeStorage(): FirstMissionShareNudgeStorage | null {
   return typeof window === "undefined" ? null : window.localStorage;
@@ -110,6 +66,39 @@ export function FirstMissionShareNudge({
         onOpenReplay(missionId);
         dismiss();
       }}
+      onDismiss={dismiss}
+      t={t}
+    />
+  );
+}
+
+export interface FirstShareNudgeProps {
+  projectId: string;
+  surface: Exclude<FirstShareNudgeSurface, "mission">;
+  enabled?: boolean;
+}
+
+export function FirstShareNudge({
+  projectId,
+  surface,
+  enabled = true,
+}: FirstShareNudgeProps) {
+  const { t } = useTranslation();
+  const [dismissed, setDismissed] = useState(() =>
+    hasSeenFirstMissionShareNudge(safeStorage(), projectId, surface),
+  );
+
+  if (!enabled || dismissed) return null;
+
+  const dismiss = () => {
+    markFirstMissionShareNudgeSeen(safeStorage(), projectId, surface);
+    setDismissed(true);
+  };
+
+  return (
+    <FirstMissionShareNudgeView
+      mission={null}
+      surface={surface}
       onDismiss={dismiss}
       t={t}
     />
