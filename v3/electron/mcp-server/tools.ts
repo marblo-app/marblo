@@ -68,6 +68,10 @@ import {
 } from "./implicit-mission.js";
 import { evaluateDeleteGuards, type DeleteMode } from "./task-delete.js";
 import {
+  getClaimOwnershipError,
+  shouldReleaseClaimForStoppedAgent,
+} from "./task-ownership.js";
+import {
   appendQuestion,
   answerQuestion,
   clampQuestionText,
@@ -1279,6 +1283,56 @@ async function markAgentStoppedInFirestore(agentId: string): Promise<void> {
   }
 }
 
+async function releaseTaskClaimsForStoppedAgent(
+  agentId: string,
+): Promise<number> {
+  if (!agentId) return 0;
+  let released = 0;
+  try {
+    const claimedTasks = await getDocs(
+      query(collection(db, "tasks"), where("claimedBy", "==", agentId)),
+    );
+    const now = Timestamp.now();
+    for (const taskDoc of claimedTasks.docs) {
+      const data = taskDoc.data() as { claimedBy?: string | null };
+      if (
+        !shouldReleaseClaimForStoppedAgent({
+          claimedBy: data.claimedBy ?? null,
+          stoppedAgentId: agentId,
+        })
+      ) {
+        continue;
+      }
+      try {
+        await updateDoc(doc(db, "tasks", taskDoc.id), {
+          claimedBy: null,
+          claimedAt: null,
+          updatedAt: now,
+        });
+        released++;
+      } catch (err) {
+        console.warn(
+          `[MCP] Failed to release claim for stopped agent ${agentId} on task ${taskDoc.id}:`,
+          err,
+        );
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `[MCP] Failed to query claimed tasks for stopped agent ${agentId}:`,
+      err,
+    );
+  }
+  return released;
+}
+
+async function markAgentStoppedAndReleaseClaims(
+  agentId: string,
+): Promise<void> {
+  await markAgentStoppedInFirestore(agentId);
+  await releaseTaskClaimsForStoppedAgent(agentId);
+}
+
 function applyMissionContextTags(
   data: Record<string, unknown>,
   missionId: string | null = resolveMissionContextForWrite(),
@@ -1684,6 +1738,26 @@ async function validateLiveOrchestratorToolCall(
  */
 function attributionAgentId(paramId?: string): string {
   return WORKER_AGENT_ID || workerAgentId(paramId || MARBLO_AGENT_ID);
+}
+
+function canAgentMutateClaimedTask(
+  actorAgentId: string,
+): (task: Record<string, unknown>) => boolean {
+  return (task) => {
+    const claimedBy =
+      typeof task.claimedBy === "string" && task.claimedBy
+        ? task.claimedBy
+        : null;
+    return !claimedBy || claimedBy === actorAgentId;
+  };
+}
+
+function claimOwnershipErrorFromTask(task: Record<string, unknown>): string {
+  const claimedBy =
+    typeof task.claimedBy === "string" && task.claimedBy
+      ? task.claimedBy
+      : "unknown";
+  return getClaimOwnershipError({ claimedBy, actorAgentId: "" }) ?? "";
 }
 
 /**
@@ -3449,6 +3523,13 @@ export function registerTools(server: McpServer): void {
       const task = await fetchTask(task_id);
       if (!task) return text(`Error: Task ${task_id} not found.`);
 
+      const ownershipError = getClaimOwnershipError({
+        claimedBy: task.claimedBy,
+        actorAgentId: WORKER_AGENT_ID,
+        force,
+      });
+      if (ownershipError) return text(`Error: ${ownershipError}`);
+
       // P2-2: Validate the status VALUE against the 7-member TaskStatus domain
       // BEFORE the force branch. force=true is an escape hatch for *transition
       // rules* only — it must never let an out-of-domain string ("Done",
@@ -3492,6 +3573,10 @@ export function registerTools(server: McpServer): void {
         // transaction (projection.ts) — the escape hatch was effectively dead.
         validateFrom: force ? undefined : (s) => canTransition(s, newStatus),
       };
+      if (!force) {
+        projMut.validateTask = canAgentMutateClaimedTask(WORKER_AGENT_ID);
+        projMut.validateTaskError = claimOwnershipErrorFromTask;
+      }
       if (comment) projMut.extraTaskFields = { comment };
       if (newStatus === "BLOCKED")
         projMut.blockerSummary = comment || "blocked";
@@ -3595,6 +3680,11 @@ export function registerTools(server: McpServer): void {
       // Agents tab Activity feed filters by `agentId in [our agents]`, so
       // logging "unknown" makes the activity invisible.
       const resolvedAgentId = agent_id || MARBLO_AGENT_ID;
+      const ownershipError = getClaimOwnershipError({
+        claimedBy: task.claimedBy,
+        actorAgentId: attributionAgentId(agent_id),
+      });
+      if (ownershipError) return text(`Error: ${ownershipError}`);
 
       // First real activity promotes a freshly-dispatched task CLAIMED →
       // IN_PROGRESS — dispatch only advances TODO → CLAIMED, so this is the
@@ -3610,6 +3700,10 @@ export function registerTools(server: McpServer): void {
             lastAgentId: attributionAgentId(agent_id),
             lastActivitySummary: message,
             validateFrom: (s) => s === "CLAIMED",
+            validateTask: canAgentMutateClaimedTask(
+              attributionAgentId(agent_id),
+            ),
+            validateTaskError: claimOwnershipErrorFromTask,
           });
         } catch (err) {
           // Concurrent transition already moved it out of CLAIMED — fine, the
@@ -3633,6 +3727,8 @@ export function registerTools(server: McpServer): void {
         lastAgentId: attributionAgentId(agent_id),
         lastActivitySummary: message,
         activityPayload: { agentId: resolvedAgentId, message },
+        validateTask: canAgentMutateClaimedTask(attributionAgentId(agent_id)),
+        validateTaskError: claimOwnershipErrorFromTask,
       });
 
       // Lane activity is silent on the orch PTY (P4) — the comment lives on the
@@ -5184,7 +5280,7 @@ export function registerTools(server: McpServer): void {
         }
 
         if (result.agentId) {
-          await markAgentStoppedInFirestore(result.agentId);
+          await markAgentStoppedAndReleaseClaims(result.agentId);
         }
 
         return text(`${result.reason}`);
@@ -5379,7 +5475,7 @@ export function registerTools(server: McpServer): void {
               agentId?: string;
             };
             if (result.success && result.agentId) {
-              await markAgentStoppedInFirestore(result.agentId);
+              await markAgentStoppedAndReleaseClaims(result.agentId);
             }
             results.push(`${agent.name} (${reason})`);
           } catch {
@@ -5642,8 +5738,8 @@ export function registerTools(server: McpServer): void {
               localAgent.agent.status ?? "unknown"
             }`
           : localAgent.state === "not_found"
-          ? "listener=no_listener (not hosted by this Marblo app; a teammate's app may still deliver it if signed in as a project member)"
-          : `listener=unknown (${localAgent.error})`;
+            ? "listener=no_listener (not hosted by this Marblo app; a teammate's app may still deliver it if signed in as a project member)"
+            : `listener=unknown (${localAgent.error})`;
       const status =
         localAgent.state === "not_found" ? "queued/no_listener" : "queued";
       return text(

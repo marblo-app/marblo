@@ -149,6 +149,9 @@ export interface ApplyProjectionInput extends ProjectionMutation {
   validateTask?: (
     task: Record<string, unknown> & { status: TaskStatus },
   ) => boolean;
+  validateTaskError?:
+    | string
+    | ((task: Record<string, unknown> & { status: TaskStatus }) => string);
 }
 
 /**
@@ -231,7 +234,13 @@ export async function applyProjection(
       );
     }
     if (mut.validateTask && !mut.validateTask(taskData)) {
-      throw new Error(`Task ${taskId} failed task mutation precondition`);
+      const detail =
+        typeof mut.validateTaskError === "function"
+          ? mut.validateTaskError(taskData)
+          : mut.validateTaskError;
+      throw new Error(
+        detail || `Task ${taskId} failed task mutation precondition`,
+      );
     }
 
     const missionId = taskData.missionId;

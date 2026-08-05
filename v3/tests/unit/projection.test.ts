@@ -14,6 +14,10 @@ import {
   applyProjection,
   type TaskProjection,
 } from "../../electron/mcp-server/projection";
+import {
+  formatClaimOwnershipError,
+  getClaimOwnershipError,
+} from "../../electron/mcp-server/task-ownership";
 
 const TID = "task-123";
 const NOW = Timestamp.fromMillis(1_750_000_000_000);
@@ -288,5 +292,53 @@ describe("applyProjection — Firestore 통합 (seed self-heal + TOCTOU 가드)"
     };
     expect(t1.status).toBe("CLAIMED");
     expect(t1.projection.currentStatus).toBe("CLAIMED");
+  });
+
+  it("claimedBy 소유권 가드: claim 에이전트가 아니면 명시 에러로 거부", async () => {
+    await setDoc(doc(db, "tasks", "t1"), {
+      status: "IN_PROGRESS",
+      claimedBy: "agent-1",
+    });
+
+    await expect(
+      applyProjection(db, "t1", {
+        newStatus: "REVIEW",
+        lastAgentId: "agent-2",
+        validateTask: (t) =>
+          getClaimOwnershipError({
+            claimedBy: typeof t.claimedBy === "string" ? t.claimedBy : null,
+            actorAgentId: "agent-2",
+          }) === null,
+        validateTaskError: formatClaimOwnershipError("agent-1"),
+      }),
+    ).rejects.toThrow(
+      "Task is claimed by agent agent-1; only the claiming agent can update it",
+    );
+
+    const t1 = (await getDoc(doc(db, "tasks", "t1"))).data() as {
+      status: string;
+      claimedBy: string;
+    };
+    expect(t1.status).toBe("IN_PROGRESS");
+    expect(t1.claimedBy).toBe("agent-1");
+  });
+
+  it("claimedBy 소유권 가드: force 경로처럼 validateTask를 생략하면 다른 에이전트도 통과", async () => {
+    await setDoc(doc(db, "tasks", "t1"), {
+      status: "IN_PROGRESS",
+      claimedBy: "agent-1",
+    });
+
+    await applyProjection(db, "t1", {
+      newStatus: "DONE",
+      lastAgentId: "agent-2",
+    });
+
+    const t1 = (await getDoc(doc(db, "tasks", "t1"))).data() as {
+      status: string;
+      claimedBy: string;
+    };
+    expect(t1.status).toBe("DONE");
+    expect(t1.claimedBy).toBe("agent-1");
   });
 });

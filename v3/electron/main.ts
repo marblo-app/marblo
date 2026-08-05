@@ -77,7 +77,11 @@ import {
 } from "./orchestrator-switch";
 import { installBundledHarness } from "./bundle-installer";
 import { runGoogleLoopbackOAuth } from "./google-oauth";
-import { applyPackagedOAuthConfig, type PackagedOAuthConfig } from "./oauth-config-env";
+import {
+  applyPackagedOAuthConfig,
+  type PackagedOAuthConfig,
+} from "./oauth-config-env";
+import { shouldReleaseClaimForStoppedAgent } from "./mcp-server/task-ownership";
 import {
   listCatalog,
   installPackage,
@@ -245,7 +249,9 @@ if (firebaseConfigEnvResult.status === "loaded") {
 if (app.isPackaged) {
   try {
     const cfgPath = path.join(process.resourcesPath, "oauth-config.json");
-    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) as PackagedOAuthConfig;
+    const cfg = JSON.parse(
+      fs.readFileSync(cfgPath, "utf-8"),
+    ) as PackagedOAuthConfig;
     applyPackagedOAuthConfig(cfg);
   } catch {
     // Missing/malformed (dev build, or OAuth not configured) — the loopback
@@ -640,6 +646,7 @@ function finalizeAgentStatusInFirestore(
         { status, updatedAt: fbTimestamp.now() },
         { merge: true },
       );
+      await releaseTaskClaimsForDeadAgent(db, agentId);
     } catch (err) {
       console.warn(
         "[LifecycleReclaim] terminal status finalize failed:",
@@ -649,6 +656,35 @@ function finalizeAgentStatusInFirestore(
       );
     }
   })();
+}
+
+async function releaseTaskClaimsForDeadAgent(
+  db: ReturnType<typeof getFirestore>,
+  agentId: string,
+): Promise<number> {
+  const snap = await fbGetDocs(
+    fbQuery(fbCollection(db, "tasks"), fbWhere("claimedBy", "==", agentId)),
+  );
+  let released = 0;
+  const now = fbTimestamp.now();
+  for (const taskDoc of snap.docs) {
+    const data = taskDoc.data() as { claimedBy?: string | null };
+    if (
+      !shouldReleaseClaimForStoppedAgent({
+        claimedBy: data.claimedBy ?? null,
+        stoppedAgentId: agentId,
+      })
+    ) {
+      continue;
+    }
+    await fbUpdateDoc(fbDoc(db, "tasks", taskDoc.id), {
+      claimedBy: null,
+      claimedAt: null,
+      updatedAt: now,
+    });
+    released++;
+  }
+  return released;
 }
 
 /** pid liveness ON THIS MACHINE. EPERM = exists but not ours → alive. */
@@ -720,6 +756,7 @@ async function runGhostReclaimSweep(): Promise<GhostReclaimSweepResult> {
         { status: "stopped", updatedAt: fbTimestamp.now() },
         { merge: true },
       );
+      await releaseTaskClaimsForDeadAgent(db, id);
       const name = typeof data.name === "string" ? data.name : id;
       reclaimed.push({ id, name, reason: decision.reason });
       console.log(
