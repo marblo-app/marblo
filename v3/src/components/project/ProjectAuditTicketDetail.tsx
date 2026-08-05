@@ -78,7 +78,7 @@ export function ProjectAuditTicketDetail({
       >
         <div className="flex items-start justify-between border-b border-gray-700 px-5 py-4">
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-lg font-semibold text-gray-100">
+            <h2 className="min-w-0 whitespace-normal break-words text-lg font-semibold text-gray-100">
               {taskTitle ?? `#${taskId.slice(0, 8)}`}
             </h2>
             <p className="mt-0.5 text-xs text-gray-500">
@@ -196,7 +196,7 @@ function TicketLedgerRowView({
   const { t } = useTranslation();
 
   return (
-    <li className="flex flex-wrap items-baseline gap-x-2 gap-y-1 py-2">
+    <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 py-2">
       <AuditBadge row={row} />
 
       <span
@@ -211,7 +211,9 @@ function TicketLedgerRowView({
       </span>
 
       {row.detail && (
-        <span className="truncate text-xs text-gray-500">{row.detail}</span>
+        <span className="min-w-0 whitespace-normal break-words text-xs text-gray-500">
+          {row.detail}
+        </span>
       )}
 
       {row.failed && (
