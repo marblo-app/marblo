@@ -75,9 +75,10 @@ describe("modelKeyFromSpawn (쓰기 경로 = argv 관측)", () => {
     );
   });
 
-  it("★codex 는 모델을 핀하지 않으므로 effort 만 온다 → 상속 기본모델로 채운다", () => {
-    // 오늘의 스폰 argv 는 `-c model_reasoning_effort="medium"` 뿐이고 모델은
-    // 사용자 config.toml 값이다. 사다리의 inheritedModel 이 바로 그 사실이다.
+  it("★codex 구버전/미관측 세션은 effort 만 온다 → 상속 기본모델로 채운다", () => {
+    // gpt-5.6 자동선택 이전 세션이나 argv 모델 관측이 없는 세션은
+    // `-c model_reasoning_effort="medium"` 만 남아 있다. 사다리의 inheritedModel 은
+    // 그 구 관측을 읽기 위한 폴백 키다.
     expect(modelKeyFromSpawn("gpt", { effort: "medium" })).toBe(
       "gpt-5.5@medium",
     );

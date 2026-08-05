@@ -502,7 +502,7 @@ export interface AutoModelPlan {
   effort?: EffortLevel;
   /** `model@effort` 표기(그래프 키 · 로그). */
   modelKey: string;
-  /** 이 하네스가 모델 축을 실제로 핀하는가(codex=false → effort 만 넘긴다). */
+  /** 이 하네스가 모델 축을 실제로 핀하는가(gpt 포함 pinsModel=true 는 `-c model`까지 넘긴다). */
   pinsModel: boolean;
   mode: AutoSelectMode;
   /** 티어 진입칸(= 종전 고정 동작). 선택이 이것과 다르면 그게 이 티켓의 효과다. */

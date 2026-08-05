@@ -110,12 +110,11 @@ export interface HarnessLadder {
    * 이 프로바이더에서 우리가 모델 id 를 **실제로 강제하는가**.
    *
    * claude = true (`--model <id>`).
-   * gpt = **false** — 오늘 codex 스폰은 `-c model_reasoning_effort` 만 넘기고
-   * 모델은 사용자 `~/.codex/config.toml` 값을 그대로 쓴다
+   * gpt = true — 오늘 codex 스폰은 `-c model=...` 과
+   * `-c model_reasoning_effort=...` 를 함께 넘긴다
    * (`agent-config.buildCLICommand` case "gpt"). 그래서 gpt rung 의 `model` 은
-   * "이 칸에서 **쓰기로 권장된** 모델"이고, 오늘 실제 서빙되는 모델은
-   * `inheritedModel` 이다. `-c model="…"` 배선은 dispatch 지정모델 티켓
-   * (P1-1 / OwSU3RjjOC)이 가져온다 — 여기서 먼저 배선하면 그 티켓과 충돌한다.
+   * 실제 서빙되는 모델이고, `inheritedModel` 은 gpt-5.6 변종 도입 전
+   * `gpt-5.5@effort` 관측을 그래프 폴백 키로 읽기 위한 호환 축이다.
    */
   pinsModel: boolean;
   /** pinsModel=false 일 때 오늘 실측되는 기본 모델(비용추정·그래프 키 용도). */
@@ -474,7 +473,7 @@ export const LADDER_EXCLUSIONS: Readonly<Record<string, string>> = {
   "claude-opus-4-8":
     "claude-opus-5 와 동일 능력등급·동일 단가($5/$25). 같은 칸을 둘로 만들면 사다리 순서가 무의미해진다. env(MARBLO_STANDARD_CLAUDE_MODEL)로는 여전히 선택 가능.",
   "gpt-5.5":
-    "오늘 codex 가 실제로 서빙하는 기본 모델(HarnessLadder.inheritedModel)이지만, top 등급이 같은 terra 가 3.5배 싸므로 **권장 칸**으로 올릴 근거가 없다. 사용자 config.toml 을 우리가 갈아치우지도 않는다.",
+    "gpt-5.6 변종 도입 전 codex 기본 모델(HarnessLadder.inheritedModel 폴백 키)이다. top 등급이 같은 terra 가 3.5배 싸므로 **권장 칸**으로 올릴 근거가 없다.",
   "gpt-5.4":
     "단가가 추정치(pricing.estimated) 다. 추정 단가로 순서를 정하면 '실단가 기반 사다리' 라는 이 파일의 전제가 깨진다 — db3qs0o6 서베이가 실단가를 확정하면 편입 검토.",
   "gpt-5.4-mini":
@@ -790,7 +789,7 @@ export function formatLadder(harness: HarnessId): string {
     : "";
   const pinNote = ladder.pinsModel
     ? `모델 핀: 예(--model/-c model)${inheritedNote}`
-    : `모델 핀: 아니오 — 오늘 실제 서빙 모델은 ${ladder.inheritedModel ?? "CLI 기본값"} (P1-1 이 -c model 배선 예정)`;
+    : `모델 핀: 아니오 — 오늘 실제 서빙 모델은 ${ladder.inheritedModel ?? "CLI 기본값"}`;
   return [`${harness} 사다리 (${pinNote})`, ...lines].join("\n");
 }
 

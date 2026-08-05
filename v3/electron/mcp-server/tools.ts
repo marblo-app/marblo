@@ -4550,8 +4550,8 @@ export function registerTools(server: McpServer): void {
         .describe(
           "Task difficulty — also picks the agent model tier (cost/quality). " +
             "'simple' = physical agent + board task using cheap tier (claude sonnet / codex low); 'standard' (default) = " +
-            "top model (claude opus / gpt-5.5 medium); 'complex' = physical agent + " +
-            "top reasoning (claude opus / gpt-5.5 high). Set per task difficulty.",
+            "top model (claude opus / gpt-5.6-terra medium); 'complex' = physical agent + " +
+            "top reasoning (claude fable / gpt-5.6-sol high). Set per task difficulty.",
         ),
       model: z
         .string()

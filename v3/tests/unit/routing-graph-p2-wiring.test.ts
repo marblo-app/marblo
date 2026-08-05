@@ -9,7 +9,7 @@
  *       dispatch 조회에서 실제로 읽히는가(구키 폴백과 함께).
  *
  * ★유닛 증명과 "재시작 후 라이브 확인" 은 별개다. 여기 있는 전부는 유닛이고,
- * `~/.marblo/routing-graph.json` 에 `gpt-5.5@medium` 류 키가 실제로 생기는지는
+ * `~/.marblo/routing-graph.json` 에 `gpt-5.6-terra@medium` 류 키가 실제로 생기는지는
  * 앱 재시작(dist-electron/dist-mcp 재로드) 뒤 육안 확인 항목이다.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -35,13 +35,24 @@ import { graphModelKeys } from "../../electron/routing-model-key";
  * bridge 의 spawn 경로가 실제로 부르는 표면만 갖춘 최소 fake
  * (`bridge-dispatch.test.ts` 의 FakeAgentManager 와 같은 표면). 이 테스트가
  * 관심 있는 지점은 딱 하나 — `getSpawnedModel` 이 돌려주는 argv 관측값이
- * dispatchMeta 의 `spawnedModelKey` 로 접히는가다. codex 는 모델을 핀하지 않으므로
- * effort 만 돌아오는 것이 오늘의 실제 모습이다.
+ * dispatchMeta 의 `spawnedModelKey` 로 접히는가다. codex 자동선택은 모델과 effort 를
+ * 함께 핀하지만, 구버전/미관측 세션처럼 effort 만 돌아오는 경우도 폴백으로 다룬다.
  */
 class FakeAgentManager {
   agents = new Map<string, AgentInstance>();
   launchCalls = 0;
-  constructor(private spawnModel: { modelId?: string; effort?: string }) {}
+  lastLaunch:
+    | {
+        codexModelOverride?: string;
+        codexEffortOverride?: string;
+        claudeModelOverride?: string;
+        nativeModelOverride?: string;
+      }
+    | undefined;
+  constructor(
+    private spawnModel: { modelId?: string; effort?: string },
+    private inferLaunchModel = true,
+  ) {}
 
   listAgents(): AgentInstance[] {
     return [...this.agents.values()];
@@ -56,12 +67,22 @@ class FakeAgentManager {
     return this.listAgents().find((a) => a.name === name) ?? null;
   }
   getSpawnedModel(): { modelId?: string; effort?: string } {
-    return this.spawnModel;
+    if (this.spawnModel.modelId || this.spawnModel.effort) {
+      return this.spawnModel;
+    }
+    if (!this.inferLaunchModel) return {};
+    return {
+      modelId:
+        this.lastLaunch?.codexModelOverride ??
+        this.lastLaunch?.claudeModelOverride ??
+        this.lastLaunch?.nativeModelOverride,
+      effort: this.lastLaunch?.codexEffortOverride,
+    };
   }
   /** 관측 사다리(argv → 과금 세션 모델). 이 fake 는 과금 관측을 갖지 않으므로
    * argv 관측을 그대로 돌려준다 — 이 파일이 보는 축은 argv→키 접힘이다. */
   resolveConcreteModel(): { modelId?: string; effort?: string } {
-    return this.spawnModel;
+    return this.getSpawnedModel();
   }
   setStatus(id: string, status: AgentStatus): void {
     const a = this.agents.get(id);
@@ -88,9 +109,19 @@ class FakeAgentManager {
     role: string;
     cwd: string;
     currentTaskId?: string | null;
+    claudeModelOverride?: string;
+    codexModelOverride?: string;
+    codexEffortOverride?: string;
+    nativeModelOverride?: string;
     onPtyReady?: (sid: string) => void;
   }): AgentInstance {
     this.launchCalls++;
+    this.lastLaunch = {
+      claudeModelOverride: params.claudeModelOverride,
+      codexModelOverride: params.codexModelOverride,
+      codexEffortOverride: params.codexEffortOverride,
+      nativeModelOverride: params.nativeModelOverride,
+    };
     const inst = {
       id: params.id,
       name: params.name,
@@ -144,8 +175,11 @@ interface CapturedMeta {
   };
 }
 
-function makeBridge(spawnModel: { modelId?: string; effort?: string }) {
-  const am = new FakeAgentManager(spawnModel);
+function makeBridge(
+  spawnModel: { modelId?: string; effort?: string },
+  inferLaunchModel = true,
+) {
+  const am = new FakeAgentManager(spawnModel, inferLaunchModel);
   const bridge = new BridgeServer(
     am as unknown as ConstructorParameters<typeof BridgeServer>[0],
     new FakePty() as unknown as ConstructorParameters<typeof BridgeServer>[1],
@@ -172,8 +206,24 @@ function dispatch(over: Partial<DispatchTaskRequest>): DispatchTaskRequest {
 }
 
 describe("P2 배선 — dispatchMeta 가 taskType + spawnedModelKey 를 실어 보낸다", () => {
+  it("★gpt 자동선택은 실제 스폰 핀과 같은 model@effort 키를 dispatchMeta 에 기록한다", async () => {
+    const { bridge, captured } = makeBridge({});
+    const res = await bridge.dispatchTask(
+      dispatch({
+        taskId: "taskP2AUTO001",
+        complexity: "standard",
+        taskType: "feature",
+      }),
+    );
+    expect(res.success).toBe(true);
+    expect(captured).toHaveLength(1);
+    expect(captured[0].meta.spawnedModelKey).toMatch(
+      /^gpt-5\.6-(luna|terra|sol)@(low|medium|high|xhigh)$/,
+    );
+  });
+
   it("★codex 스폰(effort 만 argv 에 있음) → gpt-5.5@medium 키가 기록된다", async () => {
-    // 오늘의 실제 codex 스폰 모습: `-c model_reasoning_effort="medium"` 뿐.
+    // 구버전/미관측 codex 스폰 모습: `-c model_reasoning_effort="medium"` 만 관측.
     const { bridge, captured } = makeBridge({ effort: "medium" });
     const res = await bridge.dispatchTask(
       dispatch({
@@ -204,7 +254,7 @@ describe("P2 배선 — dispatchMeta 가 taskType + spawnedModelKey 를 실어 �
   });
 
   it("★관측이 없으면 키를 지어내지 않는다(spawnedModelKey 미기록)", async () => {
-    const { bridge, captured } = makeBridge({});
+    const { bridge, captured } = makeBridge({}, false);
     await bridge.dispatchTask(
       dispatch({ taskId: "taskP2CCCCCC", complexity: "standard" }),
     );

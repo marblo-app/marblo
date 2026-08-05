@@ -2662,11 +2662,12 @@ export class BridgeServer {
     // 그것이 이긴다 — 자동선택은 미지정일 때만이라는 계약.
     //
     // 두 모양으로 갈리는 이유는 사다리의 `pinsModel` 계약이다:
-    //   · claude — 모델 축을 실제로 핀한다(`--model`). 버전가드를 통과시키려고
-    //     기존 `resolveModelPin` 을 그대로 태운다(미검증 CLI 면 그 함수가 우아하게
+    //   · pinsModel=true — 모델 축을 실제로 핀한다(claude `--model`,
+    //     gpt/codex `-c model=...`). 버전가드를 통과시키려고 기존
+    //     `resolveModelPin` 을 그대로 태운다(미검증 CLI 면 그 함수가 우아하게
     //     폴백하고 스폰은 살아남는다 — §8.3 불변식).
-    //   · codex  — 사용자 `~/.codex/config.toml` 의 모델을 갈아치우지 않는다.
-    //     effort 축만 넘긴다(자동선택도 그 축에서만 골랐다).
+    //   · pinsModel=false — 모델은 상속하고 effort 축만 넘긴다. 오늘 사다리에는
+    //     없지만, 새 하네스가 들어와도 아래 분기가 같은 계약을 지킨다.
     const autoPlan = model ? undefined : autoPlans.get(selectedModel);
     const autoPin: LaunchModelPin | undefined = !autoPlan
       ? undefined

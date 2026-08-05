@@ -97,18 +97,15 @@ const SEED_PRIORS: readonly ColdStartPrior[] = [
     note: "complex→fable5 ($10/$50) = vendor-top tier; 15 merges observed",
   },
   {
-    // The asymmetry this seed is really about: for gpt, complexity=complex
-    // escalates only the reasoning EFFORT (modelTierForComplexity →
-    // codexReasoning "high"); the model stays whatever ~/.codex/config.toml
-    // pins, today gpt-5.5. OpenAI's hard-task tier is gpt-5.5-pro ($30/$180),
-    // which Marblo never selects. So on complex work we compare Claude's top
-    // model against a mid GPT model — a config gap, not a vendor gap. −1 (the
-    // smallest step) because the fix is a config change, not a routing change.
+    // Historical prior: before gpt-5.6 model pinning, complex gpt dispatches
+    // only escalated reasoning effort and inherited the user's gpt-5.5 config.
+    // Keep the seed small and provider-scoped so new gpt-5.6-sol@high cells can
+    // override it with direct observations.
     factorType: "complexity",
     factorValue: "complex",
     model: "gpt",
     prior: -1,
-    note: "complex escalates effort only (gpt-5.5 high); gpt-5.5-pro never used",
+    note: "legacy complex gpt inherited gpt-5.5@high; direct gpt-5.6 cells override this prior",
   },
   {
     // routing-graph.ts's own taxonomy comment flags this: `no_activity_stale`
