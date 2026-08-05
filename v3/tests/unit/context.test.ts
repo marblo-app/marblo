@@ -175,12 +175,12 @@ describe("isTaskInReadContext", () => {
     expect(isTaskInReadContext({ contextId: "lane:abc" }, "board")).toBe(false);
     expect(isTaskInReadContext({ contextId: "lane:" }, "board")).toBe(false);
   });
-  it("a mission task does not leak into the board feed", () => {
+  it("★mission grouping: a mission-labeled task remains discoverable on the board feed", () => {
     expect(isTaskInReadContext({ contextId: "mission-xyz" }, "board")).toBe(
-      false,
+      true,
     );
-    // contextId 미설정이라도 missionId 가 있으면 board 가 아니라 그 미션 소속.
-    expect(isTaskInReadContext({ missionId: "m1" }, "board")).toBe(false);
+    // contextId 미설정이라도 missionId 가 있으면 보드 기본 조회에서 숨기지 않는다.
+    expect(isTaskInReadContext({ missionId: "m1" }, "board")).toBe(true);
   });
   it("a lane read matches only its own lane (exact, no cross-lane leak)", () => {
     expect(isTaskInReadContext({ contextId: "lane:abc" }, "lane:abc")).toBe(
@@ -200,14 +200,19 @@ describe("get_available_tasks board filter (회귀 시나리오)", () => {
     { id: "legacy", role: "backend" }, // contextId 미설정(외부/legacy) → board 포함
     { id: "board1", role: "backend", contextId: "board" },
     { id: "lane1", role: "backend", contextId: "lane:q1" }, // 누출 금지
-    { id: "mission1", role: "backend", contextId: "mission-7" }, // 누출 금지
-    { id: "missionLegacy", role: "backend", missionId: "mission-7" }, // contextId 없지만 미션 소속 → 누출 금지
+    { id: "mission1", role: "backend", contextId: "mission-7" }, // 그룹핑: board 기본 조회 포함
+    { id: "missionLegacy", role: "backend", missionId: "mission-7" }, // legacy mission label도 포함
   ];
-  it("board 가용 목록은 board+미설정만 포함하고 lane/mission 은 제외한다", () => {
+  it("board 가용 목록은 board+미설정+mission 을 포함하고 lane 만 제외한다", () => {
     const visible = tasks
       .filter((t) => isTaskInReadContext(t, "board"))
       .map((t) => t.id);
-    expect(visible).toEqual(["legacy", "board1"]);
+    expect(visible).toEqual([
+      "legacy",
+      "board1",
+      "mission1",
+      "missionLegacy",
+    ]);
   });
   it("lane:q1 컨텍스트로 읽으면 board/미설정/타lane 은 안 보이고 자기 lane 만 보인다", () => {
     const visible = tasks

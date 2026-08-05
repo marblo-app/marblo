@@ -109,12 +109,11 @@ export function effectiveContextId(task: {
 /**
  * Whether a task is visible under the given read-scope context.
  *  - "" (unscoped) → every task is visible (no context filter).
- *  - "board" → tasks effectively on the board, INCLUDING legacy tasks stored
- *    without a contextId (effectiveContextId backfills them to "board"). This is
- *    the regression fix: a single Firestore `==` cannot express
- *    "contextId == 'board' OR contextId unset", so the board read must filter in
- *    memory. A lane (lane:*) or mission task carries an explicit, non-board
- *    contextId, so it never matches "board" — the lane-isolation invariant holds.
+ *  - "board" → the default board feed: board + mission-grouped tasks, excluding
+ *    only Quick Lanes. Mission labels are grouping metadata for Replay, not a
+ *    silent isolation boundary; keeping contextId=missionId still preserves the
+ *    Replay join key. Firestore cannot express "not lane:*" as one query, so the
+ *    board read filters in memory.
  *  - any other context (lane:* / missionId) → exact effective-contextId match.
  */
 export function isTaskInReadContext(
@@ -122,7 +121,9 @@ export function isTaskInReadContext(
   contextId: string,
 ): boolean {
   if (!contextId) return true;
-  return effectiveContextId(task) === contextId;
+  const effective = effectiveContextId(task);
+  if (contextId === "board") return !isLaneContextId(effective);
+  return effective === contextId;
 }
 
 // ── Mission step report (B안 Phase 2 — 오케스트레이터 → 지휘자 보고 채널) ──
