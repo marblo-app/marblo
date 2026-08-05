@@ -239,6 +239,9 @@ function errorMessage(err: unknown): string {
 }
 
 function testReplayMissions(projectId: string): Mission[] | null {
+  if (typeof window === "undefined" || typeof localStorage === "undefined") {
+    return null;
+  }
   if (!window.electronAPI?.testMode?.bypassAuth) return null;
   try {
     const raw = localStorage.getItem("marblo:test:replayMissions");

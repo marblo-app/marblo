@@ -133,6 +133,13 @@ describe("resolveClaimOwner — claimedBy 이중키", () => {
     ];
     expect(resolveClaimOwner("bot", dupes)).toBe("alice");
   });
+
+  it('레거시 ownerId="orchestrator" 에이전트는 프로젝트 오너로 매핑한다', () => {
+    const legacy = [agent("orch-spawned", "orchestrator")];
+    expect(resolveClaimOwner("orch-spawned", legacy, "owner-uid")).toBe(
+      "owner-uid",
+    );
+  });
 });
 
 describe("computeMemberWorkload — 상태별 집계", () => {
@@ -213,6 +220,37 @@ describe("computeMemberWorkload — 상태별 집계", () => {
     expect(rowFor(summary, "bob").agentCount).toBe(1);
   });
 
+  it("멤버 uid 소유 에이전트가 claimedBy 인 티켓은 그 멤버에게 귀속된다", () => {
+    const summary = computeMemberWorkload(
+      input({
+        members,
+        memberRoles,
+        agents: [agent("backend-a", "bob")],
+        tasks: [task("t1", "IN_PROGRESS", "backend-a")],
+      }),
+    );
+    expect(rowFor(summary, "bob").tasks.inProgress).toBe(1);
+    expect(summary.unattributed.tasks.total).toBe(0);
+  });
+
+  it('ownerId="orchestrator" 레거시 에이전트의 티켓과 에이전트 수는 오너에게 귀속된다', () => {
+    const summary = computeMemberWorkload(
+      input({
+        members,
+        memberRoles,
+        projectOwnerId: "alice",
+        agents: [agent("legacy-a", "orchestrator", { status: "working" })],
+        tasks: [task("t1", "IN_PROGRESS", "legacy-a")],
+      }),
+    );
+    const alice = rowFor(summary, "alice");
+    expect(alice.agentCount).toBe(1);
+    expect(alice.activeAgentCount).toBe(1);
+    expect(alice.tasks.inProgress).toBe(1);
+    expect(summary.unattributed.agentCount).toBe(0);
+    expect(summary.unattributed.tasks.total).toBe(0);
+  });
+
   it("머지는 taskId → 티켓 → 소유자 사슬로 귀속된다", () => {
     const summary = computeMemberWorkload(
       input({
@@ -270,6 +308,21 @@ describe("computeMemberWorkload — 미귀속 버킷", () => {
       input({ members, merges: [merge("m1", null)] }),
     );
     expect(summary.unattributed.merges).toBe(1);
+  });
+
+  it("소유자도 선점자도 없는 진행중 티켓만 미귀속으로 남긴다", () => {
+    const summary = computeMemberWorkload(
+      input({
+        members,
+        agents: [agent("a1", "alice")],
+        tasks: [
+          task("owned", "IN_PROGRESS", "a1"),
+          task("unowned", "IN_PROGRESS", null),
+        ],
+      }),
+    );
+    expect(rowFor(summary, "alice").tasks.inProgress).toBe(1);
+    expect(summary.unattributed.tasks.inProgress).toBe(1);
   });
 });
 

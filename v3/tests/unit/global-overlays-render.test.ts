@@ -48,6 +48,10 @@ vi.mock("../../src/components/collaboration/RepoConnectModal", () => ({
   RepoConnectModal: () =>
     createElement("div", { "data-testid": "repo-connect-modal" }),
 }));
+vi.mock("../../src/components/collaboration/FirstSharedProjectModal", () => ({
+  FirstSharedProjectModal: () =>
+    createElement("div", { "data-testid": "first-shared-project-modal" }),
+}));
 vi.mock("../../src/components/onboarding/FirstProjectSurvey", () => ({
   FirstProjectSurvey: () =>
     createElement("div", { "data-testid": "first-project-survey" }),
@@ -117,6 +121,7 @@ describe("GlobalOverlays DOM wiring", () => {
     expect(screen.getByTestId("marketing-reconsent-banner")).toBeTruthy();
     expect(screen.getByTestId("project-setup-banners")).toBeTruthy();
     expect(screen.getByTestId("repo-connect-modal")).toBeTruthy();
+    expect(screen.getByTestId("first-shared-project-modal")).toBeTruthy();
     expect(screen.getByTestId("first-project-survey")).toBeTruthy();
     expect(screen.getByTestId("privacy-consent-gate")).toBeTruthy();
     expect(screen.getByTestId("chat-toast-host")).toBeTruthy();

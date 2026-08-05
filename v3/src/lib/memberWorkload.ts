@@ -122,16 +122,22 @@ function addTask(counts: TaskCounts, status: TaskStatus): boolean {
 export function resolveClaimOwner(
   claimedBy: string | null | undefined,
   agents: Agent[],
+  projectOwnerId?: string | null,
 ): string | null {
   if (!claimedBy) return null;
   const byId = agents.find((a) => a.id === claimedBy);
-  if (byId) return byId.ownerId || null;
+  if (byId) {
+    if (byId.ownerId === "orchestrator") return projectOwnerId || null;
+    return byId.ownerId || null;
+  }
 
   const named = agents.filter((a) => a.name === claimedBy);
   if (named.length === 0) return null;
   const owners = new Set(named.map((a) => a.ownerId));
   if (owners.size !== 1) return null; // 이름 충돌 — 판정 불가
-  return named[0].ownerId || null;
+  const ownerId = named[0].ownerId;
+  if (ownerId === "orchestrator") return projectOwnerId || null;
+  return ownerId || null;
 }
 
 function laterOf(a: Date | null, b: Date | null | undefined): Date | null {
@@ -143,6 +149,7 @@ function laterOf(a: Date | null, b: Date | null | undefined): Date | null {
 export interface WorkloadInput {
   members: User[];
   memberRoles: Record<string, InvitationRole>;
+  projectOwnerId?: string | null;
   agents: Agent[];
   tasks: Task[];
   merges: MergeHistoryEntry[];
@@ -157,6 +164,10 @@ export interface WorkloadInput {
  */
 export function computeMemberWorkload(input: WorkloadInput): WorkloadSummary {
   const { members, memberRoles, agents, tasks, merges } = input;
+  const projectOwnerId =
+    input.projectOwnerId ??
+    Object.entries(memberRoles).find(([, role]) => role === "owner")?.[0] ??
+    null;
 
   // soft-delete 된 티켓은 원장에서 지워진 것으로 취급한다. archived 는 남긴다 —
   // 접어 둔 것이지 안 한 일이 아니다.
@@ -190,7 +201,9 @@ export function computeMemberWorkload(input: WorkloadInput): WorkloadSummary {
 
   // ── 에이전트 ───────────────────────────────────────────────────────────
   for (const agent of agents) {
-    const row = agent.ownerId ? rows.get(agent.ownerId) : undefined;
+    const ownerId =
+      agent.ownerId === "orchestrator" ? projectOwnerId : agent.ownerId;
+    const row = ownerId ? rows.get(ownerId) : undefined;
     if (!row) {
       unattributed.agentCount += 1;
       continue;
@@ -207,7 +220,7 @@ export function computeMemberWorkload(input: WorkloadInput): WorkloadSummary {
   // taskId → 귀속 uid 를 여기서 한 번 만들어 두고 머지 집계가 재사용한다.
   const ownerByTaskId = new Map<string, string | null>();
   for (const task of liveTasks) {
-    const owner = resolveClaimOwner(task.claimedBy, agents);
+    const owner = resolveClaimOwner(task.claimedBy, agents, projectOwnerId);
     const attributed = owner && memberIds.has(owner) ? owner : null;
     ownerByTaskId.set(task.id, attributed);
 

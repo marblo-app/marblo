@@ -655,6 +655,32 @@ async function projectExists(projectId: string): Promise<boolean> {
   }
 }
 
+async function readProjectOwnerId(projectId: string): Promise<string | null> {
+  if (!projectId) return null;
+  try {
+    const snap = await getDoc(doc(db, "projects", projectId));
+    if (!snap.exists()) return null;
+    const data = snap.data() as { ownerId?: unknown };
+    return typeof data.ownerId === "string" && data.ownerId.trim()
+      ? data.ownerId
+      : null;
+  } catch (err) {
+    console.warn(
+      `[MCP] readProjectOwnerId(${projectId}) failed:`,
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
+}
+
+async function resolveAgentDocumentOwnerId(
+  projectId: string,
+): Promise<string | null> {
+  const actorUid = getCurrentAuthUid();
+  if (actorUid) return actorUid;
+  return readProjectOwnerId(projectId);
+}
+
 /** Resolve a friendly project name (e.g. "마블로") to a real Firestore project
  * id by matching the projects collection `name` field. Returns null when no
  * unambiguous match exists. Best-effort — any read error yields null. */
@@ -4141,11 +4167,12 @@ export function registerTools(server: McpServer): void {
         // converge on the same id without creating duplicates.
         const projectId = DEFAULT_PROJECT;
         if (projectId && result.agentId) {
+          const ownerId = await resolveAgentDocumentOwnerId(projectId);
           await setDoc(
             doc(db, "agents", result.agentId),
             {
               projectId,
-              ownerId: "orchestrator",
+              ...(ownerId ? { ownerId } : {}),
               name,
               model,
               // 벤더(model)만으로는 fable5 인지 5.6-sol 인지 보드에서 구분이 안
@@ -5110,11 +5137,12 @@ export function registerTools(server: McpServer): void {
           const projectId = DEFAULT_PROJECT;
           if (projectId) {
             try {
+              const ownerId = await resolveAgentDocumentOwnerId(projectId);
               await setDoc(
                 doc(db, "agents", result.agentId),
                 {
                   projectId,
-                  ownerId: "orchestrator",
+                  ...(ownerId ? { ownerId } : {}),
                   name: result.agentName || `${role}-agent`,
                   model: result.model || model || "claude",
                   // 구체 모델 축. spawned/restarted 모두 브릿지가 그 프로세스의
