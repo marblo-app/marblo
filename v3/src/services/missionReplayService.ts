@@ -238,6 +238,18 @@ function errorMessage(err: unknown): string {
     : String(err);
 }
 
+function testReplayMissions(projectId: string): Mission[] | null {
+  if (!window.electronAPI?.testMode?.bypassAuth) return null;
+  try {
+    const raw = localStorage.getItem("marblo:test:replayMissions");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, Mission[]>;
+    return parsed[projectId] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ── 완료 미션 목록 ──────────────────────────────────────────────
 
 function sortByCompletion(missions: Mission[]): Mission[] {
@@ -272,6 +284,22 @@ export function subscribeToReplayableMissions(
   callback: (state: ReplayMissionsState) => void,
   options: Pick<MissionReplayOptions, "deps"> = {},
 ): MissionReplaySubscription {
+  const mock = testReplayMissions(projectId);
+  if (mock) {
+    callback({ status: "ready", missions: selectReplayableMissions(mock) });
+    return {
+      unsubscribe() {},
+      reload() {
+        callback({
+          status: "ready",
+          missions: selectReplayableMissions(
+            testReplayMissions(projectId) ?? [],
+          ),
+        });
+      },
+    };
+  }
+
   const deps = options.deps ?? firestoreMissionReplayDeps;
   let disposed = false;
   let gateSettled = false;

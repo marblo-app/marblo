@@ -84,6 +84,35 @@ function toAuditLog(raw: Record<string, unknown>): AuditLog {
   return convertTimestamps<AuditLog>(raw, DATE_FIELDS);
 }
 
+function testAuditOverride(projectId: string): {
+  human?: ProjectAuditEvent[];
+  agent?: AuditLog[];
+  taskTitles?: Record<string, string>;
+} | null {
+  if (!window.electronAPI?.testMode?.bypassAuth) return null;
+  try {
+    const raw = localStorage.getItem("marblo:test:projectAuditData");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<
+      string,
+      {
+        human?: ProjectAuditEvent[];
+        agent?: AuditLog[];
+        taskTitles?: Record<string, string>;
+      }
+    >;
+    return parsed[projectId] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function auditTime(value: Date): number {
+  const date = value instanceof Date ? value : new Date(value);
+  const ms = date.getTime();
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
 /**
  * 현재 로그인 사용자. 캡처 지점이 uid 를 직접 들고 있지 않을 때 쓴다.
  *
@@ -158,6 +187,18 @@ export async function getProjectAuditLog(
   options: ProjectAuditLogQuery = {},
 ): Promise<ProjectAuditEvent[]> {
   const max = normalizeAuditLimit(options.limit);
+  const mock = testAuditOverride(projectId);
+  if (mock) {
+    return (mock.human ?? [])
+      .filter((event) => event.projectId === projectId)
+      .filter(
+        (event) => !options.actorUid || event.actorUid === options.actorUid,
+      )
+      .filter((event) => !options.type || event.type === options.type)
+      .filter((event) => !options.taskId || event.taskId === options.taskId)
+      .sort((a, b) => auditTime(b.createdAt) - auditTime(a.createdAt))
+      .slice(0, max);
+  }
 
   const constraints = [
     where("projectId", "==", projectId),
@@ -256,6 +297,20 @@ export async function getProjectLedgerLog(
   options: ProjectLedgerLogQuery = {},
 ): Promise<AuditLog[]> {
   const max = normalizeAuditLimit(options.limit);
+  const mock = testAuditOverride(projectId);
+  if (mock) {
+    return (mock.agent ?? [])
+      .filter((event) => event.projectId === projectId)
+      .filter(
+        (event) => !options.actorUid || event.actorUid === options.actorUid,
+      )
+      .filter(
+        (event) => !options.toolName || event.toolName === options.toolName,
+      )
+      .filter((event) => !options.taskId || event.taskId === options.taskId)
+      .sort((a, b) => auditTime(b.createdAt) - auditTime(a.createdAt))
+      .slice(0, max);
+  }
 
   const constraints = [
     where("projectId", "==", projectId),
@@ -336,6 +391,9 @@ export async function getProjectLedgerActors(
 export async function getProjectTaskTitles(
   projectId: string,
 ): Promise<Record<string, string>> {
+  const mock = testAuditOverride(projectId);
+  if (mock) return { ...(mock.taskTitles ?? {}) };
+
   const docs = await queryDocuments<{ id: string; title?: unknown }>(
     TASKS_COLLECTION,
     where("projectId", "==", projectId),

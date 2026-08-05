@@ -10,6 +10,7 @@ import { useWorkspaceModeStore } from "./stores/workspaceModeStore";
 import { DetachedLayout, type DetachedView } from "./components/DetachedLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BrandLoader } from "./components/BrandLoader";
+import { ProjectAuditPanel } from "./components/project/ProjectAuditPanel";
 import { useProjectStore } from "./stores/projectStore";
 import { useSubscriptionStore } from "./stores/subscriptionStore";
 import { useAgentStore } from "./stores/agentStore";
@@ -36,6 +37,7 @@ import {
 } from "./services/telemetryService";
 import telemetry from "./services/telemetryService";
 import { t } from "./lib/i18n";
+import type { User } from "./types/user";
 
 // First-party telemetry is ON by default for de-identified operational metrics.
 // VITE_DISABLE_TELEMETRY=1 is the hard kill-switch: it force-disables here too,
@@ -419,6 +421,20 @@ function AppContent() {
     }
   }, []);
 
+  const auditHarness = testProjectAuditHarness();
+  if (auditHarness) {
+    return (
+      <div className="h-screen overflow-auto bg-gray-900 p-4 text-gray-100">
+        <div className="mx-auto max-w-4xl">
+          <ProjectAuditPanel
+            projectId={auditHarness.projectId}
+            members={auditHarness.members}
+          />
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return <BrandLoader label={t("common.loading")} />;
   }
@@ -448,6 +464,30 @@ function AppContent() {
     return <WorkspaceShell />;
   }
   return <Layout />;
+}
+
+function testProjectAuditHarness(): {
+  projectId: string;
+  members: User[];
+} | null {
+  if (!window.electronAPI?.testMode?.bypassAuth) return null;
+  try {
+    const raw = localStorage.getItem("marblo:test:projectAuditHarness");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      projectId?: unknown;
+      members?: unknown;
+    };
+    if (
+      typeof parsed.projectId !== "string" ||
+      !Array.isArray(parsed.members)
+    ) {
+      return null;
+    }
+    return { projectId: parsed.projectId, members: parsed.members as User[] };
+  } catch {
+    return null;
+  }
 }
 
 // One-shot marker: has this install ever emitted app:first_run? Persisted so

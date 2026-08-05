@@ -626,7 +626,7 @@ async function dismissFirstRunDialogs(page: Page): Promise<void> {
   // PrivacyConsentGate 의 useEffect 가 auth user uid 받은 후에야 needsPrompt
   // 판정하므로 부팅 직후 ~1-3초 윈도우. timeout 을 넉넉하게 (4s) 잡되, 모달이
   // 없으면 즉시 통과.
-  const consentLater = page.locator('button:has-text("나중에")').first();
+  const consentLater = page.getByRole("button", { name: /^나중에$/ }).first();
   try {
     await consentLater.waitFor({ state: "visible", timeout: 4000 });
     await consentLater.click();
