@@ -291,7 +291,7 @@ function FileTreeNode({
           setSelected(node.path);
           onContextMenu(e, node);
         }}
-        className={`group flex w-full items-center gap-1 px-1 py-0.5 text-[13px] ${
+        className={`group flex w-full min-w-0 items-center gap-1 px-1 py-0.5 text-[13px] ${
           isSelected
             ? "bg-blue-600/30 text-white"
             : isActive
@@ -351,7 +351,7 @@ function FileTreeNode({
           </svg>
         ) : (
           <span
-            className={`flex-shrink-0 text-[10px] font-bold ${
+            className={`w-4 flex-shrink-0 text-center text-[10px] font-bold ${
               getFileIcon(node.name).color
             }`}
           >
@@ -378,7 +378,7 @@ function FileTreeNode({
             }}
             onBlur={commitRename}
             onClick={(e) => e.stopPropagation()}
-            className="flex-1 rounded border border-blue-500 bg-gray-900 px-1 py-0 text-[13px] text-white outline-none"
+            className="min-w-0 flex-1 rounded border border-blue-500 bg-gray-900 px-1 py-0 text-[13px] text-white outline-none"
           />
         ) : (
           <button
@@ -389,12 +389,16 @@ function FileTreeNode({
               openFile(node.path);
               requestJump({ type: "code" });
             }}
-            className="flex flex-1 items-center gap-1 truncate text-left"
+            className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-left"
+            title={node.path}
           >
-            <span className={`truncate ${statusColor}`}>{node.name}</span>
+            <span className={`min-w-0 flex-1 truncate ${statusColor}`}>
+              {node.name}
+            </span>
             {gitStatus && (
               <span
-                className={`ml-auto flex-shrink-0 text-[10px] font-bold ${statusColor}`}
+                className={`ml-1 flex-shrink-0 text-[10px] font-bold ${statusColor}`}
+                title={gitStatus}
               >
                 {gitStatus.charAt(0)}
               </span>
@@ -503,7 +507,7 @@ function InlineCreateInput({
           <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
         </svg>
       ) : (
-        <span className="flex-shrink-0 text-[10px] font-bold text-gray-500">
+        <span className="w-4 flex-shrink-0 text-center text-[10px] font-bold text-gray-500">
           {" "}
         </span>
       )}
@@ -528,7 +532,7 @@ function InlineCreateInput({
             ? t("sidebar.tree.folderName")
             : t("sidebar.tree.fileName")
         }
-        className="flex-1 rounded border border-blue-500 bg-gray-900 px-1 py-0 text-[13px] text-white outline-none"
+        className="min-w-0 flex-1 rounded border border-blue-500 bg-gray-900 px-1 py-0 text-[13px] text-white outline-none"
       />
     </div>
   );
@@ -700,14 +704,19 @@ function WorktreeMenuButton({
               <button
                 key={t.path}
                 onClick={() => onSwitch(t.path)}
-                className="flex w-full min-w-0 items-center gap-2 px-2 py-1 text-left text-[12px] text-gray-300 hover:bg-gray-700"
+                className="flex w-full min-w-0 items-start gap-2 px-2 py-1 text-left text-[12px] text-gray-300 hover:bg-gray-700"
                 title={`${t.label}${t.taskId ? ` · ${t.taskId}` : ""}\n${
                   t.path
                 }`}
               >
-                <span className="min-w-0 flex-1 truncate">{t.label}</span>
+                <span className="min-w-0 flex-1 whitespace-normal break-words leading-snug">
+                  {t.label}
+                </span>
                 {t.taskId && (
-                  <span className="ml-auto flex-shrink-0 rounded bg-purple-500/20 px-1 text-[9px] font-bold uppercase tracking-wide text-purple-300">
+                  <span
+                    className="ml-auto max-w-[45%] flex-shrink-0 truncate rounded bg-purple-500/20 px-1 text-[9px] font-bold uppercase tracking-wide text-purple-300"
+                    title={t.taskId}
+                  >
                     {t.taskId}
                   </span>
                 )}
@@ -1723,14 +1732,14 @@ export function FileTree() {
         <div className="flex items-start gap-1 px-2 pt-1">
           <div className="flex min-w-0 flex-1 items-start gap-1">
             <span
-              className="min-w-0 whitespace-normal break-words text-[11px] font-medium leading-snug text-gray-300"
+              className="min-w-0 flex-1 whitespace-normal break-words text-[11px] font-medium leading-snug text-gray-300"
               title={rootView?.fullPath ?? rootPath}
             >
               {rootView?.label ?? basename(rootPath)}
             </span>
             {rootView?.kind === "worktree" && (
               <span
-                className="mt-0.5 flex-shrink-0 rounded bg-purple-500/20 px-1 text-[9px] font-bold uppercase tracking-wide text-purple-300"
+                className="mt-0.5 max-w-[48%] flex-shrink-0 truncate rounded bg-purple-500/20 px-1 text-[9px] font-bold uppercase tracking-wide text-purple-300"
                 title={t("sidebar.tree.activeWorktree")}
               >
                 {rootView.detail ? `WT · ${rootView.detail}` : "WT"}
@@ -1818,7 +1827,7 @@ export function FileTree() {
                       without registering it as a project. */}
                     <button
                       onClick={handleBrowseReadonly}
-                      className="block w-full truncate px-2 py-1 text-left text-[11px] text-gray-300 hover:bg-gray-700"
+                      className="block w-full px-2 py-1 text-left text-[11px] text-gray-300 hover:bg-gray-700"
                       role="menuitem"
                     >
                       {t("sidebar.tree.browseReadonly")}
@@ -1832,12 +1841,14 @@ export function FileTree() {
                           <button
                             key={path}
                             onClick={() => handleOpenRecent(path)}
-                            className="block w-full truncate px-2 py-1 text-left text-[11px] text-gray-300 hover:bg-gray-700"
+                            className="flex w-full min-w-0 flex-col px-2 py-1 text-left text-[11px] text-gray-300 hover:bg-gray-700"
                             title={path}
                             role="menuitem"
                           >
-                            {folderLabel(path)}
-                            <span className="ml-1 text-[9px] text-gray-500">
+                            <span className="min-w-0 whitespace-normal break-words leading-snug">
+                              {folderLabel(path)}
+                            </span>
+                            <span className="min-w-0 whitespace-normal break-words text-[9px] leading-snug text-gray-500">
                               {path}
                             </span>
                           </button>
@@ -1969,7 +1980,7 @@ export function FileTree() {
         {/* Full path of the root currently being viewed — makes a worktree
             switch unmistakable (basenames are often generated ids). */}
         <div
-          className="truncate px-2 pb-1 text-[10px] text-gray-500"
+          className="whitespace-normal break-words px-2 pb-1 text-[10px] leading-snug text-gray-500"
           title={rootView?.fullPath ?? rootPath}
         >
           {rootView?.fullPath ?? rootPath}
