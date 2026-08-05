@@ -1720,17 +1720,17 @@ export function FileTree() {
 
       {/* Project path header + toolbar */}
       <div className="flex flex-col border-b border-gray-700">
-        <div className="flex items-center gap-1 px-2 pt-1">
-          <div className="flex min-w-0 flex-1 items-center gap-1">
+        <div className="flex items-start gap-1 px-2 pt-1">
+          <div className="flex min-w-0 flex-1 items-start gap-1">
             <span
-              className="min-w-0 truncate text-[11px] font-medium text-gray-300"
+              className="min-w-0 whitespace-normal break-words text-[11px] font-medium leading-snug text-gray-300"
               title={rootView?.fullPath ?? rootPath}
             >
               {rootView?.label ?? basename(rootPath)}
             </span>
             {rootView?.kind === "worktree" && (
               <span
-                className="flex-shrink-0 rounded bg-purple-500/20 px-1 text-[9px] font-bold uppercase tracking-wide text-purple-300"
+                className="mt-0.5 flex-shrink-0 rounded bg-purple-500/20 px-1 text-[9px] font-bold uppercase tracking-wide text-purple-300"
                 title={t("sidebar.tree.activeWorktree")}
               >
                 {rootView.detail ? `WT · ${rootView.detail}` : "WT"}
@@ -1738,7 +1738,7 @@ export function FileTree() {
             )}
             {rootView?.kind === "project" && (
               <span
-                className="flex-shrink-0 rounded bg-gray-600/40 px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400"
+                className="mt-0.5 flex-shrink-0 rounded bg-gray-600/40 px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400"
                 title={t("sidebar.tree.projectRoot")}
               >
                 ROOT
