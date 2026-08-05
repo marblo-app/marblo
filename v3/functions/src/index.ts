@@ -8182,7 +8182,7 @@ function marketingContactRef(
   return db.collection(MARKETING_CONTACTS_COLLECTION).doc(contactId);
 }
 
-interface MarketingContactUpsertInput {
+export interface MarketingContactUpsertInput {
   email: string;
   uid?: string | null;
   source?: ContactSource;
@@ -8220,7 +8220,7 @@ interface MarketingContactUpsertInput {
   actor: string;
 }
 
-interface MarketingContactUpsertResult {
+export interface MarketingContactUpsertResult {
   contactId: string;
   created: boolean;
   consentGranted: boolean;
@@ -8238,7 +8238,7 @@ interface MarketingContactUpsertResult {
  *  - emailEnc: 최초 1회 암호화 저장. 키 미설정 환경에선 null(해시로만 운영,
  *    키 설정 후 백필 재실행으로 채움).
  */
-async function upsertMarketingContact(
+export async function upsertMarketingContact(
   input: MarketingContactUpsertInput,
 ): Promise<MarketingContactUpsertResult> {
   const normalized = normalizeMarketingEmail(input.email);
@@ -9050,7 +9050,7 @@ export const unsubscribeMarketingEmail = functions.https.onRequest(
 const BQ_MARKETING_DATASET = "marblo_marketing";
 const BQ_CONTACTS_TABLE = "contacts_daily";
 
-async function mirrorMarketingContactsToBqInternal(): Promise<{
+export async function mirrorMarketingContactsToBqInternal(): Promise<{
   snapshotDate: string;
   rows: number;
 }> {
