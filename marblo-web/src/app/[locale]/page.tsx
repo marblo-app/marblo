@@ -1,7 +1,7 @@
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import Image from "next/image";
-import HeroScreenshot from "@/components/HeroScreenshot";
+import HeroWorkspaceMockup from "@/components/HeroWorkspaceMockup";
 import HeroConstellation from "@/components/HeroConstellation";
 import { Check, X, Minus } from "lucide-react";
 import FeatureSection from "@/components/FeatureSection";
@@ -183,7 +183,7 @@ export default function HomePage() {
       <section className="py-28 px-4 text-center relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-indigo-600/5 to-transparent" />
         <HeroConstellation />
-        <div className="max-w-4xl mx-auto relative z-10">
+        <div className="w-full max-w-4xl mx-auto relative z-10 overflow-hidden">
           {/* The eyebrow pill lives INSIDE the h1. hero.title is pure benefit
               copy ("혼자서 팀 전체의 성과를 만드세요") and contains neither the
               brand nor the category, so the single strongest on-page heading
@@ -195,26 +195,26 @@ export default function HomePage() {
               Styling moved onto the inner spans so the pill and the headline
               render exactly as before. */}
           <h1>
-            <span className="inline-block bg-indigo-500/10 text-indigo-400 text-sm font-medium px-4 py-1.5 rounded-full mb-6 border border-indigo-500/30">
+            <span className="inline-block max-w-[22rem] sm:max-w-full whitespace-normal break-words bg-indigo-500/10 text-indigo-400 text-xs sm:text-sm font-medium px-4 py-1.5 rounded-full mb-6 border border-indigo-500/30">
               {t("hero.badge")}
             </span>
-            <span className="block text-5xl md:text-7xl font-bold leading-tight whitespace-pre-line tracking-tight bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">
+            <span className="block max-w-[22rem] sm:max-w-full mx-auto text-3xl sm:text-5xl md:text-7xl font-bold leading-tight whitespace-pre-line break-words tracking-tight bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">
               {t("hero.title")}
             </span>
           </h1>
-          <p className="mt-6 text-xl text-zinc-400 max-w-2xl mx-auto whitespace-pre-line leading-relaxed">
+          <p className="mt-6 text-lg sm:text-xl text-zinc-400 max-w-[22rem] sm:max-w-2xl mx-auto whitespace-pre-line break-words leading-relaxed">
             {t("hero.subtitle")}
           </p>
-          <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
+          <div className="mt-10 mx-auto flex w-full max-w-[22rem] sm:max-w-none flex-col sm:flex-row gap-4 justify-center">
             <Link
               href={`/${locale}/download`}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-xl text-lg font-semibold transition shadow-lg shadow-indigo-600/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+              className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-xl text-lg font-semibold text-center transition shadow-lg shadow-indigo-600/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
             >
               {t("hero.cta_download")}
             </Link>
             <Link
               href={`/${locale}/pricing`}
-              className="border border-zinc-700 hover:bg-zinc-800 text-white px-8 py-4 rounded-xl text-lg font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+              className="border border-zinc-700 hover:bg-zinc-800 text-white px-8 py-4 rounded-xl text-lg font-semibold text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
             >
               {t("hero.cta_pricing")}
             </Link>
@@ -223,12 +223,11 @@ export default function HomePage() {
           {/* Honest prerequisite — AI usage not included, CLI login/account
               connection required after install. Shown up front so users
               aren't surprised post-install. */}
-          <p className="mt-5 text-sm text-zinc-500 max-w-2xl mx-auto leading-relaxed">
+          <p className="mt-5 text-sm text-zinc-500 max-w-[22rem] sm:max-w-2xl mx-auto leading-relaxed">
             {t("hero.prereqNote")}
           </p>
 
-          {/* App Screenshot Mockup */}
-          <HeroScreenshot />
+          <HeroWorkspaceMockup />
         </div>
       </section>
 
