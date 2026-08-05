@@ -48,6 +48,7 @@ export interface MarbloHandle {
   openTab(
     tabId:
       | "guide"
+      | "startHere"
       | "board"
       | "missions"
       | "code"
@@ -607,6 +608,20 @@ async function openMockMissions(
 }
 
 async function dismissFirstRunDialogs(page: Page): Promise<void> {
+  // LanguageFirstRun — fresh app profiles can show this before any tab click.
+  // Pick the default Korean locale used by the rest of these Playwright specs.
+  try {
+    const languageDialog = page.getByRole("dialog", {
+      name: "언어를 선택하세요",
+    });
+    await languageDialog.waitFor({ state: "visible", timeout: 1500 });
+    await languageDialog.getByRole("button", { name: /한국어/ }).click();
+    await languageDialog.getByRole("button", { name: "계속" }).click();
+    await languageDialog.waitFor({ state: "hidden", timeout: 5000 });
+  } catch {
+    /* 모달이 없으면 통과 */
+  }
+
   // PrivacyConsent — 텔레메트리 동의. "나중에" = 옵트아웃 후 다시 안 뜸.
   // PrivacyConsentGate 의 useEffect 가 auth user uid 받은 후에야 needsPrompt
   // 판정하므로 부팅 직후 ~1-3초 윈도우. timeout 을 넉넉하게 (4s) 잡되, 모달이
@@ -625,6 +640,7 @@ function labelOf(tabId: string): string {
   // TabBar.tsx 의 label 과 일치. 신규 탭 추가 시 여기도 갱신.
   const m: Record<string, string> = {
     guide: "Guide",
+    startHere: "Start here",
     board: "Board",
     missions: "Missions",
     code: "Code",
@@ -651,6 +667,7 @@ function labelOf(tabId: string): string {
 function shellLabelOf(tabId: string): string {
   const m: Record<string, string> = {
     guide: "가이드",
+    startHere: "시작하기",
     board: "보드",
     missions: "미션",
     code: "코드",

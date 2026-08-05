@@ -43,7 +43,10 @@ export function ByomStartSection() {
   const readyCount = byomReadyCount(options);
 
   return (
-    <section className="rounded-lg border border-[#89b4fa]/30 bg-[#89b4fa]/5">
+    <section
+      data-testid="start-here-byom-section"
+      className="rounded-lg border border-[#89b4fa]/30 bg-[#89b4fa]/5"
+    >
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}

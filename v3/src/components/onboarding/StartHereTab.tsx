@@ -278,6 +278,7 @@ export function StartHereTab() {
             return (
               <section
                 key={view.id}
+                data-testid={`start-here-step-${view.id}`}
                 className={`rounded-lg border transition-colors ${
                   isOpen
                     ? "border-[#89b4fa]/50 bg-[#181825]"
@@ -307,7 +308,10 @@ export function StartHereTab() {
                 </button>
 
                 {isOpen && (
-                  <div className="space-y-3 border-t border-[#313244] px-4 py-4">
+                  <div
+                    data-testid={`start-here-step-body-${view.id}`}
+                    className="space-y-3 border-t border-[#313244] px-4 py-4"
+                  >
                     <StepBody
                       step={view.id}
                       hasProject={hasProject}
