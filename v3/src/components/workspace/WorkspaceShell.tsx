@@ -1,14 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../../lib/i18n";
 import { Header } from "../Header";
-import { UpdateBanner } from "../UpdateBanner";
-import { ProjectSetupBanners } from "../onboarding/ProjectSetupBanners";
 import { CliSetupHost } from "../onboarding/CliSetupHost";
-import { PrivacyConsentGate } from "../legal/PrivacyConsentGate";
-import { MarketingReconsentBanner } from "../legal/MarketingReconsentBanner";
-import { ChatToastHost } from "../chat/ChatToastHost";
-import { BugReportNoticeToast } from "../chat/BugReportNoticeToast";
-import { UpgradeModal } from "../settings/UpgradeModal";
+import { GlobalOverlays } from "../GlobalOverlays";
 import { useAppLifecycle } from "../../hooks/useAppLifecycle";
 import { useUiStore } from "../../stores/uiStore";
 import { useNavigationStore } from "../../stores/navigationStore";
@@ -71,8 +65,6 @@ export function WorkspaceShell() {
     useAppLifecycle();
   const { handleSelectDirectory } = projectSetup;
 
-  const upgradeModal = useUiStore((s) => s.upgradeModal);
-  const hideUpgrade = useUiStore((s) => s.hideUpgrade);
   const pendingSettingsSection = useUiStore((s) => s.pendingSettingsSection);
 
   const ratio = useSplitWorkspaceStore((s) => s.ratio);
@@ -227,10 +219,11 @@ export function WorkspaceShell() {
   return (
     <div className="relative flex h-screen flex-col bg-gray-900 text-gray-100">
       <Header onNavigateToSettings={() => setActiveTab("settings")} />
-      <UpdateBanner />
-      {/* 기존 파운더 재동의 배너 — status unknown 인 파운더에게만 노출. */}
-      <MarketingReconsentBanner />
-      <ProjectSetupBanners {...projectSetup} />
+
+      {/* Shared global banners/modals/toasts — parity-guarded against
+          Layout, see GlobalOverlays. */}
+      <GlobalOverlays projectSetup={projectSetup} />
+
       {/* Onboarding: no modal here. This host runs the CLI setup engine and
           surfaces a non-blocking banner that deep-links to the 시작하기 tab. */}
       <CliSetupHost />
@@ -349,19 +342,6 @@ export function WorkspaceShell() {
           )}
         </div>
       </div>
-
-      {/* Global gates / hosts (parity with Layout). */}
-      <PrivacyConsentGate />
-      <ChatToastHost />
-      <BugReportNoticeToast />
-
-      {upgradeModal && (
-        <UpgradeModal
-          feature={upgradeModal.feature}
-          requiredPlan={upgradeModal.requiredPlan}
-          onClose={hideUpgrade}
-        />
-      )}
 
       {/* Settings used to be an overlay here because the shell had no tab for
           it. It has one now (WorkTabs), which is both discoverable and a single

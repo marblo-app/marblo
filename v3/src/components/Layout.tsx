@@ -17,22 +17,14 @@ import { WorktreeTab } from "./tabs/WorktreeTab";
 import { WorkHistoryTab } from "./work-history/WorkHistoryTab";
 import { SettingsPage } from "./settings/SettingsPage";
 import { PlanGate } from "./settings/PlanGate";
-import { UpgradeModal } from "./settings/UpgradeModal";
 import { OrchestratorChat } from "./orchestrator/OrchestratorChat";
-import { ChatToastHost } from "./chat/ChatToastHost";
-import { BugReportNoticeToast } from "./chat/BugReportNoticeToast";
 import { TaskCreateModal } from "./board/TaskCreateModal";
 import { HarnessStore } from "./harness/HarnessStore";
 import { StoreTab } from "./store/StoreTab";
 import { GuideTab } from "./guide/GuideTab";
 import { ActivityStreamPanel } from "./activity/ActivityStreamPanel";
-import { PrivacyConsentGate } from "./legal/PrivacyConsentGate";
-import { MarketingReconsentBanner } from "./legal/MarketingReconsentBanner";
 import { CliSetupGate } from "./onboarding/CliSetupGate";
-import { RepoConnectModal } from "./collaboration/RepoConnectModal";
-import { ProjectSetupBanners } from "./onboarding/ProjectSetupBanners";
-import { FirstProjectSurvey } from "./onboarding/FirstProjectSurvey";
-import { UpdateBanner } from "./UpdateBanner";
+import { GlobalOverlays } from "./GlobalOverlays";
 import { useProjectSetup } from "../hooks/useProjectSetup";
 import { useOrchestratorAutoLaunch } from "../hooks/useOrchestratorAutoLaunch";
 import { useAgentReconnect } from "../hooks/useAgentReconnect";
@@ -183,12 +175,10 @@ export function Layout() {
     }
   }, [pendingJump, consumeJump]);
 
-  // Global upgrade modal + Settings-section routing (uiStore). When a plan
-  // limit is hit anywhere, `showUpgrade` sets `upgradeModal`; the modal's CTA
-  // requests the Billing section, which switches us to the Settings tab (the
+  // Settings-section routing (uiStore). The global upgrade modal itself now
+  // lives in <GlobalOverlays/>; this only handles its CTA's deep link, which
+  // requests the Billing section and switches us to the Settings tab (the
   // SettingsPage then selects the Billing sub-tab and clears the latch).
-  const upgradeModal = useUiStore((s) => s.upgradeModal);
-  const hideUpgrade = useUiStore((s) => s.hideUpgrade);
   const pendingSettingsSection = useUiStore((s) => s.pendingSettingsSection);
   useEffect(() => {
     if (pendingSettingsSection) setActiveTab("settings");
@@ -441,20 +431,9 @@ export function Layout() {
       {/* Header */}
       <Header onNavigateToSettings={() => setActiveTab("settings")} />
 
-      {/* Auto-update banner — silent when no update; sticky when one
-          is available / downloading / downloaded. Hotfix releases show
-          a forced-restart countdown. */}
-      <UpdateBanner />
-
-      {/* 기존 파운더 재동의 배너 — 마케팅 동의가 아직 unknown 인 파운더에게만
-          뜨는 얇은 opt-in 줄. 이미 동의/철회한 사람에겐 조회 단계에서 걸러진다. */}
-      <MarketingReconsentBanner />
-
-      {/* Project-setup prompts (register-or-browse choice, name-your-project).
-          Rendered here so they surface no matter which panel / sidebar state
-          triggered the folder pick. Silent on the zero-click first-user happy
-          path, which auto-registers without a banner. */}
-      <ProjectSetupBanners {...projectSetup} />
+      {/* Shared global banners/modals/toasts — parity-guarded against
+          WorkspaceShell, see GlobalOverlays. */}
+      <GlobalOverlays projectSetup={projectSetup} />
 
       {/* Main body */}
       <div className="flex flex-1 overflow-hidden">
@@ -511,24 +490,6 @@ export function Layout() {
           already-set-up user never sees it. */}
       <CliSetupGate />
 
-      {/* 팀 멤버 저장소 연결 — 초대 수락한 멤버가 rootPath 미연결 프로젝트에
-          진입하면 Clone & 연결 원클릭 모달. 이미 연결된 멤버에겐 렌더되지
-          않는다(픽셀 불변). ★자동풀 아님 — 명시적 버튼에서만 clone. */}
-      <RepoConnectModal />
-
-      {/* First project completion micro-survey */}
-      <FirstProjectSurvey />
-
-      {/* PIPA consent — auto-shows on first launch / policy version bump */}
-      <PrivacyConsentGate />
-
-      {/* Global team-chat listener and transient top notification. */}
-      <ChatToastHost />
-
-      {/* One-time first-run beta notice: welcomes new users and points them at
-          the 🐛 bug reporter. Non-blocking, shows once, then never again. */}
-      <BugReportNoticeToast />
-
       {/* Modals triggered from CommandPanel */}
       {showOrchestratorChat && (
         <OrchestratorChat onClose={() => setShowOrchestratorChat(false)} />
@@ -541,18 +502,6 @@ export function Layout() {
       )}
       {showHarnessStore && (
         <HarnessStore onClose={() => setShowHarnessStore(false)} />
-      )}
-
-      {/* Global plan-limit upgrade modal — triggered from anywhere (agent /
-          project limits) via uiStore.showUpgrade. Rendered once here so store
-          code (agentStore/projectStore/FileTree) can open it without holding
-          its own modal instance. Its CTA routes to Settings → Billing. */}
-      {upgradeModal && (
-        <UpgradeModal
-          feature={upgradeModal.feature}
-          requiredPlan={upgradeModal.requiredPlan}
-          onClose={hideUpgrade}
-        />
       )}
     </div>
   );
