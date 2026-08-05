@@ -10,7 +10,7 @@ test("@mocked 프로젝트 감사로그 티켓 상세는 긴 detail 전체와 Re
     "긴 상세 텍스트 회귀 가드 #758 #768 - " +
     Array.from(
       { length: 28 },
-      (_, i) => `segment-${String(i + 1).padStart(2, "0")}`,
+      (_, i) => `segment-${String(i + 1).padStart(2, "0")}`
     ).join(" / ") +
     " - 끝까지 보여야 하는 마지막 문장";
   const createdAtIso = "2026-08-05T03:21:00.000Z";
@@ -30,7 +30,7 @@ test("@mocked 프로젝트 감사로그 티켓 상세는 긴 detail 전체와 Re
       localStorage.removeItem("marblo.firstRun.inProgress");
       localStorage.setItem(
         "marblo:test:projectAuditHarness",
-        JSON.stringify({ projectId, members: [member] }),
+        JSON.stringify({ projectId, members: [member] })
       );
       localStorage.setItem(
         "marblo:test:projectAuditData",
@@ -73,7 +73,7 @@ test("@mocked 프로젝트 감사로그 티켓 상세는 긴 detail 전체와 Re
               },
             ],
           },
-        }),
+        })
       );
       localStorage.setItem(
         "marblo:test:replayMissions",
@@ -95,10 +95,10 @@ test("@mocked 프로젝트 감사로그 티켓 상세는 긴 detail 전체와 Re
               completedAt: now,
             },
           ],
-        }),
+        })
       );
     },
-    { projectId, taskId, taskTitle, longTierDetail, createdAtIso },
+    { projectId, taskId, taskTitle, longTierDetail, createdAtIso }
   );
   await marblo.page.reload({ waitUntil: "domcontentloaded" });
 
@@ -106,14 +106,14 @@ test("@mocked 프로젝트 감사로그 티켓 상세는 긴 detail 전체와 Re
     timeout: 8000,
   });
   await expect(
-    marblo.page.locator("li", { hasText: "상태 변경" }).first(),
+    marblo.page.locator("li", { hasText: "상태 변경" }).first()
   ).toBeVisible();
   await expect(marblo.page.getByText(taskTitle).first()).toBeVisible();
 
   await marblo.page.getByRole("button", { name: taskTitle }).first().click();
 
   await expect(
-    marblo.page.getByRole("heading", { name: taskTitle }),
+    marblo.page.getByRole("heading", { name: taskTitle })
   ).toBeVisible();
   const modalDetail = marblo.page.locator("span.whitespace-normal", {
     hasText: longTierDetail,
@@ -122,11 +122,203 @@ test("@mocked 프로젝트 감사로그 티켓 상세는 긴 detail 전체와 Re
   await expect(modalDetail).not.toHaveCSS("text-overflow", "ellipsis");
   await expect(marblo.page.getByText("...")).toHaveCount(0);
   await expect(
-    marblo.page.getByRole("button", { name: "Replay 보기" }),
+    marblo.page.getByRole("button", { name: "Replay 보기" })
   ).toBeVisible();
 
   await marblo.page.screenshot({
     path: "test-results/project-audit-modal-long-detail.png",
+    fullPage: true,
+  });
+});
+
+test("@mocked 프로젝트 감사로그는 worktree 단위 그룹에 보기 버튼과 아카이브 안내를 노출한다", async ({
+  marblo,
+}) => {
+  const projectId = "test-audit-worktree-project";
+  const liveTaskId = "audit-live-worktree-task";
+  const archivedTaskId = "audit-archived-worktree-task";
+  const liveTitle = "감사로그 라이브 워크트리 티켓";
+  const archivedTitle = "감사로그 아카이브 워크트리 티켓";
+  const liveBranch = "feature/audit-live-worktree-task";
+  const now = "2026-08-05T04:10:00.000Z";
+
+  await marblo.page.evaluate(
+    ({
+      projectId,
+      liveTaskId,
+      archivedTaskId,
+      liveTitle,
+      archivedTitle,
+      liveBranch,
+      now,
+    }) => {
+      const member = {
+        id: "test-user-bypass",
+        email: "owner@example.test",
+        displayName: "테스트 오너",
+        photoURL: "",
+        createdAt: now,
+      };
+      const ledger = (
+        id: string,
+        taskId: string,
+        createdAt: string,
+        tier: string
+      ) => ({
+        id,
+        projectId,
+        agentId: `agent-${taskId}`,
+        toolName: "add_activity",
+        params: { message: tier },
+        result: "ok",
+        duration: 12,
+        success: true,
+        createdAt,
+        actorUid: "test-user-bypass",
+        model: "codex",
+        tier,
+        taskId,
+        kind: "action",
+        worktreeId: `${projectId}/${taskId}`,
+        seq: 1,
+        prevHash: "prev",
+        hash: "hash",
+      });
+
+      localStorage.setItem("marblo:locale", "ko");
+      localStorage.removeItem("marblo.firstRun.inProgress");
+      localStorage.setItem(
+        "marblo:test:projectAuditHarness",
+        JSON.stringify({ projectId, members: [member] })
+      );
+      localStorage.setItem(
+        "marblo:test:projectAuditData",
+        JSON.stringify({
+          [projectId]: {
+            taskTitles: {
+              [liveTaskId]: liveTitle,
+              [archivedTaskId]: archivedTitle,
+            },
+            human: [
+              {
+                id: "archived-human-status",
+                projectId,
+                actorUid: "test-user-bypass",
+                actorName: "테스트 오너",
+                type: "task.status_changed",
+                taskId: archivedTaskId,
+                targetId: archivedTaskId,
+                metadata: { from: "REVIEW", to: "DONE" },
+                createdAt: "2026-08-05T04:06:00.000Z",
+              },
+            ],
+            agent: [
+              ledger(
+                "live-note-2",
+                liveTaskId,
+                "2026-08-05T04:10:00.000Z",
+                "라이브 워크트리 두 번째 진행"
+              ),
+              ledger(
+                "live-note-1",
+                liveTaskId,
+                "2026-08-05T04:09:00.000Z",
+                "라이브 워크트리 첫 번째 진행"
+              ),
+              ledger(
+                "archived-note-2",
+                archivedTaskId,
+                "2026-08-05T04:08:00.000Z",
+                "아카이브 워크트리 두 번째 진행"
+              ),
+              ledger(
+                "archived-note-1",
+                archivedTaskId,
+                "2026-08-05T04:07:00.000Z",
+                "아카이브 워크트리 첫 번째 진행"
+              ),
+            ],
+          },
+        })
+      );
+      localStorage.setItem(
+        "marblo:test:worktreeLightData",
+        JSON.stringify([
+          {
+            projectId,
+            repoRoot: "/tmp/marblo-audit-repo",
+            baseRef: "main",
+            worktrees: [
+              {
+                path: "/tmp/marblo-audit-repo",
+                branch: "main",
+                head: "base-head",
+              },
+              {
+                path: `/tmp/marblo-audit-worktrees/${projectId}/${liveTaskId}`,
+                branch: liveBranch,
+                head: "live-head",
+              },
+            ],
+          },
+        ])
+      );
+    },
+    {
+      projectId,
+      liveTaskId,
+      archivedTaskId,
+      liveTitle,
+      archivedTitle,
+      liveBranch,
+      now,
+    }
+  );
+  await marblo.page.reload({ waitUntil: "domcontentloaded" });
+
+  await expect(marblo.page.getByText("감사 로그")).toBeVisible({
+    timeout: 8000,
+  });
+  await marblo.page.screenshot({
+    path: "test-results/project-audit-worktree-before.png",
+    fullPage: true,
+  });
+
+  await marblo.page.getByLabel("텔레그램·메모 포함").check();
+  const liveGroup = marblo.page.locator("li", { hasText: liveTitle }).first();
+  const archivedGroup = marblo.page
+    .locator("li", { hasText: archivedTitle })
+    .first();
+
+  await expect(liveGroup.getByText("메모 묶음")).toBeVisible();
+  await expect(liveGroup.getByText(liveBranch).first()).toBeVisible();
+  await expect(
+    liveGroup.getByRole("button", { name: /이 워크트리 보기/ })
+  ).toBeVisible();
+
+  await expect(archivedGroup.getByText("메모 묶음")).toBeVisible();
+  await expect(archivedGroup.getByText("아카이브됨")).toBeVisible();
+  await expect(
+    archivedGroup.getByText(`${projectId}/${archivedTaskId}`)
+  ).toBeVisible();
+  await expect(
+    archivedGroup.getByRole("button", { name: /이 워크트리 보기/ })
+  ).toHaveCount(0);
+
+  const archivedStatusRow = marblo.page
+    .locator("li", { hasText: "상태 변경" })
+    .filter({ hasText: archivedTitle })
+    .first();
+  await archivedStatusRow.getByRole("button", { name: archivedTitle }).click();
+  await expect(
+    marblo.page.getByRole("heading", { name: archivedTitle })
+  ).toBeVisible();
+  await expect(
+    marblo.page.getByRole("button", { name: /아카이브됨/ })
+  ).toBeDisabled();
+
+  await marblo.page.screenshot({
+    path: "test-results/project-audit-worktree-after.png",
     fullPage: true,
   });
 });

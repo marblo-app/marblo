@@ -130,7 +130,7 @@ export function toolRowLabel(toolName: string): AuditRowLabel {
  */
 export function resolveActorLabel(
   event: Pick<ProjectAuditEvent, "actorUid" | "actorName">,
-  nameByUid: Record<string, string> = {},
+  nameByUid: Record<string, string> = {}
 ): string {
   const name = event.actorName?.trim() || nameByUid[event.actorUid]?.trim();
   if (name) return name;
@@ -146,7 +146,7 @@ export function resolveActorLabel(
  */
 export function auditMetadataSummary(
   type: string,
-  metadata: ProjectAuditMetadata | undefined,
+  metadata: ProjectAuditMetadata | undefined
 ): string | null {
   if (!metadata) return null;
   const str = (key: string): string | null => {
@@ -162,7 +162,7 @@ export function auditMetadataSummary(
   }
   if (type === "agent.spawned") {
     const parts = [str("agentName"), str("model"), str("role")].filter(
-      (v): v is string => !!v,
+      (v): v is string => !!v
     );
     return parts.length ? parts.join(" · ") : null;
   }
@@ -288,6 +288,23 @@ export type AuditRowLabel =
   | { kind: "tool"; key: MessageKey; toolName: string }
   | { kind: "raw"; text: string };
 
+/**
+ * 원장 확장 필드(§5) 하나의 표시 상태.
+ *
+ * ★"없음"을 한 종류로 뭉개지 않는다 — 세 사실이 서로 다르다:
+ *   - `preLedger`      — 문서에 그 **필드 자체가 없다**(원장 확장 이전에 쓰인 기록).
+ *   - `outOfConvention`— 필드는 있는데 값이 null(예: 워크트리 경로 규약 밖이라
+ *                        `parseWorktreePath` 가 null 을 write 했다 — ledger.ts §8).
+ *   - `value`          — 실제 값이 있다.
+ * 티켓 스펙의 "확실한 척 금지"가 이 세 갈래를 요구한다 — `outOfConvention` 을
+ * `preLedger` 로 보여주면 "이 기록엔 원래 워크트리 개념이 없었다"는 거짓말이 되고,
+ * 반대로 접으면 "판별에 실패했다"는 사실이 "정상적으로 없다"로 읽힌다.
+ */
+export type LedgerFieldValue =
+  | { state: "preLedger" }
+  | { state: "outOfConvention" }
+  | { state: "value"; value: string };
+
 /** 통합 타임라인 한 행. 두 소스가 이 모양으로 접힌 뒤에는 구분이 `actorKind` 뿐이다. */
 export interface UnifiedAuditRow {
   /**
@@ -309,6 +326,8 @@ export interface UnifiedAuditRow {
   model: string | null;
   /** 실패한 툴 호출인가. 사람 행은 성공/실패 개념이 없어 항상 false. */
   failed: boolean;
+  /** 사람 행은 워크트리 개념이 없다 — null. 오케 행은 원장 worktreeId 상태. */
+  worktree: LedgerFieldValue | null;
 }
 
 /**
@@ -324,7 +343,7 @@ export interface UnifiedAuditRow {
  * 있다"는 오해를 만든다.
  */
 export function auditLedgerDetail(
-  event: Pick<AuditLog, "tier">,
+  event: Pick<AuditLog, "tier">
 ): string | null {
   const tier = event.tier?.trim();
   return tier ? tier : null;
@@ -351,7 +370,7 @@ const TASK_STATUS_VALUES = new Set([
  * 건드리지 않는 이 티켓의 제약상 화살표는 목표 쪽만 보여준다.
  */
 export function auditStatusTarget(
-  event: Pick<AuditLog, "toolName" | "params">,
+  event: Pick<AuditLog, "toolName" | "params">
 ): string | null {
   if (event.toolName !== "update_task_status") return null;
   const raw = event.params?.status;
@@ -360,12 +379,12 @@ export function auditStatusTarget(
 
 /** 오케 행 detail 전체 — 상태 목표(있으면) + 티어(있으면). */
 function agentRowDetail(
-  event: Pick<AuditLog, "tier" | "toolName" | "params">,
+  event: Pick<AuditLog, "tier" | "toolName" | "params">
 ): string | null {
   const target = auditStatusTarget(event);
   const tier = auditLedgerDetail(event);
   const parts = [target ? `→ ${target}` : null, tier].filter(
-    (v): v is string => !!v,
+    (v): v is string => !!v
   );
   return parts.length ? parts.join(" · ") : null;
 }
@@ -373,7 +392,7 @@ function agentRowDetail(
 /** 사람 행위 한 건 → 통합 행. */
 export function humanAuditRow(
   event: ProjectAuditEvent,
-  nameByUid: Record<string, string> = {},
+  nameByUid: Record<string, string> = {}
 ): UnifiedAuditRow {
   return {
     key: `human:${event.id}`,
@@ -386,6 +405,7 @@ export function humanAuditRow(
     taskId: event.taskId,
     model: null,
     failed: false,
+    worktree: null,
   };
 }
 
@@ -418,7 +438,7 @@ export function taskIdFromCreateTaskResult(result: string): string | null {
  */
 export function agentAuditRow(
   event: AuditLog,
-  nameByUid: Record<string, string> = {},
+  nameByUid: Record<string, string> = {}
 ): UnifiedAuditRow {
   const actorUid = event.actorUid?.trim() || null;
   const taskId =
@@ -441,6 +461,7 @@ export function agentAuditRow(
     // success 는 원장 초창기부터 있던 필드라 undefined 면 옛 문서가 아니라
     // 손상된 문서다. 그때는 실패로 단정하지 않는다(없는 사실을 지어내지 않음).
     failed: event.success === false,
+    worktree: ledgerFieldValue(event, "worktreeId"),
   };
 }
 
@@ -478,11 +499,11 @@ export function mergeAuditRows(
 export function buildAuditRows(
   human: readonly ProjectAuditEvent[],
   agent: readonly AuditLog[],
-  nameByUid: Record<string, string> = {},
+  nameByUid: Record<string, string> = {}
 ): UnifiedAuditRow[] {
   return mergeAuditRows(
     human.map((event) => humanAuditRow(event, nameByUid)),
-    agent.map((event) => agentAuditRow(event, nameByUid)),
+    agent.map((event) => agentAuditRow(event, nameByUid))
   );
 }
 
@@ -522,7 +543,7 @@ export type AuditTypeFilter =
  * 읽는다. 실제로 이 드롭다운은 우리가 만든 값만 내보내므로 이 경로는 방어다.
  */
 export function parseAuditTypeFilter(
-  value: string | undefined | null,
+  value: string | undefined | null
 ): AuditTypeFilter {
   const raw = value?.trim();
   if (!raw) return { source: "both" };
@@ -659,7 +680,7 @@ export function mergeAuditActors(
  */
 export function resolveTaskLabel(
   taskId: string | null,
-  titleById: Record<string, string> = {},
+  titleById: Record<string, string> = {}
 ): string | null {
   if (!taskId) return null;
   const title = titleById[taskId]?.trim();
@@ -684,7 +705,7 @@ export type AuditBadgeKind =
   | "orchestratorControlPlane";
 
 export function auditBadgeKind(
-  row: Pick<UnifiedAuditRow, "actorKind" | "model">,
+  row: Pick<UnifiedAuditRow, "actorKind" | "model">
 ): AuditBadgeKind {
   if (row.actorKind === "human") return "human";
   return row.model ? "agentModel" : "orchestratorControlPlane";
@@ -751,23 +772,6 @@ export type AuditDisplayRow =
 // 필드를 담지 않는다. 티켓 상세 패널은 그 원본을 그대로 보여줘야 하므로, 목록용
 // 타입을 오염시키지 않고 **상세 전용 파생**을 여기 따로 둔다.
 
-/**
- * 원장 확장 필드(§5) 하나의 표시 상태.
- *
- * ★"없음"을 한 종류로 뭉개지 않는다 — 세 사실이 서로 다르다:
- *   - `preLedger`      — 문서에 그 **필드 자체가 없다**(원장 확장 이전에 쓰인 기록).
- *   - `outOfConvention`— 필드는 있는데 값이 null(예: 워크트리 경로 규약 밖이라
- *                        `parseWorktreePath` 가 null 을 write 했다 — ledger.ts §8).
- *   - `value`          — 실제 값이 있다.
- * 티켓 스펙의 "확실한 척 금지"가 이 세 갈래를 요구한다 — `outOfConvention` 을
- * `preLedger` 로 보여주면 "이 기록엔 원래 워크트리 개념이 없었다"는 거짓말이 되고,
- * 반대로 접으면 "판별에 실패했다"는 사실이 "정상적으로 없다"로 읽힌다.
- */
-export type LedgerFieldValue =
-  | { state: "preLedger" }
-  | { state: "outOfConvention" }
-  | { state: "value"; value: string };
-
 /** 원장 확장(§5) 필드 중 상세 패널이 표시하는 것. */
 type LedgerExtensionField =
   | "actorUid"
@@ -788,7 +792,7 @@ type LedgerExtensionField =
  */
 export function ledgerFieldValue(
   event: AuditLog,
-  field: LedgerExtensionField,
+  field: LedgerExtensionField
 ): LedgerFieldValue {
   if (!(field in event)) return { state: "preLedger" };
   const raw = event[field];
@@ -805,7 +809,7 @@ export function ledgerFieldValue(
  * L3 가 배선되면 이 함수 하나만 바뀌면 되도록 판정을 여기 모아 둔다.
  */
 export function auditSealStatus(
-  event: Pick<AuditLog, "seq" | "prevHash" | "hash">,
+  event: Pick<AuditLog, "seq" | "prevHash" | "hash">
 ): "sealed" | "unsealed" {
   return event.seq != null && !!event.prevHash && !!event.hash
     ? "sealed"
@@ -831,7 +835,7 @@ export interface TicketLedgerRow extends UnifiedAuditRow {
 export function buildTicketLedgerRows(
   human: readonly ProjectAuditEvent[],
   agent: readonly AuditLog[],
-  nameByUid: Record<string, string> = {},
+  nameByUid: Record<string, string> = {}
 ): TicketLedgerRow[] {
   const humanRows: TicketLedgerRow[] = human.map((event) => ({
     ...humanAuditRow(event, nameByUid),
@@ -841,7 +845,6 @@ export function buildTicketLedgerRows(
   const agentRows: TicketLedgerRow[] = agent.map((event) => ({
     ...agentAuditRow(event, nameByUid),
     sealStatus: auditSealStatus(event),
-    worktree: ledgerFieldValue(event, "worktreeId"),
   }));
   return mergeAuditRows(humanRows, agentRows) as TicketLedgerRow[];
 }
@@ -859,7 +862,7 @@ export function buildTicketLedgerRows(
  */
 export function foldAuditRows(
   rows: readonly UnifiedAuditRow[],
-  minGroupSize = 2,
+  minGroupSize = 2
 ): AuditDisplayRow[] {
   const out: AuditDisplayRow[] = [];
   let i = 0;

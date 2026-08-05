@@ -75,7 +75,7 @@ interface WorktreeState {
    * `worktree:status` for that path alone.
    */
   resolveWorktree: (
-    select: (worktrees: Worktree[]) => Worktree | null,
+    select: (worktrees: Worktree[]) => Worktree | null
   ) => Promise<Worktree | null>;
   /** Archive (hide) or restore (show) a worktree by its key (path). */
   setWorktreeArchived: (key: string, archived: boolean) => void;
@@ -101,11 +101,11 @@ interface WorktreeState {
   remove: (
     repoRoot: string,
     path: string,
-    deleteBranch?: boolean,
+    deleteBranch?: boolean
   ) => Promise<void>;
   cleanupStale: (
     repoRoot: string,
-    maxIdleDays?: number,
+    maxIdleDays?: number
   ) => Promise<{
     removed: string[];
     failed: { path: string; error: string }[];
@@ -133,7 +133,7 @@ function errorMessage(err: unknown): string {
 
 function assertActionResult(
   result: unknown,
-  fallbackMessage: string,
+  fallbackMessage: string
 ): asserts result {
   if (!result || typeof result !== "object") return;
   if ("ok" in result && result.ok === false) {
@@ -145,8 +145,8 @@ function assertActionResult(
       "error" in result && typeof result.error === "string"
         ? result.error
         : conflicts
-          ? `${fallbackMessage}: ${conflicts}`
-          : fallbackMessage;
+        ? `${fallbackMessage}: ${conflicts}`
+        : fallbackMessage;
     throw new Error(error);
   }
   if ("success" in result && result.success === false) {
@@ -183,7 +183,7 @@ function isMainByEnumerationOrder(index: number): boolean {
 function normalizeWorktree(
   group: WorktreeProjectGroup,
   item: WorktreeProjectGroup["worktrees"][number],
-  index: number,
+  index: number
 ): Worktree {
   const taskId = inferTaskId(group.projectId, item.path);
   return {
@@ -238,6 +238,18 @@ let inflightRefresh: Promise<void> | null = null;
 // ensureFresh().
 let inflightLight: Promise<void> | null = null;
 
+function testWorktreeLightOverride(): WorktreeLightGroup[] | null {
+  if (!window.electronAPI?.testMode?.bypassAuth) return null;
+  try {
+    const raw = localStorage.getItem("marblo:test:worktreeLightData");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as WorktreeLightGroup[]) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Normalize a light entry. `status` is carried over from the previous snapshot
  * when the worktree's HEAD is unchanged; a moved HEAD means new commits, so the
@@ -263,7 +275,7 @@ function normalizeLightWorktree(
   item: WorktreeLightItem,
   prev: Worktree | undefined,
   index: number,
-  verdicts: ReturnType<typeof loadVerdictCache>,
+  verdicts: ReturnType<typeof loadVerdictCache>
 ): Worktree {
   const carry = prev !== undefined && prev.head === item.head;
   const fresh = item.staleInfo !== undefined || item.stale !== undefined;
@@ -271,8 +283,8 @@ function normalizeLightWorktree(
   const verdict: Pick<Worktree, "stale" | "staleInfo"> = fresh
     ? { stale: item.stale ?? item.staleInfo?.stale, staleInfo: item.staleInfo }
     : carry
-      ? { stale: prev.stale, staleInfo: prev.staleInfo }
-      : { stale: cached?.stale, staleInfo: cached?.staleInfo };
+    ? { stale: prev.stale, staleInfo: prev.staleInfo }
+    : { stale: cached?.stale, staleInfo: cached?.staleInfo };
   return {
     id: `${group.projectId}:${item.path}`,
     taskId: inferTaskId(group.projectId, item.path),
@@ -303,7 +315,7 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
     const next = setOverride(
       get().archiveOverrides,
       key,
-      archived ? "archived" : "active",
+      archived ? "archived" : "active"
     );
     persistArchiveOverrides(next);
     set({ archiveOverrides: next });
@@ -317,8 +329,8 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
         const groups = await window.electronAPI.worktree.list();
         const worktrees = groups.flatMap((group) =>
           group.worktrees.map((item, index) =>
-            normalizeWorktree(group, item, index),
-          ),
+            normalizeWorktree(group, item, index)
+          )
         );
         set({ worktrees, loading: false, lastRefreshedAt: Date.now() });
         // Persist the sweep's hygiene verdicts so light refreshes (Code tab /
@@ -345,7 +357,8 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
         // (dev HMR / renderer newer than main) — slower but never wrong.
         const api = window.electronAPI.worktree;
         const groups: (WorktreeLightGroup | WorktreeProjectGroup)[] =
-          api.listLight ? await api.listLight() : await api.list();
+          testWorktreeLightOverride() ??
+          (api.listLight ? await api.listLight() : await api.list());
         // Snapshot AFTER the await so a full refresh that landed meanwhile
         // contributes its fresh statuses to the carry-over.
         const prevById = new Map(get().worktrees.map((w) => [w.id, w]));
@@ -357,9 +370,9 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
               item,
               prevById.get(`${group.projectId}:${item.path}`),
               index,
-              verdicts,
-            ),
-          ),
+              verdicts
+            )
+          )
         );
         set({ worktrees, loading: false, lastRefreshedAt: Date.now() });
         // Seed the persisted cache from the light path too. Before this, the
@@ -418,7 +431,7 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
     try {
       const result = await window.electronAPI.worktree.cleanupStale(
         repoRoot,
-        maxIdleDays,
+        maxIdleDays
       );
       await get().refresh();
       return result;
@@ -438,7 +451,7 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
           await window.electronAPI.worktree.remove(
             target.repoRoot,
             target.path,
-            true,
+            true
           );
           removed.push(target.path);
         } catch (e) {
@@ -496,7 +509,7 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
 
   getWorktreesByProject: (projectId) => {
     return get().worktrees.filter(
-      (worktree) => worktree.projectId === projectId,
+      (worktree) => worktree.projectId === projectId
     );
   },
 
@@ -507,7 +520,7 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
         groups[worktree.projectId].push(worktree);
         return groups;
       },
-      {},
+      {}
     );
   },
 

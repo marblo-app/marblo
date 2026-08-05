@@ -156,6 +156,9 @@ export const project: Record<keyof typeof koProject, string> = {
   "project.audit.group.count": "{count} events",
   "project.audit.group.expand": "Expand",
   "project.audit.group.collapse": "Collapse",
+  "project.audit.worktreeArchived": "Archived",
+  "project.audit.worktreeArchivedTip":
+    "The ledger records worktreeId ({worktreeId}), but the current worktree list has no live match. It may have been removed after merge/prune, so this button stays disabled.",
 
   // Ticket ledger detail (click a ticket in the audit log) — ticket
   // U6ITRR38Z3c4MGLyg2PU.

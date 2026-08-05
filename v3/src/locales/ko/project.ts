@@ -150,6 +150,9 @@ export const project = {
   "project.audit.group.count": "{count}건",
   "project.audit.group.expand": "펼치기",
   "project.audit.group.collapse": "접기",
+  "project.audit.worktreeArchived": "아카이브됨",
+  "project.audit.worktreeArchivedTip":
+    "원장에는 worktreeId({worktreeId})가 있지만 현재 워크트리 목록에서 찾지 못했습니다. 머지/prune 후 제거된 워크트리일 수 있어 버튼을 비활성화합니다.",
 
   // 티켓 원장 상세(감사 로그에서 티켓 클릭) — 티켓 U6ITRR38Z3c4MGLyg2PU.
   "project.audit.ticket.subtitle": "이 티켓의 전체 이력 · 최신순",

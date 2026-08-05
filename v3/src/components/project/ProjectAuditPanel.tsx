@@ -1,6 +1,8 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { User } from "../../types/user";
+import type { Worktree } from "../../types/worktree";
 import { useTranslation } from "../../lib/i18n";
+import { findTaskWorktree } from "../../lib/taskWorktree";
 import {
   PROJECT_AUDIT_EVENT_TYPES,
   PROJECT_AUDIT_SINCE_VERSION,
@@ -20,9 +22,12 @@ import {
   type AuditRowGroup,
   type AuditRowLabel,
   type AuditSourceNotice,
+  type LedgerFieldValue,
   type UnifiedAuditRow,
 } from "../../lib/projectAuditView";
 import { useProjectAuditLog } from "../../hooks/useProjectAuditLog";
+import { useWorktreeStore } from "../../stores/worktreeStore";
+import { ViewWorktreeButton } from "../board/ViewWorktreeButton";
 import { ProjectAuditTicketDetail } from "./ProjectAuditTicketDetail";
 
 /**
@@ -76,13 +81,19 @@ export function ProjectAuditPanel({
   const nameByUid = useMemo(
     () =>
       Object.fromEntries(
-        members.map((m) => [m.id, m.displayName || m.email || m.id]),
+        members.map((m) => [m.id, m.displayName || m.email || m.id])
       ),
-    [members],
+    [members]
   );
 
   const { rows, sources, actors, toolNames, taskTitleById, reload } =
     useProjectAuditLog(projectId, actorFilter, typeFilter, nameByUid);
+
+  const worktrees = useWorktreeStore((s) => s.worktrees);
+  const ensureFreshWorktrees = useWorktreeStore((s) => s.ensureFresh);
+  useEffect(() => {
+    ensureFreshWorktrees().catch(() => {});
+  }, [ensureFreshWorktrees, projectId]);
 
   const notices = auditSourceNotices(sources);
   const loading = isAuditLoading(sources);
@@ -94,7 +105,7 @@ export function ProjectAuditPanel({
   const visibleRows = useMemo(
     () =>
       showLowSignal ? rows : rows.filter((row) => !isLowSignalAuditRow(row)),
-    [rows, showLowSignal],
+    [rows, showLowSignal]
   );
   const hiddenLowSignalCount = rows.length - visibleRows.length;
 
@@ -102,7 +113,7 @@ export function ProjectAuditPanel({
   // 순수함수라 렌더 중에 접어도 안전(재조회 없음).
   const displayRows = useMemo(() => foldAuditRows(visibleRows), [visibleRows]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
-    () => new Set(),
+    () => new Set()
   );
   const toggleGroup = (key: string) =>
     setExpandedGroups((prior) => {
@@ -257,6 +268,7 @@ export function ProjectAuditPanel({
                   onToggle={() => toggleGroup(displayRow.key)}
                   locale={locale}
                   taskTitleById={taskTitleById}
+                  worktrees={worktrees}
                   onOpenTicket={setSelectedTaskId}
                 />
               ) : (
@@ -265,9 +277,10 @@ export function ProjectAuditPanel({
                   row={displayRow.row}
                   locale={locale}
                   taskTitleById={taskTitleById}
+                  worktrees={worktrees}
                   onOpenTicket={setSelectedTaskId}
                 />
-              ),
+              )
             )}
           </ul>
         ))}
@@ -379,11 +392,13 @@ function AuditRow({
   row,
   locale,
   taskTitleById,
+  worktrees,
   onOpenTicket,
 }: {
   row: UnifiedAuditRow;
   locale: string;
   taskTitleById: Record<string, string>;
+  worktrees: Worktree[];
   onOpenTicket?: (taskId: string) => void;
 }) {
   const { t } = useTranslation();
@@ -423,6 +438,15 @@ function AuditRow({
         />
       )}
 
+      {row.taskId && row.worktree?.state === "value" && (
+        <AuditWorktreeEvidence
+          taskId={row.taskId}
+          evidence={row.worktree}
+          worktrees={worktrees}
+          onClose={() => {}}
+        />
+      )}
+
       <span className="ml-auto flex-shrink-0 text-xs tabular-nums text-gray-500">
         {formatAuditTime(row.createdAt, locale)}
       </span>
@@ -459,6 +483,7 @@ function AuditGroupRow({
   onToggle,
   locale,
   taskTitleById,
+  worktrees,
   onOpenTicket,
 }: {
   group: AuditRowGroup;
@@ -466,42 +491,56 @@ function AuditGroupRow({
   onToggle: () => void;
   locale: string;
   taskTitleById: Record<string, string>;
+  worktrees: Worktree[];
   onOpenTicket?: (taskId: string) => void;
 }) {
   const { t } = useTranslation();
   const latest = group.rows[0];
+  const worktreeEvidence =
+    group.rows.find((row) => row.worktree?.state === "value")?.worktree ?? null;
 
   return (
     <li className="py-2">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        className="flex w-full flex-wrap items-baseline gap-x-2 gap-y-1 text-left"
-      >
-        <span className="flex-shrink-0 rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-400">
-          {t("project.audit.group.badge")}
-        </span>
+      <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1 text-left"
+        >
+          <span className="flex-shrink-0 rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-400">
+            {t("project.audit.group.badge")}
+          </span>
 
-        {/* onOpenTicket 을 안 넘긴다 — 이 라벨은 이미 <button onClick={onToggle}>
-            안에 있어서, 클릭형으로 바꾸면 버튼 중첩(무효 HTML)이 된다. 펼치면
-            아래 개별 행의 라벨이 클릭 가능하다. */}
-        <AuditTaskLabel taskId={group.taskId} taskTitleById={taskTitleById} />
+          {/* onOpenTicket 을 안 넘긴다 — 이 라벨은 이미 <button onClick={onToggle}>
+              안에 있어서, 클릭형으로 바꾸면 버튼 중첩(무효 HTML)이 된다. 펼치면
+              아래 개별 행의 라벨이 클릭 가능하다. */}
+          <AuditTaskLabel taskId={group.taskId} taskTitleById={taskTitleById} />
 
-        <span className="text-xs text-gray-500">
-          {t("project.audit.group.count", { count: group.rows.length })}
-        </span>
+          <span className="text-xs text-gray-500">
+            {t("project.audit.group.count", { count: group.rows.length })}
+          </span>
 
-        <span className="flex-shrink-0 text-[11px] text-blue-400 underline">
-          {expanded
-            ? t("project.audit.group.collapse")
-            : t("project.audit.group.expand")}
-        </span>
+          <span className="flex-shrink-0 text-[11px] text-blue-400 underline">
+            {expanded
+              ? t("project.audit.group.collapse")
+              : t("project.audit.group.expand")}
+          </span>
+        </button>
+
+        {worktreeEvidence?.state === "value" && (
+          <AuditWorktreeEvidence
+            taskId={group.taskId}
+            evidence={worktreeEvidence}
+            worktrees={worktrees}
+            onClose={() => {}}
+          />
+        )}
 
         <span className="ml-auto flex-shrink-0 text-xs tabular-nums text-gray-500">
           {formatAuditTime(latest.createdAt, locale)}
         </span>
-      </button>
+      </div>
 
       {expanded && (
         <ul className="mt-1 ml-4 divide-y divide-gray-800 border-l border-gray-800 pl-3">
@@ -511,12 +550,54 @@ function AuditGroupRow({
               row={row}
               locale={locale}
               taskTitleById={taskTitleById}
+              worktrees={worktrees}
               onOpenTicket={onOpenTicket}
             />
           ))}
         </ul>
       )}
     </li>
+  );
+}
+
+function AuditWorktreeEvidence({
+  taskId,
+  evidence,
+  worktrees,
+  onClose,
+}: {
+  taskId: string;
+  evidence: LedgerFieldValue;
+  worktrees: Worktree[];
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  if (evidence.state !== "value") return null;
+  const live = findTaskWorktree(worktrees, { id: taskId });
+  if (live) {
+    return (
+      <div className="flex flex-shrink-0 items-center gap-1">
+        <span className="rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 font-mono text-[10px] text-gray-400">
+          {live.branch}
+        </span>
+        <ViewWorktreeButton
+          worktree={live}
+          agentId={live.agentId}
+          onClose={onClose}
+        />
+      </div>
+    );
+  }
+  return (
+    <span
+      className="flex-shrink-0 rounded border border-amber-800/60 bg-amber-950/20 px-1.5 py-0.5 text-[10px] text-amber-300"
+      title={t("project.audit.worktreeArchivedTip", {
+        worktreeId: evidence.value,
+      })}
+    >
+      {t("project.audit.worktreeArchived")}
+      <span className="ml-1 font-mono text-amber-200/80">{evidence.value}</span>
+    </span>
   );
 }
 
@@ -541,8 +622,8 @@ function SourceNotice({
       ? t("project.audit.notice.humanDenied")
       : t("project.audit.notice.agentDenied")
     : notice.source === "human"
-      ? t("project.audit.notice.humanError")
-      : t("project.audit.notice.agentError");
+    ? t("project.audit.notice.humanError")
+    : t("project.audit.notice.agentError");
 
   return (
     <div

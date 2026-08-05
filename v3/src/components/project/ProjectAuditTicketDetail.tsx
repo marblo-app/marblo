@@ -5,13 +5,14 @@ import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useReplayableMissions } from "../../hooks/useMissionReplay";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { findTaskWorktree } from "../../lib/taskWorktree";
-import { viewWorktree } from "../../lib/viewWorktree";
 import {
   auditSourceNotices,
   isAuditLoading,
   isFullyDenied,
+  type LedgerFieldValue,
   type TicketLedgerRow,
 } from "../../lib/projectAuditView";
+import { ViewWorktreeButton } from "../board/ViewWorktreeButton";
 import { AuditBadge, RowLabel, formatAuditTime } from "./ProjectAuditPanel";
 
 /**
@@ -54,17 +55,20 @@ export function ProjectAuditTicketDetail({
   }, [taskId, ensureFreshWorktrees]);
   const taskWorktree = useMemo(
     () => findTaskWorktree(worktrees, { id: taskId }),
-    [worktrees, taskId],
+    [worktrees, taskId]
   );
   const hasWorktreeEvidence = rows.some(
-    (row) => row.worktree?.state === "value",
+    (row) => row.worktree?.state === "value"
   );
   const showViewCode = !!taskWorktree && hasWorktreeEvidence;
+  const archivedWorktreeEvidence =
+    !taskWorktree &&
+    rows.find((row) => row.worktree?.state === "value")?.worktree;
 
   const { missions } = useReplayableMissions(projectId);
   const mission = useMemo(
     () => missions.find((m) => m.taskIds?.includes(taskId)) ?? null,
-    [missions, taskId],
+    [missions, taskId]
   );
 
   return (
@@ -106,30 +110,26 @@ export function ProjectAuditTicketDetail({
           </button>
         </div>
 
-        {(showViewCode || mission) && (
+        {(showViewCode || archivedWorktreeEvidence || mission) && (
           <div className="flex flex-wrap items-center gap-2 border-b border-gray-700 px-5 py-3">
             {showViewCode && taskWorktree && (
-              <button
-                type="button"
-                onClick={() => {
-                  viewWorktree(taskWorktree, {});
-                  onClose();
-                }}
-                className="flex items-center gap-1.5 rounded border border-purple-500/30 bg-purple-500/10 px-3 py-1.5 text-xs text-purple-300 transition-colors hover:bg-purple-500/20"
-              >
-                {t("project.audit.ticket.viewCode")}
-              </button>
+              <ViewWorktreeButton
+                worktree={taskWorktree}
+                agentId={taskWorktree.agentId}
+                onClose={onClose}
+              />
+            )}
+            {archivedWorktreeEvidence && (
+              <ArchivedWorktreeNotice evidence={archivedWorktreeEvidence} />
             )}
             {mission && (
               <button
                 type="button"
                 onClick={() => {
-                  useNavigationStore
-                    .getState()
-                    .requestJump({
-                      type: "missionReplay",
-                      missionId: mission.id,
-                    });
+                  useNavigationStore.getState().requestJump({
+                    type: "missionReplay",
+                    missionId: mission.id,
+                  });
                   onClose();
                 }}
                 className="flex items-center gap-1.5 rounded border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-300 transition-colors hover:bg-blue-500/20"
@@ -241,9 +241,35 @@ function TicketLedgerRowView({
         </span>
       )}
 
+      {row.worktree?.state === "value" && (
+        <span className="rounded border border-gray-700 bg-gray-900 px-1 font-mono text-[10px] text-gray-400">
+          {row.worktree.value}
+        </span>
+      )}
+
       <span className="ml-auto flex-shrink-0 text-xs tabular-nums text-gray-500">
         {formatAuditTime(row.createdAt, locale)}
       </span>
     </li>
+  );
+}
+
+function ArchivedWorktreeNotice({ evidence }: { evidence: LedgerFieldValue }) {
+  const { t } = useTranslation();
+  if (evidence.state !== "value") return null;
+  return (
+    <button
+      type="button"
+      disabled
+      className="flex cursor-not-allowed items-center gap-1.5 rounded border border-amber-800/60 bg-amber-950/20 px-3 py-1.5 text-xs text-amber-300 opacity-80"
+      title={t("project.audit.worktreeArchivedTip", {
+        worktreeId: evidence.value,
+      })}
+    >
+      {t("project.audit.worktreeArchived")}
+      <span className="font-mono text-[11px] text-amber-200/80">
+        {evidence.value}
+      </span>
+    </button>
   );
 }
