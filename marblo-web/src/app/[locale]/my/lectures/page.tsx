@@ -13,7 +13,7 @@ interface PurchasedLecture {
   title_ko: string;
   title_en: string;
   thumbnail: string;
-  purchasedAt: any;
+  purchasedAt: unknown;
 }
 
 export default function MyLecturesPage() {
@@ -31,15 +31,23 @@ export default function MyLecturesPage() {
         const snap = await getDocs(q);
         const purchasedLectures: PurchasedLecture[] = [];
         for (const purchase of snap.docs) {
-          const data = purchase.data();
+          const data = purchase.data() as {
+            lectureSlug?: string;
+            purchasedAt?: unknown;
+          };
+          if (!data.lectureSlug) continue;
           const lectureDoc = await getDoc(doc(db, 'lectures', data.lectureSlug));
           if (lectureDoc.exists()) {
-            const ld = lectureDoc.data();
+            const ld = lectureDoc.data() as Partial<{
+              title_ko: string;
+              title_en: string;
+              thumbnail: string;
+            }>;
             purchasedLectures.push({
               slug: data.lectureSlug,
-              title_ko: ld.title_ko,
-              title_en: ld.title_en,
-              thumbnail: ld.thumbnail,
+              title_ko: ld.title_ko ?? '',
+              title_en: ld.title_en ?? '',
+              thumbnail: ld.thumbnail ?? '',
               purchasedAt: data.purchasedAt,
             });
           }

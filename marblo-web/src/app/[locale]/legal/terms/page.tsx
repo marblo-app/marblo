@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import Link from "next/link";
 import LegalPageLayout from "@/components/LegalPageLayout";
 
 const LAST_UPDATED = "2026-05-25";
@@ -365,7 +366,7 @@ export default function TermsOfServicePage() {
       <p>
         회사는 이용자의 개인정보를 보호하기 위해 노력하며, 이용자의 개인정보
         보호에 관한 사항은 회사가 별도로 정하는{" "}
-        <a href="/ko/legal/privacy">개인정보처리방침</a> 에 따릅니다.
+        <Link href="/ko/legal/privacy">개인정보처리방침</Link> 에 따릅니다.
       </p>
 
       <h2>제14조 (서비스의 변경 및 중단)</h2>
@@ -424,7 +425,7 @@ export default function TermsOfServicePage() {
       <h2>제16조 (환불)</h2>
       <p>
         유료 서비스의 환불에 관한 사항은 회사가 별도로 정하는{" "}
-        <a href="/ko/legal/refund">환불정책</a> 에 따릅니다.
+        <Link href="/ko/legal/refund">환불정책</Link> 에 따릅니다.
       </p>
 
       <h2>제17조 (책임 제한)</h2>

@@ -12,7 +12,11 @@ import {
   buildOpenGraphLocale,
   pagePathFromPathname,
 } from "@/lib/seo";
-import { buildOrganizationSchema, buildWebSiteSchema } from "@/lib/schema";
+import {
+  buildOrganizationSchema,
+  buildWebSiteSchema,
+  stringifyJsonLd,
+} from "@/lib/schema";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import PromoBar from "@/components/PromoBar";
@@ -233,12 +237,12 @@ export default async function LocaleLayout({
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
-            __html: JSON.stringify(organizationSchema),
+            __html: stringifyJsonLd(organizationSchema),
           }}
         />
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteSchema) }}
+          dangerouslySetInnerHTML={{ __html: stringifyJsonLd(websiteSchema) }}
         />
         {/* GA4 로더 + 자동 pageview (측정ID 없으면 no-op). useSearchParams 사용 → Suspense 필수 */}
         <Suspense fallback={null}>

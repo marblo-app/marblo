@@ -8,7 +8,7 @@ import { httpsCallable, getFunctions } from "firebase/functions";
 import { auth } from "@/lib/firebase";
 import app from "@/lib/firebase";
 import { trackAppDownload } from "@/lib/gtag";
-import { buildSoftwareApplicationSchema } from "@/lib/schema";
+import { buildSoftwareApplicationSchema, stringifyJsonLd } from "@/lib/schema";
 import {
   Apple,
   Monitor,
@@ -90,7 +90,8 @@ export default function DownloadPage() {
   const [macArch, setMacArch] = useState<MacArch>("universal");
 
   useEffect(() => {
-    setMacArch(detectMacArch());
+    const id = window.setTimeout(() => setMacArch(detectMacArch()), 0);
+    return () => window.clearTimeout(id);
   }, []);
 
   useEffect(() => {
@@ -128,7 +129,7 @@ export default function DownloadPage() {
     <div className="py-24 px-4">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareSchema) }}
+        dangerouslySetInnerHTML={{ __html: stringifyJsonLd(softwareSchema) }}
       />
       <div className="max-w-3xl mx-auto text-center">
         <span className="inline-flex items-center gap-2 bg-indigo-600/15 text-indigo-300 border border-indigo-500/40 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider">

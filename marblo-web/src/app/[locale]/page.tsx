@@ -10,6 +10,7 @@ import BetaTester50Section from "@/components/BetaTester50Section";
 import {
   buildSoftwareApplicationSchema,
   buildFAQPageSchema,
+  stringifyJsonLd,
 } from "@/lib/schema";
 
 // Answer-first FAQ for GEO (generative-engine optimization). Each answer opens
@@ -172,11 +173,11 @@ export default function HomePage() {
     <div>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareSchema) }}
+        dangerouslySetInnerHTML={{ __html: stringifyJsonLd(softwareSchema) }}
       />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }}
+        dangerouslySetInnerHTML={{ __html: stringifyJsonLd(faqSchema) }}
       />
       {/* Hero */}
       <section className="py-28 px-4 text-center relative overflow-hidden">

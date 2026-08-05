@@ -3,7 +3,7 @@ import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { getAllPosts, getCategories } from "@/lib/blog";
 import { SITE_URL, buildAlternates } from "@/lib/seo";
-import { buildBlogListSchema } from "@/lib/schema";
+import { buildBlogListSchema, stringifyJsonLd } from "@/lib/schema";
 
 export async function generateMetadata({
   params,
@@ -79,7 +79,7 @@ export default async function BlogIndexPage({
     <div className="max-w-4xl mx-auto px-4 py-16 sm:py-20">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(blogSchema) }}
+        dangerouslySetInnerHTML={{ __html: stringifyJsonLd(blogSchema) }}
       />
       <header className="mb-10">
         <h1 className="text-4xl md:text-5xl font-bold tracking-tight">

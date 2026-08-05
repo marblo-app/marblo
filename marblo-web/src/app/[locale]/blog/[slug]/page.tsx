@@ -6,7 +6,11 @@ import { MDXRemote } from "next-mdx-remote/rsc";
 import { getTranslations } from "next-intl/server";
 import { getPost, getPostLocales, getAllPostParams } from "@/lib/blog";
 import { SITE_URL, buildBlogAlternates } from "@/lib/seo";
-import { buildBlogPostingSchema, buildBreadcrumbSchema } from "@/lib/schema";
+import {
+  buildBlogPostingSchema,
+  buildBreadcrumbSchema,
+  stringifyJsonLd,
+} from "@/lib/schema";
 import Comments from "@/components/Comments";
 
 type MdxNode = {
@@ -222,11 +226,11 @@ export default async function BlogPostPage({
     <article className="max-w-3xl mx-auto px-4 py-16 sm:py-20">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(postingSchema) }}
+        dangerouslySetInnerHTML={{ __html: stringifyJsonLd(postingSchema) }}
       />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbSchema) }}
+        dangerouslySetInnerHTML={{ __html: stringifyJsonLd(breadcrumbSchema) }}
       />
 
       <nav className="mb-8 text-sm text-zinc-500" aria-label="Breadcrumb">

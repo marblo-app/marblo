@@ -5,6 +5,7 @@ import PricingSection from "@/components/PricingSection";
 import {
   buildFAQPageSchema,
   buildSoftwareApplicationSchema,
+  stringifyJsonLd,
 } from "@/lib/schema";
 
 // Locale-aware metadata. The title segment reuses the existing nav label
@@ -49,11 +50,11 @@ export default function PricingPage() {
     <div className="py-24 px-4">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(productSchema) }}
+        dangerouslySetInnerHTML={{ __html: stringifyJsonLd(productSchema) }}
       />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }}
+        dangerouslySetInnerHTML={{ __html: stringifyJsonLd(faqSchema) }}
       />
       <div className="max-w-7xl mx-auto">
         <h1 className="text-4xl font-bold text-center">{t("title")}</h1>

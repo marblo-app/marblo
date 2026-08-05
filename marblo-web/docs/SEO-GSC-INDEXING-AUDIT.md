@@ -9,6 +9,73 @@
 
 ---
 
+## 2026-08-05 후속 점검 (티켓 `5Shb2lGBQ9lYCxhyiOuC`)
+
+### 측정 결과
+
+- Google `site:marblo.app` 검색은 ko/en/ja 홈과 일부 하위 페이지를 반환했다. 즉
+  **실색인 0건 상태는 아니다.** 단, Google 공개 검색의 결과 수는 부정확하고 GSC 권한이
+  없으면 정확한 색인 URL 수는 확인할 수 없다.
+- 라이브 `robots.txt` 는 `Allow: /`, `Disallow: /api/`, `Sitemap:
+  https://marblo.app/sitemap.xml` 로 정상이다. HTML 라우트를 막고 있지 않다.
+- 라이브 `sitemap.xml` 은 75 URL, ko/en/ja + `x-default` hreflang cluster 를 낸다.
+  `x-default` 는 sitemap 기준 모두 `/en/...` 으로 `routing.defaultLocale` 과 일치한다.
+- 라이브 HTML `<head>` 샘플(`/en`, `/en/pricing`)은 `index, follow`, 자기참조 canonical,
+  ko/en/ja + `/en/...` `x-default`, OG/Twitter metadata 를 정상 방출한다.
+- `/pricing` 같은 로케일 미접두 URL 은 `307 -> /en/pricing` 으로 정상이다. 로케일 루트
+  307 도 정상 동작이다.
+
+### 이번에 새로 특정한 근본 원인
+
+`next-intl` middleware 의 `alternateLinks` 기본값이 HTTP `Link` 헤더에 별도 hreflang
+cluster 를 추가하고 있었다. 이 헤더의 `x-default` 는 locale-less 경로(`/pricing`,
+`/`)를 가리켰고, HTML metadata/sitemap 의 canonical cluster(`/en/pricing`, `/en`)와
+충돌했다.
+
+HTML `<head>` 와 sitemap 은 이미 옳았지만, Google 은 HTTP `Link` 헤더도 hreflang
+신호로 사용할 수 있다. 따라서 같은 응답 안에서 `x-default` 가 둘로 갈리는 것은 크롤러가
+언어 대체본을 신뢰하지 못하게 만드는 낮은 빈도의 SEO 결함이다.
+
+### 수정
+
+- `src/i18n/routing.ts`: `alternateLinks: false` 로 `next-intl` 자동 HTTP hreflang 헤더를
+  끄고, hreflang 의 단일 소스를 Next metadata + `app/sitemap.ts` 로 통일했다.
+- `src/lib/schema.ts`: `stringifyJsonLd()` 를 추가해 Next16 문서 권장대로 JSON-LD 출력 시
+  `<` 를 `\u003c` 로 이스케이프한다.
+- 공개 JSON-LD 출력 지점(home/layout/pricing/download/blog/faq/guide)에 helper 를
+  적용했다.
+- `messages/{ko,en,ja}.json`: 공개 블로그 글이 사용하는 `blog.categories.announcement`
+  누락을 보강했다. 빌드 중 `MISSING_MESSAGE` 로그가 사라졌다.
+
+### 검증
+
+- `npm run typecheck` 통과.
+- `npm run build` 통과. `blog.categories.announcement` 누락 로그 없음.
+- `npm run lint` 는 실패. 이번 변경과 무관한 기존 오류들:
+  `auth/login`·`my/lectures`·`i18n/request` 의 `any`, `download/page.tsx` 의 기존
+  effect setState 규칙 위반, `legal/terms` 의 기존 `<a>` 내부 라우팅 오류.
+- 로컬 `next start --port 3016`:
+  - `/robots.txt`, `/sitemap.xml` 200 정상.
+  - `/pricing` 307 -> `/en/pricing` 정상.
+  - `HEAD /en/pricing` 에서 next-intl 의 alternate `Link` 헤더는 더 이상 나오지 않는다
+    (폰트/style preload Link 만 남음).
+  - HTML 라우트 GET 은 이 워크트리 preview 환경의 Firebase 공개 설정값이 유효하지 않아
+    `auth/invalid-api-key` 500 이 발생했다. 설정 원문은 출력하지 않았다. 라이브는 같은
+    URL이 200 이고, 이번 수정은 build/typecheck 와 헤더/metadata route 레벨에서 검증했다.
+
+### 배포 후 Search Console 소유자 계정으로 해야 할 일
+
+이 작업은 코드 응답을 정리할 뿐, GSC 제출/검사는 사이트 소유자 계정이 필요하다.
+
+1. `https://marblo.app/sitemap.xml` 을 Google Search Console 과 Naver Search Advisor 에
+   재제출한다.
+2. URL 검사에서 `/en`, `/ko`, `/ja`, `/en/pricing`, `/ko/pricing`, `/ja/pricing` 의
+   라이브 테스트를 실행하고 "색인 생성 요청"을 누른다.
+3. hreflang 보고에서 `x-default` 대상이 locale-less URL 로 남는지 확인한다. 새 배포 후
+   기대값은 `/en/...` 이다.
+4. "페이지 리디렉션"에 `/`, `/pricing` 같은 로케일 미접두 URL 이 잡히는 것은 정상이다.
+   최종 도착 URL(`/en`, `/en/pricing`)이 색인 가능하면 에러가 아니다.
+
 ## 0. 방법과 한계 (먼저 읽을 것)
 
 무엇이 **측정된 사실**이고 무엇이 **추정**인지 구분한다. 섞으면 이 문서는 쓸모가 없다.

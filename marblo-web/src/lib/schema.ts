@@ -15,6 +15,10 @@ import { SITE_URL } from "@/lib/seo";
  * ratings, no unreleased features (Mission/Flow are intentionally excluded).
  */
 
+export function stringifyJsonLd(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
+
 /** Stable node identifiers so nodes can cross-reference via `@id`. */
 export const ORG_ID = `${SITE_URL}/#organization`;
 export const WEBSITE_ID = `${SITE_URL}/#website`;

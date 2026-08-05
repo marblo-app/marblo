@@ -10,7 +10,7 @@ import {
   Lightbulb,
 } from "lucide-react";
 import { SITE_URL, buildAlternates } from "@/lib/seo";
-import { buildBreadcrumbSchema } from "@/lib/schema";
+import { buildBreadcrumbSchema, stringifyJsonLd } from "@/lib/schema";
 import {
   GUIDE_ANCHOR_IDS,
   GUIDE_STEPS,
@@ -264,7 +264,7 @@ export default async function GuidePage({
     <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbSchema) }}
+        dangerouslySetInnerHTML={{ __html: stringifyJsonLd(breadcrumbSchema) }}
       />
 
       <nav className="mb-8 text-sm text-zinc-500" aria-label="Breadcrumb">

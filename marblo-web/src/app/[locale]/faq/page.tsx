@@ -2,7 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { SITE_URL, buildAlternates } from "@/lib/seo";
-import { buildFAQPageSchema, buildBreadcrumbSchema } from "@/lib/schema";
+import {
+  buildFAQPageSchema,
+  buildBreadcrumbSchema,
+  stringifyJsonLd,
+} from "@/lib/schema";
 
 type FaqItem = { q: string; a: string };
 
@@ -49,11 +53,11 @@ export default async function FaqPage({
     <div className="max-w-3xl mx-auto px-4 py-16 sm:py-20">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }}
+        dangerouslySetInnerHTML={{ __html: stringifyJsonLd(faqSchema) }}
       />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbSchema) }}
+        dangerouslySetInnerHTML={{ __html: stringifyJsonLd(breadcrumbSchema) }}
       />
 
       <nav className="mb-8 text-sm text-zinc-500" aria-label="Breadcrumb">

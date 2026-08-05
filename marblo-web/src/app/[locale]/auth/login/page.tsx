@@ -8,6 +8,10 @@ import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 
 import { auth } from '@/lib/firebase';
 import { sanitizeRedirect } from '@/lib/sanitizeRedirect';
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : 'Login failed';
+}
+
 export default function LoginPage() {
   const t = useTranslations('auth');
   const locale = useLocale();
@@ -23,8 +27,8 @@ export default function LoginPage() {
     try {
       await signInWithEmailAndPassword(auth, email, password);
       router.push(redirect);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(errorMessage(err));
     }
   };
 
@@ -32,8 +36,8 @@ export default function LoginPage() {
     try {
       await signInWithPopup(auth, new GoogleAuthProvider());
       router.push(redirect);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(errorMessage(err));
     }
   };
 
