@@ -256,10 +256,10 @@ export function createTaskDispatcher(
     await ready;
     const now = Timestamp.now();
     const ref = await addDoc(collection(db, "tasks"), {
-      title: `🎯 미션: ${mission.goal}`,
+      title: `🎯 Mission: ${mission.goal}`,
       // 본문 필드 — 보드/상세 렌더러가 기대하는 구조화 본문 부분집합을 채운다.
       ...taskBodyStorageFields({
-        description: `Mission ${mission.id} 대표 카드`,
+        description: `Mission ${mission.id} representative card`,
       }),
       role: "backend",
       priority: 3,
@@ -269,7 +269,7 @@ export function createTaskDispatcher(
       claimedBy: null,
       claimedAt: null,
       scope: [],
-      comment: `Mission ${mission.id} 대표 카드`,
+      comment: `Mission ${mission.id} representative card`,
       prUrl: "",
       hasPmFeedback: false,
       projectId: mission.projectId,

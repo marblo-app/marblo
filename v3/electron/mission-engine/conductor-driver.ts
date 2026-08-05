@@ -279,35 +279,27 @@ function buildGrantMessage(
   stepIndex: number
 ): string {
   if (step.type === "gstack") {
-    const skill = step.skill ?? "(스킬 미지정)";
+    const skill = step.skill ?? "(skill not specified)";
     // gstack 스킬(특히 /investigate)은 '무엇을' 대상으로 돌릴지 목표가 있어야 의미가
     // 있다. 목표 없이 grant 하면 스킬이 clarify 만 반복한다 → 미션 goal 을 함께 싣는다.
     // step.args 가 있으면 그게 더 구체적인 대상이므로 우선.
     const target = step.args?.trim() || mission.goal;
     return (
-      `【Marblo Mission】 현재 스텝 ${stepIndex}: ${skill} (gstack)\n` +
-      `이 미션의 목표: ${target}\n` +
-      `지시: 위 목표를 대상으로 ${skill} 을 run_skill 로 직접 실행하세요. 조사/리뷰 결과 ` +
-      `같은 산출물을 만들면 그게 이 스텝의 완료입니다 — 사용자 결정을 기다리지 마세요.\n` +
-      `★필수: 완료 직후 mission_step_done({success:true, output:"핵심 결과 요약"}) 을 ` +
-      `반드시 호출해 보고하세요. 지휘자는 이 보고를 받아야만 다음 스텝을 grant 합니다 — ` +
-      `보고하지 않으면 미션이 영영 멈춥니다. 결과가 방향 선택을 요하더라도, 먼저 ` +
-      `mission_step_done 으로 보고(요약·권고를 output 에 담아)한 뒤 grant 를 기다리세요.\n` +
-      `보고 전에 스스로 다음 스텝을 실행하지 마세요 — 순서·게이트는 지휘자가 관리합니다. ` +
-      `실패 시 mission_step_done({success:false, error:"원인"}) 로 보고하세요.`
+      `【Marblo Mission】 Current step ${stepIndex}: ${skill} (gstack)\n` +
+      `Mission goal: ${target}\n` +
+      `Instruction: Run ${skill} directly with run_skill against the goal above. Producing an artifact such as investigation or review results completes this step; do not wait for a user decision.\n` +
+      `★Required: Immediately after completion, report by calling mission_step_done({success:true, output:"summary of key results"}). The conductor must receive this report before it can grant the next step; without the report, the mission will remain stuck. Even if the result requires a direction choice, first report with mission_step_done, including the summary and recommendation in output, then wait for the next grant.\n` +
+      `Do not start the next step yourself before reporting; the conductor owns ordering and gates. On failure, report with mission_step_done({success:false, error:"reason"}).`
     );
   }
   // fix / dispatch — 작업 분해·할당 스텝. 목표는 step.args(있으면) 우선, 없으면 미션 goal.
   const goal = step.args?.trim() || mission.goal;
   return (
-    `【Marblo Mission】 현재 스텝 ${stepIndex}: ${step.type} (작업 분해·할당)\n` +
-    `이 스텝의 목표: ${goal}\n` +
-    `create_task · dispatch_task 로 작업을 분해·할당하세요 (missionId 는 자동 태깅됩니다).\n` +
-    `★필수: 할당을 마치면 mission_step_done({success:true, output:"배정 요약"}) 을 반드시 ` +
-    `호출해 보고하세요. 지휘자는 이 보고를 받아야만 다음으로 진행합니다 — 보고하지 않으면 ` +
-    `미션이 영영 멈춥니다. 분해된 task 들의 완료 대기는 지휘자가 하니 당신은 보고 후 대기하세요.\n` +
-    `보고 전에 스스로 다음 스텝을 실행하지 마세요 — 순서·게이트는 지휘자가 관리합니다. ` +
-    `실패 시 mission_step_done({success:false, error:"원인"}) 로 보고하세요.`
+    `【Marblo Mission】 Current step ${stepIndex}: ${step.type} (task decomposition and assignment)\n` +
+    `Step goal: ${goal}\n` +
+    `Decompose and assign the work with create_task and dispatch_task (missionId is tagged automatically).\n` +
+    `★Required: After assignment is complete, report by calling mission_step_done({success:true, output:"assignment summary"}). The conductor must receive this report before it can proceed; without the report, the mission will remain stuck. The conductor waits for the decomposed tasks to finish, so report and then wait.\n` +
+    `Do not start the next step yourself before reporting; the conductor owns ordering and gates. On failure, report with mission_step_done({success:false, error:"reason"}).`
   );
 }
 
@@ -401,7 +393,7 @@ export function createConductorDriver(
     try {
       const id = await deps.board.createMissionCard(mission);
       await deps.store.updateMission(mission.id, { missionCardTaskId: id });
-      await deps.board.addCardActivity(id, `미션 시작 · ${mission.goal}`);
+      await deps.board.addCardActivity(id, `Mission started · ${mission.goal}`);
       log("mission card created", { missionId: mission.id, cardId: id });
     } catch (err) {
       log("ensureMissionCard failed (best-effort)", {
@@ -428,12 +420,11 @@ export function createConductorDriver(
   // ── 보고-감시 watchdog 헬퍼 ──
   function buildReportNudge(stepIndex: number, step: MissionStep): string {
     return (
-      `【지휘자】 스텝 ${stepIndex} (${
+      `【Conductor】 No report has been received yet for step ${stepIndex} (${
         step.skill ?? step.type
-      }) 의 보고를 아직 못 받았습니다.\n` +
-      `이 스텝이 이미 끝났다면 지금 바로 mission_step_done({success:true, output:"핵심 결과 요약"}) 으로 ` +
-      `보고하세요 — 보고해야 다음 스텝으로 넘어갑니다.\n` +
-      `아직 진행 중이거나 사용자 답변을 기다리는 중이면 이 메시지는 무시하세요.`
+      }).\n` +
+      `If this step is already complete, report now with mission_step_done({success:true, output:"summary of key results"}); the mission can move to the next step only after that report.\n` +
+      `If you are still working or waiting for a user answer, ignore this message.`
     );
   }
 
@@ -499,9 +490,9 @@ export function createConductorDriver(
             projectId: m.projectId,
             goal: m.goal,
             kind: "escalate",
-            question: `스텝 ${stepIndex} (${
+            question: `Step ${stepIndex} (${
               s.skill ?? s.type
-            }) 완료 보고가 없습니다. 확인이 필요합니다.`,
+            }) has no completion report. Confirmation is required.`,
             skill: s.skill ?? null,
           });
           await deps.store.appendTimelineEvent(missionId, {
@@ -518,7 +509,7 @@ export function createConductorDriver(
           await transition(missionId, m.status, "waiting_for_human");
           notifyOrchestrator(
             m,
-            `⏸️ [Marblo Mission] 스텝 ${stepIndex} 완료 보고가 없어 사용자 확인을 요청했습니다. 끝났으면 mission_step_done 으로 보고하세요.`
+            `⏸️ [Marblo Mission] User confirmation was requested because step ${stepIndex} has no completion report. If it is complete, report with mission_step_done.`
           );
         });
         return;
@@ -611,7 +602,7 @@ export function createConductorDriver(
     // 대표 카드에 스텝 시작 댓글(best-effort, no-op if board 미주입/카드 미생성).
     await cardActivity(
       mission,
-      `스텝 ${stepIndex} 시작 · ${step.skill ?? step.type}`
+      `Step ${stepIndex} started · ${step.skill ?? step.type}`
     );
 
     // wait 스텝: 오케에 grant 하지 않는다 — 지휘자가 task 완료를 폴링한다(§8-3).
@@ -805,7 +796,7 @@ export function createConductorDriver(
     const fresh = await deps.store.getMission(missionId);
     if (!fresh) return;
     // 대표 카드에 스텝 완료 댓글(best-effort, no-op if board 미주입/카드 미생성).
-    await cardActivity(fresh, `스텝 ${stepIndex} 완료`);
+    await cardActivity(fresh, `Step ${stepIndex} complete`);
     const nextIdx = stepIndex + 1;
     await deps.store.updateMission(missionId, { currentStepIndex: nextIdx });
     if (nextIdx >= fresh.steps.length) {
@@ -930,15 +921,15 @@ export function createConductorDriver(
       projectId: mission.projectId,
       goal: mission.goal,
       kind: "escalate",
-      question: error ? `단계 실패: ${error}` : undefined,
+      question: error ? `Step failed: ${error}` : undefined,
       skill: step.skill ?? null,
     });
     await transition(missionId, mission.status, "waiting_for_human");
     notifyOrchestrator(
       mission,
-      `⏸️ [Marblo Mission] 스텝 ${stepIndex} (${
+      `⏸️ [Marblo Mission] Waiting for user confirmation at step ${stepIndex} (${
         step.skill ?? step.type
-      }) 에서 사용자 확인을 기다립니다: ${error}`
+      }): ${error}`
     );
   }
 
@@ -962,7 +953,7 @@ export function createConductorDriver(
         await deps.board.setCardStatus(mission.missionCardTaskId, "DONE");
         await deps.board.addCardActivity(
           mission.missionCardTaskId,
-          "미션 완료 ✅"
+          "Mission complete ✅"
         );
       } catch (err) {
         log("completeMission card sync failed", {
@@ -973,7 +964,7 @@ export function createConductorDriver(
     }
     notifyOrchestrator(
       mission,
-      `✅ [Marblo Mission] 모든 스텝이 끝나 미션이 완료되었습니다.`
+      `✅ [Marblo Mission] All steps are complete; the mission is complete.`
     );
   }
 

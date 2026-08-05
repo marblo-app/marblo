@@ -237,12 +237,12 @@ describe("ConductorDriver — grantStep", () => {
     expect(store.raw(id)!.steps[0].status).toBe("running");
     expect(posts).toHaveLength(1);
     // §3.2 — '한 번에 하나' 허가 + mission_step_done 보고 필수 + 스스로 advance 금지.
-    expect(posts[0]).toContain("현재 스텝 0");
+    expect(posts[0]).toContain("Current step 0");
     expect(posts[0]).toContain("/office-hours");
     expect(posts[0]).toContain("mission_step_done");
     // 보고가 다음 스텝의 전제임을 명시(완료 후 mission_step_done 미보고 → 교착 방지).
-    expect(posts[0]).toContain("보고를 받아야만 다음 스텝을 grant");
-    expect(posts[0]).toContain("스스로 다음 스텝을 실행하지 마세요");
+    expect(posts[0]).toContain("must receive this report before it can grant the next step");
+    expect(posts[0]).toContain("Do not start the next step yourself");
     // step.started 타임라인이 driver=orchestrator 로 남는다.
     const started = store
       .raw(id)!
@@ -284,7 +284,7 @@ describe("ConductorDriver — grantStep", () => {
 
     // grant 가 실제로 주입됐다(스킵되지 않음).
     expect(posts).toHaveLength(1);
-    expect(posts[0]).toContain("현재 스텝 0");
+    expect(posts[0]).toContain("Current step 0");
     // ensureSession 으로 얻은 라이브 세션("sess-1")으로 ownerOrchestratorSessionId 가
     // 영속 바인딩됐다 — 다음 grant 부터는 getSession 이 바로 매칭한다.
     expect(store.raw(id)!.ownerOrchestratorSessionId).toBe("sess-1");
@@ -304,10 +304,10 @@ describe("ConductorDriver — 보고-감시 watchdog", () => {
     await waitFor(() => posts.length === 1); // grant 주입
     // 보고를 안 하면 watchdog 이 nudge 를 추가로 주입한다.
     await waitFor(() => posts.length >= 2, 2000);
-    const nudge = posts.find((p) => p.includes("【지휘자】"));
+    const nudge = posts.find((p) => p.includes("【Conductor】"));
     expect(nudge).toBeTruthy();
     expect(nudge!).toContain("mission_step_done");
-    expect(nudge!).toContain("이 메시지는 무시");
+    expect(nudge!).toContain("ignore this message");
   });
 
   it("mission_step_done 보고가 오면 watchdog 이 멈춰 더는 nudge 하지 않는다", async () => {
@@ -323,10 +323,10 @@ describe("ConductorDriver — 보고-감시 watchdog", () => {
     // step0 성공 보고 → 전진. step0 watchdog 해제.
     bus.emit(reportEvent(id, 0, "success", { output: "ok" }));
     await waitFor(() => store.raw(id)!.currentStepIndex === 1);
-    const countAfterAdvance = posts.filter((p) => p.includes("스텝 0")).length;
+    const countAfterAdvance = posts.filter((p) => p.includes("step 0")).length;
     // 잠시 더 기다려도 step0 에 대한 추가 nudge 가 늘지 않아야 한다(해제 확인).
     await new Promise((r) => setTimeout(r, 80));
-    const countLater = posts.filter((p) => p.includes("스텝 0")).length;
+    const countLater = posts.filter((p) => p.includes("step 0")).length;
     expect(countLater).toBe(countAfterAdvance);
   });
 
@@ -378,8 +378,8 @@ describe("ConductorDriver — 대표 보드 카드 라이프사이클", () => {
     expect(board.createMissionCard).toHaveBeenCalledTimes(1);
     expect(store.raw(id)!.missionCardTaskId).toBe("card-1");
     // 시작 댓글 + 첫 스텝 시작 댓글이 쌓인다.
-    expect(cards.activities.some((a) => a.includes("미션 시작"))).toBe(true);
-    expect(cards.activities.some((a) => a.includes("스텝 0 시작"))).toBe(true);
+    expect(cards.activities.some((a) => a.includes("Mission started"))).toBe(true);
+    expect(cards.activities.some((a) => a.includes("Step 0 started"))).toBe(true);
   });
 
   it("스텝 완료 → 다음 스텝 시작/완료 댓글이 쌓이고 미션 완료 시 카드 DONE 동기화", async () => {
@@ -411,8 +411,8 @@ describe("ConductorDriver — 대표 보드 카드 라이프사이클", () => {
     await waitFor(() => store.raw(id)!.status === "completed");
 
     // 스텝 완료 댓글이 쌓이고, 완료 시 카드 상태가 DONE 으로 동기화된다.
-    expect(cards.activities.some((a) => a.includes("스텝 0 완료"))).toBe(true);
-    expect(cards.activities.some((a) => a.includes("미션 완료"))).toBe(true);
+    expect(cards.activities.some((a) => a.includes("Step 0 complete"))).toBe(true);
+    expect(cards.activities.some((a) => a.includes("Mission complete"))).toBe(true);
     expect(cards.statuses).toContain("DONE");
     expect(cards.createCalls).toBe(1); // 카드는 미션당 1회만 생성
   });
@@ -447,7 +447,7 @@ describe("ConductorDriver — 보고 → 게이트 → 전진 루프", () => {
     expect(m.steps[0].status).toBe("success");
     expect(m.currentStepIndex).toBe(1);
     expect(posts).toHaveLength(2);
-    expect(posts[1]).toContain("현재 스텝 1");
+    expect(posts[1]).toContain("Current step 1");
     expect(posts[1]).toContain("/plan-ceo-review");
   });
 

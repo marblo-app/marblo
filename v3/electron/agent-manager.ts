@@ -312,9 +312,9 @@ export function serializeAgent(agent: AgentInstance): SerializableAgent {
 // the only silence-based backstop. See that file's header for the full model.
 
 const SECRET_OUTPUT_GUARDRAIL = [
-  "[보안 가드레일]",
-  "- `.env`, `.mcp.json`, firebase-config, service account JSON, OAuth/Toss/Paddle/API key 파일의 원문을 cat/print/log 하지 마세요.",
-  "- 설정 확인이 필요하면 키 존재 여부, 파일 경로, 마스킹된 값만 보고하세요. 값 자체를 출력해야 하는 로그에는 maskConfigForLogging/maskEnvForLogging 계열 마스킹을 적용하세요.",
+  "[Security Guardrails]",
+  "- Do not cat, print, or log raw contents from `.env`, `.mcp.json`, firebase-config files, service account JSON, or OAuth/Toss/Paddle/API key files.",
+  "- When configuration checks are needed, report only whether keys exist, file paths, and masked values. If a config or env value must be logged, apply maskConfigForLogging or maskEnvForLogging-style masking.",
 ].join("\n");
 
 // P3-4: backstop pruning of dead (stopped/error) entries the primary reaper
@@ -404,12 +404,12 @@ export function composeInitialPrompt(
   // 정상 작동한다. 따라서 다른 비-claude 워커와 동일한 prepend 경로 사용.
   if (!skillContent) return sanitized;
   return [
-    "[역할 스킬 — 아래 워크플로우와 도구 사용 규칙을 따르세요]",
+    "[Role Skill — Follow the workflow and tool-use rules below]",
     skillContent.trim(),
     "",
     SECRET_OUTPUT_GUARDRAIL,
     "",
-    "[작업 지시]",
+    "[Task Instructions]",
     sanitized,
   ].join("\n");
 }
