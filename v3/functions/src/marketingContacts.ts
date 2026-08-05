@@ -579,6 +579,11 @@ export interface MarketingConsentStatusView {
   isFounder: boolean;
 }
 
+export interface MarketingConsentStatusResponse
+  extends MarketingConsentStatusView {
+  shouldPromptReconsent: boolean;
+}
+
 export function marketingConsentStatusView(
   contact: Partial<MarketingContactDoc> | null | undefined,
 ): MarketingConsentStatusView {
@@ -615,6 +620,13 @@ export function shouldPromptReconsent(
   if (view.unsubscribed) return false;
   if (view.status !== "unknown") return false;
   return view.isFounder;
+}
+
+export function marketingConsentStatusResponse(
+  contact: Partial<MarketingContactDoc> | null | undefined,
+): MarketingConsentStatusResponse {
+  const view = marketingConsentStatusView(contact);
+  return { ...view, shouldPromptReconsent: shouldPromptReconsent(view) };
 }
 
 // ─── lifecycle·세그먼트 파생 ────────────────────────────────────────

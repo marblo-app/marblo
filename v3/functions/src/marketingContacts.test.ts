@@ -24,6 +24,7 @@ import {
   backfillConsentGrantFromUserDoc,
   decideWaitlistConsentGrant,
   marketingConsentStatusView,
+  marketingConsentStatusResponse,
   shouldPromptReconsent,
   UNKNOWN_CONSENT,
   type ContactFlags,
@@ -701,6 +702,41 @@ test("marketingConsentStatusView: 컨택트 없으면 no_contact(배너 대상 �
     isFounder: false,
   });
   assert.equal(shouldPromptReconsent(view), false);
+});
+
+test("marketingConsentStatusResponse: 응답 조립은 민감 필드 없이 순수하게 고정", () => {
+  const cid = contactIdForEmail("private.user@example.com");
+  const response = marketingConsentStatusResponse({
+    normalizedEmailHash: cid,
+    emailEnc: encryptEmail("private.user@example.com", KEY),
+    emailMarketingConsent: UNKNOWN_CONSENT,
+    unsubscribe: subscribed,
+    segments: ["founder"],
+  });
+  assert.deepEqual(response, {
+    status: "unknown",
+    unsubscribed: false,
+    isFounder: true,
+    shouldPromptReconsent: true,
+  });
+  assert.ok(!("normalizedEmailHash" in response));
+  assert.ok(!("emailEnc" in response));
+});
+
+test("marketingConsentStatusResponse: 백필/구스키마의 부분 문서도 안전 반환", () => {
+  const response = marketingConsentStatusResponse({
+    // 최근 백필 중 일부 필드가 비어 있어도 callable 은 internal 로 죽지 않는다.
+    emailMarketingConsent: undefined,
+    unsubscribe: undefined,
+    segments: undefined,
+    founderStatus: "selected",
+  });
+  assert.deepEqual(response, {
+    status: "unknown",
+    unsubscribed: false,
+    isFounder: true,
+    shouldPromptReconsent: true,
+  });
 });
 
 test("marketingConsentStatusView: 세그먼트/founderStatus 중 하나만 있어도 파운더로 본다", () => {

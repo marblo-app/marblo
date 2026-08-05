@@ -57,8 +57,7 @@ import {
   decideMarketingConsentSync,
   backfillConsentGrantFromUserDoc,
   decideWaitlistConsentGrant,
-  marketingConsentStatusView,
-  shouldPromptReconsent,
+  marketingConsentStatusResponse,
   type UserDocRaw,
   type WaitlistDocRaw,
   type ContactFlags,
@@ -8548,8 +8547,8 @@ export const syncMarketingConsentOnUserWrite = functions.firestore
 // ★쓰기는 하지 않는다. 이 호출은 순수 read 이고, 동의 grant 는 여전히
 //   users/{uid}.webPrivacyConsent.marketing → 훅 1b 경로 하나뿐이다(새 훅 없음).
 // ★응답에 이메일은 없다 — 평문도, emailEnc 도, 해시도. 배너 판정에 불필요하다.
-// ★판정은 순수 함수 marketingContacts.{marketingConsentStatusView,
-//   shouldPromptReconsent} 로 수렴(단위테스트로 고정) — 여기선 IO 만 한다.
+// ★판정은 순수 함수 marketingContacts.marketingConsentStatusResponse 로 수렴
+//   (단위테스트로 고정) — 여기선 IO 와 에러 경계만 책임진다.
 export const getMyMarketingConsentStatus = functions.https.onCall(
   async (_data, context) => {
     const uid = context.auth?.uid;
@@ -8566,21 +8565,54 @@ export const getMyMarketingConsentStatus = functions.https.onCall(
       user = await admin.auth().getUser(uid);
     } catch (err) {
       if ((err as { code?: string }).code === "auth/user-not-found") {
-        return { status: "no_contact", unsubscribed: false, isFounder: false };
+        return marketingConsentStatusResponse(null);
       }
-      throw err;
+      console.warn("[getMyMarketingConsentStatus] auth lookup failed", {
+        uid,
+        code: (err as { code?: string }).code ?? null,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      throw new functions.https.HttpsError(
+        "unavailable",
+        "마케팅 동의 상태를 확인할 수 없습니다.",
+      );
     }
     if (!isRealSignupUser(user)) {
-      return { status: "no_contact", unsubscribed: false, isFounder: false };
+      return marketingConsentStatusResponse(null);
     }
 
-    const snap = await marketingContactRef(
-      contactIdForEmail(user.email as string),
-    ).get();
-    const view = marketingConsentStatusView(
-      snap.exists ? (snap.data() as Partial<MarketingContactDoc>) : null,
-    );
-    return { ...view, shouldPromptReconsent: shouldPromptReconsent(view) };
+    const contactId = contactIdForEmail(user.email as string);
+    let snap: admin.firestore.DocumentSnapshot;
+    try {
+      snap = await marketingContactRef(contactId).get();
+    } catch (err) {
+      console.warn("[getMyMarketingConsentStatus] contact read failed", {
+        uid,
+        code: (err as { code?: string }).code ?? null,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      throw new functions.https.HttpsError(
+        "unavailable",
+        "마케팅 동의 상태를 확인할 수 없습니다.",
+      );
+    }
+
+    try {
+      return marketingConsentStatusResponse(
+        snap.exists ? (snap.data() as Partial<MarketingContactDoc>) : null,
+      );
+    } catch (err) {
+      console.warn("[getMyMarketingConsentStatus] contact view failed", {
+        uid,
+        contactDocExists: snap.exists,
+        code: (err as { code?: string }).code ?? null,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      throw new functions.https.HttpsError(
+        "data-loss",
+        "마케팅 동의 상태 데이터 형식이 올바르지 않습니다.",
+      );
+    }
   },
 );
 
