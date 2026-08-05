@@ -160,6 +160,60 @@ export const project: Record<keyof typeof koProject, string> = {
   "project.audit.worktreeArchivedTip":
     "The ledger records worktreeId ({worktreeId}), but the current worktree list has no live match. It may have been removed after merge/prune, so this button stays disabled.",
 
+  // Operator view — problems first, mission/ticket grouping, link cluster.
+  "project.audit.admin.attentionTitle": "{count} need attention",
+  "project.audit.admin.attentionNone": "Nothing needs a human right now",
+  "project.audit.admin.attentionScopeNote":
+    "Across everything loaded, filters ignored",
+  "project.audit.admin.attentionMore": "+{count} more",
+  "project.audit.admin.reason.taskFailed": "Ended in failure",
+  "project.audit.admin.reason.taskBlocked": "Blocked",
+  "project.audit.admin.reason.failedActions": "{count} failed calls",
+  "project.audit.admin.reason.orphanedClaim": "Orphaned claim",
+  "project.audit.admin.reason.orphanedClaimTip":
+    "The agent that claimed this ticket ({agentId}) is not in the list of running agents.",
+  "project.audit.admin.reason.stalled": "No change for {hours}h",
+  "project.audit.admin.reassign": "Reassign on board",
+  "project.audit.admin.review": "Review history",
+
+  "project.audit.admin.workloadTitle": "Actions per member",
+  "project.audit.admin.workloadNote": "Project-wide tally · click to filter",
+  "project.audit.admin.workloadAll": "All",
+  "project.audit.admin.workloadUnattributed": "Unattributed",
+  "project.audit.admin.workloadUnattributedTip":
+    "Records with no actor uid (written before the ledger extension). No server-side filter is possible, so this filters within the loaded window only.",
+  "project.audit.admin.workloadTile": "{actions} actions",
+  "project.audit.admin.workloadWindowScopeTip":
+    "This count comes from the loaded records only, not the project-wide tally.",
+
+  "project.audit.admin.filterActorKind": "Actor axis",
+  "project.audit.admin.filterActorKindAll": "Human + orchestrator + agent",
+  "project.audit.admin.filterActorKindHuman": "Humans only",
+  "project.audit.admin.filterActorKindOrchestrator": "Orchestrator only",
+  "project.audit.admin.filterActorKindAgent": "Agents only",
+  "project.audit.admin.filterStatus": "Ticket status",
+  "project.audit.admin.filterStatusAll": "All statuses",
+  "project.audit.admin.filterMission": "Mission",
+  "project.audit.admin.filterMissionAll": "All missions",
+  "project.audit.admin.filterHidden": "{count} hidden by filters",
+  "project.audit.admin.filterReset": "Reset filters",
+
+  "project.audit.admin.boardSection": "Board",
+  "project.audit.admin.boardSectionNote": "Tickets not tied to a mission",
+  "project.audit.admin.missionProgress": "{done}/{total} done",
+  "project.audit.admin.missionProgressUnknown": " ({count} unknown)",
+  "project.audit.admin.missionSummary": "{tickets} tickets · {actions} actions",
+
+  "project.audit.admin.ticketSummary": "{actions} actions · {actors} actors",
+  "project.audit.admin.noTicketTitle": "Records with no ticket",
+  "project.audit.admin.noTicketNote": "Chat, lookups and other untied records",
+  "project.audit.admin.statusUnknown": "Status unknown",
+  "project.audit.admin.linkTicket": "Ticket detail",
+  "project.audit.admin.linkPr": "PR",
+  "project.audit.admin.expand": "Expand history",
+  "project.audit.admin.collapse": "Collapse history",
+  "project.audit.admin.emptySection": "No tickets match these filters",
+
   // Ticket ledger detail (click a ticket in the audit log) — ticket
   // U6ITRR38Z3c4MGLyg2PU.
   "project.audit.ticket.subtitle": "This ticket's full history, newest first",

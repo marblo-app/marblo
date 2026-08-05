@@ -154,6 +154,65 @@ export const project = {
   "project.audit.worktreeArchivedTip":
     "원장에는 worktreeId({worktreeId})가 있지만 현재 워크트리 목록에서 찾지 못했습니다. 머지/prune 후 제거된 워크트리일 수 있어 버튼을 비활성화합니다.",
 
+  // ── 관리자 뷰 — 문제 우선 · 미션/티켓 묶음 · 링크 클러스터 ────────
+  // 시간순 firehose 를 접고 "지금 무엇이 막혔나 / 누가 무엇을 지고 있나 /
+  // 이 티켓은 어디까지 갔나" 세 질문에 답하는 화면.
+  "project.audit.admin.attentionTitle": "주의 필요 {count}건",
+  "project.audit.admin.attentionNone": "지금 손이 필요한 티켓은 없습니다",
+  // 배너는 필터를 무시한다(문제를 필터로 숨기지 않는다) — 그 사실을 밝힌다.
+  "project.audit.admin.attentionScopeNote": "필터와 무관하게 전체 기준",
+  "project.audit.admin.attentionMore": "외 {count}건",
+  "project.audit.admin.reason.taskFailed": "실패로 종료",
+  "project.audit.admin.reason.taskBlocked": "차단됨",
+  "project.audit.admin.reason.failedActions": "실패한 호출 {count}건",
+  "project.audit.admin.reason.orphanedClaim": "고아 클레임",
+  "project.audit.admin.reason.orphanedClaimTip":
+    "이 티켓을 선점한 에이전트({agentId})가 현재 실행 중인 에이전트 목록에 없습니다.",
+  "project.audit.admin.reason.stalled": "{hours}시간째 무변동",
+  "project.audit.admin.reassign": "보드에서 재배정",
+  "project.audit.admin.review": "이력 보기",
+
+  // 구성원 워크로드 스트립 — 위 작업량 패널(결과)과 다른 축(행위 수)이다.
+  "project.audit.admin.workloadTitle": "구성원별 행위",
+  "project.audit.admin.workloadNote":
+    "프로젝트 전체 기준 · 클릭하면 그 구성원만",
+  "project.audit.admin.workloadAll": "전체",
+  "project.audit.admin.workloadUnattributed": "미귀속",
+  "project.audit.admin.workloadUnattributedTip":
+    "행위자 uid 가 없는 기록(원장 확장 이전 등)입니다. 서버 필터를 걸 수 없어 불러온 창 안에서만 거릅니다.",
+  "project.audit.admin.workloadTile": "{actions}건",
+  "project.audit.admin.workloadWindowScopeTip":
+    "이 수치는 프로젝트 전체 집계가 아니라 지금 불러온 기록 안에서만 센 값입니다.",
+
+  "project.audit.admin.filterActorKind": "행위자 축",
+  "project.audit.admin.filterActorKindAll": "사람+오케+에이전트",
+  "project.audit.admin.filterActorKindHuman": "사람만",
+  "project.audit.admin.filterActorKindOrchestrator": "오케 조작만",
+  "project.audit.admin.filterActorKindAgent": "에이전트만",
+  "project.audit.admin.filterStatus": "티켓 상태",
+  "project.audit.admin.filterStatusAll": "전체 상태",
+  "project.audit.admin.filterMission": "미션",
+  "project.audit.admin.filterMissionAll": "전체 미션",
+  "project.audit.admin.filterHidden": "필터로 {count}건 가림",
+  "project.audit.admin.filterReset": "필터 초기화",
+
+  "project.audit.admin.boardSection": "보드",
+  "project.audit.admin.boardSectionNote": "미션에 묶이지 않은 티켓",
+  "project.audit.admin.missionProgress": "{done}/{total} 완료",
+  // 롤업이 없어 taskIds 로 셀 때, 상태를 못 읽은 티켓 수를 따로 밝힌다.
+  "project.audit.admin.missionProgressUnknown": " ({count} 미상)",
+  "project.audit.admin.missionSummary": "티켓 {tickets} · 기록 {actions}",
+
+  "project.audit.admin.ticketSummary": "{actions}건 · 행위자 {actors}",
+  "project.audit.admin.noTicketTitle": "티켓 없는 기록",
+  "project.audit.admin.noTicketNote": "티켓에 붙지 않은 채팅 · 조회 등",
+  "project.audit.admin.statusUnknown": "상태 미상",
+  "project.audit.admin.linkTicket": "티켓 상세",
+  "project.audit.admin.linkPr": "PR",
+  "project.audit.admin.expand": "이력 펼치기",
+  "project.audit.admin.collapse": "이력 접기",
+  "project.audit.admin.emptySection": "조건에 맞는 티켓이 없습니다",
+
   // 티켓 원장 상세(감사 로그에서 티켓 클릭) — 티켓 U6ITRR38Z3c4MGLyg2PU.
   "project.audit.ticket.subtitle": "이 티켓의 전체 이력 · 최신순",
   "project.audit.ticket.partialNotice":

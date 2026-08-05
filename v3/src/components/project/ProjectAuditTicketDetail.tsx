@@ -13,7 +13,7 @@ import {
   type TicketLedgerRow,
 } from "../../lib/projectAuditView";
 import { ViewWorktreeButton } from "../board/ViewWorktreeButton";
-import { AuditBadge, RowLabel, formatAuditTime } from "./ProjectAuditPanel";
+import { AuditBadge, RowLabel, formatAuditTime } from "./ProjectAuditRow";
 
 /**
  * 티켓 원장 상세 — 감사 로그에서 티켓을 클릭했을 때 여는 모달(티켓
@@ -55,10 +55,10 @@ export function ProjectAuditTicketDetail({
   }, [taskId, ensureFreshWorktrees]);
   const taskWorktree = useMemo(
     () => findTaskWorktree(worktrees, { id: taskId }),
-    [worktrees, taskId]
+    [worktrees, taskId],
   );
   const hasWorktreeEvidence = rows.some(
-    (row) => row.worktree?.state === "value"
+    (row) => row.worktree?.state === "value",
   );
   const showViewCode = !!taskWorktree && hasWorktreeEvidence;
   const archivedWorktreeEvidence =
@@ -68,7 +68,7 @@ export function ProjectAuditTicketDetail({
   const { missions } = useReplayableMissions(projectId);
   const mission = useMemo(
     () => missions.find((m) => m.taskIds?.includes(taskId)) ?? null,
-    [missions, taskId]
+    [missions, taskId],
   );
 
   return (

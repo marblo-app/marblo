@@ -25,9 +25,10 @@ import type { AuditLog } from "../types/audit";
 import {
   getProjectAuditLog,
   getProjectAuditActors,
+  getProjectAuditMissions,
+  getProjectAuditTaskMeta,
   getProjectLedgerLog,
   getProjectLedgerActors,
-  getProjectTaskTitles,
 } from "../services/projectAuditService";
 import {
   auditStateFromError,
@@ -37,8 +38,10 @@ import {
   parseAuditTypeFilter,
   type AuditActorTally,
   type AuditLoadState,
+  type AuditMissionMeta,
   type AuditSources,
   type AuditSourceState,
+  type AuditTaskMeta,
   type TicketLedgerRow,
   type UnifiedAuditRow,
 } from "../lib/projectAuditView";
@@ -87,15 +90,27 @@ export async function fetchAuditActors(
 }
 
 /**
- * 필터 UI 안 쓰이는 부가 정보 — 티켓 제목 조인용 맵. `fetchAuditActors` 와
- * 같은 이유로 실패는 빈 맵으로 접는다(부가 정보라 별도 에러 화면을 만들지
- * 않는다).
+ * 필터 UI 안 쓰이는 부가 정보 — 티켓 메타(제목·상태·미션·PR) 조인용 맵.
+ * `fetchAuditActors` 와 같은 이유로 실패는 빈 맵으로 접는다(부가 정보라 별도
+ * 에러 화면을 만들지 않는다 — 못 가져오면 관리자 뷰가 해시와 "상태 미상"으로
+ * 떨어질 뿐 타임라인 자체는 그대로 보인다).
  */
-export async function fetchProjectTaskTitles(
+export async function fetchProjectTaskMeta(
   projectId: string,
-): Promise<Record<string, string>> {
+): Promise<Record<string, AuditTaskMeta>> {
   try {
-    return await getProjectTaskTitles(projectId);
+    return await getProjectAuditTaskMeta(projectId);
+  } catch {
+    return {};
+  }
+}
+
+/** 미션 섹션 헤더용 메타. 같은 이유로 실패는 빈 맵. */
+export async function fetchProjectAuditMissions(
+  projectId: string,
+): Promise<Record<string, AuditMissionMeta>> {
+  try {
+    return await getProjectAuditMissions(projectId);
   } catch {
     return {};
   }
@@ -192,8 +207,10 @@ export interface UnifiedAuditOptions {
   actors: AuditActorTally[];
   /** 종류 필터에 실을 오케 행위 종류 = 창에 실제 등장한 툴 이름. */
   toolNames: string[];
-  /** 티켓 제목 조인용 맵(현재 tasks 스냅샷). 없는 id 는 호출부가 해시로 떨군다. */
-  taskTitleById: Record<string, string>;
+  /** 티켓 메타 맵(현재 tasks 스냅샷). 없는 id 는 호출부가 해시로 떨군다. */
+  taskMetaById: Record<string, AuditTaskMeta>;
+  /** 미션 메타 맵(현재 missions 스냅샷). 없으면 헤더가 id 로 떨어진다. */
+  missionMetaById: Record<string, AuditMissionMeta>;
 }
 
 /**
@@ -207,19 +224,21 @@ export interface UnifiedAuditOptions {
 export async function fetchUnifiedAuditOptions(
   projectId: string,
 ): Promise<UnifiedAuditOptions> {
-  const [human, agent, taskTitleById] = await Promise.all([
+  const [human, agent, taskMetaById, missionMetaById] = await Promise.all([
     fetchAuditActors(projectId),
     getProjectLedgerActors(projectId).catch(() => ({
       actors: [] as AuditActorTally[],
       toolNames: [] as string[],
     })),
-    fetchProjectTaskTitles(projectId),
+    fetchProjectTaskMeta(projectId),
+    fetchProjectAuditMissions(projectId),
   ]);
 
   return {
     actors: mergeAuditActors(human, agent.actors),
     toolNames: agent.toolNames,
-    taskTitleById,
+    taskMetaById,
+    missionMetaById,
   };
 }
 
@@ -228,7 +247,8 @@ export interface UseProjectAuditLogResult {
   sources: AuditSources;
   actors: AuditActorTally[];
   toolNames: string[];
-  taskTitleById: Record<string, string>;
+  taskMetaById: Record<string, AuditTaskMeta>;
+  missionMetaById: Record<string, AuditMissionMeta>;
   reload: () => void;
 }
 
@@ -253,7 +273,8 @@ export function useProjectAuditLog(
   const [options, setOptions] = useState<UnifiedAuditOptions>({
     actors: [],
     toolNames: [],
-    taskTitleById: {},
+    taskMetaById: {},
+    missionMetaById: {},
   });
   const [nonce, setNonce] = useState(0);
 
@@ -293,7 +314,12 @@ export function useProjectAuditLog(
    */
   useEffect(() => {
     if (!projectId) {
-      setOptions({ actors: [], toolNames: [], taskTitleById: {} });
+      setOptions({
+        actors: [],
+        toolNames: [],
+        taskMetaById: {},
+        missionMetaById: {},
+      });
       return;
     }
     let cancelled = false;
@@ -317,7 +343,8 @@ export function useProjectAuditLog(
     sources: fetched.sources,
     actors: options.actors,
     toolNames: options.toolNames,
-    taskTitleById: options.taskTitleById,
+    taskMetaById: options.taskMetaById,
+    missionMetaById: options.missionMetaById,
     reload,
   };
 }

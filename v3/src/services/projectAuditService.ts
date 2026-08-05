@@ -55,12 +55,14 @@ import type {
   ProjectAuditLogQuery,
 } from "../types/projectAudit";
 import type { AuditLog } from "../types/audit";
+import type { TaskStatus } from "../types/task";
 import {
   buildProjectAuditEvent,
   normalizeAuditLimit,
   sortAuditEventsDesc,
   type BuildProjectAuditEventInput,
 } from "../lib/projectAudit";
+import type { AuditMissionMeta, AuditTaskMeta } from "../lib/projectAuditView";
 import {
   createDocument,
   queryDocuments,
@@ -74,7 +76,23 @@ const COLLECTION = "projectAuditLog";
 const LEDGER_COLLECTION = "audit_logs";
 /** 태스크 제목 조인용. **읽기만 한다** — write 초크포인트는 taskService.ts. */
 const TASKS_COLLECTION = "tasks";
+/** 미션 섹션 헤더용. **읽기만 한다** — write 초크포인트는 missionService.ts. */
+const MISSIONS_COLLECTION = "missions";
 const DATE_FIELDS = ["createdAt"];
+
+/**
+ * 서버(mcp-server/tools.ts)가 검증하는 7-원소 상태 집합과 같은 값.
+ * 여기 없는 값은 "모름"으로 떨어뜨린다 — 없는 상태를 화면이 발명하지 않게.
+ */
+const TASK_STATUSES: ReadonlySet<string> = new Set<TaskStatus>([
+  "TODO",
+  "CLAIMED",
+  "IN_PROGRESS",
+  "REVIEW",
+  "BLOCKED",
+  "FAILED",
+  "DONE",
+]);
 
 function toProjectAuditEvent(raw: Record<string, unknown>): ProjectAuditEvent {
   return convertTimestamps<ProjectAuditEvent>(raw, DATE_FIELDS);
@@ -84,11 +102,22 @@ function toAuditLog(raw: Record<string, unknown>): AuditLog {
   return convertTimestamps<AuditLog>(raw, DATE_FIELDS);
 }
 
-function testAuditOverride(projectId: string): {
+/**
+ * mocked E2E 용 주입 데이터.
+ *
+ * `taskTitles` 는 옛 harness 의 축약형(제목만)이고 `tasks`/`missions` 가 관리자
+ * 뷰가 쓰는 넓은 형태다. 둘 다 받는 이유는 하위호환 — 옛 spec 을 고치지 않고도
+ * 새 화면이 돌아야 한다(제목만 주면 상태·PR·미션 칸이 비는 것이 정확한 표현이다).
+ */
+interface TestAuditOverride {
   human?: ProjectAuditEvent[];
   agent?: AuditLog[];
   taskTitles?: Record<string, string>;
-} | null {
+  tasks?: Record<string, unknown>[];
+  missions?: Record<string, unknown>[];
+}
+
+function testAuditOverride(projectId: string): TestAuditOverride | null {
   if (typeof window === "undefined" || typeof localStorage === "undefined") {
     return null;
   }
@@ -96,14 +125,7 @@ function testAuditOverride(projectId: string): {
   try {
     const raw = localStorage.getItem("marblo:test:projectAuditData");
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Record<
-      string,
-      {
-        human?: ProjectAuditEvent[];
-        agent?: AuditLog[];
-        taskTitles?: Record<string, string>;
-      }
-    >;
+    const parsed = JSON.parse(raw) as Record<string, TestAuditOverride>;
     return parsed[projectId] ?? null;
   } catch {
     return null;
@@ -394,17 +416,114 @@ export async function getProjectLedgerActors(
 export async function getProjectTaskTitles(
   projectId: string,
 ): Promise<Record<string, string>> {
-  const mock = testAuditOverride(projectId);
-  if (mock) return { ...(mock.taskTitles ?? {}) };
+  const metaById = await getProjectAuditTaskMeta(projectId);
+  const titleById: Record<string, string> = {};
+  for (const meta of Object.values(metaById)) {
+    if (meta.title) titleById[meta.id] = meta.title;
+  }
+  return titleById;
+}
 
-  const docs = await queryDocuments<{ id: string; title?: unknown }>(
+/**
+ * 이 프로젝트의 티켓 id → **감사 뷰용 얇은 메타**. 위 제목 맵의 상위집합이고,
+ * 같은 한 번의 `tasks` 조회에서 나온다(제목 맵은 여기서 파생된다 — 같은 화면이
+ * 같은 컬렉션을 두 번 읽지 않게).
+ *
+ * ★관리자 뷰가 제목만으로는 못 그리는 것들 때문에 넓혔다: 상태 pill(status),
+ * 미션 묶음(contextId), PR 링크(prUrl), 고아 클레임 판정(claimedBy), 그리고
+ * 보관/삭제 여부(주의 필요 판정에서 빼려고). **읽기 전용**이라는 성질은 그대로다 —
+ * `tasks` write 초크포인트는 여전히 taskService.ts 다.
+ *
+ * 필드가 없거나 타입이 어긋나면 그 필드만 null 로 떨어뜨린다. 문서 하나가
+ * 이상하다고 티켓을 통째로 빼면 감사 화면에서 그 티켓이 조용히 사라진다.
+ */
+export async function getProjectAuditTaskMeta(
+  projectId: string,
+): Promise<Record<string, AuditTaskMeta>> {
+  const mock = testAuditOverride(projectId);
+  if (mock) {
+    const out: Record<string, AuditTaskMeta> = {};
+    // 옛 harness 는 `taskTitles` 만 준다 — 제목만 있는 메타로 접어서 기존
+    // spec 이 그대로 돌게 둔다. `tasks` 가 있으면 그쪽이 이긴다(상위집합).
+    for (const [id, title] of Object.entries(mock.taskTitles ?? {})) {
+      out[id] = toAuditTaskMeta({ id, title });
+    }
+    for (const raw of mock.tasks ?? []) {
+      const meta = toAuditTaskMeta(raw as Record<string, unknown>);
+      if (meta.id) out[meta.id] = meta;
+    }
+    return out;
+  }
+
+  const docs = await queryDocuments<Record<string, unknown>>(
     TASKS_COLLECTION,
     where("projectId", "==", projectId),
   );
-  const titleById: Record<string, string> = {};
+  const metaById: Record<string, AuditTaskMeta> = {};
   for (const doc of docs) {
-    const title = typeof doc.title === "string" ? doc.title.trim() : "";
-    if (title) titleById[doc.id] = title;
+    const meta = toAuditTaskMeta(doc);
+    if (meta.id) metaById[meta.id] = meta;
   }
-  return titleById;
+  return metaById;
+}
+
+function str(raw: Record<string, unknown>, key: string): string | null {
+  const value = raw[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function toAuditTaskMeta(raw: Record<string, unknown>): AuditTaskMeta {
+  const status = str(raw, "status");
+  return {
+    id: str(raw, "id") ?? "",
+    title: str(raw, "title"),
+    // 서버가 검증한 7-원소 enum 이지만, 옛/손상 문서가 다른 값을 들고 있을 수
+    // 있다. 아는 값만 통과시키고 나머지는 "모름"(null)으로 — 모르는 코드를
+    // 상태 pill 에 그대로 찍으면 화면이 없는 상태를 발명한다.
+    status: status && TASK_STATUSES.has(status) ? (status as TaskStatus) : null,
+    contextId: str(raw, "contextId"),
+    prUrl: str(raw, "prUrl"),
+    claimedBy: str(raw, "claimedBy"),
+    archived: raw.archived === true,
+    deleted: raw.deleted === true,
+  };
+}
+
+/**
+ * 이 프로젝트의 미션 id → 감사 뷰용 얇은 메타. **읽기 전용** — missions write
+ * 초크포인트는 missionService.ts 다.
+ *
+ * 미션 섹션 헤더(목표·상태·진행바)만 그린다. 실패는 호출부에서 빈 맵으로
+ * 접힌다 — 미션 메타가 없으면 티켓 묶음은 그대로 두고 헤더만 id 로 떨어진다
+ * (미션 조회 실패가 감사 타임라인 전체를 죽이지 않는다).
+ */
+export async function getProjectAuditMissions(
+  projectId: string,
+): Promise<Record<string, AuditMissionMeta>> {
+  const mock = testAuditOverride(projectId);
+  const docs = mock
+    ? ((mock.missions ?? []) as Record<string, unknown>[])
+    : await queryDocuments<Record<string, unknown>>(
+        MISSIONS_COLLECTION,
+        where("projectId", "==", projectId),
+      );
+
+  const byId: Record<string, AuditMissionMeta> = {};
+  for (const doc of docs) {
+    const id = str(doc, "id");
+    if (!id) continue;
+    const projection = doc.projection as
+      | { statusCounts?: Partial<Record<string, number>> }
+      | undefined;
+    byId[id] = {
+      id,
+      goal: str(doc, "goal"),
+      status: str(doc, "status"),
+      taskIds: Array.isArray(doc.taskIds)
+        ? doc.taskIds.filter((v): v is string => typeof v === "string")
+        : [],
+      statusCounts: projection?.statusCounts ?? null,
+    };
+  }
+  return byId;
 }

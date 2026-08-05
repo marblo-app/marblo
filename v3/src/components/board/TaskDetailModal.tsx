@@ -27,21 +27,16 @@ import {
   spawnedModelTitle,
 } from "../../lib/spawnedModelLabel";
 import { findTaskWorktree, resolveTaskAgentId } from "../../lib/taskWorktree";
+import { TASK_STATUS_COLORS } from "../../lib/taskStatusStyle";
 import { TaskBodySections, hasAnyBody } from "./TaskBodySections";
 import { DiffViewer } from "./DiffViewer";
 import { ViewWorktreeButton } from "./ViewWorktreeButton";
 
 type DetailTab = "comments" | "activity" | "diff";
 
-const STATUS_COLORS: Record<TaskStatus, string> = {
-  TODO: "bg-gray-600",
-  CLAIMED: "bg-yellow-600",
-  IN_PROGRESS: "bg-blue-600",
-  REVIEW: "bg-purple-600",
-  BLOCKED: "bg-orange-600",
-  FAILED: "bg-red-600",
-  DONE: "bg-green-600",
-};
+// 감사 로그의 관리자 뷰도 같은 팔레트를 쓴다 — 두 화면이 같은 상태를 다른
+// 색으로 칠하지 않도록 lib/taskStatusStyle 한 곳에만 둔다.
+const STATUS_COLORS = TASK_STATUS_COLORS;
 
 const STATUS_BUTTON_COLORS: Record<TaskStatus, string> = {
   TODO: "bg-gray-600 hover:bg-gray-500",

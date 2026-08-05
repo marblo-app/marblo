@@ -105,22 +105,32 @@ test("@mocked 프로젝트 감사로그 티켓 상세는 긴 detail 전체와 Re
   await expect(marblo.page.getByText("감사 로그")).toBeVisible({
     timeout: 8000,
   });
-  await expect(
-    marblo.page.locator("li", { hasText: "상태 변경" }).first()
-  ).toBeVisible();
-  await expect(marblo.page.getByText(taskTitle).first()).toBeVisible();
+  // 관리자 뷰에서는 티켓이 카드 하나로 접혀 있고, 이벤트("상태 변경")는 펼쳐야
+  // 보인다 — 캡처가 그대로라는 계약을 여기서 같이 지킨다.
+  const card = marblo.page
+    .getByTestId("audit-ticket")
+    .filter({ hasText: taskTitle })
+    .first();
+  await expect(card).toBeVisible();
+  await card.getByRole("button", { expanded: false }).first().click();
+  await expect(card.getByText("상태 변경").first()).toBeVisible();
 
-  await marblo.page.getByRole("button", { name: taskTitle }).first().click();
+  await card.getByRole("button", { name: "티켓 상세" }).click();
 
   await expect(
     marblo.page.getByRole("heading", { name: taskTitle })
   ).toBeVisible();
-  const modalDetail = marblo.page.locator("span.whitespace-normal", {
-    hasText: longTierDetail,
-  });
+  // ★모달로 스코프한다 — 같은 detail 이 뒤의 (펼쳐진) 티켓 카드 타임라인에도
+  // 있어서, 전역으로 찾으면 strict mode 위반이 난다. 이 가드가 지키는 것은
+  // 모달의 줄바꿈이다.
+  const modalDetail = marblo.page
+    .locator(".fixed.inset-0")
+    .locator("span.whitespace-normal", { hasText: longTierDetail });
   await expect(modalDetail).toBeVisible();
   await expect(modalDetail).not.toHaveCSS("text-overflow", "ellipsis");
-  await expect(marblo.page.getByText("...")).toHaveCount(0);
+  await expect(marblo.page.locator(".fixed.inset-0").getByText("...")).toHaveCount(
+    0
+  );
   await expect(
     marblo.page.getByRole("button", { name: "Replay 보기" })
   ).toBeVisible();
@@ -285,31 +295,38 @@ test("@mocked 프로젝트 감사로그는 worktree 단위 그룹에 보기 버�
   });
 
   await marblo.page.getByLabel("텔레그램·메모 포함").check();
-  const liveGroup = marblo.page.locator("li", { hasText: liveTitle }).first();
-  const archivedGroup = marblo.page
-    .locator("li", { hasText: archivedTitle })
+  const liveCard = marblo.page
+    .getByTestId("audit-ticket")
+    .filter({ hasText: liveTitle })
     .first();
-
-  await expect(liveGroup.getByText("메모 묶음")).toBeVisible();
-  await expect(liveGroup.getByText(liveBranch).first()).toBeVisible();
-  await expect(
-    liveGroup.getByRole("button", { name: /이 워크트리 보기/ })
-  ).toBeVisible();
-
-  await expect(archivedGroup.getByText("메모 묶음")).toBeVisible();
-  await expect(archivedGroup.getByText("아카이브됨")).toBeVisible();
-  await expect(
-    archivedGroup.getByText(`${projectId}/${archivedTaskId}`)
-  ).toBeVisible();
-  await expect(
-    archivedGroup.getByRole("button", { name: /이 워크트리 보기/ })
-  ).toHaveCount(0);
-
-  const archivedStatusRow = marblo.page
-    .locator("li", { hasText: "상태 변경" })
+  const archivedCard = marblo.page
+    .getByTestId("audit-ticket")
     .filter({ hasText: archivedTitle })
     .first();
-  await archivedStatusRow.getByRole("button", { name: archivedTitle }).click();
+
+  // 라이브 워크트리는 링크 클러스터의 "이 워크트리 보기"(브랜치 포함).
+  await expect(liveCard.getByText(liveBranch).first()).toBeVisible();
+  await expect(
+    liveCard.getByRole("button", { name: /이 워크트리 보기/ })
+  ).toBeVisible();
+
+  // 정리된 워크트리는 아카이브 안내로만 — raw worktreeId 는 줄에서 빠지고
+  // tooltip 에만 남는다(원문을 버리지는 않는다).
+  const archivedTag = archivedCard.getByText("아카이브됨");
+  await expect(archivedTag).toBeVisible();
+  await expect(archivedTag).toHaveAttribute(
+    "title",
+    new RegExp(`${projectId}/${archivedTaskId}`)
+  );
+  await expect(
+    archivedCard.getByRole("button", { name: /이 워크트리 보기/ })
+  ).toHaveCount(0);
+
+  // 펼치면 접힌 메모 묶음이 그대로 보인다(캡처 불변).
+  await archivedCard.getByRole("button", { expanded: false }).first().click();
+  await expect(archivedCard.getByText("메모 묶음")).toBeVisible();
+
+  await archivedCard.getByRole("button", { name: "티켓 상세" }).click();
   await expect(
     marblo.page.getByRole("heading", { name: archivedTitle })
   ).toBeVisible();

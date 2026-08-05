@@ -18,6 +18,8 @@ import type {
   ProjectAuditMetadata,
 } from "../types/projectAudit";
 import type { AuditLog } from "../types/audit";
+import type { TaskStatus } from "../types/task";
+import { getMissionId } from "./laneContext";
 import { isProjectAuditEventType } from "./projectAudit";
 
 // ── 이벤트 종류 라벨 ─────────────────────────────────────────────
@@ -130,7 +132,7 @@ export function toolRowLabel(toolName: string): AuditRowLabel {
  */
 export function resolveActorLabel(
   event: Pick<ProjectAuditEvent, "actorUid" | "actorName">,
-  nameByUid: Record<string, string> = {}
+  nameByUid: Record<string, string> = {},
 ): string {
   const name = event.actorName?.trim() || nameByUid[event.actorUid]?.trim();
   if (name) return name;
@@ -146,7 +148,7 @@ export function resolveActorLabel(
  */
 export function auditMetadataSummary(
   type: string,
-  metadata: ProjectAuditMetadata | undefined
+  metadata: ProjectAuditMetadata | undefined,
 ): string | null {
   if (!metadata) return null;
   const str = (key: string): string | null => {
@@ -162,7 +164,7 @@ export function auditMetadataSummary(
   }
   if (type === "agent.spawned") {
     const parts = [str("agentName"), str("model"), str("role")].filter(
-      (v): v is string => !!v
+      (v): v is string => !!v,
     );
     return parts.length ? parts.join(" · ") : null;
   }
@@ -343,7 +345,7 @@ export interface UnifiedAuditRow {
  * 있다"는 오해를 만든다.
  */
 export function auditLedgerDetail(
-  event: Pick<AuditLog, "tier">
+  event: Pick<AuditLog, "tier">,
 ): string | null {
   const tier = event.tier?.trim();
   return tier ? tier : null;
@@ -370,7 +372,7 @@ const TASK_STATUS_VALUES = new Set([
  * 건드리지 않는 이 티켓의 제약상 화살표는 목표 쪽만 보여준다.
  */
 export function auditStatusTarget(
-  event: Pick<AuditLog, "toolName" | "params">
+  event: Pick<AuditLog, "toolName" | "params">,
 ): string | null {
   if (event.toolName !== "update_task_status") return null;
   const raw = event.params?.status;
@@ -379,12 +381,12 @@ export function auditStatusTarget(
 
 /** 오케 행 detail 전체 — 상태 목표(있으면) + 티어(있으면). */
 function agentRowDetail(
-  event: Pick<AuditLog, "tier" | "toolName" | "params">
+  event: Pick<AuditLog, "tier" | "toolName" | "params">,
 ): string | null {
   const target = auditStatusTarget(event);
   const tier = auditLedgerDetail(event);
   const parts = [target ? `→ ${target}` : null, tier].filter(
-    (v): v is string => !!v
+    (v): v is string => !!v,
   );
   return parts.length ? parts.join(" · ") : null;
 }
@@ -392,7 +394,7 @@ function agentRowDetail(
 /** 사람 행위 한 건 → 통합 행. */
 export function humanAuditRow(
   event: ProjectAuditEvent,
-  nameByUid: Record<string, string> = {}
+  nameByUid: Record<string, string> = {},
 ): UnifiedAuditRow {
   return {
     key: `human:${event.id}`,
@@ -438,7 +440,7 @@ export function taskIdFromCreateTaskResult(result: string): string | null {
  */
 export function agentAuditRow(
   event: AuditLog,
-  nameByUid: Record<string, string> = {}
+  nameByUid: Record<string, string> = {},
 ): UnifiedAuditRow {
   const actorUid = event.actorUid?.trim() || null;
   const taskId =
@@ -499,11 +501,11 @@ export function mergeAuditRows(
 export function buildAuditRows(
   human: readonly ProjectAuditEvent[],
   agent: readonly AuditLog[],
-  nameByUid: Record<string, string> = {}
+  nameByUid: Record<string, string> = {},
 ): UnifiedAuditRow[] {
   return mergeAuditRows(
     human.map((event) => humanAuditRow(event, nameByUid)),
-    agent.map((event) => agentAuditRow(event, nameByUid))
+    agent.map((event) => agentAuditRow(event, nameByUid)),
   );
 }
 
@@ -543,7 +545,7 @@ export type AuditTypeFilter =
  * 읽는다. 실제로 이 드롭다운은 우리가 만든 값만 내보내므로 이 경로는 방어다.
  */
 export function parseAuditTypeFilter(
-  value: string | undefined | null
+  value: string | undefined | null,
 ): AuditTypeFilter {
   const raw = value?.trim();
   if (!raw) return { source: "both" };
@@ -680,7 +682,7 @@ export function mergeAuditActors(
  */
 export function resolveTaskLabel(
   taskId: string | null,
-  titleById: Record<string, string> = {}
+  titleById: Record<string, string> = {},
 ): string | null {
   if (!taskId) return null;
   const title = titleById[taskId]?.trim();
@@ -705,7 +707,7 @@ export type AuditBadgeKind =
   | "orchestratorControlPlane";
 
 export function auditBadgeKind(
-  row: Pick<UnifiedAuditRow, "actorKind" | "model">
+  row: Pick<UnifiedAuditRow, "actorKind" | "model">,
 ): AuditBadgeKind {
   if (row.actorKind === "human") return "human";
   return row.model ? "agentModel" : "orchestratorControlPlane";
@@ -792,7 +794,7 @@ type LedgerExtensionField =
  */
 export function ledgerFieldValue(
   event: AuditLog,
-  field: LedgerExtensionField
+  field: LedgerExtensionField,
 ): LedgerFieldValue {
   if (!(field in event)) return { state: "preLedger" };
   const raw = event[field];
@@ -809,7 +811,7 @@ export function ledgerFieldValue(
  * L3 가 배선되면 이 함수 하나만 바뀌면 되도록 판정을 여기 모아 둔다.
  */
 export function auditSealStatus(
-  event: Pick<AuditLog, "seq" | "prevHash" | "hash">
+  event: Pick<AuditLog, "seq" | "prevHash" | "hash">,
 ): "sealed" | "unsealed" {
   return event.seq != null && !!event.prevHash && !!event.hash
     ? "sealed"
@@ -835,7 +837,7 @@ export interface TicketLedgerRow extends UnifiedAuditRow {
 export function buildTicketLedgerRows(
   human: readonly ProjectAuditEvent[],
   agent: readonly AuditLog[],
-  nameByUid: Record<string, string> = {}
+  nameByUid: Record<string, string> = {},
 ): TicketLedgerRow[] {
   const humanRows: TicketLedgerRow[] = human.map((event) => ({
     ...humanAuditRow(event, nameByUid),
@@ -862,7 +864,7 @@ export function buildTicketLedgerRows(
  */
 export function foldAuditRows(
   rows: readonly UnifiedAuditRow[],
-  minGroupSize = 2
+  minGroupSize = 2,
 ): AuditDisplayRow[] {
   const out: AuditDisplayRow[] = [];
   let i = 0;
@@ -893,4 +895,785 @@ export function foldAuditRows(
     i++;
   }
   return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 관리자 뷰 — 문제 우선 · 미션/티켓 묶음 · 링크 클러스터
+// ═══════════════════════════════════════════════════════════════════
+//
+// ★왜 시간순 firehose 를 접는가
+// 위의 `buildAuditRows` 는 "언제 무슨 일이 있었나"를 최신순 한 줄씩 준다. 그건
+// 한 사건을 되짚을 때는 맞지만, **운영자가 화면을 여는 이유**와는 다르다:
+// 운영자는 "지금 무엇이 막혔나 / 누가 무엇을 지고 있나 / 이 티켓은 어디까지
+// 갔나"를 본다. 같은 티켓 하나가 created→claimed→dispatched→status→submitted
+// 로 5줄씩 흩어지면 그 세 질문 중 어느 것도 답이 안 나온다(사장님 도그푸딩
+// 피드백).
+//
+// 그래서 이 섹션은 같은 행들을 **세 겹으로 다시 접는다**: 티켓(1차) → 미션
+// (상위) → 그리고 그 위에 **문제 우선** 목록. 캡처도 원본 행도 건드리지 않는다 —
+// `AuditTicketGroup.rows` 는 그대로 `UnifiedAuditRow` 이고, 펼치면 예전 타임라인이
+// 그대로 다시 보인다(표현만 접는다는 `foldAuditRows` 의 원칙 그대로).
+//
+// ★왜 순수함수 모듈에 두는가 (설계 §7)
+// 이 파일은 firebase 도 react 도 electron IPC 도 타지 않는다. 그래서 같은 뷰모델을
+// 나중에 웹 관리자 콘솔(marblo.app admin)이 그대로 lift 할 수 있다 — 그쪽은
+// Electron 스토어(worktree/agent)가 없으므로, 그 두 축은 **주입받는 옵션**
+// (`liveAgentIds`)이나 **원장에서 파생된 값**(`worktreeId`)으로만 표현하고
+// 여기서 직접 조회하지 않는다.
+
+/**
+ * 감사 뷰가 티켓에 대해 필요로 하는 **최소 사실**. `tasks` 스냅샷의 얇은 투영이다.
+ *
+ * 왜 `Task` 를 그대로 안 쓰는가: 이 모듈은 렌더러 스토어가 없는 곳(웹 콘솔)에서도
+ * 돌아야 하고, `Task` 전체를 요구하면 그 호출부가 보드 스토어까지 끌고 와야 한다.
+ * 감사 뷰가 실제로 읽는 6개 필드만 계약으로 못 박는다.
+ *
+ * 각 필드의 `null` 은 "모른다"이지 "없다"가 아니다 — 티켓 문서를 못 읽은 경우
+ * (물리 삭제 등)와 값이 빈 경우를 호출부가 가를 수 있어야 한다.
+ */
+export interface AuditTaskMeta {
+  id: string;
+  title: string | null;
+  status: TaskStatus | null;
+  /**
+   * 원문 `contextId`. 미션 귀속은 여기서 파생한다 — 판정 규약(`"board"` 도
+   * `"lane:*"` 도 아니면 missionId)은 lib/laneContext 하나에만 있고, 이 모듈은
+   * 그것을 부를 뿐 다시 구현하지 않는다. (`Task` 에는 `missionId` 필드가 아예
+   * 없다 — dispatcher 가 `contextId: missionId` 로 태깅하는 것이 유일한 결속.)
+   */
+  contextId: string | null;
+  prUrl: string | null;
+  claimedBy: string | null;
+  archived: boolean;
+  deleted: boolean;
+}
+
+/** 미션 섹션 헤더가 쓰는 최소 사실. `projection` 은 #775 프로젝터 롤업. */
+export interface AuditMissionMeta {
+  id: string;
+  goal: string | null;
+  status: string | null;
+  taskIds: string[];
+  statusCounts: Partial<Record<string, number>> | null;
+}
+
+// ── 주의 필요(문제 우선) ─────────────────────────────────────────
+
+/**
+ * 이 티켓이 사람 손을 필요로 하는 이유.
+ *
+ * ★사실만 담는다. 각 종류는 **관측된 값 하나**에 1:1로 대응하고, 추측은 없다:
+ *   - `taskFailed`    — 티켓 상태가 FAILED (에이전트가 스스로 실패를 보고했다).
+ *   - `taskBlocked`   — 티켓 상태가 BLOCKED (무언가를 기다린다고 스스로 말했다).
+ *   - `failedActions` — 원장에 `success:false` 툴 호출이 있다.
+ *   - `orphanedClaim` — 클레임한 에이전트 id 가 살아 있는 에이전트 목록에 없다.
+ *   - `stalled`       — 진행 중(CLAIMED/IN_PROGRESS/REVIEW)인데 마지막 기록이
+ *                       임계값보다 오래됐다.
+ */
+export type AuditAttentionKind =
+  | "taskFailed"
+  | "taskBlocked"
+  | "failedActions"
+  | "orphanedClaim"
+  | "stalled";
+
+export type AuditAttentionSeverity = "critical" | "warning";
+
+export interface AuditAttention {
+  kinds: AuditAttentionKind[];
+  severity: AuditAttentionSeverity;
+  /** `stalled` 의 근거 — 마지막 기록 이후 경과(ms). 해당 없으면 null. */
+  idleMs: number | null;
+}
+
+/**
+ * 정체 판정 임계값. 6시간 — 한 근무 반나절이다.
+ *
+ * 이 값을 짧게(예: 30분) 잡으면 정상적으로 긴 턴을 도는 에이전트가 전부 "정체"로
+ * 뜨고, 배너가 한 번 늑대소년이 되면 진짜 정체를 아무도 안 본다. 판정 자체는
+ * 주입 가능(`stalledAfterMs`)하게 열어 둔다 — 테스트와 향후 설정 UI 를 위해.
+ */
+export const AUDIT_STALLED_AFTER_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * 에이전트 목록 → 클레임 키 집합.
+ *
+ * ★`task.claimedBy` 는 **id 일 수도 이름일 수도 있다**(보드가 실제로
+ * `a.id === claimedBy || a.name === claimedBy || a.name.toLowerCase() === ...`
+ * 로 푼다 — components/board/TaskDetailModal.tsx). 여기서 id 만 모으면 이름으로
+ * 물린 티켓이 전부 "고아 클레임"으로 떠서 배너가 통째로 거짓말이 된다. 그래서
+ * 같은 세 갈래를 모두 키로 넣는다(대조는 `auditAttention` 이 원문·소문자 둘 다로).
+ *
+ * `Agent` 타입을 안 받고 구조로만 받는 이유는 이 모듈의 나머지와 같다 —
+ * 렌더러 스토어가 없는 곳(웹 콘솔)에서도 돌아야 한다.
+ */
+export function auditAgentClaimKeys(
+  agents: readonly { id: string; name: string }[],
+): Set<string> {
+  const keys = new Set<string>();
+  for (const agent of agents) {
+    if (agent.id) keys.add(agent.id);
+    if (agent.name) {
+      keys.add(agent.name);
+      keys.add(agent.name.toLowerCase());
+    }
+  }
+  return keys;
+}
+
+/** 아직 끝나지 않은 = 누군가 지고 있어야 하는 상태. */
+const IN_FLIGHT_TASK_STATUSES: ReadonlySet<string> = new Set([
+  "CLAIMED",
+  "IN_PROGRESS",
+  "REVIEW",
+]);
+
+/** 즉시 손이 필요한 종류. 나머지는 경고(노랑). */
+const CRITICAL_ATTENTION_KINDS: ReadonlySet<AuditAttentionKind> = new Set([
+  "taskFailed",
+  "failedActions",
+  "orphanedClaim",
+]);
+
+export interface AuditAttentionInput {
+  status: TaskStatus | null;
+  claimedBy: string | null;
+  archived: boolean;
+  deleted: boolean;
+  /** 이 티켓 그룹 안의 실패한 툴 호출 수. */
+  failedCount: number;
+  /** 이 티켓의 가장 최근 기록 시각. */
+  latestAt: Date;
+}
+
+export interface AuditAttentionOptions {
+  now?: Date;
+  /**
+   * 살아 있는 에이전트의 **클레임 키** 집합 — `auditAgentClaimKeys` 로 만든다.
+   *
+   * ★`null`/미지정이면 고아 클레임 **판정을 아예 하지 않는다**. 에이전트 스토어가
+   * 아직 하이드레이트되지 않은 상태에서 빈 집합을 넘기면 진행 중인 티켓이 전부
+   * "고아"로 떠서, 배너가 첫 프레임마다 거짓 경보를 낸다 — "모른다"를 "없다"로
+   * 접지 않는다는 이 파일의 규칙(LedgerFieldValue 주석)과 같은 이유. 에이전트
+   * 스토어 자체가 `hydrated` 로 그 둘을 가르고 있으니 호출부는 그걸 그대로 쓴다.
+   */
+  liveAgentKeys?: ReadonlySet<string> | null;
+  stalledAfterMs?: number;
+}
+
+/**
+ * 티켓 하나의 주의 필요 판정. 없으면 null.
+ *
+ * ★끝난 티켓은 문제가 아니다. DONE·보관·삭제된 티켓은 과거에 실패한 호출이
+ * 있었더라도 배너에 올리지 않는다 — 이미 사람이 처리해서 끝난 일을 계속 "N건
+ * 주의 필요"로 세면 그 숫자가 영원히 안 줄고, 배너 전체가 무시된다.
+ *
+ * 티켓 문서를 못 읽은 경우(`status === null`)는 상태 기반 판정을 못 하지만,
+ * `failedActions` 는 원장이 직접 말하는 사실이라 그대로 남긴다.
+ */
+export function auditAttention(
+  input: AuditAttentionInput,
+  options: AuditAttentionOptions = {},
+): AuditAttention | null {
+  if (input.deleted || input.archived || input.status === "DONE") return null;
+
+  const kinds: AuditAttentionKind[] = [];
+  if (input.status === "FAILED") kinds.push("taskFailed");
+  if (input.status === "BLOCKED") kinds.push("taskBlocked");
+  if (input.failedCount > 0) kinds.push("failedActions");
+
+  const inFlight = !!input.status && IN_FLIGHT_TASK_STATUSES.has(input.status);
+
+  const liveAgentKeys = options.liveAgentKeys;
+  if (
+    inFlight &&
+    input.claimedBy &&
+    liveAgentKeys != null &&
+    !liveAgentKeys.has(input.claimedBy) &&
+    !liveAgentKeys.has(input.claimedBy.toLowerCase())
+  ) {
+    kinds.push("orphanedClaim");
+  }
+
+  const stalledAfterMs = options.stalledAfterMs ?? AUDIT_STALLED_AFTER_MS;
+  const nowMs = auditTimeValue(options.now ?? new Date());
+  const latestMs = auditTimeValue(input.latestAt);
+  // latestMs === 0 은 시각 변환 실패다(auditTimeValue). 그걸 "1970년부터 정체"로
+  // 읽으면 모든 손상 행이 최우선 경보가 된다 — 판정에서 뺀다.
+  const idleMs = latestMs > 0 ? nowMs - latestMs : null;
+  if (inFlight && idleMs !== null && idleMs >= stalledAfterMs) {
+    kinds.push("stalled");
+  }
+
+  if (kinds.length === 0) return null;
+  return {
+    kinds,
+    severity: kinds.some((kind) => CRITICAL_ATTENTION_KINDS.has(kind))
+      ? "critical"
+      : "warning",
+    idleMs: kinds.includes("stalled") ? idleMs : null,
+  };
+}
+
+// ── 티켓 그룹 ────────────────────────────────────────────────────
+
+/**
+ * 티켓 하나의 모든 행을 접은 그룹 = 이 화면의 1차 단위.
+ *
+ * `taskId === null` 은 **티켓에 안 붙는 행들**(티켓 없는 채팅, `get_agents` 같은
+ * 조회 툴 …)의 묶음이다. 버리지 않는다 — 감사에서 조용한 누락은 가장 나쁜
+ * 실패이고, 그건 이 파일이 `auditTypeLabelKey` 부터 지켜 온 규칙이다.
+ */
+export interface AuditTicketGroup {
+  key: string;
+  taskId: string | null;
+  /** 티켓 제목. 못 읽으면 null — 호출부가 해시/기타로 그린다. */
+  title: string | null;
+  status: TaskStatus | null;
+  missionId: string | null;
+  /** 링크 클러스터의 PR. 없으면 null → 링크를 **숨긴다**(죽은 링크 금지). */
+  prUrl: string | null;
+  /** 링크 클러스터의 워크트리. 원장에서 파생 — 라이브/아카이브 판정은 호출부. */
+  worktreeId: string | null;
+  /** 이 티켓을 선점한 에이전트 id. 고아 클레임 사유의 근거로 화면에 밝힌다. */
+  claimedBy: string | null;
+  /** 이 티켓에 등장한 모델(중복 제거, 등장 순). */
+  models: string[];
+  /** 이 티켓에 등장한 행위자 표시 이름(중복 제거, 등장 순). */
+  actorLabels: string[];
+  actionCount: number;
+  actorCount: number;
+  failedCount: number;
+  latestAt: Date;
+  attention: AuditAttention | null;
+  /** 원본 행 — 최신순 그대로. 펼치면 캡처와 1:1. */
+  rows: UnifiedAuditRow[];
+}
+
+/** 티켓에 안 붙는 행들의 그룹 키(고정). */
+export const AUDIT_NO_TICKET_KEY = "__noTicket__";
+
+function distinct(values: readonly (string | null)[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+/**
+ * 그룹의 최신 시각. 입력이 최신순 정렬돼 있어도 **다시 최대값을 구한다** —
+ * 정렬을 믿고 `rows[0]` 을 쓰면, 손상된 createdAt(0 으로 접힌 값)이 맨 앞에
+ * 오는 순간 그룹 전체가 1970년으로 보인다.
+ */
+function latestRowTime(rows: readonly UnifiedAuditRow[]): Date {
+  let best: Date | null = null;
+  let bestMs = -1;
+  for (const row of rows) {
+    const ms = auditTimeValue(row.createdAt);
+    if (ms > bestMs) {
+      bestMs = ms;
+      best = row.createdAt;
+    }
+  }
+  return best ?? new Date(0);
+}
+
+/** 원장 행에 실린 워크트리 id 중 실제 값이 있는 첫 번째. 없으면 null. */
+function groupWorktreeId(rows: readonly UnifiedAuditRow[]): string | null {
+  for (const row of rows) {
+    if (row.worktree?.state === "value") return row.worktree.value;
+  }
+  return null;
+}
+
+function summarizeTicketGroup(
+  taskId: string | null,
+  rows: UnifiedAuditRow[],
+  meta: AuditTaskMeta | undefined,
+  options: AuditAttentionOptions,
+): AuditTicketGroup {
+  const latestAt = latestRowTime(rows);
+  const failedCount = rows.filter((row) => row.failed).length;
+  const archived = meta?.archived ?? false;
+  const deleted = meta?.deleted ?? false;
+  const status = meta?.status ?? null;
+  const claimedBy = meta?.claimedBy?.trim() || null;
+
+  return {
+    key: `ticket:${taskId ?? AUDIT_NO_TICKET_KEY}`,
+    taskId,
+    title: meta?.title?.trim() || null,
+    status,
+    missionId: getMissionId(meta?.contextId ?? undefined),
+    prUrl: meta?.prUrl?.trim() || null,
+    worktreeId: groupWorktreeId(rows),
+    claimedBy,
+    models: distinct(rows.map((row) => row.model)),
+    actorLabels: distinct(rows.map((row) => row.actorLabel)),
+    actionCount: rows.length,
+    // 귀속 불가 행(actorUid 없음)이 섞여 있어도 "행위자 0명"이라고 말하지
+    // 않는다 — uid 로 셀 수 없을 뿐 누군가는 했다. 그런 행만 있으면 0 이고,
+    // 호출부가 "미귀속"으로 그린다.
+    actorCount: new Set(
+      rows.map((row) => row.actorUid).filter((uid): uid is string => !!uid),
+    ).size,
+    failedCount,
+    latestAt,
+    attention:
+      taskId === null
+        ? // 티켓에 안 붙는 행 묶음은 "티켓 상태"라는 개념이 없다. 실패한 호출은
+          // 여전히 사실이므로 그것만으로 판정한다.
+          auditAttention(
+            {
+              status: null,
+              claimedBy: null,
+              archived: false,
+              deleted: false,
+              failedCount,
+              latestAt,
+            },
+            options,
+          )
+        : auditAttention(
+            {
+              status,
+              claimedBy,
+              archived,
+              deleted,
+              failedCount,
+              latestAt,
+            },
+            options,
+          ),
+    rows,
+  };
+}
+
+/**
+ * 행 목록 → 티켓 그룹. **순수함수.**
+ *
+ * 입력이 최신순이라는 전제하에 첫 등장 순서로 그룹을 배치하고(=최신 활동 순),
+ * 각 그룹 안의 행 순서도 입력 그대로 유지한다.
+ */
+export function groupAuditRowsByTicket(
+  rows: readonly UnifiedAuditRow[],
+  taskMetaById: Record<string, AuditTaskMeta> = {},
+  options: AuditAttentionOptions = {},
+): AuditTicketGroup[] {
+  const order: (string | null)[] = [];
+  const byTask = new Map<string | null, UnifiedAuditRow[]>();
+  for (const row of rows) {
+    const key = row.taskId ?? null;
+    const prior = byTask.get(key);
+    if (prior) prior.push(row);
+    else {
+      byTask.set(key, [row]);
+      order.push(key);
+    }
+  }
+  return order.map((taskId) =>
+    summarizeTicketGroup(
+      taskId,
+      byTask.get(taskId)!,
+      taskId ? taskMetaById[taskId] : undefined,
+      options,
+    ),
+  );
+}
+
+// ── 미션 섹션 ────────────────────────────────────────────────────
+
+/**
+ * 미션 진행도.
+ *
+ * ★분모를 **감사 창에 잡힌 티켓 수로 잡지 않는다.** 창에 3개만 잡힌 미션을
+ * "3개 중 1개 완료"라고 쓰면, 실제로 10개짜리 미션인데 화면이 33% 를 보여준다 —
+ * 감사 화면이 지어낸 숫자를 말하는 순간 나머지 화면도 안 믿기게 된다.
+ *
+ * - `source: "projection"` — 프로젝터 롤업(#775 `mission.projection.statusCounts`).
+ *   가장 신뢰할 수 있는 값이라 있으면 항상 이걸 쓴다.
+ * - `source: "tasks"`      — 롤업이 없을 때만. 분모는 `mission.taskIds` 이고,
+ *   그중 상태를 못 읽은 티켓 수를 `unknown` 으로 **따로 밝힌다**(0 이 아니면
+ *   호출부가 "일부 미상"을 표기한다).
+ */
+export interface AuditMissionProgress {
+  done: number;
+  total: number;
+  unknown: number;
+  source: "projection" | "tasks";
+}
+
+export function auditMissionProgress(
+  mission: AuditMissionMeta,
+  taskMetaById: Record<string, AuditTaskMeta> = {},
+): AuditMissionProgress | null {
+  const counts = mission.statusCounts;
+  if (counts) {
+    const total = Object.values(counts).reduce<number>(
+      (sum, value) => sum + (typeof value === "number" ? value : 0),
+      0,
+    );
+    if (total > 0) {
+      return {
+        done: counts.DONE ?? 0,
+        total,
+        unknown: 0,
+        source: "projection",
+      };
+    }
+  }
+  const taskIds = mission.taskIds;
+  if (!taskIds.length) return null;
+  let done = 0;
+  let unknown = 0;
+  for (const taskId of taskIds) {
+    const status = taskMetaById[taskId]?.status;
+    if (!status) unknown++;
+    else if (status === "DONE") done++;
+  }
+  return { done, total: taskIds.length, unknown, source: "tasks" };
+}
+
+/**
+ * 미션 하나(또는 "보드")로 묶인 티켓 그룹들.
+ *
+ * `missionId === null` = 미션에 안 묶인 티켓 = **보드**. 마지막에 온다 — 미션이
+ * 있는 일이 상위 맥락이고, 보드는 그 밖의 낱개 작업이다.
+ */
+export interface AuditMissionSection {
+  key: string;
+  missionId: string | null;
+  /** 미션 목표. 미션 문서를 못 읽었으면 null → 호출부가 id 로 떨군다. */
+  goal: string | null;
+  status: string | null;
+  progress: AuditMissionProgress | null;
+  ticketCount: number;
+  actionCount: number;
+  attentionCount: number;
+  latestAt: Date;
+  tickets: AuditTicketGroup[];
+}
+
+/** 보드 섹션(미션 없음)의 고정 키 — 미션 필터 <select> 의 값으로도 쓴다. */
+export const AUDIT_BOARD_SECTION_ID = "__board__";
+
+// ── 필터 ─────────────────────────────────────────────────────────
+
+/**
+ * 행위자 축 필터.
+ *
+ * `auditBadgeKind` 와 **같은 3분류**를 쓴다(사람 / 오케 컨트롤플레인 / 스폰된
+ * 에이전트). 뱃지가 가르는 것과 필터가 가르는 것이 다르면, 보라색 뱃지만 골라
+ * 보려고 필터를 걸었는데 다른 게 나오는 화면이 된다.
+ */
+export type AuditActorKindFilter = "all" | "human" | "orchestrator" | "agent";
+
+export function auditActorKindOf(
+  row: Pick<UnifiedAuditRow, "actorKind" | "model">,
+): Exclude<AuditActorKindFilter, "all"> {
+  const kind = auditBadgeKind(row);
+  if (kind === "human") return "human";
+  return kind === "agentModel" ? "agent" : "orchestrator";
+}
+
+export interface AuditAdminFilters {
+  actorKind?: AuditActorKindFilter;
+  /** 티켓 상태. `"all"`/미지정 = 전체. */
+  status?: TaskStatus | "all";
+  /** 미션 id, `AUDIT_BOARD_SECTION_ID`, 또는 `"all"`. */
+  mission?: string;
+}
+
+function matchesActorKind(
+  row: UnifiedAuditRow,
+  filter: AuditActorKindFilter | undefined,
+): boolean {
+  if (!filter || filter === "all") return true;
+  return auditActorKindOf(row) === filter;
+}
+
+function matchesTicketFilters(
+  group: AuditTicketGroup,
+  filters: AuditAdminFilters,
+): boolean {
+  if (filters.status && filters.status !== "all") {
+    if (group.status !== filters.status) return false;
+  }
+  const mission = filters.mission;
+  if (mission && mission !== "all") {
+    const target = mission === AUDIT_BOARD_SECTION_ID ? null : mission;
+    if (group.missionId !== target) return false;
+  }
+  return true;
+}
+
+// ── 조립 ─────────────────────────────────────────────────────────
+
+export interface BuildAuditAdminViewOptions extends AuditAttentionOptions {
+  taskMetaById?: Record<string, AuditTaskMeta>;
+  missionMetaById?: Record<string, AuditMissionMeta>;
+  filters?: AuditAdminFilters;
+}
+
+export interface AuditAdminView {
+  /** 미션 → 보드 순. 필터가 적용된 결과. */
+  sections: AuditMissionSection[];
+  /**
+   * 주의 필요 티켓, 심각도 → 최신순.
+   *
+   * ★**필터를 무시한다.** "문제 우선"이 필터로 조용히 좁혀지면, 미션 하나만
+   * 보려고 필터를 건 운영자에게 다른 미션이 불타는 것이 안 보인다. 배너는 항상
+   * 현재 불러온 전체를 말하고, 화면은 그 사실을 문구로 밝힌다.
+   */
+  attention: AuditTicketGroup[];
+  /** 필터 적용 후 티켓 수 / 행 수. 헤더 카운트가 화면과 일치하도록 여기서 센다. */
+  ticketCount: number;
+  actionCount: number;
+  /** 필터로 가려진 행 수 — 조용한 절단 금지(빈 화면 분기와 같은 이유). */
+  hiddenByFilterCount: number;
+}
+
+/** 심각도(critical 먼저) → 최신순. */
+function compareAttention(a: AuditTicketGroup, b: AuditTicketGroup): number {
+  const rank = (group: AuditTicketGroup) =>
+    group.attention?.severity === "critical" ? 0 : 1;
+  const bySeverity = rank(a) - rank(b);
+  if (bySeverity !== 0) return bySeverity;
+  return auditTimeValue(b.latestAt) - auditTimeValue(a.latestAt);
+}
+
+/**
+ * 통합 행 목록 → 관리자 뷰(문제 우선 + 미션/티켓 묶음). **이 섹션의 진입점.**
+ *
+ * 순서가 중요하다:
+ *   1. 전체 행으로 티켓 그룹을 만든다 → 주의 필요 판정은 **필터 전** 사실로.
+ *   2. 행위자 필터를 행에 걸고 그룹을 다시 요약한다(카운트가 화면과 일치).
+ *   3. 티켓 필터(상태·미션)를 걸고 미션 섹션으로 접는다.
+ */
+export function buildAuditAdminView(
+  rows: readonly UnifiedAuditRow[],
+  options: BuildAuditAdminViewOptions = {},
+): AuditAdminView {
+  const taskMetaById = options.taskMetaById ?? {};
+  const missionMetaById = options.missionMetaById ?? {};
+  const filters = options.filters ?? {};
+  const attentionOptions: AuditAttentionOptions = {
+    ...(options.now ? { now: options.now } : {}),
+    ...(options.liveAgentKeys !== undefined
+      ? { liveAgentKeys: options.liveAgentKeys }
+      : {}),
+    ...(options.stalledAfterMs !== undefined
+      ? { stalledAfterMs: options.stalledAfterMs }
+      : {}),
+  };
+
+  const allGroups = groupAuditRowsByTicket(
+    rows,
+    taskMetaById,
+    attentionOptions,
+  );
+  const attention = allGroups
+    .filter((group) => group.attention)
+    .sort(compareAttention);
+
+  const visibleRows = rows.filter((row) =>
+    matchesActorKind(row, filters.actorKind),
+  );
+
+  const filteredGroups = groupAuditRowsByTicket(
+    visibleRows,
+    taskMetaById,
+    attentionOptions,
+  ).filter((group) => matchesTicketFilters(group, filters));
+
+  const sections = foldTicketsIntoMissions(filteredGroups, missionMetaById, {
+    taskMetaById,
+  });
+
+  const actionCount = filteredGroups.reduce(
+    (sum, group) => sum + group.actionCount,
+    0,
+  );
+
+  return {
+    sections,
+    attention,
+    ticketCount: filteredGroups.length,
+    actionCount,
+    // 두 겹(행위자 축 + 티켓 축)의 필터를 합쳐 **최종적으로 안 보이는 행 수**를
+    // 한 숫자로 준다. 두 축을 나눠 보여줘야 할 이유가 없고(사용자는 "몇 개가
+    // 가려졌나"만 알면 필터를 되돌린다), 나누면 합이 안 맞는 순간이 생긴다.
+    hiddenByFilterCount: rows.length - actionCount,
+  };
+}
+
+function foldTicketsIntoMissions(
+  groups: readonly AuditTicketGroup[],
+  missionMetaById: Record<string, AuditMissionMeta>,
+  context: { taskMetaById: Record<string, AuditTaskMeta> },
+): AuditMissionSection[] {
+  const order: (string | null)[] = [];
+  const byMission = new Map<string | null, AuditTicketGroup[]>();
+  for (const group of groups) {
+    const key = group.missionId;
+    const prior = byMission.get(key);
+    if (prior) prior.push(group);
+    else {
+      byMission.set(key, [group]);
+      order.push(key);
+    }
+  }
+
+  const sections = order.map<AuditMissionSection>((missionId) => {
+    const tickets = byMission.get(missionId)!;
+    const mission = missionId ? missionMetaById[missionId] : undefined;
+    return {
+      key: `mission:${missionId ?? AUDIT_BOARD_SECTION_ID}`,
+      missionId,
+      goal: mission?.goal?.trim() || null,
+      status: mission?.status ?? null,
+      progress: mission
+        ? auditMissionProgress(mission, context.taskMetaById)
+        : null,
+      ticketCount: tickets.length,
+      actionCount: tickets.reduce((sum, group) => sum + group.actionCount, 0),
+      attentionCount: tickets.filter((group) => group.attention).length,
+      latestAt: tickets.reduce<Date>(
+        (latest, group) =>
+          auditTimeValue(group.latestAt) > auditTimeValue(latest)
+            ? group.latestAt
+            : latest,
+        tickets[0]?.latestAt ?? new Date(0),
+      ),
+      tickets,
+    };
+  });
+
+  // 미션 섹션이 먼저(최신 활동 순), 보드는 항상 맨 뒤. 보드는 "그 밖의 낱개
+  // 작업" 이라 상위 맥락인 미션보다 먼저 오면 화면이 다시 firehose 로 읽힌다.
+  return sections.sort((a, b) => {
+    if (a.missionId === null && b.missionId !== null) return 1;
+    if (a.missionId !== null && b.missionId === null) return -1;
+    return auditTimeValue(b.latestAt) - auditTimeValue(a.latestAt);
+  });
+}
+
+/**
+ * 미션 필터 <select> 의 선택지 — **화면에 실제로 등장한** 미션만.
+ *
+ * 프로젝트의 전체 미션을 박아 두면 고르는 족족 0건인 항목이 섞인다(종류 필터가
+ * `toolNames` 를 등장한 것으로만 채우는 것과 같은 이유).
+ */
+export interface AuditMissionOption {
+  missionId: string;
+  label: string;
+  ticketCount: number;
+}
+
+export function auditMissionOptions(
+  sections: readonly AuditMissionSection[],
+): AuditMissionOption[] {
+  return sections
+    .filter(
+      (section): section is AuditMissionSection & { missionId: string } =>
+        section.missionId !== null,
+    )
+    .map((section) => ({
+      missionId: section.missionId,
+      label: section.goal ?? `#${section.missionId.slice(0, 8)}`,
+      ticketCount: section.ticketCount,
+    }));
+}
+
+// ── 멤버 워크로드 스트립 ─────────────────────────────────────────
+
+/**
+ * 구성원 워크로드 타일 하나.
+ *
+ * ★위쪽 `MemberWorkloadPanel`(결과: 에이전트·티켓·머지 현황)과 **다른 축**이다.
+ * 여기 숫자는 "이 프로젝트에서 이 사람에게 귀속된 감사 기록 수"다. 두 패널이
+ * 같은 숫자를 다르게 말하는 것처럼 보이면 안 되므로, 호출부는 이 스트립을 감사
+ * 필터로만 쓰고 인사 지표로 쓰지 않는다.
+ *
+ * ★`actionCount` 의 **범위를 숨기지 않는다**(`countScope`):
+ *   - `"project"` — 서버 집계(`mergeAuditActors`). 불러온 창과 무관한 전체 수라,
+ *     창 안에 한 건도 없는 구성원도 타일이 남는다. 그게 중요한 이유는 이 타일이
+ *     **서버사이드 필터**의 진입점이기 때문이다 — 창에 없다고 타일을 지우면
+ *     "최근 100건 안에 3건뿐인 사람"을 고를 방법이 화면에서 사라진다(예전
+ *     구성원 드롭다운이 전체 집계를 쓴 이유와 같다).
+ *   - `"window"` — 서버 집계에 없는 행위자(=미귀속 등). 불러온 창 안의 수다.
+ *
+ * `actorUid === null` = **미귀속** 타일(원장 확장 이전 문서 등). uid 가 없어 서버
+ * 필터를 걸 수 없으므로 항상 `"window"` 다. 0 건이면 아예 만들지 않는다 — 항상
+ * 떠 있으면 정상 상태에서도 결손이 있는 것처럼 보인다.
+ */
+export interface AuditWorkloadTile {
+  actorUid: string | null;
+  label: string | null;
+  actionCount: number;
+  countScope: "project" | "window";
+  /** 이 사람이 손댄 티켓 중 주의 필요인 것 — **불러온 창 기준**. */
+  attentionCount: number;
+}
+
+/**
+ * 워크로드 스트립.
+ *
+ * 정렬은 행위 수 내림차순, 미귀속 타일은 항상 맨 뒤 — 결손은 목록을 이끄는
+ * 정보가 아니라 각주다.
+ */
+export function auditWorkloadTiles(
+  groups: readonly AuditTicketGroup[],
+  actors: readonly AuditActorTally[] = [],
+): AuditWorkloadTile[] {
+  const byUid = new Map<string | null, AuditWorkloadTile>();
+
+  // ①서버 집계를 먼저 깐다 — 창에 안 잡힌 구성원도 고를 수 있어야 한다.
+  for (const actor of actors) {
+    if (!actor.actorUid) continue;
+    byUid.set(actor.actorUid, {
+      actorUid: actor.actorUid,
+      label: actor.actorName,
+      actionCount: actor.count,
+      countScope: "project",
+      attentionCount: 0,
+    });
+  }
+
+  // ②창 안의 사실로 이름을 메꾸고, 서버 집계에 없던 행위자를 더한다.
+  for (const group of groups) {
+    for (const row of group.rows) {
+      const uid = row.actorUid ?? null;
+      const prior = byUid.get(uid);
+      if (prior) {
+        prior.label = prior.label ?? row.actorLabel;
+        if (prior.countScope === "window") prior.actionCount += 1;
+        continue;
+      }
+      byUid.set(uid, {
+        actorUid: uid,
+        label: row.actorLabel,
+        actionCount: 1,
+        countScope: "window",
+        attentionCount: 0,
+      });
+    }
+    if (!group.attention) continue;
+    // 주의 필요 티켓은 **그 티켓에 손댄 모든 사람**에게 표시한다. 마지막 행위자
+    // 하나에게만 달면 "누가 이걸 떠안아야 하나"가 우연히 정해진다.
+    for (const uid of new Set(group.rows.map((row) => row.actorUid ?? null))) {
+      const tile = byUid.get(uid);
+      if (tile) tile.attentionCount += 1;
+    }
+  }
+
+  return [...byUid.values()].sort((a, b) => {
+    if (a.actorUid === null && b.actorUid !== null) return 1;
+    if (a.actorUid !== null && b.actorUid === null) return -1;
+    return b.actionCount - a.actionCount;
+  });
 }
