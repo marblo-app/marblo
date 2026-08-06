@@ -145,6 +145,72 @@ test("@mocked 감사 관리자 뷰: 문제 우선 배너 · 미션/티켓 묶음
   await expect(doneCard.getByText("태스크 선점")).toBeVisible();
 });
 
+test("@mocked 감사 관리자 뷰: 접이식 상세는 params/result·해결요약을 scrub 후 노출한다", async ({
+  marblo,
+}) => {
+  const { page } = marblo;
+  await seedAuditAdmin(page);
+
+  const doneCard = page
+    .getByTestId("audit-ticket")
+    .filter({ hasText: "결제 API 리팩터" })
+    .first();
+  await doneCard.getByRole("button", { expanded: false }).first().click();
+
+  const ticketEvidence = doneCard.getByTestId("audit-ticket-evidence");
+  await ticketEvidence.getByText("무엇을 어떻게 했나").click();
+  await expect(
+    ticketEvidence.getByText("저장된 툴 인자와 결과를 접이식으로 노출했습니다."),
+  ).toBeVisible();
+  await expect(ticketEvidence.getByRole("link", { name: /PR/ })).toHaveAttribute(
+    "href",
+    AUDIT_ADMIN_IDS.prUrl,
+  );
+  await expect(ticketEvidence.getByText("아카이브됨")).toBeVisible();
+
+  const rowEvidence = doneCard
+    .getByText("저장된 인자·결과 보기")
+    .first();
+  await rowEvidence.click();
+  await expect(doneCard.getByText("툴 인자", { exact: true })).toBeVisible();
+  await expect(doneCard.getByText('"OPENAI_API_KEY": "<REDACTED>"')).toBeVisible();
+  await expect(doneCard.getByText("<USER_HOME>")).toBeVisible();
+  await expect(doneCard.getByText("<EMAIL>")).toBeVisible();
+  await expect(doneCard.getByText("<API_KEY>")).toBeVisible();
+  await expect(doneCard).not.toContainText("owner@example.test");
+  await expect(doneCard).not.toContainText("sk-testtesttesttesttesttesttesttest");
+  await expect(doneCard).not.toContainText("/Users/alice");
+
+  await page.screenshot({
+    path: `test-results/project-audit-admin-detail-${SHOT}.png`,
+    fullPage: true,
+  });
+});
+
+test("@mocked 감사 관리자 뷰: activity 포함 시 마지막 activity도 접이식 상세에 표시한다", async ({
+  marblo,
+}) => {
+  const { page } = marblo;
+  await seedAuditAdmin(page);
+
+  await page.getByLabel("텔레그램·메모 포함").check();
+  const failedCard = page
+    .getByTestId("audit-ticket")
+    .filter({ hasText: "결제 UI 연결" })
+    .first();
+  await failedCard.getByRole("button", { expanded: false }).first().click();
+  const ticketEvidence = failedCard.getByTestId("audit-ticket-evidence");
+  await ticketEvidence.getByText("무엇을 어떻게 했나").click();
+
+  await expect(
+    ticketEvidence.getByText("마지막 activity", { exact: true }),
+  ).toBeVisible();
+  await expect(ticketEvidence.getByText("<EMAIL>")).toBeVisible();
+  await expect(ticketEvidence.getByText("<USER_HOME>")).toBeVisible();
+  await expect(failedCard).not.toContainText("owner@example.test");
+  await expect(failedCard).not.toContainText("/Users/alice");
+});
+
 test("@mocked 감사 관리자 뷰: 필터는 목록만 좁히고 문제 우선 배너는 안 가린다", async ({
   marblo,
 }) => {

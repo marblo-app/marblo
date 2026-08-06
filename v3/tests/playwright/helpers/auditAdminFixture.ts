@@ -176,6 +176,18 @@ export function auditAdminSeed() {
           ledger({
             id: "l-done-submit",
             toolName: "submit_for_review",
+            params: {
+              task_id: doneTaskId,
+              summary: {
+                problem: "완료된 작업의 감사 상세가 부족했습니다.",
+                changes: "저장된 툴 인자와 결과를 접이식으로 노출했습니다.",
+                verification: "렌더러 타입체크와 mocked Playwright로 검증했습니다.",
+              },
+              OPENAI_API_KEY: "sk-testtesttesttesttesttesttesttest",
+              reportPath: "/Users/alice/private/marblo/report.txt",
+            },
+            result:
+              "submitted by owner@example.test with sk-testtesttesttesttesttesttesttest",
             taskId: doneTaskId,
             model: "codex",
             tier: "standard",
@@ -211,6 +223,10 @@ export function auditAdminSeed() {
           ledger({
             id: "l-failed-note",
             toolName: "add_activity",
+            params: {
+              message:
+                "마지막 activity: owner@example.test 경로 /Users/alice/secret 를 확인했고 해결 요약을 남김",
+            },
             taskId: failedTaskId,
             model: "grok",
             tier: "빌드가 안 붙어 진행 불가",

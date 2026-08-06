@@ -21,6 +21,7 @@ import type { AuditLog } from "../types/audit";
 import type { TaskStatus } from "../types/task";
 import { getMissionId } from "./laneContext";
 import { isProjectAuditEventType } from "./projectAudit";
+import { scrubString, scrubValue } from "./telemetry/scrub";
 
 // ── 이벤트 종류 라벨 ─────────────────────────────────────────────
 
@@ -330,6 +331,59 @@ export interface UnifiedAuditRow {
   failed: boolean;
   /** 사람 행은 워크트리 개념이 없다 — null. 오케 행은 원장 worktreeId 상태. */
   worktree: LedgerFieldValue | null;
+  /** 저장된 원장 상세의 표시용 projection. params/result 는 scrubbed 문자열만 싣는다. */
+  evidence: AuditRowEvidence | null;
+}
+
+export interface AuditRowEvidence {
+  paramsJson: string | null;
+  resultText: string | null;
+  activityText: string | null;
+  resolutionText: string | null;
+}
+
+function stableJson(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value as Record<string, unknown>).length === 0
+  ) {
+    return null;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return JSON.stringify(String(value));
+  }
+}
+
+function agentRowEvidence(
+  event: Pick<AuditLog, "toolName" | "params" | "result">,
+): AuditRowEvidence {
+  const paramsJson = stableJson(scrubValue(event.params));
+  const resultText =
+    typeof event.result === "string" && event.result.trim()
+      ? scrubString(event.result.trim())
+      : null;
+  const rawActivity =
+    event.toolName === "add_activity" &&
+    typeof event.params?.message === "string"
+      ? event.params.message.trim()
+      : null;
+  const rawResolution =
+    event.toolName === "submit_for_review"
+      ? stringFromPath(event.params, ["summary", "changes"]) ??
+        stringFromPath(event.params, ["summary", "verification"]) ??
+        stringFromPath(event.params, ["summary", "approach"]) ??
+        stringFromPath(event.params, ["summary", "problem"])
+      : null;
+  return {
+    paramsJson,
+    resultText,
+    activityText: rawActivity ? scrubString(rawActivity) : null,
+    resolutionText: rawResolution ? scrubString(rawResolution) : null,
+  };
 }
 
 /**
@@ -408,6 +462,7 @@ export function humanAuditRow(
     model: null,
     failed: false,
     worktree: null,
+    evidence: null,
   };
 }
 
@@ -464,6 +519,7 @@ export function agentAuditRow(
     // 손상된 문서다. 그때는 실패로 단정하지 않는다(없는 사실을 지어내지 않음).
     failed: event.success === false,
     worktree: ledgerFieldValue(event, "worktreeId"),
+    evidence: agentRowEvidence(event),
   };
 }
 
@@ -1148,6 +1204,46 @@ export interface AuditTicketGroup {
   attention: AuditAttention | null;
   /** 원본 행 — 최신순 그대로. 펼치면 캡처와 1:1. */
   rows: UnifiedAuditRow[];
+  detail: AuditTicketDetailEvidence;
+}
+
+export interface AuditTicketDetailEvidence {
+  lastActivity: string | null;
+  resolutionSummary: string | null;
+  prUrl: string | null;
+  worktreeId: string | null;
+}
+
+function stringFromPath(value: unknown, path: readonly string[]): string | null {
+  let current: unknown = value;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || !(key in current)) {
+      return null;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+  return typeof current === "string" && current.trim()
+    ? current.trim()
+    : null;
+}
+
+function latestActivity(rows: readonly UnifiedAuditRow[]): string | null {
+  for (const row of rows) {
+    const text = row.evidence?.activityText;
+    if (text) return text;
+  }
+  return null;
+}
+
+function latestResolutionSummary(rows: readonly UnifiedAuditRow[]): string | null {
+  for (const row of rows) {
+    const toolName = auditRowToolName(row);
+    if (toolName !== "submit_for_review") continue;
+    const summary = row.evidence?.resolutionText;
+    if (summary) return summary;
+    if (row.evidence?.resultText) return row.evidence.resultText;
+  }
+  return null;
 }
 
 /** 티켓에 안 붙는 행들의 그룹 키(고정). */
@@ -1250,6 +1346,12 @@ function summarizeTicketGroup(
             options,
           ),
     rows,
+    detail: {
+      lastActivity: latestActivity(rows),
+      resolutionSummary: latestResolutionSummary(rows),
+      prUrl: meta?.prUrl?.trim() || null,
+      worktreeId: groupWorktreeId(rows),
+    },
   };
 }
 

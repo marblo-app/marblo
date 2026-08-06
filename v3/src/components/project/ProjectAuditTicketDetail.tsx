@@ -13,7 +13,12 @@ import {
   type TicketLedgerRow,
 } from "../../lib/projectAuditView";
 import { ViewWorktreeButton } from "../board/ViewWorktreeButton";
-import { AuditBadge, RowLabel, formatAuditTime } from "./ProjectAuditRow";
+import {
+  AuditBadge,
+  AuditEvidenceDetails,
+  RowLabel,
+  formatAuditTime,
+} from "./ProjectAuditRow";
 
 /**
  * 티켓 원장 상세 — 감사 로그에서 티켓을 클릭했을 때 여는 모달(티켓
@@ -196,60 +201,63 @@ function TicketLedgerRowView({
   const { t } = useTranslation();
 
   return (
-    <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 py-2">
-      <AuditBadge row={row} />
+    <li className="py-2">
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+        <AuditBadge row={row} />
 
-      <span
-        className="rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-400"
-        title={row.label.kind === "tool" ? row.label.toolName : undefined}
-      >
-        <RowLabel label={row.label} />
-      </span>
-
-      <span className="text-sm text-gray-200">
-        {row.actorLabel ?? t("project.audit.actor.unknown")}
-      </span>
-
-      {row.detail && (
-        <span className="min-w-0 whitespace-normal break-words text-xs text-gray-500">
-          {row.detail}
-        </span>
-      )}
-
-      {row.failed && (
-        <span className="rounded border border-red-900/60 px-1 text-[10px] text-red-400">
-          {t("project.audit.failed")}
-        </span>
-      )}
-
-      {row.sealStatus && (
         <span
-          className="rounded border border-gray-700 px-1 text-[10px] text-gray-500"
-          title={t("project.audit.ticket.sealHint")}
+          className="rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-400"
+          title={row.label.kind === "tool" ? row.label.toolName : undefined}
         >
-          {row.sealStatus === "sealed"
-            ? t("project.audit.ticket.sealed")
-            : t("project.audit.ticket.unsealed")}
+          <RowLabel label={row.label} />
         </span>
-      )}
 
-      {row.worktree && row.worktree.state !== "value" && (
-        <span className="rounded border border-amber-800/60 px-1 text-[10px] text-amber-400">
-          {row.worktree.state === "preLedger"
-            ? t("project.audit.ticket.worktreePreLedger")
-            : t("project.audit.ticket.worktreeOutOfConvention")}
+        <span className="text-sm text-gray-200">
+          {row.actorLabel ?? t("project.audit.actor.unknown")}
         </span>
-      )}
 
-      {row.worktree?.state === "value" && (
-        <span className="rounded border border-gray-700 bg-gray-900 px-1 font-mono text-[10px] text-gray-400">
-          {row.worktree.value}
+        {row.detail && (
+          <span className="min-w-0 whitespace-normal break-words text-xs text-gray-500">
+            {row.detail}
+          </span>
+        )}
+
+        {row.failed && (
+          <span className="rounded border border-red-900/60 px-1 text-[10px] text-red-400">
+            {t("project.audit.failed")}
+          </span>
+        )}
+
+        {row.sealStatus && (
+          <span
+            className="rounded border border-gray-700 px-1 text-[10px] text-gray-500"
+            title={t("project.audit.ticket.sealHint")}
+          >
+            {row.sealStatus === "sealed"
+              ? t("project.audit.ticket.sealed")
+              : t("project.audit.ticket.unsealed")}
+          </span>
+        )}
+
+        {row.worktree && row.worktree.state !== "value" && (
+          <span className="rounded border border-amber-800/60 px-1 text-[10px] text-amber-400">
+            {row.worktree.state === "preLedger"
+              ? t("project.audit.ticket.worktreePreLedger")
+              : t("project.audit.ticket.worktreeOutOfConvention")}
+          </span>
+        )}
+
+        {row.worktree?.state === "value" && (
+          <span className="rounded border border-gray-700 bg-gray-900 px-1 font-mono text-[10px] text-gray-400">
+            {row.worktree.value}
+          </span>
+        )}
+
+        <span className="ml-auto flex-shrink-0 text-xs tabular-nums text-gray-500">
+          {formatAuditTime(row.createdAt, locale)}
         </span>
-      )}
-
-      <span className="ml-auto flex-shrink-0 text-xs tabular-nums text-gray-500">
-        {formatAuditTime(row.createdAt, locale)}
-      </span>
+      </div>
+      <AuditEvidenceDetails evidence={row.evidence} />
     </li>
   );
 }

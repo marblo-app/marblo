@@ -149,41 +149,117 @@ export function ProjectAuditTicketCard({
       )}
 
       {expanded && (
-        <ul className="mt-2 ml-6 divide-y divide-gray-800 border-l border-gray-800 pl-3">
-          {timeline.map((display) =>
-            display.kind === "group" ? (
-              // 접힌 메모 묶음은 여기서 한 줄로 표시만 한다 — 티켓 카드가 이미
-              // 접힘 단위라, 그 안에 또 접히는 단계를 두면 클릭 두 번이 필요해진다.
-              <li
-                key={display.key}
-                className="flex flex-wrap items-baseline gap-x-2 py-1.5"
-              >
-                <span className="rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-400">
-                  {t("project.audit.group.badge")}
-                </span>
-                <span className="text-xs text-gray-500">
-                  {t("project.audit.group.count", {
-                    count: display.rows.length,
-                  })}
-                </span>
-                <span className="min-w-0 break-words text-xs text-gray-500">
-                  {display.rows[0]?.detail}
-                </span>
-                <span className="ml-auto flex-shrink-0 text-xs tabular-nums text-gray-500">
-                  {formatAuditTime(display.rows[0].createdAt, locale)}
-                </span>
-              </li>
-            ) : (
-              <AuditTimelineRow
-                key={display.row.key}
-                row={display.row}
-                locale={locale}
-              />
-            ),
-          )}
-        </ul>
+        <div className="mt-2 ml-6 border-l border-gray-800 pl-3">
+          <TicketEvidenceSummary
+            group={group}
+            worktrees={worktrees}
+            onOpenTicket={onOpenTicket}
+          />
+          <ul className="divide-y divide-gray-800">
+            {timeline.map((display) =>
+              display.kind === "group" ? (
+                // 접힌 메모 묶음은 여기서 한 줄로 표시만 한다 — 티켓 카드가 이미
+                // 접힘 단위라, 그 안에 또 접히는 단계를 두면 클릭 두 번이 필요해진다.
+                <li key={display.key} className="py-1.5">
+                  <div className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-400">
+                      {t("project.audit.group.badge")}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {t("project.audit.group.count", {
+                        count: display.rows.length,
+                      })}
+                    </span>
+                    <span className="min-w-0 break-words text-xs text-gray-500">
+                      {display.rows[0]?.detail}
+                    </span>
+                    <span className="ml-auto flex-shrink-0 text-xs tabular-nums text-gray-500">
+                      {formatAuditTime(display.rows[0].createdAt, locale)}
+                    </span>
+                  </div>
+                  {display.rows.map((row) => (
+                    <AuditTimelineRow key={row.key} row={row} locale={locale} />
+                  ))}
+                </li>
+              ) : (
+                <AuditTimelineRow
+                  key={display.row.key}
+                  row={display.row}
+                  locale={locale}
+                />
+              ),
+            )}
+          </ul>
+        </div>
       )}
     </li>
+  );
+}
+
+function TicketEvidenceSummary({
+  group,
+  worktrees,
+  onOpenTicket,
+}: {
+  group: AuditTicketGroup;
+  worktrees: Worktree[];
+  onOpenTicket: (taskId: string) => void;
+}) {
+  const { t } = useTranslation();
+  const hasDetail =
+    !!group.detail.lastActivity ||
+    !!group.detail.resolutionSummary ||
+    !!group.detail.prUrl ||
+    !!group.detail.worktreeId;
+  if (!group.taskId || !hasDetail) return null;
+  return (
+    <details
+      data-testid="audit-ticket-evidence"
+      className="mb-2 rounded border border-gray-800 bg-gray-950/30 px-2 py-1.5 text-xs text-gray-400"
+    >
+      <summary className="cursor-pointer select-none text-[11px] font-medium text-gray-400 hover:text-gray-200">
+        {t("project.audit.detail.ticketToggle")}
+      </summary>
+      <div className="mt-2 space-y-2">
+        {group.detail.resolutionSummary && (
+          <EvidenceText
+            label={t("project.audit.detail.resolution")}
+            value={group.detail.resolutionSummary}
+          />
+        )}
+        {group.detail.lastActivity && (
+          <EvidenceText
+            label={t("project.audit.detail.lastActivity")}
+            value={group.detail.lastActivity}
+          />
+        )}
+        <div>
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-gray-600">
+            {t("project.audit.detail.links")}
+          </div>
+          <ProjectAuditLinks
+            taskId={group.taskId}
+            prUrl={group.detail.prUrl}
+            worktreeId={group.detail.worktreeId}
+            worktrees={worktrees}
+            onOpenTicket={onOpenTicket}
+          />
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function EvidenceText({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="mb-1 text-[10px] uppercase tracking-wide text-gray-600">
+        {label}
+      </div>
+      <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-gray-300">
+        {value}
+      </p>
+    </div>
   );
 }
 

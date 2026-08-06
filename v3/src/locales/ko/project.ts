@@ -212,6 +212,13 @@ export const project = {
   "project.audit.admin.expand": "이력 펼치기",
   "project.audit.admin.collapse": "이력 접기",
   "project.audit.admin.emptySection": "조건에 맞는 티켓이 없습니다",
+  "project.audit.detail.toggle": "저장된 인자·결과 보기",
+  "project.audit.detail.ticketToggle": "무엇을 어떻게 했나",
+  "project.audit.detail.params": "툴 인자",
+  "project.audit.detail.result": "툴 결과",
+  "project.audit.detail.lastActivity": "마지막 activity",
+  "project.audit.detail.resolution": "해결 요약",
+  "project.audit.detail.links": "PR · 워크트리 diff",
 
   // 티켓 원장 상세(감사 로그에서 티켓 클릭) — 티켓 U6ITRR38Z3c4MGLyg2PU.
   "project.audit.ticket.subtitle": "이 티켓의 전체 이력 · 최신순",

@@ -213,6 +213,13 @@ export const project: Record<keyof typeof koProject, string> = {
   "project.audit.admin.expand": "Expand history",
   "project.audit.admin.collapse": "Collapse history",
   "project.audit.admin.emptySection": "No tickets match these filters",
+  "project.audit.detail.toggle": "Show saved params and result",
+  "project.audit.detail.ticketToggle": "What changed and how",
+  "project.audit.detail.params": "Tool params",
+  "project.audit.detail.result": "Tool result",
+  "project.audit.detail.lastActivity": "Last activity",
+  "project.audit.detail.resolution": "Resolution summary",
+  "project.audit.detail.links": "PR and worktree diff",
 
   // Ticket ledger detail (click a ticket in the audit log) — ticket
   // U6ITRR38Z3c4MGLyg2PU.

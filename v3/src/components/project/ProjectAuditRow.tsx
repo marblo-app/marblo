@@ -2,6 +2,7 @@ import { useTranslation } from "../../lib/i18n";
 import {
   auditBadgeKind,
   type AuditRowLabel,
+  type AuditRowEvidence,
   type UnifiedAuditRow,
 } from "../../lib/projectAuditView";
 
@@ -106,35 +107,102 @@ export function AuditTimelineRow({
   const { t } = useTranslation();
 
   return (
-    <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 py-1.5">
-      <AuditBadge row={row} />
+    <li className="py-1.5">
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+        <AuditBadge row={row} />
 
-      <span
-        className="rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-400"
-        title={row.label.kind === "tool" ? row.label.toolName : undefined}
-      >
-        <RowLabel label={row.label} />
-      </span>
-
-      <span className="text-xs text-gray-200">
-        {row.actorLabel ?? t("project.audit.actor.unknown")}
-      </span>
-
-      {row.detail && (
-        <span className="min-w-0 whitespace-normal break-words text-xs text-gray-500">
-          {row.detail}
+        <span
+          className="rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-400"
+          title={row.label.kind === "tool" ? row.label.toolName : undefined}
+        >
+          <RowLabel label={row.label} />
         </span>
-      )}
 
-      {row.failed && (
-        <span className="rounded border border-red-900/60 px-1 text-[10px] text-red-400">
-          {t("project.audit.failed")}
+        <span className="text-xs text-gray-200">
+          {row.actorLabel ?? t("project.audit.actor.unknown")}
         </span>
-      )}
 
-      <span className="ml-auto flex-shrink-0 text-xs tabular-nums text-gray-500">
-        {formatAuditTime(row.createdAt, locale)}
-      </span>
+        {row.detail && (
+          <span className="min-w-0 whitespace-normal break-words text-xs text-gray-500">
+            {row.detail}
+          </span>
+        )}
+
+        {row.failed && (
+          <span className="rounded border border-red-900/60 px-1 text-[10px] text-red-400">
+            {t("project.audit.failed")}
+          </span>
+        )}
+
+        <span className="ml-auto flex-shrink-0 text-xs tabular-nums text-gray-500">
+          {formatAuditTime(row.createdAt, locale)}
+        </span>
+      </div>
+      <AuditEvidenceDetails evidence={row.evidence} />
     </li>
+  );
+}
+
+export function AuditEvidenceDetails({
+  evidence,
+}: {
+  evidence: AuditRowEvidence | null;
+}) {
+  const { t } = useTranslation();
+  if (!evidence?.paramsJson && !evidence?.resultText && !evidence?.activityText)
+    return null;
+  return (
+    <details className="mt-1 rounded border border-gray-800 bg-gray-950/40 px-2 py-1 text-xs text-gray-400">
+      <summary className="cursor-pointer select-none text-[11px] text-gray-500 hover:text-gray-300">
+        {t("project.audit.detail.toggle")}
+      </summary>
+      <div className="mt-2 space-y-2">
+        {evidence.activityText && (
+          <AuditEvidenceBlock
+            label={t("project.audit.detail.lastActivity")}
+            value={evidence.activityText}
+          />
+        )}
+        {evidence.paramsJson && (
+          <AuditEvidenceBlock
+            label={t("project.audit.detail.params")}
+            value={evidence.paramsJson}
+            mono
+          />
+        )}
+        {evidence.resultText && (
+          <AuditEvidenceBlock
+            label={t("project.audit.detail.result")}
+            value={evidence.resultText}
+            mono
+          />
+        )}
+      </div>
+    </details>
+  );
+}
+
+function AuditEvidenceBlock({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-[10px] uppercase tracking-wide text-gray-600">
+        {label}
+      </div>
+      <pre
+        className={`max-h-44 overflow-auto whitespace-pre-wrap break-words rounded bg-gray-950 px-2 py-1.5 text-[11px] leading-relaxed text-gray-300 ${
+          mono ? "font-mono" : "font-sans"
+        }`}
+      >
+        {value}
+      </pre>
+    </div>
   );
 }
