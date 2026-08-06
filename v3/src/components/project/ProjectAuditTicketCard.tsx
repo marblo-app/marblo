@@ -36,7 +36,7 @@ export function ProjectAuditTicketCard({
   locale: string;
   worktrees: Worktree[];
   onOpenTicket: (taskId: string) => void;
-  onOpenBoard: (taskId: string) => void;
+  onOpenBoard: (group: AuditTicketGroup) => void;
 }) {
   const { t } = useTranslation();
 
@@ -76,7 +76,7 @@ export function ProjectAuditTicketCard({
 
           <span
             className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${taskStatusPillClass(
-              group.status,
+              group.status
             )}`}
           >
             {group.status ?? t("project.audit.admin.statusUnknown")}
@@ -133,7 +133,7 @@ export function ProjectAuditTicketCard({
           {group.attention && (
             <button
               type="button"
-              onClick={() => onOpenBoard(group.taskId!)}
+              onClick={() => onOpenBoard(group)}
               className="text-xs text-amber-300 transition-colors hover:text-amber-200 hover:underline"
             >
               {t("project.audit.admin.reassign")}
@@ -187,7 +187,7 @@ export function ProjectAuditTicketCard({
                   row={display.row}
                   locale={locale}
                 />
-              ),
+              )
             )}
           </ul>
         </div>
@@ -313,7 +313,7 @@ function attentionReasonLabel(
   kind: AuditAttention["kinds"][number],
   attention: AuditAttention,
   failedCount: number,
-  t: (key: MessageKey, vars?: Record<string, string | number>) => string,
+  t: (key: MessageKey, vars?: Record<string, string | number>) => string
 ): string {
   switch (kind) {
     case "taskFailed":

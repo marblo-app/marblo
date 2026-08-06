@@ -23,11 +23,13 @@ import {
   resolveTaskLabel,
   type AuditActorKindFilter,
   type AuditSourceNotice,
+  type AuditTicketGroup,
 } from "../../lib/projectAuditView";
 import { useProjectAuditLog } from "../../hooks/useProjectAuditLog";
+import { useAuth } from "../../hooks/useAuth";
 import { useAgentStore } from "../../stores/agentStore";
-import { useNavigationStore } from "../../stores/navigationStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
+import { routeInstructionToOrchestrator } from "../../services/orchestratorInstructionService";
 import { ProjectAuditAttention } from "./ProjectAuditAttention";
 import { ProjectAuditMissionSectionView } from "./ProjectAuditMissionSection";
 import { ProjectAuditTicketDetail } from "./ProjectAuditTicketDetail";
@@ -94,6 +96,7 @@ export function ProjectAuditPanel({
   members,
 }: ProjectAuditPanelProps) {
   const { t, locale } = useTranslation();
+  const { user } = useAuth();
 
   // 서버사이드 축 — 재조회를 유발한다. "최근 100건 안에 그 사람이 3건뿐" 같은
   // 절단이 없어야 하는 두 필터라 클라이언트로 내리지 않는다.
@@ -113,9 +116,9 @@ export function ProjectAuditPanel({
   const nameByUid = useMemo(
     () =>
       Object.fromEntries(
-        members.map((m) => [m.id, m.displayName || m.email || m.id]),
+        members.map((m) => [m.id, m.displayName || m.email || m.id])
       ),
-    [members],
+    [members]
   );
 
   const {
@@ -141,7 +144,7 @@ export function ProjectAuditPanel({
   const agentsHydrated = useAgentStore((s) => s.hydrated);
   const liveAgentKeys = useMemo(
     () => (agentsHydrated ? auditAgentClaimKeys(agents) : null),
-    [agents, agentsHydrated],
+    [agents, agentsHydrated]
   );
 
   const notices = auditSourceNotices(sources);
@@ -153,7 +156,7 @@ export function ProjectAuditPanel({
   const signalRows = useMemo(
     () =>
       showLowSignal ? rows : rows.filter((row) => !isLowSignalAuditRow(row)),
-    [rows, showLowSignal],
+    [rows, showLowSignal]
   );
   const hiddenLowSignalCount = rows.length - signalRows.length;
 
@@ -164,7 +167,7 @@ export function ProjectAuditPanel({
       actorUid === UNATTRIBUTED
         ? signalRows.filter((row) => !row.actorUid)
         : signalRows,
-    [signalRows, actorUid],
+    [signalRows, actorUid]
   );
 
   const view = useMemo(
@@ -183,7 +186,7 @@ export function ProjectAuditPanel({
       actorKind,
       status,
       mission,
-    ],
+    ]
   );
 
   // 워크로드 타일은 **필터 전** 그룹으로 센다 — 필터를 걸면 타일이 그 필터의
@@ -193,18 +196,18 @@ export function ProjectAuditPanel({
     () =>
       auditWorkloadTiles(
         groupAuditRowsByTicket(signalRows, taskMetaById, { liveAgentKeys }),
-        actors,
+        actors
       ),
-    [signalRows, taskMetaById, liveAgentKeys, actors],
+    [signalRows, taskMetaById, liveAgentKeys, actors]
   );
 
   const missionOptions = useMemo(
     () => auditMissionOptions(view.sections),
-    [view.sections],
+    [view.sections]
   );
 
   const [expandedTickets, setExpandedTickets] = useState<Set<string>>(
-    () => new Set(),
+    () => new Set()
   );
   const toggleTicket = (key: string) =>
     setExpandedTickets((prior) => {
@@ -217,11 +220,57 @@ export function ProjectAuditPanel({
   // 티켓 클릭 → 그 티켓의 원장 상세. 목록 조회와는 별개의 taskId 스코프 조회라
   // 여기 state 하나로만 열고 닫는다 — 목록의 필터와 무관.
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [reassigningTaskId, setReassigningTaskId] = useState<string | null>(
+    null
+  );
+  const [reassignToast, setReassignToast] = useState<{
+    tone: "success" | "error";
+    message: string;
+  } | null>(null);
 
-  // 배너/카드의 "보드에서 재배정" — 이 패널은 읽기 전용이라 쓰기(재배정)는
-  // 보드의 초크포인트로 넘긴다. Layout 이 탭을 바꾸고 BoardTab 이 잡을 소비한다.
-  const openOnBoard = (taskId: string) =>
-    useNavigationStore.getState().requestJump({ type: "task", id: taskId });
+  // 배너/카드의 "재배정" — 감사는 읽기 전용이라 티켓을 직접 쓰지 않는다.
+  // 대신 오케스트레이터 초크포인트에 재배정/재디스패치 지시를 주입한다.
+  const requestReassign = async (group: AuditTicketGroup) => {
+    if (!group.taskId || reassigningTaskId) return;
+    const taskId = group.taskId;
+    const title = group.title ?? `#${taskId.slice(0, 8)}`;
+    const failedCalls = group.failedCount;
+    const reason =
+      failedCalls > 0
+        ? `실패(${failedCalls} failed calls)`
+        : group.attention?.kinds.includes("orphanedClaim")
+        ? "고아 클레임"
+        : "주의 필요";
+    const message = `티켓 #${taskId} ${reason} — 재배정/재디스패치 해줘. 제목: ${title}`;
+
+    setReassigningTaskId(taskId);
+    try {
+      const result = await routeInstructionToOrchestrator({
+        projectId,
+        taskId,
+        message,
+        fromUserId: user?.uid,
+        fromUserName: user?.displayName ?? user?.email ?? "User",
+      });
+      if (result === "failed") {
+        setReassignToast({
+          tone: "error",
+          message: t("project.audit.admin.reassignFailed"),
+        });
+        return;
+      }
+      setReassignToast({
+        tone: "success",
+        message:
+          result === "local"
+            ? t("project.audit.admin.reassignSent")
+            : t("project.audit.admin.reassignQueued"),
+      });
+      window.setTimeout(() => setReassignToast(null), 3600);
+    } finally {
+      setReassigningTaskId(null);
+    }
+  };
 
   const filtersActive =
     actorKind !== "all" || status !== "all" || mission !== "all";
@@ -254,8 +303,21 @@ export function ProjectAuditPanel({
           groups={view.attention}
           locale={locale}
           onOpenTicket={setSelectedTaskId}
-          onOpenBoard={openOnBoard}
+          onOpenBoard={requestReassign}
         />
+      )}
+
+      {reassignToast && (
+        <div
+          role="status"
+          className={`fixed right-4 top-4 z-50 rounded border px-3 py-2 text-xs shadow-lg ${
+            reassignToast.tone === "success"
+              ? "border-emerald-700 bg-emerald-950 text-emerald-200"
+              : "border-red-800 bg-red-950 text-red-200"
+          }`}
+        >
+          {reassignToast.message}
+        </div>
       )}
 
       {/* ②누가 무엇을 지고 있나 — 동시에 구성원 필터. */}
@@ -466,7 +528,7 @@ export function ProjectAuditPanel({
                 expandedTickets={expandedTickets}
                 onToggleTicket={toggleTicket}
                 onOpenTicket={setSelectedTaskId}
-                onOpenBoard={openOnBoard}
+                onOpenBoard={requestReassign}
               />
             ))}
           </div>
@@ -481,8 +543,8 @@ export function ProjectAuditPanel({
             Object.fromEntries(
               Object.values(taskMetaById)
                 .filter((meta) => meta.title)
-                .map((meta) => [meta.id, meta.title as string]),
-            ),
+                .map((meta) => [meta.id, meta.title as string])
+            )
           )}
           nameByUid={nameByUid}
           onClose={() => setSelectedTaskId(null)}
@@ -513,8 +575,8 @@ function SourceNotice({
       ? t("project.audit.notice.humanDenied")
       : t("project.audit.notice.agentDenied")
     : notice.source === "human"
-      ? t("project.audit.notice.humanError")
-      : t("project.audit.notice.agentError");
+    ? t("project.audit.notice.humanError")
+    : t("project.audit.notice.agentError");
 
   return (
     <div

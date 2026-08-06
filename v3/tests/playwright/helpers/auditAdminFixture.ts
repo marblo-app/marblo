@@ -181,7 +181,8 @@ export function auditAdminSeed() {
               summary: {
                 problem: "완료된 작업의 감사 상세가 부족했습니다.",
                 changes: "저장된 툴 인자와 결과를 접이식으로 노출했습니다.",
-                verification: "렌더러 타입체크와 mocked Playwright로 검증했습니다.",
+                verification:
+                  "렌더러 타입체크와 mocked Playwright로 검증했습니다.",
               },
               OPENAI_API_KEY: "sk-testtesttesttesttesttesttesttest",
               reportPath: "/Users/alice/private/marblo/report.txt",
@@ -207,6 +208,7 @@ export function auditAdminSeed() {
           ledger({
             id: "l-done-create",
             toolName: "create_task",
+            params: { title: "결제 API 리팩터" },
             taskId: doneTaskId,
             model: null,
             createdAt: AT("2026-08-05T12:00:00.000Z"),
@@ -238,6 +240,7 @@ export function auditAdminSeed() {
           ledger({
             id: "l-orphan-dispatch",
             toolName: "dispatch_task",
+            params: { model: "grok", role: "frontend" },
             taskId: orphanTaskId,
             model: "grok",
             worktreeId: `${AUDIT_ADMIN_PROJECT_ID}/${orphanTaskId}`,

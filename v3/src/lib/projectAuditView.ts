@@ -133,7 +133,7 @@ export function toolRowLabel(toolName: string): AuditRowLabel {
  */
 export function resolveActorLabel(
   event: Pick<ProjectAuditEvent, "actorUid" | "actorName">,
-  nameByUid: Record<string, string> = {},
+  nameByUid: Record<string, string> = {}
 ): string {
   const name = event.actorName?.trim() || nameByUid[event.actorUid]?.trim();
   if (name) return name;
@@ -149,7 +149,7 @@ export function resolveActorLabel(
  */
 export function auditMetadataSummary(
   type: string,
-  metadata: ProjectAuditMetadata | undefined,
+  metadata: ProjectAuditMetadata | undefined
 ): string | null {
   if (!metadata) return null;
   const str = (key: string): string | null => {
@@ -165,7 +165,7 @@ export function auditMetadataSummary(
   }
   if (type === "agent.spawned") {
     const parts = [str("agentName"), str("model"), str("role")].filter(
-      (v): v is string => !!v,
+      (v): v is string => !!v
     );
     return parts.length ? parts.join(" · ") : null;
   }
@@ -359,17 +359,150 @@ function stableJson(value: unknown): string | null {
   }
 }
 
+const EVIDENCE_PRIORITY_KEYS = [
+  "task_id",
+  "taskId",
+  "title",
+  "role",
+  "model",
+  "status",
+  "from",
+  "to",
+  "pr_url",
+  "prUrl",
+  "summary",
+  "message",
+  "comment",
+  "question",
+  "blocking",
+  "targetAgentId",
+  "targetAgent",
+  "sourceType",
+] as const;
+
+function parseJsonLikeString(value: string): unknown {
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  if (
+    !(
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    )
+  ) {
+    return value;
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function evidenceLabel(key: string): string {
+  const labels: Record<string, string> = {
+    task_id: "Ticket",
+    taskId: "Ticket",
+    title: "Title",
+    role: "Role",
+    model: "Model",
+    status: "Status",
+    from: "From",
+    to: "To",
+    pr_url: "PR",
+    prUrl: "PR",
+    summary: "Summary",
+    message: "Message",
+    comment: "Comment",
+    question: "Question",
+    blocking: "Blocking",
+    targetAgentId: "Target agent",
+    targetAgent: "Target agent",
+    sourceType: "Source",
+  };
+  return labels[key] ?? key;
+}
+
+function scrubAuditString(value: string): string {
+  return scrubString(value).replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "<API_KEY>");
+}
+
+function isSensitiveEvidenceKey(key: string): boolean {
+  return /(?:api[_-]?key|token|secret|password|credential)/i.test(key);
+}
+
+function orderedObjectEntries(
+  obj: Record<string, unknown>
+): [string, unknown][] {
+  const priority = EVIDENCE_PRIORITY_KEYS.filter((key) => key in obj);
+  const rest = Object.keys(obj)
+    .filter((key) => !priority.includes(key as typeof priority[number]))
+    .sort((a, b) => a.localeCompare(b));
+  return [...priority, ...rest].map((key) => [key, obj[key]]);
+}
+
+function formatEvidenceScalar(value: unknown): string {
+  if (value === null) return "null";
+  if (value === undefined) return "";
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string") return scrubAuditString(value);
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
+  return stableJson(value) ?? String(value);
+}
+
+function formatEvidenceValue(value: unknown, indent = 0): string | null {
+  if (value === null || value === undefined) return null;
+  const parsed = typeof value === "string" ? parseJsonLikeString(value) : value;
+  const scrubbed = scrubValue(parsed);
+  if (
+    typeof scrubbed !== "object" ||
+    scrubbed === null ||
+    scrubbed instanceof Date
+  ) {
+    const scalar = formatEvidenceScalar(scrubbed).trim();
+    return scalar ? scalar : null;
+  }
+  const pad = "  ".repeat(indent);
+  const childPad = "  ".repeat(indent + 1);
+  if (Array.isArray(scrubbed)) {
+    if (scrubbed.length === 0) return null;
+    return scrubbed
+      .map((item, index) => {
+        const formatted = formatEvidenceValue(item, indent + 1);
+        return formatted ? `${pad}- ${index + 1}: ${formatted}` : null;
+      })
+      .filter((line): line is string => !!line)
+      .join("\n");
+  }
+  const entries = orderedObjectEntries(scrubbed as Record<string, unknown>);
+  if (entries.length === 0) return null;
+  return entries
+    .map(([key, item]) => {
+      if (isSensitiveEvidenceKey(key)) {
+        return `${pad}${evidenceLabel(key)}: <REDACTED>`;
+      }
+      const formatted = formatEvidenceValue(item, indent + 1);
+      if (!formatted) return null;
+      const inline = !formatted.includes("\n");
+      return inline
+        ? `${pad}${evidenceLabel(key)}: ${formatted}`
+        : `${pad}${evidenceLabel(key)}:\n${childPad}${formatted.trimStart()}`;
+    })
+    .filter((line): line is string => !!line)
+    .join("\n");
+}
+
 function agentRowEvidence(
   event: Pick<
     AuditLog,
     "toolName" | "params" | "result" | "instructionRedacted"
-  >,
+  >
 ): AuditRowEvidence {
-  const paramsJson = stableJson(scrubValue(event.params));
+  const paramsJson = formatEvidenceValue(event.params);
   const resultText =
     typeof event.result === "string" && event.result.trim()
-      ? scrubString(event.result.trim())
-      : null;
+      ? formatEvidenceValue(event.result.trim())
+      : formatEvidenceValue(event.result);
   const instructionRedacted =
     typeof event.instructionRedacted === "string" &&
     event.instructionRedacted.trim()
@@ -409,7 +542,7 @@ function agentRowEvidence(
  * 있다"는 오해를 만든다.
  */
 export function auditLedgerDetail(
-  event: Pick<AuditLog, "tier">,
+  event: Pick<AuditLog, "tier">
 ): string | null {
   const tier = event.tier?.trim();
   return tier ? tier : null;
@@ -436,21 +569,103 @@ const TASK_STATUS_VALUES = new Set([
  * 건드리지 않는 이 티켓의 제약상 화살표는 목표 쪽만 보여준다.
  */
 export function auditStatusTarget(
-  event: Pick<AuditLog, "toolName" | "params">,
+  event: Pick<AuditLog, "toolName" | "params">
 ): string | null {
   if (event.toolName !== "update_task_status") return null;
   const raw = event.params?.status;
   return typeof raw === "string" && TASK_STATUS_VALUES.has(raw) ? raw : null;
 }
 
-/** 오케 행 detail 전체 — 상태 목표(있으면) + 티어(있으면). */
-function agentRowDetail(
-  event: Pick<AuditLog, "tier" | "toolName" | "params">,
+function stringFromPath(
+  value: unknown,
+  path: readonly string[]
 ): string | null {
-  const target = auditStatusTarget(event);
+  let cur: unknown = value;
+  for (const key of path) {
+    if (!cur || typeof cur !== "object") return null;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return typeof cur === "string" && cur.trim() ? scrubString(cur.trim()) : null;
+}
+
+function firstStringFromPaths(
+  value: unknown,
+  paths: readonly (readonly string[])[]
+): string | null {
+  for (const path of paths) {
+    const found = stringFromPath(value, path);
+    if (found) return found;
+  }
+  return null;
+}
+
+function truncateSummary(value: string, max = 96): string {
+  const oneLine = value.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
+}
+
+function auditStatusTransitionSummary(
+  event: Pick<AuditLog, "params">
+): string | null {
+  const from = firstStringFromPaths(event.params, [["from"], ["previous"]]);
+  const to =
+    firstStringFromPaths(event.params, [["to"], ["status"]]) ??
+    auditStatusTarget({ toolName: "update_task_status", params: event.params });
+  if (from && to) return `${from} → ${to}`;
+  return to ? `→ ${to}` : from;
+}
+
+export function auditToolParamSummary(
+  event: Pick<AuditLog, "toolName" | "params" | "result" | "model" | "tier">
+): string | null {
+  const p = event.params;
+  switch (event.toolName) {
+    case "create_task":
+      return firstStringFromPaths(p, [["title"], ["task", "title"]]);
+    case "create_tasks_bulk": {
+      const tasks = (p as { tasks?: unknown } | null)?.tasks;
+      if (Array.isArray(tasks)) return `${tasks.length} tickets`;
+      return null;
+    }
+    case "dispatch_task": {
+      const model =
+        firstStringFromPaths(p, [["model"], ["modelType"]]) ?? event.model;
+      const role = firstStringFromPaths(p, [["role"], ["agent_role"]]);
+      const parts = [model, role].filter((v): v is string => !!v);
+      return parts.length ? parts.join(" · ") : null;
+    }
+    case "update_task_status":
+      return auditStatusTransitionSummary(event);
+    case "submit_for_review":
+      return (
+        firstStringFromPaths(p, [["pr_url"], ["prUrl"], ["summary", "pr"]]) ??
+        firstStringFromPaths(p, [
+          ["summary", "changes"],
+          ["summary", "verification"],
+          ["summary", "approach"],
+        ])
+      );
+    case "add_activity":
+      return firstStringFromPaths(p, [["message"]]);
+    case "ask_orchestrator":
+      return firstStringFromPaths(p, [["question"]]);
+    case "add_pending_instruction":
+      return firstStringFromPaths(p, [["message"]]);
+    case "claim_task":
+      return firstStringFromPaths(p, [["agent_id"], ["agentId"]]);
+    default:
+      return null;
+  }
+}
+
+/** 오케 행 detail 전체 — 액션별 핵심 요약(있으면) + 티어(있으면). */
+function agentRowDetail(
+  event: Pick<AuditLog, "tier" | "toolName" | "params" | "result" | "model">
+): string | null {
+  const summary = auditToolParamSummary(event);
   const tier = auditLedgerDetail(event);
-  const parts = [target ? `→ ${target}` : null, tier].filter(
-    (v): v is string => !!v,
+  const parts = [summary ? truncateSummary(summary) : null, tier].filter(
+    (v): v is string => !!v
   );
   return parts.length ? parts.join(" · ") : null;
 }
@@ -458,7 +673,7 @@ function agentRowDetail(
 /** 사람 행위 한 건 → 통합 행. */
 export function humanAuditRow(
   event: ProjectAuditEvent,
-  nameByUid: Record<string, string> = {},
+  nameByUid: Record<string, string> = {}
 ): UnifiedAuditRow {
   return {
     key: `human:${event.id}`,
@@ -505,7 +720,7 @@ export function taskIdFromCreateTaskResult(result: string): string | null {
  */
 export function agentAuditRow(
   event: AuditLog,
-  nameByUid: Record<string, string> = {},
+  nameByUid: Record<string, string> = {}
 ): UnifiedAuditRow {
   const actorUid = event.actorUid?.trim() || null;
   const taskId =
@@ -567,11 +782,11 @@ export function mergeAuditRows(
 export function buildAuditRows(
   human: readonly ProjectAuditEvent[],
   agent: readonly AuditLog[],
-  nameByUid: Record<string, string> = {},
+  nameByUid: Record<string, string> = {}
 ): UnifiedAuditRow[] {
   return mergeAuditRows(
     human.map((event) => humanAuditRow(event, nameByUid)),
-    agent.map((event) => agentAuditRow(event, nameByUid)),
+    agent.map((event) => agentAuditRow(event, nameByUid))
   );
 }
 
@@ -611,7 +826,7 @@ export type AuditTypeFilter =
  * 읽는다. 실제로 이 드롭다운은 우리가 만든 값만 내보내므로 이 경로는 방어다.
  */
 export function parseAuditTypeFilter(
-  value: string | undefined | null,
+  value: string | undefined | null
 ): AuditTypeFilter {
   const raw = value?.trim();
   if (!raw) return { source: "both" };
@@ -748,7 +963,7 @@ export function mergeAuditActors(
  */
 export function resolveTaskLabel(
   taskId: string | null,
-  titleById: Record<string, string> = {},
+  titleById: Record<string, string> = {}
 ): string | null {
   if (!taskId) return null;
   const title = titleById[taskId]?.trim();
@@ -773,7 +988,7 @@ export type AuditBadgeKind =
   | "orchestratorControlPlane";
 
 export function auditBadgeKind(
-  row: Pick<UnifiedAuditRow, "actorKind" | "model">,
+  row: Pick<UnifiedAuditRow, "actorKind" | "model">
 ): AuditBadgeKind {
   if (row.actorKind === "human") return "human";
   return row.model ? "agentModel" : "orchestratorControlPlane";
@@ -860,7 +1075,7 @@ type LedgerExtensionField =
  */
 export function ledgerFieldValue(
   event: AuditLog,
-  field: LedgerExtensionField,
+  field: LedgerExtensionField
 ): LedgerFieldValue {
   if (!(field in event)) return { state: "preLedger" };
   const raw = event[field];
@@ -877,7 +1092,7 @@ export function ledgerFieldValue(
  * L3 가 배선되면 이 함수 하나만 바뀌면 되도록 판정을 여기 모아 둔다.
  */
 export function auditSealStatus(
-  event: Pick<AuditLog, "seq" | "prevHash" | "hash">,
+  event: Pick<AuditLog, "seq" | "prevHash" | "hash">
 ): "sealed" | "unsealed" {
   return event.seq != null && !!event.prevHash && !!event.hash
     ? "sealed"
@@ -903,7 +1118,7 @@ export interface TicketLedgerRow extends UnifiedAuditRow {
 export function buildTicketLedgerRows(
   human: readonly ProjectAuditEvent[],
   agent: readonly AuditLog[],
-  nameByUid: Record<string, string> = {},
+  nameByUid: Record<string, string> = {}
 ): TicketLedgerRow[] {
   const humanRows: TicketLedgerRow[] = human.map((event) => ({
     ...humanAuditRow(event, nameByUid),
@@ -930,7 +1145,7 @@ export function buildTicketLedgerRows(
  */
 export function foldAuditRows(
   rows: readonly UnifiedAuditRow[],
-  minGroupSize = 2,
+  minGroupSize = 2
 ): AuditDisplayRow[] {
   const out: AuditDisplayRow[] = [];
   let i = 0;
@@ -1074,7 +1289,7 @@ export const AUDIT_STALLED_AFTER_MS = 6 * 60 * 60 * 1000;
  * 렌더러 스토어가 없는 곳(웹 콘솔)에서도 돌아야 한다.
  */
 export function auditAgentClaimKeys(
-  agents: readonly { id: string; name: string }[],
+  agents: readonly { id: string; name: string }[]
 ): Set<string> {
   const keys = new Set<string>();
   for (const agent of agents) {
@@ -1139,7 +1354,7 @@ export interface AuditAttentionOptions {
  */
 export function auditAttention(
   input: AuditAttentionInput,
-  options: AuditAttentionOptions = {},
+  options: AuditAttentionOptions = {}
 ): AuditAttention | null {
   if (input.deleted || input.archived || input.status === "DONE") return null;
 
@@ -1224,19 +1439,6 @@ export interface AuditTicketDetailEvidence {
   worktreeId: string | null;
 }
 
-function stringFromPath(value: unknown, path: readonly string[]): string | null {
-  let current: unknown = value;
-  for (const key of path) {
-    if (!current || typeof current !== "object" || !(key in current)) {
-      return null;
-    }
-    current = (current as Record<string, unknown>)[key];
-  }
-  return typeof current === "string" && current.trim()
-    ? current.trim()
-    : null;
-}
-
 function latestActivity(rows: readonly UnifiedAuditRow[]): string | null {
   for (const row of rows) {
     const text = row.evidence?.activityText;
@@ -1245,7 +1447,9 @@ function latestActivity(rows: readonly UnifiedAuditRow[]): string | null {
   return null;
 }
 
-function latestResolutionSummary(rows: readonly UnifiedAuditRow[]): string | null {
+function latestResolutionSummary(
+  rows: readonly UnifiedAuditRow[]
+): string | null {
   for (const row of rows) {
     const toolName = auditRowToolName(row);
     if (toolName !== "submit_for_review") continue;
@@ -1300,7 +1504,7 @@ function summarizeTicketGroup(
   taskId: string | null,
   rows: UnifiedAuditRow[],
   meta: AuditTaskMeta | undefined,
-  options: AuditAttentionOptions,
+  options: AuditAttentionOptions
 ): AuditTicketGroup {
   const latestAt = latestRowTime(rows);
   const failedCount = rows.filter((row) => row.failed).length;
@@ -1325,7 +1529,7 @@ function summarizeTicketGroup(
     // 않는다 — uid 로 셀 수 없을 뿐 누군가는 했다. 그런 행만 있으면 0 이고,
     // 호출부가 "미귀속"으로 그린다.
     actorCount: new Set(
-      rows.map((row) => row.actorUid).filter((uid): uid is string => !!uid),
+      rows.map((row) => row.actorUid).filter((uid): uid is string => !!uid)
     ).size,
     failedCount,
     latestAt,
@@ -1342,7 +1546,7 @@ function summarizeTicketGroup(
               failedCount,
               latestAt,
             },
-            options,
+            options
           )
         : auditAttention(
             {
@@ -1353,7 +1557,7 @@ function summarizeTicketGroup(
               failedCount,
               latestAt,
             },
-            options,
+            options
           ),
     rows,
     detail: {
@@ -1374,7 +1578,7 @@ function summarizeTicketGroup(
 export function groupAuditRowsByTicket(
   rows: readonly UnifiedAuditRow[],
   taskMetaById: Record<string, AuditTaskMeta> = {},
-  options: AuditAttentionOptions = {},
+  options: AuditAttentionOptions = {}
 ): AuditTicketGroup[] {
   const order: (string | null)[] = [];
   const byTask = new Map<string | null, UnifiedAuditRow[]>();
@@ -1392,8 +1596,8 @@ export function groupAuditRowsByTicket(
       taskId,
       byTask.get(taskId)!,
       taskId ? taskMetaById[taskId] : undefined,
-      options,
-    ),
+      options
+    )
   );
 }
 
@@ -1421,13 +1625,13 @@ export interface AuditMissionProgress {
 
 export function auditMissionProgress(
   mission: AuditMissionMeta,
-  taskMetaById: Record<string, AuditTaskMeta> = {},
+  taskMetaById: Record<string, AuditTaskMeta> = {}
 ): AuditMissionProgress | null {
   const counts = mission.statusCounts;
   if (counts) {
     const total = Object.values(counts).reduce<number>(
       (sum, value) => sum + (typeof value === "number" ? value : 0),
-      0,
+      0
     );
     if (total > 0) {
       return {
@@ -1485,7 +1689,7 @@ export const AUDIT_BOARD_SECTION_ID = "__board__";
 export type AuditActorKindFilter = "all" | "human" | "orchestrator" | "agent";
 
 export function auditActorKindOf(
-  row: Pick<UnifiedAuditRow, "actorKind" | "model">,
+  row: Pick<UnifiedAuditRow, "actorKind" | "model">
 ): Exclude<AuditActorKindFilter, "all"> {
   const kind = auditBadgeKind(row);
   if (kind === "human") return "human";
@@ -1502,7 +1706,7 @@ export interface AuditAdminFilters {
 
 function matchesActorKind(
   row: UnifiedAuditRow,
-  filter: AuditActorKindFilter | undefined,
+  filter: AuditActorKindFilter | undefined
 ): boolean {
   if (!filter || filter === "all") return true;
   return auditActorKindOf(row) === filter;
@@ -1510,7 +1714,7 @@ function matchesActorKind(
 
 function matchesTicketFilters(
   group: AuditTicketGroup,
-  filters: AuditAdminFilters,
+  filters: AuditAdminFilters
 ): boolean {
   if (filters.status && filters.status !== "all") {
     if (group.status !== filters.status) return false;
@@ -1568,7 +1772,7 @@ function compareAttention(a: AuditTicketGroup, b: AuditTicketGroup): number {
  */
 export function buildAuditAdminView(
   rows: readonly UnifiedAuditRow[],
-  options: BuildAuditAdminViewOptions = {},
+  options: BuildAuditAdminViewOptions = {}
 ): AuditAdminView {
   const taskMetaById = options.taskMetaById ?? {};
   const missionMetaById = options.missionMetaById ?? {};
@@ -1586,20 +1790,20 @@ export function buildAuditAdminView(
   const allGroups = groupAuditRowsByTicket(
     rows,
     taskMetaById,
-    attentionOptions,
+    attentionOptions
   );
   const attention = allGroups
     .filter((group) => group.attention)
     .sort(compareAttention);
 
   const visibleRows = rows.filter((row) =>
-    matchesActorKind(row, filters.actorKind),
+    matchesActorKind(row, filters.actorKind)
   );
 
   const filteredGroups = groupAuditRowsByTicket(
     visibleRows,
     taskMetaById,
-    attentionOptions,
+    attentionOptions
   ).filter((group) => matchesTicketFilters(group, filters));
 
   const sections = foldTicketsIntoMissions(filteredGroups, missionMetaById, {
@@ -1608,7 +1812,7 @@ export function buildAuditAdminView(
 
   const actionCount = filteredGroups.reduce(
     (sum, group) => sum + group.actionCount,
-    0,
+    0
   );
 
   return {
@@ -1626,7 +1830,7 @@ export function buildAuditAdminView(
 function foldTicketsIntoMissions(
   groups: readonly AuditTicketGroup[],
   missionMetaById: Record<string, AuditMissionMeta>,
-  context: { taskMetaById: Record<string, AuditTaskMeta> },
+  context: { taskMetaById: Record<string, AuditTaskMeta> }
 ): AuditMissionSection[] {
   const order: (string | null)[] = [];
   const byMission = new Map<string | null, AuditTicketGroup[]>();
@@ -1659,7 +1863,7 @@ function foldTicketsIntoMissions(
           auditTimeValue(group.latestAt) > auditTimeValue(latest)
             ? group.latestAt
             : latest,
-        tickets[0]?.latestAt ?? new Date(0),
+        tickets[0]?.latestAt ?? new Date(0)
       ),
       tickets,
     };
@@ -1687,12 +1891,12 @@ export interface AuditMissionOption {
 }
 
 export function auditMissionOptions(
-  sections: readonly AuditMissionSection[],
+  sections: readonly AuditMissionSection[]
 ): AuditMissionOption[] {
   return sections
     .filter(
       (section): section is AuditMissionSection & { missionId: string } =>
-        section.missionId !== null,
+        section.missionId !== null
     )
     .map((section) => ({
       missionId: section.missionId,
@@ -1740,7 +1944,7 @@ export interface AuditWorkloadTile {
  */
 export function auditWorkloadTiles(
   groups: readonly AuditTicketGroup[],
-  actors: readonly AuditActorTally[] = [],
+  actors: readonly AuditActorTally[] = []
 ): AuditWorkloadTile[] {
   const byUid = new Map<string | null, AuditWorkloadTile>();
 

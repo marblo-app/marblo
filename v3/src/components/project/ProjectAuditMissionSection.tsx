@@ -2,6 +2,7 @@ import { useTranslation } from "../../lib/i18n";
 import type {
   AuditMissionProgress,
   AuditMissionSection,
+  AuditTicketGroup,
 } from "../../lib/projectAuditView";
 import type { Worktree } from "../../types/worktree";
 import { formatAuditTime } from "./ProjectAuditRow";
@@ -29,7 +30,7 @@ export function ProjectAuditMissionSectionView({
   expandedTickets: Set<string>;
   onToggleTicket: (key: string) => void;
   onOpenTicket: (taskId: string) => void;
-  onOpenBoard: (taskId: string) => void;
+  onOpenBoard: (group: AuditTicketGroup) => void;
 }) {
   const { t } = useTranslation();
   const isBoard = section.missionId === null;
@@ -47,7 +48,7 @@ export function ProjectAuditMissionSectionView({
         <h4 className="min-w-0 flex-1 truncate text-sm font-medium text-gray-100">
           {isBoard
             ? t("project.audit.admin.boardSection")
-            : (section.goal ?? `#${section.missionId?.slice(0, 8)}`)}
+            : section.goal ?? `#${section.missionId?.slice(0, 8)}`}
         </h4>
 
         {section.status && (

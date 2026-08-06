@@ -174,6 +174,11 @@ export const project: Record<keyof typeof koProject, string> = {
     "The agent that claimed this ticket ({agentId}) is not in the list of running agents.",
   "project.audit.admin.reason.stalled": "No change for {hours}h",
   "project.audit.admin.reassign": "Reassign on board",
+  "project.audit.admin.reassignSent":
+    "Reassign request sent to the orchestrator.",
+  "project.audit.admin.reassignQueued":
+    "Reassign request queued for the orchestrator.",
+  "project.audit.admin.reassignFailed": "Failed to send the reassign request.",
   "project.audit.admin.review": "Review history",
 
   "project.audit.admin.workloadTitle": "Actions per member",

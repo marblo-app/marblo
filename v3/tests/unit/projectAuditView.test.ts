@@ -15,6 +15,7 @@ import {
   auditMetadataSummary,
   auditSealStatus,
   auditStatusTarget,
+  auditToolParamSummary,
   resolveActorLabel,
   resolveTaskLabel,
   isPermissionDenied,
@@ -59,7 +60,7 @@ describe("auditTypeLabelKey — 라벨", () => {
   it("모르는 종류도 행을 떨구지 않고 '알 수 없음' 으로 접는다", () => {
     // 새 클라이언트가 쓴 type 을 옛 클라이언트가 읽는 경우. 숨기면 조용한 누락.
     expect(auditTypeLabelKey("task.exploded")).toBe(
-      "project.audit.type.unknown",
+      "project.audit.type.unknown"
     );
   });
 });
@@ -67,23 +68,23 @@ describe("auditTypeLabelKey — 라벨", () => {
 describe("resolveActorLabel — 이름 메꿈", () => {
   it("기록된 actorName 을 그대로 쓴다", () => {
     expect(resolveActorLabel({ actorUid: "u1", actorName: "John" })).toBe(
-      "John",
+      "John"
     );
   });
 
   it("actorName 이 비면 현재 멤버 목록으로 메꾼다", () => {
     expect(
-      resolveActorLabel({ actorUid: "u1", actorName: null }, { u1: "Jane" }),
+      resolveActorLabel({ actorUid: "u1", actorName: null }, { u1: "Jane" })
     ).toBe("Jane");
     // 공백만 있는 이름도 비어 있는 것으로 본다.
     expect(
-      resolveActorLabel({ actorUid: "u1", actorName: "   " }, { u1: "Jane" }),
+      resolveActorLabel({ actorUid: "u1", actorName: "   " }, { u1: "Jane" })
     ).toBe("Jane");
   });
 
   it("둘 다 없으면 uid 앞자리 — 빈 칸으로 두지 않는다", () => {
     expect(
-      resolveActorLabel({ actorUid: "abcdefghijkl", actorName: null }),
+      resolveActorLabel({ actorUid: "abcdefghijkl", actorName: null })
     ).toBe("abcdefgh");
   });
 });
@@ -94,13 +95,13 @@ describe("auditMetadataSummary — 메타 요약", () => {
       auditMetadataSummary("task.status_changed", {
         from: "TODO",
         to: "IN_PROGRESS",
-      }),
+      })
     ).toBe("TODO → IN_PROGRESS");
   });
 
   it("한쪽만 있으면 있는 쪽만", () => {
     expect(auditMetadataSummary("task.status_changed", { to: "DONE" })).toBe(
-      "DONE",
+      "DONE"
     );
   });
 
@@ -110,7 +111,7 @@ describe("auditMetadataSummary — 메타 요약", () => {
         agentName: "frontend-1",
         model: "claude",
         role: "frontend",
-      }),
+      })
     ).toBe("frontend-1 · claude · frontend");
   });
 
@@ -120,7 +121,7 @@ describe("auditMetadataSummary — 메타 요약", () => {
     expect(auditMetadataSummary("chat.message.sent", undefined)).toBeNull();
     // 숫자만 있는 채팅 메타(길이) — 본문이 없으니 요약도 없다.
     expect(
-      auditMetadataSummary("chat.message.sent", { contentLength: 12 }),
+      auditMetadataSummary("chat.message.sent", { contentLength: 12 })
     ).toBeNull();
   });
 });
@@ -134,8 +135,8 @@ describe("권한 분기 — denied 와 error 는 다른 값", () => {
   it("code 를 잃고 메시지만 남은 래핑 에러도 잡는다", () => {
     expect(
       isPermissionDenied(
-        new Error("FirebaseError: Missing or insufficient permissions."),
-      ),
+        new Error("FirebaseError: Missing or insufficient permissions.")
+      )
     ).toBe(true);
   });
 
@@ -167,7 +168,7 @@ describe("auditEmptyKind — 빈 화면이 '왜' 비었는지", () => {
   it("필터가 없으면 진짜 0건(noRecordsYet)", () => {
     expect(auditEmptyKind({})).toBe("noRecordsYet");
     expect(auditEmptyKind({ actorUid: undefined, type: undefined })).toBe(
-      "noRecordsYet",
+      "noRecordsYet"
     );
   });
 
@@ -175,7 +176,7 @@ describe("auditEmptyKind — 빈 화면이 '왜' 비었는지", () => {
     expect(auditEmptyKind({ actorUid: "u1" })).toBe("filtered");
     expect(auditEmptyKind({ type: "chat.message.sent" })).toBe("filtered");
     expect(auditEmptyKind({ actorUid: "u1", type: "agent.spawned" })).toBe(
-      "filtered",
+      "filtered"
     );
   });
 
@@ -313,7 +314,7 @@ describe("humanAuditRow / agentAuditRow — 소스 태깅", () => {
     // 같은 사람이 두 소스에서 다른 이름으로 보이면 안 된다.
     const uid = "abcdefghijklmnop";
     expect(agentAuditRow(ledgerEvent({ actorUid: uid })).actorLabel).toBe(
-      humanAuditRow(humanEvent({ actorUid: uid, actorName: null })).actorLabel,
+      humanAuditRow(humanEvent({ actorUid: uid, actorName: null })).actorLabel
     );
   });
 
@@ -334,7 +335,7 @@ describe("humanAuditRow / agentAuditRow — 소스 태깅", () => {
   it("실패한 툴 호출을 표시한다 — 단, success 부재를 실패로 단정하지 않는다", () => {
     expect(agentAuditRow(ledgerEvent({ success: false })).failed).toBe(true);
     expect(
-      agentAuditRow(ledgerEvent({ success: undefined as never })).failed,
+      agentAuditRow(ledgerEvent({ success: undefined as never })).failed
     ).toBe(false);
   });
 
@@ -343,7 +344,7 @@ describe("humanAuditRow / agentAuditRow — 소스 태깅", () => {
     // 덮어써서 감사 기록이 화면에서 사라진다.
     const same = "SAME_ID";
     expect(humanAuditRow(humanEvent({ id: same })).key).not.toBe(
-      agentAuditRow(ledgerEvent({ id: same })).key,
+      agentAuditRow(ledgerEvent({ id: same })).key
     );
   });
 });
@@ -353,7 +354,7 @@ describe("★프라이버시 경계 — 원장 원문은 뷰로 새지 않는다
     // 툴 인자에는 지시문·경로·티켓 본문이 그대로 들어오고 거기 자격증명이
     // 섞일 수 있다. 원장은 불변이라 한번 새면 되돌릴 수 없다.
     const row = agentAuditRow(
-      ledgerEvent({ params: { token: "sk-live-super-secret" } }),
+      ledgerEvent({ params: { token: "sk-live-super-secret" } })
     );
 
     expect(JSON.stringify(row)).not.toContain("sk-live-super-secret");
@@ -378,7 +379,7 @@ describe("mergeAuditRows / buildAuditRows — 병합", () => {
       [
         ledgerEvent({ id: "a1", createdAt: new Date("2026-08-01T10:00:00Z") }),
         ledgerEvent({ id: "a2", createdAt: new Date("2026-08-01T13:00:00Z") }),
-      ],
+      ]
     );
 
     expect(rows.map((r) => r.key)).toEqual([
@@ -441,13 +442,13 @@ describe("ledgerFieldValue — preLedger vs 규약 밖 vs 값 있음", () => {
 
   it("필드는 있는데 null 이면 outOfConvention", () => {
     expect(
-      ledgerFieldValue(ledgerEvent({ worktreeId: null }), "worktreeId"),
+      ledgerFieldValue(ledgerEvent({ worktreeId: null }), "worktreeId")
     ).toEqual({ state: "outOfConvention" });
   });
 
   it("값이 있으면 그대로 싣는다", () => {
     expect(
-      ledgerFieldValue(ledgerEvent({ worktreeId: "p1/t1" }), "worktreeId"),
+      ledgerFieldValue(ledgerEvent({ worktreeId: "p1/t1" }), "worktreeId")
     ).toEqual({ state: "value", value: "p1/t1" });
   });
 
@@ -462,7 +463,7 @@ describe("ledgerFieldValue — preLedger vs 규약 밖 vs 값 있음", () => {
 describe("auditSealStatus — 체인 봉인 상태", () => {
   it("seq/prevHash/hash 가 셋 다 있어야 sealed", () => {
     expect(auditSealStatus({ seq: 1, prevHash: "aa", hash: "bb" })).toBe(
-      "sealed",
+      "sealed"
     );
   });
 
@@ -483,7 +484,7 @@ describe("buildTicketLedgerRows — 티켓 상세 병합", () => {
   it("오케 행은 sealStatus/worktree 가 채워진다", () => {
     const [row] = buildTicketLedgerRows(
       [],
-      [ledgerEvent({ worktreeId: "p1/t1" })],
+      [ledgerEvent({ worktreeId: "p1/t1" })]
     );
     expect(row.sealStatus).toBe("unsealed");
     expect(row.worktree).toEqual({ state: "value", value: "p1/t1" });
@@ -497,7 +498,7 @@ describe("buildTicketLedgerRows — 티켓 상세 병합", () => {
   it("최신순 병합은 buildAuditRows 와 같은 규칙을 따른다", () => {
     const rows = buildTicketLedgerRows(
       [humanEvent({ id: "h1", createdAt: new Date("2026-08-01T09:00:00Z") })],
-      [ledgerEvent({ id: "a1", createdAt: new Date("2026-08-01T10:00:00Z") })],
+      [ledgerEvent({ id: "a1", createdAt: new Date("2026-08-01T10:00:00Z") })]
     );
     expect(rows.map((r) => r.key)).toEqual(["agent:a1", "human:h1"]);
   });
@@ -565,7 +566,7 @@ describe("★소스별 에러 격리 — 한 소스가 다른 소스를 죽이�
 
   it("살아 있는/건너뛴 소스는 안내를 만들지 않는다", () => {
     expect(
-      auditSourceNotices({ human: ready, agent: { status: "skipped" } }),
+      auditSourceNotices({ human: ready, agent: { status: "skipped" } })
     ).toEqual([]);
   });
 
@@ -578,7 +579,7 @@ describe("★소스별 에러 격리 — 한 소스가 다른 소스를 죽이�
 
   it("한 소스라도 로딩 중이면 로딩이다", () => {
     expect(isAuditLoading({ human: { status: "loading" }, agent: ready })).toBe(
-      true,
+      true
     );
     expect(isAuditLoading({ human: ready, agent: ready })).toBe(false);
   });
@@ -589,7 +590,7 @@ describe("mergeAuditActors — 구성원 축은 하나다", () => {
     // 두 줄로 갈리면 고르는 순간 반쪽 타임라인이 나온다.
     const merged = mergeAuditActors(
       [{ actorUid: "u1", actorName: "John", count: 3 }],
-      [{ actorUid: "u1", actorName: null, count: 40 }],
+      [{ actorUid: "u1", actorName: null, count: 40 }]
     );
 
     expect(merged).toEqual([{ actorUid: "u1", actorName: "John", count: 43 }]);
@@ -598,7 +599,7 @@ describe("mergeAuditActors — 구성원 축은 하나다", () => {
   it("이름이 있는 쪽이 이긴다(원장엔 이름이 없다)", () => {
     const merged = mergeAuditActors(
       [{ actorUid: "u2", actorName: null, count: 1 }],
-      [{ actorUid: "u2", actorName: "Jane", count: 2 }],
+      [{ actorUid: "u2", actorName: "Jane", count: 2 }]
     );
 
     expect(merged[0].actorName).toBe("Jane");
@@ -607,7 +608,7 @@ describe("mergeAuditActors — 구성원 축은 하나다", () => {
   it("건수 내림차순으로 정렬한다", () => {
     const merged = mergeAuditActors(
       [{ actorUid: "u1", actorName: null, count: 1 }],
-      [{ actorUid: "u2", actorName: null, count: 9 }],
+      [{ actorUid: "u2", actorName: null, count: 9 }]
     );
 
     expect(merged.map((a) => a.actorUid)).toEqual(["u2", "u1"]);
@@ -643,17 +644,17 @@ describe("통합 뷰 i18n — ko/en 짝이 맞는가", () => {
 
   it("★부분 실패 안내가 '거부'와 '장애'를 다른 문구로 말한다", () => {
     expect(ko["project.audit.notice.humanDenied"]).not.toBe(
-      ko["project.audit.notice.humanError"],
+      ko["project.audit.notice.humanError"]
     );
     expect(en["project.audit.notice.agentDenied"]).not.toBe(
-      en["project.audit.notice.agentError"],
+      en["project.audit.notice.agentError"]
     );
   });
 
   it("★빈 화면 안내가 더 이상 '에이전트 행위는 여기 안 잡힌다'고 말하지 않는다", () => {
     // 이제 잡힌다. 옛 문구를 그대로 두면 안내 자체가 거짓이 된다.
     expect(ko["project.audit.emptyAgentNote"]).not.toContain(
-      "액티비티 스트림에 남습니다",
+      "액티비티 스트림에 남습니다"
     );
     expect(en["project.audit.emptyAgentNote"]).not.toContain("not here");
     // 대신 여전히 안 잡히는 것을 말한다.
@@ -692,7 +693,7 @@ describe("auditStatusTarget — update_task_status 목표 상태만 화이트리
       auditStatusTarget({
         toolName: "update_task_status",
         params: { status: "DONE" },
-      }),
+      })
     ).toBe("DONE");
   });
 
@@ -701,7 +702,7 @@ describe("auditStatusTarget — update_task_status 목표 상태만 화이트리
       auditStatusTarget({
         toolName: "create_task",
         params: { status: "DONE" },
-      }),
+      })
     ).toBeNull();
   });
 
@@ -710,7 +711,7 @@ describe("auditStatusTarget — update_task_status 목표 상태만 화이트리
       auditStatusTarget({
         toolName: "update_task_status",
         params: { status: "banana" },
-      }),
+      })
     ).toBeNull();
   });
 
@@ -719,10 +720,98 @@ describe("auditStatusTarget — update_task_status 목표 상태만 화이트리
       ledgerEvent({
         toolName: "update_task_status",
         params: { status: "DONE", comment: "sk-live-super-secret" },
-      }),
+      })
     );
     expect(row.detail).toContain("DONE");
     expect(JSON.stringify(row)).not.toContain("sk-live-super-secret");
+  });
+});
+
+describe("auditToolParamSummary — 행 상단 핵심 요약", () => {
+  it("create_task 는 티켓 제목을 보여준다", () => {
+    expect(
+      auditToolParamSummary({
+        toolName: "create_task",
+        params: { title: "감사뷰 정리" },
+        result: "ok",
+        model: null,
+        tier: null,
+      })
+    ).toBe("감사뷰 정리");
+  });
+
+  it("dispatch_task 는 모델과 역할을 보여준다", () => {
+    expect(
+      auditToolParamSummary({
+        toolName: "dispatch_task",
+        params: { model: "codex", role: "frontend" },
+        result: "ok",
+        model: "codex",
+        tier: null,
+      })
+    ).toBe("codex · frontend");
+  });
+
+  it("update_task_status 는 상태 전이를 보여준다", () => {
+    expect(
+      auditToolParamSummary({
+        toolName: "update_task_status",
+        params: { from: "REVIEW", status: "DONE" },
+        result: "ok",
+        model: "codex",
+        tier: null,
+      })
+    ).toBe("REVIEW → DONE");
+  });
+
+  it("submit_for_review 는 PR 또는 요약을 보여준다", () => {
+    expect(
+      auditToolParamSummary({
+        toolName: "submit_for_review",
+        params: { pr_url: "https://github.com/acme/repo/pull/1" },
+        result: "ok",
+        model: "codex",
+        tier: null,
+      })
+    ).toBe("https://github.com/acme/repo/pull/1");
+  });
+});
+
+describe("AuditRowEvidence — raw JSON 대신 정제 텍스트", () => {
+  it("params 는 주요 필드 우선 key:value 텍스트로 정렬하고 scrub 한다", () => {
+    const row = agentAuditRow(
+      ledgerEvent({
+        toolName: "submit_for_review",
+        params: {
+          zeta: "last",
+          task_id: "t1",
+          summary: { changes: "완료", verification: "tsc" },
+          OPENAI_API_KEY: "sk-live-super-secret",
+        },
+      })
+    );
+
+    expect(row.evidence?.paramsJson).toContain("Ticket: t1");
+    expect(row.evidence?.paramsJson).toContain("Summary:");
+    expect(row.evidence?.paramsJson).toContain("changes: 완료");
+    expect(row.evidence?.paramsJson).toContain("OPENAI_API_KEY: <REDACTED>");
+    expect(row.evidence?.paramsJson).not.toContain('"task_id"');
+    expect(JSON.stringify(row)).not.toContain("sk-live-super-secret");
+  });
+
+  it("result 가 JSON 문자열이면 정제 텍스트로 펼친다", () => {
+    const row = agentAuditRow(
+      ledgerEvent({
+        result: JSON.stringify({
+          ok: true,
+          token: "sk-live-super-secret",
+        }),
+      })
+    );
+
+    expect(row.evidence?.resultText).toContain("ok: true");
+    expect(row.evidence?.resultText).toContain("token: <REDACTED>");
+    expect(row.evidence?.resultText).not.toContain('"ok"');
   });
 });
 
@@ -747,7 +836,7 @@ describe("auditBadgeKind — 사람 / 오케(모델) / 오케(컨트롤플레인
 
   it("모델이 있는 오케 행은 agentModel", () => {
     expect(auditBadgeKind({ actorKind: "agent", model: "claude" })).toBe(
-      "agentModel",
+      "agentModel"
     );
   });
 
@@ -755,7 +844,7 @@ describe("auditBadgeKind — 사람 / 오케(모델) / 오케(컨트롤플레인
     // 스폰된 에이전트 없이 오케 자신이 MCP 툴을 직접 호출한 정상 케이스다 —
     // 오류처럼 읽히는 분류에 섞이면 안 된다.
     expect(auditBadgeKind({ actorKind: "agent", model: null })).toBe(
-      "orchestratorControlPlane",
+      "orchestratorControlPlane"
     );
   });
 });
@@ -764,13 +853,13 @@ describe("foldAuditRows — 같은 티켓의 연속 add_activity 접기", () => 
   it("2건 이상 연속되면 한 그룹으로 접는다", () => {
     const rows = [
       agentAuditRow(
-        ledgerEvent({ id: "m3", toolName: "add_activity", taskId: "t1" }),
+        ledgerEvent({ id: "m3", toolName: "add_activity", taskId: "t1" })
       ),
       agentAuditRow(
-        ledgerEvent({ id: "m2", toolName: "add_activity", taskId: "t1" }),
+        ledgerEvent({ id: "m2", toolName: "add_activity", taskId: "t1" })
       ),
       agentAuditRow(
-        ledgerEvent({ id: "m1", toolName: "add_activity", taskId: "t1" }),
+        ledgerEvent({ id: "m1", toolName: "add_activity", taskId: "t1" })
       ),
     ];
 
@@ -786,7 +875,7 @@ describe("foldAuditRows — 같은 티켓의 연속 add_activity 접기", () => 
   it("1건뿐이면 접지 않는다 — 접어봐야 화면만 복잡해진다", () => {
     const rows = [
       agentAuditRow(
-        ledgerEvent({ id: "m1", toolName: "add_activity", taskId: "t1" }),
+        ledgerEvent({ id: "m1", toolName: "add_activity", taskId: "t1" })
       ),
     ];
 
@@ -796,13 +885,13 @@ describe("foldAuditRows — 같은 티켓의 연속 add_activity 접기", () => 
   it("★다른 티켓이 끼면 그룹이 갈린다 — 연속성은 같은 티켓 안에서만", () => {
     const rows = [
       agentAuditRow(
-        ledgerEvent({ id: "a1", toolName: "add_activity", taskId: "t1" }),
+        ledgerEvent({ id: "a1", toolName: "add_activity", taskId: "t1" })
       ),
       agentAuditRow(
-        ledgerEvent({ id: "a2", toolName: "add_activity", taskId: "t2" }),
+        ledgerEvent({ id: "a2", toolName: "add_activity", taskId: "t2" })
       ),
       agentAuditRow(
-        ledgerEvent({ id: "a3", toolName: "add_activity", taskId: "t1" }),
+        ledgerEvent({ id: "a3", toolName: "add_activity", taskId: "t1" })
       ),
     ];
 
@@ -816,10 +905,10 @@ describe("foldAuditRows — 같은 티켓의 연속 add_activity 접기", () => 
       humanAuditRow(humanEvent({ id: "h1", taskId: "t1" })),
       humanAuditRow(humanEvent({ id: "h2", taskId: "t1" })),
       agentAuditRow(
-        ledgerEvent({ id: "s1", toolName: "spawn_agent", taskId: "t1" }),
+        ledgerEvent({ id: "s1", toolName: "spawn_agent", taskId: "t1" })
       ),
       agentAuditRow(
-        ledgerEvent({ id: "s2", toolName: "spawn_agent", taskId: "t1" }),
+        ledgerEvent({ id: "s2", toolName: "spawn_agent", taskId: "t1" })
       ),
     ];
 
@@ -829,10 +918,10 @@ describe("foldAuditRows — 같은 티켓의 연속 add_activity 접기", () => 
   it("★캡처는 그대로다 — 그룹을 펼치면 원본 행 값이 그대로 다시 나온다", () => {
     const original = [
       agentAuditRow(
-        ledgerEvent({ id: "m2", toolName: "add_activity", taskId: "t1" }),
+        ledgerEvent({ id: "m2", toolName: "add_activity", taskId: "t1" })
       ),
       agentAuditRow(
-        ledgerEvent({ id: "m1", toolName: "add_activity", taskId: "t1" }),
+        ledgerEvent({ id: "m1", toolName: "add_activity", taskId: "t1" })
       ),
     ];
 
@@ -847,7 +936,7 @@ describe("foldAuditRows — 같은 티켓의 연속 add_activity 접기", () => 
 describe("isLowSignalAuditRow — 텔레그램 발송·메모는 저신호", () => {
   it("send_telegram_message 는 저신호", () => {
     const row = agentAuditRow(
-      ledgerEvent({ toolName: "send_telegram_message" }),
+      ledgerEvent({ toolName: "send_telegram_message" })
     );
     expect(isLowSignalAuditRow(row)).toBe(true);
   });
@@ -878,7 +967,7 @@ describe("taskIdFromCreateTaskResult — create_task 결과에서 새 태스크 
         taskId: null,
         params: { title: "새 태스크", role: "frontend" },
         result: "ok",
-      }),
+      })
     );
     expect(row.taskId).toBeNull();
   });
@@ -897,7 +986,7 @@ describe("taskIdFromCreateTaskResult — create_task 결과에서 새 태스크 
         params: { title: "새 태스크", role: "frontend" },
         result:
           "Task created successfully!\nID: abc123\nTitle: 새 태스크\nRole: frontend\nPriority: 0\nProject: p1",
-      }),
+      })
     );
     expect(row.taskId).toBe("abc123");
   });
@@ -908,7 +997,7 @@ describe("taskIdFromCreateTaskResult — create_task 결과에서 새 태스크 
         toolName: "create_task",
         taskId: "t1",
         result: "Task created successfully!\nID: abc123\n",
-      }),
+      })
     );
     expect(row.taskId).toBe("t1");
   });
@@ -919,7 +1008,7 @@ describe("taskIdFromCreateTaskResult — create_task 결과에서 새 태스크 
         toolName: "update_task_status",
         taskId: null,
         result: "ID: abc123",
-      }),
+      })
     );
     expect(row.taskId).toBeNull();
   });

@@ -31,7 +31,7 @@ export function ProjectAuditAttention({
   groups: AuditTicketGroup[];
   locale: string;
   onOpenTicket: (taskId: string) => void;
-  onOpenBoard: (taskId: string) => void;
+  onOpenBoard: (group: AuditTicketGroup) => void;
 }) {
   const { t } = useTranslation();
 
@@ -76,7 +76,7 @@ export function ProjectAuditAttention({
           >
             <span
               className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${taskStatusPillClass(
-                group.status,
+                group.status
               )}`}
             >
               {group.status ?? t("project.audit.admin.statusUnknown")}
@@ -116,7 +116,7 @@ export function ProjectAuditAttention({
                 </button>
                 <button
                   type="button"
-                  onClick={() => onOpenBoard(group.taskId!)}
+                  onClick={() => onOpenBoard(group)}
                   className="text-xs text-amber-300 transition-colors hover:text-amber-200 hover:underline"
                 >
                   {t("project.audit.admin.reassign")}

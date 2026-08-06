@@ -170,6 +170,11 @@ export const project = {
     "이 티켓을 선점한 에이전트({agentId})가 현재 실행 중인 에이전트 목록에 없습니다.",
   "project.audit.admin.reason.stalled": "{hours}시간째 무변동",
   "project.audit.admin.reassign": "보드에서 재배정",
+  "project.audit.admin.reassignSent":
+    "오케스트레이터에 재배정 지시를 전달했습니다.",
+  "project.audit.admin.reassignQueued":
+    "오케스트레이터 재배정 지시를 대기열에 넣었습니다.",
+  "project.audit.admin.reassignFailed": "재배정 지시 전달에 실패했습니다.",
   "project.audit.admin.review": "이력 보기",
 
   // 구성원 워크로드 스트립 — 위 작업량 패널(결과)과 다른 축(행위 수)이다.

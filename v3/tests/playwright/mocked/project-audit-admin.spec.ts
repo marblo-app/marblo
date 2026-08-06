@@ -30,15 +30,15 @@ async function seedAuditAdmin(page: Page) {
     localStorage.removeItem("marblo.firstRun.inProgress");
     localStorage.setItem(
       "marblo:test:projectAuditHarness",
-      JSON.stringify({ projectId: seed.projectId, members: seed.members }),
+      JSON.stringify({ projectId: seed.projectId, members: seed.members })
     );
     localStorage.setItem(
       "marblo:test:projectAuditData",
-      JSON.stringify(seed.auditData),
+      JSON.stringify(seed.auditData)
     );
     localStorage.setItem(
       "marblo:test:worktreeLightData",
-      JSON.stringify(seed.worktreeLight),
+      JSON.stringify(seed.worktreeLight)
     );
   }, seed);
 
@@ -118,7 +118,7 @@ test("@mocked 감사 관리자 뷰: 문제 우선 배너 · 미션/티켓 묶음
     .first();
   await expect(doneCard.getByRole("link", { name: /PR/ })).toHaveAttribute(
     "href",
-    AUDIT_ADMIN_IDS.prUrl,
+    AUDIT_ADMIN_IDS.prUrl
   );
   await expect(doneCard.getByText("아카이브됨")).toBeVisible();
 
@@ -135,7 +135,7 @@ test("@mocked 감사 관리자 뷰: 문제 우선 배너 · 미션/티켓 묶음
     .filter({ hasText: "감사로그 관리자 뷰" })
     .first();
   await expect(
-    orphanCard.getByRole("button", { name: /이 워크트리 보기/ }),
+    orphanCard.getByRole("button", { name: /이 워크트리 보기/ })
   ).toBeVisible();
 
   // ④ 접힌 카드를 펼치면 원본 이벤트가 그대로 다시 보인다(캡처 불변).
@@ -143,6 +143,70 @@ test("@mocked 감사 관리자 뷰: 문제 우선 배너 · 미션/티켓 묶음
   await doneCard.getByRole("button", { expanded: false }).first().click();
   await expect(doneCard.getByText("리뷰 제출")).toBeVisible();
   await expect(doneCard.getByText("태스크 선점")).toBeVisible();
+  await expect(
+    doneCard.getByText(
+      "저장된 툴 인자와 결과를 접이식으로 노출했습니다. · standard"
+    )
+  ).toBeVisible();
+  await expect(
+    doneCard.getByRole("button", { name: "DONE 결제 API 리팩터" })
+  ).toBeVisible();
+  await orphanCard.getByRole("button", { expanded: false }).first().click();
+  await expect(orphanCard.getByText("grok · frontend")).toBeVisible();
+});
+
+test("@mocked 감사 관리자 뷰: 재배정은 보드 점프가 아니라 오케스트레이터 주입이다", async ({
+  marblo,
+}) => {
+  const { app, page } = marblo;
+  await seedAuditAdmin(page);
+
+  await app.evaluate(async ({ ipcMain }) => {
+    ipcMain.removeHandler("orchestrator:injectMessage");
+    (
+      globalThis as typeof globalThis & {
+        __auditInjected?: { projectId: string; message: string }[];
+      }
+    ).__auditInjected = [];
+    ipcMain.handle("orchestrator:injectMessage", (_event, payload) => {
+      const p = payload as { projectId: string; message: string };
+      (
+        globalThis as typeof globalThis & {
+          __auditInjected?: { projectId: string; message: string }[];
+        }
+      ).__auditInjected?.push({
+        projectId: p.projectId,
+        message: p.message,
+      });
+      return { delivered: true };
+    });
+  });
+
+  const failedCard = page
+    .getByTestId("audit-ticket")
+    .filter({ hasText: "결제 UI 연결" })
+    .first();
+  await failedCard.getByRole("button", { name: "보드에서 재배정" }).click();
+
+  await expect(
+    page.getByText("오케스트레이터에 재배정 지시를 전달했습니다.")
+  ).toBeVisible();
+
+  const injected = await app.evaluate(
+    () =>
+      (
+        globalThis as typeof globalThis & {
+          __auditInjected?: { projectId: string; message: string }[];
+        }
+      ).__auditInjected ?? []
+  );
+  expect(injected).toHaveLength(1);
+  expect(injected[0].projectId).toBe(AUDIT_ADMIN_PROJECT_ID);
+  expect(injected[0].message).toContain(
+    `티켓 #${AUDIT_ADMIN_IDS.failedTaskId}`
+  );
+  expect(injected[0].message).toContain("실패(1 failed calls)");
+  expect(injected[0].message).toContain("재배정/재디스패치");
 });
 
 test("@mocked 감사 관리자 뷰: 접이식 상세는 params/result·해결요약을 scrub 후 노출한다", async ({
@@ -160,31 +224,36 @@ test("@mocked 감사 관리자 뷰: 접이식 상세는 params/result·해결요
   const ticketEvidence = doneCard.getByTestId("audit-ticket-evidence");
   await ticketEvidence.getByText("무엇을 어떻게 했나").click();
   await expect(
-    ticketEvidence.getByText("저장된 툴 인자와 결과를 접이식으로 노출했습니다."),
+    ticketEvidence.getByText("저장된 툴 인자와 결과를 접이식으로 노출했습니다.")
   ).toBeVisible();
-  await expect(ticketEvidence.getByRole("link", { name: /PR/ })).toHaveAttribute(
-    "href",
-    AUDIT_ADMIN_IDS.prUrl,
-  );
+  await expect(
+    ticketEvidence.getByRole("link", { name: /PR/ })
+  ).toHaveAttribute("href", AUDIT_ADMIN_IDS.prUrl);
   await expect(ticketEvidence.getByText("아카이브됨")).toBeVisible();
 
-  const rowEvidence = doneCard
-    .getByText("저장된 인자·결과 보기")
-    .first();
+  const rowEvidence = doneCard.getByText("저장된 인자·결과 보기").first();
   await rowEvidence.click();
-  await expect(doneCard.getByText("툴 인자", { exact: true })).toBeVisible();
-  await expect(doneCard.getByText('"OPENAI_API_KEY": "<REDACTED>"')).toBeVisible();
+  await expect(
+    doneCard.getByText("툴 인자", { exact: true }).first()
+  ).toBeVisible();
+  await expect(
+    doneCard.getByText("Ticket: audit-admin-task-done")
+  ).toBeVisible();
+  await expect(doneCard.getByText("OPENAI_API_KEY: <REDACTED>")).toBeVisible();
+  await expect(doneCard).toContainText("Summary:");
   await expect(doneCard.getByText("프롬프트", { exact: true })).toBeVisible();
   await expect(
     doneCard.getByText(
-      "instructionRedacted(프롬프트): <EMAIL> 계정으로 <USER_HOME>/private 리포트를 확인하고 <API_KEY> 없이 감사 상세를 보강",
-    ),
+      "instructionRedacted(프롬프트): <EMAIL> 계정으로 <USER_HOME>/private 리포트를 확인하고 <API_KEY> 없이 감사 상세를 보강"
+    )
   ).toBeVisible();
   await expect(doneCard).toContainText("<USER_HOME>");
   await expect(doneCard).toContainText("<EMAIL>");
   await expect(doneCard).toContainText("<API_KEY>");
   await expect(doneCard).not.toContainText("owner@example.test");
-  await expect(doneCard).not.toContainText("sk-testtesttesttesttesttesttesttest");
+  await expect(doneCard).not.toContainText(
+    "sk-testtesttesttesttesttesttesttest"
+  );
   await expect(doneCard).not.toContainText("/Users/alice");
 
   await page.screenshot({
@@ -209,7 +278,7 @@ test("@mocked 감사 관리자 뷰: activity 포함 시 마지막 activity도 �
   await ticketEvidence.getByText("무엇을 어떻게 했나").click();
 
   await expect(
-    ticketEvidence.getByText("마지막 activity", { exact: true }),
+    ticketEvidence.getByText("마지막 activity", { exact: true })
   ).toBeVisible();
   await expect(ticketEvidence.getByText("<EMAIL>")).toBeVisible();
   await expect(ticketEvidence.getByText("<USER_HOME>")).toBeVisible();
@@ -228,10 +297,10 @@ test("@mocked 감사 관리자 뷰: 필터는 목록만 좁히고 문제 우선 
   await expect(
     page
       .getByTestId("audit-section")
-      .filter({ has: page.getByText("결제 플로우 리팩터") }),
+      .filter({ has: page.getByText("결제 플로우 리팩터") })
   ).toHaveCount(0);
   await expect(page.getByTestId("audit-attention")).toContainText(
-    "결제 UI 연결",
+    "결제 UI 연결"
   );
 
   // 상태 필터.
@@ -291,7 +360,7 @@ test("@mocked 감사 관리자 뷰: 티켓 상세 모달은 그대로 열린다"
     .click();
 
   await expect(
-    page.getByRole("heading", { name: "결제 API 리팩터" }),
+    page.getByRole("heading", { name: "결제 API 리팩터" })
   ).toBeVisible();
   expect(AUDIT_ADMIN_PROJECT_ID).toBeTruthy();
 });
