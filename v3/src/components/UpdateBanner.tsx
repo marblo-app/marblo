@@ -1,7 +1,7 @@
 /**
  * Auto-update banner — surfaces electron-updater status to the user.
  *
- * Three flows:
+ * Four flows:
  *   1. Regular update available → "Download" button (manual control).
  *   2. Update downloaded → "Restart now" button. Auto-installs on next quit
  *      anyway, but giving an explicit restart shortens the upgrade window
@@ -11,6 +11,9 @@
  *      timer expires, electron-updater main-process side calls
  *      quitAndInstall() regardless — Postpone only delays this session,
  *      hotfix re-fires on next launch.
+ *   4. Download error → error-tone banner with status.error, manual download
+ *      (GitHub releases), retry (updater.download), and dismiss. Render-only;
+ *      main-process updater is not touched.
  *
  * Sits in Layout so it's visible from any tab.
  */
@@ -30,6 +33,10 @@ interface UpdateStatus {
   error?: string;
   forceInstallInMs?: number;
 }
+
+/** Fallback when auto-update fails — open latest release in the OS browser. */
+const MANUAL_DOWNLOAD_URL =
+  "https://github.com/melocream/marblo-releases/releases/latest";
 
 // updater API surface lives in src/vite-env.d.ts (ElectronAPI.updater).
 
@@ -67,12 +74,14 @@ export function UpdateBanner() {
   }, [hotfixSecondsLeft]);
 
   if (!status || dismissed) return null;
-  // We only render in three cases — checking/not-available/error are silent.
+  // checking / not-available stay silent; error is user-visible.
   const isHotfix = hotfixSecondsLeft !== null;
+  const isError = status.status === "error";
   if (
     status.status !== "available" &&
     status.status !== "downloading" &&
-    status.status !== "downloaded"
+    status.status !== "downloaded" &&
+    status.status !== "error"
   ) {
     return null;
   }
@@ -84,24 +93,34 @@ export function UpdateBanner() {
     setHotfixSecondsLeft(null);
     setDismissed(true);
   };
+  // main setWindowOpenHandler routes https _blank → shell.openExternal.
+  const handleManualDownload = () => {
+    window.open(MANUAL_DOWNLOAD_URL, "_blank", "noopener");
+  };
 
   const version = status.info?.version ?? "";
   const percent = status.progress?.percent
     ? Math.round(status.progress.percent)
     : 0;
+  const errorTone = isHotfix || isError;
+  const errorMessage =
+    status.error?.trim() || t("updater.errorFallback");
 
   return (
     <div
       className={`flex items-center gap-3 border-b px-4 py-2 text-xs ${
-        isHotfix
+        errorTone
           ? "border-[#f38ba8]/40 bg-[#f38ba8]/10 text-[#f38ba8]"
           : "border-[#89b4fa]/30 bg-[#89b4fa]/10 text-[#89b4fa]"
       }`}
-      role="status"
+      role={isError ? "alert" : "status"}
     >
-      <span>
-        {isHotfix ? "🚨" : "✨"} v{version}
-      </span>
+      {!isError && (
+        <span>
+          {isHotfix ? "🚨" : "✨"} v{version}
+        </span>
+      )}
+      {isError && <span aria-hidden="true">⚠️</span>}
 
       {status.status === "available" && (
         <>
@@ -160,6 +179,32 @@ export function UpdateBanner() {
             title={t("updater.postponeTitle")}
           >
             {t("updater.postpone")}
+          </button>
+        </>
+      )}
+
+      {status.status === "error" && (
+        <>
+          <span className="min-w-0 flex-1 truncate text-[#bac2de]" title={errorMessage}>
+            {errorMessage}
+          </span>
+          <button
+            onClick={handleManualDownload}
+            className="ml-auto shrink-0 rounded bg-[#f38ba8]/20 px-3 py-1 text-[#f38ba8] hover:bg-[#f38ba8]/30"
+          >
+            {t("updater.manualDownload")}
+          </button>
+          <button
+            onClick={handleDownload}
+            className="shrink-0 rounded bg-[#f38ba8]/20 px-3 py-1 text-[#f38ba8] hover:bg-[#f38ba8]/30"
+          >
+            {t("updater.retry")}
+          </button>
+          <button
+            onClick={() => setDismissed(true)}
+            className="shrink-0 rounded px-2 py-1 text-[#6c7086] hover:text-[#cdd6f4]"
+          >
+            {t("updater.close")}
           </button>
         </>
       )}

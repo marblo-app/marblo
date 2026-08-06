@@ -16,4 +16,7 @@ export const updater: Record<keyof typeof koUpdater, string> = {
     "Critical update. Restarting automatically in {count}s — save your work.",
   "updater.postpone": "Postpone (next launch)",
   "updater.postponeTitle": "Will re-apply on next launch",
+  "updater.errorFallback": "Update download failed.",
+  "updater.manualDownload": "Manual download",
+  "updater.retry": "Retry",
 };
