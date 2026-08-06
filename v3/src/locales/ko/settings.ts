@@ -6,6 +6,7 @@ export const settings = {
   // ── Settings → tabs ─────────────────────────────────────
   "settings.title": "설정",
   "settings.tab.profile": "프로필",
+  "settings.tab.adminAnalytics": "어드민 분석",
   "settings.tab.models": "에이전트 모델",
   "settings.tab.billing": "결제",
   "settings.tab.team": "팀",

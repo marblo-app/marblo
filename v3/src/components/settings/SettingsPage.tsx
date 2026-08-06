@@ -19,9 +19,11 @@ import { APIKeysSettings } from "./APIKeysSettings";
 import { VendorKeysSettings } from "./VendorKeysSettings";
 import { PrivacySettings } from "./PrivacySettings";
 import { BugReportModal } from "./BugReportModal";
+import { AdminAnalyticsPanel } from "./AdminAnalyticsPanel";
 
 type SettingsTab =
   | "profile"
+  | "adminAnalytics"
   | "models"
   | "billing"
   | "team"
@@ -34,6 +36,7 @@ interface TabSpec {
   id: SettingsTab;
   labelKey:
     | "settings.tab.profile"
+    | "settings.tab.adminAnalytics"
     | "settings.tab.models"
     | "settings.tab.billing"
     | "settings.tab.team"
@@ -46,6 +49,7 @@ interface TabSpec {
 
 const TABS: TabSpec[] = [
   { id: "profile", labelKey: "settings.tab.profile" },
+  { id: "adminAnalytics", labelKey: "settings.tab.adminAnalytics" },
   { id: "models", labelKey: "settings.tab.models" },
   { id: "billing", labelKey: "settings.tab.billing" },
   { id: "team", labelKey: "settings.tab.team" },
@@ -105,8 +109,8 @@ export function SettingsPage() {
               plan === "team"
                 ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
                 : plan === "pro"
-                  ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
-                  : "bg-gray-500/20 text-gray-400 border border-gray-500/30"
+                ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                : "bg-gray-500/20 text-gray-400 border border-gray-500/30"
             }`}
           >
             {plan.toUpperCase()} {t("header.planBadge.suffix")}
@@ -133,6 +137,7 @@ export function SettingsPage() {
 
         {/* Tab content */}
         {activeTab === "profile" && <ProfileSection />}
+        {activeTab === "adminAnalytics" && <AdminAnalyticsPanel />}
         {activeTab === "models" && <ModelPresetSection />}
         {activeTab === "billing" && <BillingPage />}
         {activeTab === "team" &&
@@ -520,7 +525,7 @@ function ModelPresetSection() {
             </option>
           ))}
           {!ORCHESTRATOR_HARNESS_OPTIONS.some(
-            (h) => h.value === orchestratorModel,
+            (h) => h.value === orchestratorModel
           ) && (
             <option value={orchestratorModel} disabled>
               {ORCHESTRATOR_ENV_MODEL.label}
@@ -529,10 +534,10 @@ function ModelPresetSection() {
         </select>
         <p className="mt-2 text-xs text-gray-500">
           {ORCHESTRATOR_HARNESS_OPTIONS.some(
-            (h) => h.value === orchestratorModel,
+            (h) => h.value === orchestratorModel
           )
             ? // 설명이 없는 하네스는 설명만 비운다 — 칸은 이미 서 있다.
-              (ORCHESTRATOR_HARNESS_DESC[orchestratorModel] ?? "")
+              ORCHESTRATOR_HARNESS_DESC[orchestratorModel] ?? ""
             : ORCHESTRATOR_ENV_MODEL.desc}
         </p>
         <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
@@ -622,7 +627,7 @@ function SubscriptionPlansSection() {
 
   const update = (i: number, patch: Partial<SubscriptionPlanEntry>) => {
     setPlans((prev) =>
-      prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p)),
+      prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p))
     );
   };
 
