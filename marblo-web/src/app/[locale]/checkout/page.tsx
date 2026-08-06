@@ -28,6 +28,7 @@ interface PortOneSDK {
     customer?: {
       fullName?: string;
       email?: string;
+      phoneNumber?: string;
     };
   }): Promise<{ paymentId?: string; code?: string; message?: string }>;
   requestIssueBillingKey(params: {
@@ -39,6 +40,7 @@ interface PortOneSDK {
     customer?: {
       fullName?: string;
       email?: string;
+      phoneNumber?: string;
     };
   }): Promise<{ billingKey?: string; code?: string; message?: string }>;
 }
@@ -87,6 +89,8 @@ export default function CheckoutPage() {
   const [discount, setDiscount] = useState(0);
   const [couponCode, setCouponCode] = useState("");
   const [paymentConsent, setPaymentConsent] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [phoneNumberTouched, setPhoneNumberTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Resolve plan or lecture info
@@ -113,6 +117,16 @@ export default function CheckoutPage() {
     billing === "annual"
       ? t("annualAutoRenewNotice", { amount: baseAmountLabel })
       : t("monthlyAutoRenewNotice", { amount: baseAmountLabel });
+  const requiresPhoneNumber = paymentProvider === "portone";
+  const isPhoneNumberValid =
+    !requiresPhoneNumber || /^\d{10,11}$/.test(phoneNumber);
+  const showPhoneNumberError =
+    requiresPhoneNumber && phoneNumberTouched && !isPhoneNumberValid;
+  const paymentProcessorName = t(
+    paymentProvider === "portone"
+      ? "paymentProcessorPortOne"
+      : "paymentProcessorToss",
+  );
 
   // Validate query params
   const isValid = isLecture ? !!lectureInfo : !!planInfo;
@@ -215,6 +229,11 @@ export default function CheckoutPage() {
       setError(t("consentRequired"));
       return;
     }
+    if (!isPhoneNumberValid) {
+      setPhoneNumberTouched(true);
+      setError(t("phoneNumberInvalid"));
+      return;
+    }
     setLoading(true);
     setError(null);
     // GA4 begin_checkout — 결제 요청 직전 발화(값/상품만, PII 없음).
@@ -265,6 +284,7 @@ export default function CheckoutPage() {
             customer: {
               fullName: user.displayName || "Marblo User",
               email: user.email || undefined,
+              phoneNumber,
             },
           });
           if (response.code) throw new Error(response.message || response.code);
@@ -285,6 +305,7 @@ export default function CheckoutPage() {
             customer: {
               fullName: user.displayName || "Marblo User",
               email: user.email || undefined,
+              phoneNumber,
             },
           });
           if (response.code) throw new Error(response.message || response.code);
@@ -494,6 +515,46 @@ export default function CheckoutPage() {
               </div>
             )}
 
+            {requiresPhoneNumber && (
+              <div className="space-y-2">
+                <label
+                  htmlFor="checkout-phone-number"
+                  className="block text-sm font-medium text-zinc-300"
+                >
+                  {t("phoneNumberLabel")}
+                </label>
+                <input
+                  id="checkout-phone-number"
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  value={phoneNumber}
+                  onChange={(event) => {
+                    setPhoneNumber(event.target.value.replace(/\D/g, ""));
+                    if (error) setError(null);
+                  }}
+                  onBlur={() => setPhoneNumberTouched(true)}
+                  placeholder={t("phoneNumberPlaceholder")}
+                  aria-invalid={showPhoneNumberError}
+                  aria-describedby={
+                    showPhoneNumberError
+                      ? "checkout-phone-number-error"
+                      : undefined
+                  }
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-3 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                  maxLength={11}
+                />
+                {showPhoneNumberError && (
+                  <p
+                    id="checkout-phone-number-error"
+                    className="text-sm text-red-400"
+                  >
+                    {t("phoneNumberInvalid")}
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Payment consent gate (PIPA — 결제대행사 제3자 제공 동의) */}
             <label className="flex items-start gap-2.5 mt-4 cursor-pointer select-none">
               <input
@@ -506,7 +567,7 @@ export default function CheckoutPage() {
                 className="mt-0.5 w-4 h-4 rounded border-zinc-600 bg-zinc-900 text-indigo-500 focus:ring-indigo-500/40 shrink-0"
               />
               <span className="text-sm text-zinc-300 leading-snug">
-                {t("consentLabel")}{" "}
+                {t("consentLabel", { processor: paymentProcessorName })}{" "}
                 <Link
                   href={`/${locale}/legal/privacy`}
                   target="_blank"
@@ -523,8 +584,18 @@ export default function CheckoutPage() {
                 {t("thirdPartyTitle")}
               </p>
               <ul className="mt-1 space-y-0.5">
-                <li>{t("thirdPartyRecipient")}</li>
-                <li>{t("thirdPartyItems")}</li>
+                <li>
+                  {t("thirdPartyRecipient", {
+                    processor: paymentProcessorName,
+                  })}
+                </li>
+                <li>
+                  {t(
+                    paymentProvider === "portone"
+                      ? "thirdPartyItemsPortOne"
+                      : "thirdPartyItemsToss",
+                  )}
+                </li>
                 <li>{t("thirdPartyPurpose")}</li>
                 <li>{t("thirdPartyRetention")}</li>
               </ul>
@@ -533,7 +604,9 @@ export default function CheckoutPage() {
             {/* Pay button */}
             <button
               onClick={handlePayment}
-              disabled={loading || !sdkReady || !paymentConsent}
+              disabled={
+                loading || !sdkReady || !paymentConsent || !isPhoneNumberValid
+              }
               className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-xl text-lg font-semibold transition mt-4 flex items-center justify-center gap-2"
             >
               {loading ? (
