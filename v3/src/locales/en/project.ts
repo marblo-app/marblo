@@ -216,6 +216,7 @@ export const project: Record<keyof typeof koProject, string> = {
   "project.audit.detail.toggle": "Show saved params and result",
   "project.audit.detail.ticketToggle": "What changed and how",
   "project.audit.detail.params": "Tool params",
+  "project.audit.detail.prompt": "Prompt",
   "project.audit.detail.result": "Tool result",
   "project.audit.detail.lastActivity": "Last activity",
   "project.audit.detail.resolution": "Resolution summary",

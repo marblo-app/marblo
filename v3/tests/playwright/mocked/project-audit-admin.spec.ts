@@ -174,9 +174,15 @@ test("@mocked 감사 관리자 뷰: 접이식 상세는 params/result·해결요
   await rowEvidence.click();
   await expect(doneCard.getByText("툴 인자", { exact: true })).toBeVisible();
   await expect(doneCard.getByText('"OPENAI_API_KEY": "<REDACTED>"')).toBeVisible();
-  await expect(doneCard.getByText("<USER_HOME>")).toBeVisible();
-  await expect(doneCard.getByText("<EMAIL>")).toBeVisible();
-  await expect(doneCard.getByText("<API_KEY>")).toBeVisible();
+  await expect(doneCard.getByText("프롬프트", { exact: true })).toBeVisible();
+  await expect(
+    doneCard.getByText(
+      "instructionRedacted(프롬프트): <EMAIL> 계정으로 <USER_HOME>/private 리포트를 확인하고 <API_KEY> 없이 감사 상세를 보강",
+    ),
+  ).toBeVisible();
+  await expect(doneCard).toContainText("<USER_HOME>");
+  await expect(doneCard).toContainText("<EMAIL>");
+  await expect(doneCard).toContainText("<API_KEY>");
   await expect(doneCard).not.toContainText("owner@example.test");
   await expect(doneCard).not.toContainText("sk-testtesttesttesttesttesttesttest");
   await expect(doneCard).not.toContainText("/Users/alice");

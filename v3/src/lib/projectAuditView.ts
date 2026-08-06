@@ -338,6 +338,7 @@ export interface UnifiedAuditRow {
 export interface AuditRowEvidence {
   paramsJson: string | null;
   resultText: string | null;
+  instructionRedacted: string | null;
   activityText: string | null;
   resolutionText: string | null;
 }
@@ -359,12 +360,20 @@ function stableJson(value: unknown): string | null {
 }
 
 function agentRowEvidence(
-  event: Pick<AuditLog, "toolName" | "params" | "result">,
+  event: Pick<
+    AuditLog,
+    "toolName" | "params" | "result" | "instructionRedacted"
+  >,
 ): AuditRowEvidence {
   const paramsJson = stableJson(scrubValue(event.params));
   const resultText =
     typeof event.result === "string" && event.result.trim()
       ? scrubString(event.result.trim())
+      : null;
+  const instructionRedacted =
+    typeof event.instructionRedacted === "string" &&
+    event.instructionRedacted.trim()
+      ? event.instructionRedacted.trim()
       : null;
   const rawActivity =
     event.toolName === "add_activity" &&
@@ -381,6 +390,7 @@ function agentRowEvidence(
   return {
     paramsJson,
     resultText,
+    instructionRedacted,
     activityText: rawActivity ? scrubString(rawActivity) : null,
     resolutionText: rawResolution ? scrubString(rawResolution) : null,
   };

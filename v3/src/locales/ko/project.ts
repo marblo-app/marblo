@@ -215,6 +215,7 @@ export const project = {
   "project.audit.detail.toggle": "저장된 인자·결과 보기",
   "project.audit.detail.ticketToggle": "무엇을 어떻게 했나",
   "project.audit.detail.params": "툴 인자",
+  "project.audit.detail.prompt": "프롬프트",
   "project.audit.detail.result": "툴 결과",
   "project.audit.detail.lastActivity": "마지막 activity",
   "project.audit.detail.resolution": "해결 요약",

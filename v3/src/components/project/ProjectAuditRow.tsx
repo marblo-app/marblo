@@ -149,7 +149,12 @@ export function AuditEvidenceDetails({
   evidence: AuditRowEvidence | null;
 }) {
   const { t } = useTranslation();
-  if (!evidence?.paramsJson && !evidence?.resultText && !evidence?.activityText)
+  if (
+    !evidence?.paramsJson &&
+    !evidence?.resultText &&
+    !evidence?.instructionRedacted &&
+    !evidence?.activityText
+  )
     return null;
   return (
     <details className="mt-1 rounded border border-gray-800 bg-gray-950/40 px-2 py-1 text-xs text-gray-400">
@@ -167,6 +172,13 @@ export function AuditEvidenceDetails({
           <AuditEvidenceBlock
             label={t("project.audit.detail.params")}
             value={evidence.paramsJson}
+            mono
+          />
+        )}
+        {evidence.instructionRedacted && (
+          <AuditEvidenceBlock
+            label={t("project.audit.detail.prompt")}
+            value={evidence.instructionRedacted}
             mono
           />
         )}

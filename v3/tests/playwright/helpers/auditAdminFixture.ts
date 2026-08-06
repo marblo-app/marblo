@@ -188,6 +188,8 @@ export function auditAdminSeed() {
             },
             result:
               "submitted by owner@example.test with sk-testtesttesttesttesttesttesttest",
+            instructionRedacted:
+              "instructionRedacted(프롬프트): <EMAIL> 계정으로 <USER_HOME>/private 리포트를 확인하고 <API_KEY> 없이 감사 상세를 보강",
             taskId: doneTaskId,
             model: "codex",
             tier: "standard",
