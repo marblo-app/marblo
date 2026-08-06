@@ -28,7 +28,14 @@ import { saveMarketingOptIn } from "../../services/marketingConsentService";
 import { PrivacyConsentModal } from "./PrivacyConsentModal";
 
 export function PrivacyConsentGate() {
-  const { user, authSettled, humanUser, humanUserUid } = useAuth();
+  const {
+    user,
+    authSettled,
+    humanUser,
+    humanUserUid,
+    humanAuthReady,
+    getHumanIdToken,
+  } = useAuth();
   const needsPrompt = usePrivacyConsentStore((s) => s.needsPrompt);
   const hasLoaded = usePrivacyConsentStore((s) => s.hasLoaded);
   const loadedUid = usePrivacyConsentStore((s) => s.loadedUid);
@@ -42,44 +49,59 @@ export function PrivacyConsentGate() {
   const load = usePrivacyConsentStore((s) => s.load);
   const save = usePrivacyConsentStore((s) => s.save);
   const consentUid = authSettled ? humanUserUid : null;
+  const canReadConsent = !!consentUid && !!humanUser && humanAuthReady;
 
   // Load consent only after auth has settled on a human account. During app
   // startup Firebase may transiently expose non-interactive custom-token
   // identities used by agent infrastructure; those must not drive a human
   // privacy prompt or mark the store as loaded for the wrong uid.
   useEffect(() => {
-    if (!consentUid) return;
+    if (!consentUid || !humanUser || !humanAuthReady) return;
+    let cancelled = false;
 
-    // The first-run flow (FirstRunFlow) asks for consent before sign-in, so the
-    // answer is waiting in localStorage with no uid attached. Flush it instead
-    // of reading — this user answered seconds ago, that answer is authoritative,
-    // and `save` flips needsPrompt=false synchronously so the modal never
-    // flashes on top of the flow that just closed.
-    const pending = readPendingConsent();
-    if (pending) {
-      save(consentUid, pending.flags, pending.locale)
-        // Only drop the parked answer once it is durably stored. On a failed
-        // write we keep it and retry next launch — the alternative is losing
-        // the consent record server-side and re-prompting a user who already
-        // answered.
-        .then(() => clearPendingConsent())
-        .catch((err) => {
-          console.warn(
-            "[PrivacyConsentGate] pending consent flush failed:",
-            err,
-          );
-        });
-      return;
-    }
+    const run = async () => {
+      const token = await getHumanIdToken();
+      if (cancelled || !token) return;
 
-    load(consentUid).catch((err) => {
-      // Fail open with default OFF — user will see the prompt next launch.
-      // 정확한 진단을 위해 err 는 콘솔에 남긴다 (service 내부 logFirestoreError
-      // 가 이미 자세히 출력하지만, 호출 경로가 load 인지 save 인지 구분 위해
-      // 한 줄 더).
-      console.warn("[PrivacyConsentGate] load failed:", err);
+      // The first-run flow (FirstRunFlow) asks for consent before sign-in, so the
+      // answer is waiting in localStorage with no uid attached. Flush it instead
+      // of reading — this user answered seconds ago, that answer is authoritative,
+      // and `save` flips needsPrompt=false synchronously so the modal never
+      // flashes on top of the flow that just closed.
+      const pending = readPendingConsent();
+      if (pending) {
+        save(consentUid, pending.flags, pending.locale)
+          // Only drop the parked answer once it is durably stored. On a failed
+          // write we keep it and retry next launch — the alternative is losing
+          // the consent record server-side and re-prompting a user who already
+          // answered.
+          .then(() => clearPendingConsent())
+          .catch((err) => {
+            console.warn(
+              "[PrivacyConsentGate] pending consent flush failed:",
+              err,
+            );
+          });
+        return;
+      }
+
+      load(consentUid, { authReady: true }).catch((err) => {
+        // Fail open with default OFF — user will see the prompt next launch.
+        // 정확한 진단을 위해 err 는 콘솔에 남긴다 (service 내부 logFirestoreError
+        // 가 이미 자세히 출력하지만, 호출 경로가 load 인지 save 인지 구분 위해
+        // 한 줄 더).
+        console.warn("[PrivacyConsentGate] load failed:", err);
+      });
+    };
+
+    run().catch((err) => {
+      console.warn("[PrivacyConsentGate] auth readiness check failed:", err);
     });
-  }, [consentUid, load, save]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [consentUid, humanUser, humanAuthReady, getHumanIdToken, load, save]);
 
   // 가입 전 첫 실행 플로우에서 켠 마케팅 opt-in 을 uid 가 생기는 순간 flush.
   //
@@ -103,17 +125,19 @@ export function PrivacyConsentGate() {
 
   useEffect(() => {
     const showPrompt =
-      !!consentUid && hasLoaded && loadedUid === consentUid && needsPrompt;
+      canReadConsent && hasLoaded && loadedUid === consentUid && needsPrompt;
     const versionCurrent = storedVersion === CURRENT_POLICY_VERSION;
     console.info(
-      `[PrivacyConsentGate] eval uid=${consentUid} humanUid=${humanUserUid} outcome=${lastReadOutcome} version=${storedVersion || null} current=${versionCurrent} show=${showPrompt}`,
+      `[PrivacyConsentGate] eval uid=${consentUid} humanUid=${humanUserUid} authReady=${humanAuthReady} outcome=${lastReadOutcome} version=${storedVersion || null} current=${versionCurrent} show=${showPrompt}`,
     );
   }, [
     user,
     authSettled,
     humanUser,
     humanUserUid,
+    humanAuthReady,
     consentUid,
+    canReadConsent,
     hasLoaded,
     loadedUid,
     needsPrompt,
@@ -135,7 +159,12 @@ export function PrivacyConsentGate() {
   // The store defaults needsPrompt=true (fail-safe); showing that default during
   // the initial load/retry window is exactly the cold-start + macOS-wake
   // re-prompt (the renderer is discarded+reloaded on wake, resetting the store).
-  if (!consentUid || !hasLoaded || loadedUid !== consentUid || !needsPrompt) {
+  if (
+    !canReadConsent ||
+    !hasLoaded ||
+    loadedUid !== consentUid ||
+    !needsPrompt
+  ) {
     return null;
   }
   return <PrivacyConsentModal />;

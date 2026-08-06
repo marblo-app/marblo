@@ -1,4 +1,10 @@
-import { createContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   onAuthStateChanged,
   onIdTokenChanged,
@@ -48,6 +54,12 @@ export interface AuthContextType {
    */
   humanUser: User | null;
   humanUserUid: string | null;
+  /**
+   * True only when Firebase has resolved initial auth state and the current
+   * interactive user can supply an ID token for Firestore rules.
+   */
+  humanAuthReady: boolean;
+  getHumanIdToken: (forceRefresh?: boolean) => Promise<string | null>;
   loading: boolean;
   error: string | null;
   loginWithGoogle: (options?: AuthMarketingConsentOptions) => Promise<void>;
@@ -200,6 +212,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [firebaseAuthReady, setFirebaseAuthReady] = useState(false);
   // Flips true if Firebase Auth doesn't report an initial state within the
   // timeout. Rather than a dead-end error screen, we fall back to the normal
   // (signed-out) login screen and surface this as a thin banner — a new user is
@@ -222,6 +235,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAnonymous: false,
         providerData: [],
       } as unknown as User);
+      setFirebaseAuthReady(true);
       setLoading(false);
       return;
     }
@@ -246,6 +260,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (settled) return;
       settled = true;
       setInitDegraded(true);
+      setFirebaseAuthReady(false);
       setLoading(false);
     }, AUTH_INIT_TIMEOUT_MS);
 
@@ -255,12 +270,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // drop the banner so recovery is seamless.
         setInitDegraded(false);
         setUser(firebaseUser);
+        setFirebaseAuthReady(true);
         setLoading(false);
         return;
       }
       settled = true;
       clearTimeout(timeout);
       setUser(firebaseUser);
+      setFirebaseAuthReady(true);
       setLoading(false);
     });
 
@@ -274,6 +291,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         settled = true;
         clearTimeout(timeout);
         setUser(auth.currentUser);
+        setFirebaseAuthReady(true);
         setLoading(false);
       })
       .catch(() => {
@@ -305,6 +323,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setError(null);
           setInitDegraded(false);
           setUser(result.user);
+          setFirebaseAuthReady(true);
           setLoading(false);
           syncAgentFirebaseAuthForUser(
             result.user,
@@ -321,6 +340,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           settled = true;
           clearTimeout(timeout);
           setError(e instanceof Error ? e.message : t("auth.error.google"));
+          setFirebaseAuthReady(true);
           setLoading(false);
         });
     } else {
@@ -612,6 +632,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearError = () => setError(null);
   const authSettled = !loading;
   const humanUser = authSettled && isHumanAuthUser(user) ? user : null;
+  const humanAuthReady = !!humanUser && firebaseAuthReady;
+  const getHumanIdToken = useCallback(
+    async (forceRefresh = false): Promise<string | null> => {
+      await auth.authStateReady();
+      const candidate = auth.currentUser ?? user;
+      if (!isHumanAuthUser(candidate)) return null;
+      return candidate.getIdToken(forceRefresh);
+    },
+    [user],
+  );
 
   return (
     <AuthContext.Provider
@@ -620,6 +650,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         authSettled,
         humanUser,
         humanUserUid: humanUser?.uid ?? null,
+        humanAuthReady,
+        getHumanIdToken,
         loading,
         error,
         loginWithGoogle,

@@ -12,6 +12,8 @@ const authState = vi.hoisted(() => ({
     authSettled: false,
     humanUser: null as User | null,
     humanUserUid: null as string | null,
+    humanAuthReady: false,
+    getHumanIdToken: vi.fn(() => Promise.resolve("token")),
     loading: true,
     error: null as string | null,
     loginWithGoogle: vi.fn(),
@@ -88,6 +90,7 @@ function makeUser(uid: string, providerId?: string): User {
     email: providerId ? "john.kim@example.com" : null,
     emailVerified: !!providerId,
     providerData: providerId ? [{ providerId }] : [],
+    getIdToken: vi.fn(() => Promise.resolve("token")),
   } as unknown as User;
 }
 
@@ -121,6 +124,7 @@ describe("PrivacyConsentGate stable human uid gating", () => {
       authSettled: false,
       humanUser: null,
       humanUserUid: null,
+      humanAuthReady: false,
       loading: true,
     });
   });
@@ -144,6 +148,7 @@ describe("PrivacyConsentGate stable human uid gating", () => {
       authSettled: true,
       humanUser: null,
       humanUserUid: null,
+      humanAuthReady: false,
       loading: false,
     });
 
@@ -152,8 +157,34 @@ describe("PrivacyConsentGate stable human uid gating", () => {
     expect(consentService.getConsentWithRetry).not.toHaveBeenCalled();
     expect(screen.queryByTestId("privacy-consent-modal")).toBeNull();
     expect(info).toHaveBeenCalledWith(
-      "[PrivacyConsentGate] eval uid=null humanUid=null outcome=not_loaded version=null current=false show=false",
+      "[PrivacyConsentGate] eval uid=null humanUid=null authReady=false outcome=not_loaded version=null current=false show=false",
     );
+  });
+
+  it("keeps auth-not-ready empty consent reads in loading state with no prompt", () => {
+    const humanUser = makeUser(HUMAN_UID, "google.com");
+    usePrivacyConsentStore.setState({
+      consent: consentService.DEFAULT_CONSENT,
+      hasLoaded: true,
+      loadedUid: HUMAN_UID,
+      needsPrompt: true,
+      lastReadOutcome: "missing",
+      lastReadCode: null,
+    });
+    setAuth({
+      user: humanUser,
+      authSettled: true,
+      humanUser,
+      humanUserUid: HUMAN_UID,
+      humanAuthReady: false,
+      loading: false,
+    });
+
+    render(createElement(PrivacyConsentGate));
+
+    expect(authState.value.getHumanIdToken).not.toHaveBeenCalled();
+    expect(consentService.getConsentWithRetry).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("privacy-consent-modal")).toBeNull();
   });
 
   it("loads with the settled Google uid and hides prompt for current consent", async () => {
@@ -172,6 +203,7 @@ describe("PrivacyConsentGate stable human uid gating", () => {
       authSettled: true,
       humanUser,
       humanUserUid: HUMAN_UID,
+      humanAuthReady: true,
       loading: false,
     });
 
@@ -187,7 +219,95 @@ describe("PrivacyConsentGate stable human uid gating", () => {
     expect(screen.queryByTestId("privacy-consent-modal")).toBeNull();
   });
 
-  it("does not render from a stale loaded agent uid while human uid is loading", () => {
+  it("shows no prompt when auth-ready authoritative read has current consent", async () => {
+    const humanUser = makeUser(HUMAN_UID, "google.com");
+    consentService.getConsentWithRetry.mockResolvedValue({
+      status: "ok",
+      consent: {
+        ...consentService.DEFAULT_CONSENT,
+        version: consentService.CURRENT_POLICY_VERSION,
+        acceptedAt: new Date(),
+      },
+    });
+    setAuth({
+      user: humanUser,
+      authSettled: true,
+      humanUser,
+      humanUserUid: HUMAN_UID,
+      humanAuthReady: true,
+      loading: false,
+    });
+
+    render(createElement(PrivacyConsentGate));
+
+    await waitFor(() =>
+      expect(usePrivacyConsentStore.getState().hasLoaded).toBe(true),
+    );
+    expect(usePrivacyConsentStore.getState().needsPrompt).toBe(false);
+    expect(screen.queryByTestId("privacy-consent-modal")).toBeNull();
+  });
+
+  it("shows prompt when auth-ready authoritative read is genuinely missing", async () => {
+    const humanUser = makeUser(HUMAN_UID, "google.com");
+    consentService.getConsentWithRetry.mockResolvedValue({ status: "missing" });
+    setAuth({
+      user: humanUser,
+      authSettled: true,
+      humanUser,
+      humanUserUid: HUMAN_UID,
+      humanAuthReady: true,
+      loading: false,
+    });
+
+    render(createElement(PrivacyConsentGate));
+
+    await screen.findByTestId("privacy-consent-modal");
+    expect(usePrivacyConsentStore.getState().lastReadOutcome).toBe("missing");
+    expect(usePrivacyConsentStore.getState().needsPrompt).toBe(true);
+  });
+
+  it("auto-closes a stale early missing prompt after authoritative current read", async () => {
+    const humanUser = makeUser(HUMAN_UID, "google.com");
+    consentService.getConsentWithRetry.mockResolvedValue({
+      status: "ok",
+      consent: {
+        ...consentService.DEFAULT_CONSENT,
+        version: consentService.CURRENT_POLICY_VERSION,
+        acceptedAt: new Date(),
+      },
+    });
+    usePrivacyConsentStore.setState({
+      consent: consentService.DEFAULT_CONSENT,
+      hasLoaded: true,
+      loadedUid: HUMAN_UID,
+      needsPrompt: true,
+      lastReadOutcome: "missing",
+      lastReadCode: null,
+    });
+    setAuth({
+      user: humanUser,
+      authSettled: true,
+      humanUser,
+      humanUserUid: HUMAN_UID,
+      humanAuthReady: false,
+      loading: false,
+    });
+
+    const { rerender } = render(createElement(PrivacyConsentGate));
+    expect(screen.queryByTestId("privacy-consent-modal")).toBeNull();
+
+    setAuth({
+      humanAuthReady: true,
+    });
+    rerender(createElement(PrivacyConsentGate));
+
+    await waitFor(() =>
+      expect(usePrivacyConsentStore.getState().needsPrompt).toBe(false),
+    );
+    expect(screen.queryByTestId("privacy-consent-modal")).toBeNull();
+  });
+
+  it("does not render from a stale loaded agent uid while human uid is loading", async () => {
     const humanUser = makeUser(HUMAN_UID, "google.com");
     consentService.getConsentWithRetry.mockReturnValue(new Promise(() => {}));
     usePrivacyConsentStore.setState({
@@ -200,13 +320,16 @@ describe("PrivacyConsentGate stable human uid gating", () => {
       authSettled: true,
       humanUser,
       humanUserUid: HUMAN_UID,
+      humanAuthReady: true,
       loading: false,
     });
 
     render(createElement(PrivacyConsentGate));
 
     expect(screen.queryByTestId("privacy-consent-modal")).toBeNull();
-    expect(usePrivacyConsentStore.getState().loadedUid).toBe(HUMAN_UID);
+    await waitFor(() =>
+      expect(usePrivacyConsentStore.getState().loadedUid).toBe(HUMAN_UID),
+    );
     expect(usePrivacyConsentStore.getState().hasLoaded).toBe(false);
   });
 });

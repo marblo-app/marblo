@@ -14,6 +14,10 @@ import {
 
 type ConsentReadOutcome = GetConsentResult["status"] | "not_loaded";
 
+interface PrivacyConsentLoadOptions {
+  authReady?: boolean;
+}
+
 interface PrivacyConsentState {
   consent: PrivacyConsent;
   loading: boolean;
@@ -35,7 +39,7 @@ interface PrivacyConsentState {
   loadedUid: string | null;
   lastReadOutcome: ConsentReadOutcome;
   lastReadCode: string | null;
-  load: (uid: string) => Promise<void>;
+  load: (uid: string, options?: PrivacyConsentLoadOptions) => Promise<void>;
   save: (uid: string, flags: ConsentFlags, locale?: string) => Promise<void>;
   /** Local update without Firestore write — used for optimistic UI in
    *  Settings toggles. Pair with save() afterward. */
@@ -58,7 +62,8 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
     lastReadOutcome: "not_loaded",
     lastReadCode: null,
 
-    load: async (uid: string) => {
+    load: async (uid: string, options?: PrivacyConsentLoadOptions) => {
+      const authReady = options?.authReady ?? true;
       set({
         loading: true,
         hasLoaded: false,
@@ -66,12 +71,40 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
         lastReadOutcome: "not_loaded",
         lastReadCode: null,
       });
+
+      if (!authReady) {
+        // A missing/empty read before Firebase can attach an ID token is not an
+        // authoritative "no consent" result. Keep the UI in loading/no-prompt
+        // until the caller can retry with an authenticated read.
+        set({
+          loading: true,
+          hasLoaded: false,
+          loadedUid: uid,
+          needsPrompt: false,
+          lastReadOutcome: "not_loaded",
+          lastReadCode: null,
+        });
+        console.info("[PrivacyConsentStore] load outcome", {
+          requestedUid: uid,
+          authReady,
+          readOutcome: "not_loaded",
+          readCode: null,
+          storedVersion: null,
+          currentVersion: CURRENT_POLICY_VERSION,
+          versionCurrent: false,
+          cacheHit: false,
+          needsPrompt: false,
+        });
+        return;
+      }
+
       const result = await getConsentWithRetry(uid);
       const cacheHit = hasAcceptedConsentCached(uid, CURRENT_POLICY_VERSION);
 
       const diagnose = (needsPrompt: boolean, storedVersion: string | null) => {
         console.info("[PrivacyConsentStore] load outcome", {
           requestedUid: uid,
+          authReady,
           readOutcome: result.status,
           readCode: result.status === "error" ? result.code : null,
           storedVersion,
