@@ -24,8 +24,10 @@ import {
   ClipboardList,
   BarChart3,
   Ban,
+  FolderGit2,
 } from "lucide-react";
 import AnalyticsPanel from "./AnalyticsPanel";
+import ProjectAuditPanel from "./ProjectAuditPanel";
 
 // 신청 목록 항목 (getFounderWaitlist 함수 응답; 날짜는 ISO 문자열).
 // 서버가 정규화 이메일 기준으로 중복 신청을 1건(최신)으로 접어서 내려준다.
@@ -140,7 +142,13 @@ const BUG_STATUS_LABEL: Record<BugReportStatus, string> = {
 };
 
 const BUG_STATUS_ORDER: BugReportStatus[] = ["new", "triaged", "resolved"];
-type AdminTab = "waitlist" | "founders" | "candidates" | "bugs" | "analytics";
+type AdminTab =
+  | "waitlist"
+  | "founders"
+  | "candidates"
+  | "bugs"
+  | "analytics"
+  | "projects";
 
 const ADMIN_TABS: Array<{
   id: AdminTab;
@@ -152,6 +160,7 @@ const ADMIN_TABS: Array<{
   { id: "candidates", label: "인터뷰 후보", icon: Video },
   { id: "bugs", label: "버그 신고", icon: Bug },
   { id: "analytics", label: "사업 분석", icon: BarChart3 },
+  { id: "projects", label: "프로젝트 감사", icon: FolderGit2 },
 ];
 
 // V2 루브릭 5차원 정의 (BETA-INCENTIVE-MODEL-V2 §5). 가중치는 총점 계산과 표시용.
@@ -849,7 +858,9 @@ export default function AdminPage() {
     <div className="min-h-screen bg-zinc-950 text-zinc-100 py-16 px-4">
       <div
         className={`${
-          activeTab === "analytics" ? "max-w-6xl" : "max-w-4xl"
+          activeTab === "analytics" || activeTab === "projects"
+            ? "max-w-6xl"
+            : "max-w-4xl"
         } mx-auto space-y-8`}
       >
         {/* Header */}
@@ -1590,6 +1601,9 @@ export default function AdminPage() {
 
         {/* 사업 분석 대시보드 */}
         {activeTab === "analytics" && <AnalyticsPanel />}
+
+        {/* 프로젝트 감사 — 읽기 전용 관찰 뷰(Phase1). 자체 로딩·에러를 갖는다. */}
+        {activeTab === "projects" && <ProjectAuditPanel />}
       </div>
 
       {/* 버그 신고 상세 모달 */}

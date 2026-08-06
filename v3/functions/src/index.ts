@@ -30,6 +30,7 @@ import {
   type HarnessAgentRow,
   type CostByDayModelSourceRow,
 } from "./adminAnalytics";
+import { buildProjectAudit, toMillis } from "./projectAudit";
 import {
   verifyPaddleSignature,
   classifyTossPaymentResponse,
@@ -2508,10 +2509,7 @@ export const submitExperienceShareSurvey = functions.https.onCall(
       );
     }
 
-    const liked = normalizeShortText(
-      (data as { liked?: unknown }).liked,
-      1000,
-    );
+    const liked = normalizeShortText((data as { liked?: unknown }).liked, 1000);
     const improvements = normalizeShortText(
       (data as { improvements?: unknown }).improvements,
       1000,
@@ -2523,7 +2521,9 @@ export const submitExperienceShareSurvey = functions.https.onCall(
       );
     }
 
-    const shareUrl = normalizeHttpUrl((data as { shareUrl?: unknown }).shareUrl);
+    const shareUrl = normalizeHttpUrl(
+      (data as { shareUrl?: unknown }).shareUrl,
+    );
     if (!shareUrl) {
       throw new functions.https.HttpsError(
         "invalid-argument",
@@ -9906,5 +9906,226 @@ export const mirrorMarketingContactsToBq = functions.https.onCall(
   async (_data, context) => {
     requireAdmin(context);
     return mirrorMarketingContactsToBqInternal();
+  },
+);
+
+// ════════════════════════════════════════════════════════════════════════════
+// 어드민 프로젝트 감사 (읽기 전용) — marblo.app/admin "프로젝트 감사" 탭
+// ════════════════════════════════════════════════════════════════════════════
+// 앱(Electron)의 ProjectAuditPanel 계열이 주던 프로젝트 운영 관찰가능성을 웹
+// 어드민으로 넓힌다. 기존 어드민 표면은 전부 비즈니스 축(파운더·대기자·버그·BQ)
+// 이라 tasks/agents/missions/원장은 웹에서 아예 볼 수 없었다.
+//
+// ★왜 콜러블인가 (클라 직접 Firestore read 가 아니라)
+//   Firestore 룰은 쿼리 결과의 **모든** 문서가 통과해야 쿼리를 허용한다. 웹 클라에
+//   admin 분기를 열면 클라 쿼리 제약이 룰과 조금이라도 어긋나는 순간 쿼리 전체가
+//   permission-denied 로 죽는다(#406/#428 의 실패 모드). 그래서 **룰은 한 줄도
+//   건드리지 않고**, 서버가 Admin SDK 로 읽어 조립한 뷰만 내려보낸다.
+//
+// ★범위: Phase1 = read only. 이 핸들러에는 write 경로가 아예 없다.
+// ★판정·집계·마스킹은 전부 projectAudit.ts(순수, node --test)에 있다. 여기서는
+//   Firestore fetch 와 실패 격리만 한다.
+
+/** 컬렉션당 스캔 상한. 감사 뷰는 최근 활동을 보는 화면이라 전량 스캔하지 않는다. */
+const AUDIT_TASK_SCAN_LIMIT = 500;
+const AUDIT_AGENT_SCAN_LIMIT = 300;
+const AUDIT_ACTIVITY_SCAN_LIMIT = 500;
+const AUDIT_LEDGER_SCAN_LIMIT = 500;
+const AUDIT_MISSION_SCAN_LIMIT = 200;
+const AUDIT_MERGE_SCAN_LIMIT = 200;
+const AUDIT_PROJECT_SCAN_LIMIT = 200;
+
+function auditDocs(
+  snap: FirebaseFirestore.QuerySnapshot,
+): Array<Record<string, unknown> & { id: string }> {
+  return snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+}
+
+/**
+ * 쿼리 하나가 실패해도(인덱스 부재 등) 화면 전체를 죽이지 않는다 — 감사 뷰에서
+ * 조용한 누락은 나쁘지만, 한 소스 때문에 나머지를 못 보는 것도 나쁘다. 실패는
+ * 빈 배열 + `ok:false` 로 돌려 호출부가 notes 에 그 사실을 **밝히게** 한다.
+ */
+async function auditQuery(
+  label: string,
+  run: () => Promise<FirebaseFirestore.QuerySnapshot>,
+): Promise<{
+  ok: boolean;
+  docs: Array<Record<string, unknown> & { id: string }>;
+}> {
+  try {
+    return { ok: true, docs: auditDocs(await run()) };
+  } catch (err) {
+    functions.logger.warn(
+      `[getAdminProjectAudit] ${label} 조회 실패: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return { ok: false, docs: [] };
+  }
+}
+
+export const getAdminProjectAudit = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+
+    const requestedProjectId =
+      typeof data?.projectId === "string" && data.projectId.trim() !== ""
+        ? data.projectId.trim()
+        : null;
+    const timelineLimit = Math.min(
+      500,
+      Math.max(20, Math.floor(Number(data?.timelineLimit) || 0) || 200),
+    );
+
+    // 1) 프로젝트 목록 — 셀렉터용. 정렬은 최신 갱신순.
+    const projectsRes = await auditQuery("projects", () =>
+      db
+        .collection("projects")
+        .orderBy("updatedAt", "desc")
+        .limit(AUDIT_PROJECT_SCAN_LIMIT)
+        .get(),
+    );
+    // orderBy 가 인덱스/필드 부재로 실패하면 무정렬로 한 번 더 시도한다 —
+    // 정렬 실패 때문에 프로젝트 목록 자체가 비면 화면이 통째로 못 뜬다.
+    const projects = projectsRes.ok
+      ? projectsRes.docs
+      : (
+          await auditQuery("projects(unordered)", () =>
+            db.collection("projects").limit(AUDIT_PROJECT_SCAN_LIMIT).get(),
+          )
+        ).docs;
+
+    // 요청이 없으면 첫 프로젝트를 기본 선택(빈 화면 대신 무언가 보이게).
+    const projectId =
+      requestedProjectId ?? (projects.length > 0 ? projects[0].id : null);
+
+    if (!projectId) {
+      return buildProjectAudit({
+        projects,
+        projectId: null,
+        tasks: [],
+        agents: [],
+        activities: [],
+        ledger: [],
+        missions: [],
+        merges: [],
+        agentsLoaded: true,
+        timelineLimit,
+      });
+    }
+
+    // 2) 프로젝트 축 소스들. 서로 독립이라 병렬로 읽는다.
+    const [tasksRes, agentsRes, missionsRes, ledgerRes, mergesRes] =
+      await Promise.all([
+        auditQuery("tasks", () =>
+          db
+            .collection("tasks")
+            .where("projectId", "==", projectId)
+            .limit(AUDIT_TASK_SCAN_LIMIT)
+            .get(),
+        ),
+        auditQuery("agents", () =>
+          db
+            .collection("agents")
+            .where("projectId", "==", projectId)
+            .limit(AUDIT_AGENT_SCAN_LIMIT)
+            .get(),
+        ),
+        auditQuery("missions", () =>
+          db
+            .collection("missions")
+            .where("projectId", "==", projectId)
+            .limit(AUDIT_MISSION_SCAN_LIMIT)
+            .get(),
+        ),
+        auditQuery("audit_logs", () =>
+          db
+            .collection("audit_logs")
+            .where("projectId", "==", projectId)
+            .orderBy("createdAt", "desc")
+            .limit(AUDIT_LEDGER_SCAN_LIMIT)
+            .get(),
+        ),
+        auditQuery("merge_history", () =>
+          db
+            .collection("merge_history")
+            .where("projectId", "==", projectId)
+            .limit(AUDIT_MERGE_SCAN_LIMIT)
+            .get(),
+        ),
+      ]);
+
+    // 3) 활동은 taskId 축이라 이 프로젝트의 티켓 id 로 조회한다.
+    //    `in` 절은 30개 상한이라 청크로 나눈다. 티켓이 많으면 최근 갱신순 상위만
+    //    본다 — 잘린 사실은 아래 notes 에 남긴다.
+    const taskIds = tasksRes.docs.map((t) => t.id);
+    const ACTIVITY_TASK_CAP = 90; // 30 × 3 청크
+    const orderedTaskIds = [...tasksRes.docs]
+      .sort((a, b) => {
+        const av = toMillis(a.updatedAt) ?? 0;
+        const bv = toMillis(b.updatedAt) ?? 0;
+        return bv - av;
+      })
+      .map((t) => t.id);
+    const activityTaskIds = orderedTaskIds.slice(0, ACTIVITY_TASK_CAP);
+
+    const activityChunks: string[][] = [];
+    for (let i = 0; i < activityTaskIds.length; i += 30) {
+      activityChunks.push(activityTaskIds.slice(i, i + 30));
+    }
+    const activityResults = await Promise.all(
+      activityChunks.map((chunk, i) =>
+        auditQuery(`activities[${i}]`, () =>
+          db
+            .collection("activities")
+            .where("taskId", "in", chunk)
+            .limit(AUDIT_ACTIVITY_SCAN_LIMIT)
+            .get(),
+        ),
+      ),
+    );
+    const activities = activityResults.flatMap((r) => r.docs);
+
+    const result = buildProjectAudit({
+      projects,
+      projectId,
+      tasks: tasksRes.docs,
+      agents: agentsRes.docs,
+      activities,
+      ledger: ledgerRes.docs,
+      missions: missionsRes.docs,
+      merges: mergesRes.docs,
+      // ★에이전트 조회가 실패했으면 "살아있는 에이전트가 없다"가 아니라
+      //   "모른다" 다. 그 구분이 고아 클레임 오경보를 막는다.
+      agentsLoaded: agentsRes.ok,
+      timelineLimit,
+    });
+
+    // 4) 부분 실패·절단을 화면에 정직하게 밝힌다(조용한 누락 금지).
+    const failed: string[] = [];
+    if (!tasksRes.ok) failed.push("티켓");
+    if (!agentsRes.ok) failed.push("에이전트");
+    if (!missionsRes.ok) failed.push("미션");
+    if (!ledgerRes.ok) failed.push("원장");
+    if (!mergesRes.ok) failed.push("머지 내역");
+    if (activityResults.some((r) => !r.ok)) failed.push("활동");
+    if (failed.length > 0) {
+      result.notes.push(
+        `일부 소스를 읽지 못했다: ${failed.join(", ")}. 해당 칸은 비어 보일 수 있다(0 이 아니라 '모름').`,
+      );
+    }
+    if (taskIds.length > activityTaskIds.length) {
+      result.notes.push(
+        `활동 타임라인은 최근 갱신 티켓 ${activityTaskIds.length}건 기준이다(전체 ${taskIds.length}건).`,
+      );
+    }
+    if (tasksRes.docs.length >= AUDIT_TASK_SCAN_LIMIT) {
+      result.notes.push(
+        `티켓 스캔이 상한 ${AUDIT_TASK_SCAN_LIMIT}건에서 잘렸다 — 요약 수치는 이 표본 기준이다.`,
+      );
+    }
+
+    return result;
   },
 );
