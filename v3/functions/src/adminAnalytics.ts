@@ -6,8 +6,9 @@
 //   1) includeAdmin 토글 — 운영자(존킴) 제외를 하드코딩에서 파라미터로. 기본 false
 //      (제외). 값이 정확히 true 일 때만 포함한다(구버전 web 이 param 을 안 보내면
 //      undefined → false → 기존 동작 유지 = 하위호환).
-//   2) 온보딩 "첫 10분" 퍼널 — app:first_run → login → folder_connected →
-//      orchestrator_opened → agent:spawned 의 단계별 도달·이탈 + 실패분기 분해.
+//   2) 온보딩 활성화 퍼널 — app:first_run → login → folder_connected →
+//      orchestrator_opened → agent:spawned → first ticket completed 의 순차
+//      도달·이탈 + 실패분기 분해.
 
 // ── includeAdmin 파싱 ────────────────────────────────────────────────────────
 // 기본 false(제외 유지). 오직 boolean true 만 "포함". 문자열 "true" 등은 받지
@@ -66,18 +67,12 @@ export function metricCountExpr(
   return "COUNT(*)";
 }
 
-// ── 온보딩 첫10분 퍼널 ───────────────────────────────────────────────────────
+// ── 온보딩 활성화 퍼널 ───────────────────────────────────────────────────────
 //
-// 측정 방식(정직성): 각 단계에 "도달한 고유 clientId 수"(distinct userId)로 센다.
-// beta-churn 분석(§1-B, session:started 22 → agent:spawned 6)과 동일한 방법론이다.
-// ★엄격 순차(prior-all-reached)가 아니다 — 익명 clientId + auth-gated flush 한계
-// (로그인 전 이벤트는 다음 로그인 성공 때 함께 flush)로 순차 조인은 과소계상 위험.
-// 그래서 "단계별 도달(reach)"로 읽고, 인접 단계 감소를 이탈로 표기한다.
-//
-// ★비단조(non-monotonic) 정상: folder_connected=0 인데 orchestrator_opened>0 이
-// 나올 수 있다(관측 세션 전부 resumed:true = 기존 프로젝트 재개라 신규 폴더연결
-// 경로 미실행 — onboarding live-verify 문서 §4 참조). 이때 drop 은 음수가 아니라
-// 0 으로 clamp 하고, reach 값 자체는 있는 그대로 노출한다(왜곡 금지).
+// 측정 방식(정직성): BigQuery 쿼리가 각 identity(신규 accountUserId, 과거 row 는
+// clientId 폴백)별 최초 이벤트 시각을 조인해 "앞 단계에 도달한 사람 중 다음 단계도
+// 24h/7d 창 안에 도달한 사람"만 넘긴다. 그래서 steps 는 항상 단조 감소해야 하며,
+// task_completed 는 헤드라인 activatedClients 와 같은 스칼라를 읽는다.
 
 export type OnboardingStepKey =
   | "first_run"
@@ -232,15 +227,16 @@ export type FailureBranch = {
   byCategory: Array<{ key: string; count: number; clients: number }>;
 };
 
-// ★헤드라인 활성화 지표 — "가입 후 N분 내 오케 티켓을 에이전트가 1개+ 완료한
-// 사용자 비율". 분자=시간창 내 활성화한 고유 client, 분모=가입(로그인 성공)
-// 고유 client. 시간창 조인(min task_completed ts − min login_success ts ≤ N분)은
-// index.ts 가 BQ 로 계산해 d_activated_30m / d_signup_base 스칼라로 넘긴다.
+// ★헤드라인 활성화 지표 — "가입 후 N시간 내 오케 티켓을 에이전트가 1개+ 완료한
+// 사용자 비율". 분자=시간창 내 활성화한 고유 사용자(identity), 분모=가입(로그인 성공)
+// 고유 사용자. 시간창 조인은 index.ts 가 BQ 로 계산해 d_activated_30m /
+// d_signup_base 스칼라로 넘긴다. 컬럼명은 하위호환 때문에 30m 를 유지하지만, 창은
+// 기본 24h(1440분)이다.
 export type ActivationHeadline = {
-  activatedClients: number; // 분자: N분 내 첫 티켓 완료
+  activatedClients: number; // 분자: 시간창 내 첫 티켓 완료
   baseClients: number; // 분모: 가입(로그인 성공) 고유 client
   rate: number | null; // activated / base (base=0 이면 null)
-  windowMinutes: number; // 시간창(분). 기본 30
+  windowMinutes: number; // 시간창(분). 기본 1440(24h)
   label: string;
 };
 
@@ -254,7 +250,7 @@ export type OnboardingFunnelResult = {
 // 헤드라인 계산(순수). row 의 d_activated_30m / d_signup_base 를 읽어 비율을 낸다.
 export function buildActivationHeadline(
   row: FunnelCountsRow | undefined | null,
-  windowMinutes = 30,
+  windowMinutes = 24 * 60,
 ): ActivationHeadline {
   const safeRow = row ?? {};
   const activatedClients = coerceNumber(safeRow["d_activated_30m"]);
@@ -264,7 +260,10 @@ export function buildActivationHeadline(
     baseClients,
     rate: baseClients > 0 ? activatedClients / baseClients : null,
     windowMinutes,
-    label: `가입 후 ${windowMinutes}분 내 오케 티켓을 에이전트가 1개+ 완료한 사용자 비율`,
+    label:
+      windowMinutes % 60 === 0
+        ? `가입 후 ${windowMinutes / 60}시간 내 오케 티켓을 에이전트가 1개+ 완료한 사용자 비율`
+        : `가입 후 ${windowMinutes}분 내 오케 티켓을 에이전트가 1개+ 완료한 사용자 비율`,
   };
 }
 
@@ -371,13 +370,12 @@ export function buildOnboardingFunnel(
     failureBranches,
     headline: buildActivationHeadline(safeRow),
     note:
-      "단계별 '도달 고유 clientId' 기준(엄격 순차 아님). folder_connected 미도달인데 " +
-      "orchestrator_opened 가 잡히면 기존 프로젝트 resume 경로(신규 폴더연결 미실행)다. " +
-      "로그인-이전 이벤트는 다음 로그인 성공 때 함께 flush 되어, 끝내 로그인 못 한 " +
-      "유저의 실패는 과소계상될 수 있다. 스폰 이후 활성화 단계(첫 티켓 완료·핵심경험· " +
-      "7일 잔존)는 reach 본선의 엄격 부분집합이 아니라 각 단계 절대값을 우선으로 읽는다 " +
-      "(예: 단일 스폰으로 티켓을 끝낸 유저는 '첫 티켓 완료'엔 있어도 '핵심경험(스폰2회+)'엔 " +
-      "없다). 헤드라인 활성화율은 가입(로그인 성공)한 유저 중 30분 내 첫 티켓 완료 비율이다.",
+      "순차 퍼널 기준: 각 단계는 앞 단계 도달자의 부분집합이다. 신규 row 는 " +
+      "accountUserId 기준으로 dedup 하고, 과거 row 는 BigQuery events.userId 에 남은 " +
+      "익명 clientId 로 폴백한다. 로그인-이전 이벤트는 다음 로그인 성공 때 함께 flush " +
+      "되어, 끝내 로그인 못 한 유저의 실패는 과소계상될 수 있다. 헤드라인 활성화율은 " +
+      "가입(로그인 성공)한 유저 중 24시간 내 첫 티켓 완료 비율이며, 첫 티켓 완료 단계와 " +
+      "같은 분자를 사용한다. 운영자 도그푸딩은 includeAdmin=false 기본값에서 제외된다.",
   };
 }
 
@@ -459,8 +457,8 @@ export function computeNpsFromStars(
 // ── 베타종료 게이지 6종(현재값 vs 목표) ──────────────────────────────────────
 // 활성화 전략 메모(activation_first_and_metrics_based_beta_exit_2026_07)의 지표기반
 // 종료 기준을 게이지로 만든다. 목표치는 메모 준수:
-//   CLI인증 80% · 첫프로젝트 60% · 첫티켓 50% · 7일잔존 30% · NPS 40+ · 30분율.
-// ★30분내 첫완료율은 헤드라인(가입 30분내 첫티켓완료 = 핵심 KPI)이며, 메모에
+//   CLI인증 80% · 첫프로젝트 60% · 첫티켓 50% · 7일잔존 30% · NPS 40+ · 활성화율.
+// ★24시간내 첫완료율은 헤드라인(가입 24h내 첫티켓완료 = 핵심 KPI)이며, 메모에
 // 숫자 목표가 명시돼 있지 않아 잠정 기본값 0.30 을 둔다(CEO 확정 시 이 상수만 조정).
 export type BetaExitGaugeKey =
   | "cli_auth_success"
@@ -532,7 +530,7 @@ const BETA_EXIT_GAUGE_META: ReadonlyArray<{
   // satisfaction_nps 는 별점 분포에서 별도 계산 — 아래 buildBetaExitGauges 에서 주입.
   {
     key: "activation_30m",
-    label: "가입 30분내 첫완료율",
+    label: "가입 24시간내 첫완료율",
     unit: "rate",
     numCol: "d_activated_30m",
     denCol: "d_signup_base",

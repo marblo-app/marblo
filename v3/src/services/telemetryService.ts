@@ -184,13 +184,11 @@ const CLIENT_ID_KEY = "marblo.telemetry.clientId";
 
 /**
  * Stable, anonymous per-install identifier. Random UUID persisted in
- * localStorage and NEVER linked to the Firebase account — there is no
- * mapping table anywhere. This is what lets us honestly call the 1st-party
- * BigQuery telemetry 비식별(익명): rows carry this id, never the auth uid.
- * Clearing storage just mints a new id, which is fine for aggregate analytics.
+ * localStorage. BigQuery rows keep this as the de-identified row key, while the
+ * callable adds a server-side accountUserId into metadata for admin-only user
+ * dedup. Clearing storage still mints a new install id.
  *
- * Shared with taskService so the task-outcome ML rows use the same anonymous
- * id instead of the account uid.
+ * Shared with taskService so the task-outcome ML rows use the same install id.
  */
 export function getClientId(): string {
   try {

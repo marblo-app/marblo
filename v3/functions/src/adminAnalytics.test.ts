@@ -139,26 +139,25 @@ test("funnel: computes drop-off and flags the single largest drop (22→6 shape)
   assert.equal(byKey.agent_spawned.clients, 6);
 });
 
-test("funnel: non-monotonic reach (resume path) clamps drop to 0, keeps reach honest", () => {
-  // folder_connected=0 인데 orchestrator_opened=6 (전부 resumed:true).
+test("funnel: sequential rows stay monotonic across every stage", () => {
   const row = {
-    d_first_run: 6,
-    d_login_attempt: 6,
-    d_login_success: 6,
-    d_folder_connected: 0,
-    d_orchestrator_opened: 6,
-    d_agent_spawned: 5,
+    d_first_run: 10,
+    d_login_attempt: 9,
+    d_login_success: 8,
+    d_folder_connected: 6,
+    d_orchestrator_opened: 5,
+    d_agent_spawned: 4,
+    d_task_completed: 3,
+    d_core_experience: 2,
+    d_retained_7d: 1,
   };
   const f = buildOnboardingFunnel(row, []);
-  const byKey = Object.fromEntries(f.steps.map((s) => [s.key, s]));
-  // reach 는 있는 그대로.
-  assert.equal(byKey.folder_connected.clients, 0);
-  assert.equal(byKey.orchestrator_opened.clients, 6);
-  // folder(0) → orch(6) 는 증가라 drop=0 (음수 clamp).
-  assert.equal(byKey.orchestrator_opened.dropFromPrev, 0);
-  // 최대 이탈은 login_success(6) → folder_connected(0) = 6.
-  assert.equal(byKey.folder_connected.dropFromPrev, 6);
-  assert.equal(byKey.folder_connected.isMaxDrop, true);
+  for (let i = 1; i < f.steps.length; i += 1) {
+    assert.ok(
+      f.steps[i].clients <= f.steps[i - 1].clients,
+      `${f.steps[i].key} must be <= ${f.steps[i - 1].key}`,
+    );
+  }
 });
 
 test("funnel: failure branches decompose errorCategory (cli_auth vs launch_error)", () => {
@@ -215,7 +214,7 @@ test("funnel: post-spawn activation steps read injected scalars, tagged 'activat
     d_orchestrator_opened: 8,
     d_agent_spawned: 8,
     n_agent_spawned: 30,
-    // 활성화 단계 — index.ts 가 별도 subquery 로 주입하는 스칼라.
+    // 활성화 단계 — index.ts 순차 CTE 가 주입하는 스칼라.
     d_task_completed: 5,
     n_task_completed: 12,
     d_core_experience: 4, // 스폰 2회+
@@ -238,15 +237,15 @@ test("funnel: post-spawn activation steps read injected scalars, tagged 'activat
 });
 
 test("funnel: max-drop stays within reach steps, never an activation step", () => {
-  // agent_spawned(20) → task_completed(1) 은 drop 19 로 최대치지만 activation 이라
-  // isMaxDrop 후보에서 제외 — 본선 최대 이탈(login_success 18 → folder 3 = 15)이 남는다.
+  // activation 감소는 isMaxDrop 후보에서 제외 — 본선 최대 이탈
+  // (login_success 18 → folder 3 = 15)이 남는다.
   const row = {
     d_first_run: 22,
     d_login_attempt: 21,
     d_login_success: 18,
     d_folder_connected: 3,
-    d_orchestrator_opened: 21,
-    d_agent_spawned: 20,
+    d_orchestrator_opened: 3,
+    d_agent_spawned: 3,
     d_task_completed: 1,
     d_core_experience: 1,
     d_retained_7d: 0,
@@ -254,7 +253,7 @@ test("funnel: max-drop stays within reach steps, never an activation step", () =
   const f = buildOnboardingFunnel(row, []);
   const byKey = Object.fromEntries(f.steps.map((s) => [s.key, s]));
   // drop 값 자체는 activation 에도 계산된다(참고용).
-  assert.equal(byKey.task_completed.dropFromPrev, 19);
+  assert.equal(byKey.task_completed.dropFromPrev, 2);
   // 그러나 최대 이탈 플래그는 reach 안에서만.
   const flagged = f.steps.filter((s) => s.isMaxDrop);
   assert.equal(flagged.length, 1);
@@ -262,14 +261,14 @@ test("funnel: max-drop stays within reach steps, never an activation step", () =
   assert.equal(flagged[0].kind, "reach");
 });
 
-// ── buildActivationHeadline (★가입 후 30분내 첫 티켓 완료 비율) ──────────────
-test("headline: rate = activated / signup base, 30min window", () => {
+// ── buildActivationHeadline (★가입 후 24h내 첫 티켓 완료 비율) ──────────────
+test("headline: rate = activated / signup base, 24h window", () => {
   const h = buildActivationHeadline({ d_activated_30m: 3, d_signup_base: 12 });
   assert.equal(h.activatedClients, 3);
   assert.equal(h.baseClients, 12);
   assert.equal(h.rate, 3 / 12);
-  assert.equal(h.windowMinutes, 30);
-  assert.match(h.label, /30분/);
+  assert.equal(h.windowMinutes, 24 * 60);
+  assert.match(h.label, /24시간/);
 });
 
 test("headline: base 0 yields null rate (no divide-by-zero)", () => {
@@ -285,17 +284,21 @@ test("headline: absent row is all-zero, null rate; custom window respected", () 
   assert.equal(h.baseClients, 0);
   assert.equal(h.rate, null);
   assert.equal(h.windowMinutes, 60);
-  assert.match(h.label, /60분/);
+  assert.match(h.label, /1시간/);
 });
 
 test("funnel: result carries headline built from same row", () => {
   const f = buildOnboardingFunnel(
-    { d_activated_30m: 4, d_signup_base: 10 },
+    { d_task_completed: 4, d_activated_30m: 4, d_signup_base: 10 },
     [],
   );
   assert.equal(f.headline.activatedClients, 4);
   assert.equal(f.headline.baseClients, 10);
   assert.equal(f.headline.rate, 0.4);
+  assert.equal(
+    f.steps.find((s) => s.key === "task_completed")?.clients,
+    f.headline.activatedClients,
+  );
 });
 
 // ════════════════════════════════════════════════════════════════════════════

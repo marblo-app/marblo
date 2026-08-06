@@ -4824,16 +4824,20 @@ const DISPATCH_DECISION_META_KEYS = [
  *     JSON_VALUE(metadata,'$.selectedModel'), JSON_QUERY(metadata,
  *     '$.perModelScores') to slice/join against cost_logs.taskId + outcomes.
  */
-function buildMetadata(e: TelemetryRow): string | null {
+function buildMetadata(e: TelemetryRow, accountUserId?: string): string | null {
   const base =
     e.metadata != null
       ? typeof e.metadata === "string"
         ? safeParseObject(e.metadata)
         : (e.metadata as Record<string, unknown>)
       : {};
+  const withAccountUser =
+    accountUserId != null && accountUserId !== ""
+      ? { ...base, accountUserId }
+      : base;
 
   if (e.event === "dispatch:decision") {
-    const decision: Record<string, unknown> = { ...base };
+    const decision: Record<string, unknown> = { ...withAccountUser };
     const row = e as unknown as Record<string, unknown>;
     for (const key of DISPATCH_DECISION_META_KEYS) {
       const v = row[key];
@@ -4842,10 +4846,9 @@ function buildMetadata(e: TelemetryRow): string | null {
     return Object.keys(decision).length > 0 ? JSON.stringify(decision) : null;
   }
 
-  if (e.metadata == null) return null;
-  return typeof e.metadata === "string"
-    ? e.metadata
-    : JSON.stringify(e.metadata);
+  return Object.keys(withAccountUser).length > 0
+    ? JSON.stringify(withAccountUser)
+    : null;
 }
 
 /** Parse a JSON object string, returning {} on anything non-object/invalid. */
@@ -4885,6 +4888,7 @@ export const logTelemetryBatch = functions.https.onCall(
     // uid. The events table is 비식별(익명): the `userId` column now holds the
     // client-supplied anonymous install id, never the Firebase account uid.
     const now = new Date().toISOString();
+    const accountUserId = context.auth.uid;
 
     const rows = events.map((e) => ({
       event: e.event,
@@ -4910,7 +4914,7 @@ export const logTelemetryBatch = functions.https.onCall(
       exitCode: e.exitCode ?? null,
       nodeType: e.nodeType || null,
       nodeCount: e.nodeCount ?? null,
-      metadata: buildMetadata(e),
+      metadata: buildMetadata(e, accountUserId),
       // ML-ready columns
       taskType: e.taskType || null,
       taskComplexity: e.taskComplexity ?? null,
@@ -5990,9 +5994,11 @@ function parseSegmentKey(data: unknown): string {
 //     지운다. 단 cost_logs(uid 보유) 와 agentId 가 같은 공간이라, 어드민이
 //     소유한 agentId 로 events 를 역참조하면 어드민 clientId 를 유추할 수 있다.
 //     그 유추분만 제외한다(실패해도 대시보드는 살아야 하므로 fail-open).
+const DEFAULT_DOGFOOD_UID = "RSALO1rljtWBSZ70MoBiaeFORxr1";
+
 function getAdminExclusionUid(): string | null {
   const uid = process.env.ADMIN_UID?.trim();
-  return uid ? uid : null;
+  return uid ? uid : DEFAULT_DOGFOOD_UID;
 }
 
 // 어드민 uid 가 소유한 agentId → events.userId(익명 clientId) 역참조.
@@ -6049,6 +6055,24 @@ function adminClientExclusion(clientIds: string[]): {
   return {
     clause: " AND (userId IS NULL OR userId NOT IN UNNEST(@excludeClients))",
     params: { excludeClients: clientIds },
+  };
+}
+
+// events 테이블 전용 제외 절. 신규 row 는 metadata.accountUserId 로 존킴/어드민을
+// 정확 제외하고, 과거 row 는 clientId 역참조 목록으로 제외한다.
+function adminEventExclusion(clientIds: string[]): {
+  clause: string;
+  params: Record<string, unknown>;
+} {
+  const clientEx = adminClientExclusion(clientIds);
+  const adminUid = getAdminExclusionUid();
+  if (!adminUid) return clientEx;
+  return {
+    clause:
+      clientEx.clause +
+      " AND (JSON_VALUE(metadata, '$.accountUserId') IS NULL" +
+      " OR JSON_VALUE(metadata, '$.accountUserId') != @excludeAccountUserId)",
+    params: { ...clientEx.params, excludeAccountUserId: adminUid },
   };
 }
 
@@ -6465,7 +6489,7 @@ export const getAdminUsageSummary = functions.https.onCall(
     const adminClientIds = await resolveAdminClientIds(rangeDays);
     const ex = includeAdmin
       ? EMPTY_EXCLUSION
-      : adminClientExclusion(adminClientIds);
+      : adminEventExclusion(adminClientIds);
     // BQ events/task_outcomes 의 timestamp/completedAt 은 STRING 으로 적재돼
     // 있어 TIMESTAMP 리터럴과 직접 비교하면 타입 불일치로 쿼리가 실패한다.
     // SAFE_CAST 로 감싸 비교·DATE() 추출이 동작하게 한다(파싱 실패는 NULL→제외).
@@ -6618,17 +6642,19 @@ export const getAdminUsageSummary = functions.https.onCall(
 );
 
 /**
- * getAdminOnboardingFunnel — 온보딩 "첫 10분" 활성화 퍼널(🟡 BQ events).
+ * getAdminOnboardingFunnel — 온보딩 24h 활성화 퍼널(🟡 BQ events).
  *
  * app:first_run → auth:login_attempt → auth:login_success →
  * onboarding:folder_connected → onboarding:orchestrator_opened → agent:spawned
- * 의 단계별 "도달 고유 clientId"와 인접 단계 이탈을 집계하고, 실패-분기
+ * 의 단계별 순차 도달 고유 identity(accountUserId 우선, 과거 clientId 폴백)와
+ * 인접 단계 이탈을 집계하고, 실패-분기
  * (login_failed / folder_connect_failed / orchestrator_blocked / agent:crashed)를
  * errorCategory 로 분해한다(★orchestrator_blocked 의 cli_auth vs launch_error 등).
  *
- * 측정·한계는 buildOnboardingFunnel 의 note 참조(엄격 순차 아님, auth-gated flush).
- * 익명 clientId 공간 — 개인 식별/PII 미노출, 카운트만. 운영자 제외는 상위 콜러블과
- * 동일하게 includeAdmin(기본 false=제외) 토글을 따른다.
+ * 측정·한계는 buildOnboardingFunnel 의 note 참조(auth-gated flush).
+ * 신규 row 는 서버가 metadata.accountUserId 를 주입해 계정 기준으로 dedup 하고,
+ * 과거 row 는 익명 clientId 로 폴백한다. 운영자 제외는 includeAdmin(기본 false=제외)
+ * 토글을 따른다.
  *
  * params: { days?: number, includeAdmin?: boolean } (기본 30, 제외)
  */
@@ -6643,24 +6669,17 @@ export const getAdminOnboardingFunnel = functions
     const adminClientIds = await resolveAdminClientIds(rangeDays);
     const ex = includeAdmin
       ? EMPTY_EXCLUSION
-      : adminClientExclusion(adminClientIds);
+      : adminEventExclusion(adminClientIds);
     // events.timestamp 는 BigQuery TIMESTAMP 컬럼이다. 컬럼을 함수로 감싸면
     // 파티션/클러스터 프루닝이 약해질 수 있어 직접 비교한다.
     const eventTs = "timestamp";
 
-    // 단일 스캔으로 정확히 뽑히는 단계 = reach 본선 + task_completed(단순 event
-    // distinct). core_experience(스폰≥2)·retained_7d(7일내 2세션/2프로젝트)는
-    // per-client HAVING/시간창이라 단일 스캔으론 못 구한다 — 아래 별도 subquery 로
-    // 스칼라를 뽑아 funnel row 에 주입한다(순수 빌더는 d_<key> 만 읽으므로 무관).
-    const scanSteps = ONBOARDING_FUNNEL_STEPS.filter(
-      (s) => s.kind === "reach" || s.key === "task_completed",
-    );
-
-    // 관심 이벤트(스캔 단계 + 실패 4종, 중복 제거). 파티션/스캔 최소화를 위해 IN
-    // 절로 좁힌 뒤 단일 스캔에서 단계별 (distinct clientId, 이벤트수)를 뽑는다.
+    // 순차 퍼널: identity(accountUserId 우선, 과거 row 는 익명 clientId 폴백)별
+    // 최초 이벤트 시각을 만든 뒤, 각 단계가 직전 단계 이후에 발생한 사용자만 센다.
+    // 가입~활성화 창은 24h 로 현실화한다. d_task_completed 는 헤드라인 분자와 같다.
     const funnelEventNames = Array.from(
       new Set([
-        ...scanSteps.map((s) => s.event),
+        ...ONBOARDING_FUNNEL_STEPS.map((s) => s.event),
         ...ONBOARDING_FAILURE_EVENTS.map((f) => f.event),
       ]),
     );
@@ -6670,27 +6689,163 @@ export const getAdminOnboardingFunnel = functions
       eventParams[`ev${i}`] = name;
     });
 
-    // d_<col> = 도달 고유 clientId, n_<col> = 이벤트 발생량. col 은 순수 모듈의
-    // step.key / failure.col 규약과 1:1 로 맞춘다(buildOnboardingFunnel 이 읽는 키).
-    const countCols = [
-      // 스캔 단계는 step.key 를 컬럼 접두로 쓴다(buildOnboardingFunnel 의 d_<key>).
-      ...scanSteps.map((s) => ({ col: s.key, event: s.event })),
-      ...ONBOARDING_FAILURE_EVENTS.map((f) => ({ col: f.col, event: f.event })),
-    ];
-    const countSelects = countCols
-      .map(
-        ({ col, event }) =>
-          `COUNT(DISTINCT IF(event = '${event}', userId, NULL)) AS d_${col},\n` +
-          `        COUNTIF(event = '${event}') AS n_${col}`,
-      )
-      .join(",\n        ");
-
     const funnelQuery = `
+      WITH raw AS (
+        SELECT
+          COALESCE(NULLIF(JSON_VALUE(metadata, '$.accountUserId'), ''), userId)
+            AS identity,
+          event,
+          ${eventTs} AS ts,
+          DATE(${eventTs}) AS activity_date,
+          projectId
+        FROM ${eventsTable}
+        WHERE ${eventTs} >= ${since}
+          AND event IN (${inList})
+          AND userId IS NOT NULL${ex.clause}
+      ),
+      marks AS (
+        SELECT
+          identity,
+          MIN(IF(event = 'app:first_run', ts, NULL)) AS first_run_ts,
+          MIN(IF(event = 'auth:login_attempt', ts, NULL)) AS login_attempt_ts,
+          MIN(IF(event = 'auth:login_success', ts, NULL)) AS login_success_ts,
+          MIN(IF(event = 'onboarding:folder_connected', ts, NULL))
+            AS folder_connected_ts,
+          MIN(IF(event = 'onboarding:orchestrator_opened', ts, NULL))
+            AS orchestrator_opened_ts,
+          MIN(IF(event = 'agent:spawned', ts, NULL)) AS agent_spawned_ts,
+          MIN(IF(event = 'task:completed', ts, NULL)) AS task_completed_ts,
+          COUNTIF(event = 'app:first_run') AS n_first_run,
+          COUNTIF(event = 'auth:login_attempt') AS n_login_attempt,
+          COUNTIF(event = 'auth:login_success') AS n_login_success,
+          COUNTIF(event = 'onboarding:folder_connected') AS n_folder_connected,
+          COUNTIF(event = 'onboarding:orchestrator_opened')
+            AS n_orchestrator_opened,
+          COUNTIF(event = 'agent:spawned') AS n_agent_spawned,
+          COUNTIF(event = 'task:completed') AS n_task_completed,
+          COUNTIF(event = 'auth:login_failed') AS n_login_failed,
+          COUNTIF(event = 'onboarding:folder_connect_failed')
+            AS n_folder_connect_failed,
+          COUNTIF(event = 'onboarding:orchestrator_blocked')
+            AS n_orchestrator_blocked,
+          COUNTIF(event = 'agent:crashed') AS n_agent_crashed
+        FROM raw
+        GROUP BY identity
+      ),
+      seq AS (
+        SELECT
+          *,
+          first_run_ts IS NOT NULL AS reached_first_run,
+          first_run_ts IS NOT NULL
+            AND login_attempt_ts BETWEEN first_run_ts
+              AND TIMESTAMP_ADD(first_run_ts, INTERVAL 24 HOUR)
+            AS reached_login_attempt,
+          first_run_ts IS NOT NULL
+            AND login_attempt_ts BETWEEN first_run_ts
+              AND TIMESTAMP_ADD(first_run_ts, INTERVAL 24 HOUR)
+            AND login_success_ts BETWEEN login_attempt_ts
+              AND TIMESTAMP_ADD(first_run_ts, INTERVAL 24 HOUR)
+            AS reached_login_success,
+          first_run_ts IS NOT NULL
+            AND login_attempt_ts BETWEEN first_run_ts
+              AND TIMESTAMP_ADD(first_run_ts, INTERVAL 24 HOUR)
+            AND login_success_ts BETWEEN login_attempt_ts
+              AND TIMESTAMP_ADD(first_run_ts, INTERVAL 24 HOUR)
+            AND folder_connected_ts BETWEEN login_success_ts
+              AND TIMESTAMP_ADD(login_success_ts, INTERVAL 24 HOUR)
+            AS reached_folder_connected,
+          first_run_ts IS NOT NULL
+            AND login_attempt_ts BETWEEN first_run_ts
+              AND TIMESTAMP_ADD(first_run_ts, INTERVAL 24 HOUR)
+            AND login_success_ts BETWEEN login_attempt_ts
+              AND TIMESTAMP_ADD(first_run_ts, INTERVAL 24 HOUR)
+            AND folder_connected_ts BETWEEN login_success_ts
+              AND TIMESTAMP_ADD(login_success_ts, INTERVAL 24 HOUR)
+            AND orchestrator_opened_ts BETWEEN folder_connected_ts
+              AND TIMESTAMP_ADD(login_success_ts, INTERVAL 24 HOUR)
+            AS reached_orchestrator_opened,
+          first_run_ts IS NOT NULL
+            AND login_attempt_ts BETWEEN first_run_ts
+              AND TIMESTAMP_ADD(first_run_ts, INTERVAL 24 HOUR)
+            AND login_success_ts BETWEEN login_attempt_ts
+              AND TIMESTAMP_ADD(first_run_ts, INTERVAL 24 HOUR)
+            AND folder_connected_ts BETWEEN login_success_ts
+              AND TIMESTAMP_ADD(login_success_ts, INTERVAL 24 HOUR)
+            AND orchestrator_opened_ts BETWEEN folder_connected_ts
+              AND TIMESTAMP_ADD(login_success_ts, INTERVAL 24 HOUR)
+            AND agent_spawned_ts BETWEEN orchestrator_opened_ts
+              AND TIMESTAMP_ADD(login_success_ts, INTERVAL 24 HOUR)
+            AS reached_agent_spawned,
+          first_run_ts IS NOT NULL
+            AND login_attempt_ts BETWEEN first_run_ts
+              AND TIMESTAMP_ADD(first_run_ts, INTERVAL 24 HOUR)
+            AND login_success_ts BETWEEN login_attempt_ts
+              AND TIMESTAMP_ADD(first_run_ts, INTERVAL 24 HOUR)
+            AND folder_connected_ts BETWEEN login_success_ts
+              AND TIMESTAMP_ADD(login_success_ts, INTERVAL 24 HOUR)
+            AND orchestrator_opened_ts BETWEEN folder_connected_ts
+              AND TIMESTAMP_ADD(login_success_ts, INTERVAL 24 HOUR)
+            AND agent_spawned_ts BETWEEN orchestrator_opened_ts
+              AND TIMESTAMP_ADD(login_success_ts, INTERVAL 24 HOUR)
+            AND task_completed_ts BETWEEN agent_spawned_ts
+              AND TIMESTAMP_ADD(login_success_ts, INTERVAL 24 HOUR)
+            AS reached_task_completed
+        FROM marks
+      ),
+      sessions AS (
+        SELECT
+          r.identity,
+          COUNT(DISTINCT CONCAT(
+            COALESCE(r.projectId, '(none)'),
+            ':',
+            FORMAT_DATE('%F', r.activity_date)
+          )) AS sessionish_count,
+          COUNT(DISTINCT r.projectId) AS project_count
+        FROM raw r
+        JOIN seq s ON s.identity = r.identity
+        WHERE s.reached_task_completed
+          AND r.ts BETWEEN s.login_success_ts
+            AND TIMESTAMP_ADD(s.login_success_ts, INTERVAL 7 DAY)
+        GROUP BY r.identity
+      )
       SELECT
-        ${countSelects}
-      FROM ${eventsTable}
-      WHERE ${eventTs} >= ${since}
-        AND event IN (${inList})${ex.clause}
+        COUNTIF(reached_first_run) AS d_first_run,
+        SUM(IF(reached_first_run, n_first_run, 0)) AS n_first_run,
+        COUNTIF(reached_login_attempt) AS d_login_attempt,
+        SUM(IF(reached_login_attempt, n_login_attempt, 0)) AS n_login_attempt,
+        COUNTIF(reached_login_success) AS d_login_success,
+        SUM(IF(reached_login_success, n_login_success, 0)) AS n_login_success,
+        COUNTIF(reached_folder_connected) AS d_folder_connected,
+        SUM(IF(reached_folder_connected, n_folder_connected, 0))
+          AS n_folder_connected,
+        COUNTIF(reached_orchestrator_opened) AS d_orchestrator_opened,
+        SUM(IF(reached_orchestrator_opened, n_orchestrator_opened, 0))
+          AS n_orchestrator_opened,
+        COUNTIF(reached_agent_spawned) AS d_agent_spawned,
+        SUM(IF(reached_agent_spawned, n_agent_spawned, 0)) AS n_agent_spawned,
+        COUNTIF(reached_task_completed) AS d_task_completed,
+        SUM(IF(reached_task_completed, n_task_completed, 0))
+          AS n_task_completed,
+        COUNTIF(reached_task_completed AND n_agent_spawned >= 2)
+          AS d_core_experience,
+        COUNTIF(reached_task_completed AND (
+          SELECT COALESCE(MAX(
+            IF(sessionish_count >= 2 OR project_count >= 2, 1, 0)
+          ), 0)
+          FROM sessions ss
+          WHERE ss.identity = seq.identity
+        ) = 1) AS d_retained_7d,
+        COUNTIF(n_login_failed > 0) AS d_login_failed,
+        SUM(n_login_failed) AS n_login_failed,
+        COUNTIF(n_folder_connect_failed > 0) AS d_folder_connect_failed,
+        SUM(n_folder_connect_failed) AS n_folder_connect_failed,
+        COUNTIF(n_orchestrator_blocked > 0) AS d_orchestrator_blocked,
+        SUM(n_orchestrator_blocked) AS n_orchestrator_blocked,
+        COUNTIF(n_agent_crashed > 0) AS d_agent_crashed,
+        SUM(n_agent_crashed) AS n_agent_crashed,
+        COUNTIF(reached_login_success) AS d_signup_base,
+        COUNTIF(reached_task_completed) AS d_activated_30m
+      FROM seq
     `;
 
     // 실패 이벤트의 errorCategory 분해(cli_auth / launch_error / crash 카테고리 등).
@@ -6706,7 +6861,10 @@ export const getAdminOnboardingFunnel = functions
         event,
         COALESCE(errorCategory, '(none)') AS category,
         COUNT(*) AS n,
-        COUNT(DISTINCT userId) AS clients
+        COUNT(DISTINCT COALESCE(
+          NULLIF(JSON_VALUE(metadata, '$.accountUserId'), ''),
+          userId
+        )) AS clients
       FROM ${eventsTable}
       WHERE ${eventTs} >= ${since}
         AND event IN (${failureInList})${ex.clause}
@@ -6714,124 +6872,23 @@ export const getAdminOnboardingFunnel = functions
       ORDER BY n DESC
     `;
 
-    // ── 스폰 이후 활성화 스칼라(per-client 집계 — 단일 스캔 밖) ──
-    // (a) core_experience: agent:spawned 를 2회+ 한 고유 clientId 수(반복 사용).
-    const coreExpQuery = `
-      SELECT COUNT(*) AS d_core_experience
-      FROM (
-        SELECT userId
-        FROM ${eventsTable}
-        WHERE event = 'agent:spawned'
-          AND ${eventTs} >= ${since}
-          AND userId IS NOT NULL${ex.clause}
-        GROUP BY userId
-        HAVING COUNT(*) >= 2
-      )
-    `;
-    // (b) retained_7d: events에는 sessionId 컬럼이 없고 metadata.sessionId도
-    //     미적재라, 세션은 projectId+활동일 기반 파생 키로 정의한다. 기존
-    //     2번째 프로젝트(projectId≥2) 폴백은 유지한다.
-    const retainedQuery = `
-      WITH win AS (
-        SELECT
-          userId,
-          ${eventTs} AS ts,
-          DATE(${eventTs}) AS activity_date,
-          projectId
-        FROM ${eventsTable}
-        WHERE ${eventTs} >= ${since}
-          AND userId IS NOT NULL${ex.clause}
-      ),
-      firstSeen AS (
-        SELECT userId, MIN(ts) AS first_seen FROM win GROUP BY userId
-      )
-      SELECT COUNT(*) AS d_retained_7d
-      FROM (
-        SELECT w.userId
-        FROM win w
-        JOIN firstSeen f ON f.userId = w.userId
-        WHERE w.ts <= TIMESTAMP_ADD(f.first_seen, INTERVAL 7 DAY)
-        GROUP BY w.userId
-        HAVING COUNT(DISTINCT CONCAT(
-                  COALESCE(w.projectId, '(none)'),
-                  ':',
-                  FORMAT_DATE('%F', w.activity_date)
-                )) >= 2
-            OR COUNT(DISTINCT w.projectId) >= 2
-      )
-    `;
-    // (c) ★헤드라인: 가입(로그인 성공) 후 30분 내 첫 티켓 완료 활성화율.
-    //     분모=가입 고유 clientId, 분자=첫 task:completed 가 가입±30분 창에 든 clientId.
-    const headlineQuery = `
-      WITH signup AS (
-        SELECT userId, MIN(${eventTs}) AS signup_ts
-        FROM ${eventsTable}
-        WHERE event = 'auth:login_success'
-          AND ${eventTs} >= ${since}
-          AND userId IS NOT NULL${ex.clause}
-        GROUP BY userId
-      ),
-      firstTask AS (
-        SELECT userId, MIN(${eventTs}) AS task_ts
-        FROM ${eventsTable}
-        WHERE event = 'task:completed'
-          AND ${eventTs} >= ${since}
-          AND userId IS NOT NULL${ex.clause}
-        GROUP BY userId
-      )
-      SELECT
-        COUNT(DISTINCT s.userId) AS d_signup_base,
-        COUNT(DISTINCT IF(
-          t.task_ts IS NOT NULL
-          AND t.task_ts >= s.signup_ts
-          AND t.task_ts <= TIMESTAMP_ADD(s.signup_ts, INTERVAL 30 MINUTE),
-          s.userId, NULL)) AS d_activated_30m
-      FROM signup s
-      LEFT JOIN firstTask t ON t.userId = s.userId
-    `;
+    const [funnelRows, reasonRows] = await runAdminAnalyticsQueries([
+      {
+        name: "onboarding.funnel",
+        query: funnelQuery,
+        params: { days: rangeDays, ...eventParams, ...ex.params },
+      },
+      {
+        name: "onboarding.failureReasons",
+        query: reasonQuery,
+        params: { days: rangeDays, ...failureParams, ...ex.params },
+      },
+    ]);
 
-    const [funnelRows, reasonRows, coreRows, retainedRows, headRows] =
-      await runAdminAnalyticsQueries([
-        {
-          name: "onboarding.funnel",
-          query: funnelQuery,
-          params: { days: rangeDays, ...eventParams, ...ex.params },
-        },
-        {
-          name: "onboarding.failureReasons",
-          query: reasonQuery,
-          params: { days: rangeDays, ...failureParams, ...ex.params },
-        },
-        {
-          name: "onboarding.coreExperience",
-          query: coreExpQuery,
-          params: { days: rangeDays, ...ex.params },
-        },
-        {
-          name: "onboarding.retained7d",
-          query: retainedQuery,
-          params: { days: rangeDays, ...ex.params },
-        },
-        {
-          name: "onboarding.headline",
-          query: headlineQuery,
-          params: { days: rangeDays, ...ex.params },
-        },
-      ]);
-
-    // 단일 스캔 row 에 per-client 활성화 스칼라를 병합(순수 빌더가 d_<key> 로 읽는다).
-    const coreRow = coreRows[0] ?? {};
-    const retainedRow = retainedRows[0] ?? {};
-    const headRow = headRows[0] ?? {};
-    const funnelRow: Record<string, unknown> = {
-      ...(funnelRows[0] ?? {}),
-      d_core_experience: coreRow.d_core_experience,
-      d_retained_7d: retainedRow.d_retained_7d,
-      d_activated_30m: headRow.d_activated_30m,
-      d_signup_base: headRow.d_signup_base,
-    };
-
-    const funnel = buildOnboardingFunnel(funnelRow, reasonRows as ReasonRow[]);
+    const funnel = buildOnboardingFunnel(
+      funnelRows[0] as Record<string, unknown> | undefined,
+      reasonRows as ReasonRow[],
+    );
 
     return {
       rangeDays,
@@ -6857,8 +6914,9 @@ export const getAdminOnboardingFunnel = functions
  * demo_started/completed/cta_click·marketing_consent_shown/granted)는 3.0.19 렌더러
  * 빌드+실사용 전엔 값 0 — 쿼리는 미발화여도 안전하게 0/빈배열을 돌려준다(구조 먼저).
  *
- * 익명 clientId 공간 — PII/uid/clientId 미노출, 카운트/비율만. 운영자 제외는 상위
- * 콜러블과 동일하게 includeAdmin(기본 false=제외) 토글을 따른다.
+ * 신규 row 는 accountUserId 기준, 과거 row 는 익명 clientId 기준으로 카운트한다.
+ * 개별 uid/clientId 는 미노출하며, 운영자 제외는 includeAdmin(기본 false=제외)
+ * 토글을 따른다.
  *
  * params: { days?: number, includeAdmin?: boolean } (기본 30, 제외)
  */
@@ -6874,64 +6932,76 @@ export const getAdminKpiCockpit = functions
     const adminClientIds = await resolveAdminClientIds(rangeDays);
     const ex = includeAdmin
       ? EMPTY_EXCLUSION
-      : adminClientExclusion(adminClientIds);
+      : adminEventExclusion(adminClientIds);
     // events.timestamp 는 BigQuery TIMESTAMP 컬럼이다. 컬럼을 함수로 감싸면
     // 파티션/클러스터 프루닝이 약해질 수 있어 직접 비교한다.
     const eventTs = "timestamp";
 
-    // ── (1) 헤드라인: 가입(login_success) 후 30분내 첫 티켓 완료 활성화율 ──
+    // ── (1) 헤드라인: 가입(login_success) 후 24h내 첫 티켓 완료 활성화율 ──
     // 게이지 분모(d_signup_base) + 분자(d_activated_30m). getAdminOnboardingFunnel
     // 의 headlineQuery 와 동일 로직(단일 소스 오브 트루스는 순수 빌더 쪽 규약).
     const headlineQuery = `
-      WITH signup AS (
-        SELECT userId, MIN(${eventTs}) AS signup_ts
+      WITH raw AS (
+        SELECT
+          COALESCE(NULLIF(JSON_VALUE(metadata, '$.accountUserId'), ''), userId)
+            AS identity,
+          event,
+          ${eventTs} AS ts
         FROM ${eventsTable}
-        WHERE event = 'auth:login_success'
+        WHERE event IN ('auth:login_success', 'task:completed')
           AND ${eventTs} >= ${since}
           AND userId IS NOT NULL${ex.clause}
-        GROUP BY userId
+      ),
+      signup AS (
+        SELECT identity, MIN(ts) AS signup_ts
+        FROM raw
+        WHERE event = 'auth:login_success'
+        GROUP BY identity
       ),
       firstTask AS (
-        SELECT userId, MIN(${eventTs}) AS task_ts
-        FROM ${eventsTable}
+        SELECT identity, MIN(ts) AS task_ts
+        FROM raw
         WHERE event = 'task:completed'
-          AND ${eventTs} >= ${since}
-          AND userId IS NOT NULL${ex.clause}
-        GROUP BY userId
+        GROUP BY identity
       )
       SELECT
-        COUNT(DISTINCT s.userId) AS d_signup_base,
+        COUNT(DISTINCT s.identity) AS d_signup_base,
         COUNT(DISTINCT IF(
           t.task_ts IS NOT NULL
           AND t.task_ts >= s.signup_ts
-          AND t.task_ts <= TIMESTAMP_ADD(s.signup_ts, INTERVAL 30 MINUTE),
-          s.userId, NULL)) AS d_activated_30m
+          AND t.task_ts <= TIMESTAMP_ADD(s.signup_ts, INTERVAL 24 HOUR),
+          s.identity, NULL)) AS d_activated_30m
       FROM signup s
-      LEFT JOIN firstTask t ON t.userId = s.userId
+      LEFT JOIN firstTask t ON t.identity = s.identity
     `;
 
-    // ── (2) 7일 잔존: 첫 활동 후 7일내 2파생세션/2프로젝트 도달 고유 clientId ──
+    // ── (2) 7일 잔존: 가입자 중 7일내 2파생세션/2프로젝트 도달 고유 identity ──
     const retainedQuery = `
       WITH win AS (
         SELECT
-          userId,
+          COALESCE(NULLIF(JSON_VALUE(metadata, '$.accountUserId'), ''), userId)
+            AS identity,
           ${eventTs} AS ts,
           DATE(${eventTs}) AS activity_date,
-          projectId
+          projectId,
+          event
         FROM ${eventsTable}
         WHERE ${eventTs} >= ${since}
           AND userId IS NOT NULL${ex.clause}
       ),
-      firstSeen AS (
-        SELECT userId, MIN(ts) AS first_seen FROM win GROUP BY userId
+      signup AS (
+        SELECT identity, MIN(ts) AS signup_ts
+        FROM win
+        WHERE event = 'auth:login_success'
+        GROUP BY identity
       )
       SELECT COUNT(*) AS d_retained_7d
       FROM (
-        SELECT w.userId
+        SELECT w.identity
         FROM win w
-        JOIN firstSeen f ON f.userId = w.userId
-        WHERE w.ts <= TIMESTAMP_ADD(f.first_seen, INTERVAL 7 DAY)
-        GROUP BY w.userId
+        JOIN signup s ON s.identity = w.identity
+        WHERE w.ts BETWEEN s.signup_ts AND TIMESTAMP_ADD(s.signup_ts, INTERVAL 7 DAY)
+        GROUP BY w.identity
         HAVING COUNT(DISTINCT CONCAT(
                   COALESCE(w.projectId, '(none)'),
                   ':',
@@ -7126,7 +7196,7 @@ export const getAdminKpiCockpit = functions
     const gaugeRow: Record<string, unknown> = {
       d_signup_base: headRow.d_signup_base,
       d_activated_30m: headRow.d_activated_30m,
-      d_task_completed: activityRow.d_task_completed,
+      d_task_completed: headRow.d_activated_30m,
       d_retained_7d: retainedRow.d_retained_7d,
       d_cli_connect_enter: connect?.clients.enter ?? 0,
       d_cli_connect_success: connect?.clients.success ?? 0,
