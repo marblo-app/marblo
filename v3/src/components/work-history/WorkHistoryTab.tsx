@@ -37,6 +37,9 @@ import {
   MissionReplayDetailView,
 } from "./replay/MissionReplayDetail";
 import { ReplayShareFlow } from "./replay/ReplayShareFlow";
+import { ReplayHeadline } from "./replay/ReplayHeadline";
+import { ReplayCast } from "./replay/ReplayCast";
+import { ReplayTimeline } from "./replay/ReplayTimeline";
 
 // 완료 보고를 추적할 최근 완료 태스크 상한. task 당 Firestore activities 리스너가
 // 하나씩 생기므로, 무한정 구독하지 않도록 최신순으로 잘라 둔다.
@@ -256,6 +259,46 @@ function WorkHistoryRow({
   );
 }
 
+function AggregateReplayShowcase({
+  replay,
+  canPublish,
+  publisherUid,
+  shareOpen,
+  onOpenShare,
+  onCloseShare,
+}: {
+  replay: NonNullable<
+    ReturnType<typeof buildLightweightReplayFromCompletedTasks>
+  >["replay"];
+  canPublish: boolean;
+  publisherUid?: string;
+  shareOpen: boolean;
+  onOpenShare: () => void;
+  onCloseShare: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <section className="space-y-4" data-testid="work-history-replay-showcase">
+      <ReplayHeadline
+        replay={replay}
+        sourceErrors={{}}
+        onShare={onOpenShare}
+        t={t}
+      />
+      <ReplayCast cast={replay.cast} t={t} />
+      <ReplayTimeline replay={replay} t={t} />
+      {shareOpen && (
+        <ReplayShareFlow
+          replay={replay}
+          canPublish={canPublish}
+          publisherUid={publisherUid}
+          onClose={onCloseShare}
+        />
+      )}
+    </section>
+  );
+}
+
 export function WorkHistoryTab() {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -436,6 +479,15 @@ export function WorkHistoryTab() {
         )}
 
         <div className="ml-auto flex flex-shrink-0 gap-1">
+          {view === "tasks" && lightweightReplay && (
+            <button
+              type="button"
+              onClick={() => setLightweightShareOpen(true)}
+              className="rounded border border-violet-500/50 px-2 py-0.5 text-xs text-violet-200 transition hover:bg-violet-500/10"
+            >
+              {t("workHistory.replay.share")}
+            </button>
+          )}
           {(["tasks", "replay"] as const).map((mode) => (
             <button
               key={mode}
@@ -524,7 +576,18 @@ export function WorkHistoryTab() {
             onReset={() => setFilter(DEFAULT_WORK_HISTORY_FILTER)}
           />
 
-          <ShareCard stats={shareStats} />
+          {lightweightReplay ? (
+            <AggregateReplayShowcase
+              replay={lightweightReplay.replay}
+              canPublish={canMergeInProject(lightweightReplay.replay.projectId)}
+              publisherUid={user?.uid}
+              shareOpen={lightweightShareOpen}
+              onOpenShare={() => setLightweightShareOpen(true)}
+              onCloseShare={() => setLightweightShareOpen(false)}
+            />
+          ) : (
+            <ShareCard stats={shareStats} />
+          )}
 
           {doneTasks.length === 0 ? (
             <div className="flex flex-1 items-center justify-center py-12">

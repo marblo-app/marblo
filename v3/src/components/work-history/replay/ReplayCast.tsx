@@ -22,64 +22,58 @@ export function ReplayCast({
   cast: readonly ReplayCastMember[];
   t: TFunction;
 }) {
+  const strip = cast.length > 8 ? [...cast, ...cast] : cast;
   return (
     <section>
-      <h3 className="mb-2 text-xs font-semibold text-gray-300">
-        {t("workHistory.replay.cast.title")}
-      </h3>
+      <style>
+        {
+          "@keyframes replay-cast-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}"
+        }
+      </style>
+      <div className="mb-2 flex items-center gap-2">
+        <h3 className="text-xs font-semibold text-gray-300">
+          {t("workHistory.replay.cast.title")}
+        </h3>
+        <span className="font-mono text-[11px] text-gray-500">
+          {t("workHistory.replay.cast.count", { count: cast.length })}
+        </span>
+      </div>
 
       {cast.length === 0 ? (
         <p className="rounded-lg border border-dashed border-gray-700 bg-gray-800/30 px-3 py-4 text-center text-xs text-gray-500">
           {t("workHistory.replay.cast.empty")}
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-gray-800">
-          <table className="w-full min-w-[520px] text-left text-xs">
-            <thead className="bg-gray-900/60 text-[11px] text-gray-500">
-              <tr>
-                <th className="px-3 py-1.5 font-medium">
-                  {t("workHistory.replay.cast.agent")}
-                </th>
-                <th className="px-3 py-1.5 font-medium">
-                  {t("workHistory.replay.cast.model")}
-                </th>
-                <th className="px-3 py-1.5 font-medium">
-                  {t("workHistory.replay.cast.role")}
-                </th>
-                <th className="px-3 py-1.5 text-right font-medium">
-                  {t("workHistory.replay.cast.tasks")}
-                </th>
-                <th className="px-3 py-1.5 text-right font-medium">
-                  {t("workHistory.replay.cast.beats")}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {cast.map((member) => (
-                <tr
-                  key={member.agentRef}
-                  className="border-t border-gray-800 text-gray-300"
+        <div className="relative overflow-hidden rounded-xl border border-gray-800 bg-gray-950/60">
+          <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-10 bg-gradient-to-r from-gray-950/95 to-transparent" />
+          <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-10 bg-gradient-to-l from-gray-950/95 to-transparent" />
+          <div className="flex w-max gap-2 px-3 py-3 motion-safe:animate-[replay-cast-scroll_42s_linear_infinite] motion-reduce:w-auto motion-reduce:flex-wrap">
+            {strip.map((member, index) => {
+              const model =
+                member.detectedModelId ?? member.spawnedModel ?? member.vendor;
+              const initials = member.role.slice(0, 2).toUpperCase();
+              return (
+                <div
+                  key={`${member.agentRef}-${index}`}
+                  className="flex min-w-[210px] flex-shrink-0 items-center gap-2 rounded-full border border-gray-700 bg-gray-900 px-2 py-1.5 shadow-sm"
                 >
-                  {/* 별칭·모델 id·역할 코드는 전부 식별자라 번역하지 않는다. */}
-                  <td className="px-3 py-1.5 font-mono text-[11px] text-gray-200">
-                    {member.agentRef}
-                  </td>
-                  <td className="px-3 py-1.5 font-mono text-[11px] text-gray-400">
-                    {member.detectedModelId ?? member.spawnedModel ?? "—"}
-                  </td>
-                  <td className="px-3 py-1.5 text-[11px] text-gray-400">
-                    {member.role}
-                  </td>
-                  <td className="px-3 py-1.5 text-right font-mono text-[11px]">
-                    {member.tasksCompleted}
-                  </td>
-                  <td className="px-3 py-1.5 text-right font-mono text-[11px]">
-                    {member.beats}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  <span className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-full bg-gradient-to-br from-violet-300 to-sky-300 font-mono text-[10px] font-bold text-gray-950">
+                    {initials || "AI"}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-mono text-[11px] font-semibold text-gray-100">
+                      {member.agentRef}
+                    </span>
+                    <span className="block truncate font-mono text-[10px] text-gray-500">
+                      {model} · {member.tasksCompleted}{" "}
+                      {t("workHistory.replay.cast.tasksShort")} · {member.beats}{" "}
+                      {t("workHistory.replay.cast.beatsShort")}
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </section>

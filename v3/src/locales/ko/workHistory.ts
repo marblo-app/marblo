@@ -92,10 +92,10 @@ export const workHistory = {
   "workHistory.replay.list.untitled": "(목표 없음)",
   "workHistory.replay.list.empty.title": "완료된 미션이 없습니다.",
   "workHistory.replay.list.empty.hint":
-    "미션이 완료되면 여기에서 그 미션의 Replay 를 볼 수 있습니다.",
+    "목표를 입력하고, Marblo가 티켓으로 분해한 뒤, 알맞은 에이전트를 스폰하는 흐름으로 시작하세요.",
   "workHistory.replay.list.empty.createHint":
-    "Missions 탭에서 Quick Fix, Polish, Feature 같은 템플릿을 골라 첫 미션을 시작하세요.",
-  "workHistory.replay.list.empty.cta": "첫 미션 만들기",
+    "그 목표 → 분해 → 스폰 가이드가 끝나면 첫 Replay 가 여기에 남습니다.",
+  "workHistory.replay.list.empty.cta": "목표 입력 시작",
   "workHistory.replay.list.lightweight.title":
     "완료 작업 요약 Replay 를 먼저 보여줍니다.",
   "workHistory.replay.list.lightweight.hint":
@@ -111,7 +111,19 @@ export const workHistory = {
   "workHistory.replay.unavailable.denied":
     "이 미션을 읽을 권한이 없습니다. (미션이 없는 것과 다릅니다)",
   "workHistory.replay.privateNotice":
-    "이 Replay 는 앱 안에서만 보입니다 — 공유·내보내기 경로가 없습니다.",
+    "공유는 레닭션 검증을 거친 카드·GIF·공개 링크 흐름으로 진행됩니다.",
+  "workHistory.replay.share": "공유하기",
+
+  "workHistory.replay.hero.eyebrow": "Mission Replay",
+  "workHistory.replay.hero.title":
+    "당신의 AI 팀이 {count}개 작업을 완수했습니다.",
+  "workHistory.replay.shareBar.title": "공유 형식",
+  "workHistory.replay.shareBar.card": "카드",
+  "workHistory.replay.shareBar.cardHint": "PNG 성과 카드를 생성합니다.",
+  "workHistory.replay.shareBar.gif": "GIF",
+  "workHistory.replay.shareBar.gifHint": "Replay 비트 흐름을 움직이는 이미지로 만듭니다.",
+  "workHistory.replay.shareBar.link": "링크",
+  "workHistory.replay.shareBar.linkHint": "레닭션된 공개 Replay URL을 발행합니다.",
 
   "workHistory.replay.headline.template": "템플릿",
   "workHistory.replay.headline.launched": "시작",
@@ -174,6 +186,9 @@ export const workHistory = {
   "workHistory.replay.timeline.empty": "표시할 기록이 없습니다.",
   "workHistory.replay.timeline.laneDenied":
     "'{lane}' 레인은 권한이 없어 읽지 못했습니다 — 비어 있는 것이 아닙니다.",
+  "workHistory.replay.timeline.missionGroup": "미션 비트",
+  "workHistory.replay.timeline.ticket": "티켓",
+  "workHistory.replay.timeline.ticketBeats": "{count} 비트",
 
   "workHistory.replay.outcome.title": "최종 결과",
   "workHistory.replay.outcome.tasksDone": "완료 티켓",
@@ -188,9 +203,12 @@ export const workHistory = {
 
   "workHistory.replay.cast.title": "에이전트별 기여",
   "workHistory.replay.cast.empty": "에이전트 기여 기록이 없습니다.",
+  "workHistory.replay.cast.count": "{count}명",
   "workHistory.replay.cast.agent": "에이전트",
   "workHistory.replay.cast.model": "모델",
   "workHistory.replay.cast.role": "역할",
   "workHistory.replay.cast.tasks": "완료 태스크",
+  "workHistory.replay.cast.tasksShort": "작업",
   "workHistory.replay.cast.beats": "기록 수",
+  "workHistory.replay.cast.beatsShort": "비트",
 };

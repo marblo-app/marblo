@@ -19,6 +19,28 @@ import type {
   ReplaySourceState,
 } from "../../../types/missionReplay";
 import type { ReplaySourceErrors } from "../../../services/missionReplayService";
+import { replayHumanStepCount } from "./ReplayStatsGrid";
+
+const SHARE_FORMATS = [
+  {
+    key: "image",
+    icon: "▣",
+    label: "workHistory.replay.shareBar.card",
+    hint: "workHistory.replay.shareBar.cardHint",
+  },
+  {
+    key: "gif",
+    icon: "▶",
+    label: "workHistory.replay.shareBar.gif",
+    hint: "workHistory.replay.shareBar.gifHint",
+  },
+  {
+    key: "link",
+    icon: "↗",
+    label: "workHistory.replay.shareBar.link",
+    hint: "workHistory.replay.shareBar.linkHint",
+  },
+] as const;
 
 /** 소스 표기 순서 — 미션 서사(위) → 코드 성과(아래). */
 const SOURCE_ORDER: readonly ReplaySource[] = [
@@ -112,10 +134,12 @@ function ProvenanceChips({
 export function ReplayHeadline({
   replay,
   sourceErrors,
+  onShare,
   t,
 }: {
   replay: MissionReplay;
   sourceErrors: ReplaySourceErrors;
+  onShare?: () => void;
   t: TFunction;
 }) {
   const denied = SOURCE_ORDER.filter(
@@ -124,9 +148,21 @@ export function ReplayHeadline({
   const failed = SOURCE_ORDER.filter((source) => !!sourceErrors[source]);
 
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
-      {/* goal 은 사용자가 친 값이라 번역하지 않는다. */}
-      <h2 className="text-sm font-semibold text-gray-100">{replay.goal}</h2>
+    <div
+      data-testid="replay-accomplishment-hero"
+      className="overflow-hidden rounded-2xl border border-violet-500/30 bg-[radial-gradient(700px_320px_at_78%_-30%,rgba(203,166,247,0.22),transparent_60%),linear-gradient(180deg,rgba(49,50,68,0.62),rgba(24,24,37,0.72))] p-5 shadow-2xl shadow-black/30"
+    >
+      <p className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-violet-300">
+        {t("workHistory.replay.hero.eyebrow")}
+      </p>
+      <h2 className="mt-3 max-w-xl text-3xl font-extrabold leading-tight tracking-normal text-gray-50">
+        {t("workHistory.replay.hero.title", {
+          count: replay.stats.tasksDone,
+        })}
+      </h2>
+      <p className="mt-2 max-w-2xl text-sm text-gray-400">
+        {replay.goal}
+      </p>
 
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-gray-400">
         <span>
@@ -153,6 +189,60 @@ export function ReplayHeadline({
         </span>
       </div>
 
+      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+        <HeroStat
+          label={t("workHistory.replay.stats.agents")}
+          value={replay.stats.agents}
+          tone="text-sky-300"
+        />
+        <HeroStat
+          label={t("workHistory.replay.stats.tasks")}
+          value={replay.stats.tasksDone}
+          tone="text-emerald-300"
+        />
+        <HeroStat
+          label={t("workHistory.replay.stats.prs")}
+          value={replay.stats.prs}
+          tone="text-violet-300"
+        />
+        <HeroStat
+          label={t("workHistory.replay.stats.lines")}
+          value={`+${replay.stats.linesAdded}/-${replay.stats.linesDeleted}`}
+          tone="text-peach-300 text-orange-300"
+        />
+        <HeroStat
+          label={t("workHistory.replay.stats.interventions")}
+          value={replayHumanStepCount(replay)}
+          tone="text-teal-300"
+        />
+      </div>
+
+      {onShare && (
+        <div className="mt-4 rounded-xl border border-gray-700 bg-gray-950/70 p-3">
+          <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.08em] text-gray-500">
+            {t("workHistory.replay.shareBar.title")}
+          </p>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {SHARE_FORMATS.map((format) => (
+              <button
+                key={format.key}
+                type="button"
+                onClick={onShare}
+                className="rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-left transition hover:border-violet-400 hover:bg-gray-800"
+              >
+                <span className="flex items-center gap-2 text-xs font-semibold text-gray-100">
+                  <span aria-hidden>{format.icon}</span>
+                  {t(format.label)}
+                </span>
+                <span className="mt-0.5 block text-[11px] text-gray-500">
+                  {t(format.hint)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="mt-3 border-t border-gray-800 pt-2">
         <p className="mb-1.5 text-[11px] font-medium text-gray-500">
           {t("workHistory.replay.provenance.title")}
@@ -175,11 +265,28 @@ export function ReplayHeadline({
         )}
       </div>
 
-      {/* Phase 1 은 로컬 전용이라는 사실을 화면에 못 박는다 — 이 뷰에는 공유·
-          익스포트·remix 경로가 하나도 없다(설계 §4 Phase 1 "공유 표면: 없음"). */}
       <p className="mt-2 text-[11px] text-gray-500">
         {t("workHistory.replay.privateNotice")}
       </p>
+    </div>
+  );
+}
+
+function HeroStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string | number;
+  tone: string;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-950/50 px-3 py-2">
+      <span className={`block font-mono text-xl font-bold ${tone}`}>
+        {value}
+      </span>
+      <span className="mt-0.5 block text-[11px] text-gray-500">{label}</span>
     </div>
   );
 }

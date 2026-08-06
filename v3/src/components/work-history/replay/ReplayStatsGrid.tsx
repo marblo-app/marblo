@@ -25,6 +25,12 @@ export function countMerges(beats: readonly ReplayBeat[]): number {
   return beats.filter((beat) => beat.source === "merge_history").length;
 }
 
+export function replayHumanStepCount(replay: MissionReplay): number | "—" {
+  return replay.provenance.sources.projectAuditLog === "denied"
+    ? UNREADABLE
+    : countHumanInterventions(replay.beats);
+}
+
 function Tile({
   label,
   value,
@@ -65,9 +71,7 @@ export function ReplayStatsGrid({
   // 사람 레인이 통째로 비는데, 그 화면이 "사람 개입 0회"라고 말하면 안 된다.
   const mergeDenied = replay.provenance.sources.merge_history === "denied";
   const humanDenied = replay.provenance.sources.projectAuditLog === "denied";
-  const interventions = humanDenied
-    ? UNREADABLE
-    : countHumanInterventions(replay.beats);
+  const interventions = replayHumanStepCount(replay);
   const merges = mergeDenied ? UNREADABLE : countMerges(replay.beats);
   const deniedHint = t("workHistory.replay.stats.deniedHint");
   // heuristic 축의 분모가 전체와 다르면 그 사실을 밝힌다 — 안 밝히면 "12건 통과"가

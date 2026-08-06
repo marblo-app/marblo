@@ -44,6 +44,7 @@ import type { Agent } from "../../src/types/agent";
 import type { Mission } from "../../src/types/mission";
 import type { Task } from "../../src/types/task";
 import { ko } from "../../src/locales/ko";
+import { en } from "../../src/locales/en";
 
 const T0 = new Date("2026-08-01T09:00:00Z");
 const NOW = new Date("2026-08-01T12:00:00Z");
@@ -280,6 +281,25 @@ describe("Replay 상세 — 실데이터 렌더", () => {
     expect(markup).toContain("claude-opus-5");
   });
 
+  it("성과 히어로·공유 형식 바·계층 타임라인을 렌더한다", () => {
+    const markup = renderDetail(
+      { status: "ready", replay: makeReplay(), sourceErrors: {} },
+      () => {},
+    );
+
+    expect(markup).toContain('data-testid="replay-accomplishment-hero"');
+    expect(markup).toContain(
+      msg("workHistory.replay.hero.title", { count: 1 }),
+    );
+    expect(markup).toContain(msg("workHistory.replay.shareBar.title"));
+    expect(markup).toContain(msg("workHistory.replay.shareBar.card"));
+    expect(markup).toContain(msg("workHistory.replay.shareBar.gif"));
+    expect(markup).toContain(msg("workHistory.replay.shareBar.link"));
+    expect(markup).toContain(
+      msg("workHistory.replay.timeline.ticketBeats", { count: 4 }),
+    );
+  });
+
   it("사람 식별자(uid)나 git 좌표(headSha·repoRoot)는 화면에 안 나온다", () => {
     const markup = renderReady(makeReplay());
     expect(markup).not.toContain("abc1234");
@@ -478,5 +498,21 @@ describe("Replay 목록", () => {
         surface,
       ).toBe(false);
     }
+  });
+});
+
+describe("Replay locale contract", () => {
+  it("en copy exposes sharing and no longer says there is no export path", () => {
+    expect(en["workHistory.replay.hero.title"]).toBe(
+      "Your AI team completed {count} tasks.",
+    );
+    expect(en["workHistory.replay.privateNotice"]).toContain("Sharing runs");
+    expect(en["workHistory.replay.privateNotice"]).not.toMatch(
+      /no share or export path/i,
+    );
+    expect(en["workHistory.replay.shareBar.card"]).toBe("Card");
+    expect(en["workHistory.replay.list.empty.hint"]).toContain(
+      "Start with a goal",
+    );
   });
 });

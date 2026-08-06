@@ -81,10 +81,10 @@ export const workHistory: Record<keyof typeof koWorkHistory, string> = {
   "workHistory.replay.list.untitled": "(no goal)",
   "workHistory.replay.list.empty.title": "No completed missions yet.",
   "workHistory.replay.list.empty.hint":
-    "When a mission completes, its replay shows up here.",
+    "Start with a goal, let Marblo decompose it into tickets, then spawn the right agents.",
   "workHistory.replay.list.empty.createHint":
-    "Open the Missions tab and choose Quick Fix, Polish, or Feature to start the first mission.",
-  "workHistory.replay.list.empty.cta": "Create first mission",
+    "The first replay appears after that guided goal → breakdown → spawn flow finishes.",
+  "workHistory.replay.list.empty.cta": "Start goal flow",
   "workHistory.replay.list.lightweight.title":
     "Showing a completed-work replay summary first.",
   "workHistory.replay.list.lightweight.hint":
@@ -100,7 +100,19 @@ export const workHistory: Record<keyof typeof koWorkHistory, string> = {
   "workHistory.replay.unavailable.denied":
     "You don't have permission to read this mission. (Different from it not existing.)",
   "workHistory.replay.privateNotice":
-    "This replay stays inside the app — there is no share or export path.",
+    "Sharing runs through the redaction-checked card, GIF, and public-link flow.",
+  "workHistory.replay.share": "Share",
+
+  "workHistory.replay.hero.eyebrow": "Mission Replay",
+  "workHistory.replay.hero.title":
+    "Your AI team completed {count} tasks.",
+  "workHistory.replay.shareBar.title": "Share format",
+  "workHistory.replay.shareBar.card": "Card",
+  "workHistory.replay.shareBar.cardHint": "Generate a PNG achievement card.",
+  "workHistory.replay.shareBar.gif": "GIF",
+  "workHistory.replay.shareBar.gifHint": "Export motion from the replay beats.",
+  "workHistory.replay.shareBar.link": "Link",
+  "workHistory.replay.shareBar.linkHint": "Publish a redacted public replay URL.",
 
   "workHistory.replay.headline.template": "Template",
   "workHistory.replay.headline.launched": "Started",
@@ -163,6 +175,9 @@ export const workHistory: Record<keyof typeof koWorkHistory, string> = {
   "workHistory.replay.timeline.empty": "Nothing recorded to show.",
   "workHistory.replay.timeline.laneDenied":
     "The '{lane}' lane could not be read for permission reasons — it is not empty.",
+  "workHistory.replay.timeline.missionGroup": "Mission beats",
+  "workHistory.replay.timeline.ticket": "Ticket",
+  "workHistory.replay.timeline.ticketBeats": "{count} beats",
 
   "workHistory.replay.outcome.title": "Outcome",
   "workHistory.replay.outcome.tasksDone": "Tickets done",
@@ -177,9 +192,12 @@ export const workHistory: Record<keyof typeof koWorkHistory, string> = {
 
   "workHistory.replay.cast.title": "Per-agent contribution",
   "workHistory.replay.cast.empty": "No agent contribution recorded.",
+  "workHistory.replay.cast.count": "{count} agents",
   "workHistory.replay.cast.agent": "Agent",
   "workHistory.replay.cast.model": "Model",
   "workHistory.replay.cast.role": "Role",
   "workHistory.replay.cast.tasks": "Tasks done",
+  "workHistory.replay.cast.tasksShort": "tasks",
   "workHistory.replay.cast.beats": "Records",
+  "workHistory.replay.cast.beatsShort": "beats",
 };

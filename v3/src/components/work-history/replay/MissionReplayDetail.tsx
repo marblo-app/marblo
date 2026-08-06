@@ -214,7 +214,12 @@ export function MissionReplayDetailView({
   return (
     <div className="space-y-4">
       {header}
-      <ReplayHeadline replay={replay} sourceErrors={sourceErrors} t={t} />
+      <ReplayHeadline
+        replay={replay}
+        sourceErrors={sourceErrors}
+        onShare={onShare}
+        t={t}
+      />
       <ReplayStatsGrid replay={replay} t={t} />
       <ReplayTimeline replay={replay} t={t} />
       <ReplayOutcome replay={replay} t={t} />

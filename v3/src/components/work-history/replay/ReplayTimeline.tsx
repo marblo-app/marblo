@@ -32,6 +32,12 @@ const LANE_ORDER: readonly ReplayLane[] = [
 /** 한 번에 그리는 비트 수. 미션 하나가 수천 비트일 수 있어 화면을 잘라 둔다. */
 export const TIMELINE_PAGE = 100;
 
+interface TicketGroup {
+  key: string;
+  title: string;
+  beats: ReplayBeat[];
+}
+
 export function countBeatsByLane(
   beats: readonly ReplayBeat[],
 ): Record<ReplayLane, number> {
@@ -62,6 +68,7 @@ export function ReplayTimeline({
     [replay.beats, lane],
   );
   const shown = filtered.slice(0, limit);
+  const grouped = useMemo(() => groupBeats(shown, t), [shown, t]);
 
   // 사람 레인은 owner/admin 전용 소스에서만 나온다(설계 C2). 못 읽은 것을
   // "아무 일도 없었다"로 그리지 않기 위해 레인별 denied 를 따로 본다.
@@ -143,11 +150,46 @@ export function ReplayTimeline({
         </p>
       ) : (
         <>
-          <ul className="space-y-1">
-            {shown.map((beat) => (
-              <ReplayBeatRow key={beat.id} beat={beat} t={t} />
+          <div className="space-y-3">
+            {grouped.map((group) => (
+              <section
+                key={group.key}
+                className="overflow-hidden rounded-xl border border-gray-800 bg-gray-950/30"
+              >
+                <div className="flex items-center gap-2 border-b border-gray-800 bg-gray-900/70 px-3 py-2">
+                  <span
+                    aria-hidden
+                    className="h-2.5 w-2.5 rounded-full bg-emerald-300 shadow-[0_0_0_4px_rgba(110,231,183,0.12)]"
+                  />
+                  <h4 className="min-w-0 flex-1 truncate text-xs font-semibold text-gray-100">
+                    {group.title}
+                  </h4>
+                  <span className="font-mono text-[10px] text-gray-500">
+                    {t("workHistory.replay.timeline.ticketBeats", {
+                      count: group.beats.length,
+                    })}
+                  </span>
+                </div>
+                <div className="divide-y divide-gray-800/80">
+                  {group.beats.map((beat) => (
+                    <div key={beat.id} className="px-3 py-2">
+                      <div className="mb-1 flex items-center gap-2">
+                        <span className="rounded-md border border-gray-700 px-1.5 py-0.5 text-[10px] font-semibold text-gray-300">
+                          {laneLabel(beat.lane, t)}
+                        </span>
+                        {beat.taskId && (
+                          <span className="truncate font-mono text-[10px] text-gray-500">
+                            {beat.taskId}
+                          </span>
+                        )}
+                      </div>
+                      <ReplayBeatRow beat={beat} t={t} />
+                    </div>
+                  ))}
+                </div>
+              </section>
             ))}
-          </ul>
+          </div>
           {shown.length < filtered.length && (
             <button
               type="button"
@@ -163,4 +205,23 @@ export function ReplayTimeline({
       )}
     </section>
   );
+}
+
+function groupBeats(beats: readonly ReplayBeat[], t: TFunction): TicketGroup[] {
+  const groups: TicketGroup[] = [];
+  const indexByKey = new Map<string, number>();
+  for (const beat of beats) {
+    const key = beat.taskId ?? `mission-${beat.lane}`;
+    const existing = indexByKey.get(key);
+    if (existing !== undefined) {
+      groups[existing].beats.push(beat);
+      continue;
+    }
+    const title = beat.taskId
+      ? `${t("workHistory.replay.timeline.ticket")} ${beat.taskId}`
+      : t("workHistory.replay.timeline.missionGroup");
+    indexByKey.set(key, groups.length);
+    groups.push({ key, title, beats: [beat] });
+  }
+  return groups;
 }
