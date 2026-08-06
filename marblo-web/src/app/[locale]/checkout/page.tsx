@@ -300,7 +300,7 @@ export default function CheckoutPage() {
             totalAmount: intent.amount,
             currency: "KRW",
             payMethod: "CARD",
-            redirectUrl: `${window.location.origin}/${locale}/checkout/success?provider=portone&type=lecture&slug=${lectureSlug}&paymentId=${intent.paymentId}&plan=${safePlan}&billing=${billing}`,
+            redirectUrl: `${window.location.origin}/${locale}/checkout/success?provider=portone&type=lecture&slug=${encodeURIComponent(lectureSlug)}&paymentId=${encodeURIComponent(intent.paymentId)}&plan=${safePlan}&billing=${billing}&amount=${intent.amount}`,
             customer,
           });
           if (response.code) throw new Error(response.message || response.code);
@@ -308,16 +308,18 @@ export default function CheckoutPage() {
           await complete({
             paymentId: response.paymentId || intent.paymentId,
           });
+          // amount/paymentId 로 success 페이지가 GA4 purchase 발화(멱등 complete + dedupe).
           router.push(
-            `/${locale}/checkout/success?provider=portone&type=lecture&slug=${lectureSlug}&paymentId=${intent.paymentId}&plan=${safePlan}&amount=${intent.amount}`,
+            `/${locale}/checkout/success?provider=portone&type=lecture&slug=${encodeURIComponent(lectureSlug)}&paymentId=${encodeURIComponent(intent.paymentId)}&plan=${safePlan}&amount=${intent.amount}`,
           );
         } else if (plan) {
+          // KG이니시스 issueId 40자 제한 — uid 삽입 시 초과하므로 짧은 고정 prefix + UUID(무하이픈)
+          const issueId = `mb_${crypto.randomUUID().replace(/-/g, "")}`;
           const response = await portone.requestIssueBillingKey({
             storeId: config.storeId,
             channelKey: config.channelKey,
             billingKeyMethod: "CARD",
-            // KG이니시스 issueId 40자 제한 — uid 삽입 시 초과하므로 짧은 고정 prefix + UUID(무하이픈)
-            issueId: `mb_${crypto.randomUUID().replace(/-/g, "")}`,
+            issueId,
             issueName: `Marblo ${itemName} 구독`,
             customer,
           });
@@ -333,8 +335,9 @@ export default function CheckoutPage() {
             customerName: fullName,
             customerPhone: customer.phoneNumber,
           });
+          // tx=issueId → success 페이지 GA4 purchase transaction_id (중복 가드 키)
           router.push(
-            `/${locale}/checkout/success?provider=portone&plan=${plan}&billing=${billing}&amount=${finalAmount}`,
+            `/${locale}/checkout/success?provider=portone&plan=${plan}&billing=${billing}&amount=${finalAmount}&tx=${encodeURIComponent(issueId)}`,
           );
         }
       } else if (isLecture && lectureSlug) {
@@ -365,9 +368,11 @@ export default function CheckoutPage() {
           process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || "",
         );
         const payment = toss.payment({ customerKey: user.uid });
+        // amount 를 successUrl 에 실어 success 페이지 GA4 purchase value 로 사용.
+        // Toss 가 authKey/customerKey 등을 쿼리에 추가한다.
         await payment.requestBillingAuth({
           method: "CARD",
-          successUrl: `${window.location.origin}/${locale}/checkout/success?plan=${plan}&billing=${billing}&coupon=${couponCode}`,
+          successUrl: `${window.location.origin}/${locale}/checkout/success?plan=${plan}&billing=${billing}&coupon=${encodeURIComponent(couponCode || "")}&amount=${finalAmount}`,
           failUrl: `${window.location.origin}/${locale}/checkout/fail`,
         });
       }

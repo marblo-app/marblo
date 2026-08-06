@@ -32,11 +32,20 @@ export default function CheckoutSuccessPage() {
   const provider = searchParams.get('provider');
   const isLecture = type === 'lecture';
 
-  // 강의 결제 확정 성공 시 GA4 purchase 1회만 발화.
-  // orderId 기준 중복 가드: ref(마운트 내) + sessionStorage(리로드/재마운트 간).
-  // 이메일 등 PII 는 넣지 않는다 — orderId(비식별)·금액·상품 slug/제목만.
-  const fireLecturePurchase = (orderId: string, amountParam: string) => {
-    const dedupeKey = `ga4_purchase_${orderId}`;
+  // 결제 확정 성공 시 GA4 purchase 1회만 발화 (강의 + 구독 Pro/Team/Team Plus).
+  // transactionId 기준 중복 가드: ref(마운트 내) + sessionStorage(리로드/재마운트 간).
+  // 이메일 등 PII 는 넣지 않는다 — transactionId(비식별)·금액·상품 id/제목만.
+  const firePurchase = (args: {
+    transactionId: string;
+    value: number;
+    itemId: string;
+    itemName?: string;
+    itemCategory: 'lecture' | 'subscription';
+  }) => {
+    const { transactionId, value, itemId, itemName, itemCategory } = args;
+    if (!transactionId || !Number.isFinite(value) || value < 0) return;
+
+    const dedupeKey = `ga4_purchase_${transactionId}`;
     if (purchaseFiredRef.current) return;
     try {
       if (typeof window !== 'undefined' && window.sessionStorage.getItem(dedupeKey)) {
@@ -53,6 +62,23 @@ export default function CheckoutSuccessPage() {
       // 무시 — 저장 실패해도 ref 가 이번 마운트 중복은 막음
     }
 
+    trackPurchase({
+      transactionId,
+      value,
+      currency: 'KRW',
+      items: [
+        {
+          item_id: itemId,
+          item_name: itemName,
+          item_category: itemCategory,
+          price: value,
+          quantity: 1,
+        },
+      ],
+    });
+  };
+
+  const resolveLectureItem = () => {
     const slug = searchParams.get('slug');
     const lecture = slug ? lectures.find((l) => l.slug === slug) : undefined;
     const itemName = lecture
@@ -60,20 +86,17 @@ export default function CheckoutSuccessPage() {
         ? lecture.title_ko
         : lecture.title_en
       : undefined;
-    trackPurchase({
-      transactionId: orderId,
-      value: Number(amountParam),
-      currency: 'KRW',
-      items: [
-        {
-          item_id: slug ?? 'lecture',
-          item_name: itemName,
-          item_category: 'lecture',
-          price: Number(amountParam),
-          quantity: 1,
-        },
-      ],
-    });
+    return { itemId: slug ?? 'lecture', itemName };
+  };
+
+  const resolveSubscriptionItem = (planId: string) => {
+    const billing = searchParams.get('billing') || 'monthly';
+    const planLabel = PLAN_NAMES[planId] || planId;
+    const cycleLabel = billing === 'annual' ? 'Annual' : 'Monthly';
+    return {
+      itemId: planId,
+      itemName: `Marblo ${planLabel} (${cycleLabel})`,
+    };
   };
 
   useEffect(() => {
@@ -84,18 +107,52 @@ export default function CheckoutSuccessPage() {
       const paymentId = searchParams.get('paymentId');
       const orderId = searchParams.get('orderId');
       const amountParam = searchParams.get('amount');
+      const txParam = searchParams.get('tx');
+      const value = amountParam != null && amountParam !== '' ? Number(amountParam) : NaN;
 
       const functions = getFunctions(app, 'us-central1');
       try {
         if (provider === 'portone' && paymentId && plan) {
+          // PortOne 일회성(강의 등) — checkout 에서 이미 complete 했을 수 있으나
+          // 리다이렉트 복귀 경로와 동일 callable 로 멱등 확정.
           const billing = searchParams.get('billing') || undefined;
           const complete = httpsCallable(functions, 'completePortOnePayment');
           await complete({ paymentId, planType: plan, billing });
+          if (Number.isFinite(value)) {
+            if (isLecture) {
+              const lectureItem = resolveLectureItem();
+              firePurchase({
+                transactionId: paymentId,
+                value,
+                itemId: lectureItem.itemId,
+                itemName: lectureItem.itemName,
+                itemCategory: 'lecture',
+              });
+            } else {
+              const subItem = resolveSubscriptionItem(plan);
+              firePurchase({
+                transactionId: paymentId,
+                value,
+                itemId: subItem.itemId,
+                itemName: subItem.itemName,
+                itemCategory: 'subscription',
+              });
+            }
+          }
         } else if (isLecture && paymentKey && orderId && amountParam) {
+          // Toss 강의 결제
           const confirm = httpsCallable(functions, 'confirmLecturePayment');
           await confirm({ paymentKey, orderId, amount: Number(amountParam) });
-          fireLecturePurchase(orderId, amountParam);
+          const lectureItem = resolveLectureItem();
+          firePurchase({
+            transactionId: orderId,
+            value: Number(amountParam),
+            itemId: lectureItem.itemId,
+            itemName: lectureItem.itemName,
+            itemCategory: 'lecture',
+          });
         } else if (authKey && customerKey && plan) {
+          // Toss 구독 빌링키 발급 + 첫 청구
           // 쿠폰 코드를 첫 청구까지 전달(빈 문자열이면 미적용). checkout 페이지가
           // successUrl 에 &coupon= 로 실어 보낸다.
           const coupon = searchParams.get('coupon') || undefined;
@@ -107,6 +164,29 @@ export default function CheckoutSuccessPage() {
           const billing = searchParams.get('billing') || undefined;
           const issue = httpsCallable(functions, 'issueBillingKey');
           await issue({ authKey, customerKey, plan, coupon, billing });
+          // authKey 는 빌링 인증 1회당 유일 — transaction_id 로 사용(PII 아님).
+          // amount 는 successUrl 에 실어 보낸 값; 없으면 발화 스킵(오값 방지).
+          if (Number.isFinite(value) && value > 0) {
+            const subItem = resolveSubscriptionItem(plan);
+            firePurchase({
+              transactionId: authKey,
+              value,
+              itemId: subItem.itemId,
+              itemName: subItem.itemName,
+              itemCategory: 'subscription',
+            });
+          }
+        } else if (provider === 'portone' && plan && Number.isFinite(value) && value > 0) {
+          // PortOne 구독: checkout 페이지에서 completePortOneBillingKey 까지 끝난 뒤
+          // 여기로 리다이렉트만 한다(재확정 callable 없음). success 마운트 시 purchase 1회.
+          const subItem = resolveSubscriptionItem(plan);
+          firePurchase({
+            transactionId: txParam || paymentId || `portone_${plan}_${searchParams.get('billing') || 'monthly'}_${value}`,
+            value,
+            itemId: subItem.itemId,
+            itemName: subItem.itemName,
+            itemCategory: 'subscription',
+          });
         }
         setSuccess(true);
       } catch (err) {
@@ -119,7 +199,7 @@ export default function CheckoutSuccessPage() {
       }
     };
     confirmPayment();
-  }, [searchParams, isLecture, plan, t]);
+  }, [searchParams, isLecture, plan, provider, t, locale]);
 
   return (
     <div className="py-24 px-4 text-center">

@@ -33,10 +33,10 @@
 
 > marblo-web 은 **실제 매출·리드만 전환**으로 카운트합니다. 결제 확정 성공·waitlist 문서 쓰기 성공 등 서버 확정 시점에만 발화(단순 클릭·검증 실패는 미포함).
 
-| 이벤트명            | 설명                                     | 파라미터                                                                           | 발생 위치                                                                              |
-| ------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| **`purchase`**      | 강의 결제 확정 성공 (GA4 표준 ecommerce) | `transaction_id`(orderId), `value`(금액), `currency`(KRW), `items`(강의 slug/제목) | `checkout/success/page.tsx` — `confirmLecturePayment` 성공 직후, orderId 기준 1회 가드 |
-| **`generate_lead`** | 베타(파운더) 신청 폼 제출 성공           | `lead_source`(home/promo_bar/foundation50_page), `locale`, `currency`, `value`     | `components/BetaTester50SignupForm.tsx` — waitlist `addDoc` 성공 직후                  |
+| 이벤트명            | 설명                                              | 파라미터                                                                                                                                 | 발생 위치                                                                                                                                                                                                 |
+| ------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`purchase`**      | 강의·구독 결제 확정 성공 (GA4 표준 ecommerce)     | `transaction_id`, `value`, `currency`(KRW), `items` (`item_category`=`lecture`\|`subscription`, `item_id`=slug 또는 plan)               | `checkout/success/page.tsx` — 확정 성공 직후 1회. 강의(Toss orderId / PortOne paymentId), 구독(Toss authKey / PortOne issueId=`tx`). sessionStorage+ref 중복 가드. amount 없으면 발화 스킵(오값 방지) |
+| **`generate_lead`** | 베타(파운더) 신청 폼 제출 성공                    | `lead_source`(home/promo_bar/foundation50_page), `locale`, `currency`, `value`                                                            | `components/BetaTester50SignupForm.tsx` — waitlist `addDoc` 성공 직후                                                                                                                                     |
 
 **GA4 콘솔 설정:** 관리 → 데이터 표시 → 이벤트 → `purchase`·`generate_lead` 각각 **키 이벤트로 표시** ON. 그 외는 OFF 유지.
 
