@@ -1776,6 +1776,8 @@ const FOUNDER_INTERVIEW_MIN_TOTAL = 14;
 const FOUNDER_FIELD_MAX = 5000;
 const FOUNDER_FEEDBACK_COLLECTION = "founder_feedback";
 const FOUNDERS_COLLECTION = "founders";
+const EXPERIENCE_SHARE_SURVEY_COLLECTION = "experience_share_surveys";
+const EXPERIENCE_SHARE_REWARD_MONTHS = 5;
 // 신청 목록 조회/반려 매칭이 스캔하는 최대 신청 수. 이메일 정규화 기준으로
 // 매칭·중복제거하려면 doc 을 읽어봐야 해서 쿼리 필터 대신 스캔 상한을 둔다.
 const WAITLIST_SCAN_LIMIT = 1000;
@@ -1851,6 +1853,21 @@ function classifyWaitlistEmail(
     return { ok: false, email, reason: "typo_domain" };
   }
   return { ok: true, email };
+}
+
+function normalizeShortText(value: unknown, maxLength: number): string {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
+
+function normalizeHttpUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 function addMonths(base: Date, months: number): Date {
@@ -2017,6 +2034,107 @@ async function grantFounderProTotalInternal(
   );
   return outcome.periodEnd;
 }
+
+export const submitExperienceShareSurvey = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Login required");
+    }
+
+    const uid = context.auth.uid;
+    const rating = Number((data as { rating?: unknown }).rating);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "rating must be 1..5",
+      );
+    }
+
+    const liked = normalizeShortText(
+      (data as { liked?: unknown }).liked,
+      1000,
+    );
+    const improvements = normalizeShortText(
+      (data as { improvements?: unknown }).improvements,
+      1000,
+    );
+    if (!liked && !improvements) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "liked or improvements is required",
+      );
+    }
+
+    const shareUrl = normalizeHttpUrl((data as { shareUrl?: unknown }).shareUrl);
+    if (!shareUrl) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "shareUrl must be an http(s) URL",
+      );
+    }
+
+    const sessionCountRaw = Number(
+      (data as { sessionCount?: unknown }).sessionCount,
+    );
+    const sessionCount =
+      Number.isFinite(sessionCountRaw) && sessionCountRaw > 0
+        ? Math.trunc(sessionCountRaw)
+        : null;
+    const ref = db.collection(EXPERIENCE_SHARE_SURVEY_COLLECTION).doc(uid);
+    const existing = await ref.get();
+    if (existing.exists) {
+      const existingData = existing.data() ?? {};
+      const periodEnd = timestampToDate(existingData.rewardPeriodEnd);
+      return {
+        ok: true,
+        id: ref.id,
+        rewardMonths: EXPERIENCE_SHARE_REWARD_MONTHS,
+        reviewStatus: "already_submitted",
+        grantApplied: existingData.rewardGrantApplied === true,
+        periodEnd: periodEnd?.toISOString(),
+      };
+    }
+
+    const now = new Date();
+    const rewardEnd = addMonths(now, EXPERIENCE_SHARE_REWARD_MONTHS);
+    const grantOutcome = await upsertProSubscription(
+      uid,
+      rewardEnd,
+      "experience_share_reward",
+      now,
+    );
+
+    await ref.set({
+      userId: uid,
+      rating,
+      liked,
+      improvements,
+      shareUrl,
+      sessionCount,
+      rewardMonths: EXPERIENCE_SHARE_REWARD_MONTHS,
+      rewardPlanType: "pro",
+      rewardGrantApplied: grantOutcome.granted,
+      rewardSkippedReason: grantOutcome.skippedReason,
+      rewardPeriodEnd: admin.firestore.Timestamp.fromDate(
+        grantOutcome.periodEnd,
+      ),
+      reviewStatus: "pending_review",
+      adminReviewRequired: true,
+      spamReviewFlag: true,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    return {
+      ok: true,
+      id: ref.id,
+      rewardMonths: EXPERIENCE_SHARE_REWARD_MONTHS,
+      reviewStatus: "pending_review",
+      grantApplied: grantOutcome.granted,
+      periodEnd: grantOutcome.periodEnd.toISOString(),
+    };
+  },
+);
 
 function timestampToDate(value: unknown): Date | null {
   if (value && typeof (value as { toDate?: unknown }).toDate === "function") {

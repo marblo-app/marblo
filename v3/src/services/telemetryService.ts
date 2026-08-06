@@ -648,7 +648,7 @@ export const telemetry = {
     });
   },
 
-  surveyFirstProject(rating: number, feedback?: string) {
+  surveyFirstProject(rating: number, feedback?: unknown) {
     logTelemetry({
       event: "onboarding:survey_first_project",
       metadata: { rating, ...(feedback ? { feedback } : {}) },
