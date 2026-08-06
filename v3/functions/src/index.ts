@@ -972,6 +972,8 @@ async function payPortOneBillingKey(params: {
   amount: number;
   customerId: string;
   customerEmail: string | null;
+  customerName?: string | null;
+  customerPhone?: string | null;
 }): Promise<PortOnePaymentLike> {
   assertPortOneServerConfig();
   const res = await fetch(
@@ -994,6 +996,11 @@ async function payPortOneBillingKey(params: {
         customer: {
           id: params.customerId,
           email: params.customerEmail || undefined,
+          // PortOne V2: name is { full: "..." }; missing name/phone can 500 on billing-key charge.
+          name: params.customerName
+            ? { full: params.customerName }
+            : undefined,
+          phoneNumber: params.customerPhone || undefined,
         },
       }),
     },
@@ -1493,6 +1500,8 @@ export const completePortOneBillingKey = functions.https.onCall(
         : null;
     const billingKey = stringField(data, "billingKey");
     const planType = stringField(data, "planType") || "pro";
+    const customerName = stringField(data, "customerName");
+    const customerPhone = stringField(data, "customerPhone");
     if (!billingKey) {
       throw new functions.https.HttpsError(
         "invalid-argument",
@@ -1559,6 +1568,8 @@ export const completePortOneBillingKey = functions.https.onCall(
             amount: finalAmount,
             customerId: userId,
             customerEmail: authEmail,
+            customerName,
+            customerPhone,
           });
 
     if (payment) {

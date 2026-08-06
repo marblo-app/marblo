@@ -336,6 +336,9 @@ export default function CheckoutPage() {
             planType: plan,
             billing,
             coupon: couponCode || undefined,
+            // PortOne billing-key charge requires customer.name/phoneNumber server-side.
+            customerName: fullName,
+            customerPhone: customer.phoneNumber,
           });
           router.push(
             `/${locale}/checkout/success?provider=portone&plan=${plan}&billing=${billing}&amount=${finalAmount}`,
