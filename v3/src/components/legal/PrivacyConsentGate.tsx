@@ -102,23 +102,12 @@ export function PrivacyConsentGate() {
   }, [consentUid]);
 
   useEffect(() => {
-    console.info("[PrivacyConsentGate] evaluation", {
-      hasUser: !!user,
-      uid: user?.uid ?? null,
-      authSettled,
-      hasHumanUser: !!humanUser,
-      humanUid: humanUserUid,
-      hasLoaded,
-      loadedUid,
-      needsPrompt,
-      showPrompt:
-        !!consentUid && hasLoaded && loadedUid === consentUid && needsPrompt,
-      readOutcome: lastReadOutcome,
-      readCode: lastReadCode,
-      storedVersion: storedVersion || null,
-      currentVersion: CURRENT_POLICY_VERSION,
-      versionCurrent: storedVersion === CURRENT_POLICY_VERSION,
-    });
+    const showPrompt =
+      !!consentUid && hasLoaded && loadedUid === consentUid && needsPrompt;
+    const versionCurrent = storedVersion === CURRENT_POLICY_VERSION;
+    console.info(
+      `[PrivacyConsentGate] eval uid=${consentUid} humanUid=${humanUserUid} outcome=${lastReadOutcome} version=${storedVersion || null} current=${versionCurrent} show=${showPrompt}`,
+    );
   }, [
     user,
     authSettled,

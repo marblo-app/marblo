@@ -105,6 +105,9 @@ export function isHumanAuthUser(firebaseUser: User | null): firebaseUser is User
   if (!firebaseUser) return false;
   if (firebaseUser.uid === "test-user-bypass") return true;
 
+  const email = firebaseUser.email?.trim();
+  if (!email) return false;
+
   const providerIds = firebaseUser.providerData
     .map((provider) => provider.providerId)
     .filter(Boolean);
@@ -117,10 +120,10 @@ export function isHumanAuthUser(firebaseUser: User | null): firebaseUser is User
     return true;
   }
 
-  // Custom-token agent identities normally have no providerData/email. Keep the
-  // fallback conservative: a verified email still represents an interactive
-  // account even if Firebase did not hydrate providerData yet.
-  return !!firebaseUser.email && firebaseUser.emailVerified;
+  // Firebase may not have hydrated providerData yet, but an email-bearing
+  // account is still the interactive user. Agent custom-token identities have no
+  // email and are rejected above, so they never drive human-only consent state.
+  return true;
 }
 
 function rememberMarketingConsentForRedirect(

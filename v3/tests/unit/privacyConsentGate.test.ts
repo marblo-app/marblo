@@ -127,6 +127,7 @@ describe("PrivacyConsentGate stable human uid gating", () => {
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
   });
 
   it("does not load or prompt before auth settles on a human uid", () => {
@@ -137,6 +138,7 @@ describe("PrivacyConsentGate stable human uid gating", () => {
   });
 
   it("ignores agent custom-token identity even after auth is settled", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     setAuth({
       user: makeUser(AGENT_UID),
       authSettled: true,
@@ -149,6 +151,9 @@ describe("PrivacyConsentGate stable human uid gating", () => {
 
     expect(consentService.getConsentWithRetry).not.toHaveBeenCalled();
     expect(screen.queryByTestId("privacy-consent-modal")).toBeNull();
+    expect(info).toHaveBeenCalledWith(
+      "[PrivacyConsentGate] eval uid=null humanUid=null outcome=not_loaded version=null current=false show=false",
+    );
   });
 
   it("loads with the settled Google uid and hides prompt for current consent", async () => {
