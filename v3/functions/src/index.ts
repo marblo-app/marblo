@@ -79,6 +79,13 @@ import {
   hasPaymentEvidence as hasBillingPaymentEvidence,
   type SubscriptionSnapshot,
 } from "./billing";
+import {
+  portoneChargeDocId,
+  portoneExpectedAmount,
+  portonePaymentId,
+  validatePortOnePaidPayment,
+  type PortOnePaymentLike,
+} from "./portone";
 import { resolveEntitledPlan } from "./entitlement";
 import { MAX_COST_LOGS_LIMIT, normalizeCostLogsLimit } from "./costLogsLimit";
 
@@ -503,6 +510,14 @@ const PADDLE_API_BASE = "https://api.paddle.com";
 const TOSS_SECRET_KEY = process.env.TOSS_SECRET_KEY!;
 const TOSS_API_BASE = "https://api.tosspayments.com/v1";
 
+const PORTONE_API_SECRET = process.env.PORTONE_API_SECRET || "";
+const PORTONE_STORE_ID = process.env.PORTONE_STORE_ID || "";
+const PORTONE_INICIS_ONETIME_CHANNEL_KEY =
+  process.env.PORTONE_INICIS_ONETIME_CHANNEL_KEY || "";
+const PORTONE_INICIS_BILLING_CHANNEL_KEY =
+  process.env.PORTONE_INICIS_BILLING_CHANNEL_KEY || "";
+const PORTONE_API_BASE = "https://api.portone.io";
+
 // ─── SendGrid (파운더 접근 안내 이메일) ──────────────────────────────
 // 전부 선택값 — 미설정 시 발송만 스킵하고 배포·선정은 정상 동작한다.
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
@@ -882,6 +897,298 @@ export const confirmTossPayment = functions.https.onCall(
   },
 );
 
+// ═══════════════════════════════════════════════════════════════════
+// PortOne V2 Integration (KG이니시스 테스트모드)
+// ═══════════════════════════════════════════════════════════════════
+
+function assertPortOneServerConfig(): void {
+  if (!PORTONE_API_SECRET || !PORTONE_STORE_ID) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "PortOne 서버 설정이 필요합니다.",
+    );
+  }
+}
+
+function assertPortOneCheckoutConfig(kind: "one_time" | "subscription"): string {
+  assertPortOneServerConfig();
+  const channelKey =
+    kind === "subscription"
+      ? PORTONE_INICIS_BILLING_CHANNEL_KEY
+      : PORTONE_INICIS_ONETIME_CHANNEL_KEY;
+  if (!channelKey) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "PortOne 채널 설정이 필요합니다.",
+    );
+  }
+  return channelKey;
+}
+
+function objectField(data: unknown, key: string): unknown {
+  if (!data || typeof data !== "object") return undefined;
+  return (data as Record<string, unknown>)[key];
+}
+
+function stringField(data: unknown, key: string): string | null {
+  const value = objectField(data, key);
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+async function fetchPortOnePayment(
+  paymentId: string,
+): Promise<PortOnePaymentLike> {
+  assertPortOneServerConfig();
+  const res = await fetch(
+    `${PORTONE_API_BASE}/payments/${encodeURIComponent(paymentId)}`,
+    {
+      headers: { Authorization: `PortOne ${PORTONE_API_SECRET}` },
+    },
+  );
+  if (!res.ok) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "PortOne 결제내역 조회에 실패했습니다.",
+    );
+  }
+  return (await res.json()) as PortOnePaymentLike;
+}
+
+async function payPortOneBillingKey(params: {
+  paymentId: string;
+  billingKey: string;
+  channelKey: string;
+  orderName: string;
+  amount: number;
+  customerId: string;
+  customerEmail: string | null;
+}): Promise<PortOnePaymentLike> {
+  assertPortOneServerConfig();
+  const res = await fetch(
+    `${PORTONE_API_BASE}/payments/${encodeURIComponent(
+      params.paymentId,
+    )}/billing-key`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `PortOne ${PORTONE_API_SECRET}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        storeId: PORTONE_STORE_ID,
+        channelKey: params.channelKey,
+        billingKey: params.billingKey,
+        orderName: params.orderName,
+        amount: { total: params.amount },
+        currency: "KRW",
+        customer: {
+          id: params.customerId,
+          email: params.customerEmail || undefined,
+        },
+      }),
+    },
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const message =
+      typeof objectField(body, "message") === "string"
+        ? String(objectField(body, "message")).slice(0, 300)
+        : "PortOne 빌링키 결제에 실패했습니다.";
+    throw new functions.https.HttpsError("internal", message);
+  }
+  const body = (await res.json()) as { payment?: PortOnePaymentLike };
+  return body.payment || fetchPortOnePayment(params.paymentId);
+}
+
+export const getPortOneCheckoutConfig = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다.",
+      );
+    }
+
+    const kind =
+      stringField(data, "kind") === "one_time" ? "one_time" : "subscription";
+    const channelKey = assertPortOneCheckoutConfig(kind);
+    return {
+      storeId: PORTONE_STORE_ID,
+      channelKey,
+      oneTimeChannelKey: PORTONE_INICIS_ONETIME_CHANNEL_KEY || null,
+      billingChannelKey: PORTONE_INICIS_BILLING_CHANNEL_KEY || null,
+    };
+  },
+);
+
+export const createPortOnePaymentIntent = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다.",
+      );
+    }
+    assertPortOneCheckoutConfig("one_time");
+    const planType = stringField(data, "planType");
+    if (!planType) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "planType이 필요합니다.",
+      );
+    }
+    const expected = portoneExpectedAmount(planType, stringField(data, "billing"));
+    if (!expected) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "유효하지 않은 플랜입니다.",
+      );
+    }
+    const paymentId = portonePaymentId(
+      context.auth.uid,
+      "one_time",
+      `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    );
+    const orderName = `Marblo ${planType} 단건 결제`;
+    await db.collection("pendingPortOneOrders").doc(paymentId).set({
+      userId: context.auth.uid,
+      planType,
+      billingCycle: expected.billingCycle,
+      amount: expected.amount,
+      orderName,
+      status: "pending",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return {
+      paymentId,
+      orderName,
+      amount: expected.amount,
+      currency: "KRW",
+    };
+  },
+);
+
+export const completePortOnePayment = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다.",
+      );
+    }
+    const paymentId = stringField(data, "paymentId");
+    if (!paymentId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "paymentId가 필요합니다.",
+      );
+    }
+
+    const orderSnap = await db
+      .collection("pendingPortOneOrders")
+      .doc(paymentId)
+      .get();
+    if (!orderSnap.exists) {
+      throw new functions.https.HttpsError(
+        "not-found",
+        "PortOne 주문을 찾을 수 없습니다.",
+      );
+    }
+    const order = orderSnap.data() || {};
+    if (order.userId !== context.auth.uid) {
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "본인의 주문만 확인할 수 있습니다.",
+      );
+    }
+    const planType =
+      typeof order.planType === "string" ? order.planType : "pro";
+    const billingCycle = normalizeBillingCycle(order.billingCycle);
+    const amount = typeof order.amount === "number" ? order.amount : 0;
+    if (amount <= 0) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "주문 금액이 유효하지 않습니다.",
+      );
+    }
+
+    const chargeRef = db
+      .collection("billingCharges")
+      .doc(portoneChargeDocId(paymentId));
+    const shouldApply = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(chargeRef);
+      if (snap.exists && snap.data()?.status === "succeeded") return false;
+      tx.set(
+        chargeRef,
+        {
+          userId: context.auth!.uid,
+          provider: "portone",
+          paymentId,
+          amount,
+          planType,
+          reason: "one_time",
+          status: "pending",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      return true;
+    });
+
+    if (!shouldApply) return { success: true, idempotent: true };
+
+    const payment = await fetchPortOnePayment(paymentId);
+    const validation = validatePortOnePaidPayment(payment, {
+      paymentId,
+      storeId: PORTONE_STORE_ID,
+      amount,
+      currency: "KRW",
+    });
+    if (!validation.ok) {
+      await chargeRef.update({
+        status: "failed",
+        error: validation.reason,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "PortOne 결제 검증에 실패했습니다.",
+      );
+    }
+
+    const now = new Date();
+    await db.collection("subscriptions").doc(context.auth.uid).set(
+      {
+        userId: context.auth.uid,
+        planType,
+        billingCycle,
+        status: "active",
+        paymentProvider: "portone",
+        portonePaymentId: paymentId,
+        currentPeriodStart: now,
+        currentPeriodEnd: nextPeriodEnd(now, billingCycle),
+        billingFailedCount: 0,
+        nextRetryAt: null,
+        createdAt: now,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    await chargeRef.update({
+      status: "succeeded",
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    await orderSnap.ref.update({
+      status: "confirmed",
+      confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return { success: true, idempotent: false };
+  },
+);
+
 // ─── TossPayments Webhook ────────────────────────────────────────
 // H1(재수정): Toss 결제 웹훅(PAYMENT_STATUS_CHANGED)은 서명 헤더가 없다 — HMAC
 // 서명은 정산/셀러 웹훅(payout.changed) 전용(`tosspayments-webhook-signature`).
@@ -1162,6 +1469,157 @@ async function resolveFirstChargeAmount(
   const { finalAmount } = applyCouponDiscount(baseAmount, c);
   return { finalAmount, appliedCoupon: { code: couponCode } };
 }
+
+export const completePortOneBillingKey = functions.https.onCall(
+  async (data, context) => {
+    const userId = context.auth?.uid;
+    if (!userId) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다.",
+      );
+    }
+    const authEmail =
+      typeof context.auth?.token.email === "string"
+        ? context.auth.token.email
+        : null;
+    const billingKey = stringField(data, "billingKey");
+    const planType = stringField(data, "planType") || "pro";
+    if (!billingKey) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "billingKey가 필요합니다.",
+      );
+    }
+
+    const channelKey = assertPortOneCheckoutConfig("subscription");
+    const expected = portoneExpectedAmount(planType, stringField(data, "billing"));
+    if (!expected) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        `Plan '${planType}' is not chargeable`,
+      );
+    }
+
+    const { finalAmount, appliedCoupon } = await resolveFirstChargeAmount(
+      userId,
+      expected.amount,
+      stringField(data, "coupon"),
+    );
+    const cycleAnchorMs = Date.now();
+    const paymentId = portonePaymentId(
+      userId,
+      "subscription",
+      String(cycleAnchorMs),
+    );
+    const chargeRef = db
+      .collection("billingCharges")
+      .doc(portoneChargeDocId(paymentId));
+
+    const shouldCharge = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(chargeRef);
+      if (snap.exists && snap.data()?.status === "succeeded") return false;
+      tx.set(
+        chargeRef,
+        {
+          userId,
+          provider: "portone",
+          paymentId,
+          amount: finalAmount,
+          planType,
+          reason: "first",
+          status: "pending",
+          cycleAnchorMs,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      return true;
+    });
+
+    if (!shouldCharge) return { success: true, idempotent: true };
+
+    const payment =
+      finalAmount <= 0
+        ? null
+        : await payPortOneBillingKey({
+            paymentId,
+            billingKey,
+            channelKey,
+            orderName: `Marblo ${planType} 구독`,
+            amount: finalAmount,
+            customerId: userId,
+            customerEmail: authEmail,
+          });
+
+    if (payment) {
+      const validation = validatePortOnePaidPayment(payment, {
+        paymentId,
+        storeId: PORTONE_STORE_ID,
+        amount: finalAmount,
+        currency: "KRW",
+      });
+      if (!validation.ok) {
+        await chargeRef.update({
+          status: "failed",
+          error: validation.reason,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "PortOne 빌링키 결제 검증에 실패했습니다.",
+        );
+      }
+    }
+
+    const now = new Date(cycleAnchorMs);
+    await db.collection("subscriptions").doc(userId).set(
+      {
+        userId,
+        planType,
+        billingCycle: expected.billingCycle,
+        status: "active",
+        paymentProvider: "portone",
+        portoneBillingKey: billingKey,
+        portonePaymentId: finalAmount <= 0 ? null : paymentId,
+        currentPeriodStart: now,
+        currentPeriodEnd: nextPeriodEnd(now, expected.billingCycle),
+        billingFailedCount: 0,
+        nextRetryAt: null,
+        couponCode: appliedCoupon?.code || null,
+        createdAt: now,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    await chargeRef.update({
+      status: finalAmount <= 0 ? "comped" : "succeeded",
+      portonePaymentId: finalAmount <= 0 ? null : paymentId,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    if (appliedCoupon) {
+      await db
+        .collection("coupons")
+        .doc(appliedCoupon.code)
+        .update({ usedCount: admin.firestore.FieldValue.increment(1) });
+      await db.collection("couponRedemptions").add({
+        couponCode: appliedCoupon.code,
+        userId,
+        redeemedAt: new Date(),
+        context: "portone_subscription_first_charge",
+      });
+    }
+
+    return {
+      success: true,
+      idempotent: false,
+      charged: finalAmount <= 0 ? "comped" : "charged",
+    };
+  },
+);
 
 // 빌링키 발급 + 첫 결제 청구(원자적). 청구 실패 시 구독을 active 로 만들지
 // 않는다 — GAP A(₩0 무료 활성) 방지의 핵심.

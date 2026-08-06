@@ -13,6 +13,42 @@ import { lectures } from "@/data/lectures";
 import { trackBeginCheckout } from "@/lib/gtag";
 import { ArrowLeft, Loader2, AlertCircle, ShoppingCart } from "lucide-react";
 
+type PaymentProvider = "toss" | "portone";
+
+interface PortOneSDK {
+  requestPayment(params: {
+    storeId: string;
+    channelKey: string;
+    paymentId: string;
+    orderName: string;
+    totalAmount: number;
+    currency: "KRW";
+    payMethod: "CARD";
+    redirectUrl?: string;
+    customer?: {
+      fullName?: string;
+      email?: string;
+    };
+  }): Promise<{ paymentId?: string; code?: string; message?: string }>;
+  requestIssueBillingKey(params: {
+    storeId: string;
+    channelKey: string;
+    billingKeyMethod: "CARD";
+    issueId: string;
+    issueName: string;
+    customer?: {
+      fullName?: string;
+      email?: string;
+    };
+  }): Promise<{ billingKey?: string; code?: string; message?: string }>;
+}
+
+declare global {
+  interface Window {
+    PortOne?: PortOneSDK;
+  }
+}
+
 const PLAN_PRICES: Record<
   string,
   { name: string; monthly: number; annual: number }
@@ -39,6 +75,11 @@ export default function CheckoutPage() {
   const lectureSlug = searchParams.get("slug");
   const type = searchParams.get("type") || "subscription";
   const billing = searchParams.get("billing") || "monthly";
+  const paymentProvider: PaymentProvider =
+    searchParams.get("provider") === "portone" ||
+    process.env.NEXT_PUBLIC_PAYMENT_PROVIDER === "portone"
+      ? "portone"
+      : "toss";
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -108,18 +149,46 @@ export default function CheckoutPage() {
     return () => unsub();
   }, [locale, plan, lectureSlug, isLecture, type, router]);
 
-  // Pre-load TossPayments SDK
+  const loadPortOneSDK = useCallback(async (): Promise<PortOneSDK> => {
+    if (window.PortOne) return window.PortOne;
+    await new Promise<void>((resolve, reject) => {
+      const existing = document.querySelector<HTMLScriptElement>(
+        'script[src="https://cdn.portone.io/v2/browser-sdk.js"]',
+      );
+      if (existing) {
+        existing.addEventListener("load", () => resolve(), { once: true });
+        existing.addEventListener("error", () => reject(new Error(t("sdkLoadError"))), {
+          once: true,
+        });
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://cdn.portone.io/v2/browser-sdk.js";
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error(t("sdkLoadError")));
+      document.head.appendChild(script);
+    });
+    if (!window.PortOne) throw new Error(t("sdkLoadError"));
+    return window.PortOne;
+  }, [t]);
+
+  // Pre-load selected payment SDK
   useEffect(() => {
     if (!user || !isValid) return;
     let cancelled = false;
     const preload = async () => {
       try {
-        const { loadTossPayments } =
-          await import("@tosspayments/tosspayments-sdk");
-        await loadTossPayments(process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || "");
+        if (paymentProvider === "portone") {
+          await loadPortOneSDK();
+        } else {
+          const { loadTossPayments } =
+            await import("@tosspayments/tosspayments-sdk");
+          await loadTossPayments(process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || "");
+        }
         if (!cancelled) setSdkReady(true);
       } catch (err) {
-        console.error("TossPayments SDK preload error:", err);
+        console.error("Payment SDK preload error:", err);
         if (!cancelled) setError(t("sdkLoadError"));
       }
     };
@@ -127,7 +196,7 @@ export default function CheckoutPage() {
     return () => {
       cancelled = true;
     };
-  }, [user, isValid, t]);
+  }, [user, isValid, t, paymentProvider, loadPortOneSDK]);
 
   const handleCouponApply = useCallback(
     (result: { discountPercent?: number; code: string }) => {
@@ -164,7 +233,74 @@ export default function CheckoutPage() {
       ],
     });
     try {
-      if (isLecture && lectureSlug) {
+      if (paymentProvider === "portone") {
+        const functions = getFunctions(app, "us-central1");
+        const getConfig = httpsCallable<
+          { kind: "one_time" | "subscription" },
+          { storeId: string; channelKey: string }
+        >(functions, "getPortOneCheckoutConfig");
+        const { data: config } = await getConfig({
+          kind: isLecture ? "one_time" : "subscription",
+        });
+        const portone = await loadPortOneSDK();
+        const safePlan = plan || "pro";
+        if (isLecture && lectureSlug) {
+          const createIntent = httpsCallable<
+            { planType: string; billing: string },
+            { paymentId: string; orderName: string; amount: number }
+          >(functions, "createPortOnePaymentIntent");
+          const { data: intent } = await createIntent({
+            planType: safePlan,
+            billing,
+          });
+          const response = await portone.requestPayment({
+            storeId: config.storeId,
+            channelKey: config.channelKey,
+            paymentId: intent.paymentId,
+            orderName: intent.orderName || itemName,
+            totalAmount: intent.amount,
+            currency: "KRW",
+            payMethod: "CARD",
+            redirectUrl: `${window.location.origin}/${locale}/checkout/success?provider=portone&type=lecture&slug=${lectureSlug}&paymentId=${intent.paymentId}&plan=${safePlan}&billing=${billing}`,
+            customer: {
+              fullName: user.displayName || "Marblo User",
+              email: user.email || undefined,
+            },
+          });
+          if (response.code) throw new Error(response.message || response.code);
+          const complete = httpsCallable(functions, "completePortOnePayment");
+          await complete({
+            paymentId: response.paymentId || intent.paymentId,
+          });
+          router.push(
+            `/${locale}/checkout/success?provider=portone&type=lecture&slug=${lectureSlug}&paymentId=${intent.paymentId}&plan=${safePlan}&amount=${intent.amount}`,
+          );
+        } else if (plan) {
+          const response = await portone.requestIssueBillingKey({
+            storeId: config.storeId,
+            channelKey: config.channelKey,
+            billingKeyMethod: "CARD",
+            issueId: `portone_issue_${user.uid}_${crypto.randomUUID()}`,
+            issueName: `Marblo ${itemName} 구독`,
+            customer: {
+              fullName: user.displayName || "Marblo User",
+              email: user.email || undefined,
+            },
+          });
+          if (response.code) throw new Error(response.message || response.code);
+          if (!response.billingKey) throw new Error(t("paymentError"));
+          const complete = httpsCallable(functions, "completePortOneBillingKey");
+          await complete({
+            billingKey: response.billingKey,
+            planType: plan,
+            billing,
+            coupon: couponCode || undefined,
+          });
+          router.push(
+            `/${locale}/checkout/success?provider=portone&plan=${plan}&billing=${billing}&amount=${finalAmount}`,
+          );
+        }
+      } else if (isLecture && lectureSlug) {
         const functions = getFunctions(app, "us-central1");
         const createOrder = httpsCallable(functions, "createLectureOrder");
         const { data } = (await createOrder({

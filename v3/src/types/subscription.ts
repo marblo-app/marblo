@@ -7,7 +7,7 @@ export type SubscriptionStatus =
   | "canceled"
   | "past_due"
   | "trialing";
-export type PaymentProvider = "paddle" | "toss";
+export type PaymentProvider = "paddle" | "toss" | "portone";
 
 export interface Subscription {
   id: string;
@@ -21,6 +21,9 @@ export interface Subscription {
   // TossPayments
   tossBillingKey?: string;
   tossCustomerKey?: string;
+  // PortOne V2
+  portoneBillingKey?: string;
+  portonePaymentId?: string;
   currentPeriodStart: Date;
   currentPeriodEnd: Date;
   createdAt: Date;

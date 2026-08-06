@@ -13,6 +13,7 @@ import { Check, Loader2, BookOpen, Download, LayoutDashboard, Home } from 'lucid
 const PLAN_NAMES: Record<string, string> = {
   pro: 'Pro',
   team: 'Team',
+  team_plus: 'Team Plus',
 };
 
 export default function CheckoutSuccessPage() {
@@ -28,6 +29,7 @@ export default function CheckoutSuccessPage() {
   const type = searchParams.get('type');
   const plan = searchParams.get('plan');
   const amount = searchParams.get('amount');
+  const provider = searchParams.get('provider');
   const isLecture = type === 'lecture';
 
   // 강의 결제 확정 성공 시 GA4 purchase 1회만 발화.
@@ -79,12 +81,17 @@ export default function CheckoutSuccessPage() {
       const authKey = searchParams.get('authKey');
       const customerKey = searchParams.get('customerKey');
       const paymentKey = searchParams.get('paymentKey');
+      const paymentId = searchParams.get('paymentId');
       const orderId = searchParams.get('orderId');
       const amountParam = searchParams.get('amount');
 
       const functions = getFunctions(app, 'us-central1');
       try {
-        if (isLecture && paymentKey && orderId && amountParam) {
+        if (provider === 'portone' && paymentId && plan) {
+          const billing = searchParams.get('billing') || undefined;
+          const complete = httpsCallable(functions, 'completePortOnePayment');
+          await complete({ paymentId, planType: plan, billing });
+        } else if (isLecture && paymentKey && orderId && amountParam) {
           const confirm = httpsCallable(functions, 'confirmLecturePayment');
           await confirm({ paymentKey, orderId, amount: Number(amountParam) });
           fireLecturePurchase(orderId, amountParam);
