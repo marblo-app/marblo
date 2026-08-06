@@ -12,9 +12,11 @@ import "highlight.js/styles/github-dark.css";
 
 interface MarkdownPreviewProps {
   filePath: string;
-  /** Already-read file text — rendered as markdown, and shown verbatim in Raw. */
+  /** Already-read file text — rendered as markdown, and shown verbatim in Edit. */
   content: string;
   language: string;
+  /** Optional read-only contexts can opt out of editing; markdown is editable by default. */
+  readOnly?: boolean;
 }
 
 // Element → styled-element map. react-markdown emits bare HTML tags, so every
@@ -153,8 +155,8 @@ export const markdownComponents: Components = {
 /**
  * Renders a Markdown file as a formatted document (react-markdown + remark-gfm
  * for tables/task-lists + rehype-highlight for fenced code), instead of raw
- * Monaco text. A Preview ↔ Raw toggle mirrors ImagePreview's Preview ↔ Source:
- * the original source is always one click away in the read-only editor.
+ * Monaco text. A Preview ↔ Edit toggle mirrors ImagePreview's Preview ↔ Source:
+ * the editable original source is always one click away.
  *
  * Raw HTML embedded in the markdown is NOT rendered (no rehype-raw), so a
  * malicious .md file can't inject scripts into the renderer.
@@ -163,8 +165,9 @@ export function MarkdownPreview({
   filePath,
   content,
   language,
+  readOnly = false,
 }: MarkdownPreviewProps) {
-  const [view, setView] = useState<"preview" | "raw">("preview");
+  const [view, setView] = useState<"preview" | "edit">("preview");
 
   const toolbar = (
     <div className="flex items-center gap-3 border-b border-gray-700 bg-gray-800 px-3 py-1.5 text-xs text-gray-400">
@@ -184,20 +187,20 @@ export function MarkdownPreview({
         </button>
         <button
           type="button"
-          onClick={() => setView("raw")}
+          onClick={() => setView("edit")}
           className={`px-2 py-0.5 ${
-            view === "raw"
+            view === "edit"
               ? "bg-blue-600 text-white"
               : "text-gray-300 hover:bg-gray-700"
           }`}
         >
-          Raw
+          Edit
         </button>
       </div>
     </div>
   );
 
-  if (view === "raw") {
+  if (view === "edit") {
     return (
       <div className="flex h-full flex-col">
         {toolbar}
@@ -206,7 +209,7 @@ export function MarkdownPreview({
             filePath={filePath}
             content={content}
             language={language}
-            readOnly
+            readOnly={readOnly}
           />
         </div>
       </div>
