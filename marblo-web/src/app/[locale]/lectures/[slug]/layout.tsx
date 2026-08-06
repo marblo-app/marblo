@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { lectures } from "@/data/lectures";
+import { buildAlternates } from "@/lib/seo";
 
 // Client page → per-lecture title lives in this server-only layout.
 // Looks the slug up in the static lecture catalog; unknown slugs (e.g. ones
@@ -29,6 +30,7 @@ export async function generateMetadata({
   // intent explicit instead of accidental, and keeps the fallback branded.
   return {
     title: { absolute: title },
+    alternates: buildAlternates(locale, `/lectures/${slug}`),
   };
 }
 

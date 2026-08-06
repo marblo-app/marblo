@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
+import { buildAlternates } from "@/lib/seo";
 
 // The page itself is a Client Component and cannot export metadata, so this
 // server-only layout supplies the per-route title. Locale-aware via the shared
@@ -27,6 +28,7 @@ export async function generateMetadata({
   return {
     title: t("download"),
     description: descriptions[locale] ?? descriptions.en,
+    alternates: buildAlternates(locale, "/download"),
   };
 }
 

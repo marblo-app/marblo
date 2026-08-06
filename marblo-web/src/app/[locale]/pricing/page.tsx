@@ -7,6 +7,7 @@ import {
   buildSoftwareApplicationSchema,
   stringifyJsonLd,
 } from "@/lib/schema";
+import { buildAlternates } from "@/lib/seo";
 
 // Locale-aware metadata. The title segment reuses the existing nav label
 // (가격 / Pricing / 料金) so Korean/Japanese search sees a localized <title>
@@ -26,6 +27,7 @@ export async function generateMetadata({
   return {
     title: t("pricing"),
     description: descriptions[locale] ?? descriptions.en,
+    alternates: buildAlternates(locale, "/pricing"),
   };
 }
 

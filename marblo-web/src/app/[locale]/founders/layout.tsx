@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
+import { buildAlternates } from "@/lib/seo";
 
 // Client page → per-route title lives in this server-only layout. Locale-aware
 // via the shared nav label (파운더 / Founders / ファウンダー) so Korean/Japanese
@@ -24,6 +25,7 @@ export async function generateMetadata({
   return {
     title: t("foundation50"),
     description: descriptions[locale] ?? descriptions.en,
+    alternates: buildAlternates(locale, "/founders"),
   };
 }
 
