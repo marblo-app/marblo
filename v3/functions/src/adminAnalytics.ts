@@ -862,6 +862,272 @@ export function buildKpiCockpit(input: KpiCockpitInput): KpiCockpitResult {
       "재시작은 회복 신호라 분모에서 제외한다. 동시작업 수는 세션 상관이 필요해 v1 미포함.",
   };
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// 필수 활성유저 지표 확충 — 리텐션 코호트 · Stickiness · 30일+ 잔존 · 순차 게이트
+// ════════════════════════════════════════════════════════════════════════════
+// 신규 row 는 events.metadata.accountUserId 를 계정 identity 로 쓰고, cost_logs.userId
+// 는 이미 clean account uid 로 본다. events.userId 는 agent/client UUID 오염이 있어
+// 여기서는 계정 identity 로 쓰지 않는다. ADMIN_UID 와 agent identity 는 쿼리에서
+// 제외하고, 이 모듈은 BQ 행을 비율/표시 shape 로 접는 순수 로직만 담당한다.
+
+export type RetentionHorizon = "d1" | "d7" | "d14" | "d30";
+export type RetentionCohortSourceRow = {
+  period?: unknown;
+  cohort?: unknown;
+  cohortUsers?: unknown;
+  d1Users?: unknown;
+  d7Users?: unknown;
+  d14Users?: unknown;
+  d30Users?: unknown;
+};
+export type RetentionCohort = {
+  period: "day" | "week";
+  cohort: string;
+  cohortUsers: number;
+  returningUsers: Record<RetentionHorizon, number>;
+  rates: Record<RetentionHorizon, number | null>;
+};
+export type RetentionCohortsResult = {
+  day: RetentionCohort[];
+  week: RetentionCohort[];
+  note: string;
+};
+
+function normalizeRetentionPeriod(value: unknown): "day" | "week" {
+  return value === "week" ? "week" : "day";
+}
+
+function buildRetentionCohortRow(
+  row: RetentionCohortSourceRow,
+): RetentionCohort {
+  const cohortUsers = coerceNumber(row.cohortUsers);
+  const returningUsers: Record<RetentionHorizon, number> = {
+    d1: coerceNumber(row.d1Users),
+    d7: coerceNumber(row.d7Users),
+    d14: coerceNumber(row.d14Users),
+    d30: coerceNumber(row.d30Users),
+  };
+  const rate = (n: number): number | null =>
+    cohortUsers > 0 ? n / cohortUsers : null;
+  return {
+    period: normalizeRetentionPeriod(row.period),
+    cohort: coerceStr(row.cohort),
+    cohortUsers,
+    returningUsers,
+    rates: {
+      d1: rate(returningUsers.d1),
+      d7: rate(returningUsers.d7),
+      d14: rate(returningUsers.d14),
+      d30: rate(returningUsers.d30),
+    },
+  };
+}
+
+export function buildRetentionCohorts(
+  rows: ReadonlyArray<RetentionCohortSourceRow>,
+): RetentionCohortsResult {
+  const cohorts = rows
+    .map(buildRetentionCohortRow)
+    .filter((r) => r.cohort !== "")
+    .sort((a, b) => b.cohort.localeCompare(a.cohort));
+  return {
+    day: cohorts.filter((r) => r.period === "day"),
+    week: cohorts.filter((r) => r.period === "week"),
+    note:
+      "리텐션 코호트는 유저별 첫활성일을 기준으로 묶고, D1/D7/D14/D30 당일에 " +
+      "재방문한 distinct account user 비율을 계산한다. events.userId 는 agent UUID " +
+      "오염이 있어 쓰지 않고 metadata.accountUserId 와 cost_logs.userId 만 사용한다.",
+  };
+}
+
+export type ActiveByDaySourceRow = {
+  date?: unknown;
+  dau?: unknown;
+  events?: unknown;
+};
+export type ActiveUserScalarRow = {
+  dau?: unknown;
+  wau?: unknown;
+  mau?: unknown;
+};
+export type ThirtyDayRetentionSourceRow = {
+  date?: unknown;
+  eligibleUsers?: unknown;
+  retainedUsers?: unknown;
+};
+export type ActiveByDayMetric = {
+  date: string;
+  dau: number;
+  events: number;
+};
+export type ThirtyDayRetentionPoint = {
+  date: string;
+  eligibleUsers: number;
+  retainedUsers: number;
+  retentionRate: number | null;
+};
+export type ActiveUserMetricsResult = {
+  dau: number;
+  wau: number;
+  mau: number;
+  dauWauRatio: number | null;
+  dauMauRatio: number | null;
+  activeByDay: ActiveByDayMetric[];
+  thirtyDayRetention: {
+    current: ThirtyDayRetentionPoint | null;
+    trend: ThirtyDayRetentionPoint[];
+  };
+  note: string;
+};
+
+function buildThirtyDayRetentionPoint(
+  row: ThirtyDayRetentionSourceRow,
+): ThirtyDayRetentionPoint {
+  const eligibleUsers = coerceNumber(row.eligibleUsers);
+  const retainedUsers = coerceNumber(row.retainedUsers);
+  return {
+    date: coerceStr(row.date),
+    eligibleUsers,
+    retainedUsers,
+    retentionRate: eligibleUsers > 0 ? retainedUsers / eligibleUsers : null,
+  };
+}
+
+export function buildActiveUserMetrics(
+  activeRows: ReadonlyArray<ActiveByDaySourceRow>,
+  scalarRow: ActiveUserScalarRow | undefined | null,
+  retentionRows: ReadonlyArray<ThirtyDayRetentionSourceRow>,
+): ActiveUserMetricsResult {
+  const scalars = scalarRow ?? {};
+  const dau = coerceNumber(scalars.dau);
+  const wau = coerceNumber(scalars.wau);
+  const mau = coerceNumber(scalars.mau);
+  const trend = retentionRows
+    .map(buildThirtyDayRetentionPoint)
+    .filter((r) => r.date !== "")
+    .sort((a, b) => a.date.localeCompare(b.date));
+  return {
+    dau,
+    wau,
+    mau,
+    dauWauRatio: wau > 0 ? dau / wau : null,
+    dauMauRatio: mau > 0 ? dau / mau : null,
+    activeByDay: activeRows
+      .map((r) => ({
+        date: coerceStr(r.date),
+        dau: coerceNumber(r.dau),
+        events: coerceNumber(r.events),
+      }))
+      .filter((r) => r.date !== "")
+      .sort((a, b) => a.date.localeCompare(b.date)),
+    thirtyDayRetention: {
+      current: trend.length > 0 ? trend[trend.length - 1] : null,
+      trend,
+    },
+    note:
+      "DAU/WAU/MAU 는 account user 기준 distinct active users 이다. 30일+ 잔존은 " +
+      "first-active 이후 30일이 지난 코호트 중 30일 이후에도 활동한 distinct user 수와 " +
+      "그 비율이다.",
+  };
+}
+
+export type ActivationGateKey =
+  | "install"
+  | "first_run"
+  | "login"
+  | "folder_connected"
+  | "orchestrator_opened"
+  | "agent_spawned"
+  | "first_ticket_complete";
+
+export const ACTIVATION_GATE_STEPS: ReadonlyArray<{
+  key: ActivationGateKey;
+  event: string;
+  label: string;
+}> = [
+  { key: "install", event: "app:installed", label: "설치" },
+  { key: "first_run", event: "app:first_run", label: "최초 실행" },
+  { key: "login", event: "auth:login_success", label: "로그인" },
+  {
+    key: "folder_connected",
+    event: "onboarding:folder_connected",
+    label: "폴더 연결",
+  },
+  {
+    key: "orchestrator_opened",
+    event: "onboarding:orchestrator_opened",
+    label: "오케 오픈",
+  },
+  { key: "agent_spawned", event: "agent:spawned", label: "스폰" },
+  {
+    key: "first_ticket_complete",
+    event: "task:completed",
+    label: "첫 티켓 완료",
+  },
+];
+
+export type ActivationGateSourceRow = Record<string, unknown>;
+export type ActivationGateStep = {
+  key: ActivationGateKey;
+  event: string;
+  label: string;
+  users: number;
+  dropFromPrev: number | null;
+  dropRateFromPrev: number | null;
+  isMaxDrop: boolean;
+};
+export type ActivationGateFunnelResult = {
+  steps: ActivationGateStep[];
+  maxDrop: ActivationGateStep | null;
+  note: string;
+};
+
+export function buildActivationGateFunnel(
+  row: ActivationGateSourceRow | undefined | null,
+): ActivationGateFunnelResult {
+  const safeRow = row ?? {};
+  let maxDrop = 0;
+  let maxDropIndex = -1;
+  const steps = ACTIVATION_GATE_STEPS.map((s, i) => {
+    const users = coerceNumber(safeRow[`d_${s.key}`]);
+    if (i === 0) {
+      return {
+        ...s,
+        users,
+        dropFromPrev: null,
+        dropRateFromPrev: null,
+        isMaxDrop: false,
+      };
+    }
+    const prevUsers = coerceNumber(
+      safeRow[`d_${ACTIVATION_GATE_STEPS[i - 1].key}`],
+    );
+    const drop = Math.max(0, prevUsers - users);
+    if (drop > maxDrop) {
+      maxDrop = drop;
+      maxDropIndex = i;
+    }
+    return {
+      ...s,
+      users,
+      dropFromPrev: drop,
+      dropRateFromPrev: prevUsers > 0 ? drop / prevUsers : null,
+      isMaxDrop: false,
+    };
+  });
+  if (maxDropIndex >= 0 && maxDrop > 0) {
+    steps[maxDropIndex].isMaxDrop = true;
+  }
+  return {
+    steps,
+    maxDrop: maxDropIndex >= 0 && maxDrop > 0 ? steps[maxDropIndex] : null,
+    note:
+      "활성화 게이트는 install→first_run→login→folder_connected→오케open→spawn→" +
+      "first_ticket_complete 순차 부분집합이다. install 전용 이벤트가 없는 구버전 " +
+      "데이터는 first_run 을 install 대체 신호로 사용한다.",
+  };
+}
 // ════════════════════════════════════════════════════════════════════════════
 // 릴리스·버전 헬스 + 모델 하위분해 (ticket F7OUUkNSD6FqoWxktWcp)
 // ════════════════════════════════════════════════════════════════════════════

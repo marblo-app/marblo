@@ -22,6 +22,10 @@ import {
   buildReleaseHealth,
   buildModelBreakdown,
   buildCostByDayModel,
+  buildRetentionCohorts,
+  buildActiveUserMetrics,
+  buildActivationGateFunnel,
+  ACTIVATION_GATE_STEPS,
   type ReasonRow,
   type CliSetupStepRow,
   type ReleaseVersionSourceRow,
@@ -29,6 +33,9 @@ import {
   type ModelBridgeSourceRow,
   type HarnessAgentRow,
   type CostByDayModelSourceRow,
+  type RetentionCohortSourceRow,
+  type ActiveByDaySourceRow,
+  type ThirtyDayRetentionSourceRow,
 } from "./adminAnalytics";
 import { buildProjectAudit, toMillis } from "./projectAudit";
 import {
@@ -7357,6 +7364,365 @@ export const getAdminOnboardingFunnel = functions
         clientIdCount: adminClientIds.length,
       },
       ...funnel,
+    };
+  });
+
+/**
+ * getAdminRetentionCohorts — account user 기준 리텐션 코호트 + 순차 활성화 게이트.
+ *
+ * 활성유저 identity 규칙:
+ *   - cost_logs.userId 는 clean account uid 로 사용한다.
+ *   - events.userId 는 agent/client UUID 오염이 있어 사용하지 않고,
+ *     metadata.accountUserId 가 있는 row 만 account activity 로 본다.
+ *   - ADMIN_UID 와 UUID 형태 agent identity 는 제외한다(includeAdmin=true 면 ADMIN_UID 포함).
+ *
+ * params: { days?: number, includeAdmin?: boolean } (기본 30, 제외)
+ */
+export const getAdminRetentionCohorts = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const rangeDays = parseAnalyticsDays(data);
+    const lookbackDays = Math.min(rangeDays + 35, 400);
+    const includeAdmin = parseIncludeAdmin(data);
+    const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
+    const costTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\``;
+    const adminUid = getAdminExclusionUid();
+    const adminClientIds = await resolveAdminClientIds(rangeDays);
+    const adminClause =
+      !includeAdmin && adminUid ? " AND user_id != @excludeAccountUserId" : "";
+    const adminParams =
+      !includeAdmin && adminUid ? { excludeAccountUserId: adminUid } : {};
+    const identityCleanClause = `
+      AND user_id IS NOT NULL
+      AND user_id != ''
+      AND NOT REGEXP_CONTAINS(
+        user_id,
+        r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+      )${adminClause}
+    `;
+
+    const activityCte = `
+      WITH activity AS (
+        SELECT
+          NULLIF(JSON_VALUE(metadata, '$.accountUserId'), '') AS user_id,
+          timestamp AS ts,
+          DATE(timestamp) AS active_date,
+          event
+        FROM ${eventsTable}
+        WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @lookbackDays DAY)
+          AND NULLIF(JSON_VALUE(metadata, '$.accountUserId'), '') IS NOT NULL
+        UNION ALL
+        SELECT
+          userId AS user_id,
+          SAFE_CAST(timestamp AS TIMESTAMP) AS ts,
+          DATE(SAFE_CAST(timestamp AS TIMESTAMP)) AS active_date,
+          'cost:usage' AS event
+        FROM ${costTable}
+        WHERE SAFE_CAST(timestamp AS TIMESTAMP) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @lookbackDays DAY)
+          AND userId IS NOT NULL
+      ),
+      clean_activity AS (
+        SELECT user_id, ts, active_date, event
+        FROM activity
+        WHERE ts IS NOT NULL${identityCleanClause}
+      )
+    `;
+
+    const retentionQuery = `
+      ${activityCte},
+      firsts AS (
+        SELECT user_id, MIN(active_date) AS first_active_date
+        FROM clean_activity
+        GROUP BY user_id
+      ),
+      cohorts AS (
+        SELECT user_id, first_active_date
+        FROM firsts
+        WHERE first_active_date >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)
+      ),
+      user_returns AS (
+        SELECT
+          c.user_id,
+          c.first_active_date,
+          MAX(IF(a.active_date = DATE_ADD(c.first_active_date, INTERVAL 1 DAY), 1, 0)) AS d1,
+          MAX(IF(a.active_date = DATE_ADD(c.first_active_date, INTERVAL 7 DAY), 1, 0)) AS d7,
+          MAX(IF(a.active_date = DATE_ADD(c.first_active_date, INTERVAL 14 DAY), 1, 0)) AS d14,
+          MAX(IF(a.active_date = DATE_ADD(c.first_active_date, INTERVAL 30 DAY), 1, 0)) AS d30
+        FROM cohorts c
+        LEFT JOIN clean_activity a ON a.user_id = c.user_id
+        GROUP BY c.user_id, c.first_active_date
+      )
+      SELECT
+        'day' AS period,
+        FORMAT_DATE('%F', first_active_date) AS cohort,
+        COUNT(*) AS cohortUsers,
+        SUM(d1) AS d1Users,
+        SUM(d7) AS d7Users,
+        SUM(d14) AS d14Users,
+        SUM(d30) AS d30Users
+      FROM user_returns
+      GROUP BY cohort
+      UNION ALL
+      SELECT
+        'week' AS period,
+        FORMAT_DATE('%F', DATE_TRUNC(first_active_date, WEEK(MONDAY))) AS cohort,
+        COUNT(*) AS cohortUsers,
+        SUM(d1) AS d1Users,
+        SUM(d7) AS d7Users,
+        SUM(d14) AS d14Users,
+        SUM(d30) AS d30Users
+      FROM user_returns
+      GROUP BY cohort
+    `;
+
+    const gateEventNames = Array.from(
+      new Set(ACTIVATION_GATE_STEPS.map((s) => s.event)),
+    );
+    const gateInList = gateEventNames.map((_, i) => `@gateEv${i}`).join(", ");
+    const gateParams: Record<string, unknown> = {};
+    gateEventNames.forEach((name, i) => {
+      gateParams[`gateEv${i}`] = name;
+    });
+    const gateQuery = `
+      WITH raw AS (
+        SELECT
+          NULLIF(JSON_VALUE(metadata, '$.accountUserId'), '') AS user_id,
+          event,
+          timestamp AS ts
+        FROM ${eventsTable}
+        WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @lookbackDays DAY)
+          AND event IN (${gateInList})
+          AND NULLIF(JSON_VALUE(metadata, '$.accountUserId'), '') IS NOT NULL
+      ),
+      clean AS (
+        SELECT user_id, event, ts
+        FROM raw
+        WHERE ts IS NOT NULL${identityCleanClause}
+      ),
+      marks AS (
+        SELECT
+          user_id,
+          COALESCE(
+            MIN(IF(event = 'app:installed', ts, NULL)),
+            MIN(IF(event = 'app:first_run', ts, NULL))
+          ) AS install_ts,
+          MIN(IF(event = 'app:first_run', ts, NULL)) AS first_run_ts,
+          MIN(IF(event = 'auth:login_success', ts, NULL)) AS login_ts,
+          MIN(IF(event = 'onboarding:folder_connected', ts, NULL)) AS folder_connected_ts,
+          MIN(IF(event = 'onboarding:orchestrator_opened', ts, NULL)) AS orchestrator_opened_ts,
+          MIN(IF(event = 'agent:spawned', ts, NULL)) AS agent_spawned_ts,
+          MIN(IF(event = 'task:completed', ts, NULL)) AS first_ticket_complete_ts
+        FROM clean
+        GROUP BY user_id
+      ),
+      seq AS (
+        SELECT
+          *,
+          install_ts IS NOT NULL AS reached_install,
+          install_ts IS NOT NULL
+            AND first_run_ts BETWEEN install_ts AND TIMESTAMP_ADD(install_ts, INTERVAL 24 HOUR)
+            AS reached_first_run,
+          install_ts IS NOT NULL
+            AND first_run_ts BETWEEN install_ts AND TIMESTAMP_ADD(install_ts, INTERVAL 24 HOUR)
+            AND login_ts BETWEEN first_run_ts AND TIMESTAMP_ADD(install_ts, INTERVAL 24 HOUR)
+            AS reached_login,
+          install_ts IS NOT NULL
+            AND first_run_ts BETWEEN install_ts AND TIMESTAMP_ADD(install_ts, INTERVAL 24 HOUR)
+            AND login_ts BETWEEN first_run_ts AND TIMESTAMP_ADD(install_ts, INTERVAL 24 HOUR)
+            AND folder_connected_ts BETWEEN login_ts AND TIMESTAMP_ADD(login_ts, INTERVAL 24 HOUR)
+            AS reached_folder_connected,
+          install_ts IS NOT NULL
+            AND first_run_ts BETWEEN install_ts AND TIMESTAMP_ADD(install_ts, INTERVAL 24 HOUR)
+            AND login_ts BETWEEN first_run_ts AND TIMESTAMP_ADD(install_ts, INTERVAL 24 HOUR)
+            AND folder_connected_ts BETWEEN login_ts AND TIMESTAMP_ADD(login_ts, INTERVAL 24 HOUR)
+            AND orchestrator_opened_ts BETWEEN folder_connected_ts AND TIMESTAMP_ADD(login_ts, INTERVAL 24 HOUR)
+            AS reached_orchestrator_opened,
+          install_ts IS NOT NULL
+            AND first_run_ts BETWEEN install_ts AND TIMESTAMP_ADD(install_ts, INTERVAL 24 HOUR)
+            AND login_ts BETWEEN first_run_ts AND TIMESTAMP_ADD(install_ts, INTERVAL 24 HOUR)
+            AND folder_connected_ts BETWEEN login_ts AND TIMESTAMP_ADD(login_ts, INTERVAL 24 HOUR)
+            AND orchestrator_opened_ts BETWEEN folder_connected_ts AND TIMESTAMP_ADD(login_ts, INTERVAL 24 HOUR)
+            AND agent_spawned_ts BETWEEN orchestrator_opened_ts AND TIMESTAMP_ADD(login_ts, INTERVAL 24 HOUR)
+            AS reached_agent_spawned,
+          install_ts IS NOT NULL
+            AND first_run_ts BETWEEN install_ts AND TIMESTAMP_ADD(install_ts, INTERVAL 24 HOUR)
+            AND login_ts BETWEEN first_run_ts AND TIMESTAMP_ADD(install_ts, INTERVAL 24 HOUR)
+            AND folder_connected_ts BETWEEN login_ts AND TIMESTAMP_ADD(login_ts, INTERVAL 24 HOUR)
+            AND orchestrator_opened_ts BETWEEN folder_connected_ts AND TIMESTAMP_ADD(login_ts, INTERVAL 24 HOUR)
+            AND agent_spawned_ts BETWEEN orchestrator_opened_ts AND TIMESTAMP_ADD(login_ts, INTERVAL 24 HOUR)
+            AND first_ticket_complete_ts BETWEEN agent_spawned_ts AND TIMESTAMP_ADD(login_ts, INTERVAL 24 HOUR)
+            AS reached_first_ticket_complete
+        FROM marks
+      )
+      SELECT
+        COUNTIF(reached_install) AS d_install,
+        COUNTIF(reached_first_run) AS d_first_run,
+        COUNTIF(reached_login) AS d_login,
+        COUNTIF(reached_folder_connected) AS d_folder_connected,
+        COUNTIF(reached_orchestrator_opened) AS d_orchestrator_opened,
+        COUNTIF(reached_agent_spawned) AS d_agent_spawned,
+        COUNTIF(reached_first_ticket_complete) AS d_first_ticket_complete
+      FROM seq
+    `;
+
+    const params = {
+      days: rangeDays,
+      lookbackDays,
+      ...adminParams,
+    };
+    const [cohortRows, gateRows] = await runAdminAnalyticsQueries([
+      { name: "retention.cohorts", query: retentionQuery, params },
+      {
+        name: "retention.activationGate",
+        query: gateQuery,
+        params: { lookbackDays, ...gateParams, ...adminParams },
+      },
+    ]);
+
+    return {
+      rangeDays,
+      generatedAt: new Date().toISOString(),
+      adminExcluded: {
+        applied: !includeAdmin,
+        uidFiltered: getAdminExclusionUid() != null,
+        clientIdCount: adminClientIds.length,
+      },
+      cohorts: buildRetentionCohorts(
+        cohortRows as RetentionCohortSourceRow[],
+      ),
+      activationGate: buildActivationGateFunnel(gateRows[0]),
+    };
+  });
+
+/**
+ * getAdminActiveUserMetrics — DAU/WAU/MAU stickiness + 30일+ 잔존 추이.
+ *
+ * getAdminUsageSummary 의 activeByDay 의미를 account user 기준으로 재구성한다.
+ * events.userId 는 쓰지 않고 metadata.accountUserId 와 cost_logs.userId 만 합산한다.
+ */
+export const getAdminActiveUserMetrics = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const rangeDays = parseAnalyticsDays(data);
+    const lookbackDays = Math.min(Math.max(rangeDays + 35, 65), 400);
+    const includeAdmin = parseIncludeAdmin(data);
+    const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
+    const costTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\``;
+    const adminUid = getAdminExclusionUid();
+    const adminClientIds = await resolveAdminClientIds(rangeDays);
+    const adminClause =
+      !includeAdmin && adminUid ? " AND user_id != @excludeAccountUserId" : "";
+    const adminParams =
+      !includeAdmin && adminUid ? { excludeAccountUserId: adminUid } : {};
+    const identityCleanClause = `
+      AND user_id IS NOT NULL
+      AND user_id != ''
+      AND NOT REGEXP_CONTAINS(
+        user_id,
+        r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+      )${adminClause}
+    `;
+    const activityCte = `
+      WITH activity AS (
+        SELECT
+          NULLIF(JSON_VALUE(metadata, '$.accountUserId'), '') AS user_id,
+          timestamp AS ts,
+          DATE(timestamp) AS active_date
+        FROM ${eventsTable}
+        WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @lookbackDays DAY)
+          AND NULLIF(JSON_VALUE(metadata, '$.accountUserId'), '') IS NOT NULL
+        UNION ALL
+        SELECT
+          userId AS user_id,
+          SAFE_CAST(timestamp AS TIMESTAMP) AS ts,
+          DATE(SAFE_CAST(timestamp AS TIMESTAMP)) AS active_date
+        FROM ${costTable}
+        WHERE SAFE_CAST(timestamp AS TIMESTAMP) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @lookbackDays DAY)
+          AND userId IS NOT NULL
+      ),
+      clean_activity AS (
+        SELECT user_id, ts, active_date
+        FROM activity
+        WHERE ts IS NOT NULL${identityCleanClause}
+      )
+    `;
+
+    const activeByDayQuery = `
+      ${activityCte}
+      SELECT
+        FORMAT_DATE('%F', active_date) AS date,
+        COUNT(DISTINCT user_id) AS dau,
+        COUNT(*) AS events
+      FROM clean_activity
+      WHERE active_date >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)
+      GROUP BY date
+      ORDER BY date ASC
+    `;
+    const scalarQuery = `
+      ${activityCte}
+      SELECT
+        COUNT(DISTINCT IF(active_date = CURRENT_DATE(), user_id, NULL)) AS dau,
+        COUNT(DISTINCT IF(
+          active_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 DAY),
+          user_id, NULL
+        )) AS wau,
+        COUNT(DISTINCT IF(
+          active_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 29 DAY),
+          user_id, NULL
+        )) AS mau
+      FROM clean_activity
+    `;
+    const thirtyDayRetentionQuery = `
+      ${activityCte},
+      firsts AS (
+        SELECT user_id, MIN(active_date) AS first_active_date
+        FROM clean_activity
+        GROUP BY user_id
+      )
+      SELECT
+        FORMAT_DATE('%F', first_active_date) AS date,
+        COUNT(*) AS eligibleUsers,
+        COUNT(DISTINCT IF(a.active_date > DATE_ADD(f.first_active_date, INTERVAL 30 DAY), f.user_id, NULL))
+          AS retainedUsers
+      FROM firsts f
+      LEFT JOIN clean_activity a ON a.user_id = f.user_id
+      WHERE f.first_active_date <= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+        AND f.first_active_date >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)
+      GROUP BY date
+      ORDER BY date ASC
+    `;
+
+    const params = {
+      days: rangeDays,
+      lookbackDays,
+      ...adminParams,
+    };
+    const [activeRows, scalarRows, retentionRows] =
+      await runAdminAnalyticsQueries([
+        { name: "activeUsers.byDay", query: activeByDayQuery, params },
+        { name: "activeUsers.scalars", query: scalarQuery, params },
+        {
+          name: "activeUsers.thirtyDayRetention",
+          query: thirtyDayRetentionQuery,
+          params,
+        },
+      ]);
+
+    return {
+      rangeDays,
+      generatedAt: new Date().toISOString(),
+      adminExcluded: {
+        applied: !includeAdmin,
+        uidFiltered: getAdminExclusionUid() != null,
+        clientIdCount: adminClientIds.length,
+      },
+      ...buildActiveUserMetrics(
+        activeRows as ActiveByDaySourceRow[],
+        scalarRows[0],
+        retentionRows as ThirtyDayRetentionSourceRow[],
+      ),
     };
   });
 

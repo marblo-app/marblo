@@ -26,6 +26,9 @@ import {
   buildSpawnHealth,
   foldKeyCounts,
   buildKpiCockpit,
+  buildRetentionCohorts,
+  buildActiveUserMetrics,
+  buildActivationGateFunnel,
 } from "./adminAnalytics";
 
 // ── parseIncludeAdmin ──────────────────────────────────────────────────────
@@ -646,6 +649,83 @@ test("cockpit: assembles gauges, onboarding events, reuse, spawn health", () => 
   assert.equal(result.reuse.secondSessionRate, 0.25);
   assert.equal(result.spawnHealth.successRate, 25 / 30);
   assert.match(result.note, /3\.0\.19/);
+});
+
+// ── 필수 활성유저 확충: 리텐션 · Stickiness · 30일+ 잔존 · 순차 게이트 ────────
+test("retention cohorts: computes D1/D7/D14/D30 return rates by day and week", () => {
+  const r = buildRetentionCohorts([
+    {
+      period: "day",
+      cohort: "2026-07-01",
+      cohortUsers: 10,
+      d1Users: 4,
+      d7Users: 3,
+      d14Users: 2,
+      d30Users: 1,
+    },
+    {
+      period: "week",
+      cohort: "2026-06-29",
+      cohortUsers: "20",
+      d1Users: "8",
+      d7Users: "5",
+      d14Users: "4",
+      d30Users: "2",
+    },
+  ]);
+
+  assert.equal(r.day.length, 1);
+  assert.equal(r.week.length, 1);
+  assert.equal(r.day[0].rates.d1, 0.4);
+  assert.equal(r.day[0].rates.d7, 0.3);
+  assert.equal(r.day[0].rates.d14, 0.2);
+  assert.equal(r.day[0].rates.d30, 0.1);
+  assert.equal(r.week[0].rates.d30, 0.1);
+  assert.match(r.note, /accountUserId/);
+});
+
+test("active user metrics: computes DAU/WAU/MAU stickiness and 30d+ retention trend", () => {
+  const r = buildActiveUserMetrics(
+    [
+      { date: "2026-07-02", dau: 5, events: 50 },
+      { date: "2026-07-01", dau: "3", events: "30" },
+    ],
+    { dau: 5, wau: 10, mau: 20 },
+    [
+      { date: "2026-06-01", eligibleUsers: 10, retainedUsers: 4 },
+      { date: "2026-06-02", eligibleUsers: "8", retainedUsers: "2" },
+    ],
+  );
+
+  assert.equal(r.dauWauRatio, 0.5);
+  assert.equal(r.dauMauRatio, 0.25);
+  assert.deepEqual(
+    r.activeByDay.map((d) => d.date),
+    ["2026-07-01", "2026-07-02"],
+  );
+  assert.equal(r.thirtyDayRetention.trend[0].retentionRate, 0.4);
+  assert.equal(r.thirtyDayRetention.current?.date, "2026-06-02");
+  assert.equal(r.thirtyDayRetention.current?.retentionRate, 0.25);
+});
+
+test("activation gate: sequential subset counts drop-off and flags the largest gate", () => {
+  const r = buildActivationGateFunnel({
+    d_install: 100,
+    d_first_run: 80,
+    d_login: 50,
+    d_folder_connected: 25,
+    d_orchestrator_opened: 20,
+    d_agent_spawned: 18,
+    d_first_ticket_complete: 9,
+  });
+  const byKey = Object.fromEntries(r.steps.map((s) => [s.key, s]));
+
+  assert.equal(byKey.first_run.dropFromPrev, 20);
+  assert.equal(byKey.login.dropFromPrev, 30);
+  assert.equal(byKey.folder_connected.dropFromPrev, 25);
+  assert.equal(byKey.first_ticket_complete.dropRateFromPrev, 0.5);
+  assert.equal(r.maxDrop?.key, "login");
+  assert.equal(byKey.login.isMaxDrop, true);
 });
 // ════════════════════════════════════════════════════════════════════════════
 // 릴리스·버전 헬스 + 모델 하위분해 (ticket F7OUUkNSD6FqoWxktWcp)
