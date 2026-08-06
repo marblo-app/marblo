@@ -693,6 +693,7 @@ export class LedgerSpool {
       model: prior?.model ?? null,
       tier: prior?.tier ?? null,
       instructionHash: null,
+      instructionRedacted: null,
       taskId: null,
       worktreeId: prior?.worktreeId ?? null,
     };
@@ -963,6 +964,7 @@ export class LedgerSpool {
       model: prior?.model ?? null,
       tier: prior?.tier ?? null,
       instructionHash: null,
+      instructionRedacted: null,
       taskId: null,
       worktreeId: prior?.worktreeId ?? null,
     };

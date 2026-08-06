@@ -58,6 +58,8 @@ export interface LedgerEvent {
   tier: string | null;
   /** 지시문 **해시만**. 원문은 절대 담지 않는다 — 아래 hashInstruction 주석 참조. */
   instructionHash: string | null;
+  /** scrub+truncate 된 표시용 지시문. 안전 검증 실패 시 저장하지 않는다. */
+  instructionRedacted: string | null;
   /** 이 행위가 속한 티켓. */
   taskId: string | null;
   /** 경로 규약에서 우선 파생하고, 규약 밖이면 taskId 근거로 보강한 결정적 문자열(§8). */
@@ -189,6 +191,31 @@ export function deriveLedgerWorktreeId(input: {
 // ── 지시문 해시 (§5) ──────────────────────────────────────────────
 
 export const INSTRUCTION_HASH_PREFIX = "sha256:";
+export const INSTRUCTION_REDACTED_MAX_CHARS = 1200;
+const INSTRUCTION_REDACTED_SUFFIX = "\n[truncated]";
+
+const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+const PHONE_KR_RE = /\b01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}\b/g;
+const PHONE_INTL_RE = /\+\d{1,3}[-.\s]?\d{2,4}[-.\s]?\d{3,4}[-.\s]?\d{3,4}\b/g;
+const HOME_PATH_RE =
+  /(?:\/Users\/[^/\s"']+|\/home\/[^/\s"']+|[A-Za-z]:\\Users\\[^\\\s"']+)/g;
+const WORKTREE_PATH_RE =
+  /(?:~|\/Users\/[^/\s"']+|\/home\/[^/\s"']+)?\/?\.marblo\/worktrees\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)?(?:\/[^\s"']*)?/g;
+const SECRET_ASSIGNMENT_RE =
+  /\b[A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|CLIENT[_-]?SECRET|PRIVATE[_-]?KEY|AUTHORIZATION)[A-Z0-9_]*\s*[:=]\s*([^\s"'`]+)/gi;
+const KNOWN_SECRET_RE =
+  /(?:sk-ant-[A-Za-z0-9_-]{16,}|sk-proj-[A-Za-z0-9_-]{16,}|sk-or-v?1?-?[A-Za-z0-9_-]{16,}|sk_live_[A-Za-z0-9]{16,}|sk_test_[A-Za-z0-9]{16,}|rk_live_[A-Za-z0-9]{16,}|pk_live_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{16,}|ya29\.[A-Za-z0-9_-]{16,}|1\/\/0[A-Za-z0-9_-]{16,}|xai-[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{16,}|gh[pousr]_[A-Za-z0-9]{16,}|glpat-[A-Za-z0-9_-]{16,}|xox[baprs]-[A-Za-z0-9-]{10,}|hooks\.slack\.com\/services\/[A-Za-z0-9/_-]+|(?:AKIA|ASIA)[A-Z0-9]{16}|hf_[A-Za-z0-9]{16,}|nvapi-[A-Za-z0-9_-]{16,}|pplx-[A-Za-z0-9]{16,}|r8_[A-Za-z0-9]{16,}|gsk_[A-Za-z0-9]{16,}|npm_[A-Za-z0-9]{16,}|whsec_[A-Za-z0-9]{16,}|vercel_[A-Za-z0-9]{16,})/g;
+const JWT_RE = /eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]+/g;
+const PEM_PRIVATE_KEY_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----/g;
+const CREDENTIAL_URL_RE =
+  /\b(?:https?|postgres|postgresql|mysql|mongodb(?:\+srv)?|redis|rediss|amqp|amqps|mssql|ftp|sftp)[^\s:]*:\/\/[^\s/:@]+:[^\s@]+@/gi;
+const RESIDUAL_BEARER_TOKEN_RE = /\bBearer\s+[A-Za-z0-9._-]{16,}/g;
+const RESIDUAL_OAUTH_TOKEN_RE = /\boauth[_-]?[A-Za-z0-9._-]{16,}/gi;
+
+function resetAndTest(re: RegExp, value: string): boolean {
+  re.lastIndex = 0;
+  return re.test(value);
+}
 
 /**
  * 지시문의 해시. **원문은 원장에 담지 않는다.**
@@ -207,6 +234,63 @@ export function hashInstruction(
     INSTRUCTION_HASH_PREFIX +
     createHash("sha256").update(instruction, "utf8").digest("hex")
   );
+}
+
+function maskSecretAssignments(value: string): string {
+  return value.replace(
+    SECRET_ASSIGNMENT_RE,
+    (match: string, secret: string) =>
+      match.slice(0, match.length - secret.length) + "<REDACTED>",
+  );
+}
+
+function truncateInstructionRedacted(value: string): string {
+  if (value.length <= INSTRUCTION_REDACTED_MAX_CHARS) return value;
+  const keep = Math.max(
+    0,
+    INSTRUCTION_REDACTED_MAX_CHARS - INSTRUCTION_REDACTED_SUFFIX.length,
+  );
+  return value.slice(0, keep).trimEnd() + INSTRUCTION_REDACTED_SUFFIX;
+}
+
+function hasResidualUnsafeInstructionText(value: string): boolean {
+  return (
+    resetAndTest(KNOWN_SECRET_RE, value) ||
+    resetAndTest(JWT_RE, value) ||
+    resetAndTest(PEM_PRIVATE_KEY_RE, value) ||
+    resetAndTest(CREDENTIAL_URL_RE, value) ||
+    resetAndTest(RESIDUAL_BEARER_TOKEN_RE, value) ||
+    resetAndTest(RESIDUAL_OAUTH_TOKEN_RE, value) ||
+    resetAndTest(EMAIL_RE, value) ||
+    resetAndTest(PHONE_KR_RE, value) ||
+    resetAndTest(PHONE_INTL_RE, value)
+  );
+}
+
+/**
+ * 지시문 표시용 비식별 텍스트.
+ *
+ * 원장에는 원문을 절대 저장하지 않는다. 알려진 secret/PII 는 먼저 마스킹하고,
+ * 같은 detector 를 다시 통과시켜 잔존하면 null 로 접는다. 즉, 마스킹이 실패한
+ * 것으로 의심되면 표시용 필드 자체를 저장하지 않는 안전측 정책이다.
+ */
+export function redactInstructionForLedger(
+  instruction: string | undefined,
+): string | null {
+  if (!instruction || !instruction.trim()) return null;
+  const scrubbed = maskSecretAssignments(instruction)
+    .replace(KNOWN_SECRET_RE, "<API_KEY>")
+    .replace(JWT_RE, "<TOKEN>")
+    .replace(PEM_PRIVATE_KEY_RE, "<PRIVATE_KEY>")
+    .replace(CREDENTIAL_URL_RE, "<CREDENTIAL_URL>")
+    .replace(EMAIL_RE, "<EMAIL>")
+    .replace(PHONE_KR_RE, "<PHONE>")
+    .replace(PHONE_INTL_RE, "<PHONE>")
+    .replace(WORKTREE_PATH_RE, "<WORKTREE_PATH>")
+    .replace(HOME_PATH_RE, "<USER_HOME>");
+
+  if (hasResidualUnsafeInstructionText(scrubbed)) return null;
+  return truncateInstructionRedacted(scrubbed);
 }
 
 // ── 워크트리 귀속의 근거 경로 ────────────────────────────────────
@@ -299,6 +383,7 @@ export interface BuildLedgerEventInput {
   kind?: LedgerEventKind;
   actorUid?: string | null;
   runtime?: Partial<AgentRuntimeContext>;
+  instruction?: string;
   taskId?: string | null;
   /** 이 프로세스의 작업 디렉터리. worktreeId 는 여기서만 파생된다. */
   cwd?: string;
@@ -320,6 +405,7 @@ export function buildLedgerEvent(
   const homeDir = input.homeDir;
   const cwd = input.cwd;
   const taskId = input.taskId ?? taskIdFromParams(input.params);
+  const instructionRedacted = redactInstructionForLedger(input.instruction);
   return {
     projectId: input.projectId,
     agentId: input.agentId,
@@ -332,7 +418,9 @@ export function buildLedgerEvent(
     actorUid: input.actorUid ?? null,
     model: input.runtime?.model ?? null,
     tier: input.runtime?.tier ?? null,
-    instructionHash: input.runtime?.instructionHash ?? null,
+    instructionHash:
+      input.runtime?.instructionHash ?? hashInstruction(input.instruction),
+    instructionRedacted,
     taskId,
     worktreeId: deriveLedgerWorktreeId({
       cwd,

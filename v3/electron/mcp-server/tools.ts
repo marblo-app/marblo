@@ -1810,6 +1810,7 @@ function auditLog(entry: {
   duration: number;
   success: boolean;
   kind?: LedgerEventKind;
+  instruction?: string;
 }): void {
   const event = buildLedgerEvent({
     ...entry,
@@ -2077,6 +2078,22 @@ function sanitizeParams(
     }
   }
   return sanitized;
+}
+
+function instructionFromParams(
+  params: Record<string, unknown>,
+): string | undefined {
+  const candidates = [
+    params.instruction,
+    params.instructions,
+    params.initial_prompt,
+    params.initialPrompt,
+    params.prompt,
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return undefined;
 }
 
 function truncateResult(result: unknown): string {
@@ -2749,6 +2766,7 @@ export function registerTools(server: McpServer): void {
           agentId: MARBLO_AGENT_ID,
           toolName: name,
           params: sanitizeParams(params),
+          instruction: instructionFromParams(params),
           result: truncateResult(resultText),
           duration,
           success,

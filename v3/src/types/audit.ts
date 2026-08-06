@@ -42,6 +42,8 @@ export interface AuditLog {
   tier?: string | null;
   /** 지시문 **해시만**. 원문은 원장에 없다 — 뷰가 원문을 추측하지 않는다. */
   instructionHash?: string | null;
+  /** scrub+truncate 된 표시용 지시문. 마스킹 안전 검증 실패 시 null/부재. */
+  instructionRedacted?: string | null;
   /** 이 행위가 속한 티켓. */
   taskId?: string | null;
   /** `<projectId>/<taskId>` — 워크트리 경로에서 파생. 규약 밖이면 null. */
