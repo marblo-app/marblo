@@ -1013,8 +1013,8 @@ async function payPortOneBillingKey(params: {
         : "PortOne 빌링키 결제에 실패했습니다.";
     throw new functions.https.HttpsError("internal", message);
   }
-  const body = (await res.json()) as { payment?: PortOnePaymentLike };
-  return body.payment || fetchPortOnePayment(params.paymentId);
+  // 즉시청구 POST 요약본은 top-level 필드 없어 검증불가, canonical GET 사용
+  return fetchPortOnePayment(params.paymentId);
 }
 
 export const getPortOneCheckoutConfig = functions.https.onCall(
