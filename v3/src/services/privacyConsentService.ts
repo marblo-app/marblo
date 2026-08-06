@@ -16,7 +16,12 @@
  * Default state when the user has not yet been prompted: first-party
  * de-identified analytics true; third-party / overseas flags false.
  */
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import {
+  doc,
+  getDocFromServer,
+  setDoc,
+  serverTimestamp,
+} from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { db } from "../lib/firebase";
 
@@ -95,9 +100,19 @@ interface RawConsent {
  *                 '동의 간주'도 '미동의 간주'도 아니다 — 그냥 모른다.
  */
 export type GetConsentResult =
-  | { status: "ok"; consent: PrivacyConsent }
-  | { status: "missing" }
-  | { status: "error"; code: string | null };
+  | {
+      status: "ok";
+      consent: PrivacyConsent;
+      readSource?: "server";
+      attempts?: number;
+    }
+  | { status: "missing"; readSource?: "server"; attempts?: number }
+  | {
+      status: "error";
+      code: string | null;
+      readSource?: "server";
+      attempts?: number;
+    };
 
 function toConsent(raw: RawConsent | undefined): PrivacyConsent {
   if (!raw) return DEFAULT_CONSENT;
@@ -123,16 +138,16 @@ function toConsent(raw: RawConsent | undefined): PrivacyConsent {
  */
 export async function getConsent(uid: string): Promise<GetConsentResult> {
   try {
-    const snap = await getDoc(doc(db, "users", uid));
+    const snap = await getDocFromServer(doc(db, "users", uid));
     const raw = snap.exists()
       ? (snap.data()?.privacyConsent as RawConsent | undefined)
       : undefined;
-    if (!raw) return { status: "missing" };
-    return { status: "ok", consent: toConsent(raw) };
+    if (!raw) return { status: "missing", readSource: "server" };
+    return { status: "ok", consent: toConsent(raw), readSource: "server" };
   } catch (err) {
     logFirestoreError("getConsent", err, uid);
     const code = (err as { code?: string }).code ?? null;
-    return { status: "error", code };
+    return { status: "error", code, readSource: "server" };
   }
 }
 
@@ -142,8 +157,9 @@ const sleep = (ms: number): Promise<void> =>
 /**
  * getConsent with a short linear backoff over transient failures. On wake the
  * very first read often fails (network not up / auth token not refreshed yet);
- * one or two retries usually land once connectivity returns. Only an "error"
- * outcome is retried — "ok"/"missing" are authoritative and returned at once.
+ * one or two retries usually land once connectivity returns. A first "missing"
+ * is also verified before being returned so a cold auth/permission race cannot
+ * surface the modal from a single empty read.
  *
  * `backoffMs` is injectable so unit tests can run retries instantly.
  */
@@ -155,8 +171,9 @@ export async function getConsentWithRetry(
   let last: GetConsentResult = { status: "error", code: null };
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const result = await getConsent(uid);
-    if (result.status !== "error") return result;
-    last = result;
+    last = { ...result, attempts: attempt };
+    if (result.status === "ok") return last;
+    if (result.status === "missing" && attempt >= attempts) return last;
     if (attempt < attempts && backoffMs > 0) await sleep(backoffMs * attempt);
   }
   return last;

@@ -110,6 +110,8 @@ function resetStore(): void {
     loadedUid: null,
     lastReadOutcome: "not_loaded",
     lastReadCode: null,
+    lastReadSource: null,
+    lastReadAttempts: null,
   });
 }
 
@@ -157,7 +159,7 @@ describe("PrivacyConsentGate stable human uid gating", () => {
     expect(consentService.getConsentWithRetry).not.toHaveBeenCalled();
     expect(screen.queryByTestId("privacy-consent-modal")).toBeNull();
     expect(info).toHaveBeenCalledWith(
-      "[PrivacyConsentGate] eval uid=null humanUid=null authReady=false outcome=not_loaded version=null current=false show=false",
+      "[PrivacyConsentGate] eval uid=null humanUid=null authReady=false outcome=not_loaded readSource=null attempts=null readCode=null version=null current=false show=false",
     );
   });
 
@@ -170,6 +172,8 @@ describe("PrivacyConsentGate stable human uid gating", () => {
       needsPrompt: true,
       lastReadOutcome: "missing",
       lastReadCode: null,
+      lastReadSource: "server",
+      lastReadAttempts: 1,
     });
     setAuth({
       user: humanUser,
@@ -266,6 +270,33 @@ describe("PrivacyConsentGate stable human uid gating", () => {
     expect(usePrivacyConsentStore.getState().needsPrompt).toBe(true);
   });
 
+  it("keeps the prompt hidden when the consent read is transient", async () => {
+    const humanUser = makeUser(HUMAN_UID, "google.com");
+    consentService.getConsentWithRetry.mockResolvedValue({
+      status: "error",
+      code: "permission-denied",
+      readSource: "server",
+      attempts: 3,
+    });
+    setAuth({
+      user: humanUser,
+      authSettled: true,
+      humanUser,
+      humanUserUid: HUMAN_UID,
+      humanAuthReady: true,
+      loading: false,
+    });
+
+    render(createElement(PrivacyConsentGate));
+
+    await waitFor(() =>
+      expect(usePrivacyConsentStore.getState().lastReadOutcome).toBe("error"),
+    );
+    expect(usePrivacyConsentStore.getState().hasLoaded).toBe(false);
+    expect(usePrivacyConsentStore.getState().needsPrompt).toBe(false);
+    expect(screen.queryByTestId("privacy-consent-modal")).toBeNull();
+  });
+
   it("auto-closes a stale early missing prompt after authoritative current read", async () => {
     const humanUser = makeUser(HUMAN_UID, "google.com");
     consentService.getConsentWithRetry.mockResolvedValue({
@@ -283,6 +314,8 @@ describe("PrivacyConsentGate stable human uid gating", () => {
       needsPrompt: true,
       lastReadOutcome: "missing",
       lastReadCode: null,
+      lastReadSource: "server",
+      lastReadAttempts: 1,
     });
     setAuth({
       user: humanUser,

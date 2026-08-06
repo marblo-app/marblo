@@ -76,6 +76,8 @@ beforeEach(() => {
     loadedUid: null,
     lastReadOutcome: "not_loaded",
     lastReadCode: null,
+    lastReadSource: null,
+    lastReadAttempts: null,
   });
 });
 
@@ -143,11 +145,20 @@ describe("hasLoaded — modal must not surface before the first resolution", () 
   it.each([
     ["ok", { status: "ok", consent: currentConsent() }],
     ["missing", { status: "missing" }],
-    ["error", { status: "error", code: null }],
   ] as const)("is true after a %s resolution", async (_label, result) => {
     getConsentWithRetry.mockResolvedValue(result);
     await usePrivacyConsentStore.getState().load(UID);
     expect(usePrivacyConsentStore.getState().hasLoaded).toBe(true);
+  });
+
+  it("stays unresolved after a transient error with no local proof", async () => {
+    getConsentWithRetry.mockResolvedValue({ status: "error", code: null });
+
+    await usePrivacyConsentStore.getState().load(UID);
+
+    expect(usePrivacyConsentStore.getState().hasLoaded).toBe(false);
+    expect(usePrivacyConsentStore.getState().loading).toBe(true);
+    expect(usePrivacyConsentStore.getState().needsPrompt).toBe(false);
   });
 });
 
@@ -242,16 +253,20 @@ describe("load — transient failure must not surface the modal", () => {
     expect(s.lastReadCode).toBe("unauthenticated");
   });
 
-  it("error + no cache + unknown user (needsPrompt true) → held at true (fail-safe)", async () => {
+  it("error + no cache + unknown user → stays loading with no prompt", async () => {
     usePrivacyConsentStore.setState({ needsPrompt: true });
     hasAcceptedConsentCached.mockReturnValue(false);
     getConsentWithRetry.mockResolvedValue({ status: "error", code: null });
 
     await usePrivacyConsentStore.getState().load(UID);
 
-    // Never fabricates consent: an unknown user with a failed read is not
-    // silently suppressed.
-    expect(usePrivacyConsentStore.getState().needsPrompt).toBe(true);
+    // Never fabricates "missing": a failed read is unresolved, so the Gate
+    // keeps showing loading/null instead of the blocking modal.
+    const s = usePrivacyConsentStore.getState();
+    expect(s.loading).toBe(true);
+    expect(s.hasLoaded).toBe(false);
+    expect(s.needsPrompt).toBe(false);
+    expect(s.lastReadOutcome).toBe("error");
   });
 
   it("logs a single diagnostic line with read outcome and version comparison", async () => {
@@ -270,6 +285,8 @@ describe("load — transient failure must not surface the modal", () => {
         storedVersion: "2020-01-01",
         currentVersion: CURRENT_POLICY_VERSION,
         versionCurrent: false,
+        readSource: null,
+        attempts: null,
         needsPrompt: true,
       }),
     );

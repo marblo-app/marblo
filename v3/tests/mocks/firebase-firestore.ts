@@ -33,6 +33,8 @@ export async function getDoc(ref: { collectionPath: string; docId: string }) {
   };
 }
 
+export const getDocFromServer = getDoc;
+
 export async function getDocs(q: {
   path?: string;
   constraints?: Array<{

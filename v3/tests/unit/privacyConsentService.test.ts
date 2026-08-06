@@ -113,7 +113,7 @@ describe("getConsent — success/missing/error are distinct", () => {
   });
 
   it("returns error (NOT missing/default) when the read throws", async () => {
-    vi.spyOn(firestore, "getDoc").mockRejectedValueOnce(
+    vi.spyOn(firestore, "getDocFromServer").mockRejectedValueOnce(
       Object.assign(new Error("client is offline"), { code: "unavailable" }),
     );
     const result = await getConsent(UID);
@@ -125,7 +125,7 @@ describe("getConsent — success/missing/error are distinct", () => {
 describe("getConsentWithRetry — retries transient failures", () => {
   it("returns the first non-error result without retrying", async () => {
     seedConsentDoc(CURRENT_POLICY_VERSION);
-    const spy = vi.spyOn(firestore, "getDoc");
+    const spy = vi.spyOn(firestore, "getDocFromServer");
     const result = await getConsentWithRetry(UID, 3, 0);
     expect(result.status).toBe("ok");
     expect(spy).toHaveBeenCalledTimes(1);
@@ -133,9 +133,9 @@ describe("getConsentWithRetry — retries transient failures", () => {
 
   it("recovers when an early read fails but a later one succeeds", async () => {
     seedConsentDoc(CURRENT_POLICY_VERSION);
-    const real = firestore.getDoc;
+    const real = firestore.getDocFromServer;
     const spy = vi
-      .spyOn(firestore, "getDoc")
+      .spyOn(firestore, "getDocFromServer")
       .mockRejectedValueOnce(
         Object.assign(new Error("offline"), { code: "unavailable" }),
       )
@@ -147,13 +147,49 @@ describe("getConsentWithRetry — retries transient failures", () => {
 
   it("returns error after exhausting all attempts", async () => {
     const spy = vi
-      .spyOn(firestore, "getDoc")
+      .spyOn(firestore, "getDocFromServer")
       .mockRejectedValue(
         Object.assign(new Error("offline"), { code: "unavailable" }),
       );
     const result = await getConsentWithRetry(UID, 3, 0);
     expect(result.status).toBe("error");
     expect(spy).toHaveBeenCalledTimes(3);
+  });
+
+  it("recovers when an early empty read is followed by current consent", async () => {
+    const real = firestore.getDocFromServer;
+    const spy = vi
+      .spyOn(firestore, "getDocFromServer")
+      .mockResolvedValueOnce({
+        exists: () => false,
+        id: UID,
+        data: () => null,
+      } as never)
+      .mockImplementation((ref: never) => real(ref));
+    seedConsentDoc(CURRENT_POLICY_VERSION);
+
+    const result = await getConsentWithRetry(UID, 3, 0);
+
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.consent.version).toBe(CURRENT_POLICY_VERSION);
+      expect(result.attempts).toBe(2);
+      expect(result.readSource).toBe("server");
+    }
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns missing only after server-absent is confirmed across attempts", async () => {
+    const spy = vi.spyOn(firestore, "getDocFromServer");
+
+    const result = await getConsentWithRetry(UID, 2, 0);
+
+    expect(result.status).toBe("missing");
+    if (result.status === "missing") {
+      expect(result.attempts).toBe(2);
+      expect(result.readSource).toBe("server");
+    }
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 });
 

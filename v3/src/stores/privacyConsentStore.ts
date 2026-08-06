@@ -13,6 +13,7 @@ import {
 } from "../services/privacyConsentService";
 
 type ConsentReadOutcome = GetConsentResult["status"] | "not_loaded";
+type ConsentReadSource = NonNullable<GetConsentResult["readSource"]>;
 
 interface PrivacyConsentLoadOptions {
   authReady?: boolean;
@@ -39,6 +40,8 @@ interface PrivacyConsentState {
   loadedUid: string | null;
   lastReadOutcome: ConsentReadOutcome;
   lastReadCode: string | null;
+  lastReadSource: ConsentReadSource | null;
+  lastReadAttempts: number | null;
   load: (uid: string, options?: PrivacyConsentLoadOptions) => Promise<void>;
   save: (uid: string, flags: ConsentFlags, locale?: string) => Promise<void>;
   /** Local update without Firestore write — used for optimistic UI in
@@ -61,6 +64,8 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
     loadedUid: null,
     lastReadOutcome: "not_loaded",
     lastReadCode: null,
+    lastReadSource: null,
+    lastReadAttempts: null,
 
     load: async (uid: string, options?: PrivacyConsentLoadOptions) => {
       const authReady = options?.authReady ?? true;
@@ -70,6 +75,8 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
         loadedUid: uid,
         lastReadOutcome: "not_loaded",
         lastReadCode: null,
+        lastReadSource: null,
+        lastReadAttempts: null,
       });
 
       if (!authReady) {
@@ -83,6 +90,8 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
           needsPrompt: false,
           lastReadOutcome: "not_loaded",
           lastReadCode: null,
+          lastReadSource: null,
+          lastReadAttempts: null,
         });
         console.info("[PrivacyConsentStore] load outcome", {
           requestedUid: uid,
@@ -93,6 +102,8 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
           currentVersion: CURRENT_POLICY_VERSION,
           versionCurrent: false,
           cacheHit: false,
+          readSource: null,
+          attempts: 0,
           needsPrompt: false,
         });
         return;
@@ -111,6 +122,8 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
           currentVersion: CURRENT_POLICY_VERSION,
           versionCurrent: storedVersion === CURRENT_POLICY_VERSION,
           cacheHit,
+          readSource: result.readSource ?? null,
+          attempts: result.attempts ?? null,
           needsPrompt,
         });
       };
@@ -127,6 +140,8 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
           needsPrompt,
           lastReadOutcome: result.status,
           lastReadCode: null,
+          lastReadSource: result.readSource ?? null,
+          lastReadAttempts: result.attempts ?? null,
         });
         diagnose(needsPrompt, consent.version);
         // Keep the proof-of-consent cache in sync so a later read failure
@@ -147,6 +162,8 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
           needsPrompt: true,
           lastReadOutcome: result.status,
           lastReadCode: null,
+          lastReadSource: result.readSource ?? null,
+          lastReadAttempts: result.attempts ?? null,
         });
         diagnose(true, null);
         return;
@@ -154,9 +171,8 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
 
       // result.status === "error": the read FAILED, so the stored consent is
       // unknown. Do NOT flip needsPrompt to true on a transient failure — that
-      // is the sleep/resume bug. If we have local proof this user already
-      // accepted the CURRENT policy version, keep the modal hidden; otherwise
-      // hold the existing needsPrompt (don't surface the modal off a failure).
+      // is the sleep/resume bug. Keep the Gate in loading/no-prompt unless the
+      // server read has conclusively returned ok or missing.
       // PIPA 옵트인 정설: 실패 시 '동의 간주'가 아니라 '이미 동의자 재프롬프트 안 함'.
       if (cacheHit) {
         set({
@@ -166,17 +182,22 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
           needsPrompt: false,
           lastReadOutcome: result.status,
           lastReadCode: result.code,
+          lastReadSource: result.readSource ?? null,
+          lastReadAttempts: result.attempts ?? null,
         });
         diagnose(false, get().consent.version || null);
       } else {
         set({
-          loading: false,
-          hasLoaded: true,
+          loading: true,
+          hasLoaded: false,
           loadedUid: uid,
+          needsPrompt: false,
           lastReadOutcome: result.status,
           lastReadCode: result.code,
+          lastReadSource: result.readSource ?? null,
+          lastReadAttempts: result.attempts ?? null,
         });
-        diagnose(get().needsPrompt, get().consent.version || null);
+        diagnose(false, get().consent.version || null);
       }
     },
 

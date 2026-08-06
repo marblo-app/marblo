@@ -42,6 +42,8 @@ export function PrivacyConsentGate() {
   const storedVersion = usePrivacyConsentStore((s) => s.consent.version);
   const lastReadOutcome = usePrivacyConsentStore((s) => s.lastReadOutcome);
   const lastReadCode = usePrivacyConsentStore((s) => s.lastReadCode);
+  const lastReadSource = usePrivacyConsentStore((s) => s.lastReadSource);
+  const lastReadAttempts = usePrivacyConsentStore((s) => s.lastReadAttempts);
   const sentryConsent = usePrivacyConsentStore((s) => s.consent.sentry);
   const firstPartyTelemetry = usePrivacyConsentStore(
     (s) => s.consent.firstPartyTelemetry,
@@ -128,7 +130,7 @@ export function PrivacyConsentGate() {
       canReadConsent && hasLoaded && loadedUid === consentUid && needsPrompt;
     const versionCurrent = storedVersion === CURRENT_POLICY_VERSION;
     console.info(
-      `[PrivacyConsentGate] eval uid=${consentUid} humanUid=${humanUserUid} authReady=${humanAuthReady} outcome=${lastReadOutcome} version=${storedVersion || null} current=${versionCurrent} show=${showPrompt}`,
+      `[PrivacyConsentGate] eval uid=${consentUid} humanUid=${humanUserUid} authReady=${humanAuthReady} outcome=${lastReadOutcome} readSource=${lastReadSource ?? null} attempts=${lastReadAttempts ?? null} readCode=${lastReadCode ?? null} version=${storedVersion || null} current=${versionCurrent} show=${showPrompt}`,
     );
   }, [
     user,
@@ -143,6 +145,8 @@ export function PrivacyConsentGate() {
     needsPrompt,
     lastReadOutcome,
     lastReadCode,
+    lastReadSource,
+    lastReadAttempts,
     storedVersion,
   ]);
 
