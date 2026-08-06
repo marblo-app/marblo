@@ -31,6 +31,8 @@ interface PrivacyConsentState {
    * authoritative resolution.
    */
   hasLoaded: boolean;
+  /** uid whose consent state produced the current `hasLoaded`/`needsPrompt`. */
+  loadedUid: string | null;
   lastReadOutcome: ConsentReadOutcome;
   lastReadCode: string | null;
   load: (uid: string) => Promise<void>;
@@ -52,16 +54,24 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
     loading: false,
     needsPrompt: true,
     hasLoaded: false,
+    loadedUid: null,
     lastReadOutcome: "not_loaded",
     lastReadCode: null,
 
     load: async (uid: string) => {
-      set({ loading: true });
+      set({
+        loading: true,
+        hasLoaded: false,
+        loadedUid: uid,
+        lastReadOutcome: "not_loaded",
+        lastReadCode: null,
+      });
       const result = await getConsentWithRetry(uid);
       const cacheHit = hasAcceptedConsentCached(uid, CURRENT_POLICY_VERSION);
 
       const diagnose = (needsPrompt: boolean, storedVersion: string | null) => {
         console.info("[PrivacyConsentStore] load outcome", {
+          requestedUid: uid,
           readOutcome: result.status,
           readCode: result.status === "error" ? result.code : null,
           storedVersion,
@@ -80,6 +90,7 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
           consent,
           loading: false,
           hasLoaded: true,
+          loadedUid: uid,
           needsPrompt,
           lastReadOutcome: result.status,
           lastReadCode: null,
@@ -99,6 +110,7 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
           consent: DEFAULT_CONSENT,
           loading: false,
           hasLoaded: true,
+          loadedUid: uid,
           needsPrompt: true,
           lastReadOutcome: result.status,
           lastReadCode: null,
@@ -117,6 +129,7 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
         set({
           loading: false,
           hasLoaded: true,
+          loadedUid: uid,
           needsPrompt: false,
           lastReadOutcome: result.status,
           lastReadCode: result.code,
@@ -126,6 +139,7 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
         set({
           loading: false,
           hasLoaded: true,
+          loadedUid: uid,
           lastReadOutcome: result.status,
           lastReadCode: result.code,
         });
@@ -148,6 +162,7 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
         },
         needsPrompt: false,
         hasLoaded: true,
+        loadedUid: uid,
       });
       await saveConsent(uid, flags, locale);
     },

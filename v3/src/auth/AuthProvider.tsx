@@ -36,6 +36,18 @@ function authErrorCode(e: unknown): string {
 
 export interface AuthContextType {
   user: User | null;
+  /**
+   * Auth has reached a renderer-stable initial state. Consent/privacy gates
+   * must wait for this instead of reacting to transient identity changes.
+   */
+  authSettled: boolean;
+  /**
+   * The signed-in interactive account. Agent custom-token identities can appear
+   * in Firebase Auth transitions, but they must not drive human-only UI such as
+   * privacy consent prompts.
+   */
+  humanUser: User | null;
+  humanUserUid: string | null;
   loading: boolean;
   error: string | null;
   loginWithGoogle: (options?: AuthMarketingConsentOptions) => Promise<void>;
@@ -88,6 +100,28 @@ const AUTH_BUILD_TAG = "google-login=redirect-v3-idb-heartbeat-fix";
 const REDIRECT_NAV_WATCHDOG_MS = 8_000;
 const MARKETING_CONSENT_VERSION = "2026-07-22";
 const MARKETING_CONSENT_REDIRECT_KEY = "marblo:authMarketingConsentPending";
+
+export function isHumanAuthUser(firebaseUser: User | null): firebaseUser is User {
+  if (!firebaseUser) return false;
+  if (firebaseUser.uid === "test-user-bypass") return true;
+
+  const providerIds = firebaseUser.providerData
+    .map((provider) => provider.providerId)
+    .filter(Boolean);
+
+  if (
+    providerIds.some((providerId) =>
+      ["google.com", "github.com", "password", "phone"].includes(providerId),
+    )
+  ) {
+    return true;
+  }
+
+  // Custom-token agent identities normally have no providerData/email. Keep the
+  // fallback conservative: a verified email still represents an interactive
+  // account even if Firebase did not hydrate providerData yet.
+  return !!firebaseUser.email && firebaseUser.emailVerified;
+}
 
 function rememberMarketingConsentForRedirect(
   options?: AuthMarketingConsentOptions,
@@ -573,11 +607,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const clearError = () => setError(null);
+  const authSettled = !loading;
+  const humanUser = authSettled && isHumanAuthUser(user) ? user : null;
 
   return (
     <AuthContext.Provider
       value={{
         user,
+        authSettled,
+        humanUser,
+        humanUserUid: humanUser?.uid ?? null,
         loading,
         error,
         loginWithGoogle,

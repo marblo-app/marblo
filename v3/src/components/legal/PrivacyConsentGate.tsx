@@ -28,9 +28,10 @@ import { saveMarketingOptIn } from "../../services/marketingConsentService";
 import { PrivacyConsentModal } from "./PrivacyConsentModal";
 
 export function PrivacyConsentGate() {
-  const { user } = useAuth();
+  const { user, authSettled, humanUser, humanUserUid } = useAuth();
   const needsPrompt = usePrivacyConsentStore((s) => s.needsPrompt);
   const hasLoaded = usePrivacyConsentStore((s) => s.hasLoaded);
+  const loadedUid = usePrivacyConsentStore((s) => s.loadedUid);
   const storedVersion = usePrivacyConsentStore((s) => s.consent.version);
   const lastReadOutcome = usePrivacyConsentStore((s) => s.lastReadOutcome);
   const lastReadCode = usePrivacyConsentStore((s) => s.lastReadCode);
@@ -40,10 +41,14 @@ export function PrivacyConsentGate() {
   );
   const load = usePrivacyConsentStore((s) => s.load);
   const save = usePrivacyConsentStore((s) => s.save);
+  const consentUid = authSettled ? humanUserUid : null;
 
-  // Load consent the first time we have a uid.
+  // Load consent only after auth has settled on a human account. During app
+  // startup Firebase may transiently expose non-interactive custom-token
+  // identities used by agent infrastructure; those must not drive a human
+  // privacy prompt or mark the store as loaded for the wrong uid.
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!consentUid) return;
 
     // The first-run flow (FirstRunFlow) asks for consent before sign-in, so the
     // answer is waiting in localStorage with no uid attached. Flush it instead
@@ -52,7 +57,7 @@ export function PrivacyConsentGate() {
     // flashes on top of the flow that just closed.
     const pending = readPendingConsent();
     if (pending) {
-      save(user.uid, pending.flags, pending.locale)
+      save(consentUid, pending.flags, pending.locale)
         // Only drop the parked answer once it is durably stored. On a failed
         // write we keep it and retry next launch — the alternative is losing
         // the consent record server-side and re-prompting a user who already
@@ -67,14 +72,14 @@ export function PrivacyConsentGate() {
       return;
     }
 
-    load(user.uid).catch((err) => {
+    load(consentUid).catch((err) => {
       // Fail open with default OFF — user will see the prompt next launch.
       // 정확한 진단을 위해 err 는 콘솔에 남긴다 (service 내부 logFirestoreError
       // 가 이미 자세히 출력하지만, 호출 경로가 load 인지 save 인지 구분 위해
       // 한 줄 더).
       console.warn("[PrivacyConsentGate] load failed:", err);
     });
-  }, [user?.uid, load, save]);
+  }, [consentUid, load, save]);
 
   // 가입 전 첫 실행 플로우에서 켠 마케팅 opt-in 을 uid 가 생기는 순간 flush.
   //
@@ -83,10 +88,10 @@ export function PrivacyConsentGate() {
   //   성공했을 때만 park 을 지운다 — 실패 시 다음 실행에서 다시 시도한다
   //   (동의를 받고도 잃어버리는 것이 최악).
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!consentUid) return;
     const pendingMarketing = readPendingMarketingOptIn();
     if (!pendingMarketing) return;
-    saveMarketingOptIn(user.uid, pendingMarketing.locale)
+    saveMarketingOptIn(consentUid, pendingMarketing.locale)
       .then(() => clearPendingMarketingOptIn())
       .catch((err) => {
         console.warn(
@@ -94,15 +99,20 @@ export function PrivacyConsentGate() {
           err,
         );
       });
-  }, [user?.uid]);
+  }, [consentUid]);
 
   useEffect(() => {
     console.info("[PrivacyConsentGate] evaluation", {
       hasUser: !!user,
       uid: user?.uid ?? null,
+      authSettled,
+      hasHumanUser: !!humanUser,
+      humanUid: humanUserUid,
       hasLoaded,
+      loadedUid,
       needsPrompt,
-      showPrompt: !!user && hasLoaded && needsPrompt,
+      showPrompt:
+        !!consentUid && hasLoaded && loadedUid === consentUid && needsPrompt,
       readOutcome: lastReadOutcome,
       readCode: lastReadCode,
       storedVersion: storedVersion || null,
@@ -111,7 +121,12 @@ export function PrivacyConsentGate() {
     });
   }, [
     user,
+    authSettled,
+    humanUser,
+    humanUserUid,
+    consentUid,
     hasLoaded,
+    loadedUid,
     needsPrompt,
     lastReadOutcome,
     lastReadCode,
@@ -131,6 +146,8 @@ export function PrivacyConsentGate() {
   // The store defaults needsPrompt=true (fail-safe); showing that default during
   // the initial load/retry window is exactly the cold-start + macOS-wake
   // re-prompt (the renderer is discarded+reloaded on wake, resetting the store).
-  if (!user || !hasLoaded || !needsPrompt) return null;
+  if (!consentUid || !hasLoaded || loadedUid !== consentUid || !needsPrompt) {
+    return null;
+  }
   return <PrivacyConsentModal />;
 }

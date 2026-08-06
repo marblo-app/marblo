@@ -73,6 +73,7 @@ beforeEach(() => {
     loading: false,
     needsPrompt: true,
     hasLoaded: false,
+    loadedUid: null,
     lastReadOutcome: "not_loaded",
     lastReadCode: null,
   });
@@ -103,10 +104,40 @@ describe("hasLoaded — modal must not surface before the first resolution", () 
     // the Gate must still see hasLoaded=false and keep the modal hidden even
     // though needsPrompt defaults to true.
     expect(usePrivacyConsentStore.getState().hasLoaded).toBe(false);
+    expect(usePrivacyConsentStore.getState().loadedUid).toBe(UID);
 
     resolveRead({ status: "ok", consent: currentConsent() });
     await done;
     expect(usePrivacyConsentStore.getState().hasLoaded).toBe(true);
+    expect(usePrivacyConsentStore.getState().loadedUid).toBe(UID);
+  });
+
+  it("clears a previous uid's loaded state while the next uid is loading", async () => {
+    let resolveRead: (r: {
+      status: "ok";
+      consent: PrivacyConsent;
+    }) => void = () => {};
+    usePrivacyConsentStore.setState({
+      hasLoaded: true,
+      loadedUid: "agent-transient",
+      needsPrompt: true,
+    });
+    getConsentWithRetry.mockReturnValue(
+      new Promise((res) => {
+        resolveRead = res;
+      }),
+    );
+
+    const done = usePrivacyConsentStore.getState().load(UID);
+
+    expect(usePrivacyConsentStore.getState().hasLoaded).toBe(false);
+    expect(usePrivacyConsentStore.getState().loadedUid).toBe(UID);
+
+    resolveRead({ status: "ok", consent: currentConsent() });
+    await done;
+    expect(usePrivacyConsentStore.getState().hasLoaded).toBe(true);
+    expect(usePrivacyConsentStore.getState().loadedUid).toBe(UID);
+    expect(usePrivacyConsentStore.getState().needsPrompt).toBe(false);
   });
 
   it.each([
