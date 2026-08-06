@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { ArrowRight, CheckCircle2, Download } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { trackGenerateLead } from "@/lib/gtag";
 
@@ -107,6 +107,13 @@ export default function BetaTester50SignupForm({
           <p className="text-emerald-200/80 text-sm mt-1 leading-relaxed">
             {t("success_body")}
           </p>
+          <Link
+            href={`/${locale}/download`}
+            className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-300 px-4 py-2 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-200"
+          >
+            <Download className="h-4 w-4" />
+            {t("success_download_cta")}
+          </Link>
         </div>
       </div>
     );

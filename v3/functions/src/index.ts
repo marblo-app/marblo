@@ -1779,6 +1779,34 @@ const FOUNDERS_COLLECTION = "founders";
 // 신청 목록 조회/반려 매칭이 스캔하는 최대 신청 수. 이메일 정규화 기준으로
 // 매칭·중복제거하려면 doc 을 읽어봐야 해서 쿼리 필터 대신 스캔 상한을 둔다.
 const WAITLIST_SCAN_LIMIT = 1000;
+const WAITLIST_EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const AUTO_FOUNDER_COHORT_CAP = Number.parseInt(
+  process.env.AUTO_FOUNDER_COHORT_CAP || "100",
+  10,
+);
+const WAITLIST_TEST_DOMAINS = new Set([
+  "example.com",
+  "example.org",
+  "example.net",
+  "test.com",
+  "test.co",
+  "invalid.test",
+]);
+const WAITLIST_TYPO_DOMAINS = new Set([
+  "gamil.com",
+  "gmial.com",
+  "gmai.com",
+  "gmail.co",
+  "hotmial.com",
+  "hotmai.com",
+  "hotnail.com",
+  "outlok.com",
+  "outllok.com",
+  "icloud.con",
+  "naver.con",
+  "nvaer.com",
+  "daum.con",
+]);
 /** 백필의 users/{uid} 동의 조회 배치 크기(getAll 1회당 문서 수). */
 const USER_CONSENT_READ_CHUNK = 200;
 
@@ -1803,6 +1831,26 @@ interface FounderRubricScore {
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+function classifyWaitlistEmail(
+  rawEmail: string,
+): { ok: true; email: string } | { ok: false; email: string; reason: string } {
+  const email = normalizeEmail(rawEmail);
+  if (!email || !WAITLIST_EMAIL_RE.test(email) || email.length > 254) {
+    return { ok: false, email, reason: "invalid_email" };
+  }
+  const [local, domain] = email.split("@");
+  if (/^(qa-|verify-)/i.test(local)) {
+    return { ok: false, email, reason: "test_local_prefix" };
+  }
+  if (WAITLIST_TEST_DOMAINS.has(domain)) {
+    return { ok: false, email, reason: "test_domain" };
+  }
+  if (WAITLIST_TYPO_DOMAINS.has(domain)) {
+    return { ok: false, email, reason: "typo_domain" };
+  }
+  return { ok: true, email };
 }
 
 function addMonths(base: Date, months: number): Date {
@@ -3401,104 +3449,104 @@ export const sendFounderFollowupEmails = functions.https.onCall(
   },
 );
 
-// ─── 신청 접수 확인 이메일 (Resend) ──────────────────────────────────
+// ─── 신청 즉시 접근 부여 자동화 (Resend) ──────────────────────────────
 //
 // /founders 신청 시 클라가 betatester50_waitlist 에 직접 doc 을 쓴다.
-// 신청자는 그 즉시 아무 메일도 못 받고, 접근 안내는 어드민이 '선정'할 때만
-// 발송된다. 그 공백을 메우기 위해 doc 생성 시 "접수됐습니다, 선정 시
-// 안내드릴게요" 확인 메일을 자동 발송한다.
-// 메일 본문/발송/스킵 정책은 위 파운더 접근 안내 이메일과 동일하게 재사용한다.
+// 수동 markFounderSelected 대기 없이 생성 즉시 기존 선정 내부 로직을 재사용한다.
+// 스팸/테스트/오타 도메인은 먼저 suppressed 처리해 접근 부여와 메일을 막는다.
 
-function buildApplyConfirmEmail(locale: FounderLocale): FounderEmailContent {
-  if (locale === "en") {
-    return {
-      subject: "🙌 Your Marblo Founder beta application is in",
-      html: founderHtmlShell(`
-        <h1 style="font-size:22px;margin:0 0 16px">🙌 We got your application!</h1>
-        <p>Thanks for applying to the Marblo Founder beta. Your application has been received — there's nothing more you need to do right now.</p>
-        <p>We review applications on a rolling basis. <strong>If you're selected, we'll email you</strong> the download and onboarding details at this address, so keep an eye on your inbox.</p>
-        <p style="color:#666">Excited to build Marblo with founders like you. See you on the inside soon.</p>
-      `),
-      text: [
-        "We got your application!",
-        "",
-        "Thanks for applying to the Marblo Founder beta. Your application has been received — nothing more to do right now.",
-        "",
-        "We review applications on a rolling basis. If you're selected, we'll email you the download and onboarding details at this address.",
-        "",
-        "Excited to build Marblo with founders like you.",
-      ].join("\n"),
-    };
-  }
-
-  if (locale === "ja") {
-    return {
-      subject: "🙌 Marblo ファウンダーベータのお申し込みを受け付けました",
-      html: founderHtmlShell(`
-        <h1 style="font-size:22px;margin:0 0 16px">🙌 お申し込みを受け付けました！</h1>
-        <p>Marblo ファウンダーベータにお申し込みいただきありがとうございます。お申し込みは受理されました。いまの時点で追加の操作は必要ありません。</p>
-        <p>お申し込みは順次審査しております。<strong>選ばれた場合は、このアドレス宛にメールで</strong>ダウンロードとオンボーディングのご案内をお送りしますので、受信トレイをご確認ください。</p>
-        <p style="color:#666">あなたのようなファウンダーと一緒に Marblo をつくれることを楽しみにしています。</p>
-      `),
-      text: [
-        "お申し込みを受け付けました！",
-        "",
-        "Marblo ファウンダーベータにお申し込みいただきありがとうございます。お申し込みは受理されました。いまの時点で追加の操作は必要ありません。",
-        "",
-        "お申し込みは順次審査しております。選ばれた場合は、このアドレス宛にダウンロードとオンボーディングのご案内をメールでお送りします。",
-        "",
-        "あなたのようなファウンダーと一緒に Marblo をつくれることを楽しみにしています。",
-      ].join("\n"),
-    };
-  }
-
-  // 기본: 한국어
-  return {
-    subject: "🙌 마블로 파운더 베타 신청이 접수됐어요",
-    html: founderHtmlShell(`
-      <h1 style="font-size:22px;margin:0 0 16px">🙌 신청이 접수됐어요!</h1>
-      <p>마블로 파운더 베타에 신청해 주셔서 감사합니다. 신청이 정상적으로 접수되었으며, 지금은 따로 하실 일이 없습니다.</p>
-      <p>신청은 순차적으로 검토하고 있어요. <strong>선정되시면 이 주소로 이메일을 보내</strong> 다운로드와 시작 안내를 드릴 테니, 받은편지함을 확인해 주세요.</p>
-      <p style="color:#666">여러분 같은 파운더와 함께 마블로를 만들어갈 수 있어 기대돼요. 곧 안에서 뵙겠습니다.</p>
-    `),
-    text: [
-      "신청이 접수됐어요!",
-      "",
-      "마블로 파운더 베타에 신청해 주셔서 감사합니다. 신청이 정상적으로 접수되었으며, 지금은 따로 하실 일이 없습니다.",
-      "",
-      "신청은 순차적으로 검토하고 있어요. 선정되시면 이 주소로 이메일을 보내 다운로드와 시작 안내를 드립니다.",
-      "",
-      "여러분 같은 파운더와 함께 마블로를 만들어갈 수 있어 기대돼요. 곧 안에서 뵙겠습니다.",
-    ].join("\n"),
-  };
-}
-
-/**
- * 신청 접수 확인 이메일 발송. 반드시 non-throwing (sendFounderAccessEmail 과 동일 정책).
- * - RESEND_API_KEY 미설정 시 console.warn 후 false 반환(스킵).
- * - 발송 성공 시 true, 그 외 false.
- */
-async function sendApplyConfirmEmail(
-  email: string,
-  locale: string,
-): Promise<boolean> {
+async function sendFounderCohortCapAlert(count: number): Promise<boolean> {
   try {
     if (!RESEND_API_KEY) {
       console.warn(
-        "[apply-confirm-email] RESEND_API_KEY 미설정 — 발송 스킵:",
-        email,
+        "[founder-auto-select] RESEND_API_KEY 미설정 — cap 알림 발송 스킵",
       );
       return false;
     }
-    const content = buildApplyConfirmEmail(normalizeFounderLocale(locale));
-    return await postResendEmail(email, content, "apply-confirm-email");
+    const cap = Number.isFinite(AUTO_FOUNDER_COHORT_CAP)
+      ? AUTO_FOUNDER_COHORT_CAP
+      : 100;
+    return await postResendEmail(
+      FOUNDER_SUPPORT_EMAIL,
+      {
+        subject: `[Marblo] Founder cohort cap exceeded (${count}/${cap})`,
+        html: founderHtmlShell(`
+          <h1 style="font-size:20px;margin:0 0 16px">Founder cohort cap exceeded</h1>
+          <p>자동 접근 부여된 founder 수가 설정 cap 을 초과했습니다.</p>
+          <p><strong>Selected founders:</strong> ${count}<br/><strong>Cap:</strong> ${cap}</p>
+          <p>필요하면 NEXT_PUBLIC_FOUNDATION50_OPEN=false 로 신청 노출을 끄거나 AUTO_FOUNDER_COHORT_CAP 을 조정하세요.</p>
+        `),
+        text: [
+          "Founder cohort cap exceeded",
+          "",
+          `Selected founders: ${count}`,
+          `Cap: ${cap}`,
+          "",
+          "If needed, turn off signup exposure with NEXT_PUBLIC_FOUNDATION50_OPEN=false or adjust AUTO_FOUNDER_COHORT_CAP.",
+        ].join("\n"),
+      },
+      "founder-auto-select",
+    );
   } catch (err) {
-    console.warn("[apply-confirm-email] 발송 실패:", email, err);
+    console.warn("[founder-auto-select] cap 알림 발송 실패:", err);
     return false;
   }
 }
 
-// 신청 접수 확인 이메일 트리거 — waitlist doc 생성 시 1회 발송.
+async function alertFounderCohortCapIfNeeded(): Promise<void> {
+  const cap = Number.isFinite(AUTO_FOUNDER_COHORT_CAP)
+    ? AUTO_FOUNDER_COHORT_CAP
+    : 100;
+  if (cap <= 0) return;
+
+  const countSnap = await db
+    .collection(FOUNDERS_COLLECTION)
+    .where("status", "==", "selected")
+    .count()
+    .get();
+  const count = countSnap.data().count;
+  if (count <= cap) return;
+
+  const alertRef = db
+    .collection("system_alerts")
+    .doc(`founder_auto_cap_${cap}`);
+  const created = await db.runTransaction(async (tx) => {
+    const existing = await tx.get(alertRef);
+    if (existing.exists) {
+      tx.set(
+        alertRef,
+        {
+          lastCount: count,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      return false;
+    }
+    tx.set(alertRef, {
+      kind: "founder_auto_cap_exceeded",
+      cap,
+      firstCount: count,
+      lastCount: count,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return true;
+  });
+
+  if (created) {
+    const sent = await sendFounderCohortCapAlert(count);
+    await alertRef.set(
+      {
+        emailSent: sent,
+        emailSentAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+  }
+}
+
+// 신청 자동 접근 부여 트리거 — waitlist doc 생성 시 1회 처리.
 // betatester50_waitlist 는 클라가 직접 쓰므로 콜러블이 아닌 onCreate 가 정석.
 // 트리거 재시도 폭주를 막기 위해 절대 throw 하지 않는다(에러는 삼키고 종료).
 export const sendApplyConfirmOnWaitlist = functions.firestore
@@ -3507,32 +3555,84 @@ export const sendApplyConfirmOnWaitlist = functions.firestore
     try {
       const data = snap.data() || {};
       const rawEmail = typeof data.email === "string" ? data.email : "";
-      const email = normalizeEmail(rawEmail);
-      if (!email) {
-        console.warn("[apply-confirm-email] email 없음 — 발송 스킵:", snap.id);
-        return;
-      }
-      const locale = typeof data.locale === "string" ? data.locale : "ko";
-      const emailSent = await sendApplyConfirmEmail(email, locale);
-      // 발송 흔적 기록(추적용). non-throwing — 기록 실패가 트리거를 깨면 안 된다.
-      await snap.ref
-        .set(
+      const classified = classifyWaitlistEmail(rawEmail);
+      if (!classified.ok) {
+        await snap.ref.set(
           {
-            confirmEmailSent: emailSent,
-            confirmEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
+            status: "suppressed",
+            suppressedReason: classified.reason,
+            suppressedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
           { merge: true },
-        )
-        .catch((err) =>
-          console.warn(
-            "[apply-confirm-email] 발송 흔적 기록 실패:",
-            snap.id,
-            err,
-          ),
         );
+        console.warn(
+          "[founder-auto-select] waitlist suppressed:",
+          snap.id,
+          classified.reason,
+        );
+        return;
+      }
+      if (data.agreed !== true) {
+        await snap.ref.set(
+          {
+            status: "suppressed",
+            suppressedReason: "missing_required_consent",
+            suppressedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+        console.warn(
+          "[founder-auto-select] agreed=false — 자동 접근 부여 스킵:",
+          snap.id,
+        );
+        return;
+      }
+
+      const founderSnap = await db
+        .collection(FOUNDERS_COLLECTION)
+        .doc(classified.email)
+        .get();
+      const founder = founderSnap.exists ? founderSnap.data() || {} : {};
+      if (
+        founder.status === "selected" &&
+        founder.accessGrantedAt &&
+        (founder.accessEmailSent === true || founder.accessEmailSentAt)
+      ) {
+        await snap.ref.set(
+          {
+            status: "duplicate_selected",
+            duplicateSelectedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+        console.warn(
+          "[founder-auto-select] duplicate selected email — access email resend skipped:",
+          snap.id,
+        );
+        await alertFounderCohortCapIfNeeded().catch((err) =>
+          console.warn("[founder-auto-select] cap 확인 실패:", snap.id, err),
+        );
+        return;
+      }
+
+      const result = await markFounderSelectedInternal(classified.email, false);
+      await snap.ref.set(
+        {
+          status: "auto_selected",
+          autoSelectedAt: admin.firestore.FieldValue.serverTimestamp(),
+          autoAccessEmailSent: result.emailSent,
+          autoBetaExpiresAt: result.betaExpiresAt,
+          autoSubscriptionGranted: result.subscriptionGranted,
+          autoSubscriptionSkippedReason: result.subscriptionSkippedReason,
+        },
+        { merge: true },
+      );
+      await alertFounderCohortCapIfNeeded().catch((err) =>
+        console.warn("[founder-auto-select] cap 확인 실패:", snap.id, err),
+      );
     } catch (err) {
       // 트리거 재시도 폭주 방지 — 모든 에러를 삼킨다.
-      console.warn("[apply-confirm-email] 트리거 처리 실패:", snap.id, err);
+      console.warn("[founder-auto-select] 트리거 처리 실패:", snap.id, err);
     }
   });
 

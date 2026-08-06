@@ -3,10 +3,6 @@
 import { useEffect, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
-import { onAuthStateChanged } from "firebase/auth";
-import { httpsCallable, getFunctions } from "firebase/functions";
-import { auth } from "@/lib/firebase";
-import app from "@/lib/firebase";
 import { trackAppDownload } from "@/lib/gtag";
 import { buildSoftwareApplicationSchema, stringifyJsonLd } from "@/lib/schema";
 import {
@@ -14,8 +10,6 @@ import {
   Monitor,
   Sparkles,
   Download,
-  Loader2,
-  Lock,
   Bug,
   Info,
 } from "lucide-react";
@@ -75,15 +69,10 @@ function detectMacArch(): MacArch {
 // 잘못 표기하게 된다. 감지값은 라벨이 아니라 텔레메트리(arch)로만 쓴다.
 const MAC_ARCH_LABEL_KEY = "mac_arch_apple";
 
-// 소프트(인지) 게이트 상태. 바이너리는 공개 릴리스라 하드 차단이 아니라,
-// 미로그인/비선정 사용자에게 다운로드 대신 적절한 다음 행동을 안내한다.
-type AccessState = "loading" | "anon" | "pending" | "granted";
-
 export default function DownloadPage() {
   const t = useTranslations("download");
   const tBug = useTranslations("bugReport");
   const locale = useLocale();
-  const [state, setState] = useState<AccessState>("loading");
   // 서버/하이드레이션 일치를 위해 초기값은 universal 키. 마운트 후 클라이언트에서
   // 감지한다 — 현재 세 키 모두 같은 arm64 DMG 로 매핑되므로 링크는 바뀌지 않고,
   // 감지값은 다운로드 텔레메트리(arch)에만 실린다.
@@ -92,33 +81,6 @@ export default function DownloadPage() {
   useEffect(() => {
     const id = window.setTimeout(() => setMacArch(detectMacArch()), 0);
     return () => window.clearTimeout(id);
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      if (!active) return;
-      if (!u) {
-        setState("anon");
-        return;
-      }
-      setState("loading");
-      try {
-        const functions = getFunctions(app, "us-central1");
-        const getAccess = httpsCallable(functions, "getMyFounderAccess");
-        const res = await getAccess();
-        const hasAccess =
-          (res.data as { hasAccess?: boolean })?.hasAccess === true;
-        if (active) setState(hasAccess ? "granted" : "pending");
-      } catch {
-        // 소프트 게이트: 조회 실패 시 다운로드를 노출하지 않는 쪽으로 폴백.
-        if (active) setState("pending");
-      }
-    });
-    return () => {
-      active = false;
-      unsub();
-    };
   }, []);
 
   // SoftwareApplication JSON-LD — same app entity as home (shared @id=APP_ID),
@@ -140,142 +102,77 @@ export default function DownloadPage() {
           {t("title")}
         </h1>
 
-        {/* Honest prerequisite — shown before download so users know they must
-            install/sign in to AI CLIs and connect existing accounts, and that
-            AI usage is billed separately. Visible in every non-loading state. */}
-        {state !== "loading" && (
-          <div className="mt-8 mx-auto max-w-xl text-left p-5 rounded-2xl border border-zinc-800 bg-zinc-900/40">
-            <div className="flex items-start gap-3">
-              <Info className="w-5 h-5 text-indigo-300 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-semibold text-zinc-100">
-                  {t("prereq_title")}
-                </p>
-                <p className="mt-1.5 text-sm text-zinc-400 leading-relaxed">
-                  {t("prereq_body")}
-                </p>
-              </div>
+        <div className="mt-8 mx-auto max-w-xl text-left p-5 rounded-2xl border border-zinc-800 bg-zinc-900/40">
+          <div className="flex items-start gap-3">
+            <Info className="w-5 h-5 text-indigo-300 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-zinc-100">
+                {t("prereq_title")}
+              </p>
+              <p className="mt-1.5 text-sm text-zinc-400 leading-relaxed">
+                {t("prereq_body")}
+              </p>
             </div>
           </div>
-        )}
+        </div>
 
-        {state === "loading" && (
-          <div className="mt-12 flex justify-center">
-            <Loader2 className="w-7 h-7 animate-spin text-indigo-300" />
-          </div>
-        )}
+        <p className="text-zinc-400 mt-4 whitespace-pre-line leading-relaxed">
+          {t("subtitle")}
+        </p>
 
-        {/* ① 미로그인 — 로그인/가입 안내, DMG 숨김 */}
-        {state === "anon" && (
-          <div className="mt-12 p-8 rounded-2xl border border-zinc-800 bg-zinc-900/40 max-w-md mx-auto">
-            <Lock className="w-8 h-8 text-indigo-300 mx-auto mb-4" />
-            <h2 className="text-xl font-semibold">{t("gate_anon_title")}</h2>
-            <p className="text-zinc-400 text-sm mt-2 mb-6 leading-relaxed">
-              {t("gate_anon_body")}
-            </p>
-            <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <Link
-                href={`/${locale}/auth/login?redirect=${encodeURIComponent(
-                  `/${locale}/download`
-                )}`}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium transition"
-              >
-                {t("gate_login")}
-              </Link>
-              <Link
-                href={`/${locale}/auth/signup`}
-                className="border border-zinc-700 hover:bg-zinc-800 text-zinc-200 px-6 py-3 rounded-lg font-medium transition"
-              >
-                {t("gate_signup")}
-              </Link>
-            </div>
-          </div>
-        )}
+        <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <a
+            href={MAC_DMG_URLS[macArch]}
+            onClick={() =>
+              trackAppDownload({
+                os: "mac",
+                arch: macArch,
+                appVersion: APP_VERSION,
+              })
+            }
+            className="group flex flex-col items-center justify-center gap-3 p-6 rounded-xl border border-indigo-500/50 bg-indigo-600/10 hover:bg-indigo-600/20 hover:border-indigo-400 transition"
+          >
+            <Apple className="w-7 h-7 text-zinc-200" />
+            <span className="text-sm font-medium text-zinc-100">
+              {t("macos")}
+            </span>
+            <span className="text-xs text-zinc-400">
+              {t(MAC_ARCH_LABEL_KEY)} · {t("mac_sub")} · {APP_VERSION}
+            </span>
+            <span className="mt-1 inline-flex items-center gap-2 bg-indigo-600 group-hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
+              <Download className="w-4 h-4" />
+              {t("download_now")}
+            </span>
+          </a>
 
-        {/* ② 로그인+비선정 — 파운더 신청 안내, DMG 숨김 */}
-        {state === "pending" && (
-          <div className="mt-12 p-8 rounded-2xl border border-zinc-800 bg-zinc-900/40 max-w-md mx-auto">
-            <Sparkles className="w-8 h-8 text-indigo-300 mx-auto mb-4" />
-            <h2 className="text-xl font-semibold">{t("gate_pending_title")}</h2>
-            <p className="text-zinc-400 text-sm mt-2 mb-6 leading-relaxed">
-              {t("gate_pending_body")}
-            </p>
-            <Link
-              href={`/${locale}/founders`}
-              className="inline-flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium transition"
-            >
-              {t("gate_apply_cta")}
-            </Link>
-          </div>
-        )}
+          <a
+            href={WIN_EXE_URL}
+            onClick={() =>
+              trackAppDownload({ os: "win", appVersion: APP_VERSION })
+            }
+            className="group flex flex-col items-center justify-center gap-3 p-6 rounded-xl border border-indigo-500/50 bg-indigo-600/10 hover:bg-indigo-600/20 hover:border-indigo-400 transition"
+          >
+            <Monitor className="w-7 h-7 text-zinc-200" />
+            <span className="text-sm font-medium text-zinc-100">
+              {t("windows")}
+            </span>
+            <span className="text-xs text-zinc-400">{APP_VERSION}</span>
+            <span className="mt-1 inline-flex items-center gap-2 bg-indigo-600 group-hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
+              <Download className="w-4 h-4" />
+              {t("download_now")}
+            </span>
+          </a>
+        </div>
 
-        {/* ③ 선정 — 기존 다운로드 카드 노출 */}
-        {state === "granted" && (
-          <>
-            <p className="text-zinc-400 mt-4 whitespace-pre-line leading-relaxed">
-              {t("subtitle")}
-            </p>
-
-            <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* macOS — 다운로드 가능 (arm64 단일 산출, Apple Silicon 대상) */}
-              <a
-                href={MAC_DMG_URLS[macArch]}
-                onClick={() =>
-                  trackAppDownload({
-                    os: "mac",
-                    arch: macArch,
-                    appVersion: APP_VERSION,
-                  })
-                }
-                className="group flex flex-col items-center justify-center gap-3 p-6 rounded-xl border border-indigo-500/50 bg-indigo-600/10 hover:bg-indigo-600/20 hover:border-indigo-400 transition"
-              >
-                <Apple className="w-7 h-7 text-zinc-200" />
-                <span className="text-sm font-medium text-zinc-100">
-                  {t("macos")}
-                </span>
-                <span className="text-xs text-zinc-400">
-                  {t(MAC_ARCH_LABEL_KEY)} · {t("mac_sub")} · {APP_VERSION}
-                </span>
-                <span className="mt-1 inline-flex items-center gap-2 bg-indigo-600 group-hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
-                  <Download className="w-4 h-4" />
-                  {t("download_now")}
-                </span>
-              </a>
-
-              {/* Windows — 다운로드 가능 (NSIS 인스톨러) */}
-              <a
-                href={WIN_EXE_URL}
-                onClick={() =>
-                  trackAppDownload({ os: "win", appVersion: APP_VERSION })
-                }
-                className="group flex flex-col items-center justify-center gap-3 p-6 rounded-xl border border-indigo-500/50 bg-indigo-600/10 hover:bg-indigo-600/20 hover:border-indigo-400 transition"
-              >
-                <Monitor className="w-7 h-7 text-zinc-200" />
-                <span className="text-sm font-medium text-zinc-100">
-                  {t("windows")}
-                </span>
-                <span className="text-xs text-zinc-400">{APP_VERSION}</span>
-                <span className="mt-1 inline-flex items-center gap-2 bg-indigo-600 group-hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
-                  <Download className="w-4 h-4" />
-                  {t("download_now")}
-                </span>
-              </a>
-            </div>
-          </>
-        )}
-
-        {/* 버그 신고 안내 — 모든 상태(미로그인/대기/선정)에서 노출. 웹이라 릴리스 없이 즉시 도달. */}
-        {state !== "loading" && (
-          <p className="mt-10 text-sm text-zinc-500">
-            <Link
-              href={`/${locale}/bugs`}
-              className="inline-flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200 transition"
-            >
-              <Bug className="w-4 h-4" />
-              {tBug("title")}
-            </Link>
-          </p>
-        )}
+        <p className="mt-10 text-sm text-zinc-500">
+          <Link
+            href={`/${locale}/bugs`}
+            className="inline-flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200 transition"
+          >
+            <Bug className="w-4 h-4" />
+            {tBug("title")}
+          </Link>
+        </p>
       </div>
     </div>
   );
