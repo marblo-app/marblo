@@ -253,6 +253,33 @@ export default function CheckoutPage() {
     });
     try {
       if (paymentProvider === "portone") {
+        // PortOne customer — shared by requestPayment / requestIssueBillingKey.
+        // fullName/email/phoneNumber field names must stay as-is (SDK contract).
+        const fullName = (user.displayName || "Marblo User").trim();
+        const email = user.email || undefined;
+        if (!email) {
+          console.warn("[portone] customer email missing", { uid: user.uid });
+        }
+        // Digits only, no hyphens; empty or not 10–11 digits → reject.
+        const phoneDigits = phoneNumber.replace(/\D/g, "");
+        if (!phoneDigits || !/^\d{10,11}$/.test(phoneDigits)) {
+          setPhoneNumberTouched(true);
+          setError(t("phoneNumberInvalid"));
+          throw new Error(t("phoneNumberInvalid"));
+        }
+        const customer = {
+          fullName,
+          email,
+          phoneNumber: phoneDigits,
+        };
+        // PII-safe diagnostic: never log raw phone, only length.
+        console.info("[portone] customer payload", {
+          fullName,
+          hasEmail: !!customer.email,
+          phoneLen: customer.phoneNumber?.length,
+          uid: user.uid,
+        });
+
         const functions = getFunctions(app, "us-central1");
         const getConfig = httpsCallable<
           { kind: "one_time" | "subscription" },
@@ -281,11 +308,7 @@ export default function CheckoutPage() {
             currency: "KRW",
             payMethod: "CARD",
             redirectUrl: `${window.location.origin}/${locale}/checkout/success?provider=portone&type=lecture&slug=${lectureSlug}&paymentId=${intent.paymentId}&plan=${safePlan}&billing=${billing}`,
-            customer: {
-              fullName: user.displayName || "Marblo User",
-              email: user.email || undefined,
-              phoneNumber,
-            },
+            customer,
           });
           if (response.code) throw new Error(response.message || response.code);
           const complete = httpsCallable(functions, "completePortOnePayment");
@@ -303,11 +326,7 @@ export default function CheckoutPage() {
             // KG이니시스 issueId 40자 제한 — uid 삽입 시 초과하므로 짧은 고정 prefix + UUID(무하이픈)
             issueId: `mb_${crypto.randomUUID().replace(/-/g, "")}`,
             issueName: `Marblo ${itemName} 구독`,
-            customer: {
-              fullName: user.displayName || "Marblo User",
-              email: user.email || undefined,
-              phoneNumber,
-            },
+            customer,
           });
           if (response.code) throw new Error(response.message || response.code);
           if (!response.billingKey) throw new Error(t("paymentError"));
