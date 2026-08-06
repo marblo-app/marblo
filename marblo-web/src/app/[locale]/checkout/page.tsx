@@ -300,7 +300,8 @@ export default function CheckoutPage() {
             storeId: config.storeId,
             channelKey: config.channelKey,
             billingKeyMethod: "CARD",
-            issueId: `portone_issue_${user.uid}_${crypto.randomUUID()}`,
+            // KG이니시스 issueId 40자 제한 — uid 삽입 시 초과하므로 짧은 고정 prefix + UUID(무하이픈)
+            issueId: `mb_${crypto.randomUUID().replace(/-/g, "")}`,
             issueName: `Marblo ${itemName} 구독`,
             customer: {
               fullName: user.displayName || "Marblo User",

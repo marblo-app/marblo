@@ -33,12 +33,22 @@ export type PortOnePaymentValidation =
   | { ok: true; paymentId: string; amount: number; status: "PAID" }
   | { ok: false; reason: string };
 
+/**
+ * PortOne / KG이니시스 paymentId (oid) — 최대 40자.
+ * userId 는 시그니처 호환용으로 유지하되 ID 에 포함하지 않는다
+ * (Firebase uid 28자 삽입 시 40자 제한 초과).
+ * purpose 는 1글자 코드(o|s) + nonce, ASCII 정규화 후 slice(0,40).
+ */
 export function portonePaymentId(
   userId: string,
   purpose: "one_time" | "subscription",
   nonce: string,
 ): string {
-  return `portone_${purpose}_${userId}_${nonce}`.replace(/[^A-Za-z0-9_-]/g, "_");
+  void userId;
+  const purposeCode = purpose === "subscription" ? "s" : "o";
+  return `mb_${purposeCode}_${nonce}`
+    .replace(/[^A-Za-z0-9_-]/g, "_")
+    .slice(0, 40);
 }
 
 export function portoneChargeDocId(paymentId: string): string {

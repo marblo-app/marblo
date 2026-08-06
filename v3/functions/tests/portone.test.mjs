@@ -30,14 +30,29 @@ function eq(a, b, msg) {
 const paymentId = portonePaymentId("uid/A", "subscription", "123");
 eq(
   paymentId,
-  "portone_subscription_uid_A_123",
-  "paymentId ASCII-safe deterministic",
+  "mb_s_123",
+  "paymentId uses purpose code + nonce (no userId)",
 );
+assert(paymentId.length <= 40, "paymentId length ≤40 (KG이니시스 oid limit)");
 eq(
   portoneChargeDocId(paymentId),
-  "portone_portone_subscription_uid_A_123",
+  "portone_mb_s_123",
   "billingCharges doc id is provider-scoped",
 );
+
+// long uid + long nonce must still cap at 40
+{
+  const longUid = "a".repeat(28);
+  const longNonce = `${Date.now()}_${"x".repeat(80)}`;
+  const longId = portonePaymentId(longUid, "one_time", longNonce);
+  assert(longId.length <= 40, `long paymentId capped at 40 (got ${longId.length})`);
+  assert(longId.startsWith("mb_o_"), "one_time purpose code is o");
+  eq(
+    portonePaymentId(longUid, "subscription", "n1"),
+    "mb_s_n1",
+    "subscription purpose code is s",
+  );
+}
 
 {
   const expected = portoneExpectedAmount("pro", "annual");
