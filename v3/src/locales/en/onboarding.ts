@@ -299,6 +299,37 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.startHere.reenableLanding": "Open this tab on launch",
   "onboarding.startHere.dontLandHint":
     "Either way, your remaining steps stay right here.",
+  "onboarding.startHere.value.kicker": "Try the value before sign-in",
+  "onboarding.startHere.value.title":
+    "See tickets assigned and agents doing the work",
+  "onboarding.startHere.value.body":
+    "The demo shows the orchestrator turning a request into tickets, assigning the right agents, and letting them work in parallel. After you connect the CLI and link your account, the same flow runs against your own project with real terminals and worktrees.",
+  "onboarding.startHere.value.playInteractive": "Play interactive demo",
+  "onboarding.startHere.value.zeroCost":
+    "The demo plays without CLI runs, AI calls, or billing.",
+  "onboarding.startHere.activation.kicker": "CLI connect + account link",
+  "onboarding.startHere.activation.title":
+    "After install, sign in from the bottom Agents terminal",
+  "onboarding.startHere.activation.body":
+    "Once auto-install finishes, Marblo creates an agent terminal. Complete claude login or codex login there; Marblo detects the session and moves you toward your first spawn.",
+  "onboarding.startHere.activation.terminalTitle": "Bottom Agents terminal",
+  "onboarding.startHere.activation.autoCreated": "Auto-created",
+  "onboarding.startHere.activation.browserAuth":
+    "Confirm the account in the browser, then return to the terminal.",
+  "onboarding.startHere.activation.detected":
+    "Sign-in detected — you can create the first ticket now.",
+  "onboarding.startHere.activation.step.install.title": "Install",
+  "onboarding.startHere.activation.step.install.body":
+    "Use the install button to auto-install the required CLI and check versions.",
+  "onboarding.startHere.activation.step.terminal.title": "Terminal appears",
+  "onboarding.startHere.activation.step.terminal.body":
+    "When sign-in is needed, a login terminal opens in the bottom Agents tab.",
+  "onboarding.startHere.activation.step.auth.title": "Sign in",
+  "onboarding.startHere.activation.step.auth.body":
+    "Finish claude login or codex login in the terminal, then re-check.",
+  "onboarding.startHere.activation.step.spawn.title": "First spawn",
+  "onboarding.startHere.activation.step.spawn.body":
+    "Connect a project and PRD, send the first ticket, and the orchestrator proposes agent assignments.",
   // One line per step: why it's needed
   "onboarding.startHere.why.install":
     "The orchestrator and agents run on top of these CLIs — without one, nothing can launch.",

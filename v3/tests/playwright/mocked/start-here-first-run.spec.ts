@@ -47,6 +47,31 @@ async function clearProject(page: Page): Promise<void> {
   });
 }
 
+async function openStartHere(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    localStorage.removeItem("marblo:test:projectAuditHarness");
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.evaluate(() => {
+    const tw = (
+      window as unknown as {
+        __marbloTest?: {
+          stores: {
+            splitWorkspace: {
+              getState: () => {
+                setActiveTab: (tab: "startHere") => void;
+              };
+            };
+          };
+        };
+      }
+    ).__marbloTest;
+    if (!tw) throw new Error("__marbloTest hatch 가 노출되지 않음");
+    tw.stores.splitWorkspace.getState().setActiveTab("startHere");
+  });
+  await expect(page.getByRole("heading", { name: "시작하기" })).toBeVisible();
+}
+
 async function screenshot(page: Page, testInfo: TestInfo, name: string) {
   const dir = path.join(testInfo.project.outputDir, "start-here-first-run");
   fs.mkdirSync(dir, { recursive: true });
@@ -62,7 +87,7 @@ test.describe("StartHereTab first-run mocked rendering", () => {
   test("@mocked no project -> CLI missing -> auth/BYOM -> first ticket steps stay reachable", async ({
     marblo,
   }, testInfo) => {
-    await marblo.openTab("startHere");
+    await openStartHere(marblo.page);
     await clearProject(marblo.page);
     await forceCliMissing(marblo.page);
     await marblo.page.getByRole("button", { name: "다시 확인" }).click();
@@ -75,6 +100,34 @@ test.describe("StartHereTab first-run mocked rendering", () => {
       marblo.page.getByText(/4단계 중 \d단계 완료/),
       "진행률은 4단계 기준으로 보여야 함",
     ).toBeVisible();
+    await expect(
+      marblo.page.getByTestId("start-here-value-preview"),
+      "인증 전 가치체험 영역이 먼저 보여야 함",
+    ).toBeVisible();
+    await expect(
+      marblo.page.getByTestId("start-here-orchestration-video"),
+      "시연 영상이 StartHere 안에서 렌더링되어야 함",
+    ).toHaveAttribute("src", "/media/orchestration-demo.mp4");
+    await expect(
+      marblo.page.getByText(/CLI를 연결하고 계정을 연동하면/),
+      "데모 이후 실제 CLI 연결 가치 문구가 보여야 함",
+    ).toBeVisible();
+    await expect(
+      marblo.page.getByTestId("start-here-activation-guide"),
+      "자동 설치에서 인증, 첫 스폰까지 이어지는 가이드가 보여야 함",
+    ).toBeVisible();
+    await expect(
+      marblo.page.getByTestId("start-here-terminal-flow"),
+      "하단 에이전트 터미널 인증 흐름이 시각화되어야 함",
+    ).toBeVisible();
+    await expect(marblo.page.getByText("하단 에이전트 터미널")).toBeVisible();
+    await expect(marblo.page.getByText("$ claude login")).toBeVisible();
+    await expect(marblo.page.getByText("$ codex login")).toBeVisible();
+    await expect(
+      marblo.page.getByText(/에이전트 배정을 제안합니다/),
+      "설치-터미널-인증-첫 스폰 가이드가 첫 스폰까지 설명해야 함",
+    ).toBeVisible();
+    await screenshot(marblo.page, testInfo, "start-here-value-guide");
 
     for (const step of ["install", "auth", "prd", "firstTicket"] as const) {
       await expect(
@@ -142,11 +195,7 @@ test.describe("StartHereTab first-run mocked rendering", () => {
     ).toBeVisible();
     await screenshot(marblo.page, testInfo, "start-here-first-ticket");
 
-    for (const pattern of [
-      "Something went wrong",
-      "에러가 발생",
-      "crashed",
-    ]) {
+    for (const pattern of ["Something went wrong", "에러가 발생", "crashed"]) {
       await expect(
         marblo.page.locator(`text=/${pattern}/i`),
         `에러 패턴 "${pattern}" 가 보이면 안 됨`,

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { CheckCircle2, PlayCircle, Terminal, UserCheck } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
 import {
@@ -66,6 +67,18 @@ const STEP_ICON: Record<WizardStep, string> = {
   prd: "📄",
   firstTicket: "🎫",
 };
+
+const DEMO_VIDEO_SRC = "/media/orchestration-demo.mp4";
+const DEMO_POSTER_SRC = "/media/orchestration-demo-poster.jpg";
+
+const QUICK_GUIDE_STEPS = ["install", "terminal", "auth", "spawn"] as const;
+
+const QUICK_GUIDE_ICON = {
+  install: CheckCircle2,
+  terminal: Terminal,
+  auth: UserCheck,
+  spawn: PlayCircle,
+} satisfies Record<(typeof QUICK_GUIDE_STEPS)[number], typeof CheckCircle2>;
 
 export function StartHereTab() {
   const { t } = useTranslation();
@@ -203,7 +216,7 @@ export function StartHereTab() {
   return (
     // WorkTabs already gives each tab an `overflow-auto` box — only grow here.
     <div className="min-h-full bg-gray-900 px-6 py-6 text-[#cdd6f4]">
-      <div className="mx-auto max-w-2xl">
+      <div className="mx-auto max-w-5xl">
         {/* ── Header: what this is, how far along, and the always-on demo ── */}
         <div className="mb-5">
           <h1 className="text-xl font-semibold text-[#cdd6f4]">
@@ -260,6 +273,8 @@ export function StartHereTab() {
           </div>
         </div>
 
+        <ValuePreview onWatchDemo={openDemo} />
+
         {complete && (
           <div className="mb-4 rounded-lg border border-[#a6e3a1]/30 bg-[#a6e3a1]/10 px-4 py-3">
             <p className="text-sm font-semibold text-[#a6e3a1]">
@@ -271,80 +286,89 @@ export function StartHereTab() {
           </div>
         )}
 
-        {/* ── The checklist. Nothing here ever disappears. ───────────────── */}
-        <div className="space-y-2.5">
-          {views.map((view, i) => {
-            const isOpen = view.id === openStep;
-            return (
-              <section
-                key={view.id}
-                data-testid={`start-here-step-${view.id}`}
-                className={`rounded-lg border transition-colors ${
-                  isOpen
-                    ? "border-[#89b4fa]/50 bg-[#181825]"
-                    : "border-[#313244] bg-[#181825]/60"
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => selectStep(view.id)}
-                  aria-expanded={isOpen}
-                  className="flex w-full items-start gap-3 px-4 py-3 text-left"
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+          {/* ── The checklist. Nothing here ever disappears. ─────────────── */}
+          <div className="space-y-2.5">
+            {views.map((view, i) => {
+              const isOpen = view.id === openStep;
+              return (
+                <section
+                  key={view.id}
+                  data-testid={`start-here-step-${view.id}`}
+                  className={`rounded-lg border transition-colors ${
+                    isOpen
+                      ? "border-[#89b4fa]/50 bg-[#181825]"
+                      : "border-[#313244] bg-[#181825]/60"
+                  }`}
                 >
-                  <StepBadge status={view.status} index={i} />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-semibold text-[#cdd6f4]">
-                        {STEP_ICON[view.id]}{" "}
-                        {t(`onboarding.cliGate.step.${view.id}` as MessageKey)}
-                      </span>
-                      <StatusChip status={view.status} skipped={view.skipped} />
-                    </span>
-                    {/* 왜 필요한지 — 한 줄 */}
-                    <span className="mt-1 block text-xs text-[#7f849c]">
-                      {t(`onboarding.startHere.why.${view.id}` as MessageKey)}
-                    </span>
-                  </span>
-                </button>
-
-                {isOpen && (
-                  <div
-                    data-testid={`start-here-step-body-${view.id}`}
-                    className="space-y-3 border-t border-[#313244] px-4 py-4"
+                  <button
+                    type="button"
+                    onClick={() => selectStep(view.id)}
+                    aria-expanded={isOpen}
+                    className="flex w-full items-start gap-3 px-4 py-3 text-left"
                   >
-                    <StepBody
-                      step={view.id}
-                      hasProject={hasProject}
-                      seeding={seeding}
-                      seedMsg={seedMsg}
-                      onSeed={() => void handleSeed()}
-                      sendingTicket={sendingTicket}
-                      ticketMsg={ticketMsg}
-                      onFirstTicket={() => void handleFirstTicket()}
-                    />
+                    <StepBadge status={view.status} index={i} />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-[#cdd6f4]">
+                          {STEP_ICON[view.id]}{" "}
+                          {t(
+                            `onboarding.cliGate.step.${view.id}` as MessageKey,
+                          )}
+                        </span>
+                        <StatusChip
+                          status={view.status}
+                          skipped={view.skipped}
+                        />
+                      </span>
+                      {/* 왜 필요한지 — 한 줄 */}
+                      <span className="mt-1 block text-xs text-[#7f849c]">
+                        {t(`onboarding.startHere.why.${view.id}` as MessageKey)}
+                      </span>
+                    </span>
+                  </button>
 
-                    {/* 막혔을 때의 대안 — 항상 보이게 둔다. */}
-                    <p className="rounded-md border border-[#f9e2af]/25 bg-[#f9e2af]/5 px-3 py-2 text-xs text-[#a6adc8]">
-                      <span className="font-medium text-[#f9e2af]">
-                        {t("onboarding.startHere.stuckLabel")}
-                      </span>{" "}
-                      {t(`onboarding.startHere.alt.${view.id}` as MessageKey)}
-                    </p>
+                  {isOpen && (
+                    <div
+                      data-testid={`start-here-step-body-${view.id}`}
+                      className="space-y-3 border-t border-[#313244] px-4 py-4"
+                    >
+                      <StepBody
+                        step={view.id}
+                        hasProject={hasProject}
+                        seeding={seeding}
+                        seedMsg={seedMsg}
+                        onSeed={() => void handleSeed()}
+                        sendingTicket={sendingTicket}
+                        ticketMsg={ticketMsg}
+                        onFirstTicket={() => void handleFirstTicket()}
+                      />
 
-                    {view.status !== "done" && (
-                      <button
-                        type="button"
-                        onClick={() => skipStep(view.id)}
-                        className="text-xs text-[#7f849c] underline decoration-dotted transition-colors hover:text-[#cdd6f4]"
-                      >
-                        {t("onboarding.startHere.skipStep")}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </section>
-            );
-          })}
+                      {/* 막혔을 때의 대안 — 항상 보이게 둔다. */}
+                      <p className="rounded-md border border-[#f9e2af]/25 bg-[#f9e2af]/5 px-3 py-2 text-xs text-[#a6adc8]">
+                        <span className="font-medium text-[#f9e2af]">
+                          {t("onboarding.startHere.stuckLabel")}
+                        </span>{" "}
+                        {t(`onboarding.startHere.alt.${view.id}` as MessageKey)}
+                      </p>
+
+                      {view.status !== "done" && (
+                        <button
+                          type="button"
+                          onClick={() => skipStep(view.id)}
+                          className="text-xs text-[#7f849c] underline decoration-dotted transition-colors hover:text-[#cdd6f4]"
+                        >
+                          {t("onboarding.startHere.skipStep")}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+
+          <ActivationGuide />
         </div>
 
         {/* 벤더 확장 — 체크리스트 **뒤**에 둔다. ①~④는 첫 티켓까지 가는 최단
@@ -386,6 +410,130 @@ export function StartHereTab() {
         />
       )}
     </div>
+  );
+}
+
+function ValuePreview({ onWatchDemo }: { onWatchDemo: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <section
+      data-testid="start-here-value-preview"
+      className="mb-4 grid overflow-hidden rounded-lg border border-[#313244] bg-[#181825] md:grid-cols-[minmax(0,1.25fr)_minmax(260px,0.75fr)]"
+    >
+      <div className="bg-black">
+        <video
+          data-testid="start-here-orchestration-video"
+          className="aspect-video h-full w-full object-cover"
+          src={DEMO_VIDEO_SRC}
+          poster={DEMO_POSTER_SRC}
+          controls
+          muted
+          playsInline
+          preload="metadata"
+        />
+      </div>
+      <div className="flex flex-col justify-between gap-4 border-t border-[#313244] p-4 md:border-l md:border-t-0">
+        <div>
+          <p className="text-[11px] font-semibold uppercase text-[#89b4fa]">
+            {t("onboarding.startHere.value.kicker")}
+          </p>
+          <h2 className="mt-2 text-lg font-semibold text-[#cdd6f4]">
+            {t("onboarding.startHere.value.title")}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-[#a6adc8]">
+            {t("onboarding.startHere.value.body")}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={onWatchDemo}
+            className="inline-flex items-center gap-1.5 rounded-md bg-[#89b4fa] px-3 py-2 text-xs font-semibold text-[#1e1e2e] transition-colors hover:bg-[#74c7ec]"
+          >
+            <PlayCircle className="h-3.5 w-3.5" aria-hidden="true" />
+            {t("onboarding.startHere.value.playInteractive")}
+          </button>
+          <span className="text-xs text-[#7f849c]">
+            {t("onboarding.startHere.value.zeroCost")}
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ActivationGuide() {
+  const { t } = useTranslation();
+  return (
+    <aside
+      data-testid="start-here-activation-guide"
+      className="space-y-3 rounded-lg border border-[#313244] bg-[#181825]/80 p-4"
+    >
+      <div>
+        <p className="text-[11px] font-semibold uppercase text-[#f9e2af]">
+          {t("onboarding.startHere.activation.kicker")}
+        </p>
+        <h2 className="mt-1 text-base font-semibold text-[#cdd6f4]">
+          {t("onboarding.startHere.activation.title")}
+        </h2>
+        <p className="mt-1 text-xs leading-5 text-[#a6adc8]">
+          {t("onboarding.startHere.activation.body")}
+        </p>
+      </div>
+
+      <div
+        data-testid="start-here-terminal-flow"
+        className="rounded-md border border-[#45475a] bg-[#11111b] p-3"
+      >
+        <div className="mb-2 flex items-center justify-between border-b border-[#313244] pb-2">
+          <div className="flex items-center gap-1.5">
+            <Terminal className="h-3.5 w-3.5 text-[#89b4fa]" aria-hidden />
+            <span className="text-xs font-medium text-[#cdd6f4]">
+              {t("onboarding.startHere.activation.terminalTitle")}
+            </span>
+          </div>
+          <span className="rounded bg-[#a6e3a1]/15 px-1.5 py-0.5 text-[10px] font-medium text-[#a6e3a1]">
+            {t("onboarding.startHere.activation.autoCreated")}
+          </span>
+        </div>
+        <div className="space-y-1 font-mono text-[11px] leading-5">
+          <p className="text-[#a6e3a1]">$ claude login</p>
+          <p className="text-[#7f849c]">
+            {t("onboarding.startHere.activation.browserAuth")}
+          </p>
+          <p className="text-[#a6e3a1]">$ codex login</p>
+          <p className="text-[#89b4fa]">
+            {t("onboarding.startHere.activation.detected")}
+          </p>
+        </div>
+      </div>
+
+      <ol className="space-y-2">
+        {QUICK_GUIDE_STEPS.map((step, index) => {
+          const Icon = QUICK_GUIDE_ICON[step];
+          return (
+            <li key={step} className="flex gap-3">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[#313244] text-[#cdd6f4]">
+                <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-xs font-semibold text-[#cdd6f4]">
+                  {index + 1}.{" "}
+                  {t(
+                    `onboarding.startHere.activation.step.${step}.title` as MessageKey,
+                  )}
+                </span>
+                <span className="mt-0.5 block text-xs leading-5 text-[#7f849c]">
+                  {t(
+                    `onboarding.startHere.activation.step.${step}.body` as MessageKey,
+                  )}
+                </span>
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </aside>
   );
 }
 

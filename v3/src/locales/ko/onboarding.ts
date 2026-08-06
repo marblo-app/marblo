@@ -454,6 +454,37 @@ export const onboarding = {
   "onboarding.startHere.reenableLanding": "앱을 켤 때 이 탭으로 시작하기",
   "onboarding.startHere.dontLandHint":
     "어느 쪽이든 남은 단계는 이 탭에 그대로 남아 있습니다.",
+  "onboarding.startHere.value.kicker": "인증 전 가치 체험",
+  "onboarding.startHere.value.title":
+    "티켓 배정부터 에이전트 작업까지 먼저 확인하세요",
+  "onboarding.startHere.value.body":
+    "시연 영상은 오케스트레이터가 요청을 티켓으로 나누고, 알맞은 에이전트를 배정해 병렬로 작업시키는 흐름을 보여줍니다. CLI를 연결하고 계정을 연동하면 같은 흐름이 내 프로젝트에서 실제 터미널과 워크트리로 실행됩니다.",
+  "onboarding.startHere.value.playInteractive": "인터랙티브 데모 재생",
+  "onboarding.startHere.value.zeroCost":
+    "데모는 CLI 실행·AI 호출·과금 없이 재생됩니다.",
+  "onboarding.startHere.activation.kicker": "CLI 연결 + 계정 연동",
+  "onboarding.startHere.activation.title":
+    "설치가 끝나면 하단 에이전트 탭에서 인증합니다",
+  "onboarding.startHere.activation.body":
+    "자동 설치 뒤에는 에이전트 터미널이 생성됩니다. 거기서 claude login 또는 codex login을 완료하면 마블로가 인증 상태를 감지하고 첫 스폰으로 이어갑니다.",
+  "onboarding.startHere.activation.terminalTitle": "하단 에이전트 터미널",
+  "onboarding.startHere.activation.autoCreated": "자동 생성",
+  "onboarding.startHere.activation.browserAuth":
+    "브라우저에서 계정을 확인하고 터미널로 돌아옵니다.",
+  "onboarding.startHere.activation.detected":
+    "인증 감지됨 — 이제 첫 티켓을 만들 수 있습니다.",
+  "onboarding.startHere.activation.step.install.title": "설치",
+  "onboarding.startHere.activation.step.install.body":
+    "설치 버튼을 누르면 필요한 CLI를 자동 설치하고 버전을 확인합니다.",
+  "onboarding.startHere.activation.step.terminal.title": "터미널 자동 생성",
+  "onboarding.startHere.activation.step.terminal.body":
+    "인증이 필요하면 하단 에이전트 탭에 로그인용 터미널이 열립니다.",
+  "onboarding.startHere.activation.step.auth.title": "인증",
+  "onboarding.startHere.activation.step.auth.body":
+    "터미널에서 claude login 또는 codex login을 끝내고 다시 확인합니다.",
+  "onboarding.startHere.activation.step.spawn.title": "첫 스폰",
+  "onboarding.startHere.activation.step.spawn.body":
+    "프로젝트와 PRD를 연결한 뒤 첫 티켓을 보내면 오케스트레이터가 에이전트 배정을 제안합니다.",
   // 왜 필요한지 — 단계마다 한 줄
   "onboarding.startHere.why.install":
     "오케스트레이터와 에이전트는 이 CLI 위에서 돌아갑니다. 없으면 아무것도 실행되지 않습니다.",
