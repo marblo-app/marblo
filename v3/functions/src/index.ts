@@ -6025,7 +6025,7 @@ function tgSummarize(v: unknown, max = 200): string {
   return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 
-// ─── 트리거 1: 신규 신청 → 관리자 알림([선정][스킵]) ─────────────────
+// ─── 트리거 1: 신규 신청 → 관리자 정보성 알림 ────────────────────────
 export const notifyAdminOnWaitlistApply = functions.firestore
   .document("betatester50_waitlist/{docId}")
   .onCreate(async (snap) => {
@@ -6034,19 +6034,19 @@ export const notifyAdminOnWaitlistApply = functions.firestore
       const data = snap.data() || {};
       const email = typeof data.email === "string" ? data.email : "";
       const name = typeof data.name === "string" ? data.name : "";
-      const reason = tgSummarize(data.reason, 200);
+      const selectedCountSnap = await db
+        .collection(FOUNDERS_COLLECTION)
+        .where("status", "==", "selected")
+        .count()
+        .get();
+      const selectedCount = selectedCountSnap.data().count;
       const lines = [
-        "🆕 파운더 베타 신청",
+        "✅ 자동 선정 완료 — 조치 불필요",
         name ? `이름: ${name}` : "",
         `이메일: ${email || "(없음)"}`,
-        reason ? `사유: ${reason}` : "",
+        `선정 코호트: ${selectedCount}명`,
       ].filter(Boolean);
-      await tgSend(lines.join("\n"), [
-        [
-          { text: "✅ 선정(1개월)", callback_data: `sel:${snap.id}` },
-          { text: "⏭️ 스킵", callback_data: `skip:${snap.id}` },
-        ],
-      ]);
+      await tgSend(lines.join("\n"));
     } catch (err) {
       // 트리거 재시도 폭주 방지 — 알림 실패는 삼킨다.
       console.warn("[tg-waitlist] 알림 실패:", snap.id, err);
