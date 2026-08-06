@@ -1580,6 +1580,17 @@ export const completePortOneBillingKey = functions.https.onCall(
         currency: "KRW",
       });
       if (!validation.ok) {
+        functions.logger.warn("portone billing validation failed", {
+          reason: validation.reason,
+          expectedPaymentId: paymentId,
+          actualPaymentId: payment?.id,
+          expectedStoreId: PORTONE_STORE_ID,
+          actualStoreId: payment?.storeId,
+          expectedAmount: finalAmount,
+          actualAmount: payment?.amount?.total,
+          actualStatus: payment?.status,
+          actualCurrency: payment?.currency,
+        });
         await chargeRef.update({
           status: "failed",
           error: validation.reason,

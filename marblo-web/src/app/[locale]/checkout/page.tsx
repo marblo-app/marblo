@@ -272,13 +272,6 @@ export default function CheckoutPage() {
           email,
           phoneNumber: phoneDigits,
         };
-        // PII-safe diagnostic: never log raw phone, only length.
-        console.info("[portone] customer payload", {
-          fullName,
-          hasEmail: !!customer.email,
-          phoneLen: customer.phoneNumber?.length,
-          uid: user.uid,
-        });
 
         const functions = getFunctions(app, "us-central1");
         const getConfig = httpsCallable<
