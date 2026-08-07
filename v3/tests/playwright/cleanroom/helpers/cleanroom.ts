@@ -808,6 +808,26 @@ export async function switchToLegacyLayout(page: Page): Promise<void> {
 }
 
 /**
+ * 어드밴스드 셸의 보드 탭을 연다.
+ *
+ * 라벨이 두 벌인 이유: 워크스페이스 셸의 WorkTabs 는 i18n 라벨("보드")이고,
+ * 옵트아웃 경로인 레거시 Layout 의 TabBar 는 하드코딩 영문("Board")이다. 진입판정
+ * 회귀가드는 두 경로를 다 지나므로(workspaceMode.enabled="0" 마커가 레거시로
+ * 떨어뜨린다) 어느 쪽이 떠 있든 보드에 닿아야 한다.
+ */
+export async function openBoardTab(page: Page): Promise<void> {
+  await waitForAppShell(page);
+  for (const label of ["보드", "Board"]) {
+    const tab = page.locator(`button:has-text("${label}")`).first();
+    if (await tab.isVisible().catch(() => false)) {
+      await tab.click().catch(() => {});
+      await page.waitForTimeout(400);
+      return;
+    }
+  }
+}
+
+/**
  * 프로젝트 연결 상태를 주입한다. 진짜 폴더 연결은 Firestore createProject
  * 쓰기를 타므로(bypassAuth mock 유저로는 통과 못 함) 스토어에 직접 넣는다 —
  * 위저드 이후 단계(PRD/첫 티켓)의 게이트는 `currentProject.folderPath` 하나다.
@@ -854,4 +874,267 @@ export async function injectProject(
       updatedAt: new Date(),
     });
   }, folderPath);
+}
+
+// ── 비기너 모드 (설계: v3/docs/BEGINNER-MODE-DESIGN.md) ──────────────────────
+
+/**
+ * "이 설치는 처음이 아니다" 를 증명하는 localStorage 마커 →
+ * `lib/beginnerMode.PriorInstallMarkers` 의 필드와 1:1.
+ *
+ * 키를 여기 다시 적는 것은 의도적이다. 앱 코드에서 import 하면 키 이름이 바뀔 때
+ * 테스트도 같이 따라가 **판정이 조용히 죽는 회귀를 놓친다** — 이 표가 묻는 것은
+ * "규칙이 어떤 키를 보기로 했는가" 가 아니라 "실제로 그 키가 깔린 프로필이
+ * 어드밴스드로 떨어지는가" 다.
+ */
+export const PRIOR_INSTALL_MARKERS = {
+  onboardingProgress: "marblo.onboarding.progress",
+  workspaceTab: "marblo.workspaceSplit.activeTab",
+  workspaceModeFlag: "marblo.workspaceMode.enabled",
+  legacyGateDismissed: "marblo.cliSetupGateDismissed",
+} as const;
+
+export type PriorInstallMarkerName = keyof typeof PRIOR_INSTALL_MARKERS;
+
+/**
+ * 마커별로 실제 앱이 쓰는 모양의 값.
+ *
+ * ★`workspaceModeFlag: "0"` 이 이 표의 핵심 표본이다. 워크스페이스 셸을 **끈**
+ * 유저의 값이 "0" 인데, 판정 규칙은 값이 아니라 **존재**만 본다(설계 §진입판정).
+ * 값으로 읽는 구현으로 되돌아가면 "0" 이 falsy 라 그 유저가 비기너로 떨어지고,
+ * 즉 보드를 쓰던 사람의 보드가 사라진다.
+ */
+const MARKER_VALUE: Record<PriorInstallMarkerName, string> = {
+  onboardingProgress: JSON.stringify({ done: ["install"] }),
+  workspaceTab: "board",
+  workspaceModeFlag: "0",
+  legacyGateDismissed: "1",
+};
+
+export const BEGINNER_MODE_LS_KEY = "marblo.beginnerMode";
+export const COACHMARK_LS_KEY = "marblo.coachmark";
+
+export interface BeginnerRecordView {
+  /** 저장된 판정. 키가 아예 없으면 null. */
+  state: "beginner" | "advanced" | null;
+  enteredAt: number;
+  firstCompletionAt: number;
+  promotionShownAt: number;
+}
+
+/** 영속된 비기너 판정 레코드를 읽는다(화면 문구보다 이쪽이 정직하다). */
+export async function readBeginnerRecord(
+  page: Page,
+): Promise<BeginnerRecordView> {
+  return page.evaluate((key) => {
+    const empty = {
+      state: null as "beginner" | "advanced" | null,
+      enteredAt: 0,
+      firstCompletionAt: 0,
+      promotionShownAt: 0,
+    };
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return empty;
+      const p = JSON.parse(raw) as Partial<BeginnerRecordViewShape>;
+      return {
+        state:
+          p.state === "beginner" || p.state === "advanced" ? p.state : null,
+        enteredAt: Number(p.enteredAt) || 0,
+        firstCompletionAt: Number(p.firstCompletionAt) || 0,
+        promotionShownAt: Number(p.promotionShownAt) || 0,
+      };
+    } catch {
+      return empty;
+    }
+  }, BEGINNER_MODE_LS_KEY);
+}
+
+/** page.evaluate 안에서 쓰는 구조 타입(브라우저 컨텍스트로 넘어가지 않는다). */
+interface BeginnerRecordViewShape {
+  state: "beginner" | "advanced";
+  enteredAt: number;
+  firstCompletionAt: number;
+  promotionShownAt: number;
+}
+
+/**
+ * 진입판정을 **처음 상태로 되돌리고** 지정한 이전-사용 마커만 심은 뒤 재부팅한다.
+ *
+ * 판정은 스토어의 모듈 평가 시점에 한 번 확정되므로(첫 렌더 전에 셸이 정해져야
+ * 깜빡임이 없다) 리로드가 곧 재부팅이다 — `switchToLegacyLayout` 과 같은 패턴.
+ *
+ * ★굳은 판정(`marblo.beginnerMode`)과 **모든** 마커를 먼저 지운다. 앱은 부팅하며
+ * 스스로 마커를 쓰므로(셸이 활성 탭을 persist 한다), 지우지 않으면 두 번째
+ * 조합부터는 "직전 런이 남긴 마커" 를 재는 셈이 되어 표 전체가 vacuous 해진다.
+ */
+export async function reseedBeginnerDecision(
+  page: Page,
+  markers: readonly PriorInstallMarkerName[],
+): Promise<void> {
+  const seed = markers.map((m) => [PRIOR_INSTALL_MARKERS[m], MARKER_VALUE[m]]);
+  await page.evaluate(
+    (arg) => {
+      try {
+        for (const key of arg.clear) localStorage.removeItem(key);
+        for (const [key, value] of arg.seed) localStorage.setItem(key, value);
+      } catch {
+        /* 프라이빗 모드 — 이 하네스에선 일어나지 않는다 */
+      }
+    },
+    {
+      clear: [
+        BEGINNER_MODE_LS_KEY,
+        ...Object.values(PRIOR_INSTALL_MARKERS),
+      ] as string[],
+      seed,
+    },
+  );
+  await page.reload();
+  await page.waitForLoadState("domcontentloaded");
+}
+
+/**
+ * 비기너 셸이 떠 있는가.
+ *
+ * 상단바의 개발모드 전환 버튼을 지문으로 쓴다 — 연결 게이트·폴더 게이트·챗 어느
+ * 국면에 있든 항상 그려지는 유일한 요소다(#857 이 추가한 상시 어포던스).
+ */
+export async function beginnerShellVisible(page: Page): Promise<boolean> {
+  return page
+    .getByTestId("beginner-go-advanced")
+    .first()
+    .isVisible()
+    .catch(() => false);
+}
+
+/** 첫 실행 코치마크 투어가 떠 있는가. */
+export async function beginnerTourVisible(page: Page): Promise<boolean> {
+  return page
+    .getByTestId("beginner-tour")
+    .first()
+    .isVisible()
+    .catch(() => false);
+}
+
+/**
+ * 투어가 떠 있으면 '다시 보지 않기' 로 치운다.
+ *
+ * 오버레이 자체는 `pointer-events-none` 이라 아래 화면을 막지 않지만, 카드는
+ * `pointer-events-auto` 라 그 아래 버튼을 가릴 수 있다. 투어가 검증 대상이 아닌
+ * spec 은 이걸로 먼저 치우고 시작한다.
+ */
+export async function dismissBeginnerTour(page: Page): Promise<boolean> {
+  const never = page.getByTestId("beginner-tour-never").first();
+  try {
+    await never.waitFor({ state: "visible", timeout: 8_000 });
+  } catch {
+    return false;
+  }
+  await never.click().catch(() => {});
+  await page.waitForTimeout(300);
+  return true;
+}
+
+export interface SeedTask {
+  id: string;
+  title: string;
+  status: string;
+}
+
+export interface SeedAgent {
+  id: string;
+  name: string;
+  status: string;
+}
+
+/**
+ * 티켓을 taskStore 에 직접 넣는다 — 비기너 라이브 스트립의 유일한 데이터원.
+ *
+ * 진짜 티켓 생성은 Firestore 쓰기를 타는데 이 하네스는 bypassAuth mock 유저라
+ * 거절된다. 두 번 쓰는 이유는 team-collaboration spec 과 같다: 구독이 늦게
+ * 정착하면서 빈 스냅샷으로 덮을 수 있다.
+ */
+export async function injectTasks(
+  page: Page,
+  tasks: readonly SeedTask[],
+): Promise<void> {
+  const write = async () => {
+    await page.evaluate((seed) => {
+      const hatch = (
+        window as unknown as {
+          __marbloTest?: {
+            stores: { task: { setState: (s: unknown) => void } };
+          };
+        }
+      ).__marbloTest;
+      if (!hatch) throw new Error("cleanroom test hatch is unavailable");
+      hatch.stores.task.setState({
+        tasks: seed.map((t) => ({
+          id: t.id,
+          projectId: "cleanroom-project",
+          title: t.title,
+          description: "",
+          status: t.status,
+          dependsOn: [],
+          dependsOnCompleted: true,
+          priority: 1,
+          role: "test",
+          claimedBy: null,
+          claimedAt: null,
+          scope: [],
+          comment: "",
+          prUrl: "",
+          hasPmFeedback: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })),
+        loading: false,
+      });
+    }, tasks as SeedTask[]);
+  };
+  await write();
+  await page.waitForTimeout(400);
+  await write();
+  await page.waitForTimeout(300);
+}
+
+/** 에이전트를 agentStore 에 직접 넣는다(미니 에이전트 뷰의 데이터원). */
+export async function injectAgents(
+  page: Page,
+  agents: readonly SeedAgent[],
+): Promise<void> {
+  const write = async () => {
+    await page.evaluate((seed) => {
+      const hatch = (
+        window as unknown as {
+          __marbloTest?: {
+            stores: { agent: { setState: (s: unknown) => void } };
+          };
+        }
+      ).__marbloTest;
+      if (!hatch) throw new Error("cleanroom test hatch is unavailable");
+      hatch.stores.agent.setState({
+        agents: seed.map((a) => ({
+          id: a.id,
+          projectId: "cleanroom-project",
+          ownerId: "test-user-bypass",
+          name: a.name,
+          model: "claude",
+          role: "test",
+          status: a.status,
+          currentTaskId: null,
+          command: "claude",
+          skillFile: "",
+          createdAt: new Date(),
+        })),
+        loading: false,
+        hydrated: true,
+      });
+    }, agents as SeedAgent[]);
+  };
+  await write();
+  await page.waitForTimeout(400);
+  await write();
+  await page.waitForTimeout(300);
 }
