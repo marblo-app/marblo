@@ -1630,10 +1630,21 @@ export const completePortOneBillingKey = functions.https.onCall(
     const planType = stringField(data, "planType") || "pro";
     const customerName = stringField(data, "customerName");
     const customerPhone = stringField(data, "customerPhone");
+    // KG이니시스 빌링 청구는 customer.email REQUIRED.
+    // 클라이언트가 넘긴 customerEmail 우선, 없으면 auth token email 폴백.
+    const customerEmailRaw = stringField(data, "customerEmail");
+    const customerEmail =
+      (customerEmailRaw && customerEmailRaw.trim()) || authEmail || null;
     if (!billingKey) {
       throw new functions.https.HttpsError(
         "invalid-argument",
         "billingKey가 필요합니다.",
+      );
+    }
+    if (!customerEmail) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "결제에 이메일이 필요합니다",
       );
     }
 
@@ -1695,7 +1706,7 @@ export const completePortOneBillingKey = functions.https.onCall(
             orderName: `Marblo ${planType} 구독`,
             amount: finalAmount,
             customerId: userId,
-            customerEmail: authEmail,
+            customerEmail,
             customerName,
             customerPhone,
           });
@@ -1740,10 +1751,11 @@ export const completePortOneBillingKey = functions.https.onCall(
         status: "active",
         paymentProvider: "portone",
         portoneBillingKey: billingKey,
-        // KG이니시스 갱신 청구는 매 사이클 name/phone 을 요구한다 — 구독 문서에
+        // KG이니시스 갱신 청구는 매 사이클 name/phone/email 을 요구한다 — 구독 문서에
         // 저장해 scheduledChargePortOneSubscriptions 가 재사용한다.
         portoneCustomerName: customerName,
         portoneCustomerPhone: customerPhone,
+        portoneCustomerEmail: customerEmail,
         portonePaymentId: finalAmount <= 0 ? null : paymentId,
         currentPeriodStart: now,
         currentPeriodEnd: nextPeriodEnd(now, expected.billingCycle),
@@ -6138,23 +6150,29 @@ export const scheduledChargePortOneSubscriptions = functions.pubsub
         typeof sub.portoneCustomerPhone === "string"
           ? sub.portoneCustomerPhone
           : null;
-      // KG이니시스 갱신 청구는 name/phone 필수 — 미저장 레거시는 스킵(해지 방지).
-      if (!billingKey || !customerName || !customerPhone) {
+      // 구독 문서에 저장된 email 우선, 없으면 Auth 폴백.
+      let customerEmail: string | null =
+        typeof sub.portoneCustomerEmail === "string" &&
+        sub.portoneCustomerEmail.trim()
+          ? sub.portoneCustomerEmail.trim()
+          : null;
+      if (!customerEmail) {
+        try {
+          const userRecord = await admin.auth().getUser(doc.id);
+          customerEmail =
+            typeof userRecord.email === "string" ? userRecord.email : null;
+        } catch {
+          customerEmail = null;
+        }
+      }
+      // KG이니시스 갱신 청구는 name/phone/email 필수 — 미저장 레거시는 스킵(해지 방지).
+      if (!billingKey || !customerName || !customerPhone || !customerEmail) {
         console.warn(
-          "[PortOne Billing Cron] missing billingKey/name/phone, skip",
+          "[PortOne Billing Cron] missing billingKey/name/phone/email, skip",
           doc.id,
         );
         result.skipped++;
         continue;
-      }
-
-      let customerEmail: string | null = null;
-      try {
-        const userRecord = await admin.auth().getUser(doc.id);
-        customerEmail =
-          typeof userRecord.email === "string" ? userRecord.email : null;
-      } catch {
-        customerEmail = null;
       }
 
       const cycleAnchorMs = currentPeriodEndMs as number;

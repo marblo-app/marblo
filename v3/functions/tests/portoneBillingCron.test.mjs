@@ -89,14 +89,16 @@ function resolvePortOneChargeAfterClaim(params) {
 /**
  * 레거시 구독 스킵 가드 미러.
  * 소스: scheduledChargePortOneSubscriptions
- *   if (!billingKey || !customerName || !customerPhone) → skipped++ (해지 안 함)
+ *   if (!billingKey || !customerName || !customerPhone || !customerEmail)
+ *     → skipped++ (해지 안 함)
  */
 function shouldSkipPortOneLegacyMissingCustomer(
   billingKey,
   customerName,
   customerPhone,
+  customerEmail = "legacy@example.com",
 ) {
-  return !billingKey || !customerName || !customerPhone;
+  return !billingKey || !customerName || !customerPhone || !customerEmail;
 }
 
 // ── 멱등 paymentId / charge doc 결정성 ───────────────────────────────
@@ -272,7 +274,7 @@ function shouldSkipPortOneLegacyMissingCustomer(
   eq(r.paymentKey, paymentId, "paymentKey = paymentId");
 }
 
-// ── 레거시 스킵: name/phone/billingKey 미저장 → skip, 해지 안 함 ─────
+// ── 레거시 스킵: name/phone/email/billingKey 미저장 → skip, 해지 안 함 ─
 {
   assert(
     shouldSkipPortOneLegacyMissingCustomer(null, "홍길동", "01012345678"),
@@ -287,6 +289,24 @@ function shouldSkipPortOneLegacyMissingCustomer(
     "phone 없음 → skip",
   );
   assert(
+    shouldSkipPortOneLegacyMissingCustomer(
+      "bk_1",
+      "홍길동",
+      "01012345678",
+      null,
+    ),
+    "email 없음 → skip",
+  );
+  assert(
+    shouldSkipPortOneLegacyMissingCustomer(
+      "bk_1",
+      "홍길동",
+      "01012345678",
+      "",
+    ),
+    "email 빈문자열 → skip",
+  );
+  assert(
     shouldSkipPortOneLegacyMissingCustomer("", "홍길동", "01012345678"),
     "billingKey 빈문자열 → skip",
   );
@@ -295,7 +315,12 @@ function shouldSkipPortOneLegacyMissingCustomer(
     "name 빈문자열 → skip",
   );
   assert(
-    !shouldSkipPortOneLegacyMissingCustomer("bk_1", "홍길동", "01012345678"),
+    !shouldSkipPortOneLegacyMissingCustomer(
+      "bk_1",
+      "홍길동",
+      "01012345678",
+      "user@example.com",
+    ),
     "전부 있음 → skip 안 함",
   );
 
@@ -311,8 +336,8 @@ function shouldSkipPortOneLegacyMissingCustomer(
   };
   assert(selectDueForCharge(dueLegacy, T0), "레거시도 due 판정은 true 가능");
   assert(
-    shouldSkipPortOneLegacyMissingCustomer("bk_legacy", null, null),
-    "name/phone 미저장 레거시 → 크론 skip",
+    shouldSkipPortOneLegacyMissingCustomer("bk_legacy", null, null, null),
+    "name/phone/email 미저장 레거시 → 크론 skip",
   );
   // 스킵 경로: applyChargeFailure 미호출 가정 → 상태 전이 없음
   const unchanged = {
@@ -350,7 +375,12 @@ function shouldSkipPortOneLegacyMissingCustomer(
   };
   assert(selectDueForCharge(snap, T0), "due");
   assert(
-    !shouldSkipPortOneLegacyMissingCustomer("bk_ok", "Kim", "01000000000"),
+    !shouldSkipPortOneLegacyMissingCustomer(
+      "bk_ok",
+      "Kim",
+      "01000000000",
+      "kim@example.com",
+    ),
     "고객정보 완비",
   );
   const paymentId = portonePaymentId(

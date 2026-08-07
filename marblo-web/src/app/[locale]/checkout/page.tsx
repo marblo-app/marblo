@@ -91,6 +91,9 @@ export default function CheckoutPage() {
   const [paymentConsent, setPaymentConsent] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [phoneNumberTouched, setPhoneNumberTouched] = useState(false);
+  // KG이니시스 빌링은 customer.email REQUIRED. auth email 없는 유저만 수동 입력.
+  const [checkoutEmail, setCheckoutEmail] = useState("");
+  const [checkoutEmailTouched, setCheckoutEmailTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Resolve plan or lecture info
@@ -122,6 +125,21 @@ export default function CheckoutPage() {
     !requiresPhoneNumber || /^\d{10,11}$/.test(phoneNumber);
   const showPhoneNumberError =
     requiresPhoneNumber && phoneNumberTouched && !isPhoneNumberValid;
+  // PortOne(KG이니시스) 결제 시 email 필수. auth email 있으면 그대로, 없으면 입력 필드.
+  const requiresCheckoutEmail =
+    paymentProvider === "portone" && !user?.email;
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const resolvedCheckoutEmail = (
+    user?.email ||
+    checkoutEmail.trim() ||
+    ""
+  ).trim();
+  const isCheckoutEmailValid =
+    !requiresCheckoutEmail || EMAIL_RE.test(resolvedCheckoutEmail);
+  const showCheckoutEmailError =
+    requiresCheckoutEmail &&
+    checkoutEmailTouched &&
+    !isCheckoutEmailValid;
   const paymentProcessorName = t(
     paymentProvider === "portone"
       ? "paymentProcessorPortOne"
@@ -253,6 +271,13 @@ export default function CheckoutPage() {
       setError(t("phoneNumberInvalid"));
       return;
     }
+    if (!isCheckoutEmailValid) {
+      setCheckoutEmailTouched(true);
+      setError(
+        resolvedCheckoutEmail ? t("emailInvalid") : t("emailRequired"),
+      );
+      return;
+    }
     setLoading(true);
     setError(null);
     // GA4 begin_checkout — 결제 요청 직전 발화(값/상품만, PII 없음).
@@ -293,9 +318,12 @@ export default function CheckoutPage() {
         // PortOne customer — shared by requestPayment / requestIssueBillingKey.
         // fullName/email/phoneNumber field names must stay as-is (SDK contract).
         const fullName = (user.displayName || "Marblo User").trim();
-        const email = user.email || undefined;
-        if (!email) {
-          console.warn("[portone] customer email missing", { uid: user.uid });
+        // KG이니시스: customer.email REQUIRED. auth email 우선, 없으면 수동 입력값.
+        const email = resolvedCheckoutEmail;
+        if (!email || !EMAIL_RE.test(email)) {
+          setCheckoutEmailTouched(true);
+          setError(email ? t("emailInvalid") : t("emailRequired"));
+          throw new Error(email ? t("emailInvalid") : t("emailRequired"));
         }
         // Digits only, no hyphens; empty or not 10–11 digits → reject.
         const phoneDigits = phoneNumber.replace(/\D/g, "");
@@ -368,9 +396,10 @@ export default function CheckoutPage() {
             planType: plan,
             billing,
             coupon: couponCode || undefined,
-            // PortOne billing-key charge requires customer.name/phoneNumber server-side.
+            // PortOne billing-key charge requires customer.name/phone/email server-side.
             customerName: fullName,
             customerPhone: customer.phoneNumber,
+            customerEmail: email,
           });
           // tx=issueId → success 페이지 GA4 purchase transaction_id (중복 가드 키)
           router.push(
@@ -573,6 +602,47 @@ export default function CheckoutPage() {
               </div>
             )}
 
+            {requiresCheckoutEmail && (
+              <div className="space-y-2">
+                <label
+                  htmlFor="checkout-email"
+                  className="block text-sm font-medium text-zinc-300"
+                >
+                  {t("emailLabel")}
+                </label>
+                <input
+                  id="checkout-email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  value={checkoutEmail}
+                  onChange={(event) => {
+                    setCheckoutEmail(event.target.value);
+                    if (error) setError(null);
+                  }}
+                  onBlur={() => setCheckoutEmailTouched(true)}
+                  placeholder={t("emailPlaceholder")}
+                  aria-invalid={showCheckoutEmailError}
+                  aria-describedby={
+                    showCheckoutEmailError
+                      ? "checkout-email-error"
+                      : undefined
+                  }
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-3 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                />
+                {showCheckoutEmailError && (
+                  <p
+                    id="checkout-email-error"
+                    className="text-sm text-red-400"
+                  >
+                    {checkoutEmail.trim()
+                      ? t("emailInvalid")
+                      : t("emailRequired")}
+                  </p>
+                )}
+              </div>
+            )}
+
             {requiresPhoneNumber && (
               <div className="space-y-2">
                 <label
@@ -663,7 +733,11 @@ export default function CheckoutPage() {
             <button
               onClick={handlePayment}
               disabled={
-                loading || !sdkReady || !paymentConsent || !isPhoneNumberValid
+                loading ||
+                !sdkReady ||
+                !paymentConsent ||
+                !isPhoneNumberValid ||
+                !isCheckoutEmailValid
               }
               className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-xl text-lg font-semibold transition mt-4 flex items-center justify-center gap-2"
             >
