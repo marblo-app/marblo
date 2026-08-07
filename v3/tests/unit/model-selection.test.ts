@@ -5,6 +5,10 @@
  * `normalizeModel()` 에서 undefined 가 되어 **조용히 사라지던** 경로를 여기서
  * 못박는다. 그리고 §8.3 불변식 — 지정 모델이 미검증 CLI 여도 spawn 은 성공하고
  * opus 로 폴백한다 — 을 버전 주입으로 결정적으로 검증한다.
+ *
+ * §P1 벤더 숏핸드 회귀 가드: `dispatch_task(model="minimax")` 이
+ * `resolveModelPin()` 에서 undefined 가 되어 antigravity/gpt 로 폴백하던
+ * 결함을 `resolveVendorShorthand()` 로 못박는다.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -18,6 +22,7 @@ import {
   codexOrchestratorChoices,
   selectableEfforts,
   humanizeClaudeModelId,
+  resolveVendorShorthand,
 } from "../../electron/model-selection";
 import { normalizeModel } from "../../electron/dispatch-scoring";
 import { MODEL_REGISTRY, getModel } from "../../electron/model-registry";
@@ -371,5 +376,135 @@ describe("오케 셀렉터 compound 값", () => {
     expect(humanizeClaudeModelId("claude-haiku-4-5-20251001")).toBe(
       "Haiku 4.5",
     );
+  });
+});
+
+describe("§P1 벤더 숏핸드 해석 (minimax / glm / kimi)", () => {
+  it('resolveModelPin("minimax") === MiniMax-M3 (최신 flagship, M2.7 아님)', () => {
+    const pin = resolveModelPin("minimax", CLI_OK);
+    expect(pin).toMatchObject({
+      harness: "claude",
+      vendor: "minimax",
+      claudeModel: "MiniMax-M3",
+      label: "MiniMax-M3",
+    });
+    expect(pin?.claudeModel).not.toBe("MiniMax-M2.7");
+  });
+
+  it("MiniMax(대소문자 혼합) → MiniMax-M3", () => {
+    const pin = resolveModelPin("MiniMax", CLI_OK);
+    expect(pin).toMatchObject({
+      harness: "claude",
+      vendor: "minimax",
+      claudeModel: "MiniMax-M3",
+    });
+  });
+
+  it("MINIMAX(대문자) → MiniMax-M3", () => {
+    const pin = resolveModelPin("MINIMAX", CLI_OK);
+    expect(pin).toMatchObject({
+      harness: "claude",
+      vendor: "minimax",
+      claudeModel: "MiniMax-M3",
+    });
+  });
+
+  it("glm → glm-5.2 (GLM flagship)", () => {
+    const pin = resolveModelPin("glm", CLI_OK);
+    expect(pin).toMatchObject({
+      harness: "claude",
+      vendor: "zai",
+      claudeModel: "glm-5.2",
+      label: "glm-5.2",
+    });
+  });
+
+  it("zai → glm-5.2 (GLM brand name)", () => {
+    const pin = resolveModelPin("zai", CLI_OK);
+    expect(pin).toMatchObject({
+      harness: "claude",
+      vendor: "zai",
+      claudeModel: "glm-5.2",
+    });
+  });
+
+  it("kimi → k3 (Kimi flagship)", () => {
+    const pin = resolveModelPin("kimi", CLI_OK);
+    expect(pin).toMatchObject({
+      harness: "claude",
+      vendor: "moonshot",
+      claudeModel: "k3",
+      label: "k3",
+    });
+  });
+
+  it("moonshot → k3 (Kimi brand name)", () => {
+    const pin = resolveModelPin("moonshot", CLI_OK);
+    expect(pin).toMatchObject({
+      harness: "claude",
+      vendor: "moonshot",
+      claudeModel: "k3",
+    });
+  });
+
+  it("★회귀: 벤더 숏핸드는 loose index 에 없다 (숏핸드 전용 경로)", () => {
+    expect(findModelLoose("minimax")).toBeUndefined();
+    expect(findModelLoose("glm")).toBeUndefined();
+    expect(findModelLoose("kimi")).toBeUndefined();
+    expect(findModelLoose("zai")).toBeUndefined();
+    expect(findModelLoose("moonshot")).toBeUndefined();
+  });
+
+  it("★회귀: normalizeModel 은 벤더 숏핸드를 삼키지 않는다 (harness 축 유지)", () => {
+    // MODEL_ALIASES 에 없어 undefined — 벤더를 harness 로 접으면 축 분리 붕괴
+    expect(normalizeModel("minimax")).toBeUndefined();
+    expect(normalizeModel("glm")).toBeUndefined();
+    expect(normalizeModel("kimi")).toBeUndefined();
+    // 고치기 전: resolveModelPin("minimax") 도 undefined → antigravity/gpt 폴백
+    // 고친 후: resolveVendorShorthand → MiniMax-M3 핀 성공
+    expect(resolveModelPin("minimax", CLI_OK)?.claudeModel).toBe("MiniMax-M3");
+  });
+
+  it("parseModelSpec 로 직접 벤더 숏핸드 파싱", () => {
+    const spec = parseModelSpec("minimax");
+    expect(spec).toMatchObject({
+      harness: "claude",
+      vendor: "minimax",
+      modelId: "MiniMax-M3",
+    });
+  });
+
+  it("★회귀: 구체 id 는 숏핸드와 무관하게 그대로 핀된다", () => {
+    // 구체 id 는 findModelLoose 가 먼저 잡음 — M2.7 / M3 둘 다 보존
+    expect(resolveVendorShorthand("MiniMax-M2.7")).toBeUndefined();
+    expect(resolveVendorShorthand("MiniMax-M3")).toBeUndefined();
+    expect(resolveVendorShorthand("glm-5.2")).toBeUndefined();
+    expect(parseModelSpec("MiniMax-M2.7")?.modelId).toBe("MiniMax-M2.7");
+    expect(parseModelSpec("MiniMax-M3")?.modelId).toBe("MiniMax-M3");
+    expect(parseModelSpec("minimax-m3")?.modelId).toBe("MiniMax-M3");
+    expect(parseModelSpec("minimax-m2.7")?.modelId).toBe("MiniMax-M2.7");
+    expect(resolveModelPin("MiniMax-M2.7", CLI_OK)?.claudeModel).toBe(
+      "MiniMax-M2.7",
+    );
+    expect(resolveModelPin("glm-5.2", CLI_OK)?.claudeModel).toBe("glm-5.2");
+    expect(resolveModelPin("k3", CLI_OK)?.claudeModel).toBe("k3");
+  });
+
+  it("resolveVendorShorthand 직접: 벤더 → flagship 행", () => {
+    expect(resolveVendorShorthand("minimax")?.id).toBe("MiniMax-M3");
+    expect(resolveVendorShorthand("glm")?.id).toBe("glm-5.2");
+    expect(resolveVendorShorthand("zai")?.id).toBe("glm-5.2");
+    expect(resolveVendorShorthand("kimi")?.id).toBe("k3");
+    expect(resolveVendorShorthand("moonshot")?.id).toBe("k3");
+  });
+
+  it("존재하지 않는 벤더는 undefined", () => {
+    expect(resolveModelPin("nonexistent", CLI_OK)).toBeUndefined();
+    expect(resolveVendorShorthand("nonexistent")).toBeUndefined();
+  });
+
+  it("looseIndexCollisions 는 벤더 숏핸드와 충돌하지 않는다", () => {
+    const collisions = looseIndexCollisions();
+    expect(collisions).toEqual([]);
   });
 });

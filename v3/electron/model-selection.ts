@@ -170,6 +170,69 @@ export function findModelLoose(input: string): ModelRegistryEntry | undefined {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// 벤더 숏핸드 해석 (§P1 — env-swap 벤더 이름 → 기본 모델 id)
+//
+// 사용자가 "minimax", "glm", "kimi" 처럼 벤더 이름만으로 dispatch 하면
+// 그건 모델 id 가 아니라 벤더 ID 이다. 이 층이 "minimax" → "MiniMax-M3" 처럼
+// 해당 벤더의 플래그십 모델로 해석한다.
+//
+// loose 인덱스가 "minimax" 를 모르는 이유: 레지스트리 행의 id/alias/bare/날짜접미
+// 어디에도 벤더 이름 문자열 자체가 없다. 벤더 이름을 모델로 승격하려면 별도 표가
+// 필요하다.
+//
+// ★하드코딩을 최소화: 숏핸드는 VendorId 로만 매핑하고, primary 모델은
+// MODEL_REGISTRY 에서 capability 최고 active 행으로 자동 파생한다
+// (동점이면 레지스트리 등재 순서 — 플래그십이 먼저: MiniMax-M3, glm-5.2, k3).
+// normalizeModel 에 벤더를 넣지 않는다 — 그건 harness 축이다.
+// ─────────────────────────────────────────────────────────────────────────
+
+/** 벤더 숏핸드 / 브랜드명 → VendorId (모델 id 하드코딩 없음). */
+const VENDOR_SHORTHAND_TO_VENDOR: Record<string, VendorId> = {
+  minimax: "minimax",
+  // GLM / Z.ai — 같은 벤더의 두 이름
+  glm: "zai",
+  zai: "zai",
+  // Kimi / Moonshot — 같은 벤더의 두 이름
+  kimi: "moonshot",
+  moonshot: "moonshot",
+};
+
+const CAPABILITY_RANK: Readonly<Record<CapabilityTier, number>> = {
+  cheap: 0,
+  mid: 1,
+  top: 2,
+  frontier: 3,
+};
+
+/**
+ * 벤더 숏핸드 또는 VendorId 를 해당 벤더의 primary 모델 행으로 해석한다.
+ *
+ * primary = 해당 벤더 active 행 중 capability 최고. 동점이면 레지스트리 등재 순서
+ * (최신/플래그십이 먼저 등록된 규율: MiniMax-M3, glm-5.2, k3).
+ *
+ * 매핑이 없으면 undefined — 호출자가 기존 `normalizeModel` 경로로 폴백한다.
+ */
+export function resolveVendorShorthand(
+  input: string,
+): ModelRegistryEntry | undefined {
+  const key = input.trim().toLowerCase();
+  const vendor = VENDOR_SHORTHAND_TO_VENDOR[key];
+  if (!vendor) return undefined;
+
+  let best: ModelRegistryEntry | undefined;
+  for (const entry of MODEL_REGISTRY) {
+    if (entry.provider !== vendor || entry.status !== "active") continue;
+    if (
+      !best ||
+      CAPABILITY_RANK[entry.capability] > CAPABILITY_RANK[best.capability]
+    ) {
+      best = entry;
+    }
+  }
+  return best;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // 파싱
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -181,11 +244,15 @@ export function findModelLoose(input: string): ModelRegistryEntry | undefined {
  *   "gpt-5.6-terra@max"→ { provider: "gpt", modelId: "gpt-5.6-terra", effort: "max" }
  *   "fable@high"       → { provider: "claude", modelId: "claude-fable-5",
  *                          droppedEffort: "high" }   ← claude 엔 effort 축이 없다
+ *   "minimax"          → { provider: "claude", vendor: "minimax", modelId: "MiniMax-M3" }
+ *   "glm" / "zai"      → { provider: "claude", vendor: "zai",     modelId: "glm-5.2" }
+ *   "kimi" / "moonshot"→ { provider: "claude", vendor: "moonshot",modelId: "k3" }
  *   "존재하지않음"       → undefined                                 (호출자가 폴백)
  *
- * ★프로바이더 토큰("claude"/"codex"/"gpt"/"agy"…)을 **먼저** 가로챈다. 그래야
- * 기존 호출(`model: "codex"`)의 동작이 한 바이트도 바뀌지 않는다 — 프로바이더만
- * 말한 것을 구체 모델 지정으로 승격시키지 않는다.
+ * 해석 순서: (1) 구체 id/alias loose → (2) 벤더 숏핸드 → (3) 하네스 토큰.
+ * 구체 id 가 벤더 숏핸드보다 먼저라 `MiniMax-M2.7` / `minimax-m3` 회귀가 보존된다.
+ * 하네스 토큰("claude"/"codex"/"gpt"/"agy"…)은 마지막 — 프로바이더만 말한 것을
+ * 구체 모델로 승격시키지 않는다.
  */
 export function parseModelSpec(input?: string): ModelSpec | undefined {
   const raw = (input ?? "").trim();
@@ -201,28 +268,42 @@ export function parseModelSpec(input?: string): ModelSpec | undefined {
           .toLowerCase()
       : "";
 
-  // 1) 하네스 토큰만 말한 경우 — 구체 모델 없음(기존 경로 그대로).
-  //    normalizeModel 은 "gpt-5.6-terra" 같은 구체 슬러그도 "gpt" 로 접으므로,
-  //    레지스트리에 그 id 가 있는지를 먼저 확인해 구체 지정과 구분한다.
-  //    ★벤더는 모른다 — "codex" 라고만 말한 사람은 벤더를 특정하지 않았다.
+  // 1) 레지스트리의 느슨한 인덱스("opus5" → "claude-opus-5", "minimax-m3" → MiniMax-M3).
   const entry = findModelLoose(modelPart);
-  if (!entry) {
-    const harness = normalizeModel(modelPart);
-    if (!harness) return undefined;
-    return withEffort({ harness, raw }, effortPart, undefined);
+  if (entry) {
+    return withEffort(
+      {
+        harness: entry.harness as ModelType,
+        vendor: entry.provider,
+        modelId: entry.id,
+        raw,
+      },
+      effortPart,
+      entry,
+    );
   }
 
-  // 2) 구체 모델 지정. 두 축 모두 레지스트리 항목에서 파생한다(별도 표 없음).
-  return withEffort(
-    {
-      harness: entry.harness as ModelType,
-      vendor: entry.provider,
-      modelId: entry.id,
-      raw,
-    },
-    effortPart,
-    entry,
-  );
+  // 2) 벤더 숏핸드 → 해당 벤더의 primary 모델 (minimax/glm/kimi 등).
+  //    "minimax" → MiniMax-M3, "glm" → glm-5.2, "kimi" → k3.
+  //    normalizeModel 에 넣지 않는다(harness 축 오염 방지).
+  const vendorEntry = resolveVendorShorthand(modelPart);
+  if (vendorEntry) {
+    return withEffort(
+      {
+        harness: vendorEntry.harness as ModelType,
+        vendor: vendorEntry.provider,
+        modelId: vendorEntry.id,
+        raw,
+      },
+      effortPart,
+      vendorEntry,
+    );
+  }
+
+  // 3) 하네스 토큰("claude"/"codex"/"agy" 등) — 구체 모델 없음(기존 경로 그대로).
+  const harness = normalizeModel(modelPart);
+  if (!harness) return undefined;
+  return withEffort({ harness, raw }, effortPart, undefined);
 }
 
 /** effort 를 검증해 붙인다. 지원하지 않으면 버리고 사유를 남긴다(스폰은 계속). */
