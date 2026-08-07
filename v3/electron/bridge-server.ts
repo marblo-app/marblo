@@ -55,6 +55,11 @@ import { getAccountRateLimits, type AccountRateLimits } from "./account-usage";
 import type { RateLimitInfo } from "./session-parsers";
 import { decideAutoMix, isAutoMixEnabled, autoMixThresholds } from "./auto-mix";
 import {
+  loadUsageRollup,
+  weeklyUsedPercentForHarness,
+  type UsageRollupSnapshot,
+} from "./usage-rollup";
+import {
   resolveSkillRouting,
   vendorForModel,
   withSkillDirective,
@@ -99,6 +104,30 @@ function accountRateLimitsToBudgetSnapshot(
   if (claude) budgets.claude = claude;
   if (gpt) budgets.gpt = gpt;
   return budgets;
+}
+
+/**
+ * 주간 토큰 soft-limit 사용률을 budgetSnapshot 에 max 합성한다.
+ * rate-limit % 와 cost_logs 주간 집계 중 **더 빡센 쪽**이 1·2층 압력을 만든다
+ * → claude/gpt 한도 근접 시 grok·env-swap fleet 으로 자연 전환.
+ */
+function mergeWeeklyUsageIntoBudgetSnapshot(
+  budgets: ModelBudgetSnapshot,
+  usage: UsageRollupSnapshot | null,
+): ModelBudgetSnapshot {
+  if (!usage) return budgets;
+  const next: ModelBudgetSnapshot = { ...budgets };
+  for (const harness of ["claude", "gpt"] as const) {
+    const weeklyPct = weeklyUsedPercentForHarness(harness, usage);
+    if (weeklyPct === null) continue;
+    const existing = next[harness]?.usedPercent;
+    const usedPercent =
+      typeof existing === "number" && Number.isFinite(existing)
+        ? Math.max(existing, weeklyPct)
+        : weeklyPct;
+    next[harness] = { usedPercent };
+  }
+  return next;
 }
 
 const TASK_AGENT_FIRST_ACTIVITY_GRACE_MS = 180_000;
@@ -2247,6 +2276,13 @@ export class BridgeServer {
         );
       }
     }
+    // cost_logs 로컬 거울(usage-weekly) — 주간 한도 압력을 budget 과 max 합성.
+    // BQ/getCostSummary 핫패스 await 없음(동기 파일). 없으면 no-op.
+    const usageRollup = model ? null : loadUsageRollup();
+    budgetSnapshot = mergeWeeklyUsageIntoBudgetSnapshot(
+      budgetSnapshot,
+      usageRollup,
+    );
 
     // Step 1 & 2: Score existing agents
     const scored = this.scoreAgents(
@@ -2559,6 +2595,7 @@ export class BridgeServer {
           ctx: graphCtx,
           graph: routingGraph,
           budgetUsedPercent: budgetSnapshot[candidate]?.usedPercent,
+          usageRollup,
           // 벤더 크레덴셜이 없는 구체 모델은 후보에서 뺀다(env-swap 벤더). 오늘
           // 사다리엔 그런 행이 없어 no-op 이지만, 편입되는 순간 자동선택이 키
           // 없는 칸을 고르는 사고를 자료구조가 막는다.

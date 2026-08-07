@@ -150,6 +150,41 @@ export const GRAPH_BIAS_MAX = 20;
  * required before the graph moves the score. */
 export const SHRINKAGE_K = 6;
 
+/**
+ * Stale KG attenuation (autoselect · dispatch).
+ *
+ * 로컬 `routing-graph.json` 이 오래 갱신되지 않으면(관측 예: 2026-07-27 정지)
+ * 과거 claude 편중 셀이 영원히 산다. soft 일수까지는 완전 가중, hard 일수부터
+ * floor 까지 선형 감쇠 — 콜드(파일 없음)와 구분된다(updatedAt 이 epoch 이면 1).
+ */
+export const STALE_GRAPH_SOFT_DAYS = 7;
+export const STALE_GRAPH_HARD_DAYS = 27;
+/** hard 이상 방치 시 남는 KG 가중 하한(완전 0 이면 학습 신호 소멸). */
+export const STALE_GRAPH_FLOOR = 0.15;
+
+/**
+ * graph.updatedAt 연령 → 가중 배수 [STALE_GRAPH_FLOOR, 1].
+ * 파싱 실패·미래 시각·미설정 → 1(감쇠 없음).
+ */
+export function staleGraphAttenuation(
+  updatedAt: string | undefined | null,
+  nowMs: number = Date.now(),
+): number {
+  if (!updatedAt) return 1;
+  const t = Date.parse(updatedAt);
+  if (!Number.isFinite(t)) return 1;
+  // Empty graph seeds use epoch — treat as "no real history", full weight (0).
+  if (t <= 0) return 1;
+  const ageDays = (nowMs - t) / MS_PER_DAY;
+  if (!(ageDays > 0)) return 1;
+  if (ageDays <= STALE_GRAPH_SOFT_DAYS) return 1;
+  if (ageDays >= STALE_GRAPH_HARD_DAYS) return STALE_GRAPH_FLOOR;
+  const frac =
+    (ageDays - STALE_GRAPH_SOFT_DAYS) /
+    (STALE_GRAPH_HARD_DAYS - STALE_GRAPH_SOFT_DAYS);
+  return 1 - frac * (1 - STALE_GRAPH_FLOOR);
+}
+
 /** Default decay half-lives (days) written into a fresh graph (spec §8.1). */
 export const DEFAULT_HALF_LIFE_DAYS: Readonly<Record<DecayBucket, number>> = {
   model: 21,

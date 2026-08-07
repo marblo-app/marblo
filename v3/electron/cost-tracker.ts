@@ -33,6 +33,7 @@ import {
   type TokenTotals,
 } from "./session-parsers";
 import { readAgyDbDelta, resolveAgyStore } from "./agy-usage";
+import { recordUsageDelta } from "./usage-rollup";
 
 export interface CostEntry {
   totalCost: number;
@@ -1076,6 +1077,19 @@ export class CostTracker {
     acc.cacheWrite += delta.cacheWrite;
     tracker.totalCostUsd += deltaCost;
 
+    // 로컬 주간 롤업 — cost_logs 로 나가는 같은 델타의 핫패스 거울.
+    // selectAutoModel 이 BQ 없이 실사용량 하향·주간 한도 압력을 쓴다.
+    if (hasTokens) {
+      recordUsageDelta({
+        model: tracker.model,
+        inputTokens: delta.input,
+        outputTokens: delta.output,
+        cacheReadTokens: delta.cacheRead,
+        cacheWriteTokens: delta.cacheWrite,
+        totalCost: deltaCost,
+      });
+    }
+
     this.onCostDetected?.(tracker.agentId, {
       totalCost: tracker.totalCostUsd,
       inputTokens: acc.input,
@@ -1242,6 +1256,13 @@ export class CostTracker {
     acc.input += dInput;
     acc.output += dOutput;
     tracker.totalCostUsd += deltaCost;
+
+    recordUsageDelta({
+      model: tracker.model,
+      inputTokens: dInput,
+      outputTokens: dOutput,
+      totalCost: deltaCost,
+    });
 
     this.onCostDetected?.(tracker.agentId, {
       totalCost: tracker.totalCostUsd,

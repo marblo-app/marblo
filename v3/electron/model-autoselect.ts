@@ -36,6 +36,13 @@
  *               exploitation 점수 자체에 상시로 들어가므로 85% top-score 경로도
  *               아직 덜 본 `model@effort` 셀을 조금 끌어올린다. 읽는 셀은 실제
  *               스폰할 그 키라 P2-2 해상도와 쓰기 경로가 맞는다.
+ *   · 실사용량  cost_logs 거울(`usage-rollup`) / getCostSummary.weeklyByModel.
+ *               같은 창에서 토큰 비중이 큰 모델은 하향(로드밸런싱). 콜드=0.
+ *   · 주간한도  `HARNESS_WEEKLY_TOKEN_SOFT_LIMIT` 근접 시 구독 계열 칸을 강하게
+ *               de-prioritize. bridge 는 같은 신호를 budget used% 와 max 합성해
+ *               1층도 fleet(grok/minimax) 로 넘긴다.
+ *   · stale KG  graph.updatedAt 이 7~27일 지나면 kg 항을 감쇠 — 7/27 정지 그래프의
+ *               claude 편중이 영구 고정되는 것을 막는다.
  *   · 잔여예산  계정 쿼터 잔량이 적을수록 **단가 가중치를 키운다**. budgetBias 는
  *               프로바이더 축(1층)이라 한 하네스 안의 칸들을 가르지 못한다. 잔량이
  *               라우팅을 실제로 바꾸는 자리는 여기다.
@@ -79,6 +86,7 @@ import {
   entryRung,
   ladderFor,
   usableRungs,
+  weeklyTokenSoftLimitForHarness,
   type LadderTier,
 } from "./model-ladder";
 import { isApprovalGatedEffort } from "./mcp-server/escalation-approval";
@@ -91,9 +99,17 @@ import { formatModelKey } from "./routing-model-key";
 import {
   graphBiasForModel,
   observationCountForModel,
+  staleGraphAttenuation,
   type GraphContext,
   type RoutingGraph,
 } from "./routing-graph";
+import {
+  tokensForHarness,
+  tokensForModel,
+  usageLoadScore,
+  weeklyLimitScore,
+  type UsageRollupSnapshot,
+} from "./usage-rollup";
 
 // ─────────────────────────────────────────────────────────────────────────
 // 가중치 — 왜 이 값인지가 주석에 남는다(튜닝은 이 표 한 곳에서)
@@ -130,6 +146,26 @@ const BENCH_WEIGHT: Readonly<Record<LadderTier, number>> = {
   simple: 1,
   standard: 4,
   complex: 8,
+};
+
+/**
+ * 실사용량 로드밸런싱 가중(주간 토큰 점유율 → 감점).
+ * simple 은 분산 여유, complex 는 품질 우선이라 약하게.
+ */
+const USAGE_LOAD_WEIGHT: Readonly<Record<LadderTier, number>> = {
+  simple: 10,
+  standard: 8,
+  complex: 4,
+};
+
+/**
+ * 주간 한도 근접 가중. 한도 100% 에서 −weight.
+ * standard 가 opus 편중의 주 전장이라 가장 세게.
+ */
+const WEEKLY_LIMIT_WEIGHT: Readonly<Record<LadderTier, number>> = {
+  simple: 12,
+  standard: 16,
+  complex: 10,
 };
 
 /**
@@ -479,10 +515,14 @@ export interface AutoScoreBreakdown {
   bench: number;
   /** 벤치 결측 시의 콜드 폴백(능력등급 차이). */
   capability: number;
-  /** 라우팅 그래프 관측(±20). 콜드면 0. */
+  /** 라우팅 그래프 관측(±20, stale 감쇠 후). 콜드면 0. */
   kg: number;
   /** UCB1 형 저표본 다양성 보너스(≥0). */
   diversity: number;
+  /** 실사용량 점유율 감점(≤0). 콜드/무롤업이면 0. */
+  usage: number;
+  /** 주간 토큰 한도 근접 감점(≤0). 한도 없는 fleet 은 0. */
+  weeklyLimit: number;
   /** 현 ctx 후보 관측 합(UCB1 totalObs). */
   totalObservations: number;
   /** 이 칸의 그래프 관측 수(exploration 이 "빈 셀" 을 찾는 근거). */
@@ -511,7 +551,7 @@ export interface AutoModelPlan {
   movedFromEntry: boolean;
   /** 그래프에 이 맥락의 관측이 하나도 없나(콜드 = 정적신호로만 판단했다). */
   coldStart: boolean;
-  /** 무엇이 결정했나 — 난이도/단가/능력/효과/다양성/탐색/동률. */
+  /** 무엇이 결정했나 — 난이도/단가/능력/효과/다양성/사용량/한도/탐색/동률. */
   decidedBy:
     | "fit"
     | "cost"
@@ -519,6 +559,8 @@ export interface AutoModelPlan {
     | "capability"
     | "kg"
     | "diversity"
+    | "usage"
+    | "weeklyLimit"
     | AutoSelectMode;
   scores: AutoScoreBreakdown[];
   /** dispatchReason 에 그대로 붙는 한 줄. */
@@ -532,6 +574,11 @@ export interface AutoSelectInput {
   graph?: RoutingGraph | null;
   /** 이 하네스 계정의 쿼터 사용률(0-100). 없으면 중립. */
   budgetUsedPercent?: number | null;
+  /**
+   * 실사용량 롤업(cost_logs 로컬 거울 / getCostSummary.weeklyByModel).
+   * 없으면 사용량·주간한도 항 = 0 (콜드 무회귀).
+   */
+  usageRollup?: UsageRollupSnapshot | null;
   /** 구체 모델 id 가 지금 이 기기에서 스폰 가능한가(벤더 크레덴셜 등). */
   modelAvailable?: (modelId: string) => boolean;
   /** ε. 미지정이면 env(`MARBLO_ROUTING_EXPLORE`) → DEFAULT_EPSILON. */
@@ -542,6 +589,8 @@ export interface AutoSelectInput {
   random?: () => number;
   /** 이 dispatch 가 이미 탐색으로 결정됐는가(하네스별 롤을 나누지 않기 위한 주입). */
   forceExplore?: boolean;
+  /** stale KG 감쇠 기준 시각(테스트 주입). 미지정이면 Date.now(). */
+  nowMs?: number;
 }
 
 /**
@@ -582,8 +631,10 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
     ctx,
     graph,
     budgetUsedPercent,
+    usageRollup,
     modelAvailable,
     random = Math.random,
+    nowMs = Date.now(),
   } = input;
 
   const { candidates, entryIndex, pinsModel } = autoCandidates(harness, tier);
@@ -606,9 +657,25 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
     COST_WEIGHT[tier] * costPressureForHeadroom(budgetUsedPercent);
   const benchWeight = BENCH_WEIGHT[tier];
   const capWeight = CAPABILITY_WEIGHT[tier];
+  const usageWeight = USAGE_LOAD_WEIGHT[tier];
+  const weeklyWeight = WEEKLY_LIMIT_WEIGHT[tier];
   const diversityCoefficient =
     input.diversityCoefficient ??
     resolveDiversityC(process.env.MARBLO_ROUTING_DIVERSITY);
+  const kgAttenuation = graph
+    ? staleGraphAttenuation(graph.updatedAt, nowMs)
+    : 1;
+
+  // 후보 풀 전체 주간 토큰(로드밸런싱 분모). 전역 총합이 아니라 **이 하네스
+  // 후보들의 합**이라 다른 하네스 사용량이 칸 순위를 왜곡하지 않는다.
+  const poolTokens = usable.reduce(
+    (sum, c) => sum + tokensForModel(c.model, usageRollup),
+    0,
+  );
+  const harnessWeeklyTokens = tokensForHarness(harness, usageRollup, {
+    subscriptionOnly: true,
+  });
+  const weeklyLimit = weeklyTokenSoftLimitForHarness(harness);
 
   const observed = new Map<string, number>();
   for (const candidate of usable) {
@@ -661,9 +728,10 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
       !comparableBench && typeof entryCapability === "number" && guidance
         ? capWeight * (CAPABILITY_ORDER[guidance.capability] - entryCapability)
         : 0;
-    const kg = graph
+    const kgRaw = graph
       ? graphBiasForModel([candidate.modelKey, harness], ctx, graph)
       : 0;
+    const kg = kgRaw * kgAttenuation;
     const observations = observed.get(candidate.modelKey) ?? 0;
     const diversity = diversityBonus(
       observations,
@@ -671,7 +739,38 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
       diversityCoefficient,
     );
 
-    const total = fit + cost + bench + capability + kg + diversity;
+    // 실사용량 하향 — 후보 풀 안에서 토큰 점유율이 큰 칸을 벌한다.
+    const modelTok = tokensForModel(candidate.model, usageRollup);
+    const usage = usageLoadScore(modelTok, poolTokens, usageWeight);
+
+    // 주간 한도 — 모델별 점유 비중이 높을수록 한도 압력을 더 받는다
+    // (opus 가 주를 먹었으면 opus 만 크게 깎고 sonnet 은 상대적으로 산다).
+    // 한도 없는 하네스(grok 등) → 0. 콜드 롤업 → 0.
+    let weeklyLimitPenalty = 0;
+    if (typeof weeklyLimit === "number" && weeklyLimit > 0 && harnessWeeklyTokens > 0) {
+      const harnessPenalty = weeklyLimitScore(
+        harnessWeeklyTokens,
+        weeklyLimit,
+        weeklyWeight,
+      );
+      // 모델 점유율로 분배: 많이 쓴 칸이 한도 벌점을 더 진다.
+      const share =
+        harnessWeeklyTokens > 0
+          ? Math.min(1, Math.max(0, modelTok / harnessWeeklyTokens))
+          : 0;
+      // 최소 20% 균등 + 80% 점유 가중 — 완전 0 점유 칸도 하네스 한도의 영향을 약하게 받는다.
+      weeklyLimitPenalty = harnessPenalty * (0.2 + 0.8 * share);
+    }
+
+    const total =
+      fit +
+      cost +
+      bench +
+      capability +
+      kg +
+      diversity +
+      usage +
+      weeklyLimitPenalty;
     return {
       candidate,
       fit: round1(fit),
@@ -680,6 +779,8 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
       capability: round1(capability),
       kg: round1(kg),
       diversity: round1(diversity),
+      usage: round1(usage),
+      weeklyLimit: round1(weeklyLimitPenalty),
       totalObservations,
       observations,
       total: round1(Number.isFinite(total) ? total : 0),
@@ -798,6 +899,8 @@ function decideFactor(
     ["capability", Math.abs(winner.capability)],
     ["kg", Math.abs(winner.kg)],
     ["diversity", Math.abs(winner.diversity)],
+    ["usage", Math.abs(winner.usage)],
+    ["weeklyLimit", Math.abs(winner.weeklyLimit)],
   ];
   parts.sort((a, b) => b[1] - a[1]);
   return parts[0][1] > 0 ? parts[0][0] : "top-score";
@@ -834,6 +937,8 @@ export function formatAutoReason(
     tierLabel ? `tier=${tierLabel}` : "",
     `kg ${signed(winner.kg)}${plan.coldStart ? "(cold)" : `(n=${winner.observations})`}`,
     `diversity ${signed(winner.diversity)} (n=${winner.observations}, tot=${winner.totalObservations})`,
+    winner.usage !== 0 ? `usage ${signed(winner.usage)}` : "",
+    winner.weeklyLimit !== 0 ? `weekly ${signed(winner.weeklyLimit)}` : "",
     `budget ${headroom}`,
   ]
     .filter(Boolean)

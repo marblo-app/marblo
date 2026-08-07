@@ -122,6 +122,38 @@ export interface HarnessLadder {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// 주간 토큰 soft limit — 자동선택 부하분산 정책 (하드 차단 아님)
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Claude(Max 계열)·Codex 구독의 **라우팅용** 주간 토큰 한도.
+ *
+ * 하드 캡이 아니다 — `usage-rollup` / `model-autoselect` 가 한도 근접 시
+ * 해당 하네스를 de-prioritize 하고, 여력 있는 fleet(grok·MiniMax env-swap)으로
+ * 자연 전환하기 위한 soft 상수다. 계정 rate-limit % 와 max 합성된다.
+ *
+ * 값은 관측 가능 규모(수천만~억 토큰/주) 감각으로 잡았고, 실측이 쌓이면
+ * 이 표만 바꾸면 된다(코드 분기 없음). grok/minimax 는 항목 없음 = 한도 압력 0.
+ */
+export const HARNESS_WEEKLY_TOKEN_SOFT_LIMIT: Readonly<
+  Partial<Record<HarnessId, number>>
+> = {
+  // Claude Max 급 주간 여유를 soft 상한으로 — 근접 시 opus 편중을 깨고 env-swap/grok 로.
+  claude: 80_000_000,
+  // Codex / ChatGPT 주간 창 — 근접 시 gpt 칸 하향 + 1층 budget 압력.
+  gpt: 60_000_000,
+};
+
+/** 하네스 soft 한도. 미등록·0 → undefined(압력 없음). */
+export function weeklyTokenSoftLimitForHarness(
+  harness: HarnessId | string,
+): number | undefined {
+  const n =
+    HARNESS_WEEKLY_TOKEN_SOFT_LIMIT[harness as HarnessId] ?? undefined;
+  return typeof n === "number" && n > 0 ? n : undefined;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // 비용 지표 — 순서의 근거
 // ─────────────────────────────────────────────────────────────────────────
 
