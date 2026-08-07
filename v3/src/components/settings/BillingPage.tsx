@@ -10,7 +10,7 @@ import type {
 import {
   subscribeToSubscription,
   openPaddleCheckout,
-  cancelPaddleSubscription,
+  cancelSubscription,
   createTossCheckout,
   confirmTossPayment,
   PLAN_PRICES_KRW,
@@ -233,35 +233,42 @@ export function BillingPage() {
 
   const handleManageSubscription = async () => {
     if (!user || !subscription) return;
-    setActionLoading(true);
-    try {
-      if (
-        subscription.paymentProvider === "paddle" &&
-        subscription.paddleSubscriptionId
-      ) {
-        // Paddle 구독 관리 — Paddle의 update URL로 이동
+    // Paddle: 고객 포털. toss/portone: 지원 알림 없이 실제 해지(단일 cancelSubscription).
+    if (
+      subscription.paymentProvider === "paddle" &&
+      subscription.paddleSubscriptionId
+    ) {
+      setActionLoading(true);
+      try {
         const updateUrl = `https://customer-portal.paddle.com/subscriptions/${subscription.paddleSubscriptionId}`;
         window.open(updateUrl, "_blank");
-      } else {
-        // 토스페이먼츠 — 앱 내 취소
-        alert(t("billing.alert.cancelViaSupport"));
+      } catch (err) {
+        console.error("구독 관리 실패:", err);
+      } finally {
+        setActionLoading(false);
       }
-    } catch (err) {
-      console.error("구독 관리 실패:", err);
-    } finally {
-      setActionLoading(false);
+      return;
     }
+    await handleCancelSubscription();
   };
 
   const handleCancelSubscription = async () => {
-    if (!user) return;
-    if (!confirm(t("billing.confirm.cancel"))) return;
+    if (!user || !subscription) return;
+    if (subscription.status === "canceled") return;
+
+    const confirmKey =
+      subscription.status === "past_due"
+        ? "billing.confirm.cancelPastDue"
+        : "billing.confirm.cancel";
+    if (!confirm(t(confirmKey))) return;
 
     setActionLoading(true);
     try {
-      await cancelPaddleSubscription(user.uid);
+      // provider 분기 없는 단일 callable — toss/portone/paddle 모두 서버에서 처리.
+      await cancelSubscription();
     } catch (err) {
       console.error("구독 취소 실패:", err);
+      alert(t("billing.alert.cancelFailed"));
     } finally {
       setActionLoading(false);
     }
@@ -324,7 +331,11 @@ export function BillingPage() {
           {subscription?.currentPeriodEnd && (
             <div className="text-right">
               <p className="text-sm text-gray-400">
-                {t("billing.nextBillingDate")}
+                {subscription.status === "canceled"
+                  ? t("billing.accessUntil")
+                  : subscription.status === "past_due"
+                    ? t("billing.periodEndPastDue")
+                    : t("billing.nextBillingDate")}
               </p>
               <p className="text-sm text-white">
                 {formatDate(subscription.currentPeriodEnd)}
@@ -506,8 +517,8 @@ export function BillingPage() {
         </div>
       )}
 
-      {/* 구독 관리 */}
-      {currentPlan !== "free" && (
+      {/* 구독 관리 — free 강등·이미 해지 시 숨김. past_due 도 해지 가능. */}
+      {currentPlan !== "free" && subscription?.status !== "canceled" && (
         <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
           <div className="flex items-center justify-between">
             <div>
@@ -515,17 +526,21 @@ export function BillingPage() {
                 {t("billing.manage.heading")}
               </p>
               <p className="text-xs text-gray-400">
-                {t("billing.manage.desc")}
+                {subscription?.status === "past_due"
+                  ? t("billing.manage.descPastDue")
+                  : t("billing.manage.desc")}
               </p>
             </div>
             <div className="flex gap-2">
-              <button
-                onClick={handleManageSubscription}
-                disabled={actionLoading}
-                className="rounded border border-gray-600 px-4 py-2 text-sm text-gray-300 transition-colors hover:bg-gray-700 disabled:opacity-50"
-              >
-                {t("billing.manage.button")}
-              </button>
+              {subscription?.paymentProvider === "paddle" && (
+                <button
+                  onClick={handleManageSubscription}
+                  disabled={actionLoading}
+                  className="rounded border border-gray-600 px-4 py-2 text-sm text-gray-300 transition-colors hover:bg-gray-700 disabled:opacity-50"
+                >
+                  {t("billing.manage.button")}
+                </button>
+              )}
               <button
                 onClick={handleCancelSubscription}
                 disabled={actionLoading}

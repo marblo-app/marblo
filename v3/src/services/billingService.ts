@@ -155,6 +155,26 @@ export async function cancelPaddleSubscription(userId: string): Promise<void> {
   await fn({ userId });
 }
 
+/** provider 무관 단일 해지 진입점 (toss/portone/paddle). 환불 없음·기간말 entitlement 유지. */
+export async function cancelSubscription(): Promise<{
+  success: boolean;
+  alreadyCanceled?: boolean;
+  provider?: string | null;
+  accessUntil?: string | null;
+}> {
+  const fn = httpsCallable<
+    Record<string, never>,
+    {
+      success: boolean;
+      alreadyCanceled?: boolean;
+      provider?: string | null;
+      accessUntil?: string | null;
+    }
+  >(functions, "cancelSubscription");
+  const result = await fn({});
+  return result.data;
+}
+
 // ─── TossPayments (국내 결제) ────────────────────────────────────
 export async function createTossCheckout(
   userId: string,

@@ -19,7 +19,7 @@ import {
 
 type PlanType = "free" | "pro" | "team" | "team_plus" | "enterprise";
 type SubStatus = "active" | "canceled" | "past_due" | "trialing";
-type PaymentProvider = "paddle" | "toss";
+type PaymentProvider = "paddle" | "toss" | "portone";
 
 interface SubDoc {
   planType: PlanType;
@@ -92,12 +92,8 @@ export default function SubscriptionPage() {
     setCanceling(true);
     try {
       const functions = getFunctions(app, "us-central1");
-      // paymentProvider 에 맞는 해지 콜러블 선택. 둘 다 인증된 본인 구독만 해지.
-      const fnName =
-        sub.paymentProvider === "paddle"
-          ? "cancelPaddleSubscription"
-          : "cancelTossSubscription";
-      const cancelFn = httpsCallable(functions, fnName);
+      // provider 분기 없는 단일 callable — toss/portone/paddle 서버 분기.
+      const cancelFn = httpsCallable(functions, "cancelSubscription");
       await cancelFn({});
       setSub((s) => (s ? { ...s, status: "canceled" } : s));
       setConfirmingCancel(false);
@@ -127,7 +123,11 @@ export default function SubscriptionPage() {
 
   const isPaid = !!sub && sub.planType !== "free";
   const isActive = sub?.status === "active" || sub?.status === "trialing";
-  const canCancel = isPaid && isActive;
+  // past_due 도 해지 가능 — 재시도 청구 중단(환불 없음, 기간말 entitlement 유지).
+  const canCancel =
+    isPaid &&
+    (isActive || sub?.status === "past_due") &&
+    sub?.status !== "canceled";
 
   const statusColor: Record<SubStatus, string> = {
     active: "text-emerald-300",
@@ -177,7 +177,9 @@ export default function SubscriptionPage() {
                   <CalendarClock className="w-4 h-4" />
                   {sub!.status === "canceled"
                     ? t("period_end_canceled")
-                    : t("next_renewal")}
+                    : sub!.status === "past_due"
+                      ? t("period_end_past_due")
+                      : t("next_renewal")}
                 </span>
                 <span className="text-sm text-zinc-200">
                   {dateFmt(sub!.currentPeriodEnd)}
@@ -237,7 +239,7 @@ export default function SubscriptionPage() {
           </p>
         </section>
 
-        {/* 해지 */}
+        {/* 해지 — past_due 포함, 환불 없음·기간말 접근 유지 정책 */}
         {canCancel && (
           <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 mb-6">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-200">
@@ -245,7 +247,9 @@ export default function SubscriptionPage() {
               {t("cancel.title")}
             </h2>
             <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
-              {t("cancel.desc")}
+              {sub?.status === "past_due"
+                ? t("cancel.desc_past_due")
+                : t("cancel.desc")}
             </p>
             {!confirmingCancel ? (
               <button
@@ -257,7 +261,11 @@ export default function SubscriptionPage() {
               </button>
             ) : (
               <div className="mt-4 rounded-xl border border-red-900/50 bg-red-950/30 p-4">
-                <p className="text-sm text-red-200">{t("cancel.confirm")}</p>
+                <p className="text-sm text-red-200">
+                  {sub?.status === "past_due"
+                    ? t("cancel.confirm_past_due")
+                    : t("cancel.confirm")}
+                </p>
                 <div className="flex items-center gap-3 mt-3">
                   <button
                     type="button"

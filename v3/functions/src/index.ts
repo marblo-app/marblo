@@ -2516,7 +2516,23 @@ export const chargeBillingKey = functions.https.onCall(
 //
 // 잔여 기간의 접근권은 currentPeriodEnd 를 함께 보는 entitlement.ts 규칙이
 // 부여한다(렌더러/functions 공통).
+//
+// ★호환: 신규 클라이언트는 cancelSubscription 을 쓴다. 이 함수는 레거시 웹/앱
+// 호출부를 위해 유지하며, pull 모델(toss/portone) 해지 본문은 공유 헬퍼로 통일.
 export const cancelTossSubscription = functions.https.onCall(
+  async (_data, context) => {
+    return cancelPullModelSubscription(context);
+  },
+);
+
+/**
+ * 단일 해지 진입점 — provider 분기.
+ * - toss / portone / 미지정(레거시): pull 모델 → status=canceled (planType 유지, 환불 없음)
+ * - paddle: Paddle API cancel(next_billing_period) + 로컬 status=canceled (planType 유지)
+ * past_due 도 허용(재시도 청구 중단). 이미 canceled 면 멱등 성공.
+ * ★중도/부분 환불 자동화는 범위 밖.
+ */
+export const cancelSubscription = functions.https.onCall(
   async (_data, context) => {
     const userId = context.auth?.uid;
     if (!userId)
@@ -2530,23 +2546,123 @@ export const cancelTossSubscription = functions.https.onCall(
         "No subscription to cancel",
       );
 
+    const data = snap.data() ?? {};
+    const status = typeof data.status === "string" ? data.status : "";
+    const provider =
+      typeof data.paymentProvider === "string" ? data.paymentProvider : "";
+    const accessUntilMs = tsToMillis(data.currentPeriodEnd);
+    const accessUntil =
+      accessUntilMs != null ? new Date(accessUntilMs).toISOString() : null;
+
+    // 멱등: 이미 해지된 구독은 재호출해도 성공.
+    if (status === "canceled") {
+      return {
+        success: true,
+        alreadyCanceled: true,
+        provider: provider || null,
+        accessUntil,
+      };
+    }
+
+    // active / past_due / trialing 만 자발 해지 허용.
+    // past_due: 재시도 청구를 멈추기 위해 취소 가능(환불 없음, 기간말 접근은 entitlement).
+    if (
+      status !== "active" &&
+      status !== "past_due" &&
+      status !== "trialing"
+    ) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        `Subscription status '${status || "unknown"}' cannot be canceled`,
+      );
+    }
+
+    if (provider === "paddle") {
+      const paddleSubId =
+        typeof data.paddleSubscriptionId === "string"
+          ? data.paddleSubscriptionId
+          : "";
+      if (paddleSubId) {
+        const response = await fetch(
+          `${PADDLE_API_BASE}/subscriptions/${paddleSubId}/cancel`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${PADDLE_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ effective_from: "next_billing_period" }),
+          },
+        );
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          console.error("Paddle cancel failed:", error);
+          throw new functions.https.HttpsError(
+            "internal",
+            "구독 취소에 실패했습니다.",
+          );
+        }
+      }
+      // 로컬도 즉시 canceled — UI/청구 대상 선정 정합. planType 은 유지해
+      // 기간말까지 entitlement 유지(환불 없음). Paddle webhook 이 기간 말에
+      // planType:free 로 내릴 수 있음(하드 킬스위치, 잔여 기간 종료 후).
+      await subRef.update({
+        status: "canceled",
+        canceledAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return {
+        success: true,
+        alreadyCanceled: false,
+        provider: "paddle",
+        accessUntil,
+      };
+    }
+
+    // toss / portone / 미지정(레거시 토스 경로 포함)
     await subRef.update({
       status: "canceled",
       canceledAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-
-    // 사용자에게 "언제까지 쓸 수 있는지"를 돌려준다. 기간이 기록돼 있지 않은
-    // 레거시 문서는 잔여 기간을 줄 근거가 없으므로 즉시 종료로 안내한다(없는
-    // 기간을 지어내지 않는다).
-    const accessUntilMs = tsToMillis(snap.get("currentPeriodEnd"));
     return {
       success: true,
-      accessUntil:
-        accessUntilMs != null ? new Date(accessUntilMs).toISOString() : null,
+      alreadyCanceled: false,
+      provider: provider || "toss",
+      accessUntil,
     };
   },
 );
+
+/** pull 모델(toss/portone) 해지 본문 — cancelTossSubscription 레거시 호환용. */
+async function cancelPullModelSubscription(
+  context: functions.https.CallableContext,
+): Promise<{ success: true; accessUntil: string | null }> {
+  const userId = context.auth?.uid;
+  if (!userId)
+    throw new functions.https.HttpsError("unauthenticated", "Login required");
+
+  const subRef = db.collection("subscriptions").doc(userId);
+  const snap = await subRef.get();
+  if (!snap.exists)
+    throw new functions.https.HttpsError(
+      "not-found",
+      "No subscription to cancel",
+    );
+
+  await subRef.update({
+    status: "canceled",
+    canceledAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  const accessUntilMs = tsToMillis(snap.get("currentPeriodEnd"));
+  return {
+    success: true,
+    accessUntil:
+      accessUntilMs != null ? new Date(accessUntilMs).toISOString() : null,
+  };
+}
 
 // ============================================
 // 강의 (Lecture) Functions

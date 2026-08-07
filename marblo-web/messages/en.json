@@ -1045,6 +1045,7 @@
     "upgrade": "Upgrade",
     "next_renewal": "Next renewal",
     "period_end_canceled": "Access ends on",
+    "period_end_past_due": "Current period ends",
     "payment_method": "Payment method",
     "change_plan": {
       "title": "Change plan",
@@ -1057,9 +1058,11 @@
     },
     "cancel": {
       "title": "Cancel subscription",
-      "desc": "Canceling stops auto-renewal at the end of the current billing period and reverts you to the Free plan.",
+      "desc": "Canceling stops auto-renewal immediately. If paid time remains, you keep access until the period ends (no refund).",
+      "desc_past_due": "Payment failed and retries are scheduled. Canceling stops further charges. If paid time remains, you keep access until the period ends (no refund).",
       "button": "Cancel subscription",
-      "confirm": "Are you sure you want to cancel? This cannot be undone.",
+      "confirm": "Are you sure you want to cancel? Auto-renewal stops, and you move to Free after the remaining period (no refund).",
+      "confirm_past_due": "Payment has failed. Canceling stops retry charges. If paid time remains, you keep access until the period ends (no refund). Continue?",
       "confirm_yes": "Yes, cancel",
       "confirm_no": "Keep subscription",
       "error": "Something went wrong while canceling. Please try again shortly."

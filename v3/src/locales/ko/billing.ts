@@ -15,6 +15,8 @@ export const billing = {
   "billing.status.pastDue": "결제 지연",
   "billing.status.canceled": "취소됨",
   "billing.nextBillingDate": "다음 결제일",
+  "billing.accessUntil": "이용 종료일",
+  "billing.periodEndPastDue": "현재 청구 주기 종료일",
 
   // ── Plan cards ──────────────────────────────────────────
   "billing.currentPlanBadge": "현재 플랜",
@@ -48,11 +50,17 @@ export const billing = {
   // ── Subscription management ─────────────────────────────
   "billing.manage.heading": "구독 관리",
   "billing.manage.desc": "결제 수단 변경, 구독 취소, 인보이스 확인",
+  "billing.manage.descPastDue":
+    "결제 재시도 중입니다. 해지하면 추가 청구가 중단됩니다. 이미 결제한 기간이 남아 있으면 종료일까지 이용할 수 있습니다(환불 없음).",
   "billing.manage.button": "관리",
   "billing.cancelSubscription": "구독 취소",
   "billing.confirm.cancel":
     "정말 구독을 취소하시겠습니까? 현재 기간이 끝날 때까지 서비스를 이용할 수 있습니다.",
+  "billing.confirm.cancelPastDue":
+    "결제 실패 상태입니다. 해지하면 재시도 청구가 중단됩니다. 이미 결제한 기간이 남아 있으면 종료일까지 이용할 수 있으며 환불은 되지 않습니다. 계속할까요?",
   "billing.alert.cancelViaSupport": "구독 취소는 고객센터로 문의해주세요.",
+  "billing.alert.cancelFailed":
+    "구독 취소에 실패했습니다. 잠시 후 다시 시도해주세요.",
 
   // ── Data-as-label: checkout payment methods (BillingPage) ──
   "billing.data.method.paddle": "해외 결제 (카드/PayPal)",

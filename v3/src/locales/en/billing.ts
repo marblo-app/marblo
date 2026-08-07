@@ -12,6 +12,8 @@ export const billing: Record<keyof typeof koBilling, string> = {
   "billing.status.pastDue": "Payment overdue",
   "billing.status.canceled": "Canceled",
   "billing.nextBillingDate": "Next billing date",
+  "billing.accessUntil": "Access ends on",
+  "billing.periodEndPastDue": "Current period ends",
 
   // ── Plan cards ──────────────────────────────────────────
   "billing.currentPlanBadge": "Current plan",
@@ -45,12 +47,18 @@ export const billing: Record<keyof typeof koBilling, string> = {
   "billing.manage.heading": "Manage subscription",
   "billing.manage.desc":
     "Change payment method, cancel subscription, view invoices",
+  "billing.manage.descPastDue":
+    "Payment retry is in progress. Canceling stops further charges. If paid time remains, you can use the service until the period ends (no refund).",
   "billing.manage.button": "Manage",
   "billing.cancelSubscription": "Cancel subscription",
   "billing.confirm.cancel":
     "Are you sure you want to cancel your subscription? You can keep using the service until the end of the current period.",
+  "billing.confirm.cancelPastDue":
+    "Payment has failed. Canceling stops retry charges. If paid time remains, you keep access until the period ends (no refund). Continue?",
   "billing.alert.cancelViaSupport":
     "To cancel your subscription, please contact support.",
+  "billing.alert.cancelFailed":
+    "Could not cancel the subscription. Please try again shortly.",
 
   // ── Data-as-label: checkout payment methods (BillingPage) ──
   "billing.data.method.paddle": "International (Card/PayPal)",
