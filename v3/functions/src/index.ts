@@ -152,13 +152,23 @@ interface AdminAnalyticsQuerySpec {
   params: Record<string, unknown>;
 }
 
+interface AdminAnalyticsQueryResult {
+  name: string;
+  rows: BigQueryRows;
+  error: string | null;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function runAdminAnalyticsQueries(
+function safeAnalyticsErrorMessage(error: unknown): string {
+  return errorMessage(error).replace(/\s+/g, " ").slice(0, 300);
+}
+
+async function runAdminAnalyticsQueriesWithStatus(
   specs: readonly AdminAnalyticsQuerySpec[],
-): Promise<BigQueryRows[]> {
+): Promise<AdminAnalyticsQueryResult[]> {
   const settled = await Promise.allSettled(
     specs.map((spec) =>
       bigquery.query({
@@ -173,15 +183,31 @@ async function runAdminAnalyticsQueries(
     const spec = specs[index];
     if (result.status === "fulfilled") {
       const [rows] = result.value;
-      return rows as BigQueryRows;
+      return {
+        name: spec?.name ?? `query_${index}`,
+        rows: rows as BigQueryRows,
+        error: null,
+      };
     }
 
+    const error = safeAnalyticsErrorMessage(result.reason);
     functions.logger.error("Admin analytics BigQuery query failed", {
       queryName: spec?.name ?? `query_${index}`,
-      error: errorMessage(result.reason),
+      error,
     });
-    return [];
+    return {
+      name: spec?.name ?? `query_${index}`,
+      rows: [],
+      error,
+    };
   });
+}
+
+async function runAdminAnalyticsQueries(
+  specs: readonly AdminAnalyticsQuerySpec[],
+): Promise<BigQueryRows[]> {
+  const results = await runAdminAnalyticsQueriesWithStatus(specs);
+  return results.map((result) => result.rows);
 }
 
 type MergeChangeType =
@@ -8275,7 +8301,7 @@ export const getAdminOnboardingFunnel = functions
       ORDER BY n DESC
     `;
 
-    const [funnelRows, reasonRows] = await runAdminAnalyticsQueries([
+    const queryResults = await runAdminAnalyticsQueriesWithStatus([
       {
         name: "onboarding.funnel",
         query: funnelQuery,
@@ -8287,10 +8313,26 @@ export const getAdminOnboardingFunnel = functions
         params: { days: rangeDays, ...failureParams, ...ex.params },
       },
     ]);
+    const funnelResult = queryResults[0] ?? {
+      name: "onboarding.funnel",
+      rows: [],
+      error: "missing query result",
+    };
+    const reasonResult = queryResults[1] ?? {
+      name: "onboarding.failureReasons",
+      rows: [],
+      error: "missing query result",
+    };
+    const queryErrors = queryResults
+      .filter((result) => result.error != null)
+      .map((result) => ({
+        name: result.name,
+        error: result.error ?? "unknown query failure",
+      }));
 
     const funnel = buildOnboardingFunnel(
-      funnelRows[0] as Record<string, unknown> | undefined,
-      reasonRows as ReasonRow[],
+      funnelResult.rows[0] as Record<string, unknown> | undefined,
+      reasonResult.rows as ReasonRow[],
     );
 
     return {
@@ -8300,6 +8342,10 @@ export const getAdminOnboardingFunnel = functions
         applied: !includeAdmin,
         uidFiltered: getAdminExclusionUid() != null,
         clientIdCount: adminClientIds.length,
+      },
+      queryStatus: {
+        ok: queryErrors.length === 0,
+        errors: queryErrors,
       },
       ...funnel,
     };
