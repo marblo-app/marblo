@@ -1316,6 +1316,7 @@ export const LOGIN_SCREEN_PATTERNS: RegExp[] = [
   /Grok Build.*(login|auth)/i, // grok first-run auth
   /Log ?in (with|to) (your )?(Grok|xAI|X account)/i, // grok login
   /Sign in with (Grok|xAI|X)/i, // grok browser auth
+  /You are not authenticated\.?/i, // grok auth required (mid-session expiry)
   /Browser OIDC/i, // grok login method docs/flow wording
   // Antigravity (agy) / gemini OAuth flow — the CLI blocks on a browser
   // sign-in spinner. Distinctive to the auth handshake, so it won't trip on

@@ -3052,7 +3052,20 @@ export class AgentConfigGenerator {
     if (process.env.XAI_API_KEY?.trim()) return;
 
     const sourceAuth = path.join(userGrokDir, "auth.json");
-    if (!fs.existsSync(sourceAuth)) return;
+    // Verify source is a valid, non-empty JSON before propagating. A present-but-
+    // corrupt auth.json (empty file, truncated JSON, wrong permissions) would
+    // otherwise create a broken symlink that silently fails grok auth.
+    try {
+      const stat = fs.statSync(sourceAuth);
+      if (!stat.isFile() || stat.size === 0) return;
+      const content = fs.readFileSync(sourceAuth, "utf-8");
+      if (!content.trim()) return;
+      JSON.parse(content); // throws if invalid
+    } catch {
+      // Source is missing, empty, or unparseable — skip propagation so grok
+      // falls back to its own auth flow rather than inheriting a broken token.
+      return;
+    }
 
     const targetAuth = path.join(grokHome, "auth.json");
     try {

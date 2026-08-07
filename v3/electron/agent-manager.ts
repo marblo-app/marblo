@@ -709,6 +709,7 @@ export class AgentManager {
       const watchLoginScreen =
         params.model === "claude" ||
         params.model === "gpt" ||
+        params.model === "grok" ||
         params.model === "antigravity";
       const sendPrompt = () => {
         if (sent || authBlocked) return;
