@@ -55,10 +55,22 @@ export const billing: Record<keyof typeof koBilling, string> = {
     "Are you sure you want to cancel your subscription? You can keep using the service until the end of the current period.",
   "billing.confirm.cancelPastDue":
     "Payment has failed. Canceling stops retry charges. If paid time remains, you keep access until the period ends (no refund). Continue?",
-  "billing.alert.cancelViaSupport":
-    "To cancel your subscription, please contact support.",
   "billing.alert.cancelFailed":
     "Could not cancel the subscription. Please try again shortly.",
+
+  // ── Cancel confirmation modal (replaces native confirm/alert) ──
+  // Mirrors the web (my/subscription) inline confirm UX — both surfaces go
+  // through the single cancelSubscription callable.
+  "billing.cancel.modalTitle": "Cancel subscription",
+  "billing.cancel.keep": "Keep subscription",
+  "billing.cancel.confirm": "Cancel subscription",
+  "billing.cancel.canceling": "Canceling...",
+  "billing.cancel.doneTitle": "Your subscription has been canceled.",
+  "billing.cancel.doneAlreadyTitle": "This subscription was already canceled.",
+  "billing.cancel.doneAccessUntil":
+    "You keep your current plan until {date}. After that you move to Free and will not be charged again.",
+  "billing.cancel.doneNoPeriod": "You will not be charged again.",
+  "billing.cancel.close": "Close",
 
   // ── Data-as-label: checkout payment methods (BillingPage) ──
   "billing.data.method.paddle": "International (Card/PayPal)",
@@ -73,6 +85,8 @@ export const billing: Record<keyof typeof koBilling, string> = {
 
   // ── Data-as-label: payment provider display name ─────────
   "billing.data.provider.toss": "TossPayments",
+  "billing.data.provider.portone": "PortOne",
+  "billing.data.provider.paddle": "Paddle",
 
   // ── Data-as-label: payment method codes ──────────────────
   "billing.data.paymentMethod.CARD": "Card",

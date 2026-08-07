@@ -129,6 +129,15 @@ const PAYMENT_METHODS: {
   },
 ];
 
+// 결제사 표시 라벨. 예전엔 `toss ? 토스 : "Paddle"` 이라 PortOne 구독이
+// "Paddle" 로 오표시됐다. 런타임 구독 문서에는 타입에 없는 값(founder_grant 등)도
+// 들어올 수 있으므로 조회 실패 시 provider 코드를 그대로 보여준다.
+const PROVIDER_LABEL_KEYS: Record<PaymentProvider, MessageKey> = {
+  toss: "billing.data.provider.toss",
+  portone: "billing.data.provider.portone",
+  paddle: "billing.data.provider.paddle",
+};
+
 export function BillingPage() {
   const { t, locale } = useTranslation();
   const { user } = useAuth();
@@ -138,6 +147,16 @@ export function BillingPage() {
   const [selectedPlan, setSelectedPlan] = useState<PlanType | null>(null);
   const [selectedMethod, setSelectedMethod] =
     useState<PaymentMethod>("card_kr");
+  // 취소 확인 모달 상태. 네이티브 confirm/alert 은 Electron 렌더러를 통째로
+  // 블로킹하고 웹(my/subscription)의 인라인 확인 UX 와도 어긋나서 쓰지 않는다.
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [canceling, setCanceling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  // 취소 성공 후 기간말 접근(entitlement) 안내 — callable 이 돌려준 accessUntil.
+  const [cancelResult, setCancelResult] = useState<{
+    alreadyCanceled: boolean;
+    accessUntil: Date | null;
+  } | null>(null);
 
   const currentPlan = subscription?.planType ?? "free";
 
@@ -249,29 +268,55 @@ export function BillingPage() {
       }
       return;
     }
-    await handleCancelSubscription();
+    openCancelModal();
+  };
+
+  const openCancelModal = () => {
+    if (!user || !subscription) return;
+    if (subscription.status === "canceled") return;
+    setCancelError(null);
+    setCancelResult(null);
+    setConfirmingCancel(true);
+  };
+
+  const closeCancelModal = () => {
+    if (canceling) return;
+    setConfirmingCancel(false);
+    setCancelError(null);
+    setCancelResult(null);
   };
 
   const handleCancelSubscription = async () => {
     if (!user || !subscription) return;
     if (subscription.status === "canceled") return;
 
-    const confirmKey =
-      subscription.status === "past_due"
-        ? "billing.confirm.cancelPastDue"
-        : "billing.confirm.cancel";
-    if (!confirm(t(confirmKey))) return;
-
-    setActionLoading(true);
+    setCanceling(true);
+    setCancelError(null);
     try {
       // provider 분기 없는 단일 callable — toss/portone/paddle 모두 서버에서 처리.
-      await cancelSubscription();
+      // 웹 my/subscription 과 동일 경로.
+      const result = await cancelSubscription();
+      // 서버가 준 accessUntil 을 우선 쓰고(취소 시점의 정본), 없으면 구독 문서의
+      // currentPeriodEnd 로 폴백한다.
+      const accessUntil = result.accessUntil
+        ? new Date(result.accessUntil)
+        : subscription.currentPeriodEnd ?? null;
+      setCancelResult({
+        alreadyCanceled: result.alreadyCanceled === true,
+        accessUntil:
+          accessUntil && !isNaN(accessUntil.getTime()) ? accessUntil : null,
+      });
     } catch (err) {
       console.error("구독 취소 실패:", err);
-      alert(t("billing.alert.cancelFailed"));
+      setCancelError(t("billing.alert.cancelFailed"));
     } finally {
-      setActionLoading(false);
+      setCanceling(false);
     }
+  };
+
+  const providerLabel = (provider: PaymentProvider) => {
+    const key = PROVIDER_LABEL_KEYS[provider];
+    return key ? t(key) : provider;
   };
 
   const formatDate = (date: Date | undefined) => {
@@ -309,11 +354,7 @@ export function BillingPage() {
               {currentPlan}
               {subscription?.paymentProvider && currentPlan !== "free" && (
                 <span className="ml-2 text-xs text-gray-500">
-                  (
-                  {subscription.paymentProvider === "toss"
-                    ? t("billing.data.provider.toss")
-                    : "Paddle"}
-                  )
+                  ({providerLabel(subscription.paymentProvider)})
                 </span>
               )}
               {subscription?.status === "past_due" && (
@@ -334,8 +375,8 @@ export function BillingPage() {
                 {subscription.status === "canceled"
                   ? t("billing.accessUntil")
                   : subscription.status === "past_due"
-                    ? t("billing.periodEndPastDue")
-                    : t("billing.nextBillingDate")}
+                  ? t("billing.periodEndPastDue")
+                  : t("billing.nextBillingDate")}
               </p>
               <p className="text-sm text-white">
                 {formatDate(subscription.currentPeriodEnd)}
@@ -542,13 +583,80 @@ export function BillingPage() {
                 </button>
               )}
               <button
-                onClick={handleCancelSubscription}
-                disabled={actionLoading}
+                onClick={openCancelModal}
+                disabled={actionLoading || canceling}
                 className="rounded border border-red-800 px-4 py-2 text-sm text-red-400 transition-colors hover:bg-red-900/30 disabled:opacity-50"
               >
                 {t("billing.cancelSubscription")}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 구독 취소 확인 모달 — 확인 → 취소 → 기간말 접근 안내까지 한 자리에서.
+          past_due 는 "재시도 청구 중단·환불 없음" 문구로 갈린다. */}
+      {confirmingCancel && subscription && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-md rounded-xl border border-gray-700 bg-gray-800 p-6">
+            <h2 className="mb-3 text-lg font-semibold text-white">
+              {cancelResult
+                ? cancelResult.alreadyCanceled
+                  ? t("billing.cancel.doneAlreadyTitle")
+                  : t("billing.cancel.doneTitle")
+                : t("billing.cancel.modalTitle")}
+            </h2>
+
+            {cancelResult ? (
+              <>
+                <p className="text-sm text-gray-300">
+                  {cancelResult.accessUntil
+                    ? t("billing.cancel.doneAccessUntil", {
+                        date: formatDate(cancelResult.accessUntil),
+                      })
+                    : t("billing.cancel.doneNoPeriod")}
+                </p>
+                <button
+                  onClick={closeCancelModal}
+                  className="mt-5 w-full rounded-lg bg-gray-700 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-600"
+                >
+                  {t("billing.cancel.close")}
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-300">
+                  {subscription.status === "past_due"
+                    ? t("billing.confirm.cancelPastDue")
+                    : t("billing.confirm.cancel")}
+                </p>
+
+                {cancelError && (
+                  <p className="mt-3 rounded border border-red-800 bg-red-900/20 px-3 py-2 text-xs text-red-300">
+                    {cancelError}
+                  </p>
+                )}
+
+                <div className="mt-5 flex gap-2">
+                  <button
+                    onClick={closeCancelModal}
+                    disabled={canceling}
+                    className="flex-1 rounded-lg border border-gray-600 py-2.5 text-sm font-medium text-gray-200 transition-colors hover:bg-gray-700 disabled:opacity-50"
+                  >
+                    {t("billing.cancel.keep")}
+                  </button>
+                  <button
+                    onClick={handleCancelSubscription}
+                    disabled={canceling}
+                    className="flex-1 rounded-lg bg-red-600 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {canceling
+                      ? t("billing.cancel.canceling")
+                      : t("billing.cancel.confirm")}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

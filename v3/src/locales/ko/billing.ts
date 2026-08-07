@@ -58,9 +58,22 @@ export const billing = {
     "정말 구독을 취소하시겠습니까? 현재 기간이 끝날 때까지 서비스를 이용할 수 있습니다.",
   "billing.confirm.cancelPastDue":
     "결제 실패 상태입니다. 해지하면 재시도 청구가 중단됩니다. 이미 결제한 기간이 남아 있으면 종료일까지 이용할 수 있으며 환불은 되지 않습니다. 계속할까요?",
-  "billing.alert.cancelViaSupport": "구독 취소는 고객센터로 문의해주세요.",
   "billing.alert.cancelFailed":
     "구독 취소에 실패했습니다. 잠시 후 다시 시도해주세요.",
+
+  // ── Cancel confirmation modal (native confirm/alert 대체) ──
+  // 웹(my/subscription)의 인라인 확인 UX 와 문구·단계가 같아야 한다 —
+  // 취소 경로는 웹/앱 모두 단일 cancelSubscription callable 이다.
+  "billing.cancel.modalTitle": "구독 취소",
+  "billing.cancel.keep": "구독 유지",
+  "billing.cancel.confirm": "구독 취소하기",
+  "billing.cancel.canceling": "취소 중...",
+  "billing.cancel.doneTitle": "구독이 취소되었습니다.",
+  "billing.cancel.doneAlreadyTitle": "이미 취소된 구독입니다.",
+  "billing.cancel.doneAccessUntil":
+    "{date}까지 현재 플랜을 그대로 이용할 수 있습니다. 이후 Free 로 전환되며 추가 청구는 없습니다.",
+  "billing.cancel.doneNoPeriod": "추가 청구는 발생하지 않습니다.",
+  "billing.cancel.close": "닫기",
 
   // ── Data-as-label: checkout payment methods (BillingPage) ──
   "billing.data.method.paddle": "해외 결제 (카드/PayPal)",
@@ -75,6 +88,8 @@ export const billing = {
 
   // ── Data-as-label: payment provider display name ─────────
   "billing.data.provider.toss": "토스페이먼츠",
+  "billing.data.provider.portone": "포트원",
+  "billing.data.provider.paddle": "Paddle",
 
   // ── Data-as-label: payment method codes ──────────────────
   // Enum internal values are English code identifiers; these are the
