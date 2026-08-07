@@ -1,6 +1,6 @@
 // 정기결제 순수 로직 단위테스트 — 컴파일된 모듈을 import 해 구현과 drift 없게 한다.
-// (webhookVerify.test.mjs 와 동일 방침) 빌드 후 실행:
-//   cd v3/functions && npm run build && node tests/billing.test.mjs
+// (webhookVerify.test.mjs 와 동일 방침) 실행:
+//   cd v3/functions && npm run test:billing
 //
 // 커버: 멱등키 생성 / 쿠폰 할인 / 갱신 대상 선정 / 성공·실패 상태전이.
 // 돈 직결이라 "중복청구 방지(멱등)"·"실패→유예→해지" 를 최우선으로 검증.
@@ -121,6 +121,7 @@ assert(
   "빌링키 없음 → 비대상",
 );
 // PortOne 갱신 크론 대상: paymentProvider + portoneBillingKey 만으로 due 판정.
+// (#827 scheduledChargePortOneSubscriptions / selectDueForCharge portone 분기)
 const basePortOne = {
   paymentProvider: "portone",
   status: "active",
@@ -134,9 +135,57 @@ assert(
   "포트원 빌링키 없음 → 비대상",
 );
 assert(
+  !selectDueForCharge({ ...basePortOne, portoneBillingKey: "" }, T0),
+  "포트원 빌링키 빈문자열 → 비대상",
+);
+assert(
+  !selectDueForCharge({ ...basePortOne, portoneBillingKey: undefined }, T0),
+  "포트원 빌링키 undefined → 비대상",
+);
+assert(
   !selectDueForCharge({ ...basePortOne, currentPeriodEndMs: T0 + DAY_MS }, T0),
   "포트원 아직 만료 전 → 비대상",
 );
+assert(
+  !selectDueForCharge({ ...basePortOne, founderGrant: true }, T0),
+  "포트원 파운더 grant → 절대 비대상",
+);
+assert(
+  !selectDueForCharge({ ...basePortOne, status: "canceled" }, T0),
+  "포트원 canceled → 비대상",
+);
+assert(
+  selectDueForCharge({ ...basePortOne, status: "past_due" }, T0),
+  "포트원 past_due + 재시도시각 없음 → 대상",
+);
+assert(
+  !selectDueForCharge(
+    { ...basePortOne, status: "past_due", nextRetryAtMs: T0 + DAY_MS },
+    T0,
+  ),
+  "포트원 past_due + 재시도 백오프 중 → 비대상",
+);
+assert(
+  selectDueForCharge(
+    { ...basePortOne, status: "past_due", nextRetryAtMs: T0 - 1 },
+    T0,
+  ),
+  "포트원 past_due + 재시도 시각 지남 → 대상",
+);
+// toss 키만 있고 portone 키가 없어도 portone provider 는 청구 안 함.
+assert(
+  !selectDueForCharge(
+    {
+      ...basePortOne,
+      portoneBillingKey: null,
+      tossBillingKey: "bk_toss",
+      tossCustomerKey: "ck_toss",
+    },
+    T0,
+  ),
+  "포트원 provider 인데 toss 키만 있음 → 비대상",
+);
+// 기존 toss 케이스 회귀(안 깨졌는지)
 assert(
   !selectDueForCharge({ ...baseSub, status: "canceled" }, T0),
   "canceled → 비대상",
@@ -158,6 +207,21 @@ assert(
     T0,
   ),
   "past_due + 재시도 시각 지남 → 대상",
+);
+// toss 회귀: portone 필드가 있어도 paymentProvider=toss 면 toss 키로 판정.
+assert(
+  selectDueForCharge(
+    { ...baseSub, portoneBillingKey: "bk_portone_ignored" },
+    T0,
+  ),
+  "toss provider + toss 키 유효 → portone 필드 무시하고 대상",
+);
+assert(
+  !selectDueForCharge(
+    { ...baseSub, tossBillingKey: null, portoneBillingKey: "bk_portone_1" },
+    T0,
+  ),
+  "toss provider 인데 toss 키 없고 portone 키만 → 비대상",
 );
 
 // ── 결제 증거 판정 ────────────────────────────────────────────────────
