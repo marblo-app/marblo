@@ -24,6 +24,9 @@ export interface Subscription {
   // PortOne V2
   portoneBillingKey?: string;
   portonePaymentId?: string;
+  /** KG이니시스 갱신 청구 시 매번 필요 — completePortOneBillingKey 에서 저장. */
+  portoneCustomerName?: string;
+  portoneCustomerPhone?: string;
   currentPeriodStart: Date;
   currentPeriodEnd: Date;
   createdAt: Date;

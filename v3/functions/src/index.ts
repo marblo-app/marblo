@@ -1452,6 +1452,134 @@ async function chargeSubscriptionIdempotent(params: {
   }
 }
 
+// ─── PortOne 정기결제 청구 헬퍼(멱등) ─────────────────────────────────
+// Toss chargeSubscriptionIdempotent 미러. billingCharges/portone_{paymentId}
+// claim + payPortOneBillingKey + validatePortOnePaidPayment. paymentId 는
+// portonePaymentId(uid,"subscription", cycleAnchorMs) 로 결정적 — 같은 사이클
+// 중복 청구를 막는다. 갱신 크론(scheduledChargePortOneSubscriptions) 전용.
+async function chargePortOneSubscriptionIdempotent(params: {
+  userId: string;
+  billingKey: string;
+  amount: number;
+  planType: string;
+  cycleAnchorMs: number;
+  reason: "first" | "renewal" | "manual";
+  customerEmail: string | null;
+  customerName: string | null;
+  customerPhone: string | null;
+}): Promise<ChargeResult> {
+  const {
+    userId,
+    billingKey,
+    amount,
+    planType,
+    cycleAnchorMs,
+    customerEmail,
+    customerName,
+    customerPhone,
+  } = params;
+  const paymentId = portonePaymentId(
+    userId,
+    "subscription",
+    String(cycleAnchorMs),
+  );
+  const chargeRef = db
+    .collection("billingCharges")
+    .doc(portoneChargeDocId(paymentId));
+
+  const proceed = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(chargeRef);
+    if (snap.exists) {
+      const data = snap.data() || {};
+      const st = data.status as string | undefined;
+      if (st === "succeeded" || st === "comped") return false;
+      if (st === "pending") {
+        const updatedMs = tsToMillis(data.updatedAt);
+        if (updatedMs != null && Date.now() - updatedMs < STALE_PENDING_MS) {
+          return false;
+        }
+      }
+    }
+    tx.set(
+      chargeRef,
+      {
+        userId,
+        provider: "portone",
+        paymentId,
+        amount,
+        planType,
+        reason: params.reason,
+        status: "pending",
+        cycleAnchorMs,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    return true;
+  });
+
+  if (!proceed) return { status: "skipped" };
+
+  if (amount <= 0) {
+    await chargeRef.update({
+      status: "comped",
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return { status: "comped" };
+  }
+
+  try {
+    const channelKey = assertPortOneCheckoutConfig("subscription");
+    const payment = await payPortOneBillingKey({
+      paymentId,
+      billingKey,
+      channelKey,
+      orderName: `Marblo ${planType} 구독`,
+      amount,
+      customerId: userId,
+      customerEmail,
+      customerName,
+      customerPhone,
+    });
+    const validation = validatePortOnePaidPayment(payment, {
+      paymentId,
+      storeId: PORTONE_STORE_ID,
+      amount,
+      currency: "KRW",
+    });
+    if (!validation.ok) {
+      await chargeRef.update({
+        status: "failed",
+        error: validation.reason,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return { status: "failed", error: validation.reason };
+    }
+    await chargeRef.update({
+      status: "succeeded",
+      portonePaymentId: paymentId,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    // ChargeResult.paymentKey 슬롯에 paymentId 를 실어 호출부가 구독 문서에 쓴다.
+    return { status: "charged", paymentKey: paymentId };
+  } catch (err) {
+    const msg = (
+      err instanceof functions.https.HttpsError
+        ? err.message
+        : err instanceof Error
+          ? err.message
+          : String(err)
+    ).slice(0, 500);
+    await chargeRef.update({
+      status: "failed",
+      error: msg,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return { status: "failed", error: msg };
+  }
+}
+
 // 첫 청구용 쿠폰 검증·할인 계산. 유효하지 않으면 정가로 폴백(throw 하지 않음 —
 // 쿠폰 문제로 결제 자체가 깨지면 안 됨). 반환된 appliedCoupon 은 청구 성공
 // 후에만 소진 기록한다.
@@ -1612,6 +1740,10 @@ export const completePortOneBillingKey = functions.https.onCall(
         status: "active",
         paymentProvider: "portone",
         portoneBillingKey: billingKey,
+        // KG이니시스 갱신 청구는 매 사이클 name/phone 을 요구한다 — 구독 문서에
+        // 저장해 scheduledChargePortOneSubscriptions 가 재사용한다.
+        portoneCustomerName: customerName,
+        portoneCustomerPhone: customerPhone,
         portonePaymentId: finalAmount <= 0 ? null : paymentId,
         currentPeriodStart: now,
         currentPeriodEnd: nextPeriodEnd(now, expected.billingCycle),
@@ -5940,6 +6072,141 @@ export const scheduledChargeSubscriptions = functions.pubsub
     }
 
     console.log("[Billing Cron]", JSON.stringify(result));
+    return null;
+  });
+
+// ─── PortOne 정기결제 갱신 크론 ───────────────────────────────────────
+// 매일 05:00 KST. 토스 크론(scheduledChargeSubscriptions) 미러 —
+// paymentProvider=="portone" 쿼리 + payPortOneBillingKey 청구.
+// selectDueForCharge / applyChargeSuccess / applyChargeFailure / planAmountKRW
+// 는 billing.ts 헬퍼 재사용. 토스 크론은 건드리지 않는다.
+export const scheduledChargePortOneSubscriptions = functions.pubsub
+  .schedule("0 5 * * *")
+  .timeZone("Asia/Seoul")
+  .onRun(async () => {
+    const nowMs = Date.now();
+    const result = {
+      scanned: 0,
+      due: 0,
+      charged: 0,
+      comped: 0,
+      extended: 0,
+      failed: 0,
+      suspended: 0,
+      skipped: 0,
+    };
+    const snap = await db
+      .collection("subscriptions")
+      .where("paymentProvider", "==", "portone")
+      .get();
+    result.scanned = snap.size;
+
+    for (const doc of snap.docs) {
+      const sub = doc.data();
+      const currentPeriodEndMs = tsToMillis(sub.currentPeriodEnd);
+      const snapshot: SubscriptionSnapshot = {
+        paymentProvider: sub.paymentProvider,
+        status: sub.status,
+        planType: sub.planType,
+        billingCycle: sub.billingCycle,
+        portoneBillingKey: sub.portoneBillingKey,
+        founderGrant: sub.founderGrant === true,
+        currentPeriodEndMs,
+        billingFailedCount: sub.billingFailedCount || 0,
+        nextRetryAtMs: tsToMillis(sub.nextRetryAt),
+      };
+      if (!selectDueForCharge(snapshot, nowMs)) continue;
+      result.due++;
+
+      const planType = sub.planType || "pro";
+      const billingCycle = normalizeBillingCycle(sub.billingCycle);
+      const amount = planAmountKRW(planType, billingCycle);
+      if (!amount) {
+        result.skipped++;
+        continue;
+      }
+
+      const billingKey =
+        typeof sub.portoneBillingKey === "string"
+          ? sub.portoneBillingKey
+          : null;
+      const customerName =
+        typeof sub.portoneCustomerName === "string"
+          ? sub.portoneCustomerName
+          : null;
+      const customerPhone =
+        typeof sub.portoneCustomerPhone === "string"
+          ? sub.portoneCustomerPhone
+          : null;
+      // KG이니시스 갱신 청구는 name/phone 필수 — 미저장 레거시는 스킵(해지 방지).
+      if (!billingKey || !customerName || !customerPhone) {
+        console.warn(
+          "[PortOne Billing Cron] missing billingKey/name/phone, skip",
+          doc.id,
+        );
+        result.skipped++;
+        continue;
+      }
+
+      let customerEmail: string | null = null;
+      try {
+        const userRecord = await admin.auth().getUser(doc.id);
+        customerEmail =
+          typeof userRecord.email === "string" ? userRecord.email : null;
+      } catch {
+        customerEmail = null;
+      }
+
+      const cycleAnchorMs = currentPeriodEndMs as number;
+      const charge = await chargePortOneSubscriptionIdempotent({
+        userId: doc.id,
+        billingKey,
+        amount,
+        planType,
+        cycleAnchorMs,
+        reason: "renewal",
+        customerEmail,
+        customerName,
+        customerPhone,
+      });
+
+      if (charge.status === "failed") {
+        const f = applyChargeFailure(snapshot, nowMs);
+        await doc.ref.update({
+          status: f.status,
+          billingFailedCount: f.billingFailedCount,
+          nextRetryAt:
+            f.nextRetryAtMs != null
+              ? admin.firestore.Timestamp.fromMillis(f.nextRetryAtMs)
+              : null,
+          ...(f.planType ? { planType: f.planType } : {}),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        if (f.status === "canceled") result.suspended++;
+        else result.failed++;
+        continue;
+      }
+
+      const s = applyChargeSuccess(nowMs, billingCycle);
+      await doc.ref.update({
+        status: s.status,
+        currentPeriodStart: s.currentPeriodStart,
+        currentPeriodEnd: s.currentPeriodEnd,
+        billingCycle: s.billingCycle,
+        billingFailedCount: 0,
+        nextRetryAt: null,
+        ...(charge.status === "charged"
+          ? { portonePaymentId: charge.paymentKey }
+          : {}),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      result.extended++;
+      if (charge.status === "charged") result.charged++;
+      else if (charge.status === "comped") result.comped++;
+      else result.skipped++;
+    }
+
+    console.log("[PortOne Billing Cron]", JSON.stringify(result));
     return null;
   });
 

@@ -135,6 +135,8 @@ export interface SubscriptionSnapshot {
   billingCycle?: string;
   tossBillingKey?: string | null;
   tossCustomerKey?: string | null;
+  /** PortOne V2 빌링키 — paymentProvider==="portone" 갱신 청구에 사용. */
+  portoneBillingKey?: string | null;
   founderGrant?: boolean;
   currentPeriodEndMs?: number | null;
   billingFailedCount?: number;
@@ -169,10 +171,15 @@ export function selectDueForCharge(
   sub: SubscriptionSnapshot,
   nowMs: number,
 ): boolean {
-  // 무료 파운더 grant·비-토스 구독은 절대 청구하지 않는다.
+  // 무료 파운더 grant·지원 외 PG 구독은 절대 청구하지 않는다.
   if (sub.founderGrant === true) return false;
-  if (sub.paymentProvider !== "toss") return false;
-  if (!sub.tossBillingKey || !sub.tossCustomerKey) return false;
+  if (sub.paymentProvider === "toss") {
+    if (!sub.tossBillingKey || !sub.tossCustomerKey) return false;
+  } else if (sub.paymentProvider === "portone") {
+    if (!sub.portoneBillingKey) return false;
+  } else {
+    return false;
+  }
   // active(정상 갱신) 또는 past_due(재시도)만 대상.
   if (sub.status !== "active" && sub.status !== "past_due") return false;
   if (typeof sub.currentPeriodEndMs !== "number") return false;

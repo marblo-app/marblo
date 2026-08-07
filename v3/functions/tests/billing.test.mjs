@@ -114,11 +114,28 @@ assert(
 );
 assert(
   !selectDueForCharge({ ...baseSub, paymentProvider: "paddle" }, T0),
-  "비-토스 → 비대상",
+  "paddle 등 비지원 PG → 비대상",
 );
 assert(
   !selectDueForCharge({ ...baseSub, tossBillingKey: null }, T0),
   "빌링키 없음 → 비대상",
+);
+// PortOne 갱신 크론 대상: paymentProvider + portoneBillingKey 만으로 due 판정.
+const basePortOne = {
+  paymentProvider: "portone",
+  status: "active",
+  planType: "pro",
+  portoneBillingKey: "bk_portone_1",
+  currentPeriodEndMs: T0 - DAY_MS,
+};
+assert(selectDueForCharge(basePortOne, T0), "포트원 만료 도래 active → 청구 대상");
+assert(
+  !selectDueForCharge({ ...basePortOne, portoneBillingKey: null }, T0),
+  "포트원 빌링키 없음 → 비대상",
+);
+assert(
+  !selectDueForCharge({ ...basePortOne, currentPeriodEndMs: T0 + DAY_MS }, T0),
+  "포트원 아직 만료 전 → 비대상",
 );
 assert(
   !selectDueForCharge({ ...baseSub, status: "canceled" }, T0),
