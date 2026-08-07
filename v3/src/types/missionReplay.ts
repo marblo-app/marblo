@@ -137,6 +137,35 @@ export interface ReplayStats {
  */
 export type ReplaySourceState = "ok" | "denied" | "empty";
 
+/**
+ * 개요 한 줄 — 미션이 쪼개진 태스크 하나.
+ *
+ * ★담기는 것은 **큐레이션된 제목 + PR 번호 + 의존 ref** 뿐이다. 본문·경로·코드·
+ * 담당자는 애초에 들어오지 않는다(`lib/replay/missionOutline.ts` 헤더). 그래서
+ * 이 구조는 그 자체로 공유 가능하고, 무거운 2차 비식별이 필요 없다.
+ */
+export interface ReplayOutlineTask {
+  /** 표시용 순번 — 의존성 위상순서로 매긴 "A"·"B"·"C". */
+  ref: string;
+  title: string;
+  /** ★번호만. URL 은 저장소 좌표를 담아 경계 밖으로 내보내지 않는다. */
+  prNumber: number | null;
+  /** 이 태스크가 기다린 태스크들의 ref(미션 내부 간선만). */
+  dependsOn: string[];
+  done: boolean;
+}
+
+/** 미션의 작업 분해 + 의존성 머지 순서. 조립은 `lib/replay/missionOutline.ts`. */
+export interface ReplayOutline {
+  tasks: ReplayOutlineTask[];
+  /** 완료된 태스크의 PR 번호를 의존성 순서로 나열 — 머지 서사의 근거. */
+  mergeOrder: number[];
+  /** 실제로 의존 간선이 있었나(없으면 "병렬로 돌았다"가 사실이다). */
+  hasDependencies: boolean;
+  /** 상한 때문에 개요에서 빠진 태스크 수. 조용한 절단 금지. */
+  truncated: number;
+}
+
 export interface MissionReplay {
   replayVersion: 1;
   missionId: string;
@@ -150,6 +179,13 @@ export interface MissionReplay {
   /** ts 오름차순. 동시각은 id 로 안정 정렬(재집계해도 순서가 안 흔들린다). */
   beats: ReplayBeat[];
   prUrls: string[];
+  /**
+   * 작업 분해 + 의존성 머지 순서 (미션 서사 GIF 의 1급 소스).
+   *
+   * `beats` 와 겹치지 않는다: 비트는 "언제 무슨 일이 있었나"(시간축)이고, 개요는
+   * "무엇이 무엇을 기다렸나"(의존축)다. 후자는 시간축에서 복원할 수 없다.
+   */
+  outline: ReplayOutline;
   /** 어떤 소스가 실제로 읽혔는지 — 권한 부족으로 빠진 레인을 UI 가 정직하게 표시. */
   provenance: {
     sources: Record<ReplaySource, ReplaySourceState>;

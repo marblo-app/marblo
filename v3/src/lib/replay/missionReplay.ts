@@ -38,6 +38,7 @@ import {
   selectMissionTasks,
   type MissionReplaySources,
 } from "./beats";
+import { buildMissionOutline } from "./missionOutline";
 
 export type { MissionReplaySources, ReplayAuditLogRow } from "./beats";
 
@@ -64,6 +65,17 @@ export interface BuildMissionReplayOptions {
   sourceAccess?: Partial<Record<ReplaySource, ReplaySourceState>>;
   /** 집계 시각. 생략하면 현재 시각. */
   now?: Date;
+  /**
+   * 완료되지 않은 미션도 조립할 것인가. 기본 `false`(= 기존 계약 불변).
+   *
+   * ★"완료 미션만"은 **발행**의 규칙이지 로컬 미리보기의 규칙이 아니다. 진행 중인
+   * 미션으로도 GIF 를 만들 수 있어야 사용자가 오늘 자기 미션을 고를 수 있고
+   * (완료 미션이 0건인 프로젝트가 흔하다), 그렇다고 GIF 가 거짓말을 하지도
+   * 않는다 — 결론 문구는 `completedAt`/`stats.tasksDone` 에서 파생되므로 진행
+   * 중이면 진행 중이라고 그린다. 발행 경로는 여전히 막혀 있다
+   * (`isReplayPublicationCandidate` 가 `completedAt !== null` 을 요구).
+   */
+  includeIncomplete?: boolean;
 }
 
 /**
@@ -88,7 +100,9 @@ export function buildMissionReplay(
   options: BuildMissionReplayOptions = {},
 ): MissionReplay | null {
   const { mission } = sources;
-  if (!isReplayableMission(mission)) return null;
+  if (!isReplayableMission(mission) && options.includeIncomplete !== true) {
+    return null;
+  }
 
   const missionTasks = selectMissionTasks(mission, sources.tasks);
   const aliases = createReplayAliases(sources);
@@ -107,6 +121,14 @@ export function buildMissionReplay(
     cast: buildCast(missionTasks, beats, aliases, sources),
     beats,
     prUrls: collectPrUrls(missionTasks, reports),
+    outline: buildMissionOutline(missionTasks, {
+      prUrlByTaskId: Object.fromEntries(
+        missionTasks.map((task) => [
+          task.id,
+          resolvePrUrl(task, reports[task.id] ?? null),
+        ]),
+      ),
+    }),
     provenance: {
       sources: resolveProvenance(sources, options.sourceAccess),
       generatedAt: options.now ?? new Date(),

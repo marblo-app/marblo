@@ -90,8 +90,17 @@ export const REPLAY_STORY_MARK = "MADE WITH MARBLO";
 // Templates — what the user picks in `ReplayExportPanel`.
 // ---------------------------------------------------------------------------
 
-/** Templates this module renders. `"stats"` (the #741 shape) is not one of them — `gif.ts` routes it to its own drawer. */
-export type ReplayStoryTemplateId = "story" | "cast";
+/**
+ * Templates this module renders. `"stats"` (the #741 shape) is not one of them —
+ * `gif.ts` routes it to its own drawer.
+ *
+ * ★`"mission"` is the **default share flow's** cut (미션 서사): 미션명 → 태스크
+ * 분해(제목만) → 워크트리·오케 머지 → PR 의존성 순서 머지 → 1~2줄 결론. It is
+ * deliberately **not** in `REPLAY_EXPORT_TEMPLATES` — that array is the legacy
+ * multi-format export panel's menu, and the reduced flow offers exactly one
+ * button, not a template picker.
+ */
+export type ReplayStoryTemplateId = "mission" | "story" | "cast";
 
 /** Everything selectable in the export panel, including the legacy stat-card shape. */
 export type ReplayExportTemplateId = ReplayStoryTemplateId | "stats";
@@ -125,7 +134,7 @@ export const REPLAY_EXPORT_DEFAULT_TEMPLATE: ReplayExportTemplateId = "story";
 export function isReplayStoryTemplate(
   id: ReplayExportTemplateId,
 ): id is ReplayStoryTemplateId {
-  return id === "story" || id === "cast";
+  return id === "mission" || id === "story" || id === "cast";
 }
 
 // ---------------------------------------------------------------------------
@@ -228,6 +237,100 @@ export function buildReplayStoryCast(
     if (cast.length >= max) break;
   }
   return cast;
+}
+
+// ---------------------------------------------------------------------------
+// Outline — the mission cut's own payload slice: task titles, PR numbers, and
+// the dependency order they merged in. Same defensive posture as the readers
+// above; still nothing but `title` (curated), an integer, and refs.
+// ---------------------------------------------------------------------------
+
+/** Outline rows drawn on screen. Beyond this the breakdown stops reading. */
+export const REPLAY_STORY_MAX_OUTLINE = 5;
+/** PR chips drawn in the merge scene. */
+export const REPLAY_STORY_MAX_MERGE = 6;
+
+export interface ReplayStoryOutlineTask {
+  ref: string;
+  title: string;
+  prNumber: number | null;
+  done: boolean;
+  /** refs this row waited on — drawn as "← A" so the order is visibly *why*. */
+  dependsOn: string[];
+}
+
+export interface ReplayStoryOutline {
+  tasks: ReplayStoryOutlineTask[];
+  mergeOrder: number[];
+  hasDependencies: boolean;
+  /** Rows the outline itself dropped upstream — surfaced, never swallowed. */
+  truncated: number;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const entry of value) {
+    const str = asNonEmptyString(entry);
+    if (str) out.push(str);
+  }
+  return out;
+}
+
+/**
+ * Reads `payload.outline`.
+ *
+ * ★Only `ref`/`title`/`prNumber`/`done`/`dependsOn` — the exact shape
+ * `lib/replay/missionOutline.ts` produced and redaction let through. There is
+ * no PR **URL** in this payload to read even by accident (redaction's repoGate
+ * drops it), which is the point: the frame can name `#831` without ever
+ * knowing which repository it belongs to.
+ */
+export function buildReplayStoryOutline(
+  redacted: RedactedReplay,
+  maxTasks: number = REPLAY_STORY_MAX_OUTLINE,
+  maxMerge: number = REPLAY_STORY_MAX_MERGE,
+): ReplayStoryOutline {
+  const root = asRecord(redacted.payload) ?? {};
+  const outlineRaw = asRecord(root.outline);
+  const tasksRaw = outlineRaw?.tasks;
+
+  const tasks: ReplayStoryOutlineTask[] = [];
+  if (Array.isArray(tasksRaw) && maxTasks > 0) {
+    for (const entry of tasksRaw) {
+      const rec = asRecord(entry);
+      const title = asNonEmptyString(rec?.title);
+      const ref = asNonEmptyString(rec?.ref);
+      if (!title && !ref) continue;
+      tasks.push({
+        ref: ref ?? String.fromCharCode(65 + tasks.length),
+        title: title ?? "",
+        prNumber: asNonNegativeInt(rec?.prNumber),
+        done: rec?.done === true,
+        dependsOn: asStringArray(rec?.dependsOn),
+      });
+      if (tasks.length >= maxTasks) break;
+    }
+  }
+
+  const mergeOrder: number[] = [];
+  if (Array.isArray(outlineRaw?.mergeOrder)) {
+    for (const entry of outlineRaw.mergeOrder as unknown[]) {
+      const num = asNonNegativeInt(entry);
+      if (num === null || mergeOrder.includes(num)) continue;
+      mergeOrder.push(num);
+      if (mergeOrder.length >= Math.max(0, maxMerge)) break;
+    }
+  }
+
+  return {
+    tasks,
+    mergeOrder,
+    hasDependencies:
+      outlineRaw?.hasDependencies === true ||
+      tasks.some((task) => task.dependsOn.length > 0),
+    truncated: asNonNegativeInt(outlineRaw?.truncated) ?? 0,
+  };
 }
 
 /** How many *distinct* models the payload can attest to — the "M models" half of the hero line. */
@@ -342,7 +445,12 @@ export type ReplayStorySceneKind =
   | "cast"
   | "progress"
   | "ship"
-  | "stamp";
+  | "stamp"
+  // ── mission cut ──────────────────────────────────────────────────────
+  | "breakdown"
+  | "worktree"
+  | "merge"
+  | "conclusion";
 
 export interface ReplayStoryScene {
   kind: ReplayStorySceneKind;
@@ -357,6 +465,10 @@ const SCENE_CHAPTERS: Record<ReplayStorySceneKind, string> = {
   progress: "IN FLIGHT",
   ship: "SHIP",
   stamp: "REPLAY",
+  breakdown: "BREAKDOWN",
+  worktree: "WORKTREES",
+  merge: "MERGE",
+  conclusion: "RESULT",
 };
 
 const SCENE_HEADINGS: Record<ReplayStorySceneKind, string> = {
@@ -367,6 +479,10 @@ const SCENE_HEADINGS: Record<ReplayStorySceneKind, string> = {
   // already sits directly above.
   ship: "",
   stamp: "",
+  breakdown: "태스크 분해",
+  worktree: "워크트리별 작업 → 오케스트레이터 머지",
+  merge: "의존성 순서대로 머지",
+  conclusion: "",
 };
 
 /** Build → Orchestrate → Replay, weighted so the two shareable moments (parallel, ship) get the room. */
@@ -387,6 +503,20 @@ const CAST_SCENE_SECONDS: ReadonlyArray<[ReplayStorySceneKind, number]> = [
   ["stamp", 1],
 ];
 
+/**
+ * ★Mission cut — the ticket's narrative, in its order:
+ * 미션명 → 태스크 분해(제목만) → 워크트리별 작업·오케 머지 → PR 의존성 순서
+ * 머지 → 1~2줄 결론. The breakdown and the merge get the room because those two
+ * frames are the ones that carry information nobody can screenshot elsewhere.
+ */
+const MISSION_SCENE_SECONDS: ReadonlyArray<[ReplayStorySceneKind, number]> = [
+  ["headline", 2],
+  ["breakdown", 3],
+  ["worktree", 2],
+  ["merge", 2.5],
+  ["conclusion", 2],
+];
+
 export interface ReplayStoryboard {
   templateId: ReplayStoryTemplateId;
   model: ReplayCardModel;
@@ -394,12 +524,61 @@ export interface ReplayStoryboard {
   cast: ReplayStoryCastMember[];
   beats: ReplayStoryBeat[];
   ship: ReplayStoryShip;
+  /** Mission cut's own slice — empty (but present) for the other templates. */
+  outline: ReplayStoryOutline;
+  /** 1~2 lines that close the mission cut. Data-derived, never boilerplate. */
+  conclusion: string[];
   scenes: ReplayStoryScene[];
 }
 
 export interface BuildReplayStoryboardOptions {
   maxBeats?: number;
   maxCast?: number;
+  maxOutline?: number;
+}
+
+/**
+ * The closing sentence(s).
+ *
+ * ★Derived, so it cannot lie. "의존성 순서대로" is only claimed when the outline
+ * actually carries dependency edges; "완료" is only claimed when every task the
+ * outline knows about is done. An in-flight mission closes on "진행 중" with the
+ * counts that are true right now — which is exactly why an unfinished mission is
+ * still allowed to produce a GIF.
+ */
+export function buildReplayStoryConclusion(
+  outline: ReplayStoryOutline,
+  ship: ReplayStoryShip,
+): string[] {
+  const merged = outline.mergeOrder.length;
+  const tasksDone = ship.tasksDone;
+  const tasks = ship.tasks;
+  const allDone =
+    tasksDone !== null && tasks !== null && tasks > 0 && tasksDone >= tasks;
+
+  const countPart =
+    tasksDone !== null && tasks !== null
+      ? `태스크 ${tasksDone}/${tasks}`
+      : tasks !== null
+        ? `태스크 ${tasks}건`
+        : null;
+  const prPart =
+    merged > 0
+      ? `PR ${merged}건 머지`
+      : ship.prs !== null && ship.prs > 0
+        ? `PR ${ship.prs}건`
+        : null;
+
+  const first = [countPart, prPart].filter(Boolean).join(" · ");
+  const second = allDone
+    ? outline.hasDependencies
+      ? "의존성 순서대로 실행·머지 완료"
+      : "병렬로 실행·머지 완료"
+    : outline.hasDependencies
+      ? "의존성 순서대로 진행 중"
+      : "진행 중";
+
+  return first ? [first, second] : [second];
 }
 
 /**
@@ -425,21 +604,33 @@ export function buildReplayStoryboard(
     options.maxBeats ?? REPLAY_STORY_MAX_BEATS,
   );
 
+  const outline = buildReplayStoryOutline(
+    redacted,
+    options.maxOutline ?? REPLAY_STORY_MAX_OUTLINE,
+  );
+
   const source =
-    templateId === "cast" ? CAST_SCENE_SECONDS : STORY_SCENE_SECONDS;
+    templateId === "mission"
+      ? MISSION_SCENE_SECONDS
+      : templateId === "cast"
+        ? CAST_SCENE_SECONDS
+        : STORY_SCENE_SECONDS;
   const scenes: ReplayStoryScene[] = source.map(([kind, seconds], index) => ({
     kind,
     seconds,
     chapter: `${String(index + 1).padStart(2, "0")} · ${SCENE_CHAPTERS[kind]}`,
   }));
 
+  const ship = buildShip(root);
   return {
     templateId,
     model,
     hero: buildHero(root, model, cast.length),
     cast,
     beats,
-    ship: buildShip(root),
+    ship,
+    outline,
+    conclusion: buildReplayStoryConclusion(outline, ship),
     scenes,
   };
 }
@@ -479,6 +670,10 @@ export interface ReplayStoryFrame {
   beatIndex: number | null;
   /** Spotlit cast member during the "cast" scene, else null. */
   castIndex: number | null;
+  /** Outline row under the playhead during "breakdown", else null. */
+  outlineIndex: number | null;
+  /** PR under the playhead during "merge", else null. */
+  mergeIndex: number | null;
 }
 
 function sliceIndex(progress: number, count: number): number | null {
@@ -541,6 +736,14 @@ export function planReplayStoryboardFrames(
       castIndex:
         scene.kind === "cast"
           ? sliceIndex(progress, storyboard.cast.length)
+          : null,
+      outlineIndex:
+        scene.kind === "breakdown"
+          ? sliceIndex(progress, storyboard.outline.tasks.length)
+          : null,
+      mergeIndex:
+        scene.kind === "merge"
+          ? sliceIndex(progress, storyboard.outline.mergeOrder.length)
           : null,
     });
   }
@@ -617,6 +820,18 @@ export function drawReplayStoryboardFrame(
       break;
     case "stamp":
       drawStampScene(ctx, storyboard, frame, theme);
+      break;
+    case "breakdown":
+      drawBreakdownScene(ctx, storyboard, frame, theme);
+      break;
+    case "worktree":
+      drawWorktreeScene(ctx, storyboard, frame, theme);
+      break;
+    case "merge":
+      drawMergeScene(ctx, storyboard, frame, theme);
+      break;
+    case "conclusion":
+      drawConclusionScene(ctx, storyboard, frame, theme);
       break;
   }
 
@@ -932,6 +1147,264 @@ function drawShipScene(
     }
     ctx.textAlign = "left";
   }
+}
+
+// ---------------------------------------------------------------------------
+// Mission cut scenes. Everything drawn here comes from `storyboard.outline` —
+// curated titles, integers, and refs. No free text can reach these frames.
+// ---------------------------------------------------------------------------
+
+/** "#831" — the only shape a PR takes in an exported frame. */
+export function formatPrChip(prNumber: number | null): string | null {
+  return prNumber === null ? null : `#${prNumber}`;
+}
+
+function drawBreakdownScene(
+  ctx: ReplayCardDrawContext,
+  storyboard: ReplayStoryboard,
+  frame: ReplayStoryFrame,
+  theme: ReplayStoryTheme,
+): void {
+  const rows = storyboard.outline.tasks;
+
+  if (rows.length === 0) {
+    setFont(ctx, 700, 40);
+    ctx.fillStyle = theme.headline;
+    ctx.fillText(storyboard.model.goal, PADDING, 300);
+    setFont(ctx, 500, 22);
+    ctx.fillStyle = theme.subtitle;
+    ctx.fillText("태스크 분해 기록 없음", PADDING, 348);
+    return;
+  }
+
+  const rowHeight = 56;
+  const top = 254;
+  for (let i = 0; i < rows.length; i += 1) {
+    // Rows land one after another — the viewer sees the mission being cut up,
+    // not a finished list fading in.
+    const revealAt = (i / rows.length) * 0.7;
+    if (frame.progress < revealAt) continue;
+
+    const row = rows[i];
+    const y = top + i * rowHeight;
+    const live = frame.outlineIndex === i;
+
+    if (live) {
+      ctx.fillStyle = theme.surface;
+      ctx.fillRect(PADDING - 16, y - 32, CONTENT_WIDTH + 32, rowHeight - 10);
+    }
+
+    ctx.fillStyle = row.done ? theme.accent : theme.laneSystem;
+    ctx.fillRect(PADDING, y - 26, 5, 32);
+
+    setFont(ctx, 700, 26);
+    ctx.fillStyle = theme.accent;
+    ctx.fillText(row.ref, PADDING + 20, y);
+
+    // The title is the payload. It gets the width, and it wraps to one line
+    // only — a breakdown frame that turns into a paragraph stops being one.
+    setFont(ctx, 600, 26);
+    ctx.fillStyle = live ? theme.headline : theme.statValue;
+    const chip = formatPrChip(row.prNumber);
+    const chipWidth = chip ? 96 : 0;
+    const titleWidth = CONTENT_WIDTH - 64 - chipWidth;
+    const [line] = wrapLines(ctx, row.title || "(제목 없음)", titleWidth, 1);
+    ctx.fillText(line ?? "", PADDING + 64, y);
+
+    if (chip) {
+      ctx.textAlign = "right";
+      setFont(ctx, 700, 22);
+      ctx.fillStyle = row.done ? theme.accentAlt : theme.statLabel;
+      ctx.fillText(chip, REPLAY_STORY_WIDTH - PADDING, y);
+      ctx.textAlign = "left";
+    }
+
+    if (row.dependsOn.length > 0) {
+      setFont(ctx, 600, 16);
+      ctx.fillStyle = theme.statLabel;
+      ctx.fillText(`← ${row.dependsOn.join(", ")}`, PADDING + 64, y + 20);
+    }
+  }
+
+  if (storyboard.outline.truncated > 0) {
+    // ★Pinned to the heading line, not stacked under the last row: a full
+    // roster (REPLAY_STORY_MAX_OUTLINE rows, each possibly with a dependency
+    // line) already reaches the divider, and one more line below it would
+    // print straight through the footer.
+    ctx.textAlign = "right";
+    setFont(ctx, 500, 18);
+    ctx.fillStyle = theme.statLabel;
+    ctx.fillText(
+      `+${storyboard.outline.truncated} more`,
+      REPLAY_STORY_WIDTH - PADDING,
+      190,
+    );
+    ctx.textAlign = "left";
+  }
+}
+
+/**
+ * 워크트리별 작업 → 오케스트레이터 머지.
+ *
+ * One rail per outline row (that is what a worktree *is* here: one ticket, one
+ * isolated tree), all of them converging into a single merge box. The claim the
+ * frame makes — parallel trees, one merge — is the orchestrator's whole job.
+ */
+function drawWorktreeScene(
+  ctx: ReplayCardDrawContext,
+  storyboard: ReplayStoryboard,
+  frame: ReplayStoryFrame,
+  theme: ReplayStoryTheme,
+): void {
+  const rows = storyboard.outline.tasks;
+  const railCount = Math.max(
+    1,
+    Math.min(REPLAY_STORY_MAX_OUTLINE, rows.length),
+  );
+  const railTop = 252;
+  const railLeft = PADDING + 56;
+  const mergeX = REPLAY_STORY_WIDTH - PADDING - 168;
+  const railWidth = Math.max(40, mergeX - railLeft - 24);
+
+  for (let i = 0; i < railCount; i += 1) {
+    const y = railTop + i * 34;
+    const row = rows[i];
+
+    setFont(ctx, 700, 20);
+    ctx.fillStyle = theme.accent;
+    ctx.fillText(row?.ref ?? String.fromCharCode(65 + i), PADDING, y + 8);
+
+    ctx.fillStyle = theme.divider;
+    ctx.fillRect(railLeft, y, railWidth, 6);
+
+    // Staggered so several trees are visibly mid-flight in the same instant.
+    const fill = Math.min(1, Math.max(0, frame.progress * 1.5 - i * 0.1));
+    if (fill > 0) {
+      ctx.fillStyle = row?.done === false ? theme.laneSystem : theme.laneAgent;
+      ctx.fillRect(railLeft, y, Math.round(railWidth * fill), 6);
+    }
+  }
+
+  const boxTop = railTop - 22;
+  const boxBottom = railTop + railCount * 34 - 8;
+  if (frame.progress >= 0.55) {
+    ctx.fillStyle = theme.surface;
+    ctx.fillRect(mergeX, boxTop, 168, Math.max(48, boxBottom - boxTop));
+    ctx.fillStyle = theme.laneOrchestrator;
+    ctx.fillRect(mergeX, boxTop, 4, Math.max(48, boxBottom - boxTop));
+
+    setFont(ctx, 700, 22);
+    ctx.fillStyle = theme.headline;
+    ctx.fillText("오케 머지", mergeX + 20, boxTop + 40);
+  }
+
+  setFont(ctx, 500, 22);
+  ctx.fillStyle = theme.subtitle;
+  ctx.fillText(
+    `워크트리 ${railCount}개 · 격리 작업 후 머지`,
+    PADDING,
+    boxBottom + 52,
+  );
+}
+
+/** PR #830 → #831 → #832, revealed one at a time, in dependency order. */
+function drawMergeScene(
+  ctx: ReplayCardDrawContext,
+  storyboard: ReplayStoryboard,
+  frame: ReplayStoryFrame,
+  theme: ReplayStoryTheme,
+): void {
+  const prs = storyboard.outline.mergeOrder;
+
+  if (prs.length === 0) {
+    setFont(ctx, 700, 44);
+    ctx.fillStyle = theme.headline;
+    ctx.fillText(
+      storyboard.ship.prs !== null && storyboard.ship.prs > 0
+        ? "MERGED"
+        : "머지된 PR 없음",
+      PADDING,
+      300,
+    );
+    return;
+  }
+
+  const chipWidth = Math.min(
+    200,
+    Math.floor((CONTENT_WIDTH - (prs.length - 1) * 24) / prs.length),
+  );
+  const chipHeight = 84;
+  const chipTop = 268;
+
+  for (let i = 0; i < prs.length; i += 1) {
+    const revealed = frame.mergeIndex === null || i <= frame.mergeIndex;
+    if (!revealed) continue;
+
+    const x = PADDING + i * (chipWidth + 24);
+    const live = frame.mergeIndex === i;
+
+    ctx.fillStyle = theme.surface;
+    ctx.fillRect(x, chipTop, chipWidth, chipHeight);
+    ctx.fillStyle = live ? theme.accent : theme.laneAgent;
+    ctx.fillRect(x, chipTop, chipWidth, 4);
+
+    ctx.textAlign = "center";
+    setFont(ctx, 700, 34);
+    ctx.fillStyle = live ? theme.headline : theme.statValue;
+    ctx.fillText(`#${prs[i]}`, x + chipWidth / 2, chipTop + 54);
+    ctx.textAlign = "left";
+
+    // The arrow between chips is the dependency claim made visual.
+    if (i > 0) {
+      setFont(ctx, 700, 24);
+      ctx.fillStyle = theme.statLabel;
+      ctx.fillText("→", x - 20, chipTop + 54);
+    }
+  }
+
+  setFont(ctx, 600, 24);
+  ctx.fillStyle = theme.accent;
+  ctx.fillText(
+    storyboard.outline.hasDependencies
+      ? "의존성 순서대로 실행 → 머지"
+      : "병렬 실행 → 머지",
+    PADDING,
+    chipTop + chipHeight + 62,
+  );
+}
+
+/** The 1~2 line close. Bottom-anchored so one or two lines both sit right. */
+function drawConclusionScene(
+  ctx: ReplayCardDrawContext,
+  storyboard: ReplayStoryboard,
+  frame: ReplayStoryFrame,
+  theme: ReplayStoryTheme,
+): void {
+  setFont(ctx, 700, 44);
+  ctx.fillStyle = theme.headline;
+  const goalLines = wrapLines(ctx, storyboard.model.goal, CONTENT_WIDTH, 2);
+  let y = 258;
+  for (const line of goalLines) {
+    ctx.fillText(line, PADDING, y);
+    y += 54;
+  }
+
+  if (frame.progress >= 0.15) {
+    const lines = storyboard.conclusion;
+    let cy = y + 34;
+    for (let i = 0; i < lines.length; i += 1) {
+      setFont(ctx, i === 0 ? 700 : 600, i === 0 ? 34 : 28);
+      ctx.fillStyle = i === 0 ? theme.accent : theme.subtitle;
+      ctx.fillText(lines[i], PADDING, cy);
+      cy += 44;
+    }
+  }
+
+  ctx.textAlign = "right";
+  setFont(ctx, 700, 18);
+  ctx.fillStyle = theme.brand;
+  ctx.fillText(REPLAY_STORY_MARK, REPLAY_STORY_WIDTH - PADDING, 466);
+  ctx.textAlign = "left";
 }
 
 function drawStampScene(

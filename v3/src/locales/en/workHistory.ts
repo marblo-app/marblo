@@ -104,15 +104,36 @@ export const workHistory: Record<keyof typeof koWorkHistory, string> = {
   "workHistory.replay.share": "Share",
 
   "workHistory.replay.hero.eyebrow": "Mission Replay",
-  "workHistory.replay.hero.title":
-    "Your AI team completed {count} tasks.",
+  "workHistory.replay.hero.title": "Your AI team completed {count} tasks.",
   "workHistory.replay.shareBar.title": "Share format",
   "workHistory.replay.shareBar.card": "Card",
   "workHistory.replay.shareBar.cardHint": "Generate a PNG achievement card.",
   "workHistory.replay.shareBar.gif": "GIF",
   "workHistory.replay.shareBar.gifHint": "Export motion from the replay beats.",
   "workHistory.replay.shareBar.link": "Link",
-  "workHistory.replay.shareBar.linkHint": "Publish a redacted public replay URL.",
+  "workHistory.replay.shareBar.linkHint":
+    "Publish a redacted public replay URL.",
+
+  // Mission GIF — the default share flow (pick a mission → one GIF).
+  "workHistory.replay.gif.open": "Make a mission GIF",
+  "workHistory.replay.gif.title": "Mission GIF",
+  "workHistory.replay.gif.hint":
+    "Pick a mission to render its name, task breakdown, worktree merges, and PR dependency order. Titles and PR numbers only.",
+  "workHistory.replay.gif.pickerLabel": "Mission to render",
+  "workHistory.replay.gif.empty":
+    "No mission has tasks attached yet. Dispatch work under a mission label and it shows up here.",
+  "workHistory.replay.gif.status.completed": "Completed",
+  "workHistory.replay.gif.status.running": "In progress",
+  "workHistory.replay.gif.taskCount": "Tasks {done}/{total}",
+  "workHistory.replay.gif.prCount": "{count} PRs",
+  "workHistory.replay.gif.truncated": "{count} more omitted from the GIF",
+  "workHistory.replay.gif.mergeOrder": "Merge order",
+  "workHistory.replay.gif.generate": "Generate GIF",
+  "workHistory.replay.gif.generating": "Generating…",
+  "workHistory.replay.gif.download": "Download {name}",
+  "workHistory.replay.gif.error.unverified":
+    "Redaction verification failed, so no GIF was produced (rules: {rules}).",
+  "workHistory.replay.gif.error.generic": "Could not generate the GIF.",
 
   "workHistory.replay.headline.template": "Template",
   "workHistory.replay.headline.launched": "Started",

@@ -121,9 +121,32 @@ export const workHistory = {
   "workHistory.replay.shareBar.card": "카드",
   "workHistory.replay.shareBar.cardHint": "PNG 성과 카드를 생성합니다.",
   "workHistory.replay.shareBar.gif": "GIF",
-  "workHistory.replay.shareBar.gifHint": "Replay 비트 흐름을 움직이는 이미지로 만듭니다.",
+  "workHistory.replay.shareBar.gifHint":
+    "Replay 비트 흐름을 움직이는 이미지로 만듭니다.",
   "workHistory.replay.shareBar.link": "링크",
-  "workHistory.replay.shareBar.linkHint": "레닭션된 공개 Replay URL을 발행합니다.",
+  "workHistory.replay.shareBar.linkHint":
+    "레닭션된 공개 Replay URL을 발행합니다.",
+
+  // 미션 GIF — 기본 공유 플로우(미션 선택 → GIF 하나).
+  "workHistory.replay.gif.open": "미션 GIF 만들기",
+  "workHistory.replay.gif.title": "미션 GIF",
+  "workHistory.replay.gif.hint":
+    "미션을 고르면 미션명 → 태스크 분해 → 워크트리·머지 → PR 의존성 순서를 담은 GIF를 만듭니다. 제목과 PR 번호만 들어갑니다.",
+  "workHistory.replay.gif.pickerLabel": "GIF 를 만들 미션",
+  "workHistory.replay.gif.empty":
+    "태스크가 붙은 미션이 아직 없습니다. 오케스트레이터에게 미션 라벨로 작업을 배치하면 여기에 나타납니다.",
+  "workHistory.replay.gif.status.completed": "완료",
+  "workHistory.replay.gif.status.running": "진행 중",
+  "workHistory.replay.gif.taskCount": "태스크 {done}/{total}",
+  "workHistory.replay.gif.prCount": "PR {count}건",
+  "workHistory.replay.gif.truncated": "그 외 {count}건은 GIF 에서 생략",
+  "workHistory.replay.gif.mergeOrder": "머지 순서",
+  "workHistory.replay.gif.generate": "GIF 생성",
+  "workHistory.replay.gif.generating": "생성 중…",
+  "workHistory.replay.gif.download": "{name} 다운로드",
+  "workHistory.replay.gif.error.unverified":
+    "비식별 검증에 걸려 GIF 를 만들지 않았습니다 (규칙: {rules}).",
+  "workHistory.replay.gif.error.generic": "GIF 를 만들지 못했습니다.",
 
   "workHistory.replay.headline.template": "템플릿",
   "workHistory.replay.headline.launched": "시작",

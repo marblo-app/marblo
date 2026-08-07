@@ -25,6 +25,29 @@ export function isReplayPublicationCandidate(
   return includeIncomplete || replay.completedAt !== null;
 }
 
+/**
+ * 개요 → 발행 입력.
+ *
+ * `outline` 이 없는 Replay 객체(발행 이전 버전에서 만들어졌거나 저장된 페이로드
+ * 를 되읽은 경우)도 여기서 조용히 빈 개요로 떨어진다 — 경계 함수가 옛 모양
+ * 하나에 throw 하면 공유가 통째로 죽는다.
+ */
+function outlineInput(replay: MissionReplay): Record<string, unknown> {
+  const outline = replay.outline;
+  return {
+    tasks: (outline?.tasks ?? []).map((item) => ({
+      ref: item.ref,
+      title: item.title,
+      prNumber: item.prNumber,
+      dependsOn: item.dependsOn,
+      done: item.done,
+    })),
+    mergeOrder: outline?.mergeOrder ?? [],
+    hasDependencies: outline?.hasDependencies ?? false,
+    truncated: outline?.truncated ?? 0,
+  };
+}
+
 function publicationInput(
   replay: MissionReplay,
   options: ReplayRedactionOptions,
@@ -77,6 +100,10 @@ function publicationInput(
       detail: beat.detail,
       sensitivity: beat.sensitivity,
     })),
+    // ★개요는 등급과 무관하게 나간다 — 담긴 것이 제목·PR **번호**·의존 ref 뿐이라
+    // L1(과정만)에서도 공개 가능한 사실이다. 저장소 좌표를 담는 `prUrl` 은 아래
+    // 에서 여전히 L1 drop / L2+ repoGate 로 따로 처리된다(번호와 URL 은 다른 축).
+    outline: outlineInput(replay),
   };
 
   // L1 is deliberately process-only; L2 adds only the already-public PR surface.
@@ -88,6 +115,25 @@ function publicationInput(
   }
   return input;
 }
+
+/**
+ * 개요에서 통과시킬 키 전수.
+ *
+ * ★열거형이라 새 필드는 자동으로 안 나간다(§5.2 default-deny). `prUrl` 은 여기
+ * 없다 — 개요가 싣는 것은 URL 이 아니라 정수 `prNumber` 다.
+ */
+const OUTLINE_SAFE_KEYS = new Set([
+  "outline",
+  "tasks",
+  "ref",
+  "title",
+  "prNumber",
+  "dependsOn",
+  "done",
+  "mergeOrder",
+  "hasDependencies",
+  "truncated",
+]);
 
 function removed(findings: RedactFinding[]): RedactionRemoval[] {
   return findings.map(({ path, rule, action }) => ({ path, rule, action }));
@@ -107,20 +153,44 @@ export function redactReplay(
     includeCost: options.includeCost === true,
     publicRepos: options.publicRepos,
     salt: options.salt ?? replay.missionId,
-    classifyOverride: (key) => {
-      if ([
-        "tasksDone", "agents", "prs", "filesChanged", "linesAdded", "linesDeleted",
-        "testsPassed", "riskFlags", "reportsScanned", "retries", "agentRef",
-        "spawnedModel", "detectedModelId", "tasksCompleted", "beats", "mode", "handle",
-        "credits",
-      ].includes(key)) return key === "agentRef" ? "agentId" : "structuredSafe";
+    classifyOverride: (key, path) => {
+      // 개요 하위 키만 — 경로로 스코프한다. 전역으로 열면 언젠가 다른 곳에
+      // 생길 동명 필드(`ref`/`done`)까지 조용히 통과한다(default-deny 훼손).
+      if (path === "outline" || path.startsWith("outline.")) {
+        if (OUTLINE_SAFE_KEYS.has(key)) return "structuredSafe";
+      }
+      if (
+        [
+          "tasksDone",
+          "agents",
+          "prs",
+          "filesChanged",
+          "linesAdded",
+          "linesDeleted",
+          "testsPassed",
+          "riskFlags",
+          "reportsScanned",
+          "retries",
+          "agentRef",
+          "spawnedModel",
+          "detectedModelId",
+          "tasksCompleted",
+          "beats",
+          "mode",
+          "handle",
+          "credits",
+        ].includes(key)
+      )
+        return key === "agentRef" ? "agentId" : "structuredSafe";
       if (key === "prUrl") return "repoIdentifier";
       if (key === "actorRef") return "personId";
-      if (key === "ts" || key === "launchedAt" || key === "completedAt") return "timestamp";
+      if (key === "ts" || key === "launchedAt" || key === "completedAt")
+        return "timestamp";
       return undefined;
     },
   });
-  const serialized = result.serialized ?? JSON.stringify(result.payload ?? null, null, 2);
+  const serialized =
+    result.serialized ?? JSON.stringify(result.payload ?? null, null, 2);
   return {
     level: options.level,
     payload: result.payload ?? null,

@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { t, useTranslation } from "../../lib/i18n";
-import { useAuth } from "../../hooks/useAuth";
-import { useMergePermission } from "../../hooks/useMergePermission";
 import { useProjectStore } from "../../stores/projectStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useNavigationStore } from "../../stores/navigationStore";
@@ -27,19 +25,8 @@ import { periodLabel } from "../common/PeriodSelector";
 import { ShareCard } from "./ShareCard";
 import { WorkHistoryFilterBar } from "./WorkHistoryFilterBar";
 import { FirstMissionShareNudge } from "./FirstMissionShareNudge";
-import {
-  buildLightweightReplayFromCompletedTasks,
-  LIGHTWEIGHT_REPLAY_MISSION_ID,
-} from "../../hooks/useMissionReplay";
-import { MissionReplayList } from "./replay/MissionReplayList";
-import {
-  MissionReplayDetail,
-  MissionReplayDetailView,
-} from "./replay/MissionReplayDetail";
-import {
-  ReplayShareFlow,
-  type ReplayShareFormat,
-} from "./replay/ReplayShareFlow";
+import { buildLightweightReplayFromCompletedTasks } from "../../hooks/useMissionReplay";
+import { MissionGifPanel } from "./replay/MissionGifPanel";
 import { ReplayHeadline } from "./replay/ReplayHeadline";
 import { ReplayCast } from "./replay/ReplayCast";
 
@@ -261,52 +248,44 @@ function WorkHistoryRow({
   );
 }
 
+/**
+ * 태스크 뷰 상단의 집계 쇼케이스.
+ *
+ * ★공유 형식 바(카드/링크/GIF)와 3단계 마법사를 여기서 뺐다 — 기본 공유 경로는
+ * **미션 GIF 하나**다(설계: `replay/MissionGifPanel.tsx` 헤더). 대신 "미션 GIF
+ * 만들기" 버튼 하나가 미션 선택 화면으로 넘긴다. `ReplayShareFlow`(카드·링크·
+ * 등급 선택)의 코드는 그대로 남아 있고, 이 경로에서만 빠졌다.
+ */
 function AggregateReplayShowcase({
   replay,
-  canPublish,
-  publisherUid,
-  shareOpen,
-  shareFormat,
-  onOpenShare,
-  onCloseShare,
+  onOpenGif,
 }: {
   replay: NonNullable<
     ReturnType<typeof buildLightweightReplayFromCompletedTasks>
   >["replay"];
-  canPublish: boolean;
-  publisherUid?: string;
-  shareOpen: boolean;
-  shareFormat?: ReplayShareFormat;
-  onOpenShare: (format: ReplayShareFormat) => void;
-  onCloseShare: () => void;
+  onOpenGif: () => void;
 }) {
   const { t } = useTranslation();
   return (
     <section className="space-y-4" data-testid="work-history-replay-showcase">
-      <ReplayHeadline
-        replay={replay}
-        sourceErrors={{}}
-        onShare={onOpenShare}
-        t={t}
-      />
+      <ReplayHeadline replay={replay} sourceErrors={{}} t={t} />
       <ReplayCast cast={replay.cast} t={t} />
-      {shareOpen && (
-        <ReplayShareFlow
-          replay={replay}
-          canPublish={canPublish}
-          publisherUid={publisherUid}
-          onClose={onCloseShare}
-          defaultFormat={shareFormat}
-        />
-      )}
+      <div>
+        <button
+          type="button"
+          data-testid="work-history-open-mission-gif"
+          onClick={onOpenGif}
+          className="rounded border border-violet-500/50 px-2.5 py-1 text-xs text-violet-200 transition hover:bg-violet-500/10"
+        >
+          {t("workHistory.replay.gif.open")}
+        </button>
+      </div>
     </section>
   );
 }
 
 export function WorkHistoryTab() {
   const { t } = useTranslation();
-  const { user } = useAuth();
-  const { canMergeInProject } = useMergePermission();
   const currentProject = useProjectStore((s) => s.currentProject);
   const tasks = useTaskStore((s) => s.tasks);
   const subscribeToTasks = useTaskStore((s) => s.subscribeToTasks);
@@ -320,23 +299,10 @@ export function WorkHistoryTab() {
   }, [currentProject?.id, subscribeToTasks]);
 
   // Replay 는 **추가 뷰**다 — 기존 태스크 뷰의 상태·구독은 그대로 두고, 미션
-  // 구독(useReplayableMissions/useMissionReplay)은 Replay 를 실제로 열었을 때만
-  // 마운트된다(리스너를 안 쓰는 화면에 켜 두지 않는다).
+  // 구독(useProjectMissions)은 Replay 를 실제로 열었을 때만 마운트된다
+  // (리스너를 안 쓰는 화면에 켜 두지 않는다).
   const [view, setView] = useState<WorkHistoryView>("tasks");
   const [replayMissionId, setReplayMissionId] = useState<string | null>(null);
-  const [lightweightShareOpen, setLightweightShareOpen] = useState(false);
-  const [lightweightShareFormat, setLightweightShareFormat] = useState<
-    ReplayShareFormat | undefined
-  >(undefined);
-
-  const openLightweightShare = (format: ReplayShareFormat = "link") => {
-    setLightweightShareFormat(format);
-    setLightweightShareOpen(true);
-  };
-  const closeLightweightShare = () => {
-    setLightweightShareOpen(false);
-    setLightweightShareFormat(undefined);
-  };
 
   // 감사 로그 티켓 상세의 "Replay 보기" 크로스링크 → Layout 이 이 탭을
   // 앞으로 가져온 뒤, 여기서 missionId 를 직접 읽어 Replay 뷰를 연다
@@ -495,15 +461,6 @@ export function WorkHistoryTab() {
         )}
 
         <div className="ml-auto flex flex-shrink-0 gap-1">
-          {view === "tasks" && lightweightReplay && (
-            <button
-              type="button"
-              onClick={() => openLightweightShare("link")}
-              className="rounded border border-violet-500/50 px-2 py-0.5 text-xs text-violet-200 transition hover:bg-violet-500/10"
-            >
-              {t("workHistory.replay.share")}
-            </button>
-          )}
           {(["tasks", "replay"] as const).map((mode) => (
             <button
               key={mode}
@@ -529,53 +486,22 @@ export function WorkHistoryTab() {
       </div>
 
       {view === "replay" ? (
-        replayMissionId === LIGHTWEIGHT_REPLAY_MISSION_ID &&
-        lightweightReplay ? (
-          <>
-            <MissionReplayDetailView
-              state={{
-                status: "ready",
-                replay: lightweightReplay.replay,
-                sourceErrors: {},
-              }}
-              onBack={() => {
-                setReplayMissionId(null);
-                closeLightweightShare();
-              }}
-              onReload={() => undefined}
-              onShare={openLightweightShare}
-              t={t}
-            />
-            {lightweightShareOpen && (
-              <div className="mt-4">
-                <ReplayShareFlow
-                  replay={lightweightReplay.replay}
-                  canPublish={canMergeInProject(
-                    lightweightReplay.replay.projectId,
-                  )}
-                  publisherUid={user?.uid}
-                  onClose={closeLightweightShare}
-                  defaultFormat={lightweightShareFormat}
-                />
-              </div>
-            )}
-          </>
-        ) : replayMissionId ? (
-          <MissionReplayDetail
-            missionId={replayMissionId}
-            projectId={currentProject.id}
-            onBack={() => setReplayMissionId(null)}
-          />
-        ) : (
-          <MissionReplayList
-            projectId={currentProject.id}
-            fallbackMissions={
-              lightweightReplay ? [lightweightReplay.mission] : []
-            }
-            onSelect={setReplayMissionId}
-            onCreateMission={openMissionCreator}
-          />
-        )
+        // 미션 선택 → GIF 하나. 미션 목록(MissionReplayList)·상세
+        // (MissionReplayDetail)·공유 마법사(ReplayShareFlow)는 코드로 남아
+        // 있지만 기본 경로에서는 이 패널 하나로 대체된다.
+        <MissionGifPanel
+          projectId={currentProject.id}
+          // ★기간 필터를 걸지 않은 태스크 전부를 넘긴다 — 미션 소속은 기간과
+          // 무관한 사실이고, 필터된 목록을 넘기면 30일 밖 태스크가 미션에서
+          // 통째로 빠진 GIF 가 나온다.
+          tasks={tasks}
+          activitiesByTaskId={activitiesMap}
+          mergeHistoryByTaskId={mergeByTask}
+          fallbackMission={lightweightReplay}
+          selectedMissionId={replayMissionId}
+          onSelectMission={setReplayMissionId}
+          onCreateMission={openMissionCreator}
+        />
       ) : (
         <>
           <FirstMissionShareNudge
@@ -596,12 +522,10 @@ export function WorkHistoryTab() {
           {lightweightReplay ? (
             <AggregateReplayShowcase
               replay={lightweightReplay.replay}
-              canPublish={canMergeInProject(lightweightReplay.replay.projectId)}
-              publisherUid={user?.uid}
-              shareOpen={lightweightShareOpen}
-              shareFormat={lightweightShareFormat}
-              onOpenShare={openLightweightShare}
-              onCloseShare={closeLightweightShare}
+              onOpenGif={() => {
+                setView("replay");
+                setReplayMissionId(null);
+              }}
             />
           ) : (
             <ShareCard stats={shareStats} />

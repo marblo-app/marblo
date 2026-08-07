@@ -24,6 +24,7 @@ import type {
   ReplaySourceState,
 } from "../types/missionReplay";
 import { buildMissionReplay } from "../lib/replay/missionReplay";
+import { subscribeToMissions } from "../services/missionService";
 import {
   subscribeToMissionReplay,
   subscribeToReplayableMissions,
@@ -263,4 +264,88 @@ export function useMissionReplay(
   }, [missionId, projectId, nonce]);
 
   return { state, reload };
+}
+
+// ── 미션 GIF 선택 인프라 ────────────────────────────────────────
+
+/**
+ * 프로젝트의 미션 **전부**(완료 여부 무관).
+ *
+ * `useReplayableMissions` 와 갈라 둔 이유: 저쪽은 **발행 후보**(완료 미션)를
+ * 세는 축이고, 여기는 **고를 수 있는 것**을 세는 축이다. 둘을 한 훅으로 합치면
+ * "완료 미션만 목록"이라는 발행 규칙이 선택 UI 에 그대로 새어 들어간다
+ * (`lib/replay/missionPicker.ts` 헤더).
+ *
+ * ★공용 `subscribeToCollection` 은 실패를 빈 배열로 접는다 — 이 훅은 그래서
+ * `denied` 를 말하지 못한다. 선택 목록이 비면 화면은 경량 Replay(집계) 로
+ * 떨어지므로 사용자가 아무것도 못 하는 상태가 되지는 않는다.
+ */
+export function useProjectMissions(projectId: string | null | undefined): {
+  missions: Mission[];
+  loading: boolean;
+} {
+  const [missions, setMissions] = useState<Mission[]>([]);
+  const [loading, setLoading] = useState(Boolean(projectId));
+
+  useEffect(() => {
+    if (!projectId) {
+      setMissions([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const unsubscribe = subscribeToMissions(projectId, (next) => {
+      setMissions(next);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, [projectId]);
+
+  return { missions, loading };
+}
+
+export interface MissionExportReplayInput {
+  mission: Mission;
+  /** 프로젝트 태스크 전부. 소속 판정은 집계 코어가 `contextId` 로 한다. */
+  tasks: readonly Task[];
+  activitiesByTaskId?: Readonly<Record<string, readonly Activity[]>>;
+  mergeHistoryByTaskId?: Readonly<Record<string, MergeHistoryEntry>>;
+  now?: Date;
+}
+
+/**
+ * 선택된 미션 1건 → 익스포트용 `MissionReplay`.
+ *
+ * ★새로 읽지 않는다. 완료이력 탭이 이미 구독 중인 태스크·activity·머지이력을
+ * 그대로 받아 조립한다 — 미션을 고를 때마다 Firestore 를 다시 때리면 선택
+ * 자체가 비싸지고(`missionReplayService` 는 미션당 6소스 재읽기다), GIF 는
+ * 어차피 화면에 이미 있는 사실만 그린다.
+ *
+ * 진행 중 미션도 허용한다(`includeIncomplete`) — 그래야 오늘 돌린 미션으로 GIF
+ * 를 만들 수 있고, 결론 문구는 데이터 파생이라 완료로 위장하지 않는다.
+ */
+export function buildMissionExportReplay({
+  mission,
+  tasks,
+  activitiesByTaskId,
+  mergeHistoryByTaskId,
+  now,
+}: MissionExportReplayInput): MissionReplay | null {
+  const missionTasks = tasks.filter((task) => task.contextId === mission.id);
+  const mergeHistory = missionTasks
+    .map((task) => mergeHistoryByTaskId?.[task.id])
+    .filter((entry): entry is MergeHistoryEntry => Boolean(entry));
+
+  return buildMissionReplay(
+    {
+      mission,
+      tasks: missionTasks,
+      activitiesByTaskId,
+      mergeHistory,
+      auditLogs: [],
+      projectAuditEvents: [],
+      agents: [],
+    },
+    { now, includeIncomplete: true },
+  );
 }
