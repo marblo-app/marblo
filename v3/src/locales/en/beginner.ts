@@ -69,6 +69,14 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.live.progress": "{done}/{total} done",
   "beginner.live.label": "Happening now",
 
+  // ── ⑤ Mini board + mini agent view ──────────────────────────────────────
+  "beginner.board.label": "Work in flight",
+  "beginner.board.todo": "To do",
+  "beginner.board.doing": "In progress",
+  "beginner.board.done": "Done",
+  "beginner.board.more": "+{count} more",
+  "beginner.agents.label": "Who's working",
+
   // ── Chat ────────────────────────────────────────────────────────────────
   "beginner.chat.title": "Talk to Marblo",
   "beginner.chat.hint": "Keep the conversation going right here.",

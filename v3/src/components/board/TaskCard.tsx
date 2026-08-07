@@ -114,23 +114,39 @@ function timeAgo(date: Date): string {
 
 interface TaskCardProps {
   task: Task;
-  onClick: (task: Task) => void;
+  /** 생략하면 카드가 클릭 대상이 아니다(비기너 미니 보드엔 상세 모달이 없다). */
+  onClick?: (task: Task) => void;
   onFlowNavigate?: (flowId: string, nodeId: string) => void;
+  /**
+   * ★경량 렌더. 비기너 모드 미니 보드가 이 카드를 **그대로** 재사용하되
+   * (중복 구현 금지) 워크트리 pill·diff 진입·모델 스탬프·PR/Flow/우선순위 칩·
+   * 담당자·생성시각을 전부 뺀 형태로 그린다.
+   *
+   * 뺀 것들은 장식이 아니라 "승격 후에 배우는 것" 이다. 비기너에게 정확한
+   * 해상도는 제목 + 지금 굴러가는가 + 막혔는가, 딱 셋이다.
+   */
+  compact?: boolean;
 }
 
-export function TaskCard({ task, onClick, onFlowNavigate }: TaskCardProps) {
+export function TaskCard({
+  task,
+  onClick,
+  onFlowNavigate,
+  compact,
+}: TaskCardProps) {
   return (
     <TaskCardContent
       task={task}
       onClick={onClick}
       onFlowNavigate={onFlowNavigate}
+      compact={compact}
     />
   );
 }
 
 interface DraggableTaskCardProps {
   task: Task;
-  onClick: (task: Task) => void;
+  onClick?: (task: Task) => void;
   onFlowNavigate?: (flowId: string, nodeId: string) => void;
 }
 
@@ -167,6 +183,7 @@ function TaskCardContent({
   onClick,
   onFlowNavigate,
   isDragging,
+  compact,
 }: TaskCardProps & { isDragging?: boolean }) {
   const { t } = useTranslation();
   const priority = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG[1];
@@ -211,16 +228,20 @@ function TaskCardContent({
   // ensureFresh is TTL+in-flight gated, so a board full of cards mounting at
   // once still costs at most one worktree:list IPC per minute.
   useEffect(() => {
+    // compact 는 워크트리를 아예 그리지 않는다 — 미니 보드 카드가 마운트될
+    // 때마다 worktree:list IPC 를 태울 이유가 없다.
+    if (compact) return;
     ensureFreshWorktrees().catch(() => {});
-  }, [ensureFreshWorktrees]);
+  }, [compact, ensureFreshWorktrees]);
 
   // A claimed task without a matching worktree is the "worktree was created
   // after our snapshot" signature (claim → spawn → worktree add) — re-check.
   const missingClaimedWorktree = Boolean(task.claimedBy) && !matchingWorktree;
   useEffect(() => {
+    if (compact) return;
     if (!missingClaimedWorktree) return;
     ensureFreshWorktrees().catch(() => {});
-  }, [missingClaimedWorktree, task.status, ensureFreshWorktrees]);
+  }, [compact, missingClaimedWorktree, task.status, ensureFreshWorktrees]);
 
   // Resolve the claimant agent → owner userId so we can show whose machine
   // is currently hosting the agent and whether that teammate is online.
@@ -237,7 +258,8 @@ function TaskCardContent({
   // 구체 모델 스탬프(model@effort). 없으면 null → 배지는 벤더로 fallback.
   const agentModelLabel = spawnedModelLabel(claimingAgent?.spawnedModel);
   const ownerId = claimingAgent?.ownerId;
-  const lastHeartbeatAt = usePresence(ownerId);
+  // compact 는 팀 presence 를 안 그린다 → 구독도 걸지 않는다(undefined = no-op).
+  const lastHeartbeatAt = usePresence(compact ? undefined : ownerId);
   // Presence 1차 판정은 에이전트 프로세스의 직접 시그널(agent.status)을 본다.
   // - working/idle 이면 inject_message 가 즉시 잡힐 거라 online
   // - stopped/error 면 오프라인 배너로 회수 권유
@@ -256,6 +278,46 @@ function TaskCardContent({
     }
   }
 
+  if (compact) {
+    // 지금 굴러가는가 — 담당 에이전트의 프로세스 시그널만 본다. presence(팀원이
+    // 앱을 켜뒀나)는 협업 개념이라 비기너 화면에서는 노이즈다.
+    const running = claimingAgent?.status === "working";
+    return (
+      <div
+        data-testid="beginner-mini-task"
+        data-task-status={task.status}
+        className={`relative rounded-md border border-gray-700/50 bg-gray-800 px-2 py-1.5 ${statusHighlight} ${
+          onClick ? "cursor-pointer hover:border-gray-600" : ""
+        }`}
+        title={task.title}
+        onClick={onClick ? () => onClick(task) : undefined}
+      >
+        {pulsing && (
+          <span aria-hidden="true" className="mb-card-pulse-overlay" />
+        )}
+        <div className="flex items-start gap-1.5">
+          <span aria-hidden className="text-[11px] leading-4">
+            {roleIcon}
+          </span>
+          <span className="min-w-0 flex-1 text-[11px] leading-4 text-gray-200 line-clamp-2">
+            {task.title}
+          </span>
+          {running && (
+            <span
+              aria-hidden
+              className="mt-1 h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-green-400"
+            />
+          )}
+        </div>
+        {(isBlocked || isFailed) && (
+          <span className="mt-1 inline-flex rounded bg-amber-500/15 px-1 py-0.5 text-[10px] font-medium text-amber-300">
+            ⚠ {t("board.taskCard.stuck")}
+          </span>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       className={`relative cursor-pointer rounded-lg bg-gray-800 p-3 shadow hover:bg-gray-750 transition-colors border border-gray-700/50 hover:border-gray-600 ${statusHighlight} ${
@@ -263,7 +325,7 @@ function TaskCardContent({
       } ${isLaneTask(task.contextId) ? "border-l-2 border-l-amber-500" : ""} ${
         isMissionTask(task.contextId) ? "border-l-2 border-l-violet-500" : ""
       }`}
-      onClick={() => onClick(task)}
+      onClick={() => onClick?.(task)}
     >
       {pulsing && <span aria-hidden="true" className="mb-card-pulse-overlay" />}
       <div className="flex items-start justify-between gap-2 mb-2">

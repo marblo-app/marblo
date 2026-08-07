@@ -1,6 +1,6 @@
 import { useDroppable } from "@dnd-kit/core";
 import type { Task, TaskStatus } from "../../types/task";
-import { DraggableTaskCard } from "./TaskCard";
+import { DraggableTaskCard, TaskCard } from "./TaskCard";
 import { useTranslation } from "../../lib/i18n";
 
 const STATUS_CONFIG: Record<
@@ -23,8 +23,24 @@ const STATUS_CONFIG: Record<
 interface KanbanColumnProps {
   status: TaskStatus;
   tasks: Task[];
-  onTaskClick: (task: Task) => void;
+  /** 생략하면 카드를 클릭해도 아무 일도 없다(비기너 미니 보드엔 상세가 없다). */
+  onTaskClick?: (task: Task) => void;
   isDropTarget?: boolean;
+  /**
+   * ★경량 컬럼. 비기너 모드 미니 보드가 이 컬럼을 **그대로** 재사용한다
+   * (중복 구현 금지). 드래그·드롭 힌트·빈칸 안내를 빼고, 카드도 compact 로
+   * 그린다. 높이는 부모가 정하도록 flex 만 남긴다.
+   */
+  compact?: boolean;
+  /**
+   * 헤더 라벨 덮어쓰기. 미니 보드는 7상태를 3칸으로 접기 때문에 대표 상태
+   * (IN_PROGRESS)의 색은 쓰되 라벨은 "진행 중" 처럼 접힌 이름이어야 한다.
+   */
+  label?: string;
+  /** 라벨 옆 배지에 쓸 개수. 생략하면 `tasks.length`(=그려진 카드 수). */
+  count?: number;
+  /** 상한 때문에 안 그린 카드 수. 0 초과일 때만 "+N" 를 붙인다. */
+  hiddenCount?: number;
 }
 
 export function KanbanColumn({
@@ -32,17 +48,60 @@ export function KanbanColumn({
   tasks,
   onTaskClick,
   isDropTarget,
+  compact,
+  label,
+  count,
+  hiddenCount = 0,
 }: KanbanColumnProps) {
   const { t } = useTranslation();
   const config = STATUS_CONFIG[status];
 
+  // compact 는 DndContext 밖에서 마운트된다. useDroppable 은 기본 컨텍스트
+  // (dispatch=noop)로 안전하게 떨어지므로 훅 순서를 흔들지 않고 그대로 둔다 —
+  // isOver 가 영원히 false 라 드롭 하이라이트는 자연히 죽는다.
   const { setNodeRef, isOver } = useDroppable({
     id: `column-${status}`,
     data: { status },
   });
 
-  const highlight = isOver && isDropTarget;
-  const invalid = isOver && !isDropTarget;
+  const highlight = !compact && isOver && isDropTarget;
+  const invalid = !compact && isOver && !isDropTarget;
+
+  if (compact) {
+    return (
+      <div
+        data-testid="beginner-mini-column"
+        data-column-status={status}
+        className="flex min-w-0 flex-1 flex-col rounded-md border border-gray-700/50 bg-gray-900/50"
+      >
+        <div className="flex items-center justify-between gap-1 border-b border-gray-700/50 px-2 py-1">
+          <span
+            className={`truncate text-[10px] font-semibold ${config.color}`}
+          >
+            {label ?? config.label}
+          </span>
+          <span
+            className={`inline-flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-medium text-white ${config.bg}`}
+          >
+            {count ?? tasks.length}
+          </span>
+        </div>
+        <div className="flex-1 space-y-1 overflow-y-auto p-1.5">
+          {tasks.map((task) => (
+            <TaskCard key={task.id} task={task} compact />
+          ))}
+          {hiddenCount > 0 && (
+            <p className="px-1 text-[10px] text-gray-500">
+              {t("beginner.board.more", { count: hiddenCount })}
+            </p>
+          )}
+          {tasks.length === 0 && (
+            <p className="py-2 text-center text-[10px] text-gray-600">—</p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

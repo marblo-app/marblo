@@ -190,6 +190,8 @@ export const agents: Record<keyof typeof koAgents, string> = {
 
   // ── Team summary ────────────────────────────────────────────
   "agents.summary.totalTasks": "Total tasks",
+  "agents.summary.unit": "agents",
+  "agents.summary.none": "No agents on the job yet",
 
   // ── Terminal fleet cell ─────────────────────────────────────
   "agents.terminalCell.closeConfirm": 'Close terminal "{name}"?',

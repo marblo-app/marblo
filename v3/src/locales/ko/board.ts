@@ -32,6 +32,8 @@ export const board = {
   "board.taskCard.viewingWorktree": "지금 이 워크트리를 보는 중",
   "board.taskCard.assignee": "담당자 {status}",
   "board.taskCard.unassigned": "미배정",
+  // 비기너 미니 보드용 — BLOCKED/FAILED 를 별도 컬럼 대신 카드 위 한 칩으로.
+  "board.taskCard.stuck": "막힘",
 
   // TaskBodySections — section headings
   "board.section.goal": "목표",

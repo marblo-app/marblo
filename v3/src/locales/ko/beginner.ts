@@ -67,6 +67,17 @@ export const beginner = {
   "beginner.live.progress": "{done}/{total} 완료",
   "beginner.live.label": "지금 하는 일",
 
+  // ── ⑤ 미니 보드 + 미니 에이전트 뷰 ──────────────────────────────────────
+  // 보드·에이전트는 마블로의 핵심이라 비기너에게도 축소판을 보여 준다.
+  // 워크트리·diff·모델명은 여전히 감춘다 — 티켓이 움직이는 것과 사람이(에이전트가)
+  // 붙어 있다는 것만.
+  "beginner.board.label": "일감 흐름",
+  "beginner.board.todo": "할 일",
+  "beginner.board.doing": "진행 중",
+  "beginner.board.done": "완료",
+  "beginner.board.more": "+{count}개 더",
+  "beginner.agents.label": "일하는 팀",
+
   // ── 챗 ──────────────────────────────────────────────────────────────────
   "beginner.chat.title": "마블로와 대화하기",
   "beginner.chat.hint": "여기에 이어서 말을 걸 수 있어요.",

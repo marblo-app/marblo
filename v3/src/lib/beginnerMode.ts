@@ -14,11 +14,14 @@
  *  3. {@link summarizeBeginnerProgress} — ★the S4 fix: what the inline mini-live
  *     strip says while the orchestrator works, so "첫 티켓을 보냈는데 화면에서
  *     아무 일도 안 일어난다"(activation-friction-diagnosis §S4) stops happening.
+ *  4. {@link groupBeginnerBoard} — how the 7-status board collapses into the
+ *     3-column mini board a beginner sees.
  *
  * Everything is a pure function of its inputs (no DOM, no storage, no clock) so
  * the activation-critical branches are unit-testable in the node test env. The
  * store (`beginnerModeStore`) wires localStorage + Date.now() into these.
  */
+import type { TaskStatus } from "../types/task";
 
 export type BeginnerModeState = "beginner" | "advanced";
 
@@ -257,4 +260,90 @@ export function summarizeBeginnerProgress(
     return { ...base, phase: "stalled", showStallHelp: true };
   }
   return { ...base, phase: input.sentAt > 0 ? "thinking" : "idle" };
+}
+
+// ── ★미니 보드: 7상태 → 3컬럼 압축 ──────────────────────────────────────────
+
+/**
+ * 비기너가 보는 컬럼. 어드밴스드 보드의 5컬럼(+정체 레인)을 셋으로 접는다.
+ *
+ * 접는 기준은 "유저가 지금 할 수 있는 게 뭔가" 다. CLAIMED/IN_PROGRESS/REVIEW
+ * 의 차이는 에이전트 워크플로의 내부 사정이라 비기너에게는 전부 "진행 중" 이고,
+ * 어느 칸에 있든 유저가 할 일은 똑같이 없다.
+ */
+export const BEGINNER_BOARD_COLUMNS = ["todo", "doing", "done"] as const;
+export type BeginnerBoardColumn = (typeof BEGINNER_BOARD_COLUMNS)[number];
+
+/**
+ * 압축 컬럼을 대표하는 원래 상태. 미니 보드가 어드밴스드 `KanbanColumn` 을
+ * 그대로 재사용하기 때문에(중복 구현 금지) 컬럼 색·카운트 배지는 이 상태에서
+ * 나온다 — 라벨만 비기너 문구로 덮어쓴다.
+ */
+export const BEGINNER_COLUMN_STATUS: Record<BeginnerBoardColumn, TaskStatus> = {
+  todo: "TODO",
+  doing: "IN_PROGRESS",
+  done: "DONE",
+};
+
+/** 컬럼당 그리는 카드 수 상한. 넘치면 "+N" 로만 알린다. */
+export const BEGINNER_COLUMN_LIMIT = 4;
+
+/**
+ * ★BLOCKED/FAILED 는 "진행 중" 으로 접는다.
+ *
+ * 감추는 선택지는 없다 — 막힌 티켓이 화면에서 사라지는 것이야말로 이 화면이
+ * 고치려는 dead-end 다. 그렇다고 "실패" 컬럼을 따로 세우면 비기너에게 처음
+ * 보이는 게 빨간 칸이 된다. 그래서 칸은 "아직 안 끝난 일" 로 두고, 막혔다는
+ * 사실은 카드 자체가(테두리 + 막힘 칩) 말한다.
+ */
+export function beginnerBoardColumnFor(
+  status: TaskStatus,
+): BeginnerBoardColumn {
+  if (status === "DONE") return "done";
+  if (status === "TODO") return "todo";
+  return "doing";
+}
+
+export interface BeginnerBoardColumnView<T> {
+  column: BeginnerBoardColumn;
+  /** 재사용하는 `KanbanColumn` 에 넘길 대표 상태. */
+  status: TaskStatus;
+  /** 상한까지 자른 카드들. 입력 순서를 유지한다. */
+  tasks: T[];
+  /** 자르기 **전** 총 개수 — 배지는 항상 진짜 개수를 보여야 한다. */
+  total: number;
+  /** 상한 때문에 안 그린 수. 0 이면 "+N" 를 숨긴다. */
+  hiddenCount: number;
+}
+
+/**
+ * 티켓을 3컬럼으로 접고 컬럼당 상한까지 자른다.
+ *
+ * 자르기는 여기서 한다(컴포넌트가 아니라): 티켓 200개짜리 프로젝트에서 비기너
+ * 셸의 미니 보드가 챗을 화면 밖으로 밀어내면 안 되고, "총 개수는 진짜, 그린
+ * 개수는 상한" 이라는 규칙은 눈으로 확인하기 어려워 테스트로 못박아야 한다.
+ */
+export function groupBeginnerBoard<T extends { status: TaskStatus }>(
+  tasks: readonly T[],
+  limit: number = BEGINNER_COLUMN_LIMIT,
+): BeginnerBoardColumnView<T>[] {
+  const buckets: Record<BeginnerBoardColumn, T[]> = {
+    todo: [],
+    doing: [],
+    done: [],
+  };
+  for (const task of tasks)
+    buckets[beginnerBoardColumnFor(task.status)].push(task);
+
+  return BEGINNER_BOARD_COLUMNS.map((column) => {
+    const all = buckets[column];
+    const capped = limit >= 0 ? all.slice(0, limit) : all;
+    return {
+      column,
+      status: BEGINNER_COLUMN_STATUS[column],
+      tasks: capped,
+      total: all.length,
+      hiddenCount: all.length - capped.length,
+    };
+  });
 }

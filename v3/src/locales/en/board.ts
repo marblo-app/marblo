@@ -34,6 +34,7 @@ export const board: Record<keyof typeof koBoard, string> = {
   "board.taskCard.viewingWorktree": "Currently viewing this worktree",
   "board.taskCard.assignee": "Assignee {status}",
   "board.taskCard.unassigned": "Unassigned",
+  "board.taskCard.stuck": "Stuck",
 
   // TaskBodySections — section headings
   "board.section.goal": "Goal",

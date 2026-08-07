@@ -182,6 +182,8 @@ export const agents = {
 
   // ── Team summary ────────────────────────────────────────────
   "agents.summary.totalTasks": "전체 태스크",
+  "agents.summary.unit": "명",
+  "agents.summary.none": "아직 붙은 에이전트가 없어요",
 
   // ── Terminal fleet cell ─────────────────────────────────────
   "agents.terminalCell.closeConfirm": '터미널 "{name}" 을 닫을까요?',

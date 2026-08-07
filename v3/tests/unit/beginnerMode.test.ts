@@ -8,9 +8,13 @@ import {
   serializeBeginnerRecord,
   shouldPromote,
   summarizeBeginnerProgress,
+  BEGINNER_COLUMN_LIMIT,
+  beginnerBoardColumnFor,
+  groupBeginnerBoard,
   type BeginnerModeRecord,
   type PriorInstallMarkers,
 } from "../../src/lib/beginnerMode";
+import type { TaskStatus } from "../../src/types/task";
 
 const FRESH: PriorInstallMarkers = {
   onboardingProgress: false,
@@ -273,5 +277,72 @@ describe("summarizeBeginnerProgress — ★S4 인라인 라이브", () => {
       completedTasks: 3,
       workingAgents: 2,
     });
+  });
+});
+
+describe("groupBeginnerBoard — 7상태 → 미니 보드 3컬럼", () => {
+  const task = (id: string, status: TaskStatus) => ({ id, status });
+
+  it("TODO 만 '할 일', DONE 만 '완료'", () => {
+    const [todo, doing, done] = groupBeginnerBoard([
+      task("a", "TODO"),
+      task("b", "DONE"),
+    ]);
+    expect(todo.tasks.map((x) => x.id)).toEqual(["a"]);
+    expect(doing.tasks).toEqual([]);
+    expect(done.tasks.map((x) => x.id)).toEqual(["b"]);
+  });
+
+  it("CLAIMED·IN_PROGRESS·REVIEW 는 전부 '진행 중' 한 칸으로 접힌다", () => {
+    const [, doing] = groupBeginnerBoard([
+      task("a", "CLAIMED"),
+      task("b", "IN_PROGRESS"),
+      task("c", "REVIEW"),
+    ]);
+    expect(doing.tasks.map((x) => x.id)).toEqual(["a", "b", "c"]);
+    expect(doing.total).toBe(3);
+  });
+
+  it("★BLOCKED/FAILED 는 감추지 않는다 — '진행 중' 에 남는다", () => {
+    // 감추면 막힌 티켓이 화면에서 사라진다 = 이 화면이 고치려는 바로 그 dead-end.
+    const [todo, doing, done] = groupBeginnerBoard([
+      task("a", "BLOCKED"),
+      task("b", "FAILED"),
+    ]);
+    expect(beginnerBoardColumnFor("BLOCKED")).toBe("doing");
+    expect(beginnerBoardColumnFor("FAILED")).toBe("doing");
+    expect(doing.total).toBe(2);
+    expect(todo.total + done.total).toBe(0);
+  });
+
+  it("컬럼 순서는 항상 할 일 → 진행 중 → 완료", () => {
+    expect(groupBeginnerBoard([]).map((c) => c.column)).toEqual([
+      "todo",
+      "doing",
+      "done",
+    ]);
+  });
+
+  it("★배지 개수는 자르기 전 진짜 개수, 그린 카드만 상한을 받는다", () => {
+    const many = Array.from({ length: BEGINNER_COLUMN_LIMIT + 3 }, (_, i) =>
+      task(`t${i}`, "TODO"),
+    );
+    const [todo] = groupBeginnerBoard(many);
+    expect(todo.total).toBe(BEGINNER_COLUMN_LIMIT + 3);
+    expect(todo.tasks).toHaveLength(BEGINNER_COLUMN_LIMIT);
+    expect(todo.hiddenCount).toBe(3);
+  });
+
+  it("상한 이하이면 숨긴 게 없다", () => {
+    const [todo] = groupBeginnerBoard([task("a", "TODO")]);
+    expect(todo.hiddenCount).toBe(0);
+  });
+
+  it("재사용하는 KanbanColumn 에 넘길 대표 상태를 함께 준다", () => {
+    expect(groupBeginnerBoard([]).map((c) => c.status)).toEqual([
+      "TODO",
+      "IN_PROGRESS",
+      "DONE",
+    ]);
   });
 });
