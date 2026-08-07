@@ -30,6 +30,8 @@ const db = {} as never;
 
 beforeEach(() => __resetStore());
 
+const PROJECT_ID = "proj-1";
+
 describe("[H1] force escape hatch — validateFrom undefined skips in-txn re-check", () => {
   it("force 경로(validateFrom 미지정): 상태머신상 불가능한 전이도 통과한다", async () => {
     // TODO → DONE 은 상태머신상 불가능. force=true 면 핸들러가 validateFrom 을
@@ -88,7 +90,11 @@ describe("[H1] force escape hatch — validateFrom undefined skips in-txn re-che
 
 describe("[M3] dispatch_task BLOCKED — projection 경로로 라우팅", () => {
   it("BLOCKED 마킹이 task.status + projection.currentStatus + blockerSummary 를 함께 갱신", async () => {
-    await setDoc(doc(db, "tasks", "t1"), { status: "TODO", missionId: "m1" });
+    await setDoc(doc(db, "tasks", "t1"), {
+      status: "TODO",
+      missionId: "m1",
+      projectId: PROJECT_ID,
+    });
     await setDoc(doc(db, "missions", "m1"), { goal: "ship it" });
 
     // dispatch_task 가 선행 미완료 시 호출하는 형태 그대로 (validateFrom 없음 =
@@ -114,7 +120,11 @@ describe("[M3] dispatch_task BLOCKED — projection 경로로 라우팅", () => 
   it("BLOCKED 마킹이 mission statusCounts 에 반영 (get_projection 이 실제 status 와 일치)", async () => {
     await setDoc(doc(db, "missions", "m1"), { goal: "ship it" });
     for (const t of ["t1", "t2", "t3"]) {
-      await setDoc(doc(db, "tasks", t), { status: "TODO", missionId: "m1" });
+      await setDoc(doc(db, "tasks", t), {
+        status: "TODO",
+        missionId: "m1",
+        projectId: PROJECT_ID,
+      });
     }
 
     await applyProjection(db, "t1", {

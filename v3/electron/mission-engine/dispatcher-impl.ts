@@ -225,13 +225,36 @@ export function createTaskDispatcher(
   }
 
   // 미션에 이미 생성된 (비종료) task id 들. 앱 재시작 후 dispatch step 이 다시
-  // 돌 때, 새로 만들지 않고 이걸로 재연결해 중복 dispatch 를 막는다. missionId 는
-  // dispatch/fix 가 task 에 태깅하므로 단일 필드 쿼리(복합 인덱스 불필요).
+  // 돌 때, 새로 만들지 않고 이걸로 재연결해 중복 dispatch 를 막는다.
+  //
+  // ★projectId 동등조건 필수 (티켓 4ov5wbQZ25XUXHZVhxdh): firestore.rules 의
+  // tasks read 는 isProjectMember(resource.data.projectId) 이고 Firestore 는
+  // list 를 쿼리 제약식으로 평가하므로, missionId 단독 쿼리는 항상
+  // PERMISSION_DENIED 였다(catch 가 삼켜 "재연결이 안 되고 매번 새로 dispatch"
+  // 로 나타난다). projectId 는 미션 문서에서 단건 get 으로 읽는다 — 포트
+  // 시그니처(findMissionTaskIds(missionId))를 건드리지 않기 위해서다.
+  // 두 조건 모두 동등비교라 복합 인덱스는 필요 없다.
   async function findMissionTaskIds(missionId: string): Promise<string[]> {
     await ready;
     try {
+      const missionSnap = await getDoc(doc(db, "missions", missionId));
+      const projectId = missionSnap.exists()
+        ? String(
+            (missionSnap.data() as { projectId?: unknown }).projectId ?? "",
+          ).trim()
+        : "";
+      if (!projectId) {
+        log("findMissionTaskIds skipped — mission has no projectId", {
+          missionId,
+        });
+        return [];
+      }
       const snap = await getDocs(
-        query(collection(db, "tasks"), where("missionId", "==", missionId)),
+        query(
+          collection(db, "tasks"),
+          where("projectId", "==", projectId),
+          where("missionId", "==", missionId),
+        ),
       );
       return snap.docs
         .filter((d) => {

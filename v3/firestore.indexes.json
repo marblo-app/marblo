@@ -304,6 +304,14 @@
         { "fieldPath": "missionId", "order": "ASCENDING" },
         { "fieldPath": "publishedAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "dependsOn", "arrayConfig": "CONTAINS" }
+      ]
     }
   ],
   "fieldOverrides": []

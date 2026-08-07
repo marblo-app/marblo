@@ -50,13 +50,23 @@ export function createFixRunner(deps: FixRunnerDeps): FixRunner {
   const pollMs = deps.pollIntervalMs ?? POLL_INTERVAL_MS;
 
   // 이 미션에 이미 만들어진 가장 최근 task 한 개. 멱등 재연결용 — 있으면 새로
-  // 만들지 않고 그 task 를 폴링한다. missionId 단일 필드 쿼리(복합 인덱스 불필요).
+  // 만들지 않고 그 task 를 폴링한다.
+  //
+  // ★projectId 동등조건 필수 (티켓 4ov5wbQZ25XUXHZVhxdh): tasks read 룰이
+  // isProjectMember(resource.data.projectId) 라, projectId 를 고정하지 않은
+  // list 는 Firestore 가 통째로 거부한다. 둘 다 동등비교라 복합 인덱스는 불필요.
   async function findExistingMissionTask(
-    missionId: string
+    missionId: string,
+    projectId: string,
   ): Promise<{ id: string; status?: string } | null> {
+    if (!projectId.trim()) return null;
     try {
       const snap = await getDocs(
-        query(collection(db, "tasks"), where("missionId", "==", missionId))
+        query(
+          collection(db, "tasks"),
+          where("projectId", "==", projectId),
+          where("missionId", "==", missionId),
+        ),
       );
       if (snap.empty) return null;
       const docs = snap.docs.map((d) => {
@@ -104,7 +114,10 @@ export function createFixRunner(deps: FixRunnerDeps): FixRunner {
     // 세션은 resume 으로 대화 컨텍스트가 이어지고, task 진실원은 Firestore 이므로
     // 둘이 합쳐져 "끊김없이 이어짐"이 된다.
     let taskId: string;
-    const existing = await findExistingMissionTask(input.missionId);
+    const existing = await findExistingMissionTask(
+      input.missionId,
+      input.projectId,
+    );
     if (existing) {
       if (existing.status === "DONE") return { success: true };
       if (existing.status === "FAILED") {
@@ -197,10 +210,13 @@ function sleep(ms: number): Promise<void> {
 const SPINNER_GLYPHS = "✢⏺·✶✻✽✦❀✺✳⠁-⣿";
 const SPINNER_PREFIX_GLYPHS = "✢⏺✶✻✽✦❀✺✳⠁-⣿";
 const SPINNER_GLYPH_REGEX = new RegExp(`[${SPINNER_GLYPHS}]`, "gu");
-const SPINNER_ONLY_LINE_REGEX = new RegExp(`^\\s*[${SPINNER_GLYPHS}]+\\s*$`, "u");
+const SPINNER_ONLY_LINE_REGEX = new RegExp(
+  `^\\s*[${SPINNER_GLYPHS}]+\\s*$`,
+  "u",
+);
 const SPINNER_PREFIX_FRAGMENT_REGEX = new RegExp(
   `^\\s*[${SPINNER_PREFIX_GLYPHS}]+\\s*[\\p{L}\\p{N}_./:-]{0,18}[….]?\\s*$`,
-  "u"
+  "u",
 );
 const SPINNER_FOLLOWER_FRAGMENT_REGEX = /^\s*[\p{L}\p{N}]{1,4}[….]?\s*$/u;
 const SPINNER_STATUS_WORD_REGEX =
@@ -242,9 +258,7 @@ function isMostlySpinnerGlyphLine(line: string): boolean {
   if (compact === "") return false;
   const glyphCount = compact.match(SPINNER_GLYPH_REGEX)?.length ?? 0;
   if (glyphCount === 0) return false;
-  const nonGlyph = compact
-    .replace(SPINNER_GLYPH_REGEX, "")
-    .replace(/\s+/g, "");
+  const nonGlyph = compact.replace(SPINNER_GLYPH_REGEX, "").replace(/\s+/g, "");
   return glyphCount >= nonGlyph.length;
 }
 
@@ -261,9 +275,7 @@ function cleanContextForAgent(raw: string): string {
   const flattened = applyCarriageReturnLineDiscipline(raw);
   const out: string[] = [];
   let spinnerNoiseRun = 0;
-  for (const line of flattened
-    .split("\n")
-    .map((l) => l.replace(/\s+$/, ""))) {
+  for (const line of flattened.split("\n").map((l) => l.replace(/\s+$/, ""))) {
     if (line.trim() === "") continue;
     const isSpinnerNoise = isSpinnerNoiseLine(line);
     const isSpinnerFollowerFragment =

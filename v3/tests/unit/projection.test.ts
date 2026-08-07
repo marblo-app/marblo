@@ -19,6 +19,7 @@ import {
   getClaimOwnershipError,
 } from "../../electron/mcp-server/task-ownership";
 
+const PROJECT_ID = "proj-1";
 const TID = "task-123";
 const NOW = Timestamp.fromMillis(1_750_000_000_000);
 const LATER = Timestamp.fromMillis(1_750_000_060_000);
@@ -190,7 +191,11 @@ describe("applyProjection — Firestore 통합 (seed self-heal + TOCTOU 가드)"
   it("bug_003 seed: mission projection 미초기화 상태에서 첫 claim 시 sibling 전체를 재계산해 TODO 총원을 보존", async () => {
     await setDoc(doc(db, "missions", "m1"), { goal: "ship it" }); // projection 없음
     for (const t of ["t1", "t2", "t3", "t4", "t5"]) {
-      await setDoc(doc(db, "tasks", t), { status: "TODO", missionId: "m1" });
+      await setDoc(doc(db, "tasks", t), {
+        status: "TODO",
+        missionId: "m1",
+        projectId: PROJECT_ID,
+      });
     }
 
     await applyProjection(db, "t1", {
@@ -211,10 +216,34 @@ describe("applyProjection — Firestore 통합 (seed self-heal + TOCTOU 가드)"
     expect(t1.status).toBe("CLAIMED");
   });
 
+  // ★fail-open (티켓 4ov5wbQZ25XUXHZVhxdh): 미션 카운트 seed 는 부기이지 상태
+  // 전이가 아니다. projectId 가 없어 스코프 쿼리를 만들 수 없는 손상 문서라도
+  // 상태 write 는 반드시 커밋돼야 한다 — 여기서 막히면 task_outcomes 가 유실되고
+  // 스폰모델 학습축이 손상된다(예전엔 이 경로가 통째로 throw 했다).
+  it("projectId 없는 손상 태스크: seed 는 건너뛰되 상태 전이는 커밋된다", async () => {
+    await setDoc(doc(db, "missions", "m1"), { goal: "ship it" });
+    await setDoc(doc(db, "tasks", "t1"), { status: "TODO", missionId: "m1" });
+
+    await applyProjection(db, "t1", {
+      newStatus: "CLAIMED",
+      lastAgentId: "agent-1",
+      validateFrom: (s) => s === "TODO",
+    });
+
+    const t1 = (await getDoc(doc(db, "tasks", "t1"))).data() as {
+      status: string;
+    };
+    expect(t1.status).toBe("CLAIMED");
+  });
+
   it("seed 이후 두 번째 전이는 delta 경로로 정확히 갱신", async () => {
     await setDoc(doc(db, "missions", "m1"), { goal: "ship it" });
     for (const t of ["t1", "t2", "t3"]) {
-      await setDoc(doc(db, "tasks", t), { status: "TODO", missionId: "m1" });
+      await setDoc(doc(db, "tasks", t), {
+        status: "TODO",
+        missionId: "m1",
+        projectId: PROJECT_ID,
+      });
     }
     await applyProjection(db, "t1", {
       newStatus: "CLAIMED",

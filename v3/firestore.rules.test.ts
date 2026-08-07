@@ -33,7 +33,8 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { readFileSync } from "fs";
-import { describe, it, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, beforeAll, afterAll, beforeEach, expect } from "vitest";
+import { applyProjection } from "./electron/mcp-server/projection";
 
 let testEnv: RulesTestEnvironment;
 
@@ -2595,5 +2596,216 @@ describe("unauthenticated access", () => {
     await assertFails(getDoc(doc(db, "subscriptions", OWNER_ID)));
     await assertFails(getDoc(doc(db, "coupons", "WELCOME2026")));
     await assertFails(getDoc(doc(db, "couponRedemptions", "redemption-1")));
+  });
+});
+
+// ===== 프로젝트 스코프 쿼리 규율 (티켓 4ov5wbQZ25XUXHZVhxdh) =====
+//
+// "task 상태쓰기가 Missing or insufficient permissions" 의 진짜 원인은 룰 드리프트도
+// 토큰 만료도 아니라 **쿼리에 projectId 가 빠진 것**이었다.
+//
+// Firestore 는 list(쿼리)를 문서별로 판정하지 않는다 — 쿼리 제약식만으로 룰을 증명할
+// 수 있어야 한다("security rules are not filters"). tasks/agents/flows 의 read 룰이
+// isProjectMember(resource.data.projectId) 인 이상, projectId 를 == 로 고정하지 않은
+// 쿼리는 결과가 전부 자기 프로젝트여도 통째로 거부된다. 에뮬레이터 원문 에러:
+//   "Property projectId is undefined on object. for 'list'"
+//
+// 아래 테스트가 이 불변식을 고정한다. 실패하면 그건 룰이 이상해진 게 아니라 누군가
+// 무스코프 쿼리를 되살렸다는 뜻이다 (electron/mcp-server/project-scope.ts 참조).
+
+describe("프로젝트 스코프 쿼리 규율 — 무스코프 list 는 거부", () => {
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, "tasks", "scoped-task"), {
+        projectId: PROJECT_ID,
+        title: "Scoped",
+        status: "TODO",
+        missionId: "mission-x",
+        contextId: "mission-x",
+        claimedBy: "agent-dead",
+        dependsOn: ["task-1"],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+  });
+
+  it("tasks: projectId 를 고정하지 않은 쿼리는 거부된다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      getDocs(
+        query(collection(db, "tasks"), where("missionId", "==", "mission-x")),
+      ),
+    );
+  });
+
+  it("tasks: projectId 를 고정하면 같은 쿼리가 통과한다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      getDocs(
+        query(
+          collection(db, "tasks"),
+          where("projectId", "==", PROJECT_ID),
+          where("missionId", "==", "mission-x"),
+        ),
+      ),
+    );
+  });
+
+  it("tasks: claimedBy 단독 쿼리(죽은 클레임 해제 경로)는 거부, projectId 동반이면 통과", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      getDocs(
+        query(collection(db, "tasks"), where("claimedBy", "==", "agent-dead")),
+      ),
+    );
+    await assertSucceeds(
+      getDocs(
+        query(
+          collection(db, "tasks"),
+          where("projectId", "==", PROJECT_ID),
+          where("claimedBy", "==", "agent-dead"),
+        ),
+      ),
+    );
+  });
+
+  it("tasks: dependsOn array-contains(의존 해소 경로)도 projectId 가 있어야 통과", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      getDocs(
+        query(
+          collection(db, "tasks"),
+          where("dependsOn", "array-contains", "task-1"),
+        ),
+      ),
+    );
+    await assertSucceeds(
+      getDocs(
+        query(
+          collection(db, "tasks"),
+          where("projectId", "==", PROJECT_ID),
+          where("dependsOn", "array-contains", "task-1"),
+        ),
+      ),
+    );
+  });
+
+  it("agents / flows 도 같은 규율", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(getDocs(collection(db, "agents")));
+    await assertSucceeds(
+      getDocs(
+        query(collection(db, "agents"), where("projectId", "==", PROJECT_ID)),
+      ),
+    );
+    await assertFails(getDocs(collection(db, "flows")));
+    await assertSucceeds(
+      getDocs(
+        query(collection(db, "flows"), where("projectId", "==", PROJECT_ID)),
+      ),
+    );
+  });
+
+  it("activities 는 taskId 로 증명되므로 projectId 없이도 통과(대조군)", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      getDocs(
+        query(collection(db, "activities"), where("taskId", "==", "task-1")),
+      ),
+    );
+  });
+});
+
+// ===== 상태전이 권한 회귀 (티켓 4ov5wbQZ25XUXHZVhxdh) =====
+//
+// 오케(=프로젝트 owner uid 로 인증한 MCP)와 에이전트가 실제로 쓰는 전이 전 구간이
+// 룰을 통과하는지 — applyProjection 의 진짜 코드경로로 검증한다. 순수 룰 테스트만으론
+// 이 버그를 못 잡았다: 거부된 건 write 가 아니라 write 직전의 **읽기 쿼리**였다.
+
+describe("task 상태전이 — applyProjection 실제 경로", () => {
+  const MISSION_ID = "mission-live";
+
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      // ★프로덕션 재현 조건: 미션 컨텍스트 + mission.projection 미초기화
+      // (실제 27CNOI0pdxvsSjVwuB3x 가 projection: null 이었다)
+      await setDoc(doc(db, "missions", MISSION_ID), {
+        projectId: PROJECT_ID,
+        status: "active",
+        goal: "live mission",
+        taskIds: ["mission-task"],
+      });
+      await setDoc(doc(db, "tasks", "mission-task"), {
+        projectId: PROJECT_ID,
+        missionId: MISSION_ID,
+        contextId: MISSION_ID,
+        title: "Mission Task",
+        status: "CLAIMED",
+        claimedBy: "agent-1",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+  });
+
+  it("오케(owner)가 미션 태스크를 CLAIMED→IN_PROGRESS→REVIEW→DONE 로 전이할 수 있다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    for (const status of ["IN_PROGRESS", "REVIEW", "DONE"] as const) {
+      await applyProjection(db as never, "mission-task", {
+        newStatus: status,
+        lastAgentId: "orchestrator",
+        lastActivitySummary: `→ ${status}`,
+      });
+    }
+    const after = await getDoc(doc(db, "tasks", "mission-task"));
+    expect(after.data()?.status).toBe("DONE");
+  });
+
+  it("에이전트 자기 클레임 태스크의 add_activity 가 미션 컨텍스트에서도 성공한다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await applyProjection(db as never, "mission-task", {
+      lastAgentId: "agent-1",
+      lastActivitySummary: "작업 진행중",
+      activityPayload: { agentId: "agent-1", message: "작업 진행중" },
+    });
+    const after = await getDoc(doc(db, "tasks", "mission-task"));
+    expect(after.data()?.projection?.lastActivitySummary).toBe("작업 진행중");
+  });
+
+  it("미션 statusCounts 가 실제로 seed 된다(스코프 쿼리가 통과했다는 증거)", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await applyProjection(db as never, "mission-task", {
+      newStatus: "IN_PROGRESS",
+      lastAgentId: "agent-1",
+    });
+    const mission = await getDoc(doc(db, "missions", MISSION_ID));
+    expect(mission.data()?.projection?.statusCounts?.IN_PROGRESS).toBe(1);
+  });
+
+  it("projectId 가 없는 손상 태스크여도 상태 전이 자체는 막지 않는다(fail-open)", async () => {
+    // 부기(미션 카운트 seed) 실패가 상태 write 를 죽이면 task_outcomes 가 유실되고
+    // 스폰모델 학습축이 손상된다. seed 는 건너뛰되 전이는 반드시 커밋돼야 한다.
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, "tasks", "orphan-task"), {
+        projectId: PROJECT_ID, // 룰 통과용 (문서 write 는 스코프 필요 없음)
+        missionId: MISSION_ID,
+        contextId: MISSION_ID,
+        title: "Orphan",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await applyProjection(db as never, "orphan-task", {
+      newStatus: "IN_PROGRESS",
+      lastAgentId: "agent-1",
+    });
+    const after = await getDoc(doc(db, "tasks", "orphan-task"));
+    expect(after.data()?.status).toBe("IN_PROGRESS");
   });
 });

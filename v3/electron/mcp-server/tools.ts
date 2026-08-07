@@ -51,6 +51,11 @@ import {
   type ProjectLockFailure,
 } from "./project-resolve.js";
 import {
+  requireProjectScope,
+  isPermissionDeniedError,
+  MissingProjectScopeError,
+} from "./project-scope.js";
+import {
   validateTaskBodyInput,
   validateTaskBodySections,
   taskBodyStorageFields,
@@ -964,11 +969,19 @@ function text(t: string) {
 async function resolveDependentsAfterDone(
   taskId: string,
   contextId: string,
+  projectId: string,
 ): Promise<number> {
   let depDocs: Array<{ id: string }> = [];
   try {
+    // ★projectId 필수 — 무스코프였을 때 이 쿼리는 룰에 100% 거부됐고, catch 가
+    // 그걸 삼켜 "DONE 인데 후행이 영영 안 열린다"가 조용히 성립했다(#4ov5wbQZ).
     const depQ = query(
       collection(db, "tasks"),
+      where(
+        "projectId",
+        "==",
+        requireProjectScope("tasks", projectId, "resolveDependentsAfterDone"),
+      ),
       where("dependsOn", "array-contains", taskId),
     );
     depDocs = (await getDocs(depQ)).docs;
@@ -1309,14 +1322,52 @@ async function markAgentStoppedInFirestore(agentId: string): Promise<void> {
   }
 }
 
+/** agents/{id}.projectId (단건 get 이라 룰상 안전). 없거나 실패하면 "". */
+async function readAgentProjectId(agentId: string): Promise<string> {
+  try {
+    const snap = await getDoc(doc(db, "agents", agentId));
+    if (!snap.exists()) return "";
+    const pid = (snap.data() as { projectId?: unknown }).projectId;
+    return typeof pid === "string" ? pid.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 죽인 에이전트가 잡고 있던 클레임을 푼다.
+ *
+ * ★projectId 스코프 필수 (티켓 4ov5wbQZ25XUXHZVhxdh). 예전엔 `claimedBy` 단독
+ * 쿼리라 룰이 이 list 를 항상 거부했고, 바깥 catch 가 그걸 warn 으로 삼켜서
+ * **"죽은 클레임 자동 해제"가 한 번도 동작한 적이 없었다** — 그 결과 죽은
+ * 에이전트가 잡고 있던 티켓은 다른 에이전트가 손대지 못하는 상태로 남았다.
+ * agents/{id}.projectId 를 우선 쓰고, 없으면 세션 바인딩(MARBLO_PROJECT)로 폴백.
+ */
 async function releaseTaskClaimsForStoppedAgent(
   agentId: string,
+  projectIdHint?: string,
 ): Promise<number> {
   if (!agentId) return 0;
   let released = 0;
   try {
+    const projectId =
+      (projectIdHint ?? "").trim() ||
+      (await readAgentProjectId(agentId)) ||
+      DEFAULT_PROJECT;
     const claimedTasks = await getDocs(
-      query(collection(db, "tasks"), where("claimedBy", "==", agentId)),
+      query(
+        collection(db, "tasks"),
+        where(
+          "projectId",
+          "==",
+          requireProjectScope(
+            "tasks",
+            projectId,
+            "releaseTaskClaimsForStoppedAgent",
+          ),
+        ),
+        where("claimedBy", "==", agentId),
+      ),
     );
     const now = Timestamp.now();
     for (const taskDoc of claimedTasks.docs) {
@@ -1540,8 +1591,24 @@ async function closeImplicitMissionIfComplete(
     const mission = missionSnap.data() as Record<string, unknown>;
     if (!isImplicitMissionDoc(mission as { missionKind?: string })) return null;
 
+    // ★projectId 필수 — 미션 문서의 projectId 를 쓴다(없으면 세션 바인딩).
+    // 무스코프였을 때 이 쿼리는 룰에 거부돼 암묵적 미션이 영영 안 닫혔다.
+    const missionProjectId =
+      typeof mission.projectId === "string" ? mission.projectId.trim() : "";
     const tasksSnap = await getDocs(
-      query(collection(db, "tasks"), where("contextId", "==", contextId)),
+      query(
+        collection(db, "tasks"),
+        where(
+          "projectId",
+          "==",
+          requireProjectScope(
+            "tasks",
+            missionProjectId || DEFAULT_PROJECT,
+            "closeImplicitMissionIfComplete",
+          ),
+        ),
+        where("contextId", "==", contextId),
+      ),
     );
     const tasks = tasksSnap.docs.map((d) => ({
       status: String((d.data() as Record<string, unknown>).status ?? ""),
@@ -2177,21 +2244,35 @@ async function withStaleBuildNotice<T>(result: T): Promise<T> {
  * "requires an index" hard-fail risk. Callers keep their in-memory filter/sort,
  * so the ORDER of returned rows is unchanged — only the volume read shrinks.
  */
+/**
+ * ★projectId 스코프는 여기 한 곳에서 강제한다 (티켓 4ov5wbQZ25XUXHZVhxdh).
+ *
+ * 예전엔 호출부마다 `if (projectId) constraints.push(where("projectId","==",…))`
+ * 를 손으로 붙였다. 그래서 MARBLO_PROJECT 가 비면 조건이 통째로 빠진 **무스코프
+ * 쿼리**가 나갔고, Firestore 룰은 list 를 쿼리 제약식으로 평가하므로 그건 항상
+ * PERMISSION_DENIED 였다 — "권한 문제"처럼 보이지만 실제로는 쿼리가 잘못된 것이다.
+ * 이제 스코프 컬렉션이면 projectId 를 무조건 요구하고(없으면 즉시 명확한 에러),
+ * 조건 주입도 여기서 한다. 호출부는 projectId 를 넘기기만 하면 된다.
+ */
 async function boundedGetDocs(
   collectionName: string,
+  projectId: string | undefined,
   baseConstraints: QueryConstraint[],
   boundConstraints: QueryConstraint[],
   label: string,
 ): Promise<QuerySnapshot> {
+  const scopeId = requireProjectScope(collectionName, projectId, label);
+  const scoped = scopeId
+    ? [where("projectId", "==", scopeId), ...baseConstraints]
+    : baseConstraints;
   try {
     return await getDocs(
-      query(
-        collection(db, collectionName),
-        ...baseConstraints,
-        ...boundConstraints,
-      ),
+      query(collection(db, collectionName), ...scoped, ...boundConstraints),
     );
   } catch (err) {
+    // 권한 거부는 색인 문제가 아니다. 폴백으로 한 번 더 쏘면 똑같이 거부되면서
+    // 원인만 흐려지므로(그리고 무스코프 재시도는 더 나쁘다) 즉시 올린다.
+    if (isPermissionDeniedError(err)) throw err;
     console.warn(
       `[MCP] ${label}: bounded query failed (likely a missing composite ` +
         `index) — falling back to an unbounded read. Deploy ` +
@@ -2199,7 +2280,7 @@ async function boundedGetDocs(
           (err as Error)?.message ?? String(err)
         }`,
     );
-    return getDocs(query(collection(db, collectionName), ...baseConstraints));
+    return getDocs(query(collection(db, collectionName), ...scoped));
   }
 }
 
@@ -2273,7 +2354,8 @@ async function scanLedgerAuditWindow(projectId: string): Promise<{
 }> {
   const snap = await boundedGetDocs(
     "audit_logs",
-    [where("projectId", "==", projectId)],
+    projectId,
+    [],
     [orderBy("createdAt", "desc"), fsLimit(WORKTREE_LEDGER_SCAN_CAP)],
     "worktree_audit:scan",
   );
@@ -2310,10 +2392,8 @@ async function fetchWorktreeLedgerEvents(
 > {
   const snap = await boundedGetDocs(
     "audit_logs",
-    [
-      where("projectId", "==", projectId),
-      where("worktreeId", "==", worktreeId),
-    ],
+    projectId,
+    [where("worktreeId", "==", worktreeId)],
     [orderBy("createdAt", "desc"), fsLimit(WORKTREE_EVENT_CAP)],
     "get_worktree_audit:events",
   );
@@ -2330,7 +2410,8 @@ async function fetchMergeHistoryForTask(
 ): Promise<MergeHistoryRow[]> {
   const snap = await boundedGetDocs(
     "merge_history",
-    [where("projectId", "==", projectId), where("taskId", "==", taskId)],
+    projectId,
+    [where("taskId", "==", taskId)],
     [orderBy("mergedAt", "desc"), fsLimit(10)],
     "worktree_audit:merge_history",
   );
@@ -2359,7 +2440,8 @@ async function fetchMergeInfoByTaskId(
       try {
         const snap = await boundedGetDocs(
           "merge_history",
-          [where("projectId", "==", projectId), where("taskId", "==", taskId)],
+          projectId,
+          [where("taskId", "==", taskId)],
           [fsLimit(5)],
           "list_worktree_audit:merge_history",
         );
@@ -2628,6 +2710,9 @@ async function fetchRecentActivityMessages(
   // returns the newest `window` entries.
   const snap = await boundedGetDocs(
     "activities",
+    // activities 는 프로젝트 스코프 컬렉션이 아니다 — 룰이
+    // isTaskProjectMember(resource.data.taskId) 라 taskId 고정으로 증명된다.
+    undefined,
     [where("taskId", "==", taskId)],
     [orderBy("createdAt", "desc"), fsLimit(window)],
     "fetchRecentActivityMessages",
@@ -2698,6 +2783,15 @@ interface PendingInstructionDoc {
 export function registerTools(server: McpServer): void {
   // Wrap server.tool to add automatic audit logging
   const originalTool = server.tool.bind(server);
+  /** MissingProjectScopeError 를 도구 결과 텍스트로. 아니면 null(그대로 throw). */
+  function projectScopeErrorText(
+    toolName: string,
+    err: unknown,
+  ): string | null {
+    if (!(err instanceof MissingProjectScopeError)) return null;
+    return `Error: ${toolName} — ${err.message}`;
+  }
+
   function auditedTool<Args extends ZodRawShapeCompat>(
     name: string,
     description: string,
@@ -2717,10 +2811,16 @@ export function registerTools(server: McpServer): void {
       // 감사 로그 자체를 쓰지 않는다 — 시스템 페이로드(스킬 본문 등) 노이즈 방지.
       const gatedHandler = (async (...args: unknown[]) => {
         await ensureAuthenticated();
-        const result = await (
-          handler as unknown as (...a: unknown[]) => unknown
-        )(...args);
-        return withStaleBuildNotice(result);
+        try {
+          const result = await (
+            handler as unknown as (...a: unknown[]) => unknown
+          )(...args);
+          return withStaleBuildNotice(result);
+        } catch (err) {
+          const scoped = projectScopeErrorText(name, err);
+          if (scoped) return text(scoped);
+          throw err;
+        }
       }) as unknown as ToolCallback<Args>;
       originalTool(name, description, schema, gatedHandler);
       return;
@@ -2753,6 +2853,14 @@ export function registerTools(server: McpServer): void {
       } catch (err) {
         success = false;
         resultText = err instanceof Error ? err.message : String(err);
+        // projectId 누락은 프로토콜 에러가 아니라 호출자가 고칠 수 있는 입력
+        // 문제다. 원문 그대로 텍스트로 돌려줘야 에이전트가 다음 수를 안다
+        // (예전엔 이게 PERMISSION_DENIED 로 둔갑해 룰/멤버십을 의심하게 했다).
+        const scoped = projectScopeErrorText(name, err);
+        if (scoped) {
+          resultText = scoped;
+          return text(scoped);
+        }
         throw err;
       } finally {
         const duration = Date.now() - start;
@@ -2828,10 +2936,21 @@ export function registerTools(server: McpServer): void {
       const projectId = all_projects
         ? ""
         : await enforceProjectLock("get_all_tasks", project_id);
+      // ★all_projects 는 Firestore 룰상 불가능한 요청이다(티켓 4ov5wbQZ25XUXHZVhxdh):
+      // tasks read 룰이 isProjectMember(resource.data.projectId) 라, projectId 를
+      // 고정하지 않은 list 는 언제나 거부된다. 예전엔 그 거부가
+      // "Missing or insufficient permissions" 로만 보여서 권한/멤버십 문제로
+      // 오인됐다. 조용히 빈 결과를 주지 않고 왜 불가능한지 말한다.
+      if (all_projects) {
+        return text(
+          "Error: all_projects=true 는 지원되지 않습니다 — Firestore 보안 룰이 " +
+            "projectId 를 고정하지 않은 tasks 쿼리를 거부합니다(교차 테넌트 차단).\n" +
+            "해야 할 일: 프로젝트별로 project_id 를 지정해 각각 조회하세요.",
+        );
+      }
       const contextId = contextReadFilter(!!all_contexts);
       const filterContextInMemory = contextId === "board";
       const constraints: QueryConstraint[] = [];
-      if (projectId) constraints.push(where("projectId", "==", projectId));
       if (contextId && !filterContextInMemory)
         constraints.push(where("contextId", "==", contextId));
       if (role) constraints.push(where("role", "==", role));
@@ -2854,6 +2973,7 @@ export function registerTools(server: McpServer): void {
       ): Promise<TaskDoc[]> => {
         const snap = await boundedGetDocs(
           "tasks",
+          projectId,
           [...constraints, ...extra],
           bound,
           label,
@@ -2970,7 +3090,6 @@ export function registerTools(server: McpServer): void {
         // falsy → excluded on both sides).
         where("dependsOnCompleted", "==", true),
       ];
-      if (projectId) constraints.push(where("projectId", "==", projectId));
       if (contextId && !filterContextInMemory)
         constraints.push(where("contextId", "==", contextId));
 
@@ -2980,6 +3099,7 @@ export function registerTools(server: McpServer): void {
       const rowLimit = limit ?? LIST_LIMIT_DEFAULT;
       const snap = await boundedGetDocs(
         "tasks",
+        projectId,
         constraints,
         [orderBy("priority", "desc"), fsLimit(rowLimit)],
         "get_available_tasks",
@@ -3676,7 +3796,11 @@ export function registerTools(server: McpServer): void {
 
       const unblocked =
         newStatus === "DONE"
-          ? await resolveDependentsAfterDone(task_id, task.contextId)
+          ? await resolveDependentsAfterDone(
+              task_id,
+              task.contextId,
+              task.projectId || DEFAULT_PROJECT,
+            )
           : 0;
 
       const unblockedNote =
@@ -3985,6 +4109,7 @@ export function registerTools(server: McpServer): void {
       const rowLimit = limit ?? 30;
       const snap = await boundedGetDocs(
         "activities",
+        undefined, // taskId 로 증명되는 컬렉션 (위 fetchRecentActivityMessages 참조)
         constraints,
         [orderBy("createdAt", "desc"), fsLimit(rowLimit)],
         "get_task_activities",
@@ -4024,13 +4149,16 @@ export function registerTools(server: McpServer): void {
     },
     async ({ role, project_id }) => {
       const projectId = await enforceProjectLock("check_feedback", project_id);
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(db, "tasks"),
+        where(
+          "projectId",
+          "==",
+          requireProjectScope("tasks", projectId, "check_feedback"),
+        ),
         where("role", "==", role),
         where("hasPmFeedback", "==", true),
-      ];
-      if (projectId) constraints.push(where("projectId", "==", projectId));
-
-      const q = query(collection(db, "tasks"), ...constraints);
+      );
       const snap = await getDocs(q);
 
       if (snap.empty)
@@ -4275,7 +4403,6 @@ export function registerTools(server: McpServer): void {
     async ({ keyword, project_id, limit }) => {
       const projectId = await enforceProjectLock("search_tasks", project_id);
       const constraints: QueryConstraint[] = [];
-      if (projectId) constraints.push(where("projectId", "==", projectId));
 
       // P2-5: bound the scan to the newest SEARCH_SCAN_CAP tasks (orderBy
       // createdAt desc + limit) instead of the entire collection. Substring
@@ -4285,6 +4412,7 @@ export function registerTools(server: McpServer): void {
       const scanLimit = Math.max(limit ?? LIST_LIMIT_DEFAULT, SEARCH_SCAN_CAP);
       const snap = await boundedGetDocs(
         "tasks",
+        projectId,
         constraints,
         [orderBy("createdAt", "desc"), fsLimit(scanLimit)],
         "search_tasks",
@@ -4404,6 +4532,15 @@ export function registerTools(server: McpServer): void {
       try {
         const depQ = query(
           collection(db, "tasks"),
+          where(
+            "projectId",
+            "==",
+            requireProjectScope(
+              "tasks",
+              task.projectId || DEFAULT_PROJECT,
+              "delete_task:dependents",
+            ),
+          ),
           where("dependsOn", "array-contains", task_id),
         );
         const depSnap = await getDocs(depQ);
@@ -4627,10 +4764,14 @@ export function registerTools(server: McpServer): void {
 
       // Firestore fallback
       const projectId = lockedProjectId;
-      const constraints: QueryConstraint[] = [];
-      if (projectId) constraints.push(where("projectId", "==", projectId));
-
-      const q = query(collection(db, "agents"), ...constraints);
+      const q = query(
+        collection(db, "agents"),
+        where(
+          "projectId",
+          "==",
+          requireProjectScope("agents", projectId, "get_agents"),
+        ),
+      );
       const snap = await getDocs(q);
 
       if (snap.empty) return text("No agents found.");
@@ -5614,10 +5755,14 @@ export function registerTools(server: McpServer): void {
     },
     async ({ project_id }) => {
       const projectId = await enforceProjectLock("get_flows", project_id);
-      const constraints: QueryConstraint[] = [];
-      if (projectId) constraints.push(where("projectId", "==", projectId));
-
-      const q = query(collection(db, "flows"), ...constraints);
+      const q = query(
+        collection(db, "flows"),
+        where(
+          "projectId",
+          "==",
+          requireProjectScope("flows", projectId, "get_flows"),
+        ),
+      );
       const snap = await getDocs(q);
 
       if (snap.empty) return text("No flows found.");
@@ -5837,14 +5982,23 @@ export function registerTools(server: McpServer): void {
       }
       const membership = await requireReadableProjectMember(projectId);
       if (!membership.ok) return text(membership.message);
-      const constraints: QueryConstraint[] = [
-        where("projectId", "==", projectId),
+      const extra: QueryConstraint[] = include_delivered
+        ? []
+        : [where("isDelivered", "==", false)];
+      const q = query(
+        collection(db, "pendingInstructions"),
+        where(
+          "projectId",
+          "==",
+          requireProjectScope(
+            "pendingInstructions",
+            projectId,
+            "get_pending_instructions",
+          ),
+        ),
         where("targetAgentId", "==", target_agent_id),
-      ];
-      if (!include_delivered) {
-        constraints.push(where("isDelivered", "==", false));
-      }
-      const q = query(collection(db, "pendingInstructions"), ...constraints);
+        ...extra,
+      );
       const snap = await getDocs(q);
 
       if (snap.empty)
@@ -6355,11 +6509,11 @@ export function registerTools(server: McpServer): void {
         project_id,
       );
       const constraints: QueryConstraint[] = [];
-      if (projectId) constraints.push(where("projectId", "==", projectId));
       // openQuestionCount 는 질문이 처음 달릴 때 생기는 필드라, 이 조건은
       // 질문이 하나라도 있었던 티켓만 읽는다(질문 없는 보드는 0 doc read).
       const snap = await boundedGetDocs(
         "tasks",
+        projectId,
         constraints,
         [where("openQuestionCount", ">", 0)],
         "get_open_questions",
@@ -7368,11 +7522,10 @@ export function registerTools(server: McpServer): void {
     cap: number,
     caller: string,
   ): Promise<EffectivenessInputRow[]> {
-    const constraints: QueryConstraint[] = [];
-    if (projectId) constraints.push(where("projectId", "==", projectId));
     const snap = await boundedGetDocs(
       "tasks",
-      constraints,
+      projectId,
+      [],
       [fsLimit(cap)],
       caller,
     );
@@ -7679,6 +7832,7 @@ export function registerTools(server: McpServer): void {
         const unblocked = await resolveDependentsAfterDone(
           task_id,
           task.contextId,
+          task.projectId || DEFAULT_PROJECT,
         );
         if (unblocked > 0) {
           lines.push(`의존 태스크 ${unblocked}건 해제됨.`);

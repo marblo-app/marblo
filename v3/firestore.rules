@@ -152,6 +152,23 @@ service cloud.firestore {
     // ===== Tasks =====
     // 크로스테넌트 누출 차단: renderer, Electron main, MCP 서버 모두 실제 사용자
     // uid 로 인증한 뒤 자기 프로젝트 task 만 읽고 쓸 수 있다.
+    //
+    // ★★쿼리(list) 규율 — 읽기 전에 반드시 알아야 하는 것 (티켓 4ov5wbQZ25XUXHZVhxdh):
+    //   아래 read 룰은 `resource.data.projectId` 를 참조한다. 단건 get 이면
+    //   resource 가 그 문서지만, **list 는 문서를 읽어 보고 판정하지 않는다** —
+    //   쿼리 제약식만으로 룰이 증명돼야 한다("security rules are not filters").
+    //   그래서 projectId 를 `==` 로 고정하지 않은 tasks 쿼리는 결과가 전부 자기
+    //   프로젝트 문서여도 **통째로 거부**된다. 에뮬레이터 원문:
+    //     "Property projectId is undefined on object. for 'list'"
+    //   클라이언트에는 이게 "Missing or insufficient permissions" 로만 보이므로
+    //   룰 드리프트/토큰 만료로 오인하기 쉽다. 실제로 그렇게 오인된 P1 이 있었다:
+    //   applyProjection 이 미션 statusCounts seed 를 위해 무스코프 쿼리를 쏘고,
+    //   그게 거부되며 update_task_status/add_activity 의 상태 write 가 시작도
+    //   못 하고 실패했다(agents/flows/chatMessages/taskComments/pendingInstructions
+    //   /audit_logs/merge_history 도 같은 룰 모양 = 같은 규율).
+    //   코드 쪽 단일 규율: electron/mcp-server/project-scope.ts
+    //   회귀 가드: firestore.rules.test.ts "프로젝트 스코프 쿼리 규율" +
+    //              tests/unit/project-scoped-query-guard.test.ts (소스 스캔)
 
     // 머지성 write 게이트: REVIEW→DONE 전이는 "리뷰 통과 후 머지 완료 처리"다
     // (renderer 의 merged→DONE 화해 shouldMarkMergedTaskDone 이 허용하는 유일한

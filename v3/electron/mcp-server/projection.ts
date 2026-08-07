@@ -158,16 +158,34 @@ export interface ApplyProjectionInput extends ProjectionMutation {
  * 미션 task 들의 status 를 한 번에 읽어 statusCounts 맵을 만든다.
  * Firestore client SDK 트랜잭션은 쿼리를 못 돌리므로 (txn.get 은 단일 doc 만),
  * mission projection 이 아직 seed 되지 않았을 때 1회성 전체 재계산용으로 쓴다.
+ *
+ * ★projectId 동등조건 필수 (티켓 4ov5wbQZ25XUXHZVhxdh). 예전엔 missionId/contextId
+ * 만으로 쿼리했는데, firestore.rules 의 tasks read 는
+ * `isProjectMember(resource.data.projectId)` 이고 Firestore 는 list 를 쿼리
+ * 제약식으로 평가하므로("rules are not filters") projectId 를 고정하지 않은 이
+ * 두 쿼리는 **항상** 거부됐다 — 결과가 전부 내 프로젝트여도. 그 거부가
+ * applyProjection 을 트랜잭션 진입 전에 throw 시켜 update_task_status /
+ * add_activity 가 통째로 "Missing or insufficient permissions" 로 실패했다.
+ * project-scope.ts 참조.
  */
 async function recomputeMissionCounts(
   db: Firestore,
   missionId: string,
+  projectId: string,
 ): Promise<Record<string, number>> {
   const byMissionId = await getDocs(
-    query(collection(db, "tasks"), where("missionId", "==", missionId)),
+    query(
+      collection(db, "tasks"),
+      where("projectId", "==", projectId),
+      where("missionId", "==", missionId),
+    ),
   );
   const byContextId = await getDocs(
-    query(collection(db, "tasks"), where("contextId", "==", missionId)),
+    query(
+      collection(db, "tasks"),
+      where("projectId", "==", projectId),
+      where("contextId", "==", missionId),
+    ),
   );
   const rows = new Map<string, { status?: string }>();
   byMissionId.forEach((d) => {
@@ -220,21 +238,56 @@ export async function applyProjection(
   // client SDK 트랜잭션은 쿼리를 못 돌리므로, 미초기화를 감지하면 트랜잭션 진입
   // '전에' sibling task 전체를 한 번 읽어 권위 있는 카운트를 seed 한다. 1회성이고
   // 이후 호출은 트랜잭션 내 delta 경로(동시성 안전)를 탄다.
+  //
+  // ★이 seed 는 **부기(bookkeeping)** 이지 상태 전이가 아니다. 그러므로 여기서
+  // 무슨 일이 나도 아래 트랜잭션(=진짜 상태 write)을 막아선 안 된다. 예전엔
+  // 이 블록이 그냥 throw 를 흘려보내서, 미션 카운트 재계산 실패 하나가
+  // update_task_status/add_activity 전체를 죽였다(티켓 4ov5wbQZ25XUXHZVhxdh).
+  // 상태쓰기 실패는 곧 task_outcomes 유실 → 스폰모델 학습축 손상이므로,
+  // 부기 실패는 로그로만 남기고 전이는 반드시 진행시킨다(fail-open).
   let seedCounts: Record<string, number> | undefined;
   const preTask = await getDoc(taskRef);
-  const preMissionId = preTask.exists()
-    ? missionIdFromTaskContext(
-        preTask.data() as { missionId?: string; contextId?: string },
-      )
+  const preTaskData = preTask.exists()
+    ? (preTask.data() as {
+        missionId?: string;
+        contextId?: string;
+        projectId?: string;
+      })
+    : undefined;
+  const preMissionId = preTaskData
+    ? missionIdFromTaskContext(preTaskData)
     : undefined;
   if (preMissionId) {
-    const preMission = await getDoc(doc(db, "missions", preMissionId));
-    if (
-      preMission.exists() &&
-      (preMission.data() as { projection?: MissionProjection }).projection
-        ?.statusCounts === undefined
-    ) {
-      seedCounts = await recomputeMissionCounts(db, preMissionId);
+    try {
+      const preMission = await getDoc(doc(db, "missions", preMissionId));
+      if (
+        preMission.exists() &&
+        (preMission.data() as { projection?: MissionProjection }).projection
+          ?.statusCounts === undefined
+      ) {
+        const projectId = (preTaskData?.projectId ?? "").trim();
+        if (projectId) {
+          seedCounts = await recomputeMissionCounts(
+            db,
+            preMissionId,
+            projectId,
+          );
+        } else {
+          // projectId 없는 손상 문서 — 스코프 쿼리를 만들 수 없다. 거부될 게
+          // 뻔한 무스코프 쿼리를 쏘느니 seed 를 건너뛴다(카운트는 delta 로만
+          // 갱신되어 부정확할 수 있고, 그건 상태 전이를 막는 것보다 낫다).
+          console.error(
+            `[applyProjection] task ${taskId} has no projectId — mission ` +
+              `statusCounts seed skipped (counts may drift).`,
+          );
+        }
+      }
+    } catch (err) {
+      console.error(
+        `[applyProjection] mission statusCounts seed failed for ` +
+          `${preMissionId} — continuing with the status write:`,
+        err,
+      );
     }
   }
 
