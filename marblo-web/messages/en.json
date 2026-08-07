@@ -606,7 +606,16 @@
     "alreadySubscribed": "You already have an active subscription. Redirecting to My Subscription.",
     "firstChargeFailed": "Your card was registered but the first charge failed. Please retry below.",
     "retryFirstCharge": "Retry first charge",
-    "paymentInProgress": "A payment is already in progress. Please wait and try again."
+    "paymentInProgress": "A payment is already in progress. Please wait and try again.",
+    "freeFirstCharge": "Free",
+    "couponAppliedFree": "Coupon applied — your first payment is free",
+    "couponAppliedDiscount": "Coupon applied: {amount} off",
+    "couponNotApplied": "The coupon could not be applied, so you were charged the regular price. (Expired, fully used, or already redeemed.)",
+    "notActivated": "We could not confirm your payment yet. Please check your subscription page in a moment.",
+    "alreadySubscribedTitle": "You're already subscribed",
+    "alreadySubscribedBody": "This account already has an active subscription, so nothing new was charged.",
+    "goToMySubscription": "View my subscription",
+    "goToLogin": "Sign in"
   },
   "lectures": {
     "title": "Lectures",

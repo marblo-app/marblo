@@ -606,7 +606,16 @@
     "alreadySubscribed": "すでに有効なサブスクリプションがあります。マイ購読ページへ移動します。",
     "firstChargeFailed": "カードは登録されましたが初回請求に失敗しました。下のボタンから再試行してください。",
     "retryFirstCharge": "初回請求を再試行",
-    "paymentInProgress": "決済が進行中です。しばらくしてから再度お試しください。"
+    "paymentInProgress": "決済が進行中です。しばらくしてから再度お試しください。",
+    "freeFirstCharge": "無料",
+    "couponAppliedFree": "クーポンが適用され、初回のお支払いは無料です",
+    "couponAppliedDiscount": "クーポン適用：{amount} 割引",
+    "couponNotApplied": "クーポンが適用されなかったため、通常価格で請求されました。（期限切れ・上限到達・使用済み）",
+    "notActivated": "お支払いの確認がまだ完了していません。しばらくしてからサブスクリプションページでご確認ください。",
+    "alreadySubscribedTitle": "すでに購読中です",
+    "alreadySubscribedBody": "このアカウントにはすでに有効なサブスクリプションがあるため、新たな請求は行われていません。",
+    "goToMySubscription": "購読内容を見る",
+    "goToLogin": "ログインする"
   },
   "lectures": {
     "title": "講座",

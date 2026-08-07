@@ -13,6 +13,7 @@ import {
   normalizeBillingCycle,
   planAmountKRW,
   applyCouponDiscount,
+  firstChargeReceipt,
   nextPeriodEnd,
   billingChargeDocId,
   billingOrderId,
@@ -154,7 +155,10 @@ assert(
   "pending_first_charge → 차단 안 함(재시도 경로)",
 );
 assert(
-  !isAlreadySubscribed({ status: "canceled", currentPeriodEndMs: T_NOW + DAY_MS }, T_NOW),
+  !isAlreadySubscribed(
+    { status: "canceled", currentPeriodEndMs: T_NOW + DAY_MS },
+    T_NOW,
+  ),
   "canceled → 차단 안 함",
 );
 assert(!isAlreadySubscribed(null, T_NOW), "구독 없음 → 허용");
@@ -233,7 +237,10 @@ const basePortOne = {
   portoneBillingKey: "bk_portone_1",
   currentPeriodEndMs: T0 - DAY_MS,
 };
-assert(selectDueForCharge(basePortOne, T0), "포트원 만료 도래 active → 청구 대상");
+assert(
+  selectDueForCharge(basePortOne, T0),
+  "포트원 만료 도래 active → 청구 대상",
+);
 assert(
   !selectDueForCharge({ ...basePortOne, portoneBillingKey: null }, T0),
   "포트원 빌링키 없음 → 비대상",
@@ -570,6 +577,86 @@ assert(
       T0,
     ),
     "연간이어도 파운더 grant 는 청구 안 함",
+  );
+}
+
+// ── 첫 청구 영수증: 표시금액 ≠ 실청구 를 막는 정본 ───────────────────
+// resolveFirstChargeAmount 는 쿠폰이 만료/소진/중복이면 throw 하지 않고 정가로
+// 폴백한다. 그때 화면이 계속 할인가를 그리면 "₩0" 을 보고 결제한 사용자에게
+// 정가가 청구된다 — firstChargeReceipt 가 그 갈림을 드러내는 지점이다.
+{
+  const paid = firstChargeReceipt({
+    status: "charged",
+    amount: 19000,
+    appliedCouponCode: null,
+    requestedCouponCode: null,
+  });
+  eq(paid.chargedAmount, 19000, "쿠폰 없음 → 정가 청구액 그대로");
+  eq(paid.couponApplied, false, "미적용 쿠폰은 false");
+  assert(!paid.couponRejected, "쿠폰을 넣지 않았으면 거절 고지도 없다");
+
+  const discounted = firstChargeReceipt({
+    status: "charged",
+    amount: 15200,
+    appliedCouponCode: "WELCOME20",
+    requestedCouponCode: "WELCOME20",
+  });
+  eq(discounted.chargedAmount, 15200, "적용된 할인가가 실청구액");
+  eq(discounted.couponApplied, "WELCOME20", "적용 쿠폰 코드를 그대로 돌려준다");
+  assert(!discounted.couponRejected, "적용됐으면 정가청구 고지 없음");
+
+  // ★핵심 회귀: 만료/소진 쿠폰 → 서버가 정가로 폴백한 경우.
+  const fellBack = firstChargeReceipt({
+    status: "charged",
+    amount: 19000,
+    appliedCouponCode: null,
+    requestedCouponCode: "EXPIRED",
+  });
+  eq(fellBack.chargedAmount, 19000, "폴백 시 실청구액은 정가");
+  eq(fellBack.couponApplied, false, "폴백 시 couponApplied=false");
+  assert(fellBack.couponRejected, "쿠폰 넣었는데 미적용 → 정가청구 고지 필요");
+
+  // comped(전액 면제) 는 PG 청구를 건너뛰므로 실청구액이 0 이어야 한다.
+  const comped = firstChargeReceipt({
+    status: "comped",
+    amount: 0,
+    appliedCouponCode: "FREETRIAL",
+    requestedCouponCode: "FREETRIAL",
+  });
+  eq(comped.chargedAmount, 0, "comped 는 0원 청구");
+  eq(comped.couponApplied, "FREETRIAL", "comped 도 적용 쿠폰을 보고한다");
+  assert(!comped.couponRejected, "comped 는 쿠폰이 먹은 것이므로 거절 아님");
+
+  // comped 인데 금액이 남아 들어와도 0 으로 잠근다(표시금액 오염 방지).
+  eq(
+    firstChargeReceipt({ status: "comped", amount: 19000 }).chargedAmount,
+    0,
+    "comped 는 amount 가 뭐든 0",
+  );
+  // 소수/음수/비정상 입력 방어 — 표시용 정수 KRW.
+  eq(
+    firstChargeReceipt({ status: "charged", amount: 15200.4 }).chargedAmount,
+    15200,
+    "실청구액은 정수 KRW 로 반올림",
+  );
+  eq(
+    firstChargeReceipt({ status: "charged", amount: -1 }).chargedAmount,
+    0,
+    "음수 금액은 0 으로 잠금",
+  );
+  eq(
+    firstChargeReceipt({ status: "charged", amount: Number.NaN }).chargedAmount,
+    0,
+    "NaN 금액은 0 으로 잠금",
+  );
+  // 공백만 있는 쿠폰 입력은 '요청 없음' 으로 본다(빈 고지 방지).
+  assert(
+    !firstChargeReceipt({
+      status: "charged",
+      amount: 19000,
+      requestedCouponCode: "   ",
+    }).couponRejected,
+    "공백 쿠폰 입력은 거절 고지를 띄우지 않는다",
   );
 }
 

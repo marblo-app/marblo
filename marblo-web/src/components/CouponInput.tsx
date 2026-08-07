@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { httpsCallable } from 'firebase/functions';
 import { getFunctions } from 'firebase/functions';
 import app from '@/lib/firebase';
+import { couponDiscountAmount, isFullyComped } from '@/lib/coupon';
 
 interface CouponResult {
   valid: boolean;
@@ -17,9 +18,15 @@ interface CouponResult {
 interface CouponInputProps {
   onApply: (result: CouponResult & { code: string }) => void;
   userId: string;
+  /** 할인 대상 금액 — 적용 결과를 금액으로 되돌려주는 데 쓴다. */
+  baseAmount?: number;
 }
 
-export default function CouponInput({ onApply, userId }: CouponInputProps) {
+export default function CouponInput({
+  onApply,
+  userId,
+  baseAmount = 0,
+}: CouponInputProps) {
   const t = useTranslations('checkout');
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
@@ -35,7 +42,20 @@ export default function CouponInput({ onApply, userId }: CouponInputProps) {
       const result = await validateCoupon({ code: code.trim(), userId });
       const data = result.data as CouponResult;
       if (data.valid) {
-        setMessage({ text: t('couponApplied'), type: 'success' });
+        // 쿠폰 타입별로 다른 말을 해야 한다. free_trial / plan_upgrade 는
+        // discountPercent 가 없어서, 예전엔 "적용되었습니다" 만 뜨고 총액은
+        // 정가 그대로 남아 있었다(실제 첫 청구는 0원).
+        const discount = couponDiscountAmount(baseAmount, data);
+        setMessage({
+          text: isFullyComped(baseAmount, data)
+            ? t('couponAppliedFree')
+            : discount > 0
+              ? t('couponAppliedDiscount', {
+                  amount: `\u20A9${discount.toLocaleString()}`,
+                })
+              : t('couponApplied'),
+          type: 'success',
+        });
         onApply({ ...data, code: code.trim() });
       } else {
         setMessage({ text: data.reason || t('couponInvalid'), type: 'error' });

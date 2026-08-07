@@ -87,6 +87,57 @@ export function applyCouponDiscount(
   }
 }
 
+// ─── 첫 청구 영수증(표시용 정본) ──────────────────────────────────────
+// ★화면이 말한 금액과 카드사가 긁은 금액이 달라지던 버그의 수리점.
+// resolveFirstChargeAmount 는 쿠폰이 만료/소진/중복이면 throw 하지 않고 정가로
+// 폴백한다(쿠폰 문제로 결제가 깨지면 안 되니까 — 이 보호로직은 유지한다).
+// 그런데 화면은 할인 총액을, 완료 페이지는 클라이언트가 계산한 금액을 그리고
+// 있었다. 그래서 "₩0 무료" 를 보고 결제한 사용자에게 정가가 청구될 수 있었다.
+//
+// 이 함수가 "서버가 실제로 얼마를, 어떤 쿠폰으로 청구했나" 의 단일 진실이다.
+// 응답과 구독 문서 양쪽에 같은 값을 싣고, 완료 페이지는 클라 금액이 아니라
+// 이 값을 표시한다. couponRejected 가 true 면 "쿠폰 미적용, 정가 청구" 고지를
+// 띄운다 — 사용자가 쿠폰을 넣었는데 서버가 못 쓴 경우다.
+export interface FirstChargeReceipt {
+  /** 실제 청구된 정수 KRW. comped(면제)면 0. */
+  chargedAmount: number;
+  /** 서버가 실제 적용한 쿠폰 코드. 미적용이면 false. */
+  couponApplied: string | false;
+  /** 사용자가 쿠폰을 넣었으나 서버가 정가로 폴백했는가. */
+  couponRejected: boolean;
+}
+
+export function firstChargeReceipt(input: {
+  /** 청구 결과. comped = 금액 0(무료 쿠폰 등)이라 PG 청구를 건너뛴 상태. */
+  status: "charged" | "comped";
+  /** 청구 시도 금액(쿠폰 적용 후). */
+  amount: number;
+  /** 서버가 실제 적용한 쿠폰 코드(없으면 null). */
+  appliedCouponCode?: string | null;
+  /** 사용자가 요청한 쿠폰 코드(없으면 null). */
+  requestedCouponCode?: string | null;
+}): FirstChargeReceipt {
+  const applied =
+    typeof input.appliedCouponCode === "string" &&
+    input.appliedCouponCode.length > 0
+      ? input.appliedCouponCode
+      : null;
+  const requested =
+    typeof input.requestedCouponCode === "string" &&
+    input.requestedCouponCode.trim().length > 0
+      ? input.requestedCouponCode.trim()
+      : null;
+  const chargedAmount =
+    input.status === "comped" || !Number.isFinite(input.amount)
+      ? 0
+      : Math.max(0, Math.round(input.amount));
+  return {
+    chargedAmount,
+    couponApplied: applied ?? false,
+    couponRejected: requested !== null && applied === null,
+  };
+}
+
 // ─── 기간 계산 ────────────────────────────────────────────────────────
 // 한 결제 주기 = 월간 1개월 / 연간 12개월. setMonth 로 월경계를 넘긴다.
 //

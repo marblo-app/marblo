@@ -78,6 +78,7 @@ import {
   planAmountKRW,
   normalizeBillingCycle,
   applyCouponDiscount,
+  firstChargeReceipt,
   nextPeriodEnd,
   billingChargeDocId,
   billingOrderId,
@@ -90,6 +91,7 @@ import {
   applyChargeSuccess,
   applyChargeFailure,
   hasPaymentEvidence as hasBillingPaymentEvidence,
+  type FirstChargeReceipt,
   type SubscriptionSnapshot,
   type BillingCycle,
   type FirstChargeProvider,
@@ -951,7 +953,9 @@ function assertPortOneServerConfig(): void {
   }
 }
 
-function assertPortOneCheckoutConfig(kind: "one_time" | "subscription"): string {
+function assertPortOneCheckoutConfig(
+  kind: "one_time" | "subscription",
+): string {
   assertPortOneServerConfig();
   const channelKey =
     kind === "subscription"
@@ -1030,9 +1034,7 @@ async function payPortOneBillingKey(params: {
           id: params.customerId,
           email: params.customerEmail || undefined,
           // PortOne V2: name is { full: "..." }; missing name/phone can 500 on billing-key charge.
-          name: params.customerName
-            ? { full: params.customerName }
-            : undefined,
+          name: params.customerName ? { full: params.customerName } : undefined,
           phoneNumber: params.customerPhone || undefined,
         },
       }),
@@ -1087,7 +1089,10 @@ export const createPortOnePaymentIntent = functions.https.onCall(
         "planType이 필요합니다.",
       );
     }
-    const expected = portoneExpectedAmount(planType, stringField(data, "billing"));
+    const expected = portoneExpectedAmount(
+      planType,
+      stringField(data, "billing"),
+    );
     if (!expected) {
       throw new functions.https.HttpsError(
         "invalid-argument",
@@ -1099,16 +1104,27 @@ export const createPortOnePaymentIntent = functions.https.onCall(
       "one_time",
       `${Date.now()}_${Math.random().toString(36).slice(2)}`,
     );
-    const orderName = `Marblo ${planType} 단건 결제`;
-    await db.collection("pendingPortOneOrders").doc(paymentId).set({
-      userId: context.auth.uid,
-      planType,
-      billingCycle: expected.billingCycle,
-      amount: expected.amount,
-      orderName,
-      status: "pending",
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    // 단건 결제가 무엇에 대한 권리인지는 주문에 실려야 한다 — 강의 결제인데
+    // lectureSlug 를 안 실으면 확정 시점에 무엇을 지급할지 알 수 없어, 예전엔
+    // 그 공백을 "구독 active" 로 메우고 있었다(단건이 구독을 열어주던 버그).
+    const lectureSlug = stringField(data, "lectureSlug");
+    const orderName = lectureSlug
+      ? `Marblo 강의 단건 결제`
+      : `Marblo ${planType} 단건 결제`;
+    await db
+      .collection("pendingPortOneOrders")
+      .doc(paymentId)
+      .set({
+        userId: context.auth.uid,
+        kind: "one_time",
+        planType,
+        lectureSlug: lectureSlug || null,
+        billingCycle: expected.billingCycle,
+        amount: expected.amount,
+        orderName,
+        status: "pending",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
     return {
       paymentId,
       orderName,
@@ -1153,7 +1169,10 @@ export const completePortOnePayment = functions.https.onCall(
     }
     const planType =
       typeof order.planType === "string" ? order.planType : "pro";
-    const billingCycle = normalizeBillingCycle(order.billingCycle);
+    const lectureSlug =
+      typeof order.lectureSlug === "string" && order.lectureSlug.trim()
+        ? order.lectureSlug.trim()
+        : null;
     const amount = typeof order.amount === "number" ? order.amount : 0;
     if (amount <= 0) {
       throw new functions.https.HttpsError(
@@ -1186,7 +1205,13 @@ export const completePortOnePayment = functions.https.onCall(
       return true;
     });
 
-    if (!shouldApply) return { success: true, idempotent: true };
+    if (!shouldApply)
+      return {
+        success: true,
+        idempotent: true,
+        chargedAmount: amount,
+        lectureSlug,
+      };
 
     const payment = await fetchPortOnePayment(paymentId);
     const validation = validatePortOnePaidPayment(payment, {
@@ -1207,24 +1232,49 @@ export const completePortOnePayment = functions.https.onCall(
       );
     }
 
+    // ★단건 결제는 subscriptions 를 절대 건드리지 않는다.
+    // 예전엔 여기서 구독을 active 로 세웠다 — 강의 한 번 결제한 사람이 정기
+    // 구독자로 승격되고(공짜 Pro), 기존 구독자라면 빌링키·주기·기간 필드가 단건
+    // 값으로 덮여 갱신 청구가 어긋났다. 정기구독을 여는 건 빌링키 경로
+    // (completePortOneBillingKey / issueBillingKey) 하나뿐이다.
+    const uid = context.auth.uid;
     const now = new Date();
-    await db.collection("subscriptions").doc(context.auth.uid).set(
+    await db.collection("oneTimeEntitlements").doc(paymentId).set(
       {
-        userId: context.auth.uid,
+        userId: uid,
+        provider: "portone",
+        paymentId,
         planType,
-        billingCycle,
-        status: "active",
-        paymentProvider: "portone",
-        portonePaymentId: paymentId,
-        currentPeriodStart: now,
-        currentPeriodEnd: nextPeriodEnd(now, billingCycle),
-        billingFailedCount: 0,
-        nextRetryAt: null,
-        createdAt: now,
+        lectureSlug,
+        amount,
+        grantedAt: now,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
       { merge: true },
     );
+
+    // 강의 단건이면 강의 수강권도 지급한다(Toss confirmLecturePayment 와 동일
+    // 계약: userId+lectureSlug 1행 + 앱 쿠폰 자동발급).
+    if (lectureSlug) {
+      const existingPurchase = await db
+        .collection("lecturePurchases")
+        .where("userId", "==", uid)
+        .where("lectureSlug", "==", lectureSlug)
+        .limit(1)
+        .get();
+      if (existingPurchase.empty) {
+        await db.collection("lecturePurchases").add({
+          userId: uid,
+          lectureSlug,
+          purchasedAt: now,
+          orderId: paymentId,
+          amount,
+          provider: "portone",
+        });
+        await issueLectureCouponInternal(uid);
+      }
+    }
+
     await chargeRef.update({
       status: "succeeded",
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1233,7 +1283,12 @@ export const completePortOnePayment = functions.https.onCall(
       status: "confirmed",
       confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-    return { success: true, idempotent: false };
+    return {
+      success: true,
+      idempotent: false,
+      chargedAmount: amount,
+      lectureSlug,
+    };
   },
 );
 
@@ -1380,6 +1435,8 @@ async function chargeSubscriptionIdempotent(params: {
   chargeDocIdOverride?: string;
   /** 첫청구 등 결정적 orderId 강제. */
   orderIdOverride?: string;
+  /** 실제 적용된 쿠폰 코드. 원장에 남겨 멱등 재진입 시 영수증을 복원한다. */
+  couponCode?: string | null;
 }): Promise<ChargeResult> {
   const { userId, billingKey, customerKey, amount, planType, cycleAnchorMs } =
     params;
@@ -1416,6 +1473,7 @@ async function chargeSubscriptionIdempotent(params: {
         reason: params.reason,
         status: "pending",
         cycleAnchorMs,
+        couponCode: params.couponCode ?? null,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
@@ -1520,6 +1578,8 @@ async function chargePortOneSubscriptionIdempotent(params: {
   paymentIdOverride?: string;
   /** 첫청구 결정적 billingCharges doc id (기본: portone_{paymentId}). */
   chargeDocIdOverride?: string;
+  /** 실제 적용된 쿠폰 코드. 원장에 남겨 멱등 재진입 시 영수증을 복원한다. */
+  couponCode?: string | null;
 }): Promise<ChargeResult> {
   const {
     userId,
@@ -1562,6 +1622,7 @@ async function chargePortOneSubscriptionIdempotent(params: {
         reason: params.reason,
         status: "pending",
         cycleAnchorMs,
+        couponCode: params.couponCode ?? null,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
@@ -1735,7 +1796,12 @@ async function pickFirstChargeGeneration(
       break;
     }
     const st = snap.data()?.status as string | undefined;
-    if (st === "succeeded" || st === "comped" || st === "pending" || st === "failed") {
+    if (
+      st === "succeeded" ||
+      st === "comped" ||
+      st === "pending" ||
+      st === "failed"
+    ) {
       statuses.push(st);
     } else {
       statuses.push("failed");
@@ -1819,6 +1885,26 @@ async function resolveFirstChargeAmount(
   return { finalAmount, appliedCoupon: { code: couponCode } };
 }
 
+// 멱등 재진입(이미 성공한 첫청구)에서 "그때 실제로 얼마를 청구했나" 를 원장에서
+// 복원한다. 이번 호출의 계산값이 아니라 원장이 정본이다 — 재진입 시 쿠폰이
+// 소진돼 finalAmount 가 정가로 계산될 수 있는데, 실제로 긁힌 건 그때 금액이다.
+function ledgerReceipt(
+  data: FirebaseFirestore.DocumentData | undefined,
+  fallbackAmount: number,
+  requestedCouponCode: string | null,
+): FirstChargeReceipt {
+  const d = data || {};
+  const receipt = firstChargeReceipt({
+    status: d.status === "comped" ? "comped" : "charged",
+    amount: typeof d.amount === "number" ? d.amount : fallbackAmount,
+    appliedCouponCode: typeof d.couponCode === "string" ? d.couponCode : null,
+    requestedCouponCode,
+  });
+  // couponCode 필드가 아예 없는 구버전 원장은 "쿠폰 미적용" 을 단정할 수 없다 —
+  // 잘못된 정가청구 고지를 띄우지 않는다.
+  return "couponCode" in d ? receipt : { ...receipt, couponRejected: false };
+}
+
 export const completePortOneBillingKey = functions.https.onCall(
   async (data, context) => {
     const userId = context.auth?.uid;
@@ -1870,10 +1956,11 @@ export const completePortOneBillingKey = functions.https.onCall(
     const existingSub = await loadSubscriptionGuard(userId);
     assertNotAlreadySubscribed(existingSub, nowMs);
 
+    const requestedCoupon = stringField(data, "coupon");
     const { finalAmount, appliedCoupon } = await resolveFirstChargeAmount(
       userId,
       expected.amount,
-      stringField(data, "coupon"),
+      requestedCoupon,
     );
 
     // 결정적 첫청구 키 — Date.now() 앵커 금지(동시 호출 이중청구 방지).
@@ -1898,38 +1985,56 @@ export const completePortOneBillingKey = functions.https.onCall(
 
     // 이미 성공한 첫청구 문서면 재청구 없이 구독 복구 + idempotent.
     {
-      const prior = await db.collection("billingCharges").doc(chargeDocId).get();
+      const prior = await db
+        .collection("billingCharges")
+        .doc(chargeDocId)
+        .get();
       const priorSt = prior.data()?.status as string | undefined;
       if (priorSt === "succeeded" || priorSt === "comped") {
         const now = new Date(nowMs);
-        await db.collection("subscriptions").doc(userId).set(
-          {
-            userId,
-            planType,
-            billingCycle: expected.billingCycle,
-            status: "active",
-            paymentProvider: "portone",
-            portoneBillingKey: billingKey,
-            portoneCustomerName: customerName,
-            portoneCustomerPhone: customerPhone,
-            portoneCustomerEmail: customerEmail,
-            portonePaymentId:
-              priorSt === "comped"
-                ? null
-                : prior.data()?.portonePaymentId || paymentId,
-            currentPeriodStart: now,
-            currentPeriodEnd: nextPeriodEnd(now, expected.billingCycle),
-            billingFailedCount: 0,
-            nextRetryAt: null,
-            firstChargeGeneration: generation,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          },
-          { merge: true },
+        const receipt = ledgerReceipt(
+          prior.data(),
+          finalAmount,
+          requestedCoupon,
         );
+        await db
+          .collection("subscriptions")
+          .doc(userId)
+          .set(
+            {
+              userId,
+              planType,
+              billingCycle: expected.billingCycle,
+              status: "active",
+              paymentProvider: "portone",
+              portoneBillingKey: billingKey,
+              portoneCustomerName: customerName,
+              portoneCustomerPhone: customerPhone,
+              portoneCustomerEmail: customerEmail,
+              portonePaymentId:
+                priorSt === "comped"
+                  ? null
+                  : prior.data()?.portonePaymentId || paymentId,
+              // 완료 페이지가 클라 계산액이 아니라 이 값을 표시한다(#6).
+              lastChargeAmount: receipt.chargedAmount,
+              couponCode: receipt.couponApplied || null,
+              couponRejected: receipt.couponRejected,
+              currentPeriodStart: now,
+              currentPeriodEnd: nextPeriodEnd(now, expected.billingCycle),
+              billingFailedCount: 0,
+              nextRetryAt: null,
+              firstChargeGeneration: generation,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true },
+          );
         return {
           success: true,
           idempotent: true,
           charged: priorSt === "comped" ? "comped" : "charged",
+          chargedAmount: receipt.chargedAmount,
+          couponApplied: receipt.couponApplied,
+          couponRejected: receipt.couponRejected,
         };
       }
     }
@@ -1946,39 +2051,55 @@ export const completePortOneBillingKey = functions.https.onCall(
       customerPhone,
       paymentIdOverride: paymentId,
       chargeDocIdOverride: chargeDocId,
+      couponCode: appliedCoupon?.code ?? null,
     });
 
     if (charge.status === "skipped" && charge.reason === "already_done") {
       const now = new Date(nowMs);
-      await db.collection("subscriptions").doc(userId).set(
-        {
-          userId,
-          planType,
-          billingCycle: expected.billingCycle,
-          status: "active",
-          paymentProvider: "portone",
-          portoneBillingKey: billingKey,
-          portoneCustomerName: customerName,
-          portoneCustomerPhone: customerPhone,
-          portoneCustomerEmail: customerEmail,
-          portonePaymentId: finalAmount <= 0 ? null : paymentId,
-          currentPeriodStart: now,
-          currentPeriodEnd: nextPeriodEnd(now, expected.billingCycle),
-          billingFailedCount: 0,
-          nextRetryAt: null,
-          firstChargeGeneration: generation,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
-      return { success: true, idempotent: true, charged: "charged" };
+      const prior = await db
+        .collection("billingCharges")
+        .doc(chargeDocId)
+        .get();
+      const receipt = ledgerReceipt(prior.data(), finalAmount, requestedCoupon);
+      await db
+        .collection("subscriptions")
+        .doc(userId)
+        .set(
+          {
+            userId,
+            planType,
+            billingCycle: expected.billingCycle,
+            status: "active",
+            paymentProvider: "portone",
+            portoneBillingKey: billingKey,
+            portoneCustomerName: customerName,
+            portoneCustomerPhone: customerPhone,
+            portoneCustomerEmail: customerEmail,
+            portonePaymentId: finalAmount <= 0 ? null : paymentId,
+            lastChargeAmount: receipt.chargedAmount,
+            couponCode: receipt.couponApplied || null,
+            couponRejected: receipt.couponRejected,
+            currentPeriodStart: now,
+            currentPeriodEnd: nextPeriodEnd(now, expected.billingCycle),
+            billingFailedCount: 0,
+            nextRetryAt: null,
+            firstChargeGeneration: generation,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      return {
+        success: true,
+        idempotent: true,
+        charged: "charged",
+        chargedAmount: receipt.chargedAmount,
+        couponApplied: receipt.couponApplied,
+        couponRejected: receipt.couponRejected,
+      };
     }
 
     if (charge.status === "skipped" && charge.reason === "in_flight") {
-      throw new functions.https.HttpsError(
-        "aborted",
-        "payment_in_progress",
-      );
+      throw new functions.https.HttpsError("aborted", "payment_in_progress");
     }
 
     if (charge.status === "failed") {
@@ -2001,36 +2122,53 @@ export const completePortOneBillingKey = functions.https.onCall(
     }
 
     const now = new Date(nowMs);
-    await db.collection("subscriptions").doc(userId).set(
-      {
-        userId,
-        planType,
-        billingCycle: expected.billingCycle,
-        status: "active",
-        paymentProvider: "portone",
-        portoneBillingKey: billingKey,
-        // KG이니시스 갱신 청구는 매 사이클 name/phone/email 을 요구한다 — 구독 문서에
-        // 저장해 scheduledChargePortOneSubscriptions 가 재사용한다.
-        portoneCustomerName: customerName,
-        portoneCustomerPhone: customerPhone,
-        portoneCustomerEmail: customerEmail,
-        portonePaymentId:
-          charge.status === "comped"
-            ? null
-            : charge.status === "charged"
-              ? charge.paymentKey
-              : paymentId,
-        currentPeriodStart: now,
-        currentPeriodEnd: nextPeriodEnd(now, expected.billingCycle),
-        billingFailedCount: 0,
-        nextRetryAt: null,
-        firstChargeGeneration: generation,
-        couponCode: appliedCoupon?.code || null,
-        createdAt: now,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
+    // ★실청구 영수증(#6). 화면·GA4 는 클라가 계산한 금액이 아니라 이 값을 쓴다.
+    // 쿠폰이 만료/소진/중복이면 resolveFirstChargeAmount 가 정가로 폴백하므로,
+    // 사용자가 본 할인 총액과 실제 청구액이 갈릴 수 있다.
+    const receipt = firstChargeReceipt({
+      status: charge.status === "comped" ? "comped" : "charged",
+      amount: finalAmount,
+      appliedCouponCode: appliedCoupon?.code ?? null,
+      requestedCouponCode: requestedCoupon,
+    });
+    await db
+      .collection("subscriptions")
+      .doc(userId)
+      .set(
+        {
+          userId,
+          planType,
+          billingCycle: expected.billingCycle,
+          status: "active",
+          paymentProvider: "portone",
+          portoneBillingKey: billingKey,
+          // KG이니시스 갱신 청구는 매 사이클 name/phone/email 을 요구한다 — 구독 문서에
+          // 저장해 scheduledChargePortOneSubscriptions 가 재사용한다.
+          portoneCustomerName: customerName,
+          portoneCustomerPhone: customerPhone,
+          portoneCustomerEmail: customerEmail,
+          portonePaymentId:
+            charge.status === "comped"
+              ? null
+              : charge.status === "charged"
+                ? charge.paymentKey
+                : paymentId,
+          currentPeriodStart: now,
+          currentPeriodEnd: nextPeriodEnd(now, expected.billingCycle),
+          billingFailedCount: 0,
+          nextRetryAt: null,
+          firstChargeGeneration: generation,
+          // PortOne 구독은 이 callable 을 checkout 에서 호출하고 완료 페이지로는
+          // 리다이렉트만 한다 — 응답이 완료 페이지에 닿지 않으므로 구독 문서에
+          // 실청구 영수증을 남겨야 완료 페이지가 서버값을 읽을 수 있다.
+          lastChargeAmount: receipt.chargedAmount,
+          couponCode: receipt.couponApplied || null,
+          couponRejected: receipt.couponRejected,
+          createdAt: now,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
 
     if (appliedCoupon) {
       await db
@@ -2054,6 +2192,9 @@ export const completePortOneBillingKey = functions.https.onCall(
           : charge.status === "charged"
             ? "charged"
             : charge.status,
+      chargedAmount: receipt.chargedAmount,
+      couponApplied: receipt.couponApplied,
+      couponRejected: receipt.couponRejected,
     };
   },
 );
@@ -2110,6 +2251,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
   const billingKey = responseData.billingKey;
 
   // 2) 쿠폰 할인(첫 청구에만 적용).
+  const requestedCoupon = typeof coupon === "string" ? coupon : null;
   const { finalAmount, appliedCoupon } = await resolveFirstChargeAmount(
     userId,
     baseAmount,
@@ -2143,30 +2285,40 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
     const priorSt = prior.data()?.status as string | undefined;
     if (priorSt === "succeeded" || priorSt === "comped") {
       const now = new Date(nowMs);
-      await db.collection("subscriptions").doc(userId).set(
-        {
-          userId,
-          planType,
-          billingCycle,
-          status: "active",
-          paymentProvider: "toss",
-          tossBillingKey: billingKey,
-          tossCustomerKey: customerKey,
-          tossPaymentKey: prior.data()?.paymentKey || null,
-          currentPeriodStart: now,
-          currentPeriodEnd: nextPeriodEnd(now, billingCycle),
-          billingFailedCount: 0,
-          nextRetryAt: null,
-          firstChargeGeneration: generation,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
+      const receipt = ledgerReceipt(prior.data(), finalAmount, requestedCoupon);
+      await db
+        .collection("subscriptions")
+        .doc(userId)
+        .set(
+          {
+            userId,
+            planType,
+            billingCycle,
+            status: "active",
+            paymentProvider: "toss",
+            tossBillingKey: billingKey,
+            tossCustomerKey: customerKey,
+            tossPaymentKey: prior.data()?.paymentKey || null,
+            lastChargeAmount: receipt.chargedAmount,
+            couponCode: receipt.couponApplied || null,
+            couponRejected: receipt.couponRejected,
+            currentPeriodStart: now,
+            currentPeriodEnd: nextPeriodEnd(now, billingCycle),
+            billingFailedCount: 0,
+            nextRetryAt: null,
+            firstChargeGeneration: generation,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
       return {
         success: true,
         billingKey,
         charged: priorSt,
         idempotent: true,
+        chargedAmount: receipt.chargedAmount,
+        couponApplied: receipt.couponApplied,
+        couponRejected: receipt.couponRejected,
       };
     }
   }
@@ -2181,29 +2333,53 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
     reason: "first",
     chargeDocIdOverride: chargeDocId,
     orderIdOverride: orderId,
+    couponCode: appliedCoupon?.code ?? null,
   });
 
   if (charge.status === "skipped" && charge.reason === "already_done") {
     const now = new Date(nowMs);
-    await db.collection("subscriptions").doc(userId).set(
-      {
-        userId,
-        planType,
-        billingCycle,
-        status: "active",
-        paymentProvider: "toss",
-        tossBillingKey: billingKey,
-        tossCustomerKey: customerKey,
-        currentPeriodStart: now,
-        currentPeriodEnd: nextPeriodEnd(now, billingCycle),
-        billingFailedCount: 0,
-        nextRetryAt: null,
-        firstChargeGeneration: generation,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true },
+    const priorSnap = await db
+      .collection("billingCharges")
+      .doc(chargeDocId)
+      .get();
+    const replayReceipt = ledgerReceipt(
+      priorSnap.data(),
+      finalAmount,
+      requestedCoupon,
     );
-    return { success: true, billingKey, charged: "charged", idempotent: true };
+    await db
+      .collection("subscriptions")
+      .doc(userId)
+      .set(
+        {
+          userId,
+          planType,
+          billingCycle,
+          status: "active",
+          paymentProvider: "toss",
+          tossBillingKey: billingKey,
+          tossCustomerKey: customerKey,
+          lastChargeAmount: replayReceipt.chargedAmount,
+          couponCode: replayReceipt.couponApplied || null,
+          couponRejected: replayReceipt.couponRejected,
+          currentPeriodStart: now,
+          currentPeriodEnd: nextPeriodEnd(now, billingCycle),
+          billingFailedCount: 0,
+          nextRetryAt: null,
+          firstChargeGeneration: generation,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    return {
+      success: true,
+      billingKey,
+      charged: "charged",
+      idempotent: true,
+      chargedAmount: replayReceipt.chargedAmount,
+      couponApplied: replayReceipt.couponApplied,
+      couponRejected: replayReceipt.couponRejected,
+    };
   }
 
   if (charge.status === "skipped" && charge.reason === "in_flight") {
@@ -2230,6 +2406,13 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
   // 4) 청구 성공/comped → 구독 active 저장 + 쿠폰 소진 기록.
   const now = new Date(nowMs);
   const periodEnd = nextPeriodEnd(now, billingCycle);
+  // ★실청구 영수증(#6) — 쿠폰 폴백 시 화면 금액과 실청구가 갈리던 지점.
+  const receipt = firstChargeReceipt({
+    status: charge.status === "comped" ? "comped" : "charged",
+    amount: finalAmount,
+    appliedCouponCode: appliedCoupon?.code ?? null,
+    requestedCouponCode: requestedCoupon,
+  });
   await db
     .collection("subscriptions")
     .doc(userId)
@@ -2248,7 +2431,9 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
         billingFailedCount: 0,
         nextRetryAt: null,
         firstChargeGeneration: generation,
-        couponCode: appliedCoupon?.code || null,
+        lastChargeAmount: receipt.chargedAmount,
+        couponCode: receipt.couponApplied || null,
+        couponRejected: receipt.couponRejected,
         createdAt: now,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
@@ -2273,6 +2458,9 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
     billingKey,
     charged: charge.status,
     idempotent: false,
+    chargedAmount: receipt.chargedAmount,
+    couponApplied: receipt.couponApplied,
+    couponRejected: receipt.couponRejected,
   };
 });
 
@@ -2305,8 +2493,7 @@ export const retryFirstCharge = functions.https.onCall(
       );
     }
 
-    const provider =
-      sub.paymentProvider === "portone" ? "portone" : "toss";
+    const provider = sub.paymentProvider === "portone" ? "portone" : "toss";
     const generation =
       typeof sub.firstChargeGeneration === "number"
         ? sub.firstChargeGeneration
@@ -2422,6 +2609,18 @@ export const retryFirstCharge = functions.https.onCall(
 
     // succeeded / comped / already_done
     const now = new Date(nowMs);
+    // 재시도는 쿠폰을 다시 적용하지 않는다(이중 소진 방지) — 원장에 남은
+    // 쿠폰/금액이 이 청구의 영수증이다. couponRejected 는 첫 시도의 판정을
+    // 유지해야 하므로 여기서 덮어쓰지 않는다.
+    const retryReceipt = firstChargeReceipt({
+      status: charge.status === "comped" ? "comped" : "charged",
+      amount: finalAmount,
+      appliedCouponCode:
+        typeof priorCharge.data()?.couponCode === "string"
+          ? (priorCharge.data()!.couponCode as string)
+          : null,
+      requestedCouponCode: null,
+    });
     const activePatch: Record<string, unknown> = {
       status: "active",
       planType,
@@ -2432,6 +2631,7 @@ export const retryFirstCharge = functions.https.onCall(
       nextRetryAt: null,
       firstChargeError: null,
       firstChargeGeneration: generation,
+      lastChargeAmount: retryReceipt.chargedAmount,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
     if (provider === "portone" && charge.status === "charged") {
@@ -2446,6 +2646,8 @@ export const retryFirstCharge = functions.https.onCall(
       success: true,
       charged: charge.status === "comped" ? "comped" : "charged",
       idempotent: charge.status === "skipped",
+      chargedAmount: retryReceipt.chargedAmount,
+      couponApplied: retryReceipt.couponApplied,
     };
   },
 );
@@ -2592,11 +2794,7 @@ export const cancelSubscription = functions.https.onCall(
 
     // active / past_due / trialing 만 자발 해지 허용.
     // past_due: 재시도 청구를 멈추기 위해 취소 가능(환불 없음, 기간말 접근은 entitlement).
-    if (
-      status !== "active" &&
-      status !== "past_due" &&
-      status !== "trialing"
-    ) {
+    if (status !== "active" && status !== "past_due" && status !== "trialing") {
       throw new functions.https.HttpsError(
         "failed-precondition",
         `Subscription status '${status || "unknown"}' cannot be canceled`,
@@ -8572,9 +8770,7 @@ export const getAdminRetentionCohorts = functions
         uidFiltered: getAdminExclusionUid() != null,
         clientIdCount: adminClientIds.length,
       },
-      cohorts: buildRetentionCohorts(
-        cohortRows as RetentionCohortSourceRow[],
-      ),
+      cohorts: buildRetentionCohorts(cohortRows as RetentionCohortSourceRow[]),
       activationGate: buildActivationGateFunnel(gateRows[0]),
     };
   });

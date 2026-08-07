@@ -9,6 +9,7 @@ import { httpsCallable, getFunctions } from "firebase/functions";
 import { auth } from "@/lib/firebase";
 import app from "@/lib/firebase";
 import CouponInput from "@/components/CouponInput";
+import { couponDiscountAmount } from "@/lib/coupon";
 import { lectures } from "@/data/lectures";
 import { trackBeginCheckout, trackViewItem, trackAddPaymentInfo } from "@/lib/gtag";
 import { ArrowLeft, Loader2, AlertCircle, ShoppingCart } from "lucide-react";
@@ -232,11 +233,11 @@ export default function CheckoutPage() {
     };
   }, [user, isValid, t, paymentProvider, loadPortOneSDK]);
 
+  // 쿠폰 타입별 할인 반영(C). discountPercent 만 보면 첫 결제를 전액 면제하는
+  // free_trial / plan_upgrade 쿠폰이 화면에 반영되지 않아 정가가 그대로 보였다.
   const handleCouponApply = useCallback(
-    (result: { discountPercent?: number; code: string }) => {
-      if (result.discountPercent) {
-        setDiscount(Math.round((baseAmount * result.discountPercent) / 100));
-      }
+    (result: { discountPercent?: number; type?: string; code: string }) => {
+      setDiscount(couponDiscountAmount(baseAmount, result));
       setCouponCode(result.code);
     },
     [baseAmount],
@@ -426,12 +427,15 @@ export default function CheckoutPage() {
         const safePlan = plan || "pro";
         if (isLecture && lectureSlug) {
           const createIntent = httpsCallable<
-            { planType: string; billing: string },
+            { planType: string; billing: string; lectureSlug?: string },
             { paymentId: string; orderName: string; amount: number }
           >(functions, "createPortOnePaymentIntent");
           const { data: intent } = await createIntent({
             planType: safePlan,
             billing,
+            // 무엇에 대한 단건 결제인지 주문에 실어야 확정 시점에 강의 수강권을
+            // 지급할 수 있다(없으면 서버가 지급할 대상을 알 수 없다).
+            lectureSlug,
           });
           const response = await portone.requestPayment({
             storeId: config.storeId,
@@ -661,7 +665,11 @@ export default function CheckoutPage() {
 
             {/* Coupon (subscriptions only) */}
             {!isLecture && user && (
-              <CouponInput onApply={handleCouponApply} userId={user.uid} />
+              <CouponInput
+                onApply={handleCouponApply}
+                userId={user.uid}
+                baseAmount={baseAmount}
+              />
             )}
 
             {/* Discount */}
@@ -675,14 +683,21 @@ export default function CheckoutPage() {
               </div>
             )}
 
-            {/* Total */}
+            {/* Total — 전액 면제 쿠폰이면 "₩0/월" 이 아니라 무료로 표기한다
+                (0원은 첫 결제 한정이고, 갱신가는 위 autoRenewNotice 가 말한다). */}
             <div className="border-t border-zinc-700 pt-4 flex justify-between text-lg font-bold">
               <span>{t("total")}</span>
               <span>
-                {"\u20A9"}
-                {finalAmount.toLocaleString()}
-                {!isLecture &&
-                  (billing === "annual" ? t("annual") : t("monthly"))}
+                {finalAmount <= 0 ? (
+                  t("freeFirstCharge")
+                ) : (
+                  <>
+                    {"\u20A9"}
+                    {finalAmount.toLocaleString()}
+                    {!isLecture &&
+                      (billing === "annual" ? t("annual") : t("monthly"))}
+                  </>
+                )}
               </span>
             </div>
 

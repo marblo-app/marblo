@@ -606,7 +606,16 @@
     "alreadySubscribed": "이미 구독 중입니다. 내 구독 페이지로 이동합니다.",
     "firstChargeFailed": "카드는 등록됐으나 첫 청구에 실패했습니다. 아래에서 재시도해 주세요.",
     "retryFirstCharge": "첫 청구 재시도",
-    "paymentInProgress": "결제가 이미 진행 중입니다. 잠시 후 다시 시도해 주세요."
+    "paymentInProgress": "결제가 이미 진행 중입니다. 잠시 후 다시 시도해 주세요.",
+    "freeFirstCharge": "무료",
+    "couponAppliedFree": "쿠폰이 적용되어 첫 결제가 무료입니다",
+    "couponAppliedDiscount": "쿠폰 적용: {amount} 할인",
+    "couponNotApplied": "쿠폰이 적용되지 않아 정가로 청구되었습니다. (만료·소진 또는 이미 사용한 쿠폰)",
+    "notActivated": "결제 확인이 완료되지 않았습니다. 잠시 후 내 구독 페이지에서 다시 확인해 주세요.",
+    "alreadySubscribedTitle": "이미 구독 중입니다",
+    "alreadySubscribedBody": "이 계정에는 이미 활성 구독이 있어 이번에 새로 청구되지 않았습니다.",
+    "goToMySubscription": "내 구독 보기",
+    "goToLogin": "로그인하기"
   },
   "lectures": {
     "title": "강의",
