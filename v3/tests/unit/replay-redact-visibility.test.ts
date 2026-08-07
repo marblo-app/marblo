@@ -36,6 +36,16 @@ describe("Mission Replay redaction boundary", () => {
     expect(renderToStaticMarkup(createElement(RedactionPreview, { redacted }))).toContain(redacted.serialized.replaceAll('"', "&quot;"));
   });
 
+  it("drops private/detail beats before the redaction boundary (L2)", () => {
+    // sensitivity=detail 비트는 L2 허용 목록 밖 — 발행 입력에 들어가면 2차
+    // 검증 실패 후보가 된다. 등급 게이트가 1차로 걸러야 Card/GIF 생성이 산다.
+    const redacted = redactReplay(replay, { level: "L2" });
+    expect(redacted.verified).toBe(true);
+    const payload = redacted.payload as { beats?: unknown[] } | null;
+    expect(Array.isArray(payload?.beats)).toBe(true);
+    expect(payload?.beats).toHaveLength(0);
+  });
+
   it("renders CEO defaults without an outward-facing action", () => {
     const markup = renderToStaticMarkup(createElement(ReplayVisibilityPanel));
     expect(markup).toContain('value="L2"');

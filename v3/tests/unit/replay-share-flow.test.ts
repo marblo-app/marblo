@@ -62,5 +62,19 @@ describe("ReplayShareFlow", () => {
     expect(markup).toContain("이미지 카드");
     expect(markup).toContain("GIF");
     expect(markup).toContain("OG 카드가 자동 미리보기됩니다");
+    expect(markup).toContain("1. 형식 선택");
+  });
+
+  it("opens on the generate step when a defaultFormat is provided", () => {
+    const markup = renderToStaticMarkup(createElement(ReplayShareFlow, {
+      replay: replay(),
+      canPublish: false,
+      onClose: () => {},
+      defaultFormat: "image",
+    }));
+    // Step 2 (생성) is active — headline share-bar skips format pick.
+    expect(markup).toContain("2. 생성");
+    expect(markup).toContain("이미지 카드 생성");
+    expect(markup).toContain("bg-violet-500/20 text-violet-200");
   });
 });

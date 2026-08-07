@@ -1,5 +1,6 @@
 /** Mission Replay's single boundary into the shared redaction primitive. */
 import { redactAndVerify } from "../redact/redact";
+import { filterBeatsForVisibility } from "./sensitivity";
 import type {
   MissionReplay,
   RedactedReplay,
@@ -29,6 +30,11 @@ function publicationInput(
   options: ReplayRedactionOptions,
 ): Record<string, unknown> {
   const { stats } = replay;
+  // ★등급 게이트를 1차로 통과한 비트만 레닭션에 넣는다. private 비트(자유
+  // 텍스트 진행 로그·감독자 노트 등)를 그대로 넣으면 2차 검증이 깨져
+  // Card/GIF 생성이 전부 막힌다 — 발행 표면 밖 비트는 애초에 경계 밖으로
+  // 나가지 않아야 한다(설계 §5.2 / filterBeatsForVisibility).
+  const visibleBeats = filterBeatsForVisibility(replay.beats, options.level);
   const input: Record<string, unknown> = {
     goal: replay.goal,
     templateId: replay.templateId,
@@ -58,7 +64,7 @@ function publicationInput(
       tasksCompleted: member.tasksCompleted,
       beats: member.beats,
     })),
-    beats: replay.beats.map((beat) => ({
+    beats: visibleBeats.map((beat) => ({
       id: beat.id,
       ts: beat.ts.toISOString(),
       lane: beat.lane,

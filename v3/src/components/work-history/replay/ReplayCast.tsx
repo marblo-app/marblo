@@ -15,6 +15,13 @@
 import type { TFunction } from "../../../lib/i18n";
 import type { ReplayCastMember } from "../../../types/missionReplay";
 
+/**
+ * Cast marquee: slow (75s / cycle), 2 passes then stop. Pause on hover.
+ * `prefers-reduced-motion` drops animation and wraps statically.
+ */
+const CAST_SCROLL_DURATION_S = 75;
+const CAST_SCROLL_ITERATIONS = 2;
+
 export function ReplayCast({
   cast,
   t,
@@ -22,13 +29,27 @@ export function ReplayCast({
   cast: readonly ReplayCastMember[];
   t: TFunction;
 }) {
-  const strip = cast.length > 8 ? [...cast, ...cast] : cast;
+  // Duplicate only when scrolling makes sense (>8 members); still need a
+  // seamless half-strip for the -50% translate keyframes.
+  const shouldMarquee = cast.length > 8;
+  const strip = shouldMarquee ? [...cast, ...cast] : cast;
   return (
     <section>
       <style>
-        {
-          "@keyframes replay-cast-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}"
-        }
+        {`
+          @keyframes replay-cast-scroll{
+            from{transform:translateX(0)}
+            to{transform:translateX(-50%)}
+          }
+          @media (prefers-reduced-motion: no-preference) {
+            .replay-cast-track--marquee{
+              animation: replay-cast-scroll ${CAST_SCROLL_DURATION_S}s linear ${CAST_SCROLL_ITERATIONS} both;
+            }
+            .replay-cast-track--marquee:hover{
+              animation-play-state: paused;
+            }
+          }
+        `}
       </style>
       <div className="mb-2 flex items-center gap-2">
         <h3 className="text-xs font-semibold text-gray-300">
@@ -47,7 +68,13 @@ export function ReplayCast({
         <div className="relative overflow-hidden rounded-xl border border-gray-800 bg-gray-950/60">
           <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-10 bg-gradient-to-r from-gray-950/95 to-transparent" />
           <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-10 bg-gradient-to-l from-gray-950/95 to-transparent" />
-          <div className="flex w-max gap-2 px-3 py-3 motion-safe:animate-[replay-cast-scroll_42s_linear_2] motion-reduce:w-auto motion-reduce:flex-wrap">
+          <div
+            className={
+              shouldMarquee
+                ? "replay-cast-track--marquee flex w-max gap-2 px-3 py-3 motion-reduce:w-auto motion-reduce:flex-wrap motion-reduce:animate-none"
+                : "flex w-max max-w-full flex-wrap gap-2 px-3 py-3"
+            }
+          >
             {strip.map((member, index) => {
               const model =
                 member.detectedModelId ?? member.spawnedModel ?? member.vendor;

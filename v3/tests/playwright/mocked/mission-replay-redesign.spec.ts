@@ -116,16 +116,19 @@ test("@mocked Work History aggregate replay renders and opens share flow", async
     page.getByRole("button", { name: /링크 레닭션된 공개/ }),
   ).toBeVisible();
   await expect(page.getByText("에이전트별 기여")).toBeVisible();
-  await expect(page.getByText("티켓 ticket-hero")).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /집계 공유 진입 배선 agent-frontend/ }),
-  ).toBeVisible();
+  // 타임라인(raw ReplayTimeline)은 집계 쇼케이스에서 제거됨 — 완료 내역과 중복.
+  await expect(page.getByText("티켓 ticket-hero")).toHaveCount(0);
 
   await page.screenshot({
     path: "test-results/mission-replay-redesign.png",
     fullPage: false,
   });
 
-  await page.getByRole("button", { name: "공유하기" }).first().click();
+  // 공유 형식 버튼이 포맷을 실어 마법사를 연다(생성 단계로 직행).
+  await page.getByRole("button", { name: /카드 PNG 성과 카드/ }).click();
   await expect(page.getByLabel("Mission Replay 공유 마법사")).toBeVisible();
+  await expect(page.getByText("2. 생성")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /이미지 카드 생성/ }),
+  ).toBeVisible();
 });

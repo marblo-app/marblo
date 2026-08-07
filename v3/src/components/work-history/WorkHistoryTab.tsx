@@ -36,10 +36,12 @@ import {
   MissionReplayDetail,
   MissionReplayDetailView,
 } from "./replay/MissionReplayDetail";
-import { ReplayShareFlow } from "./replay/ReplayShareFlow";
+import {
+  ReplayShareFlow,
+  type ReplayShareFormat,
+} from "./replay/ReplayShareFlow";
 import { ReplayHeadline } from "./replay/ReplayHeadline";
 import { ReplayCast } from "./replay/ReplayCast";
-import { ReplayTimeline } from "./replay/ReplayTimeline";
 
 // 완료 보고를 추적할 최근 완료 태스크 상한. task 당 Firestore activities 리스너가
 // 하나씩 생기므로, 무한정 구독하지 않도록 최신순으로 잘라 둔다.
@@ -264,6 +266,7 @@ function AggregateReplayShowcase({
   canPublish,
   publisherUid,
   shareOpen,
+  shareFormat,
   onOpenShare,
   onCloseShare,
 }: {
@@ -273,7 +276,8 @@ function AggregateReplayShowcase({
   canPublish: boolean;
   publisherUid?: string;
   shareOpen: boolean;
-  onOpenShare: () => void;
+  shareFormat?: ReplayShareFormat;
+  onOpenShare: (format: ReplayShareFormat) => void;
   onCloseShare: () => void;
 }) {
   const { t } = useTranslation();
@@ -286,13 +290,13 @@ function AggregateReplayShowcase({
         t={t}
       />
       <ReplayCast cast={replay.cast} t={t} />
-      <ReplayTimeline replay={replay} t={t} />
       {shareOpen && (
         <ReplayShareFlow
           replay={replay}
           canPublish={canPublish}
           publisherUid={publisherUid}
           onClose={onCloseShare}
+          defaultFormat={shareFormat}
         />
       )}
     </section>
@@ -321,6 +325,18 @@ export function WorkHistoryTab() {
   const [view, setView] = useState<WorkHistoryView>("tasks");
   const [replayMissionId, setReplayMissionId] = useState<string | null>(null);
   const [lightweightShareOpen, setLightweightShareOpen] = useState(false);
+  const [lightweightShareFormat, setLightweightShareFormat] = useState<
+    ReplayShareFormat | undefined
+  >(undefined);
+
+  const openLightweightShare = (format: ReplayShareFormat = "link") => {
+    setLightweightShareFormat(format);
+    setLightweightShareOpen(true);
+  };
+  const closeLightweightShare = () => {
+    setLightweightShareOpen(false);
+    setLightweightShareFormat(undefined);
+  };
 
   // 감사 로그 티켓 상세의 "Replay 보기" 크로스링크 → Layout 이 이 탭을
   // 앞으로 가져온 뒤, 여기서 missionId 를 직접 읽어 Replay 뷰를 연다
@@ -482,7 +498,7 @@ export function WorkHistoryTab() {
           {view === "tasks" && lightweightReplay && (
             <button
               type="button"
-              onClick={() => setLightweightShareOpen(true)}
+              onClick={() => openLightweightShare("link")}
               className="rounded border border-violet-500/50 px-2 py-0.5 text-xs text-violet-200 transition hover:bg-violet-500/10"
             >
               {t("workHistory.replay.share")}
@@ -524,10 +540,10 @@ export function WorkHistoryTab() {
               }}
               onBack={() => {
                 setReplayMissionId(null);
-                setLightweightShareOpen(false);
+                closeLightweightShare();
               }}
               onReload={() => undefined}
-              onShare={() => setLightweightShareOpen(true)}
+              onShare={openLightweightShare}
               t={t}
             />
             {lightweightShareOpen && (
@@ -538,7 +554,8 @@ export function WorkHistoryTab() {
                     lightweightReplay.replay.projectId,
                   )}
                   publisherUid={user?.uid}
-                  onClose={() => setLightweightShareOpen(false)}
+                  onClose={closeLightweightShare}
+                  defaultFormat={lightweightShareFormat}
                 />
               </div>
             )}
@@ -582,8 +599,9 @@ export function WorkHistoryTab() {
               canPublish={canMergeInProject(lightweightReplay.replay.projectId)}
               publisherUid={user?.uid}
               shareOpen={lightweightShareOpen}
-              onOpenShare={() => setLightweightShareOpen(true)}
-              onCloseShare={() => setLightweightShareOpen(false)}
+              shareFormat={lightweightShareFormat}
+              onOpenShare={openLightweightShare}
+              onCloseShare={closeLightweightShare}
             />
           ) : (
             <ShareCard stats={shareStats} />

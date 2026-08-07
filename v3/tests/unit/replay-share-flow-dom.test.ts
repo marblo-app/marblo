@@ -14,6 +14,9 @@ import {
 vi.mock("../../src/lib/firebase", () => ({ db: {}, auth: {}, functions: {} }));
 
 const publishReplayMock = vi.hoisted(() => vi.fn());
+const renderReplayCardPngMock = vi.hoisted(() =>
+  vi.fn(async () => new Blob(["png"], { type: "image/png" })),
+);
 
 vi.mock("../../src/services/publicReplayService", () => ({
   PUBLIC_REPLAYS_COLLECTION: "publicReplays",
@@ -23,6 +26,16 @@ vi.mock("../../src/services/publicReplayService", () => ({
   publishReplay: publishReplayMock,
   unpublishReplay: vi.fn(),
 }));
+
+vi.mock("../../src/lib/replay/export/card", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../src/lib/replay/export/card")
+  >("../../src/lib/replay/export/card");
+  return {
+    ...actual,
+    renderReplayCardPng: renderReplayCardPngMock,
+  };
+});
 
 import { ReplayShareFlow } from "../../src/components/work-history/replay/ReplayShareFlow";
 import {
@@ -75,6 +88,8 @@ function replay(): MissionReplay {
 afterEach(() => {
   cleanup();
   publishReplayMock.mockReset();
+  renderReplayCardPngMock.mockClear();
+  vi.unstubAllGlobals();
 });
 
 describe("ReplayShareFlow DOM pipeline", () => {
@@ -122,5 +137,43 @@ describe("ReplayShareFlow DOM pipeline", () => {
     expect(screen.getByRole("link", { name: "LinkedIn 공유" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Threads 공유" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "링크 복사" })).toBeTruthy();
+  });
+
+  it("image format from defaultFormat can generate a PNG when redaction verifies", async () => {
+    const createObjectURL = vi.fn(() => "blob:replay-card");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", {
+      createObjectURL,
+      revokeObjectURL,
+    });
+
+    render(
+      createElement(ReplayShareFlow, {
+        replay: replay(),
+        canPublish: false,
+        onClose: () => {},
+        defaultFormat: "image",
+      }),
+    );
+
+    // defaultFormat lands on step 2 with generate ready
+    const generateBtn = await screen.findByRole("button", {
+      name: "이미지 카드 생성",
+    });
+    expect((generateBtn as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(generateBtn);
+
+    await waitFor(() =>
+      expect(renderReplayCardPngMock).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /다운로드/ })).toBeTruthy(),
+    );
+    expect(createObjectURL).toHaveBeenCalled();
+    // Gate: only verified RedactedReplay crosses the export boundary.
+    expect(renderReplayCardPngMock.mock.calls[0][0]).toMatchObject({
+      level: "L2",
+      verified: true,
+    });
   });
 });

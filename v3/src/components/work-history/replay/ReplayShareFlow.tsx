@@ -32,12 +32,27 @@ import { ReplayPublishPanel } from "./ReplayPublishPanel";
 export type ReplayShareFormat = "link" | "image" | "gif";
 export type ReplayShareStep = 1 | 2 | 3;
 
+/** Formats that can actually produce an asset / publish URL in this build. */
+export const REPLAY_SHARE_IMPLEMENTED_FORMATS: readonly ReplayShareFormat[] = [
+  "link",
+  "image",
+  "gif",
+] as const;
+
+export function isReplayShareFormatImplemented(
+  format: ReplayShareFormat,
+): boolean {
+  return (REPLAY_SHARE_IMPLEMENTED_FORMATS as readonly string[]).includes(
+    format,
+  );
+}
+
 export interface ReplayShareFlowProps {
   replay: MissionReplay;
   canPublish: boolean;
   publisherUid?: string;
   onClose: () => void;
-  /** Opens the flow directly at the given format step (avoids extra tap). */
+  /** Opens the flow directly at the given format (skips step 1 when set). */
   defaultFormat?: ReplayShareFormat;
 }
 
@@ -48,19 +63,22 @@ interface GeneratedAsset {
 
 const FORMAT_COPY: Record<
   ReplayShareFormat,
-  { title: string; description: string }
+  { title: string; description: string; implemented: boolean }
 > = {
   link: {
     title: "텍스트 · 링크",
     description: "공개 URL을 원클릭으로 공유합니다. OG 카드가 자동 미리보기됩니다.",
+    implemented: true,
   },
   image: {
     title: "이미지 카드",
     description: "PNG 공유 카드를 생성합니다.",
+    implemented: true,
   },
   gif: {
     title: "GIF",
     description: "미션 흐름을 보여 주는 GIF를 생성합니다.",
+    implemented: true,
   },
 };
 
@@ -112,8 +130,13 @@ export function ReplayShareFlow({
   onClose,
   defaultFormat,
 }: ReplayShareFlowProps) {
-  const [step, setStep] = useState<ReplayShareStep>(1);
-  const [format, setFormat] = useState<ReplayShareFormat>(defaultFormat ?? "link");
+  // Headline share-bar already picked a format — land on the generate step.
+  const initialFormat: ReplayShareFormat =
+    defaultFormat && isReplayShareFormatImplemented(defaultFormat)
+      ? defaultFormat
+      : "link";
+  const [step, setStep] = useState<ReplayShareStep>(defaultFormat ? 2 : 1);
+  const [format, setFormat] = useState<ReplayShareFormat>(initialFormat);
   const [level, setLevel] = useState<Exclude<ReplayVisibilityLevel, "L0">>("L2");
   const [publication, setPublication] = useState<PublicReplayRef | null>(null);
   const [publicationLoading, setPublicationLoading] = useState(true);
@@ -188,12 +211,23 @@ export function ReplayShareFlow({
     }
   };
 
+  const formatImplemented = isReplayShareFormatImplemented(format);
+  const canGenerate =
+    redacted.verified &&
+    formatImplemented &&
+    !generating &&
+    !publicationLoading &&
+    (format !== "link" || Boolean(publication));
+
   const generate = async () => {
     setError(null);
     setGenerating(true);
     try {
       if (!redacted.verified) {
         throw new Error("비식별화 검증에 실패해 공유 산출물 생성을 중단했습니다.");
+      }
+      if (!formatImplemented) {
+        throw new Error("아직 지원하지 않는 공유 형식입니다.");
       }
       if (format === "link") {
         if (publication) {
@@ -270,19 +304,53 @@ export function ReplayShareFlow({
 
       {step === 1 && (
         <div className="grid gap-2 sm:grid-cols-3">
-          {(Object.keys(FORMAT_COPY) as ReplayShareFormat[]).map((item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => setFormat(item)}
-              className={`rounded-lg border p-3 text-left text-xs ${format === item ? "border-violet-400 bg-violet-500/10" : "border-gray-800 hover:border-gray-600"}`}
-            >
-              <span className="block font-medium text-gray-100">{FORMAT_COPY[item].title}</span>
-              <span className="mt-1 block text-[11px] text-gray-500">{FORMAT_COPY[item].description}</span>
-            </button>
-          ))}
+          {(Object.keys(FORMAT_COPY) as ReplayShareFormat[]).map((item) => {
+            const meta = FORMAT_COPY[item];
+            const disabled = !meta.implemented;
+            return (
+              <button
+                key={item}
+                type="button"
+                disabled={disabled}
+                title={
+                  disabled
+                    ? "이 형식은 아직 지원하지 않습니다."
+                    : meta.description
+                }
+                onClick={() => {
+                  if (!disabled) setFormat(item);
+                }}
+                className={`rounded-lg border p-3 text-left text-xs ${
+                  disabled
+                    ? "cursor-not-allowed border-gray-800 bg-gray-900/40 opacity-40"
+                    : format === item
+                      ? "border-violet-400 bg-violet-500/10"
+                      : "border-gray-800 hover:border-gray-600"
+                }`}
+              >
+                <span className="block font-medium text-gray-100">
+                  {meta.title}
+                </span>
+                <span className="mt-1 block text-[11px] text-gray-500">
+                  {disabled
+                    ? "곧 지원 예정 · 지금은 사용할 수 없습니다"
+                    : meta.description}
+                </span>
+              </button>
+            );
+          })}
           <div className="sm:col-span-3 flex justify-end">
-            <button type="button" onClick={() => setStep(nextReplayShareStep(step))} className="rounded bg-violet-400 px-3 py-1.5 text-xs font-medium text-gray-950">
+            <button
+              type="button"
+              disabled={!formatImplemented}
+              title={
+                formatImplemented
+                  ? undefined
+                  : "지원되는 형식을 선택해 주세요."
+              }
+              onClick={() => setStep(nextReplayShareStep(step))}
+              className="rounded bg-violet-400 px-3 py-1.5 text-xs font-medium text-gray-950 disabled:opacity-40"
+            >
               다음: 생성
             </button>
           </div>
@@ -293,6 +361,16 @@ export function ReplayShareFlow({
         <div className="space-y-3">
           <ReplayVisibilityPanel level={level} onLevelChange={changeLevel} />
           <RedactionPreview redacted={redacted} />
+          {!redacted.verified && (
+            <p
+              role="alert"
+              data-testid="replay-share-unverified"
+              className="rounded border border-red-500/40 bg-red-950/30 p-3 text-xs text-red-200"
+            >
+              비식별화 2차 검증에 실패해 카드·GIF·링크 생성을 모두 막았습니다.
+              등급을 바꾸거나 민감 정보가 빠진 미션으로 다시 시도하세요.
+            </p>
+          )}
           {format === "link" && !publicationLoading && (
             <ReplayPublishPanel
               redacted={redacted}
@@ -311,11 +389,39 @@ export function ReplayShareFlow({
               텍스트·링크 공유에는 공개 URL이 필요합니다. 등급을 확인한 뒤 발행하면 URL과 OG 카드 미리보기를 원클릭으로 공유할 수 있습니다.
             </p>
           )}
-          {format !== "link" && error && <p role="alert" className="text-xs text-red-300">{error}</p>}
+          {format !== "link" && error && (
+            <p role="alert" className="text-xs text-red-300">
+              {error}
+            </p>
+          )}
           <div className="flex justify-between gap-2">
-            <button type="button" onClick={() => setStep(previousReplayShareStep(step))} className="rounded border border-gray-700 px-3 py-1.5 text-xs text-gray-300">이전</button>
-            <button type="button" disabled={generating || publicationLoading || (format === "link" && !publication)} onClick={() => void generate()} className="rounded bg-violet-400 px-3 py-1.5 text-xs font-medium text-gray-950 disabled:opacity-40">
-              {generating ? "생성 중…" : format === "link" ? "다음: 채널 선택" : `${FORMAT_COPY[format].title} 생성`}
+            <button
+              type="button"
+              onClick={() => setStep(previousReplayShareStep(step))}
+              className="rounded border border-gray-700 px-3 py-1.5 text-xs text-gray-300"
+            >
+              이전
+            </button>
+            <button
+              type="button"
+              disabled={!canGenerate}
+              title={
+                !redacted.verified
+                  ? "비식별화 검증 실패 · 생성 불가"
+                  : !formatImplemented
+                    ? "아직 지원하지 않는 형식"
+                    : format === "link" && !publication
+                      ? "공개 URL을 먼저 발행하세요"
+                      : undefined
+              }
+              onClick={() => void generate()}
+              className="rounded bg-violet-400 px-3 py-1.5 text-xs font-medium text-gray-950 disabled:opacity-40"
+            >
+              {generating
+                ? "생성 중…"
+                : format === "link"
+                  ? "다음: 채널 선택"
+                  : `${FORMAT_COPY[format].title} 생성`}
             </button>
           </div>
         </div>
