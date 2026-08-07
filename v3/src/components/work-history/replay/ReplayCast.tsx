@@ -16,11 +16,14 @@ import type { TFunction } from "../../../lib/i18n";
 import type { ReplayCastMember } from "../../../types/missionReplay";
 
 /**
- * Cast marquee: slow (75s / cycle), 2 passes then stop. Pause on hover.
- * `prefers-reduced-motion` drops animation and wraps statically.
+ * Cast strip motion (after #830/#835 still felt too fast at 75s×2):
+ * - One subtle opacity/slide reveal on mount, then **stop**.
+ * - Long casts (>8): no auto marquee; horizontal scroll. Hover starts a
+ *   slow single-pass pan; leave hover to pause.
+ * - `prefers-reduced-motion`: static wrap, no animation.
  */
-const CAST_SCROLL_DURATION_S = 75;
-const CAST_SCROLL_ITERATIONS = 2;
+const CAST_REVEAL_DURATION_S = 1.4;
+const CAST_HOVER_PAN_DURATION_S = 90;
 
 export function ReplayCast({
   cast,
@@ -29,24 +32,29 @@ export function ReplayCast({
   cast: readonly ReplayCastMember[];
   t: TFunction;
 }) {
-  // Duplicate only when scrolling makes sense (>8 members); still need a
-  // seamless half-strip for the -50% translate keyframes.
+  // Duplicate only for the hover pan (seamless -50% keyframes). Default
+  // layout shows a single strip — no continuous scroll.
   const shouldMarquee = cast.length > 8;
   const strip = shouldMarquee ? [...cast, ...cast] : cast;
   return (
-    <section>
+    <section data-testid="replay-cast">
       <style>
         {`
-          @keyframes replay-cast-scroll{
+          @keyframes replay-cast-reveal{
+            from{opacity:0.35;transform:translateY(6px)}
+            to{opacity:1;transform:translateY(0)}
+          }
+          @keyframes replay-cast-hover-pan{
             from{transform:translateX(0)}
             to{transform:translateX(-50%)}
           }
           @media (prefers-reduced-motion: no-preference) {
-            .replay-cast-track--marquee{
-              animation: replay-cast-scroll ${CAST_SCROLL_DURATION_S}s linear ${CAST_SCROLL_ITERATIONS} both;
+            .replay-cast-track{
+              animation: replay-cast-reveal ${CAST_REVEAL_DURATION_S}s ease-out 1 both;
             }
             .replay-cast-track--marquee:hover{
-              animation-play-state: paused;
+              animation:
+                replay-cast-hover-pan ${CAST_HOVER_PAN_DURATION_S}s linear 1 both;
             }
           }
         `}
@@ -71,9 +79,10 @@ export function ReplayCast({
           <div
             className={
               shouldMarquee
-                ? "replay-cast-track--marquee flex w-max gap-2 px-3 py-3 motion-reduce:w-auto motion-reduce:flex-wrap motion-reduce:animate-none"
-                : "flex w-max max-w-full flex-wrap gap-2 px-3 py-3"
+                ? "replay-cast-track replay-cast-track--marquee flex w-max gap-2 overflow-x-auto px-3 py-3 motion-reduce:w-auto motion-reduce:flex-wrap motion-reduce:animate-none"
+                : "replay-cast-track flex w-max max-w-full flex-wrap gap-2 px-3 py-3 motion-reduce:animate-none"
             }
+            data-cast-motion={shouldMarquee ? "hover-pan" : "reveal-once"}
           >
             {strip.map((member, index) => {
               const model =

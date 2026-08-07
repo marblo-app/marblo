@@ -140,6 +140,9 @@ export function ReplayShareFlow({
   const [level, setLevel] = useState<Exclude<ReplayVisibilityLevel, "L0">>("L2");
   const [publication, setPublication] = useState<PublicReplayRef | null>(null);
   const [publicationLoading, setPublicationLoading] = useState(true);
+  const [publicationLookupError, setPublicationLookupError] = useState<
+    string | null
+  >(null);
   const [asset, setAsset] = useState<GeneratedAsset | null>(null);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -155,22 +158,57 @@ export function ReplayShareFlow({
     [publication?.url, shareText],
   );
 
+  // Link format alone needs the owner-record lookup. Card/GIF generation must
+  // not wait on Firestore — a hanging query was the aggregate Share dead-button
+  // root cause (verified=true but canGenerate stayed false forever).
   useEffect(() => {
     let cancelled = false;
+    let settled = false;
+    setPublicationLoading(true);
+    setPublicationLookupError(null);
+
+    const finishLoading = () => {
+      if (!cancelled) setPublicationLoading(false);
+    };
+
+    const timeoutMs = 8_000;
+    const timer = window.setTimeout(() => {
+      if (cancelled || settled) return;
+      settled = true;
+      // Timed out: do not leave link format spinning forever. Card/GIF never
+      // depended on this lookup after the canGenerate fix.
+      setPublication(null);
+      setPublicationLookupError(
+        "공개 URL 상태 확인이 지연되고 있습니다. 이미지·GIF는 바로 만들 수 있고, 링크 공유는 잠시 후 다시 시도하세요.",
+      );
+      finishLoading();
+    }, timeoutMs);
+
     void getMissionPublication(replay.projectId, replay.missionId)
       .then((record) => {
-        if (!cancelled) setPublication(publicationRef(record));
+        if (cancelled || settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        setPublication(publicationRef(record));
+        setPublicationLookupError(null);
+        finishLoading();
       })
       .catch(() => {
         // Owner-record read can be denied for a member. Publish itself remains
-        // fail-closed through `canPublish`; do not treat a failed lookup as no
-        // publication and promise a new URL.
-      })
-      .finally(() => {
-        if (!cancelled) setPublicationLoading(false);
+        // fail-closed through `canPublish`. Card/GIF stay available.
+        if (cancelled || settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        setPublication(null);
+        setPublicationLookupError(
+          "공개 URL 상태를 확인하지 못했습니다. 이미지·GIF 생성은 가능합니다.",
+        );
+        finishLoading();
       });
+
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [replay.missionId, replay.projectId]);
 
@@ -212,19 +250,43 @@ export function ReplayShareFlow({
   };
 
   const formatImplemented = isReplayShareFormatImplemented(format);
+  /** Card/GIF never depend on publication lookup — only link does. */
+  const needsPublication = format === "link";
   const canGenerate =
     redacted.verified &&
     formatImplemented &&
     !generating &&
-    !publicationLoading &&
-    (format !== "link" || Boolean(publication));
+    (!needsPublication || (!publicationLoading && Boolean(publication)));
+
+  const generateDisabledReason = (): string | undefined => {
+    if (!redacted.verified) {
+      return "비식별화 검증 실패 · 생성 불가 — 등급을 바꾸거나 민감 정보를 줄인 뒤 다시 시도하세요";
+    }
+    if (!formatImplemented) return "아직 지원하지 않는 형식";
+    if (needsPublication && publicationLoading) {
+      return "공개 URL 발행 상태 확인 중…";
+    }
+    if (needsPublication && !publication) {
+      return "공개 URL을 먼저 발행하세요";
+    }
+    return undefined;
+  };
 
   const generate = async () => {
     setError(null);
     setGenerating(true);
     try {
       if (!redacted.verified) {
-        throw new Error("비식별화 검증에 실패해 공유 산출물 생성을 중단했습니다.");
+        const removalHint =
+          redacted.removed.length > 0
+            ? ` (제거/차단 규칙: ${redacted.removed
+                .slice(0, 5)
+                .map((item) => item.rule)
+                .join(", ")}${redacted.removed.length > 5 ? "…" : ""})`
+            : "";
+        throw new Error(
+          `비식별화 검증에 실패해 공유 산출물 생성을 중단했습니다.${removalHint}`,
+        );
       }
       if (!formatImplemented) {
         throw new Error("아직 지원하지 않는 공유 형식입니다.");
@@ -369,6 +431,33 @@ export function ReplayShareFlow({
             >
               비식별화 2차 검증에 실패해 카드·GIF·링크 생성을 모두 막았습니다.
               등급을 바꾸거나 민감 정보가 빠진 미션으로 다시 시도하세요.
+              {redacted.removed.length > 0 && (
+                <span className="mt-1 block text-red-300/80">
+                  관련 규칙:{" "}
+                  {redacted.removed
+                    .slice(0, 8)
+                    .map((item) => `${item.path || "(root)"}·${item.rule}`)
+                    .join(", ")}
+                  {redacted.removed.length > 8 ? "…" : ""}
+                </span>
+              )}
+            </p>
+          )}
+          {format === "link" && publicationLoading && (
+            <p
+              data-testid="replay-share-publication-loading"
+              className="rounded border border-gray-700 bg-gray-900/50 p-3 text-xs text-gray-400"
+            >
+              공개 URL 발행 상태를 확인하는 중…
+            </p>
+          )}
+          {format === "link" && !publicationLoading && publicationLookupError && (
+            <p
+              role="status"
+              data-testid="replay-share-publication-lookup-error"
+              className="rounded border border-amber-500/40 bg-amber-950/30 p-3 text-xs text-amber-100"
+            >
+              {publicationLookupError}
             </p>
           )}
           {format === "link" && !publicationLoading && (
@@ -389,9 +478,27 @@ export function ReplayShareFlow({
               텍스트·링크 공유에는 공개 URL이 필요합니다. 등급을 확인한 뒤 발행하면 URL과 OG 카드 미리보기를 원클릭으로 공유할 수 있습니다.
             </p>
           )}
+          {format !== "link" && (
+            <p
+              data-testid="replay-share-asset-hint"
+              className="rounded border border-emerald-500/20 bg-emerald-950/20 p-3 text-xs text-emerald-100/80"
+            >
+              {FORMAT_COPY[format].title}는 공개 URL 없이 이 기기에서 바로
+              만듭니다. 생성 후 다운로드·채널 첨부로 공유하세요.
+            </p>
+          )}
           {format !== "link" && error && (
-            <p role="alert" className="text-xs text-red-300">
+            <p role="alert" data-testid="replay-share-generate-error" className="text-xs text-red-300">
               {error}
+            </p>
+          )}
+          {!canGenerate && generateDisabledReason() && (
+            <p
+              role="status"
+              data-testid="replay-share-generate-blocked"
+              className="text-[11px] text-amber-200/90"
+            >
+              {generateDisabledReason()}
             </p>
           )}
           <div className="flex justify-between gap-2">
@@ -404,16 +511,9 @@ export function ReplayShareFlow({
             </button>
             <button
               type="button"
+              data-testid="replay-share-generate"
               disabled={!canGenerate}
-              title={
-                !redacted.verified
-                  ? "비식별화 검증 실패 · 생성 불가"
-                  : !formatImplemented
-                    ? "아직 지원하지 않는 형식"
-                    : format === "link" && !publication
-                      ? "공개 URL을 먼저 발행하세요"
-                      : undefined
-              }
+              title={generateDisabledReason()}
               onClick={() => void generate()}
               className="rounded bg-violet-400 px-3 py-1.5 text-xs font-medium text-gray-950 disabled:opacity-40"
             >
