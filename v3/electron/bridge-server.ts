@@ -22,6 +22,9 @@ import {
   checkPlanConcurrency,
   isAgentContextReusable,
   budgetBiasScore,
+  nearLimitModels,
+  reserveQuotaGate,
+  resolveQuotaReservePct,
   type AgentInfo,
   type ModelSelection,
   type ModelBudgetSnapshot,
@@ -52,13 +55,15 @@ import {
   type AvailabilityFilter,
 } from "./model-availability";
 import { getAccountRateLimits, type AccountRateLimits } from "./account-usage";
-import type { RateLimitInfo } from "./session-parsers";
-import { decideAutoMix, isAutoMixEnabled, autoMixThresholds } from "./auto-mix";
 import {
-  loadUsageRollup,
-  weeklyUsedPercentForHarness,
-  type UsageRollupSnapshot,
-} from "./usage-rollup";
+  budgetSnapshotFromQuotaRows,
+  formatQuotaRow,
+  harnessQuotaRows,
+  quotaDivergences,
+  type HarnessQuotaRow,
+} from "./harness-quota";
+import { decideAutoMix, isAutoMixEnabled, autoMixThresholds } from "./auto-mix";
+import { loadUsageRollup, type UsageRollupSnapshot } from "./usage-rollup";
 import {
   resolveSkillRouting,
   vendorForModel,
@@ -68,66 +73,37 @@ import {
 import { issueFreshAgentCustomToken } from "./firebase-auth-sync";
 import type { WorktreeCoordinator } from "./worktree-coordinator";
 
-function rateLimitToBudgetInfo(
-  info: RateLimitInfo | null,
-): { usedPercent: number } | undefined {
-  if (!info) return undefined;
-  const readings = [info.primaryPercent, info.secondaryPercent].filter(
-    (p): p is number => typeof p === "number" && Number.isFinite(p),
-  );
-  if (readings.length === 0) return undefined;
-  return { usedPercent: Math.max(...readings) };
-}
-
 /**
- * 계정 쿼터 실측 → 라우팅이 읽는 예산 스냅샷.
+ * 계정 프로브 + 주간 롤업 → 라우팅이 읽는 예산 스냅샷.
+ *
+ * 합성 규칙 자체는 `harness-quota.ts` 한 곳에 있다(읽는 셀 = 쓰는 셀). 여기서는
+ * 그 결과를 dispatch 가 쓰는 모양으로 받고, 두 소스가 크게 갈라졌을 때 그 사실을
+ * 로그로 드러낸다 — 조용히 다른 두 숫자가 굴러다니면 "Usage 탭이 보여주는 잔여" 와
+ * "라우터가 고르는 근거" 가 갈라져도 아무도 모른다.
  *
  * ★grok 이 여기 없는 것은 누락이 아니다. Grok Build CLI(측정 0.2.117)에는
  * usage/account/quota 를 내주는 명령이 없어서(#713) `getAccountGrokRateLimit()`
- * 이 구조적으로 null 만 돌려준다 — `account-usage.ts` 헤더에 같은 사실이 적혀
- * 있다. null 을 0% 사용으로 접으면 "쿼터 무한" 이라는 **없는 사실**을 라우터에
- * 먹이는 것이고, 100% 로 접으면 grok 을 영구 차단한다. 그래서 키 자체를 넣지
- * 않고, `budgetBiasScore` 가 no-data → bias 0(중립)으로 처리하게 둔다. 즉
- * **grok 은 오늘 budget 팩터 밖에서 능력·단가·KG 로만 경쟁한다.**
- *
- * grok 이 usage 를 노출하는 날의 편입 비용은 이 함수에 두 줄이다(별도 티켓):
- * `rateLimitToBudgetInfo(rateLimits.grok)` 를 grok 키에 넣으면 1층 곡선도
- * 2층 헤드룸 스케일도 그대로 적용된다 — 아래 프로브 게이트에 "grok" 을 추가하는
- * 것도 잊지 말 것(안 그러면 grok 단독 dispatch 가 프로브를 건너뛴다).
+ * 이 구조적으로 null 만 돌려준다. null 을 0% 사용으로 접으면 "쿼터 무한" 이라는
+ * **없는 사실**을 라우터에 먹이는 것이고, 100% 로 접으면 grok 을 영구 차단한다.
+ * 그래서 키 자체를 넣지 않고 `budgetBiasScore` 가 no-data → 중립으로 처리하게 둔다.
  */
-function accountRateLimitsToBudgetSnapshot(
-  rateLimits: AccountRateLimits,
-): ModelBudgetSnapshot {
-  const budgets: ModelBudgetSnapshot = {};
-  const claude = rateLimitToBudgetInfo(rateLimits.claude);
-  const gpt = rateLimitToBudgetInfo(rateLimits.gpt);
-  if (claude) budgets.claude = claude;
-  if (gpt) budgets.gpt = gpt;
-  return budgets;
-}
-
-/**
- * 주간 토큰 soft-limit 사용률을 budgetSnapshot 에 max 합성한다.
- * rate-limit % 와 cost_logs 주간 집계 중 **더 빡센 쪽**이 1·2층 압력을 만든다
- * → claude/gpt 한도 근접 시 grok·env-swap fleet 으로 자연 전환.
- */
-function mergeWeeklyUsageIntoBudgetSnapshot(
-  budgets: ModelBudgetSnapshot,
+function quotaBudgetSnapshot(
+  rateLimits: Partial<AccountRateLimits> | null,
   usage: UsageRollupSnapshot | null,
-): ModelBudgetSnapshot {
-  if (!usage) return budgets;
-  const next: ModelBudgetSnapshot = { ...budgets };
-  for (const harness of ["claude", "gpt"] as const) {
-    const weeklyPct = weeklyUsedPercentForHarness(harness, usage);
-    if (weeklyPct === null) continue;
-    const existing = next[harness]?.usedPercent;
-    const usedPercent =
-      typeof existing === "number" && Number.isFinite(existing)
-        ? Math.max(existing, weeklyPct)
-        : weeklyPct;
-    next[harness] = { usedPercent };
+  logContext: string,
+): { budgets: ModelBudgetSnapshot; rows: HarnessQuotaRow[] } {
+  const reservePct = resolveQuotaReservePct(
+    process.env.MARBLO_QUOTA_RESERVE_PCT,
+  );
+  const rows = harnessQuotaRows(rateLimits, usage, { reservePct });
+  for (const row of quotaDivergences(rows)) {
+    console.warn(
+      `[BridgeServer] ${logContext} 쿼터 소스 불일치(${Math.round(
+        row.divergencePct!,
+      )}%p) — ${formatQuotaRow(row)}`,
+    );
   }
-  return next;
+  return { budgets: budgetSnapshotFromQuotaRows(rows), rows };
 }
 
 const TASK_AGENT_FIRST_ACTIVITY_GRACE_MS = 180_000;
@@ -1114,7 +1090,7 @@ export class BridgeServer {
         // tsconfig rootDir 때문에 그 참조표들을 직접 import 할 수 없어서, /agents
         // 와 같은 방식으로 메인 프로세스가 넘겨준다. 읽기 전용·인자 없음.
         if (req.method === "GET" && req.url === "/model-guidance") {
-          this.handleGetModelGuidance(res);
+          void this.handleGetModelGuidance(res);
           return;
         }
 
@@ -1275,15 +1251,47 @@ export class BridgeServer {
     res.end(JSON.stringify({ agents }));
   }
 
-  // ── GET /model-guidance — 정적 모델 지식(오케 모델선택 근거) ──────────
+  // ── GET /model-guidance — 정적 모델 지식 + 하네스별 잔여 쿼터 ──────────
   //
   // 조인·선정 정책은 전부 model-guidance.ts 가 갖는다. 여기선 직렬화만 한다 —
   // 핸들러가 페이로드를 손보기 시작하면 화면(IPC)과 오케(브리지)가 서로 다른
   // 사실을 보게 된다.
-  private handleGetModelGuidance(res: http.ServerResponse): void {
+  //
+  // ★`quota` 는 왜 여기 붙나(티켓 AS4noeJq): 명시 모델 핀은 설계상 자동선택을
+  // 우회한다. 그래서 라우터가 아무리 소진 하네스를 피해도, 오케가 "gpt 로 해줘"
+  // 라고 핀하면 그대로 간다 — 실제로 코덱스가 마른 주에 그 일이 났다. 오케가
+  // 모델을 고르기 전에 보는 창구가 이 툴이므로, 라우터가 읽는 **바로 그 수치**를
+  // 여기서 같이 내려 준다(읽는 셀 = 쓰는 셀). 프로브 실패는 잔여 없음으로
+  // 내려가고 정적 절반은 그대로 서빙된다 — 쿼터 때문에 지식 전체를 잃지 않는다.
+  private async handleGetModelGuidance(
+    res: http.ServerResponse,
+  ): Promise<void> {
     try {
+      let rateLimits: Partial<AccountRateLimits> | null = null;
+      try {
+        rateLimits = await getAccountRateLimits();
+      } catch (err) {
+        console.warn(
+          `[Bridge] model-guidance 쿼터 프로브 실패 — 잔여 없음으로 서빙: ${String(err)}`,
+        );
+      }
+      const { rows } = quotaBudgetSnapshot(
+        rateLimits,
+        loadUsageRollup(),
+        "model-guidance",
+      );
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(modelGuidanceStatic()));
+      res.end(
+        JSON.stringify({
+          ...modelGuidanceStatic(),
+          quota: {
+            reservePct: resolveQuotaReservePct(
+              process.env.MARBLO_QUOTA_RESERVE_PCT,
+            ),
+            harnesses: rows,
+          },
+        } satisfies Record<string, unknown>),
+      );
     } catch (error) {
       console.error("[Bridge] model-guidance failed:", error);
       res.writeHead(500, { "Content-Type": "application/json" });
@@ -2262,12 +2270,13 @@ export class BridgeServer {
       ...(enabledModels as ModelType[]),
       ...(model ? [model] : []),
     ]);
-    let budgetSnapshot: ModelBudgetSnapshot = {};
+    // cost_logs 로컬 거울(usage-weekly) — 주간 한도 압력을 계정 프로브와 max
+    // 합성한다. BQ/getCostSummary 핫패스 await 없음(동기 파일). 없으면 no-op.
+    const usageRollup = model ? null : loadUsageRollup();
+    let accountRateLimits: Partial<AccountRateLimits> | null = null;
     if (budgetModels.has("claude") || budgetModels.has("gpt")) {
       try {
-        budgetSnapshot = accountRateLimitsToBudgetSnapshot(
-          await getAccountRateLimits(),
-        );
+        accountRateLimits = await getAccountRateLimits();
       } catch (err) {
         console.warn(
           `[BridgeServer] dispatch budget usage probe failed — neutral budgetBias fallback: ${String(
@@ -2276,22 +2285,59 @@ export class BridgeServer {
         );
       }
     }
-    // cost_logs 로컬 거울(usage-weekly) — 주간 한도 압력을 budget 과 max 합성.
-    // BQ/getCostSummary 핫패스 await 없음(동기 파일). 없으면 no-op.
-    const usageRollup = model ? null : loadUsageRollup();
-    budgetSnapshot = mergeWeeklyUsageIntoBudgetSnapshot(
-      budgetSnapshot,
+    const { budgets: budgetSnapshot, rows: quotaRows } = quotaBudgetSnapshot(
+      accountRateLimits,
       usageRollup,
+      "dispatch",
     );
 
+    // ── ★near-limit 예비 게이트 ────────────────────────────────────────
+    //
+    // 잔여가 예비선(기본 10%) 아래로 내려간 하네스는 **후보에서 뺀다** — 점수를
+    // 더 깎는 것으로는 부족하다는 게 라이브 관측이다(gpt 태그 보너스 25 + 단가차
+    // 7 이 budgetBias 바닥 −20 을 이긴다 → `dispatch-scoring` 게이트 주석).
+    // 대안이 하나도 안 남으면 아무도 빼지 않는다(게이트가 dispatch 를 죽이지
+    // 않는다). 명시 모델 핀은 설계상 자동선택을 우회하므로 여기서도 제외한다 —
+    // 그 경로의 방어선은 get_model_guidance 가 노출하는 하네스별 잔여다.
+    const quotaReservePct = resolveQuotaReservePct(
+      process.env.MARBLO_QUOTA_RESERVE_PCT,
+    );
+    const nearLimit = model
+      ? new Set<ModelType>()
+      : nearLimitModels([...budgetModels], budgetSnapshot, quotaReservePct);
+    if (nearLimit.size > 0) {
+      console.log(
+        `[BridgeServer] dispatch 쿼터 예비선(${quotaReservePct}%) 이하: ` +
+          `${[...nearLimit].join(", ")} — 대안이 있으면 후보에서 뺀다 (${quotaRows
+            .map(formatQuotaRow)
+            .join(" | ")})`,
+      );
+    }
+
     // Step 1 & 2: Score existing agents
-    const scored = this.scoreAgents(
+    const scoredAll = this.scoreAgents(
       allAgents,
       role,
       model,
       tags,
       budgetSnapshot,
     );
+    // 재사용·재시작도 같은 쿼터를 먹는다. 임박한 하네스의 유휴 에이전트를 그냥
+    // 재사용하면 스폰 경로만 고쳐 놓고 실제 소비는 그대로다 — 같은 술어를 건다.
+    const reuseGate = reserveQuotaGate(
+      scoredAll,
+      (s) => s.agent.model,
+      nearLimit,
+    );
+    if (reuseGate.dropped.length > 0) {
+      console.log(
+        `[BridgeServer] dispatch 재사용 후보 ${reuseGate.dropped.length}건을 ` +
+          `쿼터 예비선으로 제외(${[
+            ...new Set(reuseGate.dropped.map((s) => s.agent.model)),
+          ].join(", ")})`,
+      );
+    }
+    const scored = reuseGate.kept;
     // Explicit model request wins over reuse. When the user/orchestrator
     // names a model (normalized: "코덱스"/"codex" → "gpt"), only an agent of
     // that SAME model may be reused/restarted; otherwise we fall through to
@@ -2557,7 +2603,23 @@ export class BridgeServer {
     if (availability?.note) {
       console.log(`[BridgeServer] dispatch ${availability.note}`);
     }
-    const scoredModels = availability?.available ?? eligibleModels;
+    // ★쿼터 예비선 게이트(위에서 계산한 near-limit 집합)를 여기서 후보에 건다.
+    // 가용성 필터 **다음**이라 순서가 중요하다: 미인증으로 이미 빠진 하네스를
+    // 다시 세면 "대안이 있다" 판정이 틀리고, 그러면 남은 한 하네스까지 빼려다
+    // 게이트가 스스로를 무력화한다(reserveQuotaGate 는 전부 빠지면 원본을
+    // 그대로 돌려주므로 안전하지만, 로그가 거짓말을 하게 된다).
+    const modelGate = reserveQuotaGate(
+      availability?.available ?? eligibleModels,
+      (m) => m,
+      nearLimit,
+    );
+    if (modelGate.dropped.length > 0) {
+      console.log(
+        `[BridgeServer] dispatch 스폰 후보에서 쿼터 예비선 제외: ` +
+          `${[...new Set(modelGate.dropped)].join(", ")}`,
+      );
+    }
+    const scoredModels = modelGate.kept;
     // Live knowledge-graph (spec 2026-07-22): sync mtime-cache load — an
     // observed, decaying prior over (context × model) outcomes. Cold/absent →
     // graphBias 0 everywhere, so scoring is byte-identical to before. Read here
@@ -2735,9 +2797,17 @@ export class BridgeServer {
     const effectivePin = modelPin ?? autoPin;
     const autoFragment = autoPlan ? ` ${autoPlan.reason}.` : "";
     const availFragment = availability?.note ? ` ${availability.note}.` : "";
+    // 쿼터 예비선으로 뺀 후보가 있으면 그 사실이 감사 로그(BQ dispatchDecision)에
+    // 남아야 한다 — 안 남기면 "왜 codex 를 안 골랐지" 가 영원히 미스터리다.
+    const quotaFragment =
+      modelGate.dropped.length > 0
+        ? ` quota-reserve(${quotaReservePct}%) excluded ${[
+            ...new Set(modelGate.dropped),
+          ].join("/")}.`
+        : "";
     const spawnDecisionReason = model
       ? `Explicit model '${model}' requested — scoring bypassed (${selectedBudgetReason}). Spawned new ${selectedModel} agent.`
-      : `Scored ${scoredModels.length} model(s) → ${selectedModel} (${modelSelection?.mode}; ${selectedBudgetReason}).${graphFragment}${availFragment}${autoFragment} Spawned new agent.`;
+      : `Scored ${scoredModels.length} model(s) → ${selectedModel} (${modelSelection?.mode}; ${selectedBudgetReason}).${graphFragment}${availFragment}${quotaFragment}${autoFragment} Spawned new agent.`;
     const spawnResult = await this.spawnNewAgent({
       name: agentName,
       model: selectedModel,

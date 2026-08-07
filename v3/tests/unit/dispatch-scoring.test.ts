@@ -18,6 +18,10 @@ import {
   checkPlanConcurrency,
   isCapExempt,
   budgetBiasScore,
+  nearLimitModels,
+  reserveQuotaGate,
+  resolveQuotaReservePct,
+  DEFAULT_QUOTA_RESERVE_PCT,
   getPlanAgentLimit,
   countActivePlanAgents,
   isLaneContextId,
@@ -1584,5 +1588,81 @@ describe("availability filter keeps the preset change a no-op until grok logs in
     });
     expect(filtered.applied).toBe(false); // nothing excluded
     expect(filtered.available).toContain("grok");
+  });
+});
+
+// ── ★near-limit 예비(reserve) 게이트 (티켓 AS4noeJq) ──────────────────────
+//
+// 라이브 관측: gpt 가 100% 소진되면 dispatch 가 하드차단되는데(bias=null),
+// 잔여 5% 처럼 **임박**한 구간에서는 계속 codex 로 스폰됐다. 원인은 점수 산수다 —
+// budgetBias 바닥이 -20 인데 gpt 태그 보너스(simple-fix 25 / github 25)와
+// costEff 격차(10 vs 3)가 그걸 넘는다. 즉 "쿼터가 매우 중요한 팩터" 라는 요구가
+// 태그 하나로 뒤집혔다. 게이트는 그 산수를 후보 단계에서 끊는다.
+describe("★near-limit 예비 게이트 — 잔여가 마른 하네스를 후보에서 뺀다", () => {
+  it("잔여가 reserve 이하인 하네스를 집합으로 돌려준다(데이터 없으면 미포함)", () => {
+    const near = nearLimitModels(["claude", "gpt", "grok"], {
+      claude: { usedPercent: 30 }, // 잔여 70%
+      gpt: { usedPercent: 95 }, // 잔여 5%
+      // grok — 데이터 없음(no-data 는 0% 잔여가 아니다)
+    });
+    expect([...near]).toEqual(["gpt"]);
+  });
+
+  it("소진(잔여 0%)도 near-limit 에 포함된다", () => {
+    const near = nearLimitModels(["gpt"], { gpt: { usedPercent: 100 } });
+    expect(near.has("gpt")).toBe(true);
+  });
+
+  it("건강한 대안이 있으면 near-limit 후보를 뺀다", () => {
+    const near = nearLimitModels(["claude", "gpt"], {
+      claude: { usedPercent: 10 },
+      gpt: { usedPercent: 95 },
+    });
+    const gate = reserveQuotaGate(["claude", "gpt"], (m) => m, near);
+    expect(gate.kept).toEqual(["claude"]);
+    expect(gate.dropped).toEqual(["gpt"]);
+  });
+
+  it("★전부 near-limit 이면 아무도 빼지 않는다 — 게이트가 dispatch 를 죽이면 안 된다", () => {
+    const near = nearLimitModels(["claude", "gpt"], {
+      claude: { usedPercent: 92 },
+      gpt: { usedPercent: 95 },
+    });
+    const gate = reserveQuotaGate(["claude", "gpt"], (m) => m, near);
+    expect(gate.kept).toEqual(["claude", "gpt"]);
+    expect(gate.dropped).toEqual([]);
+  });
+
+  it("reserve 기본값은 10%p 이고 env 로 조정된다(범위 밖·비수는 기본값)", () => {
+    expect(resolveQuotaReservePct(undefined)).toBe(DEFAULT_QUOTA_RESERVE_PCT);
+    expect(resolveQuotaReservePct("")).toBe(DEFAULT_QUOTA_RESERVE_PCT);
+    expect(resolveQuotaReservePct("25")).toBe(25);
+    expect(resolveQuotaReservePct("0")).toBe(0); // 0 = 끄기(소진 하드게이트만)
+    expect(resolveQuotaReservePct("-3")).toBe(DEFAULT_QUOTA_RESERVE_PCT);
+    expect(resolveQuotaReservePct("abc")).toBe(DEFAULT_QUOTA_RESERVE_PCT);
+    expect(resolveQuotaReservePct("120")).toBe(DEFAULT_QUOTA_RESERVE_PCT);
+  });
+
+  // 이 케이스가 티켓의 근인이다. 게이트 없이 점수만으로는 gpt 가 이긴다.
+  it("★점수만으로는 못 이기던 케이스: 잔여 5% gpt + simple-fix 태그", () => {
+    const budgets = { claude: { usedPercent: 10 }, gpt: { usedPercent: 95 } };
+    const raw = scoreModelsDetailed(
+      ["claude", "gpt"],
+      ["simple-fix"],
+      "standard",
+      budgets,
+    );
+    // 점수 경쟁만 시키면 태그+단가가 budgetBias 를 이긴다(= 관측된 결함).
+    expect(raw.selected).toBe("gpt");
+
+    // 게이트를 앞에 두면 후보 자체가 사라진다.
+    const near = nearLimitModels(["claude", "gpt"], budgets);
+    const gated = scoreModelsDetailed(
+      reserveQuotaGate(["claude", "gpt"], (m) => m, near).kept,
+      ["simple-fix"],
+      "standard",
+      budgets,
+    );
+    expect(gated.selected).toBe("claude");
   });
 });

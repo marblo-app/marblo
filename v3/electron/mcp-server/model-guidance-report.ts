@@ -71,10 +71,35 @@ export interface GuidanceStaticRow {
   representativeIndex: number | null;
 }
 
+/**
+ * 하네스 계정의 **잔여 쿼터** 한 줄. 브리지가 라우터와 **같은 합성**
+ * (`electron/harness-quota.ts`)으로 만들어 내려 준다 — 즉 오케가 여기서 보는
+ * 숫자가 자동선택이 실제로 읽는 그 숫자다.
+ */
+export interface GuidanceQuotaRow {
+  harness: string;
+  /** 라우터가 읽는 사용률(%). null = 조회 불가(0% 잔여가 **아니다**). */
+  usedPercent: number | null;
+  remainingPercent: number | null;
+  accountUsedPercent: number | null;
+  weeklyRollupUsedPercent: number | null;
+  source: string;
+  divergencePct: number | null;
+  planType: string | null;
+}
+
+export interface GuidanceQuota {
+  /** 잔여가 이 %p 이하면 자동선택이 그 하네스를 후보에서 뺀다. */
+  reservePct: number;
+  harnesses: GuidanceQuotaRow[];
+}
+
 export interface GuidanceStaticPayload {
   payloadVersion: number;
   sources: Record<string, string>;
   models: GuidanceStaticRow[];
+  /** 구버전 브리지는 안 보낸다 — 없으면 쿼터 절 자체를 생략한다. */
+  quota?: GuidanceQuota | null;
 }
 
 /** 한 모델에 붙은 동적 실적. 어떤 키에서 왔는지 반드시 같이 들고 다닌다. */
@@ -244,6 +269,65 @@ export interface GuidanceReportOptions {
   staticError?: string | null;
   /** 이 모델 id/alias 로 필터된 결과면 그 질의어. */
   filter?: string | null;
+  /** 하네스별 잔여 쿼터. 없으면(구버전 브리지) 절을 생략한다. */
+  quota?: GuidanceQuota | null;
+}
+
+/**
+ * 하네스별 잔여 쿼터 절.
+ *
+ * ★왜 리포트 **맨 앞**인가: 이 툴을 부르는 이유가 "어느 칸에 줄까" 인데, 잔여가
+ * 마른 하네스는 단가·벤치·실적을 아무리 잘 골라도 도중에 죽는다. 그리고 명시
+ * 핀은 자동선택을 우회하므로(설계상 예외) 이 줄이 그 경로의 유일한 방어선이다.
+ *
+ * ★없는 숫자를 만들지 않는다: 조회 불가 하네스(grok 등)는 "조회불가" 로 적고
+ * 0%/100% 로 채우지 않는다. no-data 는 "쿼터 무한" 도 "소진" 도 아니다.
+ */
+function formatQuotaSection(quota: GuidanceQuota): string[] {
+  const lines: string[] = [
+    "",
+    "## 하네스 잔여 쿼터(자동선택이 읽는 그 수치)",
+    // ★이 경고는 절 안에 둔다 — 아래 "읽는 법" 꼬리말은 모델 행이 하나도 없으면
+    // 출력되지 않으므로, 거기에만 적으면 필터 결과가 빈 호출에서 사라진다.
+    "  ※ 자동선택은 예비선 이하 하네스를 후보에서 빼지만, **명시 모델 핀은 그 게이트를 우회한다** — 핀하기 전에 이 줄을 볼 것.",
+  ];
+  const withData = quota.harnesses.filter(
+    (h) => typeof h.remainingPercent === "number",
+  );
+  if (withData.length === 0) {
+    lines.push(
+      "  조회불가 — 계정 프로브도 주간 롤업도 값이 없다(로그아웃/프로브 실패). " +
+        "쿼터를 근거로 판단하지 말 것.",
+    );
+    return lines;
+  }
+  for (const h of quota.harnesses) {
+    if (typeof h.remainingPercent !== "number") {
+      lines.push(
+        `  · ${h.harness}: 조회불가(벤더가 잔여 API 를 주지 않거나 미로그인) — 0% 도 100% 도 아니다`,
+      );
+      continue;
+    }
+    const remaining = Math.round(h.remainingPercent);
+    const flag =
+      remaining <= 0
+        ? " ★소진 — dispatch 가 하드차단한다(명시 핀도 실패한다)"
+        : remaining <= quota.reservePct
+          ? ` ★예비선(${quota.reservePct}%) 이하 — 자동선택은 이 하네스를 후보에서 뺀다. 명시 핀도 피할 것`
+          : "";
+    const diverge =
+      typeof h.divergencePct === "number" && h.divergencePct >= 15
+        ? ` ※계정프로브(${Math.round(h.accountUsedPercent ?? 0)}%)와 주간롤업(${Math.round(
+            h.weeklyRollupUsedPercent ?? 0,
+          )}%)이 ${Math.round(h.divergencePct)}%p 벌어져 있다 — 더 빡센 쪽을 썼다`
+        : "";
+    lines.push(
+      `  · ${h.harness}: 잔여 ${remaining}% (사용 ${Math.round(
+        h.usedPercent ?? 0,
+      )}%, 출처 ${h.source}${h.planType ? `, plan ${h.planType}` : ""})${flag}${diverge}`,
+    );
+  }
+  return lines;
 }
 
 /**
@@ -272,6 +356,9 @@ export function formatModelGuidance(
         : ""),
   );
   if (opts.filter) lines.push(`필터: "${opts.filter}"`);
+  // 쿼터는 필터·행 유무와 무관하게 먼저 말한다 — 행이 하나도 없어도 "지금 어느
+  // 하네스가 말랐나" 는 오케가 알아야 하는 사실이다.
+  if (opts.quota) lines.push(...formatQuotaSection(opts.quota));
   if (rows.length === 0) {
     // ★사유를 두 번 말하지 않는다. 정적 절반을 못 받아서 행이 없는 것을
     // "모델 행이 없다"(=레지스트리가 비었다)로 다시 적으면 오케가 원인을
@@ -332,6 +419,8 @@ export function formatModelGuidance(
       "라벨이지 순위가 아니다. (3) 우리 실적의 n 이 작은 칸으로 우열을 판정하지 말 것. " +
       "(4) `○` 줄은 하네스 공통 실적이라 모델별 근거가 아니다. " +
       "(5) 단가에 ★추정치가 붙은 행은 비용 비교의 근거로 삼기 전에 확인이 필요하다. " +
+      "(6) ★잔여 쿼터가 예비선 이하인 하네스는 능력·단가가 아무리 좋아도 고르지 말 것 — " +
+      "자동선택은 이미 후보에서 빼지만 **명시 모델 핀은 그 게이트를 우회한다**. " +
       "칸별 (난도 × taskType) 세부는 get_routing_effectiveness 가 준다.",
   );
   return lines.join("\n");

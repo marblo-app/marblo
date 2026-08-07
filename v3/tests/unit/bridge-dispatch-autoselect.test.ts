@@ -63,29 +63,56 @@ vi.mock("../../electron/telemetry", () => ({
  */
 const account = vi.hoisted(() => ({
   claudeUsedPercent: 5 as number | null,
+  // ★gpt 도 실측이 온다(라이브 확인 2026-08-07: codex app-server
+  // account/rateLimits/read → primary usedPercent, windowDurationMins 10080).
+  // 기본은 null(= 종전 케이스 무회귀), 쿼터 케이스가 값을 넣는다.
+  gptUsedPercent: null as number | null,
 }));
 vi.mock("../../electron/account-usage", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../electron/account-usage")>();
+  const info = (
+    percent: number | null,
+    planType: string,
+    windowMins: number,
+  ) =>
+    percent === null
+      ? null
+      : ({
+          planType,
+          primaryPercent: percent,
+          primaryResetAt: null,
+          primaryWindowDurationMins: windowMins,
+          secondaryPercent: null,
+          secondaryResetAt: null,
+          secondaryWindowDurationMins: null,
+        } as never);
   return {
     ...actual,
     getAccountRateLimits: async () => ({
-      claude:
-        account.claudeUsedPercent === null
-          ? null
-          : ({
-              planType: "max",
-              primaryPercent: account.claudeUsedPercent,
-              primaryResetAt: null,
-              primaryWindowDurationMins: null,
-              secondaryPercent: null,
-              secondaryResetAt: null,
-              secondaryWindowDurationMins: null,
-            } as never),
-      gpt: null,
+      claude: info(account.claudeUsedPercent, "max", 300),
+      // prolite 플랜은 주간창만 있다(라이브 실측 그대로).
+      gpt: info(account.gptUsedPercent, "prolite", 10080),
       grok: null,
     }),
   };
+});
+
+/**
+ * ★결정성 3 — `~/.marblo/usage-weekly.json`(cost_logs 로컬 거울) 도 끊는다.
+ *
+ * dispatch 는 이 **실파일**을 동기로 읽어 주간 한도 압력을 만든다. 개발 기기의
+ * 하루치가 soft-limit 을 이미 넘겨(측정 2026-08-07: claude 201%, gpt 850%)
+ * 롤업이 상시 포화라, 모킹하지 않으면 같은 코드가 기기마다 다른 칸을 고른다.
+ * 기본은 null(콜드 = 사용량 항 0)이고, 필요한 케이스가 직접 주입한다.
+ */
+const usage = vi.hoisted(() => ({
+  rollup: null as unknown,
+}));
+vi.mock("../../electron/usage-rollup", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../electron/usage-rollup")>();
+  return { ...actual, loadUsageRollup: () => usage.rollup ?? null };
 });
 
 /**
@@ -112,6 +139,7 @@ import type { AgentInstance, AgentStatus } from "../../electron/agent-manager";
 import { spawnedModelFromArgs } from "../../electron/agent-manager";
 import { resetAutoSelectRotation } from "../../electron/model-autoselect";
 import { entryRung } from "../../electron/model-ladder";
+import { usageSnapshotFromRows } from "../../electron/usage-rollup";
 import {
   applyOutcome,
   emptyRoutingGraph,
@@ -310,6 +338,8 @@ beforeEach(() => {
   for (const fn of Object.values(telemetry)) fn.mockClear();
   resetAutoSelectRotation();
   account.claudeUsedPercent = 5;
+  account.gptUsedPercent = null;
+  usage.rollup = null;
   routing.graph = null;
   for (const k of ENV_SWAP_KEYS) {
     savedEnvSwapKeys[k] = process.env[k];
@@ -512,5 +542,140 @@ describe("★구독 우선 실물 스폰", () => {
       model: "opus5",
     });
     expect(claudeModelOf(am, agentId)).toBe("claude-opus-5");
+  });
+});
+
+/**
+ * ★near-limit 디프라이어리티 — 티켓 AS4noeJq 의 완료 기준.
+ *
+ * 관측: codex 가 100% 소진되면 dispatch 가 하드차단되는데(bias=null), **임박**
+ * 구간에서는 계속 codex 로 스폰됐다. 원인은 1층 점수 산수다 — budgetBias 바닥이
+ * −20 인데 gpt 태그 보너스(simple-fix/github 25)와 단가 격차(costEff 10 vs 3)가
+ * 그걸 넘는다. 아래 첫 케이스가 그 산수를, 나머지가 게이트의 안전장치를 고정한다.
+ */
+describe("★near-limit 하네스는 후보에서 밀린다(잔여 5% codex)", () => {
+  /** 하네스(프로바이더) 축만 본다 — 어느 CLI 로 떴나. */
+  async function dispatchHarness(opts: {
+    complexity?: "simple" | "standard" | "complex";
+    tags?: string[];
+    enabledModels?: string[];
+  }): Promise<{ harness: string; reason: string }> {
+    const { bridge, am } = makeBridge();
+    const res = await bridge.dispatchTask({
+      role: "backend",
+      instruction: "do it",
+      cwd: TMP,
+      enabledModels: opts.enabledModels ?? ["claude", "gpt"],
+      complexity: opts.complexity ?? "standard",
+      tags: opts.tags ?? [],
+    });
+    expect(res.success).toBe(true);
+    return {
+      harness: am.getAgent(res.agentId!)!.model,
+      reason: String(res.reason ?? ""),
+    };
+  }
+
+  it("standard: 잔여 5% codex 는 선택되지 않는다(claude 여유)", async () => {
+    account.claudeUsedPercent = 20; // 잔여 80%
+    account.gptUsedPercent = 95; // 잔여 5%
+    for (let i = 0; i < 4; i++) {
+      expect((await dispatchHarness({})).harness).toBe("claude");
+    }
+  });
+
+  it("★태그가 gpt 를 강하게 밀어도 뒤집히지 않는다 — 이게 관측된 결함이었다", async () => {
+    account.claudeUsedPercent = 20;
+    account.gptUsedPercent = 95;
+    // 점수만으로는 gpt 67 vs claude 60 이라 gpt 가 이긴다(dispatch-scoring 유닛 참조).
+    for (const tags of [["simple-fix"], ["github"], ["quick-edit"]]) {
+      expect((await dispatchHarness({ tags })).harness, tags.join()).toBe(
+        "claude",
+      );
+    }
+  });
+
+  it("complex 도 같다 — 어려운 티켓을 마른 쿼터로 시작하지 않는다", async () => {
+    account.claudeUsedPercent = 20;
+    account.gptUsedPercent = 93;
+    expect((await dispatchHarness({ complexity: "complex" })).harness).toBe(
+      "claude",
+    );
+  });
+
+  it("잔여가 예비선 위면(15%) 종전대로 점수 경쟁이다 — 과반응 금지", async () => {
+    account.claudeUsedPercent = 20;
+    account.gptUsedPercent = 85; // 잔여 15% > 예비선 10%
+    const picks = new Set<string>();
+    for (const tags of [["simple-fix"], ["github"]]) {
+      picks.add((await dispatchHarness({ tags })).harness);
+    }
+    // 태그가 gpt 를 미는 구간이므로 gpt 가 살아 있어야 한다(게이트 미발동).
+    expect(picks.has("gpt")).toBe(true);
+  });
+
+  it("★대안이 없으면 게이트가 발동하지 않는다 — dispatch 를 죽이지 않는다", async () => {
+    account.claudeUsedPercent = null; // claude 미연결
+    account.gptUsedPercent = 95;
+    const { harness } = await dispatchHarness({ enabledModels: ["gpt"] });
+    expect(harness).toBe("gpt");
+  });
+
+  it("★둘 다 임박이면 둘 다 남는다(하나는 떠야 한다)", async () => {
+    account.claudeUsedPercent = 92;
+    account.gptUsedPercent = 95;
+    const { harness } = await dispatchHarness({});
+    expect(["claude", "gpt"]).toContain(harness);
+  });
+
+  it("★소진(100%)은 종전대로 하드차단 — 게이트가 그 계약을 바꾸지 않는다", async () => {
+    account.claudeUsedPercent = 100;
+    account.gptUsedPercent = 100;
+    const { bridge } = makeBridge();
+    const res = await bridge.dispatchTask({
+      role: "backend",
+      instruction: "do it",
+      cwd: TMP,
+      enabledModels: ["claude", "gpt"],
+      complexity: "standard",
+    });
+    expect(res.success).toBe(false);
+    expect(String(res.error)).toContain("budget exhausted");
+  });
+
+  /**
+   * ★추정치 포화가 dispatch 를 막지 않는다(harness-quota.weeklyRollupCap).
+   * 개발 기기 실측(2026-08-07)에서 usage-weekly 하루치가 soft-limit 의 2~8.5배라
+   * 롤업은 상시 100% 였고, 캡이 없으면 그 추정치가 계정 실측과 max 합성돼
+   * "모든 후보 소진" 으로 모든 자동선택 dispatch 를 막았다.
+   */
+  it("포화된 주간 롤업만으로는 dispatch 가 막히지 않는다", async () => {
+    account.claudeUsedPercent = 20;
+    account.gptUsedPercent = null;
+    usage.rollup = usageSnapshotFromRows([
+      { model: "claude-opus-5", totalTokens: 161_000_000 }, // soft limit 80M
+      { model: "gpt-5.5", totalTokens: 510_000_000 }, // soft limit 60M
+    ]);
+    const { harness } = await dispatchHarness({});
+    expect(["claude", "gpt"]).toContain(harness);
+  });
+});
+
+describe("★쿼터 예비선 제외는 감사 로그에 남는다", () => {
+  it("dispatchReason 에 quota-reserve 와 제외된 하네스가 실린다", async () => {
+    account.claudeUsedPercent = 20;
+    account.gptUsedPercent = 95;
+    const { bridge } = makeBridge();
+    await bridge.dispatchTask({
+      role: "backend",
+      instruction: "do it",
+      cwd: TMP,
+      enabledModels: ["claude", "gpt"],
+      complexity: "standard",
+      tags: ["simple-fix"],
+    });
+    const reason = String(lastDecision().decisionReason);
+    expect(reason).toContain("quota-reserve(10%)");
+    expect(reason).toContain("gpt");
   });
 });

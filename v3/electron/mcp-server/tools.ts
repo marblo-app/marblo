@@ -389,6 +389,10 @@ async function fetchModelGuidanceStatic(): Promise<{
           typeof data.payloadVersion === "number" ? data.payloadVersion : 0,
         sources: data.sources ?? {},
         models: data.models,
+        // 하네스별 잔여 쿼터(브리지가 라우터와 같은 합성으로 만든다). 구버전
+        // 브리지는 안 보내므로 없으면 null — 리포트가 절을 통째로 생략한다.
+        quota:
+          data.quota && Array.isArray(data.quota.harnesses) ? data.quota : null,
       },
       error: null,
     };
@@ -7613,7 +7617,7 @@ export function registerTools(server: McpServer): void {
   // 서로 다른 벤치와 얇은 표본을 한 숫자로 뭉개면 그게 근거처럼 읽힌다.
   auditedTool(
     "get_model_guidance",
-    "모델 선택 지식 통합: 모델별 정적 사실(레지스트리 단가·능력등급·지원 effort·컨텍스트 창 + 공개 SWE-bench 점수 원문(벤치·스캐폴드·출처·일자 동반) + 파생 티어(프리미어/일반작업/가성비))과 동적 실적(우리 보드의 성공률·평균비용·비용당성공)을 한 번에 돌려준다. dispatch_task/spawn_agent 로 모델을 고르기 전에 근거를 확인할 때 쓴다. 임계값·추천·종합점수는 주지 않는다 — 판정은 호출자가 한다. 칸별 (난도 × taskType) 세부는 get_routing_effectiveness 쪽이다.",
+    "모델 선택 지식 통합: 하네스별 **잔여 쿼터 실측**(자동선택이 읽는 그 수치 — 예비선 이하면 경고) + 모델별 정적 사실(레지스트리 단가·능력등급·지원 effort·컨텍스트 창 + 공개 SWE-bench 점수 원문(벤치·스캐폴드·출처·일자 동반) + 파생 티어(프리미어/일반작업/가성비)) + 동적 실적(우리 보드의 성공률·평균비용·비용당성공)을 한 번에 돌려준다. dispatch_task/spawn_agent 로 모델을 고르기 전에, 특히 **모델을 명시 핀하기 전에** 확인할 것 — 명시 핀은 자동선택의 쿼터 게이트를 우회한다. 임계값·추천·종합점수는 주지 않는다 — 판정은 호출자가 한다. 칸별 (난도 × taskType) 세부는 get_routing_effectiveness 쪽이다.",
     {
       project_id: z
         .string()
@@ -7665,6 +7669,7 @@ export function registerTools(server: McpServer): void {
             cap,
             staticError: staticPayload.error,
             filter: model ?? null,
+            // 정적 절반을 못 받았으면 쿼터도 같이 없다(같은 응답에 실려 온다).
           }) +
             "\n\n" +
             formatEffectivenessReport(report, { scanned: rows.length, cap }),
@@ -7688,6 +7693,7 @@ export function registerTools(server: McpServer): void {
           scanned: rows.length,
           cap,
           filter: model ?? null,
+          quota: staticPayload.payload.quota ?? null,
         }),
       );
     },

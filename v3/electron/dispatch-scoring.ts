@@ -254,6 +254,93 @@ export function budgetBiasScore(
   };
 }
 
+// ── ★near-limit 예비(reserve) 게이트 ────────────────────────────────────
+//
+// 왜 bias 만으로는 부족한가(라이브 측정 2026-08-07, 티켓 AS4noeJq): budgetBias 의
+// 바닥은 -20 인데 1층 점수에는 그보다 큰 성분들이 있다. gpt 잔여 5%(bias -16) 라도
+//
+//     gpt   45(base) + 25(simple-fix) + 13(costEff×tag) − 16 = 67
+//     claude 50(base) +  0            +  4              +  6 = 60
+//
+// 이라 **태그 하나가 쿼터를 이긴다**. 실제 관측이 그랬다 — 완전소진(잔여 0%)만
+// 하드차단되고, 임박 구간에서는 codex 로 계속 스폰됐다.
+//
+// 그래서 임박 구간은 "점수를 더 깎는" 게 아니라 **후보에서 뺀다**. 잔여 한 자릿수를
+// 태워 티켓을 시작하면 대개 도중에 0 을 만나 PTY 하나를 안고 죽는데, 그 실패는
+// 재작업이라 절약분보다 비싸다(FIT_PENALTY 주석과 같은 논리).
+//
+// ★두 가지 안전장치:
+//   1. **대안이 있을 때만** 뺀다. 후보가 전부 임박이면 아무도 빼지 않는다 —
+//      게이트가 dispatch 자체를 죽이면 사용자는 "왜 아무것도 안 뜨지" 만 본다.
+//   2. **no-data 는 임박이 아니다**(grok). 없는 숫자를 0% 잔여로 접지 않는다는
+//      budgetBiasScore 의 규율을 그대로 따른다.
+//
+// 명시 모델 핀은 이 게이트를 타지 않는다(설계상 예외). 그 경로의 방어선은
+// `get_model_guidance` 가 노출하는 하네스별 잔여다.
+
+/** 잔여가 이 %p 이하면 "곧 마른다". `MARBLO_QUOTA_RESERVE_PCT` 로 조정. */
+export const DEFAULT_QUOTA_RESERVE_PCT = 10;
+
+/**
+ * env 로 reserve 를 조정한다. `0` = 끄기(소진 하드게이트만 남는다).
+ * 미설정(빈 문자열)·비수·범위 밖(0~100 아님)은 기본값 — `Number("")===0` 때문에
+ * 미설정을 0 으로 접으면 게이트가 조용히 꺼진다(resolveEpsilon 과 같은 함정).
+ */
+export function resolveQuotaReservePct(raw?: string): number {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) return DEFAULT_QUOTA_RESERVE_PCT;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    return DEFAULT_QUOTA_RESERVE_PCT;
+  }
+  return value;
+}
+
+/** 이 하네스의 잔여 쿼터(%). 데이터가 없으면 null(= 모름, 0% 아님). */
+export function remainingQuotaPercent(
+  model: ModelType,
+  budgets?: ModelBudgetSnapshot,
+): number | null {
+  const used = budgets?.[model]?.usedPercent;
+  if (typeof used !== "number" || !Number.isFinite(used)) return null;
+  return 100 - Math.min(100, Math.max(0, used));
+}
+
+/**
+ * 잔여가 reserve 이하인 하네스들. 데이터 없는 하네스는 들어가지 않는다.
+ * 중복 항목(프리셋 가중치용 반복)이 있어도 집합이라 한 번만 담긴다.
+ */
+export function nearLimitModels(
+  models: readonly ModelType[],
+  budgets?: ModelBudgetSnapshot,
+  reservePct: number = DEFAULT_QUOTA_RESERVE_PCT,
+): Set<ModelType> {
+  const near = new Set<ModelType>();
+  if (!(reservePct > 0)) return near;
+  for (const model of models) {
+    const remaining = remainingQuotaPercent(model, budgets);
+    if (remaining !== null && remaining <= reservePct) near.add(model);
+  }
+  return near;
+}
+
+/**
+ * near-limit 항목을 후보에서 뺀다 — **단, 남는 게 있을 때만**.
+ *
+ * 모델 목록에도, 재사용 후보(에이전트) 목록에도 같은 술어를 쓰라고 제네릭이다.
+ * 전부 near-limit 이면 `dropped` 는 비고 `kept` 가 입력 그대로다.
+ */
+export function reserveQuotaGate<T>(
+  items: readonly T[],
+  keyOf: (item: T) => ModelType,
+  nearLimit: ReadonlySet<ModelType>,
+): { kept: T[]; dropped: T[] } {
+  if (nearLimit.size === 0) return { kept: [...items], dropped: [] };
+  const kept = items.filter((item) => !nearLimit.has(keyOf(item)));
+  if (kept.length === 0) return { kept: [...items], dropped: [] };
+  return { kept, dropped: items.filter((item) => nearLimit.has(keyOf(item))) };
+}
+
 /**
  * 이 bias 가 "쿼터가 실제 제약이 됐다" 를 뜻하는가.
  *

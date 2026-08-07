@@ -404,3 +404,86 @@ describe("model-guidance / 모르는 것을 모른다고 말한다", () => {
     expect(out).not.toMatch(/추천|권장 모델|종합점수|best model/i);
   });
 });
+
+// ── ★하네스 잔여 쿼터 절(티켓 AS4noeJq) ──────────────────────────────────
+//
+// 명시 모델 핀은 자동선택의 쿼터 게이트를 **우회한다**(설계상 예외). 오케가
+// 모델을 고르기 전에 보는 창구가 이 리포트이므로, 라우터가 읽는 그 수치를 여기서
+// 같이 말해 주는 것이 그 경로의 방어선이다.
+describe("model-guidance / 하네스 잔여 쿼터", () => {
+  const quota = {
+    reservePct: 10,
+    harnesses: [
+      {
+        harness: "claude",
+        usedPercent: 20,
+        remainingPercent: 80,
+        accountUsedPercent: 20,
+        weeklyRollupUsedPercent: null,
+        weeklyRollupCapped: false,
+        source: "account-probe",
+        divergencePct: null,
+        planType: "max",
+      },
+      {
+        harness: "gpt",
+        usedPercent: 100,
+        remainingPercent: 0,
+        accountUsedPercent: 100,
+        weeklyRollupUsedPercent: null,
+        weeklyRollupCapped: false,
+        source: "account-probe",
+        divergencePct: null,
+        planType: "prolite",
+      },
+    ],
+  };
+
+  it("잔여와 소진을 명시하고, 명시 핀이 게이트를 우회한다는 경고를 단다", () => {
+    const out = formatModelGuidance([], { scanned: 0, cap: 500, quota });
+    expect(out).toContain("하네스 잔여 쿼터");
+    expect(out).toContain("claude: 잔여 80%");
+    expect(out).toContain("gpt: 잔여 0%");
+    expect(out).toContain("★소진");
+    expect(out).toContain("명시 모델 핀은 그 게이트를 우회한다");
+  });
+
+  it("예비선 이하는 '자동선택이 뺀다' 를 말한다", () => {
+    const near = {
+      ...quota,
+      harnesses: [
+        { ...quota.harnesses[1], usedPercent: 95, remainingPercent: 5 },
+      ],
+    };
+    const out = formatModelGuidance([], { scanned: 0, cap: 500, quota: near });
+    expect(out).toContain("예비선(10%) 이하");
+    expect(out).toContain("후보에서 뺀다");
+  });
+
+  it("★조회불가는 0%도 100%도 아니라고 적는다(없는 숫자를 만들지 않는다)", () => {
+    const unknown = {
+      reservePct: 10,
+      harnesses: [
+        {
+          ...quota.harnesses[0],
+          usedPercent: null,
+          remainingPercent: null,
+          accountUsedPercent: null,
+          source: "none",
+        },
+      ],
+    };
+    const out = formatModelGuidance([], {
+      scanned: 0,
+      cap: 500,
+      quota: unknown,
+    });
+    expect(out).toContain("조회불가");
+    expect(out).not.toMatch(/잔여 0%/);
+  });
+
+  it("구버전 브리지(quota 없음)는 절을 통째로 생략한다 — 무회귀", () => {
+    const out = formatModelGuidance([], { scanned: 0, cap: 500 });
+    expect(out).not.toContain("하네스 잔여 쿼터");
+  });
+});
