@@ -2785,9 +2785,17 @@ describe("task 상태전이 — applyProjection 실제 경로", () => {
     expect(mission.data()?.projection?.statusCounts?.IN_PROGRESS).toBe(1);
   });
 
-  it("projectId 가 없는 손상 태스크여도 상태 전이 자체는 막지 않는다(fail-open)", async () => {
+  it("아직 seed 되지 않은 미션의 TODO 태스크도 전이가 커밋된다", async () => {
     // 부기(미션 카운트 seed) 실패가 상태 write 를 죽이면 task_outcomes 가 유실되고
     // 스폰모델 학습축이 손상된다. seed 는 건너뛰되 전이는 반드시 커밋돼야 한다.
+    //
+    // ★주의(티켓 7PL9wQ2H): 이 케이스는 fixture 가 projectId 를 갖고 있으므로
+    // "projectId 없는 손상 문서" 분기(= seed skip + console.error)를 타지 않는다.
+    // 룰 아래에서는 그 분기를 재현할 수 없다 — projectId 없는 tasks 문서는
+    // isProjectMember(resource.data.projectId) 때문에 seed 이전의 getDoc(taskRef)
+    // 에서 먼저 거부되기 때문이다. 진짜 fail-open 분기는 인메모리 mock 을 쓰는
+    // tests/unit/projection.test.ts 의 "projectId 없는 손상 태스크: seed 는
+    // 건너뛰되 상태 전이는 커밋된다" 가 덮는다.
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
       await setDoc(doc(db, "tasks", "orphan-task"), {
@@ -2807,5 +2815,154 @@ describe("task 상태전이 — applyProjection 실제 경로", () => {
     });
     const after = await getDoc(doc(db, "tasks", "orphan-task"));
     expect(after.data()?.status).toBe("IN_PROGRESS");
+  });
+});
+
+// ===== #851 인과 고정 — 왜 "미션 컨텍스트 + projection 미초기화" 만 실패했나 =====
+// (티켓 7PL9wQ2HTwrIuZ4CpsEy — #851 의 독립 재현·확증에서 나온 갭)
+//
+// #851 은 간헐성을 "그 seed 는 미션 컨텍스트 + mission.projection 미초기화일 때만
+// 돈다. board 컨텍스트 티켓은 이 경로를 아예 안 탄다"로 설명했다
+// (실패 OByWwm5i → contextId=missionId=27CNOI0pdxvs / 성공 ekRjwRFS → contextId="board").
+// 그런데 회귀 가드는 실패하는 칸만 덮고 있었다 — 통과하던 칸이 왜 통과했는지는
+// 아무것도 고정하지 않아서, 누가 seed 진입 조건을 넓히면(예: board 도 미션 취급,
+// 또는 projection 초기화 여부와 무관하게 재계산) 조용히 프로덕션 결함이 되살아난다.
+//
+// 아래가 진입 조건 2x2 를 통째로 못 박는다. projection.ts 를 3d0e6b9d 이전으로
+// 되돌리고 실측한 결과:
+//
+//   컨텍스트          projection      수정 전     수정 후
+//   ----------------------------------------------------
+//   board             n/a             GREEN      GREEN
+//   lane:*            n/a             GREEN      GREEN
+//   mission           초기화됨         GREEN      GREEN
+//   mission           미초기화        ★RED       GREEN   ← 진범 칸
+//
+// 즉 red 는 정확히 한 칸에서만 난다. 그게 #851 의 인과 주장이고, 이 describe 가
+// 그 주장 자체를 회귀 테스트로 만든다.
+
+describe("#851 인과 — seed 경로 진입 조건 2x2 (missionIdFromTaskContext)", () => {
+  const MISSION_ID = "mission-causal";
+
+  async function seedTask(
+    taskId: string,
+    fields: Record<string, unknown>,
+  ): Promise<void> {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, "tasks", taskId), {
+        projectId: PROJECT_ID,
+        title: taskId,
+        status: "CLAIMED",
+        claimedBy: "agent-1",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...fields,
+      });
+    });
+  }
+
+  async function seedMission(fields: Record<string, unknown>): Promise<void> {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, "missions", MISSION_ID), {
+        projectId: PROJECT_ID,
+        status: "active",
+        goal: "causal matrix",
+        ...fields,
+      });
+    });
+  }
+
+  it("board 컨텍스트: seed 경로를 아예 타지 않는다 (수정 전에도 통과했던 이유)", async () => {
+    // 이 케이스는 수정 전에도 GREEN 이다. 그게 핵심 — 같은 오케·같은 룰·같은
+    // 인증인데 board 티켓만 멀쩡했던 건 무스코프 쿼리를 쏘지 않았기 때문이지
+    // 권한이 달라서가 아니었다.
+    await seedTask("board-task", { contextId: "board" });
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+
+    await applyProjection(db as never, "board-task", {
+      newStatus: "IN_PROGRESS",
+      lastAgentId: "agent-1",
+    });
+
+    const after = await getDoc(doc(db, "tasks", "board-task"));
+    expect(after.data()?.status).toBe("IN_PROGRESS");
+  });
+
+  it("lane 컨텍스트(lane:*): 마찬가지로 seed 경로 밖", async () => {
+    await seedTask("lane-task", { contextId: "lane:quick-1" });
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+
+    await applyProjection(db as never, "lane-task", {
+      newStatus: "IN_PROGRESS",
+      lastAgentId: "agent-1",
+    });
+
+    const after = await getDoc(doc(db, "tasks", "lane-task"));
+    expect(after.data()?.status).toBe("IN_PROGRESS");
+  });
+
+  it("미션 컨텍스트 + projection 이미 초기화됨: seed 를 건너뛰고 delta 로만 간다", async () => {
+    // 이 칸도 수정 전에 GREEN 이었다 — statusCounts 가 이미 있으면 재계산 쿼리를
+    // 안 쏘기 때문. "미션 티켓이면 항상 실패"가 아니라 "미션 티켓 중 첫 전이만
+    // 실패"였다는 뜻이고, 그래서 간헐로 보였다.
+    await seedMission({
+      projection: { statusCounts: { CLAIMED: 1, TODO: 1 } },
+    });
+    await seedTask("seeded-mission-task", {
+      missionId: MISSION_ID,
+      contextId: MISSION_ID,
+    });
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+
+    await applyProjection(db as never, "seeded-mission-task", {
+      newStatus: "IN_PROGRESS",
+      lastAgentId: "agent-1",
+    });
+
+    const after = await getDoc(doc(db, "tasks", "seeded-mission-task"));
+    expect(after.data()?.status).toBe("IN_PROGRESS");
+    // delta 경로: CLAIMED -1, IN_PROGRESS +1. TODO 는 건드리지 않는다.
+    const mission = await getDoc(doc(db, "missions", MISSION_ID));
+    expect(mission.data()?.projection?.statusCounts).toEqual({
+      CLAIMED: 0,
+      IN_PROGRESS: 1,
+      TODO: 1,
+    });
+  });
+
+  it("★진범 칸 — missionId 필드 없이 contextId 만 미션인 태스크도 스코프 쿼리로 seed 된다", async () => {
+    // 프로덕션 실패 문서(27CNOI0pdxvs)는 contextId=missionId 였다. 그런데 기존
+    // 가드의 fixture 는 둘 다 채워 두어서 missionId 가 우선 반환된다
+    // (missionIdFromTaskContext 는 task.missionId 를 먼저 본다). 즉 "contextId
+    // 로만 미션이 식별되는" 분기는 어떤 테스트도 통과하지 않았다.
+    // ★projection.ts 를 3d0e6b9d 이전으로 되돌리면 이 테스트는 프로덕션과 똑같이
+    //   "FirebaseError: Property projectId is undefined on object. for 'list'" 로 실패한다.
+    await seedMission({}); // projection 미초기화 — 진범 조건
+    await seedTask("ctx-only-task", { contextId: MISSION_ID });
+    await seedTask("ctx-only-sibling", {
+      contextId: MISSION_ID,
+      status: "TODO",
+      claimedBy: null,
+    });
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+
+    await applyProjection(db as never, "ctx-only-task", {
+      newStatus: "IN_PROGRESS",
+      lastAgentId: "agent-1",
+    });
+
+    const after = await getDoc(doc(db, "tasks", "ctx-only-task"));
+    expect(after.data()?.status).toBe("IN_PROGRESS");
+    // seed 가 sibling 둘을 다 읽었다({CLAIMED:1, TODO:1})는 게 contextId 쿼리가
+    // 실제로 룰을 통과했다는 증거다. 그 위에 CLAIMED→IN_PROGRESS delta 가 얹힌다.
+    // 쿼리가 거부됐다면 fail-open 으로 seed 가 비어 TODO 가 통째로 사라진다.
+    const mission = await getDoc(doc(db, "missions", MISSION_ID));
+    expect(mission.data()?.projection?.statusCounts).toEqual({
+      TODO: 1,
+      CLAIMED: 0,
+      IN_PROGRESS: 1,
+    });
   });
 });
