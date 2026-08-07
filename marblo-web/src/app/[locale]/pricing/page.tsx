@@ -8,6 +8,7 @@ import {
   stringifyJsonLd,
 } from "@/lib/schema";
 import { buildAlternates } from "@/lib/seo";
+import PricingGA4Tracker from "@/components/PricingGA4Tracker";
 
 // Locale-aware metadata. The title segment reuses the existing nav label
 // (가격 / Pricing / 料金) so Korean/Japanese search sees a localized <title>
@@ -70,6 +71,9 @@ export default function PricingPage() {
           {t("byokNotice")}
         </p>
         <PricingSection />
+
+        {/* Pricing GA4 — fires view_item_list once on page mount. */}
+        <PricingGA4Tracker />
 
         {/* Pricing FAQ — visible, and mirrored in the FAQPage JSON-LD above. */}
         <section className="max-w-3xl mx-auto mt-24">

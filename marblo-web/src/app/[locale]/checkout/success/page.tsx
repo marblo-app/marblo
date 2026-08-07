@@ -41,8 +41,9 @@ export default function CheckoutSuccessPage() {
     itemId: string;
     itemName?: string;
     itemCategory: 'lecture' | 'subscription';
+    itemVariant?: string;
   }) => {
-    const { transactionId, value, itemId, itemName, itemCategory } = args;
+    const { transactionId, value, itemId, itemName, itemCategory, itemVariant } = args;
     if (!transactionId || !Number.isFinite(value) || value < 0) return;
 
     const dedupeKey = `ga4_purchase_${transactionId}`;
@@ -73,6 +74,7 @@ export default function CheckoutSuccessPage() {
           item_category: itemCategory,
           price: value,
           quantity: 1,
+          item_variant: itemVariant,
         },
       ],
     });
@@ -96,6 +98,7 @@ export default function CheckoutSuccessPage() {
     return {
       itemId: planId,
       itemName: `Marblo ${planLabel} (${cycleLabel})`,
+      itemVariant: billing,
     };
   };
 
@@ -127,6 +130,7 @@ export default function CheckoutSuccessPage() {
                 itemId: lectureItem.itemId,
                 itemName: lectureItem.itemName,
                 itemCategory: 'lecture',
+                itemVariant: undefined,
               });
             } else {
               const subItem = resolveSubscriptionItem(plan);
@@ -136,6 +140,7 @@ export default function CheckoutSuccessPage() {
                 itemId: subItem.itemId,
                 itemName: subItem.itemName,
                 itemCategory: 'subscription',
+                itemVariant: subItem.itemVariant,
               });
             }
           }
@@ -150,6 +155,7 @@ export default function CheckoutSuccessPage() {
             itemId: lectureItem.itemId,
             itemName: lectureItem.itemName,
             itemCategory: 'lecture',
+            itemVariant: undefined,
           });
         } else if (authKey && customerKey && plan) {
           // Toss 구독 빌링키 발급 + 첫 청구
@@ -174,6 +180,7 @@ export default function CheckoutSuccessPage() {
               itemId: subItem.itemId,
               itemName: subItem.itemName,
               itemCategory: 'subscription',
+              itemVariant: subItem.itemVariant,
             });
           }
         } else if (provider === 'portone' && plan && Number.isFinite(value) && value > 0) {
@@ -186,6 +193,7 @@ export default function CheckoutSuccessPage() {
             itemId: subItem.itemId,
             itemName: subItem.itemName,
             itemCategory: 'subscription',
+            itemVariant: subItem.itemVariant,
           });
         }
         setSuccess(true);

@@ -27,6 +27,8 @@ export interface GtagItem {
   item_category?: string;
   price?: number;
   quantity?: number;
+  /** Billing cycle: "monthly" | "annual". Added to all subscription items. */
+  item_variant?: string;
 }
 
 type EventParamValue = string | number | boolean | undefined | GtagItem[];
@@ -113,6 +115,52 @@ export function trackBeginCheckout(args: {
     value: args.value,
     currency: args.currency ?? "KRW",
     checkout_type: args.checkoutType,
+    items: args.items,
+  });
+}
+
+/**
+ * 사용자가 결제 수단 입력 완료 후 결제 버튼 직전. GA4 표준 ecommerce 이벤트.
+ * payment_type: "toss" | "portone"
+ */
+export function trackAddPaymentInfo(args: {
+  value: number;
+  currency?: string;
+  payment_type: string;
+  items?: GtagItem[];
+}) {
+  sendEvent("add_payment_info", {
+    value: args.value,
+    currency: args.currency ?? "KRW",
+    payment_type: args.payment_type,
+    items: args.items,
+  });
+}
+
+/**
+ * 상품 상세 보기 — 구독 플랜 상세(/pricing 등) 진입 시. GA4 표준 ecommerce 이벤트.
+ */
+export function trackViewItem(args: {
+  value?: number;
+  currency?: string;
+  items?: GtagItem[];
+}) {
+  sendEvent("view_item", {
+    value: args.value,
+    currency: args.currency ?? "KRW",
+    items: args.items,
+  });
+}
+
+/**
+ * 상품 목록 보기 — pricing 페이지 마운트 시. GA4 표준 ecommerce 이벤트.
+ */
+export function trackViewItemList(args: {
+  item_list_name?: string;
+  items?: GtagItem[];
+}) {
+  sendEvent("view_item_list", {
+    item_list_name: args.item_list_name ?? "subscription_plans",
     items: args.items,
   });
 }

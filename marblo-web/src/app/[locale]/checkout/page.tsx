@@ -10,7 +10,7 @@ import { auth } from "@/lib/firebase";
 import app from "@/lib/firebase";
 import CouponInput from "@/components/CouponInput";
 import { lectures } from "@/data/lectures";
-import { trackBeginCheckout } from "@/lib/gtag";
+import { trackBeginCheckout, trackViewItem, trackAddPaymentInfo } from "@/lib/gtag";
 import { ArrowLeft, Loader2, AlertCircle, ShoppingCart } from "lucide-react";
 
 type PaymentProvider = "toss" | "portone";
@@ -222,6 +222,25 @@ export default function CheckoutPage() {
     [baseAmount],
   );
 
+  // GA4 view_item — checkout 페이지 마운트 시 구독/강의 상세 보기.
+  useEffect(() => {
+    if (!isValid) return;
+    trackViewItem({
+      value: baseAmount,
+      currency: "KRW",
+      items: [
+        {
+          item_id: isLecture ? lectureSlug || "lecture" : plan || "plan",
+          item_name: itemName,
+          item_category: isLecture ? "lecture" : "subscription",
+          price: baseAmount,
+          quantity: 1,
+          item_variant: isLecture ? undefined : billing,
+        },
+      ],
+    });
+  }, [isValid, baseAmount, isLecture, lectureSlug, plan, itemName, billing]);
+
   const handlePayment = async () => {
     if (!user) return;
     // 결제 전 필수 동의 게이팅 — 결제대행사(토스) 제3자 제공 동의 없이 결제 불가.
@@ -248,6 +267,24 @@ export default function CheckoutPage() {
           item_category: isLecture ? "lecture" : "subscription",
           price: finalAmount,
           quantity: 1,
+          item_variant: isLecture ? undefined : billing,
+        },
+      ],
+    });
+    // GA4 add_payment_info — 결제 수단 입력 완료 후 결제 버튼 직전 발화.
+    // payment_type = "toss" | "portone"
+    trackAddPaymentInfo({
+      value: finalAmount,
+      currency: "KRW",
+      payment_type: paymentProvider,
+      items: [
+        {
+          item_id: isLecture ? lectureSlug || "lecture" : plan || "plan",
+          item_name: itemName,
+          item_category: isLecture ? "lecture" : "subscription",
+          price: finalAmount,
+          quantity: 1,
+          item_variant: isLecture ? undefined : billing,
         },
       ],
     });
