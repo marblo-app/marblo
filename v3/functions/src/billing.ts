@@ -110,8 +110,10 @@ export function nextPeriodEnd(
 
 // ─── 멱등키(청구 문서 ID) ─────────────────────────────────────────────
 // 같은 사이클을 두 번 청구하지 않도록, (userId, 사이클 기준시각) 을 결정적으로
-// 문서 ID 화한다. 첫 청구는 발급시각, 갱신은 직전 currentPeriodEnd 를 앵커로
-// 쓴다 — 크론이 중복 실행돼도 같은 사이클이면 같은 ID → claim 이 막는다.
+// 문서 ID 화한다. 갱신은 직전 currentPeriodEnd 를 앵커로 쓴다 — 크론이 중복
+// 실행돼도 같은 사이클이면 같은 ID → claim 이 막는다.
+// ★첫 청구는 Date.now() 를 쓰면 안 된다(동시 호출=다른 키=이중청구). 아래
+// firstCharge* 헬퍼를 쓴다.
 export function billingChargeDocId(
   userId: string,
   cycleAnchorMs: number,
@@ -122,6 +124,96 @@ export function billingChargeDocId(
 // Toss 에 넘길 결정적 orderId — PG 측 멱등을 한 겹 더 보강.
 export function billingOrderId(userId: string, cycleAnchorMs: number): string {
   return `sub_${userId}_${cycleAnchorMs}`;
+}
+
+// ─── 첫 청구 결정적 멱등 키 ───────────────────────────────────────────
+// provider+user+plan+cycle(+generation). generation 은 이전 첫청구가
+// succeeded 인데 구독이 해지된 뒤 재구독할 때만 올린다(동시 재시도는 gen 공유).
+export type FirstChargeProvider = "toss" | "portone";
+
+export function firstChargeLedgerId(
+  provider: FirstChargeProvider,
+  userId: string,
+  planType: string,
+  cycle: BillingCycle,
+  generation = 0,
+): string {
+  const safePlan = String(planType || "pro").replace(/[^A-Za-z0-9_-]/g, "_");
+  const base = `first_${provider}_${userId}_${safePlan}_${cycle}`;
+  return generation > 0 ? `${base}_g${generation}` : base;
+}
+
+/** Toss orderId (≤64자 관례). 결정적 — 같은 gen 재시도 = 같은 orderId. */
+export function firstChargeOrderId(
+  userId: string,
+  planType: string,
+  cycle: BillingCycle,
+  generation = 0,
+): string {
+  const safePlan = String(planType || "pro").replace(/[^A-Za-z0-9_-]/g, "_");
+  const base = `sub_first_${userId}_${safePlan}_${cycle}`;
+  const id = generation > 0 ? `${base}_g${generation}` : base;
+  return id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64);
+}
+
+/**
+ * PortOne paymentId 용 짧은 nonce (portonePaymentId 가 mb_s_ 접두 후 40자 캡).
+ * 예: f_pro_m / f_team_plus_a_g1
+ */
+export function firstChargePortoneNonce(
+  planType: string,
+  cycle: BillingCycle,
+  generation = 0,
+): string {
+  const p = String(planType || "pro")
+    .replace(/[^A-Za-z0-9]/g, "")
+    .slice(0, 12);
+  const c = cycle === "annual" ? "a" : "m";
+  const base = `f_${p}_${c}`;
+  return generation > 0 ? `${base}_g${generation}` : base;
+}
+
+/**
+ * 기존 gen 0..N-1 의 charge status 배열을 보고 재사용할 gen 을 고른다.
+ * succeeded/comped → 다음 gen (재구독). missing/failed/pending → 그 gen 재사용.
+ */
+export function resolveFirstChargeGeneration(
+  existingStatuses: ReadonlyArray<
+    "succeeded" | "comped" | "pending" | "failed" | "missing"
+  >,
+): number {
+  for (let i = 0; i < existingStatuses.length; i++) {
+    const s = existingStatuses[i];
+    if (s === "succeeded" || s === "comped") continue;
+    return i;
+  }
+  return existingStatuses.length;
+}
+
+/**
+ * 활성 구독 재결제 가드. status ∈ (active, past_due) 이고 기간이 유효하면
+ * 새 첫청구를 막는다(이중과금·키 덮어쓰기 방지).
+ * - active: periodEnd 없음(레거시) → 차단, periodEnd > now → 차단
+ * - past_due: 항상 차단(재시도/지원 경로, 재구매 아님)
+ * - pending_first_charge / canceled / 없음 → 차단 안 함
+ */
+export function isAlreadySubscribed(
+  sub:
+    | {
+        status?: string | null;
+        currentPeriodEndMs?: number | null;
+      }
+    | null
+    | undefined,
+  nowMs: number,
+): boolean {
+  if (!sub) return false;
+  const st = sub.status;
+  if (st === "past_due") return true;
+  if (st !== "active") return false;
+  const end = sub.currentPeriodEndMs;
+  if (typeof end !== "number" || !Number.isFinite(end)) return true;
+  return end > nowMs;
 }
 
 // ─── 갱신 대상 선정(순수) ─────────────────────────────────────────────

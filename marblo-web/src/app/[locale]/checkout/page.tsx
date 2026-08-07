@@ -95,6 +95,8 @@ export default function CheckoutPage() {
   const [checkoutEmail, setCheckoutEmail] = useState("");
   const [checkoutEmailTouched, setCheckoutEmailTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 첫청구 실패(빌링키는 있음) — retryFirstCharge 노출 */
+  const [canRetryFirstCharge, setCanRetryFirstCharge] = useState(false);
 
   // Resolve plan or lecture info
   const planInfo = plan ? PLAN_PRICES[plan] : null;
@@ -259,6 +261,75 @@ export default function CheckoutPage() {
     });
   }, [isValid, baseAmount, isLecture, lectureSlug, plan, itemName, billing]);
 
+  const PAYMENT_LOCK_KEY = "payment_in_progress";
+  const PAYMENT_LOCK_STALE_MS = 15 * 60 * 1000;
+
+  const acquirePaymentLock = (): boolean => {
+    try {
+      const raw = sessionStorage.getItem(PAYMENT_LOCK_KEY);
+      if (raw) {
+        const started = Number(raw);
+        if (
+          Number.isFinite(started) &&
+          Date.now() - started < PAYMENT_LOCK_STALE_MS
+        ) {
+          return false;
+        }
+      }
+      sessionStorage.setItem(PAYMENT_LOCK_KEY, String(Date.now()));
+      return true;
+    } catch {
+      // sessionStorage 불가 환경 — 탭 단위 loading 만 의존
+      return true;
+    }
+  };
+
+  const releasePaymentLock = () => {
+    try {
+      sessionStorage.removeItem(PAYMENT_LOCK_KEY);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const mapPaymentError = (err: unknown): string => {
+    const message =
+      err && typeof err === "object" && "message" in err
+        ? String((err as { message?: string }).message || "")
+        : err instanceof Error
+          ? err.message
+          : "";
+    if (message.includes("already_subscribed")) return t("alreadySubscribed");
+    if (message.includes("first_charge_failed")) return t("firstChargeFailed");
+    if (message.includes("payment_in_progress")) return t("paymentInProgress");
+    return message || t("paymentError");
+  };
+
+  const handleRetryFirstCharge = async () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const functions = getFunctions(app, "us-central1");
+      const retry = httpsCallable(functions, "retryFirstCharge");
+      await retry({});
+      setCanRetryFirstCharge(false);
+      releasePaymentLock();
+      router.push(
+        `/${locale}/checkout/success?plan=${plan || "pro"}&billing=${billing}&amount=${finalAmount}&retry=1`,
+      );
+    } catch (err: unknown) {
+      console.error("retryFirstCharge error:", err);
+      const msg = mapPaymentError(err);
+      setError(msg);
+      if (!String(msg).includes(t("firstChargeFailed"))) {
+        setCanRetryFirstCharge(false);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handlePayment = async () => {
     if (!user) return;
     // 결제 전 필수 동의 게이팅 — 결제대행사(토스) 제3자 제공 동의 없이 결제 불가.
@@ -278,8 +349,13 @@ export default function CheckoutPage() {
       );
       return;
     }
+    if (!acquirePaymentLock()) {
+      setError(t("paymentInProgress"));
+      return;
+    }
     setLoading(true);
     setError(null);
+    setCanRetryFirstCharge(false);
     // GA4 begin_checkout — 결제 요청 직전 발화(값/상품만, PII 없음).
     trackBeginCheckout({
       value: finalAmount,
@@ -401,6 +477,7 @@ export default function CheckoutPage() {
             customerPhone: customer.phoneNumber,
             customerEmail: email,
           });
+          releasePaymentLock();
           // tx=issueId → success 페이지 GA4 purchase transaction_id (중복 가드 키)
           router.push(
             `/${locale}/checkout/success?provider=portone&plan=${plan}&billing=${billing}&amount=${finalAmount}&tx=${encodeURIComponent(issueId)}`,
@@ -444,8 +521,28 @@ export default function CheckoutPage() {
       }
     } catch (err: unknown) {
       console.error("Payment error:", err);
-      const message = err instanceof Error ? err.message : t("paymentError");
+      const message = mapPaymentError(err);
       setError(message);
+      if (
+        message === t("firstChargeFailed") ||
+        (err &&
+          typeof err === "object" &&
+          "message" in err &&
+          String((err as { message?: string }).message || "").includes(
+            "first_charge_failed",
+          ))
+      ) {
+        setCanRetryFirstCharge(true);
+      }
+      if (message === t("alreadySubscribed")) {
+        releasePaymentLock();
+        // 이미 구독 중 — 내 구독 페이지로 안내(잠깐 메시지 후 이동)
+        setTimeout(() => {
+          router.push(`/${locale}/my/subscription`);
+        }, 1500);
+      } else {
+        releasePaymentLock();
+      }
     } finally {
       setLoading(false);
     }
@@ -519,9 +616,21 @@ export default function CheckoutPage() {
 
           {/* Error message */}
           {error && (
-            <div className="flex items-start gap-3 text-red-400 mb-6 p-4 bg-red-950/30 border border-red-900/50 rounded-lg">
-              <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
-              <p className="text-sm">{error}</p>
+            <div className="flex flex-col gap-3 text-red-400 mb-6 p-4 bg-red-950/30 border border-red-900/50 rounded-lg">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
+                <p className="text-sm">{error}</p>
+              </div>
+              {canRetryFirstCharge && (
+                <button
+                  type="button"
+                  onClick={handleRetryFirstCharge}
+                  disabled={loading}
+                  className="self-start ml-8 text-sm font-medium text-indigo-300 hover:text-indigo-200 underline disabled:opacity-50"
+                >
+                  {t("retryFirstCharge")}
+                </button>
+              )}
             </div>
           )}
 

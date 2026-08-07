@@ -602,7 +602,11 @@
     "thirdPartyItemsToss": "提供項目：購入者識別情報（メールアドレス）、注文番号、決済金額",
     "thirdPartyItemsPortOne": "提供項目：購入者識別情報（メールアドレス、電話番号）、注文番号、決済金額",
     "thirdPartyPurpose": "利用目的：決済処理および決済手段の承認・検証",
-    "thirdPartyRetention": "保有・利用期間：関係法令（電子商取引法等）に定める保存期間"
+    "thirdPartyRetention": "保有・利用期間：関係法令（電子商取引法等）に定める保存期間",
+    "alreadySubscribed": "すでに有効なサブスクリプションがあります。マイ購読ページへ移動します。",
+    "firstChargeFailed": "カードは登録されましたが初回請求に失敗しました。下のボタンから再試行してください。",
+    "retryFirstCharge": "初回請求を再試行",
+    "paymentInProgress": "決済が進行中です。しばらくしてから再度お試しください。"
   },
   "lectures": {
     "title": "講座",

@@ -169,7 +169,28 @@ export default function CheckoutSuccessPage() {
           // (normalizeBillingCycle) 값이 없거나 이상해도 월간으로 안전하게 떨어진다.
           const billing = searchParams.get('billing') || undefined;
           const issue = httpsCallable(functions, 'issueBillingKey');
-          await issue({ authKey, customerKey, plan, coupon, billing });
+          try {
+            await issue({ authKey, customerKey, plan, coupon, billing });
+          } catch (issueErr: unknown) {
+            const msg =
+              issueErr && typeof issueErr === 'object' && 'message' in issueErr
+                ? String((issueErr as { message?: string }).message || '')
+                : '';
+            // 이미 구독 중 / 멱등 재진입 — 성공 UI (이중청구 없음)
+            if (msg.includes('already_subscribed')) {
+              setSuccess(true);
+              setProcessing(false);
+              return;
+            }
+            // 카드 등록됨·청구 실패 — 재시도는 checkout 에서
+            if (msg.includes('first_charge_failed')) {
+              setErrorMsg(t('firstChargeFailed'));
+              setSuccess(false);
+              setProcessing(false);
+              return;
+            }
+            throw issueErr;
+          }
           // authKey 는 빌링 인증 1회당 유일 — transaction_id 로 사용(PII 아님).
           // amount 는 successUrl 에 실어 보낸 값; 없으면 발화 스킵(오값 방지).
           if (Number.isFinite(value) && value > 0) {
@@ -309,10 +330,14 @@ export default function CheckoutSuccessPage() {
               <p className="text-zinc-400">{errorMsg || t('paymentError')}</p>
             </div>
             <Link
-              href={`/${locale}/pricing`}
+              href={
+                errorMsg === t('firstChargeFailed') && plan
+                  ? `/${locale}/checkout?plan=${encodeURIComponent(plan)}&billing=${encodeURIComponent(searchParams.get('billing') || 'monthly')}`
+                  : `/${locale}/pricing`
+              }
               className="inline-block bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg transition"
             >
-              {t('tryAgain')}
+              {errorMsg === t('firstChargeFailed') ? t('retryFirstCharge') : t('tryAgain')}
             </Link>
           </div>
         )}

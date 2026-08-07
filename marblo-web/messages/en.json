@@ -602,7 +602,11 @@
     "thirdPartyItemsToss": "Items provided: purchaser identifier (email), order number, payment amount",
     "thirdPartyItemsPortOne": "Items provided: purchaser identifier (email, phone number), order number, payment amount",
     "thirdPartyPurpose": "Purpose: payment processing and authorization/verification of the payment method",
-    "thirdPartyRetention": "Retention period: the period required by applicable law (e.g., the Act on Consumer Protection in Electronic Commerce)"
+    "thirdPartyRetention": "Retention period: the period required by applicable law (e.g., the Act on Consumer Protection in Electronic Commerce)",
+    "alreadySubscribed": "You already have an active subscription. Redirecting to My Subscription.",
+    "firstChargeFailed": "Your card was registered but the first charge failed. Please retry below.",
+    "retryFirstCharge": "Retry first charge",
+    "paymentInProgress": "A payment is already in progress. Please wait and try again."
   },
   "lectures": {
     "title": "Lectures",

@@ -602,7 +602,11 @@
     "thirdPartyItemsToss": "제공 항목: 구매자 식별정보(이메일), 주문번호, 결제 금액",
     "thirdPartyItemsPortOne": "제공 항목: 구매자 식별정보(이메일, 전화번호), 주문번호, 결제 금액",
     "thirdPartyPurpose": "이용 목적: 결제 처리 및 결제수단 승인·검증",
-    "thirdPartyRetention": "보유·이용 기간: 관계 법령에 따른 보존기간(전자상거래법 등)"
+    "thirdPartyRetention": "보유·이용 기간: 관계 법령에 따른 보존기간(전자상거래법 등)",
+    "alreadySubscribed": "이미 구독 중입니다. 내 구독 페이지로 이동합니다.",
+    "firstChargeFailed": "카드는 등록됐으나 첫 청구에 실패했습니다. 아래에서 재시도해 주세요.",
+    "retryFirstCharge": "첫 청구 재시도",
+    "paymentInProgress": "결제가 이미 진행 중입니다. 잠시 후 다시 시도해 주세요."
   },
   "lectures": {
     "title": "강의",

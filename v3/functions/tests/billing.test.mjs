@@ -16,6 +16,11 @@ import {
   nextPeriodEnd,
   billingChargeDocId,
   billingOrderId,
+  firstChargeLedgerId,
+  firstChargeOrderId,
+  firstChargePortoneNonce,
+  resolveFirstChargeGeneration,
+  isAlreadySubscribed,
   selectDueForCharge,
   applyChargeSuccess,
   applyChargeFailure,
@@ -54,6 +59,105 @@ assert(
   "다른 유저는 다른 docId",
 );
 eq(billingOrderId("u1", 999), "sub_u1_999", "orderId deterministic");
+
+// ── 첫청구 결정적 멱등 (#1/#9/#12) ────────────────────────────────────
+// Date.now() 가 아니라 user+plan+cycle → 동시 2회 호출도 같은 키.
+eq(
+  firstChargeLedgerId("portone", "uidA", "pro", "monthly"),
+  "first_portone_uidA_pro_monthly",
+  "portone first ledger deterministic",
+);
+eq(
+  firstChargeLedgerId("toss", "uidA", "pro", "monthly"),
+  "first_toss_uidA_pro_monthly",
+  "toss first ledger deterministic",
+);
+eq(
+  firstChargeLedgerId("portone", "uidA", "pro", "monthly"),
+  firstChargeLedgerId("portone", "uidA", "pro", "monthly"),
+  "동시 2회 → 동일 ledger (이중청구 키 충돌 방지)",
+);
+assert(
+  firstChargeLedgerId("portone", "uidA", "pro", "monthly") !==
+    firstChargeLedgerId("portone", "uidA", "pro", "annual"),
+  "다른 사이클 → 다른 ledger",
+);
+eq(
+  firstChargeLedgerId("portone", "uidA", "pro", "monthly", 1),
+  "first_portone_uidA_pro_monthly_g1",
+  "generation 1 suffix",
+);
+eq(
+  firstChargeOrderId("uidA", "pro", "monthly"),
+  "sub_first_uidA_pro_monthly",
+  "toss first orderId deterministic",
+);
+eq(firstChargePortoneNonce("pro", "monthly"), "f_pro_m", "portone nonce short");
+eq(
+  firstChargePortoneNonce("team_plus", "annual", 1),
+  "f_teamplus_a_g1",
+  "portone nonce gen+annual",
+);
+// resolveFirstChargeGeneration: succeeded → next; failed/pending/missing → reuse
+eq(resolveFirstChargeGeneration([]), 0, "empty → gen 0");
+eq(resolveFirstChargeGeneration(["missing"]), 0, "missing → gen 0");
+eq(resolveFirstChargeGeneration(["failed"]), 0, "failed → reuse gen 0");
+eq(resolveFirstChargeGeneration(["pending"]), 0, "pending → reuse gen 0");
+eq(
+  resolveFirstChargeGeneration(["succeeded"]),
+  1,
+  "succeeded only → gen 1 (재구독)",
+);
+eq(
+  resolveFirstChargeGeneration(["succeeded", "failed"]),
+  1,
+  "gen0 done gen1 failed → reuse 1",
+);
+eq(
+  resolveFirstChargeGeneration(["comped", "succeeded", "missing"]),
+  2,
+  "two successes → gen 2",
+);
+
+// ── 활성 구독 가드 (#5) ───────────────────────────────────────────────
+const T_NOW = Date.parse("2026-08-07T00:00:00Z");
+assert(
+  isAlreadySubscribed(
+    { status: "active", currentPeriodEndMs: T_NOW + DAY_MS },
+    T_NOW,
+  ),
+  "active + 기간 유효 → 차단",
+);
+assert(
+  isAlreadySubscribed({ status: "active", currentPeriodEndMs: null }, T_NOW),
+  "active + 기간 미상(레거시) → 차단",
+);
+assert(
+  !isAlreadySubscribed(
+    { status: "active", currentPeriodEndMs: T_NOW - 1 },
+    T_NOW,
+  ),
+  "active + 기간 만료 → 허용(재구독)",
+);
+assert(
+  isAlreadySubscribed(
+    { status: "past_due", currentPeriodEndMs: T_NOW - DAY_MS },
+    T_NOW,
+  ),
+  "past_due → 항상 차단",
+);
+assert(
+  !isAlreadySubscribed(
+    { status: "pending_first_charge", currentPeriodEndMs: null },
+    T_NOW,
+  ),
+  "pending_first_charge → 차단 안 함(재시도 경로)",
+);
+assert(
+  !isAlreadySubscribed({ status: "canceled", currentPeriodEndMs: T_NOW + DAY_MS }, T_NOW),
+  "canceled → 차단 안 함",
+);
+assert(!isAlreadySubscribed(null, T_NOW), "구독 없음 → 허용");
 
 // ── 쿠폰 할인 ─────────────────────────────────────────────────────────
 {
