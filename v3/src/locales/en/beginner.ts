@@ -87,6 +87,26 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.promote.reason.merged": "You landed your first merge",
   "beginner.promote.reason.days": "You've been using Marblo for a few days",
 
+  // ── Coachmark tour (first-run walkthrough) ──────────────────────────────
+  "beginner.tour.progress": "Tip {current}/{total}",
+  "beginner.tour.next": "Next",
+  "beginner.tour.back": "Back",
+  "beginner.tour.done": "Get started",
+  "beginner.tour.skip": "Skip",
+  "beginner.tour.never": "Don't show this again",
+  "beginner.tour.chat.title": "This is where you talk to Marblo",
+  "beginner.tour.chat.body":
+    "It looks like a terminal, but you can just talk to it. Marblo splits the work up and hands it to agents.",
+  "beginner.tour.ask.title": "Write your first request here",
+  "beginner.tour.ask.body":
+    "Describe what you want in plain language — or tap one of the examples below.",
+  "beginner.tour.live.title": "Progress shows up here",
+  "beginner.tour.live.body":
+    "Once you send a request, this line keeps showing how many tickets exist and how many agents are working.",
+  "beginner.tour.advanced.title": "Switch to advanced mode any time",
+  "beginner.tour.advanced.body":
+    "Need the board, worktrees or the model picker? Click here. Settings brings you back.",
+
   // ── Settings toggle ─────────────────────────────────────────────────────
   "beginner.settings.heading": "Beginner mode",
   "beginner.settings.body":
@@ -95,4 +115,7 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.settings.off": "Switch to advanced",
   "beginner.settings.restartHint":
     "The whole screen changes. Agents already running keep going.",
+  "beginner.settings.replayTour": "Replay the first-run walkthrough",
+  "beginner.settings.replayTourDone":
+    "The walkthrough will show up next time you open the beginner screen.",
 };

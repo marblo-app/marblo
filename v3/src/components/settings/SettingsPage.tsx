@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useWorkspaceModeStore } from "../../stores/workspaceModeStore";
 import { useBeginnerModeStore } from "../../stores/beginnerModeStore";
+import { useCoachmarkStore } from "../../stores/coachmarkStore";
+import { BEGINNER_TOUR_ID } from "../../lib/coachmark";
 import telemetry from "../../services/telemetryService";
 import { useProjectStore } from "../../stores/projectStore";
 import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
@@ -281,6 +283,10 @@ function BeginnerModeSection() {
   const beginner = useBeginnerModeStore((s) => s.state) === "beginner";
   const revertToBeginner = useBeginnerModeStore((s) => s.revertToBeginner);
   const promote = useBeginnerModeStore((s) => s.promote);
+  // 첫 실행 코치마크 투어를 다시 볼 수 있는 유일한 문 — '다시 보지 않기' 를 누른
+  // 유저에게 되돌릴 방법이 없으면 그건 실수 한 번으로 닫히는 막다른 길이다.
+  const resetTour = useCoachmarkStore((s) => s.resetTour);
+  const [tourReset, setTourReset] = useState(false);
 
   return (
     <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
@@ -324,6 +330,22 @@ function BeginnerModeSection() {
       <p className="mt-1 text-xs text-gray-500">
         {t("beginner.settings.restartHint")}
       </p>
+      <button
+        type="button"
+        data-testid="settings-replay-tour"
+        onClick={() => {
+          resetTour(BEGINNER_TOUR_ID);
+          setTourReset(true);
+        }}
+        className="mt-3 rounded-md border border-gray-600 px-2.5 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-700"
+      >
+        {t("beginner.settings.replayTour")}
+      </button>
+      {tourReset && (
+        <p className="mt-1.5 text-xs text-green-400">
+          {t("beginner.settings.replayTourDone")}
+        </p>
+      )}
     </div>
   );
 }

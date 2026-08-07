@@ -9,7 +9,7 @@ export const beginner = {
   "beginner.topbar.openFolder": "내 폴더 열기",
   "beginner.topbar.changeFolder": "폴더 바꾸기",
   "beginner.topbar.settings": "설정",
-  "beginner.topbar.advanced": "고급 모드",
+  "beginner.topbar.advanced": "개발 모드로 보기",
   "beginner.topbar.advancedHint":
     "보드·워크트리·모델 선택이 있는 원래 화면으로 갑니다. 설정에서 언제든 돌아올 수 있어요.",
 
@@ -85,6 +85,26 @@ export const beginner = {
   "beginner.promote.reason.merged": "첫 머지까지 마치셨어요",
   "beginner.promote.reason.days": "마블로를 며칠째 쓰고 계시네요",
 
+  // ── 코치마크 투어 (첫 실행 안내) ────────────────────────────────────────
+  "beginner.tour.progress": "안내 {current}/{total}",
+  "beginner.tour.next": "다음",
+  "beginner.tour.back": "이전",
+  "beginner.tour.done": "시작하기",
+  "beginner.tour.skip": "건너뛰기",
+  "beginner.tour.never": "다시 보지 않기",
+  "beginner.tour.chat.title": "여기가 마블로와 대화하는 곳이에요",
+  "beginner.tour.chat.body":
+    "터미널처럼 보이지만 그냥 말을 걸면 됩니다. 마블로가 알아듣고 일을 쪼개 에이전트에게 넘겨요.",
+  "beginner.tour.ask.title": "첫 요청은 여기에 적어 주세요",
+  "beginner.tour.ask.body":
+    "무엇을 만들지 한국어로 그냥 쓰면 됩니다. 아래 예시를 눌러도 돼요.",
+  "beginner.tour.live.title": "진행 상황은 여기에 나와요",
+  "beginner.tour.live.body":
+    "요청을 보내면 티켓이 몇 개 생겼는지, 지금 몇 명이 일하는지 이 줄에서 계속 보입니다.",
+  "beginner.tour.advanced.title": "언제든 개발 모드로 넘어갈 수 있어요",
+  "beginner.tour.advanced.body":
+    "보드·워크트리·모델 선택이 필요해지면 여기를 누르세요. 설정에서 다시 돌아올 수 있어요.",
+
   // ── 설정 토글 ───────────────────────────────────────────────────────────
   "beginner.settings.heading": "비기너 모드",
   "beginner.settings.body":
@@ -93,4 +113,7 @@ export const beginner = {
   "beginner.settings.off": "고급 모드로 전환",
   "beginner.settings.restartHint":
     "화면 전체가 바뀝니다. 진행 중인 에이전트는 그대로 계속 돌아가요.",
+  "beginner.settings.replayTour": "첫 실행 안내 다시 보기",
+  "beginner.settings.replayTourDone":
+    "다음에 비기너 화면을 열면 안내가 다시 나와요.",
 };

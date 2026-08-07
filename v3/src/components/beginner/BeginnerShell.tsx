@@ -18,6 +18,7 @@ import { BeginnerConnectStep } from "./BeginnerConnectStep";
 import { BeginnerFirstAsk } from "./BeginnerFirstAsk";
 import { BeginnerLiveStrip } from "./BeginnerLiveStrip";
 import { BeginnerPromotionModal } from "./BeginnerPromotionModal";
+import { BeginnerTour } from "./BeginnerTour";
 
 /**
  * 비기너 셸 — 오케챗 하나만 있는 화면 (설계: v3/docs/BEGINNER-MODE-DESIGN.md).
@@ -189,13 +190,20 @@ export function BeginnerShell() {
         >
           {t("beginner.topbar.settings")}
         </button>
+        {/* ★상시 전환 어포던스 — 승격 모달(완료 3건 트리거)을 기다리지 않고
+            언제든 개발(어드밴스드) 모드로 넘어간다. 그래서 눈에 띄는 강조색이다:
+            "숨겨진 화면이 따로 있다" 는 사실 자체가 첫 화면에서 보여야 한다. */}
         <button
           type="button"
           data-testid="beginner-go-advanced"
+          data-coach="beginner-advanced"
           title={t("beginner.topbar.advancedHint")}
           onClick={() => goAdvanced("manual")}
-          className="shrink-0 rounded-md border border-[#45475a] px-2.5 py-1 text-xs text-[#a6adc8] transition-colors hover:bg-[#313244] hover:text-[#cdd6f4]"
+          className="flex shrink-0 items-center gap-1.5 rounded-md border border-[#89b4fa]/50 bg-[#89b4fa]/10 px-2.5 py-1 text-xs font-medium text-[#89b4fa] transition-colors hover:border-[#89b4fa] hover:bg-[#89b4fa]/20"
         >
+          <span aria-hidden className="font-mono text-[10px]">
+            {"</>"}
+          </span>
           {t("beginner.topbar.advanced")}
         </button>
       </header>
@@ -228,13 +236,14 @@ export function BeginnerShell() {
           </div>
         ) : (
           <>
-            {/* 첫 요청 — 전달되면 스스로 접혀 확인 한 줄만 남긴다(중복 주입 차단). */}
-            <div className="flex-shrink-0">
+            {/* 첫 요청 — 전달되면 스스로 접혀 확인 한 줄만 남긴다(중복 주입 차단).
+                data-coach: 코치마크 투어의 앵커(BeginnerTour.COACH_ANCHORS). */}
+            <div className="flex-shrink-0" data-coach="beginner-ask">
               <BeginnerFirstAsk ask={ask} />
             </div>
 
             {/* ★S4: 진행상황을 별도 탭이 아니라 챗 바로 위에 그린다. */}
-            <div className="flex-shrink-0">
+            <div className="flex-shrink-0" data-coach="beginner-live">
               <BeginnerLiveStrip
                 sentAt={ask.deliveredAt}
                 onResend={() => void ask.resend()}
@@ -243,7 +252,10 @@ export function BeginnerShell() {
             </div>
 
             {/* 풀스크린 오케챗 — 실 PTY 그대로. */}
-            <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[#313244] bg-[#181825]">
+            <section
+              data-coach="beginner-chat"
+              className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[#313244] bg-[#181825]"
+            >
               <div className="flex flex-shrink-0 items-baseline gap-2 border-b border-[#313244] px-3 py-1.5">
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-[#7f849c]">
                   {t("beginner.chat.title")}
@@ -259,6 +271,14 @@ export function BeginnerShell() {
           </>
         )}
       </main>
+
+      {/* 첫 실행 코치마크 투어. 앵커(챗·첫요청·라이브·모드전환)가 실제로 그려진
+          뒤에만 뜨고, 다른 오버레이와는 겹치지 않는다. 재노출 규칙은
+          lib/coachmark 가 든다(완주/다시보지않기 = 끝, 그냥 닫으면 3회까지). */}
+      <BeginnerTour
+        ready={cliReady && hasFolder}
+        blocked={!!promotion || showDemo}
+      />
 
       {promotion && (
         <BeginnerPromotionModal

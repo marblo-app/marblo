@@ -76,7 +76,15 @@ export type TelemetryEvent =
   // timestamp 는 수신시각이라 단계 지연을 계산할 수 없기 때문이다.
   | "onboarding:beginner_entered"
   | "onboarding:beginner_first_completion"
-  | "onboarding:beginner_promoted";
+  | "onboarding:beginner_promoted"
+  // ── 코치마크 투어 (ticket m7mpxqSw) ──────────────────────────────────────
+  // 비기너 셸 첫 실행에 뜨는 순차 스포트라이트 안내. 위 퍼널과 같은 설치·같은
+  // 세션에 붙으므로 beginner_entered → coachmark_* → beginner_first_completion
+  // 으로 조인해 "안내를 본 유저가 첫 완료까지 더 잘 가는가" 를 볼 수 있다.
+  // ★started 는 '띄운 횟수' 지 '완주' 가 아니다 — skipped 와 합쳐야 분모가 된다.
+  | "onboarding:coachmark_started"
+  | "onboarding:coachmark_completed"
+  | "onboarding:coachmark_skipped";
 
 interface TelemetryPayload {
   event: TelemetryEvent;
@@ -728,6 +736,41 @@ export const telemetry = {
       event: "onboarding:beginner_promoted",
       success: true,
       metadata: { trigger, manual },
+    });
+  },
+
+  // ── 코치마크 투어 (ticket m7mpxqSw) ──────────────────────────────────────
+  /** 투어를 화면에 띄웠다. tourId 로 투어를 구분한다(비기너 첫 실행 외에도 쓰인다). */
+  coachmarkStarted(tourId: string, stepCount: number) {
+    logTelemetry({
+      event: "onboarding:coachmark_started",
+      success: true,
+      metadata: { tourId, stepCount },
+    });
+  },
+
+  /** 마지막 스텝까지 봤다. durationMs = 시작→완주(클라 계산 — 진단 §3 와 동일 이유). */
+  coachmarkCompleted(tourId: string, stepCount: number, durationMs: number) {
+    logTelemetry({
+      event: "onboarding:coachmark_completed",
+      success: true,
+      durationMs,
+      metadata: { tourId, stepCount },
+    });
+  },
+
+  /** 중간에 닫았다. stepIndex = 몇 번째에서 이탈했나(0-based),
+   *  permanent = '다시 보지 않기'(true) vs 그냥 건너뛰기(false). */
+  coachmarkSkipped(
+    tourId: string,
+    stepIndex: number,
+    stepCount: number,
+    permanent: boolean,
+  ) {
+    logTelemetry({
+      event: "onboarding:coachmark_skipped",
+      success: true,
+      metadata: { tourId, stepIndex, stepCount, permanent },
     });
   },
 
