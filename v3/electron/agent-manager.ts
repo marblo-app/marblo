@@ -18,7 +18,11 @@ import {
   shouldDemoteCompletedTurn,
   shouldDemoteAbandonedTurn,
 } from "./agent-status-reconcile";
-import { looksLikeLoginScreen } from "./harness-manager";
+import {
+  createLoginScreenBackstop,
+  modelToCliAuth,
+  probeCliAuth,
+} from "./harness-manager";
 import { isCliHomeTracked } from "./session-parsers";
 import { isHarnessFamilyId } from "./model-registry";
 
@@ -699,12 +703,17 @@ export class AgentManager {
         launchConfig.skillContent,
       );
       let sent = false;
-      // Set once if the CLI boots into an interactive login prompt — blocks
-      // BOTH the readiness path and the blind fallback from typing the
-      // instruction into the login menu (which historically navigated the menu
-      // and exited the CLI cleanly, leaving a dead PTY). Watched for
-      // claude/codex (gated pre-spawn) AND antigravity (ungated pre-spawn, but
-      // its OAuth flow still needs the backstop). See looksLikeLoginScreen.
+      // Set once the login-screen backstop CONFIRMS the CLI is sitting at a
+      // login prompt — blocks BOTH the readiness path and the blind fallback
+      // from typing the instruction into the login menu (which historically
+      // navigated the menu and exited the CLI cleanly, leaving a dead PTY).
+      // Watched for claude/codex/grok (gated pre-spawn) AND antigravity
+      // (ungated pre-spawn, but its OAuth flow still needs the backstop).
+      //
+      // ★ 확정은 이제 패턴 1회 매칭이 아니라 `createLoginScreenBackstop` 의 조정
+      // 결과다: 사전 probe 가 인증됨이었으면 grace 창 동안 readiness 를 기다려
+      // 오탐(정상 grok 이 부팅 중 뱉는 인증 안내 문구)을 걸러내고, 발화한 뒤라도
+      // readiness 에 도달하면 철회한다.
       let authBlocked = false;
       const watchLoginScreen =
         params.model === "claude" ||
@@ -714,6 +723,7 @@ export class AgentManager {
       const sendPrompt = () => {
         if (sent || authBlocked) return;
         sent = true;
+        loginBackstop.dispose();
         // Split text and \r so Claude Code registers Enter as a discrete
         // keystroke (single-chunk write gets paste-buffered, leaving the
         // CR inside the message body without submitting).
@@ -722,21 +732,56 @@ export class AgentManager {
           `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`,
         );
       };
-      const handleLoginScreen = () => {
-        if (authBlocked || sent) return;
-        authBlocked = true;
-        console.error(
-          `[Agent:${params.id}] Login prompt detected for ${params.model} — ` +
-            `suppressing prompt injection (CLI needs auth / login).`,
-        );
-        this.setStatus(params.id, "error");
-        // Surface to the renderer so it can open the CLI setup gate instead of
-        // the agent silently dying at a login screen.
-        this.getMainWindow?.()?.webContents.send("agent:needsAuth", {
-          agentId: params.id,
-          model: params.model,
-        });
-      };
+      // 사전 probe — 백스톱의 첫 번째 축. grok 은 파일 존재 검사라 사실상 즉시
+      // 끝나지만, 늦게 도착하는 경우(claude 키체인)도 있으므로 백스톱은 "미도착"을
+      // 인증됨과 같게(=grace) 취급한다.
+      const cliAuthModel = watchLoginScreen
+        ? modelToCliAuth(params.model)
+        : null;
+      const loginBackstop = createLoginScreenBackstop({
+        hasProbe: cliAuthModel !== null,
+        onGrace: (graceMs) => {
+          console.warn(
+            `[Agent:${params.id}] Login-screen pattern matched for ${params.model} ` +
+              `but pre-spawn probe said authenticated — holding ${graceMs}ms for readiness.`,
+          );
+        },
+        onNeedsAuth: (reason) => {
+          if (sent) return;
+          authBlocked = true;
+          console.error(
+            `[Agent:${params.id}] Login prompt confirmed for ${params.model} ` +
+              `(${reason}) — suppressing prompt injection (CLI needs auth / login).`,
+          );
+          this.setStatus(params.id, "error");
+          // Surface to the renderer so it can open the CLI setup gate instead
+          // of the agent silently dying at a login screen.
+          this.getMainWindow?.()?.webContents.send("agent:needsAuth", {
+            agentId: params.id,
+            model: params.model,
+            reason,
+          });
+        },
+        onResolved: () => {
+          authBlocked = false;
+          console.warn(
+            `[Agent:${params.id}] ${params.model} reached readiness after a login-screen ` +
+              `match — retracting needsAuth (transient auth notice, not a login screen).`,
+          );
+          // "error" 로 떨어뜨렸던 판정을 되돌린다. 실제 working 승격은 평소대로
+          // PTY 출력이 한다(shouldPromoteOnPtyOutput).
+          this.setStatus(params.id, "idle");
+          this.getMainWindow?.()?.webContents.send("agent:authResolved", {
+            agentId: params.id,
+            model: params.model,
+          });
+        },
+      });
+      if (cliAuthModel) {
+        probeCliAuth(cliAuthModel)
+          .then((r) => loginBackstop.setPreProbeAuthenticated(r.authenticated))
+          .catch(() => loginBackstop.setPreProbeAuthenticated(false));
+      }
 
       // Watch PTY output for CLI readiness indicators
       // Only match patterns that confirm the CLI is actually ready for input.
@@ -777,40 +822,47 @@ export class AgentManager {
       const dismissed = new Set<RegExp>();
 
       this.ptyManager.onData(ptySessionId, (data) => {
-        if (sent || authBlocked) return;
+        if (sent) return;
         outputBuffer += data;
         // Only keep last 4KB to avoid memory growth
         if (outputBuffer.length > 4096)
           outputBuffer = outputBuffer.slice(-4096);
 
-        // Login-screen backstop: if the CLI booted into an interactive login
-        // prompt, stop here — never fall through to the readiness patterns or
-        // the blind fallback and type into the menu.
-        if (watchLoginScreen && looksLikeLoginScreen(outputBuffer)) {
-          handleLoginScreen();
-          return;
-        }
+        // Login-screen backstop: while the CLI looks like it may be sitting at
+        // an interactive login prompt ("hold"/"blocked"), never type into it —
+        // dialog dismissal keystrokes and the blind fallback both navigate the
+        // menu and kill the CLI. readiness 는 두 상태에서도 **계속 본다**: 그게
+        // 오탐을 스스로 걷어내는(철회) 유일한 신호이기 때문이다.
+        const loginState = watchLoginScreen
+          ? loginBackstop.observe(outputBuffer)
+          : "clear";
 
-        for (const dlg of activeMatchers) {
-          if (dismissed.has(dlg.pattern)) continue;
-          if (dlg.pattern.test(outputBuffer)) {
-            dismissed.add(dlg.pattern);
-            console.log(
-              `[Agent:${params.id}] Dismissing blocking dialog: ${dlg.label}`,
-            );
-            // Small delay so the TUI is in steady state when we type.
-            setTimeout(() => {
-              this.ptyManager.write(ptySessionId, dlg.keys);
-            }, 300);
-            // Reset buffer so the dismissed dialog's text doesn't keep
-            // being re-matched against readiness patterns.
-            outputBuffer = "";
-            return;
+        if (loginState === "clear") {
+          for (const dlg of activeMatchers) {
+            if (dismissed.has(dlg.pattern)) continue;
+            if (dlg.pattern.test(outputBuffer)) {
+              dismissed.add(dlg.pattern);
+              console.log(
+                `[Agent:${params.id}] Dismissing blocking dialog: ${dlg.label}`,
+              );
+              // Small delay so the TUI is in steady state when we type.
+              setTimeout(() => {
+                this.ptyManager.write(ptySessionId, dlg.keys);
+              }, 300);
+              // Reset buffer so the dismissed dialog's text doesn't keep
+              // being re-matched against readiness patterns.
+              outputBuffer = "";
+              return;
+            }
           }
         }
 
         for (const pattern of readinessPatterns) {
           if (pattern.test(outputBuffer)) {
+            // readiness 도달 = 로그인 화면이 아니었다는 최종 증거. 보류 중이던
+            // grace 를 닫고, 이미 발화했었다면 철회한다(agent:authResolved).
+            loginBackstop.noteReadiness();
+            if (authBlocked) return;
             // Delay to let CLI fully render its prompt
             setTimeout(sendPrompt, 1500);
             return;

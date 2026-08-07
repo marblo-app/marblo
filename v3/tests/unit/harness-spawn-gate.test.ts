@@ -58,7 +58,15 @@ describe("looksLikeLoginScreen", () => {
   it("matches the Grok browser auth flow", () => {
     expect(looksLikeLoginScreen("Grok Build login required")).toBe(true);
     expect(looksLikeLoginScreen("Sign in with xAI to continue")).toBe(true);
-    expect(looksLikeLoginScreen("Browser OIDC")).toBe(true);
+    // 'Browser OIDC' 단독은 더는 확정 신호가 아니다 — 정상 인증된 grok 도 부팅 중
+    // 인증 '방법' 안내로 뱉기 때문(UO8F2SM7i6YTQcnbqrSX). 로그인 메뉴 맥락이
+    // 함께 있을 때만 확정으로 친다. 자세한 축은 login-screen-backstop.test.ts.
+    expect(looksLikeLoginScreen("Browser OIDC")).toBe(false);
+    expect(
+      looksLikeLoginScreen(
+        "Select login method\n  1) Browser OIDC\n  2) API key",
+      ),
+    ).toBe(true);
   });
 
   it("does NOT match a normal ready CLI prompt (no false blocking)", () => {

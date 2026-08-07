@@ -270,6 +270,19 @@ export function Layout() {
     };
   }, []);
 
+  // ...and the RETRACTION. 백스톱이 로그인 화면이라 판정했더라도 그 CLI 가 이어서
+  // readiness 에 도달하면(정상 인증된 grok 이 부팅 중 뱉는 인증 안내 문구가 대표적)
+  // main 이 `agent:authResolved` 를 보낸다. 열려 있던 인증 안내를 닫아 준다 —
+  // 사용자는 아무 문제 없는 스폰을 두고 팝업을 직접 치울 이유가 없다.
+  useEffect(() => {
+    window.electronAPI.on("agent:authResolved", () => {
+      window.dispatchEvent(new CustomEvent("marblo:cli-auth-resolved"));
+    });
+    return () => {
+      window.electronAPI.off("agent:authResolved");
+    };
+  }, []);
+
   // Listen for agent:deleted events from bridge server → delete from Firestore
   useEffect(() => {
     window.electronAPI.on("agent:deleted", (data: unknown) => {

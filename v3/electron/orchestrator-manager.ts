@@ -17,7 +17,11 @@ import {
   CODEX_ORCH_REQUIRED_MCP_TOOLS,
 } from "./mcp-server/tool-surface";
 import { YOLO_FLAG } from "./telegram-channels";
-import { looksLikeLoginScreen } from "./harness-manager";
+import {
+  createLoginScreenBackstop,
+  modelToCliAuth,
+  probeCliAuth,
+} from "./harness-manager";
 import { maskConfigForLogging } from "./config-redaction";
 
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
@@ -1165,16 +1169,54 @@ export class OrchestratorManager {
         : baseInitialPrompt;
 
       let sent = false;
-      // Login-screen backstop: the orchestrator is always claude. If it boots
-      // into `claude login` (unauthenticated), suppress the boot prompt rather
-      // than typing it into the login menu (which navigates the menu and exits
+      // Login-screen backstop (claude orchestrator). If it boots into
+      // `claude login` (unauthenticated), suppress the boot prompt rather than
+      // typing it into the login menu (which navigates the menu and exits
       // Claude cleanly → dead PTY). checkSpawnAuthGate at the IPC layer
       // normally prevents this; this is the defense-in-depth backstop.
+      //
+      // ★ agent-manager 와 **같은 조정기**를 쓴다: 사전 probe 가 인증됨이었으면
+      // 패턴 1회 매칭으로 즉시 래치하지 않고 grace 창 동안 readiness 를 기다리고,
+      // 발화한 뒤라도 readiness 에 도달하면 철회한다. 오케 부팅은 blind fallback 이
+      // 10s 라 grace(7s)가 그 안에서 끝난다.
       let authBlocked = false;
+      const orchCliAuthModel =
+        launchConfig.model === "claude" ? modelToCliAuth("claude") : null;
+      const loginBackstop = createLoginScreenBackstop({
+        hasProbe: orchCliAuthModel !== null,
+        onGrace: (graceMs) => {
+          console.warn(
+            `[Orchestrator:${this.kind}] Login-screen pattern matched but the ` +
+              `pre-spawn probe said authenticated — holding ${graceMs}ms for readiness.`,
+          );
+        },
+        onNeedsAuth: (reason) => {
+          if (sent) return;
+          authBlocked = true;
+          console.error(
+            `[Orchestrator:${this.kind}] Login prompt confirmed (${reason}) — ` +
+              "suppressing boot prompt (claude needs auth: run `claude login`).",
+          );
+          this.setStatus("error");
+        },
+        onResolved: () => {
+          authBlocked = false;
+          console.warn(
+            `[Orchestrator:${this.kind}] Readiness reached after a login-screen ` +
+              "match — retracting the auth block (transient notice, not a login screen).",
+          );
+        },
+      });
+      if (orchCliAuthModel) {
+        probeCliAuth(orchCliAuthModel)
+          .then((r) => loginBackstop.setPreProbeAuthenticated(r.authenticated))
+          .catch(() => loginBackstop.setPreProbeAuthenticated(false));
+      }
       const sendPrompt = () => {
         if (sent || authBlocked) return;
         if (this.session?.ptySessionId !== ptySessionId) return;
         sent = true;
+        loginBackstop.dispose();
         this.ptyManager.writeAndSubmit(ptySessionId, initialPrompt);
         this.setStatus("running");
         // 부팅 프롬프트의 제출 사이클(text→150ms→CR+재시도 ~2s)이 끝난 뒤에야
@@ -1200,26 +1242,19 @@ export class OrchestratorManager {
         /esc to interrupt/i,
       ];
       this.ptyManager.onData(ptySessionId, (data) => {
-        if (sent || authBlocked) return;
+        if (sent) return;
         outputBuffer += data;
         if (outputBuffer.length > 4096)
           outputBuffer = outputBuffer.slice(-4096);
         // Login-screen backstop — never inject the boot prompt into a
         // `claude login` menu; surface an error the UI can act on instead.
-        if (
-          launchConfig.model === "claude" &&
-          looksLikeLoginScreen(outputBuffer)
-        ) {
-          authBlocked = true;
-          console.error(
-            "[Orchestrator] Login prompt detected — suppressing boot prompt " +
-              "(claude needs auth: run `claude login`).",
-          );
-          this.setStatus("error");
-          return;
-        }
+        // readiness 는 blocked 상태에서도 계속 본다(철회 신호).
+        if (launchConfig.model === "claude")
+          loginBackstop.observe(outputBuffer);
         for (const pattern of readinessPatterns) {
           if (pattern.test(outputBuffer)) {
+            loginBackstop.noteReadiness();
+            if (authBlocked) return;
             // Wait for the input prompt to fully render before sending.
             setTimeout(sendPrompt, launchConfig.model === "gpt" ? 250 : 1500);
             return;

@@ -218,6 +218,17 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
     return () => window.removeEventListener("marblo:open-cli-setup", onOpen);
   }, [probeAll, refreshVersions]);
 
+  // Retraction — main 의 로그인-화면 백스톱이 스스로 오탐을 확정했을 때
+  // (`agent:authResolved` → Layout → 이 이벤트). 사용자가 아무것도 안 했는데 떠 있던
+  // 안내이므로 **사용자 결정(dismiss)이 아닌 close 로** 닫는다: 영구 dismissal 을
+  // 기록하면 진짜 미인증일 때 안내가 안 뜨게 된다.
+  useEffect(() => {
+    const onResolved = () => hRef.current.close?.();
+    window.addEventListener("marblo:cli-auth-resolved", onResolved);
+    return () =>
+      window.removeEventListener("marblo:cli-auth-resolved", onResolved);
+  }, []);
+
   // Auto re-check while a sign-in is running in a terminal: poll the auth probe
   // and re-check when the window regains focus (user returns from the browser
   // OAuth flow). As soon as the required set is authenticated we stop.

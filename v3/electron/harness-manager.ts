@@ -1314,10 +1314,7 @@ export const LOGIN_SCREEN_PATTERNS: RegExp[] = [
   /Claude account with subscription/i, // claude login option
   /Anthropic Console account/i, // claude login option
   /Grok Build.*(login|auth)/i, // grok first-run auth
-  /Log ?in (with|to) (your )?(Grok|xAI|X account)/i, // grok login
   /Sign in with (Grok|xAI|X)/i, // grok browser auth
-  /You are not authenticated\.?/i, // grok auth required (mid-session expiry)
-  /Browser OIDC/i, // grok login method docs/flow wording
   // Antigravity (agy) / gemini OAuth flow — the CLI blocks on a browser
   // sign-in spinner. Distinctive to the auth handshake, so it won't trip on
   // ordinary boot output. Lets the readiness backstop suppress blind typing
@@ -1327,7 +1324,195 @@ export const LOGIN_SCREEN_PATTERNS: RegExp[] = [
   /How would you like to authenticate/i, // gemini auth-type dialog
 ];
 
+/**
+ * ★약한 신호 — 로그인 '화면'이 아니라 인증 '안내/전이'에서도 지나가듯 뜨는 문구들.
+ *
+ * grok 부팅이 대표 사례다: **정상 인증된** grok 도 부팅 중 인증 방법 안내로
+ * `Browser OIDC` 를 뱉고, 토큰을 갱신하는 순간 `You are not authenticated` 를 한 번
+ * 출력한 뒤 곧바로 준비 상태로 넘어간다. 이 문구들만으로 즉시 needsAuth 를 때리면
+ * 정상 사용자에게 매 스폰 인증 팝업이 뜬다(이 티켓의 진범).
+ *
+ * 그래서 이 패턴들은 **혼자서는 판정하지 못한다** — 같은 버퍼에 로그인 '메뉴' 맥락
+ * (선택지 나열·"Select login method"·화살표 안내 등)이 함께 있을 때만 로그인 화면으로
+ * 친다. 맥락 없이 스쳐 지나간 매칭은 백스톱의 grace 창(createLoginScreenBackstop)이
+ * readiness 도달 여부로 최종 판정한다.
+ */
+export const AMBIGUOUS_LOGIN_PATTERNS: RegExp[] = [
+  /You are not authenticated\.?/i, // grok: 토큰 갱신 중에도 스쳐 지나간다
+  /Browser OIDC/i, // grok: 인증 '방법' 안내 문구
+  /Log ?in (with|to) (your )?(Grok|xAI|X account)/i, // grok login 안내문
+];
+
+/**
+ * 로그인 '메뉴' 맥락 — 사용자의 선택을 기다리며 CLI 가 **멈춰 있다**는 신호.
+ * 약한 신호를 확정으로 승격시키는 조건이며, 준비된 CLI 의 입력 프롬프트에는
+ * 나타나지 않는 표현만 담는다.
+ */
+const LOGIN_MENU_CONTEXT_PATTERNS: RegExp[] = [
+  /select (a |an |your )?(login|sign[- ]?in|auth\w*)/i,
+  /(login|sign[- ]?in|auth\w*) method/i,
+  /use (the )?arrow keys/i,
+  /press enter to (continue|select|sign)/i,
+  // 번호가 매겨진 선택지가 둘 이상 — 메뉴가 열려 있다는 뜻.
+  /^\s*\d[.)]\s+\S.*\r?\n(?:.*\r?\n){0,3}?\s*\d[.)]\s+\S/m,
+];
+
+/** 이 버퍼가 선택을 기다리는 로그인 **메뉴**로 보이는가. */
+export function looksLikeLoginMenu(buffer: string): boolean {
+  return LOGIN_MENU_CONTEXT_PATTERNS.some((re) => re.test(buffer));
+}
+
 /** Whether freshly-booted CLI output looks like an interactive login prompt. */
 export function looksLikeLoginScreen(buffer: string): boolean {
-  return LOGIN_SCREEN_PATTERNS.some((re) => re.test(buffer));
+  if (LOGIN_SCREEN_PATTERNS.some((re) => re.test(buffer))) return true;
+  // 약한 신호는 로그인 메뉴 맥락이 함께 있을 때만 확정으로 친다.
+  return (
+    AMBIGUOUS_LOGIN_PATTERNS.some((re) => re.test(buffer)) &&
+    looksLikeLoginMenu(buffer)
+  );
+}
+
+// ── Login-screen backstop reconciler ───────────────────────────────
+//
+// 종전 백스톱은 **패턴 1회 매칭 = 즉시 needsAuth 래치**였다. readiness 도달 여부도,
+// 스폰 직전 probe 결과도 다시 보지 않았기 때문에 정상 인증된 grok 이 부팅 중 뱉는
+// 인증 안내 문구 하나로 인증 팝업이 떴고, 그 래치가 프롬프트 주입까지 막았다.
+//
+// 이 조정기(reconciler)는 같은 매칭을 **두 축**으로 다시 본다:
+//
+//   ① 사전 probe   — 스폰 직전 `probeCliAuth` 가 authenticated:true 라고 했나?
+//                    그렇다면 이 매칭은 오탐일 가능성이 크므로 grace 창을 연다.
+//                    false(또는 probe 자체가 없는 모델)면 종전대로 즉시 발화한다
+//                    — 진짜 미인증 회귀 가드.
+//   ② readiness   — grace 창 안에 CLI 가 준비 상태에 도달하면 그 매칭은 transient
+//                    였다고 확정하고 발화하지 않는다. grace 가 끝났는데도 로그인
+//                    화면이 **여전히** 버퍼에 남아 있을 때만 발화한다("지속/반복").
+//
+// 발화한 뒤에라도 readiness 에 도달하면 `onResolved` 로 **철회**한다(agent-manager 가
+// `agent:authResolved` 로 렌더러에 알려 팝업을 닫는다).
+export type LoginBackstopFireReason =
+  | "no-probe" // 프로브가 없는 모델(agy 등) — 종전 동작 유지
+  | "probe-unauthenticated" // 사전 probe 가 미인증이라고 답했다
+  | "grace-expired"; // probe=authed 였지만 grace 안에 readiness 없음 + 로그인 화면 지속
+
+/** grace 창 기본값. 에이전트 blind-fallback(10s)보다 **짧아야** 한다. */
+export const LOGIN_BACKSTOP_GRACE_MS = 7_000;
+
+export interface LoginScreenBackstopOptions {
+  /**
+   * 이 모델에 사전 auth probe 가 존재하나(claude/gpt/grok=true, agy 처럼 프로브가
+   * 없는 모델=false). false 면 grace 없이 종전대로 즉시 발화한다.
+   */
+  hasProbe: boolean;
+  /** probe 결과. 아직 도착 전이면 null — 도착 전 매칭은 grace 로 취급한다. */
+  preProbeAuthenticated?: boolean | null;
+  graceMs?: number;
+  /** 실제 needsAuth 발화. */
+  onNeedsAuth: (reason: LoginBackstopFireReason) => void;
+  /** 발화했던 판정을 철회(오탐 확정). */
+  onResolved?: () => void;
+  /** 발화를 grace 로 미룬 순간(관측용). */
+  onGrace?: (graceMs: number) => void;
+}
+
+/** observe() 가 돌려주는 현재 판정. */
+export type LoginBackstopState =
+  | "clear" // 로그인 신호 없음 — 평소 부팅 경로
+  | "hold" // 로그인 신호는 봤지만 grace 로 판정 보류 — 주입성 키 입력은 금지
+  | "blocked"; // needsAuth 발화됨
+
+export interface LoginScreenBackstop {
+  /** 새 PTY 버퍼를 평가한다. 호출자는 "clear" 가 아니면 대화형 키 입력을 멈춘다. */
+  observe(buffer: string): LoginBackstopState;
+  /** CLI 가 readiness 에 도달했다. @returns 발화했던 판정을 철회했으면 true. */
+  noteReadiness(): boolean;
+  /** 사전 probe 결과가 늦게 도착했을 때 주입. */
+  setPreProbeAuthenticated(authenticated: boolean): void;
+  /** 현재 판정(로그/테스트용). */
+  state(): LoginBackstopState;
+  /** 타이머 정리 — 프롬프트 전송/PTY 종료 시. */
+  dispose(): void;
+}
+
+export function createLoginScreenBackstop(
+  opts: LoginScreenBackstopOptions,
+): LoginScreenBackstop {
+  const graceMs = opts.graceMs ?? LOGIN_BACKSTOP_GRACE_MS;
+  let preProbe: boolean | null = opts.preProbeAuthenticated ?? null;
+  let fired = false;
+  let settled = false; // readiness 도달 — 더는 로그인 판정을 하지 않는다
+  let graceTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastBuffer = "";
+
+  const clearGrace = (): void => {
+    if (graceTimer) {
+      clearTimeout(graceTimer);
+      graceTimer = null;
+    }
+  };
+
+  const fire = (reason: LoginBackstopFireReason): void => {
+    if (fired || settled) return;
+    clearGrace();
+    fired = true;
+    opts.onNeedsAuth(reason);
+  };
+
+  const armGrace = (): void => {
+    if (graceTimer) return;
+    graceTimer = setTimeout(() => {
+      graceTimer = null;
+      // "지속/반복" 확인: grace 가 끝난 시점에도 로그인 화면이 여전히 보일 때만
+      // 발화한다. 스쳐 지나간 문구(버퍼에서 이미 밀려남)는 여기서 조용히 소멸하고,
+      // 호출자의 blind-fallback 이 종전대로 프롬프트를 넣는다.
+      if (looksLikeLoginScreen(lastBuffer)) fire("grace-expired");
+    }, graceMs);
+    opts.onGrace?.(graceMs);
+  };
+
+  return {
+    observe(buffer: string): LoginBackstopState {
+      lastBuffer = buffer;
+      if (settled) return "clear";
+      if (fired) return "blocked";
+      if (!looksLikeLoginScreen(buffer)) {
+        return graceTimer ? "hold" : "clear";
+      }
+      if (!opts.hasProbe) {
+        fire("no-probe");
+        return "blocked";
+      }
+      if (preProbe === false) {
+        fire("probe-unauthenticated");
+        return "blocked";
+      }
+      // preProbe === true(인증됨) 또는 null(아직 미도착) → 판정 보류.
+      armGrace();
+      return "hold";
+    },
+    noteReadiness(): boolean {
+      if (settled) return false;
+      settled = true;
+      clearGrace();
+      if (!fired) return false;
+      fired = false;
+      opts.onResolved?.();
+      return true;
+    },
+    setPreProbeAuthenticated(authenticated: boolean): void {
+      preProbe = authenticated;
+      // 보류 중인데 probe 가 "미인증"으로 답했다면 더 기다릴 이유가 없다.
+      if (!authenticated && graceTimer && looksLikeLoginScreen(lastBuffer)) {
+        fire("probe-unauthenticated");
+      }
+    },
+    state(): LoginBackstopState {
+      if (settled) return "clear";
+      if (fired) return "blocked";
+      return graceTimer ? "hold" : "clear";
+    },
+    dispose(): void {
+      clearGrace();
+    },
+  };
 }
