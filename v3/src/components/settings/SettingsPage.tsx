@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useWorkspaceModeStore } from "../../stores/workspaceModeStore";
+import { useBeginnerModeStore } from "../../stores/beginnerModeStore";
+import telemetry from "../../services/telemetryService";
 import { useProjectStore } from "../../stores/projectStore";
 import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import {
@@ -109,8 +111,8 @@ export function SettingsPage() {
               plan === "team"
                 ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
                 : plan === "pro"
-                ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
-                : "bg-gray-500/20 text-gray-400 border border-gray-500/30"
+                  ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                  : "bg-gray-500/20 text-gray-400 border border-gray-500/30"
             }`}
           >
             {plan.toUpperCase()} {t("header.planBadge.suffix")}
@@ -261,7 +263,67 @@ function ProfileSection() {
         </div>
       </div>
 
+      <BeginnerModeSection />
       <WorkspaceModeSection />
+    </div>
+  );
+}
+
+/**
+ * 비기너 모드 되돌리기 (설계 v3/docs/BEGINNER-MODE-DESIGN.md §7).
+ *
+ * 승격은 한 방향 문이 아니다 — 여기서 언제든 다시 큰 대화창 하나짜리 화면으로
+ * 갈 수 있다. 이 화면은 어드밴스드에서만 보이므로(비기너 셸엔 설정 탭이 없다)
+ * 토글의 의미는 항상 "비기너로 가기" 다.
+ */
+function BeginnerModeSection() {
+  const { t } = useTranslation();
+  const beginner = useBeginnerModeStore((s) => s.state) === "beginner";
+  const revertToBeginner = useBeginnerModeStore((s) => s.revertToBeginner);
+  const promote = useBeginnerModeStore((s) => s.promote);
+
+  return (
+    <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="mb-1 text-sm font-medium text-gray-200">
+            {t("beginner.settings.heading")}
+          </h3>
+          <p className="text-xs leading-relaxed text-gray-500">
+            {t("beginner.settings.body")}
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          data-testid="settings-beginner-toggle"
+          aria-checked={beginner}
+          aria-label={t("beginner.settings.heading")}
+          onClick={() => {
+            if (beginner) {
+              telemetry.beginnerPromoted("manual", true);
+              promote("manual");
+            } else {
+              revertToBeginner();
+            }
+          }}
+          className={`relative mt-0.5 h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+            beginner ? "bg-blue-600" : "bg-gray-600"
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+              beginner ? "translate-x-5" : "translate-x-0.5"
+            }`}
+          />
+        </button>
+      </div>
+      <p className="mt-2 text-xs font-medium text-gray-400">
+        {beginner ? t("beginner.settings.off") : t("beginner.settings.on")}
+      </p>
+      <p className="mt-1 text-xs text-gray-500">
+        {t("beginner.settings.restartHint")}
+      </p>
     </div>
   );
 }
@@ -525,7 +587,7 @@ function ModelPresetSection() {
             </option>
           ))}
           {!ORCHESTRATOR_HARNESS_OPTIONS.some(
-            (h) => h.value === orchestratorModel
+            (h) => h.value === orchestratorModel,
           ) && (
             <option value={orchestratorModel} disabled>
               {ORCHESTRATOR_ENV_MODEL.label}
@@ -534,10 +596,10 @@ function ModelPresetSection() {
         </select>
         <p className="mt-2 text-xs text-gray-500">
           {ORCHESTRATOR_HARNESS_OPTIONS.some(
-            (h) => h.value === orchestratorModel
+            (h) => h.value === orchestratorModel,
           )
             ? // 설명이 없는 하네스는 설명만 비운다 — 칸은 이미 서 있다.
-              ORCHESTRATOR_HARNESS_DESC[orchestratorModel] ?? ""
+              (ORCHESTRATOR_HARNESS_DESC[orchestratorModel] ?? "")
             : ORCHESTRATOR_ENV_MODEL.desc}
         </p>
         <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
@@ -627,7 +689,7 @@ function SubscriptionPlansSection() {
 
   const update = (i: number, patch: Partial<SubscriptionPlanEntry>) => {
     setPlans((prev) =>
-      prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p))
+      prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p)),
     );
   };
 

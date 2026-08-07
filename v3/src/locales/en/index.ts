@@ -39,6 +39,7 @@ import { workspace } from "./workspace";
 import { diffComment } from "./diffComment";
 import { collaboration } from "./collaboration";
 import { project } from "./project";
+import { beginner } from "./beginner";
 
 export const en: Record<MessageKey, string> = {
   ...header,
@@ -72,4 +73,5 @@ export const en: Record<MessageKey, string> = {
   ...diffComment,
   ...collaboration,
   ...project,
+  ...beginner,
 };

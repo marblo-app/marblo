@@ -41,6 +41,16 @@ export interface LaunchOptions {
    * 테스트하는 spec 만 false 로 끄면 된다.
    */
   bypassAuth?: boolean;
+  /**
+   * 비기너 셸(오케챗 하나만 있는 화면)로 부팅한다. 기본 false.
+   *
+   * ★기본이 false 인 이유: 프로필이 깨끗한 환경(CI 신규 러너)에서는
+   * `lib/beginnerMode` 판정이 비기너로 떨어져 탭·보드가 아예 렌더되지 않는다.
+   * 이 suite 의 spec 들은 어드밴스드 표면을 검증하므로 하네스가 기본으로
+   * 옵트아웃시켜 개발 머신(마커 있음)과 CI(마커 없음)의 결과를 일치시킨다.
+   * 설계: v3/docs/BEGINNER-MODE-DESIGN.md
+   */
+  beginnerShell?: boolean;
 }
 
 export interface LaunchedApp {
@@ -93,6 +103,25 @@ export async function launchMarblo(
   // 첫 번째 BrowserWindow = mainWindow 가 띄워질 때까지 대기.
   const page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");
+
+  // 비기너 셸 옵트아웃 (기본). 셸 분기는 스토어 모듈 평가 시점에 확정되므로
+  // 시드만으로는 이번 로드에 반영되지 않는다 — 한 번 리로드한다. 이미 어드밴스드로
+  // 굳은 프로필(개발 머신)에서는 값이 같아 아무 것도 달라지지 않는다.
+  if (!opts.beginnerShell) {
+    await page.evaluate(() => {
+      localStorage.setItem(
+        "marblo.beginnerMode",
+        JSON.stringify({
+          state: "advanced",
+          enteredAt: 0,
+          firstCompletionAt: 0,
+          promotionShownAt: 0,
+        }),
+      );
+    });
+    await page.reload();
+    await page.waitForLoadState("domcontentloaded");
+  }
 
   return {
     app,

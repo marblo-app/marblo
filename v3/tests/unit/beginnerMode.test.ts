@@ -1,0 +1,277 @@
+import { describe, expect, it } from "vitest";
+import {
+  PROMOTION_MIN_COMPLETED,
+  PROMOTION_MIN_DAYS,
+  STALL_THRESHOLD_MS,
+  parseBeginnerRecord,
+  resolveInitialBeginnerMode,
+  serializeBeginnerRecord,
+  shouldPromote,
+  summarizeBeginnerProgress,
+  type BeginnerModeRecord,
+  type PriorInstallMarkers,
+} from "../../src/lib/beginnerMode";
+
+const FRESH: PriorInstallMarkers = {
+  onboardingProgress: false,
+  workspaceTab: false,
+  workspaceModeFlag: false,
+  legacyGateDismissed: false,
+  storageUnavailable: false,
+};
+
+const RECORD: BeginnerModeRecord = {
+  state: "beginner",
+  enteredAt: 1_000,
+  firstCompletionAt: 0,
+  promotionShownAt: 0,
+};
+
+describe("resolveInitialBeginnerMode — 누가 비기너가 되는가", () => {
+  it("깨끗한 신규 설치만 비기너로 간다", () => {
+    expect(resolveInitialBeginnerMode(null, FRESH)).toBe("beginner");
+  });
+
+  // ★이 표가 깨지면 기존 유저의 보드가 사라진다. 마커 하나하나가 회귀 가드다.
+  const markerKeys = [
+    "onboardingProgress",
+    "workspaceTab",
+    "workspaceModeFlag",
+    "legacyGateDismissed",
+  ] as const;
+
+  for (const key of markerKeys) {
+    it(`${key} 마커가 있으면 기존 설치로 보고 advanced 를 유지한다`, () => {
+      expect(resolveInitialBeginnerMode(null, { ...FRESH, [key]: true })).toBe(
+        "advanced",
+      );
+    });
+  }
+
+  it("마커가 여러 개여도 advanced (OR 규칙)", () => {
+    expect(
+      resolveInitialBeginnerMode(null, {
+        ...FRESH,
+        onboardingProgress: true,
+        workspaceTab: true,
+      }),
+    ).toBe("advanced");
+  });
+
+  it("저장소를 못 읽으면(프라이빗 모드) 기존 경험을 유지한다", () => {
+    expect(
+      resolveInitialBeginnerMode(null, { ...FRESH, storageUnavailable: true }),
+    ).toBe("advanced");
+  });
+
+  it("저장된 결정이 항상 이긴다 — 마커가 뒤에 생겨도 모드가 흔들리지 않는다", () => {
+    expect(
+      resolveInitialBeginnerMode(RECORD, {
+        ...FRESH,
+        onboardingProgress: true,
+        workspaceTab: true,
+      }),
+    ).toBe("beginner");
+    expect(
+      resolveInitialBeginnerMode({ ...RECORD, state: "advanced" }, FRESH),
+    ).toBe("advanced");
+  });
+});
+
+describe("parseBeginnerRecord", () => {
+  it("round-trips", () => {
+    expect(parseBeginnerRecord(serializeBeginnerRecord(RECORD))).toEqual(
+      RECORD,
+    );
+  });
+
+  it("없음 / 깨진 JSON / 낯선 state 는 전부 null (→ 호출부가 재판정)", () => {
+    expect(parseBeginnerRecord(null)).toBeNull();
+    expect(parseBeginnerRecord("")).toBeNull();
+    expect(parseBeginnerRecord("{nope")).toBeNull();
+    expect(parseBeginnerRecord('{"state":"expert"}')).toBeNull();
+    expect(parseBeginnerRecord('"beginner"')).toBeNull();
+  });
+
+  it("망가진 타임스탬프는 0 으로 degrade 하되 state 는 살린다", () => {
+    expect(
+      parseBeginnerRecord(
+        '{"state":"beginner","enteredAt":"어제","promotionShownAt":-5}',
+      ),
+    ).toEqual({
+      state: "beginner",
+      enteredAt: 0,
+      firstCompletionAt: 0,
+      promotionShownAt: 0,
+    });
+  });
+});
+
+describe("shouldPromote — 승격 트리거", () => {
+  const none = { completedTasks: 0, mergedTasks: 0, elapsedMs: 0 };
+
+  it("아무 신호도 없으면 제안하지 않는다", () => {
+    expect(shouldPromote(none, false)).toBeNull();
+  });
+
+  it("완료 1~2건으로는 아직 이르다", () => {
+    expect(
+      shouldPromote(
+        { ...none, completedTasks: PROMOTION_MIN_COMPLETED - 1 },
+        false,
+      ),
+    ).toBeNull();
+  });
+
+  it("완료 N건이면 제안한다", () => {
+    expect(
+      shouldPromote(
+        { ...none, completedTasks: PROMOTION_MIN_COMPLETED },
+        false,
+      ),
+    ).toBe("completed");
+  });
+
+  it("첫 머지가 완료 건수보다 강한 신호다", () => {
+    expect(
+      shouldPromote({ completedTasks: 0, mergedTasks: 1, elapsedMs: 0 }, false),
+    ).toBe("merged");
+  });
+
+  it("완료가 없어도 사흘째면 제안한다", () => {
+    const threeDays = PROMOTION_MIN_DAYS * 24 * 60 * 60 * 1000;
+    expect(
+      shouldPromote({ ...none, elapsedMs: threeDays - 1 }, false),
+    ).toBeNull();
+    expect(shouldPromote({ ...none, elapsedMs: threeDays }, false)).toBe(
+      "days",
+    );
+  });
+
+  it("★한 번 띄웠으면 어떤 신호로도 다시 띄우지 않는다 (조르지 않는다)", () => {
+    expect(
+      shouldPromote(
+        { completedTasks: 99, mergedTasks: 9, elapsedMs: 9e9 },
+        true,
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("summarizeBeginnerProgress — ★S4 인라인 라이브", () => {
+  const base = {
+    sentAt: 0,
+    now: 100_000,
+    totalTasks: 0,
+    completedTasks: 0,
+    workingAgents: 0,
+  };
+
+  it("아무것도 안 보냈고 티켓도 없으면 스트립을 그리지 않는다", () => {
+    expect(summarizeBeginnerProgress(base).phase).toBe("idle");
+  });
+
+  it("보낸 직후엔 '읽는 중'", () => {
+    expect(
+      summarizeBeginnerProgress({ ...base, sentAt: 90_000, now: 100_000 })
+        .phase,
+    ).toBe("thinking");
+  });
+
+  it("★90초가 지나도 티켓이 없으면 막힘 안내를 띄운다", () => {
+    const view = summarizeBeginnerProgress({
+      ...base,
+      sentAt: 0 + 1,
+      now: 1 + STALL_THRESHOLD_MS,
+    });
+    expect(view.phase).toBe("stalled");
+    expect(view.showStallHelp).toBe(true);
+  });
+
+  it("경계 직전은 아직 '읽는 중' (막힘으로 성급히 넘기지 않는다)", () => {
+    const view = summarizeBeginnerProgress({
+      ...base,
+      sentAt: 1,
+      now: STALL_THRESHOLD_MS,
+    });
+    expect(view.phase).toBe("thinking");
+    expect(view.showStallHelp).toBe(false);
+  });
+
+  it("티켓이 생겼는데 아직 일하는 에이전트가 없으면 '만들었어요'", () => {
+    expect(
+      summarizeBeginnerProgress({ ...base, sentAt: 1, totalTasks: 3 }).phase,
+    ).toBe("planned");
+  });
+
+  it("에이전트가 일하면 '일하는 중'", () => {
+    expect(
+      summarizeBeginnerProgress({
+        ...base,
+        sentAt: 1,
+        totalTasks: 3,
+        workingAgents: 2,
+      }).phase,
+    ).toBe("working");
+  });
+
+  it("완료가 있고 일하는 에이전트가 없으면 '끝났어요'", () => {
+    expect(
+      summarizeBeginnerProgress({
+        ...base,
+        sentAt: 1,
+        totalTasks: 3,
+        completedTasks: 1,
+      }).phase,
+    ).toBe("completed");
+  });
+
+  it("★완료 뒤 새 작업이 돌면 '일하는 중'이 이긴다 (현재형이 더 정확하다)", () => {
+    expect(
+      summarizeBeginnerProgress({
+        ...base,
+        sentAt: 1,
+        totalTasks: 5,
+        completedTasks: 2,
+        workingAgents: 1,
+      }).phase,
+    ).toBe("working");
+  });
+
+  it("★두 번째 요청은 다시 '읽는 중'으로 내려간다 (단조 증가가 아니다)", () => {
+    // 앞선 요청으로 티켓이 생겼다가 전부 정리된 뒤 새 요청을 보낸 상태.
+    const view = summarizeBeginnerProgress({
+      sentAt: 500,
+      now: 1_000,
+      totalTasks: 0,
+      completedTasks: 0,
+      workingAgents: 0,
+    });
+    expect(view.phase).toBe("thinking");
+  });
+
+  it("보낸 적 없어도 티켓이 이미 있으면(재시작 등) 국면을 읽어 준다", () => {
+    const view = summarizeBeginnerProgress({
+      ...base,
+      totalTasks: 4,
+      completedTasks: 4,
+    });
+    expect(view.phase).toBe("completed");
+    expect(view.showStallHelp).toBe(false);
+  });
+
+  it("카운트는 그대로 통과시킨다", () => {
+    const view = summarizeBeginnerProgress({
+      sentAt: 1,
+      now: 2,
+      totalTasks: 7,
+      completedTasks: 3,
+      workingAgents: 2,
+    });
+    expect(view).toMatchObject({
+      totalTasks: 7,
+      completedTasks: 3,
+      workingAgents: 2,
+    });
+  });
+});

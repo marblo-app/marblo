@@ -67,7 +67,16 @@ export type TelemetryEvent =
   // 함께 flush 된다 — 끝내 로그인 안 한 방문자의 데모 이탈은 전송되지 않는다.
   | "onboarding:demo_started"
   | "onboarding:demo_completed"
-  | "onboarding:demo_cta_click";
+  | "onboarding:demo_cta_click"
+  // ── 비기너 모드 퍼널 (ticket qpOpVJCtK06mq6Qa2a1S, 설계 docs/BEGINNER-MODE-DESIGN.md) ──
+  // 활성화 진단 §S4 가 관측한 유일한 실 dead-end("첫 티켓 전달 성공 후 화면에서
+  // 아무 일도 안 일어남")를 고치는 셸의 퍼널. 기존 first_run→login_success 축
+  // 뒤에 붙어 beginner_entered → beginner_first_completion → beginner_promoted
+  // 로 이어진다. ★durationMs 를 클라가 계산해 싣는 이유는 진단 §3 — 서버
+  // timestamp 는 수신시각이라 단계 지연을 계산할 수 없기 때문이다.
+  | "onboarding:beginner_entered"
+  | "onboarding:beginner_first_completion"
+  | "onboarding:beginner_promoted";
 
 interface TelemetryPayload {
   event: TelemetryEvent;
@@ -690,6 +699,36 @@ export const telemetry = {
    *  유도된 시점. 이후 로그인 성공 시 CliSetupGate 위저드가 열린다. */
   demoCtaClick() {
     logTelemetry({ event: "onboarding:demo_cta_click", success: true });
+  },
+
+  // ── 비기너 모드 퍼널 (설계 docs/BEGINNER-MODE-DESIGN.md §8) ────────────
+  /** 비기너 셸 진입. reason = fresh_install(최초 판정) | settings(설정에서 복귀). */
+  beginnerEntered(reason: string) {
+    logTelemetry({
+      event: "onboarding:beginner_entered",
+      success: true,
+      metadata: { reason },
+    });
+  },
+
+  /** ★비기너 챗 안에서 첫 완료를 관측(설치당 1회). durationMs = 진입→첫완료.
+   *  서버 timestamp 로는 이 지연을 못 구한다(진단 §3) — 클라 계산값을 싣는다. */
+  beginnerFirstCompletion(durationMs: number) {
+    logTelemetry({
+      event: "onboarding:beginner_first_completion",
+      success: true,
+      durationMs,
+    });
+  },
+
+  /** 어드밴스드 모드로 승격. trigger = completed|merged|days|manual,
+   *  manual = 유저가 스스로 전환했나(모달 CTA 가 아니라 상단바/설정). */
+  beginnerPromoted(trigger: string, manual: boolean) {
+    logTelemetry({
+      event: "onboarding:beginner_promoted",
+      success: true,
+      metadata: { trigger, manual },
+    });
   },
 
   flush: flushTelemetry,

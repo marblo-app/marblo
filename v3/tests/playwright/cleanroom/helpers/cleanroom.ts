@@ -86,6 +86,18 @@ export interface CleanRoomScenario {
     installed: boolean;
     reason?: string;
   } | null;
+  /**
+   * 비기너 셸(오케챗 하나만 있는 화면)로 부팅한다. 기본 false.
+   *
+   * ★왜 기본이 false 인가: 클린룸은 정의상 "마커가 하나도 없는 새 설치" 라
+   * `lib/beginnerMode` 의 판정이 **비기너**로 떨어진다. 하지만 이 suite 의 기존
+   * spec 들은 어드밴스드 온보딩 표면(시작하기 탭·CLI 배너·레거시 모달 위저드)의
+   * 회귀 가드다 — 그 표면들은 지금도 살아 있고(기존 유저·승격한 유저의 경로),
+   * 검증 대상도 그대로다. 그래서 하네스가 기본으로 비기너를 옵트아웃시켜
+   * **기존 spec 의 의미를 보존**하고, 비기너 화면을 보고 싶은 spec 만 이 플래그를
+   * 켠다. 설계: v3/docs/BEGINNER-MODE-DESIGN.md
+   */
+  beginnerShell?: boolean;
 }
 
 export interface InjectedMessage {
@@ -428,6 +440,25 @@ export async function launchCleanRoom(
 
   const page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");
+
+  // 비기너 셸 옵트아웃 (기본). 셸 분기는 스토어의 모듈 평가 시점에 확정되므로
+  // 시드 뒤 한 번 리로드해야 반영된다 — switchToLegacyLayout 과 같은 패턴이다.
+  // `beginnerShell: true` 인 시나리오는 건드리지 않고 그대로 비기너로 부팅한다.
+  if (!scenario.beginnerShell) {
+    await page.evaluate(() => {
+      localStorage.setItem(
+        "marblo.beginnerMode",
+        JSON.stringify({
+          state: "advanced",
+          enteredAt: 0,
+          firstCompletionAt: 0,
+          promotionShownAt: 0,
+        }),
+      );
+    });
+    await page.reload();
+    await page.waitForLoadState("domcontentloaded");
+  }
 
   return {
     app,

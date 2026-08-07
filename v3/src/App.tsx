@@ -6,7 +6,9 @@ import { useAuth } from "./hooks/useAuth";
 import { LoginPage } from "./auth";
 import { Layout } from "./components/Layout";
 import { WorkspaceShell } from "./components/workspace/WorkspaceShell";
+import { BeginnerShell } from "./components/beginner/BeginnerShell";
 import { useWorkspaceModeStore } from "./stores/workspaceModeStore";
+import { useBeginnerModeStore } from "./stores/beginnerModeStore";
 import { DetachedLayout, type DetachedView } from "./components/DetachedLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BrandLoader } from "./components/BrandLoader";
@@ -242,6 +244,7 @@ function AppContent() {
   );
   const projects = useProjectStore((s) => s.projects);
   const workspaceMode = useWorkspaceModeStore((s) => s.enabled);
+  const beginnerMode = useBeginnerModeStore((s) => s.state) === "beginner";
 
   // Stable membership key: the projects array is a fresh reference on every
   // snapshot, so we key the KG-forwarding effect on the sorted project ids to
@@ -455,6 +458,14 @@ function AppContent() {
   const detachedView = resolveDetachedView();
   if (detachedView) {
     return <DetachedLayout view={detachedView} />;
+  }
+
+  // 비기너 모드 — 깨끗한 신규 설치만 여기로 온다(lib/beginnerMode 의 보수적
+  // 판정: 이전 사용 마커가 하나라도 있으면 advanced). 워크스페이스 셸 **위에**
+  // 얹히는 한 층이라, 승격하면 아래 분기를 그대로 통과해 기존 셸이 뜬다.
+  // detached 팝아웃은 위에서 먼저 걸린다 — 보조 창은 비기너 셸을 그릴 이유가 없다.
+  if (beginnerMode) {
+    return <BeginnerShell />;
   }
 
   // Opt-in Workspace shell (default OFF). When OFF this is exactly <Layout />
