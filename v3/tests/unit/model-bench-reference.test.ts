@@ -104,6 +104,16 @@ describe("model-bench-reference / 레지스트리 교차검증", () => {
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",
+      // ★env-swap / 네이티브 벤더(자동선택 후보 풀). 수치가 없으면 score:null 행으로라도
+      // 남겨야 "안 찾아봤다"와 "찾았는데 없다"가 갈린다 — MiniMax-M3 누락 회귀 가드.
+      "MiniMax-M3",
+      "MiniMax-M2.7",
+      "glm-5.2",
+      "glm-4.7",
+      "k3",
+      "k3-256k",
+      "kimi-for-coding",
+      "grok-4.5",
     ];
     for (const id of targets) {
       const rows = benchRowsForModel(id);
@@ -111,6 +121,16 @@ describe("model-bench-reference / 레지스트리 교차검증", () => {
       // 대상 모델은 전부 레지스트리에 실재해야 한다(오타 가드).
       expect(MODEL_REGISTRY.some((m) => m.id === id)).toBe(true);
     }
+  });
+
+  it("★MiniMax-M3 은 SWE-bench Verified 1차 출처 점수를 갖는다(자동선택 bench 축)", () => {
+    const verified = benchRowsForModel("MiniMax-M3").filter(
+      (r) => r.benchmark === "swe-bench-verified" && r.score !== null,
+    );
+    expect(verified.length).toBeGreaterThan(0);
+    expect(verified[0].score).toBe(80.5);
+    expect(verified[0].source).toMatch(/huggingface\.co\/MiniMaxAI\/MiniMax-M3/);
+    expect(verified[0].sourceKind).toBe("model-vendor");
   });
 
   it("표 안에 레지스트리 밖 registry 행이 하나도 없다", () => {

@@ -690,3 +690,114 @@ describe("관측성 — 근거가 문자열로 남는다", () => {
     expect(p.reason).toContain("claude-opus-5 → claude-sonnet-5");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// ★벤더모델 후보풀 · SWE/단가/능력 경로 감사 가드 (5k94HAnWJsYc9qYC2IwD)
+//
+// 경로 추적(후보가 어디서 오고 어디서 빠지나):
+//   MODEL_REGISTRY(active)
+//     → model-ladder CLAUDE_RUNGS / GPT_RUNGS / GROK_RUNGS
+//     → autoCandidates(harness, tier)  // 승인게이트 max/ultra 제외
+//     → selectAutoModel 의 modelAvailable(vendorEnvReadiness)  // 키 없으면 제외
+//     → 점수: fit(사다리거리) + cost(단가 log2) + bench|capability + kg + diversity
+//   antigravity/gemini: 사다리 없음 → selectAutoModel=null (레지스트리 행 없음)
+//   guidance 는 modelGuidanceStatic() ← registry+bench-reference 조인(사실 0 추가)
+// ─────────────────────────────────────────────────────────────────────────
+describe("★벤더모델 후보풀·SWE/능력 경로(5k94 감사 가드)", () => {
+  const VENDOR_AUTOSELECT_IDS = [
+    "MiniMax-M3",
+    "MiniMax-M2.7",
+    "glm-5.2",
+    "glm-4.7",
+    "k3",
+    "k3-256k",
+    "kimi-for-coding",
+    "grok-4.5",
+  ] as const;
+
+  it("벤더 활성 모델이 구조적으로 autoCandidates 후보풀에 있다", () => {
+    const pool = new Set([
+      ...autoCandidates("claude", "standard").candidates.map((c) => c.model),
+      ...autoCandidates("gpt", "standard").candidates.map((c) => c.model),
+      ...autoCandidates("grok", "standard").candidates.map((c) => c.model),
+    ]);
+    for (const id of VENDOR_AUTOSELECT_IDS) {
+      expect(pool.has(id), `${id} 가 후보풀에서 빠졌다`).toBe(true);
+    }
+  });
+
+  it("modelGuidance 가 벤더 모델을 전부 서빙한다(단가·능력·벤치|null)", () => {
+    for (const id of VENDOR_AUTOSELECT_IDS) {
+      const g = modelGuidance(id);
+      expect(g, `${id} guidance 없음`).toBeDefined();
+      expect(g!.capability).toMatch(/^(cheap|mid|top|frontier)$/);
+      expect(typeof g!.costIndex).toBe("number");
+      // 벤치가 없으면 benchScore 를 0 으로 꾸며내지 않는다(undefined).
+      if (g!.benchScore !== undefined) {
+        expect(typeof g!.benchScore).toBe("number");
+        expect(g!.benchmark).toBeTruthy();
+      } else {
+        expect(g!.benchmark).toBeUndefined();
+      }
+    }
+  });
+
+  it("★MiniMax-M3 guidance 는 SWE-bench Verified 80.5 를 대표로 쓴다", () => {
+    const g = modelGuidance("MiniMax-M3")!;
+    expect(g.benchScore).toBe(80.5);
+    expect(g.benchmark).toBe("swe-bench-verified");
+    expect(g.capability).toBe("top");
+  });
+
+  it("★SWE 비교 가능 시 MiniMax-M3 score 에 bench 성분이 실제로 움직인다", () => {
+    // standard 진입칸 opus5 도 Verified 를 대표로 쓰므로 같은 벤치끼리 감산된다.
+    const p = plan("claude", "standard")!;
+    const m3 = p.scores.find((s) => s.candidate.model === "MiniMax-M3");
+    expect(m3, "MiniMax-M3 가 scores 에 없다").toBeDefined();
+    // opus5 Verified ≫ M3 80.5 이므로 M3 의 bench 는 음수(진입 대비 열세).
+    expect(m3!.bench).toBeLessThan(0);
+    // 비교 가능 벤치가 있으면 capability 폴백은 0(이중계상 금지).
+    expect(m3!.capability).toBe(0);
+    // 구독 쿼터가 넉넉하면 effective 단가≈0 이라 env-swap cost 는 음수(구독 대비 비쌈).
+    // 쿼터가 마르면 시장가 우위가 살아 cost 가 양수로 뒤집힌다 — 단가 축이 실제로 산다.
+    expect(m3!.cost).toBeLessThan(0);
+    const exhausted = plan("claude", "standard", { budgetUsedPercent: 95 })!;
+    const m3Low = exhausted.scores.find((s) => s.candidate.model === "MiniMax-M3");
+    expect(m3Low!.cost).toBeGreaterThan(0);
+    // bench 축은 쿼터와 무관 — 같은 음수 방향 유지.
+    expect(m3Low!.bench).toBeLessThan(0);
+  });
+
+  it("★벤치 없는 Kimi 는 capability 폴백으로만 능력 축이 움직인다", () => {
+    // k3/kimi-for-coding 은 score:null 행만 있다 → guidance.benchScore undefined.
+    expect(modelGuidance("kimi-for-coding")!.benchScore).toBeUndefined();
+    expect(modelGuidance("k3")!.benchScore).toBeUndefined();
+
+    const p = plan("claude", "standard")!;
+    const kimi = p.scores.find((s) => s.candidate.model === "kimi-for-coding");
+    const k3 = p.scores.find((s) => s.candidate.model === "k3");
+    expect(kimi).toBeDefined();
+    expect(k3).toBeDefined();
+    // 벤치 비교 불가 → bench=0, capability 는 등급차(mid vs top entry)로만.
+    expect(kimi!.bench).toBe(0);
+    expect(k3!.bench).toBe(0);
+    // entry=opus5(top). kimi mid → 음수, k3 top → 0.
+    expect(kimi!.capability).toBeLessThan(0);
+    expect(k3!.capability).toBe(0);
+  });
+
+  it("antigravity 는 레지스트리·사다리 없음 → 후보 0 · 계획 null", () => {
+    const { candidates } = autoCandidates("antigravity", "standard");
+    expect(candidates).toEqual([]);
+    expect(plan("antigravity", "standard")).toBeNull();
+  });
+
+  it("Grok 은 단일 칸이지만 계획이 나와 modelKey=grok-4.5(그래프 셀 일치)", () => {
+    const p = plan("grok", "standard")!;
+    expect(p.model).toBe("grok-4.5");
+    expect(p.modelKey).toBe("grok-4.5");
+    expect(p.mode).toBe("single");
+    expect(modelGuidance("grok-4.5")!.benchmark).toBe("swe-bench-pro");
+    expect(modelGuidance("grok-4.5")!.benchScore).toBe(64.7);
+  });
+});
