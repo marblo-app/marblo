@@ -12,7 +12,12 @@ import CouponInput from "@/components/CouponInput";
 import { couponDiscountAmount } from "@/lib/coupon";
 import { lectures } from "@/data/lectures";
 import { trackBeginCheckout, trackViewItem, trackAddPaymentInfo } from "@/lib/gtag";
-import { ArrowLeft, Loader2, AlertCircle, ShoppingCart } from "lucide-react";
+import {
+  mapPaymentError,
+  shouldShowTestCardHint,
+  type PaymentErrorTone,
+} from "@/lib/paymentErrors";
+import { ArrowLeft, Loader2, AlertCircle, ShoppingCart, RotateCcw, Info } from "lucide-react";
 
 type PaymentProvider = "toss" | "portone";
 
@@ -96,6 +101,10 @@ export default function CheckoutPage() {
   const [checkoutEmail, setCheckoutEmail] = useState("");
   const [checkoutEmailTouched, setCheckoutEmailTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** error UI tone: soft cancel vs hard fail vs network retry */
+  const [errorTone, setErrorTone] = useState<PaymentErrorTone>("error");
+  /** SDK preload 실패 시 재시도 CTA 노출 */
+  const [sdkLoadFailed, setSdkLoadFailed] = useState(false);
   /** 첫청구 실패(빌링키는 있음) — retryFirstCharge 노출 */
   const [canRetryFirstCharge, setCanRetryFirstCharge] = useState(false);
 
@@ -208,11 +217,42 @@ export default function CheckoutPage() {
     return window.PortOne;
   }, [t]);
 
+  const preloadPaymentSDK = useCallback(async () => {
+    setSdkLoadFailed(false);
+    setSdkReady(false);
+    setError(null);
+    try {
+      if (paymentProvider === "portone") {
+        // Drop a broken script tag so retry can re-insert a fresh one.
+        if (!window.PortOne) {
+          document
+            .querySelectorAll(
+              'script[src="https://cdn.portone.io/v2/browser-sdk.js"]',
+            )
+            .forEach((el) => el.remove());
+        }
+        await loadPortOneSDK();
+      } else {
+        const { loadTossPayments } =
+          await import("@tosspayments/tosspayments-sdk");
+        await loadTossPayments(process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || "");
+      }
+      setSdkReady(true);
+      setSdkLoadFailed(false);
+    } catch (err) {
+      console.error("Payment SDK preload error:", err);
+      setSdkReady(false);
+      setSdkLoadFailed(true);
+      setErrorTone("network");
+      setError(t("sdkLoadError"));
+    }
+  }, [paymentProvider, loadPortOneSDK, t]);
+
   // Pre-load selected payment SDK
   useEffect(() => {
     if (!user || !isValid) return;
     let cancelled = false;
-    const preload = async () => {
+    (async () => {
       try {
         if (paymentProvider === "portone") {
           await loadPortOneSDK();
@@ -221,13 +261,20 @@ export default function CheckoutPage() {
             await import("@tosspayments/tosspayments-sdk");
           await loadTossPayments(process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || "");
         }
-        if (!cancelled) setSdkReady(true);
+        if (!cancelled) {
+          setSdkReady(true);
+          setSdkLoadFailed(false);
+        }
       } catch (err) {
         console.error("Payment SDK preload error:", err);
-        if (!cancelled) setError(t("sdkLoadError"));
+        if (!cancelled) {
+          setSdkReady(false);
+          setSdkLoadFailed(true);
+          setErrorTone("network");
+          setError(t("sdkLoadError"));
+        }
       }
-    };
-    preload();
+    })();
     return () => {
       cancelled = true;
     };
@@ -293,23 +340,19 @@ export default function CheckoutPage() {
     }
   };
 
-  const mapPaymentError = (err: unknown): string => {
-    const message =
-      err && typeof err === "object" && "message" in err
-        ? String((err as { message?: string }).message || "")
-        : err instanceof Error
-          ? err.message
-          : "";
-    if (message.includes("already_subscribed")) return t("alreadySubscribed");
-    if (message.includes("first_charge_failed")) return t("firstChargeFailed");
-    if (message.includes("payment_in_progress")) return t("paymentInProgress");
-    return message || t("paymentError");
+  const applyMappedError = (err: unknown) => {
+    const mapped = mapPaymentError(err);
+    setErrorTone(mapped.tone);
+    setError(t(mapped.key));
+    setCanRetryFirstCharge(mapped.canRetryFirstCharge);
+    return mapped;
   };
 
   const handleRetryFirstCharge = async () => {
     if (!user) return;
     setLoading(true);
     setError(null);
+    setErrorTone("error");
     try {
       const functions = getFunctions(app, "us-central1");
       const retry = httpsCallable(functions, "retryFirstCharge");
@@ -321,11 +364,7 @@ export default function CheckoutPage() {
       );
     } catch (err: unknown) {
       console.error("retryFirstCharge error:", err);
-      const msg = mapPaymentError(err);
-      setError(msg);
-      if (!String(msg).includes(t("firstChargeFailed"))) {
-        setCanRetryFirstCharge(false);
-      }
+      applyMappedError(err);
     } finally {
       setLoading(false);
     }
@@ -448,7 +487,12 @@ export default function CheckoutPage() {
             redirectUrl: `${window.location.origin}/${locale}/checkout/success?provider=portone&type=lecture&slug=${encodeURIComponent(lectureSlug)}&paymentId=${encodeURIComponent(intent.paymentId)}&plan=${safePlan}&billing=${billing}&amount=${intent.amount}`,
             customer,
           });
-          if (response.code) throw new Error(response.message || response.code);
+          if (response.code) {
+            throw Object.assign(
+              new Error(response.message || response.code),
+              { code: response.code },
+            );
+          }
           const complete = httpsCallable(functions, "completePortOnePayment");
           await complete({
             paymentId: response.paymentId || intent.paymentId,
@@ -468,7 +512,12 @@ export default function CheckoutPage() {
             issueName: `Marblo ${itemName} 구독`,
             customer,
           });
-          if (response.code) throw new Error(response.message || response.code);
+          if (response.code) {
+            throw Object.assign(
+              new Error(response.message || response.code),
+              { code: response.code },
+            );
+          }
           if (!response.billingKey) throw new Error(t("paymentError"));
           const complete = httpsCallable(functions, "completePortOneBillingKey");
           await complete({
@@ -525,27 +574,13 @@ export default function CheckoutPage() {
       }
     } catch (err: unknown) {
       console.error("Payment error:", err);
-      const message = mapPaymentError(err);
-      setError(message);
-      if (
-        message === t("firstChargeFailed") ||
-        (err &&
-          typeof err === "object" &&
-          "message" in err &&
-          String((err as { message?: string }).message || "").includes(
-            "first_charge_failed",
-          ))
-      ) {
-        setCanRetryFirstCharge(true);
-      }
-      if (message === t("alreadySubscribed")) {
-        releasePaymentLock();
+      const mapped = applyMappedError(err);
+      releasePaymentLock();
+      if (mapped.alreadySubscribed) {
         // 이미 구독 중 — 내 구독 페이지로 안내(잠깐 메시지 후 이동)
         setTimeout(() => {
           router.push(`/${locale}/my/subscription`);
         }, 1500);
-      } else {
-        releasePaymentLock();
       }
     } finally {
       setLoading(false);
@@ -611,20 +646,54 @@ export default function CheckoutPage() {
           </div>
 
           {/* SDK loading indicator */}
-          {!sdkReady && !error && (
+          {!sdkReady && !error && !sdkLoadFailed && (
             <div className="flex items-center gap-3 text-zinc-400 mb-6 p-3 bg-zinc-800/50 rounded-lg">
               <Loader2 className="w-4 h-4 animate-spin" />
               <span className="text-sm">{t("loading")}</span>
             </div>
           )}
 
-          {/* Error message */}
+          {/* Dev/staging: test card / unsupported issuer hint */}
+          {shouldShowTestCardHint() && (
+            <div className="flex items-start gap-3 text-amber-200/90 mb-6 p-4 bg-amber-950/25 border border-amber-800/40 rounded-lg">
+              <Info className="w-5 h-5 mt-0.5 shrink-0 text-amber-400" />
+              <div className="text-sm space-y-1">
+                <p className="font-medium text-amber-100">
+                  {t("testCardHintTitle")}
+                </p>
+                <p className="text-amber-200/80 leading-relaxed">
+                  {t("testCardHintBody")}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Error / soft-cancel / network message */}
           {error && (
-            <div className="flex flex-col gap-3 text-red-400 mb-6 p-4 bg-red-950/30 border border-red-900/50 rounded-lg">
+            <div
+              className={
+                errorTone === "soft"
+                  ? "flex flex-col gap-3 text-zinc-200 mb-6 p-4 bg-zinc-800/60 border border-zinc-600/50 rounded-lg"
+                  : errorTone === "network"
+                    ? "flex flex-col gap-3 text-amber-200 mb-6 p-4 bg-amber-950/30 border border-amber-900/40 rounded-lg"
+                    : "flex flex-col gap-3 text-red-400 mb-6 p-4 bg-red-950/30 border border-red-900/50 rounded-lg"
+              }
+              role="alert"
+            >
               <div className="flex items-start gap-3">
                 <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
                 <p className="text-sm">{error}</p>
               </div>
+              {sdkLoadFailed && (
+                <button
+                  type="button"
+                  onClick={() => void preloadPaymentSDK()}
+                  className="self-start ml-8 inline-flex items-center gap-1.5 text-sm font-medium text-indigo-300 hover:text-indigo-200"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  {t("sdkReload")}
+                </button>
+              )}
               {canRetryFirstCharge && (
                 <button
                   type="button"

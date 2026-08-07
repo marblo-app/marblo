@@ -10,6 +10,7 @@ import { httpsCallable, getFunctions } from "firebase/functions";
 import app, { auth, db } from "@/lib/firebase";
 import { lectures } from "@/data/lectures";
 import { trackPurchase } from "@/lib/gtag";
+import { mapPaymentError } from "@/lib/paymentErrors";
 import {
   Check,
   Loader2,
@@ -375,8 +376,9 @@ export default function CheckoutSuccessPage() {
         }
       } catch (err) {
         console.error("Confirmation error:", err);
-        const message = err instanceof Error ? err.message : t("paymentError");
-        setErrorMsg(message);
+        // Map HttpsError / PG codes to locale strings — never dump payment_not_paid etc.
+        const mapped = mapPaymentError(err);
+        setErrorMsg(t(mapped.key));
         setState("error");
       }
     };
