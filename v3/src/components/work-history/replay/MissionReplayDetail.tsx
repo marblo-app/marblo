@@ -29,7 +29,7 @@ import type { MissionReplay } from "../../../types/missionReplay";
 import { ReplayCast } from "./ReplayCast";
 import { ReplayHeadline } from "./ReplayHeadline";
 import { ReplayStatsGrid, countHumanInterventions } from "./ReplayStatsGrid";
-import { ReplayTimeline } from "./ReplayTimeline";
+import type { ReplayShareFormat } from "./ReplayShareFlow";
 import { ReplayShareFlow } from "./ReplayShareFlow";
 
 function Panel({ children }: { children: React.ReactNode }) {
@@ -140,7 +140,7 @@ export interface MissionReplayDetailViewProps {
   state: MissionReplayState;
   onBack: () => void;
   onReload: () => void;
-  onShare?: () => void;
+  onShare?: (format: ReplayShareFormat) => void;
   t: TFunction;
 }
 
@@ -165,7 +165,7 @@ export function MissionReplayDetailView({
       {onShare && state.status === "ready" && (
         <button
           type="button"
-          onClick={onShare}
+          onClick={() => onShare("link")}
           className="rounded border border-violet-500/50 px-2 py-1 text-xs text-violet-200 transition hover:bg-violet-500/10"
         >
           공유하기
@@ -221,7 +221,6 @@ export function MissionReplayDetailView({
         t={t}
       />
       <ReplayStatsGrid replay={replay} t={t} />
-      <ReplayTimeline replay={replay} t={t} />
       <ReplayOutcome replay={replay} t={t} />
       <ReplayCast cast={replay.cast} t={t} />
     </div>
@@ -246,6 +245,7 @@ export function MissionReplayDetail({
   const { user } = useAuth();
   const { canMergeInProject } = useMergePermission();
   const [shareOpen, setShareOpen] = useState(false);
+  const [shareFormat, setShareFormat] = useState<ReplayShareFormat | undefined>(undefined);
   const { state, reload } = useMissionReplay(missionId, {
     ...options,
     projectId,
@@ -256,7 +256,10 @@ export function MissionReplayDetail({
         state={state}
         onBack={onBack}
         onReload={reload}
-        onShare={() => setShareOpen(true)}
+        onShare={(format) => {
+          setShareOpen(true);
+          setShareFormat(format);
+        }}
         t={t}
       />
       {shareOpen && state.status === "ready" && (
@@ -266,6 +269,7 @@ export function MissionReplayDetail({
             canPublish={canMergeInProject(state.replay.projectId)}
             publisherUid={user?.uid}
             onClose={() => setShareOpen(false)}
+            defaultFormat={shareFormat}
           />
         </div>
       )}

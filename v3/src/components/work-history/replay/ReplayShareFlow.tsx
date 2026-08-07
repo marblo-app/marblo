@@ -37,6 +37,8 @@ export interface ReplayShareFlowProps {
   canPublish: boolean;
   publisherUid?: string;
   onClose: () => void;
+  /** Opens the flow directly at the given format step (avoids extra tap). */
+  defaultFormat?: ReplayShareFormat;
 }
 
 interface GeneratedAsset {
@@ -108,9 +110,10 @@ export function ReplayShareFlow({
   canPublish,
   publisherUid,
   onClose,
+  defaultFormat,
 }: ReplayShareFlowProps) {
   const [step, setStep] = useState<ReplayShareStep>(1);
-  const [format, setFormat] = useState<ReplayShareFormat>("link");
+  const [format, setFormat] = useState<ReplayShareFormat>(defaultFormat ?? "link");
   const [level, setLevel] = useState<Exclude<ReplayVisibilityLevel, "L0">>("L2");
   const [publication, setPublication] = useState<PublicReplayRef | null>(null);
   const [publicationLoading, setPublicationLoading] = useState(true);

@@ -13,6 +13,7 @@
  */
 
 import type { TFunction } from "../../../lib/i18n";
+import type { ReplayShareFormat } from "./ReplayShareFlow";
 import type {
   MissionReplay,
   ReplaySource,
@@ -139,7 +140,7 @@ export function ReplayHeadline({
 }: {
   replay: MissionReplay;
   sourceErrors: ReplaySourceErrors;
-  onShare?: () => void;
+  onShare?: (format: ReplayShareFormat) => void;
   t: TFunction;
 }) {
   const denied = SOURCE_ORDER.filter(
@@ -227,7 +228,7 @@ export function ReplayHeadline({
               <button
                 key={format.key}
                 type="button"
-                onClick={onShare}
+                onClick={() => onShare?.(format.key)}
                 className="rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-left transition hover:border-violet-400 hover:bg-gray-800"
               >
                 <span className="flex items-center gap-2 text-xs font-semibold text-gray-100">
@@ -281,10 +282,17 @@ function HeroStat({
   value: string | number;
   tone: string;
 }) {
+  const display =
+    typeof value === "string" && value.length > 10
+      ? value.slice(0, 9) + "…"
+      : value;
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-950/50 px-3 py-2">
-      <span className={`block font-mono text-xl font-bold ${tone}`}>
-        {value}
+    <div className="min-w-0 rounded-xl border border-gray-800 bg-gray-950/50 px-3 py-2">
+      <span
+        className={`block min-w-0 truncate font-mono text-xl font-bold tabular-nums ${tone}`}
+        title={typeof value === "string" ? value : undefined}
+      >
+        {display}
       </span>
       <span className="mt-0.5 block text-[11px] text-gray-500">{label}</span>
     </div>

@@ -47,7 +47,7 @@ export function ReplayCast({
         <div className="relative overflow-hidden rounded-xl border border-gray-800 bg-gray-950/60">
           <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-10 bg-gradient-to-r from-gray-950/95 to-transparent" />
           <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-10 bg-gradient-to-l from-gray-950/95 to-transparent" />
-          <div className="flex w-max gap-2 px-3 py-3 motion-safe:animate-[replay-cast-scroll_42s_linear_infinite] motion-reduce:w-auto motion-reduce:flex-wrap">
+          <div className="flex w-max gap-2 px-3 py-3 motion-safe:animate-[replay-cast-scroll_42s_linear_2] motion-reduce:w-auto motion-reduce:flex-wrap">
             {strip.map((member, index) => {
               const model =
                 member.detectedModelId ?? member.spawnedModel ?? member.vendor;

@@ -2,8 +2,8 @@
  * Mission Replay — 인앱 뷰(Phase 1) 렌더 테스트.
  *
  * 핀하는 계약:
- *   - 실데이터 1건으로 헤드라인·통계·타임라인·최종결과·캐스트가 전부 렌더된다
- *     (설계 §4 Phase 1 완료 기준).
+ *   - 실데이터 1건으로 헤드라인·통계·최종결과·캐스트가 전부 렌더된다
+ *     (설계 §4 Phase 1 완료 기준; 타임라인은 완료내역과 중복되어 제외).
  *   - 순수 뷰에는 공유 경로가 없다. 컨테이너가 명시적으로 `onShare`를 주입할
  *     때만 별도 레닭션 마법사의 진입점이 나타난다.
  *   - `denied`(권한 없음)와 `empty`(기록 0건)가 **다른 화면**으로 그려진다. 이게
@@ -200,7 +200,7 @@ function makeReplay(
   return replay;
 }
 
-function renderDetail(state: MissionReplayState, onShare?: () => void): string {
+function renderDetail(state: MissionReplayState, onShare?: Parameters<typeof MissionReplayDetailView>[0]["onShare"]): string {
   return renderToStaticMarkup(
     createElement(MissionReplayDetailView, {
       state,
@@ -267,12 +267,6 @@ describe("Replay 상세 — 실데이터 렌더", () => {
     expect(markup).toContain(">7<");
     expect(markup).toContain("+210/-14");
 
-    // 타임라인 — 오케 비트와 태스크 비트가 실제로 그려진다
-    expect(markup).toContain("step.started");
-    expect(markup).toContain("step.completed");
-    expect(markup).toContain("Replay 뷰 구현");
-    expect(markup).toContain(msg("workHistory.replay.timeline.title"));
-
     // 최종 결과 — PR 링크
     expect(markup).toContain("https://github.com/melocream/marblo/pull/999");
 
@@ -281,7 +275,7 @@ describe("Replay 상세 — 실데이터 렌더", () => {
     expect(markup).toContain("claude-opus-5");
   });
 
-  it("성과 히어로·공유 형식 바·계층 타임라인을 렌더한다", () => {
+  it("성과 히어로·공유 형식 바만 렌더한다(타임라인은 완료내역과 중복되어 제거됨)", () => {
     const markup = renderDetail(
       { status: "ready", replay: makeReplay(), sourceErrors: {} },
       () => {},
@@ -295,9 +289,6 @@ describe("Replay 상세 — 실데이터 렌더", () => {
     expect(markup).toContain(msg("workHistory.replay.shareBar.card"));
     expect(markup).toContain(msg("workHistory.replay.shareBar.gif"));
     expect(markup).toContain(msg("workHistory.replay.shareBar.link"));
-    expect(markup).toContain(
-      msg("workHistory.replay.timeline.ticketBeats", { count: 4 }),
-    );
   });
 
   it("사람 식별자(uid)나 git 좌표(headSha·repoRoot)는 화면에 안 나온다", () => {
@@ -355,8 +346,6 @@ describe("권한저하 — denied 는 empty 가 아니다", () => {
 
     expect(markup).toContain(msg("workHistory.replay.provenance.denied"));
     expect(markup).toContain(msg("workHistory.replay.provenance.deniedNote"));
-    // 사람 레인이 통째로 비었다는 사실을 타임라인에서도 말한다.
-    expect(markup).toContain("권한이 없어 읽지 못했습니다");
     // ★수치는 0 이 아니라 "—" 여야 한다 — "사람 개입 0회"는 거짓말이다.
     expect(
       outcomeValue(markup, msg("workHistory.replay.outcome.interventions")),
@@ -419,7 +408,7 @@ describe("Replay 상세 — 비/로딩/불가 상태", () => {
     expect(markup).toContain("boom");
   });
 
-  it("비트가 하나도 없는 미션도 렌더된다(빈 타임라인)", () => {
+  it("비트가 하나도 없는 미션도 렌더된다(타임라인은 완료내역과 중복되어 제거됨)", () => {
     const replay = makeReplay({
       mission: makeMission({ contextLog: [] }),
       tasks: [],
@@ -427,7 +416,6 @@ describe("Replay 상세 — 비/로딩/불가 상태", () => {
       mergeHistory: [],
     });
     const markup = renderReady(replay);
-    expect(markup).toContain(msg("workHistory.replay.timeline.empty"));
     expect(markup).toContain(msg("workHistory.replay.cast.empty"));
     expect(markup).toContain(msg("workHistory.replay.outcome.noPrs"));
   });
