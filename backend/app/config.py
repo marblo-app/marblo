@@ -6,6 +6,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
     skills_dir: str = "skills"
+    # Firebase project whose ID tokens this server accepts. Empty means auth is
+    # unconfigured and every plan-gated request fails closed (503).
+    firebase_project_id: str = ""
     backend_port: int = 8001
     backend_host: str = "0.0.0.0"
 

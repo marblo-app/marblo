@@ -8,6 +8,9 @@ Provides Redis-backed usage tracking and FastAPI dependencies for:
 4. Feature gating middleware     -> :func:`require_feature`
 5. Usage dashboard for users     -> :func:`get_usage_summary`
 
+The caller's identity and plan come from :mod:`app.auth` (a verified Firebase
+ID token) -- never from request headers, which a client controls.
+
 The Redis client is injected so the pure logic stays testable without a live
 server (see ``app.plan_limits`` verification script / fakeredis). All counters
 are namespaced under ``plan:`` and self-expire, so this module owns no schema
@@ -20,8 +23,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import redis.asyncio as redis
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, HTTPException
 
+from app.auth import Claims, extract_uid, get_verified_claims
 from app.events import get_redis
 from app.plan_config import (
     UNLIMITED,
@@ -53,9 +57,11 @@ _CHANNEL_TTL_SECONDS = 60 * 60 * 24 * 90
 class UserContext:
     """Identity + plan resolved for an incoming request.
 
-    Real auth wiring is out of scope for this module; until it lands we read
-    the user id and plan from headers. ``parse_plan`` guarantees an unknown
-    plan can never escalate above the free tier.
+    Both fields come from a verified Firebase ID token (see :mod:`app.auth`).
+    Request headers are never consulted: ``X-User-Id`` / ``X-Plan`` used to be
+    the source here, which let any caller impersonate a user or claim a paid
+    tier. ``parse_plan`` still guarantees an unrecognised plan value can never
+    escalate above the free tier.
     """
 
     user_id: str
@@ -66,15 +72,34 @@ class UserContext:
         return get_plan_limits(self.plan)
 
 
-async def get_user_context(
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
-    x_plan: str | None = Header(default=None, alias="X-Plan"),
-) -> UserContext:
-    """FastAPI dependency resolving the caller's identity and plan."""
+# Claim names carrying the subscription tier. These are Firebase *custom
+# claims*: only a privileged server (Admin SDK ``setCustomUserClaims``) can
+# write them, so a client cannot mint or edit its own plan. A user with no
+# plan claim resolves to free -- gating fails closed, never open.
+PLAN_CLAIM_KEYS = ("plan", "planType")
 
-    if not x_user_id:
-        raise HTTPException(status_code=401, detail="Missing X-User-Id")
-    return UserContext(user_id=x_user_id, plan=parse_plan(x_plan))
+
+def resolve_plan_from_claims(claims: Claims) -> Plan:
+    """Read the caller's plan out of their verified token claims."""
+
+    for key in PLAN_CLAIM_KEYS:
+        value = claims.get(key)
+        if isinstance(value, str) and value.strip():
+            return parse_plan(value)
+    return parse_plan(None)
+
+
+async def get_user_context(
+    claims: Claims = Depends(get_verified_claims),
+) -> UserContext:
+    """FastAPI dependency resolving the caller's identity and plan.
+
+    Rejects the request (401) unless it carries a valid Firebase ID token.
+    """
+
+    return UserContext(
+        user_id=extract_uid(claims), plan=resolve_plan_from_claims(claims)
+    )
 
 
 # Errors ---------------------------------------------------------------------

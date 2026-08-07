@@ -1,0 +1,4 @@
+# Test-only dependencies. Kept out of requirements.txt so the runtime image
+# (Dockerfile installs requirements.txt) never ships a test runner.
+-r requirements.txt
+pytest>=8.0.0

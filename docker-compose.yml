@@ -44,6 +44,9 @@ services:
       MARBLO_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-marblo}:${POSTGRES_PASSWORD:-marblo123}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-marblo}
       MARBLO_REDIS_URL: redis://redis:${REDIS_PORT:-6379}/0
       MARBLO_SKILLS_DIR: /app/skills
+      # Firebase project whose ID tokens the plan-gated endpoints accept.
+      # Unset -> those endpoints fail closed (503) instead of trusting headers.
+      MARBLO_FIREBASE_PROJECT_ID: ${MARBLO_FIREBASE_PROJECT_ID:-}
     volumes:
       - ./skills:/app/skills:ro
 
