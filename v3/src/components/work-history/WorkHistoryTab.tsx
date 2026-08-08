@@ -18,6 +18,7 @@ import {
   isFilterActive,
   type WorkHistoryFilter,
 } from "../../lib/workHistoryFilter";
+import { isReplayDashboardEnabled } from "../../lib/replayDashboardFlag";
 import { useTaskActivities } from "../../hooks/useTaskActivities";
 import { DiffViewer } from "../board/DiffViewer";
 import { TaskDetailModal } from "../board/TaskDetailModal";
@@ -43,10 +44,11 @@ import { ReplayCast } from "./replay/ReplayCast";
 const MAX_TRACKED = 50;
 
 /**
- * 이 탭이 그리는 두 축 — 태스크 단위(기존)와 미션 단위 Replay(신규).
+ * 이 탭이 그리는 두 축 — 태스크 단위(기존)와 미션 단위 Replay.
  *
- * 신규 탭을 만들지 않고 같은 탭 안에서 토글하는 것은 설계 §1 확정 사항이다.
- * "완료된 일을 보여주는 집"이 이미 여기고, Replay 는 그 집의 미션 단위 뷰다.
+ * ★"replay" 축은 현재 파킹되어 있다: `replayDashboardFlag` 가 OFF(기본)면 토글
+ * 자체가 렌더되지 않고 이 탭은 언제나 "tasks" 로 남는다. 타입·분기·컴포넌트는
+ * 플래그를 켜면 그대로 되살아나도록 삭제하지 않고 남겨 둔다.
  */
 type WorkHistoryView = "tasks" | "replay";
 
@@ -298,10 +300,17 @@ export function WorkHistoryTab() {
     return () => unsub();
   }, [currentProject?.id, subscribeToTasks]);
 
+  // ★리플레이 대시보드 파킹 플래그(기본 OFF) — 마운트 시점에 한 번 고정한다.
+  // OFF 면 이 탭은 평탄화 전의 단순 완료내역(ShareCard + 리스트)만 그린다.
+  const replayDashboard = useMemo(() => isReplayDashboardEnabled(), []);
+
   // Replay 는 **추가 뷰**다 — 기존 태스크 뷰의 상태·구독은 그대로 두고, 미션
   // 구독(useProjectMissions)은 Replay 를 실제로 열었을 때만 마운트된다
   // (리스너를 안 쓰는 화면에 켜 두지 않는다).
-  const [view, setView] = useState<WorkHistoryView>("tasks");
+  const [viewState, setView] = useState<WorkHistoryView>("tasks");
+  // 플래그가 꺼져 있으면 어떤 경로로 setView("replay") 가 불렸든 태스크 뷰로
+  // 고정한다 — 게이트를 렌더 한 곳에 모아 두면 진입점이 새로 생겨도 안 샌다.
+  const view: WorkHistoryView = replayDashboard ? viewState : "tasks";
   const [replayMissionId, setReplayMissionId] = useState<string | null>(null);
 
   // 감사 로그 티켓 상세의 "Replay 보기" 크로스링크 → Layout 이 이 탭을
@@ -311,10 +320,14 @@ export function WorkHistoryTab() {
   const consumeJump = useNavigationStore((s) => s.consumeJump);
   useEffect(() => {
     if (!pendingJump || pendingJump.type !== "missionReplay") return;
-    setView("replay");
-    setReplayMissionId(pendingJump.missionId);
+    // 대시보드가 파킹된 동안에는 열 화면이 없다. 그래도 래치는 비운다 —
+    // 안 비우면 나중에 플래그를 켜는 순간 옛 점프가 되살아난다.
+    if (replayDashboard) {
+      setView("replay");
+      setReplayMissionId(pendingJump.missionId);
+    }
     consumeJump();
-  }, [pendingJump, consumeJump]);
+  }, [pendingJump, consumeJump, replayDashboard]);
 
   const [filter, setFilter] = useState<WorkHistoryFilter>(
     DEFAULT_WORK_HISTORY_FILTER,
@@ -408,14 +421,21 @@ export function WorkHistoryTab() {
   );
 
   const lightweightReplay = useMemo(() => {
-    if (!currentProject) return null;
+    // 파킹 중에는 집계 자체를 만들지 않는다(쓰는 곳이 전부 플래그 뒤에 있다).
+    if (!currentProject || !replayDashboard) return null;
     return buildLightweightReplayFromCompletedTasks({
       projectId: currentProject.id,
       tasks: doneTasks,
       activitiesByTaskId: activitiesMap,
       mergeHistoryByTaskId: mergeByTask,
     });
-  }, [currentProject?.id, doneTasks, activitiesMap, mergeByTask]);
+  }, [
+    currentProject?.id,
+    doneTasks,
+    activitiesMap,
+    mergeByTask,
+    replayDashboard,
+  ]);
 
   const openMissionCreator = () => {
     window.dispatchEvent(new CustomEvent("marblo:open-missions"));
@@ -460,29 +480,33 @@ export function WorkHistoryTab() {
           </span>
         )}
 
-        <div className="ml-auto flex flex-shrink-0 gap-1">
-          {(["tasks", "replay"] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => {
-                setView(mode);
-                // 목록으로 돌아갈 때 이전 선택이 남아 있으면, 다음에 Replay 를
-                // 열었을 때 고르지도 않은 미션이 펼쳐진다.
-                if (mode === "tasks") setReplayMissionId(null);
-              }}
-              className={`rounded border px-2 py-0.5 text-xs transition ${
-                view === mode
-                  ? "border-gray-500 bg-gray-800 text-gray-100"
-                  : "border-gray-700 text-gray-400 hover:bg-gray-800"
-              }`}
-            >
-              {mode === "tasks"
-                ? t("workHistory.view.tasks")
-                : t("workHistory.view.missions")}
-            </button>
-          ))}
-        </div>
+        {/* 태스크/미션 축 토글은 리플레이 대시보드와 함께 파킹됐다 — OFF 면
+            고를 축이 하나뿐이라 토글 자체를 그리지 않는다. */}
+        {replayDashboard && (
+          <div className="ml-auto flex flex-shrink-0 gap-1">
+            {(["tasks", "replay"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => {
+                  setView(mode);
+                  // 목록으로 돌아갈 때 이전 선택이 남아 있으면, 다음에 Replay 를
+                  // 열었을 때 고르지도 않은 미션이 펼쳐진다.
+                  if (mode === "tasks") setReplayMissionId(null);
+                }}
+                className={`rounded border px-2 py-0.5 text-xs transition ${
+                  view === mode
+                    ? "border-gray-500 bg-gray-800 text-gray-100"
+                    : "border-gray-700 text-gray-400 hover:bg-gray-800"
+                }`}
+              >
+                {mode === "tasks"
+                  ? t("workHistory.view.tasks")
+                  : t("workHistory.view.missions")}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {view === "replay" ? (
@@ -504,14 +528,19 @@ export function WorkHistoryTab() {
         />
       ) : (
         <>
-          <FirstMissionShareNudge
-            key={currentProject.id}
-            projectId={currentProject.id}
-            onOpenReplay={(missionId) => {
-              setView("replay");
-              setReplayMissionId(missionId);
-            }}
-          />
+          {/* 첫 미션 공유 널지의 CTA 는 Replay 뷰로 보낸다 — 그 목적지가
+              파킹된 동안에는 널지도 같이 내린다(누를 곳 없는 CTA 금지).
+              널지가 미션 구독을 켜므로, 내리면 리스너도 같이 꺼진다. */}
+          {replayDashboard && (
+            <FirstMissionShareNudge
+              key={currentProject.id}
+              projectId={currentProject.id}
+              onOpenReplay={(missionId) => {
+                setView("replay");
+                setReplayMissionId(missionId);
+              }}
+            />
+          )}
 
           <WorkHistoryFilterBar
             filter={filter}
@@ -519,6 +548,8 @@ export function WorkHistoryTab() {
             onReset={() => setFilter(DEFAULT_WORK_HISTORY_FILTER)}
           />
 
+          {/* 파킹 중에는 lightweightReplay 가 항상 null 이라 평탄화 전 모양
+              (ShareCard)으로 돌아간다. 플래그를 켜면 집계 쇼케이스가 복귀한다. */}
           {lightweightReplay ? (
             <AggregateReplayShowcase
               replay={lightweightReplay.replay}

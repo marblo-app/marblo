@@ -5,6 +5,7 @@ import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useReplayableMissions } from "../../hooks/useMissionReplay";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { findTaskWorktree } from "../../lib/taskWorktree";
+import { isReplayDashboardEnabled } from "../../lib/replayDashboardFlag";
 import {
   auditSourceNotices,
   isAuditLoading,
@@ -70,7 +71,12 @@ export function ProjectAuditTicketDetail({
     !taskWorktree &&
     rows.find((row) => row.worktree?.state === "value")?.worktree;
 
-  const { missions } = useReplayableMissions(projectId);
+  // ★"Replay 보기" CTA 는 리플레이 대시보드와 함께 파킹됐다. 미션 구독은 오직
+  // 이 CTA 를 그리기 위한 것이라, 파킹 중에는 리스너도 열지 않는다.
+  const replayDashboard = useMemo(() => isReplayDashboardEnabled(), []);
+  const { missions } = useReplayableMissions(
+    replayDashboard ? projectId : null,
+  );
   const mission = useMemo(
     () => missions.find((m) => m.taskIds?.includes(taskId)) ?? null,
     [missions, taskId],
@@ -127,7 +133,10 @@ export function ProjectAuditTicketDetail({
             {archivedWorktreeEvidence && (
               <ArchivedWorktreeNotice evidence={archivedWorktreeEvidence} />
             )}
-            {mission && (
+            {/* ★목적지(History 탭의 Replay 뷰)가 파킹돼 있으면 이 CTA 는 History
+                탭을 열고 아무것도 안 하는 죽은 버튼이 된다 — 같은 플래그로 함께
+                내린다(`lib/replayDashboardFlag`). */}
+            {mission && replayDashboard && (
               <button
                 type="button"
                 onClick={() => {
