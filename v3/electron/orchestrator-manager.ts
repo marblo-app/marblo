@@ -1240,6 +1240,11 @@ export class OrchestratorManager {
         /Enter to send/i,
         /Explain this codebase/i,
         /esc to interrupt/i,
+        // Grok Build 1.0.0 (`--minimal`) 상태 푸터 — grok 오케도 준비 지표가
+        // 없어 매 부팅이 10s blind fallback 이었다. 근거는
+        // agent-manager.ts CLI_READINESS_PATTERNS 주석과
+        // tests/unit/grok-login-detection.test.ts.
+        /\/help for commands/i,
       ];
       this.ptyManager.onData(ptySessionId, (data) => {
         if (sent) return;

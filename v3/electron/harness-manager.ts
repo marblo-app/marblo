@@ -1304,6 +1304,15 @@ export async function checkSpawnAuthGate(
 // (before any instruction is sent), so an agent "discussing" these phrases in
 // chat can't trip them — the buffer is closed to further matching once the
 // prompt is sent.
+// ★불변식 — 이 배열의 패턴은 **하나의 연속된 문구**만 담는다. 임의 텍스트를 건너뛰는
+// `.*` / `.+` 브리지는 금지다(구조 불변식 테스트가 강제한다).
+//
+// 이유는 라이브 실측이다(grok 1.0.0, 2026-08-08): 전면 TUI 가 뱉는 PTY 바이트에는
+// **개행이 없다** — 130,177 바이트 캡처에 `\n` 이 1개, `\r` 은 0개였다. TUI 는 줄바꿈
+// 대신 `ESC[row;colH` 커서 이동으로 화면을 그리기 때문이다. 그래서 이 버퍼에서 `.` 은
+// 화면 전체를 가로지른다: `A.*B` 는 "A 와 B 가 같은 줄" 이 아니라 "4KB 창 어딘가에 A 가
+// 있고 그 뒤 어딘가에 B 가 있다" 는 뜻이 된다. 화면 어딘가에 상주하는 헤더/푸터 문구를
+// 앞부분에 두면 사실상 항상 매칭되는 패턴이 만들어진다(아래 grok 사례).
 export const LOGIN_SCREEN_PATTERNS: RegExp[] = [
   /Sign in with ChatGPT/i, // codex login menu
   /Welcome to Codex/i, // codex first-run when logged out
@@ -1313,8 +1322,35 @@ export const LOGIN_SCREEN_PATTERNS: RegExp[] = [
   /Log ?in (with|to) (your )?(Claude|Anthropic)/i, // claude login
   /Claude account with subscription/i, // claude login option
   /Anthropic Console account/i, // claude login option
-  /Grok Build.*(login|auth)/i, // grok first-run auth
-  /Sign in with (Grok|xAI|X)/i, // grok browser auth
+  // ── Grok Build 1.0.0 ────────────────────────────────────────────
+  // 종전엔 `/Grok Build.*(login|auth)/i` 하나였고, 그 패턴은 **양방향으로** 틀렸다:
+  //
+  //   ① 오탐 — "Grok Build" 는 로그인 화면 문구가 아니라 minimal 모드의 **준비 상태
+  //      푸터**에 상주한다("Grok Build  v1.0.0 … Model … /help for commands").
+  //      개행 없는 TUI 버퍼에서 `.*` 가 화면 전체를 가로지르므로, 그 뒤 어딘가에
+  //      "auth"/"login" 부분문자열이 한 번이라도 있으면(MCP 패널의 "needs auth",
+  //      "authenticated", 경로·파일명 …) 준비된 grok 이 로그인 화면으로 판정됐다.
+  //   ② 미탐 — 정작 grok 1.0.0 의 **진짜** 로그인 화면에는 "Grok Build" 가 없다.
+  //      라이브 device-code 로그인 화면 130KB 캡처를 감지기에 넣으면 매칭이 0 이었다
+  //      (looksLikeLoginScreen=false) — 진짜 미인증 grok 을 못 잡고 blind fallback 이
+  //      로그인 화면에 지시문을 타이핑했다.
+  //
+  // 아래는 그 캡처(★)와 grok 1.0.0 바이너리 문자열표(☆)로 확인한 실문구다.
+  /Approve in your browser to finish signing in/i, // ★ device-code 승인 화면
+  /Make sure your browser shows this code/i, // ★ 같은 화면
+  /Waiting for approval\.{3}/i, // ★ 같은 화면 하단
+  /Copying not working\? Click here to show full URL/i, // ★ 같은 화면 하단
+  /Open this URL in your browser to approve/i, // ☆ device-code (full 렌더)
+  /Opening your browser to sign in/i, // ☆ loopback OAuth 진입
+  /Sign in to Grok/i, // ☆ 로그인 화면 제목
+  /Login with grok\.com/i, // ☆ 웰컴 화면 버튼(기본 프로바이더 라벨)
+  /A browser window will open for authentication/i, // ☆ 로그인 안내
+  /Waiting for login to complete/i, // ☆ 로그인 대기
+  /Waiting for auth URL/i, // ☆ 로그인 URL 대기
+  /Paste your token here/i, // ☆ 토큰 수동 입력
+  // grok 1.0.0 바이너리에는 이 렌더 문구가 없다(0.2.x 잔재로 보인다). 구버전·롤백
+  // 대비로 남기지만, `.*` 브리지가 없어 오탐 표면이 없다.
+  /Sign in with (Grok|xAI|X)\b/i, // grok browser auth (구버전 방어)
   // Antigravity (agy) / gemini OAuth flow — the CLI blocks on a browser
   // sign-in spinner. Distinctive to the auth handshake, so it won't trip on
   // ordinary boot output. Lets the readiness backstop suppress blind typing
@@ -1336,11 +1372,17 @@ export const LOGIN_SCREEN_PATTERNS: RegExp[] = [
  * (선택지 나열·"Select login method"·화살표 안내 등)이 함께 있을 때만 로그인 화면으로
  * 친다. 맥락 없이 스쳐 지나간 매칭은 백스톱의 grace 창(createLoginScreenBackstop)이
  * readiness 도달 여부로 최종 판정한다.
+ *
+ * ★버전 주석(2026-08-08, grok 1.0.0 바이너리 문자열표 실측): 아래 셋 중 실제로
+ * 존재하는 렌더 문구는 "You are not authenticated." 뿐이고, 그나마 TUI 가 아니라
+ * `grok models` 같은 **비-TUI 상태 출력**의 문구다. "Browser OIDC" 와 "Log in with
+ * Grok/xAI" 는 1.0.0 바이너리에 0회 — 0.2.x 시절 문구로 보인다. 약한 신호라 혼자서는
+ * 발화하지 못하므로 구버전 방어용으로 남긴다.
  */
 export const AMBIGUOUS_LOGIN_PATTERNS: RegExp[] = [
   /You are not authenticated\.?/i, // grok: 토큰 갱신 중에도 스쳐 지나간다
-  /Browser OIDC/i, // grok: 인증 '방법' 안내 문구
-  /Log ?in (with|to) (your )?(Grok|xAI|X account)/i, // grok login 안내문
+  /Browser OIDC/i, // grok 0.2.x: 인증 '방법' 안내 문구 (1.0.0 에는 없음)
+  /Log ?in (with|to) (your )?(Grok|xAI|X account)/i, // grok 0.2.x login 안내문
 ];
 
 /**
@@ -1354,6 +1396,10 @@ const LOGIN_MENU_CONTEXT_PATTERNS: RegExp[] = [
   /use (the )?arrow keys/i,
   /press enter to (continue|select|sign)/i,
   // 번호가 매겨진 선택지가 둘 이상 — 메뉴가 열려 있다는 뜻.
+  // ※ 이 패턴은 개행이 있는 라인 지향 CLI(claude/codex login)에서만 동작한다.
+  //   전면 TUI(grok 1.0.0 등)의 PTY 바이트에는 개행이 사실상 없어서(라이브 실측:
+  //   130KB 중 `\n` 1개) 여기서 승격이 일어날 일이 없다 — TUI 하네스는 약한 신호
+  //   대신 위 LOGIN_SCREEN_PATTERNS 의 실문구로 잡아야 한다.
   /^\s*\d[.)]\s+\S.*\r?\n(?:.*\r?\n){0,3}?\s*\d[.)]\s+\S/m,
 ];
 

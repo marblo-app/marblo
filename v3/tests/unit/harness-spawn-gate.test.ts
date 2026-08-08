@@ -56,8 +56,24 @@ describe("looksLikeLoginScreen", () => {
   });
 
   it("matches the Grok browser auth flow", () => {
-    expect(looksLikeLoginScreen("Grok Build login required")).toBe(true);
+    // ★ grok 1.0.0 라이브 캡처 실문구(AFfUD3h2DaQZweNdwDhy). 종전의
+    //   "Grok Build login required" 는 실물이 아니라 창작 문자열이었고, 그 패턴
+    //   (/Grok Build.*(login|auth)/i)은 정작 진짜 로그인 화면을 못 잡으면서
+    //   준비 상태 푸터("Grok Build  v1.0.0 … /help for commands")를 오탐했다.
+    //   전수 근거는 grok-login-detection.test.ts.
+    expect(
+      looksLikeLoginScreen("Approve in your browser to finish signing in."),
+    ).toBe(true);
+    expect(
+      looksLikeLoginScreen("Make sure your browser shows this code."),
+    ).toBe(true);
+    expect(looksLikeLoginScreen("Waiting for approval...")).toBe(true);
+    expect(looksLikeLoginScreen("Login with grok.com")).toBe(true);
     expect(looksLikeLoginScreen("Sign in with xAI to continue")).toBe(true);
+    // 준비 상태 푸터는 로그인 화면이 아니다 (이 티켓의 오탐).
+    expect(looksLikeLoginScreen("Grok Build  v1.0.0   Model grok-4-fast")).toBe(
+      false,
+    );
     // 'Browser OIDC' 단독은 더는 확정 신호가 아니다 — 정상 인증된 grok 도 부팅 중
     // 인증 '방법' 안내로 뱉기 때문(UO8F2SM7i6YTQcnbqrSX). 로그인 메뉴 맥락이
     // 함께 있을 때만 확정으로 친다. 자세한 축은 login-screen-backstop.test.ts.

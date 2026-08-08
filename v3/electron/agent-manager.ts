@@ -393,6 +393,50 @@ export const STARTUP_DIALOG_MATCHERS: StartupDialogMatcher[] = [
   },
 ];
 
+/**
+ * CLI 가 **입력을 받을 준비가 됐다**는 확증 신호. 이 중 하나라도 부팅 버퍼에 뜨면
+ * (a) 초기 프롬프트를 주입하고 (b) 로그인 백스톱의 grace 를 닫는다
+ * (`noteReadiness()` — 스쳐 지나간 인증 문구를 transient 로 확정하고, 이미 발화한
+ * needsAuth 는 철회한다).
+ *
+ * ★`╭─+` 같은 박스 테두리는 금지 — "Do you trust this folder?" 다이얼로그 테두리와
+ * 같아서, 1500ms 뒤 보내는 `\r` 이 기본값("No")을 확정해 에이전트를 즉사시킨다.
+ * 준비된 **입력 프롬프트**에만 나타나는 문구만 담는다.
+ */
+export const CLI_READINESS_PATTERNS: RegExp[] = [
+  // Antigravity (agy) verified via live PTY capture: its post-trust input
+  // prompt uses the same `? for shortcuts` footer as Claude Code, so this one
+  // pattern covers both. agy's blocking gate is the trust dialog itself,
+  // handled by STARTUP_DIALOG_MATCHERS.
+  /\? for shortcuts/, // Claude Code: footer help text
+  /Type your message/i, // Claude/Gemini: input prompt placeholder
+  /Loaded \d+ MCP tool/i, // MCP tools loaded — only after trust granted
+  /Ready to assist/i, // Generic CLI ready message
+  /What can I help/i, // Gemini/GPT greeting
+  // Codex TUI: the empty input area shows the example prompt
+  // "Explain this codebase" once init finishes (post plugin-sync,
+  // post trust check, post MCP startup). Verified by capturing
+  // the live PTY output of `codex` 0.128. Without a codex-specific
+  // pattern, Marblo would fall through to the 10s blind fallback
+  // and dump the prompt into whatever dialog/state codex is in,
+  // which historically caused the agent to exit cleanly without
+  // ever processing the instruction.
+  /Explain this codebase/i,
+  /esc to interrupt/i,
+  // ── Grok Build 1.0.0 ────────────────────────────────────────────
+  // grok 은 다섯 하네스 중 **유일하게 readiness 지표가 없었다**. 그래서
+  // noteReadiness() 가 한 번도 불리지 않았고, 로그인 백스톱의 grace 창은 늘
+  // "readiness 미도달" 로 만료됐다 — 부팅 중 스쳐 지나간 인증 문구 하나가 그대로
+  // needsAuth 로 굳는 구조였다(인증 팝업 재발의 두 번째 축).
+  //
+  // Marblo 는 grok 을 항상 `--minimal` 로 띄운다(agent-config.ts). minimal 렌더러의
+  // 상태 푸터가 준비 상태에서 "Grok Build  v<ver>   Model <id>   /help for commands"
+  // 를 그린다 — grok 1.0.0 바이너리 문자열표(xai-grok-pager-minimal/src/full_view.rs)
+  // 로 확인했다. 로그인/승인 화면의 푸터는 "ctrl+q quit" 뿐이고 이 문구가 없다
+  // (라이브 device-code 로그인 캡처 130KB 에 "/help for commands" 0회).
+  /\/help for commands/i,
+];
+
 export function composeInitialPrompt(
   model: ModelType,
   instruction: string,
@@ -626,9 +670,9 @@ export class AgentManager {
       console.log(
         `[Agent:${params.id}] grok session ${
           isResume ? "resume" : "pinned"
-        } → ${launchConfig.grokSessionId ?? "(--continue: CLI picks latest for cwd)"} under ${grokSessionsDir(
-          params.id,
-        )}`,
+        } → ${
+          launchConfig.grokSessionId ?? "(--continue: CLI picks latest for cwd)"
+        } under ${grokSessionsDir(params.id)}`,
       );
     }
 
@@ -790,27 +834,7 @@ export class AgentManager {
       // default ("No") and immediately kill the agent. Match only patterns
       // that appear in the post-trust input prompt.
       let outputBuffer = "";
-      const readinessPatterns = [
-        /\? for shortcuts/, // Claude Code: footer help text
-        /Type your message/i, // Claude/Gemini: input prompt placeholder
-        /Loaded \d+ MCP tool/i, // MCP tools loaded — only after trust granted
-        /Ready to assist/i, // Generic CLI ready message
-        /What can I help/i, // Gemini/GPT greeting
-        // Codex TUI: the empty input area shows the example prompt
-        // "Explain this codebase" once init finishes (post plugin-sync,
-        // post trust check, post MCP startup). Verified by capturing
-        // the live PTY output of `codex` 0.128. Without a codex-specific
-        // pattern, Marblo would fall through to the 10s blind fallback
-        // and dump the prompt into whatever dialog/state codex is in,
-        // which historically caused the agent to exit cleanly without
-        // ever processing the instruction.
-        /Explain this codebase/i,
-        /esc to interrupt/i,
-      ];
-      // Antigravity (agy) verified via live PTY capture: the post-trust
-      // input prompt uses the same `? for shortcuts` footer as Claude
-      // Code, so the pattern above already matches once trust is granted.
-      // The blocking gate is the trust dialog itself, handled below.
+      const readinessPatterns = CLI_READINESS_PATTERNS;
 
       // Per-launch state for STARTUP_DIALOG_MATCHERS — fire each matcher
       // at most once. Filter by model so e.g. codex's update prompt

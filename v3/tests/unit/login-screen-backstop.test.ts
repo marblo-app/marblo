@@ -13,6 +13,12 @@ import {
  * needsAuth 를 래치했다. 정상 인증된 grok 도 부팅 중 'Browser OIDC'(인증 방법 안내)
  * 와 'You are not authenticated'(토큰 갱신 중 순간 출력)를 뱉기 때문에, 아무 문제
  * 없는 스폰마다 인증 팝업이 떴다.
+ *
+ * ★후속 주의(AFfUD3h2DaQZweNdwDhy): 아래 grok 픽스처 문자열들은 라이브 캡처가 아니라
+ * 창작이다 — 'Browser OIDC'·'Select login method'·'grok 0.2.112' 는 grok 1.0.0
+ * 바이너리 문자열표에 0회다. 이 스위트는 **조정기(grace/철회) 상태기계**를 고정하는
+ * 용도로 그대로 두고, grok 실문구·개행 없는 TUI 버퍼 축은 라이브 캡처 기반의
+ * grok-login-detection.test.ts 가 담당한다.
  */
 
 // grok 이 정상 인증 상태로 부팅할 때 실제로 스쳐 지나가는 문구들.
