@@ -62,4 +62,34 @@ export const code = {
   "code.worktreeDiff.deletionsOnly":
     "변경 {count}건이 모두 삭제입니다 — 디스크에 남은 파일이 없어 diff 를 표시할 수 없습니다.",
   "code.worktreeDiff.error": "워크트리 diff 를 열지 못했습니다: {message}",
+
+  // 경량 퀵액션(docs/CODE-QUICK-ACTIONS.md). 커서식 연속 자동완성이 아니라
+  // "선택 → 클릭 → 연결 CLI 1회" 다. 문구가 그 성질(온디맨드·1회)을 드러내야
+  // 사용자가 "왜 자동으로 안 뜨지?" 로 읽지 않는다.
+  "code.quickAction.explain": "설명",
+  "code.quickAction.fix": "이거 고쳐",
+  "code.quickAction.running": "{start}–{end}번째 줄을 CLI 에 물어보는 중…",
+  "code.quickAction.onDemandHint":
+    "누를 때만 한 번 실행됩니다 — 자동완성처럼 계속 돌지 않습니다.",
+  "code.quickAction.truncated":
+    "선택이 길어 앞부분만 보냈습니다. 더 짧게 선택하면 더 정확합니다.",
+  "code.quickAction.tooLong":
+    "선택이 너무 깁니다 — {max}줄 이하로 선택하세요. (잘라서 고치면 원래 범위와 어긋나 코드가 깨집니다)",
+  "code.quickAction.noRoot":
+    "프로젝트 루트를 찾지 못해 CLI 를 실행할 수 없습니다.",
+  "code.quickAction.spawnFailed": "CLI 를 실행하지 못했습니다: {message}",
+  "code.quickAction.emptyResult":
+    "CLI 가 결과를 돌려주지 않았습니다 (종료 코드 {code}). 아래는 마지막 출력입니다.",
+  "code.quickAction.noCodeBlock":
+    "수정안에서 코드 블록을 찾지 못해 자동 적용할 수 없습니다. 아래 답변을 직접 확인하세요.",
+  "code.quickAction.needsCli": "연결된 CLI 가 없습니다.",
+  "code.quickAction.needsCliWhy":
+    "퀵액션은 이미 설치·로그인된 CLI(Claude Code 또는 Codex)를 그대로 씁니다. 새 구독이나 추가 비용은 없습니다.",
+  "code.quickAction.needsCliCta": "설치·사인인 하러 가기",
+  "code.quickAction.diffTitle": "수정 제안 · {start}–{end}번째 줄",
+  "code.quickAction.diffStat": "+{added} −{removed}",
+  "code.quickAction.diffNoChange": "바뀐 부분이 없습니다.",
+  "code.quickAction.apply": "적용",
+  "code.quickAction.rangeDrifted":
+    "그 사이 코드가 바뀌어 적용하지 않았습니다. 다시 선택해 실행하세요.",
 };

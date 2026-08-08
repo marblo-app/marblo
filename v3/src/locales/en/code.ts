@@ -53,4 +53,31 @@ export const code: Record<keyof typeof koCode, string> = {
   "code.worktreeDiff.deletionsOnly":
     "All {count} change(s) are deletions — no file left on disk to diff.",
   "code.worktreeDiff.error": "Could not open the worktree diff: {message}",
+
+  "code.quickAction.explain": "Explain",
+  "code.quickAction.fix": "Fix this",
+  "code.quickAction.running": "Asking your CLI about lines {start}–{end}…",
+  "code.quickAction.onDemandHint":
+    "Runs once, only when you click — it does not keep running like autocomplete.",
+  "code.quickAction.truncated":
+    "The selection was long, so only the beginning was sent. A shorter selection gives a sharper answer.",
+  "code.quickAction.tooLong":
+    "That selection is too long — select {max} lines or fewer. (A truncated fix wouldn't line up with the original range and would break the code.)",
+  "code.quickAction.noRoot":
+    "No project root found, so the CLI could not be run.",
+  "code.quickAction.spawnFailed": "Could not run the CLI: {message}",
+  "code.quickAction.emptyResult":
+    "The CLI returned no result (exit code {code}). Its last output is below.",
+  "code.quickAction.noCodeBlock":
+    "No code block was found in the fix, so it can't be applied automatically. Review the answer below.",
+  "code.quickAction.needsCli": "No CLI is connected.",
+  "code.quickAction.needsCliWhy":
+    "Quick actions reuse a CLI you already installed and signed into (Claude Code or Codex). No new subscription, no extra cost.",
+  "code.quickAction.needsCliCta": "Install & sign in",
+  "code.quickAction.diffTitle": "Suggested fix · lines {start}–{end}",
+  "code.quickAction.diffStat": "+{added} −{removed}",
+  "code.quickAction.diffNoChange": "Nothing changed.",
+  "code.quickAction.apply": "Apply",
+  "code.quickAction.rangeDrifted":
+    "The code changed in the meantime, so nothing was applied. Select it again and re-run.",
 };
