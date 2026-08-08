@@ -286,8 +286,10 @@ function TaskCardContent({
       <div
         data-testid="beginner-mini-task"
         data-task-status={task.status}
-        className={`relative rounded-md border border-gray-700/50 bg-gray-800 px-2 py-1.5 ${statusHighlight} ${
-          onClick ? "cursor-pointer hover:border-gray-600" : ""
+        // 셸 팔레트(카타푸친)로 그린다 — 어드밴스드 보드의 `gray-*` 는 푸른
+        // 회색이라 비기너 셸의 보랏빛 패널 위에서 색이 튀었다.
+        className={`relative rounded-md border border-[#313244] bg-[#1e1e2e] px-2.5 py-1.5 ${statusHighlight} ${
+          onClick ? "cursor-pointer hover:border-[#45475a]" : ""
         }`}
         title={task.title}
         onClick={onClick ? () => onClick(task) : undefined}
@@ -296,21 +298,21 @@ function TaskCardContent({
           <span aria-hidden="true" className="mb-card-pulse-overlay" />
         )}
         <div className="flex items-start gap-1.5">
-          <span aria-hidden className="text-[11px] leading-4">
+          <span aria-hidden className="text-[11px] leading-[18px]">
             {roleIcon}
           </span>
-          <span className="min-w-0 flex-1 text-[11px] leading-4 text-gray-200 line-clamp-2">
+          <span className="min-w-0 flex-1 text-[11px] leading-[18px] text-[#cdd6f4] line-clamp-2">
             {task.title}
           </span>
           {running && (
             <span
               aria-hidden
-              className="mt-1 h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-green-400"
+              className="mt-1.5 h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#a6e3a1]"
             />
           )}
         </div>
         {(isBlocked || isFailed) && (
-          <span className="mt-1 inline-flex rounded bg-amber-500/15 px-1 py-0.5 text-[10px] font-medium text-amber-300">
+          <span className="mt-1 inline-flex rounded bg-[#f9e2af]/15 px-1.5 py-0.5 text-[10px] font-medium text-[#f9e2af]">
             ⚠ {t("board.taskCard.stuck")}
           </span>
         )}

@@ -12,6 +12,10 @@ interface TeamSummaryProps {
    * 도넛은 작아지고, 티켓 통계 블록은 통째로 빠진다 — 비기너 화면에서는 바로
    * 옆 미니 보드가 이미 티켓 흐름을 그리고 있어서 같은 숫자를 두 번 말하게
    * 된다. 여기 남는 질문은 하나다: "몇 명이 붙어 있고 지금 일하는 중인가."
+   *
+   * ★compact 는 자기 테두리·배경을 갖지 않는다. 이 뷰는 이미 라이브 패널
+   * **안**의 한 블록이라, 카드 안에 카드를 또 그리면(중첩 상자) 화면이 곧바로
+   * 성기고 크루드해진다 — 구분은 패널의 헤어라인이 이미 하고 있다.
    */
   compact?: boolean;
 }
@@ -74,18 +78,18 @@ export default function TeamSummary({
   return (
     <div
       data-testid={compact ? "beginner-mini-agents" : "team-summary"}
-      className={`rounded-lg border border-gray-700 bg-gray-800 ${
-        compact ? "p-2.5" : "p-4"
-      }`}
+      className={
+        compact ? "" : "rounded-lg border border-gray-700 bg-gray-800 p-4"
+      }
     >
       <div className={`flex items-center ${compact ? "gap-3" : "gap-6"}`}>
         {/* Donut Chart */}
         <div
-          className={`relative shrink-0 ${compact ? "h-12 w-12" : "h-20 w-20"}`}
+          className={`relative shrink-0 ${compact ? "h-10 w-10" : "h-20 w-20"}`}
         >
           <svg
             viewBox="0 0 36 36"
-            className={`-rotate-90 ${compact ? "h-12 w-12" : "h-20 w-20"}`}
+            className={`-rotate-90 ${compact ? "h-10 w-10" : "h-20 w-20"}`}
           >
             {agents.length === 0 ? (
               <circle
@@ -93,7 +97,7 @@ export default function TeamSummary({
                 cy="18"
                 r="14"
                 fill="none"
-                stroke="#374151"
+                stroke={compact ? "#313244" : "#374151"}
                 strokeWidth="4"
               />
             ) : (
@@ -115,12 +119,16 @@ export default function TeamSummary({
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <span
-              className={`font-bold text-gray-100 ${compact ? "text-sm leading-none" : "text-lg"}`}
+              className={`font-bold ${compact ? "text-xs leading-none tabular-nums text-[#cdd6f4]" : "text-lg text-gray-100"}`}
             >
               {agents.length}
             </span>
             <span
-              className={`text-gray-500 ${compact ? "text-[8px] leading-none" : "text-[10px]"}`}
+              className={
+                compact
+                  ? "text-[8px] leading-none text-[#6c7086]"
+                  : "text-[10px] text-gray-500"
+              }
             >
               {compact ? t("agents.summary.unit") : "agents"}
             </span>
@@ -131,22 +139,30 @@ export default function TeamSummary({
         <div
           className={
             compact
-              ? "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"
+              ? "flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1"
               : "grid grid-cols-2 gap-x-6 gap-y-2"
           }
         >
           {visibleStatuses.map((status) => (
             <div key={status} className="flex items-center gap-1.5">
               <div
-                className={`rounded-full ${compact ? "h-2 w-2" : "h-2.5 w-2.5"} ${STATUS_CONFIG[status].bg}`}
+                className={`rounded-full ${compact ? "h-1.5 w-1.5" : "h-2.5 w-2.5"} ${STATUS_CONFIG[status].bg}`}
               />
               <span
-                className={`${compact ? "text-xs" : "text-sm"} ${STATUS_CONFIG[status].color}`}
+                className={
+                  compact
+                    ? "text-xs font-medium tabular-nums text-[#cdd6f4]"
+                    : `text-sm ${STATUS_CONFIG[status].color}`
+                }
               >
                 {statusCounts[status]}
               </span>
               <span
-                className={`text-gray-500 ${compact ? "text-[10px]" : "text-xs"}`}
+                className={
+                  compact
+                    ? "text-[11px] text-[#7f849c]"
+                    : "text-xs text-gray-500"
+                }
               >
                 {compact
                   ? t(`agents.status.${status}`)
@@ -158,7 +174,7 @@ export default function TeamSummary({
               빈 칸이 되므로 한 줄로 설명한다(아직 아무도 안 붙었다는 것도
               정보다). */}
           {compact && visibleStatuses.length === 0 && (
-            <span className="text-[10px] text-gray-500">
+            <span className="text-[11px] text-[#7f849c]">
               {t("agents.summary.none")}
             </span>
           )}

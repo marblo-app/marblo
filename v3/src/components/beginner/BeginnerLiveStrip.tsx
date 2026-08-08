@@ -10,6 +10,7 @@ import { useAgentStore } from "../../stores/agentStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { KanbanColumn } from "../board/KanbanColumn";
 import TeamSummary from "../agents/TeamSummary";
+import { BLOCK, BUTTON_GHOST, SectionLabel } from "./beginnerUi";
 
 /**
  * ★S4 해결 표면 — 챗 **안**의 미니 라이브.
@@ -92,65 +93,76 @@ export function BeginnerLiveStrip({
     <section
       data-testid="beginner-live-strip"
       data-phase={view.phase}
-      className={`rounded-lg border px-4 py-3 ${
+      // ★한 장의 패널 안에서 블록을 헤어라인으로 나눈다. 예전엔 헤드라인·미니
+      // 보드·미니 팀뷰가 각자 `mt-3` 로 떠 있어 경계가 없는 채로 벌어졌다 —
+      // 그게 "성기다" 의 정체였다. divide-y 는 간격을 0 으로 줄이는 대신 줄을
+      // 그어 위계를 만든다.
+      className={`flex flex-col divide-y overflow-hidden rounded-lg border ${
         view.phase === "stalled"
-          ? "border-[#f9e2af]/35 bg-[#f9e2af]/10"
-          : "border-[#313244] bg-[#181825]"
+          ? "divide-[#f9e2af]/25 border-[#f9e2af]/35 bg-[#f9e2af]/10"
+          : "divide-[#313244] border-[#313244] bg-[#181825]"
       }`}
     >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-[#7f849c]">
+      {/* ── 헤드라인 블록 ─────────────────────────────────────────────── */}
+      <div className={BLOCK}>
+        <SectionLabel
+          trailing={
+            view.totalTasks > 0 ? (
+              <span data-testid="beginner-live-counts">
+                {t("beginner.live.progress", {
+                  done: view.completedTasks,
+                  total: view.totalTasks,
+                })}
+              </span>
+            ) : null
+          }
+        >
           {t("beginner.live.label")}
-        </span>
+        </SectionLabel>
 
-        <span className="flex items-center gap-2 text-sm font-medium text-[#cdd6f4]">
+        <p className="mt-1.5 flex items-center gap-2 text-sm font-medium leading-5 text-[#cdd6f4]">
           <Pulse phase={view.phase} />
           {headline}
-        </span>
+        </p>
 
-        {view.totalTasks > 0 && (
-          <span
-            data-testid="beginner-live-counts"
-            className="text-xs text-[#a6adc8]"
-          >
-            {t("beginner.live.progress", {
-              done: view.completedTasks,
-              total: view.totalTasks,
-            })}
-          </span>
+        {/* 막힘 안내 — 진단 §7 P1-2 ④. 90초가 지나도 티켓이 없으면 "기다리세요"
+            로 방치하지 않고 다음 행동을 준다. */}
+        {view.showStallHelp && (
+          <div className="mt-2.5 flex flex-wrap items-center gap-3">
+            <p className="min-w-0 flex-1 text-xs leading-5 text-[#a6adc8]">
+              {t("beginner.live.stalledHelp")}
+            </p>
+            <button
+              type="button"
+              data-testid="beginner-live-resend"
+              onClick={onResend}
+              disabled={resending}
+              className={BUTTON_GHOST}
+            >
+              {resending ? t("beginner.ask.sending") : t("beginner.ask.resend")}
+            </button>
+          </div>
         )}
       </div>
 
-      {/* 막힘 안내 — 진단 §7 P1-2 ④. 90초가 지나도 티켓이 없으면 "기다리세요" 로
-          방치하지 않고 다음 행동을 준다. */}
-      {view.showStallHelp && (
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <p className="min-w-0 flex-1 text-xs text-[#a6adc8]">
-            {t("beginner.live.stalledHelp")}
-          </p>
-          <button
-            type="button"
-            data-testid="beginner-live-resend"
-            onClick={onResend}
-            disabled={resending}
-            className="shrink-0 rounded-md border border-[#45475a] px-2.5 py-1 text-xs font-medium text-[#cdd6f4] transition-colors hover:bg-[#313244] disabled:opacity-60"
-          >
-            {resending ? t("beginner.ask.sending") : t("beginner.ask.resend")}
-          </button>
-        </div>
-      )}
-
-      {/* ★미니 보드 — 티켓이 하나라도 생긴 뒤에만. 티켓 0개일 때 빈 3칸을 띄우면
-          "아무 일도 안 일어난다" 는 인상을 오히려 강화한다(그 국면의 답은 위
-          헤드라인의 '읽는 중' 이다). */}
+      {/* ── ★미니 보드 — 티켓이 하나라도 생긴 뒤에만. 티켓 0개일 때 빈 3칸을
+          띄우면 "아무 일도 안 일어난다" 는 인상을 오히려 강화한다(그 국면의
+          답은 위 헤드라인의 '읽는 중' 이다). ───────────────────────────── */}
       {view.totalTasks > 0 && (
-        <div className="mt-3">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-[#7f849c]">
-            {t("beginner.board.label")}
-          </span>
+        <div className={BLOCK}>
+          <SectionLabel>{t("beginner.board.label")}</SectionLabel>
+          {/* 세로 레인 셋. 상한(BEGINNER_COLUMN_LIMIT=4)이 있어도 세 레인이 다
+              차면 12장이라, 챗을 화면 밖으로 밀지 않게 여기서 한 번 더 자른다.
+              17rem 은 임의의 수가 아니다 — 흔한 국면(티켓 대여섯 건, 그중 막힌
+              카드 하나 = 실측 244px)이 **잘리지 않고** 다 들어가는 높이다.
+              그보다 낮게 잡으면 마지막 '완료' 레인이 반쯤 잘려 보이는데, 티켓이
+              완료로 넘어가는 걸 보여 주는 게 이 화면의 목적이라 그 잘림은 특히
+              나쁘다. 여기서 자리를 더 내줘도 되는 이유는 미니 보드가 뜨는
+              시점에는 위 첫 요청 카드가 이미 한 줄로 접혀 있기 때문이다
+              (보드 = 전달 후에만 생기는 티켓의 결과). */}
           <div
             data-testid="beginner-mini-board"
-            className="mt-1.5 flex max-h-40 gap-2"
+            className="mt-2 flex max-h-[17rem] flex-col gap-2 overflow-y-auto"
           >
             {columns.map((col) => (
               <KanbanColumn
@@ -167,13 +179,11 @@ export function BeginnerLiveStrip({
         </div>
       )}
 
-      {/* ★미니 에이전트 뷰 — 에이전트가 실제로 붙은 뒤에만. */}
+      {/* ── ★미니 에이전트 뷰 — 에이전트가 실제로 붙은 뒤에만. ─────────── */}
       {agents.length > 0 && (
-        <div className="mt-3">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-[#7f849c]">
-            {t("beginner.agents.label")}
-          </span>
-          <div className="mt-1.5">
+        <div className={BLOCK}>
+          <SectionLabel>{t("beginner.agents.label")}</SectionLabel>
+          <div className="mt-2">
             <TeamSummary compact agents={agents} tasks={tasks} />
           </div>
         </div>

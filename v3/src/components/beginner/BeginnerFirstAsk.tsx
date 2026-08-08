@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import type { BeginnerAsk } from "../../hooks/useBeginnerAsk";
+import { BLOCK, BUTTON_PRIMARY, SURFACE } from "./beginnerUi";
 
 const EXAMPLE_KEYS = [
   "beginner.ask.example1",
@@ -26,17 +27,17 @@ export function BeginnerFirstAsk({ ask }: { ask: BeginnerAsk }) {
   return (
     <section
       data-testid="beginner-first-ask"
-      className="rounded-lg border border-[#313244] bg-[#181825] p-4"
+      className={`${SURFACE} ${ask.locked ? "px-4 py-2.5" : BLOCK}`}
     >
       {/* ★전달된 뒤에는 입력도 안내문도 사라지고 초록 확인 한 줄만 남는다 —
           같은 프롬프트를 다시 주입하는 연타(진단 §S4)의 직접 차단이자, 시선을
           아래 라이브 스트립으로 넘기는 장치다. 재전송은 막힘 안내의 CTA 로만. */}
       {!ask.locked && (
         <>
-          <h2 className="text-base font-semibold text-[#cdd6f4]">
+          <h2 className="text-[15px] font-semibold leading-6 text-[#cdd6f4]">
             {t("beginner.ask.title")}
           </h2>
-          <p className="mt-1 text-xs leading-5 text-[#a6adc8]">
+          <p className="mt-0.5 text-xs leading-5 text-[#7f849c]">
             {t("beginner.ask.body")}
           </p>
 
@@ -53,32 +54,43 @@ export function BeginnerFirstAsk({ ask }: { ask: BeginnerAsk }) {
             rows={3}
             disabled={ask.sending}
             placeholder={t("beginner.ask.placeholder")}
-            className="mt-3 w-full resize-none rounded-md border border-[#45475a] bg-[#11111b] px-3 py-2.5 text-sm text-[#cdd6f4] placeholder-[#585b70] focus:border-[#89b4fa] focus:outline-none disabled:opacity-60"
+            className="mt-3 w-full resize-none rounded-md border border-[#313244] bg-[#11111b] px-3 py-2.5 text-sm leading-6 text-[#cdd6f4] placeholder-[#585b70] transition-colors focus:border-[#89b4fa] focus:outline-none disabled:opacity-60"
           />
 
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          {/* ★예시 칩과 보내기를 **한 줄**에 둔다. 예전엔 칩 줄 아래에 폭 전체를
+              채운 초록 버튼이 또 한 층 쌓여서, 카드 하나가 가로줄 넷(제목·입력·
+              칩·버튼)으로 늘어졌다. 색도 파랑으로 통일한다 — 바로 앞 폴더
+              게이트의 CTA 가 파랑이라 같은 흐름에서 두 색이 번갈아 나왔다. */}
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-2">
             {EXAMPLE_KEYS.map((key) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => setText(t(key))}
                 disabled={ask.sending}
-                className="rounded-full border border-[#45475a] px-2.5 py-1 text-[11px] text-[#a6adc8] transition-colors hover:bg-[#313244] hover:text-[#cdd6f4] disabled:opacity-60"
+                className="rounded-full border border-[#313244] bg-[#1e1e2e] px-2.5 py-1 text-[11px] leading-4 text-[#a6adc8] transition-colors hover:border-[#45475a] hover:text-[#cdd6f4] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {t(key)}
               </button>
             ))}
-          </div>
 
-          <button
-            type="button"
-            data-testid="beginner-first-ask-send"
-            onClick={() => void ask.send(text)}
-            disabled={ask.sending || !text.trim()}
-            className="mt-3 w-full rounded-md bg-[#a6e3a1] px-3 py-2.5 text-sm font-semibold text-[#1e1e2e] transition-colors hover:bg-[#94e2d5] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {ask.sending ? t("beginner.ask.sending") : t("beginner.ask.send")}
-          </button>
+            <div className="ml-auto flex items-center gap-2.5">
+              <kbd className="hidden font-sans text-[10px] text-[#585b70] sm:inline">
+                ⌘↵
+              </kbd>
+              <button
+                type="button"
+                data-testid="beginner-first-ask-send"
+                onClick={() => void ask.send(text)}
+                disabled={ask.sending || !text.trim()}
+                className={BUTTON_PRIMARY}
+              >
+                {ask.sending
+                  ? t("beginner.ask.sending")
+                  : t("beginner.ask.send")}
+              </button>
+            </div>
+          </div>
         </>
       )}
 
@@ -86,7 +98,9 @@ export function BeginnerFirstAsk({ ask }: { ask: BeginnerAsk }) {
         <p
           data-testid="beginner-first-ask-result"
           data-delivery={ask.delivery}
-          className={`text-xs ${ask.locked ? "" : "mt-3"} ${
+          className={`flex items-center gap-1.5 text-xs leading-5 ${
+            ask.locked ? "" : "mt-3"
+          } ${
             ask.delivery === "delivered"
               ? "text-[#a6e3a1]"
               : ask.delivery === "queued"
@@ -94,6 +108,7 @@ export function BeginnerFirstAsk({ ask }: { ask: BeginnerAsk }) {
                 : "text-[#f38ba8]"
           }`}
         >
+          <span aria-hidden>{ask.delivery === "delivered" ? "✓" : "!"}</span>
           {ask.delivery === "delivered"
             ? t("beginner.ask.sent")
             : ask.delivery === "queued"

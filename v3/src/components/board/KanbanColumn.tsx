@@ -27,9 +27,15 @@ interface KanbanColumnProps {
   onTaskClick?: (task: Task) => void;
   isDropTarget?: boolean;
   /**
-   * ★경량 컬럼. 비기너 모드 미니 보드가 이 컬럼을 **그대로** 재사용한다
+   * ★경량 **레인**. 비기너 모드 미니 보드가 이 컬럼을 **그대로** 재사용한다
    * (중복 구현 금지). 드래그·드롭 힌트·빈칸 안내를 빼고, 카드도 compact 로
-   * 그린다. 높이는 부모가 정하도록 flex 만 남긴다.
+   * 그린다.
+   *
+   * ★가로 컬럼이 아니라 세로 레인이다: 라벨+개수가 왼쪽 고정폭에 서고 카드가
+   * 오른쪽으로 흐른다. 비기너 화면에서 컬럼 셋을 나란히 세우면 폭이 넓을수록
+   * 칸이 옆으로 벌어져 카드 몇 장이 허공에 떠 있는 성긴 보드가 됐다(3칸 ×
+   * 최대 4장). 레인은 폭을 먹지 않고 세로로만 자라서 셸의 세로 흐름에 붙고,
+   * 라벨이 한 열에 정렬돼 훑기도 쉽다. 높이는 부모가 정한다.
    */
   compact?: boolean;
   /**
@@ -72,31 +78,32 @@ export function KanbanColumn({
       <div
         data-testid="beginner-mini-column"
         data-column-status={status}
-        className="flex min-w-0 flex-1 flex-col rounded-md border border-gray-700/50 bg-gray-900/50"
+        className="flex min-w-0 items-start gap-3"
       >
-        <div className="flex items-center justify-between gap-1 border-b border-gray-700/50 px-2 py-1">
+        {/* 고정폭 라벨 열 — 레인 셋의 라벨과 개수가 한 열에 정렬된다. */}
+        <div className="flex w-[5.5rem] shrink-0 items-center gap-1.5 pt-1">
           <span
-            className={`truncate text-[10px] font-semibold ${config.color}`}
-          >
+            aria-hidden
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${config.bg}`}
+          />
+          <span className="truncate text-[11px] font-medium text-[#a6adc8]">
             {label ?? config.label}
           </span>
-          <span
-            className={`inline-flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-medium text-white ${config.bg}`}
-          >
+          <span className="ml-auto shrink-0 text-[11px] tabular-nums text-[#6c7086]">
             {count ?? tasks.length}
           </span>
         </div>
-        <div className="flex-1 space-y-1 overflow-y-auto p-1.5">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
           {tasks.map((task) => (
             <TaskCard key={task.id} task={task} compact />
           ))}
           {hiddenCount > 0 && (
-            <p className="px-1 text-[10px] text-gray-500">
+            <p className="pl-0.5 text-[10px] text-[#6c7086]">
               {t("beginner.board.more", { count: hiddenCount })}
             </p>
           )}
           {tasks.length === 0 && (
-            <p className="py-2 text-center text-[10px] text-gray-600">—</p>
+            <p className="pt-1 text-[11px] leading-4 text-[#45475a]">—</p>
           )}
         </div>
       </div>

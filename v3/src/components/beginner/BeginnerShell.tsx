@@ -19,6 +19,12 @@ import { BeginnerFirstAsk } from "./BeginnerFirstAsk";
 import { BeginnerLiveStrip } from "./BeginnerLiveStrip";
 import { BeginnerPromotionModal } from "./BeginnerPromotionModal";
 import { BeginnerTour } from "./BeginnerTour";
+import {
+  BUTTON_GHOST,
+  BUTTON_PRIMARY,
+  SURFACE,
+  SectionLabel,
+} from "./beginnerUi";
 
 /**
  * 비기너 셸 — 오케챗 하나만 있는 화면 (설계: v3/docs/BEGINNER-MODE-DESIGN.md).
@@ -160,116 +166,147 @@ export function BeginnerShell() {
 
   return (
     <div className="flex h-screen flex-col bg-[#11111b] text-[#cdd6f4]">
-      {/* ── 최소 상단바. 프로젝트 스위처·비용·탭은 일부러 없다. ────────────── */}
-      <header className="flex flex-shrink-0 items-center gap-3 border-b border-[#313244] bg-[#181825] px-4 py-2">
-        <span className="text-sm font-semibold text-[#cdd6f4]">Marblo</span>
-        <span className="min-w-0 flex-1 truncate text-xs text-[#7f849c]">
-          {currentProject?.name || t("beginner.topbar.noFolder")}
+      {/* ── 최소 상단바. 프로젝트 스위처·비용·탭은 일부러 없다. ──────────────
+          ★어드밴스드 셸의 `Header` 와 같은 규격이다: h-12, 창 드래그 영역,
+          왼쪽 아이덴티티 / 오른쪽 액션. 예전엔 높이도(py-2) 버튼 높이도 제각각인
+          한 줄에 넷이 나란히 서서 무엇이 주 액션인지 읽히지 않았다. */}
+      <header
+        className="flex h-12 flex-shrink-0 items-center gap-2.5 border-b border-[#313244] bg-[#181825] px-4"
+        style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+      >
+        <span className="shrink-0 text-sm font-semibold tracking-tight text-[#cdd6f4]">
+          Marblo
         </span>
-        <button
-          type="button"
-          data-testid="beginner-open-folder"
-          onClick={connectFolder}
-          className="shrink-0 rounded-md border border-[#45475a] px-2.5 py-1 text-xs text-[#cdd6f4] transition-colors hover:bg-[#313244]"
+
+        {/* 폴더는 "상태 + 바꾸기" 를 한 칩으로 합친다 — 이름 텍스트와 버튼이
+            따로 서서 폭을 먹던 자리다. */}
+        <div
+          className="flex min-w-0 flex-1 items-center"
+          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
-          {hasFolder
-            ? t("beginner.topbar.changeFolder")
-            : t("beginner.topbar.openFolder")}
-        </button>
-        <button
-          type="button"
-          data-testid="beginner-open-settings"
-          title={t("beginner.topbar.advancedHint")}
-          onClick={() => {
-            // 설정은 어드밴스드 셸의 탭이다. 비기너에 설정 화면을 복제하는 대신
-            // 승격시키고 그 탭을 열어 준다 — 막다른 버튼을 만들지 않는다.
-            useSplitWorkspaceStore.getState().setActiveTab("settings");
-            goAdvanced("manual");
-          }}
-          className="shrink-0 rounded-md border border-[#45475a] px-2.5 py-1 text-xs text-[#cdd6f4] transition-colors hover:bg-[#313244]"
+          <button
+            type="button"
+            data-testid="beginner-open-folder"
+            onClick={connectFolder}
+            title={
+              hasFolder
+                ? t("beginner.topbar.changeFolder")
+                : t("beginner.topbar.openFolder")
+            }
+            className="inline-flex h-7 min-w-0 max-w-[22rem] items-center gap-1.5 rounded-md border border-transparent px-2 text-xs text-[#a6adc8] transition-colors hover:border-[#313244] hover:bg-[#313244]/60 hover:text-[#cdd6f4]"
+          >
+            <span aria-hidden className="shrink-0 text-[#6c7086]">
+              ▸
+            </span>
+            <span className="truncate">
+              {currentProject?.name || t("beginner.topbar.noFolder")}
+            </span>
+          </button>
+        </div>
+
+        <div
+          className="flex shrink-0 items-center gap-2"
+          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
-          {t("beginner.topbar.settings")}
-        </button>
-        {/* ★상시 전환 어포던스 — 승격 모달(완료 3건 트리거)을 기다리지 않고
-            언제든 개발(어드밴스드) 모드로 넘어간다. 그래서 눈에 띄는 강조색이다:
-            "숨겨진 화면이 따로 있다" 는 사실 자체가 첫 화면에서 보여야 한다. */}
-        <button
-          type="button"
-          data-testid="beginner-go-advanced"
-          data-coach="beginner-advanced"
-          title={t("beginner.topbar.advancedHint")}
-          onClick={() => goAdvanced("manual")}
-          className="flex shrink-0 items-center gap-1.5 rounded-md border border-[#89b4fa]/50 bg-[#89b4fa]/10 px-2.5 py-1 text-xs font-medium text-[#89b4fa] transition-colors hover:border-[#89b4fa] hover:bg-[#89b4fa]/20"
-        >
-          <span aria-hidden className="font-mono text-[10px]">
-            {"</>"}
-          </span>
-          {t("beginner.topbar.advanced")}
-        </button>
+          <button
+            type="button"
+            data-testid="beginner-open-settings"
+            title={t("beginner.topbar.advancedHint")}
+            onClick={() => {
+              // 설정은 어드밴스드 셸의 탭이다. 비기너에 설정 화면을 복제하는 대신
+              // 승격시키고 그 탭을 열어 준다 — 막다른 버튼을 만들지 않는다.
+              useSplitWorkspaceStore.getState().setActiveTab("settings");
+              goAdvanced("manual");
+            }}
+            className={BUTTON_GHOST}
+          >
+            {t("beginner.topbar.settings")}
+          </button>
+          {/* ★상시 전환 어포던스 — 승격 모달(완료 3건 트리거)을 기다리지 않고
+              언제든 개발(어드밴스드) 모드로 넘어간다. 그래서 눈에 띄는 강조색이다:
+              "숨겨진 화면이 따로 있다" 는 사실 자체가 첫 화면에서 보여야 한다. */}
+          <button
+            type="button"
+            data-testid="beginner-go-advanced"
+            data-coach="beginner-advanced"
+            title={t("beginner.topbar.advancedHint")}
+            onClick={() => goAdvanced("manual")}
+            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2.5 text-xs font-medium text-[#89b4fa] transition-colors hover:border-[#89b4fa] hover:bg-[#89b4fa]/20"
+          >
+            <span aria-hidden className="font-mono text-[10px]">
+              {"</>"}
+            </span>
+            {t("beginner.topbar.advanced")}
+          </button>
+        </div>
       </header>
 
-      <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
-        {!cliReady ? (
-          <div className="min-h-0 flex-1 overflow-auto">
-            <BeginnerConnectStep onWatchDemo={() => setShowDemo(true)} />
-          </div>
-        ) : !hasFolder ? (
-          <div className="min-h-0 flex-1 overflow-auto">
-            <section
-              data-testid="beginner-folder-gate"
-              className="mx-auto w-full max-w-2xl rounded-lg border border-[#313244] bg-[#181825] p-6 text-center"
-            >
-              <h1 className="text-lg font-semibold text-[#cdd6f4]">
-                {t("beginner.folder.title")}
-              </h1>
-              <p className="mt-1.5 text-sm leading-6 text-[#a6adc8]">
-                {t("beginner.folder.body")}
-              </p>
-              <button
-                type="button"
-                onClick={connectFolder}
-                className="mt-4 rounded-md bg-[#89b4fa] px-4 py-2 text-sm font-semibold text-[#1e1e2e] transition-colors hover:bg-[#74c7ec]"
+      {/* ★세로 흐름 한 열. 창이 넓어져도 카드가 옆으로 늘어나지 않게 폭을
+          묶는다 — 예전엔 첫 요청 카드도 미니 보드도 창 폭 전체로 벌어져서
+          같은 내용이 그저 성기게 퍼졌다. 대화창(PTY)까지 한 열에 들어가야
+          시선이 위→아래 한 줄기로 흐른다. */}
+      <main className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
+        <div className="mx-auto flex min-h-0 w-full max-w-[68rem] flex-1 flex-col gap-2.5 overflow-hidden">
+          {!cliReady ? (
+            <div className="min-h-0 flex-1 overflow-auto">
+              <BeginnerConnectStep onWatchDemo={() => setShowDemo(true)} />
+            </div>
+          ) : !hasFolder ? (
+            <div className="min-h-0 flex-1 overflow-auto">
+              <section
+                data-testid="beginner-folder-gate"
+                className={`mx-auto w-full max-w-xl ${SURFACE} px-6 py-7 text-center`}
               >
-                {t("beginner.folder.cta")}
-              </button>
-            </section>
-          </div>
-        ) : (
-          <>
-            {/* 첫 요청 — 전달되면 스스로 접혀 확인 한 줄만 남긴다(중복 주입 차단).
-                data-coach: 코치마크 투어의 앵커(BeginnerTour.COACH_ANCHORS). */}
-            <div className="flex-shrink-0" data-coach="beginner-ask">
-              <BeginnerFirstAsk ask={ask} />
+                <h1 className="text-lg font-semibold leading-7 text-[#cdd6f4]">
+                  {t("beginner.folder.title")}
+                </h1>
+                <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-[#7f849c]">
+                  {t("beginner.folder.body")}
+                </p>
+                <button
+                  type="button"
+                  onClick={connectFolder}
+                  className={`mt-5 ${BUTTON_PRIMARY}`}
+                >
+                  {t("beginner.folder.cta")}
+                </button>
+              </section>
             </div>
-
-            {/* ★S4: 진행상황을 별도 탭이 아니라 챗 바로 위에 그린다. */}
-            <div className="flex-shrink-0" data-coach="beginner-live">
-              <BeginnerLiveStrip
-                sentAt={ask.deliveredAt}
-                onResend={() => void ask.resend()}
-                resending={ask.sending}
-              />
-            </div>
-
-            {/* 풀스크린 오케챗 — 실 PTY 그대로. */}
-            <section
-              data-coach="beginner-chat"
-              className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[#313244] bg-[#181825]"
-            >
-              <div className="flex flex-shrink-0 items-baseline gap-2 border-b border-[#313244] px-3 py-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-[#7f849c]">
-                  {t("beginner.chat.title")}
-                </span>
-                <span className="truncate text-[11px] text-[#585b70]">
-                  {t("beginner.chat.hint")}
-                </span>
+          ) : (
+            <>
+              {/* 첫 요청 — 전달되면 스스로 접혀 확인 한 줄만 남긴다(중복 주입 차단).
+                  data-coach: 코치마크 투어의 앵커(BeginnerTour.COACH_ANCHORS). */}
+              <div className="flex-shrink-0" data-coach="beginner-ask">
+                <BeginnerFirstAsk ask={ask} />
               </div>
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <OrchestratorPanel fill />
+
+              {/* ★S4: 진행상황을 별도 탭이 아니라 챗 바로 위에 그린다. */}
+              <div className="flex-shrink-0" data-coach="beginner-live">
+                <BeginnerLiveStrip
+                  sentAt={ask.deliveredAt}
+                  onResend={() => void ask.resend()}
+                  resending={ask.sending}
+                />
               </div>
-            </section>
-          </>
-        )}
+
+              {/* 풀스크린 오케챗 — 실 PTY 그대로. */}
+              <section
+                data-coach="beginner-chat"
+                className={`flex min-h-0 flex-1 flex-col overflow-hidden ${SURFACE}`}
+              >
+                <div className="flex flex-shrink-0 items-center gap-2 border-b border-[#313244] px-4 py-2">
+                  <SectionLabel>{t("beginner.chat.title")}</SectionLabel>
+                  <span className="min-w-0 truncate text-[11px] text-[#585b70]">
+                    {t("beginner.chat.hint")}
+                  </span>
+                </div>
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <OrchestratorPanel fill />
+                </div>
+              </section>
+            </>
+          )}
+        </div>
       </main>
 
       {/* 첫 실행 코치마크 투어. 앵커(챗·첫요청·라이브·모드전환)가 실제로 그려진
