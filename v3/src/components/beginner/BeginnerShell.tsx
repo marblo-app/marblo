@@ -11,10 +11,10 @@ import {
   type PromotionTrigger,
 } from "../../lib/beginnerMode";
 import { findAgentPtySessionId } from "../../lib/agentTerminal";
+import { useOnboardingSetup } from "../../hooks/useOnboardingSetup";
 import { useAgentStore } from "../../stores/agentStore";
 import { useBeginnerModeStore } from "../../stores/beginnerModeStore";
-import { useCliSetupStore } from "../../stores/cliSetupStore";
-import { useFirstRunSampleStore } from "../../stores/firstRunSampleStore";
+import { useOnboardingPreviewStore } from "../../stores/onboardingPreviewStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { useTaskStore } from "../../stores/taskStore";
@@ -30,6 +30,7 @@ import { BeginnerOneClickModal } from "./BeginnerOneClickModal";
 import { BeginnerPromotionModal } from "./BeginnerPromotionModal";
 import { BeginnerTaskModal } from "./BeginnerTaskModal";
 import { BeginnerTour } from "./BeginnerTour";
+import { OnboardingPreviewBanner } from "./OnboardingPreviewBanner";
 import {
   BUTTON_GHOST,
   BUTTON_PRIMARY,
@@ -69,6 +70,26 @@ import {
  * 자동설치·로그인 자동재확인·`marblo:cli-auth-ready`). 워크스페이스 셸의
  * CliSetupHost 와 동시에 마운트되는 일은 없다 — 셸은 둘 중 하나만 뜬다.
  */
+/**
+ * CLI 설정 엔진을 도는 **자리**. 컴포넌트로 뽑은 이유는 딱 하나 — 온보딩
+ * 프리뷰(시연)일 때 이 훅을 아예 마운트하지 않기 위해서다.
+ *
+ * 엔진의 첫 이펙트는 프로브에 이어 **백그라운드 자동설치**를 돈다. 프리뷰의 계약이
+ * "실제 설치·인증을 건드리지 않는다" 이므로, 시연을 켠 것 때문에 진짜 셸
+ * 인스톨러가 도는 일은 없어야 한다. 훅은 조건부로 부를 수 없으니 마운트를
+ * 조건부로 만든다.
+ *
+ * 프리뷰를 끄면 이 자리가 다시 서고(혹은 어드밴스드 셸의 CliSetupHost 가 선다)
+ * 엔진이 평소대로 한 번 돈다 — 창당 하나라는 규칙은 그대로다.
+ */
+function CliSetupEngineHost() {
+  // "설정이 필요하다" 는 요청은 연결 게이트가 `ready` 로 직접 판정하므로 핸들러는
+  // 의도적으로 no-op 이다(모달도 배너도 띄우지 않는다).
+  const noop = useCallback(() => {}, []);
+  useCliSetupEngine({ openAt: noop });
+  return null;
+}
+
 export function BeginnerShell() {
   const { t } = useTranslation();
 
@@ -76,19 +97,25 @@ export function BeginnerShell() {
   // 자체의 부수효과(오케 자동기동 등)가 목적이다.
   useAppLifecycle();
 
-  // 이 셸에는 CliSetupHost(배너)가 없다. 엔진은 여기서 한 번만 돌리고, "설정이
-  // 필요하다" 는 요청은 아래 연결 게이트가 `ready` 로 직접 판정하므로 핸들러는
-  // 의도적으로 no-op 이다(모달도 배너도 띄우지 않는다).
-  const noop = useCallback(() => {}, []);
-  useCliSetupEngine({ openAt: noop });
-
-  const cliReady = useCliSetupStore((s) => s.ready);
+  // ★온보딩 게이트가 읽는 값은 뷰모델 하나로 모은다 — 실제 상태와 온보딩
+  // 프리뷰(개발/시연용 fresh-user 시뮬)가 여기서 갈린다. 프리뷰 시뮬이 끝나면
+  // (`done`) 이 값들은 다시 실제 상태로 흘러가므로, 토글을 끄는 걸 잊어도
+  // 사용자가 가짜 화면에 갇히지 않는다.
+  const setup = useOnboardingSetup();
+  // ★프리뷰는 **개발/시연 도구**다. 이 셸에 들어와 있다는 사실 자체가 계측되면
+  // 안 된다: 프리뷰를 켜는 사람은 이미 어드밴스드 유저라, 비기너 진입/첫완료/
+  // 승격 이벤트가 퍼널의 분모·분자를 그대로 오염시킨다.
+  const previewEnabled = useOnboardingPreviewStore((s) => s.enabled);
+  const setPreviewEnabled = useOnboardingPreviewStore((s) => s.setEnabled);
+  const cliReady = setup.ready;
   // 첫 실행 샘플 폴더 자동 연결(#872)의 진행 상태 — 폴더 게이트가 이걸 읽어
   // "준비 중" 을 그린다(아래 렌더 주석 참조).
-  const sampleStatus = useFirstRunSampleStore((s) => s.status);
+  const sampleStatus = setup.sampleStatus;
   const currentProject = useProjectStore((s) => s.currentProject);
   const projectId = currentProject?.id ?? "";
-  const hasFolder = !!currentProject?.folderPath;
+  // ★프리뷰 중에는 "폴더 없음" 으로 그린다 — 실제 프로젝트를 끊지 않고 폴더
+  // 게이트(샘플 자동연결)를 재생하기 위한 것이다. 시뮬이 끝나면 실제 값으로.
+  const hasFolder = setup.preview ? false : !!currentProject?.folderPath;
 
   const subscribeToTasks = useTaskStore((s) => s.subscribeToTasks);
   const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
@@ -153,25 +180,25 @@ export function BeginnerShell() {
   // 재시작을 신규 설치로 계상하면 비기너 진입 수가 세션 수만큼 부풀어 퍼널
   // 분모가 망가진다.
   useEffect(() => {
-    if (enteredReported) return;
+    if (previewEnabled || enteredReported) return;
     markEnteredReported();
     telemetry.beginnerEntered(entryReason);
-  }, [enteredReported, markEnteredReported, entryReason]);
+  }, [previewEnabled, enteredReported, markEnteredReported, entryReason]);
 
   // ★첫 완료 계측 — 설치당 한 번. 스토어가 멱등성을 보장하고(이미 기록됐으면
   // null), 경과는 클라가 계산해 싣는다(서버 timestamp 는 수신시각이라 단계
   // 지연을 못 구한다 — 진단 §3).
   useEffect(() => {
-    if (firstCompletionAt || completedTasks === 0) return;
+    if (previewEnabled || firstCompletionAt || completedTasks === 0) return;
     const durationMs = markFirstCompletion();
     if (durationMs !== null) telemetry.beginnerFirstCompletion(durationMs);
-  }, [completedTasks, firstCompletionAt, markFirstCompletion]);
+  }, [previewEnabled, completedTasks, firstCompletionAt, markFirstCompletion]);
 
   // 승격 트리거. mergedTasks 는 아직 0 이 흐른다(설계 §9 F1: merge_history 구독이
   // App.tsx 안에 있고 스토어가 없어, 여기서 끌어오면 두 번째 구독이 생긴다).
   // 완료 건수·사용 일수 트리거가 그 자리를 메운다.
   useEffect(() => {
-    if (promotionShownAt || promotion) return;
+    if (previewEnabled || promotionShownAt || promotion) return;
     const trigger = shouldPromote(
       {
         completedTasks,
@@ -185,6 +212,7 @@ export function BeginnerShell() {
       markPromotionShown();
     }
   }, [
+    previewEnabled,
     completedTasks,
     enteredAt,
     promotionShownAt,
@@ -194,11 +222,20 @@ export function BeginnerShell() {
 
   const goAdvanced = useCallback(
     (trigger: PromotionTrigger | "manual") => {
+      // ★프리뷰 중의 "개발 모드로" 는 **승격이 아니라 프리뷰 종료**다. 프리뷰를
+      // 켠 사람은 이미 어드밴스드라, 여기서 promote 를 부르면 비기너 기록과
+      // 승격 계측만 더럽히고 정작 화면은 (App 이 프리뷰를 보고 있으므로) 안
+      // 바뀐다.
+      if (previewEnabled) {
+        setPromotion(null);
+        setPreviewEnabled(false);
+        return;
+      }
       telemetry.beginnerPromoted(trigger, trigger === "manual");
       setPromotion(null);
       promote(trigger);
     },
-    [promote],
+    [previewEnabled, setPreviewEnabled, promote],
   );
 
   // 티켓 상세는 **현재** 구독 스냅샷에서 다시 찾는다. 티켓이 사라졌으면(오케가
@@ -281,6 +318,14 @@ export function BeginnerShell() {
 
   return (
     <div className="flex h-screen flex-col bg-[#11111b] text-[#cdd6f4]">
+      {/* 이 셸에는 CliSetupHost(배너)가 없다 — 엔진은 여기서 한 번만 돈다.
+          프리뷰 중에는 아예 마운트하지 않는다(위 주석: 자동설치 금지). */}
+      {!previewEnabled && <CliSetupEngineHost />}
+
+      {/* 온보딩 프리뷰(개발/시연)가 켜져 있을 때만 뜨는 띠 — 지금 보이는 화면이
+          시뮬이라는 사실과 그 자리에서의 탈출구를 항상 들고 있는다. */}
+      <OnboardingPreviewBanner />
+
       {/* ── 최소 상단바. 프로젝트 스위처·비용·탭은 일부러 없다. ──────────────
           ★어드밴스드 셸의 `Header` 와 같은 규격이다: h-12, 창 드래그 영역,
           왼쪽 아이덴티티 / 오른쪽 액션. 예전엔 높이도(py-2) 버튼 높이도 제각각인
@@ -299,22 +344,29 @@ export function BeginnerShell() {
           className="flex min-w-0 flex-1 items-center"
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
+          {/* ★프리뷰 중에는 네이티브 폴더 피커를 열지 않는다 — 여기서 폴더를
+              고르면 진짜 프로젝트가 바뀐다(프리뷰의 계약은 '실제 상태 미변경'). */}
           <button
             type="button"
             data-testid="beginner-open-folder"
-            onClick={connectFolder}
+            onClick={setup.preview ? undefined : connectFolder}
+            disabled={setup.preview}
             title={
-              hasFolder
-                ? t("beginner.topbar.changeFolder")
-                : t("beginner.topbar.openFolder")
+              setup.preview
+                ? t("beginner.preview.folderLocked")
+                : hasFolder
+                  ? t("beginner.topbar.changeFolder")
+                  : t("beginner.topbar.openFolder")
             }
-            className="inline-flex h-7 min-w-0 max-w-[22rem] items-center gap-1.5 rounded-md border border-transparent px-2 text-xs text-[#a6adc8] transition-colors hover:border-[#313244] hover:bg-[#313244]/60 hover:text-[#cdd6f4]"
+            className="inline-flex h-7 min-w-0 max-w-[22rem] items-center gap-1.5 rounded-md border border-transparent px-2 text-xs text-[#a6adc8] transition-colors hover:border-[#313244] hover:bg-[#313244]/60 hover:text-[#cdd6f4] disabled:cursor-not-allowed disabled:hover:border-transparent disabled:hover:bg-transparent"
           >
             <span aria-hidden className="shrink-0 text-[#6c7086]">
               ▸
             </span>
             <span className="truncate">
-              {currentProject?.name || t("beginner.topbar.noFolder")}
+              {setup.preview
+                ? t("beginner.preview.sampleFolder")
+                : currentProject?.name || t("beginner.topbar.noFolder")}
             </span>
           </button>
         </div>

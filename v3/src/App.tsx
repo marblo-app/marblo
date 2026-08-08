@@ -9,6 +9,7 @@ import { WorkspaceShell } from "./components/workspace/WorkspaceShell";
 import { BeginnerShell } from "./components/beginner/BeginnerShell";
 import { useWorkspaceModeStore } from "./stores/workspaceModeStore";
 import { useBeginnerModeStore } from "./stores/beginnerModeStore";
+import { useOnboardingPreviewStore } from "./stores/onboardingPreviewStore";
 import { DetachedLayout, type DetachedView } from "./components/DetachedLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BrandLoader } from "./components/BrandLoader";
@@ -245,6 +246,10 @@ function AppContent() {
   const projects = useProjectStore((s) => s.projects);
   const workspaceMode = useWorkspaceModeStore((s) => s.enabled);
   const beginnerMode = useBeginnerModeStore((s) => s.state) === "beginner";
+  // 온보딩 프리뷰(설정 → 개발용 토글): 이미 설치·인증이 끝난 유저에게 fresh
+  // 유저의 최초 연결단계를 다시 보여주는 시연 모드. 그 화면은 비기너 셸에만
+  // 있으므로 여기서 셸을 갈아끼운다 — 비기너 기록(persist)은 건드리지 않는다.
+  const onboardingPreview = useOnboardingPreviewStore((s) => s.enabled);
 
   // Stable membership key: the projects array is a fresh reference on every
   // snapshot, so we key the KG-forwarding effect on the sorted project ids to
@@ -464,7 +469,10 @@ function AppContent() {
   // 판정: 이전 사용 마커가 하나라도 있으면 advanced). 워크스페이스 셸 **위에**
   // 얹히는 한 층이라, 승격하면 아래 분기를 그대로 통과해 기존 셸이 뜬다.
   // detached 팝아웃은 위에서 먼저 걸린다 — 보조 창은 비기너 셸을 그릴 이유가 없다.
-  if (beginnerMode) {
+  // 프리뷰는 어드밴스드 유저를 **일시적으로** 이 셸에 세운다(끄면 곧장 원위치).
+  // detached 팝아웃은 위에서 이미 걸러졌다 — 보조 창까지 시연 화면이 되면
+  // 원래 보려던 터미널/diff 가 사라진다.
+  if (beginnerMode || onboardingPreview) {
     return <BeginnerShell />;
   }
 

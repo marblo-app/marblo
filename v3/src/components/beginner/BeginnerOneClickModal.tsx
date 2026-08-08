@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import TerminalView from "../terminal/TerminalView";
 import { CommandBox } from "../onboarding/CliSetupRows";
-import { oneClickSignIn } from "../../services/cliSetupActions";
 import {
   bulkInstallOutcome,
   oneClickInstallRows,
@@ -17,10 +16,12 @@ import {
   ROWS,
   UPDATE_CMD,
   cliLabel,
-  useCliSetupStore,
   type CliModel,
 } from "../../stores/cliSetupStore";
+import { useOnboardingSetup } from "../../hooks/useOnboardingSetup";
+import { useOnboardingPreviewStore } from "../../stores/onboardingPreviewStore";
 import telemetry from "../../services/telemetryService";
+import { PreviewTerminal } from "./PreviewTerminal";
 import { BUTTON_GHOST, BUTTON_PRIMARY } from "./beginnerUi";
 
 /**
@@ -64,16 +65,30 @@ export function BeginnerOneClickModal({
 }: BeginnerOneClickModalProps) {
   const { t } = useTranslation();
 
-  const ready = useCliSetupStore((s) => s.ready);
-  const results = useCliSetupStore((s) => s.results);
-  const bulk = useCliSetupStore((s) => s.bulkInstall);
-  const installErrors = useCliSetupStore((s) => s.installErrors);
-  const runInstallAll = useCliSetupStore((s) => s.runInstallAll);
+  // ★값·액션은 전부 이 뷰모델에서 온다 — 실제 흐름과 온보딩 프리뷰(시연)가
+  // 여기서 갈린다. 화면 자체는 두 경우에 **똑같이** 그려진다: 시연의 목적이
+  // "신규 유저가 보는 그 화면" 을 보는 것이라, 프리뷰용 UI 분기를 두면 안 된다
+  // (유일한 예외가 아래 터미널 자리 — 실 PTY 를 띄울 수 없다).
+  const setup = useOnboardingSetup();
+  const ready = setup.ready;
+  const results = setup.results;
+  const bulk = setup.bulk;
+  const installErrors = setup.installErrors;
+  const previewStage = useOnboardingPreviewStore((s) => s.stage);
 
   const [started, setStarted] = useState(false);
   const [loginSessionId, setLoginSessionId] = useState<string | null>(null);
   const [loginModel, setLoginModel] = useState<CliModel | null>(null);
   const autoSignInRef = useRef(false);
+  // ★액션은 ref 로 잡는다. 뷰모델은 프로브 결과가 갱신될 때마다 새 객체가 되는데,
+  // 그걸 `start`/자동사인인 이펙트의 의존성에 넣으면 "설치를 시작한 그 호출이
+  // 만든 상태 변화" 가 곧바로 이펙트를 재실행시켜 **설치 패스가 두 번 돈다**
+  // (`started` 가드는 setState 반영보다 늦다).
+  const actionsRef = useRef({
+    installAll: setup.installAll,
+    signIn: setup.signIn,
+  });
+  actionsRef.current = { installAll: setup.installAll, signIn: setup.signIn };
 
   const targets = useMemo(
     () => signInRows(ROWS, results, ORCHESTRATOR_CLI_IDS),
@@ -102,8 +117,8 @@ export function BeginnerOneClickModal({
     if (ready) return;
     setStarted(true);
     telemetry.cliSetupStep("install", "enter");
-    void runInstallAll(oneClickInstallRows(ROWS));
-  }, [started, ready, runInstallAll]);
+    actionsRef.current.installAll();
+  }, [started, ready]);
 
   useEffect(() => {
     start();
@@ -118,7 +133,9 @@ export function BeginnerOneClickModal({
     if (!shouldAutoSignIn(flow)) return;
     autoSignInRef.current = true;
     telemetry.cliSetupStep("auth", "enter");
-    const model = oneClickSignIn((sessionId) => setLoginSessionId(sessionId));
+    const model = actionsRef.current.signIn((sessionId) =>
+      setLoginSessionId(sessionId),
+    );
     if (model) {
       setLoginModel(model);
     } else {
@@ -151,8 +168,8 @@ export function BeginnerOneClickModal({
     autoSignInRef.current = false;
     setLoginSessionId(null);
     setLoginModel(null);
-    void runInstallAll(oneClickInstallRows(ROWS));
-  }, [runInstallAll]);
+    actionsRef.current.installAll();
+  }, []);
 
   const failedRows = useMemo(
     () =>
@@ -305,7 +322,16 @@ export function BeginnerOneClickModal({
                 data-testid="beginner-oneclick-terminal"
                 className="relative h-64 overflow-hidden rounded-md border border-[#45475a] bg-[#11111b] p-2"
               >
-                <TerminalView sessionId={loginSessionId} isActive />
+                {/* 프리뷰(시연)에서는 실 PTY 세션이 없다 — 같은 자리에 로그인
+                    대본을 재생한다. 이것이 프리뷰의 유일한 UI 분기다. */}
+                {setup.preview ? (
+                  <PreviewTerminal
+                    model={loginModel ?? "claude"}
+                    stage={previewStage}
+                  />
+                ) : (
+                  <TerminalView sessionId={loginSessionId} isActive />
+                )}
               </div>
               <p className="mt-2 text-[11px] leading-5 text-[#7f849c]">
                 {t("beginner.oneClick.stuck")}

@@ -207,4 +207,23 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.settings.replayTour": "Replay the first-run walkthrough",
   "beginner.settings.replayTourDone":
     "The walkthrough will show up next time you open the beginner screen.",
+
+  // ── Onboarding preview (dev/QA demo) ────────────────────────────────────
+  "beginner.preview.badge": "Preview",
+  "beginner.preview.bannerBody":
+    "Simulating a brand-new user's first connect flow — nothing is actually installed, signed in or reconnected.",
+  "beginner.preview.restart": "Restart",
+  "beginner.preview.advance": "Next step",
+  "beginner.preview.exit": "Exit preview",
+  "beginner.preview.sampleFolder": "marblo-sample (preview)",
+  "beginner.preview.folderLocked":
+    "Folders aren't changed while the preview is on. Exit to get your folder back.",
+  "beginner.preview.settings.heading": "Onboarding preview (dev)",
+  "beginner.preview.settings.body":
+    "Replays a brand-new user's first connect flow (one-click install → auto sign-in → terminal → sample folder) even on a machine where the CLIs are already installed and signed in. For demos and QA.",
+  "beginner.preview.settings.on":
+    "Preview on — the screen switches to the new-user flow",
+  "beginner.preview.settings.off": "Turn on preview",
+  "beginner.preview.settings.safety":
+    "Simulation only: real installs, sign-ins, keychain entries and folder connections are untouched, and turning it off restores your normal screen immediately.",
 };

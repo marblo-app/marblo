@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useWorkspaceModeStore } from "../../stores/workspaceModeStore";
 import { useBeginnerModeStore } from "../../stores/beginnerModeStore";
+import { useOnboardingPreviewStore } from "../../stores/onboardingPreviewStore";
 import { useCoachmarkStore } from "../../stores/coachmarkStore";
 import { BEGINNER_TOUR_ID } from "../../lib/coachmark";
 import telemetry from "../../services/telemetryService";
@@ -265,6 +266,69 @@ function ProfileSection() {
       {/* 워크스페이스 셸 토글은 없앴다 — 셸이 곧 제품이라 고를 축이 아니다
           (stores/workspaceModeStore 의 "프로덕션 항상 ON" 주석 참고). */}
       <BeginnerModeSection />
+      <OnboardingPreviewSection />
+    </div>
+  );
+}
+
+/**
+ * 온보딩 프리뷰(개발/QA용) — 티켓 MA5PnltkHBFbgcRvjo0r.
+ *
+ * 이미 CLI 가 깔리고 인증까지 끝난 기계에서는 원클릭 설치·자동 사인인·터미널
+ * 임베드·샘플 폴더 자동연결이 **영영 안 그려진다**(첫 프로브가 `ready` 를 true 로
+ * 뒤집는 순간 셸이 연결 게이트를 건너뛴다). 이 토글은 그 화면들을 다시 세워
+ * 시연·QA 할 수 있게 한다.
+ *
+ * ★안전이 이 기능의 절반이다. 켠다고 실제로 달라지는 것은 localStorage 플래그
+ * 하나뿐이다 — 설치 IPC·PTY 스폰·키체인·firestore·`cliSetupStore` 중 무엇도
+ * 호출되지 않고, 시뮬이 끝나면(`done`) 화면은 스스로 실제 상태로 돌아온다.
+ * 그래서 프로덕션 유저가 실수로 켜도 인증이 깨지지 않는다.
+ */
+function OnboardingPreviewSection() {
+  const { t } = useTranslation();
+  const enabled = useOnboardingPreviewStore((s) => s.enabled);
+  const setEnabled = useOnboardingPreviewStore((s) => s.setEnabled);
+
+  return (
+    <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="mb-1 flex items-center gap-2 text-sm font-medium text-gray-200">
+            {t("beginner.preview.settings.heading")}
+            <span className="rounded border border-yellow-500/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-400">
+              {t("beginner.preview.badge")}
+            </span>
+          </h3>
+          <p className="text-xs leading-relaxed text-gray-500">
+            {t("beginner.preview.settings.body")}
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          data-testid="settings-onboarding-preview-toggle"
+          aria-checked={enabled}
+          aria-label={t("beginner.preview.settings.heading")}
+          onClick={() => setEnabled(!enabled)}
+          className={`relative mt-0.5 h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+            enabled ? "bg-yellow-600" : "bg-gray-600"
+          }`}
+        >
+          <span
+            className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+              enabled ? "translate-x-5" : "translate-x-0"
+            }`}
+          />
+        </button>
+      </div>
+      <p className="mt-2 text-xs font-medium text-gray-400">
+        {enabled
+          ? t("beginner.preview.settings.on")
+          : t("beginner.preview.settings.off")}
+      </p>
+      <p className="mt-1 text-xs text-gray-500">
+        {t("beginner.preview.settings.safety")}
+      </p>
     </div>
   );
 }

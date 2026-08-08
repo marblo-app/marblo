@@ -209,4 +209,23 @@ export const beginner = {
   "beginner.settings.replayTour": "첫 실행 안내 다시 보기",
   "beginner.settings.replayTourDone":
     "다음에 비기너 화면을 열면 안내가 다시 나와요.",
+
+  // ── 온보딩 프리뷰 (개발/QA 시연용) ──────────────────────────────────────
+  "beginner.preview.badge": "프리뷰",
+  "beginner.preview.bannerBody":
+    "신규 유저의 최초 연결단계를 시뮬레이션 중입니다 — 실제 설치·로그인·폴더는 바뀌지 않습니다.",
+  "beginner.preview.restart": "처음부터",
+  "beginner.preview.advance": "다음 단계",
+  "beginner.preview.exit": "프리뷰 종료",
+  "beginner.preview.sampleFolder": "marblo-sample (프리뷰)",
+  "beginner.preview.folderLocked":
+    "프리뷰 중에는 폴더를 바꾸지 않습니다. 종료하면 원래 폴더로 돌아갑니다.",
+  "beginner.preview.settings.heading": "온보딩 프리뷰 (개발용)",
+  "beginner.preview.settings.body":
+    "이미 CLI 가 깔리고 로그인된 계정에서도 신규 유저의 최초 연결단계(원클릭 모두설치 → 자동 사인인 → 터미널 → 샘플 폴더 자동연결)를 그대로 다시 볼 수 있습니다. 시연·QA 용입니다.",
+  "beginner.preview.settings.on":
+    "프리뷰 켜짐 — 화면이 신규 유저 흐름으로 바뀝니다",
+  "beginner.preview.settings.off": "프리뷰 켜기",
+  "beginner.preview.settings.safety":
+    "시뮬레이션만 합니다: 실제 설치·로그인·키체인·폴더 연결은 건드리지 않으며, 끄면 즉시 원래 화면으로 돌아옵니다.",
 };

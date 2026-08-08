@@ -2,7 +2,6 @@ import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import TerminalView from "../terminal/TerminalView";
 import { CommandBox } from "../onboarding/CliSetupRows";
-import { launchLogin } from "../../services/cliSetupActions";
 import {
   oneClickInstallRows,
   pendingInstallRows,
@@ -11,11 +10,13 @@ import {
   DOCS_URL,
   ROWS,
   UPDATE_CMD,
-  useCliSetupStore,
   type CliModel,
   type CliRow,
 } from "../../stores/cliSetupStore";
+import { useOnboardingSetup } from "../../hooks/useOnboardingSetup";
+import { useOnboardingPreviewStore } from "../../stores/onboardingPreviewStore";
 import telemetry from "../../services/telemetryService";
+import { PreviewTerminal } from "./PreviewTerminal";
 import { BUTTON_GHOST, BUTTON_PRIMARY } from "./beginnerUi";
 
 /**
@@ -76,12 +77,15 @@ export function BeginnerConnectStep({
   onOneClick: () => void;
 }) {
   const { t } = useTranslation();
-  const states = useCliSetupStore((s) => s.states);
-  const results = useCliSetupStore((s) => s.results);
-  const installErrors = useCliSetupStore((s) => s.installErrors);
-  const installingId = useCliSetupStore((s) => s.installing);
-  const runInstall = useCliSetupStore((s) => s.runInstall);
-  const probeAll = useCliSetupStore((s) => s.probeAll);
+  // ★값은 전부 이 뷰모델에서 온다 — 실제 흐름과 온보딩 프리뷰(시연)가 여기서
+  // 갈린다(hooks/useOnboardingSetup). 프리뷰일 때는 설치 IPC 도 PTY 스폰도
+  // 일어나지 않는다.
+  const setup = useOnboardingSetup();
+  const states = setup.states;
+  const results = setup.results;
+  const installErrors = setup.installErrors;
+  const installingId = setup.installing;
+  const previewStage = useOnboardingPreviewStore((s) => s.stage);
 
   const [picked, setPicked] = useState<CliModel | null>(null);
   const [busy, setBusy] = useState(false);
@@ -97,16 +101,16 @@ export function BeginnerConnectStep({
         // 아직 안 깔렸으면 먼저 깐다. 백그라운드 자동설치(useCliSetupEngine)가
         // 돌고 있을 수도 있지만, 유저가 지금 이 카드를 눌렀다는 건 그게 아직
         // 안 끝났다는 뜻이라 여기서 명시적으로 기다린다.
-        if (!useCliSetupStore.getState().results[row.id]?.installed) {
-          await runInstall(row);
+        if (!setup.readResults()[row.id]?.installed) {
+          await setup.installOne(row);
         }
         // 로그인 명령은 `launchLogin` 안의 `loginCommandFor` 가 정한다(프로브의
         // action 이 실은 **설치** 명령이거나 에러 문자열일 때의 폴백이 거기 있다).
         // 예전엔 여기서 `${model} login` 을 직접 조립했는데, 그건 그 규칙의 두
         // 번째 사본이었다 — codex 예외를 여기서만 손보다 어긋나기 딱 좋은 자리다.
-        const sessionId = await launchLogin(
+        const sessionId = await setup.login(
           row.model,
-          useCliSetupStore.getState().results[row.id]?.action,
+          setup.results[row.id]?.action,
         );
         setLoginSessionId(sessionId);
       } catch {
@@ -115,7 +119,7 @@ export function BeginnerConnectStep({
         setBusy(false);
       }
     },
-    [busy, runInstall],
+    [busy, setup],
   );
 
   const anyChecking = ROWS.some((r) => states[r.id]?.checking);
@@ -264,7 +268,16 @@ export function BeginnerConnectStep({
             data-testid="beginner-connect-terminal"
             className="relative h-64 overflow-hidden rounded-md border border-[#45475a] bg-[#11111b] p-2"
           >
-            <TerminalView sessionId={loginSessionId} isActive />
+            {/* 프리뷰(시연)에서는 실 PTY 를 띄우지 않는다 — 같은 자리에 대본을
+                재생한다(부수효과 0). 규격은 실물과 같게 둔다. */}
+            {setup.preview ? (
+              <PreviewTerminal
+                model={picked ?? "claude"}
+                stage={previewStage}
+              />
+            ) : (
+              <TerminalView sessionId={loginSessionId} isActive />
+            )}
           </div>
           <p className="mt-2 text-[11px] text-[#7f849c]">
             {t("beginner.connect.stuck")}
@@ -275,7 +288,8 @@ export function BeginnerConnectStep({
       <div className="mt-5 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          onClick={() => void probeAll()}
+          data-testid="beginner-connect-recheck"
+          onClick={setup.recheck}
           disabled={anyChecking}
           className={BUTTON_GHOST}
         >
