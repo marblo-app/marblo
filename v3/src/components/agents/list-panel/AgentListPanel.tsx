@@ -9,6 +9,7 @@ import { EmptyState } from "./EmptyState";
 import { FocusView } from "./FocusView";
 import { VENDOR_VISUALS, type AgentRowData, type VendorKind } from "./types";
 import TerminalView from "../../terminal/TerminalView";
+import { findAgentPtySessionId } from "../../../lib/agentTerminal";
 import { useTranslation } from "../../../lib/i18n";
 
 // Panel height (drag-resizable, persisted to localStorage). MIN of 180 keeps
@@ -168,18 +169,12 @@ export function AgentListPanel({
 
   const rows = useMemo<AgentRowData[]>(() => {
     // Agent rows: match each agent to its pty session by name suffix.
-    // attachSession is called from 5+ sites with different label formats:
-    //   "Agent: <name>"   (Layout.tsx initial spawn)
-    //   "🟣 <name>"       (useAgentReconnect / restartAgent / AgentStatusCard)
-    //   "🔵 <name>" / "🟢 <name>" (gemini / gpt+codex)
-    // endsWith covers all of them. Trade-off: if one agent name is a suffix
-    // of another (e.g. "foo-1" vs "x-foo-1") the wrong row matches; agent
-    // names in practice are distinct enough for Phase 1. Long-term fix is
-    // to store the canonical ptySessionId on the Agent Firestore doc.
+    // ★The matching rule lives in lib/agentTerminal (shared with the beginner
+    // shell's agent terminal) — see that file for the label formats it covers
+    // and the endsWith trade-off. Keeping a second copy here is how the two
+    // screens drift the day another attachSession label appears.
     const agentRows: AgentRowData[] = realAgents.map((a) => {
-      const matched = sessions.find(
-        (s) => s.isAgent && s.name.endsWith(a.name),
-      );
+      const matchedId = findAgentPtySessionId(sessions, a.name);
       // Firestore 에 들어온 model 값이 VENDOR_VISUALS 키에 없으면 (옛 값,
       // 빈 문자열, 신규 모델 미등록 등) AgentRow 에서 vendor.stripeColor 가
       // undefined 로 crash. 안전한 fallback 으로 "custom"(회색 X) 노출.
@@ -196,7 +191,7 @@ export function AgentListPanel({
         status: a.status === "working" ? "running" : a.status,
         lastActivityLabel: formatAge(a.costUpdatedAt ?? a.createdAt),
         isAgent: true,
-        ptySessionId: matched?.id,
+        ptySessionId: matchedId,
       };
     });
 

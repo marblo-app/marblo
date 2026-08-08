@@ -10,7 +10,15 @@ const EXAMPLE_KEYS = [
 ] as const;
 
 /**
- * 비기너 셸의 **지속 대화창** — 아래 오케 PTY 로 그대로 흘러가는 컴포저.
+ * 비기너 셸의 **첫 대화창** — 아래 오케 PTY 로 그대로 흘러가는 컴포저.
+ *
+ * ★언제 뜨는지는 이 파일이 정하지 않는다. 셸이
+ * `lib/beginnerMode.shouldShowBeginnerComposer` 로 판정해 마운트/언마운트한다.
+ * #879 는 이 칸을 "항상 살아 있는" 지속 대화창으로 만들었는데, 그러면 아래
+ * 오케 대화창과 입력면이 둘이 된다 — 재시연에서 사장님이 곧바로 "어디에 쓰냐"
+ * 를 물으신 자리다. 그래서 표면은 하나로 접혔다: 첫 마디 전에는 여기, 그
+ * 뒤로는 아래 오케 대화창. 예외는 티켓 상세가 문장을 채워 줬을 때뿐이고, 그때는
+ * 이 컴포넌트가 그 문장을 들고 다시 나타난다(그 프리필이 갈 곳이 PTY 에는 없다).
  *
  * 예전 `BeginnerFirstAsk` 는 이름 그대로 **첫 요청 한 번**짜리였다: 전달되면
  * 입력칸도 보내기 버튼도 사라지고 초록 확인 한 줄만 남았다. 같은 프롬프트를
@@ -35,15 +43,30 @@ export function BeginnerChatBar({
   ask,
   draft,
   onDraftChange,
+  mode = "intro",
+  onDismiss,
 }: {
   ask: BeginnerAsk;
   draft: string;
   onDraftChange: (next: string) => void;
+  /**
+   * 어떤 얼굴로 뜨는가 — 판정은 셸이 `lib/beginnerMode.beginnerComposerMode` 로
+   * 한다. `intro` 는 안내문·예시 칩을 펼친 첫 화면, `followUp` 은 티켓 상세의
+   * 프리필을 들고 잠깐 나온 컴포저다. 예전에는 `ask.locked` 로 이 얼굴을 스스로
+   * 정했는데, 그러면 **재시작 뒤** 프리필이 도착했을 때(세션 sentCount 는 0)
+   * 하던 일 위에 "무엇을 만들까요?" 가 다시 깔린다.
+   */
+  mode?: "intro" | "followUp";
+  /**
+   * 프리필로 되살아난 컴포저를 그냥 치우기(첫 국면에는 그리지 않는다 — 그때는
+   * 이 칸이 화면의 목적 자체다). 누르면 셸이 문장을 비우고, 규칙이 다시 컴포저를
+   * 접는다.
+   */
+  onDismiss?: () => void;
 }) {
   const { t } = useTranslation();
 
-  // 첫 전달 전 = 안내를 펼친 "무엇을 만들까요?" 국면. 이후 = 대화 국면.
-  const intro = !ask.locked;
+  const intro = mode === "intro";
 
   // ★전달에 성공하면 입력을 비운다 — 보낸 문장이 칸에 그대로 남아 있으면 그게
   // 연타의 미끼가 된다(같은 문장 재전송은 훅의 가드가 막지만, 애초에 유혹을
@@ -83,25 +106,39 @@ export function BeginnerChatBar({
         // 묻게 되는데, 답은 "같은 곳으로 간다" 이다.
         <SectionLabel
           trailing={
-            ask.delivery && (
-              <span
-                data-testid="beginner-first-ask-result"
-                data-delivery={ask.delivery}
-                className={
-                  ask.delivery === "delivered"
-                    ? "text-[#a6e3a1]"
+            <span className="flex items-center gap-2">
+              {ask.delivery && (
+                <span
+                  data-testid="beginner-first-ask-result"
+                  data-delivery={ask.delivery}
+                  className={
+                    ask.delivery === "delivered"
+                      ? "text-[#a6e3a1]"
+                      : ask.delivery === "queued"
+                        ? "text-[#f9e2af]"
+                        : "text-[#f38ba8]"
+                  }
+                >
+                  {ask.delivery === "delivered"
+                    ? t("beginner.ask.sentShort")
                     : ask.delivery === "queued"
-                      ? "text-[#f9e2af]"
-                      : "text-[#f38ba8]"
-                }
-              >
-                {ask.delivery === "delivered"
-                  ? t("beginner.ask.sentShort")
-                  : ask.delivery === "queued"
-                    ? t("beginner.ask.queuedShort")
-                    : t("beginner.ask.failedShort")}
-              </span>
-            )
+                      ? t("beginner.ask.queuedShort")
+                      : t("beginner.ask.failedShort")}
+                </span>
+              )}
+              {onDismiss && (
+                <button
+                  type="button"
+                  data-testid="beginner-composer-dismiss"
+                  onClick={onDismiss}
+                  title={t("beginner.chat.dismiss")}
+                  aria-label={t("beginner.chat.dismiss")}
+                  className="text-[#585b70] transition-colors hover:text-[#cdd6f4]"
+                >
+                  ✕
+                </button>
+              )}
+            </span>
           }
         >
           {t("beginner.chat.composerLabel")}

@@ -49,7 +49,14 @@ import {
 import { useLocaleStore } from "../../src/lib/i18n";
 import { ko } from "../../src/locales/ko";
 
-/** 셸이 하는 배선(훅 + 입력 문자열 보유)을 그대로 재현한 최소 하네스. */
+/**
+ * 셸이 하는 배선(훅 + 입력 문자열 보유)을 그대로 재현한 최소 하네스.
+ *
+ * ★여기서는 컴포저를 **계속 마운트한 채** 둔다. 이 파일의 관심사는 컴포넌트가
+ * 스스로 잠기지 않는다는 것(같은 문장 가드가 폼 잠금이 아니라 훅에 있다)이고,
+ * "언제 접히는가" 는 셸의 규칙이라 `beginner-shell-wiring.test.ts` 가 든다.
+ * 얼굴만 셸과 같은 규칙으로 바꾼다: 첫 전달 뒤에는 안내를 접은 얼굴.
+ */
 function Harness() {
   const ask = useBeginnerAsk();
   const [draft, setDraft] = useState("");
@@ -57,6 +64,7 @@ function Harness() {
     ask,
     draft,
     onDraftChange: setDraft,
+    mode: ask.locked ? "followUp" : "intro",
   });
 }
 
@@ -85,7 +93,10 @@ afterEach(() => {
 });
 
 describe("지속 대화창", () => {
-  it("★전달된 뒤에도 입력칸과 보내기가 살아 있다 (일회성 아님)", async () => {
+  it("★전달돼도 컴포넌트가 스스로 잠기지 않는다 (일회성 아님)", async () => {
+    // 화면에서 이 칸이 접히는 건 셸의 판정이다(대화 표면 하나 —
+    // beginner-shell-wiring.test.ts). 컴포넌트 자체가 잠기면 프리필로 되살려도
+    // 아무것도 못 쓰게 되므로, 그 둘은 다른 계약이다.
     render(createElement(Harness));
     await send("README 를 읽고 시작 가이드를 정리해 줘");
 

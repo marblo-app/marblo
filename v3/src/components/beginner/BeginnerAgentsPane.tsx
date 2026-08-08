@@ -20,16 +20,26 @@ import { BEGINNER_ROLE_ICON, SectionLabel } from "./beginnerUi";
  * 그건 승격 후 에이전트 탭에서 배우는 것이고, 비기너에게 정확한 해상도는
  * "누가, 무슨 일에, 지금 붙어 있나" 딱 셋이다. 티켓 줄을 누르면 미니 보드의
  * 카드를 누른 것과 **같은** 상세가 열린다 — 두 입구가 한 곳으로 모여야 한다.
+ *
+ * ★행 자체를 누르면 그 에이전트의 **터미널**이 열린다(`onAgentClick`). 시연에서
+ * 사장님이 에이전트를 누르셨을 때 아무 일도 없던 자리다 — 상태 점까지 보여
+ * 놓고 "그래서 지금 뭐 하는데?" 에 답하지 않으면, 이 패널도 미니 보드가 그랬듯
+ * 그림으로 읽힌다. 한 행 안에 목적지가 둘(행=터미널 / 티켓 줄=티켓 상세)이라
+ * 티켓 줄은 클릭을 **삼킨다**(stopPropagation) — 안 그러면 티켓을 누를 때마다
+ * 터미널이 함께 열린다.
  */
 export function BeginnerAgentsPane({
   agents,
   tasks,
   onTaskClick,
+  onAgentClick,
 }: {
   agents: Agent[];
   tasks: Task[];
   /** 에이전트가 붙은 티켓을 눌렀을 때. 생략하면 줄이 클릭 불가가 된다. */
   onTaskClick?: (task: Task) => void;
+  /** 에이전트 행을 눌렀을 때(터미널 열기). 생략하면 행이 클릭 불가가 된다. */
+  onAgentClick?: (agent: Agent) => void;
 }) {
   const { t } = useTranslation();
 
@@ -74,6 +84,7 @@ export function BeginnerAgentsPane({
                     null
                   }
                   onTaskClick={onTaskClick}
+                  onAgentClick={onAgentClick}
                 />
               ))}
             </ul>
@@ -103,19 +114,28 @@ function AgentRow({
   agent,
   task,
   onTaskClick,
+  onAgentClick,
 }: {
   agent: Agent;
   task: Task | null;
   onTaskClick?: (task: Task) => void;
+  onAgentClick?: (agent: Agent) => void;
 }) {
   const { t } = useTranslation();
-  const clickable = !!task && !!onTaskClick;
+  const taskClickable = !!task && !!onTaskClick;
+  const rowClickable = !!onAgentClick;
 
   return (
     <li
       data-testid="beginner-agent-row"
       data-agent-status={agent.status}
-      className="rounded-md border border-[#313244] bg-[#1e1e2e] px-2.5 py-2"
+      // 행 전체가 터미널로 가는 문이다. 목록에서 이름만 누르게 하면 타깃이
+      // 11px 텍스트만큼으로 줄어드는데, 이 패널은 폭이 19rem 뿐이라 그 여백까지
+      // 다 눌리는 편이 낫다.
+      onClick={rowClickable ? () => onAgentClick!(agent) : undefined}
+      className={`rounded-md border border-[#313244] bg-[#1e1e2e] px-2.5 py-2 ${
+        rowClickable ? "cursor-pointer hover:border-[#45475a]" : ""
+      }`}
     >
       <div className="flex items-center gap-1.5">
         <span aria-hidden className="text-[11px] leading-4">
@@ -140,11 +160,19 @@ function AgentRow({
         <button
           type="button"
           data-testid="beginner-agent-task"
-          disabled={!clickable}
-          onClick={clickable ? () => onTaskClick!(task) : undefined}
+          disabled={!taskClickable}
+          // ★행 클릭(터미널)을 삼킨다 — 티켓 줄의 목적지는 티켓 상세다.
+          onClick={
+            taskClickable
+              ? (e) => {
+                  e.stopPropagation();
+                  onTaskClick!(task);
+                }
+              : undefined
+          }
           title={task.title}
           className={`mt-1 block w-full truncate text-left text-[11px] leading-4 text-[#7f849c] ${
-            clickable ? "hover:text-[#89b4fa]" : "cursor-default"
+            taskClickable ? "hover:text-[#89b4fa]" : "cursor-default"
           }`}
         >
           {task.title}
@@ -152,6 +180,17 @@ function AgentRow({
       ) : (
         <p className="mt-1 truncate text-[11px] leading-4 text-[#585b70]">
           {t("beginner.agents.noTask")}
+        </p>
+      )}
+
+      {/* 행이 눌린다는 사실을 말로 한 번 더 — 커서만으로는 "여기 뭐가 있나" 가
+          안 읽힌다. 이 패널에서 유일하게 늘어나는 어포던스라 작게 둔다. */}
+      {rowClickable && (
+        <p
+          data-testid="beginner-agent-open-terminal"
+          className="mt-1 text-[10px] leading-4 text-[#585b70]"
+        >
+          {t("beginner.agents.openTerminal")}
         </p>
       )}
     </li>

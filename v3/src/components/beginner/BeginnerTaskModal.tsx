@@ -1,9 +1,22 @@
 import { useEffect } from "react";
 import { useTranslation } from "../../lib/i18n";
-import { beginnerBoardColumnFor } from "../../lib/beginnerMode";
+import {
+  BEGINNER_BOARD_COLUMNS,
+  beginnerBoardColumnFor,
+  type BeginnerBoardColumn,
+} from "../../lib/beginnerMode";
 import type { Agent } from "../../types/agent";
 import type { Task } from "../../types/task";
-import { BEGINNER_ROLE_ICON } from "./beginnerUi";
+import { BEGINNER_ROLE_ICON, SectionLabel } from "./beginnerUi";
+
+const COLUMN_LABEL_KEY: Record<
+  BeginnerBoardColumn,
+  "beginner.board.todo" | "beginner.board.doing" | "beginner.board.done"
+> = {
+  todo: "beginner.board.todo",
+  doing: "beginner.board.doing",
+  done: "beginner.board.done",
+};
 
 /**
  * 미니 보드 티켓 상세 — 비기너 판.
@@ -89,7 +102,13 @@ export function BeginnerTaskModal({
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-md rounded-xl border border-[#45475a] bg-[#181825] p-6 shadow-2xl"
       >
-        <div className="flex items-center gap-2">
+        {/* ★이 화면이 무엇인지 먼저 말한다. 재시연에서 사장님은 카드를 누르고
+            열린 이 창을 "티켓 상세" 가 아니라 "물어보기 창" 으로 읽으셨다 —
+            제목 한 줄과 큰 파란 버튼만 눈에 들어오면 그렇게 읽힌다. 눈썹 라벨과
+            아래 진행 스텝이 "여기는 그 일감의 상태를 보는 곳" 이라고 못박는다. */}
+        <SectionLabel>{t("beginner.taskDetail.label")}</SectionLabel>
+
+        <div className="mt-2 flex items-center gap-2">
           <span
             data-testid="beginner-task-modal-status"
             className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
@@ -121,7 +140,50 @@ export function BeginnerTaskModal({
           </p>
         )}
 
-        <div className="mt-4 flex items-center gap-1.5 text-xs leading-5 text-[#7f849c]">
+        {/* ── 진행 3단계 — "지금 어디까지 왔나" 를 한 눈에 ────────────────
+            상태 칩 하나로는 "그래서 남은 게 뭔데" 가 안 읽힌다. 미니 보드의
+            세 레인과 **같은 이름**을 쓴다 — 카드가 어느 칸에서 어느 칸으로
+            넘어가는 중인지가 이 화면에서도 같은 말로 이어져야 한다. */}
+        <ol
+          data-testid="beginner-task-modal-steps"
+          className="mt-4 flex items-center gap-1.5"
+        >
+          {BEGINNER_BOARD_COLUMNS.map((step) => {
+            const index = BEGINNER_BOARD_COLUMNS.indexOf(step);
+            const current = BEGINNER_BOARD_COLUMNS.indexOf(column);
+            const passed = index <= current;
+            return (
+              <li
+                key={step}
+                data-step={step}
+                data-step-state={
+                  index === current ? "current" : passed ? "passed" : "upcoming"
+                }
+                className="flex min-w-0 flex-1 flex-col gap-1"
+              >
+                <span
+                  aria-hidden
+                  className={`h-1 rounded-full ${
+                    passed
+                      ? stuck && index === current
+                        ? "bg-[#f9e2af]"
+                        : "bg-[#89b4fa]"
+                      : "bg-[#313244]"
+                  }`}
+                />
+                <span
+                  className={`truncate text-[10px] leading-4 ${
+                    index === current ? "text-[#cdd6f4]" : "text-[#6c7086]"
+                  }`}
+                >
+                  {t(COLUMN_LABEL_KEY[step])}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+
+        <div className="mt-3 flex items-center gap-1.5 text-xs leading-5 text-[#7f849c]">
           <span aria-hidden>{BEGINNER_ROLE_ICON[task.role] ?? "📋"}</span>
           {owner ? (
             <span data-testid="beginner-task-modal-owner">

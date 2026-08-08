@@ -5,7 +5,12 @@ import { DemoMode, DEMO_CONNECT_PENDING_KEY } from "../onboarding/DemoMode";
 import { useAppLifecycle } from "../../hooks/useAppLifecycle";
 import { useBeginnerAsk } from "../../hooks/useBeginnerAsk";
 import { useCliSetupEngine } from "../../hooks/useCliSetupEngine";
-import { shouldPromote, type PromotionTrigger } from "../../lib/beginnerMode";
+import {
+  beginnerComposerMode,
+  shouldPromote,
+  type PromotionTrigger,
+} from "../../lib/beginnerMode";
+import { findAgentPtySessionId } from "../../lib/agentTerminal";
 import { useAgentStore } from "../../stores/agentStore";
 import { useBeginnerModeStore } from "../../stores/beginnerModeStore";
 import { useCliSetupStore } from "../../stores/cliSetupStore";
@@ -13,9 +18,11 @@ import { useFirstRunSampleStore } from "../../stores/firstRunSampleStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { useTaskStore } from "../../stores/taskStore";
+import { useTerminalStore } from "../../stores/terminalStore";
 import { connectFolder } from "../../services/cliSetupActions";
 import telemetry from "../../services/telemetryService";
 import { BeginnerAgentsPane } from "./BeginnerAgentsPane";
+import { BeginnerAgentTerminalModal } from "./BeginnerAgentTerminalModal";
 import { BeginnerChatBar } from "./BeginnerChatBar";
 import { BeginnerConnectStep } from "./BeginnerConnectStep";
 import { BeginnerLiveStrip } from "./BeginnerLiveStrip";
@@ -87,6 +94,9 @@ export function BeginnerShell() {
   const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
   const tasks = useTaskStore((s) => s.tasks);
   const agents = useAgentStore((s) => s.agents);
+  // 에이전트 터미널의 PTY 세션 원장. 어드밴스드 에이전트 탭이 읽는 것과 **같은**
+  // 스토어다 — 비기너가 여는 터미널은 그 탭이 여는 것과 같은 세션이어야 한다.
+  const terminalSessions = useTerminalStore((s) => s.sessions);
 
   const enteredAt = useBeginnerModeStore((s) => s.enteredAt);
   const entryReason = useBeginnerModeStore((s) => s.entryReason);
@@ -110,6 +120,9 @@ export function BeginnerShell() {
   // 미니 보드/에이전트에서 연 티켓 상세. **id** 로 든다: 티켓 객체를 들면
   // 구독이 갱신돼도 모달이 옛 스냅샷을 계속 그린다(상태가 안 움직인다).
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  // 에이전트 패널에서 연 터미널. 같은 이유로 id 로 든다(상태 점·담당 티켓이
+  // 모달 헤더에서도 살아 움직여야 한다).
+  const [openAgentId, setOpenAgentId] = useState<string | null>(null);
   const [showDemo, setShowDemo] = useState(false);
   // ★원클릭 모달을 **셸**이 든다. 연결 게이트 안에 두면 인증이 성립하는 순간
   // 게이트가 폴더 게이트로 갈아치워지면서 모달째 언마운트돼, "연결됐어요" 가
@@ -196,16 +209,60 @@ export function BeginnerShell() {
     [openTaskId, tasks],
   );
 
-  const openTaskDetail = useCallback(
-    (task: { id: string }) => setOpenTaskId(task.id),
-    [],
+  // 에이전트 터미널도 **현재** 구독 스냅샷에서 다시 찾는다(에이전트가 죽어
+  // 목록에서 빠지면 모달도 닫힌다). 세션 짝짓기 규칙은 어드밴스드 에이전트
+  // 탭과 공유한다 — `lib/agentTerminal`.
+  const openAgent = useMemo(
+    () =>
+      openAgentId ? (agents.find((a) => a.id === openAgentId) ?? null) : null,
+    [openAgentId, agents],
   );
+  const openAgentTask = useMemo(
+    () =>
+      openAgent?.currentTaskId
+        ? (tasks.find((x) => x.id === openAgent.currentTaskId) ?? null)
+        : null,
+    [openAgent, tasks],
+  );
+  const openAgentSessionId = useMemo(
+    () =>
+      openAgent
+        ? findAgentPtySessionId(terminalSessions, openAgent.name)
+        : undefined,
+    [openAgent, terminalSessions],
+  );
+
+  // 두 모달은 서로를 배타한다 — 겹쳐 띄우면 Esc 한 번이 어느 쪽을 닫는지
+  // 알 수 없고, 둘 다 z-[60] 이라 뒤엣것이 그냥 가려진다.
+  const openTaskDetail = useCallback((task: { id: string }) => {
+    setOpenAgentId(null);
+    setOpenTaskId(task.id);
+  }, []);
   const closeTaskDetail = useCallback(() => setOpenTaskId(null), []);
+
+  const openAgentTerminal = useCallback((agent: { id: string }) => {
+    setOpenTaskId(null);
+    setOpenAgentId(agent.id);
+  }, []);
+  const closeAgentTerminal = useCallback(() => setOpenAgentId(null), []);
 
   // 티켓 상세의 "오케에게 물어보기" — 문장을 대화창에 **채우기만** 한다. 대신
   // 보내 주면 유저가 무엇이 나갔는지 모른 채 오케가 움직이고, 문장을 고칠 기회도
   // 없다. 심플 모드라도 마지막 한 번은 유저가 누르는 게 맞다.
+  // ★대화가 시작된 뒤 상단 컴포저는 접혀 있는데, 이 프리필이 그것을 되살린다
+  // (규칙: shouldShowBeginnerComposer 의 draft 예외). 프리필이 갈 곳이 아래
+  // 오케 PTY 에는 없어서다 — 터미널에 남의 문장을 몰래 타이핑할 수는 없다.
   const askAboutTask = useCallback((message: string) => setDraft(message), []);
+  const dismissComposer = useCallback(() => setDraft(""), []);
+
+  // ★상단 컴포저를 지금 그릴 것인가, 어떤 얼굴로 — 규칙은 순수함수가 든다
+  // (lib/beginnerMode). 첫 마디 전에는 여기가 대화창, 그 뒤로는 아래 오케
+  // 대화창 하나뿐이고, 티켓 프리필만 예외로 잠깐 되살린다.
+  const composerMode = beginnerComposerMode({
+    sentCount: ask.sentCount,
+    totalTasks: tasks.length,
+    draft,
+  });
 
   // 안정적인 identity — 모달의 자동 닫힘 타이머가 이 콜백에 걸려 있다.
   const openOneClick = useCallback(() => setShowOneClick(true), []);
@@ -361,16 +418,27 @@ export function BeginnerShell() {
             </div>
           ) : (
             <>
-              {/* ★지속 대화창 — 전달돼도 사라지지 않는다. 중복 주입 가드는 폼
-                  잠금이 아니라 `useBeginnerAsk` 의 동일문장 창으로 옮겼다.
-                  data-coach: 코치마크 투어의 앵커(BeginnerTour.COACH_ANCHORS). */}
-              <div className="flex-shrink-0" data-coach="beginner-ask">
-                <BeginnerChatBar
-                  ask={ask}
-                  draft={draft}
-                  onDraftChange={setDraft}
-                />
-              </div>
+              {/* ★첫 대화창 — 첫 마디가 오케에게 닿으면 접힌다. 아래 오케
+                  대화창(실 PTY)과 입력칸이 둘이면 유저는 매번 "어디에 쓰냐" 를
+                  고르게 되고, 그건 심플 모드가 없애려던 종류의 선택이다.
+                  티켓 상세의 "물어보기" 가 문장을 채워 주면 다시 나타난다.
+                  data-coach: 코치마크 투어의 앵커(BeginnerTour.COACH_ANCHORS).
+                  ★접혀 있으면 앵커도 함께 사라지는데, 코치마크는 없는 앵커의
+                  스텝을 알아서 건너뛴다(CoachmarkOverlay.resolveSteps). */}
+              {composerMode !== "hidden" && (
+                <div className="flex-shrink-0" data-coach="beginner-ask">
+                  <BeginnerChatBar
+                    ask={ask}
+                    draft={draft}
+                    onDraftChange={setDraft}
+                    mode={composerMode}
+                    // 첫 국면(이 칸이 화면의 목적)에는 치우기를 주지 않는다.
+                    onDismiss={
+                      composerMode === "followUp" ? dismissComposer : undefined
+                    }
+                  />
+                </div>
+              )}
 
               {/* ★S4: 진행상황을 별도 탭이 아니라 대화창 바로 아래에 그린다.
                   ★높이 상한(34%)은 하단 2페인을 지키기 위한 것이다. 티켓이 대여섯
@@ -420,6 +488,7 @@ export function BeginnerShell() {
                     agents={agents}
                     tasks={tasks}
                     onTaskClick={openTaskDetail}
+                    onAgentClick={openAgentTerminal}
                   />
                 </section>
               </div>
@@ -433,7 +502,13 @@ export function BeginnerShell() {
           lib/coachmark 가 든다(완주/다시보지않기 = 끝, 그냥 닫으면 3회까지). */}
       <BeginnerTour
         ready={cliReady && hasFolder}
-        blocked={!!promotion || showDemo || showOneClick}
+        blocked={
+          !!promotion ||
+          showDemo ||
+          showOneClick ||
+          !!openTaskId ||
+          !!openAgentId
+        }
       />
 
       {showOneClick && <BeginnerOneClickModal onClose={closeOneClick} />}
@@ -445,6 +520,16 @@ export function BeginnerShell() {
           agents={agents}
           onAsk={askAboutTask}
           onClose={closeTaskDetail}
+        />
+      )}
+
+      {/* ★에이전트 패널에서 연 터미널 — 어드밴스드와 같은 PTY, 같은 TerminalView. */}
+      {openAgent && (
+        <BeginnerAgentTerminalModal
+          agent={openAgent}
+          task={openAgentTask}
+          sessionId={openAgentSessionId}
+          onClose={closeAgentTerminal}
         />
       )}
 

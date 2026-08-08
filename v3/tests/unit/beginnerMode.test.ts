@@ -11,6 +11,7 @@ import {
   BEGINNER_COLUMN_LIMIT,
   beginnerBoardColumnFor,
   groupBeginnerBoard,
+  beginnerComposerMode,
   type BeginnerModeRecord,
   type PriorInstallMarkers,
 } from "../../src/lib/beginnerMode";
@@ -344,5 +345,65 @@ describe("groupBeginnerBoard — 7상태 → 미니 보드 3컬럼", () => {
       "IN_PROGRESS",
       "DONE",
     ]);
+  });
+});
+
+/**
+ * ★대화 표면은 하나 — 상단 컴포저 vs 아래 오케 대화창(실 PTY).
+ *
+ * #879 가 상단을 "지속 대화창" 으로 만들면서 입력칸이 둘이 됐고, 재시연에서
+ * 사장님이 곧바로 "어디에 쓰냐" 를 물으셨다. 이 규칙이 그 답이다. 화면에서
+ * 눈으로 확인하려면 오케 PTY 가 붙은 실행이 필요해서, 규칙 자체를 여기서 못박는다.
+ */
+describe("상단 컴포저 노출 규칙", () => {
+  const base = { sentCount: 0, totalTasks: 0, draft: "" };
+
+  it("첫 마디 전에는 안내를 펼친 채 보인다 — 그때는 여기가 유일한 대화창이다", () => {
+    expect(beginnerComposerMode(base)).toBe("intro");
+  });
+
+  it("첫 화면에서 타이핑 중이어도 여전히 첫 화면이다", () => {
+    expect(beginnerComposerMode({ ...base, draft: "가이드 정리해 줘" })).toBe(
+      "intro",
+    );
+  });
+
+  it("★오케가 첫 마디를 받으면 접힌다 (아래 대화창이 이어받는다)", () => {
+    expect(beginnerComposerMode({ ...base, sentCount: 1 })).toBe("hidden");
+  });
+
+  it("★재시작해도 되살아나지 않는다 — 티켓이 있으면 이미 대화가 있었다는 뜻", () => {
+    // sentCount 는 세션 상태라 재시작하면 0 이다. 그것만 보면 하던 일 위에
+    // "무엇을 만들까요?" 가 다시 덮인다.
+    expect(beginnerComposerMode({ ...base, totalTasks: 3 })).toBe("hidden");
+  });
+
+  it("★티켓 상세가 문장을 채워 주면 다시 나타난다 — 단 첫 화면의 얼굴은 아니다", () => {
+    expect(
+      beginnerComposerMode({
+        sentCount: 4,
+        totalTasks: 9,
+        draft: "가이드 초안 어떻게 돼가?",
+      }),
+    ).toBe("followUp");
+    // 재시작 직후(세션 sentCount=0)에도 안내문·예시 칩이 다시 깔리면 안 된다.
+    expect(
+      beginnerComposerMode({
+        sentCount: 0,
+        totalTasks: 9,
+        draft: "가이드 초안 어떻게 돼가?",
+      }),
+    ).toBe("followUp");
+  });
+
+  it("공백뿐인 문장은 프리필이 아니다", () => {
+    expect(
+      beginnerComposerMode({ sentCount: 1, totalTasks: 1, draft: "   " }),
+    ).toBe("hidden");
+  });
+
+  it("전달에 실패해 sentCount 가 안 오른 국면에서는 계속 보인다", () => {
+    // 실패는 오케가 받은 적이 없다는 뜻이라, 유저가 곧바로 다시 눌러야 한다.
+    expect(beginnerComposerMode(base)).toBe("intro");
   });
 });

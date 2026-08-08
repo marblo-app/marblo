@@ -127,18 +127,25 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.board.more": "+{count} more",
   "beginner.agents.label": "Who's working",
   "beginner.agents.empty":
-    "Nobody's on the job yet. Say what you'd like built above and Marblo puts a team on it.",
+    "Nobody's on the job yet. Say what you'd like built and Marblo puts a team on it.",
   "beginner.agents.noTask": "Nothing assigned right now",
+  "beginner.agents.openTerminal": "Tap to see what they're doing",
+  "beginner.agents.terminalEmpty":
+    "Nothing to show yet. This teammate just started or is reconnecting — try again in a moment.",
+  "beginner.agents.terminalHint":
+    "This is what your teammate is working on right now. Watching is enough — but you can answer them here if they ask.",
 
   // ── Chat ────────────────────────────────────────────────────────────────
   "beginner.chat.title": "Talk to Marblo",
   "beginner.chat.hint": "Keep the conversation going right here.",
   "beginner.chat.composerLabel": "Say something else",
+  "beginner.chat.dismiss": "Close this box",
   "beginner.chat.placeholder":
     "What next? e.g. add a few examples to the guide you just wrote",
   "beginner.chat.orchestratorRunning": "In conversation",
 
   // ── Ticket detail (mini board card click) ───────────────────────────────
+  "beginner.taskDetail.label": "Task detail",
   "beginner.taskDetail.owner": "{name} is on it",
   "beginner.taskDetail.noOwner": "Nobody's picked this up yet",
   "beginner.taskDetail.askProgressCta": "Ask how it's going",

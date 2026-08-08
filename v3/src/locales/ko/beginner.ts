@@ -127,18 +127,25 @@ export const beginner = {
   "beginner.board.more": "+{count}개 더",
   "beginner.agents.label": "일하는 팀",
   "beginner.agents.empty":
-    "아직 붙은 팀원이 없어요. 위에서 무엇을 만들지 말씀하시면 마블로가 팀을 붙입니다.",
+    "아직 붙은 팀원이 없어요. 무엇을 만들지 말씀하시면 마블로가 팀을 붙입니다.",
   "beginner.agents.noTask": "지금은 맡은 일이 없어요",
+  "beginner.agents.openTerminal": "눌러서 무슨 작업 중인지 보기",
+  "beginner.agents.terminalEmpty":
+    "아직 화면이 없어요. 이 팀원이 막 붙었거나 다시 연결하는 중입니다 — 잠시 뒤 다시 눌러 보세요.",
+  "beginner.agents.terminalHint":
+    "팀원이 지금 하고 있는 작업 화면이에요. 보기만 해도 되고, 필요하면 여기에 직접 답해 줄 수도 있어요.",
 
   // ── 챗 ──────────────────────────────────────────────────────────────────
   "beginner.chat.title": "마블로와 대화하기",
   "beginner.chat.hint": "여기에 이어서 말을 걸 수 있어요.",
   "beginner.chat.composerLabel": "이어서 말하기",
+  "beginner.chat.dismiss": "이 입력칸 닫기",
   "beginner.chat.placeholder":
     "이어서 하고 싶은 말을 적어 주세요. 예: 방금 만든 가이드에 예시를 더 넣어 줘",
   "beginner.chat.orchestratorRunning": "대화 중",
 
   // ── 티켓 상세(미니 보드 카드 클릭) ──────────────────────────────────────
+  "beginner.taskDetail.label": "일감 상세",
   "beginner.taskDetail.owner": "{name} 이(가) 맡고 있어요",
   "beginner.taskDetail.noOwner": "아직 아무도 붙지 않았어요",
   "beginner.taskDetail.askProgressCta": "진행 상황 물어보기",

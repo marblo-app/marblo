@@ -347,3 +347,57 @@ export function groupBeginnerBoard<T extends { status: TaskStatus }>(
     };
   });
 }
+
+// ── 대화 표면은 하나여야 한다 ────────────────────────────────────────────────
+
+export interface BeginnerComposerInput {
+  /** 오케가 **실제로 받은** 횟수(useBeginnerAsk.sentCount). 0 = 아직 첫 마디 전. */
+  sentCount: number;
+  /** 지금 보드에 있는 티켓 수 — 재시작해도 남는 "대화가 이미 있었다" 의 흔적. */
+  totalTasks: number;
+  /** 티켓 상세가 채워 준 문장. 비어 있지 않으면 무조건 보여야 한다. */
+  draft: string;
+}
+
+/**
+ * 상단 컴포저의 국면.
+ *
+ *   hidden   — 안 그린다. 대화는 아래 오케 대화창(실 PTY) 하나로 흐른다.
+ *   intro    — "무엇을 만들까요?" — 첫 마디를 받는 화면(안내문 + 예시 칩).
+ *   followUp — 티켓 상세가 채워 준 문장을 들고 잠깐 다시 나온 컴포저.
+ */
+export type BeginnerComposerMode = "hidden" | "intro" | "followUp";
+
+/**
+ * 상단 컴포저(BeginnerChatBar)를 **지금 그릴 것인가, 어떤 얼굴로.**
+ *
+ * ★#879 이 상단을 지속 대화창으로 만들면서 입력면이 둘이 됐다: 위 컴포저와
+ * 아래 오케 대화창(`OrchestratorPanel` = 실 PTY). 둘 다 같은 곳으로 흘러가지만,
+ * 시연에서 사장님이 곧바로 물으신 게 "어디에 써야 하냐" 였다. 두 칸이 나란히
+ * 있으면 유저는 매번 그 선택을 하게 되고, 그건 심플 모드가 없애려던 종류의
+ * 선택이다. 그래서 대화 표면은 하나로 접는다.
+ *
+ * 규칙은 셋이다:
+ *
+ *   ① 첫 마디 전에는 **위**가 대화창이다. 아래 오케 PTY 는 비기너에게 "터미널"
+ *      로 읽혀서, 거기 커서를 두고 한국어를 치라고 하면 아무도 안 친다. S4
+ *      dead-end("무엇을 해야 할지 모르겠다")의 입구가 이 카드다.
+ *   ② 오케가 첫 마디를 받은 뒤에는 **아래**가 대화창이다. 오케의 답이 거기
+ *      흐르고 있으므로, 이어지는 말은 답이 보이는 곳에서 하는 게 맞다.
+ *   ③ 예외 — 티켓 상세의 "물어보기" 가 문장을 채워 줬으면 다시 보인다. 그
+ *      문장이 갈 곳이 없으면 그 버튼이 죽는다(PTY 는 프리필 대상이 아니다).
+ *      단 그때의 얼굴은 `followUp` 이다: 하던 일 위에 "무엇을 만들까요?" 와
+ *      예시 칩이 다시 깔리면, 그건 첫 화면이 아니라 뒤로 감긴 화면이다.
+ *
+ * `totalTasks` 를 함께 보는 이유: `sentCount` 는 세션 상태라 재시작하면 0 으로
+ * 돌아간다. 티켓이 이미 있는 설치에서 "무엇을 만들까요?" 가 다시 뜨면, 그건
+ * 첫 화면이 아니라 하던 일 위에 덮인 중복 입력칸이다.
+ */
+export function beginnerComposerMode({
+  sentCount,
+  totalTasks,
+  draft,
+}: BeginnerComposerInput): BeginnerComposerMode {
+  if (sentCount === 0 && totalTasks === 0) return "intro";
+  return draft.trim().length > 0 ? "followUp" : "hidden";
+}
