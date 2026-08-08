@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useAuth } from "./useAuth";
 import { useEditorStore } from "../stores/editorStore";
+import { useFirstRunSampleStore } from "../stores/firstRunSampleStore";
 import { useProjectStore } from "../stores/projectStore";
 import { useLocaleStore } from "../lib/i18n";
 import {
@@ -93,6 +94,10 @@ export function useFirstRunSampleProject(
     if (!shouldSeedSampleProject(gate)) return;
 
     startedRef.current = true;
+    // 화면용 상태 — 이 1~2초 동안 셸이 "폴더를 골라 주세요" 를 그리면 유저가
+    // 곧 자동으로 붙을 폴더를 직접 고르러 간다(그리고 화면이 튄다).
+    const setStatus = useFirstRunSampleStore.getState().setStatus;
+    setStatus("preparing");
     void (async () => {
       try {
         // ★세션 복원이 정착하기 전에 결정하지 않는다. 복원은 main 으로 두 번
@@ -112,6 +117,7 @@ export function useFirstRunSampleProject(
         );
         if (!result?.ok || !result.path) {
           telemetry.sampleProjectSeeded("failed");
+          setStatus("failed");
           console.warn(
             "[firstRunSample] could not prepare the sample project:",
             result?.error,
@@ -125,10 +131,12 @@ export function useFirstRunSampleProject(
         // 수동 폴더 픽과 **정확히 같은** 경로로 등록한다 — 중복 가드·기기별 경로
         // 기록·오케 자동기동이 전부 여기에 붙어 있다.
         await connectFolderPath(result.path);
+        setStatus("connected");
       } catch (err) {
         // 자동 편의 기능이 첫 실행을 깨뜨리면 안 된다. 실패하면 지금까지와
         // 똑같이 사용자가 폴더를 고르는 화면으로 남는다.
         telemetry.sampleProjectSeeded("failed");
+        setStatus("failed");
         console.warn("[firstRunSample] auto-connect failed (non-fatal):", err);
       }
     })();

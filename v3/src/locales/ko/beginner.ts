@@ -32,12 +32,56 @@ export const beginner = {
   "beginner.connect.watchDemo": "먼저 데모 보기",
   "beginner.connect.stuck":
     "잘 안 되나요? 터미널에 나온 주소를 브라우저에 직접 붙여 넣어도 됩니다.",
+  "beginner.connect.pickYourself": "직접 고르기",
+  "beginner.connect.installFail": "설치하지 못했어요",
+  "beginner.connect.officialDocs": "공식 설치 안내 보기",
+
+  // ── ①-a 원클릭 (모두 설치 + 자동 로그인) ────────────────────────────────
+  "beginner.oneClick.ctaTitle": "한 번에 준비하기",
+  "beginner.oneClick.ctaBody":
+    "필요한 CLI 를 대신 설치하고, 끝나면 로그인 창까지 자동으로 띄워 드려요. 브라우저에서 승인만 하시면 됩니다.",
+  "beginner.oneClick.cta": "모두 설치하고 자동 로그인",
+  "beginner.oneClick.ctaPending": "설치할 것 {count}개",
+  "beginner.oneClick.ctaNothingToInstall":
+    "설치는 이미 끝났어요 — 로그인만 하면 됩니다",
+  "beginner.oneClick.title": "설치하고 로그인하는 중이에요",
+  "beginner.oneClick.step.install": "설치",
+  "beginner.oneClick.step.auth": "로그인",
+  "beginner.oneClick.status.installing":
+    "필요한 CLI 를 설치하고 있어요. 잠시만 기다려 주세요.",
+  "beginner.oneClick.status.signIn": "설치가 끝났어요. 로그인 창을 띄우는 중…",
+  "beginner.oneClick.status.awaitingAuth":
+    "브라우저에서 승인만 하시면 됩니다. 끝나면 자동으로 넘어가요.",
+  "beginner.oneClick.status.blocked":
+    "자동 설치가 막혔어요. 아래 명령을 터미널에 직접 붙여 넣으면 됩니다.",
+  "beginner.oneClick.status.done": "연결됐어요. 바로 시작할 수 있습니다.",
+  "beginner.oneClick.installProgress": "{done}/{total} 설치됨",
+  "beginner.oneClick.partial":
+    "{total}개 중 {failed}개는 실패했지만, 성공한 것으로 계속 진행해요.",
+  "beginner.oneClick.terminalHint":
+    "{cli} 로그인 창이에요. 브라우저가 열리면 승인해 주세요 — 아래 창은 그대로 두시면 됩니다.",
+  "beginner.oneClick.stuck":
+    "브라우저가 안 열리면, 아래 창에 나온 주소를 복사해 직접 열어도 됩니다.",
+  "beginner.oneClick.blocked.title": "자동 설치가 실패했어요",
+  "beginner.oneClick.blocked.body":
+    "아래 명령을 터미널에 붙여 넣어 직접 설치한 뒤 '다시 시도' 를 눌러 주세요.",
+  "beginner.oneClick.blocked.docs": "공식 설치 안내 보기",
+  "beginner.oneClick.done": "준비 끝! 이제 무엇을 만들지 말씀해 주세요.",
+  "beginner.oneClick.retry": "다시 시도",
+  "beginner.oneClick.manual": "직접 고를게요",
+  "beginner.oneClick.close": "닫기",
+  "beginner.oneClick.footerHint": "언제든 닫고 직접 진행해도 됩니다.",
 
   // ── ② 폴더 ──────────────────────────────────────────────────────────────
   "beginner.folder.title": "작업할 폴더를 열어 주세요",
   "beginner.folder.body":
     "프로젝트 폴더를 고르면 그 안에서 에이전트가 일합니다. 비어 있는 새 폴더도 괜찮아요.",
   "beginner.folder.cta": "내 폴더 열기",
+  "beginner.folder.preparingTitle": "연습용 프로젝트를 준비하고 있어요",
+  "beginner.folder.preparingBody":
+    "첫 시작을 위해 작은 예제 폴더를 만들어 자동으로 연결합니다. 몇 초면 끝나요.",
+  "beginner.folder.sampleFailed":
+    "예제 폴더를 만들지 못했어요. 위 버튼으로 직접 폴더를 열어 주세요.",
 
   // ── ③ 첫 요청 ───────────────────────────────────────────────────────────
   "beginner.ask.title": "무엇을 만들까요?",

@@ -14,6 +14,7 @@ import {
 import {
   bulkInstallOutcome,
   loginCommandFor,
+  oneClickInstallRows,
   pendingInstallRows,
   signInRows,
 } from "../../lib/oneClickSetup";
@@ -319,10 +320,7 @@ export function InstallAllPanel() {
   const bulk = useCliSetupStore((s) => s.bulkInstall);
   const runInstallAll = useCliSetupStore((s) => s.runInstallAll);
 
-  const targetRows = useMemo(
-    () => ROWS.filter((r) => r.autoInstall || r.required),
-    [],
-  );
+  const targetRows = useMemo(() => oneClickInstallRows(ROWS), []);
   const pending = useMemo(
     () => pendingInstallRows(targetRows, results),
     [targetRows, results],

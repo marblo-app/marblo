@@ -34,12 +34,57 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.connect.watchDemo": "Watch the demo first",
   "beginner.connect.stuck":
     "Stuck? You can paste the URL printed in the terminal into your browser directly.",
+  "beginner.connect.pickYourself": "Or pick one yourself",
+  "beginner.connect.installFail": "Couldn't install it",
+  "beginner.connect.officialDocs": "Open the official install guide",
+
+  // ── ①-a One click (install everything + sign in) ────────────────────────
+  "beginner.oneClick.ctaTitle": "Set everything up in one click",
+  "beginner.oneClick.ctaBody":
+    "We'll install the CLIs for you and open the sign-in for you when that's done. All you do is approve it in your browser.",
+  "beginner.oneClick.cta": "Install everything & sign me in",
+  "beginner.oneClick.ctaPending": "{count} left to install",
+  "beginner.oneClick.ctaNothingToInstall":
+    "Already installed — only the sign-in is left",
+  "beginner.oneClick.title": "Installing and signing you in",
+  "beginner.oneClick.step.install": "Install",
+  "beginner.oneClick.step.auth": "Sign in",
+  "beginner.oneClick.status.installing":
+    "Installing the CLIs you need. This takes a moment.",
+  "beginner.oneClick.status.signIn": "Installed. Opening the sign-in…",
+  "beginner.oneClick.status.awaitingAuth":
+    "Just approve it in your browser — we'll move on automatically.",
+  "beginner.oneClick.status.blocked":
+    "Auto-install is blocked. Paste the command below into a terminal instead.",
+  "beginner.oneClick.status.done": "Connected. You're ready to start.",
+  "beginner.oneClick.installProgress": "{done}/{total} installed",
+  "beginner.oneClick.partial":
+    "{failed} of {total} failed, but we're carrying on with the ones that worked.",
+  "beginner.oneClick.terminalHint":
+    "This is the {cli} sign-in. Approve it when the browser opens — you can leave this window as it is.",
+  "beginner.oneClick.stuck":
+    "If the browser doesn't open, copy the URL printed below and open it yourself.",
+  "beginner.oneClick.blocked.title": "Auto-install failed",
+  "beginner.oneClick.blocked.body":
+    "Paste the command below into a terminal to install it yourself, then hit Try again.",
+  "beginner.oneClick.blocked.docs": "Open the official install guide",
+  "beginner.oneClick.done": "All set — tell us what you'd like to build.",
+  "beginner.oneClick.retry": "Try again",
+  "beginner.oneClick.manual": "I'll pick one myself",
+  "beginner.oneClick.close": "Close",
+  "beginner.oneClick.footerHint":
+    "You can close this and carry on manually at any time.",
 
   // ── ② Folder ────────────────────────────────────────────────────────────
   "beginner.folder.title": "Open a folder to work in",
   "beginner.folder.body":
     "Pick a project folder and the agents will work inside it. An empty new folder is fine too.",
   "beginner.folder.cta": "Open my folder",
+  "beginner.folder.preparingTitle": "Setting up a practice project",
+  "beginner.folder.preparingBody":
+    "We're creating a small example folder and connecting it for you. Just a few seconds.",
+  "beginner.folder.sampleFailed":
+    "We couldn't create the example folder. Use the button above to open one yourself.",
 
   // ── ③ First ask ─────────────────────────────────────────────────────────
   "beginner.ask.title": "What should we build?",

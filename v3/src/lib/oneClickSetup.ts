@@ -67,13 +67,41 @@ const INSTALL_CMD_MARKERS = [
   "powershell",
 ];
 
-/** Whether `cmd` is a sign-in command (vs an installer / probe error text). */
-export function isLoginCommand(cmd: string | undefined): boolean {
+/**
+ * Binary that runs each CLI. Used to check that a probe-supplied command is
+ * actually **that CLI's** command before we type it into the user's shell.
+ */
+const CLI_BIN: Record<CliModel, string> = {
+  claude: "claude",
+  codex: "codex",
+  grok: "grok",
+  antigravity: "agy",
+};
+
+/**
+ * Whether `cmd` is a sign-in command (vs an installer / probe error text).
+ *
+ * When `model` is given the check is strict: the first token must be that
+ * CLI's binary. ★이게 없으면 프로브가 돌려준 **아무 문자열이나** 사용자의 셸에
+ * 그대로 타이핑된다. 클린룸에서 실제로 그랬다 — 프로브 action 이 `login` 이라
+ * macOS 의 `login`(로그인 셸 교체)이 실행돼 터미널이 `login:` 프롬프트에 갇혔다.
+ * 설치 명령 거부(아래 마커)만으로는 그 부류를 못 거른다.
+ */
+export function isLoginCommand(
+  cmd: string | undefined,
+  model?: CliModel,
+): boolean {
   if (!cmd) return false;
   const c = cmd.trim();
   if (!c) return false;
   const lower = c.toLowerCase();
-  return !INSTALL_CMD_MARKERS.some((m) => lower.includes(m));
+  if (INSTALL_CMD_MARKERS.some((m) => lower.includes(m))) return false;
+  if (model) {
+    // 절대경로로 올 수 있다(`/usr/local/bin/claude login`).
+    const bin = lower.split(/\s+/)[0].split("/").pop();
+    if (bin !== CLI_BIN[model]) return false;
+  }
+  return true;
 }
 
 /**
@@ -82,7 +110,9 @@ export function isLoginCommand(cmd: string | undefined): boolean {
  * static table when the probe gave us nothing usable.
  */
 export function loginCommandFor(model: CliModel, action?: string): string {
-  return isLoginCommand(action) ? (action as string).trim() : LOGIN_CMD[model];
+  return isLoginCommand(action, model)
+    ? (action as string).trim()
+    : LOGIN_CMD[model];
 }
 
 /**
@@ -124,6 +154,21 @@ export function signInRows<R extends { id: string }>(
   return [...eligible].sort((a, b) => rank(a.id) - rank(b.id));
 }
 
+/**
+ * Rows a "모두 설치" click targets, before looking at what is already there.
+ *
+ * Orchestrator candidates only (Claude / Codex — `autoInstall`, plus anything
+ * flagged `required`). Grok·Antigravity are optional expansions and keep their
+ * own per-row install buttons: one click must never run two vendor installers
+ * the user never chose. Shared so the 시작하기 탭 패널과 비기너 모달이 같은
+ * 대상 집합을 쓴다 — 한쪽만 늘어나면 "모두 설치" 의 뜻이 화면마다 달라진다.
+ */
+export function oneClickInstallRows<
+  R extends { autoInstall: boolean; required: boolean },
+>(rows: R[]): R[] {
+  return rows.filter((r) => r.autoInstall || r.required);
+}
+
 /** Progress of a bulk install pass, rendered as "n/total" + failures. */
 export interface BulkInstallProgress {
   running: boolean;
@@ -144,6 +189,74 @@ export type BulkInstallOutcome = "success" | "partial" | "failed";
 export function bulkInstallOutcome(p: BulkInstallProgress): BulkInstallOutcome {
   if (p.failedIds.length === 0) return "success";
   return p.failedIds.length >= p.total ? "failed" : "partial";
+}
+
+/**
+ * ★"모두 설치 + 자동 사인인" 을 **한 흐름**으로 진행할 때의 국면.
+ *
+ * 시작하기 탭은 두 패널(InstallAllPanel / OneClickSignInPanel)이 체크리스트의
+ * 서로 다른 단계에 나란히 서 있어서 국면이라는 개념이 필요 없었다 — 사용자가
+ * ①에서 누르고 ②로 내려가면 그만이다. 비기너 모달은 그 두 단계를 한 화면에서
+ * 자동으로 이어 붙이므로(설치가 끝나면 사인인이 **스스로** 시작된다) "지금 무엇을
+ * 보여줄 것인가" 를 판정할 규칙이 필요하다.
+ *
+ * 판정은 전부 이미 있는 관측값에서 파생한다(새 상태 없음):
+ *   ready         cliSetupStore.ready — Claude/Codex 중 하나가 설치+인증
+ *   bulk          runInstallAll 의 진행 기록
+ *   signInTargets signInRows(...).length — 설치됐지만 미인증인 행 수
+ *   loginLaunched 우리가 이 흐름에서 로그인 터미널을 띄웠는가
+ *
+ * 우선순위가 곧 계약이다:
+ *  - `done` 이 항상 먼저다. 설치 패스가 아직 정리 중이어도 이미 인증이 됐다면
+ *    사용자에게 보여줄 것은 성공이다(예: 다른 창/터미널에서 먼저 로그인한 경우).
+ *  - `installing` 은 사인인보다 먼저다 — 설치 중에 사인인 터미널을 띄우면 아직
+ *    없는 바이너리에 로그인 명령을 타이핑하게 된다.
+ *  - `awaiting_auth` 는 `sign_in` 보다 먼저다. 터미널을 띄운 뒤에는 대상 행이
+ *    여전히 미인증으로 남아 있는 게 정상이므로(브라우저 승인 대기), 그걸로
+ *    "다시 사인인" 을 그리면 같은 로그인을 두 번 띄운다.
+ *  - `blocked` 는 마지막 폴백이다: 설치가 끝났는데 사인인할 대상이 **하나도**
+ *    없다 = 설치가 전부 실패했다는 뜻이라, 수동 명령·공식문서로 넘겨야 한다.
+ */
+export type OneClickPhase =
+  | "idle"
+  | "installing"
+  | "sign_in"
+  | "awaiting_auth"
+  | "blocked"
+  | "done";
+
+export interface OneClickFlowState {
+  /** 사용자가 이 흐름을 시작했는가(모달의 CTA 를 눌렀는가). */
+  started: boolean;
+  /** Claude/Codex 중 하나가 설치+인증 완료. */
+  ready: boolean;
+  bulk: BulkInstallProgress | null;
+  /** 설치됐지만 아직 미인증인 행 수(= signInRows 의 길이). */
+  signInTargets: number;
+  /** 이 흐름이 로그인 터미널을 띄웠는가. */
+  loginLaunched: boolean;
+}
+
+export function oneClickPhase(s: OneClickFlowState): OneClickPhase {
+  if (s.ready) return "done";
+  if (!s.started) return "idle";
+  if (s.bulk?.running) return "installing";
+  if (s.loginLaunched) return "awaiting_auth";
+  if (s.signInTargets > 0) return "sign_in";
+  // 설치 패스가 아직 시작 전이면(클릭 직후 한 틱) 설치 중으로 본다 — 빈
+  // "막힘" 화면이 한 프레임 스치는 것을 막는다.
+  if (!s.bulk) return "installing";
+  return "blocked";
+}
+
+/**
+ * `sign_in` 국면에서 자동으로 로그인을 띄워도 되는가.
+ *
+ * 모달의 "자동" 이 성립하는 지점이다 — 사용자가 두 번째 버튼을 누르지 않는다.
+ * 한 번만 띄우는 것이 핵심이라 `loginLaunched` 를 그대로 게이트로 쓴다.
+ */
+export function shouldAutoSignIn(s: OneClickFlowState): boolean {
+  return oneClickPhase(s) === "sign_in";
 }
 
 /**

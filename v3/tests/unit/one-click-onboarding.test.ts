@@ -111,6 +111,26 @@ describe("loginCommandFor — 인증 단계에서 설치 명령을 타이핑하�
   it("agy 는 login 서브커맨드가 없다 — 한 번 실행이 곧 OAuth 다", () => {
     expect(LOGIN_CMD.antigravity).toBe("agy");
   });
+
+  it("★그 CLI 의 명령이 아니면 거부한다 — 프로브 문자열이 셸로 새면 안 된다", () => {
+    // 클린룸에서 실측된 사고: probe action 이 그냥 `login` 이었고, 그게 그대로
+    // 타이핑돼 macOS 의 `login`(로그인 셸 교체)이 실행됐다. 설치 명령 거부만으로는
+    // 이 부류가 안 걸러진다 — 첫 토큰이 그 CLI 의 바이너리여야 한다.
+    expect(isLoginCommand("login", "claude")).toBe(false);
+    expect(loginCommandFor("claude", "login")).toBe("claude login");
+    // 프로브가 에러 문자열을 실어 보낸 경우도 같다.
+    expect(loginCommandFor("codex", "command not found: codex")).toBe(
+      "codex login",
+    );
+    // 엉뚱한 CLI 의 명령을 이 행에 타이핑하지 않는다.
+    expect(loginCommandFor("codex", "claude login")).toBe("codex login");
+    // 절대경로로 와도 그 CLI 면 그대로 쓴다.
+    expect(loginCommandFor("claude", "/usr/local/bin/claude login")).toBe(
+      "/usr/local/bin/claude login",
+    );
+    // model 을 안 주면 종전 계약 그대로(설치 명령만 거른다).
+    expect(isLoginCommand("login")).toBe(true);
+  });
 });
 
 describe("bulkInstallOutcome — 부분 실패는 성공도 실패도 아니다", () => {

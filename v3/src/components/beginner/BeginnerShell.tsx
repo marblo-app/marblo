@@ -9,6 +9,7 @@ import { shouldPromote, type PromotionTrigger } from "../../lib/beginnerMode";
 import { useAgentStore } from "../../stores/agentStore";
 import { useBeginnerModeStore } from "../../stores/beginnerModeStore";
 import { useCliSetupStore } from "../../stores/cliSetupStore";
+import { useFirstRunSampleStore } from "../../stores/firstRunSampleStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { useTaskStore } from "../../stores/taskStore";
@@ -17,6 +18,7 @@ import telemetry from "../../services/telemetryService";
 import { BeginnerConnectStep } from "./BeginnerConnectStep";
 import { BeginnerFirstAsk } from "./BeginnerFirstAsk";
 import { BeginnerLiveStrip } from "./BeginnerLiveStrip";
+import { BeginnerOneClickModal } from "./BeginnerOneClickModal";
 import { BeginnerPromotionModal } from "./BeginnerPromotionModal";
 import { BeginnerTour } from "./BeginnerTour";
 import {
@@ -56,6 +58,9 @@ export function BeginnerShell() {
   useCliSetupEngine({ openAt: noop });
 
   const cliReady = useCliSetupStore((s) => s.ready);
+  // 첫 실행 샘플 폴더 자동 연결(#872)의 진행 상태 — 폴더 게이트가 이걸 읽어
+  // "준비 중" 을 그린다(아래 렌더 주석 참조).
+  const sampleStatus = useFirstRunSampleStore((s) => s.status);
   const currentProject = useProjectStore((s) => s.currentProject);
   const projectId = currentProject?.id ?? "";
   const hasFolder = !!currentProject?.folderPath;
@@ -80,6 +85,10 @@ export function BeginnerShell() {
 
   const ask = useBeginnerAsk();
   const [showDemo, setShowDemo] = useState(false);
+  // ★원클릭 모달을 **셸**이 든다. 연결 게이트 안에 두면 인증이 성립하는 순간
+  // 게이트가 폴더 게이트로 갈아치워지면서 모달째 언마운트돼, "연결됐어요" 가
+  // 뜨자마자 사라진다(시연에서 화면이 뚝 끊기는 자리).
+  const [showOneClick, setShowOneClick] = useState(false);
   const [promotion, setPromotion] = useState<PromotionTrigger | null>(null);
 
   // 보드가 없으므로 티켓/에이전트 구독을 이 셸이 직접 든다 — 인라인 라이브의
@@ -152,6 +161,10 @@ export function BeginnerShell() {
     },
     [promote],
   );
+
+  // 안정적인 identity — 모달의 자동 닫힘 타이머가 이 콜백에 걸려 있다.
+  const openOneClick = useCallback(() => setShowOneClick(true), []);
+  const closeOneClick = useCallback(() => setShowOneClick(false), []);
 
   const closeDemo = useCallback(() => {
     // 데모의 CTA 는 "로그인 후 연결" 플래그를 세우는데, 우리는 이미 로그인 뒤
@@ -249,27 +262,56 @@ export function BeginnerShell() {
         <div className="mx-auto flex min-h-0 w-full max-w-[68rem] flex-1 flex-col gap-2.5 overflow-hidden">
           {!cliReady ? (
             <div className="min-h-0 flex-1 overflow-auto">
-              <BeginnerConnectStep onWatchDemo={() => setShowDemo(true)} />
+              <BeginnerConnectStep
+                onWatchDemo={() => setShowDemo(true)}
+                onOneClick={openOneClick}
+              />
             </div>
           ) : !hasFolder ? (
             <div className="min-h-0 flex-1 overflow-auto">
               <section
                 data-testid="beginner-folder-gate"
+                data-sample-status={sampleStatus}
                 className={`mx-auto w-full max-w-xl ${SURFACE} px-6 py-7 text-center`}
               >
+                {/* ★자동 연결(#872)이 도는 중에는 "폴더를 골라 주세요" 를 그리지
+                    않는다. 1~2초 뒤 스스로 붙을 폴더인데 그 사이 유저가 네이티브
+                    피커를 열면, 자동 연결이 뒤늦게 도착해 화면이 튄다. */}
                 <h1 className="text-lg font-semibold leading-7 text-[#cdd6f4]">
-                  {t("beginner.folder.title")}
+                  {t(
+                    sampleStatus === "preparing"
+                      ? "beginner.folder.preparingTitle"
+                      : "beginner.folder.title",
+                  )}
                 </h1>
                 <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-[#7f849c]">
-                  {t("beginner.folder.body")}
+                  {t(
+                    sampleStatus === "preparing"
+                      ? "beginner.folder.preparingBody"
+                      : "beginner.folder.body",
+                  )}
                 </p>
-                <button
-                  type="button"
-                  onClick={connectFolder}
-                  className={`mt-5 ${BUTTON_PRIMARY}`}
-                >
-                  {t("beginner.folder.cta")}
-                </button>
+                {sampleStatus === "preparing" ? (
+                  <div
+                    data-testid="beginner-folder-preparing"
+                    className="mx-auto mt-5 h-1.5 w-48 overflow-hidden rounded-full bg-[#313244]"
+                  >
+                    <div className="h-full w-1/3 animate-pulse rounded-full bg-[#89b4fa]" />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={connectFolder}
+                    className={`mt-5 ${BUTTON_PRIMARY}`}
+                  >
+                    {t("beginner.folder.cta")}
+                  </button>
+                )}
+                {sampleStatus === "failed" && (
+                  <p className="mt-3 text-xs leading-5 text-[#f9e2af]">
+                    {t("beginner.folder.sampleFailed")}
+                  </p>
+                )}
               </section>
             </div>
           ) : (
@@ -314,8 +356,10 @@ export function BeginnerShell() {
           lib/coachmark 가 든다(완주/다시보지않기 = 끝, 그냥 닫으면 3회까지). */}
       <BeginnerTour
         ready={cliReady && hasFolder}
-        blocked={!!promotion || showDemo}
+        blocked={!!promotion || showDemo || showOneClick}
       />
+
+      {showOneClick && <BeginnerOneClickModal onClose={closeOneClick} />}
 
       {promotion && (
         <BeginnerPromotionModal

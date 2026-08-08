@@ -72,14 +72,22 @@ export function connectFolder(): void {
  * (probe failed, or `action` is actually an *install* command because the CLI
  * is missing) `loginCommandFor` falls back to the per-model table rather than
  * typing an installer into the terminal.
+ *
+ * ★Returns the spawned session id (null when the spawn failed), and hands the
+ * same id to `onLaunched`. The modal / tab surfaces only need "hide me", but the
+ * 비기너 셸에는 터미널 열이 없어서 **이 세션을 카드 안에 임베드**해야 한다 —
+ * CLI 가 인쇄하는 인증 URL 을 못 보면 로그인은 그 자리에서 끝난다. 예전에는
+ * 호출부가 `terminalStore.activeSessionId` 를 훔쳐봤는데, 그건 방금 만든 세션이
+ * 곧 active 라는 가정에 기대는 것이라 다른 탭이 하나라도 끼면 엉뚱한 터미널을
+ * 그린다.
  */
 export async function launchLogin(
   model: CliModel,
   cmd?: string,
-  onLaunched?: () => void,
-): Promise<void> {
+  onLaunched?: (sessionId: string) => void,
+): Promise<string | null> {
   const command = loginCommandFor(model, cmd);
-  if (!command) return;
+  if (!command) return null;
   const label = cliLabel(model);
   try {
     const term = useTerminalStore.getState();
@@ -91,7 +99,7 @@ export async function launchLogin(
     // lets a successful auth reveal the orchestrator (and keeps a cold-start
     // ready edge from doing the same).
     setup.markSetupInitiated();
-    onLaunched?.();
+    onLaunched?.(id);
     // Let the shell print its prompt before typing, so the command isn't
     // swallowed by a not-yet-interactive shell.
     setTimeout(() => {
@@ -99,8 +107,10 @@ export async function launchLogin(
         /* PTY closed — user can still type it themselves */
       });
     }, 700);
+    return id;
   } catch {
     /* terminal spawn failed — user can still copy/run the command manually */
+    return null;
   }
 }
 
@@ -118,7 +128,9 @@ export async function launchLogin(
  * needs only one of Claude/Codex (#579), and the remaining rows keep their own
  * sign-in buttons for anyone who wants more.
  */
-export function oneClickSignIn(onLaunched?: () => void): CliModel | null {
+export function oneClickSignIn(
+  onLaunched?: (sessionId: string) => void,
+): CliModel | null {
   const { results } = useCliSetupStore.getState();
   const target = signInRows(ROWS, results, ORCHESTRATOR_CLI_IDS)[0];
   if (!target) return null;

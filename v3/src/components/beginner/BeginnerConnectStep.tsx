@@ -1,15 +1,22 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import TerminalView from "../terminal/TerminalView";
+import { CommandBox } from "../onboarding/CliSetupRows";
 import { launchLogin } from "../../services/cliSetupActions";
 import {
+  oneClickInstallRows,
+  pendingInstallRows,
+} from "../../lib/oneClickSetup";
+import {
+  DOCS_URL,
   ROWS,
+  UPDATE_CMD,
   useCliSetupStore,
   type CliModel,
   type CliRow,
 } from "../../stores/cliSetupStore";
-import { useTerminalStore } from "../../stores/terminalStore";
 import telemetry from "../../services/telemetryService";
+import { BUTTON_GHOST, BUTTON_PRIMARY } from "./beginnerUi";
 
 /**
  * 비기너 진입 게이트 — **하나만** 연결하면 통과.
@@ -19,6 +26,13 @@ import telemetry from "../../services/telemetryService";
  * 하나만 있어도 오케를 태울 수 있다는 게 코드의 규칙이고, 이 화면은 그걸 문구로도
  * 못박는다. 통과 판정 자체는 부모(BeginnerShell)가 `cliSetupStore.ready` 로 읽고,
  * 여기서는 "어느 쪽을 연결할까" 만 묻는다.
+ *
+ * ★주 경로는 **원클릭 모달**이다(티켓 1F0D8hH5): "모두 설치 + 자동 로그인" 한 번이
+ * 미설치 CLI 를 일괄 설치하고, 끝나는 대로 오케 후보 하나의 로그인 터미널을
+ * 스스로 띄운다. 신규 유저가 내려야 할 결정이 0 이 되는 지점이라 이게 먼저 서고,
+ * 아래 택1 카드는 "직접 고르고 싶은 사람" 용 폴백으로 내려간다. 두 경로 모두
+ * #870 이 뽑은 공용 로직(`lib/oneClickSetup` · `services/cliSetupActions`)을 쓴다 —
+ * 이 파일에는 설치·로그인 규칙의 사본이 없다.
  *
  * ★인라인 터미널이 핵심이다. `launchLogin` 은 실 터미널 세션을 띄우고
  * `claude login` / `codex login` 을 타이핑하는데, 비기너 셸에는 터미널 열이 없다.
@@ -50,11 +64,21 @@ const CHOICES: Array<{
 
 export function BeginnerConnectStep({
   onWatchDemo,
+  onOneClick,
 }: {
   onWatchDemo: () => void;
+  /**
+   * 원클릭 모달을 연다. ★모달 자체는 **셸**이 든다 — 인증이 성립하는 순간 셸이
+   * 이 연결 게이트를 폴더 게이트로 갈아치우므로, 모달이 여기 달려 있으면 성공
+   * 표시가 뜨자마자 통째로 언마운트된다(화면이 뚝 끊긴다). 다른 오버레이(투어·
+   * 승격·데모)와 같은 층에 두는 게 이 셸의 규칙이기도 하다.
+   */
+  onOneClick: () => void;
 }) {
   const { t } = useTranslation();
   const states = useCliSetupStore((s) => s.states);
+  const results = useCliSetupStore((s) => s.results);
+  const installErrors = useCliSetupStore((s) => s.installErrors);
   const installingId = useCliSetupStore((s) => s.installing);
   const runInstall = useCliSetupStore((s) => s.runInstall);
   const probeAll = useCliSetupStore((s) => s.probeAll);
@@ -76,15 +100,17 @@ export function BeginnerConnectStep({
         if (!useCliSetupStore.getState().results[row.id]?.installed) {
           await runInstall(row);
         }
-        const cmd =
-          useCliSetupStore.getState().results[row.id]?.action ||
-          `${row.model === "codex" ? "codex" : row.model} login`;
-        await launchLogin(row.model, cmd);
-        // launchLogin 은 세션 id 를 돌려주지 않는다(모달·탭은 전역 터미널 패널을
-        // 쓰므로 필요가 없었다). 방금 만든 세션이 곧 active 이므로 거기서 집는다.
-        setLoginSessionId(useTerminalStore.getState().activeSessionId);
+        // 로그인 명령은 `launchLogin` 안의 `loginCommandFor` 가 정한다(프로브의
+        // action 이 실은 **설치** 명령이거나 에러 문자열일 때의 폴백이 거기 있다).
+        // 예전엔 여기서 `${model} login` 을 직접 조립했는데, 그건 그 규칙의 두
+        // 번째 사본이었다 — codex 예외를 여기서만 손보다 어긋나기 딱 좋은 자리다.
+        const sessionId = await launchLogin(
+          row.model,
+          useCliSetupStore.getState().results[row.id]?.action,
+        );
+        setLoginSessionId(sessionId);
       } catch {
-        // 설치·스폰 실패 — 아래 수동 안내(UPDATE_CMD)가 그대로 폴백이 된다.
+        // 설치·스폰 실패 — 아래 수동 안내(UPDATE_CMD + 공식문서)가 폴백이 된다.
       } finally {
         setBusy(false);
       }
@@ -93,6 +119,19 @@ export function BeginnerConnectStep({
   );
 
   const anyChecking = ROWS.some((r) => states[r.id]?.checking);
+  // 아직 아무 프로브도 안 끝났다 — 이 순간의 "설치 안 됨" 은 사실이 아니라
+  // "아직 모른다" 다. 버튼을 그리되 확인 중임을 말해 준다.
+  const probing = useMemo(
+    () => CHOICES.every(({ row }) => !results[row.id]),
+    [results],
+  );
+  const pendingInstalls = useMemo(
+    () => pendingInstallRows(oneClickInstallRows(ROWS), results).length,
+    [results],
+  );
+  // 픽한 행의 설치 실패 — 예전에는 catch 가 삼키고 아무것도 안 그렸다.
+  const pickedRow = CHOICES.find((c) => c.row.model === picked)?.row;
+  const pickedError = pickedRow ? installErrors[pickedRow.id] : "";
 
   return (
     <section
@@ -106,7 +145,42 @@ export function BeginnerConnectStep({
         {t("beginner.connect.subtitle")}
       </p>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+      {/* ── ★주 경로: 원클릭 ─────────────────────────────────────────────
+          한 번 누르면 설치 → 로그인까지 이어진다. 아래 택1 카드는 이걸
+          거절한 사람을 위한 길이라 시각적으로도 한 단 낮춘다. */}
+      <div
+        data-testid="beginner-oneclick-cta-card"
+        className="mt-5 rounded-lg border border-[#89b4fa]/30 bg-[#89b4fa]/5 p-4"
+      >
+        <p className="text-sm font-semibold text-[#cdd6f4]">
+          {t("beginner.oneClick.ctaTitle")}
+        </p>
+        <p className="mt-1 text-xs leading-5 text-[#a6adc8]">
+          {t("beginner.oneClick.ctaBody")}
+        </p>
+        <button
+          type="button"
+          data-testid="beginner-oneclick-cta"
+          onClick={onOneClick}
+          disabled={busy}
+          className={`mt-3 ${BUTTON_PRIMARY}`}
+        >
+          {t("beginner.oneClick.cta")}
+        </button>
+        <p className="mt-2 text-[11px] text-[#7f849c]">
+          {probing
+            ? t("beginner.connect.checking")
+            : pendingInstalls > 0
+              ? t("beginner.oneClick.ctaPending", { count: pendingInstalls })
+              : t("beginner.oneClick.ctaNothingToInstall")}
+        </p>
+      </div>
+
+      <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6c7086]">
+        {t("beginner.connect.pickYourself")}
+      </p>
+
+      <div className="mt-2 grid gap-3 sm:grid-cols-2">
         {CHOICES.map(({ row, nameKey, descKey }) => {
           const state = states[row.id];
           const ready = !!state?.installed && !!state?.authenticated;
@@ -139,7 +213,7 @@ export function BeginnerConnectStep({
                   type="button"
                   onClick={() => void connect(row)}
                   disabled={busy}
-                  className="mt-2 w-full rounded-md bg-[#89b4fa] px-3 py-2 text-xs font-semibold text-[#1e1e2e] transition-colors hover:bg-[#74c7ec] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="mt-2 w-full rounded-md border border-[#45475a] px-3 py-2 text-xs font-medium text-[#cdd6f4] transition-colors hover:border-[#585b70] hover:bg-[#313244] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {installing
                     ? t("beginner.connect.installing")
@@ -153,15 +227,42 @@ export function BeginnerConnectStep({
         })}
       </div>
 
+      {/* 택1 경로의 설치 실패 — 수동 명령 + 공식 문서로 넘긴다. */}
+      {pickedRow && pickedError && (
+        <div
+          data-testid="beginner-connect-install-error"
+          className="mt-4 rounded-md border border-[#f38ba8]/30 bg-[#f38ba8]/5 p-3"
+        >
+          <p className="text-xs font-medium text-[#f38ba8]">
+            {t("beginner.connect.installFail")}
+          </p>
+          <p className="mt-1 break-words text-[11px] leading-5 text-[#a6adc8]">
+            {pickedError}
+          </p>
+          <CommandBox cmd={UPDATE_CMD[pickedRow.model]} />
+          <a
+            href={DOCS_URL[pickedRow.model]}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-1.5 inline-block text-xs text-[#89b4fa] underline decoration-dotted hover:text-[#74c7ec]"
+          >
+            {t("beginner.connect.officialDocs")} ↗
+          </a>
+        </div>
+      )}
+
       {/* 인증이 진행되는 실 터미널 — 숨기면 유저가 인증 URL 을 못 본다. */}
       {loginSessionId && (
         <div className="mt-5">
           <p className="mb-2 text-xs text-[#a6adc8]">
             {t("beginner.connect.terminalHint")}
           </p>
+          {/* ★`relative` 가 필수다(선재 버그). TerminalView 는 `absolute inset-0`
+              이라 positioned 조상이 없으면 이 박스를 뚫고 나가 화면 전체를
+              덮는다 — 로그인 터미널이 뜨는 순간 앱이 통째로 사라져 보였다. */}
           <div
             data-testid="beginner-connect-terminal"
-            className="h-64 overflow-hidden rounded-md border border-[#45475a] bg-[#11111b] p-2"
+            className="relative h-64 overflow-hidden rounded-md border border-[#45475a] bg-[#11111b] p-2"
           >
             <TerminalView sessionId={loginSessionId} isActive />
           </div>
@@ -176,17 +277,13 @@ export function BeginnerConnectStep({
           type="button"
           onClick={() => void probeAll()}
           disabled={anyChecking}
-          className="rounded-md border border-[#45475a] px-2.5 py-1 text-xs text-[#cdd6f4] transition-colors hover:bg-[#313244] disabled:opacity-60"
+          className={BUTTON_GHOST}
         >
           {anyChecking
             ? t("beginner.connect.checking")
             : t("beginner.connect.recheck")}
         </button>
-        <button
-          type="button"
-          onClick={onWatchDemo}
-          className="rounded-md border border-[#45475a] px-2.5 py-1 text-xs text-[#cdd6f4] transition-colors hover:bg-[#313244]"
-        >
+        <button type="button" onClick={onWatchDemo} className={BUTTON_GHOST}>
           ▶ {t("beginner.connect.watchDemo")}
         </button>
       </div>
