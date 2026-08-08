@@ -1,7 +1,10 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
 import type { WizardStep } from "../../lib/cliSetupGate";
+import { shouldRevealOrchestrator } from "../../lib/oneClickSetup";
+import { useCliSetupStore } from "../../stores/cliSetupStore";
+import { useProjectStore } from "../../stores/projectStore";
 import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { useOnboardingProgressStore } from "../../stores/onboardingProgressStore";
 import { useCliSetupEngine } from "../../hooks/useCliSetupEngine";
@@ -51,6 +54,36 @@ export function CliSetupHost() {
   }, [setDismissed]);
 
   useCliSetupEngine({ openAt, close, showPostAuth: openAt });
+
+  // ★설치+인증이 끝나면 오케스트레이터를 실제로 **보여준다**.
+  //
+  // `marblo:cli-auth-ready` 는 이미 useOrchestratorAutoLaunch 의 재개 신호다
+  // (오케 프로세스는 그쪽이 띄운다). 빠져 있던 건 화면이었다: 방금 인증을 끝낸
+  // 사용자는 여전히 체크리스트 탭에 서 있고, 터미널 열은 접혀 있을 수 있어
+  // "다 했는데 아무 일도 안 일어난다" 로 읽혔다. 여기서 터미널 열을 펴고 작업
+  // 뷰를 보드로 옮겨, 방금 뜬 오케가 눈에 들어오게 한다.
+  //
+  // ★이 이벤트는 **이미 인증된 사용자의 콜드 스타트에서도** 뜬다(probe 가
+  // false 에서 시작해 true 로 뒤집히는 같은 엣지 — bRABKQX7/nB4eenxP 의 원인).
+  // 그래서 shouldRevealOrchestrator 가 "이 세션에서 우리 원클릭 버튼을 눌렀나"
+  // (setupInitiated)를 요구한다: 매 재시작마다 사용자의 탭/접힘 상태를 앱이
+  // 마음대로 되돌리는 일은 없다.
+  useEffect(() => {
+    const onReady = () => {
+      const decision = shouldRevealOrchestrator({
+        ready: useCliSetupStore.getState().ready,
+        hasProject: !!useProjectStore.getState().currentProject?.folderPath,
+        setupInitiated: useCliSetupStore.getState().setupInitiated,
+      });
+      if (!decision) return;
+      const split = useSplitWorkspaceStore.getState();
+      split.setTerminalCollapsed(false);
+      if (split.activeTab === "startHere") split.setActiveTab("board");
+      setNeedStep(null);
+    };
+    window.addEventListener("marblo:cli-auth-ready", onReady);
+    return () => window.removeEventListener("marblo:cli-auth-ready", onReady);
+  }, []);
 
   // Already standing in the tab → the banner would be redundant noise.
   if (!needStep || activeTab === "startHere") return null;

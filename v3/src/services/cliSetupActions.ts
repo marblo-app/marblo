@@ -5,8 +5,11 @@ import { useTerminalStore } from "../stores/terminalStore";
 import {
   useCliSetupStore,
   cliLabel,
+  ORCHESTRATOR_CLI_IDS,
+  ROWS,
   type CliModel,
 } from "../stores/cliSetupStore";
+import { loginCommandFor, signInRows } from "../lib/oneClickSetup";
 import telemetry from "../services/telemetryService";
 import { routeInstructionToOrchestrator } from "./orchestratorInstructionService";
 import {
@@ -60,30 +63,67 @@ export function connectFolder(): void {
  * tab does nothing) via `onLaunched`. The engine's auto-recheck poll watches
  * `loginRunning` until the required set authenticates, so no manual "Re-check"
  * click is needed — copy/Re-check remain as fallbacks.
+ *
+ * The user's whole job is the browser step: the CLI opens its device-code page
+ * and they approve there. No terminal is opened by hand and no command is
+ * typed by hand — that is the entire point of this path.
+ *
+ * `cmd` is optional: when the probe didn't hand us a usable login command
+ * (probe failed, or `action` is actually an *install* command because the CLI
+ * is missing) `loginCommandFor` falls back to the per-model table rather than
+ * typing an installer into the terminal.
  */
 export async function launchLogin(
   model: CliModel,
-  cmd: string,
+  cmd?: string,
   onLaunched?: () => void,
 ): Promise<void> {
-  if (!cmd) return;
+  const command = loginCommandFor(model, cmd);
+  if (!command) return;
   const label = cliLabel(model);
   try {
     const term = useTerminalStore.getState();
     const id = await term.createSession(label);
     term.openTerminalForSession(id, label);
-    useCliSetupStore.getState().setLoginRunning(true);
+    const setup = useCliSetupStore.getState();
+    setup.setLoginRunning(true);
+    // One-click sign-in counts as "the user started setup here", which is what
+    // lets a successful auth reveal the orchestrator (and keeps a cold-start
+    // ready edge from doing the same).
+    setup.markSetupInitiated();
     onLaunched?.();
     // Let the shell print its prompt before typing, so the command isn't
     // swallowed by a not-yet-interactive shell.
     setTimeout(() => {
-      window.electronAPI.pty.writeAndSubmit(id, cmd).catch(() => {
+      window.electronAPI.pty.writeAndSubmit(id, command).catch(() => {
         /* PTY closed — user can still type it themselves */
       });
     }, 700);
   } catch {
     /* terminal spawn failed — user can still copy/run the command manually */
   }
+}
+
+/**
+ * ★"원클릭 사인인" — the auth step's single button.
+ *
+ * Picks the CLI whose sign-in actually unblocks the orchestrator (Claude or
+ * Codex first, then the optional CLIs), spawns its terminal and types its
+ * login command. Returns the model it started, or null when nothing is
+ * signable (nothing installed yet, or everything is already signed in).
+ *
+ * Deliberately ONE terminal, not one per CLI: each login opens its own browser
+ * device-code page, and firing three at once leaves the user with three
+ * half-finished approval tabs and no idea which terminal is waiting. Readiness
+ * needs only one of Claude/Codex (#579), and the remaining rows keep their own
+ * sign-in buttons for anyone who wants more.
+ */
+export function oneClickSignIn(onLaunched?: () => void): CliModel | null {
+  const { results } = useCliSetupStore.getState();
+  const target = signInRows(ROWS, results, ORCHESTRATOR_CLI_IDS)[0];
+  if (!target) return null;
+  void launchLogin(target.model, results[target.id]?.action, onLaunched);
+  return target.model;
 }
 
 /**

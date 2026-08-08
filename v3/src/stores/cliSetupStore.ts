@@ -4,6 +4,10 @@ import {
   requiredInstalled as computeRequiredInstalled,
   requiredReady as computeRequiredReady,
 } from "../lib/cliSetupGate";
+import {
+  pendingInstallRows,
+  type BulkInstallProgress,
+} from "../lib/oneClickSetup";
 
 /**
  * Shared CLI setup engine state — the probe / install / version machinery that
@@ -139,6 +143,19 @@ interface CliSetupState {
   installErrors: Record<string, string>;
   /** A sign-in command is running in a terminal — drives the auto-recheck poll. */
   loginRunning: boolean;
+  /**
+   * Live progress of a "모두 설치" pass, or null when none has run this
+   * session. Per-row errors stay in `installErrors` so each failed card keeps
+   * its own manual command + docs fallback.
+   */
+  bulkInstall: BulkInstallProgress | null;
+  /**
+   * The user pressed one of the one-click buttons (모두 설치 / 원클릭 사인인)
+   * in THIS session. Guards the "setup finished → reveal the orchestrator"
+   * jump so it can't fire on the cold-start ready edge of an already
+   * set-up user (see lib/oneClickSetup.shouldRevealOrchestrator).
+   */
+  setupInitiated: boolean;
 
   probe: (model: CliModel, id: string) => Promise<CliAuthResult>;
   probeAll: () => Promise<{
@@ -146,8 +163,11 @@ interface CliSetupState {
     requiredReady: boolean;
   }>;
   runInstall: (row: CliRow) => Promise<void>;
+  /** One-click: install every not-yet-installed row of `rows`, in order. */
+  runInstallAll: (rows: CliRow[]) => Promise<void>;
   refreshVersions: () => void;
   setLoginRunning: (v: boolean) => void;
+  markSetupInitiated: () => void;
   /** Whether any orchestrator candidate is at least installed (live). */
   requiredInstalled: () => boolean;
 }
@@ -160,6 +180,8 @@ export const useCliSetupStore = create<CliSetupState>((set, get) => ({
   installing: null,
   installErrors: {},
   loginRunning: false,
+  bulkInstall: null,
+  setupInitiated: false,
 
   probe: async (model, id) => {
     set((s) => ({
@@ -234,6 +256,66 @@ export const useCliSetupStore = create<CliSetupState>((set, get) => ({
     }
   },
 
+  /**
+   * ★"모두 설치" — the one click that replaces "press install on every row".
+   *
+   * SEQUENTIAL on purpose: these are shell installers (`curl … | bash`) that
+   * write into the same `~/.local/bin` and shell rc, and `runInstall` keys the
+   * per-row spinner off a single `installing` id. Running them in parallel
+   * would race those writes and make the row spinners lie about which CLI is
+   * being installed.
+   *
+   * Already-installed rows are skipped (pendingInstallRows), so a second click
+   * only retries what actually failed. A failure never aborts the pass — each
+   * failed row keeps its error in `installErrors`, which renders that row's
+   * manual command + official docs fallback, and the remaining CLIs still get
+   * installed.
+   */
+  runInstallAll: async (rows) => {
+    if (get().bulkInstall?.running) return; // already running — ignore re-click
+    const targets = pendingInstallRows(rows, get().results);
+    set({
+      setupInitiated: true,
+      bulkInstall: {
+        running: true,
+        total: targets.length,
+        done: 0,
+        failedIds: [],
+      },
+    });
+    if (targets.length === 0) {
+      set((s) => ({
+        bulkInstall: s.bulkInstall
+          ? { ...s.bulkInstall, running: false }
+          : null,
+      }));
+      return;
+    }
+    for (const row of targets) {
+      await get().runInstall(row);
+      // runInstall re-probes the row, so `results` is the truth about whether
+      // the install actually took — not just whether the IPC resolved.
+      const installed = get().results[row.id]?.installed === true;
+      set((s) => ({
+        bulkInstall: s.bulkInstall
+          ? {
+              ...s.bulkInstall,
+              done: s.bulkInstall.done + 1,
+              failedIds: installed
+                ? s.bulkInstall.failedIds
+                : [...s.bulkInstall.failedIds, row.id],
+            }
+          : null,
+      }));
+    }
+    // Refresh readiness once at the end (each runInstall only re-probed its
+    // own row, which leaves `ready` stale).
+    await get().probeAll();
+    set((s) => ({
+      bulkInstall: s.bulkInstall ? { ...s.bulkInstall, running: false } : null,
+    }));
+  },
+
   // Non-blocking version probe (npm view under the hood). Fire-and-forget so a
   // slow/offline lookup never stalls the surface or the readiness spinner.
   refreshVersions: () => {
@@ -246,6 +328,8 @@ export const useCliSetupStore = create<CliSetupState>((set, get) => ({
   },
 
   setLoginRunning: (v) => set({ loginRunning: v }),
+
+  markSetupInitiated: () => set({ setupInitiated: true }),
 
   requiredInstalled: () =>
     computeRequiredInstalled(ORCHESTRATOR_CLI_IDS, get().results),

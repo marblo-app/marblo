@@ -315,6 +315,28 @@ export const onboarding = {
   "onboarding.cliGate.runLogin": "인증 실행",
   "onboarding.cliGate.runLoginHint":
     "터미널에서 자동 실행 · 완료되면 자동 인식됩니다",
+
+  // — 원클릭 온보딩 (ticket afW5wNdX) —
+  // ①단계: 미설치 CLI 를 한 번에. 개별 [설치] 버튼은 실패한 행 재시도용으로 유지.
+  "onboarding.cliGate.installAll.title": "필수 CLI 모두 설치",
+  "onboarding.cliGate.installAll.body":
+    "아직 설치되지 않은 CLI 만 골라 순서대로 설치합니다. 이미 설치된 것은 건너뜁니다.",
+  "onboarding.cliGate.installAll.cta": "모두 설치 ({count}개)",
+  "onboarding.cliGate.installAll.running": "설치 중… {done}/{total}",
+  "onboarding.cliGate.installAll.done": "{total}개 모두 설치했습니다.",
+  "onboarding.cliGate.installAll.partial":
+    "{total}개 중 {failed}개 실패 — 실패한 CLI 카드의 수동 명령·공식 문서로 이어서 진행하세요.",
+  "onboarding.cliGate.installAll.allDone": "필수 CLI 가 모두 설치돼 있습니다.",
+  // ②단계: 터미널 자동생성 + 로그인 명령 자동주입. 사용자는 브라우저 승인만.
+  "onboarding.cliGate.signInAll.title": "원클릭 사인인",
+  "onboarding.cliGate.signInAll.body":
+    "터미널 탭이 자동으로 열리고 로그인 명령이 자동 입력됩니다. 브라우저가 뜨면 승인만 하세요 — 직접 타이핑할 것은 없습니다.",
+  "onboarding.cliGate.signInAll.cta": "{cli} 로 사인인",
+  "onboarding.cliGate.signInAll.launched":
+    "{cli} 터미널을 열고 로그인 명령을 실행했습니다. 브라우저에서 승인해 주세요.",
+  "onboarding.cliGate.signInAll.watching": "완료되면 자동으로 인식합니다.",
+  "onboarding.cliGate.signInAll.others":
+    "다른 CLI {count}개도 각 카드에서 같은 방식으로 사인인할 수 있습니다.",
   "onboarding.cliGate.subscription.title": "구독 없으신가요?",
   "onboarding.cliGate.subscription.body":
     "공식 구독 페이지로 이동해 플랜을 선택할 수 있습니다. 한 번 구독하면 정액으로, per-token 깜짝 청구 없이 플랜 사용한도 내에서 안전하게 사용합니다.",

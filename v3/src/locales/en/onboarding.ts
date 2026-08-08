@@ -458,6 +458,28 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.cliGate.runLogin": "Run sign-in",
   "onboarding.cliGate.runLoginHint":
     "Runs in a terminal · detected automatically when done",
+
+  // — One-click onboarding (ticket afW5wNdX) —
+  "onboarding.cliGate.installAll.title": "Install all required CLIs",
+  "onboarding.cliGate.installAll.body":
+    "Installs only the CLIs that are still missing, one after another. Anything already installed is skipped.",
+  "onboarding.cliGate.installAll.cta": "Install all ({count})",
+  "onboarding.cliGate.installAll.running": "Installing… {done}/{total}",
+  "onboarding.cliGate.installAll.done": "All {total} installed.",
+  "onboarding.cliGate.installAll.partial":
+    "{failed} of {total} failed — continue from the manual command and official docs on each failed card.",
+  "onboarding.cliGate.installAll.allDone":
+    "Every required CLI is already installed.",
+  "onboarding.cliGate.signInAll.title": "One-click sign-in",
+  "onboarding.cliGate.signInAll.body":
+    "A terminal tab opens and the login command is typed for you. Approve in the browser when it pops up — there is nothing to type yourself.",
+  "onboarding.cliGate.signInAll.cta": "Sign in with {cli}",
+  "onboarding.cliGate.signInAll.launched":
+    "Opened the {cli} terminal and ran its login command. Approve it in the browser.",
+  "onboarding.cliGate.signInAll.watching":
+    "We detect completion automatically.",
+  "onboarding.cliGate.signInAll.others":
+    "{count} other CLI(s) can be signed in the same way from their own cards.",
   "onboarding.cliGate.subscription.title": "No subscription yet?",
   "onboarding.cliGate.subscription.body":
     "Open the official subscription page to choose a plan. One subscription is a fixed plan: no surprise per-token billing, and safe use within the plan's usage limits.",

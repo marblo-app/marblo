@@ -1,0 +1,176 @@
+import type { CliModel } from "../stores/cliSetupStore";
+
+/**
+ * Pure decisions for the ONE-CLICK onboarding path (ticket afW5wNdX).
+ *
+ * The 시작하기 탭 already had every individual action (install this CLI, run
+ * this CLI's login, connect a folder). What it did not have was the *one
+ * click*: a new user had to work out which rows still needed installing, press
+ * four buttons, then work out which row still needed a sign-in. Activation
+ * diagnosis (#850) put CLI install+auth at the top of the drop-off list.
+ *
+ * Everything here is a pure function over probe results so the batching rules
+ * are testable without a DOM or a live CLI:
+ *   - which rows a "모두 설치" click should actually install (never re-install)
+ *   - which row a "원클릭 사인인" click should sign in first, and in what order
+ *   - what command to type into the spawned terminal (model → login command),
+ *     including the guard against typing an *install* command at the auth step
+ *   - whether finishing setup should reveal the orchestrator
+ */
+
+/** The subset of a probe result these decisions read. */
+export interface CliProbeLike {
+  installed: boolean;
+  authenticated: boolean;
+  /** Probe-supplied next command. Login command only when `installed`. */
+  action?: string;
+}
+
+/** Structural shape of `cliSetupStore.ROWS` entries used here. */
+export interface SetupRowLike {
+  id: string;
+  model: CliModel;
+}
+
+/**
+ * The login command per CLI, used when the probe didn't hand us one.
+ *
+ * The probe (`harness:cliAuthCheck`) returns the login command in `action`
+ * ONLY for an installed-but-signed-out CLI; for a missing CLI `action` is the
+ * *install* command instead. The sign-in button used to render only when
+ * `action` was non-empty, so a probe that failed (offline, throw → `action`
+ * carries an error string) silently removed the one-click sign-in and left the
+ * user with a copy box and no button. This table is the fallback that keeps
+ * the button meaningful.
+ */
+export const LOGIN_CMD: Record<CliModel, string> = {
+  claude: "claude login",
+  codex: "codex login",
+  grok: "grok login",
+  // agy has no `login` subcommand — running it once opens the OAuth browser
+  // flow (harness-catalog postInstall says the same).
+  antigravity: "agy",
+};
+
+/**
+ * Anything that installs rather than signs in. If a probe's `action` looks like
+ * this we must NOT type it at the auth step: it would run a `curl … | bash`
+ * installer in the user's terminal instead of opening the browser sign-in.
+ */
+const INSTALL_CMD_MARKERS = [
+  "curl",
+  "install.sh",
+  "install.ps1",
+  "npm i",
+  "npm install",
+  "iwr",
+  "powershell",
+];
+
+/** Whether `cmd` is a sign-in command (vs an installer / probe error text). */
+export function isLoginCommand(cmd: string | undefined): boolean {
+  if (!cmd) return false;
+  const c = cmd.trim();
+  if (!c) return false;
+  const lower = c.toLowerCase();
+  return !INSTALL_CMD_MARKERS.some((m) => lower.includes(m));
+}
+
+/**
+ * What to type into the sign-in terminal for `model`. Prefers the probe's
+ * `action` (it is the authoritative per-machine command) and falls back to the
+ * static table when the probe gave us nothing usable.
+ */
+export function loginCommandFor(model: CliModel, action?: string): string {
+  return isLoginCommand(action) ? (action as string).trim() : LOGIN_CMD[model];
+}
+
+/**
+ * Rows a "모두 설치" click should install.
+ *
+ * Only rows the probe explicitly reported as NOT installed. A row with no
+ * probe result yet is left alone on purpose — "we haven't looked" must never
+ * become "install it", or a slow/failed probe would re-run a shell installer
+ * over a working CLI.
+ */
+export function pendingInstallRows<R extends { id: string }>(
+  rows: R[],
+  results: Record<string, CliProbeLike | undefined>,
+): R[] {
+  return rows.filter((r) => results[r.id]?.installed === false);
+}
+
+/**
+ * Rows a sign-in click can act on, most useful first.
+ *
+ * Installed but not authenticated — a missing CLI has nothing to sign into.
+ * `priorityIds` (the orchestrator candidates: Claude / Codex) come first,
+ * in their given order, because authenticating one of those is what actually
+ * unblocks the orchestrator; the optional CLIs follow in row order.
+ */
+export function signInRows<R extends { id: string }>(
+  rows: R[],
+  results: Record<string, CliProbeLike | undefined>,
+  priorityIds: string[] = [],
+): R[] {
+  const eligible = rows.filter((r) => {
+    const s = results[r.id];
+    return s?.installed === true && s.authenticated !== true;
+  });
+  const rank = (id: string) => {
+    const i = priorityIds.indexOf(id);
+    return i === -1 ? priorityIds.length : i;
+  };
+  return [...eligible].sort((a, b) => rank(a.id) - rank(b.id));
+}
+
+/** Progress of a bulk install pass, rendered as "n/total" + failures. */
+export interface BulkInstallProgress {
+  running: boolean;
+  total: number;
+  /** Rows whose install attempt finished (successfully or not). */
+  done: number;
+  /** Row ids whose install failed — each keeps its own manual fallback card. */
+  failedIds: string[];
+}
+
+export type BulkInstallOutcome = "success" | "partial" | "failed";
+
+/**
+ * How a finished bulk pass ended. `partial` matters: some CLIs installed and
+ * some didn't, which is a different message (and a different next action) than
+ * "everything failed" — the failed rows keep their manual command + docs link.
+ */
+export function bulkInstallOutcome(p: BulkInstallProgress): BulkInstallOutcome {
+  if (p.failedIds.length === 0) return "success";
+  return p.failedIds.length >= p.total ? "failed" : "partial";
+}
+
+/**
+ * Whether finishing setup should reveal the orchestrator (사장님 요구 (3)):
+ * install + sign-in succeeding should land the user *in* the product, not on
+ * the checklist they just completed.
+ *
+ * `setupInitiated` is the guard that keeps this honest. The ready edge
+ * (`false → true`) ALSO fires on every cold start, because the probe starts
+ * false and flips once an already-authenticated user is re-probed — the same
+ * edge that caused the restart-popup regressions (bRABKQX7 / nB4eenxP). So we
+ * only reveal when the user actually pressed one of OUR one-click buttons in
+ * this session. Without a project there is nothing to open, so that is required
+ * too (the checklist's ③단계 is then the next action).
+ *
+ * ★알려진 갭 (사장님 요구 (4), 이 티켓에서 **분리**): 폴더가 없으면 여기서 멈춘다.
+ * "폴더 미설정이면 기본/데모 폴더를 자동선택해서 오케가 뜨게" 하려면 렌더러가
+ * 홈 디렉터리를 알고 폴더를 만들 수 있어야 하는데, preload 의 fs 표면에는
+ * `selectDirectory`(네이티브 피커) 외에 홈 경로도 mkdir 도 없다 — 새 메인
+ * 프로세스 IPC 가 필요하고, 그건 이 티켓의 스코프(프론트엔드) 밖이다. 후속
+ * 티켓에서 `fs:defaultProjectDir` 류를 열고 나면 이 함수의 hasProject 조건이
+ * 그 경로로 대체된다.
+ */
+export function shouldRevealOrchestrator(input: {
+  ready: boolean;
+  hasProject: boolean;
+  setupInitiated: boolean;
+}): boolean {
+  return input.ready && input.hasProject && input.setupInitiated;
+}

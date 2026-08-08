@@ -1,7 +1,9 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import {
   DOCS_URL,
+  ORCHESTRATOR_CLI_IDS,
+  ROWS,
   UPDATE_CMD,
   cliLabel,
   isCliReady,
@@ -9,7 +11,13 @@ import {
   type CliRow,
   type CliState,
 } from "../../stores/cliSetupStore";
-import { launchLogin } from "../../services/cliSetupActions";
+import {
+  bulkInstallOutcome,
+  loginCommandFor,
+  pendingInstallRows,
+  signInRows,
+} from "../../lib/oneClickSetup";
+import { launchLogin, oneClickSignIn } from "../../services/cliSetupActions";
 
 /**
  * The per-CLI row UI shared by both onboarding surfaces: the legacy modal
@@ -122,6 +130,11 @@ export function CliRowCard({ row, phase, onLoginLaunched }: CliRowCardProps) {
 
   const cmd = state?.action ?? "";
   const manualCmd = cmd || UPDATE_CMD[row.model];
+  // The auth step never types `cmd` blindly: for a not-installed CLI the probe
+  // puts the INSTALL command in `action`, and a failed probe puts an error
+  // string there. loginCommandFor keeps the sign-in button honest (and present
+  // — it used to disappear entirely whenever `action` was empty).
+  const loginCmd = loginCommandFor(row.model, state?.action);
   const subscriptionUrl = SUBSCRIPTION_URL[row.model];
 
   return (
@@ -201,16 +214,16 @@ export function CliRowCard({ row, phase, onLoginLaunched }: CliRowCardProps) {
         state &&
         !state.checking &&
         state.installed &&
-        !state.authenticated &&
-        cmd && (
+        !state.authenticated && (
           <div className="mt-3">
             <p className="text-xs text-[#a6adc8]">
               {t("onboarding.cliGate.loginHint")}
             </p>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
               <button
+                data-testid={`cli-run-login-${row.model}`}
                 onClick={() =>
-                  void launchLogin(row.model, cmd, onLoginLaunched)
+                  void launchLogin(row.model, loginCmd, onLoginLaunched)
                 }
                 className="rounded-md bg-[#89b4fa] px-3 py-1.5 text-xs font-medium text-[#1e1e2e] transition-colors hover:bg-[#74c7ec]"
               >
@@ -220,7 +233,7 @@ export function CliRowCard({ row, phase, onLoginLaunched }: CliRowCardProps) {
                 {t("onboarding.cliGate.runLoginHint")}
               </span>
             </div>
-            <CommandBox cmd={cmd} />
+            <CommandBox cmd={loginCmd} />
           </div>
         )}
 
@@ -281,6 +294,195 @@ export function CliRowCard({ row, phase, onLoginLaunched }: CliRowCardProps) {
             <CommandBox cmd={UPDATE_CMD[row.model]} />
           </div>
         )}
+    </div>
+  );
+}
+
+/**
+ * ★①단계의 원클릭 — "필수 CLI 모두 설치".
+ *
+ * 종전에는 행마다 [설치] 를 눌러야 했고, 어느 행이 아직 미설치인지도 사용자가
+ * 직접 읽어 판단해야 했다(활성화 진단 #850 의 최상단 마찰). 이 패널은 그 판단을
+ * 대신한다: 미설치 행만 골라 순차 설치하고, 진행률(n/총)과 실패 행 수를 한 줄로
+ * 보여준다. 실패한 행은 자기 카드에 수동 명령 + 공식문서 링크를 그대로 띄우므로
+ * 폴백은 원래대로 살아 있다.
+ *
+ * 대상은 오케스트레이터 후보(Claude/Codex)뿐이다 — 이 둘 중 하나만 준비되면
+ * 오케가 뜬다(#579). Grok·Antigravity 는 선택 확장이라 각 행의 개별 설치 버튼에
+ * 남는다: "모두 설치" 한 번이 사용자가 고르지도 않은 벤더 인스톨러 두 개를 더
+ * 실행해서는 안 된다.
+ */
+export function InstallAllPanel() {
+  const { t } = useTranslation();
+  const results = useCliSetupStore((s) => s.results);
+  const states = useCliSetupStore((s) => s.states);
+  const bulk = useCliSetupStore((s) => s.bulkInstall);
+  const runInstallAll = useCliSetupStore((s) => s.runInstallAll);
+
+  const targetRows = useMemo(
+    () => ROWS.filter((r) => r.autoInstall || r.required),
+    [],
+  );
+  const pending = useMemo(
+    () => pendingInstallRows(targetRows, results),
+    [targetRows, results],
+  );
+  const checking = targetRows.some((r) => states[r.id]?.checking);
+  const running = bulk?.running === true;
+
+  // 전부 설치돼 있으면 버튼 대신 완료 줄만 남긴다(누를 게 없는 버튼을 띄우지
+  // 않는다 — 눌러도 아무 일이 없는 버튼이 곧 "고장난 앱" 으로 읽힌다).
+  if (!running && pending.length === 0) {
+    return (
+      <div
+        data-testid="cli-install-all"
+        className="rounded-md border border-[#a6e3a1]/30 bg-[#a6e3a1]/10 px-3 py-2.5 text-xs text-[#a6e3a1]"
+      >
+        ✓ {t("onboarding.cliGate.installAll.allDone")}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      data-testid="cli-install-all"
+      className="rounded-lg border border-[#89b4fa]/30 bg-[#89b4fa]/5 px-3 py-3"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-[#cdd6f4]">
+            {t("onboarding.cliGate.installAll.title")}
+          </p>
+          <p className="mt-0.5 text-xs text-[#a6adc8]">
+            {t("onboarding.cliGate.installAll.body")}
+          </p>
+        </div>
+        <button
+          type="button"
+          data-testid="cli-install-all-button"
+          onClick={() => void runInstallAll(targetRows)}
+          disabled={running || checking}
+          className="shrink-0 rounded-md bg-[#89b4fa] px-3.5 py-2 text-xs font-semibold text-[#1e1e2e] transition-colors hover:bg-[#74c7ec] disabled:opacity-60"
+        >
+          {running
+            ? t("onboarding.cliGate.installAll.running", {
+                done: bulk?.done ?? 0,
+                total: bulk?.total ?? 0,
+              })
+            : t("onboarding.cliGate.installAll.cta", {
+                count: pending.length,
+              })}
+        </button>
+      </div>
+
+      {bulk && bulk.total > 0 && (
+        <div className="mt-2.5">
+          <div className="h-1.5 overflow-hidden rounded-full bg-[#313244]">
+            <div
+              data-testid="cli-install-all-progress"
+              className="h-full rounded-full bg-[#89b4fa] transition-all duration-300"
+              style={{ width: `${(bulk.done / bulk.total) * 100}%` }}
+            />
+          </div>
+          {!bulk.running && (
+            <p
+              data-testid="cli-install-all-result"
+              className={`mt-1.5 text-xs ${
+                bulkInstallOutcome(bulk) === "success"
+                  ? "text-[#a6e3a1]"
+                  : "text-[#f9e2af]"
+              }`}
+            >
+              {bulkInstallOutcome(bulk) === "success"
+                ? t("onboarding.cliGate.installAll.done", { total: bulk.total })
+                : t("onboarding.cliGate.installAll.partial", {
+                    failed: bulk.failedIds.length,
+                    total: bulk.total,
+                  })}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ★②단계의 원클릭 — "원클릭 사인인".
+ *
+ * 누르면 우리 터미널 탭이 자동 생성되고 그 CLI 의 로그인 명령이 자동 입력된다
+ * (`launchLogin` → `pty.writeAndSubmit`). CLI 가 브라우저 device-code 페이지를
+ * 띄우면 사용자는 브라우저에서 승인만 하면 된다 — 터미널을 직접 열거나 명령을
+ * 타이핑하는 수동 작업이 0 이 되는 지점이다. 인증 완료는 엔진의 auto-recheck
+ * 폴이 스스로 감지한다(`loginRunning`).
+ *
+ * 대상 선택은 `signInRows` 가 한다: 설치돼 있고 아직 미인증인 행 중 오케 후보
+ * (Claude/Codex)가 먼저다. 한 번에 하나만 여는 이유는 서비스 쪽 주석 참고.
+ */
+export function OneClickSignInPanel() {
+  const { t } = useTranslation();
+  const results = useCliSetupStore((s) => s.results);
+  const loginRunning = useCliSetupStore((s) => s.loginRunning);
+  const [launched, setLaunched] = useState<string | null>(null);
+
+  const targets = useMemo(
+    () => signInRows(ROWS, results, ORCHESTRATOR_CLI_IDS),
+    [results],
+  );
+  const target = targets[0];
+
+  // 설치된 미인증 CLI 가 없다 — 인증할 대상 자체가 없으므로 ①단계(설치)나 BYOM
+  // 안내가 다음 액션이다. 이 패널은 조용히 빠진다.
+  if (!target) return null;
+
+  return (
+    <div
+      data-testid="cli-signin-oneclick"
+      className="rounded-lg border border-[#89b4fa]/30 bg-[#89b4fa]/5 px-3 py-3"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-[#cdd6f4]">
+            {t("onboarding.cliGate.signInAll.title")}
+          </p>
+          <p className="mt-0.5 text-xs text-[#a6adc8]">
+            {t("onboarding.cliGate.signInAll.body")}
+          </p>
+        </div>
+        <button
+          type="button"
+          data-testid="cli-signin-oneclick-button"
+          onClick={() => {
+            const model = oneClickSignIn();
+            if (model) setLaunched(cliLabel(model));
+          }}
+          className="shrink-0 rounded-md bg-[#89b4fa] px-3.5 py-2 text-xs font-semibold text-[#1e1e2e] transition-colors hover:bg-[#74c7ec]"
+        >
+          {t("onboarding.cliGate.signInAll.cta", {
+            cli: cliLabel(target.model),
+          })}
+        </button>
+      </div>
+      {launched && (
+        <p
+          data-testid="cli-signin-oneclick-note"
+          className="mt-2 text-xs text-[#a6e3a1]"
+        >
+          {t("onboarding.cliGate.signInAll.launched", { cli: launched })}
+          {loginRunning && (
+            <span className="ml-1 text-[#a6adc8]">
+              {t("onboarding.cliGate.signInAll.watching")}
+            </span>
+          )}
+        </p>
+      )}
+      {targets.length > 1 && (
+        <p className="mt-1.5 text-[11px] text-[#7f849c]">
+          {t("onboarding.cliGate.signInAll.others", {
+            count: targets.length - 1,
+          })}
+        </p>
+      )}
     </div>
   );
 }

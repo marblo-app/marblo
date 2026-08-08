@@ -27,7 +27,11 @@ import {
   type ActionResult,
   type FirstTicketResult,
 } from "../../services/cliSetupActions";
-import { CliRowCard } from "./CliSetupRows";
+import {
+  CliRowCard,
+  InstallAllPanel,
+  OneClickSignInPanel,
+} from "./CliSetupRows";
 import { ByomStartSection } from "./ByomStartSection";
 import { FirstTicketResultNote } from "./FirstTicketResultNote";
 import { VendorModelsSection } from "./VendorModelsSection";
@@ -615,10 +619,17 @@ function StepBody({
           {t(`onboarding.cliGate.${step}.body` as MessageKey)}
         </p>
         {step === "install" && (
-          <div className="rounded-md border border-[#89b4fa]/25 bg-[#89b4fa]/5 px-3 py-2.5 text-xs text-[#a6adc8]">
-            {t("onboarding.cliGate.install.costNote")}
-          </div>
+          <>
+            <div className="rounded-md border border-[#89b4fa]/25 bg-[#89b4fa]/5 px-3 py-2.5 text-xs text-[#a6adc8]">
+              {t("onboarding.cliGate.install.costNote")}
+            </div>
+            {/* ★원클릭: 미설치 CLI 를 한 번에. 개별 행 버튼은 그대로 남는다
+                (실패한 한 행만 다시 시도하는 길). */}
+            <InstallAllPanel />
+          </>
         )}
+        {/* ★원클릭 사인인: 터미널 자동생성 + 로그인 명령 자동주입 → 브라우저 승인만. */}
+        {step === "auth" && <OneClickSignInPanel />}
         {ROWS.map((row) => (
           <CliRowCard key={row.id} row={row} phase={step} />
         ))}
