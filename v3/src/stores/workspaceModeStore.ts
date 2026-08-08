@@ -4,47 +4,46 @@ import { create } from "zustand";
  * Single flag for the unified Workspace shell (IDE split: file tree ·
  * orchestrator + agent terminals · tabbed work view · activity).
  *
- * ★ DEFAULT ON since the shell became the product's cold-open experience. The
- * flag did not disappear — it inverted: it is now an opt-OUT back to the legacy
- * <Layout />, and OFF must still be a total no-op (App renders <Layout />
- * verbatim, pixel-identical to before the shell existed).
+ * ★ ALWAYS ON in production. The flag's history: opt-IN experiment (PR#477) →
+ * opt-OUT with the shell as default → (now) no user-facing switch at all. The
+ * Settings toggle was removed because the shell IS the product; keeping a
+ * persisted opt-out without a toggle would be a trap, not a choice — a user who
+ * once wrote "0" would be stuck in the legacy <Layout /> forever with no UI to
+ * come back.
  *
- * The polarity change is deliberately expressed as "explicit "0" wins", not as
- * a flipped default with the same read: users who turned the shell OFF wrote
- * "0" and keep the legacy layout across this change, while everyone who never
- * touched the Settings toggle (no key at all) graduates to the shell. A read
- * failure (private mode, storage disabled) lands on the shell too, since that
- * is now the default experience rather than an experiment.
+ * The legacy <Layout /> branch in App.tsx is NOT deleted, and this is not an
+ * oversight: it is still exercised on purpose by the cleanroom E2E
+ * (`switchToLegacyLayout` in tests/playwright/cleanroom/helpers/cleanroom.ts,
+ * two first-run scenarios) and it owns onboarding surfaces the shell does not
+ * have (CliSetupGate, TabBar). So the opt-out survives as a **test-only hatch**:
+ * honored only when the app runs under MARBLO_TEST_BYPASS_AUTH=1, which preload
+ * (and only preload) can set and production builds never do.
  */
 const STORAGE_KEY = "marblo.workspaceMode.enabled";
 
-function readInitial(): boolean {
+/**
+ * Whether the workspace shell renders. Exported for the unit test — the store
+ * itself is a module singleton evaluated at import time, so the branch is only
+ * observable through this function.
+ */
+export function resolveWorkspaceModeEnabled(): boolean {
   if (typeof window === "undefined") return true;
+  // Production has no opt-out: the persisted "0" (and any other value) is
+  // ignored, so old opt-outs graduate to the shell on the next launch.
+  if (!window.electronAPI?.testMode?.bypassAuth) return true;
   try {
-    // Explicit "0" only (a deliberate opt-out). Missing / "1" / garbage → ON.
-    return localStorage.getItem(STORAGE_KEY) !== "0";
+    // Test harness only. Explicit "0" → legacy <Layout />; anything else → shell.
+    return window.localStorage.getItem(STORAGE_KEY) !== "0";
   } catch {
     return true;
   }
 }
 
 interface WorkspaceModeState {
-  /** When true, the app renders the new WorkspaceShell instead of Layout. */
+  /** When true, the app renders the WorkspaceShell instead of the legacy Layout. */
   enabled: boolean;
-  setEnabled: (enabled: boolean) => void;
-  toggle: () => void;
 }
 
-export const useWorkspaceModeStore = create<WorkspaceModeState>((set, get) => ({
-  enabled: readInitial(),
-  setEnabled: (enabled) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, enabled ? "1" : "0");
-    } catch {
-      // Persisting failed (private mode) — keep the in-memory value so the
-      // toggle still works for this session; it just won't survive restart.
-    }
-    set({ enabled });
-  },
-  toggle: () => get().setEnabled(!get().enabled),
+export const useWorkspaceModeStore = create<WorkspaceModeState>(() => ({
+  enabled: resolveWorkspaceModeEnabled(),
 }));

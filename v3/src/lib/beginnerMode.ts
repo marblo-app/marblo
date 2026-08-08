@@ -96,7 +96,12 @@ export interface PriorInstallMarkers {
   onboardingProgress: boolean;
   /** `marblo.workspaceSplit.activeTab` — the shell has persisted a tab. */
   workspaceTab: boolean;
-  /** `marblo.workspaceMode.enabled` — the shell opt-out toggle was touched. */
+  /**
+   * `marblo.workspaceMode.enabled` — the shell toggle was touched. The toggle
+   * itself is gone (the shell is now unconditional), so nothing writes this key
+   * anymore — but installs that predate the removal still carry it, which is
+   * exactly the prior-use evidence this marker is for.
+   */
   workspaceModeFlag: boolean;
   /** `marblo.cliSetupGateDismissed` — the legacy modal was dismissed. */
   legacyGateDismissed: boolean;

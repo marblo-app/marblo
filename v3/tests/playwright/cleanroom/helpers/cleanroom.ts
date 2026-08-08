@@ -1027,9 +1027,11 @@ export async function openWorkTab(page: Page, label: string): Promise<void> {
 }
 
 /**
- * 레거시 Layout(모달 위저드) 경로로 전환. workspaceMode 는 기본 ON 이라
- * 신규 유저의 기본 화면은 셸이지만, 옵트아웃한 유저는 여전히 모달을 본다 —
- * #579 의 원래 무대라 두 경로 모두 검증한다.
+ * 레거시 Layout(모달 위저드) 경로로 전환. 설정의 셸 토글이 없어진 뒤로 이
+ * opt-out 은 **테스트 전용 해치**다 — workspaceModeStore 가 "0" 을 읽는 것은
+ * MARBLO_TEST_BYPASS_AUTH=1 로 뜬 경우뿐이고(=이 하네스), 실사용 빌드는 항상
+ * 셸이다. 그럼에도 계속 검증하는 이유: #579 의 원래 무대이자 Layout 전용
+ * 온보딩 표면(CliSetupGate)이 아직 이 경로에만 있다.
  */
 export async function switchToLegacyLayout(page: Page): Promise<void> {
   await page.evaluate(() => {

@@ -468,9 +468,12 @@ function AppContent() {
     return <BeginnerShell />;
   }
 
-  // Opt-in Workspace shell (default OFF). When OFF this is exactly <Layout />
-  // as before — no behavioral change. Detached pop-out windows above always
-  // use the legacy DetachedLayout regardless of this flag.
+  // Workspace shell — 프로덕션에선 **항상** 이쪽이다(설정 토글 제거,
+  // stores/workspaceModeStore 참고). 아래 <Layout /> 은 죽은 코드가 아니라
+  // 테스트 하네스(MARBLO_TEST_BYPASS_AUTH + localStorage "0")에서만 도달하는
+  // 레거시 경로다 — cleanroom first-run 의 두 시나리오와 Layout 전용 온보딩
+  // 표면(CliSetupGate·TabBar)이 아직 여기 걸려 있어 함께 남겨 둔다.
+  // detached 팝아웃 창은 이 플래그와 무관하게 위에서 DetachedLayout 으로 빠진다.
   if (workspaceMode) {
     return <WorkspaceShell />;
   }

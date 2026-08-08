@@ -8,7 +8,6 @@ export const settings: Record<keyof typeof koSettings, string> = {
   // ── Settings → tabs ─────────────────────────────────────
   "settings.title": "Settings",
   "settings.tab.profile": "Profile",
-  "settings.tab.adminAnalytics": "Admin Analytics",
   "settings.tab.models": "Agent Models",
   "settings.tab.billing": "Billing",
   "settings.tab.team": "Team",

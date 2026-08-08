@@ -14,7 +14,6 @@ import {
   orchestratorModelProvider,
 } from "../../stores/orchestratorStore";
 import { useSubscriptionStore } from "../../stores/subscriptionStore";
-import { useAdminAccessStore } from "../../stores/adminAccessStore";
 import { useUiStore } from "../../stores/uiStore";
 import { useTranslation } from "../../lib/i18n";
 import { BillingPage } from "./BillingPage";
@@ -24,11 +23,9 @@ import { APIKeysSettings } from "./APIKeysSettings";
 import { VendorKeysSettings } from "./VendorKeysSettings";
 import { PrivacySettings } from "./PrivacySettings";
 import { BugReportModal } from "./BugReportModal";
-import { AdminAnalyticsPanel } from "./AdminAnalyticsPanel";
 
 type SettingsTab =
   | "profile"
-  | "adminAnalytics"
   | "models"
   | "billing"
   | "team"
@@ -41,7 +38,6 @@ interface TabSpec {
   id: SettingsTab;
   labelKey:
     | "settings.tab.profile"
-    | "settings.tab.adminAnalytics"
     | "settings.tab.models"
     | "settings.tab.billing"
     | "settings.tab.team"
@@ -54,7 +50,6 @@ interface TabSpec {
 
 const TABS: TabSpec[] = [
   { id: "profile", labelKey: "settings.tab.profile" },
-  { id: "adminAnalytics", labelKey: "settings.tab.adminAnalytics" },
   { id: "models", labelKey: "settings.tab.models" },
   { id: "billing", labelKey: "settings.tab.billing" },
   { id: "team", labelKey: "settings.tab.team" },
@@ -84,27 +79,9 @@ const TABS: TabSpec[] = [
 
 export function SettingsPage() {
   const { t } = useTranslation();
-  const { user } = useAuth();
   const currentProject = useProjectStore((s) => s.currentProject);
   const getPlan = useSubscriptionStore((s) => s.getPlan);
   const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
-
-  // 어드민 분석 탭은 서버가 permission-denied 를 실제로 돌려준 계정에서만
-  // 숨긴다(adminAccessStore). 판정 전(unknown)에는 보인다 — 미리 숨기면 진짜
-  // 어드민이 탭을 찾을 길이 없는 닭-달걀이 된다.
-  const adminAccess = useAdminAccessStore((s) => s.statusByUid)[
-    user?.uid ?? ""
-  ];
-  const adminTabHidden = adminAccess === "denied";
-  const tabs = adminTabHidden
-    ? TABS.filter((tab) => tab.id !== "adminAnalytics")
-    : TABS;
-
-  // 이번 세션에 거절이 확인되면 그 자리에 서 있을 수 없다 — 프로필로 돌린다.
-  useEffect(() => {
-    if (adminTabHidden && activeTab === "adminAnalytics")
-      setActiveTab("profile");
-  }, [adminTabHidden, activeTab]);
 
   // Deep-link from the Upgrade modal (or any caller) to a specific section,
   // e.g. Billing. Consume the latch whenever it appears so the sub-tab is
@@ -140,10 +117,11 @@ export function SettingsPage() {
           </span>
         </div>
 
-        {/* Tab navigation. 탭이 9개라 좁은 창에서는 줄바꿈 대신 가로 스크롤로
-            흘린다 — flex 기본 축소에 맡기면 라벨이 눌려 읽을 수 없게 된다. */}
+        {/* Tab navigation. 탭이 여러 개라 좁은 창에서는 줄바꿈 대신 가로
+            스크롤로 흘린다 — flex 기본 축소에 맡기면 라벨이 눌려 읽을 수 없게
+            된다. */}
         <div className="mb-6 flex overflow-x-auto border-b border-gray-700">
-          {tabs.map((tab) => (
+          {TABS.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -161,7 +139,6 @@ export function SettingsPage() {
 
         {/* Tab content */}
         {activeTab === "profile" && <ProfileSection />}
-        {activeTab === "adminAnalytics" && <AdminAnalyticsPanel />}
         {activeTab === "models" && <ModelPresetSection />}
         {activeTab === "billing" && <BillingPage />}
         {activeTab === "team" &&
@@ -285,8 +262,9 @@ function ProfileSection() {
         </div>
       </div>
 
+      {/* 워크스페이스 셸 토글은 없앴다 — 셸이 곧 제품이라 고를 축이 아니다
+          (stores/workspaceModeStore 의 "프로덕션 항상 ON" 주석 참고). */}
       <BeginnerModeSection />
-      <WorkspaceModeSection />
     </div>
   );
 }
@@ -369,47 +347,6 @@ function BeginnerModeSection() {
           {t("beginner.settings.replayTourDone")}
         </p>
       )}
-    </div>
-  );
-}
-
-function WorkspaceModeSection() {
-  const { t } = useTranslation();
-  const enabled = useWorkspaceModeStore((s) => s.enabled);
-  const setEnabled = useWorkspaceModeStore((s) => s.setEnabled);
-
-  return (
-    <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h3 className="mb-1 text-sm font-medium text-gray-200">
-            {t("workspace.settings.heading")}
-          </h3>
-          <p className="text-xs leading-relaxed text-gray-500">
-            {t("workspace.settings.help")}
-          </p>
-        </div>
-        {/* Toggle switch */}
-        <button
-          type="button"
-          role="switch"
-          aria-checked={enabled}
-          aria-label={t("workspace.settings.toggleLabel")}
-          onClick={() => setEnabled(!enabled)}
-          className={`relative mt-0.5 h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
-            enabled ? "bg-blue-600" : "bg-gray-600"
-          }`}
-        >
-          <span
-            className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-              enabled ? "translate-x-5" : "translate-x-0"
-            }`}
-          />
-        </button>
-      </div>
-      <p className="mt-2 text-xs font-medium text-gray-400">
-        {enabled ? t("workspace.settings.on") : t("workspace.settings.off")}
-      </p>
     </div>
   );
 }
@@ -567,8 +504,8 @@ function PresetRow({
         bare
           ? ""
           : selected
-          ? "border border-blue-500 bg-blue-500/10"
-          : "border border-gray-700 hover:border-gray-600 hover:bg-gray-700/50"
+            ? "border border-blue-500 bg-blue-500/10"
+            : "border border-gray-700 hover:border-gray-600 hover:bg-gray-700/50"
       }`}
     >
       <span className="text-xl leading-6">{icon}</span>
@@ -706,7 +643,7 @@ function ModelPresetSection() {
       catalog.presets.find((p) => p.id === current)?.models ??
       catalog.customHarnesses;
     const unique = [...new Set(seed)].filter((m) =>
-      catalog.customHarnesses.includes(m)
+      catalog.customHarnesses.includes(m),
     );
     if (unique.length === 0) return;
     void handleSelect(`${CUSTOM_PRESET_PREFIX}${unique.join(",")}`);
