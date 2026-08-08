@@ -563,6 +563,11 @@
     "annualAutoRenewNotice": "{amount} will be charged automatically every year and renew until canceled",
     "annualServicePeriod": "Service period: 12 months (1 year) from the payment date. It renews automatically on the same date each year, providing another 12 months.",
     "cancelNotice": "To cancel your subscription, contact customer support.",
+    "paymentMethodLabel": "Payment method",
+    "paymentMethodCard": "Credit / debit card",
+    "paymentMethodTossPay": "Toss Pay",
+    "paymentMethodTossPayNotice": "You'll register automatic payments in the Toss Pay window. After that, each billing cycle is charged automatically.",
+    "paymentMethodUnsupported": "That easy-pay method isn't available right now. Please try another payment method.",
     "phoneNumberLabel": "Phone number (Required)",
     "phoneNumberPlaceholder": "01012345678",
     "phoneNumberInvalid": "Enter 10 to 11 digits without hyphens.",
@@ -625,7 +630,8 @@
     "cancelSoftDescription": "You closed or cancelled the payment window. You can try again when ready.",
     "testCardHintTitle": "Test payment tips",
     "testCardHintBody": "This is a development/staging environment. Some issuers (e.g. KB, KakaoBank) may not work on the test channel. Use the PortOne/KG Inicis test card guide.",
-    "errorDetailOptional": "Error code (for support)"  },
+    "errorDetailOptional": "Error code (for support)"
+  },
   "lectures": {
     "title": "Lectures",
     "subtitle": "Master AI Agent Development",

@@ -40,15 +40,45 @@ interface PortOneSDK {
   requestIssueBillingKey(params: {
     storeId: string;
     channelKey: string;
-    billingKeyMethod: "CARD";
+    billingKeyMethod: PortOneBillingKeyMethod;
     issueId: string;
     issueName: string;
+    /** 간편결제(EASY_PAY) 전용 — 간편결제사를 직접 지정한다. */
+    easyPay?: { easyPayProvider: PortOneEasyPayProvider };
     customer?: {
+      /**
+       * 토스페이 빌링키 발급은 customerId 가 필수다(포트원 토스페이 연동
+       * 가이드). 카드 경로에는 없던 요구사항.
+       */
+      customerId?: string;
       fullName?: string;
       email?: string;
       phoneNumber?: string;
     };
-  }): Promise<{ billingKey?: string; code?: string; message?: string }>;
+  }): Promise<{
+    billingKey?: string;
+    /**
+     * 수동 승인 채널이면 billingKey 자리에 'NEEDS_CONFIRMATION' 이 오고
+     * 이 토큰이 함께 온다 — 서버가 POST /billing-keys/confirm 으로 승인해야
+     * 실제 빌링키가 나온다.
+     */
+    billingIssueToken?: string;
+    code?: string;
+    message?: string;
+  }>;
+}
+
+/** 포트원 V2 규약(@portone/browser-sdk BillingKeyMethod / EasyPayProvider). */
+type PortOneBillingKeyMethod = "CARD" | "EASY_PAY";
+type PortOneEasyPayProvider = "TOSSPAY";
+
+interface PortOneCheckoutConfig {
+  storeId: string;
+  channelKey: string;
+  /** 간편결제 빌링 채널. null 이면 토스페이 옵션을 띄우지 않는다. */
+  easyPayBillingChannelKey?: string | null;
+  /** 서버가 배선을 확인한 간편결제사(포트원 규약명). */
+  easyPayProviders?: string[] | null;
 }
 
 declare global {
@@ -107,6 +137,15 @@ export default function CheckoutPage() {
   const [sdkLoadFailed, setSdkLoadFailed] = useState(false);
   /** 첫청구 실패(빌링키는 있음) — retryFirstCharge 노출 */
   const [canRetryFirstCharge, setCanRetryFirstCharge] = useState(false);
+  /** PortOne 빌링키 발급수단 — 카드 또는 간편결제(토스페이). */
+  const [portoneBillingKeyMethod, setPortoneBillingKeyMethod] =
+    useState<PortOneBillingKeyMethod>("CARD");
+  /**
+   * 간편결제 옵션 노출 여부를 결정하려면 결제 버튼을 누르기 전에 서버 채널
+   * 설정을 알아야 한다 — 마운트 시 prefetch 하고 결제 시 재사용한다.
+   */
+  const [portoneConfig, setPortoneConfig] =
+    useState<PortOneCheckoutConfig | null>(null);
 
   // Resolve plan or lecture info
   const planInfo = plan ? PLAN_PRICES[plan] : null;
@@ -157,6 +196,18 @@ export default function CheckoutPage() {
       ? "paymentProcessorPortOne"
       : "paymentProcessorToss",
   );
+  /**
+   * 토스페이(간편결제)는 구독 빌링키 축에만 배선돼 있다. 강의 단건은 카드
+   * 경로 그대로. 서버가 간편결제 채널을 확인해 줬을 때만 노출한다.
+   */
+  const easyPayAvailable =
+    paymentProvider === "portone" &&
+    !isLecture &&
+    !!portoneConfig?.easyPayBillingChannelKey &&
+    (portoneConfig?.easyPayProviders || []).includes("TOSSPAY");
+  const effectiveBillingKeyMethod: PortOneBillingKeyMethod = easyPayAvailable
+    ? portoneBillingKeyMethod
+    : "CARD";
 
   // Validate query params
   const isValid = isLecture ? !!lectureInfo : !!planInfo;
@@ -279,6 +330,31 @@ export default function CheckoutPage() {
       cancelled = true;
     };
   }, [user, isValid, t, paymentProvider, loadPortOneSDK]);
+
+  // PortOne 채널 설정 prefetch — 간편결제(토스페이) 옵션 노출 판단용.
+  // 실패는 조용히 무시한다(카드 경로는 결제 시점 재조회로 계속 동작).
+  useEffect(() => {
+    if (!user || !isValid || paymentProvider !== "portone") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const functions = getFunctions(app, "us-central1");
+        const getConfig = httpsCallable<
+          { kind: "one_time" | "subscription" },
+          PortOneCheckoutConfig
+        >(functions, "getPortOneCheckoutConfig");
+        const { data } = await getConfig({
+          kind: isLecture ? "one_time" : "subscription",
+        });
+        if (!cancelled) setPortoneConfig(data);
+      } catch (err) {
+        console.error("PortOne config prefetch error:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, isValid, paymentProvider, isLecture]);
 
   // 쿠폰 타입별 할인 반영(C). discountPercent 만 보면 첫 결제를 전액 면제하는
   // free_trial / plan_upgrade 쿠폰이 화면에 반영되지 않아 정가가 그대로 보였다.
@@ -457,11 +533,16 @@ export default function CheckoutPage() {
         const functions = getFunctions(app, "us-central1");
         const getConfig = httpsCallable<
           { kind: "one_time" | "subscription" },
-          { storeId: string; channelKey: string }
+          PortOneCheckoutConfig
         >(functions, "getPortOneCheckoutConfig");
-        const { data: config } = await getConfig({
-          kind: isLecture ? "one_time" : "subscription",
-        });
+        // prefetch 된 설정을 재사용하되, 없으면(프리페치 실패) 여기서 조회한다.
+        const config =
+          portoneConfig ??
+          (
+            await getConfig({
+              kind: isLecture ? "one_time" : "subscription",
+            })
+          ).data;
         const portone = await loadPortOneSDK();
         const safePlan = plan || "pro";
         if (isLecture && lectureSlug) {
@@ -504,13 +585,22 @@ export default function CheckoutPage() {
         } else if (plan) {
           // KG이니시스 issueId 40자 제한 — uid 삽입 시 초과하므로 짧은 고정 prefix + UUID(무하이픈)
           const issueId = `mb_${crypto.randomUUID().replace(/-/g, "")}`;
+          const isEasyPay = effectiveBillingKeyMethod === "EASY_PAY";
           const response = await portone.requestIssueBillingKey({
             storeId: config.storeId,
-            channelKey: config.channelKey,
-            billingKeyMethod: "CARD",
+            // 간편결제 빌링키는 간편결제 채널에서 발급된다 — 카드 채널키로
+            // 요청하면 발급창이 뜨지 않는다.
+            channelKey:
+              (isEasyPay ? config.easyPayBillingChannelKey : null) ||
+              config.channelKey,
+            billingKeyMethod: effectiveBillingKeyMethod,
+            ...(isEasyPay
+              ? { easyPay: { easyPayProvider: "TOSSPAY" as const } }
+              : {}),
             issueId,
             issueName: `Marblo ${itemName} 구독`,
-            customer,
+            // 토스페이 빌링키 발급은 customerId 필수(포트원 토스페이 가이드).
+            customer: { ...customer, customerId: user.uid },
           });
           if (response.code) {
             throw Object.assign(
@@ -518,10 +608,18 @@ export default function CheckoutPage() {
               { code: response.code },
             );
           }
-          if (!response.billingKey) throw new Error(t("paymentError"));
+          // ★간편결제 승인 차이: 수동 승인 채널은 billingKey 대신
+          // 'NEEDS_CONFIRMATION' + billingIssueToken 을 준다. 둘 다 없을 때만
+          // 실패다 — 서버가 토큰으로 승인해 실제 빌링키를 받는다.
+          if (!response.billingKey && !response.billingIssueToken) {
+            throw new Error(t("paymentError"));
+          }
           const complete = httpsCallable(functions, "completePortOneBillingKey");
           await complete({
             billingKey: response.billingKey,
+            billingIssueToken: response.billingIssueToken,
+            billingKeyMethod: effectiveBillingKeyMethod,
+            easyPayProvider: isEasyPay ? "TOSSPAY" : undefined,
             planType: plan,
             billing,
             coupon: couponCode || undefined,
@@ -793,6 +891,45 @@ export default function CheckoutPage() {
                   {t("cancelNotice")}
                 </p>
               </div>
+            )}
+
+            {/* 결제수단 — 포트원 구독 축에만 노출(간편결제 채널이 붙었을 때). */}
+            {easyPayAvailable && (
+              <fieldset className="space-y-2">
+                <legend className="block text-sm font-medium text-zinc-300">
+                  {t("paymentMethodLabel")}
+                </legend>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["CARD", "EASY_PAY"] as const).map((method) => {
+                    const selected = portoneBillingKeyMethod === method;
+                    return (
+                      <button
+                        key={method}
+                        type="button"
+                        onClick={() => {
+                          setPortoneBillingKeyMethod(method);
+                          if (error) setError(null);
+                        }}
+                        aria-pressed={selected}
+                        className={`rounded-lg border px-3 py-3 text-sm font-medium transition ${
+                          selected
+                            ? "border-indigo-500 bg-indigo-500/10 text-zinc-100"
+                            : "border-zinc-700 bg-zinc-950 text-zinc-400 hover:border-zinc-600"
+                        }`}
+                      >
+                        {method === "CARD"
+                          ? t("paymentMethodCard")
+                          : t("paymentMethodTossPay")}
+                      </button>
+                    );
+                  })}
+                </div>
+                {portoneBillingKeyMethod === "EASY_PAY" && (
+                  <p className="text-xs text-zinc-400">
+                    {t("paymentMethodTossPayNotice")}
+                  </p>
+                )}
+              </fieldset>
             )}
 
             {requiresCheckoutEmail && (

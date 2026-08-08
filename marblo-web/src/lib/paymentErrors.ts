@@ -17,6 +17,7 @@ export type PaymentErrorKey =
   | "networkError"
   | "sdkLoadError"
   | "unsupportedCard"
+  | "paymentMethodUnsupported"
   | "loginRequired"
   | "couponInvalid"
   | "paymentNotPaid"
@@ -46,6 +47,35 @@ const USER_CANCEL_CODES = new Set(
     "CANCEL",
     "CANCELED",
     "CANCELLED",
+    // 간편결제(토스페이) 창 취소 — PortOne V2 / 간편결제 계열 코드.
+    "PORTONE_CANCEL",
+    "EASY_PAY_CANCEL",
+    "EASY_PAY_CANCELED",
+    "EASY_PAY_CANCELLED",
+    "TOSSPAY_CANCEL",
+    "USER_CANCEL_PAYMENT",
+    "PAY_CANCEL",
+  ].map((c) => c.toUpperCase()),
+);
+
+/**
+ * 간편결제(EASY_PAY) 미지원·미배선·발급승인 실패 코드.
+ * 카드 거절과 달리 "다른 카드로 재시도" 가 답이 아니라 결제수단 자체를
+ * 바꿔야 하므로 별도 키로 안내한다. 소문자 코드는 우리 callable 이 던지는
+ * 비즈니스 코드다(completePortOneBillingKey / confirmPortOneBillingKey).
+ */
+const UNSUPPORTED_EASY_PAY_CODES = new Set(
+  [
+    "easy_pay_provider_unsupported",
+    "billing_key_confirm_failed",
+    "EASY_PAY_NOT_SUPPORTED",
+    "NOT_SUPPORTED_EASY_PAY",
+    "UNSUPPORTED_EASY_PAY",
+    "EASY_PAY_PROVIDER_NOT_SUPPORTED",
+    "UNSUPPORTED_BILLING_KEY_METHOD",
+    "BILLING_KEY_METHOD_NOT_SUPPORTED",
+    "CHANNEL_NOT_FOUND",
+    "PG_PROVIDER_NOT_SUPPORTED",
   ].map((c) => c.toUpperCase()),
 );
 
@@ -184,6 +214,14 @@ export function isUserCancelMessage(message: string): boolean {
   return false;
 }
 
+/** 간편결제 미지원·미배선(결제수단을 바꿔야 하는) 코드인가. */
+export function isUnsupportedEasyPayCode(
+  code: string | null | undefined,
+): boolean {
+  if (!code) return false;
+  return UNSUPPORTED_EASY_PAY_CODES.has(upper(code));
+}
+
 export function isUnsupportedCardCode(
   code: string | null | undefined,
 ): boolean {
@@ -229,6 +267,22 @@ export function mapPaymentError(err: unknown): MappedPaymentError {
         alreadySubscribed: !!rule.alreadySubscribed,
       };
     }
+  }
+
+  // 2.5) 간편결제(토스페이) 미지원·미배선 — 카드 거절보다 먼저 본다.
+  // "다른 카드" 가 아니라 "다른 결제수단" 을 안내해야 하는 갈래.
+  const easyPayHit =
+    isUnsupportedEasyPayCode(pgCode) ||
+    isUnsupportedEasyPayCode(message) ||
+    [...UNSUPPORTED_EASY_PAY_CODES].some((c) => upper(haystack).includes(c));
+  if (easyPayHit) {
+    return {
+      key: "paymentMethodUnsupported",
+      tone: "error",
+      code: pgCode || message || undefined,
+      canRetryFirstCharge: false,
+      alreadySubscribed: false,
+    };
   }
 
   // 3) Unsupported / declined card

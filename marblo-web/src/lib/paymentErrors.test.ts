@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   extractErrorCode,
+  isUnsupportedEasyPayCode,
   isUserCancelCode,
   isUserCancelMessage,
   mapFailPageParams,
@@ -92,6 +93,41 @@ test("extractErrorCode pulls UPPER_SNAKE tokens", () => {
   assert.equal(
     extractErrorCode({ code: "INVALID_CARD", message: "x" }),
     "INVALID_CARD",
+  );
+});
+
+test("easy-pay (TossPay) cancel codes are soft, not hard failures", () => {
+  assert.equal(isUserCancelCode("EASY_PAY_CANCEL"), true);
+  assert.equal(isUserCancelCode("tosspay_cancel"), true);
+  assert.equal(isUserCancelCode("PORTONE_CANCEL"), true);
+
+  const m = mapPaymentError({ code: "EASY_PAY_CANCEL", message: "" });
+  assert.equal(m.key, "paymentCancelled");
+  assert.equal(m.tone, "soft");
+});
+
+test("unsupported easy-pay maps to paymentMethodUnsupported, not unsupportedCard", () => {
+  assert.equal(isUnsupportedEasyPayCode("EASY_PAY_NOT_SUPPORTED"), true);
+  assert.equal(isUnsupportedEasyPayCode("easy_pay_provider_unsupported"), true);
+  assert.equal(isUnsupportedEasyPayCode("INVALID_CARD"), false);
+  assert.equal(isUnsupportedEasyPayCode(null), false);
+
+  // 서버 callable 이 던지는 비즈니스 코드(소문자)도 잡혀야 한다.
+  const fromServer = mapPaymentError({
+    code: "functions/invalid-argument",
+    message: "easy_pay_provider_unsupported",
+  });
+  assert.equal(fromServer.key, "paymentMethodUnsupported");
+  assert.equal(fromServer.canRetryFirstCharge, false);
+
+  // 빌링키 발급 수동 승인 실패도 결제수단을 바꾸라고 안내한다.
+  const confirmFail = mapPaymentError(new Error("billing_key_confirm_failed"));
+  assert.equal(confirmFail.key, "paymentMethodUnsupported");
+
+  // ★카드 거절은 여전히 카드 문구로 남아야 한다(간편결제 분기가 삼키면 안 됨).
+  assert.equal(
+    mapPaymentError({ code: "INVALID_CARD" }).key,
+    "unsupportedCard",
   );
 });
 

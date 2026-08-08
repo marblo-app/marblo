@@ -563,6 +563,11 @@
     "annualAutoRenewNotice": "매년 {amount} 자동결제, 해지 전까지 갱신",
     "annualServicePeriod": "서비스 제공기간: 결제일로부터 12개월(1년). 매년 같은 날 자동 갱신되며, 갱신 시 다시 12개월이 제공됩니다.",
     "cancelNotice": "구독 해지는 고객지원 문의로 요청할 수 있습니다.",
+    "paymentMethodLabel": "결제수단",
+    "paymentMethodCard": "신용·체크카드",
+    "paymentMethodTossPay": "토스페이",
+    "paymentMethodTossPayNotice": "토스페이 창에서 자동결제(정기결제)를 등록합니다. 등록 후 매 결제주기마다 자동으로 청구됩니다.",
+    "paymentMethodUnsupported": "선택한 간편결제는 현재 사용할 수 없습니다. 다른 결제수단으로 시도해 주세요.",
     "phoneNumberLabel": "전화번호 (필수)",
     "phoneNumberPlaceholder": "01012345678",
     "phoneNumberInvalid": "전화번호는 하이픈 없이 숫자 10~11자리로 입력해 주세요.",
@@ -625,7 +630,8 @@
     "cancelSoftDescription": "결제창을 닫았거나 취소했습니다. 준비가 되면 다시 결제할 수 있습니다.",
     "testCardHintTitle": "테스트 결제 안내",
     "testCardHintBody": "개발/스테이징 환경입니다. 일부 카드사(국민·카카오뱅크 등)는 테스트 채널에서 지원되지 않을 수 있습니다. 이니시스/포트원 테스트 카드 가이드를 확인하세요.",
-    "errorDetailOptional": "상세 코드 (고객지원용)"  },
+    "errorDetailOptional": "상세 코드 (고객지원용)"
+  },
   "lectures": {
     "title": "강의",
     "subtitle": "AI 에이전트 개발을 마스터하세요",

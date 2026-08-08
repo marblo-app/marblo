@@ -563,6 +563,11 @@
     "annualAutoRenewNotice": "毎年{amount}が自動決済され、解約するまで更新されます",
     "annualServicePeriod": "サービス提供期間: 決済日から12ヶ月(1年)。毎年同じ日に自動更新され、更新時に再び12ヶ月が提供されます。",
     "cancelNotice": "サブスクリプションの解約はカスタマーサポートへお問い合わせください。",
+    "paymentMethodLabel": "お支払い方法",
+    "paymentMethodCard": "クレジット・デビットカード",
+    "paymentMethodTossPay": "Toss Pay",
+    "paymentMethodTossPayNotice": "Toss Pay の画面で自動支払い（定期決済）を登録します。登録後は請求サイクルごとに自動で請求されます。",
+    "paymentMethodUnsupported": "選択した簡単決済は現在ご利用いただけません。別のお支払い方法をお試しください。",
     "phoneNumberLabel": "電話番号（必須）",
     "phoneNumberPlaceholder": "01012345678",
     "phoneNumberInvalid": "ハイフンなしの数字10〜11桁で入力してください。",
@@ -625,7 +630,8 @@
     "cancelSoftDescription": "決済画面を閉じたかキャンセルしました。準備ができたら再度お支払いできます。",
     "testCardHintTitle": "テスト決済のご案内",
     "testCardHintBody": "開発/ステージング環境です。一部のカード会社（国民・カカオバンクなど）はテストチャネルで利用できない場合があります。PortOne/KGイニシスのテストカードガイドをご確認ください。",
-    "errorDetailOptional": "エラーコード（サポート用）"  },
+    "errorDetailOptional": "エラーコード（サポート用）"
+  },
   "lectures": {
     "title": "講座",
     "subtitle": "AIエージェント開発をマスターしよう",
