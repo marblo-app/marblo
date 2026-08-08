@@ -123,6 +123,9 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.settings.off": "Switch to advanced",
   "beginner.settings.restartHint":
     "The whole screen changes. Agents already running keep going.",
+  "beginner.topbar.simple": "Simple mode",
+  "beginner.topbar.simpleHint":
+    "Folds away tabs and the board, leaving one big chat. You can switch back any time from Settings.",
   "beginner.settings.replayTour": "Replay the first-run walkthrough",
   "beginner.settings.replayTourDone":
     "The walkthrough will show up next time you open the beginner screen.",

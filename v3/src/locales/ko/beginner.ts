@@ -124,6 +124,11 @@ export const beginner = {
   "beginner.settings.off": "고급 모드로 전환",
   "beginner.settings.restartHint":
     "화면 전체가 바뀝니다. 진행 중인 에이전트는 그대로 계속 돌아가요.",
+  // 어드밴스드 상단바에 서는 **되돌리기** 어포던스(비기너 상단바의
+  // `beginner.topbar.advanced` 와 정확히 반대 방향).
+  "beginner.topbar.simple": "간단 모드",
+  "beginner.topbar.simpleHint":
+    "탭·보드를 접고 큰 대화창 하나만 보여 줍니다. 설정에서 언제든 되돌릴 수 있어요.",
   "beginner.settings.replayTour": "첫 실행 안내 다시 보기",
   "beginner.settings.replayTourDone":
     "다음에 비기너 화면을 열면 안내가 다시 나와요.",

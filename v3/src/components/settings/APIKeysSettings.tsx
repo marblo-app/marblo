@@ -13,7 +13,7 @@ const PROVIDERS: ProviderConfig[] = [
   {
     id: 'anthropic',
     name: 'Anthropic',
-    description: 'Claude models (claude-sonnet-4, claude-opus-4, etc.)',
+    description: 'Claude models (claude-opus-5, claude-sonnet-5, claude-fable-5)',
     placeholder: 'sk-ant-api03-...',
     color: 'orange',
     icon: (
@@ -25,7 +25,7 @@ const PROVIDERS: ProviderConfig[] = [
   {
     id: 'openai',
     name: 'OpenAI',
-    description: 'GPT and o-series models (gpt-4o, o3, o4-mini, etc.)',
+    description: 'OpenAI models (gpt-5.6-sol, gpt-5.5, etc.)',
     placeholder: 'sk-proj-...',
     color: 'green',
     icon: (
@@ -37,7 +37,7 @@ const PROVIDERS: ProviderConfig[] = [
   {
     id: 'google',
     name: 'Google AI',
-    description: 'Gemini models (gemini-2.5-pro, gemini-2.5-flash, etc.)',
+    description: 'Gemini models (Google AI Studio key)',
     placeholder: 'AIza...',
     color: 'blue',
     icon: (

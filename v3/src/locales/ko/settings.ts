@@ -118,9 +118,16 @@ export const settings = {
   "settings.saveFailed": "저장 실패",
 
   // ── Subscription plans (SettingsPage › SubscriptionPlansSection) ─
-  "settings.subscription.heading": "구독제 플랜 등록",
+  "settings.subscription.heading": "구독제 과금",
   "settings.subscription.help":
-    "Claude Max, ChatGPT Plus 처럼 월정액 구독으로 쓰는 모델이 있으면 여기 등록하세요. 등록된 모델은 토큰 단가가 아닌 월정액으로 비용이 계산되고, 선택적으로 월간 토큰 한도를 넘으면 그 초과분만 토큰 단가로 과금합니다. 등록 안 하면 기본 토큰 단가가 적용됩니다.",
+    "구독으로 쓰는 하네스는 아래처럼 자동 감지됩니다. 비용 리포트에서 월정액으로 환산하려면 금액만 따로 등록하세요.",
+  "settings.subscription.detected.heading": "감지된 CLI 구독",
+  "settings.subscription.detected.none": "감지 안 됨",
+  "settings.subscription.detected.help":
+    "각 CLI 계정의 한도(rate limit) 창을 직접 조회한 결과입니다. 구독 여부와 소진율은 이렇게 자동으로 알 수 있지만, 월정액 금액은 CLI 가 알려주지 않습니다.",
+  "settings.subscription.manual.heading": "월정액 금액 등록 (고급)",
+  "settings.subscription.manual.help":
+    "비용 리포트를 토큰 단가 대신 월정액으로 계산하려면 여기 금액을 넣으세요. 위에서 자동 감지되지 않는 벤더(GLM·MiniMax 등 잔액 API 가 없는 곳)도 여기서 선언합니다. 등록 안 하면 기본 토큰 단가가 적용됩니다.",
   "settings.subscription.empty":
     "등록된 구독 플랜이 없습니다. 모든 모델은 토큰 단가로 과금됩니다.",
   "settings.subscription.monthlyFlat": "월정액 USD",

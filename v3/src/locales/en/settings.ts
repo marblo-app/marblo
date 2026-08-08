@@ -121,9 +121,16 @@ export const settings: Record<keyof typeof koSettings, string> = {
   "settings.saveFailed": "Save failed",
 
   // ── Subscription plans (SettingsPage › SubscriptionPlansSection) ─
-  "settings.subscription.heading": "Register subscription plans",
+  "settings.subscription.heading": "Subscription billing",
   "settings.subscription.help":
-    "If you use models on a monthly subscription (e.g. Claude Max, ChatGPT Plus), register them here. Registered models are billed at the monthly flat rate instead of per-token; optionally, once a monthly token allowance is exceeded, only the overage is billed per token. Without registration, the default per-token rate applies.",
+    "Harnesses you run on a subscription are detected automatically below. Register an amount only if you want cost reports converted to a monthly flat rate.",
+  "settings.subscription.detected.heading": "Detected CLI subscriptions",
+  "settings.subscription.detected.none": "Not detected",
+  "settings.subscription.detected.help":
+    "Read directly from each CLI account's rate-limit windows. Whether a subscription is active — and how much of it is used — is detected this way; the monthly price is not something the CLI reports.",
+  "settings.subscription.manual.heading": "Register monthly amount (advanced)",
+  "settings.subscription.manual.help":
+    "Enter an amount to bill cost reports at a monthly flat rate instead of per token. Vendors that aren't auto-detected above (GLM, MiniMax and others with no balance API) are declared here too. Without registration, the default per-token rate applies.",
   "settings.subscription.empty":
     "No subscription plans registered. All models are billed per token.",
   "settings.subscription.monthlyFlat": "Monthly USD",

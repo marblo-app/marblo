@@ -14,6 +14,7 @@ import {
   orchestratorModelProvider,
 } from "../../stores/orchestratorStore";
 import { useSubscriptionStore } from "../../stores/subscriptionStore";
+import { useAdminAccessStore } from "../../stores/adminAccessStore";
 import { useUiStore } from "../../stores/uiStore";
 import { useTranslation } from "../../lib/i18n";
 import { BillingPage } from "./BillingPage";
@@ -83,9 +84,27 @@ const TABS: TabSpec[] = [
 
 export function SettingsPage() {
   const { t } = useTranslation();
+  const { user } = useAuth();
   const currentProject = useProjectStore((s) => s.currentProject);
   const getPlan = useSubscriptionStore((s) => s.getPlan);
   const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
+
+  // 어드민 분석 탭은 서버가 permission-denied 를 실제로 돌려준 계정에서만
+  // 숨긴다(adminAccessStore). 판정 전(unknown)에는 보인다 — 미리 숨기면 진짜
+  // 어드민이 탭을 찾을 길이 없는 닭-달걀이 된다.
+  const adminAccess = useAdminAccessStore((s) => s.statusByUid)[
+    user?.uid ?? ""
+  ];
+  const adminTabHidden = adminAccess === "denied";
+  const tabs = adminTabHidden
+    ? TABS.filter((tab) => tab.id !== "adminAnalytics")
+    : TABS;
+
+  // 이번 세션에 거절이 확인되면 그 자리에 서 있을 수 없다 — 프로필로 돌린다.
+  useEffect(() => {
+    if (adminTabHidden && activeTab === "adminAnalytics")
+      setActiveTab("profile");
+  }, [adminTabHidden, activeTab]);
 
   // Deep-link from the Upgrade modal (or any caller) to a specific section,
   // e.g. Billing. Consume the latch whenever it appears so the sub-tab is
@@ -121,13 +140,14 @@ export function SettingsPage() {
           </span>
         </div>
 
-        {/* Tab navigation */}
-        <div className="mb-6 flex border-b border-gray-700">
-          {TABS.map((tab) => (
+        {/* Tab navigation. 탭이 9개라 좁은 창에서는 줄바꿈 대신 가로 스크롤로
+            흘린다 — flex 기본 축소에 맡기면 라벨이 눌려 읽을 수 없게 된다. */}
+        <div className="mb-6 flex overflow-x-auto border-b border-gray-700">
+          {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2 text-sm font-medium transition-colors ${
+              className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm font-medium transition-colors ${
                 activeTab === tab.id
                   ? "border-b-2 border-blue-500 text-blue-400"
                   : "text-gray-400 hover:text-gray-200"
@@ -317,9 +337,12 @@ function BeginnerModeSection() {
             beginner ? "bg-blue-600" : "bg-gray-600"
           }`}
         >
+          {/* left-0.5 앵커 — abspos 의 static position 은 버튼 기본
+              text-align:center 탓에 0 이 아니다(실측 4px). 앵커를 안 주면 그
+              4px 이 translate 에 더해져 ON 상태 노브가 트랙 끝에 붙는다. */}
           <span
-            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-              beginner ? "translate-x-5" : "translate-x-0.5"
+            className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+              beginner ? "translate-x-5" : "translate-x-0"
             }`}
           />
         </button>
@@ -378,8 +401,8 @@ function WorkspaceModeSection() {
           }`}
         >
           <span
-            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-              enabled ? "translate-x-5" : "translate-x-0.5"
+            className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+              enabled ? "translate-x-5" : "translate-x-0"
             }`}
           />
         </button>
@@ -839,6 +862,97 @@ function ModelPresetSection() {
   );
 }
 
+/**
+ * 실측으로 감지된 CLI 구독 — 아래 수동 등록칸이 무엇을 **대신 못 하는지**를
+ * 보여 주는 자리.
+ *
+ * ★2026-08-08 중복 판정(티켓 8lYqKIYj). "구독플랜 등록" 이 #853 의 실측
+ * 구독감지와 중복인가? — **부분 중복**이다:
+ *   · "이 하네스가 구독제인가" 라는 boolean 은 `usage:accountRateLimits` 의
+ *     planType 으로 이미 자동 감지된다(claude/gpt/grok). 그 축에서 수동 등록은
+ *     불필요하다.
+ *   · 그러나 프로브가 주지 않는 값이 하나 있다 — **월정액 금액(USD)**. cost-
+ *     tracker 는 정액/토큰 단가를 가르기 위해 그 숫자가 필요하고, zai·minimax
+ *     같은 벤더는 잔액/쿼터 공개 API 자체가 없다(lib/vendorBilling.ts 의 1차
+ *     문서 조사). 그래서 등록칸을 **지우지 않고 강등**한다: 자동 감지 결과를
+ *     위에 먼저 보여 주고, 수동 등록은 접어 둔 고급 항목으로 내린다.
+ * 삭제하지 않는 또 하나의 이유 — 이 파일(~/.marblo/subscription-plans.json)은
+ * 죽은 설정이 아니라 cost-tracker 단가와 dispatch-scoring 의 비용효율 점수에
+ * 라이브로 물려 있다. UI 를 없애면 이미 등록한 항목을 지울 방법이 사라진다.
+ */
+function DetectedSubscriptionsRow() {
+  const { t } = useTranslation();
+  const [limits, setLimits] = useState<{
+    claude: RateLimitSnapshot | null;
+    gpt: RateLimitSnapshot | null;
+    grok: RateLimitSnapshot | null;
+  } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    window.electronAPI.usage
+      .accountRateLimits()
+      .then((next) => {
+        if (alive) setLimits(next);
+      })
+      .catch(() => {
+        /* 프로브 실패 = 정보 없음. 여기서 숫자를 지어내지 않는다. */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const HARNESSES: { key: "claude" | "gpt" | "grok"; label: string }[] = [
+    { key: "claude", label: "Claude" },
+    { key: "gpt", label: "Codex (GPT)" },
+    { key: "grok", label: "Grok" },
+  ];
+
+  return (
+    <div
+      className="rounded-lg border border-gray-700 bg-gray-900/40 p-3"
+      data-testid="detected-subscriptions"
+    >
+      <p className="mb-2 text-xs font-medium text-gray-300">
+        {t("settings.subscription.detected.heading")}
+      </p>
+      <div className="space-y-1.5">
+        {HARNESSES.map(({ key, label }) => {
+          const snap = limits?.[key] ?? null;
+          return (
+            <div
+              key={key}
+              className="flex items-center justify-between gap-3 text-xs"
+            >
+              <span className="text-gray-400">{label}</span>
+              {snap?.planType ? (
+                <span className="flex items-center gap-2">
+                  <span className="rounded bg-green-500/15 px-2 py-0.5 font-medium text-green-400">
+                    {snap.planType}
+                  </span>
+                  {snap.primaryPercent != null && (
+                    <span className="text-gray-500">
+                      {Math.round(snap.primaryPercent)}%
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className="text-gray-600">
+                  {t("settings.subscription.detected.none")}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-[11px] leading-relaxed text-gray-500">
+        {t("settings.subscription.detected.help")}
+      </p>
+    </div>
+  );
+}
+
 // Patent claim 8 (구독제 vs 토큰단위 과금체계 구분):
 // 사용자가 어떤 모델을 구독제로 쓰는지 선언하면 cost-tracker 가
 // per-token 단가 대신 월정액 + 한도 기반으로 비용을 산출함. 빈 리스트면
@@ -906,85 +1020,102 @@ function SubscriptionPlansSection() {
         {t("settings.subscription.help")}
       </p>
 
-      <div className="space-y-3">
-        {plans.length === 0 && (
-          <p className="text-xs text-gray-500 italic">
-            {t("settings.subscription.empty")}
-          </p>
-        )}
-        {plans.map((p, i) => (
-          <div
-            key={i}
-            className="flex flex-wrap items-center gap-2 rounded border border-gray-700 bg-gray-900/40 p-3"
-          >
-            <input
-              className="w-40 rounded bg-gray-800 px-2 py-1 text-xs text-gray-200"
-              placeholder="claude-opus"
-              value={p.modelPrefix}
-              onChange={(e) => update(i, { modelPrefix: e.target.value })}
-            />
-            <span className="text-xs text-gray-500">
-              {t("settings.subscription.monthlyFlat")}
-            </span>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              className="w-20 rounded bg-gray-800 px-2 py-1 text-xs text-gray-200"
-              value={p.monthlyFlatUsd}
-              onChange={(e) =>
-                update(i, { monthlyFlatUsd: Number(e.target.value) || 0 })
-              }
-            />
-            <span className="text-xs text-gray-500">
-              {t("settings.subscription.tokenAllowance")}
-            </span>
-            <input
-              type="number"
-              min={0}
-              step={100000}
-              className="w-32 rounded bg-gray-800 px-2 py-1 text-xs text-gray-200"
-              placeholder={t("settings.subscription.optional")}
-              value={p.monthlyTokenAllowance ?? ""}
-              onChange={(e) =>
-                update(i, {
-                  monthlyTokenAllowance: e.target.value
-                    ? Number(e.target.value)
-                    : undefined,
-                })
-              }
-            />
-            <button
-              onClick={() => removePlan(i)}
-              className="ml-auto rounded bg-red-500/20 px-2 py-1 text-xs text-red-400 hover:bg-red-500/30"
-            >
-              {t("settings.subscription.delete")}
-            </button>
-          </div>
-        ))}
-      </div>
+      <DetectedSubscriptionsRow />
 
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          onClick={addPlan}
-          className="rounded border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700/50"
-        >
-          {t("settings.subscription.addPlan")}
-        </button>
-        <button
-          onClick={save}
-          disabled={saving}
-          className="rounded bg-blue-500/20 px-3 py-1.5 text-xs text-blue-400 hover:bg-blue-500/30 disabled:opacity-50"
-        >
-          {saving ? t("settings.subscription.saving") : t("common.save")}
-        </button>
-        {savedAt && (
-          <span className="text-xs text-green-400">
-            {t("settings.subscription.saved")}
+      {/* 수동 등록은 접어 둔다 — 자동 감지가 덮지 못하는 축(월정액 금액,
+          프로브 없는 벤더)만 남은 보조 입력이라 기본 설정 흐름에서 비킨다.
+          이미 등록한 항목이 있으면 열어 둔다(숨겨 두면 지울 길이 없다). */}
+      <details className="mt-3 group" open={plans.length > 0}>
+        <summary className="cursor-pointer list-none text-xs font-medium text-gray-400 transition-colors hover:text-gray-200">
+          <span className="mr-1 inline-block transition-transform group-open:rotate-90">
+            ▸
           </span>
-        )}
-        {error && <span className="text-xs text-red-400">{error}</span>}
-      </div>
+          {t("settings.subscription.manual.heading")}
+        </summary>
+        <p className="mt-2 mb-3 text-[11px] leading-relaxed text-gray-500">
+          {t("settings.subscription.manual.help")}
+        </p>
+
+        <div className="space-y-3">
+          {plans.length === 0 && (
+            <p className="text-xs text-gray-500 italic">
+              {t("settings.subscription.empty")}
+            </p>
+          )}
+          {plans.map((p, i) => (
+            <div
+              key={i}
+              className="flex flex-wrap items-center gap-2 rounded border border-gray-700 bg-gray-900/40 p-3"
+            >
+              <input
+                className="w-40 rounded bg-gray-800 px-2 py-1 text-xs text-gray-200"
+                placeholder="claude-opus"
+                value={p.modelPrefix}
+                onChange={(e) => update(i, { modelPrefix: e.target.value })}
+              />
+              <span className="text-xs text-gray-500">
+                {t("settings.subscription.monthlyFlat")}
+              </span>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                className="w-20 rounded bg-gray-800 px-2 py-1 text-xs text-gray-200"
+                value={p.monthlyFlatUsd}
+                onChange={(e) =>
+                  update(i, { monthlyFlatUsd: Number(e.target.value) || 0 })
+                }
+              />
+              <span className="text-xs text-gray-500">
+                {t("settings.subscription.tokenAllowance")}
+              </span>
+              <input
+                type="number"
+                min={0}
+                step={100000}
+                className="w-32 rounded bg-gray-800 px-2 py-1 text-xs text-gray-200"
+                placeholder={t("settings.subscription.optional")}
+                value={p.monthlyTokenAllowance ?? ""}
+                onChange={(e) =>
+                  update(i, {
+                    monthlyTokenAllowance: e.target.value
+                      ? Number(e.target.value)
+                      : undefined,
+                  })
+                }
+              />
+              <button
+                onClick={() => removePlan(i)}
+                className="ml-auto rounded bg-red-500/20 px-2 py-1 text-xs text-red-400 hover:bg-red-500/30"
+              >
+                {t("settings.subscription.delete")}
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            onClick={addPlan}
+            className="rounded border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700/50"
+          >
+            {t("settings.subscription.addPlan")}
+          </button>
+          <button
+            onClick={save}
+            disabled={saving}
+            className="rounded bg-blue-500/20 px-3 py-1.5 text-xs text-blue-400 hover:bg-blue-500/30 disabled:opacity-50"
+          >
+            {saving ? t("settings.subscription.saving") : t("common.save")}
+          </button>
+          {savedAt && (
+            <span className="text-xs text-green-400">
+              {t("settings.subscription.saved")}
+            </span>
+          )}
+          {error && <span className="text-xs text-red-400">{error}</span>}
+        </div>
+      </details>
     </div>
   );
 }

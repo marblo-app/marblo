@@ -4,6 +4,7 @@ import { useProjectStore } from "../stores/projectStore";
 import { useEditorStore } from "../stores/editorStore";
 import { useSubscriptionStore } from "../stores/subscriptionStore";
 import { useActivityStreamStore } from "../stores/activityStreamStore";
+import { useBeginnerModeStore } from "../stores/beginnerModeStore";
 import { useTranslation } from "../lib/i18n";
 import { createProject } from "../services/projectService";
 import { BugReportModal } from "./settings/BugReportModal";
@@ -147,6 +148,40 @@ function BugReportButton() {
   );
 }
 
+/**
+ * 어드밴스드 → 비기너 되돌리기. 비기너 상단바의 "개발 모드로 보기"(#857)와
+ * **정확히 반대 방향**의 어포던스다.
+ *
+ * 여기 두는 이유: 지금까지 되돌아갈 문은 설정 › 프로필 안쪽 토글 하나뿐이라,
+ * 탭이 잔뜩 열린 화면에 압도된 사용자가 그 문을 찾을 확률이 낮았다. 승격이
+ * 상단바 한 번으로 되는데 복귀가 3단계면 그건 사실상 한 방향 문이다.
+ * 상태 자체는 beginnerModeStore.revertToBeginner 를 그대로 재사용한다(새 상태
+ * 축을 만들지 않는다 — App 이 읽는 셀은 하나여야 한다).
+ */
+function SimpleModeButton() {
+  const { t } = useTranslation();
+  const beginner = useBeginnerModeStore((s) => s.state) === "beginner";
+  const revertToBeginner = useBeginnerModeStore((s) => s.revertToBeginner);
+
+  // 비기너 셸에는 이 Header 자체가 없지만, 상태가 어긋난 순간에 "간단 모드로
+  // 가기" 버튼이 이미 간단 모드인 화면에 뜨는 일은 없어야 한다.
+  if (beginner) return null;
+
+  return (
+    <button
+      type="button"
+      data-testid="header-go-beginner"
+      onClick={revertToBeginner}
+      title={t("beginner.topbar.simpleHint")}
+      aria-label={t("beginner.topbar.simpleHint")}
+      className="flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-400 transition-colors hover:bg-gray-800 hover:text-gray-200"
+    >
+      <span aria-hidden>💬</span>
+      <span>{t("beginner.topbar.simple")}</span>
+    </button>
+  );
+}
+
 const PLAN_BADGE_STYLES: Record<string, string> = {
   free: "bg-gray-500/20 text-gray-400 border-gray-500/30",
   pro: "bg-blue-500/20 text-blue-400 border-blue-500/30",
@@ -162,7 +197,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
   const setRootPath = useEditorStore((s) => s.setRootPath);
   const getPlan = useSubscriptionStore((s) => s.getPlan);
 
-  const handleSelectProject = (project: typeof projects[number]) => {
+  const handleSelectProject = (project: (typeof projects)[number]) => {
     if (currentProject?.id === project.id) {
       setShowProjectMenu(false);
       return;
@@ -183,7 +218,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
   const [newProjectName, setNewProjectName] = useState("");
   const [projectSearch, setProjectSearch] = useState("");
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(() =>
-    readRecentProjectIds()
+    readRecentProjectIds(),
   );
   const userMenuRef = useRef<HTMLDivElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
@@ -203,13 +238,13 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
   const projectMenuGroups = useMemo(() => {
     const query = projectSearch.trim().toLowerCase();
     const visible = projects.filter(
-      (p) => !isGhostProject(p) && p.id !== currentProject?.id
+      (p) => !isGhostProject(p) && p.id !== currentProject?.id,
     );
 
     if (query) {
       return {
         searchResults: visible.filter((p) =>
-          p.name.toLowerCase().includes(query)
+          p.name.toLowerCase().includes(query),
         ),
         recent: [] as Project[],
         mine: [] as Project[],
@@ -223,7 +258,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
     const recentIds = new Set(recent.map((p) => p.id));
 
     const mine = visible.filter(
-      (p) => !recentIds.has(p.id) && !hasNoLinkedActivity(p)
+      (p) => !recentIds.has(p.id) && !hasNoLinkedActivity(p),
     );
 
     // Fallback: nobody counts as "recent" or "linked" yet (fresh account) —
@@ -319,7 +354,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
                         <span className="truncate text-[10px] text-gray-500">
                           {currentProject.folderPath.replace(
                             /^\/Users\/[^/]+/,
-                            "~"
+                            "~",
                           )}
                         </span>
                       )}
@@ -452,6 +487,8 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
           {currentProject && (
             <PresenceIndicator projectId={currentProject.id} />
           )}
+
+          <SimpleModeButton />
 
           <BugReportButton />
 

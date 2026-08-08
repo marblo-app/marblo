@@ -121,38 +121,49 @@ export function PrivacySettings() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-sm font-semibold text-[#cdd6f4]">
+        <h2 className="text-sm font-semibold text-gray-200">
           {t("settings.privacy.heading")}
         </h2>
-        <p className="mt-1 text-xs text-[#bac2de]">
+        <p className="mt-1 text-xs text-gray-400">
           {t("settings.privacy.optInDescription")}
         </p>
       </div>
 
-      <div className="rounded border border-[#313244] bg-[#181825]">
+      <div className="rounded-lg border border-gray-700 bg-gray-800">
         {ROWS.map((row, idx) => (
           <div
             key={row.id}
-            className={`flex items-center gap-3 px-3 py-3 ${
-              idx > 0 ? "border-t border-[#313244]" : ""
+            className={`flex items-center gap-3 px-4 py-3 ${
+              idx > 0 ? "border-t border-gray-700" : ""
             }`}
           >
-            <div className="flex-1 min-w-0">
-              <div className="text-sm text-[#cdd6f4]">{t(row.labelKey)}</div>
-              <div className="text-[11px] text-[#6c7086]">{t(row.hintKey)}</div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-gray-200">{t(row.labelKey)}</div>
+              <div className="text-[11px] text-gray-500">{t(row.hintKey)}</div>
             </div>
+            {/* ★flex-shrink-0 이 없으면 노브가 트랙 밖으로 튀어나온다: 형제
+                라벨이 flex-1(basis 0) 이라 좁은 창의 축소분을 이 버튼이 전부
+                흡수하는데, 노브는 absolute 고정폭이라 같이 줄지 않는다.
+                설정의 다른 토글(SettingsPage)과 동일하게 role=switch 를 쓴다. */}
             <button
               type="button"
+              role="switch"
+              data-testid={`privacy-toggle-${row.id}`}
               onClick={() => toggle(row.id)}
               disabled={busyKey === row.id}
-              aria-pressed={consent[row.id]}
-              className={`relative h-5 w-9 rounded-full transition-colors disabled:opacity-50 ${
-                consent[row.id] ? "bg-[#89b4fa]" : "bg-[#45475a]"
+              aria-checked={consent[row.id]}
+              aria-label={t(row.labelKey)}
+              className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+                consent[row.id] ? "bg-blue-600" : "bg-gray-600"
               }`}
             >
+              {/* ★left-0.5 를 명시한다. 앵커가 없으면 노브의 x 는 abspos 의
+                  static position 에서 오는데, 버튼 기본 text-align:center 때문에
+                  그 값이 0 이 아니다(실측 4px) — 그 4px 이 translate 에 더해져
+                  ON 상태에서 노브가 트랙 오른쪽으로 밀려 나간다. */}
               <span
-                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
-                  consent[row.id] ? "translate-x-4" : "translate-x-0.5"
+                className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+                  consent[row.id] ? "translate-x-4" : "translate-x-0"
                 }`}
               />
             </button>
@@ -160,15 +171,15 @@ export function PrivacySettings() {
         ))}
       </div>
 
-      <div className="rounded border border-[#313244] bg-[#11111b] px-3 py-2 text-[11px] text-[#6c7086]">
-        <span className="text-[#bac2de]">
+      <div className="rounded-lg border border-gray-700 bg-gray-900/60 px-4 py-2.5 text-[11px] text-gray-500">
+        <span className="text-gray-400">
           {t("settings.privacy.bigquery.label")}
         </span>{" "}
         — {t("settings.privacy.bigquery.body")}
       </div>
 
       {consent.sentry && (
-        <div className="rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-3 py-2 text-[11px] text-[#f9e2af]">
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-[11px] text-amber-200">
           {t("settings.privacy.overseas.notice", {
             status: consent.overseasTransfer
               ? t("settings.privacy.overseas.agreed")
@@ -178,7 +189,7 @@ export function PrivacySettings() {
       )}
 
       {error && (
-        <div className="rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-3 py-2 text-[11px] text-[#f38ba8]">
+        <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2.5 text-[11px] text-red-300">
           {error}
         </div>
       )}
@@ -187,14 +198,14 @@ export function PrivacySettings() {
         <button
           type="button"
           onClick={() => setShowPolicy(true)}
-          className="text-[#89b4fa] hover:underline"
+          className="text-blue-400 hover:underline"
         >
           {t("settings.privacy.viewPolicy")}
         </button>
         {user && (
           <a
             href={buildDeletionMailto(user.uid)}
-            className="text-[#f38ba8] hover:underline"
+            className="text-red-400 hover:underline"
           >
             {t("settings.privacy.requestDeletion")}
           </a>
@@ -202,7 +213,7 @@ export function PrivacySettings() {
       </div>
 
       {consent.acceptedAt && (
-        <p className="text-[10px] text-[#6c7086]">
+        <p className="text-[10px] text-gray-500">
           {t("settings.privacy.lastUpdated", {
             date: consent.acceptedAt.toLocaleString(),
             version: consent.version,
