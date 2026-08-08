@@ -37,6 +37,13 @@ import {
   type ActiveByDaySourceRow,
   type ThirtyDayRetentionSourceRow,
 } from "./adminAnalytics";
+import {
+  buildBetaSegmentUsage,
+  type GrantHolderRow,
+  type SegmentActivityRow,
+  type SegmentEventRow,
+  type SegmentSessionRow,
+} from "./betaSegments";
 import { buildProjectAudit, toMillis } from "./projectAudit";
 import {
   verifyPaddleSignature,
@@ -9051,6 +9058,185 @@ export const getAdminActiveUserMetrics = functions
   });
 
 /**
+ * getAdminBetaSegmentUsage — 베타/파운더 grant 보유자 세그먼트 사용패턴
+ * (🟡 BQ events + cost_logs / 🟢 Firestore subscriptions).
+ *
+ * TdlWmESR. 기존 어드민 분석은 "전체 계정" 모수를 보는데, 베타 운영에서 실제로
+ * 궁금한 건 **grant 를 준 사람들이 실제로 쓰는가**다. 그래서 모수를 Firestore
+ * grant 명단으로 고정하고 그 위에 기능사용·세션·재방문·기능채택을 얹는다.
+ *
+ * 모수 정의:
+ *   - subscriptions.founderGrant === true 인 계정 = 베타/파운더 grant 보유자.
+ *     founderGrantReason 으로 파운더/베타선정/베타신청 세그먼트를 가른다
+ *     (paymentProvider 로 판정하지 않는다 — founder_grant stomp 이슈).
+ *   - 활동 identity 는 getAdminActiveUserMetrics 와 **동일 규약**:
+ *     events.metadata.accountUserId ∪ cost_logs.userId. events.userId 는 익명
+ *     clientId 라 계정 귀속에 쓰지 않는다.
+ *
+ * ★프라이버시(§0-C, 메모리 telemetry_privacy_policy):
+ *   - 응답에 uid·이메일 등 식별자는 어떤 필드로도 넣지 않는다. 세그먼트 단위
+ *     집계만 내려간다.
+ *   - 관측 계정이 MIN_COHORT_SIZE 미만인 세그먼트는 행동지표를 통째로 억제한다
+ *     (betaSegments.buildBetaSegmentUsage). 소규모 베타에서 세그먼트를 쪼개면
+ *     행동지표가 개인 지목으로 퇴화하기 때문.
+ *   - 운영자 본인은 grant 보유자이기도 해서, includeAdmin=false(기본)면 명단
+ *     단계에서 미리 빼고 BQ 에 넘긴다.
+ *
+ * ★데이터 가용성: metadata.accountUserId 는 2026-08-06 적재 시작이라 이벤트
+ * 기반 지표는 아직 사실상 비어 있다. 이 콜러블은 그 사실을
+ * accountAttributionAvailable=false 로 정직하게 내려보내고, UI 는 "텔레메트리 ON
+ * 선행"을 표시한다. 값을 0 으로 꾸며 오도하지 않는다.
+ *
+ * params: { days?: number, includeAdmin?: boolean } (기본 30, 제외)
+ */
+export const getAdminBetaSegmentUsage = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const rangeDays = parseAnalyticsDays(data);
+    const includeAdmin = parseIncludeAdmin(data);
+    const adminUid = getAdminExclusionUid();
+
+    // ── 1) 모수: Firestore grant 명단 ────────────────────────────────────────
+    // 항상 켜져 있는 소스라 텔레메트리 상태와 무관하게 정확하다.
+    const grantSnap = await db
+      .collection("subscriptions")
+      .where("founderGrant", "==", true)
+      .get();
+    const grantHolders: GrantHolderRow[] = grantSnap.docs
+      .map((doc) => {
+        const d = doc.data() as {
+          founderGrantReason?: unknown;
+          status?: unknown;
+        };
+        return {
+          uid: doc.id,
+          founderGrantReason: d.founderGrantReason,
+          status: d.status,
+        };
+      })
+      // 운영자 자기계정 제외(기본). 명단 단계에서 빼면 BQ 절이 단순해지고
+      // 응답 어디에도 uid 가 남지 않는다.
+      .filter((h) => includeAdmin || !adminUid || h.uid !== adminUid);
+
+    const grantUids = grantHolders.map((h) => h.uid);
+
+    // grant 가 하나도 없으면 BQ 를 아예 치지 않는다(빈 ARRAY 파라미터 타입 이슈
+    // 회피 — adminClientExclusion 과 동일 사유). 빈 결과도 구조는 유지된다.
+    if (grantUids.length === 0) {
+      return {
+        rangeDays,
+        generatedAt: new Date().toISOString(),
+        adminExcluded: {
+          applied: !includeAdmin,
+          uidFiltered: adminUid != null,
+          clientIdCount: 0,
+        },
+        queryStatus: { ok: true, errors: [] as string[] },
+        ...buildBetaSegmentUsage({
+          grantHolders,
+          activityRows: [],
+          eventRows: [],
+          sessionRows: [],
+        }),
+      };
+    }
+
+    const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
+    const costTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\``;
+    const accountExpr = `NULLIF(JSON_VALUE(metadata, '$.accountUserId'), '')`;
+
+    // ── 2) 계정별 활동일(events ∪ cost_logs) — 재방문 리듬의 원천 ───────────
+    const activityQuery = `
+      WITH activity AS (
+        SELECT ${accountExpr} AS user_id, DATE(timestamp) AS active_date
+        FROM ${eventsTable}
+        WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+          AND ${accountExpr} IN UNNEST(@grantUids)
+        UNION ALL
+        SELECT
+          userId AS user_id,
+          DATE(SAFE_CAST(timestamp AS TIMESTAMP)) AS active_date
+        FROM ${costTable}
+        WHERE SAFE_CAST(timestamp AS TIMESTAMP)
+              >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+          AND userId IN UNNEST(@grantUids)
+      )
+      SELECT
+        user_id AS userId,
+        COUNT(DISTINCT active_date) AS activeDays,
+        FORMAT_DATE('%F', MIN(active_date)) AS firstActiveDate,
+        FORMAT_DATE('%F', MAX(active_date)) AS lastActiveDate,
+        COUNT(*) AS events
+      FROM activity
+      WHERE active_date IS NOT NULL
+      GROUP BY user_id
+    `;
+
+    // ── 3) 계정 × 이벤트종류 — 기능별 사용 + 기능채택(오케/스폰/티켓) ───────
+    const eventQuery = `
+      SELECT
+        ${accountExpr} AS userId,
+        event,
+        COUNT(*) AS n
+      FROM ${eventsTable}
+      WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+        AND ${accountExpr} IN UNNEST(@grantUids)
+        AND event IS NOT NULL AND event != ''
+      GROUP BY userId, event
+    `;
+
+    // ── 4) 세션 빈도·길이 ───────────────────────────────────────────────────
+    // ★session:ended 는 정상 종료에서만 발사된다(강제종료·크래시 시 누락) →
+    // "clean-exit 표본"이며 세션 길이는 체계적으로 과소집계될 수 있다.
+    const sessionQuery = `
+      SELECT
+        ${accountExpr} AS userId,
+        COUNT(*) AS sessions,
+        SUM(durationMs) AS totalMs,
+        APPROX_QUANTILES(durationMs, 100)[OFFSET(50)] AS medianMs
+      FROM ${eventsTable}
+      WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+        AND event = 'session:ended'
+        AND durationMs > 0
+        AND ${accountExpr} IN UNNEST(@grantUids)
+      GROUP BY userId
+    `;
+
+    const params = { days: rangeDays, grantUids };
+    const queryResults = await runAdminAnalyticsQueriesWithStatus([
+      { name: "betaSegment.activity", query: activityQuery, params },
+      { name: "betaSegment.events", query: eventQuery, params },
+      { name: "betaSegment.sessions", query: sessionQuery, params },
+    ]);
+    // 쿼리 하나가 죽어도 나머지 지표는 살린다(빈 배열로 폴백).
+    const rowsAt = (i: number): BigQueryRows => queryResults[i]?.rows ?? [];
+    const queryErrors = queryResults
+      .filter((result) => result.error != null)
+      .map((result) => ({
+        name: result.name,
+        error: result.error ?? "unknown query failure",
+      }));
+
+    return {
+      rangeDays,
+      generatedAt: new Date().toISOString(),
+      adminExcluded: {
+        applied: !includeAdmin,
+        uidFiltered: adminUid != null,
+        clientIdCount: 0,
+      },
+      queryStatus: { ok: queryErrors.length === 0, errors: queryErrors },
+      ...buildBetaSegmentUsage({
+        grantHolders,
+        activityRows: rowsAt(0) as SegmentActivityRow[],
+        eventRows: rowsAt(1) as SegmentEventRow[],
+        sessionRows: rowsAt(2) as SegmentSessionRow[],
+      }),
+    };
+  });
+
+/**
  * getAdminKpiCockpit — 지표기반 베타종료 게이지 + 신규 온보딩 이벤트(설문·데모·
  * 동의·CLI셋업) + 재사용/리텐션 + 스폰 헬스(🟡 BQ events).
  *
@@ -11802,7 +11988,9 @@ export const getAdminProjectAudit = functions.https.onCall(
     if (activityResults.some((r) => !r.ok)) failed.push("활동");
     if (failed.length > 0) {
       result.notes.push(
-        `일부 소스를 읽지 못했다: ${failed.join(", ")}. 해당 칸은 비어 보일 수 있다(0 이 아니라 '모름').`,
+        `일부 소스를 읽지 못했다: ${failed.join(
+          ", ",
+        )}. 해당 칸은 비어 보일 수 있다(0 이 아니라 '모름').`,
       );
     }
     if (taskIds.length > activityTaskIds.length) {

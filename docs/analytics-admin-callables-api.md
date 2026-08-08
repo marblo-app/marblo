@@ -427,6 +427,54 @@
 
 ---
 
+## 7. `getAdminBetaSegmentUsage` — 베타/파운더 grant 세그먼트 사용패턴 (🟢 모수 + 🟡 행동지표)
+
+티켓 TdlWmESR. 설계 상세는 [v3/docs/ADMIN-BETA-SEGMENT-ANALYTICS.md](../v3/docs/ADMIN-BETA-SEGMENT-ANALYTICS.md).
+
+**모수**: Firestore `subscriptions.founderGrant === true`. 세그먼트는 `founderGrantReason` 으로 가른다(`paymentProvider` 로 판정 금지 — founder_grant stomp). **활동 identity** 는 `getAdminActiveUserMetrics` 와 동일 규약: `events.metadata.accountUserId ∪ cost_logs.userId`(`events.userId` 는 익명 clientId 라 미사용).
+
+**Request:** `{ days?: number, includeAdmin?: boolean }`
+
+**Response:**
+
+```ts
+{
+  rangeDays: number;
+  generatedAt: string;
+  adminExcluded: { applied: boolean; uidFiltered: boolean; clientIdCount: number };
+  queryStatus: { ok: boolean; errors: { name: string; error: string }[] };
+  minCohortSize: number;              // k-익명성 임계(5)
+  grantCohortSize: number;            // grant 보유자 총원(🟢 Firestore)
+  observedUsers: number;              // 그중 관측된 계정 수
+  accountAttributionAvailable: boolean; // false = 계정귀속 이벤트 0 → 텔레메트리 ON 선행
+  segments: BetaSegmentSummary[];     // 코호트 0 인 세그먼트는 생략
+  all: BetaSegmentSummary;            // 전 세그먼트 롤업
+}
+
+type BetaSegmentSummary = {
+  key: "founder_backfill" | "beta_selected" | "beta_signup" | "other" | "all";
+  label: string;
+  cohortSize: number;                 // 🟢 텔레메트리 무관하게 정확
+  observedUsers: number;
+  observedRate: number | null;        // 분모 0 → null (0% 로 오도 금지)
+  suppressed: boolean;                // 관측 < minCohortSize → 행동지표 비공개
+  suppressionReason: string | null;
+  // ↓ suppressed=true 면 전부 [] / null
+  featureUsage: { event: string; users: number; count: number }[];
+  sessions: { sessions; sessionsPerUser; avgDurationMs; medianDurationMs } | null;
+  rhythm: { avgActiveDays; returningUsers; returningRate; avgSpanDays } | null;
+  adoption: { orchestratorUsers; spawnUsers; ticketUsers; ...Rate } | null;
+};
+```
+
+> **★프라이버시:** 응답에 uid·이메일 등 식별자는 어떤 필드로도 포함되지 않는다. 관측 계정이 `minCohortSize` 미만인 세그먼트는 **행동지표를 통째로 억제**한다(카운트만 유지) — 수십 명 규모 베타에서 세그먼트를 쪼개면 행동지표가 개인 지목으로 퇴화하기 때문. 운영자 본인도 grant 보유자라 `includeAdmin=false`(기본)면 **명단 단계에서** 제외해 BQ 로도 넘기지 않는다.
+
+> **★해석 주의:** `accountAttributionAvailable=false` 면 `featureUsage`/`sessions`/`adoption` 의 공백은 "안 썼다"가 아니라 **"측정되지 않았다"**다(`metadata.accountUserId` 는 2026-08-06 적재 시작 + 프로덕션 텔레메트리 기본 OFF). 반면 `grantCohortSize`/`observedUsers` 는 Firestore·`cost_logs` 기반이라 그 상태와 무관하게 정확하다. `session:ended` 는 정상 종료에서만 발사되므로 세션 길이는 clean-exit 표본이다(강제종료·크래시 누락 → 과소집계 가능).
+
+순수 조립은 `betaSegments.buildBetaSegmentUsage` (BQ/Firestore 무의존, `npm run test:beta-segments`).
+
+---
+
 ## 범위 밖 (기획 §2.3 / §6 후속 티켓)
 
 - **안정성/에러 KPI(🔴):** Sentry 미설치 → v1 제외. 대시보드 안정성 섹션은 "미연동" 고정(T0-2/T3-6).

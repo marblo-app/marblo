@@ -26,6 +26,8 @@ import {
   Gauge,
   Star,
   Tag,
+  Lock,
+  UserCheck,
 } from "lucide-react";
 
 // ── 콜러블 응답 타입 (docs/analytics-admin-callables-api.md 미러) ───────────────
@@ -44,6 +46,56 @@ type AdminExcludedTelemetry = {
   applied?: boolean;
   uidFiltered: boolean;
   clientIdCount: number;
+};
+
+// ── 베타 세그먼트 사용패턴 (getAdminBetaSegmentUsage) ───────────────────────
+// 모수 = Firestore subscriptions.founderGrant===true(파운더/베타 grant 보유자).
+// 관측 계정이 minCohortSize 미만인 세그먼트는 서버가 행동지표를 억제해서 내려준다
+// (suppressed=true + 지표 null) — 프론트는 그 상태를 숨기지 않고 그대로 말한다.
+type BetaFeatureUsage = { event: string; users: number; count: number };
+type BetaSessionStats = {
+  sessions: number;
+  sessionsPerUser: number | null;
+  avgDurationMs: number | null;
+  medianDurationMs: number | null;
+};
+type BetaRhythmStats = {
+  avgActiveDays: number | null;
+  returningUsers: number;
+  returningRate: number | null;
+  avgSpanDays: number | null;
+};
+type BetaAdoptionStats = {
+  orchestratorUsers: number;
+  spawnUsers: number;
+  ticketUsers: number;
+  orchestratorRate: number | null;
+  spawnRate: number | null;
+  ticketRate: number | null;
+};
+type BetaSegmentSummary = {
+  key: string;
+  label: string;
+  cohortSize: number;
+  observedUsers: number;
+  observedRate: number | null;
+  suppressed: boolean;
+  suppressionReason: string | null;
+  featureUsage: BetaFeatureUsage[];
+  sessions: BetaSessionStats | null;
+  rhythm: BetaRhythmStats | null;
+  adoption: BetaAdoptionStats | null;
+};
+type BetaSegmentUsage = {
+  rangeDays: number;
+  generatedAt: string;
+  adminExcluded: AdminExcludedTelemetry;
+  minCohortSize: number;
+  grantCohortSize: number;
+  observedUsers: number;
+  accountAttributionAvailable: boolean;
+  segments: BetaSegmentSummary[];
+  all: BetaSegmentSummary;
 };
 
 // ── 온보딩 "첫 10분" 퍼널 (getAdminOnboardingFunnel) ─────────────────────────
@@ -1455,6 +1507,172 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
 // 현재값 vs 목표를 선형 게이지로. 목표 마커(눈금)를 트랙 위에 표시하고, 달성 시
 // 초록·미달 주황·데이터공백(current=null) 회색으로 상태를 색+텍스트로 이중표기한다.
 // nps 단위는 -100~100 을 0~1 로 정규화해 같은 트랙에 그린다.
+// 베타 세그먼트 — 억제된 세그먼트의 자리표시. 값을 0 으로 그리지 않는다.
+function SuppressedBox({ reason }: { reason: string | null }) {
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-dashed border-zinc-800 bg-zinc-950/40 p-3">
+      <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-600" />
+      <p className="text-xs text-zinc-500">
+        {reason || "표본이 작아 행동지표를 표시하지 않습니다."}
+      </p>
+    </div>
+  );
+}
+
+// 세그먼트 1건 카드 — 코호트/관측은 항상, 행동지표는 억제 해제 시에만.
+function BetaSegmentCard({ seg }: { seg: BetaSegmentSummary }) {
+  const adoptionRows = seg.adoption
+    ? [
+        { key: "오케스트레이터", value: seg.adoption.orchestratorUsers },
+        { key: "에이전트 스폰", value: seg.adoption.spawnUsers },
+        { key: "티켓", value: seg.adoption.ticketUsers },
+      ]
+    : [];
+  return (
+    <Panel
+      title={seg.label}
+      note={`grant ${fmtInt(seg.cohortSize)}명 · 관측 ${fmtInt(
+        seg.observedUsers,
+      )}명`}
+    >
+      <div className="mb-3 grid grid-cols-2 gap-3">
+        <StatCard
+          label="관측률"
+          value={seg.observedRate == null ? "—" : fmtPct(seg.observedRate)}
+          sub="grant 대비 실사용 관측"
+        />
+        <StatCard
+          label="재방문"
+          value={
+            seg.rhythm?.returningRate == null
+              ? "—"
+              : fmtPct(seg.rhythm.returningRate)
+          }
+          sub={
+            seg.rhythm
+              ? `활동일 2일+ ${fmtInt(seg.rhythm.returningUsers)}명`
+              : "표본 대기"
+          }
+        />
+      </div>
+      {seg.suppressed ? (
+        <SuppressedBox reason={seg.suppressionReason} />
+      ) : (
+        <div className="space-y-3">
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-zinc-500">
+              기능 채택 (사용자 수)
+            </p>
+            <BarList data={adoptionRows} emptyLabel="채택 이벤트가 없습니다." />
+          </div>
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-zinc-500">
+              기능별 사용 (이벤트 종류별 사용자 수)
+            </p>
+            <BarList
+              data={seg.featureUsage.map((f) => ({
+                key: f.event,
+                value: f.users,
+              }))}
+              color={SERIES_2}
+              maxRows={8}
+              emptyLabel="계정에 귀속된 이벤트가 없습니다."
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <StatCard
+              label="세션/인"
+              value={
+                seg.sessions?.sessionsPerUser == null
+                  ? "—"
+                  : seg.sessions.sessionsPerUser.toFixed(1)
+              }
+              sub={`총 ${fmtInt(seg.sessions?.sessions)}세션`}
+            />
+            <StatCard
+              label="평균 세션길이"
+              value={
+                seg.sessions?.avgDurationMs == null
+                  ? "—"
+                  : fmtDuration(seg.sessions.avgDurationMs)
+              }
+              sub={
+                seg.sessions?.medianDurationMs == null
+                  ? "정상종료 표본"
+                  : `중앙 ${fmtDuration(seg.sessions.medianDurationMs)}`
+              }
+            />
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function BetaSegmentView({ data }: { data: BetaSegmentUsage }) {
+  const all = data.all;
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard
+          label="grant 보유자"
+          value={fmtInt(data.grantCohortSize)}
+          sub="파운더·베타 (Firestore)"
+        />
+        <StatCard
+          label="관측된 계정"
+          value={fmtInt(data.observedUsers)}
+          sub={`최근 ${data.rangeDays}일 텔레메트리`}
+        />
+        <StatCard
+          label="관측률"
+          value={all.observedRate == null ? "—" : fmtPct(all.observedRate)}
+          sub="grant 를 준 사람 중 실사용"
+          accent={
+            all.observedRate != null && all.observedRate < 0.5
+              ? STATUS_CRIT
+              : undefined
+          }
+        />
+        <StatCard
+          label="최소 코호트"
+          value={fmtInt(data.minCohortSize)}
+          sub="미만이면 행동지표 비공개"
+        />
+      </div>
+
+      {!data.accountAttributionAvailable && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/30 p-3 text-xs text-amber-200">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <p>
+            <strong>텔레메트리 ON 이 선행 조건입니다.</strong>{" "}
+            기능사용·세션·채택 지표는 이벤트가 계정에 귀속돼야 나오는데(
+            <code className="text-amber-300">metadata.accountUserId</code>),
+            해당 필드는 2026-08-06 부터 적재되기 시작했고 프로덕션 텔레메트리는
+            기본 OFF 입니다. 현재 이 구간의 grant 보유자 이벤트는 계정 귀속분이
+            없어 값을 표시하지 않습니다 — 0 은 &ldquo;안 썼다&rdquo;가 아니라
+            &ldquo;측정되지 않았다&rdquo;입니다. 위 grant/관측 카운트는
+            Firestore·cost_logs 기반이라 텔레메트리와 무관하게 정확합니다.
+          </p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <BetaSegmentCard seg={all} />
+        {data.segments.map((seg) => (
+          <BetaSegmentCard key={seg.key} seg={seg} />
+        ))}
+      </div>
+
+      <p className="text-xs text-zinc-600">
+        프라이버시: 세그먼트 단위 집계만 표시하며 개별 계정 식별자는 서버 응답에
+        포함되지 않습니다. 관측 계정이 {data.minCohortSize}명 미만인 세그먼트는
+        행동지표를 표시하지 않습니다.
+      </p>
+    </>
+  );
+}
+
 function GaugeCard({ gauge }: { gauge: BetaExitGauge }) {
   const isNps = gauge.unit === "nps";
   // 정규화(0~1). rate 는 그대로, nps 는 (-100~100)→(0~1).
@@ -1855,6 +2073,11 @@ export default function AnalyticsPanel() {
     loading: true,
     error: null,
   });
+  const [betaSeg, setBetaSeg] = useState<Loaded<BetaSegmentUsage>>({
+    data: null,
+    loading: true,
+    error: null,
+  });
   const [modelView, setModelView] = useState<"overview" | "routing">(
     "overview",
   );
@@ -1932,6 +2155,10 @@ export default function AnalyticsPanel() {
         { days: number; includeAdmin: boolean },
         ReleaseHealth
       >(fns, "getAdminReleaseHealth");
+      const callBetaSeg = httpsCallable<
+        { days: number; includeAdmin: boolean },
+        BetaSegmentUsage
+      >(fns, "getAdminBetaSegmentUsage");
 
       setBiz((s) => ({ ...s, loading: true, error: null }));
       setUsage((s) => ({ ...s, loading: true, error: null }));
@@ -1939,6 +2166,7 @@ export default function AnalyticsPanel() {
       setOnbFunnel((s) => ({ ...s, loading: true, error: null }));
       setKpi((s) => ({ ...s, loading: true, error: null }));
       setRelease((s) => ({ ...s, loading: true, error: null }));
+      setBetaSeg((s) => ({ ...s, loading: true, error: null }));
 
       // 각 콜러블 독립 처리 — 하나 실패해도 나머지는 렌더.
       callBiz({ days: d })
@@ -1994,6 +2222,15 @@ export default function AnalyticsPanel() {
         .then((r) => setRelease({ data: r.data, loading: false, error: null }))
         .catch((e) =>
           setRelease({
+            data: null,
+            loading: false,
+            error: mapErr(e as CallableError),
+          }),
+        );
+      callBetaSeg({ days: d, includeAdmin: inc })
+        .then((r) => setBetaSeg({ data: r.data, loading: false, error: null }))
+        .catch((e) =>
+          setBetaSeg({
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
@@ -2396,6 +2633,32 @@ export default function AnalyticsPanel() {
               )}
             </Panel>
           </>
+        ) : null}
+      </div>
+
+      {/* ── 베타 세그먼트 사용패턴 (🟡 grant 모수는 🟢) ──────────────
+          "grant 를 준 사람들이 실제로 쓰는가". 모수(grant 명단)와 관측 카운트는
+          Firestore/cost_logs 라 항상 정확하고, 기능사용·세션·채택만 텔레메트리에
+          걸린다 — 그래서 섹션 신뢰도는 🟡 로 두되 카드가 둘을 구분해 말한다. */}
+      <div className="space-y-4">
+        <SectionHeader
+          icon={UserCheck}
+          title="베타 세그먼트 사용패턴"
+          trust="yellow"
+        >
+          {betaSeg.data && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950/40 px-2.5 py-1 text-xs text-zinc-400">
+              <Lock className="h-3.5 w-3.5" />
+              최소 코호트 {fmtInt(betaSeg.data.minCohortSize)}명 가드
+            </span>
+          )}
+        </SectionHeader>
+        {betaSeg.loading ? (
+          <LoadingBox />
+        ) : betaSeg.error ? (
+          <ErrorBox msg={betaSeg.error} />
+        ) : betaSeg.data ? (
+          <BetaSegmentView data={betaSeg.data} />
         ) : null}
       </div>
 
