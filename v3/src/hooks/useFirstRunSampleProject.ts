@@ -33,6 +33,27 @@ import telemetry from "../services/telemetryService";
  * 폴더를 보고 있거나, 사용자가 직접 고르려고 연 새 창이면 물러선다. 시드는
  * 기기당 1회만 시도하므로 샘플을 지운 사용자에게 되살아나지 않는다.
  */
+/**
+ * 이 창이 복원하려는 폴더 — 창별 레코드가 먼저, 없으면 전역 app-state.
+ * (`useSessionRestore.resolveRestoreSource` 와 같은 우선순위. 새 창은 애초에
+ * 시드 대상이 아니므로 isNewWindow 분기는 여기서 다시 볼 필요가 없다.)
+ */
+async function readRestoreTarget(): Promise<string | null> {
+  try {
+    const perWindow = await window.electronAPI.window
+      .getRestoreState()
+      .catch(() => ({}) as { rootPath?: string });
+    if (perWindow?.rootPath) return perWindow.rootPath;
+    const global = await window.electronAPI.appState
+      .load()
+      .catch(() => ({}) as { lastRootPath?: string });
+    return global?.lastRootPath ?? null;
+  } catch {
+    // 읽을 수 없으면 "복원 대상이 있다"고 본다 — 자동 연결을 안 하는 쪽이 안전하다.
+    return "unknown";
+  }
+}
+
 export function useFirstRunSampleProject(
   connectFolderPath: (dir: string) => Promise<void>,
 ): void {
@@ -65,12 +86,27 @@ export function useFirstRunSampleProject(
         }
       })(),
       alreadyAttempted: hasAttemptedSampleSeed(),
+      // 복원 레코드는 IPC 라 비동기다 — 값싼 동기 조건을 먼저 걸러내고, 실제
+      // 판단은 아래에서 그 값을 채워 **같은 규칙 표**로 한 번 더 한다.
+      hasRestoreTarget: false,
     };
     if (!shouldSeedSampleProject(gate)) return;
 
     startedRef.current = true;
     void (async () => {
       try {
+        // ★세션 복원이 정착하기 전에 결정하지 않는다. 복원은 main 으로 두 번
+        // 왕복하므로 위 동기 판단 시점엔 rootPath 가 아직 비어 있다 — 그대로
+        // 진행하면 폴더를 쓰던 창이 샘플로 갈아탄다(E2E Z6).
+        const restoreTarget = await readRestoreTarget();
+        if (
+          !shouldSeedSampleProject({
+            ...gate,
+            hasRestoreTarget: !!restoreTarget,
+          })
+        ) {
+          return;
+        }
         const result = await window.electronAPI.sample.ensure(
           useLocaleStore.getState().locale,
         );

@@ -58,7 +58,11 @@ tests/playwright/
 │                  라우팅(#580), 설치 실패 대안, BYOM 경로를 검증한다.
 │                  실행/발견사항: ../../docs/QA-CLEANROOM-FIRST-RUN.md
 │                  ※ 기존 사용자 프로필(~/Library/Application Support/Marblo,
-│                    ~/.claude)은 절대 건드리지 않는다.
+│                    ~/.claude)은 절대 건드리지 않는다. 샘플 시드 경로
+│                    (app.getPath("documents"))만은 macOS 에서 $HOME 을 안 따르므로
+│                    하네스가 sample:ensure 를 클린룸 안으로 돌린다(F9).
+│                  · zero-friction-onramp.spec.ts = 원클릭 온보딩·샘플 자동연결의
+│                    엣지케이스/회귀가드(Z1~Z9).
 │
 ├── helpers/
 │   ├── launch.ts      ← Electron _electron.launch wrapper
@@ -133,6 +137,10 @@ PresenceIndicator를 확인한다. 이 구간은 테스트에서 조용히 생�
 
 ## 알려진 제약
 
+0. **클린룸 임시 루트는 실행 후 자동 정리된다** (`globalTeardown`). 런당
+   ~280MB(Chromium userData 포함)라 정리를 안 하면 디스크가 차서 스위트가
+   ENOSPC 로 깨진다 — 실제로 그렇게 깨졌다. 디버깅 때 남기려면
+   `KEEP_CLEANROOM_ROOTS=1`.
 1. **macOS Electron Apple Silicon**: `electron-rebuild` 로 node-pty 가 ABI
    맞게 빌드되어 있어야 함. `npm run postinstall` 자동 실행됨.
 2. **PTY 콘텐츠 부족 시 skip**: 일부 회귀 테스트는 실제 PTY 출력이 없으면

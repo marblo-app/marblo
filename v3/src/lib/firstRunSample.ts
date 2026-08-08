@@ -20,6 +20,18 @@ export interface SampleSeedGate {
   projectCount: number;
   /** 이 창이 이미 폴더를 보고 있는가(세션 복원 결과 포함). */
   hasRootPath: boolean;
+  /**
+   * 이 창이 **복원하려고 하는** 폴더가 이미 정해져 있는가(창별 restore 레코드나
+   * 전역 app-state 의 lastRootPath).
+   *
+   * ★`hasRootPath` 만으로는 부족하다. 세션 복원(useSessionRestore)은 main 으로
+   * 두 번 왕복한 뒤에야 rootPath 를 세우는데, 이 훅은 같은 마운트에서 **동기로**
+   * 판단한다 — 그 찰나에는 아직 rootPath 가 비어 있어 "폴더 없는 신규 유저" 로
+   * 보인다(클린룸 E2E Z6 실측). 프로젝트가 하나라도 있으면 projectCount 가
+   * 막아주지만, 오프라인·권한오류로 스냅샷이 빈 채 정착한 복귀 유저는 그 보호도
+   * 못 받는다 — 그 경우 쓰던 폴더가 샘플로 갈아치워진다.
+   */
+  hasRestoreTarget: boolean;
   /** 선택된 프로젝트가 있는가. */
   hasCurrentProject: boolean;
   /**
@@ -45,6 +57,7 @@ export function shouldSeedSampleProject(gate: SampleSeedGate): boolean {
   if (gate.projectCount > 0) return false;
   if (gate.hasCurrentProject) return false;
   if (gate.hasRootPath) return false;
+  if (gate.hasRestoreTarget) return false;
   return true;
 }
 

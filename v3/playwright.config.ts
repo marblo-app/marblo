@@ -19,6 +19,10 @@ export default defineConfig({
   // Tier 폴더 안에 spec 파일이 떨어져 있음.
   testMatch: /.*\.spec\.ts/,
 
+  // 클린룸 하네스의 임시 루트(런당 ~280MB)를 실행 후 정리. 없으면 개발 맥의
+  // 디스크가 차서 스위트가 ENOSPC 로 깨진다(실측). KEEP_CLEANROOM_ROOTS=1 로 보존.
+  globalTeardown: "./tests/playwright/global-teardown.ts",
+
   // Electron 앱은 동시에 여러 인스턴스 띄우면 PTY/Firestore handle 충돌 위험.
   // workers=1 로 직렬 실행 — Tier 1 unit 만 별도로 병렬화하고 싶으면 추후
   // describe.parallel 로 명시.

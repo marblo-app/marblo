@@ -93,6 +93,28 @@ npm run test:e2e:pw -- tests/playwright/cleanroom
 > 그 판정은 Anthropic 계정 축이 아니라 **벤더 크레덴셜 축**이다 — #638 이 바꾼
 > 바로 그것. F1(키체인 누수)이라는 한계를 역이용한 셈이다.
 
+## 3-2. 제로마찰 온램프 엣지케이스 (2026-08-08 · `zero-friction-onramp.spec.ts` 9/9 통과)
+
+원클릭 온보딩(#870)·샘플 폴더 자동연결(#872) 착지 이후의 **엣지케이스·회귀가드**.
+해피패스는 `first-run.spec.ts`(A~D2)와 `beginner-first-run.spec.ts`(G1~G8)에 있고,
+여기서는 정상 경로를 벗어났을 때와 "원클릭이 사용자의 것을 건드리는가" 를 본다.
+
+| ID  | 시나리오                                 | 회귀가드                                                                           |
+| --- | ---------------------------------------- | ---------------------------------------------------------------------------------- |
+| Z1  | "모두 설치" 클릭                         | ✅ 미설치 행만 설치(이미 설치된 codex 재설치 없음) + 설치≠준비(오케 안 열림)       |
+| Z2  | claude 실패·codex 성공                   | ✅ 패스가 안 끊기고 "1개 실패" + 실패 행의 수동 명령·공식문서 유지                 |
+| Z3  | 사인인 후 아직 미인증 → 나중에 완료      | ✅ 대기 중 탭 안 뺏김·폴 재프로브 지속 → 인증되면 보드+터미널 자동 노출            |
+| Z4  | 원클릭 사인인이 타이핑하는 명령          | ✅ `claude login` 정확히 1회 (`curl`/`install.sh` 금지 — probe action 은 인스톨러) |
+| Z5  | 샘플 폴더가 이미 쓰이는 중               | ✅ 한 바이트도 안 씀(사용자 파일 그대로·시드 파일 0) + 그 폴더 그대로 연결         |
+| Z6  | 이전 세션 폴더를 복원하는 유저           | ✅ `sample:ensure` 호출 0 + 자기 폴더로 열림 (**F7 회귀가드**)                     |
+| Z7  | 시드 후 재시작                           | ✅ 기기 마커로 재시드 없음 + 첫 부팅 대조군(README·src/format.js·.git 실재)        |
+| Z8  | 이미 인증된 유저의 콜드스타트 ready 엣지 | ✅ 탭·터미널 접힘 상태 그대로 (bRABKQX7/nB4eenxP 회귀가드)                         |
+| Z9  | 첫 티켓 전송 중 중복 클릭                | ✅ 전송 중 잠금·1회만 전달 + 전달 뒤 재전송 CTA 없음                               |
+
+> 같은 날 `tests/playwright/cleanroom` 전체는 **33/36 통과**. 나머지 3건
+> (B1-a·B1-b·B1-d)은 이 작업과 무관한 **선재 red** 로, 변경분을 stash 한 상태에서
+> 동일하게 실패하는 것을 대조 확인했다(벤더 키 축 — F6 계열).
+
 ## 4. 발견된 활성화 장벽 (우선순위)
 
 ### ~~F2 (High) — "CLI 인증이 필요합니다" 배너가 사실과 다르고, 영구히 돌아온다~~ ✅ 닫힘 (kG6in9J9)
@@ -213,6 +235,54 @@ DISMISSED_KEY))` 로 **레거시 키** `marblo.cliSetupGateDismissed` 만 읽는
   그래서 이 spec 은 설치/인증 축을 IPC 스텁으로 구동한다.
 - 제안: 탐지 결과에 해결된 바이너리 **경로**를 함께 반환(진단·지원 대응에 필수),
   그리고 QA 용 엄격 모드 env(`MARBLO_CLI_PATH_STRICT=1`)로 하드코딩 확장을 끄기.
+
+### F7 (High) — 자동 시드가 **세션 복원보다 먼저** 결정한다 ✅ 닫힘 (M4wrqMYT)
+
+- 증상: 이전 세션의 폴더를 복원하는 창인데도 첫 실행 샘플이 시드되고, 창이 그
+  샘플 폴더로 갈아탄다. `hasRootPath` 가드가 있는데도 통과하는 이유는
+  **타이밍**이다 — `useSessionRestore` 는 main 으로 두 번 왕복한 뒤에야
+  `rootPath` 를 세우는데, `useFirstRunSampleProject` 는 같은 마운트에서 동기로
+  판단한다. 그 찰나엔 rootPath 가 비어 있어 "폴더 없는 신규 유저" 로 보인다.
+- 실사용에서는 `projectCount > 0` 이 대개 막아주지만, **오프라인·권한오류로 빈
+  스냅샷이 정착한 복귀 유저**는 그 보호도 못 받는다(클린룸이 정확히 그 상태다).
+  설계 문서가 "가장 지독한 증상" 으로 꼽은 바로 그 경우.
+- 수정: 게이트에 `hasRestoreTarget` 칸을 추가하고, 훅이 시드 직전에 창별/전역
+  복원 레코드를 읽어 그 칸을 채운다(`shouldSeedSampleProject` 를 같은 규칙 표로
+  한 번 더 통과). 가드: E2E `zero-friction-onramp.spec.ts` Z6 + 유닛 1건.
+
+### F8 (Medium) — 연결된 폴더를 지운 뒤 재시작하면 **첫 화면이 네이티브 경고**다
+
+- `restoreWindowSession` 이 살릴 루트를 못 찾으면 `notifyRootPathMissing` 이
+  부모 창 없는 `dialog.showMessageBox` 를 띄운다. macOS 에서 부모 없는 알림은 앱
+  모달이라 그 시점엔 창이 하나도 없다 — 자동화에서는 `firstWindow` 가 영원히 안
+  오고(실측 30s 타임아웃), 사람에게는 "확인 → 빈 창" 이 된다.
+- 자동 생성된 샘플 폴더(`~/Documents/Marblo Sample`)를 사용자가 정리하는 것은
+  흔한 일이라, 제로마찰 관점에서 첫인상 리스크다. 창을 먼저 띄우고 인앱 배너로
+  안내하는 편이 낫다(수정은 별 티켓).
+- E2E 에서는 재현 불가 구간이라 Z7 이 "폴더를 지우지 않은 재시작" 으로 우회하고,
+  그 이유를 spec 주석에 남겼다.
+
+### F9 (Medium · QA 신뢰도 High) — 샘플 시드 경로는 HOME 격리를 따르지 않는다
+
+- `sample:ensure` 는 `app.getPath("documents")` 로 위치를 잡는데, **macOS 에서
+  이 경로는 $HOME 을 무시한다**(실측: HOME 을 tmp 로 바꿔도
+  `/Users/<나>/Documents`). 즉 F1(탐지)에 이어 이 하네스의 HOME 격리가 못 막는
+  유일한 **쓰기** 경로다 — 스텁이 없으면 클린룸 테스트가 개발자의 진짜 Documents
+  에 폴더를 만든다.
+- 대응: 하네스가 `sample:ensure` 를 가로채 경로만 클린룸 안
+  (`<root>/documents/Marblo Sample`)으로 돌리고 구현은 **진짜**
+  `ensureSampleProject` 를 부른다(clobber 규칙·`wx` 쓰기·git init 이 실제 코드로
+  검증된다). Z5 가 진짜 `~/Documents` 의 상태(존재·mtime)가 안 변했는지도 함께
+  단언한다.
+
+### F10 (Low · 개발환경) — 클린룸 임시 루트가 정리되지 않는다
+
+- 실행마다 `<tmp>/marblo-cleanroom-XXXX` 가 남고 그 안엔 Chromium `userData`
+  까지 들어 있다(런당 ~280MB). 이 맥엔 360개(≈40GB)가 쌓여 있었고 결국 디스크가
+  차서 스위트가 ENOSPC 로 깨졌다(스크린샷 저장 실패 → 테스트 실패).
+- 수정: `playwright.config.ts` 의 `globalTeardown` 이 하네스 접두사
+  (`marblo-cleanroom-`·`marblo-own-repo-`)만 골라 정리한다.
+  `KEEP_CLEANROOM_ROOTS=1` 로 보존 가능.
 
 ### 잘 되고 있는 것 (회귀 가드로 고정됨)
 

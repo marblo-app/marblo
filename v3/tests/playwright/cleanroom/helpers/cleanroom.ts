@@ -45,6 +45,9 @@ const SHOT_DIR = path.join(REPO_ROOT, "test-results", "cleanroom");
 /** CLI 한 줄의 상태. ready = 설치 + 인증 완료. */
 export type CliStateName = "missing" | "installed" | "ready";
 
+/** 하네스가 상태를 매기는 CLI 축(= cliSetupStore 의 CliModel). */
+export type CliModelName = "claude" | "codex" | "grok" | "antigravity";
+
 export interface CleanRoomScenario {
   claude?: CliStateName;
   codex?: CliStateName;
@@ -54,6 +57,44 @@ export interface CleanRoomScenario {
   installSucceeds?: boolean;
   /** 자동설치 성공 시 어떤 상태가 되는지 (기본 installed — 인증은 아직). */
   installResultsIn?: CliStateName;
+  /**
+   * ★행별 자동설치 결과 — "일부만 설치됨" 시나리오의 축.
+   *
+   * `installSucceeds` 는 전부-아니면-전무라 "모두 설치" 한 번에 한 행만 실패하는
+   * 실제 상황(claude 는 EACCES, codex 는 성공)을 만들 수 없다. 여기 지정한
+   * 모델은 이 표를 따르고, 안 지정한 모델은 종전 두 노브를 그대로 따른다.
+   * `"fail"` = harness:install 이 실패 봉투를 돌려준다(설치 안 됨).
+   */
+  installPlan?: Partial<Record<CliModelName, CliStateName | "fail">>;
+  /**
+   * 첫 실행 샘플 프로젝트 시드(`sample:ensure`)를 어떻게 다룰지. 기본 "real".
+   *
+   * ★기본이 스텁인 이유는 격리다. main 의 핸들러는 시드 위치를
+   * `app.getPath("documents")` 로 잡는데, **macOS 에서 이 경로는 $HOME 을 따르지
+   * 않는다**(실측: HOME 을 tmp 로 바꿔도 `/Users/<나>/Documents`). 즉 이 하네스의
+   * HOME 격리가 유일하게 못 막는 **쓰기** 경로다 — 스텁이 없으면 클린룸 테스트가
+   * 개발자의 진짜 Documents 에 "Marblo Sample" 을 만든다.
+   *
+   *  - "real"      : 진짜 `ensureSampleProject` 를 부르되 경로만 클린룸
+   *                  `<root>/documents/Marblo Sample` 로 돌린다(clobber 규칙·wx
+   *                  쓰기·git init 이 전부 실제 구현 그대로 검증된다).
+   *  - "fail"      : 디스크가 막힌 상황 — ok:false 를 돌려준다.
+   *  - "unstubbed" : 손대지 않는다. ★진짜 Documents 에 쓰므로 일부러 그걸
+   *                  관측하려는 spec 외에는 쓰지 말 것.
+   */
+  sampleSeed?: "real" | "fail" | "unstubbed";
+  /**
+   * `appState:load` 가 돌려줄 이전 세션 폴더(`lastRootPath`) — "이 기기에서 이미
+   * 자기 폴더를 쓰던 유저" 를 진짜 복원 경로(useSessionRestore)로 재현한다.
+   * 이 값이 있으면 렌더러의 rootPath 가 부팅과 함께 채워지므로 샘플 자동시드의
+   * `hasRootPath` 칸이 실제로 닫힌다.
+   */
+  priorRootPath?: string;
+  /**
+   * `orchestrator:injectMessage` 응답을 이만큼 늦춘다(ms). 전송 중(in-flight)
+   * 중복 클릭 가드를 관측하려면 응답이 즉시 오면 안 된다.
+   */
+  injectDelayMs?: number;
   /** orchestrator:injectMessage 가 delivered:true 를 돌려주는지. */
   orchestratorRunning?: boolean;
   /** 재시작 시나리오용 — 앞선 런의 root 를 그대로 재사용(=같은 userData/HOME). */
@@ -120,10 +161,22 @@ export interface CleanRoom {
   userData: string;
   /** 폴더 연결 시나리오에서 fs:selectDirectory 가 돌려줄 프로젝트 폴더. */
   projectDir: string;
+  /**
+   * 샘플 자동시드가 실제로 쓰이는 경로(`<root>/documents/Marblo Sample`).
+   * 진짜 `~/Documents` 가 아니다 — sampleSeed 주석 참조.
+   */
+  sampleDir: string;
   /** cliAuthCheck 호출 횟수 (재프로브가 실제로 돌았는지 확인용). */
   probeCalls(): Promise<number>;
   /** harness:install 로 요청된 row id 목록. */
   installCalls(): Promise<string[]>;
+  /** `sample:ensure` 가 요청된 횟수(로케일 목록). 0 = 자동시드가 안 돌았다. */
+  sampleCalls(): Promise<string[]>;
+  /**
+   * 터미널에 **자동 입력된 명령**들 — 원클릭 사인인이 무엇을 타이핑하는지가
+   * 이 채널 하나로 관측된다(`pty:writeAndSubmit`).
+   */
+  typedCommands(): Promise<Array<{ sessionId: string; data: string }>>;
   /** orchestrator:injectMessage 로 실제 전달된 메시지들 (#580 의 증거). */
   injected(): Promise<InjectedMessage[]>;
   /** 스텁 없이 진짜 probeCliAuth — 클린룸 격리의 실효성 관측용(F1). */
@@ -251,7 +304,12 @@ export async function launchCleanRoom(
   const bin = path.join(root, "bin");
   const userData = path.join(root, "userData");
   const projectDir = path.join(root, "project");
-  for (const d of [home, bin, userData, projectDir]) {
+  // 샘플 시드의 목적지. main 은 `<Documents>/Marblo Sample` 을 쓰지만 macOS 의
+  // documents 경로는 HOME 격리를 따르지 않으므로(sampleSeed 주석) 하네스가
+  // 클린룸 안에 같은 모양의 자리를 만들어 그리로 돌린다.
+  const documentsDir = path.join(root, "documents");
+  const sampleDir = path.join(documentsDir, "Marblo Sample");
+  for (const d of [home, bin, userData, projectDir, documentsDir]) {
     fs.mkdirSync(d, { recursive: true });
   }
   seedHomeAuthState(home, scenario);
@@ -288,6 +346,18 @@ export async function launchCleanRoom(
     timeout: 60_000,
   });
 
+  // 메인 프로세스 로그 — 창이 안 뜨는 류의 부팅 실패는 여기 말고는 단서가 없다.
+  // 평소엔 조용하고 `CLEANROOM_VERBOSE=1` 일 때만 흘린다.
+  if (process.env.CLEANROOM_VERBOSE === "1") {
+    const proc = app.process();
+    proc.stdout?.on("data", (d: Buffer) =>
+      process.stdout.write(`[main] ${d.toString()}`),
+    );
+    proc.stderr?.on("data", (d: Buffer) =>
+      process.stdout.write(`[main:err] ${d.toString()}`),
+    );
+  }
+
   // ── main process IPC 스텁 (시나리오 축) ──────────────────────────────────
   await app.evaluate(
     ({ ipcMain }, s) => {
@@ -295,12 +365,23 @@ export async function launchCleanRoom(
         __cleanroom?: {
           probeCalls: number;
           installCalls: string[];
+          sampleCalls: string[];
+          typed: Array<{ sessionId: string; data: string }>;
           injected: Array<{ projectId: string; message: string }>;
           cli: Record<string, { installed: boolean; authenticated: boolean }>;
           installSucceeds: boolean;
           installResultsIn: { installed: boolean; authenticated: boolean };
+          installPlan: Record<
+            string,
+            { installed: boolean; authenticated: boolean } | "fail"
+          >;
           orchestratorRunning: boolean;
+          injectDelayMs: number;
           projectDir: string;
+          sampleDir: string;
+          sampleSeed: string;
+          sampleModule: string;
+          priorRootPath: string | null;
           orchestratorLaunchBlock: {
             model: string;
             action: string;
@@ -312,12 +393,20 @@ export async function launchCleanRoom(
       g.__cleanroom = {
         probeCalls: 0,
         installCalls: [],
+        sampleCalls: [],
+        typed: [],
         injected: [],
         cli: s.cli,
         installSucceeds: s.installSucceeds,
         installResultsIn: s.installResultsIn,
+        installPlan: s.installPlan,
         orchestratorRunning: s.orchestratorRunning,
+        injectDelayMs: s.injectDelayMs,
         projectDir: s.projectDir,
+        sampleDir: s.sampleDir,
+        sampleSeed: s.sampleSeed,
+        sampleModule: s.sampleModule,
+        priorRootPath: s.priorRootPath,
         orchestratorLaunchBlock: s.orchestratorLaunchBlock,
       };
       const cr = g.__cleanroom!;
@@ -363,14 +452,11 @@ export async function launchCleanRoom(
       });
 
       // 자동설치 — node/npm 부재 시나리오는 여기서 실패한다.
+      //
+      // 행별 결과(installPlan)가 있으면 그쪽이 이긴다: "모두 설치" 한 번에 한 행만
+      // 실패하는 상황(claude EACCES · codex 성공)은 전역 boolean 으로는 못 만든다.
       rehandle("harness:install", (id) => {
         cr.installCalls.push(String(id));
-        if (!cr.installSucceeds) {
-          return {
-            success: false,
-            error: "npm 을 찾을 수 없습니다 (cleanroom: node 미설치 시나리오)",
-          };
-        }
         const model = String(id).includes("codex")
           ? "codex"
           : String(id).includes("claude")
@@ -378,8 +464,87 @@ export async function launchCleanRoom(
             : String(id).includes("grok")
               ? "grok"
               : "antigravity";
-        cr.cli[model] = { ...cr.installResultsIn };
+        const planned = cr.installPlan[model];
+        if (planned === "fail") {
+          return {
+            success: false,
+            error: `${model} 설치 실패 (cleanroom: 권한/네트워크 시뮬)`,
+          };
+        }
+        if (!planned && !cr.installSucceeds) {
+          return {
+            success: false,
+            error: "npm 을 찾을 수 없습니다 (cleanroom: node 미설치 시나리오)",
+          };
+        }
+        cr.cli[model] = { ...(planned ?? cr.installResultsIn) };
         return { success: true };
+      });
+
+      // ★첫 실행 샘플 시드 — 경로만 클린룸으로 돌리고 구현은 진짜를 부른다.
+      // (macOS 의 documents 경로가 HOME 격리를 안 따르므로 이 스텁이 없으면
+      //  개발자의 진짜 ~/Documents 에 폴더가 생긴다 — sampleSeed 주석 참조.)
+      if (cr.sampleSeed !== "unstubbed") {
+        rehandle("sample:ensure", async (input) => {
+          const locale =
+            input &&
+            typeof input === "object" &&
+            (input as { locale?: unknown }).locale === "en"
+              ? "en"
+              : "ko";
+          cr.sampleCalls.push(locale);
+          if (cr.sampleSeed === "fail") {
+            return {
+              ok: false,
+              path: cr.sampleDir,
+              created: false,
+              reused: false,
+              gitInitialized: false,
+              error: "cleanroom: 디스크 쓰기 실패 시뮬",
+            };
+          }
+          // mainCall 과 같은 입구(getBuiltinModule → createRequire): 앱이 이미
+          // 로드한 모듈 인스턴스를 그대로 잡는다.
+          const nodeModule = (
+            process as unknown as {
+              getBuiltinModule?: (id: string) => {
+                createRequire: (from: string) => (id: string) => unknown;
+              };
+            }
+          ).getBuiltinModule?.("module");
+          if (!nodeModule?.createRequire) {
+            throw new Error("sample-project 모듈을 로드할 수 없습니다");
+          }
+          const mod = nodeModule.createRequire(cr.sampleModule)(
+            cr.sampleModule,
+          ) as {
+            ensureSampleProject: (o: {
+              dir: string;
+              locale: string;
+            }) => Promise<unknown>;
+          };
+          return await mod.ensureSampleProject({
+            dir: cr.sampleDir,
+            locale,
+          });
+        });
+      }
+
+      // 이전 세션 복원 — "이 기기에서 이미 자기 폴더를 쓰던 유저".
+      if (cr.priorRootPath) {
+        rehandle("appState:load", () => ({
+          lastRootPath: cr.priorRootPath,
+        }));
+      }
+
+      // ★터미널 자동 입력 관측(원클릭 사인인). `pty:writeAndSubmit` 는 invoke 가
+      // 아니라 send 라 rehandle(=_invokeHandlers) 로는 못 잡는다 — 리스너를 직접
+      // 갈아끼운다. 실제 입력은 **일부러 삼킨다**: 진짜로 타이핑되면 CLI 가
+      // 브라우저 인증 페이지를 열어 테스트가 사람의 승인을 기다리게 된다.
+      ipcMain.removeAllListeners("pty:writeAndSubmit");
+      ipcMain.on("pty:writeAndSubmit", (_e: unknown, payload: unknown) => {
+        const p = payload as { id?: string; data?: string };
+        cr.typed.push({ sessionId: p?.id ?? "", data: p?.data ?? "" });
       });
 
       // 버전 조회는 npm 네트워크 호출 → 클린룸에선 무의미하니 비운다.
@@ -400,9 +565,12 @@ export async function launchCleanRoom(
       }
 
       // ★ #580 의 증거 지점: 위저드 마지막 버튼이 여기까지 오는지.
-      rehandle("orchestrator:injectMessage", (payload) => {
+      rehandle("orchestrator:injectMessage", async (payload) => {
         const p = payload as { projectId: string; message: string };
         cr.injected.push({ projectId: p.projectId, message: p.message });
+        if (cr.injectDelayMs > 0) {
+          await new Promise((r) => setTimeout(r, cr.injectDelayMs));
+        }
         return cr.orchestratorRunning
           ? { delivered: true }
           : { delivered: false, reason: "no-local-orchestrator" };
@@ -432,8 +600,21 @@ export async function launchCleanRoom(
         scenario.installResultsIn ?? "installed",
         "login",
       ),
+      installPlan: Object.fromEntries(
+        Object.entries(scenario.installPlan ?? {}).map(([model, outcome]) => [
+          model,
+          outcome === "fail"
+            ? ("fail" as const)
+            : stateToProbe(outcome as CliStateName, "login"),
+        ]),
+      ),
       orchestratorRunning: scenario.orchestratorRunning ?? false,
+      injectDelayMs: scenario.injectDelayMs ?? 0,
       projectDir,
+      sampleDir,
+      sampleSeed: scenario.sampleSeed ?? "real",
+      sampleModule: path.join(REPO_ROOT, "dist-electron", "sample-project.js"),
+      priorRootPath: scenario.priorRootPath ?? null,
       orchestratorLaunchBlock: scenario.orchestratorLaunchBlock ?? null,
     },
   );
@@ -467,6 +648,7 @@ export async function launchCleanRoom(
     home,
     userData,
     projectDir,
+    sampleDir,
     probeCalls: () =>
       app.evaluate(
         () =>
@@ -478,6 +660,23 @@ export async function launchCleanRoom(
         () =>
           (globalThis as unknown as { __cleanroom: { installCalls: string[] } })
             .__cleanroom.installCalls,
+      ),
+    sampleCalls: () =>
+      app.evaluate(
+        () =>
+          (globalThis as unknown as { __cleanroom: { sampleCalls: string[] } })
+            .__cleanroom.sampleCalls,
+      ),
+    typedCommands: () =>
+      app.evaluate(
+        () =>
+          (
+            globalThis as unknown as {
+              __cleanroom: {
+                typed: Array<{ sessionId: string; data: string }>;
+              };
+            }
+          ).__cleanroom.typed,
       ),
     injected: () =>
       app.evaluate(
@@ -592,10 +791,43 @@ export async function launchCleanRoom(
       return file;
     },
     close: async () => {
+      // ★프로세스가 **실제로 죽을 때까지** 기다린다.
+      //
+      // `app.close()` 는 종료를 요청할 뿐이고, 폴더를 연결한 런은 파일 워처·PTY·
+      // git 자식 프로세스를 물고 있어 그 요청이 조용히 늦어질 수 있다. 그대로
+      // 다음 런을 같은 `--user-data-dir` 로 띄우면 Chromium 프로필이 앞 인스턴스에
+      // 잠겨 있어 창이 아예 안 뜬다(재시작 시나리오가 firstWindow 타임아웃으로
+      // 깨진다). 실측으로 그 모양을 한 번 밟았으므로 여기서 못박는다.
+      // process() 는 앱이 이미 사라진 뒤엔 스스로 던진다(내부 커넥션이 없다) —
+      // 그 경우는 "이미 죽었다" 이므로 기다릴 것도 없다.
+      let proc: ReturnType<ElectronApplication["process"]> | null = null;
+      try {
+        proc = app.process();
+      } catch {
+        proc = null;
+      }
       try {
         await app.close();
       } catch {
-        /* 이미 닫혔으면 무시 */
+        /* 이미 닫혔거나 종료 요청이 거부됨 — 아래에서 강제 종료 */
+      }
+      if (!proc) return;
+      const deadline = Date.now() + 10_000;
+      while (proc.exitCode === null && proc.signalCode === null) {
+        if (Date.now() > deadline) {
+          proc.kill("SIGKILL");
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      // SIGKILL 뒤에도 커널이 정리할 틈을 준다(프로필 락 해제 시점).
+      const killDeadline = Date.now() + 5_000;
+      while (
+        proc.exitCode === null &&
+        proc.signalCode === null &&
+        Date.now() < killDeadline
+      ) {
+        await new Promise((r) => setTimeout(r, 200));
       }
     },
   };
@@ -874,6 +1106,65 @@ export async function injectProject(
       updatedAt: new Date(),
     });
   }, folderPath);
+}
+
+/**
+ * 이 창이 실제로 보고 있는 폴더(editorStore.rootPath).
+ *
+ * 샘플 자동연결의 결과는 화면 문구가 아니라 이 값이다 — 클린룸은 bypassAuth
+ * mock 유저라 Firestore `createProject` 가 거절되므로(프로젝트 등록은 인라인
+ * 이름짓기 배너로 폴백) "연결됐다" 를 프로젝트로 재면 항상 실패로 읽힌다.
+ * connectFolderPath 가 가장 먼저 하는 일이 setRootPath 이고, 그것이 곧 "이 창이
+ * 어느 폴더를 열었나" 다.
+ */
+export async function readRootPath(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    const hatch = (
+      window as unknown as {
+        __marbloTest?: {
+          stores: { editor: { getState: () => { rootPath: string | null } } };
+        };
+      }
+    ).__marbloTest;
+    return hatch?.stores.editor.getState().rootPath ?? null;
+  });
+}
+
+export interface SplitWorkspaceView {
+  activeTab: string;
+  terminalCollapsed: boolean;
+}
+
+/**
+ * 워크스페이스 셸의 화면 배치 — "오케가 눈에 보이는가" 의 관측 지점.
+ *
+ * 원클릭 설치·사인인이 끝나면 CliSetupHost 가 터미널 열을 펴고(terminalCollapsed
+ * false) 작업 뷰를 보드로 옮긴다. 반대로 **이 세션에서 원클릭을 누르지 않은**
+ * 사용자에게는 그 이동이 일어나면 안 된다(콜드스타트 ready 엣지 —
+ * bRABKQX7/nB4eenxP).
+ */
+export async function readSplitWorkspace(
+  page: Page,
+): Promise<SplitWorkspaceView> {
+  return page.evaluate(() => {
+    const hatch = (
+      window as unknown as {
+        __marbloTest?: {
+          stores: {
+            splitWorkspace: {
+              getState: () => {
+                activeTab: string;
+                terminalCollapsed: boolean;
+              };
+            };
+          };
+        };
+      }
+    ).__marbloTest;
+    if (!hatch) throw new Error("cleanroom test hatch is unavailable");
+    const s = hatch.stores.splitWorkspace.getState();
+    return { activeTab: s.activeTab, terminalCollapsed: s.terminalCollapsed };
+  });
 }
 
 // ── 비기너 모드 (설계: v3/docs/BEGINNER-MODE-DESIGN.md) ──────────────────────

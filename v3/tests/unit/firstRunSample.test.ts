@@ -16,6 +16,7 @@ const FIRST_RUN: SampleSeedGate = {
   hasCurrentProject: false,
   isNewWindow: false,
   alreadyAttempted: false,
+  hasRestoreTarget: false,
 };
 
 describe("shouldSeedSampleProject", () => {
@@ -33,6 +34,10 @@ describe("shouldSeedSampleProject", () => {
     ["the account already has a project", { projectCount: 1 }],
     ["a project is already selected", { hasCurrentProject: true }],
     ["this window already has a folder open", { hasRootPath: true }],
+    // ★hasRootPath 와 다른 칸이다: 복원은 main 왕복 뒤에 rootPath 를 세우므로,
+    //   그 전에 판단하면 "폴더 없는 신규 유저" 로 보인다. 복원 대상이 있다는
+    //   사실만으로 물러서야 쓰던 폴더가 샘플로 갈아치워지지 않는다(E2E Z6).
+    ["this window is about to restore a folder", { hasRestoreTarget: true }],
     // Cmd+Shift+N 은 "내가 직접 고르겠다" 는 의사표시다.
     ["it is a deliberately opened new window", { isNewWindow: true }],
     // 샘플을 지운 사용자에게 되살아나면 그건 버그다.
