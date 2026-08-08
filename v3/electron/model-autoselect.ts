@@ -273,6 +273,34 @@ export function costPressureForHeadroom(usedPercent?: number | null): number {
   return lerp(0, 10, 3.2, 2.2);
 }
 
+/**
+ * 프리셋이 요구하는 **소진율 바닥**을 실측 위에 얹는다.
+ *
+ * 왜 이 모양인가: "비용절감" 프리셋(`dispatch-scoring.MODEL_PRESETS["cost-saver"]`)
+ * 이 표현하려는 것은 "구독 쿼터를 아껴 쓰라" 이고, 그 뜻은 이미 이 파일 안에
+ * `subscriptionCostScaleForHeadroom` / `costPressureForHeadroom` 두 함수로
+ * 정확히 모델링돼 있다. 새 성분을 더하는 대신 그 함수들이 보는 **입력 하나**를
+ * 바닥으로 눌러 주면, 절약 의도가 단가 항 안에서만 표현되고 다른 성분이 같은
+ * 사실을 두 번 세지 않는다(이 파일의 이중계상 금지 규율).
+ *
+ * ★실측이 바닥보다 이미 나쁘면 실측이 이긴다(`Math.max`) — 절약 프리셋이 진짜
+ * 소진 상황을 낙관적으로 덮어쓰면 안 된다. 쿼터 데이터가 아예 없으면 바닥이
+ * 그대로 값이 된다(그게 이 레버의 주 사용처다 — 프로브가 없는 기기).
+ */
+export function applyBudgetUsedFloor(
+  usedPercent: number | null | undefined,
+  floorPercent: number | null | undefined,
+): number | null | undefined {
+  if (typeof floorPercent !== "number" || !Number.isFinite(floorPercent)) {
+    return usedPercent;
+  }
+  const floor = Math.min(100, Math.max(0, floorPercent));
+  if (typeof usedPercent !== "number" || !Number.isFinite(usedPercent)) {
+    return floor;
+  }
+  return Math.max(usedPercent, floor);
+}
+
 export function isSubscriptionMeteredModel(modelId: string): boolean {
   const entry = getModel(modelId);
   if (!entry) return false;
@@ -575,6 +603,12 @@ export interface AutoSelectInput {
   /** 이 하네스 계정의 쿼터 사용률(0-100). 없으면 중립. */
   budgetUsedPercent?: number | null;
   /**
+   * 프리셋이 요구하는 **최소 소진율**(0-100). "비용절감" 프리셋이 구독 쿼터를
+   * 아껴 쓰게 만드는 유일한 레버다 — `applyBudgetUsedFloor` 주석 참고.
+   * 미지정이면 실측만 본다(무회귀).
+   */
+  minBudgetUsedPercent?: number | null;
+  /**
    * 실사용량 롤업(cost_logs 로컬 거울 / getCostSummary.weeklyByModel).
    * 없으면 사용량·주간한도 항 = 0 (콜드 무회귀).
    */
@@ -630,12 +664,20 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
     tier,
     ctx,
     graph,
-    budgetUsedPercent,
     usageRollup,
     modelAvailable,
     random = Math.random,
     nowMs = Date.now(),
   } = input;
+
+  // ★프리셋의 절약 의도는 여기서 **한 번만** 적용된다. 아래 모든 단가/압력/보존
+  // 판정(`effectiveCostIndexForModel`, `costPressureForHeadroom`, `conserving`,
+  // 근거 문자열)이 이 값을 쓰므로, 절약 프리셋에서 탐색·동률회전이 멈추는 것도
+  // 같은 한 줄에서 따라나온다(잔량이 부족할 땐 비교데이터를 사지 않는다).
+  const budgetUsedPercent = applyBudgetUsedFloor(
+    input.budgetUsedPercent,
+    input.minBudgetUsedPercent,
+  );
 
   const { candidates, entryIndex, pinsModel } = autoCandidates(harness, tier);
   const usable = candidates.filter(
@@ -856,7 +898,15 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
     scores,
     reason: "",
   };
-  plan.reason = formatAutoReason(plan, winner, tier, budgetUsedPercent);
+  plan.reason = formatAutoReason(
+    plan,
+    winner,
+    tier,
+    budgetUsedPercent,
+    budgetUsedPercent !== input.budgetUsedPercent
+      ? input.minBudgetUsedPercent
+      : undefined,
+  );
   return plan;
 }
 
@@ -920,10 +970,20 @@ export function formatAutoReason(
   winner: AutoScoreBreakdown,
   tier: LadderTier,
   budgetUsedPercent?: number | null,
+  /**
+   * 값이 오면 이 잔여는 **실측이 아니라 프리셋이 눌러 놓은 바닥**이라는 뜻이다.
+   * 감사 로그가 "20% left" 를 관측치로 읽히게 두면 안 된다.
+   */
+  presetFloorPercent?: number | null,
 ): string {
   const headroom =
     typeof budgetUsedPercent === "number" && Number.isFinite(budgetUsedPercent)
-      ? `${Math.round(100 - Math.min(100, Math.max(0, budgetUsedPercent)))}% left`
+      ? `${Math.round(100 - Math.min(100, Math.max(0, budgetUsedPercent)))}% left${
+          typeof presetFloorPercent === "number" &&
+          Number.isFinite(presetFloorPercent)
+            ? ` (preset floor ${presetFloorPercent}% used)`
+            : ""
+        }`
       : "no-data";
   // 티어 라벨(premier/standard/value)은 **점수가 아니라 표기**다 — 벤치+단가에서
   // 파생된 값이라 점수에 또 넣으면 이중계상이고, 사람이 읽을 땐 "이건 가성비 칸"

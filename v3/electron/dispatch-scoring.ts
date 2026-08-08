@@ -560,9 +560,10 @@ const TIED_SCORE_BAND = 5;
 // ── Model Presets ──────────────────────────────────────────
 
 export type ModelPreset =
-  | "claude-only"
-  | "recommended"
+  | "auto"
+  | "cost-saver"
   | "balanced"
+  | "claude-only"
   | "codex-only"
   | "grok-only"
   | "antigravity-only";
@@ -588,48 +589,247 @@ export type ModelPreset =
 // unauthenticated/uninstalled harness BEFORE scoring (preserving duplicates),
 // so on a machine without `grok login` the resulting mix is byte-identical to
 // the old table. The change only takes effect once grok can actually spawn.
-export const MODEL_PRESETS: Record<
-  ModelPreset,
-  { label: string; models: ModelType[]; description: string }
-> = {
+/**
+ * ★한 프리셋이 라우팅에 거는 것은 **두 가지뿐**이다.
+ *
+ *   `models` — 1층(하네스) 후보집합. **중복 항목이 곧 고정 가중치**다: 태그가
+ *     없는 dispatch(오케 기본 경로)는 `scoreModelsDetailed` 의 순수 round-robin
+ *     분기를 타는데, 그 회전 목록이 중복을 그대로 보존하기 때문이다.
+ *   `budgetUsedFloorPercent` — 2층(`model-autoselect`)이 볼 **최소 소진율**.
+ *     아래 cost-saver 주석 참고. 없으면(=대부분) 2층은 실측 잔여만 본다.
+ *
+ * 그 외의 모든 것(태그 적합, 실단가, SWE, 잔여쿼터, 주간한도, 사용량, 지식그래프,
+ * 다양성)은 프리셋이 정하지 않는다 — 매 dispatch 마다 근거로 계산된다. 그래서
+ * "추천"이 고정 퍼센트일 이유가 없다(그게 `auto` 가 `recommended` 를 대체한 이유다).
+ */
+export interface ModelPresetEntry {
+  label: string;
+  models: ModelType[];
+  description: string;
+  /**
+   * 2층에 주입할 **소진율 바닥**(0-100). "구독 쿼터를 아껴 쓰라"를 표현하는
+   * 유일한 정직한 레버다 — cost-saver 주석 참고.
+   */
+  budgetUsedFloorPercent?: number;
+}
+
+// ★A preset is the ONLY live source of dispatch candidates.
+//
+// `BridgeServer.dispatchTask` resolves enabledModels as
+//   request body → per-project lookup → resolvePreset(MARBLO_MODEL_PRESET).
+// The middle link is dead wiring: main.ts's `orchestratorSession:launch`
+// handler accepts `enabledModels`, but preload's launch() has no such
+// parameter and nothing in src/ ever sets it — so `projectEnabledModels` is
+// permanently empty. With no saved preset either, every live dispatch runs on
+// the default below. That is why a harness missing from these lists never
+// spawns: it isn't losing the score, it never enters the competition.
+//
+// Grok was exactly that dead cell — registered in model-registry (verified),
+// on the ladder, with tag bonuses, base score, an orchestrator setting and a
+// harness-catalog "recommended" row, yet present in no multi-model preset.
+// Measured live (dist-electron, 200 dispatch scorings per row): grok 0% across
+// every tag set and complexity.
+//
+// Adding a harness is safe by construction: `filterAvailableHarnesses` drops an
+// unauthenticated/uninstalled harness BEFORE scoring (preserving duplicates),
+// so on a machine without `grok login` the mix falls back to what can spawn.
+export const MODEL_PRESETS: Record<ModelPreset, ModelPresetEntry> = {
+  /**
+   * ★기본값이자 추천. 종전 "Marblo Recommended" 의 고정 60/20/20(실제 표는
+   * claude×3 + antigravity + gpt + grok = 50/17/17/17)을 대체한다.
+   *
+   * 왜 고정 퍼센트를 버리나: 그 숫자는 **아무것도 관측하지 않는다.** claude 주간
+   * 한도가 95% 차 있어도, 이번 티켓이 research 태그를 달고 있어도, 지식그래프가
+   * 이 맥락에서 gpt 승률을 학습해 뒀어도 50/17/17/17 은 그대로다. 그 신호들은
+   * 전부 이미 스코어러 안에 있다(#841 사용량·주간한도·다양성, #853 잔여쿼터).
+   * 프리셋이 할 일은 "누가 경쟁에 들어오나" 뿐이고, 승자는 근거가 정한다.
+   *
+   * 왜 이 셋인가: claude/gpt/grok 만이 **양쪽 층 모두** 근거를 갖는다 —
+   * `MODEL_LADDERS` 에 사다리가 있고(2층이 칸을 고를 수 있다), 레지스트리에 실단가·
+   * SWE 가 있으며, `getAccountRateLimits` 가 잔여 쿼터를 실제로 프로브한다.
+   * env-swap 벤더(MiniMax/GLM/Kimi)는 별도 하네스가 아니라 **claude 사다리의 칸**
+   * 이므로 여기 claude 가 있는 것만으로 후보가 된다(2층이 고른다).
+   *
+   * Antigravity 는 여기 없다 — 사다리·실단가·쿼터 프로브가 셋 다 없어서 2층이
+   * 아예 판단하지 못하고(`selectAutoModel` → null = CLI 기본값), 1층에서도 잔여
+   * 쿼터 신호가 안 붙는다. 근거 기반 프리셋의 기본값에 근거 없는 칸을 끼우면
+   * 그 자리에서만 라우팅이 눈을 감는다. Balanced / 전용 프리셋에는 그대로 있다.
+   */
+  auto: {
+    label: "Auto (Marblo Recommended)",
+    models: ["claude", "gpt", "grok"],
+    description:
+      "Evidence-based smart routing — no fixed percentages. Each dispatch scores tags, live quota headroom, weekly token limits, observed usage and the routing graph, then picks both the harness and the rung. Claude / Codex / Grok compete; env-swap vendors (MiniMax, GLM, Kimi) ride the Claude ladder.",
+  },
+  /**
+   * "비용절감". env-swap 벤더는 **별도 하네스가 아니므로** 1층 후보목록으로는
+   * 표현할 수 없다 — 레버는 2층에 있어야 한다.
+   *
+   * ★단가 가중치를 키우는 방식은 역효과다. `subscriptionCostScaleForHeadroom` 은
+   * 잔여가 넉넉한 구독(claude/codex/grok)의 effective 단가를 0.02배로 깎는다 —
+   * 이미 낸 정액권의 한계비용이 0 이라는 정직한 계산이다. 그 위에서 단가 민감도만
+   * 올리면 종량제인 env-swap 이 **더** 불리해진다.
+   *
+   * 그래서 레버는 "소진율 바닥"이다: 2층이 구독 잔여를 실측보다 낮게(=아껴야 할
+   * 자원으로) 보게 만든다. 그러면 같은 함수 하나로 env-swap 칸이 경쟁력을 얻는다.
+   *
+   * ★90% 인 이유는 **측정**이다(사다리·레지스트리 실단가로 전 조합 스윕,
+   * `tests/unit/model-autoselect.test.ts` 의 "프리셋 소진율 바닥" 블록이 그
+   * 관측을 고정한다). 바닥별로 claude 사다리가 실제로 이렇게 움직인다:
+   *
+   *   바닥     키有 simple/standard        키無 simple/standard      complex
+   *   없음     sonnet5 / opus5             sonnet5 / opus5          fable5
+   *   80       MiniMax-M2.7 / M2.7         sonnet5 / **opus5**      fable5
+   *   85·90    MiniMax-M2.7 / M2.7         sonnet5 / **sonnet5**    fable5
+   *   95       MiniMax-M2.7 / M2.7         sonnet5 / sonnet5        **k3-256k**
+   *
+   * 즉 80 은 벤더 키가 **없는** 기기에서 아무것도 안 바꾸고(=대다수 기기에서
+   * "비용절감"이 이름뿐인 프리셋이 된다), 95 는 complex 진입칸(fable5)까지
+   * 무너뜨린다 — 어려운 티켓을 약한 칸으로 돌린 실패는 재작업이라 절약분보다
+   * 비싸다(FIT_PENALTY 주석과 같은 논리). 90 은 키 유무와 무관하게 절약이
+   * 일어나면서 complex 는 지켜지는 유일한 구간이다.
+   *
+   * ★codex/grok 하네스는 이 바닥으로 **움직이지 않는다**(측정 확인). 그 사다리는
+   * 통째로 한 구독이라 더 싼 칸을 골라도 같은 쿼터를 먹는다 — 아낄 자원이 없다.
+   * 절약은 claude 사다리(=env-swap 칸이 사는 곳)에서만 일어난다.
+   */
+  "cost-saver": {
+    label: "Cost Saver (spare subscription quota)",
+    models: ["claude", "gpt", "grok"],
+    budgetUsedFloorPercent: 90,
+    description:
+      "Same fleet as Auto, but the rung selector treats subscription quota as scarce, so cheap env-swap rungs (MiniMax / GLM / Kimi) win on the Claude ladder. Without vendor API keys it drops to the cheaper native rung (Sonnet instead of Opus) instead. Complex tickets keep the frontier rung either way, and the Codex / Grok ladders are unaffected — one subscription, nothing to spare.",
+  },
+  /**
+   * 전 fleet 균등 회전. Antigravity 가 사는 자리다 — 2층이 판단하지 못하는 칸이라
+   * 근거 기반 기본값(`auto`)에서는 뺐지만, 계정이 있으면 쓸 이유는 충분하다.
+   */
+  balanced: {
+    label: "Balanced (whole fleet)",
+    models: ["claude", "gpt", "grok", "antigravity"],
+    description:
+      "Equal rotation across Claude / Codex / Grok / Antigravity. Antigravity has no ladder, pricing or quota probe, so it joins the rotation but the rung selector cannot reason about it (it spawns on the CLI default).",
+  },
   "claude-only": {
     label: "Claude 100%",
     models: ["claude"],
-    description: "All agents use Claude (highest quality)",
-  },
-  recommended: {
-    label: "Marblo Recommended",
-    models: ["claude", "claude", "claude", "antigravity", "gpt", "grok"],
     description:
-      "Claude 50% + Antigravity / Codex / Grok ~17% each (cost-optimized)",
-  },
-  balanced: {
-    label: "Balanced",
-    models: ["claude", "antigravity", "gpt", "grok"],
-    description: "Equal rotation across Claude / Antigravity / Codex / Grok",
+      "All agents use the Claude CLI (highest quality). The rung selector still picks the model inside it, including env-swap vendors when their keys are present.",
   },
   "codex-only": {
     label: "Codex 100%",
     models: ["gpt"],
-    description: "All agents use OpenAI Codex (model id 'gpt')",
+    description:
+      "All agents use OpenAI Codex (model id 'gpt'); the rung selector picks the gpt-5.6 variant and effort.",
   },
   "grok-only": {
     label: "Grok 100%",
     models: ["grok"],
-    description: "All agents use xAI Grok Build",
+    description: "All agents use xAI Grok Build.",
   },
   "antigravity-only": {
     label: "Antigravity 100%",
     models: ["antigravity"],
-    description: "All agents use Google Antigravity (agy)",
+    description: "All agents use Google Antigravity (agy).",
   },
 };
 
-export function resolvePreset(preset?: string): ModelType[] {
-  if (preset && preset in MODEL_PRESETS) {
-    return MODEL_PRESETS[preset as ModelPreset].models;
+/** 기본 프리셋 — 저장값·env 가 없거나 알 수 없을 때. */
+export const DEFAULT_MODEL_PRESET: ModelPreset = "auto";
+
+/**
+ * 폐기된 프리셋 id → 현행 id. 저장된 앱 상태(`appState.modelPreset`)와 env 를
+ * 마이그레이션 없이 계속 읽을 수 있게 한다 — 사용자가 고른 적 있는 값이 조용히
+ * 기본값으로 되돌아가면 "설정이 안 먹는다"로 보인다.
+ */
+const LEGACY_PRESET_ALIASES: Readonly<Record<string, ModelPreset>> = {
+  // 고정 60/20/20 추천 → 근거 기반 추천.
+  recommended: "auto",
+};
+
+/** 사용자 지정 프리셋 표기: `custom:claude,gpt,grok`. */
+export const CUSTOM_PRESET_PREFIX = "custom:";
+
+/** custom 프리셋에서 고를 수 있는 하네스 축(전용 프리셋이 있는 것들과 같다). */
+export const CUSTOM_PRESET_HARNESSES: readonly ModelType[] = [
+  "claude",
+  "gpt",
+  "grok",
+  "antigravity",
+];
+
+/**
+ * `custom:...` 표기를 하네스 배열로. 알 수 없는 토큰은 **버린다**(에러가 아니라)
+ * — 하네스가 하나 사라져도 나머지 선택은 살아 있어야 한다. 유효 토큰이 하나도
+ * 없으면 null 을 돌려 호출자가 기본 프리셋으로 폴백하게 한다.
+ */
+export function parseCustomPreset(preset?: string): ModelType[] | null {
+  if (!preset || !preset.startsWith(CUSTOM_PRESET_PREFIX)) return null;
+  const seen = new Set<ModelType>();
+  for (const raw of preset.slice(CUSTOM_PRESET_PREFIX.length).split(",")) {
+    const token = raw.trim().toLowerCase();
+    if (!token) continue;
+    // "codex"/"agy" 같은 별칭도 그대로 받는다(normalizeModel 이 단일소스).
+    const model = normalizeModel(token);
+    if (model && CUSTOM_PRESET_HARNESSES.includes(model)) seen.add(model);
   }
-  return MODEL_PRESETS["recommended"].models;
+  return seen.size > 0 ? [...seen] : null;
+}
+
+/** 저장/전달용 custom 프리셋 문자열. */
+export function formatCustomPreset(models: ModelType[]): string {
+  return `${CUSTOM_PRESET_PREFIX}${models.join(",")}`;
+}
+
+/**
+ * 프리셋 문자열 → 카탈로그 id. custom 표기는 정규화된 형태로, 알 수 없는 값은
+ * 기본값으로 접는다. 저장 경로(`modelPreset:set`)가 이 함수를 지나므로 앱 상태에
+ * 쓰레기 문자열이 남지 않는다.
+ */
+export function normalizePresetId(preset?: string): string {
+  const custom = parseCustomPreset(preset);
+  if (custom) return formatCustomPreset(custom);
+  const key = (preset ?? "").trim();
+  if (key in MODEL_PRESETS) return key;
+  if (key in LEGACY_PRESET_ALIASES) return LEGACY_PRESET_ALIASES[key];
+  return DEFAULT_MODEL_PRESET;
+}
+
+export function resolvePreset(preset?: string): ModelType[] {
+  const custom = parseCustomPreset(preset);
+  if (custom) return custom;
+  return MODEL_PRESETS[normalizePresetId(preset) as ModelPreset].models;
+}
+
+/**
+ * 이 프리셋이 2층에 요구하는 소진율 바닥(없으면 undefined = 실측 그대로).
+ * `bridge-server` 가 `selectAutoModel({ minBudgetUsedPercent })` 로 넘긴다.
+ */
+export function resolvePresetBudgetFloor(preset?: string): number | undefined {
+  if (parseCustomPreset(preset)) return undefined;
+  return MODEL_PRESETS[normalizePresetId(preset) as ModelPreset]
+    .budgetUsedFloorPercent;
+}
+
+/** 설정 화면이 그릴 프리셋 카탈로그 한 줄. */
+export interface ModelPresetCatalogEntry extends ModelPresetEntry {
+  id: ModelPreset;
+}
+
+/**
+ * 설정 화면용 카탈로그(IPC `modelPreset:list`).
+ *
+ * ★종전엔 `SettingsPage.PRESETS` 가 이 표를 **2차 하드코딩**하고 있었다. 그 결과
+ * 백엔드가 grok 을 편입하고 가중치를 바꾼 뒤에도 화면은 "Claude 60% + Antigravity
+ * 20% + Codex 20%" 를 계속 광고했고, `grok-only` 프리셋은 화면에 행 자체가 없어
+ * 고를 수 없었다. 목록을 여기서 서빙하면 그 벌어질 자리가 사라진다
+ * (`ORCHESTRATOR_HARNESS_OPTIONS` 와 같은 규율).
+ */
+export function listModelPresets(): ModelPresetCatalogEntry[] {
+  return (Object.keys(MODEL_PRESETS) as ModelPreset[]).map((id) => ({
+    id,
+    ...MODEL_PRESETS[id],
+  }));
 }
 
 // ── Model alias normalization ───────────────────────────────

@@ -7,6 +7,13 @@ import {
   scoreModels,
   scoreModelsDetailed,
   resolvePreset,
+  resolvePresetBudgetFloor,
+  normalizePresetId,
+  parseCustomPreset,
+  formatCustomPreset,
+  listModelPresets,
+  DEFAULT_MODEL_PRESET,
+  CUSTOM_PRESET_HARNESSES,
   MODEL_PRESETS,
   resolveSimpleAgyBias,
   checkSpawnConstraints,
@@ -1468,6 +1475,91 @@ describe("fleet diversity — grok is a live dispatch candidate", () => {
     if (savedPlans !== null) fs.writeFileSync(PLANS_FILE, savedPlans, "utf-8");
   });
 
+  // ── 프리셋 현행화(티켓 mzHNVsHV) ────────────────────────────────────
+  //
+  // 종전 "Marblo Recommended" 는 고정 퍼센트(claude×3 + antigravity + gpt + grok)
+  // 였다. 그 숫자는 아무것도 관측하지 않는다 — 주간 한도가 95% 차 있어도, 지식
+  // 그래프가 이 맥락의 승자를 학습해 뒀어도 그대로다. 그 신호들은 전부 이미
+  // 스코어러 안에 있으므로(#841/#853), 추천 프리셋이 할 일은 "누가 경쟁에
+  // 들어오나" 뿐이다.
+  it("the recommended default carries NO fixed weighting (auto = evidence decides)", () => {
+    expect(DEFAULT_MODEL_PRESET).toBe("auto");
+    const models = MODEL_PRESETS.auto.models;
+    // 중복이 하나라도 있으면 그게 곧 고정 가중치다(무태그 round-robin 이 중복을
+    // 그대로 회전한다) — 이 티켓이 없앤 바로 그 성질.
+    expect(new Set(models).size).toBe(models.length);
+    expect(models).toEqual(["claude", "gpt", "grok"]);
+  });
+
+  it("the auto default only contains harnesses BOTH layers can reason about", () => {
+    // 사다리가 있어야 2층(`model-autoselect`)이 칸을 고를 수 있고, 쿼터 프로브가
+    // 있어야 1층 budgetBias 가 붙는다. antigravity 는 둘 다 없어서 기본값에서
+    // 빠졌다 — 하지만 사라지지는 않았다.
+    expect(MODEL_PRESETS.auto.models).not.toContain("antigravity");
+    expect(MODEL_PRESETS.balanced.models).toContain("antigravity");
+    expect(MODEL_PRESETS["antigravity-only"].models).toEqual(["antigravity"]);
+  });
+
+  it("legacy 'recommended' still resolves (saved app state must not silently reset)", () => {
+    expect(normalizePresetId("recommended")).toBe("auto");
+    expect(resolvePreset("recommended")).toEqual(MODEL_PRESETS.auto.models);
+    // 알 수 없는 값 · 빈 값도 기본값으로.
+    expect(normalizePresetId("nonsense")).toBe("auto");
+    expect(normalizePresetId(undefined)).toBe("auto");
+  });
+
+  it("cost-saver is the ONLY preset that presses the layer-2 budget floor", () => {
+    // env-swap 벤더(MiniMax/GLM/Kimi)는 별도 하네스가 아니라 claude 사다리의 칸
+    // 이라 1층 후보목록으로는 표현할 수 없다. "아껴 쓰라"는 2층 입력으로만 전달된다.
+    expect(resolvePresetBudgetFloor("cost-saver")).toBe(90);
+    for (const id of Object.keys(MODEL_PRESETS)) {
+      if (id === "cost-saver") continue;
+      expect(resolvePresetBudgetFloor(id), `preset '${id}'`).toBeUndefined();
+    }
+    // 프리셋이 아닌 경로(custom)로 후보가 왔으면 절약 의도도 없었던 것이다.
+    expect(resolvePresetBudgetFloor("custom:claude,gpt")).toBeUndefined();
+  });
+
+  it("custom presets round-trip and drop junk instead of failing", () => {
+    expect(parseCustomPreset("custom:claude,grok")).toEqual(["claude", "grok"]);
+    // 별칭도 받는다(normalizeModel 이 단일소스), 중복은 접힌다.
+    expect(parseCustomPreset("custom:codex, agy ,gpt")).toEqual([
+      "gpt",
+      "antigravity",
+    ]);
+    // 알 수 없는 토큰만 남으면 null → 호출자가 기본 프리셋으로 폴백.
+    expect(parseCustomPreset("custom:nope,???")).toBeNull();
+    expect(resolvePreset("custom:nope")).toEqual(MODEL_PRESETS.auto.models);
+    expect(parseCustomPreset("auto")).toBeNull();
+    expect(formatCustomPreset(["claude", "gpt"])).toBe("custom:claude,gpt");
+    expect(normalizePresetId("custom: codex ,claude")).toBe(
+      "custom:gpt,claude"
+    );
+    expect(resolvePreset("custom:claude,grok")).toEqual(["claude", "grok"]);
+  });
+
+  it("the settings catalog IS the routing table (no second hardcoded list)", () => {
+    // ★이 티켓의 진짜 원인: 화면이 이 표를 2차 하드코딩해서 grok-only 는 행 자체가
+    // 없었고 설명은 옛 60/20/20 을 광고했다. 이제 화면은 이 함수만 그린다.
+    const catalog = listModelPresets();
+    expect(catalog.map((p) => p.id).sort()).toEqual(
+      Object.keys(MODEL_PRESETS).sort()
+    );
+    for (const entry of catalog) {
+      expect(entry.label, entry.id).toBeTruthy();
+      expect(entry.description, entry.id).toBeTruthy();
+      expect(entry.models.length, entry.id).toBeGreaterThan(0);
+      expect(MODEL_PRESETS[entry.id].models, entry.id).toEqual(entry.models);
+    }
+    // 그리고 화면에서 고를 수 있는 하네스는 전용 프리셋이 있는 축과 같다.
+    for (const harness of CUSTOM_PRESET_HARNESSES) {
+      expect(
+        catalog.some((p) => p.models.includes(harness)),
+        `harness '${harness}' must be reachable from some preset`
+      ).toBe(true);
+    }
+  });
+
   it("every multi-model preset includes grok (dead-cell regression guard)", () => {
     for (const [name, preset] of Object.entries(MODEL_PRESETS)) {
       if (preset.models.length === 1) continue; // *-only presets are single by design
@@ -1493,10 +1585,14 @@ describe("fleet diversity — grok is a live dispatch candidate", () => {
       picked.add(scoreModelsDetailed(enabled, []).selected);
     }
     expect(picked.has("grok")).toBe(true);
-    // …and the rest of the fleet is still reachable (no new monoculture).
+    // …and the rest of the default fleet is still reachable (no monoculture).
     expect(picked.has("claude")).toBe(true);
     expect(picked.has("gpt")).toBe(true);
-    expect(picked.has("antigravity")).toBe(true);
+    // Antigravity is deliberately NOT in the evidence-based default — the rung
+    // selector has no ladder/pricing/quota probe for it. It stays reachable via
+    // `balanced` and `antigravity-only`.
+    expect(picked.has("antigravity")).toBe(false);
+    expect(resolvePreset("balanced")).toContain("antigravity");
   });
 
   it("grok joins the `coding` tie-band instead of dominating it", () => {
@@ -1555,13 +1651,13 @@ describe("fleet diversity — grok is a live dispatch candidate", () => {
   });
 });
 
-// The preset change is inert until the harness can actually spawn: dispatchTask
-// runs filterAvailableHarnesses BEFORE scoring, and that filter preserves the
-// duplicate entries the `recommended` weighting depends on. On a machine
-// without `grok login` (measured live: excluded, action "grok login") the mix
-// is therefore byte-identical to the pre-change table.
-describe("availability filter keeps the preset change a no-op until grok logs in", () => {
-  it("drops an unauthenticated grok and preserves the claude weighting", async () => {
+// A preset never spawns a harness that cannot run: dispatchTask calls
+// filterAvailableHarnesses BEFORE scoring, and that filter preserves the order
+// and any duplicate entries a weighted preset depends on. On a machine without
+// `grok login` (measured live: excluded, action "grok login") grok simply never
+// enters the competition.
+describe("availability filter drops harnesses that cannot spawn", () => {
+  it("drops an unauthenticated grok and keeps the rest of the preset intact", async () => {
     const filtered = await filterAvailableHarnesses(resolvePreset(undefined), {
       ttlMs: 0,
       probe: async (model) =>
@@ -1570,15 +1666,26 @@ describe("availability filter keeps the preset change a no-op until grok logs in
           : { installed: true, authenticated: true },
     });
     expect(filtered.applied).toBe(true);
-    expect(filtered.available).toEqual([
-      "claude",
-      "claude",
-      "claude",
-      "antigravity",
-      "gpt",
-    ]);
+    expect(filtered.available).toEqual(["claude", "gpt"]);
     expect(filtered.excluded.map((e) => e.harness)).toEqual(["grok"]);
     expect(filtered.note).toContain("grok");
+  });
+
+  it("preserves duplicate weighting when a preset uses it", async () => {
+    // No shipped preset weights by duplication today (that is the point of the
+    // evidence-based default), but the filter must stay weighting-preserving so
+    // a future weighted preset is not silently flattened.
+    const filtered = await filterAvailableHarnesses(
+      ["claude", "claude", "gpt", "grok"],
+      {
+        ttlMs: 0,
+        probe: async (model) =>
+          model === "grok"
+            ? { installed: true, authenticated: false, action: "grok login" }
+            : { installed: true, authenticated: true },
+      }
+    );
+    expect(filtered.available).toEqual(["claude", "claude", "gpt"]);
   });
 
   it("keeps grok once it is authenticated", async () => {

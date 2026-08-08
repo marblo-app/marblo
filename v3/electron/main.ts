@@ -44,6 +44,12 @@ import { describeRootPathFailure, diagnoseRootPath } from "./rootPathHealth";
 import { TaskDecomposer } from "./orchestrator/task-decomposer";
 import type { DecomposedTask } from "./orchestrator/dag-generator";
 import { BridgeServer, withCompletionFooter } from "./bridge-server";
+import {
+  listModelPresets,
+  normalizePresetId,
+  CUSTOM_PRESET_HARNESSES,
+  DEFAULT_MODEL_PRESET,
+} from "./dispatch-scoring";
 import { GraphUpdater } from "./graph-updater";
 import type { GraphContext } from "./routing-graph";
 import {
@@ -3465,9 +3471,14 @@ const flowRunner = new FlowRunner(flowDb, llmProvider);
 const kanbanBridge = new KanbanBridge(flowDb, flowRunner);
 kanbanBridge.attach();
 
-// Restore model preset from app state
+// Restore model preset from app state. 정규화를 여기서도 태우는 이유: 폐기된 id
+// (`recommended`)가 저장돼 있던 기기에서도 라우팅이 현행 프리셋(`auto`)을 읽어야
+// 한다 — 정규화가 없으면 `resolvePreset` 이 알 수 없는 값으로 보고 기본값으로
+// 폴백하긴 하지만, env 에는 옛 문자열이 남아 로그와 설정 화면이 어긋난다.
 const savedPreset = readAppState().modelPreset;
-if (savedPreset) process.env.MARBLO_MODEL_PRESET = savedPreset;
+if (savedPreset) {
+  process.env.MARBLO_MODEL_PRESET = normalizePresetId(savedPreset);
+}
 
 const INITIAL_ORCHESTRATOR_MODEL_ENV =
   process.env.MARBLO_ORCHESTRATOR_MODEL?.trim() || "";
@@ -7219,20 +7230,33 @@ ipcMain.handle("clipboard:getFilePaths", async () => {
 });
 
 // --- Model Preset ---
+//
+// ★목록은 여기서 만들지 않고 `dispatch-scoring.MODEL_PRESETS`(라우팅이 실제로
+// 읽는 그 표)를 그대로 서빙한다. 종전엔 `SettingsPage.PRESETS` 가 그 표를 2차
+// 하드코딩해서, 백엔드가 grok 을 편입하고 가중치를 바꾼 뒤에도 화면은 옛 60/20/20
+// 을 광고했고 `grok-only` 는 고를 방법 자체가 없었다.
 ipcMain.handle("modelPreset:set", (_event, preset: string) => {
-  process.env.MARBLO_MODEL_PRESET = preset;
-  writeAppState({ modelPreset: preset });
-  console.log(`[Main] Model preset set to: ${preset}`);
-  return { success: true };
+  // 저장 전에 정규화한다 — 알 수 없는 값·폐기된 id(`recommended`)·custom 표기가
+  // 앱 상태에 날것으로 남으면 다음 부팅에서 조용히 기본값으로 되돌아간다.
+  const normalized = normalizePresetId(preset);
+  process.env.MARBLO_MODEL_PRESET = normalized;
+  writeAppState({ modelPreset: normalized });
+  console.log(`[Main] Model preset set to: ${normalized}`);
+  return { success: true, preset: normalized };
 });
 
 ipcMain.handle("modelPreset:get", () => {
-  return (
+  return normalizePresetId(
     process.env.MARBLO_MODEL_PRESET ||
-    readAppState().modelPreset ||
-    "recommended"
+      readAppState().modelPreset ||
+      DEFAULT_MODEL_PRESET,
   );
 });
+
+ipcMain.handle("modelPreset:list", () => ({
+  presets: listModelPresets(),
+  customHarnesses: [...CUSTOM_PRESET_HARNESSES],
+}));
 
 ipcMain.handle(
   "orchestratorModel:set",

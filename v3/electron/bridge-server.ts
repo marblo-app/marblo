@@ -17,6 +17,7 @@ import {
   scoreAgents as scoreAgentsFn,
   scoreModelsDetailed as scoreModelsDetailedFn,
   resolvePreset,
+  resolvePresetBudgetFloor,
   normalizeModel,
   isWorktreeIsolated,
   checkPlanConcurrency,
@@ -2648,6 +2649,14 @@ export class BridgeServer {
     const autoExplore = model
       ? false
       : Math.random() < resolveEpsilon(process.env.MARBLO_ROUTING_EXPLORE);
+    // ★프리셋의 2층 레버(비용절감). 1층 후보집합(enabledModels)은 요청 본문 →
+    // 프로젝트 조회 → 전역 프리셋 순으로 풀리지만 앞의 두 경로는 프리셋 id 를
+    // 나르지 않는다. 그래서 이 바닥은 **전역 설정**(설정 화면이 쓰는 그 값)에서만
+    // 읽는다 — 프리셋이 아닌 경로로 후보가 왔으면 절약 의도도 없었던 것이다.
+    // 그 외 프리셋은 undefined = 실측 그대로(무회귀).
+    const presetBudgetFloor = resolvePresetBudgetFloor(
+      process.env.MARBLO_MODEL_PRESET,
+    );
     const autoPlans = new Map<ModelType, AutoModelPlan>();
     if (!model) {
       for (const candidate of scoredModels) {
@@ -2657,6 +2666,7 @@ export class BridgeServer {
           ctx: graphCtx,
           graph: routingGraph,
           budgetUsedPercent: budgetSnapshot[candidate]?.usedPercent,
+          minBudgetUsedPercent: presetBudgetFloor,
           usageRollup,
           // 벤더 크레덴셜이 없는 구체 모델은 후보에서 뺀다(env-swap 벤더). 오늘
           // 사다리엔 그런 행이 없어 no-op 이지만, 편입되는 순간 자동선택이 키

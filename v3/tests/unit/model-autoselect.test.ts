@@ -23,8 +23,10 @@ import {
   modelGuidance,
   DEFAULT_EPSILON,
   effectiveCostIndexForModel,
+  applyBudgetUsedFloor,
 } from "../../electron/model-autoselect";
 import { costIndexForModel, entryRung } from "../../electron/model-ladder";
+import { MODEL_PRESETS } from "../../electron/dispatch-scoring";
 import { formatModelKey } from "../../electron/routing-model-key";
 import { modelGuidanceStatic } from "../../electron/model-guidance";
 import { withModelTiers } from "../../electron/mcp-server/model-tier";
@@ -799,5 +801,160 @@ describe("★벤더모델 후보풀·SWE/능력 경로(5k94 감사 가드)", () 
     expect(p.mode).toBe("single");
     expect(modelGuidance("grok-4.5")!.benchmark).toBe("swe-bench-pro");
     expect(modelGuidance("grok-4.5")!.benchScore).toBe(64.7);
+  });
+});
+
+// ── ★프리셋 소진율 바닥(비용절감 프리셋, 티켓 mzHNVsHV) ──────────────────
+//
+// env-swap 벤더는 별도 하네스가 아니라 **claude 사다리의 칸**이라, "비용절감"은
+// 1층 후보목록으로 표현할 수 없고 2층 입력으로만 전달된다. 그 레버가
+// `minBudgetUsedPercent` 다 — 구독 쿼터를 실측보다 귀하게 보게 만든다.
+//
+// ★이 블록은 `MODEL_PRESETS["cost-saver"].budgetUsedFloorPercent` 가 90 인 근거를
+// 고정한다(그 주석의 스윕 표). 숫자를 하드코딩하지 않고 사다리·레지스트리 실단가와
+// 대조하되, "어느 칸이 이기나"는 정책이므로 명시적으로 단언한다.
+describe("★프리셋 소진율 바닥(minBudgetUsedPercent)", () => {
+  const COST_SAVER_FLOOR = MODEL_PRESETS["cost-saver"].budgetUsedFloorPercent!;
+
+  it("바닥이 없으면 완전 무회귀(입력 하나만 다른 두 호출이 같은 칸)", () => {
+    resetAutoSelectRotation();
+    const withoutFloor = plan("claude", "standard", { budgetUsedPercent: 10 })!;
+    resetAutoSelectRotation();
+    const nullFloor = plan("claude", "standard", {
+      budgetUsedPercent: 10,
+      minBudgetUsedPercent: undefined,
+    })!;
+    expect(nullFloor.modelKey).toBe(withoutFloor.modelKey);
+    expect(nullFloor.reason).toBe(withoutFloor.reason);
+    expect(withoutFloor.reason).not.toContain("preset floor");
+  });
+
+  it("applyBudgetUsedFloor: 실측이 더 나쁘면 실측이 이긴다(낙관적 덮어쓰기 금지)", () => {
+    // 데이터 없음 → 바닥이 곧 값(프로브가 없는 기기가 이 레버의 주 사용처).
+    expect(applyBudgetUsedFloor(undefined, 90)).toBe(90);
+    expect(applyBudgetUsedFloor(null, 90)).toBe(90);
+    // 실측 95% 소진(잔여 5%)은 바닥보다 나쁘다 → 실측 유지.
+    expect(applyBudgetUsedFloor(95, 90)).toBe(95);
+    // 실측이 넉넉하면 바닥으로 눌린다.
+    expect(applyBudgetUsedFloor(10, 90)).toBe(90);
+    // 바닥이 없으면 그대로 통과.
+    expect(applyBudgetUsedFloor(10, undefined)).toBe(10);
+    expect(applyBudgetUsedFloor(10, Number.NaN)).toBe(10);
+    // 범위 밖 바닥은 클램프.
+    expect(applyBudgetUsedFloor(0, 140)).toBe(100);
+    expect(applyBudgetUsedFloor(0, -5)).toBe(0);
+  });
+
+  it("바닥은 구독 칸의 effective 단가만 올린다(종량제 env-swap 은 불변)", () => {
+    const cheapWhenFresh = effectiveCostIndexForModel("claude-opus-5", 10)!;
+    const dearWhenSaving = effectiveCostIndexForModel(
+      "claude-opus-5",
+      COST_SAVER_FLOOR
+    )!;
+    expect(dearWhenSaving).toBeGreaterThan(cheapWhenFresh);
+    // 종량제 env-swap 칸은 구독이 아니므로 잔여와 무관하게 그대로다 — 그래서
+    // "구독을 아껴라"가 곧 "env-swap 이 이긴다"가 된다.
+    expect(effectiveCostIndexForModel("MiniMax-M3", 10)).toBe(
+      effectiveCostIndexForModel("MiniMax-M3", COST_SAVER_FLOOR)
+    );
+  });
+
+  it("★키 있으면 simple·standard 가 env-swap 최저단가 칸으로 간다", () => {
+    for (const tier of ["simple", "standard"] as const) {
+      resetAutoSelectRotation();
+      const saving = plan("claude", tier, {
+        budgetUsedPercent: 0,
+        minBudgetUsedPercent: COST_SAVER_FLOOR,
+      })!;
+      expect(saving.model, tier).toBe("MiniMax-M2.7");
+      expect(saving.movedFromEntry, tier).toBe(true);
+      // 고른 칸이 진입칸보다 실제로 싸다(레지스트리 실단가 대조).
+      expect(costIndexForModel(saving.model)!).toBeLessThan(
+        costIndexForModel(entryRung("claude", tier)!.model)!
+      );
+    }
+  });
+
+  it("★키가 없어도 standard 는 절약된다(opus5 → sonnet5) — 80 이 아니라 90 인 이유", () => {
+    resetAutoSelectRotation();
+    const saving = plan("claude", "standard", {
+      budgetUsedPercent: 0,
+      minBudgetUsedPercent: COST_SAVER_FLOOR,
+      modelAvailable: onlyOriginalClaude,
+    })!;
+    expect(saving.model).toBe("claude-sonnet-5");
+    expect(costIndexForModel("claude-sonnet-5")!).toBeLessThan(
+      costIndexForModel("claude-opus-5")!
+    );
+
+    // 바닥 80 은 같은 조건에서 아무것도 바꾸지 못한다 — 벤더 키가 없는 기기(대다수)
+    // 에서 "비용절감"이 이름뿐인 프리셋이 되는 지점이라 90 을 골랐다.
+    resetAutoSelectRotation();
+    const tooShallow = plan("claude", "standard", {
+      budgetUsedPercent: 0,
+      minBudgetUsedPercent: 80,
+      modelAvailable: onlyOriginalClaude,
+    })!;
+    expect(tooShallow.model).toBe("claude-opus-5");
+    expect(COST_SAVER_FLOOR).toBeGreaterThan(80);
+  });
+
+  it("★complex 진입칸(fable5)은 절약 바닥으로 무너지지 않는다 — 95 를 안 쓰는 이유", () => {
+    for (const available of [undefined, onlyOriginalClaude]) {
+      resetAutoSelectRotation();
+      const saving = plan("claude", "complex", {
+        budgetUsedPercent: 0,
+        minBudgetUsedPercent: COST_SAVER_FLOOR,
+        ...(available ? { modelAvailable: available } : {}),
+      })!;
+      expect(saving.model).toBe("claude-fable-5");
+      expect(saving.movedFromEntry).toBe(false);
+    }
+    // 95 까지 올리면 complex 가 무너진다(재작업이 절약분보다 비싸다).
+    resetAutoSelectRotation();
+    const tooDeep = plan("claude", "complex", {
+      budgetUsedPercent: 0,
+      minBudgetUsedPercent: 95,
+    })!;
+    expect(tooDeep.model).not.toBe("claude-fable-5");
+    expect(COST_SAVER_FLOOR).toBeLessThan(95);
+  });
+
+  it("codex/grok 사다리는 이 바닥으로 움직이지 않는다(한 구독 = 아낄 자원 없음)", () => {
+    // 프리셋 설명이 "Codex 에서도 싼 변종이 뜬다" 고 주장하지 않도록 고정하는 단언.
+    for (const harness of ["gpt", "grok"]) {
+      for (const tier of ["simple", "standard", "complex"] as const) {
+        resetAutoSelectRotation();
+        const base = plan(harness, tier, { budgetUsedPercent: 0 })!;
+        resetAutoSelectRotation();
+        const saving = plan(harness, tier, {
+          budgetUsedPercent: 0,
+          minBudgetUsedPercent: COST_SAVER_FLOOR,
+        })!;
+        expect(saving.modelKey, `${harness}/${tier}`).toBe(base.modelKey);
+      }
+    }
+  });
+
+  it("근거 문자열이 눌린 잔여를 실측으로 위장하지 않는다", () => {
+    const saving = plan("claude", "standard", {
+      budgetUsedPercent: 0,
+      minBudgetUsedPercent: COST_SAVER_FLOOR,
+    })!;
+    expect(saving.reason).toContain(`${100 - COST_SAVER_FLOOR}% left`);
+    expect(saving.reason).toContain(`preset floor ${COST_SAVER_FLOOR}% used`);
+  });
+
+  it("절약 모드에서는 탐색·동률회전을 사지 않는다(conserving 경로)", () => {
+    // 바닥이 pressure > 1 을 만들므로 ε=1(항상 탐색)이어도 근거상 최선만 쓴다.
+    resetAutoSelectRotation();
+    const saving = plan("claude", "standard", {
+      budgetUsedPercent: 0,
+      minBudgetUsedPercent: COST_SAVER_FLOOR,
+      epsilon: 1,
+      random: () => 0,
+    })!;
+    expect(saving.mode).toBe("top-score");
+    expect(costPressureForHeadroom(COST_SAVER_FLOOR)).toBeGreaterThan(1);
   });
 });

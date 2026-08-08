@@ -21,7 +21,13 @@ export const settings = {
   "settings.team.selectProjectFirst": "프로젝트를 먼저 선택해주세요.",
   "settings.models.heading": "Agent Model Preset",
   "settings.models.help":
-    "오케스트레이터가 새 에이전트를 스폰할 때 어떤 모델을 사용할지 결정합니다. 태스크에 특정 tags가 있으면 최적 모델이 자동 선택되고, 없으면 프리셋 비율로 배분됩니다.",
+    "오케스트레이터가 새 에이전트를 스폰할 때 **어떤 하네스가 경쟁에 들어갈지**를 정합니다. 승자는 프리셋이 아니라 매 dispatch 마다 태그 적합·잔여 쿼터·주간 토큰 한도·최근 사용량·라우팅 그래프로 계산되고(스마트 라우팅), 그 하네스 안의 구체 모델 칸도 같은 근거로 골라집니다. 태스크에 모델을 명시하면 그 지정이 우선합니다.",
+  "settings.models.customHelp":
+    "경쟁에 넣을 하네스를 직접 고릅니다. 고른 뒤에도 승자는 스마트 라우팅이 정합니다.",
+  "settings.models.customLastHarness":
+    "최소 한 개는 켜져 있어야 합니다 — 후보가 없으면 dispatch 가 막힙니다.",
+  "settings.models.restartNote":
+    "프리셋은 즉시 저장되지만 dispatch 라우팅은 Electron main 에서 읽습니다. HMR 이 안 되므로 실제 스폰 분포는 앱을 재시작한 뒤에 확인하세요.",
   "settings.orchestratorModel.heading": "오케스트레이터 모델",
   "settings.orchestratorModel.help":
     "오케스트레이터 자체를 어떤 CLI로 실행할지 선택합니다. 환경변수 MARBLO_ORCHESTRATOR_MODEL이 있으면 환경변수가 우선합니다.",

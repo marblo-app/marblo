@@ -23,7 +23,13 @@ export const settings: Record<keyof typeof koSettings, string> = {
   "settings.team.selectProjectFirst": "Select a project first.",
   "settings.models.heading": "Agent Model Preset",
   "settings.models.help":
-    "Sets which models the orchestrator uses when spawning new agents. Tasks tagged with a specific model pick it directly; everything else follows the preset distribution.",
+    "Sets which harnesses enter the competition when the orchestrator spawns a new agent. The winner is not a fixed percentage — every dispatch scores tag fit, live quota headroom, weekly token limits, recent usage and the routing graph, then picks the harness and the specific model rung inside it. Naming a model on the task overrides all of this.",
+  "settings.models.customHelp":
+    "Pick the harnesses yourself. Smart routing still decides the winner among them.",
+  "settings.models.customLastHarness":
+    "Keep at least one on — dispatch has nothing to pick from otherwise.",
+  "settings.models.restartNote":
+    "The preset saves immediately, but dispatch routing reads it in the Electron main process, which does not hot reload. Restart the app before checking the live spawn mix.",
   "settings.orchestratorModel.heading": "Orchestrator Model",
   "settings.orchestratorModel.help":
     "Choose which CLI runs the orchestrator itself. If MARBLO_ORCHESTRATOR_MODEL is set in the environment, the environment wins.",

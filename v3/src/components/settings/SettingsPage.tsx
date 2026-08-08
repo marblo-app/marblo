@@ -475,38 +475,120 @@ function BugReportSection() {
   );
 }
 
-const PRESETS = [
-  {
-    id: "claude-only",
-    label: "Claude 100%",
-    desc: "All agents use Claude (highest quality)",
-    icon: "🟣",
-  },
-  {
-    id: "recommended",
-    label: "Marblo Recommended",
-    desc: "Claude 60% + Antigravity 20% + Codex 20%",
-    icon: "🎯",
-  },
-  {
-    id: "balanced",
-    label: "Balanced",
-    desc: "Equal rotation across Claude / Antigravity / Codex",
-    icon: "⚖️",
-  },
-  {
-    id: "codex-only",
-    label: "Codex 100%",
-    desc: "All agents use OpenAI Codex",
-    icon: "🟢",
-  },
-  {
-    id: "antigravity-only",
-    label: "Antigravity 100%",
-    desc: "All agents use Google Antigravity (agy)",
-    icon: "🟠",
-  },
-];
+/**
+ * 프리셋 목록은 여기서 만들지 않는다 — `modelPreset:list` IPC 가
+ * `electron/dispatch-scoring.MODEL_PRESETS`(dispatch 라우팅이 실제로 읽는 그 표)를
+ * 그대로 서빙한다.
+ *
+ * ★종전엔 이 파일에 표가 **2차 하드코딩**돼 있었다. 그래서 백엔드가 grok 을
+ * 편입하고 가중치를 바꾼 뒤에도 화면은 "Claude 60% + Antigravity 20% + Codex 20%"
+ * 를 계속 광고했고(실제 표는 50/17/17/17), `grok-only` 프리셋은 행 자체가 없어
+ * 고를 방법이 없었다. 오케 실행모델 셀렉터가 같은 이유로 이미 파생으로 바뀌었다
+ * (`ORCHESTRATOR_HARNESS_OPTIONS` 주석).
+ *
+ * 아이콘만 화면 쪽 **덧붙임**이다 — 여기 없는 프리셋도 목록엔 그대로 서고
+ * 기본 아이콘을 쓴다. 반대로 두면(아이콘 표가 목록을 정하면) 새 프리셋이
+ * 이모지를 기다리다 조용히 사라진다.
+ */
+const PRESET_ICONS: Readonly<Record<string, string>> = {
+  auto: "🎯",
+  "cost-saver": "💸",
+  balanced: "⚖️",
+  "claude-only": "🟣",
+  "codex-only": "🟢",
+  "grok-only": "⚡",
+  "antigravity-only": "🟠",
+};
+const PRESET_ICON_FALLBACK = "⚙️";
+
+/** 하네스 축의 사람이 읽는 이름(custom 프리셋 체크박스). 없으면 id 그대로. */
+const HARNESS_LABELS: Readonly<Record<string, string>> = {
+  claude: "Claude",
+  gpt: "Codex",
+  grok: "Grok",
+  antigravity: "Antigravity",
+};
+
+const CUSTOM_PRESET_PREFIX = "custom:";
+
+interface PresetRowProps {
+  icon: string;
+  label: string;
+  description: string;
+  /** 이 프리셋의 후보 하네스 요약(비어 있으면 안 그린다). */
+  detail: string;
+  selected: boolean;
+  disabled: boolean;
+  /** Custom 행처럼 바깥 컨테이너가 이미 테두리를 그린 경우 자기 테두리를 뺀다. */
+  bare?: boolean;
+  onSelect: () => void;
+}
+
+function PresetRow({
+  icon,
+  label,
+  description,
+  detail,
+  selected,
+  disabled,
+  bare = false,
+  onSelect,
+}: PresetRowProps) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      disabled={disabled}
+      aria-pressed={selected}
+      className={`flex w-full items-start gap-3 rounded-lg px-4 py-3 text-left transition-colors ${
+        bare
+          ? ""
+          : selected
+          ? "border border-blue-500 bg-blue-500/10"
+          : "border border-gray-700 hover:border-gray-600 hover:bg-gray-700/50"
+      }`}
+    >
+      <span className="text-xl leading-6">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <span
+          className={`text-sm font-medium ${
+            selected ? "text-blue-400" : "text-gray-200"
+          }`}
+        >
+          {label}
+        </span>
+        {detail && (
+          <p className="mt-0.5 text-xs font-medium text-gray-400">{detail}</p>
+        )}
+        <p className="mt-0.5 text-xs leading-relaxed text-gray-500">
+          {description}
+        </p>
+      </div>
+      {selected && (
+        <svg
+          className="mt-0.5 h-5 w-5 shrink-0 text-blue-400"
+          fill="currentColor"
+          viewBox="0 0 20 20"
+        >
+          <path
+            fillRule="evenodd"
+            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+            clipRule="evenodd"
+          />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+function parseCustomSelection(preset: string): string[] {
+  if (!preset.startsWith(CUSTOM_PRESET_PREFIX)) return [];
+  return preset
+    .slice(CUSTOM_PRESET_PREFIX.length)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 /**
  * 이 설정이 다루는 축은 **하네스**(어느 CLI 로 오케를 띄울까) 하나다. 구체 모델
@@ -528,7 +610,11 @@ const ORCHESTRATOR_ENV_MODEL = {
 
 function ModelPresetSection() {
   const { t } = useTranslation();
-  const [current, setCurrent] = useState("recommended");
+  const [current, setCurrent] = useState("auto");
+  const [catalog, setCatalog] = useState<ModelPresetCatalog>({
+    presets: [],
+    customHarnesses: [],
+  });
   const [orchestratorModel, setOrchestratorModel] = useState<string>("claude");
   const [saving, setSaving] = useState(false);
   const [savingOrchestratorModel, setSavingOrchestratorModel] = useState(false);
@@ -541,6 +627,10 @@ function ModelPresetSection() {
     window.electronAPI.modelPreset
       .get()
       .then(setCurrent)
+      .catch(() => {});
+    window.electronAPI.modelPreset
+      .list()
+      .then(setCatalog)
       .catch(() => {});
     window.electronAPI.orchestratorModel
       .get()
@@ -560,13 +650,43 @@ function ModelPresetSection() {
   const handleSelect = async (preset: string) => {
     setSaving(true);
     try {
-      await window.electronAPI.modelPreset.set(preset);
-      setCurrent(preset);
+      // main 이 정규화한 값을 되받는다 — 유효하지 않은 조합을 골랐을 때 화면이
+      // 실제 저장값과 다른 것을 체크된 상태로 보여주지 않게 한다.
+      const result = await window.electronAPI.modelPreset.set(preset);
+      setCurrent(result?.preset ?? preset);
     } catch {
       /* ignore */
     } finally {
       setSaving(false);
     }
+  };
+
+  const customSelection = parseCustomSelection(current);
+  const isCustom = customSelection.length > 0;
+
+  /**
+   * custom 하네스 토글. 마지막 하나를 끄려는 경우는 무시한다 — 후보가 0이면
+   * 라우팅이 고를 것이 없어 dispatch 가 통째로 막힌다(빈 프리셋은 설정이 아니라
+   * 장애다).
+   */
+  const toggleCustomHarness = (harness: string) => {
+    const next = customSelection.includes(harness)
+      ? customSelection.filter((h) => h !== harness)
+      : [...customSelection, harness];
+    if (next.length === 0) return;
+    void handleSelect(`${CUSTOM_PRESET_PREFIX}${next.join(",")}`);
+  };
+
+  /** Custom 행을 처음 켤 때의 시작값 — 현재 프리셋의 후보집합을 그대로 물려준다. */
+  const startCustom = () => {
+    const seed =
+      catalog.presets.find((p) => p.id === current)?.models ??
+      catalog.customHarnesses;
+    const unique = [...new Set(seed)].filter((m) =>
+      catalog.customHarnesses.includes(m)
+    );
+    if (unique.length === 0) return;
+    void handleSelect(`${CUSTOM_PRESET_PREFIX}${unique.join(",")}`);
   };
 
   const handleOrchestratorModelChange = async (model: OrchestratorModel) => {
@@ -643,43 +763,75 @@ function ModelPresetSection() {
           {t("settings.models.help")}
         </p>
         <div className="space-y-2">
-          {PRESETS.map((p) => (
-            <button
+          {catalog.presets.map((p) => (
+            <PresetRow
               key={p.id}
-              onClick={() => handleSelect(p.id)}
+              icon={PRESET_ICONS[p.id] ?? PRESET_ICON_FALLBACK}
+              label={p.label}
+              description={p.description}
+              detail={p.models.map((m) => HARNESS_LABELS[m] ?? m).join(" · ")}
+              selected={current === p.id}
               disabled={saving}
-              className={`w-full flex items-center gap-3 rounded-lg border px-4 py-3 text-left transition-colors ${
-                current === p.id
-                  ? "border-blue-500 bg-blue-500/10"
-                  : "border-gray-700 hover:border-gray-600 hover:bg-gray-700/50"
+              onSelect={() => handleSelect(p.id)}
+            />
+          ))}
+          {catalog.customHarnesses.length > 0 && (
+            <div
+              className={`rounded-lg border transition-colors ${
+                isCustom ? "border-blue-500 bg-blue-500/10" : "border-gray-700"
               }`}
             >
-              <span className="text-xl">{p.icon}</span>
-              <div className="flex-1">
-                <span
-                  className={`text-sm font-medium ${
-                    current === p.id ? "text-blue-400" : "text-gray-200"
-                  }`}
-                >
-                  {p.label}
-                </span>
-                <p className="text-xs text-gray-500">{p.desc}</p>
-              </div>
-              {current === p.id && (
-                <svg
-                  className="h-5 w-5 text-blue-400"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                    clipRule="evenodd"
-                  />
-                </svg>
+              <PresetRow
+                icon="🛠"
+                label="Custom"
+                description={t("settings.models.customHelp")}
+                detail={
+                  isCustom
+                    ? customSelection
+                        .map((m) => HARNESS_LABELS[m] ?? m)
+                        .join(" · ")
+                    : ""
+                }
+                selected={isCustom}
+                disabled={saving}
+                bare
+                onSelect={startCustom}
+              />
+              {isCustom && (
+                <div className="flex flex-wrap gap-2 border-t border-blue-500/20 px-4 py-3">
+                  {catalog.customHarnesses.map((harness) => {
+                    const on = customSelection.includes(harness);
+                    // 마지막 하나는 끌 수 없다 — 후보 0이면 dispatch 가 막힌다.
+                    const isLastOn = on && customSelection.length === 1;
+                    return (
+                      <button
+                        key={harness}
+                        type="button"
+                        onClick={() => toggleCustomHarness(harness)}
+                        disabled={saving || isLastOn}
+                        title={
+                          isLastOn
+                            ? t("settings.models.customLastHarness")
+                            : undefined
+                        }
+                        className={`rounded-full border px-3 py-1 text-xs transition-colors disabled:opacity-60 ${
+                          on
+                            ? "border-blue-400 bg-blue-500/20 text-blue-200"
+                            : "border-gray-600 text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                        }`}
+                      >
+                        {on ? "✓ " : ""}
+                        {HARNESS_LABELS[harness] ?? harness}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
-            </button>
-          ))}
+            </div>
+          )}
+        </div>
+        <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          {t("settings.models.restartNote")}
         </div>
       </div>
       <SubscriptionPlansSection />

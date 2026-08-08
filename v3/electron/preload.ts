@@ -65,6 +65,24 @@ interface VendorSecretsSnapshot {
   }>;
 }
 
+/**
+ * 설정 화면이 그릴 에이전트 모델 프리셋 카탈로그. 모양은
+ * `electron/dispatch-scoring.ModelPresetCatalogEntry` 와 같고, 값은 그 표 자체다.
+ * (preload 는 main 모듈을 import 하지 않으므로 구조만 다시 적는다 — 값이 아니라
+ * 모양의 중복이라 백엔드가 프리셋을 늘려도 여기 손댈 일이 없다.)
+ */
+interface ModelPresetCatalog {
+  presets: Array<{
+    id: string;
+    label: string;
+    description: string;
+    models: string[];
+    budgetUsedFloorPercent?: number;
+  }>;
+  /** custom 프리셋에서 고를 수 있는 하네스 축. */
+  customHarnesses: string[];
+}
+
 contextBridge.exposeInMainWorld("electronAPI", {
   platform: process.platform,
   // 이 기기의 안정적 식별자. 프로젝트 폴더 경로를 기기별 칸에 저장하려면
@@ -586,7 +604,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
     set: (preset: string) =>
       ipcRenderer.invoke("modelPreset:set", preset) as Promise<{
         success: boolean;
+        preset?: string;
       }>,
+    /**
+     * 설정 화면이 그릴 프리셋 카탈로그. ★목록의 단일소스는 라우팅이 실제로 읽는
+     * `electron/dispatch-scoring.MODEL_PRESETS` 다 — 렌더러가 프리셋 표를 다시
+     * 적으면 백엔드가 하네스를 편입해도 화면만 옛 표에 머문다(이 티켓이 고친
+     * 실패모드). `models:quickLaneCatalog` 와 같은 규율.
+     */
+    list: () =>
+      ipcRenderer.invoke("modelPreset:list") as Promise<ModelPresetCatalog>,
   },
   models: {
     /**

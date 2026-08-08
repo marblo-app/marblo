@@ -484,9 +484,33 @@ interface CodeAPI {
   ) => Promise<{ formatted: string; error: string | null }>;
 }
 
+/**
+ * 설정 화면이 그릴 프리셋 한 줄. 목록의 단일소스는 라우팅이 실제로 읽는
+ * `electron/dispatch-scoring.MODEL_PRESETS` 이고, 렌더러엔 프리셋 리터럴이 없다.
+ */
+interface ModelPresetOption {
+  /** 카탈로그 id(`auto` · `cost-saver` · `grok-only` …). */
+  id: string;
+  label: string;
+  description: string;
+  /**
+   * 1층(하네스) 후보집합. **중복 = 고정 가중치**(현행 프리셋은 전부 중복 없음).
+   */
+  models: string[];
+  /** 2층에 주입되는 소진율 바닥(비용절감 프리셋만). */
+  budgetUsedFloorPercent?: number;
+}
+
+interface ModelPresetCatalog {
+  presets: ModelPresetOption[];
+  /** `custom:` 프리셋에서 고를 수 있는 하네스 축. */
+  customHarnesses: string[];
+}
+
 interface ModelPresetAPI {
   get: () => Promise<string>;
-  set: (preset: string) => Promise<{ success: boolean }>;
+  set: (preset: string) => Promise<{ success: boolean; preset?: string }>;
+  list: () => Promise<ModelPresetCatalog>;
 }
 
 /**
