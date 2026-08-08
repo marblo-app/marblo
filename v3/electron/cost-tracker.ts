@@ -423,6 +423,148 @@ const OUTPUT_TOKENS_PATTERN = /(?:output)[\s]*(?:tokens)?[:\s]*([0-9,]+)/i;
 const MAX_BUFFER_SIZE = 2048;
 const SESSION_POLL_INTERVAL_MS = 15_000; // poll JSONL every 15s
 
+// ── Parse watermarks: the bytes we already billed, persisted ────────────
+//
+// ★진범(비용 축 정합화 조사, v3/docs/COST-AXIS-RECONCILIATION-2026-08-08.md):
+// `ParseState.lastLineCount` 는 이 프로세스 메모리에만 있었다. 그래서 같은 세션
+// 파일에 트래커가 **다시 붙을 때마다** 워터마크가 0 으로 돌아가고, 이미 청구한
+// 바이트 전체가 한 번의 "델타" 로 다시 나갔다. 재부착 경로는 드물지 않다:
+//
+//   - 앱 재시작(모든 resume 세션이 처음부터 다시 읽힌다)
+//   - reuse_agent / reconnect — 같은 agentId 에 trackSession 재호출
+//   - codex/gemini/grok 의 `findNewestSessionFile` 이 이미 소비한 파일로
+//     되돌아오는 경우(mtime 플랩)
+//
+// BQ 실측 지문: 같은 agentId·같은 model 이 **완전히 동일한** 토큰 번들
+// (734,788 in / 41,976 out / 21.4M cache-read, $15.65)을 16회 재적재. 2026-08
+// cost_logs 비용의 32.4%(= $2,652/$8,196)가 이 초과분이었다. 15초 폴 하나가
+// 2,000M 캐시리드를 나를 수는 없다 — 그것이 재읽기의 지문이다.
+//
+// 그래서 워터마크를 **파일 경로 기준으로 디스크에 남긴다.** 파일이 줄어들었으면
+// (= 같은 이름으로 새 파일이 났으면) 워터마크는 버리고 0 부터 다시 읽는다.
+const WATERMARK_FILE_ENV = "MARBLO_COST_WATERMARK_FILE";
+const WATERMARK_RETENTION_MS = 14 * 24 * 60 * 60_000;
+/** Coalesce watermark writes — the poller ticks per agent every 15s. */
+const WATERMARK_FLUSH_MS = 2_000;
+
+interface WatermarkEntry {
+  /** ParseState at the time the file had `fileSize` bytes. */
+  state: ParseState;
+  /** Size of the session file when this watermark was taken. */
+  fileSize: number;
+  updatedAt: number;
+}
+
+let watermarkPathOverride: string | null = null;
+let watermarkCache: Record<string, WatermarkEntry> | null = null;
+let watermarkDirty = false;
+let watermarkFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function watermarkFilePath(): string {
+  if (watermarkPathOverride) return watermarkPathOverride;
+  const fromEnv = process.env[WATERMARK_FILE_ENV];
+  if (fromEnv) return fromEnv;
+  return path.join(os.homedir(), ".marblo", "cost-watermarks.json");
+}
+
+/** Test seam: point the store at a scratch file and drop the in-memory cache. */
+export function __setWatermarkPathForTest(p: string | null): void {
+  watermarkPathOverride = p;
+  watermarkCache = null;
+  watermarkDirty = false;
+  if (watermarkFlushTimer) {
+    clearTimeout(watermarkFlushTimer);
+    watermarkFlushTimer = null;
+  }
+}
+
+function loadWatermarks(): Record<string, WatermarkEntry> {
+  if (watermarkCache) return watermarkCache;
+  try {
+    const raw = fs.readFileSync(watermarkFilePath(), "utf-8");
+    const parsed = JSON.parse(raw) as Record<string, WatermarkEntry>;
+    const cutoff = Date.now() - WATERMARK_RETENTION_MS;
+    const kept: Record<string, WatermarkEntry> = {};
+    for (const [file, entry] of Object.entries(parsed ?? {})) {
+      if (!entry?.state || typeof entry.fileSize !== "number") continue;
+      if ((entry.updatedAt ?? 0) < cutoff) continue;
+      kept[file] = entry;
+    }
+    watermarkCache = kept;
+  } catch {
+    // Absent / unreadable / corrupt store is not an error — it just means we
+    // re-read from 0, which is the pre-fix behaviour, never a wrong charge.
+    watermarkCache = {};
+  }
+  return watermarkCache;
+}
+
+function flushWatermarks(): void {
+  if (!watermarkDirty || !watermarkCache) return;
+  watermarkDirty = false;
+  try {
+    const file = watermarkFilePath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(watermarkCache), "utf-8");
+  } catch (err) {
+    console.warn(
+      "[CostTracker] Could not persist parse watermarks:",
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
+function scheduleWatermarkFlush(): void {
+  if (watermarkFlushTimer) return;
+  watermarkFlushTimer = setTimeout(() => {
+    watermarkFlushTimer = null;
+    flushWatermarks();
+  }, WATERMARK_FLUSH_MS);
+  watermarkFlushTimer.unref?.();
+}
+
+/** Current size of `file`, or -1 when it cannot be stat'ed. */
+function fileSizeOf(file: string): number {
+  try {
+    return fs.statSync(file).size;
+  } catch {
+    return -1;
+  }
+}
+
+/**
+ * The parse state to resume `file` from, or null when we must start at 0.
+ *
+ * A watermark is only honoured while the file has **grown** since it was
+ * taken. A smaller file at the same path means the CLI rotated a new session
+ * into that name; resuming the old line count there would silently skip real
+ * tokens, which is the opposite (and worse) failure.
+ */
+export function restoreParseState(file: string): ParseState | null {
+  if (!file) return null;
+  const entry = loadWatermarks()[file];
+  if (!entry) return null;
+  const size = fileSizeOf(file);
+  if (size < 0 || size < entry.fileSize) return null;
+  return {
+    lastLineCount: entry.state.lastLineCount ?? 0,
+    cumulative: { ...ZERO_TOTALS, ...(entry.state.cumulative ?? {}) },
+    model: entry.state.model ?? null,
+    rateLimit: entry.state.rateLimit ?? null,
+  };
+}
+
+/** Record how far `file` has been billed, so a re-attach does not re-bill it. */
+export function saveParseState(file: string, state: ParseState): void {
+  if (!file) return;
+  const size = fileSizeOf(file);
+  if (size < 0) return;
+  const store = loadWatermarks();
+  store[file] = { state, fileSize: size, updatedAt: Date.now() };
+  watermarkDirty = true;
+  scheduleWatermarkFlush();
+}
+
 // ── Claude account rate-limit probe cadence (Phase 1b) ──────────────────
 // Plan limits move slowly; one headless get_usage probe per 5 minutes is
 // plenty and costs no tokens. A snapshot older than 3 missed polls is stale
@@ -466,6 +608,9 @@ interface SessionTracker {
   searchRoot: string;
   // Per-current-file parse state (line watermark + cumulative + model).
   state: ParseState;
+  // filePath whose persisted watermark has already been folded into `state`.
+  // "" until the first poll resolves a file — see `attachState`.
+  restoredFor: string;
   // Cross-file running totals that drive the emitted rollup — survives a file
   // rotation (codex/gemini start a fresh file on resume) so no data is lost.
   accumulated: TokenTotals;
@@ -796,6 +941,21 @@ export class CostTracker {
           return;
         }
         filePath = path.join(projectDir, files[0].name);
+        // ★This branch is the fan-out misattribution site. "Most recently
+        // modified JSONL in the project dir" is whatever agent is busiest
+        // right now — on a cold-boot reconnect that is somebody ELSE's live
+        // session. BQ 2026-06 shows the result: up to 11 distinct agentIds
+        // emitting a byte-identical token bundle in the same second, one
+        // single row worth $1,165. Refuse rather than bill a session we can
+        // already see belongs to another live tracker.
+        if (this.isFileTrackedByOther(agentId, filePath)) {
+          console.warn(
+            `[CostTracker] agent=${agentId} has no sessionId and the newest ` +
+              `JSONL (${files[0].name}) is already tracked by another agent — ` +
+              `skipping file tracking rather than charging one session twice.`
+          );
+          return;
+        }
         console.log(
           `[CostTracker] No sessionId — using most recent: ${files[0].name}`
         );
@@ -822,6 +982,7 @@ export class CostTracker {
       filePath,
       searchRoot: "",
       state: newParseState(),
+      restoredFor: "",
       accumulated: { ...ZERO_TOTALS },
       // 구체 모델이 관측됐으면 그것으로, 아니면 종전대로 하네스족. 족으로 남는
       // 경우는 argv 에 모델을 핀하지 않은 launch 뿐이고, 그때도 첫 assistant 턴이
@@ -948,6 +1109,7 @@ export class CostTracker {
       filePath: "",
       searchRoot,
       state: newParseState(),
+      restoredFor: "",
       accumulated: { ...ZERO_TOTALS },
       // 관측된 스폰 모델이 있으면 그것이 최선의 씨앗이다(codex `-c model="…"` 핀).
       // 없으면 하네스별 기본 추정값 — 세션이 실제 모델 id 를 기록하는 순간 덮인다.
@@ -977,6 +1139,19 @@ export class CostTracker {
     this.pollSessionFile(agentId);
   }
 
+  /**
+   * True when a DIFFERENT live tracker is already reading `filePath`. One
+   * session file is one billable conversation; two trackers on it bill it
+   * twice and attribute it to whichever agent polled last.
+   */
+  private isFileTrackedByOther(agentId: string, filePath: string): boolean {
+    if (!filePath) return false;
+    for (const [id, t] of this.sessions) {
+      if (id !== agentId && t.filePath === filePath) return true;
+    }
+    return false;
+  }
+
   stopSession(agentId: string): void {
     const tracker = this.sessions.get(agentId);
     if (tracker) {
@@ -985,6 +1160,9 @@ export class CostTracker {
     }
     this.stopAgySession(agentId);
     this.stopClaudeProbeIfIdle();
+    // Land the watermark now: an agent that stops and is later reused must
+    // resume where it was billed to, even if the app dies in between.
+    flushWatermarks();
   }
 
   /**
@@ -1000,18 +1178,37 @@ export class CostTracker {
     try {
       // codex / gemini: re-resolve the newest session file each tick (it may
       // appear after launch, or rotate when the agent resumes). On a file
-      // switch, reset the per-file parse state but KEEP `accumulated` so the
+      // switch, drop the per-file parse state but KEEP `accumulated` so the
       // agent's cross-session running total is preserved (no data loss).
       if (tracker.format !== "claude") {
         const newest = this.findNewestSessionFile(tracker);
         if (!newest) return;
         if (newest !== tracker.filePath) {
+          if (this.isFileTrackedByOther(agentId, newest)) return;
           tracker.filePath = newest;
-          tracker.state = newParseState();
+          tracker.restoredFor = "";
         }
       }
 
       if (!tracker.filePath || !fs.existsSync(tracker.filePath)) return;
+
+      // ★Attach to the file at the watermark we already billed it to, not at
+      // line 0. Without this every re-attach (app restart, reuse_agent, an
+      // mtime flap that walks back onto a consumed file) re-emitted the whole
+      // file as one delta — the duplication that made 32% of August's
+      // cost_logs spend fictitious. See the watermark block above.
+      if (tracker.restoredFor !== tracker.filePath) {
+        const restored = restoreParseState(tracker.filePath);
+        tracker.state = restored ?? newParseState();
+        if (restored?.model) tracker.model = restored.model;
+        tracker.restoredFor = tracker.filePath;
+        if (restored) {
+          console.log(
+            `[CostTracker] agent=${agentId} resuming ${tracker.filePath} at ` +
+              `line ${restored.lastLineCount} (already billed) instead of re-reading it`
+          );
+        }
+      }
 
       const lines = readJsonlLines(tracker.filePath);
       const { delta, newState } = parseSessionDelta(
@@ -1020,6 +1217,7 @@ export class CostTracker {
         tracker.state
       );
       tracker.state = newState;
+      saveParseState(tracker.filePath, newState);
       if (newState.model) tracker.model = newState.model;
       // Rate-limit source per format: codex carries it inside the rollout
       // JSONL (parsed into newState); claude JSONLs have none — the official
@@ -1394,5 +1592,6 @@ export class CostTracker {
       this.claudeProbeTimer = null;
     }
     this.claudeUsage = null;
+    flushWatermarks();
   }
 }
