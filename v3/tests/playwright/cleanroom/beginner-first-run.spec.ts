@@ -213,7 +213,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
     }
   });
 
-  test("G4(★S4) 첫 요청이 전달되면 라이브 스트립이 뜨고 폼이 잠긴다 — 미니보드·미니에이전트 포함", async () => {
+  test("G4(★S4) 첫 요청이 전달되면 라이브 스트립이 뜨고 대화가 이어진다 — 미니보드·에이전트 패널 포함", async () => {
     const cr = await launchCleanRoom({
       claude: "missing",
       codex: "ready",
@@ -239,20 +239,42 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       expect(injected[0].projectId).toBe("cleanroom-project");
       expect(injected[0].message).toContain("README");
 
-      // ── ★중복 전송 가드(진단 §7 P1-2 ①) ───────────────────────────────
-      // 8/4 유저는 delivered 된 요청을 14초 간격으로 3번 더 눌렀다. 전달되고 나면
-      // 입력칸도 보내기 버튼도 사라져야 한다 — 재전송은 막힘 안내의 CTA 로만.
       await expect(
         cr.page.getByTestId("beginner-first-ask-result"),
       ).toHaveAttribute("data-delivery", "delivered");
-      expect(await cr.page.getByTestId("beginner-first-ask-send").count()).toBe(
-        0,
+
+      // ── ★지속 대화창 — 전달돼도 입력칸이 살아 있다 ─────────────────────
+      // 종전 계약은 정반대였다(전달되면 입력칸·버튼째 사라짐). 그 잠금이 첫 질문
+      // 뒤에 오케와 이어서 말할 곳을 없애서, 상단을 지속 대화창으로 바꿨다.
+      await expect(
+        cr.page.getByTestId("beginner-first-ask-input"),
+      ).toBeVisible();
+      await expect(
+        cr.page.getByTestId("beginner-first-ask-send"),
+      ).toBeVisible();
+      // 보낸 문장은 칸에 남지 않는다 — 남으면 그게 연타의 미끼다.
+      await expect(cr.page.getByTestId("beginner-first-ask-input")).toHaveValue(
+        "",
       );
-      expect(
-        await cr.page.getByTestId("beginner-first-ask-input").count(),
-      ).toBe(0);
+
+      // ── ★중복 전송 가드(진단 §7 P1-2 ①)는 형태만 바뀌어 살아 있다 ──────
+      // 8/4 유저는 delivered 된 요청을 14초 간격으로 3번 더 눌렀다. 이제 잠기는
+      // 것은 폼이 아니라 **같은 문장**이다: 그대로 다시 보내도 주입되지 않는다.
+      await cr.page.getByTestId("beginner-first-ask-input").fill(message);
+      await cr.page.getByTestId("beginner-first-ask-send").click();
       await settle(cr.page, 1500);
       expect((await cr.injected()).length).toBe(1);
+      await expect(cr.page.getByTestId("beginner-ask-duplicate")).toBeVisible();
+
+      // 다른 문장은 통과한다 — 막으려던 건 대화가 아니라 반복 주입이었다.
+      await cr.page
+        .getByTestId("beginner-first-ask-input")
+        .fill("거기에 예시도 넣어 줘");
+      await cr.page.getByTestId("beginner-first-ask-send").click();
+      await settle(cr.page, 1500);
+      const after = await cr.injected();
+      expect(after.length).toBe(2);
+      expect(after[1].message).toContain("예시");
 
       // ── ★S4: 챗 안 인라인 진행 ────────────────────────────────────────
       expect(await livePhase(cr.page)).toBe("thinking");
@@ -277,12 +299,27 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       ).toHaveAttribute("data-column-status", "IN_PROGRESS");
       await cr.shot("G4-strip-planned-miniboard");
 
-      // 에이전트가 붙으면 → working + 미니 에이전트 뷰.
+      // ── ★미니 보드는 눌린다 — 상세는 비기너 판(워크트리·diff·PR 없음) ──
+      await cr.page
+        .getByTestId("beginner-mini-task")
+        .filter({ hasText: "막힌 티켓" })
+        .click();
+      const detail = cr.page.getByTestId("beginner-task-modal");
+      await expect(detail).toBeVisible();
+      await expect(detail).toHaveAttribute("data-task-status", "BLOCKED");
+      expect(await detail.textContent()).not.toContain("marblo/");
+      await cr.shot("G4-task-detail");
+      await cr.page.getByTestId("beginner-task-modal-close").click();
+      await expect(detail).toHaveCount(0);
+
+      // 에이전트가 붙으면 → working + 에이전트 패널(하단 2분할 오른쪽).
       await injectAgents(cr.page, [
         { id: "a1", name: "test-1", status: "working" },
       ]);
       expect(await livePhase(cr.page)).toBe("working");
+      await expect(cr.page.getByTestId("beginner-agents-pane")).toBeVisible();
       await expect(cr.page.getByTestId("beginner-mini-agents")).toBeVisible();
+      await expect(cr.page.getByTestId("beginner-agent-row")).toHaveCount(1);
       await cr.shot("G4-strip-working");
 
       // 완료가 생기고 일하는 에이전트가 없으면 → completed.

@@ -23,7 +23,7 @@ const STATUS_CONFIG: Record<
 interface KanbanColumnProps {
   status: TaskStatus;
   tasks: Task[];
-  /** 생략하면 카드를 클릭해도 아무 일도 없다(비기너 미니 보드엔 상세가 없다). */
+  /** 생략하면 카드를 클릭해도 아무 일도 없다(커서·hover 도 붙지 않는다). */
   onTaskClick?: (task: Task) => void;
   isDropTarget?: boolean;
   /**
@@ -95,7 +95,15 @@ export function KanbanColumn({
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           {tasks.map((task) => (
-            <TaskCard key={task.id} task={task} compact />
+            <TaskCard
+              key={task.id}
+              task={task}
+              compact
+              // ★비기너 미니 보드도 카드를 누를 수 있어야 한다. 예전엔 여기서
+              // onTaskClick 을 떨어뜨려서, 보드가 "움직이는 그림" 으로 읽혔다.
+              // 핸들러가 없으면 TaskCard 가 커서·hover 도 안 준다(= 종전 동작).
+              onClick={onTaskClick}
+            />
           ))}
           {hiddenCount > 0 && (
             <p className="pl-0.5 text-[10px] text-[#6c7086]">

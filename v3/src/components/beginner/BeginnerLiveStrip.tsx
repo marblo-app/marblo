@@ -8,8 +8,8 @@ import {
 } from "../../lib/beginnerMode";
 import { useAgentStore } from "../../stores/agentStore";
 import { useTaskStore } from "../../stores/taskStore";
+import type { Task } from "../../types/task";
 import { KanbanColumn } from "../board/KanbanColumn";
-import TeamSummary from "../agents/TeamSummary";
 import { BLOCK, BUTTON_GHOST, SectionLabel } from "./beginnerUi";
 
 /**
@@ -27,26 +27,34 @@ import { BLOCK, BUTTON_GHOST, SectionLabel } from "./beginnerUi";
  *      물려 그리기만 한다. 라이브 확인이 실계정을 요구하는 구간이라 규칙은
  *      유닛테스트로 못박아야 한다.
  *   2. ★미니 보드 — 티켓이 할 일 → 진행 중 → 완료로 **움직이는 것**. 보드는
- *      마블로의 핵심이라, 축소판이라도 첫날부터 보여 준다.
- *   3. ★미니 에이전트 뷰 — 몇 명이 붙어 있고 지금 일하는 중인가.
+ *      마블로의 핵심이라, 축소판이라도 첫날부터 보여 준다. ★카드는 누를 수
+ *      있다(`onTaskClick`) — 움직이기만 하고 눌리지 않는 보드는 그림으로 읽힌다.
  *
- * ★2·3 은 새로 만든 컴포넌트가 아니다. 어드밴스드 보드의 `KanbanColumn` 과
- * 에이전트 탭의 `TeamSummary` 를 `compact` 로 그대로 재사용한다 — 미니 보드가
- * 자기만의 카드 렌더를 갖는 순간 두 화면이 갈라지고, 갈라진 쪽은 반드시 낡는다.
+ * ★2 는 새로 만든 컴포넌트가 아니다. 어드밴스드 보드의 `KanbanColumn` 을
+ * `compact` 로 그대로 재사용한다 — 미니 보드가 자기만의 카드 렌더를 갖는 순간
+ * 두 화면이 갈라지고, 갈라진 쪽은 반드시 낡는다.
  *
- * 추상화 수준은 여전히 낮게 유지한다: 워크트리·diff·모델명·담당 에이전트 이름은
- * compact 프롭이 걷어낸다. 비기너에게 정확한 해상도는 "일감이 움직인다 / 누가
- * 붙어 있다" 이고, 세부는 승격 후 보드에서 본다.
+ * ★"누가 붙어 있나"(예전의 3층 미니 에이전트 뷰)는 이 스트립을 떠나
+ * `BeginnerAgentsPane` 으로 갔다 — 하단 2분할의 오른쪽 열이다. 여기 두면 스트립이
+ * 세로로 계속 자라 정작 대화창(이 화면의 주인공)을 아래로 밀어냈고, 요약만으로는
+ * "누가 **뭘** 하나" 에 답하지 못했다.
+ *
+ * 추상화 수준은 여전히 낮게 유지한다: 워크트리·diff·모델명은 compact 프롭이
+ * 걷어낸다. 비기너에게 정확한 해상도는 "일감이 움직인다" 이고, 세부는 승격 후
+ * 보드에서 본다.
  */
 export function BeginnerLiveStrip({
   sentAt,
   onResend,
   resending,
+  onTaskClick,
 }: {
   /** 마지막으로 오케에 **실제 전달**된 시각(ms). 0 = 아직 안 보냄. */
   sentAt: number;
   onResend: () => void;
   resending: boolean;
+  /** 미니 보드 카드 클릭. 생략하면 카드가 눌리지 않는다(종전 동작). */
+  onTaskClick?: (task: Task) => void;
 }) {
   const { t } = useTranslation();
   const tasks = useTaskStore((s) => s.tasks);
@@ -173,18 +181,9 @@ export function BeginnerLiveStrip({
                 tasks={col.tasks}
                 count={col.total}
                 hiddenCount={col.hiddenCount}
+                onTaskClick={onTaskClick}
               />
             ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── ★미니 에이전트 뷰 — 에이전트가 실제로 붙은 뒤에만. ─────────── */}
-      {agents.length > 0 && (
-        <div className={BLOCK}>
-          <SectionLabel>{t("beginner.agents.label")}</SectionLabel>
-          <div className="mt-2">
-            <TeamSummary compact agents={agents} tasks={tasks} />
           </div>
         </div>
       )}

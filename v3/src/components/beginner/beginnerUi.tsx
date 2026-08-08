@@ -34,6 +34,19 @@ export const BUTTON_PRIMARY =
   "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md bg-[#89b4fa] px-3.5 py-2 text-sm font-semibold text-[#1e1e2e] transition-colors hover:bg-[#74c7ec] disabled:cursor-not-allowed disabled:opacity-40";
 
 /**
+ * 역할 아이콘 — 미니 보드 카드(`TaskCard compact`)가 쓰는 것과 **같은** 그림이다.
+ *
+ * 비기너 화면에서 "누구" 는 모델명도 에이전트 id 도 아니고 역할이다. 보드 카드와
+ * 에이전트 패널이 같은 티켓을 가리킬 때 아이콘이 다르면 같은 것으로 안 읽힌다.
+ */
+export const BEGINNER_ROLE_ICON: Record<string, string> = {
+  backend: "⚙️",
+  frontend: "🎨",
+  test: "🧪",
+  devops: "🚀",
+};
+
+/**
  * 섹션 눈썹 라벨 — "지금 하는 일 / 일감 흐름 / 일하는 팀 / 대화".
  *
  * 예전엔 이 라벨이 헤드라인과 **같은 줄**에 flex-wrap 으로 섞여 있어서 둘이

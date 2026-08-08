@@ -95,6 +95,11 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.ask.send": "Send",
   "beginner.ask.sending": "Sending…",
   "beginner.ask.sent": "Sent. You'll see progress below.",
+  "beginner.ask.sentShort": "Sent",
+  "beginner.ask.queuedShort": "Queued",
+  "beginner.ask.failedShort": "Not sent",
+  "beginner.ask.duplicate":
+    "That's the same message you just sent. It already went through — give it a moment, or phrase it differently.",
   "beginner.ask.resend": "Send again",
   "beginner.ask.queued":
     "The orchestrator isn't up yet, so this only went to the queue. Please try again in a moment.",
@@ -121,10 +126,31 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.board.done": "Done",
   "beginner.board.more": "+{count} more",
   "beginner.agents.label": "Who's working",
+  "beginner.agents.empty":
+    "Nobody's on the job yet. Say what you'd like built above and Marblo puts a team on it.",
+  "beginner.agents.noTask": "Nothing assigned right now",
 
   // ── Chat ────────────────────────────────────────────────────────────────
   "beginner.chat.title": "Talk to Marblo",
   "beginner.chat.hint": "Keep the conversation going right here.",
+  "beginner.chat.composerLabel": "Say something else",
+  "beginner.chat.placeholder":
+    "What next? e.g. add a few examples to the guide you just wrote",
+  "beginner.chat.orchestratorRunning": "In conversation",
+
+  // ── Ticket detail (mini board card click) ───────────────────────────────
+  "beginner.taskDetail.owner": "{name} is on it",
+  "beginner.taskDetail.noOwner": "Nobody's picked this up yet",
+  "beginner.taskDetail.askProgressCta": "Ask how it's going",
+  "beginner.taskDetail.askProgress":
+    "How far along is '{title}'? Keep it short.",
+  "beginner.taskDetail.askStuckCta": "Ask why it's stuck",
+  "beginner.taskDetail.askStuck":
+    "'{title}' looks stuck. In plain language: what stopped it, and what do you need from me?",
+  "beginner.taskDetail.askDoneCta": "Ask what changed",
+  "beginner.taskDetail.askDone":
+    "Summarise what changed in '{title}', in plain language.",
+  "beginner.taskDetail.close": "Close",
 
   // ── Promotion modal ─────────────────────────────────────────────────────
   "beginner.promote.title": "Ready for the real thing?",
@@ -155,7 +181,7 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
     "Describe what you want in plain language — or tap one of the examples below.",
   "beginner.tour.live.title": "Progress shows up here",
   "beginner.tour.live.body":
-    "Once you send a request, this line keeps showing how many tickets exist and how many agents are working.",
+    "Once you send a request, this line keeps showing how many tickets exist and how far along they are. Click a card to see what it is; who's on it shows up in the team column on the right.",
   "beginner.tour.advanced.title": "Switch to advanced mode any time",
   "beginner.tour.advanced.body":
     "Need the board, worktrees or the model picker? Click here. Settings brings you back.",

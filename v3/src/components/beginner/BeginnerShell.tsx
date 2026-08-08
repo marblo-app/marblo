@@ -15,11 +15,13 @@ import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { connectFolder } from "../../services/cliSetupActions";
 import telemetry from "../../services/telemetryService";
+import { BeginnerAgentsPane } from "./BeginnerAgentsPane";
+import { BeginnerChatBar } from "./BeginnerChatBar";
 import { BeginnerConnectStep } from "./BeginnerConnectStep";
-import { BeginnerFirstAsk } from "./BeginnerFirstAsk";
 import { BeginnerLiveStrip } from "./BeginnerLiveStrip";
 import { BeginnerOneClickModal } from "./BeginnerOneClickModal";
 import { BeginnerPromotionModal } from "./BeginnerPromotionModal";
+import { BeginnerTaskModal } from "./BeginnerTaskModal";
 import { BeginnerTour } from "./BeginnerTour";
 import {
   BUTTON_GHOST,
@@ -29,14 +31,30 @@ import {
 } from "./beginnerUi";
 
 /**
- * 비기너 셸 — 오케챗 하나만 있는 화면 (설계: v3/docs/BEGINNER-MODE-DESIGN.md).
+ * 비기너 셸 — **가벼운 2페인 워크스페이스** (설계: v3/docs/BEGINNER-MODE-DESIGN.md).
  *
- * 사이드바·15개 탭·보드·워크트리·Activity·에이전트 터미널 열을 **렌더하지 않는다.**
+ * 사이드바·15개 탭·워크트리·Activity·에이전트 터미널 열을 **렌더하지 않는다.**
  * 상태를 지우는 게 아니라 그리지 않을 뿐이라, 승격하면 워크스페이스 셸이 자기
  * persist 값 그대로 복원된다.
  *
- * ★풀스크린 오케챗은 `OrchestratorPanel fill` **그대로**다. 오케는 이미 실 PTY 를
- * 태운 대화창이므로 새 챗 프로토콜을 만들지 않는다(PTY 재배선 0).
+ * ★레이아웃이 한 번 바뀌었다(시연 피드백). 종전은 "큰 챗 하나 + 위에 얹힌 작은
+ * 스트립" 이었는데, 실제로 써 보니 세 가지가 걸렸다:
+ *
+ *   ① 상단 입력이 **일회성**이었다 — 첫 요청이 전달되면 입력칸째 사라져서, 오케에게
+ *      이어서 말할 곳이 없었다. 사장님은 그 자리를 "오케 터미널과 연결된 대화창"
+ *      으로 생각하고 계셨다. → `BeginnerChatBar`(항상 살아 있는 컴포저).
+ *   ② 미니 보드가 눌리지 않았다 → 카드 클릭 → `BeginnerTaskModal`.
+ *   ③ 오케 영역이 낮았고, "누가 뭐하나" 는 도넛 요약 한 덩이가 전부였다
+ *      → 하단을 **가로 2분할**로 키운다: 왼쪽 오케 대화창 / 오른쪽 에이전트.
+ *
+ * 그래서 이 화면은 이제 '채팅 + 작은 스트립' 이 아니라 가벼운 워크스페이스다.
+ * 다만 어드밴스드와의 경계는 그대로다 — 워크트리·diff·모델 선택은 여전히 없다
+ * (미니 보드 카드는 `compact`, 오케 헤더는 `hideModelControls`).
+ *
+ * ★오케 대화창은 `OrchestratorPanel fill` **그대로**다. 오케는 이미 실 PTY 를
+ * 태운 대화창이므로 새 챗 프로토콜을 만들지 않는다(PTY 재배선 0). 상단 컴포저도
+ * 같은 라우팅(`useBeginnerAsk` → `routeInstructionToOrchestrator`)을 타므로, 두
+ * 입력칸은 같은 곳으로 흘러간다.
  *
  * ★`useAppLifecycle()` 은 여기서도 동일하게 마운트해야 한다 — 오케 자동기동·
  * 에이전트 재접속·세션 복원·비용 기록이 전부 그 훅에 있어서, 빼면 비기너 유저의
@@ -68,6 +86,7 @@ export function BeginnerShell() {
   const subscribeToTasks = useTaskStore((s) => s.subscribeToTasks);
   const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
   const tasks = useTaskStore((s) => s.tasks);
+  const agents = useAgentStore((s) => s.agents);
 
   const enteredAt = useBeginnerModeStore((s) => s.enteredAt);
   const entryReason = useBeginnerModeStore((s) => s.entryReason);
@@ -84,6 +103,13 @@ export function BeginnerShell() {
   const promote = useBeginnerModeStore((s) => s.promote);
 
   const ask = useBeginnerAsk();
+  // ★대화창 입력 문자열을 셸이 든다. 미니 보드/에이전트 패널의 "오케에게
+  // 물어보기" 가 이 칸을 채우기 때문이다 — 상태가 컴포저 안에 갇혀 있으면 그
+  // 프리필이 닿지 못한다.
+  const [draft, setDraft] = useState("");
+  // 미니 보드/에이전트에서 연 티켓 상세. **id** 로 든다: 티켓 객체를 들면
+  // 구독이 갱신돼도 모달이 옛 스냅샷을 계속 그린다(상태가 안 움직인다).
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [showDemo, setShowDemo] = useState(false);
   // ★원클릭 모달을 **셸**이 든다. 연결 게이트 안에 두면 인증이 성립하는 순간
   // 게이트가 폴더 게이트로 갈아치워지면서 모달째 언마운트돼, "연결됐어요" 가
@@ -161,6 +187,25 @@ export function BeginnerShell() {
     },
     [promote],
   );
+
+  // 티켓 상세는 **현재** 구독 스냅샷에서 다시 찾는다. 티켓이 사라졌으면(오케가
+  // 지웠거나 프로젝트가 바뀌었으면) 모달도 자연히 닫힌다.
+  const openTask = useMemo(
+    () =>
+      openTaskId ? (tasks.find((x) => x.id === openTaskId) ?? null) : null,
+    [openTaskId, tasks],
+  );
+
+  const openTaskDetail = useCallback(
+    (task: { id: string }) => setOpenTaskId(task.id),
+    [],
+  );
+  const closeTaskDetail = useCallback(() => setOpenTaskId(null), []);
+
+  // 티켓 상세의 "오케에게 물어보기" — 문장을 대화창에 **채우기만** 한다. 대신
+  // 보내 주면 유저가 무엇이 나갔는지 모른 채 오케가 움직이고, 문장을 고칠 기회도
+  // 없다. 심플 모드라도 마지막 한 번은 유저가 누르는 게 맞다.
+  const askAboutTask = useCallback((message: string) => setDraft(message), []);
 
   // 안정적인 identity — 모달의 자동 닫힘 타이머가 이 콜백에 걸려 있다.
   const openOneClick = useCallback(() => setShowOneClick(true), []);
@@ -254,12 +299,12 @@ export function BeginnerShell() {
         </div>
       </header>
 
-      {/* ★세로 흐름 한 열. 창이 넓어져도 카드가 옆으로 늘어나지 않게 폭을
-          묶는다 — 예전엔 첫 요청 카드도 미니 보드도 창 폭 전체로 벌어져서
-          같은 내용이 그저 성기게 퍼졌다. 대화창(PTY)까지 한 열에 들어가야
-          시선이 위→아래 한 줄기로 흐른다. */}
+      {/* 위→아래 흐름(대화 → 일감 → 하단 2페인)은 그대로 두되, 폭 상한은
+          68rem → 96rem 으로 연다. 68rem 은 한 열짜리 화면의 가독 폭이었는데,
+          하단이 2분할이 된 지금 그 폭이면 오케 터미널이 좁아져 TUI 가 접힌다.
+          상한 자체는 남긴다 — 27" 에서 카드가 끝까지 벌어지면 다시 성겨진다. */}
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
-        <div className="mx-auto flex min-h-0 w-full max-w-[68rem] flex-1 flex-col gap-2.5 overflow-hidden">
+        <div className="mx-auto flex min-h-0 w-full max-w-[96rem] flex-1 flex-col gap-2.5 overflow-hidden">
           {!cliReady ? (
             <div className="min-h-0 flex-1 overflow-auto">
               <BeginnerConnectStep
@@ -316,36 +361,68 @@ export function BeginnerShell() {
             </div>
           ) : (
             <>
-              {/* 첫 요청 — 전달되면 스스로 접혀 확인 한 줄만 남긴다(중복 주입 차단).
+              {/* ★지속 대화창 — 전달돼도 사라지지 않는다. 중복 주입 가드는 폼
+                  잠금이 아니라 `useBeginnerAsk` 의 동일문장 창으로 옮겼다.
                   data-coach: 코치마크 투어의 앵커(BeginnerTour.COACH_ANCHORS). */}
               <div className="flex-shrink-0" data-coach="beginner-ask">
-                <BeginnerFirstAsk ask={ask} />
+                <BeginnerChatBar
+                  ask={ask}
+                  draft={draft}
+                  onDraftChange={setDraft}
+                />
               </div>
 
-              {/* ★S4: 진행상황을 별도 탭이 아니라 챗 바로 위에 그린다. */}
-              <div className="flex-shrink-0" data-coach="beginner-live">
+              {/* ★S4: 진행상황을 별도 탭이 아니라 대화창 바로 아래에 그린다.
+                  ★높이 상한(34%)은 하단 2페인을 지키기 위한 것이다. 티켓이 대여섯
+                  건 쌓이면 미니 보드는 얼마든지 자라는데, 그걸 그대로 두면 예전처럼
+                  오케 영역이 아래로 밀려 납작해진다(시연 피드백 ③). 넘치는 만큼은
+                  이 칸 안에서 스크롤한다. */}
+              <div
+                className="min-h-0 shrink overflow-y-auto max-h-[34%]"
+                data-coach="beginner-live"
+              >
                 <BeginnerLiveStrip
                   sentAt={ask.deliveredAt}
                   onResend={() => void ask.resend()}
                   resending={ask.sending}
+                  onTaskClick={openTaskDetail}
                 />
               </div>
 
-              {/* 풀스크린 오케챗 — 실 PTY 그대로. */}
-              <section
-                data-coach="beginner-chat"
-                className={`flex min-h-0 flex-1 flex-col overflow-hidden ${SURFACE}`}
-              >
-                <div className="flex flex-shrink-0 items-center gap-2 border-b border-[#313244] px-4 py-2">
-                  <SectionLabel>{t("beginner.chat.title")}</SectionLabel>
-                  <span className="min-w-0 truncate text-[11px] text-[#585b70]">
-                    {t("beginner.chat.hint")}
-                  </span>
-                </div>
-                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                  <OrchestratorPanel fill />
-                </div>
-              </section>
+              {/* ── ★하단 2분할: 오케 대화창 | 에이전트 ──────────────────────
+                  좁은 창(<1024px)에서는 세로로 쌓는다 — 두 열을 억지로 유지하면
+                  오케 터미널이 40컬럼 아래로 눌려 TUI 가 접힌다. */}
+              <div className="flex min-h-[18rem] flex-1 flex-col gap-2.5 overflow-hidden lg:flex-row">
+                <section
+                  data-coach="beginner-chat"
+                  className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${SURFACE}`}
+                >
+                  <div className="flex flex-shrink-0 items-center gap-2 border-b border-[#313244] px-4 py-2">
+                    <SectionLabel>{t("beginner.chat.title")}</SectionLabel>
+                    <span className="min-w-0 truncate text-[11px] text-[#585b70]">
+                      {t("beginner.chat.hint")}
+                    </span>
+                  </div>
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                    {/* ★모델·effort·세션 선택은 감춘다. 비기너 화면의 차별점이
+                        "고를 게 없다" 라서, 헤더 한 줄이 그 약속을 깨면 안 된다. */}
+                    <OrchestratorPanel fill hideModelControls />
+                  </div>
+                </section>
+
+                {/* ★에이전트 열 — "누가 뭐하나". 세로 스택일 땐 높이를 묶어
+                    오케가 화면 밖으로 밀리지 않게 한다. */}
+                <section
+                  data-testid="beginner-agents-pane"
+                  className={`flex max-h-[14rem] min-h-0 flex-col overflow-hidden lg:max-h-none lg:w-[19rem] lg:shrink-0 ${SURFACE}`}
+                >
+                  <BeginnerAgentsPane
+                    agents={agents}
+                    tasks={tasks}
+                    onTaskClick={openTaskDetail}
+                  />
+                </section>
+              </div>
             </>
           )}
         </div>
@@ -360,6 +437,16 @@ export function BeginnerShell() {
       />
 
       {showOneClick && <BeginnerOneClickModal onClose={closeOneClick} />}
+
+      {/* 미니 보드/에이전트에서 연 티켓 상세 — 비기너 판(워크트리·diff·PR 없음). */}
+      {openTask && (
+        <BeginnerTaskModal
+          task={openTask}
+          agents={agents}
+          onAsk={askAboutTask}
+          onClose={closeTaskDetail}
+        />
+      )}
 
       {promotion && (
         <BeginnerPromotionModal

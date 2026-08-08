@@ -1,21 +1,26 @@
 /**
  * @vitest-environment jsdom
  *
- * ★비기너 미니 보드 + 미니 에이전트 뷰 — 실제 DOM 렌더 회귀 테스트.
+ * ★비기너 미니 보드 + 미니 에이전트 패널 — 실제 DOM 렌더 회귀 테스트.
  *
  * 순수 규칙(`groupBeginnerBoard`)만 고정하면 "스토어 → 그룹핑 → 재사용하는
  * KanbanColumn/TeamSummary" 배선이 끊겨도 못 잡는다. 그리고 이 화면의 계약은
- * 두 방향이다:
+ * 세 방향이다:
  *
  *   ① 티켓이 움직이는 게 **보여야** 한다 (그게 S4 dead-end 의 해결책)
- *   ② 워크트리·diff·모델명은 **안 보여야** 한다 (비기너 추상화 수준)
+ *   ② ★그 카드가 **눌려야** 한다 (시연 피드백 ② — 안 눌리는 보드는 그림이다)
+ *   ③ 워크트리·diff·모델명은 **안 보여야** 한다 (비기너 추상화 수준)
  *
- * ②는 "안 그린다" 라서 눈으로 확인하기 가장 어렵고, compact 프롭이 나중에
+ * ③은 "안 그린다" 라서 눈으로 확인하기 가장 어렵고, compact 프롭이 나중에
  * 누락되면 조용히 깨진다 — 그래서 부재를 여기서 못박는다.
+ *
+ * ★"누가 뭐하나"(에이전트)는 라이브 스트립을 떠나 `BeginnerAgentsPane`(하단
+ * 2분할의 오른쪽 열)으로 갔다. 그래서 아래 에이전트 describe 는 스트립이 아니라
+ * 그 패널을 마운트한다.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import type { Agent, AgentStatus } from "../../src/types/agent";
 import type { Task, TaskStatus } from "../../src/types/task";
@@ -74,6 +79,7 @@ vi.mock("../../src/services/firestore", () => ({
 
 const ensureFreshSpy = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 
+import { BeginnerAgentsPane } from "../../src/components/beginner/BeginnerAgentsPane";
 import { BeginnerLiveStrip } from "../../src/components/beginner/BeginnerLiveStrip";
 import { BEGINNER_COLUMN_LIMIT } from "../../src/lib/beginnerMode";
 import { useLocaleStore } from "../../src/lib/i18n";
@@ -125,6 +131,18 @@ function mount(props?: Partial<Parameters<typeof BeginnerLiveStrip>[0]>) {
       sentAt: 1,
       onResend: () => {},
       resending: false,
+      ...props,
+    }),
+  );
+}
+
+function mountAgents(
+  props?: Partial<Parameters<typeof BeginnerAgentsPane>[0]>,
+) {
+  return render(
+    createElement(BeginnerAgentsPane, {
+      agents: stores.agents as Agent[],
+      tasks: stores.tasks as Task[],
       ...props,
     }),
   );
@@ -218,13 +236,37 @@ describe("비기너 미니 보드", () => {
     // worktree:list 를 부를 이유가 없다).
     expect(ensureFreshSpy).not.toHaveBeenCalled();
   });
+
+  // ── ★클릭커블(시연 피드백 ②) ────────────────────────────────────────────
+  it("★카드를 누르면 그 티켓이 상세로 올라온다", () => {
+    stores.tasks = [
+      task("t1", "TODO", "리드미 읽기"),
+      task("t2", "IN_PROGRESS", "가이드 초안"),
+    ];
+    const onTaskClick = vi.fn();
+    mount({ onTaskClick });
+
+    fireEvent.click(screen.getAllByTestId("beginner-mini-task")[1]);
+    expect(onTaskClick).toHaveBeenCalledTimes(1);
+    expect(onTaskClick.mock.calls[0][0].id).toBe("t2");
+  });
+
+  it("핸들러가 없으면 카드는 눌리지 않는다 — 커서도 붙지 않는다", () => {
+    stores.tasks = [task("t1", "TODO", "리드미 읽기")];
+    mount();
+    // 클릭이 예외를 던지지 않는 것만으론 부족하다: 누를 수 있는 것처럼 **보이면**
+    // 안 된다(눌러도 아무 일 없는 카드가 바로 그 시연 피드백의 자리다).
+    expect(screen.getByTestId("beginner-mini-task").className).not.toContain(
+      "cursor-pointer",
+    );
+  });
 });
 
-describe("비기너 미니 에이전트 뷰", () => {
+describe("비기너 에이전트 패널 (하단 2분할 오른쪽)", () => {
   it("에이전트 수와 상태를 요약한다", () => {
     stores.tasks = [task("t1", "IN_PROGRESS", "가이드 초안")];
     stores.agents = [agent("a1", "working"), agent("a2", "idle")];
-    mount();
+    mountAgents();
 
     const mini = screen.getByTestId("beginner-mini-agents");
     expect(mini.textContent).toContain("2");
@@ -234,10 +276,50 @@ describe("비기너 미니 에이전트 뷰", () => {
     expect(mini.textContent).not.toContain(ko["agents.status.error"]);
   });
 
-  it("에이전트가 아직 없으면 그리지 않는다", () => {
+  it("★누가 무슨 티켓에 붙어 있는지 한 줄로 말한다", () => {
+    stores.tasks = [
+      task("t1", "IN_PROGRESS", "가이드 초안"),
+      task("t2", "TODO", "리드미 읽기"),
+    ];
+    stores.agents = [
+      { ...agent("a1", "working"), currentTaskId: "t1" },
+      agent("a2", "idle"),
+    ];
+    mountAgents();
+
+    const rows = screen.getAllByTestId("beginner-agent-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("가이드 초안");
+    // 맡은 게 없는 에이전트는 티켓 줄 대신 그 사실을 말한다(빈칸 금지).
+    expect(rows[1].textContent).toContain(ko["beginner.agents.noTask"]);
+  });
+
+  it("★티켓 줄을 누르면 미니 보드 카드와 **같은** 상세가 열린다", () => {
+    stores.tasks = [task("t1", "IN_PROGRESS", "가이드 초안")];
+    stores.agents = [{ ...agent("a1", "working"), currentTaskId: "t1" }];
+    const onTaskClick = vi.fn();
+    mountAgents({ onTaskClick });
+
+    fireEvent.click(screen.getByTestId("beginner-agent-task"));
+    expect(onTaskClick.mock.calls[0][0].id).toBe("t1");
+  });
+
+  it("★모델명은 여기서도 안 보인다 (어드밴스드 에이전트 탭과의 경계)", () => {
+    stores.tasks = [task("t1", "IN_PROGRESS", "가이드 초안")];
+    stores.agents = [{ ...agent("a1", "working"), currentTaskId: "t1" }];
+    const { container } = mountAgents();
+
+    expect(container.textContent).not.toContain("claude-fable-5");
+    expect(container.textContent).not.toContain("claude");
+  });
+
+  it("에이전트가 아직 없으면 요약 대신 다음 행동을 말한다", () => {
     stores.tasks = [task("t1", "TODO", "리드미 읽기")];
-    mount();
+    stores.agents = [];
+    mountAgents();
+
     expect(screen.queryByTestId("beginner-mini-agents")).toBeNull();
+    expect(screen.getByTestId("beginner-agents-empty")).toBeTruthy();
   });
 });
 

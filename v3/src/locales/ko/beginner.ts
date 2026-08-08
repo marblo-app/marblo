@@ -92,6 +92,11 @@ export const beginner = {
   "beginner.ask.send": "보내기",
   "beginner.ask.sending": "보내는 중…",
   "beginner.ask.sent": "전달했어요. 아래에서 진행 상황이 보입니다.",
+  "beginner.ask.sentShort": "전달됨",
+  "beginner.ask.queuedShort": "대기 중",
+  "beginner.ask.failedShort": "전달 실패",
+  "beginner.ask.duplicate":
+    "방금 보낸 말과 같아요. 이미 전달됐으니 조금 기다리거나 다르게 말해 주세요.",
   "beginner.ask.resend": "다시 보내기",
   "beginner.ask.queued":
     "아직 오케스트레이터가 준비되지 않아 대기열에만 담겼어요. 잠시 후 다시 보내 주세요.",
@@ -111,20 +116,41 @@ export const beginner = {
   "beginner.live.progress": "{done}/{total} 완료",
   "beginner.live.label": "지금 하는 일",
 
-  // ── ⑤ 미니 보드 + 미니 에이전트 뷰 ──────────────────────────────────────
-  // 보드·에이전트는 마블로의 핵심이라 비기너에게도 축소판을 보여 준다.
-  // 워크트리·diff·모델명은 여전히 감춘다 — 티켓이 움직이는 것과 사람이(에이전트가)
-  // 붙어 있다는 것만.
+  // ── ⑤ 미니 보드(스트립) + 에이전트 패널(하단 2분할 오른쪽) ──────────────
+  // 보드·에이전트는 마블로의 핵심이라 비기너에게도 축소판을 보여 준다. 카드는
+  // 눌리고(비기너 판 상세), 에이전트는 "누가 뭐하나" 까지 말한다.
+  // 워크트리·diff·모델명은 여전히 감춘다.
   "beginner.board.label": "일감 흐름",
   "beginner.board.todo": "할 일",
   "beginner.board.doing": "진행 중",
   "beginner.board.done": "완료",
   "beginner.board.more": "+{count}개 더",
   "beginner.agents.label": "일하는 팀",
+  "beginner.agents.empty":
+    "아직 붙은 팀원이 없어요. 위에서 무엇을 만들지 말씀하시면 마블로가 팀을 붙입니다.",
+  "beginner.agents.noTask": "지금은 맡은 일이 없어요",
 
   // ── 챗 ──────────────────────────────────────────────────────────────────
   "beginner.chat.title": "마블로와 대화하기",
   "beginner.chat.hint": "여기에 이어서 말을 걸 수 있어요.",
+  "beginner.chat.composerLabel": "이어서 말하기",
+  "beginner.chat.placeholder":
+    "이어서 하고 싶은 말을 적어 주세요. 예: 방금 만든 가이드에 예시를 더 넣어 줘",
+  "beginner.chat.orchestratorRunning": "대화 중",
+
+  // ── 티켓 상세(미니 보드 카드 클릭) ──────────────────────────────────────
+  "beginner.taskDetail.owner": "{name} 이(가) 맡고 있어요",
+  "beginner.taskDetail.noOwner": "아직 아무도 붙지 않았어요",
+  "beginner.taskDetail.askProgressCta": "진행 상황 물어보기",
+  "beginner.taskDetail.askProgress":
+    "'{title}' 지금 어디까지 됐어? 짧게 알려줘.",
+  "beginner.taskDetail.askStuckCta": "왜 막혔는지 물어보기",
+  "beginner.taskDetail.askStuck":
+    "'{title}' 이 막힌 것 같아. 왜 멈췄고 내가 뭘 해주면 되는지 쉬운 말로 알려줘.",
+  "beginner.taskDetail.askDoneCta": "무엇이 바뀌었는지 물어보기",
+  "beginner.taskDetail.askDone":
+    "'{title}' 에서 무엇이 어떻게 바뀌었는지 쉬운 말로 정리해 줘.",
+  "beginner.taskDetail.close": "닫기",
 
   // ── 승격 모달 ───────────────────────────────────────────────────────────
   "beginner.promote.title": "이제 진짜 힘 좀 써볼까요?",
@@ -155,7 +181,7 @@ export const beginner = {
     "무엇을 만들지 한국어로 그냥 쓰면 됩니다. 아래 예시를 눌러도 돼요.",
   "beginner.tour.live.title": "진행 상황은 여기에 나와요",
   "beginner.tour.live.body":
-    "요청을 보내면 티켓이 몇 개 생겼는지, 지금 몇 명이 일하는지 이 줄에서 계속 보입니다.",
+    "요청을 보내면 티켓이 몇 개 생겼는지, 어디까지 왔는지 이 줄에서 계속 보입니다. 카드를 누르면 그 일이 무엇인지 볼 수 있고, 누가 맡았는지는 오른쪽 팀 칸에 나와요.",
   "beginner.tour.advanced.title": "언제든 개발 모드로 넘어갈 수 있어요",
   "beginner.tour.advanced.body":
     "보드·워크트리·모델 선택이 필요해지면 여기를 누르세요. 설정에서 다시 돌아올 수 있어요.",

@@ -149,10 +149,24 @@ interface OrchestratorPanelProps {
    * false → legacy fixed-height behavior (pixel-identical to before).
    */
   fill?: boolean;
+  /**
+   * Beginner shell: hide everything in the header that names or picks a model —
+   * the model label, the reasoning-effort select, the harness version badge and
+   * the session picker.
+   *
+   * The beginner screen's whole promise is "there is nothing to configure"; a
+   * header reading `Claude Opus 5 @high  v2.1.4  [Sessions ▾]` breaks that
+   * promise in one line, and the switch flow behind those selects (take over /
+   * switch and wait) is a concept that shell deliberately doesn't teach yet.
+   * The PTY, the status dot and Start/Stop stay — those are recovery, not
+   * configuration. Default false → pixel-identical to before.
+   */
+  hideModelControls?: boolean;
 }
 
 export default memo(function OrchestratorPanel({
   fill = false,
+  hideModelControls = false,
 }: OrchestratorPanelProps) {
   const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -619,10 +633,14 @@ export default memo(function OrchestratorPanel({
               {isSwitching
                 ? "Switching..."
                 : status === "running"
-                  ? describeOrchestratorModel(runningModel ?? selectedModel)
+                  ? hideModelControls
+                    ? // 비기너: 모델 이름 자리에 상태만. 빈 문자열로 두면 점 옆이
+                      // 휑해서 "안 켜졌나" 로 읽힌다.
+                      t("beginner.chat.orchestratorRunning")
+                    : describeOrchestratorModel(runningModel ?? selectedModel)
                   : "Starting..."}
             </span>
-            {claudeVersion && (
+            {claudeVersion && !hideModelControls && (
               <span
                 className="rounded bg-[#313244]/60 px-1.5 py-0.5 font-mono text-[10px] text-[#a6adc8]"
                 title={`Agents launch with Claude Code v${claudeVersion}`}
@@ -632,7 +650,7 @@ export default memo(function OrchestratorPanel({
             )}
             <div
               ref={switchAnchorRef}
-              className="relative ml-1"
+              className={`relative ml-1 ${hideModelControls ? "hidden" : ""}`}
               onClick={(e) => e.stopPropagation()}
             >
               <select
@@ -748,20 +766,22 @@ export default memo(function OrchestratorPanel({
             </span>
             {/* Start button + session picker toggle */}
             <div className="relative ml-2 flex items-center gap-1">
-              <select
-                value={selectedBase}
-                onClick={(e) => e.stopPropagation()}
-                onChange={handleModelChange}
-                className="h-6 rounded border border-[#313244] bg-[#1e1e2e] px-1.5 text-[11px] text-[#cdd6f4] outline-none hover:border-[#89b4fa]"
-                title="Orchestrator model"
-              >
-                {ORCHESTRATOR_MODEL_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              {effortChoices.length > 0 && (
+              {!hideModelControls && (
+                <select
+                  value={selectedBase}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={handleModelChange}
+                  className="h-6 rounded border border-[#313244] bg-[#1e1e2e] px-1.5 text-[11px] text-[#cdd6f4] outline-none hover:border-[#89b4fa]"
+                  title="Orchestrator model"
+                >
+                  {ORCHESTRATOR_MODEL_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {!hideModelControls && effortChoices.length > 0 && (
                 <select
                   value={selectedEffort}
                   onClick={(e) => e.stopPropagation()}
@@ -789,6 +809,8 @@ export default memo(function OrchestratorPanel({
                 aria-haspopup="menu"
                 aria-expanded={showSessionPicker}
                 className={`flex flex-shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 transition-colors ${
+                  hideModelControls ? "hidden" : ""
+                } ${
                   showSessionPicker
                     ? "bg-[#313244] text-[#cdd6f4]"
                     : "bg-[#313244]/50 text-[#a6adc8] hover:bg-[#313244] hover:text-[#cdd6f4]"
