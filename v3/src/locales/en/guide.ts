@@ -5,9 +5,10 @@
 import type { guide as koGuide } from "../ko/guide";
 
 export const guide: Record<keyof typeof koGuide, string> = {
-  "guide.title": "Marblo Getting Started",
+  "guide.title": "Using Marblo",
   "guide.subtitle":
-    "Assemble and orchestrate an army of AI agents — the core building blocks on one page",
-  "guide.footerPrefix": "For more detail, see ",
-  "guide.footerSuffix": " or the PRD doc.",
+    "What each tab is for · how to brief the orchestrator · picking models · FAQ",
+  "guide.jumpLabel": "Jump to a section",
+  "guide.footer":
+    "Installing, signing in and your first ticket are handled step by step — with live state — on the Start here tab. This guide covers what comes after that, and where to do it.",
 };

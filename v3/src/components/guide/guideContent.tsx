@@ -1,20 +1,46 @@
 /**
  * Guide tab long-form content — split ko/en.
  *
- * Why a content module instead of `guide.*` translation keys: the guide is 8
- * rich-JSX sections plus an 18-row command table. Keying every sentence would
- * explode the locale table and make the prose unreadable across two files.
- * Instead the whole body lives here as parallel ko/en blocks (the pattern
- * sanctioned by ../../locales/README.md for long-form copy). The page chrome
- * (title/subtitle/footer) stays as `guide.*` keys; GuideTab picks the block
- * for the active locale.
+ * Why a content module instead of `guide.*` translation keys: the guide is a
+ * dozen rich-JSX sections plus two generated tables and an FAQ. Keying every
+ * sentence would explode the locale table and make the prose unreadable across
+ * two files. Instead the whole body lives here as parallel ko/en blocks (the
+ * pattern sanctioned by ../../locales/README.md for long-form copy). The page
+ * chrome (title/subtitle/footer) stays as `guide.*` keys; GuideTab picks the
+ * block for the active locale.
  *
- * Translation boundary: `/tf-*` slash-command names, MCP tool names, file
- * paths and keyboard chords are identifiers — kept verbatim in both locales.
+ * ★ ACCURACY RULE — the two things that always drifted are generated here, not
+ * typed by hand:
+ *   - the tab reference reads {@link visibleRightTabs} (real bar order, real
+ *     dev-flag gating) and labels each row with the SAME `workspace.tab.*` key
+ *     the tab bar renders;
+ *   - the slash-command table reads {@link SLASH_COMMANDS} (the orchestrator's
+ *     own palette) with its `orchestrator.cmd.*` descriptions.
+ * Only the per-tab prose is written per locale. A tab or command added
+ * elsewhere shows up here on its own; a hand-maintained copy is what let the
+ * old guide advertise a fleet ("Gemini", "BYOK API keys") that no longer
+ * existed and miss four shipped commands.
+ *
+ * ★ SCOPE vs the 시작하기 (Start here) tab: that tab DOES the setup — install,
+ * sign-in, folder connect, first ticket, with live probe state. This guide does
+ * not re-teach those steps; it explains what each surface is for and links back
+ * to that tab. Keep it that way so the two never contradict each other.
+ *
+ * Translation boundary: `/tf-*` slash-command names, MCP tool names, file paths
+ * and keyboard chords are identifiers — kept verbatim in both locales.
  */
 import type { Locale } from "../../lib/i18n";
+import { useTranslation } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
+import {
+  visibleRightTabs,
+  type RightTabId,
+} from "../../lib/splitWorkspaceLayout";
+import { SLASH_COMMANDS } from "../orchestrator/SlashCommandPopup";
 
 export interface GuideSection {
+  /** Stable anchor id — also the React key and the table-of-contents target. */
+  id: string;
   title: string;
   body: React.ReactNode;
 }
@@ -23,164 +49,520 @@ interface GuideContent {
   sections: GuideSection[];
 }
 
-interface TfCommand {
-  cmd: string;
-  what: string;
+/** Per-tab prose, written per locale. Keys come from the real tab list. */
+type TabNotes = Record<RightTabId, string>;
+
+interface FaqItem {
+  q: string;
+  a: React.ReactNode;
 }
 
-const KO_COMMANDS: TfCommand[] = [
-  {
-    cmd: "/tf-start",
-    what: "프로젝트를 시작 — 분석 + 태스크 분해 + 에이전트 스폰 한 번에",
-  },
-  {
-    cmd: "/tf-analyze",
-    what: "요구사항을 분석하고 컴포넌트 / 역할 / 의존성 파악",
-  },
-  {
-    cmd: "/tf-create-tasks",
-    what: "분석 결과를 Marblo MCP에 태스크로 일괄 생성",
-  },
-  { cmd: "/tf-spawn-agents", what: "필요한 역할의 에이전트를 자동 스폰" },
-  {
-    cmd: "/tf-status",
-    what: "프로젝트 태스크 진행 상태를 대시보드 형태로 요약",
-  },
-  { cmd: "/tf-add", what: "진행 중 새 태스크 추가 / 우선순위·설명 수정" },
-  { cmd: "/tf-fix", what: "FAILED / BLOCKED 태스크 진단 및 복구" },
-  { cmd: "/tf-handoff", what: "에이전트가 실패한 태스크를 직접 이어받아 완료" },
-  { cmd: "/tf-hold", what: "태스크 일시 보류 / 재개" },
-  { cmd: "/tf-review", what: "REVIEW 상태 태스크 검토 후 DONE 처리" },
-  { cmd: "/tf-feedback", what: "PM 피드백을 태스크에 등록" },
-  { cmd: "/tf-ralph", what: "Ralph 패턴으로 반복 작업을 티켓 단위로 추적" },
-  { cmd: "/tf-resume", what: "이전 세션 재개 (현 진행 상황 컨텍스트 복구)" },
-  { cmd: "/tf-sync", what: "Firestore ↔ 로컬 상태 동기화" },
-  { cmd: "/tf-work", what: "내 역할의 다음 사용 가능 태스크 클레임 후 작업" },
-  { cmd: "/tf-done", what: "현재 태스크 완료 처리 + PR URL 첨부" },
-  { cmd: "/tf-plan", what: "복잡한 작업의 계획 수립 (Plan 모드)" },
-  { cmd: "/tf-guide", what: "TaskForce 워크플로우 사용 가이드" },
-];
+// Same feature-flag mechanism as WorkTabs — dev-only tabs (missions/flows/
+// deploy) are documented only when VITE_DEV_FEATURES lists their id, so the
+// guide never describes a tab the reader cannot see.
+const devFeatures = (import.meta.env.VITE_DEV_FEATURES || "")
+  .split(",")
+  .map((s: string) => s.trim());
 
-const EN_COMMANDS: TfCommand[] = [
-  {
-    cmd: "/tf-start",
-    what: "Start a project — analyze + break down tasks + spawn agents in one shot",
-  },
-  {
-    cmd: "/tf-analyze",
-    what: "Analyze requirements and identify components / roles / dependencies",
-  },
-  {
-    cmd: "/tf-create-tasks",
-    what: "Bulk-create tasks in Marblo MCP from the analysis",
-  },
-  { cmd: "/tf-spawn-agents", what: "Auto-spawn agents for the roles you need" },
-  {
-    cmd: "/tf-status",
-    what: "Summarize task progress for the project as a dashboard",
-  },
-  {
-    cmd: "/tf-add",
-    what: "Add a new task mid-flight / edit priority and description",
-  },
-  { cmd: "/tf-fix", what: "Diagnose and recover FAILED / BLOCKED tasks" },
-  {
-    cmd: "/tf-handoff",
-    what: "Have an agent take over and finish a failed task directly",
-  },
-  { cmd: "/tf-hold", what: "Pause / resume a task" },
-  { cmd: "/tf-review", what: "Review tasks in REVIEW and mark them DONE" },
-  { cmd: "/tf-feedback", what: "Register PM feedback on a task" },
-  {
-    cmd: "/tf-ralph",
-    what: "Track repetitive work ticket by ticket with the Ralph pattern",
-  },
-  {
-    cmd: "/tf-resume",
-    what: "Resume a previous session (restore current-progress context)",
-  },
-  { cmd: "/tf-sync", what: "Sync Firestore ↔ local state" },
-  {
-    cmd: "/tf-work",
-    what: "Claim and work the next available task for your role",
-  },
-  { cmd: "/tf-done", what: "Mark the current task done + attach the PR URL" },
-  { cmd: "/tf-plan", what: "Plan a complex task (Plan mode)" },
-  { cmd: "/tf-guide", what: "TaskForce workflow usage guide" },
-];
+// ─────────────────────────────────────────────────────────────────────────────
+// Presentational helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
-function CommandTable({ commands }: { commands: TfCommand[] }) {
+const P = "text-sm leading-relaxed text-[#bac2de]";
+const MUTED = "text-xs leading-relaxed text-[#6c7086]";
+
+function Note({
+  tone = "info",
+  children,
+}: {
+  tone?: "info" | "warn";
+  children: React.ReactNode;
+}) {
+  const cls =
+    tone === "warn"
+      ? "border-[#f9e2af]/30 bg-[#f9e2af]/10 text-[#f9e2af]"
+      : "border-[#89b4fa]/25 bg-[#89b4fa]/5 text-[#a6adc8]";
+  return (
+    <p className={`rounded-md border px-3 py-2 text-xs leading-relaxed ${cls}`}>
+      {children}
+    </p>
+  );
+}
+
+/**
+ * The tab reference. Order, membership and labels come from the shell itself —
+ * only the description column is authored copy.
+ */
+function TabTable({ notes }: { notes: TabNotes }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1 text-xs">
-      {commands.map((c) => (
+      {visibleRightTabs(devFeatures).map((id) => (
         <div
-          key={c.cmd}
-          className="flex gap-3 border-b border-[#313244]/50 py-1"
+          key={id}
+          data-testid="guide-tab-row"
+          data-tab={id}
+          className="flex flex-col gap-0.5 border-b border-[#313244]/50 py-1.5 sm:flex-row sm:gap-3"
         >
-          <code className="shrink-0 w-32 font-mono text-[#89b4fa]">
-            {c.cmd}
-          </code>
-          <span className="text-[#bac2de]">{c.what}</span>
+          <span className="shrink-0 font-medium text-[#89b4fa] sm:w-28">
+            {t(`workspace.tab.${id}` as MessageKey)}
+          </span>
+          <span className="min-w-0 text-[#bac2de]">{notes[id]}</span>
         </div>
       ))}
     </div>
   );
 }
 
+/** The orchestrator's own slash-command palette, rendered as a reference. */
+function CommandTable() {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1 text-xs">
+      {SLASH_COMMANDS.map((c) => (
+        <div
+          key={c.command}
+          data-testid="guide-command-row"
+          data-command={c.command}
+          className="flex flex-col gap-0.5 border-b border-[#313244]/50 py-1 sm:flex-row sm:gap-3"
+        >
+          <code className="shrink-0 font-mono text-[#89b4fa] sm:w-40">
+            {c.command}
+          </code>
+          <span className="min-w-0 text-[#bac2de]">{t(c.description)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Faq({ items }: { items: FaqItem[] }) {
+  return (
+    <div className="space-y-2">
+      {items.map((item) => (
+        <details
+          key={item.q}
+          className="group rounded-md border border-[#313244] bg-[#181825] px-3 py-2"
+        >
+          <summary className="cursor-pointer list-none text-sm font-medium text-[#cdd6f4] marker:content-none">
+            <span className="mr-1.5 text-[#89b4fa] group-open:hidden">＋</span>
+            <span className="mr-1.5 hidden text-[#89b4fa] group-open:inline">
+              －
+            </span>
+            {item.q}
+          </summary>
+          <div className="mt-2 border-t border-[#313244] pt-2 text-xs leading-relaxed text-[#bac2de]">
+            {item.a}
+          </div>
+        </details>
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 한국어
+// ─────────────────────────────────────────────────────────────────────────────
+
+const KO_TAB_NOTES: TabNotes = {
+  startHere:
+    "설치 → 로그인 → 폴더 연결 → 첫 티켓까지 4단계 체크리스트. 진행 상황이 저장돼 다시 열면 멈춘 자리에서 이어집니다. 건너뛴 단계도 사라지지 않고 목록에 남습니다. 시연 영상과 인터랙티브 데모도 여기 있습니다.",
+  guide: "지금 보고 있는 이 문서.",
+  board:
+    "칸반 보드. 오케스트레이터가 만든 티켓이 TODO · CLAIMED · IN_PROGRESS · REVIEW · DONE 다섯 칸으로 흐릅니다. BLOCKED / FAILED 는 위쪽 ‘정체’ 레인에 따로 모입니다. 카드를 열면 상세 · 활동 타임라인 · diff 를 볼 수 있습니다.",
+  code: "Monaco 에디터. 사이드바 파일 트리에서 연 파일을 편집하고, 상단 선택으로 루트와 워크트리를 오갑니다. 마크다운 · 이미지 · 노트북은 전용 뷰로 열립니다.",
+  lanes:
+    "퀵레인. 메인 작업을 멈추지 않고, 방금 눈에 띈 개선점을 독립 워크트리에서 병렬로 돌립니다. 레인마다 터미널이 붙고 미션도 여기서 관리합니다.",
+  agents:
+    "에이전트 관리 대시보드 — 스폰된 에이전트의 상태 · 담당 티켓 · 비용을 보고 중지 / 재시작 / 삭제합니다. 터미널 화면 자체는 왼쪽 터미널 열에 있습니다.",
+  project:
+    "이 프로젝트의 ‘사람’ 쪽 — 멤버 · 역할 · 초대 · 멤버별 작업량. 초대와 역할 부여는 설정 › 팀과 같은 화면을 공유합니다(팀 기능은 유료 플랜).",
+  worktrees:
+    "티켓마다 격리된 브랜치 작업 폴더 목록. 머지 가능 · 뒤처짐 · stale · 충돌 상태를 한눈에 보고, diff 확인 · 머지 · 정리를 여기서 합니다.",
+  history:
+    "완료된 티켓과 에이전트가 남긴 완료 보고, 머지 이력. 기간 · 역할로 거르고 공유 카드로 성과를 내보낼 수 있습니다.",
+  usage:
+    "모델별 · 에이전트별 · 일자별 토큰 사용량과 비용 추정. 라이브 집계(에이전트 문서)와 히스토리(BigQuery)를 합쳐 보여 줍니다.",
+  store:
+    "공개 레지스트리 카탈로그 — 스킬 · MCP 서버 · 에이전트 · 워크플로 · 지식팩 · 로컬 모델을 골라 담습니다. ‘있으면 좋은 것’ 쪽입니다.",
+  harness:
+    "이 앱을 쓰려면 ‘반드시’ 해야 하는 연결 — CLI 설치와 로그인, env-swap 벤더 키, 텔레그램 채널. 스토어가 선택이라면 여기는 필수 배선입니다.",
+  missions: "미션 — 여러 단계를 묶어 굴리는 실행 단위 (개발 플래그 전용).",
+  flows:
+    "플로우 에디터 — 노드로 파이프라인을 짭니다 (베타 · 개발 플래그 전용).",
+  deploy: "배포 탭 — GCP Cloud Run 배포 (개발 플래그 전용).",
+  settings:
+    "프로필 · 모델 · 요금제 · 팀 · 프라이버시 · 언어 · 버그 신고. 헤더의 톱니바퀴로도 열립니다.",
+};
+
+const KO_FAQ: FaqItem[] = [
+  {
+    q: "CLI 를 꼭 설치해야 하나요?",
+    a: (
+      <>
+        네. 오케스트레이터와 에이전트는 설치된 CLI 위에서 실제 프로세스로
+        돕니다. Claude Code 가 필수이고 Codex · Grok · Antigravity 는
+        선택입니다. <strong>시작하기</strong> 탭 ①단계의{" "}
+        <strong>‘모두 설치’</strong> 버튼이 아직 없는 것만 골라 순서대로
+        설치합니다.
+      </>
+    ),
+  },
+  {
+    q: "자동 설치가 실패했어요 (EACCES · npm 권한 오류 등)",
+    a: (
+      <>
+        실패한 CLI 카드에 수동 설치 명령과 공식 문서 링크가 그대로 남습니다.
+        터미널에서 그 명령을 직접 실행한 뒤 <strong>‘다시 확인’</strong> 을
+        누르면 상태가 갱신됩니다. 개별 [설치] 버튼은 실패한 한 줄만 재시도하는
+        용도로 남아 있습니다.
+      </>
+    ),
+  },
+  {
+    q: "로그인은 몇 개나 해야 하나요?",
+    a: (
+      <>
+        Claude Code 와 Codex 중 <strong>하나만</strong> 로그인해도 시작할 수
+        있습니다. <strong>시작하기</strong> 탭 ②단계의{" "}
+        <strong>원클릭 사인인</strong> 을 누르면 터미널 탭이 자동으로 열리고
+        로그인 명령까지 자동 입력됩니다 — 브라우저가 뜨면 승인만 하면 되고,
+        완료되면 앱이 스스로 인식합니다.
+      </>
+    ),
+  },
+  {
+    q: "Claude / ChatGPT 구독이 없어요.",
+    a: (
+      <>
+        두 가지 길이 있습니다. ①<strong>구독</strong> — ②단계의 안내 링크에서
+        공식 플랜에 가입하면 정액 한도 안에서 씁니다. ②
+        <strong>벤더 키(BYOM)</strong> — GLM · MiniMax · Kimi 같은 공급자의 키를
+        등록하면 별도 하네스를 깔지 않고도 Claude 사다리의 한 칸으로 들어옵니다.
+        등록은 시작하기 탭 아래쪽 또는 <strong>하네스</strong> 탭에서 합니다.
+      </>
+    ),
+  },
+  {
+    q: "AI 사용료가 마블로 요금에 포함되나요?",
+    a: (
+      <>
+        아니요. 토큰 사용료는{" "}
+        <strong>이미 쓰고 계신 Claude Code · Codex 계정으로 청구</strong>
+        됩니다. 마블로 요금제는 앱 기능과 한도에 대한 것입니다 — Free 는
+        프로젝트 1개 · 동시 에이전트 5명이고, 유료 플랜은 사실상 제한이
+        없습니다(공정 사용). 쓴 양은 <strong>사용량</strong> 탭에서 확인합니다.
+      </>
+    ),
+  },
+  {
+    q: "모델은 누가 고르나요? 프리셋의 퍼센트는 어디 갔나요?",
+    a: (
+      <>
+        프리셋은 이제 <strong>고정 퍼센트가 아니라 후보 집합</strong>입니다.
+        실제 선택은 디스패치마다 태그 · 잔여 쿼터 · 주간 한도 · 관측된 사용량 ·
+        라우팅 그래프를 점수화해서 결정합니다. 기본값{" "}
+        <strong>Auto (Marblo Recommended)</strong> 는 Claude · Codex · Grok 을
+        경쟁시키고, env-swap 벤더(MiniMax · GLM · Kimi)는 Claude 사다리의 칸으로
+        참가합니다. <strong>Cost Saver</strong> 는 구독 잔여를 아껴야 할
+        자원으로 보게 만들어 싼 칸이 이기게 하고, <strong>Balanced</strong> 는
+        Antigravity 까지 포함한 전 fleet 균등, 그 밖에 단일 하네스 전용과 Custom
+        이 있습니다.
+      </>
+    ),
+  },
+  {
+    q: "모델·프리셋을 바꿨는데 반영이 안 돼요.",
+    a: (
+      <>
+        선택 자체는 즉시 저장되지만, 디스패치 라우팅과 오케스트레이터 하네스는
+        Electron 메인 프로세스가 읽습니다. 실제 스폰 분포는{" "}
+        <strong>앱을 재시작한 뒤</strong>부터 바뀝니다. 오케스트레이터 모델과
+        텔레그램 채널 설정도 마찬가지로{" "}
+        <strong>이후 새로 띄우는 오케스트레이터</strong>에만 적용되니, 돌고 있는
+        오케스트레이터는 재시작해 주세요.
+      </>
+    ),
+  },
+  {
+    q: "폴더는 어떻게 연결하나요? 첫 실행에 처음 보는 프로젝트가 열려 있어요.",
+    a: (
+      <>
+        처음 실행하면 폴더를 고르기 전에도 제품이 움직이도록{" "}
+        <code>&lt;문서&gt;/Marblo Sample</code> 에 의존성 없는 미니 예제
+        프로젝트를 만들어 자동으로 연결합니다. 내 저장소로 바꾸려면 상단의{" "}
+        <strong>폴더 열기 / 폴더 바꾸기</strong> 를 쓰면 됩니다. 이미 내용이
+        있는 폴더는 <strong>한 바이트도 건드리지 않습니다</strong> — 비어 있을
+        때만 예제를 심습니다.
+      </>
+    ),
+  },
+  {
+    q: "화면이 너무 복잡해요. 대화창 하나만 보고 싶어요.",
+    a: (
+      <>
+        헤더의 <strong>💬 간단 모드</strong> 를 누르면 탭 · 보드 · 워크트리를
+        접고 큰 오케스트레이터 대화창 하나만 남습니다. 반대로 간단 모드 상단바의{" "}
+        <strong>‘개발 모드로 보기’</strong> 로 언제든 돌아옵니다. 설정 ›
+        프로필에도 같은 토글이 있고,{" "}
+        <strong>진행 중인 에이전트는 모드를 바꿔도 그대로 계속 돕니다</strong>.
+      </>
+    ),
+  },
+  {
+    q: "오케스트레이터가 안 뜹니다.",
+    a: (
+      <>
+        순서대로 확인하세요. ① 폴더가 연결돼 있는지(미연결이면 기동을 시도조차
+        하지 않습니다) ② <strong>시작하기</strong> 탭에서 CLI 가 ‘준비 완료’
+        인지 — 인증이 없으면 스폰이 조용히 실패합니다 ③ ‘다시 확인’ 으로
+        프로브를 갱신 ④ 그래도 안 되면 앱 재시작. 콜드 재시작 직후 터미널이
+        까맣게 보이는 것은 정상이며, 클릭하거나 창 크기를 바꾸면 다시
+        그려집니다.
+      </>
+    ),
+  },
+  {
+    q: "설치 · 로그인 안내가 계속 다시 보입니다.",
+    a: (
+      <>
+        온보딩은 모달이 아니라 <strong>시작하기</strong> 탭이라 닫아도 사라지지
+        않고 그 자리에 남습니다(그게 의도입니다). 이 탭으로 착지하는 것만 끄고
+        싶다면 탭 맨 아래의 <strong>‘시작할 때 이 탭으로 열지 않기’</strong> 를
+        쓰세요 — 단계는 그대로 남습니다. 이미 끝낸 단계가 다시 남은 것으로
+        보인다면 ‘다시 확인’ 을 눌러 프로브를 갱신해 주세요.
+      </>
+    ),
+  },
+  {
+    q: "워크트리가 뭔가요? 왜 폴더가 계속 늘어나죠?",
+    a: (
+      <>
+        에이전트는 서로의 작업을 덮어쓰지 않도록 티켓마다{" "}
+        <strong>격리된 git 워크트리(=별도 브랜치 폴더)</strong>에서 일합니다.{" "}
+        <strong>워크트리</strong> 탭에서 상태를 보고 diff 를 확인한 뒤 머지하고,
+        끝난 것은 같은 화면에서 정리하면 됩니다.
+      </>
+    ),
+  },
+  {
+    q: "여러 프로젝트를 동시에 굴리려면?",
+    a: (
+      <>
+        새 창을 열면 됩니다(창 하나 = 프로젝트 하나). 창마다 PTY 와 Bridge
+        라우팅이 독립이라 서로 간섭하지 않습니다. 같은 프로젝트를 두 창에서 열면
+        연속성을 위해 인스턴스를 의도적으로 공유합니다.
+      </>
+    ),
+  },
+];
+
 const KO: GuideContent = {
   sections: [
     {
-      title: "1. Marblo란",
+      id: "what",
+      title: "1. 마블로란",
       body: (
-        <p className="text-sm text-[#bac2de] leading-relaxed">
-          Marblo는 이종 AI 에이전트(Claude Code / Gemini / Codex)를 가상
-          터미널로 분할 호출하여, 오케스트레이터가 칸반 보드와 연동해 컨텍스트를
-          유지하며 태스크를 운영하는 데스크탑 도구입니다. 한 창 = 한 프로젝트가
-          기본, 창을 더 열면 다른 프로젝트를 동시에 굴릴 수 있습니다.
-        </p>
-      ),
-    },
-    {
-      title: "2. 시작하기 — 프로젝트 만들고 오케스트레이터 띄우기",
-      body: (
-        <ol className="list-decimal pl-5 text-sm text-[#bac2de] space-y-1.5">
-          <li>좌측 사이드바에서 프로젝트 폴더 선택 (또는 새로 만들기)</li>
-          <li>아래 오케스트레이터 패널이 자동으로 Claude Code를 띄움</li>
-          <li>
-            오케스트레이터에 자연어로 요청 → <code>/tf-start</code> 또는
-            <code>/tf-analyze</code> 사용
-          </li>
-          <li>Board 탭에서 생성된 태스크를 확인 / 편집</li>
-          <li>Agents 탭에서 스폰된 에이전트 모니터링</li>
-        </ol>
-      ),
-    },
-    {
-      title: "3. TaskForce 슬래시 커맨드",
-      body: (
-        <div>
-          <p className="mb-3 text-sm text-[#bac2de] leading-relaxed">
-            <code>/tf-*</code> 슬래시 커맨드는 Marblo 설치 시 자동으로 사용자
-            Claude Code에 등록됩니다. 어느 디렉터리에서 Claude를 띄우든 슬래시
-            메뉴에 노출됩니다.
+        <div className={`${P} space-y-2`}>
+          <p>
+            마블로는 <strong>AI 에이전트 팀의 관제탑</strong>입니다.
+            오케스트레이터에게 말로 시키면 → 할 일을 티켓으로 쪼개고 → 각 티켓에
+            맞는 에이전트를 실제 터미널 프로세스로 띄우고 → 티켓마다 격리된
+            워크트리에서 작업해 → 보드와 완료 이력에 결과가 쌓입니다.
           </p>
-          <CommandTable commands={KO_COMMANDS} />
+          <p>
+            에이전트는 이미 쓰고 계신 CLI(Claude Code · Codex · Grok ·
+            Antigravity)로 돌아갑니다. 마블로는 그 위에서 무엇을 누구에게
+            맡길지, 무엇이 끝났는지를 관리합니다.
+          </p>
         </div>
       ),
     },
     {
-      title: "4. Marblo MCP — 오케스트레이터 ↔ 칸반 ↔ 에이전트",
+      id: "first",
+      title: "2. 처음 켰다면 — 간단 모드와 개발 모드",
       body: (
-        <div className="text-sm text-[#bac2de] leading-relaxed space-y-2">
+        <div className={`${P} space-y-2`}>
           <p>
-            Marblo MCP 서버는 자동으로 사용자 Claude Code의 글로벌 설정에
-            등록됩니다 (<code>~/.claude.json</code>). Marblo 앱이 실행 중이면
-            외부 Claude Code 세션에서도 다음 도구를 호출할 수 있습니다:
+            새로 설치한 기기는 <strong>간단 모드</strong>로 열립니다. 탭도
+            보드도 없이 오케스트레이터 대화창 하나뿐이라, 하고 싶은 말을 적어
+            보내는 것만으로 첫 결과까지 갑니다. 진행 상황은 대화창 아래 라이브
+            스트립에 미니 보드와 일하는 에이전트로 나타납니다.
           </p>
-          <ul className="list-disc pl-5 space-y-1">
+          <p>
+            폴더를 아직 안 골랐어도 괜찮습니다 — 첫 실행에 예제 프로젝트가
+            자동으로 연결돼 오케스트레이터가 바로 열립니다(아래 FAQ 참고).
+          </p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              간단 → 개발: 상단바 <strong>‘개발 모드로 보기’</strong>. 첫 작업이
+              끝나면 승격 안내도 한 번 뜹니다.
+            </li>
+            <li>
+              개발 → 간단: 헤더의 <strong>💬 간단 모드</strong>. 설정 ›
+              프로필에도 같은 토글이 있습니다.
+            </li>
+          </ul>
+          <Note>
+            모드는 <strong>보여 주는 범위만</strong> 바꿉니다. 돌고 있는
+            에이전트와 티켓은 그대로 유지되고, 개발 모드로 돌아오면 열어 두었던
+            탭까지 복원됩니다.
+          </Note>
+        </div>
+      ),
+    },
+    {
+      id: "setup",
+      title: "3. 셋업은 ‘시작하기’ 탭에서 — 원클릭 두 개",
+      body: (
+        <div className={`${P} space-y-2`}>
+          <p>
+            설치와 로그인은 이 문서가 아니라 <strong>시작하기</strong> 탭이
+            담당합니다. 상태를 실제로 검사해서 남은 것만 시키기 때문입니다.
+          </p>
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>
+              <strong>모두 설치</strong> — 아직 없는 CLI 만 골라 순서대로
+              설치합니다. 이미 있는 것은 건너뜁니다.
+            </li>
+            <li>
+              <strong>원클릭 사인인</strong> — 터미널 탭이 자동으로 열리고
+              로그인 명령이 자동 입력됩니다. 브라우저 승인만 하면 앱이 완료를
+              스스로 인식합니다. Claude Code · Codex 중 하나면 충분합니다.
+            </li>
+            <li>
+              <strong>폴더 연결</strong> — 첫 실행이면 예제 프로젝트가 이미
+              연결돼 있습니다. 내 저장소로 바꾸려면 폴더 열기.
+            </li>
+            <li>
+              <strong>첫 티켓</strong> — 여기까지 오면 마블로가 실제로 무엇을
+              해주는지 눈으로 보입니다.
+            </li>
+          </ol>
+          <p className={MUTED}>
+            네 단계는 저장돼 다시 열면 멈춘 자리에서 이어지고, 건너뛴 단계도
+            목록에서 사라지지 않습니다. 막히면 각 단계에 ‘막혔을 때’ 대안이 함께
+            적혀 있습니다.
+          </p>
+        </div>
+      ),
+    },
+    {
+      id: "layout",
+      title: "4. 화면 구성",
+      body: (
+        <div className={`${P} space-y-2`}>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              <strong>왼쪽 터미널 열</strong> — 위는 오케스트레이터, 아래는
+              에이전트 터미널. 가운데 경계선을 끌어 폭과 높이를 조절하고, 창이
+              좁아지면 자동으로 접힙니다.
+            </li>
+            <li>
+              <strong>오른쪽 작업 탭</strong> — 보드 · 코드 · 워크트리 등. 탭을
+              바꿔도 왼쪽 터미널은 그대로 살아 있습니다.
+            </li>
+            <li>
+              <strong>사이드바</strong> — 파일 트리와 프로젝트 전환.
+            </li>
+            <li>
+              <strong>Activity 패널</strong> —{" "}
+              <kbd className="rounded bg-[#313244] px-1.5 py-0.5 text-xs">
+                Cmd/Ctrl + Shift + A
+              </kbd>{" "}
+              로 열리는 실시간 활동 스트림. 항목을 누르면 해당 탭으로
+              이동합니다.
+            </li>
+          </ul>
+          <p className={MUTED}>
+            창 하나 = 프로젝트 하나가 기본입니다. 새 창을 열면 다른 프로젝트를
+            동시에 굴릴 수 있고, 창마다 PTY / Bridge 라우팅이 독립입니다.
+          </p>
+        </div>
+      ),
+    },
+    {
+      id: "tabs",
+      title: "5. 탭별 안내",
+      body: (
+        <div className="space-y-3">
+          <p className={P}>
+            아래 목록은 지금 이 빌드의 탭 바를 그대로 읽어 만듭니다 — 순서도
+            구성도 화면과 같습니다.
+          </p>
+          <TabTable notes={KO_TAB_NOTES} />
+        </div>
+      ),
+    },
+    {
+      id: "orchestrator",
+      title: "6. 오케스트레이터에게 시키기",
+      body: (
+        <div className="space-y-3">
+          <div className={`${P} space-y-2`}>
+            <p>
+              그냥 한국어로 말하면 됩니다 — “결제 실패 로그를 조사해서 원인
+              티켓으로 쪼개 줘” 같은 식으로. 정형화된 작업에는 아래{" "}
+              <code>/tf-*</code> 슬래시 커맨드가 더 빠릅니다. 입력창에{" "}
+              <code>/</code> 를 치면 같은 목록이 자동완성으로 뜹니다.
+            </p>
+            <p className={MUTED}>
+              이 커맨드는 마블로 설치 시 사용자 Claude Code 에 등록되므로, 앱
+              밖에서 띄운 Claude 세션의 슬래시 메뉴에도 나타납니다.
+            </p>
+          </div>
+          <CommandTable />
+        </div>
+      ),
+    },
+    {
+      id: "models",
+      title: "7. 모델 — 무엇이 어떤 티켓을 맡을지",
+      body: (
+        <div className={`${P} space-y-2`}>
+          <p>모델은 두 군데에서 정합니다(설정 › 모델).</p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              <strong>오케스트레이터 하네스</strong> — 관제탑 자신이 어떤 CLI 로
+              돌지. 바꾸면 새로 띄우는 오케스트레이터부터 적용됩니다.
+            </li>
+            <li>
+              <strong>Agent Model Preset</strong> — 티켓을 맡을 에이전트의{" "}
+              <strong>후보 집합</strong>. 고정 퍼센트가 아닙니다: 실제 선택은
+              디스패치마다 태그 · 잔여 쿼터 · 주간 한도 · 관측된 사용량 · 라우팅
+              그래프를 점수화해 결정합니다.
+            </li>
+          </ul>
+          <p>
+            기본값 <strong>Auto (Marblo Recommended)</strong> 는 Claude · Codex
+            · Grok 을 경쟁시킵니다. <strong>Cost Saver</strong> 는 구독 잔여를
+            아껴야 할 자원으로 보게 해 싼 칸(MiniMax · GLM · Kimi 등 env-swap)이
+            이기게 하고, 어려운 티켓은 그대로 상위 칸을 지킵니다.{" "}
+            <strong>Balanced</strong> 는 Antigravity 를 포함한 전 fleet 균등,
+            그리고 단일 하네스 전용 프리셋과 직접 고르는 <strong>Custom</strong>{" "}
+            이 있습니다.
+          </p>
+          <Note tone="warn">
+            ⚠️ 프리셋은 즉시 저장되지만 라우팅은 메인 프로세스가 읽습니다 — 실제
+            스폰 분포는 <strong>앱 재시작 후</strong>부터 바뀝니다.
+          </Note>
+        </div>
+      ),
+    },
+    {
+      id: "mcp",
+      title: "8. Marblo MCP — 오케스트레이터 ↔ 보드 ↔ 에이전트",
+      body: (
+        <div className={`${P} space-y-2`}>
+          <p>
+            Marblo MCP 서버는 설치 시 사용자 Claude Code 의 글로벌 설정(
+            <code>~/.claude.json</code>)에 자동 등록됩니다. 앱이 실행 중이면 앱
+            밖의 Claude 세션에서도 다음 도구를 쓸 수 있습니다.
+          </p>
+          <ul className="list-disc space-y-1 pl-5">
             <li>
               <code>create_task / get_all_tasks / update_task_status</code> —
-              칸반 태스크 CRUD
+              티켓 CRUD
             </li>
             <li>
               <code>
@@ -189,181 +571,488 @@ const KO: GuideContent = {
               — 에이전트 라이프사이클
             </li>
             <li>
-              <code>notify_orchestrator / add_activity</code> — 메시지 전달 /
-              진행 기록
+              <code>add_activity / ask_orchestrator</code> — 진행 기록 / 질의
             </li>
             <li>
               <code>search_tasks / get_agent_skill</code> — 검색 / 역할 스킬
               조회
             </li>
           </ul>
-          <p className="text-[#6c7086]">
+          <p className={MUTED}>
             ⓘ 동적 포트는 <code>~/.marblo/bridge-port</code> 디스커버리 파일로
-            전달되므로 사용자가 따로 설정할 필요 없습니다.
+            전달되므로 따로 설정할 것이 없습니다.
           </p>
         </div>
       ),
     },
     {
-      title: "5. 멀티윈도우 — 여러 프로젝트 동시 작업",
+      id: "extend",
+      title: "9. 확장 — 하네스 · 스토어 · 텔레그램",
       body: (
-        <div className="text-sm text-[#bac2de] leading-relaxed space-y-2">
+        <div className={`${P} space-y-3`}>
           <p>
-            상단 메뉴에서 새 창을 열면 다른 프로젝트의 오케스트레이터 /
-            에이전트를 동시에 굴릴 수 있습니다. 창마다 독립된 PTY / Bridge
-            라우팅이 적용되어 서로 간섭하지 않습니다.
-          </p>
-          <p className="text-[#6c7086]">
-            같은 프로젝트를 두 창에서 열면 의도적으로 인스턴스를 공유합니다
-            (연속성 유지). 다른 프로젝트는 완전히 격리됩니다.
-          </p>
-        </div>
-      ),
-    },
-    {
-      title: "6. Harness 스토어 — 추천 스킬 / MCP 한 번에 설치",
-      body: (
-        <div className="text-sm text-[#bac2de] leading-relaxed space-y-2">
-          <p>
-            상단 탭의 <strong>Harness</strong> 또는 단축키{" "}
+            <strong>하네스</strong> 탭은 <em>반드시 필요한 연결</em>(CLI 설치 ·
+            로그인, env-swap 벤더 키, 채널)이고, <strong>스토어</strong> 탭은{" "}
+            <em>골라 담는 카탈로그</em>(스킬 · MCP · 에이전트 · 워크플로 ·
+            지식팩 · 로컬 모델)입니다. 하네스는{" "}
             <kbd className="rounded bg-[#313244] px-1.5 py-0.5 text-xs">
               Cmd/Ctrl + Shift + H
             </kbd>{" "}
-            로 Harness 스토어를 엽니다. 큐레이팅된 패키지(superpowers, gstack,
-            context7 / filesystem / github MCP 등)를 카드 클릭으로 설치 / 제거할
-            수 있습니다.
+            로도 열립니다.
           </p>
-          <p className="text-[#6c7086]">
-            <strong>필수 (자동 설치)</strong> 카테고리는 Marblo 설치 시 이미
-            글로벌에 깔린 항목입니다. 추천 / MCP 카테고리는 옵션입니다.
-          </p>
+          <div className="space-y-2">
+            <p className="font-medium text-[#cdd6f4]">
+              텔레그램으로 알림 받고 지시하기
+            </p>
+            <ol className="list-decimal space-y-1.5 pl-5">
+              <li>
+                텔레그램에서 <code className="text-[#89b4fa]">@BotFather</code>{" "}
+                에게 <code className="text-[#89b4fa]">/newbot</code> 으로 봇을
+                만들고 <strong>봇 토큰</strong>을 복사합니다.
+              </li>
+              <li>
+                알림 받을 채널 / 그룹에 그 봇을 추가한 뒤{" "}
+                <strong>chatId</strong> 를 확인합니다(채널은 보통{" "}
+                <code className="text-[#89b4fa]">-100…</code> 으로 시작).
+              </li>
+              <li>
+                <strong>하네스</strong> 탭 채널 패널에 토큰과 chatId 를 넣고
+                토글을 켭니다.
+              </li>
+            </ol>
+            <Note tone="warn">
+              ⚠️ 채널 설정은{" "}
+              <strong>이후 새로 띄우는 오케스트레이터에만</strong> 적용됩니다.
+              돌고 있는 오케스트레이터에 반영하려면 재시작하세요.
+            </Note>
+          </div>
         </div>
       ),
     },
     {
-      title: "7. 텔레그램 채널 연결 — 에이전트 알림 / 제어를 텔레그램으로",
-      body: (
-        <div className="text-sm text-[#bac2de] leading-relaxed space-y-3">
-          <p>
-            텔레그램 봇을 연결하면 에이전트 진행 상황을 알림으로 받고, 텔레그램
-            채팅으로 오케스트레이터에 메시지를 보낼 수 있습니다. 아래 순서대로
-            설정합니다.
-          </p>
-          <ol className="list-decimal pl-5 space-y-2">
-            <li>
-              <strong>봇 생성 → 토큰 발급:</strong> 텔레그램에서{" "}
-              <code className="text-[#89b4fa]">@BotFather</code> 와 대화를 열고{" "}
-              <code className="text-[#89b4fa]">/newbot</code> 으로 봇을 만든 뒤,
-              발급된 <strong>봇 토큰</strong>(
-              <code className="text-[#89b4fa]">123456:ABC-DEF...</code> 형식)을
-              복사합니다.
-            </li>
-            <li>
-              <strong>봇을 채널 / 그룹에 추가 → chatId 확인:</strong> 알림을
-              받을 채널(또는 그룹)에 위 봇을 멤버로 추가한 뒤, 해당 대화의{" "}
-              <strong>chatId</strong> 를 확인합니다. 예:{" "}
-              <code className="text-[#89b4fa]">
-                api.telegram.org/bot&lt;토큰&gt;/getUpdates
-              </code>{" "}
-              응답의 <code className="text-[#89b4fa]">chat.id</code> 값. 채널은
-              보통 <code className="text-[#89b4fa]">-100...</code> 으로
-              시작합니다.
-            </li>
-            <li>
-              <strong>telegram 플러그인 설치:</strong> 사용자 Claude Code에{" "}
-              <code className="text-[#89b4fa]">
-                plugin:telegram@claude-plugins-official
-              </code>{" "}
-              플러그인을 설치합니다 (Harness 스토어 또는 플러그인 마켓).
-            </li>
-            <li>
-              <strong>하네스탭 채널 패널에 입력 → 토글:</strong> 상단{" "}
-              <strong>Harness</strong> 탭의 채널 패널에 봇 토큰과 chatId 를
-              입력하고, 토글을 켜서 채널을 활성화합니다.
-            </li>
-          </ol>
-          <p className="rounded-md border border-[#f9e2af]/30 bg-[#f9e2af]/10 px-3 py-2 text-[#f9e2af]">
-            ⚠️ 채널 설정은{" "}
-            <strong>이후 새로 launch 하는 오케스트레이터에만</strong>{" "}
-            적용됩니다. 이미 실행 중인 오케스트레이터에 반영하려면{" "}
-            <strong>해당 오케스트레이터를 재시작</strong>해야 합니다.
-          </p>
-        </div>
-      ),
-    },
-    {
-      title: "8. 다음 단계",
-      body: (
-        <ul className="list-disc pl-5 text-sm text-[#bac2de] space-y-1">
-          <li>Board 탭에서 태스크 흐름 확인</li>
-          <li>Agents 탭에서 에이전트 라이프사이클 / 비용 모니터링</li>
-          <li>Settings에서 BYOK API 키 등록 (Anthropic / OpenAI / Google)</li>
-          <li>Harness에서 추가 스킬 / MCP 설치 후 워크플로우 확장</li>
-        </ul>
-      ),
+      id: "faq",
+      title: "10. 자주 묻는 질문",
+      body: <Faq items={KO_FAQ} />,
     },
   ],
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// English
+// ─────────────────────────────────────────────────────────────────────────────
+
+const EN_TAB_NOTES: TabNotes = {
+  startHere:
+    "A four-step checklist: install → sign in → connect a folder → first ticket. Progress is saved, so reopening resumes where you stopped, and a skipped step stays in the list instead of vanishing. The demo video and the interactive demo live here too.",
+  guide: "This page.",
+  board:
+    "The kanban board. Tickets the orchestrator creates flow through TODO · CLAIMED · IN_PROGRESS · REVIEW · DONE, with BLOCKED / FAILED collected in a separate “stuck” lane above. Open a card for details, the activity timeline and the diff.",
+  code: "The Monaco editor. Edit files opened from the sidebar tree and switch between the repo root and any worktree from the selector. Markdown, images and notebooks open in dedicated views.",
+  lanes:
+    "Quick Lanes. Run the improvement you just noticed in its own worktree, in parallel, without leaving your main work. Each lane gets a terminal, and missions are managed here too.",
+  agents:
+    "The agent management dashboard — status, assigned ticket and cost per spawned agent, plus stop / restart / delete. The terminals themselves live in the left column.",
+  project:
+    "The people side of the project — members, roles, invites and per-member workload. Invites and role assignment share the same screen as Settings → Team (team features are a paid plan).",
+  worktrees:
+    "Every ticket's isolated branch folder in one list: mergeable · behind · stale · conflicted at a glance, plus diff review, merge and cleanup.",
+  history:
+    "Completed tickets with the agents' completion reports and merge history. Filter by period and role, and export a share card of what shipped.",
+  usage:
+    "Token usage and cost estimates per model, per agent and per day — live totals (agent docs) merged with history (BigQuery).",
+  store:
+    "The public registry catalog — skills, MCP servers, agents, workflows, knowledge packs and local models. This is the optional, nice-to-have side.",
+  harness:
+    "The connections this app REQUIRES — CLI install and sign-in, env-swap vendor keys, channels. If the store is optional, this is the wiring.",
+  missions: "Missions — multi-step execution units (dev flag only).",
+  flows:
+    "The flow editor — build pipelines out of nodes (beta · dev flag only).",
+  deploy: "Deploy tab — GCP Cloud Run deploys (dev flag only).",
+  settings:
+    "Profile · models · billing · team · privacy · language · bug report. Also reachable from the gear in the header.",
+};
+
+const EN_FAQ: FaqItem[] = [
+  {
+    q: "Do I really have to install a CLI?",
+    a: (
+      <>
+        Yes. The orchestrator and the agents run as real processes on top of an
+        installed CLI. Claude Code is required; Codex, Grok and Antigravity are
+        optional. Step ① of the <strong>Start here</strong> tab has an{" "}
+        <strong>Install all</strong> button that picks only what is missing and
+        installs it in order.
+      </>
+    ),
+  },
+  {
+    q: "Automatic install failed (EACCES, npm permission errors…)",
+    a: (
+      <>
+        The failed CLI's card keeps the manual command and a link to the
+        official docs. Run that command in a terminal, then hit{" "}
+        <strong>Re-check</strong> to refresh the state. The per-row [Install]
+        button stays around precisely so you can retry the one row that failed.
+      </>
+    ),
+  },
+  {
+    q: "How many accounts do I need to sign in to?",
+    a: (
+      <>
+        <strong>One</strong> of Claude Code or Codex is enough to start. Step
+        ②'s <strong>one-click sign-in</strong> opens a terminal tab and types
+        the login command for you — approve it in the browser that pops up, and
+        the app detects completion on its own.
+      </>
+    ),
+  },
+  {
+    q: "I don't have a Claude / ChatGPT subscription.",
+    a: (
+      <>
+        Two paths. (1) <strong>Subscribe</strong> — step ② links to the official
+        plans; you then work inside a flat-rate limit. (2){" "}
+        <strong>Vendor keys (BYOM)</strong> — register a key for GLM, MiniMax,
+        Kimi and friends and they join as rungs on the Claude ladder without
+        installing another harness. Register them at the bottom of Start here or
+        on the <strong>Harness</strong> tab.
+      </>
+    ),
+  },
+  {
+    q: "Is AI usage included in what I pay Marblo?",
+    a: (
+      <>
+        No. Token usage is{" "}
+        <strong>
+          billed to the Claude Code / Codex account you already have
+        </strong>
+        . Marblo's plans cover app features and limits — Free is 1 project and 5
+        concurrent agents; paid tiers are effectively unlimited (fair use). See
+        what you've spent on the <strong>Usage</strong> tab.
+      </>
+    ),
+  },
+  {
+    q: "Who picks the model? Where did the preset percentages go?",
+    a: (
+      <>
+        A preset is now a <strong>candidate set, not a fixed split</strong>.
+        Each dispatch scores tags, live quota headroom, weekly token limits,
+        observed usage and the routing graph, then picks the harness and the
+        rung. The default <strong>Auto (Marblo Recommended)</strong> makes
+        Claude, Codex and Grok compete, with env-swap vendors (MiniMax, GLM,
+        Kimi) riding the Claude ladder. <strong>Cost Saver</strong> makes the
+        selector treat subscription quota as scarce so cheap rungs win;{" "}
+        <strong>Balanced</strong> spreads across the whole fleet including
+        Antigravity; and there are single-harness presets plus{" "}
+        <strong>Custom</strong>.
+      </>
+    ),
+  },
+  {
+    q: "I changed the model / preset and nothing happened.",
+    a: (
+      <>
+        The choice saves immediately, but dispatch routing and the orchestrator
+        harness are read by the Electron main process. The actual spawn
+        distribution changes <strong>after you restart the app</strong>. The
+        orchestrator model and Telegram channel settings likewise apply only to{" "}
+        <strong>orchestrators launched afterwards</strong> — restart a running
+        one to pick them up.
+      </>
+    ),
+  },
+  {
+    q: "How do I connect a folder? Why is there a project I never created?",
+    a: (
+      <>
+        So the product moves before you have picked anything, the first run
+        seeds a dependency-free mini project at{" "}
+        <code>&lt;Documents&gt;/Marblo Sample</code> and connects it
+        automatically. Point it at your own repo with{" "}
+        <strong>Open folder / Change folder</strong> up top. A folder that
+        already has content is <strong>never touched</strong> — the sample is
+        only seeded into an empty one.
+      </>
+    ),
+  },
+  {
+    q: "This is too much screen. Can I get just the chat?",
+    a: (
+      <>
+        Hit <strong>💬 Simple mode</strong> in the header: tabs, board and
+        worktrees fold away and one big orchestrator chat remains. Come back any
+        time with <strong>Advanced mode</strong> in the simple-mode top bar (the
+        same toggle also lives in Settings → Profile).{" "}
+        <strong>Running agents keep running</strong> across the switch.
+      </>
+    ),
+  },
+  {
+    q: "The orchestrator won't start.",
+    a: (
+      <>
+        In order: (1) is a folder connected? Without one it does not even try to
+        launch. (2) On <strong>Start here</strong>, is the CLI marked ready?
+        With no auth, spawns fail silently. (3) Hit <strong>Re-check</strong> to
+        refresh the probe. (4) Still stuck — restart the app. A black terminal
+        right after a cold restart is normal; click it or resize the window and
+        it repaints.
+      </>
+    ),
+  },
+  {
+    q: "The install / sign-in guidance keeps coming back.",
+    a: (
+      <>
+        Onboarding is the <strong>Start here</strong> tab, not a modal, so it
+        deliberately stays put instead of disappearing when dismissed. If you
+        only want to stop landing on it, use{" "}
+        <strong>“don't open this tab on start”</strong> at the bottom of the tab
+        — the steps remain. If a step you already finished looks incomplete, hit
+        Re-check to refresh the probe.
+      </>
+    ),
+  },
+  {
+    q: "What is a worktree, and why do folders keep appearing?",
+    a: (
+      <>
+        So agents never overwrite each other, each ticket is worked in an{" "}
+        <strong>isolated git worktree</strong> (its own branch folder). The{" "}
+        <strong>Worktrees</strong> tab shows their state, lets you review the
+        diff, merge, and clean up the finished ones.
+      </>
+    ),
+  },
+  {
+    q: "How do I run several projects at once?",
+    a: (
+      <>
+        Open another window — one window, one project. Each window has its own
+        PTY and Bridge routing, so they never interfere. Opening the same
+        project twice intentionally shares the instance, to keep continuity.
+      </>
+    ),
+  },
+];
+
 const EN: GuideContent = {
   sections: [
     {
-      title: "1. What is Marblo",
+      id: "what",
+      title: "1. What Marblo is",
       body: (
-        <p className="text-sm text-[#bac2de] leading-relaxed">
-          Marblo is a desktop tool that fans heterogeneous AI agents (Claude
-          Code / Gemini / Codex) out across virtual terminals, while an
-          orchestrator keeps context and runs your tasks in sync with a kanban
-          board. One window = one project by default; open more windows to run
-          other projects at the same time.
-        </p>
-      ),
-    },
-    {
-      title:
-        "2. Getting started — create a project and launch the orchestrator",
-      body: (
-        <ol className="list-decimal pl-5 text-sm text-[#bac2de] space-y-1.5">
-          <li>
-            Pick a project folder in the left sidebar (or create a new one)
-          </li>
-          <li>The orchestrator panel below auto-launches Claude Code</li>
-          <li>
-            Ask the orchestrator in natural language → use{" "}
-            <code>/tf-start</code> or <code>/tf-analyze</code>
-          </li>
-          <li>Review / edit the generated tasks on the Board tab</li>
-          <li>Monitor spawned agents on the Agents tab</li>
-        </ol>
-      ),
-    },
-    {
-      title: "3. TaskForce slash commands",
-      body: (
-        <div>
-          <p className="mb-3 text-sm text-[#bac2de] leading-relaxed">
-            <code>/tf-*</code> slash commands are registered into your Claude
-            Code automatically when Marblo is installed. They show up in the
-            slash menu no matter which directory you launch Claude from.
+        <div className={`${P} space-y-2`}>
+          <p>
+            Marblo is a <strong>control tower for a team of AI agents</strong>.
+            Tell the orchestrator what you want → it breaks the work into
+            tickets → spawns the right agent for each one as a real terminal
+            process → each works in its own isolated worktree → results land on
+            the board and in your work history.
           </p>
-          <CommandTable commands={EN_COMMANDS} />
+          <p>
+            The agents run on CLIs you already use — Claude Code, Codex, Grok,
+            Antigravity. Marblo is the layer above them that decides who gets
+            what and tracks what actually finished.
+          </p>
         </div>
       ),
     },
     {
-      title: "4. Marblo MCP — orchestrator ↔ kanban ↔ agents",
+      id: "first",
+      title: "2. First launch — simple mode vs advanced mode",
       body: (
-        <div className="text-sm text-[#bac2de] leading-relaxed space-y-2">
+        <div className={`${P} space-y-2`}>
+          <p>
+            A fresh install opens in <strong>simple mode</strong>: no tabs, no
+            board, just one orchestrator chat. Type what you want and you reach
+            a first result from there. Progress shows up under the chat as a
+            live strip with a mini board and the agents at work.
+          </p>
+          <p>
+            You don't need to have picked a folder yet — the first run connects
+            a sample project automatically so the orchestrator opens right away
+            (see the FAQ below).
+          </p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              Simple → advanced: <strong>Advanced mode</strong> in the top bar.
+              You also get a one-time invitation once your first work finishes.
+            </li>
+            <li>
+              Advanced → simple: <strong>💬 Simple mode</strong> in the header.
+              The same toggle is in Settings → Profile.
+            </li>
+          </ul>
+          <Note>
+            The mode changes <strong>only what is shown</strong>. Running agents
+            and tickets are untouched, and coming back to advanced mode restores
+            the tabs you had open.
+          </Note>
+        </div>
+      ),
+    },
+    {
+      id: "setup",
+      title: "3. Setup lives on the Start here tab — two one-click buttons",
+      body: (
+        <div className={`${P} space-y-2`}>
+          <p>
+            Installing and signing in is the <strong>Start here</strong> tab's
+            job, not this page's — it probes the real state and only asks for
+            what is missing.
+          </p>
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>
+              <strong>Install all</strong> — picks only the CLIs you don't have
+              and installs them in order, skipping the rest.
+            </li>
+            <li>
+              <strong>One-click sign-in</strong> — opens a terminal tab and
+              types the login command for you; approve in the browser and the
+              app detects it. One of Claude Code / Codex is enough.
+            </li>
+            <li>
+              <strong>Connect a folder</strong> — on a first run the sample
+              project is already connected. Open your own repo to switch.
+            </li>
+            <li>
+              <strong>First ticket</strong> — the step where you actually see
+              what Marblo does for you.
+            </li>
+          </ol>
+          <p className={MUTED}>
+            The four steps persist, so reopening resumes where you left off, and
+            a skipped step never disappears from the list. Each step also
+            carries a “when you're stuck” fallback.
+          </p>
+        </div>
+      ),
+    },
+    {
+      id: "layout",
+      title: "4. How the screen is laid out",
+      body: (
+        <div className={`${P} space-y-2`}>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              <strong>Left terminal column</strong> — orchestrator on top, agent
+              terminals below. Drag the dividers to resize; it auto-collapses on
+              narrow windows.
+            </li>
+            <li>
+              <strong>Right work pane</strong> — board, code, worktrees and the
+              rest. Switching tabs never disturbs the terminals on the left.
+            </li>
+            <li>
+              <strong>Sidebar</strong> — file tree and project switching.
+            </li>
+            <li>
+              <strong>Activity panel</strong> —{" "}
+              <kbd className="rounded bg-[#313244] px-1.5 py-0.5 text-xs">
+                Cmd/Ctrl + Shift + A
+              </kbd>{" "}
+              opens the live activity stream; clicking an entry jumps to the tab
+              it belongs to.
+            </li>
+          </ul>
+          <p className={MUTED}>
+            One window = one project by default. Open more windows to run other
+            projects at the same time; each window has independent PTY / Bridge
+            routing.
+          </p>
+        </div>
+      ),
+    },
+    {
+      id: "tabs",
+      title: "5. The tabs",
+      body: (
+        <div className="space-y-3">
+          <p className={P}>
+            The list below is generated from this build's actual tab bar — same
+            order, same membership as what you see.
+          </p>
+          <TabTable notes={EN_TAB_NOTES} />
+        </div>
+      ),
+    },
+    {
+      id: "orchestrator",
+      title: "6. Talking to the orchestrator",
+      body: (
+        <div className="space-y-3">
+          <div className={`${P} space-y-2`}>
+            <p>
+              Plain language works — “dig through the payment failure logs and
+              split the causes into tickets”. For routine work the{" "}
+              <code>/tf-*</code> slash commands below are faster; typing{" "}
+              <code>/</code> in the input brings up the same list as
+              autocomplete.
+            </p>
+            <p className={MUTED}>
+              These commands are registered into your Claude Code when Marblo is
+              installed, so they also appear in the slash menu of Claude
+              sessions you start outside the app.
+            </p>
+          </div>
+          <CommandTable />
+        </div>
+      ),
+    },
+    {
+      id: "models",
+      title: "7. Models — who takes which ticket",
+      body: (
+        <div className={`${P} space-y-2`}>
+          <p>Two settings decide this (Settings → Models).</p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              <strong>Orchestrator harness</strong> — which CLI the control
+              tower itself runs on. Applies to orchestrators launched after the
+              change.
+            </li>
+            <li>
+              <strong>Agent model preset</strong> — the{" "}
+              <strong>candidate set</strong> for the agents taking your tickets.
+              Not a fixed split: each dispatch scores tags, live quota headroom,
+              weekly limits, observed usage and the routing graph.
+            </li>
+          </ul>
+          <p>
+            The default <strong>Auto (Marblo Recommended)</strong> lets Claude,
+            Codex and Grok compete. <strong>Cost Saver</strong> makes the rung
+            selector treat subscription quota as scarce so the cheap env-swap
+            rungs (MiniMax, GLM, Kimi) win, while hard tickets keep the frontier
+            rung. <strong>Balanced</strong> spreads evenly across the whole
+            fleet including Antigravity, and there are single-harness presets
+            plus a <strong>Custom</strong> picker.
+          </p>
+          <Note tone="warn">
+            ⚠️ The preset saves instantly, but routing is read by the main
+            process — the real spawn distribution only changes{" "}
+            <strong>after an app restart</strong>.
+          </Note>
+        </div>
+      ),
+    },
+    {
+      id: "mcp",
+      title: "8. Marblo MCP — orchestrator ↔ board ↔ agents",
+      body: (
+        <div className={`${P} space-y-2`}>
           <p>
             The Marblo MCP server is registered into your Claude Code global
-            config automatically (<code>~/.claude.json</code>). While the Marblo
-            app is running, even external Claude Code sessions can call these
-            tools:
+            config (<code>~/.claude.json</code>) at install time. While the app
+            is running, even Claude sessions started outside it can call:
           </p>
-          <ul className="list-disc pl-5 space-y-1">
+          <ul className="list-disc space-y-1 pl-5">
             <li>
               <code>create_task / get_all_tasks / update_task_status</code> —
-              kanban task CRUD
+              ticket CRUD
             </li>
             <li>
               <code>
@@ -372,133 +1061,73 @@ const EN: GuideContent = {
               — agent lifecycle
             </li>
             <li>
-              <code>notify_orchestrator / add_activity</code> — message delivery
-              / progress logging
+              <code>add_activity / ask_orchestrator</code> — progress logging /
+              questions
             </li>
             <li>
               <code>search_tasks / get_agent_skill</code> — search / role-skill
               lookup
             </li>
           </ul>
-          <p className="text-[#6c7086]">
+          <p className={MUTED}>
             ⓘ The dynamic port is handed off via the{" "}
-            <code>~/.marblo/bridge-port</code> discovery file, so there's
+            <code>~/.marblo/bridge-port</code> discovery file, so there is
             nothing to configure manually.
           </p>
         </div>
       ),
     },
     {
-      title: "5. Multi-window — work on several projects at once",
+      id: "extend",
+      title: "9. Extending — harness · store · Telegram",
       body: (
-        <div className="text-sm text-[#bac2de] leading-relaxed space-y-2">
+        <div className={`${P} space-y-3`}>
           <p>
-            Open a new window from the top menu to run another project's
-            orchestrator / agents simultaneously. Each window gets independent
-            PTY / Bridge routing, so they don't interfere with one another.
-          </p>
-          <p className="text-[#6c7086]">
-            Opening the same project in two windows intentionally shares the
-            instance (to keep continuity). Different projects stay fully
-            isolated.
-          </p>
-        </div>
-      ),
-    },
-    {
-      title: "6. Harness store — install recommended skills / MCP in one click",
-      body: (
-        <div className="text-sm text-[#bac2de] leading-relaxed space-y-2">
-          <p>
-            Open the Harness store from the <strong>Harness</strong> tab up top
-            or the shortcut{" "}
+            The <strong>Harness</strong> tab is the <em>required</em> wiring
+            (CLI install and sign-in, env-swap vendor keys, channels); the{" "}
+            <strong>Store</strong> tab is the <em>optional</em> catalog (skills,
+            MCP servers, agents, workflows, knowledge packs, local models).
+            Harness also opens with{" "}
             <kbd className="rounded bg-[#313244] px-1.5 py-0.5 text-xs">
               Cmd/Ctrl + Shift + H
             </kbd>
-            . Install / remove curated packages (superpowers, gstack, context7 /
-            filesystem / github MCP, etc.) with a click on a card.
+            .
           </p>
-          <p className="text-[#6c7086]">
-            The <strong>Required (auto-installed)</strong> category is already
-            installed globally when Marblo is set up. The Recommended / MCP
-            categories are optional.
-          </p>
+          <div className="space-y-2">
+            <p className="font-medium text-[#cdd6f4]">
+              Notifications and control over Telegram
+            </p>
+            <ol className="list-decimal space-y-1.5 pl-5">
+              <li>
+                In Telegram, create a bot with{" "}
+                <code className="text-[#89b4fa]">/newbot</code> via{" "}
+                <code className="text-[#89b4fa]">@BotFather</code> and copy the{" "}
+                <strong>bot token</strong>.
+              </li>
+              <li>
+                Add that bot to the channel / group that should receive
+                notifications and find its <strong>chatId</strong> (channels
+                usually start with <code className="text-[#89b4fa]">-100…</code>
+                ).
+              </li>
+              <li>
+                Enter the token and chatId in the channel panel of the{" "}
+                <strong>Harness</strong> tab and flip the toggle.
+              </li>
+            </ol>
+            <Note tone="warn">
+              ⚠️ Channel settings apply{" "}
+              <strong>only to orchestrators launched afterwards</strong>.
+              Restart a running orchestrator to pick them up.
+            </Note>
+          </div>
         </div>
       ),
     },
     {
-      title:
-        "7. Connect a Telegram channel — agent notifications / control over Telegram",
-      body: (
-        <div className="text-sm text-[#bac2de] leading-relaxed space-y-3">
-          <p>
-            Connect a Telegram bot to receive agent progress as notifications
-            and to message the orchestrator from a Telegram chat. Set it up in
-            the order below.
-          </p>
-          <ol className="list-decimal pl-5 space-y-2">
-            <li>
-              <strong>Create a bot → get a token:</strong> In Telegram, open a
-              chat with <code className="text-[#89b4fa]">@BotFather</code> and
-              create a bot with <code className="text-[#89b4fa]">/newbot</code>,
-              then copy the issued <strong>bot token</strong> (format{" "}
-              <code className="text-[#89b4fa]">123456:ABC-DEF...</code>).
-            </li>
-            <li>
-              <strong>
-                Add the bot to a channel / group → find the chatId:
-              </strong>{" "}
-              Add the bot as a member of the channel (or group) that should
-              receive notifications, then find that chat's{" "}
-              <strong>chatId</strong>. E.g. the{" "}
-              <code className="text-[#89b4fa]">chat.id</code> value in the
-              response of{" "}
-              <code className="text-[#89b4fa]">
-                api.telegram.org/bot&lt;token&gt;/getUpdates
-              </code>
-              . Channels usually start with{" "}
-              <code className="text-[#89b4fa]">-100...</code>.
-            </li>
-            <li>
-              <strong>Install the telegram plugin:</strong> Install the{" "}
-              <code className="text-[#89b4fa]">
-                plugin:telegram@claude-plugins-official
-              </code>{" "}
-              plugin into your Claude Code (via the Harness store or the plugin
-              marketplace).
-            </li>
-            <li>
-              <strong>
-                Enter it in the Harness tab channel panel → toggle:
-              </strong>{" "}
-              Enter the bot token and chatId in the channel panel of the{" "}
-              <strong>Harness</strong> tab up top, and flip the toggle to
-              activate the channel.
-            </li>
-          </ol>
-          <p className="rounded-md border border-[#f9e2af]/30 bg-[#f9e2af]/10 px-3 py-2 text-[#f9e2af]">
-            ⚠️ Channel settings apply{" "}
-            <strong>only to orchestrators launched afterward</strong>. To apply
-            them to an already-running orchestrator, you must{" "}
-            <strong>restart that orchestrator</strong>.
-          </p>
-        </div>
-      ),
-    },
-    {
-      title: "8. Next steps",
-      body: (
-        <ul className="list-disc pl-5 text-sm text-[#bac2de] space-y-1">
-          <li>Check the task flow on the Board tab</li>
-          <li>Monitor agent lifecycle / cost on the Agents tab</li>
-          <li>
-            Register BYOK API keys in Settings (Anthropic / OpenAI / Google)
-          </li>
-          <li>
-            Install extra skills / MCP from Harness to extend your workflow
-          </li>
-        </ul>
-      ),
+      id: "faq",
+      title: "10. FAQ",
+      body: <Faq items={EN_FAQ} />,
     },
   ],
 };
