@@ -46,6 +46,10 @@ export type TelemetryEvent =
   | "auth:login_failed"
   | "onboarding:folder_connected"
   | "onboarding:folder_connect_failed"
+  // 첫 실행 샘플 프로젝트 시드(티켓 yk8ouW2pS6nGzH272rXy). 바로 뒤에 붙는
+  // folder_connected("new") 를 "자동 연결" 로 식별해 주는 짝 신호다 — 이게
+  // 없으면 제로셋업 온램프의 도달률을 수동 폴더 픽과 구분할 수 없다.
+  | "onboarding:sample_project_seeded"
   | "onboarding:orchestrator_opened"
   | "onboarding:orchestrator_blocked"
   // 연결 마법사(CliSetupGate) 단계별 진입/성공/실패 (ticket CecrriY8). 위
@@ -593,6 +597,19 @@ export const telemetry = {
       event: "onboarding:folder_connected",
       success: true,
       metadata: { mode, hasGitRemote },
+    });
+  },
+
+  /** 첫 실행 샘플 프로젝트 시드 결과(티켓 yk8ouW2pS6nGzH272rXy).
+   *  outcome = created(새로 시드) | reused(이미 있어 재사용) | failed.
+   *  이어지는 folderConnected("new") 와 짝을 이뤄 "자동 연결" 을 수동 픽과
+   *  구분한다 — 경로는 싣지 않는다. */
+  sampleProjectSeeded(outcome: "created" | "reused" | "failed") {
+    logTelemetry({
+      event: "onboarding:sample_project_seeded",
+      success: outcome !== "failed",
+      ...(outcome === "failed" ? { errorCategory: "seed_error" } : {}),
+      metadata: { outcome },
     });
   },
 

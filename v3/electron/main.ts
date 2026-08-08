@@ -201,6 +201,7 @@ import {
   type AccessMode,
 } from "./connection-store";
 import { cloneRepo, defaultCloneParentDir } from "./repo-clone";
+import { ensureSampleProject, resolveSampleProjectDir } from "./sample-project";
 import {
   pollGitHubDeviceCode,
   requestGitHubDeviceCode,
@@ -4796,6 +4797,35 @@ ipcMain.handle("fs:selectDirectory", async () => {
   });
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0];
+});
+
+// --- 첫 실행 샘플 프로젝트 (티켓 yk8ouW2pS6nGzH272rXy) ---
+//
+// 폴더 미설정이면 오케스트레이터가 아예 기동되지 않는다(useOrchestratorAutoLaunch
+// 는 currentProject.folderPath 를 키로 한다). 그 마지막 관문을 없애려면 "연결할
+// 폴더"가 하나 있어야 하는데, 아래 fs:* 뮤테이션은 전부 **이미 알고 있는 rootPath
+// 안**으로 제한되어 있어(fsGuard) 새 폴더를 만드는 데 쓸 수 없다. 그래서 시드는
+// 이 전용 핸들러 하나로만 일어난다 — 경로는 렌더러가 정하지 않고 main 이
+// `<Documents>/Marblo Sample` 로 고정 산출한다(임의 경로 쓰기 차단).
+ipcMain.handle("sample:ensure", async (_event, input: unknown) => {
+  const locale =
+    input &&
+    typeof input === "object" &&
+    (input as { locale?: unknown }).locale === "en"
+      ? "en"
+      : "ko";
+  const dir = resolveSampleProjectDir({
+    documentsDir: (() => {
+      try {
+        return app.getPath("documents");
+      } catch {
+        // 일부 리눅스/포터블 환경엔 documents 가 없다 — 홈으로 떨어진다.
+        return null;
+      }
+    })(),
+    homeDir: os.homedir(),
+  });
+  return ensureSampleProject({ dir, locale });
 });
 
 // File mutation operations. All paths must be inside rootPath (path-traversal guard).

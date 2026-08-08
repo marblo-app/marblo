@@ -5,6 +5,7 @@ import { useProjectStore } from "../stores/projectStore";
 import { useSubscriptionStore } from "../stores/subscriptionStore";
 import { useUiStore } from "../stores/uiStore";
 import { checkProjectCreate, ProjectLimitError } from "../lib/planLimits";
+import { useFirstRunSampleProject } from "./useFirstRunSampleProject";
 import telemetry from "../services/telemetryService";
 import type { Project } from "../types/project";
 
@@ -31,6 +32,15 @@ export interface ProjectSetup {
   /** Full folder-pick → auto-register (zero-click) flow, with an inline
    * name-your-project banner as the not-signed-in / write-failed fallback. */
   handleSelectDirectory: () => Promise<void>;
+
+  /**
+   * Everything `handleSelectDirectory` does *after* the native picker returns:
+   * bind the folder, dedupe against existing projects, auto-register, boot the
+   * orchestrator. Split out so a caller that already knows the path (the
+   * first-run sample seeder) reuses this exact path instead of growing a
+   * second, subtly different registration flow.
+   */
+  connectFolderPath: (dir: string) => Promise<void>;
 
   // Inline "name your project" banner — the fallback shown only when the
   // zero-click auto-register can't run (no signed-in user) or its write fails.
@@ -163,78 +173,89 @@ export function useProjectSetup(): ProjectSetup {
     ],
   );
 
+  const connectFolderPath = useCallback(
+    async (dir: string) => {
+      setRootPath(dir);
+
+      const remoteUrl = await window.electronAPI.fs.gitRemoteUrl(dir);
+
+      // Duplicate guard: this folder (or a project sharing its git remote) is
+      // already registered → open it, never create a second project. This is the
+      // deterministic common case; a genuinely ambiguous conflict is rare and
+      // still resolves to an existing project here rather than prompting.
+      const existing = findByPathOrRemote(dir, remoteUrl);
+      if (existing) {
+        // ★기기 간 경로 충돌의 근본 해소 지점 (티켓 sHyHC9RoutYHDt97UOEm).
+        // 다른 기기(예: 윈도우 PC)가 등록한 프로젝트를 여기서 git remote 로
+        // 매칭했다면, 이 기기에는 경로 칸이 없어 folderPath 가 undefined 다.
+        // 사용자가 방금 자기 로컬 클론을 골랐으므로 그 경로를 **내 칸에만**
+        // 기록한다 — 다음 부팅부터 own 으로 해결되고, 상대 기기의 칸은 그대로
+        // 남아 반대 방향으로 깨지지 않는다.
+        if (existing.folderPath !== dir) {
+          try {
+            await setFolderPathForThisMachine(existing.id, dir);
+          } catch (err) {
+            // 경로 기록 실패가 프로젝트 열기를 막아선 안 된다(fail-soft).
+            console.error("Failed to record this machine's folder path:", err);
+          }
+        }
+        // repo URL backfill (티켓 r8VggohxLGciDVXV2rf6): 생성 시점에 remote 가
+        // 없었거나 구버전으로 만들어진 프로젝트가 처음으로 git 폴더와 연결될 때
+        // gitRemoteUrl 을 기록한다 — 이 값이 있어야 초대된 멤버의 기기에서
+        // "저장소 연결(Clone & 연결)" 모달이 repo 를 자동 표시할 수 있다.
+        if (!existing.gitRemoteUrl && remoteUrl) {
+          try {
+            await useProjectStore
+              .getState()
+              .updateProject(existing.id, { gitRemoteUrl: remoteUrl });
+          } catch (err) {
+            // backfill 실패가 프로젝트 열기를 막아선 안 된다(fail-soft).
+            console.error("Failed to backfill project gitRemoteUrl:", err);
+          }
+        }
+        // `existing` 은 쓰기 이전의 스냅샷이라 folderPath 가 아직 비어 있다.
+        // 스토어가 낙관적으로 갱신한 최신본을 다시 집어야 오케 자동기동이
+        // 방금 고른 경로를 본다.
+        const refreshed =
+          useProjectStore
+            .getState()
+            .projects.find((p) => p.id === existing.id) ?? existing;
+        setCurrentProject(refreshed);
+        // Onboarding funnel: existing project opened (returning user / re-pick).
+        telemetry.folderConnected("existing", !!remoteUrl);
+        return;
+      }
+
+      // Default happy path for EVERY user (new or returning): the folder pick
+      // alone registers a project named after the folder, and setCurrentProject
+      // boots the orchestrator — zero extra clicks, no register-or-browse choice
+      // and no name-confirm step. Browsing a folder read-only without registering
+      // is still available as a non-blocking secondary action in the FileTree
+      // "Open Folder" menu, and the name can be changed afterwards via the
+      // FileTree project rename. Fall back to the inline name banner only when
+      // auto-register can't run (not signed in) or the write fails.
+      if (await autoRegisterProject(dir, remoteUrl)) return;
+      startInlineProjectCreation(dir, remoteUrl);
+    },
+    [
+      setRootPath,
+      findByPathOrRemote,
+      setCurrentProject,
+      setFolderPathForThisMachine,
+      autoRegisterProject,
+      startInlineProjectCreation,
+    ],
+  );
+
   const handleSelectDirectory = useCallback(async () => {
     const dir = await window.electronAPI.fs.selectDirectory();
     if (!dir) return;
+    await connectFolderPath(dir);
+  }, [connectFolderPath]);
 
-    setRootPath(dir);
-
-    const remoteUrl = await window.electronAPI.fs.gitRemoteUrl(dir);
-
-    // Duplicate guard: this folder (or a project sharing its git remote) is
-    // already registered → open it, never create a second project. This is the
-    // deterministic common case; a genuinely ambiguous conflict is rare and
-    // still resolves to an existing project here rather than prompting.
-    const existing = findByPathOrRemote(dir, remoteUrl);
-    if (existing) {
-      // ★기기 간 경로 충돌의 근본 해소 지점 (티켓 sHyHC9RoutYHDt97UOEm).
-      // 다른 기기(예: 윈도우 PC)가 등록한 프로젝트를 여기서 git remote 로
-      // 매칭했다면, 이 기기에는 경로 칸이 없어 folderPath 가 undefined 다.
-      // 사용자가 방금 자기 로컬 클론을 골랐으므로 그 경로를 **내 칸에만**
-      // 기록한다 — 다음 부팅부터 own 으로 해결되고, 상대 기기의 칸은 그대로
-      // 남아 반대 방향으로 깨지지 않는다.
-      if (existing.folderPath !== dir) {
-        try {
-          await setFolderPathForThisMachine(existing.id, dir);
-        } catch (err) {
-          // 경로 기록 실패가 프로젝트 열기를 막아선 안 된다(fail-soft).
-          console.error("Failed to record this machine's folder path:", err);
-        }
-      }
-      // repo URL backfill (티켓 r8VggohxLGciDVXV2rf6): 생성 시점에 remote 가
-      // 없었거나 구버전으로 만들어진 프로젝트가 처음으로 git 폴더와 연결될 때
-      // gitRemoteUrl 을 기록한다 — 이 값이 있어야 초대된 멤버의 기기에서
-      // "저장소 연결(Clone & 연결)" 모달이 repo 를 자동 표시할 수 있다.
-      if (!existing.gitRemoteUrl && remoteUrl) {
-        try {
-          await useProjectStore
-            .getState()
-            .updateProject(existing.id, { gitRemoteUrl: remoteUrl });
-        } catch (err) {
-          // backfill 실패가 프로젝트 열기를 막아선 안 된다(fail-soft).
-          console.error("Failed to backfill project gitRemoteUrl:", err);
-        }
-      }
-      // `existing` 은 쓰기 이전의 스냅샷이라 folderPath 가 아직 비어 있다.
-      // 스토어가 낙관적으로 갱신한 최신본을 다시 집어야 오케 자동기동이
-      // 방금 고른 경로를 본다.
-      const refreshed =
-        useProjectStore.getState().projects.find((p) => p.id === existing.id) ??
-        existing;
-      setCurrentProject(refreshed);
-      // Onboarding funnel: existing project opened (returning user / re-pick).
-      telemetry.folderConnected("existing", !!remoteUrl);
-      return;
-    }
-
-    // Default happy path for EVERY user (new or returning): the folder pick
-    // alone registers a project named after the folder, and setCurrentProject
-    // boots the orchestrator — zero extra clicks, no register-or-browse choice
-    // and no name-confirm step. Browsing a folder read-only without registering
-    // is still available as a non-blocking secondary action in the FileTree
-    // "Open Folder" menu, and the name can be changed afterwards via the
-    // FileTree project rename. Fall back to the inline name banner only when
-    // auto-register can't run (not signed in) or the write fails.
-    if (await autoRegisterProject(dir, remoteUrl)) return;
-    startInlineProjectCreation(dir, remoteUrl);
-  }, [
-    setRootPath,
-    findByPathOrRemote,
-    setCurrentProject,
-    setFolderPathForThisMachine,
-    autoRegisterProject,
-    startInlineProjectCreation,
-  ]);
+  // 첫 실행 자동 연결 — 이 훅 안에 두는 이유는 두 셸(Layout / WorkspaceShell)이
+  // 각자 useProjectSetup 을 부르기 때문이다. 여기 달면 배선 지점이 하나다.
+  useFirstRunSampleProject(connectFolderPath);
 
   // Main-process recovery actions for a dead rootPath (see notifyRootPathMissing
   // / invalidateRemovedWorktreeRoots in electron/main.ts).
@@ -338,6 +359,7 @@ export function useProjectSetup(): ProjectSetup {
 
   return {
     handleSelectDirectory,
+    connectFolderPath,
     showNewProject,
     newProjectName,
     setNewProjectName,
