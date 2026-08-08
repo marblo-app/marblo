@@ -12,10 +12,56 @@
  * `~/.marblo/routing-graph.json` 에 `gpt-5.6-terra@medium` 류 키가 실제로 생기는지는
  * 앱 재시작(dist-electron/dist-mcp 재로드) 뒤 육안 확인 항목이다.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterEach,
+  vi,
+} from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+
+/**
+ * ★결정성 — (1) 블록의 실 dispatch 가 읽는 **라이브 기기 상태**를 끊는다
+ * (티켓 gW6Z2xtS). 계정 잔여 쿼터(CLI 셸아웃)·`usage-weekly.json`·개발 기기의
+ * `routing-graph.json` 세 가지다. 끊지 않으면 codex 주간 쿼터가 100% 에 닿는 날
+ * 잔여 0% → `budgetBiasScore` 하드게이트 → "All eligible models are budget
+ * exhausted — dispatch blocked" 로 이 블록 5건이 통째로 빨개진다
+ * (`enabledModels: ["gpt"]` 라 유일 후보가 소진 판정을 받는다). 배선 증명이
+ * 그날의 소진율에 좌우돼선 안 된다.
+ *
+ * ★`loadRoutingGraph`(기기 실파일)만 콜드로 갈아끼운다 — 이 파일 (2) 블록이
+ * 쓰는 `loadRoutingGraphFile`/`GraphUpdater` 는 임시파일을 쓰는 **진짜 코드**로
+ * 남아야 한다. 그 축이 이 파일의 본 증명이다.
+ */
+vi.mock("../../electron/account-usage", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../electron/account-usage")>();
+  return {
+    ...actual,
+    getAccountRateLimits: async () => ({ claude: null, gpt: null, grok: null }),
+  };
+});
+vi.mock("../../electron/usage-rollup", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../electron/usage-rollup")>();
+  return { ...actual, loadUsageRollup: () => null };
+});
+vi.mock("../../electron/routing-graph", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../electron/routing-graph")>();
+  return { ...actual, loadRoutingGraph: () => actual.emptyRoutingGraph() };
+});
+
+/** ε-greedy 탐색을 끈다 — 자동선택 칸이 확률로 흔들리면 키 단언이 간헐 실패한다. */
+beforeAll(() => {
+  process.env.MARBLO_ROUTING_EXPLORE = "0";
+});
+
 import {
   BridgeServer,
   type DispatchTaskRequest,
@@ -345,11 +391,7 @@ describe("P2 배선 — outcome 이 model@effort × taskType 셀로 접히고 �
     const keys = graphModelKeys("gpt", "standard", () => ({
       codexReasoning: "medium",
     }));
-    expect(keys).toEqual([
-      "gpt-5.6-terra@medium",
-      "gpt-5.5@medium",
-      "gpt",
-    ]);
+    expect(keys).toEqual(["gpt-5.6-terra@medium", "gpt-5.5@medium", "gpt"]);
     expect(graphBiasForModel(keys, ctx, graph)).toBeGreaterThan(0);
     // gpt-5.5 학습은 폴백으로만 상속된다. 폴백을 빼면 새 변종 셀은 아직 비어 있다.
     expect(graphBiasForModel(["gpt-5.6-terra@medium"], ctx, graph)).toBe(0);

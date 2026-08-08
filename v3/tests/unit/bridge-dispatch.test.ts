@@ -13,8 +13,52 @@
  * WorktreeCoordinator so we exercise the real BridgeServer routing without
  * Electron / node-pty / git.
  */
-import { describe, it, expect } from "vitest";
+import { beforeAll, describe, it, expect, vi } from "vitest";
 import * as path from "node:path";
+
+/**
+ * ★결정성 — 라우팅이 읽는 **라이브 기기 상태**를 이 파일에서 끊는다(티켓 gW6Z2xtS).
+ *
+ * `dispatchTask` 는 세 군데서 기기 상태를 읽는다:
+ *   · `getAccountRateLimits()` — 이 기기 구독 계정의 실제 잔여 쿼터(CLI 셸아웃).
+ *   · `loadUsageRollup()`      — `~/.marblo/usage-weekly.json` 실파일.
+ *   · `loadRoutingGraph()`     — `~/.marblo/routing-graph.json` 실파일(학습 결과).
+ *
+ * 끊지 않으면 같은 코드가 기기·날짜마다 다른 판정을 낸다. 실제로 codex 주간 쿼터가
+ * 100% 에 닿은 날, 잔여 0% → `budgetBiasScore` 하드게이트(bias=null) → "budget
+ * exhausted — dispatch blocked" 로 gpt/codex/antigravity 케이스 7건이 통째로
+ * 빨개졌다(claude 는 36% 라 통과). 코드 회귀가 아니라 유닛테스트가 외부 상태를
+ * 읽고 있었던 것 — 이 테스트를 작성한 커밋에서도 오늘 돌리면 똑같이 빨개진다.
+ *
+ * 중립(no-data)·콜드로 고정한다. 이 파일이 증명하는 축은 동시성 캡·재사용 레이스·
+ * per-task 유일성·명시 모델 하드필터지 쿼터가 아니다. 쿼터/그래프 축의 증명은
+ * `dispatch-scoring.test.ts` 와 `bridge-dispatch-autoselect.test.ts` 가 주입값으로
+ * 따로 한다.
+ */
+vi.mock("../../electron/account-usage", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../electron/account-usage")>();
+  return {
+    ...actual,
+    getAccountRateLimits: async () => ({ claude: null, gpt: null, grok: null }),
+  };
+});
+vi.mock("../../electron/usage-rollup", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../electron/usage-rollup")>();
+  return { ...actual, loadUsageRollup: () => null };
+});
+vi.mock("../../electron/routing-graph", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../electron/routing-graph")>();
+  return { ...actual, loadRoutingGraph: () => actual.emptyRoutingGraph() };
+});
+
+/** ε-greedy 탐색을 끈다 — 통합에서 확률을 굴리면 CI 가 주기적으로 빨개진다. */
+beforeAll(() => {
+  process.env.MARBLO_ROUTING_EXPLORE = "0";
+});
+
 import {
   BridgeServer,
   type DispatchTaskRequest,

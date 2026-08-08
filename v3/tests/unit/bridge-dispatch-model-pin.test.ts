@@ -34,6 +34,30 @@ vi.mock("../../electron/telemetry", () => ({
   sendTelemetry: vi.fn(),
 }));
 
+/**
+ * ★결정성 — 이 기기 구독 계정의 **라이브 잔여 쿼터**를 끊는다(티켓 gW6Z2xtS).
+ *
+ * `dispatchTask` 는 `getAccountRateLimits()` 로 실제 claude/codex CLI 를 셸아웃해
+ * 계정 잔여를 읽고, 잔여 0% 는 `budgetBiasScore` 의 하드게이트(bias=null)에 걸려
+ * **dispatch 자체를 막는다**(bridge-server: "Explicit model '…' is budget
+ * exhausted"). 그래서 모킹하지 않으면 이 파일의 판정이 사장님 계정의 그날 소진율에
+ * 좌우된다 — 실제로 codex 주간 쿼터가 100% 에 닿은 날 gpt/codex 케이스 6건이
+ * 통째로 빨개졌고(claude 는 36% 라 통과), 같은 실패가 이 테스트를 **작성한** 커밋
+ * (#660)에서도 재현됐다. 코드 회귀가 아니라 테스트가 외부 상태를 읽고 있었다.
+ *
+ * 중립(모든 하네스 no-data)으로 고정한다 — 이 파일이 증명하는 축은 모델 핀 →
+ * argv 이지 쿼터가 아니다. 쿼터 축의 증명은 `dispatch-scoring.test.ts`(순수 유닛)와
+ * `bridge-dispatch-autoselect.test.ts`(주입값)가 따로 한다.
+ */
+vi.mock("../../electron/account-usage", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../electron/account-usage")>();
+  return {
+    ...actual,
+    getAccountRateLimits: async () => ({ claude: null, gpt: null, grok: null }),
+  };
+});
+
 import { BridgeServer } from "../../electron/bridge-server";
 import { AgentConfigGenerator } from "../../electron/agent-config";
 import type { AgentInstance, AgentStatus } from "../../electron/agent-manager";
