@@ -119,6 +119,15 @@ import {
 } from "./portone";
 import { resolveEntitledPlan } from "./entitlement";
 import { MAX_COST_LOGS_LIMIT, normalizeCostLogsLimit } from "./costLogsLimit";
+import {
+  MAX_SAMPLES_PER_BATCH,
+  TRAINING_DATASET,
+  TRAINING_SAMPLES_SCHEMA,
+  TRAINING_SAMPLES_TABLE,
+  resolveCaptureGate,
+  toTrainingRows,
+  type TrainingConsentDoc,
+} from "./trainingCapture";
 
 function getFirebaseProjectId(): string | undefined {
   if (process.env.GCLOUD_PROJECT) return process.env.GCLOUD_PROJECT;
@@ -6561,6 +6570,141 @@ export const logTelemetryBatch = functions.https.onCall(
     return { inserted: rows.length };
   },
 );
+
+// ─── 학습데이터 캡처 → BigQuery marblo_training (ticket IqcXHVbT0rXnHloXpV7n) ──
+//
+// 위 logTelemetryBatch 와 **의도적으로 다른 데이터셋**이다. events 는 비식별·
+// 상시라 원문 텍스트를 못 담고(그래서 생성형 파인튜닝이 불가했다), 이 경로는
+// 원문을 담되 admin 본인 + 명시 동의로만 열린다. 데이터셋을 나눠야 BigQuery IAM
+// 에서 "분석용 텔레는 열고 전사(transcript)는 닫는" 분리가 가능하다.
+//
+// 게이트는 여기(서버)가 권위다. 클라도 자기 쪽에서 막지만(원문이 아예 기기 밖으로
+// 안 나가게), 조작된 클라가 있어도 여기서 uid==ADMIN_UID + consent 를 다시 본다.
+
+/** 사용자 문서에서 학습데이터 동의 플래그를 읽는다(문서 부재 = 미설정). */
+async function readTrainingConsentDoc(
+  uid: string,
+): Promise<TrainingConsentDoc | null> {
+  try {
+    const snap = await db.collection("users").doc(uid).get();
+    return snap.exists ? (snap.data() as TrainingConsentDoc) : null;
+  } catch (err) {
+    functions.logger.warn("[trainingCapture] consent read failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    // 읽기 실패는 '동의'가 아니다 — 호출부가 fail-closed 로 처리하도록 null 이
+    // 아닌 '미동의' 의미의 명시적 false 를 돌려준다.
+    return { privacyConsent: { trainingDataCapture: false } };
+  }
+}
+
+/**
+ * 이 계정이 학습데이터를 캡처해도 되는지. 응답은 boolean 2개뿐 — ADMIN_UID 도,
+ * 다른 사용자 정보도 절대 반환하지 않는다(클라가 admin uid 를 알 필요가 없다).
+ */
+export const getTrainingCaptureStatus = functions.https.onCall(
+  async (_data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const adminUid = process.env.ADMIN_UID?.trim() ?? "";
+    // 비적격(대다수 사용자)에겐 사용자 문서를 읽을 이유조차 없다.
+    if (!adminUid || uid !== adminUid) {
+      return { eligible: false, consent: false };
+    }
+    const gate = resolveCaptureGate(
+      uid,
+      adminUid,
+      await readTrainingConsentDoc(uid),
+    );
+    return { eligible: gate.eligible, consent: gate.consent };
+  },
+);
+
+let trainingTableReady = false;
+
+/** 데이터셋/테이블을 최초 1회 생성한다(마케팅 미러와 같은 패턴). 수동 BigQuery
+ *  마이그레이션 없이 배포 즉시 적재가 시작되도록 하기 위한 것. */
+async function ensureTrainingTable(): Promise<void> {
+  if (trainingTableReady) return;
+  const dataset = bigquery.dataset(TRAINING_DATASET);
+  const [datasetExists] = await dataset.exists();
+  if (!datasetExists) await dataset.create({ location: BQ_LOCATION });
+  const table = dataset.table(TRAINING_SAMPLES_TABLE);
+  const [tableExists] = await table.exists();
+  if (!tableExists) {
+    await table.create({
+      schema: TRAINING_SAMPLES_SCHEMA as unknown as {
+        name: string;
+        type: string;
+      }[],
+      timePartitioning: { type: "DAY", field: "ingestedAt" },
+      clustering: { fields: ["harness", "model", "source"] },
+    });
+    functions.logger.info("[trainingCapture] created training_samples table");
+  }
+  trainingTableReady = true;
+}
+
+export const logTrainingSamples = functions
+  .runWith({ timeoutSeconds: 120, memory: "512MB" })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const gate = resolveCaptureGate(
+      uid,
+      process.env.ADMIN_UID,
+      await readTrainingConsentDoc(uid),
+    );
+    if (!gate.allowed) {
+      // 사유는 코드로만 남긴다(uid 로그 금지). 클라는 permission-denied 를 보면
+      // 업로드를 멈추고 스풀을 보존한다.
+      functions.logger.warn("[trainingCapture] insert refused", {
+        reason: gate.reason,
+      });
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "Training capture is not enabled for this account.",
+      );
+    }
+
+    const samples = (data as { samples?: unknown })?.samples;
+    if (!Array.isArray(samples) || samples.length === 0) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "samples array required",
+      );
+    }
+    if (samples.length > MAX_SAMPLES_PER_BATCH) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        `Max ${MAX_SAMPLES_PER_BATCH} samples per batch`,
+      );
+    }
+
+    const ingestedAt = new Date().toISOString();
+    const { rows, skipped } = toTrainingRows(samples, uid, ingestedAt);
+    if (rows.length === 0) {
+      // 전부 빈 샘플이었다 — 클라가 스풀을 비울 수 있게 성공으로 답하되 건수를
+      // 정직하게 0 으로 돌려준다(조용한 성공 위장 금지).
+      return { inserted: 0, skipped };
+    }
+
+    await ensureTrainingTable();
+    await bigquery
+      .dataset(TRAINING_DATASET)
+      .table(TRAINING_SAMPLES_TABLE)
+      .insert(rows);
+
+    functions.logger.info("[trainingCapture] inserted", {
+      rows: rows.length,
+      skipped,
+    });
+    return { inserted: rows.length, skipped };
+  });
 
 interface CostRow {
   projectId: string;

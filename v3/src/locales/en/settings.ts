@@ -105,6 +105,15 @@ export const settings: Record<keyof typeof koSettings, string> = {
   "settings.privacy.bigquery.label": "First-party quality metrics (BigQuery)",
   "settings.privacy.bigquery.body":
     "Only de-identified data (anonymous install ID, token/cost/event types) is collected to our GCP. Account UID, code, and input text are never included, and nothing is shared with third parties.",
+  // Training-data capture — operator-only row (ticket IqcXHVbT0rXnHloXpV7n).
+  "settings.privacy.trainingCapture.label":
+    "Training data capture (raw prompts & responses)",
+  "settings.privacy.trainingCapture.hint":
+    "Stores the raw text of your own agent turns in a separate admin-only store for fine-tuning our models. Completely isolated from the de-identified metrics above, and applies only to the operator account.",
+  "settings.privacy.trainingCapture.status":
+    "Status: {state} · {spooled} pending upload",
+  "settings.privacy.trainingCapture.on": "capturing",
+  "settings.privacy.trainingCapture.off": "stopped",
   "settings.privacy.overseas.notice":
     "Overseas transfer consent: {status} — Sentry processes data in the US (PIPA Art. 15(2)).",
   "settings.privacy.overseas.agreed": "✓ Agreed",

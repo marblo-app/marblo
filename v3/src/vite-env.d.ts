@@ -1154,6 +1154,25 @@ interface AuthAPI {
   clearAgentCustomToken: () => Promise<{ ok: boolean; error?: string }>;
 }
 
+/**
+ * 학습데이터 캡처 상태(ticket IqcXHVbT0rXnHloXpV7n).
+ * ★불리언과 건수만 — 전사 원문은 이 브리지를 통과하지 않는다(캡처·업로드는
+ * main 프로세스 안에서 끝난다). preload 의 TrainingCaptureStatus 와 같은 모양.
+ */
+interface TrainingCaptureStatus {
+  enabled: boolean;
+  eligible: boolean;
+  consent: boolean;
+  spooled: number;
+  disabledReason: string | null;
+}
+
+interface TrainingAPI {
+  captureStatus: () => Promise<TrainingCaptureStatus>;
+  /** 동의 토글 직후 서버 게이트를 즉시 다시 읽는다. */
+  refreshCapture: () => Promise<TrainingCaptureStatus>;
+}
+
 /** Account-global rate-limit reading for one provider. null fields = no
  * information (logged out / probe failed), never zero usage. */
 interface RateLimitSnapshot {
@@ -1185,6 +1204,7 @@ interface ElectronAPI {
   testMode: TestModeAPI;
   window: WindowAPI;
   auth: AuthAPI;
+  training: TrainingAPI;
   claude: ClaudeAPI;
   harness: HarnessAPI;
   registry: RegistryAPI;

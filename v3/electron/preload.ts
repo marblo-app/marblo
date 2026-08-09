@@ -71,6 +71,23 @@ interface VendorSecretsSnapshot {
  * (preload 는 main 모듈을 import 하지 않으므로 구조만 다시 적는다 — 값이 아니라
  * 모양의 중복이라 백엔드가 프리셋을 늘려도 여기 손댈 일이 없다.)
  */
+/**
+ * 학습데이터 캡처 상태(ticket IqcXHVbT0rXnHloXpV7n). 불리언과 건수뿐 —
+ * 전사 원문도, uid 도, ADMIN_UID 도 여기 없다.
+ */
+interface TrainingCaptureStatus {
+  /** 지금 실제로 캡처 중인가(= eligible && consent && 서버가 거부 안 함). */
+  enabled: boolean;
+  /** 서버가 이 계정을 적격이라고 답했나(= 운영자 본인인가). */
+  eligible: boolean;
+  /** 동의 플래그가 켜져 있나. */
+  consent: boolean;
+  /** 아직 업로드 못 하고 로컬 스풀에 남아 있는 샘플 수. */
+  spooled: number;
+  /** 캡처가 꺼져 있다면 그 사유(서버 거부 등). 정상이면 null. */
+  disabledReason: string | null;
+}
+
 interface ModelPresetCatalog {
   presets: Array<{
     id: string;
@@ -144,6 +161,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ok: boolean;
       error?: string;
     }> => ipcRenderer.invoke("auth:clearAgentCustomToken"),
+  },
+  // 학습데이터 캡처(ticket IqcXHVbT0rXnHloXpV7n) — 상태 조회와 즉시 재평가만.
+  // ★원문 전사(transcript)는 이 브리지를 절대 통과하지 않는다. 캡처·업로드는
+  // 전부 main 프로세스 안에서 끝나고, 렌더러는 "켜졌나/적격인가/스풀 몇 건"만
+  // 본다. 렌더러로 원문을 흘리면 비식별 텔레 경로와 한 프로세스에 놓이게 된다.
+  training: {
+    captureStatus: (): Promise<TrainingCaptureStatus> =>
+      ipcRenderer.invoke("training:captureStatus"),
+    /** 동의 토글 직후 서버 게이트를 다시 읽는다(10분 주기 대기 없이 즉시 반영). */
+    refreshCapture: (): Promise<TrainingCaptureStatus> =>
+      ipcRenderer.invoke("training:refreshCapture"),
   },
   // Resolved Claude Code binary used to launch agents (path + version).
   claude: {

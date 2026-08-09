@@ -57,9 +57,27 @@ export type ConsentFlags = {
   ga4: boolean;
   mixpanel: boolean;
   overseasTransfer: boolean;
+  /**
+   * ★생성형 파인튜닝용 학습데이터(프롬프트/응답 **원문**) 캡처 동의
+   * (ticket IqcXHVbT0rXnHloXpV7n).
+   *
+   * 위 플래그들과 성격이 다르다: 저 넷은 비식별 지표를 어디로 보낼지의 문제고,
+   * 이건 원문 텍스트(코드·PII)를 보관해도 되는지의 문제다. 그래서 저장소도
+   * 분리돼 있고(admin 전용 BigQuery marblo_training), **오늘은 운영자 본인
+   * (ADMIN_UID)에게만 열린다** — 다른 계정은 이 값이 true 여도 서버가 거부한다
+   * (전면 옵트인 설계는 로드맵 ZFgn4zpt).
+   *
+   * optional 인 이유: 최초 실행 동의 모달(PIPA 옵트인 4항목)에 이 항목을 넣지
+   * 않기 위해서다. 넣으면 정책 버전을 올려야 하고, 그러면 전 사용자가 동의
+   * 팝업을 다시 보게 된다(#797~#809 saga). 미설정(undefined)의 해석은 서버가
+   * 한다 — 운영자 본인은 자기동의로 ON, 그 외는 애초에 비적격.
+   */
+  trainingDataCapture?: boolean;
 };
 
 export interface PrivacyConsent extends ConsentFlags {
+  /** 로컬 표시용으로는 항상 boolean(미설정=false)으로 정규화된다. */
+  trainingDataCapture: boolean;
   version: string;
   acceptedAt: Date | null;
   locale: string;
@@ -71,6 +89,7 @@ export const DEFAULT_CONSENT: PrivacyConsent = {
   ga4: false,
   mixpanel: false,
   overseasTransfer: false,
+  trainingDataCapture: false,
   version: "",
   acceptedAt: null,
   locale: "ko",
@@ -82,6 +101,7 @@ interface RawConsent {
   ga4?: boolean;
   mixpanel?: boolean;
   overseasTransfer?: boolean;
+  trainingDataCapture?: boolean;
   version?: string;
   acceptedAt?: { toDate: () => Date } | null;
   locale?: string;
@@ -122,6 +142,7 @@ function toConsent(raw: RawConsent | undefined): PrivacyConsent {
     ga4: !!raw.ga4,
     mixpanel: !!raw.mixpanel,
     overseasTransfer: !!raw.overseasTransfer,
+    trainingDataCapture: !!raw.trainingDataCapture,
     version: raw.version ?? "",
     acceptedAt:
       raw.acceptedAt && typeof raw.acceptedAt.toDate === "function"
@@ -363,6 +384,23 @@ export function clearPendingConsent(): void {
   }
 }
 
+/**
+ * Drop keys whose value is `undefined`.
+ *
+ * `trainingDataCapture` is optional, so a caller that never decided it (the
+ * first-run modal) leaves it undefined — and Firestore rejects an undefined
+ * field value outright, which would fail the whole consent write. Omitting the
+ * key is also the semantically right thing: with `merge: true` a previously
+ * stored value survives instead of being silently reset.
+ */
+function definedFlags(flags: ConsentFlags): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(flags)) {
+    if (typeof value === "boolean") out[key] = value;
+  }
+  return out;
+}
+
 /** Save flags + bump version + acceptedAt. `merge: true` so we don't
  *  clobber other fields on the user doc. */
 export async function saveConsent(
@@ -377,7 +415,7 @@ export async function saveConsent(
         doc(db, "users", uid),
         {
           privacyConsent: {
-            ...flags,
+            ...definedFlags(flags),
             version: CURRENT_POLICY_VERSION,
             acceptedAt: serverTimestamp(),
             locale,

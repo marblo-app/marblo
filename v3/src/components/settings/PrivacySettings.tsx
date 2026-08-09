@@ -58,6 +58,11 @@ export function PrivacySettings() {
   const [busyKey, setBusyKey] = useState<keyof ConsentFlags | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showPolicy, setShowPolicy] = useState(false);
+  // 학습데이터 캡처(ticket IqcXHVbT0rXnHloXpV7n)는 오늘 운영자 본인에게만
+  // 열려 있다. 적격 판정은 서버만 할 수 있으므로(ADMIN_UID 는 서버 env 에만
+  // 있다) main 프로세스에 물어보고, 적격일 때만 이 행을 그린다 — 일반 사용자에게
+  // 켤 수 없는 스위치를 보여주는 건 동의 UI 로서 정직하지 않다.
+  const [training, setTraining] = useState<TrainingCaptureStatus | null>(null);
 
   // Drive Sentry to match consent on page mount + every change.
   useEffect(() => {
@@ -68,6 +73,20 @@ export function PrivacySettings() {
   useEffect(() => {
     setTelemetryEnabled(consent.firstPartyTelemetry);
   }, [consent.firstPartyTelemetry]);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.electronAPI?.training
+      ?.captureStatus()
+      .then((status) => {
+        if (!cancelled) setTraining(status);
+      })
+      // 상태를 못 읽으면 행을 그리지 않는다(닫힌 쪽으로 실패).
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const toggle = async (id: keyof ConsentFlags) => {
     if (!user) return;
@@ -85,6 +104,7 @@ export function PrivacySettings() {
       ga4: consent.ga4,
       mixpanel: consent.mixpanel,
       overseasTransfer: consent.overseasTransfer,
+      trainingDataCapture: consent.trainingDataCapture,
       [id]: next,
     } as ConsentFlags;
     // If user turns Sentry ON, they need overseasTransfer too (US-hosted).
@@ -98,6 +118,12 @@ export function PrivacySettings() {
     }
     try {
       await save(user.uid, flags, consent.locale || "ko");
+      if (id === "trainingDataCapture") {
+        // main 프로세스 게이트를 즉시 다시 읽게 한다 — 10분 주기 재조회를
+        // 기다리면 "껐는데 아직 쌓인다"(또는 그 반대)로 보인다.
+        const status = await window.electronAPI?.training?.refreshCapture();
+        if (status) setTraining(status);
+      }
     } catch (err) {
       // Roll back optimistic UI on failure
       patchLocal({ [id]: !next } as Partial<ConsentFlags>);
@@ -177,6 +203,51 @@ export function PrivacySettings() {
         </span>{" "}
         — {t("settings.privacy.bigquery.body")}
       </div>
+
+      {/* 학습데이터 캡처 — 서버가 적격이라고 답한 계정(운영자 본인)에게만 보인다. */}
+      {training?.eligible && (
+        <div className="rounded-lg border border-purple-500/30 bg-purple-500/5">
+          <div className="flex items-center gap-3 px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-gray-200">
+                {t("settings.privacy.trainingCapture.label")}
+              </div>
+              <div className="text-[11px] text-gray-500">
+                {t("settings.privacy.trainingCapture.hint")}
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              data-testid="privacy-toggle-trainingDataCapture"
+              onClick={() => toggle("trainingDataCapture")}
+              disabled={busyKey === "trainingDataCapture"}
+              aria-checked={consent.trainingDataCapture}
+              aria-label={t("settings.privacy.trainingCapture.label")}
+              className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+                consent.trainingDataCapture ? "bg-purple-600" : "bg-gray-600"
+              }`}
+            >
+              <span
+                className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+                  consent.trainingDataCapture
+                    ? "translate-x-4"
+                    : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+          <div className="border-t border-purple-500/20 px-4 py-2 text-[11px] text-gray-500">
+            {t("settings.privacy.trainingCapture.status", {
+              state: training.enabled
+                ? t("settings.privacy.trainingCapture.on")
+                : t("settings.privacy.trainingCapture.off"),
+              spooled: String(training.spooled),
+            })}
+            {training.disabledReason ? ` — ${training.disabledReason}` : ""}
+          </div>
+        </div>
+      )}
 
       {consent.sentry && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-[11px] text-amber-200">

@@ -35,6 +35,30 @@ import {
 import { readAgyDbDelta, resolveAgyStore } from "./agy-usage";
 import { recordUsageDelta } from "./usage-rollup";
 
+/**
+ * Optional observer of the RAW session lines this tracker just read.
+ *
+ * The tracker already reads every session file incrementally and knows exactly
+ * which lines are new — the same lines that carry the prompt/completion text a
+ * generative fine-tune needs. Handing that slice to a sink here means the
+ * capture path (electron/training-capture.ts) costs zero extra file IO and can
+ * never drift out of sync with the tracker's watermark.
+ *
+ * The tracker stays ignorant of what the sink does: it is consent-gated,
+ * admin-scoped, and fail-closed on its own side. A throwing sink must never
+ * break cost tracking, so calls are wrapped.
+ */
+export type SessionLinesSink = (input: {
+  agentId: string;
+  format: SessionFormat;
+  /** Only the lines not seen on a previous poll. */
+  newLines: string[];
+  /** Concrete model id as currently attributed by the tracker. */
+  model: string;
+  /** Session file these lines came from — also the sink's session identity. */
+  filePath: string;
+}) => void;
+
 export interface CostEntry {
   totalCost: number;
   inputTokens: number;
@@ -103,7 +127,7 @@ type RawTokenRate = { inputPer1M: number; outputPer1M: number };
 const SUBSCRIPTION_PLANS_FILE = path.join(
   os.homedir(),
   ".marblo",
-  "subscription-plans.json"
+  "subscription-plans.json",
 );
 
 interface SubscriptionPlanEntry {
@@ -135,7 +159,7 @@ function loadSubscriptionPlans(): SubscriptionPlanEntry[] {
   } catch (err) {
     console.error(
       "[CostTracker] Failed to load subscription plans:",
-      err instanceof Error ? err.message : err
+      err instanceof Error ? err.message : err,
     );
     subscriptionPlanCache = [];
     return [];
@@ -336,7 +360,7 @@ export function perTokenRateFor(model: string): RawTokenRate {
  * `model@effort` 로 들어와도 effort 는 벗긴다: 단가·집계 축은 모델 id 다.
  */
 export function normalizeSeedModel(
-  candidate: string | null | undefined
+  candidate: string | null | undefined,
 ): string | null {
   const raw = (candidate ?? "").trim();
   if (!raw) return null;
@@ -371,7 +395,7 @@ let unmatchedPricingSink: ((ev: UnmatchedPricingEvent) => void) | null = null;
  * replaces it. Pass null to detach.
  */
 export function onUnmatchedPricing(
-  sink: ((ev: UnmatchedPricingEvent) => void) | null
+  sink: ((ev: UnmatchedPricingEvent) => void) | null,
 ): void {
   unmatchedPricingSink = sink;
 }
@@ -409,7 +433,7 @@ function recordUnmatchedPricing(model: string): void {
       `pricing table nor the model registry (alias/case-folded lookups also ` +
       `missed). Billing it at $0 — cost for this model is UNDER-REPORTED, not ` +
       `estimated. Seen ${count}x. Fix: add a verified row to ` +
-      `electron/model-registry.ts (never invent a rate).`
+      `electron/model-registry.ts (never invent a rate).`,
   );
   unmatchedPricingSink?.({ model: id, count, firstSeen: count === 1 });
 }
@@ -509,7 +533,7 @@ function flushWatermarks(): void {
   } catch (err) {
     console.warn(
       "[CostTracker] Could not persist parse watermarks:",
-      err instanceof Error ? err.message : err
+      err instanceof Error ? err.message : err,
     );
   }
 }
@@ -650,6 +674,7 @@ export class CostTracker {
   private agySessions: Map<string, AgyTracker> = new Map();
   private monthlySubscriptionTokens: Map<string, TokenTotals> = new Map();
   private onCostDetected?: (agentId: string, cost: CostEntry) => void;
+  private sessionLinesSink?: SessionLinesSink;
 
   // Claude plan rate-limits are ACCOUNT-global (all spawned claude agents
   // share ~/.claude auth), so one probe + one snapshot serves every claude
@@ -662,6 +687,15 @@ export class CostTracker {
 
   constructor(onCostDetected?: (agentId: string, cost: CostEntry) => void) {
     this.onCostDetected = onCostDetected;
+  }
+
+  /**
+   * Register (or clear) the raw-session-lines observer. Separate from the
+   * constructor so the consent-gated capture path can be wired after auth is
+   * up without reconstructing the tracker.
+   */
+  setSessionLinesSink(sink: SessionLinesSink | undefined): void {
+    this.sessionLinesSink = sink;
   }
 
   /**
@@ -721,7 +755,7 @@ export class CostTracker {
     accumulatedInputTokens = 0,
     accumulatedOutputTokens = 0,
     deltaCacheReadTokens = 0,
-    deltaCacheWriteTokens = 0
+    deltaCacheWriteTokens = 0,
   ): number {
     if (pricing.scheme === "per-token") {
       // API-equivalent value INCLUDING cache. Cache rates aren't in the table;
@@ -758,7 +792,7 @@ export class CostTracker {
     // portion above allowance, split proportionally across input/output.
     const overageDelta = Math.min(
       deltaInputTokens + deltaOutputTokens,
-      totalAfter - Math.max(totalBefore, allowance)
+      totalAfter - Math.max(totalBefore, allowance),
     );
     if (overageDelta <= 0) return 0;
     const totalDelta = deltaInputTokens + deltaOutputTokens || 1;
@@ -781,7 +815,7 @@ export class CostTracker {
   }
 
   private getMonthlySubscriptionTotals(
-    pricing: SubscriptionPricing
+    pricing: SubscriptionPricing,
   ): TokenTotals {
     const key = this.monthlyUsageKey(pricing);
     const existing = this.monthlySubscriptionTokens.get(key);
@@ -801,7 +835,7 @@ export class CostTracker {
         monthly.input,
         monthly.output,
         delta.cacheRead,
-        delta.cacheWrite
+        delta.cacheWrite,
       );
     }
 
@@ -812,13 +846,13 @@ export class CostTracker {
       0,
       0,
       delta.cacheRead,
-      delta.cacheWrite
+      delta.cacheWrite,
     );
   }
 
   private recordMonthlySubscriptionUsage(
     pricing: ModelPricing,
-    delta: TokenTotals
+    delta: TokenTotals,
   ): void {
     if (pricing.scheme !== "subscription") return;
     const monthly = this.getMonthlySubscriptionTotals(pricing);
@@ -855,7 +889,7 @@ export class CostTracker {
      * 씨앗을 구체 모델로 주면 첫 emit 부터 모델 id 와 정상 단가가 붙는다. 파일에서
      * 실제 과금 모델이 읽히면 그 관측이 여전히 씨앗을 덮는다(pollSessionFile).
      */
-    spawnedModelId?: string
+    spawnedModelId?: string,
   ): void {
     // Don't double-track
     if (this.sessions.has(agentId)) {
@@ -909,7 +943,7 @@ export class CostTracker {
       console.log(
         `[CostTracker] agent=${agentId} model=${model} writes no ~/.claude ` +
           `JSONL — skipping file tracking (PTY fallback still applies). ` +
-          `Wiring a real ${model} usage source is a separate task.`
+          `Wiring a real ${model} usage source is a separate task.`,
       );
       return;
     }
@@ -919,7 +953,7 @@ export class CostTracker {
       os.homedir(),
       ".claude",
       "projects",
-      encodedPath
+      encodedPath,
     );
 
     let filePath: string;
@@ -952,12 +986,12 @@ export class CostTracker {
           console.warn(
             `[CostTracker] agent=${agentId} has no sessionId and the newest ` +
               `JSONL (${files[0].name}) is already tracked by another agent — ` +
-              `skipping file tracking rather than charging one session twice.`
+              `skipping file tracking rather than charging one session twice.`,
           );
           return;
         }
         console.log(
-          `[CostTracker] No sessionId — using most recent: ${files[0].name}`
+          `[CostTracker] No sessionId — using most recent: ${files[0].name}`,
         );
       } catch {
         console.warn(`[CostTracker] Cannot read project dir: ${projectDir}`);
@@ -972,7 +1006,7 @@ export class CostTracker {
     // Bailing here is exactly what left newly-spawned agents reading 0 tokens.
     if (!fs.existsSync(filePath)) {
       console.log(
-        `[CostTracker] Session file not present yet, will poll until it appears: ${filePath}`
+        `[CostTracker] Session file not present yet, will poll until it appears: ${filePath}`,
       );
     }
 
@@ -991,13 +1025,13 @@ export class CostTracker {
       totalCostUsd: 0,
       timer: setInterval(
         () => this.pollSessionFile(agentId),
-        SESSION_POLL_INTERVAL_MS
+        SESSION_POLL_INTERVAL_MS,
       ),
     };
 
     this.sessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking session file for agent=${agentId}: ${filePath}`
+      `[CostTracker] Tracking session file for agent=${agentId}: ${filePath}`,
     );
 
     // Account-global rate-limit probe runs while any claude tracker lives.
@@ -1013,7 +1047,7 @@ export class CostTracker {
     if (this.claudeProbeTimer) return;
     this.claudeProbeTimer = setInterval(
       () => void this.pollClaudeUsage(),
-      CLAUDE_PROBE_INTERVAL_MS
+      CLAUDE_PROBE_INTERVAL_MS,
     );
     void this.pollClaudeUsage();
   }
@@ -1039,7 +1073,7 @@ export class CostTracker {
         this.claudeProbeFailures = 0;
         console.log(
           `[CostTracker] Claude rate-limit probe: 5h=${snap.primaryPercent}% ` +
-            `7d=${snap.secondaryPercent}% plan=${snap.planType ?? "?"}`
+            `7d=${snap.secondaryPercent}% plan=${snap.planType ?? "?"}`,
         );
       } else {
         this.claudeProbeFailures++;
@@ -1048,7 +1082,7 @@ export class CostTracker {
           this.claudeProbeFailures = 0;
           console.warn(
             `[CostTracker] Claude rate-limit probe failed ${CLAUDE_PROBE_MAX_FAILURES}x — ` +
-              `backing off ${CLAUDE_PROBE_BACKOFF_MS / 60_000}min`
+              `backing off ${CLAUDE_PROBE_BACKOFF_MS / 60_000}min`,
           );
         }
       }
@@ -1089,7 +1123,7 @@ export class CostTracker {
   private trackCliSession(
     agentId: string,
     model: "gpt" | "gemini" | "grok",
-    spawnedModelId?: string
+    spawnedModelId?: string,
   ): void {
     // SSOT: model→session-format mapping lives in session-parsers.formatForModel.
     // `model` is narrowed to "gpt" | "gemini" | "grok" here, so it always maps
@@ -1100,8 +1134,8 @@ export class CostTracker {
       format === "codex"
         ? codexSessionsDir(agentId)
         : format === "grok"
-        ? grokSessionsDir(agentId)
-        : geminiTmpDir(agentId);
+          ? grokSessionsDir(agentId)
+          : geminiTmpDir(agentId);
 
     const tracker: SessionTracker = {
       agentId,
@@ -1121,18 +1155,18 @@ export class CostTracker {
         (format === "codex"
           ? "gpt-5.5"
           : format === "grok"
-          ? "grok-4.5"
-          : "gemini-2.5-pro"),
+            ? "grok-4.5"
+            : "gemini-2.5-pro"),
       totalCostUsd: 0,
       timer: setInterval(
         () => this.pollSessionFile(agentId),
-        SESSION_POLL_INTERVAL_MS
+        SESSION_POLL_INTERVAL_MS,
       ),
     };
 
     this.sessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking ${format} session for agent=${agentId} under ${searchRoot}`
+      `[CostTracker] Tracking ${format} session for agent=${agentId} under ${searchRoot}`,
     );
 
     // Initial scan (file may not exist yet — poller tolerates that).
@@ -1205,18 +1239,22 @@ export class CostTracker {
         if (restored) {
           console.log(
             `[CostTracker] agent=${agentId} resuming ${tracker.filePath} at ` +
-              `line ${restored.lastLineCount} (already billed) instead of re-reading it`
+              `line ${restored.lastLineCount} (already billed) instead of re-reading it`,
           );
         }
       }
 
       const lines = readJsonlLines(tracker.filePath);
+      // Line index the parser is about to resume from — the boundary between
+      // "already seen" and "new". Captured BEFORE parseSessionDelta advances it.
+      const seenBefore = tracker.state.lastLineCount;
       const { delta, newState } = parseSessionDelta(
         tracker.format,
         lines,
-        tracker.state
+        tracker.state,
       );
       tracker.state = newState;
+      this.feedSessionLinesSink(tracker, lines.slice(seenBefore));
       saveParseState(tracker.filePath, newState);
       if (newState.model) tracker.model = newState.model;
       // Rate-limit source per format: codex carries it inside the rollout
@@ -1231,7 +1269,32 @@ export class CostTracker {
     } catch (err) {
       console.error(
         `[CostTracker] Error polling session for agent=${agentId}:`,
-        err
+        err,
+      );
+    }
+  }
+
+  /**
+   * Hand the newly-read session lines to the optional sink. Isolated in its
+   * own try/catch: an observer must never be able to stop the money path.
+   */
+  private feedSessionLinesSink(
+    tracker: SessionTracker,
+    newLines: string[],
+  ): void {
+    if (!this.sessionLinesSink || newLines.length === 0) return;
+    try {
+      this.sessionLinesSink({
+        agentId: tracker.agentId,
+        format: tracker.format,
+        newLines,
+        model: tracker.model,
+        filePath: tracker.filePath,
+      });
+    } catch (err) {
+      console.warn(
+        `[CostTracker] session-lines sink threw for agent=${tracker.agentId}:`,
+        err,
       );
     }
   }
@@ -1243,7 +1306,7 @@ export class CostTracker {
   private emit(
     tracker: SessionTracker,
     delta: TokenTotals,
-    rateLimit?: RateLimitInfo | null
+    rateLimit?: RateLimitInfo | null,
   ): void {
     const hasTokens =
       delta.input > 0 ||
@@ -1311,7 +1374,7 @@ export class CostTracker {
     console.log(
       `[CostTracker] Agent=${tracker.agentId} model=${tracker.model} ` +
         `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()} ` +
-        `cache_read=${acc.cacheRead.toLocaleString()} cache_write=${acc.cacheWrite.toLocaleString()}`
+        `cache_read=${acc.cacheRead.toLocaleString()} cache_write=${acc.cacheWrite.toLocaleString()}`,
     );
   }
 
@@ -1348,9 +1411,9 @@ export class CostTracker {
           tracker.format === "codex"
             ? entry.name.startsWith("rollout-") && entry.name.endsWith(".jsonl")
             : tracker.format === "grok"
-            ? entry.name === "updates.jsonl"
-            : entry.name.startsWith("session-") &&
-              entry.name.endsWith(".jsonl");
+              ? entry.name === "updates.jsonl"
+              : entry.name.startsWith("session-") &&
+                entry.name.endsWith(".jsonl");
         if (!matches) continue;
         let mtime: number;
         try {
@@ -1385,12 +1448,12 @@ export class CostTracker {
       loggedLimited: false,
       timer: setInterval(
         () => this.pollAgySession(agentId),
-        SESSION_POLL_INTERVAL_MS
+        SESSION_POLL_INTERVAL_MS,
       ),
     };
     this.agySessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking antigravity store for agent=${agentId}`
+      `[CostTracker] Tracking antigravity store for agent=${agentId}`,
     );
     this.pollAgySession(agentId);
   }
@@ -1417,7 +1480,7 @@ export class CostTracker {
           tracker.loggedLimited = true;
           console.warn(
             `[CostTracker] agy agent=${agentId} uses legacy .pb store — ` +
-              `token capture limited (no decode); relying on PTY signals.`
+              `token capture limited (no decode); relying on PTY signals.`,
           );
         }
         return;
@@ -1429,7 +1492,7 @@ export class CostTracker {
     } catch (err) {
       console.error(
         `[CostTracker] Error polling agy store for agent=${agentId}:`,
-        err
+        err,
       );
     }
   }
@@ -1479,7 +1542,7 @@ export class CostTracker {
 
     console.log(
       `[CostTracker] Agent=${tracker.agentId} model=${tracker.model} (agy) ` +
-        `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()}`
+        `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()}`,
     );
   }
 
@@ -1551,7 +1614,7 @@ export class CostTracker {
         const cost = this.computeIncrementalCost(
           pricing,
           inputTokens,
-          outputTokens
+          outputTokens,
         );
 
         this.onCostDetected?.(agentId, {

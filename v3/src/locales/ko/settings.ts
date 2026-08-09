@@ -103,6 +103,15 @@ export const settings = {
   "settings.privacy.bigquery.label": "자체 운영 품질 지표 (BigQuery)",
   "settings.privacy.bigquery.body":
     "식별정보를 제거한 비식별 데이터(익명 설치 ID, 토큰/비용/이벤트 종류)만 우리 GCP에 수집됩니다. 계정 UID·코드·입력 텍스트는 포함되지 않으며, 제3자에게 제공되지 않습니다.",
+  // 학습데이터 캡처 — 운영자 본인 계정에서만 보이는 행(ticket IqcXHVbT0rXnHloXpV7n).
+  "settings.privacy.trainingCapture.label":
+    "학습데이터 캡처 (프롬프트·응답 원문)",
+  "settings.privacy.trainingCapture.hint":
+    "자체 모델 파인튜닝용으로 내 에이전트 턴의 원문 텍스트를 별도 보안 저장소(admin 전용)에 보관합니다. 위 비식별 지표와는 완전히 분리된 경로이며, 운영자 본인 계정에만 적용됩니다.",
+  "settings.privacy.trainingCapture.status":
+    "상태: {state} · 미전송 대기 {spooled}건",
+  "settings.privacy.trainingCapture.on": "수집 중",
+  "settings.privacy.trainingCapture.off": "중지됨",
   "settings.privacy.overseas.notice":
     "국외 이전 동의: {status} — Sentry는 미국에서 처리됩니다 (PIPA 제15조 제2항).",
   "settings.privacy.overseas.agreed": "✓ 동의함",
