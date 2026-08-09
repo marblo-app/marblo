@@ -38,6 +38,28 @@ export const legal: Record<keyof typeof koLegal, string> = {
   "legal.consent.marketing.hint":
     "Sent to your sign-up email. All features work the same if you decline, and you can withdraw any time via the unsubscribe link in every email.",
 
+  // ── Training-data contribution card (TrainingConsentCard) ──
+  "legal.training.heading":
+    "Make Marblo better — contribute your work to model improvement",
+  "legal.training.body":
+    "Marblo learns which model to hand which job to. If you'd like, your work can help with that learning.",
+  "legal.training.alreadyOn.label": "Already on · de-identified metrics",
+  "legal.training.alreadyOn.hint":
+    "An anonymous install ID and aggregate metrics (de-identified derived features such as model, duration, and success) are used to improve routing quality. No raw text is included, and you can turn this off any time in Settings → Privacy.",
+  "legal.training.rawText.label":
+    "Optional · contribute raw prompts & responses",
+  "legal.training.rawText.hint":
+    "Stores the raw text of your own agent turns (which may include code) in a separate secure store used to train our own models. Fully isolated from the de-identified metrics, never shared with third parties, and withdrawable any time. Your consent is recorded immediately; actual collection opens up in phases.",
+  "legal.training.noPressure":
+    "Optional — every feature works exactly the same if you don't take part.",
+  "legal.training.viewDetails":
+    "View details (collected items · retention · withdrawal)",
+  "legal.training.optIn": "Count me in",
+  "legal.training.later": "Later",
+  "legal.training.saving": "Saving...",
+  "legal.training.thanks":
+    "Thank you! You can change this any time in Settings → Privacy.",
+
   // ── Re-consent banner for existing users (MarketingReconsentBanner) ──
   "legal.reconsent.label": "Get product news by email",
   "legal.reconsent.basis":

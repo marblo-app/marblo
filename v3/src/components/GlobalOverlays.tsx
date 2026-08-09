@@ -5,6 +5,7 @@ import { RepoConnectModal } from "./collaboration/RepoConnectModal";
 import { FirstSharedProjectModal } from "./collaboration/FirstSharedProjectModal";
 import { FirstProjectSurvey } from "./onboarding/FirstProjectSurvey";
 import { PrivacyConsentGate } from "./legal/PrivacyConsentGate";
+import { TrainingConsentCard } from "./legal/TrainingConsentCard";
 import { ChatToastHost } from "./chat/ChatToastHost";
 import { BugReportNoticeToast } from "./chat/BugReportNoticeToast";
 import { UpgradeModal } from "./settings/UpgradeModal";
@@ -68,6 +69,12 @@ export function GlobalOverlays({ projectSetup }: GlobalOverlaysProps) {
 
       {/* PIPA consent — auto-shows on first launch / policy version bump */}
       <PrivacyConsentGate />
+
+      {/* 학습데이터 기여 1회 옵트인 카드(선택). 비차단 코너 카드이고, PIPA 동의가
+          끝난 뒤 · 프로젝트를 연결한 뒤에만 뜬다. ★심플 셸(BeginnerShell)은
+          GlobalOverlays 를 마운트하지 않으므로 같은 카드를 자기 쪽에서 직접
+          마운트한다 — 양쪽 배선은 trainingConsentSurfaceParity 테스트가 지킨다. */}
+      <TrainingConsentCard />
 
       {/* Global team-chat listener and transient top notification. */}
       <ChatToastHost />

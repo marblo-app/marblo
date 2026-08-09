@@ -96,18 +96,24 @@ export const settings = {
   "settings.privacy.optInDescription":
     "비식별 사용 분석은 기본 켜짐이며 언제든 끌 수 있습니다. 외부 제3자(Sentry) 송신은 옵트인입니다.",
   "settings.privacy.firstParty.label": "사용 분석 (비식별)",
+  // ★라우팅 고지(ticket QFNrT4Z4dG9nGoRYmTlr): 라우팅 라벨(#892)은 새로 수집하는
+  //   항목이 아니라 이 비식별 지표에서 파생되는 특징이다. 수집 범위가 아니라
+  //   **이용 목적**을 명확히 밝히는 문구다 — 원문은 여기에 포함되지 않는다.
   "settings.privacy.firstParty.hint":
-    "익명 설치 ID와 집계 지표만 자체 GCP(BigQuery)에 수집. 계정 UID·코드·입력 텍스트 제외.",
+    "익명 설치 ID와 집계 지표만 자체 GCP(BigQuery)에 수집. 계정 UID·코드·입력 텍스트 제외. 이 비식별 파생 특징은 모델 라우팅(어떤 일을 어떤 모델에 맡길지) 품질 개선에도 쓰입니다.",
   "settings.privacy.sentry.label": "익명 크래시 리포트 (Sentry)",
   "settings.privacy.sentry.hint": "스택 트레이스에서 PII 자동 마스킹.",
   "settings.privacy.bigquery.label": "자체 운영 품질 지표 (BigQuery)",
   "settings.privacy.bigquery.body":
-    "식별정보를 제거한 비식별 데이터(익명 설치 ID, 토큰/비용/이벤트 종류)만 우리 GCP에 수집됩니다. 계정 UID·코드·입력 텍스트는 포함되지 않으며, 제3자에게 제공되지 않습니다.",
-  // 학습데이터 캡처 — 운영자 본인 계정에서만 보이는 행(ticket IqcXHVbT0rXnHloXpV7n).
+    "식별정보를 제거한 비식별 데이터(익명 설치 ID, 토큰/비용/이벤트 종류)만 우리 GCP에 수집됩니다. 계정 UID·코드·입력 텍스트는 포함되지 않으며, 제3자에게 제공되지 않습니다. 이 비식별 데이터에서 파생된 특징은 모델 라우팅 품질 개선에도 이용됩니다(원문 아님).",
+  // 학습데이터 캡처 행(ticket IqcXHVbT0rXnHloXpV7n + 동의배선 QFNrT4Z4dG9nGoRYmTlr).
+  // 행 자체는 모두에게 보이고 기본값은 off — 명시 옵트인만 인정한다.
   "settings.privacy.trainingCapture.label":
-    "학습데이터 캡처 (프롬프트·응답 원문)",
+    "학습데이터 기여 (프롬프트·응답 원문)",
   "settings.privacy.trainingCapture.hint":
-    "자체 모델 파인튜닝용으로 내 에이전트 턴의 원문 텍스트를 별도 보안 저장소(admin 전용)에 보관합니다. 위 비식별 지표와는 완전히 분리된 경로이며, 운영자 본인 계정에만 적용됩니다.",
+    "자체 모델 학습용으로 내 에이전트 턴의 원문 텍스트(코드 포함 가능)를 별도 보안 저장소에 보관합니다. 위 비식별 지표와 완전히 분리된 경로이고, 제3자에게 제공되지 않으며, 끄면 즉시 중단됩니다.",
+  "settings.privacy.trainingCapture.phased":
+    "상태: 이 계정은 아직 원문 수집이 열리지 않았습니다 — 동의는 지금 기록되고, 개방 시점부터 적용됩니다. 끄면 기록도 함께 철회됩니다.",
   "settings.privacy.trainingCapture.status":
     "상태: {state} · 미전송 대기 {spooled}건",
   "settings.privacy.trainingCapture.on": "수집 중",

@@ -37,6 +37,29 @@ export const legal = {
   "legal.consent.marketing.hint":
     "수신처: 가입 이메일. 동의하지 않아도 모든 기능을 동일하게 이용할 수 있고, 동의 후에도 메일 하단 수신거부 링크로 언제든 철회할 수 있습니다.",
 
+  // ── 학습데이터 기여 동의 카드 (TrainingConsentCard) ──────
+  // ★선택 동의다. 문구는 "무엇이 이미 켜져 있고(비식별), 이번에 무엇을 새로
+  //   묻는지(원문)" 를 분리해서 말한다 — 두 축을 한 문장에 섞으면 사용자는
+  //   자기가 무엇에 동의하는지 알 수 없다.
+  "legal.training.heading":
+    "마블로를 더 뛰어나게 — 내 작업으로 모델 개선에 기여",
+  "legal.training.body":
+    "마블로는 어떤 모델에 어떤 일을 맡길지 스스로 배웁니다. 원하시면 내 작업이 그 학습에 쓰이도록 도와주실 수 있습니다.",
+  "legal.training.alreadyOn.label": "이미 켜짐 · 비식별 지표",
+  "legal.training.alreadyOn.hint":
+    "익명 설치 ID와 집계 지표(모델·소요시간·성공 여부 등 비식별 파생 특징)는 라우팅 품질 개선에 쓰입니다. 원문은 포함되지 않으며, Settings → Privacy 에서 언제든 끌 수 있습니다.",
+  "legal.training.rawText.label": "선택 · 프롬프트·응답 원문 기여",
+  "legal.training.rawText.hint":
+    "내 에이전트 턴의 원문 텍스트(코드가 포함될 수 있습니다)를 자체 모델 학습용 별도 보안 저장소에 보관합니다. 비식별 지표와 완전히 분리된 경로이고, 제3자에게 제공되지 않으며, 언제든 철회할 수 있습니다. 동의는 즉시 기록되고 실제 수집은 순차 개방됩니다.",
+  "legal.training.noPressure":
+    "선택 항목입니다 — 참여하지 않아도 모든 기능이 동일하게 작동합니다.",
+  "legal.training.viewDetails": "자세히 보기 (수집 항목 · 보관 · 철회)",
+  "legal.training.optIn": "기여할게요",
+  "legal.training.later": "나중에",
+  "legal.training.saving": "저장 중...",
+  "legal.training.thanks":
+    "감사합니다! Settings → Privacy 에서 언제든 바꿀 수 있어요.",
+
   // ── 기존 사용자 재동의 배너 (MarketingReconsentBanner) ──
   "legal.reconsent.label": "마케팅 소식 받아보기",
   "legal.reconsent.basis":

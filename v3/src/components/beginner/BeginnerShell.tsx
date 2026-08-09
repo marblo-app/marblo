@@ -32,6 +32,8 @@ import { BeginnerPromotionModal } from "./BeginnerPromotionModal";
 import { BeginnerTaskModal } from "./BeginnerTaskModal";
 import { BeginnerTour } from "./BeginnerTour";
 import { OnboardingPreviewBanner } from "./OnboardingPreviewBanner";
+import { PrivacyConsentGate } from "../legal/PrivacyConsentGate";
+import { TrainingConsentCard } from "../legal/TrainingConsentCard";
 import {
   BUTTON_GHOST,
   BUTTON_PRIMARY,
@@ -614,6 +616,27 @@ export function BeginnerShell() {
           onConnect={closeDemo}
         />
       )}
+
+      {/* ★동의 게이트 — 심플 모드에도 있어야 한다(ticket QFNrT4Z4dG9nGoRYmTlr).
+          이 게이트는 모달만 띄우는 컴포넌트가 아니라 **동의 파이프라인 자체**다:
+            ① 가입 전 FirstRunFlow 가 로컬에 park 한 동의 답을 uid 가 생기는
+               순간 Firestore 로 flush 하고,
+            ② 동의 레코드를 읽어 store 를 채우며,
+            ③ 그 값으로 Sentry·1차 텔레메트리 게이트를 구동한다.
+          심플 셸은 GlobalOverlays 를 마운트하지 않으므로 지금까지 이 셋이 전부
+          돌지 않았다 — 심플로 시작한 사용자의 동의가 서버에 기록되지 않고(park 만
+          남아 있다가 승격 후에야 flush), 그 사이 동의 상태를 읽는 어떤 화면도
+          "모름" 으로 남는다. 어드밴스드와 같은 컴포넌트를 그대로 건다(셸이
+          배타적이라 이중 마운트는 없다). */}
+      <PrivacyConsentGate />
+
+      {/* ★학습데이터 기여 옵트인 — 어드밴스드 셸(GlobalOverlays)과 **같은**
+          컴포넌트다. 심플 모드는 GlobalOverlays 를 마운트하지 않으므로 여기서
+          직접 건다. 동의 표면이 한쪽 모드에만 있으면 "심플로 시작한 사람은
+          평생 못 본다" 가 되고, 그건 동의 설계로서 결함이다.
+          자기 판정으로만 뜨는 비차단 코너 카드라 위 모달들과 겹치지 않는다
+          (PIPA 모달이 떠 있는 동안·연결 전에는 스스로 렌더하지 않는다). */}
+      <TrainingConsentCard />
     </div>
   );
 }

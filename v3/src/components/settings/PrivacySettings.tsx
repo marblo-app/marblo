@@ -58,10 +58,15 @@ export function PrivacySettings() {
   const [busyKey, setBusyKey] = useState<keyof ConsentFlags | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showPolicy, setShowPolicy] = useState(false);
-  // 학습데이터 캡처(ticket IqcXHVbT0rXnHloXpV7n)는 오늘 운영자 본인에게만
-  // 열려 있다. 적격 판정은 서버만 할 수 있으므로(ADMIN_UID 는 서버 env 에만
-  // 있다) main 프로세스에 물어보고, 적격일 때만 이 행을 그린다 — 일반 사용자에게
-  // 켤 수 없는 스위치를 보여주는 건 동의 UI 로서 정직하지 않다.
+  // 학습데이터 캡처(ticket IqcXHVbT0rXnHloXpV7n). 실제 **수집**이 열려 있는지는
+  // 서버만 판정할 수 있으므로(ADMIN_UID 는 서버 env 에만 있다) main 프로세스에
+  // 물어본다 — 오늘은 운영자 본인 계정만 수집이 돈다.
+  //
+  // ★그래도 행은 모두에게 그린다(ticket QFNrT4Z4dG9nGoRYmTlr). 동의와 수집은
+  // 다른 일이다: 동의는 사용자가 지금 표명할 수 있어야 하고(PIPA 제22조 —
+  // 언제든 변경 가능), 수집은 서버가 순차 개방한다. 켤 수 없는 스위치를 숨기는
+  // 것보다, 켤 수 있되 "지금은 아직 수집되지 않는다" 를 상태줄에 정직하게 쓰는
+  // 쪽이 낫다 — 숨기면 비운영자는 옵트인할 창구 자체가 없다.
   const [training, setTraining] = useState<TrainingCaptureStatus | null>(null);
 
   // Drive Sentry to match consent on page mount + every change.
@@ -99,12 +104,15 @@ export function PrivacySettings() {
     }
     setBusyKey(id);
     const flags: ConsentFlags = {
-      firstPartyTelemetry: consent.firstPartyTelemetry,
-      sentry: consent.sentry,
-      ga4: consent.ga4,
-      mixpanel: consent.mixpanel,
-      overseasTransfer: consent.overseasTransfer,
-      trainingDataCapture: consent.trainingDataCapture,
+      firstPartyTelemetry: !!consent.firstPartyTelemetry,
+      sentry: !!consent.sentry,
+      ga4: !!consent.ga4,
+      mixpanel: !!consent.mixpanel,
+      overseasTransfer: !!consent.overseasTransfer,
+      trainingDataCapture: !!consent.trainingDataCapture,
+      // 설정에서 직접 결정한 사람에게 온보딩 카드를 다시 띄우지 않는다.
+      trainingDataPrompted:
+        !!consent.trainingDataPrompted || id === "trainingDataCapture",
       [id]: next,
     } as ConsentFlags;
     // If user turns Sentry ON, they need overseasTransfer too (US-hosted).
@@ -204,50 +212,56 @@ export function PrivacySettings() {
         — {t("settings.privacy.bigquery.body")}
       </div>
 
-      {/* 학습데이터 캡처 — 서버가 적격이라고 답한 계정(운영자 본인)에게만 보인다. */}
-      {training?.eligible && (
-        <div className="rounded-lg border border-purple-500/30 bg-purple-500/5">
-          <div className="flex items-center gap-3 px-4 py-3">
-            <div className="min-w-0 flex-1">
-              <div className="text-sm text-gray-200">
-                {t("settings.privacy.trainingCapture.label")}
-              </div>
-              <div className="text-[11px] text-gray-500">
-                {t("settings.privacy.trainingCapture.hint")}
-              </div>
+      {/* 학습데이터 캡처 — 모두에게 보이는 명시 옵트인(기본 off). 실제 수집이
+          도는지는 아래 상태줄이 서버 판정 그대로 말한다. */}
+      <div className="rounded-lg border border-purple-500/30 bg-purple-500/5">
+        <div className="flex items-center gap-3 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm text-gray-200">
+              {t("settings.privacy.trainingCapture.label")}
             </div>
-            <button
-              type="button"
-              role="switch"
-              data-testid="privacy-toggle-trainingDataCapture"
-              onClick={() => toggle("trainingDataCapture")}
-              disabled={busyKey === "trainingDataCapture"}
-              aria-checked={consent.trainingDataCapture}
-              aria-label={t("settings.privacy.trainingCapture.label")}
-              className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors disabled:opacity-50 ${
-                consent.trainingDataCapture ? "bg-purple-600" : "bg-gray-600"
+            <div className="text-[11px] text-gray-500">
+              {t("settings.privacy.trainingCapture.hint")}
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            data-testid="privacy-toggle-trainingDataCapture"
+            onClick={() => toggle("trainingDataCapture")}
+            disabled={busyKey === "trainingDataCapture"}
+            aria-checked={consent.trainingDataCapture}
+            aria-label={t("settings.privacy.trainingCapture.label")}
+            className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+              consent.trainingDataCapture ? "bg-purple-600" : "bg-gray-600"
+            }`}
+          >
+            <span
+              className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+                consent.trainingDataCapture ? "translate-x-4" : "translate-x-0"
               }`}
-            >
-              <span
-                className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
-                  consent.trainingDataCapture
-                    ? "translate-x-4"
-                    : "translate-x-0"
-                }`}
-              />
-            </button>
-          </div>
-          <div className="border-t border-purple-500/20 px-4 py-2 text-[11px] text-gray-500">
-            {t("settings.privacy.trainingCapture.status", {
-              state: training.enabled
-                ? t("settings.privacy.trainingCapture.on")
-                : t("settings.privacy.trainingCapture.off"),
-              spooled: String(training.spooled),
-            })}
-            {training.disabledReason ? ` — ${training.disabledReason}` : ""}
-          </div>
+            />
+          </button>
         </div>
-      )}
+        <div className="border-t border-purple-500/20 px-4 py-2 text-[11px] text-gray-500">
+          {training?.eligible ? (
+            <>
+              {t("settings.privacy.trainingCapture.status", {
+                state: training.enabled
+                  ? t("settings.privacy.trainingCapture.on")
+                  : t("settings.privacy.trainingCapture.off"),
+                spooled: String(training.spooled),
+              })}
+              {training.disabledReason ? ` — ${training.disabledReason}` : ""}
+            </>
+          ) : (
+            /* 서버가 아직 이 계정의 수집을 열지 않았다(또는 상태를 못 읽었다).
+                 동의는 지금 기록되고, 수집은 개방 시점부터 적용된다 — 켜 놓고
+                 아무 일도 안 일어나는 이유를 여기서 밝힌다. */
+            t("settings.privacy.trainingCapture.phased")
+          )}
+        </div>
+      </div>
 
       {consent.sentry && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-[11px] text-amber-200">

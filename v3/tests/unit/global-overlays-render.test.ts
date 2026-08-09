@@ -60,6 +60,10 @@ vi.mock("../../src/components/legal/PrivacyConsentGate", () => ({
   PrivacyConsentGate: () =>
     createElement("div", { "data-testid": "privacy-consent-gate" }),
 }));
+vi.mock("../../src/components/legal/TrainingConsentCard", () => ({
+  TrainingConsentCard: () =>
+    createElement("div", { "data-testid": "training-consent-card" }),
+}));
 vi.mock("../../src/components/chat/ChatToastHost", () => ({
   ChatToastHost: () =>
     createElement("div", { "data-testid": "chat-toast-host" }),
@@ -124,6 +128,7 @@ describe("GlobalOverlays DOM wiring", () => {
     expect(screen.getByTestId("first-shared-project-modal")).toBeTruthy();
     expect(screen.getByTestId("first-project-survey")).toBeTruthy();
     expect(screen.getByTestId("privacy-consent-gate")).toBeTruthy();
+    expect(screen.getByTestId("training-consent-card")).toBeTruthy();
     expect(screen.getByTestId("chat-toast-host")).toBeTruthy();
     expect(screen.getByTestId("bug-report-notice-toast")).toBeTruthy();
   });

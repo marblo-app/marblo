@@ -73,11 +73,26 @@ export type ConsentFlags = {
    * 한다 — 운영자 본인은 자기동의로 ON, 그 외는 애초에 비적격.
    */
   trainingDataCapture?: boolean;
+  /**
+   * ★"학습데이터 기여를 한 번 물어봤다" 는 사실(ticket QFNrT4Z4dG9nGoRYmTlr).
+   * 동의가 **아니다** — 기여를 눌렀든 나중에를 눌렀든 똑같이 true 가 된다.
+   * 오직 재노출 억제용이다: 거부한 사람을 실행마다 다시 조르는 것은 다크패턴이고,
+   * 그 억제를 로컬 저장소에만 두면 기기를 바꿀 때마다 다시 물어보게 된다.
+   *
+   * `trainingDataCapture` 와 분리한 이유: 저건 "원문을 보관해도 되는가"(법적
+   * 동의)이고 이건 "물어봤는가"(UI 사실)다. 하나로 합치면 거부를 동의로,
+   * 또는 동의를 단순 노출 기록으로 재해석할 여지가 생긴다.
+   *
+   * optional 인 이유는 trainingDataCapture 와 같다 — 최초 실행 PIPA 모달은 이
+   * 값을 결정하지 않으므로 키를 아예 쓰지 않는다(merge 로 기존 값 보존).
+   */
+  trainingDataPrompted?: boolean;
 };
 
 export interface PrivacyConsent extends ConsentFlags {
   /** 로컬 표시용으로는 항상 boolean(미설정=false)으로 정규화된다. */
   trainingDataCapture: boolean;
+  trainingDataPrompted: boolean;
   version: string;
   acceptedAt: Date | null;
   locale: string;
@@ -90,6 +105,7 @@ export const DEFAULT_CONSENT: PrivacyConsent = {
   mixpanel: false,
   overseasTransfer: false,
   trainingDataCapture: false,
+  trainingDataPrompted: false,
   version: "",
   acceptedAt: null,
   locale: "ko",
@@ -102,6 +118,7 @@ interface RawConsent {
   mixpanel?: boolean;
   overseasTransfer?: boolean;
   trainingDataCapture?: boolean;
+  trainingDataPrompted?: boolean;
   version?: string;
   acceptedAt?: { toDate: () => Date } | null;
   locale?: string;
@@ -143,6 +160,7 @@ function toConsent(raw: RawConsent | undefined): PrivacyConsent {
     mixpanel: !!raw.mixpanel,
     overseasTransfer: !!raw.overseasTransfer,
     trainingDataCapture: !!raw.trainingDataCapture,
+    trainingDataPrompted: !!raw.trainingDataPrompted,
     version: raw.version ?? "",
     acceptedAt:
       raw.acceptedAt && typeof raw.acceptedAt.toDate === "function"

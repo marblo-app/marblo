@@ -11,6 +11,18 @@
  * This is read-only content. Update CURRENT_POLICY_VERSION in
  * privacyConsentService.ts when this text changes — that re-prompts existing
  * users on next launch.
+ *
+ * ★예외 하나(ticket QFNrT4Z4dG9nGoRYmTlr): 라우팅 이용 목적 고지와 원문 기여
+ * 항목을 추가하면서 버전은 올리지 않았다. 판단 근거는 "무엇을 수집하는지" 가
+ * 아니라 "무엇이 바뀌었는지" 다:
+ *   - 라우팅 문구는 이미 동의받아 수집 중인 비식별 지표의 **이용 목적을 더
+ *     명확히 밝히는 것**이다. 수집 항목·보유기간·수령자는 그대로다. 고지를
+ *     강화했다는 이유로 전 사용자에게 동의 모달을 다시 띄우는 것은
+ *     (#797~#809 재프롬프트 saga) 얻는 것보다 잃는 게 크다.
+ *   - 원문 기여는 **새 항목**이 맞지만, 그래서 이 모달이 아니라 별도의 명시
+ *     옵트인(TrainingConsentCard, TRAINING_CONSENT_VERSION)으로 분리했다.
+ *     기본 off 이고, 여기 표에는 "무엇에 동의하게 되는지" 를 적어 둔다.
+ * 수집 항목 자체가 늘어나면 그때는 반드시 버전을 올린다.
  */
 import type { Locale } from "../../lib/i18n";
 
@@ -42,7 +54,12 @@ const KO: PrivacyContent = {
     {
       label: "비식별 1차 지표 (BigQuery)",
       value:
-        "마블로 자체 운영 품질을 위해 식별정보를 제거한 비식별 데이터만 우리 GCP(BigQuery)에 상시 수집합니다. 수집 항목: 익명 설치 ID(계정 UID 아님), 이벤트 종류, 토큰/비용/지속시간 등 집계 지표. 계정 식별자·코드·입력 텍스트는 포함되지 않으며, 에러 메시지는 송신 전 PII 마스킹됩니다.",
+        "마블로 자체 운영 품질을 위해 식별정보를 제거한 비식별 데이터만 우리 GCP(BigQuery)에 상시 수집합니다. 수집 항목: 익명 설치 ID(계정 UID 아님), 이벤트 종류, 토큰/비용/지속시간 등 집계 지표. 계정 식별자·코드·입력 텍스트는 포함되지 않으며, 에러 메시지는 송신 전 PII 마스킹됩니다. 이용 목적: 서비스 품질 분석과 함께, 이 비식별 데이터에서 파생된 특징(모델·소요시간·성공 여부 등)을 모델 라우팅(어떤 작업을 어떤 모델에 배정할지) 품질 개선에 이용합니다 — 프롬프트·응답 원문은 여기에 포함되지 않습니다.",
+    },
+    {
+      label: "학습데이터 기여 (선택 · 원문)",
+      value:
+        "(명시적으로 동의한 경우에만) 내 에이전트 턴의 프롬프트·응답 원문 텍스트를 자체 모델 학습 목적으로 별도 보안 저장소에 보관합니다. 위 비식별 지표와는 저장소·경로가 완전히 분리되며, 제3자에게 제공·판매하지 않습니다. 기본값은 꺼짐이고, Settings → Privacy 에서 언제든 끌 수 있습니다(끄면 이후 수집이 즉시 중단되고, 기존 데이터 삭제는 support@marblo.app 요청으로 처리합니다). 동의하지 않아도 모든 기능은 동일하게 작동합니다.",
     },
     {
       label: "옵트인 항목 (앱 크래시)",
@@ -57,17 +74,17 @@ const KO: PrivacyContent = {
     {
       label: "미수집 항목",
       value:
-        "코드 내용, BYOK 키 (Anthropic/OpenAI/Google), 사용자 작성 텍스트, 파일 내용, 비밀번호",
+        "코드 내용, BYOK 키 (Anthropic/OpenAI/Google), 사용자 작성 텍스트, 파일 내용, 비밀번호 — 비식별 1차 지표와 Sentry 경로에서는 어떤 경우에도 수집하지 않습니다. (위 '학습데이터 기여' 에 명시적으로 동의한 경우에만, 그 별도 경로로 프롬프트·응답 원문이 보관됩니다. BYOK 키·비밀번호는 그 경로에서도 수집하지 않습니다.)",
     },
     {
       label: "처리 위치",
       value:
-        "비식별 1차 지표: 우리 GCP(BigQuery) — 식별정보 없음. 옵트인 Sentry(앱 크래시): 미국 (별도 국외 이전 동의 필요). 웹사이트 GA4: 미국.",
+        "비식별 1차 지표: 우리 GCP(BigQuery) — 식별정보 없음. 학습데이터 기여(동의 시): 우리 GCP 내 별도 보안 데이터셋 — 비식별 지표와 접근 권한이 분리됩니다. 옵트인 Sentry(앱 크래시): 미국 (별도 국외 이전 동의 필요). 웹사이트 GA4: 미국.",
     },
     {
       label: "보유 기간",
       value:
-        "비식별 1차 지표: 집계 분석 목적 보관 (개인 식별 불가). Sentry: 90일. 웹사이트 GA4: 14개월.",
+        "비식별 1차 지표: 집계 분석 목적 보관 (개인 식별 불가). 학습데이터 기여(동의 시): 모델 학습 목적 보관 — 동의를 끄면 이후 수집이 중단되고, 기존 데이터 삭제는 support@marblo.app 요청으로 처리(30일 이내 응답, PIPA 제36조). Sentry: 90일. 웹사이트 GA4: 14개월.",
     },
     {
       label: "거부 효과",
@@ -132,7 +149,12 @@ const EN: PrivacyContent = {
     {
       label: "De-identified first-party metrics (BigQuery)",
       value:
-        "For Marblo's own operational quality, only de-identified data with identifiers removed is collected continuously into our GCP (BigQuery). Collected: anonymous install ID (not the account UID), event type, and aggregate metrics like tokens/cost/duration. Account identifiers, code, and input text are not included, and error messages are PII-masked before send.",
+        "For Marblo's own operational quality, only de-identified data with identifiers removed is collected continuously into our GCP (BigQuery). Collected: anonymous install ID (not the account UID), event type, and aggregate metrics like tokens/cost/duration. Account identifiers, code, and input text are not included, and error messages are PII-masked before send. Purpose of use: service quality analysis, plus improving model routing quality (which task is assigned to which model) from features derived from this de-identified data (model, duration, success) — raw prompts and responses are never part of this.",
+    },
+    {
+      label: "Training-data contribution (optional · raw text)",
+      value:
+        "(Only with your explicit consent) the raw prompt/response text of your own agent turns is stored in a separate secure store to train our own models. Its storage and pipeline are fully isolated from the de-identified metrics above, and it is never shared with or sold to third parties. Off by default, and you can turn it off any time in Settings → Privacy (collection stops immediately; deletion of already-stored data is handled by request to support@marblo.app). All features work identically if you decline.",
     },
     {
       label: "Opt-in items (app crashes)",
@@ -147,17 +169,17 @@ const EN: PrivacyContent = {
     {
       label: "Not collected",
       value:
-        "Code contents, BYOK keys (Anthropic/OpenAI/Google), user-written text, file contents, passwords",
+        "Code contents, BYOK keys (Anthropic/OpenAI/Google), user-written text, file contents, passwords — never collected on the de-identified first-party or Sentry paths. (Only if you explicitly opted into 'Training-data contribution' above does raw prompt/response text get stored, on that separate path. BYOK keys and passwords are not collected there either.)",
     },
     {
       label: "Processing location",
       value:
-        "De-identified first-party metrics: our GCP (BigQuery) — no identifiers. Opt-in Sentry (app crashes): United States (requires separate cross-border transfer consent). Website GA4: United States.",
+        "De-identified first-party metrics: our GCP (BigQuery) — no identifiers. Training-data contribution (with consent): a separate secure dataset in our GCP, with access separated from the de-identified metrics. Opt-in Sentry (app crashes): United States (requires separate cross-border transfer consent). Website GA4: United States.",
     },
     {
       label: "Retention period",
       value:
-        "De-identified first-party metrics: retained for aggregate analysis (no personal identification). Sentry: 90 days. Website GA4: 14 months.",
+        "De-identified first-party metrics: retained for aggregate analysis (no personal identification). Training-data contribution (with consent): retained for model training — turning consent off stops further collection, and deletion of stored data is handled by request to support@marblo.app (response within 30 days, PIPA Art. 36). Sentry: 90 days. Website GA4: 14 months.",
     },
     {
       label: "Effect of declining",

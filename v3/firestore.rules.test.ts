@@ -460,6 +460,64 @@ describe("users collection", () => {
       updateDoc(doc(db, "users", OWNER_ID), { displayName: "Hacked" }),
     );
   });
+
+  /**
+   * ★동의 폼 ↔ 룰 드리프트 재발 가드(waitlist 사고와 같은 종류).
+   *
+   * 그 사고의 진범은 "폼이 필드를 늘렸는데 룰의 hasOnly 를 안 늘려서 전면
+   * permission-denied" 였다. 그래서 여기서는 룰 문법이 아니라 **클라이언트가
+   * 실제로 보내는 payload 그대로** 를 쓴다 — privacyConsentService.saveConsent
+   * 가 만드는 모양(플래그 + version + acceptedAt + locale). 필드가 늘어난 뒤에도
+   * 이 테스트가 통과해야 온보딩 동의 카드가 살아 있다.
+   *
+   * 오늘 users/{uid} 의 update 규칙에는 키 allowlist(hasOnly)가 없고 소유자
+   * 검사만 있다 — 그래서 새 필드가 막히지 않는다. 이 테스트는 그 성질이
+   * 조용히 뒤집히는(누군가 hasOnly 를 도입하는) 순간을 잡는다.
+   */
+  it("본인 privacyConsent(학습데이터 기여 필드 포함) 를 저장할 수 있다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(
+        doc(db, "users", OWNER_ID),
+        {
+          privacyConsent: {
+            firstPartyTelemetry: true,
+            sentry: false,
+            ga4: false,
+            mixpanel: false,
+            overseasTransfer: false,
+            // 원문 기여 옵트인 + "한 번 물어봤다" 마커 (ticket QFNrT4Z4dG9nGoRYmTlr)
+            trainingDataCapture: true,
+            trainingDataPrompted: true,
+            version: "2026-06-01",
+            acceptedAt: new Date(),
+            locale: "ko",
+          },
+        },
+        { merge: true },
+      ),
+    );
+  });
+
+  it("타인의 privacyConsent 는 저장할 수 없다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "users", OWNER_ID),
+        {
+          privacyConsent: {
+            firstPartyTelemetry: true,
+            trainingDataCapture: true,
+            trainingDataPrompted: true,
+            version: "2026-06-01",
+            acceptedAt: new Date(),
+            locale: "ko",
+          },
+        },
+        { merge: true },
+      ),
+    );
+  });
 });
 
 // ===== Projects =====

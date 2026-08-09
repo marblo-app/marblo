@@ -99,17 +99,20 @@ export const settings: Record<keyof typeof koSettings, string> = {
     "De-identified usage analytics is on by default and can be turned off anytime. External third-party sends (Sentry) remain opt-in.",
   "settings.privacy.firstParty.label": "Usage analytics (de-identified)",
   "settings.privacy.firstParty.hint":
-    "Only anonymous install ID and aggregate metrics go to our GCP (BigQuery). Account UID, code, and input text are excluded.",
+    "Only anonymous install ID and aggregate metrics go to our GCP (BigQuery). Account UID, code, and input text are excluded. These de-identified derived features are also used to improve model routing quality (which job goes to which model).",
   "settings.privacy.sentry.label": "Anonymous crash reports (Sentry)",
   "settings.privacy.sentry.hint": "PII is auto-masked in stack traces.",
   "settings.privacy.bigquery.label": "First-party quality metrics (BigQuery)",
   "settings.privacy.bigquery.body":
-    "Only de-identified data (anonymous install ID, token/cost/event types) is collected to our GCP. Account UID, code, and input text are never included, and nothing is shared with third parties.",
-  // Training-data capture — operator-only row (ticket IqcXHVbT0rXnHloXpV7n).
+    "Only de-identified data (anonymous install ID, token/cost/event types) is collected to our GCP. Account UID, code, and input text are never included, and nothing is shared with third parties. Features derived from this de-identified data are also used to improve model routing quality (never raw text).",
+  // Training-data contribution row (ticket IqcXHVbT0rXnHloXpV7n + QFNrT4Z4dG9nGoRYmTlr).
+  // Visible to everyone, default off — explicit opt-in only.
   "settings.privacy.trainingCapture.label":
-    "Training data capture (raw prompts & responses)",
+    "Training data contribution (raw prompts & responses)",
   "settings.privacy.trainingCapture.hint":
-    "Stores the raw text of your own agent turns in a separate admin-only store for fine-tuning our models. Completely isolated from the de-identified metrics above, and applies only to the operator account.",
+    "Stores the raw text of your own agent turns (which may include code) in a separate secure store used to train our own models. Completely isolated from the de-identified metrics above, never shared with third parties, and stops immediately when turned off.",
+  "settings.privacy.trainingCapture.phased":
+    "Status: raw-text collection is not open for this account yet — your consent is recorded now and applies from the moment it opens. Turning this off withdraws that record too.",
   "settings.privacy.trainingCapture.status":
     "Status: {state} · {spooled} pending upload",
   "settings.privacy.trainingCapture.on": "capturing",
