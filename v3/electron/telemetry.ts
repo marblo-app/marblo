@@ -14,6 +14,39 @@ export function sendTelemetry(
   }
 }
 
+/**
+ * 스폰 이벤트의 라우팅 라벨 축(#890 F-1 · F-9).
+ *
+ * `taskId` 없이는 스폰 행이 어떤 결정의 결과인지 조인할 수 없고(감사 G1: 현재
+ * 0%), `spawnedModel` 없이는 그 결정의 **액션 해상도**가 프로바이더까지밖에
+ * 안 남는다(감사 C2: 7.6%). 둘 다 이미 존재하는 first-class 컬럼/메타 키라
+ * 서버 스키마 변경이 없다.
+ */
+export interface AgentSpawnedContext {
+  /** 이 스폰이 묶인 보드 태스크. 미바인딩 세션은 null. */
+  taskId?: string | null;
+  /** 실제로 넘긴 argv 를 되읽은 `model@effort`. 핀 없으면 undefined. */
+  spawnedModel?: string;
+}
+
+/**
+ * 에이전트 종료 시의 **실패 귀책 신호**(#890 F-7 · 감사 G11).
+ *
+ * "실패" 를 무산출/모델귀책/환경으로 가르려면 종료 시점의 세 가지가 필요하다:
+ * 얼마나 뱉었나(`outputChars`), 무엇으로 끝났나(`exitCode`), 어느 태스크였나
+ * (`taskId`). 전부 비식별 — PTY **바이트 수**만 세고 내용은 담지 않는다.
+ */
+export interface AgentStoppedContext {
+  taskId?: string | null;
+  model?: string | null;
+  /** 이 에이전트가 살아 있는 동안 PTY 로 뱉은 총 문자 수(내용 아님). */
+  outputChars?: number;
+  /** 산출이 사실상 없었나 — 배너/프롬프트 수준 이하. F-7 의 NO_OUTPUT 후보. */
+  noOutput?: boolean;
+  /** 종료 분류(graceful/clean/no_output). 크래시 계열은 agentCrashed 가 쓴다. */
+  errorCategory?: string;
+}
+
 export const mainTelemetry = {
   agentSpawned(
     win: BrowserWindow | null,
@@ -24,6 +57,7 @@ export const mainTelemetry = {
     projectId?: string,
     promptHash?: string,
     promptLength?: number,
+    context?: AgentSpawnedContext,
   ) {
     sendTelemetry(win, "agent:spawned", {
       agentId,
@@ -33,11 +67,41 @@ export const mainTelemetry = {
       projectId,
       promptHash,
       promptLength,
+      // ★F-1/F-9 — 액션 해상도의 스폰측 절반. 값이 없으면 키를 싣지 않는다
+      // (서버는 undefined 를 null 로 적재하므로 기존 행과 호환).
+      taskId: context?.taskId ?? undefined,
+      metadata: context?.spawnedModel
+        ? { spawnedModel: context.spawnedModel }
+        : undefined,
     });
   },
 
-  agentStopped(win: BrowserWindow | null, agentId: string, exitCode?: number) {
-    sendTelemetry(win, "agent:stopped", { agentId, exitCode });
+  agentStopped(
+    win: BrowserWindow | null,
+    agentId: string,
+    exitCode?: number,
+    context?: AgentStoppedContext,
+  ) {
+    sendTelemetry(win, "agent:stopped", {
+      agentId,
+      exitCode,
+      taskId: context?.taskId ?? undefined,
+      model: context?.model ?? undefined,
+      errorCategory: context?.errorCategory,
+      // 산출 신호는 metadata JSON 으로 — events 에 전용 컬럼이 없고, 숫자/불리언
+      // 이라 스크럽 denylist(#887 R8)에 걸릴 것이 없다.
+      metadata:
+        context?.outputChars !== undefined || context?.noOutput !== undefined
+          ? {
+              ...(context?.outputChars !== undefined
+                ? { outputChars: context.outputChars }
+                : {}),
+              ...(context?.noOutput !== undefined
+                ? { noOutput: context.noOutput }
+                : {}),
+            }
+          : undefined,
+    });
   },
 
   // `taskId` is the agent's currentTaskId at crash/restart time. Without it
@@ -84,6 +148,11 @@ export const mainTelemetry = {
     taskId?: string | null,
     model?: string | null,
     dispatchReason?: string | null,
+    // ★재시도 **사유**(#890 F-5 의 신호 절반). 종전엔 "몇 번째 재시도" 만 남아
+    // 재시도가 설정 문제(fast_fail_config)인지 런타임 크래시인지 구분이 안 됐다.
+    // 어휘는 agentCrashed 와 동일하게 유지 — 두 신호가 조인 가능해야 한다.
+    errorCategory?: string,
+    exitCode?: number,
   ) {
     sendTelemetry(win, "agent:restarted", {
       agentId,
@@ -92,6 +161,8 @@ export const mainTelemetry = {
       model,
       dispatchReason,
       outcome: "crashed",
+      errorCategory,
+      exitCode,
     });
   },
 
@@ -406,6 +477,15 @@ export const mainTelemetry = {
       // ★P2-3 — 실제 스폰된 model@effort. 후속 지식그래프가 이 축으로 학습한다.
       spawnedModel: payload.spawnedModel,
       modelFallbackReason: payload.modelFallbackReason,
+      // ★#890 F-1~F-4 라우팅 라벨. 서버 화이트리스트
+      // (functions DISPATCH_DECISION_META_KEYS)에 같은 이름으로 등재돼야
+      // metadata JSON 까지 살아 간다 — 빠지면 조용히 사라진다.
+      spawnedModelSource: payload.spawnedModelSource,
+      plannedModelKey: payload.plannedModelKey,
+      candidateKeys: payload.candidateKeys,
+      candidateCostIndex: payload.candidateCostIndex,
+      decisionState: payload.decisionState,
+      decisionComponents: payload.decisionComponents,
     });
   },
 };
@@ -461,6 +541,84 @@ export interface DispatchDecisionPayload {
   modelFallbackReason?: string;
   /** reuse/restart 경로에서 선택된 기존 에이전트의 매칭 점수. */
   agentScore?: number;
+
+  // ── ★라우팅 라벨 계측(#890 §7 F-1~F-4) ────────────────────────────────
+  //
+  // 전부 nullable/optional 이고 전부 `metadata` JSON 으로 접힌다 — BigQuery
+  // 마이그레이션 0(functions `buildMetadata` 화이트리스트에 등재만 하면 된다).
+  // 값은 숫자·enum·모델 id 뿐이라 스크럽 denylist(#887 R8) 대상이 없다:
+  // 프롬프트·경로·사용자 문자열은 여기에 **들어오지 않는다**.
+
+  /**
+   * ★F-1 — `spawnedModel` 의 **근거**. 종전엔 값만 있고 출처가 없어서, 값이
+   * 비면 "핀 안 한 스폰" 인지 "관측 실패" 인지 구분할 수 없었다.
+   *   · `argv`     — 우리가 CLI 에 넘긴 인자를 되읽은 값(가장 강함)
+   *   · `observed` — 과금 세션이 기록한 모델 id(reuse/restart 경로)
+   * 값이 없으면 이 필드도 없다 — 지어내지 않는다는 규율은 그대로다.
+   */
+  spawnedModelSource?: "argv" | "observed";
+
+  /**
+   * ★F-1 — **라우터가 고른 칸**(`model@effort`). `spawnedModel`(실제로 뜬 칸)과
+   * 다른 축이다: 이쪽은 **액션**(학습이 배우려는 그 결정)이고 저쪽은 **실현**이다.
+   * 둘이 갈리는 경우(버전가드 폴백·런타임 강등)가 실제로 있으므로 한 필드로
+   * 뭉개면 라벨이 오염된다. 모델을 핀하지 않는 하네스에선 effort 칸만 담긴다.
+   */
+  plannedModelKey?: string;
+
+  /**
+   * ★F-1 — **비선택 후보까지** `model@effort` 해상도로. 후보 전개(§3-E)로 1
+   * dispatch → N 훈련행을 만들려면 "무엇과 겨뤄 이겼나" 가 같은 해상도여야 한다.
+   * 종전 `eligibleModels` 는 프로바이더까지만 말한다.
+   */
+  candidateKeys?: string[];
+
+  /**
+   * ★F-4 — **결정 시점 단가 스냅샷**(modelKey → blended $/1M). 단가는 바뀐다.
+   * 6개월 뒤 레지스트리로 재구성하면 그건 당시 결정의 근거가 아닌 값이다.
+   */
+  candidateCostIndex?: Record<string, number>;
+
+  /**
+   * ★F-2 — **결정 시점 상태 스냅샷**. baseline 이 바로 이 값들로 점수를 매기는데
+   * BQ 에는 하나도 안 남아서, 오프라인 리플레이가 baseline 을 재현조차 못 했다.
+   */
+  decisionState?: {
+    /** 선택된 하네스 계정의 쿼터 소진율(0-100). */
+    budgetUsedPercent?: number | null;
+    /** 주간 토큰 중 이 하네스 몫(0-1). 롤업 없으면 null. */
+    weeklyTokenShare?: number | null;
+    /** 결정 시점 활성(working) 에이전트 수. */
+    activeAgentCount?: number;
+    /** 그중 같은 role 의 수. */
+    roleAgentCount?: number;
+    /** 실제로 겨룬 후보 수. */
+    candidateSetSize?: number;
+  };
+
+  /**
+   * ★F-3 — **결정 근거의 구조화**. 종전엔 `decisionReason` 문자열에만 있어서
+   * 분석이 정규식 파싱에 의존했다(취약). 선택된 칸의 8성분 + 모드/결정자만
+   * 담는다 — 후보 전체 점수는 `perModelScores`(비교축 전용, §2-D) 쪽이다.
+   */
+  decisionComponents?: {
+    mode?: string;
+    decidedBy?: string;
+    entryModelKey?: string;
+    movedFromEntry?: boolean;
+    coldStart?: boolean;
+    fit?: number;
+    cost?: number;
+    bench?: number;
+    capability?: number;
+    kg?: number;
+    diversity?: number;
+    usage?: number;
+    weeklyLimit?: number;
+    observations?: number;
+    totalObservations?: number;
+    total?: number;
+  };
 }
 
 export interface AgentLifecycleOutcomePayload {

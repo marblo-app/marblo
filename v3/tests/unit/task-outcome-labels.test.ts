@@ -41,7 +41,11 @@ vi.mock("firebase/functions", () => ({
 }));
 
 import { classifyTaskType } from "../../src/lib/telemetry/taskType";
-import { buildTaskOutcome } from "../../src/lib/telemetry/taskOutcome";
+import {
+  buildTaskOutcome,
+  classifyErrorCategory,
+  MODEL_ATTRIBUTABLE_CATEGORIES,
+} from "../../src/lib/telemetry/taskOutcome";
 import {
   observeTaskSnapshot,
   resetTaskOutcomeObserver,
@@ -169,12 +173,14 @@ describe("buildTaskOutcome (defect ①: success was constant TRUE)", () => {
     );
   });
 
-  it("records the terminal status in errorCategory so FAILED and BLOCKED stay separable", () => {
+  // ★#890 F-6 — 종전엔 여기가 터미널 상태 문자열이었다("FAILED"/"BLOCKED").
+  // 이제 실패 **귀책** 어휘다. 상태 자체는 success 로 남으므로 정보 손실이 없다.
+  it("records the failure attribution vocabulary, not the terminal status", () => {
     expect(buildTaskOutcome({ ...base, status: "FAILED" }).errorCategory).toBe(
-      "FAILED",
+      "MODEL_FAIL",
     );
     expect(buildTaskOutcome({ ...base, status: "BLOCKED" }).errorCategory).toBe(
-      "BLOCKED",
+      "BLOCKED_DEP",
     );
     // Clean axis: a success carries no error reason.
     expect(buildTaskOutcome({ ...base, status: "DONE" }).errorCategory).toBe(
@@ -334,7 +340,7 @@ describe("observeTaskSnapshot (the MCP-path gap)", () => {
     expect(sentOutcomes).toHaveLength(1);
     expect(sentOutcomes[0]).toMatchObject({
       success: false,
-      errorCategory: "FAILED",
+      errorCategory: "MODEL_FAIL",
     });
   });
 
@@ -390,7 +396,7 @@ describe("observeTaskSnapshot (the MCP-path gap)", () => {
     expect(sentOutcomes).toHaveLength(2);
     expect(sentOutcomes[0]).toMatchObject({
       success: false,
-      errorCategory: "BLOCKED",
+      errorCategory: "BLOCKED_DEP",
     });
     expect(sentOutcomes[1]).toMatchObject({
       success: true,
@@ -409,5 +415,101 @@ describe("observeTaskSnapshot (the MCP-path gap)", () => {
     expect(sentOutcomes).toHaveLength(1);
     // Would be null if the reporter read the doc before flushing.
     expect(sentOutcomes[0]).toMatchObject({ totalCost: 0.4 });
+  });
+});
+
+/**
+ * ★실패 귀책 — #890 F-6·F-7 / BQ 감사 G10·G11 (티켓 AdJ1Gon2).
+ *
+ * 이 블록이 지키는 것: **"실패했다" 는 라벨이 아니다.** 음성 39건 중 33건이
+ * BLOCKED 인 데이터로 성공 분류를 학습하면 라우터는 "막히기 쉬운 태스크에 비싼
+ * 모델을 붙여라" 는 정반대 정책을 배운다. 그래서 실패는 세 갈래로 갈려야 한다:
+ * 모델 귀책(MODEL_FAIL) / 무산출(NO_OUTPUT) / 환경·외부(나머지).
+ */
+describe("classifyErrorCategory (F-6·F-7 실패 귀책)", () => {
+  it("성공은 사유 축을 비워 둔다", () => {
+    expect(classifyErrorCategory({ status: "DONE" })).toBeNull();
+  });
+
+  it("의존성이 안 풀린 BLOCKED 는 모델 귀책이 아니다", () => {
+    expect(
+      classifyErrorCategory({
+        status: "BLOCKED",
+        dependsOn: ["other-task"],
+        dependsOnCompleted: false,
+      }),
+    ).toBe("BLOCKED_DEP");
+  });
+
+  it("사유 문자열의 확정적 신호가 상태보다 우선한다", () => {
+    const cases: Array<[string, string]> = [
+      ["CLI 인증이 만료돼 로그인 필요", "AUTH"],
+      ["사용자가 취소함", "CANCELLED"],
+      ["30분 응답 없음 — 타임아웃", "TIMEOUT"],
+      ["MCP 도구 호출이 실패", "TOOL"],
+      ["auth token rejected", "AUTH"],
+    ];
+    for (const [comment, expected] of cases) {
+      expect(classifyErrorCategory({ status: "FAILED", comment })).toBe(
+        expected,
+      );
+    }
+  });
+
+  it("★무산출: 에이전트가 아무것도 안 낸 실행은 모델 실패와 갈린다", () => {
+    expect(
+      classifyErrorCategory({
+        status: "FAILED",
+        totalOutputTokens: 0,
+      }),
+    ).toBe("NO_OUTPUT");
+    // 에이전트 측 신호(PTY 산출량)만으로도 잡힌다 — 비용 집계가 안 붙은 경우.
+    expect(
+      classifyErrorCategory({
+        status: "FAILED",
+        agent: { noOutput: true },
+      }),
+    ).toBe("NO_OUTPUT");
+  });
+
+  it("★산출물이 있으면 무산출이 아니다", () => {
+    expect(
+      classifyErrorCategory({
+        status: "FAILED",
+        totalOutputTokens: 0,
+        prUrl: "https://github.com/x/y/pull/1",
+      }),
+    ).toBe("MODEL_FAIL");
+  });
+
+  it("★미집계(null)를 무산출로 둔갑시키지 않는다", () => {
+    // null = "안 냈다" 가 아니라 "집계가 안 붙었다". 둘을 뭉개면 비용 파이프라인의
+    // 공백이 전부 모델의 무산출로 기록된다.
+    expect(
+      classifyErrorCategory({
+        status: "FAILED",
+        totalOutputTokens: null,
+      }),
+    ).toBe("MODEL_FAIL");
+  });
+
+  it("모델 귀책 카테고리만 학습 음성으로 남는다(유효 라벨 조건 7)", () => {
+    expect(MODEL_ATTRIBUTABLE_CATEGORIES).not.toContain("BLOCKED_DEP");
+    expect(MODEL_ATTRIBUTABLE_CATEGORIES).not.toContain("AUTH");
+    expect(MODEL_ATTRIBUTABLE_CATEGORIES).toContain("MODEL_FAIL");
+    expect(MODEL_ATTRIBUTABLE_CATEGORIES).toContain("NO_OUTPUT");
+  });
+
+  it("buildTaskOutcome 이 에이전트 종료 신호를 실제로 읽는다", () => {
+    const row = buildTaskOutcome({
+      clientId: "anon",
+      taskId: "t1",
+      status: "FAILED",
+      task: { description: "무언가", scope: [] },
+      agent: { model: "grok", noOutput: true, lastExitCode: 1 },
+      now: NOW,
+    });
+    expect(row.errorCategory).toBe("NO_OUTPUT");
+    expect(row.success).toBe(false);
   });
 });

@@ -31,6 +31,7 @@ import {
   AgentManager,
   serializeAgent,
   formatModelAtEffort,
+  isNoOutputRun,
   type ModelType,
 } from "./agent-manager";
 import { Updater } from "./updater";
@@ -648,7 +649,16 @@ function stampAgentMachineOwnership(agentId: string): void {
 // in-flight writes may still be cut off — the boot ghost sweep is the backstop.
 function finalizeAgentStatusInFirestore(
   agentId: string,
-  status: "stopped" | "error"
+  status: "stopped" | "error",
+  // ★실행 종료 신호(#890 F-7 · 감사 G11). 이 세 값이 없으면 "실패" 를 무산출과
+  // 모델 귀책으로 가를 수 없다 — 태스크 라벨 빌더(taskOutcome)가 여기서 스탬프된
+  // 값을 읽어 errorCategory 를 정한다. 전부 숫자/불리언(비식별)이고, 값이 없으면
+  // 키 자체를 쓰지 않아 기존 doc 형태를 건드리지 않는다.
+  runSignals?: {
+    outputChars?: number;
+    lastExitCode?: number | null;
+    noOutput?: boolean;
+  }
 ): void {
   void (async () => {
     try {
@@ -657,7 +667,20 @@ function finalizeAgentStatusInFirestore(
       const db = getFirestore(fbApp);
       await fbSetDoc(
         fbDoc(db, "agents", agentId),
-        { status, updatedAt: fbTimestamp.now() },
+        {
+          status,
+          updatedAt: fbTimestamp.now(),
+          ...(runSignals?.outputChars !== undefined
+            ? { outputChars: runSignals.outputChars }
+            : {}),
+          ...(runSignals?.lastExitCode !== undefined &&
+          runSignals?.lastExitCode !== null
+            ? { lastExitCode: runSignals.lastExitCode }
+            : {}),
+          ...(runSignals?.noOutput !== undefined
+            ? { noOutput: runSignals.noOutput }
+            : {}),
+        },
         { merge: true }
       );
       await releaseTaskClaimsForDeadAgent(db, agentId);
@@ -1179,7 +1202,18 @@ const agentManager = new AgentManager(
     // crash/force-kill/normal-exit can't strand the doc at `working` when no
     // window is alive to sync it (agent-lifecycle-reclaim fix 1).
     if (status === "stopped" || status === "error") {
-      finalizeAgentStatusInFirestore(agentId, status);
+      const ended = agentManager?.getAgent(agentId);
+      // ★산출량을 모르면(에이전트가 이미 정리됨) noOutput 을 **쓰지 않는다**.
+      // false 로 적으면 "산출이 있었다" 는, 근거 없는 주장이 doc 에 남는다.
+      const outputChars = ended?.outputChars;
+      finalizeAgentStatusInFirestore(agentId, status, {
+        outputChars,
+        lastExitCode: ended?.lastExitCode,
+        noOutput:
+          typeof outputChars === "number"
+            ? isNoOutputRun(outputChars)
+            : undefined,
+      });
     }
     // Free the pending-instruction listener once the agent is fully gone.
     // "error" is transient (auto-restart may follow), only "stopped" is final.

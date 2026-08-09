@@ -30,9 +30,14 @@
  * A task can legitimately produce more than one row over its life
  * (BLOCKED → later DONE). Rows are append-only and each carries its own
  * `completedAt`, so **the latest row per taskId is the authoritative outcome**;
- * earlier rows are the recovery history. `errorCategory` holds the terminal
- * status for negative rows so BLOCKED can be filtered out separately from
- * FAILED.
+ * earlier rows are the recovery history.
+ *
+ * `errorCategory` 는 이제 터미널 상태가 아니라 **실패 귀책 어휘**다
+ * (#890 F-6 / 감사 G10 — `MODEL_FAIL` / `NO_OUTPUT` / `TIMEOUT` / `TOOL` /
+ * `AUTH` / `BLOCKED_DEP` / `CANCELLED`). 상태 자체는 `success` 로 남고, 이 축은
+ * "모델이 못한 것" 과 "태스크가 막힌 것" 을 가른다 — 그 구분 없이는 음성 라벨의
+ * 85% 가 BLOCKED 라 학습이 정반대 정책을 배운다. ★이 변경 **이전** 행은 옛
+ * 어휘("FAILED"/"BLOCKED")를 담고 있으므로 두 시기를 섞어 세지 말 것.
  */
 
 import { doc, runTransaction, serverTimestamp } from "firebase/firestore";

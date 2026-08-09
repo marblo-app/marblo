@@ -59,6 +59,134 @@ export interface AgentModelSnapshot {
   detectedModelId?: string | null;
   /** main 이 스폰 argv 를 되읽어 스탬프한 값. effort 접미사(`@high`)가 붙는다. */
   spawnedModel?: string | null;
+  // ── 실행 종료 신호(#890 F-7). main 이 종료 시점에 스탬프한다. ──────────
+  /** PTY 산출량(문자 수). 내용 아님. 구 doc 에는 없다. */
+  outputChars?: number | null;
+  /** 산출량이 무산출 임계 이하였나. */
+  noOutput?: boolean | null;
+  /** 프로세스 종료 코드. */
+  lastExitCode?: number | null;
+}
+
+/**
+ * ★실패 귀책 어휘 (#890 F-6 · BQ 감사 G10).
+ *
+ * 종전엔 `errorCategory` 가 **터미널 상태 문자열 그대로**("FAILED"/"BLOCKED")였다.
+ * 그 라벨로는 학습이 불가능하다: 음성 39건 중 33건이 BLOCKED 인데, BLOCKED 는
+ * "이 모델이 못했다" 가 아니라 **"이 태스크가 막혔다"** 다. 그대로 학습하면
+ * 분류기는 "막히기 쉬운 태스크에 비싼 모델을 붙여라" 라는 정반대 정책을 배운다.
+ *
+ * 세 갈래로 나뉜다 — 이 구분이 이 어휘의 존재 이유다:
+ *   · 모델 귀책   `MODEL_FAIL` — 추론 오류·거부·루프. **학습셋의 진짜 음성.**
+ *   · 무산출     `NO_OUTPUT`  — 붙었지만 아무것도 안 냄. 모델 품질과 다른 축.
+ *   · 환경/외부  `BLOCKED_DEP` `AUTH` `TOOL` `TIMEOUT` `CANCELLED`
+ *                 — 모델 선택으로 못 고치는 것들. 유효 라벨 조건 7 이 제외한다.
+ */
+export type ErrorCategory =
+  | "MODEL_FAIL"
+  | "NO_OUTPUT"
+  | "TIMEOUT"
+  | "TOOL"
+  | "AUTH"
+  | "BLOCKED_DEP"
+  | "CANCELLED";
+
+/** 모델 귀책으로 볼 수 있는 카테고리 — 유효 라벨 조건 7(#890 §3-B). */
+export const MODEL_ATTRIBUTABLE_CATEGORIES: readonly ErrorCategory[] = [
+  "MODEL_FAIL",
+  "NO_OUTPUT",
+  "TIMEOUT",
+  "TOOL",
+] as const;
+
+/**
+ * 실패 사유 문자열 → 카테고리. **로컬 순수함수**이고 나가는 값은 enum 하나다
+ * (`classifyTaskType` 과 같은 계약, #890 §2-E) — 본문은 절대 밖으로 나가지 않는다.
+ *
+ * 한·영 두 어휘를 함께 본다. 우리 실사용 코멘트가 한국어이기 때문이고, 이 함수가
+ * 영어 키워드만 봤다면 실측 데이터에서 아무것도 못 골라냈을 것이다.
+ */
+function categoryFromReasonText(text: string): ErrorCategory | null {
+  const t = text.toLowerCase();
+  // 순서가 의미를 만든다: 인증/취소처럼 **확정적인** 사유를 먼저 본다. 마지막
+  // MODEL_FAIL 은 아래 호출부가 폴백으로 정하므로 여기선 찾지 않는다.
+  if (
+    /(auth|인증|로그인|login|credential|unauthorized|unauthenticated|api\s*key|토큰\s*만료)/.test(
+      t,
+    )
+  ) {
+    return "AUTH";
+  }
+  if (/(cancel|취소|중단|aborted|사용자\s*중지)/.test(t)) return "CANCELLED";
+  if (/(timeout|타임아웃|시간\s*초과|응답\s*없음|stalled|정체)/.test(t)) {
+    return "TIMEOUT";
+  }
+  if (
+    /(mcp|tool|도구|스폰\s*실패|spawn\s*fail|binary|not\s*found|cli|permission\s*denied|권한\s*없)/.test(
+      t,
+    )
+  ) {
+    return "TOOL";
+  }
+  if (/(의존|depend|선행|대기|waiting\s*on|blocked\s*by)/.test(t)) {
+    return "BLOCKED_DEP";
+  }
+  return null;
+}
+
+/** 실패 귀책 분류에 필요한 신호들. 전부 이미 수집되는 값이다. */
+export interface ErrorCategoryInput {
+  status: TerminalTaskStatus;
+  /** 의존성 게이트 — BLOCKED 의 대다수가 여기서 갈린다. */
+  dependsOn?: string[] | null;
+  dependsOnCompleted?: boolean | null;
+  /** 상태 전환 시 남긴 사유 한 줄. 읽기만 하고 밖으로 내보내지 않는다. */
+  comment?: string | null;
+  /** 산출물 증거 — 있으면 무산출이 아니다. */
+  prUrl?: string | null;
+  /** 이 태스크에 귀속된 출력 토큰. null = 미집계(0 과 다르다). */
+  totalOutputTokens?: number | null;
+  /** 에이전트 종료 신호(#890 F-7). */
+  agent?: Pick<
+    AgentModelSnapshot,
+    "outputChars" | "noOutput" | "lastExitCode"
+  > | null;
+}
+
+/**
+ * ★실패를 무산출 / 모델귀책 / 환경 으로 가른다 (#890 F-6·F-7).
+ *
+ * 판정 사다리 — **강한 증거부터**:
+ *   1. 성공이면 카테고리가 없다(깨끗한 "왜 실패했나" 축을 유지).
+ *   2. 사유 문자열이 확정적으로 말하는 것(인증/취소/타임아웃/도구/의존).
+ *   3. 의존성 게이트가 실제로 안 풀린 BLOCKED → `BLOCKED_DEP`.
+ *   4. **무산출 증거** → `NO_OUTPUT`.
+ *   5. 남으면 `MODEL_FAIL`(FAILED) / `BLOCKED_DEP`(BLOCKED).
+ *
+ * ★무산출은 **적극적 증거가 있을 때만** 선언한다. `totalOutputTokens` 가 null 인
+ * 것은 "안 냈다" 가 아니라 "집계가 안 붙었다" 일 수 있고, 그 둘을 뭉개면 비용
+ * 파이프라인의 공백이 전부 모델의 무산출로 둔갑한다. 그래서 명시적 0 이거나
+ * 에이전트 측 무산출 신호가 있을 때만 NO_OUTPUT 이다.
+ */
+export function classifyErrorCategory(
+  input: ErrorCategoryInput,
+): ErrorCategory | null {
+  const { status } = input;
+  if (status === "DONE") return null;
+
+  const fromText = input.comment ? categoryFromReasonText(input.comment) : null;
+  if (fromText) return fromText;
+
+  const dependencyPending =
+    (input.dependsOn?.length ?? 0) > 0 && input.dependsOnCompleted !== true;
+  if (status === "BLOCKED" && dependencyPending) return "BLOCKED_DEP";
+
+  const producedArtifact = !!input.prUrl?.trim();
+  const agentSaysEmpty = input.agent?.noOutput === true;
+  const zeroTokens = input.totalOutputTokens === 0;
+  if (!producedArtifact && (agentSaysEmpty || zeroTokens)) return "NO_OUTPUT";
+
+  return status === "FAILED" ? "MODEL_FAIL" : "BLOCKED_DEP";
 }
 
 export interface BuildTaskOutcomeInput {
@@ -75,6 +203,11 @@ export interface BuildTaskOutcomeInput {
     scope?: string[] | null;
     claimedAt?: Date | null;
     createdAt?: Date | null;
+    // ── 실패 귀책 신호(#890 F-6). 전부 이미 태스크 doc 에 있는 값이다. ──
+    dependsOn?: string[] | null;
+    dependsOnCompleted?: boolean | null;
+    comment?: string | null;
+    prUrl?: string | null;
   };
   rollups?: TaskRollups | null;
   agent?: AgentModelSnapshot | null;
@@ -205,8 +338,23 @@ export function buildTaskOutcome(input: BuildTaskOutcomeInput): TaskOutcomeRow {
     totalOutputTokens,
     totalCost,
     retriesCount,
+    // ★F-6(감사 G10) — 종전엔 여기가 터미널 **상태 문자열**("FAILED"/"BLOCKED")
+    // 이었다. 그 라벨로는 "모델이 못했다" 와 "태스크가 막혔다" 가 구분되지 않아
+    // 음성 라벨이 통째로 못 쓰는 값이었다. 이제 7종 어휘로 귀책을 가른다.
+    //
+    // 하위호환: 컬럼 타입(STRING)·nullable 계약은 그대로다 — BigQuery 스키마
+    // 변경 없음. 기존 행은 옛 어휘("FAILED"/"BLOCKED")로 남아 있고, 새 행부터
+    // 새 어휘가 쌓인다. 두 시기를 섞어 세지 않도록 분석 쪽에서 갈라 보면 된다.
     // null for DONE so the column stays a clean "why did this fail" axis.
-    errorCategory: success ? null : status,
+    errorCategory: classifyErrorCategory({
+      status,
+      dependsOn: task.dependsOn,
+      dependsOnCompleted: task.dependsOnCompleted,
+      comment: task.comment,
+      prUrl: task.prUrl,
+      totalOutputTokens,
+      agent,
+    }),
     createdAt:
       task.createdAt instanceof Date
         ? task.createdAt.toISOString()

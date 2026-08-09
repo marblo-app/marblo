@@ -679,3 +679,111 @@ describe("★쿼터 예비선 제외는 감사 로그에 남는다", () => {
     expect(reason).toContain("gpt");
   });
 });
+
+/**
+ * ★라우팅 라벨 계측 — #890 §7 F-1~F-4 (티켓 AdJ1Gon2).
+ *
+ * 왜 이 파일인가: F-1~F-4 는 전부 **같은 한 줄**(`emitDispatchDecision`)에서
+ * 나오고(§7-A), 그 한 줄이 실제로 무엇을 싣는지는 실물 dispatch 를 태워야만
+ * 보인다. 위 케이스들이 이미 그 경로를 진짜 코드로 돌리고 있으므로 여기 붙인다.
+ *
+ * 이 블록이 지키는 계약은 두 가지다:
+ *   1. **액션이 model@effort 해상도로 남는다** — 선택된 칸과 **비선택 후보까지**.
+ *      이게 없으면 2층 라우팅은 학습이 원리적으로 불가능하다(오늘 유효 7행).
+ *   2. **결정 시점에만 알 수 있는 것이 그 시점에 박힌다** — 잔여예산·주간 점유·
+ *      활성 수·당시 단가. 나중엔 재구성이 불가능하거나 틀린 값이 된다.
+ */
+describe("★라우팅 라벨 계측(#890 F-1~F-4)", () => {
+  it("F-1 — 액션과 후보집합이 model@effort 해상도로 남는다", async () => {
+    const { am, agentId } = await dispatchOnce({ complexity: "standard" });
+    const d = lastDecision();
+
+    // 액션(라우터가 고른 칸): 프로바이더가 아니라 구체 칸이어야 한다.
+    expect(String(d.plannedModelKey)).toMatch(/^claude-/);
+    // 실현(실제 argv): 되읽은 값 + 그 근거.
+    expect(d.spawnedModel).toBe(claudeModelOf(am, agentId));
+    expect(d.spawnedModelSource).toBe("argv");
+    // 후보집합도 같은 해상도 — "무엇과 겨뤄 이겼나" 가 프로바이더까지만
+    // 남으면 후보 전개(1 dispatch → N 훈련행)를 할 수 없다.
+    const keys = d.candidateKeys as string[];
+    expect(keys.length).toBeGreaterThan(0);
+    expect(keys.every((k) => k !== "claude")).toBe(true);
+  });
+
+  it("F-4 — 결정 시점 단가가 후보 키별로 스냅샷된다", async () => {
+    await dispatchOnce({ complexity: "standard" });
+    const costs = lastDecision().candidateCostIndex as Record<string, number>;
+    const keys = lastDecision().candidateKeys as string[];
+    expect(Object.keys(costs).length).toBeGreaterThan(0);
+    for (const [key, value] of Object.entries(costs)) {
+      expect(keys).toContain(key);
+      // 0 은 "공짜" 라는 거짓 근거다 — 미등록 id 는 아예 안 싣는 게 계약이다.
+      expect(value).toBeGreaterThan(0);
+    }
+  });
+
+  it("F-2 — 결정 시점 상태(잔여예산·활성 수)가 함께 박힌다", async () => {
+    account.claudeUsedPercent = 37;
+    await dispatchOnce({ complexity: "standard" });
+    const state = lastDecision().decisionState as Record<string, unknown>;
+    expect(state.budgetUsedPercent).toBe(37);
+    expect(state.candidateSetSize).toBeGreaterThan(0);
+    expect(typeof state.activeAgentCount).toBe("number");
+    expect(typeof state.roleAgentCount).toBe("number");
+    // 롤업이 콜드면 점유율은 **0 이 아니라 null** 이다 — 모르는 것을 0 으로
+    // 적으면 "이 하네스를 안 썼다" 는 없는 사실이 학습셋에 들어간다.
+    expect(state.weeklyTokenShare).toBeNull();
+  });
+
+  it("F-3 — 근거 8성분이 문자열이 아니라 필드로 남는다", async () => {
+    await dispatchOnce({ complexity: "standard" });
+    const c = lastDecision().decisionComponents as Record<string, unknown>;
+    expect(c).toBeTruthy();
+    expect(typeof c.mode).toBe("string");
+    expect(typeof c.decidedBy).toBe("string");
+    expect(String(c.entryModelKey)).toMatch(/^claude-/);
+    for (const part of [
+      "fit",
+      "cost",
+      "bench",
+      "capability",
+      "kg",
+      "diversity",
+      "usage",
+      "weeklyLimit",
+    ]) {
+      expect(typeof c[part]).toBe("number");
+    }
+  });
+
+  it("★명시 모델 경로에도 액션 칸이 남는다(그 구간이 통째로 비어 있었다)", async () => {
+    const { bridge } = makeBridge();
+    await bridge.dispatchTask({
+      role: "backend",
+      instruction: "do it",
+      cwd: TMP,
+      enabledModels: ["claude"],
+      complexity: "standard",
+      model: "claude",
+    });
+    const d = lastDecision();
+    expect(d.explicitModel).toBe(true);
+    // 자동선택은 안 돌았지만 티어 정책이 고른 칸은 결정돼 있다 — 그게 액션이다.
+    expect(String(d.plannedModelKey)).toMatch(/^claude-/);
+    expect(d.decisionState).toBeTruthy();
+  });
+
+  it("★비식별 — 페이로드에 프롬프트/경로가 들어가지 않는다", async () => {
+    const { bridge } = makeBridge();
+    await bridge.dispatchTask({
+      role: "backend",
+      instruction: "SECRET-INSTRUCTION-TEXT",
+      cwd: TMP,
+      enabledModels: ["claude"],
+      complexity: "standard",
+    });
+    const serialized = JSON.stringify(lastDecision());
+    expect(serialized).not.toContain("SECRET-INSTRUCTION-TEXT");
+    expect(serialized).not.toContain(TMP);
+  });
+});

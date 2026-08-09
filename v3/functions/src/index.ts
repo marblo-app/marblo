@@ -6422,6 +6422,21 @@ interface TelemetryRow {
   spawnedModel?: string;
   /** 지정 모델이 CLI 버전가드에 걸려 폴백했을 때의 사유 코드. */
   modelFallbackReason?: string;
+  // ── ★라우팅 라벨 계측(#890 §7 F-1~F-4, 티켓 AdJ1Gon2) ────────────────
+  // 전부 optional·비식별(숫자/enum/모델 id). 기존 행은 이 키들이 없을 뿐이고,
+  // `metadata` 는 JSON STRING 컬럼이라 BigQuery 마이그레이션이 필요 없다.
+  /** spawnedModel 의 근거(argv=우리가 넘긴 인자 / observed=과금 세션 관측). */
+  spawnedModelSource?: string;
+  /** 라우터가 **고른** 칸(model@effort) — 실현값(spawnedModel)과 다른 축. */
+  plannedModelKey?: string;
+  /** 비선택 후보까지 포함한 후보집합의 model@effort 키. */
+  candidateKeys?: string[];
+  /** 결정 시점 단가 스냅샷(modelKey → blended $/1M). */
+  candidateCostIndex?: Record<string, number>;
+  /** 결정 시점 상태(예산 소진율·주간 점유·활성 에이전트 수). */
+  decisionState?: Record<string, unknown>;
+  /** 선택 칸의 점수 8성분 + mode/decidedBy(문자열 파싱 대체). */
+  decisionComponents?: Record<string, unknown>;
 }
 
 // dispatch:decision fields that get folded into the `metadata` JSON column.
@@ -6442,6 +6457,13 @@ const DISPATCH_DECISION_META_KEYS = [
   // 사라진다. P2-3 의 model@effort 기록이 BigQuery 까지 살아 가려면 반드시 등재.
   "spawnedModel",
   "modelFallbackReason",
+  // ★#890 F-1~F-4. 같은 이유로 여기 없으면 클라가 보내도 BigQuery 에 안 남는다.
+  "spawnedModelSource",
+  "plannedModelKey",
+  "candidateKeys",
+  "candidateCostIndex",
+  "decisionState",
+  "decisionComponents",
 ] as const;
 
 /**

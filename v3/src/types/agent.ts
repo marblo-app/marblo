@@ -64,4 +64,19 @@ export interface Agent {
   rateLimitResetAt?: number; // epoch seconds, codex primary window reset
   rateLimitWeeklyPercent?: number; // 0-100, weekly(7d/secondary) window used %
   rateLimitWeeklyResetAt?: number; // epoch seconds, weekly window reset
+
+  // ── 실행 종료 신호 (#890 F-7 · BQ 감사 G11) ────────────────────────────
+  // main 이 종료(stopped/error) 시점에 스탬프한다(finalizeAgentStatusInFirestore).
+  // 목적은 하나다: "실패" 를 **무산출**(붙었다가 아무것도 안 내고 끝난 실행)과
+  // **모델 귀책**(추론 오류·거부·루프)으로 가르는 것. 이게 없으면 두 실패가 같은
+  // 라벨로 학습셋에 들어가고, 라우터는 "이 모델이 못한다" 대신 엉뚱한 걸 배운다.
+  //
+  // 비식별: 문자 **수**와 종료 코드뿐이다. PTY 내용은 세지도, 담지도 않는다.
+  // 이 필드들이 생기기 전 doc 에는 없다 — 읽는 쪽은 반드시 undefined 를 허용.
+  /** 이 에이전트가 PTY 로 뱉은 총 문자 수(내용 아님). */
+  outputChars?: number;
+  /** 프로세스 종료 코드. 정상/크래시 구분의 원신호. */
+  lastExitCode?: number;
+  /** 산출량이 무산출 임계 이하였나(agent-manager.isNoOutputRun). */
+  noOutput?: boolean;
 }

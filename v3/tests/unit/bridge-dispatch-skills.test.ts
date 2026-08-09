@@ -139,6 +139,12 @@ class FakeAgentManager {
     if (!agent?.launchConfig) return null;
     return spawnedModelFromArgs(agent.model, agent.launchConfig.args);
   }
+  /** 실물과 같은 사다리(argv → 과금 세션 관측). 이 fake 엔 관측이 없다. */
+  resolveConcreteModel(
+    id: string,
+  ): { modelId?: string; effort?: string } | null {
+    return this.getSpawnedModel(id);
+  }
   getAgentByName(name: string): AgentInstance | null {
     return this.listAgents().find((a) => a.name === name) ?? null;
   }

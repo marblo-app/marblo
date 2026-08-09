@@ -41,8 +41,14 @@ import {
   resolveTopClaudeModelDetailed,
   vendorEnvReadiness,
   type LaunchModelPin,
+  type TaskComplexity,
 } from "./agent-config";
-import { graphModelKeys, modelKeyFromSpawn } from "./routing-model-key";
+import {
+  graphModelKeys,
+  modelKeyFromSpawn,
+  predictedModelKey,
+} from "./routing-model-key";
+import { costIndexForModel } from "./model-ladder";
 import { normalizeTaskTypeLabel } from "./mcp-server/task-type";
 import { resolveModelPin } from "./model-selection";
 import { modelGuidanceStatic } from "./model-guidance";
@@ -64,7 +70,12 @@ import {
   type HarnessQuotaRow,
 } from "./harness-quota";
 import { decideAutoMix, isAutoMixEnabled, autoMixThresholds } from "./auto-mix";
-import { loadUsageRollup, type UsageRollupSnapshot } from "./usage-rollup";
+import {
+  loadUsageRollup,
+  tokensForHarness,
+  totalTokens,
+  type UsageRollupSnapshot,
+} from "./usage-rollup";
 import {
   resolveSkillRouting,
   vendorForModel,
@@ -2415,6 +2426,18 @@ export class BridgeServer {
         reuseVsSpawn: "reuse",
         explicitModel: !!model,
         agentScore: candidate.score,
+        // ★F-2/F-4(#890) — reuse 도 라우팅 결정이다. 후보 경쟁은 없었지만
+        // 그 순간의 상태(활성 수·잔여예산·주간 점유)는 남아야 오프라인
+        // 리플레이가 "왜 새로 안 띄웠나" 를 재현할 수 있다.
+        ...this.routingDecisionLabels({
+          role,
+          complexity,
+          selectedModel: candidate.agent.model,
+          candidates: [],
+          budgets: budgetSnapshot,
+          usageRollup,
+          agents: allAgents,
+        }),
         // ★P2-3 — reuse 는 **이미 떠 있는** 프로세스를 쓴다. 그래서 이번 요청의
         // 모델 핀이 아니라 그 에이전트가 실제로 떠 있는 모델을 기록해야 한다.
         // 요청값을 적으면 그래프가 "opus5 로 돌았다"고 배우지만 실제로는 그
@@ -2423,9 +2446,7 @@ export class BridgeServer {
         // 관측 사다리(argv → 과금 세션 모델)를 쓴다: 모델을 핀하지 않고 뜬
         // 에이전트는 argv 근거가 없지만 **이미 돌아본 적이 있으므로** 과금 관측은
         // 있다. 그걸 안 보면 이 경로가 영구히 "모델미상" 이었다.
-        spawnedModel: formatModelAtEffort(
-          this.agentManager.resolveConcreteModel(fullAgent.id),
-        ),
+        ...this.resolveActionModel(fullAgent.id),
       });
       return {
         success: true,
@@ -2509,12 +2530,19 @@ export class BridgeServer {
           reuseVsSpawn: "restart",
           explicitModel: !!model,
           agentScore: best.score,
+          ...this.routingDecisionLabels({
+            role,
+            complexity,
+            selectedModel: best.agent.model,
+            candidates: [],
+            budgets: budgetSnapshot,
+            usageRollup,
+            agents: allAgents,
+          }),
           // ★P2-3 — restart 도 요청 핀 또는 기존 launch 핀(+난도)을 실어 재기동한다.
           // 배지는 요청값이 아니라 재시작된 프로세스의 실제 argv 를 읽고, argv 에
           // 핀이 없으면 직전 세션의 과금 관측으로 떨어진다(재시작 간 보존됨).
-          spawnedModel: formatModelAtEffort(
-            this.agentManager.resolveConcreteModel(restarted.id),
-          ),
+          ...this.resolveActionModel(restarted.id),
         });
         return {
           success: true,
@@ -2578,6 +2606,17 @@ export class BridgeServer {
           decisionReason: reason,
           reuseVsSpawn: "spawn",
           explicitModel: true,
+          // 스폰이 일어나지 않은 결정도 결정이다 — 후보집합·단가·상태를 남겨야
+          // "예산 때문에 막힌 dispatch" 가 학습셋에서 실패와 구분된다.
+          ...this.routingDecisionLabels({
+            role,
+            complexity,
+            selectedModel: model,
+            candidates: eligibleModels as ModelType[],
+            budgets: budgetSnapshot,
+            usageRollup,
+            agents: allAgents,
+          }),
         });
         return { success: false, error: reason };
       }
@@ -2722,6 +2761,16 @@ export class BridgeServer {
         decisionReason: reason,
         reuseVsSpawn: "spawn",
         explicitModel: false,
+        ...this.routingDecisionLabels({
+          role,
+          complexity,
+          selectedModel: modelSelection.selected,
+          candidates: scoredModels,
+          autoPlans,
+          budgets: budgetSnapshot,
+          usageRollup,
+          agents: allAgents,
+        }),
       });
       return { success: false, error: reason };
     }
@@ -2896,11 +2945,23 @@ export class BridgeServer {
       decisionReason: spawnDecisionReason,
       reuseVsSpawn: "spawn",
       explicitModel: !!model,
-      // ★P2-3 — 방금 만든 argv 를 되읽어 "실제로 뭘로 떴는지" 를 박는다.
-      spawnedModel: formatModelAtEffort(
-        this.agentManager.getSpawnedModel(spawnResult.agentId!),
-      ),
+      // ★P2-3/F-1 — 방금 만든 argv 를 되읽어 "실제로 뭘로 떴는지" 를 박는다.
+      // argv 에 핀이 없으면 과금 세션 관측으로 떨어지고, 그것도 없으면 비운다
+      // (그 경우 액션 축은 아래 plannedModelKey 가 채운다).
+      ...this.resolveActionModel(spawnResult.agentId),
       modelFallbackReason: resolvedPin?.fallback?.reason,
+      // ★#890 F-1~F-4 — 후보집합의 model@effort, 당시 단가, 결정 시점 상태,
+      // 선택 칸의 8성분. 이 dispatch 가 나중에 훈련 1행이 되는 그 축들이다.
+      ...this.routingDecisionLabels({
+        role,
+        complexity,
+        selectedModel,
+        candidates: scoredModels,
+        autoPlans,
+        budgets: budgetSnapshot,
+        usageRollup,
+        agents: allAgents,
+      }),
     });
     // §8.1 폴백 사용자 표식 — complex claude 가 최상위 모델 resolver 를 탔는데
     // 버전가드/미지모델로 폴백됐으면 dispatch 응답에 표시(사용자가 왜 최상위가
@@ -3204,6 +3265,188 @@ export class BridgeServer {
       mainTelemetry.dispatchDecision(this.mainWindow, payload);
     } catch (err) {
       console.warn("[BridgeServer] dispatch:decision telemetry failed:", err);
+    }
+  }
+
+  /**
+   * ★라우팅 라벨 블록(#890 §7 F-1~F-4) — 결정 **시점**에만 알 수 있는 것들.
+   *
+   * 왜 결정 시점인가: 여기 담기는 값(잔여예산·주간 점유·활성 에이전트 수·당시
+   * 단가)은 전부 시간이 지나면 **재구성이 불가능하거나 틀린 값이 된다**. 스키마
+   * 소급이 안 되므로 지금 안 담은 dispatch 는 영원히 이 축이 비어 있다.
+   *
+   * 담기는 것 / 안 담기는 것:
+   *   · 담는다 — 숫자, enum, 모델 id. 전부 비식별이고 스크럽 denylist 대상 없음.
+   *   · 안 담는다 — 프롬프트·경로·티켓 본문. 이 함수는 그런 입력을 받지도 않는다.
+   *
+   * `perModelScores`(baseline 성분 분해)는 여기 없다 — 그건 §2-D 가 **피처 금지·
+   * 비교축 전용**으로 못박은 값이고 이미 별도 필드로 나간다.
+   */
+  private routingDecisionLabels(input: {
+    role: string;
+    complexity: TaskComplexity | undefined;
+    selectedModel: string;
+    /** 실제로 겨룬 후보(스폰 경로). reuse/restart 는 빈 배열. */
+    candidates: readonly ModelType[];
+    /** 2층 자동선택 결과. 명시 모델 경로면 없음. */
+    autoPlans?: Map<ModelType, AutoModelPlan>;
+    budgets?: ModelBudgetSnapshot;
+    usageRollup?: UsageRollupSnapshot | null;
+    agents: readonly AgentInstance[];
+  }): Pick<
+    DispatchDecisionPayload,
+    | "plannedModelKey"
+    | "candidateKeys"
+    | "candidateCostIndex"
+    | "decisionState"
+    | "decisionComponents"
+  > {
+    // ★계측은 dispatch 를 죽이지 않는다(resolveActionModel 과 같은 이유 —
+    // 이 함수도 emitDispatchDecision 의 try/catch 밖에서 불린다).
+    try {
+      return this.buildRoutingDecisionLabels(input);
+    } catch (err) {
+      console.warn("[BridgeServer] routing label build failed:", err);
+      return {};
+    }
+  }
+
+  private buildRoutingDecisionLabels(input: {
+    role: string;
+    complexity: TaskComplexity | undefined;
+    selectedModel: string;
+    candidates: readonly ModelType[];
+    autoPlans?: Map<ModelType, AutoModelPlan>;
+    budgets?: ModelBudgetSnapshot;
+    usageRollup?: UsageRollupSnapshot | null;
+    agents: readonly AgentInstance[];
+  }): Pick<
+    DispatchDecisionPayload,
+    | "plannedModelKey"
+    | "candidateKeys"
+    | "candidateCostIndex"
+    | "decisionState"
+    | "decisionComponents"
+  > {
+    // 후보 하나의 `model@effort` 키. 자동선택이 돌았으면 그 결과가 가장 구체적인
+    // 근거이고(그 칸으로 실제 뜬다), 아니면 티어 정책의 예측칸이다. 둘 다 없으면
+    // (모델을 핀하지 않는 하네스) 프로바이더 이름으로 떨어진다 — 지어내지 않는다.
+    const keyFor = (harness: string): string =>
+      input.autoPlans?.get(harness as ModelType)?.modelKey ??
+      predictedModelKey(harness, input.complexity, (provider, tier) =>
+        modelTierForComplexity(provider as ModelType, tier),
+      ) ??
+      harness;
+
+    const candidateKeys = input.candidates.map((c) => keyFor(c));
+    // ★F-4 단가 스냅샷. 레지스트리에 없는 id(로컬/미등록)는 넣지 않는다 —
+    // 0 을 넣으면 "공짜" 라는 거짓 근거가 학습셋에 들어간다.
+    const candidateCostIndex: Record<string, number> = {};
+    for (const key of candidateKeys) {
+      const cost = costIndexForModel(key.split("@")[0] ?? key);
+      if (typeof cost === "number") candidateCostIndex[key] = cost;
+    }
+
+    // ★F-2 상태 스냅샷. baseline 이 점수를 매길 때 본 그 값들이다.
+    const active = input.agents.filter((a) => a.status === "working");
+    const weeklyTotal = totalTokens(input.usageRollup);
+    const decisionState: NonNullable<DispatchDecisionPayload["decisionState"]> =
+      {
+        budgetUsedPercent:
+          input.budgets?.[input.selectedModel as ModelType]?.usedPercent ??
+          null,
+        weeklyTokenShare:
+          weeklyTotal > 0
+            ? tokensForHarness(input.selectedModel, input.usageRollup) /
+              weeklyTotal
+            : null,
+        activeAgentCount: active.length,
+        roleAgentCount: active.filter((a) => a.role === input.role).length,
+        candidateSetSize: input.candidates.length,
+      };
+
+    // ★F-3 근거 구조화 — 선택된 칸의 8성분. 종전엔 decisionReason 문자열을
+    // 정규식으로 파싱해야 얻을 수 있었다.
+    const plan = input.autoPlans?.get(input.selectedModel as ModelType);
+    const winning = plan?.scores.find(
+      (s) => s.candidate.modelKey === plan.modelKey,
+    );
+    const decisionComponents = plan
+      ? {
+          mode: plan.mode,
+          decidedBy: plan.decidedBy,
+          entryModelKey: plan.entryModelKey,
+          movedFromEntry: plan.movedFromEntry,
+          coldStart: plan.coldStart,
+          ...(winning
+            ? {
+                fit: winning.fit,
+                cost: winning.cost,
+                bench: winning.bench,
+                capability: winning.capability,
+                kg: winning.kg,
+                diversity: winning.diversity,
+                usage: winning.usage,
+                weeklyLimit: winning.weeklyLimit,
+                observations: winning.observations,
+                totalObservations: winning.totalObservations,
+                total: winning.total,
+              }
+            : {}),
+        }
+      : undefined;
+
+    return {
+      // 자동선택이 안 돈 경로(명시 모델)에서도 티어 정책의 칸은 결정돼 있다 —
+      // 그게 이 dispatch 의 액션이다.
+      plannedModelKey: keyFor(input.selectedModel),
+      ...(candidateKeys.length > 0 ? { candidateKeys } : {}),
+      ...(Object.keys(candidateCostIndex).length > 0
+        ? { candidateCostIndex }
+        : {}),
+      decisionState,
+      ...(decisionComponents ? { decisionComponents } : {}),
+    };
+  }
+
+  /**
+   * ★F-1 — 액션 해상도를 **근거와 함께** 돌려준다.
+   *
+   * 종전 스폰 경로는 `getSpawnedModel`(argv 되읽기)만 봤다. argv 에 모델을 안
+   * 핀하는 경로(오케 기본·재사용·콜드부트 reconnect)는 그래서 통째로 "모델미상"
+   * 이었고, 그게 `spawnedModel` 이 dispatch 의 7.6% 에만 있는 이유의 절반이다.
+   * `resolveConcreteModel` 은 argv → 과금 세션 관측 순으로 떨어지므로 이미 돌아본
+   * 적 있는 프로세스는 관측값으로 채워진다.
+   *
+   * ★없으면 비운다. CLI 기본값을 지어내지 않는다는 규율은 바뀌지 않는다 —
+   * 대신 `plannedModelKey`(라우터가 고른 칸)가 액션 축을 따로 채운다.
+   *
+   * ★계측이 dispatch 를 죽이지 않는다. 이 함수는 `emitDispatchDecision` 의
+   * try/catch **밖**에서(페이로드를 만드는 자리에서) 불리므로, 여기서 던지면
+   * 라벨을 못 남기는 데서 끝나지 않고 스폰 자체가 실패한다. 관측 사다리는
+   * 전부 best-effort 로 감싼다.
+   */
+  private resolveActionModel(agentId: string | undefined): {
+    spawnedModel?: string;
+    spawnedModelSource?: "argv" | "observed";
+  } {
+    if (!agentId) return {};
+    try {
+      const fromArgs = formatModelAtEffort(
+        this.agentManager.getSpawnedModel(agentId),
+      );
+      if (fromArgs) {
+        return { spawnedModel: fromArgs, spawnedModelSource: "argv" };
+      }
+      const observed = formatModelAtEffort(
+        this.agentManager.resolveConcreteModel(agentId),
+      );
+      return observed
+        ? { spawnedModel: observed, spawnedModelSource: "observed" }
+        : {};
+    } catch (err) {
+      console.warn("[BridgeServer] action-model resolve failed:", err);
+      return {};
     }
   }
 

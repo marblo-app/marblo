@@ -81,6 +81,25 @@ export function spawnedModelFromArgs(
   return {};
 }
 
+/**
+ * ★무산출 임계(#890 F-7 · 감사 G11).
+ *
+ * CLI 는 붙기만 해도 배너·프롬프트·스피너로 수백~수천 바이트를 그린다. 그래서
+ * "0 바이트" 를 기준으로 삼으면 실제 무산출 실행이 하나도 안 잡힌다. 반대로
+ * 임계를 높이면 짧지만 진짜 답변한 실행을 무산출로 오분류한다.
+ *
+ * 2,000자는 **보수적인 하한**이다 — 이 아래면 어떤 하네스에서도 실질 답변이
+ * 아니라는 쪽에 건다. 이 값 하나로 라벨을 확정하지 않는다는 점이 중요하다:
+ * 여기서 나오는 것은 `noOutput` **후보 신호**이고, 최종 귀책은 태스크 축의
+ * 산출물(출력토큰·PR)과 함께 taskOutcome 에서 정해진다.
+ */
+export const NO_OUTPUT_CHARS = 2_000;
+
+/** PTY 산출량이 무산출 후보 임계 이하인가. 미집계(undefined)면 판정하지 않는다. */
+export function isNoOutputRun(outputChars: number | undefined): boolean {
+  return typeof outputChars === "number" && outputChars <= NO_OUTPUT_CHARS;
+}
+
 /** `model@effort` 표기. 모델을 모르면 undefined — 빈 문자열을 만들지 않는다. */
 export function formatModelAtEffort(
   info: SpawnedModelInfo | null | undefined,
@@ -213,6 +232,21 @@ export interface AgentInstance {
    * (ABANDONED_TURN_MS) and the reaper's post-completion grace window, never a
    * routine working→idle demotion. */
   lastPtyActivity: number;
+  /**
+   * ★무산출 판정용 누적 출력량(#890 F-7 · 감사 G11).
+   *
+   * 이 프로세스가 살아 있는 동안 PTY 로 뱉은 **문자 수**다. 내용은 세지 않고
+   * 보관도 하지 않는다 — 길이 하나만 남긴다(promptLength 와 같은 계약).
+   *
+   * 왜 필요한가: "실패" 를 모델 귀책과 가르려면 먼저 **아무것도 안 낸 실행**을
+   * 떼어내야 한다. grok 의 empty-run 처럼 붙었다가 배너만 그리고 죽은 실행이
+   * 지금은 "모델이 못했다" 와 같은 라벨로 들어간다.
+   *
+   * ★한계: 배너·스피너 repaint 도 바이트다. 그래서 이 값 하나로 무산출을
+   * 단정하지 않고, 임계(NO_OUTPUT_CHARS) 이하일 때 **후보 신호**로만 쓴다.
+   * 최종 판정은 태스크 축의 산출물(출력토큰·PR)과 함께 본다(taskOutcome).
+   */
+  outputChars: number;
   /**
    * epoch-ms the agent reported its turn finished (submit_for_review /
    * update_task_status → REVIEW·DONE·FAILED·BLOCKED), set by markTurnComplete.
@@ -1164,6 +1198,7 @@ export class AgentManager {
       heartbeatTimer: null,
       onPtyReady: params.onPtyReady,
       lastPtyActivity: Date.now(),
+      outputChars: 0,
       turnCompletedAt: null,
       terminalSince: null,
       topClaudeModel,
@@ -1196,10 +1231,13 @@ export class AgentManager {
     // working on the first byte of an OPEN turn. Demotion is not handled here
     // (nor by silence) — it follows the agent's completion report; see the
     // heartbeat below and agent-status-reconcile.ts.
-    this.ptyManager.onData(ptySessionId, () => {
+    this.ptyManager.onData(ptySessionId, (chunk) => {
       const agent = this.agents.get(params.id);
       if (!agent || agent !== instance) return;
       agent.lastPtyActivity = Date.now();
+      // ★F-7 — 산출량은 **길이만** 센다. chunk 는 여기서 버려지고 어디에도
+      // 저장되지 않는다(원문 금지 계약, #887 §2).
+      agent.outputChars += chunk.length;
       // Output NEVER starts a turn — it only continues one. While a completion
       // report stands, these bytes are the finished turn's repaint (trailing
       // flush, then the idle prompt's spinner/cursor forever), and promoting on
@@ -1248,6 +1286,15 @@ export class AgentManager {
       spawnProjectId,
       promptHash,
       promptLength,
+      {
+        // ★F-9(감사 G1) — 스폰 행의 taskId 는 지금까지 **0%** 였다. 그래서
+        // "이 스폰이 어느 결정의 결과인가" 를 스폰 단위로는 조인할 수 없었고,
+        // dispatch:decision 을 거치지 않는 스폰(오케·UI·MCP)은 통째로 미라벨이었다.
+        taskId: params.currentTaskId ?? null,
+        // ★F-1 — 액션 해상도. onPtyReady 에 넘긴 그 값(방금 만든 argv 되읽기)을
+        // 재사용한다 — 같은 사실을 두 번 계산하면 갈릴 여지만 생긴다.
+        spawnedModel: formatModelAtEffort(spawnedModelInfo),
+      },
     );
 
     // Start heartbeat for anomaly detection (ML-4)
@@ -1347,6 +1394,22 @@ export class AgentManager {
           this.getMainWindow?.() ?? null,
           params.id,
           exitCode,
+          {
+            // ★F-7(감사 G11) — 종료 시점의 실패 귀책 신호. 종전엔 exitCode 만
+            // 남아서 "붙었다가 아무것도 안 내고 죽은 실행"(grok empty-run)을
+            // 모델 실패와 구분할 방법이 데이터에 없었다.
+            taskId: agent.currentTaskId,
+            model: agent.model,
+            outputChars: agent.outputChars,
+            noOutput: isNoOutputRun(agent.outputChars),
+            errorCategory: isNoOutputRun(agent.outputChars)
+              ? "no_output"
+              : agent.stopRequested
+                ? "stopped_by_user"
+                : isGracefulCompletion
+                  ? "graceful_completion"
+                  : "clean_exit",
+          },
         );
         if (isGracefulCompletion) {
           console.log(
@@ -1414,6 +1477,10 @@ export class AgentManager {
           agent.currentTaskId,
           agent.model,
           agent.dispatchReason,
+          // ★재시도 사유 — 크래시 이벤트와 **같은 어휘**로 남긴다. 설정 문제로
+          // 즉사해 도는 재시도와 런타임 크래시 재시도는 귀책이 다르다.
+          wasFastFail ? "fast_fail_config" : "runtime_crash",
+          exitCode,
         );
         console.log(
           `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`,
@@ -1574,7 +1641,13 @@ export class AgentManager {
     agent.terminalSince = Date.now(); // P3-4: pruner backstop clock
     agent.restartCount = 0;
     this.onStatusChange?.(agentId, "stopped");
-    mainTelemetry.agentStopped(this.getMainWindow?.() ?? null, agentId, 0);
+    mainTelemetry.agentStopped(this.getMainWindow?.() ?? null, agentId, 0, {
+      taskId: agent.currentTaskId,
+      model: agent.model,
+      outputChars: agent.outputChars,
+      noOutput: isNoOutputRun(agent.outputChars),
+      errorCategory: "stopped_by_user",
+    });
   }
 
   restart(
@@ -1846,16 +1919,18 @@ export class AgentManager {
       restartTimer: null,
       heartbeatTimer: null,
       lastPtyActivity: Date.now(),
+      outputChars: 0,
       turnCompletedAt: null,
       terminalSince: null,
     };
     this.agents.set(agent.id, instance);
     // Same PTY-activity hook as launch() — reconnected agents need
     // working/idle auto-derivation too (incl. the W1 completed-turn suppression).
-    this.ptyManager.onData(agent.ptySessionId, () => {
+    this.ptyManager.onData(agent.ptySessionId, (chunk) => {
       const a = this.agents.get(agent.id);
       if (!a || a !== instance) return;
       a.lastPtyActivity = Date.now();
+      a.outputChars += chunk.length;
       if (
         shouldPromoteOnPtyOutput({
           status: a.status,
