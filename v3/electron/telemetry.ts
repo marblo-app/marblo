@@ -47,6 +47,23 @@ export interface AgentStoppedContext {
   errorCategory?: string;
 }
 
+/**
+ * 메시지 길이를 구간으로 접는다 — 원문은 물론 정확한 글자 수도 남기지 않는다.
+ * 퍼널이 알아야 할 건 "한 줄짜리였나, 붙여넣은 스펙이었나" 정도뿐이다.
+ */
+export function bucketMessageLength(length: number): string {
+  // 터미널 직접 입력은 키스트로크로 쪼개져 들어와 길이를 알 수 없다. 그 경우를
+  // 0 으로 적으면 "빈 메시지"라는 없는 사실이 되므로 unknown 으로 남긴다
+  // (길이를 알려면 사용자 입력을 메인에서 버퍼링해야 하는데, 그건 더 나쁘다).
+  if (!Number.isFinite(length) || length < 0) return "unknown";
+  if (length === 0) return "0";
+  if (length < 20) return "1-19";
+  if (length < 100) return "20-99";
+  if (length < 500) return "100-499";
+  if (length < 2000) return "500-1999";
+  return "2000+";
+}
+
 export const mainTelemetry = {
   agentSpawned(
     win: BrowserWindow | null,
@@ -325,6 +342,31 @@ export const mainTelemetry = {
       agentId,
       model,
       success: true,
+    });
+  },
+
+  /**
+   * 사용자가 오케스트레이터 PTY 에 지시를 **제출**했다 — 활성화 퍼널의 "첫 대화"
+   * 칸(티켓 ygoWP1VJ). 퍼널 감사에서 이 구간만 이벤트가 아예 없어, 폴더까지
+   * 연결하고 말을 안 걸어본 유저와 말은 걸었는데 티켓이 안 나온 유저를 구분할
+   * 수 없었다.
+   *
+   * ★여기서는 **제출될 때마다** 보낸다. 설치당 1회로 접는 건 렌더러가 한다
+   * (telemetryService.firstConversationObserved) — one-shot 마커가 localStorage 라
+   * 렌더러에만 있기 때문이다. 반대로 "어느 PTY 가 오케인가"는 메인만 아니까 감지는
+   * 여기서 한다. 각자 아는 쪽이 자기 몫을 맡는 분업이다.
+   *
+   * ★비식별: 입력 **내용은 절대 싣지 않는다**. 정확한 글자 수도 짧은 문장에서는
+   * 지문이 될 수 있어 구간으로 접는다 — 남는 건 "어느 표면에서, 대략 어느 분량으로
+   * 말을 걸었나" 뿐이다.
+   */
+  orchestratorMessage(
+    win: BrowserWindow | null,
+    surface: string,
+    length: number,
+  ) {
+    sendTelemetry(win, "onboarding:first_conversation", {
+      metadata: { surface, lengthBucket: bucketMessageLength(length) },
     });
   },
 

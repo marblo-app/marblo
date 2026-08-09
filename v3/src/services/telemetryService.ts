@@ -110,6 +110,21 @@ export type TelemetryEvent =
   // 렌더러 발화(#884 의 funding 감지 지점):
   | "onboarding:funding_probe"
   | "onboarding:funding_guide_shown"
+  // ── 활성화 퍼널의 남은 두 칸 (ticket ygoWP1VJ) ───────────────────────────
+  // 퍼널 감사 결과 "첫 대화"·"첫 티켓" 두 구간만 계측이 비어 있었다.
+  //
+  // · first_conversation — **사용자가 오케에 처음 지시를 제출한** 순간. 지금까지
+  //   이 순간의 이벤트가 하나도 없어서 "폴더까지 연결하고 말은 안 걸어본 유저"와
+  //   "말은 걸었는데 티켓이 안 나온 유저"를 구분할 수 없었다. 감지는 메인 프로세스
+  //   PTY 제출 초크포인트에서 하고(electron/telemetry.ts orchestratorMessage), 설치당
+  //   1회로 접는 건 여기서 한다 — one-shot 마커(localStorage)가 렌더러에만 있다.
+  //   **내용은 절대 싣지 않는다**(표면 + 길이 구간만).
+  // · first_ticket — 보드에 티켓이 처음 보인 순간(설치당 1회). task:created 를
+  //   쓰지 않는 이유는 오케가 MCP(별도 stdio 프로세스)로 Firestore 에 직접
+  //   write 해서 렌더러 텔레메트리를 우회하기 때문이다 — 실측 90일 11건뿐이라
+  //   그 축으로는 "첫 티켓"을 셀 수 없다.
+  | "onboarding:first_conversation"
+  | "onboarding:first_ticket"
   // ── L0 온램프 (ticket VzR1izqW6hzwF0YRfkgL · 설계 #886 §9-B) ─────────────
   // 위 스톨 계측(#888)이 "막힌 사람" 을 세기 시작했다면, 아래 둘은 그 **앞칸**을
   // 센다: 계정이 없는 사람이 자기 말로 티켓을 만들었는가(decompose_used), 그리고
@@ -219,7 +234,7 @@ const logHeartbeatFn = httpsCallable(functions, "logHeartbeat");
 
 export function setTelemetryEnabled(
   enabled: boolean,
-  options: { persist?: boolean } = {},
+  options: { persist?: boolean } = {}
 ) {
   const next = firstPartyTelemetryDefaultEnabled() && enabled;
   telemetryEnabled = next;
@@ -282,6 +297,23 @@ function anonymize(payload: TelemetryPayload): TelemetryPayload {
     scrubbed.metadata = m;
   }
   return scrubbed;
+}
+
+/**
+ * 설치당 1회 마커. 이미 찍혀 있으면 false — 호출부는 발신을 건너뛴다.
+ *
+ * app:first_run 이 쓰는 것과 같은 규약이다(App.tsx markFirstRunIfNeeded):
+ * 스토리지를 비우면 clientId 자체가 새로 발급되므로 그때 다시 발신되는 것이
+ * 맞는 동작이고, 스토리지를 못 쓰면 "매 부팅 발신" 위험을 피해 아예 안 보낸다.
+ */
+function markOncePerInstall(key: string): boolean {
+  try {
+    if (localStorage.getItem(key) === "true") return false;
+    localStorage.setItem(key, "true");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Separate heartbeat queue — goes to agent_heartbeats table, not events
@@ -399,7 +431,7 @@ export const telemetry = {
     name: string,
     model: string,
     role: string,
-    projectId?: string,
+    projectId?: string
   ) {
     logTelemetry({
       event: "agent:spawned",
@@ -427,7 +459,7 @@ export const telemetry = {
     model?: string,
     dispatchReason?: string,
     errorCategory?: string,
-    errorMessage?: string,
+    errorMessage?: string
   ) {
     logTelemetry({
       event: "agent:crashed",
@@ -452,7 +484,7 @@ export const telemetry = {
     attempt: number,
     taskId?: string,
     model?: string,
-    dispatchReason?: string,
+    dispatchReason?: string
   ) {
     logTelemetry({
       event: "agent:restarted",
@@ -469,7 +501,7 @@ export const telemetry = {
     taskId: string,
     projectId: string,
     role: string,
-    priority?: number,
+    priority?: number
   ) {
     logTelemetry({
       event: "task:created",
@@ -484,7 +516,7 @@ export const telemetry = {
     taskId: string,
     fromStatus: string,
     toStatus: string,
-    agentId?: string,
+    agentId?: string
   ) {
     logTelemetry({
       event: "task:status_changed",
@@ -515,7 +547,7 @@ export const telemetry = {
     flowId: string,
     nodeType: string,
     durationMs: number,
-    success: boolean,
+    success: boolean
   ) {
     logTelemetry({
       event: "flow:node_executed",
@@ -530,7 +562,7 @@ export const telemetry = {
     flowId: string,
     status: string,
     durationMs: number,
-    nodeCount: number,
+    nodeCount: number
   ) {
     logTelemetry({
       event: "flow:completed",
@@ -548,7 +580,7 @@ export const telemetry = {
     tokensInput: number,
     tokensOutput: number,
     cost: number,
-    projectId?: string,
+    projectId?: string
   ) {
     logTelemetry({
       event: "token:usage",
@@ -698,7 +730,7 @@ export const telemetry = {
       | "connect"
       | "project",
     phase: "enter" | "success" | "fail",
-    reason?: string,
+    reason?: string
   ) {
     logTelemetry({
       event: "onboarding:cli_setup_step",
@@ -817,7 +849,7 @@ export const telemetry = {
     tourId: string,
     stepIndex: number,
     stepCount: number,
-    permanent: boolean,
+    permanent: boolean
   ) {
     logTelemetry({
       event: "onboarding:coachmark_skipped",
@@ -848,7 +880,7 @@ export const telemetry = {
     verdict: "ok" | "unfunded" | "blocked" | "inconclusive",
     model: string,
     trigger: "auto" | "recheck",
-    blockedReason?: string,
+    blockedReason?: string
   ) {
     logTelemetry({
       event: "onboarding:funding_probe",
@@ -879,7 +911,7 @@ export const telemetry = {
    */
   fundingGuideShown(
     state: "authedButUnfunded" | "authedButBlocked",
-    model?: string,
+    model?: string
   ) {
     logTelemetry({
       event: "onboarding:funding_guide_shown",
@@ -888,6 +920,40 @@ export const telemetry = {
       outcome: "blocked",
       errorCategory: state,
       metadata: { state },
+    });
+  },
+
+  /**
+   * 이 설치에서 보드에 티켓이 **처음 보인** 순간(설치당 1회).
+   *
+   * task:created 를 쓰지 않는 이유: 오케는 MCP 서버(별도 stdio 프로세스)에서
+   * Firestore 에 직접 write 하므로 렌더러의 taskService 를 타지 않는다. 실측상
+   * BigQuery 의 task:created 는 90일 11건뿐이라 그 축으로 "첫 티켓" 을 세면
+   * 심하게 과소계상된다. 여기서는 보드 구독 결과만 보고 세므로 생성 경로
+   * (사람/오케/MCP)와 무관하게 잡힌다.
+   */
+  firstTicketObserved() {
+    if (!markOncePerInstall("marblo.telemetry.firstTicketSent")) return;
+    logTelemetry({ event: "onboarding:first_ticket", success: true });
+  },
+
+  /**
+   * 이 설치에서 사용자가 오케에 **처음 지시를 제출한** 순간(1회).
+   *
+   * 감지는 메인 프로세스가 한다(PTY 제출 초크포인트 — 렌더러는 어느 PTY 가
+   * 오케인지 모르고, 사용자는 대개 FeedbackInput 이 아니라 터미널에 직접 친다).
+   * 그런데 one-shot 마커는 localStorage 라 렌더러에만 있으므로, 접는 건 여기서
+   * 한다: 메인은 "제출됐다" 는 사실만 매번 보내고 첫 건만 실제로 발신된다.
+   *
+   * metadata 는 메인이 붙여 보낸 것(surface + 길이 **구간**)을 그대로 쓴다 —
+   * 원문도, 정확한 글자 수도 들어오지 않는다.
+   */
+  firstConversationObserved(metadata?: Record<string, unknown>) {
+    if (!markOncePerInstall("marblo.telemetry.firstConversationSent")) return;
+    logTelemetry({
+      event: "onboarding:first_conversation",
+      success: true,
+      ...(metadata ? { metadata } : {}),
     });
   },
 

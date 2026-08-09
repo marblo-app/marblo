@@ -8588,12 +8588,21 @@ export const getAdminUsageSummary = functions.https.onCall(
 /**
  * getAdminOnboardingFunnel — 온보딩 24h 활성화 퍼널(🟡 BQ events).
  *
- * app:first_run → auth:login_attempt → auth:login_success →
- * onboarding:folder_connected → onboarding:orchestrator_opened → agent:spawned
- * 의 단계별 순차 도달 고유 identity(accountUserId 우선, 과거 clientId 폴백)와
- * 인접 단계 이탈을 집계하고, 실패-분기
- * (login_failed / folder_connect_failed / orchestrator_blocked / agent:crashed)를
- * errorCategory 로 분해한다(★orchestrator_blocked 의 cli_auth vs launch_error 등).
+ * 설치(app:installed∪app:first_run) → app:first_run → auth:login_attempt →
+ * auth:login_success → onboarding:folder_connected →
+ * onboarding:orchestrator_opened → [첫대화 onboarding:first_conversation ·
+ * 첫티켓 onboarding:first_ticket] → agent:spawned → task:completed →
+ * [첫머지 task:merged(7일 창)] → 핵심경험 → 7일 잔존.
+ * 단계별 순차 도달 고유 identity(accountUserId 우선, 과거 clientId 폴백)와
+ * 인접 단계 이탈/전환을 집계하고, 실패-분기(login_failed / folder_connect_failed /
+ * orchestrator_blocked / agent:crashed / spawn_blocked / agent_needs_auth /
+ * funding_guide_shown)를 errorCategory 로 분해한다
+ * (★orchestrator_blocked 의 cli_auth vs launch_error 등).
+ *
+ * ★[]로 묶은 칸은 gating=false — 화면에는 보이되 하류 단계의 이탈률 기준선이
+ * 되지 않는다. 계측이 늦게 생겼거나(첫대화·첫티켓) 시간창이 다른(첫머지) 칸이
+ * 체인에 끼면 그 뒤가 통째로 0 이 되어 계측 공백이 제품 실패로 둔갑하기 때문이다.
+ * 자세한 근거는 adminAnalytics.ONBOARDING_FUNNEL_STEPS 주석 참조.
  *
  * 측정·한계는 buildOnboardingFunnel 의 note 참조(auth-gated flush).
  * 신규 row 는 서버가 metadata.accountUserId 를 주입해 계정 기준으로 dedup 하고,
@@ -8602,6 +8611,23 @@ export const getAdminUsageSummary = functions.https.onCall(
  *
  * params: { days?: number, includeAdmin?: boolean } (기본 30, 제외)
  */
+/**
+ * 퍼널 확장(티켓 ygoWP1VJ)으로 raw 스캔에 **새로 들어온** 이벤트들.
+ *
+ * sessions CTE 는 (프로젝트×날짜) 조합 수로 "7일 내 2번째 세션"을 근사하므로,
+ * 스캔하는 이벤트 종류가 늘면 d_retained_7d 가 저절로 올라간다. 그건 잔존이
+ * 좋아진 게 아니라 분모를 바꾼 것이라, 잔존 계산에서는 이 목록을 제외한다.
+ */
+const FUNNEL_EVENTS_EXCLUDED_FROM_RETENTION: readonly string[] = [
+  "app:installed",
+  "onboarding:first_conversation",
+  "onboarding:first_ticket",
+  "task:merged",
+  "onboarding:spawn_blocked",
+  "onboarding:agent_needs_auth",
+  "onboarding:funding_guide_shown",
+];
+
 export const getAdminOnboardingFunnel = functions
   .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
   .https.onCall(async (data, context) => {
@@ -8657,22 +8683,38 @@ export const getAdminOnboardingFunnel = functions
             AS folder_connected_ts,
           MIN(IF(event = 'onboarding:orchestrator_opened', ts, NULL))
             AS orchestrator_opened_ts,
+          MIN(IF(event = 'onboarding:first_conversation', ts, NULL))
+            AS first_conversation_ts,
+          MIN(IF(event = 'onboarding:first_ticket', ts, NULL))
+            AS first_ticket_ts,
           MIN(IF(event = 'agent:spawned', ts, NULL)) AS agent_spawned_ts,
           MIN(IF(event = 'task:completed', ts, NULL)) AS task_completed_ts,
+          MIN(IF(event = 'task:merged', ts, NULL)) AS first_merge_ts,
+          -- ★설치 전용 이벤트(app:installed)는 아직 발신된 적이 없다(실측 0건).
+          -- 없는 신호를 지어내지 않고, 있으면 쓰고 없으면 최초 실행으로 대체한다.
+          COALESCE(
+            MIN(IF(event = 'app:installed', ts, NULL)),
+            MIN(IF(event = 'app:first_run', ts, NULL))
+          ) AS install_ts,
+          COUNTIF(event IN ('app:installed', 'app:first_run')) AS n_install,
           COUNTIF(event = 'app:first_run') AS n_first_run,
           COUNTIF(event = 'auth:login_attempt') AS n_login_attempt,
           COUNTIF(event = 'auth:login_success') AS n_login_success,
           COUNTIF(event = 'onboarding:folder_connected') AS n_folder_connected,
           COUNTIF(event = 'onboarding:orchestrator_opened')
             AS n_orchestrator_opened,
+          COUNTIF(event = 'onboarding:first_conversation')
+            AS n_first_conversation,
+          COUNTIF(event = 'onboarding:first_ticket') AS n_first_ticket,
           COUNTIF(event = 'agent:spawned') AS n_agent_spawned,
           COUNTIF(event = 'task:completed') AS n_task_completed,
-          COUNTIF(event = 'auth:login_failed') AS n_login_failed,
-          COUNTIF(event = 'onboarding:folder_connect_failed')
-            AS n_folder_connect_failed,
-          COUNTIF(event = 'onboarding:orchestrator_blocked')
-            AS n_orchestrator_blocked,
-          COUNTIF(event = 'agent:crashed') AS n_agent_crashed
+          COUNTIF(event = 'task:merged') AS n_first_merge,
+          -- 실패 분기 카운트는 상수(ONBOARDING_FAILURE_EVENTS)에서 생성한다.
+          -- 손으로 적던 시절엔 상수에 칸을 늘려도 SQL 이 안 따라와 조용히 0 이
+          -- 나왔다(needsAuth/authedButUnfunded 가 그렇게 빠져 있었다).
+          ${ONBOARDING_FAILURE_EVENTS.map(
+            (f) => `COUNTIF(event = '${f.event}') AS n_${f.col}`,
+          ).join(",\n          ")}
         FROM raw
         GROUP BY identity
       ),
@@ -8736,6 +8778,29 @@ export const getAdminOnboardingFunnel = functions
             AS reached_task_completed
         FROM marks
       ),
+      -- ★비-gating 칸(설치·첫대화·첫티켓·첫머지)은 별도 레이어에서 파생한다.
+      -- 본선 체인 SQL 을 한 줄도 건드리지 않으므로 기존 단계 수치가 그대로 남고
+      -- (회귀 방지), BigQuery 가 같은 SELECT 안의 별칭 참조를 허용하지 않아
+      -- 어차피 레이어가 하나 더 필요하다.
+      seq_ext AS (
+        SELECT
+          *,
+          install_ts IS NOT NULL AS reached_install,
+          reached_orchestrator_opened
+            AND first_conversation_ts BETWEEN orchestrator_opened_ts
+              AND TIMESTAMP_ADD(login_success_ts, INTERVAL 24 HOUR)
+            AS reached_first_conversation,
+          reached_orchestrator_opened
+            AND first_ticket_ts BETWEEN orchestrator_opened_ts
+              AND TIMESTAMP_ADD(login_success_ts, INTERVAL 24 HOUR)
+            AS reached_first_ticket,
+          -- 머지는 24h 안에 거의 안 일어난다 — 7일 창으로 잰다(라벨에 명시).
+          reached_agent_spawned
+            AND first_merge_ts BETWEEN agent_spawned_ts
+              AND TIMESTAMP_ADD(login_success_ts, INTERVAL 7 DAY)
+            AS reached_first_merge
+        FROM seq
+      ),
       sessions AS (
         SELECT
           r.identity,
@@ -8750,9 +8815,19 @@ export const getAdminOnboardingFunnel = functions
         WHERE s.reached_task_completed
           AND r.ts BETWEEN s.login_success_ts
             AND TIMESTAMP_ADD(s.login_success_ts, INTERVAL 7 DAY)
+          -- ★이 티켓에서 raw 에 새로 들어온 이벤트는 잔존 계산에서 뺀다.
+          -- sessions 는 (프로젝트×날짜) 조합 수로 '2번째 세션' 을 근사하므로,
+          -- 이벤트 종류를 늘리면 d_retained_7d(베타종료 게이지 입력)가 조용히
+          -- 올라간다. 퍼널 칸을 추가했다는 이유로 잔존 지표가 좋아지는 건
+          -- 계측이 아니라 착시라 명시적으로 배제한다.
+          AND r.event NOT IN (${FUNNEL_EVENTS_EXCLUDED_FROM_RETENTION.map(
+            (e) => `'${e}'`,
+          ).join(", ")})
         GROUP BY r.identity
       )
       SELECT
+        COUNTIF(reached_install) AS d_install,
+        SUM(IF(reached_install, n_install, 0)) AS n_install,
         COUNTIF(reached_first_run) AS d_first_run,
         SUM(IF(reached_first_run, n_first_run, 0)) AS n_first_run,
         COUNTIF(reached_login_attempt) AS d_login_attempt,
@@ -8765,11 +8840,18 @@ export const getAdminOnboardingFunnel = functions
         COUNTIF(reached_orchestrator_opened) AS d_orchestrator_opened,
         SUM(IF(reached_orchestrator_opened, n_orchestrator_opened, 0))
           AS n_orchestrator_opened,
+        COUNTIF(reached_first_conversation) AS d_first_conversation,
+        SUM(IF(reached_first_conversation, n_first_conversation, 0))
+          AS n_first_conversation,
+        COUNTIF(reached_first_ticket) AS d_first_ticket,
+        SUM(IF(reached_first_ticket, n_first_ticket, 0)) AS n_first_ticket,
         COUNTIF(reached_agent_spawned) AS d_agent_spawned,
         SUM(IF(reached_agent_spawned, n_agent_spawned, 0)) AS n_agent_spawned,
         COUNTIF(reached_task_completed) AS d_task_completed,
         SUM(IF(reached_task_completed, n_task_completed, 0))
           AS n_task_completed,
+        COUNTIF(reached_first_merge) AS d_first_merge,
+        SUM(IF(reached_first_merge, n_first_merge, 0)) AS n_first_merge,
         COUNTIF(reached_task_completed AND n_agent_spawned >= 2)
           AS d_core_experience,
         COUNTIF(reached_task_completed AND (
@@ -8777,19 +8859,16 @@ export const getAdminOnboardingFunnel = functions
             IF(sessionish_count >= 2 OR project_count >= 2, 1, 0)
           ), 0)
           FROM sessions ss
-          WHERE ss.identity = seq.identity
+          WHERE ss.identity = seq_ext.identity
         ) = 1) AS d_retained_7d,
-        COUNTIF(n_login_failed > 0) AS d_login_failed,
-        SUM(n_login_failed) AS n_login_failed,
-        COUNTIF(n_folder_connect_failed > 0) AS d_folder_connect_failed,
-        SUM(n_folder_connect_failed) AS n_folder_connect_failed,
-        COUNTIF(n_orchestrator_blocked > 0) AS d_orchestrator_blocked,
-        SUM(n_orchestrator_blocked) AS n_orchestrator_blocked,
-        COUNTIF(n_agent_crashed > 0) AS d_agent_crashed,
-        SUM(n_agent_crashed) AS n_agent_crashed,
+        ${ONBOARDING_FAILURE_EVENTS.map(
+          (f) =>
+            `COUNTIF(n_${f.col} > 0) AS d_${f.col},\n        ` +
+            `SUM(n_${f.col}) AS n_${f.col}`,
+        ).join(",\n        ")},
         COUNTIF(reached_login_success) AS d_signup_base,
         COUNTIF(reached_task_completed) AS d_activated_30m
-      FROM seq
+      FROM seq_ext
     `;
 
     // 실패 이벤트의 errorCategory 분해(cli_auth / launch_error / crash 카테고리 등).
@@ -9709,20 +9788,10 @@ export const getAdminKpiCockpit = functions
     // (위 getAdminModelSummary 의 uid/client 분리와 동일 사유) 제외절 파라미터만
     // 넘긴다.
     const daysParams = { days: rangeDays, ...ex.params };
-    const [
-      headRows,
-      retainedRows,
-      activityRows,
-      cliSetupRows,
-      starRows,
-      cliFailRows,
-      demoConsentRows,
-      weeklyRows,
-      secondSessionRows,
-      avgDauRows,
-      stallRows,
-      stallReasonRows,
-    ] = await runAdminAnalyticsQueries([
+    // ★WithStatus 로 받는다: 이 러너는 개별 쿼리 실패를 삼키고 빈 배열을 돌려주기
+    // 때문에, 상태를 같이 내보내지 않으면 "쿼리가 죽어서 0" 과 "정말 0" 이 화면에서
+    // 구분되지 않는다(어드민이 '데이터 변화 없음' 으로 오독하던 지점).
+    const kpiQueryResults = await runAdminAnalyticsQueriesWithStatus([
       { name: "kpi.headline", query: headlineQuery, params: daysParams },
       { name: "kpi.retained7d", query: retainedQuery, params: daysParams },
       { name: "kpi.activity", query: activityQuery, params: daysParams },
@@ -9748,6 +9817,26 @@ export const getAdminKpiCockpit = functions
         params: daysParams,
       },
     ]);
+    const [
+      headRows,
+      retainedRows,
+      activityRows,
+      cliSetupRows,
+      starRows,
+      cliFailRows,
+      demoConsentRows,
+      weeklyRows,
+      secondSessionRows,
+      avgDauRows,
+      stallRows,
+      stallReasonRows,
+    ] = kpiQueryResults.map((r) => r.rows);
+    const kpiQueryErrors = kpiQueryResults
+      .filter((r) => r.error != null)
+      .map((r) => ({
+        name: r.name,
+        error: r.error ?? "unknown query failure",
+      }));
 
     const first = (rows: BigQueryRows): Record<string, unknown> =>
       rows[0] ?? {};
@@ -9850,6 +9939,10 @@ export const getAdminKpiCockpit = functions
         applied: !includeAdmin,
         uidFiltered: getAdminExclusionUid() != null,
         clientIdCount: adminClientIds.length,
+      },
+      queryStatus: {
+        ok: kpiQueryErrors.length === 0,
+        errors: kpiQueryErrors,
       },
       ...cockpit,
     };

@@ -336,33 +336,60 @@
     uidFiltered: boolean;
     clientIdCount: number;
   }
-  // 본선 6단계 — 각 단계 "도달 고유 clientId"(clients)와 이벤트 발생량(events).
-  // ★엄격 순차 아님(도달 기준). dropFromPrev 는 직전 단계 대비 감소(≥0 clamp).
-  //   비단조(folder_connected=0 인데 orchestrator_opened>0=resume 경로)면 drop=0.
-  // isMaxDrop = 최대 이탈 구간 1곳(★22→6 같은 활성화 절벽).
+  // 부분 쿼리 실패 상태 — 서버 러너는 개별 쿼리 실패를 삼키고 빈 배열을 준다.
+  // ok=false 면 그 칸의 0 은 "정말 0" 이 아니라 "못 읽음" 이다.
+  queryStatus: { ok: boolean; errors: { name: string; error: string }[] };
+  // 전 구간 13단계 — 각 단계 "도달 고유 clientId"(clients)와 이벤트 발생량(events).
+  // ★엄격 순차 아님(도달 기준). dropFromPrev 는 직전 **gating** 단계 대비 감소
+  //   (≥0 clamp). 비단조(folder_connected=0 인데 orchestrator_opened>0=resume
+  //   경로)면 drop=0. conversionFromPrev = 1 − dropRateFromPrev(같은 분모).
+  // ★gating=false 는 화면에만 있고 하류 기준선이 아닌 칸이다(티켓 ygoWP1VJ):
+  //   first_conversation·first_ticket 은 계측이 늦게 생겨, first_merge 는 7일 창이라
+  //   본선과 축이 다르다. 체인에 끼우면 그 뒤가 통째로 0 이 되어 계측 공백이 제품
+  //   실패로 둔갑한다. isMaxDrop 후보도 reach ∧ gating 칸으로 한정.
+  // ★install 은 전용 이벤트(app:installed)가 아직 한 번도 발신된 적이 없어
+  //   COALESCE(app:installed, app:first_run) 으로 채운다 — 사실상 first_run 과 같다.
   steps: {
-    key: "first_run" |
+    key: "install" |
+      "first_run" |
       "login_attempt" |
       "login_success" |
       "folder_connected" |
       "orchestrator_opened" |
-      "agent_spawned";
+      "first_conversation" | // onboarding:first_conversation (gating=false)
+      "first_ticket" | // onboarding:first_ticket (gating=false)
+      "agent_spawned" |
+      "task_completed" |
+      "first_merge" | // task:merged, 7일 창 (gating=false)
+      "core_experience" |
+      "retained_7d";
     event: string; // 소스 이벤트명
     label: string;
+    kind: "reach" | "activation";
+    gating: boolean;
     clients: number;
     events: number;
     dropFromPrev: number | null; // 첫 단계=null
-    dropRateFromPrev: number | null; // dropFromPrev / prev.clients
+    dropRateFromPrev: number | null; // dropFromPrev / prevGating.clients
+    conversionFromPrev: number | null; // 직전 gating 대비 전환율
+    conversionFromStart: number | null; // 최초 단계(install) 대비 누적 전환율
     isMaxDrop: boolean;
   }
   [];
   // 실패-분기(퍼널 밖 이탈 사유) — errorCategory 로 세분.
   // ★orchestrator_blocked 는 cli_auth vs launch_error 로 분해된다.
+  // ★스톨 3종(needsAuth/authedButUnfunded/spawnBlocked)은 전진 단계가 아니라 여기
+  //   있다 — 스폰하려다 인증에 막힌 사람을 전진한 것으로 세면 안 되기 때문이다.
+  //   needsAuth.clients 는 **철회 보정 전** 원수치다(철회분을 뺀 값은 KPI 코크핏의
+  //   onboardingStall.needsAuth.unresolvedAgents).
   failureBranches: {
     key: "loginFailed" |
       "folderConnectFailed" |
       "orchestratorBlocked" |
-      "agentCrashed";
+      "agentCrashed" |
+      "spawnBlocked" |
+      "needsAuth" |
+      "authedButUnfunded";
     event: string;
     label: string;
     clients: number;

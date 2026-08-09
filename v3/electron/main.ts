@@ -4327,9 +4327,36 @@ ipcMain.handle("pty:create", (event, { id, name, command, args, cwd }) => {
   return { id: session.id, name: session.name, shell: session.shell };
 });
 
+// 오케스트레이터 PTY 는 launch 시 `orch-orchestrator-...` 로 id 가 만들어진다
+// (orchestrator-manager: `orch-${sessionId}-${Date.now()}`). 활성화 퍼널의
+// "첫 대화" 칸은 **사용자가 오케에 말을 건 순간**이라, 에이전트 PTY 는 세면 안 된다.
+function isOrchestratorPtyId(id: string): boolean {
+  return id.startsWith("orch-");
+}
+
+// 사용자가 오케 PTY 에 지시를 제출한 순간 = 활성화 퍼널 "첫 대화"(티켓 ygoWP1VJ).
+// 렌더러가 보낸 것만 여기를 지난다(메인 내부 주입은 ptyManager 를 직접 호출).
+// 내용은 넘기지 않는다 — 길이만 넘기고 그마저 구간으로 접혀 나간다.
+function noteOrchestratorSubmit(id: string, surface: string, length: number) {
+  if (!isOrchestratorPtyId(id)) return;
+  mainTelemetry.orchestratorMessage(mainWindow, surface, length);
+}
+
 // pty:write uses ipcMain.on (one-way) — keystrokes shouldn't pay invoke's round-trip cost
 ipcMain.on("pty:write", (event, { id, data }) => {
   if (!isPtyCallerOwner(event.sender.id, id)) return;
+  // 터미널 직접 입력의 '제출' 은 CR 키다(xterm 이 Enter 를 \r 로 보낸다).
+  // 키스트로크마다 도는 경로라 오케 PTY 가 아니면 문자열 검사도 하지 않는다.
+  // 길이는 -1(unknown) 로 보낸다 — 입력이 키스트로크로 쪼개져 들어오므로 진짜
+  // 길이를 알려면 사용자 입력을 메인에서 버퍼링해야 하고, 그건 비식별 원칙에
+  // 어긋난다. 0 으로 적어 "빈 메시지"를 지어내지도 않는다.
+  if (
+    typeof data === "string" &&
+    isOrchestratorPtyId(id) &&
+    data.includes("\r")
+  ) {
+    noteOrchestratorSubmit(id, "terminal", -1);
+  }
   ptyManager.write(id, data);
 });
 
@@ -4348,6 +4375,13 @@ ipcMain.on(
     }: { id: string; data: string; bracketedPaste?: boolean }
   ) => {
     if (!isPtyCallerOwner(event.sender.id, id)) return;
+    // FeedbackInput / CommandPanel 처럼 한 번에 통째로 제출하는 경로 — 여기서는
+    // 길이를 알 수 있어 구간으로 접어 남긴다(내용은 넘기지 않는다).
+    noteOrchestratorSubmit(
+      id,
+      "inject",
+      typeof data === "string" ? data.length : -1
+    );
     ptyManager.writeAndSubmit(id, data, undefined, bracketedPaste);
   }
 );

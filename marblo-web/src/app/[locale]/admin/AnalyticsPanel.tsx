@@ -104,10 +104,17 @@ type OnboardingFunnelStep = {
   event: string;
   label: string;
   kind: "reach" | "activation";
+  /** 하류 이탈률의 기준선인가. false = 체인 밖(계측이 늦게 생겼거나 창이 다른 칸).
+   *  구버전 functions 응답에는 없으므로 optional — 없으면 true 로 본다. */
+  gating?: boolean;
   clients: number;
   events: number;
   dropFromPrev: number | null;
   dropRateFromPrev: number | null;
+  /** 직전 gating 단계 대비 전환율(= 1 − dropRateFromPrev). 구버전은 미제공. */
+  conversionFromPrev?: number | null;
+  /** 최초 단계(설치) 대비 누적 전환율. 구버전은 미제공. */
+  conversionFromStart?: number | null;
   isMaxDrop: boolean;
 };
 // ★헤드라인 — 가입 후 30분 내 첫 티켓 완료 활성화율.
@@ -126,14 +133,53 @@ type OnboardingFailureBranch = {
   events: number;
   byCategory: { key: string; count: number; clients: number }[];
 };
+type QueryStatus = { ok: boolean; errors: { name: string; error: string }[] };
 type OnboardingFunnel = {
   rangeDays: number;
   generatedAt: string;
   adminExcluded?: AdminExcludedTelemetry;
+  /** 부분 쿼리 실패 상태. 구버전 functions 는 안 내려준다. */
+  queryStatus?: QueryStatus;
   steps: OnboardingFunnelStep[];
   failureBranches: OnboardingFailureBranch[];
   headline?: ActivationHeadline;
   note: string;
+};
+
+// ── 활성화 게이트 + 리텐션 코호트 (getAdminRetentionCohorts) ─────────────────
+// ★이 콜러블은 서버에 있는데 **웹이 호출조차 하지 않고 있었다** — 앱 설정의
+// 어드민 탭이 제거되면서(#881) 이 축이 어디에도 안 보이게 됐다.
+//
+// 위 온보딩 퍼널과 다른 축이다: 여기는 events.metadata.accountUserId(계정
+// identity)만 쓰고 익명 clientId 폴백을 하지 않는다. 그래서 accountUserId 주입이
+// 시작된 시점 이전 구간은 구조적으로 비어 있다 — 화면이 그 사실을 말해야 한다
+// (0 을 '아무도 안 왔다'로 읽으면 오독이다).
+type ActivationGateStep = {
+  key: string;
+  event: string;
+  label: string;
+  users: number;
+  dropFromPrev: number | null;
+  dropRateFromPrev: number | null;
+  isMaxDrop: boolean;
+};
+type RetentionCohort = {
+  period: "day" | "week";
+  cohort: string;
+  cohortUsers: number;
+  returningUsers: Record<string, number>;
+  rates: Record<string, number | null>;
+};
+type RetentionCohorts = {
+  rangeDays: number;
+  generatedAt: string;
+  adminExcluded?: AdminExcludedTelemetry;
+  cohorts: { day: RetentionCohort[]; week: RetentionCohort[]; note: string };
+  activationGate: {
+    steps: ActivationGateStep[];
+    maxDrop: ActivationGateStep | null;
+    note: string;
+  };
 };
 
 // ── KPI 코크핏 (getAdminKpiCockpit) — 지표기반 베타종료 게이지 + 신규 온보딩 ──
@@ -170,6 +216,8 @@ type KpiCockpit = {
   rangeDays: number;
   generatedAt: string;
   adminExcluded?: AdminExcludedTelemetry;
+  /** 부분 쿼리 실패 상태. 구버전 functions 는 안 내려준다. */
+  queryStatus?: QueryStatus;
   betaExitGauges: BetaExitGauge[];
   onboardingEvents: {
     cliSetup: CliSetupStepSummary[];
@@ -214,6 +262,40 @@ type KpiCockpit = {
     crashRate: number | null;
     avgRestartPerSpawn: number | null;
   };
+  /**
+   * 온보딩 스톨 요약(#888 buildOnboardingStallSummary) — "구독/크레딧/인증이
+   * 없어 최초에 멈춘" 설치. 서버는 진작 계산해 내려주고 있었는데 이 화면에
+   * 필드조차 없어 아무 데도 안 보였다(어드민 정본이 웹으로 옮겨온 뒤 생긴 공백).
+   * 구버전 functions 는 null 을 준다.
+   */
+  onboardingStall?: {
+    stalledClients: number;
+    stalledRate: number | null;
+    spawnBlocked: {
+      clients: number;
+      events: number;
+      byReason: KeyCount[];
+    };
+    needsAuth: {
+      clients: number;
+      agents: number;
+      resolvedAgents: number;
+      /** 철회(오탐)를 뺀 값 — 진짜 "로그인 화면에서 죽은" 수. */
+      unresolvedAgents: number;
+      /** 철회 비율 = 오탐률. 높으면 백스톱 튜닝이 먼저다. */
+      falsePositiveRate: number | null;
+    };
+    funding: {
+      okClients: number;
+      unfundedClients: number;
+      blockedClients: number;
+      inconclusiveClients: number;
+      decidedClients: number;
+      unfundedRate: number | null;
+    };
+    guideShown: { clients: number; events: number };
+    note: string;
+  } | null;
   note: string;
 };
 
@@ -851,7 +933,7 @@ function TwoLineChart({
   onDrill?: (date: string) => void;
 }) {
   const clean = data.filter(
-    (d) => d && isFinite(d.first) && isFinite(d.second),
+    (d) => d && isFinite(d.first) && isFinite(d.second)
   );
   const allZero = clean.every((d) => d.first === 0 && d.second === 0);
   if (clean.length === 0 || allZero) return <EmptyState label={emptyLabel} />;
@@ -953,7 +1035,7 @@ function TwoLineChart({
             style={onDrill ? { cursor: "pointer" } : undefined}
           >
             <title>{`${fmtDay(d.date)} · ${first.label} ${fmtFirst(
-              d.first,
+              d.first
             )} · ${second.label} ${fmtSecond(d.second)}${
               onDrill ? " (클릭: 상세 분해)" : ""
             }`}</title>
@@ -1037,11 +1119,11 @@ function SectionHeader({
           t: "🟢 항상 켜짐·식별",
         }
       : trust === "yellow"
-        ? {
-            c: "text-amber-300 bg-amber-950/30 border-amber-900/40",
-            t: "🟡 옵트인 표본",
-          }
-        : { c: "text-zinc-400 bg-zinc-900 border-zinc-800", t: "🔴 소스 없음" };
+      ? {
+          c: "text-amber-300 bg-amber-950/30 border-amber-900/40",
+          t: "🟡 옵트인 표본",
+        }
+      : { c: "text-zinc-400 bg-zinc-900 border-zinc-800", t: "🔴 소스 없음" };
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="flex items-center gap-2">
@@ -1291,11 +1373,11 @@ function AdminExclusionNote({
     parts.push(
       fsTotal > 0
         ? `사업 데이터에서 관리자 소유 ${fmtInt(fsTotal)}건 제외(구독 ${fmtInt(
-            fs.subscriptions,
+            fs.subscriptions
           )} · 청구 ${fmtInt(fs.billingCharges)} · 파운더 ${fmtInt(
-            fs.founders,
+            fs.founders
           )} · 에이전트 ${fmtInt(fs.agents)})`
-        : "사업 데이터에 관리자 소유 문서 없음",
+        : "사업 데이터에 관리자 소유 문서 없음"
     );
   }
   if (tel) {
@@ -1308,25 +1390,25 @@ function AdminExclusionNote({
       parts.push(
         tel.clientIdCount > 0
           ? `🟠 텔레메트리 전체 포함 중(운영자 미제외) — 제외 시 관리자 클라이언트 ${fmtInt(
-              tel.clientIdCount,
+              tel.clientIdCount
             )}개가 빠집니다`
-          : "🟠 텔레메트리 전체 포함 중(운영자 미제외)",
+          : "🟠 텔레메트리 전체 포함 중(운영자 미제외)"
       );
     } else if (tel.clientIdCount > 0) {
       parts.push(
         `텔레메트리에서 관리자 클라이언트 ${fmtInt(
-          tel.clientIdCount,
-        )}개 제외(cost_logs 역참조 추정)`,
+          tel.clientIdCount
+        )}개 제외(cost_logs 역참조 추정)`
       );
     } else {
       parts.push(
         "텔레메트리는 익명 clientId 라 운영자 식별분이 없어 제외분 0 " +
-          "(비용 지출은 uid 기준 정확 제외)",
+          "(비용 지출은 uid 기준 정확 제외)"
       );
     }
     // ★blind spot 상시 고지 — cost_logs 무흔적 세션은 존킴이라도 못 잡음.
     parts.push(
-      "제외기 한계: cost_logs 흔적 있는 세션만 잡아 무토큰·dev·크래시 세션은 외부로 샐 수 있음",
+      "제외기 한계: cost_logs 흔적 있는 세션만 잡아 무토큰·dev·크래시 세션은 외부로 샐 수 있음"
     );
   }
 
@@ -1365,12 +1447,17 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
   const maxClients = Math.max(1, ...steps.map((s) => s.clients));
   const hasAny = steps.some((s) => s.clients > 0 || s.events > 0);
   const failuresWithData = funnel.failureBranches.filter(
-    (f) => f.clients > 0 || f.events > 0,
+    (f) => f.clients > 0 || f.events > 0
   );
 
   if (!hasAny) {
+    // ★빈 화면일수록 배너가 필요하다 — 쿼리가 통째로 죽어도 여기로 떨어지므로,
+    // 배너 없이 '이벤트 없음' 만 보여주면 장애를 데이터 공백으로 오독하게 된다.
     return (
-      <EmptyState label="온보딩 퍼널 이벤트가 없습니다 (해당 기간 미발화 또는 텔레메트리 공백)." />
+      <div className="space-y-3">
+        <QueryStatusBanner status={funnel.queryStatus} />
+        <EmptyState label="온보딩 퍼널 이벤트가 없습니다 (해당 기간 미발화 또는 텔레메트리 공백)." />
+      </div>
     );
   }
 
@@ -1378,6 +1465,8 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
 
   return (
     <div className="space-y-4">
+      {/* ★부분 쿼리 실패는 '0' 이 아니라 '못 읽음' — 먼저 밝힌다. */}
+      <QueryStatusBanner status={funnel.queryStatus} />
       {/* ★헤드라인 활성화 지표 — 가입 후 30분 내 첫 티켓 완료 비율. */}
       {headline && (
         <div className="rounded-xl border border-indigo-800/60 bg-indigo-950/30 p-4">
@@ -1399,13 +1488,15 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
       )}
       <Panel
         title="단계별 도달 (고유 clientId)"
-        note="app:first_run → 로그인 → 폴더연결 → 오케오픈 → 스폰 → (활성화) 첫 티켓 완료·핵심경험·7일 잔존 · 인접 단계 감소 = 이탈"
+        note="설치 → 최초실행 → 로그인 → 폴더연결 → 오케오픈 → 첫대화 → 첫티켓 → 스폰 → (활성화) 첫 티켓 완료·첫 머지·핵심경험·7일 잔존 · 감소=이탈, 증가율=전환"
       >
         <div className="space-y-1">
           {steps.map((s, i) => {
             const widthPct = Math.round((s.clients / maxClients) * 100);
             const drop = s.dropFromPrev;
             const showDrop = i > 0 && drop != null && drop > 0;
+            // 구버전 functions 응답(gating 미제공)은 전부 체인 칸으로 본다.
+            const isGating = s.gating !== false;
             return (
               <div key={s.key}>
                 {showDrop && (
@@ -1433,6 +1524,17 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
                         활성화
                       </span>
                     )}
+                    {/* ★체인 밖 칸임을 화면에서도 밝힌다 — 이 칸의 감소를
+                        "제품 누수"로 읽으면 안 된다(계측이 늦게 생겼거나
+                        시간창이 다르다). 서버 note 와 같은 이야기. */}
+                    {!isGating && (
+                      <span
+                        className="rounded bg-zinc-800 px-1 text-[9px] font-medium text-zinc-400"
+                        title="참고 지표 — 뒤 단계의 이탈률 기준선으로 쓰이지 않습니다(계측 시점/시간창이 본선과 다름)."
+                      >
+                        참고
+                      </span>
+                    )}
                   </div>
                   <div className="relative h-7 flex-1 overflow-hidden rounded bg-zinc-900">
                     <div
@@ -1442,8 +1544,8 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
                         backgroundColor: s.isMaxDrop
                           ? STATUS_CRIT
                           : s.kind === "activation"
-                            ? SERIES_2
-                            : SERIES,
+                          ? SERIES_2
+                          : SERIES,
                       }}
                     />
                     <div className="absolute inset-0 flex items-center gap-2 px-2">
@@ -1456,6 +1558,22 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
                           style={{ color: INK_MUTED }}
                         >
                           · {fmtInt(s.events)} 이벤트
+                        </span>
+                      )}
+                      {/* 단계별 전환율(직전 gating 대비 · 시작 대비). 분모가 0 이면
+                          서버가 null 을 주므로 0% 로 오도하지 않고 아예 감춘다. */}
+                      {i > 0 && s.conversionFromPrev != null && (
+                        <span className="ml-auto text-[11px] tabular-nums text-zinc-300">
+                          전환 {fmtPct(s.conversionFromPrev)}
+                          {s.conversionFromStart != null && (
+                            <span
+                              className="ml-1"
+                              style={{ color: INK_MUTED }}
+                              title="최초 단계(설치) 대비 누적 전환율"
+                            >
+                              · 누적 {fmtPct(s.conversionFromStart)}
+                            </span>
+                          )}
                         </span>
                       )}
                     </div>
@@ -1474,7 +1592,7 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
               key={f.key}
               title={`실패 분기 · ${f.label}`}
               note={`${fmtInt(f.clients)} clientId · ${fmtInt(
-                f.events,
+                f.events
               )}건 · 사유(errorCategory)별`}
             >
               {f.byCategory.length > 0 ? (
@@ -1532,7 +1650,7 @@ function BetaSegmentCard({ seg }: { seg: BetaSegmentSummary }) {
     <Panel
       title={seg.label}
       note={`grant ${fmtInt(seg.cohortSize)}명 · 관측 ${fmtInt(
-        seg.observedUsers,
+        seg.observedUsers
       )}명`}
     >
       <div className="mb-3 grid grid-cols-2 gap-3">
@@ -1684,8 +1802,8 @@ function GaugeCard({ gauge }: { gauge: BetaExitGauge }) {
   const valueText = !hasData
     ? "—"
     : isNps
-      ? String(Math.round(gauge.current as number))
-      : fmtPct(gauge.current);
+    ? String(Math.round(gauge.current as number))
+    : fmtPct(gauge.current);
   const targetText = isNps ? String(gauge.target) : fmtPct(gauge.target);
   const color = !hasData ? INK_MUTED : gauge.met ? STATUS_GOOD : STATUS_WARN;
   const statusText = !hasData ? "데이터 대기" : gauge.met ? "달성" : "미달";
@@ -1736,7 +1854,7 @@ function GaugeCard({ gauge }: { gauge: BetaExitGauge }) {
 // CLI 셋업 위저드 단계별 성공/실패 미니 리스트.
 function CliSetupList({ steps }: { steps: CliSetupStepSummary[] }) {
   const hasAny = steps.some(
-    (s) => s.clients.enter > 0 || s.clients.success > 0 || s.clients.fail > 0,
+    (s) => s.clients.enter > 0 || s.clients.success > 0 || s.clients.fail > 0
   );
   if (!hasAny) {
     return (
@@ -1806,8 +1924,8 @@ function SurveyStars({ nps }: { nps: NpsResult }) {
                 nps.nps == null
                   ? INK_MUTED
                   : nps.nps >= 40
-                    ? STATUS_GOOD
-                    : STATUS_WARN,
+                  ? STATUS_GOOD
+                  : STATUS_WARN,
             }}
           >
             {nps.nps == null ? "—" : nps.nps}
@@ -1844,6 +1962,259 @@ function SurveyStars({ nps }: { nps: NpsResult }) {
   );
 }
 
+// ── 활성화 게이트 + 리텐션 코호트 뷰 (계정 identity 축) ─────────────────────
+function RetentionCohortsView({ data }: { data: RetentionCohorts }) {
+  const gate = data.activationGate;
+  const maxUsers = Math.max(1, ...gate.steps.map((s) => s.users));
+  const gateEmpty = gate.steps.every((s) => s.users === 0);
+  const cohorts = data.cohorts.week.length > 0 ? data.cohorts.week : [];
+  const horizons: Array<["d1" | "d7" | "d14" | "d30", string]> = [
+    ["d1", "D1"],
+    ["d7", "D7"],
+    ["d14", "D14"],
+    ["d30", "D30"],
+  ];
+  return (
+    <div className="space-y-4">
+      <Panel
+        title="순차 활성화 게이트 (계정 identity)"
+        note="설치 → 최초실행 → 로그인 → 폴더연결 → 오케오픈 → 스폰 → 첫 티켓 완료"
+      >
+        {gateEmpty ? (
+          <EmptyState label="계정 귀속(metadata.accountUserId) 이벤트가 이 기간에 없습니다 — 이 축은 계정 귀속이 붙은 이후 구간만 계산됩니다. 익명 clientId 기준 수치는 위 '온보딩 퍼널' 을 보세요." />
+        ) : (
+          <div className="space-y-1">
+            {gate.steps.map((s, i) => {
+              const widthPct = Math.round((s.users / maxUsers) * 100);
+              const drop = s.dropFromPrev;
+              return (
+                <div key={s.key}>
+                  {i > 0 && drop != null && drop > 0 && (
+                    <div
+                      className={`flex items-center gap-1.5 py-0.5 pl-1 text-xs ${
+                        s.isMaxDrop
+                          ? "font-semibold text-red-400"
+                          : "text-zinc-500"
+                      }`}
+                    >
+                      <span>↓</span>
+                      <span className="tabular-nums">
+                        −{fmtInt(drop)}
+                        {s.dropRateFromPrev != null &&
+                          ` (−${fmtPct(s.dropRateFromPrev)})`}
+                      </span>
+                      {s.isMaxDrop && <span>· 최대 이탈 구간</span>}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-3">
+                    <div className="w-40 shrink-0 text-xs text-zinc-400">
+                      {s.label}
+                    </div>
+                    <div className="relative h-7 flex-1 overflow-hidden rounded bg-zinc-900">
+                      <div
+                        className="h-full rounded"
+                        style={{
+                          width: `${Math.max(widthPct, s.users > 0 ? 2 : 0)}%`,
+                          backgroundColor: s.isMaxDrop ? STATUS_CRIT : SERIES,
+                        }}
+                      />
+                      <div className="absolute inset-0 flex items-center px-2">
+                        <span className="text-xs font-semibold tabular-nums text-zinc-100">
+                          {fmtInt(s.users)}명
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>{gate.note}</span>
+        </p>
+      </Panel>
+
+      <Panel
+        title="리텐션 코호트 (주간)"
+        note="first-active 주 기준 · D1/D7/D14/D30 복귀율 · 관측창 미도달 칸은 —"
+      >
+        {cohorts.length === 0 ? (
+          <EmptyState label="코호트가 없습니다 (계정 귀속 활동 표본 없음)." />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[420px] text-xs">
+              <thead>
+                <tr className="text-zinc-500">
+                  <th className="py-1 pr-3 text-left font-medium">코호트</th>
+                  <th className="py-1 pr-3 text-right font-medium">인원</th>
+                  {horizons.map(([, label]) => (
+                    <th
+                      key={label}
+                      className="py-1 pr-3 text-right font-medium"
+                    >
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {cohorts.map((c) => (
+                  <tr key={c.cohort} className="border-t border-zinc-900">
+                    <td className="py-1 pr-3 tabular-nums text-zinc-300">
+                      {c.cohort}
+                    </td>
+                    <td className="py-1 pr-3 text-right tabular-nums text-zinc-300">
+                      {fmtInt(c.cohortUsers)}
+                    </td>
+                    {horizons.map(([h, label]) => {
+                      const rate = c.rates?.[h];
+                      return (
+                        <td
+                          key={label}
+                          className="py-1 pr-3 text-right tabular-nums text-zinc-400"
+                        >
+                          {rate == null ? "—" : fmtPct(rate)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>{data.cohorts.note}</span>
+        </p>
+      </Panel>
+    </div>
+  );
+}
+
+// ── 온보딩 스톨 카드 (#888) ─────────────────────────────────────────────────
+// "구독/크레딧/인증이 없어 최초에 멈춘 설치"의 규모. 서버는 진작 내려주고 있었는데
+// 화면이 없어 어디에도 안 보이던 축이다.
+//
+// 두 가지를 화면에서도 지킨다(서버 빌더와 같은 정직성 규약):
+//  1) needsAuth 는 **철회 보정 후**(unresolvedAgents)를 크게 쓴다 — 인증 팝업
+//     오탐을 스톨로 세면 오탐이 곧 문제 크기로 둔갑한다. 오탐률도 같이 보인다.
+//  2) unfunded 비율의 분모는 판정이 난 설치(ok 포함)다. 분모 0 이면 0% 가 아니라
+//     '데이터 대기'로 적는다.
+function OnboardingStallCard({
+  stall,
+}: {
+  stall: NonNullable<KpiCockpit["onboardingStall"]>;
+}) {
+  const na = stall.needsAuth;
+  const fu = stall.funding;
+  const hasAny =
+    stall.stalledClients > 0 ||
+    stall.spawnBlocked.clients > 0 ||
+    na.agents > 0 ||
+    fu.decidedClients > 0 ||
+    stall.guideShown.clients > 0;
+  return (
+    <Panel
+      title="온보딩 스톨 (인증·구독/크레딧에서 멈춘 설치)"
+      note="스폰 사전차단 · CLI 로그인화면 정지(철회 보정) · 인증됐으나 미결제"
+    >
+      {!hasAny && (
+        <div className="mb-3">
+          <EmptyState label="스톨 신호 0건 — 해당 계측(3.0.24+)이 실린 빌드의 실사용 전이거나, 실제로 막힌 설치가 없습니다." />
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard
+          label="스톨 설치"
+          value={fmtInt(stall.stalledClients)}
+          sub={
+            stall.stalledRate == null
+              ? "가입 표본 없음 (데이터 대기)"
+              : `가입 대비 ${fmtPct(stall.stalledRate)}`
+          }
+          accent={stall.stalledClients > 0 ? STATUS_CRIT : undefined}
+        />
+        <StatCard
+          label="스폰 사전 차단"
+          value={fmtInt(stall.spawnBlocked.clients)}
+          sub={`${fmtInt(stall.spawnBlocked.events)}건 · 설치/인증/벤더 미비`}
+        />
+        <StatCard
+          label="로그인화면 정지 (철회 제외)"
+          value={fmtInt(na.unresolvedAgents)}
+          sub={
+            na.falsePositiveRate == null
+              ? `발화 ${fmtInt(na.agents)} · 오탐률 —`
+              : `발화 ${fmtInt(na.agents)} · 오탐 ${fmtPct(
+                  na.falsePositiveRate
+                )}`
+          }
+          accent={na.unresolvedAgents > 0 ? STATUS_WARN : undefined}
+        />
+        <StatCard
+          label="인증됐으나 미결제"
+          value={fu.unfundedRate == null ? "—" : fmtPct(fu.unfundedRate)}
+          sub={`${fmtInt(fu.unfundedClients)} / 판정 ${fmtInt(
+            fu.decidedClients
+          )} (ok ${fmtInt(fu.okClients)})`}
+          accent={
+            fu.unfundedRate != null && fu.unfundedRate > 0
+              ? STATUS_CRIT
+              : undefined
+          }
+        />
+      </div>
+      <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Panel
+          title="차단 사유 (errorCategory)"
+          note="onboarding:spawn_blocked"
+        >
+          <BarList
+            data={stall.spawnBlocked.byReason.map((r) => ({
+              key: r.key,
+              value: r.count,
+            }))}
+            color={STATUS_WARN}
+            showShare
+            emptyLabel="차단 사유 데이터가 없습니다."
+          />
+        </Panel>
+        <Panel
+          title="가이드 모달 노출 (눈으로 막힌 사람)"
+          note="onboarding:funding_guide_shown · 판정과 따로 센다"
+        >
+          <div className="grid grid-cols-2 gap-3">
+            <StatCard
+              label="본 설치"
+              value={fmtInt(stall.guideShown.clients)}
+            />
+            <StatCard
+              label="노출 횟수"
+              value={fmtInt(stall.guideShown.events)}
+            />
+            <StatCard
+              label="판정 불가"
+              value={fmtInt(fu.inconclusiveClients)}
+              sub="주장 아님 — 분모에서 제외"
+            />
+            <StatCard
+              label="차단(요금제 있음 포함)"
+              value={fmtInt(fu.blockedClients)}
+            />
+          </div>
+        </Panel>
+      </div>
+      <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>{stall.note}</span>
+      </p>
+    </Panel>
+  );
+}
+
 // ── KPI 코크핏 뷰 (베타종료 게이지 + 온보딩 이벤트 + 재사용 + 스폰 헬스) ──────
 function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
   const { onboardingEvents: onb, reuse, spawnHealth: spawn } = kpi;
@@ -1851,6 +2222,12 @@ function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
   const consent = onb.consent;
   return (
     <div className="space-y-4">
+      <QueryStatusBanner status={kpi.queryStatus} />
+      {/* ★온보딩 스톨(#888) — 퍼널 바로 옆에 있어야 "왜 안 넘어갔나"가 읽힌다. */}
+      {kpi.onboardingStall && (
+        <OnboardingStallCard stall={kpi.onboardingStall} />
+      )}
+
       {/* ★베타종료 게이지 6종 */}
       <Panel
         title="베타종료 게이지 (현재값 vs 목표)"
@@ -1883,7 +2260,7 @@ function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
               : fmtPct(reuse.secondSessionRate)
           }
           sub={`${fmtInt(reuse.secondSessionClients)} / ${fmtInt(
-            reuse.signupBase,
+            reuse.signupBase
           )}명`}
         />
         <StatCard
@@ -1898,21 +2275,21 @@ function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
           label="스폰 성공률"
           value={spawn.successRate == null ? "—" : fmtPct(spawn.successRate)}
           sub={`완료 ${fmtInt(spawn.completed)} vs 크래시 ${fmtInt(
-            spawn.crashed,
+            spawn.crashed
           )}`}
           accent={
             spawn.successRate == null
               ? undefined
               : spawn.successRate >= 0.7
-                ? STATUS_GOOD
-                : STATUS_WARN
+              ? STATUS_GOOD
+              : STATUS_WARN
           }
         />
         <StatCard
           label="크래시율"
           value={spawn.crashRate == null ? "—" : fmtPct(spawn.crashRate)}
           sub={`크래시 ${fmtInt(spawn.crashed)} / 스폰 ${fmtInt(
-            spawn.spawned,
+            spawn.spawned
           )}`}
           accent={
             spawn.crashRate != null && spawn.crashRate > 0
@@ -2078,8 +2455,13 @@ export default function AnalyticsPanel() {
     loading: true,
     error: null,
   });
+  const [retention, setRetention] = useState<Loaded<RetentionCohorts>>({
+    data: null,
+    loading: true,
+    error: null,
+  });
   const [modelView, setModelView] = useState<"overview" | "routing">(
-    "overview",
+    "overview"
   );
   // 드릴다운 — 열려 있는 요청과 그 응답.
   const [drill, setDrill] = useState<DrilldownRequest | null>(null);
@@ -2101,7 +2483,7 @@ export default function AnalyticsPanel() {
       const fns = getFunctions(app, "us-central1");
       const call = httpsCallable<DrilldownRequest, DrilldownResult>(
         fns,
-        "getAdminDrilldown",
+        "getAdminDrilldown"
       );
       call(fullReq)
         .then((r) => {
@@ -2117,7 +2499,7 @@ export default function AnalyticsPanel() {
           });
         });
     },
-    [includeAdmin],
+    [includeAdmin]
   );
 
   const closeDrill = useCallback(() => {
@@ -2132,7 +2514,7 @@ export default function AnalyticsPanel() {
       // 사업(Firestore)은 항상 운영자 제외(별도 doc-id 기반) — includeAdmin 무관.
       const callBiz = httpsCallable<{ days: number }, BusinessSummary>(
         fns,
-        "getAdminBusinessSummary",
+        "getAdminBusinessSummary"
       );
       // 텔레메트리 계열은 includeAdmin 토글을 그대로 전달. usage 는 metricMode 도.
       const callUsage = httpsCallable<
@@ -2159,6 +2541,10 @@ export default function AnalyticsPanel() {
         { days: number; includeAdmin: boolean },
         BetaSegmentUsage
       >(fns, "getAdminBetaSegmentUsage");
+      const callRetention = httpsCallable<
+        { days: number; includeAdmin: boolean },
+        RetentionCohorts
+      >(fns, "getAdminRetentionCohorts");
 
       setBiz((s) => ({ ...s, loading: true, error: null }));
       setUsage((s) => ({ ...s, loading: true, error: null }));
@@ -2167,6 +2553,7 @@ export default function AnalyticsPanel() {
       setKpi((s) => ({ ...s, loading: true, error: null }));
       setRelease((s) => ({ ...s, loading: true, error: null }));
       setBetaSeg((s) => ({ ...s, loading: true, error: null }));
+      setRetention((s) => ({ ...s, loading: true, error: null }));
 
       // 각 콜러블 독립 처리 — 하나 실패해도 나머지는 렌더.
       callBiz({ days: d })
@@ -2176,7 +2563,7 @@ export default function AnalyticsPanel() {
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
-          }),
+          })
         );
       callUsage({ days: d, includeAdmin: inc, metricMode: mode })
         .then((r) => setUsage({ data: r.data, loading: false, error: null }))
@@ -2185,7 +2572,7 @@ export default function AnalyticsPanel() {
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
-          }),
+          })
         );
       callModel({ days: d, includeAdmin: inc })
         .then((r) => setModel({ data: r.data, loading: false, error: null }))
@@ -2194,20 +2581,20 @@ export default function AnalyticsPanel() {
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
-          }),
+          })
         );
       // 신규 콜러블 — functions 미배포(web 선배포) 시 not-found 로 실패할 수 있으나
       // 독립 catch 라 나머지 섹션은 정상 렌더된다(배포순서 soft-fail).
       callFunnel({ days: d, includeAdmin: inc })
         .then((r) =>
-          setOnbFunnel({ data: r.data, loading: false, error: null }),
+          setOnbFunnel({ data: r.data, loading: false, error: null })
         )
         .catch((e) =>
           setOnbFunnel({
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
-          }),
+          })
         );
       callKpi({ days: d, includeAdmin: inc })
         .then((r) => setKpi({ data: r.data, loading: false, error: null }))
@@ -2216,7 +2603,7 @@ export default function AnalyticsPanel() {
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
-          }),
+          })
         );
       callRelease({ days: d, includeAdmin: inc })
         .then((r) => setRelease({ data: r.data, loading: false, error: null }))
@@ -2225,7 +2612,7 @@ export default function AnalyticsPanel() {
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
-          }),
+          })
         );
       callBetaSeg({ days: d, includeAdmin: inc })
         .then((r) => setBetaSeg({ data: r.data, loading: false, error: null }))
@@ -2234,10 +2621,21 @@ export default function AnalyticsPanel() {
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
-          }),
+          })
+        );
+      callRetention({ days: d, includeAdmin: inc })
+        .then((r) =>
+          setRetention({ data: r.data, loading: false, error: null })
+        )
+        .catch((e) =>
+          setRetention({
+            data: null,
+            loading: false,
+            error: mapErr(e as CallableError),
+          })
         );
     },
-    [],
+    []
   );
 
   useEffect(() => {
@@ -2270,41 +2668,41 @@ export default function AnalyticsPanel() {
     () =>
       b
         ? Object.entries(b.subscriptions.byPlanActive || {}).map(
-            ([key, value]) => ({ key, value }),
+            ([key, value]) => ({ key, value })
           )
         : [],
-    [b],
+    [b]
   );
   const statusRows = useMemo(
     () =>
       b
         ? Object.entries(b.subscriptions.byStatus || {}).map(
-            ([key, value]) => ({ key, value }),
+            ([key, value]) => ({ key, value })
           )
         : [],
-    [b],
+    [b]
   );
   const providerRows = useMemo(
     () =>
       b
         ? Object.entries(b.subscriptions.byProviderActive || {}).map(
-            ([key, value]) => ({ key, value }),
+            ([key, value]) => ({ key, value })
           )
         : [],
-    [b],
+    [b]
   );
   const consecutiveRows = useMemo(
     () =>
       b
         ? Object.entries(
-            b.subscriptions.consecutiveBilling?.byCycleCount || {},
+            b.subscriptions.consecutiveBilling?.byCycleCount || {}
           ).map(([key, value]) => ({ key, value }))
         : [],
-    [b],
+    [b]
   );
   const subscriptionTrend = useMemo(
     () => b?.subscriptions.trendByDay || [],
-    [b],
+    [b]
   );
 
   // 퍼널: 신청 → 선정 → 활성(옵트인) → Pro. 활성은 익명 표본이라 라벨 구분.
@@ -2451,7 +2849,7 @@ export default function AnalyticsPanel() {
                 label="활성 파운더"
                 value={fmtInt(b.founders.accessGranted)}
                 sub={`설문 ${fmtInt(
-                  b.founders.feedbackSubmitted,
+                  b.founders.feedbackSubmitted
                 )} · 인터뷰 ${fmtInt(b.founders.interviewCompleted)}`}
               />
               <StatCard
@@ -2464,7 +2862,7 @@ export default function AnalyticsPanel() {
                 label="유료 Pro(active)"
                 value={fmtInt(b.subscriptions.paidProActive)}
                 sub={`현재 ${fmtInt(
-                  b.subscriptions.paidCurrent,
+                  b.subscriptions.paidCurrent
                 )} · 무료부여 ${fmtInt(b.subscriptions.founderGrantActive)}`}
                 accent={SERIES}
               />
@@ -2472,7 +2870,7 @@ export default function AnalyticsPanel() {
                 label="연속 구독자"
                 value={fmtInt(consecutiveBilling.subscribers)}
                 sub={`Toss 평균 ${consecutiveBilling.averageCycleCount.toFixed(
-                  1,
+                  1
                 )}회`}
                 accent={SERIES_2}
               />
@@ -2492,8 +2890,8 @@ export default function AnalyticsPanel() {
                 note={`활성 구독 ${fmtInt(
                   Object.values(b.subscriptions.byPlanActive || {}).reduce(
                     (a, c) => a + c,
-                    0,
-                  ),
+                    0
+                  )
                 )}건`}
               >
                 <BarList
@@ -2572,7 +2970,7 @@ export default function AnalyticsPanel() {
               <Panel
                 title="연속 청구 사이클"
                 note={`Toss billingCharges 기준 · Paddle ${fmtInt(
-                  b.subscriptions.paddleActiveCurrent,
+                  b.subscriptions.paddleActiveCurrent
                 )}건은 원장 공백`}
               >
                 <BarList
@@ -2603,7 +3001,7 @@ export default function AnalyticsPanel() {
                     return funnel.map((f) => {
                       const pct = Math.max(
                         (f.value / fmax) * 100,
-                        f.value > 0 ? 3 : 0,
+                        f.value > 0 ? 3 : 0
                       );
                       const color = f.trust === "yellow" ? STATUS_WARN : SERIES;
                       return (
@@ -2807,6 +3205,22 @@ export default function AnalyticsPanel() {
         ) : null}
       </div>
 
+      {/* ── 활성화 게이트 · 리텐션 코호트 (🟡, 계정 identity 축) ───────── */}
+      <div className="space-y-4">
+        <SectionHeader
+          icon={Activity}
+          title="활성화 게이트 · 리텐션 코호트"
+          trust="yellow"
+        />
+        {retention.loading ? (
+          <LoadingBox />
+        ) : retention.error ? (
+          <ErrorBox msg={retention.error} />
+        ) : retention.data ? (
+          <RetentionCohortsView data={retention.data} />
+        ) : null}
+      </div>
+
       {/* ── 모델 준비 (🟡) ────────────────────────────────────────── */}
       <div className="space-y-4">
         <SectionHeader icon={Cpu} title="모델 선정·라우팅" trust="yellow">
@@ -2944,8 +3358,8 @@ export default function AnalyticsPanel() {
                     value={fmtInt(
                       m.routing.byReuseVsSpawn.reduce(
                         (sum, r) => sum + r.count,
-                        0,
-                      ),
+                        0
+                      )
                     )}
                     sub="dispatch:decision"
                   />
@@ -2964,8 +3378,8 @@ export default function AnalyticsPanel() {
                     value={fmtInt(
                       m.outcomeByModel.reduce(
                         (sum, r) => sum + r.reworkCount,
-                        0,
-                      ),
+                        0
+                      )
                     )}
                     sub="retriesCount 합계"
                   />
@@ -3109,7 +3523,7 @@ function StackedBarChart({
   const n = dates.length;
   // 일자별 총합 — y 스케일과 빈 상태 판정의 기준.
   const totals = dates.map((_, i) =>
-    series.reduce((s, ser) => s + (ser.values[i] ?? 0), 0),
+    series.reduce((s, ser) => s + (ser.values[i] ?? 0), 0)
   );
   const max = Math.max(...totals, 0);
   if (n === 0 || series.length === 0 || max <= 0) {
@@ -3375,16 +3789,16 @@ function ReleaseHealthView({ data }: { data: ReleaseHealth }) {
           label="전체 크래시율"
           value={totals.crashRate == null ? "—" : fmtPct(totals.crashRate)}
           sub={`크래시 ${fmtInt(totals.crashed)} / 스폰 ${fmtInt(
-            totals.spawned,
+            totals.spawned
           )}`}
           accent={
             totals.crashRate == null
               ? undefined
               : totals.crashRate >= 0.2
-                ? STATUS_CRIT
-                : totals.crashRate >= 0.05
-                  ? STATUS_WARN
-                  : STATUS_GOOD
+              ? STATUS_CRIT
+              : totals.crashRate >= 0.05
+              ? STATUS_WARN
+              : STATUS_GOOD
           }
         />
         <StatCard
@@ -3469,14 +3883,14 @@ function ReleaseHealthView({ data }: { data: ReleaseHealth }) {
                             style={{
                               width: `${Math.min(
                                 100,
-                                Math.round(v.crashRate * 100),
+                                Math.round(v.crashRate * 100)
                               )}%`,
                               backgroundColor:
                                 v.crashRate >= 0.2
                                   ? STATUS_CRIT
                                   : v.crashRate >= 0.05
-                                    ? STATUS_WARN
-                                    : STATUS_GOOD,
+                                  ? STATUS_WARN
+                                  : STATUS_GOOD,
                             }}
                           />
                         </div>
@@ -3570,8 +3984,8 @@ function ModelRoleTable({
                           r.successRate >= 0.7
                             ? STATUS_GOOD
                             : r.successRate >= 0.4
-                              ? STATUS_WARN
-                              : STATUS_CRIT,
+                            ? STATUS_WARN
+                            : STATUS_CRIT,
                       }}
                     />
                   </div>
@@ -3708,6 +4122,40 @@ function ErrorBox({ msg }: { msg: string }) {
     <div className="flex items-start gap-3 rounded-lg border border-red-900/50 bg-red-950/30 p-4 text-red-400">
       <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
       <p className="text-sm">{msg}</p>
+    </div>
+  );
+}
+
+/**
+ * 부분 실패 배너 — 콜러블은 성공했지만 **일부 BigQuery 쿼리가 죽은** 경우.
+ *
+ * 서버 러너(runAdminAnalyticsQueries)는 개별 쿼리 실패를 삼키고 빈 배열을 준다.
+ * 섹션 전체가 에러로 뜨지 않는 대신, 그 칸이 "정말 0" 인지 "쿼리가 죽어서 0" 인지
+ * 화면에서 구분이 안 됐다 — 어드민이 '수치가 안 변한다' 고 본 자리가 여기다.
+ * 응답에 queryStatus 가 없는 구버전 functions 면 아무것도 그리지 않는다.
+ */
+function QueryStatusBanner({
+  status,
+}: {
+  status?: { ok: boolean; errors: { name: string; error: string }[] } | null;
+}) {
+  if (!status || status.ok || status.errors.length === 0) return null;
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-amber-300">
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+      <div className="text-xs">
+        <p className="font-medium">
+          일부 쿼리가 실패했습니다 — 아래 수치 중 일부는 0 이 아니라 &quot;못
+          읽음&quot; 입니다.
+        </p>
+        <ul className="mt-1 space-y-0.5 text-amber-400/80">
+          {status.errors.map((e) => (
+            <li key={e.name}>
+              <span className="font-mono">{e.name}</span>: {e.error}
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }

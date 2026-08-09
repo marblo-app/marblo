@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Task, TaskStatus } from '../types/task';
 import { subscribeToTasks as subscribeToTasksService } from '../services/taskService';
 import * as taskService from '../services/taskService';
+import telemetry from '../services/telemetryService';
 
 interface TaskFilter {
   status: TaskStatus | null;
@@ -58,6 +59,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     let isActive = true;
     const unsubscribeService = subscribeToTasksService(projectId, (tasks) => {
       if (!isActive) return;
+      // 활성화 퍼널의 "첫 티켓" 칸(설치당 1회). 여기서 세는 이유는 오케가 MCP
+      // 로 만든 티켓이 렌더러 taskService 를 우회하기 때문 — 보드에 보이는 것을
+      // 기준으로 하면 생성 경로와 무관하게 잡힌다. 헬퍼가 자체 one-shot 이라
+      // 스냅샷이 여러 번 와도 한 번만 나간다.
+      if (tasks.length > 0) telemetry.firstTicketObserved();
       set({ tasks, loading: false });
     });
 

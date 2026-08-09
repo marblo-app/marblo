@@ -75,14 +75,18 @@ export function metricCountExpr(
 // task_completed 는 헤드라인 activatedClients 와 같은 스칼라를 읽는다.
 
 export type OnboardingStepKey =
+  | "install"
   | "first_run"
   | "login_attempt"
   | "login_success"
   | "folder_connected"
   | "orchestrator_opened"
+  | "first_conversation" // 오케에게 첫 지시를 **보낸** 순간
+  | "first_ticket" // 보드에 첫 티켓이 생긴 순간
   | "agent_spawned"
   // ── 스폰 이후 활성화 단계(reach 본선 밖, "핵심경험/잔존") ──
   | "task_completed" // 첫 오케 티켓을 에이전트가 완료(활성화 순간)
+  | "first_merge" // 첫 머지(7일 창) — 코드가 실제로 랜딩된 순간
   | "core_experience" // 에이전트를 2회+ 스폰(반복 사용 = 핵심경험 도달)
   | "retained_7d"; // 7일 내 2번째 세션/프로젝트(초기 잔존)
 
@@ -92,47 +96,94 @@ export type OnboardingStepKey =
 export type OnboardingStepKind = "reach" | "activation";
 
 // 퍼널 순서 + 라벨 + 소스 이벤트명 + 종류(단일 소스 오브 트루스).
+//
+// ★`gating` — 이 단계가 **하류 단계의 기준선**인가.
+//
+// 전 구간을 다 채우라는 요구(티켓 ygoWP1VJ)와 "체인을 늘리면 신호가 죽는다"는
+// 현실이 부딪힌다. 새로 끼운 단계 중 일부는 구조적으로 과소계상이다:
+//   · first_ticket — 오케는 MCP(별도 stdio 프로세스)로 Firestore 에 직접 write
+//     하므로 렌더러의 task:created 를 우회한다. 그래서 렌더러 one-shot
+//     `onboarding:first_ticket` 을 함께 세지만, 그 빌드가 깔리기 전 구간은 0 이다.
+//   · first_conversation — 계측 자체가 이 티켓에서 처음 생겼다(그 전 전량 0).
+//   · first_merge — 24h 가 아니라 7일 창이라 본선과 축이 다르다.
+// 이런 단계를 순차 체인에 **강제로 끼우면** 그 뒤의 agent_spawned 가 통째로 0 이
+// 되어, 계측 공백이 제품 실패로 둔갑한다. 그래서 gating=false 인 단계는 화면에는
+// 보이되 하류의 기준선이 되지 않는다 — 이탈률은 직전 **gating** 단계 대비로 낸다.
+// (기존 단계는 전부 gating=true 라 수치가 한 자리도 바뀌지 않는다.)
 export const ONBOARDING_FUNNEL_STEPS: ReadonlyArray<{
   key: OnboardingStepKey;
   event: string;
   label: string;
   kind: OnboardingStepKind;
+  gating: boolean;
 }> = [
+  // ★install 전용 이벤트(`app:installed`)는 **아직 한 번도 발신된 적이 없다**
+  // (BQ 90일 실측 0건). index.ts 가 COALESCE(app:installed, app:first_run) 로
+  // 채우므로 이 칸은 사실상 first_run 과 같은 수다 — 없는 신호를 있는 척하지
+  // 않도록 note 와 라벨에 그대로 밝힌다.
+  {
+    key: "install",
+    event: "app:installed",
+    label: "설치(최초 실행 대체 신호)",
+    kind: "reach",
+    gating: true,
+  },
   {
     key: "first_run",
     event: "app:first_run",
     label: "앱 최초 실행",
     kind: "reach",
+    gating: true,
   },
   {
     key: "login_attempt",
     event: "auth:login_attempt",
     label: "로그인 시도",
     kind: "reach",
+    gating: true,
   },
   {
     key: "login_success",
     event: "auth:login_success",
-    label: "로그인 성공",
+    label: "로그인 성공(인증)",
     kind: "reach",
+    gating: true,
   },
   {
     key: "folder_connected",
     event: "onboarding:folder_connected",
     label: "폴더 연결",
     kind: "reach",
+    gating: true,
   },
   {
     key: "orchestrator_opened",
     event: "onboarding:orchestrator_opened",
     label: "오케 오픈(첫 스폰 시도)",
     kind: "reach",
+    gating: true,
+  },
+  // ★비-gating 2칸 — 위 주석의 이유로 하류 기준선이 되지 않는다.
+  {
+    key: "first_conversation",
+    event: "onboarding:first_conversation",
+    label: "첫 대화(오케에 첫 지시 전송)",
+    kind: "reach",
+    gating: false,
+  },
+  {
+    key: "first_ticket",
+    event: "onboarding:first_ticket",
+    label: "첫 티켓 생성",
+    kind: "reach",
+    gating: false,
   },
   {
     key: "agent_spawned",
     event: "agent:spawned",
     label: "에이전트 스폰",
     kind: "reach",
+    gating: true,
   },
   // ── 스폰 이후 활성화 단계 ──
   // task_completed 는 본선과 동일한 단일 스캔에서 d_task_completed 로 뽑히지만,
@@ -146,18 +197,31 @@ export const ONBOARDING_FUNNEL_STEPS: ReadonlyArray<{
     event: "task:completed",
     label: "첫 티켓 완료(활성화)",
     kind: "activation",
+    gating: true,
+  },
+  // ★첫 머지는 24h 창이 아니라 **7일 창**이다(본선과 축이 다르다). 머지는 보통
+  // 가입 당일에 안 일어나므로 24h 로 재면 구조적으로 0 이 된다 — 창을 늘려 재고,
+  // gating=false 로 두어 뒤의 core_experience 기준선을 오염시키지 않는다.
+  {
+    key: "first_merge",
+    event: "task:merged",
+    label: "첫 머지(7일 내)",
+    kind: "activation",
+    gating: false,
   },
   {
     key: "core_experience",
     event: "agent:spawned",
     label: "핵심경험(스폰 2회+)",
     kind: "activation",
+    gating: true,
   },
   {
     key: "retained_7d",
     event: "session:started",
     label: "7일 잔존(2번째 세션/프로젝트)",
     kind: "activation",
+    gating: true,
   },
 ];
 
@@ -193,6 +257,30 @@ export const ONBOARDING_FAILURE_EVENTS: ReadonlyArray<{
     event: "agent:crashed",
     label: "에이전트 크래시",
   },
+  // ── 온보딩 스톨 분기(#888 계측을 퍼널 화면으로 끌어올린 것) ────────────────
+  // 이 셋은 **전진 단계가 아니라 이탈 사유**다. 순차 체인에 칸으로 끼우면 "스폰
+  // 하려다 인증에 막힌 사람"이 전진한 것처럼 보이므로 실패 분기로 넣는다.
+  // 집계 축(buildOnboardingStallSummary)과 같은 이벤트를 읽으니 두 화면의 수가
+  // 어긋나지 않는다 — needsAuth 만 의미가 갈리는데, 여기 clients 는 **철회 보정
+  // 전** 원수치다(철회분을 뺀 값은 스톨 요약의 unresolvedAgents 를 봐야 한다).
+  {
+    key: "spawnBlocked",
+    col: "spawn_blocked",
+    event: "onboarding:spawn_blocked",
+    label: "스폰 사전 차단(설치/인증/벤더 미비)",
+  },
+  {
+    key: "needsAuth",
+    col: "needs_auth",
+    event: "onboarding:agent_needs_auth",
+    label: "CLI 로그인 화면에서 멈춤(needsAuth, 철회 보정 전)",
+  },
+  {
+    key: "authedButUnfunded",
+    col: "funding_guide_shown",
+    event: "onboarding:funding_guide_shown",
+    label: "인증됐으나 구독/크레딧 없음(authedButUnfunded)",
+  },
 ];
 
 // buildOnboardingFunnel 입력 — BQ 집계 1행에서 뽑은 단계별 (distinct, count).
@@ -211,10 +299,16 @@ export type FunnelStep = {
   event: string;
   label: string;
   kind: OnboardingStepKind; // reach(본선) | activation(스폰 이후)
+  gating: boolean; // 하류 이탈률의 기준선인가(false=화면에만, 체인 밖)
   clients: number; // 도달 고유 clientId
   events: number; // 이벤트 발생 총량
-  dropFromPrev: number | null; // 직전 단계 대비 이탈 client 수(≥0, clamp). 첫 단계=null
-  dropRateFromPrev: number | null; // dropFromPrev / prev.clients. 첫 단계=null
+  /** 이탈 client 수 = 직전 **gating** 단계 − 이 단계(≥0, clamp). 첫 단계=null */
+  dropFromPrev: number | null;
+  dropRateFromPrev: number | null; // dropFromPrev / prevGating.clients. 첫 단계=null
+  /** 전환율 = 이 단계 / 직전 **gating** 단계(= 1 − dropRateFromPrev). 첫 단계=null */
+  conversionFromPrev: number | null;
+  /** 최초 단계(install) 대비 누적 전환율. 분모 0 이면 null. */
+  conversionFromStart: number | null;
   isMaxDrop: boolean; // 최대 이탈 구간 표시(★22→6 같은 지점)
 };
 
@@ -262,7 +356,9 @@ export function buildActivationHeadline(
     windowMinutes,
     label:
       windowMinutes % 60 === 0
-        ? `가입 후 ${windowMinutes / 60}시간 내 오케 티켓을 에이전트가 1개+ 완료한 사용자 비율`
+        ? `가입 후 ${
+            windowMinutes / 60
+          }시간 내 오케 티켓을 에이전트가 1개+ 완료한 사용자 비율`
         : `가입 후 ${windowMinutes}분 내 오케 티켓을 에이전트가 1개+ 완료한 사용자 비율`,
   };
 }
@@ -295,29 +391,40 @@ export function buildOnboardingFunnel(
     event: s.event,
     label: s.label,
     kind: s.kind,
+    gating: s.gating,
     clients: stepClients(safeRow, s.key),
     events: stepEvents(safeRow, s.key),
   }));
 
-  // 2) 인접 단계 이탈(음수는 0 으로 clamp — 비단조 정상, §비단조 주석).
-  // ★isMaxDrop(최대 이탈 구간)은 reach 본선 안에서만 후보로 삼는다 — activation
-  // 단계는 reach 의 엄격 부분집합이 아니라(단일 스폰으로 완료한 유저 등) 그 감소가
-  // 진짜 온보딩 누수가 아니다. drop 값 자체는 참고용으로 모든 단계에 계산한다.
+  // 2) 이탈·전환(음수는 0 으로 clamp — 비단조 정상, §비단조 주석).
+  // ★기준선은 "배열의 직전 칸"이 아니라 "직전 **gating** 칸"이다. 계측 공백이나
+  // 다른 시간창을 쓰는 칸(first_conversation·first_ticket·first_merge)이 중간에
+  // 끼어도 본선 수치가 흔들리지 않게 하기 위한 것 — 기존 칸은 전부 gating 이라
+  // 이 변경으로 값이 바뀌지 않는다.
+  // ★isMaxDrop(최대 이탈 구간)은 reach 본선의 **gating** 칸 안에서만 후보로 삼는다
+  // — activation 단계는 reach 의 엄격 부분집합이 아니고(단일 스폰으로 완료한 유저
+  // 등), 비-gating 칸의 감소는 제품 누수가 아니라 계측 공백일 수 있다.
+  const startClients = base.length > 0 ? base[0].clients : 0;
+  let prevGating: (typeof base)[number] | null = null;
   let maxDrop = 0;
   let maxDropIdx = -1;
   const steps: FunnelStep[] = base.map((s, i) => {
-    if (i === 0) {
+    const prev = prevGating;
+    if (s.gating) prevGating = s;
+    if (i === 0 || prev == null) {
       return {
         ...s,
         dropFromPrev: null,
         dropRateFromPrev: null,
+        conversionFromPrev: null,
+        conversionFromStart:
+          i === 0 ? null : startClients > 0 ? s.clients / startClients : null,
         isMaxDrop: false,
       };
     }
-    const prev = base[i - 1];
     const drop = Math.max(0, prev.clients - s.clients);
     const rate = prev.clients > 0 ? drop / prev.clients : null;
-    if (drop > maxDrop && s.kind === "reach") {
+    if (drop > maxDrop && s.kind === "reach" && s.gating) {
       maxDrop = drop;
       maxDropIdx = i;
     }
@@ -325,6 +432,8 @@ export function buildOnboardingFunnel(
       ...s,
       dropFromPrev: drop,
       dropRateFromPrev: rate,
+      conversionFromPrev: prev.clients > 0 ? s.clients / prev.clients : null,
+      conversionFromStart: startClients > 0 ? s.clients / startClients : null,
       isMaxDrop: false,
     };
   });
@@ -375,7 +484,16 @@ export function buildOnboardingFunnel(
       "익명 clientId 로 폴백한다. 로그인-이전 이벤트는 다음 로그인 성공 때 함께 flush " +
       "되어, 끝내 로그인 못 한 유저의 실패는 과소계상될 수 있다. 헤드라인 활성화율은 " +
       "가입(로그인 성공)한 유저 중 24시간 내 첫 티켓 완료 비율이며, 첫 티켓 완료 단계와 " +
-      "같은 분자를 사용한다. 운영자 도그푸딩은 includeAdmin=false 기본값에서 제외된다.",
+      "같은 분자를 사용한다. 운영자 도그푸딩은 includeAdmin=false 기본값에서 제외된다. " +
+      "★단계별 한계(있는 그대로): (1) '설치' 는 전용 이벤트가 없어 app:first_run 을 " +
+      "대체 신호로 쓴다 — 실질적으로 최초 실행과 같은 수다. (2) '첫 대화'·'첫 티켓' 은 " +
+      "이 티켓에서 처음 계측됐고(onboarding:first_conversation / onboarding:first_ticket), " +
+      "그 렌더러 빌드가 깔리기 전 구간은 0 이다. 특히 오케가 MCP 로 만든 티켓은 렌더러 " +
+      "task:created 를 우회하므로 설치당 one-shot 이벤트로 따로 센다. (3) '첫 머지' 는 " +
+      "24h 가 아니라 7일 창이다. 이 세 칸은 gating=false — 화면에는 보이되 뒤 단계의 " +
+      "이탈률 기준선이 되지 않는다(계측 공백이 제품 실패로 둔갑하지 않게). 이탈률/전환율은 " +
+      "직전 gating 단계 대비값이다. needsAuth·authedButUnfunded 는 전진 단계가 아니라 " +
+      "실패 분기로 집계한다(같은 이벤트를 온보딩 스톨 요약과 공유).",
   };
 }
 

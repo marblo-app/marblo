@@ -421,6 +421,15 @@ function AppContent() {
       // Remove any stale listeners first to prevent duplicates
       api.telemetry.offEvent();
       api.telemetry.onEvent((data) => {
+        // ★"첫 대화" 만 예외 경로다. 어느 PTY 가 오케인지는 메인만 알고(감지=메인),
+        // 설치당 1회 마커는 localStorage 라 렌더러에만 있다(접기=여기). 그래서
+        // 메인은 제출될 때마다 보내고, 첫 건만 실제로 발신된다.
+        if (data.event === "onboarding:first_conversation") {
+          telemetry.firstConversationObserved(
+            data.metadata as Record<string, unknown> | undefined,
+          );
+          return;
+        }
         logTelemetry(data as { event: TelemetryEvent; [key: string]: unknown });
       });
       return () => {

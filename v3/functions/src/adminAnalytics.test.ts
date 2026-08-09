@@ -110,6 +110,8 @@ test("funnel: computes drop-off and flags the single largest drop (22→6 shape)
   //   → orchestrator_opened 6 → agent_spawned 6
   // 최대 이탈은 login_success(18) → folder_connected(8) = 10.
   const row = {
+    d_install: 22,
+    n_install: 22,
     d_first_run: 22,
     n_first_run: 22,
     d_login_attempt: 20,
@@ -126,8 +128,10 @@ test("funnel: computes drop-off and flags the single largest drop (22→6 shape)
   const f = buildOnboardingFunnel(row, []);
   const byKey = Object.fromEntries(f.steps.map((s) => [s.key, s]));
 
+  assert.equal(byKey.install.clients, 22);
+  assert.equal(byKey.install.dropFromPrev, null);
   assert.equal(byKey.first_run.clients, 22);
-  assert.equal(byKey.first_run.dropFromPrev, null);
+  assert.equal(byKey.first_run.dropFromPrev, 0);
   assert.equal(byKey.login_attempt.dropFromPrev, 2);
   assert.equal(byKey.folder_connected.dropFromPrev, 10);
   assert.equal(byKey.folder_connected.dropRateFromPrev, 10 / 18);
@@ -145,13 +149,17 @@ test("funnel: computes drop-off and flags the single largest drop (22→6 shape)
 
 test("funnel: sequential rows stay monotonic across every stage", () => {
   const row = {
+    d_install: 11,
     d_first_run: 10,
     d_login_attempt: 9,
     d_login_success: 8,
     d_folder_connected: 6,
     d_orchestrator_opened: 5,
+    d_first_conversation: 5,
+    d_first_ticket: 5,
     d_agent_spawned: 4,
     d_task_completed: 3,
+    d_first_merge: 3,
     d_core_experience: 2,
     d_retained_7d: 1,
   };
@@ -263,6 +271,143 @@ test("funnel: max-drop stays within reach steps, never an activation step", () =
   assert.equal(flagged.length, 1);
   assert.equal(flagged[0].key, "folder_connected");
   assert.equal(flagged[0].kind, "reach");
+});
+
+// ── 전 구간 확장(티켓 ygoWP1VJ): 설치·첫대화·첫티켓·첫머지 + gating ─────────
+test("funnel: 티켓이 요구한 전 스텝이 한 칸도 빠짐없이 존재한다", () => {
+  const f = buildOnboardingFunnel(undefined, []);
+  const keys = f.steps.map((s) => s.key);
+  for (const required of [
+    "install",
+    "login_success",
+    "folder_connected",
+    "first_conversation",
+    "first_ticket",
+    "agent_spawned",
+    "task_completed",
+    "first_merge",
+  ]) {
+    assert.ok(keys.includes(required as never), `missing step: ${required}`);
+  }
+  // needsAuth / authedButUnfunded 는 전진 단계가 아니라 실패 분기로 존재한다.
+  const branchKeys = f.failureBranches.map((b) => b.key);
+  for (const required of ["spawnBlocked", "needsAuth", "authedButUnfunded"]) {
+    assert.ok(branchKeys.includes(required), `missing branch: ${required}`);
+  }
+});
+
+test("funnel: 비-gating 칸이 하류 이탈률 기준선을 오염시키지 않는다", () => {
+  // 첫대화/첫티켓 계측이 아직 0 인 구간(신규 빌드 이전)을 재현한다.
+  // 이 둘을 체인에 끼웠다면 agent_spawned 의 drop 이 0→8 로 뒤집혀
+  // "스폰 구간에서 8명이 죽었다"는 없는 사실이 만들어진다.
+  const row = {
+    d_install: 20,
+    d_first_run: 20,
+    d_login_attempt: 18,
+    d_login_success: 16,
+    d_folder_connected: 10,
+    d_orchestrator_opened: 8,
+    d_first_conversation: 0, // 계측 공백
+    d_first_ticket: 0, // 계측 공백(오케 MCP 우회)
+    d_agent_spawned: 8,
+  };
+  const f = buildOnboardingFunnel(row, []);
+  const byKey = Object.fromEntries(f.steps.map((s) => [s.key, s]));
+
+  // 기준선은 직전 gating 칸(orchestrator_opened=8) — 공백 칸이 아니다.
+  assert.equal(byKey.agent_spawned.dropFromPrev, 0);
+  assert.equal(byKey.agent_spawned.conversionFromPrev, 1);
+  // 공백 칸 자신의 이탈은 그대로 보인다(숨기지 않는다).
+  assert.equal(byKey.first_conversation.dropFromPrev, 8);
+  assert.equal(byKey.first_conversation.gating, false);
+  assert.equal(byKey.first_ticket.gating, false);
+  assert.equal(byKey.agent_spawned.gating, true);
+  // 최대 이탈 플래그도 gating 칸 안에서만 — 계측 공백이 '최대 누수'로 둔갑 금지.
+  const flagged = f.steps.filter((s) => s.isMaxDrop);
+  assert.equal(flagged.length, 1);
+  assert.equal(flagged[0].key, "folder_connected");
+});
+
+test("funnel: 단계별 전환율(직전 gating 대비 · 시작 대비)", () => {
+  const row = {
+    d_install: 20,
+    d_first_run: 20,
+    d_login_attempt: 10,
+    d_login_success: 5,
+  };
+  const f = buildOnboardingFunnel(row, []);
+  const byKey = Object.fromEntries(f.steps.map((s) => [s.key, s]));
+
+  assert.equal(byKey.install.conversionFromPrev, null);
+  assert.equal(byKey.install.conversionFromStart, null);
+  assert.equal(byKey.login_attempt.conversionFromPrev, 0.5);
+  assert.equal(byKey.login_attempt.conversionFromStart, 0.5);
+  assert.equal(byKey.login_success.conversionFromPrev, 0.5);
+  assert.equal(byKey.login_success.conversionFromStart, 0.25);
+  // 전환율 + 이탈률 = 1 (같은 분모를 쓴다는 계약).
+  assert.equal(
+    (byKey.login_success.conversionFromPrev ?? 0) +
+      (byKey.login_success.dropRateFromPrev ?? 0),
+    1,
+  );
+});
+
+test("funnel: 시작 분모 0 이면 전환율은 null (0% 로 오도 금지)", () => {
+  const f = buildOnboardingFunnel({ d_agent_spawned: 3 }, []);
+  const byKey = Object.fromEntries(f.steps.map((s) => [s.key, s]));
+  assert.equal(byKey.agent_spawned.conversionFromStart, null);
+  assert.equal(byKey.agent_spawned.conversionFromPrev, null);
+  assert.equal(byKey.agent_spawned.dropRateFromPrev, null);
+});
+
+test("funnel: 스톨 분기(needsAuth/authedButUnfunded)가 errorCategory 로 쪼개진다", () => {
+  const row = {
+    d_needs_auth: 4,
+    n_needs_auth: 6,
+    d_funding_guide_shown: 3,
+    n_funding_guide_shown: 5,
+    d_spawn_blocked: 2,
+    n_spawn_blocked: 2,
+  };
+  const reasonRows = [
+    {
+      event: "onboarding:funding_guide_shown",
+      category: "authedButUnfunded",
+      n: 4,
+      clients: 3,
+    },
+    {
+      event: "onboarding:funding_guide_shown",
+      category: "authedButBlocked",
+      n: 1,
+      clients: 1,
+    },
+    {
+      event: "onboarding:spawn_blocked",
+      category: "not-authenticated",
+      n: 2,
+      clients: 2,
+    },
+  ];
+  const f = buildOnboardingFunnel(row, reasonRows);
+  const branches = Object.fromEntries(f.failureBranches.map((b) => [b.key, b]));
+
+  assert.equal(branches.needsAuth.clients, 4);
+  assert.equal(branches.needsAuth.events, 6);
+  assert.equal(branches.authedButUnfunded.clients, 3);
+  assert.equal(
+    branches.authedButUnfunded.byCategory[0].key,
+    "authedButUnfunded",
+  );
+  assert.equal(branches.authedButUnfunded.byCategory[0].count, 4);
+  assert.equal(branches.spawnBlocked.byCategory[0].key, "not-authenticated");
+});
+
+test("funnel: note 가 설치·첫티켓의 한계를 감추지 않는다", () => {
+  const f = buildOnboardingFunnel(undefined, []);
+  assert.match(f.note, /app:first_run 을 대체 신호/);
+  assert.match(f.note, /MCP/); // 오케 MCP 우회로 인한 과소계상 명시
+  assert.match(f.note, /7일 창/);
 });
 
 // ── buildActivationHeadline (★가입 후 24h내 첫 티켓 완료 비율) ──────────────
