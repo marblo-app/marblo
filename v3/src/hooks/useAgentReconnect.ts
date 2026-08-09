@@ -5,6 +5,7 @@ import { useEditorStore } from "../stores/editorStore";
 import { useTerminalStore } from "../stores/terminalStore";
 import { useOrchestratorStore } from "../stores/orchestratorStore";
 import * as agentService from "../services/agentService";
+import { reportOnrampExecBlocked } from "../services/onrampBlockSignal";
 import type { AgentStatus } from "../types/agent";
 
 const MODEL_ICONS: Record<string, string> = {
@@ -167,6 +168,8 @@ export function useAgentReconnect() {
       );
       if (result?.needsAuth) {
         setOrchestratorStatus("stopped");
+        // 온램프 축 보고(설계 #886 §5-A). 재접속 경로에서도 같은 벽이다.
+        reportOnrampExecBlocked(result.needsAuth, "spawn_needs_auth");
         window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
         return;
       }

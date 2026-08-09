@@ -17,6 +17,7 @@ import {
 import { ROWS, useCliSetupStore } from "../../stores/cliSetupStore";
 import { useOnboardingProgressStore } from "../../stores/onboardingProgressStore";
 import { useProjectStore } from "../../stores/projectStore";
+import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { useStepPrdSuccess } from "../../hooks/useCliSetupEngine";
 import { useByomOptions } from "../../hooks/useByomOptions";
 import telemetry from "../../services/telemetryService";
@@ -37,6 +38,7 @@ import { FirstTicketResultNote } from "./FirstTicketResultNote";
 import { VendorModelsSection } from "./VendorModelsSection";
 import { DemoMode, DEMO_CONNECT_PENDING_KEY } from "./DemoMode";
 import { DEMO_TOTAL_SECONDS } from "./demoScript";
+import { OnrampDecomposeCard } from "./OnrampDecomposeCard";
 
 /**
  * "시작하기" — onboarding as a first-class TAB (ticket ZdgQMxW7).
@@ -99,6 +101,7 @@ export function StartHereTab() {
   const refreshVersions = useCliSetupStore((s) => s.refreshVersions);
   const requiredInstalled = useCliSetupStore((s) => s.requiredInstalled());
   const hasProject = useProjectStore((s) => !!s.currentProject?.folderPath);
+  const setActiveTab = useSplitWorkspaceStore((s) => s.setActiveTab);
 
   const [seeding, setSeeding] = useState(false);
   const [seedMsg, setSeedMsg] = useState<ActionResult | null>(null);
@@ -278,6 +281,20 @@ export function StartHereTab() {
         </div>
 
         <ValuePreview onWatchDemo={openDemo} />
+
+        {/* ★L0 — 내 말이 진짜 티켓이 된다 (온램프 사다리 #886 §4).
+            비기너 연결 게이트와 **같은 컴포넌트**다. 한쪽에만 달면 어드밴스드로
+            들어온 신규 유저(= 이 탭에 착지하는 사람)만 0층이 없는 반쪽 온보딩을
+            받는다. 값 미리보기(본다) 바로 다음에 오는 것도 의도다 — 본 것을
+            그 자리에서 자기 문장으로 해 보게 만든다. */}
+        {!complete && (
+          <div className="mb-4">
+            <OnrampDecomposeCard
+              surface="start_here_tab"
+              onOpenBoard={() => setActiveTab("board")}
+            />
+          </div>
+        )}
 
         {complete && (
           <div className="mb-4 rounded-lg border border-[#a6e3a1]/30 bg-[#a6e3a1]/10 px-4 py-3">

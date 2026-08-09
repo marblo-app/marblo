@@ -109,7 +109,21 @@ export type TelemetryEvent =
   | "onboarding:agent_auth_resolved"
   // 렌더러 발화(#884 의 funding 감지 지점):
   | "onboarding:funding_probe"
-  | "onboarding:funding_guide_shown";
+  | "onboarding:funding_guide_shown"
+  // ── L0 온램프 (ticket VzR1izqW6hzwF0YRfkgL · 설계 #886 §9-B) ─────────────
+  // 위 스톨 계측(#888)이 "막힌 사람" 을 세기 시작했다면, 아래 둘은 그 **앞칸**을
+  // 센다: 계정이 없는 사람이 자기 말로 티켓을 만들었는가(decompose_used), 그리고
+  // 그걸 실행하려다 벽을 만났는가(exec_blocked). 설계 §9-C 의 퍼널이
+  //   beginner_entered → onramp:decompose_used → onramp:exec_blocked
+  //   → cliSetupStep(성공) → beginner_first_completion
+  // 이라 이 두 칸이 비면 사다리의 0→1층 전이를 관측할 수 없다.
+  //
+  // ★`onramp:exec_blocked` 는 main 의 `onboarding:spawn_blocked` 와 **다른 축**이다.
+  // spawn_blocked = 게이트가 막았다(사실). exec_blocked = 그 차단이 **화면이 되어
+  // 유저에게 말을 걸었다**(경험). 온램프가 고쳐야 하는 숫자는 후자이고, 둘이
+  // 갈리는 지점(세션 상한·MCP 축 억제)이 곧 이 설계의 튜닝 손잡이다.
+  | "onramp:decompose_used"
+  | "onramp:exec_blocked";
 
 interface TelemetryPayload {
   event: TelemetryEvent;
@@ -874,6 +888,73 @@ export const telemetry = {
       outcome: "blocked",
       errorCategory: state,
       metadata: { state },
+    });
+  },
+
+  // ── L0 온램프 (ticket VzR1izqW6hzwF0YRfkgL · 설계 #886 §9-B) ───────────
+
+  /**
+   * 룰 분해 1회. **유저 문장은 절대 싣지 않는다** — 자유 텍스트라 무엇이 섞여
+   * 있을지 알 수 없고, 판정에 필요한 정보는 어떤 규칙이 걸렸는지와 몇 장이
+   * 나왔는지뿐이다(funding 프로브가 원문 detail 을 안 싣는 것과 같은 규율).
+   *
+   * `matchedRule` 이 이 계측의 핵심이다: "어떤 입력이 fallback 으로 떨어지는가"
+   * 가 다음 룰의 유일한 근거이고, 설계 T4 의 판정선(fallback 비율 < 40%)이
+   * 이 필드로만 측정된다.
+   */
+  onrampDecomposeUsed(payload: {
+    mode: "rule" | "llm";
+    matchedRule: string;
+    fallback: boolean;
+    ticketCount: number;
+    /** 티켓이 실제로 보드에 쓰였는가(권한·오프라인 실패와 구분). */
+    persisted: boolean;
+    /** 어느 표면에서 — beginner_connect | start_here_tab. */
+    surface: string;
+  }) {
+    logTelemetry({
+      event: "onramp:decompose_used",
+      success: payload.persisted,
+      errorCategory: payload.fallback ? "fallback" : payload.matchedRule,
+      metadata: {
+        mode: payload.mode,
+        matchedRule: payload.matchedRule,
+        fallback: payload.fallback,
+        ticketCount: payload.ticketCount,
+        persisted: payload.persisted,
+        surface: payload.surface,
+      },
+    });
+  },
+
+  /**
+   * 실행 시도가 막혀 **연결 안내(M1)가 떴다**. 설계 §9-A 의 P0 이벤트.
+   *
+   * ★`shown` 을 함께 싣는 이유: 억제된 차단(세션 상한 초과·MCP 축)도 세야
+   * "우리가 몇 번 말을 걸 기회를 스스로 버렸나" 가 보인다. 분자만 세면 상한을
+   * 조일지 풀지 판단할 근거가 없다.
+   */
+  onrampExecBlocked(payload: {
+    trigger: string;
+    model: string;
+    installed: boolean;
+    shown: boolean;
+    suppressedReason?: string;
+  }) {
+    logTelemetry({
+      event: "onramp:exec_blocked",
+      model: payload.model,
+      success: false,
+      outcome: "blocked",
+      errorCategory: payload.trigger,
+      metadata: {
+        trigger: payload.trigger,
+        installed: payload.installed,
+        shown: payload.shown,
+        ...(payload.suppressedReason
+          ? { suppressedReason: payload.suppressedReason }
+          : {}),
+      },
     });
   },
 

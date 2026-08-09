@@ -699,4 +699,60 @@ export const onboarding = {
   "onboarding.demo.a2.claudeStart": "목록 화면을 바로 시작합니다.",
   "onboarding.demo.a2.done":
     "추가 임무까지 끝났습니다 🎉 — 프로젝트가 도는 동안 /tf-add 로 계속 얹으면 됩니다.",
+
+  // — L0 온램프: 룰 분해 카드 (설계 v3/docs/onramp-ladder-design-2026-08-09.md §4) —
+  // ★데모(위)와 역할이 다르다: 데모는 **본다**, 이 카드는 **만든다**. 문구가 그
+  //   경계를 말하지 않으면 두 표면이 중복으로 읽힌다(설계 R4).
+  "onramp.decompose.title": "먼저, 내 말로 티켓을 만들어 보세요",
+  "onramp.decompose.body":
+    "하고 싶은 일을 한 문장으로 쓰면 진짜 보드에 진짜 티켓으로 쪼개 드립니다. 계정 연결 전이라 비용은 들지 않아요.",
+  "onramp.decompose.placeholder": "예) 로그인 화면이랑 인증 API 가 필요해요",
+  "onramp.decompose.cta": "티켓으로 쪼개기",
+  "onramp.decompose.working": "쪼개는 중…",
+  "onramp.decompose.zeroCost": "무료 · 계정 연결 불필요",
+  "onramp.decompose.example1": "로그인 화면이랑 인증 API 만들어줘",
+  "onramp.decompose.example2": "결제창 붙이고 결제 결과 검증까지",
+  "onramp.decompose.example3": "구독자 목록 화면에 검색 기능 추가",
+  "onramp.decompose.result": "티켓 {count}장을 보드에 올렸어요.",
+  "onramp.decompose.resultHint":
+    "이 티켓들은 진짜입니다 — 보드에 그대로 남아 있고, 계정을 연결하면 그대로 실행됩니다.",
+  // ★정직성 규칙(설계 §4-D): 규칙이 확신 못 했을 때 화면이 그렇게 말한다.
+  //   초안을 완성품처럼 팔지 않는 것이 룰베이스에서 가능한 유일한 방어다.
+  "onramp.decompose.fallbackNote":
+    "대략 이런 모양으로 쪼갤 수 있어요. 계정을 연결하면 오케스트레이터가 실제 코드를 읽고 다시 쪼갭니다.",
+  "onramp.decompose.partial":
+    "일부 티켓만 만들어졌어요. 잠시 후 다시 시도해 주세요.",
+  "onramp.decompose.failed":
+    "티켓을 만들지 못했어요. 잠시 후 다시 시도해 주세요.",
+  "onramp.decompose.preparing":
+    "샘플 프로젝트를 준비하는 중이에요. 곧 쓸 수 있습니다.",
+  "onramp.decompose.noProject":
+    "티켓을 올릴 폴더가 아직 없어요. 폴더를 연결하면 여기서 바로 만들 수 있습니다.",
+  "onramp.decompose.remaining": "데모로 {count}번 더 쪼갤 수 있어요",
+  "onramp.decompose.limitTitle": "데모로 만들 수 있는 티켓을 다 만들었어요",
+  "onramp.decompose.limitBody":
+    "여기까지는 계정 없이 볼 수 있는 범위예요. 계정을 연결하면 이 티켓들을 실제로 실행할 수 있습니다.",
+  "onramp.decompose.limitCta": "연결하고 실행하기",
+  "onramp.decompose.runCta": "이 티켓 실행하기",
+  "onramp.decompose.openBoard": "보드에서 보기 (데모 티켓 {count}장)",
+  "onramp.decompose.dependsOn": "선행 필요",
+  "onramp.decompose.role.frontend": "프론트엔드",
+  "onramp.decompose.role.backend": "백엔드",
+  "onramp.decompose.role.test": "테스트",
+  "onramp.decompose.role.devops": "데브옵스",
+
+  // — L0 온램프: M1 실행 차단 모달 (설계 §5-A) —
+  // ★이미 있는 게이트(checkSpawnAuthGate)에 처음으로 목소리를 주는 자리다.
+  //   지금까지 이 차단은 비기너 셸에서 **아무 화면도 만들지 않았다**.
+  "onramp.block.title": "여기까지는 무료로 볼 수 있어요",
+  "onramp.block.body":
+    "이 티켓들은 진짜입니다 — 보드에 그대로 남아 있어요. 실제로 실행하려면 코딩 CLI 계정 하나만 연결하면 됩니다. 추가 비용은 없어요 — 이미 쓰고 계신 구독을 그대로 씁니다.",
+  "onramp.block.cta.connect": "{cli} 연결하기",
+  "onramp.block.cta.install": "{cli} 설치하고 연결하기",
+  "onramp.block.alt": "다른 방법 보기",
+  "onramp.block.altHint": "이미 API 키가 있다면 그 키로 시작할 수 있어요.",
+  "onramp.block.ghost": "티켓만 더 만들어 볼게요",
+  "onramp.block.close": "닫기",
+  "onramp.block.reason.limit": "데모 분해 한도에 도달했어요.",
+  "onramp.block.reason.run": "실행은 계정 연결 뒤부터 가능합니다.",
 };

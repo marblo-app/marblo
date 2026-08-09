@@ -61,6 +61,21 @@ export interface Task {
   deletedBy?: string;
   deleteReason?: string;
 
+  // ── L0 온램프 데모 출처 (v3/docs/onramp-ladder-design-2026-08-09.md §4-E) ──
+  // ★이 티켓들은 **진짜**다: 실제 `tasks` 컬렉션에 쓰이고, 계정을 연결하면 그대로
+  // 실행된다(불변식 I3 — 아래층에서 만든 것이 위층에서 살아남아야 사다리다).
+  // 그래도 출처는 남긴다. 두 가지가 필요해서다:
+  //   (1) 계측이 "데모 티켓 vs 진짜 요청 티켓" 을 갈라야 퍼널이 읽힌다.
+  //   (2) 나중에 일괄 정리 UI 가 대상을 알아야 한다(리스크 R2 — 실행 못 하는
+  //       카드가 보드에 쌓이는 것).
+  // 이 필드가 없는 티켓(=지금까지의 모든 티켓)이 정상이므로 전부 optional 이다.
+  /** 어디서 만들어졌나. 현재 유일한 값은 "onramp_demo". */
+  origin?: string;
+  /** 어떤 분해 규칙이 걸렸나(`DecomposeResult.matchedRule`). */
+  originRule?: string;
+  /** 규칙이 확신 못 해 일반 골격으로 떨어졌는가. */
+  originFallback?: boolean;
+
   // Idempotency marker for outcome reporting — the terminal status already
   // sent to BigQuery. Claimed in a transaction so concurrent windows can't
   // double-report. See services/taskOutcomeReporter.ts.

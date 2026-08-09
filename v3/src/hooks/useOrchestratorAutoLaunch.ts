@@ -11,6 +11,7 @@ import {
   orchestratorTeardownAction,
 } from "../lib/orchestratorTeardown";
 import { planOrchestratorBlockUi } from "../lib/orchestratorLaunchBlock";
+import { reportOnrampExecBlocked } from "../services/onrampBlockSignal";
 
 /**
  * - Stops the orchestrator when project/folder changes or unmounts.
@@ -118,6 +119,10 @@ export function useOrchestratorAutoLaunch() {
         if (ui.openCliSetup) {
           window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
         }
+        // ★온램프 축(설계 #886 §5-A 의 트리거 ②: "오케 자동기동이 needsAuth 로
+        // 반환"). 배너·위저드는 이미 있는 유저를 위한 것이고, 아직 계정이 없는
+        // 유저에게 처음 말을 거는 것이 M1 이다.
+        reportOnrampExecBlocked(result.needsAuth, "spawn_needs_auth");
         return;
       }
       if (result) {

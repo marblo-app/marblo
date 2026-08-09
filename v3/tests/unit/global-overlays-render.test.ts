@@ -64,6 +64,19 @@ vi.mock("../../src/components/legal/TrainingConsentCard", () => ({
   TrainingConsentCard: () =>
     createElement("div", { "data-testid": "training-consent-card" }),
 }));
+// ★온램프 두 문(門) — 이 티켓(VzR1izqW6hzwF0YRfkgL)이 여기로 승격시켰다.
+// 셸마다 따로 달려 있던 시절 레거시 Layout 사용자만 안내를 못 받는 갭이 있었다.
+vi.mock("../../src/components/onboarding/FundingGuideHost", () => ({
+  FundingGuideHost: () =>
+    createElement("div", { "data-testid": "funding-guide-host" }),
+}));
+vi.mock("../../src/components/onboarding/OnrampGateHost", () => ({
+  OnrampGateHost: ({ variant }: { variant: string }) =>
+    createElement("div", {
+      "data-testid": "onramp-gate-host",
+      "data-variant": variant,
+    }),
+}));
 vi.mock("../../src/components/chat/ChatToastHost", () => ({
   ChatToastHost: () =>
     createElement("div", { "data-testid": "chat-toast-host" }),
@@ -131,6 +144,11 @@ describe("GlobalOverlays DOM wiring", () => {
     expect(screen.getByTestId("training-consent-card")).toBeTruthy();
     expect(screen.getByTestId("chat-toast-host")).toBeTruthy();
     expect(screen.getByTestId("bug-report-notice-toast")).toBeTruthy();
+    // 온램프 안내 둘 — 어드밴스드/레거시 셸이 이 컴포넌트를 통해 받는다.
+    expect(screen.getByTestId("funding-guide-host")).toBeTruthy();
+    expect(
+      screen.getByTestId("onramp-gate-host").getAttribute("data-variant"),
+    ).toBe("workspace");
   });
 
   it("forwards projectSetup straight through to ProjectSetupBanners", () => {

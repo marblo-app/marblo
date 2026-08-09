@@ -8,7 +8,6 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { useOnboardingProgressStore } from "../../stores/onboardingProgressStore";
 import { useCliSetupEngine } from "../../hooks/useCliSetupEngine";
-import { FundingGuideHost } from "./FundingGuideHost";
 
 /**
  * The split shell's replacement for the CLI setup MODAL.
@@ -87,14 +86,17 @@ export function CliSetupHost() {
   }, []);
 
   // Already standing in the tab → the banner would be redundant noise.
-  // ★배너가 안 뜨는 경우에도 `FundingGuideHost` 는 서 있어야 한다: "인증은 됐는데
-  // 구독이 없어 안 돈다" 는 배너가 다루는 국면(=설정이 덜 됐다)이 **아니라**,
-  // 배너가 사라진 뒤에 벌어지는 일이다.
-  if (!needStep || activeTab === "startHere") return <FundingGuideHost />;
+  //
+  // ★자금 안내(FundingGuideHost)는 더 이상 여기 있지 않다 — `GlobalOverlays` 로
+  // 올라갔다. 이 호스트를 마운트하는 셸은 WorkspaceShell 하나뿐이라, 여기 두면
+  // 레거시 Layout 셸 사용자는 "로그인은 됐는데 구독이 없다" 는 같은 상태에서
+  // 아무 안내도 못 받는다(온램프 설계 #886 §5-B 의 호스트 갭). 안내가 다루는
+  // 국면이 이 배너(=설정이 덜 됐다)와 다르다는 종전 판단은 그대로 유효하고,
+  // 그래서 배너의 유무와 무관하게 서 있어야 한다는 결론도 같다.
+  if (!needStep || activeTab === "startHere") return null;
 
   return (
     <>
-      <FundingGuideHost />
       <div
         data-testid="cli-setup-banner"
         className="flex items-center gap-3 border-b border-[#f9e2af]/30 bg-[#f9e2af]/10 px-4 py-2"

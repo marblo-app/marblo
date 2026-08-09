@@ -3,6 +3,7 @@ import { useTranslation } from "../../lib/i18n";
 import OrchestratorPanel from "../orchestrator/OrchestratorPanel";
 import { DemoMode, DEMO_CONNECT_PENDING_KEY } from "../onboarding/DemoMode";
 import { FundingGuideHost } from "../onboarding/FundingGuideHost";
+import { OnrampGateHost } from "../onboarding/OnrampGateHost";
 import { useAppLifecycle } from "../../hooks/useAppLifecycle";
 import { useBeginnerAsk } from "../../hooks/useBeginnerAsk";
 import { useCliSetupEngine } from "../../hooks/useCliSetupEngine";
@@ -579,6 +580,15 @@ export function BeginnerShell() {
           Esc 한 번이 어느 쪽을 닫는지 알 수 없다. 원클릭은 인증되면 스스로
           닫히므로 이 안내는 곧바로 이어서 뜬다. */}
       {!showOneClick && <FundingGuideHost />}
+
+      {/* ★M1 — "여기까지는 무료로 볼 수 있어요"(온램프 #886 §5-A). 지금까지 이
+          셸은 스폰 차단(`needsAuth`)을 해석하는 화면 목록에 아예 없어서, L0
+          유저가 실행을 눌러도 화면에 **아무 일도** 일어나지 않았다.
+          원클릭 모달과 배타인 이유는 위 자금 안내와 같다. M2(자금)와의 배타는
+          호스트가 스스로 판정한다 — 두 모달이 서로 반대되는 지시를 준다. */}
+      {!showOneClick && (
+        <OnrampGateHost variant="beginner" onConnect={openOneClick} />
+      )}
 
       {/* 미니 보드/에이전트에서 연 티켓 상세 — 비기너 판(워크트리·diff·PR 없음). */}
       {openTask && (

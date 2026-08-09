@@ -4,6 +4,8 @@ import { ProjectSetupBanners } from "./onboarding/ProjectSetupBanners";
 import { RepoConnectModal } from "./collaboration/RepoConnectModal";
 import { FirstSharedProjectModal } from "./collaboration/FirstSharedProjectModal";
 import { FirstProjectSurvey } from "./onboarding/FirstProjectSurvey";
+import { FundingGuideHost } from "./onboarding/FundingGuideHost";
+import { OnrampGateHost } from "./onboarding/OnrampGateHost";
 import { PrivacyConsentGate } from "./legal/PrivacyConsentGate";
 import { TrainingConsentCard } from "./legal/TrainingConsentCard";
 import { ChatToastHost } from "./chat/ChatToastHost";
@@ -38,6 +40,11 @@ export interface GlobalOverlaysProps {
  * NOT here — they are two different onboarding surfaces by design (modal vs.
  * non-blocking banner + tab, see CliSetupHost's own doc comment), not a
  * drifted duplicate. Each shell keeps mounting its own.
+ *
+ * ★ The two ONRAMP gates (FundingGuideHost = "signed in but unfunded",
+ * OnrampGateHost = "not connected yet, so this can't run") ARE here, for the
+ * opposite reason: they are the same guidance in every shell, and the one that
+ * used to live inside CliSetupHost was invisible to the legacy Layout shell.
  */
 export function GlobalOverlays({ projectSetup }: GlobalOverlaysProps) {
   const upgradeModal = useUiStore((s) => s.upgradeModal);
@@ -66,6 +73,19 @@ export function GlobalOverlays({ projectSetup }: GlobalOverlaysProps) {
 
       {/* First project completion micro-survey */}
       <FirstProjectSurvey />
+
+      {/* ── 온램프 사다리의 두 문(門) (v3/docs/onramp-ladder-design-2026-08-09.md) ──
+          ★둘 다 여기 있는 이유는 **모드 파리티**다. 종전에 FundingGuideHost 는
+          CliSetupHost 안에 있었는데, 그 호스트는 WorkspaceShell 만 마운트한다 —
+          레거시 Layout 셸로 떨어지는 사용자는 "로그인은 됐는데 구독이 없다" 는
+          같은 상태에서 아무 안내도 못 받았다(설계 §5-B 의 호스트 갭 N5). 셸이
+          갈리는 안내는 셸-불가지 자리에 둔다.
+
+          비기너 셸은 GlobalOverlays 를 마운트하지 않으므로 자기 사본을 따로
+          든다(그쪽 CTA 는 원클릭 모달이라 목적지가 다르다). 두 셸이 동시에 뜨는
+          일은 없으니 중복 노출은 생기지 않는다. */}
+      <FundingGuideHost />
+      <OnrampGateHost variant="workspace" />
 
       {/* PIPA consent — auto-shows on first launch / policy version bump */}
       <PrivacyConsentGate />

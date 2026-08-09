@@ -12,6 +12,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { checkAgentSpawn } from "../../lib/planLimits";
 import type { Agent, ModelType } from "../../types/agent";
 import * as agentService from "../../services/agentService";
+import { reportOnrampExecBlocked } from "../../services/onrampBlockSignal";
 import { useTranslation } from "../../lib/i18n";
 
 export function AgentsTab() {
@@ -112,6 +113,10 @@ export function AgentsTab() {
       // Spawn blocked: this model's CLI is not installed / not logged in.
       // Open the CLI setup gate rather than attaching an empty terminal.
       if (result?.needsAuth) {
+        // ★온램프 축에도 보고한다(설계 #886 §5-A). 계정이 아직 없는 유저에게
+        // 위저드만 여는 것은 "왜" 를 말해 주지 않는다 — M1 이 그 몫이고, 이미
+        // 연결된 유저에게는 이 호출이 스스로 억제된다.
+        reportOnrampExecBlocked(result.needsAuth, "spawn_needs_auth");
         window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
         return;
       }

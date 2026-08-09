@@ -31,6 +31,7 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { upsertOrchestratorAgentDoc } from "../../services/orchestratorAgentDoc";
+import { reportOnrampExecBlocked } from "../../services/onrampBlockSignal";
 import OrchestratorTerminal from "./OrchestratorTerminal";
 
 const MIN_HEIGHT = 80;
@@ -353,6 +354,8 @@ export default memo(function OrchestratorPanel({
         if (ui.openCliSetup) {
           window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
         }
+        // 온램프 축 보고(설계 #886 §5-A) — 아직 연결 안 된 유저에게만 M1 이 뜬다.
+        reportOnrampExecBlocked(result.needsAuth, "spawn_needs_auth");
         return;
       }
       if (result) {
@@ -465,6 +468,7 @@ export default memo(function OrchestratorPanel({
         if (ui.openCliSetup) {
           window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
         }
+        reportOnrampExecBlocked(result.needsAuth, "spawn_needs_auth");
         return;
       }
       setSwitchStatus("starting");

@@ -16,6 +16,7 @@ import {
 import { useOnboardingSetup } from "../../hooks/useOnboardingSetup";
 import { useOnboardingPreviewStore } from "../../stores/onboardingPreviewStore";
 import telemetry from "../../services/telemetryService";
+import { OnrampDecomposeCard } from "../onboarding/OnrampDecomposeCard";
 import { PreviewTerminal } from "./PreviewTerminal";
 import { BUTTON_GHOST, BUTTON_PRIMARY } from "./beginnerUi";
 
@@ -148,6 +149,20 @@ export function BeginnerConnectStep({
       <p className="mt-1.5 text-sm leading-6 text-[#a6adc8]">
         {t("beginner.connect.subtitle")}
       </p>
+
+      {/* ── ★L0: 연결 **전에** 먼저 값을 준다 (온램프 사다리 #886 §4) ─────
+          사다리의 0층은 "내 말이 진짜 티켓이 된다" 이고, 그건 계정 없이도 된다.
+          그래서 연결 카드보다 **위**에 선다 — 자격증명을 요구하기 전에 한 번은
+          제품이 무엇인지 보여준다는 게 이 설계의 순서다(불변식 I2 는 그다음
+          문을 항상 원가 0인 L1 으로 가리킨다).
+
+          ★프리뷰(시연)에서는 그리지 않는다: 이 카드는 실제 Firestore 티켓을
+          만들고, 프리뷰의 계약은 "실제 상태를 건드리지 않는다" 이다. */}
+      {!setup.preview && (
+        <div className="mt-5">
+          <OnrampDecomposeCard surface="beginner_connect" />
+        </div>
+      )}
 
       {/* ── ★주 경로: 원클릭 ─────────────────────────────────────────────
           한 번 누르면 설치 → 로그인까지 이어진다. 아래 택1 카드는 이걸

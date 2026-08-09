@@ -41,6 +41,7 @@ import { LaneTerminalButton } from "./LaneTerminalButton";
 import type { LaneRow } from "../../types/lane";
 import type { Worktree } from "../../types/worktree";
 import { useTranslation } from "../../lib/i18n";
+import { reportOnrampExecBlocked } from "../../services/onrampBlockSignal";
 
 // 빠른 작업 task 는 규약대로 contextId="lane:<laneId>" 로 태깅된다(lib/laneContext).
 // 보드 카드 마킹(좌측 amber 바)은 lib/laneContext.isLaneTask 가, 여기 Lanes 탭
@@ -438,6 +439,10 @@ export function LanesTab() {
       // CLI 미설치/미로그인이면 main 이 PTY 를 만들기 전에 막고 needsAuth 를
       // 돌려준다. 그 경우 ptySessionId 는 빈 문자열이라 매핑에 박으면 안 된다.
       if (result?.needsAuth) {
+        // 온램프 축 보고(설계 #886 §5-A) — 레인의 인라인 에러는 "무엇이" 를
+        // 말하지만 계정이 없는 유저에게 필요한 "그래서 뭘 하면 되나" 는 M1 이
+        // 든다. 이미 연결된 유저에게는 스스로 억제된다.
+        reportOnrampExecBlocked(result.needsAuth, "spawn_needs_auth");
         return fail(
           t("lanes.error.needsAuth", {
             model: result.needsAuth.model,

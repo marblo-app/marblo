@@ -696,4 +696,57 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.demo.a2.claudeStart": "Starting the list screen right away.",
   "onboarding.demo.a2.done":
     "The follow-up work is done too 🎉 — keep stacking with /tf-add while the project runs.",
+
+  // — L0 onramp: rule-based decomposition card (design §4) —
+  // The demo above is watched; this card is USED. The copy has to hold that
+  // line or the two surfaces read as duplicates.
+  "onramp.decompose.title": "First, turn your own words into tickets",
+  "onramp.decompose.body":
+    "Write what you want in one sentence and we'll split it into real tickets on your real board. No account needed yet, and it costs nothing.",
+  "onramp.decompose.placeholder": "e.g. I need a login screen and an auth API",
+  "onramp.decompose.cta": "Split into tickets",
+  "onramp.decompose.working": "Splitting…",
+  "onramp.decompose.zeroCost": "Free · no account required",
+  "onramp.decompose.example1": "Build a login screen and an auth API",
+  "onramp.decompose.example2": "Add checkout and verify the payment result",
+  "onramp.decompose.example3": "Add search to the subscriber list screen",
+  "onramp.decompose.result": "Added {count} tickets to your board.",
+  "onramp.decompose.resultHint":
+    "These tickets are real — they stay on your board, and they run as-is once you connect an account.",
+  "onramp.decompose.fallbackNote":
+    "This is roughly how it could be split. Connect an account and the orchestrator will re-split it after reading your actual code.",
+  "onramp.decompose.partial":
+    "Only some tickets were created. Please try again in a moment.",
+  "onramp.decompose.failed":
+    "Couldn't create the tickets. Please try again in a moment.",
+  "onramp.decompose.preparing":
+    "Preparing your sample project — this will be ready in a second.",
+  "onramp.decompose.noProject":
+    "There's no folder to put tickets in yet. Connect a folder and you can create them right here.",
+  "onramp.decompose.remaining": "{count} more demo splits available",
+  "onramp.decompose.limitTitle": "You've created every demo ticket available",
+  "onramp.decompose.limitBody":
+    "That's as far as the account-free preview goes. Connect an account and these tickets actually run.",
+  "onramp.decompose.limitCta": "Connect and run",
+  "onramp.decompose.runCta": "Run this ticket",
+  "onramp.decompose.openBoard": "See them on the board ({count} demo tickets)",
+  "onramp.decompose.dependsOn": "Waits on",
+  "onramp.decompose.role.frontend": "Frontend",
+  "onramp.decompose.role.backend": "Backend",
+  "onramp.decompose.role.test": "Test",
+  "onramp.decompose.role.devops": "DevOps",
+
+  // — L0 onramp: M1 execution-blocked modal (design §5-A) —
+  "onramp.block.title": "This part is free to explore",
+  "onramp.block.body":
+    "These tickets are real — they stay on your board. To actually run them you only need to connect one coding CLI account. There's no extra cost: it uses the subscription you already pay for.",
+  "onramp.block.cta.connect": "Connect {cli}",
+  "onramp.block.cta.install": "Install and connect {cli}",
+  "onramp.block.alt": "See other options",
+  "onramp.block.altHint":
+    "Already have an API key? You can start with that instead.",
+  "onramp.block.ghost": "I'll just make more tickets",
+  "onramp.block.close": "Close",
+  "onramp.block.reason.limit": "You've hit the demo split limit.",
+  "onramp.block.reason.run": "Running requires a connected account.",
 };
