@@ -30,6 +30,8 @@ import {
   buildActiveUserMetrics,
   buildActivationGateFunnel,
   buildOnboardingStallSummary,
+  buildZeroFrictionKpis,
+  MULTI_AGENT_TARGET_WINDOW_MINUTES,
 } from "./adminAnalytics";
 
 // ── parseIncludeAdmin ──────────────────────────────────────────────────────
@@ -504,28 +506,61 @@ test("nps: out-of-range stars ignored, BQ int64-as-string coerced", () => {
 });
 
 // ── buildBetaExitGauges ──────────────────────────────────────────────────────
-test("gauges: 6 gauges in flow order, targets from strategy memo", () => {
+test("gauges: 8 gauges in flow order (D1/D7/D30), targets from strategy memo", () => {
   const nps = computeNpsFromStars([]);
   const gauges = buildBetaExitGauges({}, nps);
-  assert.equal(gauges.length, 6);
+  assert.equal(gauges.length, 8);
+  // ★순서 계약: 잔존 3칸은 창 길이 순서로 D1 → D7 → D30 이어야 한다. 종전엔
+  // 인덱스로 조립해서 메타 상수에 칸을 넣으면 순서가 조용히 어긋났다.
   assert.deepEqual(
     gauges.map((g) => g.key),
     [
       "cli_auth_success",
       "first_project_run",
       "first_ticket_completed",
+      "retention_1d",
       "retention_7d",
+      "retention_30d",
       "satisfaction_nps",
       "activation_30m",
     ],
   );
-  assert.equal(gauges[0].target, BETA_EXIT_TARGETS.cli_auth_success);
-  assert.equal(gauges[0].target, 0.8);
-  assert.equal(gauges[1].target, 0.6);
-  assert.equal(gauges[2].target, 0.5);
-  assert.equal(gauges[3].target, 0.3);
-  assert.equal(gauges[4].target, 40);
-  assert.equal(gauges[4].unit, "nps");
+  const byKey = new Map(gauges.map((g) => [g.key, g]));
+  assert.equal(
+    byKey.get("cli_auth_success")?.target,
+    BETA_EXIT_TARGETS.cli_auth_success,
+  );
+  assert.equal(byKey.get("cli_auth_success")?.target, 0.8);
+  assert.equal(byKey.get("first_project_run")?.target, 0.6);
+  assert.equal(byKey.get("first_ticket_completed")?.target, 0.5);
+  assert.equal(byKey.get("retention_7d")?.target, 0.3);
+  assert.equal(byKey.get("satisfaction_nps")?.target, 40);
+  assert.equal(byKey.get("satisfaction_nps")?.unit, "nps");
+});
+
+test("gauges: D1/D7/D30 read their own columns (same definition, 창만 다름)", () => {
+  const gauges = buildBetaExitGauges(
+    {
+      d_signup_base: 20,
+      d_retained_1d: 10, // 0.5
+      d_retained_7d: 6, // 0.3
+      d_retained_30d: 4, // 0.2
+    },
+    computeNpsFromStars([]),
+  );
+  const byKey = new Map(gauges.map((g) => [g.key, g]));
+  assert.equal(byKey.get("retention_1d")?.current, 0.5);
+  assert.equal(byKey.get("retention_7d")?.current, 0.3);
+  assert.equal(byKey.get("retention_30d")?.current, 0.2);
+  // 같은 정의·다른 창이므로 단조 감소여야 한다(D1 ≥ D7 ≥ D30).
+  assert.ok(
+    (byKey.get("retention_1d")?.current ?? 0) >=
+      (byKey.get("retention_7d")?.current ?? 0),
+  );
+  assert.ok(
+    (byKey.get("retention_7d")?.current ?? 0) >=
+      (byKey.get("retention_30d")?.current ?? 0),
+  );
 });
 
 test("gauges: empty row → all rate gauges null (데이터 대기), not met", () => {
@@ -783,7 +818,9 @@ test("cockpit: assembles gauges, onboarding events, reuse, spawn health", () => 
     spawn: { spawned: 30, crashed: 5, restarted: 3, completed: 25 },
   });
 
-  assert.equal(result.betaExitGauges.length, 6);
+  assert.equal(result.betaExitGauges.length, 8);
+  // 구버전 호출부 호환: 입력이 없으면 새 섹션은 null 이고 나머지는 그대로 조립된다.
+  assert.equal(result.zeroFriction, null);
   assert.equal(result.onboardingEvents.cliSetup.length, 3);
   assert.equal(result.onboardingEvents.survey.nps.total, 5);
   assert.equal(
@@ -795,6 +832,144 @@ test("cockpit: assembles gauges, onboarding events, reuse, spawn health", () => 
   assert.equal(result.reuse.secondSessionRate, 0.25);
   assert.equal(result.spawnHealth.successRate, 25 / 30);
   assert.match(result.note, /3\.0\.19/);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★제로마찰 KPI — 10분 첫 multi-agent 성공 · 동시2+ · 주2회+ · 무료→유료
+// ════════════════════════════════════════════════════════════════════════════
+
+const ZERO_FRICTION_SAMPLE = {
+  firstRunBase: 40,
+  signupBase: 25,
+  multiAgentActiveClients: 12,
+  multiAgentActiveEvents: 55,
+  multiAgentSuccessClients: 8,
+  multiAgentSuccessEvents: 19,
+  firstSuccessClients: 8,
+  firstSuccessWithinClients: 6,
+  firstSuccessNoClockClients: 1,
+  firstSuccessMedianMs: 420_000,
+  weeklyActiveClients: 20,
+  weeklyTwicePlusClients: 9,
+  paidClients: 5,
+};
+
+test("zeroFriction: 핵심 KPI 분모는 가입이 아니라 최초 실행이다", () => {
+  const z = buildZeroFrictionKpis(ZERO_FRICTION_SAMPLE);
+  // 6/40 — 가입(25)으로 나누면 0.24 가 되어 KPI 가 낙관 편향된다.
+  assert.equal(z.tenMinuteMultiAgent.base, 40);
+  assert.equal(z.tenMinuteMultiAgent.rate, 6 / 40);
+  assert.notEqual(z.tenMinuteMultiAgent.rate, 6 / 25);
+  // 창 무관 첫 성공률은 같은 분모로 따로 낸다(10분 밖 성공도 성공이다).
+  assert.equal(z.tenMinuteMultiAgent.successRate, 8 / 40);
+  assert.equal(z.tenMinuteMultiAgent.windowMinutes, 10);
+  assert.equal(MULTI_AGENT_TARGET_WINDOW_MINUTES, 10);
+  assert.match(z.tenMinuteMultiAgent.label, /10분/);
+});
+
+test("zeroFriction: 동시2+ · 주2회+ · 무료→유료 각자의 분모를 쓴다", () => {
+  const z = buildZeroFrictionKpis(ZERO_FRICTION_SAMPLE);
+  assert.equal(z.multiAgentUsage.activeRate, 12 / 40); // 최초 실행 대비
+  assert.equal(z.multiAgentUsage.successRate, 8 / 40);
+  // 주2회+ 만 분모가 다르다(그 창의 활동 설치) — 화면이 병기해야 하는 이유.
+  assert.equal(z.weeklyTwicePlus.rate, 9 / 20);
+  assert.equal(z.weeklyTwicePlus.base, 20);
+  assert.equal(z.freeToPaid.rate, 5 / 40);
+  assert.equal(z.freeToPaid.rateOfSignups, 5 / 25); // 참고치는 가입 분모
+});
+
+test("zeroFriction: 표본 0 이면 0% 가 아니라 null(데이터 대기)", () => {
+  const z = buildZeroFrictionKpis({
+    firstRunBase: 0,
+    signupBase: 0,
+    multiAgentActiveClients: 0,
+    multiAgentActiveEvents: 0,
+    multiAgentSuccessClients: 0,
+    multiAgentSuccessEvents: 0,
+    firstSuccessClients: 0,
+    firstSuccessWithinClients: 0,
+    firstSuccessNoClockClients: 0,
+    firstSuccessMedianMs: 0,
+    weeklyActiveClients: 0,
+    weeklyTwicePlusClients: 0,
+    paidClients: 0,
+  });
+  assert.equal(z.tenMinuteMultiAgent.rate, null);
+  assert.equal(z.tenMinuteMultiAgent.successRate, null);
+  // ★중앙값 0 은 "0분 만에 성공" 이 아니라 표본 없음이다.
+  assert.equal(z.tenMinuteMultiAgent.medianMs, null);
+  assert.equal(z.multiAgentUsage.activeRate, null);
+  assert.equal(z.weeklyTwicePlus.rate, null);
+  assert.equal(z.freeToPaid.rate, null);
+});
+
+test("zeroFriction: BQ int64-as-string 을 강제 변환하고, note 가 한계를 말한다", () => {
+  const z = buildZeroFrictionKpis({
+    ...ZERO_FRICTION_SAMPLE,
+    firstRunBase: "40",
+    firstSuccessWithinClients: "6",
+    firstSuccessMedianMs: "420000",
+  });
+  assert.equal(z.tenMinuteMultiAgent.rate, 6 / 40);
+  assert.equal(z.tenMinuteMultiAgent.medianMs, 420_000);
+  assert.equal(z.tenMinuteMultiAgent.noClockClients, 1);
+  // 정직성 계약: 시계 시작점·web 경계·결제 관측시점 한계가 note 에 있어야 한다.
+  assert.match(z.note, /최초 실행/);
+  assert.match(z.note, /모델 연결/);
+  assert.match(z.note, /GA4|Vercel/);
+});
+
+test("zeroFriction: 목표창은 주입 가능하고, 잘못된 값이면 기본 10분", () => {
+  assert.equal(
+    buildZeroFrictionKpis({ ...ZERO_FRICTION_SAMPLE, targetWindowMinutes: 30 })
+      .tenMinuteMultiAgent.windowMinutes,
+    30,
+  );
+  assert.equal(
+    buildZeroFrictionKpis({ ...ZERO_FRICTION_SAMPLE, targetWindowMinutes: 0 })
+      .tenMinuteMultiAgent.windowMinutes,
+    10,
+  );
+});
+
+test("cockpit: zeroFriction 입력이 있으면 섹션이 조립된다", () => {
+  const result = buildKpiCockpit({
+    gaugeRow: { d_signup_base: 25, d_retained_1d: 10, d_retained_30d: 3 },
+    starRatingRows: [],
+    cliSetupRows: [],
+    cliFailReasonRows: [],
+    demo: {
+      startedClients: 0,
+      completedClients: 0,
+      ctaClients: 0,
+      startedEvents: 0,
+      completedEvents: 0,
+      ctaEvents: 0,
+    },
+    consent: {
+      shownClients: 0,
+      grantedClients: 0,
+      shownEvents: 0,
+      grantedEvents: 0,
+    },
+    reuse: {
+      weeklyActiveProjects: 0,
+      weeklyCompletedTasks: 0,
+      secondSessionClients: 0,
+      signupBase: 25,
+      avgDau: 0,
+      wau: 0,
+    },
+    spawn: { spawned: 0, crashed: 0, restarted: 0, completed: 0 },
+    zeroFriction: ZERO_FRICTION_SAMPLE,
+  });
+  assert.equal(result.zeroFriction?.tenMinuteMultiAgent.rate, 6 / 40);
+  assert.equal(result.zeroFriction?.freeToPaid.paidClients, 5);
+  const byKey = new Map(result.betaExitGauges.map((g) => [g.key, g]));
+  assert.equal(byKey.get("retention_1d")?.current, 10 / 25);
+  assert.equal(byKey.get("retention_30d")?.current, 3 / 25);
+  // 코크핏 note 가 "동시작업 미포함" 이라는 옛 사실을 더는 말하지 않아야 한다.
+  assert.match(result.note, /멀티에이전트/);
 });
 
 // ── 필수 활성유저 확충: 리텐션 · Stickiness · 30일+ 잔존 · 순차 게이트 ────────

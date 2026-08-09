@@ -370,6 +370,61 @@ export const mainTelemetry = {
     });
   },
 
+  // ── ★멀티에이전트 동시실행/성공 (티켓 pWSnJeQN) ─────────────────────────
+  //
+  // 사장님 최중요 KPI 는 "10분 안에 첫 multi-agent 성공 경험" 인데, 그 성공을
+  // 구성하는 **동시실행** 자체가 계측에 없었다(BigQuery grep 0건). 아래 둘이
+  // 그 공백을 채운다. 둘 다 개수만 싣는 비식별 이벤트이고, 기존 렌더러 choke
+  // point(logTelemetry: scrub + firstParty 게이트) → logTelemetryBatch →
+  // BigQuery `events` 로 간다 — 새 파이프라인도 서버 변경도 없다.
+  //
+  // ★설치당 1회로 접는 일은 **여기서 하지 않는다**. one-shot 마커(localStorage)
+  // 는 렌더러에만 있고, 어느 PTY 가 살아 있는지는 메인만 안다 — first_conversation
+  // 과 같은 분업이다. 메인은 사실을 매번 보내고, 렌더러가 접는다.
+
+  /**
+   * 동시에 살아 있는 에이전트가 2대 이상으로 **늘어난** 순간.
+   * `concurrent` = 그 순간의 live 수, `working` = 그중 턴이 열린 수(참고치).
+   */
+  multiAgentActive(
+    win: BrowserWindow | null,
+    concurrent: number,
+    working: number,
+  ) {
+    sendTelemetry(win, "onboarding:multi_agent_active", {
+      success: true,
+      metadata: { concurrent, working },
+    });
+  },
+
+  /**
+   * 동시 2대+ 상태에서 **성과가 났다** — 이 이벤트의 메인측 트리거는 머지다
+   * (`recordMergeHistory`). 티켓 완료 쪽 트리거는 렌더러가 보드 구독에서 관측한다
+   * (오케는 MCP 로 Firestore 를 직접 write 해 렌더러 taskService 를 우회하므로,
+   * 보드 관측만이 모든 작성 경로를 한 번씩 잡는다 — #895 first_ticket 과 동일 근거).
+   */
+  multiAgentSuccess(
+    win: BrowserWindow | null,
+    payload: {
+      trigger: "merge" | "task_completed";
+      concurrent: number;
+      working: number;
+      taskId?: string | null;
+      projectId?: string;
+    },
+  ) {
+    sendTelemetry(win, "onboarding:multi_agent_success", {
+      success: true,
+      taskId: payload.taskId ?? undefined,
+      projectId: payload.projectId,
+      metadata: {
+        trigger: payload.trigger,
+        concurrent: payload.concurrent,
+        working: payload.working,
+      },
+    });
+  },
+
   heartbeat(
     win: BrowserWindow | null,
     agentId: string,

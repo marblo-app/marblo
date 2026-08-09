@@ -45,6 +45,7 @@ import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../lib/firebase";
 import type { Task } from "../types/task";
 import { getClientId, isTelemetryEnabled } from "./telemetryService";
+import { noteTaskCompletionForMultiAgentKpi } from "./multiAgentKpi";
 import { getDocument } from "./firestore";
 import { flushTaskRollups } from "./taskRollups";
 import {
@@ -164,6 +165,18 @@ export function observeTaskSnapshot(tasks: Task[]): void {
 
     if (previous === undefined) continue; // first sighting — seed only
     if (previous === task.status) continue;
+
+    // ★핵심 KPI("10분 안에 첫 multi-agent 성공") 의 완료측 트리거(티켓 pWSnJeQN).
+    // 여기가 유일하게 **모든 작성 경로**(사람 UI·오케 MCP·워치독)의 DONE 전이를
+    // 한 번씩 보는 지점이라 이 위에 얹는다 — 위 §"Why this is not in
+    // updateTaskStatus()" 와 같은 이유다. 실패해도 아웃컴 보고를 막지 않는다.
+    void noteTaskCompletionForMultiAgentKpi(
+      previous,
+      task.status,
+      undefined,
+      task.id,
+    );
+
     if (!isTerminalTaskStatus(task.status)) continue;
 
     void reportTaskOutcome(task, task.status);

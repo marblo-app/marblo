@@ -9499,6 +9499,25 @@ export const getAdminBetaSegmentUsage = functions
  *
  * params: { days?: number, includeAdmin?: boolean } (기본 30, 제외)
  */
+/**
+ * ★제로마찰 KPI 이벤트(티켓 pWSnJeQN) — 잔존 계산의 스캔에서 제외한다.
+ *
+ * 코크핏의 잔존 쿼리는 (프로젝트×날짜) 조합 수로 "2번째 세션" 을 근사하므로,
+ * 스캔에 들어오는 이벤트 **종류**가 늘면 잔존율이 저절로 올라간다(#895 가 퍼널
+ * 쪽에서 닫은 것과 같은 함정). 계측을 추가했다는 이유로 베타종료 게이지가
+ * 좋아지는 건 착시다.
+ *
+ * ★여기 담는 건 **이 티켓에서 새로 생긴 이벤트뿐**이다. 기존 이벤트까지 빼면
+ * d_retained_7d 값이 소급해서 움직이는데, 그건 이 티켓이 요구한 변화가 아니다
+ * (게이지를 조용히 옮기지 않는다).
+ */
+const KPI_RETENTION_EXCLUDED_EVENTS: readonly string[] = [
+  "onboarding:multi_agent_active",
+  "onboarding:multi_agent_success",
+  "onboarding:first_multi_agent_success",
+  "billing:subscription_active",
+];
+
 export const getAdminKpiCockpit = functions
   .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
   .https.onCall(async (data, context) => {
@@ -9554,7 +9573,17 @@ export const getAdminKpiCockpit = functions
       LEFT JOIN firstTask t ON t.identity = s.identity
     `;
 
-    // ── (2) 7일 잔존: 가입자 중 7일내 2파생세션/2프로젝트 도달 고유 identity ──
+    // ── (2) 잔존 D1/D7/D30: 가입자 중 N일내 2파생세션/2프로젝트 도달 identity ──
+    //
+    // ★D7 값은 이 재작성 전후로 **한 자리도 바뀌지 않는다**: 창을 30일로 넓힌 건
+    // 바깥 필터뿐이고, 7일 칸은 내부 조건부 집계가 그대로 7일로 자른다. 세 칸이
+    // 창 길이만 다른 같은 정의라야 D1<D7<D30 의 단조성이 지표의 사실이 된다.
+    //
+    // ★새 이벤트 제외: 이 CTE 는 (프로젝트×날짜) 조합 수로 '2번째 세션' 을
+    // 근사하므로, 스캔에 들어오는 이벤트 종류가 늘면 잔존이 저절로 올라간다.
+    // 퍼널에 칸을 추가했다는 이유로 잔존이 좋아지는 건 착시라 명시적으로 뺀다
+    // (#895 FUNNEL_EVENTS_EXCLUDED_FROM_RETENTION 과 같은 규율). 과거 값은
+    // 이 이벤트들이 존재하지 않았으므로 영향받지 않는다.
     const retainedQuery = `
       WITH win AS (
         SELECT
@@ -9566,28 +9595,52 @@ export const getAdminKpiCockpit = functions
           event
         FROM ${eventsTable}
         WHERE ${eventTs} >= ${since}
-          AND userId IS NOT NULL${ex.clause}
+          AND userId IS NOT NULL
+          AND event NOT IN (${KPI_RETENTION_EXCLUDED_EVENTS.map(
+            (e) => `'${e}'`,
+          ).join(", ")})${ex.clause}
       ),
       signup AS (
         SELECT identity, MIN(ts) AS signup_ts
         FROM win
         WHERE event = 'auth:login_success'
         GROUP BY identity
-      )
-      SELECT COUNT(*) AS d_retained_7d
-      FROM (
-        SELECT w.identity
+      ),
+      per_identity AS (
+        SELECT
+          w.identity,
+          ${[1, 7, 30]
+            .map(
+              (d) => `COUNT(DISTINCT IF(
+            w.ts <= TIMESTAMP_ADD(s.signup_ts, INTERVAL ${d} DAY),
+            CONCAT(
+              COALESCE(w.projectId, '(none)'),
+              ':',
+              FORMAT_DATE('%F', w.activity_date)
+            ),
+            NULL
+          )) AS sessionish_${d}d,
+          COUNT(DISTINCT IF(
+            w.ts <= TIMESTAMP_ADD(s.signup_ts, INTERVAL ${d} DAY),
+            w.projectId,
+            NULL
+          )) AS projects_${d}d`,
+            )
+            .join(",\n          ")}
         FROM win w
         JOIN signup s ON s.identity = w.identity
-        WHERE w.ts BETWEEN s.signup_ts AND TIMESTAMP_ADD(s.signup_ts, INTERVAL 7 DAY)
+        WHERE w.ts BETWEEN s.signup_ts
+          AND TIMESTAMP_ADD(s.signup_ts, INTERVAL 30 DAY)
         GROUP BY w.identity
-        HAVING COUNT(DISTINCT CONCAT(
-                  COALESCE(w.projectId, '(none)'),
-                  ':',
-                  FORMAT_DATE('%F', w.activity_date)
-                )) >= 2
-            OR COUNT(DISTINCT w.projectId) >= 2
       )
+      SELECT
+        ${[1, 7, 30]
+          .map(
+            (d) =>
+              `COUNTIF(sessionish_${d}d >= 2 OR projects_${d}d >= 2) AS d_retained_${d}d`,
+          )
+          .join(",\n        ")}
+      FROM per_identity
     `;
 
     // ── (3) 활동 스캔(단일): 첫티켓 완료 distinct + 스폰 헬스 카운트 ──
@@ -9783,6 +9836,89 @@ export const getAdminKpiCockpit = functions
       ORDER BY count DESC
     `;
 
+    // ── (11) ★제로마찰 KPI — 10분 첫 multi-agent 성공 · 동시2+ · 무료→유료 ──
+    //
+    // 티켓 pWSnJeQN. 사장님 최중요 KPI 를 이루는 조각들인데, 그중 **멀티에이전트
+    // 동시실행은 BigQuery 에 한 건도 없었다**(grep 0). 이제 메인 프로세스가
+    // 발생 시점에 직접 관측해 보내므로 여기서 규모를 뽑는다.
+    //
+    // ★분모는 가입이 아니라 **최초 실행**(app:first_run)이다 — "설치한 사람 중
+    // 몇 %가 10분 안에 성공했나" 가 질문이라, 로그인에서 죽은 사람을 빼면 KPI 가
+    // 낙관 편향된다.
+    // ★소요시간은 클라가 계산해 durationMs 로 싣는다(서버 timestamp 는 수신시각
+    // 이고 로그인 이전 이벤트는 나중에 한꺼번에 flush 된다). 목표창 판정도 같은
+    // 이유로 클라가 실은 값(metadata.withinTargetWindow)을 읽기만 한다 — 여기서
+    // 다시 계산하면 두 수가 갈린다.
+    const withinWindow = "JSON_VALUE(metadata, '$.withinTargetWindow')";
+    const clockAvailable = "JSON_VALUE(metadata, '$.clockAvailable')";
+    const zeroFrictionQuery = `
+      WITH raw AS (
+        SELECT
+          COALESCE(NULLIF(JSON_VALUE(metadata, '$.accountUserId'), ''), userId)
+            AS identity,
+          event,
+          durationMs,
+          metadata
+        FROM ${eventsTable}
+        WHERE ${eventTs} >= ${since}
+          AND userId IS NOT NULL
+          AND event IN ('app:first_run',
+                        'onboarding:multi_agent_active',
+                        'onboarding:multi_agent_success',
+                        'onboarding:first_multi_agent_success',
+                        'billing:subscription_active')${ex.clause}
+      )
+      SELECT
+        COUNT(DISTINCT IF(event = 'app:first_run', identity, NULL))
+          AS d_first_run_base,
+        COUNT(DISTINCT IF(
+          event = 'onboarding:multi_agent_active', identity, NULL))
+          AS d_multi_active,
+        COUNTIF(event = 'onboarding:multi_agent_active') AS n_multi_active,
+        COUNT(DISTINCT IF(
+          event = 'onboarding:multi_agent_success', identity, NULL))
+          AS d_multi_success,
+        COUNTIF(event = 'onboarding:multi_agent_success') AS n_multi_success,
+        COUNT(DISTINCT IF(
+          event = 'onboarding:first_multi_agent_success', identity, NULL))
+          AS d_first_success,
+        COUNT(DISTINCT IF(
+          event = 'onboarding:first_multi_agent_success'
+            AND ${withinWindow} = 'true',
+          identity, NULL)) AS d_first_success_within,
+        -- 시계를 못 구한 설치(이 계측 이전부터 쓰던 설치). 소요시간을 지어내지
+        -- 않았다는 사실 자체를 수치로 보여 준다.
+        COUNT(DISTINCT IF(
+          event = 'onboarding:first_multi_agent_success'
+            AND ${clockAvailable} = 'false',
+          identity, NULL)) AS d_first_success_no_clock,
+        APPROX_QUANTILES(
+          IF(event = 'onboarding:first_multi_agent_success' AND durationMs > 0,
+             durationMs, NULL), 100
+        )[SAFE_OFFSET(50)] AS median_first_success_ms,
+        COUNT(DISTINCT IF(
+          event = 'billing:subscription_active', identity, NULL)) AS d_paid
+      FROM raw
+    `;
+
+    // ── (12) 주 2회+ 사용(최근 7일 창에서 서로 다른 활동일 2일 이상) ──
+    // 분모는 그 창의 활동 설치다 — 다른 카드와 분모가 다르므로 화면에 병기한다.
+    const weeklyTwicePlusQuery = `
+      SELECT
+        COUNT(*) AS weekly_active_clients,
+        COUNTIF(active_days >= 2) AS weekly_twice_plus_clients
+      FROM (
+        SELECT
+          COALESCE(NULLIF(JSON_VALUE(metadata, '$.accountUserId'), ''), userId)
+            AS identity,
+          COUNT(DISTINCT DATE(${eventTs})) AS active_days
+        FROM ${eventsTable}
+        WHERE ${eventTs} >= ${week}
+          AND userId IS NOT NULL${ex.clause}
+        GROUP BY identity
+      )
+    `;
+
     // 대부분 쿼리는 @days(윈도우)+제외절 파라미터를 참조한다. 단 weeklyQuery 는
     // 고정 7일 창(@days 미참조)이라, 미참조 파라미터를 넘기면 BQ 가 거부하므로
     // (위 getAdminModelSummary 의 uid/client 분리와 동일 사유) 제외절 파라미터만
@@ -9816,6 +9952,18 @@ export const getAdminKpiCockpit = functions
         query: stallReasonQuery,
         params: daysParams,
       },
+      {
+        name: "kpi.zeroFriction",
+        query: zeroFrictionQuery,
+        params: daysParams,
+      },
+      // 고정 7일 창이라 @days 를 참조하지 않는다 — weeklyQuery 와 같은 이유로
+      // 제외절 파라미터만 넘긴다(미참조 파라미터는 BQ 가 거부한다).
+      {
+        name: "kpi.weeklyTwicePlus",
+        query: weeklyTwicePlusQuery,
+        params: ex.params,
+      },
     ]);
     const [
       headRows,
@@ -9830,6 +9978,8 @@ export const getAdminKpiCockpit = functions
       avgDauRows,
       stallRows,
       stallReasonRows,
+      zeroFrictionRows,
+      weeklyTwicePlusRows,
     ] = kpiQueryResults.map((r) => r.rows);
     const kpiQueryErrors = kpiQueryResults
       .filter((r) => r.error != null)
@@ -9848,6 +9998,8 @@ export const getAdminKpiCockpit = functions
     const secondSessionRow = first(secondSessionRows);
     const avgDauRow = first(avgDauRows);
     const stallRow = first(stallRows);
+    const zeroFrictionRow = first(zeroFrictionRows);
+    const weeklyTwicePlusRow = first(weeklyTwicePlusRows);
 
     // CLI 셋업 단계 요약 → 게이지의 CLI 인증/첫프로젝트 분자·분모 파생.
     const cliRows = (cliSetupRows as Array<Record<string, unknown>>).map(
@@ -9867,7 +10019,10 @@ export const getAdminKpiCockpit = functions
       d_signup_base: headRow.d_signup_base,
       d_activated_30m: headRow.d_activated_30m,
       d_task_completed: headRow.d_activated_30m,
+      // 잔존 3종은 창 길이만 다른 같은 정의다(같은 쿼리에서 나온다).
+      d_retained_1d: retainedRow.d_retained_1d,
       d_retained_7d: retainedRow.d_retained_7d,
+      d_retained_30d: retainedRow.d_retained_30d,
       d_cli_connect_enter: connect?.clients.enter ?? 0,
       d_cli_connect_success: connect?.clients.success ?? 0,
       d_cli_project_success: project?.clients.success ?? 0,
@@ -9929,6 +10084,23 @@ export const getAdminKpiCockpit = functions
         stalledClients: stallRow.stalled_clients,
         // 스톨 비율의 분모는 게이지와 같은 로그인 성공 기반(같은 창·같은 제외절).
         signupBase: headRow.d_signup_base,
+      },
+      // ★제로마찰 KPI(티켓 pWSnJeQN). 분모는 최초 실행 기준 — 이유는 순수 빌더
+      // buildZeroFrictionKpis 의 note 참조.
+      zeroFriction: {
+        firstRunBase: zeroFrictionRow.d_first_run_base,
+        signupBase: headRow.d_signup_base,
+        multiAgentActiveClients: zeroFrictionRow.d_multi_active,
+        multiAgentActiveEvents: zeroFrictionRow.n_multi_active,
+        multiAgentSuccessClients: zeroFrictionRow.d_multi_success,
+        multiAgentSuccessEvents: zeroFrictionRow.n_multi_success,
+        firstSuccessClients: zeroFrictionRow.d_first_success,
+        firstSuccessWithinClients: zeroFrictionRow.d_first_success_within,
+        firstSuccessNoClockClients: zeroFrictionRow.d_first_success_no_clock,
+        firstSuccessMedianMs: zeroFrictionRow.median_first_success_ms,
+        weeklyActiveClients: weeklyTwicePlusRow.weekly_active_clients,
+        weeklyTwicePlusClients: weeklyTwicePlusRow.weekly_twice_plus_clients,
+        paidClients: zeroFrictionRow.d_paid,
       },
     });
 

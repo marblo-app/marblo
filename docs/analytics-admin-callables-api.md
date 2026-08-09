@@ -338,7 +338,14 @@
   }
   // 부분 쿼리 실패 상태 — 서버 러너는 개별 쿼리 실패를 삼키고 빈 배열을 준다.
   // ok=false 면 그 칸의 0 은 "정말 0" 이 아니라 "못 읽음" 이다.
-  queryStatus: { ok: boolean; errors: { name: string; error: string }[] };
+  queryStatus: {
+    ok: boolean;
+    errors: {
+      name: string;
+      error: string;
+    }
+    [];
+  }
   // 전 구간 13단계 — 각 단계 "도달 고유 clientId"(clients)와 이벤트 발생량(events).
   // ★엄격 순차 아님(도달 기준). dropFromPrev 는 직전 **gating** 단계 대비 감소
   //   (≥0 clamp). 비단조(folder_connected=0 인데 orchestrator_opened>0=resume
@@ -508,6 +515,17 @@ type BetaSegmentSummary = {
 - **계정↔사용 조인:** events=익명 clientId, 매핑 테이블 없음 → 계정 단위 활성/리텐션 불가(§1.6).
 - **에이전트 트리·fast_fail·per-task cost delta·taskType 분류·prompt 임베딩:** 데이터 보강 선행 필요(Phase 3, T3-1~T3-5).
 - **리텐션(D1/D7/D30) 코호트:** clientId 기준만 가능, v1 미포함(T3-7 고도화).
+  → 2026-08-09 부분 해소: `getAdminKpiCockpit` 의 베타종료 게이지에 D1/D7/D30 이
+  **익명 clientId(identity) 기준**으로 들어왔다(티켓 pWSnJeQN, 정의는 세 칸 모두
+  "가입 후 N일 창 안에서 2번째 파생세션/프로젝트 도달"로 동일). 계정 identity 기준
+  코호트는 여전히 `getAdminRetentionCohorts` 쪽이고 accountUserId 축 한계가 남는다.
+- **방문→다운로드 · 다운로드→설치 조인:** web(GA4/Vercel) 과 앱(BigQuery events)의
+  **경계**다. 앱은 `app:first_run` 부터만 관측하고 GA4 `user_pseudo_id` 와 앱의 익명
+  `clientId` 는 서로 다른 축이라 개인 조인이 불가능하다 — 규모(magnitude) 대사만
+  가능하다. 티켓 pWSnJeQN(앱 내부 계측) 범위 밖이며, 이 경계는 `UzvcqHMd`(#901)가
+  소유한다: 설계·실측은 `v3/docs/web-app-join-attribution-design-2026-08-09.md`
+  (1순위 블로커 = 두 데이터셋의 BigQuery **리전 불일치**, 권장안 = 다운로드
+  attribution 토큰이 아니라 웹가입 문서에 유입맥락을 서버측 스탬프하는 옵션 A′).
 
 ## 검증
 

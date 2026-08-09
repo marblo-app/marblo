@@ -32,6 +32,7 @@ import {
   serializeAgent,
   formatModelAtEffort,
   isNoOutputRun,
+  MULTI_AGENT_MIN_CONCURRENCY,
   type ModelType,
 } from "./agent-manager";
 import { Updater } from "./updater";
@@ -3062,6 +3063,21 @@ const recordMergeHistory = async (
     changeType: record.changeType,
   });
 
+  // ★"10분 안에 첫 multi-agent 성공"(티켓 pWSnJeQN)의 머지측 트리거. 머지는
+  // 가장 강한 성공 라벨이므로, 그 순간 동시에 2대 이상이 살아 있었다면 그건
+  // 정확히 이 제품이 약속한 경험이 일어난 순간이다. 동시성 판정은 메인이
+  // 소유하고(AgentManager), 설치당 1회로 접는 것과 시계 계산은 렌더러가 한다.
+  const mergeConcurrency = agentManager.getConcurrency();
+  if (mergeConcurrency.live >= MULTI_AGENT_MIN_CONCURRENCY) {
+    mainTelemetry.multiAgentSuccess(mainWindow, {
+      trigger: "merge",
+      concurrent: mergeConcurrency.live,
+      working: mergeConcurrency.working,
+      taskId: record.taskId ?? null,
+      projectId: record.projectId
+    });
+  }
+
   // KG feedback (spec §7): merge is the top accepted (positive) label. Fold it
   // into the routing graph via the shared entry point (same path gh merges take
   // through the kg:recordMergeOutcome bridge). Idempotent with the renderer-
@@ -5965,6 +5981,15 @@ ipcMain.handle("agent:list", (event, projectId?: string) => {
   // be cloned". (regression: this handler returned raw instances.)
   return agentManager.listAgentsByProject(scope).map(serializeAgent);
 });
+
+// ★멀티에이전트 동시성 조회(티켓 pWSnJeQN). 렌더러가 "티켓이 방금 DONE 이 됐다"
+// 를 관측한 순간 이 값을 읽어 '동시 2대+ 에서의 성공' 을 판정한다.
+//
+// 왜 렌더러가 자기 스토어로 세지 않나: agents 스토어는 Firestore 문서 기반이라
+// **선택된 프로젝트로 스코프**되고 죽은 문서가 남을 수 있다. 살아 있는 PTY 의
+// 진실은 메인의 AgentManager 뿐이고, KPI 가 묻는 것은 "이 사람이 2대를 동시에
+// 굴렸나"(설치 축)라 프로젝트로 나누면 안 된다. 개수만 돌려준다 — id·이름 없음.
+ipcMain.handle("agent:concurrency", () => agentManager.getConcurrency());
 
 // Renderer registers its current project so we can scope events
 // (agent:spawned, agent:statusChanged, etc.) to the right window in

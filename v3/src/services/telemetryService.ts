@@ -138,7 +138,32 @@ export type TelemetryEvent =
   // 유저에게 말을 걸었다**(경험). 온램프가 고쳐야 하는 숫자는 후자이고, 둘이
   // 갈리는 지점(세션 상한·MCP 축 억제)이 곧 이 설계의 튜닝 손잡이다.
   | "onramp:decompose_used"
-  | "onramp:exec_blocked";
+  | "onramp:exec_blocked"
+  // ── ★제로마찰 핵심 KPI (ticket pWSnJeQN) ────────────────────────────────
+  // 사장님 최중요 KPI 는 **"10분 안에 첫 multi-agent 성공 경험"** 인데, 그 KPI 를
+  // 구성하는 '멀티에이전트 동시실행' 이 BigQuery 에 한 건도 없었다(grep 0). #895
+  // 가 여정 골격(first_run→…→first_merge + 상관키)을 심었으므로 여기서는 그 위에
+  // 빠진 조각만 얹는다 — 새 파이프라인 없이 같은 choke point 를 지난다.
+  //
+  // · multi_agent_active — 동시에 살아 있는 에이전트가 2대 이상으로 **늘어난**
+  //   순간(메인 AgentManager 관측). 상시 발신 + 설치당 첫 건에 firstForInstall
+  //   플래그. 개수만 싣는다.
+  // · multi_agent_success — 그 동시 2대+ 상태에서 성과가 난 순간(티켓 DONE 또는
+  //   머지). 상시 발신.
+  // · first_multi_agent_success — 설치당 **1회**. `durationMs` 에 first_run→이
+  //   순간의 소요시간이 실리고 metadata.withinTargetWindow 가 10분 판정이다.
+  //   ★서버 timestamp 로는 이 지연을 못 구한다(수신시각이고, 로그인 이전 큐잉분은
+  //   나중에 한꺼번에 flush 된다) — beginner_first_completion 과 같은 이유로
+  //   클라가 계산해 싣는다.
+  | "onboarding:multi_agent_active"
+  | "onboarding:multi_agent_success"
+  | "onboarding:first_multi_agent_success"
+  // 무료→유료 전환을 **무료 여정 상관키(익명 clientId)에 귀속**시키는 한 칸.
+  // 결제 자체는 웹(포트원/#826)에서 일어나 앱을 거치지 않으므로, 앱이 관측할 수
+  // 있는 사실은 "이 설치의 계정이 유료 플랜이 됐다" 뿐이다. 그거면 충분하다 —
+  // 설치 축 여정(first_run→…)에 결제가 붙는 유일한 다리이기 때문이다.
+  // 설치당 1회, 플랜 이름만(금액·결제수단·주문번호 없음).
+  | "billing:subscription_active";
 
 interface TelemetryPayload {
   event: TelemetryEvent;
@@ -234,7 +259,7 @@ const logHeartbeatFn = httpsCallable(functions, "logHeartbeat");
 
 export function setTelemetryEnabled(
   enabled: boolean,
-  options: { persist?: boolean } = {}
+  options: { persist?: boolean } = {},
 ) {
   const next = firstPartyTelemetryDefaultEnabled() && enabled;
   telemetryEnabled = next;
@@ -314,6 +339,71 @@ function markOncePerInstall(key: string): boolean {
   } catch {
     return false;
   }
+}
+
+// ── ★"10분 안에 첫 multi-agent 성공" 의 시계 (ticket pWSnJeQN) ───────────────
+//
+// 목표창 10분. 이 상수 하나가 이벤트의 `withinTargetWindow` 판정과 어드민 카드
+// 라벨의 단일 소스다(서버는 이벤트에 실린 판정을 읽기만 한다 — 클라가 계산한
+// 값을 서버가 다시 계산하면 두 수가 갈릴 수 있고, 서버 timestamp 는 애초에
+// 수신시각이라 시작점을 모른다).
+export const MULTI_AGENT_TARGET_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * 시계 **시작점 두 개**. 어느 쪽이 옳은지는 제품 판단이라 둘 다 싣고 문서가
+ * 정의한다(docs/zero-friction-kpi-completion-2026-08-09.md §시계).
+ *
+ * · `firstRunAt` — 앱을 처음 연 순간. 사장님 KPI 문장("10분 안에")의 자연스러운
+ *   해석이고, 헤드라인은 이 시계를 쓴다.
+ * · `modelConnectedAt` — 이 설치가 **실제로 모델을 돌릴 수 있게 된** 순간(CLI
+ *   인증 성공 또는 funding 프로브 ok). ★L0 무료 데모는 룰베이스라 진짜
+ *   multi-agent 실행이 원천적으로 불가능하다 — 그래서 first_run 시계는 "우리가
+ *   못 고치는 구간(사용자가 CLI 를 설치·로그인하는 시간)"까지 포함한다. 제품
+ *   개선의 신호로는 이쪽이 더 공정해서 보조 시계로 함께 싣는다.
+ */
+const FIRST_RUN_AT_KEY = "marblo.telemetry.firstRunAt";
+const MODEL_CONNECTED_AT_KEY = "marblo.telemetry.modelConnectedAt";
+
+/** epoch-ms 를 1회만 찍는다(이미 있으면 보존). 실패하면 조용히 없는 것으로 둔다. */
+function stampOnce(key: string): void {
+  try {
+    if (localStorage.getItem(key) != null) return;
+    localStorage.setItem(key, String(Date.now()));
+  } catch {
+    // Storage unavailable — 시계 없이 간다(0 을 지어내지 않는다).
+  }
+}
+
+function readStamp(key: string): number | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 이 설치의 최초 실행 시각을 찍는다(App.tsx markFirstRunIfNeeded 에서 1회). */
+export function stampFirstRunAt(): void {
+  stampOnce(FIRST_RUN_AT_KEY);
+}
+
+/**
+ * 이 설치가 모델을 실제로 돌릴 수 있게 된 시각(1회). CLI 인증 성공과 funding
+ * 프로브 ok 두 지점에서 불린다 — 먼저 온 쪽이 기록된다.
+ */
+export function stampModelConnectedAt(): void {
+  stampOnce(MODEL_CONNECTED_AT_KEY);
+}
+
+/** now − 시작점. 시작점이 없으면(이 빌드 이전 설치) undefined — 0 을 만들지 않는다. */
+function elapsedSince(key: string): number | undefined {
+  const at = readStamp(key);
+  if (at == null) return undefined;
+  const delta = Date.now() - at;
+  return delta >= 0 ? delta : undefined;
 }
 
 // Separate heartbeat queue — goes to agent_heartbeats table, not events
@@ -431,7 +521,7 @@ export const telemetry = {
     name: string,
     model: string,
     role: string,
-    projectId?: string
+    projectId?: string,
   ) {
     logTelemetry({
       event: "agent:spawned",
@@ -459,7 +549,7 @@ export const telemetry = {
     model?: string,
     dispatchReason?: string,
     errorCategory?: string,
-    errorMessage?: string
+    errorMessage?: string,
   ) {
     logTelemetry({
       event: "agent:crashed",
@@ -484,7 +574,7 @@ export const telemetry = {
     attempt: number,
     taskId?: string,
     model?: string,
-    dispatchReason?: string
+    dispatchReason?: string,
   ) {
     logTelemetry({
       event: "agent:restarted",
@@ -501,7 +591,7 @@ export const telemetry = {
     taskId: string,
     projectId: string,
     role: string,
-    priority?: number
+    priority?: number,
   ) {
     logTelemetry({
       event: "task:created",
@@ -516,7 +606,7 @@ export const telemetry = {
     taskId: string,
     fromStatus: string,
     toStatus: string,
-    agentId?: string
+    agentId?: string,
   ) {
     logTelemetry({
       event: "task:status_changed",
@@ -547,7 +637,7 @@ export const telemetry = {
     flowId: string,
     nodeType: string,
     durationMs: number,
-    success: boolean
+    success: boolean,
   ) {
     logTelemetry({
       event: "flow:node_executed",
@@ -562,7 +652,7 @@ export const telemetry = {
     flowId: string,
     status: string,
     durationMs: number,
-    nodeCount: number
+    nodeCount: number,
   ) {
     logTelemetry({
       event: "flow:completed",
@@ -580,7 +670,7 @@ export const telemetry = {
     tokensInput: number,
     tokensOutput: number,
     cost: number,
-    projectId?: string
+    projectId?: string,
   ) {
     logTelemetry({
       event: "token:usage",
@@ -730,8 +820,12 @@ export const telemetry = {
       | "connect"
       | "project",
     phase: "enter" | "success" | "fail",
-    reason?: string
+    reason?: string,
   ) {
+    // ★"모델 연결" 시계의 시작점 하나(티켓 pWSnJeQN). 인증 단계 성공 = 이 설치가
+    // 비로소 진짜 에이전트를 돌릴 수 있게 된 순간이다(무료 데모는 룰베이스라
+    // 그 전엔 multi-agent 성공이 원천적으로 불가능하다).
+    if (step === "auth" && phase === "success") stampModelConnectedAt();
     logTelemetry({
       event: "onboarding:cli_setup_step",
       success: phase !== "fail",
@@ -849,7 +943,7 @@ export const telemetry = {
     tourId: string,
     stepIndex: number,
     stepCount: number,
-    permanent: boolean
+    permanent: boolean,
   ) {
     logTelemetry({
       event: "onboarding:coachmark_skipped",
@@ -880,8 +974,12 @@ export const telemetry = {
     verdict: "ok" | "unfunded" | "blocked" | "inconclusive",
     model: string,
     trigger: "auto" | "recheck",
-    blockedReason?: string
+    blockedReason?: string,
   ) {
+    // ★"모델 연결" 시계의 다른 시작점(티켓 pWSnJeQN). 프로브 ok = 그 계정이
+    // 실제로 한 턴을 돌릴 수 있다는 관측이다. CLI 위저드를 건너뛴 경로(이미
+    // 설치·인증된 유저)는 여기서만 잡힌다. 먼저 온 쪽이 기록된다.
+    if (verdict === "ok") stampModelConnectedAt();
     logTelemetry({
       event: "onboarding:funding_probe",
       model,
@@ -911,7 +1009,7 @@ export const telemetry = {
    */
   fundingGuideShown(
     state: "authedButUnfunded" | "authedButBlocked",
-    model?: string
+    model?: string,
   ) {
     logTelemetry({
       event: "onboarding:funding_guide_shown",
@@ -1020,6 +1118,115 @@ export const telemetry = {
         ...(payload.suppressedReason
           ? { suppressedReason: payload.suppressedReason }
           : {}),
+      },
+    });
+  },
+
+  // ── ★제로마찰 핵심 KPI (ticket pWSnJeQN) ────────────────────────────────
+
+  /**
+   * 동시 2대+ 관측(메인이 상승 엣지마다 보낸다). **상시 발신**하되 설치당 첫
+   * 건에는 `firstForInstall: true` 를 붙인다 — "동시 2대를 한 번이라도 써 본
+   * 설치" 와 "지금도 그렇게 쓰는 설치" 는 다른 질문이고, 둘 다 필요하다.
+   *
+   * metadata 는 메인이 실어 보낸 개수(concurrent/working)를 그대로 쓴다.
+   */
+  multiAgentActiveObserved(metadata?: Record<string, unknown>) {
+    const firstForInstall = markOncePerInstall(
+      "marblo.telemetry.multiAgentActiveSent",
+    );
+    logTelemetry({
+      event: "onboarding:multi_agent_active",
+      success: true,
+      metadata: { ...(metadata ?? {}), firstForInstall },
+    });
+  },
+
+  /**
+   * ★핵심 KPI 의 관측점 — 동시 2대+ 상태에서 티켓이 완료됐거나 머지됐다.
+   *
+   * 매번 보내고(상시), **설치당 첫 건**에는 짝 이벤트
+   * `onboarding:first_multi_agent_success` 를 하나 더 보낸다. 그 짝이 KPI 의
+   * 분자이고, `durationMs`(= first_run → 이 순간)와
+   * `metadata.withinTargetWindow`(10분 판정)를 싣는다.
+   *
+   * ★두 시계를 함께 싣는 이유는 위 MODEL_CONNECTED_AT_KEY 주석 참조 — 무료 데모
+   * 는 룰베이스라 진짜 multi-agent 성공은 모델 연결 이후에만 가능하다.
+   *
+   * 시작점 스탬프가 없는 설치(이 빌드 이전부터 쓰던 설치)는 duration 을 지어내지
+   * 않고 비운다 — 그 경우 `clockAvailable: false` 로 분모에서 가려낼 수 있다.
+   *
+   * `taskId`/`projectId` 는 first-class 컬럼으로 올린다(metadata JSON 이 아니라).
+   * 창이 여러 개면 같은 완료를 각 렌더러가 한 번씩 볼 수 있는데, taskId 가
+   * 있으면 집계에서 `COUNT(DISTINCT taskId)` 로 접을 수 있다.
+   */
+  multiAgentSuccessObserved(
+    metadata?: Record<string, unknown>,
+    keys?: { taskId?: string; projectId?: string },
+  ) {
+    logTelemetry({
+      event: "onboarding:multi_agent_success",
+      success: true,
+      ...(keys?.taskId ? { taskId: keys.taskId } : {}),
+      ...(keys?.projectId ? { projectId: keys.projectId } : {}),
+      ...(metadata ? { metadata } : {}),
+    });
+    if (!markOncePerInstall("marblo.telemetry.firstMultiAgentSuccessSent")) {
+      return;
+    }
+    const msFromFirstRun = elapsedSince(FIRST_RUN_AT_KEY);
+    const msFromModelConnect = elapsedSince(MODEL_CONNECTED_AT_KEY);
+    logTelemetry({
+      event: "onboarding:first_multi_agent_success",
+      success: true,
+      ...(keys?.taskId ? { taskId: keys.taskId } : {}),
+      ...(keys?.projectId ? { projectId: keys.projectId } : {}),
+      // first-class 컬럼. 헤드라인 시계(first_run 기준)를 여기 싣는다.
+      ...(msFromFirstRun !== undefined ? { durationMs: msFromFirstRun } : {}),
+      metadata: {
+        ...(metadata ?? {}),
+        targetWindowMs: MULTI_AGENT_TARGET_WINDOW_MS,
+        clockAvailable: msFromFirstRun !== undefined,
+        ...(msFromFirstRun !== undefined
+          ? {
+              msFromFirstRun,
+              withinTargetWindow:
+                msFromFirstRun <= MULTI_AGENT_TARGET_WINDOW_MS,
+            }
+          : {}),
+        ...(msFromModelConnect !== undefined
+          ? {
+              msFromModelConnect,
+              withinTargetWindowFromConnect:
+                msFromModelConnect <= MULTI_AGENT_TARGET_WINDOW_MS,
+            }
+          : {}),
+      },
+    });
+  },
+
+  /**
+   * 이 설치의 계정이 **유료 플랜이 된 것을 앱이 처음 관측한** 순간(설치당 1회).
+   *
+   * 결제 자체는 웹(포트원)에서 일어나므로 앱은 결제 이벤트를 볼 수 없다. 볼 수
+   * 있는 것은 구독 문서가 유료로 바뀐 사실뿐이고, 그거면 "무료 여정 상관키(익명
+   * clientId)에 결제를 귀속" 시키는 목적에는 충분하다. ★그래서 이 이벤트는
+   * 결제 시각이 아니라 **관측 시각**이다(웹에서 결제하고 앱을 나중에 열면 그만큼
+   * 늦게 찍힌다) — 전환 여부의 신호로 쓰고, 결제 정산에는 쓰지 않는다.
+   *
+   * 비식별: 플랜 이름만. 금액·주문번호·결제수단·구독 id 는 싣지 않는다.
+   */
+  subscriptionActiveObserved(plan: string) {
+    if (!markOncePerInstall("marblo.telemetry.subscriptionActiveSent")) return;
+    const msFromFirstRun = elapsedSince(FIRST_RUN_AT_KEY);
+    logTelemetry({
+      event: "billing:subscription_active",
+      success: true,
+      ...(msFromFirstRun !== undefined ? { durationMs: msFromFirstRun } : {}),
+      metadata: {
+        plan,
+        clockAvailable: msFromFirstRun !== undefined,
+        ...(msFromFirstRun !== undefined ? { msFromFirstRun } : {}),
       },
     });
   },

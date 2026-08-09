@@ -36,6 +36,7 @@ import { buildBusyTaskIds } from "./lib/archiveSignals";
 import {
   logTelemetry,
   setTelemetryEnabled,
+  stampFirstRunAt,
   type TelemetryEvent,
 } from "./services/telemetryService";
 import telemetry from "./services/telemetryService";
@@ -394,6 +395,22 @@ function AppContent() {
     return () => unsub();
   }, [user?.uid, memberProjectIdsKey, FIREBASE_LISTENERS_ENABLED]);
 
+  // ★무료→유료 전환을 무료 여정 상관키(익명 clientId)에 귀속(티켓 pWSnJeQN).
+  //
+  // 결제는 웹(포트원)에서 일어나 앱을 거치지 않으므로 앱이 결제 이벤트를 볼 방법은
+  // 없다. 대신 이 설치의 계정이 유료 플랜이 된 **사실**을 구독 스토어에서 관측해
+  // 설치 축 여정(app:first_run → … )에 결제를 잇는다. 판정은 lib/entitlement 의
+  // 단일 규칙(getPlan)에 위임한다 — status 단독으로 보면 해지 즉시 free 로 떨어져
+  // 잔여 기간이 소멸하는 그 버그를 여기서 되풀이하지 않는다.
+  //
+  // 설치당 1회 발신이라 스토어가 여러 번 스냅샷을 줘도 한 건만 나간다.
+  const entitledPlan = useSubscriptionStore((s) => s.getPlan());
+  useEffect(() => {
+    if (!user) return;
+    if (!entitledPlan || entitledPlan === "free") return;
+    telemetry.subscriptionActiveObserved(entitledPlan);
+  }, [user?.uid, entitledPlan]);
+
   // Track session start/end
   useEffect(() => {
     if (!user) return;
@@ -427,6 +444,26 @@ function AppContent() {
         if (data.event === "onboarding:first_conversation") {
           telemetry.firstConversationObserved(
             data.metadata as Record<string, unknown> | undefined,
+          );
+          return;
+        }
+        // ★멀티에이전트 계측도 같은 분업이다(티켓 pWSnJeQN): 동시성은 메인만
+        // 알고(감지=메인 AgentManager), 설치당 1회 마커와 first_run 시계는
+        // localStorage 라 렌더러에만 있다(접기·시간계산=여기).
+        if (data.event === "onboarding:multi_agent_active") {
+          telemetry.multiAgentActiveObserved(
+            data.metadata as Record<string, unknown> | undefined,
+          );
+          return;
+        }
+        if (data.event === "onboarding:multi_agent_success") {
+          telemetry.multiAgentSuccessObserved(
+            data.metadata as Record<string, unknown> | undefined,
+            {
+              taskId: typeof data.taskId === "string" ? data.taskId : undefined,
+              projectId:
+                typeof data.projectId === "string" ? data.projectId : undefined,
+            },
           );
           return;
         }
@@ -538,6 +575,10 @@ function markFirstRunIfNeeded() {
     // Storage unavailable — skip rather than risk emitting on every boot.
     return;
   }
+  // ★"10분 안에 첫 multi-agent 성공" 의 시계 시작점(티켓 pWSnJeQN). 서버
+  // timestamp 는 수신시각이고 로그인-이전 이벤트는 나중에 한꺼번에 flush 되므로
+  // 서버에서는 이 지연을 계산할 수 없다 — 로컬에 epoch-ms 를 찍어 둔다.
+  stampFirstRunAt();
   // Queued now; flushes on the next successful login (flush is auth-gated).
   // Reconciles at magnitude against GA4 download clicks — see churn analysis §5-1.
   const platform =

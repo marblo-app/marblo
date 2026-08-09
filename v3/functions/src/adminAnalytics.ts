@@ -582,7 +582,14 @@ export type BetaExitGaugeKey =
   | "cli_auth_success"
   | "first_project_run"
   | "first_ticket_completed"
+  // ★잔존 3종(티켓 pWSnJeQN). 종전엔 D7 한 칸뿐이라 "첫날 바로 이탈" 과
+  // "한 달 뒤에도 온다" 를 같은 화면에서 볼 수 없었다. 세 칸 모두 **같은 정의**
+  // (가입 후 N일 창 안에서 2번째 파생세션/프로젝트 도달)라 창 길이만 다르다 —
+  // 정의가 같아야 D1<D7<D30 의 단조성이 지표의 사실이 되고, 창이 다른 정의를
+  // 섞어 놓은 것이 아님을 화면에서 말할 수 있다.
+  | "retention_1d"
   | "retention_7d"
+  | "retention_30d"
   | "satisfaction_nps"
   | "activation_30m";
 
@@ -596,6 +603,10 @@ export const BETA_EXIT_TARGETS: Readonly<Record<BetaExitGaugeKey, number>> = {
   retention_7d: 0.3,
   satisfaction_nps: 40,
   activation_30m: 0.3, // ★잠정(메모에 숫자 없음, headline 재사용) — CEO 확정 전 default
+  // ★D1/D30 목표는 메모에 없다. D7(0.30)을 기준으로 D1 은 위, D30 은 아래로 둔
+  // **잠정치**이며, 이 상수만 고치면 게이지가 따라온다(CEO 확정 전 default).
+  retention_1d: 0.4,
+  retention_30d: 0.2,
 };
 
 export type BetaExitGauge = {
@@ -639,10 +650,24 @@ const BETA_EXIT_GAUGE_META: ReadonlyArray<{
     denCol: "d_signup_base",
   },
   {
+    key: "retention_1d",
+    label: "1일 잔존율(D1)",
+    unit: "rate",
+    numCol: "d_retained_1d",
+    denCol: "d_signup_base",
+  },
+  {
     key: "retention_7d",
     label: "7일 잔존율",
     unit: "rate",
     numCol: "d_retained_7d",
+    denCol: "d_signup_base",
+  },
+  {
+    key: "retention_30d",
+    label: "30일 잔존율(D30)",
+    unit: "rate",
+    numCol: "d_retained_30d",
     denCol: "d_signup_base",
   },
   // satisfaction_nps 는 별점 분포에서 별도 계산 — 아래 buildBetaExitGauges 에서 주입.
@@ -688,15 +713,26 @@ export function buildBetaExitGauges(
     numerator: nps.total,
     denominator: nps.total,
   };
-  // 표시 순서: 퍼널 흐름(인증→프로젝트→티켓→잔존)→만족도→헤드라인.
-  return [
-    rateGauges[0], // cli_auth_success
-    rateGauges[1], // first_project_run
-    rateGauges[2], // first_ticket_completed
-    rateGauges[3], // retention_7d
-    npsGauge, // satisfaction_nps
-    rateGauges[4], // activation_30m
+  // 표시 순서: 퍼널 흐름(인증→프로젝트→티켓→잔존 D1/D7/D30)→만족도→헤드라인.
+  // ★키로 정렬한다 — 종전엔 rateGauges[0..4] 인덱스로 집어 넣었는데, 그 배열은
+  // 메타 상수에서 나오므로 칸을 하나 추가하면 순서가 조용히 어긋난다(D1/D30 을
+  // 넣으면서 실제로 어긋날 뻔했다). 키 기반이면 메타에 칸을 늘려도 안전하다.
+  const order: BetaExitGaugeKey[] = [
+    "cli_auth_success",
+    "first_project_run",
+    "first_ticket_completed",
+    "retention_1d",
+    "retention_7d",
+    "retention_30d",
+    "satisfaction_nps",
+    "activation_30m",
   ];
+  const byKey = new Map<BetaExitGaugeKey, BetaExitGauge>(
+    [...rateGauges, npsGauge].map((g) => [g.key, g]),
+  );
+  return order
+    .map((key) => byKey.get(key))
+    .filter((g): g is BetaExitGauge => g != null);
 }
 
 // ── 신규 온보딩 이벤트 집계(설문·데모·동의·CLI셋업) ──────────────────────────
@@ -1047,6 +1083,167 @@ export function buildOnboardingStallSummary(
 
 // ── 코크핏 전체 조립 ─────────────────────────────────────────────────────────
 // index.ts 콜러블이 BQ 결과를 아래 입력 shape 로 넘기면 최종 응답 본문을 만든다.
+// ════════════════════════════════════════════════════════════════════════════
+// ★제로마찰 KPI — "10분 안에 첫 multi-agent 성공" · 동시 2+ · 주2회+ · 무료→유료
+// ════════════════════════════════════════════════════════════════════════════
+// 티켓 pWSnJeQN. #895 가 여정 골격(first_run→…→first_merge)을 심었고, 여기서는
+// 사장님 최중요 KPI 를 이루는 **빠진 조각**만 집계한다. 전부 순수 로직 —
+// index.ts 가 BQ 스칼라를 뽑아 넘기고 여기서 비율로 접는다.
+//
+// ★분모 규약: 이 섹션의 분모는 **가입(로그인 성공)** 이 아니라 **최초 실행**
+// (app:first_run 고유 identity)이다. "설치한 사람 중 몇 %가 10분 안에 성공을
+// 경험했나" 가 질문이기 때문이다. 로그인 기준 분모는 로그인에서 죽은 사람을
+// 통째로 빼버려 KPI 를 낙관 편향시킨다. 참고용으로 가입 분모도 함께 내려준다.
+//
+// ★한계는 note 에 그대로 적는다: (1) 방문→다운로드, 다운로드→설치 구간은 web
+// (GA4/Vercel) 경계라 이 축에 없다. (2) 무료 데모는 룰베이스라 진짜 multi-agent
+// 성공은 모델 연결 이후에만 가능하다 — 그래서 10분 시계는 first_run 기준(헤드라인)
+// 과 모델연결 기준(보조) 둘 다 이벤트에 실린다.
+
+export type ZeroFrictionInput = {
+  /** 분모: 최초 실행(app:first_run) 고유 identity. */
+  firstRunBase: unknown;
+  /** 참고 분모: 가입(로그인 성공) 고유 identity. */
+  signupBase: unknown;
+  /** 동시 2대+ 를 한 번이라도 관측한 고유 identity / 발생 총량. */
+  multiAgentActiveClients: unknown;
+  multiAgentActiveEvents: unknown;
+  /** 동시 2대+ 상태에서 완료·머지가 난 고유 identity / 발생 총량. */
+  multiAgentSuccessClients: unknown;
+  multiAgentSuccessEvents: unknown;
+  /** 설치당 1회 이벤트(first_multi_agent_success) 고유 identity. */
+  firstSuccessClients: unknown;
+  /** 그중 목표창(10분) 안에 도달한 고유 identity. */
+  firstSuccessWithinClients: unknown;
+  /** 그중 first_run 시계를 못 구한 설치(이 계측 이전부터 쓰던 설치). */
+  firstSuccessNoClockClients: unknown;
+  /** 첫 성공까지 걸린 시간의 중앙값(ms). 표본 없으면 null. */
+  firstSuccessMedianMs: unknown;
+  /** 최근 7일 활동 고유 identity / 그중 서로 다른 활동일이 2일 이상인 수. */
+  weeklyActiveClients: unknown;
+  weeklyTwicePlusClients: unknown;
+  /** 유료 전환이 관측된 고유 identity(billing:subscription_active). */
+  paidClients: unknown;
+  /** 목표창(분). 클라 상수(MULTI_AGENT_TARGET_WINDOW_MS)와 같은 값. */
+  targetWindowMinutes?: number;
+};
+
+export type ZeroFrictionResult = {
+  /** ★핵심 KPI. rate = 목표창 내 첫 multi-agent 성공 설치 / 최초 실행 설치. */
+  tenMinuteMultiAgent: {
+    windowMinutes: number;
+    withinClients: number;
+    successClients: number;
+    noClockClients: number;
+    base: number;
+    /** 목표창 내 성공률(분모=최초 실행). 분모 0 이면 null. */
+    rate: number | null;
+    /** 창 무관 첫 성공률(같은 분모). 10분 밖 성공까지 포함. */
+    successRate: number | null;
+    /** 첫 성공까지 중앙값(ms). 표본 없으면 null. */
+    medianMs: number | null;
+    label: string;
+  };
+  /** 동시 2대+ 를 실제로 쓴 설치. */
+  multiAgentUsage: {
+    activeClients: number;
+    activeEvents: number;
+    successClients: number;
+    successEvents: number;
+    base: number;
+    activeRate: number | null;
+    successRate: number | null;
+  };
+  /** 주 2회+ 사용(최근 7일, 서로 다른 활동일 2일 이상). */
+  weeklyTwicePlus: {
+    clients: number;
+    base: number;
+    rate: number | null;
+  };
+  /** 무료→유료 전환(설치 축 귀속). */
+  freeToPaid: {
+    paidClients: number;
+    base: number;
+    signupBase: number;
+    rate: number | null;
+    /** 가입 분모 기준 참고치. */
+    rateOfSignups: number | null;
+  };
+  note: string;
+};
+
+/** 기본 목표창 10분 — 렌더러 상수 MULTI_AGENT_TARGET_WINDOW_MS 와 짝이다. */
+export const MULTI_AGENT_TARGET_WINDOW_MINUTES = 10;
+
+export function buildZeroFrictionKpis(
+  input: ZeroFrictionInput,
+): ZeroFrictionResult {
+  const windowMinutes =
+    input.targetWindowMinutes && input.targetWindowMinutes > 0
+      ? input.targetWindowMinutes
+      : MULTI_AGENT_TARGET_WINDOW_MINUTES;
+  const base = coerceNumber(input.firstRunBase);
+  const signupBase = coerceNumber(input.signupBase);
+  const withinClients = coerceNumber(input.firstSuccessWithinClients);
+  const successClients = coerceNumber(input.firstSuccessClients);
+  const medianRaw = coerceNumber(input.firstSuccessMedianMs);
+  const weeklyActive = coerceNumber(input.weeklyActiveClients);
+  const weeklyTwice = coerceNumber(input.weeklyTwicePlusClients);
+  const paidClients = coerceNumber(input.paidClients);
+  const activeClients = coerceNumber(input.multiAgentActiveClients);
+  const multiSuccessClients = coerceNumber(input.multiAgentSuccessClients);
+  return {
+    tenMinuteMultiAgent: {
+      windowMinutes,
+      withinClients,
+      successClients,
+      noClockClients: coerceNumber(input.firstSuccessNoClockClients),
+      base,
+      rate: safeRate(withinClients, base),
+      successRate: safeRate(successClients, base),
+      // 표본이 없으면 0 이 아니라 null — "0분 만에 성공" 으로 읽히면 안 된다.
+      medianMs: successClients > 0 && medianRaw > 0 ? medianRaw : null,
+      label: `최초 실행 후 ${windowMinutes}분 안에 에이전트 2대+ 동시 상태에서 첫 완료/머지에 도달한 설치 비율`,
+    },
+    multiAgentUsage: {
+      activeClients,
+      activeEvents: coerceNumber(input.multiAgentActiveEvents),
+      successClients: multiSuccessClients,
+      successEvents: coerceNumber(input.multiAgentSuccessEvents),
+      base,
+      activeRate: safeRate(activeClients, base),
+      successRate: safeRate(multiSuccessClients, base),
+    },
+    weeklyTwicePlus: {
+      clients: weeklyTwice,
+      base: weeklyActive,
+      rate: safeRate(weeklyTwice, weeklyActive),
+    },
+    freeToPaid: {
+      paidClients,
+      base,
+      signupBase,
+      rate: safeRate(paidClients, base),
+      rateOfSignups: safeRate(paidClients, signupBase),
+    },
+    note:
+      `핵심 KPI 의 분모는 가입이 아니라 **최초 실행**(app:first_run 고유 설치)이다 — ` +
+      `로그인에서 죽은 사람을 빼면 KPI 가 낙관 편향된다. 시계는 클라이언트가 계산해 ` +
+      `이벤트에 싣는다(서버 timestamp 는 수신시각이고, 로그인 이전 이벤트는 나중에 ` +
+      `한꺼번에 flush 되므로 서버에서는 지연을 구할 수 없다). ★시계 시작점은 ` +
+      `'최초 실행' 이다 — 무료 데모는 룰베이스라 진짜 multi-agent 실행은 모델 연결(L1) ` +
+      `이후에만 가능하므로, 이 수치에는 사용자가 CLI 를 설치·로그인하는 시간이 포함된다. ` +
+      `모델 연결 기준 보조 시계도 같은 이벤트에 실려 있다(metadata.msFromModelConnect). ` +
+      `'시계 없음' 설치는 이 계측 이전부터 쓰던 설치라 소요시간을 지어내지 않고 비운다. ` +
+      `주 2회+ 는 최근 7일 창에서 서로 다른 활동일이 2일 이상인 설치이며 분모는 그 창의 ` +
+      `활동 설치다(다른 카드와 분모가 다르다). 무료→유료는 앱이 관측한 구독 활성화 시점 ` +
+      `이지 결제 시점이 아니다 — 웹에서 결제하고 앱을 나중에 열면 그만큼 늦게 찍힌다. ` +
+      `계측 직후 한동안은 이미 결제해 둔 설치가 분자에 섞여 과대 계상될 수 있다(창을 ` +
+      `짧게 두고 읽으면 빠진다). ` +
+      `★범위 밖: 방문→다운로드·다운로드→설치 구간은 web(GA4/Vercel) 경계라 이 축에 없다.`,
+  };
+}
+
 export type KpiCockpitInput = {
   gaugeRow: FunnelCountsRow; // d_<col> 스칼라(게이지 분자/분모)
   starRatingRows: ReadonlyArray<{ rating: unknown; count: unknown }>;
@@ -1058,6 +1255,8 @@ export type KpiCockpitInput = {
   spawn: SpawnHealthInput;
   /** 온보딩 스톨(티켓 9dXgBdkGn1LyJokShh1g). 구버전 호출부 호환을 위해 선택. */
   stall?: OnboardingStallInput;
+  /** ★제로마찰 KPI(티켓 pWSnJeQN). 구버전 호출부 호환을 위해 선택. */
+  zeroFriction?: ZeroFrictionInput;
 };
 export type KpiCockpitResult = {
   betaExitGauges: BetaExitGauge[];
@@ -1071,6 +1270,8 @@ export type KpiCockpitResult = {
   spawnHealth: SpawnHealthSummary;
   /** 온보딩 스톨 요약. 입력이 없으면(구버전 호출부) null. */
   onboardingStall: OnboardingStallSummary | null;
+  /** ★제로마찰 KPI. 입력이 없으면(구버전 호출부) null. */
+  zeroFriction: ZeroFrictionResult | null;
   note: string;
 };
 
@@ -1092,13 +1293,19 @@ export function buildKpiCockpit(input: KpiCockpitInput): KpiCockpitResult {
     onboardingStall: input.stall
       ? buildOnboardingStallSummary(input.stall)
       : null,
+    zeroFriction: input.zeroFriction
+      ? buildZeroFrictionKpis(input.zeroFriction)
+      : null,
     note:
       "베타종료 게이지는 활성화 전략 메모의 지표기반 종료 기준(CLI인증80·첫프로젝트60· " +
       "첫티켓50·7일잔존30·NPS40+)이다. 분모가 0 인 게이지는 current=null('데이터 대기')로 " +
       "표시한다. ★신규 온보딩 이벤트(cli_setup_step·survey·demo·marketing_consent)는 3.0.19 " +
       "렌더러 빌드+실사용 전엔 전부 0 이다 — 구조가 먼저, 데이터는 후행한다. 30분내 첫완료율 " +
       "목표(0.30)는 메모에 숫자가 없어 잠정 기본값이다. 스폰 성공률은 완료/(완료+크래시)이며 " +
-      "재시작은 회복 신호라 분모에서 제외한다. 동시작업 수는 세션 상관이 필요해 v1 미포함.",
+      "재시작은 회복 신호라 분모에서 제외한다. ★동시작업(멀티에이전트)은 v1 에서 빠져 " +
+      "있었으나 이제 zeroFriction 섹션이 직접 관측한 값으로 채운다(티켓 pWSnJeQN) — " +
+      "세션 상관으로 재구성하지 않고 발생 시점에 센다. D1/D7/D30 잔존은 창 길이만 다른 " +
+      "같은 정의(가입 후 N일 내 2번째 파생세션/프로젝트)이고, D1/D30 목표치는 잠정이다.",
   };
 }
 

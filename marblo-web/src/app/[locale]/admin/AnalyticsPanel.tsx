@@ -296,6 +296,43 @@ type KpiCockpit = {
     guideShown: { clients: number; events: number };
     note: string;
   } | null;
+  /**
+   * ★제로마찰 KPI(티켓 pWSnJeQN) — 사장님 최중요 KPI 인 "10분 안에 첫
+   * multi-agent 성공" 과 그 주변(동시2+·주2회+·무료→유료). 서버 순수 빌더
+   * buildZeroFrictionKpis 의 응답 shape 미러. 구버전 functions 는 null 을 준다.
+   */
+  zeroFriction?: {
+    tenMinuteMultiAgent: {
+      windowMinutes: number;
+      withinClients: number;
+      successClients: number;
+      /** 시계를 못 구한 설치(이 계측 이전부터 쓰던 설치). */
+      noClockClients: number;
+      base: number;
+      rate: number | null;
+      successRate: number | null;
+      medianMs: number | null;
+      label: string;
+    };
+    multiAgentUsage: {
+      activeClients: number;
+      activeEvents: number;
+      successClients: number;
+      successEvents: number;
+      base: number;
+      activeRate: number | null;
+      successRate: number | null;
+    };
+    weeklyTwicePlus: { clients: number; base: number; rate: number | null };
+    freeToPaid: {
+      paidClients: number;
+      base: number;
+      signupBase: number;
+      rate: number | null;
+      rateOfSignups: number | null;
+    };
+    note: string;
+  } | null;
   note: string;
 };
 
@@ -2215,6 +2252,114 @@ function OnboardingStallCard({
   );
 }
 
+// ── ★제로마찰 KPI 카드 (티켓 pWSnJeQN) ──────────────────────────────────────
+//
+// 사장님이 가장 먼저 보는 수치라 코크핏 맨 위에 온다. 화면이 지키는 정직성 규약:
+//  1) 분모를 항상 병기한다 — 10분 성공률·동시2+·무료→유료는 **최초 실행** 기준,
+//     주2회+ 만 그 주의 활동 설치 기준이라 분모가 다르다. 안 적으면 네 수치를
+//     같은 축으로 착각한다.
+//  2) 분모 0 은 0% 가 아니라 '데이터 대기'다.
+//  3) 계측이 새로 생겼다는 사실과 web 경계(방문→다운로드) 밖이라는 사실을 적는다.
+function ZeroFrictionCard({
+  zf,
+}: {
+  zf: NonNullable<KpiCockpit["zeroFriction"]>;
+}) {
+  const ten = zf.tenMinuteMultiAgent;
+  const usage = zf.multiAgentUsage;
+  const hasAny =
+    ten.successClients > 0 ||
+    usage.activeClients > 0 ||
+    zf.freeToPaid.paidClients > 0 ||
+    zf.weeklyTwicePlus.clients > 0;
+  return (
+    <Panel
+      title="★제로마찰 핵심 KPI (10분 안에 첫 multi-agent 성공)"
+      note="동시 2대+ 에서의 첫 완료/머지까지 걸린 시간 · 분모는 최초 실행(설치) 기준"
+    >
+      {!hasAny && (
+        <div className="mb-3">
+          <EmptyState label="멀티에이전트 신호 0건 — 이 계측이 실린 빌드의 실사용 전이거나, 아직 아무도 2대를 동시에 굴리지 않았습니다." />
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard
+          label={`${ten.windowMinutes}분 첫 multi-agent 성공률`}
+          value={ten.rate == null ? "—" : fmtPct(ten.rate)}
+          sub={`${fmtInt(ten.withinClients)} / 최초 실행 ${fmtInt(
+            ten.base
+          )} · 중앙값 ${fmtDuration(ten.medianMs)}`}
+          accent={
+            ten.rate == null
+              ? undefined
+              : ten.rate >= 0.3
+              ? STATUS_GOOD
+              : STATUS_WARN
+          }
+        />
+        <StatCard
+          label="동시 2대+ 사용 설치"
+          value={usage.activeRate == null ? "—" : fmtPct(usage.activeRate)}
+          sub={`${fmtInt(usage.activeClients)}명 · 관측 ${fmtInt(
+            usage.activeEvents
+          )}회`}
+        />
+        <StatCard
+          label="주 2회+ 사용"
+          value={
+            zf.weeklyTwicePlus.rate == null
+              ? "—"
+              : fmtPct(zf.weeklyTwicePlus.rate)
+          }
+          sub={`${fmtInt(zf.weeklyTwicePlus.clients)} / 최근 7일 활동 ${fmtInt(
+            zf.weeklyTwicePlus.base
+          )}명 (분모 다름)`}
+        />
+        <StatCard
+          label="무료 → 유료 전환"
+          value={zf.freeToPaid.rate == null ? "—" : fmtPct(zf.freeToPaid.rate)}
+          sub={`${fmtInt(zf.freeToPaid.paidClients)} / 최초 실행 ${fmtInt(
+            zf.freeToPaid.base
+          )} · 가입 대비 ${
+            zf.freeToPaid.rateOfSignups == null
+              ? "—"
+              : fmtPct(zf.freeToPaid.rateOfSignups)
+          }`}
+          accent={zf.freeToPaid.paidClients > 0 ? STATUS_GOOD : undefined}
+        />
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard
+          label="첫 성공 도달(창 무관)"
+          value={ten.successRate == null ? "—" : fmtPct(ten.successRate)}
+          sub={`${fmtInt(ten.successClients)}명 · ${
+            ten.windowMinutes
+          }분 밖 성공 포함`}
+        />
+        <StatCard
+          label="동시 2대+ 에서의 성공"
+          value={fmtInt(usage.successClients)}
+          sub={`설치 · 발생 ${fmtInt(usage.successEvents)}회(완료·머지)`}
+        />
+        <StatCard
+          label="시계 없음"
+          value={fmtInt(ten.noClockClients)}
+          sub="이 계측 이전 설치 — 소요시간을 지어내지 않음"
+        />
+        <StatCard
+          label="목표창"
+          value={`${ten.windowMinutes}분`}
+          sub="시작점 = 앱 최초 실행"
+        />
+      </div>
+      <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>{zf.note}</span>
+      </p>
+    </Panel>
+  );
+}
+
 // ── KPI 코크핏 뷰 (베타종료 게이지 + 온보딩 이벤트 + 재사용 + 스폰 헬스) ──────
 function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
   const { onboardingEvents: onb, reuse, spawnHealth: spawn } = kpi;
@@ -2223,6 +2368,8 @@ function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
   return (
     <div className="space-y-4">
       <QueryStatusBanner status={kpi.queryStatus} />
+      {/* ★제로마찰 핵심 KPI(pWSnJeQN) — 맨 위. 사장님이 가장 먼저 보는 수치다. */}
+      {kpi.zeroFriction && <ZeroFrictionCard zf={kpi.zeroFriction} />}
       {/* ★온보딩 스톨(#888) — 퍼널 바로 옆에 있어야 "왜 안 넘어갔나"가 읽힌다. */}
       {kpi.onboardingStall && (
         <OnboardingStallCard stall={kpi.onboardingStall} />

@@ -108,6 +108,45 @@ export function formatModelAtEffort(
   return info.effort ? `${info.modelId}@${info.effort}` : info.modelId;
 }
 
+/**
+ * ★멀티에이전트 동시실행의 판정 하한(티켓 pWSnJeQN).
+ *
+ * 제품의 핵심 약속("여러 에이전트를 동시에 굴린다")이 실제로 일어난 순간이
+ * BigQuery 에 **한 건도 없었다**(grep 0). 세는 기준은 "동시에 살아 있는 PTY 수"
+ * 다 — `agent:spawned` 와 `agent:stopped` 의 겹침에서 파생되는 그 값이고,
+ * 여기서는 그 겹침을 사후 SQL 로 재구성하는 대신 발생 시점에 직접 관측한다
+ * (SQL 재구성은 crash/stale 로 stop 이 안 찍힌 세션에서 영원히 열린 구간을
+ * 만든다).
+ */
+export const MULTI_AGENT_MIN_CONCURRENCY = 2;
+
+/**
+ * "지금 살아 있는가" 의 판정. `stopped`/`error` 는 PTY 가 죽은 종단 상태이고,
+ * `idle` 은 **살아 있다** — 붙어 있는 CLI 가 다음 지시를 기다리는 상태를 죽은
+ * 것으로 세면 동시실행이 거의 관측되지 않는다(오케가 한 에이전트에 지시를 넣는
+ * 동안 나머지는 대부분 idle 이다).
+ */
+export function isLiveAgentStatus(status: AgentStatus): boolean {
+  return status !== "stopped" && status !== "error";
+}
+
+/**
+ * 동시실행 이벤트를 지금 발신해야 하는가 — **상승 엣지에서만** true.
+ *
+ * 매 변화마다 보내면 스폰이 잦은 세션에서 이벤트가 폭주하고, 반대로 설치당
+ * 1회로 접으면 "상시" 축(이 유저가 지금도 동시에 굴리는가)이 사라진다. 그래서
+ * 규칙은 "≥2 이면서 직전 관측보다 늘었을 때만" 이다: 2→3→2→3 은 두 번 잡히고,
+ * 3→2 나 2→2 는 잡히지 않는다.
+ */
+export function shouldEmitMultiAgentActive(
+  previousLive: number,
+  currentLive: number,
+): boolean {
+  return (
+    currentLive >= MULTI_AGENT_MIN_CONCURRENCY && currentLive > previousLive
+  );
+}
+
 // --- Auto-restart constants ---
 const MAX_RESTARTS = 5;
 const BACKOFF_BASE_MS = 1000;
@@ -526,6 +565,12 @@ export class AgentManager {
   ) => void;
   private onRestartFailed?: (agentId: string, exitCode: number) => void;
   private getMainWindow?: () => BrowserWindow | null;
+  /**
+   * 직전에 관측한 동시 live 에이전트 수(멀티에이전트 계측의 상승 엣지 판정용).
+   * 프로세스 수명 동안만 유지한다 — 재시작 후 다시 2대를 띄우면 그건 새 관측이
+   * 맞다(설치당 1회로 접는 건 렌더러의 localStorage 마커가 한다).
+   */
+  private lastLiveAgentCount = 0;
   private resolveSessionId?: (
     rootPath: string,
     requested: string,
@@ -1297,6 +1342,11 @@ export class AgentManager {
       },
     );
 
+    // ★멀티에이전트 동시실행(티켓 pWSnJeQN) — 이 스폰으로 동시 live 가 2 이상
+    // 으로 올라갔다면 그 순간을 계측한다. agents.set 이 이미 끝난 뒤라야 방금
+    // 뜬 이 에이전트가 카운트에 포함된다.
+    this.noteLiveAgentCount();
+
     // Start heartbeat for anomaly detection (ML-4)
     instance.heartbeatTimer = setInterval(() => {
       const win = this.getMainWindow?.() ?? null;
@@ -1411,6 +1461,7 @@ export class AgentManager {
                   : "clean_exit",
           },
         );
+        this.noteLiveAgentCount();
         if (isGracefulCompletion) {
           console.log(
             `[Agent:${agent.id}] Graceful completion (exit ${exitCode} after ${runtimeMs}ms) — marking stopped, not restarting.`,
@@ -1517,6 +1568,7 @@ export class AgentManager {
           errorCategory,
           errorMessage,
         );
+        this.noteLiveAgentCount();
         if (fastFailExceeded) {
           console.error(
             `[Agent:${agent.id}] Aborting auto-restart — agent exited within ${FAST_FAIL_WINDOW_MS}ms ${agent.fastFailCount}x. Likely a missing binary or bad config (command="${agent.command}"). Verify the CLI is on PATH and check the agent's launch args.`,
@@ -1648,6 +1700,8 @@ export class AgentManager {
       noOutput: isNoOutputRun(agent.outputChars),
       errorCategory: "stopped_by_user",
     });
+    // 하강 관측 — 이걸 빼면 2→1→2 의 두 번째 상승이 "안 늘었다"로 접혀 사라진다.
+    this.noteLiveAgentCount();
   }
 
   restart(
@@ -1802,6 +1856,9 @@ export class AgentManager {
     if (status !== "stopped" && status !== "error") agent.terminalSince = null;
     agent.status = status;
     this.onStatusChange?.(agentId, status);
+    // 종단 전이(→stopped/error)와 부활(error→idle)이 둘 다 여기를 지난다.
+    // idle↔working 은 live 수를 바꾸지 않으므로 아무 것도 발신되지 않는다.
+    this.noteLiveAgentCount();
   }
 
   /**
@@ -1883,6 +1940,7 @@ export class AgentManager {
       this.stop(agentId);
     }
     this.agents.delete(agentId);
+    this.noteLiveAgentCount();
     console.log(`[AgentManager] Removed agent ${agent.name} (${agentId})`);
   }
 
@@ -1951,10 +2009,51 @@ export class AgentManager {
     console.log(
       `[AgentManager] Registered reconnected agent: ${agent.name} (${agent.id})`,
     );
+    // 콜드부트 재접속도 진짜 동시실행이다 — 앱을 껐다 켜도 2대가 붙어 있으면
+    // 그 사람은 지금 멀티에이전트를 쓰고 있는 것이다.
+    this.noteLiveAgentCount();
   }
 
   listAgents(): AgentInstance[] {
     return Array.from(this.agents.values());
+  }
+
+  /**
+   * ★지금 동시에 살아 있는 에이전트 수(티켓 pWSnJeQN).
+   *
+   * 프로젝트로 나누지 않는다 — 사장님이 보려는 KPI 는 "이 사람이 에이전트 2대를
+   * 동시에 굴렸나" 이지 "한 보드 안에서 굴렸나" 가 아니다. `working` 은 그중
+   * 실제로 턴이 열려 있는 수로, 참고치로 함께 낸다(PTY 바이트 파생이라 양방향
+   * 오판이 있는 축이므로 판정에는 쓰지 않는다).
+   */
+  getConcurrency(): { live: number; working: number } {
+    let live = 0;
+    let working = 0;
+    for (const agent of this.agents.values()) {
+      if (!isLiveAgentStatus(agent.status)) continue;
+      live++;
+      if (agent.status === "working") working++;
+    }
+    return { live, working };
+  }
+
+  /**
+   * live 수의 변화를 관측해 **상승 엣지에서만** `onboarding:multi_agent_active`
+   * 를 발신한다. 스폰 직후와 모든 종단 전이(정상종료/사용자중지/에러) 뒤에
+   * 불린다 — 하강을 관측하지 않으면 2→1→2 의 두 번째 상승을 놓친다.
+   *
+   * 비식별: 이벤트에 실리는 것은 **개수**뿐이다(에이전트 id·이름·모델 없음).
+   */
+  private noteLiveAgentCount(): void {
+    const { live, working } = this.getConcurrency();
+    const previous = this.lastLiveAgentCount;
+    this.lastLiveAgentCount = live;
+    if (!shouldEmitMultiAgentActive(previous, live)) return;
+    mainTelemetry.multiAgentActive(
+      this.getMainWindow?.() ?? null,
+      live,
+      working,
+    );
   }
 
   /**

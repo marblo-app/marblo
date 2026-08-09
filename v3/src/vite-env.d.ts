@@ -168,6 +168,8 @@ interface AgentAPI {
       status: string;
     }>
   >;
+  /** 지금 동시에 살아 있는 에이전트 수(설치 전역·개수만). 티켓 pWSnJeQN. */
+  concurrency: () => Promise<{ live: number; working: number }>;
   remove: (id: string) => Promise<{ success: boolean }>;
   onStatusChange: (
     callback: (data: { agentId: string; status: string }) => void,

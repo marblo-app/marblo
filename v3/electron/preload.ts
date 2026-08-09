@@ -263,6 +263,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     restart: (id: string) => ipcRenderer.invoke("agent:restart", id),
     status: (id: string) => ipcRenderer.invoke("agent:status", id),
     list: (projectId?: string) => ipcRenderer.invoke("agent:list", projectId),
+    /** 지금 동시에 살아 있는 에이전트 수(개수만, 설치 전역). 티켓 pWSnJeQN. */
+    concurrency: (): Promise<{ live: number; working: number }> =>
+      ipcRenderer.invoke("agent:concurrency"),
     remove: (id: string) => ipcRenderer.invoke("agent:remove", id),
     onStatusChange: (
       callback: (data: { agentId: string; status: string }) => void,
