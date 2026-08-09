@@ -29,13 +29,22 @@ const storeState = {
   loginRunning: false,
   setLoginRunning: vi.fn(),
   requiredInstalled: () => true,
+  // 인증 직후의 구독/크레딧 프로브도 이 테스트의 관심사가 아니다. 실제 게이트와
+  // 같은 값(이 세션에서 원클릭을 누른 적 없음)으로 두면 엔진이 프로브를 부르지
+  // 않는다 — 그 게이트가 있다는 사실 자체가 여기서 한 번 더 확인된다.
+  setupInitiated: false,
+  runFundingProbe: vi.fn(async () => null),
 };
 
 vi.mock("../../src/stores/cliSetupStore", () => ({
   ORCHESTRATOR_CLI_IDS: ["cli-claude-code", "cli-codex"],
   ROWS: [],
-  useCliSetupStore: (sel: (s: typeof storeState) => unknown) =>
-    sel(storeState as never),
+  // 엔진은 셀렉터로도, `getState()` 로도 스토어를 읽는다(비동기 경로는 렌더
+  // 스냅샷이 아니라 지금 값을 봐야 한다) — 스텁도 둘 다 제공해야 한다.
+  useCliSetupStore: Object.assign(
+    (sel: (s: typeof storeState) => unknown) => sel(storeState as never),
+    { getState: () => storeState },
+  ),
 }));
 
 vi.mock("../../src/stores/projectStore", () => ({

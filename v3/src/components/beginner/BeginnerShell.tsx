@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import OrchestratorPanel from "../orchestrator/OrchestratorPanel";
 import { DemoMode, DEMO_CONNECT_PENDING_KEY } from "../onboarding/DemoMode";
+import { FundingGuideHost } from "../onboarding/FundingGuideHost";
 import { useAppLifecycle } from "../../hooks/useAppLifecycle";
 import { useBeginnerAsk } from "../../hooks/useBeginnerAsk";
 import { useCliSetupEngine } from "../../hooks/useCliSetupEngine";
@@ -564,6 +565,18 @@ export function BeginnerShell() {
       />
 
       {showOneClick && <BeginnerOneClickModal onClose={closeOneClick} />}
+
+      {/* ★"로그인은 됐는데 아무 일도 안 일어나요" — 구독/크레딧이 없어 CLI 가 한
+          턴도 못 도는 상태의 가이드(티켓 sVdwTsiGq6qZVAmSkwZB). 원클릭 모달이
+          "연결됐어요" 를 띄우고 닫힌 **뒤에** 벌어지는 일이라 셸이 든다. 판정이
+          없거나 정상이면 이 호스트는 아무것도 그리지 않는다.
+
+          원클릭 모달과는 배타다(이 파일의 다른 모달들과 같은 규칙). 구독 없는
+          계정은 프로브가 **빨리** 실패하므로, 가드가 없으면 원클릭 모달이 성공
+          문구를 1.6초 보여주는 그 위에 이 모달이 겹쳐 뜬다 — 두 개가 겹치면
+          Esc 한 번이 어느 쪽을 닫는지 알 수 없다. 원클릭은 인증되면 스스로
+          닫히므로 이 안내는 곧바로 이어서 뜬다. */}
+      {!showOneClick && <FundingGuideHost />}
 
       {/* 미니 보드/에이전트에서 연 티켓 상세 — 비기너 판(워크트리·diff·PR 없음). */}
       {openTask && (

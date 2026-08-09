@@ -4,6 +4,7 @@ import {
   DOCS_URL,
   ORCHESTRATOR_CLI_IDS,
   ROWS,
+  SUBSCRIPTION_URL,
   UPDATE_CMD,
   cliLabel,
   isCliReady,
@@ -28,11 +29,6 @@ import { launchLogin, oneClickSignIn } from "../../services/cliSetupActions";
  */
 
 type TFn = ReturnType<typeof useTranslation>["t"];
-
-const SUBSCRIPTION_URL: Partial<Record<CliRow["model"], string>> = {
-  claude: "https://claude.com/pricing",
-  codex: "https://chatgpt.com/pricing/",
-};
 
 /** Copy-to-clipboard command box with a transient "복사됨" confirmation. */
 export function CommandBox({ cmd }: { cmd: string }) {
@@ -136,7 +132,14 @@ export function CliRowCard({ row, phase, onLoginLaunched }: CliRowCardProps) {
   // string there. loginCommandFor keeps the sign-in button honest (and present
   // — it used to disappear entirely whenever `action` was empty).
   const loginCmd = loginCommandFor(row.model, state?.action);
-  const subscriptionUrl = SUBSCRIPTION_URL[row.model];
+  // 이 카드의 구독 안내는 오케 후보 두 개에만 붙는다 — 아래 링크 문구가
+  // Claude/Codex 두 갈래로만 쓰여 있어서, 다른 벤더에 열어 주면 Grok 링크에
+  // "Codex 요금제 보기" 라벨이 붙는다. 공용 테이블(SUBSCRIPTION_URL)에는 grok 도
+  // 있고, 가이드 모달은 CLI 이름을 변수로 받으므로 그쪽에서 그대로 쓴다.
+  const subscriptionUrl =
+    row.model === "claude" || row.model === "codex"
+      ? SUBSCRIPTION_URL[row.model]
+      : undefined;
 
   return (
     <div className="rounded-lg border border-[#313244] bg-[#181825] p-4">

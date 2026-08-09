@@ -75,6 +75,34 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.oneClick.footerHint":
     "You can close this and carry on manually at any time.",
 
+  // ── ①-b Signed in, but nothing runs (no subscription / credits) ─────────
+  "beginner.funding.unfunded.title": "You need a subscription",
+  "beginner.funding.unfunded.body":
+    "Signing in worked. But that account has no subscription or credits available, so {cli} couldn't run even once. Turn on a plan below and you can pick up right where you left off.",
+  "beginner.funding.blocked.title": "Signed in, but it won't run",
+  "beginner.funding.blocked.rateLimit":
+    "Signing in worked and you do appear to have a plan — you're just at {cli}'s usage limit right now. Check again once the limit resets.",
+  "beginner.funding.blocked.auth":
+    "You're shown as signed in, but running {cli} asks you to sign in again. Run the sign-in once more, then check again.",
+  "beginner.funding.blocked.unknown":
+    "Signing in worked, but running {cli} once failed. See the message below for what it said — it may be a subscription/credit problem, or just a temporary one.",
+  "beginner.funding.step1": "Open the {cli} plans page with the button below.",
+  "beginner.funding.step2":
+    "Subscribe with the **same account** you signed in with.",
+  "beginner.funding.step3":
+    "Come back and hit 'Check again' — we'll carry straight on.",
+  "beginner.funding.openSubscription": "See {cli} plans",
+  "beginner.funding.apiPlan.title": "Simple API-rate checkout (coming soon)",
+  "beginner.funding.apiPlan.body":
+    "We're also working on pay-for-what-you-use instead of a subscription. When it's ready you'll be able to pay for it right here.",
+  "beginner.funding.detail": "See what it printed when we ran it",
+  "beginner.funding.recheck": "I've subscribed · Check again",
+  "beginner.funding.rechecking": "Checking…",
+  "beginner.funding.later": "Later",
+  "beginner.funding.close": "Close",
+  "beginner.funding.footerHint":
+    "You can close this and keep using the app either way.",
+
   // ── ② Folder ────────────────────────────────────────────────────────────
   "beginner.folder.title": "Open a folder to work in",
   "beginner.folder.body":

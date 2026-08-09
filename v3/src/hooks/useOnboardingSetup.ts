@@ -9,6 +9,7 @@ import {
 } from "../lib/onboardingPreview";
 import { oneClickInstallRows } from "../lib/oneClickSetup";
 import type { BulkInstallProgress, CliProbeLike } from "../lib/oneClickSetup";
+import type { FundingProbeState } from "../lib/fundingProbe";
 import {
   ROWS,
   useCliSetupStore,
@@ -72,6 +73,15 @@ export interface OnboardingSetupView {
   login: (model: CliModel, action?: string) => Promise<string | null>;
   /** 수동 "다시 확인" — 프리뷰에서는 실 프로브를 돌리지 않는다. */
   recheck: () => void;
+
+  /**
+   * ★인증 다음 칸 — "로그인은 됐는데 진짜 도는가"(티켓 sVdwTsiGq6qZVAmSkwZB).
+   * 프리뷰에서는 **언제나 판정 없음**이다: 시연은 정상 흐름을 보여주는 것이고,
+   * 실 헤드리스 턴을 태우지 않는다는 프리뷰의 계약도 그대로 지켜야 한다.
+   */
+  funding: FundingProbeState;
+  /** "이미 구독했어요 → 다시 확인" — 프로브를 한 번 더 돌린다. */
+  recheckFunding: () => void;
 }
 
 const ONE_CLICK_ROW_IDS = oneClickInstallRows(ROWS).map((r) => r.id);
@@ -88,6 +98,9 @@ export function useOnboardingSetup(): OnboardingSetupView {
   const runInstall = useCliSetupStore((s) => s.runInstall);
   const runInstallAll = useCliSetupStore((s) => s.runInstallAll);
   const probeAll = useCliSetupStore((s) => s.probeAll);
+  const fundingChecking = useCliSetupStore((s) => s.fundingChecking);
+  const fundingOutcome = useCliSetupStore((s) => s.fundingOutcome);
+  const runFundingProbe = useCliSetupStore((s) => s.runFundingProbe);
   const realSampleStatus = useFirstRunSampleStore((s) => s.status);
 
   // ── 프리뷰 상태 ────────────────────────────────────────────────────────
@@ -135,6 +148,8 @@ export function useOnboardingSetup(): OnboardingSetupView {
         signIn: (onSession) => oneClickSignIn(onSession),
         login: (model, action) => launchLogin(model, action),
         recheck: () => void probeAll(),
+        funding: { checking: fundingChecking, outcome: fundingOutcome },
+        recheckFunding: () => void runFundingProbe(),
       };
     }
 
@@ -168,6 +183,10 @@ export function useOnboardingSetup(): OnboardingSetupView {
       recheck: () => {
         /* 프리뷰에서는 프로브를 돌리지 않는다 — 국면이 스스로 굴러간다 */
       },
+      // 프리뷰는 구독/크레딧 문제를 **연출하지 않는다**: 시연의 목적은 신규
+      // 유저의 정상 경로를 보는 것이고, 실 헤드리스 턴도 태우지 않는다.
+      funding: { checking: false, outcome: null },
+      recheckFunding: () => {},
     };
   }, [
     preview,
@@ -185,6 +204,9 @@ export function useOnboardingSetup(): OnboardingSetupView {
     runInstall,
     runInstallAll,
     probeAll,
+    fundingChecking,
+    fundingOutcome,
+    runFundingProbe,
     startInstallAll,
     startSignIn,
   ]);

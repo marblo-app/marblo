@@ -8,6 +8,7 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { useOnboardingProgressStore } from "../../stores/onboardingProgressStore";
 import { useCliSetupEngine } from "../../hooks/useCliSetupEngine";
+import { FundingGuideHost } from "./FundingGuideHost";
 
 /**
  * The split shell's replacement for the CLI setup MODAL.
@@ -86,45 +87,51 @@ export function CliSetupHost() {
   }, []);
 
   // Already standing in the tab → the banner would be redundant noise.
-  if (!needStep || activeTab === "startHere") return null;
+  // ★배너가 안 뜨는 경우에도 `FundingGuideHost` 는 서 있어야 한다: "인증은 됐는데
+  // 구독이 없어 안 돈다" 는 배너가 다루는 국면(=설정이 덜 됐다)이 **아니라**,
+  // 배너가 사라진 뒤에 벌어지는 일이다.
+  if (!needStep || activeTab === "startHere") return <FundingGuideHost />;
 
   return (
-    <div
-      data-testid="cli-setup-banner"
-      className="flex items-center gap-3 border-b border-[#f9e2af]/30 bg-[#f9e2af]/10 px-4 py-2"
-    >
-      <span className="text-sm">⚠️</span>
-      <span className="min-w-0 flex-1 truncate text-xs text-[#f9e2af]">
-        {/* Title follows the step the banner is actually about — a fixed
-            "CLI 인증이 필요합니다" contradicted the body for every step but
-            auth (barrier F2). */}
-        <span data-testid="cli-setup-banner-title">
-          {t(`onboarding.startHere.banner.title.${needStep}` as MessageKey)}
-        </span>
-        <span className="ml-2 text-[#a6adc8]">
-          {t(`onboarding.startHere.why.${needStep}` as MessageKey)}
-        </span>
-      </span>
-      <button
-        type="button"
-        onClick={() => {
-          setActiveTab("startHere");
-          setNeedStep(null);
-        }}
-        className="shrink-0 rounded-md bg-[#f9e2af] px-2.5 py-1 text-xs font-semibold text-[#1e1e2e] transition-colors hover:bg-[#f5e0a3]"
+    <>
+      <FundingGuideHost />
+      <div
+        data-testid="cli-setup-banner"
+        className="flex items-center gap-3 border-b border-[#f9e2af]/30 bg-[#f9e2af]/10 px-4 py-2"
       >
-        {t("onboarding.startHere.banner.cta")}
-      </button>
-      <button
-        type="button"
-        data-testid="cli-setup-banner-dismiss"
-        onClick={dismiss}
-        aria-label={t("onboarding.startHere.banner.dismiss")}
-        title={t("onboarding.startHere.banner.dismiss")}
-        className="shrink-0 rounded px-1.5 py-1 text-xs text-[#a6adc8] transition-colors hover:text-[#cdd6f4]"
-      >
-        ✕
-      </button>
-    </div>
+        <span className="text-sm">⚠️</span>
+        <span className="min-w-0 flex-1 truncate text-xs text-[#f9e2af]">
+          {/* Title follows the step the banner is actually about — a fixed
+              "CLI 인증이 필요합니다" contradicted the body for every step but
+              auth (barrier F2). */}
+          <span data-testid="cli-setup-banner-title">
+            {t(`onboarding.startHere.banner.title.${needStep}` as MessageKey)}
+          </span>
+          <span className="ml-2 text-[#a6adc8]">
+            {t(`onboarding.startHere.why.${needStep}` as MessageKey)}
+          </span>
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab("startHere");
+            setNeedStep(null);
+          }}
+          className="shrink-0 rounded-md bg-[#f9e2af] px-2.5 py-1 text-xs font-semibold text-[#1e1e2e] transition-colors hover:bg-[#f5e0a3]"
+        >
+          {t("onboarding.startHere.banner.cta")}
+        </button>
+        <button
+          type="button"
+          data-testid="cli-setup-banner-dismiss"
+          onClick={dismiss}
+          aria-label={t("onboarding.startHere.banner.dismiss")}
+          title={t("onboarding.startHere.banner.dismiss")}
+          className="shrink-0 rounded px-1.5 py-1 text-xs text-[#a6adc8] transition-colors hover:text-[#cdd6f4]"
+        >
+          ✕
+        </button>
+      </div>
+    </>
   );
 }

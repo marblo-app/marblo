@@ -72,6 +72,35 @@ export const beginner = {
   "beginner.oneClick.close": "닫기",
   "beginner.oneClick.footerHint": "언제든 닫고 직접 진행해도 됩니다.",
 
+  // ── ①-b 인증은 됐는데 실행이 안 될 때 (구독/크레딧 없음) ────────────────
+  // ★문구가 두 갈래인 것이 설계다: 벤더가 "구독/크레딧이 없다" 를 사실상 문장으로
+  // 말했을 때만 구독을 단정하고, 그 밖의 실패는 전부 중립으로 말한다.
+  "beginner.funding.unfunded.title": "구독이 필요해요",
+  "beginner.funding.unfunded.body":
+    "로그인은 잘 됐어요. 다만 그 계정에 사용할 수 있는 구독이나 크레딧이 없어서 {cli} 가 한 번도 실행되지 못했습니다. 아래에서 요금제를 켜면 바로 이어서 진행할 수 있어요.",
+  "beginner.funding.blocked.title": "인증은 됐지만 실행이 안 돼요",
+  "beginner.funding.blocked.rateLimit":
+    "로그인은 잘 됐고 요금제도 있는 것 같아요. 다만 지금은 {cli} 의 사용 한도에 걸려 있어서 실행되지 않습니다. 한도가 풀린 뒤 다시 확인해 주세요.",
+  "beginner.funding.blocked.auth":
+    "로그인은 됐다고 나오는데, {cli} 를 실행해 보니 다시 로그인하라고 합니다. 로그인을 한 번 더 진행한 뒤 다시 확인해 주세요.",
+  "beginner.funding.blocked.unknown":
+    "로그인은 잘 됐는데 {cli} 를 한 번 실행해 보니 실패했어요. 원인은 아래 원문을 참고해 주세요. 구독·크레딧 문제일 수도 있고, 일시적인 문제일 수도 있습니다.",
+  "beginner.funding.step1": "아래 버튼으로 {cli} 요금제 페이지를 엽니다.",
+  "beginner.funding.step2":
+    "로그인한 것과 **같은 계정**으로 요금제를 결제합니다.",
+  "beginner.funding.step3":
+    "돌아와서 '다시 확인' 을 누르면 바로 이어서 진행돼요.",
+  "beginner.funding.openSubscription": "{cli} 요금제 보기",
+  "beginner.funding.apiPlan.title": "API 요금제로 간단 결제 (준비 중)",
+  "beginner.funding.apiPlan.body":
+    "구독 대신 쓴 만큼만 내는 방식도 준비하고 있어요. 준비되면 이 자리에서 바로 결제할 수 있게 됩니다.",
+  "beginner.funding.detail": "실행했을 때 나온 메시지 보기",
+  "beginner.funding.recheck": "이미 구독했어요 · 다시 확인",
+  "beginner.funding.rechecking": "확인하는 중…",
+  "beginner.funding.later": "나중에 할게요",
+  "beginner.funding.close": "닫기",
+  "beginner.funding.footerHint": "닫아도 앱은 그대로 쓸 수 있어요.",
+
   // ── ② 폴더 ──────────────────────────────────────────────────────────────
   "beginner.folder.title": "작업할 폴더를 열어 주세요",
   "beginner.folder.body":

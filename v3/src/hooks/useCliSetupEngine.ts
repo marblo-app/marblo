@@ -266,6 +266,36 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
     if (ready && !prevReadyRef.current) {
       telemetry.cliSetupStep("auth", "success");
       window.dispatchEvent(new CustomEvent("marblo:cli-auth-ready"));
+      // ★인증 다음 칸: 로그인이 성립했다고 그 계정이 **돌아간다**는 뜻은 아니다.
+      // 구독/크레딧이 없으면 CLI 는 한 턴도 못 도는데 여기까지의 모든 신호는
+      // 초록색이라, 사용자는 "연결됐어요" 를 보고 조용히 막힌다. 짧은 헤드리스
+      // 턴 하나로 실제 실행 가능 여부를 재 본다.
+      //
+      // ★`setupInitiated` 게이트가 필수다. 이 엣지는 **이미 인증된 사용자의 콜드
+      // 스타트에서도** 뜬다(bRABKQX7/nB4eenxP 와 같은 엣지). 게이트가 없으면 매
+      // 재시작마다 모든 사용자에게 모델 턴이 한 번씩 청구된다. 이 세션에서 우리
+      // 원클릭 버튼을 눌러 방금 인증을 끝낸 사람에게만 돈다 — 그게 이 안내가
+      // 실제로 필요한 순간이기도 하다. 그 밖의 경우는 가이드 모달의 "다시 확인"
+      // 이 수동 경로로 남는다.
+      if (useCliSetupStore.getState().setupInitiated) {
+        void useCliSetupStore
+          .getState()
+          .runFundingProbe()
+          .then((outcome) => {
+            // 인증 성공(위 `auth/success`)과 별개로, 그 계정이 실제로 못 돈
+            // 경우를 남긴다 — 퍼널에서 "인증까지 왔는데 왜 아무도 안 넘어가나"
+            // 를 설명하는 것이 이 사유다.
+            if (!outcome || outcome.verdict === "ok") return;
+            if (outcome.verdict === "inconclusive") return;
+            telemetry.cliSetupStep(
+              "auth",
+              "fail",
+              outcome.verdict === "unfunded"
+                ? "unfunded"
+                : `blocked:${outcome.blockedReason ?? "unknown"}`,
+            );
+          });
+      }
       if (hasProjectRef.current) {
         // Mid-session blocked re-open: the orchestrator resumes on its own.
         hRef.current.close?.();

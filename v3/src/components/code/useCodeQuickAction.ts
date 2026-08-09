@@ -3,6 +3,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // 그때그때 읽으므로, 훅의 t 를 클로저에 가둘 때 생기는 로케일 어긋남이 없다.
 import { t, useTranslation } from "../../lib/i18n";
 import { useCliSetupStore, ROWS } from "../../stores/cliSetupStore";
+import {
+  runHeadlessOnce,
+  type HeadlessRunHandle,
+} from "../../services/headlessRun";
 import { useEditorStore } from "../../stores/editorStore";
 import { useProjectStore } from "../../stores/projectStore";
 import {
@@ -67,81 +71,14 @@ export interface QuickActionRequest {
   endLine: number;
 }
 
-interface RunHandle {
-  ptyId: string;
-  cancelled: boolean;
-}
+/**
+ * ★PTY 1회 실행은 `services/headlessRun` 이 든다. 여기 있던 구현을 그대로 뽑은
+ * 것이다 — 온보딩의 구독/크레딧 프로브가 같은 실행·정리 순서를 필요로 해서,
+ * 두 벌을 두는 대신 한 벌을 공유한다(한쪽만 fd 를 흘리는 일이 없도록).
+ */
+type RunHandle = HeadlessRunHandle;
 
 let runSeq = 0;
-
-/**
- * PTY 1회 실행 → 원시 출력. 종료·타임아웃·취소 중 무엇으로 끝나든 리스너를
- * 걷고 세션을 정리한다(fd 를 남기지 않는다).
- */
-async function runHeadlessOnce(opts: {
-  command: string;
-  args: string[];
-  cwd: string;
-  handle: RunHandle;
-}): Promise<{ raw: string; exitCode: number | null }> {
-  const { command, args, cwd, handle } = opts;
-  const { pty } = window.electronAPI;
-  const id = handle.ptyId;
-
-  await pty.create({ id, name: `Quick action ${id}`, command, args, cwd });
-
-  let raw = "";
-  let exitCode: number | null = null;
-  let settle: (() => void) | null = null;
-  const finished = new Promise<void>((resolve) => {
-    settle = resolve;
-  });
-  const finish = () => {
-    settle?.();
-    settle = null;
-  };
-
-  pty.onData(id, (chunk) => {
-    raw += chunk;
-  });
-  pty.onExit(id, (code) => {
-    exitCode = code;
-    finish();
-  });
-
-  // main 은 `pty:replay` 가 불릴 때까지 초기 출력을 버퍼에 잡아 둔다. 이걸
-  // 안 부르면 CLI 가 뱉은 첫 바이트들이 메인 프로세스에 갇힌 채 영영 안 온다.
-  const buffered = await pty.replay(id);
-  raw = buffered.join("") + raw;
-
-  const timer = window.setTimeout(finish, QUICK_ACTION_TIMEOUT_MS);
-  // 안전망: 리스너를 달기 전에 프로세스가 끝나 exit 이벤트를 놓쳤더라도
-  // 여기서 죽은 세션을 알아채고 빠져나온다(무한 대기 방지).
-  const liveness = window.setInterval(() => {
-    if (handle.cancelled) return finish();
-    void pty
-      .exists(id)
-      .then((alive) => {
-        if (!alive) finish();
-      })
-      .catch(() => finish());
-  }, 2000);
-
-  try {
-    await finished;
-  } finally {
-    window.clearTimeout(timer);
-    window.clearInterval(liveness);
-    try {
-      await pty.kill(id);
-    } catch {
-      // 이미 죽은 세션 — kill 실패는 정상 경로다.
-    }
-    pty.removeListeners(id);
-  }
-
-  return { raw, exitCode };
-}
 
 export interface CodeQuickAction {
   state: QuickActionState | null;
@@ -272,6 +209,8 @@ export function useCodeQuickAction(): CodeQuickAction {
         command,
         args: headlessArgs(cli, prompt),
         cwd,
+        timeoutMs: QUICK_ACTION_TIMEOUT_MS,
+        name: `Quick action ${handle.ptyId}`,
         handle,
       });
       raw = result.raw;
