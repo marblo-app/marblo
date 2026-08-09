@@ -16,6 +16,10 @@ export default tseslint.config(
       "functions/lib/**",
       "dist/**",
       "dist-electron/**",
+      // credit-proxy is a separate Cloud Run package with its own build output
+      // (gitignored, but present locally after `npm test` / `npm run build`).
+      "credit-proxy/dist/**",
+      "credit-proxy/.test-out/**",
       "**/*.d.ts",
     ],
   },
@@ -91,5 +95,5 @@ export default tseslint.config(
         },
       ],
     },
-  }
+  },
 );

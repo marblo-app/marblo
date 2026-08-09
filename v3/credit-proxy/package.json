@@ -1,0 +1,24 @@
+{
+  "name": "marblo-credit-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "L2 metering proxy PoC — byte-exact Anthropic passthrough with prompt-cache preservation measurement (ticket zkWlKlGSpW9V1GfpaFzx, design v3/docs/onramp-l2-credit-tier-design-2026-08-09.md)",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "start": "node dist/index.js",
+    "test": "tsc -p tsconfig.test.json && node --test .test-out/test/*.test.js",
+    "probe:mock": "npm run build && node dist/probe/runMockProbe.js",
+    "probe:cache": "npm run build && node dist/probe/runCacheProbe.js",
+    "probe:toolloop": "npm run build && node dist/probe/runToolLoop.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "typescript": "^5.7.3"
+  }
+}
