@@ -282,6 +282,18 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
           .getState()
           .runFundingProbe()
           .then((outcome) => {
+            // ★스톨 계측(티켓 9dXgBdkGn1LyJokShh1g): **판정 전체**를 남긴다 —
+            // `ok` 까지 포함해야 "인증까지 온 유저 중 몇 %가 못 도는가" 의 분모가
+            // 생긴다. 아래 cliSetupStep(fail) 은 퍼널용이라 실패만 남기고,
+            // 그것만으로는 비율을 못 구한다(#883/#885 가 막힌 지점).
+            if (outcome) {
+              telemetry.fundingProbe(
+                outcome.verdict,
+                outcome.model,
+                "auto",
+                outcome.blockedReason,
+              );
+            }
             // 인증 성공(위 `auth/success`)과 별개로, 그 계정이 실제로 못 돈
             // 경우를 남긴다 — 퍼널에서 "인증까지 왔는데 왜 아무도 안 넘어가나"
             // 를 설명하는 것이 이 사유다.

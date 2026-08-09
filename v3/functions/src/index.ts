@@ -9466,6 +9466,78 @@ export const getAdminKpiCockpit = functions
       )
     `;
 
+    // ── (10) ★온보딩 스톨 — 구독/크레딧/인증 공백 (티켓 9dXgBdkGn1LyJokShh1g) ──
+    //
+    // 온램프 스파이크 #883/#885 의 공통 결론이 "무료→유료 투자 전에 **최초에
+    // 멈추는 유저 수**부터 세야 하는데 그 이벤트가 BQ 에 0건" 이었다. 이제 5개
+    // 이벤트가 들어오므로 여기서 규모를 뽑는다. 판정 로직은 전부 순수 빌더
+    // (adminAnalytics.buildOnboardingStallSummary)에 있다.
+    //
+    // ★needs_auth 는 철회될 수 있어(readiness 도달 = 로그인화면 오탐) agentId
+    // 단위로 철회분을 따로 센다 — 오탐을 스톨로 세면 문제 크기가 부풀려진다.
+    // ★funding 은 정상(ok) 판정도 세야 "인증까지 온 설치 중 몇 %가 못 도는가" 의
+    // 분모가 생긴다.
+    const stallVerdict = "JSON_VALUE(metadata, '$.verdict')";
+    const stallQuery = `
+      SELECT
+        COUNT(DISTINCT IF(event = 'onboarding:spawn_blocked', userId, NULL))
+          AS spawn_blocked_clients,
+        COUNTIF(event = 'onboarding:spawn_blocked') AS spawn_blocked_events,
+        COUNT(DISTINCT IF(event = 'onboarding:agent_needs_auth', userId, NULL))
+          AS needs_auth_clients,
+        COUNT(DISTINCT IF(
+          event = 'onboarding:agent_needs_auth', agentId, NULL))
+          AS needs_auth_agents,
+        COUNT(DISTINCT IF(
+          event = 'onboarding:agent_auth_resolved', agentId, NULL))
+          AS needs_auth_resolved_agents,
+        COUNT(DISTINCT IF(
+          event = 'onboarding:funding_probe' AND ${stallVerdict} = 'ok',
+          userId, NULL)) AS funding_ok_clients,
+        COUNT(DISTINCT IF(
+          event = 'onboarding:funding_probe' AND ${stallVerdict} = 'unfunded',
+          userId, NULL)) AS funding_unfunded_clients,
+        COUNT(DISTINCT IF(
+          event = 'onboarding:funding_probe' AND ${stallVerdict} = 'blocked',
+          userId, NULL)) AS funding_blocked_clients,
+        COUNT(DISTINCT IF(
+          event = 'onboarding:funding_probe'
+            AND ${stallVerdict} = 'inconclusive',
+          userId, NULL)) AS funding_inconclusive_clients,
+        COUNT(DISTINCT IF(
+          event = 'onboarding:funding_guide_shown', userId, NULL))
+          AS guide_shown_clients,
+        COUNTIF(event = 'onboarding:funding_guide_shown')
+          AS guide_shown_events,
+        -- 어느 신호든 하나라도 맞은 고유 설치. funding_probe 는 실제로 막힌
+        -- 판정(unfunded/blocked)만 스톨로 센다 — ok/inconclusive 는 아니다.
+        COUNT(DISTINCT IF(
+          event IN ('onboarding:spawn_blocked', 'onboarding:agent_needs_auth',
+                    'onboarding:funding_guide_shown')
+            OR (event = 'onboarding:funding_probe'
+                AND ${stallVerdict} IN ('unfunded', 'blocked')),
+          userId, NULL)) AS stalled_clients
+      FROM ${eventsTable}
+      WHERE ${eventTs} >= ${since}
+        AND event IN ('onboarding:spawn_blocked',
+                      'onboarding:agent_needs_auth',
+                      'onboarding:agent_auth_resolved',
+                      'onboarding:funding_probe',
+                      'onboarding:funding_guide_shown')${ex.clause}
+    `;
+    // 차단 사유 분해(errorCategory: not-installed / not-authenticated /
+    // vendor-not-configured). "어디를 고쳐야 하나" 는 이 분포가 답한다.
+    const stallReasonQuery = `
+      SELECT
+        COALESCE(NULLIF(errorCategory, ''), '(none)') AS key,
+        COUNT(*) AS count
+      FROM ${eventsTable}
+      WHERE event = 'onboarding:spawn_blocked'
+        AND ${eventTs} >= ${since}${ex.clause}
+      GROUP BY key
+      ORDER BY count DESC
+    `;
+
     // 대부분 쿼리는 @days(윈도우)+제외절 파라미터를 참조한다. 단 weeklyQuery 는
     // 고정 7일 창(@days 미참조)이라, 미참조 파라미터를 넘기면 BQ 가 거부하므로
     // (위 getAdminModelSummary 의 uid/client 분리와 동일 사유) 제외절 파라미터만
@@ -9482,6 +9554,8 @@ export const getAdminKpiCockpit = functions
       weeklyRows,
       secondSessionRows,
       avgDauRows,
+      stallRows,
+      stallReasonRows,
     ] = await runAdminAnalyticsQueries([
       { name: "kpi.headline", query: headlineQuery, params: daysParams },
       { name: "kpi.retained7d", query: retainedQuery, params: daysParams },
@@ -9501,6 +9575,12 @@ export const getAdminKpiCockpit = functions
         params: daysParams,
       },
       { name: "kpi.avgDau", query: avgDauQuery, params: daysParams },
+      { name: "kpi.stall", query: stallQuery, params: daysParams },
+      {
+        name: "kpi.stallReason",
+        query: stallReasonQuery,
+        params: daysParams,
+      },
     ]);
 
     const first = (rows: BigQueryRows): Record<string, unknown> =>
@@ -9512,6 +9592,7 @@ export const getAdminKpiCockpit = functions
     const weeklyRow = first(weeklyRows);
     const secondSessionRow = first(secondSessionRows);
     const avgDauRow = first(avgDauRows);
+    const stallRow = first(stallRows);
 
     // CLI 셋업 단계 요약 → 게이지의 CLI 인증/첫프로젝트 분자·분모 파생.
     const cliRows = (cliSetupRows as Array<Record<string, unknown>>).map(
@@ -9574,6 +9655,25 @@ export const getAdminKpiCockpit = functions
         crashed: activityRow.n_crashed,
         restarted: activityRow.n_restarted,
         completed: activityRow.n_task_completed,
+      },
+      stall: {
+        spawnBlockedClients: stallRow.spawn_blocked_clients,
+        spawnBlockedEvents: stallRow.spawn_blocked_events,
+        spawnBlockedReasonRows: (
+          stallReasonRows as Array<Record<string, unknown>>
+        ).map((r) => ({ key: r.key, count: r.count })),
+        needsAuthClients: stallRow.needs_auth_clients,
+        needsAuthAgents: stallRow.needs_auth_agents,
+        needsAuthResolvedAgents: stallRow.needs_auth_resolved_agents,
+        fundingOkClients: stallRow.funding_ok_clients,
+        fundingUnfundedClients: stallRow.funding_unfunded_clients,
+        fundingBlockedClients: stallRow.funding_blocked_clients,
+        fundingInconclusiveClients: stallRow.funding_inconclusive_clients,
+        guideShownClients: stallRow.guide_shown_clients,
+        guideShownEvents: stallRow.guide_shown_events,
+        stalledClients: stallRow.stalled_clients,
+        // 스톨 비율의 분모는 게이지와 같은 로그인 성공 기반(같은 창·같은 제외절).
+        signupBase: headRow.d_signup_base,
       },
     });
 

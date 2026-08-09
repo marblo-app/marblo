@@ -805,6 +805,16 @@ export class AgentManager {
             model: params.model,
             reason,
           });
+          // ★온보딩 스톨 계측(티켓 9dXgBdkGn1LyJokShh1g): 사전 게이트를 통과했는데도
+          // CLI 가 로그인 화면에서 멈춘 순간. 종전엔 이 순간이 콘솔과 렌더러 팝업에만
+          // 남아 BigQuery 에 0건이었고, 그래서 "몇 명이 여기서 멈추나" 를 셀 수 없었다.
+          // 짝 이벤트(agent_auth_resolved)로 오탐 철회분을 빼고 세야 한다.
+          mainTelemetry.agentNeedsAuth(
+            this.getMainWindow?.() ?? null,
+            params.id,
+            params.model,
+            reason,
+          );
         },
         onResolved: () => {
           authBlocked = false;
@@ -819,6 +829,13 @@ export class AgentManager {
             agentId: params.id,
             model: params.model,
           });
+          // 위 판정의 철회 = 오탐이었다. 이 행이 없으면 needsAuth 오탐 saga 가
+          // 그대로 스톨 수치로 잡혀 문제 크기를 부풀린다.
+          mainTelemetry.agentAuthResolved(
+            this.getMainWindow?.() ?? null,
+            params.id,
+            params.model,
+          );
         },
       });
       if (cliAuthModel) {

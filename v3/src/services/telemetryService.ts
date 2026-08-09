@@ -88,7 +88,28 @@ export type TelemetryEvent =
   // ★started 는 '띄운 횟수' 지 '완주' 가 아니다 — skipped 와 합쳐야 분모가 된다.
   | "onboarding:coachmark_started"
   | "onboarding:coachmark_completed"
-  | "onboarding:coachmark_skipped";
+  | "onboarding:coachmark_skipped"
+  // ── 온보딩 스톨 계측 (ticket 9dXgBdkGn1LyJokShh1g) ───────────────────────
+  // 온램프 스파이크 #883/#885 의 공통 결론: 무료→유료 티어에 투자하기 전에
+  // "구독/크레딧/인증이 없어 **최초에 멈추는** 유저" 가 몇 명인지부터 세야 하는데,
+  // 그 순간의 이벤트가 BigQuery 에 **0건**이라 문제 크기를 알 수 없었다(grep 0건).
+  // 아래 5개가 그 공백을 채운다 — 스키마/쿼리는
+  // docs/onboarding-stall-telemetry.md.
+  //
+  // 전부 기존 파이프라인 그대로다: 이 파일의 logTelemetry choke point(비식별
+  // scrub + firstParty 게이트) → 기존 logTelemetryBatch → BigQuery `events`.
+  // 새 테이블도, 서버 스키마 변경도 없다(서버는 event 문자열을 화이트리스트 없이
+  // 적재하고 model/errorCategory/metadata 컬럼은 이미 존재한다).
+  //
+  // main 프로세스 발화(App.tsx IPC 브리지 경유):
+  | "onboarding:spawn_blocked"
+  | "onboarding:agent_needs_auth"
+  // ★needs_auth 는 철회될 수 있다(readiness 도달 = 오탐). 이 짝 이벤트를 빼지
+  // 않고 세면 인증 팝업 오탐이 스톨 수치를 부풀린다.
+  | "onboarding:agent_auth_resolved"
+  // 렌더러 발화(#884 의 funding 감지 지점):
+  | "onboarding:funding_probe"
+  | "onboarding:funding_guide_shown";
 
 interface TelemetryPayload {
   event: TelemetryEvent;
@@ -788,6 +809,71 @@ export const telemetry = {
       event: "onboarding:coachmark_skipped",
       success: true,
       metadata: { tourId, stepIndex, stepCount, permanent },
+    });
+  },
+
+  // ── 온보딩 스톨 계측 (ticket 9dXgBdkGn1LyJokShh1g) ─────────────────────
+  //
+  // #884 가 만든 funding 프로브("로그인은 됐는데 그 계정이 한 턴이라도 도는가")의
+  // 판정을 그대로 계측한다. 스폰차단 쪽 두 이벤트는 main 프로세스가 IPC 브리지로
+  // 보내므로 여기 헬퍼가 없다(electron/telemetry.ts).
+
+  /**
+   * ★프로브 판정 1건. **정상(`ok`)도 반드시 싣는다** — 분모가 없으면 "인증까지 온
+   * 유저 중 몇 %가 못 도는가" 라는 이 계측의 유일한 질문에 답할 수 없다.
+   *
+   * `trigger` = auto(인증 성립 직후 자동 1회) | recheck(가이드 모달의 "다시 확인").
+   * recheck 는 같은 설치에서 여러 번 나올 수 있으므로 유저수 집계는 auto 로 하거나
+   * clientId 단위로 접어야 한다(문서 §쿼리).
+   *
+   * ★프로브 원문(`outcome.detail` — 벤더 CLI 의 출력 꼬리)은 **절대 싣지 않는다**.
+   * 자유 텍스트라 무엇이 섞여 있을지 알 수 없고, 판정에 필요한 정보는 verdict 와
+   * blockedReason 코드가 전부다.
+   */
+  fundingProbe(
+    verdict: "ok" | "unfunded" | "blocked" | "inconclusive",
+    model: string,
+    trigger: "auto" | "recheck",
+    blockedReason?: string,
+  ) {
+    logTelemetry({
+      event: "onboarding:funding_probe",
+      model,
+      success: verdict === "ok",
+      ...(verdict === "unfunded" || verdict === "blocked"
+        ? { outcome: "blocked" as const }
+        : {}),
+      // 사유 코드만(원문 금지). blocked 는 하위 사유까지 붙여 rate_limit(=요금제
+      // 있음) 과 진짜 스톨을 구분할 수 있게 한다.
+      errorCategory:
+        verdict === "blocked"
+          ? `blocked:${blockedReason ?? "unknown"}`
+          : verdict,
+      metadata: {
+        verdict,
+        trigger,
+        ...(blockedReason ? { blockedReason } : {}),
+      },
+    });
+  },
+
+  /**
+   * 스톨 가이드 모달이 **실제로 화면에 떴다** = 사용자가 눈으로 막힌 순간.
+   * 판정(fundingProbe)과 따로 세는 이유는 둘이 갈리기 때문이다 — 판정이
+   * unfunded 라도 사용자가 이미 닫았거나(dismissed) 셸이 안 떠 있으면 모달은
+   * 안 뜬다. 온램프가 고쳐야 할 숫자는 "본 사람" 쪽이다.
+   */
+  fundingGuideShown(
+    state: "authedButUnfunded" | "authedButBlocked",
+    model?: string,
+  ) {
+    logTelemetry({
+      event: "onboarding:funding_guide_shown",
+      model,
+      success: false,
+      outcome: "blocked",
+      errorCategory: state,
+      metadata: { state },
     });
   },
 

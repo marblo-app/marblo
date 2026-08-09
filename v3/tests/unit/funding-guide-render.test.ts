@@ -22,8 +22,10 @@ vi.mock("../../src/services/fundingProbeService", () => ({ probeFunding }));
 
 // 텔레메트리는 모듈 최상단에서 firebase auth 를 초기화한다 — jsdom 유닛에서는
 // 붙일 것도, 볼 것도 없다.
+const fundingGuideShown = vi.hoisted(() => vi.fn());
+const fundingProbe = vi.hoisted(() => vi.fn());
 vi.mock("../../src/services/telemetryService", () => ({
-  default: { cliSetupStep: vi.fn() },
+  default: { cliSetupStep: vi.fn(), fundingGuideShown, fundingProbe },
 }));
 
 // 뷰모델(useOnboardingSetup)이 끌고 오는 설치·로그인 액션은 오케 라우팅을 거쳐
@@ -90,6 +92,7 @@ describe("FundingGuideHost — 정상 유저를 막지 않는다", () => {
 describe("FundingGuideHost — 구독 없음", () => {
   beforeEach(() => {
     probeFunding.mockReset();
+    fundingGuideShown.mockClear();
     probeFunding.mockResolvedValue(outcome({ verdict: "ok" }));
     seed(outcome({ verdict: "unfunded", detail: "credit balance is too low" }));
   });
@@ -125,6 +128,26 @@ describe("FundingGuideHost — 구독 없음", () => {
     render(createElement(FundingGuideHost));
     fireEvent.click(screen.getByTestId("beginner-funding-recheck"));
     expect(probeFunding).toHaveBeenCalledWith("claude");
+  });
+
+  // ── 온보딩 스톨 계측 (티켓 9dXgBdkGn1LyJokShh1g) ───────────────────────
+  // 이 모달이 떴다 = 사용자가 **눈으로** 막힌 순간이고, 온램프 투자를 판단할
+  // 유일한 실측치다(스파이크 #883/#885 는 이 이벤트가 0건이라 멈췄다).
+  it("★모달이 뜨면 스톨 이벤트를 남긴다 — 판정 종류마다 한 번만", () => {
+    const { rerender } = render(createElement(FundingGuideHost));
+    rerender(createElement(FundingGuideHost));
+
+    expect(fundingGuideShown).toHaveBeenCalledTimes(1);
+    expect(fundingGuideShown).toHaveBeenCalledWith(
+      "authedButUnfunded",
+      "claude",
+    );
+  });
+
+  it("★모달이 안 뜨는 경우(닫음)에는 스톨 이벤트도 없다", () => {
+    useCliSetupStore.setState({ fundingGuideDismissed: true });
+    render(createElement(FundingGuideHost));
+    expect(fundingGuideShown).not.toHaveBeenCalled();
   });
 
   it("닫으면 사라지고 이 세션에 다시 뜨지 않는다", () => {

@@ -813,6 +813,120 @@ export function buildSpawnHealth(input: SpawnHealthInput): SpawnHealthSummary {
   };
 }
 
+// ── 온보딩 스톨(구독/크레딧/인증 공백) ───────────────────────────────────────
+// 티켓 9dXgBdkGn1LyJokShh1g. 온램프 스파이크 #883/#885 의 공통 결론이 "무료→유료
+// 투자 전에 **최초에 멈추는 유저 수**부터 세야 하는데 그 이벤트가 0건" 이었다.
+// 이제 5개 이벤트가 들어오므로, 여기서 "몇 명이 · 어디서 · 왜" 로 접는다.
+//
+// ★두 가지가 이 요약의 정직성을 지킨다:
+//  1) `needs_auth` 는 **철회**될 수 있다(readiness 도달 = 로그인화면 오탐). 그래서
+//     agent 단위로 철회분을 뺀 `unresolvedAgents` 를 쓴다 — 오탐을 스톨로 세면
+//     인증 팝업 오탐 saga 가 그대로 문제 크기로 둔갑한다.
+//  2) 프로브 판정은 **정상(ok)도 분모로** 받는다. unfunded 건수만으로는 "인증까지
+//     온 유저 중 몇 %가 못 도는가" 에 답할 수 없고, 그 비율이 온램프 투자 판단의
+//     실제 입력값이다.
+export type OnboardingStallInput = {
+  /** 사전 스폰 게이트 차단(onboarding:spawn_blocked). */
+  spawnBlockedClients: unknown;
+  spawnBlockedEvents: unknown;
+  /** 차단 사유 분포(errorCategory: not-installed / not-authenticated / vendor-not-configured). */
+  spawnBlockedReasonRows: ReadonlyArray<{ key: unknown; count: unknown }>;
+  /** 스폰 후 로그인화면 확정(onboarding:agent_needs_auth). */
+  needsAuthClients: unknown;
+  needsAuthAgents: unknown;
+  /** 그중 철회된 agent 수(onboarding:agent_auth_resolved 로 짝지어진 것). */
+  needsAuthResolvedAgents: unknown;
+  /** funding 프로브 판정별 설치 수(onboarding:funding_probe). */
+  fundingOkClients: unknown;
+  fundingUnfundedClients: unknown;
+  fundingBlockedClients: unknown;
+  fundingInconclusiveClients: unknown;
+  /** 가이드 모달 노출(onboarding:funding_guide_shown) = 눈으로 막힌 사람. */
+  guideShownClients: unknown;
+  guideShownEvents: unknown;
+  /** ★어느 스톨 신호든 하나라도 맞은 **고유 설치 수**(SQL 에서 DISTINCT 합집합). */
+  stalledClients: unknown;
+  /** 같은 기간의 로그인 성공 설치 수 — 스톨 비율의 분모. */
+  signupBase: unknown;
+};
+
+export type OnboardingStallSummary = {
+  stalledClients: number;
+  /** stalledClients / signupBase. 분모 0 → null("데이터 대기", 0% 로 오도 금지). */
+  stalledRate: number | null;
+  spawnBlocked: {
+    clients: number;
+    events: number;
+    byReason: Array<{ key: string; count: number }>;
+  };
+  needsAuth: {
+    clients: number;
+    agents: number;
+    resolvedAgents: number;
+    /** 철회분을 뺀 값(음수 방지). 이게 진짜 "로그인화면에서 죽은" 수다. */
+    unresolvedAgents: number;
+    /** 철회 비율 = 오탐률. 높으면 백스톱 튜닝이 먼저다(스톨 대책이 아니라). */
+    falsePositiveRate: number | null;
+  };
+  funding: {
+    okClients: number;
+    unfundedClients: number;
+    blockedClients: number;
+    inconclusiveClients: number;
+    /** 판정이 난 설치(ok+unfunded+blocked). inconclusive 는 아무 주장도 아니라 제외. */
+    decidedClients: number;
+    /** ★핵심 지표: 인증까지 왔는데 구독/크레딧이 없어 못 도는 비율. */
+    unfundedRate: number | null;
+  };
+  guideShown: { clients: number; events: number };
+  note: string;
+};
+
+export function buildOnboardingStallSummary(
+  input: OnboardingStallInput,
+): OnboardingStallSummary {
+  const stalledClients = coerceNumber(input.stalledClients);
+  const needsAuthAgents = coerceNumber(input.needsAuthAgents);
+  const resolvedAgents = coerceNumber(input.needsAuthResolvedAgents);
+  const okClients = coerceNumber(input.fundingOkClients);
+  const unfundedClients = coerceNumber(input.fundingUnfundedClients);
+  const blockedClients = coerceNumber(input.fundingBlockedClients);
+  const decidedClients = okClients + unfundedClients + blockedClients;
+  return {
+    stalledClients,
+    stalledRate: safeRate(stalledClients, input.signupBase),
+    spawnBlocked: {
+      clients: coerceNumber(input.spawnBlockedClients),
+      events: coerceNumber(input.spawnBlockedEvents),
+      byReason: foldKeyCounts(input.spawnBlockedReasonRows),
+    },
+    needsAuth: {
+      clients: coerceNumber(input.needsAuthClients),
+      agents: needsAuthAgents,
+      resolvedAgents,
+      unresolvedAgents: Math.max(0, needsAuthAgents - resolvedAgents),
+      falsePositiveRate: safeRate(resolvedAgents, needsAuthAgents),
+    },
+    funding: {
+      okClients,
+      unfundedClients,
+      blockedClients,
+      inconclusiveClients: coerceNumber(input.fundingInconclusiveClients),
+      decidedClients,
+      unfundedRate: safeRate(unfundedClients, decidedClients),
+    },
+    guideShown: {
+      clients: coerceNumber(input.guideShownClients),
+      events: coerceNumber(input.guideShownEvents),
+    },
+    note:
+      "온보딩 스톨 = '구독/크레딧/인증이 없어 최초에 멈춘' 설치. needsAuth 는 철회(오탐)를 " +
+      "뺀 unresolvedAgents 를 봐야 하고, funding 비율의 분모는 판정이 난 설치(ok 포함)다. " +
+      "익명 install id(clientId) 기준이라 사람 수가 아니라 설치 수이며, 계정 조인은 하지 " +
+      "않는다(비식별 방침). 3.0.24+ 렌더러/메인 빌드 실사용 전엔 전부 0 — 구조가 먼저다.",
+  };
+}
+
 // ── 코크핏 전체 조립 ─────────────────────────────────────────────────────────
 // index.ts 콜러블이 BQ 결과를 아래 입력 shape 로 넘기면 최종 응답 본문을 만든다.
 export type KpiCockpitInput = {
@@ -824,6 +938,8 @@ export type KpiCockpitInput = {
   consent: ConsentInput;
   reuse: ReuseInput;
   spawn: SpawnHealthInput;
+  /** 온보딩 스톨(티켓 9dXgBdkGn1LyJokShh1g). 구버전 호출부 호환을 위해 선택. */
+  stall?: OnboardingStallInput;
 };
 export type KpiCockpitResult = {
   betaExitGauges: BetaExitGauge[];
@@ -835,6 +951,8 @@ export type KpiCockpitResult = {
   };
   reuse: ReuseSummary;
   spawnHealth: SpawnHealthSummary;
+  /** 온보딩 스톨 요약. 입력이 없으면(구버전 호출부) null. */
+  onboardingStall: OnboardingStallSummary | null;
   note: string;
 };
 
@@ -853,6 +971,9 @@ export function buildKpiCockpit(input: KpiCockpitInput): KpiCockpitResult {
     },
     reuse: buildReuseSummary(input.reuse),
     spawnHealth: buildSpawnHealth(input.spawn),
+    onboardingStall: input.stall
+      ? buildOnboardingStallSummary(input.stall)
+      : null,
     note:
       "베타종료 게이지는 활성화 전략 메모의 지표기반 종료 기준(CLI인증80·첫프로젝트60· " +
       "첫티켓50·7일잔존30·NPS40+)이다. 분모가 0 인 게이지는 current=null('데이터 대기')로 " +

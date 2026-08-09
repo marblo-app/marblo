@@ -20,6 +20,7 @@ import {
 import { useFirstRunSampleStore } from "../stores/firstRunSampleStore";
 import { useOnboardingPreviewStore } from "../stores/onboardingPreviewStore";
 import { launchLogin, oneClickSignIn } from "../services/cliSetupActions";
+import telemetry from "../services/telemetryService";
 import type { FirstRunSampleStatus } from "../stores/firstRunSampleStore";
 
 /**
@@ -149,7 +150,19 @@ export function useOnboardingSetup(): OnboardingSetupView {
         login: (model, action) => launchLogin(model, action),
         recheck: () => void probeAll(),
         funding: { checking: fundingChecking, outcome: fundingOutcome },
-        recheckFunding: () => void runFundingProbe(),
+        // ★스톨 계측(티켓 9dXgBdkGn1LyJokShh1g): "이미 구독했어요 → 다시 확인"
+        // 의 판정도 남긴다. 이 축이 없으면 "구독을 붙이고 실제로 풀린 사람"
+        // (unfunded → ok 전이)을 셀 수 없고, 그게 온램프 투자 효과의 결과지표다.
+        recheckFunding: () =>
+          void runFundingProbe().then((outcome) => {
+            if (!outcome) return;
+            telemetry.fundingProbe(
+              outcome.verdict,
+              outcome.model,
+              "recheck",
+              outcome.blockedReason,
+            );
+          }),
       };
     }
 

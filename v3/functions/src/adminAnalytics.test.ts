@@ -29,6 +29,7 @@ import {
   buildRetentionCohorts,
   buildActiveUserMetrics,
   buildActivationGateFunnel,
+  buildOnboardingStallSummary,
 } from "./adminAnalytics";
 
 // ── parseIncludeAdmin ──────────────────────────────────────────────────────
@@ -1024,4 +1025,138 @@ test("buildModelBreakdown: 하네스 고유 에이전트 수는 별도 입력이
   // 하위 모델별 수치는 그대로 유지된다(덮어쓰기는 하네스 레벨만)
   assert.equal(exact.harnesses[0].subModels.length, 2);
   assert.equal(exact.harnesses[0].cost, 6);
+});
+
+// ── 온보딩 스톨 (티켓 9dXgBdkGn1LyJokShh1g) ──────────────────────────────────
+// 온램프 스파이크 #883/#885 가 멈춘 지점 = "구독/크레딧/인증이 없어 최초에 멈추는
+// 유저가 몇 명인지 모른다". 이 요약이 그 수를 만든다. 여기서 지키는 계약은 둘:
+// (1) needsAuth 오탐(철회)을 스톨로 세지 않는다, (2) 비율의 분모에 정상(ok)이 든다.
+const stallInput = {
+  spawnBlockedClients: 4,
+  spawnBlockedEvents: 9,
+  spawnBlockedReasonRows: [
+    { key: "not-authenticated", count: 6 },
+    { key: "not-installed", count: 3 },
+  ],
+  needsAuthClients: 3,
+  needsAuthAgents: 10,
+  needsAuthResolvedAgents: 4,
+  fundingOkClients: 6,
+  fundingUnfundedClients: 2,
+  fundingBlockedClients: 2,
+  fundingInconclusiveClients: 5,
+  guideShownClients: 3,
+  guideShownEvents: 4,
+  stalledClients: 7,
+  signupBase: 20,
+};
+
+test("buildOnboardingStallSummary: 스톨 규모와 사유 분포를 만든다", () => {
+  const s = buildOnboardingStallSummary(stallInput);
+  assert.equal(s.stalledClients, 7);
+  assert.equal(s.stalledRate, 7 / 20);
+  assert.equal(s.spawnBlocked.clients, 4);
+  assert.equal(s.spawnBlocked.events, 9);
+  assert.deepEqual(s.spawnBlocked.byReason, [
+    { key: "not-authenticated", count: 6 },
+    { key: "not-installed", count: 3 },
+  ]);
+  assert.equal(s.guideShown.clients, 3);
+});
+
+test("★needsAuth 는 철회분(오탐)을 뺀 수를 쓴다 — 팝업 오탐이 문제 크기를 부풀리지 않게", () => {
+  const s = buildOnboardingStallSummary(stallInput);
+  assert.equal(s.needsAuth.agents, 10);
+  assert.equal(s.needsAuth.resolvedAgents, 4);
+  assert.equal(s.needsAuth.unresolvedAgents, 6);
+  assert.equal(s.needsAuth.falsePositiveRate, 0.4);
+});
+
+test("★철회가 발화보다 많아도(창 경계) 음수로 새지 않는다", () => {
+  const s = buildOnboardingStallSummary({
+    ...stallInput,
+    needsAuthAgents: 2,
+    needsAuthResolvedAgents: 5,
+  });
+  assert.equal(s.needsAuth.unresolvedAgents, 0);
+});
+
+test("★unfunded 비율의 분모는 '판정이 난 설치'(ok 포함) — inconclusive 는 뺀다", () => {
+  const s = buildOnboardingStallSummary(stallInput);
+  // ok 6 + unfunded 2 + blocked 2 = 10. inconclusive 5 는 아무 주장도 아니다.
+  assert.equal(s.funding.decidedClients, 10);
+  assert.equal(s.funding.unfundedRate, 0.2);
+  assert.equal(s.funding.inconclusiveClients, 5);
+});
+
+test("데이터가 없으면 0% 가 아니라 null 이다(데이터 대기 ≠ 문제 없음)", () => {
+  const s = buildOnboardingStallSummary({
+    spawnBlockedClients: 0,
+    spawnBlockedEvents: 0,
+    spawnBlockedReasonRows: [],
+    needsAuthClients: 0,
+    needsAuthAgents: 0,
+    needsAuthResolvedAgents: 0,
+    fundingOkClients: 0,
+    fundingUnfundedClients: 0,
+    fundingBlockedClients: 0,
+    fundingInconclusiveClients: 0,
+    guideShownClients: 0,
+    guideShownEvents: 0,
+    stalledClients: 0,
+    signupBase: 0,
+  });
+  assert.equal(s.stalledRate, null);
+  assert.equal(s.funding.unfundedRate, null);
+  assert.equal(s.needsAuth.falsePositiveRate, null);
+});
+
+test("BQ 문자열/undefined 수치도 안전하게 접힌다(스키마 드리프트 방어)", () => {
+  const s = buildOnboardingStallSummary({
+    ...stallInput,
+    stalledClients: "7",
+    signupBase: undefined,
+    needsAuthAgents: null,
+  });
+  assert.equal(s.stalledClients, 7);
+  assert.equal(s.stalledRate, null);
+  assert.equal(s.needsAuth.unresolvedAgents, 0);
+});
+
+test("코크핏은 stall 입력이 없으면 null(구버전 호출부 하위호환)", () => {
+  const base = {
+    gaugeRow: {},
+    starRatingRows: [],
+    cliSetupRows: [],
+    cliFailReasonRows: [],
+    demo: {
+      startedClients: 0,
+      completedClients: 0,
+      ctaClients: 0,
+      startedEvents: 0,
+      completedEvents: 0,
+      ctaEvents: 0,
+    },
+    consent: {
+      shownClients: 0,
+      grantedClients: 0,
+      shownEvents: 0,
+      grantedEvents: 0,
+    },
+    reuse: {
+      weeklyActiveProjects: 0,
+      weeklyCompletedTasks: 0,
+      secondSessionClients: 0,
+      signupBase: 0,
+      avgDau: 0,
+      wau: 0,
+    },
+    spawn: { spawned: 0, crashed: 0, restarted: 0, completed: 0 },
+  };
+  assert.equal(buildKpiCockpit(base).onboardingStall, null);
+  assert.equal(
+    buildKpiCockpit({ ...base, stall: stallInput }).onboardingStall
+      ?.stalledClients,
+    7,
+  );
 });

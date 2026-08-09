@@ -1166,6 +1166,52 @@ export interface SpawnAuthGate {
   missingEnvKeys?: string[];
 }
 
+/**
+ * ★스폰이 게이트에서 막힌 순간의 **비식별** 관측치 (티켓 9dXgBdkGn1LyJokShh1g).
+ *
+ * 온램프 스파이크 두 건(#883/#885)의 공통 결론이 "무료→유료 투자를 하기 전에
+ * '구독/크레딧/인증이 없어 최초에 멈추는 유저'가 몇 명인지부터 세야 하는데 그
+ * 이벤트가 텔레메트리에 **0건**이라 문제 크기를 모른다" 였다. 차단 판정은 전부
+ * 이 함수 한 곳을 지나가므로, 관측도 여기 한 곳에 붙인다 — 호출부(agent:launch /
+ * 오케 런치 / 오케 스위치)마다 흩뿌리면 새 호출부가 생길 때 조용히 빠진다.
+ *
+ * 관찰자 주입(observer)인 이유는 이 모듈이 electron 을 import 하지 않기 때문이다
+ * (유닛 테스트가 fake home 으로 통째로 로드한다). main 이 부팅 때 한 번 꽂는다.
+ */
+export interface SpawnGateBlockedEvent {
+  /** 어느 표면에서 막혔나(agent_launch / orchestrator_launch / orchestrator_switch). */
+  surface: string;
+  /** 스폰하려던 하네스(claude/gpt/grok/...). */
+  model: string;
+  /** 차단 사유 — SpawnAuthGate.reason 어휘 그대로. */
+  reason: "not-installed" | "not-authenticated" | "vendor-not-configured";
+  installed: boolean;
+  /** env-swap 벤더 축이었으면 그 벤더 id. */
+  vendor?: string;
+  /**
+   * 빠진 벤더 env 키의 **개수**. 키 이름도 값도 싣지 않는다 — 개수만으로
+   * "벤더 설정 미완" 을 세기에 충분하고, 텔레메트리에 시크릿 축을 만들지 않는다.
+   */
+  missingEnvKeyCount?: number;
+}
+
+let spawnGateObserver: ((e: SpawnGateBlockedEvent) => void) | null = null;
+
+/** 차단 관측자를 꽂는다(main 부팅 1회). null 로 해제. */
+export function setSpawnGateObserver(
+  fn: ((e: SpawnGateBlockedEvent) => void) | null,
+): void {
+  spawnGateObserver = fn;
+}
+
+function reportSpawnGateBlocked(e: SpawnGateBlockedEvent): void {
+  try {
+    spawnGateObserver?.(e);
+  } catch {
+    // 관측이 스폰 판정을 깨뜨려서는 안 된다.
+  }
+}
+
 /** 이 스폰이 env-swap 벤더로 붙는가 — 붙는다면 그 크레덴셜 준비 상태. */
 interface EnvSwapSpawn {
   vendor: string;
@@ -1236,6 +1282,8 @@ function envSwapSpawn(
 export async function checkSpawnAuthGate(
   model: string,
   pinnedModelId?: string,
+  /** 관측용 표면 라벨(텔레메트리에만 쓰인다 — 판정에는 영향 없음). */
+  surface = "unknown",
 ): Promise<SpawnAuthGate> {
   const cliModel = modelToCliAuth(model);
   if (!cliModel) {
@@ -1244,6 +1292,13 @@ export async function checkSpawnAuthGate(
   const vendorSpawn = envSwapSpawn(model, pinnedModelId);
   const r = await probeCliAuth(cliModel);
   if (!r.installed) {
+    reportSpawnGateBlocked({
+      surface,
+      model,
+      reason: "not-installed",
+      installed: false,
+      ...(vendorSpawn ? { vendor: vendorSpawn.vendor } : {}),
+    });
     return {
       ok: false,
       model: cliModel,
@@ -1264,6 +1319,14 @@ export async function checkSpawnAuthGate(
         vendor: vendorSpawn.vendor,
       };
     }
+    reportSpawnGateBlocked({
+      surface,
+      model,
+      reason: "vendor-not-configured",
+      installed: true,
+      vendor: vendorSpawn.vendor,
+      missingEnvKeyCount: vendorSpawn.missingEnvKeys.length,
+    });
     return {
       ok: false,
       model: cliModel,
@@ -1277,6 +1340,12 @@ export async function checkSpawnAuthGate(
     };
   }
   if (!r.authenticated) {
+    reportSpawnGateBlocked({
+      surface,
+      model,
+      reason: "not-authenticated",
+      installed: true,
+    });
     return {
       ok: false,
       model: cliModel,

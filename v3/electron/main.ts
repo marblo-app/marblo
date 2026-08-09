@@ -96,6 +96,7 @@ import {
   getCatalogVersions,
   probeCliAuth,
   checkSpawnAuthGate,
+  setSpawnGateObserver,
   type CliAuthModel,
 } from "./harness-manager";
 import { getRegistryIndex } from "./registry-client";
@@ -3460,6 +3461,14 @@ onUnmatchedPricing(({ model, count, firstSeen }) => {
   mainTelemetry.pricingUnmatched(mainWindow, model, count, firstSeen);
 });
 
+// ★온보딩 스톨 계측 (티켓 9dXgBdkGn1LyJokShh1g). 사전 스폰 게이트가 거절한 순간 =
+// 사용자가 첫 작업을 **실행 전에** 막힌 순간. 관측을 게이트 안(단일 판정 지점)에
+// 두고 여기서 창을 붙인다 — 호출부마다 emit 을 흩뿌리면 새 호출부가 생길 때
+// 조용히 빠지고, 그게 지금 이 이벤트가 BigQuery 에 0건인 이유이기도 하다.
+setSpawnGateObserver((e) => {
+  mainTelemetry.spawnBlocked(mainWindow, e);
+});
+
 // Load stored API keys and create LLM provider
 const storedKeys = readApiKeys();
 syncApiKeysToEnv(storedKeys);
@@ -5620,7 +5629,11 @@ ipcMain.handle(
     // before any worktree/PTY side effects so the CLI never boots into its login
     // prompt. Ungated models (gemini/agy/custom) pass through. Resume launches
     // are gated too — a lapsed login should still surface, not hang.
-    const agentGate = await checkSpawnAuthGate(agent.model, gatePinnedModelId);
+    const agentGate = await checkSpawnAuthGate(
+      agent.model,
+      gatePinnedModelId,
+      "agent_launch",
+    );
     if (!agentGate.ok) {
       console.warn(
         `[agent:launch] Blocked "${agent.name}" — ${
@@ -6556,6 +6569,7 @@ ipcMain.handle(
         const gate = await checkSpawnAuthGate(
           model,
           splitOrchestratorModelValue(targetModelSetting).modelId,
+          "orchestrator_switch",
         );
         if (!gate.ok) {
           return {
@@ -6717,6 +6731,7 @@ ipcMain.handle(
     const orchGate = await checkSpawnAuthGate(
       orchestratorModel,
       splitOrchestratorModelValue(effectiveModelSetting).modelId,
+      "orchestrator_launch",
     );
     if (!orchGate.ok) {
       console.warn(

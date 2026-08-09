@@ -181,6 +181,82 @@ export const mainTelemetry = {
     });
   },
 
+  // ── 온보딩 스톨 계측 (티켓 9dXgBdkGn1LyJokShh1g) ───────────────────────
+  //
+  // 온램프 스파이크 #883/#885 의 공통 결론: 무료→유료 투자를 결정하기 전에
+  // "구독/크레딧/인증이 없어 **최초에 멈추는** 유저" 가 몇 명인지부터 세야 하는데,
+  // 그 순간의 이벤트가 BigQuery 에 **0건**이라 문제 크기를 알 수 없었다. 아래 두
+  // 이벤트가 main 쪽 스톨(사전 게이트 차단 / 스폰 후 로그인화면 확정)을 채운다.
+  //
+  // 새 파이프라인은 없다 — 렌더러의 단일 choke point(logTelemetry: 비식별 scrub +
+  // firstParty 게이트)를 지나 기존 `logTelemetryBatch` → BigQuery `events` 로 간다.
+  // 서버는 event 문자열을 화이트리스트 없이 적재하므로 서버 변경도 없다.
+  // 페이로드는 비식별: 모델/사유 코드/개수만, 경로·키·원문 출력은 절대 싣지 않는다.
+
+  /**
+   * 사전 스폰 게이트(`checkSpawnAuthGate`)가 스폰을 거절했다 = 사용자가 첫 작업을
+   * **실행 전에** 막힌 순간. reason 어휘는 게이트 그대로:
+   * not-installed / not-authenticated / vendor-not-configured.
+   */
+  spawnBlocked(
+    win: BrowserWindow | null,
+    payload: {
+      surface: string;
+      model: string;
+      reason: string;
+      installed: boolean;
+      vendor?: string;
+      missingEnvKeyCount?: number;
+    },
+  ) {
+    sendTelemetry(win, "onboarding:spawn_blocked", {
+      model: payload.model,
+      success: false,
+      outcome: "blocked",
+      errorCategory: payload.reason,
+      metadata: {
+        surface: payload.surface,
+        installed: payload.installed,
+        ...(payload.vendor ? { vendor: payload.vendor } : {}),
+        ...(payload.missingEnvKeyCount !== undefined
+          ? { missingEnvKeyCount: payload.missingEnvKeyCount }
+          : {}),
+      },
+    });
+  },
+
+  /**
+   * 스폰은 됐는데 CLI 가 **로그인 화면에서** 멈췄다(백스톱 확정). reason 은
+   * LoginBackstopFireReason(no-probe / probe-unauthenticated / grace-expired).
+   *
+   * ★이 판정은 철회될 수 있다(readiness 도달 = 오탐). 그래서 짝 이벤트
+   * `onboarding:agent_auth_resolved` 를 반드시 함께 읽어야 한다 — 철회분을 빼지
+   * 않고 세면 인증 팝업 오탐 saga 가 스톨 수치를 부풀린다.
+   */
+  agentNeedsAuth(
+    win: BrowserWindow | null,
+    agentId: string,
+    model: string,
+    reason: string,
+  ) {
+    sendTelemetry(win, "onboarding:agent_needs_auth", {
+      agentId,
+      model,
+      success: false,
+      outcome: "blocked",
+      errorCategory: reason,
+    });
+  },
+
+  /** 위 판정의 **철회**(오탐 확정). 스톨 집계의 분자에서 빼는 데 쓴다. */
+  agentAuthResolved(win: BrowserWindow | null, agentId: string, model: string) {
+    sendTelemetry(win, "onboarding:agent_auth_resolved", {
+      agentId,
+      model,
+      success: true,
+    });
+  },
+
   heartbeat(
     win: BrowserWindow | null,
     agentId: string,

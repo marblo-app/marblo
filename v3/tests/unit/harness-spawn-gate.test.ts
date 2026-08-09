@@ -240,6 +240,64 @@ describe("checkSpawnAuthGate", () => {
     });
   });
 
+  // ── 온보딩 스톨 계측 (티켓 9dXgBdkGn1LyJokShh1g) ───────────────────────
+  //
+  // 온램프 스파이크 #883/#885 가 멈춘 지점: "구독/크레딧/인증이 없어 최초에
+  // 멈추는 유저" 의 수를 모른다(이 이벤트가 BigQuery 에 0건). 차단 판정은 전부
+  // 이 게이트를 지나가므로 관측도 여기 하나에 붙는다 — 호출부마다 흩뿌리면
+  // 새 호출부가 조용히 빠진다.
+  it("★차단될 때 관측자에게 사유·표면을 넘긴다 (스톨 계측)", async () => {
+    const { checkSpawnAuthGate, setSpawnGateObserver } =
+      await loadGateWithFakeHome(home);
+    const seen: unknown[] = [];
+    setSpawnGateObserver((e) => seen.push(e));
+    try {
+      await checkSpawnAuthGate("claude", undefined, "agent_launch");
+    } finally {
+      setSpawnGateObserver(null);
+    }
+
+    expect(seen).toEqual([
+      {
+        surface: "agent_launch",
+        model: "claude",
+        reason: "not-installed",
+        installed: false,
+      },
+    ]);
+  });
+
+  it("★통과하는 스폰은 관측치를 만들지 않는다 (스톨만 센다)", async () => {
+    touchFakeBinary(home, "claude");
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    const { checkSpawnAuthGate, setSpawnGateObserver } =
+      await loadGateWithFakeHome(home);
+    const seen: unknown[] = [];
+    setSpawnGateObserver((e) => seen.push(e));
+    try {
+      await checkSpawnAuthGate("claude", undefined, "agent_launch");
+      await checkSpawnAuthGate("gemini", undefined, "agent_launch");
+    } finally {
+      setSpawnGateObserver(null);
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it("★관측자가 던져도 스폰 판정은 그대로다", async () => {
+    const { checkSpawnAuthGate, setSpawnGateObserver } =
+      await loadGateWithFakeHome(home);
+    setSpawnGateObserver(() => {
+      throw new Error("telemetry down");
+    });
+    try {
+      const gate = await checkSpawnAuthGate("claude");
+      expect(gate.ok).toBe(false);
+      expect(gate.reason).toBe("not-installed");
+    } finally {
+      setSpawnGateObserver(null);
+    }
+  });
+
   it("leaves antigravity ungated at spawn (backstop covers it instead)", async () => {
     // agy is spawn-ungated even when logged out — checkSpawnAuthGate passes it
     // through; the readiness login-screen backstop handles an unauthed agy.

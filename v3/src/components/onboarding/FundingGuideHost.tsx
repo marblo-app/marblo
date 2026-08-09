@@ -1,9 +1,11 @@
+import { useEffect, useRef } from "react";
 import {
   onboardingAuthState,
   shouldShowFundingGuide,
 } from "../../lib/fundingProbe";
 import { useCliSetupStore } from "../../stores/cliSetupStore";
 import { useOnboardingSetup } from "../../hooks/useOnboardingSetup";
+import telemetry from "../../services/telemetryService";
 import { SubscriptionNeededModal } from "../beginner/SubscriptionNeededModal";
 
 /**
@@ -28,8 +30,30 @@ export function FundingGuideHost() {
     funding: setup.funding,
   });
 
-  if (!shouldShowFundingGuide({ state, dismissed })) return null;
-  // shouldShowFundingGuide 가 true 인 시점의 state 는 두 값 중 하나다.
+  const visible =
+    shouldShowFundingGuide({ state, dismissed }) &&
+    // shouldShowFundingGuide 가 true 인 시점의 state 는 두 값 중 하나다.
+    (state === "authedButUnfunded" || state === "authedButBlocked");
+
+  // ★스톨 계측(티켓 9dXgBdkGn1LyJokShh1g): 모달이 **실제로 떴다** = 사용자가 눈으로
+  // 막힌 순간. 판정(funding_probe)과 따로 세는 이유는 둘이 갈리기 때문이다 —
+  // 판정이 unfunded 라도 이미 닫았으면(dismissed) 모달은 안 뜬다. 온램프가 고쳐야
+  // 하는 숫자는 "본 사람" 쪽이다.
+  //
+  // 판정 종류마다 한 번만 남긴다(리렌더·재표시로 부풀지 않게). 모달이 뜰 수 있는
+  // 상태는 둘뿐이라 한 세션에서 최대 2건이다.
+  const reportedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!visible) return;
+    if (reportedRef.current === state) return;
+    reportedRef.current = state;
+    telemetry.fundingGuideShown(
+      state as "authedButUnfunded" | "authedButBlocked",
+      setup.funding.outcome?.model,
+    );
+  }, [visible, state, setup.funding.outcome?.model]);
+
+  if (!visible) return null;
   if (state !== "authedButUnfunded" && state !== "authedButBlocked")
     return null;
 
