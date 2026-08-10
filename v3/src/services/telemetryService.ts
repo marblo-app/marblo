@@ -287,9 +287,11 @@ const CLIENT_ID_KEY = "marblo.telemetry.clientId";
 
 /**
  * Stable, anonymous per-install identifier. Random UUID persisted in
- * localStorage. BigQuery rows keep this as the de-identified row key, while the
- * callable adds a server-side accountUserId into metadata for admin-only user
- * dedup. Clearing storage still mints a new install id.
+ * localStorage. BigQuery rows keep this as their de-identified row key — and as
+ * of ticket woXp2c70oR0tliGB8Vs6 it is the *only* identity on the events table:
+ * the callable no longer merges a server-side accountUserId (Firebase uid) into
+ * metadata, so journeys correlate on this install id alone. Clearing storage
+ * still mints a new install id.
  *
  * Shared with taskService so the task-outcome ML rows use the same install id.
  */

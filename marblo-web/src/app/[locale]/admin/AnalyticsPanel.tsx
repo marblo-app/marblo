@@ -53,6 +53,12 @@ type AdminExcludedTelemetry = {
 // 모수 = Firestore subscriptions.founderGrant===true(파운더/베타 grant 보유자).
 // 관측 계정이 minCohortSize 미만인 세그먼트는 서버가 행동지표를 억제해서 내려준다
 // (suppressed=true + 지표 null) — 프론트는 그 상태를 숨기지 않고 그대로 말한다.
+//
+// ★events 계정축 은퇴(eventAxisRetired): 이벤트를 grant 계정에 귀속시키던
+// metadata.accountUserId(=Firebase uid) 부착을 프라이버시 결정으로 중단했다.
+// 그래서 기능사용·세션·기능채택 3종은 **영구히** 비어 있고, 화면은 그것을
+// "텔레메트리 ON 하면 채워진다" 가 아니라 "이 축은 더 이상 측정하지 않는다" 로
+// 그려야 한다. 남는 축(관측률·재방문 리듬)은 cost_logs 기반이라 그대로 유효하다.
 type BetaFeatureUsage = { event: string; users: number; count: number };
 type BetaSessionStats = {
   sessions: number;
@@ -95,6 +101,9 @@ type BetaSegmentUsage = {
   grantCohortSize: number;
   observedUsers: number;
   accountAttributionAvailable: boolean;
+  /** 구버전 functions 는 안 내려준다 — 없으면 기존 "측정 대기" 안내로 폴백. */
+  eventAxisRetired?: boolean;
+  eventAxisRetiredOn?: string;
   segments: BetaSegmentSummary[];
   all: BetaSegmentSummary;
 };
@@ -151,10 +160,12 @@ type OnboardingFunnel = {
 // ★이 콜러블은 서버에 있는데 **웹이 호출조차 하지 않고 있었다** — 앱 설정의
 // 어드민 탭이 제거되면서(#881) 이 축이 어디에도 안 보이게 됐다.
 //
-// 위 온보딩 퍼널과 다른 축이다: 여기는 events.metadata.accountUserId(계정
-// identity)만 쓰고 익명 clientId 폴백을 하지 않는다. 그래서 accountUserId 주입이
-// 시작된 시점 이전 구간은 구조적으로 비어 있다 — 화면이 그 사실을 말해야 한다
-// (0 을 '아무도 안 왔다'로 읽으면 오독이다).
+// 위 온보딩 퍼널과 다른 축이다: 여기는 계정 identity 만 쓰고 익명 설치 ID 폴백을
+// 하지 않는다. 그 계정 identity 는 events.metadata.accountUserId 였는데, 계정축
+// 은퇴(프라이버시 결정)로 그 필드 부착이 끊겼다 — 즉 이 축은 **은퇴일 이전
+// 구간에서만** 채워지고 이후로는 구조적으로 비어 간다. 화면이 그 사실을 말해야
+// 한다(0 을 '아무도 안 왔다'로 읽으면 오독이다). 설치 단위 동일 퍼널은 위
+// '온보딩 퍼널'이 계속 온전하게 보여 준다.
 type ActivationGateStep = {
   key: string;
   event: string;
@@ -1912,7 +1923,15 @@ function SuppressedBox({ reason }: { reason: string | null }) {
 }
 
 // 세그먼트 1건 카드 — 코호트/관측은 항상, 행동지표는 억제 해제 시에만.
-function BetaSegmentCard({ seg }: { seg: BetaSegmentSummary }) {
+// eventAxisRetired 면 이벤트 파생 3종(기능채택·기능별 사용·세션)은 아예 그리지
+// 않는다. 영원히 비는 블록을 남겨 두면 "아직 안 쌓였나 보다" 로 읽히기 때문이다.
+function BetaSegmentCard({
+  seg,
+  eventAxisRetired,
+}: {
+  seg: BetaSegmentSummary;
+  eventAxisRetired: boolean;
+}) {
   const adoptionRows = seg.adoption
     ? [
         { key: "오케스트레이터", value: seg.adoption.orchestratorUsers },
@@ -1949,6 +1968,12 @@ function BetaSegmentCard({ seg }: { seg: BetaSegmentSummary }) {
       </div>
       {seg.suppressed ? (
         <SuppressedBox reason={seg.suppressionReason} />
+      ) : eventAxisRetired ? (
+        <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-xs leading-relaxed text-zinc-500">
+          기능채택·기능별 사용·세션은 이벤트를 계정에 귀속시켜야 나오는 지표라,
+          계정축 은퇴와 함께 이 카드에서 내렸습니다. 위 관측률·재방문은
+          cost_logs(사용량) 기반이라 계속 유효합니다.
+        </p>
       ) : (
         <div className="space-y-3">
           <div>
@@ -2003,6 +2028,8 @@ function BetaSegmentCard({ seg }: { seg: BetaSegmentSummary }) {
 
 function BetaSegmentView({ data }: { data: BetaSegmentUsage }) {
   const all = data.all;
+  // 구버전 functions 응답에는 이 필드가 없다 → false 로 접어 기존 안내를 쓴다.
+  const retired = data.eventAxisRetired === true;
   return (
     <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -2033,26 +2060,44 @@ function BetaSegmentView({ data }: { data: BetaSegmentUsage }) {
         />
       </div>
 
-      {!data.accountAttributionAvailable && (
-        <div className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/30 p-3 text-xs text-amber-200">
+      {retired ? (
+        <div className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-xs text-zinc-400">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <p>
-            <strong>텔레메트리 ON 이 선행 조건입니다.</strong>{" "}
-            기능사용·세션·채택 지표는 이벤트가 계정에 귀속돼야 나오는데(
-            <code className="text-amber-300">metadata.accountUserId</code>),
-            해당 필드는 2026-08-06 부터 적재되기 시작했고 프로덕션 텔레메트리는
-            기본 OFF 입니다. 현재 이 구간의 grant 보유자 이벤트는 계정 귀속분이
-            없어 값을 표시하지 않습니다 — 0 은 &ldquo;안 썼다&rdquo;가 아니라
-            &ldquo;측정되지 않았다&rdquo;입니다. 위 grant/관측 카운트는
-            Firestore·cost_logs 기반이라 텔레메트리와 무관하게 정확합니다.
+            <strong className="text-zinc-300">
+              이벤트 기반 계정 지표는 은퇴했습니다
+            </strong>{" "}
+            {data.eventAxisRetiredOn ? `(${data.eventAxisRetiredOn}부터)` : ""}.
+            기능사용·세션·채택은 이벤트를 계정에 귀속시켜야 나오는데, 그 귀속에
+            쓰던 계정 식별자를 텔레메트리 이벤트에서 제거했습니다 — 처리방침이
+            이 테이블을 &ldquo;계정 UID 없는 익명 설치 ID&rdquo;로 고지하고 있어
+            문구가 아니라 코드를 맞춘 결정입니다. grant 명단(계정)과 익명 설치
+            ID 를 잇는 다리가 없으므로 이 축은 값을 추정하지 않고 내렸습니다. 위
+            grant·관측·재방문은 Firestore·cost_logs 기반이라 그대로 정확합니다.
+            설치 단위 기능사용은 &lsquo;온보딩 퍼널&rsquo;· &lsquo;사용량&rsquo;
+            탭에서 계속 볼 수 있습니다.
           </p>
         </div>
+      ) : (
+        !data.accountAttributionAvailable && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/30 p-3 text-xs text-amber-200">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <p>
+              <strong>텔레메트리 ON 이 선행 조건입니다.</strong>{" "}
+              기능사용·세션·채택 지표는 이벤트가 계정에 귀속돼야 나오는데, 현재
+              이 구간의 grant 보유자 이벤트는 계정 귀속분이 없어 값을 표시하지
+              않습니다 — 0 은 &ldquo;안 썼다&rdquo;가 아니라 &ldquo;측정되지
+              않았다&rdquo;입니다. 위 grant/관측 카운트는 Firestore·cost_logs
+              기반이라 텔레메트리와 무관하게 정확합니다.
+            </p>
+          </div>
+        )
       )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <BetaSegmentCard seg={all} />
+        <BetaSegmentCard seg={all} eventAxisRetired={retired} />
         {data.segments.map((seg) => (
-          <BetaSegmentCard key={seg.key} seg={seg} />
+          <BetaSegmentCard key={seg.key} seg={seg} eventAxisRetired={retired} />
         ))}
       </div>
 
@@ -2255,7 +2300,7 @@ function RetentionCohortsView({ data }: { data: RetentionCohorts }) {
         note="설치 → 최초실행 → 로그인 → 폴더연결 → 오케오픈 → 스폰 → 첫 티켓 완료"
       >
         {gateEmpty ? (
-          <EmptyState label="계정 귀속(metadata.accountUserId) 이벤트가 이 기간에 없습니다 — 이 축은 계정 귀속이 붙은 이후 구간만 계산됩니다. 익명 clientId 기준 수치는 위 '온보딩 퍼널' 을 보세요." />
+          <EmptyState label="계정 귀속 이벤트가 이 기간에 없습니다 — 프라이버시 결정으로 텔레메트리 이벤트에서 계정 식별자를 제거해, 이 축은 은퇴일 이전 구간에서만 계산됩니다(0 은 '아무도 안 왔다'가 아닙니다). 설치 단위 동일 퍼널은 위 '온보딩 퍼널' 을 보세요." />
         ) : (
           <div className="space-y-1">
             {gate.steps.map((s, i) => {

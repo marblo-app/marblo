@@ -18,6 +18,7 @@ import {
   type SegmentEventRow,
   type SegmentSessionRow,
 } from "./betaSegments";
+import { EVENTS_ACCOUNT_AXIS_RETIRED_ON } from "./adminAnalytics";
 
 // ── 분류 ─────────────────────────────────────────────────────────────────────
 
@@ -361,6 +362,23 @@ test("segments with an empty cohort are dropped from the response", () => {
     ["beta_signup"],
   );
   assert.equal(out.segments[0].label, BETA_SEGMENT_LABELS.beta_signup);
+});
+
+test("★events 계정축 은퇴를 응답이 명시한다 — '측정 대기' 와 구분되게", () => {
+  const out = buildBetaSegmentUsage({
+    grantHolders: [{ uid: "u1", founderGrantReason: "beta_signup" }],
+    // 호출부는 이제 events/session 행을 아예 넘기지 않는다(쿼리를 치지 않는다).
+    activityRows: [{ userId: "u1", activeDays: 3 }],
+    eventRows: [],
+    sessionRows: [],
+  });
+  assert.equal(out.eventAxisRetired, true);
+  assert.equal(out.eventAxisRetiredOn, EVENTS_ACCOUNT_AXIS_RETIRED_ON);
+  // 은퇴했으므로 계정 귀속 이벤트는 영원히 0 이다 — 이 조합("귀속 불가 + 은퇴")을
+  // UI 가 "텔레메트리 ON 하면 채워진다" 로 그리면 거짓말이 된다.
+  assert.equal(out.accountAttributionAvailable, false);
+  // 그래도 cost_logs 기반 관측은 살아 있다.
+  assert.equal(out.observedUsers, 1);
 });
 
 test("empty input is safe", () => {

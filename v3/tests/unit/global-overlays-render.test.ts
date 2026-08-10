@@ -64,6 +64,10 @@ vi.mock("../../src/components/legal/TrainingConsentCard", () => ({
   TrainingConsentCard: () =>
     createElement("div", { "data-testid": "training-consent-card" }),
 }));
+vi.mock("../../src/components/legal/PrivacyClarificationNotice", () => ({
+  PrivacyClarificationNotice: () =>
+    createElement("div", { "data-testid": "privacy-clarification-notice" }),
+}));
 // ★온램프 두 문(門) — 이 티켓(VzR1izqW6hzwF0YRfkgL)이 여기로 승격시켰다.
 // 셸마다 따로 달려 있던 시절 레거시 Layout 사용자만 안내를 못 받는 갭이 있었다.
 vi.mock("../../src/components/onboarding/FundingGuideHost", () => ({
@@ -142,6 +146,7 @@ describe("GlobalOverlays DOM wiring", () => {
     expect(screen.getByTestId("first-project-survey")).toBeTruthy();
     expect(screen.getByTestId("privacy-consent-gate")).toBeTruthy();
     expect(screen.getByTestId("training-consent-card")).toBeTruthy();
+    expect(screen.getByTestId("privacy-clarification-notice")).toBeTruthy();
     expect(screen.getByTestId("chat-toast-host")).toBeTruthy();
     expect(screen.getByTestId("bug-report-notice-toast")).toBeTruthy();
     // 온램프 안내 둘 — 어드밴스드/레거시 셸이 이 컴포넌트를 통해 받는다.

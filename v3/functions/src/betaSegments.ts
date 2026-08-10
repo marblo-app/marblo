@@ -10,8 +10,23 @@
 //
 // ── 계정 identity 규약(index.ts 와 동일) ────────────────────────────────────
 //   - events.userId 는 익명 clientId 라 계정 귀속에 쓰지 않는다.
-//   - 계정 활동 = events.metadata.accountUserId ∪ cost_logs.userId.
+//   - 계정 활동 = cost_logs.userId (사용량·비용 원장. uid 를 보관한다).
 //   - UUID 형태(agent/client 오염) 와 ADMIN_UID 는 배제.
+//
+// ── ★events 계정축 은퇴 (ticket woXp2c70oR0tliGB8Vs6) ──────────────────────
+// 원래는 계정 활동 = events.metadata.accountUserId ∪ cost_logs.userId 였다. 그
+// accountUserId 는 서버가 모든 이벤트에 Firebase uid 를 붙여 만든 값인데,
+// 처리방침은 같은 테이블을 "계정 UID 없는 익명 설치 ID" 로 고지하고 있었다.
+// 문구가 아니라 코드를 고치기로 확정(옵션 B)했으므로 uid 부착을 중단했고, 그
+// 대가로 **이 모듈의 events 축은 은퇴한다**.
+//
+// 왜 "설치 ID 로 대체" 가 아니라 은퇴인가: 이 뷰의 모수는 Firestore grant 명단
+// (uid)이다. 익명 설치 ID 와 uid 를 잇는 다리가 사라졌으니, 설치 단위 이벤트를
+// 세그먼트에 귀속시킬 방법 자체가 없다. 없는 다리를 추정으로 만들면 그게 곧
+// 재식별이다. 그래서 이벤트 파생 지표(기능사용·세션·기능채택)는 값을 지어내지
+// 않고 은퇴 사실을 그대로 내려보내며(eventAxisRetired), 남는 축은 cost_logs 로
+// 계산되는 관측률·재방문 리듬이다. 설치 단위 기능사용은 계정 세그먼트와 무관한
+// 별도 축(getAdminUsageSummary / getAdminOnboardingFunnel)에 이미 있다.
 //
 // ── 프라이버시 ──────────────────────────────────────────────────────────────
 // 베타 모수는 수십 명 규모라 세그먼트를 잘게 쪼개면 행동지표가 개인 지목으로
@@ -19,7 +34,11 @@
 // 통째로 억제**한다(카운트만 남긴다). uid·이메일 등 식별자는 어떤 경로로도 응답에
 // 넣지 않는다 — 이 모듈의 입력 타입에도 uid 는 들어오지만 출력 타입에는 없다.
 
-import { coerceNumber, safeRate } from "./adminAnalytics";
+import {
+  coerceNumber,
+  safeRate,
+  EVENTS_ACCOUNT_AXIS_RETIRED_ON,
+} from "./adminAnalytics";
 
 // ── 세그먼트 정의 ────────────────────────────────────────────────────────────
 // subscriptions.founderGrantReason 이 권위 마커다(paymentProvider 아님 —
@@ -55,7 +74,7 @@ export interface GrantHolderRow {
   status?: unknown;
 }
 
-/** BQ: 계정별 활동일 요약(events.accountUserId ∪ cost_logs.userId). */
+/** BQ: 계정별 활동일 요약(cost_logs.userId 기준). */
 export interface SegmentActivityRow {
   userId?: unknown;
   activeDays?: unknown;
@@ -64,14 +83,18 @@ export interface SegmentActivityRow {
   events?: unknown;
 }
 
-/** BQ: 계정 × 이벤트종류 카운트. */
+/**
+ * BQ: 계정 × 이벤트종류 카운트. ★은퇴한 축 — 현재 호출부는 항상 빈 배열을 넘긴다
+ * (events 에 계정 식별자를 붙이지 않으므로). 타입과 집계 코드는 과거 구간
+ * 재계산·테스트를 위해 남겨 둔다.
+ */
 export interface SegmentEventRow {
   userId?: unknown;
   event?: unknown;
   n?: unknown;
 }
 
-/** BQ: 계정별 세션(session:ended) 요약. */
+/** BQ: 계정별 세션(session:ended) 요약. ★SegmentEventRow 와 같은 이유로 은퇴. */
 export interface SegmentSessionRow {
   userId?: unknown;
   sessions?: unknown;
@@ -139,10 +162,20 @@ export interface BetaSegmentUsage {
   /** 그중 관측된 계정 총원. */
   observedUsers: number;
   /**
-   * 계정 귀속 가능한 이벤트가 실제로 적재되고 있는가. false 면 이벤트 기반
-   * 지표(기능사용·세션·채택)는 구조만 있고 값이 비어 있다 = 텔레메트리 ON 선행.
+   * 계정 귀속 이벤트가 실제로 들어왔는가. 계정축 은퇴 후에는 항상 false 다 —
+   * 이때 "텔레메트리 ON 을 기다린다" 가 아니라 "이 축은 더 이상 측정하지
+   * 않는다" 로 읽어야 하고, 그 구분은 eventAxisRetired 가 준다.
    */
   accountAttributionAvailable: boolean;
+  /**
+   * ★events 기반 계정 귀속 축이 은퇴했는가(프라이버시 결정). true 면 기능사용·
+   * 세션·기능채택은 앞으로도 채워지지 않는다 — UI 는 "측정 대기" 가 아니라
+   * "측정하지 않음" 으로 그려야 한다. 구버전 web 은 이 필드를 모르므로
+   * accountAttributionAvailable 만 보고 기존 안내를 띄운다(하위호환).
+   */
+  eventAxisRetired: boolean;
+  /** 은퇴 시점(YYYY-MM-DD). 그 이전 구간 데이터는 여전히 유효하다. */
+  eventAxisRetiredOn: string;
   segments: BetaSegmentSummary[];
   all: BetaSegmentSummary;
 }
@@ -412,6 +445,8 @@ export function buildBetaSegmentUsage(input: {
     grantCohortSize: roster.total,
     observedUsers: all.observedUsers,
     accountAttributionAvailable: eventsByUid.size > 0,
+    eventAxisRetired: true,
+    eventAxisRetiredOn: EVENTS_ACCOUNT_AXIS_RETIRED_ON,
     segments,
     all,
   };

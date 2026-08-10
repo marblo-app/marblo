@@ -10,6 +10,29 @@
 //      orchestrator_opened → agent:spawned → first ticket completed 의 순차
 //      도달·이탈 + 실패분기 분해.
 
+// ── ★events 계정축 은퇴 (ticket woXp2c70oR0tliGB8Vs6) ────────────────────────
+// logTelemetryBatch 는 그동안 모든 이벤트의 metadata 에 accountUserId(=Firebase
+// uid)를 몰래 붙였다. 처리방침은 같은 테이블을 "계정 UID 없이 익명 설치 ID만"
+// 이라고 고지하고 있었으므로, 문구가 아니라 코드를 고쳐 uid 부착을 중단했다.
+//
+// 결과적으로 events 로 만들 수 있는 identity 는 익명 설치 ID(clientId) 하나다.
+//   - COALESCE(accountUserId, userId) 폴백을 쓰던 축(온보딩 퍼널·KPI 코크핏)은
+//     그대로 동작한다. 단위가 "계정"에서 "설치"로 수렴할 뿐이다.
+//   - accountUserId 단독을 쓰던 축(리텐션 코호트·활성화 게이트·DAU/WAU/MAU·
+//     베타 세그먼트)은 은퇴일 이후 구간에서 events 기여분이 0 이 된다.
+//     ★그 0 은 "아무도 안 왔다"가 아니라 "이 축으로는 더 이상 측정하지 않는다"다.
+//     계정 단위 활동은 cost_logs.userId(=uid — 사용자 본인에게 자기 지출을
+//     되돌려주는 용도라 유지) 로만 남는다.
+// 화면이 0 을 제품 실패로 오독하지 않도록, 해당 콜러블은 아래 note 를 응답에
+// 실어 보낸다.
+export const EVENTS_ACCOUNT_AXIS_RETIRED_ON = "2026-08-10";
+
+export const EVENTS_ACCOUNT_AXIS_NOTE =
+  `★${EVENTS_ACCOUNT_AXIS_RETIRED_ON} 부터 events 에는 계정 식별자를 붙이지 ` +
+  "않는다(익명 설치 ID 단일 축). 그래서 이 축의 events 기여분은 그 날짜까지의 " +
+  "과거 구간에만 존재하고, 이후 구간의 계정 활동은 cost_logs(사용량·비용) " +
+  "기준만 집계된다 — 0 은 '안 썼다'가 아니라 '이 축으로는 측정하지 않는다'다.";
+
 // ── includeAdmin 파싱 ────────────────────────────────────────────────────────
 // 기본 false(제외 유지). 오직 boolean true 만 "포함". 문자열 "true" 등은 받지
 // 않는다 — 콜러블은 JSON 을 그대로 넘기므로 클라이언트가 boolean 을 보낸다.
@@ -1492,7 +1515,9 @@ export function buildRetentionCohorts(
     note:
       "리텐션 코호트는 유저별 첫활성일을 기준으로 묶고, D1/D7/D14/D30 당일에 " +
       "재방문한 distinct account user 비율을 계산한다. events.userId 는 agent UUID " +
-      "오염이 있어 쓰지 않고 metadata.accountUserId 와 cost_logs.userId 만 사용한다.",
+      "오염이 있어 쓰지 않고 과거 구간의 metadata.accountUserId 와 " +
+      "cost_logs.userId 만 사용한다. " +
+      EVENTS_ACCOUNT_AXIS_NOTE,
   };
 }
 
@@ -1583,7 +1608,8 @@ export function buildActiveUserMetrics(
     note:
       "DAU/WAU/MAU 는 account user 기준 distinct active users 이다. 30일+ 잔존은 " +
       "first-active 이후 30일이 지난 코호트 중 30일 이후에도 활동한 distinct user 수와 " +
-      "그 비율이다.",
+      "그 비율이다. " +
+      EVENTS_ACCOUNT_AXIS_NOTE,
   };
 }
 
@@ -1680,7 +1706,9 @@ export function buildActivationGateFunnel(
     note:
       "활성화 게이트는 install→first_run→login→folder_connected→오케open→spawn→" +
       "first_ticket_complete 순차 부분집합이다. install 전용 이벤트가 없는 구버전 " +
-      "데이터는 first_run 을 install 대체 신호로 사용한다.",
+      "데이터는 first_run 을 install 대체 신호로 사용한다. " +
+      EVENTS_ACCOUNT_AXIS_NOTE +
+      " 설치 단위 동일 퍼널은 '온보딩 퍼널'(getAdminOnboardingFunnel)에 있다.",
   };
 }
 // ════════════════════════════════════════════════════════════════════════════

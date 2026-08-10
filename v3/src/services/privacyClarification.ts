@@ -1,0 +1,108 @@
+/**
+ * 처리방침 1회성 명확화 고지 — 순수 로직(의존성 0).
+ *
+ * trainingConsent.ts / marketingConsent.ts 와 같은 분리 규약: Firestore 를
+ * 만지지 않고 "언제 띄울 것인가" 판정과 로컬 억제만 둔다(vitest 가 firebase
+ * 부트 없이 판정을 직접 검사한다).
+ *
+ * ── 이게 왜 동의가 아니라 고지인가 (ticket woXp2c70oR0tliGB8Vs6) ────────
+ * 이번 처리방침 변경은 두 조각이다.
+ *   (1) 익명화 강화 — 서버가 이벤트에 붙이던 계정 UID 부착을 중단했다. 수집이
+ *       **줄었고**, 문서가 원래 고지하던 "계정 UID 없는 익명 설치 ID" 가 뒤늦게
+ *       사실이 됐다. 축소 방향이라 새로 받을 동의가 없다.
+ *   (2) 사용량·비용 기록(계정 연결) 고지 추가 — 새 수집이 아니라 **이미 하고
+ *       있던 것의 누락된 고지**다. 정산·본인 사용량 표시에 필수인 기록이라
+ *       역시 "동의하지 않으면 안 하겠다" 를 제시할 수 없다.
+ * 둘 다 새 동의를 받을 게 없으므로 CURRENT_POLICY_VERSION 을 올리지 않는다
+ * (올리면 전 사용자에게 PIPA 모달 재프롬프트 — #797~#809 saga). 그렇다고 (2)를
+ * 조용히 넘기지도 않는다. 그 사이의 정직한 자리가 이 **1회성 고지 배너**다.
+ *
+ * ── 불변식 ──────────────────────────────────────────────────────────
+ *  - 이 배너는 아무것도 write 하지 않는다. 봤다는 사실도, 닫았다는 사실도
+ *    동의로 기록되지 않는다(기록할 동의 자체가 없다).
+ *  - 닫기는 이 기기 로컬 억제일 뿐이다. 전문은 언제나 처리방침 화면에 있다.
+ *  - 아직 PIPA 동의 모달을 봐야 하는 사용자에게는 뜨지 않는다 — 그 사람은
+ *    지금 최신 문구를 통째로 읽고 동의하는 중이라 고지할 "변경" 이 없다.
+ */
+
+/**
+ * 고지 문안 버전. 이 배너로 알릴 내용이 또 생기면 올린다(억제 키에 들어가므로
+ * 올리면 이전에 닫은 사람에게도 한 번 더 뜬다).
+ *
+ * ★`CURRENT_POLICY_VERSION` 과 일부러 분리한다 — 저쪽은 동의 재프롬프트 축이고
+ * 이쪽은 고지 축이다. 섞으면 "고지하려다 전 사용자 재동의" 가 된다.
+ */
+export const PRIVACY_CLARIFICATION_VERSION = "2026-08-10";
+
+export interface PrivacyClarificationInput {
+  /** 서명된 사람 uid. 없으면(로그인 전/에이전트 신원) 노출하지 않는다. */
+  uid: string | null;
+  /** 동의 레코드를 권위 있게 읽었나(privacyConsentStore.hasLoaded). */
+  consentLoaded: boolean;
+  /**
+   * PIPA 동의 모달이 지금 떠야 하는가(store.needsPrompt). true 면 뜨지 않는다 —
+   * 최신 전문을 읽고 동의하려는 사람에게 "바뀐 점" 배너는 소음이다.
+   */
+  needsPolicyPrompt: boolean;
+  /** 이 기기에서 닫았나. */
+  dismissedLocally: boolean;
+}
+
+/** 1회성 명확화 고지를 띄울지 판정한다. 전부 만족해야 한다. */
+export function shouldShowPrivacyClarification({
+  uid,
+  consentLoaded,
+  needsPolicyPrompt,
+  dismissedLocally,
+}: PrivacyClarificationInput): boolean {
+  if (!uid) return false;
+  if (!consentLoaded) return false;
+  if (needsPolicyPrompt) return false;
+  return !dismissedLocally;
+}
+
+// ─── 닫기 로컬 기록 ─────────────────────────────────────────────────
+const DISMISS_PREFIX = "marblo:privacyClarificationSeen:";
+
+function safeLocalStorage(): Storage | null {
+  try {
+    return typeof localStorage !== "undefined" ? localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+export function privacyClarificationKeyFor(
+  uid: string,
+  version: string,
+): string {
+  return `${DISMISS_PREFIX}${uid}:${version}`;
+}
+
+/** 닫음 기록. best-effort — 실패해도 throw 하지 않는다(다음 실행에 한 번 더 뜰 뿐). */
+export function rememberPrivacyClarificationSeen(
+  uid: string,
+  version: string = PRIVACY_CLARIFICATION_VERSION,
+): void {
+  if (!uid || !version) return;
+  try {
+    safeLocalStorage()?.setItem(privacyClarificationKeyFor(uid, version), "1");
+  } catch {
+    // private mode / quota.
+  }
+}
+
+export function hasSeenPrivacyClarification(
+  uid: string,
+  version: string = PRIVACY_CLARIFICATION_VERSION,
+): boolean {
+  if (!uid || !version) return false;
+  try {
+    return (
+      safeLocalStorage()?.getItem(privacyClarificationKeyFor(uid, version)) ===
+      "1"
+    );
+  } catch {
+    return false;
+  }
+}

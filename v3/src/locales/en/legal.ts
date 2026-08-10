@@ -69,4 +69,13 @@ export const legal: Record<keyof typeof koLegal, string> = {
   "legal.reconsent.savedNotice": "Consent saved. Thank you!",
   "legal.reconsent.saveFailed": "Save failed — please try again later.",
   "legal.reconsent.dismiss": "Don't show again",
+
+  // ── One-time privacy-policy clarification (PrivacyClarificationNotice) ──
+  // ★This copy informs; it does not ask. No "agree"/"accept" wording — the
+  //   banner stores nothing.
+  "legal.clarification.label": "Privacy policy update",
+  "legal.clarification.body":
+    "We removed account identifiers from product usage analytics entirely (anonymous install ID only). In turn, the policy now states plainly that token usage and cost records are linked to your account so we can show you your own usage and billing.",
+  "legal.clarification.viewDetails": "Details",
+  "legal.clarification.dismiss": "Dismiss",
 };

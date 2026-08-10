@@ -69,4 +69,13 @@ export const legal = {
   "legal.reconsent.savedNotice": "동의가 저장됐습니다. 감사합니다!",
   "legal.reconsent.saveFailed": "저장 실패 — 잠시 후 다시 시도해 주세요.",
   "legal.reconsent.dismiss": "다시 안 보기",
+
+  // ── 처리방침 1회성 명확화 고지 (PrivacyClarificationNotice) ──
+  // ★동의를 받는 문구가 아니라 알리는 문구다. "동의"/"확인" 같은 승낙 어휘를
+  //   쓰지 않는다 — 이 배너는 아무것도 저장하지 않는다.
+  "legal.clarification.label": "개인정보 처리방침 안내",
+  "legal.clarification.body":
+    "제품 사용 통계에서 계정 식별자를 완전히 제거했습니다(익명 설치 ID만 사용). 대신 토큰 사용량·비용 기록은 본인 사용량·요금 확인을 위해 계정에 연결된다는 점을 처리방침에 명시했습니다.",
+  "legal.clarification.viewDetails": "자세히",
+  "legal.clarification.dismiss": "닫기",
 };

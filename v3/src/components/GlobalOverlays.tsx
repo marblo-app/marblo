@@ -1,5 +1,6 @@
 import { UpdateBanner } from "./UpdateBanner";
 import { MarketingReconsentBanner } from "./legal/MarketingReconsentBanner";
+import { PrivacyClarificationNotice } from "./legal/PrivacyClarificationNotice";
 import { ProjectSetupBanners } from "./onboarding/ProjectSetupBanners";
 import { RepoConnectModal } from "./collaboration/RepoConnectModal";
 import { FirstSharedProjectModal } from "./collaboration/FirstSharedProjectModal";
@@ -59,6 +60,12 @@ export function GlobalOverlays({ projectSetup }: GlobalOverlaysProps) {
       {/* 기존 파운더 재동의 배너 — 마케팅 동의가 아직 unknown 인 파운더에게만
           뜨는 얇은 opt-in 줄. */}
       <MarketingReconsentBanner />
+
+      {/* 처리방침 1회성 명확화 고지 — 동의를 받는 배너가 아니라 알리는 배너다
+          (익명화 강화 + 사용량 기록 계정연결 고지). 아무것도 저장하지 않고,
+          닫으면 이 기기에서 다시 뜨지 않는다. ★심플 셸도 같은 컴포넌트를 직접
+          마운트한다(privacyClarificationSurfaceParity 테스트가 지킨다). */}
+      <PrivacyClarificationNotice />
 
       {/* Project-setup prompts (register-or-browse choice, name-your-project). */}
       <ProjectSetupBanners {...projectSetup} />

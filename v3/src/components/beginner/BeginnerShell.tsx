@@ -35,6 +35,7 @@ import { BeginnerTour } from "./BeginnerTour";
 import { OnboardingPreviewBanner } from "./OnboardingPreviewBanner";
 import { PrivacyConsentGate } from "../legal/PrivacyConsentGate";
 import { TrainingConsentCard } from "../legal/TrainingConsentCard";
+import { PrivacyClarificationNotice } from "../legal/PrivacyClarificationNotice";
 import {
   BUTTON_GHOST,
   BUTTON_PRIMARY,
@@ -647,6 +648,12 @@ export function BeginnerShell() {
           자기 판정으로만 뜨는 비차단 코너 카드라 위 모달들과 겹치지 않는다
           (PIPA 모달이 떠 있는 동안·연결 전에는 스스로 렌더하지 않는다). */}
       <TrainingConsentCard />
+
+      {/* ★처리방침 1회성 명확화 고지 — 어드밴스드 셸(GlobalOverlays)과 **같은**
+          컴포넌트다. 고지 표면이 한쪽 모드에만 있으면 "심플로 쓰는 사람은 못
+          본다" 가 되고, 고지로서 결함이다. 동의를 받지 않는 배너라 위 모달들과
+          경쟁하지 않는다(PIPA 모달이 떠 있는 동안은 스스로 렌더하지 않는다). */}
+      <PrivacyClarificationNotice />
     </div>
   );
 }

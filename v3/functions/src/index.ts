@@ -53,9 +53,8 @@ import {
   buildBetaSegmentUsage,
   type GrantHolderRow,
   type SegmentActivityRow,
-  type SegmentEventRow,
-  type SegmentSessionRow,
 } from "./betaSegments";
+import { buildMetadata } from "./telemetryMetadata";
 import { buildProjectAudit, toMillis } from "./projectAudit";
 import {
   verifyPaddleSignature,
@@ -6452,85 +6451,9 @@ interface TelemetryRow {
   decisionComponents?: Record<string, unknown>;
 }
 
-// dispatch:decision fields that get folded into the `metadata` JSON column.
-// `model`/`agentId`/`taskId`/`role` are NOT here — they map to first-class
-// columns already (selectedModel is also sent as `model` for GROUP BY model).
-const DISPATCH_DECISION_META_KEYS = [
-  "reuseVsSpawn",
-  "selectedModel",
-  "complexity",
-  "tags",
-  "eligibleModels",
-  "explicitModel",
-  "decisionReason",
-  "modelSelectionMode",
-  "perModelScores",
-  "agentScore",
-  // ★이 목록은 화이트리스트다 — 여기 없는 필드는 metadata 에 접히지 않고 조용히
-  // 사라진다. P2-3 의 model@effort 기록이 BigQuery 까지 살아 가려면 반드시 등재.
-  "spawnedModel",
-  "modelFallbackReason",
-  // ★#890 F-1~F-4. 같은 이유로 여기 없으면 클라가 보내도 BigQuery 에 안 남는다.
-  "spawnedModelSource",
-  "plannedModelKey",
-  "candidateKeys",
-  "candidateCostIndex",
-  "decisionState",
-  "decisionComponents",
-] as const;
-
-/**
- * Build the `metadata` STRING column value for an event.
- *
- * For dispatch:decision we merge the decision-specific fields (perModelScores,
- * reuseVsSpawn, selection mode, …) into the metadata JSON. Design choice: a
- * single JSON STRING column instead of flattened per-field BigQuery columns.
- *   - Backward compatible: no ALTER TABLE on a streaming-insert table (adding
- *     columns there risks insert failures until the schema change propagates,
- *     and would break replay of existing rows). Deploy = `firebase deploy`
- *     for the function only; no BigQuery migration required.
- *   - Query-friendly: analysts use JSON_VALUE(metadata,'$.reuseVsSpawn'),
- *     JSON_VALUE(metadata,'$.selectedModel'), JSON_QUERY(metadata,
- *     '$.perModelScores') to slice/join against cost_logs.taskId + outcomes.
- */
-function buildMetadata(e: TelemetryRow, accountUserId?: string): string | null {
-  const base =
-    e.metadata != null
-      ? typeof e.metadata === "string"
-        ? safeParseObject(e.metadata)
-        : (e.metadata as Record<string, unknown>)
-      : {};
-  const withAccountUser =
-    accountUserId != null && accountUserId !== ""
-      ? { ...base, accountUserId }
-      : base;
-
-  if (e.event === "dispatch:decision") {
-    const decision: Record<string, unknown> = { ...withAccountUser };
-    const row = e as unknown as Record<string, unknown>;
-    for (const key of DISPATCH_DECISION_META_KEYS) {
-      const v = row[key];
-      if (v !== undefined) decision[key] = v;
-    }
-    return Object.keys(decision).length > 0 ? JSON.stringify(decision) : null;
-  }
-
-  return Object.keys(withAccountUser).length > 0
-    ? JSON.stringify(withAccountUser)
-    : null;
-}
-
-/** Parse a JSON object string, returning {} on anything non-object/invalid. */
-function safeParseObject(s: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(s);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
-}
+// events.metadata 조립은 telemetryMetadata.ts(순수 모듈)로 분리했다 —
+// "events 에 계정 식별자를 넣지 않는다" 는 프라이버시 불변식을 단위테스트가
+// 지킬 수 있는 자리에 두기 위해서다(ticket woXp2c70oR0tliGB8Vs6).
 
 export const logTelemetryBatch = functions.https.onCall(
   async (data, context) => {
@@ -6554,10 +6477,18 @@ export const logTelemetryBatch = functions.https.onCall(
     }
 
     // Auth is required for anti-abuse, but we deliberately DO NOT persist the
-    // uid. The events table is 비식별(익명): the `userId` column now holds the
-    // client-supplied anonymous install id, never the Firebase account uid.
+    // uid — not in the `userId` column and not in `metadata` either. The events
+    // table is 비식별(익명): its only identity is the client-supplied anonymous
+    // install id, and journeys are correlated on that alone.
+    //
+    // History (ticket woXp2c70oR0tliGB8Vs6): the server used to merge
+    // metadata.accountUserId = context.auth.uid so admin analytics could dedup
+    // by account. That silently made a table the privacy policy describes as
+    // carrying no account identifier carry one, so it was removed and the
+    // account axis was retired instead of the promise. Account-linked usage
+    // still exists — but only in cost_logs.userId, whose purpose is showing a
+    // user their own spend back (see logCostBatch / getCostSummary).
     const now = new Date().toISOString();
-    const accountUserId = context.auth.uid;
 
     const rows = events.map((e) => ({
       event: e.event,
@@ -6583,7 +6514,7 @@ export const logTelemetryBatch = functions.https.onCall(
       exitCode: e.exitCode ?? null,
       nodeType: e.nodeType || null,
       nodeCount: e.nodeCount ?? null,
-      metadata: buildMetadata(e, accountUserId),
+      metadata: buildMetadata(e),
       // ML-ready columns
       taskType: e.taskType || null,
       taskComplexity: e.taskComplexity ?? null,
@@ -8015,8 +7946,13 @@ function adminClientExclusion(clientIds: string[]): {
   };
 }
 
-// events 테이블 전용 제외 절. 신규 row 는 metadata.accountUserId 로 존킴/어드민을
-// 정확 제외하고, 과거 row 는 clientId 역참조 목록으로 제외한다.
+// events 테이블 전용 제외 절.
+//
+// ★두 절이 시대별로 나뉜다: clientId 역참조 목록은 **모든 시대**에 적용되고(어드민
+// clientId 는 cost_logs.agentId 조인으로 유추하므로 uid 부착과 무관하다 —
+// resolveAdminClientIds 참조), metadata.accountUserId 절은 계정축 은퇴
+// (EVENTS_ACCOUNT_AXIS_RETIRED_ON) **이전 과거 row 전용**이다. 신규 row 에는
+// accountUserId 가 없어 그 절이 NULL 로 통과하고, 제외는 clientId 절이 담당한다.
 function adminEventExclusion(clientIds: string[]): {
   clause: string;
   params: Record<string, unknown>;
@@ -8606,7 +8542,7 @@ export const getAdminUsageSummary = functions.https.onCall(
  * onboarding:orchestrator_opened → [첫대화 onboarding:first_conversation ·
  * 첫티켓 onboarding:first_ticket] → agent:spawned → task:completed →
  * [첫머지 task:merged(7일 창)] → 핵심경험 → 7일 잔존.
- * 단계별 순차 도달 고유 identity(accountUserId 우선, 과거 clientId 폴백)와
+ * 단계별 순차 도달 고유 identity(익명 설치 ID)와
  * 인접 단계 이탈/전환을 집계하고, 실패-분기(login_failed / folder_connect_failed /
  * orchestrator_blocked / agent:crashed / spawn_blocked / agent_needs_auth /
  * funding_guide_shown)를 errorCategory 로 분해한다
@@ -8618,9 +8554,12 @@ export const getAdminUsageSummary = functions.https.onCall(
  * 자세한 근거는 adminAnalytics.ONBOARDING_FUNNEL_STEPS 주석 참조.
  *
  * 측정·한계는 buildOnboardingFunnel 의 note 참조(auth-gated flush).
- * 신규 row 는 서버가 metadata.accountUserId 를 주입해 계정 기준으로 dedup 하고,
- * 과거 row 는 익명 clientId 로 폴백한다. 운영자 제외는 includeAdmin(기본 false=제외)
- * 토글을 따른다.
+ * ★여정 상관키는 익명 설치 ID(events.userId = telemetryService.getClientId) 하나다.
+ * 과거 row 에만 남아 있는 metadata.accountUserId 를 COALESCE 로 먼저 보긴 하지만,
+ * 계정축 은퇴(EVENTS_ACCOUNT_AXIS_RETIRED_ON) 이후 row 에는 그 값이 없어 자연히
+ * 설치 ID 로 수렴한다 — 즉 이 퍼널은 uid 부착 중단으로 깨지지 않는다. 대신 한 사람이
+ * 두 기기에서 설치하면 두 명으로 세어진다(계정 dedup 포기의 대가).
+ * 운영자 제외는 includeAdmin(기본 false=제외) 토글을 따른다.
  *
  * params: { days?: number, includeAdmin?: boolean } (기본 30, 제외)
  */
@@ -8657,7 +8596,7 @@ export const getAdminOnboardingFunnel = functions
     // 파티션/클러스터 프루닝이 약해질 수 있어 직접 비교한다.
     const eventTs = "timestamp";
 
-    // 순차 퍼널: identity(accountUserId 우선, 과거 row 는 익명 clientId 폴백)별
+    // 순차 퍼널: identity(익명 설치 ID. 과거 row 에 한해 accountUserId 폴백)별
     // 최초 이벤트 시각을 만든 뒤, 각 단계가 직전 단계 이후에 발생한 사용자만 센다.
     // 가입~활성화 창은 24h 로 현실화한다. d_task_completed 는 헤드라인 분자와 같다.
     const funnelEventNames = Array.from(
@@ -8967,6 +8906,13 @@ export const getAdminOnboardingFunnel = functions
  *     metadata.accountUserId 가 있는 row 만 account activity 로 본다.
  *   - ADMIN_UID 와 UUID 형태 agent identity 는 제외한다(includeAdmin=true 면 ADMIN_UID 포함).
  *
+ * ★계정축 은퇴(EVENTS_ACCOUNT_AXIS_RETIRED_ON, ticket woXp2c70oR0tliGB8Vs6):
+ * events 에는 더 이상 accountUserId 가 붙지 않는다. 그래서 events 브랜치는
+ * **과거 구간만** 채우고, 이후 구간의 계정 활동은 cost_logs 만 남는다. 브랜치를
+ * 지우지 않는 이유는 과거 데이터가 여전히 유효하기 때문이고, 그 대신 응답의
+ * note(EVENTS_ACCOUNT_AXIS_NOTE)가 "언제부터 왜 얇아지는지"를 화면에 말해 준다.
+ * 설치 단위 동치 지표는 getAdminOnboardingFunnel / getAdminUsageSummary 에 있다.
+ *
  * params: { days?: number, includeAdmin?: boolean } (기본 30, 제외)
  */
 export const getAdminRetentionCohorts = functions
@@ -9189,6 +9135,10 @@ export const getAdminRetentionCohorts = functions
  *
  * getAdminUsageSummary 의 activeByDay 의미를 account user 기준으로 재구성한다.
  * events.userId 는 쓰지 않고 metadata.accountUserId 와 cost_logs.userId 만 합산한다.
+ *
+ * ★계정축 은퇴(EVENTS_ACCOUNT_AXIS_RETIRED_ON) 이후 events 브랜치는 과거 구간만
+ * 채운다 — 이후의 DAU/WAU/MAU 는 사실상 cost_logs 기준이다. 설치 단위 DAU 는
+ * getAdminUsageSummary.activeByDay 쪽이 계속 온전하다.
  */
 export const getAdminActiveUserMetrics = functions
   .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
@@ -9317,19 +9267,18 @@ export const getAdminActiveUserMetrics = functions
 
 /**
  * getAdminBetaSegmentUsage — 베타/파운더 grant 보유자 세그먼트 사용패턴
- * (🟡 BQ events + cost_logs / 🟢 Firestore subscriptions).
+ * (🟡 BQ cost_logs / 🟢 Firestore subscriptions).
  *
  * TdlWmESR. 기존 어드민 분석은 "전체 계정" 모수를 보는데, 베타 운영에서 실제로
  * 궁금한 건 **grant 를 준 사람들이 실제로 쓰는가**다. 그래서 모수를 Firestore
- * grant 명단으로 고정하고 그 위에 기능사용·세션·재방문·기능채택을 얹는다.
+ * grant 명단으로 고정하고 그 위에 관측률·재방문 리듬을 얹는다.
  *
  * 모수 정의:
  *   - subscriptions.founderGrant === true 인 계정 = 베타/파운더 grant 보유자.
  *     founderGrantReason 으로 파운더/베타선정/베타신청 세그먼트를 가른다
  *     (paymentProvider 로 판정하지 않는다 — founder_grant stomp 이슈).
- *   - 활동 identity 는 getAdminActiveUserMetrics 와 **동일 규약**:
- *     events.metadata.accountUserId ∪ cost_logs.userId. events.userId 는 익명
- *     clientId 라 계정 귀속에 쓰지 않는다.
+ *   - 활동 identity = cost_logs.userId. events.userId 는 익명 설치 ID 라 계정
+ *     귀속에 쓰지 않는다.
  *
  * ★프라이버시(§0-C, 메모리 telemetry_privacy_policy):
  *   - 응답에 uid·이메일 등 식별자는 어떤 필드로도 넣지 않는다. 세그먼트 단위
@@ -9340,10 +9289,13 @@ export const getAdminActiveUserMetrics = functions
  *   - 운영자 본인은 grant 보유자이기도 해서, includeAdmin=false(기본)면 명단
  *     단계에서 미리 빼고 BQ 에 넘긴다.
  *
- * ★데이터 가용성: metadata.accountUserId 는 2026-08-06 적재 시작이라 이벤트
- * 기반 지표는 아직 사실상 비어 있다. 이 콜러블은 그 사실을
- * accountAttributionAvailable=false 로 정직하게 내려보내고, UI 는 "텔레메트리 ON
- * 선행"을 표시한다. 값을 0 으로 꾸며 오도하지 않는다.
+ * ★events 계정축 은퇴(ticket woXp2c70oR0tliGB8Vs6): 이 콜러블은 원래
+ * metadata.accountUserId 로 이벤트를 계정에 귀속시켜 기능사용·세션·기능채택을
+ * 냈다. 그 필드는 서버가 붙이던 Firebase uid 였고, 처리방침이 events 를 익명이라
+ * 고지하는 것과 어긋나 부착을 중단했다. grant 명단(uid)과 익명 설치 ID 를 잇는
+ * 다리가 없어졌으므로 이벤트 3종 쿼리를 **아예 치지 않는다** — 빈 값을 0 으로
+ * 꾸미지도, 설치 단위 수치를 계정 세그먼트인 척 붙이지도 않는다.
+ * 응답의 eventAxisRetired=true 가 UI 에 그 사실을 그대로 전달한다.
  *
  * params: { days?: number, includeAdmin?: boolean } (기본 30, 제외)
  */
@@ -9400,18 +9352,14 @@ export const getAdminBetaSegmentUsage = functions
       };
     }
 
-    const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
     const costTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\``;
-    const accountExpr = `NULLIF(JSON_VALUE(metadata, '$.accountUserId'), '')`;
 
-    // ── 2) 계정별 활동일(events ∪ cost_logs) — 재방문 리듬의 원천 ───────────
+    // ── 2) 계정별 활동일(cost_logs) — 관측률·재방문 리듬의 원천 ─────────────
+    // 계정축 은퇴 전에는 여기에 events(metadata.accountUserId) 브랜치가 UNION 으로
+    // 붙어 있었다. events 에 계정 식별자를 붙이지 않기로 하면서 그 브랜치는
+    // 사라졌고, 남은 계정 단위 신호는 사용량 원장뿐이다.
     const activityQuery = `
       WITH activity AS (
-        SELECT ${accountExpr} AS user_id, DATE(timestamp) AS active_date
-        FROM ${eventsTable}
-        WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
-          AND ${accountExpr} IN UNNEST(@grantUids)
-        UNION ALL
         SELECT
           userId AS user_id,
           DATE(SAFE_CAST(timestamp AS TIMESTAMP)) AS active_date
@@ -9431,41 +9379,13 @@ export const getAdminBetaSegmentUsage = functions
       GROUP BY user_id
     `;
 
-    // ── 3) 계정 × 이벤트종류 — 기능별 사용 + 기능채택(오케/스폰/티켓) ───────
-    const eventQuery = `
-      SELECT
-        ${accountExpr} AS userId,
-        event,
-        COUNT(*) AS n
-      FROM ${eventsTable}
-      WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
-        AND ${accountExpr} IN UNNEST(@grantUids)
-        AND event IS NOT NULL AND event != ''
-      GROUP BY userId, event
-    `;
-
-    // ── 4) 세션 빈도·길이 ───────────────────────────────────────────────────
-    // ★session:ended 는 정상 종료에서만 발사된다(강제종료·크래시 시 누락) →
-    // "clean-exit 표본"이며 세션 길이는 체계적으로 과소집계될 수 있다.
-    const sessionQuery = `
-      SELECT
-        ${accountExpr} AS userId,
-        COUNT(*) AS sessions,
-        SUM(durationMs) AS totalMs,
-        APPROX_QUANTILES(durationMs, 100)[OFFSET(50)] AS medianMs
-      FROM ${eventsTable}
-      WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
-        AND event = 'session:ended'
-        AND durationMs > 0
-        AND ${accountExpr} IN UNNEST(@grantUids)
-      GROUP BY userId
-    `;
-
+    // ── 3) 은퇴한 축 ────────────────────────────────────────────────────────
+    // 기능별 사용(계정 × 이벤트종류)·세션(session:ended)은 events 를 grant 계정에
+    // 귀속시켜야 나오는 지표라, 계정축 은퇴와 함께 쿼리를 걷어냈다. 빈 배열을
+    // 넘겨 구조는 유지하되 값을 지어내지 않는다.
     const params = { days: rangeDays, grantUids };
     const queryResults = await runAdminAnalyticsQueriesWithStatus([
       { name: "betaSegment.activity", query: activityQuery, params },
-      { name: "betaSegment.events", query: eventQuery, params },
-      { name: "betaSegment.sessions", query: sessionQuery, params },
     ]);
     // 쿼리 하나가 죽어도 나머지 지표는 살린다(빈 배열로 폴백).
     const rowsAt = (i: number): BigQueryRows => queryResults[i]?.rows ?? [];
@@ -9488,8 +9408,8 @@ export const getAdminBetaSegmentUsage = functions
       ...buildBetaSegmentUsage({
         grantHolders,
         activityRows: rowsAt(0) as SegmentActivityRow[],
-        eventRows: rowsAt(1) as SegmentEventRow[],
-        sessionRows: rowsAt(2) as SegmentSessionRow[],
+        eventRows: [],
+        sessionRows: [],
       }),
     };
   });
@@ -9506,9 +9426,11 @@ export const getAdminBetaSegmentUsage = functions
  * demo_started/completed/cta_click·marketing_consent_shown/granted)는 3.0.19 렌더러
  * 빌드+실사용 전엔 값 0 — 쿼리는 미발화여도 안전하게 0/빈배열을 돌려준다(구조 먼저).
  *
- * 신규 row 는 accountUserId 기준, 과거 row 는 익명 clientId 기준으로 카운트한다.
- * 개별 uid/clientId 는 미노출하며, 운영자 제외는 includeAdmin(기본 false=제외)
- * 토글을 따른다.
+ * ★identity 는 익명 설치 ID(events.userId) 다. COALESCE 로 과거 row 의
+ * metadata.accountUserId 를 먼저 보긴 하지만 계정축 은퇴
+ * (EVENTS_ACCOUNT_AXIS_RETIRED_ON) 이후 row 에는 그 값이 없어 설치 ID 로 수렴한다
+ * — uid 부착 중단으로 이 코크핏이 깨지지 않는다는 뜻이다. 개별 uid/clientId 는
+ * 미노출하며, 운영자 제외는 includeAdmin(기본 false=제외) 토글을 따른다.
  *
  * params: { days?: number, includeAdmin?: boolean } (기본 30, 제외)
  */
