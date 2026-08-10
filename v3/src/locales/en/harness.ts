@@ -193,6 +193,16 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.registry.tier.community": "Community",
   "harness.store.registry.referenceOnly":
     "Reference only — browse via link, no in-app install.",
+  "harness.store.registry.usage.skill":
+    "Once installed, agents use this skill via a slash command (/name) or automatically.",
+  "harness.store.registry.usage.mcpServer":
+    "Once installed, it registers in your agents' MCP config and its tools become available automatically.",
+  "harness.store.registry.usage.agent":
+    "Once installed, you can pick this agent type when spawning an agent.",
+  "harness.store.registry.usage.workflow":
+    "Reference only — opened as documentation, not installed.",
+  "harness.store.registry.usage.knowledge":
+    "Knowledge pack (reference only) — browse as agent context material.",
   "harness.store.registry.communityWarnTitle": "Install unreviewed item",
   "harness.store.registry.communityWarnBody":
     "This item is community tier — Marblo has not reviewed its contents. Installing downloads content from {source} onto your machine, where agents can load it. Proceed only after verifying the source yourself.",

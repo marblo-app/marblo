@@ -192,6 +192,16 @@ export const harness = {
   "harness.store.registry.tier.community": "커뮤니티",
   "harness.store.registry.referenceOnly":
     "참조 전용 — 인앱 설치 없이 링크로 열람합니다.",
+  "harness.store.registry.usage.skill":
+    "설치하면 에이전트가 슬래시 커맨드(/이름) 또는 자동으로 이 스킬을 사용합니다.",
+  "harness.store.registry.usage.mcpServer":
+    "설치하면 에이전트 MCP 설정에 등록되어 도구로 자동 노출됩니다.",
+  "harness.store.registry.usage.agent":
+    "설치하면 에이전트를 스폰할 때 이 에이전트 유형으로 선택할 수 있습니다.",
+  "harness.store.registry.usage.workflow":
+    "참고 전용 — 설치가 아니라 문서로 열람합니다.",
+  "harness.store.registry.usage.knowledge":
+    "지식팩(참고 전용) — 에이전트 컨텍스트 참고 자료로 열람합니다.",
   "harness.store.registry.communityWarnTitle": "미검수 항목 설치",
   "harness.store.registry.communityWarnBody":
     "이 항목은 커뮤니티 tier 로, Marblo 가 내용을 검수하지 않았습니다. 설치하면 {source} 의 콘텐츠가 내 머신에 내려받아져 에이전트가 로드할 수 있습니다. 출처를 직접 확인한 뒤에만 진행하세요.",

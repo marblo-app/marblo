@@ -5,6 +5,7 @@ import {
   type Locale,
   type TFunction,
 } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 import { LocalModelsSection } from "../store/LocalModelsSection";
 
 /**
@@ -109,6 +110,26 @@ export type StoreTabKey = StoreCategoryKey | "all" | "localModels";
 export function isReferenceOnlyRegistryType(type: string): boolean {
   return type === "workflow" || type === "knowledge";
 }
+
+/**
+ * 타입별 "사용법 한 줄" — 카드에서 이 항목이 뭘 하는 물건인지 즉시 알려준다.
+ * `isReferenceOnlyRegistryType` 과 의미가 일치해야 한다: workflow/knowledge 는
+ * 참고 전용이라고 여기서도 말한다. 맵에 없는 타입(향후 신설 타입 등)은 줄을
+ * 그리지 않는다 — 잘못된 사용법을 지어내는 것보다 침묵이 낫다.
+ */
+const REGISTRY_USAGE_LINE: Record<
+  string,
+  { icon: string; i18nKey: MessageKey }
+> = {
+  skill: { icon: "🔧", i18nKey: "harness.store.registry.usage.skill" },
+  "mcp-server": {
+    icon: "🔌",
+    i18nKey: "harness.store.registry.usage.mcpServer",
+  },
+  agent: { icon: "🤖", i18nKey: "harness.store.registry.usage.agent" },
+  workflow: { icon: "📄", i18nKey: "harness.store.registry.usage.workflow" },
+  knowledge: { icon: "📚", i18nKey: "harness.store.registry.usage.knowledge" },
+};
 
 const TIER_RANK: Record<RegistryStoreItem["tier"], number> = {
   official: 0,
@@ -807,6 +828,14 @@ export function RegistryStoreSection({
               <p className="mb-2 text-xs text-[#bac2de]">
                 {display.description}
               </p>
+              {REGISTRY_USAGE_LINE[item.type] && (
+                <p className="mb-2 text-[11px] text-[#6c7086]">
+                  <span className="mr-1">
+                    {REGISTRY_USAGE_LINE[item.type].icon}
+                  </span>
+                  {t(REGISTRY_USAGE_LINE[item.type].i18nKey)}
+                </p>
+              )}
 
               {/* 권한 공시 — 스코프 문자열은 모든 tier 에서 verbatim, 경고 톤은
                   미검수 community 의 고위험 스코프에만 적용한다(§4.6). */}
