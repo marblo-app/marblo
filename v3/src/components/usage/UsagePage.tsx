@@ -34,6 +34,7 @@ import type {
 } from "../../lib/usageBreakdown";
 import { VendorCreditsPanel } from "./VendorCreditsPanel";
 import { ModelFactSheet } from "./ModelFactSheet";
+import { OurBenchPanel } from "./OurBenchPanel";
 
 /**
  * Top-level Usage tab. Surfaces what used to be buried two levels deep
@@ -232,6 +233,17 @@ export function UsagePage() {
           쓴 실적" 인 반면 이 표만 "모델 자체의 사실" 이라, 이 탭의 1차 질문
           ("얼마 썼나")을 밀어내지 않도록 접어 둔다. */}
       <ModelFactSheet />
+
+      {/* ★우리 자체 실측(our-measured) — 바로 위 정보표와 **다른 물건**이다.
+          위는 벤더가 발표한 숫자, 이건 우리가 우리 스폰 경로로 직접 잰 숫자다.
+          실행환경이 달라(공식 Docker 아님) 한 표에 놓을 수 없으므로 섹션을
+          나눴고, 그 한계 캡션은 표를 접어도 남는다.
+
+          위치가 여기인 이유: 멀리 떼어 놓는 것이 "안 섞는" 방법처럼 보이지만,
+          비교하려는 사람은 어차피 스크롤한다. 붙여 두고 **왜 뺄셈이 성립하지
+          않는지를 그 자리에서** 말하는 편이 정직하다. 그리고 아래로 밀면 직전
+          사고("Usage 탭에서 안 보인다")가 그대로 재발한다. */}
+      <OurBenchPanel />
 
       {/* Totals — 선택 기간(BQ) 기준. BQ 행이 없으면 라이브 누적으로 폴백하고
           그 사실을 라벨로 드러낸다(두 수치는 답하는 질문이 다르다). */}

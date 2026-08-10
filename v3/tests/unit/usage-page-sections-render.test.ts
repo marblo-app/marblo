@@ -85,6 +85,20 @@ vi.mock("../../src/stores/quickLaneModelStore", () => ({
     sel({ groups: stores.catalogGroups, load: () => {} }),
 }));
 
+// ★우리 자체 실측 섹션도 IPC 스토어를 쓴다. 여기서 **빈 응답**으로 고정하는 게
+// 핵심이다 — 데이터가 없어도 제목과 안내가 남아야 한다는 것이 이 파일의 계약이고,
+// 이 섹션은 그 계약이 만들어진 사고("Usage 탭에 안 보인다")의 직계 후손이다.
+vi.mock("../../src/stores/ourBenchStore", () => ({
+  useOurBenchStore: (sel: (s: unknown) => unknown) =>
+    sel({
+      report: null,
+      status: "ready",
+      error: null,
+      load: () => {},
+      reload: () => {},
+    }),
+}));
+
 vi.mock("../../src/stores/modelFactSheetStore", () => ({
   useModelFactSheetStore: (sel: (s: unknown) => unknown) =>
     sel({
@@ -119,6 +133,10 @@ const SECTION_TITLES = [
   ko["usage.credits.title"],
   ko["usage.section.byModelAgent"],
   ko["usage.rateLimit.title"],
+  // ★우리 자체 실측(#922 의 실측 결과). 데이터가 없어도 제목이 남아야 한다 —
+  // 이 섹션이 붙기 전엔 그 숫자가 마크다운에만 있어 화면에서 아예 보이지 않았고,
+  // 그게 이 티켓의 출발점이다. 벤더 공개치(ModelFactSheet)와는 별개 섹션이다.
+  ko["usage.ourBench.title"],
 ];
 
 describe("UsagePage — 섹션 전수 렌더", () => {

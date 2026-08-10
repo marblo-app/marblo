@@ -645,9 +645,89 @@ interface ModelFactSheetPayload {
   defaultBenchmark: BenchmarkVariantId;
 }
 
+// ── ★우리 자체 실측(our-measured) — 위 벤더 공개치와 **별개 축** ──────────
+// 타입을 위 ModelFact* 계열과 섞지 않고 따로 두는 것 자체가 규율이다. 두 소스는
+// 실행환경이 달라(우리는 native-venv/no-docker, 벤더는 자기 하네스) 한 표에 놓을
+// 수 없고, 타입이 갈라져 있으면 그 조인이 애초에 컴파일되지 않는다.
+
+type OurBenchHarness = "claude" | "codex" | "gold" | "noop";
+
+/** noop=바닥, gold=천장. 모델 성능이 아니라 **채점기 무결성**의 증거다. */
+type OurBenchControlRole = "floor" | "ceiling";
+
+interface OurBenchMeta {
+  label: "our-measured";
+  dataset: string;
+  instances: string[];
+  totalRuns: number;
+  scaffold: string;
+  /** ★공식 Docker 가 아님을 이 값이 드러낸다 — 화면이 반드시 같이 말해야 한다. */
+  execEnv: string;
+  graderVersion: string;
+  generatedAt: string;
+  reportPath: string;
+  /** `generated-report.md` 헤더 문구 그대로(마크다운 강조 포함). */
+  disclaimers: string[];
+}
+
+interface OurBenchCell {
+  harness: OurBenchHarness;
+  /** null = CLI 기본값(대조행). */
+  model: string | null;
+  effort: string | null;
+  graded: number;
+  resolved: number;
+  /** graded=0 이면 null — 0/0 을 0% 로 적지 않는다. */
+  resolvedPct: number | null;
+  noOutput: number;
+  errored: number;
+  avgAgentSeconds: number | null;
+  cliVersion: string | null;
+  scaffold: string;
+  execEnv: string;
+  graderVersion: string;
+}
+
+interface OurBenchInstanceCell {
+  harness: OurBenchHarness;
+  /** null = 채점되지 못함(에러). false(미해결)와 구분된다. */
+  resolved: boolean | null;
+  f2pPassed: number;
+  f2pTotal: number;
+  p2pPassed: number;
+  p2pTotal: number;
+}
+
+interface OurBenchInstanceRow {
+  instanceId: string;
+  cells: OurBenchInstanceCell[];
+}
+
+interface OurBenchControl {
+  role: OurBenchControlRole;
+  harness: OurBenchHarness;
+  resolvedPct: number | null;
+  graded: number;
+}
+
+/** `models:ourBench` 응답. */
+interface OurBenchPayload {
+  meta: OurBenchMeta;
+  cells: OurBenchCell[];
+  instances: OurBenchInstanceRow[];
+  /** ★접힌 상태에서도 노출해야 하는 대조행(noop/gold). */
+  controls: OurBenchControl[];
+  /** 대조행이 아닌 셀 = 실제로 모델을 태운 칸. */
+  measured: OurBenchCell[];
+  /** 마크다운 강조를 뗀 캡션. */
+  disclaimersPlain: string[];
+}
+
 interface ModelsAPI {
   quickLaneCatalog: () => Promise<QuickLaneVendorGroup[]>;
   factSheet: () => Promise<ModelFactSheetPayload>;
+  /** ★벤더 공개치(factSheet)와 **다른 채널**. 섞지 않기 위한 분리다. */
+  ourBench: () => Promise<OurBenchPayload>;
 }
 
 interface OrchestratorModelAPI {

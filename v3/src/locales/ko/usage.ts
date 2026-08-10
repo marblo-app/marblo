@@ -175,6 +175,61 @@ export const usage = {
   "usage.factSheet.footer":
     "단가는 모델 레지스트리(electron/model-registry.ts) 단일소스에서 그대로 읽습니다 — 레지스트리에 모델이 추가되면 이 표에 자동 반영됩니다. SWE-bench 는 문제집합이 다른 4종이고 모델마다 벤치·스캐폴드 조건이 달라 **개략** 값입니다. 각 수치의 1차 출처와 관측일은 셀 아래 링크에 있고, 공식 수치를 못 찾은 칸은 지어내지 않고 '확인 필요' 로 둡니다.",
 
+  // ── ★우리 자체 실측 (our-measured) — 벤더 공개치와 **별개 섹션** ────────
+  // 위 factSheet 은 "벤더가 발표한 숫자" 고 이쪽은 "우리가 직접 잰 숫자" 다.
+  // 실행환경이 달라(공식 Docker 아님) 한 표에 놓을 수 없으므로 섹션 자체를
+  // 나눴고, 그 한계 문구(caption.*)는 접어도 사라지지 않는다.
+  "usage.ourBench.title": "우리 자체 실측 (SWE-bench)",
+  "usage.ourBench.badge": "our-measured",
+  "usage.ourBench.loading": "실측 결과를 불러오는 중…",
+  "usage.ourBench.error":
+    "실측 결과를 불러오지 못했습니다(Electron 브리지 응답 없음).",
+  "usage.ourBench.retry": "다시 시도",
+  "usage.ourBench.empty":
+    "아직 자체 실측 결과가 없습니다. `npm run bench:swe` 로 측정한 뒤 `npm run bench:swe:emit` 으로 반영됩니다.",
+  // 한 줄 요약 — ★접힌 상태에서도 항상 보인다(“숫자가 어디에도 안 보인다” 재발 방지).
+  "usage.ourBench.summaryLead": "{dataset} · 인스턴스 {n}개",
+  "usage.ourBench.summaryCell": "{model} {pct}",
+  "usage.ourBench.summaryControl": "대조 noop {floor} · gold {ceiling}",
+  "usage.ourBench.summaryControlTip":
+    "noop(아무것도 안 함)과 gold(정답 패치 적용)는 모델 성능이 아니라 채점기가 정상인지를 재는 대조행입니다. noop 이 0% 가 아니면 채점기가 헐거운 것이고, gold 가 100% 가 아니면 채점기가 조이는 것입니다. 이 두 행이 없으면 위 100% 는 증거 없는 주장입니다.",
+  "usage.ourBench.expand": "전체 표 펼치기",
+  "usage.ourBench.collapse": "전체 표 접기",
+
+  // ★캡션 — `docs/benchmark/generated-report.md` 헤더 문구 **그대로**(마크다운
+  // 강조만 뗀 것). 문구를 여기서 다시 쓰지 않고 생성기 상수와 일치시키며, 그
+  // 일치를 `tests/unit/model-bench-ours.test.ts` 가 못박는다.
+  "usage.ourBench.caption.separate":
+    "★이 표의 숫자는 우리가 우리 스폰 경로로 직접 잰 값이다. 벤더 공개치(electron/model-bench-reference.ts)와 같은 표에 놓지 않는다.",
+  "usage.ourBench.caption.execEnv":
+    "★실행환경이 공식 SWE-bench Docker 이미지가 아니므로 공식 리더보드 수치와 비교할 수 없다. 여기서 읽어도 되는 것은 같은 execEnv·같은 scaffold 안에서의 상대 비교뿐이다.",
+
+  // 펼친 표
+  "usage.ourBench.cellsTitle": "셀별 요약",
+  "usage.ourBench.instancesTitle": "인스턴스 × 하네스",
+  "usage.ourBench.colHarness": "하네스",
+  "usage.ourBench.colModel": "모델",
+  "usage.ourBench.colEffort": "effort",
+  "usage.ourBench.colGraded": "n(채점)",
+  "usage.ourBench.colResolved": "resolved",
+  "usage.ourBench.colPct": "resolved%",
+  "usage.ourBench.colNoOutput": "무산출",
+  "usage.ourBench.colErrored": "에러",
+  "usage.ourBench.colAvg": "평균 시간",
+  "usage.ourBench.colInstance": "인스턴스",
+  "usage.ourBench.cliDefault": "(CLI 기본값)",
+  "usage.ourBench.seconds": "{n}초",
+  "usage.ourBench.control.floor": "대조·바닥",
+  "usage.ourBench.control.ceiling": "대조·천장",
+  "usage.ourBench.grade":
+    "F2P {f2pPassed}/{f2pTotal} · P2P {p2pPassed}/{p2pTotal}",
+  "usage.ourBench.notGraded": "채점 실패",
+  "usage.ourBench.envLine":
+    "scaffold {scaffold} · execEnv {execEnv} · grader {grader}",
+  "usage.ourBench.runsLine": "총 런 {runs}회 · 생성 {generatedAt}",
+  "usage.ourBench.footer":
+    "이 표는 {path} 와 같은 생성기에서 나옵니다 — 사람이 문서를 보고 옮겨 적지 않으므로 문서와 화면이 갈라질 수 없습니다. 에러로 채점 못 한 런은 분모에서 빼지 않고 '에러' 로 따로 셉니다.",
+
   // ── Relative reset time (fmtReset) ──────────────────────
   "usage.reset.soon": "곧",
   "usage.reset.days": "{n}일 후",

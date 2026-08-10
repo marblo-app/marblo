@@ -168,6 +168,60 @@ export const usage: Record<keyof typeof koUsage, string> = {
   "usage.factSheet.footer":
     "Prices are read verbatim from the model registry (electron/model-registry.ts) as the single source — add a model there and it shows up here automatically. SWE-bench is four different problem sets, and each model reports under different benchmark and scaffold conditions, so these are rough figures. Every number links to its primary source and the date it was read; cells with no official number say 'needs checking' rather than guessing.",
 
+  // ── ★Our own measurements (our-measured) — a SEPARATE section ──────────
+  // The fact sheet above holds vendor-published numbers; this holds numbers we
+  // measured ourselves through our own spawn path. The execution environment
+  // differs (not the official Docker images), so the two can never share a
+  // table — and the caption saying so is never hidden behind the collapse.
+  "usage.ourBench.title": "Our own measurements (SWE-bench)",
+  "usage.ourBench.badge": "our-measured",
+  "usage.ourBench.loading": "Loading our measurements…",
+  "usage.ourBench.error":
+    "Could not load our measurements (no response from the Electron bridge).",
+  "usage.ourBench.retry": "Retry",
+  "usage.ourBench.empty":
+    "No measurements of our own yet. Run `npm run bench:swe`, then `npm run bench:swe:emit` to publish them here.",
+  "usage.ourBench.summaryLead": "{dataset} · {n} instances",
+  "usage.ourBench.summaryCell": "{model} {pct}",
+  "usage.ourBench.summaryControl": "controls noop {floor} · gold {ceiling}",
+  "usage.ourBench.summaryControlTip":
+    "noop (do nothing) and gold (apply the reference patch) measure the grader, not the model. If noop is not 0% the grader is too loose; if gold is not 100% it is too strict. Without these two rows the 100% above is a claim with no evidence behind it.",
+  "usage.ourBench.expand": "Show the full table",
+  "usage.ourBench.collapse": "Hide the full table",
+
+  // ★Caption — the header text of `docs/benchmark/generated-report.md`
+  // verbatim (markdown emphasis stripped). The generator constant and these
+  // strings are pinned together by tests/unit/model-bench-ours.test.ts.
+  "usage.ourBench.caption.separate":
+    "★These numbers were measured by us, through our own spawn path. They are never placed in the same table as vendor-published figures (electron/model-bench-reference.ts).",
+  "usage.ourBench.caption.execEnv":
+    "★The execution environment is not the official SWE-bench Docker image, so these cannot be compared against the official leaderboard. The only valid reading is a relative comparison within the same execEnv and the same scaffold.",
+
+  "usage.ourBench.cellsTitle": "Per-cell summary",
+  "usage.ourBench.instancesTitle": "Instance × harness",
+  "usage.ourBench.colHarness": "Harness",
+  "usage.ourBench.colModel": "Model",
+  "usage.ourBench.colEffort": "Effort",
+  "usage.ourBench.colGraded": "n (graded)",
+  "usage.ourBench.colResolved": "Resolved",
+  "usage.ourBench.colPct": "Resolved %",
+  "usage.ourBench.colNoOutput": "No output",
+  "usage.ourBench.colErrored": "Errors",
+  "usage.ourBench.colAvg": "Avg time",
+  "usage.ourBench.colInstance": "Instance",
+  "usage.ourBench.cliDefault": "(CLI default)",
+  "usage.ourBench.seconds": "{n}s",
+  "usage.ourBench.control.floor": "control · floor",
+  "usage.ourBench.control.ceiling": "control · ceiling",
+  "usage.ourBench.grade":
+    "F2P {f2pPassed}/{f2pTotal} · P2P {p2pPassed}/{p2pTotal}",
+  "usage.ourBench.notGraded": "not graded",
+  "usage.ourBench.envLine":
+    "scaffold {scaffold} · execEnv {execEnv} · grader {grader}",
+  "usage.ourBench.runsLine": "{runs} runs · generated {generatedAt}",
+  "usage.ourBench.footer":
+    "This table comes from the same generator as {path} — nobody copies numbers out of the document by hand, so the document and this screen cannot drift apart. Runs that failed before grading are counted separately as 'Errors' rather than dropped from the denominator.",
+
   // ── Relative reset time (fmtReset) ──────────────────────
   "usage.reset.soon": "soon",
   "usage.reset.days": "in {n} days",

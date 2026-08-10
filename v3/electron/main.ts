@@ -150,6 +150,7 @@ import {
   resolveModelPin,
 } from "./model-selection";
 import { modelFactSheetPayload } from "./model-fact-sheet";
+import { ourBenchPayload } from "./model-bench-ours";
 import {
   vendorSecretsSnapshot,
   setVendorSecret,
@@ -5729,6 +5730,20 @@ ipcMain.handle("models:quickLaneCatalog", () => {
  * 바이트도 지나가지 않는다).
  */
 ipcMain.handle("models:factSheet", () => modelFactSheetPayload());
+
+/**
+ * 사용량 탭 **우리 자체 실측**(SWE-bench, our-measured).
+ *
+ * ★위 `models:factSheet` 과 **채널이 다르고 소스도 다르다**. 같은 응답에 합치고
+ * 싶은 유혹이 있지만(둘 다 "모델 성능" 이니까), 합치는 순간 화면에서 두 숫자를
+ * 한 표에 놓지 않을 이유가 사라진다 — 벤더 발표치와 우리 실측치는 실행환경이
+ * 달라 뺄셈이 성립하지 않는다(`model-bench-ours.ts` 상단 §Docker). 채널을 갈라
+ * 두면 "섞지 않는다" 가 규율이 아니라 **구조**가 된다.
+ *
+ * factSheet 과 마찬가지로 순수 상수 파생이고 env·시크릿은 한 바이트도 지나가지
+ * 않는다.
+ */
+ipcMain.handle("models:ourBench", () => ourBenchPayload());
 
 ipcMain.handle(
   "agent:launch",

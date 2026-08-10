@@ -658,6 +658,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
      * 컨텍스트/벤치 참조표의 조인이고, env·시크릿은 지나가지 않는다.
      */
     factSheet: () => ipcRenderer.invoke("models:factSheet"),
+    /**
+     * ★우리 **자체 실측** SWE-bench(our-measured). 위 factSheet(벤더 공개치)와
+     * 채널을 일부러 나눈다 — 소스가 다르고(우리 실행 vs 벤더 발표), 실행환경이
+     * 달라 한 표에 놓을 수 없기 때문이다. 한 응답으로 합치면 화면이 둘을 섞지
+     * 않을 구조적 이유가 사라진다.
+     */
+    ourBench: () => ipcRenderer.invoke("models:ourBench"),
   },
   orchestratorModel: {
     // projectId 를 주면 그 프로젝트의 오케가 마지막으로 돈 모델을 우선 반환/기록
