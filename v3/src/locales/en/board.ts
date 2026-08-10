@@ -31,8 +31,28 @@ export const board: Record<keyof typeof koBoard, string> = {
   "board.view.graphTip": "Graph view — dependsOn DAG",
   "board.graph.empty": "No tasks to graph",
   "board.graph.summary": "{nodes} tasks · {edges} dependencies",
-  "board.graph.hint": "Left runs first · click a node for details",
+  "board.graph.hint": "Scroll to zoom · drag to pan · click a node for details",
   "board.graph.cycle": "Dependency cycle — dashed arrows",
+
+  // TaskGraphView Phase 2 — ops layer (critical path, ready/waiting legend, hover card)
+  "board.graph.critical": "Critical path",
+  "board.graph.criticalTip":
+    "Longest dependency chain — {count} remaining tasks set the finish date",
+  "board.graph.criticalNone": "No dependency chain to highlight",
+  "board.graph.fit": "Fit to view",
+  "board.graph.nodeListLabel": "{count} dependency graph nodes",
+  "board.graph.legend.ready": "Ready {count}",
+  "board.graph.legend.waiting": "Waiting {count}",
+  "board.graph.legend.active": "Active {count}",
+  "board.graph.legend.stuck": "Stuck {count}",
+  "board.graph.legend.done": "Done {count}",
+  "board.graph.legend.critical": "Critical {count}",
+  "board.graph.readiness.ready": "Ready to start — all dependencies are done",
+  "board.graph.readiness.waiting": "Waiting on dependencies",
+  "board.graph.readiness.active": "In flight",
+  "board.graph.readiness.stuck": "Stuck — needs a human",
+  "board.graph.readiness.done": "Done",
+  "board.graph.tooltip.blocks": "{count} tasks waiting on this",
 
   // TaskCard — presence + assignee
   "board.presence.online": "Online",

@@ -29,8 +29,28 @@ export const board = {
   "board.view.graphTip": "그래프 보기 — 의존 관계(dependsOn) DAG",
   "board.graph.empty": "그릴 태스크가 없습니다",
   "board.graph.summary": "태스크 {nodes}개 · 의존 {edges}개",
-  "board.graph.hint": "왼쪽이 먼저 · 노드를 누르면 상세",
+  "board.graph.hint": "휠 확대 · 드래그 이동 · 노드를 누르면 상세",
   "board.graph.cycle": "순환 의존 — 점선 화살표",
+
+  // TaskGraphView Phase 2 — 운영 레이어(크리티컬 패스·준비/대기 범례·호버 카드)
+  "board.graph.critical": "크리티컬 패스",
+  "board.graph.criticalTip":
+    "최장 의존 사슬 — 남은 티켓 {count}개가 완료 시점을 결정합니다",
+  "board.graph.criticalNone": "강조할 의존 사슬이 없습니다",
+  "board.graph.fit": "화면에 맞추기",
+  "board.graph.nodeListLabel": "의존 그래프 노드 {count}개",
+  "board.graph.legend.ready": "준비 {count}",
+  "board.graph.legend.waiting": "대기 {count}",
+  "board.graph.legend.active": "진행 {count}",
+  "board.graph.legend.stuck": "정체 {count}",
+  "board.graph.legend.done": "완료 {count}",
+  "board.graph.legend.critical": "크리티컬 {count}",
+  "board.graph.readiness.ready": "지금 착수 가능 — 선행이 모두 끝났습니다",
+  "board.graph.readiness.waiting": "선행 대기 중",
+  "board.graph.readiness.active": "진행 중",
+  "board.graph.readiness.stuck": "정체 — 사람이 봐야 합니다",
+  "board.graph.readiness.done": "완료",
+  "board.graph.tooltip.blocks": "이 티켓을 기다리는 {count}개",
 
   // TaskCard — presence + assignee
   "board.presence.online": "온라인",
