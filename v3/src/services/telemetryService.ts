@@ -170,7 +170,16 @@ export type TelemetryEvent =
   // 있는 사실은 "이 설치의 계정이 유료 플랜이 됐다" 뿐이다. 그거면 충분하다 —
   // 설치 축 여정(first_run→…)에 결제가 붙는 유일한 다리이기 때문이다.
   // 설치당 1회, 플랜 이름만(금액·결제수단·주문번호 없음).
-  | "billing:subscription_active";
+  | "billing:subscription_active"
+  // ── 라우팅 shadow 비교 (ticket 6LH4Y1GC7xeWA94pW3Ar) ──────────────────────
+  // 로컬 `model-autoselect` 가 고른 칸 vs 클라우드 스텁(`getRoutingRecommendation`)
+  // 이 골랐을 칸. ★행동 변경 0 — 스폰은 언제나 로컬 결정대로 났고, 이 이벤트는
+  // 그 옆에 클라우드의 답을 나란히 적기만 한다. 학습·실반영은 이 단계가 아니다.
+  //
+  // 새 테이블도 서버 스키마 변경도 없다: 다른 이벤트와 똑같이 이 파일의
+  // logTelemetry choke point(비식별 scrub + firstParty 게이트) → logTelemetryBatch
+  // → BigQuery `events` 로 가고, shadow 고유 필드는 전부 metadata JSON 이다.
+  | "routing:shadow";
 
 interface TelemetryPayload {
   event: TelemetryEvent;

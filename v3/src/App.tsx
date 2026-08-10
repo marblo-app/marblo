@@ -41,6 +41,7 @@ import {
   type TelemetryEvent,
 } from "./services/telemetryService";
 import telemetry from "./services/telemetryService";
+import { recordRoutingShadow } from "./services/routingShadowService";
 import { t } from "./lib/i18n";
 import type { User } from "./types/user";
 
@@ -459,6 +460,16 @@ function AppContent() {
             "spawn_gate",
             data.metadata as Record<string, unknown> | undefined
           );
+          return;
+        }
+        // ★라우팅 shadow(티켓 6LH4Y1GC7xeWA94pW3Ar). 이 이름은 **BigQuery 로
+        // 가는 이벤트가 아니다** — 메인이 "클라우드에 물어봐 달라" 고 넘긴
+        // 요청이다. 서비스가 왕복을 마친 뒤 비교 결과를 `routing:shadow` 라는
+        // 다른 이름으로 정식 텔레메트리 경로에 올린다.
+        // ★행동 변경 0: 스폰은 이미 로컬 결정대로 끝났고, 여기서 무슨 일이
+        // 일어나든(실패 포함) 되돌아가지 않는다.
+        if (data.event === "routing:shadow_request") {
+          void recordRoutingShadow(data.shadow);
           return;
         }
         if (data.event === "onboarding:multi_agent_active") {

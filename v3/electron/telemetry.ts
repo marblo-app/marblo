@@ -616,7 +616,62 @@ export const mainTelemetry = {
       decisionComponents: payload.decisionComponents,
     });
   },
+
+  /**
+   * ★라우팅 shadow **요청**(티켓 6LH4Y1GC7xeWA94pW3Ar).
+   *
+   * 이건 BigQuery 로 갈 이벤트가 **아니다**. 렌더러가 이 이름을 가로채
+   * (`App.tsx`) 클라우드 추천을 받아 온 뒤, 비교 결과를 `routing:shadow` 라는
+   * **다른 이름**으로 정식 텔레메트리 경로에 올린다. 이 채널을 재사용하는
+   * 이유는 하나다 — 메인이 렌더러에 무언가를 시키는 배선이 이미 여기뿐이고,
+   * 새 IPC 채널을 파면 preload·타입·정리 코드가 통째로 늘기 때문이다.
+   *
+   * ★행동 변경 0: 이 발신의 성패는 dispatch 에 되돌아오지 않는다(응답 없음).
+   */
+  routingShadowRequest(
+    win: BrowserWindow | null,
+    payload: RoutingShadowRequestPayload,
+  ) {
+    sendTelemetry(win, "routing:shadow_request", {
+      taskId: payload.taskId ?? null,
+      agentId: payload.agentId,
+      shadow: payload,
+    });
+  },
 };
+
+/**
+ * `routing:shadow_request` 페이로드. 비식별 — 숫자·enum·모델 id 뿐이고
+ * 태그는 **개수만** 실린다(문자열은 자유입력이라 뺀다).
+ *
+ * 구조는 `electron/routing-shadow.ShadowRequest` 그대로다. 여기서 그 타입을
+ * import 하지 않는 이유는 telemetry.ts 가 모델·사다리 모듈에 의존하지 않는다는
+ * 기존 규율 때문이다(이 파일은 "무엇을 보내는가" 만 알고 "어떻게 정했는가" 는
+ * 모른다). 형태가 갈리면 `tests/unit/routing-shadow.test.ts` 가 잡는다.
+ */
+export interface RoutingShadowRequestPayload {
+  features: {
+    schemaVersion: number;
+    tier: string;
+    harness: string;
+    entryIndex: number;
+    rungs: { modelKey: string; index: number; costIndex?: number }[];
+    budgetUsedPercent?: number | null;
+    weeklyTokenShare?: number | null;
+    activeAgentCount?: number | null;
+    roleAgentCount?: number | null;
+    role?: string | null;
+    taskType?: string | null;
+    tagCount?: number | null;
+  };
+  localModelKey: string;
+  localMode: string;
+  localDecidedBy: string;
+  localMovedFromEntry: boolean;
+  localColdStart: boolean;
+  taskId?: string | null;
+  agentId?: string | null;
+}
 
 /** task:merged 이벤트 페이로드. 비식별 — 개수·라인±·경로파생 카테고리만. */
 export interface TaskMergedPayload {

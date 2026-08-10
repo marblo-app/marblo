@@ -57,6 +57,7 @@ import {
   resolveEpsilon,
   type AutoModelPlan,
 } from "./model-autoselect";
+import { buildShadowRequest, routingShadowEnabled } from "./routing-shadow";
 import {
   filterAvailableHarnesses,
   type AvailabilityFilter,
@@ -2963,6 +2964,22 @@ export class BridgeServer {
         agents: allAgents,
       }),
     });
+    // ★라우팅 shadow(티켓 6LH4Y1GC7xeWA94pW3Ar) — 결정이 **끝난 뒤**에만 부른다.
+    // 스폰은 이미 위에서 났고, 이 호출의 결과는 아무 데도 되돌아오지 않는다
+    // (행동 변경 0). 계측이 dispatch 를 죽이지 않도록 안에서 전부 삼킨다.
+    this.emitRoutingShadow({
+      role,
+      complexity,
+      taskType: graphCtx.taskType,
+      tagCount: tags.length,
+      selectedModel,
+      autoPlans,
+      budgets: budgetSnapshot,
+      usageRollup,
+      agents: allAgents,
+      taskId: resolvedTaskId,
+      agentId: spawnResult.agentId,
+    });
     // §8.1 폴백 사용자 표식 — complex claude 가 최상위 모델 resolver 를 탔는데
     // 버전가드/미지모델로 폴백됐으면 dispatch 응답에 표시(사용자가 왜 최상위가
     // 아닌지 알 수 있게). read-only 재해석(같은 env → spawn 이 쓴 값과 일치).
@@ -3265,6 +3282,62 @@ export class BridgeServer {
       mainTelemetry.dispatchDecision(this.mainWindow, payload);
     } catch (err) {
       console.warn("[BridgeServer] dispatch:decision telemetry failed:", err);
+    }
+  }
+
+  /**
+   * ★라우팅 shadow 요청 발신(티켓 6LH4Y1GC7xeWA94pW3Ar).
+   *
+   * **비목표**: 학습도 실반영도 아니다. 스폰은 이미 로컬 결정대로 났고, 여기서는
+   * 그 결정의 특징을 렌더러에 넘겨 "클라우드였다면?" 을 물어보게 할 뿐이다.
+   * 응답은 이 클래스로 되돌아오지 않는다 — 돌아올 배선 자체가 없다.
+   *
+   * fail-safe 3중:
+   *   1. env 킬스위치(`MARBLO_ROUTING_SHADOW=0`)면 애초에 안 만든다.
+   *   2. 자동선택이 안 돈 경로(명시 핀·사다리 없는 하네스)는 `null` 이라 no-op.
+   *   3. 무슨 예외가 나도 여기서 삼킨다. dispatch 는 이미 끝나 있고, 계측이
+   *      스폰을 되돌릴 수는 없다(`routingDecisionLabels` 와 같은 규율).
+   */
+  private emitRoutingShadow(input: {
+    role: string;
+    complexity: TaskComplexity | undefined;
+    taskType?: string | null;
+    tagCount: number;
+    selectedModel: string;
+    autoPlans?: Map<ModelType, AutoModelPlan>;
+    budgets?: ModelBudgetSnapshot;
+    usageRollup?: UsageRollupSnapshot | null;
+    agents: readonly AgentInstance[];
+    taskId: string | null;
+    agentId?: string;
+  }): void {
+    try {
+      if (!routingShadowEnabled(process.env.MARBLO_ROUTING_SHADOW)) return;
+      const weeklyTotal = totalTokens(input.usageRollup);
+      const active = input.agents.filter((a) => a.status === "working");
+      const request = buildShadowRequest({
+        plan: input.autoPlans?.get(input.selectedModel as ModelType),
+        tier: input.complexity,
+        role: input.role,
+        taskType: input.taskType ?? null,
+        tagCount: input.tagCount,
+        budgetUsedPercent:
+          input.budgets?.[input.selectedModel as ModelType]?.usedPercent ??
+          null,
+        weeklyTokenShare:
+          weeklyTotal > 0
+            ? tokensForHarness(input.selectedModel, input.usageRollup) /
+              weeklyTotal
+            : null,
+        activeAgentCount: active.length,
+        roleAgentCount: active.filter((a) => a.role === input.role).length,
+        taskId: input.taskId,
+        agentId: input.agentId ?? null,
+      });
+      if (!request) return;
+      mainTelemetry.routingShadowRequest(this.mainWindow, request);
+    } catch (err) {
+      console.warn("[BridgeServer] routing shadow emit failed:", err);
     }
   }
 

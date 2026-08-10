@@ -54,6 +54,12 @@ import {
 } from "./betaSegments";
 import { buildMetadata } from "./telemetryMetadata";
 import {
+  ROUTING_SHADOW_SCHEMA_VERSION,
+  compareShadowRouting,
+  parseShadowFeatures,
+  recommendRouting,
+} from "./routingShadow";
+import {
   ANALYTICS_ID_SALT_ENV,
   pseudonymizeAnalyticsRow,
   readAnalyticsIdSalt,
@@ -6578,6 +6584,64 @@ export const logTelemetryBatch = functions.https.onCall(
     await bigquery.dataset(BQ_DATASET).table(BQ_EVENTS_TABLE).insert(rows);
 
     return { inserted: rows.length };
+  }
+);
+
+// ─── 라우팅 shadow 서빙 스텁 (ticket 6LH4Y1GC7xeWA94pW3Ar) ─────────────────
+//
+// ★★ 비목표를 먼저 적는다. 이 함수는 **학습하지 않고, 실반영하지 않는다.**
+// 클라이언트는 로컬 `model-autoselect` 가 고른 칸으로 이미 스폰을 끝냈고, 여기에
+// 묻는 것은 "클라우드였다면 뭘 골랐을까" 하나뿐이다. 응답은 어떤 스폰도 바꾸지
+// 않으며(shadow), 실패해도 로컬 라우팅은 그대로 돈다(호출측이 fire-and-forget).
+//
+// 왜 쓰기(BigQuery insert)를 여기서 하지 않나: shadow 비교 결과는 **기존 텔레
+// 메트리 경로**(렌더러 logTelemetry → logTelemetryBatch → events)로 적재된다.
+// 그 경로에는 이미 (a) 사용자 동의 게이트, (b) PII scrub, (c) 조인키 가명화가
+// 붙어 있다. 여기서 따로 insert 하면 그 세 가지를 우회하는 두 번째 쓰기 경로가
+// 생긴다 — 새 테이블·새 IAM·새 프라이버시 표면을 만들 이유가 없다. 그래서 이
+// 콜러블은 **읽기 전용**이다(BigQuery 를 건드리지 않는다).
+//
+// 페이로드: 숫자·enum·모델 id 뿐이다. parseShadowFeatures 가 화이트리스트라
+// 그 밖의 키(프롬프트·경로·태그 문자열)는 서버가 보지도 않고 버린다.
+export const getRoutingRecommendation = functions.https.onCall(
+  async (data, context) => {
+    // 인증은 anti-abuse 용이다 — uid 는 어디에도 적지 않는다(이 함수는 아무것도
+    // 적지 않는다).
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Login required");
+    }
+    const features = parseShadowFeatures(data?.features);
+    if (!features) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "features {tier, harness, rungs[]} required"
+      );
+    }
+    // ★순서가 계약이다: 추천이 먼저, 비교가 나중. recommendRouting 은 로컬
+    // 결정을 인자로 받지 않으므로 정답을 훔쳐볼 수 없다(routingShadow.test.ts).
+    const recommendation = recommendRouting(features);
+    if (!recommendation) {
+      // 사다리가 비었거나 티어가 이상하다 = 추천할 근거가 없다. 지어내지 않고
+      // "없음" 을 돌려준다 — 클라는 shadow 이벤트를 남기지 않고 끝낸다.
+      return { schemaVersion: ROUTING_SHADOW_SCHEMA_VERSION, ok: false };
+    }
+    const comparison = compareShadowRouting(
+      features,
+      recommendation,
+      data?.localModelKey
+    );
+    return {
+      schemaVersion: ROUTING_SHADOW_SCHEMA_VERSION,
+      ok: true,
+      recommendation: {
+        modelKey: recommendation.modelKey,
+        heuristicVersion: recommendation.heuristicVersion,
+        decidedBy: recommendation.decidedBy,
+        reason: recommendation.reason,
+        scores: recommendation.scores,
+      },
+      comparison,
+    };
   }
 );
 

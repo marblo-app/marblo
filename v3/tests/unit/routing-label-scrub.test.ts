@@ -82,4 +82,44 @@ describe("라우팅 라벨 × PII 스크럽 (#890 §7-A 동반 검토)", () => {
     const stopped = { outputChars: 1240, noOutput: true, exitCode: 1 };
     expect(scrubValue(stopped)).toEqual(stopped);
   });
+
+  // ── 라우팅 shadow (티켓 6LH4Y1GC7xeWA94pW3Ar) ─────────────────────────────
+  // 같은 동반 검토를 shadow 이벤트의 metadata 에도 적용한다. 특히 `...ModelKey`
+  // 계열이 `_KEY` 규칙(언더스코어 필수)에 걸리지 않는다는 판정을 못 박는다 —
+  // 걸리면 이벤트가 조용히 `<REDACTED>` 로 채워져 일치율이 통째로 거짓이 된다.
+  const SHADOW_METADATA = {
+    cloudModelKey: "claude-sonnet-5",
+    localModelKey: "claude-opus-5",
+    rungDelta: -1,
+    costDelta: -12.5,
+    cloudDecidedBy: "cost",
+    heuristicVersion: "heuristic-v0-cost-fit",
+    localMode: "top-score",
+    localDecidedBy: "kg",
+    localMovedFromEntry: false,
+    localColdStart: true,
+    tier: "standard",
+    harness: "claude",
+  };
+
+  it("shadow metadata 는 스크럽을 손상 없이 통과한다", () => {
+    expect(scrubValue(SHADOW_METADATA)).toEqual(SHADOW_METADATA);
+  });
+
+  it("★shadow 요청 특징에 자유입력이 섞이면 그 키는 떨어진다", () => {
+    // features 는 숫자·enum·모델 id 만 싣는 계약이다(태그는 개수만). 계약이
+    // 깨져 원문이 섞여 들어와도 choke point 가 마지막으로 걷어낸다.
+    const scrubbed = scrubValue({
+      tier: "complex",
+      harness: "gpt",
+      tagCount: 3,
+      rungs: [{ modelKey: "gpt-5.6-sol@high", index: 2, costIndex: 17.5 }],
+      prompt: "티켓 본문이 실렸다고 가정",
+    }) as Record<string, unknown>;
+    expect(scrubbed.prompt).toBeUndefined();
+    expect(scrubbed.tagCount).toBe(3);
+    expect(scrubbed.rungs).toEqual([
+      { modelKey: "gpt-5.6-sol@high", index: 2, costIndex: 17.5 },
+    ]);
+  });
 });
