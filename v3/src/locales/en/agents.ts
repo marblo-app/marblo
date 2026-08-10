@@ -234,6 +234,17 @@ export const agents: Record<keyof typeof koAgents, string> = {
     "↑/↓: move · Enter / → / click: focus · double-click: Agents tab",
   "agents.row.terminalTitle": "↑/↓: move · Enter: focus terminal",
 
+  // ── Close (X) — row / focus header ──────────────────────────
+  "agents.close.rowAria": "Close {name}",
+  "agents.close.rowAgentTitle": "Close — end the session and remove it here",
+  "agents.close.rowTerminalTitle": "Close terminal (kills the PTY)",
+  "agents.close.confirmTitle": "Close a working agent?",
+  "agents.close.confirmBody":
+    '"{name}" is working right now. Closing ends its session and removes it from the list.',
+  "agents.close.confirmWarning": "Work in progress cannot be recovered.",
+  "agents.close.confirm": "Close",
+  "agents.close.cancel": "Cancel",
+
   // ── Focus view ──────────────────────────────────────────────
   "agents.focus.backTitle": "Back to list (← / Esc)",
   "agents.focus.renameTitle": "Rename (Ctrl+R)",

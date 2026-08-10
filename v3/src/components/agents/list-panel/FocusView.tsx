@@ -20,6 +20,9 @@ interface Props {
   onRename: (newName: string) => Promise<void> | void;
   onStart?: () => Promise<void> | void;
   isStarting?: boolean;
+  /** 이 항목(에이전트/터미널) 자체를 닫는다 — 헤더의 X. */
+  onClose?: () => void;
+  isClosing?: boolean;
 }
 
 export function FocusView({
@@ -32,6 +35,8 @@ export function FocusView({
   onRename,
   onStart,
   isStarting,
+  onClose,
+  isClosing,
 }: Props) {
   const { t } = useTranslation();
   // Defense-in-depth: 미지 vendor/status 가 진입하면 crash 대신 회색 fallback.
@@ -228,6 +233,39 @@ export function FocusView({
             ›
           </button>
         </div>
+
+        {/* 열려 있는 항목의 X — 목록 행의 X 와 같은 동작(같은 핸들러)이다.
+            드릴인 상태에서 목록으로 돌아가지 않고 바로 닫을 수 있어야 한다. */}
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isClosing}
+            aria-label={t("agents.close.rowAria", { name: row.displayName })}
+            title={
+              row.isAgent
+                ? t("agents.close.rowAgentTitle")
+                : t("agents.close.rowTerminalTitle")
+            }
+            className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[#6c7086] transition-colors hover:bg-[#313244] hover:text-[#f38ba8] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isClosing ? (
+              <span className="text-[10px]">…</span>
+            ) : (
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                aria-hidden
+              >
+                <path d="M3 3l6 6M9 3l-6 6" />
+              </svg>
+            )}
+          </button>
+        )}
       </div>
     </div>
   );

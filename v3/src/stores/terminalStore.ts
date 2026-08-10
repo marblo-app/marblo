@@ -117,8 +117,16 @@ const terminalStore = create<TerminalState>((set, get) => ({
     // 프리뷰용 ptyMirror 리스너까지 함께 사라진다. 미러의 attached 플래그를
     // 정리하지 않으면 다음 attach()가 early-return 해 데드 미러가 된다(P2-7).
     usePtyMirrorStore.getState().release(id);
-    // Only kill if it's not an agent session (agent manages its own lifecycle)
-    if (!session?.isAgent) {
+    // ★kill 은 **이 창이 소유한 셸 터미널** 에만 한다. 에이전트 PTY 의 소유자는
+    // AgentManager 이고(agent:stop → ptyManager.kill 이 유일한 초크포인트),
+    // 렌더러가 같은 세션에 pty:kill 을 또 부르면 이미 destroy 된 pty 를 두 번
+    // 만지는 경합이 된다.
+    //
+    // `session` 이 없는 경우(이미 detach 됐거나 다른 창 소유)도 kill 하지
+    // 않는다 — 종전 `!session?.isAgent` 는 **미추적 id 를 셸로 접어서** 에이전트
+    // PTY 를 렌더러가 직접 죽이는 경로를 열어 두고 있었다. 여기서는 리스너와
+    // 미러만 회수하는 게 맞다.
+    if (session && !session.isAgent) {
       await window.electronAPI.pty.kill(id);
       // 영속 entry 도 제거 → 다음 재시작 때 부활하지 않음.
       const projectId = useProjectStore.getState().currentProject?.id;

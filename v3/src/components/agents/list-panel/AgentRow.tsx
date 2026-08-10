@@ -16,7 +16,13 @@ interface Props {
   onSelect: () => void;
   onDoubleClick: () => void;
   onKill?: () => void;
+  /**
+   * 항목 자체를 닫는다 — 에이전트든 셸 터미널이든 이 행이 사라진다. onKill 이
+   * "세션만 정지(행은 stopped 로 남음)" 인 것과 갈린다.
+   */
+  onClose?: () => void;
   isDeleting?: boolean;
+  isClosing?: boolean;
 }
 
 function AgentRowImpl({
@@ -25,7 +31,9 @@ function AgentRowImpl({
   onSelect,
   onDoubleClick,
   onKill,
+  onClose,
   isDeleting = false,
+  isClosing = false,
 }: Props) {
   const { t } = useTranslation();
   // Defense-in-depth: row.vendor/status 는 AgentListPanel 에서 normalize 되지만,
@@ -55,7 +63,7 @@ function AgentRowImpl({
       title={
         row.isAgent ? t("agents.row.agentTitle") : t("agents.row.terminalTitle")
       }
-      className={`relative flex items-center gap-3 px-3 py-2 border-b border-[#313244] cursor-pointer transition-colors ${
+      className={`group relative flex items-center gap-3 px-3 py-2 border-b border-[#313244] cursor-pointer transition-colors ${
         isHighlighted ? "bg-[#313244]" : "hover:bg-[#1e1e2e]/60"
       }`}
       style={{ minHeight: 52 }}
@@ -125,6 +133,47 @@ function AgentRowImpl({
           }
         >
           {isDeleting ? "…" : row.status === "stopped" ? "정리" : "Kill"}
+        </button>
+      )}
+
+      {/* 닫기(X) — 에이전트와 셸 터미널 **둘 다** 받는다. 종전엔 이 자리가
+          `row.isAgent` 로 잠겨 있어서 터미널 행은 닫을 수단이 아예 없었다.
+          hover/포커스 시 드러나고, 닫는 중에는 계속 보인다(사라지면 눌린 게
+          맞는지 알 수 없다). */}
+      {onClose && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onClose();
+          }}
+          disabled={isClosing}
+          aria-label={t("agents.close.rowAria", { name: row.displayName })}
+          title={
+            row.isAgent
+              ? t("agents.close.rowAgentTitle")
+              : t("agents.close.rowTerminalTitle")
+          }
+          className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[#6c7086] transition-all hover:bg-[#45475a] hover:text-[#f38ba8] focus-visible:opacity-100 disabled:cursor-not-allowed disabled:opacity-50 ${
+            isClosing ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          }`}
+        >
+          {isClosing ? (
+            <span className="text-[10px]">…</span>
+          ) : (
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              aria-hidden
+            >
+              <path d="M3 3l6 6M9 3l-6 6" />
+            </svg>
+          )}
         </button>
       )}
 

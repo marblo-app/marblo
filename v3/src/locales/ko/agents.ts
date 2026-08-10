@@ -226,6 +226,17 @@ export const agents = {
     "↑/↓: 이동 · Enter / → / 클릭: 포커스 · 더블클릭: Agents 탭",
   "agents.row.terminalTitle": "↑/↓: 이동 · Enter: 터미널 포커스",
 
+  // ── Close (X) — row / focus header ──────────────────────────
+  "agents.close.rowAria": "{name} 닫기",
+  "agents.close.rowAgentTitle": "닫기 — 세션 종료 후 목록에서 제거",
+  "agents.close.rowTerminalTitle": "터미널 닫기 (PTY 종료)",
+  "agents.close.confirmTitle": "작업 중인 에이전트를 닫을까요?",
+  "agents.close.confirmBody":
+    '"{name}" 은(는) 지금 작업 중입니다. 닫으면 세션이 종료되고 목록에서 사라집니다.',
+  "agents.close.confirmWarning": "진행 중이던 작업은 복구할 수 없습니다.",
+  "agents.close.confirm": "닫기",
+  "agents.close.cancel": "취소",
+
   // ── Focus view ──────────────────────────────────────────────
   "agents.focus.backTitle": "목록으로 (← / Esc)",
   "agents.focus.renameTitle": "이름 변경 (Ctrl+R)",

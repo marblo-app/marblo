@@ -7,9 +7,14 @@ import { useAgentFocusStore } from "../../../stores/agentFocusStore";
 import { AgentRow } from "./AgentRow";
 import { EmptyState } from "./EmptyState";
 import { FocusView } from "./FocusView";
+import { CloseConfirmModal } from "./CloseConfirmModal";
 import { VENDOR_VISUALS, type AgentRowData, type VendorKind } from "./types";
 import TerminalView from "../../terminal/TerminalView";
 import { findAgentPtySessionId } from "../../../lib/agentTerminal";
+import {
+  closePlanFor,
+  neighborIdAfterClose,
+} from "../../../lib/agentEntryClose";
 import { useTranslation } from "../../../lib/i18n";
 
 // Panel height (drag-resizable, persisted to localStorage). MIN of 180 keeps
@@ -68,10 +73,14 @@ export function AgentListPanel({
   const deleteAgent = useAgentStore((s) => s.deleteAgent);
   const sessions = useTerminalStore((s) => s.sessions);
   const createTerminalSession = useTerminalStore((s) => s.createSession);
+  const closeTerminalSession = useTerminalStore((s) => s.closeSession);
   const requestJump = useNavigationStore((s) => s.requestJump);
   const projectId = useProjectStore((s) => s.currentProject?.id) ?? "";
   const [startingId, setStartingId] = useState<string | null>(null);
   const [deletingIds, setDeletingIds] = useState<Set<string>>(() => new Set());
+  // 닫기(X) 진행 중인 행 + 작업 중 에이전트에 대한 손실 경고 대기열.
+  const [closingIds, setClosingIds] = useState<Set<string>>(() => new Set());
+  const [pendingClose, setPendingClose] = useState<AgentRowData | null>(null);
   // Single-select focus model (Claude /agents style). When set, the panel
   // body switches from the row list to a fullscreen-in-panel FocusView for
   // that agent. null = list view.
@@ -287,6 +296,96 @@ export function AgentListPanel({
     [deleteAgent, focusedId, setDeleting, setFocusedId, stopAgent],
   );
 
+  const setClosing = useCallback((id: string, isClosing: boolean) => {
+    setClosingIds((current) => {
+      const next = new Set(current);
+      if (isClosing) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  /**
+   * 항목 닫기의 실행부. 자원 정리 순서가 이 함수의 전부다:
+   *
+   *   terminal   → closeSession 이 pty:kill 까지 부른다. main 의 ptyManager.kill
+   *                이 프로세스 트리 시그널 + destroy + orphan master fd
+   *                closeSync 를 하므로 fd 가 남지 않는다.
+   *   agent      → **먼저** agent-manager 초크포인트(deleteAgent = agent:stop +
+   *                agent:remove + 문서 삭제)로 죽인다. 렌더러가 같은 세션에
+   *                pty:kill 을 따로 부르지 않으므로 중복 kill/경합이 없다.
+   *                그 다음 closeSession 으로 렌더러 쪽 잔재(ipcRenderer 리스너,
+   *                ptyMirror 버퍼, sessions 엔트리)를 회수한다 — 종전엔 이게
+   *                없어서 죽은 에이전트의 세션이 앱 수명 내내 남았다.
+   *                deleteAgent 도 결정적 `agent-<id>` 세션을 같은 식으로 회수하지만
+   *                (다른 표면의 삭제 경로까지 덮기 위함), 이 행이 잡고 있는 id 는
+   *                이름 매칭 결과라 둘이 갈릴 수 있어 여기서 한 번 더 부른다.
+   *                closeSession 은 멱등이라 중복 호출이 안전하다.
+   *
+   * 포커스는 await 전에 인접 항목으로 옮긴다. rows 가 갱신되며 "사라진 focus 는
+   * null" 효과(아래 useEffect)가 먼저 돌면 인접 이동이 통째로 무효가 된다.
+   */
+  const performClose = useCallback(
+    async (row: AgentRowData) => {
+      const plan = closePlanFor(row);
+      const neighborId = neighborIdAfterClose(rows, row.id);
+      const wasFocused = focusedId === row.id;
+      const wasHighlighted = highlightedId === row.id;
+
+      if (wasFocused) setFocusedId(neighborId);
+      if (wasHighlighted) setHighlightedId(neighborId);
+      setClosing(row.id, true);
+      try {
+        if (plan.kind === "terminal") {
+          if (row.ptySessionId) await closeTerminalSession(row.ptySessionId);
+        } else {
+          await deleteAgent(row.id);
+          if (row.ptySessionId) await closeTerminalSession(row.ptySessionId);
+        }
+      } catch (err) {
+        console.error("[AgentListPanel] close failed:", err);
+        // 실패했으면 항목이 그대로 남는다 — 포커스도 되돌려 놔야 사용자가
+        // 방금 무엇을 보고 있었는지 잃지 않는다.
+        if (wasFocused) setFocusedId(row.id);
+        if (wasHighlighted) setHighlightedId(row.id);
+      } finally {
+        setClosing(row.id, false);
+      }
+    },
+    [
+      closeTerminalSession,
+      deleteAgent,
+      focusedId,
+      highlightedId,
+      rows,
+      setClosing,
+      setFocusedId,
+    ],
+  );
+
+  /**
+   * X 진입점. 작업 중(working/running) 에이전트만 손실 경고를 거치고, idle 이나
+   * 이미 종료된 항목·셸 터미널은 즉시 닫힌다.
+   */
+  const handleCloseRow = useCallback(
+    (row: AgentRowData) => {
+      if (closingIds.has(row.id)) return;
+      if (closePlanFor(row).needsConfirm) {
+        setPendingClose(row);
+        return;
+      }
+      void performClose(row);
+    },
+    [closingIds, performClose],
+  );
+
+  const handleConfirmClose = useCallback(() => {
+    const row = pendingClose;
+    if (!row) return;
+    setPendingClose(null);
+    void performClose(row);
+  }, [pendingClose, performClose]);
+
   const handleKillAllAgents = useCallback(async () => {
     if (activeAgents.length === 0) return;
     const confirmed = window.confirm(
@@ -340,6 +439,14 @@ export function AgentListPanel({
       setFocusedId(null);
     }
   }, [focusedId, rows, setFocusedId]);
+
+  // 확인 대기 중인 행이 다른 경로로(오케의 kill_agent, 워치독 등) 사라지면
+  // 경고 모달도 함께 걷는다 — 없는 항목을 닫겠냐고 묻지 않는다.
+  useEffect(() => {
+    if (pendingClose && !rows.some((r) => r.id === pendingClose.id)) {
+      setPendingClose(null);
+    }
+  }, [pendingClose, rows]);
 
   // Initialize / clamp the keyboard highlight. When list re-mounts (after
   // returning from FocusView, or rows change), keep the highlight on the
@@ -565,6 +672,8 @@ export function AgentListPanel({
                   : undefined
               }
               isStarting={startingId === focusedRow.id}
+              onClose={() => handleCloseRow(focusedRow)}
+              isClosing={closingIds.has(focusedRow.id)}
             />
           )}
           <div className="flex-1 min-h-0 relative">
@@ -637,13 +746,26 @@ export function AgentListPanel({
                       }}
                       onDoubleClick={() => handleDoubleClick(row)}
                       onKill={() => handleKillAgent(row)}
+                      onClose={() => handleCloseRow(row)}
                       isDeleting={deletingIds.has(row.id)}
+                      isClosing={closingIds.has(row.id)}
                     />
                   </div>
                 ))}
               </div>
             )}
           </div>
+        )}
+
+        {/* 작업 중 에이전트 닫기 경고 — 리스트/포커스 어느 쪽에서 눌렀든 같은
+            모달을 이 패널 위에 띄운다. */}
+        {pendingClose && (
+          <CloseConfirmModal
+            name={pendingClose.displayName}
+            busy={closingIds.has(pendingClose.id)}
+            onConfirm={handleConfirmClose}
+            onCancel={() => setPendingClose(null)}
+          />
         )}
       </div>
     </div>

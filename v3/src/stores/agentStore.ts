@@ -7,6 +7,7 @@ import {
 } from "../services/firestore";
 import * as agentService from "../services/agentService";
 import { usePtyMirrorStore } from "./ptyMirrorStore";
+import { useTerminalStore } from "./terminalStore";
 import { getSessionIdForAgent } from "./agentSessionMap";
 import { useProjectStore } from "./projectStore";
 import { useSubscriptionStore } from "./subscriptionStore";
@@ -162,7 +163,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // Fleet 프리뷰 미러 회수 — 삭제된 에이전트의 버퍼/attached/리스너가 앱
       // 수명 내내 누적되지 않게(P2-8). 세션 id 는 launch 시 매핑되며 없으면
       // 결정적 `agent-${id}` fallback.
-      usePtyMirrorStore.getState().release(getSessionIdForAgent(id));
+      const sessionId = getSessionIdForAgent(id);
+      usePtyMirrorStore.getState().release(sessionId);
+      // ★렌더러의 터미널 세션도 함께 회수한다. 종전엔 에이전트를 지워도
+      // terminalStore.sessions 에 isAgent 엔트리가 그대로 남아, 그 채널의
+      // ipcRenderer 리스너가 앱 수명 내내 쌓였다(그리고 목록/그리드는 죽은
+      // 세션을 계속 매칭했다). closeSession 은 isAgent 세션에 pty:kill 을
+      // 부르지 않으므로 위 agent.stop 초크포인트와 중복되지 않는다.
+      await useTerminalStore
+        .getState()
+        .closeSession(sessionId)
+        .catch(() => {
+          /* 이미 detach 된 세션 — 정리할 게 없다 */
+        });
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to delete agent",
