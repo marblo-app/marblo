@@ -42,9 +42,23 @@ export function VendorCreditsPanel({
 }) {
   const { t } = useTranslation();
 
-  // 카탈로그가 아직 안 왔거나(Electron 밖) 비었으면 패널 자체를 숨긴다 —
-  // 벤더 목록을 렌더러가 지어낼 수는 없기 때문이다.
-  if (groups.length === 0) return null;
+  // 카탈로그가 아직 안 왔거나(Electron 밖) 비었을 때 — ★패널을 숨기지 않는다.
+  // 벤더 목록을 렌더러가 지어낼 수는 없으므로 **내용**은 비우되, 제목과 사유는
+  // 남긴다. 종전엔 `return null` 이라 섹션이 통째로 사라졌고, 화면에서 조용히
+  // 없어진 섹션은 "데이터가 없다" 가 아니라 "앱이 고장났다" 로 읽힌다
+  // (티켓 kEMh5HGDGggponXrsgby 의 사장님 리포트가 정확히 그 모양이었다).
+  if (groups.length === 0) {
+    return (
+      <div className="space-y-2">
+        <h2 className="text-sm font-medium text-gray-300">
+          {t("usage.credits.title")}
+        </h2>
+        <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4 text-xs text-gray-500">
+          {t("usage.credits.empty")}
+        </div>
+      </div>
+    );
+  }
 
   // 같은 벤더가 하네스별로 쪼개져 올 수 있다(카탈로그 규약). 크레딧은 벤더 축의
   // 사실이므로 벤더로 한 번 접는다 — 필요 키는 합집합, available 은 전부 AND.

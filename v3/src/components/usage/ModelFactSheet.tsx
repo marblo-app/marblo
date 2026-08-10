@@ -8,7 +8,6 @@ import {
   shortHarness,
 } from "../../lib/modelFactFormat";
 import { groupModelsByTier, type ModelTier } from "../../lib/modelTier";
-import { ModelFactChart } from "./ModelFactChart";
 
 /**
  * 사용량 탭 상단 **모델 정보표** — 기본 접힘.
@@ -55,9 +54,19 @@ import { ModelFactChart } from "./ModelFactChart";
  *     기본값으로 두면 표가 절반 비어 보인다.
  *
  * ── 필터 한 줄 ──────────────────────────────────────────────────────────
- * 기준(변형)과 티어는 **차트와 표를 같이** 좁힌다. 그래서 둘 다 카드 하나 안이
- * 아니라 둘 위의 한 줄에 있다 — 차트에만 걸린 필터와 표에만 걸린 필터가 따로 있으면
- * 두 그림이 서로 다른 슬라이스를 보여 주고, 그 어긋남은 눈에 띄지 않는다.
+ * 기준(변형)과 티어는 표를 좁힌다. 둘 다 표 위의 한 줄에 모아 둔다.
+ *
+ * ── ★막대차트를 걷어낸 이유 (티켓 kEMh5HGDGggponXrsgby) ─────────────────
+ * 한동안 이 표 위에 "Price vs performance at a glance" 막대차트가 있었다(단가 패널
+ * + SWE-bench 패널). 그 차트의 입력은 **바로 아래 표와 같은 세 칸**(input/output
+ * 단가, 선택 변형 점수)이었다 — 같은 사실을 두 번 그린 셈이라, 화면이 길어진 만큼
+ * 아래의 "우리가 실제로 얼마 썼나" 섹션들이 밀려났다(사장님 리포트).
+ *
+ * 표를 남기고 차트를 지운 이유: 이 표의 값은 **조건을 달고 다녀야 하는 숫자**다.
+ * 벤치 점수는 스캐폴드·변형·관측일이 붙어야 뜻이 서고, 단가엔 "추정" 배지가 붙는다.
+ * 표는 그 조건들을 같은 칸에 담을 수 있지만 막대는 길이 하나로 접어 버린다. 잃은 건
+ * "눈으로 정렬" 하나이고, 그건 티어 묶음(프리미어·일반작업·가성비)이 이미 대신한다.
+ * 출처 링크·관측일·대체 측정치는 표에 그대로 있다 — 정보는 하나도 안 줄었다.
  *
  * ── ★티어 묶음(프리미어 · 일반작업 · 가성비) ────────────────────────────
  * 위의 세 칸은 정확하지만, 19줄을 훑어 "그래서 뭘 고르나" 를 사용자가 직접 계산해야
@@ -105,7 +114,7 @@ export function ModelFactSheet() {
   // (valueRatio=null) 오케가 `get_model_guidance` 로 듣는 판정과도 갈라진다.
   // 대표는 그 두 경로가 공유하는 한 벌이라 화면과 오케가 같은 티어를 말한다.
   //
-  // 표/차트의 **셀**은 여전히 선택된 변형만 그린다(benchByVariant) — 그 규율은
+  // 표의 **셀**은 여전히 선택된 변형만 그린다(benchByVariant) — 그 규율은
   // 그대로다. 여기서만 자를 하나로 고정할 뿐이다.
   const tierFacts = useMemo(
     () =>
@@ -120,12 +129,6 @@ export function ModelFactSheet() {
   const groups = useMemo(() => groupModelsByTier(tierFacts), [tierFacts]);
   const visibleGroups =
     tierFilter === "all" ? groups : groups.filter((g) => g.tier === tierFilter);
-
-  // 차트는 표와 **같은 슬라이스**를 그린다(필터 한 줄 규율).
-  const visibleRows = useMemo(
-    () => visibleGroups.flatMap((g) => g.rows.map((a) => a.row.row)),
-    [visibleGroups],
-  );
 
   // 펼칠 때 처음 한 번만 읽는다. 접혀 있는 동안은 IPC 왕복이 없다.
   useEffect(() => {
@@ -179,7 +182,7 @@ export function ModelFactSheet() {
 
           {rows.length > 0 && benchmark && activeVariant && (
             <>
-              {/* ★필터 한 줄 — 기준(변형)과 티어가 차트·표를 함께 좁힌다. */}
+              {/* ★필터 한 줄 — 기준(변형)과 티어가 표를 좁힌다. */}
               <div className="space-y-1.5">
                 <VariantFilter
                   variants={variants}
@@ -203,12 +206,6 @@ export function ModelFactSheet() {
                   total: activeVariant.totalModels,
                 })}
               </p>
-
-              <ModelFactChart
-                rows={visibleRows}
-                benchmark={benchmark}
-                variantLabel={activeVariant.label}
-              />
 
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[720px] text-left text-xs">

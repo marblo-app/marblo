@@ -189,7 +189,16 @@ export function UsagePage() {
   }
 
   return (
-    <div className="space-y-6 p-4">
+    // ★`h-full overflow-y-auto` 가 이 페이지의 **버그 수리**다(티켓 kEMh5HGDGggponXrsgby).
+    // 워크스페이스 셸의 pane 은 `absolute inset-0` + 부모 `overflow-hidden` 이라
+    // (`workspace/PaneGroup.tsx`) 자식이 스크롤 컨테이너를 들고 있지 않으면 pane
+    // 높이를 넘는 섹션이 **잘려서 도달 불가**가 된다 — 스크롤바조차 안 생기므로
+    // 화면에선 "그 섹션들이 아예 없다" 로 보인다(사장님 라이브 리포트의 정체).
+    // 레거시 `Layout`(flex-1 overflow-auto)과 `WorkTabs`(absolute inset-0
+    // overflow-auto)는 감싸는 쪽이 스크롤을 들고 있어서 이 결함이 안 드러났다.
+    // 그래서 감싸는 쪽을 고치지 않고 **페이지가 자기 스크롤을 소유**한다 —
+    // `GuideTab` 이 이미 쓰는 패턴이고, 세 호스트 전부에서 옳게 동작한다.
+    <div className="h-full space-y-6 overflow-y-auto p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold text-gray-100">
@@ -1041,7 +1050,19 @@ function RateLimitPanel({
     [agentRows, connectedModels],
   );
 
-  if (rows.length === 0) return null;
+  // 그릴 행이 없을 때 — ★섹션을 숨기지 않는다. CLI 가 하나도 안 깔렸거나
+  // 카탈로그가 아직 안 온 상태이지 "한도 개념이 없는" 상태가 아니다. 종전엔
+  // `return null` 이라 섹션이 통째로 사라져, 사장님 화면에서 "한도 패널이 없다"
+  // 로 보였다(티켓 kEMh5HGDGggponXrsgby).
+  if (rows.length === 0) {
+    return (
+      <Section title={t("usage.rateLimit.title")}>
+        <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4 text-xs text-gray-500">
+          {t("usage.rateLimit.empty")}
+        </div>
+      </Section>
+    );
+  }
 
   return (
     <Section title={t("usage.rateLimit.title")}>
