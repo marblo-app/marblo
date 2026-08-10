@@ -39,6 +39,20 @@ For a source-verified learning path across LLM foundations, agents, RAG, evaluat
 
 ---
 
+## Problem-first demo: Claude Code alone vs Marblo
+
+If Marblo looks like "a kanban board for agents", start here. The board is the display surface; the difference is what happens when several agents touch the same repository at once and the workflow has to stay recoverable.
+
+The demo starts with failure modes, not a feature list:
+
+- **Claude Code alone:** multiple streams in one checkout mix branches, indexes, uncommitted edits, and review diffs.
+- **5-agent end-to-end:** five agents create shared-type conflicts, dependency drift, PM feedback changes, merge ambiguity, and `merged ≠ done` states.
+- **Marblo:** worktree isolation, agent dependencies, live replanning, REVIEW gates, safe merge, and the AI Audit Timeline turn those problems into visible, reviewable scenes.
+
+The scenario, script, and storyboard draft live in [docs/demo/problem-first-demo.md](docs/demo/problem-first-demo.md).
+
+---
+
 ## Install in 30 seconds — no app required
 
 **Everything in this repository is a plain file that works in the CLI you already run.** Start here — installing the app is an upgrade on top, never the gate.
