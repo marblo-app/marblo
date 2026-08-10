@@ -3,7 +3,17 @@ import Link from "next/link";
 import Image from "next/image";
 import HeroWorkspaceMockup from "@/components/HeroWorkspaceMockup";
 import HeroConstellation from "@/components/HeroConstellation";
-import { Check, X, Minus } from "lucide-react";
+import GitHubIcon from "@/components/GitHubIcon";
+import {
+  Check,
+  CheckCircle2,
+  GitMerge,
+  ListChecks,
+  Minus,
+  RefreshCcw,
+  Terminal,
+  X,
+} from "lucide-react";
 import FeatureSection from "@/components/FeatureSection";
 import FeatureVideoSection from "@/components/FeatureVideoSection";
 import BetaTester50Section from "@/components/BetaTester50Section";
@@ -172,6 +182,14 @@ export default function HomePage() {
     orca: "OSS",
   };
 
+  const terminalPainIcons = [
+    GitMerge,
+    CheckCircle2,
+    ListChecks,
+    Terminal,
+    RefreshCcw,
+  ];
+
   return (
     <div>
       <script
@@ -200,7 +218,7 @@ export default function HomePage() {
           <p className="mt-6 text-lg sm:text-xl text-zinc-400 max-w-[22rem] sm:max-w-2xl mx-auto whitespace-pre-line break-words leading-relaxed">
             {t("hero.subtitle")}
           </p>
-          <div className="mt-10 mx-auto flex w-full max-w-[22rem] sm:max-w-none flex-col sm:flex-row gap-4 justify-center">
+          <div className="mt-10 mx-auto flex w-full max-w-[22rem] sm:max-w-none flex-col sm:flex-row sm:flex-wrap gap-4 justify-center">
             <Link
               href={`/${locale}/download`}
               className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-xl text-lg font-semibold text-center transition shadow-lg shadow-indigo-600/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
@@ -213,6 +231,15 @@ export default function HomePage() {
             >
               {t("hero.cta_pricing")}
             </Link>
+            <a
+              href="https://github.com/marblo-app/marblo"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 border border-zinc-700 hover:bg-zinc-800 text-white px-6 py-4 rounded-xl text-base font-semibold text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+            >
+              <GitHubIcon className="h-5 w-5 shrink-0" />
+              {t("hero.cta_github")}
+            </a>
           </div>
 
           {/* Honest prerequisite — AI usage not included, CLI login/account
@@ -258,6 +285,45 @@ export default function HomePage() {
                   </p>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Developer objection — make the real terminal failure modes explicit. */}
+      <section className="px-4 pb-24">
+        <div className="mx-auto max-w-6xl border-y border-zinc-800/80 py-16">
+          <div className="grid grid-cols-1 gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-widest text-cyan-400">
+                {t("terminals.eyebrow")}
+              </p>
+              <h2 className="mt-4 text-3xl font-bold leading-tight text-white md:text-4xl">
+                {t("terminals.title")}
+              </h2>
+              <p className="mt-5 text-lg leading-relaxed text-zinc-400">
+                {t("terminals.subtitle")}
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {[1, 2, 3, 4, 5].map((i) => {
+                const Icon = terminalPainIcons[i - 1];
+
+                return (
+                  <div
+                    key={i}
+                    className="border border-zinc-800 bg-zinc-950/60 p-5"
+                  >
+                    <Icon className="h-5 w-5 text-indigo-300" />
+                    <h3 className="mt-4 text-base font-semibold text-zinc-100">
+                      {t(`terminals.item${i}.pain`)}
+                    </h3>
+                    <p className="mt-2 text-sm leading-relaxed text-zinc-500">
+                      {t(`terminals.item${i}.fix`)}
+                    </p>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

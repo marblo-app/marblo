@@ -100,6 +100,16 @@ export default function Footer() {
                     : "Report a bug"}
                 </Link>
               </li>
+              <li>
+                <a
+                  href="https://github.com/marblo-app/marblo"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-zinc-400 hover:text-white text-sm block mb-2"
+                >
+                  {t("github")}
+                </a>
+              </li>
             </ul>
           </div>
 

@@ -12,13 +12,15 @@
     "privacy": "Privacy",
     "blog": "Blog",
     "faq": "FAQ",
-    "guide": "Guide"
+    "guide": "Guide",
+    "github": "GitHub"
   },
   "hero": {
     "title": "Claude Code and Codex are great coding agents.\nMarblo turns them into an engineering team.",
     "subtitle": "The orchestration layer for the coding agents you already use.",
     "cta_download": "Download",
     "cta_pricing": "View Pricing",
+    "cta_github": "Open source assets & docs on GitHub",
     "badge": "Marblo · AI Agent Orchestration Platform",
     "clickToEnlarge": "Click to enlarge",
     "prereqNote": "AI usage is billed separately · After install, you'll install and sign in to your existing AI CLIs (Claude Code, Codex, etc.) and connect your accounts.",
@@ -51,6 +53,31 @@
         "title": "First multi-agent success",
         "description": "The onboarding path is built around getting a real multi-agent run to completion quickly."
       }
+    }
+  },
+  "terminals": {
+    "eyebrow": "The developer question",
+    "title": "Why not just open 5 terminals?",
+    "subtitle": "You can. The problem starts when those terminals produce real changes in the same repo. Marblo adds the coordination layer terminals do not have.",
+    "item1": {
+      "pain": "Merge conflicts become invisible until late.",
+      "fix": "Each agent works in an isolated worktree, then converges through review instead of racing inside one checkout."
+    },
+    "item2": {
+      "pain": "Merged does not always mean done.",
+      "fix": "Task state stays explicit: claimed, in progress, review, done. A merge is one gate, not the whole definition of completion."
+    },
+    "item3": {
+      "pain": "Nobody knows who changed what.",
+      "fix": "Ownership lives on the ticket, with activity logs tied to the agent doing the work."
+    },
+    "item4": {
+      "pain": "There is no clean isolation.",
+      "fix": "Parallel agents get separate workspace context, so one experiment does not trample another."
+    },
+    "item5": {
+      "pain": "The plan goes stale mid-run.",
+      "fix": "The orchestrator can reassign, ask for clarification, and route follow-up work back onto the board."
     }
   },
   "featureVideo": {
@@ -700,6 +727,7 @@
     "privacy": "Privacy Policy",
     "refund": "Refund Policy",
     "business_info": "Business Information",
+    "github": "GitHub repository",
     "contact": "Contact",
     "biz_company_name": "HYPEMARC Inc.",
     "biz_ceo_label": "CEO",

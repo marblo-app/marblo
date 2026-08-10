@@ -9,6 +9,7 @@ import { Menu, X } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import LanguageToggle from "./LanguageToggle";
 import { comingSoonLabel } from "@/data/lectures";
+import GitHubIcon from "./GitHubIcon";
 
 export default function Header() {
   const t = useTranslations("nav");
@@ -96,6 +97,15 @@ export default function Header() {
             >
               {t("foundation50")}
             </Link>
+            <a
+              href="https://github.com/marblo-app/marblo"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={t("github")}
+              className="text-zinc-400 hover:text-white transition"
+            >
+              <GitHubIcon className="h-5 w-5" />
+            </a>
             <LanguageToggle />
             {user ? (
               <>
@@ -198,6 +208,16 @@ export default function Header() {
             >
               {t("foundation50")}
             </Link>
+            <a
+              href="https://github.com/marblo-app/marblo"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={closeMobile}
+              className="inline-flex items-center gap-2 text-zinc-400 hover:text-white transition"
+            >
+              <GitHubIcon className="h-5 w-5" />
+              {t("github")}
+            </a>
             <div className="pt-1">
               <LanguageToggle />
             </div>
