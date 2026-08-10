@@ -77,6 +77,12 @@ Marblo uses this split as a default shape:
 - **Codex** — frontend and code work: UI components, types, hooks, state management, and consistent application of existing patterns.
 - **Antigravity** — testing and verification: running the code, reproducing failures, checking edge cases, and reporting what actually passed.
 
+## What Marblo supports today
+
+Marblo treats a model integration as two separate things: the **harness** it can spawn and the **provider/model** that harness reaches. The current native harness paths are Claude Code, Codex, Grok Build, and Antigravity. Claude Code, Codex, and Antigravity are the mainline paths; Grok Build is an experimental native harness. Gemini remains as a deprecated compatibility path, while local and custom paths are experimental.
+
+Some providers are intentionally not separate harnesses. GLM, MiniMax, and Kimi Code run through the Claude harness with an Anthropic-compatible env-swap profile and a configured vendor key. That means they can be selected as model/provider rows where configured, but they should not be described as native Marblo harnesses.
+
 This split is a **starting point**, not a fixed rule. Adjust it to the project. In a data-heavy system, Claude may take more schema and domain reasoning while Codex handles transformation code and type safety. In a design-system cleanup, Codex may cover the broad component surface while Antigravity checks rendering, accessibility, and regression paths. In a difficult bug hunt, Antigravity may first narrow the reproduction steps before Claude or Codex receives the fix task.
 
 Good placement is not "give everything to the smartest model." Good placement is a structure where failure can be diagnosed. If the result breaks, you should be able to tell whether the backend contract was wrong, the UI misunderstood the contract, or the test failed to reflect the user path. That is why role output matters as much as model strength. Claude should leave design decisions and reasons. Codex should leave changed files and UI impact. Antigravity should leave commands, results, and residual risk.
