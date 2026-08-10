@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -17,6 +17,7 @@ import { useNavigationStore } from "../../stores/navigationStore";
 import { useAuth } from "../../hooks/useAuth";
 import { KanbanColumn } from "./KanbanColumn";
 import { StuckLane } from "./StuckLane";
+import { TaskGraphView } from "./TaskGraphView";
 import { TaskCard } from "./TaskCard";
 import { TaskCreateModal } from "./TaskCreateModal";
 import { TaskDetailModal } from "./TaskDetailModal";
@@ -36,6 +37,25 @@ const COLUMN_STATUSES: TaskStatus[] = [
 ];
 const ROLES: AgentRole[] = ["backend", "frontend", "test", "devops"];
 
+/**
+ * 보드를 그리는 두 방식. 칸반은 "지금 어느 단계인가", 그래프는 "무엇이 무엇을
+ * 막고 있나" 를 답한다 — 같은 티켓 집합의 다른 축이라 필터·상세 모달·스토어
+ * 구독은 전부 공유하고 렌더만 갈린다.
+ */
+type BoardViewMode = "kanban" | "graph";
+const VIEW_MODE_KEY = "boardViewMode";
+
+function readViewMode(): BoardViewMode {
+  if (typeof window === "undefined") return "kanban";
+  try {
+    return window.localStorage.getItem(VIEW_MODE_KEY) === "graph"
+      ? "graph"
+      : "kanban";
+  } catch {
+    return "kanban";
+  }
+}
+
 export function KanbanBoard() {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -53,6 +73,16 @@ export function KanbanBoard() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showOrchestrator, setShowOrchestrator] = useState(false);
+  const [viewMode, setViewMode] = useState<BoardViewMode>(readViewMode);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(VIEW_MODE_KEY, viewMode);
+    } catch {
+      /* quota / disabled — best-effort */
+    }
+  }, [viewMode]);
 
   // Drag-and-drop state
   const [activeTask, setActiveTask] = useState<Task | null>(null);
@@ -175,6 +205,22 @@ export function KanbanBoard() {
 
   const visibleCount = activeTasks.length + stuck.total;
 
+  // 그래프가 그리는 티켓 = 필터를 통과한 것 중 감춤(보관·삭제)만 뺀 전부.
+  // 활성/정체 구분은 쓰지 않는다 — 의존 관계는 상태와 직교하고, 막힌 티켓이야
+  // 말로 "무엇이 무엇을 기다리나" 를 볼 때 가장 봐야 할 노드다. 대신 칸반에서
+  // 안 보이는 것(감춤)을 그래프에서만 되살리지는 않는다.
+  //
+  // filteredTasks 를 그대로 쓰지 않고 다시 거르는 이유는 참조 안정성이다:
+  // 매 렌더 새 배열이 넘어가면 TaskGraphView 의 레이아웃 useMemo 가 매번 깨진다.
+  const graphTasks = useMemo(() => {
+    const hiddenIds = new Set(hidden.map((task) => task.id));
+    return tasks.filter(
+      (task) =>
+        !hiddenIds.has(task.id) &&
+        (roleFilters.size === 0 || roleFilters.has(task.role)),
+    );
+  }, [tasks, hidden, roleFilters]);
+
   const tasksByColumn = (columnStatus: TaskStatus) =>
     activeTasks.filter((t) => t.status === columnStatus);
 
@@ -283,6 +329,37 @@ export function KanbanBoard() {
 
         <div className="flex-1" />
 
+        {/* View switcher — kanban (status columns) vs graph (dependsOn DAG).
+            Agents 탭의 List/Grid 토글과 같은 형태·같은 지속 방식. */}
+        <div className="flex items-center rounded border border-gray-700 bg-gray-800/50 p-0.5">
+          <button
+            type="button"
+            onClick={() => setViewMode("kanban")}
+            aria-pressed={viewMode === "kanban"}
+            title={t("board.view.kanbanTip")}
+            className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+              viewMode === "kanban"
+                ? "bg-gray-700 text-gray-100"
+                : "text-gray-500 hover:text-gray-300"
+            }`}
+          >
+            ▤ {t("board.view.kanban")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("graph")}
+            aria-pressed={viewMode === "graph"}
+            title={t("board.view.graphTip")}
+            className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+              viewMode === "graph"
+                ? "bg-gray-700 text-gray-100"
+                : "text-gray-500 hover:text-gray-300"
+            }`}
+          >
+            ⑃ {t("board.view.graph")}
+          </button>
+        </div>
+
         {/* Task count — 보관/삭제로 감춘 티켓은 빠진다(화면에 없는 걸 세지
             않는다). 정체분은 여전히 보드 위에 있으므로 포함. */}
         <span className="text-xs text-gray-500">
@@ -332,41 +409,48 @@ export function KanbanBoard() {
         </button>
       </div>
 
-      {/* Board columns */}
-      <DndContext
-        sensors={sensors}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
-      >
-        <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
-          <div className="flex gap-4 h-full">
-            {COLUMN_STATUSES.map((status) => (
-              <KanbanColumn
-                key={status}
-                status={status}
-                tasks={tasksByColumn(status)}
-                onTaskClick={setSelectedTask}
-                isDropTarget={validDropStatuses.has(status)}
-              />
-            ))}
-            {/* DONE 우측 — 드롭 타깃이 아니다. 정체는 사용자가 끌어다 놓는
+      {/* Board body — 뷰 토글에 따라 칸반 컬럼 또는 의존 그래프. 두 뷰가 같은
+          selectedTask 를 쓰므로 상세는 아래 TaskDetailModal 하나로 끝난다. */}
+      {viewMode === "graph" ? (
+        <div className="min-h-0 flex-1">
+          <TaskGraphView tasks={graphTasks} onSelect={setSelectedTask} />
+        </div>
+      ) : (
+        <DndContext
+          sensors={sensors}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
+          <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
+            <div className="flex gap-4 h-full">
+              {COLUMN_STATUSES.map((status) => (
+                <KanbanColumn
+                  key={status}
+                  status={status}
+                  tasks={tasksByColumn(status)}
+                  onTaskClick={setSelectedTask}
+                  isDropTarget={validDropStatuses.has(status)}
+                />
+              ))}
+              {/* DONE 우측 — 드롭 타깃이 아니다. 정체는 사용자가 끌어다 놓는
                 컬럼이 아니라 판정 결과라, 끌어다 놓아도 판정이 그대로면 즉시
                 되돌아온다. */}
-            <StuckLane
-              groups={stuck}
-              hidden={hidden}
-              onTaskClick={setSelectedTask}
-            />
-          </div>
-        </div>
-        <DragOverlay>
-          {activeTask && (
-            <div className="w-[220px] opacity-90">
-              <TaskCard task={activeTask} onClick={() => {}} />
+              <StuckLane
+                groups={stuck}
+                hidden={hidden}
+                onTaskClick={setSelectedTask}
+              />
             </div>
-          )}
-        </DragOverlay>
-      </DndContext>
+          </div>
+          <DragOverlay>
+            {activeTask && (
+              <div className="w-[220px] opacity-90">
+                <TaskCard task={activeTask} onClick={() => {}} />
+              </div>
+            )}
+          </DragOverlay>
+        </DndContext>
+      )}
 
       {/* Modals */}
       {showCreateModal && currentProject && (

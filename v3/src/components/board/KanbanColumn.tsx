@@ -3,7 +3,12 @@ import type { Task, TaskStatus } from "../../types/task";
 import { DraggableTaskCard, TaskCard } from "./TaskCard";
 import { useTranslation } from "../../lib/i18n";
 
-const STATUS_CONFIG: Record<
+/**
+ * 상태 → 라벨·글자색·배경색. ★그래프 뷰(TaskGraphView)가 **이 표를 그대로**
+ * 쓴다 — 같은 보드에서 칸반의 REVIEW 와 그래프의 REVIEW 가 다른 보라색이면
+ * 색이 정보가 아니라 장식이 된다.
+ */
+export const STATUS_CONFIG: Record<
   TaskStatus,
   { label: string; color: string; bg: string }
 > = {

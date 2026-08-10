@@ -24,6 +24,16 @@ export const board: Record<keyof typeof koBoard, string> = {
   "board.column.dropHere": "Drop here",
   "board.column.todoHint": "+ Start with New Task",
 
+  // KanbanBoard — kanban↔graph view toggle, TaskGraphView
+  "board.view.kanban": "Kanban",
+  "board.view.graph": "Graph",
+  "board.view.kanbanTip": "Kanban view — columns by status",
+  "board.view.graphTip": "Graph view — dependsOn DAG",
+  "board.graph.empty": "No tasks to graph",
+  "board.graph.summary": "{nodes} tasks · {edges} dependencies",
+  "board.graph.hint": "Left runs first · click a node for details",
+  "board.graph.cycle": "Dependency cycle — dashed arrows",
+
   // TaskCard — presence + assignee
   "board.presence.online": "Online",
   "board.presence.idle": "Idle",

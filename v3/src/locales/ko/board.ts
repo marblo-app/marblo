@@ -22,6 +22,16 @@ export const board = {
   "board.column.dropHere": "여기에 놓기",
   "board.column.todoHint": "+ 새 태스크로 시작",
 
+  // KanbanBoard — 칸반↔그래프 뷰 토글, TaskGraphView
+  "board.view.kanban": "칸반",
+  "board.view.graph": "그래프",
+  "board.view.kanbanTip": "칸반 보기 — 상태별 컬럼",
+  "board.view.graphTip": "그래프 보기 — 의존 관계(dependsOn) DAG",
+  "board.graph.empty": "그릴 태스크가 없습니다",
+  "board.graph.summary": "태스크 {nodes}개 · 의존 {edges}개",
+  "board.graph.hint": "왼쪽이 먼저 · 노드를 누르면 상세",
+  "board.graph.cycle": "순환 의존 — 점선 화살표",
+
   // TaskCard — presence + assignee
   "board.presence.online": "온라인",
   "board.presence.idle": "유휴",

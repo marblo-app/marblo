@@ -61,14 +61,16 @@ function usePulseOnChange(key: number | string, durationMs = 1400): boolean {
   return pulsing;
 }
 
-const ROLE_COLORS: Record<string, string> = {
+// ★그래프 뷰(TaskGraphView)가 그대로 재사용한다 — 역할 뱃지 색/아이콘이
+// 카드와 노드에서 갈리면 같은 보드 안에서 색이 정보가 아니게 된다.
+export const ROLE_COLORS: Record<string, string> = {
   backend: "bg-orange-500/20 text-orange-400",
   frontend: "bg-cyan-500/20 text-cyan-400",
   test: "bg-pink-500/20 text-pink-400",
   devops: "bg-emerald-500/20 text-emerald-400",
 };
 
-const ROLE_ICONS: Record<string, string> = {
+export const ROLE_ICONS: Record<string, string> = {
   backend: "⚙️",
   frontend: "🎨",
   test: "🧪",
@@ -76,7 +78,7 @@ const ROLE_ICONS: Record<string, string> = {
 };
 
 // agentStore 의 MODEL_ICONS 와 동일 (기존 AgentList/AgentStatusCard 중복 패턴).
-const MODEL_ICONS: Record<string, string> = {
+export const MODEL_ICONS: Record<string, string> = {
   claude: "🟣",
   gemini: "🔵",
   gpt: "🟢",
