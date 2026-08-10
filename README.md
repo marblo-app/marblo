@@ -8,6 +8,20 @@ PM이 칸반 보드에서 태스크를 만들면, Claude Code Agent Teams가 자
 
 ---
 
+## 문제우선 데모: Claude Code alone vs Marblo
+
+Marblo를 "에이전트용 칸반 보드"로만 보면 핵심을 놓칩니다. 보드는 표시 화면이고, 실제 차이는 여러 에이전트가 같은 저장소를 동시에 만질 때 생기는 실패 모드를 운영 가능한 흐름으로 바꾸는 데 있습니다.
+
+데모는 기능 나열이 아니라 문제 장면에서 시작합니다.
+
+- **Claude Code alone:** 한 체크아웃에서 여러 작업 흐름을 동시에 돌리면 브랜치, 인덱스, 미커밋 변경, 리뷰 diff가 한곳에 섞입니다.
+- **5-agent end-to-end:** 다섯 에이전트가 공유 타입, 의존성, PM 피드백, 머지 충돌, `merged ≠ done` 상태를 만들며 프로젝트가 애매해집니다.
+- **Marblo:** worktree isolation, agent dependency, live replanning, REVIEW gate, safe merge, AI Audit Timeline으로 같은 문제를 추적 가능하고 되돌릴 수 있는 장면으로 바꿉니다.
+
+시나리오/스크립트/스토리보드 초안은 [docs/demo/problem-first-demo.md](docs/demo/problem-first-demo.md)에 있습니다.
+
+---
+
 ## 어떻게 동작하나요?
 
 ```
