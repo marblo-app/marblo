@@ -150,14 +150,21 @@ export type TelemetryEvent =
   //   플래그. 개수만 싣는다.
   // · multi_agent_success — 그 동시 2대+ 상태에서 성과가 난 순간(티켓 DONE 또는
   //   머지). 상시 발신.
-  // · first_multi_agent_success — 설치당 **1회**. `durationMs` 에 first_run→이
-  //   순간의 소요시간이 실리고 metadata.withinTargetWindow 가 10분 판정이다.
+  // · first_multi_agent_success — 설치당 **1회**. ★헤드라인 10분 판정은
+  //   `metadata.withinTargetWindowFromConnect`(모델 연결 시계) 이고, first_run
+  //   기준 값(durationMs·withinTargetWindow)은 앞단 포함 참고치로 함께 실린다
+  //   (티켓 Tw6m14gR — 사장님 결정으로 앵커가 first_run→모델 연결로 바뀌었다).
   //   ★서버 timestamp 로는 이 지연을 못 구한다(수신시각이고, 로그인 이전 큐잉분은
   //   나중에 한꺼번에 flush 된다) — beginner_first_completion 과 같은 이유로
   //   클라가 계산해 싣는다.
+  // · model_connected — ★10분 시계의 **앵커**(설치당 1회). "이 설치가 실제로
+  //   에이전트를 돌릴 수 있게 됐다" 는 사실 그 자체이자, 핵심 KPI 의 **분모**다
+  //   (티켓 Tw6m14gR). 연결하지 않은 설치는 이 이벤트가 없으므로 10분 KPI 의
+  //   분모에 아예 들어가지 않는다 — 앞단(설치→연결) 이탈과 분리된다.
   | "onboarding:multi_agent_active"
   | "onboarding:multi_agent_success"
   | "onboarding:first_multi_agent_success"
+  | "onboarding:model_connected"
   // 무료→유료 전환을 **무료 여정 상관키(익명 clientId)에 귀속**시키는 한 칸.
   // 결제 자체는 웹(포트원/#826)에서 일어나 앱을 거치지 않으므로, 앱이 관측할 수
   // 있는 사실은 "이 설치의 계정이 유료 플랜이 됐다" 뿐이다. 그거면 충분하다 —
@@ -350,19 +357,24 @@ function markOncePerInstall(key: string): boolean {
 export const MULTI_AGENT_TARGET_WINDOW_MS = 10 * 60 * 1000;
 
 /**
- * 시계 **시작점 두 개**. 어느 쪽이 옳은지는 제품 판단이라 둘 다 싣고 문서가
- * 정의한다(docs/zero-friction-kpi-completion-2026-08-09.md §시계).
+ * 시계 **시작점 두 개**. 어느 쪽이 헤드라인인지는 제품 판단이고, 사장님 결정으로
+ * **모델 연결 시점**이 정본이 됐다(티켓 Tw6m14gR — 문서 §3).
  *
- * · `firstRunAt` — 앱을 처음 연 순간. 사장님 KPI 문장("10분 안에")의 자연스러운
- *   해석이고, 헤드라인은 이 시계를 쓴다.
- * · `modelConnectedAt` — 이 설치가 **실제로 모델을 돌릴 수 있게 된** 순간(CLI
- *   인증 성공 또는 funding 프로브 ok). ★L0 무료 데모는 룰베이스라 진짜
- *   multi-agent 실행이 원천적으로 불가능하다 — 그래서 first_run 시계는 "우리가
- *   못 고치는 구간(사용자가 CLI 를 설치·로그인하는 시간)"까지 포함한다. 제품
- *   개선의 신호로는 이쪽이 더 공정해서 보조 시계로 함께 싣는다.
+ * · `modelConnectedAt` — ★**헤드라인 앵커**. 이 설치가 **실제로 에이전트를 돌릴
+ *   수 있게 된** 순간. L0 무료 데모는 룰베이스라(실제 CLI 스폰·LLM 0) 진짜
+ *   multi-agent 성공이 **원천적으로 불가능**하다 — 그러므로 first_run 부터 재면
+ *   "연결조차 안 한 사람" 이 영원히 '10분 실패' 로 잡힌다. 그건 제품이 고쳐야
+ *   하는 **앞단 이탈**이지 10분 경험의 실패가 아니다.
+ * · `firstRunAt` — 앱을 처음 연 순간. 이제는 **앞단 포함 참고 시계**다(설치→연결
+ *   구간까지 합친 총 소요시간). 앞단 이탈 자체는 별도 구간으로 집계한다.
+ *
+ * 두 값 모두 같은 이벤트에 실린다 — 어느 쪽을 정본으로 삼든 과거 데이터를 다시
+ * 모을 필요가 없게 한 #902 의 설계를 그대로 쓴다.
  */
 const FIRST_RUN_AT_KEY = "marblo.telemetry.firstRunAt";
 const MODEL_CONNECTED_AT_KEY = "marblo.telemetry.modelConnectedAt";
+/** 앵커 이벤트를 설치당 1회로 접는 마커(스탬프와 별개 — 스탬프는 시계, 이건 발신). */
+const MODEL_CONNECTED_SENT_KEY = "marblo.telemetry.modelConnectedSent";
 
 /** epoch-ms 를 1회만 찍는다(이미 있으면 보존). 실패하면 조용히 없는 것으로 둔다. */
 function stampOnce(key: string): void {
@@ -391,11 +403,47 @@ export function stampFirstRunAt(): void {
 }
 
 /**
- * 이 설치가 모델을 실제로 돌릴 수 있게 된 시각(1회). CLI 인증 성공과 funding
- * 프로브 ok 두 지점에서 불린다 — 먼저 온 쪽이 기록된다.
+ * 이 설치가 모델을 실제로 돌릴 수 있게 된 시각(1회). 아래 세 앵커 지점에서
+ * 불린다 — 먼저 온 쪽이 기록된다.
  */
 export function stampModelConnectedAt(): void {
   stampOnce(MODEL_CONNECTED_AT_KEY);
+}
+
+/**
+ * ★10분 시계의 **앵커 지점 3곳**(티켓 Tw6m14gR). 어느 쪽이든 "이 설치는 이제
+ * 진짜 에이전트를 스폰할 수 있다" 는 같은 사실을 말한다:
+ *
+ * · `spawn_gate` — 사전 스폰 게이트(`harness-manager.checkSpawnAuthGate`)가
+ *   **통과**시킨 순간. 판정의 단일 소스이고, env-swap(BYOM) 유저처럼 우리
+ *   위저드를 한 번도 안 거치는 경로까지 여기서만 잡힌다. 메인이 매번 보내고
+ *   설치당 1회로 접는 건 여기서 한다(first_conversation 과 같은 분업).
+ * · `cli_auth` — 연결 마법사의 인증 단계 성공(`cliSetupStep("auth","success")`).
+ * · `funding_probe` — 프로브 ok(이미 설치·인증돼 마법사를 건너뛴 경로).
+ *
+ * 세 지점 모두 같은 스탬프를 찍고 **같은 이벤트**를 낸다. 서버 집계의 분모가
+ * 정확히 이 이벤트(+ 하위호환용 기존 두 신호)이므로, 여기 목록과 서버의
+ * `MODEL_CONNECT_ANCHOR_EVENTS` 는 짝으로 움직여야 한다.
+ */
+export type ModelConnectTrigger = "spawn_gate" | "cli_auth" | "funding_probe";
+
+/**
+ * 앵커를 관측했다 — 시계를 찍고(항상), 앵커 이벤트를 **설치당 1회** 발신한다.
+ *
+ * 스탬프와 발신을 따로 마킹하는 이유: 스탬프는 이 계측 이전 빌드에서도 이미
+ * 찍혔을 수 있고(#902), 그 설치도 앵커 이벤트는 한 번 내보내야 분모에 들어온다.
+ */
+function noteModelConnected(
+  trigger: ModelConnectTrigger,
+  metadata?: Record<string, unknown>,
+): void {
+  stampModelConnectedAt();
+  if (!markOncePerInstall(MODEL_CONNECTED_SENT_KEY)) return;
+  logTelemetry({
+    event: "onboarding:model_connected",
+    success: true,
+    metadata: { ...(metadata ?? {}), trigger },
+  });
 }
 
 /** now − 시작점. 시작점이 없으면(이 빌드 이전 설치) undefined — 0 을 만들지 않는다. */
@@ -822,10 +870,10 @@ export const telemetry = {
     phase: "enter" | "success" | "fail",
     reason?: string,
   ) {
-    // ★"모델 연결" 시계의 시작점 하나(티켓 pWSnJeQN). 인증 단계 성공 = 이 설치가
-    // 비로소 진짜 에이전트를 돌릴 수 있게 된 순간이다(무료 데모는 룰베이스라
-    // 그 전엔 multi-agent 성공이 원천적으로 불가능하다).
-    if (step === "auth" && phase === "success") stampModelConnectedAt();
+    // ★10분 시계의 앵커 지점 하나(pWSnJeQN → 헤드라인 승격 Tw6m14gR). 인증 단계
+    // 성공 = 이 설치가 비로소 진짜 에이전트를 돌릴 수 있게 된 순간이다(무료
+    // 데모는 룰베이스라 그 전엔 multi-agent 성공이 원천적으로 불가능하다).
+    if (step === "auth" && phase === "success") noteModelConnected("cli_auth");
     logTelemetry({
       event: "onboarding:cli_setup_step",
       success: phase !== "fail",
@@ -976,10 +1024,10 @@ export const telemetry = {
     trigger: "auto" | "recheck",
     blockedReason?: string,
   ) {
-    // ★"모델 연결" 시계의 다른 시작점(티켓 pWSnJeQN). 프로브 ok = 그 계정이
-    // 실제로 한 턴을 돌릴 수 있다는 관측이다. CLI 위저드를 건너뛴 경로(이미
-    // 설치·인증된 유저)는 여기서만 잡힌다. 먼저 온 쪽이 기록된다.
-    if (verdict === "ok") stampModelConnectedAt();
+    // ★10분 시계의 다른 앵커 지점(pWSnJeQN → 헤드라인 승격 Tw6m14gR). 프로브 ok
+    // = 그 계정이 실제로 한 턴을 돌릴 수 있다는 관측이다. CLI 위저드를 건너뛴
+    // 경로(이미 설치·인증된 유저)는 여기서만 잡힌다. 먼저 온 쪽이 기록된다.
+    if (verdict === "ok") noteModelConnected("funding_probe");
     logTelemetry({
       event: "onboarding:funding_probe",
       model,
@@ -1122,7 +1170,22 @@ export const telemetry = {
     });
   },
 
-  // ── ★제로마찰 핵심 KPI (ticket pWSnJeQN) ────────────────────────────────
+  // ── ★제로마찰 핵심 KPI (ticket pWSnJeQN · 앵커 수정 Tw6m14gR) ───────────
+
+  /**
+   * ★10분 시계의 **앵커** 관측 — "이 설치가 실제로 에이전트를 스폰할 수 있게
+   * 됐다". 설치당 1회만 실제로 발신되고, 시계 스탬프는 매번 보존된다.
+   *
+   * 메인(스폰 게이트 통과)이 매번 보내도 여기서 접히므로 볼륨 걱정이 없다 —
+   * one-shot 마커가 localStorage 라 렌더러에만 있는, first_conversation 과 같은
+   * 분업이다. 비식별: trigger 코드와 모델 축(있으면)뿐, 경로·키 없음.
+   */
+  modelConnectedObserved(
+    trigger: ModelConnectTrigger,
+    metadata?: Record<string, unknown>,
+  ) {
+    noteModelConnected(trigger, metadata);
+  },
 
   /**
    * 동시 2대+ 관측(메인이 상승 엣지마다 보낸다). **상시 발신**하되 설치당 첫
@@ -1147,14 +1210,17 @@ export const telemetry = {
    *
    * 매번 보내고(상시), **설치당 첫 건**에는 짝 이벤트
    * `onboarding:first_multi_agent_success` 를 하나 더 보낸다. 그 짝이 KPI 의
-   * 분자이고, `durationMs`(= first_run → 이 순간)와
-   * `metadata.withinTargetWindow`(10분 판정)를 싣는다.
+   * 분자다.
    *
-   * ★두 시계를 함께 싣는 이유는 위 MODEL_CONNECTED_AT_KEY 주석 참조 — 무료 데모
-   * 는 룰베이스라 진짜 multi-agent 성공은 모델 연결 이후에만 가능하다.
+   * ★헤드라인 판정은 **모델 연결 시계**다(티켓 Tw6m14gR):
+   * `metadata.msFromModelConnect` + `withinTargetWindowFromConnect`. first_run
+   * 기준 값(`durationMs`·`msFromFirstRun`·`withinTargetWindow`)은 **앞단(설치→
+   * 연결)까지 포함한 참고치**로 그대로 함께 싣는다 — 의미가 바뀌지 않았으므로
+   * 과거 행과 같은 축에서 읽힌다.
    *
-   * 시작점 스탬프가 없는 설치(이 빌드 이전부터 쓰던 설치)는 duration 을 지어내지
-   * 않고 비운다 — 그 경우 `clockAvailable: false` 로 분모에서 가려낼 수 있다.
+   * 시작점 스탬프가 없는 설치는 duration 을 지어내지 않고 비운다 — first_run
+   * 시계는 `clockAvailable`, 연결 시계는 `connectClockAvailable` 로 각각
+   * 가려낼 수 있다(둘은 서로 다른 사실이다).
    *
    * `taskId`/`projectId` 는 first-class 컬럼으로 올린다(metadata JSON 이 아니라).
    * 창이 여러 개면 같은 완료를 각 렌더러가 한 번씩 볼 수 있는데, taskId 가
@@ -1181,12 +1247,18 @@ export const telemetry = {
       success: true,
       ...(keys?.taskId ? { taskId: keys.taskId } : {}),
       ...(keys?.projectId ? { projectId: keys.projectId } : {}),
-      // first-class 컬럼. 헤드라인 시계(first_run 기준)를 여기 싣는다.
+      // first-class 컬럼. ★여기 실리는 값은 **앞단 포함 총 소요시간**(first_run
+      // 기준)이다 — 헤드라인이 아니다. 의미를 바꾸면 이미 적재된 행과 축이
+      // 갈리므로 그대로 두고, 헤드라인 시계는 metadata 로 읽는다(anchor 참조).
       ...(msFromFirstRun !== undefined ? { durationMs: msFromFirstRun } : {}),
       metadata: {
         ...(metadata ?? {}),
         targetWindowMs: MULTI_AGENT_TARGET_WINDOW_MS,
+        // ★어느 시계가 헤드라인인지를 행 자체가 말하게 한다. 서버는 이 값으로
+        // 이 빌드 이후 행을 식별한다(옛 행에는 이 키가 없다).
+        anchor: "model_connect",
         clockAvailable: msFromFirstRun !== undefined,
+        connectClockAvailable: msFromModelConnect !== undefined,
         ...(msFromFirstRun !== undefined
           ? {
               msFromFirstRun,

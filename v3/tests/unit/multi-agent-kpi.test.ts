@@ -171,6 +171,66 @@ describe("멀티에이전트 KPI 계측", () => {
     );
     expect(typeof meta(first).msFromModelConnect).toBe("number");
     expect(meta(first).withinTargetWindowFromConnect).toBe(true);
+    // ★헤드라인 앵커가 무엇인지 행 자체가 말한다(티켓 Tw6m14gR).
+    expect(meta(first).anchor).toBe("model_connect");
+    expect(meta(first).connectClockAvailable).toBe(true);
+  });
+
+  // ── ★10분 시계의 앵커 (티켓 Tw6m14gR) ───────────────────────────────────
+  //
+  // 사장님 결정으로 시계가 first_run→모델 연결로 바뀌었다. 서버 집계의 **분모**가
+  // 이 앵커 이벤트이므로, 앵커 3지점이 모두 같은 이벤트를 내고 설치당 1회로
+  // 접히는 것이 KPI 의 정확도 그 자체다.
+
+  it("앵커는 스폰게이트·CLI인증·펀딩ok 어디서든 나오고 설치당 1회다", async () => {
+    const { telemetry } = await import("../../src/services/telemetryService");
+
+    telemetry.modelConnectedObserved("spawn_gate", { surface: "agent_launch" });
+    telemetry.cliSetupStep("auth", "success");
+    telemetry.fundingProbe("ok", "claude", "auto");
+
+    const rows = (await drain()).filter(
+      (e) => e.event === "onboarding:model_connected",
+    );
+    expect(rows).toHaveLength(1); // 설치당 1회 — 매 스폰마다 나가면 안 된다
+    expect(meta(rows[0]).trigger).toBe("spawn_gate");
+    expect(meta(rows[0]).surface).toBe("agent_launch");
+  });
+
+  it("연결 앵커가 없으면 연결 시계를 지어내지 않는다(first_run 만 있어도)", async () => {
+    const { telemetry } = await import("../../src/services/telemetryService");
+    localStorage.setItem(
+      "marblo.telemetry.firstRunAt",
+      String(Date.now() - 60_000),
+    );
+
+    telemetry.multiAgentSuccessObserved({ trigger: "merge", concurrent: 2 });
+
+    const first = (await drain()).find(
+      (e) => e.event === "onboarding:first_multi_agent_success",
+    );
+    // 앞단 시계는 있지만 연결 시계는 없다 — 서로 다른 사실이고, 없는 쪽을 0 으로
+    // 지어내면 "연결 0초 만에 성공" 이라는 없는 사실이 KPI 분자에 들어간다.
+    expect(meta(first).clockAvailable).toBe(true);
+    expect(meta(first).connectClockAvailable).toBe(false);
+    expect(meta(first).msFromModelConnect).toBeUndefined();
+    expect(meta(first).withinTargetWindowFromConnect).toBeUndefined();
+  });
+
+  it("연결이 10분을 넘기면 연결 기준 판정도 false 다", async () => {
+    const { telemetry } = await import("../../src/services/telemetryService");
+    localStorage.setItem(
+      "marblo.telemetry.modelConnectedAt",
+      String(Date.now() - 11 * 60 * 1000),
+    );
+
+    telemetry.multiAgentSuccessObserved({ trigger: "merge", concurrent: 2 });
+
+    const first = (await drain()).find(
+      (e) => e.event === "onboarding:first_multi_agent_success",
+    );
+    expect(meta(first).withinTargetWindowFromConnect).toBe(false);
+    expect(meta(first).connectClockAvailable).toBe(true);
   });
 
   it("무료→유료는 설치당 1회, 플랜 이름만 싣는다", async () => {
@@ -208,6 +268,38 @@ describe("멀티에이전트 KPI 계측", () => {
 
     expect(await drain()).toHaveLength(0);
     setTelemetryEnabled(true);
+  });
+});
+
+describe("모델 연결 앵커: 메인 → 렌더러 채널 계약", () => {
+  it("메인이 보내는 이벤트 이름이 렌더러가 접는 이름과 같다", async () => {
+    // 프로세스 경계라 문자열이 복제돼 있다 — 어긋나면 앵커가 조용히 유실되고
+    // 10분 KPI 의 분모가 통째로 비므로 여기서 못박는다.
+    const { mainTelemetry } = await import("../../electron/telemetry");
+    const sent: Array<{ channel: string; payload: Record<string, unknown> }> =
+      [];
+    const fakeWin = {
+      isDestroyed: () => false,
+      webContents: {
+        send: (channel: string, payload: Record<string, unknown>) =>
+          void sent.push({ channel, payload }),
+      },
+    } as unknown as Parameters<typeof mainTelemetry.modelConnected>[0];
+
+    mainTelemetry.modelConnected(fakeWin, {
+      surface: "agent_launch",
+      model: "claude",
+      vendor: "glm",
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].channel).toBe("telemetry:event");
+    expect(sent[0].payload.event).toBe("onboarding:model_connected");
+    const md = sent[0].payload.metadata as Record<string, unknown>;
+    expect(md.trigger).toBe("spawn_gate");
+    expect(md.vendor).toBe("glm");
+    // 비식별: 계정·경로·키 축은 이 이벤트에 없다.
+    expect(Object.keys(md).sort()).toEqual(["surface", "trigger", "vendor"]);
   });
 });
 

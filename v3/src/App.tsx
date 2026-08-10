@@ -450,6 +450,16 @@ function AppContent() {
         // ★멀티에이전트 계측도 같은 분업이다(티켓 pWSnJeQN): 동시성은 메인만
         // 알고(감지=메인 AgentManager), 설치당 1회 마커와 first_run 시계는
         // localStorage 라 렌더러에만 있다(접기·시간계산=여기).
+        // ★10분 시계의 앵커(티켓 Tw6m14gR). 스폰 게이트 통과는 메인만 아는
+        // 사실이고(판정이 거기 있다), 설치당 1회 마커는 렌더러에만 있다 —
+        // 메인이 통과할 때마다 보내고 여기서 첫 건만 실제로 발신된다.
+        if (data.event === "onboarding:model_connected") {
+          telemetry.modelConnectedObserved(
+            "spawn_gate",
+            data.metadata as Record<string, unknown> | undefined,
+          );
+          return;
+        }
         if (data.event === "onboarding:multi_agent_active") {
           telemetry.multiAgentActiveObserved(
             data.metadata as Record<string, unknown> | undefined,

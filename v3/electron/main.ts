@@ -99,6 +99,7 @@ import {
   probeCliAuth,
   checkSpawnAuthGate,
   setSpawnGateObserver,
+  setSpawnGatePassedObserver,
   type CliAuthModel,
 } from "./harness-manager";
 import { getRegistryIndex } from "./registry-client";
@@ -3556,6 +3557,13 @@ costTracker.setSessionLinesSink(
 // 조용히 빠지고, 그게 지금 이 이벤트가 BigQuery 에 0건인 이유이기도 하다.
 setSpawnGateObserver((e) => {
   mainTelemetry.spawnBlocked(mainWindow, e);
+});
+
+// ★10분 시계의 앵커 (티켓 Tw6m14gR). 같은 게이트의 **통과** 쪽 — "이 설치가
+// 실제로 에이전트를 돌릴 수 있게 된" 순간이고, 사장님 결정으로 핵심 KPI 의
+// 시계가 여기서 시작한다. 차단 관측과 같은 이유로 게이트 안에 두고 창만 붙인다.
+setSpawnGatePassedObserver((e) => {
+  mainTelemetry.modelConnected(mainWindow, e);
 });
 
 // Load stored API keys and create LLM provider

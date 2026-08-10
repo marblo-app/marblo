@@ -1212,6 +1212,46 @@ function reportSpawnGateBlocked(e: SpawnGateBlockedEvent): void {
   }
 }
 
+/**
+ * ★게이트 **통과** 관측 (티켓 Tw6m14gR).
+ *
+ * 사장님 결정으로 "10분 안에 첫 multi-agent 성공" 의 시계가 first_run 이 아니라
+ * **모델 연결 완료 시점**부터가 됐다. 그 "연결 완료" 의 코드상 정의가 바로 이
+ * 게이트의 통과다 — 바이너리가 있고 인증이 됐거나(또는 env-swap 벤더 키가 전부
+ * 준비돼) **지금 스폰이 가능한 상태**. 종전에는 거절만 관측했으므로 그 순간이
+ * 데이터에 없었다.
+ *
+ * 상시 발신이다 — 설치당 1회로 접는 일은 렌더러가 한다(one-shot 마커가
+ * localStorage 라 거기에만 있다. first_conversation 과 같은 분업).
+ */
+export interface SpawnGatePassedEvent {
+  /** 어느 표면에서 통과했나(agent_launch / orchestrator_launch / ...). */
+  surface: string;
+  /** 스폰하려던 하네스(claude/gpt/grok/...). */
+  model: string;
+  /** env-swap 벤더 축으로 통과했으면 그 벤더 id. */
+  vendor?: string;
+  /** CLI 인증 축이 없는 하네스(로컬 모델 등)라 프로브 없이 통과했나. */
+  noAuthAxis?: boolean;
+}
+
+let spawnGatePassedObserver: ((e: SpawnGatePassedEvent) => void) | null = null;
+
+/** 통과 관측자를 꽂는다(main 부팅 1회). null 로 해제. */
+export function setSpawnGatePassedObserver(
+  fn: ((e: SpawnGatePassedEvent) => void) | null,
+): void {
+  spawnGatePassedObserver = fn;
+}
+
+function reportSpawnGatePassed(e: SpawnGatePassedEvent): void {
+  try {
+    spawnGatePassedObserver?.(e);
+  } catch {
+    // 관측이 스폰 판정을 깨뜨려서는 안 된다(차단 쪽과 같은 규율).
+  }
+}
+
 /** 이 스폰이 env-swap 벤더로 붙는가 — 붙는다면 그 크레덴셜 준비 상태. */
 interface EnvSwapSpawn {
   vendor: string;
@@ -1287,6 +1327,9 @@ export async function checkSpawnAuthGate(
 ): Promise<SpawnAuthGate> {
   const cliModel = modelToCliAuth(model);
   if (!cliModel) {
+    // CLI 인증 축이 없는 하네스(로컬 모델 등) — 프로브 없이 스폰 가능하다.
+    // 그것도 "지금 돌릴 수 있다" 이므로 연결 앵커로 센다.
+    reportSpawnGatePassed({ surface, model, noAuthAxis: true });
     return { ok: true, model: null, installed: true, authenticated: true };
   }
   const vendorSpawn = envSwapSpawn(model, pinnedModelId);
@@ -1311,6 +1354,10 @@ export async function checkSpawnAuthGate(
   }
   if (vendorSpawn) {
     if (vendorSpawn.ready) {
+      // ★BYOM(env-swap) 경로는 우리 연결 마법사도 funding 프로브도 거치지
+      // 않는다 — 이 통과 관측이 없으면 그 유저는 '연결한 적 없는 설치'로
+      // 남아 10분 KPI 분모에서 통째로 빠진다.
+      reportSpawnGatePassed({ surface, model, vendor: vendorSpawn.vendor });
       return {
         ok: true,
         model: cliModel,
@@ -1355,6 +1402,7 @@ export async function checkSpawnAuthGate(
       reason: "not-authenticated",
     };
   }
+  reportSpawnGatePassed({ surface, model });
   return { ok: true, model: cliModel, installed: true, authenticated: true };
 }
 

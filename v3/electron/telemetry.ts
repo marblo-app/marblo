@@ -314,6 +314,37 @@ export const mainTelemetry = {
   },
 
   /**
+   * ★사전 스폰 게이트가 스폰을 **허용**한 순간 = 이 설치가 실제로 에이전트를
+   * 돌릴 수 있게 된 순간(티켓 Tw6m14gR). "10분 안에 첫 multi-agent 성공" 의
+   * 시계가 여기서 출발한다 — 그 전(무료 데모)은 룰베이스라 multi-agent 성공이
+   * 원천적으로 불가능하고, 연결하지 않은 사람을 '10분 실패'로 세면 안 된다.
+   *
+   * ★상시 발신이다. 설치당 1회로 접는 건 렌더러가 한다(one-shot 마커가
+   * localStorage 라 거기에만 있다) — first_conversation 과 같은 분업.
+   * 비식별: 하네스 이름·표면 라벨·벤더 id 만. 키/경로/계정은 싣지 않는다.
+   */
+  modelConnected(
+    win: BrowserWindow | null,
+    payload: {
+      surface: string;
+      model: string;
+      vendor?: string;
+      noAuthAxis?: boolean;
+    },
+  ) {
+    sendTelemetry(win, "onboarding:model_connected", {
+      model: payload.model,
+      success: true,
+      metadata: {
+        trigger: "spawn_gate",
+        surface: payload.surface,
+        ...(payload.vendor ? { vendor: payload.vendor } : {}),
+        ...(payload.noAuthAxis ? { noAuthAxis: true } : {}),
+      },
+    });
+  },
+
+  /**
    * 스폰은 됐는데 CLI 가 **로그인 화면에서** 멈췄다(백스톱 확정). reason 은
    * LoginBackstopFireReason(no-probe / probe-unauthenticated / grace-expired).
    *

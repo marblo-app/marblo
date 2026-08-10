@@ -1,6 +1,13 @@
-# 제로마찰 KPI 완성 — "10분 안에 첫 multi-agent 성공" 계측 · 2026-08-09
+# 제로마찰 KPI 완성 — "연결 후 10분 내 첫 multi-agent 성공" 계측 · 2026-08-09
 
-- **티켓**: `pWSnJeQNshTSQ9p7POBy`
+> **2026-08-10 개정(티켓 `Tw6m14gRvtpxzd5UYoLm`) — 시계 앵커 변경.** 사장님 결정으로
+> 10분 시계의 시작점이 `app:first_run` → **모델 연결 완료**(유저가 실제로 에이전트를
+> 돌릴 수 있게 된 순간)로 바뀌었다. 근거는 아래 §3 그대로다: 무료 데모는 룰베이스라
+> 진짜 multi-agent 성공이 모델 연결 이후에만 가능하므로, first_run 부터 재면 **연결조차
+> 안 한 사람이 영원히 '10분 실패' 로 잡힌다**. 그 이탈은 앞단(설치→연결) 구간으로
+> 분리해 따로 센다. §3·§4 는 개정 후 내용이고, first_run 기준 값은 참고 축으로 남는다.
+
+- **티켓**: `pWSnJeQNshTSQ9p7POBy` → 앵커 개정 `Tw6m14gRvtpxzd5UYoLm`
 - **선행**: `#895`(활성화 퍼널 전 구간 계측 — first_conversation/first_ticket/first_merge +
   여정 상관키 + gating) · `#888`(온보딩 스톨) · `#826`(구독 purchase GA4)
 - **원칙**: 새 파이프라인 없음. 신규 이벤트도 기존 `logTelemetry` choke point(비식별
@@ -23,14 +30,15 @@
 | 무료→$19 전환                 | 결제는 웹(포트원)이라 **앱 여정 상관키에 붙지 않았다**                            |
 | 방문→다운로드 / 다운로드→설치 | web 경계 — §5 참조(이번 범위 밖)                                                  |
 
-## 2. 계측 (신규 이벤트 4종)
+## 2. 계측 (신규 이벤트 5종 — 앵커 1종은 2026-08-10 개정분)
 
-| 이벤트                                 | 발화 지점                                                                  | 필드                                                                              | 비식별                                      |
-| -------------------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------- |
-| `onboarding:multi_agent_active`        | 메인 `AgentManager` — 동시 live 에이전트가 2 이상으로 **늘어난** 상승 엣지 | `metadata.concurrent/working/firstForInstall`                                     | **개수만**. 에이전트 id·이름·모델 없음      |
-| `onboarding:multi_agent_success`       | 머지 = 메인 `recordMergeHistory` / 티켓 DONE = 렌더러 보드 구독            | `metadata.trigger/concurrent/working`                                             | 티켓 id 는 first-class 컬럼, 제목·본문 없음 |
-| `onboarding:first_multi_agent_success` | 위의 **설치당 첫 건**에 짝으로 1회                                         | `durationMs`(= first_run→성공), `metadata.withinTargetWindow/msFromModelConnect…` | 소요시간(ms)뿐                              |
-| `billing:subscription_active`          | 렌더러 — 구독 스토어가 유료 플랜을 **처음 관측**했을 때(설치당 1회)        | `durationMs`(= first_run→관측), `metadata.plan`                                   | 플랜 이름만. 금액·주문번호·결제수단 없음    |
+| 이벤트                                 | 발화 지점                                                                                          | 필드                                                                                                                                                      | 비식별                                      |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `onboarding:multi_agent_active`        | 메인 `AgentManager` — 동시 live 에이전트가 2 이상으로 **늘어난** 상승 엣지                         | `metadata.concurrent/working/firstForInstall`                                                                                                             | **개수만**. 에이전트 id·이름·모델 없음      |
+| `onboarding:multi_agent_success`       | 머지 = 메인 `recordMergeHistory` / 티켓 DONE = 렌더러 보드 구독                                    | `metadata.trigger/concurrent/working`                                                                                                                     | 티켓 id 는 first-class 컬럼, 제목·본문 없음 |
+| `onboarding:first_multi_agent_success` | 위의 **설치당 첫 건**에 짝으로 1회                                                                 | ★판정 = `metadata.msFromModelConnect`·`withinTargetWindowFromConnect`·`anchor`. `durationMs`(= first_run→성공)와 `withinTargetWindow` 는 앞단 포함 참고치 | 소요시간(ms)뿐                              |
+| ★`onboarding:model_connected`          | **10분 시계의 앵커**(설치당 1회) — 스폰 게이트 통과 / CLI 인증 성공 / 펀딩 프로브 ok 중 먼저 온 것 | `metadata.trigger`(spawn_gate\|cli_auth\|funding_probe)·`surface`·`vendor`, `model`                                                                       | 하네스 이름·표면 라벨뿐. 계정·경로·키 없음  |
+| `billing:subscription_active`          | 렌더러 — 구독 스토어가 유료 플랜을 **처음 관측**했을 때(설치당 1회)                                | `durationMs`(= first_run→관측), `metadata.plan`                                                                                                           | 플랜 이름만. 금액·주문번호·결제수단 없음    |
 
 ### 소유권 분업 (왜 이렇게 쪼갰나)
 
@@ -58,28 +66,59 @@
   세면 동시실행이 거의 관측되지 않는다(오케가 한 대에 지시를 넣는 동안 나머지는 대부분
   idle 이다). 종단은 `stopped`/`error` 뿐이다.
 
-## 3. ★10분 시계의 시작점 (제품 정의)
+## 3. ★10분 시계의 시작점 (제품 정의 — 2026-08-10 개정)
 
-**헤드라인 = `app:first_run` 기준.** "10분 안에 첫 multi-agent 성공" 이라는 문장의
-자연스러운 해석이고, 어드민 카드가 이 값을 크게 쓴다.
+**헤드라인 = 모델 연결 완료 기준.** 사장님 결정(티켓 `Tw6m14gR`): 시계는 유저가
+**실제로 에이전트를 돌릴 수 있게 된 순간**부터 잰다.
 
-**그런데 이 시계는 우리가 못 고치는 구간을 포함한다.** L0 무료 데모는 **룰베이스**라
-(실제 CLI 스폰·LLM·과금 0) 진짜 multi-agent 실행이 **원천적으로 불가능**하다. 즉
-first_run 기준 10분에는 사용자가 CLI 를 설치하고 로그인하는 시간이 통째로 들어간다.
+**왜 first_run 이 아닌가.** L0 무료 데모는 **룰베이스**라(실제 CLI 스폰·LLM·과금 0)
+진짜 multi-agent 실행이 **원천적으로 불가능**하다. first_run 부터 재면 그 10분에
+사용자가 CLI 를 설치·로그인하는 시간이 통째로 들어갈 뿐 아니라, 더 나쁘게는
+**연결을 아예 안 한 사람이 영원히 '10분 실패' 로 분자에서 빠진 채 분모에 남는다**.
+그건 10분 경험의 실패가 아니라 **앞단(설치→연결) 이탈**이고, 고치는 방법도 다르다.
+그래서 두 수를 갈라 놓는다:
 
-그래서 **보조 시계**를 같은 이벤트에 함께 싣는다 — `metadata.msFromModelConnect`.
-시작점은 "이 설치가 실제로 모델을 돌릴 수 있게 된 순간" 이고, 두 지점 중 먼저 온 쪽이
-기록된다:
+- **핵심 KPI** = (연결 후 10분 내 첫 multi-agent 성공 설치) / (**모델 연결 완료 설치**)
+- **앞단 구간**(`connectFunnel`) = (모델 연결 완료 설치) / (최초 실행 설치)
 
-1. `onboarding:cli_setup_step` step=`auth` phase=`success` (연결 마법사를 통과한 경로)
-2. `onboarding:funding_probe` verdict=`ok` (이미 설치·인증돼 마법사를 건너뛴 경로)
+### 앵커("모델 연결 완료")의 코드상 정의
 
-제품 개선의 신호로는 보조 시계가 더 공정하고, 사장님 KPI 문장에 답하는 것은 헤드라인
-시계다. 둘을 **한 이벤트에 같이** 실어 두었으므로 나중에 어느 쪽을 정본으로 삼든
-과거 데이터를 다시 모을 필요가 없다.
+"연결" 은 느낌이 아니라 **스폰 가능 여부**다. 판정의 단일 소스는
+`harness-manager.checkSpawnAuthGate` — 바이너리가 있고 인증이 됐거나(또는 env-swap
+벤더 키가 전부 준비돼) **지금 스폰이 가능한 상태**. 앵커 이벤트
+`onboarding:model_connected` 는 아래 세 지점에서 발신되고 **설치당 1회**로 접힌다:
 
-**시계가 없는 설치**(이 계측 이전부터 쓰던 설치)는 소요시간을 **지어내지 않는다** —
-`clockAvailable: false` 로 남기고 어드민이 그 수를 따로 보여 준다.
+1. **스폰 게이트 통과**(`trigger=spawn_gate`) — 정의 그 자체. 종전에는 게이트의
+   **거절만** 계측했기 때문에(`onboarding:spawn_blocked`) 이 순간이 데이터에 없었다.
+   ★BYOM(env-swap) 유저처럼 우리 연결 마법사도 펀딩 프로브도 안 거치는 경로는
+   여기서만 잡힌다.
+2. `onboarding:cli_setup_step` step=`auth` phase=`success`(`trigger=cli_auth`) —
+   연결 마법사를 통과한 경로.
+3. `onboarding:funding_probe` verdict=`ok`(`trigger=funding_probe`) — 이미 설치·인증돼
+   마법사를 건너뛴 경로.
+
+> 후보였다가 **탈락한 것**: `auth:login_success` 는 Firebase **계정** 로그인이라 모델
+> 연결이 아니다(로그인만 하고 CLI 를 안 붙인 사람이 그대로 통과한다).
+> `onboarding:agent_auth_resolved` 는 인증 팝업 **오탐의 철회** 신호라 앵커가 아니다.
+
+집계 분모는 위 앵커 이벤트 **∪ 기존 두 신호**다(`MODEL_CONNECT_ANCHOR_EVENTS` +
+`modelConnectedPredicateSql`). 정본 이벤트는 이 빌드부터 나오므로, 그 전에 이미 연결을
+끝낸 설치를 분모에서 빠뜨리지 않기 위한 하위호환이다. **클라의 앵커 지점 목록과 서버의
+이 상수는 짝으로 움직여야 한다** — 한쪽만 바뀌면 분모가 조용히 어긋난다.
+
+### 두 시계는 계속 함께 실린다
+
+`metadata.msFromModelConnect`(헤드라인) 와 `durationMs`/`msFromFirstRun`(앞단 포함
+참고치)가 같은 이벤트에 함께 간다. #902 가 "어느 쪽을 정본으로 삼든 과거 데이터를 다시
+모을 필요가 없게" 두 시계를 실어 둔 덕에, 이번 개정은 **읽는 키만 바꾸면 됐다**.
+행이 어느 빌드에서 왔는지는 `metadata.anchor = "model_connect"` 로 구분한다.
+
+**시계가 없는 설치**는 소요시간을 **지어내지 않는다** — 앞단 시계는
+`clockAvailable: false`, 연결 시계는 `connectClockAvailable: false` 로 각각 남기고
+어드민이 '연결 시계 없음' 수를 따로 보여 준다. ★서버가 '연결 시계 없음' 을 셀 때는
+그 플래그가 아니라 **`msFromModelConnect` 값의 존재**로 판정한다 — 플래그는 이번
+빌드부터 실리므로, 플래그로 세면 연결 시계가 실제로 있었던 #902 빌드 행까지 '시계
+없음' 으로 잘못 잡힌다.
 
 **왜 클라가 계산하나**: 서버 `timestamp` 는 **수신시각**이고, 로그인 이전 이벤트는
 다음 성공 로그인 때 한꺼번에 flush 된다(anti-abuse). 서버에서는 시작점을 알 수 없다.
@@ -90,17 +129,26 @@ first_run 기준 10분에는 사용자가 CLI 를 설치하고 로그인하는 �
 ### `getAdminKpiCockpit` (functions)
 
 - **신규 `zeroFriction` 섹션**(순수 빌더 `buildZeroFrictionKpis`):
-  - `tenMinuteMultiAgent` — ★핵심 KPI. `rate` = 목표창 내 첫 성공 설치 / **최초 실행**
-    설치. 중앙값(ms)과 '시계 없음' 수를 병기.
+  - `tenMinuteMultiAgent` — ★핵심 KPI. `rate` = 목표창 내 첫 성공 설치 / **모델 연결
+    완료** 설치(`anchor: "model_connect"`). 연결→성공 중앙값(ms)과 '연결 시계 없음'
+    수를 병기.
+  - ★`connectFunnel` — 앞단(최초 실행→모델 연결). `connectRate` 와 `notConnectedClients`
+    가 "연결 안 해서 10분 분모 밖" 인 설치를 명시한다.
+  - ★`fromFirstRunReference` — first_run 기준 같은 KPI(앞단 포함). 앵커 변경 전과 같은
+    축이라 전/후 대조에 쓴다.
   - `multiAgentUsage` — 동시 2대+ 를 실제로 쓴 설치·발생량, 그 상태에서의 성공.
+    분모는 핵심 KPI 와 같은 **연결 완료**다(연결 전엔 원천적으로 불가능하므로).
   - `weeklyTwicePlus` — 최근 7일 창에서 **서로 다른 활동일이 2일 이상**인 설치.
-  - `freeToPaid` — `billing:subscription_active` 고유 설치 / 최초 실행(가입 분모 참고치 병기).
-- **★분모 규약**: 이 섹션의 분모는 가입(로그인 성공)이 아니라 **최초 실행**이다.
-  "설치한 사람 중 몇 %가 10분 안에 성공했나" 가 질문이고, 로그인 분모를 쓰면 로그인에서
-  죽은 사람을 통째로 빼 KPI 가 **낙관 편향**된다. 주2회+ 만 분모가 다르며(그 창의 활동
-  설치) 화면이 그 사실을 병기한다.
-- **목표창 판정은 서버가 다시 계산하지 않는다.** 클라가 실은 `withinTargetWindow` 를
-  읽기만 한다 — 서버가 재계산하면 두 수가 갈리고, 애초에 서버는 시작점을 모른다.
+  - `freeToPaid` — `billing:subscription_active` 고유 설치 / **최초 실행**(가입 분모
+    참고치 병기). ★이 칸만 분모가 최초 실행인 이유: 결제는 연결하지 않은 사람도 할 수
+    있는 앞단 포함 여정이라, 연결 분모로 좁히면 전환율이 낙관 편향된다.
+- **★분모 규약**: 10분 KPI 의 분모는 가입도 최초 실행도 아닌 **모델 연결 완료**다
+  (§3). 가입 분모를 쓰면 로그인에서 죽은 사람이 빠져 낙관 편향되고, 최초 실행 분모를
+  쓰면 연결조차 안 한 사람이 '10분 실패' 로 잡힌다 — 후자는 `connectFunnel` 이 센다.
+  주2회+ 와 무료→유료만 분모가 다르며 화면이 그 사실을 병기한다.
+- **목표창 판정은 서버가 다시 계산하지 않는다.** 클라가 실은
+  `withinTargetWindowFromConnect` 를 읽기만 한다 — 서버가 재계산하면 두 수가 갈리고,
+  애초에 서버는 시작점을 모른다.
 - **잔존 D1/D7/D30**: 기존 7일 쿼리를 조건부 집계로 일반화했다. **D7 값은 재작성 전후로
   한 자리도 바뀌지 않는다**(창을 30일로 넓힌 건 바깥 필터뿐이고, 7일 칸은 내부에서
   그대로 7일로 자른다). 세 칸이 창 길이만 다른 **같은 정의**(가입 후 N일 창 안에서
@@ -117,15 +165,19 @@ first_run 기준 10분에는 사용자가 CLI 를 설치하고 로그인하는 �
 ### 어드민 웹 (`marblo-web/src/app/[locale]/admin`)
 
 `ZeroFrictionCard` 를 KPI 코크핏 **맨 위**에 신설:
-"10분 첫 multi-agent 성공률" · "동시 2대+ 사용 설치" · "주 2회+ 사용" · "무료→유료 전환"
+"연결 후 10분 내 첫 multi-agent 성공률" · ★"모델 연결 도달률(앞단)" ·
+"동시 2대+ 사용 설치" · "무료→유료 전환"
 
-- 보조 4칸(창 무관 첫 성공률 · 동시2+ 에서의 성공 · 시계 없음 · 목표창).
-  분모를 항상 병기하고, 분모 0 은 0% 가 아니라 '데이터 대기'로 적는다.
-  D1/D30 게이지는 기존 게이지 그리드에 자동으로 붙는다.
+- 보조 칸(주 2회+ · 창 무관 첫 성공률 · 동시2+ 에서의 성공 · 연결 시계 없음 ·
+  ★참고: 최초 실행 기준 · 목표창). 분모를 항상 병기하고, 분모 0 은 0% 가 아니라
+  '데이터 대기'로 적는다. D1/D30 게이지는 기존 게이지 그리드에 자동으로 붙는다.
+- ★헤드라인 옆에 앞단(연결 도달률)을 나란히 둔다 — 10분 수치가 나쁠 때 "경험이
+  느린가" 와 "연결에서 죽는가" 를 한 화면에서 가르기 위해서다. 신규 칸은 구버전
+  functions 응답에는 없으므로 '재배포 후 표시' 로 폴백한다.
 
 ## 5. 남은 한계 (있는 그대로)
 
-- **신규 이벤트 4종은 그 빌드가 실사용에 깔리기 전까지 0 이다.** 구조가 먼저고 데이터는
+- **신규 이벤트 5종은 그 빌드가 실사용에 깔리기 전까지 0 이다.** 구조가 먼저고 데이터는
   후행한다 — 화면의 빈 상태 문구가 그 사실을 말한다.
 - **★방문→다운로드 · 다운로드→설치 조인은 이번 범위 밖이다.** web(GA4/Vercel)과
   앱(BigQuery events)의 경계이고, GA4 `user_pseudo_id` 와 앱의 익명 `clientId` 는 서로
@@ -144,6 +196,16 @@ first_run 기준 10분에는 사용자가 CLI 를 설치하고 로그인하는 �
   이 잔재가 빠진다. 지어낸 보정을 넣는 대신 사실을 적어 둔다.
 - **D30 은 조회 창(기본 30일)에 잘린다.** 창 끝에 가입한 설치는 30일을 채울 수 없다.
   기간 컨트롤을 90일로 두면 완화된다.
+- **★앵커 스탬프는 '관측 시각' 이다(2026-08-10 개정분).** 이 계측 이전부터 쓰던 설치는
+  실제 연결이 몇 주 전이었어도, 업그레이드 후 **첫 스폰 게이트 통과 시점**에 연결
+  스탬프가 찍힌다. 그래서 이미 숙련된 유저가 "연결하고 10분 만에 성공" 으로 잡힐 수
+  있고, 초기 몇 주의 헤드라인은 **과대 계상**될 수 있다. 지어낸 보정을 넣는 대신
+  사실을 적어 둔다 — 신규 설치가 쌓이면 자연히 빠지고, 그 사이에는 `connectFunnel`
+  (신규 유입 축)과 함께 읽으면 된다.
+- **분모의 하위호환 합집합은 창 경계에서 앞단과 어긋날 수 있다.** 연결 신호가 조회 창
+  안이고 그 설치의 `app:first_run` 이 창 밖이면 `connectedClients > firstRunBase` 가
+  될 수 있다. '앞단 이탈' 을 음수로 만들지 않도록 0 으로 자르며(그 값은 '이탈 -N명'
+  이 아니라 그냥 모르는 값이다), 창을 넓혀 읽으면 완화된다.
 - **퍼널 칸은 늘리지 않았다.** 멀티에이전트는 `getAdminOnboardingFunnel` 의 순차 체인에
   끼우지 않고 코크핏에만 넣었다 — 체인에 넣으면 gating 판정을 또 손봐야 하고, #895 가
   방금 안정시킨 수치를 흔든다. 필요해지면 `gating=false` 칸으로 한 줄 추가하면 된다.
@@ -158,15 +220,27 @@ first_run 기준 10분에는 사용자가 CLI 를 설치하고 로그인하는 �
 
 ## 6. 검증
 
+### 최초 착지(pWSnJeQN, 2026-08-09)
+
 - `v3`: `tsc --noEmit` 0(렌더러·electron 양쪽) · `vitest tests/unit/multi-agent-kpi.test.ts`
   **12 pass**(상시/1회 발신 계약, 10분 판정, 시계 없음 → 지어내지 않음, DONE 만 성공,
   동시 1대면 미발신, 동시성 못 읽으면 미판정, 옵트아웃 시 0건, ★메인↔렌더러 동시성
   하한 드리프트 가드).
-- `v3/functions`: `tsc --noEmit` 0 · `npm run test:admin-analytics` **78 pass**
-  (신규 7: 분모가 최초 실행이라는 계약, 카드별 분모 분리, 표본 0 → null, int64-as-string,
-  note 정직성, 목표창 주입, D1/D7/D30 단조성 + 게이지 순서 계약).
+- `v3/functions`: `tsc --noEmit` 0 · `npm run test:admin-analytics` **78 pass**.
 - `marblo-web`: `tsc --noEmit` 0 · `eslint` 0 error.
+
+### 앵커 개정(Tw6m14gR, 2026-08-10)
+
+- `v3`: `tsc --noEmit` 0(렌더러·electron) · `vitest run` **348 files / 5602 pass**
+  (multi-agent-kpi **16 pass** — 신규 4: 앵커 3지점이 같은 이벤트를 내고 **설치당
+  1회**로 접힌다 · 연결 앵커가 없으면 연결 시계를 지어내지 않는다 · 연결 후 10분을
+  넘기면 판정 false · ★메인→렌더러 앵커 채널/이벤트명 드리프트 가드).
+- `v3/functions`: `tsc --noEmit` 0 · `npm run test:admin-analytics` **81 pass**
+  (신규/개정: 분모가 **모델 연결 완료**라는 계약, 앞단 구간 보존, 연결>최초실행일 때
+  음수 방지, 카드별 분모 분리(무료→유료만 최초 실행), 앵커 이벤트 목록·predicate 계약).
+- `marblo-web`: `tsc --noEmit` 0.
 - 배포: functions 변경이 있으므로 머지 후 오케가 단일 `--only` 로 배포
   (`firebase deploy --only functions:getAdminKpiCockpit --project marblo-2253d`).
   BQ 마이그레이션은 없다 — `metadata` 는 JSON STRING 컬럼이고 `durationMs` 는 이미
-  first-class 컬럼이다.
+  first-class 컬럼이다. 신규 이벤트도 서버가 화이트리스트 없이 적재한다.
+- ★재배포 전까지 어드민의 신규 칸(앞단·참고 축)은 '재배포 후 표시' 로 폴백한다.

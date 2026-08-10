@@ -1095,14 +1095,56 @@ export function buildOnboardingStallSummary(
 // 경험했나" 가 질문이기 때문이다. 로그인 기준 분모는 로그인에서 죽은 사람을
 // 통째로 빼버려 KPI 를 낙관 편향시킨다. 참고용으로 가입 분모도 함께 내려준다.
 //
-// ★한계는 note 에 그대로 적는다: (1) 방문→다운로드, 다운로드→설치 구간은 web
-// (GA4/Vercel) 경계라 이 축에 없다. (2) 무료 데모는 룰베이스라 진짜 multi-agent
-// 성공은 모델 연결 이후에만 가능하다 — 그래서 10분 시계는 first_run 기준(헤드라인)
-// 과 모델연결 기준(보조) 둘 다 이벤트에 실린다.
+// ★10분 시계의 앵커 = **모델 연결 완료**(티켓 Tw6m14gR, 사장님 결정). 무료 데모는
+// 룰베이스라 진짜 multi-agent 실행이 모델 연결 이후에만 가능하다 — first_run 부터
+// 재면 **연결조차 안 한 사람이 영원히 '10분 실패'로 잡힌다**. 그건 앞단(설치→연결)
+// 이탈이지 10분 경험의 실패가 아니므로, 분모를 연결 완료 설치로 좁히고 앞단은
+// `connectFunnel` 로 따로 센다. first_run 기준 값은 참고치로 계속 내려준다.
+//
+// ★한계는 note 에 그대로 적는다: 방문→다운로드, 다운로드→설치 구간은 web
+// (GA4/Vercel) 경계라 이 축에 없다.
+
+/**
+ * ★"모델 연결 완료" 앵커의 **이벤트 목록**(클라 telemetryService 의 앵커 지점과
+ * 짝이다 — 한쪽만 바뀌면 분모가 조용히 어긋난다).
+ *
+ * · `onboarding:model_connected` — 정본. 스폰 게이트 통과/CLI 인증/펀딩 프로브 중
+ *   무엇이든 "이제 스폰 가능" 이 성립한 순간, 설치당 1회.
+ * · 나머지 둘은 **하위호환**이다. 정본 이벤트는 이 빌드부터 나오므로, 그 전에
+ *   이미 연결을 끝낸 설치를 분모에서 빠뜨리지 않으려고 같은 사실을 말하는 기존
+ *   신호를 함께 센다(연결 마법사 인증 성공 / 펀딩 프로브 ok).
+ */
+export const MODEL_CONNECT_ANCHOR_EVENTS = [
+  "onboarding:model_connected",
+  "onboarding:cli_setup_step",
+  "onboarding:funding_probe",
+] as const;
+
+/**
+ * 위 세 신호를 하나의 boolean SQL 로 접는다. 표현식(step/phase/verdict 추출)은
+ * 호출부가 이미 쓰고 있는 것을 그대로 넘겨 받는다 — JSON 경로를 두 벌 적지 않기
+ * 위해서다.
+ */
+export function modelConnectedPredicateSql(exprs: {
+  event: string;
+  step: string;
+  phase: string;
+  verdict: string;
+}): string {
+  return (
+    `(${exprs.event} = 'onboarding:model_connected'` +
+    ` OR (${exprs.event} = 'onboarding:cli_setup_step'` +
+    ` AND ${exprs.step} = 'auth' AND ${exprs.phase} = 'success')` +
+    ` OR (${exprs.event} = 'onboarding:funding_probe'` +
+    ` AND ${exprs.verdict} = 'ok'))`
+  );
+}
 
 export type ZeroFrictionInput = {
-  /** 분모: 최초 실행(app:first_run) 고유 identity. */
+  /** 앞단 분모: 최초 실행(app:first_run) 고유 identity. */
   firstRunBase: unknown;
+  /** ★핵심 KPI 분모: **모델 연결이 관측된** 고유 identity(위 앵커 3신호 합집합). */
+  modelConnectedClients: unknown;
   /** 참고 분모: 가입(로그인 성공) 고유 identity. */
   signupBase: unknown;
   /** 동시 2대+ 를 한 번이라도 관측한 고유 identity / 발생 총량. */
@@ -1113,11 +1155,17 @@ export type ZeroFrictionInput = {
   multiAgentSuccessEvents: unknown;
   /** 설치당 1회 이벤트(first_multi_agent_success) 고유 identity. */
   firstSuccessClients: unknown;
-  /** 그중 목표창(10분) 안에 도달한 고유 identity. */
-  firstSuccessWithinClients: unknown;
-  /** 그중 first_run 시계를 못 구한 설치(이 계측 이전부터 쓰던 설치). */
+  /** ★그중 **연결 후** 목표창(10분) 안에 도달한 고유 identity(헤드라인 분자). */
+  firstSuccessWithinConnectClients: unknown;
+  /** 그중 **연결 시계**를 못 구한 설치(연결 스탬프 이전부터 쓰던 설치). */
+  firstSuccessNoConnectClockClients: unknown;
+  /** ★연결→첫 성공 소요시간의 중앙값(ms). 표본 없으면 null. */
+  firstSuccessMedianFromConnectMs: unknown;
+  /** 참고: first_run 기준 목표창 안에 도달한 고유 identity(앞단 포함). */
+  firstSuccessWithinFirstRunClients: unknown;
+  /** 참고: first_run 시계를 못 구한 설치(이 계측 이전부터 쓰던 설치). */
   firstSuccessNoClockClients: unknown;
-  /** 첫 성공까지 걸린 시간의 중앙값(ms). 표본 없으면 null. */
+  /** 참고: first_run→첫 성공 소요시간의 중앙값(ms). 앞단 구간을 포함한다. */
   firstSuccessMedianMs: unknown;
   /** 최근 7일 활동 고유 identity / 그중 서로 다른 활동일이 2일 이상인 수. */
   weeklyActiveClients: unknown;
@@ -1129,22 +1177,51 @@ export type ZeroFrictionInput = {
 };
 
 export type ZeroFrictionResult = {
-  /** ★핵심 KPI. rate = 목표창 내 첫 multi-agent 성공 설치 / 최초 실행 설치. */
+  /**
+   * ★핵심 KPI. rate = **연결 후** 목표창 내 첫 multi-agent 성공 설치 / **모델
+   * 연결 완료** 설치(티켓 Tw6m14gR). 연결하지 않은 설치는 분모에 없다.
+   */
   tenMinuteMultiAgent: {
+    /** 시계 시작점 이름 — 화면·문서가 이 값을 그대로 쓴다. */
+    anchor: "model_connect";
     windowMinutes: number;
     withinClients: number;
     successClients: number;
     noClockClients: number;
     base: number;
-    /** 목표창 내 성공률(분모=최초 실행). 분모 0 이면 null. */
+    /** 목표창 내 성공률(분모=모델 연결 완료). 분모 0 이면 null. */
     rate: number | null;
     /** 창 무관 첫 성공률(같은 분모). 10분 밖 성공까지 포함. */
     successRate: number | null;
-    /** 첫 성공까지 중앙값(ms). 표본 없으면 null. */
+    /** 연결→첫 성공 중앙값(ms). 표본 없으면 null. */
     medianMs: number | null;
     label: string;
   };
-  /** 동시 2대+ 를 실제로 쓴 설치. */
+  /**
+   * ★앞단 구간(설치→모델 연결). 여기서 죽은 사람은 10분 KPI 의 **실패가 아니라
+   * 앞단 이탈**이다 — 두 수를 갈라 놓는 것이 이 티켓의 핵심이다.
+   */
+  connectFunnel: {
+    firstRunBase: number;
+    connectedClients: number;
+    /** 최초 실행 대비 모델 연결 도달률. 분모 0 이면 null. */
+    connectRate: number | null;
+    /** 최초 실행했지만 연결까지 못 온 설치(음수 방지로 0 하한). */
+    notConnectedClients: number;
+    label: string;
+  };
+  /**
+   * 참고: **first_run 기준**(앞단 포함) 같은 KPI. 앵커 변경 전 수치와 같은 축이라
+   * 전/후 대조에 쓴다 — 헤드라인은 위쪽이다.
+   */
+  fromFirstRunReference: {
+    base: number;
+    withinClients: number;
+    noClockClients: number;
+    rate: number | null;
+    medianMs: number | null;
+  };
+  /** 동시 2대+ 를 실제로 쓴 설치(분모=모델 연결 완료 — 연결 전엔 불가능하다). */
   multiAgentUsage: {
     activeClients: number;
     activeEvents: number;
@@ -1182,11 +1259,18 @@ export function buildZeroFrictionKpis(
     input.targetWindowMinutes && input.targetWindowMinutes > 0
       ? input.targetWindowMinutes
       : MULTI_AGENT_TARGET_WINDOW_MINUTES;
-  const base = coerceNumber(input.firstRunBase);
+  // ★분모는 **모델 연결 완료** 설치다(티켓 Tw6m14gR). first_run 분모는 앞단
+  // 구간과 참고치에서만 쓴다 — 연결 안 한 사람을 '10분 실패'로 세지 않기 위해서다.
+  const firstRunBase = coerceNumber(input.firstRunBase);
+  const base = coerceNumber(input.modelConnectedClients);
   const signupBase = coerceNumber(input.signupBase);
-  const withinClients = coerceNumber(input.firstSuccessWithinClients);
+  const withinClients = coerceNumber(input.firstSuccessWithinConnectClients);
   const successClients = coerceNumber(input.firstSuccessClients);
-  const medianRaw = coerceNumber(input.firstSuccessMedianMs);
+  const medianRaw = coerceNumber(input.firstSuccessMedianFromConnectMs);
+  const withinFromFirstRun = coerceNumber(
+    input.firstSuccessWithinFirstRunClients,
+  );
+  const medianFromFirstRun = coerceNumber(input.firstSuccessMedianMs);
   const weeklyActive = coerceNumber(input.weeklyActiveClients);
   const weeklyTwice = coerceNumber(input.weeklyTwicePlusClients);
   const paidClients = coerceNumber(input.paidClients);
@@ -1194,16 +1278,37 @@ export function buildZeroFrictionKpis(
   const multiSuccessClients = coerceNumber(input.multiAgentSuccessClients);
   return {
     tenMinuteMultiAgent: {
+      anchor: "model_connect",
       windowMinutes,
       withinClients,
       successClients,
-      noClockClients: coerceNumber(input.firstSuccessNoClockClients),
+      noClockClients: coerceNumber(input.firstSuccessNoConnectClockClients),
       base,
       rate: safeRate(withinClients, base),
       successRate: safeRate(successClients, base),
       // 표본이 없으면 0 이 아니라 null — "0분 만에 성공" 으로 읽히면 안 된다.
       medianMs: successClients > 0 && medianRaw > 0 ? medianRaw : null,
-      label: `최초 실행 후 ${windowMinutes}분 안에 에이전트 2대+ 동시 상태에서 첫 완료/머지에 도달한 설치 비율`,
+      label: `모델 연결 완료 후 ${windowMinutes}분 안에 에이전트 2대+ 동시 상태에서 첫 완료/머지에 도달한 설치 비율`,
+    },
+    connectFunnel: {
+      firstRunBase,
+      connectedClients: base,
+      connectRate: safeRate(base, firstRunBase),
+      // 두 수는 서로 다른 이벤트에서 오고 창 경계도 다르다 — 연결이 창 안이고
+      // first_run 이 창 밖이면 음수가 나올 수 있다. 그건 '앞단 이탈 -1명' 이
+      // 아니라 그냥 모르는 값이므로 0 으로 자른다.
+      notConnectedClients: Math.max(0, firstRunBase - base),
+      label: `최초 실행한 설치 중 모델 연결(실제 스폰 가능)까지 도달한 비율 — 여기서 이탈한 설치는 ${windowMinutes}분 KPI 의 분모에 들어가지 않는다`,
+    },
+    fromFirstRunReference: {
+      base: firstRunBase,
+      withinClients: withinFromFirstRun,
+      noClockClients: coerceNumber(input.firstSuccessNoClockClients),
+      rate: safeRate(withinFromFirstRun, firstRunBase),
+      medianMs:
+        successClients > 0 && medianFromFirstRun > 0
+          ? medianFromFirstRun
+          : null,
     },
     multiAgentUsage: {
       activeClients,
@@ -1221,25 +1326,29 @@ export function buildZeroFrictionKpis(
     },
     freeToPaid: {
       paidClients,
-      base,
+      // ★무료→유료만 분모가 **최초 실행**이다. 결제는 연결하지 않은 사람도 할 수
+      // 있는 앞단 포함 여정이라, 연결 분모로 좁히면 전환율이 낙관 편향된다.
+      base: firstRunBase,
       signupBase,
-      rate: safeRate(paidClients, base),
+      rate: safeRate(paidClients, firstRunBase),
       rateOfSignups: safeRate(paidClients, signupBase),
     },
     note:
-      `핵심 KPI 의 분모는 가입이 아니라 **최초 실행**(app:first_run 고유 설치)이다 — ` +
-      `로그인에서 죽은 사람을 빼면 KPI 가 낙관 편향된다. 시계는 클라이언트가 계산해 ` +
-      `이벤트에 싣는다(서버 timestamp 는 수신시각이고, 로그인 이전 이벤트는 나중에 ` +
-      `한꺼번에 flush 되므로 서버에서는 지연을 구할 수 없다). ★시계 시작점은 ` +
-      `'최초 실행' 이다 — 무료 데모는 룰베이스라 진짜 multi-agent 실행은 모델 연결(L1) ` +
-      `이후에만 가능하므로, 이 수치에는 사용자가 CLI 를 설치·로그인하는 시간이 포함된다. ` +
-      `모델 연결 기준 보조 시계도 같은 이벤트에 실려 있다(metadata.msFromModelConnect). ` +
-      `'시계 없음' 설치는 이 계측 이전부터 쓰던 설치라 소요시간을 지어내지 않고 비운다. ` +
-      `주 2회+ 는 최근 7일 창에서 서로 다른 활동일이 2일 이상인 설치이며 분모는 그 창의 ` +
-      `활동 설치다(다른 카드와 분모가 다르다). 무료→유료는 앱이 관측한 구독 활성화 시점 ` +
-      `이지 결제 시점이 아니다 — 웹에서 결제하고 앱을 나중에 열면 그만큼 늦게 찍힌다. ` +
-      `계측 직후 한동안은 이미 결제해 둔 설치가 분자에 섞여 과대 계상될 수 있다(창을 ` +
-      `짧게 두고 읽으면 빠진다). ` +
+      `★${windowMinutes}분 시계의 시작점은 **모델 연결 완료**(실제로 에이전트를 스폰할 수 ` +
+      `있게 된 순간)다 — 스폰 게이트 통과 / 연결 마법사 인증 성공 / 펀딩 프로브 ok 중 ` +
+      `먼저 온 것. 무료 데모는 룰베이스라 진짜 multi-agent 실행이 모델 연결 이후에만 ` +
+      `가능하므로, 최초 실행부터 재면 **연결조차 안 한 설치가 영원히 '10분 실패'로 ` +
+      `잡힌다**. 그 이탈은 앞단(설치→연결) 구간(connectFunnel)에서 따로 세고, 핵심 KPI 의 ` +
+      `분모는 연결을 끝낸 설치다. 최초 실행 기준 값은 fromFirstRunReference 에 참고로 ` +
+      `남겨 앵커 변경 전후를 대조할 수 있게 했다. 시계는 클라이언트가 계산해 이벤트에 ` +
+      `싣는다(서버 timestamp 는 수신시각이고, 로그인 이전 이벤트는 나중에 한꺼번에 flush ` +
+      `되므로 서버에서는 지연을 구할 수 없다). '시계 없음' 설치는 이 계측 이전부터 쓰던 ` +
+      `설치라 소요시간을 지어내지 않고 비운다. 주 2회+ 는 최근 7일 창에서 서로 다른 ` +
+      `활동일이 2일 이상인 설치이며 분모는 그 창의 활동 설치다(다른 카드와 분모가 다르다). ` +
+      `무료→유료는 분모가 최초 실행이고(결제는 연결 안 한 사람도 한다), 앱이 관측한 구독 ` +
+      `활성화 시점이지 결제 시점이 아니다 — 웹에서 결제하고 앱을 나중에 열면 그만큼 늦게 ` +
+      `찍힌다. 계측 직후 한동안은 이미 결제해 둔 설치가 분자에 섞여 과대 계상될 수 ` +
+      `있다(창을 짧게 두고 읽으면 빠진다). ` +
       `★범위 밖: 방문→다운로드·다운로드→설치 구간은 web(GA4/Vercel) 경계라 이 축에 없다.`,
   };
 }

@@ -26,6 +26,8 @@ import {
   buildActiveUserMetrics,
   buildActivationGateFunnel,
   ACTIVATION_GATE_STEPS,
+  MODEL_CONNECT_ANCHOR_EVENTS,
+  modelConnectedPredicateSql,
   type ReasonRow,
   type CliSetupStepRow,
   type ReleaseVersionSourceRow,
@@ -9516,6 +9518,9 @@ const KPI_RETENTION_EXCLUDED_EVENTS: readonly string[] = [
   "onboarding:multi_agent_success",
   "onboarding:first_multi_agent_success",
   "billing:subscription_active",
+  // 앵커 이벤트도 같은 규율(티켓 Tw6m14gR) — 계측을 늘렸다는 이유로 잔존
+  // 게이지가 좋아져서는 안 된다.
+  "onboarding:model_connected",
 ];
 
 export const getAdminKpiCockpit = functions
@@ -9842,15 +9847,27 @@ export const getAdminKpiCockpit = functions
     // 동시실행은 BigQuery 에 한 건도 없었다**(grep 0). 이제 메인 프로세스가
     // 발생 시점에 직접 관측해 보내므로 여기서 규모를 뽑는다.
     //
-    // ★분모는 가입이 아니라 **최초 실행**(app:first_run)이다 — "설치한 사람 중
-    // 몇 %가 10분 안에 성공했나" 가 질문이라, 로그인에서 죽은 사람을 빼면 KPI 가
-    // 낙관 편향된다.
-    // ★소요시간은 클라가 계산해 durationMs 로 싣는다(서버 timestamp 는 수신시각
-    // 이고 로그인 이전 이벤트는 나중에 한꺼번에 flush 된다). 목표창 판정도 같은
-    // 이유로 클라가 실은 값(metadata.withinTargetWindow)을 읽기만 한다 — 여기서
-    // 다시 계산하면 두 수가 갈린다.
+    // ★시계 시작점 = **모델 연결 완료**(티켓 Tw6m14gR, 사장님 결정). 무료 데모는
+    // 룰베이스라 진짜 multi-agent 실행이 모델 연결 이후에만 가능하므로, first_run
+    // 부터 재면 **연결조차 안 한 사람이 영원히 '10분 실패'로 잡힌다**. 그래서
+    // 분모를 '연결 완료 설치'로 좁히고, 앞단(최초 실행→연결)은 같은 쿼리에서
+    // 따로 센다 — 두 이탈을 한 수치에 섞지 않는다.
+    // ★소요시간은 클라가 계산해 싣는다(서버 timestamp 는 수신시각이고 로그인
+    // 이전 이벤트는 나중에 한꺼번에 flush 된다). 목표창 판정도 같은 이유로 클라가
+    // 실은 값을 읽기만 한다 — 여기서 다시 계산하면 두 수가 갈린다.
     const withinWindow = "JSON_VALUE(metadata, '$.withinTargetWindow')";
+    const withinWindowFromConnect =
+      "JSON_VALUE(metadata, '$.withinTargetWindowFromConnect')";
     const clockAvailable = "JSON_VALUE(metadata, '$.clockAvailable')";
+    const msFromConnect =
+      "SAFE_CAST(JSON_VALUE(metadata, '$.msFromModelConnect') AS INT64)";
+    // 앵커 조건은 순수 모듈이 소유한다(클라의 앵커 지점과 짝을 이루는 계약).
+    const connected = modelConnectedPredicateSql({
+      event: "event",
+      step: "JSON_VALUE(metadata, '$.step')",
+      phase: "JSON_VALUE(metadata, '$.phase')",
+      verdict: "JSON_VALUE(metadata, '$.verdict')",
+    });
     const zeroFrictionQuery = `
       WITH raw AS (
         SELECT
@@ -9866,11 +9883,17 @@ export const getAdminKpiCockpit = functions
                         'onboarding:multi_agent_active',
                         'onboarding:multi_agent_success',
                         'onboarding:first_multi_agent_success',
-                        'billing:subscription_active')${ex.clause}
+                        'billing:subscription_active',
+                        ${MODEL_CONNECT_ANCHOR_EVENTS.map((e) => `'${e}'`).join(
+                          ",\n                        ",
+                        )})${ex.clause}
       )
       SELECT
         COUNT(DISTINCT IF(event = 'app:first_run', identity, NULL))
           AS d_first_run_base,
+        -- ★핵심 KPI 의 분모. 정본 앵커 이벤트 + 하위호환 두 신호의 합집합이라
+        -- 이 빌드 이전에 이미 연결을 끝낸 설치도 분모에 들어온다.
+        COUNT(DISTINCT IF(${connected}, identity, NULL)) AS d_model_connected,
         COUNT(DISTINCT IF(
           event = 'onboarding:multi_agent_active', identity, NULL))
           AS d_multi_active,
@@ -9882,12 +9905,30 @@ export const getAdminKpiCockpit = functions
         COUNT(DISTINCT IF(
           event = 'onboarding:first_multi_agent_success', identity, NULL))
           AS d_first_success,
+        -- ★헤드라인 분자: **연결 후** 목표창 안에 도달.
+        COUNT(DISTINCT IF(
+          event = 'onboarding:first_multi_agent_success'
+            AND ${withinWindowFromConnect} = 'true',
+          identity, NULL)) AS d_first_success_within_connect,
+        -- 연결 시계를 못 구한 설치(연결 스탬프 이전부터 쓰던 설치). 소요시간을
+        -- 지어내지 않았다는 사실 자체를 수치로 보여 준다.
+        -- ★판정 근거는 connectClockAvailable 플래그가 아니라 **값의 존재**다:
+        -- 그 플래그는 이번 빌드부터 실리므로, 플래그로 세면 연결 시계가 실제로
+        -- 있었던 #902 빌드 행까지 '시계 없음' 으로 잘못 잡힌다.
+        COUNT(DISTINCT IF(
+          event = 'onboarding:first_multi_agent_success'
+            AND ${msFromConnect} IS NULL,
+          identity, NULL)) AS d_first_success_no_connect_clock,
+        APPROX_QUANTILES(
+          IF(event = 'onboarding:first_multi_agent_success'
+               AND ${msFromConnect} > 0,
+             ${msFromConnect}, NULL), 100
+        )[SAFE_OFFSET(50)] AS median_first_success_from_connect_ms,
+        -- 참고(앵커 변경 전과 같은 축): first_run 기준 판정·시계.
         COUNT(DISTINCT IF(
           event = 'onboarding:first_multi_agent_success'
             AND ${withinWindow} = 'true',
           identity, NULL)) AS d_first_success_within,
-        -- 시계를 못 구한 설치(이 계측 이전부터 쓰던 설치). 소요시간을 지어내지
-        -- 않았다는 사실 자체를 수치로 보여 준다.
         COUNT(DISTINCT IF(
           event = 'onboarding:first_multi_agent_success'
             AND ${clockAvailable} = 'false',
@@ -10085,17 +10126,26 @@ export const getAdminKpiCockpit = functions
         // 스톨 비율의 분모는 게이지와 같은 로그인 성공 기반(같은 창·같은 제외절).
         signupBase: headRow.d_signup_base,
       },
-      // ★제로마찰 KPI(티켓 pWSnJeQN). 분모는 최초 실행 기준 — 이유는 순수 빌더
-      // buildZeroFrictionKpis 의 note 참조.
+      // ★제로마찰 KPI(티켓 pWSnJeQN · 앵커 수정 Tw6m14gR). 10분 판정의 분모는
+      // **모델 연결 완료** 설치다 — 이유는 순수 빌더 buildZeroFrictionKpis 의
+      // note 참조. 최초 실행 기준 값은 앞단 구간·참고치로 함께 넘긴다.
       zeroFriction: {
         firstRunBase: zeroFrictionRow.d_first_run_base,
+        modelConnectedClients: zeroFrictionRow.d_model_connected,
         signupBase: headRow.d_signup_base,
         multiAgentActiveClients: zeroFrictionRow.d_multi_active,
         multiAgentActiveEvents: zeroFrictionRow.n_multi_active,
         multiAgentSuccessClients: zeroFrictionRow.d_multi_success,
         multiAgentSuccessEvents: zeroFrictionRow.n_multi_success,
         firstSuccessClients: zeroFrictionRow.d_first_success,
-        firstSuccessWithinClients: zeroFrictionRow.d_first_success_within,
+        firstSuccessWithinConnectClients:
+          zeroFrictionRow.d_first_success_within_connect,
+        firstSuccessNoConnectClockClients:
+          zeroFrictionRow.d_first_success_no_connect_clock,
+        firstSuccessMedianFromConnectMs:
+          zeroFrictionRow.median_first_success_from_connect_ms,
+        firstSuccessWithinFirstRunClients:
+          zeroFrictionRow.d_first_success_within,
         firstSuccessNoClockClients: zeroFrictionRow.d_first_success_no_clock,
         firstSuccessMedianMs: zeroFrictionRow.median_first_success_ms,
         weeklyActiveClients: weeklyTwicePlusRow.weekly_active_clients,

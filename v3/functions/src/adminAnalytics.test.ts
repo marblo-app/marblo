@@ -32,6 +32,8 @@ import {
   buildOnboardingStallSummary,
   buildZeroFrictionKpis,
   MULTI_AGENT_TARGET_WINDOW_MINUTES,
+  MODEL_CONNECT_ANCHOR_EVENTS,
+  modelConnectedPredicateSql,
 } from "./adminAnalytics";
 
 // ── parseIncludeAdmin ──────────────────────────────────────────────────────
@@ -840,13 +842,19 @@ test("cockpit: assembles gauges, onboarding events, reuse, spawn health", () => 
 
 const ZERO_FRICTION_SAMPLE = {
   firstRunBase: 40,
+  // ★최초 실행 40 중 연결까지 온 설치는 20 — 나머지 20 은 앞단 이탈이지
+  // '10분 실패' 가 아니다(티켓 Tw6m14gR 의 전부).
+  modelConnectedClients: 20,
   signupBase: 25,
   multiAgentActiveClients: 12,
   multiAgentActiveEvents: 55,
   multiAgentSuccessClients: 8,
   multiAgentSuccessEvents: 19,
   firstSuccessClients: 8,
-  firstSuccessWithinClients: 6,
+  firstSuccessWithinConnectClients: 7,
+  firstSuccessNoConnectClockClients: 1,
+  firstSuccessMedianFromConnectMs: 180_000,
+  firstSuccessWithinFirstRunClients: 6,
   firstSuccessNoClockClients: 1,
   firstSuccessMedianMs: 420_000,
   weeklyActiveClients: 20,
@@ -854,40 +862,61 @@ const ZERO_FRICTION_SAMPLE = {
   paidClients: 5,
 };
 
-test("zeroFriction: 핵심 KPI 분모는 가입이 아니라 최초 실행이다", () => {
+test("zeroFriction: 10분 시계 분모는 최초 실행이 아니라 모델 연결 완료다", () => {
   const z = buildZeroFrictionKpis(ZERO_FRICTION_SAMPLE);
-  // 6/40 — 가입(25)으로 나누면 0.24 가 되어 KPI 가 낙관 편향된다.
-  assert.equal(z.tenMinuteMultiAgent.base, 40);
-  assert.equal(z.tenMinuteMultiAgent.rate, 6 / 40);
-  assert.notEqual(z.tenMinuteMultiAgent.rate, 6 / 25);
+  // ★핵심: 연결 안 한 20 명은 분모에 없다. 40 으로 나누면 연결조차 안 한
+  // 사람을 '10분 실패' 로 세는 것이라 사장님 결정과 어긋난다.
+  assert.equal(z.tenMinuteMultiAgent.anchor, "model_connect");
+  assert.equal(z.tenMinuteMultiAgent.base, 20);
+  assert.equal(z.tenMinuteMultiAgent.rate, 7 / 20);
+  assert.notEqual(z.tenMinuteMultiAgent.rate, 7 / 40);
+  // 판정은 연결 시계 기준 분자를 쓴다(first_run 기준 6 이 아니라 7).
+  assert.equal(z.tenMinuteMultiAgent.withinClients, 7);
   // 창 무관 첫 성공률은 같은 분모로 따로 낸다(10분 밖 성공도 성공이다).
-  assert.equal(z.tenMinuteMultiAgent.successRate, 8 / 40);
+  assert.equal(z.tenMinuteMultiAgent.successRate, 8 / 20);
+  assert.equal(z.tenMinuteMultiAgent.medianMs, 180_000); // 연결→성공
   assert.equal(z.tenMinuteMultiAgent.windowMinutes, 10);
   assert.equal(MULTI_AGENT_TARGET_WINDOW_MINUTES, 10);
   assert.match(z.tenMinuteMultiAgent.label, /10분/);
+  assert.match(z.tenMinuteMultiAgent.label, /모델 연결/);
 });
 
-test("zeroFriction: 동시2+ · 주2회+ · 무료→유료 각자의 분모를 쓴다", () => {
+test("zeroFriction: 앞단(설치→연결) 이탈은 별도 구간으로 보존된다", () => {
   const z = buildZeroFrictionKpis(ZERO_FRICTION_SAMPLE);
-  assert.equal(z.multiAgentUsage.activeRate, 12 / 40); // 최초 실행 대비
-  assert.equal(z.multiAgentUsage.successRate, 8 / 40);
-  // 주2회+ 만 분모가 다르다(그 창의 활동 설치) — 화면이 병기해야 하는 이유.
-  assert.equal(z.weeklyTwicePlus.rate, 9 / 20);
-  assert.equal(z.weeklyTwicePlus.base, 20);
-  assert.equal(z.freeToPaid.rate, 5 / 40);
-  assert.equal(z.freeToPaid.rateOfSignups, 5 / 25); // 참고치는 가입 분모
+  assert.equal(z.connectFunnel.firstRunBase, 40);
+  assert.equal(z.connectFunnel.connectedClients, 20);
+  assert.equal(z.connectFunnel.connectRate, 20 / 40);
+  assert.equal(z.connectFunnel.notConnectedClients, 20);
+  // 참고 축(앵커 변경 전과 같은 계산)도 함께 남아 전/후 대조가 된다.
+  assert.equal(z.fromFirstRunReference.base, 40);
+  assert.equal(z.fromFirstRunReference.rate, 6 / 40);
+  assert.equal(z.fromFirstRunReference.medianMs, 420_000);
+});
+
+test("zeroFriction: 연결 수가 최초 실행보다 크면 앞단 이탈을 음수로 만들지 않는다", () => {
+  // 창 경계가 달라(연결은 창 안, first_run 은 창 밖) 실제로 일어날 수 있다.
+  const z = buildZeroFrictionKpis({
+    ...ZERO_FRICTION_SAMPLE,
+    firstRunBase: 3,
+    modelConnectedClients: 9,
+  });
+  assert.equal(z.connectFunnel.notConnectedClients, 0);
 });
 
 test("zeroFriction: 표본 0 이면 0% 가 아니라 null(데이터 대기)", () => {
   const z = buildZeroFrictionKpis({
     firstRunBase: 0,
+    modelConnectedClients: 0,
     signupBase: 0,
     multiAgentActiveClients: 0,
     multiAgentActiveEvents: 0,
     multiAgentSuccessClients: 0,
     multiAgentSuccessEvents: 0,
     firstSuccessClients: 0,
-    firstSuccessWithinClients: 0,
+    firstSuccessWithinConnectClients: 0,
+    firstSuccessNoConnectClockClients: 0,
+    firstSuccessMedianFromConnectMs: 0,
+    firstSuccessWithinFirstRunClients: 0,
     firstSuccessNoClockClients: 0,
     firstSuccessMedianMs: 0,
     weeklyActiveClients: 0,
@@ -898,25 +927,61 @@ test("zeroFriction: 표본 0 이면 0% 가 아니라 null(데이터 대기)", ()
   assert.equal(z.tenMinuteMultiAgent.successRate, null);
   // ★중앙값 0 은 "0분 만에 성공" 이 아니라 표본 없음이다.
   assert.equal(z.tenMinuteMultiAgent.medianMs, null);
+  assert.equal(z.connectFunnel.connectRate, null);
   assert.equal(z.multiAgentUsage.activeRate, null);
   assert.equal(z.weeklyTwicePlus.rate, null);
   assert.equal(z.freeToPaid.rate, null);
 });
 
+test("zeroFriction: 동시2+ 는 연결 분모, 무료→유료는 최초 실행 분모를 쓴다", () => {
+  const z = buildZeroFrictionKpis(ZERO_FRICTION_SAMPLE);
+  // 동시 2대+ 도 연결 전엔 원천적으로 불가능하므로 같은 분모(연결)를 쓴다.
+  assert.equal(z.multiAgentUsage.base, 20);
+  assert.equal(z.multiAgentUsage.activeRate, 12 / 20);
+  assert.equal(z.multiAgentUsage.successRate, 8 / 20);
+  // 주2회+ 만 분모가 다르다(그 창의 활동 설치) — 화면이 병기해야 하는 이유.
+  assert.equal(z.weeklyTwicePlus.rate, 9 / 20);
+  assert.equal(z.weeklyTwicePlus.base, 20);
+  // ★결제는 연결 안 한 사람도 한다 — 좁히면 전환율이 낙관 편향된다.
+  assert.equal(z.freeToPaid.base, 40);
+  assert.equal(z.freeToPaid.rate, 5 / 40);
+  assert.equal(z.freeToPaid.rateOfSignups, 5 / 25); // 참고치는 가입 분모
+});
+
 test("zeroFriction: BQ int64-as-string 을 강제 변환하고, note 가 한계를 말한다", () => {
   const z = buildZeroFrictionKpis({
     ...ZERO_FRICTION_SAMPLE,
-    firstRunBase: "40",
-    firstSuccessWithinClients: "6",
-    firstSuccessMedianMs: "420000",
+    modelConnectedClients: "20",
+    firstSuccessWithinConnectClients: "7",
+    firstSuccessMedianFromConnectMs: "180000",
   });
-  assert.equal(z.tenMinuteMultiAgent.rate, 6 / 40);
-  assert.equal(z.tenMinuteMultiAgent.medianMs, 420_000);
+  assert.equal(z.tenMinuteMultiAgent.rate, 7 / 20);
+  assert.equal(z.tenMinuteMultiAgent.medianMs, 180_000);
   assert.equal(z.tenMinuteMultiAgent.noClockClients, 1);
-  // 정직성 계약: 시계 시작점·web 경계·결제 관측시점 한계가 note 에 있어야 한다.
-  assert.match(z.note, /최초 실행/);
-  assert.match(z.note, /모델 연결/);
+  // 정직성 계약: 시계 시작점·앞단 분리·web 경계·결제 관측시점 한계가 note 에.
+  assert.match(z.note, /모델 연결 완료/);
+  assert.match(z.note, /앞단/);
   assert.match(z.note, /GA4|Vercel/);
+});
+
+test("앵커 계약: 정본 이벤트 + 하위호환 두 신호가 한 predicate 로 접힌다", () => {
+  // 클라(telemetryService 의 앵커 지점)와 서버 분모가 어긋나면 KPI 가 조용히
+  // 틀어진다 — 목록을 코드로 고정한다.
+  assert.deepEqual(MODEL_CONNECT_ANCHOR_EVENTS.slice(), [
+    "onboarding:model_connected",
+    "onboarding:cli_setup_step",
+    "onboarding:funding_probe",
+  ]);
+  const sql = modelConnectedPredicateSql({
+    event: "event",
+    step: "S",
+    phase: "P",
+    verdict: "V",
+  });
+  assert.match(sql, /onboarding:model_connected/);
+  // 하위호환 신호는 **조건부**여야 한다(cli_setup_step 전부가 연결은 아니다).
+  assert.match(sql, /S = 'auth' AND P = 'success'/);
+  assert.match(sql, /V = 'ok'/);
 });
 
 test("zeroFriction: 목표창은 주입 가능하고, 잘못된 값이면 기본 10분", () => {
@@ -963,7 +1028,8 @@ test("cockpit: zeroFriction 입력이 있으면 섹션이 조립된다", () => {
     spawn: { spawned: 0, crashed: 0, restarted: 0, completed: 0 },
     zeroFriction: ZERO_FRICTION_SAMPLE,
   });
-  assert.equal(result.zeroFriction?.tenMinuteMultiAgent.rate, 6 / 40);
+  assert.equal(result.zeroFriction?.tenMinuteMultiAgent.rate, 7 / 20);
+  assert.equal(result.zeroFriction?.connectFunnel.connectRate, 20 / 40);
   assert.equal(result.zeroFriction?.freeToPaid.paidClients, 5);
   const byKey = new Map(result.betaExitGauges.map((g) => [g.key, g]));
   assert.equal(byKey.get("retention_1d")?.current, 10 / 25);

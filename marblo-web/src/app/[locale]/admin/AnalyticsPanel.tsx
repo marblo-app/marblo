@@ -297,22 +297,41 @@ type KpiCockpit = {
     note: string;
   } | null;
   /**
-   * ★제로마찰 KPI(티켓 pWSnJeQN) — 사장님 최중요 KPI 인 "10분 안에 첫
-   * multi-agent 성공" 과 그 주변(동시2+·주2회+·무료→유료). 서버 순수 빌더
-   * buildZeroFrictionKpis 의 응답 shape 미러. 구버전 functions 는 null 을 준다.
+   * ★제로마찰 KPI(티켓 pWSnJeQN · 앵커 수정 Tw6m14gR) — 사장님 최중요 KPI 인
+   * "**연결 후** 10분 안에 첫 multi-agent 성공" 과 그 주변(앞단 연결 퍼널·
+   * 동시2+·주2회+·무료→유료). 서버 순수 빌더 buildZeroFrictionKpis 의 응답
+   * shape 미러. 구버전 functions 는 null 또는 신규 칸 없이 준다.
    */
   zeroFriction?: {
     tenMinuteMultiAgent: {
+      /** 시계 시작점. 구버전 functions 응답엔 없다. */
+      anchor?: "model_connect";
       windowMinutes: number;
       withinClients: number;
       successClients: number;
-      /** 시계를 못 구한 설치(이 계측 이전부터 쓰던 설치). */
+      /** 연결 시계를 못 구한 설치(이 계측 이전부터 쓰던 설치). */
       noClockClients: number;
       base: number;
       rate: number | null;
       successRate: number | null;
       medianMs: number | null;
       label: string;
+    };
+    /** ★앞단(설치→모델 연결). 구버전 functions 는 안 내려준다. */
+    connectFunnel?: {
+      firstRunBase: number;
+      connectedClients: number;
+      connectRate: number | null;
+      notConnectedClients: number;
+      label: string;
+    };
+    /** 참고: first_run 기준(앞단 포함) 같은 KPI — 앵커 변경 전과 같은 축. */
+    fromFirstRunReference?: {
+      base: number;
+      withinClients: number;
+      noClockClients: number;
+      rate: number | null;
+      medianMs: number | null;
     };
     multiAgentUsage: {
       activeClients: number;
@@ -2267,6 +2286,8 @@ function ZeroFrictionCard({
 }) {
   const ten = zf.tenMinuteMultiAgent;
   const usage = zf.multiAgentUsage;
+  const connect = zf.connectFunnel;
+  const fromFirstRun = zf.fromFirstRunReference;
   const hasAny =
     ten.successClients > 0 ||
     usage.activeClients > 0 ||
@@ -2274,8 +2295,8 @@ function ZeroFrictionCard({
     zf.weeklyTwicePlus.clients > 0;
   return (
     <Panel
-      title="★제로마찰 핵심 KPI (10분 안에 첫 multi-agent 성공)"
-      note="동시 2대+ 에서의 첫 완료/머지까지 걸린 시간 · 분모는 최초 실행(설치) 기준"
+      title="★제로마찰 핵심 KPI (연결 후 10분 내 첫 multi-agent 성공)"
+      note="시계 시작 = 모델 연결 완료(= 실제로 에이전트를 스폰할 수 있게 된 순간) · 분모는 연결을 끝낸 설치다 — 연결 전 이탈은 '모델 연결 도달률' 칸에서 따로 본다"
     >
       {!hasAny && (
         <div className="mb-3">
@@ -2284,11 +2305,11 @@ function ZeroFrictionCard({
       )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard
-          label={`${ten.windowMinutes}분 첫 multi-agent 성공률`}
+          label={`연결 후 ${ten.windowMinutes}분 내 첫 multi-agent 성공률`}
           value={ten.rate == null ? "—" : fmtPct(ten.rate)}
-          sub={`${fmtInt(ten.withinClients)} / 최초 실행 ${fmtInt(
+          sub={`${fmtInt(ten.withinClients)} / 모델 연결 ${fmtInt(
             ten.base
-          )} · 중앙값 ${fmtDuration(ten.medianMs)}`}
+          )} · 연결→성공 중앙값 ${fmtDuration(ten.medianMs)}`}
           accent={
             ten.rate == null
               ? undefined
@@ -2297,23 +2318,31 @@ function ZeroFrictionCard({
               : STATUS_WARN
           }
         />
+        {/* ★앞단(설치→연결). 여기서 죽은 사람은 위 KPI 의 실패가 아니라 앞단
+            이탈이다 — 두 수를 나란히 두는 것이 이 카드의 요점이다. */}
+        <StatCard
+          label="모델 연결 도달률 (앞단)"
+          value={
+            connect == null || connect.connectRate == null
+              ? "—"
+              : fmtPct(connect.connectRate)
+          }
+          sub={
+            connect == null
+              ? "구버전 functions — 재배포 후 표시"
+              : `${fmtInt(connect.connectedClients)} / 최초 실행 ${fmtInt(
+                  connect.firstRunBase
+                )} · 미연결 ${fmtInt(
+                  connect.notConnectedClients
+                )}명은 10분 분모 밖`
+          }
+        />
         <StatCard
           label="동시 2대+ 사용 설치"
           value={usage.activeRate == null ? "—" : fmtPct(usage.activeRate)}
-          sub={`${fmtInt(usage.activeClients)}명 · 관측 ${fmtInt(
-            usage.activeEvents
-          )}회`}
-        />
-        <StatCard
-          label="주 2회+ 사용"
-          value={
-            zf.weeklyTwicePlus.rate == null
-              ? "—"
-              : fmtPct(zf.weeklyTwicePlus.rate)
-          }
-          sub={`${fmtInt(zf.weeklyTwicePlus.clients)} / 최근 7일 활동 ${fmtInt(
-            zf.weeklyTwicePlus.base
-          )}명 (분모 다름)`}
+          sub={`${fmtInt(usage.activeClients)} / 모델 연결 ${fmtInt(
+            usage.base
+          )} · 관측 ${fmtInt(usage.activeEvents)}회`}
         />
         <StatCard
           label="무료 → 유료 전환"
@@ -2328,7 +2357,18 @@ function ZeroFrictionCard({
           accent={zf.freeToPaid.paidClients > 0 ? STATUS_GOOD : undefined}
         />
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+        <StatCard
+          label="주 2회+ 사용"
+          value={
+            zf.weeklyTwicePlus.rate == null
+              ? "—"
+              : fmtPct(zf.weeklyTwicePlus.rate)
+          }
+          sub={`${fmtInt(zf.weeklyTwicePlus.clients)} / 최근 7일 활동 ${fmtInt(
+            zf.weeklyTwicePlus.base
+          )}명 (분모 다름)`}
+        />
         <StatCard
           label="첫 성공 도달(창 무관)"
           value={ten.successRate == null ? "—" : fmtPct(ten.successRate)}
@@ -2342,14 +2382,31 @@ function ZeroFrictionCard({
           sub={`설치 · 발생 ${fmtInt(usage.successEvents)}회(완료·머지)`}
         />
         <StatCard
-          label="시계 없음"
+          label="연결 시계 없음"
           value={fmtInt(ten.noClockClients)}
-          sub="이 계측 이전 설치 — 소요시간을 지어내지 않음"
+          sub="연결 스탬프 이전 설치 — 소요시간을 지어내지 않음"
+        />
+        {/* 앵커 변경 전과 같은 축(앞단 포함). 두 수의 차이가 곧 '설치→연결'
+            구간이 KPI 를 얼마나 눌렀는지다. */}
+        <StatCard
+          label="참고: 최초 실행 기준"
+          value={
+            fromFirstRun == null || fromFirstRun.rate == null
+              ? "—"
+              : fmtPct(fromFirstRun.rate)
+          }
+          sub={
+            fromFirstRun == null
+              ? "구버전 functions — 재배포 후 표시"
+              : `${fmtInt(fromFirstRun.withinClients)} / 최초 실행 ${fmtInt(
+                  fromFirstRun.base
+                )} · 중앙값 ${fmtDuration(fromFirstRun.medianMs)}`
+          }
         />
         <StatCard
           label="목표창"
           value={`${ten.windowMinutes}분`}
-          sub="시작점 = 앱 최초 실행"
+          sub="시작점 = 모델 연결 완료(스폰 게이트 통과 · CLI 인증 · 펀딩 프로브 ok)"
         />
       </div>
       <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
