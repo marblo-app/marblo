@@ -77,6 +77,12 @@ author: "Marblo"
 - **Codex** — 프론트엔드와 코드 작업: 기존 패턴을 읽고 UI 컴포넌트, 타입, 훅, 상태 관리 변경을 일관되게 적용하는 작업에 배치합니다.
 - **Antigravity** — 테스트와 검증: 작성된 코드를 실행하고, 실패를 재현하고, 경계 조건을 확인하는 역할에 배치합니다.
 
+## 현재 마블로가 지원하는 범위
+
+마블로는 모델 통합을 두 축으로 봅니다. 하나는 실제로 스폰하는 **하네스**이고, 다른 하나는 그 하네스가 붙는 **provider/model**입니다. 현재 native harness 경로는 Claude Code, Codex, Grok Build, Antigravity입니다. Claude Code, Codex, Antigravity는 주력 경로이고, Grok Build는 실험적 native harness입니다. Gemini는 호환을 위해 남아 있는 deprecated 경로이고, local/custom 경로는 실험적입니다.
+
+일부 provider는 별도 하네스가 아닙니다. GLM, MiniMax, Kimi Code는 Claude 하네스에 Anthropic-compatible env-swap 프로파일과 벤더 키를 얹어 실행합니다. 따라서 설정된 경우 모델/provider 행으로 선택할 수 있지만, 마블로의 native harness라고 설명하면 안 됩니다.
+
 이 분담은 고정이 아니라 **출발점**입니다. 프로젝트 성격에 맞춰 조정해야 합니다. 데이터 파이프라인이 중심인 프로젝트라면 Claude가 스키마와 도메인 추론을 더 많이 맡고, Codex는 변환 코드와 타입 안정성을 정리할 수 있습니다. 디자인 시스템을 대규모로 정리하는 프로젝트라면 Codex가 컴포넌트 표면을 넓게 다루고, Antigravity가 렌더링과 접근성 회귀를 확인하는 편이 낫습니다. 복잡한 버그를 추적하는 상황에서는 Antigravity가 재현 조건을 먼저 좁히고, 그 결과를 Claude나 Codex가 수정 태스크로 이어받을 수 있습니다.
 
 좋은 배치는 "가장 똑똑한 모델에게 전부 맡기기"가 아닙니다. 좋은 배치는 실패했을 때 원인을 추적할 수 있는 배치입니다. 백엔드 계약이 틀렸는지, UI가 계약을 잘못 해석했는지, 테스트가 실제 사용자 흐름과 동떨어졌는지를 구분할 수 있어야 합니다. 그래서 모델별 강점보다 더 중요한 것이 역할별 산출물입니다. Claude는 설계 결정과 변경 이유를 남기고, Codex는 수정 파일과 UI 영향 범위를 남기고, Antigravity는 실행 명령과 검증 결과를 남겨야 합니다.
