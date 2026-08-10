@@ -50,6 +50,8 @@
     "worktree:reap": "tsc -p electron/tsconfig.json && node dist-electron/scripts/reap-worktrees.js",
     "graph:seed": "tsc -p electron/tsconfig.json && node dist-electron/scripts/seed-routing-graph.js",
     "verify:models": "tsc -p electron/tsconfig.json && node dist-electron/scripts/verify-models.js",
+    "bench:swe": "tsc -p electron/tsconfig.json && node dist-electron/scripts/bench/run.js",
+    "bench:swe:report": "tsc -p electron/tsconfig.json && node dist-electron/scripts/bench/report.js",
     "test:e2e:pw": "playwright test",
     "test:e2e:pw:ui": "playwright test --ui",
     "test:e2e:pw:headed": "playwright test --headed",
