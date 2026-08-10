@@ -192,6 +192,19 @@ describe("isolation from the de-identified telemetry path", () => {
     }
   });
 
+  it("the two producers stay decoupled — they inject, never import", () => {
+    // cost-tracker and orchestrator-manager expose a sink/handler that main.ts
+    // wires to the capture module. If either ever imports it directly, a core
+    // subsystem starts depending on consent-gated capture — and a capture bug
+    // becomes a cost-tracking or orchestrator-launch bug.
+    for (const file of [
+      read(electronDir, "cost-tracker.ts"),
+      read(electronDir, "orchestrator-manager.ts"),
+    ]) {
+      expect(file).not.toMatch(/from "\.\/training-capture"/);
+    }
+  });
+
   it("capture writes to its own BigQuery dataset, not marblo_telemetry", () => {
     const server = read(
       __dirname,

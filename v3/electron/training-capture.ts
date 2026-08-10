@@ -38,6 +38,7 @@ import * as path from "path";
 import { getAuth } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getMissionFirebaseApp } from "./mission-engine/firebase-app";
+import { encodeClaudeProjectDir } from "./claude-paths";
 import type { SessionFormat } from "./session-parsers";
 import {
   extractTranscriptTurns,
@@ -293,6 +294,177 @@ export function forgetSession(sessionKey: string): void {
   }
 }
 
+// ── Orchestrator sessions ───────────────────────────────────────────────
+//
+// The orchestrator is NOT an agent-manager agent, so it never reaches the cost
+// tracker and therefore never reaches the sink above. Its transcript is the
+// single most valuable thing this ticket is about (the orchestrator turn is
+// where the planning, decomposition and dispatch reasoning lives), so it gets
+// its own small poller here rather than being silently omitted.
+//
+// Only the claude orchestrator is read: its session file is a known path
+// (`~/.claude/projects/<encoded-root>/<sessionId>.jsonl`). A codex/grok
+// orchestrator stores a marker instead of a resolvable id, so it is skipped —
+// honestly and out loud — rather than guessed at.
+
+const ORCH_POLL_INTERVAL_MS = 15_000;
+
+interface OrchestratorWatch {
+  filePath: string;
+  projectId: string | null;
+  sessionId: string;
+  /** Lines already ingested. -1 = not yet initialized (see below). */
+  lastLineCount: number;
+}
+
+const orchestratorWatches = new Map<string, OrchestratorWatch>();
+let orchestratorTimer: ReturnType<typeof setInterval> | null = null;
+
+function orchWatermarkPath(): string {
+  return path.join(spoolDir(), "orchestrator-watermarks.json");
+}
+
+function loadOrchWatermarks(): Record<string, number> {
+  try {
+    const raw = fs.readFileSync(orchWatermarkPath(), "utf-8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function saveOrchWatermark(filePath: string, lastLineCount: number): void {
+  try {
+    fs.mkdirSync(spoolDir(), { recursive: true });
+    const store = loadOrchWatermarks();
+    store[filePath] = lastLineCount;
+    fs.writeFileSync(orchWatermarkPath(), JSON.stringify(store), {
+      mode: 0o600,
+    });
+  } catch {
+    // Best-effort. Losing a watermark re-reads a session once; the sampleId is
+    // deterministic (`sessionId:uuid`) so the duplicate stays detectable.
+  }
+}
+
+/**
+ * Watch the claude orchestrator's session file for this project root.
+ *
+ * Called from the orchestrator manager's single session-id chokepoint, so
+ * resume, relaunch and fresh-session detection all register through one path.
+ * Idempotent: re-registering the same file keeps its watermark.
+ */
+export function trackOrchestratorSession(input: {
+  rootPath: string;
+  sessionId: string;
+  projectId?: string | null;
+  model?: string | null;
+}): void {
+  const { rootPath, sessionId } = input;
+  // Non-claude orchestrators keep a marker, not a resolvable session file.
+  if (input.model && input.model !== "claude") return;
+  if (!rootPath || !sessionId || !/^[0-9a-fA-F-]{16,}$/.test(sessionId)) return;
+
+  const filePath = path.join(
+    os.homedir(),
+    ".claude",
+    "projects",
+    encodeClaudeProjectDir(rootPath),
+    `${sessionId}.jsonl`,
+  );
+  const existing = orchestratorWatches.get(filePath);
+  if (existing) {
+    existing.projectId = input.projectId ?? existing.projectId;
+    return;
+  }
+  orchestratorWatches.set(filePath, {
+    filePath,
+    projectId: input.projectId ?? null,
+    sessionId,
+    lastLineCount: loadOrchWatermarks()[filePath] ?? -1,
+  });
+  ensureOrchestratorPoller();
+  console.info(
+    `[TrainingCapture] watching orchestrator session ${sessionId} (${orchestratorWatches.size} watched)`,
+  );
+}
+
+function ensureOrchestratorPoller(): void {
+  if (orchestratorTimer) return;
+  orchestratorTimer = setInterval(
+    pollOrchestratorSessions,
+    ORCH_POLL_INTERVAL_MS,
+  );
+  orchestratorTimer.unref?.();
+}
+
+function pollOrchestratorSessions(): void {
+  refreshGateSoon();
+  if (!captureEnabled()) return;
+  for (const watch of orchestratorWatches.values()) {
+    try {
+      pollOrchestratorSession(watch);
+    } catch (err) {
+      console.warn(
+        `[TrainingCapture] orchestrator poll failed (${watch.sessionId}):`,
+        errMsg(err),
+      );
+    }
+  }
+}
+
+function pollOrchestratorSession(watch: OrchestratorWatch): void {
+  if (!fs.existsSync(watch.filePath)) return;
+  const raw = fs.readFileSync(watch.filePath, "utf-8");
+  if (!raw) return;
+  const lines = raw.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+
+  // First sighting with no stored watermark: start at the CURRENT end of file.
+  // Capturing the backlog would collect turns from before capture was enabled —
+  // consent covers what happens from now on, not retroactively.
+  if (watch.lastLineCount < 0) {
+    watch.lastLineCount = lines.length;
+    saveOrchWatermark(watch.filePath, watch.lastLineCount);
+    return;
+  }
+  // The file shrank → a different session rotated into this name. Re-baseline
+  // rather than replaying it (the mirror of the cost tracker's watermark rule).
+  if (lines.length < watch.lastLineCount) {
+    watch.lastLineCount = lines.length;
+    saveOrchWatermark(watch.filePath, watch.lastLineCount);
+    return;
+  }
+  if (lines.length === watch.lastLineCount) return;
+
+  const newLines = lines.slice(watch.lastLineCount);
+  ingestSessionLines(
+    "claude",
+    newLines,
+    {
+      agentId: null,
+      source: "orchestrator",
+      projectId: watch.projectId,
+      // The orchestrator is not bound to one board task by construction — it
+      // is the thing that hands tasks out. Leaving this null is the truth.
+      taskId: null,
+      role: "orchestrator",
+      model: null,
+      parentAgentId: null,
+      sessionId: watch.sessionId,
+      cwd: null,
+    },
+    watch.filePath,
+  );
+  watch.lastLineCount = lines.length;
+  saveOrchWatermark(watch.filePath, watch.lastLineCount);
+}
+
 // ── Upload ──────────────────────────────────────────────────────────────
 
 async function flushSpool(): Promise<void> {
@@ -369,6 +541,7 @@ export function initTrainingCapture(
     void flushSpool();
   }, UPLOAD_INTERVAL_MS);
   uploadTimer.unref?.();
+  if (orchestratorWatches.size > 0) ensureOrchestratorPoller();
   refreshGateSoon();
   console.info(
     "[TrainingCapture] initialized (fail-closed; awaiting server gate)",
@@ -379,6 +552,10 @@ export function stopTrainingCapture(): void {
   if (uploadTimer) {
     clearInterval(uploadTimer);
     uploadTimer = null;
+  }
+  if (orchestratorTimer) {
+    clearInterval(orchestratorTimer);
+    orchestratorTimer = null;
   }
 }
 

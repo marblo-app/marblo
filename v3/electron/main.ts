@@ -158,6 +158,7 @@ import {
   ingestSessionLines,
   initTrainingCapture,
   refreshTrainingCapture,
+  trackOrchestratorSession,
   trainingCaptureStatus,
 } from "./training-capture";
 import { getAccountRateLimits } from "./account-usage";
@@ -2495,6 +2496,10 @@ function createOrchestratorInstance(projectId: string): OrchestratorManager {
   // all — the shell never starts. Name the cause instead of leaving the user
   // with an orchestrator that just won't attach.
   orchestrator.setRootPathMissingHandler(notifyRootPathMissing);
+  // 오케 세션 원문 캡처(ticket IqcXHVbT0rXnHloXpV7n). 오케는 agent-manager 를
+  // 안 타서 cost-tracker sink 로는 절대 안 들어온다 — 세션 id 초크포인트에
+  // 직접 붙인다. 게이트가 닫혀 있으면 파일을 읽지도 않는다.
+  orchestrator.setSessionTranscriptHandler(trackOrchestratorSession);
   return orchestrator;
 }
 
@@ -3134,6 +3139,10 @@ function createMissionOrchestratorInstance(
     "mission", // kind — board orchestrator 와 sessionId / MCP config 분리
   );
   orchestrator.setRootPathMissingHandler(notifyRootPathMissing);
+  // 오케 세션 원문 캡처(ticket IqcXHVbT0rXnHloXpV7n). 오케는 agent-manager 를
+  // 안 타서 cost-tracker sink 로는 절대 안 들어온다 — 세션 id 초크포인트에
+  // 직접 붙인다. 게이트가 닫혀 있으면 파일을 읽지도 않는다.
+  orchestrator.setSessionTranscriptHandler(trackOrchestratorSession);
   return orchestrator;
 }
 

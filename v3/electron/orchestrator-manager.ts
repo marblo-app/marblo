@@ -1792,6 +1792,37 @@ export class OrchestratorManager {
       : this.kind;
   }
 
+  /**
+   * Observer of "this orchestrator is now bound to this claude session".
+   *
+   * The orchestrator is not an agent-manager agent, so it never reaches the
+   * cost tracker — and the cost tracker is where the training-data capture
+   * reads raw session lines from. Without this hook the single highest-value
+   * transcript in the app (the orchestrator's own planning/dispatch turns)
+   * would be the one thing capture missed.
+   *
+   * Injected rather than imported so this manager keeps knowing nothing about
+   * capture, consent, or upload. Same shape as setRootPathMissingHandler.
+   */
+  private onSessionTranscript?: (input: {
+    rootPath: string;
+    sessionId: string;
+    projectId: string | null;
+    model: string | null;
+  }) => void;
+
+  /** Register the session-transcript observer (see {@link onSessionTranscript}). */
+  setSessionTranscriptHandler(
+    handler: (input: {
+      rootPath: string;
+      sessionId: string;
+      projectId: string | null;
+      model: string | null;
+    }) => void,
+  ): void {
+    this.onSessionTranscript = handler;
+  }
+
   /** Persist this orchestrator's claude session id under its store key. */
   saveOrchSessionId(rootPath: string, claudeSessionId: string): void {
     const store = this.readOrchStore(rootPath);
@@ -1817,6 +1848,24 @@ export class OrchestratorManager {
       );
     } catch {
       /* best-effort */
+    }
+
+    // 이 지점이 "오케 세션 id 가 확정되는" 유일한 초크포인트다(resume·신규탐지·
+    // 재런치 전부 여기로 수렴) — 관측자를 여기 달아야 경로마다 빠뜨리지 않는다.
+    // 실패해도 세션 저장에는 영향 없게 격리한다.
+    try {
+      this.onSessionTranscript?.({
+        rootPath,
+        sessionId: claudeSessionId,
+        projectId:
+          this.session?.projectId ?? this.lastLaunchArgs?.projectId ?? null,
+        model: this.session?.launchConfig?.model ?? null,
+      });
+    } catch (err) {
+      console.warn(
+        `[Orchestrator:${this.kind}] session-transcript handler threw:`,
+        err,
+      );
     }
   }
 
