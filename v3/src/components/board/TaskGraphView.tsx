@@ -31,7 +31,9 @@ import {
 } from "../../lib/taskGraphAnalysis";
 import {
   createTaskGraphSimulation,
+  fitGraphToViewport,
   hitTest,
+  recommendedWarmUpTicks,
   warmUp,
   type ForceNode,
   type TaskGraphSimulation,
@@ -71,11 +73,20 @@ interface TaskGraphViewProps {
   onSelect: (task: Task) => void;
 }
 
-const MIN_ZOOM = 0.2;
+/**
+ * ★0.2 였다가 내렸다. 포스 시드가 "세로 한 컬럼" 에서 "면적을 채우는 원반" 으로
+ * 바뀌면서 그래프의 실제 크기가 √(노드 수)에 비례하게 됐다 — 1200 티켓이면 한
+ * 변이 3000px 쯤 된다. 800px 뷰포트에 넣으려면 0.23 배가 필요한데 하한이 0.2 면
+ * 아슬아슬하고, 티켓이 더 늘면 하한에 걸려 **화면 맞춤이 조용히 잘린다**(가장자리
+ * 노드가 영영 안 보인다). 하한은 사용자 휠 줌이 뒤집히지 않을 정도만 있으면 된다.
+ */
+const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 2.5;
-/** 첫 프레임 전에 미리 돌릴 틱 수 — 점들이 모여드는 과정을 안 보여준다. */
-const WARMUP_TICKS = 140;
-/** 이어받은 배치에 새 노드만 끼워 넣을 때의 틱 수. */
+/** 화면 맞춤에서 가장자리 노드가 창에 붙지 않도록 남기는 여백(px). */
+const FIT_PADDING = 56;
+/** 노드 두어 개짜리 보드를 억지로 확대하지 않게 하는 상한. */
+const MAX_FIT_ZOOM = 1.1;
+/** 이어받은 배치에 새 노드만 끼워 넣을 때의 틱 수(예산 상한 안에서). */
 const RESEED_TICKS = 30;
 /** 라벨을 그리기 시작하는 줌 — 이보다 작으면 글자가 죽처럼 뭉친다. */
 const LABEL_ZOOM = 0.55;
@@ -498,23 +509,14 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
     const sim = simRef.current;
     const { width, height } = sizeRef.current;
     if (!sim || sim.nodes.length === 0 || width === 0 || height === 0) return;
-    const b = sim.bounds();
-    const pad = 56;
-    const graphW = Math.max(1, b.maxX - b.minX);
-    const graphH = Math.max(1, b.maxY - b.minY);
-    const k = Math.min(
-      MAX_ZOOM,
-      Math.max(
-        MIN_ZOOM,
-        Math.min((width - pad * 2) / graphW, (height - pad * 2) / graphH, 1.1),
-      ),
-    );
-    viewRef.current = {
-      k,
-      x: width / 2 - ((b.minX + b.maxX) / 2) * k,
-      y: height / 2 - ((b.minY + b.maxY) / 2) * k,
-    };
-    setZoomLabel(k);
+    const next = fitGraphToViewport(sim.bounds(), width, height, {
+      padding: FIT_PADDING,
+      minZoom: MIN_ZOOM,
+      maxZoom: MAX_ZOOM,
+      maxFitZoom: MAX_FIT_ZOOM,
+    });
+    viewRef.current = next;
+    setZoomLabel(next.k);
     requestDraw();
   }, [requestDraw]);
 
@@ -533,8 +535,13 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
       radiusOf: (id) => radii.get(id) ?? 12,
     });
     // 첫 프레임 전에 미리 익힌다. 이어받는 경우엔 이미 자리를 잡고 있으므로
-    // 살짝만 데워서 새 노드만 끼워 넣는다.
-    warmUp(sim, previous && previous.size > 0 ? RESEED_TICKS : WARMUP_TICKS);
+    // 살짝만 데워서 새 노드만 끼워 넣는다. 예열 틱 수는 노드 수에 반비례하는
+    // 예산제 — 1000장 넘는 보드에서 이 동기 루프가 곧 프리즈 시간이다.
+    const budget = recommendedWarmUpTicks(layout.nodes.length);
+    warmUp(
+      sim,
+      previous && previous.size > 0 ? Math.min(RESEED_TICKS, budget) : budget,
+    );
     simRef.current = sim;
     requestDraw();
   }, [layout, dependents, requestDraw]);

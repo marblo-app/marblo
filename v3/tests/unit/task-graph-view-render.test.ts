@@ -224,6 +224,37 @@ describe("TaskGraphView — 운영 레이어", () => {
     expect(screen.getByText("대기 2")).toBeTruthy();
   });
 
+  /**
+   * ★"의존이 드문 큰 보드" 경로. 실보드가 1207태스크/82의존이고, 그래프 뷰가
+   * 세로 일자로 뭉치던 버그가 정확히 이 비율에서 났다.
+   *
+   * 캔버스 픽셀은 jsdom 이 못 그리니 배치의 *모양*은 여기서 못 잰다(그건
+   * task-graph-force.test.ts 의 bounds 종횡비 단언이 맡는다). 여기서 지키는 건
+   * 다른 것 둘이다: 티켓이 수백 장이어도 ① 노드가 하나도 안 빠지고 ② 마운트가
+   * 동기 예열 때문에 멎지 않는다 — 예열은 useEffect 안에서 그냥 돌기 때문에
+   * 여기가 실제로 그 비용을 타는 유일한 테스트다.
+   */
+  it("★수백 장짜리 희소 보드도 노드를 빠짐없이 세우고 즉시 마운트된다", () => {
+    const many: Task[] = [];
+    for (let i = 0; i < 300; i += 1) many.push(task(`n${i}`));
+    // 의존은 드물게 — 고립 노드가 대부분인 실보드 비율.
+    for (let i = 7; i < 300; i += 37) {
+      many[i] = task(`n${i}`, [`n${i - 1}`]);
+    }
+
+    const started = performance.now();
+    render(createElement(TaskGraphView, { tasks: many, onSelect: vi.fn() }));
+    const elapsed = performance.now() - started;
+
+    expect(screen.getAllByTestId("task-graph-node")).toHaveLength(300);
+    const canvas = screen.getByTestId("task-graph-canvas");
+    expect(canvas.getAttribute("data-node-count")).toBe("300");
+    expect(canvas.getAttribute("data-edge-count")).toBe("8");
+    // 자릿수 감시다(벤치가 아니다) — 반발/충돌이 전수 비교로 되돌아가거나 예열
+    // 예산제가 사라지면 여기서 수 초가 걸린다. 느린 CI 를 감안한 천장.
+    expect(elapsed).toBeLessThan(3000);
+  });
+
   it("★캔버스 색표가 칸반 상태표와 같은 키를 덮는다(색 드리프트 방지)", () => {
     // 상태가 새로 생겼는데 STATUS_HEX 에만 안 들어가면 그 노드는 회색 폴백으로
     // 조용히 그려진다 — 칸반에선 보라, 그래프에선 회색이 되는 자리다.
