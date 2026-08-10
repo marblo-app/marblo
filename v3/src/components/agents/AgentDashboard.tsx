@@ -317,12 +317,86 @@ function isActiveOrRecentAgent(agent: Agent, now: number): boolean {
   return lastSeen > 0 && now - lastSeen <= RECENT_AGENT_WINDOW_MS;
 }
 
+type AgentCost = {
+  cost: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+};
+
+type SubmodelBucket = {
+  id: string;
+  label: string;
+  tokens: number;
+  agentCount: number;
+  agentNames: string;
+};
+
+/**
+ * 하네스 그룹 안의 막대를 **실행한 하위모델 id** 로 접는다.
+ *
+ * 종전엔 이 막대가 에이전트명(오케·프론트·클로드)이었다. 그런데 이 섹션의 그룹은
+ * 하네스(`claude`/`gpt`)이고, 같은 하네스가 opus·fable·GLM 을 전부 띄운다 —
+ * 즉 "어느 모델이 토큰을 태웠나" 라는 이 화면의 질문에 에이전트명 축은 답을 못
+ * 한다(에이전트 목록은 다른 탭에 이미 있다).
+ *
+ * 모델 근거는 호출자가 넘기는 `submodelFor`(관측값: detectedModelId >
+ * spawnedModel). 근거가 없으면 agent.model → 하네스 폴백으로 떨어진다 — 지어내지
+ * 않고 아는 만큼만 좁힌다. 같은 id 는 합산하고 토큰 내림차순으로 준다(큰 소비가
+ * 위로).
+ */
+function submodelBreakdown(
+  agents: Agent[],
+  harnessFallback: string,
+  costFor: (a: Agent) => AgentCost | null,
+  submodelFor?: (a: Agent) => { id: string; label: string } | null,
+): SubmodelBucket[] {
+  const buckets = new Map<string, SubmodelBucket & { names: string[] }>();
+  for (const agent of agents) {
+    const resolved = submodelFor?.(agent) ?? null;
+    const id = resolved?.id ?? agent.model ?? harnessFallback;
+    const label = resolved?.label ?? id;
+    const d = costFor(agent);
+    const tokens = d
+      ? d.inputTokens +
+        d.outputTokens +
+        (d.cacheReadTokens || 0) +
+        (d.cacheWriteTokens || 0)
+      : 0;
+    const bucket = buckets.get(id);
+    if (bucket) {
+      bucket.tokens += tokens;
+      bucket.agentCount += 1;
+      bucket.names.push(agent.name);
+    } else {
+      buckets.set(id, {
+        id,
+        label,
+        tokens,
+        agentCount: 1,
+        agentNames: "",
+        names: [agent.name],
+      });
+    }
+  }
+  return Array.from(buckets.values())
+    .map(({ names, ...b }) => ({ ...b, agentNames: names.join(", ") }))
+    .sort((a, b) => b.tokens - a.tokens);
+}
+
 export function UsageDashboard({
   agents,
   loading = false,
+  submodelFor,
 }: {
   agents: Agent[];
   loading?: boolean;
+  /**
+   * 에이전트 → 관측된 하위모델. 넘기지 않으면 `agent.model`(=하네스)로 접히므로
+   * 이 컴포넌트를 쓰는 다른 화면은 종전과 같은 그림을 본다.
+   */
+  submodelFor?: (a: Agent) => { id: string; label: string } | null;
 }) {
   const { t } = useTranslation();
   const [showOlderAgents, setShowOlderAgents] = useState(false);
@@ -474,40 +548,47 @@ export function UsageDashboard({
               </div>
             )}
 
-            {/* Per-agent breakdown */}
+            {/* Per-submodel breakdown — 하네스 그룹 안을 실행 모델 id 로 접는다 */}
             <div className="space-y-1.5">
-              {displayAgents
-                .slice()
-                .sort((a, b) => lastUsageTime(b) - lastUsageTime(a))
-                .map((agent) => {
-                  const d = costFor(agent);
-                  const agentTokens = d
-                    ? d.inputTokens +
-                      d.outputTokens +
-                      (d.cacheReadTokens || 0) +
-                      (d.cacheWriteTokens || 0)
-                    : 0;
-                  const barBase = totalTokens;
-                  const barPct =
-                    barBase > 0 ? (agentTokens / barBase) * 100 : 0;
+              {submodelBreakdown(
+                displayAgents,
+                model,
+                costFor,
+                submodelFor,
+              ).map((bucket) => {
+                const barPct =
+                  totalTokens > 0 ? (bucket.tokens / totalTokens) * 100 : 0;
 
-                  return (
-                    <div key={agent.id} className="flex items-center gap-3">
-                      <span className="text-xs text-gray-400 truncate w-28">
-                        {agent.name}
+                return (
+                  <div key={bucket.id} className="flex items-center gap-3">
+                    <span
+                      className="w-40 truncate font-mono text-xs text-gray-400"
+                      title={bucket.label}
+                    >
+                      {bucket.label}
+                    </span>
+                    {bucket.agentCount > 1 && (
+                      <span
+                        className="shrink-0 text-[10px] text-gray-500"
+                        title={`${t("agents.usage.submodelAgentCount", {
+                          n: bucket.agentCount,
+                        })} — ${bucket.agentNames}`}
+                      >
+                        ×{bucket.agentCount}
                       </span>
-                      <div className="flex-1 h-2 rounded-full bg-gray-700 overflow-hidden">
-                        <div
-                          className="h-2 rounded-full bg-blue-500 transition-all duration-500"
-                          style={{ width: `${barPct}%` }}
-                        />
-                      </div>
-                      <span className="text-xs font-mono text-gray-400 w-20 text-right">
-                        {formatTokens(agentTokens)}
-                      </span>
+                    )}
+                    <div className="flex-1 h-2 rounded-full bg-gray-700 overflow-hidden">
+                      <div
+                        className="h-2 rounded-full bg-blue-500 transition-all duration-500"
+                        style={{ width: `${barPct}%` }}
+                      />
                     </div>
-                  );
-                })}
+                    <span className="text-xs font-mono text-gray-400 w-20 text-right">
+                      {formatTokens(bucket.tokens)}
+                    </span>
+                  </div>
+                );
+              })}
               {displayAgents.length === 0 && modelAgents.length > 0 && (
                 <div className="rounded border border-dashed border-gray-700 py-3 text-center text-xs text-gray-500">
                   {t("agents.usage.noVisibleAgents")}

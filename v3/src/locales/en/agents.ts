@@ -30,6 +30,7 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.usage.hideOlder": "Hide older",
   "agents.usage.noVisibleAgents":
     "No active agents or usage from the last 7 days.",
+  "agents.usage.submodelAgentCount": "Summed across {n} agents",
 
   // ── Guide: CLI comparison table ─────────────────────────────
   "agents.guide.cliCompare.title": "AI CLI Comparison",

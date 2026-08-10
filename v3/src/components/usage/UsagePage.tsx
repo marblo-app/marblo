@@ -54,7 +54,12 @@ import { ModelFactSheet } from "./ModelFactSheet";
  * 뿐이고, 조회할 수 없는 칸은 지어내지 않고 "조회불가" 로 비운다.
  *
  * Sections: 기간 선택기 → 총계 → 벤더·하위모델 분해 → 일자별 추이 →
- * 에이전트↔실모델 → 벤더 크레딧/쿼터 → 모델·에이전트(기존) → 한도 상태.
+ * 벤더 크레딧/쿼터 → 모델·에이전트(기존) → 한도 상태.
+ *
+ * ★`AgentModelMap`(에이전트↔실모델 표)은 **렌더하지 않는다** — 같은 사실(어느
+ * 에이전트가 어느 하위모델로 돌았나)을 "모델·에이전트" 섹션이 이미 하위모델
+ * 막대로 말하고 있어 표가 중복이었다(사장님 피드백). 컴포넌트 정의는 남겨 둔다:
+ * `agentModelRows` 는 그 하위모델 접기의 입력이고, 표 자체도 되살릴 여지가 있다.
  *
  * ★하위 섹션 컴포넌트(`VendorBreakdown`/`DailyTrend`/
  * `AgentModelMap`)를 export 해 두는 이유: 이 페이지 전체는 Firestore·IPC·인증에
@@ -180,6 +185,20 @@ export function UsagePage() {
     [agents, modelIndex],
   );
 
+  // agentId → 관측된 하위모델. "모델·에이전트" 섹션이 하네스 그룹 안 막대를
+  // 에이전트명이 아니라 **실제 실행 모델 id** 로 접는 데 쓴다 — 같은 하네스
+  // (`claude`)로 opus 와 fable 을 돌려도 종전엔 둘이 이름으로만 갈려서 "어느
+  // 모델이 토큰을 태웠나" 를 이 섹션에서 읽을 수 없었다. 근거는 `AgentModelMap`
+  // 과 동일한 관측값(detectedModelId > spawnedModel)이고, 근거 없는 에이전트는
+  // 여기에 안 담겨 아래에서 하네스 폴백으로 떨어진다(추정하지 않는다).
+  const submodelByAgent = useMemo(() => {
+    const m = new Map<string, { id: string; label: string }>();
+    for (const r of agentModelRows) {
+      if (r.modelId) m.set(r.agentId, { id: r.modelId, label: r.modelId });
+    }
+    return m;
+  }, [agentModelRows]);
+
   if (!projectId) {
     return (
       <div className="p-6 text-sm text-gray-500">
@@ -262,9 +281,6 @@ export function UsagePage() {
         index={modelIndex}
       />
 
-      {/* 에이전트명 ↔ 실제 실행 모델 */}
-      <AgentModelMap rows={agentModelRows} loading={agentsLoading} />
-
       {/* 벤더 크레딧/쿼터 — 조회 가능한 것만, 나머지는 "조회불가" */}
       <VendorCreditsPanel groups={catalogGroups} />
 
@@ -273,6 +289,7 @@ export function UsagePage() {
         <UsageDashboard
           agents={agents}
           loading={agentsLoading || costsLoading || summaryLoading}
+          submodelFor={(a) => submodelByAgent.get(a.id) ?? null}
         />
       </Section>
 

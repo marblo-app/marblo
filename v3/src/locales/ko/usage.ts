@@ -120,7 +120,7 @@ export const usage = {
   // ── Model fact sheet (접이식 · 기본 접힘) ────────────────
   // 벤치 이름(SWE-bench Verified/Pro …)과 하네스 이름은 고유명사라 번역하지
   // 않는다 — 출처 화면에 적힌 표기가 그대로 보여야 대조가 된다.
-  "usage.factSheet.title": "모델 단가 · 성능 · 컨텍스트",
+  "usage.factSheet.title": "모델 단가 · SWE-bench · 컨텍스트",
   "usage.factSheet.hint": "펼쳐서 보기",
   "usage.factSheet.loading": "모델 정보를 불러오는 중…",
   "usage.factSheet.error":

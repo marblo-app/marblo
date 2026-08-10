@@ -114,7 +114,8 @@ function installElectronApiMock() {
 const SECTION_TITLES = [
   ko["usage.breakdown.title"],
   ko["usage.trend.titleEmpty"],
-  ko["usage.agentModel.title"],
+  // usage.agentModel.title(에이전트↔실모델 표)은 의도적으로 빠졌다 — "모델·
+  // 에이전트" 섹션이 같은 사실을 하위모델 막대로 말해 중복이라 렌더를 뗐다.
   ko["usage.credits.title"],
   ko["usage.section.byModelAgent"],
   ko["usage.rateLimit.title"],

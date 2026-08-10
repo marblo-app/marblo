@@ -27,6 +27,9 @@ export const agents = {
   "agents.usage.hideOlder": "오래된 항목 접기",
   "agents.usage.noVisibleAgents":
     "최근 7일 사용량 또는 활성 에이전트가 없습니다.",
+  // 하네스 그룹 안 막대가 하위모델 id 로 접혀 있을 때, 그 한 줄이 몇 개
+  // 에이전트를 합친 것인지 알려주는 툴팁.
+  "agents.usage.submodelAgentCount": "{n}개 에이전트 합산",
 
   // ── Guide: CLI comparison table ─────────────────────────────
   "agents.guide.cliCompare.title": "AI CLI 비교",

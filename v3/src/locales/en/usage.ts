@@ -118,7 +118,7 @@ export const usage: Record<keyof typeof koUsage, string> = {
   // ── Model fact sheet (collapsible, collapsed by default) ─
   // Benchmark names (SWE-bench Verified/Pro …) and harness names stay literal —
   // they must match the source page verbatim so numbers can be cross-checked.
-  "usage.factSheet.title": "Model pricing · performance · context",
+  "usage.factSheet.title": "Model pricing · SWE-bench · context",
   "usage.factSheet.hint": "expand to view",
   "usage.factSheet.loading": "Loading model facts…",
   "usage.factSheet.error":
