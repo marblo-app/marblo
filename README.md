@@ -24,8 +24,16 @@
   &nbsp;·&nbsp;
   <a href="#full-catalog--every-item-in-the-repo"><ins>🧩 Catalog</ins></a>
   &nbsp;·&nbsp;
+  <a href="#-privacy--what-leaves-your-machine"><ins>🔒 Privacy</ins></a>
+  &nbsp;·&nbsp;
   <a href="https://marblo.app/en/guide"><ins>📖 Guide</ins></a>
 </h3>
+
+<p align="center">
+  <sub><strong>Marblo is not another coding agent. It is the layer above them</strong> — the four things you hit the moment you want <em>more than one</em> agent working at once:</sub><br/>
+  <sub>🗂 <strong>a board</strong>, not a chat log, so you can see what all of them are doing &nbsp;·&nbsp; 🎛 <strong>a different model per ticket</strong>, chosen per job instead of locked to one vendor</sub><br/>
+  <sub>🌿 <strong>worktree-per-ticket isolation</strong>, so parallel agents don't overwrite each other &nbsp;·&nbsp; ✅ <strong>safe merge</strong>, so nothing lands on <code>main</code> without your review</sub>
+</p>
 
 <p align="center">
   <img src="assets/tabs/board.svg" alt="The Marblo board — tickets across TODO, CLAIMED, IN PROGRESS, REVIEW and DONE, each card showing the agent and the concrete model working it" width="960" />
@@ -180,6 +188,24 @@ An append-only ledger of what each ticket did: problem, approach, changes, verif
 | Merge is trust-me                    | Review, verify, then you confirm          |
 
 > Agents are cheap to start. **Knowing what the fleet is doing** is the hard part. That’s the product.
+
+---
+
+## 🔒 Privacy — what leaves your machine
+
+You are about to point this at your repository, so this belongs above the fold rather than in a policy page nobody reads. Full detail: **[docs/privacy.md](docs/privacy.md)**.
+
+| &nbsp;                                                      | &nbsp;                                                                                                                                                                               |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 🚫 **Your code never leaves the machine**                   | No source, diffs, file contents, or file paths on any default path. The agent CLI reads your repo locally; Marblo spawns it as a subprocess.                                         |
+| 🚫 **We do not train on your code**                         | Not from any default path. Raw prompt/response contribution exists as an explicit switch that ships **off** and today is accepted from one account — the operator's own.             |
+| 🚫 **Prompts and agent output are not uploaded**            | Free-text fields are **dropped** before the send queue, not redacted — partial scrubbing of prose is unreliable, so it never ships.                                                  |
+| ✅ **De-identified operational analytics is ON by default** | Event names, model ids, durations, token counts, exit codes, error categories — keyed by a random install id. We are not going to call that opt-in when it isn't.                    |
+| 🎚 **One switch turns it off**                               | Settings → Privacy. Immediate, remembered, and every feature keeps working. (One trade-off, stated: it also stops cost roll-ups, so the Usage tab stops accruing new spend history.) |
+| 🔕 **Crash reports are opt-in and ship off**                | Sentry is the only third party the app can send to, and only after you switch it on. No GA4, no Mixpanel, nothing sold or shared.                                                    |
+| 🔍 **You can check this without our source**                | Put a network monitor in front of the app: on a default install the only outbound hosts are Google/Firebase, the GitHub release feed, and GitHub when you install from the Store.    |
+
+[**Read the full policy — including the parts that are not flattering →**](docs/privacy.md)
 
 ---
 
@@ -453,6 +479,15 @@ Being explicit about this, because a closed core that presents itself as an open
 
 Assets are portable by design. If you stop using Marblo, everything in this repo keeps working.
 
+**What you can verify without our source.** A closed engine means "read the code" is not an answer we can give, so here is what we can:
+
+- **Everything the agents consume** — every skill, agent, workflow, MCP manifest, and knowledge pack here is a plain file you can read _before_ it loads into a model's context, and every referenced item is pinned to an upstream tag or SHA. The catalog table is generated from those manifests, and CI fails any PR where the two have drifted.
+- **What the app sends** — [docs/privacy.md](docs/privacy.md) names the fields, the scrubber's exact transforms, the switches, and the outbound hosts, so a network monitor is enough to check us.
+- **Our own numbers** — every figure in [docs/benchmark/](docs/benchmark/) prints its sample size and traces to committed SQL you can re-run. It says outright that our sample cannot rank anything.
+- **What we got wrong** — [SECURITY.md](SECURITY.md) carries a correction to a claim an earlier version of it made, and a "what is not true yet" list. So does the privacy page.
+
+We would rather be checkable on the open surface than ask for trust on the closed one.
+
 ### Repository layout
 
 ```text
@@ -494,6 +529,7 @@ A `marblo.yaml` sits next to each item. It is **additive Store metadata, not a c
 
 - 🏠 Product site — [marblo.app](https://marblo.app)
 - 📝 What's new — [release notes](releases/) (every version, mirrored automatically)
+- 🔒 Privacy & telemetry — [docs/privacy.md](docs/privacy.md) · Security — [SECURITY.md](SECURITY.md)
 - ⬇️ Releases — [github.com/melocream/marblo-releases](https://github.com/melocream/marblo-releases/releases/latest)
 - ✉️ Contact — [team@marblo.app](mailto:team@marblo.app)
 - 🧑‍💻 Founder — [@melocream](https://github.com/melocream)

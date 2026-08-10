@@ -10,5 +10,6 @@ Documentation for the Marblo app and its open ecosystem.
 - **[Recipes & Playbooks](recipes/)** — end-to-end runs: parallel feature builds, large refactors, bug audits, doc harvests, safe merges.
 - **[Troubleshooting](troubleshooting/)** — common issues and fixes.
 - **[Benchmark](benchmark/)** — how we measure orchestrated work, and our own dogfooding numbers with their sample sizes and gaps stated up front.
+- **[Privacy & telemetry](privacy.md)** — exactly what the app sends, what never leaves your machine, how to switch the optional parts off, and how to verify it yourself.
 
 > Product site: [marblo.app](https://marblo.app) · Guide: [marblo.app/en/guide](https://marblo.app/en/guide)
