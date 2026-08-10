@@ -6,7 +6,17 @@ import {
   extractIp,
   COUPON_RULES_UID,
   COUPON_RULES_IP,
+  ATTRIBUTION_RULES_IP,
 } from "./rateLimit";
+import {
+  parseLinkInstallRequest,
+  INSTALL_ATTRIBUTION_SCHEMA,
+} from "./installAttribution";
+import {
+  buildCountryFunnel,
+  type InstallRow,
+  type WebVisitorRow,
+} from "./countryFunnel";
 import { reconcileTossPending, reconcilePaddlePending } from "./reconciliation";
 import { redactSecrets } from "./redact";
 import {
@@ -154,7 +164,7 @@ const customTokenServiceAccountId =
 admin.initializeApp(
   customTokenServiceAccountId
     ? { serviceAccountId: customTokenServiceAccountId }
-    : undefined,
+    : undefined
 );
 const db = admin.firestore();
 const BQ_LOCATION = "US";
@@ -194,7 +204,7 @@ function safeAnalyticsErrorMessage(error: unknown): string {
 }
 
 async function runAdminAnalyticsQueriesWithStatus(
-  specs: readonly AdminAnalyticsQuerySpec[],
+  specs: readonly AdminAnalyticsQuerySpec[]
 ): Promise<AdminAnalyticsQueryResult[]> {
   const settled = await Promise.allSettled(
     specs.map((spec) =>
@@ -202,8 +212,8 @@ async function runAdminAnalyticsQueriesWithStatus(
         query: spec.query,
         params: spec.params,
         location: BQ_LOCATION,
-      }),
-    ),
+      })
+    )
   );
 
   return settled.map((result, index) => {
@@ -231,7 +241,7 @@ async function runAdminAnalyticsQueriesWithStatus(
 }
 
 async function runAdminAnalyticsQueries(
-  specs: readonly AdminAnalyticsQuerySpec[],
+  specs: readonly AdminAnalyticsQuerySpec[]
 ): Promise<BigQueryRows[]> {
   const results = await runAdminAnalyticsQueriesWithStatus(specs);
   return results.map((result) => result.rows);
@@ -336,7 +346,7 @@ async function resolveFullTaskIdFromPrefix(taskId8: string): Promise<{
   if (snap.size > 1) {
     throw new functions.https.HttpsError(
       "failed-precondition",
-      `Ambiguous task prefix: ${taskId8}`,
+      `Ambiguous task prefix: ${taskId8}`
     );
   }
 
@@ -345,7 +355,7 @@ async function resolveFullTaskIdFromPrefix(taskId8: string): Promise<{
   if (!projectId) {
     throw new functions.https.HttpsError(
       "failed-precondition",
-      `Task ${doc.id} has no projectId`,
+      `Task ${doc.id} has no projectId`
     );
   }
   return { taskId: doc.id, projectId };
@@ -360,7 +370,7 @@ export const issueAgentCustomToken = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
 
@@ -378,11 +388,11 @@ export const issueAgentCustomToken = functions.https.onCall(
           ? (err as { code: string }).code
           : "unknown";
       console.error(
-        `[issueAgentCustomToken] createCustomToken failed (${code})`,
+        `[issueAgentCustomToken] createCustomToken failed (${code})`
       );
       throw new functions.https.HttpsError(
         "internal",
-        `Agent custom token signing failed (${code}).`,
+        `Agent custom token signing failed (${code}).`
       );
     }
 
@@ -390,7 +400,7 @@ export const issueAgentCustomToken = functions.https.onCall(
       customToken,
       uid: context.auth.uid,
     };
-  },
+  }
 );
 
 /**
@@ -408,7 +418,7 @@ export const recordGitHubMergeHistory = functions.https.onRequest(
 
     if (!GITHUB_MERGE_HISTORY_WEBHOOK_TOKEN) {
       functions.logger.warn(
-        "[recordGitHubMergeHistory] webhook token is not configured",
+        "[recordGitHubMergeHistory] webhook token is not configured"
       );
       res.status(503).json({ ok: false, error: "webhook_not_configured" });
       return;
@@ -567,7 +577,7 @@ export const recordGitHubMergeHistory = functions.https.onRequest(
       taskId: task.taskId,
       prNumber,
     });
-  },
+  }
 );
 
 // ─── Config ──────────────────────────────────────────────────────
@@ -637,7 +647,7 @@ export const cancelPaddleSubscription = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
 
@@ -647,7 +657,7 @@ export const cancelPaddleSubscription = functions.https.onCall(
     if (!subSnap.exists || !subSnap.data()?.paddleSubscriptionId) {
       throw new functions.https.HttpsError(
         "not-found",
-        "구독 정보를 찾을 수 없습니다.",
+        "구독 정보를 찾을 수 없습니다."
       );
     }
 
@@ -662,7 +672,7 @@ export const cancelPaddleSubscription = functions.https.onCall(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ effective_from: "next_billing_period" }),
-      },
+      }
     );
 
     if (!response.ok) {
@@ -670,12 +680,12 @@ export const cancelPaddleSubscription = functions.https.onCall(
       console.error("Paddle cancel failed:", error);
       throw new functions.https.HttpsError(
         "internal",
-        "구독 취소에 실패했습니다.",
+        "구독 취소에 실패했습니다."
       );
     }
 
     return { success: true };
-  },
+  }
 );
 
 // ─── Webhook signature verification (H1) ─────────────────────────
@@ -761,12 +771,12 @@ export const paddleWebhook = functions.https.onRequest(async (req, res) => {
         if (data.current_billing_period) {
           if (data.current_billing_period.starts_at) {
             update.currentPeriodStart = admin.firestore.Timestamp.fromDate(
-              new Date(data.current_billing_period.starts_at),
+              new Date(data.current_billing_period.starts_at)
             );
           }
           if (data.current_billing_period.ends_at) {
             update.currentPeriodEnd = admin.firestore.Timestamp.fromDate(
-              new Date(data.current_billing_period.ends_at),
+              new Date(data.current_billing_period.ends_at)
             );
           }
         }
@@ -838,7 +848,7 @@ export const createTossCheckout = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
 
@@ -854,7 +864,7 @@ export const createTossCheckout = functions.https.onCall(
     if (!amount) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "유효하지 않은 플랜입니다.",
+        "유효하지 않은 플랜입니다."
       );
     }
 
@@ -871,7 +881,7 @@ export const createTossCheckout = functions.https.onCall(
     });
 
     return { orderId, amount, planType, billingCycle };
-  },
+  }
 );
 
 // ─── Confirm Toss Payment ────────────────────────────────────────
@@ -880,7 +890,7 @@ export const confirmTossPayment = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
 
@@ -894,7 +904,7 @@ export const confirmTossPayment = functions.https.onCall(
     if (!orderSnap.exists) {
       throw new functions.https.HttpsError(
         "not-found",
-        "주문을 찾을 수 없습니다.",
+        "주문을 찾을 수 없습니다."
       );
     }
 
@@ -907,13 +917,13 @@ export const confirmTossPayment = functions.https.onCall(
     if (order.userId !== context.auth.uid) {
       throw new functions.https.HttpsError(
         "permission-denied",
-        "본인의 주문만 확인할 수 있습니다.",
+        "본인의 주문만 확인할 수 있습니다."
       );
     }
     if (order.amount !== amount) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "결제 금액이 일치하지 않습니다.",
+        "결제 금액이 일치하지 않습니다."
       );
     }
 
@@ -933,7 +943,7 @@ export const confirmTossPayment = functions.https.onCall(
       console.error("TossPayments confirm failed:", error);
       throw new functions.https.HttpsError(
         "internal",
-        error.message || "결제 승인에 실패했습니다.",
+        error.message || "결제 승인에 실패했습니다."
       );
     }
 
@@ -966,7 +976,7 @@ export const confirmTossPayment = functions.https.onCall(
     });
 
     return { success: true };
-  },
+  }
 );
 
 // ═══════════════════════════════════════════════════════════════════
@@ -977,7 +987,7 @@ function assertPortOneServerConfig(): void {
   if (!PORTONE_API_SECRET || !PORTONE_STORE_ID) {
     throw new functions.https.HttpsError(
       "failed-precondition",
-      "PortOne 서버 설정이 필요합니다.",
+      "PortOne 서버 설정이 필요합니다."
     );
   }
 }
@@ -990,7 +1000,7 @@ function assertPortOneServerConfig(): void {
  */
 function assertPortOneCheckoutConfig(
   kind: "one_time" | "subscription",
-  method: PortOneBillingKeyMethod = "CARD",
+  method: PortOneBillingKeyMethod = "CARD"
 ): string {
   assertPortOneServerConfig();
   const channelKey =
@@ -1004,7 +1014,7 @@ function assertPortOneCheckoutConfig(
   if (!channelKey) {
     throw new functions.https.HttpsError(
       "failed-precondition",
-      "PortOne 채널 설정이 필요합니다.",
+      "PortOne 채널 설정이 필요합니다."
     );
   }
   return channelKey;
@@ -1023,19 +1033,19 @@ function stringField(data: unknown, key: string): string | null {
 }
 
 async function fetchPortOnePayment(
-  paymentId: string,
+  paymentId: string
 ): Promise<PortOnePaymentLike> {
   assertPortOneServerConfig();
   const res = await fetch(
     `${PORTONE_API_BASE}/payments/${encodeURIComponent(paymentId)}`,
     {
       headers: { Authorization: `PortOne ${PORTONE_API_SECRET}` },
-    },
+    }
   );
   if (!res.ok) {
     throw new functions.https.HttpsError(
       "failed-precondition",
-      "PortOne 결제내역 조회에 실패했습니다.",
+      "PortOne 결제내역 조회에 실패했습니다."
     );
   }
   return (await res.json()) as PortOnePaymentLike;
@@ -1051,7 +1061,7 @@ async function fetchPortOnePayment(
  * (@portone/server-sdk payment.billingKey.confirmBillingKey 실측 미러)
  */
 async function confirmPortOneBillingKey(
-  billingIssueToken: string,
+  billingIssueToken: string
 ): Promise<string> {
   assertPortOneServerConfig();
   const res = await fetch(`${PORTONE_API_BASE}/billing-keys/confirm`, {
@@ -1078,7 +1088,7 @@ async function confirmPortOneBillingKey(
   if (!billingKey) {
     throw new functions.https.HttpsError(
       "failed-precondition",
-      "billing_key_confirm_failed",
+      "billing_key_confirm_failed"
     );
   }
   return billingKey;
@@ -1098,7 +1108,7 @@ async function payPortOneBillingKey(params: {
   assertPortOneServerConfig();
   const res = await fetch(
     `${PORTONE_API_BASE}/payments/${encodeURIComponent(
-      params.paymentId,
+      params.paymentId
     )}/billing-key`,
     {
       method: "POST",
@@ -1121,7 +1131,7 @@ async function payPortOneBillingKey(params: {
           phoneNumber: params.customerPhone || undefined,
         },
       }),
-    },
+    }
   );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -1140,7 +1150,7 @@ export const getPortOneCheckoutConfig = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
 
@@ -1166,7 +1176,7 @@ export const getPortOneCheckoutConfig = functions.https.onCall(
         ? [...SUPPORTED_EASY_PAY_PROVIDERS]
         : [],
     };
-  },
+  }
 );
 
 export const createPortOnePaymentIntent = functions.https.onCall(
@@ -1174,7 +1184,7 @@ export const createPortOnePaymentIntent = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
     assertPortOneCheckoutConfig("one_time");
@@ -1182,23 +1192,23 @@ export const createPortOnePaymentIntent = functions.https.onCall(
     if (!planType) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "planType이 필요합니다.",
+        "planType이 필요합니다."
       );
     }
     const expected = portoneExpectedAmount(
       planType,
-      stringField(data, "billing"),
+      stringField(data, "billing")
     );
     if (!expected) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "유효하지 않은 플랜입니다.",
+        "유효하지 않은 플랜입니다."
       );
     }
     const paymentId = portonePaymentId(
       context.auth.uid,
       "one_time",
-      `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      `${Date.now()}_${Math.random().toString(36).slice(2)}`
     );
     // 단건 결제가 무엇에 대한 권리인지는 주문에 실려야 한다 — 강의 결제인데
     // lectureSlug 를 안 실으면 확정 시점에 무엇을 지급할지 알 수 없어, 예전엔
@@ -1227,7 +1237,7 @@ export const createPortOnePaymentIntent = functions.https.onCall(
       amount: expected.amount,
       currency: "KRW",
     };
-  },
+  }
 );
 
 export const completePortOnePayment = functions.https.onCall(
@@ -1235,14 +1245,14 @@ export const completePortOnePayment = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
     const paymentId = stringField(data, "paymentId");
     if (!paymentId) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "paymentId가 필요합니다.",
+        "paymentId가 필요합니다."
       );
     }
 
@@ -1253,14 +1263,14 @@ export const completePortOnePayment = functions.https.onCall(
     if (!orderSnap.exists) {
       throw new functions.https.HttpsError(
         "not-found",
-        "PortOne 주문을 찾을 수 없습니다.",
+        "PortOne 주문을 찾을 수 없습니다."
       );
     }
     const order = orderSnap.data() || {};
     if (order.userId !== context.auth.uid) {
       throw new functions.https.HttpsError(
         "permission-denied",
-        "본인의 주문만 확인할 수 있습니다.",
+        "본인의 주문만 확인할 수 있습니다."
       );
     }
     const planType =
@@ -1273,7 +1283,7 @@ export const completePortOnePayment = functions.https.onCall(
     if (amount <= 0) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "주문 금액이 유효하지 않습니다.",
+        "주문 금액이 유효하지 않습니다."
       );
     }
 
@@ -1296,7 +1306,7 @@ export const completePortOnePayment = functions.https.onCall(
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true },
+        { merge: true }
       );
       return true;
     });
@@ -1324,7 +1334,7 @@ export const completePortOnePayment = functions.https.onCall(
       });
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "PortOne 결제 검증에 실패했습니다.",
+        "PortOne 결제 검증에 실패했습니다."
       );
     }
 
@@ -1346,7 +1356,7 @@ export const completePortOnePayment = functions.https.onCall(
         grantedAt: now,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
 
     // 강의 단건이면 강의 수강권도 지급한다(Toss confirmLecturePayment 와 동일
@@ -1385,7 +1395,7 @@ export const completePortOnePayment = functions.https.onCall(
       chargedAmount: amount,
       lectureSlug,
     };
-  },
+  }
 );
 
 // ─── TossPayments Webhook ────────────────────────────────────────
@@ -1402,7 +1412,7 @@ export const completePortOnePayment = functions.https.onCall(
 // 미설정/네트워크오류 → null 을 돌려 호출부가 "구독 변경 안 함"으로 안전
 // 처리하게 한다. body 의 status 는 절대 참조하지 않는다.
 async function fetchTossPaymentStatus(
-  paymentKey: string,
+  paymentKey: string
 ): Promise<TossPaymentQueryResult> {
   if (!TOSS_SECRET_KEY) return null;
   try {
@@ -1411,10 +1421,10 @@ async function fetchTossPaymentStatus(
       {
         headers: {
           Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-            "base64",
+            "base64"
           )}`,
         },
-      },
+      }
     );
     const body = res.ok
       ? ((await res.json().catch(() => null)) as unknown)
@@ -1442,7 +1452,7 @@ export const tossWebhook = functions.https.onRequest(async (req, res) => {
       if (!paymentKey) {
         // 재조회 식별자가 없으면 검증 불가 → 안전 무시.
         console.warn(
-          "[tossWebhook] PAYMENT_STATUS_CHANGED without paymentKey; ignoring",
+          "[tossWebhook] PAYMENT_STATUS_CHANGED without paymentKey; ignoring"
         );
         break;
       }
@@ -1452,7 +1462,7 @@ export const tossWebhook = functions.https.onRequest(async (req, res) => {
       if (!query) {
         // 재조회 실패/미존재(위조 포함) → 구독 변경 없이 무시(+로그).
         console.warn(
-          "[tossWebhook] payment re-query failed or not found; no subscription change",
+          "[tossWebhook] payment re-query failed or not found; no subscription change"
         );
         break;
       }
@@ -1573,7 +1583,7 @@ async function chargeSubscriptionIdempotent(params: {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
     return true;
   });
@@ -1607,7 +1617,7 @@ async function chargeSubscriptionIdempotent(params: {
         method: "POST",
         headers: {
           Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-            "base64",
+            "base64"
           )}`,
           "Content-Type": "application/json",
         },
@@ -1617,14 +1627,14 @@ async function chargeSubscriptionIdempotent(params: {
           orderId,
           orderName: `Marblo ${planType} 구독`,
         }),
-      },
+      }
     );
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
       const msg = String(error?.message || `HTTP ${response.status}`).slice(
         0,
-        500,
+        500
       );
       await chargeRef.update({
         status: "failed",
@@ -1644,7 +1654,7 @@ async function chargeSubscriptionIdempotent(params: {
   } catch (err) {
     const msg = (err instanceof Error ? err.message : String(err)).slice(
       0,
-      500,
+      500
     );
     await chargeRef.update({
       status: "failed",
@@ -1727,7 +1737,7 @@ async function chargePortOneSubscriptionIdempotent(params: {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
     return true;
   });
@@ -1755,7 +1765,7 @@ async function chargePortOneSubscriptionIdempotent(params: {
   try {
     const channelKey = assertPortOneCheckoutConfig(
       "subscription",
-      params.billingKeyMethod || "CARD",
+      params.billingKeyMethod || "CARD"
     );
     const payment = await payPortOneBillingKey({
       paymentId,
@@ -1808,8 +1818,8 @@ async function chargePortOneSubscriptionIdempotent(params: {
       err instanceof functions.https.HttpsError
         ? err.message
         : err instanceof Error
-          ? err.message
-          : String(err)
+        ? err.message
+        : String(err)
     ).slice(0, 500);
     await chargeRef.update({
       status: "failed",
@@ -1863,17 +1873,17 @@ async function loadSubscriptionGuard(userId: string): Promise<{
 
 function assertNotAlreadySubscribed(
   sub: { status?: string; currentPeriodEndMs: number | null },
-  nowMs: number,
+  nowMs: number
 ): void {
   if (
     isAlreadySubscribed(
       { status: sub.status, currentPeriodEndMs: sub.currentPeriodEndMs },
-      nowMs,
+      nowMs
     )
   ) {
     throw new functions.https.HttpsError(
       "failed-precondition",
-      "already_subscribed",
+      "already_subscribed"
     );
   }
 }
@@ -1889,7 +1899,7 @@ async function pickFirstChargeGeneration(
   provider: FirstChargeProvider,
   userId: string,
   planType: string,
-  cycle: BillingCycle,
+  cycle: BillingCycle
 ): Promise<number> {
   const statuses: ChargeStatusLabel[] = [];
   for (let g = 0; g < 8; g++) {
@@ -1967,7 +1977,7 @@ async function savePendingFirstCharge(params: {
 async function resolveFirstChargeAmount(
   userId: string,
   baseAmount: number,
-  couponCode: unknown,
+  couponCode: unknown
 ): Promise<{
   finalAmount: number;
   appliedCoupon: { code: string } | null;
@@ -2000,7 +2010,7 @@ async function resolveFirstChargeAmount(
 function ledgerReceipt(
   data: FirebaseFirestore.DocumentData | undefined,
   fallbackAmount: number,
-  requestedCouponCode: string | null,
+  requestedCouponCode: string | null
 ): FirstChargeReceipt {
   const d = data || {};
   const receipt = firstChargeReceipt({
@@ -2020,7 +2030,7 @@ export const completePortOneBillingKey = functions.https.onCall(
     if (!userId) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
     const authEmail =
@@ -2034,7 +2044,7 @@ export const completePortOneBillingKey = functions.https.onCall(
     // 빌링키 발급수단. 간편결제면 easyPayProvider(포트원 규약명)도 함께 받아
     // 구독 문서에 남긴다 — 갱신 크론이 같은 채널로 청구해야 하기 때문.
     const billingKeyMethod = normalizePortOneBillingKeyMethod(
-      stringField(data, "billingKeyMethod"),
+      stringField(data, "billingKeyMethod")
     );
     const easyPayProvider =
       billingKeyMethod === "EASY_PAY"
@@ -2043,7 +2053,7 @@ export const completePortOneBillingKey = functions.https.onCall(
     if (billingKeyMethod === "EASY_PAY" && !easyPayProvider) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "easy_pay_provider_unsupported",
+        "easy_pay_provider_unsupported"
       );
     }
     // KG이니시스 빌링 청구는 customer.email REQUIRED.
@@ -2065,25 +2075,25 @@ export const completePortOneBillingKey = functions.https.onCall(
     if (!billingKey) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "billingKey가 필요합니다.",
+        "billingKey가 필요합니다."
       );
     }
     if (!customerEmail) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "결제에 이메일이 필요합니다",
+        "결제에 이메일이 필요합니다"
       );
     }
 
     assertPortOneCheckoutConfig("subscription", billingKeyMethod);
     const expected = portoneExpectedAmount(
       planType,
-      stringField(data, "billing"),
+      stringField(data, "billing")
     );
     if (!expected) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        `Plan '${planType}' is not chargeable`,
+        `Plan '${planType}' is not chargeable`
       );
     }
 
@@ -2095,7 +2105,7 @@ export const completePortOneBillingKey = functions.https.onCall(
     const { finalAmount, appliedCoupon } = await resolveFirstChargeAmount(
       userId,
       expected.amount,
-      requestedCoupon,
+      requestedCoupon
     );
 
     // 결정적 첫청구 키 — Date.now() 앵커 금지(동시 호출 이중청구 방지).
@@ -2103,19 +2113,19 @@ export const completePortOneBillingKey = functions.https.onCall(
       "portone",
       userId,
       planType,
-      expected.billingCycle,
+      expected.billingCycle
     );
     const chargeDocId = firstChargeLedgerId(
       "portone",
       userId,
       planType,
       expected.billingCycle,
-      generation,
+      generation
     );
     const paymentId = portonePaymentId(
       userId,
       "subscription",
-      firstChargePortoneNonce(planType, expected.billingCycle, generation),
+      firstChargePortoneNonce(planType, expected.billingCycle, generation)
     );
 
     // 이미 성공한 첫청구 문서면 재청구 없이 구독 복구 + idempotent.
@@ -2130,7 +2140,7 @@ export const completePortOneBillingKey = functions.https.onCall(
         const receipt = ledgerReceipt(
           prior.data(),
           finalAmount,
-          requestedCoupon,
+          requestedCoupon
         );
         await db
           .collection("subscriptions")
@@ -2163,7 +2173,7 @@ export const completePortOneBillingKey = functions.https.onCall(
               firstChargeGeneration: generation,
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             },
-            { merge: true },
+            { merge: true }
           );
         return {
           success: true,
@@ -2226,7 +2236,7 @@ export const completePortOneBillingKey = functions.https.onCall(
             firstChargeGeneration: generation,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
-          { merge: true },
+          { merge: true }
         );
       return {
         success: true,
@@ -2259,7 +2269,7 @@ export const completePortOneBillingKey = functions.https.onCall(
       });
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "first_charge_failed",
+        "first_charge_failed"
       );
     }
 
@@ -2297,8 +2307,8 @@ export const completePortOneBillingKey = functions.https.onCall(
             charge.status === "comped"
               ? null
               : charge.status === "charged"
-                ? charge.paymentKey
-                : paymentId,
+              ? charge.paymentKey
+              : paymentId,
           currentPeriodStart: now,
           currentPeriodEnd: nextPeriodEnd(now, expected.billingCycle),
           billingFailedCount: 0,
@@ -2313,7 +2323,7 @@ export const completePortOneBillingKey = functions.https.onCall(
           createdAt: now,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true },
+        { merge: true }
       );
 
     if (appliedCoupon) {
@@ -2336,13 +2346,13 @@ export const completePortOneBillingKey = functions.https.onCall(
         charge.status === "comped"
           ? "comped"
           : charge.status === "charged"
-            ? "charged"
-            : charge.status,
+          ? "charged"
+          : charge.status,
       chargedAmount: receipt.chargedAmount,
       couponApplied: receipt.couponApplied,
       couponRejected: receipt.couponRejected,
     };
-  },
+  }
 );
 
 // 빌링키 발급 + 첫 결제 청구(원자적). 청구 실패 시 구독을 active 로 만들지
@@ -2362,7 +2372,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
   if (!baseAmount) {
     throw new functions.https.HttpsError(
       "failed-precondition",
-      `Plan '${planType}' is not chargeable`,
+      `Plan '${planType}' is not chargeable`
     );
   }
 
@@ -2377,19 +2387,19 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
       method: "POST",
       headers: {
         Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-          "base64",
+          "base64"
         )}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ authKey, customerKey }),
-    },
+    }
   );
 
   if (!response.ok) {
     const error = await response.json();
     throw new functions.https.HttpsError(
       "internal",
-      error.message || "Failed to issue billing key",
+      error.message || "Failed to issue billing key"
     );
   }
 
@@ -2401,7 +2411,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
   const { finalAmount, appliedCoupon } = await resolveFirstChargeAmount(
     userId,
     baseAmount,
-    coupon,
+    coupon
   );
 
   // 3) 결정적 첫청구 멱등 키(Date.now 금지).
@@ -2409,20 +2419,20 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
     "toss",
     userId,
     planType,
-    billingCycle,
+    billingCycle
   );
   const chargeDocId = firstChargeLedgerId(
     "toss",
     userId,
     planType,
     billingCycle,
-    generation,
+    generation
   );
   const orderId = firstChargeOrderId(
     userId,
     planType,
     billingCycle,
-    generation,
+    generation
   );
 
   // 이미 성공 분 → 재청구 없이 구독 복구.
@@ -2455,7 +2465,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
             firstChargeGeneration: generation,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
-          { merge: true },
+          { merge: true }
         );
       return {
         success: true,
@@ -2491,7 +2501,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
     const replayReceipt = ledgerReceipt(
       priorSnap.data(),
       finalAmount,
-      requestedCoupon,
+      requestedCoupon
     );
     await db
       .collection("subscriptions")
@@ -2515,7 +2525,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
           firstChargeGeneration: generation,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true },
+        { merge: true }
       );
     return {
       success: true,
@@ -2545,7 +2555,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
     });
     throw new functions.https.HttpsError(
       "failed-precondition",
-      "first_charge_failed",
+      "first_charge_failed"
     );
   }
 
@@ -2583,7 +2593,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
         createdAt: now,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
 
   if (appliedCoupon) {
@@ -2625,7 +2635,7 @@ export const retryFirstCharge = functions.https.onCall(
     if (!subSnap.exists || sub?.status !== "pending_first_charge") {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "not_pending_first_charge",
+        "not_pending_first_charge"
       );
     }
 
@@ -2635,7 +2645,7 @@ export const retryFirstCharge = functions.https.onCall(
     if (!baseAmount) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        `Plan '${planType}' is not chargeable`,
+        `Plan '${planType}' is not chargeable`
       );
     }
 
@@ -2647,14 +2657,14 @@ export const retryFirstCharge = functions.https.onCall(
             provider,
             userId,
             planType,
-            billingCycle,
+            billingCycle
           );
     const chargeDocId = firstChargeLedgerId(
       provider,
       userId,
       planType,
       billingCycle,
-      generation,
+      generation
     );
     const nowMs = Date.now();
     // 쿠폰은 첫 시도 시 이미 검증됨 — 재시도는 정가(쿠폰 재적용 없음, 이중 소진 방지).
@@ -2675,13 +2685,13 @@ export const retryFirstCharge = functions.https.onCall(
       if (!billingKey) {
         throw new functions.https.HttpsError(
           "failed-precondition",
-          "missing_billing_key",
+          "missing_billing_key"
         );
       }
       const paymentId = portonePaymentId(
         userId,
         "subscription",
-        firstChargePortoneNonce(planType, billingCycle, generation),
+        firstChargePortoneNonce(planType, billingCycle, generation)
       );
       charge = await chargePortOneSubscriptionIdempotent({
         userId,
@@ -2707,7 +2717,7 @@ export const retryFirstCharge = functions.https.onCall(
             : null,
         // 간편결제 빌링키 재시도가 카드 채널로 새면 PG 가 거절한다.
         billingKeyMethod: normalizePortOneBillingKeyMethod(
-          sub.portoneBillingKeyMethod,
+          sub.portoneBillingKeyMethod
         ),
         paymentIdOverride: paymentId,
         chargeDocIdOverride: chargeDocId,
@@ -2718,7 +2728,7 @@ export const retryFirstCharge = functions.https.onCall(
       if (!billingKey || !customerKey) {
         throw new functions.https.HttpsError(
           "failed-precondition",
-          "missing_billing_key",
+          "missing_billing_key"
         );
       }
       charge = await chargeSubscriptionIdempotent({
@@ -2734,7 +2744,7 @@ export const retryFirstCharge = functions.https.onCall(
           userId,
           planType,
           billingCycle,
-          generation,
+          generation
         ),
       });
     }
@@ -2749,11 +2759,11 @@ export const retryFirstCharge = functions.https.onCall(
           firstChargeError: charge.error.slice(0, 500),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true },
+        { merge: true }
       );
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "first_charge_failed",
+        "first_charge_failed"
       );
     }
 
@@ -2799,7 +2809,7 @@ export const retryFirstCharge = functions.https.onCall(
       chargedAmount: retryReceipt.chargedAmount,
       couponApplied: retryReceipt.couponApplied,
     };
-  },
+  }
 );
 
 // 빌링키로 정기결제 실행(수동 트리거). 갱신 크론과 동일한 멱등 헬퍼를 공유해
@@ -2821,7 +2831,7 @@ export const chargeBillingKey = functions.https.onCall(
     if (!subSnap.exists || !sub?.tossBillingKey || !sub?.tossCustomerKey) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "No billing key registered for this account",
+        "No billing key registered for this account"
       );
     }
 
@@ -2833,7 +2843,7 @@ export const chargeBillingKey = functions.https.onCall(
     if (!amount) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        `Plan '${planType}' is not chargeable`,
+        `Plan '${planType}' is not chargeable`
       );
     }
 
@@ -2852,7 +2862,7 @@ export const chargeBillingKey = functions.https.onCall(
     if (charge.status === "failed") {
       throw new functions.https.HttpsError(
         "internal",
-        charge.error || "Failed to charge billing key",
+        charge.error || "Failed to charge billing key"
       );
     }
 
@@ -2876,7 +2886,7 @@ export const chargeBillingKey = functions.https.onCall(
       paymentKey: charge.status === "charged" ? charge.paymentKey : null,
       charged: charge.status,
     };
-  },
+  }
 );
 
 // 토스 정기결제 취소 = "다음 결제를 멈춘다". 이미 결제한 기간은 끝까지 쓴다.
@@ -2900,7 +2910,7 @@ export const chargeBillingKey = functions.https.onCall(
 export const cancelTossSubscription = functions.https.onCall(
   async (_data, context) => {
     return cancelPullModelSubscription(context);
-  },
+  }
 );
 
 /**
@@ -2921,7 +2931,7 @@ export const cancelSubscription = functions.https.onCall(
     if (!snap.exists)
       throw new functions.https.HttpsError(
         "not-found",
-        "No subscription to cancel",
+        "No subscription to cancel"
       );
 
     const data = snap.data() ?? {};
@@ -2947,7 +2957,7 @@ export const cancelSubscription = functions.https.onCall(
     if (status !== "active" && status !== "past_due" && status !== "trialing") {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        `Subscription status '${status || "unknown"}' cannot be canceled`,
+        `Subscription status '${status || "unknown"}' cannot be canceled`
       );
     }
 
@@ -2966,14 +2976,14 @@ export const cancelSubscription = functions.https.onCall(
               "Content-Type": "application/json",
             },
             body: JSON.stringify({ effective_from: "next_billing_period" }),
-          },
+          }
         );
         if (!response.ok) {
           const error = await response.json().catch(() => ({}));
           console.error("Paddle cancel failed:", error);
           throw new functions.https.HttpsError(
             "internal",
-            "구독 취소에 실패했습니다.",
+            "구독 취소에 실패했습니다."
           );
         }
       }
@@ -3005,12 +3015,12 @@ export const cancelSubscription = functions.https.onCall(
       provider: provider || "toss",
       accessUntil,
     };
-  },
+  }
 );
 
 /** pull 모델(toss/portone) 해지 본문 — cancelTossSubscription 레거시 호환용. */
 async function cancelPullModelSubscription(
-  context: functions.https.CallableContext,
+  context: functions.https.CallableContext
 ): Promise<{ success: true; accessUntil: string | null }> {
   const userId = context.auth?.uid;
   if (!userId)
@@ -3021,7 +3031,7 @@ async function cancelPullModelSubscription(
   if (!snap.exists)
     throw new functions.https.HttpsError(
       "not-found",
-      "No subscription to cancel",
+      "No subscription to cancel"
     );
 
   await subRef.update({
@@ -3060,7 +3070,7 @@ export const createLectureOrder = functions.https.onCall(
     if (!existingPurchase.empty) {
       throw new functions.https.HttpsError(
         "already-exists",
-        "Already purchased this lecture",
+        "Already purchased this lecture"
       );
     }
 
@@ -3087,7 +3097,7 @@ export const createLectureOrder = functions.https.onCall(
     });
 
     return { orderId, amount, orderName };
-  },
+  }
 );
 
 // 강의 단건결제 확인
@@ -3110,13 +3120,13 @@ export const confirmLecturePayment = functions.https.onCall(
     if (order.userId !== userId) {
       throw new functions.https.HttpsError(
         "permission-denied",
-        "본인의 주문만 확인할 수 있습니다.",
+        "본인의 주문만 확인할 수 있습니다."
       );
     }
     if (typeof amount === "number" && order.amount !== amount) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "결제 금액이 일치하지 않습니다.",
+        "결제 금액이 일치하지 않습니다."
       );
     }
 
@@ -3130,7 +3140,7 @@ export const confirmLecturePayment = functions.https.onCall(
     if (!existingPurchase.empty) {
       throw new functions.https.HttpsError(
         "already-exists",
-        "Already purchased this lecture",
+        "Already purchased this lecture"
       );
     }
 
@@ -3141,19 +3151,19 @@ export const confirmLecturePayment = functions.https.onCall(
         method: "POST",
         headers: {
           Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-            "base64",
+            "base64"
           )}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ paymentKey, orderId, amount: order.amount }),
-      },
+      }
     );
 
     if (!response.ok) {
       const error = await response.json();
       throw new functions.https.HttpsError(
         "internal",
-        error.message || "Payment confirmation failed",
+        error.message || "Payment confirmation failed"
       );
     }
 
@@ -3173,7 +3183,7 @@ export const confirmLecturePayment = functions.https.onCall(
     await issueLectureCouponInternal(userId);
 
     return { success: true };
-  },
+  }
 );
 
 // ============================================
@@ -3186,7 +3196,7 @@ export const validateCoupon = functions.https.onCall(async (data, context) => {
   if (!code)
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "Coupon code required",
+      "Coupon code required"
     );
 
   // Rate limit: stops brute-force code guessing. Per-uid (5/min, 30/5min)
@@ -3198,14 +3208,14 @@ export const validateCoupon = functions.https.onCall(async (data, context) => {
   if (!uidCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`,
+      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`
     );
   }
   const ipCheck = await enforceRateLimit(ipKey, COUPON_RULES_IP);
   if (!ipCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`,
+      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`
     );
   }
 
@@ -3260,19 +3270,19 @@ export const applyCoupon = functions.https.onCall(async (data, context) => {
   const ip = extractIp(context.rawRequest);
   const uidCheck = await enforceRateLimit(
     `coupon:uid:${userId}`,
-    COUPON_RULES_UID,
+    COUPON_RULES_UID
   );
   if (!uidCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`,
+      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`
     );
   }
   const ipCheck = await enforceRateLimit(`coupon:ip:${ip}`, COUPON_RULES_IP);
   if (!ipCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`,
+      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`
     );
   }
 
@@ -3289,7 +3299,7 @@ export const applyCoupon = functions.https.onCall(async (data, context) => {
   switch (coupon.type) {
     case "discount":
       discountAmount = Math.round(
-        (baseAmount * (coupon.discountPercent || 0)) / 100,
+        (baseAmount * (coupon.discountPercent || 0)) / 100
       );
       finalAmount = baseAmount - discountAmount;
       break;
@@ -3330,7 +3340,7 @@ export const createCouponBatch = functions.https.onCall(
     if (!Array.isArray(coupons) || coupons.length === 0) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "Coupons array required",
+        "Coupons array required"
       );
     }
 
@@ -3352,7 +3362,7 @@ export const createCouponBatch = functions.https.onCall(
 
     await batch.commit();
     return { created: coupons.length };
-  },
+  }
 );
 
 // 강의 구매 → 앱 쿠폰 자동 발급 (내부 함수)
@@ -3386,7 +3396,7 @@ export const issueLectureCoupon = functions.https.onCall(
 
     await issueLectureCouponInternal(userId);
     return { couponCode: "LECTURE2026" };
-  },
+  }
 );
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3421,7 +3431,7 @@ const WAITLIST_SCAN_LIMIT = 1000;
 const WAITLIST_EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const AUTO_FOUNDER_COHORT_CAP = Number.parseInt(
   process.env.AUTO_FOUNDER_COHORT_CAP || "100",
-  10,
+  10
 );
 const WAITLIST_TEST_DOMAINS = new Set([
   "example.com",
@@ -3473,7 +3483,7 @@ function normalizeEmail(email: string): string {
 }
 
 function classifyWaitlistEmail(
-  rawEmail: string,
+  rawEmail: string
 ): { ok: true; email: string } | { ok: false; email: string; reason: string } {
   const email = normalizeEmail(rawEmail);
   if (!email || !WAITLIST_EMAIL_RE.test(email) || email.length > 254) {
@@ -3517,11 +3527,11 @@ function requireAdmin(context: functions.https.CallableContext): void {
   const adminUid = process.env.ADMIN_UID?.trim();
   if (!adminUid) {
     functions.logger.warn(
-      "[requireAdmin] ADMIN_UID is not configured; rejecting admin callable as server misconfiguration.",
+      "[requireAdmin] ADMIN_UID is not configured; rejecting admin callable as server misconfiguration."
     );
     throw new functions.https.HttpsError(
       "failed-precondition",
-      "Admin configuration is missing.",
+      "Admin configuration is missing."
     );
   }
 
@@ -3567,7 +3577,7 @@ function hasPaymentEvidence(sub: Record<string, unknown> | undefined): boolean {
 // 결제 흔적(옛 billingKey)보다 우선한다. 안 그러면 "해지했다가 grant 를 받은"
 // doc 이 stale billingKey 때문에 유료로 오판돼 반려해도 회수되지 않는다.
 function isFounderGrantSubscription(
-  sub: Record<string, unknown> | undefined,
+  sub: Record<string, unknown> | undefined
 ): boolean {
   if (!sub) return false;
   return sub.founderGrant === true || sub.paymentProvider === "founder_grant";
@@ -3577,7 +3587,7 @@ function isFounderGrantSubscription(
 // 이게 true 인 구독만 "건드리지 말 것"(grant 로 덮어쓰기 금지) 대상이다.
 // past_due 도 현역 — 재시도 중인 결제라 grant 로 덮으면 과금이 끊긴다.
 function isLivePaidSubscription(
-  sub: Record<string, unknown> | undefined,
+  sub: Record<string, unknown> | undefined
 ): boolean {
   if (!sub) return false;
   if (isFounderGrantSubscription(sub)) return false;
@@ -3598,7 +3608,7 @@ async function upsertProSubscription(
   userId: string,
   targetEnd: Date,
   reason: string,
-  grantStartedAt: Date,
+  grantStartedAt: Date
 ): Promise<ProGrantOutcome> {
   const now = new Date();
   const subRef = db.collection("subscriptions").doc(userId);
@@ -3628,7 +3638,7 @@ async function upsertProSubscription(
     // 트랜잭션 안에서 판정해 결제 생성과 grant 생성의 race 에서도 stomp 하지 않는다.
     if (isLivePaidSubscription(data)) {
       console.log(
-        `[upsertProSubscription] 현역 유료 구독(${userId}, status=${data?.status}) — grant(${reason}) 로 덮어쓰지 않고 결제 유지`,
+        `[upsertProSubscription] 현역 유료 구독(${userId}, status=${data?.status}) — grant(${reason}) 로 덮어쓰지 않고 결제 유지`
       );
       return {
         granted: false,
@@ -3661,13 +3671,13 @@ async function grantFounderProTotalInternal(
   userId: string,
   totalMonths: number,
   reason: string,
-  grantStartedAt: Date,
+  grantStartedAt: Date
 ): Promise<Date> {
   const outcome = await upsertProSubscription(
     userId,
     addMonths(grantStartedAt, totalMonths),
     reason,
-    grantStartedAt,
+    grantStartedAt
   );
   return outcome.periodEnd;
 }
@@ -3683,34 +3693,34 @@ export const submitExperienceShareSurvey = functions.https.onCall(
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "rating must be 1..5",
+        "rating must be 1..5"
       );
     }
 
     const liked = normalizeShortText((data as { liked?: unknown }).liked, 1000);
     const improvements = normalizeShortText(
       (data as { improvements?: unknown }).improvements,
-      1000,
+      1000
     );
     if (!liked && !improvements) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "liked or improvements is required",
+        "liked or improvements is required"
       );
     }
 
     const shareUrl = normalizeHttpUrl(
-      (data as { shareUrl?: unknown }).shareUrl,
+      (data as { shareUrl?: unknown }).shareUrl
     );
     if (!shareUrl) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "shareUrl must be an http(s) URL",
+        "shareUrl must be an http(s) URL"
       );
     }
 
     const sessionCountRaw = Number(
-      (data as { sessionCount?: unknown }).sessionCount,
+      (data as { sessionCount?: unknown }).sessionCount
     );
     const sessionCount =
       Number.isFinite(sessionCountRaw) && sessionCountRaw > 0
@@ -3737,7 +3747,7 @@ export const submitExperienceShareSurvey = functions.https.onCall(
       uid,
       rewardEnd,
       "experience_share_reward",
-      now,
+      now
     );
 
     await ref.set({
@@ -3752,7 +3762,7 @@ export const submitExperienceShareSurvey = functions.https.onCall(
       rewardGrantApplied: grantOutcome.granted,
       rewardSkippedReason: grantOutcome.skippedReason,
       rewardPeriodEnd: admin.firestore.Timestamp.fromDate(
-        grantOutcome.periodEnd,
+        grantOutcome.periodEnd
       ),
       reviewStatus: "pending_review",
       adminReviewRequired: true,
@@ -3769,7 +3779,7 @@ export const submitExperienceShareSurvey = functions.https.onCall(
       grantApplied: grantOutcome.granted,
       periodEnd: grantOutcome.periodEnd.toISOString(),
     };
-  },
+  }
 );
 
 function timestampToDate(value: unknown): Date | null {
@@ -3787,7 +3797,7 @@ function laterDate(a: Date | null, b: Date | null): Date | null {
 }
 
 function resolveFounderGrantWindowEnd(
-  founder: Record<string, unknown>,
+  founder: Record<string, unknown>
 ): Date | null {
   const betaEnd = timestampToDate(founder.betaExpiresAt);
   const proEnd = timestampToDate(founder.proExpiresAt);
@@ -3814,7 +3824,7 @@ async function materializeFounderProGrantForUid(
   founder: Record<string, unknown>,
   uid: string,
   reason: string,
-  grantStartedAt: Date,
+  grantStartedAt: Date
 ): Promise<FounderGrantMaterializationResult> {
   const windowEnd = resolveFounderGrantWindowEnd(founder);
   if (!windowEnd || windowEnd <= new Date()) {
@@ -3830,7 +3840,7 @@ async function materializeFounderProGrantForUid(
     uid,
     windowEnd,
     reason,
-    grantStartedAt,
+    grantStartedAt
   );
 
   // 실제 founder_grant 구독을 만들었을 때만 grant 흔적을 남긴다. 현역 유료 구독
@@ -3842,7 +3852,7 @@ async function materializeFounderProGrantForUid(
         proSubscriptionEnd: admin.firestore.Timestamp.fromDate(windowEnd),
         proSubscriptionGrantedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
   }
 
@@ -3888,7 +3898,7 @@ interface FounderEmailContent {
 // export 는 테스트의 dry 렌더용. 트리거가 아니므로(=__endpoint 없음)
 // firebase-functions 의 배포 discovery 는 이 export 를 건너뛴다.
 export function buildFounderAccessEmail(
-  locale: FounderLocale,
+  locale: FounderLocale
 ): FounderEmailContent {
   const downloadUrl = `${SITE_BASE}/${locale}/download`;
   const feedbackUrl = `${SITE_BASE}/${locale}/beta-survey`;
@@ -4041,7 +4051,7 @@ export function buildFounderAccessEmail(
 //
 // export 는 테스트의 dry 렌더용(트리거 아님 → 배포 discovery 스킵).
 export function buildFounderSurveyOfferEmail(
-  locale: FounderLocale,
+  locale: FounderLocale
 ): FounderEmailContent {
   const feedbackUrl = `${SITE_BASE}/${locale}/beta-survey`;
 
@@ -4128,7 +4138,7 @@ async function postResendEmail(
   content: FounderEmailContent,
   logPrefix: string,
   // 마케팅 메일용 추가 헤더(List-Unsubscribe 등). transactional 은 생략.
-  extraHeaders?: Record<string, string>,
+  extraHeaders?: Record<string, string>
 ): Promise<boolean> {
   const resp = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -4163,7 +4173,7 @@ async function postResendEmail(
  */
 async function sendFounderAccessEmail(
   email: string,
-  locale: string,
+  locale: string
 ): Promise<boolean> {
   try {
     if (!RESEND_API_KEY) {
@@ -4185,18 +4195,18 @@ async function sendFounderAccessEmail(
  */
 async function sendFounderSurveyOfferEmail(
   email: string,
-  locale: string,
+  locale: string
 ): Promise<boolean> {
   try {
     if (!RESEND_API_KEY) {
       console.warn(
         "[founder-email] RESEND_API_KEY 미설정 — 설문 리마인더 발송 스킵:",
-        maskEmailForLog(email),
+        maskEmailForLog(email)
       );
       return false;
     }
     const content = buildFounderSurveyOfferEmail(
-      normalizeFounderLocale(locale),
+      normalizeFounderLocale(locale)
     );
     // 마케팅 메일 — one-click unsubscribe 헤더+푸터(CAN-SPAM/RFC 8058).
     const delivery = marketingEmailDelivery(email);
@@ -4204,13 +4214,13 @@ async function sendFounderSurveyOfferEmail(
       email,
       delivery ? withUnsubscribeFooter(content, delivery) : content,
       "founder-email",
-      delivery?.headers,
+      delivery?.headers
     );
   } catch (err) {
     console.warn(
       "[founder-email] 설문 리마인더 발송 실패:",
       maskEmailForLog(email),
-      err,
+      err
     );
     return false;
   }
@@ -4251,7 +4261,7 @@ async function lookupFounderLocale(email: string): Promise<string> {
 // 정규화 기준으로 매칭해야 중복 신청(동일 이메일 여러 건)까지 함께 잡힌다.
 // 쿼리 필터로는 정규화 비교가 안 돼서 스캔 후 필터한다(어드민 저빈도 액션).
 async function findWaitlistDocsByEmail(
-  email: string,
+  email: string
 ): Promise<FirebaseFirestore.QueryDocumentSnapshot[]> {
   const snap = await db
     .collection("betatester50_waitlist")
@@ -4268,7 +4278,7 @@ async function findWaitlistDocsByEmail(
 // markFounderSelected onCall 과 Telegram 승인 웹훅 양쪽에서 재사용한다.
 async function markFounderSelectedInternal(
   rawEmail: string,
-  resetWindow = false,
+  resetWindow = false
 ): Promise<{
   ok: true;
   email: string;
@@ -4336,7 +4346,7 @@ async function markFounderSelectedInternal(
         status: admin.firestore.FieldValue.delete(),
         rejectedAt: admin.firestore.FieldValue.delete(),
       },
-      { merge: true },
+      { merge: true }
     );
   }
 
@@ -4349,7 +4359,7 @@ async function markFounderSelectedInternal(
       accessEmailSent: emailSent,
       accessEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
     },
-    { merge: true },
+    { merge: true }
   );
 
   // 승인 = Pro 부여. 베타 유저가 즉시 Pro 기능을 쓰려면 subscriptions/{uid}
@@ -4379,7 +4389,7 @@ async function markFounderSelectedInternal(
       founderForGrant,
       uid,
       "beta_selected",
-      betaStartedAt,
+      betaStartedAt
     );
     subscriptionUid = outcome.uid;
     subscriptionGranted = outcome.granted;
@@ -4406,12 +4416,12 @@ export const markFounderSelected = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required",
+        "email required"
       );
     }
     const resetWindow = data?.resetWindow === true;
     return markFounderSelectedInternal(email, resetWindow);
-  },
+  }
 );
 
 // 파운더 반려 (관리자용) — markFounderSelected 의 역방향.
@@ -4425,7 +4435,7 @@ export const markFounderSelected = functions.https.onCall(
 //    ★ paymentProvider==="founder_grant" 인 구독만 건드린다 — 유료(toss) 결제자가
 //    파운더로도 선정됐던 경우 반려가 유료 구독까지 취소하면 안 된다.
 async function revokeFounderGrant(
-  email: string,
+  email: string
 ): Promise<{ founderRevoked: boolean; subscriptionRevoked: boolean }> {
   const ref = db.collection(FOUNDERS_COLLECTION).doc(email);
   const snap = await ref.get();
@@ -4441,7 +4451,7 @@ async function revokeFounderGrant(
       betaExpiresAt: admin.firestore.Timestamp.fromDate(new Date()),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
-    { merge: true },
+    { merge: true }
   );
 
   // 구독 회수 — 선정 시 기록해둔 proSubscriptionUid 우선, 없으면 이메일로 재조회.
@@ -4465,7 +4475,7 @@ async function revokeFounderGrant(
       // 확인할 수 있게 남긴다 — 필드만으론 "해지후 grant" 와 구분 불가.
       if (hasPaymentEvidence(sub)) {
         console.warn(
-          `[markFounderRejected] ★결제 흔적이 남은 grant doc 회수 (uid=${uid}) — 과거 stomp 로 유료구독이 grant 로 덮인 건이면 수동 확인 필요`,
+          `[markFounderRejected] ★결제 흔적이 남은 grant doc 회수 (uid=${uid}) — 과거 stomp 로 유료구독이 grant 로 덮인 건이면 수동 확인 필요`
         );
       }
       if (sub?.status === "active") {
@@ -4476,13 +4486,13 @@ async function revokeFounderGrant(
             currentPeriodEnd: admin.firestore.Timestamp.fromDate(new Date()),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
-          { merge: true },
+          { merge: true }
         );
       }
       subscriptionRevoked = true;
     } else if (subSnap.exists) {
       console.log(
-        `[markFounderRejected] grant 아님 — 구독 보존(취소하지 않음). status=${sub?.status}, paymentProvider=${sub?.paymentProvider}`,
+        `[markFounderRejected] grant 아님 — 구독 보존(취소하지 않음). status=${sub?.status}, paymentProvider=${sub?.paymentProvider}`
       );
     }
   }
@@ -4497,7 +4507,7 @@ export const markFounderRejected = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required",
+        "email required"
       );
     }
 
@@ -4508,14 +4518,15 @@ export const markFounderRejected = functions.https.onCall(
           status: "rejected",
           rejectedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true },
+        { merge: true }
       );
     }
 
-    const { founderRevoked, subscriptionRevoked } =
-      await revokeFounderGrant(email);
+    const { founderRevoked, subscriptionRevoked } = await revokeFounderGrant(
+      email
+    );
     console.log(
-      `[markFounderRejected] email=${email} waitlist=${targets.length} founderRevoked=${founderRevoked} subRevoked=${subscriptionRevoked}`,
+      `[markFounderRejected] email=${email} waitlist=${targets.length} founderRevoked=${founderRevoked} subRevoked=${subscriptionRevoked}`
     );
     return {
       ok: true as const,
@@ -4524,7 +4535,7 @@ export const markFounderRejected = functions.https.onCall(
       founderRevoked,
       subscriptionRevoked,
     };
-  },
+  }
 );
 
 // 파운더 접근 안내 이메일 재발송 (관리자용) — /admin 에서 수동 재발송용.
@@ -4536,7 +4547,7 @@ export const resendFounderAccessEmail = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required",
+        "email required"
       );
     }
     const locale = await lookupFounderLocale(email);
@@ -4547,10 +4558,10 @@ export const resendFounderAccessEmail = functions.https.onCall(
         accessEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
     return { ok: true, emailSent };
-  },
+  }
 );
 
 // 설문 오퍼 이메일 재발송 쿨다운(일). 같은 사람에게 반복 발송 방지.
@@ -4650,7 +4661,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
         }
         const ok = await sendFounderSurveyOfferEmail(
           target.email,
-          target.locale,
+          target.locale
         );
         if (ok) {
           sent += 1;
@@ -4661,7 +4672,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
                 admin.firestore.FieldValue.serverTimestamp(),
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             },
-            { merge: true },
+            { merge: true }
           );
         } else {
           failed += 1;
@@ -4674,7 +4685,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
         acc[a.locale] = (acc[a.locale] ?? 0) + 1;
         return acc;
       },
-      {},
+      {}
     );
     // 도메인 집계(개수만 — PII 원문 아님). 발송 규모/스팸필터 사전 점검용.
     const domainBreakdown = audience.reduce<Record<string, number>>(
@@ -4684,7 +4695,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
         acc[domain] = (acc[domain] ?? 0) + 1;
         return acc;
       },
-      {},
+      {}
     );
 
     return {
@@ -4709,7 +4720,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
       failed,
       skippedNoConsent,
     };
-  },
+  }
 );
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4791,7 +4802,7 @@ async function computeFounderActivation(): Promise<FounderActivationRecord[]> {
     // 선정 기준 = getMyFounderAccess/grantBetaProOnSignup 과 동일.
     if (v.status === "rejected" || v.accessGrantedAt == null) continue;
     const email = normalizeEmail(
-      typeof v.email === "string" ? v.email : doc.id,
+      typeof v.email === "string" ? v.email : doc.id
     );
     const uid = await lookupUidByEmail(email);
     let subExists = false;
@@ -4868,10 +4879,10 @@ export const getFounderActivationReport = functions.https.onCall(
         activated: bySegment.sub_expired + bySegment.account_no_sub,
       },
       inactiveDomainDistribution: domainDistribution(
-        inactive.map((r) => r.email),
+        inactive.map((r) => r.email)
       ),
     };
-  },
+  }
 );
 
 // ─── 미활성 선정자 팔로업 메일 (Resend) ──────────────────────────────
@@ -4888,7 +4899,7 @@ export const getFounderActivationReport = functions.https.onCall(
 // 아니라 배포 discovery 가 건너뛴다).
 export function buildFounderFollowupEmail(
   locale: FounderLocale,
-  segment: FollowupSegment,
+  segment: FollowupSegment
 ): FounderEmailContent {
   const downloadUrl = `${SITE_BASE}/${locale}/download`;
   const support = FOUNDER_SUPPORT_EMAIL;
@@ -5044,19 +5055,19 @@ export function buildFounderFollowupEmail(
 async function sendFounderFollowupEmail(
   email: string,
   locale: string,
-  segment: FollowupSegment,
+  segment: FollowupSegment
 ): Promise<boolean> {
   try {
     if (!RESEND_API_KEY) {
       console.warn(
         "[founder-followup] RESEND_API_KEY 미설정 — 발송 스킵:",
-        segment,
+        segment
       );
       return false;
     }
     const content = buildFounderFollowupEmail(
       normalizeFounderLocale(locale),
-      segment,
+      segment
     );
     // 마케팅 메일 — one-click unsubscribe 헤더+푸터(CAN-SPAM/RFC 8058).
     const delivery = marketingEmailDelivery(email);
@@ -5064,7 +5075,7 @@ async function sendFounderFollowupEmail(
       email,
       delivery ? withUnsubscribeFooter(content, delivery) : content,
       "founder-followup",
-      delivery?.headers,
+      delivery?.headers
     );
   } catch (err) {
     console.warn("[founder-followup] 발송 실패:", segment, err);
@@ -5170,7 +5181,7 @@ export const sendFounderFollowupEmails = functions.https.onCall(
       throw new functions.https.HttpsError(
         "failed-precondition",
         `실발송하려면 confirm="${FOUNDER_FOLLOWUP_CONFIRM}" 필요(오발송 방지). ` +
-          "그 전에 dryRun 으로 대상을 확인하고 사장님 승인을 받으세요.",
+          "그 전에 dryRun 으로 대상을 확인하고 사장님 승인을 받으세요."
       );
     }
 
@@ -5193,14 +5204,14 @@ export const sendFounderFollowupEmails = functions.https.onCall(
             founderFollowupSegment: fseg,
             founderFollowupSentAt: admin.firestore.FieldValue.serverTimestamp(),
           },
-          { merge: true },
+          { merge: true }
         );
       } else {
         failed++;
       }
     }
     return { ...preview, sent, failed, sentBySegment };
-  },
+  }
 );
 
 // ─── 신청 즉시 접근 부여 자동화 (Resend) ──────────────────────────────
@@ -5213,7 +5224,7 @@ async function sendFounderCohortCapAlert(count: number): Promise<boolean> {
   try {
     if (!RESEND_API_KEY) {
       console.warn(
-        "[founder-auto-select] RESEND_API_KEY 미설정 — cap 알림 발송 스킵",
+        "[founder-auto-select] RESEND_API_KEY 미설정 — cap 알림 발송 스킵"
       );
       return false;
     }
@@ -5239,7 +5250,7 @@ async function sendFounderCohortCapAlert(count: number): Promise<boolean> {
           "If needed, turn off signup exposure with NEXT_PUBLIC_FOUNDATION50_OPEN=false or adjust AUTO_FOUNDER_COHORT_CAP.",
         ].join("\n"),
       },
-      "founder-auto-select",
+      "founder-auto-select"
     );
   } catch (err) {
     console.warn("[founder-auto-select] cap 알림 발송 실패:", err);
@@ -5273,7 +5284,7 @@ async function alertFounderCohortCapIfNeeded(): Promise<void> {
           lastCount: count,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true },
+        { merge: true }
       );
       return false;
     }
@@ -5295,7 +5306,7 @@ async function alertFounderCohortCapIfNeeded(): Promise<void> {
         emailSent: sent,
         emailSentAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
   }
 }
@@ -5317,12 +5328,12 @@ export const sendApplyConfirmOnWaitlist = functions.firestore
             suppressedReason: classified.reason,
             suppressedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
-          { merge: true },
+          { merge: true }
         );
         console.warn(
           "[founder-auto-select] waitlist suppressed:",
           snap.id,
-          classified.reason,
+          classified.reason
         );
         return;
       }
@@ -5333,11 +5344,11 @@ export const sendApplyConfirmOnWaitlist = functions.firestore
             suppressedReason: "missing_required_consent",
             suppressedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
-          { merge: true },
+          { merge: true }
         );
         console.warn(
           "[founder-auto-select] agreed=false — 자동 접근 부여 스킵:",
-          snap.id,
+          snap.id
         );
         return;
       }
@@ -5357,14 +5368,14 @@ export const sendApplyConfirmOnWaitlist = functions.firestore
             status: "duplicate_selected",
             duplicateSelectedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
-          { merge: true },
+          { merge: true }
         );
         console.warn(
           "[founder-auto-select] duplicate selected email — access email resend skipped:",
-          snap.id,
+          snap.id
         );
         await alertFounderCohortCapIfNeeded().catch((err) =>
-          console.warn("[founder-auto-select] cap 확인 실패:", snap.id, err),
+          console.warn("[founder-auto-select] cap 확인 실패:", snap.id, err)
         );
         return;
       }
@@ -5379,10 +5390,10 @@ export const sendApplyConfirmOnWaitlist = functions.firestore
           autoSubscriptionGranted: result.subscriptionGranted,
           autoSubscriptionSkippedReason: result.subscriptionSkippedReason,
         },
-        { merge: true },
+        { merge: true }
       );
       await alertFounderCohortCapIfNeeded().catch((err) =>
-        console.warn("[founder-auto-select] cap 확인 실패:", snap.id, err),
+        console.warn("[founder-auto-select] cap 확인 실패:", snap.id, err)
       );
     } catch (err) {
       // 트리거 재시도 폭주 방지 — 모든 에러를 삼킨다.
@@ -5438,7 +5449,7 @@ export const enforceProjectLimit = functions.firestore
           planType: typeof sub.planType === "string" ? sub.planType : null,
           currentPeriodEndMs: tsToMillis(sub.currentPeriodEnd),
         },
-        Date.now(),
+        Date.now()
       );
 
       const limit = PROJECT_LIMIT_BY_PLAN[plan];
@@ -5466,7 +5477,7 @@ export const enforceProjectLimit = functions.firestore
       await snap.ref.delete();
       console.warn(
         `[enforceProjectLimit] ${plan} 한도(${limit}) 초과 프로젝트 삭제: ` +
-          `owner=${ownerId} project=${snap.id} (owned=${owned.size})`,
+          `owner=${ownerId} project=${snap.id} (owned=${owned.size})`
       );
     } catch (err) {
       // 트리거 재시도 폭주 방지 — 모든 에러를 삼킨다.
@@ -5478,7 +5489,7 @@ function parseFounderSurveyAnswers(raw: unknown): FounderSurveyAnswers {
   if (!raw || typeof raw !== "object") {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "설문 답변이 필요합니다.",
+      "설문 답변이 필요합니다."
     );
   }
   const answers = raw as Record<string, unknown>;
@@ -5499,7 +5510,7 @@ function parseFounderSurveyAnswers(raw: unknown): FounderSurveyAnswers {
   if (missing.length > 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      `필수 7문항을 모두 입력해 주세요. 누락: ${missing.join(", ")}`,
+      `필수 7문항을 모두 입력해 주세요. 누락: ${missing.join(", ")}`
     );
   }
   return parsed;
@@ -5509,7 +5520,7 @@ function parseFounderRubricScore(raw: unknown): FounderRubricScore {
   if (!raw || typeof raw !== "object") {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "rubricScore is required",
+      "rubricScore is required"
     );
   }
   const input = raw as Record<string, unknown>;
@@ -5523,7 +5534,7 @@ function parseFounderRubricScore(raw: unknown): FounderRubricScore {
     ) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        `${key} must be an integer from 0 to 3`,
+        `${key} must be an integer from 0 to 3`
       );
     }
     return value;
@@ -5547,7 +5558,7 @@ function parseFounderRubricScore(raw: unknown): FounderRubricScore {
   ) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      `rubricScore.total must equal ${total}`,
+      `rubricScore.total must equal ${total}`
     );
   }
 
@@ -5562,7 +5573,7 @@ function parseFounderRubricScore(raw: unknown): FounderRubricScore {
 }
 
 async function getFounderFeedbackBySelector(
-  selector: unknown,
+  selector: unknown
 ): Promise<admin.firestore.DocumentSnapshot | null> {
   if (!selector || typeof selector !== "object") return null;
   const data = selector as Record<string, unknown>;
@@ -5586,7 +5597,7 @@ async function getFounderFeedbackBySelector(
       ? (x as { toMillis: () => number }).toMillis()
       : 0;
   return snap.docs.reduce((a, b) =>
-    toMillis(b.data().createdAt) > toMillis(a.data().createdAt) ? b : a,
+    toMillis(b.data().createdAt) > toMillis(a.data().createdAt) ? b : a
   );
 }
 
@@ -5598,14 +5609,14 @@ export const submitFounderFeedback = functions.https.onCall(
     if (!uid || !token?.email) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
     // 무료 Pro 부여 경계 — 이메일 소유권 위조 방지를 위해 인증된 이메일만 허용.
     if (token.email_verified !== true) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "이메일 인증이 완료된 계정만 제출할 수 있습니다.",
+        "이메일 인증이 완료된 계정만 제출할 수 있습니다."
       );
     }
     const email = normalizeEmail(token.email);
@@ -5620,14 +5631,14 @@ export const submitFounderFeedback = functions.https.onCall(
       if (!s.exists || s.data()?.status === "rejected") {
         throw new functions.https.HttpsError(
           "permission-denied",
-          "선정된 파운더가 아닙니다. 선정 안내 이메일의 계정으로 로그인했는지 확인해 주세요.",
+          "선정된 파운더가 아닙니다. 선정 안내 이메일의 계정으로 로그인했는지 확인해 주세요."
         );
       }
       const fd = s.data()!;
       if (fd.feedbackSubmittedAt) {
         throw new functions.https.HttpsError(
           "already-exists",
-          "이미 설문을 제출하셨습니다.",
+          "이미 설문을 제출하셨습니다."
         );
       }
       const granted =
@@ -5637,14 +5648,14 @@ export const submitFounderFeedback = functions.https.onCall(
       if (!granted) {
         throw new functions.https.HttpsError(
           "failed-precondition",
-          "접근 권한이 아직 부여되지 않았습니다.",
+          "접근 권한이 아직 부여되지 않았습니다."
         );
       }
       betaExpiresAt =
         fd.betaExpiresAt && typeof fd.betaExpiresAt.toDate === "function"
           ? fd.betaExpiresAt
           : admin.firestore.Timestamp.fromDate(
-              addMonths(granted, FOUNDER_BETA_MONTHS),
+              addMonths(granted, FOUNDER_BETA_MONTHS)
             );
       tx.set(
         fRef,
@@ -5654,7 +5665,7 @@ export const submitFounderFeedback = functions.https.onCall(
           feedbackSubmittedAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true },
+        { merge: true }
       );
     });
 
@@ -5662,7 +5673,7 @@ export const submitFounderFeedback = functions.https.onCall(
       email,
       userId: uid,
       locale: normalizeFounderLocale(
-        typeof data?.locale === "string" ? data.locale : "ko",
+        typeof data?.locale === "string" ? data.locale : "ko"
       ),
       answers,
       rubricScore: null,
@@ -5685,7 +5696,7 @@ export const submitFounderFeedback = functions.https.onCall(
         proGrantedMonths: 0,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
 
     return {
@@ -5696,7 +5707,7 @@ export const submitFounderFeedback = functions.https.onCall(
         ? (betaExpiresAt as admin.firestore.Timestamp).toDate().toISOString()
         : null,
     };
-  },
+  }
 );
 
 // 내 파운더 선정 상태(본인 조회) — founders 컬렉션은 클라 직접 read 차단이라
@@ -5709,7 +5720,7 @@ export const getMyFounderAccess = functions.https.onCall(
     if (!uid || !token?.email) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
     const email = normalizeEmail(token.email);
@@ -5730,7 +5741,7 @@ export const getMyFounderAccess = functions.https.onCall(
       betaExpiresAt,
       feedbackSubmitted,
     };
-  },
+  }
 );
 
 // 루브릭 채점 및 Pro 3개월 지급 확정 (관리자용).
@@ -5748,7 +5759,7 @@ export const reviewFounderFeedback = functions.https.onCall(
     if (!userId || !email) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "feedback is missing userId or email",
+        "feedback is missing userId or email"
       );
     }
 
@@ -5772,7 +5783,7 @@ export const reviewFounderFeedback = functions.https.onCall(
         userId,
         FOUNDER_PRO_MONTHS,
         "founder_survey_rubric",
-        grantStartedAt,
+        grantStartedAt
       );
     } else {
       proExpiresAt =
@@ -5813,7 +5824,7 @@ export const reviewFounderFeedback = functions.https.onCall(
             : null,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true },
+        { merge: true }
       );
 
     return {
@@ -5825,7 +5836,7 @@ export const reviewFounderFeedback = functions.https.onCall(
         : existingGranted,
       proExpiresAt: proExpiresAt?.toISOString() ?? null,
     };
-  },
+  }
 );
 
 // 루브릭 상위 응답자 조회 (관리자용). 복합 인덱스 부담을 줄이기 위해 점수 필터는
@@ -5885,7 +5896,7 @@ export const listTopFounderFeedback = functions.https.onCall(
       })
       .slice(0, limit);
     return { items };
-  },
+  }
 );
 
 // 인터뷰 요청 마킹 (관리자용). 점수만으로 자동 선정하지 않고 운영자 명시 호출만 허용.
@@ -5902,7 +5913,7 @@ export const requestFounderInterview = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "feedback is missing email",
+        "feedback is missing email"
       );
     }
     await feedbackSnap.ref.set(
@@ -5911,7 +5922,7 @@ export const requestFounderInterview = functions.https.onCall(
         interviewRequestedAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
     await db.collection(FOUNDERS_COLLECTION).doc(email).set(
       {
@@ -5920,10 +5931,10 @@ export const requestFounderInterview = functions.https.onCall(
         interviewRequestedAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
     return { ok: true, feedbackId: feedbackSnap.id };
-  },
+  }
 );
 
 // 인터뷰 완료 마킹 (관리자용) — 요청받은 사용자의 Pro를 총 6개월로 연장.
@@ -5941,7 +5952,7 @@ export const markFounderInterviewed = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "feedback is missing email",
+        "feedback is missing email"
       );
     }
     const fRef = db.collection(FOUNDERS_COLLECTION).doc(email);
@@ -5954,24 +5965,24 @@ export const markFounderInterviewed = functions.https.onCall(
       typeof feedback.userId === "string"
         ? feedback.userId
         : typeof f.userId === "string"
-          ? f.userId
-          : "";
+        ? f.userId
+        : "";
     if (!uid) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "설문 제출 전이라 계정이 연결되지 않았습니다. 설문 제출 후 진행하세요.",
+        "설문 제출 전이라 계정이 연결되지 않았습니다. 설문 제출 후 진행하세요."
       );
     }
     if (feedback.interviewCompleted === true || f.interviewCompleted === true) {
       throw new functions.https.HttpsError(
         "already-exists",
-        "이미 인터뷰 보상이 적용되었습니다.",
+        "이미 인터뷰 보상이 적용되었습니다."
       );
     }
     if (feedback.interviewRequested !== true && f.interviewRequested !== true) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "인터뷰 요청 대상자만 완료 처리할 수 있습니다.",
+        "인터뷰 요청 대상자만 완료 처리할 수 있습니다."
       );
     }
     const grantStartedAt =
@@ -5983,7 +5994,7 @@ export const markFounderInterviewed = functions.https.onCall(
       uid,
       FOUNDER_INTERVIEW_TOTAL_PRO_MONTHS,
       "founder_interview",
-      grantStartedAt,
+      grantStartedAt
     );
     await feedbackSnap.ref.set(
       {
@@ -5993,7 +6004,7 @@ export const markFounderInterviewed = functions.https.onCall(
         proExpiresAt: admin.firestore.Timestamp.fromDate(periodEnd),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
     await fRef.set(
       {
@@ -6005,14 +6016,14 @@ export const markFounderInterviewed = functions.https.onCall(
         proExpiresAt: admin.firestore.Timestamp.fromDate(periodEnd),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
     return {
       ok: true,
       proMonths: FOUNDER_INTERVIEW_TOTAL_PRO_MONTHS,
       currentPeriodEnd: periodEnd.toISOString(),
     };
-  },
+  }
 );
 
 // Timestamp → ISO 문자열(없거나 형식이 아니면 null). 어드민 read 함수 공용.
@@ -6095,7 +6106,7 @@ export const getFounderWaitlist = functions.https.onCall(
       ? all
       : all.filter((i) => i.status !== "rejected");
     return { items, rejectedCount: all.length - items.length };
-  },
+  }
 );
 
 // 파운더 현황(어드민) — founders 컬렉션 전체 요약. 상태·시각·Pro개월 등.
@@ -6136,7 +6147,7 @@ export const getFounderFeedbackByEmail = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required",
+        "email required"
       );
     }
     // orderBy 제거 — (email + createdAt) 복합 인덱스 없이 동작하도록 클라이언트 정렬.
@@ -6154,7 +6165,7 @@ export const getFounderFeedbackByEmail = functions.https.onCall(
         ? (x as { toMillis: () => number }).toMillis()
         : 0;
     const latest = snap.docs.reduce((a, b) =>
-      toMillis(b.data().createdAt) > toMillis(a.data().createdAt) ? b : a,
+      toMillis(b.data().createdAt) > toMillis(a.data().createdAt) ? b : a
     );
     const v = latest.data() as Record<string, unknown>;
     const a = (v.answers as Record<string, unknown>) || {};
@@ -6188,7 +6199,7 @@ export const getFounderFeedbackByEmail = functions.https.onCall(
         createdAt: tsToIso(v.createdAt),
       },
     };
-  },
+  }
 );
 
 // ─── In-app Bug Reports (사용자 버그 신고) ─────────────────────
@@ -6207,7 +6218,7 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
   if (!uid) {
     throw new functions.https.HttpsError(
       "unauthenticated",
-      "로그인이 필요합니다.",
+      "로그인이 필요합니다."
     );
   }
   // 이메일은 서버가 토큰에서 각인(클라 입력 불신). 인증 이메일 없으면 null.
@@ -6223,7 +6234,7 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
   if (!description) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "버그 설명을 입력해 주세요.",
+      "버그 설명을 입력해 주세요."
     );
   }
 
@@ -6241,7 +6252,7 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
     recentLogs: redactSecrets(str(ctxIn.recentLogs, BUG_REPORT_CTX_FIELD_MAX)),
     route: str(ctxIn.route, 500),
     agentSnapshot: redactSecrets(
-      str(ctxIn.agentSnapshot, BUG_REPORT_CTX_FIELD_MAX),
+      str(ctxIn.agentSnapshot, BUG_REPORT_CTX_FIELD_MAX)
     ),
   };
 
@@ -6256,7 +6267,7 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
     if (now - lastAt < BUG_REPORT_MIN_INTERVAL_MS) {
       throw new functions.https.HttpsError(
         "resource-exhausted",
-        "잠시 후 다시 시도해 주세요.",
+        "잠시 후 다시 시도해 주세요."
       );
     }
     const dayStart = typeof d.dayStartMs === "number" ? d.dayStartMs : 0;
@@ -6264,12 +6275,12 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
     const dayCount = dayRolledOver
       ? 0
       : typeof d.dayCount === "number"
-        ? d.dayCount
-        : 0;
+      ? d.dayCount
+      : 0;
     if (dayCount >= BUG_REPORT_DAILY_MAX) {
       throw new functions.https.HttpsError(
         "resource-exhausted",
-        "하루 제출 한도를 초과했습니다. 내일 다시 시도해 주세요.",
+        "하루 제출 한도를 초과했습니다. 내일 다시 시도해 주세요."
       );
     }
     tx.set(
@@ -6280,7 +6291,7 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
         dayCount: dayCount + 1,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
   });
 
@@ -6343,7 +6354,7 @@ export const updateBugReportStatus = functions.https.onCall(
     if (!(BUG_REPORT_STATUSES as readonly string[]).includes(status)) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "유효하지 않은 상태값입니다.",
+        "유효하지 않은 상태값입니다."
       );
     }
     const ref = db.collection("bugReports").doc(id);
@@ -6351,7 +6362,7 @@ export const updateBugReportStatus = functions.https.onCall(
     if (!snap.exists) {
       throw new functions.https.HttpsError(
         "not-found",
-        "신고를 찾을 수 없습니다.",
+        "신고를 찾을 수 없습니다."
       );
     }
     await ref.set(
@@ -6360,10 +6371,10 @@ export const updateBugReportStatus = functions.https.onCall(
         triagedBy: context.auth?.uid ?? null,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
     return { ok: true };
-  },
+  }
 );
 
 // ─── Telemetry → BigQuery ─────────────────────────────────────
@@ -6531,14 +6542,14 @@ export const logTelemetryBatch = functions.https.onCall(
     if (!Array.isArray(events) || events.length === 0) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "events array required",
+        "events array required"
       );
     }
 
     if (events.length > 100) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "Max 100 events per batch",
+        "Max 100 events per batch"
       );
     }
 
@@ -6592,7 +6603,7 @@ export const logTelemetryBatch = functions.https.onCall(
     await bigquery.dataset(BQ_DATASET).table(BQ_EVENTS_TABLE).insert(rows);
 
     return { inserted: rows.length };
-  },
+  }
 );
 
 // ─── 학습데이터 캡처 → BigQuery marblo_training (ticket IqcXHVbT0rXnHloXpV7n) ──
@@ -6607,7 +6618,7 @@ export const logTelemetryBatch = functions.https.onCall(
 
 /** 사용자 문서에서 학습데이터 동의 플래그를 읽는다(문서 부재 = 미설정). */
 async function readTrainingConsentDoc(
-  uid: string,
+  uid: string
 ): Promise<TrainingConsentDoc | null> {
   try {
     const snap = await db.collection("users").doc(uid).get();
@@ -6640,10 +6651,10 @@ export const getTrainingCaptureStatus = functions.https.onCall(
     const gate = resolveCaptureGate(
       uid,
       adminUid,
-      await readTrainingConsentDoc(uid),
+      await readTrainingConsentDoc(uid)
     );
     return { eligible: gate.eligible, consent: gate.consent };
-  },
+  }
 );
 
 let trainingTableReady = false;
@@ -6681,7 +6692,7 @@ export const logTrainingSamples = functions
     const gate = resolveCaptureGate(
       uid,
       process.env.ADMIN_UID,
-      await readTrainingConsentDoc(uid),
+      await readTrainingConsentDoc(uid)
     );
     if (!gate.allowed) {
       // 사유는 코드로만 남긴다(uid 로그 금지). 클라는 permission-denied 를 보면
@@ -6691,7 +6702,7 @@ export const logTrainingSamples = functions
       });
       throw new functions.https.HttpsError(
         "permission-denied",
-        "Training capture is not enabled for this account.",
+        "Training capture is not enabled for this account."
       );
     }
 
@@ -6699,13 +6710,13 @@ export const logTrainingSamples = functions
     if (!Array.isArray(samples) || samples.length === 0) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "samples array required",
+        "samples array required"
       );
     }
     if (samples.length > MAX_SAMPLES_PER_BATCH) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        `Max ${MAX_SAMPLES_PER_BATCH} samples per batch`,
+        `Max ${MAX_SAMPLES_PER_BATCH} samples per batch`
       );
     }
 
@@ -6786,7 +6797,7 @@ export const logCostBatch = functions.https.onCall(async (data, context) => {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "entries array required",
+      "entries array required"
     );
   }
 
@@ -6826,7 +6837,7 @@ export const getCostLogs = functions.https.onCall(async (data, context) => {
   if (!projectId) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "projectId required",
+      "projectId required"
     );
   }
 
@@ -6867,7 +6878,7 @@ export const getCostSummary = functions.https.onCall(async (data, context) => {
   if (!projectId) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "projectId required",
+      "projectId required"
     );
   }
 
@@ -6875,7 +6886,7 @@ export const getCostSummary = functions.https.onCall(async (data, context) => {
   if (!Number.isInteger(requestedDays) || requestedDays <= 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "days must be a positive integer",
+      "days must be a positive integer"
     );
   }
 
@@ -6962,7 +6973,7 @@ export const getCostSummary = functions.https.onCall(async (data, context) => {
 
   const weeklyTotalTokens = weeklyByModel.reduce(
     (total, row) => total + row.totalTokens,
-    0,
+    0
   );
   const weeklyCost = weeklyByModel.reduce((total, row) => total + row.cost, 0);
 
@@ -6988,7 +6999,7 @@ export const logTaskOutcome = functions.https.onCall(async (data, context) => {
   if (!d || !d.taskId) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "outcome with taskId required",
+      "outcome with taskId required"
     );
   }
 
@@ -7038,14 +7049,14 @@ export const logHeartbeat = functions.https.onCall(async (data, context) => {
   if (!Array.isArray(beats) || beats.length === 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "beats array required",
+      "beats array required"
     );
   }
 
   if (beats.length > 50) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "Max 50 beats per batch",
+      "Max 50 beats per batch"
     );
   }
 
@@ -7082,7 +7093,7 @@ export const logFlowExecution = functions.https.onCall(
     if (!d || !d.flowId || !d.runId) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "execution with flowId and runId required",
+        "execution with flowId and runId required"
       );
     }
 
@@ -7112,7 +7123,7 @@ export const logFlowExecution = functions.https.onCall(
       .insert([row]);
 
     return { inserted: 1 };
-  },
+  }
 );
 
 // ============================================
@@ -7331,7 +7342,7 @@ export const scheduledChargePortOneSubscriptions = functions.pubsub
       // 스킵(해지 방지). 간편결제(토스페이)는 customer.id + email 만 요구하므로
       // name/phone 부재로 스킵하면 멀쩡한 구독이 갱신 없이 만료된다.
       const subBillingKeyMethod = normalizePortOneBillingKeyMethod(
-        sub.portoneBillingKeyMethod,
+        sub.portoneBillingKeyMethod
       );
       const missingCustomerFields =
         subBillingKeyMethod === "EASY_PAY"
@@ -7340,7 +7351,7 @@ export const scheduledChargePortOneSubscriptions = functions.pubsub
       if (!billingKey || missingCustomerFields) {
         console.warn(
           "[PortOne Billing Cron] missing billingKey/name/phone/email, skip",
-          doc.id,
+          doc.id
         );
         result.skipped++;
         continue;
@@ -7412,7 +7423,7 @@ export const triggerReconcile = functions.https.onCall(
     const provider = (data?.provider as string) || "toss";
     if (provider === "paddle") return reconcilePaddlePending();
     return reconcileTossPending();
-  },
+  }
 );
 
 // ═══════════════════════════════════════════════════════════════════
@@ -7449,7 +7460,7 @@ interface TgCallbackQuery {
 // 텔레그램 Bot API 호출(공통) — 토큰 없으면 스킵, 절대 throw 하지 않음.
 async function tgCall(
   method: string,
-  payload: Record<string, unknown>,
+  payload: Record<string, unknown>
 ): Promise<void> {
   if (!TELEGRAM_BETA_BOT_TOKEN) return;
   try {
@@ -7459,7 +7470,7 @@ async function tgCall(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      },
+      }
     );
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
@@ -7474,7 +7485,7 @@ async function tgCall(
 // 사용자 입력을 그대로 담으므로 parse_mode 없이 평문 전송(포맷 400/인젝션 회피).
 async function tgSend(
   text: string,
-  inlineKeyboard?: TgInlineKeyboard,
+  inlineKeyboard?: TgInlineKeyboard
 ): Promise<void> {
   if (!TELEGRAM_BETA_ADMIN_CHAT_ID) return;
   const payload: Record<string, unknown> = {
@@ -7497,7 +7508,7 @@ async function tgAnswerCallbackQuery(id: string, text: string): Promise<void> {
 async function tgEditMessageText(
   chatId: string | number,
   messageId: number,
-  text: string,
+  text: string
 ): Promise<void> {
   await tgCall("editMessageText", {
     chat_id: chatId,
@@ -7575,7 +7586,7 @@ async function handleTgSelect(
   cqId: string,
   chatId: string,
   messageId: number,
-  docId: string,
+  docId: string
 ): Promise<void> {
   const snap = await db.collection("betatester50_waitlist").doc(docId).get();
   if (!snap.exists) {
@@ -7609,7 +7620,7 @@ async function handleTgSelect(
       messageId,
       `✅ 선정 (1개월, ${proNote}, 접근이메일 ${
         result.emailSent ? "발송" : "발송 스킵"
-      }) — ${email}\n처리: ${new Date().toISOString()}`,
+      }) — ${email}\n처리: ${new Date().toISOString()}`
     );
   }
 }
@@ -7619,7 +7630,7 @@ async function handleTgSkip(
   cqId: string,
   chatId: string,
   messageId: number,
-  docId: string,
+  docId: string
 ): Promise<void> {
   const ref = db.collection("betatester50_waitlist").doc(docId);
   const snap = await ref.get();
@@ -7636,14 +7647,14 @@ async function handleTgSkip(
       skipped: true,
       skippedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
-    { merge: true },
+    { merge: true }
   );
   await tgAnswerCallbackQuery(cqId, "스킵 처리됨");
   if (messageId) {
     await tgEditMessageText(
       chatId,
       messageId,
-      `⏭️ 스킵됨 — 처리: ${new Date().toISOString()}`,
+      `⏭️ 스킵됨 — 처리: ${new Date().toISOString()}`
     );
   }
 }
@@ -7653,7 +7664,7 @@ async function handleTgProGrant(
   cqId: string,
   chatId: string,
   messageId: number,
-  docId: string,
+  docId: string
 ): Promise<void> {
   const ref = db.collection(FOUNDER_FEEDBACK_COLLECTION).doc(docId);
   const snap = await ref.get();
@@ -7678,7 +7689,7 @@ async function handleTgProGrant(
       await tgEditMessageText(
         chatId,
         messageId,
-        `⭐ 이미 Pro 부여됨 (${existingGranted}개월) — ${email}`,
+        `⭐ 이미 Pro 부여됨 (${existingGranted}개월) — ${email}`
       );
     }
     return;
@@ -7687,7 +7698,7 @@ async function handleTgProGrant(
     userId,
     FOUNDER_PRO_MONTHS,
     "telegram_override",
-    new Date(),
+    new Date()
   );
   await ref.set(
     {
@@ -7697,7 +7708,7 @@ async function handleTgProGrant(
       reviewedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
-    { merge: true },
+    { merge: true }
   );
   await db
     .collection(FOUNDERS_COLLECTION)
@@ -7708,14 +7719,14 @@ async function handleTgProGrant(
         proExpiresAt: admin.firestore.Timestamp.fromDate(proExpiresAt),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
   await tgAnswerCallbackQuery(cqId, "Pro 3개월 부여 완료");
   if (messageId) {
     await tgEditMessageText(
       chatId,
       messageId,
-      `⭐ Pro 3개월 부여 (예외승인) — ${email}\n처리: ${new Date().toISOString()}`,
+      `⭐ Pro 3개월 부여 (예외승인) — ${email}\n처리: ${new Date().toISOString()}`
     );
   }
 }
@@ -7789,7 +7800,7 @@ export const betaTelegramWebhook = functions.https.onRequest(
     }
     // 텔레그램 재전송 폭주 방지 — 어떤 경우에도 200.
     res.status(200).send("ok");
-  },
+  }
 );
 
 // ─── 트리거: 신규 가입 → 선정된 베타 파운더면 Pro 구독 materialize ─────
@@ -7818,7 +7829,7 @@ export const grantBetaProOnSignup = functions.auth
         fd,
         user.uid,
         "beta_signup",
-        new Date(),
+        new Date()
       );
     } catch (err) {
       console.warn("[grantBetaProOnSignup] 부여 실패:", user.uid, err);
@@ -7853,12 +7864,12 @@ export const scheduledExpireBetaGrants = functions.pubsub
           canceledAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true },
+        { merge: true }
       );
       expired++;
     }
     console.log(
-      `[expireBetaGrants] scanned=${snap.size} expired→canceled=${expired}`,
+      `[expireBetaGrants] scanned=${snap.size} expired→canceled=${expired}`
     );
     return null;
   });
@@ -7891,7 +7902,7 @@ function parseAnalyticsDays(data: unknown, def = 30): number {
   if (!Number.isInteger(n) || n <= 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "days must be a positive integer",
+      "days must be a positive integer"
     );
   }
   return Math.min(n, 365);
@@ -7907,7 +7918,7 @@ function parseAnalyticsDate(data: unknown): string {
   ) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "date must be YYYY-MM-DD",
+      "date must be YYYY-MM-DD"
     );
   }
   return s;
@@ -7921,7 +7932,7 @@ function parseSegmentKey(data: unknown): string {
   if (!s || s.length > 200) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "key is required (max 200 chars)",
+      "key is required (max 200 chars)"
     );
   }
   return s;
@@ -7985,7 +7996,7 @@ async function resolveAdminClientIds(rangeDays: number): Promise<string[]> {
     // uid 와 원시 에러 메시지는 로그에도 남기지 않는다.
     console.warn(
       "[analytics] admin clientId resolution failed; proceeding without " +
-        "telemetry self-exclusion",
+        "telemetry self-exclusion"
     );
     return [];
   }
@@ -8039,7 +8050,7 @@ function adminUidExclusion(): {
 function foldDistribution(
   rows: Array<Record<string, unknown>>,
   keyCol: string,
-  countCol = "n",
+  countCol = "n"
 ): Array<{ key: string; count: number }> {
   return rows.map((r) => ({
     key: r[keyCol] == null || r[keyCol] === "" ? "(none)" : String(r[keyCol]),
@@ -8060,7 +8071,7 @@ function dayKeyFromMs(ms: number): string {
 
 function makeBusinessTrendBuckets(
   rangeDays: number,
-  nowMs: number,
+  nowMs: number
 ): Array<{ date: string; active: number; new: number; churned: number }> {
   const todayStartMs = startOfUtcDay(nowMs);
   const firstDayMs = todayStartMs - (rangeDays - 1) * DAY_MS;
@@ -8079,7 +8090,7 @@ function isPaidPlan(plan: string): boolean {
 function isCurrentActiveSubscription(
   status: string,
   currentPeriodEndMs: number | null,
-  nowMs: number,
+  nowMs: number
 ): boolean {
   return (
     status === "active" &&
@@ -8093,7 +8104,7 @@ function activeAtDayEnd(
   createdMs: number | null,
   canceledMs: number | null,
   currentPeriodEndMs: number | null,
-  dayEndMs: number,
+  dayEndMs: number
 ): boolean {
   if (currentPeriodEndMs == null || currentPeriodEndMs <= dayEndMs)
     return false;
@@ -8118,7 +8129,7 @@ type ConsecutiveBillingMetrics = {
 };
 
 function computeConsecutiveBillingMetrics(
-  rows: ChargeLedgerRow[],
+  rows: ChargeLedgerRow[]
 ): ConsecutiveBillingMetrics {
   const byUser = new Map<string, ChargeLedgerRow[]>();
   for (const row of rows) {
@@ -8266,7 +8277,7 @@ export const getAdminBusinessSummary = functions.https.onCall(
             createdMs,
             canceledMs,
             currentPeriodEndMs,
-            dayEndMs,
+            dayEndMs
           )
         ) {
           trendByDay[i].active++;
@@ -8403,7 +8414,7 @@ export const getAdminBusinessSummary = functions.https.onCall(
         rollingTotalTokens,
       },
     };
-  },
+  }
 );
 
 /**
@@ -8529,14 +8540,14 @@ export const getAdminUsageSummary = functions.https.onCall(
         date: String(r.date ?? ""),
         dau: toNumber(r.dau as number | string | undefined),
         events: toNumber(r.events as number | string | undefined),
-      }),
+      })
     );
     const sample = (sampleRows as Array<Record<string, unknown>>)[0] ?? {};
     const taskRow =
       (taskSummaryRows as Array<Record<string, unknown>>)[0] ?? {};
     const taskTotal = toNumber(taskRow.total as number | string | undefined);
     const taskSucceeded = toNumber(
-      taskRow.succeeded as number | string | undefined,
+      taskRow.succeeded as number | string | undefined
     );
 
     return {
@@ -8553,38 +8564,38 @@ export const getAdminUsageSummary = functions.https.onCall(
       },
       // 표본 신뢰도 라벨링(§0-B, T0-3): 옵트인/도그푸드 편향 표본 크기.
       sampleClientCount: toNumber(
-        sample.sampleClients as number | string | undefined,
+        sample.sampleClients as number | string | undefined
       ),
       wau: toNumber(sample.wau as number | string | undefined),
       activeByDay,
       topEvents: foldDistribution(
         topEventsRows as Array<Record<string, unknown>>,
-        "event",
+        "event"
       ),
       spawnsByDay: (spawnsByDayRows as Array<Record<string, unknown>>).map(
         (r) => ({
           date: String(r.date ?? ""),
           count: toNumber(r.n as number | string | undefined),
-        }),
+        })
       ),
       spawnsByRole: foldDistribution(
         spawnsByRoleRows as Array<Record<string, unknown>>,
-        "key",
+        "key"
       ),
       spawnsByModel: foldDistribution(
         spawnsByModelRows as Array<Record<string, unknown>>,
-        "key",
+        "key"
       ),
       tasks: {
         total: taskTotal,
         succeeded: taskSucceeded,
         successRate: taskTotal > 0 ? taskSucceeded / taskTotal : 0,
         avgDurationMs: toNumber(
-          taskRow.avgDurationMs as number | string | undefined,
+          taskRow.avgDurationMs as number | string | undefined
         ),
       },
     };
-  },
+  }
 );
 
 /**
@@ -8653,7 +8664,7 @@ export const getAdminOnboardingFunnel = functions
       new Set([
         ...ONBOARDING_FUNNEL_STEPS.map((s) => s.event),
         ...ONBOARDING_FAILURE_EVENTS.map((f) => f.event),
-      ]),
+      ])
     );
     const inList = funnelEventNames.map((_, i) => `@ev${i}`).join(", ");
     const eventParams: Record<string, unknown> = {};
@@ -8715,7 +8726,7 @@ export const getAdminOnboardingFunnel = functions
           -- 손으로 적던 시절엔 상수에 칸을 늘려도 SQL 이 안 따라와 조용히 0 이
           -- 나왔다(needsAuth/authedButUnfunded 가 그렇게 빠져 있었다).
           ${ONBOARDING_FAILURE_EVENTS.map(
-            (f) => `COUNTIF(event = '${f.event}') AS n_${f.col}`,
+            (f) => `COUNTIF(event = '${f.event}') AS n_${f.col}`
           ).join(",\n          ")}
         FROM raw
         GROUP BY identity
@@ -8823,7 +8834,7 @@ export const getAdminOnboardingFunnel = functions
           -- 올라간다. 퍼널 칸을 추가했다는 이유로 잔존 지표가 좋아지는 건
           -- 계측이 아니라 착시라 명시적으로 배제한다.
           AND r.event NOT IN (${FUNNEL_EVENTS_EXCLUDED_FROM_RETENTION.map(
-            (e) => `'${e}'`,
+            (e) => `'${e}'`
           ).join(", ")})
         GROUP BY r.identity
       )
@@ -8866,7 +8877,7 @@ export const getAdminOnboardingFunnel = functions
         ${ONBOARDING_FAILURE_EVENTS.map(
           (f) =>
             `COUNTIF(n_${f.col} > 0) AS d_${f.col},\n        ` +
-            `SUM(n_${f.col}) AS n_${f.col}`,
+            `SUM(n_${f.col}) AS n_${f.col}`
         ).join(",\n        ")},
         COUNTIF(reached_login_success) AS d_signup_base,
         COUNTIF(reached_task_completed) AS d_activated_30m
@@ -8875,7 +8886,7 @@ export const getAdminOnboardingFunnel = functions
 
     // 실패 이벤트의 errorCategory 분해(cli_auth / launch_error / crash 카테고리 등).
     const failureInList = ONBOARDING_FAILURE_EVENTS.map(
-      (_, i) => `@fev${i}`,
+      (_, i) => `@fev${i}`
     ).join(", ");
     const failureParams: Record<string, unknown> = {};
     ONBOARDING_FAILURE_EVENTS.forEach((f, i) => {
@@ -8928,7 +8939,7 @@ export const getAdminOnboardingFunnel = functions
 
     const funnel = buildOnboardingFunnel(
       funnelResult.rows[0] as Record<string, unknown> | undefined,
-      reasonResult.rows as ReasonRow[],
+      reasonResult.rows as ReasonRow[]
     );
 
     return {
@@ -9057,7 +9068,7 @@ export const getAdminRetentionCohorts = functions
     `;
 
     const gateEventNames = Array.from(
-      new Set(ACTIVATION_GATE_STEPS.map((s) => s.event)),
+      new Set(ACTIVATION_GATE_STEPS.map((s) => s.event))
     );
     const gateInList = gateEventNames.map((_, i) => `@gateEv${i}`).join(", ");
     const gateParams: Record<string, unknown> = {};
@@ -9299,7 +9310,7 @@ export const getAdminActiveUserMetrics = functions
       ...buildActiveUserMetrics(
         activeRows as ActiveByDaySourceRow[],
         scalarRows[0],
-        retentionRows as ThirtyDayRetentionSourceRow[],
+        retentionRows as ThirtyDayRetentionSourceRow[]
       ),
     };
   });
@@ -9602,7 +9613,7 @@ export const getAdminKpiCockpit = functions
         WHERE ${eventTs} >= ${since}
           AND userId IS NOT NULL
           AND event NOT IN (${KPI_RETENTION_EXCLUDED_EVENTS.map(
-            (e) => `'${e}'`,
+            (e) => `'${e}'`
           ).join(", ")})${ex.clause}
       ),
       signup AS (
@@ -9629,7 +9640,7 @@ export const getAdminKpiCockpit = functions
             w.ts <= TIMESTAMP_ADD(s.signup_ts, INTERVAL ${d} DAY),
             w.projectId,
             NULL
-          )) AS projects_${d}d`,
+          )) AS projects_${d}d`
             )
             .join(",\n          ")}
         FROM win w
@@ -9642,7 +9653,7 @@ export const getAdminKpiCockpit = functions
         ${[1, 7, 30]
           .map(
             (d) =>
-              `COUNTIF(sessionish_${d}d >= 2 OR projects_${d}d >= 2) AS d_retained_${d}d`,
+              `COUNTIF(sessionish_${d}d >= 2 OR projects_${d}d >= 2) AS d_retained_${d}d`
           )
           .join(",\n        ")}
       FROM per_identity
@@ -9885,7 +9896,7 @@ export const getAdminKpiCockpit = functions
                         'onboarding:first_multi_agent_success',
                         'billing:subscription_active',
                         ${MODEL_CONNECT_ANCHOR_EVENTS.map((e) => `'${e}'`).join(
-                          ",\n                        ",
+                          ",\n                        "
                         )})${ex.clause}
       )
       SELECT
@@ -10049,7 +10060,7 @@ export const getAdminKpiCockpit = functions
         phase: r.phase,
         clients: r.clients,
         events: r.events,
-      }),
+      })
     ) as CliSetupStepRow[];
     const cliSummary = buildCliSetupSummary(cliRows);
     const connect = cliSummary.find((s) => s.step === "connect");
@@ -10077,7 +10088,7 @@ export const getAdminKpiCockpit = functions
       })),
       cliSetupRows: cliRows,
       cliFailReasonRows: (cliFailRows as Array<Record<string, unknown>>).map(
-        (r) => ({ key: r.key, count: r.count }),
+        (r) => ({ key: r.key, count: r.count })
       ),
       demo: {
         startedClients: demoConsentRow.demo_started_clients,
@@ -10418,7 +10429,7 @@ export const getAdminModelSummary = functions.https.onCall(
         totalTokens: toNumber(r.totalTokens as number | string | undefined),
         cost: toNumber(r.cost as number | string | undefined),
         count: toNumber(r.n as number | string | undefined),
-      }),
+      })
     );
 
     const modelRoleStats = (
@@ -10474,31 +10485,31 @@ export const getAdminModelSummary = functions.https.onCall(
       // 일별 × 모델(기간별 분해) — 상위 6종 + '그 외'로 접되 총합은 보존한다.
       costByDayModel: buildCostByDayModel(
         costByDayModelRows as CostByDayModelSourceRow[],
-        6,
+        6
       ),
       // ★하위모델 분해(하네스 → 구체 모델).
       modelBreakdown: buildModelBreakdown(
         harnessBridgeRows as ModelBridgeSourceRow[],
-        harnessAgentRows as HarnessAgentRow[],
+        harnessAgentRows as HarnessAgentRow[]
       ),
       modelRoleStats,
       outcomeByModel,
       routing: {
         bySelectedModel: foldDistribution(
           routingSelectedRows as Array<Record<string, unknown>>,
-          "key",
+          "key"
         ),
         byDecisionReason: foldDistribution(
           routingReasonRows as Array<Record<string, unknown>>,
-          "key",
+          "key"
         ),
         byReuseVsSpawn: foldDistribution(
           routingReuseRows as Array<Record<string, unknown>>,
-          "key",
+          "key"
         ),
         byModelSelectionMode: foldDistribution(
           routingModeRows as Array<Record<string, unknown>>,
-          "key",
+          "key"
         ),
         scoreBuckets: (
           routingScoreBucketRows as Array<Record<string, unknown>>
@@ -10510,7 +10521,7 @@ export const getAdminModelSummary = functions.https.onCall(
         })),
       },
     };
-  },
+  }
 );
 
 /**
@@ -10593,7 +10604,7 @@ export const getAdminReleaseHealth = functions
       },
       ...buildReleaseHealth(
         versionRows as ReleaseVersionSourceRow[],
-        adoptionRows as ReleaseAdoptionSourceRow[],
+        adoptionRows as ReleaseAdoptionSourceRow[]
       ),
     };
   });
@@ -10653,7 +10664,7 @@ const DRILLDOWN_SCOPES = [
   "segment:provider",
 ] as const;
 
-type DrilldownScope = (typeof DRILLDOWN_SCOPES)[number];
+type DrilldownScope = typeof DRILLDOWN_SCOPES[number];
 
 function parseDrilldownScope(data: unknown): DrilldownScope {
   const raw = (data as { scope?: unknown } | null | undefined)?.scope;
@@ -10661,7 +10672,7 @@ function parseDrilldownScope(data: unknown): DrilldownScope {
   if (!(DRILLDOWN_SCOPES as readonly string[]).includes(s)) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      `scope must be one of: ${DRILLDOWN_SCOPES.join(", ")}`,
+      `scope must be one of: ${DRILLDOWN_SCOPES.join(", ")}`
     );
   }
   return s as DrilldownScope;
@@ -10707,7 +10718,7 @@ export const getAdminDrilldown = functions.https.onCall(
     // 파라미터를 섞어 보내지 않기 위함.
     const runQuery = async (
       query: string,
-      extra: Record<string, unknown>,
+      extra: Record<string, unknown>
     ): Promise<Array<Record<string, unknown>>> => {
       const candidates: Record<string, unknown> = {
         ...(date != null ? { date } : {}),
@@ -10981,7 +10992,7 @@ export const getAdminDrilldown = functions.https.onCall(
             createdMs,
             canceledMs,
             periodEndMs,
-            dayEndMs - 1,
+            dayEndMs - 1
           )
         ) {
           activeAtEnd++;
@@ -11061,8 +11072,8 @@ export const getAdminDrilldown = functions.https.onCall(
           scope === "segment:plan"
             ? plan
             : scope === "segment:status"
-              ? status
-              : provider;
+            ? status
+            : provider;
         if (field !== key) continue;
 
         matched++;
@@ -11102,8 +11113,8 @@ export const getAdminDrilldown = functions.https.onCall(
         scope === "segment:plan"
           ? "플랜"
           : scope === "segment:status"
-            ? "상태"
-            : "결제수단";
+          ? "상태"
+          : "결제수단";
 
       return {
         ...base,
@@ -11207,7 +11218,7 @@ export const getAdminDrilldown = functions.https.onCall(
                 {
                   label: "평균 완료시간",
                   value: toNumber(
-                    o.avgDurationMs as number | string | undefined,
+                    o.avgDurationMs as number | string | undefined
                   ),
                   format: "duration" as DrilldownFormat,
                 },
@@ -11356,7 +11367,7 @@ export const getAdminDrilldown = functions.https.onCall(
       trendLabel: "일별 비용 추이",
       trendFormat: "cost",
     };
-  },
+  }
 );
 
 // ═══════════════════════════════════════════════════════════════════
@@ -11379,7 +11390,7 @@ function isRealSignupUser(user: admin.auth.UserRecord): boolean {
 }
 
 function marketingContactRef(
-  contactId: string,
+  contactId: string
 ): admin.firestore.DocumentReference {
   return db.collection(MARKETING_CONTACTS_COLLECTION).doc(contactId);
 }
@@ -11441,7 +11452,7 @@ export interface MarketingContactUpsertResult {
  *    키 설정 후 백필 재실행으로 채움).
  */
 export async function upsertMarketingContact(
-  input: MarketingContactUpsertInput,
+  input: MarketingContactUpsertInput
 ): Promise<MarketingContactUpsertResult> {
   const normalized = normalizeMarketingEmail(input.email);
   if (!normalized || !normalized.includes("@")) {
@@ -11464,7 +11475,7 @@ export async function upsertMarketingContact(
       pending: input.markPending,
       revoke: input.revokeConsent,
     },
-    admin.firestore.FieldValue.serverTimestamp(),
+    admin.firestore.FieldValue.serverTimestamp()
   );
   const consent = merged.consent;
   const consentGranted = merged.event?.type === "granted";
@@ -11501,7 +11512,7 @@ export async function upsertMarketingContact(
   const founderStatus =
     input.founderStatus !== undefined
       ? input.founderStatus
-      : (existing?.founderStatus ?? null);
+      : existing?.founderStatus ?? null;
   const subscription: ContactSubscription = input.subscription ??
     existing?.subscription ?? {
       plan: null,
@@ -11567,8 +11578,8 @@ export async function upsertMarketingContact(
         console.warn(
           "[marketing-contacts] consent_events 기록 실패:",
           contactId.slice(0, 8),
-          err,
-        ),
+          err
+        )
       );
   }
 
@@ -11587,19 +11598,19 @@ export async function upsertMarketingContact(
  * 게이트 조회 실패도 발송 불가로 처리한다(오발송보다 미발송이 낫다).
  */
 async function marketingEmailGate(
-  email: string,
+  email: string
 ): Promise<{ ok: boolean; reason: string }> {
   try {
     const snap = await marketingContactRef(contactIdForEmail(email)).get();
     const verdict = isEmailable(
-      snap.exists ? (snap.data() as MarketingContactDoc) : null,
+      snap.exists ? (snap.data() as MarketingContactDoc) : null
     );
     return { ok: verdict.ok, reason: verdict.reason };
   } catch (err) {
     console.warn(
       "[marketing-contacts] 게이트 조회 실패 — 발송 차단:",
       maskEmailForLog(email),
-      err,
+      err
     );
     return { ok: false, reason: "gate_error" };
   }
@@ -11620,7 +11631,7 @@ function marketingEmailDelivery(email: string): {
   const url = buildUnsubscribeUrl(
     FUNCTIONS_BASE_URL,
     contactId,
-    MARKETING_UNSUB_SECRET,
+    MARKETING_UNSUB_SECRET
   );
   return {
     headers: {
@@ -11635,7 +11646,7 @@ function marketingEmailDelivery(email: string): {
 /** 마케팅 메일 본문에 수신거부 푸터를 덧붙인다(HTML 은 </body> 직전 삽입 시도). */
 function withUnsubscribeFooter(
   content: FounderEmailContent,
-  delivery: { footerHtml: string; footerText: string },
+  delivery: { footerHtml: string; footerText: string }
 ): FounderEmailContent {
   const html = content.html.includes("</body>")
     ? content.html.replace("</body>", `${delivery.footerHtml}</body>`)
@@ -11669,7 +11680,7 @@ export const syncMarketingContactOnAuthCreate = functions.auth
       console.warn(
         "[marketing-contacts] auth onCreate 훅 실패:",
         user.uid,
-        err,
+        err
       );
     }
   });
@@ -11696,7 +11707,7 @@ export const syncMarketingConsentOnUserWrite = functions.firestore
       if (!change.after.exists) return; // 삭제는 미러하지 않음(감사 이력 보존)
       const action = decideMarketingConsentSync(
         change.before.exists ? (change.before.data() as UserDocRaw) : null,
-        change.after.data() as UserDocRaw,
+        change.after.data() as UserDocRaw
       );
       if (action.kind === "none") return;
 
@@ -11758,7 +11769,7 @@ export const getMyMarketingConsentStatus = functions.https.onCall(
     if (!uid) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
     // 이메일은 Auth 를 SoT 로 삼는다(훅 1b 와 동일). custom-token 에이전트
@@ -11777,7 +11788,7 @@ export const getMyMarketingConsentStatus = functions.https.onCall(
       });
       throw new functions.https.HttpsError(
         "unavailable",
-        "마케팅 동의 상태를 확인할 수 없습니다.",
+        "마케팅 동의 상태를 확인할 수 없습니다."
       );
     }
     if (!isRealSignupUser(user)) {
@@ -11796,13 +11807,13 @@ export const getMyMarketingConsentStatus = functions.https.onCall(
       });
       throw new functions.https.HttpsError(
         "unavailable",
-        "마케팅 동의 상태를 확인할 수 없습니다.",
+        "마케팅 동의 상태를 확인할 수 없습니다."
       );
     }
 
     try {
       return marketingConsentStatusResponse(
-        snap.exists ? (snap.data() as Partial<MarketingContactDoc>) : null,
+        snap.exists ? (snap.data() as Partial<MarketingContactDoc>) : null
       );
     } catch (err) {
       console.warn("[getMyMarketingConsentStatus] contact view failed", {
@@ -11813,10 +11824,10 @@ export const getMyMarketingConsentStatus = functions.https.onCall(
       });
       throw new functions.https.HttpsError(
         "data-loss",
-        "마케팅 동의 상태 데이터 형식이 올바르지 않습니다.",
+        "마케팅 동의 상태 데이터 형식이 올바르지 않습니다."
       );
     }
-  },
+  }
 );
 
 // ─── write 훅 2: waitlist 신청 → 컨택트 upsert ───────────────────────
@@ -11877,8 +11888,8 @@ export const syncMarketingContactOnFounderWrite = functions.firestore
         typeof fd.status === "string"
           ? fd.status
           : fd.accessGrantedAt
-            ? "selected"
-            : "pending";
+          ? "selected"
+          : "pending";
       await upsertMarketingContact({
         email,
         source: "founder",
@@ -11890,7 +11901,7 @@ export const syncMarketingContactOnFounderWrite = functions.firestore
       console.warn(
         "[marketing-contacts] founders 훅 실패:",
         context.params.email,
-        err,
+        err
       );
     }
   });
@@ -11927,7 +11938,7 @@ export const syncMarketingContactOnSubscriptionWrite = functions.firestore
       console.warn(
         "[marketing-contacts] subscriptions 훅 실패:",
         context.params.uid,
-        err,
+        err
       );
     }
   });
@@ -11948,12 +11959,12 @@ export const backfillMarketingContacts = functions.https.onCall(
     if (!dryRun && !parseEncKey(MARKETING_EMAIL_ENC_KEY)) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "MARKETING_EMAIL_ENC_KEY(base64 32B)가 설정돼야 실적재 가능 — 이메일은 암호화 저장만 허용",
+        "MARKETING_EMAIL_ENC_KEY(base64 32B)가 설정돼야 실적재 가능 — 이메일은 암호화 저장만 허용"
       );
     }
     if (!MARKETING_UNSUB_SECRET) {
       console.warn(
-        "[marketing-backfill] MARKETING_UNSUB_SECRET 미설정 — unsubscribe tokenHash 없이 적재됨(시크릿 설정 후 재실행 권장)",
+        "[marketing-backfill] MARKETING_UNSUB_SECRET 미설정 — unsubscribe tokenHash 없이 적재됨(시크릿 설정 후 재실행 권장)"
       );
     }
 
@@ -12002,12 +12013,12 @@ export const backfillMarketingContacts = functions.https.onCall(
       const chunk = realUsers.slice(i, i + USER_CONSENT_READ_CHUNK);
       if (chunk.length === 0) continue;
       const snaps = await db.getAll(
-        ...chunk.map((u) => db.collection("users").doc(u.uid)),
+        ...chunk.map((u) => db.collection("users").doc(u.uid))
       );
       snaps.forEach((snap, idx) => {
         if (!snap.exists) return;
         const consent = backfillConsentGrantFromUserDoc(
-          snap.data() as UserDocRaw,
+          snap.data() as UserDocRaw
         );
         if (consent) explicitConsentByUid.set(chunk[idx].uid, consent);
       });
@@ -12136,8 +12147,8 @@ export const backfillMarketingContacts = functions.https.onCall(
           typeof fd.status === "string"
             ? fd.status
             : fd.accessGrantedAt
-              ? "selected"
-              : "pending",
+            ? "selected"
+            : "pending",
         actor: "backfill",
       });
     }
@@ -12160,10 +12171,10 @@ export const backfillMarketingContacts = functions.https.onCall(
     }
 
     console.log(
-      `[marketing-backfill] done: unique=${stats.uniqueEmails} created=${stats.created} updated=${stats.updated} granted=${stats.consentGranted} pending=${stats.consentPending}`,
+      `[marketing-backfill] done: unique=${stats.uniqueEmails} created=${stats.created} updated=${stats.updated} granted=${stats.consentGranted} pending=${stats.consentPending}`
     );
     return stats;
-  },
+  }
 );
 
 // ─── one-click unsubscribe (RFC 8058) ────────────────────────────────
@@ -12187,22 +12198,22 @@ export const unsubscribeMarketingEmail = functions.https.onRequest(
           .status(400)
           .send(
             UNSUB_PAGE(
-              '<h1 style="font-size:20px">링크가 유효하지 않습니다</h1><p>수신거부 링크가 만료됐거나 잘못됐어요. team@marblo.app 으로 회신 주시면 수동으로 처리해 드립니다.</p><p style="color:#666">This unsubscribe link is invalid. Reply to team@marblo.app and we\'ll handle it manually.</p>',
-            ),
+              '<h1 style="font-size:20px">링크가 유효하지 않습니다</h1><p>수신거부 링크가 만료됐거나 잘못됐어요. team@marblo.app 으로 회신 주시면 수동으로 처리해 드립니다.</p><p style="color:#666">This unsubscribe link is invalid. Reply to team@marblo.app and we\'ll handle it manually.</p>'
+            )
           );
         return;
       }
 
       if (req.method === "GET") {
         const action = `?c=${encodeURIComponent(
-          contactId,
+          contactId
         )}&t=${encodeURIComponent(token)}`;
         res
           .status(200)
           .send(
             UNSUB_PAGE(
-              `<h1 style="font-size:20px">마케팅 이메일 수신거부</h1><p>버튼을 누르면 마블로의 마케팅 이메일을 더 이상 받지 않습니다. (서비스·결제 관련 필수 안내는 계속 발송될 수 있어요.)</p><form method="POST" action="${action}"><button type="submit" style="background:#111;color:#fff;border:none;border-radius:8px;padding:12px 24px;font-size:15px;cursor:pointer">수신거부 / Unsubscribe</button></form>`,
-            ),
+              `<h1 style="font-size:20px">마케팅 이메일 수신거부</h1><p>버튼을 누르면 마블로의 마케팅 이메일을 더 이상 받지 않습니다. (서비스·결제 관련 필수 안내는 계속 발송될 수 있어요.)</p><form method="POST" action="${action}"><button type="submit" style="background:#111;color:#fff;border:none;border-radius:8px;padding:12px 24px;font-size:15px;cursor:pointer">수신거부 / Unsubscribe</button></form>`
+            )
           );
         return;
       }
@@ -12235,7 +12246,7 @@ export const unsubscribeMarketingEmail = functions.https.onRequest(
               },
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             },
-            { merge: true },
+            { merge: true }
           );
           await ref
             .collection(CONSENT_EVENTS_SUBCOLLECTION)
@@ -12253,8 +12264,8 @@ export const unsubscribeMarketingEmail = functions.https.onRequest(
               console.warn(
                 "[unsubscribe] consent_events 기록 실패:",
                 contactId.slice(0, 8),
-                err,
-              ),
+                err
+              )
             );
         }
       }
@@ -12263,8 +12274,8 @@ export const unsubscribeMarketingEmail = functions.https.onRequest(
         .status(200)
         .send(
           UNSUB_PAGE(
-            '<h1 style="font-size:20px">수신거부가 완료됐습니다</h1><p>마케팅 이메일을 더 이상 보내지 않습니다. 언제든 team@marblo.app 으로 연락 주세요.</p><p style="color:#666">You\'ve been unsubscribed from Marblo marketing emails.</p>',
-          ),
+            '<h1 style="font-size:20px">수신거부가 완료됐습니다</h1><p>마케팅 이메일을 더 이상 보내지 않습니다. 언제든 team@marblo.app 으로 연락 주세요.</p><p style="color:#666">You\'ve been unsubscribed from Marblo marketing emails.</p>'
+          )
         );
     } catch (err) {
       console.warn("[unsubscribe] 처리 실패:", err);
@@ -12272,11 +12283,11 @@ export const unsubscribeMarketingEmail = functions.https.onRequest(
         .status(500)
         .send(
           UNSUB_PAGE(
-            '<h1 style="font-size:20px">일시적인 오류가 발생했습니다</h1><p>잠시 후 다시 시도하거나 team@marblo.app 으로 회신해 주세요.</p>',
-          ),
+            '<h1 style="font-size:20px">일시적인 오류가 발생했습니다</h1><p>잠시 후 다시 시도하거나 team@marblo.app 으로 회신해 주세요.</p>'
+          )
         );
     }
-  },
+  }
 );
 
 // ─── BigQuery 미러: marblo_marketing.contacts_daily (+ contacts_latest 뷰) ──
@@ -12312,11 +12323,7 @@ export async function mirrorMarketingContactsToBqInternal(): Promise<{
 
   const snap = await db.collection(MARKETING_CONTACTS_COLLECTION).get();
   const rows = snap.docs.map((d) =>
-    contactToBqRow(
-      d.id,
-      d.data() as Partial<MarketingContactDoc>,
-      snapshotDate,
-    ),
+    contactToBqRow(d.id, d.data() as Partial<MarketingContactDoc>, snapshotDate)
   );
 
   // 같은 날 재실행 멱등: 해당 파티션 선삭제 후 적재.
@@ -12341,7 +12348,7 @@ export async function mirrorMarketingContactsToBqInternal(): Promise<{
   });
 
   console.log(
-    `[marketing-bq-mirror] snapshot=${snapshotDate} rows=${rows.length}`,
+    `[marketing-bq-mirror] snapshot=${snapshotDate} rows=${rows.length}`
   );
   return { snapshotDate, rows: rows.length };
 }
@@ -12363,7 +12370,7 @@ export const mirrorMarketingContactsToBq = functions.https.onCall(
   async (_data, context) => {
     requireAdmin(context);
     return mirrorMarketingContactsToBqInternal();
-  },
+  }
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -12393,7 +12400,7 @@ const AUDIT_MERGE_SCAN_LIMIT = 200;
 const AUDIT_PROJECT_SCAN_LIMIT = 200;
 
 function auditDocs(
-  snap: FirebaseFirestore.QuerySnapshot,
+  snap: FirebaseFirestore.QuerySnapshot
 ): Array<Record<string, unknown> & { id: string }> {
   return snap.docs.map((d) => ({ ...d.data(), id: d.id }));
 }
@@ -12405,7 +12412,7 @@ function auditDocs(
  */
 async function auditQuery(
   label: string,
-  run: () => Promise<FirebaseFirestore.QuerySnapshot>,
+  run: () => Promise<FirebaseFirestore.QuerySnapshot>
 ): Promise<{
   ok: boolean;
   docs: Array<Record<string, unknown> & { id: string }>;
@@ -12416,7 +12423,7 @@ async function auditQuery(
     functions.logger.warn(
       `[getAdminProjectAudit] ${label} 조회 실패: ${
         err instanceof Error ? err.message : String(err)
-      }`,
+      }`
     );
     return { ok: false, docs: [] };
   }
@@ -12432,7 +12439,7 @@ export const getAdminProjectAudit = functions.https.onCall(
         : null;
     const timelineLimit = Math.min(
       500,
-      Math.max(20, Math.floor(Number(data?.timelineLimit) || 0) || 200),
+      Math.max(20, Math.floor(Number(data?.timelineLimit) || 0) || 200)
     );
 
     // 1) 프로젝트 목록 — 셀렉터용. 정렬은 최신 갱신순.
@@ -12441,7 +12448,7 @@ export const getAdminProjectAudit = functions.https.onCall(
         .collection("projects")
         .orderBy("updatedAt", "desc")
         .limit(AUDIT_PROJECT_SCAN_LIMIT)
-        .get(),
+        .get()
     );
     // orderBy 가 인덱스/필드 부재로 실패하면 무정렬로 한 번 더 시도한다 —
     // 정렬 실패 때문에 프로젝트 목록 자체가 비면 화면이 통째로 못 뜬다.
@@ -12449,7 +12456,7 @@ export const getAdminProjectAudit = functions.https.onCall(
       ? projectsRes.docs
       : (
           await auditQuery("projects(unordered)", () =>
-            db.collection("projects").limit(AUDIT_PROJECT_SCAN_LIMIT).get(),
+            db.collection("projects").limit(AUDIT_PROJECT_SCAN_LIMIT).get()
           )
         ).docs;
 
@@ -12480,21 +12487,21 @@ export const getAdminProjectAudit = functions.https.onCall(
             .collection("tasks")
             .where("projectId", "==", projectId)
             .limit(AUDIT_TASK_SCAN_LIMIT)
-            .get(),
+            .get()
         ),
         auditQuery("agents", () =>
           db
             .collection("agents")
             .where("projectId", "==", projectId)
             .limit(AUDIT_AGENT_SCAN_LIMIT)
-            .get(),
+            .get()
         ),
         auditQuery("missions", () =>
           db
             .collection("missions")
             .where("projectId", "==", projectId)
             .limit(AUDIT_MISSION_SCAN_LIMIT)
-            .get(),
+            .get()
         ),
         auditQuery("audit_logs", () =>
           db
@@ -12502,14 +12509,14 @@ export const getAdminProjectAudit = functions.https.onCall(
             .where("projectId", "==", projectId)
             .orderBy("createdAt", "desc")
             .limit(AUDIT_LEDGER_SCAN_LIMIT)
-            .get(),
+            .get()
         ),
         auditQuery("merge_history", () =>
           db
             .collection("merge_history")
             .where("projectId", "==", projectId)
             .limit(AUDIT_MERGE_SCAN_LIMIT)
-            .get(),
+            .get()
         ),
       ]);
 
@@ -12538,9 +12545,9 @@ export const getAdminProjectAudit = functions.https.onCall(
             .collection("activities")
             .where("taskId", "in", chunk)
             .limit(AUDIT_ACTIVITY_SCAN_LIMIT)
-            .get(),
-        ),
-      ),
+            .get()
+        )
+      )
     );
     const activities = activityResults.flatMap((r) => r.docs);
 
@@ -12570,21 +12577,355 @@ export const getAdminProjectAudit = functions.https.onCall(
     if (failed.length > 0) {
       result.notes.push(
         `일부 소스를 읽지 못했다: ${failed.join(
-          ", ",
-        )}. 해당 칸은 비어 보일 수 있다(0 이 아니라 '모름').`,
+          ", "
+        )}. 해당 칸은 비어 보일 수 있다(0 이 아니라 '모름').`
       );
     }
     if (taskIds.length > activityTaskIds.length) {
       result.notes.push(
-        `활동 타임라인은 최근 갱신 티켓 ${activityTaskIds.length}건 기준이다(전체 ${taskIds.length}건).`,
+        `활동 타임라인은 최근 갱신 티켓 ${activityTaskIds.length}건 기준이다(전체 ${taskIds.length}건).`
       );
     }
     if (tasksRes.docs.length >= AUDIT_TASK_SCAN_LIMIT) {
       result.notes.push(
-        `티켓 스캔이 상한 ${AUDIT_TASK_SCAN_LIMIT}건에서 잘렸다 — 요약 수치는 이 표본 기준이다.`,
+        `티켓 스캔이 상한 ${AUDIT_TASK_SCAN_LIMIT}건에서 잘렸다 — 요약 수치는 이 표본 기준이다.`
       );
     }
 
     return result;
-  },
+  }
 );
+
+// ============================================================================
+// 국가·채널 어트리뷰션 (익명 GA4 수도아이디) — 티켓 rPVkmOKG
+// ============================================================================
+//
+// 설계: v3/docs/ga4-country-funnel-attribution-2026-08-10.md (#901 후속).
+//
+// 두 축이 여기 있다:
+//   1) `linkInstallAttribution` — 웹(marblo.app/<locale>/link)이 앱의 익명 설치
+//      ID 와 브라우저의 GA4 client_id 를 묶어 보내는 **미인증** 콜러블.
+//   2) `getAdminCountryFunnel`  — 두 리전에 각각 쿼리를 던지고 결과를 **메모리
+//      에서** 조인해 국가·채널 퍼널을 만드는 어드민 콜러블.
+//
+// ★리전 블로커(#901 §2)를 여기서 넘긴다. BigQuery 는 리전이 다른 데이터셋을 한
+//   쿼리에서 조인하지 못하지만, 쿼리를 두 번 던져 애플리케이션에서 합치는 건
+//   막지 않는다. 현 볼륨(31일 방문자 ~554, 다운로드 ~39)에선 이게 데이터셋
+//   복제/전송을 세팅하는 것보다 싸고, 무엇보다 **사장님 콘솔 액션 없이 오늘
+//   돌아간다**. 규모가 커지면(§WEB_VISITOR_LIMIT 절단이 보이기 시작하면)
+//   #901 §2-3 의 Scheduled Query + Dataset Copy 로 승급한다.
+
+const BQ_ATTRIBUTION_TABLE = "install_attribution";
+
+/** GA4 BigQuery export 데이터셋/리전. 링크 재생성 시 env 로만 바꾼다. */
+const GA4_BQ_DATASET =
+  process.env.GA4_BQ_DATASET?.trim() || "analytics_543991508";
+const GA4_BQ_LOCATION =
+  process.env.GA4_BQ_LOCATION?.trim() || "asia-northeast3";
+
+/**
+ * 메모리 조인이 감당하는 GA4 방문자 상한. 넘으면 결과를 자르고 그 사실을
+ * 응답 note 로 **밝힌다** — 조용히 잘린 표는 "전부 봤다"로 읽히기 때문이다.
+ */
+const WEB_VISITOR_LIMIT = 200000;
+
+let attributionTableReady = false;
+
+/** 어트리뷰션 테이블을 최초 1회 생성한다(trainingCapture 와 같은 패턴). */
+async function ensureAttributionTable(): Promise<void> {
+  if (attributionTableReady) return;
+  const dataset = bigquery.dataset(BQ_DATASET);
+  const table = dataset.table(BQ_ATTRIBUTION_TABLE);
+  const [exists] = await table.exists();
+  if (!exists) {
+    await table.create({
+      schema: INSTALL_ATTRIBUTION_SCHEMA as unknown as {
+        name: string;
+        type: string;
+      }[],
+      timePartitioning: { type: "DAY", field: "linkedAt" },
+      clustering: { fields: ["gaClientId"] },
+    });
+    functions.logger.info(
+      "[installAttribution] created install_attribution table"
+    );
+  }
+  attributionTableReady = true;
+}
+
+/**
+ * 웹→앱 익명 어트리뷰션 링크백. **미인증**이다 — 다운로드 직후 최초 실행 시점의
+ * 사용자는 아직 로그인하지 않았고, 로그인을 요구하면 측정하려는 대상(설치 완주)을
+ * 측정 행위가 파괴한다. 대신 IP 레이트리밋 + 설치당 1회 + 엄격한 입력 검증으로
+ * 막는다.
+ *
+ * ★저장하지 않는 것: uid / 이메일 / 요청 IP. IP 는 레이트리밋 키로만 쓴다.
+ * ★설치당 1회: Firestore `installAttributions/{installId}` 를 create 로 잡아
+ *   선착 1건만 BigQuery 에 적재한다(재방문 시 채널이 덮이지 않게 — first-touch).
+ */
+export const linkInstallAttribution = functions.https.onCall(
+  async (data, context) => {
+    const ip = extractIp(context.rawRequest);
+    const check = await enforceRateLimit(`attr:ip:${ip}`, ATTRIBUTION_RULES_IP);
+    if (!check.allowed) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        `Too many attempts. Try again in ${check.retryAfter}s.`
+      );
+    }
+
+    const parsed = parseLinkInstallRequest(data, new Date());
+    if (!parsed.ok) {
+      // 사유는 코드로만 남긴다 — 입력값 원문을 로그에 남기지 않는다.
+      functions.logger.warn("[installAttribution] rejected", {
+        reason: parsed.reason,
+      });
+      throw new functions.https.HttpsError("invalid-argument", parsed.reason);
+    }
+    const row = parsed.row;
+
+    // 설치당 1회 게이트. create 는 문서가 이미 있으면 ALREADY_EXISTS 로 던진다.
+    const docRef = db.collection("installAttributions").doc(row.installId);
+    try {
+      await docRef.create({
+        linkedAt: admin.firestore.Timestamp.fromDate(new Date(row.linkedAt)),
+        // ★조인키(gaClientId)를 Firestore 에 이중 보관하지 않는다 — 존재 여부만.
+        hasGaClientId: row.gaClientId !== null,
+        platform: row.platform,
+        appVersion: row.appVersion,
+        linkSource: row.linkSource,
+      });
+    } catch (e) {
+      const code = (e as { code?: number | string }).code;
+      // 6 = ALREADY_EXISTS(gRPC). 재실행/새로고침은 정상 흐름이므로 성공 응답.
+      if (code === 6 || code === "already-exists") {
+        return { ok: true, alreadyLinked: true };
+      }
+      throw e;
+    }
+
+    try {
+      await ensureAttributionTable();
+      await bigquery
+        .dataset(BQ_DATASET)
+        .table(BQ_ATTRIBUTION_TABLE)
+        .insert([row]);
+    } catch (e) {
+      // BQ 적재가 실패해도 Firestore 마커는 남아 재시도가 막힌다 → 마커를 되돌려
+      // 다음 시도에 다시 적재될 수 있게 한다(조용한 영구 유실 방지).
+      await docRef.delete().catch(() => undefined);
+      functions.logger.error("[installAttribution] bigquery insert failed", {
+        message: safeAnalyticsErrorMessage(e),
+      });
+      throw new functions.https.HttpsError("internal", "attribution_failed");
+    }
+
+    return { ok: true, alreadyLinked: false };
+  }
+);
+
+/**
+ * 어드민 국가·채널 퍼널. 두 리전 쿼리 → 메모리 조인.
+ *
+ * 한쪽(GA4)이 실패해도 나머지는 렌더된다 — 부분 실패를 0 으로 표시하지 않고
+ * note 와 `webRegionError` 로 드러낸다.
+ */
+export const getAdminCountryFunnel = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const rangeDays = parseAnalyticsDays(data);
+    const includeAdmin = parseIncludeAdmin(data);
+    const adminClientIds = includeAdmin
+      ? []
+      : await resolveAdminClientIds(rangeDays);
+
+    // GA4 데이터셋 이름은 SQL 에 그대로 박히므로 식별자 화이트리스트를 강제한다.
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(GA4_BQ_DATASET)) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "GA4_BQ_DATASET is not a valid BigQuery identifier"
+      );
+    }
+
+    // ── (1) 웹측: GA4 export (asia-northeast3) ──────────────────────────────
+    // 방문자 1명 = 1행. 국가는 **최초 이벤트 시점**의 값을 쓰고(여행/VPN 로 국가가
+    // 바뀌어도 유입국가는 하나여야 한다), traffic_source 는 GA4 에서 유저 단위
+    // 최초획득 값이라 ANY_VALUE 로 충분하다.
+    const webQuery = `
+      WITH ev AS (
+        SELECT
+          user_pseudo_id,
+          event_name,
+          event_timestamp,
+          geo.country            AS country,
+          traffic_source.source  AS source,
+          traffic_source.medium  AS medium,
+          traffic_source.name    AS campaign
+        FROM \`marblo-2253d.${GA4_BQ_DATASET}.events_*\`
+        WHERE _TABLE_SUFFIX BETWEEN
+                FORMAT_DATE('%Y%m%d',
+                  DATE_SUB(CURRENT_DATE('Asia/Seoul'), INTERVAL @days DAY))
+              AND FORMAT_DATE('%Y%m%d', CURRENT_DATE('Asia/Seoul'))
+      )
+      SELECT
+        user_pseudo_id AS gaClientId,
+        ARRAY_AGG(country IGNORE NULLS ORDER BY event_timestamp LIMIT 1)
+          [SAFE_OFFSET(0)] AS country,
+        ANY_VALUE(source)   AS source,
+        ANY_VALUE(medium)   AS medium,
+        ANY_VALUE(campaign) AS campaign,
+        COUNTIF(event_name = 'download') AS downloads
+      FROM ev
+      GROUP BY gaClientId
+      LIMIT ${WEB_VISITOR_LIMIT}
+    `;
+
+    // ── (2) 앱측: marblo_telemetry (US) ─────────────────────────────────────
+    // 행 키는 **익명 설치 ID**(events.userId)다. accountUserId 폴백을 쓰지 않는
+    // 이유: 이 퍼널의 조인 축은 설치이고, uid 를 섞으면 익명 축이 깨진다
+    // (티켓 woXp2c70 — 앱 uid 제거와 정합).
+    const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
+    const attrTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_ATTRIBUTION_TABLE}\``;
+    const connected = modelConnectedPredicateSql({
+      event: "event",
+      step: "JSON_VALUE(metadata, '$.step')",
+      phase: "JSON_VALUE(metadata, '$.phase')",
+      verdict: "JSON_VALUE(metadata, '$.verdict')",
+    });
+    // 익명 테이블 두 곳에 같은 제외 목록을 쓰되 컬럼명이 다르다
+    // (events.userId vs install_attribution.installId).
+    const excludeClause =
+      adminClientIds.length > 0
+        ? " AND (userId IS NULL OR userId NOT IN UNNEST(@excludeClients))"
+        : "";
+    const excludeAttrClause =
+      adminClientIds.length > 0
+        ? " AND installId NOT IN UNNEST(@excludeClients)"
+        : "";
+
+    const appQuery = `
+      WITH att AS (
+        SELECT
+          installId,
+          ARRAY_AGG(gaClientId IGNORE NULLS ORDER BY linkedAt LIMIT 1)
+            [SAFE_OFFSET(0)] AS gaClientId,
+          ARRAY_AGG(utmSource IGNORE NULLS ORDER BY linkedAt LIMIT 1)
+            [SAFE_OFFSET(0)] AS utmSource,
+          ARRAY_AGG(utmMedium IGNORE NULLS ORDER BY linkedAt LIMIT 1)
+            [SAFE_OFFSET(0)] AS utmMedium,
+          ARRAY_AGG(utmCampaign IGNORE NULLS ORDER BY linkedAt LIMIT 1)
+            [SAFE_OFFSET(0)] AS utmCampaign,
+          ARRAY_AGG(referrerHost IGNORE NULLS ORDER BY linkedAt LIMIT 1)
+            [SAFE_OFFSET(0)] AS referrerHost
+        FROM ${attrTable}
+        WHERE linkedAt >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+          ${excludeAttrClause}
+        GROUP BY installId
+      ),
+      ev AS (
+        SELECT
+          userId AS installId,
+          MAX(IF(event = 'app:first_run', 1, 0))       AS firstRun,
+          MAX(IF(${connected}, 1, 0))                  AS modelConnected,
+          MAX(IF(event = 'onboarding:first_multi_agent_success'
+                   AND JSON_VALUE(metadata, '$.withinTargetWindowFromConnect')
+                       = 'true', 1, 0))                AS within10m
+        FROM ${eventsTable}
+        WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+          AND userId IS NOT NULL${excludeClause}
+        GROUP BY installId
+      )
+      SELECT
+        COALESCE(att.installId, ev.installId) AS installId,
+        att.gaClientId,
+        att.utmSource,
+        att.utmMedium,
+        att.utmCampaign,
+        att.referrerHost,
+        IFNULL(ev.firstRun, 0)       AS firstRun,
+        IFNULL(ev.modelConnected, 0) AS modelConnected,
+        IFNULL(ev.within10m, 0)      AS within10m
+      FROM att
+      FULL OUTER JOIN ev ON att.installId = ev.installId
+      -- 모집단 = 이번 창의 **신규 설치**(app:first_run) ∪ **링크백이 도달한 설치**.
+      -- 후자를 포함하는 게 중요하다: 링크백은 로그인 없이도 도달하는 반면
+      -- app:first_run 은 "다음 성공 로그인"까지 flush 되지 않는다(#901 §1-2) —
+      -- 즉 링크백이 그 사각을 일부 메운다.
+      WHERE att.installId IS NOT NULL OR ev.firstRun = 1
+    `;
+
+    const params: Record<string, unknown> = { days: rangeDays };
+    if (adminClientIds.length > 0) params.excludeClients = adminClientIds;
+
+    const [webRes, appRes] = await Promise.allSettled([
+      bigquery.query({
+        query: webQuery,
+        params: { days: rangeDays },
+        location: GA4_BQ_LOCATION,
+      }),
+      bigquery.query({ query: appQuery, params, location: BQ_LOCATION }),
+    ]);
+
+    const webRows =
+      webRes.status === "fulfilled"
+        ? (webRes.value[0] as BigQueryRows)
+        : ([] as BigQueryRows);
+    const appRows =
+      appRes.status === "fulfilled"
+        ? (appRes.value[0] as BigQueryRows)
+        : ([] as BigQueryRows);
+
+    const funnel = buildCountryFunnel(
+      webRows as unknown as WebVisitorRow[],
+      appRows as unknown as InstallRow[]
+    );
+
+    const notes = [...funnel.notes];
+    const webRegionError =
+      webRes.status === "rejected"
+        ? safeAnalyticsErrorMessage(webRes.reason)
+        : null;
+    const appRegionError =
+      appRes.status === "rejected"
+        ? safeAnalyticsErrorMessage(appRes.reason)
+        : null;
+    if (webRegionError) {
+      notes.push(
+        `GA4(${GA4_BQ_LOCATION}) 조회 실패 — 방문·다운로드 칸은 '0' 이 아니라 '모름'이다.`
+      );
+    }
+    if (appRegionError) {
+      notes.push(
+        `앱 텔레메트리(${BQ_LOCATION}) 조회 실패 — 설치 이후 칸은 '0' 이 아니라 '모름'이다.`
+      );
+    }
+    if (webRows.length >= WEB_VISITOR_LIMIT) {
+      notes.push(
+        `GA4 방문자가 상한 ${WEB_VISITOR_LIMIT.toLocaleString()}명에서 잘렸다 — 표의 방문·다운로드는 이 표본 기준이다. 스케줄 쿼리 + Dataset Copy 로 승급할 시점이다.`
+      );
+    }
+    notes.push(
+      "GA4 일별 export 는 D+1 이다 — 오늘·어제 다운로드는 아직 반영되지 않았을 수 있다."
+    );
+
+    return {
+      rangeDays,
+      includeAdmin,
+      generatedAt: new Date().toISOString(),
+      join: {
+        // 조인은 SQL 이 아니라 여기서 일어난다는 사실을 화면이 말할 수 있게.
+        strategy: "in_memory_cross_region",
+        webRegion: GA4_BQ_LOCATION,
+        appRegion: BQ_LOCATION,
+        webVisitors: webRows.length,
+        webRegionError,
+        appRegionError,
+      },
+      byCountry: funnel.byCountry,
+      byChannel: funnel.byChannel,
+      totals: funnel.totals,
+      coverage: funnel.coverage,
+      notes,
+    };
+  });

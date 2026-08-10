@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AuthProvider } from "./auth";
 import { FirstRunFlow } from "./components/onboarding/FirstRunFlow";
 import { isFirstRunFlowPending } from "./lib/firstRunFlow";
+import { notifyInstallAttribution } from "./services/installAttribution";
 import { useAuth } from "./hooks/useAuth";
 import { LoginPage } from "./auth";
 import { Layout } from "./components/Layout";
@@ -50,7 +51,7 @@ import type { User } from "./types/user";
 if (import.meta.env.VITE_DISABLE_TELEMETRY === "1") {
   setTelemetryEnabled(false, { persist: false });
   console.warn(
-    "[DIAG] Telemetry DISABLED — no logTelemetryBatch/logHeartbeat calls",
+    "[DIAG] Telemetry DISABLED — no logTelemetryBatch/logHeartbeat calls"
   );
 }
 
@@ -144,14 +145,14 @@ if (PERFORMANCE_DEBUG_ENABLED && typeof PerformanceObserver !== "undefined") {
     const p95 = dur[Math.floor(dur.length * 0.95)] ?? dur[dur.length - 1];
     const max = dur[dur.length - 1];
     const avgInDel = (inDel.reduce((a, b) => a + b, 0) / inDel.length).toFixed(
-      0,
+      0
     );
     console.warn(
       `[INP-5s] count=${samples.length} p50=${p50?.toFixed(
-        0,
+        0
       )}ms p95=${p95?.toFixed(0)}ms max=${max?.toFixed(
-        0,
-      )}ms | avgInputDelay=${avgInDel}ms`,
+        0
+      )}ms | avgInputDelay=${avgInDel}ms`
     );
   }, 5000);
 
@@ -166,7 +167,7 @@ if (PERFORMANCE_DEBUG_ENABLED && typeof PerformanceObserver !== "undefined") {
       console.warn(
         `[MAIN-BUSY] ${drift.toFixed(0)}ms drift (target 100ms, actual ${(
           now - lastSched
-        ).toFixed(0)}ms)`,
+        ).toFixed(0)}ms)`
       );
     }
     lastSched = now;
@@ -217,8 +218,8 @@ if (PERFORMANCE_DEBUG_ENABLED && typeof PerformanceObserver !== "undefined") {
       if (total > 5) {
         console.warn(
           `[IPC-FREQ] ${(elapsed / 1000).toFixed(
-            1,
-          )}s window | total=${total} | ${parts.join(" ")}`,
+            1
+          )}s window | total=${total} | ${parts.join(" ")}`
         );
       }
     }, 1000);
@@ -239,10 +240,10 @@ function AppContent() {
   const subscribeToProjects = useProjectStore((s) => s.subscribeToProjects);
   const projectsHydrated = useProjectStore((s) => s.projectsHydrated);
   const setAutoSelectFirstProject = useProjectStore(
-    (s) => s.setAutoSelectFirstProject,
+    (s) => s.setAutoSelectFirstProject
   );
   const subscribeToSubscription = useSubscriptionStore(
-    (s) => s.subscribeToSubscription,
+    (s) => s.subscribeToSubscription
   );
   const projects = useProjectStore((s) => s.projects);
   const workspaceMode = useWorkspaceModeStore((s) => s.enabled);
@@ -262,7 +263,7 @@ function AppContent() {
         .filter(Boolean)
         .sort()
         .join(","),
-    [projects],
+    [projects]
   );
 
   // DIAGNOSTIC TEST: Firebase realtime listeners suspected of causing typing
@@ -285,7 +286,7 @@ function AppContent() {
 
     if (!FIREBASE_LISTENERS_ENABLED) {
       console.warn(
-        "[DIAG] Firebase listeners DISABLED via VITE_DISABLE_FB_LISTENERS=1 — projects/subscription will not sync",
+        "[DIAG] Firebase listeners DISABLED via VITE_DISABLE_FB_LISTENERS=1 — projects/subscription will not sync"
       );
       return;
     }
@@ -365,7 +366,7 @@ function AppContent() {
         }
         for (const candidate of pickMergedTaskCompletionCandidates(
           entries,
-          completed,
+          completed
         )) {
           void (async () => {
             try {
@@ -374,7 +375,7 @@ function AppContent() {
                 !shouldMarkMergedTaskDone(task, {
                   worktrees: useWorktreeStore.getState().worktrees,
                   busyTaskIds: buildBusyTaskIds(
-                    useAgentStore.getState().agents,
+                    useAgentStore.getState().agents
                   ),
                 })
               ) {
@@ -390,7 +391,7 @@ function AppContent() {
           })();
         }
       },
-      { projectIds, maxResults: 200 },
+      { projectIds, maxResults: 200 }
     );
     return () => unsub();
   }, [user?.uid, memberProjectIdsKey, FIREBASE_LISTENERS_ENABLED]);
@@ -443,7 +444,7 @@ function AppContent() {
         // 메인은 제출될 때마다 보내고, 첫 건만 실제로 발신된다.
         if (data.event === "onboarding:first_conversation") {
           telemetry.firstConversationObserved(
-            data.metadata as Record<string, unknown> | undefined,
+            data.metadata as Record<string, unknown> | undefined
           );
           return;
         }
@@ -456,13 +457,13 @@ function AppContent() {
         if (data.event === "onboarding:model_connected") {
           telemetry.modelConnectedObserved(
             "spawn_gate",
-            data.metadata as Record<string, unknown> | undefined,
+            data.metadata as Record<string, unknown> | undefined
           );
           return;
         }
         if (data.event === "onboarding:multi_agent_active") {
           telemetry.multiAgentActiveObserved(
-            data.metadata as Record<string, unknown> | undefined,
+            data.metadata as Record<string, unknown> | undefined
           );
           return;
         }
@@ -473,7 +474,7 @@ function AppContent() {
               taskId: typeof data.taskId === "string" ? data.taskId : undefined,
               projectId:
                 typeof data.projectId === "string" ? data.projectId : undefined,
-            },
+            }
           );
           return;
         }
@@ -604,7 +605,7 @@ function App() {
   // of a screen the user was already using. Detached pop-out windows skip it —
   // they inherit the main window's already-persisted locale and consent.
   const [firstRunPending, setFirstRunPending] = useState(
-    () => resolveDetachedView() === null && isFirstRunFlowPending(),
+    () => resolveDetachedView() === null && isFirstRunFlowPending()
   );
 
   // Fire the install's first-launch marker once, at the very first app mount
@@ -623,7 +624,16 @@ function App() {
           // AppContent's own z-50 elements and lose on DOM order, since the
           // flow is painted before AppContent.
           <div className="relative z-[100]">
-            <FirstRunFlow onComplete={() => setFirstRunPending(false)} />
+            <FirstRunFlow
+              onComplete={() => {
+                setFirstRunPending(false);
+                // ★익명 어트리뷰션 링크백(티켓 rPVkmOKG). 동의 화면을 통과한
+                // 직후에만, 설치당 1회, 기본 브라우저로 환영 페이지를 연다 —
+                // 그 페이지가 자기 GA4 쿠키를 읽어 "이 유입 → 이 설치" 를 uid
+                // 없이 잇는다. 옵트아웃 상태면 열리지 않는다.
+                notifyInstallAttribution();
+              }}
+            />
           </div>
         )}
         <AppContent />

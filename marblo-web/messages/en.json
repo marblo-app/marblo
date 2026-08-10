@@ -324,6 +324,18 @@
     "gate_pending_body": "Apply to the founder beta — once you're selected, you can download right here.",
     "gate_apply_cta": "Apply to the founder beta"
   },
+  "installLink": {
+    "badge": "Installed",
+    "title": "Marblo is installed",
+    "subtitle": "You can close this tab.\nHead back to the app and connect your AI CLI account to get started.",
+    "guide_title": "Getting started",
+    "guide_body": "A five-minute walkthrough: give the orchestrator its first instruction and watch agents pick up tickets.",
+    "prereq_title": "What you still need",
+    "prereq_body": "Agents run on your own AI CLIs (Claude Code, Codex, ...). Install and sign in to one; AI usage is billed to that account.",
+    "privacy_note": "This page anonymously records which channel brought you to Marblo. No email or account information is sent.",
+    "status_failed": "We could not record the referral, but nothing about the app is affected.",
+    "status_skipped": "This link was not opened by the app, so there is no install to record."
+  },
   "promoBar": {
     "message": "🌟 Marblo Founders — 1-month free beta · Pro 3 months for a thoughtful survey · Discord community",
     "email_placeholder": "Email address",

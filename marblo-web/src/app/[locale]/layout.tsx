@@ -23,6 +23,7 @@ import PromoBar from "@/components/PromoBar";
 import FounderSurveyGate from "@/components/FounderSurveyGate";
 import PrivacyConsentGate from "@/components/PrivacyConsentGate";
 import GoogleAnalytics from "@/components/GoogleAnalytics";
+import AttributionCapture from "@/components/AttributionCapture";
 import "../globals.css";
 
 // Self-hosted fonts (next/font/google → no runtime request to Google, no CLS).
@@ -248,6 +249,9 @@ export default async function LocaleLayout({
         <Suspense fallback={null}>
           <GoogleAnalytics />
         </Suspense>
+        {/* 최초 랜딩의 utm/referrer 를 1회 기록(first-touch). 전송은 하지 않는다 —
+            앱 설치 후 /link 가 열릴 때 한 번만 익명으로 보고된다. */}
+        <AttributionCapture />
         <NextIntlClientProvider messages={messages}>
           <PromoBar />
           <Header />

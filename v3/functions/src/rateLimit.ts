@@ -130,3 +130,14 @@ export const COUPON_RULES_IP: RateRule[] = [
   { windowSeconds: 60, max: 20 },
   { windowSeconds: 600, max: 100 },
 ];
+
+/**
+ * 설치 어트리뷰션 링크백(`linkInstallAttribution`) 한도 — 미인증 엔드포인트라
+ * IP 만으로 막는다. 정상 사용자는 설치당 1회만 호출하므로 한도는 넉넉히 낮다.
+ * 공유 NAT(사무실/학교)에서 여러 명이 같은 날 설치하는 경우를 감안해 분당 10,
+ * 10분당 40 으로 둔다.
+ */
+export const ATTRIBUTION_RULES_IP: RateRule[] = [
+  { windowSeconds: 60, max: 10 },
+  { windowSeconds: 600, max: 40 },
+];

@@ -28,6 +28,7 @@ import {
   Tag,
   Lock,
   UserCheck,
+  Globe,
 } from "lucide-react";
 
 // ── 콜러블 응답 타입 (docs/analytics-admin-callables-api.md 미러) ───────────────
@@ -639,6 +640,51 @@ const PROVIDER_COLOR: Record<string, string> = {
   founder_grant: "#9085e9",
 };
 
+// ── 국가·채널 퍼널 (getAdminCountryFunnel) ─────────────────────────────────
+// 조인키는 익명 GA4 client_id 하나이고 Firebase uid 는 쓰지 않는다(티켓
+// rPVkmOKG + woXp2c70). 서버가 GA4(서울)와 앱 텔레메트리(US)에 각각 쿼리를
+// 던져 **메모리에서** 조인한다 — BigQuery 는 리전이 다르면 한 쿼리로 못 잇는다.
+type CountryFunnelRow = {
+  key: string;
+  label: string;
+  source?: string;
+  medium?: string;
+  visitors: number;
+  downloads: number;
+  installs: number;
+  connected: number;
+  activated10m: number;
+  // 분모가 0 이면 null — "0%"(=실패)와 "모름"을 구분한다.
+  downloadRate: number | null;
+  installRate: number | null;
+  connectRate: number | null;
+  activationRate: number | null;
+  anomaly: boolean;
+};
+type CountryFunnel = {
+  rangeDays: number;
+  includeAdmin: boolean;
+  generatedAt: string;
+  join: {
+    strategy: string;
+    webRegion: string;
+    appRegion: string;
+    webVisitors: number;
+    webRegionError: string | null;
+    appRegionError: string | null;
+  };
+  byCountry: CountryFunnelRow[];
+  byChannel: CountryFunnelRow[];
+  totals: CountryFunnelRow;
+  coverage: {
+    installs: number;
+    withGaClientId: number;
+    matchedToWeb: number;
+    matchRate: number | null;
+  };
+  notes: string[];
+};
+
 // ── 포맷 헬퍼 ──────────────────────────────────────────────────────────────
 function fmtInt(n: number | undefined | null): string {
   if (n == null || !isFinite(n)) return "0";
@@ -646,6 +692,12 @@ function fmtInt(n: number | undefined | null): string {
 }
 function fmtPct(n: number | undefined | null): string {
   if (n == null || !isFinite(n)) return "0.0%";
+  return `${(n * 100).toFixed(1)}%`;
+}
+// 분모가 없어 계산 자체가 불가능한 전환율. fmtPct 와 달리 "0.0%" 로 눕히지
+// 않는다 — 그러면 "아무도 넘어가지 못했다"로 읽힌다.
+function fmtRate(n: number | undefined | null): string {
+  if (n == null || !isFinite(n)) return "—";
   return `${(n * 100).toFixed(1)}%`;
 }
 function fmtCost(n: number | undefined | null): string {
@@ -1498,6 +1550,172 @@ type Loaded<T> = { data: T | null; loading: boolean; error: string | null };
 // ── 온보딩 첫10분 퍼널 시각화 ────────────────────────────────────────────────
 // 단계별 "도달 고유 clientId"를 세로 막대로, 인접 단계 이탈을 화살표로 표기한다.
 // ★최대 이탈 구간(isMaxDrop)은 붉게 강조 — 22→6 같은 활성화 절벽이 눈에 띄게.
+// ── 국가·채널 퍼널 ─────────────────────────────────────────────────────────
+// 방문 → 다운로드 → 설치 → 모델연결 → 10분 첫 multi-agent 성공.
+// 앞 두 칸은 GA4(웹), 뒤 세 칸은 앱 텔레메트리이며 익명 GA4 client_id 로 이어진다.
+function CountryFunnelTable({
+  rows,
+  keyLabel,
+}: {
+  rows: CountryFunnelRow[];
+  keyLabel: string;
+}) {
+  if (rows.length === 0) return <EmptyState />;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-xs">
+        <thead className="text-zinc-500">
+          <tr className="border-b border-zinc-800">
+            <th className="py-2 pr-3 font-medium">{keyLabel}</th>
+            <th className="py-2 pr-3 text-right font-medium">방문</th>
+            <th className="py-2 pr-3 text-right font-medium">다운로드</th>
+            <th className="py-2 pr-3 text-right font-medium">전환</th>
+            <th className="py-2 pr-3 text-right font-medium">설치</th>
+            <th className="py-2 pr-3 text-right font-medium">연결</th>
+            <th className="py-2 pr-3 text-right font-medium">10분 성공</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr
+              key={r.key}
+              className="border-b border-zinc-900/60 text-zinc-300"
+            >
+              <td className="py-2 pr-3">
+                <span className="text-zinc-100">{r.label}</span>
+                {r.anomaly && (
+                  <span
+                    className="ml-1.5 text-amber-400"
+                    title="설치 수가 다운로드 수보다 많다 — 조회창 밖 다운로드이거나 GA4 조인이 안 된 설치가 섞였다."
+                  >
+                    ⚠
+                  </span>
+                )}
+              </td>
+              <td className="py-2 pr-3 text-right tabular-nums">
+                {fmtInt(r.visitors)}
+              </td>
+              <td className="py-2 pr-3 text-right tabular-nums">
+                {fmtInt(r.downloads)}
+              </td>
+              <td
+                className={`py-2 pr-3 text-right tabular-nums ${
+                  r.visitors > 0 && r.downloads === 0
+                    ? "text-amber-400"
+                    : "text-zinc-400"
+                }`}
+              >
+                {fmtRate(r.downloadRate)}
+              </td>
+              <td className="py-2 pr-3 text-right tabular-nums">
+                {fmtInt(r.installs)}
+              </td>
+              <td className="py-2 pr-3 text-right tabular-nums">
+                {fmtInt(r.connected)}
+              </td>
+              <td className="py-2 pr-3 text-right tabular-nums">
+                {fmtInt(r.activated10m)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CountryFunnelView({ data }: { data: CountryFunnel }) {
+  // 방문은 있는데 다운로드가 0 인 국가 — "해외 23% 다운로드 0" 이 여기서 뜬다.
+  const zeroDownloadCountries = data.byCountry.filter(
+    (r) => r.visitors > 0 && r.downloads === 0
+  );
+  const zeroDownloadVisitors = zeroDownloadCountries.reduce(
+    (a, r) => a + r.visitors,
+    0
+  );
+  const zeroShare =
+    data.totals.visitors > 0
+      ? zeroDownloadVisitors / data.totals.visitors
+      : null;
+
+  return (
+    <div className="space-y-4">
+      {/* 조인이 어디서 어떻게 일어났는지 숨기지 않는다. */}
+      <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+        <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5">
+          조인 = 익명 GA4 client_id (uid 미사용)
+        </span>
+        <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5">
+          {data.join.webRegion} ⋈ {data.join.appRegion} · 메모리 조인
+        </span>
+        <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5">
+          링크백 매칭 {fmtInt(data.coverage.matchedToWeb)}/
+          {fmtInt(data.coverage.installs)} ({fmtRate(data.coverage.matchRate)})
+        </span>
+      </div>
+
+      {(data.join.webRegionError || data.join.appRegionError) && (
+        <div className="rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-xs text-amber-300">
+          {data.join.webRegionError && (
+            <p>
+              GA4({data.join.webRegion}) 조회 실패: {data.join.webRegionError}
+            </p>
+          )}
+          {data.join.appRegionError && (
+            <p>
+              앱 텔레메트리({data.join.appRegion}) 조회 실패:{" "}
+              {data.join.appRegionError}
+            </p>
+          )}
+        </div>
+      )}
+
+      {zeroShare !== null && zeroDownloadVisitors > 0 && (
+        <div className="rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-xs text-amber-200">
+          ★ 방문했지만 다운로드가 <b>0건</b>인 국가가{" "}
+          {zeroDownloadCountries.length}개 · 방문자{" "}
+          {fmtInt(zeroDownloadVisitors)}
+          명({fmtPct(zeroShare)}). 상위:{" "}
+          {zeroDownloadCountries
+            .slice(0, 5)
+            .map((r) => `${r.label}(${fmtInt(r.visitors)})`)
+            .join(", ")}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Panel
+          title="유입 국가별"
+          note="국가는 GA4 geo 가 정본이다. 조인이 안 된 설치는 (unknown) 으로 모인다."
+        >
+          <CountryFunnelTable rows={data.byCountry} keyLabel="국가" />
+        </Panel>
+        <Panel
+          title="유입 채널별"
+          note="GA4 traffic_source 기준. 조인이 안 된 설치는 링크백 utm/referrer 로 접힌다."
+        >
+          <CountryFunnelTable rows={data.byChannel} keyLabel="소스 / 매체" />
+        </Panel>
+      </div>
+
+      <Panel title="합계">
+        <CountryFunnelTable
+          rows={[{ ...data.totals, label: "전체" }]}
+          keyLabel="전체"
+        />
+      </Panel>
+
+      {data.notes.length > 0 && (
+        <ul className="space-y-1 text-xs text-zinc-500">
+          {data.notes.map((n, i) => (
+            <li key={i}>· {n}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
   const steps = funnel.steps;
   const maxClients = Math.max(1, ...steps.map((s) => s.clients));
@@ -2664,6 +2882,11 @@ export default function AnalyticsPanel() {
     loading: true,
     error: null,
   });
+  const [countryFunnel, setCountryFunnel] = useState<Loaded<CountryFunnel>>({
+    data: null,
+    loading: true,
+    error: null,
+  });
   const [modelView, setModelView] = useState<"overview" | "routing">(
     "overview"
   );
@@ -2749,6 +2972,10 @@ export default function AnalyticsPanel() {
         { days: number; includeAdmin: boolean },
         RetentionCohorts
       >(fns, "getAdminRetentionCohorts");
+      const callCountry = httpsCallable<
+        { days: number; includeAdmin: boolean },
+        CountryFunnel
+      >(fns, "getAdminCountryFunnel");
 
       setBiz((s) => ({ ...s, loading: true, error: null }));
       setUsage((s) => ({ ...s, loading: true, error: null }));
@@ -2758,6 +2985,7 @@ export default function AnalyticsPanel() {
       setRelease((s) => ({ ...s, loading: true, error: null }));
       setBetaSeg((s) => ({ ...s, loading: true, error: null }));
       setRetention((s) => ({ ...s, loading: true, error: null }));
+      setCountryFunnel((s) => ({ ...s, loading: true, error: null }));
 
       // 각 콜러블 독립 처리 — 하나 실패해도 나머지는 렌더.
       callBiz({ days: d })
@@ -2833,6 +3061,17 @@ export default function AnalyticsPanel() {
         )
         .catch((e) =>
           setRetention({
+            data: null,
+            loading: false,
+            error: mapErr(e as CallableError),
+          })
+        );
+      callCountry({ days: d, includeAdmin: inc })
+        .then((r) =>
+          setCountryFunnel({ data: r.data, loading: false, error: null })
+        )
+        .catch((e) =>
+          setCountryFunnel({
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
@@ -3406,6 +3645,22 @@ export default function AnalyticsPanel() {
           <ErrorBox msg={onbFunnel.error} />
         ) : onbFunnel.data ? (
           <OnboardingFunnelView funnel={onbFunnel.data} />
+        ) : null}
+      </div>
+
+      {/* ── 유입국가·채널 퍼널 (🟡, 익명 GA4 client_id 축) ─────────────── */}
+      <div className="space-y-4">
+        <SectionHeader
+          icon={Globe}
+          title="유입국가·채널 퍼널 (방문→다운로드→설치→10분)"
+          trust="yellow"
+        />
+        {countryFunnel.loading ? (
+          <LoadingBox />
+        ) : countryFunnel.error ? (
+          <ErrorBox msg={countryFunnel.error} />
+        ) : countryFunnel.data ? (
+          <CountryFunnelView data={countryFunnel.data} />
         ) : null}
       </div>
 

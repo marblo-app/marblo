@@ -324,6 +324,18 @@
     "gate_pending_body": "ファウンダーベータに申し込み、選出されるとここからダウンロードできます。",
     "gate_apply_cta": "ファウンダーベータに申し込む"
   },
+  "installLink": {
+    "badge": "インストール完了",
+    "title": "Marblo のインストールが完了しました",
+    "subtitle": "このタブは閉じて構いません。\nアプリに戻り、AI CLI アカウントを接続すればすぐに始められます。",
+    "guide_title": "スタートガイド",
+    "guide_body": "オーケストレーターへの最初の指示から、エージェントがチケットを処理するまでの流れを5分で確認できます。",
+    "prereq_title": "インストール後に必要なもの",
+    "prereq_body": "Claude Code・Codex などの AI CLI をインストールしてログインするとエージェントが動作します。AI の利用料は各アカウントに請求されます。",
+    "privacy_note": "このページは、どの経路で Marblo を知ったかを匿名で記録します。メールアドレスやアカウント情報は送信されません。",
+    "status_failed": "流入経路の記録に失敗しましたが、アプリの利用には影響ありません。",
+    "status_skipped": "アプリから開かれたリンクではないため、記録する installation 情報がありません。"
+  },
   "promoBar": {
     "message": "🌟 Marbloファウンダー募集 — 1ヶ月無料ベータ · 誠実なアンケートでPro 3ヶ月 · Discordコミュニティ",
     "email_placeholder": "メールアドレス",
