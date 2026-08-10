@@ -36,6 +36,8 @@
     "build:mcp": "tsc -p electron/mcp-server/tsconfig.json && node scripts/bundle-mcp.mjs && node scripts/write-mcp-pkg.mjs",
     "mcp": "node dist-mcp/index.js",
     "backfill:project-members": "node scripts/backfill-project-members.mjs",
+    "stars:collect": "node scripts/collect-registry-stars.mjs",
+    "stars:check": "node scripts/collect-registry-stars.mjs --check",
     "relock": "bash scripts/relock.sh",
     "sync": "bash scripts/sync-and-rebuild.sh",
     "assets:pyodide": "node scripts/fetch-pyodide-assets.mjs",

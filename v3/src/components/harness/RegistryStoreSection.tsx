@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslation, t as translate, type Locale } from "../../lib/i18n";
+import {
+  useTranslation,
+  t as translate,
+  type Locale,
+  type TFunction,
+} from "../../lib/i18n";
 import { LocalModelsSection } from "../store/LocalModelsSection";
 
 /**
@@ -105,33 +110,66 @@ export function isReferenceOnlyRegistryType(type: string): boolean {
   return type === "workflow" || type === "knowledge";
 }
 
-/**
- * 타입 필터를 지난 항목을 "화면에 그릴 목록" 과 "그 중 community 개수" 로
- * 가른다. 둘을 **같은 모집단**에서 뽑는 게 요점 — 카운트가 화면의 필터와
- * 어긋나면 "커뮤니티 N개" 가 거짓말이 된다.
- *
- * ★ community 는 `visible` 에 **들어간다**. 설치 차단은 여기가 아니라 카드의
- * 설치 판정 + 메인 프로세스 installer 가 한다 — 목록 정책과 설치 게이트를 같은
- * 곳에서 결정하면, 목록을 여는 변경이 조용히 설치까지 열어버린다.
- */
 const TIER_RANK: Record<RegistryStoreItem["tier"], number> = {
   official: 0,
   verified: 1,
   community: 2,
 };
 
-export function splitRegistryByTier(
+/**
+ * 기본 정렬 = **별점 내림차순**. "유용하고 인증받은 것이 위로" 를 순서로
+ * 구현한 것이다(별점 산식은 electron/registry-rating.ts, 설명은
+ * v3/docs/store-rating.md).
+ *
+ * 동점 규칙(위에서부터 적용):
+ *  1. ★ 내림차순
+ *  2. 같은 ★ → 원점수(score) 내림차순 — ★는 구간이라, 같은 칸 안에서도 근거가
+ *     더 센 쪽이 위여야 4.9와 4.1이 뒤섞이지 않는다.
+ *  3. 같은 점수 → 업스트림 스타 내림차순(측정 불가는 뒤로)
+ *  4. 그래도 같으면 → tier(공식→검증됨→커뮤니티)
+ *  5. 전부 같으면 → 0 을 반환해 **레지스트리 인덱스 순서**를 유지한다.
+ *     Array.sort 가 안정 정렬이므로 이 카탈로그는 새로고침해도 순서가
+ *     흔들리지 않는다(같은 화면이 매번 다르게 보이면 별점을 못 믿는다).
+ *
+ * 별점이 없는 항목(rating undefined — 별점 이전 메인 프로세스)은 0★로 취급해
+ * 뒤로 가되, 그 경우 전 항목이 동률이라 4→5 규칙으로 기존 tier 순서가 그대로
+ * 남는다. 즉 이 함수는 별점이 하나도 없어도 예전과 같은 화면을 만든다.
+ */
+export function compareByRating(
+  a: Pick<RegistryStoreItem, "tier" | "rating">,
+  b: Pick<RegistryStoreItem, "tier" | "rating">,
+): number {
+  const starsA = a.rating?.stars ?? 0;
+  const starsB = b.rating?.stars ?? 0;
+  if (starsA !== starsB) return starsB - starsA;
+  const scoreA = a.rating?.score ?? 0;
+  const scoreB = b.rating?.score ?? 0;
+  if (scoreA !== scoreB) return scoreB - scoreA;
+  const upA = a.rating?.upstreamStars ?? -1;
+  const upB = b.rating?.upstreamStars ?? -1;
+  if (upA !== upB) return upB - upA;
+  return TIER_RANK[a.tier] - TIER_RANK[b.tier];
+}
+
+/**
+ * 타입 필터를 지난 항목을 "화면에 그릴 목록"(별점 내림차순) 과 "그 중
+ * community 개수" 로 가른다. 둘을 **같은 모집단**에서 뽑는 게 요점 — 카운트가
+ * 화면의 필터와 어긋나면 "커뮤니티 N개" 가 거짓말이 된다.
+ *
+ * ★ community 는 `visible` 에 **들어간다**. 설치 차단은 여기가 아니라 카드의
+ * 설치 판정 + 메인 프로세스 installer 가 한다 — 목록 정책과 설치 게이트를 같은
+ * 곳에서 결정하면, 목록을 여는 변경이 조용히 설치까지 열어버린다.
+ *
+ * 정렬은 전 항목에 대해 한 번만 하고 카테고리 필터는 그 뒤에 건다 — 그래서
+ * 카테고리 탭(MCP/스킬/에이전트)을 눌러도 각 탭 안이 같은 별점 내림차순으로
+ * 남는다.
+ */
+export function rankRegistryItems(
   items: RegistryStoreItem[],
   typeFilter?: RegistryStoreSectionProps["typeFilter"],
 ): { visible: RegistryStoreItem[]; communityCount: number } {
   const scoped = items.filter((i) => !typeFilter || i.type === typeFilter);
-  // 설치 가능한 것부터 보여준다. 레지스트리 순서 그대로 두면 community 가
-  // 압도적으로 많아서(94개 중 대부분) official/verified 가 스크롤 아래로
-  // 밀린다 — 감추는 대신 순서로 푼다. Array.sort 는 안정 정렬이라 같은 tier
-  // 안에서는 레지스트리 순서가 그대로 유지된다.
-  const visible = [...scoped].sort(
-    (a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier],
-  );
+  const visible = [...scoped].sort(compareByRating);
   return {
     visible,
     communityCount: scoped.filter((i) => i.tier === "community").length,
@@ -145,7 +183,7 @@ export function splitRegistryByTier(
  *  2. 설치 계약(`install`)이 실제로 있다 — 없으면 "자동 설치 불가"로 정직하게,
  *  3. 회수(revoked)되지 않았다.
  *
- * 목록 필터(`splitRegistryByTier`)와 **일부러 분리**돼 있다 — 표시 정책이
+ * 목록 필터(`rankRegistryItems`)와 **일부러 분리**돼 있다 — 표시 정책이
  * 바뀌면 같이 사라지는 방어선은 방어선이 아니다. 그리고 이 함수 자체도 UI
  * 편의일 뿐, 실제 강제는 메인 프로세스 installer 가 같은 규칙으로 다시 한다.
  */
@@ -244,6 +282,94 @@ function communitySourceLabel(item: RegistryStoreItem): string {
   }`;
 }
 
+// ── 별점 표시 ──────────────────────────────────────────────────────
+//
+// 별점은 **메인 프로세스가 계산해서 내려준다**(electron/registry-rating.ts).
+// 여기서 하는 일은 그리기와 근거 문장 조립뿐이다 — 렌더러에 점수를 만들거나
+// 바꾸는 코드가 있으면 "유저 조작 불가" 가 성립하지 않는다.
+
+/** 근거 코드 → i18n 키. 모르는 코드는 **버린다**(메인이 새 코드를 내보내도
+ *  카드가 `harness.store...reason.foo` 같은 원문 키를 뱉지 않게). */
+const RATING_REASON_KEYS: Record<string, string> = {
+  stars: "harness.store.registry.rating.reason.stars",
+  starsMissing: "harness.store.registry.rating.reason.starsMissing",
+  usefulnessUnmeasurable:
+    "harness.store.registry.rating.reason.usefulnessUnmeasurable",
+  verifiedPin: "harness.store.registry.rating.reason.verifiedPin",
+  unpinnedSource: "harness.store.registry.rating.reason.unpinnedSource",
+  hostRejected: "harness.store.registry.rating.reason.hostRejected",
+  verifiedIntegrity: "harness.store.registry.rating.reason.verifiedIntegrity",
+  integrityNotApplicable:
+    "harness.store.registry.rating.reason.integrityNotApplicable",
+  noIntegrity: "harness.store.registry.rating.reason.noIntegrity",
+  licenseOsi: "harness.store.registry.rating.reason.licenseOsi",
+  licensePublicDomain:
+    "harness.store.registry.rating.reason.licensePublicDomain",
+  licenseNonOsi: "harness.store.registry.rating.reason.licenseNonOsi",
+  licenseUnrecognized:
+    "harness.store.registry.rating.reason.licenseUnrecognized",
+  licenseUndeclared: "harness.store.registry.rating.reason.licenseUndeclared",
+  freshPin: "harness.store.registry.rating.reason.freshPin",
+  freshUpstream: "harness.store.registry.rating.reason.freshUpstream",
+  staleUpstream: "harness.store.registry.rating.reason.staleUpstream",
+  archivedUpstream: "harness.store.registry.rating.reason.archivedUpstream",
+  freshnessUnknown: "harness.store.registry.rating.reason.freshnessUnknown",
+  capRevoked: "harness.store.registry.rating.reason.capRevoked",
+  capDeprecated: "harness.store.registry.rating.reason.capDeprecated",
+  capUnverifiedSource:
+    "harness.store.registry.rating.reason.capUnverifiedSource",
+};
+
+/**
+ * 툴팁 본문 — "왜 이 별점인가" 를 한 카드 안에서 끝까지 읽을 수 있게 근거를
+ * 전부 문장으로 편다. 점수 소수점을 같이 보여주는 이유는 같은 ★ 안의 정렬
+ * 순서(동점 규칙 2)가 임의로 보이지 않게 하기 위해서다.
+ */
+export function ratingTooltip(
+  rating: RegistryRating,
+  translateFn: TFunction = translate,
+): string {
+  const head = translateFn("harness.store.registry.rating.title", {
+    stars: rating.stars,
+    score: rating.score.toFixed(2),
+  });
+  const lines = rating.reasons
+    .map((reason) => {
+      const key = RATING_REASON_KEYS[reason.code];
+      if (!key) return null;
+      return `· ${translateFn(key as Parameters<TFunction>[0], reason.params)}`;
+    })
+    .filter((line): line is string => line !== null);
+  const foot = [
+    translateFn("harness.store.registry.rating.formula"),
+    translateFn("harness.store.registry.rating.snapshotAt", {
+      date: rating.snapshotAt.slice(0, 10),
+    }),
+  ];
+  return [head, ...lines, "", ...foot].join("\n");
+}
+
+function StarRating({ rating }: { rating: RegistryRating }) {
+  const { t } = useTranslation();
+  // 회수·비OSI 처럼 상한이 걸린 별은 색으로도 구분한다 — 별 개수만 보면
+  // "낮은 별점"과 "정책상 올려선 안 되는 항목"이 같아 보인다.
+  const capped = rating.cap === "revoked" || rating.cap === "nonOsi";
+  return (
+    <span
+      className={`flex-shrink-0 font-mono text-[11px] leading-none tracking-tight ${
+        capped ? "text-[#f38ba8]" : "text-[#f9e2af]"
+      }`}
+      title={ratingTooltip(rating)}
+      aria-label={t("harness.store.registry.rating.aria", {
+        stars: rating.stars,
+      })}
+    >
+      {"★".repeat(rating.stars)}
+      <span className="text-[#45475a]">{"☆".repeat(5 - rating.stars)}</span>
+    </span>
+  );
+}
+
 function PermissionBadges({ item }: { item: RegistryStoreItem }) {
   const { t } = useTranslation();
   if (!item.permissionsDeclared) {
@@ -293,6 +419,7 @@ export function RegistryStoreSection({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [category, setCategory] = useState<StoreTabKey>("all");
+  const [ratingHelpOpen, setRatingHelpOpen] = useState(false);
   const [notice, setNotice] = useState<{
     kind: "info" | "error";
     text: string;
@@ -327,7 +454,7 @@ export function RegistryStoreSection({
   }, [load]);
 
   const { visible, communityCount } = useMemo(
-    () => splitRegistryByTier(items, typeFilter),
+    () => rankRegistryItems(items, typeFilter),
     [items, typeFilter],
   );
   const countByCategory = useMemo(() => {
@@ -480,7 +607,44 @@ export function RegistryStoreSection({
         )}
       </p>
 
-      {/* 카테고리 탭바 — 활성 카테고리의 그리드만 그린다. typeFilter 를 받는
+      {/* 별점 기준 공시 — 정렬 키를 화면에 심어 놓고 그 규칙을 앱 안에서 못
+          읽으면 별점은 그냥 우리가 정한 순서로 읽힌다. 카드 툴팁은 "이 항목이
+          왜 이 별점인지"를, 이 패널은 "별점이 애초에 무엇으로 만들어지는지"를
+          답한다(상세: v3/docs/store-rating.md). */}
+      {!isLocalTab && (
+        <div className="mb-3">
+          <button
+            type="button"
+            onClick={() => setRatingHelpOpen((v) => !v)}
+            aria-expanded={ratingHelpOpen}
+            className="text-[11px] text-[#89b4fa] hover:underline"
+          >
+            {ratingHelpOpen ? "▾ " : "▸ "}
+            {t("harness.store.registry.rating.helpToggle")}
+          </button>
+          {ratingHelpOpen && (
+            <div className="mt-1.5 rounded border border-[#313244] bg-[#181825] px-3 py-2 text-[11px] leading-relaxed text-[#a6adc8]">
+              <p className="mb-1 text-[#bac2de]">
+                {t("harness.store.registry.rating.helpIntro")}
+              </p>
+              <ul className="mb-1 list-disc space-y-0.5 pl-4">
+                <li>{t("harness.store.registry.rating.helpUsefulness")}</li>
+                <li>{t("harness.store.registry.rating.helpVerification")}</li>
+                <li>{t("harness.store.registry.rating.helpLicense")}</li>
+                <li>{t("harness.store.registry.rating.helpFreshness")}</li>
+              </ul>
+              <p className="mb-1">
+                {t("harness.store.registry.rating.helpCaps")}
+              </p>
+              <p className="text-[#7f849c]">
+                {t("harness.store.registry.rating.helpSource")}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 카테고리 탭바— 활성 카테고리의 그리드만 그린다. typeFilter 를 받는
           레거시 임베드(현재 호출자 없음)에서는 탭이 의미가 없어 숨긴다. */}
       {!typeFilter && (
         <div className="mb-3 flex flex-wrap items-center gap-1">
@@ -568,6 +732,10 @@ export function RegistryStoreSection({
             >
               <div className="mb-1 flex items-start justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-1.5">
+                  {/* 별점은 이름 **앞**에 둔다 — 목록의 정렬 키가 눈으로 보이는
+                      값이어야 "왜 이 순서인지" 가 스크롤만으로 읽힌다. 별점이
+                      없는 응답(옛 메인 프로세스)에선 아예 그리지 않는다. */}
+                  {item.rating && <StarRating rating={item.rating} />}
                   <span className="truncate text-sm font-semibold text-[#cdd6f4]">
                     {display.name}
                   </span>

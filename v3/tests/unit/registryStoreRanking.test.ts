@@ -1,9 +1,12 @@
 /**
- * 스토어는 전 tier 를 **보여주되** 설치는 official/verified 만 허용한다.
+ * 스토어의 **표시·순서** 정책. 설치는 official/verified 만 허용하되 목록은 전
+ * tier 를 보여주고, 순서는 별점 내림차순으로 잡는다("유용하고 인증받은 것이
+ * 위로").
  *
- * 이 파일이 지키는 것은 표시 정책이다 — 회귀 위험은 둘: (1) community 가 다시
- * 목록에서 사라져 카탈로그가 자기 카탈로그를 감추는 것, (2) "커뮤니티 N개"
- * 공시의 N 이 화면에 걸린 타입 필터와 다른 모집단에서 세어져 거짓말이 되는 것.
+ * 회귀 위험: (1) community 가 다시 목록에서 사라져 카탈로그가 자기 카탈로그를
+ * 감추는 것, (2) "커뮤니티 N개" 공시의 N 이 화면에 걸린 타입 필터와 다른
+ * 모집단에서 세어져 거짓말이 되는 것, (3) 별점 정렬이 동점에서 흔들려 같은
+ * 카탈로그가 새로고침마다 다르게 보이는 것.
  *
  * ★ 설치 차단(§6.3)은 이 함수가 아니라 카드의 `installable` 판정이 한다. 표시를
  * 여는 변경이 설치까지 열면 안 되므로 두 결정이 분리돼 있고, 여기서 community 가
@@ -12,15 +15,16 @@
 import { describe, it, expect } from "vitest";
 import {
   categorizeRegistryType,
+  compareByRating,
   isCommunityHighRiskPermission,
   isReferenceOnlyRegistryType,
   isRegistryItemConsentInstallable,
   isRegistryItemInstallable,
   localizedItemText,
-  splitRegistryByTier,
+  rankRegistryItems,
 } from "../../src/components/harness/RegistryStoreSection";
 
-type Item = Parameters<typeof splitRegistryByTier>[0][number];
+type Item = Parameters<typeof rankRegistryItems>[0][number];
 
 function item(
   id: string,
@@ -39,7 +43,7 @@ function item(
   } as Item;
 }
 
-describe("splitRegistryByTier", () => {
+describe("rankRegistryItems", () => {
   const items = [
     item("off-skill", "official"),
     item("ver-skill", "verified"),
@@ -50,17 +54,17 @@ describe("splitRegistryByTier", () => {
   ];
 
   it("★community 도 목록에 보이고, 개수는 따로 공시된다", () => {
-    const { visible, communityCount } = splitRegistryByTier(items);
+    const { visible, communityCount } = rankRegistryItems(items);
     expect(visible).toHaveLength(items.length);
     expect(visible.some((i) => i.tier === "community")).toBe(true);
     expect(communityCount).toBe(3);
   });
 
-  // 감추는 대신 순서로 푼다: 설치 가능한 tier 가 먼저, community 는 뒤로.
-  // 레지스트리는 community 가 압도적으로 많아서, 순서를 안 잡으면 official /
-  // verified 가 스크롤 아래로 밀려 "보여주기"가 사실상 감추기가 된다.
-  it("★official → verified → community 순으로, 같은 tier 안에선 입력 순서 유지", () => {
-    const { visible } = splitRegistryByTier(items);
+  // 별점이 하나도 없으면(별점 이전 메인 프로세스 응답) 전 항목이 동률이라
+  // 마지막 동점 규칙인 tier 로 갈린다 — 즉 별점을 붙이는 변경이 별점 없는
+  // 환경의 화면을 바꾸지 않는다. 감추는 대신 순서로 푸는 원칙은 그대로다.
+  it("★별점이 없으면 official → verified → community 순, 같은 tier 안에선 입력 순서 유지", () => {
+    const { visible } = rankRegistryItems(items);
     expect(visible.map((i) => i.id)).toEqual([
       "off-skill",
       "off-mcp",
@@ -72,7 +76,7 @@ describe("splitRegistryByTier", () => {
   });
 
   it("타입 필터가 걸리면 목록과 카운트가 같은 모집단을 본다", () => {
-    const skills = splitRegistryByTier(items, "skill");
+    const skills = rankRegistryItems(items, "skill");
     expect(skills.visible.map((i) => i.id)).toEqual([
       "off-skill",
       "ver-skill",
@@ -81,13 +85,13 @@ describe("splitRegistryByTier", () => {
     ]);
     expect(skills.communityCount).toBe(2);
 
-    const mcps = splitRegistryByTier(items, "mcp-server");
+    const mcps = rankRegistryItems(items, "mcp-server");
     expect(mcps.visible.map((i) => i.id)).toEqual(["off-mcp", "com-mcp"]);
     expect(mcps.communityCount).toBe(1);
   });
 
   it("community 만 있어도 빈 상태가 아니다 — 목록으로 뜬다", () => {
-    const { visible, communityCount } = splitRegistryByTier([
+    const { visible, communityCount } = rankRegistryItems([
       item("com-1", "community"),
       item("com-2", "community"),
     ]);
@@ -96,9 +100,123 @@ describe("splitRegistryByTier", () => {
   });
 
   it("빈 상태는 레지스트리가 정말로 비었을 때뿐이다", () => {
-    const { visible, communityCount } = splitRegistryByTier([]);
+    const { visible, communityCount } = rankRegistryItems([]);
     expect(visible).toEqual([]);
     expect(communityCount).toBe(0);
+  });
+});
+
+/**
+ * ★기본 정렬 = 별점 내림차순. 이 스위트가 지키는 것은 "5점이 최상단" 과
+ * **동점 규칙의 결정성**이다 — 동점에서 순서가 흔들리면 같은 카탈로그가 열
+ * 때마다 다르게 보여서, 사용자가 별점 자체를 신뢰하지 못한다.
+ */
+describe("compareByRating — 기본 정렬과 동점 규칙", () => {
+  function rated(
+    id: string,
+    stars: 1 | 2 | 3 | 4 | 5,
+    score: number,
+    extra: Partial<{
+      tier: Item["tier"];
+      type: Item["type"];
+      upstreamStars: number | null;
+    }> = {},
+  ): Item {
+    return {
+      ...item(id, extra.tier ?? "community", extra.type ?? "skill"),
+      rating: {
+        stars,
+        score,
+        formulaVersion: 1,
+        upstreamStars: extra.upstreamStars ?? null,
+        components: [],
+        reasons: [],
+        snapshotAt: "2026-08-10T00:00:00Z",
+      },
+    } as Item;
+  }
+
+  it("★5점이 최상단, 1점이 최하단", () => {
+    const { visible } = rankRegistryItems([
+      rated("two", 2, 0.3),
+      rated("five", 5, 0.9),
+      rated("one", 1, 0.1),
+      rated("four", 4, 0.7),
+    ]);
+    expect(visible.map((i) => i.id)).toEqual(["five", "four", "two", "one"]);
+  });
+
+  it("같은 ★ 안에서는 원점수가 높은 쪽이 위 — 4.9와 4.1이 뒤섞이지 않는다", () => {
+    const { visible } = rankRegistryItems([
+      rated("low4", 4, 0.69),
+      rated("high4", 4, 0.84),
+    ]);
+    expect(visible.map((i) => i.id)).toEqual(["high4", "low4"]);
+  });
+
+  it("점수까지 같으면 업스트림 스타가 많은 쪽이 위, 미측정은 뒤로", () => {
+    const { visible } = rankRegistryItems([
+      rated("unmeasured", 4, 0.7, { upstreamStars: null }),
+      rated("few", 4, 0.7, { upstreamStars: 12 }),
+      rated("many", 4, 0.7, { upstreamStars: 9000 }),
+    ]);
+    expect(visible.map((i) => i.id)).toEqual(["many", "few", "unmeasured"]);
+  });
+
+  it("스타까지 같으면 tier, 그마저 같으면 레지스트리 인덱스 순서(안정 정렬)", () => {
+    const { visible } = rankRegistryItems([
+      rated("com-b", 3, 0.5, { tier: "community", upstreamStars: 5 }),
+      rated("com-a", 3, 0.5, { tier: "community", upstreamStars: 5 }),
+      rated("official", 3, 0.5, { tier: "official", upstreamStars: 5 }),
+    ]);
+    expect(visible.map((i) => i.id)).toEqual(["official", "com-b", "com-a"]);
+  });
+
+  it("정렬은 결정적 — 같은 입력을 몇 번 정렬해도 같은 순서", () => {
+    const input = [
+      rated("a", 4, 0.7, { upstreamStars: 10 }),
+      rated("b", 4, 0.7, { upstreamStars: 10 }),
+      rated("c", 5, 0.9, { upstreamStars: 100 }),
+    ];
+    const once = rankRegistryItems(input).visible.map((i) => i.id);
+    const twice = rankRegistryItems(
+      rankRegistryItems(input).visible,
+    ).visible.map((i) => i.id);
+    expect(twice).toEqual(once);
+  });
+
+  it("별점 있는 항목이 별점 없는 항목보다 항상 위", () => {
+    const { visible } = rankRegistryItems([
+      item("unrated", "official"),
+      rated("rated-1star", 1, 0.05, { tier: "community" }),
+    ]);
+    expect(visible.map((i) => i.id)).toEqual(["rated-1star", "unrated"]);
+  });
+
+  it("카테고리 필터를 걸어도 각 탭 안이 별점 내림차순으로 남는다", () => {
+    const { visible } = rankRegistryItems([
+      rated("mcp-low", 2, 0.3, { type: "mcp-server" }),
+      rated("skill-high", 5, 0.9, { type: "skill" }),
+      rated("mcp-high", 4, 0.7, { type: "mcp-server" }),
+      rated("skill-low", 1, 0.1, { type: "skill" }),
+    ]);
+    // 컴포넌트는 정렬된 목록을 카테고리로 **필터만** 한다 — 그래서 탭 안
+    // 순서는 전체 정렬의 부분수열이다.
+    expect(
+      visible.filter((i) => i.type === "mcp-server").map((i) => i.id),
+    ).toEqual(["mcp-high", "mcp-low"]);
+    expect(visible.filter((i) => i.type === "skill").map((i) => i.id)).toEqual([
+      "skill-high",
+      "skill-low",
+    ]);
+  });
+
+  it("comparator 는 대칭이다 — a<b 면 b>a", () => {
+    const a = rated("a", 5, 0.9);
+    const b = rated("b", 3, 0.5);
+    expect(compareByRating(a, b)).toBeLessThan(0);
+    expect(compareByRating(b, a)).toBeGreaterThan(0);
+    expect(compareByRating(a, a)).toBe(0);
   });
 });
 
@@ -205,7 +323,7 @@ describe("isRegistryItemInstallable (one-click)", () => {
       install: contract,
       status: "active" as const,
     } as Item;
-    const { visible } = splitRegistryByTier([community]);
+    const { visible } = rankRegistryItems([community]);
     expect(visible).toHaveLength(1);
     expect(isRegistryItemInstallable(visible[0])).toBe(false);
   });

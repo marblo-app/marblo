@@ -221,6 +221,71 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.registry.installFail": "Install failed.",
   "harness.store.registry.uninstallDone": "{name} uninstalled.",
   "harness.store.registry.uninstallFail": "Uninstall failed.",
+  // --- Rating (★1–5) — formula in electron/registry-rating.ts, docs/store-rating.md ---
+  "harness.store.registry.rating.aria": "Rated {stars} out of 5",
+  "harness.store.registry.rating.title": "★ {stars}/5 (raw score {score})",
+  "harness.store.registry.rating.formula":
+    "Formula: usefulness 50% + verification 30% + license 10% + freshness 10%",
+  "harness.store.registry.rating.snapshotAt": "Star snapshot taken: {date}",
+  "harness.store.registry.rating.reason.stars": "{stars} upstream GitHub stars",
+  "harness.store.registry.rating.reason.starsMissing":
+    "Upstream repo ({repo}) missing from the star snapshot — usefulness scored 0",
+  "harness.store.registry.rating.reason.usefulnessUnmeasurable":
+    "No upstream repo, so stars cannot measure usefulness — component excluded, capped at ★4",
+  "harness.store.registry.rating.reason.verifiedPin":
+    "Source verified — allowlisted host (GitHub) + immutable pin",
+  "harness.store.registry.rating.reason.unpinnedSource":
+    "Source ref is not an immutable pin (commit SHA or version tag)",
+  "harness.store.registry.rating.reason.hostRejected":
+    "Source repository is not an allowlisted host form",
+  "harness.store.registry.rating.reason.verifiedIntegrity":
+    "Integrity verified — every installed byte is checked against a digest",
+  "harness.store.registry.rating.reason.integrityNotApplicable":
+    "Not installed in-app — integrity component excluded (no install contract)",
+  "harness.store.registry.rating.reason.noIntegrity":
+    "No integrity anchor to check against",
+  "harness.store.registry.rating.reason.licenseOsi":
+    "OSI-approved license ({license})",
+  "harness.store.registry.rating.reason.licensePublicDomain":
+    "Public domain dedication ({license})",
+  "harness.store.registry.rating.reason.licenseNonOsi":
+    "Non-OSI license ({license}) — registry policy violation, capped at ★2",
+  "harness.store.registry.rating.reason.licenseUnrecognized":
+    "Unrecognized license ({license})",
+  "harness.store.registry.rating.reason.licenseUndeclared":
+    "No license declared",
+  "harness.store.registry.rating.reason.freshPin":
+    "Pin points at the current upstream commit",
+  "harness.store.registry.rating.reason.freshUpstream":
+    "Upstream active recently ({days} days ago)",
+  "harness.store.registry.rating.reason.staleUpstream":
+    "Upstream last active {days} days ago",
+  "harness.store.registry.rating.reason.archivedUpstream":
+    "Upstream repository is archived",
+  "harness.store.registry.rating.reason.freshnessUnknown":
+    "No upstream activity data — freshness component excluded",
+  "harness.store.registry.rating.reason.capRevoked":
+    "Revoked item — pinned to ★1",
+  "harness.store.registry.rating.reason.capDeprecated":
+    "Deprecated item — capped at ★3",
+  "harness.store.registry.rating.reason.capUnverifiedSource":
+    "Source could not be verified — capped at ★4 (★5 requires an allowlisted host and an immutable pin)",
+  "harness.store.registry.rating.helpToggle": "How are these rated?",
+  "harness.store.registry.rating.helpIntro":
+    "Nobody hand-picks these scores. Four objective signals are weighted into a 1–5 rating; hover any star row to see that item's own evidence.",
+  "harness.store.registry.rating.helpUsefulness":
+    "Usefulness 50% — upstream GitHub stars on a log scale (one notch per 10×). Stars only count for the repository the installed bytes actually come from.",
+  "harness.store.registry.rating.helpVerification":
+    "Verification 30% — the same checks the installer enforces: allowlisted host, immutable pin (commit SHA or version tag), per-file integrity digests.",
+  "harness.store.registry.rating.helpLicense":
+    "License 10% — full credit only for OSI-approved licenses. Undeclared or unrecognized loses points; non-OSI (FSL, BUSL, NC…) violates registry policy and caps at ★2.",
+  "harness.store.registry.rating.helpFreshness":
+    "Freshness 10% — whether the pin tracks current upstream and whether upstream is still alive (archived or long-dormant loses points).",
+  "harness.store.registry.rating.helpCaps":
+    "Caps: revoked pins to ★1 · non-OSI ★2 · deprecated ★3 · unverified source ★4 · items with no upstream to measure ★4. ★5 requires proven upstream demand and a verified source.",
+  "harness.store.registry.rating.helpSource":
+    "Star counts come from a snapshot collected once at release build time — opening the Store never calls GitHub, and nothing in the app can change a score.",
+
   "harness.store.registry.source": "Source",
   "harness.store.registry.loadFail": "Failed to load the registry list.",
   // Community tier is listed; installing it needs explicit consent — one line.

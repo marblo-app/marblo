@@ -220,6 +220,69 @@ export const harness = {
   "harness.store.registry.installFail": "설치에 실패했습니다.",
   "harness.store.registry.uninstallDone": "{name} 제거 완료.",
   "harness.store.registry.uninstallFail": "제거에 실패했습니다.",
+  // --- 별점(★1~5) — 산식은 electron/registry-rating.ts, 설명은 docs/store-rating.md ---
+  "harness.store.registry.rating.aria": "별점 {stars}점 / 5점",
+  "harness.store.registry.rating.title": "★ {stars}/5 (원점수 {score})",
+  "harness.store.registry.rating.formula":
+    "산식: 유용성 50% + 인증 30% + 라이선스 10% + 신선도 10%",
+  "harness.store.registry.rating.snapshotAt": "스타 스냅샷 기준: {date}",
+  "harness.store.registry.rating.reason.stars":
+    "업스트림 GitHub 스타 {stars}개",
+  "harness.store.registry.rating.reason.starsMissing":
+    "업스트림 저장소({repo})가 스타 스냅샷에 없음 — 유용성 0점",
+  "harness.store.registry.rating.reason.usefulnessUnmeasurable":
+    "업스트림 저장소가 없어 스타로 유용성을 잴 수 없음 — 유용성 성분 제외, ★4 상한",
+  "harness.store.registry.rating.reason.verifiedPin":
+    "출처 검증 통과 — 허용 호스트(GitHub) + 불변 핀",
+  "harness.store.registry.rating.reason.unpinnedSource":
+    "출처 ref 가 불변 핀(커밋 SHA·버전 태그)이 아님",
+  "harness.store.registry.rating.reason.hostRejected":
+    "출처 저장소가 허용 호스트 형식이 아님",
+  "harness.store.registry.rating.reason.verifiedIntegrity":
+    "무결성 확인 — 설치 바이트가 전수 대조됨",
+  "harness.store.registry.rating.reason.integrityNotApplicable":
+    "인앱 설치 대상이 아님 — 무결성 항목 제외(설치 계약 없음)",
+  "harness.store.registry.rating.reason.noIntegrity": "무결성 대조 근거 없음",
+  "harness.store.registry.rating.reason.licenseOsi":
+    "OSI 승인 라이선스({license})",
+  "harness.store.registry.rating.reason.licensePublicDomain":
+    "퍼블릭 도메인 헌정({license})",
+  "harness.store.registry.rating.reason.licenseNonOsi":
+    "비OSI 라이선스({license}) — 레지스트리 정책 위반, ★2 상한",
+  "harness.store.registry.rating.reason.licenseUnrecognized":
+    "미인식 라이선스({license})",
+  "harness.store.registry.rating.reason.licenseUndeclared": "라이선스 미신고",
+  "harness.store.registry.rating.reason.freshPin":
+    "핀이 업스트림 최신 커밋을 가리킴",
+  "harness.store.registry.rating.reason.freshUpstream":
+    "업스트림 최근 활동 ({days}일 전)",
+  "harness.store.registry.rating.reason.staleUpstream":
+    "업스트림 마지막 활동 {days}일 전",
+  "harness.store.registry.rating.reason.archivedUpstream":
+    "업스트림 저장소가 아카이브(동결)됨",
+  "harness.store.registry.rating.reason.freshnessUnknown":
+    "업스트림 활동 정보 없음 — 신선도 성분 제외",
+  "harness.store.registry.rating.reason.capRevoked": "회수된 항목 — ★1 로 고정",
+  "harness.store.registry.rating.reason.capDeprecated":
+    "지원 종료 항목 — ★3 상한",
+  "harness.store.registry.rating.reason.capUnverifiedSource":
+    "출처를 검증할 수 없음 — ★4 상한(★5 는 허용 호스트 + 불변 핀 통과 필수)",
+  "harness.store.registry.rating.helpToggle": "별점은 어떻게 매기나요?",
+  "harness.store.registry.rating.helpIntro":
+    "사람이 매긴 점수가 아닙니다. 네 가지 객관 신호의 가중합을 1~5로 환산하고, 별 옆에 마우스를 올리면 그 항목의 근거가 그대로 나옵니다.",
+  "harness.store.registry.rating.helpUsefulness":
+    "유용성 50% — 업스트림 GitHub 스타(로그 스케일: 10배마다 한 칸). 스타가 붙는 대상은 실제 설치 바이트가 오는 저장소뿐입니다.",
+  "harness.store.registry.rating.helpVerification":
+    "인증 30% — 설치 직전 검사와 같은 규칙: 허용 호스트, 불변 핀(커밋 SHA·버전 태그), 파일 단위 무결성 대조.",
+  "harness.store.registry.rating.helpLicense":
+    "라이선스 10% — OSI 승인 라이선스만 만점. 미신고·미인식은 감점, 비OSI(FSL·BUSL·NC 등)는 정책 위반이라 ★2 상한.",
+  "harness.store.registry.rating.helpFreshness":
+    "신선도 10% — 핀이 업스트림 최신인지, 업스트림이 아직 살아 있는지(아카이브·장기 방치는 감점).",
+  "harness.store.registry.rating.helpCaps":
+    "상한: 회수됨 ★1 고정 · 비OSI ★2 · 지원 종료 ★3 · 출처 미검증 ★4 · 업스트림이 없어 유용성을 못 재는 항목 ★4. ★5 는 업스트림에서 실증된 수요와 출처 검증 통과를 동시에 만족할 때만 나옵니다.",
+  "harness.store.registry.rating.helpSource":
+    "스타 수치는 릴리스 빌드 시점에 한 번 수집한 스냅샷에서 읽습니다 — 스토어를 열 때 GitHub 를 조회하지 않으며, 점수는 앱 안에서 바꿀 수 없습니다.",
+
   "harness.store.registry.source": "소스",
   "harness.store.registry.loadFail": "레지스트리 목록을 불러오지 못했습니다.",
   // 커뮤니티 tier 는 목록에 뜨고, 설치엔 별도 동의가 필요하다 — 한 줄로 공시.

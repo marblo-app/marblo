@@ -897,6 +897,35 @@ interface HarnessAPI {
   ) => Promise<CliAuthResult>;
 }
 
+/** 별점 근거 한 줄 — electron registry-rating 의 RatingReasonCode 와 1:1.
+ *  표시 문자열은 렌더러가 이 코드로 i18n 을 조회해 만든다(메인은 숫자·코드만). */
+interface RegistryRatingReason {
+  code: string;
+  params?: Record<string, string | number>;
+}
+
+interface RegistryRatingComponent {
+  key: "usefulness" | "verification" | "license" | "freshness";
+  /** 0~1. null = 측정 불가(가중치에서 제외됨). */
+  value: number | null;
+  weight: number;
+}
+
+/** 스토어 별점 — **메인 프로세스에서만** 산출된다(registry-rating). 렌더러는
+ *  표시·정렬만 한다: 여기 값을 만들거나 바꿀 수 있는 렌더러 경로는 없다. */
+interface RegistryRating {
+  stars: 1 | 2 | 3 | 4 | 5;
+  /** 상한 적용 전 원점수 0~1 — 같은 ★ 안의 정렬 키. */
+  score: number;
+  formulaVersion: number;
+  upstreamStars: number | null;
+  components: RegistryRatingComponent[];
+  reasons: RegistryRatingReason[];
+  /** 스타 스냅샷 수집 시각(ISO). */
+  snapshotAt: string;
+  cap?: "revoked" | "nonOsi" | "deprecated" | "usefulnessUnmeasurable";
+}
+
 /** 공개 레지스트리(marblo-app/marblo) 스토어 항목 — electron registry-installer
  *  의 RegistryStoreItem 직렬화 형태. */
 interface RegistryStoreItem {
@@ -925,6 +954,10 @@ interface RegistryStoreItem {
   notInstallableReason?: string;
   installState: "installed" | "outdated" | "not-installed" | "not-installable";
   installedVersion?: string;
+  /** 옵셔널인 이유: 별점 없이 응답하는 옛 메인 프로세스와 한 세션에서 만날 수
+   *  있다(패키지 앱은 renderer 만 갱신되는 경로가 없지만, dev 는 main 이
+   *  재시작 안 되는 창이 있다 — 메모 dev_main_process_no_autorestart). */
+  rating?: RegistryRating;
 }
 
 interface RegistryIndexResponse {
