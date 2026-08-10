@@ -359,6 +359,23 @@ describe("BeginnerConnectStep — 원클릭이 주 경로, 택1 이 폴백", () 
     expect(installAllMock().mock.calls.length).toBe(0);
   });
 
+  it("★첫 문장의 `**하나만**` 강조가 별표로 새지 않는다", () => {
+    // 신규 유저가 보는 **첫 문장**이다. 프리뷰 테스트에서 여기가
+    // "Connect **either** Claude or Codex" 로 보였다 — 문구는 마크다운인데
+    // 화면이 텍스트 노드로 그냥 꽂아서다. 이제 <strong> 으로 쪼개 그린다.
+    seed({ "cli-claude-code": probe(true, false) });
+    render(
+      createElement(BeginnerConnectStep, {
+        onWatchDemo: () => {},
+        onOneClick: () => {},
+      }),
+    );
+
+    const subtitle = screen.getByTestId("beginner-connect-subtitle");
+    expect(subtitle.textContent).not.toContain("*");
+    expect(subtitle.querySelector("strong")?.textContent?.trim()).toBeTruthy();
+  });
+
   it("★택1 경로도 로그인 명령을 직접 조립하지 않는다 — 프로브 action 을 그대로 넘긴다", async () => {
     // 예전에는 여기서 `${model} login` 을 손으로 만들었다(codex 예외 포함).
     // 규칙의 두 번째 사본이라, `loginCommandFor` 가 바뀌어도 이 화면만 옛 명령을

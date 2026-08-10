@@ -8,20 +8,27 @@
  * 다음이다 — **그래서 화면에 무엇이 떴는가.** 콜백이 엉뚱한 곳에 물려 있으면
  * 각 유닛테스트는 전부 초록인 채로 화면만 틀린다.
  *
- * 그래서 여기서는 셸이 하는 배선(핸들러 3개 + 컴포저 노출 규칙)을 그대로 재현한
- * 하네스를 올리고, **DOM 에 뜬 것**을 본다. 셸 전체(`BeginnerShell`)를 마운트하지
- * 않는 이유는 그것이 오케 PTY·CLI 프로브·라이프사이클 훅을 통째로 끌고 오기
- * 때문이다 — 여기서 검증하려는 건 그 배선이지 부팅이 아니다.
+ * 그래서 여기서는 셸이 하는 배선을 재현한 하네스를 올리고, **DOM 에 뜬 것**을
+ * 본다. 셸 전체(`BeginnerShell`)를 마운트하지 않는 이유는 그것이 오케 PTY·CLI
+ * 프로브·라이프사이클 훅을 통째로 끌고 오기 때문이다 — 여기서 검증하려는 건 그
+ * 배선이지 부팅이 아니다.
+ *
+ * ★단, 하네스가 셸의 로직을 **베끼지는 않는다.** 종전 이 파일은 선택 상태
+ * (`openTaskId` → `tasks.find`)를 손으로 복사해 들고 있었는데, 그러면 복사본이
+ * 맞는 한 테스트는 초록이고 정작 셸에서만 어긋나는 결함은 못 잡는다. 실제로
+ * #880 이 이 테스트를 깔았음에도 프리뷰 시연에서 같은 지문이 다시 나왔다. 이제
+ * 셸과 하네스가 **같은 훅**(`useBeginnerDetail`)을 부른다.
  *
  * 못박는 계약:
  *   ① 미니 보드 카드 클릭 → **티켓 상세 모달** (프리필만 되고 마는 게 아니다)
- *   ② 에이전트 행 클릭 → **그 에이전트의 터미널**
- *   ③ 두 모달은 겹치지 않는다
- *   ④ 오케가 첫 마디를 받으면 상단 컴포저는 접힌다(대화 표면 하나)
- *   ⑤ 단, 티켓 상세의 "물어보기" 는 그 컴포저를 문장과 함께 되살린다
+ *   ② ★구독 스냅샷에 **없는** 데모/프리뷰 티켓을 눌러도 모달이 뜬다
+ *   ③ 에이전트 행 클릭 → **그 에이전트의 터미널**
+ *   ④ 두 모달은 겹치지 않는다
+ *   ⑤ 오케가 첫 마디를 받으면 상단 컴포저는 접힌다(대화 표면 하나)
+ *   ⑥ 단, 티켓 상세의 "물어보기" 는 그 컴포저를 문장과 함께 되살린다
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createElement, useCallback, useMemo, useState } from "react";
+import { createElement, useState } from "react";
 import {
   act,
   cleanup,
@@ -106,6 +113,7 @@ import { BeginnerChatBar } from "../../src/components/beginner/BeginnerChatBar";
 import { BeginnerLiveStrip } from "../../src/components/beginner/BeginnerLiveStrip";
 import { BeginnerTaskModal } from "../../src/components/beginner/BeginnerTaskModal";
 import { useBeginnerAsk } from "../../src/hooks/useBeginnerAsk";
+import { useBeginnerDetail } from "../../src/hooks/useBeginnerDetail";
 import { findAgentPtySessionId } from "../../src/lib/agentTerminal";
 import { beginnerComposerMode } from "../../src/lib/beginnerMode";
 import { useLocaleStore } from "../../src/lib/i18n";
@@ -153,34 +161,29 @@ const AGENT: Agent = {
 
 const SESSIONS = [{ id: "pty-7", name: "🟣 프론트-1", isAgent: true }];
 
-/** 셸이 하는 배선 그대로 — 핸들러 3개 + 컴포저 노출 규칙. */
+/**
+ * 데모/프리뷰 티켓 — 구독 스냅샷(`stores.tasks`)에는 없고, 카드로만 존재하는 것.
+ * 셸 밖에서 티켓 객체를 건네는 표면(온보딩 시연·프리뷰 보드)을 대신한다.
+ */
+const DEMO_TASK = task("demo-1", "TODO", "샘플: 시작 가이드 정리");
+
+/**
+ * 셸이 하는 배선 그대로. 선택 상태는 셸과 **같은 훅**을 부른다 — 여기서 로직을
+ * 베끼면 베낀 쪽만 맞아도 초록이 된다(이 파일 상단 주석 참조).
+ */
 function Harness() {
   const tasks = stores.tasks as Task[];
   const agents = stores.agents as Agent[];
   const ask = useBeginnerAsk();
   const [draft, setDraft] = useState("");
-  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
-  const [openAgentId, setOpenAgentId] = useState<string | null>(null);
-
-  const openTask = useMemo(
-    () =>
-      openTaskId ? (tasks.find((x) => x.id === openTaskId) ?? null) : null,
-    [openTaskId, tasks],
-  );
-  const openAgent = useMemo(
-    () =>
-      openAgentId ? (agents.find((a) => a.id === openAgentId) ?? null) : null,
-    [openAgentId, agents],
-  );
-
-  const openTaskDetail = useCallback((t: { id: string }) => {
-    setOpenAgentId(null);
-    setOpenTaskId(t.id);
-  }, []);
-  const openAgentTerminal = useCallback((a: { id: string }) => {
-    setOpenTaskId(null);
-    setOpenAgentId(a.id);
-  }, []);
+  const {
+    openTask,
+    openAgent,
+    openTaskDetail,
+    closeTaskDetail,
+    openAgentTerminal,
+    closeAgentTerminal,
+  } = useBeginnerDetail({ tasks, agents, projectId: "p1" });
 
   const composerMode = beginnerComposerMode({
     sentCount: ask.sentCount,
@@ -214,13 +217,21 @@ function Harness() {
       onTaskClick: openTaskDetail,
       onAgentClick: openAgentTerminal,
     }),
+    // ★스토어 밖에서 티켓 객체를 건네는 표면(데모/프리뷰 보드)의 자리. 미니
+    // 보드는 구독 스냅샷만 그리므로, 그 밖에서 온 티켓의 도착지는 여기서 본다.
+    createElement("button", {
+      key: "demo-card",
+      type: "button",
+      "data-testid": "harness-demo-task",
+      onClick: () => openTaskDetail(DEMO_TASK),
+    }),
     openTask &&
       createElement(BeginnerTaskModal, {
         key: "task-modal",
         task: openTask,
         agents,
         onAsk: setDraft,
-        onClose: () => setOpenTaskId(null),
+        onClose: closeTaskDetail,
       }),
     openAgent &&
       createElement(BeginnerAgentTerminalModal, {
@@ -228,7 +239,7 @@ function Harness() {
         agent: openAgent,
         task: tasks.find((x) => x.id === openAgent.currentTaskId) ?? null,
         sessionId: findAgentPtySessionId(SESSIONS, openAgent.name),
-        onClose: () => setOpenAgentId(null),
+        onClose: closeAgentTerminal,
       }),
   );
 }
@@ -264,6 +275,27 @@ describe("비기너 셸 배선 — 클릭의 도착지", () => {
         ) as HTMLTextAreaElement | null
       )?.value ?? "",
     ).toBe("");
+  });
+
+  it("★구독 스냅샷에 없는 데모/프리뷰 티켓을 눌러도 상세 모달이 뜬다", () => {
+    render(createElement(Harness));
+
+    fireEvent.click(screen.getByTestId("harness-demo-task"));
+
+    // 종전 배선(id 만 들고 tasks.find 로 재조회)에서는 여기서 아무 일도 일어나지
+    // 않았다 — 유저에게 남는 건 아래 대화바뿐이었고, 그게 보고된 지문이다.
+    const modal = screen.getByTestId("beginner-task-modal");
+    expect(modal.dataset.taskId).toBe("demo-1");
+    expect(modal.textContent).toContain("샘플: 시작 가이드 정리");
+  });
+
+  it("데모 티켓 상세도 닫힌다 — 스냅샷이 남아 다시 뜨지 않는다", () => {
+    render(createElement(Harness));
+
+    fireEvent.click(screen.getByTestId("harness-demo-task"));
+    fireEvent.click(screen.getByTestId("beginner-task-modal-close"));
+
+    expect(screen.queryByTestId("beginner-task-modal")).toBeNull();
   });
 
   it("★에이전트 행을 누르면 그 에이전트의 터미널이 열린다", () => {

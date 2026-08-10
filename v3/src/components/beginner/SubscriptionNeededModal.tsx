@@ -5,7 +5,7 @@ import type {
   OnboardingAuthState,
 } from "../../lib/fundingProbe";
 import { SUBSCRIPTION_URL, cliLabel } from "../../stores/cliSetupStore";
-import { BUTTON_GHOST, BUTTON_PRIMARY } from "./beginnerUi";
+import { BUTTON_GHOST, BUTTON_PRIMARY, emphasize } from "./beginnerUi";
 
 /**
  * ★"로그인은 됐는데 아무 일도 안 일어나요" 를 설명해 주는 가이드 모달
@@ -116,7 +116,11 @@ export function SubscriptionNeededModal({
                   <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#89b4fa]/20 text-[10px] font-semibold text-[#89b4fa]">
                     {i + 1}
                   </span>
-                  <span className="min-w-0">{t(key, { cli: label })}</span>
+                  {/* step2 에 `**같은 계정**` 강조가 들어 있다 — 별표가 그대로
+                      보이지 않게 <strong> 으로 쪼개 그린다. */}
+                  <span className="min-w-0">
+                    {emphasize(t(key, { cli: label }))}
+                  </span>
                 </li>
               ))}
             </ol>

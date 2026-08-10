@@ -76,3 +76,46 @@ export function SectionLabel({
     </div>
   );
 }
+
+/** `**강조**` 를 찾는 유일한 패턴. 비탐욕 — 한 문장에 둘 이상 있어도 각각 잡힌다. */
+const BOLD = /\*\*(.+?)\*\*/g;
+
+/**
+ * 온보딩 문구의 `**강조**` 를 진짜 `<strong>` 으로 그린다.
+ *
+ * ★왜 필요한가: 온보딩 카피 몇 줄이 마크다운 문법으로 쓰여 있는데, 이 화면들은
+ * 문자열을 그냥 텍스트 노드로 꽂는다. 그래서 사장님 프리뷰 테스트에서 첫 화면이
+ * "Connect \*\*either\*\* Claude or Codex" 로 보였다 — 신규 유저가 보는 **첫 문장**에
+ * 별표가 그대로 노출된 것이다.
+ *
+ * 고치는 방향이 둘이었다: (a) 문구에서 `**` 를 지워 평문으로, (b) 강조를 살려
+ * 렌더. (b) 를 고른 이유는 그 자리의 강조가 장식이 아니라 **문장의 요지**라서다 —
+ * "either(둘 중 하나만)", "same account(로그인한 것과 같은 계정)" 는 각각 그
+ * 화면에서 유저가 가장 자주 틀리는 지점이고, 굵게가 사라지면 문장이 평평해진다.
+ *
+ * 마크다운 파서를 들이지 않는다. 이 화면들이 쓰는 문법은 볼드 하나뿐이라,
+ * 파서·sanitizer 를 붙이는 건 그 한 줄을 위해 XSS 표면과 번들을 함께 들이는
+ * 일이다. 여기서는 문자열을 **쪼개서** React 노드로 돌려주므로 dangerouslySet~
+ * 이 등장하지 않는다 — 문구에 무엇이 들어 있든 텍스트로만 그려진다.
+ *
+ * 짝이 안 맞는 `**` 는 건드리지 않고 그대로 둔다(삼켜서 감추는 것보다 눈에 띄는
+ * 편이 낫다 — 문구를 고쳐야 한다는 신호다).
+ */
+export function emphasize(text: string): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  let key = 0;
+  // 모듈 스코프 정규식이라 lastIndex 를 매번 되감는다(g 플래그의 함정).
+  BOLD.lastIndex = 0;
+  for (let m = BOLD.exec(text); m !== null; m = BOLD.exec(text)) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    out.push(
+      <strong key={key++} className="font-semibold text-[#cdd6f4]">
+        {m[1]}
+      </strong>,
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}

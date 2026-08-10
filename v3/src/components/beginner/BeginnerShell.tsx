@@ -6,6 +6,7 @@ import { FundingGuideHost } from "../onboarding/FundingGuideHost";
 import { OnrampGateHost } from "../onboarding/OnrampGateHost";
 import { useAppLifecycle } from "../../hooks/useAppLifecycle";
 import { useBeginnerAsk } from "../../hooks/useBeginnerAsk";
+import { useBeginnerDetail } from "../../hooks/useBeginnerDetail";
 import { useCliSetupEngine } from "../../hooks/useCliSetupEngine";
 import {
   beginnerComposerMode,
@@ -149,12 +150,18 @@ export function BeginnerShell() {
   // 물어보기" 가 이 칸을 채우기 때문이다 — 상태가 컴포저 안에 갇혀 있으면 그
   // 프리필이 닿지 못한다.
   const [draft, setDraft] = useState("");
-  // 미니 보드/에이전트에서 연 티켓 상세. **id** 로 든다: 티켓 객체를 들면
-  // 구독이 갱신돼도 모달이 옛 스냅샷을 계속 그린다(상태가 안 움직인다).
-  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
-  // 에이전트 패널에서 연 터미널. 같은 이유로 id 로 든다(상태 점·담당 티켓이
-  // 모달 헤더에서도 살아 움직여야 한다).
-  const [openAgentId, setOpenAgentId] = useState<string | null>(null);
+  // ★미니 보드/에이전트에서 연 상세 오버레이. 선택 상태와 재조회 규칙은 훅이
+  // 든다(`useBeginnerDetail`) — 셸이 직접 들고 있던 시절에는 회귀 테스트가 그
+  // 로직을 손으로 베낄 수밖에 없었고, 베낀 쪽만 맞아도 테스트는 초록이었다.
+  const detail = useBeginnerDetail({ tasks, agents, projectId });
+  const {
+    openTask,
+    openAgent,
+    openTaskDetail,
+    closeTaskDetail,
+    openAgentTerminal,
+    closeAgentTerminal,
+  } = detail;
   const [showDemo, setShowDemo] = useState(false);
   // ★원클릭 모달을 **셸**이 든다. 연결 게이트 안에 두면 인증이 성립하는 순간
   // 게이트가 폴더 게이트로 갈아치워지면서 모달째 언마운트돼, "연결됐어요" 가
@@ -243,22 +250,8 @@ export function BeginnerShell() {
     [previewEnabled, setPreviewEnabled, promote],
   );
 
-  // 티켓 상세는 **현재** 구독 스냅샷에서 다시 찾는다. 티켓이 사라졌으면(오케가
-  // 지웠거나 프로젝트가 바뀌었으면) 모달도 자연히 닫힌다.
-  const openTask = useMemo(
-    () =>
-      openTaskId ? (tasks.find((x) => x.id === openTaskId) ?? null) : null,
-    [openTaskId, tasks],
-  );
-
-  // 에이전트 터미널도 **현재** 구독 스냅샷에서 다시 찾는다(에이전트가 죽어
-  // 목록에서 빠지면 모달도 닫힌다). 세션 짝짓기 규칙은 어드밴스드 에이전트
-  // 탭과 공유한다 — `lib/agentTerminal`.
-  const openAgent = useMemo(
-    () =>
-      openAgentId ? (agents.find((a) => a.id === openAgentId) ?? null) : null,
-    [openAgentId, agents],
-  );
+  // 에이전트 터미널 모달의 헤더가 쓰는 담당 티켓. 세션 짝짓기 규칙은 어드밴스드
+  // 에이전트 탭과 공유한다 — `lib/agentTerminal`.
   const openAgentTask = useMemo(
     () =>
       openAgent?.currentTaskId
@@ -273,20 +266,6 @@ export function BeginnerShell() {
         : undefined,
     [openAgent, terminalSessions],
   );
-
-  // 두 모달은 서로를 배타한다 — 겹쳐 띄우면 Esc 한 번이 어느 쪽을 닫는지
-  // 알 수 없고, 둘 다 z-[60] 이라 뒤엣것이 그냥 가려진다.
-  const openTaskDetail = useCallback((task: { id: string }) => {
-    setOpenAgentId(null);
-    setOpenTaskId(task.id);
-  }, []);
-  const closeTaskDetail = useCallback(() => setOpenTaskId(null), []);
-
-  const openAgentTerminal = useCallback((agent: { id: string }) => {
-    setOpenTaskId(null);
-    setOpenAgentId(agent.id);
-  }, []);
-  const closeAgentTerminal = useCallback(() => setOpenAgentId(null), []);
 
   // 티켓 상세의 "오케에게 물어보기" — 문장을 대화창에 **채우기만** 한다. 대신
   // 보내 주면 유저가 무엇이 나갔는지 모른 채 오케가 움직이고, 문장을 고칠 기회도
@@ -560,11 +539,7 @@ export function BeginnerShell() {
       <BeginnerTour
         ready={cliReady && hasFolder}
         blocked={
-          !!promotion ||
-          showDemo ||
-          showOneClick ||
-          !!openTaskId ||
-          !!openAgentId
+          !!promotion || showDemo || showOneClick || !!openTask || !!openAgent
         }
       />
 

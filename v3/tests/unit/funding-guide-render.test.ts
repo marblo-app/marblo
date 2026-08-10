@@ -115,6 +115,16 @@ describe("FundingGuideHost — 구독 없음", () => {
     );
   });
 
+  it("★2단계의 `**같은 계정**` 강조가 별표로 새지 않는다", () => {
+    render(createElement(FundingGuideHost));
+
+    const steps = screen.getByTestId("beginner-funding-steps");
+    // 문구는 마크다운으로 쓰여 있고, 이 화면은 그걸 <strong> 으로 쪼개 그린다
+    // (beginnerUi.emphasize). 안 그러면 안내문에 별표가 그대로 보인다.
+    expect(steps.textContent).not.toContain("*");
+    expect(steps.querySelector("strong")?.textContent?.trim()).toBeTruthy();
+  });
+
   it("'API 요금제 간단 결제' 는 자리만 잡아 둔다 — 누를 수 있는 버튼이 아니다", () => {
     // 결제 배선은 별도 스파이크(OF2wawHo)라, 여기 버튼을 두면 아무 일도 안
     // 일어나는 버튼이 된다.

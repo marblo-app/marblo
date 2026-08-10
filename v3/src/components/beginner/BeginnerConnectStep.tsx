@@ -18,7 +18,7 @@ import { useOnboardingPreviewStore } from "../../stores/onboardingPreviewStore";
 import telemetry from "../../services/telemetryService";
 import { OnrampDecomposeCard } from "../onboarding/OnrampDecomposeCard";
 import { PreviewTerminal } from "./PreviewTerminal";
-import { BUTTON_GHOST, BUTTON_PRIMARY } from "./beginnerUi";
+import { BUTTON_GHOST, BUTTON_PRIMARY, emphasize } from "./beginnerUi";
 
 /**
  * 비기너 진입 게이트 — **하나만** 연결하면 통과.
@@ -146,8 +146,13 @@ export function BeginnerConnectStep({
       <h1 className="text-lg font-semibold text-[#cdd6f4]">
         {t("beginner.connect.title")}
       </h1>
-      <p className="mt-1.5 text-sm leading-6 text-[#a6adc8]">
-        {t("beginner.connect.subtitle")}
+      {/* ★문구에 `**둘 중 하나만**` 강조가 들어 있다 — 별표가 그대로 보이지
+          않게 <strong> 으로 쪼개 그린다(beginnerUi.emphasize). */}
+      <p
+        data-testid="beginner-connect-subtitle"
+        className="mt-1.5 text-sm leading-6 text-[#a6adc8]"
+      >
+        {emphasize(t("beginner.connect.subtitle"))}
       </p>
 
       {/* ── ★L0: 연결 **전에** 먼저 값을 준다 (온램프 사다리 #886 §4) ─────
