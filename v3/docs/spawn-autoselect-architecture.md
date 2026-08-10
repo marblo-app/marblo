@@ -7,15 +7,15 @@
 
 관련 구현 모듈:
 
-| 층 | 모듈 | 역할 |
-| --- | --- | --- |
-| 오케 판단 | MCP `get_model_guidance` | 정적+동적 근거 서빙 (선택 자체는 안 함) |
-| 디스패치 진입 | `electron/bridge-server.ts` | explicit 우회 / 후보 수집 / 1·2층 호출 / 핀 적용 / `spawnNewAgent` |
-| 1층 (하네스) | `electron/dispatch-scoring.ts` | 프로바이더 경쟁 (`scoreModelsDetailed`) |
-| 2층 (칸) | `electron/model-autoselect.ts` | 하네스 안 칸 선택 (`selectAutoModel`) |
-| 사다리 | `electron/model-ladder.ts` | 난도→진입칸·순서·승인게이트 |
-| KG | `electron/routing-graph.ts` | `graphBias` · 관측수 (로컬 파일) |
-| 벤치/단가 사실 | `model-bench-reference` · `model-registry` · `model-fact-sheet` · `model-guidance` | 정적 단일소스 |
+| 층             | 모듈                                                                               | 역할                                                               |
+| -------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| 오케 판단      | MCP `get_model_guidance`                                                           | 정적+동적 근거 서빙 (선택 자체는 안 함)                            |
+| 디스패치 진입  | `electron/bridge-server.ts`                                                        | explicit 우회 / 후보 수집 / 1·2층 호출 / 핀 적용 / `spawnNewAgent` |
+| 1층 (하네스)   | `electron/dispatch-scoring.ts`                                                     | 프로바이더 경쟁 (`scoreModelsDetailed`)                            |
+| 2층 (칸)       | `electron/model-autoselect.ts`                                                     | 하네스 안 칸 선택 (`selectAutoModel`)                              |
+| 사다리         | `electron/model-ladder.ts`                                                         | 난도→진입칸·순서·승인게이트                                        |
+| KG             | `electron/routing-graph.ts`                                                        | `graphBias` · 관측수 (로컬 파일)                                   |
+| 벤치/단가 사실 | `model-bench-reference` · `model-registry` · `model-fact-sheet` · `model-guidance` | 정적 단일소스                                                      |
 
 ---
 
@@ -26,7 +26,7 @@
 1. **1층 — 어느 CLI/하네스** (`claude` / `gpt` / `grok` / …)  
    → `scoreModelsDetailed` (태그 · costEff · `budgetBias` · `graphBias` · 동률 회전)
 2. **2층 — 그 하네스 안의 어느 칸** (`claude-opus-5`, `gpt-5.6-terra@medium`, …)  
-   → `selectAutoModel` (fit · cost · bench · capability · kg · diversity · ε-greedy · 동률 회전)
+   → `selectAutoModel` (fit · workload · cost · bench · capability · kg · diversity · ε-greedy · 동률 회전)
 
 `dispatch_task`에 **`model`이 있으면 두 층 모두 스코어링을 건너뛴다.**  
 하네스만 지정해도(`model="claude"`) 2층 자동선택이 돌지 않고, 종전 complexity 티어 상수 경로로 핀이 비어 떨어진다.
@@ -68,10 +68,10 @@
 
 ### `get_model_guidance`가 하는 일 / 안 하는 일
 
-| 한다 | 안 한다 |
-| --- | --- |
-| 정적(단가·벤치·컨텍스트·티어) + 동적(보드 실적) 서술 | 스폰 결정, 추천 점수, 자동 핀 |
-| 오케가 `dispatch_task(model=…)` 하기 **전** 판단 재료 | bridge-server 핫패스 입력 |
+| 한다                                                  | 안 한다                       |
+| ----------------------------------------------------- | ----------------------------- |
+| 정적(단가·벤치·컨텍스트·티어) + 동적(보드 실적) 서술  | 스폰 결정, 추천 점수, 자동 핀 |
+| 오케가 `dispatch_task(model=…)` 하기 **전** 판단 재료 | bridge-server 핫패스 입력     |
 
 동적 절반 조인 정의: `tasks/{id}`에 물질화된 `costTotal`(← `cost_logs` 롤업) + `dispatchMeta` + status  
 (`mcp-server/routing-effectiveness.ts` 1–28).
@@ -143,20 +143,29 @@ autoCandidates(harness, tier)
         ▼
 후보별 점수 (진입칸 대비):
   fit        FIT_PENALTY[tier] × 칸 거리 (비대칭)
+  workload   WORKLOAD_STEP_WEIGHT[tier] × intensity × clamp(칸 거리, ±2)
+             · intensity = 태그순합/2 + docs·chore 사전값(−0.5), [-1,+1] 포화
+             · 어휘는 `workload-tags.ts` 한 벌 — 1층 costEfficiencyScore 와 같은 목록
   cost       COST_WEIGHT[tier] × costPressure × log2(entryCost/candCost)
              · 구독형 effective 단가 = list × subscriptionCostScaleForHeadroom(used%)
   bench      BENCH_WEIGHT × (ΔSWE / 10)  — 같은 벤치끼리만
   capability CAPABILITY_WEIGHT × Δ등급   — 벤치 비교 불가 시만
   kg         graphBiasForModel([modelKey, harness], ctx, graph)  ±20
-  diversity  UCB1: C × √(ln(totalObs+1)/(n+1))
-  total      = fit + cost + bench + capability + kg + diversity
+  diversity  UCB1: C × √(ln(totalObs+1)/(n+1)) × 근접감쇠(≤1칸 1, 밖은 1/거리)
+             · n·totalObs 는 **dispatch 환산**(맥락 축 개수로 나눈다)
+             · 쿼터 pressure>1 이면 0 (탐색을 사지 않는 국면)
+  total      = fit + workload + cost + bench + capability + kg + diversity
+               + usage + weeklyLimit
         │
         ▼
 승자 선택:
-  · gpt + 콜드 KG + diversity off → entry 고정 (gptShouldHoldEntry)
-  · 쿼터 pressure>1 (잔여 <50% 스케일) → explore/rotate 끔, top-score만
+  · gpt + 콜드 KG + diversity off + **명시 워크로드 태그 없음** → entry 고정
+    (gptShouldHoldEntry — 추론 taskType 만으로는 안 열린다)
+  · 쿼터 pressure>1 (잔여 <50% 스케일) → explore/rotate/diversity 끔, top-score만
   · else ε-greedy: 확률 ε → 진입칸 ±1 창에서 관측 최소 칸 (explore)
-  · else 동률 밴드 TIE_BAND(5) 안이면 하네스별 회전 (tie-rotate)
+  · else 동률 밴드 TIE_BAND(5) 안이면 회전 (tie-rotate)
+    · 회전 카운터는 **(하네스 · 티어 · 역할)** 스트림별 — 다른 맥락의 dispatch 가
+      내 회전을 밀지 않는다
   · else top-score
         │
         ▼
@@ -169,76 +178,80 @@ AutoModelPlan { model, effort, modelKey, mode, reason, scores… }
 
 ### 4.1 2층 (`model-autoselect.ts`)
 
-| 성분 | 상수/함수 | 위치 | 스케일·의미 |
-| --- | --- | --- | --- |
-| 난도 적합 `fit` | `FIT_PENALTY` | 111–119, 점수 625–632 | 진입칸 거리 감점; simple 상향 강벌 / complex 하향 강벌 |
-| 단가 `cost` | `COST_WEIGHT` | **122–126**, 605–646 | simple:12 / standard:7 / complex:2 (반값당 점수, log2) |
-| 잔여 쿼터 → 단가 | `subscriptionCostScaleForHeadroom` · `costPressureForHeadroom` · `effectiveCostIndexForModel` | 174–260, 227–238 | 구독형 list 단가 스케일 + cost 항 증폭; **별도 budgetBias 항 아님** |
-| 벤치 `benchScore` | `BENCH_WEIGHT` + `modelGuidance().benchScore` | 128–133, 346–375, 651–658 | SWE 10pt당 점수; 같은 `benchmark` id끼리만 차감 |
-| 능력 폴백 | `CAPABILITY_WEIGHT` | 140–144, 660–663 | 벤치 비교 불가 시만; 티어 라벨은 **점수에 안 넣음**(이중계상 금지 29–31) |
-| KG `kg` | `graphBiasForModel` | 664–666 | ±20; model@effort 키 + harness 폴백 |
-| 다양성 UCB1 | `DEFAULT_DIVERSITY_C=4`, `diversityBonus` | **268–273, 305–314, 668–672** | 저표본 상시 보너스; env `MARBLO_ROUTING_DIVERSITY` |
-| ε-greedy | `DEFAULT_EPSILON=0.15`, `resolveEpsilon` | **265–266, 285–291, 722–730** | env `MARBLO_ROUTING_EXPLORE`; 빈 문자열=기본(0 아님) |
-| 동률 회전 | `TIE_BAND=5`, `nextRotation(harness)` | **262–263, 553–559, 732–735** | 하네스별 카운터 (#654/#656 계열: 전역 공유 시 회전 사망 방지 주석 548–551) |
-| 승인게이트 | `usableRungs()` 무승인 호출 | 427–429, ladder 697–706 | max/ultra 후보 제외 |
-| 결정 사유 한 줄 | `formatAutoReason` | 815–845 | dispatchReason에 부착 |
+> ★"위치" 열은 **상수·함수 이름**이다(종전엔 줄번호였는데, 파일이 한 번 커질 때마다
+> 표 전체가 조용히 거짓말이 됐다 — 이름은 grep 하면 항상 맞는다).
+
+| 성분                | 상수/함수                                                                                        | 스케일·의미                                                                                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 난도 적합 `fit`     | `FIT_PENALTY`                                                                                    | 진입칸 거리 감점; simple 상향 강벌 / complex 하향 강벌                                                                                                     |
+| 워크로드 `workload` | `WORKLOAD_STEP_WEIGHT`(4/6/4) · `workloadIntensity` · `WORKLOAD_STEP_CAP=2` · `workload-tags.ts` | 티켓 내용(tags·taskType)이 `fit` 과 **같은 축을 반대 부호로** 민다. 중립 ctx = 정확히 0(무회귀). 어느 방향이든 그 티어의 `fit` 안전선을 넘지 못하게 잡았다 |
+| 단가 `cost`         | `COST_WEIGHT`                                                                                    | simple:12 / standard:7 / complex:2 (반값당 점수, log2)                                                                                                     |
+| 잔여 쿼터 → 단가    | `subscriptionCostScaleForHeadroom` · `costPressureForHeadroom` · `effectiveCostIndexForModel`    | 구독형 list 단가 스케일 + cost 항 증폭; **별도 budgetBias 항 아님**                                                                                        |
+| 벤치 `benchScore`   | `BENCH_WEIGHT` + `modelGuidance().benchScore`                                                    | SWE 10pt당 점수; 같은 `benchmark` id끼리만 차감                                                                                                            |
+| 능력 폴백           | `CAPABILITY_WEIGHT`                                                                              | 벤치 비교 불가 시만; 티어 라벨은 **점수에 안 넣음**(이중계상 금지)                                                                                         |
+| KG `kg`             | `graphBiasForModel`                                                                              | ±20; model@effort 키 + harness 폴백                                                                                                                        |
+| 다양성 UCB1         | `DEFAULT_DIVERSITY_C=4`, `diversityBonus`, `explorationProximity`                                | 저표본 상시 보너스. n·total 은 **dispatch 환산**(맥락 축 개수로 나눔), 창(±1) 밖은 거리 반비례 감쇠, 절약 국면엔 0. env `MARBLO_ROUTING_DIVERSITY`         |
+| ε-greedy            | `DEFAULT_EPSILON=0.15`, `resolveEpsilon`                                                         | env `MARBLO_ROUTING_EXPLORE`; 빈 문자열=기본(0 아님)                                                                                                       |
+| 동률 회전           | `TIE_BAND=5`, `rotationStreamKey` + `nextRotation`                                               | **(하네스·티어·역할) 스트림별** 카운터 (#654/#656 계열: 전역 공유 시 회전 사망)                                                                            |
+| 승인게이트          | `usableRungs()` 무승인 호출                                                                      | max/ultra 후보 제외                                                                                                                                        |
+| 결정 사유 한 줄     | `formatAutoReason`                                                                               | dispatchReason에 부착                                                                                                                                      |
 
 ### 4.2 1층 (`dispatch-scoring.ts`)
 
-| 성분 | 위치 | 비고 |
-| --- | --- | --- |
-| `budgetBias` | 212–255, 834, 883 | ±20; 잔여 0 → hard block (`bias=null`); no-data → 0 |
-| `costEff` | 158–186, 270–312, 833 | 정적 비용효율 테이블 + 구독 플랜 시 MAX |
-| `graphBias` | 854–860 | 2층과 같은 KG, 키는 bridge `graphKeysFor` 주입 |
+| 성분             | 위치                                                    | 비고                                                 |
+| ---------------- | ------------------------------------------------------- | ---------------------------------------------------- |
+| `budgetBias`     | 212–255, 834, 883                                       | ±20; 잔여 0 → hard block (`bias=null`); no-data → 0  |
+| `costEff`        | 158–186, 270–312, 833                                   | 정적 비용효율 테이블 + 구독 플랜 시 MAX              |
+| `graphBias`      | 854–860                                                 | 2층과 같은 KG, 키는 bridge `graphKeysFor` 주입       |
 | 동률/무태그 회전 | `TIED_SCORE_BAND=5` 471; `modelRoundRobin` 703, 912–932 | mode: `tie-band-round-robin` / `round-robin-no-tags` |
-| 합산 | 867–874 | base+tags+costEff+budget+agy+graph |
+| 합산             | 867–874                                                 | base+tags+costEff+budget+agy+graph                   |
 
 ### 4.3 사다리 (`model-ladder.ts`)
 
-| 항목 | 위치 |
-| --- | --- |
+| 항목                                                                    | 위치             |
+| ----------------------------------------------------------------------- | ---------------- |
 | claude 진입: simple=sonnet5(idx3), standard=opus5(4), complex=fable5(9) | 302–353, 564–568 |
-| gpt: luna@low / terra@medium / sol@high + max/ultra 게이트 | 368–429, 573–578 |
-| grok: 단일 칸 `grok-4.5` (그래프 읽기/쓰기 키 정합) | 454–460, 581–586 |
-| `costIndexForModel` (blended list price) | 141–149 |
-| `usableRungs` / `gateRung` | 231–266, 697–706 |
+| gpt: luna@low / terra@medium / sol@high + max/ultra 게이트              | 368–429, 573–578 |
+| grok: 단일 칸 `grok-4.5` (그래프 읽기/쓰기 키 정합)                     | 454–460, 581–586 |
+| `costIndexForModel` (blended list price)                                | 141–149          |
+| `usableRungs` / `gateRung`                                              | 231–266, 697–706 |
 
 ### 4.4 KG (`routing-graph.ts`)
 
-| 항목 | 위치 |
-| --- | --- |
-| `GRAPH_BIAS_MAX=20`, `SHRINKAGE_K=6` | 147–151 |
-| `graphBiasForModel` | 617–631 |
-| `observationCountForModel` (ε 탐색의 “빈 셀”) | 644–665 |
-| `loadRoutingGraph` (동기 mtime 캐시) | 791+ |
-| 저장 | `~/.marblo/routing-graph.json` (+ project overlay) |
+| 항목                                          | 위치                                               |
+| --------------------------------------------- | -------------------------------------------------- |
+| `GRAPH_BIAS_MAX=20`, `SHRINKAGE_K=6`          | 147–151                                            |
+| `graphBiasForModel`                           | 617–631                                            |
+| `observationCountForModel` (ε 탐색의 “빈 셀”) | 644–665                                            |
+| `loadRoutingGraph` (동기 mtime 캐시)          | 791+                                               |
+| 저장                                          | `~/.marblo/routing-graph.json` (+ project overlay) |
 
 ### 4.5 벤치·가이던스 단일소스
 
-| 모듈 | 역할 | 핵심 위치 |
-| --- | --- | --- |
-| `model-bench-reference.ts` | 공개 SWE 참조표 (라우팅이 **직접** import 안 함 — 테스트 강제) | 상단 규율 1–11 |
-| `model-fact-sheet.ts` | 조인 + `pickBenchRecords` (화면·오케 대표 벤치 동일) | 194–221 |
-| `model-guidance.ts` | 정적 페이로드 `modelGuidanceStatic()` | 95–140 |
-| `mcp-server/model-guidance-report.ts` | 정적×동적 합류 (MCP 전용) | `mergeModelGuidance` 144–167 |
-| `mcp-server/tools.ts` | `get_model_guidance` 툴 | 7449–7541 |
-| bridge `GET /model-guidance` | 메인→MCP 정적 전달 | ~1249–1257 |
+| 모듈                                  | 역할                                                           | 핵심 위치                    |
+| ------------------------------------- | -------------------------------------------------------------- | ---------------------------- |
+| `model-bench-reference.ts`            | 공개 SWE 참조표 (라우팅이 **직접** import 안 함 — 테스트 강제) | 상단 규율 1–11               |
+| `model-fact-sheet.ts`                 | 조인 + `pickBenchRecords` (화면·오케 대표 벤치 동일)           | 194–221                      |
+| `model-guidance.ts`                   | 정적 페이로드 `modelGuidanceStatic()`                          | 95–140                       |
+| `mcp-server/model-guidance-report.ts` | 정적×동적 합류 (MCP 전용)                                      | `mergeModelGuidance` 144–167 |
+| `mcp-server/tools.ts`                 | `get_model_guidance` 툴                                        | 7449–7541                    |
+| bridge `GET /model-guidance`          | 메인→MCP 정적 전달                                             | ~1249–1257                   |
 
 ### 4.6 디스패치 배선 (`bridge-server.ts`)
 
-| 단계 | 대략 라인 |
-| --- | --- |
-| pin 해석 / explicit `model` | 2075–2107 |
-| budget snapshot | 2231–2244 부근 |
-| explicit budget 소진 차단 | 2482–2500 |
-| 가용성 필터 (explicit 제외) | 2518–2524 |
-| routing graph 로드 (explicit이면 null 취급 분기) | 2529 |
-| **autoselect 우회 계약** | **2548–2570** |
-| 1층 score | 2591–2601 |
-| pin 합성: `modelPin ?? autoPin` | 2661–2698 |
-| decisionReason explicit vs scored | 2701–2703 |
-| `spawnNewAgent` | 2704–2722 |
-| 텔레메트리 `explicitModel` | 2767+ |
+| 단계                                             | 대략 라인      |
+| ------------------------------------------------ | -------------- |
+| pin 해석 / explicit `model`                      | 2075–2107      |
+| budget snapshot                                  | 2231–2244 부근 |
+| explicit budget 소진 차단                        | 2482–2500      |
+| 가용성 필터 (explicit 제외)                      | 2518–2524      |
+| routing graph 로드 (explicit이면 null 취급 분기) | 2529           |
+| **autoselect 우회 계약**                         | **2548–2570**  |
+| 1층 score                                        | 2591–2601      |
+| pin 합성: `modelPin ?? autoPin`                  | 2661–2698      |
+| decisionReason explicit vs scored                | 2701–2703      |
+| `spawnNewAgent`                                  | 2704–2722      |
+| 텔레메트리 `explicitModel`                       | 2767+          |
 
 ---
 
@@ -264,12 +277,12 @@ AutoModelPlan { model, effort, modelKey, mode, reason, scores… }
 
 ## 6. 환경변수 · 정책 스위치
 
-| 키 | 기본 | 효과 |
-| --- | --- | --- |
-| `MARBLO_ROUTING_EXPLORE` | 0.15 (`DEFAULT_EPSILON`) | ε-greedy 확률. `0`=탐색 끔. **미설정≠0** |
-| `MARBLO_ROUTING_DIVERSITY` | 4 (`DEFAULT_DIVERSITY_C`) | UCB1 계수. `0`=diversity 항 끔 |
-| `MARBLO_MODEL_PRESET` | (프로젝트 설정) | enabled harness 집합 |
-| 승인 게이트 max/ultra | 사용자 1회/티켓 | 사다리 상단; 자동선택 후보 제외 |
+| 키                         | 기본                      | 효과                                     |
+| -------------------------- | ------------------------- | ---------------------------------------- |
+| `MARBLO_ROUTING_EXPLORE`   | 0.15 (`DEFAULT_EPSILON`)  | ε-greedy 확률. `0`=탐색 끔. **미설정≠0** |
+| `MARBLO_ROUTING_DIVERSITY` | 4 (`DEFAULT_DIVERSITY_C`) | UCB1 계수. `0`=diversity 항 끔           |
+| `MARBLO_MODEL_PRESET`      | (프로젝트 설정)           | enabled harness 집합                     |
+| 승인 게이트 max/ultra      | 사용자 1회/티켓           | 사다리 상단; 자동선택 후보 제외          |
 
 ---
 

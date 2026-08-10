@@ -23,15 +23,15 @@
 
 ## 2. `events` — `dispatch:decision` 에 추가된 키 (전부 `metadata` JSON)
 
-| 키                   | 타입               | 무엇                                                                                          | 근거      |
-| -------------------- | ------------------ | --------------------------------------------------------------------------------------------- | --------- |
-| `plannedModelKey`    | string             | **라우터가 고른 칸**(`model@effort`) — 액션 축                                                | F-1       |
-| `spawnedModel`       | string?            | **실제로 뜬 칸** — 실현 축(요청과 갈릴 수 있다)                                               | F-1       |
-| `spawnedModelSource` | `argv`\|`observed` | 위 값의 근거. 없으면 필드 자체가 없다                                                         | F-1       |
-| `candidateKeys`      | string[]           | **비선택 후보까지** 같은 해상도로                                                             | F-1       |
-| `candidateCostIndex` | {키→number}        | 결정 시점 blended $/1M **스냅샷**                                                             | F-4       |
-| `decisionState`      | object             | `budgetUsedPercent` `weeklyTokenShare` `activeAgentCount` `roleAgentCount` `candidateSetSize` | F-2       |
-| `decisionComponents` | object             | 선택 칸의 8성분 + `mode`/`decidedBy`/`entryModelKey`/`movedFromEntry`/`coldStart`             | F-3 · G13 |
+| 키                   | 타입               | 무엇                                                                                                                                                                   | 근거      |
+| -------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `plannedModelKey`    | string             | **라우터가 고른 칸**(`model@effort`) — 액션 축                                                                                                                         | F-1       |
+| `spawnedModel`       | string?            | **실제로 뜬 칸** — 실현 축(요청과 갈릴 수 있다)                                                                                                                        | F-1       |
+| `spawnedModelSource` | `argv`\|`observed` | 위 값의 근거. 없으면 필드 자체가 없다                                                                                                                                  | F-1       |
+| `candidateKeys`      | string[]           | **비선택 후보까지** 같은 해상도로                                                                                                                                      | F-1       |
+| `candidateCostIndex` | {키→number}        | 결정 시점 blended $/1M **스냅샷**                                                                                                                                      | F-4       |
+| `decisionState`      | object             | `budgetUsedPercent` `weeklyTokenShare` `activeAgentCount` `roleAgentCount` `candidateSetSize`                                                                          | F-2       |
+| `decisionComponents` | object             | 선택 칸의 9성분(`fit` `workload` `cost` `bench` `capability` `kg` `diversity` `usage` `weeklyLimit`) + `mode`/`decidedBy`/`entryModelKey`/`movedFromEntry`/`coldStart` | F-3 · G13 |
 
 **액션 축이 두 필드인 이유**: `plannedModelKey`(고른 칸)와 `spawnedModel`(뜬 칸)은
 버전가드 폴백·런타임 강등에서 실제로 갈린다. 한 필드로 뭉개면 라벨이 오염된다.

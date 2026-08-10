@@ -791,6 +791,8 @@ export interface DispatchDecisionPayload {
     movedFromEntry?: boolean;
     coldStart?: boolean;
     fit?: number;
+    /** 티켓 내용(tags·taskType) 워크로드 성분 — 중립 dispatch 면 0. */
+    workload?: number;
     cost?: number;
     bench?: number;
     capability?: number;

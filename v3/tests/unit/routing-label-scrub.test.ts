@@ -37,6 +37,9 @@ const ROUTING_LABELS = {
     movedFromEntry: false,
     coldStart: true,
     fit: 0,
+    // 트랙A(Xna0v2mc)가 추가한 9번째 성분 — tags·taskType 워크로드. 값은 숫자라
+    // 위 §1/§2 판단(숫자·enum·모델 id 만 싣는다)이 그대로 성립한다.
+    workload: -6,
     cost: -2,
     bench: 3,
     capability: 0,

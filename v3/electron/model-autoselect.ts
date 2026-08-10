@@ -18,6 +18,9 @@
  *   · 난도적합  `model-ladder` 의 티어 **진입칸에서 몇 칸 떨어졌나**. 사다리 순서
  *               자체가 "능력등급 오름 + 같은 등급이면 싼 것" 이라는 정책이므로,
  *               거리만으로 난도 축이 표현된다(여기서 새 순서를 만들지 않는다).
+ *   · 워크로드  **티켓 내용**(tags · taskType)이 말하는 무게. 난도적합과 같은
+ *               축(진입칸 거리) 위에 얹혀 그 감점을 깎거나 키운다. 어휘는
+ *               `workload-tags.ts` 한 벌이라 1층 비용효율과 같은 목록을 읽는다.
  *   · 단가      `model-ladder.costIndexForModel`(레지스트리 실단가 blended).
  *               **배수(log2)** 로 센다 — "절반 값이면 +N점" 이라야 $3 과 $10 의
  *               차이가 티어를 넘나들며 일관된 의미를 갖는다.
@@ -35,7 +38,9 @@
  *   · 다양성    `MARBLO_ROUTING_DIVERSITY` 계수의 UCB1 형 저표본 보너스.
  *               exploitation 점수 자체에 상시로 들어가므로 85% top-score 경로도
  *               아직 덜 본 `model@effort` 셀을 조금 끌어올린다. 읽는 셀은 실제
- *               스폰할 그 키라 P2-2 해상도와 쓰기 경로가 맞는다.
+ *               스폰할 그 키라 P2-2 해상도와 쓰기 경로가 맞는다. 관측 수는
+ *               **dispatch 환산**으로 세고(맥락 축 개수로 나눈다), 보너스는
+ *               ε-greedy 와 같은 근접창 규율로 감쇠한다 — 아래 §UCB1 회계.
  *   · 실사용량  cost_logs 거울(`usage-rollup`) / getCostSummary.weeklyByModel.
  *               같은 창에서 토큰 비중이 큰 모델은 하향(로드밸런싱). 콜드=0.
  *   · 주간한도  `HARNESS_WEEKLY_TOKEN_SOFT_LIMIT` 근접 시 구독 계열 칸을 강하게
@@ -59,6 +64,16 @@
  *   2. **ε-greedy** — 확률 ε 로 인접 칸 중 **관측이 가장 적은 칸**을 고른다.
  *      무작위로 아무 칸이나 고르지 않는다. 목적이 "다양성" 이 아니라 "빈 셀 채우기"
  *      이기 때문이다(그래야 다음 판단이 실제로 좋아진다).
+ *
+ * ── ★UCB1 회계 — "관측 1건" 이 무엇인가 ─────────────────────────────────
+ * 그래프는 dispatch 결과 **1건**을 맥락 축(role · taskType · complexity · tag…)
+ * **마다** 한 셀씩 기록한다. `observationCountForModel` 은 그 셀들의 n 을 더해
+ * 돌려주므로, 태그 2개짜리 티켓의 결과 1건은 n=5 로 세어진다. 그러면
+ *   (a) 저표본 보너스의 감쇠 속도가 **티켓이 태그를 몇 개 달았느냐에 따라** 달라지고
+ *   (b) `DEFAULT_DIVERSITY_C` 주석이 말하는 보정("n=0, total≈10 에서 약 +6점")이
+ *       실제로는 dispatch 2~3건 만에 지나가 버린다 — 상수의 근거와 코드가 갈린다.
+ * 그래서 여기서 관측 수를 **맥락 축 개수로 나눠 dispatch 환산**으로 본다. 읽는 셀
+ * 자체는 그대로다(읽는 셀 = 쓰는 셀 불변식은 건드리지 않는다) — 세는 단위만 맞춘다.
  *
  * ── 규율 ────────────────────────────────────────────────────────────────
  * 1. **모델 사실을 새로 적지 않는다.** id·단가·effort·SWE·능력등급은 전부 조회다.
@@ -97,12 +112,14 @@ import {
 import { withModelTiers, type ModelTier } from "./mcp-server/model-tier";
 import { formatModelKey } from "./routing-model-key";
 import {
+  factorKeysForContext,
   graphBiasForModel,
   observationCountForModel,
   staleGraphAttenuation,
   type GraphContext,
   type RoutingGraph,
 } from "./routing-graph";
+import { classifyWorkloadTag } from "./workload-tags";
 import {
   tokensForHarness,
   tokensForModel,
@@ -133,6 +150,72 @@ const FIT_PENALTY: Readonly<Record<LadderTier, { up: number; down: number }>> =
     // 일어나면 안 되는 비용 증가다(반대로 하향은 회전으로도 시도할 만하다).
     complex: { up: 6, down: 12 },
   };
+
+/**
+ * 워크로드 신호의 **한 칸당** 점수. `fit` 과 **같은 축**(진입칸 거리) 위에 얹혀
+ * 그 감점을 깎거나 키운다 — 무거운 티켓이면 위로 가는 감점이 줄고 아래로 가는
+ * 감점이 커진다(가벼우면 반대).
+ *
+ * ── 왜 이 성분이 필요한가 (★이 티켓의 핵심) ────────────────────────────
+ * 2층이 보는 난도 축은 `tier` 하나뿐인데, **dispatch 의 기본값이 `standard` 다**
+ * (`bridge-server.ts` 의 `complexity = "standard"` 기본 인자). 그래서 아키텍처
+ * 개편 티켓과 오타 수정 티켓이 **같은 티어로 같은 점수판**을 받는다. 정작 그 차이를
+ * 아는 신호(tags · taskType)는 이미 dispatch 가 나르고 있고, 1층은 그것으로
+ * 비용효율을 증폭/감쇠하는데(`dispatch-scoring.costEfficiencyScore`) 2층만
+ * 통째로 버렸다. KG 가 언젠가 배우긴 하지만 그건 **그 태그 조합의 셀이 찰 때까지**
+ * 이고, audit(`docs/routing/label-capture-audit-2026-08-10.md` §6 G9)이 못 박은
+ * 대로 표본은 얇다 — 즉 실사용 대부분의 시간 동안 태그는 칸을 못 움직인다.
+ *
+ * ── 크기의 근거 (각 티어의 FIT_PENALTY 와 TIE_BAND=5 대비) ──────────────
+ *   · standard(6) — up 9 / down 5. 무거우면 up 3·down 11 이 되어 **위 칸이 근거로
+ *     닿는 거리**가 되고, 가벼우면 up 15·down −1 이라 값싼 칸이 회전 운(運)이
+ *     아니라 티켓 내용으로 이긴다. opus5 편중이 실제로 풀려야 하는 그 자리다.
+ *   · simple(4) < up 14 — 태그가 아무리 무거워도 simple 티켓의 상향 감점을
+ *     뒤집지 못한다(10/칸이 남는다). 진짜 무거우면 dispatch 가 난도를 올려야지
+ *     태그가 비용 폭발의 뒷문이 되면 안 된다.
+ *   · complex(4) < down 12 — 가벼운 태그가 complex 를 무너뜨리지 못한다(8/칸이
+ *     남는다). "어려운 티켓의 실패는 재작업이라 절약분보다 비싸다"(FIT_PENALTY).
+ * 어느 방향이든 **fit 을 이기지 못하도록** 티어별로 fit 의 작은 쪽보다 작게 잡았다.
+ */
+const WORKLOAD_STEP_WEIGHT: Readonly<Record<LadderTier, number>> = {
+  simple: 4,
+  standard: 6,
+  complex: 4,
+};
+
+/**
+ * 워크로드 축이 포화하는 **순 태그 개수**. 한 개로 축이 최대가 되면 태그 하나
+ * 오타·습관이 라우팅을 끝까지 밀어 버린다. 서로 동의하는 태그 2개는 실제 신호다.
+ */
+export const WORKLOAD_TAG_SATURATION = 2;
+
+/**
+ * 워크로드 신호가 **몇 칸까지** 발언권을 갖나. 그 너머의 칸에도 신호는 실리지만
+ * 크기가 더 자라지 않아서, 남은 거리는 `fit` 감점이 그대로 다 받는다.
+ *
+ * ★왜 상한이 필요한가: 이 성분은 `fit` 과 같은 축이라 칸당 선형이다. standard
+ * (fit down 5 / 칸)에서 가벼운 신호가 최대치면 칸당 +6 이 되어 **아래로 갈수록
+ * 총점이 계속 오른다** — 즉 "가벼운 티켓" 하나가 사다리 바닥까지 미끄러진다.
+ * 티켓이 말한 것은 "이건 더 가볍다" 이지 "가장 싼 칸이면 뭐든 좋다" 가 아니다.
+ * 2칸으로 묶으면 이웃 칸 경쟁은 신호가 정하고, 더 먼 칸은 단가·벤치·KG 가 스스로
+ * 이겨서 와야 한다(ε-greedy 의 `EXPLORE_WINDOW` 와 같은 "이웃까지만" 규율).
+ */
+const WORKLOAD_STEP_CAP = 2;
+
+/**
+ * taskType 만으로 주는 **약한** 사전값(태그 하나의 절반).
+ *
+ * ★`docs`/`chore` 만 넣는다. 이 둘은 분류기(`mcp-server/task-type.ts`)가 티켓
+ * 본문에서 뽑는 라벨이고, "문서·잡무는 프론티어 칸이 필요 없다" 는 판단은 되돌리기
+ * 쉬운 쪽으로 틀린다(틀려도 재작업 1건, 맞으면 상시 절감).
+ *
+ * ★나머지 5종(bug-fix/feature/refactor/test/infra)은 **일부러 중립**이다. 버그
+ * 수정은 한 줄일 수도 사흘짜리 디버깅일 수도 있어서 어느 쪽으로 밀어도 근거가
+ * 없고, 근거 없는 사전값은 KG 가 배우기 전까지 라우팅을 계속 왜곡한다. 이 축을
+ * 채우는 것은 사전값이 아니라 관측(`kg`)의 몫이다.
+ */
+const LIGHT_TASK_TYPES: ReadonlySet<string> = new Set(["docs", "chore"]);
+const LIGHT_TASK_TYPE_PRIOR = -0.5;
 
 /** 단가 **반값당** 점수. 쉬운 일일수록 값이 크다(품질 여유가 크므로). */
 const COST_WEIGHT: Readonly<Record<LadderTier, number>> = {
@@ -377,6 +460,50 @@ export function diversityBonus(
   return coefficient * Math.sqrt(Math.log(total + 1) / (n + 1));
 }
 
+/**
+ * **명시 태그**만으로 센 순 무게(무거운 태그 +1, 가벼운 태그 −1). 0 = 태그가
+ * 없거나 서로 상쇄.
+ *
+ * taskType 사전값과 분리해 두는 이유: 태그는 **사람이 그 티켓에 직접 단 선언**
+ * 이고 taskType 은 티켓 본문에서 **추론한 라벨**이다. 정책 게이트를 여는 것 같은
+ * 되돌리기 어려운 판단은 선언에만 맡긴다(아래 gpt 진입칸 보류 해제).
+ */
+export function workloadTagNet(ctx: GraphContext | null | undefined): number {
+  const tags = Array.isArray(ctx?.tags) ? ctx.tags : [];
+  let net = 0;
+  for (const tag of tags) {
+    const workload = classifyWorkloadTag(tag);
+    if (workload === "heavy") net += 1;
+    else if (workload === "cheap") net -= 1;
+  }
+  return net;
+}
+
+/**
+ * 이 dispatch 가 **얼마나 무거운 일인가** — `[-1, +1]`. 0 = 중립(무회귀).
+ *
+ * 재료는 둘 다 이미 ctx 에 실려 오는 것이다(새 사실 0):
+ *   · `tags` — `workload-tags.ts` 어휘(1층 비용효율과 **같은 목록**). 무거운 태그
+ *     +1, 가벼운 태그 −1 로 세고 `WORKLOAD_TAG_SATURATION` 으로 나눈다.
+ *   · `taskType` — `docs`/`chore` 에만 약한 사전값(`LIGHT_TASK_TYPE_PRIOR`).
+ *
+ * 둘은 **더한다**: 태그 `architecture` 가 붙은 docs 티켓(설계문서 개편)은 순
+ * +0.5 로 남아야지, taskType 이 태그를 덮어써서 "문서니까 싼 칸" 이 되면 안 된다.
+ *
+ * ★fail-safe: IPC 로 들어온 값이라 배열·문자열 여부를 여기서 확인한다. 모르는
+ * 태그는 중립이고(추측 금지), 값이 이상하면 0 = 종전 동작이다.
+ */
+export function workloadIntensity(
+  ctx: GraphContext | null | undefined,
+): number {
+  let intensity = workloadTagNet(ctx) / WORKLOAD_TAG_SATURATION;
+  const taskType =
+    typeof ctx?.taskType === "string" ? ctx.taskType.trim().toLowerCase() : "";
+  if (LIGHT_TASK_TYPES.has(taskType)) intensity += LIGHT_TASK_TYPE_PRIOR;
+  if (!Number.isFinite(intensity)) return 0;
+  return Math.max(-1, Math.min(1, intensity));
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // 정적 가이던스(단가 · SWE · 능력등급 · 티어) — ★obPe `get_model_guidance` 소비
 //
@@ -537,6 +664,8 @@ export interface AutoScoreBreakdown {
   candidate: AutoCandidate;
   /** 난도적합(진입칸 거리 감점, ≤0). */
   fit: number;
+  /** 티켓 내용(tags·taskType)이 말하는 무게 × 진입칸 거리. 중립 ctx 면 0. */
+  workload: number;
   /** 단가(진입칸 대비 배수, 잔여예산 압력 반영). */
   cost: number;
   /** SWE-bench 차이. 벤치가 없으면 0 이고 `capability` 가 대신 움직인다. */
@@ -579,9 +708,10 @@ export interface AutoModelPlan {
   movedFromEntry: boolean;
   /** 그래프에 이 맥락의 관측이 하나도 없나(콜드 = 정적신호로만 판단했다). */
   coldStart: boolean;
-  /** 무엇이 결정했나 — 난이도/단가/능력/효과/다양성/사용량/한도/탐색/동률. */
+  /** 무엇이 결정했나 — 난이도/무게/단가/능력/효과/다양성/사용량/한도/탐색/동률. */
   decidedBy:
     | "fit"
+    | "workload"
     | "cost"
     | "bench"
     | "capability"
@@ -632,12 +762,36 @@ export interface AutoSelectInput {
  * 이다. 한 dispatch 는 후보 하네스마다 이 함수를 한 번씩 부르므로(claude·gpt…),
  * 전역 카운터 하나를 공유하면 호출 수가 밴드 크기의 배수가 되어 회전이 제자리를
  * 돈다 — claude 밴드 2칸 × dispatch 당 2호출 = 매번 같은 칸(회전이 죽는다).
+ *
+ * ★키가 하네스만이 아니라 **(하네스 · 티어 · 역할)** 인 이유: 회전이 사려는 것은
+ * "같은 맥락이 반복될 때 후보 칸들을 고루 관측하는 것" 이다. 카운터가 하네스
+ * 하나면 backend/standard 스트림과 frontend/simple 스트림이 **같은 카운터를 서로
+ * 밀어** 각 스트림 입장에서는 회전이 round-robin 이 아니라 임의 점프가 된다(밴드
+ * 크기가 서로 다르면 특정 칸이 영영 안 뽑히기도 한다). 맥락별로 카운터를 나누면
+ * 각 스트림이 자기 밴드를 정확히 한 바퀴씩 돈다. dispatch 당 호출 수는 그대로
+ * 하네스당 1회라 위 "제자리 회전" 문제도 그대로 막힌다.
  */
 const rotations = new Map<string, number>();
 
-function nextRotation(harness: string): number {
-  const current = rotations.get(harness) ?? 0;
-  rotations.set(harness, current + 1);
+/**
+ * 회전 스트림 키. 그래프 셀 축(role)과 사다리 축(tier)을 그대로 쓴다 — 여기서
+ * 새 분류를 만들지 않는다. tag/taskType 까지 넣지 않는 이유는 반대쪽 실패다:
+ * 스트림을 잘게 쪼갤수록 각 스트림의 dispatch 수가 줄어 카운터가 늘 0 근처에
+ * 머물고, 그러면 회전이 "항상 첫 칸" 으로 퇴화한다.
+ */
+function rotationStreamKey(
+  harness: string,
+  tier: LadderTier,
+  ctx: GraphContext | null | undefined,
+): string {
+  const role =
+    typeof ctx?.role === "string" ? ctx.role.trim().toLowerCase() : "";
+  return `${harness}|${tier}|${role}`;
+}
+
+function nextRotation(streamKey: string): number {
+  const current = rotations.get(streamKey) ?? 0;
+  rotations.set(streamKey, current + 1);
   return current;
 }
 
@@ -697,6 +851,18 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
   const fitWeights = FIT_PENALTY[tier];
   const costWeight =
     COST_WEIGHT[tier] * costPressureForHeadroom(budgetUsedPercent);
+  const intensity = workloadIntensity(ctx);
+  const workloadWeight = WORKLOAD_STEP_WEIGHT[tier];
+  // ★쿼터가 마르면 **탐색도 회전도 사지 않는다**(pressure > 1 = 잔량 50% 미만).
+  // 탐색은 "미래의 판단을 좋게 하려고 지금 조금 더 쓰는 것" 인데, 잔량이 부족한
+  // 순간엔 그 지출이 다음 티켓의 스폰 자체를 못 하게 만들 수 있다. 그때는 근거상
+  // 최선(=대개 더 싼 칸)만 그대로 쓴다.
+  //
+  // ★같은 이유로 UCB1 저표본 보너스도 여기서 0 이 된다. 그 보너스는 방향이
+  // 없어서(안 본 칸이면 비싼 칸도 끌어올린다) 절약 국면에 켜 두면 "탐색은 안
+  // 사는데 탐색값은 점수에 남아 있는" 모순이 된다 — mode 만 top-score 로 바뀌고
+  // 실제로는 여전히 탐색 편향이 이기는 상태였다.
+  const conserving = costPressureForHeadroom(budgetUsedPercent) > 1;
   const benchWeight = BENCH_WEIGHT[tier];
   const capWeight = CAPABILITY_WEIGHT[tier];
   const usageWeight = USAGE_LOAD_WEIGHT[tier];
@@ -719,11 +885,18 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
   });
   const weeklyLimit = weeklyTokenSoftLimitForHarness(harness);
 
+  // ★dispatch 환산(§UCB1 회계) — 결과 1건이 맥락 축 개수만큼 셀에 기록되므로
+  // 그 개수로 나눠야 "관측 n 건" 이 "dispatch n 건" 을 뜻한다. 축이 하나도 없는
+  // ctx(전부 빈 문자열)면 1 로 둔다 — 0 으로 나누지 않는다(fail-safe).
+  const contextFactorCount = Math.max(1, factorKeysForContext(ctx).length);
   const observed = new Map<string, number>();
   for (const candidate of usable) {
     observed.set(
       candidate.modelKey,
-      graph ? observationCountForModel(candidate.modelKey, ctx, graph) : 0,
+      graph
+        ? observationCountForModel(candidate.modelKey, ctx, graph) /
+            contextFactorCount
+        : 0,
     );
   }
   const totalObservations = [...observed.values()].reduce(
@@ -739,6 +912,16 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
         : steps > 0
           ? -fitWeights.up * steps
           : fitWeights.down * steps; // steps<0 → 음수 유지
+
+    // 워크로드는 fit 과 **같은 축** 위에 부호만 반대로 얹힌다: 무거우면(양수)
+    // 위로 갈 때 감점을 깎고 아래로 갈 때 더 벌한다. 중립(0)이면 정확히 0 이라
+    // 태그·taskType 이 없는 종전 dispatch 는 비트 단위로 같은 점수를 받는다.
+    // 거리는 `WORKLOAD_STEP_CAP` 까지만 센다(먼 칸으로의 미끄럼 방지).
+    const workloadSteps = Math.max(
+      -WORKLOAD_STEP_CAP,
+      Math.min(WORKLOAD_STEP_CAP, steps),
+    );
+    const workload = workloadWeight * intensity * workloadSteps;
 
     const guidance = modelGuidance(candidate.model);
     const effectiveEntryCost = entryCandidate
@@ -775,11 +958,16 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
       : 0;
     const kg = kgRaw * kgAttenuation;
     const observations = observed.get(candidate.modelKey) ?? 0;
-    const diversity = diversityBonus(
-      observations,
-      totalObservations,
-      diversityCoefficient,
-    );
+    // 저표본 보너스는 ε-greedy 와 **같은 근접창 규율**을 받는다. ε-greedy 는
+    // 이미 진입칸 ±EXPLORE_WINDOW 로 탐색 범위를 묶어 뒀는데(complex 티켓이
+    // simple 칸으로 떨어지는 사고 방지), 상시로 켜져 있는 이 보너스에는 그 규율이
+    // 없어서 **먼 칸이 n=0 이라는 이유만으로** 큰 보너스를 받았다 — 같은 목적을
+    // 가진 두 장치가 서로 다른 안전선을 쓰고 있었던 셈이다. 창 밖은 거리에 반비례로
+    // 감쇠시킨다(끊지 않는다 — 언젠가는 그 칸도 비교데이터가 필요하다).
+    const diversity = conserving
+      ? 0
+      : diversityBonus(observations, totalObservations, diversityCoefficient) *
+        explorationProximity(steps);
 
     // 실사용량 하향 — 후보 풀 안에서 토큰 점유율이 큰 칸을 벌한다.
     const modelTok = tokensForModel(candidate.model, usageRollup);
@@ -789,7 +977,11 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
     // (opus 가 주를 먹었으면 opus 만 크게 깎고 sonnet 은 상대적으로 산다).
     // 한도 없는 하네스(grok 등) → 0. 콜드 롤업 → 0.
     let weeklyLimitPenalty = 0;
-    if (typeof weeklyLimit === "number" && weeklyLimit > 0 && harnessWeeklyTokens > 0) {
+    if (
+      typeof weeklyLimit === "number" &&
+      weeklyLimit > 0 &&
+      harnessWeeklyTokens > 0
+    ) {
       const harnessPenalty = weeklyLimitScore(
         harnessWeeklyTokens,
         weeklyLimit,
@@ -806,6 +998,7 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
 
     const total =
       fit +
+      workload +
       cost +
       bench +
       capability +
@@ -816,6 +1009,7 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
     return {
       candidate,
       fit: round1(fit),
+      workload: round1(workload),
       cost: round1(cost),
       bench: round1(bench),
       capability: round1(capability),
@@ -823,8 +1017,8 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
       diversity: round1(diversity),
       usage: round1(usage),
       weeklyLimit: round1(weeklyLimitPenalty),
-      totalObservations,
-      observations,
+      totalObservations: round1(totalObservations),
+      observations: round1(observations),
       total: round1(Number.isFinite(total) ? total : 0),
     };
   });
@@ -835,11 +1029,7 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
   let mode: AutoSelectMode;
   let winner = scores[0];
 
-  // ★쿼터가 마르면 **탐색도 회전도 사지 않는다**(pressure > 1 = 잔량 50% 미만).
-  // 탐색은 "미래의 판단을 좋게 하려고 지금 조금 더 쓰는 것" 인데, 잔량이 부족한
-  // 순간엔 그 지출이 다음 티켓의 스폰 자체를 못 하게 만들 수 있다. 그때는 근거상
-  // 최선(=대개 더 싼 칸)만 그대로 쓴다.
-  const conserving = costPressureForHeadroom(budgetUsedPercent) > 1;
+  const rotationKey = rotationStreamKey(harness, tier, ctx);
 
   const entryScore = scores.find(
     (s) => s.candidate.modelKey === entryCandidate?.modelKey,
@@ -850,6 +1040,7 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
     entryScore &&
     !input.forceExplore &&
     scores.every((s) => s.kg === 0) &&
+    workloadTagNet(ctx) === 0 &&
     (coldStart || diversityCoefficient === 0);
 
   if (gptShouldHoldEntry) {
@@ -857,6 +1048,14 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
     // standard→terra, complex→sol 진입 정책을 흔들면 사다리 자체가 말한
     // 난도별 기본 변종이 사라진다. KG·diversity·명시 탐색 근거가 있으면
     // 아래 경로로 간다.
+    //
+    // ★**명시 워크로드 태그**도 그 "근거" 다. 이 보류가 막으려던 것은 **근거 없는
+    // 회전**이지 근거 있는 이동이 아니다 — 티켓이 스스로 무겁다/가볍다고 말했는데도
+    // 진입칸을 붙들면, 이 티켓이 심은 신호가 gpt 사다리 전체에서 통째로 죽는다.
+    //
+    // ★단 taskType 사전값(추론 라벨)만으로는 안 연다. gpt 사다리는 luna 가 단가에서
+    // terra 를 크게 앞서 있어서, 이 게이트가 열리는 순간 진입칸이 아니라 **최하위
+    // 변종**까지 한 번에 간다. 그만한 이동을 추론 라벨 하나에 맡기지 않는다.
     winner = entryScore;
     mode = "top-score";
   } else if (scores.length === 1 || conserving) {
@@ -866,7 +1065,7 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
       input.epsilon ?? resolveEpsilon(process.env.MARBLO_ROUTING_EXPLORE);
     const exploring = input.forceExplore ?? (epsilon > 0 && random() < epsilon);
     const explorePick = exploring
-      ? pickExploration(scores, winner.candidate, entryIndex, harness)
+      ? pickExploration(scores, winner.candidate, entryIndex, rotationKey)
       : undefined;
     if (explorePick) {
       winner = explorePick;
@@ -874,7 +1073,7 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
     } else {
       const band = scores.filter((s) => winner.total - s.total <= TIE_BAND);
       if (band.length > 1) {
-        winner = band[nextRotation(harness) % band.length];
+        winner = band[nextRotation(rotationKey) % band.length];
         mode = "tie-rotate";
       } else {
         mode = "top-score";
@@ -921,7 +1120,7 @@ function pickExploration(
   scores: AutoScoreBreakdown[],
   winner: AutoCandidate,
   entryIndex: number,
-  harness: string,
+  rotationKey: string,
 ): AutoScoreBreakdown | undefined {
   const pool = scores.filter(
     (s) =>
@@ -931,7 +1130,19 @@ function pickExploration(
   if (pool.length === 0) return undefined;
   const minObs = Math.min(...pool.map((s) => s.observations));
   const leanest = pool.filter((s) => s.observations === minObs);
-  return leanest[nextRotation(harness) % leanest.length];
+  return leanest[nextRotation(rotationKey) % leanest.length];
+}
+
+/**
+ * 진입칸에서 멀어질수록 저표본 보너스를 줄이는 계수(1 → 1/2 → 1/3 …).
+ *
+ * ε-greedy 의 `EXPLORE_WINDOW` 와 **같은 상수**를 쓴다. 두 장치의 목적이 같기
+ * 때문이다 — 사고 싶은 것은 "비교 가능한 이웃 칸의 데이터" 이지 티어를 건너뛴
+ * 칸의 데이터가 아니다. 창 안(≤1칸)은 감쇠 없음, 밖은 거리에 반비례.
+ */
+function explorationProximity(steps: number): number {
+  const distance = Math.abs(steps);
+  return distance <= EXPLORE_WINDOW ? 1 : EXPLORE_WINDOW / distance;
 }
 
 /** 이 선택을 실제로 움직인 성분(모드가 우선 — 탐색/동률은 그 자체가 사유다). */
@@ -944,6 +1155,7 @@ function decideFactor(
   }
   const parts: [AutoModelPlan["decidedBy"], number][] = [
     ["fit", Math.abs(winner.fit)],
+    ["workload", Math.abs(winner.workload)],
     ["cost", Math.abs(winner.cost)],
     ["bench", Math.abs(winner.bench)],
     ["capability", Math.abs(winner.capability)],
@@ -991,6 +1203,9 @@ export function formatAutoReason(
   const tierLabel = modelGuidance(plan.model)?.tier;
   const factors = [
     `fit ${signed(winner.fit)}`,
+    // 워크로드는 **중립이면 아예 안 적는다**. 0 을 적으면 태그가 없는 dispatch 의
+    // 로그가 통째로 길어지고, 그 한 줄은 사람이 읽는 감사 로그다.
+    winner.workload !== 0 ? `workload ${signed(winner.workload)}` : "",
     `cost ${signed(winner.cost)}`,
     winner.bench !== 0 ? `swe ${signed(winner.bench)}` : "",
     winner.capability !== 0 ? `cap ${signed(winner.capability)}` : "",

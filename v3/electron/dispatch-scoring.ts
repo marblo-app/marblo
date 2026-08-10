@@ -11,6 +11,7 @@ import {
   type RoutingGraph,
   type GraphContext,
 } from "./routing-graph";
+import { classifyWorkloadTag } from "./workload-tags";
 
 export type ModelType =
   | "claude"
@@ -377,21 +378,15 @@ export function costEfficiencyScore(model: ModelType, tags: string[]): number {
 
   // Tier 2: per-token rate 기반 (기존 동작)
   const base = COST_EFFICIENCY_WEIGHT[model] ?? COST_EFFICIENCY_WEIGHT.custom;
+  // ★어휘는 `workload-tags.ts` 한 벌이다 — 2층 칸 선택(`model-autoselect`)이
+  // 같은 목록을 읽는다. 종전엔 여기 인라인 리터럴뿐이라 2층이 같은 판단을
+  // 하려면 목록을 베껴야 했고, 베낀 목록은 말없이 갈라진다.
   let multiplier = 1.0;
   for (const tag of tags) {
-    if (
-      tag === "simple-fix" ||
-      tag === "quick-edit" ||
-      tag === "boilerplate" ||
-      tag === "fast-execution"
-    ) {
+    const workload = classifyWorkloadTag(tag);
+    if (workload === "cheap") {
       multiplier += 0.3;
-    } else if (
-      tag === "architecture" ||
-      tag === "multi-file" ||
-      tag === "large-context" ||
-      tag === "complex-edit"
-    ) {
+    } else if (workload === "heavy") {
       multiplier -= 0.3;
     }
   }

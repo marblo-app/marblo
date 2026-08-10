@@ -3454,6 +3454,9 @@ export class BridgeServer {
           ...(winning
             ? {
                 fit: winning.fit,
+                // ★워크로드(tags·taskType) 성분. 스키마는 소급되지 않는다
+                // (audit §2-B) — 지금 안 실으면 이 축의 라벨은 영영 못 만든다.
+                workload: winning.workload,
                 cost: winning.cost,
                 bench: winning.bench,
                 capability: winning.capability,
