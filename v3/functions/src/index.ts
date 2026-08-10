@@ -30,7 +30,7 @@ import {
   buildKpiCockpit,
   buildCliSetupSummary,
   buildReleaseHealth,
-  buildModelBreakdown,
+  MODEL_BREAKDOWN_RETIRED,
   buildCostByDayModel,
   buildRetentionCohorts,
   buildActiveUserMetrics,
@@ -42,8 +42,6 @@ import {
   type CliSetupStepRow,
   type ReleaseVersionSourceRow,
   type ReleaseAdoptionSourceRow,
-  type ModelBridgeSourceRow,
-  type HarnessAgentRow,
   type CostByDayModelSourceRow,
   type RetentionCohortSourceRow,
   type ActiveByDaySourceRow,
@@ -55,6 +53,11 @@ import {
   type SegmentActivityRow,
 } from "./betaSegments";
 import { buildMetadata } from "./telemetryMetadata";
+import {
+  ANALYTICS_ID_SALT_ENV,
+  pseudonymizeAnalyticsRow,
+  readAnalyticsIdSalt,
+} from "./analyticsPseudonym";
 import { buildProjectAudit, toMillis } from "./projectAudit";
 import {
   verifyPaddleSignature,
@@ -172,6 +175,29 @@ const bigquery = new BigQuery({ location: BQ_LOCATION });
 const BQ_DATASET = "marblo_telemetry";
 const BQ_EVENTS_TABLE = "events";
 const BQ_COST_TABLE = "cost_logs";
+
+// ── 익명 세계 조인키 가명화 솔트 (ticket U5OPOKf0D3I2TSRP8yUq) ────────────────
+// events/task_outcomes/agent_heartbeats 에 적히는 projectId·agentId·taskId 는
+// cost_logs(계정 uid 보유)와 **같은 원시 id 공간**이었다 — uid 컬럼이 없어도 그
+// 세 키 중 하나로 조인하면 계정 재연결이 성립했다. 이제 익명 세계에는 이 솔트로
+// 키드된 HMAC 가명만 적힌다(analyticsPseudonym.ts).
+//
+// 솔트는 함수 런타임 env 에만 있고 BigQuery 에는 없다 — 웨어하우스만 보는 쪽에서
+// 조인이 성립하지 않게 하는 게 이 분리의 요점이다. 미설정이면 원시값으로
+// 폴백하지 않고 조인키를 버린다(fail-safe). 배포는 check-deploy-env 가 막는다.
+let analyticsIdSaltWarned = false;
+function getAnalyticsIdSalt(): string | null {
+  const salt = readAnalyticsIdSalt();
+  if (!salt && !analyticsIdSaltWarned) {
+    analyticsIdSaltWarned = true;
+    // 솔트 값은 남기지 않는다 — 부재 사실만.
+    functions.logger.error(
+      `[analytics] ${ANALYTICS_ID_SALT_ENV} is not configured; ` +
+        "join keys are dropped from de-identified telemetry rows"
+    );
+  }
+  return salt;
+}
 const ADMIN_ANALYTICS_RUNTIME_OPTIONS: functions.RuntimeOptions = {
   timeoutSeconds: 60,
   memory: "512MB",
@@ -522,52 +548,57 @@ export const recordGitHubMergeHistory = functions.https.onRequest(
     }
 
     const linesChanged = (linesAdded ?? 0) + (linesDeleted ?? 0);
+    // ★익명 세계로 들어가는 두 번째 writer 다 — logTelemetryBatch 와 똑같이
+    // 조인키를 가명화해야 한다(가명화 안 하면 여기 한 경로로 다리가 되살아난다).
     await bigquery
       .dataset(BQ_DATASET)
       .table(BQ_EVENTS_TABLE)
       .insert([
-        {
-          event: "task:merged",
-          userId: "github-actions",
-          appVersion: "github-actions",
-          projectId: task.projectId,
-          agentId: null,
-          taskId: task.taskId,
-          flowId: null,
-          model: null,
-          role: null,
-          status: null,
-          fromStatus: null,
-          toStatus: null,
-          durationMs: null,
-          tokensInput: null,
-          tokensOutput: null,
-          cost: null,
-          success: true,
-          exitCode: null,
-          nodeType: null,
-          nodeCount: null,
-          metadata: JSON.stringify({
-            mergeMode: "auto",
-            source: "github-actions",
-            prNumber,
-            branch,
-            linesAdded: linesAdded ?? 0,
-            linesDeleted: linesDeleted ?? 0,
-            changeType,
-          }),
-          taskType: changeType,
-          taskComplexity: null,
-          filesChanged: filesChanged ?? null,
-          linesChanged,
-          errorCategory: null,
-          errorMessage: null,
-          promptHash: null,
-          promptLength: null,
-          parentAgentId: null,
-          retryOf: null,
-          timestamp: mergedAt.toISOString(),
-        },
+        pseudonymizeAnalyticsRow(
+          {
+            event: "task:merged",
+            userId: "github-actions",
+            appVersion: "github-actions",
+            projectId: task.projectId,
+            agentId: null,
+            taskId: task.taskId,
+            flowId: null,
+            model: null,
+            role: null,
+            status: null,
+            fromStatus: null,
+            toStatus: null,
+            durationMs: null,
+            tokensInput: null,
+            tokensOutput: null,
+            cost: null,
+            success: true,
+            exitCode: null,
+            nodeType: null,
+            nodeCount: null,
+            metadata: JSON.stringify({
+              mergeMode: "auto",
+              source: "github-actions",
+              prNumber,
+              branch,
+              linesAdded: linesAdded ?? 0,
+              linesDeleted: linesDeleted ?? 0,
+              changeType,
+            }),
+            taskType: changeType,
+            taskComplexity: null,
+            filesChanged: filesChanged ?? null,
+            linesChanged,
+            errorCategory: null,
+            errorMessage: null,
+            promptHash: null,
+            promptLength: null,
+            parentAgentId: null,
+            retryOf: null,
+            timestamp: mergedAt.toISOString(),
+          },
+          getAnalyticsIdSalt()
+        ),
       ]);
 
     res.status(200).json({
@@ -6488,48 +6519,61 @@ export const logTelemetryBatch = functions.https.onCall(
     // account axis was retired instead of the promise. Account-linked usage
     // still exists — but only in cost_logs.userId, whose purpose is showing a
     // user their own spend back (see logCostBatch / getCostSummary).
+    //
+    // ★And dropping the uid was only half of it (ticket U5OPOKf0D3I2TSRP8yUq).
+    // cost_logs keeps the raw projectId/agentId/taskId next to that uid, and
+    // this table used to store the very same raw ids — so any of the three
+    // joined an "anonymous" event straight back to an account. The join keys
+    // written here are now salted HMAC pseudonyms (analyticsPseudonym.ts); the
+    // salt lives in the function env, never in BigQuery.
     const now = new Date().toISOString();
+    const idSalt = getAnalyticsIdSalt();
 
-    const rows = events.map((e) => ({
-      event: e.event,
-      userId: e.clientId || "anon",
-      // Record the client-supplied version verbatim, or null when absent. The
-      // old "3.0.0" fallback masked every event as a single stale version and
-      // made per-release analysis impossible; null honestly means "unknown".
-      appVersion: e.appVersion || null,
-      projectId: e.projectId || null,
-      agentId: e.agentId || null,
-      taskId: e.taskId || null,
-      flowId: e.flowId || null,
-      model: e.model || null,
-      role: e.role || null,
-      status: e.status || null,
-      fromStatus: e.fromStatus || null,
-      toStatus: e.toStatus || null,
-      durationMs: e.durationMs ?? null,
-      tokensInput: e.tokensInput ?? null,
-      tokensOutput: e.tokensOutput ?? null,
-      cost: e.cost ?? null,
-      success: e.success ?? null,
-      exitCode: e.exitCode ?? null,
-      nodeType: e.nodeType || null,
-      nodeCount: e.nodeCount ?? null,
-      metadata: buildMetadata(e),
-      // ML-ready columns
-      taskType: e.taskType || null,
-      taskComplexity: e.taskComplexity ?? null,
-      filesChanged: e.filesChanged ?? null,
-      linesChanged: e.linesChanged ?? null,
-      errorCategory: e.errorCategory || null,
-      errorMessage: e.errorMessage
-        ? String(e.errorMessage).slice(0, 500)
-        : null,
-      promptHash: e.promptHash || null,
-      promptLength: e.promptLength ?? null,
-      parentAgentId: e.parentAgentId || null,
-      retryOf: e.retryOf || null,
-      timestamp: now,
-    }));
+    const rows = events.map((e) =>
+      pseudonymizeAnalyticsRow(
+        {
+          event: e.event,
+          userId: e.clientId || "anon",
+          // Record the client-supplied version verbatim, or null when absent. The
+          // old "3.0.0" fallback masked every event as a single stale version and
+          // made per-release analysis impossible; null honestly means "unknown".
+          appVersion: e.appVersion || null,
+          projectId: e.projectId || null,
+          agentId: e.agentId || null,
+          taskId: e.taskId || null,
+          flowId: e.flowId || null,
+          model: e.model || null,
+          role: e.role || null,
+          status: e.status || null,
+          fromStatus: e.fromStatus || null,
+          toStatus: e.toStatus || null,
+          durationMs: e.durationMs ?? null,
+          tokensInput: e.tokensInput ?? null,
+          tokensOutput: e.tokensOutput ?? null,
+          cost: e.cost ?? null,
+          success: e.success ?? null,
+          exitCode: e.exitCode ?? null,
+          nodeType: e.nodeType || null,
+          nodeCount: e.nodeCount ?? null,
+          metadata: buildMetadata(e),
+          // ML-ready columns
+          taskType: e.taskType || null,
+          taskComplexity: e.taskComplexity ?? null,
+          filesChanged: e.filesChanged ?? null,
+          linesChanged: e.linesChanged ?? null,
+          errorCategory: e.errorCategory || null,
+          errorMessage: e.errorMessage
+            ? String(e.errorMessage).slice(0, 500)
+            : null,
+          promptHash: e.promptHash || null,
+          promptLength: e.promptLength ?? null,
+          parentAgentId: e.parentAgentId || null,
+          retryOf: e.retryOf || null,
+          timestamp: now,
+        },
+        idSalt
+      )
+    );
 
     await bigquery.dataset(BQ_DATASET).table(BQ_EVENTS_TABLE).insert(rows);
 
@@ -6936,28 +6980,33 @@ export const logTaskOutcome = functions.https.onCall(async (data, context) => {
 
   // 비식별: store the anonymous client id, not the account uid (anti-abuse
   // auth above is enough — the row itself stays de-identified).
+  // ★조인키(taskId/projectId)는 cost_logs 와 같은 원시 공간이었다 → 가명화한다
+  //   (ticket U5OPOKf0D3I2TSRP8yUq, analyticsPseudonym.ts).
   const now = new Date().toISOString();
 
-  const row = {
-    userId: d.clientId || "anon",
-    taskId: d.taskId,
-    projectId: d.projectId || null,
-    taskType: d.taskType || null,
-    taskComplexity: d.taskComplexity ?? null,
-    role: d.role || null,
-    model: d.model || null,
-    promptLength: d.promptLength ?? null,
-    scopeFileCount: d.scopeFileCount ?? null,
-    success: d.success ?? null,
-    durationMs: d.durationMs ?? null,
-    totalInputTokens: d.totalInputTokens ?? null,
-    totalOutputTokens: d.totalOutputTokens ?? null,
-    totalCost: d.totalCost ?? null,
-    retriesCount: d.retriesCount ?? 0,
-    errorCategory: d.errorCategory || null,
-    createdAt: d.createdAt || now,
-    completedAt: d.completedAt || now,
-  };
+  const row = pseudonymizeAnalyticsRow(
+    {
+      userId: d.clientId || "anon",
+      taskId: d.taskId,
+      projectId: d.projectId || null,
+      taskType: d.taskType || null,
+      taskComplexity: d.taskComplexity ?? null,
+      role: d.role || null,
+      model: d.model || null,
+      promptLength: d.promptLength ?? null,
+      scopeFileCount: d.scopeFileCount ?? null,
+      success: d.success ?? null,
+      durationMs: d.durationMs ?? null,
+      totalInputTokens: d.totalInputTokens ?? null,
+      totalOutputTokens: d.totalOutputTokens ?? null,
+      totalCost: d.totalCost ?? null,
+      retriesCount: d.retriesCount ?? 0,
+      errorCategory: d.errorCategory || null,
+      createdAt: d.createdAt || now,
+      completedAt: d.completedAt || now,
+    },
+    getAnalyticsIdSalt()
+  );
 
   await bigquery
     .dataset(BQ_DATASET)
@@ -6992,18 +7041,26 @@ export const logHeartbeat = functions.https.onCall(async (data, context) => {
   }
 
   // 비식별: heartbeats carry the anonymous client id, not the account uid.
+  // ★조인키(agentId/projectId)는 cost_logs 와 같은 원시 공간이었다 → 가명화한다
+  //   (ticket U5OPOKf0D3I2TSRP8yUq, analyticsPseudonym.ts).
   const now = new Date().toISOString();
+  const idSalt = getAnalyticsIdSalt();
 
-  const rows = beats.map((b: Record<string, unknown>) => ({
-    userId: (b.clientId as string) || "anon",
-    agentId: b.agentId || "",
-    projectId: b.projectId || null,
-    status: b.status || null,
-    tokensAccumulated: (b.tokensAccumulated as number) ?? null,
-    costAccumulated: (b.costAccumulated as number) ?? null,
-    lastActivityType: b.lastActivityType || null,
-    timestamp: (b.timestamp as string) || now,
-  }));
+  const rows = beats.map((b: Record<string, unknown>) =>
+    pseudonymizeAnalyticsRow(
+      {
+        userId: (b.clientId as string) || "anon",
+        agentId: b.agentId || "",
+        projectId: b.projectId || null,
+        status: b.status || null,
+        tokensAccumulated: (b.tokensAccumulated as number) ?? null,
+        costAccumulated: (b.costAccumulated as number) ?? null,
+        lastActivityType: b.lastActivityType || null,
+        timestamp: (b.timestamp as string) || now,
+      },
+      idSalt
+    )
+  );
 
   await bigquery.dataset(BQ_DATASET).table(BQ_HEARTBEATS_TABLE).insert(rows);
 
@@ -7878,10 +7935,24 @@ function parseSegmentKey(data: unknown): string {
 // 소스별 제외 가능성(§0 데이터 세계 분리):
 //   - Firestore subscriptions/agents/founders + BQ cost_logs → uid 를 직접
 //     보관하므로 정확히 제외 가능.
-//   - BQ events/task_outcomes → userId 컬럼이 익명 clientId 라 uid 로는 못
-//     지운다. 단 cost_logs(uid 보유) 와 agentId 가 같은 공간이라, 어드민이
-//     소유한 agentId 로 events 를 역참조하면 어드민 clientId 를 유추할 수 있다.
-//     그 유추분만 제외한다(실패해도 대시보드는 살아야 하므로 fail-open).
+//   - BQ events/task_outcomes/agent_heartbeats → userId 컬럼이 익명 clientId 라
+//     uid 로는 못 지운다. **그리고 이제 유추할 방법도 없다** — 아래 참조.
+//
+// ── ★익명 세계의 운영자 자기제외는 은퇴했다 (ticket U5OPOKf0D3I2TSRP8yUq) ────
+// 예전에는 resolveAdminClientIds 가 "어드민 uid 가 소유한 cost_logs.agentId →
+// 같은 agentId 를 가진 events row → 어드민의 익명 clientId" 를 역참조해 제외
+// 목록을 만들었다. 그 역참조는 편리한 만큼 정확히 **계정 재연결 그 자체**였고,
+// 처리방침이 익명이라 부르는 테이블을 계정으로 되짚을 수 있다는 뜻이었다.
+//
+// 이제 익명 세계의 조인키는 가명이라(analyticsPseudonym.ts) 그 역참조가 성립하지
+// 않는다. 다리를 남겨두고 "우리는 안 쓴다" 고 적는 대신 다리를 끊었다 —
+// betaSegments 의 계정축 은퇴와 같은 판단이다. 대가:
+//   - 익명 세계 집계에서 운영자 도그푸드가 더는 빠지지 않는다(신규 row 기준).
+//     표본이 작을 때 KPI 가 낙관 편향된다는 뜻이라, UI 는 adminExcluded 로 그
+//     사실을 그대로 노출한다(clientIdCount = 0).
+//   - 하네스→실모델 비용 분해(getAdminModelBreakdown 의 harnessBridge)도 같은
+//     조인이 필요해 함께 은퇴했다.
+// cost_logs 쪽 uid 제외(adminUidExclusion)는 그대로다 — 그쪽은 원래 계정 원장이다.
 const DEFAULT_DOGFOOD_UID = "RSALO1rljtWBSZ70MoBiaeFORxr1";
 
 function getAdminExclusionUid(): string | null {
@@ -7889,83 +7960,21 @@ function getAdminExclusionUid(): string | null {
   return uid ? uid : DEFAULT_DOGFOOD_UID;
 }
 
-// 어드민 uid 가 소유한 agentId → events.userId(익명 clientId) 역참조.
-// 실패(권한/테이블 공백/스키마 드리프트)하면 빈 배열 — 제외를 포기하고 계속한다.
-async function resolveAdminClientIds(rangeDays: number): Promise<string[]> {
-  const adminUid = getAdminExclusionUid();
-  if (!adminUid) return [];
-  const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
-  const costTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\``;
-  // 조회 윈도우보다 넉넉히 뒤로 본다 — 어드민 clientId 는 윈도우 밖에서 이미
-  // 확정돼 있을 수 있고, 놓치면 제외가 통째로 새어나간다.
-  const lookbackDays = Math.min(Math.max(rangeDays, 90), 365);
-  const query = `
-    SELECT DISTINCT e.userId AS clientId
-    FROM ${eventsTable} AS e
-    JOIN (
-      SELECT DISTINCT agentId
-      FROM ${costTable}
-      WHERE userId = @adminUid
-        AND agentId IS NOT NULL
-        AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @lookbackDays DAY)
-    ) AS c
-    ON e.agentId = c.agentId
-    WHERE e.userId IS NOT NULL
-      AND e.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @lookbackDays DAY)
-    LIMIT 100
-  `;
-  try {
-    const [rows] = await bigquery.query({
-      query,
-      params: { adminUid, lookbackDays },
-      location: BQ_LOCATION,
-    });
-    return (rows as Array<Record<string, unknown>>)
-      .map((r) => String(r.clientId ?? ""))
-      .filter((s) => s.length > 0);
-  } catch {
-    // uid 와 원시 에러 메시지는 로그에도 남기지 않는다.
-    console.warn(
-      "[analytics] admin clientId resolution failed; proceeding without " +
-        "telemetry self-exclusion"
-    );
-    return [];
-  }
-}
-
-// 익명 텔레메트리 테이블용 제외 절 + 파라미터. clientId 가 하나도 없으면
-// 빈 절을 돌려준다(빈 ARRAY 파라미터 타입 이슈 회피).
-function adminClientExclusion(clientIds: string[]): {
+// events 테이블 전용 제외 절 — **계정축 은퇴 이전 과거 row 전용**이다.
+// (EVENTS_ACCOUNT_AXIS_RETIRED_ON 이전 row 에만 metadata.accountUserId 가 있다.
+// 신규 row 에는 없어 절이 NULL 로 통과하고, 그때는 아무것도 제외되지 않는다 —
+// 익명 clientId 역참조가 은퇴했기 때문이다. 위 블록 주석 참조.)
+function adminEventExclusion(): {
   clause: string;
   params: Record<string, unknown>;
 } {
-  if (clientIds.length === 0) return { clause: "", params: {} };
-  return {
-    clause: " AND (userId IS NULL OR userId NOT IN UNNEST(@excludeClients))",
-    params: { excludeClients: clientIds },
-  };
-}
-
-// events 테이블 전용 제외 절.
-//
-// ★두 절이 시대별로 나뉜다: clientId 역참조 목록은 **모든 시대**에 적용되고(어드민
-// clientId 는 cost_logs.agentId 조인으로 유추하므로 uid 부착과 무관하다 —
-// resolveAdminClientIds 참조), metadata.accountUserId 절은 계정축 은퇴
-// (EVENTS_ACCOUNT_AXIS_RETIRED_ON) **이전 과거 row 전용**이다. 신규 row 에는
-// accountUserId 가 없어 그 절이 NULL 로 통과하고, 제외는 clientId 절이 담당한다.
-function adminEventExclusion(clientIds: string[]): {
-  clause: string;
-  params: Record<string, unknown>;
-} {
-  const clientEx = adminClientExclusion(clientIds);
   const adminUid = getAdminExclusionUid();
-  if (!adminUid) return clientEx;
+  if (!adminUid) return { clause: "", params: {} };
   return {
     clause:
-      clientEx.clause +
       " AND (JSON_VALUE(metadata, '$.accountUserId') IS NULL" +
       " OR JSON_VALUE(metadata, '$.accountUserId') != @excludeAccountUserId)",
-    params: { ...clientEx.params, excludeAccountUserId: adminUid },
+    params: { excludeAccountUserId: adminUid },
   };
 }
 
@@ -8379,10 +8388,7 @@ export const getAdminUsageSummary = functions.https.onCall(
     // 이미 고정 의미라 무관). userId = 익명 clientId, 개인식별 아님(카운트만).
     const metricMode = parseMetricMode(data);
     const metricExpr = metricCountExpr(metricMode, "userId");
-    const adminClientIds = await resolveAdminClientIds(rangeDays);
-    const ex = includeAdmin
-      ? EMPTY_EXCLUSION
-      : adminEventExclusion(adminClientIds);
+    const ex = includeAdmin ? EMPTY_EXCLUSION : adminEventExclusion();
     // BQ events/task_outcomes 의 timestamp/completedAt 은 STRING 으로 적재돼
     // 있어 TIMESTAMP 리터럴과 직접 비교하면 타입 불일치로 쿼리가 실패한다.
     // SAFE_CAST 로 감싸 비교·DATE() 추출이 동작하게 한다(파싱 실패는 NULL→제외).
@@ -8496,7 +8502,8 @@ export const getAdminUsageSummary = functions.https.onCall(
       adminExcluded: {
         applied: !includeAdmin,
         uidFiltered: getAdminExclusionUid() != null,
-        clientIdCount: adminClientIds.length,
+        // 익명 세계 자기제외 은퇴(U5OPOKf0D3I2TSRP8yUq) — 항상 0.
+        clientIdCount: 0,
       },
       // 표본 신뢰도 라벨링(§0-B, T0-3): 옵트인/도그푸드 편향 표본 크기.
       sampleClientCount: toNumber(
@@ -8588,10 +8595,7 @@ export const getAdminOnboardingFunnel = functions
     const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
     const since = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
     const includeAdmin = parseIncludeAdmin(data);
-    const adminClientIds = await resolveAdminClientIds(rangeDays);
-    const ex = includeAdmin
-      ? EMPTY_EXCLUSION
-      : adminEventExclusion(adminClientIds);
+    const ex = includeAdmin ? EMPTY_EXCLUSION : adminEventExclusion();
     // events.timestamp 는 BigQuery TIMESTAMP 컬럼이다. 컬럼을 함수로 감싸면
     // 파티션/클러스터 프루닝이 약해질 수 있어 직접 비교한다.
     const eventTs = "timestamp";
@@ -8887,7 +8891,8 @@ export const getAdminOnboardingFunnel = functions
       adminExcluded: {
         applied: !includeAdmin,
         uidFiltered: getAdminExclusionUid() != null,
-        clientIdCount: adminClientIds.length,
+        // 익명 세계 자기제외 은퇴(U5OPOKf0D3I2TSRP8yUq) — 항상 0.
+        clientIdCount: 0,
       },
       queryStatus: {
         ok: queryErrors.length === 0,
@@ -8925,7 +8930,6 @@ export const getAdminRetentionCohorts = functions
     const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
     const costTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\``;
     const adminUid = getAdminExclusionUid();
-    const adminClientIds = await resolveAdminClientIds(rangeDays);
     const adminClause =
       !includeAdmin && adminUid ? " AND user_id != @excludeAccountUserId" : "";
     const adminParams =
@@ -9123,7 +9127,8 @@ export const getAdminRetentionCohorts = functions
       adminExcluded: {
         applied: !includeAdmin,
         uidFiltered: getAdminExclusionUid() != null,
-        clientIdCount: adminClientIds.length,
+        // 익명 세계 자기제외 은퇴(U5OPOKf0D3I2TSRP8yUq) — 항상 0.
+        clientIdCount: 0,
       },
       cohorts: buildRetentionCohorts(cohortRows as RetentionCohortSourceRow[]),
       activationGate: buildActivationGateFunnel(gateRows[0]),
@@ -9150,7 +9155,6 @@ export const getAdminActiveUserMetrics = functions
     const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
     const costTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\``;
     const adminUid = getAdminExclusionUid();
-    const adminClientIds = await resolveAdminClientIds(rangeDays);
     const adminClause =
       !includeAdmin && adminUid ? " AND user_id != @excludeAccountUserId" : "";
     const adminParams =
@@ -9255,7 +9259,8 @@ export const getAdminActiveUserMetrics = functions
       adminExcluded: {
         applied: !includeAdmin,
         uidFiltered: getAdminExclusionUid() != null,
-        clientIdCount: adminClientIds.length,
+        // 익명 세계 자기제외 은퇴(U5OPOKf0D3I2TSRP8yUq) — 항상 0.
+        clientIdCount: 0,
       },
       ...buildActiveUserMetrics(
         activeRows as ActiveByDaySourceRow[],
@@ -9465,10 +9470,7 @@ export const getAdminKpiCockpit = functions
     const since = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
     const week = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)";
     const includeAdmin = parseIncludeAdmin(data);
-    const adminClientIds = await resolveAdminClientIds(rangeDays);
-    const ex = includeAdmin
-      ? EMPTY_EXCLUSION
-      : adminEventExclusion(adminClientIds);
+    const ex = includeAdmin ? EMPTY_EXCLUSION : adminEventExclusion();
     // events.timestamp 는 BigQuery TIMESTAMP 컬럼이다. 컬럼을 함수로 감싸면
     // 파티션/클러스터 프루닝이 약해질 수 있어 직접 비교한다.
     const eventTs = "timestamp";
@@ -10093,7 +10095,8 @@ export const getAdminKpiCockpit = functions
       adminExcluded: {
         applied: !includeAdmin,
         uidFiltered: getAdminExclusionUid() != null,
-        clientIdCount: adminClientIds.length,
+        // 익명 세계 자기제외 은퇴(U5OPOKf0D3I2TSRP8yUq) — 항상 0.
+        clientIdCount: 0,
       },
       queryStatus: {
         ok: kpiQueryErrors.length === 0,
@@ -10126,10 +10129,8 @@ export const getAdminModelSummary = functions.https.onCall(
     // includeAdmin(기본 false)=제외, true=포함(두 제외절 모두 비활성).
     const includeAdmin = parseIncludeAdmin(data);
     const uidEx = includeAdmin ? EMPTY_EXCLUSION : adminUidExclusion();
-    const adminClientIds = await resolveAdminClientIds(rangeDays);
-    const clientEx = includeAdmin
-      ? EMPTY_EXCLUSION
-      : adminClientExclusion(adminClientIds);
+    // 익명 세계 제외는 은퇴했다(위 adminEventExclusion 블록 주석) — 남는 절은 없다.
+    const clientEx = EMPTY_EXCLUSION;
     // cost_logs/events 의 timestamp, task_outcomes 의 completedAt 은 STRING 적재라
     // TIMESTAMP 비교 전 SAFE_CAST 필요(위 getAdminUsageSummary 와 동일 사유).
     const tsCast = "SAFE_CAST(timestamp AS TIMESTAMP)";
@@ -10200,61 +10201,12 @@ export const getAdminModelSummary = functions.https.onCall(
       ORDER BY date ASC
     `;
 
-    // (3-c) ★하위모델 분해 — 스폰축(events.model = 하네스 claude/gpt/grok…)과
-    // 비용축(cost_logs.model = 구체 id claude-opus-4-8/MiniMax-M3…)은 해상도가
-    // 다르다. agentId 로 조인해야 "하네스 claude 밑에서 실제로 무엇이 돌았나"가
-    // 보인다(env-swap 벤더는 우리 claude 바이너리를 그대로 쓰므로 하네스 축만
-    // 보면 Anthropic 과 한 칸에 섞인다).
-    //
-    // ★제외절이 두 축으로 갈린다: events 는 익명 clientId(clientEx), cost_logs 는
-    // 실 uid(uidEx). 각 절은 bare `userId` 를 참조하므로 JOIN 바깥이 아니라 각
-    // 서브쿼리 **안**에서 적용해 컬럼 모호성을 피한다. 두 파라미터 집합이 모두
-    // 참조되므로 이 쿼리에는 합쳐서 넘긴다(미참조 파라미터 없음).
-    const harnessBridgeQuery = `
-      WITH spawns AS (
-        SELECT DISTINCT agentId, COALESCE(model, '(none)') AS harness
-        FROM ${eventsTable}
-        WHERE event = 'agent:spawned'
-          AND agentId IS NOT NULL
-          AND ${tsCast} >= ${sinceTs}${clientEx.clause}
-      ),
-      costs AS (
-        SELECT
-          agentId,
-          COALESCE(model, '(none)') AS model,
-          SUM(COALESCE(totalCost, 0)) AS cost,
-          SUM(COALESCE(inputTokens, 0) + COALESCE(outputTokens, 0) +
-              COALESCE(cacheReadTokens, 0) + COALESCE(cacheWriteTokens, 0))
-            AS tokens,
-          COUNT(*) AS costRows
-        FROM ${costTable}
-        WHERE agentId IS NOT NULL
-          AND ${tsCast} >= ${sinceTs}${uidEx.clause}
-        GROUP BY agentId, model
-      )
-      SELECT
-        s.harness AS harness,
-        COALESCE(c.model, '(비용 미적재)') AS model,
-        COUNT(DISTINCT s.agentId) AS agents,
-        SUM(COALESCE(c.cost, 0)) AS cost,
-        SUM(COALESCE(c.tokens, 0)) AS tokens,
-        SUM(COALESCE(c.costRows, 0)) AS costRows
-      FROM spawns AS s
-      LEFT JOIN costs AS c ON c.agentId = s.agentId
-      GROUP BY harness, model
-      ORDER BY cost DESC
-    `;
-    // 하네스 그레인 고유 에이전트 수 — 위 (harness,model) 행의 agents 를 합치면
-    // 한 에이전트가 모델 2종을 태운 경우 중복 계상된다. 정확한 분모를 따로 센다.
-    const harnessAgentsQuery = `
-      SELECT COALESCE(model, '(none)') AS harness,
-             COUNT(DISTINCT agentId) AS agents
-      FROM ${eventsTable}
-      WHERE event = 'agent:spawned'
-        AND agentId IS NOT NULL
-        AND ${tsCast} >= ${sinceTs}${clientEx.clause}
-      GROUP BY harness
-    `;
+    // (3-c) ★하위모델 분해는 은퇴했다 — 여기 있던 harnessBridge/harnessAgents
+    // 쿼리는 events.agentId 와 cost_logs.agentId 를 조인해 "하네스 claude 밑에서
+    // 실제로 무엇이 돌았나"를 봤다. cost_logs 는 계정 uid 원장이라 그 조인이 곧
+    // 익명 텔레메트리를 계정으로 되짚는 경로였고, 조인키를 가명화하면서
+    // (analyticsPseudonym.ts) 성립하지 않게 됐다. 사유는 응답 note 로 밝힌다
+    // (adminAnalytics.MODEL_BREAKDOWN_RETIRED, ticket U5OPOKf0D3I2TSRP8yUq).
 
     // (4) dispatch:decision 라우팅 결정 분포(metadata JSON STRING 파싱)
     const routingQuery = (jsonPath: string) => `
@@ -10313,16 +10265,11 @@ export const getAdminModelSummary = functions.https.onCall(
       });
     const qCost = (query: string) => q(query, uidEx.params);
     const qClient = (query: string) => q(query, clientEx.params);
-    // 브릿지 쿼리만 두 축의 제외절을 모두 참조한다(각 서브쿼리 안에서 적용).
-    const qBoth = (query: string) =>
-      q(query, { ...uidEx.params, ...clientEx.params });
 
     const [
       [costByModelRows],
       [costByDayRows],
       [costByDayModelRows],
-      [harnessBridgeRows],
-      [harnessAgentRows],
       [modelRoleRows],
       [outcomeByModelRows],
       [routingSelectedRows],
@@ -10334,8 +10281,6 @@ export const getAdminModelSummary = functions.https.onCall(
       qCost(costByModelQuery),
       qCost(costByDayQuery),
       qCost(costByDayModelQuery),
-      qBoth(harnessBridgeQuery),
-      qClient(harnessAgentsQuery),
       qClient(modelRoleQuery),
       qClient(outcomeByModelQuery),
       qClient(routingQuery("$.selectedModel")),
@@ -10397,7 +10342,8 @@ export const getAdminModelSummary = functions.https.onCall(
       adminExcluded: {
         applied: !includeAdmin,
         uidFiltered: getAdminExclusionUid() != null,
-        clientIdCount: adminClientIds.length,
+        // 익명 세계 자기제외 은퇴(U5OPOKf0D3I2TSRP8yUq) — 항상 0.
+        clientIdCount: 0,
       },
       costByModel,
       costByDay: (costByDayRows as Array<Record<string, unknown>>).map((r) => ({
@@ -10409,11 +10355,8 @@ export const getAdminModelSummary = functions.https.onCall(
         costByDayModelRows as CostByDayModelSourceRow[],
         6
       ),
-      // ★하위모델 분해(하네스 → 구체 모델).
-      modelBreakdown: buildModelBreakdown(
-        harnessBridgeRows as ModelBridgeSourceRow[],
-        harnessAgentRows as HarnessAgentRow[]
-      ),
+      // ★하위모델 분해(하네스 → 구체 모델)는 은퇴 — 사유는 note 에 담겨 있다.
+      modelBreakdown: MODEL_BREAKDOWN_RETIRED,
       modelRoleStats,
       outcomeByModel,
       routing: {
@@ -10469,10 +10412,9 @@ export const getAdminReleaseHealth = functions
     const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
     const since = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
     const includeAdmin = parseIncludeAdmin(data);
-    const adminClientIds = await resolveAdminClientIds(rangeDays);
-    const ex = includeAdmin
-      ? EMPTY_EXCLUSION
-      : adminClientExclusion(adminClientIds);
+    // 익명 세계 제외는 은퇴했다(위 adminEventExclusion 블록 주석) — 남는 절은 없다.
+    // includeAdmin 토글은 응답의 adminExcluded.applied 로만 남는다.
+    const ex = EMPTY_EXCLUSION;
     // events.timestamp 는 STRING 적재라 비교 전 SAFE_CAST(다른 어드민 콜러블과 동일).
     const eventTs = "SAFE_CAST(timestamp AS TIMESTAMP)";
     // NULL appVersion 은 컬럼 도입 이전 텔레메트리 — 버리지 않고 빈 문자열로 모아
@@ -10522,7 +10464,8 @@ export const getAdminReleaseHealth = functions
       adminExcluded: {
         applied: !includeAdmin,
         uidFiltered: getAdminExclusionUid() != null,
-        clientIdCount: adminClientIds.length,
+        // 익명 세계 자기제외 은퇴(U5OPOKf0D3I2TSRP8yUq) — 항상 0.
+        clientIdCount: 0,
       },
       ...buildReleaseHealth(
         versionRows as ReleaseVersionSourceRow[],
@@ -10630,10 +10573,8 @@ export const getAdminDrilldown = functions.https.onCall(
     // 드릴다운도 동일 모집단을 분해하게 한다.
     const includeAdmin = parseIncludeAdmin(data);
     const uidEx = includeAdmin ? EMPTY_EXCLUSION : adminUidExclusion();
-    const adminClientIds = await resolveAdminClientIds(rangeDays);
-    const clientEx = includeAdmin
-      ? EMPTY_EXCLUSION
-      : adminClientExclusion(adminClientIds);
+    // 익명 세계 제외는 은퇴했다(위 adminEventExclusion 블록 주석) — 남는 절은 없다.
+    const clientEx = EMPTY_EXCLUSION;
 
     // 스코프마다 참조하는 파라미터가 달라서(@date vs @days vs @key vs 제외절)
     // 후보를 모아두고 쿼리 본문이 실제로 참조하는 것만 넘긴다 — 미참조
@@ -12658,9 +12599,6 @@ export const getAdminCountryFunnel = functions
     requireAdmin(context);
     const rangeDays = parseAnalyticsDays(data);
     const includeAdmin = parseIncludeAdmin(data);
-    const adminClientIds = includeAdmin
-      ? []
-      : await resolveAdminClientIds(rangeDays);
 
     // GA4 데이터셋 이름은 SQL 에 그대로 박히므로 식별자 화이트리스트를 강제한다.
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(GA4_BQ_DATASET)) {
@@ -12715,16 +12653,11 @@ export const getAdminCountryFunnel = functions
       phase: "JSON_VALUE(metadata, '$.phase')",
       verdict: "JSON_VALUE(metadata, '$.verdict')",
     });
-    // 익명 테이블 두 곳에 같은 제외 목록을 쓰되 컬럼명이 다르다
-    // (events.userId vs install_attribution.installId).
-    const excludeClause =
-      adminClientIds.length > 0
-        ? " AND (userId IS NULL OR userId NOT IN UNNEST(@excludeClients))"
-        : "";
-    const excludeAttrClause =
-      adminClientIds.length > 0
-        ? " AND installId NOT IN UNNEST(@excludeClients)"
-        : "";
+    // 익명 세계 운영자 자기제외는 은퇴했다(adminEventExclusion 블록 주석) —
+    // 어드민의 익명 설치 ID 를 알아내려면 cost_logs 역참조가 필요했고, 그 다리를
+    // 끊었기 때문이다. 여기 두 절은 그래서 항상 비어 있다.
+    const excludeClause = "";
+    const excludeAttrClause = "";
 
     const appQuery = `
       WITH att AS (
@@ -12778,7 +12711,6 @@ export const getAdminCountryFunnel = functions
     `;
 
     const params: Record<string, unknown> = { days: rangeDays };
-    if (adminClientIds.length > 0) params.excludeClients = adminClientIds;
 
     const [webRes, appRes] = await Promise.allSettled([
       bigquery.query({

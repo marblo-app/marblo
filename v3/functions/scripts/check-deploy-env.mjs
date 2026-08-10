@@ -4,7 +4,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const REQUIRED_KEYS = ["ADMIN_UID"];
+// ANALYTICS_ID_SALT: 익명 텔레메트리(events/task_outcomes/agent_heartbeats)의
+// 조인키를 가명화하는 HMAC 키다(functions/src/analyticsPseudonym.ts). 없으면
+// 런타임이 원시 id 로 폴백하지 않고 조인키를 **버리므로**, 조용한 분석 열화를
+// 막으려면 배포 전에 막는 게 맞다. 값은 아무 고엔트로피 문자열이면 되고,
+// 한 번 정하면 바꾸지 않는다 — 바꾸면 그 시점 전후의 가명이 갈라져
+// events↔task_outcomes 조인이 끊긴다.
+const REQUIRED_KEYS = ["ADMIN_UID", "ANALYTICS_ID_SALT"];
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const functionsDir = resolve(__dirname, "..");

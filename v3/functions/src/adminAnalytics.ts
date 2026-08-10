@@ -1920,140 +1920,41 @@ export function buildReleaseHealth(
   };
 }
 
-// ── 하위모델 분해(하네스에서 구체 모델로) ───────────────────────────────────
-// events(agent:spawned).model = 하네스, cost_logs.model = 구체 id 를 agentId 로 조인한
-// 행을 받아 2단 트리로 접는다. ★조인 신뢰도: 실측상 한 agentId 가 2개 하네스로 스폰된
-// 경우는 2093개 중 2개(0.1%)라 하네스 귀속은 사실상 1:1 이다. 그래도 추정이 아니라
-// "관측된 조인 결과"이므로 없는 값을 만들지 않는다 — 비용행이 없는 하네스는 cost 0 과
-// costRows 0 으로 그대로 남겨 UI 가 "비용 미적재"로 표시한다.
-
-/** 구체 모델 칸이 실제 모델 id 가 아니라 미귀속 센티넬인지. usageBreakdown 과 같은 규율. */
-export const UNATTRIBUTED_MODEL_KEYS: ReadonlySet<string> = new Set([
-  "unknown", // cost-tracker 가 모델 귀속 없이 emit 한 값(자기 세션파일 미사용 하네스)
-  "(none)", // BQ COALESCE fallback
-  "<synthetic>", // 합성/테스트 적재
-]);
-
-export type ModelBridgeSourceRow = {
-  harness?: unknown;
-  model?: unknown;
-  agents?: unknown;
-  cost?: unknown;
-  tokens?: unknown;
-  costRows?: unknown;
-};
-
-export type SubModelRow = {
-  model: string;
-  agents: number;
-  cost: number;
-  tokens: number;
-  costRows: number;
-  share: number; // 상위 하네스 비용 내 점유율(0~1). 하네스 비용 0 이면 0
-  /** 구체 모델로 못 읽는 칸(미귀속 센티넬이거나 하네스명이 그대로 온 경우). */
-  unattributed: boolean;
-};
-
-export type HarnessRow = {
-  harness: string;
-  agents: number;
-  cost: number;
-  tokens: number;
-  costRows: number;
-  share: number; // 전체 비용 내 점유율
-  /** 이 하네스 밑에서 실제로 돈 구체 모델(비용 내림차순). */
-  subModels: SubModelRow[];
-  /** 하네스명과 다른 구체 모델이 1종이라도 잡혔나(=분해가 의미를 가졌나). */
-  hasDecomposition: boolean;
-};
+// ── 하위모델 분해(하네스에서 구체 모델로) — 은퇴 ────────────────────────────
+//
+// ★왜 은퇴했나 (ticket U5OPOKf0D3I2TSRP8yUq): 이 표는 events(agent:spawned).model
+// = 하네스와 cost_logs.model = 구체 모델 id 를 **agentId 로 조인**해서 만들었다.
+// 그런데 cost_logs 는 계정 uid 를 보관하는 원장이라, 그 조인이 성립한다는 것은
+// 곧 익명 이벤트를 계정으로 되짚을 수 있다는 뜻이었다 — 처리방침이 "제품 사용
+// 분석에는 계정 식별자가 없다" 고 말하는 근거를 반쪽으로 만들던 마지막 다리다.
+//
+// 익명 세계의 조인키를 가명화(functions/src/analyticsPseudonym.ts)하면서 그 조인은
+// 더 이상 성립하지 않는다. 조용히 빈 표를 내려보내지 않고, 무엇이 왜 사라졌는지
+// note 로 그대로 밝힌다(같은 판단: betaSegments 의 계정축 은퇴).
+//
+// 하네스 축 자체는 사라지지 않았다 — getAdminUsageSummary 의 spawnsByModel 이
+// 하네스별 스폰 수를 계속 준다. 잃은 건 "그 하네스 밑에서 실제로 무엇이 돌았고
+// 얼마를 썼나" 하는 비용축 결합뿐이다.
 
 export type ModelBreakdownResult = {
-  harnesses: HarnessRow[];
+  harnesses: never[];
   totalCost: number;
   totalAgents: number;
   note: string;
 };
 
-// 하네스별 고유 에이전트 수 — (harness, model) 그레인의 agents 를 합치면 한 에이전트가
-// 여러 모델을 태운 경우 중복 계상되므로, 하네스 그레인의 COUNT(DISTINCT agentId) 를
-// 별도로 받아 덮어쓴다. 안 주면 하위합(중복 가능)으로 폴백한다.
-export type HarnessAgentRow = { harness?: unknown; agents?: unknown };
-
-/**
- * 하네스에서 구체모델로 내려가는 2단 분해(순수).
- * @param rows agentId 조인 결과 (harness, model, agents, cost, tokens, costRows)
- * @param harnessAgentRows 하네스 그레인 고유 에이전트 수(중복 계상 방지)
- */
-export function buildModelBreakdown(
-  rows: ReadonlyArray<ModelBridgeSourceRow>,
-  harnessAgentRows: ReadonlyArray<HarnessAgentRow> = [],
-): ModelBreakdownResult {
-  const harnessAgents = new Map<string, number>();
-  for (const r of harnessAgentRows) {
-    harnessAgents.set(coerceStr(r.harness, "(none)"), coerceNumber(r.agents));
-  }
-  const acc = new Map<string, Map<string, SubModelRow>>();
-  for (const r of rows) {
-    const harness = coerceStr(r.harness, "(none)");
-    const model = coerceStr(r.model, "(none)");
-    const sub = acc.get(harness) ?? new Map<string, SubModelRow>();
-    const prev = sub.get(model);
-    const merged: SubModelRow = {
-      model,
-      agents: (prev?.agents ?? 0) + coerceNumber(r.agents),
-      cost: (prev?.cost ?? 0) + coerceNumber(r.cost),
-      tokens: (prev?.tokens ?? 0) + coerceNumber(r.tokens),
-      costRows: (prev?.costRows ?? 0) + coerceNumber(r.costRows),
-      share: 0, // 아래에서 채움
-      // 하네스명이 그대로 구체 칸에 온 경우도 "분해 안 됨"으로 본다
-      // (예: harness=claude 인데 model 도 claude 이면 구체 모델 미기록).
-      unattributed:
-        UNATTRIBUTED_MODEL_KEYS.has(model.toLowerCase()) ||
-        model.toLowerCase() === harness.toLowerCase(),
-    };
-    sub.set(model, merged);
-    acc.set(harness, sub);
-  }
-
-  const harnesses: HarnessRow[] = Array.from(acc.entries()).map(
-    ([harness, sub]) => {
-      const subModels = Array.from(sub.values()).sort(
-        (a, b) => b.cost - a.cost || b.agents - a.agents,
-      );
-      const cost = subModels.reduce((s, m) => s + m.cost, 0);
-      for (const m of subModels) m.share = cost > 0 ? m.cost / cost : 0;
-      return {
-        harness,
-        agents:
-          harnessAgents.get(harness) ??
-          subModels.reduce((s, m) => s + m.agents, 0),
-        cost,
-        tokens: subModels.reduce((s, m) => s + m.tokens, 0),
-        costRows: subModels.reduce((s, m) => s + m.costRows, 0),
-        share: 0,
-        subModels,
-        hasDecomposition: subModels.some((m) => !m.unattributed),
-      };
-    },
-  );
-
-  const totalCost = harnesses.reduce((s, h) => s + h.cost, 0);
-  for (const h of harnesses) h.share = totalCost > 0 ? h.cost / totalCost : 0;
-  harnesses.sort((a, b) => b.cost - a.cost || b.agents - a.agents);
-
-  return {
-    harnesses,
-    totalCost,
-    totalAgents: harnesses.reduce((s, h) => s + h.agents, 0),
-    note:
-      "스폰 이벤트의 model 은 하네스(claude·gpt·grok…)이고 실제 과금 모델 id 는 " +
-      "cost_logs.model 이라, 두 축을 agentId 로 조인해 하위모델을 분해한다. env-swap " +
-      "벤더(Z.ai·MiniMax·Kimi)는 우리 claude 바이너리를 그대로 쓰기 때문에 하네스 축만 " +
-      "보면 Anthropic 과 한 칸에 섞인다 — 이 표가 그 구분을 드러낸다. 구체 모델 칸이 " +
-      "하네스명과 같거나 unknown/synthetic 이면 '모델 미기록'으로 표시하며 지어내지 " +
-      "않는다. 비용행이 0 인 하네스는 스폰만 있고 토큰 적재가 없는 경우다.",
-  };
-}
+/** 하위모델 분해 은퇴 페이로드. 응답 모양은 유지하고 사유를 note 로 밝힌다. */
+export const MODEL_BREAKDOWN_RETIRED: ModelBreakdownResult = {
+  harnesses: [],
+  totalCost: 0,
+  totalAgents: 0,
+  note:
+    "하네스→구체 모델 분해는 은퇴했다. 이 표는 익명 이벤트와 cost_logs 를 agentId 로 " +
+    "조인해 만들었는데, cost_logs 는 계정 uid 를 보관하므로 그 조인이 곧 익명 " +
+    "텔레메트리를 계정으로 되짚는 경로였다. 조인키를 가명화하면서 다리를 끊었고, " +
+    "그 대가로 이 분해를 포기했다. 하네스별 스폰 수는 '제품 사용' 탭의 모델별 " +
+    "스폰 분포에, 구체 모델별 비용은 위 모델별 비용 표에 그대로 남아 있다."
+};
 
 // ── 일별 × 모델 비용(기간별 분해) ───────────────────────────────────────────
 // 기존 대시보드의 costByDay 는 **총합**만이라 "어느 모델이 그날 비용을 만들었나"를

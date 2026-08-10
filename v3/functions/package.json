@@ -34,7 +34,8 @@
     "test:billing": "tsc src/billing.ts --outDir lib --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node tests/billing.test.mjs",
     "test:portone": "tsc src/billing.ts src/portone.ts --outDir lib --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node tests/portone.test.mjs",
     "test:portone-cron": "tsc src/billing.ts src/portone.ts --outDir lib --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node tests/portoneBillingCron.test.mjs",
-    "test:portone-easypay": "tsc src/billing.ts src/portone.ts --outDir lib --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node tests/portoneEasyPay.test.mjs"
+    "test:portone-easypay": "tsc src/billing.ts src/portone.ts --outDir lib --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node tests/portoneEasyPay.test.mjs",
+    "test:analytics-pseudonym": "tsc src/analyticsPseudonym.ts src/analyticsPseudonym.test.ts --outDir .test-out/analytics-pseudonym --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/analytics-pseudonym/analyticsPseudonym.test.js"
   },
   "engines": {
     "node": "20"

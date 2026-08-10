@@ -38,6 +38,20 @@
  *     (PrivacyClarificationNotice). 배너는 동의를 새로 받지 않는다 — 받을
  *     동의가 없기 때문이다(정산 목적 필수 기록).
  * 수집 항목 자체가 늘어나면 그때는 반드시 버전을 올린다는 원칙은 그대로다.
+ *
+ * ★예외 셋(ticket U5OPOKf0D3I2TSRP8yUq): 조인키 가명화 + 문구 현재형 정리.
+ * 여기서도 버전은 올리지 않는다. 같은 기준("무엇이 바뀌었는지"):
+ *   - 코드 변경은 **또 축소**다. events/task_outcomes/agent_heartbeats 에 적히던
+ *     프로젝트·에이전트·티켓 ID 를 원시값 대신 가명으로 바꿨다. 예전 문구는
+ *     "같은 에이전트 실행 ID 가 두 기록에 들어갈 수 있어 완전한 분리는 아니다"
+ *     라고 한계를 정직하게 밝히고 있었는데, 이번에 그 한계 자체를 없앴다
+ *     (functions/src/analyticsPseudonym.ts). 수집이 늘지 않았고 재식별 가능성은
+ *     줄었다 — 전 사용자 재프롬프트를 할 이유가 없다.
+ *   - 문구는 '우리가 다 지웠다/정정 중' 서사를 걷어내고 현재형 사실만 남겼다.
+ *     고지 내용이 달라진 게 아니라 같은 사실을 더 짧게 말한다.
+ *   - ★단, 과장하지 않는다: 사용량·비용 기록이 계정에 연결된다는 사실은 그대로
+ *     적어 둔다. "전부 익명" 이 아니라 "분석은 식별 불가, 사용량·요금은 본인
+ *     것" 이다. 그 한 줄을 지우는 순간 이 문서는 과소고지가 된다.
  */
 import type { Locale } from "../../lib/i18n";
 
@@ -57,27 +71,28 @@ const KO: PrivacyContent = {
   summary: (
     <>
       마블로 데스크톱 앱은 외부 <b>제3자 서비스(Sentry, 크래시 리포트)</b>{" "}
-      송신을 <b>명시적 옵트인</b>으로 운영합니다. 자체 운영 품질을 위한 1차
-      지표는 <b>식별정보를 제거한 비식별 데이터</b>로만, 우리 GCP(BigQuery)에
-      수집합니다 — 계정 식별자(UID)는 <b>보내는 쪽에서도, 받는 서버에서도</b>{" "}
-      붙이지 않고 익명 설치 ID만 사용합니다. 다만 <b>토큰 사용량·비용 기록</b>은
-      성격이 다릅니다: 회원님께 본인 사용량·요금을 되돌려 보여드려야 하므로 그
-      기록만은 계정에 연결됩니다. 동의하지 않아도 모든 기능은 동일하게 작동하며,
-      어느 경로로도 코드·BYOK 키·사용자 입력 텍스트는 전송되지 않습니다. (마블로
-      웹사이트는 앱과 별개로 GA4를 사용하며, 웹사이트 자체 쿠키 동의의 적용을
-      받습니다.)
+      송신을 <b>명시적 옵트인</b>으로 운영합니다.{" "}
+      <b>제품 사용 분석에는 계정 식별자가 없습니다</b> — 익명 설치 ID 하나로만
+      기록되고, 프로젝트·에이전트·티켓 ID 같은 앱 내부 식별자도 그 기록에서는
+      가명으로 적혀 <b>사용량·비용 기록과 이어붙일 수 없습니다</b>. 다만{" "}
+      <b>토큰 사용량·비용 기록</b>은 계정에 연결됩니다: 회원님께 본인
+      사용량·요금을 되돌려 보여드리려면 그래야 하기 때문입니다. 정리하면{" "}
+      <b>분석 기록은 식별 불가, 사용량·요금 기록은 본인 것</b>입니다. 동의하지
+      않아도 모든 기능은 동일하게 작동하며, 어느 경로로도 코드·BYOK 키·사용자
+      입력 텍스트는 전송되지 않습니다. (마블로 웹사이트는 앱과 별개로 GA4를
+      사용하며, 웹사이트 자체 쿠키 동의의 적용을 받습니다.)
     </>
   ),
   rows: [
     {
       label: "비식별 1차 지표 (BigQuery)",
       value:
-        "마블로 자체 운영 품질을 위해 식별정보를 제거한 비식별 데이터만 우리 GCP(BigQuery)에 상시 수집합니다. 수집 항목: 익명 설치 ID(계정 UID 아님), 이벤트 종류, 토큰/지속시간 등 집계 지표. 계정 식별자·코드·입력 텍스트는 포함되지 않으며, 에러 메시지는 송신 전 PII 마스킹됩니다. ★계정 식별자(UID)는 클라이언트가 보내지 않을 뿐 아니라 서버도 부착하지 않습니다 — 이 이벤트 기록의 상관키는 익명 설치 ID 하나뿐이라, 우리도 이벤트를 특정 계정으로 되짚을 수 없습니다(그 대가로 계정 단위 이벤트 분석은 포기했습니다). 설치 ID 는 기기·설치별로 새로 생성되며 앱 데이터를 지우면 새 값이 됩니다. 이용 목적: 서비스 품질 분석과 함께, 이 비식별 데이터에서 파생된 특징(모델·소요시간·성공 여부 등)을 모델 라우팅(어떤 작업을 어떤 모델에 배정할지) 품질 개선에 이용합니다 — 프롬프트·응답 원문은 여기에 포함되지 않습니다.",
+        "마블로 자체 운영 품질을 위해 식별정보를 제거한 비식별 데이터만 우리 GCP(BigQuery)에 상시 수집합니다. 수집 항목: 익명 설치 ID(계정 UID 아님), 이벤트 종류, 토큰/지속시간 등 집계 지표. 계정 식별자·코드·입력 텍스트는 포함되지 않으며, 에러 메시지는 송신 전 PII 마스킹됩니다. ★계정 식별자(UID)는 클라이언트도 보내지 않고 서버도 부착하지 않습니다 — 이 기록의 상관키는 익명 설치 ID 하나뿐입니다. 프로젝트·에이전트·티켓 ID 처럼 앱 내부에서 쓰는 식별자도 이 기록에는 가명으로만 적히며, 가명을 만드는 키는 이 데이터가 저장되는 곳에 없습니다 — 그래서 이 기록을 아래 사용량·비용 기록과 이어붙여 계정을 알아내는 일이 성립하지 않습니다(그 대가로 계정 단위 이벤트 분석과 운영자 본인 활동 제외는 포기했습니다). 설치 ID 는 기기·설치별로 새로 생성되며 앱 데이터를 지우면 새 값이 됩니다. 이용 목적: 서비스 품질 분석과 함께, 이 비식별 데이터에서 파생된 특징(모델·소요시간·성공 여부 등)을 모델 라우팅(어떤 작업을 어떤 모델에 배정할지) 품질 개선에 이용합니다 — 프롬프트·응답 원문은 여기에 포함되지 않습니다.",
     },
     {
       label: "사용량·비용 기록 (계정 연결)",
       value:
-        "구독·요금 정산과 회원님 본인의 사용량 확인(설정 → 사용량)을 위해, 에이전트 실행의 토큰 수·추정 비용·모델명·시각을 계정에 연결해 기록합니다. 이 기록만은 성격상 익명일 수 없습니다 — 본인 지출을 본인에게 보여드리려면 계정과 이어져 있어야 하기 때문입니다. 위 비식별 이벤트 기록과는 별도 테이블이고 그쪽에는 계정 식별자를 넣지 않습니다. 다만 두 기록에 같은 에이전트 실행 ID가 들어갈 수 있어 기술적으로 완전한 분리는 아닙니다 — '비식별'은 '이벤트 기록 자체에 계정 식별자를 넣지 않는다'는 뜻이며, 절대적 재식별 불가능성을 뜻하지는 않습니다. 이 연결은 운영자 본인 활동을 통계에서 제외하는 용도로만 쓰고, 개별 이용자를 지목하는 데 쓰지 않습니다. 코드·프롬프트·응답 원문은 여기에도 포함되지 않습니다.",
+        "구독·요금 정산과 회원님 본인의 사용량 확인(설정 → 사용량)을 위해, 에이전트 실행의 토큰 수·추정 비용·모델명·시각을 계정에 연결해 기록합니다. 이 기록만은 성격상 익명일 수 없습니다 — 본인 지출을 본인에게 보여드리려면 계정과 이어져 있어야 하기 때문입니다. 위 비식별 지표와는 별도 테이블이고, 두 기록이 공유하는 조인 키는 없습니다(위 기록의 내부 식별자는 가명입니다). 즉 이 기록은 회원님 본인에게 본인 사용량을 보여드리는 데 쓰이고, 위 분석 기록을 특정 계정으로 되짚는 데는 쓰이지 않습니다. 코드·프롬프트·응답 원문은 여기에도 포함되지 않습니다.",
     },
     {
       label: "학습데이터 기여 (선택 · 원문)",
@@ -144,14 +159,20 @@ const KO: PrivacyContent = {
       ID로 대체
     </>,
     <>
-      ★서버 역시 이벤트에 계정 UID를 <b>다시 붙이지 않습니다</b> — 수신 함수가
-      로그인 여부만 확인하고(도용 방지) uid는 저장하지 않습니다
+      ★제품 사용 분석에는 계정 UID가 <b>없습니다</b> — 앱도 보내지 않고, 수신
+      함수도 로그인 여부만 확인하고(도용 방지) uid는 저장하지 않습니다
+    </>,
+    <>
+      ★앱 내부 식별자(프로젝트·에이전트·티켓 ID) → 분석 기록에서는{" "}
+      <b>가명으로 치환</b>. 가명 키는 분석 데이터가 있는 곳에 두지 않으므로,
+      계정에 연결된 사용량·비용 기록과 조인되지 않습니다
     </>,
   ],
   measuresFootnote: (
     <>
       구현: <code>v3/src/lib/telemetry/scrub.ts</code>(클라이언트) ·{" "}
-      <code>v3/functions/src/telemetryMetadata.ts</code>(서버). Sentry SDK
+      <code>v3/functions/src/telemetryMetadata.ts</code> ·{" "}
+      <code>v3/functions/src/analyticsPseudonym.ts</code>(서버). Sentry SDK
       beforeSend 훅과 1차 BigQuery 텔레메트리 (<code>telemetryService.ts</code>)
       양쪽에서 적용됩니다.
     </>
@@ -163,29 +184,30 @@ const EN: PrivacyContent = {
     <>
       The Marblo desktop app runs all sends to external{" "}
       <b>third-party services (Sentry, crash reports)</b> on{" "}
-      <b>explicit opt-in</b>. First-party metrics for our own operational
-      quality are collected only as{" "}
-      <b>de-identified data with identifiers removed</b>, into our GCP
-      (BigQuery) — using an anonymous install ID, with no account identifier
-      (UID) attached <b>either by the app or by our server</b>. One record works
+      <b>explicit opt-in</b>.{" "}
+      <b>Product usage analytics contain no account identifiers</b> — rows are
+      keyed by an anonymous install ID alone, and the app's own internal ids
+      (project, agent, ticket) appear there only as pseudonyms, so those rows{" "}
+      <b>cannot be joined to your usage and cost records</b>. One record works
       differently: <b>token usage and cost</b> is linked to your account,
-      because showing you your own usage and billing requires it. Every feature
-      works identically whether or not you consent, and on no path is your code,
-      BYOK keys, or user input text transmitted. (The Marblo website uses GA4
-      separately from the app and is governed by the website's own cookie
-      consent.)
+      because showing you your own usage and billing requires it. In short:{" "}
+      <b>analytics cannot identify you; usage and billing records are yours</b>.
+      Every feature works identically whether or not you consent, and on no path
+      is your code, BYOK keys, or user input text transmitted. (The Marblo
+      website uses GA4 separately from the app and is governed by the website's
+      own cookie consent.)
     </>
   ),
   rows: [
     {
       label: "De-identified first-party metrics (BigQuery)",
       value:
-        "For Marblo's own operational quality, only de-identified data with identifiers removed is collected continuously into our GCP (BigQuery). Collected: anonymous install ID (not the account UID), event type, and aggregate metrics like tokens/duration. Account identifiers, code, and input text are not included, and error messages are PII-masked before send. ★The account UID is not only withheld by the app — our receiving function does not attach one either. The only correlation key on these event rows is the anonymous install ID, so not even we can trace an event back to a specific account (the price we pay is giving up account-level event analysis). The install ID is generated per device/installation and becomes a new value if you clear app data. Purpose of use: service quality analysis, plus improving model routing quality (which task is assigned to which model) from features derived from this de-identified data (model, duration, success) — raw prompts and responses are never part of this.",
+        "For Marblo's own operational quality, only de-identified data with identifiers removed is collected continuously into our GCP (BigQuery). Collected: anonymous install ID (not the account UID), event type, and aggregate metrics like tokens/duration. Account identifiers, code, and input text are not included, and error messages are PII-masked before send. ★The account UID is withheld by the app and is not attached by our receiving function either — the only correlation key on these rows is the anonymous install ID. The app's own internal ids (project, agent, ticket) are written here as pseudonyms, and the key that produces them does not live where this data is stored — so joining these rows to the usage and cost records below to recover an account does not work (the price we pay is giving up account-level event analysis and excluding our own operator activity from the stats). The install ID is generated per device/installation and becomes a new value if you clear app data. Purpose of use: service quality analysis, plus improving model routing quality (which task is assigned to which model) from features derived from this de-identified data (model, duration, success) — raw prompts and responses are never part of this.",
     },
     {
       label: "Usage & cost records (account-linked)",
       value:
-        "For subscription/billing reconciliation and for showing you your own usage (Settings → Usage), we record each agent run's token counts, estimated cost, model name, and timestamp linked to your account. This record cannot be anonymous by nature — showing you your own spend requires it to be tied to your account. It lives in a separate table from the de-identified events above, and no account identifier is written to that one. It is not a perfect technical separation, though: the same agent-run ID can appear in both, so 'de-identified' means 'no account identifier is written into the event rows', not an absolute guarantee against re-identification. We use that link only to exclude our own operator activity from statistics, never to single out an individual user. Code and raw prompts/responses are not included here either.",
+        "For subscription/billing reconciliation and for showing you your own usage (Settings → Usage), we record each agent run's token counts, estimated cost, model name, and timestamp linked to your account. This record cannot be anonymous by nature — showing you your own spend requires it to be tied to your account. It lives in a separate table from the de-identified metrics above, and the two share no join key (the internal ids on those rows are pseudonyms). So this record is used to show you your own usage — not to trace the analytics rows back to an account. Code and raw prompts/responses are not included here either.",
     },
     {
       label: "Training-data contribution (optional · raw text)",
@@ -254,15 +276,22 @@ const EN: PrivacyContent = {
       telemetry, replaced with an anonymous install ID
     </>,
     <>
-      ★The server does not re-attach an account UID either — the receiving
-      function checks only that you are signed in (abuse prevention) and never
-      stores the uid
+      ★Product usage analytics carry <b>no account UID</b> — the app does not
+      send one, and the receiving function checks only that you are signed in
+      (abuse prevention) and never stores the uid
+    </>,
+    <>
+      ★App-internal ids (project·agent·ticket) → <b>replaced by pseudonyms</b>{" "}
+      in the analytics rows. The key that produces them is not kept where that
+      data lives, so those rows do not join to the account-linked usage and cost
+      records
     </>,
   ],
   measuresFootnote: (
     <>
       Implementation: <code>v3/src/lib/telemetry/scrub.ts</code> (client) ·{" "}
-      <code>v3/functions/src/telemetryMetadata.ts</code> (server). Applied in
+      <code>v3/functions/src/telemetryMetadata.ts</code> ·{" "}
+      <code>v3/functions/src/analyticsPseudonym.ts</code> (server). Applied in
       both the Sentry SDK beforeSend hook and the first-party BigQuery telemetry
       (<code>telemetryService.ts</code>).
     </>

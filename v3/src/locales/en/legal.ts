@@ -75,7 +75,7 @@ export const legal: Record<keyof typeof koLegal, string> = {
   //   banner stores nothing.
   "legal.clarification.label": "Privacy policy update",
   "legal.clarification.body":
-    "We removed account identifiers from product usage analytics entirely (anonymous install ID only). In turn, the policy now states plainly that token usage and cost records are linked to your account so we can show you your own usage and billing.",
+    "Product usage analytics contain no account identifiers (anonymous install ID only). Token usage and cost records are linked to your account so we can show you your own usage and billing.",
   "legal.clarification.viewDetails": "Details",
   "legal.clarification.dismiss": "Dismiss",
 };

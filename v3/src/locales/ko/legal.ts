@@ -75,7 +75,7 @@ export const legal = {
   //   쓰지 않는다 — 이 배너는 아무것도 저장하지 않는다.
   "legal.clarification.label": "개인정보 처리방침 안내",
   "legal.clarification.body":
-    "제품 사용 통계에서 계정 식별자를 완전히 제거했습니다(익명 설치 ID만 사용). 대신 토큰 사용량·비용 기록은 본인 사용량·요금 확인을 위해 계정에 연결된다는 점을 처리방침에 명시했습니다.",
+    "제품 사용 분석에는 계정 식별자가 없습니다(익명 설치 ID만 사용). 토큰 사용량·비용 기록은 본인 사용량·요금 확인을 위해 계정에 연결됩니다.",
   "legal.clarification.viewDetails": "자세히",
   "legal.clarification.dismiss": "닫기",
 };

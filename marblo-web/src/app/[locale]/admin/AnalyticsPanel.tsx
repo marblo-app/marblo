@@ -3821,12 +3821,14 @@ export default function AnalyticsPanel() {
                   </Panel>
                 )}
 
-                {/* ★하위모델 분해 — 스폰축(하네스)과 비용축(구체 모델)의 해상도
-                    차이를 agentId 조인으로 메운다. */}
+                {/* ★하위모델 분해는 은퇴했다 — 이 표를 만들던 agentId 조인이 곧
+                    익명 텔레메트리를 계정으로 되짚는 경로였다(티켓
+                    U5OPOKf0D3I2TSRP8yUq). 패널을 조용히 지우지 않고 사유를
+                    서버 note 로 그대로 보여준다. */}
                 {m.modelBreakdown && (
                   <Panel
-                    title="하네스 → 하위모델 분해"
-                    note="스폰(events.model=하네스) × 비용(cost_logs.model=구체 모델) agentId 조인"
+                    title="하네스 → 하위모델 분해 (은퇴)"
+                    note="프라이버시 — 익명 텔레메트리와 cost_logs 의 조인을 끊으면서 함께 은퇴"
                   >
                     <SubModelBreakdownTable
                       harnesses={m.modelBreakdown.harnesses}
@@ -4159,9 +4161,9 @@ function StackedBarChart({
 }
 
 // 하위모델 분해표 — 하네스(스폰축) 행 아래에 구체 모델(비용축) 행을 들여쓴다.
-// ★두 축의 해상도가 달라서 필요한 표다(서버 buildModelBreakdown 주석 참조):
-// env-swap 벤더는 우리 claude 바이너리를 그대로 쓰므로 하네스 축만 보면
-// Anthropic 과 한 칸에 섞인다.
+// ★서버에서 은퇴한 표다(adminAnalytics.MODEL_BREAKDOWN_RETIRED): 이 분해를
+// 만들던 events↔cost_logs 의 agentId 조인이 곧 익명 텔레메트리를 계정으로
+// 되짚는 경로였다. 렌더러는 남겨 두되 항상 빈 상태 + 사유 note 를 보여준다.
 function SubModelBreakdownTable({
   harnesses,
   onDrill,
@@ -4170,7 +4172,7 @@ function SubModelBreakdownTable({
   onDrill?: (model: string) => void;
 }) {
   if (harnesses.length === 0) {
-    return <EmptyState label="스폰-비용 조인 결과가 없습니다." />;
+    return <EmptyState label="은퇴한 분해입니다 — 아래 사유를 참고하세요." />;
   }
   return (
     <div className="overflow-x-auto">
