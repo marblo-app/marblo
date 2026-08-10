@@ -161,4 +161,4 @@ The **Worktrees** tab is the visual version of the same audit: worktrees are cat
 
 ---
 
-Back to the **[recipe index](README.md)** · The operational reasoning behind these rules: [Fleet Operations](../../knowledge/fleet-operations/KNOWLEDGE.md)
+Back to the **[recipe index](README.md)** · The operational reasoning behind these rules: [Fleet Operations](../../knowledge/fleet-operations/KNOWLEDGE.md) · What the merge and closeout steps actually refuse to do, and why: [How it works § Safe merge](../how-it-works/README.md#7--safe-merge--what-safe-is-defined-as)

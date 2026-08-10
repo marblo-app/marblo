@@ -7,6 +7,11 @@ from running Marblo on Marblo.
   benchmark measures that a model benchmark does not, the harness × model grid,
   the metrics and what each one is allowed to claim, the four evidence tiers, and
   the honesty rules these documents follow.
+- **[harness-axis.md](harness-axis.md)** — why the harness has to be fixed before
+  any model comparison means anything, shown with published third-party numbers
+  (the same model moves 6.7–12.8 points on scaffold alone), plus the design of the
+  controlled replay round — pre-registered, randomized, blind-graded, **not yet
+  run**.
 - **[dogfooding-2026-07.md](dogfooding-2026-07.md)** — the data, snapshot
   2026-07-29. Coverage, the harness × model grid, process reliability, ticket
   outcomes, routing, and our own measurement gaps.
