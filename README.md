@@ -35,6 +35,8 @@
   <sub>Every card names the agent <em>and</em> the model actually running it — <code>claude-opus-5</code>, <code>gpt-5.6-sol</code>, <code>grok-4.5</code>, <code>glm-5.2</code>, <code>MiniMax-M3</code>.</sub>
 </p>
 
+For a source-verified learning path across LLM foundations, agents, RAG, evaluation, and operations, see the [LLM Study](docs/study/llm-study.md) curation.
+
 ---
 
 ## Install in 30 seconds — no app required
