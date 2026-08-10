@@ -216,7 +216,7 @@ describe("grok — 검증된 CLI 경로와 버전 배지", () => {
     const grok = path.join(binDir, "grok");
     fs.writeFileSync(
       grok,
-      "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'grok 0.2.112'; exit 0; fi\nexit 0\n",
+      '#!/bin/sh\nif [ "$1" = "--version" ]; then echo \'grok 0.2.112\'; exit 0; fi\nexit 0\n',
       "utf-8",
     );
     fs.chmodSync(grok, 0o755);
@@ -277,9 +277,24 @@ describe("grok — 격리 GROK_HOME 인증 전파", () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  it("auth.json 이 있으면 격리 GROK_HOME 으로 심볼릭 링크한다", () => {
+  /** 실제 grok auth.json 스키마(실측). 값은 전부 더미다. */
+  const authFixture = JSON.stringify({
+    "https://auth.x.ai::00000000-0000-4000-8000-000000000000": {
+      key: "dummy-access-token",
+      auth_mode: "Oidc",
+      refresh_token: "dummy-refresh-token",
+      expires_at: "2026-12-01T00:00:00Z",
+    },
+  });
+
+  // ★종전에는 이 자리에 "심볼릭 링크한다" 라는 테스트가 있었고, 그것이 바로
+  //   버그를 사양으로 굳혀둔 것이었다. grok 은 심링크를 realpath 로 풀어 사용자
+  //   실파일을 쓰고, refresh 가 영구실패하면 **그 실파일을 지운다**(로그 실측:
+  //   disk_mutation="file deleted (no scopes left)"). 그래서 에이전트 하나의
+  //   실패가 머신 전체 로그인을 날렸다. 계약을 뒤집는다 — **사본, 심링크 금지**.
+  it("★auth.json 을 격리 GROK_HOME 으로 복사한다 (심링크 금지)", () => {
     const sourceAuth = path.join(home, ".grok", "auth.json");
-    fs.writeFileSync(sourceAuth, JSON.stringify({ token: "fixture" }), {
+    fs.writeFileSync(sourceAuth, authFixture, {
       encoding: "utf-8",
       mode: 0o600,
     });
@@ -288,8 +303,11 @@ describe("grok — 격리 GROK_HOME 인증 전파", () => {
     const targetAuth = path.join(String(cfg.env.GROK_HOME), "auth.json");
 
     expect(fs.existsSync(targetAuth)).toBe(true);
-    expect(fs.lstatSync(targetAuth).isSymbolicLink()).toBe(true);
-    expect(fs.readlinkSync(targetAuth)).toBe(sourceAuth);
+    expect(fs.lstatSync(targetAuth).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(targetAuth, "utf-8")).toBe(authFixture);
+    expect(fs.statSync(targetAuth).mode & 0o777).toBe(0o600);
+    // ★핵심: 에이전트의 auth.json 은 사용자 실파일로 **해석되지 않는다**.
+    expect(fs.realpathSync(targetAuth)).not.toBe(fs.realpathSync(sourceAuth));
   });
 
   it("auth.json 이 없으면 전파를 조용히 스킵한다", () => {
@@ -299,12 +317,25 @@ describe("grok — 격리 GROK_HOME 인증 전파", () => {
     expect(fs.existsSync(targetAuth)).toBe(false);
   });
 
+  it("빈 껍데기(스코프 0) auth.json 은 전파하지 않는다", () => {
+    // grok 이 "no scopes left" 로 남기는 모양. 물려줘봐야 미인증이고, 깨진 토큰을
+    // 상속시키느니 grok 자체 로그인 flow 로 떨어지는 편이 낫다.
+    fs.writeFileSync(path.join(home, ".grok", "auth.json"), "{}", {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
+
+    const cfg = launchConfig("grok", "grok-auth-empty");
+    expect(
+      fs.existsSync(path.join(String(cfg.env.GROK_HOME), "auth.json")),
+    ).toBe(false);
+  });
+
   it("XAI_API_KEY 가 있으면 브라우저 인증 파일 전파를 스킵한다", () => {
-    fs.writeFileSync(
-      path.join(home, ".grok", "auth.json"),
-      JSON.stringify({ token: "fixture" }),
-      { encoding: "utf-8", mode: 0o600 },
-    );
+    fs.writeFileSync(path.join(home, ".grok", "auth.json"), authFixture, {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
     process.env.XAI_API_KEY = "fixture-key";
 
     const cfg = launchConfig("grok", "grok-auth-env");
@@ -389,6 +420,50 @@ describe("오케 셀렉터 값 → codex launch 인자", () => {
     // 즉사한다.
     expect(orchestratorLaunchPin("claude:gpt-5.5", CLI_OK)).toEqual({});
     expect(orchestratorLaunchPin("codex:claude-opus-5", CLI_OK)).toEqual({});
+  });
+});
+
+/**
+ * 오케 셀렉터 값 → **grok** launch 인자.
+ *
+ * ★회귀 대상(2026-08-10): `orchestratorLaunchPin` 이 claude/codex 두 축만 알아서
+ * `grok:*` 값은 "하네스 어긋남" 분기로 떨어져 `{}` 를 돌려줬다. 그래서 오케 grok 은
+ * 셀렉터에서 무엇을 고르든 항상 `GROK_DEFAULT_MODEL` 로 떴다 — 모델 선택이 통째로
+ * drop 됐다는 뜻이다. `OrchestratorLaunchOptions.nativeModelOverride` 와
+ * main.ts 의 두 launch 호출부도 같은 이유로 비어 있었다.
+ *
+ * grok CLI 1.0.0 은 `-m, --model <MODEL>` 을 정식 지원한다(`grok --help` 실측) —
+ * 예전 0.2.112 의 "`-m` 거부" 관측은 이 버전에서 더 이상 사실이 아니다.
+ */
+describe("오케 셀렉터 값 → grok launch 인자", () => {
+  const modelArg = (args: string[]): string | undefined => {
+    const i = args.indexOf("-m");
+    return i >= 0 ? args[i + 1] : undefined;
+  };
+
+  it("★완료기준: 'grok:grok-4.5' 가 -m 까지 살아서 도달한다", () => {
+    const pin = orchestratorLaunchPin("grok:grok-4.5", CLI_OK);
+    expect(pin.nativeModel).toBe("grok-4.5");
+    expect(modelArg(launchArgs("grok", pin))).toBe("grok-4.5");
+  });
+
+  it("★무회귀: 프로바이더만 고른 'grok' 은 종전대로 CLI 기본 모델", () => {
+    const pin = orchestratorLaunchPin("grok", CLI_OK);
+    expect(pin.nativeModel).toBeUndefined();
+    // 핀이 없어도 grok 분기는 항상 기본 모델을 물린다(종전 동작 그대로).
+    expect(modelArg(launchArgs("grok", pin))).toBeTruthy();
+  });
+
+  it("★하네스와 어긋난 grok 핀은 축을 넘기지 않는다", () => {
+    expect(orchestratorLaunchPin("grok:claude-opus-5", CLI_OK)).toEqual({});
+    expect(orchestratorLaunchPin("claude:grok-4.5", CLI_OK)).toEqual({});
+  });
+
+  it("grok 핀은 claude/codex 축을 오염시키지 않는다", () => {
+    const pin = orchestratorLaunchPin("grok:grok-4.5", CLI_OK);
+    expect(pin.claudeModel).toBeUndefined();
+    expect(pin.codexModel).toBeUndefined();
+    expect(pin.codexEffort).toBeUndefined();
   });
 });
 

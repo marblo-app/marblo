@@ -22,6 +22,7 @@ import {
   type LadderTier,
 } from "./model-ladder";
 import { maskEnvForLogging } from "./config-redaction";
+import { grokAuthBroker } from "./grok-auth-broker";
 import { getVendorSecret } from "./vendor-secrets";
 import { CODEX_ORCH_REQUIRED_MCP_TOOLS } from "./mcp-server/tool-surface";
 import {
@@ -2566,6 +2567,10 @@ export class AgentConfigGenerator {
    * Clean up generated config files for an agent.
    */
   cleanup(agentId: string): void {
+    // grok 크레덴셜 사본 감시를 먼저 놓는다 — 파일이 지워지는 것을 "refresh 됨"
+    // 으로 오해할 여지를 없앤다(브로커는 삭제를 전파하지 않지만, 죽은 에이전트를
+    // 계속 폴링할 이유도 없다).
+    grokAuthBroker.release(agentId);
     const files = this.generatedFiles.get(agentId) || [];
     for (const filePath of files) {
       try {
@@ -3059,8 +3064,7 @@ export class AgentConfigGenerator {
     const grokHome = path.join(CONFIG_DIR, `grok-home-${agentId}`);
     fs.mkdirSync(grokHome, { recursive: true });
 
-    const userGrokDir = path.join(os.homedir(), ".grok");
-    this.propagateGrokAuthAssets(agentId, userGrokDir, grokHome);
+    this.propagateGrokAuthAssets(agentId, grokHome);
 
     const { configPath, written } = writeGrokHomeFiles(
       grokHome,
@@ -3073,56 +3077,41 @@ export class AgentConfigGenerator {
     return configPath;
   }
 
-  private propagateGrokAuthAssets(
-    agentId: string,
-    userGrokDir: string,
-    grokHome: string,
-  ): void {
+  // ★심링크 금지 (2026-08-10, grok 로그 실측으로 확정된 근본원인)
+  //
+  //   종전 구현은 격리홈의 auth.json 을 사용자 ~/.grok/auth.json 로 **심링크**해
+  //   "refresh 가 자동으로 공유된다"고 기대했다. 실제로는 그 반대였다 — grok 은
+  //   심링크를 realpath 로 풀어 사용자 실파일을 잠그고 쓰고, refresh 가 영구실패
+  //   하면 **그 실파일을 지운다**:
+  //
+  //     resolved_path=~/.grok/auth.json      ← 격리홈인데 실파일로 해석
+  //     oidc try_refresh_pure terminal error :: invalid_grant
+  //     auth: cleared credentials ... disk_mutation="file deleted (no scopes left)"
+  //     auth disk state: entry lost :: Ok → FileMissing
+  //
+  //   즉 **에이전트 하나의 refresh 실패가 머신 전체 로그인을 삭제**했다(2주간 6회
+  //   실측). 그래서 grok 이 반복적으로 미인증으로 빠졌다.
+  //
+  //   지금은 사설 **복사본**을 깐다. 에이전트가 자기 사본을 지워도 사용자 로그인은
+  //   무사하다. 대신 grok 이 refresh 에 성공하면 GrokAuthBroker 가 그 갱신본을
+  //   사용자 파일로 되돌려 발행한다(문서 `## Hot Reload` 가 보증하는 계약) — 그래서
+  //   회전형 refresh token 도 공유 크레덴셜을 최신으로 유지한다.
+  private propagateGrokAuthAssets(agentId: string, grokHome: string): void {
     // If xAI API-key auth is already present, let the CLI use that path. When
     // both mechanisms exist, env auth is explicit for this process and avoids
     // coupling the isolated home to browser-login state.
+    //
+    // ★XAI_API_KEY 는 종량제 API 키지 SuperGrok 구독 브라우저 인증이 아니다 —
+    //   구독 사용자에겐 이 분기가 타지지 않는 것이 정상이다.
     if (process.env.XAI_API_KEY?.trim()) return;
 
-    const sourceAuth = path.join(userGrokDir, "auth.json");
-    // Verify source is a valid, non-empty JSON before propagating. A present-but-
-    // corrupt auth.json (empty file, truncated JSON, wrong permissions) would
-    // otherwise create a broken symlink that silently fails grok auth.
-    try {
-      const stat = fs.statSync(sourceAuth);
-      if (!stat.isFile() || stat.size === 0) return;
-      const content = fs.readFileSync(sourceAuth, "utf-8");
-      if (!content.trim()) return;
-      JSON.parse(content); // throws if invalid
-    } catch {
-      // Source is missing, empty, or unparseable — skip propagation so grok
-      // falls back to its own auth flow rather than inheriting a broken token.
-      return;
-    }
-
+    // 브로커가 검증(파싱·스코프·토큰 존재)·복사·감시를 모두 맡는다. 원본이 없거나
+    // 못 쓸 모양이면 아무것도 깔지 않고 grok 이 자기 로그인 flow 로 떨어진다 —
+    // 깨진 토큰을 물려주는 것보다 낫다.
+    const sourceAuth = path.join(os.homedir(), ".grok", "auth.json");
     const targetAuth = path.join(grokHome, "auth.json");
     try {
-      let targetExists = fs.existsSync(targetAuth);
-      if (!targetExists) {
-        try {
-          targetExists = fs.lstatSync(targetAuth).isSymbolicLink();
-        } catch {
-          targetExists = false;
-        }
-      }
-      if (targetExists) {
-        fs.unlinkSync(targetAuth);
-      }
-
-      // Prefer a symlink so browser-login token refreshes in ~/.grok remain
-      // visible to already-created isolated GROK_HOME directories. If symlink
-      // creation is unavailable, copy as a best-effort fallback; copied tokens
-      // can become stale after a refresh, but should not block spawning.
-      try {
-        fs.symlinkSync(sourceAuth, targetAuth);
-      } catch {
-        fs.copyFileSync(sourceAuth, targetAuth);
-        fs.chmodSync(targetAuth, 0o600);
-      }
+      grokAuthBroker.install(agentId, grokHome, sourceAuth);
       this.trackFile(agentId, targetAuth);
     } catch {
       // Fail-safe: auth propagation must never prevent Grok from launching.

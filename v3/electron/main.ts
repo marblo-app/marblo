@@ -137,7 +137,9 @@ import {
   resolveAllHarnessVersions,
   preflightNodeSpawn,
   probeGrokMarbloMcp,
+  CONFIG_DIR,
 } from "./agent-config";
+import { unlinkLegacyGrokAuthSymlinks } from "./grok-auth-broker";
 import {
   splitOrchestratorModelValue,
   normalizeOrchestratorModelSetting as normalizeOrchestratorModelSettingImpl,
@@ -3631,6 +3633,7 @@ function orchestratorModelPins(value: unknown): {
   claudeModel?: string;
   codexModel?: string;
   codexEffort?: string;
+  nativeModel?: string;
 } {
   return orchestratorLaunchPin(normalizeOrchestratorModelSetting(value));
 }
@@ -6797,6 +6800,7 @@ ipcMain.handle(
             claudeModelOverride: targetPins.claudeModel,
             codexModelOverride: targetPins.codexModel,
             codexEffortOverride: targetPins.codexEffort,
+            nativeModelOverride: targetPins.nativeModel,
             handoffPrompt,
             handoffMode: switchArgs.mode,
           },
@@ -6984,6 +6988,7 @@ ipcMain.handle(
         claudeModelOverride: orchestratorPins.claudeModel,
         codexModelOverride: orchestratorPins.codexModel,
         codexEffortOverride: orchestratorPins.codexEffort,
+        nativeModelOverride: orchestratorPins.nativeModel,
       },
     );
 
@@ -7889,6 +7894,25 @@ app.whenReady().then(async () => {
         "BYOK keys will not persist across restarts. " +
         "On Linux, install libsecret-1-0 / gnome-keyring.",
     );
+  }
+
+  // ★grok 레거시 심링크 지뢰 제거 (2026-08-10).
+  //   종전 배선은 격리 GROK_HOME 의 auth.json 을 사용자 ~/.grok/auth.json 로
+  //   심링크했다. grok 은 그것을 realpath 로 풀어 쓰고, refresh 가 영구실패하면
+  //   **사용자 실파일을 지운다** — 에이전트 하나의 실패가 머신 전체 로그인을
+  //   날렸다(2주간 6회 실측). 지금은 사설 복사본을 쓰지만, 예전 실행이 남긴 홈
+  //   수천 개에 심링크가 그대로 남아 있어 그 홈이 다시 물리면 재발한다.
+  //   심링크만 끊는다 — 홈/세션/실파일은 건드리지 않고, 다음 실행 때 복사본으로
+  //   재생성되므로 기능 손실이 없다.
+  try {
+    const unlinked = unlinkLegacyGrokAuthSymlinks(CONFIG_DIR);
+    if (unlinked > 0) {
+      console.log(
+        `[Main] Detached ${unlinked} legacy grok auth symlink(s) from the shared login`,
+      );
+    }
+  } catch (err) {
+    console.warn("[Main] grok auth symlink sweep failed (non-fatal):", err);
   }
 
   // 학습데이터 캡처 부트스트랩. 여기서는 타이머만 세우고 게이트를 서버에

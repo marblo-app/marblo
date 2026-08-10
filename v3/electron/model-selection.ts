@@ -630,7 +630,8 @@ export function orchestratorModelTypeForSetting(value: unknown): ModelType {
 
 /**
  * 오케 셀렉터/저장값 하나(`provider[:modelId][@effort]`)를 launch 옵션의 **모델 핀
- * 두 축**으로 해석한다. 프로바이더만 고른 값이면 전부 undefined 를 돌려주고, 그때
+ * 세 축**(claude `--model`, codex `-c model=`/`-c model_reasoning_effort=`,
+ * grok `-m`)으로 해석한다. 프로바이더만 고른 값이면 전부 undefined 를 돌려주고, 그때
  * 오케는 종전대로 각 CLI 의 기본 모델·기본 effort 를 상속한다(바이트 동일).
  *
  * ★main.ts 가 이 함수를 쓰고 테스트도 이 함수를 쓴다. 해석 규칙을 main 안에 두면
@@ -645,7 +646,12 @@ export function orchestratorModelTypeForSetting(value: unknown): ModelType {
 export function orchestratorLaunchPin(
   value: string,
   installedClaudeVersion?: string,
-): { claudeModel?: string; codexModel?: string; codexEffort?: EffortLevel } {
+): {
+  claudeModel?: string;
+  codexModel?: string;
+  codexEffort?: EffortLevel;
+  nativeModel?: string;
+} {
   const { harness, modelId, effort } = splitOrchestratorModelValue(value);
   if (!modelId) return {};
 
@@ -665,6 +671,16 @@ export function orchestratorLaunchPin(
       ...(pin.codexModel ? { codexModel: pin.codexModel } : {}),
       ...(pin.codexEffort ? { codexEffort: pin.codexEffort } : {}),
     };
+  }
+  // grok 축(`-m <MODEL>`). ★이 분기가 없어서 오케 grok 의 모델 선택이 통째로
+  // drop 됐다 — `grok:grok-4.5` 는 위 두 분기에 걸리지 못하고 아래 "하네스 어긋남"
+  // 경고로 떨어져 `{}` 를 돌려줬고, 결국 buildCLICommand 가 매번
+  // GROK_DEFAULT_MODEL 로 떴다. 셀렉터에서 무엇을 고르든 결과가 같았다.
+  //
+  // grok CLI 1.0.0 은 `-m, --model <MODEL>` 을 정식 지원한다(`grok --help` 실측).
+  // 예전 0.2.112 가 `-m` 을 거부했다는 관측은 이 버전에서 더 이상 사실이 아니다.
+  if (harness === "grok" && pin.harness === "grok") {
+    return pin.nativeModel ? { nativeModel: pin.nativeModel } : {};
   }
   console.warn("[model-selection] 오케 모델 핀이 하네스와 어긋나 무시", {
     value,

@@ -304,6 +304,19 @@ export interface OrchestratorLaunchOptions {
    * 모두 통과시키는 유일한 문이다.
    */
   codexEffortOverride?: string;
+  /**
+   * grok 오케를 띄울 **구체 모델 id**(`-m` 값).
+   *
+   * ★이 필드가 없어서 오케 grok 의 모델 선택이 통째로 drop 됐다(2026-08-10):
+   * 에이전트 스폰 경로(main.ts 의 `nativeModelOverride: pin?.nativeModel`)는 핀을
+   * 넘기는데, 오케 launch 경로는 claude/codex 축만 넘겨서 `modelPin.nativeModel` 이
+   * 항상 undefined 였고 `buildCLICommand` 의 grok 분기가 매번
+   * `GROK_DEFAULT_MODEL` 로 떨어졌다. 셀렉터에서 무엇을 고르든 결과가 같았다는 뜻이다.
+   *
+   * undefined 면 종전대로 CLI 기본 모델(`GROK_DEFAULT_MODEL`)이 붙는다 — 즉 핀이
+   * 없는 경로는 바이트 동일하다.
+   */
+  nativeModelOverride?: string;
   handoffPrompt?: string;
   handoffMode?: "wait" | "takeover";
 }
@@ -833,11 +846,12 @@ export class OrchestratorManager {
       // complexity: 오케는 난도 티어를 타지 않는다(종전대로 미지정).
       undefined,
       // 모델 셀렉터가 고른 변형. 미지정 축은 플래그 자체가 안 붙는다
-      // (claude=--model, codex=-c model=/-c model_reasoning_effort=).
+      // (claude=--model, codex=-c model=/-c model_reasoning_effort=, grok=-m).
       {
         claudeModel: launchOptions?.claudeModelOverride,
         codexModel: launchOptions?.codexModelOverride,
         codexEffort: launchOptions?.codexEffortOverride,
+        nativeModel: launchOptions?.nativeModelOverride,
       },
     );
 
