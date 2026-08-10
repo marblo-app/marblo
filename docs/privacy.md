@@ -200,10 +200,11 @@ so "read the code" is not an option we can offer for the app. These are:
   re-link rows to an account inside our own warehouse.
 - **Analytics is on by default.** It is de-identified and it is one switch
   away, but a default-on collector is a default-on collector.
-- **The in-app policy page is stricter than this page in one spot.** It says
-  first-party metrics carry no account identifier; §1 explains where one is in
-  fact attached server-side. That copy is being corrected; until it is, this
-  page is the accurate one.
+- **The in-app policy and this page now agree.** The in-app policy states that
+  product-usage analytics use an anonymous install id with no account
+  identifier — which is accurate for what the client sends. This page adds one
+  detail the in-app copy keeps brief: an account id is attached server-side and
+  rows stay re-linkable inside our own warehouse (§1).
 - **No third-party privacy audit.** Nobody outside the company has verified any
   of this. What we can offer instead is §6.
 
