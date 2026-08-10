@@ -8,5 +8,8 @@ How a goal becomes shipped code:
 4. **Review & merge** — the [`review-and-merge`](../../workflows/review-and-merge/) workflow gates every change; nothing lands without a review pass and your confirmation.
 
 Worked examples of all four steps, end to end: **[Recipes & Playbooks](../recipes/)**.
+How each step is implemented — model selection as two separate layers, the spawn
+gates, the worktree lock, and what the merge path refuses to do:
+**[How it works](../how-it-works/)**.
 
 Related: [`reviewer` agent](../../agents/reviewer/) · [`code-review` skill](../../skills/code-review/)

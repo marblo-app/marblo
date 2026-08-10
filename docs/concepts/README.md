@@ -7,4 +7,5 @@
 - **Lanes** — fire several agents in parallel yourself, picking the model per lane.
 - **Harness Store** — install skills, MCP servers, agents, workflows, and knowledge packs from the [registry](../../registry/).
 
-See also: [Orchestration →](../orchestration/)
+See also: [Orchestration →](../orchestration/) · [How it works →](../how-it-works/) —
+the same pieces at the mechanism level: what each one refuses to do, and why.
