@@ -52,6 +52,14 @@ If an item turns out to be malicious, is compromised upstream, or misrepresents 
 
 Advisories are public and permanent — an entry is never deleted, because users need to be able to find out what happened to something they already installed.
 
+## Data handling in the app
+
+This document covers the registry as a supply-chain surface. The other half of
+the question — what the Marblo desktop app itself collects, transmits, and never
+transmits, and how to switch the optional parts off — is
+[docs/privacy.md](docs/privacy.md). It follows the same "what is true today /
+what is not true yet" rule as this page.
+
 ## What must never be committed
 
 API keys or secrets, model weights, large datasets, or credentials of any kind. Manifests missing a license or an immutable source pin are rejected by CI; a GitHub repository reachability check is also run on a best-effort basis. Payload review remains mandatory.

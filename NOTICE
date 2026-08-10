@@ -1,0 +1,29 @@
+# NOTICE — what the MIT license in this repository covers
+
+The [LICENSE](LICENSE) file is the unmodified MIT license text, so that
+automated license detection (GitHub, `licensee`, SBOM scanners) resolves it to
+`MIT` rather than to `Other`. This file carries the scope note that used to be
+appended to it.
+
+**Covered by MIT:** the ecosystem content authored in this repository —
+registry manifests, first-party skills, agents, workflows, MCP server
+manifests, knowledge packs, documentation, examples, and the repo tooling under
+`scripts/` and `packages/`.
+
+**Not covered, and not vendored here:** third-party items referenced by
+manifest (see [`registry/`](registry/)). Each declares its upstream repository
+and a pinned tag or commit SHA, and remains under its own upstream license —
+this repository does not copy their code. The license of every referenced item
+is declared in its `marblo.yaml` and printed in the catalog table in
+[README.md](README.md).
+
+**Also not covered:** the Marblo desktop application itself. The orchestration
+engine is closed source and distributed under its own terms — see
+[README.md](README.md#whats-open-and-what-isnt).
+
+**First-party exceptions.** Two first-party knowledge packs are CC-BY-4.0
+rather than MIT, declared in their own manifests:
+[`knowledge/fleet-operations`](knowledge/fleet-operations/) and
+[`knowledge/curated-llm-resources`](knowledge/curated-llm-resources/). Where an
+item's `marblo.yaml` declares a license, that declaration wins; where nothing is
+declared, MIT applies.
