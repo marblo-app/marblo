@@ -24,7 +24,7 @@ const HOME_FAQS: Record<
     {
       question: "마블로(Marblo)가 무엇인가요?",
       answer:
-        "마블로는 여러 AI 코딩 에이전트를 하나의 칸반 보드에서 동시에 오케스트레이션하는 데스크톱 앱입니다. 중앙 오케스트레이터가 태스크를 분할해 각 에이전트에 할당하고 진행 상황을 실시간으로 추적합니다. macOS와 Windows에서 실행됩니다.",
+        "마블로는 Claude Code와 Codex 같은 코딩 에이전트를 엔지니어링 팀처럼 조율하는 데스크톱 앱입니다. 중앙 오케스트레이터가 태스크 귀속, 격리된 워크트리, 진행 상태, 리뷰·머지 게이트를 한 흐름으로 묶습니다. macOS와 Windows에서 실행됩니다.",
     },
     {
       question: "마블로는 어떤 AI 에이전트를 지원하나요?",
@@ -52,7 +52,7 @@ const HOME_FAQS: Record<
     {
       question: "What is Marblo?",
       answer:
-        "Marblo is a desktop app that orchestrates multiple AI coding agents simultaneously on a single kanban board. A central orchestrator splits tasks, assigns them to each agent, and tracks progress in real time. It runs on macOS and Windows.",
+        "Marblo is a desktop app that turns coding agents such as Claude Code and Codex into an engineering team. A central orchestrator ties task ownership, isolated worktrees, progress state, and review/merge gates into one workflow. It runs on macOS and Windows.",
     },
     {
       question: "Which AI agents does Marblo support?",
@@ -80,7 +80,7 @@ const HOME_FAQS: Record<
     {
       question: "Marblo(マブロ)とは何ですか?",
       answer:
-        "Marbloは複数のAIコーディングエージェントを一つのカンバンボードで同時にオーケストレーションするデスクトップアプリです。中央オーケストレーターがタスクを分割して各エージェントに割り当て、進捗をリアルタイムで追跡します。macOSとWindowsで動作します。",
+        "MarbloはClaude CodeやCodexなどのコーディングエージェントをエンジニアリングチームとして調整するデスクトップアプリです。中央オーケストレーターがタスク所有、隔離ワークツリー、進捗状態、レビュー・マージゲートを一つの流れに束ねます。macOSとWindowsで動作します。",
     },
     {
       question: "MarbloはどのAIエージェントに対応していますか?",
@@ -117,56 +117,59 @@ export default function HomePage() {
   const faqSchema = buildFAQPageSchema(HOME_FAQS[locale]);
 
   const comparisonRows = [
-    "multiAgent",
-    "kanban",
-    "ticketDiff",
-    "agentNav",
-    "multiModel",
-    "mcp",
-    "local",
+    "simultaneous",
+    "isolation",
+    "ownership",
+    "safeMerge",
+    "modelSpawn",
+    "kanbanSurface",
   ] as const;
 
   // true = supported, false = not supported, 'partial' = partially
   const comparisonData: Record<string, Record<string, boolean | string>> = {
-    multiAgent: {
+    simultaneous: {
       marblo: true,
-      cursor: false,
-      copilot: false,
-      windsurf: false,
+      claudeCode: "partial",
+      codexCli: "partial",
+      orca: true,
     },
-    kanban: { marblo: true, cursor: false, copilot: false, windsurf: false },
-    ticketDiff: {
+    isolation: {
       marblo: true,
-      cursor: false,
-      copilot: false,
-      windsurf: false,
+      claudeCode: false,
+      codexCli: false,
+      orca: true,
     },
-    agentNav: {
+    ownership: {
       marblo: true,
-      cursor: false,
-      copilot: false,
-      windsurf: false,
+      claudeCode: false,
+      codexCli: false,
+      orca: "partial",
     },
-    multiModel: {
+    safeMerge: {
       marblo: true,
-      cursor: true,
-      copilot: "partial",
-      windsurf: true,
+      claudeCode: false,
+      codexCli: false,
+      orca: "partial",
     },
-    mcp: {
+    modelSpawn: {
       marblo: true,
-      cursor: true,
-      copilot: "partial",
-      windsurf: "partial",
+      claudeCode: false,
+      codexCli: false,
+      orca: "partial",
     },
-    local: { marblo: true, cursor: true, copilot: false, windsurf: true },
+    kanbanSurface: {
+      marblo: true,
+      claudeCode: false,
+      codexCli: false,
+      orca: false,
+    },
   };
 
   const prices: Record<string, string> = {
     marblo: "$19/mo",
-    cursor: "$20/mo",
-    copilot: "$10-39/mo",
-    windsurf: "$15/mo",
+    claudeCode: "BYO",
+    codexCli: "BYO",
+    orca: "OSS",
   };
 
   return (
@@ -184,21 +187,13 @@ export default function HomePage() {
         <div className="absolute inset-0 bg-gradient-to-b from-indigo-600/5 to-transparent" />
         <HeroConstellation />
         <div className="w-full max-w-4xl mx-auto relative z-10 overflow-hidden">
-          {/* The eyebrow pill lives INSIDE the h1. hero.title is pure benefit
-              copy ("혼자서 팀 전체의 성과를 만드세요") and contains neither the
-              brand nor the category, so the single strongest on-page heading
-              signal was carrying zero of the terms we want to rank for, while
-              hero.badge — which carries all of them ("마블로 · AI 에이전트
-              오케스트레이션 플랫폼") — sat in a sibling span that counts for
-              almost nothing. Grouping them makes the h1 read "brand · category
-              → promise" without hiding text or changing a word of the copy.
-              Styling moved onto the inner spans so the pill and the headline
-              render exactly as before. */}
+          {/* Group the badge and headline into the single strongest heading
+              signal: brand/category first, then the team-oriented promise. */}
           <h1>
             <span className="inline-block max-w-[22rem] sm:max-w-full whitespace-normal break-words bg-indigo-500/10 text-indigo-400 text-xs sm:text-sm font-medium px-4 py-1.5 rounded-full mb-6 border border-indigo-500/30">
               {t("hero.badge")}
             </span>
-            <span className="block max-w-[22rem] sm:max-w-full mx-auto text-3xl sm:text-5xl md:text-7xl font-bold leading-tight whitespace-pre-line break-words tracking-tight bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">
+            <span className="block max-w-[22rem] sm:max-w-full mx-auto text-3xl sm:text-5xl md:text-6xl font-bold leading-tight whitespace-pre-line break-words bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">
               {t("hero.title")}
             </span>
           </h1>
@@ -228,6 +223,43 @@ export default function HomePage() {
           </p>
 
           <HeroWorkspaceMockup />
+        </div>
+      </section>
+
+      {/* Proof strip — show the team mechanics immediately after the promise. */}
+      <section className="px-4 pb-20">
+        <div className="mx-auto max-w-6xl">
+          <div className="border-y border-zinc-800/80 py-10">
+            <div className="mb-8 max-w-3xl">
+              <p className="text-sm font-semibold uppercase tracking-widest text-cyan-400">
+                {t("hero.proof.eyebrow")}
+              </p>
+              <h2 className="mt-3 text-2xl font-bold text-white md:text-3xl">
+                {t("hero.proof.title")}
+              </h2>
+              <p className="mt-3 text-zinc-400 leading-relaxed">
+                {t("hero.proof.subtitle")}
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div
+                  key={i}
+                  className="min-h-36 border border-zinc-800 bg-zinc-950/60 p-4"
+                >
+                  <div className="text-xs font-mono uppercase tracking-wider text-zinc-500">
+                    {t(`hero.proof.item${i}.kicker`)}
+                  </div>
+                  <h3 className="mt-3 text-base font-semibold leading-snug text-zinc-100">
+                    {t(`hero.proof.item${i}.title`)}
+                  </h3>
+                  <p className="mt-2 text-sm leading-relaxed text-zinc-500">
+                    {t(`hero.proof.item${i}.description`)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
 
@@ -267,24 +299,24 @@ export default function HomePage() {
           <div className="text-center mb-12">
             <span className="inline-flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 rounded-full px-4 py-1.5 mb-5 text-sm text-indigo-400 font-medium">
               {locale === "ko"
-                ? "마블로만의 핵심 기술"
+                ? "팀으로 바꾸는 구조"
                 : locale === "ja"
-                ? "Marbloだけのコア技術"
-                : "Core Technology Only in Marblo"}
+                ? "チームに変える構造"
+                : "The structure that makes it a team"}
             </span>
             <h2 className="text-3xl md:text-4xl font-bold mb-4">
               {locale === "ko"
-                ? "이종 에이전트 오케스트레이션"
+                ? "조율·격리·귀속·리뷰 게이트"
                 : locale === "ja"
-                ? "異種エージェント・オーケストレーション"
-                : "Heterogeneous Agent Orchestration"}
+                ? "調整・隔離・所有・レビューゲート"
+                : "Coordination, isolation, ownership, and review gates"}
             </h2>
             <p className="text-zinc-400 text-lg max-w-3xl mx-auto leading-relaxed">
               {locale === "ko"
-                ? "중앙 오케스트레이터가 Claude, GPT/Codex, Antigravity 등 이종 AI 에이전트를 물리적/논리적으로 분할하여 태스크를 할당하고 관리합니다. 이것은 마블로에서만 가능합니다."
+                ? "칸반은 표면입니다. 차별화는 여러 에이전트를 한 저장소에서 동시에 돌릴 때 태스크 소유자, 격리된 워크트리, 리뷰 상태, 머지 판단을 하나의 흐름으로 묶는 조율 계층입니다."
                 : locale === "ja"
-                ? "中央オーケストレーターがClaude、GPT/Codex、Antigravityなど異種AIエージェントを物理的/論理的に分割してタスクを割り当て管理します。これはMarbloでのみ可能です。"
-                : "A central orchestrator physically and logically partitions heterogeneous AI agents — Claude, GPT/Codex, Antigravity — to assign and manage tasks. This is only possible with Marblo."}
+                ? "カンバンは表面です。差別化は、複数エージェントが同じリポジトリで同時に動くとき、タスク所有者・隔離ワークツリー・レビュー状態・マージ判断を一つの流れに束ねる調整レイヤーです。"
+                : "The kanban board is the surface. The differentiator is the coordination layer that ties task ownership, isolated worktrees, review state, and merge decisions together when several agents work in the same repo."}
             </p>
           </div>
           <div className="rounded-2xl border border-zinc-700/50 overflow-hidden shadow-2xl shadow-indigo-900/10">
@@ -298,13 +330,13 @@ export default function HomePage() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-10">
             <div className="bg-zinc-900 border border-zinc-700/50 rounded-xl p-6 text-center">
-              <div className="text-2xl font-bold text-indigo-400 mb-2">3+</div>
+              <div className="text-2xl font-bold text-indigo-400 mb-2">2+</div>
               <p className="text-zinc-400 text-sm">
                 {locale === "ko"
-                  ? "AI 모델 동시 운용"
+                  ? "동시 에이전트 레인"
                   : locale === "ja"
-                  ? "AIモデル同時運用"
-                  : "AI Models Running Simultaneously"}
+                  ? "同時エージェントレーン"
+                  : "Concurrent Agent Lanes"}
               </p>
             </div>
             <div className="bg-zinc-900 border border-zinc-700/50 rounded-xl p-6 text-center">
@@ -318,13 +350,13 @@ export default function HomePage() {
               </p>
             </div>
             <div className="bg-zinc-900 border border-zinc-700/50 rounded-xl p-6 text-center">
-              <div className="text-2xl font-bold text-amber-400 mb-2">0</div>
+              <div className="text-2xl font-bold text-amber-400 mb-2">Safe</div>
               <p className="text-zinc-400 text-sm">
                 {locale === "ko"
-                  ? "경쟁사 동일 기능"
+                  ? "리뷰·머지 게이트"
                   : locale === "ja"
-                  ? "競合の同等機能"
-                  : "Competitors with This Feature"}
+                  ? "レビュー・マージゲート"
+                  : "Review and Merge Gate"}
               </p>
             </div>
           </div>
@@ -354,13 +386,13 @@ export default function HomePage() {
                     {t("comparison.marblo")}
                   </th>
                   <th className="text-center py-4 px-4 text-zinc-400 font-medium">
-                    {t("comparison.cursor")}
+                    {t("comparison.claudeCode")}
                   </th>
                   <th className="text-center py-4 px-4 text-zinc-400 font-medium">
-                    {t("comparison.copilot")}
+                    {t("comparison.codexCli")}
                   </th>
                   <th className="text-center py-4 px-4 text-zinc-400 font-medium">
-                    {t("comparison.windsurf")}
+                    {t("comparison.orca")}
                   </th>
                 </tr>
               </thead>
@@ -370,7 +402,7 @@ export default function HomePage() {
                     <td className="py-4 px-4 text-zinc-300">
                       {t(`comparison.rows.${row}`)}
                     </td>
-                    {["marblo", "cursor", "copilot", "windsurf"].map((tool) => (
+                    {["marblo", "claudeCode", "codexCli", "orca"].map((tool) => (
                       <td key={tool} className="text-center py-4 px-4">
                         {comparisonData[row][tool] === true ? (
                           <Check className="w-5 h-5 text-green-400 mx-auto" />
@@ -387,7 +419,7 @@ export default function HomePage() {
                   <td className="py-4 px-4 text-zinc-300 font-medium">
                     {t("comparison.rows.price")}
                   </td>
-                  {["marblo", "cursor", "copilot", "windsurf"].map((tool) => (
+                  {["marblo", "claudeCode", "codexCli", "orca"].map((tool) => (
                     <td
                       key={tool}
                       className={`text-center py-4 px-4 font-semibold ${

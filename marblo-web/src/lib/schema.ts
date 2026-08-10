@@ -30,15 +30,15 @@ const pick = <T>(locale: string, map: Record<Locale, T>): T =>
   map[(locale as Locale) in map ? (locale as Locale) : "en"];
 
 const ORG_DESCRIPTION: Record<Locale, string> = {
-  ko: "Marblo(마블로)는 여러 AI 코딩 에이전트를 칸반 보드에서 동시에 오케스트레이션하는 데스크톱 워크스페이스입니다. 개발사는 주식회사 하이프마크(HYPEMARC).",
-  en: "Marblo is a desktop workspace that orchestrates multiple AI coding agents simultaneously on a kanban board. Built by HYPEMARC.",
-  ja: "Marblo(マブロ)は複数のAIコーディングエージェントをカンバンボードで同時にオーケストレーションするデスクトップワークスペースです。開発はHYPEMARC。",
+  ko: "Marblo(마블로)는 Claude Code와 Codex 같은 코딩 에이전트를 엔지니어링 팀처럼 조율하는 데스크톱 워크스페이스입니다. 개발사는 주식회사 하이프마크(HYPEMARC).",
+  en: "Marblo is a desktop workspace that turns coding agents such as Claude Code and Codex into an engineering team. Built by HYPEMARC.",
+  ja: "Marblo(マブロ)はClaude CodeやCodexなどのコーディングエージェントをエンジニアリングチームとして調整するデスクトップワークスペースです。開発はHYPEMARC。",
 };
 
 const APP_DESCRIPTION: Record<Locale, string> = {
-  ko: "Marblo는 Claude·GPT/Codex·Antigravity 등 이종 AI 에이전트를 하나의 칸반 보드에서 동시에 운용하는 데스크톱 앱입니다. 중앙 오케스트레이터가 태스크를 분할·할당하고, MCP 프로토콜을 네이티브 지원하며, 모든 실행이 로컬에서 이루어집니다. macOS·Windows 지원.",
-  en: "Marblo is a desktop app that runs heterogeneous AI agents — Claude, GPT/Codex, Antigravity — simultaneously on a single kanban board. A central orchestrator splits and assigns tasks, MCP is supported natively, and everything runs locally. Available for macOS and Windows.",
-  ja: "MarbloはClaude・GPT/Codex・Antigravityなどの異種AIエージェントを一つのカンバンボードで同時に運用するデスクトップアプリです。中央オーケストレーターがタスクを分割・割り当て、MCPプロトコルをネイティブ対応し、すべての実行はローカルで行われます。macOS・Windows対応。",
+  ko: "Marblo는 Claude Code·Codex 등 이종 코딩 에이전트를 조율하는 데스크톱 앱입니다. 중앙 오케스트레이터가 태스크 귀속, 격리 워크트리, 진행 상태, 리뷰·머지 게이트를 한 흐름으로 묶고, MCP 프로토콜을 네이티브 지원하며, 모든 실행이 로컬에서 이루어집니다. macOS·Windows 지원.",
+  en: "Marblo is a desktop app that coordinates heterogeneous coding agents such as Claude Code and Codex. A central orchestrator ties task ownership, isolated worktrees, progress state, and review/merge gates into one workflow, supports MCP natively, and runs locally. Available for macOS and Windows.",
+  ja: "MarbloはClaude Code・Codexなどの異種コーディングエージェントを調整するデスクトップアプリです。中央オーケストレーターがタスク所有、隔離ワークツリー、進捗状態、レビュー・マージゲートを一つの流れに束ね、MCPプロトコルにネイティブ対応し、すべてローカルで実行されます。macOS・Windows対応。",
 };
 
 /**

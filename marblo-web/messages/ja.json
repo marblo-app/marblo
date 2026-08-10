@@ -15,13 +15,43 @@
     "guide": "ガイド"
   },
   "hero": {
-    "title": "一人で、チーム全体の\n成果を出す",
-    "subtitle": "Claude、GPT/Codex、Antigravityなど複数のAIエージェントをプロジェクト単位でオーケストレーション。\nあなたは指示し、エージェントが実行します。",
+    "title": "Claude CodeとCodexは優れたコーディングエージェントです。\nMarbloはそれらをエンジニアリングチームに変えます。",
+    "subtitle": "すでに使っているコーディングエージェントのためのオーケストレーションレイヤー。",
     "cta_download": "ダウンロード",
     "cta_pricing": "料金を見る",
     "badge": "Marblo · AIエージェント・オーケストレーション・プラットフォーム",
     "clickToEnlarge": "クリックして拡大",
-    "prereqNote": "AI利用料は別途 · インストール後、Claude Code・Codexなど既存のAI CLIのインストール・ログイン・アカウント連携が必要です。"
+    "prereqNote": "AI利用料は別途 · インストール後、Claude Code・Codexなど既存のAI CLIのインストール・ログイン・アカウント連携が必要です。",
+    "proof": {
+      "eyebrow": "約束ではなく証拠",
+      "title": "チームには調整、隔離、所有、マージゲートが必要です。",
+      "subtitle": "Marbloはヒーロー直下で、チームとして動く仕組みを見せます。ボード状態、同時エージェント、モデル別スポーン、safe-mergeレビュー、10分での初回マルチエージェント成功経路です。",
+      "item1": {
+        "kicker": "Board",
+        "title": "チケットは制御の表面です",
+        "description": "ボードは担当者と状態を見せる表面であり、差別化のすべてではありません。"
+      },
+      "item2": {
+        "kicker": "Concurrent",
+        "title": "複数エージェントが同時に動きます",
+        "description": "Claude Code、Codexなどのエージェントが同じプロジェクト内の別チケットを並行して進めます。"
+      },
+      "item3": {
+        "kicker": "Spawn",
+        "title": "モデル別の作業レーン",
+        "description": "バックエンド、フロントエンド、テスト、レビューに合うコーディングエージェントをスポーンします。"
+      },
+      "item4": {
+        "kicker": "Safe-merge",
+        "title": "結果はレビューに集約されます",
+        "description": "ワークツリー隔離とレビュー状態が、並行した成果を制御可能なマージへ集約します。"
+      },
+      "item5": {
+        "kicker": "10分",
+        "title": "初回マルチエージェント成功",
+        "description": "オンボーディングは、実際のマルチエージェント実行をすばやく完了する流れを基準に設計されています。"
+      }
+    }
   },
   "featureVideo": {
     "badge": "機能紹介動画",
@@ -31,14 +61,14 @@
     "iframeTitle": "Marblo機能紹介動画"
   },
   "value": {
-    "title": "エージェント1体ではない。\n軍団を運用する。",
-    "subtitle": "CursorやCopilotはエージェント1体。\nMarbloは複数のエージェントを同時運用し、10倍速い成果を生み出します。",
-    "stat1_number": "5x",
-    "stat1_label": "同時エージェント運用",
-    "stat2_number": "10x",
-    "stat2_label": "開発スピード向上",
-    "stat3_number": "3+",
-    "stat3_label": "AIモデル同時活用"
+    "title": "もう一つのコーディングエージェントではなく、\nそれらを調整するレイヤーです",
+    "subtitle": "Claude CodeとCodexはすでに強力です。Marbloはタスク所有、隔離された作業空間、レビュー経路を加え、チームとして動かします。",
+    "stat1_number": "2+",
+    "stat1_label": "同時エージェントレーン",
+    "stat2_number": "10分",
+    "stat2_label": "初回マルチエージェント成功経路",
+    "stat3_number": "Safe",
+    "stat3_label": "レビューとマージゲート"
   },
   "features": {
     "title": "なぜMarbloなのか？",
@@ -46,7 +76,7 @@
     "multiagent": {
       "title": "マルチエージェント・オーケストレーション",
       "description": "Claudeがバックエンド、GPT/Codexがフロントエンド、Antigravityがテストを — 同時に処理。カンバンボードで各エージェントの進捗をリアルタイムで確認。",
-      "highlight": "競合にない唯一の機能",
+      "highlight": "調整された並行作業のための構造",
       "detail": "Marbloのマルチエージェントシステムは、各AIモデルの強みを最大化します。\n\nClaudeは精巧なバックエンドロジックとアーキテクチャ設計を、GPT/Codexは高速なフロントエンドコーディングとUI実装を、Antigravityはテスト作成とコードレビューを担当します。\n\n各エージェントは独立したターミナルで実行され、カンバンボードで進捗をリアルタイムにモニタリングできます。MCPプロトコルを通じてエージェント間でコンテキストを共有し、実際の開発チームのように協業します。"
     },
     "kanban": {
@@ -123,21 +153,20 @@
     }
   },
   "comparison": {
-    "title": "Marblo vs 競合",
-    "subtitle": "同じ価格帯、別次元の機能",
+    "title": "Marblo vs コーディングエージェントとエージェントワークベンチ",
+    "subtitle": "カンバンは表面です。違いは調整、隔離、所有、マージ証跡です。",
     "feature": "機能",
     "marblo": "Marblo",
-    "cursor": "Cursor",
-    "copilot": "Copilot",
-    "windsurf": "Windsurf",
+    "claudeCode": "Claude Code",
+    "codexCli": "Codex CLI",
+    "orca": "Orca",
     "rows": {
-      "multiAgent": "マルチエージェント同時運用",
-      "kanban": "カンバンボード + タスク管理",
-      "ticketDiff": "チケット↔エージェント接続 + インライン差分",
-      "agentNav": "矢印キーでのエージェントパネル切り替え",
-      "multiModel": "マルチモデル（Claude+GPT/Codex+Antigravity）",
-      "mcp": "MCPプロトコル対応",
-      "local": "ローカル実行（データ保護）",
+      "simultaneous": "複数エージェントの同時作業",
+      "isolation": "エージェント別の隔離ワークツリー",
+      "ownership": "タスク → エージェント所有と活動ログ",
+      "safeMerge": "レビューとsafe-merge証跡",
+      "modelSpawn": "モデル別エージェントスポーン",
+      "kanbanSurface": "ボード/タスク表面",
       "price": "価格"
     }
   },
@@ -151,11 +180,11 @@
   },
   "social": {
     "title": "開発者の声",
-    "quote1": "3つのエージェントが同時に作業し、1日かかる仕事を2時間で終わらせました",
+    "quote1": "複数エージェントが別々のチケットを進める様子が見え、並行作業を任せやすくなりました",
     "author1": "フルスタック開発者",
     "quote2": "カンバンでエージェントの進捗を見ながら管理できるのが本当に直感的です",
     "author2": "スタートアップCTO",
-    "quote3": "Cursorから乗り換えましたが、マルチエージェントは次元が違います",
+    "quote3": "役に立つのはボード単体ではなく、その周りのオーケストレーションでした",
     "author3": "フリーランス開発者"
   },
   "experience": {
@@ -170,13 +199,13 @@
   },
   "cta_final": {
     "title": "今すぐ無料で始めましょう",
-    "subtitle": "Freeプランでお試しいただき、\nProにアップグレードしてエージェント軍団を運用しましょう",
+    "subtitle": "Freeプランでお試しいただき、\nProにアップグレードしてより多くのコーディングエージェント作業を調整しましょう",
     "download": "ダウンロード",
     "pricing": "プランを比較する"
   },
   "pricing": {
     "title": "料金プラン",
-    "subtitle": "Cursor（$20/月）より安く、マルチエージェントまで — コスパ最強のAIコーディング",
+    "subtitle": "Marbloの料金はオーケストレーションレイヤーの費用です。コーディングエージェントは既存のAIアカウントで実行されます。",
     "free": {
       "name": "Free",
       "price": "¥0",
@@ -196,7 +225,7 @@
       "price": "¥2,200",
       "price_usd": "$15",
       "period": "/月",
-      "description": "一人でチームのように働く個人開発者",
+      "description": "複数のコーディングエージェントを調整する開発者",
       "features": [
         "無制限プロジェクト",
         "オーケストレーター · Flowエディタ",

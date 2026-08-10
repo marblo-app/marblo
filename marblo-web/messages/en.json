@@ -15,13 +15,43 @@
     "guide": "Guide"
   },
   "hero": {
-    "title": "One developer.\nAn entire team's\noutput.",
-    "subtitle": "Orchestrate multiple AI agents — Claude, GPT/Codex, Antigravity — across your project.\nYou direct. They execute.",
+    "title": "Claude Code and Codex are great coding agents.\nMarblo turns them into an engineering team.",
+    "subtitle": "The orchestration layer for the coding agents you already use.",
     "cta_download": "Download",
     "cta_pricing": "View Pricing",
     "badge": "Marblo · AI Agent Orchestration Platform",
     "clickToEnlarge": "Click to enlarge",
-    "prereqNote": "AI usage is billed separately · After install, you'll install and sign in to your existing AI CLIs (Claude Code, Codex, etc.) and connect your accounts."
+    "prereqNote": "AI usage is billed separately · After install, you'll install and sign in to your existing AI CLIs (Claude Code, Codex, etc.) and connect your accounts.",
+    "proof": {
+      "eyebrow": "Proof, not just a promise",
+      "title": "A team needs coordination, isolation, ownership, and a merge gate.",
+      "subtitle": "Marblo makes the mechanics visible right under the hero: board state, concurrent agents, model-aware spawn, safe-merge review, and the first 10-minute multi-agent success path.",
+      "item1": {
+        "kicker": "Board",
+        "title": "Tickets are the control surface",
+        "description": "The board shows ownership and state; it is not the whole differentiator."
+      },
+      "item2": {
+        "kicker": "Concurrent",
+        "title": "Several agents work at once",
+        "description": "Claude Code, Codex, and other agents can move separate tickets in the same project."
+      },
+      "item3": {
+        "kicker": "Spawn",
+        "title": "Model-specific lanes",
+        "description": "Spawn the right coding agent for backend, frontend, tests, or review work."
+      },
+      "item4": {
+        "kicker": "Safe-merge",
+        "title": "Results converge through review",
+        "description": "Worktree isolation and review state keep parallel output from becoming uncontrolled merges."
+      },
+      "item5": {
+        "kicker": "10 minutes",
+        "title": "First multi-agent success",
+        "description": "The onboarding path is built around getting a real multi-agent run to completion quickly."
+      }
+    }
   },
   "featureVideo": {
     "badge": "Feature video",
@@ -31,14 +61,14 @@
     "iframeTitle": "Marblo feature video"
   },
   "value": {
-    "title": "Not one agent.\nCommand an army.",
-    "subtitle": "Cursor and Copilot give you one agent.\nMarblo runs multiple agents in parallel — delivering 10x faster results.",
-    "stat1_number": "5x",
-    "stat1_label": "Concurrent Agents",
-    "stat2_number": "10x",
-    "stat2_label": "Development Speed",
-    "stat3_number": "3+",
-    "stat3_label": "AI Models at Once"
+    "title": "Not another coding agent.\nThe layer that coordinates them.",
+    "subtitle": "Claude Code and Codex are already strong. Marblo gives them task ownership, isolated workspaces, and a review path so they operate like a team.",
+    "stat1_number": "2+",
+    "stat1_label": "Concurrent agent lanes",
+    "stat2_number": "10 min",
+    "stat2_label": "First multi-agent success path",
+    "stat3_number": "Safe",
+    "stat3_label": "Review and merge gate"
   },
   "features": {
     "title": "Why Marblo?",
@@ -46,7 +76,7 @@
     "multiagent": {
       "title": "Multi-Agent Orchestration",
       "description": "Claude handles backend, GPT/Codex handles frontend, Antigravity runs tests — all simultaneously. Track each agent's progress in real-time on the kanban board.",
-      "highlight": "Only tool with this capability",
+      "highlight": "Built for coordinated parallel work",
       "detail": "Marblo's multi-agent system maximizes each AI model's strengths.\n\nClaude handles sophisticated backend logic and architecture design, GPT/Codex delivers rapid frontend coding and UI implementation, and Antigravity manages test writing and code review.\n\nEach agent runs in its own isolated terminal, and you can monitor progress in real-time on the kanban board. Through the MCP protocol, agents share context with each other, collaborating like a real development team."
     },
     "kanban": {
@@ -123,21 +153,20 @@
     }
   },
   "comparison": {
-    "title": "Marblo vs Competitors",
-    "subtitle": "Same price range, different league",
+    "title": "Marblo vs Coding Agents and Agent Workbenches",
+    "subtitle": "Kanban is the surface. Coordination, isolation, ownership, and merge evidence are the difference.",
     "feature": "Feature",
     "marblo": "Marblo",
-    "cursor": "Cursor",
-    "copilot": "Copilot",
-    "windsurf": "Windsurf",
+    "claudeCode": "Claude Code",
+    "codexCli": "Codex CLI",
+    "orca": "Orca",
     "rows": {
-      "multiAgent": "Multi-agent simultaneous operation",
-      "kanban": "Kanban board + task management",
-      "ticketDiff": "Ticket ↔ agent linking + inline diff",
-      "agentNav": "Arrow-key agent panel switching",
-      "multiModel": "Multi-model (Claude+GPT/Codex+Antigravity)",
-      "mcp": "MCP protocol support",
-      "local": "Local execution (data protection)",
+      "simultaneous": "Several agents working at once",
+      "isolation": "Per-agent isolated worktrees",
+      "ownership": "Task → agent ownership and activity trail",
+      "safeMerge": "Review and safe-merge evidence",
+      "modelSpawn": "Model-aware agent spawning",
+      "kanbanSurface": "Board/task surface",
       "price": "Price"
     }
   },
@@ -151,11 +180,11 @@
   },
   "social": {
     "title": "What Developers Say",
-    "quote1": "3 agents working simultaneously — finished a day's work in 2 hours",
+    "quote1": "Seeing several agents move separate tickets made parallel work easier to trust",
     "author1": "Full-stack Developer",
     "quote2": "Managing agent progress on the kanban board is incredibly intuitive",
     "author2": "Startup CTO",
-    "quote3": "Switched from Cursor — multi-agent is a completely different level",
+    "quote3": "The useful part is not the board alone — it is the orchestration around it",
     "author3": "Freelance Developer"
   },
   "experience": {
@@ -170,13 +199,13 @@
   },
   "cta_final": {
     "title": "Start free today",
-    "subtitle": "Try Marblo with the Free plan,\nthen upgrade to Pro to command your agent army",
+    "subtitle": "Try Marblo with the Free plan,\nthen upgrade to coordinate more coding-agent work",
     "download": "Download",
     "pricing": "Compare Plans"
   },
   "pricing": {
     "title": "Pricing Plans",
-    "subtitle": "Cheaper than Cursor ($20/mo), with multi-agent orchestration — best value in AI coding",
+    "subtitle": "Marblo pricing covers the orchestration layer. Your coding agents run on the AI accounts you already use.",
     "free": {
       "name": "Free",
       "price": "$0",
@@ -196,7 +225,7 @@
       "price": "$15",
       "price_usd": "$15",
       "period": "/mo",
-      "description": "Solo developers who want to work like a team",
+      "description": "Developers coordinating multiple coding agents",
       "features": [
         "Unlimited Projects",
         "Orchestrator · Flow Editor",
