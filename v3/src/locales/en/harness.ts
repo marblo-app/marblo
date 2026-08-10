@@ -285,6 +285,11 @@ export const harness: Record<keyof typeof koHarness, string> = {
     "Caps: revoked pins to ★1 · non-OSI ★2 · deprecated ★3 · unverified source ★4 · items with no upstream to measure ★4. ★5 requires proven upstream demand and a verified source.",
   "harness.store.registry.rating.helpSource":
     "Star counts come from a snapshot collected once at release build time — opening the Store never calls GitHub, and nothing in the app can change a score.",
+  // Ratings are computed in the main process. When only the renderer is fresh,
+  // the response carries no rating at all — and stars vanishing without a word
+  // reads as "the rating feature is broken". Name the cause on screen.
+  "harness.store.registry.rating.mainOutdated":
+    "★ Ratings can't be shown — the running app predates them. Restart the app and they appear.",
 
   "harness.store.registry.source": "Source",
   "harness.store.registry.loadFail": "Failed to load the registry list.",

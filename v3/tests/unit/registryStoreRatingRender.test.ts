@@ -153,6 +153,25 @@ describe("스토어 카드의 별점 표시", () => {
     expect(screen.queryByText("★★★★★")).toBeNull();
   });
 
+  /**
+   * ★별이 **말없이** 사라지는 것이 실제 장애 보고였다("별점이 안 나온다").
+   * 원인은 렌더러만 새 코드이고 실행 중인 메인 프로세스가 별점 이전 빌드인
+   * 것이었는데, 화면에는 아무 단서도 없어 아무도 거기에 도달하지 못했다.
+   * 카드가 살아 있는 것(위 케이스)만으로는 부족하다 — 왜 별이 없는지가
+   * 화면에 적혀야 조용한 퇴화가 진단 가능한 상태가 된다.
+   */
+  it("★별점이 하나도 안 온 응답에서는 원인·조치가 화면에 표시된다", async () => {
+    mountWith([storeItem("a", undefined), storeItem("b", undefined)]);
+    await screen.findByText("a");
+    expect(document.body.textContent).toMatch(/재시작|[Rr]estart/);
+  });
+
+  it("별점이 하나라도 있으면 그 안내는 뜨지 않는다", async () => {
+    mountWith([storeItem("a", rating()), storeItem("b", undefined)]);
+    await screen.findByText("a");
+    expect(document.body.textContent).not.toMatch(/재시작|[Rr]estart/);
+  });
+
   it("별점 기준 패널은 접혀 있다가 눌러야 펼쳐진다", async () => {
     mountWith([storeItem("solo", rating())]);
     const toggle = await screen.findByRole("button", { name: /별점|rated/i });

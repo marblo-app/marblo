@@ -104,6 +104,7 @@ import {
 } from "./harness-manager";
 import { getRegistryIndex } from "./registry-client";
 import {
+  installDefaultRegistryItems,
   installRegistryItem,
   uninstallRegistryItem,
   overlayInstallState,
@@ -7932,6 +7933,37 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.warn("[Main] Bundle install failed (non-fatal):", err);
   }
+
+  // official 첫파티 에이전트 기본설치(최초 1회). 번들 설치와 나란히 두지만
+  // **다른 종류의 일**이다 — 번들은 앱 자산을 매 기동 심고(빌트인), 이쪽은
+  // 레지스트리의 설치형 항목을 사용자 대신 한 번 눌러 주는 것이다(원장에
+  // 기록되고 스토어에서 제거 가능).
+  //
+  // await 하지 않는다: 네트워크가 낀 일이 창 생성을 늦추면 안 된다. 그리고
+  // 인덱스가 신선할 때만 돈다 — stale/unavailable 로 돌리면 "물어보지도 못한"
+  // 실행이 완주 마커를 찍어 사용자가 기본 에이전트를 영영 못 받는다.
+  void (async () => {
+    try {
+      const index = await getRegistryIndex({
+        cacheDir: app.getPath("userData"),
+      });
+      if (!index.available || index.stale) return;
+      const outcome = await installDefaultRegistryItems(
+        index,
+        registryInstallerDeps(),
+      );
+      if (outcome.alreadyRan) return;
+      console.log(
+        `[Main] Default registry install: ${outcome.installed.length} installed, ` +
+          `${outcome.skipped.length} skipped, ${outcome.failed.length} failed`,
+      );
+      for (const f of outcome.failed) {
+        console.warn(`[Main] Default install failed for ${f.id}: ${f.error}`);
+      }
+    } catch (err) {
+      console.warn("[Main] Default registry install failed (non-fatal):", err);
+    }
+  })();
 
   // Auto-update Harness CLIs (Claude / Codex / Antigravity). One sweep now,
   // then every 24h. Keeps the user from being stuck on CLIs that show

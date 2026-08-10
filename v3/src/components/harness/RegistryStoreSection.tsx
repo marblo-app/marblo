@@ -152,6 +152,27 @@ export function compareByRating(
 }
 
 /**
+ * 별점이 **하나도** 오지 않았는가 — 항목은 왔는데 전부 rating 이 없는 상태.
+ *
+ * 이 조합의 원인은 사실상 하나다: 렌더러는 별점 코드를 갖고 있는데 실행 중인
+ * 메인 프로세스가 별점 이전 빌드다(dev 에서 `tsc --watch` 가 dist-electron 을
+ * 다시 써도 Electron 은 main 을 리로드하지 않는다 — vite HMR 은 렌더러만
+ * 갱신한다. 메모: dev_main_process_no_autorestart).
+ *
+ * 이걸 굳이 감지하는 이유: `{item.rating && <StarRating/>}` 가드는 옳지만,
+ * 그 결과가 **아무 말 없이 별이 사라진 화면**이다. 그러면 "별점 기능이 안
+ * 된다"로 읽히고 아무도 원인에 도달하지 못한다(실제로 그렇게 보고됐다).
+ * 조용한 퇴화를 진단 가능한 상태로 바꾼다.
+ *
+ * 항목이 0 개면 판정하지 않는다 — 빈 목록은 별점과 무관한 상태다.
+ */
+export function isRatingUnavailable(
+  items: Pick<RegistryStoreItem, "rating">[],
+): boolean {
+  return items.length > 0 && items.every((i) => !i.rating);
+}
+
+/**
  * 타입 필터를 지난 항목을 "화면에 그릴 목록"(별점 내림차순) 과 "그 중
  * community 개수" 로 가른다. 둘을 **같은 모집단**에서 뽑는 게 요점 — 카운트가
  * 화면의 필터와 어긋나면 "커뮤니티 N개" 가 거짓말이 된다.
@@ -457,6 +478,10 @@ export function RegistryStoreSection({
     () => rankRegistryItems(items, typeFilter),
     [items, typeFilter],
   );
+  const ratingUnavailable = useMemo(
+    () => isRatingUnavailable(visible),
+    [visible],
+  );
   const countByCategory = useMemo(() => {
     const counts = new Map<StoreCategoryKey, number>();
     for (const item of visible) {
@@ -611,6 +636,15 @@ export function RegistryStoreSection({
           읽으면 별점은 그냥 우리가 정한 순서로 읽힌다. 카드 툴팁은 "이 항목이
           왜 이 별점인지"를, 이 패널은 "별점이 애초에 무엇으로 만들어지는지"를
           답한다(상세: v3/docs/store-rating.md). */}
+      {/* 별점이 하나도 안 온 경우 = 실행 중 메인 프로세스가 별점 이전 빌드.
+          별이 말없이 사라진 화면은 "기능이 고장났다"로 읽히므로 원인과 조치를
+          한 줄로 적는다(진단 불가능한 무증상 퇴화 금지). */}
+      {!isLocalTab && !loading && ratingUnavailable && (
+        <p className="mb-3 rounded border border-[#f9e2af]/30 bg-[#f9e2af]/10 px-3 py-2 text-[11px] text-[#f9e2af]">
+          {t("harness.store.registry.rating.mainOutdated")}
+        </p>
+      )}
+
       {!isLocalTab && (
         <div className="mb-3">
           <button

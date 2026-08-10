@@ -44,6 +44,15 @@ export interface LedgerEntry {
 export interface RegistryLedger {
   schema_version: 1;
   items: Record<string, LedgerEntry>;
+  /**
+   * official 기본설치 패스를 **완주한** 시각(ISO). 존재 = "이미 돌았다".
+   *
+   * 원장에 두는 이유: 이 마커의 유일한 목적이 "사용자가 지운 것을 다시 깔지
+   * 않기"인데, 그 판단의 근거(무엇이 깔렸는가)가 같은 파일에 있다. 별도
+   * 파일로 빼면 원장만 손상 격리되고 마커는 남아 — 아무것도 안 깔린 채
+   * "이미 돌았음"이 되는 상태가 생긴다. 한 파일이면 그 어긋남이 불가능하다.
+   */
+  defaultInstallAt?: string;
 }
 
 const EMPTY_LEDGER: RegistryLedger = { schema_version: 1, items: {} };

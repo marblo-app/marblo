@@ -113,6 +113,73 @@ const BUILTIN_SKILL_DESTS = new Set(
     .filter((d): d is string => !!d),
 );
 
+// ── 빌트인 항목 — 스토어에 뜨면 안 되는 것들 ────────────────────────
+//
+// 위의 두 집합(BUILTIN_MCP_KEYS·BUILTIN_SKILL_DESTS)은 **착지 지점**의 충돌을
+// 막는다: "레지스트리 항목이 내장 자산의 자리를 덮지 못한다". 여기서 다루는
+// 것은 다른 질문이다 — **그 항목이 애초에 스토어에 있어야 하는가**.
+//
+// 아래 id 들은 사용자가 이미 갖고 있는 것들이다. 설치 버튼을 눌러야 생기는
+// 물건이 아니라 앱(또는 하네스 CLI)이 심어 놓고 시작하는 물건이라, 스토어
+// 목록에 뜨면 "안 깔려 있나?" 라는 없는 질문을 만든다. 그래서 목록에서 뺀다.
+//
+// ★이 집합은 "official 티어 기본설치"(DEFAULT_INSTALL_*)와 **정반대 개념**이다.
+// 헷갈리면 안 된다:
+//   - 빌트인(여기)     = 설치 개념이 없음. 앱에 들어 있음. 스토어에서 숨김.
+//   - official 기본설치 = 설치형 항목인데 첫 실행 때 우리가 대신 눌러 준 것.
+//                        스토어에 그대로 보이고, 사용자가 제거할 수 있다.
+//
+// 파생이 아니라 **명시 집합**인 이유: '빌트인'의 출처가 세 갈래인데 어느 한
+// 규칙도 셋을 다 덮지 못한다 — (a) 앱 번들이 심는 tf-*(bundle-installer),
+// (b) 앱 프로세스가 곧 구현체인 marblo-control MCP, (c) 하네스 CLI 자체가 들고
+// 있는 code-review. 억지 파생 규칙 하나로 묶으면 규칙이 무엇을 감추는지 아무도
+// 못 읽는다. 대신 tf-* 는 번들 디렉터리와 어긋나지 않는지 테스트가 대조한다
+// (registry-builtin-hidden.test.ts).
+const BUILTIN_REGISTRY_ITEM_IDS = new Set<string>([
+  // (a) 앱 번들 tf-* — bundle-installer 가 ~/.claude/{commands,skills} 에
+  //     매 기동마다 심는다. 레지스트리에는 이 중 일부만 워크플로로 게시돼
+  //     있지만, 집합은 번들 전체를 담는다(게시가 늘어도 자동으로 덮이게).
+  "tf-add",
+  "tf-analyze",
+  "tf-create-tasks",
+  "tf-done",
+  "tf-feedback",
+  "tf-fix",
+  "tf-guide",
+  "tf-handoff",
+  "tf-hold",
+  "tf-plan",
+  "tf-ralph",
+  "tf-resume",
+  "tf-review",
+  "tf-spawn-agents",
+  "tf-start",
+  "tf-status",
+  "tf-sync",
+  "tf-work",
+  // (b) 오케스트레이터가 보드를 굴리는 MCP — 매니페스트 본문부터 "Ships with
+  //     the Marblo app" 이다. 앱이 곧 이 서버라 설치할 대상이 없다.
+  "marblo-control",
+  // (c) 하네스 CLI(Claude Code)에 같은 이름의 네이티브 스킬이 이미 있다.
+  //     이것만 성격이 다르다 — files 설치 계약이 **있는** 항목이라 누르면
+  //     실제로 ~/.claude/skills/code-review 가 생기고, 그 순간 CLI 내장
+  //     /code-review 와 이름이 겹친다. 그래서 숨기는 쪽이 안전하다.
+  "code-review",
+]);
+
+/**
+ * 이 항목이 "앱/하네스가 이미 들고 있는 것"인가. true 면 스토어 목록에서
+ * 빠지고(overlayInstallState), 설치 요청도 거부된다(assertInstallableItem).
+ */
+export function isBuiltinRegistryItem(id: string): boolean {
+  return BUILTIN_REGISTRY_ITEM_IDS.has(id);
+}
+
+/** 테스트가 번들 디렉터리와 대조할 수 있게 노출(복사본 — 원본 불변). */
+export function builtinRegistryItemIds(): string[] {
+  return [...BUILTIN_REGISTRY_ITEM_IDS];
+}
+
 export interface InstallerDeps {
   /** 원장 파일 경로 — main.ts 가 userData 로 채운다. */
   ledgerPath: string;
@@ -449,6 +516,13 @@ function assertInstallableItem(item: RegistryItem, opts: InstallOptions): void {
   } else if (item.tier !== "official" && item.tier !== "verified") {
     throw new Error(`설치 거부: 알 수 없는 tier "${item.tier}"`);
   }
+  // 빌트인은 목록에서 이미 빠져 있지만(overlayInstallState), 표시 정책이
+  // 방어선이면 안 된다 — id 를 직접 실은 IPC 요청도 여기서 죽는다.
+  if (isBuiltinRegistryItem(item.id)) {
+    throw new Error(
+      `설치 거부: "${item.id}" 는 앱 내장 항목 — 설치 대상이 아님`,
+    );
+  }
   if (!item.install) {
     throw new Error(item.notInstallableReason ?? "설치 거부: 설치 계약 없음");
   }
@@ -723,12 +797,25 @@ export interface RegistryStoreItem extends RegistryItem {
   installedVersion?: string;
 }
 
-/** 인덱스 + 원장 → UI 항목(설치 상태 배지). 렌더마다 해시 재검사는 안 한다(§7 P3). */
+/**
+ * 인덱스 + 원장 → UI 항목(설치 상태 배지). 렌더마다 해시 재검사는 안 한다(§7 P3).
+ *
+ * ★빌트인은 여기서 목록에서 빠진다 — 앱이 이미 들고 있는 것에 설치 버튼이나
+ * '자동 설치 불가' 배지가 붙으면, 사용자는 없는 문제를 찾게 된다.
+ *
+ * 단 **원장에 있으면 그대로 보여준다.** 빌트인으로 지정되기 전 버전에서 이미
+ * 설치한 사용자가 있을 수 있고, 그 항목을 목록에서 지워 버리면 제거 버튼까지
+ * 같이 사라져 사용자가 자기 홈에 남은 파일을 UI 로 되돌릴 방법이 없어진다.
+ * "숨김"이 "잠금"이 되면 안 된다.
+ */
 export function overlayInstallState(
   index: RegistryIndex,
   ledger: RegistryLedger,
 ): RegistryStoreItem[] {
-  return index.items.map((item) => {
+  const listed = index.items.filter(
+    (item) => !isBuiltinRegistryItem(item.id) || !!ledger.items[item.id],
+  );
+  return listed.map((item) => {
     const entry = ledger.items[item.id];
     let installState: RegistryInstallState;
     if (entry) {
@@ -743,4 +830,94 @@ export function overlayInstallState(
       installedVersion: entry?.manifestVersion,
     };
   });
+}
+
+// ── official 첫파티 기본설치 ───────────────────────────────────────
+//
+// 빈 에이전트 목록으로 시작하는 앱은 "무엇을 스폰하라는 건지"에 답하지 않는다.
+// 그래서 우리가 만든 official 티어 에이전트는 첫 실행에 우리가 대신 깔아 준다.
+//
+// ★빌트인과 혼동 금지(위 BUILTIN_REGISTRY_ITEM_IDS 주석 참조). 여기 항목들은
+// **설치형이다** — 스토어에 그대로 보이고, 원장에 기록되고, 사용자가 제거
+// 버튼으로 지울 수 있다. 우리가 한 일은 첫 설치 버튼을 대신 눌러 준 것뿐이다.
+//
+// 강제가 아니라는 것의 실질적 의미는 "지운 것이 되살아나지 않는다" 이다. 그
+// 보장을 마커 하나(ledger.defaultInstallAt)로 만든다 — 패스는 앱 수명에서 딱
+// 한 번 완주하고, 그 뒤에는 레지스트리에 official 에이전트가 몇 개 추가되든
+// 다시 돌지 않는다. 사용자가 스토어에서 직접 고르는 영역이 된다.
+
+/** 기본설치 대상 판정 — 데이터 기반 규칙이다(하드코딩 id 목록이 아니다). */
+export function isDefaultInstallCandidate(item: RegistryItem): boolean {
+  return (
+    item.tier === "official" &&
+    item.type === "agent" &&
+    item.status === "active" &&
+    item.install?.kind === "files" &&
+    !isBuiltinRegistryItem(item.id)
+  );
+}
+
+export interface DefaultInstallResult {
+  /** 마커가 이미 있어 아무것도 하지 않았다. */
+  alreadyRan: boolean;
+  installed: string[];
+  /** 원장에 이미 있어 건너뛴 항목(사용자가 직접 깔았거나 이전 패스의 결과). */
+  skipped: string[];
+  failed: Array<{ id: string; error: string }>;
+}
+
+/**
+ * 첫 실행 기본설치 패스. **호출자는 신선한 인덱스일 때만 부른다**(main.ts).
+ *
+ * stale·unavailable 인덱스에서 돌리면 안 되는 이유가 마커에 있다: 레지스트리에
+ * 닿지도 못한 실행에서 패스를 "완주"로 찍으면, 그 사용자는 기본 에이전트를
+ * 영원히 못 받는다. "물어보지도 못했다"와 "물어봤는데 일부 실패했다"는 다르게
+ * 다뤄야 한다 — 전자는 다음 기동에 재시도, 후자는 마커를 찍고 끝낸다(부분
+ * 실패로 무한 재시도하면 매 기동 네트워크를 두드리게 된다).
+ */
+export async function installDefaultRegistryItems(
+  index: RegistryIndex,
+  deps: InstallerDeps,
+): Promise<DefaultInstallResult> {
+  const result: DefaultInstallResult = {
+    alreadyRan: false,
+    installed: [],
+    skipped: [],
+    failed: [],
+  };
+  if (readLedger(deps.ledgerPath).defaultInstallAt) {
+    result.alreadyRan = true;
+    return result;
+  }
+
+  const candidates = index.items.filter(isDefaultInstallCandidate);
+  // 후보가 0 이면 인덱스가 비었거나 우리가 모르는 상태다 — 마커를 찍지 않고
+  // 다음 기동에 다시 본다(빈 인덱스로 "완주" 를 찍는 실수 방지).
+  if (candidates.length === 0) return result;
+
+  for (const item of candidates) {
+    // 원장 재확인은 루프 안에서 한다 — 앞선 반복이 원장을 갱신했고, 사용자가
+    // 이전에 직접 설치한 항목을 여기서 덮어(update 경로) 로컬 수정을 건드리는
+    // 일이 없어야 한다.
+    if (readLedger(deps.ledgerPath).items[item.id]) {
+      result.skipped.push(item.id);
+      continue;
+    }
+    try {
+      await installRegistryItem(item, deps);
+      result.installed.push(item.id);
+    } catch (err) {
+      // 한 항목의 실패가 나머지를 막지 않는다 — 기본설치는 편의 기능이지
+      // 기동 조건이 아니다.
+      result.failed.push({
+        id: item.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const ledger = readLedger(deps.ledgerPath);
+  ledger.defaultInstallAt = new Date().toISOString();
+  writeLedger(deps.ledgerPath, ledger);
+  return result;
 }
