@@ -55,6 +55,7 @@ import {
   isPermissionDeniedError,
   MissingProjectScopeError,
 } from "./project-scope.js";
+import { resolveToolSurface } from "./tool-surface.js";
 import {
   validateTaskBodyInput,
   validateTaskBodySections,
@@ -2787,6 +2788,20 @@ interface PendingInstructionDoc {
 export function registerTools(server: McpServer): void {
   // Wrap server.tool to add automatic audit logging
   const originalTool = server.tool.bind(server);
+
+  // ── 부트 프리픽스 다이어트 A1: 역할별 tools/list 스코핑 ──────────────────
+  // 전체 44개 툴의 스키마 직렬화는 40.8KB(~11.7K 토큰)이고 워커 프리픽스에
+  // **매 요청** 재전송된다(#900 §3.4). 워커 역할이면 그 역할이 실제 쓰는 툴만
+  // 등록해 표면 자체를 줄인다. 표면 결정은 fail-open이고 `MARBLO_TOOL_SURFACE=full`
+  // 로 즉시 되돌릴 수 있다 — 정책 전문은 tool-surface.ts 참조.
+  const surface = resolveToolSurface();
+  const hiddenTools: string[] = [];
+  const registeredToolNames: string[] = [];
+
+  function toolIsExposed(name: string): boolean {
+    if (surface.mode === "full" || !surface.allowed) return true;
+    return surface.allowed.has(name);
+  }
   /** MissingProjectScopeError 를 도구 결과 텍스트로. 아니면 null(그대로 throw). */
   function projectScopeErrorText(
     toolName: string,
@@ -2803,6 +2818,14 @@ export function registerTools(server: McpServer): void {
     handler: ToolCallback<Args>,
     opts: { userFacing?: boolean } = {},
   ): void {
+    // 역할 스코핑에서 빠진 툴은 **등록 자체를 하지 않는다.** 핸들러만 막으면
+    // 스키마가 그대로 tools/list 에 실려 프리픽스가 안 줄어든다 — 이 다이어트의
+    // 절감은 오직 "등록하지 않음"에서 나온다.
+    if (!toolIsExposed(name)) {
+      hiddenTools.push(name);
+      return;
+    }
+    registeredToolNames.push(name);
     const userFacing = opts.userFacing ?? true;
     // 모든 도구 핸들러는 실행 전 ensureAuthenticated() 인증 게이트를 거친다.
     // MCP 핸드셰이크는 인증에 막히지 않도록 index.ts 에서 connect 를 먼저 하므로
@@ -7877,4 +7900,26 @@ export function registerTools(server: McpServer): void {
       return text(lines.join("\n"));
     },
   );
+
+  // ── 스코핑 결과를 stderr 에 남긴다 ────────────────────────────────────────
+  // "그 툴이 왜 안 보이지?" 를 라이브에서 즉시 판별할 수 있어야 한다. stdout 은
+  // JSONRPC 프레임이므로 절대 쓰지 않는다(index.ts 와 같은 규율).
+  if (surface.mode === "scoped") {
+    console.error(
+      `[MCP] tools/list scoped: role=${surface.role || "?"} reason=${surface.reason} ` +
+        `exposed=${surface.allowed ? surface.allowed.size : "all"} hidden=${hiddenTools.length}` +
+        ` (rollback: MARBLO_TOOL_SURFACE=full)`,
+    );
+    // 화이트리스트에 있는데 실제로는 존재하지 않는 이름(오타·툴 개명)은 조용한
+    // 능력 손실이 아니라 조용한 무효 항목이다. 눈에 보이게 경고한다.
+    const registered = new Set([...hiddenTools, ...registeredToolNames]);
+    const unknown = [...(surface.allowed ?? [])].filter(
+      (t) => !registered.has(t),
+    );
+    if (unknown.length > 0) {
+      console.error(
+        `[MCP] ⚠️ tool surface allowlist references unknown tools: ${unknown.join(", ")}`,
+      );
+    }
+  }
 }

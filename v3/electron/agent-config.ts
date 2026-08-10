@@ -24,6 +24,11 @@ import {
 import { maskEnvForLogging } from "./config-redaction";
 import { getVendorSecret } from "./vendor-secrets";
 import { CODEX_ORCH_REQUIRED_MCP_TOOLS } from "./mcp-server/tool-surface";
+import {
+  shouldDisableWorkerSkills,
+  toolSurfaceEnv,
+  workerClaudeSettings,
+} from "./prefix-diet";
 
 export interface ResolvedCli {
   /** Absolute path to the binary, or the bare name if resolution failed. */
@@ -1613,6 +1618,9 @@ function getMCPServerEnv(
   marbloProjectId?: string,
   agentId?: string,
   marbloContextId?: string,
+  // 역할별 tools/list 스코핑(부트 프리픽스 다이어트 A1)의 유일한 입력.
+  // 미지정이면 MCP 서버가 전체 툴을 노출한다(fail-open = 종전 동작).
+  role?: string,
 ): Record<string, string> {
   const env: Record<string, string> = {
     PATH: getEnrichedPath(),
@@ -1669,6 +1677,10 @@ function getMCPServerEnv(
   } else if (process.env.MARBLO_AGENT_ID) {
     env.MARBLO_AGENT_ID = process.env.MARBLO_AGENT_ID;
   }
+
+  // 부트 프리픽스 다이어트 A1 — 역할별 tools/list 스코핑. 역할이 없으면 아무
+  // 키도 안 들어가고 MCP 서버는 종전대로 44개 전부를 노출한다.
+  Object.assign(env, toolSurfaceEnv(role));
 
   return env;
 }
@@ -1744,6 +1756,7 @@ function buildMCPServerEntry(
   marbloProjectId?: string,
   agentId?: string,
   marbloContextId?: string,
+  role?: string,
 ): MCPServerEntry {
   // PATH 의 첫 node 를 믿지 않고 검증된 node 를 pin 한다. Electron 번들이면
   // ELECTRON_RUN_AS_NODE=1 가 함께 필요하므로 node.env 를 마지막에 머지해
@@ -1753,7 +1766,13 @@ function buildMCPServerEntry(
     command: node.command,
     args: [getMCPServerPath()],
     env: {
-      ...getMCPServerEnv(projectDir, marbloProjectId, agentId, marbloContextId),
+      ...getMCPServerEnv(
+        projectDir,
+        marbloProjectId,
+        agentId,
+        marbloContextId,
+        role,
+      ),
       ...node.env,
     },
   };
@@ -2253,6 +2272,7 @@ export class AgentConfigGenerator {
       marbloProjectId,
       agentId,
       marbloContextId,
+      role,
     );
 
     switch (model) {
@@ -2382,12 +2402,24 @@ export class AgentConfigGenerator {
     // 경로라 영향 자체가 불가능하다. 플러그인 캐시(server.ts)를 건드리지 않으므로
     // 플러그인 업데이트에도 revert 되지 않는다. 티켓 pyp7odpPQ6emCWLmUrBz.
     if (agent.model === "claude" && agent.role !== "orchestrator") {
-      args.push(
-        "--settings",
-        JSON.stringify({
-          enabledPlugins: { "telegram@claude-plugins-official": false },
-        }),
+      // ── 부트 프리픽스 다이어트 A2/A3 (워커 전용) ──────────────────────────
+      // #900 §3.4 의 통제 가능 재고 중 MCP 툴 다음으로 큰 두 덩어리가 auto-memory
+      // 인덱스와 스킬 목록 설명문이다. 워커는 티켓 하나만 처리하므로 전역 메모리
+      // 인덱스와 90여 개 스킬 카탈로그가 사실상 무용한데도 매 요청 재전송된다.
+      //
+      // ★`--settings` 는 단일 값 옵션이다. 텔레그램 플러그인 차단
+      //   (pyp7odpPQ6emCWLmUrBz)과 반드시 **한 객체로 머지**해야 한다 — 따로 붙이면
+      //   마지막 하나만 살아남아 플러그인 폴러 강탈 방어가 조용히 풀린다.
+      const settings = workerClaudeSettings(
+        { enabledPlugins: { "telegram@claude-plugins-official": false } },
+        agent.role,
       );
+      args.push("--settings", JSON.stringify(settings));
+      if (shouldDisableWorkerSkills(agent.role)) {
+        // 스킬 카탈로그(전체 SKILL.md frontmatter) 주입 제거. 워커의 역할 지식은
+        // MCP `get_agent_skill` + 스폰 프롬프트로 오지 슬래시 커맨드로 오지 않는다.
+        args.push("--disable-slash-commands");
+      }
     }
 
     return {
