@@ -46,7 +46,7 @@
 import { OUR_BENCH_DATA } from "./model-bench-ours-data";
 
 /** 이 하네스가 태울 수 있는 스폰 경로. `scripts/bench/types.ts` 와 같은 축. */
-export type OurBenchHarness = "claude" | "codex" | "gold" | "noop";
+export type OurBenchHarness = "claude" | "codex" | "grok" | "gold" | "noop";
 
 /**
  * 대조행의 역할. `floor`(noop) = 아무것도 안 했을 때의 바닥,

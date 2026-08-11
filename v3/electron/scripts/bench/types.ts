@@ -12,7 +12,7 @@
  */
 
 /** 이 하네스가 태울 수 있는 스폰 경로. `gold` 는 무과금 자체검증용. */
-export type BenchHarness = "claude" | "codex" | "gold" | "noop";
+export type BenchHarness = "claude" | "codex" | "grok" | "gold" | "noop";
 
 /**
  * SWE-bench 데이터셋 1행. HuggingFace `princeton-nlp/SWE-bench_Verified` 의
@@ -108,7 +108,7 @@ export interface RunRecord {
   harness: BenchHarness;
   /** 하네스에 핀한 모델 id(있으면). 없으면 CLI 기본값을 썼다는 뜻. */
   model: string | null;
-  /** codex 의 reasoning effort. claude 경로에선 null. */
+  /** codex 의 reasoning effort. claude/grok 경로에는 그 축이 없어 null. */
   effort: string | null;
   /** 스캐폴드 식별자 — 점수는 스캐폴드 없이 해석 불가(§W5). */
   scaffold: string;

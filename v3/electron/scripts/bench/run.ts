@@ -65,7 +65,7 @@ function parseArgs(argv: string[]): Options {
     process.env.MARBLO_BENCH_ROOT ||
     path.join(os.homedir(), ".marblo", "swe-bench");
   const harness = (get("harness") || "gold") as BenchHarness;
-  if (!["gold", "claude", "codex", "noop"].includes(harness)) {
+  if (!["gold", "claude", "codex", "grok", "noop"].includes(harness)) {
     throw new Error(`unknown --harness=${harness}`);
   }
   const instancesArg = get("instances");

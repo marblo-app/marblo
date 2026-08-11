@@ -15,15 +15,19 @@ import type { RepoSpec } from "./types";
 export const DATASET = "princeton-nlp/SWE-bench_Verified";
 
 /**
- * ★고정 tiny N. 선정 기준(결과를 보기 전에 정한 것):
+ * ★고정 N — **변별 라운드(mixed difficulty)**. 선정 기준(결과를 보기 전에 정한 것):
  *   ① `django/django` — Verified 500개 중 231개(46%)로 최대 레포이고,
  *      **서드파티 의존이 없어** Docker 없이 네이티브로 세울 수 있는 유일한
  *      대형 레포다(sympy 는 mpmath 하나로 가능하나 러너 출력 파싱이 더 험하다).
- *   ② `difficulty === "<15 min fix"` — P1 스파이크는 파이프라인을 증명하는 게
- *      목적이지 모델을 변별하는 게 목적이 아니다. 쉬운 문제여야 "실패 = 파이프
- *      라인 결함" 과 "실패 = 모델 능력" 이 덜 섞인다.
- *   ③ P2P 개수 3~40 — 채점 신호가 있으면서 러너 실행이 몇 초에 끝나는 구간.
- *   ④ 버전 4.2 / 5.0 — Python 3.11 에서 도는 세대(3.x 대는 옛 파이썬을 요구).
+ *   ② ★난이도 혼합 — 쉬움(`<15 min fix`) 3 / 중간(`15 min - 1 hour`) 5 /
+ *      어려움(`1-4 hours`) 4. 라운드1(전부 `<15 min fix`)은 **모든 모델이 100%
+ *      로 수렴해 변별력이 0** 이었다. 파이프라인은 그 라운드에서 이미 증명됐고,
+ *      이 라운드의 목적은 모델을 **가르는 것**이라 난이도를 섞는다.
+ *   ③ 버전 4.2 / 5.0 — Python 3.11 에서 도는 세대(3.x 대는 옛 파이썬을 요구).
+ *
+ * ★이 12개는 사람이 고른 것이 아니라 데이터셋을 프로그램으로 훑어 위 필터로
+ * 뽑은 것이다. **손으로 짓거나 고치지 말 것** — id 한 글자만 어긋나도 러너는
+ * "데이터셋에 없다"로 죽거나(운이 좋으면) 엉뚱한 인스턴스를 잰다.
  *
  * ★base_commit 을 여기 적지 않는 것은 실수가 아니라 **의도**다. 커밋 SHA 는
  * 데이터셋에서만 읽는다(`dataset.ts`). 손으로 옮겨 적는 순간 오타·환각이
@@ -31,9 +35,21 @@ export const DATASET = "princeton-nlp/SWE-bench_Verified";
  * 한 번 났다. 사람이 못 적게 하는 것이 유일하게 확실한 방어다.
  */
 export const PINNED_INSTANCES = [
-  "django__django-16642",
-  "django__django-16429",
+  // 쉬움 — `<15 min fix`
   "django__django-15851",
+  "django__django-15863",
+  "django__django-15987",
+  // 중간 — `15 min - 1 hour`
+  "django__django-15731",
+  "django__django-15814",
+  "django__django-16136",
+  "django__django-16256",
+  "django__django-16315",
+  // 어려움 — `1-4 hours`
+  "django__django-15957",
+  "django__django-16263",
+  "django__django-16560",
+  "django__django-16631",
 ] as const;
 
 /**
@@ -42,7 +58,7 @@ export const PINNED_INSTANCES = [
  * 시계열이 조용히 오염된다.
  */
 export const SCAFFOLD_ID =
-  "marblo-swebench-spike/v1(single-shot,no-mcp,no-board)";
+  "marblo-swebench-spike/v2(12-mixed-difficulty,single-shot,no-mcp,no-board)";
 
 /**
  * ★실행환경 식별자 — 여기에 이 스파이크의 가장 큰 한계가 들어 있다.

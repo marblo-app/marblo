@@ -85,12 +85,28 @@ export function buildInvocation(
       ],
     };
   }
+  if (harness === "grok") {
+    // 근거는 `electron/model-registry.ts` 의 grok 항목 주석에 적힌 실측 용법:
+    // `grok -p ... -m grok-4.5`. ★effort 는 **일부러 무시**한다 — grok CLI 에는
+    // reasoning-effort 축 자체가 없어서, 없는 플래그를 지어 붙이면 CLI 가 죽거나
+    // (더 나쁘게) 조용히 무시돼 "effort=high 로 쟀다"는 거짓 라벨만 남는다.
+    return {
+      command: "grok",
+      args: ["-p", prompt, ...(model ? ["-m", model] : [])],
+    };
+  }
   throw new Error(`harness ${harness} has no agent invocation`);
 }
 
 export function cliVersion(harness: BenchHarness): string | null {
   const bin =
-    harness === "claude" ? "claude" : harness === "codex" ? "codex" : null;
+    harness === "claude"
+      ? "claude"
+      : harness === "codex"
+        ? "codex"
+        : harness === "grok"
+          ? "grok"
+          : null;
   if (!bin) return null;
   const r = exec(bin, ["--version"], { timeoutMs: 20_000 });
   return r.status === 0 ? r.stdout.trim() : null;

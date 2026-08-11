@@ -48,8 +48,29 @@ describe("OurBenchPanel — 접힌 상태에서 보여야 하는 것", () => {
     expect(screen.getByText(ko["usage.ourBench.title"])).toBeTruthy();
 
     // 우리가 잰 모델 셀(요약 칩).
-    expect(screen.getByText(/claude-sonnet-5 100\.0%/)).toBeTruthy();
-    expect(screen.getByText(/gpt-5\.6-luna 100\.0%/)).toBeTruthy();
+    //
+    // ★기대값을 **데이터에서 유도**한다. 종전엔 `claude-sonnet-5 100.0%` 처럼
+    // 그때 실측된 숫자를 테스트에 박아 뒀는데, 그러면 **다시 측정할 때마다 이
+    // 테스트가 깨진다** — 실제로 라운드2(혼합 난이도)에서 sonnet 100%→75%,
+    // luna 100%→83.3% 로 갈리면서 그렇게 깨졌다. 이 테스트의 계약은 "그 숫자가
+    // 그 값이다" 가 아니라 **"커밋된 데이터의 셀이 접힌 상태에서도 그려진다"**
+    // 이므로, 숫자는 데이터에서 읽어 와 비교한다.
+    const measured = ourBenchPayload().measured;
+    expect(measured.length).toBeGreaterThan(0);
+    for (const cell of measured) {
+      const model = (cell.model ?? "(cli default)").replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&",
+      );
+      const pct =
+        cell.resolvedPct === null ? "n/a" : `${cell.resolvedPct.toFixed(1)}%`;
+      // 라운드가 둘 이상이면 같은 모델 칩이 여러 개 뜰 수 있어 getAll 로 받는다.
+      expect(
+        screen.getAllByText(new RegExp(`${model} ${pct.replace(".", "\\.")}`))
+          .length,
+        `${cell.harness}/${cell.model} 칩이 화면에 없다`,
+      ).toBeGreaterThan(0);
+    }
 
     // ★대조행 — 이 줄이 위 100% 를 관측으로 만든다.
     expect(screen.getByText(/noop 0\.0% · gold 100\.0%/)).toBeTruthy();

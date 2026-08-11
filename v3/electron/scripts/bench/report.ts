@@ -142,9 +142,20 @@ function render(records: RunRecord[], generatedAt: string): string {
   for (const d of OUR_MEASURED_DISCLAIMERS) lines.push(`> ${d}`);
   lines.push("");
   lines.push(`- 데이터셋: \`${dataset}\``);
+  // ★"합집합" 이라고 적는 이유: 라운드가 둘 이상이면 이 목록은 **어느 한 라운드의
+  // 고정 N 이 아니다**. 그냥 `고정 N=14` 라고 적으면 아무도 돌린 적 없는 14개짜리
+  // 라운드가 있었던 것처럼 읽힌다. 라운드별 실제 N 은 바로 아래 줄에 적는다.
   lines.push(
-    `- 인스턴스(고정 N=${instances.length}): ${instances.map((i) => `\`${i}\``).join(", ")}`,
+    `- 인스턴스(전 라운드 합집합 N=${instances.length}): ${instances
+      .map((i) => `\`${i}\``)
+      .join(", ")}`,
   );
+  for (const scaffold of [...new Set(records.map((r) => r.scaffold))]) {
+    const n = new Set(
+      records.filter((r) => r.scaffold === scaffold).map((r) => r.instanceId),
+    ).size;
+    lines.push(`  - 라운드 \`${scaffold}\` — 고정 N=${n}`);
+  }
   lines.push(`- 총 런: ${records.length}`);
   lines.push("");
 
@@ -162,46 +173,83 @@ function render(records: RunRecord[], generatedAt: string): string {
         : "-";
     lines.push(
       `| \`${c.harness}\` | ${c.model} | ${c.effort} | ${c.graded} | ${c.resolved} | ` +
-        `**${pct(c.resolved, c.graded)}** | ${c.noOutput} | ${c.errored} | ${avg} |`,
+        `**${pct(c.resolved, c.graded)}** | ${c.noOutput} | ${
+          c.errored
+        } | ${avg} |`,
     );
   }
   lines.push("");
   for (const c of cells) {
     lines.push(
-      `- \`${c.harness}\` scaffold=\`${c.scaffold}\` execEnv=\`${c.execEnv}\` ` +
+      `- \`${c.harness}\` ${c.model} scaffold=\`${c.scaffold}\` execEnv=\`${c.execEnv}\` ` +
         `grader=\`${c.graderVersion}\` cli=\`${c.cliVersion}\``,
     );
   }
   lines.push("");
 
-  lines.push("## 인스턴스 × 하네스");
+  // ─────────────────────────────────────────────────────────────────────
+  // ★인스턴스 표를 **라운드(scaffold)별로 쪼개고 열을 모델까지 내린** 이유.
+  //
+  // 종전 표는 열이 하네스뿐이라 `claude` 3모델의 결과가 한 칸에 <br> 로 쌓였고,
+  // 라운드가 둘이 되면 거기에 다른 라운드의 런까지 섞여 쌓인다. 그 표로는
+  // "어떤 모델이 어떤 인스턴스에서 갈렸나" — 이 라운드를 연 **유일한 이유** —
+  // 를 읽을 수 없다. 그래서 라운드로 먼저 나누고(섞임 방지), 열 키를
+  // harness·model·effort 로 내린다(변별이 보이게).
+  // ─────────────────────────────────────────────────────────────────────
+  lines.push("## 인스턴스 × 셀 (라운드별)");
   lines.push("");
-  const harnesses = [...new Set(records.map((r) => r.harness))];
-  lines.push(`| instance | ${harnesses.join(" | ")} |`);
-  lines.push(`| --- | ${harnesses.map(() => "---").join(" | ")} |`);
-  for (const inst of instances) {
-    const cols = harnesses.map((h) => {
-      const rs = records.filter(
-        (r) => r.instanceId === inst && r.harness === h,
-      );
-      if (rs.length === 0) return "–";
-      return rs
-        .map((r) => {
-          // 옛 채점기로 돈 행은 눈으로도 구분되게 표시한다(합산은 이미 막혀 있다).
-          const stale = r.graderVersion ? "" : " _[구채점기]_";
-          if (r.error) return `⚠ error${stale}`;
-          if (!r.grade) return `–${stale}`;
-          const g = r.grade;
-          return (
-            `${g.resolved ? "✅" : "❌"} (F2P ${g.f2pPassed}/${g.f2pTotal}, ` +
-            `P2P ${g.p2pPassed}/${g.p2pTotal})${stale}`
-          );
-        })
-        .join("<br>");
+  const scaffolds = [...new Set(records.map((r) => r.scaffold))];
+  for (const scaffold of scaffolds) {
+    const inRound = records.filter((r) => r.scaffold === scaffold);
+    const colKeys = [
+      ...new Set(
+        inRound.map((r) =>
+          [r.harness, r.model ?? "(cli default)", r.effort ?? "-"].join("|"),
+        ),
+      ),
+    ];
+    const roundInstances = [
+      ...new Set(inRound.map((r) => r.instanceId)),
+    ].sort();
+    lines.push(`### scaffold \`${scaffold}\``);
+    lines.push("");
+    const header = colKeys.map((k) => {
+      const [h, m, e] = k.split("|");
+      const model = m === "(cli default)" ? "" : `<br>${m}`;
+      const eff = e === "-" ? "" : `<br>effort=${e}`;
+      return `\`${h}\`${model}${eff}`;
     });
-    lines.push(`| \`${inst}\` | ${cols.join(" | ")} |`);
+    lines.push(`| instance | ${header.join(" | ")} |`);
+    lines.push(`| --- | ${colKeys.map(() => "---").join(" | ")} |`);
+    for (const inst of roundInstances) {
+      const cols = colKeys.map((k) => {
+        const rs = inRound.filter(
+          (r) =>
+            r.instanceId === inst &&
+            [r.harness, r.model ?? "(cli default)", r.effort ?? "-"].join(
+              "|",
+            ) === k,
+        );
+        if (rs.length === 0) return "–";
+        return rs
+          .map((r) => {
+            // 옛 채점기로 돈 행은 눈으로도 구분되게 표시한다(합산은 이미 막혀 있다).
+            const stale = r.graderVersion ? "" : " _[구채점기]_";
+            if (r.error) return `⚠ error${stale}`;
+            if (!r.grade) return `–${stale}`;
+            const g = r.grade;
+            return (
+              `${g.resolved ? "✅" : "❌"} (F2P ${g.f2pPassed}/${
+                g.f2pTotal
+              }, ` + `P2P ${g.p2pPassed}/${g.p2pTotal})${stale}`
+            );
+          })
+          .join("<br>");
+      });
+      lines.push(`| \`${inst}\` | ${cols.join(" | ")} |`);
+    }
+    lines.push("");
   }
-  lines.push("");
 
   const errored = records.filter((r) => r.error);
   if (errored.length > 0) {
