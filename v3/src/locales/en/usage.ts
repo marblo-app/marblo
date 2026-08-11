@@ -188,6 +188,13 @@ export const usage: Record<keyof typeof koUsage, string> = {
     "noop (do nothing) and gold (apply the reference patch) measure the grader, not the model. If noop is not 0% the grader is too loose; if gold is not 100% it is too strict. Without these two rows the 100% above is a claim with no evidence behind it.",
   "usage.ourBench.expand": "Show the full table",
   "usage.ourBench.collapse": "Hide the full table",
+  // ★Round accordion — the latest round expands by default, older rounds
+  // start collapsed (ticket pvaMBWvxpJIGSn5N6STp). {tag} is derived from the
+  // scaffold string, never hardcoded.
+  "usage.ourBench.roundHeading": "{tag} round · {n} instances",
+  "usage.ourBench.latestBadge": "Latest",
+  "usage.ourBench.previousRoundCaption":
+    "Pipeline-proof round (3 easy instances; all models at 100% is expected)",
 
   // ★Caption — the header text of `docs/benchmark/generated-report.md`
   // verbatim (markdown emphasis stripped). The generator constant and these

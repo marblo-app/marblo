@@ -34,10 +34,56 @@ import { useOurBenchStore } from "../../stores/ourBenchStore";
  * "claude 100%" 만 보이는 요약은 숫자가 참이어도 **증거가 없는 주장**이다. noop 이
  * 0% 이고 gold 가 100% 라는 것이 "채점기가 헐겁지도 조이지도 않다" 의 증거이고,
  * 그 증거는 주장과 같은 줄에 있어야 같이 읽힌다.
+ *
+ * ── ★라운드 아코디언(티켓 pvaMBWvxpJIGSn5N6STp) ───────────────────────────
+ * `cells[].scaffold` 가 라운드를 가른다(v1=쉬운 3개 파이프라인 증명, v2=12개
+ * 혼합난이도, ...). 두 라운드를 한 표에 다 나열하면 v1 의 "전모델 100%" 가
+ * v2 의 실제 변별력 있는 숫자 옆에 라벨 없이 앉아 혼동을 준다 — 위 "결론은
+ * 접지 않는다" 원칙이 **라운드 단위로는 뒤집힌다**: 이전 라운드는 결론(칩)까지
+ * 통째로 접는다. 그 라운드는 이미 파이프라인 증명이 끝난 과거 사실이라, 접혀도
+ * 새 결론을 숨기는 게 아니기 때문이다. 최신 라운드만 기존처럼 접지 않는
+ * 결론(기본 펼침)을 유지한다.
+ *
+ * '최신' 판정은 `groupCellsByRound` 가 scaffold 문자열을 그룹핑해 정렬한 뒤
+ * 최댓값을 취하는 것으로 **데이터에서 파생**한다 — "v2" 를 어디에도 하드코딩하지
+ * 않으므로 v3 라운드가 실리면 코드 변경 없이 그게 최신이 된다.
  */
+
+interface OurBenchRound {
+  /** 라운드 식별자. 같은 라운드의 셀은 이 scaffold 문자열이 동일하다. */
+  scaffold: string;
+  cells: OurBenchCell[];
+}
+
+/**
+ * scaffold 를 그룹핑해 라운드 목록을 만들고 **문자열 정렬** 로 오름차순 정렬한다.
+ * 마지막 원소가 최신 라운드다 — "v1" < "v2" < "v3" 처럼 버전 태그가 한 자리인
+ * 동안은 문자열 정렬이 곧 시간 순서와 같다.
+ */
+function groupCellsByRound(cells: OurBenchCell[]): OurBenchRound[] {
+  const order: string[] = [];
+  const byScaffold = new Map<string, OurBenchCell[]>();
+  for (const cell of cells) {
+    if (!byScaffold.has(cell.scaffold)) {
+      byScaffold.set(cell.scaffold, []);
+      order.push(cell.scaffold);
+    }
+    byScaffold.get(cell.scaffold)!.push(cell);
+  }
+  return order
+    .slice()
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    .map((scaffold) => ({ scaffold, cells: byScaffold.get(scaffold)! }));
+}
+
+/** scaffold 문자열에서 화면용 태그만 뽑는다("…/v2(12-mixed…)" → "v2"). 패턴이 안 맞으면 원문 그대로 쓴다. */
+function roundTagOf(scaffold: string): string {
+  return /\/([^/(]+)\(/.exec(scaffold)?.[1] ?? scaffold;
+}
+
 export function OurBenchPanel() {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  const [openRounds, setOpenRounds] = useState<Record<string, boolean>>({});
   const report = useOurBenchStore((s) => s.report);
   const status = useOurBenchStore((s) => s.status);
   const load = useOurBenchStore((s) => s.load);
@@ -48,6 +94,10 @@ export function OurBenchPanel() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const rounds = report ? groupCellsByRound(report.cells) : [];
+  const latestScaffold =
+    rounds.length > 0 ? rounds[rounds.length - 1].scaffold : null;
 
   return (
     // 테두리 색을 위 정보표(회색)와 다르게 둔다 — "다른 출처" 라는 말을 글로만
@@ -89,7 +139,6 @@ export function OurBenchPanel() {
         {status !== "loading" && status !== "error" && !report && (
           <p className="text-xs text-gray-500">{t("usage.ourBench.empty")}</p>
         )}
-        {report && <SummaryLine report={report} />}
 
         {/* ★한계 캡션 — 접어도 사라지지 않는다. 숫자와 조건은 같이 다녀야 한다. */}
         <p className="text-[11px] leading-snug text-amber-300/70">
@@ -98,27 +147,34 @@ export function OurBenchPanel() {
         <p className="text-[11px] leading-snug text-amber-300/70">
           {t("usage.ourBench.caption.execEnv")}
         </p>
-
-        {report && (
-          <button
-            type="button"
-            aria-expanded={open}
-            aria-controls="our-bench-body"
-            onClick={() => setOpen((v) => !v)}
-            className="flex items-center gap-1.5 pt-0.5 text-[11px] text-gray-400 hover:text-gray-200"
-          >
-            <span className="text-gray-500">{open ? "▾" : "▸"}</span>
-            <span>
-              {open ? t("usage.ourBench.collapse") : t("usage.ourBench.expand")}
-            </span>
-          </button>
-        )}
       </div>
 
-      {open && report && (
-        <div id="our-bench-body" className="space-y-3 px-3 pb-3">
-          <CellsTable report={report} />
-          <InstanceTable report={report} />
+      {report && rounds.length > 0 && (
+        <div className="space-y-2 px-3 pb-3">
+          {rounds
+            .slice()
+            .reverse()
+            .map((round) => (
+              <RoundSection
+                key={round.scaffold}
+                round={round}
+                isLatest={round.scaffold === latestScaffold}
+                open={
+                  openRounds[round.scaffold] ??
+                  round.scaffold === latestScaffold
+                }
+                onToggle={() =>
+                  setOpenRounds((prev) => ({
+                    ...prev,
+                    [round.scaffold]: !(
+                      prev[round.scaffold] ?? round.scaffold === latestScaffold
+                    ),
+                  }))
+                }
+                dataset={report.meta.dataset}
+                report={report}
+              />
+            ))}
           <div className="space-y-0.5 text-[11px] leading-snug text-gray-600">
             <p>
               {t("usage.ourBench.envLine", {
@@ -143,33 +199,140 @@ export function OurBenchPanel() {
   );
 }
 
+/**
+ * 라운드 한 덩어리 = 헤더(태그·N·최신 배지) + 토글 + (열렸을 때) 결론 칩과
+ * 표. 최신 라운드는 `open` 기본값이 `true` 라 클릭 없이 결론과 표가 보이고,
+ * 이전 라운드는 기본값이 `false` 라 접힌 헤더에 캡션만 남는다.
+ */
+function RoundSection({
+  round,
+  isLatest,
+  open,
+  onToggle,
+  dataset,
+  report,
+}: {
+  round: OurBenchRound;
+  isLatest: boolean;
+  open: boolean;
+  onToggle: () => void;
+  dataset: string;
+  report: OurBenchPayload;
+}) {
+  const { t } = useTranslation();
+  const floor = round.cells.find((c) => c.harness === "noop") ?? null;
+  const ceiling = round.cells.find((c) => c.harness === "gold") ?? null;
+  const measured = round.cells.filter(
+    (c) => c.harness !== "noop" && c.harness !== "gold"
+  );
+  const n = floor?.graded ?? ceiling?.graded ?? round.cells[0]?.graded ?? 0;
+  const tag = roundTagOf(round.scaffold);
+  const bodyId = `our-bench-round-${tag}`;
+
+  return (
+    <div
+      className={
+        isLatest
+          ? "rounded border border-amber-700/30 bg-amber-500/[0.02] p-2"
+          : "rounded border border-gray-800 p-2"
+      }
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-medium text-gray-300">
+          {t("usage.ourBench.roundHeading", { tag, n })}
+        </span>
+        {isLatest && (
+          <span className="rounded bg-amber-500/15 px-1 py-0.5 text-[9px] text-amber-300">
+            {t("usage.ourBench.latestBadge")}
+          </span>
+        )}
+      </div>
+
+      {open && (
+        <div className="pt-1">
+          <SummaryLine
+            dataset={dataset}
+            n={n}
+            measured={measured}
+            floor={floor}
+            ceiling={ceiling}
+          />
+        </div>
+      )}
+
+      {/* ★이전 라운드가 접혀 있을 때 — 왜 전모델 100% 인지를 글로 남긴다(쉬운
+          3개짜리 파이프라인 증명일 뿐, v2 이후의 변별력 있는 결과와는 다른
+          성격이다). */}
+      {!open && !isLatest && (
+        <p className="pt-1 text-[11px] leading-snug text-amber-300/70">
+          {t("usage.ourBench.previousRoundCaption")}
+        </p>
+      )}
+
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={onToggle}
+        className="flex items-center gap-1.5 pt-1 text-[11px] text-gray-400 hover:text-gray-200"
+      >
+        <span className="text-gray-500">{open ? "▾" : "▸"}</span>
+        <span>
+          {open ? t("usage.ourBench.collapse") : t("usage.ourBench.expand")}
+        </span>
+      </button>
+
+      {open && (
+        <div id={bodyId} className="space-y-3 pt-2">
+          <CellsTable cells={round.cells} />
+          {/* ★인스턴스×하네스 격자는 최신 라운드에만 붙인다. `OurBenchInstanceCell`
+              에 라운드 표식(scaffold)이 없어 공유 인스턴스(두 라운드 모두에서
+              돈 것)의 셀을 라운드별로 정확히 쪼갤 수 없다 — 잘못 쪼개 오귀속시키느니
+              라운드 하나에만 붙여 항상 정확하게 둔다. */}
+          {isLatest && <InstanceTable report={report} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** `n/a` 와 `0.0%` 를 구분한다 — 분모가 0 인 칸을 0% 로 적지 않는다. */
 function fmtPct(pct: number | null): string {
   return pct === null ? "n/a" : `${pct.toFixed(1)}%`;
 }
 
 /**
- * ★한 줄 요약. 접힌 상태의 **결론**이다.
+ * ★한 줄 요약. 라운드가 열렸을 때의 **결론**이다(최신 라운드는 기본으로 열려
+ * 있으니 클릭 없이 보인다).
  *
  * 담는 것: 무엇을 잰 것인지(데이터셋·N) + 모델 셀들의 결과 + **대조행**. 셋 중
  * 어느 하나라도 빠지면 남은 것이 오해를 만든다 — N 이 없으면 3개짜리 표본이
  * 리더보드처럼 읽히고, 대조행이 없으면 100% 가 검증되지 않은 주장이 된다.
  */
-function SummaryLine({ report }: { report: OurBenchPayload }) {
+function SummaryLine({
+  dataset,
+  n,
+  measured,
+  floor,
+  ceiling,
+}: {
+  dataset: string;
+  n: number;
+  measured: OurBenchCell[];
+  floor: OurBenchCell | null;
+  ceiling: OurBenchCell | null;
+}) {
   const { t } = useTranslation();
-  const floor = report.controls.find((c) => c.role === "floor");
-  const ceiling = report.controls.find((c) => c.role === "ceiling");
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
       <span className="text-gray-500">
-        {t("usage.ourBench.summaryLead", {
-          dataset: report.meta.dataset,
-          n: report.meta.instances.length,
-        })}
+        {t("usage.ourBench.summaryLead", { dataset, n })}
       </span>
-      {report.measured.map((cell) => (
+      {measured.map((cell) => (
         <span
-          key={`${cell.harness}-${cell.model ?? "default"}-${cell.effort ?? ""}`}
+          key={`${cell.harness}-${cell.model ?? "default"}-${
+            cell.effort ?? ""
+          }`}
           className="rounded border border-gray-700 px-1.5 py-0.5 font-mono text-[11px] text-gray-200"
           title={`${cell.harness} · n=${cell.graded}`}
         >
@@ -194,8 +357,8 @@ function SummaryLine({ report }: { report: OurBenchPayload }) {
   );
 }
 
-/** 셀별 요약 — 리포트 마크다운의 첫 표와 같은 칸. */
-function CellsTable({ report }: { report: OurBenchPayload }) {
+/** 셀별 요약 — 리포트 마크다운의 첫 표와 같은 칸. 이 라운드의 셀만 받는다. */
+function CellsTable({ cells }: { cells: OurBenchCell[] }) {
   const { t } = useTranslation();
   return (
     <div className="space-y-1">
@@ -236,9 +399,11 @@ function CellsTable({ report }: { report: OurBenchPayload }) {
             </tr>
           </thead>
           <tbody>
-            {report.cells.map((cell) => (
+            {cells.map((cell) => (
               <CellRow
-                key={`${cell.harness}-${cell.model ?? "default"}-${cell.effort ?? ""}`}
+                key={`${cell.harness}-${cell.model ?? "default"}-${
+                  cell.effort ?? ""
+                }`}
                 cell={cell}
               />
             ))}
@@ -259,8 +424,8 @@ function CellRow({ cell }: { cell: OurBenchCell }) {
     cell.harness === "noop"
       ? t("usage.ourBench.control.floor")
       : cell.harness === "gold"
-        ? t("usage.ourBench.control.ceiling")
-        : null;
+      ? t("usage.ourBench.control.ceiling")
+      : null;
   return (
     <tr className="border-b border-gray-800 last:border-0">
       <td className="py-1.5 pr-3">

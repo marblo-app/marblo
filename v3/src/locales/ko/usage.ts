@@ -195,6 +195,13 @@ export const usage = {
     "noop(아무것도 안 함)과 gold(정답 패치 적용)는 모델 성능이 아니라 채점기가 정상인지를 재는 대조행입니다. noop 이 0% 가 아니면 채점기가 헐거운 것이고, gold 가 100% 가 아니면 채점기가 조이는 것입니다. 이 두 행이 없으면 위 100% 는 증거 없는 주장입니다.",
   "usage.ourBench.expand": "전체 표 펼치기",
   "usage.ourBench.collapse": "전체 표 접기",
+  // ★라운드 아코디언 — 최신 라운드만 기본 펼침, 이전 라운드는 기본 접힘(티켓
+  // pvaMBWvxpJIGSn5N6STp). "v1/v2" 를 여기 박지 않는다 — {tag} 는 scaffold
+  // 문자열에서 파생된다.
+  "usage.ourBench.roundHeading": "{tag} 라운드 · 인스턴스 {n}개",
+  "usage.ourBench.latestBadge": "최신",
+  "usage.ourBench.previousRoundCaption":
+    "파이프라인 증명 라운드(쉬운 3개, 전모델 100%=정상)",
 
   // ★캡션 — `docs/benchmark/generated-report.md` 헤더 문구 **그대로**(마크다운
   // 강조만 뗀 것). 문구를 여기서 다시 쓰지 않고 생성기 상수와 일치시키며, 그
