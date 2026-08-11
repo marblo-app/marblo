@@ -8510,13 +8510,20 @@ export const getAdminUsageSummary = functions.https.onCall(
       GROUP BY model ORDER BY n DESC
     `;
     // 태스크 성공률·완료시간(task_outcomes 전체)
+    // ★ex.clause 를 붙이지 않는다. adminEventExclusion() 은 events 전용 절로
+    // JSON_VALUE(metadata,'$.accountUserId') 를 참조하는데, task_outcomes 에는
+    // metadata 컬럼 자체가 없다(스키마: userId/…/completedAt). #907 익명화가
+    // 제외절을 metadata 기반으로 바꾼 뒤 이 절이 outcomes 쿼리에도 붙어
+    // "Unrecognized name: metadata" 로 이 콜러블 전체가 functions/internal 로
+    // 죽었다(어드민 '제품 사용·활성' 패널 전면 에러). outcomes 에는
+    // accountUserId 가 없어 운영자 개별 제외가 애초에 불가하므로 절을 뺀다.
     const taskSummaryQuery = `
       SELECT
         COUNT(*) AS total,
         COUNTIF(success = true) AS succeeded,
         AVG(durationMs) AS avgDurationMs
       FROM ${outcomesTable}
-      WHERE ${completedAtTs} >= ${since}${ex.clause}
+      WHERE ${completedAtTs} >= ${since}
     `;
 
     const params = { days: rangeDays, ...ex.params };
