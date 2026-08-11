@@ -363,6 +363,100 @@ describe("createTaskGraphSimulation — 실보드 모양(의존이 드문 큰 �
   });
 });
 
+/**
+ * ★scope 겹침(충돌위험)이 배치에 미치는 영향.
+ *
+ * 새 간선을 그리기만 하고 배치를 그대로 두면, 부딪히는 티켓 두 장이 화면 반대편에
+ * 앉은 채 주황 선 하나로 이어진 그림이 나온다 — 선이 화면을 가로지르기만 하고
+ * "이것들이 한 덩어리다" 는 안 읽힌다. 그래서 컴포넌트 분해와 스프링에 같이
+ * 넣는데, **그러면서 Phase 2 의 정사각형 확산 불변식이 깨지면 안 된다**. 둘을
+ * 같이 재는 게 이 블록의 존재 이유다.
+ */
+describe("createTaskGraphSimulation — scope 겹침 연결(extraLinks)", () => {
+  const withLinks = (tasks: Task[], links: [string, string][]) =>
+    createTaskGraphSimulation(layoutTaskGraph(tasks), {
+      radiusOf: () => 12,
+      extraLinks: links,
+    });
+
+  it("★충돌로 이어진 두 노드가 무작위 두 노드보다 가깝다(클러스터로 읽힌다)", () => {
+    const tasks = sparseBoard(300, 0);
+    // 30 쌍을 충돌로 잇는다 — 의존은 하나도 없는 보드다.
+    const links: [string, string][] = [];
+    for (let i = 0; i < 60; i += 2) links.push([`t${i}`, `t${i + 1}`]);
+
+    const sim = withLinks(tasks, links);
+    warmUp(sim, recommendedWarmUpTicks(300));
+
+    const linked = mean(links.map(([a, b]) => distance(sim, a, b)));
+    const random: number[] = [];
+    for (let k = 0; k < 2000; k += 1) {
+      const a = sim.nodes[(k * 137) % sim.nodes.length];
+      const b = sim.nodes[(k * 331 + 17) % sim.nodes.length];
+      if (a === b) continue;
+      random.push(Math.hypot(b.x - a.x, b.y - a.y));
+    }
+    expect(linked).toBeLessThan(mean(random) * 0.5);
+  });
+
+  it("★레벨 폭이 0 인 덩어리에는 x 앵커를 안 건다(세로 일자 재발 방지)", () => {
+    // 충돌로만 묶인 티켓들은 의존이 없어 전부 level 0 이다. 여기에 x 앵커를
+    // 걸면 덩어리 전체가 같은 x 로 끌려가 한 컬럼에 줄을 선다 — 이 파일이 이미
+    // 한 번 고친 바로 그 병이다.
+    const tasks = [task("a"), task("b"), task("c"), task("d")];
+    const sim = withLinks(tasks, [
+      ["a", "b"],
+      ["b", "c"],
+      ["c", "d"],
+    ]);
+    expect(sim.nodes.every((node) => node.anchorX === null)).toBe(true);
+
+    warmUp(sim, 400);
+    const columns = new Set(sim.nodes.map((node) => Math.round(node.x / 40)));
+    expect(columns.size).toBeGreaterThan(1);
+  });
+
+  it("의존이 있는 덩어리는 좌→우 읽기 규칙을 그대로 지킨다", () => {
+    // 충돌 간선이 붙어도 의존 스프링(2배 강함)이 순서를 이긴다.
+    const sim = withLinks(
+      [task("a"), task("b", ["a"]), task("c", ["b"])],
+      [["a", "c"]],
+    );
+    warmUp(sim, 400);
+    expect(xOf(sim, "a")).toBeLessThan(xOf(sim, "b"));
+    expect(xOf(sim, "b")).toBeLessThan(xOf(sim, "c"));
+  });
+
+  it("★충돌 간선이 빽빽해도 정사각형 확산 불변식이 유지된다", () => {
+    const tasks = sparseBoard(600, 40);
+    // 고립 노드를 5장씩 묶는 충돌 덩어리를 잔뜩 만든다.
+    const links: [string, string][] = [];
+    for (let i = 0; i < 400; i += 5) {
+      for (let k = 1; k < 5; k += 1) links.push([`t${i}`, `t${i + k}`]);
+    }
+    const sim = withLinks(tasks, links);
+    warmUp(sim, recommendedWarmUpTicks(600));
+    expect(aspectOf(sim)).toBeGreaterThan(0.75);
+    expect(aspectOf(sim)).toBeLessThan(1.34);
+    expect(allFinite(sim)).toBe(true);
+  });
+
+  it("결정론과 안전성이 그대로다(자기참조·유령 id 포함)", () => {
+    const tasks = [task("a"), task("b"), task("c")];
+    const links: [string, string][] = [
+      ["a", "b"],
+      ["a", "a"], // 자기참조 — 스프링이 0 나눗셈으로 터지면 안 된다
+      ["a", "ghost"], // 삭제된 티켓을 가리키는 링크
+    ];
+    const first = withLinks(tasks, links);
+    const second = withLinks(tasks, links);
+    warmUp(first, 300);
+    warmUp(second, 300);
+    expect(allFinite(first)).toBe(true);
+    expect(first.snapshot()).toEqual(second.snapshot());
+  });
+});
+
 describe("recommendedWarmUpTicks", () => {
   it("작은 보드는 넉넉히, 큰 보드는 덜 익힌다(동기 예열이 곧 프리즈 시간)", () => {
     expect(recommendedWarmUpTicks(0)).toBe(0);

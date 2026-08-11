@@ -18,15 +18,25 @@ import {
   type TaskGraphLayout,
 } from "../../lib/taskGraphLayout";
 import {
+  CONFLICT_HEX,
   CRITICAL_HEX,
+  ISOLATED_ALPHA,
+  MAX_CONFLICT_EDGES,
   READINESS_RING,
   STATUS_HEX,
+  STUCK_HEX,
   classifyTaskReadiness,
   computeCriticalPath,
+  computeScopeConflicts,
+  computeStuckImpact,
+  conflictLinks,
   countDependents,
+  findIsolatedNodes,
   graphNodeRadius,
   isActiveStatus,
   summarizeReadiness,
+  type ScopeConflictEdge,
+  type StuckImpactResult,
   type TaskReadiness,
 } from "../../lib/taskGraphAnalysis";
 import {
@@ -50,6 +60,16 @@ import { STATUS_CONFIG } from "./KanbanColumn";
  * **지금 던질 수 있는 티켓이 뭔가**(준비/대기 구분)와 **끝나는 시점을 결정하는
  * 사슬이 뭔가**(크리티컬 패스). 판정은 전부 taskGraphAnalysis 의 순수 함수가
  * 하고 여기는 칠하기만 한다.
+ *
+ * ★Phase 3 에서 이 뷰는 **조율 도구**가 된다. 실보드가 1207태스크/82의존이라
+ * dependsOn 만으론 노드의 90% 가 고립점이고, 그러면 그래프는 예쁘기만 하고
+ * 아무 결정도 못 돕는다. 그래서 관계를 하나 더 그린다: **scope 겹침**. 두 티켓의
+ * `scope[]` 가 같은 파일 영역을 가리키면 병렬로 던지는 순간 머지 충돌이므로,
+ * 의존과 **구별되는** 주황 점선(화살표 없음 — 방향이 없는 관계다)으로 잇는다.
+ * 여기에 정체(stuck) 티켓의 폭발 반경과 "간선 0" 노드의 배경화가 얹혀서,
+ * 화면이 답하는 질문이 넷이 된다:
+ *   ① 지금 던질 수 있는 게 뭔가  ② 끝을 결정하는 사슬이 뭔가
+ *   ③ 같이 던지면 깨지는 게 뭔가  ④ 막힌 하나가 몇 장을 세우고 있나
  *
  * ★렌더가 DOM 이 아니라 캔버스인 이유: 포스 시뮬이 매 프레임 노드 좌표를 전부
  * 바꾸기 때문이다. 노드가 DOM 박스면 프레임마다 수십~수백 개의 스타일 재계산이
@@ -90,6 +110,14 @@ const MAX_FIT_ZOOM = 1.1;
 const RESEED_TICKS = 30;
 /** 라벨을 그리기 시작하는 줌 — 이보다 작으면 글자가 죽처럼 뭉친다. */
 const LABEL_ZOOM = 0.55;
+/**
+ * 독립(간선 0) 노드의 라벨은 여기서부터 나온다.
+ *
+ * 실보드에서 독립 노드가 1100장이라 일반 임계로 두면 라벨이 화면을 덮어 정작
+ * 연결 클러스터의 이름이 안 읽힌다. 배경으로 물린 것에는 이름도 배경만큼만 준다
+ * — 대신 확대하거나 호버하면 언제든 읽을 수 있다.
+ */
+const ISOLATED_LABEL_ZOOM = 1.05;
 const PULSE_PERIOD_MS = 1700;
 /** 펄스 전용 프레임 간격(≈22fps). 정착 후에도 60fps 로 태우지 않는다. */
 const PULSE_FRAME_MS = 45;
@@ -130,6 +158,10 @@ interface Scene {
   criticalNodes: Set<string>;
   criticalEdges: Set<string>;
   showCritical: boolean;
+  conflictEdges: ScopeConflictEdge[];
+  showConflicts: boolean;
+  stuck: StuckImpactResult;
+  isolatedIds: Set<string>;
   focusIds: Set<string> | null;
   hoveredId: string | null;
 }
@@ -150,6 +182,20 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
   );
   const critical = useMemo(() => computeCriticalPath(layout), [layout]);
   const dependents = useMemo(() => countDependents(layout), [layout]);
+  /** scope 겹침 — 열린 티켓끼리만. DONE 은 이미 머지돼 누구와도 안 부딪힌다. */
+  const conflicts = useMemo(
+    () => computeScopeConflicts(layout, readiness),
+    [layout, readiness],
+  );
+  const stuck = useMemo(
+    () => computeStuckImpact(layout, readiness),
+    [layout, readiness],
+  );
+  /** 의존도 scope 겹침도 없는 노드 = 백로그 필드(작게·흐리게). */
+  const isolatedIds = useMemo(
+    () => findIsolatedNodes(layout, conflicts),
+    [layout, conflicts],
+  );
 
   /** id → 직접 이웃(선행 + 후행). 호버 강조가 매번 엣지를 훑지 않도록. */
   const neighbors = useMemo(() => {
@@ -177,6 +223,7 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
   );
 
   const [showCritical, setShowCritical] = useState(true);
+  const [showConflicts, setShowConflicts] = useState(true);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [zoomLabel, setZoomLabel] = useState(1);
   const [tooltip, setTooltip] = useState<{
@@ -219,12 +266,21 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
     return map;
   }, [agents]);
 
+  /**
+   * 호버 강조 대상 — 의존 이웃 **과** scope 겹침 이웃 둘 다.
+   *
+   * 한쪽만 켜면 거짓말이 된다. "이 티켓을 지금 던져도 되나" 의 답은 선행이 끝났는
+   * 지(의존)와 같은 파일을 누가 잡고 있는지(scope) 둘을 다 봐야 나온다.
+   */
   const focusIds = useMemo(() => {
     if (!hoveredId) return null;
     const set = new Set<string>([hoveredId]);
     for (const id of neighbors.get(hoveredId) ?? []) set.add(id);
+    if (showConflicts) {
+      for (const id of conflicts.neighbors.get(hoveredId) ?? []) set.add(id);
+    }
     return set;
-  }, [hoveredId, neighbors]);
+  }, [hoveredId, neighbors, conflicts, showConflicts]);
 
   // 매 렌더 최신 장면을 ref 에 밀어 넣는다. draw() 는 이것만 본다.
   sceneRef.current = {
@@ -234,12 +290,19 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
     criticalNodes: critical.idSet,
     criticalEdges: critical.edgeIds,
     showCritical,
+    conflictEdges: conflicts.edges,
+    showConflicts,
+    stuck,
+    isolatedIds,
     focusIds,
     hoveredId,
   };
-  hasPulseRef.current = layout.nodes.some((node) =>
-    isActiveStatus(node.task.status),
-  );
+  // 펄스가 필요한가 = 굴러가는 노드 또는 정체 여파 고리가 하나라도 있는가.
+  // 없으면 RAF 는 정착 후 스스로 멈춘다(데스크톱 앱이라 보드를 열어 둔 채
+  // 자리를 비우는 게 정상 사용이다).
+  hasPulseRef.current =
+    stuck.downstreamIds.size > 0 ||
+    layout.nodes.some((node) => isActiveStatus(node.task.status));
 
   /**
    * 2D 컨텍스트. jsdom(테스트)에는 캔버스 구현이 없어 getContext 가 던지거나
@@ -285,6 +348,25 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
 
       const pulse = Math.sin((now / PULSE_PERIOD_MS) * Math.PI * 2);
 
+      // ⓪ scope 겹침 — 의존 간선보다도 아래에 깐다. 개수가 많을 수 있어서
+      //    위에 두면 의존 구조를 덮는다. 화살표를 안 그리는 게 핵심이다:
+      //    "A 다음에 B" 가 아니라 "A 와 B 를 동시에 하지 마라" 라서 방향이 없다.
+      if (scene.showConflicts) {
+        ctx.setLineDash([5, 6]);
+        ctx.shadowBlur = 0;
+        for (const edge of scene.conflictEdges) {
+          const from = sim.byId.get(edge.a);
+          const to = sim.byId.get(edge.b);
+          if (!from || !to) continue;
+          const inFocus = !focus || (focus.has(edge.a) && focus.has(edge.b));
+          ctx.globalAlpha = inFocus ? (focus ? 0.95 : 0.5) : DIM_ALPHA;
+          ctx.strokeStyle = CONFLICT_HEX;
+          ctx.lineWidth = focus && inFocus ? 2.4 : 1.5;
+          drawPlainLink(ctx, from, to);
+        }
+        ctx.setLineDash([]);
+      }
+
       // ① 간선 — 노드 밑에 깔린다.
       for (const edge of scene.layout.edges) {
         const from = sim.byId.get(edge.from);
@@ -292,20 +374,26 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
         if (!from || !to) continue;
 
         const onCritical = scene.showCritical && criticalEdges.has(edge.id);
+        // 정체 여파 = 막힌 티켓에서 아래로 뻗은 간선. 크리티컬보다 먼저 칠한다
+        // — "이 선을 따라 사람이 손대야 풀린다" 가 더 급한 정보다.
+        const onBlast = scene.stuck.edgeIds.has(edge.id);
         const inFocus = !focus || (focus.has(edge.from) && focus.has(edge.to));
         ctx.globalAlpha = inFocus ? 1 : DIM_ALPHA;
 
         const color = edge.cycle
           ? CYCLE_COLOR
-          : onCritical
-            ? CRITICAL_HEX
-            : EDGE_COLOR;
+          : onBlast
+            ? STUCK_HEX
+            : onCritical
+              ? CRITICAL_HEX
+              : EDGE_COLOR;
         ctx.strokeStyle = color;
         ctx.fillStyle = color;
-        ctx.lineWidth = onCritical ? 2.6 : focus && inFocus ? 2 : 1.3;
+        ctx.lineWidth =
+          onCritical || onBlast ? 2.6 : focus && inFocus ? 2 : 1.3;
         ctx.setLineDash(edge.cycle ? [6, 5] : []);
         // 글로우는 강조된 선에만. 전부 번지게 하면 화면이 안개가 된다.
-        ctx.shadowBlur = onCritical ? 14 : 0;
+        ctx.shadowBlur = onCritical || onBlast ? 14 : 0;
         ctx.shadowColor = color;
 
         drawEdge(ctx, from, to);
@@ -318,7 +406,10 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
         const task = tasksById.get(node.id);
         if (!task) continue;
         const inFocus = !focus || focus.has(node.id);
-        const baseAlpha = inFocus ? 1 : DIM_ALPHA;
+        // 간선 0 = 백로그 필드. 지우지 않고 배경으로 물린다 — 안 보이면
+        // "내 티켓이 사라졌다" 가 되고, 그대로 두면 연결 클러스터를 덮는다.
+        const isolated = scene.isolatedIds.has(node.id);
+        const baseAlpha = inFocus ? (isolated ? ISOLATED_ALPHA : 1) : DIM_ALPHA;
         ctx.globalAlpha = baseAlpha;
 
         const statusColor = STATUS_HEX[task.status] ?? EDGE_COLOR;
@@ -327,6 +418,22 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
         const onCritical = scene.showCritical && criticalNodes.has(node.id);
         const hovered = scene.hoveredId === node.id;
         const value = scene.readiness.get(node.id) ?? "waiting";
+
+        // 정체(빨강)의 여파. 막힌 티켓 자신은 readiness 링이 이미 빨간색이라,
+        // 여기서는 **그것에 막혀 있는 후행**을 칠한다 — BLOCKED 하나가 40장을
+        // 세우고 있는 것과 아무도 안 기다리는 것은 다른 사건인데, 점 색깔만으론
+        // 둘이 똑같이 생겼다. 펄스로 숨 쉬게 해서 정적인 링과도 구분한다.
+        if (scene.stuck.downstreamIds.has(node.id)) {
+          ctx.globalAlpha = baseAlpha * (0.45 + 0.25 * pulse);
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius + 6, 0, Math.PI * 2);
+          ctx.strokeStyle = STUCK_HEX;
+          ctx.lineWidth = 1.6;
+          ctx.setLineDash([2.5, 3.5]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = baseAlpha;
+        }
 
         // 굴러가는 노드는 바깥으로 번지는 고리를 하나 더 두른다 — 크기 변화만
         // 으론 작은 노드에서 펄스가 안 읽힌다.
@@ -412,6 +519,15 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
         const hovered = scene.hoveredId === node.id;
         // 축소 상태에서는 강조된 노드의 이름만 남긴다.
         if (view.k < LABEL_ZOOM && !hovered && !onCritical) continue;
+        // 백로그 필드의 이름은 한참 확대해야 나온다 — 실보드에서 이게 1100장
+        // 이라, 일반 임계로 두면 연결 클러스터의 이름을 통째로 덮는다.
+        if (
+          scene.isolatedIds.has(node.id) &&
+          !hovered &&
+          view.k < ISOLATED_LABEL_ZOOM
+        ) {
+          continue;
+        }
         const task = tasksById.get(node.id);
         if (!task) continue;
         const screenX = node.x * view.k + view.x;
@@ -527,12 +643,20 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
     for (const node of layout.nodes) {
       radii.set(
         node.id,
-        graphNodeRadius(node.task, dependents.get(node.id) ?? 0),
+        graphNodeRadius(
+          node.task,
+          dependents.get(node.id) ?? 0,
+          !isolatedIds.has(node.id),
+        ),
       );
     }
+    // ★scope 겹침은 `showConflicts` 와 무관하게 **항상** 시뮬에 들어간다.
+    // 토글은 그리기만 끄는 스위치다 — 토글 한 번에 배치가 통째로 재배열되면
+    // 사용자는 켜고 끌 때마다 그래프를 새로 읽어야 한다.
     const sim = createTaskGraphSimulation(layout, {
       previous,
       radiusOf: (id) => radii.get(id) ?? 12,
+      extraLinks: conflictLinks(conflicts),
     });
     // 첫 프레임 전에 미리 익힌다. 이어받는 경우엔 이미 자리를 잡고 있으므로
     // 살짝만 데워서 새 노드만 끼워 넣는다. 예열 틱 수는 노드 수에 반비례하는
@@ -544,7 +668,7 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
     );
     simRef.current = sim;
     requestDraw();
-  }, [layout, dependents, requestDraw]);
+  }, [layout, dependents, conflicts, isolatedIds, requestDraw]);
 
   // 노드 집합이 바뀐 첫 순간에만 화면을 맞춘다. 매 스냅샷마다 맞추면 사용자가
   // 잡아 둔 팬/줌이 계속 초기화된다(티켓은 몇 초마다 갱신된다).
@@ -556,7 +680,7 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
   // 강조 토글·호버 같은 상태 변화도 다시 그려야 한다.
   useEffect(() => {
     requestDraw();
-  }, [showCritical, hoveredId, requestDraw]);
+  }, [showCritical, showConflicts, hoveredId, requestDraw]);
 
   useEffect(
     () => () => {
@@ -714,6 +838,9 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
 
   const hoveredTask = tooltip ? taskById.get(tooltip.id) : undefined;
   const criticalAvailable = critical.length > 1;
+  const conflictCount = conflicts.edges.length;
+  const conflictAvailable = conflictCount > 0;
+  const clusterCount = conflicts.clusters.length;
 
   return (
     <div className="flex h-full flex-col">
@@ -752,6 +879,42 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
           ⟶ {t("board.graph.critical")}
           {criticalAvailable ? ` · ${critical.weight}` : ""}
         </button>
+
+        {/* ★충돌위험 토글. 기본이 켜짐인 건 이 뷰를 조율 도구로 쓰는 사람이
+            제일 먼저 봐야 할 게 "지금 같이 던지면 깨지는 쌍" 이기 때문이다.
+            간선 수가 많아 답답할 때 끌 수 있게만 열어 둔다(배치는 안 바뀐다). */}
+        <button
+          type="button"
+          onClick={() => setShowConflicts((prev) => !prev)}
+          aria-pressed={showConflicts}
+          disabled={!conflictAvailable}
+          data-testid="task-graph-conflict-toggle"
+          title={
+            conflictAvailable
+              ? t("board.graph.conflictTip", {
+                  count: conflictCount,
+                  clusters: clusterCount,
+                })
+              : t("board.graph.conflictNone")
+          }
+          className={`rounded border px-1.5 py-0.5 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+            showConflicts && conflictAvailable
+              ? "border-orange-400/60 bg-orange-400/15 text-orange-200"
+              : "border-gray-700 text-gray-400 hover:text-gray-200"
+          }`}
+        >
+          ⇄ {t("board.graph.conflict")}
+          {conflictAvailable ? ` · ${conflictCount}` : ""}
+        </button>
+
+        {conflicts.truncated && (
+          <span
+            data-testid="task-graph-conflict-truncated"
+            className="rounded bg-orange-500/15 px-1.5 py-0.5 font-medium text-orange-300"
+          >
+            {t("board.graph.conflictTruncated", { count: MAX_CONFLICT_EDGES })}
+          </span>
+        )}
 
         <button
           type="button"
@@ -803,6 +966,30 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
             label={t("board.graph.legend.critical", { count: critical.weight })}
           />
         )}
+        {conflictAvailable && showConflicts && (
+          <LegendLine
+            color={CONFLICT_HEX}
+            label={t("board.graph.legend.conflict", { count: conflictCount })}
+          />
+        )}
+        {stuck.downstreamIds.size > 0 && (
+          <LegendRing
+            color={STUCK_HEX}
+            dashed
+            label={t("board.graph.legend.blast", {
+              count: stuck.downstreamIds.size,
+            })}
+          />
+        )}
+        {isolatedIds.size > 0 && (
+          <LegendDot
+            color={EDGE_COLOR}
+            small
+            label={t("board.graph.legend.isolated", {
+              count: isolatedIds.size,
+            })}
+          />
+        )}
       </div>
 
       <div ref={containerRef} className="relative min-h-0 flex-1 p-1">
@@ -812,6 +999,10 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
           data-node-count={layout.nodes.length}
           data-edge-count={layout.edges.length}
           data-critical-length={critical.length}
+          data-conflict-count={conflicts.edges.length}
+          data-conflict-clusters={clusterCount}
+          data-isolated-count={isolatedIds.size}
+          data-blast-count={stuck.downstreamIds.size}
           className="absolute inset-0 h-full w-full touch-none select-none"
           style={{ cursor: hoveredId ? "pointer" : "grab" }}
           onPointerDown={handlePointerDown}
@@ -833,6 +1024,10 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
             readiness={readiness.get(tooltip.id) ?? "waiting"}
             onCritical={showCritical && critical.idSet.has(tooltip.id)}
             dependents={dependents.get(tooltip.id) ?? 0}
+            conflictCount={conflicts.neighbors.get(tooltip.id)?.size ?? 0}
+            conflictPaths={conflictPathsFor(conflicts.edges, tooltip.id)}
+            onBlast={stuck.downstreamIds.has(tooltip.id)}
+            isolated={isolatedIds.has(tooltip.id)}
             container={containerRef.current}
             clientX={tooltip.x}
             clientY={tooltip.y}
@@ -844,6 +1039,9 @@ export function TaskGraphView({ tasks, onSelect }: TaskGraphViewProps) {
           layout={layout}
           readiness={readiness}
           criticalIds={critical.idSet}
+          conflictNeighbors={conflicts.neighbors}
+          blastIds={stuck.downstreamIds}
+          isolatedIds={isolatedIds}
           agentByKey={agentByKey}
           onSelect={onSelect}
           onFocusNode={setHoveredId}
@@ -858,6 +1056,10 @@ interface GraphNodeListProps {
   layout: TaskGraphLayout;
   readiness: Map<string, TaskReadiness>;
   criticalIds: Set<string>;
+  /** id → scope 가 겹치는 상대들. 캔버스의 주황 점선과 같은 정보다. */
+  conflictNeighbors: Map<string, Set<string>>;
+  blastIds: Set<string>;
+  isolatedIds: Set<string>;
   agentByKey: Map<string, Agent>;
   onSelect: (task: Task) => void;
   onFocusNode: (id: string | null) => void;
@@ -876,6 +1078,9 @@ const GraphNodeList = memo(function GraphNodeList({
   layout,
   readiness,
   criticalIds,
+  conflictNeighbors,
+  blastIds,
+  isolatedIds,
   agentByKey,
   onSelect,
   onFocusNode,
@@ -898,6 +1103,7 @@ const GraphNodeList = memo(function GraphNodeList({
         const modelLabel = agent
           ? (spawnedModelLabel(agent.spawnedModel) ?? agent.model)
           : null;
+        const conflictCount = conflictNeighbors.get(node.id)?.size ?? 0;
         return (
           <li key={node.id}>
             <button
@@ -906,6 +1112,9 @@ const GraphNodeList = memo(function GraphNodeList({
               data-task-status={task.status}
               data-task-readiness={value}
               data-task-critical={criticalIds.has(node.id) ? "true" : "false"}
+              data-task-conflicts={conflictCount}
+              data-task-blast={blastIds.has(node.id) ? "true" : "false"}
+              data-task-isolated={isolatedIds.has(node.id) ? "true" : "false"}
               onClick={() => onSelect(task)}
               onFocus={() => onFocusNode(node.id)}
               onBlur={() => onFocusNode(null)}
@@ -914,6 +1123,16 @@ const GraphNodeList = memo(function GraphNodeList({
               <span>{status.label}</span>
               <span>{task.role}</span>
               <span>{t(READINESS_LABEL_KEY[value])}</span>
+              {/* 충돌·여파는 캔버스에서 색으로만 말하므로, 스크린리더에는
+                  글자로 한 번 더 말해 줘야 같은 정보를 얻는다. */}
+              {conflictCount > 0 && (
+                <span>
+                  {t("board.graph.tooltip.conflicts", { count: conflictCount })}
+                </span>
+              )}
+              {blastIds.has(node.id) && (
+                <span>{t("board.graph.tooltip.blast")}</span>
+              )}
               {modelLabel ? (
                 <span>{modelLabel}</span>
               ) : (
@@ -927,13 +1146,40 @@ const GraphNodeList = memo(function GraphNodeList({
   );
 });
 
-function LegendDot({ color, label }: { color: string; label: string }) {
+function LegendDot({
+  color,
+  label,
+  small,
+}: {
+  color: string;
+  label: string;
+  /** 독립 노드 범례용 — 화면의 그 점이 실제로 작고 흐리다는 걸 그대로 보인다. */
+  small?: boolean;
+}) {
   return (
     <span className="inline-flex items-center gap-1">
       <span
         aria-hidden
-        className="h-2 w-2 rounded-full"
-        style={{ background: color, boxShadow: `0 0 6px ${color}` }}
+        className={small ? "h-1 w-1 rounded-full" : "h-2 w-2 rounded-full"}
+        style={{
+          background: color,
+          boxShadow: small ? undefined : `0 0 6px ${color}`,
+          opacity: small ? 0.6 : 1,
+        }}
+      />
+      {label}
+    </span>
+  );
+}
+
+/** 간선 범례 — 점(노드)이 아니라 선(관계)을 설명하는 자리. */
+function LegendLine({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span
+        aria-hidden
+        className="h-0 w-4"
+        style={{ borderTop: `2px dashed ${color}` }}
       />
       {label}
     </span>
@@ -961,11 +1207,36 @@ function LegendRing({
   );
 }
 
+/**
+ * 이 티켓이 어떤 경로 때문에 남과 부딪히는지 — 툴팁 한 줄용.
+ *
+ * 개수만 보여 주면 "3건 겹침" 에서 손이 멈춘다. 정작 알아야 할 건 *어디서*
+ * 겹치는지고, 그걸 알아야 scope 를 갈라 병렬로 되돌릴 수 있다.
+ */
+function conflictPathsFor(
+  edges: readonly ScopeConflictEdge[],
+  id: string,
+): string[] {
+  const out: string[] = [];
+  for (const edge of edges) {
+    if (edge.a !== id && edge.b !== id) continue;
+    for (const path of edge.paths) {
+      if (!out.includes(path)) out.push(path);
+      if (out.length >= 3) return out;
+    }
+  }
+  return out;
+}
+
 interface TooltipProps {
   task: Task;
   readiness: TaskReadiness;
   onCritical: boolean;
   dependents: number;
+  conflictCount: number;
+  conflictPaths: string[];
+  onBlast: boolean;
+  isolated: boolean;
   container: HTMLDivElement | null;
   clientX: number;
   clientY: number;
@@ -977,6 +1248,10 @@ function TaskGraphTooltip({
   readiness,
   onCritical,
   dependents,
+  conflictCount,
+  conflictPaths,
+  onBlast,
+  isolated,
   container,
   clientX,
   clientY,
@@ -1018,6 +1293,22 @@ function TaskGraphTooltip({
         {onCritical && (
           <span className="text-cyan-300">⟶ {t("board.graph.critical")}</span>
         )}
+        {onBlast && (
+          <span className="text-red-400">{t("board.graph.tooltip.blast")}</span>
+        )}
+        {conflictCount > 0 && (
+          <span className="text-orange-300">
+            ⇄ {t("board.graph.tooltip.conflicts", { count: conflictCount })}
+          </span>
+        )}
+        {conflictPaths.length > 0 && (
+          <span className="break-all text-orange-200/80">
+            {t("board.graph.tooltip.conflictPaths", {
+              paths: conflictPaths.join(", "),
+            })}
+          </span>
+        )}
+        {isolated && <span>{t("board.graph.tooltip.isolated")}</span>}
       </div>
     </div>
   );
@@ -1073,6 +1364,44 @@ function drawEdge(
   );
   ctx.closePath();
   ctx.fill();
+}
+
+/**
+ * 무향 관계선(scope 겹침) — 화살촉 없는 곡선.
+ *
+ * `drawEdge` 와 갈라 둔 이유가 정확히 화살촉이다. 충돌은 "A 다음에 B" 가 아니라
+ * "A 와 B 를 동시에 하지 마라" 라서 방향이 없고, 화살표를 붙이면 사용자가 이걸
+ * 의존으로 읽는다. 곡률 부호도 의존과 반대로 준다 — 같은 두 티켓이 의존이면서
+ * 충돌이기도 하면 두 선이 겹쳐 한 줄로 보인다.
+ */
+function drawPlainLink(
+  ctx: CanvasRenderingContext2D,
+  from: ForceNode,
+  to: ForceNode,
+): void {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1) return;
+
+  const curve = Math.min(28, len * 0.12);
+  const cx = (from.x + to.x) / 2 + (dy / len) * curve;
+  const cy = (from.y + to.y) / 2 + (-dx / len) * curve;
+
+  const startAngle = Math.atan2(cy - from.y, cx - from.x);
+  const endAngle = Math.atan2(cy - to.y, cx - to.x);
+  ctx.beginPath();
+  ctx.moveTo(
+    from.x + Math.cos(startAngle) * (from.radius + 2),
+    from.y + Math.sin(startAngle) * (from.radius + 2),
+  );
+  ctx.quadraticCurveTo(
+    cx,
+    cy,
+    to.x + Math.cos(endAngle) * (to.radius + 2),
+    to.y + Math.sin(endAngle) * (to.radius + 2),
+  );
+  ctx.stroke();
 }
 
 function truncate(text: string, max: number): string {

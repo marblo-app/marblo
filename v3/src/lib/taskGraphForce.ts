@@ -57,6 +57,19 @@ export interface ForceSimulationOptions {
   previous?: ReadonlyMap<string, { x: number; y: number }>;
   /** id → 반지름. 생략하면 전부 기본값. */
   radiusOf?: (id: string) => number;
+  /**
+   * ★의존이 아닌 **무향 연결** — 현재는 scope 겹침(충돌위험)이 여기로 온다.
+   *
+   * 왜 시뮬까지 내려오나: 새 간선을 그리기만 하고 배치는 그대로 두면, 부딪히는
+   * 티켓 두 장이 화면 반대편에 앉은 채 주황 선 하나로 이어진 그림이 나온다.
+   * 선이 화면을 가로지르기만 하고 "이것들이 한 덩어리다" 는 안 읽힌다. 컴포넌트
+   * 분해와 스프링에 같이 넣어야 덩어리가 눈에 보이는 클러스터로 뭉친다.
+   *
+   * 의존 스프링보다 **약하게** 건다(CONFLICT_LINK_STRENGTH). 충돌은 "가까이
+   * 두고 같이 보라" 는 힌트지 순서를 뜻하지 않아서, 이게 세면 좌→우 읽기 규칙을
+   * 만드는 의존 구조를 밀어내 버린다.
+   */
+  extraLinks?: readonly (readonly [string, string])[];
 }
 
 /** 황금각(≈137.5°) — phyllotaxis 와 흔들기가 같이 쓴다. */
@@ -82,6 +95,8 @@ const LEVEL_SPACING = 168;
 /** 스프링의 자연 길이. 노드 지름 대비 넉넉해야 라벨이 겹치지 않는다. */
 const LINK_DISTANCE = 120;
 const LINK_STRENGTH = 0.09;
+/** scope 겹침 스프링 — 의존의 절반. 뭉치게는 하되 의존 구조를 못 이긴다. */
+const CONFLICT_LINK_STRENGTH = 0.045;
 /** 반발 상수. 거리² 로 나눠 쓰므로 값 자체는 크다. */
 const REPULSION = 14000;
 /** 반발 계산 시 거리 하한 — 0 근처에서 힘이 폭발하는 걸 막는다. */
@@ -199,8 +214,16 @@ interface SeedField {
  *
  * 큰 덩어리를 먼저(=원반 안쪽에) 놓는 건 시선이 먼저 닿는 자리에 제일 읽을 게
  * 많은 그림이 오게 하려는 것이다. 정렬 tie-break 는 입력 순서라 결정론이 유지된다.
+ *
+ * ★`extraLinks`(scope 겹침)도 컴포넌트 분해에 들어간다. 이 뷰에서 "한 덩어리"
+ * 는 의존으로만 정해지지 않는다 — 같은 파일을 건드리는 티켓들도 함께 봐야 하는
+ * 한 덩어리고, 시드 단계에서 같이 앉아야 포스가 그걸 흩기 전에 클러스터로 읽힌다.
  */
-function computeSeeds(layout: TaskGraphLayout, spacing: number): SeedField {
+function computeSeeds(
+  layout: TaskGraphLayout,
+  spacing: number,
+  extraLinks: readonly (readonly [string, string])[] = [],
+): SeedField {
   const seeds = new Map<string, Seed>();
   const total = layout.nodes.length;
   if (total === 0) return { byId: seeds, containRadius: 0 };
@@ -219,6 +242,11 @@ function computeSeeds(layout: TaskGraphLayout, spacing: number): SeedField {
     if (!nodeById.has(edge.from) || !nodeById.has(edge.to)) continue;
     link(edge.from, edge.to);
     link(edge.to, edge.from);
+  }
+  for (const [a, b] of extraLinks) {
+    if (a === b || !nodeById.has(a) || !nodeById.has(b)) continue;
+    link(a, b);
+    link(b, a);
   }
 
   // BFS 로 연결 요소를 뽑는다. 재귀 대신 배열 커서 — 1000개짜리 사슬에서도
@@ -263,14 +291,20 @@ function computeSeeds(layout: TaskGraphLayout, spacing: number): SeedField {
     // 레벨 범위의 가운데를 0 으로 잡아야 컴포넌트가 자기 중심에서 좌우로
     // 균형 있게 펼쳐진다(왼쪽 끝을 0 으로 잡으면 전부 오른쪽으로 흘러간다).
     const levelMid = (component.minLevel + component.maxLevel) / 2;
+    // ★레벨 폭이 0 인 컴포넌트는 앵커를 안 건다. x 앵커의 존재 이유는 "왼쪽이
+    // 먼저" 를 유지하는 것인데, 전원이 같은 레벨이면 유지할 순서가 없고 앵커는
+    // 그저 전부를 같은 x 로 끌어당긴다 — 그게 정확히 "세로 일자" 버그다.
+    // scope 겹침으로 묶인 덩어리(의존이 0이라 전부 level 0)가 딱 이 경우다.
+    const anchored = size > 1 && component.maxLevel > component.minLevel;
     component.ids.forEach((id, indexInComponent) => {
       const offset = phyllotaxis(indexInComponent, size, innerRadius);
       const level = nodeById.get(id)?.level ?? 0;
       seeds.set(id, {
         x: center.x + offset.x,
         y: center.y + offset.y,
-        anchorX:
-          size === 1 ? null : center.x + (level - levelMid) * LEVEL_SPACING,
+        anchorX: anchored
+          ? center.x + (level - levelMid) * LEVEL_SPACING
+          : null,
       });
     });
   });
@@ -289,7 +323,7 @@ export function createTaskGraphSimulation(
   layout: TaskGraphLayout,
   options: ForceSimulationOptions = {},
 ): TaskGraphSimulation {
-  const { previous, radiusOf } = options;
+  const { previous, radiusOf, extraLinks = [] } = options;
 
   // 시드 간격은 실제 노드 크기를 보고 정한다 — 상수로 못 박으면 큰 노드만 모인
   // 보드에서 충돌 해소가 매 틱 싸우기만 하고 정착하지 못한다.
@@ -299,7 +333,7 @@ export function createTaskGraphSimulation(
     layout.nodes.length === 0 ? 12 : radiusSum / layout.nodes.length;
   const spacing = Math.max(SEED_SPACING, meanRadius * 2 + SEED_GAP);
 
-  const seeds = computeSeeds(layout, spacing);
+  const seeds = computeSeeds(layout, spacing, extraLinks);
 
   const nodes: ForceNode[] = layout.nodes.map((node, index) => {
     const seed = seeds.byId.get(node.id);
@@ -323,12 +357,23 @@ export function createTaskGraphSimulation(
   // 간선을 노드 참조로 미리 풀어 둔다 — 틱마다 Map 조회를 반복하지 않는다.
   // 순환 간선도 스프링으로는 살린다: 순환은 좌표 계산에서 빼야 하는 거지
   // (레이아웃), 서로 당기는 관계가 아니라는 뜻은 아니다.
-  const links: { source: ForceNode; target: ForceNode }[] = [];
+  const links: {
+    source: ForceNode;
+    target: ForceNode;
+    strength: number;
+  }[] = [];
   for (const edge of layout.edges) {
     const source = byId.get(edge.from);
     const target = byId.get(edge.to);
     if (!source || !target) continue;
-    links.push({ source, target });
+    links.push({ source, target, strength: LINK_STRENGTH });
+  }
+  for (const [a, b] of extraLinks) {
+    if (a === b) continue;
+    const source = byId.get(a);
+    const target = byId.get(b);
+    if (!source || !target) continue;
+    links.push({ source, target, strength: CONFLICT_LINK_STRENGTH });
   }
 
   // 중력이 향하는 점 — 시드(또는 이어받은 좌표)의 무게중심. 원점으로 못 박으면
@@ -370,7 +415,7 @@ export function createTaskGraphSimulation(
       const dx = target.x - source.x;
       const dy = target.y - source.y;
       const dist = Math.max(1e-3, Math.sqrt(dx * dx + dy * dy));
-      const force = (dist - LINK_DISTANCE) * LINK_STRENGTH * alpha;
+      const force = (dist - LINK_DISTANCE) * link.strength * alpha;
       const fx = (dx / dist) * force;
       const fy = (dy / dist) * force;
       source.vx += fx;

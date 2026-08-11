@@ -52,6 +52,20 @@ export const board = {
   "board.graph.readiness.done": "완료",
   "board.graph.tooltip.blocks": "이 티켓을 기다리는 {count}개",
 
+  // TaskGraphView Phase 3 — 조율 레이어(scope 겹침·정체 여파·백로그 필드)
+  "board.graph.conflict": "충돌위험",
+  "board.graph.conflictTip":
+    "scope 가 겹치는 열린 티켓 {count}쌍 · 충돌 클러스터 {clusters}개 — 병렬로 돌리면 머지 충돌",
+  "board.graph.conflictNone": "겹치는 scope 가 없습니다",
+  "board.graph.conflictTruncated": "충돌 {count}쌍까지만 표시",
+  "board.graph.legend.conflict": "충돌위험 {count}",
+  "board.graph.legend.blast": "정체 여파 {count}",
+  "board.graph.legend.isolated": "독립 {count}",
+  "board.graph.tooltip.conflicts": "scope 겹침 {count}건 — 같이 돌리면 충돌",
+  "board.graph.tooltip.conflictPaths": "겹치는 경로: {paths}",
+  "board.graph.tooltip.blast": "정체 티켓에 막혀 있음",
+  "board.graph.tooltip.isolated": "연결 없음 — 백로그",
+
   // TaskCard — presence + assignee
   "board.presence.online": "온라인",
   "board.presence.idle": "유휴",

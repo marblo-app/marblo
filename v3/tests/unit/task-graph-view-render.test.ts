@@ -48,6 +48,7 @@ function task(
   id: string,
   dependsOn: string[] = [],
   status: TaskStatus = "TODO",
+  scope: string[] = [],
 ): Task {
   return {
     id,
@@ -62,7 +63,7 @@ function task(
     dependsOnCompleted: dependsOn.length === 0,
     claimedBy: null,
     claimedAt: null,
-    scope: [],
+    scope,
     comment: "",
     prUrl: "",
     hasPmFeedback: false,
@@ -261,5 +262,159 @@ describe("TaskGraphView — 운영 레이어", () => {
     expect(Object.keys(STATUS_HEX).sort()).toEqual(
       Object.keys(STATUS_CONFIG).sort(),
     );
+  });
+});
+
+/**
+ * Phase 3 조율 레이어의 **배선** 회귀.
+ *
+ * 판정 자체(겹침 규칙·클러스터·여파)는 순수함수 테스트가 덮는다
+ * (task-graph-scope-conflict.test.ts). 여기서 재는 건 딱 하나 — "그 계산이 정말
+ * 화면 속성으로 흘러나오나". 둘을 한 곳에서 재면 로직은 맞는데 화면이 안 바뀌는
+ * 회귀를 놓친다(Phase 2 와 같은 분업).
+ */
+describe("TaskGraphView — 조율 레이어(scope 겹침·정체 여파·백로그)", () => {
+  const FE = "v3/src/components/board";
+
+  it("★scope 가 겹치는 열린 티켓이 충돌 간선으로 세어진다", () => {
+    render(
+      createElement(TaskGraphView, {
+        tasks: [
+          task("a", [], "TODO", [`${FE}/TaskGraphView.tsx`]),
+          task("b", [], "IN_PROGRESS", [FE]),
+          task("far", [], "TODO", ["backend/api/tasks.py"]),
+        ],
+        onSelect: vi.fn(),
+      }),
+    );
+    const canvas = screen.getByTestId("task-graph-canvas");
+    // a⇄b 한 쌍. far 는 아무와도 안 겹친다.
+    expect(canvas.getAttribute("data-conflict-count")).toBe("1");
+    // 둘 다 지금 던질 수 있는 처지(ready/active)라 충돌 클러스터가 선다.
+    expect(canvas.getAttribute("data-conflict-clusters")).toBe("1");
+    // far 는 의존도 겹침도 없다 → 백로그 필드.
+    expect(canvas.getAttribute("data-isolated-count")).toBe("1");
+  });
+
+  it("★DONE 끼리는 안 부딪힌다 — 간선도 토글도 안 뜬다", () => {
+    render(
+      createElement(TaskGraphView, {
+        tasks: [
+          task("d1", [], "DONE", [`${FE}/x.tsx`]),
+          task("d2", [], "DONE", [`${FE}/x.tsx`]),
+        ],
+        onSelect: vi.fn(),
+      }),
+    );
+    expect(
+      screen
+        .getByTestId("task-graph-canvas")
+        .getAttribute("data-conflict-count"),
+    ).toBe("0");
+    const toggle = screen.getByTestId(
+      "task-graph-conflict-toggle",
+    ) as HTMLButtonElement;
+    expect(toggle.disabled).toBe(true);
+  });
+
+  it("충돌 이웃 수가 노드 속성으로 나오고, 토글로 끌 수 있다", () => {
+    render(
+      createElement(TaskGraphView, {
+        tasks: [
+          task("hub", [], "TODO", ["v3/src/lib"]),
+          task("x", [], "TODO", ["v3/src/lib/a.ts"]),
+          task("y", [], "TODO", ["v3/src/lib/b.ts"]),
+        ],
+        onSelect: vi.fn(),
+      }),
+    );
+    const counts = Object.fromEntries(
+      screen
+        .getAllByTestId("task-graph-node")
+        .map((node) => [
+          node.querySelector("span")?.textContent,
+          node.getAttribute("data-task-conflicts"),
+        ]),
+    );
+    // hub 는 둘 다와, x·y 는 hub 와만 부딪힌다(a.ts 와 b.ts 는 남이다).
+    expect(counts).toEqual({ "제목 hub": "2", "제목 x": "1", "제목 y": "1" });
+
+    const toggle = screen.getByTestId("task-graph-conflict-toggle");
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("범례가 충돌위험·정체 여파·독립 개수를 센다", () => {
+    render(
+      createElement(TaskGraphView, {
+        tasks: [
+          task("blocked", [], "BLOCKED", ["v3/src/lib"]),
+          task("after", ["blocked"], "TODO", ["v3/src/lib/a.ts"]),
+          task("alone"),
+        ],
+        onSelect: vi.fn(),
+      }),
+    );
+    expect(screen.getByText("충돌위험 1")).toBeTruthy();
+    expect(screen.getByText("정체 여파 1")).toBeTruthy();
+    expect(screen.getByText("독립 1")).toBeTruthy();
+  });
+
+  it("★정체 티켓의 후행이 여파로 표시된다(막힌 하나가 몇 장을 세우나)", () => {
+    render(
+      createElement(TaskGraphView, {
+        tasks: [
+          task("blocked", [], "BLOCKED"),
+          task("b", ["blocked"]),
+          task("c", ["b"]),
+          task("free"),
+        ],
+        onSelect: vi.fn(),
+      }),
+    );
+    const blast = screen
+      .getAllByTestId("task-graph-node")
+      .filter((node) => node.getAttribute("data-task-blast") === "true")
+      .map((node) => node.querySelector("span")?.textContent);
+    // 이행적으로 c 까지. 막힌 티켓 자신과 무관한 free 는 안 들어간다.
+    expect(blast).toEqual(["제목 b", "제목 c"]);
+    expect(
+      screen.getByTestId("task-graph-canvas").getAttribute("data-blast-count"),
+    ).toBe("2");
+  });
+
+  it("★독립 노드가 표시된다 — 지워지지는 않는다(백로그 필드)", () => {
+    render(
+      createElement(TaskGraphView, {
+        tasks: [task("a"), task("b", ["a"]), task("alone1"), task("alone2")],
+        onSelect: vi.fn(),
+      }),
+    );
+    const nodes = screen.getAllByTestId("task-graph-node");
+    // 흐리게 깔릴 뿐 목록에서 사라지지 않는다 — 안 보이면 "내 티켓이 없어졌다".
+    expect(nodes).toHaveLength(4);
+    const isolated = nodes
+      .filter((node) => node.getAttribute("data-task-isolated") === "true")
+      .map((node) => node.querySelector("span")?.textContent);
+    expect(isolated).toEqual(["제목 alone1", "제목 alone2"]);
+  });
+
+  it("scope 가 겹쳐도 크래시 없이 수백 장이 뜬다(충돌 계산이 마운트를 막지 않는다)", () => {
+    const many: Task[] = [];
+    for (let i = 0; i < 300; i += 1) {
+      // 10장씩 같은 파일을 물고 있는 실보드 모사.
+      many.push(task(`n${i}`, [], "TODO", [`v3/src/mod${i % 30}/file.ts`]));
+    }
+    const started = performance.now();
+    render(createElement(TaskGraphView, { tasks: many, onSelect: vi.fn() }));
+    expect(performance.now() - started).toBeLessThan(3000);
+    expect(screen.getAllByTestId("task-graph-node")).toHaveLength(300);
+    // 30 그룹 × 10장 = 그룹당 45쌍.
+    expect(
+      screen
+        .getByTestId("task-graph-canvas")
+        .getAttribute("data-conflict-count"),
+    ).toBe(String(30 * 45));
   });
 });

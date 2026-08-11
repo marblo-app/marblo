@@ -54,6 +54,21 @@ export const board: Record<keyof typeof koBoard, string> = {
   "board.graph.readiness.done": "Done",
   "board.graph.tooltip.blocks": "{count} tasks waiting on this",
 
+  // TaskGraphView Phase 3 — coordination layer (scope overlap, stuck blast, backlog field)
+  "board.graph.conflict": "Conflict risk",
+  "board.graph.conflictTip":
+    "{count} open task pairs share scope · {clusters} conflict clusters — running them in parallel means merge conflicts",
+  "board.graph.conflictNone": "No overlapping scope",
+  "board.graph.conflictTruncated": "showing first {count} conflict pairs",
+  "board.graph.legend.conflict": "Conflict risk {count}",
+  "board.graph.legend.blast": "Stuck blast {count}",
+  "board.graph.legend.isolated": "Isolated {count}",
+  "board.graph.tooltip.conflicts":
+    "{count} scope overlaps — conflicts if run together",
+  "board.graph.tooltip.conflictPaths": "Overlapping paths: {paths}",
+  "board.graph.tooltip.blast": "Blocked by a stuck task",
+  "board.graph.tooltip.isolated": "No links — backlog",
+
   // TaskCard — presence + assignee
   "board.presence.online": "Online",
   "board.presence.idle": "Idle",
