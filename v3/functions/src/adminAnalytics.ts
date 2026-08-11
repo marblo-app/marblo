@@ -914,6 +914,26 @@ export function foldKeyCounts(
     .sort((a, b) => b.count - a.count);
 }
 
+/**
+ * `{ key, count, clients }` 분포행을 접는다 — foldKeyCounts 의 '설치 수까지 든' 판
+ * (티켓 iyxb4KsJpgPgoKYUBPsu).
+ *
+ * ★정렬 기준은 `clients`(고유 설치) 우선이다. 건수로 정렬하면 재시도를 많이 한 한
+ * 사람이 만든 꼬리가 목록 맨 위에 올라와, 실제로는 몇 명 안 되는 사유가 최대 문제로
+ * 보인다. 동률일 때만 건수로 가른다.
+ */
+export function foldBlockReasonCounts(
+  rows: ReadonlyArray<{ key: unknown; count: unknown; clients: unknown }>,
+): Array<{ key: string; count: number; clients: number }> {
+  return rows
+    .map((r) => ({
+      key: r.key == null || r.key === "" ? "(none)" : String(r.key),
+      count: coerceNumber(r.count),
+      clients: coerceNumber(r.clients),
+    }))
+    .sort((a, b) => b.clients - a.clients || b.count - a.count);
+}
+
 // ── 재사용/리텐션 요약 ───────────────────────────────────────────────────────
 // 주간 활성 프로젝트·주간 완료 티켓·2번째 세션 도달률·DAU/WAU 끈적임(stickiness).
 export type ReuseInput = {
@@ -1008,6 +1028,20 @@ export type OnboardingStallInput = {
   spawnBlockedEvents: unknown;
   /** 차단 사유 분포(errorCategory: not-installed / not-authenticated / vendor-not-configured). */
   spawnBlockedReasonRows: ReadonlyArray<{ key: unknown; count: unknown }>;
+  /**
+   * ★차단 사유 **정규 어휘** 분포(metadata.reason: no_subscription / needs_auth /
+   * no_cli / quota_exhausted / other) — 티켓 iyxb4KsJpgPgoKYUBPsu.
+   *
+   * 위 errorCategory 분포와 같은 이벤트지만 축이 다르다: 저쪽은 차단을 내린 코드의
+   * 원어휘고, 이쪽은 "무엇을 고쳐야 하나" 의 축이다. 구버전 functions 응답에는 없어
+   * optional — 없으면 빈 배열로 접힌다(0 을 사실로 주장하지 않게 화면이 빈 상태를
+   * 구분한다).
+   */
+  spawnBlockedBlockReasonRows?: ReadonlyArray<{
+    key: unknown;
+    count: unknown;
+    clients: unknown;
+  }>;
   /** 스폰 후 로그인화면 확정(onboarding:agent_needs_auth). */
   needsAuthClients: unknown;
   needsAuthAgents: unknown;
@@ -1035,6 +1069,14 @@ export type OnboardingStallSummary = {
     clients: number;
     events: number;
     byReason: Array<{ key: string; count: number }>;
+    /**
+     * ★정규 어휘 분해. `clients`(고유 설치)를 함께 들고 다니는 이유: 한 사람이 열 번
+     * 눌러 쌓인 열 건과 열 명이 한 번씩 막힌 것은 완전히 다른 문제인데, 무료티어
+     * GO 판단이 보는 값은 **사람(설치) 수** 쪽이다.
+     */
+    byBlockReason: Array<{ key: string; count: number; clients: number }>;
+    /** 그중 '구독 공백'으로 막힌 고유 설치 — 이 티켓이 세려던 바로 그 수. */
+    noSubscriptionClients: number;
   };
   needsAuth: {
     clients: number;
@@ -1069,6 +1111,9 @@ export function buildOnboardingStallSummary(
   const unfundedClients = coerceNumber(input.fundingUnfundedClients);
   const blockedClients = coerceNumber(input.fundingBlockedClients);
   const decidedClients = okClients + unfundedClients + blockedClients;
+  const blockReasons = foldBlockReasonCounts(
+    input.spawnBlockedBlockReasonRows ?? [],
+  );
   return {
     stalledClients,
     stalledRate: safeRate(stalledClients, input.signupBase),
@@ -1076,6 +1121,9 @@ export function buildOnboardingStallSummary(
       clients: coerceNumber(input.spawnBlockedClients),
       events: coerceNumber(input.spawnBlockedEvents),
       byReason: foldKeyCounts(input.spawnBlockedReasonRows),
+      byBlockReason: blockReasons,
+      noSubscriptionClients:
+        blockReasons.find((r) => r.key === "no_subscription")?.clients ?? 0,
     },
     needsAuth: {
       clients: coerceNumber(input.needsAuthClients),
@@ -1097,6 +1145,9 @@ export function buildOnboardingStallSummary(
       events: coerceNumber(input.guideShownEvents),
     },
     note:
+      "차단 사유는 두 축으로 본다: byReason=차단을 내린 코드의 원어휘(errorCategory), " +
+      "byBlockReason=정규 어휘(no_subscription/needs_auth/no_cli/quota_exhausted/other). " +
+      "정규 어휘는 3.0.x+ 빌드부터 실리므로 그 전 행은 '(none)' 으로 모인다. " +
       "온보딩 스톨 = '구독/크레딧/인증이 없어 최초에 멈춘' 설치. needsAuth 는 철회(오탐)를 " +
       "뺀 unresolvedAgents 를 봐야 하고, funding 비율의 분모는 판정이 난 설치(ok 포함)다. " +
       "익명 install id(clientId) 기준이라 사람 수가 아니라 설치 수이며, 계정 조인은 하지 " +

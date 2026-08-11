@@ -9847,6 +9847,33 @@ export const getAdminKpiCockpit = functions
       ORDER BY count DESC
     `;
 
+    // ★차단 사유 **정규 어휘** 분해 (티켓 iyxb4KsJpgPgoKYUBPsu).
+    //
+    // 위 errorCategory 분해와 같은 이벤트를 읽지만 축이 다르다: errorCategory 는
+    // 차단을 내린 코드의 원어휘(게이트/플랜캡마다 다르다)고, `metadata.reason` 은
+    // 제품 질문의 축(no_subscription / needs_auth / no_cli / quota_exhausted /
+    // other)이다. 온보딩 96% 이탈(cli_setup 531 → multi_agent_success 21)의 원인이
+    // 구독 공백인지 인증인지 CLI 부재인지는 **이 분포**가 답한다.
+    //
+    // ★건수와 **고유 설치 수**를 함께 뽑는다. 한 사람이 열 번 눌러 열 건이 쌓인
+    // 것과 열 명이 한 번씩 막힌 것은 완전히 다른 문제인데, 건수만 보면 구분되지
+    // 않는다(무료티어 GO 판단의 입력값은 후자다).
+    //
+    // ★#930 교훈: `ex.clause`(운영자 제외절)는 events 전용
+    // (JSON_VALUE(metadata,'$.accountUserId'))이고 이 쿼리도 events 를 읽으므로
+    // 그대로 붙인다 — events 아닌 테이블(task_outcomes 등)에 옮겨 붙이지 말 것.
+    const stallBlockReasonQuery = `
+      SELECT
+        COALESCE(NULLIF(JSON_VALUE(metadata, '$.reason'), ''), '(none)') AS key,
+        COUNT(*) AS count,
+        COUNT(DISTINCT userId) AS clients
+      FROM ${eventsTable}
+      WHERE event = 'onboarding:spawn_blocked'
+        AND ${eventTs} >= ${since}${ex.clause}
+      GROUP BY key
+      ORDER BY count DESC
+    `;
+
     // ── (11) ★제로마찰 KPI — 10분 첫 multi-agent 성공 · 동시2+ · 무료→유료 ──
     //
     // 티켓 pWSnJeQN. 사장님 최중요 KPI 를 이루는 조각들인데, 그중 **멀티에이전트
@@ -10000,6 +10027,11 @@ export const getAdminKpiCockpit = functions
         params: daysParams,
       },
       {
+        name: "kpi.stallBlockReason",
+        query: stallBlockReasonQuery,
+        params: daysParams,
+      },
+      {
         name: "kpi.zeroFriction",
         query: zeroFrictionQuery,
         params: daysParams,
@@ -10025,6 +10057,7 @@ export const getAdminKpiCockpit = functions
       avgDauRows,
       stallRows,
       stallReasonRows,
+      stallBlockReasonRows,
       zeroFrictionRows,
       weeklyTwicePlusRows,
     ] = kpiQueryResults.map((r) => r.rows);
@@ -10119,6 +10152,10 @@ export const getAdminKpiCockpit = functions
         spawnBlockedReasonRows: (
           stallReasonRows as Array<Record<string, unknown>>
         ).map((r) => ({ key: r.key, count: r.count })),
+        // 정규 어휘 분해(티켓 iyxb4KsJpgPgoKYUBPsu) — 건수와 고유 설치 수를 함께.
+        spawnBlockedBlockReasonRows: (
+          stallBlockReasonRows as Array<Record<string, unknown>>
+        ).map((r) => ({ key: r.key, count: r.count, clients: r.clients })),
         needsAuthClients: stallRow.needs_auth_clients,
         needsAuthAgents: stallRow.needs_auth_agents,
         needsAuthResolvedAgents: stallRow.needs_auth_resolved_agents,

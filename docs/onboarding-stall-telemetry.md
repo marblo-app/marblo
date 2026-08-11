@@ -24,6 +24,34 @@
 | `onboarding:funding_probe`       | 렌더러 — #884 프로브 판정(자동 1회 + 가이드 모달 "다시 확인")                  | `model`, `metadata.verdict`=`ok`\|`unfunded`\|`blocked`\|`inconclusive`, `metadata.trigger`=`auto`\|`recheck`, `errorCategory`(=verdict 또는 `blocked:<사유>`)                                                     | ★인증까지 온 설치 중 몇 %가 구독/크레딧이 없어 못 도는가  |
 | `onboarding:funding_guide_shown` | 렌더러 `FundingGuideHost` — 모달이 실제로 뜬 순간(판정 종류당 1회)             | `model`, `errorCategory`=`authedButUnfunded`\|`authedButBlocked`                                                                                                                                                   | **눈으로** 막힌 사람 수(판정과 갈린다 — 닫았으면 안 뜬다) |
 
+### 증보 — 차단 '사유' 귀속 (티켓 iyxb4KsJpgPgoKYUBPsu)
+
+위 카탈로그를 깐 뒤에도 **"왜 멈추는가"** 는 여전히 못 셌다. 이유는 둘:
+
+1. `spawn_blocked` 의 사유가 게이트 원어휘(`not-installed` 등)로 `errorCategory`
+   에만 있어 제품 질문("구독 공백이 몇 %인가")과 어휘가 어긋났다.
+2. ★**구독 축 차단이 통째로 무음**이었다. 플랜 동시성 캡
+   (`dispatch-scoring.checkPlanConcurrency`, free=2 / pro=5)이 스폰을 정확히 막고
+   있었는데 그 사실이 이벤트로 한 건도 안 나가, "구독이 없어 멈춘 사람" 이 BQ 에서
+   0명으로 보였다 — 없는 게 아니라 **안 세고 있었다**.
+
+증보 내용(새 이벤트 없음. 같은 `onboarding:spawn_blocked` 에 축을 얹었다):
+
+- `metadata.reason` = **정규 어휘** `no_subscription` | `needs_auth` | `no_cli` |
+  `quota_exhausted` | `other`. 접기는 `electron/spawn-block-reason.ts` **한 곳**
+  (호출부가 직접 넘기면 새 차단 지점이 매핑을 빠뜨리고, 그 누락은 "그 사유 0건"
+  이라는 거짓 사실로 보인다). `errorCategory` 는 원어휘 그대로 유지 — 기존 쿼리·
+  대시보드는 한 글자도 안 바뀐다.
+- 발화 지점 추가: `bridge-server` 의 플랜 캡 차단 2곳(dispatch / spawnNewAgent)과
+  벤더 크레덴셜 차단 1곳. 원어휘는 `plan-cap-free` / `plan-cap-paid` /
+  `vendor-not-configured`.
+- **이중계상 없음**: 차단 지점은 전부 즉시 `return` 이라 한 번의 차단이 정확히
+  1건만 남긴다(`tests/unit/bridge-dispatch.test.ts` 가 못박는다).
+- ★`vendor-not-configured`(BYOM 키 미등록)는 `other` 다. 구독 공백처럼 보이지만
+  마블로 구독을 팔아도 안 풀린다 — 섞으면 온램프 투자 판단의 입력값이 부풀려진다.
+- ★`plan-cap-paid` → `quota_exhausted` 는 **요금제가 있는** 사람이다. `funding_probe`
+  의 `rate_limit` 하위 사유와 같은 규율(§3).
+
 ### 왜 이 다섯인가 — 세 가지 설계 결정
 
 1. **정상(`ok`) 판정도 싣는다.** unfunded 건수만으로는 "인증까지 온 유저 중 몇
@@ -107,7 +135,21 @@ SELECT
                                                           AS unfunded_rate
 FROM v;
 
--- ③ 어디를 고쳐야 하나 — 스폰차단 사유 × 표면
+-- ③-a ★어디를 고쳐야 하나(정규 어휘) — 티켓 iyxb4KsJpgPgoKYUBPsu.
+--   metadata.reason ∈ no_subscription | needs_auth | no_cli | quota_exhausted | other.
+--   ★설치 수로 정렬한다 — 건수로 보면 재시도를 많이 한 한 사람이 만든 꼬리가
+--   최대 문제처럼 보인다. 무료티어 GO 판단이 보는 값은 사람(설치) 수 쪽이다.
+SELECT
+  JSON_VALUE(metadata,'$.reason')            AS reason,
+  COUNT(DISTINCT userId)                     AS installs,
+  COUNT(*)                                   AS events
+FROM `marblo-2253d.marblo_telemetry.events`
+WHERE event='onboarding:spawn_blocked'
+  AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
+GROUP BY reason
+ORDER BY installs DESC;
+
+-- ③ 어디를 고쳐야 하나 — 스폰차단 **원어휘** × 표면(정규 어휘와 공존한다)
 SELECT
   errorCategory                              AS reason,
   JSON_VALUE(metadata,'$.surface')           AS surface,
@@ -162,6 +204,12 @@ BQ 직접 쿼리 외에, 같은 수치가 어드민 콜러블
 
 marblo.app/admin 화면에 이 블록을 그리는 것은 별도 작업이다(marblo-web 은 이
 티켓의 scope 밖). 응답에는 이미 실려 나간다.
+
+★증보(iyxb4KsJ): `getAdminOnboardingFunnel` 응답의
+`stall.spawnBlockedBlockReasonRows` → `spawnBlocked.byBlockReason`(설치 수 내림차순)
+과 `spawnBlocked.noSubscriptionClients`. 어드민 화면(marblo-web `AnalyticsPanel`)의
+"차단 사유 (설치 수 · 정규 어휘)" 패널이 그린다. 구버전 functions 응답에는 이 축이
+없으므로 빈 배열로 접히고, 화면은 "0건" 이 아니라 "아직 안 실렸다" 로 말한다.
 
 ## 검증
 

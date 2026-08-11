@@ -1,5 +1,7 @@
 import { BrowserWindow } from "electron";
 
+import { normalizeSpawnBlockReason } from "./spawn-block-reason";
+
 // Send telemetry events to the renderer process for Firestore persistence
 export function sendTelemetry(
   win: BrowserWindow | null,
@@ -282,9 +284,26 @@ export const mainTelemetry = {
   // 페이로드는 비식별: 모델/사유 코드/개수만, 경로·키·원문 출력은 절대 싣지 않는다.
 
   /**
-   * 사전 스폰 게이트(`checkSpawnAuthGate`)가 스폰을 거절했다 = 사용자가 첫 작업을
-   * **실행 전에** 막힌 순간. reason 어휘는 게이트 그대로:
-   * not-installed / not-authenticated / vendor-not-configured.
+   * 스폰이 **실행 전에** 막힌 순간 = 사용자가 첫 작업을 시작하지 못한 순간.
+   *
+   * `reason` 은 차단을 내린 쪽의 **원어휘 그대로**다:
+   *   · 사전 인증 게이트(`checkSpawnAuthGate`) — not-installed / not-authenticated /
+   *     vendor-not-configured
+   *   · 플랜 동시성 캡(`checkPlanConcurrency`) — plan-cap-free / plan-cap-paid
+   *
+   * ★그 원어휘와 **별도로** `metadata.reason` 에 정규 어휘(5칸)를 함께 싣는다
+   * (티켓 iyxb4KsJpgPgoKYUBPsu). 원어휘는 차단을 내린 코드의 사정이고, 정규 어휘는
+   * 제품 질문("구독 공백이 몇 %인가")의 축이다. 둘을 한 칸에 합치면 어휘가 늘 때마다
+   * 대시보드 쿼리가 조용히 어긋난다 — errorCategory 는 하위호환으로 그대로 두고
+   * (기존 `stallReasonQuery` 가 이 컬럼을 읽는다), 새 축만 얹는다.
+   *
+   * ★접기는 **여기 한 곳**에서만 한다. 호출부가 정규 어휘를 직접 넘기게 하면 새
+   * 차단 지점이 생길 때마다 매핑을 빠뜨릴 수 있고, 그 누락은 "그 사유가 0건" 이라는
+   * 거짓 사실로 보인다.
+   *
+   * ★#907 익명 규율: 이 페이로드에는 계정 식별자(uid·이메일·plan 소유자)가 한
+   * 바이트도 실리지 않는다. 상관키는 익명 clientId(렌더러가 붙이는 events.userId)
+   * 하나뿐이다. 회귀 방지는 tests/unit/spawn-block-reason.test.ts 가 지킨다.
    */
   spawnBlocked(
     win: BrowserWindow | null,
@@ -303,6 +322,8 @@ export const mainTelemetry = {
       outcome: "blocked",
       errorCategory: payload.reason,
       metadata: {
+        // 정규 어휘 — BQ 에서 GROUP BY 하는 축.
+        reason: normalizeSpawnBlockReason(payload.reason),
         surface: payload.surface,
         installed: payload.installed,
         ...(payload.vendor ? { vendor: payload.vendor } : {}),

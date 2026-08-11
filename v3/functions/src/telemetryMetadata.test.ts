@@ -57,6 +57,24 @@ test("★계정 식별자를 서버가 새로 얹지 않는다 — dispatch:deci
   }
 });
 
+test("★계정 식별자를 서버가 새로 얹지 않는다 — onboarding:spawn_blocked (티켓 iyxb4KsJ)", () => {
+  // 차단 '사유' 계측은 익명 설치 축으로만 존재한다. 사유를 계정에 귀속시키고 싶은
+  // 유혹이 가장 큰 이벤트라(누가 구독이 없나) 여기에 못을 하나 더 박는다.
+  const out = buildMetadata({
+    event: "onboarding:spawn_blocked",
+    metadata: JSON.stringify({
+      reason: "no_subscription",
+      surface: "dispatch",
+      installed: true,
+    }),
+  });
+  const obj = parsed(out);
+  assert.equal(obj.reason, "no_subscription");
+  for (const key of ACCOUNT_IDENTIFIER_KEYS) {
+    assert.equal(key in obj, false, `${key} 가 metadata 에 새로 붙었다`);
+  }
+});
+
 test("metadata 가 없고 접을 결정필드도 없으면 null(빈 '{}' 을 적지 않는다)", () => {
   assert.equal(buildMetadata({ event: "app:first_run" }), null);
   assert.equal(

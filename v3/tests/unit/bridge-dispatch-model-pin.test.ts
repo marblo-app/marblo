@@ -28,6 +28,8 @@ const telemetry = vi.hoisted(() => ({
   modelMixDispatched: vi.fn(),
   complexStagesDispatched: vi.fn(),
   agentSpawned: vi.fn(),
+  // 스폰 차단 사유 계측(티켓 iyxb4KsJ) — 벤더키/플랜캡 차단 경로가 부른다.
+  spawnBlocked: vi.fn(),
 }));
 vi.mock("../../electron/telemetry", () => ({
   mainTelemetry: telemetry,

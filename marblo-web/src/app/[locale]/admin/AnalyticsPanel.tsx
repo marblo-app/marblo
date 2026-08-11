@@ -287,6 +287,13 @@ type KpiCockpit = {
       clients: number;
       events: number;
       byReason: KeyCount[];
+      /**
+       * 차단 사유 **정규 어휘** 분해(#iyxb4KsJ). byReason 이 차단을 내린 코드의
+       * 원어휘라면 이쪽은 "무엇을 고쳐야 하나" 의 축이다 — 구독 공백이 몇 명인지가
+       * 여기서만 보인다. 구버전 functions 는 이 필드를 안 준다.
+       */
+      byBlockReason?: Array<{ key: string; count: number; clients: number }>;
+      noSubscriptionClients?: number;
     };
     needsAuth: {
       clients: number;
@@ -2429,6 +2436,10 @@ function OnboardingStallCard({
 }) {
   const na = stall.needsAuth;
   const fu = stall.funding;
+  // 정규 사유 분해(#iyxb4KsJ). 구버전 functions 는 이 축을 안 주므로 빈 배열로
+  // 접고, 화면은 "0건" 이 아니라 "아직 안 실렸다" 로 말한다.
+  const byBlockReason = stall.spawnBlocked.byBlockReason ?? [];
+  const noSubClients = stall.spawnBlocked.noSubscriptionClients ?? 0;
   const hasAny =
     stall.stalledClients > 0 ||
     stall.spawnBlocked.clients > 0 ||
@@ -2459,7 +2470,14 @@ function OnboardingStallCard({
         <StatCard
           label="스폰 사전 차단"
           value={fmtInt(stall.spawnBlocked.clients)}
-          sub={`${fmtInt(stall.spawnBlocked.events)}건 · 설치/인증/벤더 미비`}
+          sub={
+            byBlockReason.length === 0
+              ? `${fmtInt(stall.spawnBlocked.events)}건 · 설치/인증/벤더 미비`
+              : `${fmtInt(
+                  stall.spawnBlocked.events
+                )}건 · 그중 구독 공백 ${fmtInt(noSubClients)}개 설치`
+          }
+          accent={noSubClients > 0 ? STATUS_CRIT : undefined}
         />
         <StatCard
           label="로그인화면 정지 (철회 제외)"
@@ -2487,9 +2505,43 @@ function OnboardingStallCard({
         />
       </div>
       <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/*
+          ★차단 사유 정규 어휘 — 온보딩 96% 이탈(cli_setup 531 → multi_agent 21)의
+          원인을 "구독 공백 / 인증 / CLI 부재" 로 가르는 축(#iyxb4KsJ).
+          막대는 **고유 설치 수**다. 건수로 그리면 재시도를 많이 한 한 사람이 만든
+          꼬리가 최대 문제처럼 보인다 — 투자 판단이 보는 값은 사람 수 쪽이다.
+        */}
+        <Panel
+          title="차단 사유 (설치 수 · 정규 어휘)"
+          note="onboarding:spawn_blocked · metadata.reason"
+        >
+          <BarList
+            data={byBlockReason.map((r) => ({
+              key: r.key,
+              value: r.clients,
+            }))}
+            colorMap={{
+              no_subscription: STATUS_CRIT,
+              quota_exhausted: STATUS_CRIT,
+              needs_auth: STATUS_WARN,
+              no_cli: STATUS_WARN,
+            }}
+            labelMap={{
+              no_subscription: "구독 공백",
+              needs_auth: "인증 필요",
+              no_cli: "CLI 미설치",
+              quota_exhausted: "한도 소진 (요금제 있음)",
+              other: "기타",
+              "(none)": "미표기 (구버전 앱)",
+            }}
+            color={STATUS_WARN}
+            showShare
+            emptyLabel="정규 사유 데이터가 없습니다 — 이 축이 실린 앱 빌드의 실사용 전입니다."
+          />
+        </Panel>
         <Panel
           title="차단 사유 (errorCategory)"
-          note="onboarding:spawn_blocked"
+          note="onboarding:spawn_blocked · 원어휘(건수)"
         >
           <BarList
             data={stall.spawnBlocked.byReason.map((r) => ({

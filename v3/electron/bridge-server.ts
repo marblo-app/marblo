@@ -36,6 +36,7 @@ import {
   type GraphContext,
 } from "./routing-graph";
 import { mainTelemetry, type DispatchDecisionPayload } from "./telemetry";
+import { planCapErrorCategory } from "./spawn-block-reason";
 import {
   modelTierForComplexity,
   resolveTopClaudeModelDetailed,
@@ -2475,15 +2476,29 @@ export class BridgeServer {
     // exempt: capping them would freeze fleet operation. The spawn path is
     // ALSO gated inside spawnNewAgent (so HTTP /spawn-agent is covered); this
     // gate is what additionally stops a restart from exceeding the cap.
-    const planCap = checkPlanConcurrency(
-      this.planLookup(params.projectId),
-      allAgents,
-      { role, system: params.system },
-    );
+    const dispatchPlan = this.planLookup(params.projectId);
+    const planCap = checkPlanConcurrency(dispatchPlan, allAgents, {
+      role,
+      system: params.system,
+    });
     if (!planCap.allowed) {
       console.warn(
         `[BridgeServer] Dispatch blocked by plan cap (role=${role}, active=${planCap.active}/${planCap.limit})`,
       );
+      // ★구독 축 차단을 계측한다(티켓 iyxb4KsJpgPgoKYUBPsu). 판정은 위에서 이미
+      // 끝났고 여기서는 그 결과를 흘리기만 한다 — 이 자리가 무음이라 "구독이 없어
+      // 멈춘 사람" 이 BQ 에 0명으로 보였다(없는 게 아니라 안 세고 있었다).
+      // 이중계상 없음: 차단은 즉시 return 이라 아래 spawnNewAgent 의 같은 캡 검사에
+      // 도달하지 못한다.
+      // 모델은 **차단 시점에 확정된 것**만 싣는다. 명시 지정이 없으면 이 자리에서는
+      // 아직 모델 경쟁(scoring)이 끝나기 전이라 "unknown" 이 정직하다 — 캡 차단은
+      // 모델과 무관한 축이고, 없는 모델명을 지어내면 model 별 집계가 오염된다.
+      mainTelemetry.spawnBlocked(this.mainWindow, {
+        surface: "dispatch",
+        model: model ?? "unknown",
+        reason: planCapErrorCategory(dispatchPlan),
+        installed: true,
+      });
       return { success: false, error: planCap.reason };
     }
 
@@ -3609,8 +3624,9 @@ export class BridgeServer {
     // not just dispatch. Orchestrator / internal / system-flagged spawns are
     // exempt (resolver passes system:true). Count the project's active agents
     // before adding this one; unknown plan → unlimited (never false-blocks).
+    const spawnPlan = this.planLookup(params.projectId);
     const cap = checkPlanConcurrency(
-      this.planLookup(params.projectId),
+      spawnPlan,
       this.agentManager.listAgentsByProject(params.projectId),
       { role: params.role, system: params.system },
     );
@@ -3618,6 +3634,15 @@ export class BridgeServer {
       console.warn(
         `[BridgeServer] Spawn blocked by plan cap (role=${params.role}, active=${cap.active}/${cap.limit})`,
       );
+      // 구독 축 차단 계측(티켓 iyxb4KsJpgPgoKYUBPsu). dispatch 의 캡과 같은 판정을
+      // 쓰지만 이 자리는 **모든** 신규 스폰 경로(HTTP /spawn-agent · 미션 엔진)가
+      // 지나는 초크포인트라, 여기 없으면 보드 밖에서 막힌 사람이 통째로 안 세어진다.
+      mainTelemetry.spawnBlocked(this.mainWindow, {
+        surface: "spawn",
+        model: params.model || "unknown",
+        reason: planCapErrorCategory(spawnPlan),
+        installed: true,
+      });
       return { success: false, error: cap.reason };
     }
 
@@ -3653,6 +3678,18 @@ export class BridgeServer {
         "설정 → 벤더 API 키에 등록한 뒤 다시 시도하세요(키가 없으면 벤더 " +
         "프로파일이 통째로 미주입돼 Anthropic 쿼터로 새기 때문에 스폰하지 않습니다).";
       console.warn(`[BridgeServer] ${reason}`);
+      // 같은 차단이 `agent:launch` 경로에서는 이미 계측되고 있었다(게이트의
+      // vendor-not-configured). 이 경로만 무음이면 같은 실패가 표면에 따라 세어지다
+      // 말다 한다 — 어휘도 게이트와 **같은 값**을 쓴다(정규 어휘 other 로 접힌다).
+      // 값이 아니라 키 **개수**만 싣는 규율도 게이트와 동일.
+      mainTelemetry.spawnBlocked(this.mainWindow, {
+        surface: "spawn",
+        model: params.model || "unknown",
+        reason: "vendor-not-configured",
+        installed: true,
+        ...(vendorReadiness.vendor ? { vendor: vendorReadiness.vendor } : {}),
+        missingEnvKeyCount: vendorReadiness.missingEnvKeys.length,
+      });
       return { success: false, error: reason };
     }
 

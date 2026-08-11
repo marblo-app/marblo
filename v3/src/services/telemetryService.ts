@@ -102,6 +102,12 @@ export type TelemetryEvent =
   // 적재하고 model/errorCategory/metadata 컬럼은 이미 존재한다).
   //
   // main 프로세스 발화(App.tsx IPC 브리지 경유):
+  //
+  // ★spawn_blocked 는 `metadata.reason` 에 정규 어휘 5칸(no_subscription /
+  // needs_auth / no_cli / quota_exhausted / other)을 싣는다 — 원어휘는 종전대로
+  // errorCategory 에 남는다(티켓 iyxb4KsJpgPgoKYUBPsu, 접기는
+  // electron/spawn-block-reason.ts 한 곳). 이 축이 생기기 전에는 "구독이 없어서
+  // 멈춘 사람" 을 셀 수 없었다: 플랜 캡 차단이 아예 무음이었기 때문이다.
   | "onboarding:spawn_blocked"
   | "onboarding:agent_needs_auth"
   // ★needs_auth 는 철회될 수 있다(readiness 도달 = 오탐). 이 짝 이벤트를 빼지

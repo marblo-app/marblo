@@ -1350,6 +1350,41 @@ test("buildOnboardingStallSummary: 스톨 규모와 사유 분포를 만든다",
   assert.equal(s.guideShown.clients, 3);
 });
 
+// ── 차단 사유 정규 어휘 분해 (티켓 iyxb4KsJpgPgoKYUBPsu) ─────────────────────
+// 온보딩 96% 이탈(cli_setup 531 → multi_agent_success 21)의 원인이 구독 공백인지
+// 인증인지 CLI 부재인지를 가르는 축. errorCategory(원어휘)와 **다른 축**이라 두
+// 분포가 공존한다.
+const blockReasonRows = [
+  // 건수는 needs_auth 가 많지만 설치 수는 no_subscription 이 많은 배치 —
+  // 정렬 기준이 사람 수여야 하는 이유를 그대로 담았다.
+  { key: "needs_auth", count: 12, clients: 2 },
+  { key: "no_subscription", count: 5, clients: 5 },
+  { key: "no_cli", count: 2, clients: 2 },
+];
+
+test("★차단 사유 정규 어휘를 분해한다 — 구독 공백이 몇 '명'인지가 답이다", () => {
+  const s = buildOnboardingStallSummary({
+    ...stallInput,
+    spawnBlockedBlockReasonRows: blockReasonRows,
+  });
+  // 정렬은 설치 수 내림차순 — 건수로 정렬하면 재시도 많은 한 사람이 만든 꼬리가
+  // 최대 문제로 보인다.
+  assert.deepEqual(s.spawnBlocked.byBlockReason, [
+    { key: "no_subscription", count: 5, clients: 5 },
+    { key: "needs_auth", count: 12, clients: 2 },
+    { key: "no_cli", count: 2, clients: 2 },
+  ]);
+  assert.equal(s.spawnBlocked.noSubscriptionClients, 5);
+  // 원어휘 분포는 그대로 남는다(기존 화면·쿼리 하위호환).
+  assert.equal(s.spawnBlocked.byReason.length, 2);
+});
+
+test("정규 어휘 축이 없는 구버전 응답도 안전하다(빈 배열 · 0)", () => {
+  const s = buildOnboardingStallSummary(stallInput);
+  assert.deepEqual(s.spawnBlocked.byBlockReason, []);
+  assert.equal(s.spawnBlocked.noSubscriptionClients, 0);
+});
+
 test("★needsAuth 는 철회분(오탐)을 뺀 수를 쓴다 — 팝업 오탐이 문제 크기를 부풀리지 않게", () => {
   const s = buildOnboardingStallSummary(stallInput);
   assert.equal(s.needsAuth.agents, 10);

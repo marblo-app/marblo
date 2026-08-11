@@ -387,6 +387,158 @@ describe("dispatchTask — plan cap (M2)", () => {
   });
 });
 
+// ── 스폰 차단 '사유' 귀속 (티켓 iyxb4KsJpgPgoKYUBPsu) ────────────────────────
+//
+// 온보딩이 cli_setup_step(30일 531명) → multi_agent_success(21명)로 ~96% 이탈하는데
+// 원인을 못 셌다. 이유는 계측 부재가 아니라 **이 자리가 무음**이었기 때문이다:
+// 위 M2 캡은 스폰을 정확히 막고 있었지만 그 사실이 텔레메트리로 한 건도 안 나가,
+// "구독이 없어서 멈춘 사람" 이 BQ 에서 0명으로 보였다.
+//
+// 여기서 지키는 계약:
+//  1) free 캡 차단 → onboarding:spawn_blocked{metadata.reason:'no_subscription'}
+//  2) 유료 플랜 캡 차단 → quota_exhausted (구독은 **있는** 사람이다 — 섞으면
+//     결제 유도와 한도 상향이라는 정반대 조치가 한 칸에 뭉갠다)
+//  3) 캡 면제(오케/시스템) 는 아무 이벤트도 남기지 않는다
+//  4) ★이중계상 없음 — 한 번의 차단이 정확히 1건만 남긴다
+describe("spawn_blocked — 차단 사유 귀속", () => {
+  /** main→렌더러 IPC 를 가로채는 최소 창 더블. */
+  function attachWindow(bridge: ReturnType<typeof makeBridge>["bridge"]) {
+    const sent: Array<{ channel: string; payload: Record<string, unknown> }> =
+      [];
+    bridge.setMainWindow({
+      isDestroyed: () => false,
+      webContents: {
+        send: (channel: string, payload: Record<string, unknown>) =>
+          sent.push({ channel, payload }),
+      },
+    } as unknown as Parameters<typeof bridge.setMainWindow>[0]);
+    const blocked = () =>
+      sent.filter((s) => s.payload.event === "onboarding:spawn_blocked");
+    return { blocked };
+  }
+
+  function seedCapped(am: FakeAgentManager, count: number) {
+    for (let i = 0; i < count; i++) {
+      am.seed(
+        makeInstance({
+          id: `w${i}`,
+          status: "working",
+          projectId: "px",
+          cwd: "/repo",
+        }),
+      );
+    }
+  }
+
+  it("★free 플랜 캡 차단은 no_subscription 으로 귀속된다 — 이 티켓이 세려던 수치", async () => {
+    const { bridge, am } = makeBridge("free");
+    const { blocked } = attachWindow(bridge);
+    seedCapped(am, 2);
+
+    const res = await bridge.dispatchTask(
+      dispatch({ projectId: "px", taskId: "blockedTask1" }),
+    );
+
+    expect(res.success).toBe(false);
+    // 이중계상 없음: 차단은 즉시 return 이라 아래 spawnNewAgent 의 같은 캡 검사에
+    // 도달하지 못한다.
+    expect(blocked()).toHaveLength(1);
+    const payload = blocked()[0].payload;
+    expect(payload.errorCategory).toBe("plan-cap-free");
+    expect((payload.metadata as Record<string, unknown>).reason).toBe(
+      "no_subscription",
+    );
+  });
+
+  it("유료 플랜의 캡 차단은 quota_exhausted — 구독이 '있는' 사람이다", async () => {
+    const { bridge, am } = makeBridge("pro");
+    const { blocked } = attachWindow(bridge);
+    seedCapped(am, 5); // pro cap = 5
+
+    const res = await bridge.dispatchTask(
+      dispatch({ projectId: "px", taskId: "blockedTask2" }),
+    );
+
+    expect(res.success).toBe(false);
+    expect(blocked()).toHaveLength(1);
+    expect(
+      (blocked()[0].payload.metadata as Record<string, unknown>).reason,
+    ).toBe("quota_exhausted");
+  });
+
+  it("캡 면제(시스템 스폰)는 차단이 아니므로 아무 이벤트도 안 남긴다", async () => {
+    const { bridge, am } = makeBridge("free");
+    const { blocked } = attachWindow(bridge);
+    seedCapped(am, 2);
+
+    const res = await bridge.dispatchTask(
+      dispatch({ projectId: "px", taskId: "sysTask02", system: true }),
+    );
+
+    expect(res.success).toBe(true);
+    expect(blocked()).toHaveLength(0);
+  });
+
+  it("HTTP /spawn-agent 경로(spawnNewAgent)도 같은 사유를 남긴다", async () => {
+    const { bridge, am } = makeBridge("free");
+    const { blocked } = attachWindow(bridge);
+    seedCapped(am, 2);
+
+    const spawn = (
+      bridge as unknown as {
+        spawnNewAgent: (
+          p: SpawnAgentRequest,
+        ) => Promise<{ success: boolean; error?: string }>;
+      }
+    ).spawnNewAgent.bind(bridge);
+
+    const res = await spawn({
+      name: "backend-x",
+      model: "claude",
+      role: "backend",
+      projectId: "px",
+      initialPrompt: "work",
+      cwd: "/repo",
+    });
+
+    expect(res.success).toBe(false);
+    expect(blocked()).toHaveLength(1);
+    const payload = blocked()[0].payload;
+    expect((payload.metadata as Record<string, unknown>).surface).toBe("spawn");
+    expect((payload.metadata as Record<string, unknown>).reason).toBe(
+      "no_subscription",
+    );
+  });
+
+  it("★차단 이벤트에 계정 식별자가 없다(#907 회귀 방지)", async () => {
+    const { bridge, am } = makeBridge("free");
+    const { blocked } = attachWindow(bridge);
+    seedCapped(am, 2);
+
+    await bridge.dispatchTask(
+      dispatch({ projectId: "px", taskId: "blockedTask3" }),
+    );
+
+    const payload = blocked()[0].payload;
+    const keys = [
+      ...Object.keys(payload),
+      ...Object.keys(payload.metadata as Record<string, unknown>),
+    ];
+    // 키 이름으로 본다 — 원어휘 'plan-cap-free' 처럼 문자열 안에 'plan' 이 들어가는
+    // 정상 값이 있어 substring 검사는 거짓 양성이 난다. 문제는 **필드의 존재**다.
+    for (const key of ["accountUserId", "uid", "email", "phone", "plan"]) {
+      expect(keys).not.toContain(key);
+    }
+    // metadata 에 실리는 값은 전부 사유/표면 **코드**다 — 자유문자열도, 계정에서
+    // 온 값도 없다(플랜 등급은 사유 어휘로만 표현된다).
+    expect(payload.metadata).toEqual({
+      reason: "no_subscription",
+      surface: "dispatch",
+      installed: true,
+    });
+  });
+});
+
 // ── [M6] reuse idle→working race ────────────────────────────
 
 describe("dispatchTask — reuse race (M6)", () => {
