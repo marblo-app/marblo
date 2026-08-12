@@ -64,6 +64,35 @@ describe("buildDriveQuery", () => {
     );
   });
 
+  // ── 프로젝트 위키 폴더 스코프(티켓 MCTHALmNAWPpilTFwe8o) ────────────────
+  // `in parents` 는 직계만 매칭하므로 하위 폴더까지 검색하려면 펼친 id 들을
+  // OR 로 넘겨야 한다. 그 OR 절의 모양이 여기서 고정된다.
+
+  it("폴더 여럿은 OR 그룹으로 묶는다(위키 폴더 하위트리 스코프)", () => {
+    expect(buildDriveQuery({ folderIds: ["F1", "F2", "F3"] })).toContain(
+      "('F1' in parents or 'F2' in parents or 'F3' in parents)",
+    );
+  });
+
+  it("folderId 와 folderIds 를 하나의 부모 절로 합치고 중복을 지운다", () => {
+    expect(
+      buildDriveQuery({ folderId: "F1", folderIds: ["F1", "F2"] }),
+    ).toContain("('F1' in parents or 'F2' in parents)");
+  });
+
+  it("folderIds 가 하나뿐이면 괄호 없이 나간다", () => {
+    expect(buildDriveQuery({ folderIds: ["ONLY"] })).toContain(
+      "'ONLY' in parents",
+    );
+    expect(buildDriveQuery({ folderIds: ["ONLY"] })).not.toContain(" or ");
+  });
+
+  it("폴더 id 도 이스케이프한다(스코프 절을 깨뜨릴 수 없다)", () => {
+    expect(buildDriveQuery({ folderIds: ["a'b", "c"] })).toContain(
+      "('a\\'b' in parents or 'c' in parents)",
+    );
+  });
+
   it("MIME 하나는 괄호 없이, 여럿은 OR 그룹으로 묶는다", () => {
     expect(buildDriveQuery({ mimeTypes: ["text/plain"] })).toContain(
       "mimeType = 'text/plain'",

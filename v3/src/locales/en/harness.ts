@@ -220,6 +220,57 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.slack.guide.step7":
     "Mention the bot in the channel and confirm the reply round-trips.",
 
+  // --- Google Drive wiki folder panel (MCTHALmNAWPpilTFwe8o) ---
+  // Two axes in one panel: the account is connected once per user, the wiki
+  // folder is chosen per project.
+  "harness.drive.title": "Google Drive wiki",
+  "harness.drive.subtitle":
+    "Connect the account once; pick a wiki folder for each project.",
+  "harness.drive.status.disconnected": "Disconnected",
+  "harness.drive.status.needsFolder": "Folder needed",
+  "harness.drive.status.bound": "Connected",
+  "harness.drive.account": "Google account",
+  "harness.drive.accountNone": "No account connected",
+  "harness.drive.connect": "Connect Google account",
+  "harness.drive.reconnect": "Reconnect",
+  "harness.drive.connecting": "Waiting for consent in your browser",
+  "harness.drive.connected": "Google Drive connected.",
+  "harness.drive.connectFailed": "Failed to connect Google Drive.",
+  "harness.drive.disconnect": "Disconnect account",
+  "harness.drive.disconnectConfirm":
+    "Disconnect Google Drive on this machine? Stored credentials are deleted and every project stops reading Drive.",
+  "harness.drive.disconnected": "Google Drive disconnected.",
+  "harness.drive.disconnectFailed": "Failed to disconnect.",
+  "harness.drive.folderSection": "This project's wiki folder",
+  "harness.drive.folderNone": "No folder selected",
+  "harness.drive.folderHint":
+    "This project's agents read only the folder you pick here, including its subfolders.",
+  "harness.drive.searchPlaceholder": "Search folders by name (empty = recent)",
+  "harness.drive.searchFolders": "Find folders",
+  "harness.drive.searching": "Searching folders",
+  "harness.drive.noFolders": "No folders matched.",
+  "harness.drive.select": "Use this folder",
+  "harness.drive.bound": "Wiki folder set.",
+  "harness.drive.bindFailed": "Failed to set the wiki folder.",
+  "harness.drive.clearFolder": "Clear folder",
+  "harness.drive.clearConfirm":
+    "Clear this project's wiki folder? Its agents will no longer be able to read Drive documents.",
+  "harness.drive.cleared": "Wiki folder cleared.",
+  "harness.drive.clearFailed": "Failed to clear the wiki folder.",
+  "harness.drive.preview": "Check scope",
+  "harness.drive.previewTitle":
+    "Query exactly what agents see and report how many documents are in scope",
+  "harness.drive.previewOk": "{count} documents are visible in this folder.",
+  "harness.drive.previewEmpty":
+    "No documents are visible in this folder (it is empty, or content sits deeper).",
+  "harness.drive.previewTruncated":
+    "Too many subfolders — only part of the tree was searched (up to {count} folders).",
+  "harness.drive.loadError": "Failed to load Drive status.",
+  "harness.drive.needProject": "Select a project first.",
+  "harness.drive.refreshTitle": "Refresh Drive status",
+  "harness.drive.appliesImmediately":
+    "Takes effect immediately, including for already-running agents.",
+
   // HarnessVersionBadge — tooltip for an agent's installed CLI version
   "harness.installedCliVersion": "Installed CLI version v{version}",
 

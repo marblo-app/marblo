@@ -986,18 +986,24 @@ contextBridge.exposeInMainWorld("electronAPI", {
     disconnect: (userId: string) =>
       ipcRenderer.invoke("github:disconnect", userId),
   },
-  // Google Drive 읽기 전용 커넥터 (티켓 zqNxS9904aeeBEug1uAD). 지식위키·비서
-  // 에픽의 선행 기반이고, 이 티켓엔 UI 가 없다 — 설정 화면은 후속 티켓이 붙인다.
+  // Google Drive 읽기 전용 커넥터 (티켓 zqNxS9904aeeBEug1uAD + MCTHALmNAWPpilTFwe8o).
   // ★connect 는 시스템 브라우저를 열어 동의를 받는다(앱 창은 navigate 안 함).
   // ★어떤 응답에도 OAuth 토큰은 실리지 않는다(status 는 이메일·스코프만).
+  //
+  // ★두 축: connect/status/disconnect 는 **유저**(구글 계정 연결), binding.* 은
+  // **프로젝트**("이 프로젝트의 위키 = 이 폴더"). 하나를 바꿔도 다른 하나는 그대로다.
   drive: {
     connect: (userId?: string) =>
       ipcRenderer.invoke("drive:connect", { userId }),
     status: (userId?: string) => ipcRenderer.invoke("drive:status", { userId }),
     disconnect: (userId?: string) =>
       ipcRenderer.invoke("drive:disconnect", { userId }),
+    // scope:"project" + projectId 를 주면 그 프로젝트의 바인딩 폴더 범위로만
+    // 검색한다(패널의 미리보기). 안 주면 폴더 피커용 전체 조회다.
     search: (input: {
       userId?: string;
+      projectId?: string;
+      scope?: "user" | "project";
       text?: string;
       nameContains?: string;
       folderId?: string;
@@ -1007,8 +1013,23 @@ contextBridge.exposeInMainWorld("electronAPI", {
       pageSize?: number;
       pageToken?: string;
     }) => ipcRenderer.invoke("drive:search", input),
-    fetch: (input: { userId?: string; fileId: string }) =>
-      ipcRenderer.invoke("drive:fetch", input),
+    fetch: (input: {
+      userId?: string;
+      projectId?: string;
+      scope?: "user" | "project";
+      fileId: string;
+    }) => ipcRenderer.invoke("drive:fetch", input),
+    binding: {
+      get: (projectId: string) =>
+        ipcRenderer.invoke("drive:binding:get", { projectId }),
+      set: (input: {
+        projectId: string;
+        folderId: string;
+        folderName?: string | null;
+      }) => ipcRenderer.invoke("drive:binding:set", input),
+      clear: (projectId: string) =>
+        ipcRenderer.invoke("drive:binding:clear", { projectId }),
+    },
   },
   // 오케스트레이터↔Telegram 채널 연결 (텔레그램 T1·보안 민감). T2 설정 UI 가
   // 소비한다. set 은 로컬 설정 경로 — 여기서만 권한 파일(access.json)이 갱신된다.

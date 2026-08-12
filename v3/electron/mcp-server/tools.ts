@@ -7361,11 +7361,15 @@ export function registerTools(server: McpServer): void {
 
   auditedTool(
     "drive_search",
-    "Search the connected Google Drive (READ-ONLY). Returns matching files as " +
-      "id / title / mimeType / modifiedTime — pass an id to drive_fetch to get the " +
-      "body text. Combine filters: `text` does a full-text search inside documents, " +
-      "`name_contains` matches filenames, `folder_id` limits to one folder's direct " +
-      "children. Requires the user to have connected Google Drive in Marblo's settings.",
+    "Search THIS PROJECT'S Google Drive wiki folder (READ-ONLY). The search is " +
+      "always scoped to the Drive folder bound to this project (and its subfolders) " +
+      "— other projects' folders and the user's unrelated personal files are never " +
+      "visible. Returns matching files as id / title / mimeType / modifiedTime — " +
+      "pass an id to drive_fetch to get the body text. Combine filters: `text` does " +
+      "a full-text search inside documents, `name_contains` matches filenames, " +
+      "`folder_id` narrows to one subfolder's direct children (it must be inside " +
+      "the project's wiki folder). Requires the user to have connected Google Drive " +
+      "AND picked this project's wiki folder in Marblo's Harness tab.",
     {
       text: z
         .string()
@@ -7378,7 +7382,10 @@ export function registerTools(server: McpServer): void {
       folder_id: z
         .string()
         .optional()
-        .describe("Limit to direct children of this Drive folder id."),
+        .describe(
+          "Limit to direct children of this Drive folder id. Must be inside " +
+            "this project's bound wiki folder — anything else is refused."
+        ),
       mime_types: z
         .array(z.string())
         .optional()
@@ -7408,6 +7415,9 @@ export function registerTools(server: McpServer): void {
       page_token,
     }) => {
       const result = await driveViaBridge("/drive-search", {
+        // ★어느 프로젝트의 위키를 읽는지. 이 값이 없으면 브리지가 조회 자체를
+        // 거절한다 — 스코프 없는 Drive 조회는 이 경로에 존재하지 않는다.
+        projectId: process.env.MARBLO_PROJECT || "",
         text: query,
         nameContains: name_contains,
         folderId: folder_id,
@@ -7434,10 +7444,33 @@ export function registerTools(server: McpServer): void {
         nextPageToken?: string;
         query?: string;
       };
+      const scope = result.scope as
+        | {
+            folderId: string;
+            folderName?: string | null;
+            folderCount?: number;
+            truncated?: boolean;
+          }
+        | undefined;
+      const scopeLabel = scope
+        ? `위키 폴더 "${scope.folderName ?? scope.folderId}"`
+        : "연결된 Drive";
+      // 하위 폴더를 다 펼치지 못했다면 그 사실을 숨기지 않는다 — "검색해서 없었다"
+      // 와 "범위 밖이라 안 봤다" 는 완전히 다른 결론이고, 후자를 전자로 읽으면
+      // 에이전트가 없는 사실을 단정한다.
+      const scopeNote =
+        scope?.truncated === true
+          ? `\n(주의: 하위 폴더가 많아 일부만 검색했습니다 — 폴더 ${
+              scope.folderCount ?? 0
+            }개까지.)`
+          : "";
+
       const files = payload?.files ?? [];
       if (files.length === 0) {
         return text(
-          `조건에 맞는 파일이 없습니다. (q: ${payload?.query ?? ""})`
+          `${scopeLabel} 안에 조건에 맞는 파일이 없습니다. (q: ${
+            payload?.query ?? ""
+          })${scopeNote}`
         );
       }
       const lines = files.map(
@@ -7454,7 +7487,11 @@ export function registerTools(server: McpServer): void {
           `\n(더 있음 — page_token="${payload.nextPageToken}" 으로 이어서 조회하세요.)`
         );
       }
-      return text(`${files.length}개 파일:\n${lines.join("\n")}`);
+      return text(
+        `${scopeLabel} 에서 ${files.length}개 파일:\n${lines.join(
+          "\n"
+        )}${scopeNote}`
+      );
     },
     { userFacing: false }
   );
@@ -7464,12 +7501,17 @@ export function registerTools(server: McpServer): void {
     "Fetch one Google Drive file's body as text (READ-ONLY). Google Docs/Slides " +
       "are exported as plain text, Sheets as CSV, plain-text files are downloaded " +
       "as-is, and PDFs have their text layer extracted (scanned PDFs have none — " +
-      "the tool says so instead of returning silence). Get file ids from drive_search.",
+      "the tool says so instead of returning silence). Get file ids from drive_search. " +
+      "The file must live inside this project's bound Drive wiki folder; ids from " +
+      "outside it are refused even if the user's account can read them.",
     {
       file_id: z.string().describe("Drive file id (from drive_search)."),
     },
     async ({ file_id }) => {
-      const result = await driveViaBridge("/drive-fetch", { fileId: file_id });
+      const result = await driveViaBridge("/drive-fetch", {
+        projectId: process.env.MARBLO_PROJECT || "",
+        fileId: file_id,
+      });
       if (result.ok !== true) {
         return text(
           `Drive 본문 취득 실패: ${

@@ -254,6 +254,22 @@ import type {
   DriveListParams,
   DriveSearchResult,
 } from "./google-drive-connector";
+import {
+  clearDriveProjectBinding,
+  getDriveProjectBinding,
+  isValidDriveFolderId,
+  setDriveProjectBinding,
+  type DriveProjectBinding,
+} from "./drive-project-binding";
+import {
+  authorizeScopedFetch,
+  createDriveScopeResolver,
+  driveAccessFromInput,
+  planScopedSearch,
+  type DriveAccess,
+  type DriveScopeInfo,
+  type DriveScopeResolver,
+} from "./drive-scope";
 
 type ConnectionCheckStatus = "pass" | "warn" | "fail";
 
@@ -2926,10 +2942,14 @@ function logSlackRouteHealth(projectId: string, reason: string): void {
       health.connected ? "connected" : "disconnected"
     } ` +
       `lastChannelKnown=${health.lastChannelKnown} pendingReply=${health.pendingReply} ` +
-      `pendingInbound=${health.pendingInbound} lastDelivered=${health.lastDeliveredKey ?? "none"} ` +
+      `pendingInbound=${health.pendingInbound} lastDelivered=${
+        health.lastDeliveredKey ?? "none"
+      } ` +
       `lastTarget=${
         target
-          ? `${target.kind}:${target.ptySessionId ?? "unknown"}:${target.status}`
+          ? `${target.kind}:${target.ptySessionId ?? "unknown"}:${
+              target.status
+            }`
           : "none"
       } ` +
       `unanswered=${health.reliability.unanswered} sendFailures=${health.reliability.sendFailures} ` +
@@ -5021,6 +5041,19 @@ ipcMain.handle("github:disconnect", (_event, userId: unknown) => {
 // 익명 세션에서는 null 이 나오고, 그때는 "연결되지 않음" 으로 정직하게 답한다.
 //
 // ★토큰은 이 IPC 응답 어디에도 실리지 않는다 — status 는 이메일·스코프·연결시각만.
+//
+// ── ★두 개의 축, 두 개의 호출 경로 (티켓 MCTHALmNAWPpilTFwe8o) ──────────────
+//
+// 인증은 유저 단위(위 uid 규율)지만 **지식은 프로젝트 단위**다. 그래서 같은
+// 커넥터를 두 가지 접근 모드로 나눠 쓴다.
+//
+//   · `mode: "user"` — 렌더러의 **폴더 피커**. 사람이 자기 드라이브를 보며 "이
+//     프로젝트의 위키는 이 폴더" 를 고르는 화면이라, 스코프를 걸면 아무것도 고를
+//     수 없다. 사람이 자기 눈으로 자기 드라이브를 보는 것이므로 경계가 필요 없다.
+//   · `mode: "project"` — 브리지→MCP(drive_search/drive_fetch), 즉 **에이전트**.
+//     여기서는 프로젝트의 바인딩 폴더 밖을 절대 보지 못한다. 바인딩이 없으면
+//     "폴더를 먼저 고르라" 고 답하고 조회 자체를 하지 않는다 — 미바인딩을 조용히
+//     "드라이브 전체" 로 해석하면 프로젝트 A 의 에이전트가 B 의 문서를 읽는다.
 
 function validDriveUserId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9:_-]{1,128}$/.test(value);
@@ -5049,16 +5082,55 @@ const DRIVE_NOT_CONNECTED = {
     "Google Drive 가 연결되어 있지 않습니다. 설정에서 Drive 를 연결해 주세요.",
 };
 
+/**
+ * 유저별 스코프 해석기 캐시. 커넥터는 매 호출 토큰을 새로 얻으므로 상태가 없고,
+ * 해석기가 들고 있는 것은 폴더트리 캐시(TTL)뿐이라 재사용이 안전하다.
+ */
+const driveScopeResolvers = new Map<string, DriveScopeResolver>();
+
+function driveScopeResolverFor(userId: string): DriveScopeResolver {
+  const cached = driveScopeResolvers.get(userId);
+  if (cached) return cached;
+  const resolver = createDriveScopeResolver(
+    createUserDriveConnector(safeStorage, userId),
+  );
+  driveScopeResolvers.set(userId, resolver);
+  return resolver;
+}
+
+/** 바인딩 변경·연결 해제 후 낡은 폴더트리 캐시를 버린다. */
+function invalidateDriveScopeCaches(): void {
+  for (const resolver of driveScopeResolvers.values()) resolver.invalidate();
+}
+
 async function driveSearchFor(
   userId: string | null,
   params: DriveListParams,
+  access: DriveAccess = { mode: "user" },
 ): Promise<
-  { ok: true; result: DriveSearchResult } | { ok: false; error: string }
+  | { ok: true; result: DriveSearchResult; scope?: DriveScopeInfo }
+  | { ok: false; error: string }
 > {
   if (!userId) return DRIVE_NOT_CONNECTED;
   try {
     const connector = createUserDriveConnector(safeStorage, userId);
-    return { ok: true, result: await connector.search(params) };
+    if (access.mode === "user") {
+      return { ok: true, result: await connector.search(params) };
+    }
+
+    const planned = await planScopedSearch(
+      driveScopeResolverFor(userId),
+      access.projectId,
+      access.projectId ? getDriveProjectBinding(access.projectId) : null,
+      params,
+    );
+    if (!planned.ok) return planned;
+
+    return {
+      ok: true,
+      result: await connector.search(planned.params),
+      scope: planned.scope,
+    };
   } catch (e) {
     return driveFailure(e);
   }
@@ -5067,6 +5139,7 @@ async function driveSearchFor(
 async function driveFetchFor(
   userId: string | null,
   fileId: string,
+  access: DriveAccess = { mode: "user" },
 ): Promise<
   { ok: true; document: DriveDocument } | { ok: false; error: string }
 > {
@@ -5074,9 +5147,19 @@ async function driveFetchFor(
   if (typeof fileId !== "string" || !fileId.trim()) {
     return { ok: false, error: "파일 id 가 필요합니다." };
   }
+  const trimmed = fileId.trim();
   try {
+    if (access.mode === "project") {
+      const allowed = await authorizeScopedFetch(
+        driveScopeResolverFor(userId),
+        access.projectId,
+        access.projectId ? getDriveProjectBinding(access.projectId) : null,
+        trimmed,
+      );
+      if (!allowed.ok) return allowed;
+    }
     const connector = createUserDriveConnector(safeStorage, userId);
-    return { ok: true, document: await connector.fetchDocument(fileId.trim()) };
+    return { ok: true, document: await connector.fetchDocument(trimmed) };
   } catch (e) {
     return driveFailure(e);
   }
@@ -5120,7 +5203,11 @@ ipcMain.handle("drive:connect", async (_event, input: unknown) => {
       error: "먼저 Marblo 에 로그인한 뒤 Google Drive 를 연결해 주세요.",
     };
   }
-  return connectGoogleDrive(safeStorage, userId);
+  const result = await connectGoogleDrive(safeStorage, userId);
+  // 다른 구글 계정으로 다시 연결했을 수 있다 — 이전 계정의 폴더트리 캐시를
+  // 들고 있으면 남의 드라이브 구조로 스코프를 잡는다.
+  if (result.ok) invalidateDriveScopeCaches();
+  return result;
 });
 
 ipcMain.handle("drive:status", (_event, input: unknown) => {
@@ -5140,6 +5227,8 @@ ipcMain.handle("drive:disconnect", (_event, input: unknown) => {
       : input,
   );
   if (!userId) return { ok: false, error: "로그인 정보가 없습니다." };
+  // 계정이 바뀌면 폴더트리 캐시는 남의 드라이브 구조다 — 즉시 버린다.
+  invalidateDriveScopeCaches();
   return disconnectGoogleDrive(safeStorage, userId);
 });
 
@@ -5151,6 +5240,7 @@ ipcMain.handle("drive:search", async (_event, input: unknown) => {
   return driveSearchFor(
     resolveDriveUserId(raw.userId),
     sanitizeDriveListParams(raw),
+    driveAccessFromInput(raw),
   );
 });
 
@@ -5162,15 +5252,87 @@ ipcMain.handle("drive:fetch", async (_event, input: unknown) => {
   return driveFetchFor(
     resolveDriveUserId(raw.userId),
     typeof raw.fileId === "string" ? raw.fileId : "",
+    driveAccessFromInput(raw),
   );
+});
+
+// ── ★프로젝트 위키 폴더 바인딩 (티켓 MCTHALmNAWPpilTFwe8o) ──────────────────
+//
+// 인증(유저)과 다른 축이다. 저장소는 drive-project-binding.ts(로컬 JSON, 0600) —
+// slack/telegram 채널 설정과 같은 자리·같은 패턴이다. 시크릿이 없으므로 응답을
+// 그대로 렌더러에 준다(folderId·폴더명·갱신시각뿐).
+
+function driveProjectIdFrom(raw: Record<string, unknown>): string | null {
+  const value = raw.projectId;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+ipcMain.handle("drive:binding:get", (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : { projectId: input };
+  const projectId = driveProjectIdFrom(raw);
+  if (!projectId) return null;
+  return getDriveProjectBinding(projectId);
+});
+
+ipcMain.handle("drive:binding:set", (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  const projectId = driveProjectIdFrom(raw);
+  if (!projectId) return { ok: false, error: "프로젝트를 선택해 주세요." };
+  if (!isValidDriveFolderId(raw.folderId)) {
+    return { ok: false, error: "Drive 폴더 id 형식이 올바르지 않습니다." };
+  }
+  try {
+    const binding = setDriveProjectBinding({
+      projectId,
+      folderId: raw.folderId,
+      folderName:
+        typeof raw.folderName === "string" ? raw.folderName : undefined,
+    });
+    // 폴더가 바뀌었으면 이전 폴더의 하위트리 캐시는 무의미하다.
+    invalidateDriveScopeCaches();
+    return { ok: true, binding };
+  } catch (e) {
+    return {
+      ok: false,
+      error:
+        e instanceof Error ? e.message : "폴더 바인딩 저장에 실패했습니다.",
+    };
+  }
+});
+
+ipcMain.handle("drive:binding:clear", (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : { projectId: input };
+  const projectId = driveProjectIdFrom(raw);
+  if (!projectId) return { ok: false, error: "프로젝트를 선택해 주세요." };
+  const removed = clearDriveProjectBinding(projectId);
+  invalidateDriveScopeCaches();
+  return { ok: true, removed };
 });
 
 // 브리지(→ drive_search / drive_fetch MCP 도구)가 쓰는 게이트웨이. 창이 없는
 // 호출이라 uid 는 매번 "지금 로그인된 실사용자" 로 해석한다 — 로그아웃 상태에선
 // null 이 되어 도구가 "연결 안 됨" 으로 정직하게 답한다.
+//
+// ★이 경로는 **항상 프로젝트 모드**다. MCP 프로세스가 넘긴 projectId
+// (MARBLO_PROJECT)의 바인딩 폴더 하위만 보이고, 바인딩이 없으면 아무것도 안
+// 보인다 — 에이전트에게 "드라이브 전체" 는 어떤 경우에도 열리지 않는다.
 bridgeServer.setDriveGateway({
-  search: (params) => driveSearchFor(currentRealUserUid(), params),
-  fetch: (fileId) => driveFetchFor(currentRealUserUid(), fileId),
+  search: (projectId, params) =>
+    driveSearchFor(currentRealUserUid(), params, {
+      mode: "project",
+      projectId,
+    }),
+  fetch: (projectId, fileId) =>
+    driveFetchFor(currentRealUserUid(), fileId, { mode: "project", projectId }),
 });
 
 ipcMain.handle(

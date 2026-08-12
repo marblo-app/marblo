@@ -131,27 +131,116 @@ Drive 자격증명은 **Marblo 사용자 uid 별로** 저장된다(한 머신을
 쓰지 않는다** — 익명 uid 로 저장소를 찾으면 매번 다른 칸을 보게 되고, 그건
 "연결이 안 된다" 는 유령 버그로 나타난다.
 
+## 7.5 ★두 개의 축 — 인증(유저) vs 지식 바인딩(프로젝트)
+
+_티켓 MCTHALmNAWPpilTFwe8o 에서 추가._
+
+Drive 연결에는 수명도 주인도 다른 **두 축**이 있고, 이 둘을 섞으면 위키가
+성립하지 않는다.
+
+| 축 | 단위 | 저장소 | 바꾸면 영향 |
+| --- | --- | --- | --- |
+| 인증(OAuth 토큰) | **유저** | `google-drive-token-store.ts` (safeStorage 암호화) | 모든 프로젝트 |
+| 지식 바인딩(위키 폴더) | **프로젝트** | `drive-project-binding.ts` (로컬 JSON, 0600) | 그 프로젝트만 |
+
+한 레코드에 섞었다면 프로젝트를 늘릴 때마다 재동의가 필요하거나, 반대로 모든
+프로젝트가 같은 폴더를 보게 된다. 그래서 저장소부터 갈라 놓았다.
+
+### 두 개의 호출 경로
+
+```
+렌더러 IPC (drive:search, scope 미지정)  → 스코프 없음  ← 사람이 폴더를 고르는 화면
+브리지 → MCP (drive_search/drive_fetch) → 항상 프로젝트 스코프 ← 에이전트
+```
+
+- **폴더 피커는 스코프가 없다.** 아직 바인딩이 없는 상태에서 자기 드라이브를
+  훑어 위키 폴더를 골라야 하므로, 여기에 스코프를 걸면 아무것도 고를 수 없다.
+  사람이 자기 눈으로 자기 드라이브를 보는 것이라 경계가 필요 없다.
+- **에이전트 경로는 항상 스코프가 있다.** `DriveGateway.search/fetch` 의 첫
+  인자가 `projectId` 인 것은 의도적이다 — 선택 인자로 두면 빼먹은 호출이 조용히
+  "드라이브 전체" 가 된다. 바인딩이 없으면 조회 자체를 거절하고 "폴더를 먼저
+  고르라" 고 답한다. ★미바인딩을 "전체 허용" 으로 해석하지 않는다.
+  (이는 #938 MVP 대비 **의도된 동작 변경**이다: 그때는 에이전트가 드라이브
+  전체를 봤다.)
+
+### 경계 집행 (`drive-scope.ts`)
+
+- `drive_search`: `in parents` 는 직계 자식만 매칭하므로, 바인딩 폴더의 하위
+  폴더를 BFS 로 펼쳐(폴더 50개·깊이 10 상한 — 상한은 취향이 아니라 GET 쿼리스트링
+  길이 산수다) 부모 OR 절로 넘긴다. 상한/권한
+  때문에 다 펼치지 못하면 `truncated` 로 드러내고 도구가 그 사실을 문장으로
+  말한다 — "검색해서 없었다" 와 "범위 밖이라 안 봤다" 는 다른 결론이다.
+- 호출자가 `folder_id` 를 지정하면 **그 폴더가 바인딩 폴더 하위인지 검증**한다.
+  없으면 스코프 우회 통로가 된다.
+- `drive_fetch`: id 만으로는 소속을 알 수 없으므로 `parents` 를 타고 올라가
+  바인딩 폴더를 만나는지 확인한다(조상 못 읽음 = 통과 안 됨, fail-closed).
+- 폴더트리·조상 판정은 TTL 5분 캐시. 바인딩 변경·연결/해제 시 즉시 버린다.
+
+### 경계의 한계 — projectId 는 자기신고다
+
+브리지의 `projectId` 는 MCP 프로세스가 요청 본문에 실어 보내는 값이고, 브리지
+베어러 토큰은 **세션 단위로 모든 에이전트가 공유**한다(`MARBLO_BRIDGE_TOKEN`).
+따라서 셸을 쓸 수 있는 에이전트는 원리상 `curl` 로 다른 projectId 를 주장할 수
+있다. 이는 이 커넥터만의 문제가 아니라 **모든 프로젝트 스코프 브리지 라우트가
+공유하는 신뢰 모델**이라 여기서 새로 생긴 취약점은 아니지만, 위 "교차 오염 없음"
+은 *정상 경로의 에이전트*에 대한 보장이지 악의적 에이전트에 대한 격리가 아니라는
+점을 분명히 해 둔다. 진짜 격리는 브리지 토큰을 에이전트/프로젝트 단위로 쪼개는
+별도 작업이며, 그때 이 라우트도 자동으로 이득을 본다.
+
+### 연결 UI
+
+`Harness 탭 → 연동 섹션 → Google Drive 위키`(`DriveConnectionPanel.tsx`,
+Slack/Telegram 패널과 같은 자리·같은 형태). 위 절반이 유저 축(계정 연결·해제),
+아래 절반이 프로젝트 축(위키 폴더 검색·지정·해제 + "범위 확인" 미리보기).
+렌더러로 내려가는 값에 **토큰은 없다** — 연결 여부·이메일·스코프 이름뿐이다.
+
 ## 8. 이 티켓에 없는 것 (후속 에픽)
 
 - 지식 인덱스 저장소 (임베딩·청킹·증분 동기화)
-- 위키 UI, Drive 연결 설정 화면 (지금은 IPC/preload 만 있고 버튼이 없다)
+- 위키 브라우저 UI (연결·폴더 지정 화면은 MCTHALmNAWPpilTFwe8o 에서 붙었다)
 - 헤르메스형 비서 에이전트
 - 변경 감지(`changes.list` + `startPageToken`) 기반 증분 재인덱싱
 - Sheets 다중 시트, DOCX/PPTX 등 오피스 포맷, OCR
 
-## 9. 수동 검증 절차 (UI 가 붙기 전)
+## 9. 수동 검증 절차
 
-설정 화면이 후속 티켓이라, 지금은 앱 DevTools 콘솔에서 직접 부른다.
+**UI 경로 (권장).** Harness 탭 → 연동 섹션 → "Google Drive 위키":
+
+1. **Google 계정 연결** — 시스템 브라우저가 열리고 동의 후 계정 이메일이 뜬다.
+2. **폴더 찾기 → 이 폴더로 지정** — 이 프로젝트의 위키 폴더가 저장된다.
+3. **범위 확인** — 에이전트가 보는 것과 같은 경로(`scope:"project"`)로 조회해
+   그 폴더 범위의 문서 수를 보여준다.
+4. 프로젝트를 바꾸면 위 절반(계정)은 그대로고 아래 절반(폴더)만 비어 있어야
+   한다 — 그게 축이 분리돼 있다는 증거다.
+
+**콘솔 경로 (진단용).**
 
 ```js
 // 1) 동의 — 시스템 브라우저가 열린다
 await window.electronAPI.drive.connect();
 // 2) 상태 — 토큰은 안 나오고 이메일·스코프만 나온다
 await window.electronAPI.drive.status();
-// 3) 목록/검색
+// 3) 폴더 피커 조회(스코프 없음 — 사람이 고르는 경로)
 await window.electronAPI.drive.search({ pageSize: 10 });
-// 4) 본문 (id 는 3번 결과에서)
-await window.electronAPI.drive.fetch({ fileId: "<id>" });
+// 4) 이 프로젝트의 위키 폴더 지정 / 확인
+await window.electronAPI.drive.binding.set({
+  projectId: "<projectId>",
+  folderId: "<folderId>",
+  folderName: "팀 위키",
+});
+await window.electronAPI.drive.binding.get("<projectId>");
+// 5) 에이전트와 같은 경로 — 바인딩 폴더 범위로만 나온다
+await window.electronAPI.drive.search({
+  scope: "project",
+  projectId: "<projectId>",
+  pageSize: 10,
+});
+// 6) 본문 (id 는 5번 결과에서). 범위 밖 id 는 거절된다.
+await window.electronAPI.drive.fetch({
+  scope: "project",
+  projectId: "<projectId>",
+  fileId: "<id>",
+});
 ```
 
 사전 조건: GCP 콘솔에서 해당 프로젝트의 **Google Drive API 활성화**. 안 켜져

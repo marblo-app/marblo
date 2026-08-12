@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
 import { TelegramChannelPanel } from "./TelegramChannelPanel";
 import { SlackChannelPanel } from "./SlackChannelPanel";
+import { DriveConnectionPanel } from "./DriveConnectionPanel";
 import { EnvSwapVendorSection } from "./EnvSwapVendorSection";
 import { useTranslation, t as translate } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
@@ -290,6 +291,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
           <ConnectionStatusPanel />
           <TelegramChannelPanel />
           <SlackChannelPanel />
+          <DriveConnectionPanel />
 
           {/* env-swap 벤더 — 설치형 카탈로그에 없는 "키만 얹는" 벤더들.
               카탈로그보다 위에 두는 이유: 이 탭에서 안 보인다는 것이 문제였다. */}

@@ -1264,6 +1264,13 @@ interface DriveDocument {
 interface DriveSearchInput {
   /** 기본값은 로그인된 사용자. 멀티계정 화면에서만 명시한다. */
   userId?: string;
+  /**
+   * "project" 면 projectId 의 바인딩 폴더 범위로만 검색한다(패널 미리보기).
+   * 생략하면 폴더 피커용 전체 조회 — 사람이 자기 드라이브에서 폴더를 고르는
+   * 화면이라 스코프가 없어야 한다.
+   */
+  scope?: "user" | "project";
+  projectId?: string;
   /** 전문 검색(fullText contains). */
   text?: string;
   nameContains?: string;
@@ -1273,6 +1280,40 @@ interface DriveSearchInput {
   includeTrashed?: boolean;
   pageSize?: number;
   pageToken?: string;
+}
+
+/** 검색이 실제로 뒤진 범위(프로젝트 모드에서만 실린다). */
+interface DriveScopeInfo {
+  folderId: string;
+  folderName: string | null;
+  folderCount: number;
+  /** 하위 폴더를 다 펼치지 못했는가(조용한 절단 금지). */
+  truncated: boolean;
+}
+
+/**
+ * ★"이 프로젝트의 위키 = 이 Drive 폴더" 바인딩. 인증(유저 단위)과 **다른 축**인
+ * 프로젝트 단위 설정이다. 시크릿이 없다(폴더 id·이름뿐).
+ */
+interface DriveProjectBinding {
+  projectId: string;
+  folderId: string;
+  folderName: string | null;
+  updatedAt: number;
+}
+
+interface DriveBindingAPI {
+  get: (projectId: string) => Promise<DriveProjectBinding | null>;
+  set: (input: {
+    projectId: string;
+    folderId: string;
+    folderName?: string | null;
+  }) => Promise<
+    { ok: true; binding: DriveProjectBinding } | { ok: false; error: string }
+  >;
+  clear: (
+    projectId: string,
+  ) => Promise<{ ok: true; removed: boolean } | { ok: false; error: string }>;
 }
 
 interface DriveAPI {
@@ -1292,15 +1333,20 @@ interface DriveAPI {
           nextPageToken?: string;
           query: string;
         };
+        scope?: DriveScopeInfo;
       }
     | { ok: false; error: string }
   >;
   fetch: (input: {
     userId?: string;
+    projectId?: string;
+    scope?: "user" | "project";
     fileId: string;
   }) => Promise<
     { ok: true; document: DriveDocument } | { ok: false; error: string }
   >;
+  /** 프로젝트 단위 위키 폴더 바인딩(인증과 분리된 축). */
+  binding: DriveBindingAPI;
 }
 
 interface UpdaterStatus {

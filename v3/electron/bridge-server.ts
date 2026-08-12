@@ -217,14 +217,32 @@ export function buildResolverPrompt(req: {
  * 감싸므로, 후속 위키/비서 에픽이 브리지 경계를 넘어와도 계약이 하나다.
  * 미연결·권한오류는 예외가 아니라 `{ ok: false, error }` 로 돌아온다 —
  * MCP 도구가 그 문장을 그대로 에이전트에게 보여줄 수 있어야 하기 때문이다.
+ *
+ * ★projectId 가 첫 인자인 이유(티켓 MCTHALmNAWPpilTFwe8o): Drive **인증**은
+ * 유저 단위지만 **지식 바인딩은 프로젝트 단위**다. 이 게이트웨이를 쓰는 쪽은
+ * 언제나 에이전트(MCP)이고, 에이전트는 자기 프로젝트의 위키 폴더 밖을 보면
+ * 안 된다. projectId 를 선택 인자로 두면 빼먹은 호출이 조용히 "드라이브 전체"
+ * 가 되므로, **필수 인자**로 만들어 컴파일 시점에 강제한다.
  */
 export interface DriveGateway {
   search(
+    projectId: string | null,
     params: DriveListParams,
   ): Promise<
-    { ok: true; result: DriveSearchResult } | { ok: false; error: string }
+    | {
+        ok: true;
+        result: DriveSearchResult;
+        scope?: {
+          folderId: string;
+          folderName: string | null;
+          folderCount: number;
+          truncated: boolean;
+        };
+      }
+    | { ok: false; error: string }
   >;
   fetch(
+    projectId: string | null,
     fileId: string,
   ): Promise<
     { ok: true; document: DriveDocument } | { ok: false; error: string }
@@ -4415,18 +4433,25 @@ export class BridgeServer {
       const str = (v: unknown): string | undefined =>
         typeof v === "string" && v.trim() ? v.trim() : undefined;
       try {
-        const result = await this.driveGateway.search({
-          text: str(params.text),
-          nameContains: str(params.nameContains),
-          folderId: str(params.folderId),
-          mimeTypes: Array.isArray(params.mimeTypes)
-            ? params.mimeTypes.filter((m): m is string => typeof m === "string")
-            : undefined,
-          includeFolders: params.includeFolders === true,
-          pageSize:
-            typeof params.pageSize === "number" ? params.pageSize : undefined,
-          pageToken: str(params.pageToken),
-        });
+        // projectId 는 MCP 프로세스의 MARBLO_PROJECT 에서 온다. 없으면 main 이
+        // "어느 프로젝트인지 모른다" 로 거절한다(전체 드라이브로 넓히지 않는다).
+        const result = await this.driveGateway.search(
+          str(params.projectId) ?? null,
+          {
+            text: str(params.text),
+            nameContains: str(params.nameContains),
+            folderId: str(params.folderId),
+            mimeTypes: Array.isArray(params.mimeTypes)
+              ? params.mimeTypes.filter(
+                  (m): m is string => typeof m === "string",
+                )
+              : undefined,
+            includeFolders: params.includeFolders === true,
+            pageSize:
+              typeof params.pageSize === "number" ? params.pageSize : undefined,
+            pageToken: str(params.pageToken),
+          },
+        );
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(result));
       } catch (err) {
@@ -4463,8 +4488,12 @@ export class BridgeServer {
         );
         return;
       }
+      const projectId =
+        typeof params.projectId === "string" && params.projectId.trim()
+          ? params.projectId.trim()
+          : null;
       try {
-        const result = await this.driveGateway.fetch(fileId);
+        const result = await this.driveGateway.fetch(projectId, fileId);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(result));
       } catch (err) {

@@ -217,6 +217,58 @@ export const harness = {
   "harness.slack.guide.step7":
     "채널에서 봇을 멘션해 응답이 왕복하는지 확인합니다.",
 
+  // --- Google Drive 위키 폴더 패널 (MCTHALmNAWPpilTFwe8o) ---
+  // ★두 축이 한 패널에 있다: 계정 연결은 유저 단위(1회), 위키 폴더는 프로젝트 단위.
+  "harness.drive.title": "Google Drive 위키",
+  "harness.drive.subtitle":
+    "계정 연결은 1회(내 계정), 위키 폴더는 프로젝트마다 따로 지정합니다.",
+  "harness.drive.status.disconnected": "미연결",
+  "harness.drive.status.needsFolder": "폴더 필요",
+  "harness.drive.status.bound": "연결",
+  "harness.drive.account": "Google 계정",
+  "harness.drive.accountNone": "연결된 계정 없음",
+  "harness.drive.connect": "Google 계정 연결",
+  "harness.drive.reconnect": "다시 연결",
+  "harness.drive.connecting": "브라우저에서 동의 진행 중",
+  "harness.drive.connected": "Google Drive 를 연결했습니다.",
+  "harness.drive.connectFailed": "Google Drive 연결에 실패했습니다.",
+  "harness.drive.disconnect": "계정 연결 해제",
+  "harness.drive.disconnectConfirm":
+    "이 기기에서 Google Drive 연결을 해제하시겠습니까? 저장된 인증 정보가 삭제되고 모든 프로젝트의 Drive 조회가 멈춥니다.",
+  "harness.drive.disconnected": "Google Drive 연결을 해제했습니다.",
+  "harness.drive.disconnectFailed": "연결 해제에 실패했습니다.",
+  "harness.drive.folderSection": "이 프로젝트의 위키 폴더",
+  "harness.drive.folderNone": "폴더가 지정되지 않았습니다",
+  "harness.drive.folderHint":
+    "이 프로젝트의 에이전트는 여기서 고른 폴더(하위 폴더 포함)만 읽습니다.",
+  "harness.drive.searchPlaceholder": "폴더 이름으로 검색 (비우면 최근 폴더)",
+  "harness.drive.searchFolders": "폴더 찾기",
+  "harness.drive.searching": "폴더 검색 중",
+  "harness.drive.noFolders": "조건에 맞는 폴더가 없습니다.",
+  "harness.drive.select": "이 폴더로 지정",
+  "harness.drive.bound": "위키 폴더를 지정했습니다.",
+  "harness.drive.bindFailed": "위키 폴더 지정에 실패했습니다.",
+  "harness.drive.clearFolder": "폴더 지정 해제",
+  "harness.drive.clearConfirm":
+    "이 프로젝트의 위키 폴더 지정을 해제하시겠습니까? 해제하면 이 프로젝트의 에이전트는 Drive 문서를 읽지 못합니다.",
+  "harness.drive.cleared": "위키 폴더 지정을 해제했습니다.",
+  "harness.drive.clearFailed": "폴더 지정 해제에 실패했습니다.",
+  "harness.drive.preview": "범위 확인",
+  "harness.drive.previewTitle":
+    "에이전트가 보는 범위 그대로 조회해 결과 수를 확인합니다",
+  "harness.drive.previewOk": "이 폴더 범위에서 문서 {count}개가 조회됩니다.",
+  "harness.drive.previewEmpty":
+    "이 폴더 범위에 조회되는 문서가 없습니다(폴더가 비었거나 하위에만 있습니다).",
+  "harness.drive.previewTruncated":
+    "하위 폴더가 많아 일부만 검색했습니다(폴더 {count}개까지).",
+  "harness.drive.loadError": "Drive 상태를 불러오지 못했습니다.",
+  "harness.drive.needProject": "프로젝트를 먼저 선택해 주세요.",
+  "harness.drive.refreshTitle": "Drive 상태 새로고침",
+  // 바인딩은 매 요청 디스크에서 읽고 폴더트리 캐시는 저장 즉시 버리므로,
+  // 이미 떠 있는 에이전트도 재시작 없이 새 폴더를 본다.
+  "harness.drive.appliesImmediately":
+    "실행 중인 에이전트에도 즉시 적용됩니다.",
+
   // HarnessVersionBadge — tooltip for an agent's installed CLI version
   "harness.installedCliVersion": "설치된 CLI 버전 v{version}",
 

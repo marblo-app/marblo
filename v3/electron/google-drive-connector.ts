@@ -105,6 +105,16 @@ export interface DriveSearchQuery {
   nameContains?: string;
   /** 이 폴더의 직계 자식만. */
   folderId?: string;
+  /**
+   * 이 폴더들 **중 하나**의 직계 자식만(OR). `folderId` 와 함께 주면 둘 다 합쳐
+   * 하나의 OR 절이 된다.
+   *
+   * 왜 필요한가: Drive 의 `in parents` 는 **직계 자식만** 매칭한다. "이 폴더
+   * 하위 전체" 를 검색하려면 하위 폴더 id 들을 미리 펼쳐 OR 로 넘기는 수밖에
+   * 없다(drive-scope.ts 가 그 펼치기를 한다). 프로젝트 위키 폴더 스코프가
+   * 하위 폴더까지 닿아야 실제로 쓸모가 있어서 이 필드를 뒀다.
+   */
+  folderIds?: string[];
   /** 이 MIME 들 중 하나(OR). */
   mimeTypes?: string[];
   /** 폴더를 결과에 포함할지. 기본 false(문서만 보고 싶은 게 보통이다). */
@@ -138,8 +148,22 @@ export function buildDriveQuery(query: DriveSearchQuery): string {
   const name = query.nameContains?.trim();
   if (name) clauses.push(`name contains '${escapeDriveQueryValue(name)}'`);
 
-  const folderId = query.folderId?.trim();
-  if (folderId) clauses.push(`'${escapeDriveQueryValue(folderId)}' in parents`);
+  // folderId(단수) + folderIds(복수)를 하나의 부모 절로 합친다. 중복은 제거하고
+  // 입력 순서를 보존한다 — 쿼리 문자열이 결정적이어야 테스트·로그가 읽힌다.
+  const parentIds: string[] = [];
+  for (const candidate of [query.folderId, ...(query.folderIds ?? [])]) {
+    const trimmed = candidate?.trim();
+    if (trimmed && !parentIds.includes(trimmed)) parentIds.push(trimmed);
+  }
+  if (parentIds.length === 1) {
+    clauses.push(`'${escapeDriveQueryValue(parentIds[0])}' in parents`);
+  } else if (parentIds.length > 1) {
+    clauses.push(
+      `(${parentIds
+        .map((id) => `'${escapeDriveQueryValue(id)}' in parents`)
+        .join(" or ")})`,
+    );
+  }
 
   const mimeTypes = (query.mimeTypes ?? [])
     .map((m) => m.trim())
@@ -475,7 +499,9 @@ export function createDriveConnector(
         }
         const search = new URLSearchParams({ mimeType: exportMime });
         const { bytes, truncated: bytesTruncated } = await getBytes(
-          `${DRIVE_FILES_ENDPOINT}/${encodeURIComponent(fileId)}/export?${search}`,
+          `${DRIVE_FILES_ENDPOINT}/${encodeURIComponent(
+            fileId,
+          )}/export?${search}`,
         );
         const limited = truncateText(bytes.toString("utf8"), maxTextChars);
         return {
