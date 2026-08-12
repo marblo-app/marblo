@@ -1986,6 +1986,12 @@ const agentWatchdog = new AgentWatchdog(
       return {
         status: a.status,
         lastPtyActivityMs: a.lastPtyActivity,
+        // W7: the classified clocks. lastWorkOutput ignores the idle prompt's
+        // own repaint (which otherwise made a stalled agent look eternally
+        // alive), and promptIdleSince is the positive "parked at the input
+        // prompt" observation — see agent-status-reconcile.classifyPtyFrame.
+        lastWorkOutputMs: a.lastWorkOutput,
+        promptIdleSinceMs: a.promptIdleSince,
         currentTaskId: a.currentTaskId,
       };
     },

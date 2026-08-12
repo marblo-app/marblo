@@ -17,6 +17,9 @@ import {
   shouldPromoteOnPtyOutput,
   shouldDemoteCompletedTurn,
   shouldDemoteAbandonedTurn,
+  classifyPtyFrame,
+  applyPtyFrame,
+  resetPromptIdleOnTurnStart,
 } from "./agent-status-reconcile";
 import {
   createLoginScreenBackstop,
@@ -271,6 +274,28 @@ export interface AgentInstance {
    * (ABANDONED_TURN_MS) and the reaper's post-completion grace window, never a
    * routine working→idle demotion. */
   lastPtyActivity: number;
+  /**
+   * epoch-ms of the last PTY frame that counted as **work** — every frame
+   * except the ones positively identified as the harness's idle input prompt
+   * (or as contentless cursor repaint). See agent-status-reconcile.ts
+   * classifyPtyFrame.
+   *
+   * Why it exists separately from `lastPtyActivity`: a CLI parked at its prompt
+   * repaints forever, so raw PTY bytes report a stopped agent as alive. The
+   * watchdog reads THIS clock instead, which stops advancing the moment the
+   * agent falls back to its prompt — without ever treating mere silence (a
+   * reasoning agent) as death.
+   */
+  lastWorkOutput: number;
+  /**
+   * epoch-ms since which every classified PTY frame has been an idle-prompt
+   * repaint, or null when the agent is not provably parked. This is the
+   * POSITIVE proof of "stopped" the watchdog acts on; a silent (reasoning)
+   * agent emits no frames at all and so can never reach this state.
+   *
+   * Cleared by any busy/work frame and by every turn start (noteTurnStart).
+   */
+  promptIdleSince: number | null;
   /**
    * ★무산출 판정용 누적 출력량(#890 F-7 · 감사 G11).
    *
@@ -1243,6 +1268,8 @@ export class AgentManager {
       heartbeatTimer: null,
       onPtyReady: params.onPtyReady,
       lastPtyActivity: Date.now(),
+      lastWorkOutput: Date.now(),
+      promptIdleSince: null,
       outputChars: 0,
       turnCompletedAt: null,
       terminalSince: null,
@@ -1283,6 +1310,24 @@ export class AgentManager {
       // ★F-7 — 산출량은 **길이만** 센다. chunk 는 여기서 버려지고 어디에도
       // 저장되지 않는다(원문 금지 계약, #887 §2).
       agent.outputChars += chunk.length;
+      // Idle-at-prompt tracking: classify the frame and keep ONLY the two
+      // derived timestamps (the chunk itself is still dropped here — the F-7
+      // contract above is unchanged). `lastPtyActivity` above deliberately
+      // still counts every byte; it feeds the wedged-turn backstop. The
+      // watchdog reads `lastWorkOutput`/`promptIdleSince` instead, because a
+      // CLI parked at its prompt repaints forever and would otherwise look
+      // alive to it. This NEVER changes the agent's status — status still
+      // follows input/completion boundaries only.
+      const framed = applyPtyFrame(
+        {
+          lastWorkOutputAt: agent.lastWorkOutput,
+          promptIdleSince: agent.promptIdleSince,
+        },
+        classifyPtyFrame(chunk, agent.model),
+        Date.now(),
+      );
+      agent.lastWorkOutput = framed.lastWorkOutputAt;
+      agent.promptIdleSince = framed.promptIdleSince;
       // Output NEVER starts a turn — it only continues one. While a completion
       // report stands, these bytes are the finished turn's repaint (trailing
       // flush, then the idle prompt's spinner/cursor forever), and promoting on
@@ -1919,6 +1964,13 @@ export class AgentManager {
     if (!agent) return;
     if (agent.status === "stopped" || agent.status === "error") return;
     agent.turnCompletedAt = null;
+    // The agent is no longer parked at its prompt, and the submission itself is
+    // fresh evidence of life. A nudged agent therefore gets a FULL new
+    // idle-at-prompt window before the watchdog may judge it parked again —
+    // without this, one nudge would be immediately followed by the next rung.
+    const fresh = resetPromptIdleOnTurnStart(Date.now());
+    agent.lastWorkOutput = fresh.lastWorkOutputAt;
+    agent.promptIdleSince = fresh.promptIdleSince;
   }
 
   getAgentByName(name: string): AgentInstance | null {
@@ -1977,6 +2029,8 @@ export class AgentManager {
       restartTimer: null,
       heartbeatTimer: null,
       lastPtyActivity: Date.now(),
+      lastWorkOutput: Date.now(),
+      promptIdleSince: null,
       outputChars: 0,
       turnCompletedAt: null,
       terminalSince: null,
@@ -1989,6 +2043,18 @@ export class AgentManager {
       if (!a || a !== instance) return;
       a.lastPtyActivity = Date.now();
       a.outputChars += chunk.length;
+      // Same idle-at-prompt distillation as launch() — a reconnected agent can
+      // fall back to its prompt mid-task just as easily.
+      const framed = applyPtyFrame(
+        {
+          lastWorkOutputAt: a.lastWorkOutput,
+          promptIdleSince: a.promptIdleSince,
+        },
+        classifyPtyFrame(chunk, a.model),
+        Date.now(),
+      );
+      a.lastWorkOutput = framed.lastWorkOutputAt;
+      a.promptIdleSince = framed.promptIdleSince;
       if (
         shouldPromoteOnPtyOutput({
           status: a.status,

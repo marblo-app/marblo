@@ -187,6 +187,205 @@ export function shouldDemoteAbandonedTurn(input: {
   return input.now - input.lastPtyActivity >= abandonedMs;
 }
 
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * IDLE-AT-PROMPT  —  positive proof that an agent STOPPED (not that it is quiet)
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Everything above says the same thing twice: silence is not evidence of
+ * idleness. The mirror-image error is just as real and is what the WATCHDOG
+ * tripped over — **noise is not evidence of work**. A CLI parked at its input
+ * prompt keeps repainting its composer, footer and cursor forever, and the
+ * watchdog counted every one of those bytes as "the worker is alive"
+ * (agent-watchdog inspect(): `max(boardActivity, lastPtyActivity)`). So an agent
+ * that fell back to its prompt mid-task — turn over, completion never reported —
+ * looked eternally fresh: never `dead` (its PTY is alive), never `silent` (the
+ * repaint keeps bumping the clock), past the born-dead window. It was not caught
+ * late; it was never caught at all.
+ *
+ * The fix is NOT a shorter silence timer (that is exactly the false-kill
+ * regression this module exists to prevent). It is to look at WHAT the terminal
+ * is painting and only discount the frames we can positively identify as the
+ * idle prompt:
+ *
+ *   busy          — a harness "esc to interrupt"-class marker. Work in flight.
+ *   awaiting-input— a human confirmation dialog. Blocked on a person, not stuck.
+ *   idle-at-prompt— a harness composer/footer marker with NO busy marker in the
+ *                   same frame. The CLI is waiting for someone to type.
+ *   repaint       — no printable content at all (pure cursor/escape traffic).
+ *                   Proves nothing in either direction.
+ *   output        — anything else. Ordinary work output.
+ *
+ * Only `idle-at-prompt` and `repaint` fail to refresh the liveness clock; every
+ * other frame counts as activity exactly as before. The asymmetry is deliberate
+ * and runs one way: **a misread busy/idle marker must cost us a missed
+ * detection, never a killed agent.** Hence busy markers are generous and checked
+ * first, idle markers are narrow, per-harness, and only ones that appear in the
+ * ready input prompt; a harness with no verified idle marker (grok, local,
+ * custom) simply never produces this signal and keeps the legacy behavior.
+ *
+ * A reasoning agent emits NOTHING — no frames at all — so it can never enter the
+ * idle-at-prompt state, which is what makes this safe to act on quickly.
+ *
+ * ★No PTY content is retained. Each chunk is classified and dropped; only two
+ * timestamps survive (the F-7 "원문 금지" contract — see AgentInstance.outputChars).
+ */
+
+/** How a single PTY frame reads. See the block comment above. */
+export type PtyFrameKind =
+  | "busy"
+  | "awaiting-input"
+  | "idle-at-prompt"
+  | "repaint"
+  | "output";
+
+/* eslint-disable no-control-regex -- ANSI sanitizing intentionally matches ESC/C0 bytes. */
+const FRAME_OSC = /\x1b[\]PX^_][\s\S]*?(?:\x07|\x1b\\)/g;
+const FRAME_CSI = /\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g;
+const FRAME_SHORT_ESC = /\x1b[\x20-\x2f]*[\x30-\x7e]/g;
+const FRAME_CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
+/* eslint-enable no-control-regex */
+
+/** Strip ANSI/control bytes so markers match the text a human would see.
+ * Mirrors src/lib/ansi.ts stripAnsi — duplicated (not imported) because the
+ * electron main build has its own rootDir and this module must stay a pure,
+ * dependency-free unit. */
+export function stripFrameAnsi(input: string): string {
+  if (!input) return "";
+  return input
+    .replace(FRAME_OSC, "")
+    .replace(FRAME_CSI, "")
+    .replace(FRAME_SHORT_ESC, "")
+    .replace(FRAME_CTRL, "");
+}
+
+/**
+ * Work-in-flight markers. Harness-agnostic and deliberately GENEROUS: a false
+ * "busy" only costs a missed detection, while a missed "busy" could let a
+ * working agent drift into the idle-at-prompt state. Checked before idle
+ * markers, so a full-frame repaint that contains both reads as busy.
+ */
+const BUSY_MARKERS: RegExp[] = [
+  /esc to interrupt/i, // claude / codex running footer
+  /esc to cancel/i, // gemini running footer
+  /ctrl\+c to (?:stop|interrupt|cancel)/i,
+  /\besc\b\s*\)?\s*to\s+stop\b/i,
+  /\bThinking[.…]/i,
+  /\bWorking[.…]/i,
+];
+
+/**
+ * Blocked on a HUMAN (permission / confirmation dialog). Not idle-at-prompt:
+ * nudging one of these would type into a dialog whose default may be
+ * destructive, and the renderer's AttentionBadge already surfaces it. Treated
+ * as ordinary activity so watchdog behavior for these is unchanged.
+ */
+const AWAITING_INPUT_MARKERS: RegExp[] = [
+  /\[y\/n\]/i,
+  /\(y\/n\)/i,
+  /Do you want to (?:proceed|make|create|allow)/i,
+  /Press Enter to continue/i,
+  /Yes, and don't ask again/i,
+];
+
+/**
+ * Per-harness READY-INPUT-PROMPT markers — the narrow half of the asymmetry.
+ * Each entry must appear ONLY when the CLI is waiting for someone to type.
+ * Sourced from the same live-PTY captures as CLI_READINESS_PATTERNS
+ * (agent-manager.ts); note the two lists differ on purpose — readiness asks
+ * "is the CLI up?" (where `esc to interrupt` qualifies), this one asks "is the
+ * CLI waiting for input?" (where it disqualifies).
+ *
+ * A harness absent from this table never yields `idle-at-prompt`, so it keeps
+ * the pre-existing board-activity-only behavior. grok's `--minimal` footer
+ * (`/help for commands`) is NOT listed: it is verified for the ready state but
+ * has not been verified to disappear while grok is working, and an unverified
+ * idle marker is the one mistake this design refuses to make.
+ */
+const HARNESS_IDLE_PROMPT_MARKERS: Record<string, RegExp[]> = {
+  // Claude Code's composer footer. agy (antigravity) renders the same footer
+  // post-trust — verified in the CLI_READINESS_PATTERNS capture.
+  claude: [/\? for shortcuts/, /Type your message/i],
+  antigravity: [/\? for shortcuts/, /Type your message/i],
+  // Codex TUI composer placeholders (empty input area only).
+  gpt: [/Ask Codex/i, /Explain this codebase/i],
+  gemini: [/Type your message/i],
+};
+
+/** Idle-prompt markers for a harness/model key, or [] when none are verified. */
+export function idlePromptMarkersFor(harness: string | undefined): RegExp[] {
+  if (!harness) return [];
+  return HARNESS_IDLE_PROMPT_MARKERS[harness] ?? [];
+}
+
+/**
+ * Classify one PTY chunk. Pure — the chunk is read and dropped, nothing is
+ * stored. Chunks are classified individually (no rolling buffer): a marker
+ * split across two writes is simply missed, which costs one frame out of the
+ * many a parked TUI repaints, and keeps the "no PTY content retained" contract
+ * literally true.
+ */
+export function classifyPtyFrame(
+  chunk: string,
+  harness: string | undefined,
+): PtyFrameKind {
+  const text = stripFrameAnsi(chunk);
+  // Contentless cursor/escape traffic — proves nothing either way.
+  if (text.trim().length === 0) return "repaint";
+  if (BUSY_MARKERS.some((re) => re.test(text))) return "busy";
+  if (AWAITING_INPUT_MARKERS.some((re) => re.test(text)))
+    return "awaiting-input";
+  const idle = idlePromptMarkersFor(harness);
+  if (idle.length > 0 && idle.some((re) => re.test(text))) {
+    return "idle-at-prompt";
+  }
+  return "output";
+}
+
+/** The two timestamps distilled from the PTY stream. Nothing else is kept. */
+export interface PromptIdleState {
+  /** epoch-ms of the last frame that counted as WORK. This — not raw
+   * lastPtyActivity — is the liveness clock the watchdog should read. */
+  lastWorkOutputAt: number;
+  /** epoch-ms since which every classified frame has been an idle-prompt
+   * repaint, or null when the agent is not (provably) parked at its prompt. */
+  promptIdleSince: number | null;
+}
+
+/**
+ * Fold one classified frame into the state.
+ *
+ *   idle-at-prompt → start/extend the parked window; the work clock does NOT
+ *                    advance (this is the whole point — repaint ≠ work).
+ *   repaint        → no opinion; leave both fields alone.
+ *   anything else  → real activity: bump the work clock and cancel any parked
+ *                    window. ONE busy/output frame is enough to clear it.
+ */
+export function applyPtyFrame(
+  prev: PromptIdleState,
+  kind: PtyFrameKind,
+  now: number,
+): PromptIdleState {
+  if (kind === "repaint") return prev;
+  if (kind === "idle-at-prompt") {
+    return {
+      lastWorkOutputAt: prev.lastWorkOutputAt,
+      promptIdleSince: prev.promptIdleSince ?? now,
+    };
+  }
+  return { lastWorkOutputAt: now, promptIdleSince: null };
+}
+
+/**
+ * A new turn was submitted (dispatch / reuse / nudge / a human pressing Enter).
+ * The agent is no longer parked, and the submission itself is fresh evidence of
+ * life — so a nudged agent gets a full new window before it can be judged
+ * parked again.
+ */
+export function resetPromptIdleOnTurnStart(now: number): PromptIdleState {
+  return { lastWorkOutputAt: now, promptIdleSince: null };
+}
+
 /** Task statuses that mean the agent's turn is finished and its slot should be
  * released immediately (idempotent completion signal from the MCP tools). */
 export function isTurnEndingStatus(status: unknown): boolean {
