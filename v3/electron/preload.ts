@@ -1029,6 +1029,33 @@ contextBridge.exposeInMainWorld("electronAPI", {
     remove: (projectId: string) =>
       ipcRenderer.invoke("telegramChannel:remove", projectId),
   },
+  // 오케스트레이터↔Slack 채널 연결 (Socket Mode inbound + chat.postMessage
+  // outbound). telegramChannel 의 미러이되 ★`get` 이 없다 — 시크릿 원문은 렌더러
+  // 경계를 넘지 않고, 창구는 status(hasBotToken/hasAppToken 불리언)뿐이다.
+  // probe 는 저장한 자격증명이 실제로 동작하는지 사용자가 확인하는 경로.
+  slackChannel: {
+    list: () => ipcRenderer.invoke("slackChannel:list"),
+    set: (input: {
+      projectId: string;
+      botToken?: string | null;
+      appToken?: string | null;
+      channelId?: string | null;
+      enabled?: boolean;
+      inboundCapability?: "read" | "trigger";
+    }) => ipcRenderer.invoke("slackChannel:set", input),
+    status: (projectId: string) =>
+      ipcRenderer.invoke("slackChannel:status", projectId),
+    remove: (projectId: string) =>
+      ipcRenderer.invoke("slackChannel:remove", projectId),
+    probe: (projectId: string) =>
+      ipcRenderer.invoke("slackChannel:probe", projectId),
+    onHealth: (callback: (report: unknown) => void) => {
+      ipcRenderer.on("slack:health", (_event, report) => callback(report));
+    },
+    offHealth: () => {
+      ipcRenderer.removeAllListeners("slack:health");
+    },
+  },
   updater: {
     check: () => ipcRenderer.invoke("updater:check"),
     download: () => ipcRenderer.invoke("updater:download"),

@@ -205,6 +205,20 @@ import {
 } from "./telegram-health";
 import { TelegramPoller, type InboundTarget } from "./telegram-poller";
 import {
+  getSlackChannelConfig,
+  getSlackChannelStatus,
+  listSlackChannelStatuses,
+  setSlackChannelFromLocalSettings,
+  removeSlackChannel,
+  type SlackChannelInput,
+} from "./slack-channels";
+import {
+  runSlackChannelHealthCheck,
+  probeSlackChannel,
+  type SlackChannelHealthReport,
+} from "./slack-health";
+import { SlackPoller } from "./slack-poller";
+import {
   getProjectConnection,
   upsertProjectConnection,
   listProjectConnections,
@@ -499,7 +513,11 @@ function writeAppState(state: AppState): void {
   fs.writeFileSync(APP_STATE_FILE, JSON.stringify(merged, null, 2), "utf-8");
 }
 
-type WorkPowerSaveSource = "orchestrator" | "agent" | "telegram-poller";
+type WorkPowerSaveSource =
+  | "orchestrator"
+  | "agent"
+  | "telegram-poller"
+  | "slack-socket";
 
 let preventSleepWhileWorking =
   readAppState().preventSleepWhileWorking !== false;
@@ -1503,6 +1521,32 @@ function emitTelegramHealth(report: ChannelHealthReport): void {
   broadcast("telegram:health", { ...report, reliability });
 }
 
+/**
+ * Broadcast a Slack channel health report to the renderer — the mirror of
+ * emitTelegramHealth. The report carries no secret material (slack-health.ts),
+ * and the folded-in reliability counters are what make silent loss visible:
+ * unanswered inbounds, failed sends, and inbounds dropped because the
+ * orchestrator stayed offline long enough to overflow the pending queue.
+ */
+function emitSlackHealth(report: SlackChannelHealthReport): void {
+  const reliability = slackPoller.getReliabilityStats(report.projectId);
+  if (
+    reliability.unanswered > 0 ||
+    reliability.sendFailures > 0 ||
+    reliability.droppedOverflow > 0
+  ) {
+    console.warn(
+      `[SlackHealth] project=${report.projectId} reliability — unanswered inbounds=${reliability.unanswered}, ` +
+        `failed sends=${reliability.sendFailures}, dropped (queue overflow)=${reliability.droppedOverflow}`,
+    );
+  }
+  broadcast("slack:health", {
+    ...report,
+    reliability,
+    route: slackPoller.getRouteHealth(report.projectId),
+  });
+}
+
 /** Send an IPC event to a specific webContents id (or fallback to mainWindow). */
 function sendToOwner(
   ownerId: number | undefined,
@@ -1998,6 +2042,12 @@ const agentWatchdog = new AgentWatchdog(
       return {
         status: a.status,
         lastPtyActivityMs: a.lastPtyActivity,
+        // W7: the classified clocks. lastWorkOutput ignores the idle prompt's
+        // own repaint (which otherwise made a stalled agent look eternally
+        // alive), and promptIdleSince is the positive "parked at the input
+        // prompt" observation — see agent-status-reconcile.classifyPtyFrame.
+        lastWorkOutputMs: a.lastWorkOutput,
+        promptIdleSinceMs: a.promptIdleSince,
         currentTaskId: a.currentTaskId,
       };
     },
@@ -2795,6 +2845,32 @@ bridgeServer.setSendTelegramMessage((projectId, text, chatId) =>
   telegramPoller.sendMessage(projectId, text, chatId),
 );
 
+// ── Slack Socket Mode client (electron-main-owned, ticket GjEj83bvxJs701irBKJl) ──
+// The Telegram poller mirrored onto Slack: exactly one Socket Mode connection
+// per project, owned here. It resolves the SAME orchestrator target as Telegram
+// (board wins over mission) and injectMessage()s the text — the two inbound
+// paths coexist and share one orchestrator. When no orchestrator is live the
+// inbound is queued to disk and redelivered after the next boot (Slack demands
+// a 3s envelope ack, so "hold the offset" is not available — see slack-poller).
+// Outbound (send_slack_message MCP tool → bridge) routes into sendMessage().
+const slackPoller = new SlackPoller({
+  resolveOrchestrator: (projectId: string) => {
+    const board = orchestrators.get(projectId);
+    if (board && board.isRunning()) {
+      return telegramInboundTarget(board, "board");
+    }
+    const mission = missionOrchestrators.get(projectId);
+    if (mission && mission.isRunning()) {
+      return telegramInboundTarget(mission, "mission");
+    }
+    return null;
+  },
+  onLoopActivityChange: () => refreshWorkPowerSaveBlocker(),
+});
+bridgeServer.setSendSlackMessage((projectId, text, opts) =>
+  slackPoller.sendMessage(projectId, text, opts),
+);
+
 function telegramInboundTarget(
   manager: OrchestratorManager,
   kind: "board" | "mission",
@@ -2831,6 +2907,34 @@ function logTelegramRouteHealth(projectId: string, reason: string): void {
       } ` +
       `unanswered=${health.reliability.unanswered} sendFailures=${health.reliability.sendFailures}`,
   );
+  logSlackRouteHealth(projectId, reason);
+}
+
+/**
+ * The Slack half of the same route diagnosis. Called from the Telegram logger
+ * so every switch/launch checkpoint reports BOTH inbound paths — with two
+ * channels feeding one orchestrator, "which PTY gets inbound" has to be
+ * answered for each. Silent when the project has no Slack connection and
+ * nothing queued.
+ */
+function logSlackRouteHealth(projectId: string, reason: string): void {
+  const health = slackPoller.getRouteHealth(projectId);
+  if (!health.connected && health.pendingInbound === 0) return;
+  const target = health.lastDeliveredTarget;
+  console.info(
+    `[SlackPoller:${reason}] project=${projectId} socket=${
+      health.connected ? "connected" : "disconnected"
+    } ` +
+      `lastChannelKnown=${health.lastChannelKnown} pendingReply=${health.pendingReply} ` +
+      `pendingInbound=${health.pendingInbound} lastDelivered=${health.lastDeliveredKey ?? "none"} ` +
+      `lastTarget=${
+        target
+          ? `${target.kind}:${target.ptySessionId ?? "unknown"}:${target.status}`
+          : "none"
+      } ` +
+      `unanswered=${health.reliability.unanswered} sendFailures=${health.reliability.sendFailures} ` +
+      `droppedOverflow=${health.reliability.droppedOverflow}`,
+  );
 }
 
 function collectWorkPowerSaveSources(): WorkPowerSaveSource[] {
@@ -2850,6 +2954,10 @@ function collectWorkPowerSaveSources(): WorkPowerSaveSource[] {
   if (hasWorkingAgent) sources.push("agent");
 
   if (telegramPoller.hasActiveLoops()) sources.push("telegram-poller");
+  // A live Socket Mode connection is real inbound work — letting the app
+  // suspend would silently deafen the Slack channel exactly like it does the
+  // Telegram poller.
+  if (slackPoller.hasActiveLoops()) sources.push("slack-socket");
   return sources;
 }
 
@@ -3277,16 +3385,19 @@ function ensureMissionOrchestratorLaunched(
 }
 
 /**
- * Feed orchestrator PTY "busy" signals to the Telegram poller so its un-replied
- * nudge can detect a busy→idle turn boundary. node-pty onData is add-only, so
- * this extra listener coexists with setupPtyForwarding's. Cheap: a regex test
- * per chunk, and markOrchestratorActivity is a no-op unless an inbound is
+ * Feed orchestrator PTY "busy" signals to the Telegram and Slack inbound
+ * clients so their un-replied nudge can detect a busy→idle turn boundary.
+ * node-pty onData is add-only, so this extra listener coexists with
+ * setupPtyForwarding's. Cheap: one regex test per chunk, and
+ * markOrchestratorActivity is a no-op in each client unless an inbound is
  * awaiting a reply for this project.
  */
 function hookOrchestratorActivity(sid: string, projectId: string): void {
   if (!projectId) return;
   ptyManager.onData(sid, (data) => {
-    if (isBusySignal(data)) telegramPoller.markOrchestratorActivity(projectId);
+    if (!isBusySignal(data)) return;
+    telegramPoller.markOrchestratorActivity(projectId);
+    slackPoller.markOrchestratorActivity(projectId);
   });
 }
 
@@ -5781,6 +5892,63 @@ ipcMain.handle("telegramChannel:remove", (_event, projectId: string) => {
   return removed;
 });
 
+// --- Slack Channels IPC Handlers (텔레그램 채널 IPC 의 미러) ---
+//
+// ★텔레그램과 의도적으로 다른 한 가지: `get` 이 없다. 텔레그램은 설정 원문
+// (봇 토큰 포함)을 렌더러로 돌려주지만, 여기서는 시크릿을 렌더러 경계 밖으로
+// 내보내지 않는다 — 창구는 상태(status)뿐이고 그 안엔 hasBotToken/hasAppToken
+// 불리언만 있다. Slack UI 는 아직 없어서 깨질 소비자도 없으니, 노출을 넓히지
+// 않는 쪽으로 시작한다.
+//
+// 쓰기(slackChannel:set)는 로컬 설정 경로 — 이 경로에서만 권한 파일이
+// 동기화된다(chmod 600). Slack 인바운드(slack-poller)는 slack-channels 의
+// read-only 함수만 import 하며 권한을 변경할 수 없다(보안 불변식).
+
+ipcMain.handle("slackChannel:list", () => {
+  return listSlackChannelStatuses();
+});
+
+ipcMain.handle("slackChannel:set", (_event, input: SlackChannelInput) => {
+  // 로컬 설정 경로 — 설정 저장 + 권한 동기화. 합성 상태를 돌려줘 프론트가
+  // 토글 잠금/사유(issues)를 즉시 반영하게 한다.
+  const status = setSlackChannelFromLocalSettings(input);
+  // 활성/비활성 변화를 Socket Mode 클라이언트에 반영(활성 → 연결, 비활성 →
+  // 정지). syncActiveChannels 는 멱등이라 안전하다.
+  slackPoller.syncActiveChannels();
+  return status;
+});
+
+ipcMain.handle("slackChannel:status", (_event, projectId: string) => {
+  return getSlackChannelStatus(projectId);
+});
+
+ipcMain.handle("slackChannel:remove", (_event, projectId: string) => {
+  const removed = removeSlackChannel(projectId);
+  slackPoller.syncActiveChannels();
+  return removed;
+});
+
+// 설정한 자격증명이 실제로 동작하는지 사용자가 저장 직후 확인하는 경로.
+// ★probeAppToken:true 는 여기서만 켠다 — 검증 수단인 apps.connections.open 이
+// 실제 연결 슬롯을 하나 소비하므로 주기 스윕은 이걸 쓰지 않는다(slack-health).
+ipcMain.handle("slackChannel:probe", async (_event, projectId: string) => {
+  const status = getSlackChannelStatus(projectId);
+  const config = getSlackChannelConfig(projectId);
+  if (!config?.botToken) {
+    return {
+      ok: false,
+      botUserId: null,
+      teamId: null,
+      appTokenOk: false,
+      error: "bot token 이 저장돼 있지 않습니다.",
+    };
+  }
+  const health = await probeSlackChannel(config.botToken, config.appToken, {
+    probeAppToken: !!config.appToken,
+  });
+  return { ...health, status, route: slackPoller.getRouteHealth(projectId) };
+});
+
 // --- Agent IPC Handlers ---
 
 // Buffer early PTY output so data isn't lost before the renderer's listener is ready.
@@ -8188,6 +8356,15 @@ app.whenReady().then(async () => {
     console.error("[Main] Telegram poller start failed:", err);
   }
 
+  // Start the electron-owned Slack Socket Mode client: one WebSocket per active
+  // channel, plus a drain of any inbound queued while the app was down.
+  // Idempotent and independent of Telegram — both inbound paths coexist.
+  try {
+    slackPoller.start();
+  } catch (err) {
+    console.error("[Main] Slack Socket Mode start failed:", err);
+  }
+
   // 텔레그램 채널 메타 기기 간 동기화(기동 시 1회): 다른 기기가 push 한 메타를
   // 복원하고(토큰 없음·비활성 — 사용자가 토큰 재입력 시 복구), 이 기기의 기존
   // 채널 메타를 업로드한다. custom-token 인증 전(익명)이면 조용히 스킵되고,
@@ -8209,6 +8386,15 @@ app.whenReady().then(async () => {
         console.warn("[Main] Telegram wake health check failed:", err),
       )
       .finally(() => telegramPoller.syncActiveChannels());
+    // Slack self-heal on the same trigger: sleep kills the Socket Mode
+    // WebSocket too. The credential probe is cheap and tells us WHY a channel
+    // is quiet (revoked token vs dead socket); syncActiveChannels then
+    // re-dials anything whose connection died. Fire-and-forget.
+    void runSlackChannelHealthCheck("wake", { onReport: emitSlackHealth })
+      .catch((err) =>
+        console.warn("[Main] Slack wake health check failed:", err),
+      )
+      .finally(() => slackPoller.syncActiveChannels());
   });
 
   // Conservative periodic health sweep — catches steady-state disconnects that
@@ -8225,6 +8411,13 @@ app.whenReady().then(async () => {
           console.warn("[Main] Telegram interval health check failed:", err),
         )
         .finally(() => telegramPoller.syncActiveChannels());
+      // Same cadence for Slack: reconcile connections so a socket that died
+      // without a wake event is re-dialed, and surface credential expiry.
+      void runSlackChannelHealthCheck("interval", { onReport: emitSlackHealth })
+        .catch((err) =>
+          console.warn("[Main] Slack interval health check failed:", err),
+        )
+        .finally(() => slackPoller.syncActiveChannels());
     },
     4 * 60 * 1000,
   );
@@ -8302,6 +8495,7 @@ app.on("window-all-closed", () => {
     stopAllOrchestrators();
     if (telegramHealthTimer) clearInterval(telegramHealthTimer);
     void telegramPoller.stopAll();
+    void slackPoller.stopAll();
     bridgeServer.stop();
     agentManager.stopAll();
     pendingListener.detachAll();
@@ -8330,6 +8524,7 @@ app.on("before-quit", () => {
   stopAllOrchestrators();
   if (telegramHealthTimer) clearInterval(telegramHealthTimer);
   void telegramPoller.stopAll();
+  void slackPoller.stopAll();
   bridgeServer.stop();
   agentManager.stopAll();
   pendingListener.detachAll();

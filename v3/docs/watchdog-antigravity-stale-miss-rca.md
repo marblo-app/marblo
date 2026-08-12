@@ -160,3 +160,22 @@ const byTaskId = agents.find(
 - agy 가 정확히 어떤 화면/에러에서 "행"하는지 실제 PTY 원문 라이브 캡처 (Fix 2 패턴 정확도용).
 - 관측된 재디스패치가 `dispatch_task`(bind 있음) 경로였는지 `spawn_agent`(bind 없음) 경로였는지 확정 —
   후자면 가시성 갭(§3 부가)도 수정 대상에 포함.
+
+## 8. 후속 구현 — §6 Fix 4 정제 (티켓 nxi5EN27tF2RHLSUQZGh, W7)
+
+§3 이 지목한 원흉(`lastActiveMs = max(board, PTY)` 의 PTY 항)을 실제로 끊었다. 단
+Fix 4 원안(“PTY 항을 통째로 버리고 board 만 본다”)이 아니라 **한 단계 좁힌 형태**로 구현한다:
+
+- PTY 프레임을 분류해(`agent-status-reconcile.ts` `classifyPtyFrame`) **idle 입력 프롬프트로
+  확정된 프레임과 내용 없는 커서 repaint 만** 생존신호에서 제외한다. 나머지 출력(스트리밍
+  응답·툴 로그)은 종전대로 생존 근거로 인정 — PTY 항을 통째로 버리면 *출력 중인* 추론
+  에이전트까지 5분에 nudge 대상이 되므로, 이쪽이 false-kill 여지가 더 작다.
+- 그 위에 **적극 증명 축**을 하나 더 얹었다: 하네스 입력 프롬프트에 `promptIdleGraceMs`(기본
+  90초) 이상 머물고 보드 활동도 그동안 없으면 stuck. 침묵 타이머가 아니라 “CLI 가 입력을
+  기다린다”는 관측이므로, **아무 프레임도 못 내는 추론 에이전트는 이 상태에 진입 자체가 불가**하다.
+- 이 신호가 여는 것은 사다리의 **nudge 단 하나**다. respawn 은 종전 조건(dead / born-dead /
+  nudge 예산 소진) 그대로 — 마커 오탐의 최대 피해가 무해한 메시지 1건이 되도록 설계했다.
+- 회귀 고정: `tests/unit/pty-prompt-idle.test.ts`, `tests/unit/agent-watchdog-prompt-idle.test.ts`.
+
+Fix 1·2·3·5(바인딩 단락, agy 하드 실패 terminal 화, model reroute, 강제 교체)는 이 티켓 범위
+밖으로 남아 있다.

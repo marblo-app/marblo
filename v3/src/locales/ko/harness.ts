@@ -165,6 +165,42 @@ export const harness = {
   "harness.telegram.plugin.descAfter":
     "이 동작하려면 telegram 플러그인이 설치되어 있어야 합니다. 하네스 스토어에서 telegram 플러그인을 설치하거나, CLI에서 같은 플러그인 이름으로 설치한 뒤 채널을 활성화하세요.",
 
+  // --- Slack channel panel (#936 IPC 미러 — 시크릿 원문은 렌더러로 안 내려온다) ---
+  "harness.slack.status.idle": "대기",
+  "harness.slack.status.connected": "연결",
+  "harness.slack.status.needsCheck": "확인 필요",
+  "harness.slack.status.disconnected": "미연결",
+  "harness.slack.title": "Slack 채널 연결",
+  "harness.slack.loadError": "Slack 채널 상태를 불러오지 못했습니다.",
+  "harness.slack.needChannelId": "채널 ID를 저장해야 활성화할 수 있습니다.",
+  "harness.slack.saved": "채널 설정을 저장했습니다.",
+  "harness.slack.saveError": "채널 설정 저장에 실패했습니다.",
+  "harness.slack.refreshTitle": "채널 상태 새로고침",
+  "harness.slack.enableTitle": "Slack 채널 활성화",
+  "harness.slack.enabled": "활성",
+  "harness.slack.disabled": "비활성",
+  "harness.slack.loading": "채널 상태 확인 중",
+  "harness.slack.channelIdPlaceholder": "C0123456789",
+  "harness.slack.save": "저장",
+  "harness.slack.tokenSavedPlaceholder": "저장됨 — 바꾸려면 새로 입력",
+  "harness.slack.probe": "확인",
+  "harness.slack.probeTitle": "저장한 자격증명이 실제로 동작하는지 확인",
+  "harness.slack.probeOk": "자격증명 확인 완료.",
+  "harness.slack.probeFailed": "자격증명 확인에 실패했습니다.",
+  "harness.slack.probeResultOk": "자격증명 정상",
+  "harness.slack.probeResultFail": "자격증명 확인 실패",
+  "harness.slack.probeTeam": "team {team} · bot {bot}",
+  "harness.slack.probeAppTokenOk": "app token(Socket Mode) 정상",
+  "harness.slack.probeAppTokenSkipped": "app token 미확인(미입력 또는 건너뜀)",
+  "harness.slack.remove": "채널 해제",
+  "harness.slack.removeConfirm":
+    "현재 프로젝트의 Slack 채널 연결을 해제하시겠습니까? 저장된 토큰이 삭제됩니다.",
+  "harness.slack.removed": "채널 연결을 해제했습니다.",
+  "harness.slack.removeError": "채널 해제에 실패했습니다.",
+  "harness.slack.secretsNotEncrypted":
+    "이 기기에서는 토큰이 암호화 없이 저장됩니다(OS 시크릿 저장소 사용 불가).",
+  "harness.slack.healthError": "최근 헬스 체크 실패: {error}",
+
   // HarnessVersionBadge — tooltip for an agent's installed CLI version
   "harness.installedCliVersion": "설치된 CLI 버전 v{version}",
 

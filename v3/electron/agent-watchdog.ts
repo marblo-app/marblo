@@ -82,8 +82,28 @@ export type WatchdogAgentLiveStatus = "idle" | "working" | "error" | "stopped";
 
 export interface WatchdogAgentHealth {
   status: WatchdogAgentLiveStatus;
-  /** epoch-ms of the agent's most recent PTY output. */
+  /** epoch-ms of the agent's most recent PTY output — ANY byte, including the
+   * idle prompt's own repaint. Kept for backward compatibility; prefer
+   * `lastWorkOutputMs` for liveness (see below). */
   lastPtyActivityMs: number;
+  /** epoch-ms of the last PTY frame that counted as WORK — every frame except
+   * the ones positively identified as the harness's idle input prompt (or as
+   * contentless repaint). See agent-status-reconcile.ts classifyPtyFrame.
+   *
+   * ★This is the liveness clock. `lastPtyActivityMs` cannot be one: a CLI
+   * parked at its prompt repaints its composer forever, so an agent that
+   * stopped mid-task looked eternally fresh and was never flagged silent at
+   * all. Optional — hosts that don't supply it fall back to lastPtyActivityMs
+   * (legacy behavior). */
+  lastWorkOutputMs?: number;
+  /** epoch-ms since which every classified PTY frame has been an idle-prompt
+   * repaint, or null/undefined when the agent is not provably parked.
+   *
+   * ★This is POSITIVE proof of a stop, not an inference from silence: a
+   * reasoning agent emits nothing at all, so it can never reach this state. It
+   * is what lets mid-task stalls be caught inside promptIdleGraceMs instead of
+   * waiting out graceMs — see evaluatePromptIdleStall. */
+  promptIdleSinceMs?: number | null;
   currentTaskId: string | null;
 }
 
@@ -224,8 +244,15 @@ export interface WatchdogConfig {
   enabled: boolean;
   /** Sweep cadence (ms). */
   intervalMs: number;
-  /** Silence (no PTY output / board activity) before a live agent is "stuck". */
+  /** Silence (no work output / board activity) before a live agent is "stuck". */
   graceMs: number;
+  /** How long an agent must sit PROVABLY parked at its input prompt (harness
+   * prompt marker, no busy marker since) with no board activity before it is
+   * treated as stuck. Much shorter than graceMs on purpose: this is not a
+   * silence timer but a positive observation that the CLI is waiting for input,
+   * and the only action it unlocks is the cheapest rung of the ladder (a
+   * nudge). A reasoning agent emits no frames and so never enters this state. */
+  promptIdleGraceMs: number;
   /** Grace for a freshly-observed ticket to produce its FIRST activity beyond
    * the dispatch baseline. A spawned worker that dies before running a single
    * MCP call still looks "fresh" (dispatch stamps projection.lastActivityAt and
@@ -271,6 +298,11 @@ export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
   // (add_activity / commits), not PTY status, so this window is independent and
   // is left unchanged here deliberately.
   graceMs: 300_000,
+  // 90 s parked at the input prompt with nothing on the board. Safe to make
+  // this short because it is evidence, not impatience: the CLI has told us it
+  // is waiting for someone to type, and a working (even deeply reasoning) agent
+  // never produces that frame. The nudge it unlocks is harmless if wrong.
+  promptIdleGraceMs: 90_000,
   firstActivityGraceMs: 180_000, // 3 min — a spawned worker should have logged
   // its first board activity / real PTY work well within this window.
   nudgeIntervalMs: 120_000,
@@ -306,6 +338,11 @@ export function resolveWatchdogConfig(
     ),
     intervalMs: intEnv(env, "MARBLO_WATCHDOG_INTERVAL_MS", d.intervalMs),
     graceMs: intEnv(env, "MARBLO_WATCHDOG_GRACE_MS", d.graceMs),
+    promptIdleGraceMs: intEnv(
+      env,
+      "MARBLO_WATCHDOG_PROMPT_IDLE_MS",
+      d.promptIdleGraceMs,
+    ),
     firstActivityGraceMs: intEnv(
       env,
       "MARBLO_WATCHDOG_FIRST_ACTIVITY_MS",
@@ -359,6 +396,55 @@ interface RecoveryState {
   rerouted: boolean;
 }
 
+/**
+ * W7 — mid-task idle detection. Pure.
+ *
+ * The gap this closes: liveness used to be `max(boardActivity, anyPtyByte)`, and
+ * a CLI parked at its input prompt repaints forever. So an agent that stopped
+ * mid-task — turn over, completion never reported — was never `dead` (its PTY is
+ * alive), never `silent` (the repaint kept bumping the clock) and long past the
+ * born-dead window. It wasn't caught late; it was never caught.
+ *
+ * The signal here is the opposite of a silence timer. It fires only on a
+ * POSITIVE observation, produced by the harness itself, that the CLI is sitting
+ * at its ready input prompt (agent-status-reconcile.ts classifyPtyFrame), which
+ * a reasoning agent — emitting nothing at all — can never produce. Both clocks
+ * must agree: parked for the full window AND nothing posted to the board in it.
+ *
+ * What it unlocks is deliberately limited to the cheapest rung: a nudge. A
+ * respawn still requires the pre-existing gates (dead / born-dead / nudge budget
+ * spent), so a misread marker costs one harmless message, never a killed agent.
+ */
+export function evaluatePromptIdleStall(input: {
+  /** health.promptIdleSinceMs — null/undefined ⇒ not provably parked. */
+  promptIdleSinceMs: number | null | undefined;
+  /** Freshest BOARD activity for the ticket (add_activity / commit). */
+  lastBoardActivityMs: number;
+  now: number;
+  graceMs: number;
+  /** The agent must be locally hosted and not terminal — we can only read a PTY
+   * we own, and a dead/missing worker is the other gates' business. */
+  agentLocallyLive: boolean;
+}): { stalled: boolean; detail: string } {
+  const { promptIdleSinceMs, now, graceMs } = input;
+  if (!input.agentLocallyLive) return { stalled: false, detail: "" };
+  if (promptIdleSinceMs === null || promptIdleSinceMs === undefined) {
+    return { stalled: false, detail: "" };
+  }
+  const parkedMs = now - promptIdleSinceMs;
+  if (parkedMs < graceMs) return { stalled: false, detail: "" };
+  // A worker that is posting progress is working, whatever its terminal paints.
+  const boardIdleMs = now - input.lastBoardActivityMs;
+  if (boardIdleMs < graceMs) return { stalled: false, detail: "" };
+  return {
+    stalled: true,
+    detail:
+      `PTY has been parked at the harness input prompt for ` +
+      `${Math.round(parkedMs / 1000)}s with no board activity for ` +
+      `${Math.round(boardIdleMs / 1000)}s (idle-at-prompt, not silence)`,
+  };
+}
+
 /** W3 — interpret the false-positive-respawn guards. Pure: given the three
  * "someone else is handling it / already done" signals, decide whether to stand
  * down instead of nudging/respawning. Any true signal cancels recovery. */
@@ -370,6 +456,14 @@ export function evaluateRespawnGuard(input: {
   freshReason?: string;
   /** Result of hasLiveWorkerForTask. */
   liveWorkerBound?: boolean;
+  /** W7: the agent is demonstrably parked at its input prompt (see
+   * evaluatePromptIdleStall). Overrides the `fresh` stand-down ONLY: worktree
+   * mtime is an *inference* that the worker lives, while a ready input prompt is
+   * a *direct observation* that it is not working — a stall right after the last
+   * file write is exactly the case that must not be waved through. The other two
+   * signals are untouched: a terminal ticket still has nothing to recover, and a
+   * live worker bound elsewhere still forbids a duplicate. */
+  promptIdleProven?: boolean;
 }): { standDown: boolean; reason: string } {
   if (input.stillRecoverable === false) {
     return {
@@ -384,7 +478,7 @@ export function evaluateRespawnGuard(input: {
       reason: "a live agent is already bound to this task — no duplicate spawn",
     };
   }
-  if (input.fresh === true) {
+  if (input.fresh === true && input.promptIdleProven !== true) {
     return {
       standDown: true,
       reason: `original worker is fresh (${input.freshReason ?? "recent activity"}) — stand down`,
@@ -811,8 +905,15 @@ export class AgentWatchdog {
     // start so a just-dispatched foreign-hosted worker isn't instantly
     // "inactive since epoch".
     const lastBoardMs = ticket.lastActivityAtMs ?? ticket.activeSinceMs ?? 0;
-    // Freshest overall signal of life: board activity OR raw local PTY output.
-    const lastActiveMs = Math.max(lastBoardMs, health?.lastPtyActivityMs ?? 0);
+    // Freshest overall signal of life: board activity OR local PTY WORK output.
+    // ★Work output, not raw bytes: a CLI parked at its input prompt repaints its
+    // composer forever, and counting that as life is why a mid-task stall was
+    // never flagged silent (see WatchdogAgentHealth.lastWorkOutputMs). Hosts
+    // that don't supply the classified clock fall back to raw PTY activity, i.e.
+    // exactly the legacy behavior.
+    const lastPtyWorkMs =
+      health?.lastWorkOutputMs ?? health?.lastPtyActivityMs ?? 0;
+    const lastActiveMs = Math.max(lastBoardMs, lastPtyWorkMs);
     // ★ Single source of liveness: a fresh BOARD heartbeat VETOES any
     // local-registry death verdict — an agent that just reported progress is
     // alive no matter what the in-memory map says. Deliberately board-only:
@@ -830,6 +931,20 @@ export class AgentWatchdog {
     // Silence-based nudging only applies to locally-hosted, live agents — a
     // nudge writes to the local PTY, which a missing worker doesn't have.
     const silent = !dead && !missing && now - lastActiveMs > this.cfg.graceMs;
+
+    // ── W7: mid-task idle, caught by PROOF rather than by waiting ──────────
+    // The agent's own terminal says it is sitting at a ready input prompt with
+    // nothing left running, and the board agrees nothing has been reported. That
+    // is a stall now, not in five minutes. Silence alone still gets the old,
+    // slow path — this fires only on a positive marker a reasoning agent cannot
+    // emit. It unlocks the nudge rung only; see mustRespawn below.
+    const promptIdle = evaluatePromptIdleStall({
+      promptIdleSinceMs: health?.promptIdleSinceMs,
+      lastBoardActivityMs: lastBoardMs,
+      now,
+      graceMs: this.cfg.promptIdleGraceMs,
+      agentLocallyLive: !dead && !missing && !terminalLocal,
+    });
 
     // First-activity heartbeat: record when we first saw this ticket (with the
     // dispatch-baseline BOARD activity), then flag it "born dead" if it's still
@@ -857,7 +972,7 @@ export class AgentWatchdog {
 
     // Healthy → if it had been stuck and activity has since advanced, it
     // recovered (e.g. a respawned worker started emitting). Reset its budget.
-    if (!dead && !silent && !noFirstActivity) {
+    if (!dead && !silent && !noFirstActivity && !promptIdle.stalled) {
       if (state && lastActiveMs > state.stuckAtActivityMs) {
         this.states.delete(ticket.taskId);
         // Re-arm the first-activity baseline from the resumed activity so a
@@ -930,6 +1045,7 @@ export class AgentWatchdog {
         fresh,
         freshReason,
         liveWorkerBound,
+        promptIdleProven: promptIdle.stalled,
       });
       if (guard.standDown) {
         this.states.delete(ticket.taskId);
@@ -998,6 +1114,12 @@ export class AgentWatchdog {
 
     // A born-dead ticket (never produced first activity) skips nudging — a
     // worker that never started won't answer — and respawns directly.
+    //
+    // ★W7 is deliberately absent from this list: being parked at the prompt is
+    // never on its own a reason to respawn. It can only bring the ticket into
+    // the ladder at the nudge rung; a respawn still requires the pre-existing
+    // evidence (dead / born-dead) or a spent nudge budget — i.e. proof that the
+    // parked agent was asked to continue and didn't.
     const mustRespawn =
       dead || noFirstActivity || st.nudges >= this.cfg.maxNudges;
     if (mustRespawn) {
@@ -1110,7 +1232,9 @@ export class AgentWatchdog {
           ? `no activity since spawn (${Math.round(
               (now - (seenAt?.atMs ?? now)) / 1000,
             )}s)`
-          : "silent (nudges spent)";
+          : promptIdle.stalled
+            ? "idle at prompt, unresponsive to nudges"
+            : "silent (nudges spent)";
       let ok = false;
       try {
         ok = await this.deps.respawnForTicket(ticket);
@@ -1151,21 +1275,27 @@ export class AgentWatchdog {
       return;
     }
 
-    // Alive but silent, nudge budget remaining → nudge.
+    // Alive but stalled (silent past grace, or provably parked at its prompt),
+    // nudge budget remaining → nudge. For a parked agent this is the exactly
+    // right move: the CLI is waiting for input, so give it some.
     const sent = this.deps.nudgeAgent(ticket.agentId, buildBoardNudge(ticket));
     st.nudges += 1;
     st.cooldownUntilMs = now + this.cfg.nudgeIntervalMs;
     st.stuckAtActivityMs = lastActiveMs;
+    const stallReason = promptIdle.stalled
+      ? promptIdle.detail
+      : `silent ${Math.round((now - lastActiveMs) / 1000)}s`;
     this.deps.recordRecovery?.(
       ticket,
       "nudge",
-      `silent ${Math.round((now - lastActiveMs) / 1000)}s → nudge ` +
+      `${stallReason} → nudge ` +
         `${st.nudges}/${this.cfg.maxNudges} (${sent ? "sent" : "no PTY"})`,
     );
     this.log("nudge", {
       taskId: ticket.taskId,
       agentId: ticket.agentId,
       attempt: st.nudges,
+      promptIdle: promptIdle.stalled,
       sent,
     });
   }
