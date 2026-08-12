@@ -35,6 +35,11 @@ import {
   graphBiasDetailForModel,
   type GraphContext,
 } from "./routing-graph";
+import type {
+  DriveDocument,
+  DriveListParams,
+  DriveSearchResult,
+} from "./google-drive-connector";
 import { mainTelemetry, type DispatchDecisionPayload } from "./telemetry";
 import { planCapErrorCategory } from "./spawn-block-reason";
 import {
@@ -203,6 +208,27 @@ export function buildResolverPrompt(req: {
     "4. rebase 완료 후 `git status`로 클린 상태 확인",
     "5. 해결 불가하면 `git rebase --abort` 후 사유를 보고",
   ].join("\n");
+}
+
+/**
+ * 읽기 전용 Drive 게이트웨이 — main 이 주입한다(setDriveGateway).
+ *
+ * 반환형은 커넥터의 중립형(`DriveSearchResult` / `DriveDocument`)을 그대로
+ * 감싸므로, 후속 위키/비서 에픽이 브리지 경계를 넘어와도 계약이 하나다.
+ * 미연결·권한오류는 예외가 아니라 `{ ok: false, error }` 로 돌아온다 —
+ * MCP 도구가 그 문장을 그대로 에이전트에게 보여줄 수 있어야 하기 때문이다.
+ */
+export interface DriveGateway {
+  search(
+    params: DriveListParams,
+  ): Promise<
+    { ok: true; result: DriveSearchResult } | { ok: false; error: string }
+  >;
+  fetch(
+    fileId: string,
+  ): Promise<
+    { ok: true; document: DriveDocument } | { ok: false; error: string }
+  >;
 }
 
 export interface SpawnAgentRequest {
@@ -870,6 +896,12 @@ export class BridgeServer {
       }>)
     | null = null;
 
+  // Read-only Google Drive gateway — main wires this to the safeStorage-backed
+  // connector (google-drive-auth.ts). The drive_search / drive_fetch MCP tools
+  // POST here; the bridge itself never sees an OAuth token. Null until wired
+  // (the tools then report Drive as unavailable).
+  private driveGateway: DriveGateway | null = null;
+
   constructor(
     agentManager: AgentManager,
     ptyManager: PtyManager,
@@ -964,6 +996,18 @@ export class BridgeServer {
     ) => Promise<{ hasBoardActivity: boolean }> | { hasBoardActivity: boolean },
   ): void {
     this.taskAgentActivityHook = hook;
+  }
+
+  /**
+   * Wire the read-only Google Drive gateway (main → google-drive-auth).
+   *
+   * 브리지는 Drive 자격증명을 **모른다** — main 이 safeStorage 저장소에서 지금
+   * 로그인된 사용자의 토큰을 꺼내 쓰는 함수 두 개만 넘겨받는다. 그래서 이
+   * 프로세스 경계 밖(=MCP 서버)으로 토큰이 나갈 경로가 구조적으로 없다.
+   * 미연결(null)이면 drive_search/drive_fetch 가 "연결 안 됨" 으로 답한다.
+   */
+  setDriveGateway(gateway: DriveGateway): void {
+    this.driveGateway = gateway;
   }
 
   /** Wire the outbound Telegram sender (main → TelegramPoller.sendMessage). */
@@ -1168,6 +1212,17 @@ export class BridgeServer {
 
         if (req.method === "POST" && req.url === "/agent-custom-token") {
           this.handleAgentCustomToken(res);
+          return;
+        }
+
+        // Read-only Google Drive (drive_search / drive_fetch MCP tools).
+        if (req.method === "POST" && req.url === "/drive-search") {
+          this.handleDriveSearch(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/drive-fetch") {
+          this.handleDriveFetch(req, res);
           return;
         }
 
@@ -4255,5 +4310,132 @@ export class BridgeServer {
         }
       })();
     });
+  }
+
+  /** POST 본문을 모아 JSON 으로. 깨진 JSON 은 400 으로 끊고 null 을 돌려준다. */
+  private readJsonBody(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<Record<string, unknown> | null> {
+    return new Promise((resolve) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        try {
+          const parsed: unknown = JSON.parse(body || "{}");
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("expected an object");
+          }
+          resolve(parsed as Record<string, unknown>);
+        } catch (err) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: `Invalid JSON: ${
+                err instanceof Error ? err.message : "parse error"
+              }`,
+            }),
+          );
+          resolve(null);
+        }
+      });
+    });
+  }
+
+  private driveUnavailable(res: http.ServerResponse): void {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        ok: false,
+        error:
+          "Google Drive 커넥터를 쓸 수 없습니다 (앱에서 Drive 를 연결했는지 확인하세요).",
+      }),
+    );
+  }
+
+  /**
+   * POST /drive-search — 읽기 전용 파일 검색.
+   *
+   * 브리지는 검색 조건을 **그대로 통과시키지 않는다**. 커넥터의 쿼리 빌더가
+   * 받는 형태로 좁혀서 넘기므로, MCP 클라이언트가 임의의 Drive `q` 문자열을
+   * 밀어 넣을 수 없다.
+   */
+  private handleDriveSearch(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.driveGateway) return this.driveUnavailable(res);
+
+      const str = (v: unknown): string | undefined =>
+        typeof v === "string" && v.trim() ? v.trim() : undefined;
+      try {
+        const result = await this.driveGateway.search({
+          text: str(params.text),
+          nameContains: str(params.nameContains),
+          folderId: str(params.folderId),
+          mimeTypes: Array.isArray(params.mimeTypes)
+            ? params.mimeTypes.filter((m): m is string => typeof m === "string")
+            : undefined,
+          includeFolders: params.includeFolders === true,
+          pageSize:
+            typeof params.pageSize === "number" ? params.pageSize : undefined,
+          pageToken: str(params.pageToken),
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "drive search failed",
+          }),
+        );
+      }
+    })();
+  }
+
+  /** POST /drive-fetch — 파일 하나의 본문을 중립 형식(text)으로. */
+  private handleDriveFetch(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.driveGateway) return this.driveUnavailable(res);
+
+      const fileId =
+        typeof params.fileId === "string" ? params.fileId.trim() : "";
+      if (!fileId) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Missing required field: fileId",
+          }),
+        );
+        return;
+      }
+      try {
+        const result = await this.driveGateway.fetch(fileId);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "drive fetch failed",
+          }),
+        );
+      }
+    })();
   }
 }

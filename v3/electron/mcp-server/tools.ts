@@ -7263,6 +7263,197 @@ export function registerTools(server: McpServer): void {
     },
   );
 
+  // ── Google Drive 읽기 전용 (티켓 zqNxS9904aeeBEug1uAD) ──────────────────────
+  //
+  // 지식위키·헤르메스형 비서 에픽의 선행 커넥터. 이 프로세스는 OAuth 토큰을
+  // **보지 않는다** — 브리지가 main 의 safeStorage 저장소를 대신 두드리고 결과만
+  // 돌려준다. 그래서 MCP 프로세스가 탈취돼도 Drive 자격증명은 새지 않는다.
+  //
+  // userFacing:false — 읽기 조회라 활동 스트림에 노이즈를 만들지 않는다.
+
+  /** 브리지의 읽기 전용 Drive 엔드포인트 호출. 실패는 문장으로 돌려준다. */
+  async function driveViaBridge(
+    endpoint: "/drive-search" | "/drive-fetch",
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+    if (!bridgePort) {
+      return {
+        ok: false,
+        error:
+          "MARBLO_BRIDGE_PORT not set — Marblo 앱 밖에서 뜬 MCP 프로세스는 Drive 를 쓸 수 없습니다.",
+      };
+    }
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${bridgePort}${endpoint}`,
+        {
+          method: "POST",
+          headers: bridgeHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify(payload),
+        },
+      );
+      return (await response.json()) as Record<string, unknown>;
+    } catch (err) {
+      return {
+        ok: false,
+        error: `브리지 연결 실패: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      };
+    }
+  }
+
+  auditedTool(
+    "drive_search",
+    "Search the connected Google Drive (READ-ONLY). Returns matching files as " +
+      "id / title / mimeType / modifiedTime — pass an id to drive_fetch to get the " +
+      "body text. Combine filters: `text` does a full-text search inside documents, " +
+      "`name_contains` matches filenames, `folder_id` limits to one folder's direct " +
+      "children. Requires the user to have connected Google Drive in Marblo's settings.",
+    {
+      text: z
+        .string()
+        .optional()
+        .describe("Full-text search inside document contents."),
+      name_contains: z
+        .string()
+        .optional()
+        .describe("Substring match on the file name."),
+      folder_id: z
+        .string()
+        .optional()
+        .describe("Limit to direct children of this Drive folder id."),
+      mime_types: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Limit to these MIME types, e.g. ['application/vnd.google-apps.document'].",
+        ),
+      include_folders: z
+        .boolean()
+        .optional()
+        .describe("Include folders in the results (default false)."),
+      page_size: z
+        .number()
+        .optional()
+        .describe("Results per page, 1–100 (default 25)."),
+      page_token: z
+        .string()
+        .optional()
+        .describe("nextPageToken from a previous drive_search call."),
+    },
+    async ({
+      text: query,
+      name_contains,
+      folder_id,
+      mime_types,
+      include_folders,
+      page_size,
+      page_token,
+    }) => {
+      const result = await driveViaBridge("/drive-search", {
+        text: query,
+        nameContains: name_contains,
+        folderId: folder_id,
+        mimeTypes: mime_types,
+        includeFolders: include_folders,
+        pageSize: page_size,
+        pageToken: page_token,
+      });
+      if (result.ok !== true) {
+        return text(
+          `Drive 검색 실패: ${
+            typeof result.error === "string" ? result.error : "알 수 없는 오류"
+          }`,
+        );
+      }
+      const payload = result.result as {
+        files?: Array<{
+          id: string;
+          title: string;
+          mimeType: string;
+          modifiedTime?: string;
+          isFolder?: boolean;
+        }>;
+        nextPageToken?: string;
+        query?: string;
+      };
+      const files = payload?.files ?? [];
+      if (files.length === 0) {
+        return text(
+          `조건에 맞는 파일이 없습니다. (q: ${payload?.query ?? ""})`,
+        );
+      }
+      const lines = files.map(
+        (f) =>
+          `- ${f.title}${f.isFolder ? " [폴더]" : ""}\n  id: ${f.id}\n  mimeType: ${f.mimeType}` +
+          (f.modifiedTime ? `\n  modified: ${f.modifiedTime}` : ""),
+      );
+      // 다음 페이지가 있다는 사실을 숨기지 않는다 — 조용한 절단은 "전부 봤다"는
+      // 오해를 만들고, 지식 취득에서 그 오해가 가장 비싸다.
+      if (payload?.nextPageToken) {
+        lines.push(
+          `\n(더 있음 — page_token="${payload.nextPageToken}" 으로 이어서 조회하세요.)`,
+        );
+      }
+      return text(`${files.length}개 파일:\n${lines.join("\n")}`);
+    },
+    { userFacing: false },
+  );
+
+  auditedTool(
+    "drive_fetch",
+    "Fetch one Google Drive file's body as text (READ-ONLY). Google Docs/Slides " +
+      "are exported as plain text, Sheets as CSV, plain-text files are downloaded " +
+      "as-is, and PDFs have their text layer extracted (scanned PDFs have none — " +
+      "the tool says so instead of returning silence). Get file ids from drive_search.",
+    {
+      file_id: z.string().describe("Drive file id (from drive_search)."),
+    },
+    async ({ file_id }) => {
+      const result = await driveViaBridge("/drive-fetch", { fileId: file_id });
+      if (result.ok !== true) {
+        return text(
+          `Drive 본문 취득 실패: ${
+            typeof result.error === "string" ? result.error : "알 수 없는 오류"
+          }`,
+        );
+      }
+      const doc = result.document as {
+        id: string;
+        title: string;
+        mimeType: string;
+        text: string;
+        extraction: string;
+        truncated: boolean;
+        webViewLink?: string;
+      };
+      // 본문이 비는 두 경우(미지원 형식 / 텍스트 레이어 없는 PDF)를 "빈 문서" 로
+      // 뭉개지 않고 이유를 말한다.
+      if (doc.extraction === "unsupported") {
+        return text(
+          `"${doc.title}" (${doc.mimeType}) 은 텍스트로 변환할 수 없는 형식입니다.`,
+        );
+      }
+      if (doc.extraction === "pdf-no-text") {
+        return text(
+          `"${doc.title}" 은 텍스트 레이어가 없는 PDF(스캔본)입니다 — OCR 없이는 본문을 읽을 수 없습니다.`,
+        );
+      }
+      const header = [
+        `# ${doc.title}`,
+        `id: ${doc.id} · mimeType: ${doc.mimeType} · 취득: ${doc.extraction}`,
+        doc.webViewLink ? `link: ${doc.webViewLink}` : "",
+        doc.truncated ? "⚠️ 길이 상한에 걸려 뒷부분이 잘렸습니다." : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      return text(`${header}\n\n${doc.text}`);
+    },
+    { userFacing: false },
+  );
+
   // ── 감사 원장 스풀 상태 (L1, §7) ──
   //
   // 후속 L2(룰 조이기)의 라이브 검증이 이 툴을 직접 쓴다. `audit_logs` 를

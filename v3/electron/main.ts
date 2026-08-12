@@ -183,6 +183,7 @@ import {
 import { getMissionFirebaseApp } from "./mission-engine/firebase-app";
 import {
   clearAgentCustomToken,
+  currentRealUserUid,
   syncAgentCustomToken,
 } from "./firebase-auth-sync";
 import { buildLaneContextId, isLaneContextId } from "./mcp-server/context";
@@ -228,6 +229,17 @@ import {
   removeGitHubToken,
   saveGitHubToken,
 } from "./github-token-store";
+import {
+  connectGoogleDrive,
+  createUserDriveConnector,
+  disconnectGoogleDrive,
+  driveConnectionStatus,
+} from "./google-drive-auth";
+import type {
+  DriveDocument,
+  DriveListParams,
+  DriveSearchResult,
+} from "./google-drive-connector";
 
 type ConnectionCheckStatus = "pass" | "warn" | "fail";
 
@@ -4885,6 +4897,169 @@ ipcMain.handle("github:disconnect", (_event, userId: unknown) => {
   } catch {
     return { ok: false };
   }
+});
+
+// ── Google Drive 커넥터 (읽기 전용, 티켓 zqNxS9904aeeBEug1uAD) ──────────────
+//
+// 지식위키·비서 에이전트 에픽의 선행 기반. 여기 있는 것은 커넥터까지고, 인덱스
+// 저장소/위키 UI/비서는 후속이다.
+//
+// ★userId 규율: Drive 자격증명은 **Marblo 사용자 uid 별로** 저장된다(한 머신을
+// 여러 계정이 쓸 수 있다). 렌더러 호출은 uid 를 명시로 넘기고, 창이 없는 경로
+// (브리지→MCP 도구)는 `currentRealUserUid()` 로 지금 로그인된 실사용자를 쓴다.
+// 익명 세션에서는 null 이 나오고, 그때는 "연결되지 않음" 으로 정직하게 답한다.
+//
+// ★토큰은 이 IPC 응답 어디에도 실리지 않는다 — status 는 이메일·스코프·연결시각만.
+
+function validDriveUserId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9:_-]{1,128}$/.test(value);
+}
+
+/** 렌더러가 준 uid 를 우선하고, 없으면 로그인된 실사용자. 없으면 null. */
+function resolveDriveUserId(value: unknown): string | null {
+  if (validDriveUserId(value)) return value;
+  return currentRealUserUid();
+}
+
+/** Drive 호출 실패 → 사용자 문구. 예외 종류에 관계없이 토큰은 새지 않는다. */
+function driveFailure(e: unknown): { ok: false; error: string } {
+  return {
+    ok: false,
+    error:
+      e instanceof Error
+        ? e.message
+        : "Google Drive 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+  };
+}
+
+const DRIVE_NOT_CONNECTED = {
+  ok: false as const,
+  error:
+    "Google Drive 가 연결되어 있지 않습니다. 설정에서 Drive 를 연결해 주세요.",
+};
+
+async function driveSearchFor(
+  userId: string | null,
+  params: DriveListParams,
+): Promise<
+  { ok: true; result: DriveSearchResult } | { ok: false; error: string }
+> {
+  if (!userId) return DRIVE_NOT_CONNECTED;
+  try {
+    const connector = createUserDriveConnector(safeStorage, userId);
+    return { ok: true, result: await connector.search(params) };
+  } catch (e) {
+    return driveFailure(e);
+  }
+}
+
+async function driveFetchFor(
+  userId: string | null,
+  fileId: string,
+): Promise<
+  { ok: true; document: DriveDocument } | { ok: false; error: string }
+> {
+  if (!userId) return DRIVE_NOT_CONNECTED;
+  if (typeof fileId !== "string" || !fileId.trim()) {
+    return { ok: false, error: "파일 id 가 필요합니다." };
+  }
+  try {
+    const connector = createUserDriveConnector(safeStorage, userId);
+    return { ok: true, document: await connector.fetchDocument(fileId.trim()) };
+  } catch (e) {
+    return driveFailure(e);
+  }
+}
+
+/** 렌더러가 넘긴 검색 입력을 신뢰하지 않고 형태를 좁혀서 받는다. */
+function sanitizeDriveListParams(input: unknown): DriveListParams {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() ? v.trim() : undefined;
+  return {
+    text: str(raw.text),
+    nameContains: str(raw.nameContains),
+    folderId: str(raw.folderId),
+    mimeTypes: Array.isArray(raw.mimeTypes)
+      ? raw.mimeTypes.filter((m): m is string => typeof m === "string")
+      : undefined,
+    includeFolders: raw.includeFolders === true,
+    includeTrashed: raw.includeTrashed === true,
+    pageSize: typeof raw.pageSize === "number" ? raw.pageSize : undefined,
+    pageToken: str(raw.pageToken),
+  };
+}
+
+/**
+ * Drive 동의(시스템 브라우저 loopback). ★앱 창은 navigate 하지 않는다 —
+ * signInWithRedirect 가 Electron 에서 깨지는 이력 때문에 이 경로만 쓴다.
+ */
+ipcMain.handle("drive:connect", async (_event, input: unknown) => {
+  const userId = resolveDriveUserId(
+    input && typeof input === "object"
+      ? (input as { userId?: unknown }).userId
+      : undefined,
+  );
+  if (!userId) {
+    return {
+      ok: false,
+      error: "먼저 Marblo 에 로그인한 뒤 Google Drive 를 연결해 주세요.",
+    };
+  }
+  return connectGoogleDrive(safeStorage, userId);
+});
+
+ipcMain.handle("drive:status", (_event, input: unknown) => {
+  const userId = resolveDriveUserId(
+    input && typeof input === "object"
+      ? (input as { userId?: unknown }).userId
+      : input,
+  );
+  if (!userId) return { connected: false };
+  return driveConnectionStatus(safeStorage, userId);
+});
+
+ipcMain.handle("drive:disconnect", (_event, input: unknown) => {
+  const userId = resolveDriveUserId(
+    input && typeof input === "object"
+      ? (input as { userId?: unknown }).userId
+      : input,
+  );
+  if (!userId) return { ok: false, error: "로그인 정보가 없습니다." };
+  return disconnectGoogleDrive(safeStorage, userId);
+});
+
+ipcMain.handle("drive:search", async (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  return driveSearchFor(
+    resolveDriveUserId(raw.userId),
+    sanitizeDriveListParams(raw),
+  );
+});
+
+ipcMain.handle("drive:fetch", async (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  return driveFetchFor(
+    resolveDriveUserId(raw.userId),
+    typeof raw.fileId === "string" ? raw.fileId : "",
+  );
+});
+
+// 브리지(→ drive_search / drive_fetch MCP 도구)가 쓰는 게이트웨이. 창이 없는
+// 호출이라 uid 는 매번 "지금 로그인된 실사용자" 로 해석한다 — 로그아웃 상태에선
+// null 이 되어 도구가 "연결 안 됨" 으로 정직하게 답한다.
+bridgeServer.setDriveGateway({
+  search: (params) => driveSearchFor(currentRealUserUid(), params),
+  fetch: (fileId) => driveFetchFor(currentRealUserUid(), fileId),
 });
 
 ipcMain.handle(
