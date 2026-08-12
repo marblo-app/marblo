@@ -1,4 +1,8 @@
-import { getAuth, signInAnonymously, signInWithCustomToken } from "firebase/auth";
+import {
+  getAuth,
+  signInAnonymously,
+  signInWithCustomToken,
+} from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getMissionFirebaseApp } from "./mission-engine/firebase-app";
 
@@ -71,6 +75,26 @@ export async function syncAgentCustomToken(
       customTokenAccepted: false,
       error: `custom-token auth failed (code=${code}): ${errorMessage(err)}`,
     };
+  }
+}
+
+/**
+ * 지금 main 프로세스가 알고 있는 **실사용자** uid. 익명 폴백이거나 아직 로그인
+ * 전이면 null.
+ *
+ * 렌더러가 userId 를 넘겨주지 못하는 경로(브리지 → MCP 도구처럼 창이 개입하지
+ * 않는 호출)가 "누구의 자격증명으로 동작해야 하나" 를 물을 때 쓴다. 익명 uid 를
+ * 절대 돌려주지 않는 것이 요점이다 — 익명 uid 로 사용자 시크릿 저장소를 찾으면
+ * 매번 다른 칸을 보게 되고, 그건 "연결이 안 된다" 는 유령 버그로 나타난다.
+ */
+export function currentRealUserUid(): string | null {
+  try {
+    const { app } = getMissionFirebaseApp();
+    const user = getAuth(app).currentUser;
+    if (!user || user.isAnonymous) return null;
+    return user.uid;
+  } catch {
+    return null;
   }
 }
 

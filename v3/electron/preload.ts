@@ -986,6 +986,30 @@ contextBridge.exposeInMainWorld("electronAPI", {
     disconnect: (userId: string) =>
       ipcRenderer.invoke("github:disconnect", userId),
   },
+  // Google Drive 읽기 전용 커넥터 (티켓 zqNxS9904aeeBEug1uAD). 지식위키·비서
+  // 에픽의 선행 기반이고, 이 티켓엔 UI 가 없다 — 설정 화면은 후속 티켓이 붙인다.
+  // ★connect 는 시스템 브라우저를 열어 동의를 받는다(앱 창은 navigate 안 함).
+  // ★어떤 응답에도 OAuth 토큰은 실리지 않는다(status 는 이메일·스코프만).
+  drive: {
+    connect: (userId?: string) =>
+      ipcRenderer.invoke("drive:connect", { userId }),
+    status: (userId?: string) => ipcRenderer.invoke("drive:status", { userId }),
+    disconnect: (userId?: string) =>
+      ipcRenderer.invoke("drive:disconnect", { userId }),
+    search: (input: {
+      userId?: string;
+      text?: string;
+      nameContains?: string;
+      folderId?: string;
+      mimeTypes?: string[];
+      includeFolders?: boolean;
+      includeTrashed?: boolean;
+      pageSize?: number;
+      pageToken?: string;
+    }) => ipcRenderer.invoke("drive:search", input),
+    fetch: (input: { userId?: string; fileId: string }) =>
+      ipcRenderer.invoke("drive:fetch", input),
+  },
   // 오케스트레이터↔Telegram 채널 연결 (텔레그램 T1·보안 민감). T2 설정 UI 가
   // 소비한다. set 은 로컬 설정 경로 — 여기서만 권한 파일(access.json)이 갱신된다.
   // status.canEnable=false (chatId 없음 등)면 프론트가 토글을 잠가야 한다.

@@ -1217,6 +1217,92 @@ interface GitHubAPI {
   disconnect: (userId: string) => Promise<{ ok: boolean }>;
 }
 
+// ── Google Drive 읽기 전용 커넥터 (티켓 zqNxS9904aeeBEug1uAD) ────────────────
+// 후속 지식위키·비서 에이전트가 소비할 **중립 계약**이다. Drive API 모양이
+// 렌더러까지 새어나오지 않도록 여기서 끊는다.
+// ★OAuth 토큰은 이 브리지를 절대 통과하지 않는다(status 는 이메일·스코프만).
+
+interface DriveConnectionStatus {
+  connected: boolean;
+  /** 연결된 구글 계정 이메일(알 수 있으면). */
+  email?: string;
+  /** 실제로 부여된 스코프 목록. */
+  scopes?: string[];
+  connectedAt?: number;
+}
+
+interface DriveFileMeta {
+  id: string;
+  title: string;
+  mimeType: string;
+  isFolder: boolean;
+  modifiedTime?: string;
+  size?: number;
+  webViewLink?: string;
+  parents?: string[];
+}
+
+/** 본문을 어떻게 얻었는가 — 실패도 값으로 드러난다(조용한 빈 본문 금지). */
+type DriveExtraction =
+  | "export"
+  | "download"
+  | "pdf"
+  | "pdf-no-text"
+  | "unsupported";
+
+interface DriveDocument {
+  id: string;
+  title: string;
+  mimeType: string;
+  text: string;
+  extraction: DriveExtraction;
+  truncated: boolean;
+  modifiedTime?: string;
+  webViewLink?: string;
+}
+
+interface DriveSearchInput {
+  /** 기본값은 로그인된 사용자. 멀티계정 화면에서만 명시한다. */
+  userId?: string;
+  /** 전문 검색(fullText contains). */
+  text?: string;
+  nameContains?: string;
+  folderId?: string;
+  mimeTypes?: string[];
+  includeFolders?: boolean;
+  includeTrashed?: boolean;
+  pageSize?: number;
+  pageToken?: string;
+}
+
+interface DriveAPI {
+  /** 시스템 브라우저로 Drive 동의를 받는다(앱 창은 navigate 하지 않는다). */
+  connect: (
+    userId?: string,
+  ) => Promise<
+    { ok: true; status: DriveConnectionStatus } | { ok: false; error: string }
+  >;
+  status: (userId?: string) => Promise<DriveConnectionStatus>;
+  disconnect: (userId?: string) => Promise<{ ok: boolean; error?: string }>;
+  search: (input: DriveSearchInput) => Promise<
+    | {
+        ok: true;
+        result: {
+          files: DriveFileMeta[];
+          nextPageToken?: string;
+          query: string;
+        };
+      }
+    | { ok: false; error: string }
+  >;
+  fetch: (input: {
+    userId?: string;
+    fileId: string;
+  }) => Promise<
+    { ok: true; document: DriveDocument } | { ok: false; error: string }
+  >;
+}
+
 interface UpdaterStatus {
   status:
     | "checking"
@@ -1351,6 +1437,7 @@ interface ElectronAPI {
   repo: RepoAPI;
   sample: SampleAPI;
   github: GitHubAPI;
+  drive: DriveAPI;
   updater: UpdaterAPI;
   sentry: SentryBridgeAPI;
   kg: KgBridgeAPI;
