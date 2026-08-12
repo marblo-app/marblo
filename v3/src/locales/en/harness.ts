@@ -203,6 +203,22 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.slack.secretsNotEncrypted":
     "Tokens are stored unencrypted on this machine (OS secret storage unavailable).",
   "harness.slack.healthError": "Last health check failed: {error}",
+  // Connection guide (collapsible) — 7-step Slack app setup
+  "harness.slack.guide.toggle": "How do I connect a Slack app?",
+  "harness.slack.guide.step1Before": "Create a new app at ",
+  "harness.slack.guide.step1After": " (Create New App).",
+  "harness.slack.guide.step2":
+    "Turn on Socket Mode and generate an App-Level Token (connections:write scope, starts with xapp-).",
+  "harness.slack.guide.step3":
+    "Add app_mentions:read, chat:write, channels:history to Bot Token Scopes, then run Install to Workspace to issue a Bot Token (xoxb-).",
+  "harness.slack.guide.step4":
+    "Turn on Event Subscriptions and subscribe to the app_mention event.",
+  "harness.slack.guide.step5":
+    "Invite the bot to the channel you want to use and note its channel ID.",
+  "harness.slack.guide.step6":
+    "Enter the Bot Token and App Token above, save, then verify with the Probe button.",
+  "harness.slack.guide.step7":
+    "Mention the bot in the channel and confirm the reply round-trips.",
 
   // HarnessVersionBadge — tooltip for an agent's installed CLI version
   "harness.installedCliVersion": "Installed CLI version v{version}",

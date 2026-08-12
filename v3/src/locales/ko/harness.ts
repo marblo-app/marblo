@@ -200,6 +200,22 @@ export const harness = {
   "harness.slack.secretsNotEncrypted":
     "이 기기에서는 토큰이 암호화 없이 저장됩니다(OS 시크릿 저장소 사용 불가).",
   "harness.slack.healthError": "최근 헬스 체크 실패: {error}",
+  // Connection guide (collapsible) — Slack 앱 셋업 7단계
+  "harness.slack.guide.toggle": "Slack 앱을 어떻게 연결하나요?",
+  "harness.slack.guide.step1Before": "",
+  "harness.slack.guide.step1After": "에서 새 앱(Create New App)을 만듭니다.",
+  "harness.slack.guide.step2":
+    "Socket Mode를 켜고 App-Level Token을 발급합니다 (connections:write 스코프, xapp-로 시작).",
+  "harness.slack.guide.step3":
+    "Bot Token Scopes에 app_mentions:read, chat:write, channels:history를 추가한 뒤 Install to Workspace를 실행해 Bot Token(xoxb-)을 발급합니다.",
+  "harness.slack.guide.step4":
+    "Event Subscriptions를 켜고 app_mention 이벤트를 구독합니다.",
+  "harness.slack.guide.step5":
+    "봇을 사용할 채널에 초대하고 채널 ID를 확인합니다.",
+  "harness.slack.guide.step6":
+    "위 패널에 Bot Token과 App Token을 입력해 저장한 뒤 확인(Probe) 버튼으로 동작을 검증합니다.",
+  "harness.slack.guide.step7":
+    "채널에서 봇을 멘션해 응답이 왕복하는지 확인합니다.",
 
   // HarnessVersionBadge — tooltip for an agent's installed CLI version
   "harness.installedCliVersion": "설치된 CLI 버전 v{version}",

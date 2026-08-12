@@ -26,7 +26,7 @@ import {
 
 vi.mock("../../src/stores/projectStore", () => ({
   useProjectStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({ currentProject: { id: "p1", name: "Project One" } })
+    selector({ currentProject: { id: "p1", name: "Project One" } }),
   ),
 }));
 
@@ -69,7 +69,7 @@ function installSlackChannelStub(overrides: Record<string, unknown> = {}) {
         hasBotToken: !!input.botToken,
         hasAppToken: !!input.appToken,
         enabled: !!input.enabled,
-      })
+      }),
     ),
     status: vi.fn(async () => baseStatus()),
     remove: vi.fn(async () => true),
@@ -110,17 +110,17 @@ describe("SlackChannelPanel — 시크릿 미노출", () => {
           enabled: true,
           active: true,
           canEnable: true,
-        })
+        }),
       ),
     });
     renderPanel();
 
     await waitFor(() =>
-      expect(screen.getByDisplayValue("C0123456789")).toBeTruthy()
+      expect(screen.getByDisplayValue("C0123456789")).toBeTruthy(),
     );
 
     const passwordInputs = document.querySelectorAll(
-      'input[type="password"]'
+      'input[type="password"]',
     ) as NodeListOf<HTMLInputElement>;
     expect(passwordInputs).toHaveLength(2);
     for (const input of passwordInputs) {
@@ -133,15 +133,15 @@ describe("SlackChannelPanel — 시크릿 미노출", () => {
   it("연결됨 상태면 배지가 연결로 뜬다", async () => {
     installSlackChannelStub({
       status: vi.fn(async () =>
-        baseStatus({ enabled: true, active: true, canEnable: true })
+        baseStatus({ enabled: true, active: true, canEnable: true }),
       ),
     });
     renderPanel();
 
     await waitFor(() =>
       expect(
-        screen.getByText(ko["harness.slack.status.connected"])
-      ).toBeTruthy()
+        screen.getByText(ko["harness.slack.status.connected"]),
+      ).toBeTruthy(),
     );
   });
 });
@@ -150,7 +150,7 @@ describe("SlackChannelPanel — 저장 시 빈 토큰 필드는 '지움'이 아�
   it("채널 ID만 바꿔 저장하면 botToken/appToken 키를 아예 안 보낸다", async () => {
     const api = installSlackChannelStub({
       status: vi.fn(async () =>
-        baseStatus({ hasBotToken: true, hasAppToken: true, channelId: "C1" })
+        baseStatus({ hasBotToken: true, hasAppToken: true, channelId: "C1" }),
       ),
     });
     renderPanel();
@@ -175,7 +175,7 @@ describe("SlackChannelPanel — 저장 시 빈 토큰 필드는 '지움'이 아�
     await waitFor(() => expect(api.status).toHaveBeenCalledWith("p1"));
 
     const passwordInputs = document.querySelectorAll(
-      'input[type="password"]'
+      'input[type="password"]',
     ) as NodeListOf<HTMLInputElement>;
     fireEvent.change(passwordInputs[0], { target: { value: "xoxb-secret" } });
     fireEvent.click(screen.getByText(ko["harness.slack.save"]));
@@ -187,7 +187,7 @@ describe("SlackChannelPanel — 저장 시 빈 토큰 필드는 '지움'이 아�
     // 저장 뒤 입력란은 다시 비워진다(write-only 유지).
     await waitFor(() => {
       const inputs = document.querySelectorAll(
-        'input[type="password"]'
+        'input[type="password"]',
       ) as NodeListOf<HTMLInputElement>;
       expect(inputs[0].value).toBe("");
     });
@@ -212,7 +212,7 @@ describe("SlackChannelPanel — probe / remove", () => {
 
     await waitFor(() => expect(api.probe).toHaveBeenCalledWith("p1"));
     await waitFor(() =>
-      expect(screen.getByText(ko["harness.slack.probeResultOk"])).toBeTruthy()
+      expect(screen.getByText(ko["harness.slack.probeResultOk"])).toBeTruthy(),
     );
   });
 
@@ -246,5 +246,56 @@ describe("SlackChannelPanel — probe / remove", () => {
     expect(api.remove).not.toHaveBeenCalled();
 
     confirmSpy.mockRestore();
+  });
+});
+
+describe("SlackChannelPanel — 연결 가이드 (접힘/열림)", () => {
+  it("기본값은 접힘 상태이고, 토글을 누르면 7단계 가이드가 펼쳐진다", async () => {
+    installSlackChannelStub();
+    renderPanel();
+
+    const toggle = await screen.findByText(ko["harness.slack.guide.toggle"]);
+    const toggleButton = toggle.closest("button") as HTMLButtonElement;
+    expect(toggleButton.getAttribute("aria-expanded")).toBe("false");
+    expect(document.body.textContent ?? "").not.toContain(
+      ko["harness.slack.guide.step2"],
+    );
+
+    fireEvent.click(toggleButton);
+
+    expect(toggleButton.getAttribute("aria-expanded")).toBe("true");
+    const bodyText = document.body.textContent ?? "";
+    for (const step of [
+      "step1After",
+      "step2",
+      "step3",
+      "step4",
+      "step5",
+      "step6",
+      "step7",
+    ] as const) {
+      expect(bodyText).toContain(
+        ko[`harness.slack.guide.${step}` as keyof typeof ko],
+      );
+    }
+
+    // 다시 누르면 접힌다.
+    fireEvent.click(toggleButton);
+    expect(toggleButton.getAttribute("aria-expanded")).toBe("false");
+    expect(document.body.textContent ?? "").not.toContain(
+      ko["harness.slack.guide.step2"],
+    );
+  });
+
+  it("1단계 링크는 api.slack.com/apps 를 새 탭으로 연다", async () => {
+    installSlackChannelStub();
+    renderPanel();
+
+    fireEvent.click(await screen.findByText(ko["harness.slack.guide.toggle"]));
+
+    const link = screen.getByText("api.slack.com/apps") as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("https://api.slack.com/apps");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
   });
 });
