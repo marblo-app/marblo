@@ -1767,6 +1767,9 @@ const ORCHESTRATOR_LIVE_GUARDED_TOOLS = new Set([
   "run_skill",
   "mission_step_done",
   "send_telegram_message",
+  // 같은 이유로 Slack 아웃바운드도 게이트한다 — 죽은 오케 세션이 팀 채널에
+  // 메시지를 쏘지 못하게(외부 발신은 되돌릴 수 없다).
+  "send_slack_message",
 ]);
 
 async function validateLiveOrchestratorToolCall(
@@ -6207,6 +6210,57 @@ export function registerTools(server: McpServer): void {
   }
 
   /**
+   * Slack 아웃바운드(브리지 경유). `sendTelegramViaBridge` 의 미러 —
+   * 봇 토큰은 이 경계를 넘지 않고, 에러 문자열은 poller 가 이미 토큰 스크럽한
+   * 것이다. threadTs 를 넘기면 물어본 스레드에 답장이 달린다.
+   */
+  async function sendSlackViaBridge(
+    projectId: string,
+    messageText: string,
+    channelId?: string,
+    threadTs?: string,
+  ): Promise<{
+    ok: boolean;
+    channel?: string;
+    threadTs?: string;
+    error?: string;
+  }> {
+    const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+    if (!bridgePort) {
+      return {
+        ok: false,
+        error: "MARBLO_BRIDGE_PORT not set. Bridge server not available.",
+      };
+    }
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${bridgePort}/send-slack-message`,
+        {
+          method: "POST",
+          headers: bridgeHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            projectId,
+            text: messageText,
+            channelId,
+            threadTs,
+          }),
+        },
+      );
+      return (await response.json()) as {
+        ok: boolean;
+        channel?: string;
+        threadTs?: string;
+        error?: string;
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : "network error",
+      };
+    }
+  }
+
+  /**
    * ★고비용 칸(max/ultra) 게이트 — `dispatch_task` 가 스폰 전에 부른다.
    *
    * "승인이 있으면 통과, 없으면 강등" 을 판정만 하고 소진은 하지 않는다(스폰이
@@ -7259,6 +7313,68 @@ export function registerTools(server: McpServer): void {
       }
       return text(
         `Sent Telegram message to chat ${result.chatId ?? "(default)"}.`,
+      );
+    },
+  );
+
+  // send_slack_message — outbound reply to the project's Slack channel.
+  // The mirror of send_telegram_message: the electron-owned SlackPoller holds
+  // the bot token, the last-inbound channel and the thread to answer in; this
+  // tool POSTs to the bridge which routes to poller.sendMessage. The token
+  // NEVER crosses this boundary — we send only projectId/text/channelId/
+  // threadTs, and any error returned is already token-scrubbed by the poller.
+  auditedTool(
+    "send_slack_message",
+    "Reply to the project's Slack channel. Call this to answer a '[Slack " +
+      "inbound ...]' message — a plain text response is NOT delivered to Slack, " +
+      "only this tool is. Pass the threadTs from the inbound message so the reply " +
+      "lands in the thread that asked (several people share one channel; an " +
+      "un-threaded reply is hard to attribute). channelId defaults to the last " +
+      "inbound channel for the project. Requires an active Slack channel and " +
+      "MARBLO_BRIDGE_PORT.",
+    {
+      text: z.string().describe("Message text to send to Slack."),
+      projectId: z
+        .string()
+        .optional()
+        .describe(
+          "Marblo project id. Defaults to MARBLO_PROJECT (the current context).",
+        ),
+      channelId: z
+        .string()
+        .optional()
+        .describe(
+          "Target channel id (e.g. C0123ABCDEF). Omit to reply to the last inbound channel for the project.",
+        ),
+      threadTs: z
+        .string()
+        .optional()
+        .describe(
+          "Thread to reply into — pass the threadTs from the '[Slack inbound ...]' message. " +
+            'Omit to use the last inbound thread; pass "" to post to the channel instead of a thread.',
+        ),
+    },
+    async ({ text: messageText, projectId, channelId, threadTs }) => {
+      const targetProject = projectId || process.env.MARBLO_PROJECT || "";
+      if (!targetProject) {
+        return text(
+          "Error: no projectId (set MARBLO_PROJECT or pass projectId).",
+        );
+      }
+      const result = await sendSlackViaBridge(
+        targetProject,
+        messageText,
+        channelId,
+        threadTs,
+      );
+      if (!result.ok) {
+        return text(
+          `Failed to send Slack message: ${result.error || "unknown error"}`,
+        );
+      }
+      return text(
+        `Sent Slack message to channel ${result.channel ?? "(default)"}` +
+          (result.threadTs ? ` in thread ${result.threadTs}.` : "."),
       );
     },
   );

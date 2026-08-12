@@ -863,6 +863,25 @@ export class BridgeServer {
         chatId?: string,
       ) => Promise<{ ok: boolean; chatId?: string; error?: string }>)
     | null = null;
+
+  // Outbound Slack sender — the exact mirror of sendTelegramMessage above.
+  // main wires this to SlackPoller.sendMessage (which holds the bot token, the
+  // last-inbound channel and the thread to reply into). The send_slack_message
+  // MCP tool POSTs /send-slack-message and the bridge routes here. Null until
+  // wired (the tool then reports it's unavailable). Returns a token-SCRUBBED
+  // result — never surfaces a token.
+  private sendSlackMessage:
+    | ((
+        projectId: string,
+        text: string,
+        opts?: { channelId?: string; threadTs?: string },
+      ) => Promise<{
+        ok: boolean;
+        channel?: string;
+        threadTs?: string;
+        error?: string;
+      }>)
+    | null = null;
   private ghostReclaim:
     | (() => Promise<{
         scanned: number;
@@ -975,6 +994,22 @@ export class BridgeServer {
     ) => Promise<{ ok: boolean; chatId?: string; error?: string }>,
   ): void {
     this.sendTelegramMessage = fn;
+  }
+
+  /** Wire the outbound Slack sender (main → SlackPoller.sendMessage). */
+  setSendSlackMessage(
+    fn: (
+      projectId: string,
+      text: string,
+      opts?: { channelId?: string; threadTs?: string },
+    ) => Promise<{
+      ok: boolean;
+      channel?: string;
+      threadTs?: string;
+      error?: string;
+    }>,
+  ): void {
+    this.sendSlackMessage = fn;
   }
 
   setMainWindow(win: BrowserWindow | null): void {
@@ -1163,6 +1198,11 @@ export class BridgeServer {
 
         if (req.method === "POST" && req.url === "/send-telegram-message") {
           this.handleSendTelegram(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/send-slack-message") {
+          this.handleSendSlack(req, res);
           return;
         }
 
@@ -4245,6 +4285,92 @@ export class BridgeServer {
         } catch (err) {
           // Defensive: the sender scrubs its own errors, but a thrown error
           // here could carry unexpected content — keep it generic.
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: err instanceof Error ? err.message : "send failed",
+            }),
+          );
+        }
+      })();
+    });
+  }
+
+  // ── POST /send-slack-message ────────────────────────────────
+  //
+  // Outbound path for the send_slack_message MCP tool — the exact mirror of
+  // handleSendTelegram above. The orchestrator replies to a Slack inbound by
+  // calling the tool, which POSTs here, and the bridge routes to the
+  // electron-owned SlackPoller (holds the bot token + last-inbound channel and
+  // thread). No token crosses this boundary — the request carries only
+  // projectId/text/channelId/threadTs, and the response error is pre-scrubbed
+  // by the poller.
+  private handleSendSlack(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      void (async () => {
+        let params: {
+          projectId?: string;
+          text?: string;
+          channelId?: string;
+          threadTs?: string;
+        };
+        try {
+          params = JSON.parse(body);
+        } catch (err) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: `Invalid JSON: ${
+                err instanceof Error ? err.message : "parse error"
+              }`,
+            }),
+          );
+          return;
+        }
+
+        const projectId = (params.projectId ?? "").trim();
+        const text = params.text ?? "";
+        if (!projectId || !text.trim()) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: "Missing required fields: projectId, text",
+            }),
+          );
+          return;
+        }
+
+        if (!this.sendSlackMessage) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: "Slack sender not available (no active channel).",
+            }),
+          );
+          return;
+        }
+
+        try {
+          const result = await this.sendSlackMessage(projectId, text, {
+            ...(params.channelId ? { channelId: params.channelId } : {}),
+            ...(params.threadTs !== undefined
+              ? { threadTs: params.threadTs }
+              : {}),
+          });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(result));
+        } catch (err) {
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
