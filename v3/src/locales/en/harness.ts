@@ -166,6 +166,44 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.telegram.plugin.descAfter":
     " requires the telegram plugin to be installed. Install it from the Harness store, or via the CLI using the same plugin name, then enable the channel.",
 
+  // --- Slack channel panel (mirrors #936's IPC contract — secrets never reach the renderer) ---
+  "harness.slack.status.idle": "Idle",
+  "harness.slack.status.connected": "Connected",
+  "harness.slack.status.needsCheck": "Needs check",
+  "harness.slack.status.disconnected": "Disconnected",
+  "harness.slack.title": "Slack channel connection",
+  "harness.slack.loadError": "Failed to load Slack channel status.",
+  "harness.slack.needChannelId": "Save a channel ID before enabling.",
+  "harness.slack.saved": "Channel settings saved.",
+  "harness.slack.saveError": "Failed to save channel settings.",
+  "harness.slack.refreshTitle": "Refresh channel status",
+  "harness.slack.enableTitle": "Enable Slack channel",
+  "harness.slack.enabled": "Active",
+  "harness.slack.disabled": "Inactive",
+  "harness.slack.loading": "Checking channel status",
+  "harness.slack.channelIdPlaceholder": "C0123456789",
+  "harness.slack.save": "Save",
+  "harness.slack.tokenSavedPlaceholder": "Saved — type to replace",
+  "harness.slack.probe": "Probe",
+  "harness.slack.probeTitle":
+    "Check whether the saved credentials actually work",
+  "harness.slack.probeOk": "Credentials verified.",
+  "harness.slack.probeFailed": "Failed to verify credentials.",
+  "harness.slack.probeResultOk": "Credentials OK",
+  "harness.slack.probeResultFail": "Credential check failed",
+  "harness.slack.probeTeam": "team {team} · bot {bot}",
+  "harness.slack.probeAppTokenOk": "app token (Socket Mode) OK",
+  "harness.slack.probeAppTokenSkipped":
+    "app token not verified (missing or skipped)",
+  "harness.slack.remove": "Remove channel",
+  "harness.slack.removeConfirm":
+    "Remove the Slack channel connection for the current project? Saved tokens will be deleted.",
+  "harness.slack.removed": "Channel connection removed.",
+  "harness.slack.removeError": "Failed to remove channel.",
+  "harness.slack.secretsNotEncrypted":
+    "Tokens are stored unencrypted on this machine (OS secret storage unavailable).",
+  "harness.slack.healthError": "Last health check failed: {error}",
+
   // HarnessVersionBadge — tooltip for an agent's installed CLI version
   "harness.installedCliVersion": "Installed CLI version v{version}",
 

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
 import { TelegramChannelPanel } from "./TelegramChannelPanel";
+import { SlackChannelPanel } from "./SlackChannelPanel";
 import { EnvSwapVendorSection } from "./EnvSwapVendorSection";
 import { useTranslation, t as translate } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
@@ -78,14 +79,14 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
   const { t } = useTranslation();
   const [packages, setPackages] = useState<HarnessPackage[]>([]);
   const [versions, setVersions] = useState<Record<string, HarnessVersionInfo>>(
-    {},
+    {}
   );
   const [filter, setFilter] = useState<CategoryFilter>("all");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [authStates, setAuthStates] = useState<Record<string, CliAuthResult>>(
-    {},
+    {}
   );
   const [authChecking, setAuthChecking] = useState<Record<string, boolean>>({});
 
@@ -109,9 +110,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
       setPackages(list);
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : translate("harness.store.loadFail"),
+        err instanceof Error ? err.message : translate("harness.store.loadFail")
       );
     }
     // Versions are looked up lazily — they require network (npm view) and
@@ -141,7 +140,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
   const showPackages = filter !== "envswap";
   const showEnvSwap = filter === "all" || filter === "envswap";
   const filtered = packages.filter(
-    (p) => filter === "all" || p.category === filter,
+    (p) => filter === "all" || p.category === filter
   );
 
   const handleInstall = async (pkg: HarnessPackage) => {
@@ -149,7 +148,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
     setInfo(null);
     if (pkg.install.kind === "manual") {
       setInfo(
-        pkg.install.instructions ?? translate("harness.store.noManualGuide"),
+        pkg.install.instructions ?? translate("harness.store.noManualGuide")
       );
       return;
     }
@@ -290,6 +289,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
           />
           <ConnectionStatusPanel />
           <TelegramChannelPanel />
+          <SlackChannelPanel />
 
           {/* env-swap 벤더 — 설치형 카탈로그에 없는 "키만 얹는" 벤더들.
               카탈로그보다 위에 두는 이유: 이 탭에서 안 보인다는 것이 문제였다. */}
@@ -342,15 +342,15 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                               isInstalled
                                 ? "bg-[#a6e3a1]/20 text-[#a6e3a1]"
                                 : isManual
-                                  ? "bg-[#f9e2af]/20 text-[#f9e2af]"
-                                  : "bg-[#313244] text-[#6c7086]"
+                                ? "bg-[#f9e2af]/20 text-[#f9e2af]"
+                                : "bg-[#313244] text-[#6c7086]"
                             }`}
                           >
                             {isInstalled
                               ? t("harness.store.badge.installed")
                               : isManual
-                                ? t("harness.store.badge.manual")
-                                : t("harness.store.badge.notInstalled")}
+                              ? t("harness.store.badge.manual")
+                              : t("harness.store.badge.notInstalled")}
                           </span>
                           {auth && isInstalled && (
                             <span
@@ -363,8 +363,8 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                               {authBusy
                                 ? t("harness.store.auth.checking")
                                 : auth.authenticated
-                                  ? "Ready"
-                                  : t("harness.store.auth.needed")}
+                                ? "Ready"
+                                : t("harness.store.auth.needed")}
                             </span>
                           )}
                         </div>
@@ -377,14 +377,13 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                           <span className="text-[#6c7086]">
                             v{ver.localVersion}
                           </span>
-                          {ver.updateState === "outdated" &&
-                            ver.latestVersion && (
-                              <span className="rounded bg-[#f9e2af]/20 px-1.5 py-0.5 text-[#f9e2af]">
-                                {t("harness.store.updatePending", {
-                                  version: ver.latestVersion,
-                                })}
-                              </span>
-                            )}
+                          {ver.updateState === "outdated" && ver.latestVersion && (
+                            <span className="rounded bg-[#f9e2af]/20 px-1.5 py-0.5 text-[#f9e2af]">
+                              {t("harness.store.updatePending", {
+                                version: ver.latestVersion,
+                              })}
+                            </span>
+                          )}
                           {ver.updateState === "up-to-date" && (
                             <span className="text-[#6c7086]">
                               {t("harness.store.upToDate")}
@@ -427,12 +426,12 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                             {isBusy
                               ? t("harness.store.installing")
                               : isManual
-                                ? t("harness.store.viewGuide")
-                                : isBundled
-                                  ? t("harness.store.bundled")
-                                  : isRequired
-                                    ? t("harness.store.requiredInstall")
-                                    : statusLabel(pkg.status)}
+                              ? t("harness.store.viewGuide")
+                              : isBundled
+                              ? t("harness.store.bundled")
+                              : isRequired
+                              ? t("harness.store.requiredInstall")
+                              : statusLabel(pkg.status)}
                           </button>
                         )}
                         {isInstalled && !isRequired && (
