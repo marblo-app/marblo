@@ -161,7 +161,10 @@ export const CATALOG: HarnessPackage[] = [
   // 로 두면 (a) Harness 스토어가 "필수" 배지로 표시해 미설치 사용자에게 설정이
   // 덜 끝난 것처럼 보이고, (b) `uninstallPackage` 가 제거를 막아 선택 확장을
   // 되돌릴 수 없게 된다(harness-manager 의 `category === "required"` 가드).
-  // 온보딩 게이트 쪽은 `cliSetupStore.ROWS` 가 이미 required:false·autoInstall:false 다.
+  // 온보딩 게이트 쪽은 `cliSetupStore.ROWS` 가 required:false·autoInstall:**true**
+  // 다(k22rGEgv): 기본 함대로 같이 깔리되 오케 후보는 아니다. 그 두 축은 독립이라
+  // 여기 `category` 는 계속 `recommended` 여야 한다 — 자동설치된다고 제거 불가로
+  // 만들면 사용자가 되돌릴 길이 없어진다.
   {
     id: "cli-grok",
     name: "xAI Grok Build CLI",

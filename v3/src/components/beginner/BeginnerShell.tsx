@@ -169,6 +169,9 @@ export function BeginnerShell() {
   // 게이트가 폴더 게이트로 갈아치워지면서 모달째 언마운트돼, "연결됐어요" 가
   // 뜨자마자 사라진다(시연에서 화면이 뚝 끊기는 자리).
   const [showOneClick, setShowOneClick] = useState(false);
+  // 모달의 "직접 고를게요" 가 눌린 횟수 — 연결 화면이 택1 섹션으로 스크롤·강조할
+  // 신호다. 0 은 "아직 안 눌렸다"(첫 렌더에 스크롤이 튀지 않는다).
+  const [manualFocusSignal, setManualFocusSignal] = useState(0);
   const [promotion, setPromotion] = useState<PromotionTrigger | null>(null);
 
   // 보드가 없으므로 티켓/에이전트 구독을 이 셸이 직접 든다 — 인라인 라이브의
@@ -291,6 +294,17 @@ export function BeginnerShell() {
   const openOneClick = useCallback(() => setShowOneClick(true), []);
   const closeOneClick = useCallback(() => setShowOneClick(false), []);
 
+  // ★"직접 고를게요" — 닫기 **더하기** 목적지로 데려가기(티켓 k22rGEgv).
+  // 수동 선택 UI 는 이미 이 모달 아래(BeginnerConnectStep 의 택1 섹션)에 있지만
+  // 스크롤 접힘 밑이라, 닫기만 하면 사용자는 방금 떠나온 원클릭 CTA 를 다시 본다
+  // — 콜드 테스트에서 "아무 동작 없이 창만 닫힘" 으로 보고된 그 자리다. 카운터를
+  // 올려 연결 화면이 그 섹션으로 스크롤·강조하게 한다(같은 버튼을 두 번 눌러도
+  // 매번 반응해야 하므로 boolean 이 아니라 단조 증가값이다).
+  const chooseManually = useCallback(() => {
+    setShowOneClick(false);
+    setManualFocusSignal((n) => n + 1);
+  }, []);
+
   const closeDemo = useCallback(() => {
     // 데모의 CTA 는 "로그인 후 연결" 플래그를 세우는데, 우리는 이미 로그인 뒤
     // 연결 화면에 서 있다 — 다음 실행에 낡은 안내가 남지 않게 지운다.
@@ -405,6 +419,7 @@ export function BeginnerShell() {
               <BeginnerConnectStep
                 onWatchDemo={() => setShowDemo(true)}
                 onOneClick={openOneClick}
+                manualFocusSignal={manualFocusSignal}
               />
             </div>
           ) : !hasFolder ? (
@@ -553,7 +568,12 @@ export function BeginnerShell() {
         }
       />
 
-      {showOneClick && <BeginnerOneClickModal onClose={closeOneClick} />}
+      {showOneClick && (
+        <BeginnerOneClickModal
+          onClose={closeOneClick}
+          onManual={chooseManually}
+        />
+      )}
 
       {/* ★"로그인은 됐는데 아무 일도 안 일어나요" — 구독/크레딧이 없어 CLI 가 한
           턴도 못 도는 상태의 가이드(티켓 sVdwTsiGq6qZVAmSkwZB). 원클릭 모달이

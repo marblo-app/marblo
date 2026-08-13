@@ -57,11 +57,28 @@ export interface BeginnerOneClickModalProps {
   onClose: () => void;
   /** 인증까지 끝났을 때 — 셸이 다음 국면(폴더/챗)으로 넘어간다. */
   onReady?: () => void;
+  /**
+   * "직접 고를게요" — 자동 경로를 버리고 **수동 선택 화면으로 데려다 준다**.
+   *
+   * ★`onClose` 와 갈라 두는 것이 이 프롭의 전부다(티켓 k22rGEgv). 예전엔 이
+   * 버튼이 `onClose` 를 그대로 불렀는데, 수동 선택 UI(BeginnerConnectStep 의
+   * '직접 고르기' 택1 카드)는 원래부터 이 모달 **아래**에 깔려 있으므로 화면은
+   * 사실 "이동" 을 했다 — 다만 그 섹션이 온램프 카드와 원클릭 CTA 아래, 스크롤
+   * 접힘 **밑**에 있어서 닫는 순간 사용자가 보는 건 방금 떠나온 그 CTA 카드였다.
+   * 콜드 테스트에서 "눌러도 아무 동작 없이 창만 닫힌다" 로 보고된 것이 이것이다.
+   * 그래서 고칠 것은 목적지가 아니라 **도착을 보이게 하는 일**이고, 그 스크롤·
+   * 강조는 연결 화면을 소유한 셸만 할 수 있다.
+   *
+   * 안 주면 종전대로 닫기만 한다 — 이 모달을 다른 자리에서 재사용할 때 수동
+   * 화면이 없을 수도 있어서다.
+   */
+  onManual?: () => void;
 }
 
 export function BeginnerOneClickModal({
   onClose,
   onReady,
+  onManual,
 }: BeginnerOneClickModalProps) {
   const { t } = useTranslation();
 
@@ -395,10 +412,13 @@ export function BeginnerOneClickModal({
               {t("beginner.oneClick.retry")}
             </button>
           )}
+          {/* ★"직접 고를게요" 는 닫기가 **아니다** — 수동 선택 화면으로 데려다
+              준다(onManual). 둘을 같은 핸들러로 묶어 두면 창만 사라지고 사용자는
+              같은 자리에 남는다(k22rGEgv 콜드 테스트). 위의 ✕ 는 그대로 닫기다. */}
           <button
             type="button"
             data-testid="beginner-oneclick-manual"
-            onClick={onClose}
+            onClick={onManual ?? onClose}
             className={BUTTON_GHOST}
           >
             {t("beginner.oneClick.manual")}
