@@ -33,4 +33,30 @@ export const workspace = {
   "workspace.tab.missions": "미션",
   "workspace.tab.flows": "플로우 (베타)",
   "workspace.tab.deploy": "배포",
+
+  // ── 어드밴스 첫 진입 코치마크 투어 ─────────────────────────────────────
+  "workspace.tour.progress": "안내 {current}/{total}",
+  "workspace.tour.next": "다음",
+  "workspace.tour.back": "이전",
+  "workspace.tour.done": "시작하기",
+  "workspace.tour.skip": "건너뛰기",
+  "workspace.tour.never": "다시 보지 않기",
+  "workspace.tour.board.title": "보드 — 티켓 한눈에",
+  "workspace.tour.board.body":
+    "TODO부터 DONE까지 칸반으로 흘러갑니다. 카드를 누르면 담당 에이전트와 기록을 볼 수 있어요.",
+  "workspace.tour.code.title": "코드 — 파일과 변경점",
+  "workspace.tour.code.body":
+    "프로젝트 파일을 열고, 에이전트가 고친 diff 를 여기서 검토합니다.",
+  "workspace.tour.agents.title": "에이전트 — 팀원 목록",
+  "workspace.tour.agents.body":
+    "지금 일하는 에이전트와 터미널을 보고, 직접 스폰하거나 멈출 수 있어요.",
+  "workspace.tour.harness.title": "하네스 — CLI·모델 연결",
+  "workspace.tour.harness.body":
+    "Claude·Codex 같은 하네스 연결과 모델 경로를 관리하는 곳입니다.",
+  "workspace.tour.usage.title": "사용량 — 비용과 한도",
+  "workspace.tour.usage.body":
+    "이번 달 사용량과 플랜 한도를 확인합니다. 예산을 넘기기 전에 여기서 봐요.",
+  "workspace.tour.settings.title": "설정 — 계정·모드·알림",
+  "workspace.tour.settings.body":
+    "계정, 심플/어드밴스 모드 전환, 알림 등을 바꿉니다. 심플 모드로 돌아갈 때도 여기예요.",
 };
