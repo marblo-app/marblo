@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { spawn } from "child_process";
 import { gitSpawnEnv } from "./git-path";
+import { annotateGitFailure } from "./xcode-clt";
 
 export interface FileNode {
   name: string;
@@ -263,7 +264,11 @@ export class FsManager {
           reject(
             new Error(
               `git ${args[0]} exited ${code}${
-                errOut.trim() ? `: ${errOut.trim()}` : ""
+                errOut.trim()
+                  ? // macOS Xcode CLT 문제면 raw xcrun 출력 대신 실행할 명령을
+                    // 담은 안내로 바뀐다 (티켓 nETj7szjEtT5prbYsg1D).
+                    `: ${annotateGitFailure(errOut.trim())}`
+                  : ""
               }`,
             ),
           );

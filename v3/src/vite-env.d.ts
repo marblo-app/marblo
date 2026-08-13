@@ -794,9 +794,25 @@ interface AppStateAPI {
   }) => Promise<{ success: boolean }>;
 }
 
+/**
+ * macOS Xcode Command Line Tools 상태 (티켓 nETj7szjEtT5prbYsg1D).
+ * `checked:false` = darwin 이 아니라 검사하지 않음(항상 ok).
+ * 문제가 있으면 `command` 를 그대로 복사 버튼에 태워 보여준다 — sudo 가
+ * 필요해 앱이 대신 실행할 수 없다.
+ */
+interface XcodeCltStatus {
+  ok: boolean;
+  checked: boolean;
+  issue?: "license-not-agreed" | "clt-missing";
+  command?: string;
+  message?: string;
+  title?: string;
+}
+
 interface SystemAPI {
   onWake: (callback: () => void) => void;
   offWake: () => void;
+  xcodeClt: () => Promise<XcodeCltStatus>;
 }
 
 interface SentryBridgeAPI {
@@ -1138,7 +1154,15 @@ interface ProjectConnection {
 }
 
 interface ConnectionCheckItem {
-  id: "repo" | "branch" | "issues" | "pullRequest" | "auth";
+  id:
+    | "repo"
+    | "branch"
+    | "issues"
+    | "pullRequest"
+    | "auth"
+    | "mismatch"
+    // macOS Xcode CLT 라이선스/설치 (티켓 nETj7szjEtT5prbYsg1D).
+    | "toolchain";
   label: string;
   status: "pass" | "warn" | "fail";
   detail: string;
@@ -1176,8 +1200,13 @@ interface RepoCloneResult {
     | "auth"
     | "not-found"
     | "network"
-    | "git";
+    | "git"
+    // macOS Xcode CLT 문제 (티켓 nETj7szjEtT5prbYsg1D).
+    | "xcode-license"
+    | "xcode-missing";
   message?: string;
+  /** 사용자가 터미널에 그대로 붙여넣을 명령(복사 버튼용). */
+  fixCommand?: string;
 }
 
 /**

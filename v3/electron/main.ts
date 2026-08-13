@@ -232,6 +232,9 @@ import {
   type AccessMode,
 } from "./connection-store";
 import { cloneRepo, defaultCloneParentDir } from "./repo-clone";
+// macOS Xcode CLT 라이선스/설치 문제를 git 실패에서 감지·사전감지한다
+// (티켓 nETj7szjEtT5prbYsg1D).
+import { annotateGitFailure, probeXcodeClt } from "./xcode-clt";
 import { ensureSampleProject, resolveSampleProjectDir } from "./sample-project";
 import {
   pollGitHubDeviceCode,
@@ -274,7 +277,16 @@ import {
 type ConnectionCheckStatus = "pass" | "warn" | "fail";
 
 interface ConnectionCheckItem {
-  id: "repo" | "branch" | "issues" | "pullRequest" | "auth" | "mismatch";
+  id:
+    | "repo"
+    | "branch"
+    | "issues"
+    | "pullRequest"
+    | "auth"
+    | "mismatch"
+    // macOS Xcode CLT 라이선스/설치 문제 (티켓 nETj7szjEtT5prbYsg1D).
+    // 이게 걸리면 git 이 아예 안 도니 나머지 점검은 의미가 없다.
+    | "toolchain";
   label: string;
   status: ConnectionCheckStatus;
   detail: string;
@@ -4699,10 +4711,16 @@ function runBoardGit(args: string[], cwd: string): Promise<BoardGitResult> {
       stderr += data.toString();
     });
     proc.on("error", (err) => {
-      resolve({ code: 1, stdout, stderr: err.message });
+      resolve({ code: 1, stdout, stderr: annotateGitFailure(err.message) });
     });
     proc.on("close", (code) => {
-      resolve({ code: code ?? 0, stdout, stderr });
+      resolve({
+        code: code ?? 0,
+        stdout,
+        // macOS Xcode CLT 문제면 raw xcrun 출력 대신 실행할 명령을 담은
+        // 안내로 바뀐다 (티켓 nETj7szjEtT5prbYsg1D).
+        stderr: stderr ? annotateGitFailure(stderr) : stderr,
+      });
     });
   });
 }
@@ -5675,6 +5693,39 @@ async function checkProjectConnectionHealth(
   projectId: string,
 ): Promise<ConnectionCheckResult> {
   const checkedAt = Date.now();
+
+  // ★git 이전에 툴체인부터. macOS 는 CLT 라이선스에 동의하지 않으면 모든 git
+  // 호출이 xcrun 원문 에러로 죽는다 — 그 상태에서 repo/branch/auth 를 계속
+  // 돌려봐야 "repo 접근 확인 실패" 같은 엉뚱한 진단만 쌓인다. 여기서 끊고
+  // 실행할 명령 한 줄만 돌려준다 (티켓 nETj7szjEtT5prbYsg1D).
+  const toolchain = await probeXcodeClt();
+  if (!toolchain.ok && toolchain.message) {
+    return {
+      checkedAt,
+      ok: false,
+      items: [
+        makeConnectionCheckItem(
+          "toolchain",
+          "Xcode Command Line Tools",
+          "fail",
+          toolchain.message,
+        ),
+        makeConnectionCheckItem(
+          "repo",
+          "Repo access",
+          "warn",
+          "git 을 실행할 수 없어 repo 접근을 확인하지 못했습니다. 위 안내를 먼저 처리하세요.",
+        ),
+        makeConnectionCheckItem(
+          "branch",
+          "Branch",
+          "warn",
+          "git 을 실행할 수 없어 브랜치를 확인하지 못했습니다. 위 안내를 먼저 처리하세요.",
+        ),
+      ],
+    };
+  }
+
   const connection = getProjectConnection(projectId);
   if (!connection) {
     return {
@@ -6618,6 +6669,11 @@ ipcMain.handle("agent:healthStatus", (_event, agentId: string) => {
 // node 로 MCP/에이전트 자식이 침묵 -32000 으로 죽던 사고를, 행동가능 배너로
 // 드러내기 위한 preflight (marblo_mcp_dies_broken_node_binary).
 ipcMain.handle("system:nodeHealth", () => preflightNodeSpawn());
+
+// macOS Xcode CLT 사전 감지 (티켓 nETj7szjEtT5prbYsg1D). 저장소 연결 모달이
+// 사용자가 [Clone & 연결] 을 누르기 **전에** 호출해 라이선스 미동의/CLT 미설치
+// 를 미리 알린다. darwin 이 아니면 { ok:true, checked:false } 로 즉시 통과.
+ipcMain.handle("system:xcodeClt", () => probeXcodeClt());
 
 ipcMain.handle(
   "agent:reconnect",

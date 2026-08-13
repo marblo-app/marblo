@@ -768,6 +768,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.removeAllListeners("system:wake");
     },
     nodeHealth: () => ipcRenderer.invoke("system:nodeHealth"),
+    // macOS Xcode CLT 상태 사전 감지 (티켓 nETj7szjEtT5prbYsg1D).
+    // 읽기 전용 probe — `xcode-select -p` + `git --version` 만 돌린다.
+    xcodeClt: () => ipcRenderer.invoke("system:xcodeClt"),
   },
   harness: {
     list: () => ipcRenderer.invoke("harness:list"),

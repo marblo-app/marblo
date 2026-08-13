@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parseDiffNumstat, type DiffStat } from "./merge-features";
 import { gitSpawnEnv } from "./git-path";
+import { annotateGitFailure } from "./xcode-clt";
 
 export interface GitResult {
   code: number;
@@ -335,6 +336,12 @@ export class WorktreeManager {
    * Single choke-point for git. Never rejects — always resolves a GitResult.
    * With `opts.timeoutMs`, a hung process is SIGKILLed and resolved as a
    * non-zero failure (stderr notes the timeout) so callers never hang.
+   *
+   * Because it is the single choke-point, it is also where a macOS Xcode CLT
+   * failure (license not agreed / CLT missing) is translated: every downstream
+   * error string here is built from `stderr`, so rewriting it once means every
+   * worktree operation reports "run this command" instead of raw xcrun output
+   * (ticket nETj7szjEtT5prbYsg1D).
    */
   private runGit(
     args: string[],
@@ -350,7 +357,11 @@ export class WorktreeManager {
         if (settled) return;
         settled = true;
         if (timer) clearTimeout(timer);
-        resolve(r);
+        resolve(
+          r.code === 0 || !r.stderr
+            ? r
+            : { ...r, stderr: annotateGitFailure(r.stderr) }
+        );
       };
       try {
         const proc = spawn("git", args, { cwd, env: gitSpawnEnv() });

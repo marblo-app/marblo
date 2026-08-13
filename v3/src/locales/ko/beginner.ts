@@ -13,6 +13,13 @@ export const beginner = {
   "beginner.topbar.advancedHint":
     "보드·워크트리·모델 선택이 있는 원래 화면으로 갑니다. 설정에서 언제든 돌아올 수 있어요.",
 
+  // ── 큐레이트 탭바 (lib/beginnerTabs) ────────────────────────────────────
+  // 넷(가이드·코드·사용량·설정)의 라벨은 `workspace.tab.*` 를 그대로 읽는다 —
+  // 같은 화면의 이름이 셸마다 다르면 두 기능처럼 읽힌다. 여기 있는 건 심플
+  // 셸에만 있는 것들뿐이다.
+  "beginner.tabs.label": "화면",
+  "beginner.tab.chat": "대화",
+
   // ── ① 연결 (인증 하나만) ────────────────────────────────────────────────
   "beginner.connect.title": "하나만 연결하면 시작할 수 있어요",
   "beginner.connect.subtitle":
@@ -172,6 +179,8 @@ export const beginner = {
   "beginner.chat.placeholder":
     "이어서 하고 싶은 말을 적어 주세요. 예: 방금 만든 가이드에 예시를 더 넣어 줘",
   "beginner.chat.orchestratorRunning": "대화 중",
+  // 연결·인증된 모델만 골라 넣은 단순 드롭다운(오케 헤더)의 툴팁 — 티켓 cmp95TVin64IIlOiFlAC.
+  "beginner.chat.modelPickerTitle": "마블로가 사용할 모델",
 
   // ── 티켓 상세(미니 보드 카드 클릭) ──────────────────────────────────────
   "beginner.taskDetail.label": "일감 상세",

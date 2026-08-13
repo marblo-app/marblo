@@ -11,18 +11,25 @@ import { useCliSetupEngine } from "../../hooks/useCliSetupEngine";
 import {
   beginnerComposerMode,
   shouldPromote,
+  shouldRenderOnboardingGuides,
   type PromotionTrigger,
 } from "../../lib/beginnerMode";
 import { findAgentPtySessionId } from "../../lib/agentTerminal";
 import { AgentInputWaitHost } from "../agents/AgentInputWaitHost";
+import {
+  BEGINNER_CHAT_TAB,
+  BEGINNER_CURATED_TABS,
+  type BeginnerCuratedTabId,
+  type BeginnerTabId,
+} from "../../lib/beginnerTabs";
 import { useOnboardingSetup } from "../../hooks/useOnboardingSetup";
 import { useAgentStore } from "../../stores/agentStore";
 import { useBeginnerModeStore } from "../../stores/beginnerModeStore";
 import { useOnboardingPreviewStore } from "../../stores/onboardingPreviewStore";
 import { useProjectStore } from "../../stores/projectStore";
-import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useTerminalStore } from "../../stores/terminalStore";
+import { useUiStore } from "../../stores/uiStore";
 import { connectFolder } from "../../services/cliSetupActions";
 import telemetry from "../../services/telemetryService";
 import { BeginnerAgentsPane } from "./BeginnerAgentsPane";
@@ -32,9 +39,16 @@ import { BeginnerConnectStep } from "./BeginnerConnectStep";
 import { BeginnerLiveStrip } from "./BeginnerLiveStrip";
 import { BeginnerOneClickModal } from "./BeginnerOneClickModal";
 import { BeginnerPromotionModal } from "./BeginnerPromotionModal";
+import { BeginnerTabBar } from "./BeginnerTabBar";
 import { BeginnerTaskModal } from "./BeginnerTaskModal";
 import { BeginnerTour } from "./BeginnerTour";
 import { OnboardingPreviewBanner } from "./OnboardingPreviewBanner";
+// ★큐레이트 탭 — 엑스퍼트 탭 컴포넌트를 **그대로** 태운다(재구현 0). 어느 것도
+// props 를 받지 않으므로 어댑터도 없다. 근거·비노출 목록은 lib/beginnerTabs.
+import { GuideTab } from "../guide/GuideTab";
+import { CodeTab } from "../tabs/CodeTab";
+import { UsagePage } from "../usage/UsagePage";
+import { SettingsPage } from "../settings/SettingsPage";
 import { PrivacyConsentGate } from "../legal/PrivacyConsentGate";
 import { TrainingConsentCard } from "../legal/TrainingConsentCard";
 import { PrivacyClarificationNotice } from "../legal/PrivacyClarificationNotice";
@@ -63,8 +77,10 @@ import {
  *      → 하단을 **가로 2분할**로 키운다: 왼쪽 오케 대화창 / 오른쪽 에이전트.
  *
  * 그래서 이 화면은 이제 '채팅 + 작은 스트립' 이 아니라 가벼운 워크스페이스다.
- * 다만 어드밴스드와의 경계는 그대로다 — 워크트리·diff·모델 선택은 여전히 없다
- * (미니 보드 카드는 `compact`, 오케 헤더는 `hideModelControls`).
+ * 다만 어드밴스드와의 경계는 그대로다 — 워크트리·diff·티켓별 모델 지정은 여전히
+ * 없다(미니 보드 카드는 `compact`, 오케 헤더는 `hideModelControls`). 오케가 어떤
+ * 모델로 뜰지 자체는 예외다(티켓 cmp95TVin64IIlOiFlAC) — `showConnectedModelPicker`
+ * 가 연결·인증된 하네스만 남긴 단순 드롭다운 하나로 되살린다.
  *
  * ★오케 대화창은 `OrchestratorPanel fill` **그대로**다. 오케는 이미 실 PTY 를
  * 태운 대화창이므로 새 챗 프로토콜을 만들지 않는다(PTY 재배선 0). 상단 컴포저도
@@ -96,6 +112,15 @@ function CliSetupEngineHost() {
   useCliSetupEngine({ openAt: noop });
   return null;
 }
+
+/** 큐레이트 탭 id → 엑스퍼트 컴포넌트. 넷 다 props 가 없다. */
+const CURATED_TAB_COMPONENTS: Record<BeginnerCuratedTabId, () => JSX.Element> =
+  {
+    guide: GuideTab,
+    code: CodeTab,
+    usage: UsagePage,
+    settings: SettingsPage,
+  };
 
 export function BeginnerShell() {
   const { t } = useTranslation();
@@ -136,11 +161,11 @@ export function BeginnerShell() {
   const entryReason = useBeginnerModeStore((s) => s.entryReason);
   const enteredReported = useBeginnerModeStore((s) => s.enteredReported);
   const markEnteredReported = useBeginnerModeStore(
-    (s) => s.markEnteredReported,
+    (s) => s.markEnteredReported
   );
   const firstCompletionAt = useBeginnerModeStore((s) => s.firstCompletionAt);
   const markFirstCompletion = useBeginnerModeStore(
-    (s) => s.markFirstCompletion,
+    (s) => s.markFirstCompletion
   );
   const promotionShownAt = useBeginnerModeStore((s) => s.promotionShownAt);
   const markPromotionShown = useBeginnerModeStore((s) => s.markPromotionShown);
@@ -168,7 +193,36 @@ export function BeginnerShell() {
   // 게이트가 폴더 게이트로 갈아치워지면서 모달째 언마운트돼, "연결됐어요" 가
   // 뜨자마자 사라진다(시연에서 화면이 뚝 끊기는 자리).
   const [showOneClick, setShowOneClick] = useState(false);
+  // 모달의 "직접 고를게요" 가 눌린 횟수 — 연결 화면이 택1 섹션으로 스크롤·강조할
+  // 신호다. 0 은 "아직 안 눌렸다"(첫 렌더에 스크롤이 튀지 않는다).
+  const [manualFocusSignal, setManualFocusSignal] = useState(0);
   const [promotion, setPromotion] = useState<PromotionTrigger | null>(null);
+
+  // ★큐레이트 탭 — 기본은 언제나 대화다. 넷은 **보조 진입**이라 여기 로컬
+  // 상태로 든다: persist 하면 앱을 다시 켠 사람이 설정 화면에서 시작하게 되고,
+  // 그건 채팅-퍼스트를 정확히 뒤집는다. 셸이 살아 있는 동안만 기억한다.
+  const [tab, setTab] = useState<BeginnerTabId>(BEGINNER_CHAT_TAB);
+  // 지연 마운트 + 계속 유지. 켠 적 없는 탭은 트리에 없고(부팅 비용 그대로),
+  // 한 번 켜면 언마운트하지 않는다 — 대화 탭이 여기 함께 들어 있는 게 핵심이다.
+  // ★오케 대화창은 실 PTY 다. 탭을 옮길 때마다 언마운트하면 그때마다 세션을
+  // 다시 붙여야 하고, 스크롤백은 그 자리에서 사라진다. 그래서 전환은 언제나
+  // display:none 이지 조건부 렌더가 아니다(xterm 의 ResizeObserver 는 폭이 0인
+  // 동안 fit 을 건너뛰고, 되돌아오면 실제 치수로 한 번 맞춘다 — TerminalView).
+  const [mountedTabs, setMountedTabs] = useState<Set<BeginnerTabId>>(
+    () => new Set<BeginnerTabId>([BEGINNER_CHAT_TAB])
+  );
+  useEffect(() => {
+    setMountedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+  }, [tab]);
+
+  // ★"설정의 이 섹션을 열어라" 래치(uiStore) — 업그레이드 모달 CTA 등이 세운다.
+  // 지금까지 심플 셸에는 설정 탭이 없어서 이 요청이 **아무 데도 도착하지 못했다**
+  // (래치만 남고 화면은 그대로). 어드밴스드 셸(WorkspaceShell:151)과 같은 배선을
+  // 건다 — 세부 섹션 선택·래치 소거는 SettingsPage 가 마저 한다.
+  const pendingSettingsSection = useUiStore((s) => s.pendingSettingsSection);
+  useEffect(() => {
+    if (pendingSettingsSection) setTab("settings");
+  }, [pendingSettingsSection]);
 
   // 보드가 없으므로 티켓/에이전트 구독을 이 셸이 직접 든다 — 인라인 라이브의
   // 유일한 데이터원이다.
@@ -186,7 +240,7 @@ export function BeginnerShell() {
 
   const completedTasks = useMemo(
     () => tasks.filter((task) => task.status === "DONE").length,
-    [tasks],
+    [tasks]
   );
 
   // 진입 계측 — 세션당 한 번. 사유는 스토어가 판정한다(최초판정/재시작/설정복귀):
@@ -218,7 +272,7 @@ export function BeginnerShell() {
         mergedTasks: 0,
         elapsedMs: enteredAt ? Date.now() - enteredAt : 0,
       },
-      !!promotionShownAt,
+      !!promotionShownAt
     );
     if (trigger) {
       setPromotion(trigger);
@@ -248,7 +302,7 @@ export function BeginnerShell() {
       setPromotion(null);
       promote(trigger);
     },
-    [previewEnabled, setPreviewEnabled, promote],
+    [previewEnabled, setPreviewEnabled, promote]
   );
 
   // 에이전트 터미널 모달의 헤더가 쓰는 담당 티켓. 세션 짝짓기 규칙은 어드밴스드
@@ -256,16 +310,16 @@ export function BeginnerShell() {
   const openAgentTask = useMemo(
     () =>
       openAgent?.currentTaskId
-        ? (tasks.find((x) => x.id === openAgent.currentTaskId) ?? null)
+        ? tasks.find((x) => x.id === openAgent.currentTaskId) ?? null
         : null,
-    [openAgent, tasks],
+    [openAgent, tasks]
   );
   const openAgentSessionId = useMemo(
     () =>
       openAgent
         ? findAgentPtySessionId(terminalSessions, openAgent.name)
         : undefined,
-    [openAgent, terminalSessions],
+    [openAgent, terminalSessions]
   );
 
   // 티켓 상세의 "오케에게 물어보기" — 문장을 대화창에 **채우기만** 한다. 대신
@@ -282,7 +336,7 @@ export function BeginnerShell() {
       const target = agents.find((a) => a.id === agentId);
       if (target) openAgentTerminal(target);
     },
-    [agents, openAgentTerminal],
+    [agents, openAgentTerminal]
   );
 
   const askAboutTask = useCallback((message: string) => setDraft(message), []);
@@ -297,9 +351,28 @@ export function BeginnerShell() {
     draft,
   });
 
+  // 스스로 뜨는 온보딩 안내(M1 온램프 · M2 자금)를 지금 그려도 되는가 — 규칙은
+  // 순수함수가 든다. 원클릭 모달과 데모 재생은 화면 전체를 쓰는 표면이라, 그
+  // 위에 안내가 겹치면 두 지시가 동시에 서고 Esc 가 어느 쪽을 닫는지 알 수 없다.
+  const guidesAllowed = shouldRenderOnboardingGuides({
+    oneClickOpen: showOneClick,
+    demoPlaying: showDemo,
+  });
+
   // 안정적인 identity — 모달의 자동 닫힘 타이머가 이 콜백에 걸려 있다.
   const openOneClick = useCallback(() => setShowOneClick(true), []);
   const closeOneClick = useCallback(() => setShowOneClick(false), []);
+
+  // ★"직접 고를게요" — 닫기 **더하기** 목적지로 데려가기(티켓 k22rGEgv).
+  // 수동 선택 UI 는 이미 이 모달 아래(BeginnerConnectStep 의 택1 섹션)에 있지만
+  // 스크롤 접힘 밑이라, 닫기만 하면 사용자는 방금 떠나온 원클릭 CTA 를 다시 본다
+  // — 콜드 테스트에서 "아무 동작 없이 창만 닫힘" 으로 보고된 그 자리다. 카운터를
+  // 올려 연결 화면이 그 섹션으로 스크롤·강조하게 한다(같은 버튼을 두 번 눌러도
+  // 매번 반응해야 하므로 boolean 이 아니라 단조 증가값이다).
+  const chooseManually = useCallback(() => {
+    setShowOneClick(false);
+    setManualFocusSignal((n) => n + 1);
+  }, []);
 
   const closeDemo = useCallback(() => {
     // 데모의 CTA 는 "로그인 후 연결" 플래그를 세우는데, 우리는 이미 로그인 뒤
@@ -351,8 +424,8 @@ export function BeginnerShell() {
               setup.preview
                 ? t("beginner.preview.folderLocked")
                 : hasFolder
-                  ? t("beginner.topbar.changeFolder")
-                  : t("beginner.topbar.openFolder")
+                ? t("beginner.topbar.changeFolder")
+                : t("beginner.topbar.openFolder")
             }
             className="inline-flex h-7 min-w-0 max-w-[22rem] items-center gap-1.5 rounded-md border border-transparent px-2 text-xs text-[#a6adc8] transition-colors hover:border-[#313244] hover:bg-[#313244]/60 hover:text-[#cdd6f4] disabled:cursor-not-allowed disabled:hover:border-transparent disabled:hover:bg-transparent"
           >
@@ -371,21 +444,22 @@ export function BeginnerShell() {
           className="flex shrink-0 items-center gap-2"
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
+          {/* ★설정 버튼은 이제 **승격하지 않는다.** 종전엔 여기서 어드밴스드로
+              올린 뒤 그쪽 settings 탭을 열었는데(막다른 버튼을 피하려던 것),
+              설정 한 번 보려던 사람이 13탭짜리 화면에 떨어졌다 — 되돌아오는
+              길은 그 설정 화면 안에 있고. 이제 심플 셸 안에서 같은
+              `SettingsPage` 를 띄운다(큐레이트 탭). 승격은 오른쪽 버튼의 일로만
+              남는다. */}
           <button
             type="button"
             data-testid="beginner-open-settings"
-            title={t("beginner.topbar.advancedHint")}
-            onClick={() => {
-              // 설정은 어드밴스드 셸의 탭이다. 비기너에 설정 화면을 복제하는 대신
-              // 승격시키고 그 탭을 열어 준다 — 막다른 버튼을 만들지 않는다.
-              useSplitWorkspaceStore.getState().setActiveTab("settings");
-              goAdvanced("manual");
-            }}
+            title={t("beginner.topbar.settings")}
+            onClick={() => setTab("settings")}
             className={BUTTON_GHOST}
           >
             {t("beginner.topbar.settings")}
           </button>
-          {/* ★상시 전환 어포던스 — 승격 모달(완료 3건 트리거)을 기다리지 않고
+          {/* ★상시 전환 어포던스— 승격 모달(완료 3건 트리거)을 기다리지 않고
               언제든 개발(어드밴스드) 모드로 넘어간다. 그래서 눈에 띄는 강조색이다:
               "숨겨진 화면이 따로 있다" 는 사실 자체가 첫 화면에서 보여야 한다. */}
           <button
@@ -404,146 +478,188 @@ export function BeginnerShell() {
         </div>
       </header>
 
-      {/* 위→아래 흐름(대화 → 일감 → 하단 2페인)은 그대로 두되, 폭 상한은
+      {/* ── 경량 탭바 (대화 + 큐레이트 4) ──────────────────────────────────
+          ★연결/폴더 게이트 중에도 그린다. 이 티켓의 출발점이 "심플 유저가
+          도움말·설정에 닿을 길이 없다" 인데, 그게 가장 절실한 순간이 바로
+          설치가 막힌 그 화면이다 — 가이드는 그때의 답이고, 언어·프라이버시
+          토글은 설정 안에 있다. 게이트는 대화 탭 **안쪽**에 남는다. */}
+      <BeginnerTabBar active={tab} onSelect={setTab} />
+
+      {/* 탭 전환 영역. 모든 탭은 절대배치로 겹쳐 두고 비활성만 display:none 이다
+          — 위 mountedTabs 주석 참조(오케 PTY 를 살려 두기 위한 것). */}
+      <div className="relative min-h-0 flex-1">
+        <div
+          className="absolute inset-0 flex flex-col overflow-hidden"
+          style={{ display: tab === BEGINNER_CHAT_TAB ? undefined : "none" }}
+        >
+          {/* 위→아래 흐름(대화 → 일감 → 하단 2페인)은 그대로 두되, 폭 상한은
           68rem → 96rem 으로 연다. 68rem 은 한 열짜리 화면의 가독 폭이었는데,
           하단이 2분할이 된 지금 그 폭이면 오케 터미널이 좁아져 TUI 가 접힌다.
           상한 자체는 남긴다 — 27" 에서 카드가 끝까지 벌어지면 다시 성겨진다. */}
-      <main className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
-        <div className="mx-auto flex min-h-0 w-full max-w-[96rem] flex-1 flex-col gap-2.5 overflow-hidden">
-          {!cliReady ? (
-            <div className="min-h-0 flex-1 overflow-auto">
-              <BeginnerConnectStep
-                onWatchDemo={() => setShowDemo(true)}
-                onOneClick={openOneClick}
-              />
-            </div>
-          ) : !hasFolder ? (
-            <div className="min-h-0 flex-1 overflow-auto">
-              <section
-                data-testid="beginner-folder-gate"
-                data-sample-status={sampleStatus}
-                className={`mx-auto w-full max-w-xl ${SURFACE} px-6 py-7 text-center`}
-              >
-                {/* ★자동 연결(#872)이 도는 중에는 "폴더를 골라 주세요" 를 그리지
+          <main className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
+            <div className="mx-auto flex min-h-0 w-full max-w-[96rem] flex-1 flex-col gap-2.5 overflow-hidden">
+              {!cliReady ? (
+                <div className="min-h-0 flex-1 overflow-auto">
+                  <BeginnerConnectStep
+                    onWatchDemo={() => setShowDemo(true)}
+                    onOneClick={openOneClick}
+                    manualFocusSignal={manualFocusSignal}
+                  />
+                </div>
+              ) : !hasFolder ? (
+                <div className="min-h-0 flex-1 overflow-auto">
+                  <section
+                    data-testid="beginner-folder-gate"
+                    data-sample-status={sampleStatus}
+                    className={`mx-auto w-full max-w-xl ${SURFACE} px-6 py-7 text-center`}
+                  >
+                    {/* ★자동 연결(#872)이 도는 중에는 "폴더를 골라 주세요" 를 그리지
                     않는다. 1~2초 뒤 스스로 붙을 폴더인데 그 사이 유저가 네이티브
                     피커를 열면, 자동 연결이 뒤늦게 도착해 화면이 튄다. */}
-                <h1 className="text-lg font-semibold leading-7 text-[#cdd6f4]">
-                  {t(
-                    sampleStatus === "preparing"
-                      ? "beginner.folder.preparingTitle"
-                      : "beginner.folder.title",
-                  )}
-                </h1>
-                <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-[#7f849c]">
-                  {t(
-                    sampleStatus === "preparing"
-                      ? "beginner.folder.preparingBody"
-                      : "beginner.folder.body",
-                  )}
-                </p>
-                {sampleStatus === "preparing" ? (
-                  <div
-                    data-testid="beginner-folder-preparing"
-                    className="mx-auto mt-5 h-1.5 w-48 overflow-hidden rounded-full bg-[#313244]"
-                  >
-                    <div className="h-full w-1/3 animate-pulse rounded-full bg-[#89b4fa]" />
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={connectFolder}
-                    className={`mt-5 ${BUTTON_PRIMARY}`}
-                  >
-                    {t("beginner.folder.cta")}
-                  </button>
-                )}
-                {sampleStatus === "failed" && (
-                  <p className="mt-3 text-xs leading-5 text-[#f9e2af]">
-                    {t("beginner.folder.sampleFailed")}
-                  </p>
-                )}
-              </section>
-            </div>
-          ) : (
-            <>
-              {/* ★첫 대화창 — 첫 마디가 오케에게 닿으면 접힌다. 아래 오케
+                    <h1 className="text-lg font-semibold leading-7 text-[#cdd6f4]">
+                      {t(
+                        sampleStatus === "preparing"
+                          ? "beginner.folder.preparingTitle"
+                          : "beginner.folder.title"
+                      )}
+                    </h1>
+                    <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-[#7f849c]">
+                      {t(
+                        sampleStatus === "preparing"
+                          ? "beginner.folder.preparingBody"
+                          : "beginner.folder.body"
+                      )}
+                    </p>
+                    {sampleStatus === "preparing" ? (
+                      <div
+                        data-testid="beginner-folder-preparing"
+                        className="mx-auto mt-5 h-1.5 w-48 overflow-hidden rounded-full bg-[#313244]"
+                      >
+                        <div className="h-full w-1/3 animate-pulse rounded-full bg-[#89b4fa]" />
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={connectFolder}
+                        className={`mt-5 ${BUTTON_PRIMARY}`}
+                      >
+                        {t("beginner.folder.cta")}
+                      </button>
+                    )}
+                    {sampleStatus === "failed" && (
+                      <p className="mt-3 text-xs leading-5 text-[#f9e2af]">
+                        {t("beginner.folder.sampleFailed")}
+                      </p>
+                    )}
+                  </section>
+                </div>
+              ) : (
+                <>
+                  {/* ★첫 대화창 — 첫 마디가 오케에게 닿으면 접힌다. 아래 오케
                   대화창(실 PTY)과 입력칸이 둘이면 유저는 매번 "어디에 쓰냐" 를
                   고르게 되고, 그건 심플 모드가 없애려던 종류의 선택이다.
                   티켓 상세의 "물어보기" 가 문장을 채워 주면 다시 나타난다.
                   data-coach: 코치마크 투어의 앵커(BeginnerTour.COACH_ANCHORS).
                   ★접혀 있으면 앵커도 함께 사라지는데, 코치마크는 없는 앵커의
                   스텝을 알아서 건너뛴다(CoachmarkOverlay.resolveSteps). */}
-              {composerMode !== "hidden" && (
-                <div className="flex-shrink-0" data-coach="beginner-ask">
-                  <BeginnerChatBar
-                    ask={ask}
-                    draft={draft}
-                    onDraftChange={setDraft}
-                    mode={composerMode}
-                    // 첫 국면(이 칸이 화면의 목적)에는 치우기를 주지 않는다.
-                    onDismiss={
-                      composerMode === "followUp" ? dismissComposer : undefined
-                    }
-                  />
-                </div>
-              )}
+                  {composerMode !== "hidden" && (
+                    <div className="flex-shrink-0" data-coach="beginner-ask">
+                      <BeginnerChatBar
+                        ask={ask}
+                        draft={draft}
+                        onDraftChange={setDraft}
+                        mode={composerMode}
+                        // 첫 국면(이 칸이 화면의 목적)에는 치우기를 주지 않는다.
+                        onDismiss={
+                          composerMode === "followUp"
+                            ? dismissComposer
+                            : undefined
+                        }
+                      />
+                    </div>
+                  )}
 
-              {/* ★S4: 진행상황을 별도 탭이 아니라 대화창 바로 아래에 그린다.
+                  {/* ★S4: 진행상황을 별도 탭이 아니라 대화창 바로 아래에 그린다.
                   ★높이 상한(34%)은 하단 2페인을 지키기 위한 것이다. 티켓이 대여섯
                   건 쌓이면 미니 보드는 얼마든지 자라는데, 그걸 그대로 두면 예전처럼
                   오케 영역이 아래로 밀려 납작해진다(시연 피드백 ③). 넘치는 만큼은
                   이 칸 안에서 스크롤한다. */}
-              <div
-                className="min-h-0 shrink overflow-y-auto max-h-[34%]"
-                data-coach="beginner-live"
-              >
-                <BeginnerLiveStrip
-                  sentAt={ask.deliveredAt}
-                  onResend={() => void ask.resend()}
-                  resending={ask.sending}
-                  onTaskClick={openTaskDetail}
-                />
-              </div>
+                  <div
+                    className="min-h-0 shrink overflow-y-auto max-h-[34%]"
+                    data-coach="beginner-live"
+                  >
+                    <BeginnerLiveStrip
+                      sentAt={ask.deliveredAt}
+                      onResend={() => void ask.resend()}
+                      resending={ask.sending}
+                      onTaskClick={openTaskDetail}
+                    />
+                  </div>
 
-              {/* ── ★하단 2분할: 오케 대화창 | 에이전트 ──────────────────────
+                  {/* ── ★하단 2분할: 오케 대화창 | 에이전트 ──────────────────────
                   좁은 창(<1024px)에서는 세로로 쌓는다 — 두 열을 억지로 유지하면
                   오케 터미널이 40컬럼 아래로 눌려 TUI 가 접힌다. */}
-              <div className="flex min-h-[18rem] flex-1 flex-col gap-2.5 overflow-hidden lg:flex-row">
-                <section
-                  data-coach="beginner-chat"
-                  className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${SURFACE}`}
-                >
-                  <div className="flex flex-shrink-0 items-center gap-2 border-b border-[#313244] px-4 py-2">
-                    <SectionLabel>{t("beginner.chat.title")}</SectionLabel>
-                    <span className="min-w-0 truncate text-[11px] text-[#585b70]">
-                      {t("beginner.chat.hint")}
-                    </span>
-                  </div>
-                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                    {/* ★모델·effort·세션 선택은 감춘다. 비기너 화면의 차별점이
-                        "고를 게 없다" 라서, 헤더 한 줄이 그 약속을 깨면 안 된다. */}
-                    <OrchestratorPanel fill hideModelControls />
-                  </div>
-                </section>
+                  <div className="flex min-h-[18rem] flex-1 flex-col gap-2.5 overflow-hidden lg:flex-row">
+                    <section
+                      data-coach="beginner-chat"
+                      className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${SURFACE}`}
+                    >
+                      <div className="flex flex-shrink-0 items-center gap-2 border-b border-[#313244] px-4 py-2">
+                        <SectionLabel>{t("beginner.chat.title")}</SectionLabel>
+                        <span className="min-w-0 truncate text-[11px] text-[#585b70]">
+                          {t("beginner.chat.hint")}
+                        </span>
+                      </div>
+                      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                        {/* ★effort·버전 배지·세션 선택은 계속 감춘다(고급 손잡이).
+                            모델만은 예외다(cmp95TVin) — showConnectedModelPicker 가
+                            설치+인증된 하네스로만 목록을 좁힌다. */}
+                        <OrchestratorPanel
+                          fill
+                          hideModelControls
+                          showConnectedModelPicker
+                        />
+                      </div>
+                    </section>
 
-                {/* ★에이전트 열 — "누가 뭐하나". 세로 스택일 땐 높이를 묶어
+                    {/* ★에이전트 열 — "누가 뭐하나". 세로 스택일 땐 높이를 묶어
                     오케가 화면 밖으로 밀리지 않게 한다. */}
-                <section
-                  data-testid="beginner-agents-pane"
-                  className={`flex max-h-[14rem] min-h-0 flex-col overflow-hidden lg:max-h-none lg:w-[19rem] lg:shrink-0 ${SURFACE}`}
-                >
-                  <BeginnerAgentsPane
-                    agents={agents}
-                    tasks={tasks}
-                    onTaskClick={openTaskDetail}
-                    onAgentClick={openAgentTerminal}
-                  />
-                </section>
-              </div>
-            </>
-          )}
+                    <section
+                      data-testid="beginner-agents-pane"
+                      className={`flex max-h-[14rem] min-h-0 flex-col overflow-hidden lg:max-h-none lg:w-[19rem] lg:shrink-0 ${SURFACE}`}
+                    >
+                      <BeginnerAgentsPane
+                        agents={agents}
+                        tasks={tasks}
+                        onTaskClick={openTaskDetail}
+                        onAgentClick={openAgentTerminal}
+                      />
+                    </section>
+                  </div>
+                </>
+              )}
+            </div>
+          </main>
         </div>
-      </main>
+
+        {/* 큐레이트 넷 — 엑스퍼트 탭 컴포넌트 그대로. 지연 마운트라 켠 적 없는
+            탭은 여기 없다(각각 자기 구독·프로브를 들고 오므로 미리 태우지
+            않는다). 스크롤은 엑스퍼트 탭바와 같은 규격으로 이 칸이 든다. */}
+        {BEGINNER_CURATED_TABS.map((curated) => {
+          if (!mountedTabs.has(curated)) return null;
+          const Comp = CURATED_TAB_COMPONENTS[curated];
+          return (
+            <div
+              key={curated}
+              data-testid={`beginner-tabpanel-${curated}`}
+              className="absolute inset-0 overflow-auto"
+              style={{ display: tab === curated ? undefined : "none" }}
+            >
+              <Comp />
+            </div>
+          );
+        })}
+      </div>
 
       {/* 첫 실행 코치마크 투어. 앵커(챗·첫요청·라이브·모드전환)가 실제로 그려진
           뒤에만 뜨고, 다른 오버레이와는 겹치지 않는다. 재노출 규칙은
@@ -551,7 +667,16 @@ export function BeginnerShell() {
       <BeginnerTour
         ready={cliReady && hasFolder}
         blocked={
-          !!promotion || showDemo || showOneClick || !!openTask || !!openAgent
+          // ★큐레이트 탭에 가 있는 동안은 멈춘다. 투어의 앵커(챗·첫요청·라이브·
+          // 모드전환)는 전부 대화 탭 안에 있는데, 지금 그 탭은 사라진 게 아니라
+          // display:none 이다 — 앵커는 조회되지만 치수가 0이라 코치마크가
+          // 화면 구석에 붙는다(없으면 건너뛰는 규칙도 여기선 안 걸린다).
+          tab !== BEGINNER_CHAT_TAB ||
+          !!promotion ||
+          showDemo ||
+          showOneClick ||
+          !!openTask ||
+          !!openAgent
         }
       />
 
@@ -562,7 +687,12 @@ export function BeginnerShell() {
           그리는 터미널 모달이 열린다. */}
       <AgentInputWaitHost onOpen={openAgentTerminalById} />
 
-      {showOneClick && <BeginnerOneClickModal onClose={closeOneClick} />}
+      {showOneClick && (
+        <BeginnerOneClickModal
+          onClose={closeOneClick}
+          onManual={chooseManually}
+        />
+      )}
 
       {/* ★"로그인은 됐는데 아무 일도 안 일어나요" — 구독/크레딧이 없어 CLI 가 한
           턴도 못 도는 상태의 가이드(티켓 sVdwTsiGq6qZVAmSkwZB). 원클릭 모달이
@@ -573,15 +703,20 @@ export function BeginnerShell() {
           계정은 프로브가 **빨리** 실패하므로, 가드가 없으면 원클릭 모달이 성공
           문구를 1.6초 보여주는 그 위에 이 모달이 겹쳐 뜬다 — 두 개가 겹치면
           Esc 한 번이 어느 쪽을 닫는지 알 수 없다. 원클릭은 인증되면 스스로
-          닫히므로 이 안내는 곧바로 이어서 뜬다. */}
-      {!showOneClick && <FundingGuideHost />}
+          닫히므로 이 안내는 곧바로 이어서 뜬다.
+
+          ★데모 재생 중에도 뜨지 않는다(티켓 E3ywX1ftbVr5f1TrFsgp): 데모는 연결
+          전에 여는 것이고 이 안내들도 연결이 없어서 뜨는 것이라 전제가 정확히
+          겹쳐, 가드가 없으면 대본 위에 안내가 항상 덮인다. 규칙은
+          lib/beginnerMode.shouldRenderOnboardingGuides 가 든다. */}
+      {guidesAllowed && <FundingGuideHost />}
 
       {/* ★M1 — "여기까지는 무료로 볼 수 있어요"(온램프 #886 §5-A). 지금까지 이
           셸은 스폰 차단(`needsAuth`)을 해석하는 화면 목록에 아예 없어서, L0
           유저가 실행을 눌러도 화면에 **아무 일도** 일어나지 않았다.
           원클릭 모달과 배타인 이유는 위 자금 안내와 같다. M2(자금)와의 배타는
           호스트가 스스로 판정한다 — 두 모달이 서로 반대되는 지시를 준다. */}
-      {!showOneClick && (
+      {guidesAllowed && (
         <OnrampGateHost variant="beginner" onConnect={openOneClick} />
       )}
 

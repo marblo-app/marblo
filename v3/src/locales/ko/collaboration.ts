@@ -34,6 +34,15 @@ export const collaboration = {
   "collab.repoConnect.errorNoRemote":
     "선택한 폴더에서 git origin 을 찾지 못했습니다. 프로젝트 저장소를 clone 한 폴더를 선택하세요.",
   "collab.repoConnect.connectFailed": "프로젝트에 경로를 기록하지 못했습니다.",
+  // macOS Xcode Command Line Tools (티켓 nETj7szjEtT5prbYsg1D).
+  // 라이선스 미동의 상태에선 git 이 아예 안 돌아 clone/연결이 전부 실패한다.
+  // sudo 가 필요해 앱이 대신 못 하므로, 실행할 명령을 복사 버튼과 함께 준다.
+  "collab.repoConnect.errorXcodeLicense":
+    "macOS Xcode Command Line Tools 라이선스에 동의해야 git 을 쓸 수 있습니다. 아래 명령을 터미널에 붙여넣어 실행한 뒤 다시 시도하세요. (관리자 비밀번호가 필요해 마블로가 대신 실행할 수 없습니다.)",
+  "collab.repoConnect.errorXcodeMissing":
+    "macOS Xcode Command Line Tools(git 포함)가 설치되어 있지 않습니다. 아래 명령을 터미널에 붙여넣어 설치를 마친 뒤 다시 시도하세요.",
+  "collab.repoConnect.copyCommand": "명령 복사",
+  "collab.repoConnect.copied": "복사됨",
   // own-but-empty 보강 (티켓 r8vg9pMWCRtdnUzR3KyX). 자동 등록된 빈 폴더
   // 또는 프로젝트와 다른 git 을 가리키는 own 폴더일 때 보여주는 자기 진단.
   // 사용자가 "내 폴더가 비어 있다" / "내 폴더는 있는데 저장소가 다르다" 를

@@ -35,6 +35,15 @@ export const collaboration = {
     "No git origin found in the selected folder. Pick the folder where you cloned this repo.",
   "collab.repoConnect.connectFailed":
     "Failed to record the path on the project.",
+  // macOS Xcode Command Line Tools (ticket nETj7szjEtT5prbYsg1D). Until the
+  // license is accepted git cannot run at all, so clone/connect always fails.
+  // It needs sudo, so the app can only hand over the exact command to run.
+  "collab.repoConnect.errorXcodeLicense":
+    "You must accept the macOS Xcode Command Line Tools license before git can run. Paste the command below into Terminal, then try again. (It needs an administrator password, so Marblo can't run it for you.)",
+  "collab.repoConnect.errorXcodeMissing":
+    "The macOS Xcode Command Line Tools (which include git) aren't installed. Paste the command below into Terminal, finish the install, then try again.",
+  "collab.repoConnect.copyCommand": "Copy command",
+  "collab.repoConnect.copied": "Copied",
   // own-but-empty hardening (ticket r8vg9pMWCRtdnUzR3KyX). Self-diagnosis
   // shown when the registered own folder is empty or points at a different
   // git remote than the project. Helps the user see why the modal re-appeared
