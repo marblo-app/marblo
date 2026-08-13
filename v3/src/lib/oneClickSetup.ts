@@ -89,7 +89,7 @@ const CLI_BIN: Record<CliModel, string> = {
  */
 export function isLoginCommand(
   cmd: string | undefined,
-  model?: CliModel,
+  model?: CliModel
 ): boolean {
   if (!cmd) return false;
   const c = cmd.trim();
@@ -125,7 +125,7 @@ export function loginCommandFor(model: CliModel, action?: string): string {
  */
 export function pendingInstallRows<R extends { id: string }>(
   rows: R[],
-  results: Record<string, CliProbeLike | undefined>,
+  results: Record<string, CliProbeLike | undefined>
 ): R[] {
   return rows.filter((r) => results[r.id]?.installed === false);
 }
@@ -141,7 +141,7 @@ export function pendingInstallRows<R extends { id: string }>(
 export function signInRows<R extends { id: string }>(
   rows: R[],
   results: Record<string, CliProbeLike | undefined>,
-  priorityIds: string[] = [],
+  priorityIds: string[] = []
 ): R[] {
   const eligible = rows.filter((r) => {
     const s = results[r.id];
@@ -164,7 +164,7 @@ export function signInRows<R extends { id: string }>(
  * 대상 집합을 쓴다 — 한쪽만 늘어나면 "모두 설치" 의 뜻이 화면마다 달라진다.
  */
 export function oneClickInstallRows<
-  R extends { autoInstall: boolean; required: boolean },
+  R extends { autoInstall: boolean; required: boolean }
 >(rows: R[]): R[] {
   return rows.filter((r) => r.autoInstall || r.required);
 }
@@ -216,10 +216,17 @@ export function bulkInstallOutcome(p: BulkInstallProgress): BulkInstallOutcome {
  *    "다시 사인인" 을 그리면 같은 로그인을 두 번 띄운다.
  *  - `blocked` 는 마지막 폴백이다: 설치가 끝났는데 사인인할 대상이 **하나도**
  *    없다 = 설치가 전부 실패했다는 뜻이라, 수동 명령·공식문서로 넘겨야 한다.
+ *
+ * ★칸이 하나 늘었다 — `choose_subscription`(티켓 LLHMclpKaIAJbsiHzGoG).
+ * 설치와 사인인 사이에서 "어떤 구독 가지고 계세요?" 를 묻는다. 종전에는 설치가
+ * 끝나는 즉시 오케 후보 **하나**의 로그인을 띄웠는데, 그 하나가 그 사용자가 가진
+ * 구독이 아니면 승인할 것이 없어서 신규 유저가 그대로 멈췄다(콜드테스트 관측).
+ * 이 칸은 **묻는 자리**일 뿐, 설치·로그인 규칙은 종전 그대로다.
  */
 export type OneClickPhase =
   | "idle"
   | "installing"
+  | "choose_subscription"
   | "sign_in"
   | "awaiting_auth"
   | "blocked"
@@ -235,13 +242,38 @@ export interface OneClickFlowState {
   signInTargets: number;
   /** 이 흐름이 로그인 터미널을 띄웠는가. */
   loginLaunched: boolean;
+  /**
+   * 사용자가 "어떤 구독 가지고 계세요?" 에 답했는가.
+   *
+   * ★`false` 일 때만 묻는다. 생략(undefined)하면 이 칸이 없던 시절과 **바이트
+   * 동일**하게 동작한다 — 이 국면 함수를 읽는 다른 표면(시작하기 탭 계열)이
+   * 비기너 전용 단계를 강제로 지나가게 되는 일은 없다.
+   */
+  subscriptionPicked?: boolean;
+  /**
+   * 아직 로그인 터미널을 띄워야 하는 CLI 수(= `pendingLoginModels` 의 길이).
+   *
+   * ★`done` 판정을 붙잡는 유일한 이유다. `ready` 는 오케 후보 **하나**가
+   * 인증되면 서는데(#579), 사용자가 구독을 둘 골랐다면 두 번째 로그인은 아직
+   * 진행 중이다. 이 값이 없으면 첫 인증 순간 모달이 "연결됐어요" 를 띄우고
+   * 1.6초 뒤 닫히면서 두 번째 로그인을 화면에서 통째로 지운다.
+   */
+  pendingLogins?: number;
 }
 
 export function oneClickPhase(s: OneClickFlowState): OneClickPhase {
-  if (s.ready) return "done";
+  // 인증이 끝났고 더 띄울 로그인도 없다 = 이 흐름의 끝.
+  if (s.ready && (s.pendingLogins ?? 0) === 0) return "done";
   if (!s.started) return "idle";
   if (s.bulk?.running) return "installing";
   if (s.loginLaunched) return "awaiting_auth";
+  // ★설치가 **끝난 뒤에** 묻는다. 설치 중에 물으면 아직 없는 CLI 를 고르게 되고,
+  // 고른 순간 로그인 명령이 없는 바이너리로 날아간다.
+  // 사인인할 대상이 하나도 없으면 묻지 않는다 — 설치가 전부 실패했다는 뜻이라
+  // 물어봤자 띄울 터미널이 없다(아래 `blocked` 로 떨어진다).
+  if (s.subscriptionPicked === false && s.signInTargets > 0) {
+    return "choose_subscription";
+  }
   if (s.signInTargets > 0) return "sign_in";
   // 설치 패스가 아직 시작 전이면(클릭 직후 한 틱) 설치 중으로 본다 — 빈
   // "막힘" 화면이 한 프레임 스치는 것을 막는다.
@@ -250,13 +282,23 @@ export function oneClickPhase(s: OneClickFlowState): OneClickPhase {
 }
 
 /**
- * `sign_in` 국면에서 자동으로 로그인을 띄워도 되는가.
+ * 지금 로그인 터미널을 띄워도 되는 **국면**인가.
  *
  * 모달의 "자동" 이 성립하는 지점이다 — 사용자가 두 번째 버튼을 누르지 않는다.
- * 한 번만 띄우는 것이 핵심이라 `loginLaunched` 를 그대로 게이트로 쓴다.
+ * 설치 중(아직 없는 바이너리)·구독 질문 중(무엇을 띄울지 아직 모른다)·완료
+ * 후에는 아니다.
+ *
+ * ★종전 이름은 `shouldAutoSignIn` 이었고 `sign_in` 국면 하나만 통과시켰다. 그
+ * 좁은 게이트가 "같은 로그인을 폴 주기마다 다시 띄우지 않는다" 는 규칙까지 겸했기
+ * 때문인데, 구독 선택이 생기면서 로그인은 **큐**가 됐다(고른 CLI 마다 하나씩).
+ * 이제 `awaiting_auth` 는 "더 띄울 것이 없다" 가 아니라 "지금 하나가 진행 중" 일
+ * 뿐이라, 중복 방지는 국면이 아니라 **대상 선정**이 맡는다
+ * (`loginPrompt.nextLoginTarget` + 호출부의 시도 기록). 이름을 함께 바꾼 이유는
+ * 그 책임 이동을 조용히 넘기지 않기 위해서다.
  */
-export function shouldAutoSignIn(s: OneClickFlowState): boolean {
-  return oneClickPhase(s) === "sign_in";
+export function canLaunchSignIn(s: OneClickFlowState): boolean {
+  const phase = oneClickPhase(s);
+  return phase === "sign_in" || phase === "awaiting_auth";
 }
 
 /**

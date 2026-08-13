@@ -32,13 +32,35 @@ const actions = vi.hoisted(() => ({
     return "claude" as const;
   }),
   launchLogin: vi.fn(async () => "real-login-session"),
+  installAndLogin: vi.fn(async () => "real-login-session"),
+  setDefaultOrchestrator: vi.fn(async () => true),
   connectFolder: vi.fn(),
 }));
 vi.mock("../../src/services/cliSetupActions", () => actions);
 
 vi.mock("../../src/services/telemetryService", () => ({
-  default: { cliSetupStep: vi.fn() },
+  default: { cliSetupStep: vi.fn(), loginPrompt: vi.fn() },
 }));
+
+/**
+ * 구독 선택 화면(설치 → 로그인 사이의 질문)을 지나간다. 종전에는 설치가 끝나면
+ * 로그인이 **자동으로** 떴지만, 이제 무엇에 로그인할지는 사용자가 고른다
+ * (티켓 LLHMclpKaIAJbsiHzGoG).
+ */
+async function pickSubscription(...models: string[]) {
+  for (const model of models) {
+    await act(async () => {
+      fireEvent.click(
+        screen
+          .getByTestId(`beginner-subscription-${model}`)
+          .querySelector("input")!,
+      );
+    });
+  }
+  await act(async () => {
+    fireEvent.click(screen.getByTestId("beginner-subscription-confirm"));
+  });
+}
 
 // xterm 은 jsdom 에서 캔버스를 요구한다. 여기서 보려는 것은 "실 터미널이 아예
 // 안 떠야 한다" 이므로 스텁으로 존재만 관측한다.
@@ -336,13 +358,18 @@ describe("★안전성 — 프리뷰는 실 설치/로그인을 부르지 않는
     expect(useCliSetupStore.getState().bulkInstall).toBeNull();
   });
 
-  it("사인인 국면에서 뜨는 것은 실 PTY 가 아니라 대본 터미널이다", () => {
+  it("사인인 국면에서 뜨는 것은 실 PTY 가 아니라 대본 터미널이다", async () => {
     // 설치가 이미 끝난 자리에서 모달이 열린 경우(실 흐름의 '깔 게 없다' 와 같다)
-    // — 국면이 되감기지 않고 곧장 자동 사인인으로 이어져야 한다.
+    // — 국면이 되감기지 않고 구독 선택 → 로그인으로 이어져야 한다.
     act(() => useOnboardingPreviewStore.getState().setStage("sign_in"));
     render(createElement(BeginnerOneClickModal, { onClose: () => {} }));
 
+    // ★시연도 신규 유저가 보는 그 화면을 그대로 지난다(티켓 LLHMclpKaIAJbsiHzGoG).
+    // 프리뷰용 UI 분기를 두지 않는다는 이 화면의 규칙이 여기에도 적용된다.
+    await pickSubscription("claude");
+
     expect(actions.oneClickSignIn).not.toHaveBeenCalled();
+    expect(actions.installAndLogin).not.toHaveBeenCalled();
     expect(screen.queryByTestId("stub-terminal")).toBeNull();
     const term = screen.getByTestId("beginner-preview-terminal");
     expect(term.getAttribute("data-preview-model")).toBe("claude");
@@ -356,6 +383,9 @@ describe("★안전성 — 프리뷰는 실 설치/로그인을 부르지 않는
     try {
       act(() => useOnboardingPreviewStore.getState().setStage("sign_in"));
       render(createElement(BeginnerOneClickModal, { onClose: () => {} }));
+      // ★대본을 보려면 먼저 구독을 골라야 한다(티켓 LLHMclpKaIAJbsiHzGoG) —
+      // 시연도 신규 유저가 지나는 그 화면을 그대로 지난다.
+      await pickSubscription("claude");
       // 대본은 한 줄씩 흐른다(각 줄이 다음 줄의 타이머를 건다) — 몇 틱 굴린다.
       for (let i = 0; i < 4; i++) {
         act(() => void vi.advanceTimersByTime(500));

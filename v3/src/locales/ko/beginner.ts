@@ -72,6 +72,43 @@ export const beginner = {
   "beginner.oneClick.close": "닫기",
   "beginner.oneClick.footerHint": "언제든 닫고 직접 진행해도 됩니다.",
 
+  // ── ①-a-2 구독 선택 + CLI 별 로그인 유도 (티켓 LLHMclpKaIAJbsiHzGoG) ──────
+  // ★신규 유저가 실제로 멈추던 자리다. 자동설치는 끝나는데 "그래서 무엇으로
+  // 로그인하나" 를 아무도 묻지 않아서, 가진 구독과 다른 CLI 의 로그인 창만 뜨고
+  // 끝났다. 그래서 문구가 전부 **가진 것을 묻는** 말투다("필요한 것" 이 아니라).
+  "beginner.oneClick.step.subscription": "구독",
+  "beginner.oneClick.status.chooseSubscription":
+    "설치가 끝났어요. 가지고 계신 구독을 알려 주시면 그 계정으로 로그인해 드릴게요.",
+  "beginner.login.title": "어떤 구독을 가지고 계세요?",
+  "beginner.login.body":
+    "가지고 계신 것만 골라 주세요. 고른 것마다 로그인 창을 하나씩 띄워 드립니다. 하나만 있어도 시작할 수 있어요.",
+  "beginner.login.claudeName": "Claude Pro / Max",
+  "beginner.login.claudeDesc": "Claude Code 를 이 구독 계정으로 씁니다",
+  "beginner.login.codexName": "ChatGPT Plus / Pro",
+  "beginner.login.codexDesc": "Codex CLI 를 이 ChatGPT 계정으로 씁니다",
+  "beginner.login.grokName": "SuperGrok",
+  "beginner.login.grokDesc": "Grok Build CLI 를 이 xAI 계정으로 씁니다",
+  "beginner.login.alreadySignedIn": "이미 로그인됨",
+  "beginner.login.needsInstall": "설치도 함께 해 드려요",
+  "beginner.login.confirm": "로그인 진행하기",
+  "beginner.login.confirmEmpty": "가지고 계신 구독을 하나 이상 골라 주세요",
+  "beginner.login.selected": "{count}개 선택됨",
+  "beginner.login.autoSkipped":
+    "이미 로그인된 것은 자동으로 건너뛰어요 — 다시 로그인하지 않습니다.",
+  "beginner.login.noSubscription": "아직 구독이 없어요",
+  "beginner.login.queueTitle": "아래 터미널에서 로그인 진행해주세요",
+  "beginner.login.queueBody":
+    "{cli} 로그인 창이에요. 브라우저가 열리면 승인해 주세요 — 끝나면 다음으로 자동으로 넘어갑니다.",
+  "beginner.login.queueProgress": "{done}/{total} 완료",
+  "beginner.login.skip": "이건 나중에 할게요",
+  "beginner.login.launchFail":
+    "{cli} 로그인 창을 띄우지 못했어요. 아래 명령을 터미널에 직접 붙여 넣어 주세요.",
+  "beginner.login.defaultSet": "{cli} 를 기본 오케스트레이터로 정했어요.",
+  // 고른 것은 다 끝냈는데 게이트가 안 열린 경우 — 오케를 띄울 수 있는 것은 아직
+  // Claude/Codex 뿐이라(#579), 그 사실을 감추지 않고 다시 고를 문을 준다.
+  "beginner.login.exhausted":
+    "고르신 로그인은 다 끝났어요. 다만 시작하려면 Claude 또는 ChatGPT(Codex) 중 하나가 연결돼 있어야 합니다.",
+
   // ── ①-b 인증은 됐는데 실행이 안 될 때 (구독/크레딧 없음) ────────────────
   // ★문구가 두 갈래인 것이 설계다: 벤더가 "구독/크레딧이 없다" 를 사실상 문장으로
   // 말했을 때만 구독을 단정하고, 그 밖의 실패는 전부 중립으로 말한다.

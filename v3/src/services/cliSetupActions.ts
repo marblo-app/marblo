@@ -84,7 +84,7 @@ export function connectFolder(): void {
 export async function launchLogin(
   model: CliModel,
   cmd?: string,
-  onLaunched?: (sessionId: string) => void,
+  onLaunched?: (sessionId: string) => void
 ): Promise<string | null> {
   const command = loginCommandFor(model, cmd);
   if (!command) return null;
@@ -115,6 +115,62 @@ export async function launchLogin(
 }
 
 /**
+ * 고른 CLI **하나**의 로그인 터미널을 띄운다. 아직 안 깔렸으면 먼저 깐다.
+ *
+ * 구독 선택(티켓 LLHMclpKaIAJbsiHzGoG)이 생기면서 필요해진 자리다: 사용자가 고를
+ * 수 있는 것 중 grok 은 `autoInstall: false` 라 자동설치 패스에 들어 있지 않다.
+ * 그래서 "SuperGrok 있어요" 를 고른 사람에게 그대로 `grok login` 을 타이핑하면
+ * `command not found` 만 남는다 — 구독은 있는데 CLI 가 없는 것이 로그인을
+ * 건너뛸 이유는 아니므로, 여기서 설치를 먼저 태운다.
+ *
+ * 설치는 프로브가 **명시적으로 "안 깔렸다"** 고 말했을 때만 한다(`=== false`).
+ * 결과가 아직 없는 행은 건드리지 않는다 — `pendingInstallRows` 와 같은 규칙이고,
+ * 느린 프로브 한 번이 멀쩡한 CLI 위로 셸 인스톨러를 다시 돌리는 것을 막는다.
+ *
+ * 로그인 명령은 종전대로 `launchLogin` 안의 `loginCommandFor` 가 정한다. `cmd` 를
+ * 안 주면 설치 **후의** 프로브 결과에서 읽는다 — 설치 전 `action` 은 (미설치
+ * 행이라) 실은 설치 명령이라, 그걸 인증 단계에서 타이핑하면 인스톨러가 한 번 더
+ * 돈다.
+ */
+export async function installAndLogin(
+  model: CliModel,
+  cmd?: string,
+  onLaunched?: (sessionId: string) => void
+): Promise<string | null> {
+  const row = ROWS.find((r) => r.model === model);
+  if (!row) return null;
+  if (useCliSetupStore.getState().results[row.id]?.installed === false) {
+    await useCliSetupStore.getState().runInstall(row);
+  }
+  const action = cmd ?? useCliSetupStore.getState().results[row.id]?.action;
+  return launchLogin(model, action, onLaunched);
+}
+
+/**
+ * 이 설치의 **기본 오케 하네스**를 정한다(티켓 LLHMclpKaIAJbsiHzGoG 요구 (3)).
+ *
+ * 값은 설정 화면의 "실행 모델" 과 **같은 저장소·같은 IPC** 다
+ * (`orchestratorModel:set` → main 의 `normalizeOrchestratorModelSetting`). 온보딩
+ * 전용 설정을 새로 만들지 않는 게 중요하다 — 두 벌이 되면 온보딩에서 고른 CLI 와
+ * 설정 화면이 보여주는 CLI 가 갈린다.
+ *
+ * 어느 CLI 를 넣을지는 `lib/loginPrompt.defaultOrchestratorModel` 이 정한다. 여기는
+ * 그 결정을 저장하기만 한다. 실패해도 흐름을 멈추지 않는다: 기본값이 안 바뀐 것은
+ * 불편이지 차단이 아니고(오케 패널에서 언제든 바꾼다), 여기서 던지면 로그인
+ * 큐까지 함께 죽는다.
+ */
+export async function setDefaultOrchestrator(
+  model: CliModel
+): Promise<boolean> {
+  try {
+    const result = await window.electronAPI.orchestratorModel.set(model);
+    return result?.success !== false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * ★"원클릭 사인인" — the auth step's single button.
  *
  * Picks the CLI whose sign-in actually unblocks the orchestrator (Claude or
@@ -129,7 +185,7 @@ export async function launchLogin(
  * sign-in buttons for anyone who wants more.
  */
 export function oneClickSignIn(
-  onLaunched?: (sessionId: string) => void,
+  onLaunched?: (sessionId: string) => void
 ): CliModel | null {
   const { results } = useCliSetupStore.getState();
   const target = signInRows(ROWS, results, ORCHESTRATOR_CLI_IDS)[0];
@@ -159,7 +215,7 @@ export async function seedSamplePrd(): Promise<ActionResult | null> {
       await window.electronAPI.fs.writeFile(
         root,
         prdPath,
-        t("onboarding.cliGate.prdContent"),
+        t("onboarding.cliGate.prdContent")
       );
     }
     const editor = useEditorStore.getState();
@@ -200,7 +256,7 @@ export async function createFirstTicket(): Promise<FirstTicketResult> {
       await routeInstructionToOrchestrator({
         projectId: proj.id,
         message: t("onboarding.cliGate.firstTicket.prompt"),
-      }),
+      })
     );
   } catch {
     delivery = "failed";
@@ -209,7 +265,7 @@ export async function createFirstTicket(): Promise<FirstTicketResult> {
   telemetry.cliSetupStep(
     "firstTicket",
     view.telemetry.phase,
-    view.telemetry.reason,
+    view.telemetry.reason
   );
   return { ok: view.completesStep, delivery, text: t(view.messageKey) };
 }
