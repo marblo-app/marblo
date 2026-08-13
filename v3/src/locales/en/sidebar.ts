@@ -89,6 +89,11 @@ export const sidebar: Record<keyof typeof koSidebar, string> = {
   "sidebar.tab.commands": "Commands",
   "sidebar.tab.chat": "Chat",
 
+  // Files sub-view: file tree ↔ document graph
+  "sidebar.filesSub.aria": "Files panel view",
+  "sidebar.filesSub.tree": "File tree",
+  "sidebar.filesSub.graph": "Graph",
+
   // TabBar — pop-out affordance (tab labels themselves stay English)
   "sidebar.tab.popOut": "Open in a separate window",
   "sidebar.tab.popOutLabel": "Open {name} in a separate window",
