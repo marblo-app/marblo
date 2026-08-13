@@ -92,4 +92,26 @@ export const code = {
   "code.quickAction.apply": "적용",
   "code.quickAction.rangeDrifted":
     "그 사이 코드가 바뀌어 적용하지 않았습니다. 다시 선택해 실행하세요.",
+
+  // 문서 관계 그래프 (옵시디언식 · Code 사이드바 Graph 하위탭)
+  "code.docGraph.empty": "마크다운 문서가 없습니다",
+  "code.docGraph.emptyHint":
+    "프로젝트에 .md 파일을 두면 링크 관계가 그래프로 나타납니다",
+  "code.docGraph.noRoot": "프로젝트 루트를 먼저 선택하세요",
+  "code.docGraph.summary": "문서 {nodes} · 링크 {edges}",
+  "code.docGraph.orphans": "고아 {count}",
+  "code.docGraph.fit": "화면에 맞추기",
+  "code.docGraph.refresh": "새로고침",
+  "code.docGraph.loading": "문서 읽는 중…",
+  "code.docGraph.scanned": "md {count}개",
+  "code.docGraph.legend.doc": "문서",
+  "code.docGraph.legend.index": "index",
+  "code.docGraph.legend.log": "log",
+  "code.docGraph.legend.orphan": "고아",
+  "code.docGraph.legend.backlink": "백링크",
+  "code.docGraph.tooltip.links": "링크 {out} · 백링크 {back}",
+  "code.docGraph.tooltip.index": "목록 허브 (index.md)",
+  "code.docGraph.tooltip.log": "타임라인 (log.md)",
+  "code.docGraph.tooltip.orphan": "다른 문서와 링크 없음",
+  "code.docGraph.nodeListLabel": "문서 그래프 노드 {count}개",
 };

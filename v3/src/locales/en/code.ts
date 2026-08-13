@@ -80,4 +80,26 @@ export const code: Record<keyof typeof koCode, string> = {
   "code.quickAction.apply": "Apply",
   "code.quickAction.rangeDrifted":
     "The code changed in the meantime, so nothing was applied. Select it again and re-run.",
+
+  // Document relationship graph (Obsidian-style · Code sidebar Graph sub-tab)
+  "code.docGraph.empty": "No markdown documents",
+  "code.docGraph.emptyHint":
+    "Add .md files to the project to see link relationships as a graph",
+  "code.docGraph.noRoot": "Select a project root first",
+  "code.docGraph.summary": "{nodes} docs · {edges} links",
+  "code.docGraph.orphans": "{count} orphan",
+  "code.docGraph.fit": "Fit to view",
+  "code.docGraph.refresh": "Refresh",
+  "code.docGraph.loading": "Reading documents…",
+  "code.docGraph.scanned": "{count} md",
+  "code.docGraph.legend.doc": "Doc",
+  "code.docGraph.legend.index": "index",
+  "code.docGraph.legend.log": "log",
+  "code.docGraph.legend.orphan": "Orphan",
+  "code.docGraph.legend.backlink": "Backlink",
+  "code.docGraph.tooltip.links": "{out} links · {back} backlinks",
+  "code.docGraph.tooltip.index": "List hub (index.md)",
+  "code.docGraph.tooltip.log": "Timeline (log.md)",
+  "code.docGraph.tooltip.orphan": "No links to other docs",
+  "code.docGraph.nodeListLabel": "Document graph nodes ({count})",
 };
