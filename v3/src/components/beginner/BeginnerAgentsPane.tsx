@@ -1,7 +1,10 @@
+import { useCallback, useEffect, useState } from "react";
+import { closePlanFor } from "../../lib/agentEntryClose";
 import { useTranslation } from "../../lib/i18n";
 import type { Agent, AgentStatus } from "../../types/agent";
 import type { Task } from "../../types/task";
 import TeamSummary from "../agents/TeamSummary";
+import { CloseConfirmModal } from "../agents/list-panel/CloseConfirmModal";
 import { BEGINNER_ROLE_ICON, SectionLabel } from "./beginnerUi";
 
 /**
@@ -27,21 +30,106 @@ import { BEGINNER_ROLE_ICON, SectionLabel } from "./beginnerUi";
  * 그림으로 읽힌다. 한 행 안에 목적지가 둘(행=터미널 / 티켓 줄=티켓 상세)이라
  * 티켓 줄은 클릭을 **삼킨다**(stopPropagation) — 안 그러면 티켓을 누를 때마다
  * 터미널이 함께 열린다.
+ *
+ * ★그 위에 행마다 두 개의 작은 액션이 붙는다 — **작업 화면**(터미널)과
+ * **끄기**(X). 종전엔 "눌러서 보기" 라는 안내 한 줄만 있었는데, 그건 문으로
+ * 읽히지 않았고(사장님 테스트에서 그대로 재현) 무엇보다 **끌 방법이 아예 없었다**
+ * — 심플 모드에는 어드밴스드의 에이전트 목록이 없으니, 한 번 붙은 팀원은 이
+ * 화면에서 영원히 남는다. 안내 문구 자리를 액션 줄로 바꾸므로 줄 수는 그대로다
+ * (과밀 금지).
+ *
+ * ★두 액션 모두 **새 로직이 아니다**:
+ *   - 작업 화면 = 행 클릭과 같은 `onAgentClick` → 셸의 터미널 모달(어드밴스드와
+ *     같은 PTY 세션을 문다).
+ *   - 끄기 = `lib/agentEntryClose` 의 `closePlanFor` 판정 + 어드밴스드 목록과
+ *     **같은** `CloseConfirmModal`. 실제 자원 회수(agent:stop → agent:remove →
+ *     문서 삭제 → PTY/세션 회수)는 셸이 넘겨 주는 `onAgentKill` 이 든다 — 이
+ *     패널은 스토어를 직접 만지지 않는다(순수 프레젠테이션 유지).
+ * 작업 중(working) 팀원만 확인 모달을 거친다. idle/stopped 까지 확인을 받으면
+ * 정리하려는 사람에게 매번 모달을 되던지는 꼴이다.
  */
 export function BeginnerAgentsPane({
   agents,
   tasks,
   onTaskClick,
   onAgentClick,
+  onAgentKill,
 }: {
   agents: Agent[];
   tasks: Task[];
   /** 에이전트가 붙은 티켓을 눌렀을 때. 생략하면 줄이 클릭 불가가 된다. */
   onTaskClick?: (task: Task) => void;
-  /** 에이전트 행을 눌렀을 때(터미널 열기). 생략하면 행이 클릭 불가가 된다. */
+  /** 에이전트 행/작업 화면 버튼을 눌렀을 때(터미널 열기). 생략하면 행이 클릭 불가가 된다. */
   onAgentClick?: (agent: Agent) => void;
+  /**
+   * 끄기(X) 확정 시 실제 회수를 수행한다. 생략하면 끄기 버튼이 그려지지 않는다
+   * — 없는 문을 그려 놓는 것보다 낫다.
+   */
+  onAgentKill?: (agent: Agent) => void | Promise<void>;
 }) {
   const { t } = useTranslation();
+  // 확인이 필요한 끄기는 여기서 대기한다(작업 중 팀원). 대상은 객체로 든다 —
+  // 모달 문구에 이름이 들어가야 해서다.
+  const [pendingKill, setPendingKill] = useState<Agent | null>(null);
+  const [killingIds, setKillingIds] = useState<Set<string>>(() => new Set());
+
+  const setKilling = useCallback((id: string, on: boolean) => {
+    setKillingIds((current) => {
+      const next = new Set(current);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const performKill = useCallback(
+    async (agent: Agent) => {
+      if (!onAgentKill) return;
+      setKilling(agent.id, true);
+      try {
+        await onAgentKill(agent);
+      } catch (err) {
+        // 실패하면 행이 그대로 남는다 — 조용히 삼키면 "눌렀는데 아무 일도
+        // 없다" 가 되므로 최소한 콘솔에는 남긴다.
+        console.error("[BeginnerAgentsPane] kill failed:", err);
+      } finally {
+        setKilling(agent.id, false);
+      }
+    },
+    [onAgentKill, setKilling]
+  );
+
+  const requestKill = useCallback(
+    (agent: Agent) => {
+      if (killingIds.has(agent.id)) return;
+      const plan = closePlanFor({
+        id: agent.id,
+        isAgent: true,
+        status: agent.status,
+      });
+      if (plan.needsConfirm) {
+        setPendingKill(agent);
+        return;
+      }
+      void performKill(agent);
+    },
+    [killingIds, performKill]
+  );
+
+  const confirmKill = useCallback(() => {
+    const target = pendingKill;
+    if (!target) return;
+    setPendingKill(null);
+    void performKill(target);
+  }, [pendingKill, performKill]);
+
+  // 대상이 목록에서 사라졌으면(다른 표면에서 이미 종료) 확인 모달도 닫는다 —
+  // 이미 없는 팀원에게 "정말 끌까요?" 를 묻고 있을 이유가 없다.
+  useEffect(() => {
+    if (pendingKill && !agents.some((a) => a.id === pendingKill.id)) {
+      setPendingKill(null);
+    }
+  }, [agents, pendingKill]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -85,12 +173,33 @@ export function BeginnerAgentsPane({
                   }
                   onTaskClick={onTaskClick}
                   onAgentClick={onAgentClick}
+                  onAgentKill={onAgentKill ? requestKill : undefined}
+                  killing={killingIds.has(agent.id)}
                 />
               ))}
             </ul>
           </>
         )}
       </div>
+
+      {/* 손실 경고는 어드밴스드 목록과 **같은** 모달이다. 그 모달은 자기 부모를
+          기준으로 `absolute inset-0` 이라, 19rem 짜리 이 패널 안에 그대로 두면
+          좁게 눌리고 세로로 잘린다(이 패널은 세로 스택일 때 14rem 이다). 그래서
+          화면 전체를 잡는 fixed 칸에 담아 중앙에 세운다 — 모달 자체는 손대지
+          않는다. */}
+      {pendingKill && (
+        <div
+          className="fixed inset-0 z-[70]"
+          data-testid="beginner-agent-kill-confirm"
+        >
+          <CloseConfirmModal
+            name={pendingKill.name}
+            busy={killingIds.has(pendingKill.id)}
+            onConfirm={confirmKill}
+            onCancel={() => setPendingKill(null)}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -115,15 +224,22 @@ function AgentRow({
   task,
   onTaskClick,
   onAgentClick,
+  onAgentKill,
+  killing,
 }: {
   agent: Agent;
   task: Task | null;
   onTaskClick?: (task: Task) => void;
   onAgentClick?: (agent: Agent) => void;
+  /** 끄기 요청(확인 판정은 부모가 든다). 생략하면 X 가 그려지지 않는다. */
+  onAgentKill?: (agent: Agent) => void;
+  /** 회수가 진행 중 — 버튼을 잠그고 진행 중임을 보인다. */
+  killing?: boolean;
 }) {
   const { t } = useTranslation();
   const taskClickable = !!task && !!onTaskClick;
   const rowClickable = !!onAgentClick;
+  const killable = !!onAgentKill;
 
   return (
     <li
@@ -146,9 +262,9 @@ function AgentRow({
         </span>
         <span
           aria-hidden
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[agent.status]} ${
-            agent.status === "working" ? "animate-pulse" : ""
-          }`}
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+            STATUS_DOT[agent.status]
+          } ${agent.status === "working" ? "animate-pulse" : ""}`}
         />
         <span className="shrink-0 text-[10px] leading-4 text-[#a6adc8]">
           {t(STATUS_LABEL_KEY[agent.status])}
@@ -183,15 +299,61 @@ function AgentRow({
         </p>
       )}
 
-      {/* 행이 눌린다는 사실을 말로 한 번 더 — 커서만으로는 "여기 뭐가 있나" 가
-          안 읽힌다. 이 패널에서 유일하게 늘어나는 어포던스라 작게 둔다. */}
-      {rowClickable && (
-        <p
-          data-testid="beginner-agent-open-terminal"
-          className="mt-1 text-[10px] leading-4 text-[#585b70]"
-        >
-          {t("beginner.agents.openTerminal")}
-        </p>
+      {/* 액션 줄 — 종전엔 "눌러서 보기" 안내 문구가 있던 자리다. 문구는 문으로
+          읽히지 않았고, 끄기는 심플 모드에 아예 없었다. 줄 수는 그대로 유지한다.
+          두 버튼 모두 행 클릭(터미널)을 삼킨다 — 특히 X 는 삼키지 않으면 끄면서
+          동시에 터미널이 열린다. */}
+      {(rowClickable || killable) && (
+        <div className="mt-1 flex items-center justify-end gap-1">
+          {rowClickable && (
+            <button
+              type="button"
+              data-testid="beginner-agent-open-terminal"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAgentClick!(agent);
+              }}
+              title={t("beginner.agents.openTerminal")}
+              className="rounded border border-[#313244] px-1.5 py-0.5 text-[10px] leading-4 text-[#7f849c] transition-colors hover:border-[#45475a] hover:text-[#89b4fa]"
+            >
+              <span aria-hidden className="mr-0.5">
+                ▸
+              </span>
+              {t("beginner.agents.terminalAction")}
+            </button>
+          )}
+
+          {killable && (
+            <button
+              type="button"
+              data-testid="beginner-agent-kill"
+              disabled={killing}
+              onClick={(e) => {
+                e.stopPropagation();
+                onAgentKill!(agent);
+              }}
+              aria-label={t("beginner.agents.killAria", { name: agent.name })}
+              title={t("beginner.agents.killTitle")}
+              className="flex h-[18px] w-[18px] items-center justify-center rounded border border-[#313244] text-[10px] leading-4 text-[#7f849c] transition-colors hover:border-[#f38ba8]/50 hover:text-[#f38ba8] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {killing ? (
+                "…"
+              ) : (
+                <svg
+                  width="9"
+                  height="9"
+                  viewBox="0 0 12 12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  aria-hidden
+                >
+                  <path d="M3 3l6 6M9 3l-6 6" />
+                </svg>
+              )}
+            </button>
+          )}
+        </div>
       )}
     </li>
   );

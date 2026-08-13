@@ -58,6 +58,7 @@ import {
   SURFACE,
   SectionLabel,
 } from "./beginnerUi";
+import type { Agent } from "../../types/agent";
 
 /**
  * 비기너 셸 — **가벼운 2페인 워크스페이스** (설계: v3/docs/BEGINNER-MODE-DESIGN.md).
@@ -156,6 +157,9 @@ export function BeginnerShell() {
   // 에이전트 터미널의 PTY 세션 원장. 어드밴스드 에이전트 탭이 읽는 것과 **같은**
   // 스토어다 — 비기너가 여는 터미널은 그 탭이 여는 것과 같은 세션이어야 한다.
   const terminalSessions = useTerminalStore((s) => s.sessions);
+  // 팀원 끄기(심플 모드) — 어드밴스드 목록의 닫기와 같은 초크포인트를 쓴다.
+  const deleteAgent = useAgentStore((s) => s.deleteAgent);
+  const closeTerminalSession = useTerminalStore((s) => s.closeSession);
 
   const enteredAt = useBeginnerModeStore((s) => s.enteredAt);
   const entryReason = useBeginnerModeStore((s) => s.entryReason);
@@ -337,6 +341,26 @@ export function BeginnerShell() {
       if (target) openAgentTerminal(target);
     },
     [agents, openAgentTerminal]
+  );
+
+  // ★심플 모드에서 팀원 끄기 — 어드밴스드 에이전트 목록(AgentListPanel)의
+  // 닫기와 **같은 순서**로 자원을 회수한다(새 경로를 만들지 않는다):
+  //   deleteAgent = agent:stop → agent:remove → 문서 삭제 → ptyMirror 회수 →
+  //   결정적 `agent-<id>` 세션 closeSession.
+  // 그 다음, 이 화면이 터미널 모달에서 무는 **이름 매칭** 세션도 한 번 더
+  // 회수한다 — 두 id 가 갈릴 수 있어서다(closeSession 은 멱등). 확인 모달과
+  // "작업 중일 때만 묻는다" 판정은 패널이 `lib/agentEntryClose` 로 든다.
+  const killAgent = useCallback(
+    async (agent: Agent) => {
+      const sessionId = findAgentPtySessionId(terminalSessions, agent.name);
+      await deleteAgent(agent.id);
+      if (sessionId) {
+        await closeTerminalSession(sessionId).catch(() => {
+          /* 이미 detach 된 세션 — 정리할 게 없다 */
+        });
+      }
+    },
+    [closeTerminalSession, deleteAgent, terminalSessions]
   );
 
   const askAboutTask = useCallback((message: string) => setDraft(message), []);
@@ -633,6 +657,7 @@ export function BeginnerShell() {
                         tasks={tasks}
                         onTaskClick={openTaskDetail}
                         onAgentClick={openAgentTerminal}
+                        onAgentKill={killAgent}
                       />
                     </section>
                   </div>

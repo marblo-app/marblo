@@ -194,6 +194,11 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
     "Nobody's on the job yet. Say what you'd like built and Marblo puts a team on it.",
   "beginner.agents.noTask": "Nothing assigned right now",
   "beginner.agents.openTerminal": "Tap to see what they're doing",
+  "beginner.agents.terminalAction": "Live view",
+  "beginner.agents.killAction": "Stop",
+  "beginner.agents.killAria": "Stop {name}",
+  "beginner.agents.killTitle":
+    "Stop this teammate and remove them from the list",
   "beginner.agents.terminalEmpty":
     "Nothing to show yet. This teammate just started or is reconnecting — try again in a moment.",
   "beginner.agents.terminalHint":
