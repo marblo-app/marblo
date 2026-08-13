@@ -51,10 +51,53 @@ const ERROR_KEY: Record<string, MessageKey> = {
   exists: "collab.repoConnect.errorExists",
   git: "collab.repoConnect.errorGeneric",
   "invalid-url": "collab.repoConnect.errorInvalidUrl",
+  // macOS Xcode CLT (티켓 nETj7szjEtT5prbYsg1D) — raw git 에러 대신 안내.
+  "xcode-license": "collab.repoConnect.errorXcodeLicense",
+  "xcode-missing": "collab.repoConnect.errorXcodeMissing",
+};
+
+/** CLT 사전 감지 결과의 issue → 안내 문구 키. */
+const XCODE_ISSUE_KEY: Record<string, MessageKey> = {
+  "license-not-agreed": "collab.repoConnect.errorXcodeLicense",
+  "clt-missing": "collab.repoConnect.errorXcodeMissing",
 };
 
 /** 수동 재호출 진입점에서 보낼 커스텀 이벤트. */
 export const REPO_CONNECT_OPEN_EVENT = "marblo:open-repo-connect";
+
+/**
+ * "터미널에 이 명령을 붙여넣으세요" 한 줄 + 복사 버튼.
+ * 명령 원문은 항상 화면에 보이므로 클립보드가 막혀도 사용자가 직접 선택해
+ * 복사할 수 있다 (티켓 nETj7szjEtT5prbYsg1D).
+ */
+function CommandRow({
+  command,
+  copied,
+  onCopy,
+  copyLabel,
+  copiedLabel,
+}: {
+  command: string;
+  copied: boolean;
+  onCopy: () => void;
+  copyLabel: string;
+  copiedLabel: string;
+}) {
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <code className="flex-1 select-all rounded bg-gray-900 px-2 py-1 font-mono text-xs text-gray-200 break-all">
+        {command}
+      </code>
+      <button
+        type="button"
+        onClick={onCopy}
+        className="shrink-0 rounded border border-gray-600 px-2 py-1 text-xs text-gray-200 hover:bg-gray-700"
+      >
+        {copied ? copiedLabel : copyLabel}
+      </button>
+    </div>
+  );
+}
 
 export function RepoConnectModal() {
   const { t } = useTranslation();
@@ -72,6 +115,11 @@ export function RepoConnectModal() {
   const [busy, setBusy] = useState(false);
   const [errorKey, setErrorKey] = useState<MessageKey | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  // 에러와 함께 보여줄 "터미널에 붙여넣을 명령"(현재는 Xcode CLT 안내 전용).
+  const [fixCommand, setFixCommand] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  // 사전 감지 결과 — 사용자가 [Clone & 연결] 을 누르기 전에 띄우는 배너.
+  const [xcodeIssue, setXcodeIssue] = useState<XcodeCltStatus | null>(null);
   const [parentDir, setParentDir] = useState<string | null>(null);
   const [defaultParent, setDefaultParent] = useState<string | null>(null);
   // manual 모드에서만 쓰는 주소 입력값(clone 모드에선 프로젝트 값이 이긴다).
@@ -186,6 +234,28 @@ export function RepoConnectModal() {
     };
   }, [visible, defaultParent]);
 
+  // ★사전 감지 (티켓 nETj7szjEtT5prbYsg1D). macOS 에서 Xcode CLT 라이선스에
+  // 동의하지 않았거나 CLT 가 없으면 git 이 아예 안 돌아 clone 이 100% 실패한다.
+  // 사용자가 버튼을 누르고 실패를 맞기 전에 모달 상단에서 먼저 알려준다.
+  // 실패(구버전 main·IPC 없음)는 조용히 무시 — 그 경우 clone 결과의
+  // errorKind 가 같은 안내를 띄운다.
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    window.electronAPI.system
+      ?.xcodeClt?.()
+      .then((status) => {
+        if (cancelled) return;
+        setXcodeIssue(status && !status.ok ? status : null);
+      })
+      .catch(() => {
+        if (!cancelled) setXcodeIssue(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible]);
+
   useEffect(() => {
     if (!user?.uid) {
       setGithubConnected(false);
@@ -256,6 +326,8 @@ export function RepoConnectModal() {
   useEffect(() => {
     setErrorKey(null);
     setErrorDetail(null);
+    setFixCommand(null);
+    setCopied(false);
     setParentDir(null);
     setManualUrl("");
   }, [currentProject?.id]);
@@ -293,9 +365,26 @@ export function RepoConnectModal() {
       ? `${effectiveParent}/${repoDirNameFromUrl(repoUrl)}`
       : null;
 
-  const fail = (key: MessageKey, detail?: string | null) => {
+  const fail = (
+    key: MessageKey,
+    detail?: string | null,
+    command?: string | null,
+  ) => {
     setErrorKey(key);
     setErrorDetail(detail ?? null);
+    setFixCommand(command ?? null);
+    setCopied(false);
+  };
+
+  /** 안내 명령을 클립보드로. 실패해도 명령 원문은 화면에 그대로 남는다. */
+  const copyFixCommand = async (command: string) => {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* 클립보드 거부 — 사용자가 직접 선택해 복사할 수 있다 */
+    }
   };
 
   /** clone 성공/기존 폴더 선택 후 공통 연결: 내 기기 칸 기록 + rootPath. */
@@ -332,6 +421,8 @@ export function RepoConnectModal() {
     setBusy(true);
     setErrorKey(null);
     setErrorDetail(null);
+    setFixCommand(null);
+    setCopied(false);
     try {
       const result = await window.electronAPI.repo.clone({
         projectId,
@@ -343,10 +434,16 @@ export function RepoConnectModal() {
         await backfillRepoUrl(repoUrl);
         await connectPath(result.path, "member-clone");
       } else {
+        const isXcode =
+          result.errorKind === "xcode-license" ||
+          result.errorKind === "xcode-missing";
         fail(
           ERROR_KEY[result.errorKind ?? "git"] ??
             "collab.repoConnect.errorGeneric",
-          result.message,
+          // Xcode 안내는 문구 자체가 완결이라 stderr 요약을 덧붙이면 오히려
+          // 원문 에러를 다시 노출하는 꼴이 된다 — 명령만 붙인다.
+          isXcode ? null : result.message,
+          result.fixCommand,
         );
       }
     } catch (err) {
@@ -362,6 +459,8 @@ export function RepoConnectModal() {
   const handleConnectExisting = async () => {
     setErrorKey(null);
     setErrorDetail(null);
+    setFixCommand(null);
+    setCopied(false);
     const dir = await window.electronAPI.fs.selectDirectory();
     if (!dir) return;
     setBusy(true);
@@ -498,8 +597,45 @@ export function RepoConnectModal() {
                   {errorDetail}
                 </div>
               )}
+              {fixCommand && (
+                <CommandRow
+                  command={fixCommand}
+                  copied={copied}
+                  onCopy={() => void copyFixCommand(fixCommand)}
+                  copyLabel={t("collab.repoConnect.copyCommand")}
+                  copiedLabel={t("collab.repoConnect.copied")}
+                />
+              )}
             </div>
           )}
+
+          {/* 사전 감지 배너 — 아직 아무 버튼도 누르지 않았지만 이대로면
+              반드시 실패한다. 실패한 에러 박스가 이미 같은 안내를 띄우고
+              있으면 중복을 피해 숨긴다. */}
+          {xcodeIssue?.issue &&
+            !fixCommand &&
+            (() => {
+              const command = xcodeIssue.command;
+              return (
+                <div className="rounded bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-sm text-amber-300">
+                  <div>
+                    {t(
+                      XCODE_ISSUE_KEY[xcodeIssue.issue] ??
+                        "collab.repoConnect.errorXcodeLicense",
+                    )}
+                  </div>
+                  {command && (
+                    <CommandRow
+                      command={command}
+                      copied={copied}
+                      onCopy={() => void copyFixCommand(command)}
+                      copyLabel={t("collab.repoConnect.copyCommand")}
+                      copiedLabel={t("collab.repoConnect.copied")}
+                    />
+                  )}
+                </div>
+              );
+            })()}
 
           <p className="text-xs text-gray-500">
             {t("collab.repoConnect.privateHint")}

@@ -232,12 +232,18 @@ describe("★구독 선택 칸 — 설치와 로그인 사이 (티켓 LLHMclpKaI
 });
 
 describe("oneClickInstallRows — '모두 설치' 의 대상 집합", () => {
-  it("오케 후보만 든다 — 고르지도 않은 벤더 인스톨러를 실행하지 않는다", () => {
+  it("기본 함대 3종을 든다 — Claude·Codex·Grok (k22rGEgv)", () => {
     const ids = oneClickInstallRows(ROWS).map((r) => r.id);
-    expect(ids).toContain("cli-claude-code");
-    expect(ids).toContain("cli-codex");
-    expect(ids).not.toContain("cli-grok");
-    expect(ids).not.toContain("cli-antigravity");
+    expect(ids).toEqual(["cli-claude-code", "cli-codex", "cli-grok"]);
+  });
+
+  it("★Antigravity 는 여전히 빠진다 — 고르지도 않은 인스톨러는 안 돌린다", () => {
+    // 자동설치가 3종으로 늘었다고 "전부 다" 가 된 것은 아니다. 이 경계가
+    // 무너지면 원클릭 한 번이 사용자가 선택한 적 없는 벤더 셸 인스톨러까지
+    // 실행하게 된다.
+    expect(oneClickInstallRows(ROWS).map((r) => r.id)).not.toContain(
+      "cli-antigravity",
+    );
   });
 });
 
@@ -326,10 +332,11 @@ describe("BeginnerOneClickModal", () => {
     render(createElement(BeginnerOneClickModal, { onClose: () => {} }));
 
     expect(installAllMock().mock.calls.length).toBe(1);
-    // 대상은 오케 후보 두 줄이다(그록·안티그래비티 아님).
+    // 대상은 기본 함대 세 줄이다 — grok 포함, antigravity 제외(k22rGEgv).
     expect(installAllMock().mock.calls[0][0].map((r) => r.id)).toEqual([
       "cli-claude-code",
       "cli-codex",
+      "cli-grok",
     ]);
     expect(phaseAttr()).toBe("installing");
     // 설치 중에는 로그인 터미널을 띄우지 않는다.
@@ -493,6 +500,48 @@ describe("BeginnerOneClickModal", () => {
       vi.useRealTimers();
     }
   });
+
+  // ── '직접 고를게요' (k22rGEgv) ────────────────────────────────────────────
+  // 콜드 테스트 보고: "눌러도 아무 동작 없이 창만 닫힌다". 원인은 이 버튼이
+  // `onClose` 를 그대로 불러서, 수동 선택 화면으로 **데려가는** 신호가 아예 없던
+  // 것이다. 아래 둘이 그 경계를 고정한다.
+
+  it("★'직접 고를게요' 는 닫기가 아니라 onManual 을 부른다", () => {
+    seed({
+      "cli-claude-code": probe(false, false),
+      "cli-codex": probe(false, false),
+    });
+    const onClose = vi.fn();
+    const onManual = vi.fn();
+    render(createElement(BeginnerOneClickModal, { onClose, onManual }));
+
+    fireEvent.click(screen.getByTestId("beginner-oneclick-manual"));
+
+    expect(onManual).toHaveBeenCalledTimes(1);
+    // ★핵심 회귀가드: 닫기만 하고 끝내면 사용자는 같은 자리에 남는다. 목적지로
+    // 데려가는 책임은 셸(onManual)이 지고, 이 버튼은 그걸 우회하지 않는다.
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("onManual 이 없으면 종전대로 닫기로 폴백한다 — 막다른 버튼을 만들지 않는다", () => {
+    seed({ "cli-claude-code": probe(false, false) });
+    const onClose = vi.fn();
+    render(createElement(BeginnerOneClickModal, { onClose }));
+
+    fireEvent.click(screen.getByTestId("beginner-oneclick-manual"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("헤더의 ✕ 는 계속 순수한 닫기다 — onManual 을 부르지 않는다", () => {
+    seed({ "cli-claude-code": probe(false, false) });
+    const onClose = vi.fn();
+    const onManual = vi.fn();
+    render(createElement(BeginnerOneClickModal, { onClose, onManual }));
+
+    fireEvent.click(screen.getByTestId("beginner-oneclick-close"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onManual).not.toHaveBeenCalled();
+  });
 });
 
 describe("★로그인 유도 계측 · 이탈 (티켓 LLHMclpKaIAJbsiHzGoG, #932 needs_auth 와 조인)", () => {
@@ -647,5 +696,81 @@ describe("BeginnerConnectStep — 원클릭이 주 경로, 택1 이 폴백", () 
     const err = screen.getByTestId("beginner-connect-install-error");
     expect(err.textContent).toContain("EACCES");
     expect(err.querySelector("code")?.textContent).toContain("claude.ai");
+  });
+
+  // ── '직접 고를게요' 의 착지점 (k22rGEgv) ──────────────────────────────────
+
+  it("★manualFocusSignal 이 오르면 택1 섹션으로 스크롤하고 강조한다", () => {
+    seed({ "cli-claude-code": probe(false, false) });
+    const scrollIntoView = vi.fn();
+    const props = {
+      onWatchDemo: () => {},
+      onOneClick: () => {},
+      manualFocusSignal: 0,
+    };
+    const { rerender } = render(createElement(BeginnerConnectStep, props));
+
+    const manual = screen.getByTestId("beginner-connect-manual");
+    // jsdom 에는 scrollIntoView 가 없다 — 실제로 불렀는지 보려면 심어야 한다.
+    (manual as HTMLElement & { scrollIntoView: unknown }).scrollIntoView =
+      scrollIntoView;
+
+    // 신호 전에는 아무 일도 없다(첫 렌더에 화면이 튀면 안 된다).
+    expect(manual.getAttribute("data-highlighted")).toBe("false");
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    rerender(
+      createElement(BeginnerConnectStep, { ...props, manualFocusSignal: 1 }),
+    );
+
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(
+      screen
+        .getByTestId("beginner-connect-manual")
+        .getAttribute("data-highlighted"),
+    ).toBe("true");
+  });
+
+  it("★같은 버튼을 두 번 눌러도 매번 반응한다 — 신호가 boolean 이 아닌 이유", () => {
+    // 이게 boolean 이었으면 두 번째 클릭에서 값이 안 변해 이펙트가 안 돌고,
+    // 사용자는 다시 "아무 반응 없음" 을 본다 — 고치려던 그 증상 그대로다.
+    vi.useFakeTimers();
+    try {
+      seed({ "cli-claude-code": probe(false, false) });
+      const scrollIntoView = vi.fn();
+      const props = {
+        onWatchDemo: () => {},
+        onOneClick: () => {},
+        manualFocusSignal: 1,
+      };
+      const { rerender } = render(createElement(BeginnerConnectStep, props));
+      (
+        screen.getByTestId("beginner-connect-manual") as HTMLElement & {
+          scrollIntoView: unknown;
+        }
+      ).scrollIntoView = scrollIntoView;
+
+      // 강조는 스스로 꺼진다 — 영구 링은 "여기가 에러다" 로 읽힌다.
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+      expect(
+        screen
+          .getByTestId("beginner-connect-manual")
+          .getAttribute("data-highlighted"),
+      ).toBe("false");
+
+      rerender(
+        createElement(BeginnerConnectStep, { ...props, manualFocusSignal: 2 }),
+      );
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(
+        screen
+          .getByTestId("beginner-connect-manual")
+          .getAttribute("data-highlighted"),
+      ).toBe("true");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

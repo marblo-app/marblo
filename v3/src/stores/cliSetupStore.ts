@@ -43,15 +43,27 @@ export interface CliRow {
   id: CliRowId;
   model: CliModel;
   required: boolean;
-  /** npm-global installs can be auto-installed silently. Shell installers
-   * (agy) are optional and installed only on explicit click. */
+  /**
+   * This CLI is installed without the user pressing its own row button —
+   * both by the background first-run pass (`useCliSetupEngine`) and by the
+   * "모두 설치" one-click set (`oneClickSetup.oneClickInstallRows`). The two
+   * surfaces read the SAME flag on purpose: if they diverged, "자동설치" would
+   * mean a different fleet depending on which screen the user came through.
+   *
+   * ★`required` 와는 다른 축이다. `required` 는 "이게 없으면 오케를 못 띄운다"
+   * (게이트 판정), `autoInstall` 은 "묻지 않고 깔아도 되는가"(설치 정책)다.
+   * Grok 은 오케 후보가 아니라 required 는 false 지만, 사장님 요구로 기본 함대에
+   * 들어가 autoInstall 은 true 다 — 이 두 값이 서로 독립이어야 하는 이유가
+   * 정확히 그 조합이다.
+   */
   autoInstall: boolean;
 }
 
 /**
  * Claude and Codex are orchestrator candidates: either one being installed and
- * authenticated is enough (#579 `.some`). Both are still recommended and
- * auto-installed in the background; Antigravity remains optional.
+ * authenticated is enough (#579 `.some`). Grok also ships in the default fleet
+ * (auto-installed) but is NOT a candidate — it can never satisfy the gate.
+ * Antigravity remains fully opt-in.
  */
 export const ORCHESTRATOR_CLI_IDS: CliRowId[] = [
   "cli-claude-code",
@@ -61,7 +73,11 @@ export const ORCHESTRATOR_CLI_IDS: CliRowId[] = [
 export const ROWS: CliRow[] = [
   { id: "cli-claude-code", model: "claude", required: true, autoInstall: true },
   { id: "cli-codex", model: "codex", required: false, autoInstall: true },
-  { id: "cli-grok", model: "grok", required: false, autoInstall: false },
+  // ★Grok 은 required 가 아니지만 autoInstall 이다(사장님 요구, k22rGEgv).
+  // 기본 함대가 Claude·Codex 2종 → Grok 포함 3종이 된다. required 로 올리지는
+  // 않는다: 오케 후보는 여전히 claude/codex 뿐이라(#579), grok 만 깔린 사용자를
+  // "준비됨" 으로 판정하면 스폰이 즉시 fast-fail 한다.
+  { id: "cli-grok", model: "grok", required: false, autoInstall: true },
   {
     id: "cli-antigravity",
     model: "antigravity",

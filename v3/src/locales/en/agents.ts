@@ -177,6 +177,15 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.attention.awaiting": "Awaiting input",
   "agents.attention.awaitingTitle": "The agent is waiting for your input",
 
+  // ── Input-wait notification (top right) ─────────────────────
+  "agents.inputWait.title": "{name} is waiting for you",
+  "agents.inputWait.confirmBody":
+    "A confirmation prompt is up — nothing proceeds until it is answered.",
+  "agents.inputWait.promptBody":
+    "It has stopped at its prompt. Open the terminal to tell it what to do next.",
+  "agents.inputWait.open": "Open terminal",
+  "agents.inputWait.dismiss": "Dismiss",
+
   // ── Team dashboard ──────────────────────────────────────────
   "agents.team.title": "Team Dashboard",
   "agents.team.project": "Project",

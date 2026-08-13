@@ -81,6 +81,13 @@ vi.mock("../../src/components/onboarding/OnrampGateHost", () => ({
       "data-variant": variant,
     }),
 }));
+// ★에이전트 입력 대기 알림 — 셸이 갈려도 같은 알림이 뜨도록 여기 있다
+// (ticket z4otodPWZTz1El1Ev7ll). 심플 셸은 GlobalOverlays 를 안 태우므로 자기
+// 사본을 따로 마운트한다; 그 파리티는 agentInputWaitSurfaceParity 가 지킨다.
+vi.mock("../../src/components/agents/AgentInputWaitHost", () => ({
+  AgentInputWaitHost: () =>
+    createElement("div", { "data-testid": "agent-input-wait-host" }),
+}));
 vi.mock("../../src/components/chat/ChatToastHost", () => ({
   ChatToastHost: () =>
     createElement("div", { "data-testid": "chat-toast-host" }),
@@ -147,6 +154,7 @@ describe("GlobalOverlays DOM wiring", () => {
     expect(screen.getByTestId("privacy-consent-gate")).toBeTruthy();
     expect(screen.getByTestId("training-consent-card")).toBeTruthy();
     expect(screen.getByTestId("privacy-clarification-notice")).toBeTruthy();
+    expect(screen.getByTestId("agent-input-wait-host")).toBeTruthy();
     expect(screen.getByTestId("chat-toast-host")).toBeTruthy();
     expect(screen.getByTestId("bug-report-notice-toast")).toBeTruthy();
     // 온램프 안내 둘 — 어드밴스드/레거시 셸이 이 컴포넌트를 통해 받는다.

@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { gitSpawnEnv } from "./git-path";
+import { describeXcodeCltFailure } from "./xcode-clt";
 
 /**
  * repo-clone — 팀 멤버의 "Clone & 연결" 원클릭 (티켓 r8VggohxLGciDVXV2rf6).
@@ -30,7 +31,11 @@ export type CloneErrorKind =
   | "auth"
   | "not-found"
   | "network"
-  | "git";
+  | "git"
+  // macOS Xcode CLT 문제 (티켓 nETj7szjEtT5prbYsg1D). raw git 에러 대신
+  // "터미널에 이 명령을 실행하세요" 안내로 바꾸기 위한 별도 분류.
+  | "xcode-license"
+  | "xcode-missing";
 
 export interface CloneResult {
   ok: boolean;
@@ -39,6 +44,11 @@ export interface CloneResult {
   errorKind?: CloneErrorKind;
   /** git stderr 요약(마지막 줄들) — 모달의 상세 표시용. */
   message?: string;
+  /**
+   * 사용자가 터미널에 그대로 붙여넣어야 하는 명령(있을 때만).
+   * 모달이 복사 버튼과 함께 띄운다 — 현재는 Xcode CLT 안내에서만 채워진다.
+   */
+  fixCommand?: string;
 }
 
 /** 대용량 repo 여유 포함 상한 — auth 는 TERMINAL_PROMPT=0 으로 즉사하므로
@@ -101,6 +111,16 @@ export function deriveRepoDirName(url: string): string {
 
 /** git stderr → 행동 가능한 에러 분류. */
 export function classifyCloneError(stderr: string): CloneErrorKind {
+  // Xcode CLT 문제를 **가장 먼저** 본다. 라이선스 미동의 원문은 git 이
+  // 실행조차 안 된 상태라서 auth/network 로 분류하면 사용자가 엉뚱한
+  // (GitHub 인증·네트워크) 곳을 파게 된다.
+  const xcode = describeXcodeCltFailure(stderr);
+  if (xcode) {
+    return xcode.issue === "license-not-agreed"
+      ? "xcode-license"
+      : "xcode-missing";
+  }
+
   const s = stderr.toLowerCase();
   if (
     s.includes("authentication failed") ||
@@ -132,11 +152,17 @@ export function classifyCloneError(stderr: string): CloneErrorKind {
  * GitHub HTTPS URL에만 device-flow token을 붙인다. SSH와 다른 Git host는
  * 기존 gh auth/SSH fallback을 그대로 사용한다.
  */
-export function tokenizedGitHubCloneUrl(url: string, token?: string | null): string {
+export function tokenizedGitHubCloneUrl(
+  url: string,
+  token?: string | null,
+): string {
   if (!token) return url;
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== "https:" || parsed.hostname.toLowerCase() !== "github.com") {
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.hostname.toLowerCase() !== "github.com"
+    ) {
       return url;
     }
     parsed.username = "oauth2";
@@ -214,7 +240,11 @@ function summarizeStderr(stderr: string, token?: string | null): string {
  * 실행하지 않는다(exists). 절대 throw 하지 않고 CloneResult 로 돌려준다.
  */
 export async function cloneRepo(
-  input: { repoUrl: string; parentDir?: string | null; githubToken?: string | null },
+  input: {
+    repoUrl: string;
+    parentDir?: string | null;
+    githubToken?: string | null;
+  },
   runner: GitRunner = realGitRunner,
 ): Promise<CloneResult> {
   const url = validateCloneUrl(input.repoUrl);
@@ -262,6 +292,16 @@ export async function cloneRepo(
     return { ok: true, path: dest };
   }
   const errorKind = classifyCloneError(r.stderr);
+  // Xcode CLT 문제면 stderr 원문 대신 "무엇을 실행하면 되는지" 만 남긴다.
+  const xcode = describeXcodeCltFailure(r.stderr);
+  if (xcode) {
+    return {
+      ok: false,
+      errorKind,
+      message: xcode.message,
+      fixCommand: xcode.command,
+    };
+  }
   return {
     ok: false,
     errorKind,

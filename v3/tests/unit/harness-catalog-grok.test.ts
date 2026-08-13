@@ -8,6 +8,15 @@
  *       것처럼 보인다.
  * 필수 하네스는 오케스트레이터가 실제 후보로 삼는 claude/codex 뿐이다
  * (`ORCHESTRATOR_CLI_IDS`). 이 파일이 그 경계를 고정한다.
+ *
+ * ★k22rGEgv 갱신: grok 이 **기본 함대**로 편입돼 자동설치 대상이 됐다
+ * (`ROWS.autoInstall = true`). 그렇다고 위 경계가 흔들리지는 않는다 — 세 축이
+ * 각자 다른 것을 말한다:
+ *   autoInstall  묻지 않고 깔아도 되는가        → grok: 예
+ *   required     없으면 오케를 못 띄우는가       → grok: 아니오
+ *   category     하네스 스토어에서 제거 가능한가 → grok: recommended(가능)
+ * 이 셋이 한 값으로 뭉개지는 순간 "자동으로 깔렸는데 지울 수 없는 CLI" 나
+ * "grok 만 깔고 준비됨으로 판정 → 스폰 fast-fail" 이 생긴다.
  */
 import { describe, it, expect } from "vitest";
 import { CATALOG } from "../../electron/harness-catalog";
@@ -35,18 +44,34 @@ describe("harness catalog — Grok Build 편입", () => {
     expect(ORCHESTRATOR_CLI_IDS).not.toContain("cli-grok");
   });
 
-  it("온보딩 게이트에서 grok 은 필수도 자동설치도 아니다", () => {
+  it("★온보딩 게이트에서 grok 은 자동설치이되 필수는 아니다 (k22rGEgv)", () => {
+    // 사장님 요구: 기본 함대가 Claude·Codex 2종 → Grok 포함 3종. 두 축이
+    // 갈라지는 자리다 — 깔아는 주되(autoInstall), 게이트를 여는 자격은 없다
+    // (required=false, 오케 후보도 아님).
     const row = ROWS.find((r) => r.id === "cli-grok");
     expect(row).toBeDefined();
+    expect(row!.autoInstall).toBe(true);
     expect(row!.required).toBe(false);
-    expect(row!.autoInstall).toBe(false);
-    // 기존 행은 그대로 — claude 만 required, claude/codex 만 자동설치.
+    // required 는 여전히 claude 뿐 — grok 만 깔린 사용자를 "준비됨" 으로
+    // 판정하면 스폰이 즉시 fast-fail 한다.
     expect(ROWS.filter((r) => r.required).map((r) => r.id)).toEqual([
       "cli-claude-code",
     ]);
     expect(ROWS.filter((r) => r.autoInstall).map((r) => r.id)).toEqual([
       "cli-claude-code",
       "cli-codex",
+      "cli-grok",
     ]);
+    // Antigravity 는 계속 완전 옵트인 — 자동설치가 "전부 다" 로 번지지 않는다.
+    expect(ROWS.find((r) => r.id === "cli-antigravity")!.autoInstall).toBe(
+      false,
+    );
+  });
+
+  it("★자동설치가 됐다고 카탈로그가 required 로 올라가지는 않는다", () => {
+    // 두 플래그는 다른 축이다. 여기를 required 로 올리면 harness-manager 의
+    // `category === "required"` 가드가 제거를 막아, 자동으로 깔린 CLI 를
+    // 사용자가 되돌릴 수 없게 된다.
+    expect(grok!.category).toBe("recommended");
   });
 });

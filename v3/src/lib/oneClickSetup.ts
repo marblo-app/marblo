@@ -157,11 +157,14 @@ export function signInRows<R extends { id: string }>(
 /**
  * Rows a "모두 설치" click targets, before looking at what is already there.
  *
- * Orchestrator candidates only (Claude / Codex — `autoInstall`, plus anything
- * flagged `required`). Grok·Antigravity are optional expansions and keep their
- * own per-row install buttons: one click must never run two vendor installers
+ * The default fleet: every row flagged `autoInstall` (Claude / Codex / Grok),
+ * plus anything flagged `required`. Antigravity stays out — it keeps its own
+ * per-row install button, because one click must not run a vendor installer
  * the user never chose. Shared so the 시작하기 탭 패널과 비기너 모달이 같은
  * 대상 집합을 쓴다 — 한쪽만 늘어나면 "모두 설치" 의 뜻이 화면마다 달라진다.
+ *
+ * ★대상 집합 ≠ 오케 후보. Grok 은 여기 들지만 `ORCHESTRATOR_CLI_IDS` 에는 없다:
+ * 깔아는 주되, 그것만으로 게이트가 열리지는 않는다.
  */
 export function oneClickInstallRows<
   R extends { autoInstall: boolean; required: boolean }

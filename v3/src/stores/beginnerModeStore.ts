@@ -1,10 +1,14 @@
 import { create } from "zustand";
 import {
+  BEGINNER_MODE_CLAIM_KEY,
   BEGINNER_MODE_KEY,
+  beginnerModeAccountKey,
   EMPTY_BEGINNER_RECORD,
   parseBeginnerRecord,
+  resolveBeginnerModeForAccount,
   resolveInitialBeginnerMode,
   serializeBeginnerRecord,
+  type BeginnerAccountOutcome,
   type BeginnerModeRecord,
   type BeginnerModeState,
   type PriorInstallMarkers,
@@ -61,10 +65,33 @@ function readMarkers(): PriorInstallMarkers {
   }
 }
 
-function readStored(): BeginnerModeRecord | null {
+/**
+ * 지금 판정의 주인 uid. null = 아직 신원이 정해지지 않았다(로그인 전).
+ *
+ * ★영속 키가 여기서 갈린다 — 판정은 기기가 아니라 **계정**에 붙는다
+ * (티켓 E3ywX1ftbVr5f1TrFsgp). 신원 전에는 레거시(기기) 키를 쓰는데, 그건
+ * 로그인 전 화면이 비기너 셸을 그리는 일이 없으므로 사실상 안 쓰이는 자리이고,
+ * 혹시 쓰이더라도 "아직 임자 없는 기기 흔적" 이라는 그 키의 정의와 일치한다.
+ */
+let activeUid: string | null = null;
+
+function storageKey(): string {
+  return activeUid ? beginnerModeAccountKey(activeUid) : BEGINNER_MODE_KEY;
+}
+
+function readRecordAt(key: string): BeginnerModeRecord | null {
   if (typeof window === "undefined") return null;
   try {
-    return parseBeginnerRecord(localStorage.getItem(BEGINNER_MODE_KEY));
+    return parseBeginnerRecord(localStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+
+function readClaimedBy(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(BEGINNER_MODE_CLAIM_KEY);
   } catch {
     return null;
   }
@@ -73,33 +100,63 @@ function readStored(): BeginnerModeRecord | null {
 function persist(record: BeginnerModeRecord): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(BEGINNER_MODE_KEY, serializeBeginnerRecord(record));
+    localStorage.setItem(storageKey(), serializeBeginnerRecord(record));
   } catch {
     // 프라이빗 모드 — 이번 세션 동안은 인메모리 값으로 동작하고 재시작 때 잃는다.
   }
 }
 
 /**
- * 모듈 평가 시점에 한 번 판정한다. 첫 렌더 전에 값이 확정돼야 셸이 한 프레임도
- * 깜빡이지 않는다(splitWorkspaceStore 가 초기 탭을 읽는 방식과 동형).
+ * 기기 흔적의 임자를 적고 레거시 레코드를 거둔다 — 상속이 **한 번만** 일어나게.
+ * 지우지 못해도(프라이빗 모드) 최악은 다음 계정이 한 번 더 상속하는 것뿐이다.
+ */
+function markMachineClaimed(uid: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(BEGINNER_MODE_CLAIM_KEY, uid);
+    localStorage.removeItem(BEGINNER_MODE_KEY);
+  } catch {
+    /* 프라이빗 모드 */
+  }
+}
+
+/**
+ * 이전-사용 마커는 **부팅 시점에 한 번** 찍어 둔다.
+ *
+ * ★판정이 모듈 평가에서 신원 채택(로그인 뒤)으로 미뤄졌기 때문에 필요한 스냅샷이다.
+ * 지금은 이 마커들을 쓰는 곳이 전부 유저 조작(탭 전환·체크리스트·게이트 닫기)이라
+ * 그 사이에 새로 생길 일이 없지만, 그건 **다른 파일의 사정**이다. 언젠가 부팅
+ * 경로가 마커 하나를 먼저 쓰게 되면 그 순간 모든 신규 설치가 조용히 어드밴스드로
+ * 떨어지고, 증상은 "가끔 심플모드가 안 뜬다" 로만 보인다. 스냅샷이 그 결합을 끊는다.
+ */
+const bootMarkers = readMarkers();
+
+/**
+ * 모듈 평가 시점의 **잠정** 판정. 첫 렌더 전에 값이 있어야 셸이 깜빡이지 않지만
+ * (splitWorkspaceStore 가 초기 탭을 읽는 방식과 동형), 이 시점엔 uid 가 없다.
+ *
+ * ★그래서 여기서는 **아무것도 영속하지 않는다.** 종전에는 이 자리에서 판정을
+ * 굳혀 버렸고, 그게 곧 "기기에 한 번 굳으면 어느 계정으로 로그인하든 그 판정"
+ * 이라는 이 티켓의 증상이었다. 진짜 판정과 영속은 신원이 정해질 때
+ * ({@link BeginnerModeStoreState.adoptAccount}) 일어난다. 로그인 전에는 비기너
+ * 셸이 그려지지 않으므로(App 은 `!user` 면 LoginPage) 이 잠정값은 화면에 닿지
+ * 않는다.
  */
 function initialRecord(): {
   record: BeginnerModeRecord;
   entryReason: BeginnerEntryReason;
 } {
-  const stored = readStored();
-  const state = resolveInitialBeginnerMode(stored, readMarkers());
-  // 이미 판정이 굳어 있었다면 이번 부팅은 재시작이다 — 신규 설치로 계상하면
-  // 비기너 진입 수가 세션 수만큼 부풀어 퍼널 분모가 망가진다.
+  const stored = readRecordAt(BEGINNER_MODE_KEY);
+  const state = resolveInitialBeginnerMode(stored, bootMarkers);
   if (stored) return { record: stored, entryReason: "restart" };
-  // 최초 판정 — 그대로 굳혀 둔다. 이후 다른 키가 생겨도 모드가 흔들리지 않는다.
-  const record: BeginnerModeRecord = {
-    ...EMPTY_BEGINNER_RECORD,
-    state,
-    enteredAt: state === "beginner" ? Date.now() : 0,
+  return {
+    record: {
+      ...EMPTY_BEGINNER_RECORD,
+      state,
+      enteredAt: state === "beginner" ? Date.now() : 0,
+    },
+    entryReason: "fresh_install",
   };
-  persist(record);
-  return { record, entryReason: "fresh_install" };
 }
 
 /**
@@ -113,6 +170,20 @@ interface BeginnerModeStoreState extends BeginnerModeRecord {
   enteredReported: boolean;
   entryReason: BeginnerEntryReason;
 
+  /**
+   * ★신원을 채택한다 — 계정 귀속 판정의 유일한 입구
+   * (호출부는 `lib/accountScope.resetAccountScopedState` 하나뿐이다).
+   *
+   * 돌려주는 값은 "이번 채택이 무엇을 했나" 다:
+   *   kept/null — 그대로(같은 계정, 또는 로그아웃)
+   *   claimed   — 기기 흔적을 이 계정이 물려받았다
+   *   fresh     — 이 계정의 첫 실행이다(다른 계정이 쓰던 기기)
+   *
+   * 호출부는 `fresh` 를 보고 다른 계정 귀속 온보딩 기록(코치마크 투어)도 함께
+   * 되돌린다 — 남이 완주한 안내 때문에 새 계정이 첫 실행 안내를 못 보는 일이
+   * 없게.
+   */
+  adoptAccount: (uid: string | null) => BeginnerAccountOutcome | null;
   /** 어드밴스드로 승격. `trigger` 는 계측용. */
   promote: (trigger: PromotionTrigger | "manual") => void;
   /** 설정 토글에서 비기너로 되돌리기. */
@@ -134,6 +205,39 @@ export const useBeginnerModeStore = create<BeginnerModeStoreState>(
     ...initial.record,
     enteredReported: false,
     entryReason: initial.entryReason,
+
+    adoptAccount: (uid) => {
+      // 로그아웃은 판정을 건드리지 않는다. 같은 계정으로 다시 들어오는 게 가장
+      // 흔한 경로인데, 여기서 판정을 되돌리면 그 유저가 이유 없이 화면을 잃는다.
+      // 로그아웃 상태에서는 비기너 셸이 그려지지 않으므로 남겨 둬도 안전하다.
+      if (uid === null) return null;
+      if (activeUid === uid) return null;
+
+      activeUid = uid;
+      const { record, outcome } = resolveBeginnerModeForAccount({
+        uid,
+        accountRecord: readRecordAt(beginnerModeAccountKey(uid)),
+        legacyRecord: readRecordAt(BEGINNER_MODE_KEY),
+        claimedBy: readClaimedBy(),
+        markers: bootMarkers,
+        now: Date.now(),
+      });
+
+      if (outcome !== "kept") persist(record);
+      // ★청구 도장은 **상속했을 때만** 찍는다. fresh 에서도 찍으면(=임자를 새
+      // 계정으로 갈아치우면) 그 계정의 레코드가 나중에 유실됐을 때 "임자가 나"
+      // 로 읽혀 남이 남긴 마커를 자기 근거로 상속하게 된다 — 새 계정이 다시
+      // 어드밴스드로 떨어지는, 이 티켓의 증상 그대로다.
+      if (outcome === "claimed") markMachineClaimed(uid);
+      set({
+        ...record,
+        // 진입 계측은 계정마다 다시 쏜다 — 아니면 두 번째 계정의 비기너 진입이
+        // 퍼널에서 통째로 사라진다.
+        enteredReported: false,
+        entryReason: outcome === "fresh" ? "fresh_install" : "restart",
+      });
+      return outcome;
+    },
 
     promote: () => {
       const next: BeginnerModeRecord = {
@@ -187,7 +291,7 @@ export const useBeginnerModeStore = create<BeginnerModeStoreState>(
     },
 
     markEnteredReported: () => set({ enteredReported: true }),
-  }),
+  })
 );
 
 /** 셸 분기용 셀렉터 — App 이 읽는 단 하나의 값. */

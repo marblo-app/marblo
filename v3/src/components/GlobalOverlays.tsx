@@ -9,6 +9,7 @@ import { FundingGuideHost } from "./onboarding/FundingGuideHost";
 import { OnrampGateHost } from "./onboarding/OnrampGateHost";
 import { PrivacyConsentGate } from "./legal/PrivacyConsentGate";
 import { TrainingConsentCard } from "./legal/TrainingConsentCard";
+import { AgentInputWaitHost } from "./agents/AgentInputWaitHost";
 import { ChatToastHost } from "./chat/ChatToastHost";
 import { BugReportNoticeToast } from "./chat/BugReportNoticeToast";
 import { UpgradeModal } from "./settings/UpgradeModal";
@@ -102,6 +103,12 @@ export function GlobalOverlays({ projectSetup }: GlobalOverlaysProps) {
           GlobalOverlays 를 마운트하지 않으므로 같은 카드를 자기 쪽에서 직접
           마운트한다 — 양쪽 배선은 trainingConsentSurfaceParity 테스트가 지킨다. */}
       <TrainingConsentCard />
+
+      {/* ★에이전트 입력 대기 알림 — 어떤 에이전트가 프롬프트 앞에서 사람을
+          기다리는지. 심플 셸(BeginnerShell)은 GlobalOverlays 를 마운트하지
+          않으므로 같은 컴포넌트를 자기 쪽에서 직접 건다(목적지만 다르다:
+          그쪽은 터미널 모달, 여기는 AgentListPanel 의 FocusView). */}
+      <AgentInputWaitHost />
 
       {/* Global team-chat listener and transient top notification. */}
       <ChatToastHost />

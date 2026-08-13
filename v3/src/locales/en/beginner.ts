@@ -14,6 +14,10 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.topbar.advancedHint":
     "Takes you to the full screen with the board, worktrees and model picker. You can come back any time from Settings.",
 
+  // ── Curated tab bar (lib/beginnerTabs) ──────────────────────────────────
+  "beginner.tabs.label": "Views",
+  "beginner.tab.chat": "Chat",
+
   // ── ① Connect (just one) ────────────────────────────────────────────────
   "beginner.connect.title": "Connect one account and you're in",
   "beginner.connect.subtitle":
@@ -203,6 +207,7 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.chat.placeholder":
     "What next? e.g. add a few examples to the guide you just wrote",
   "beginner.chat.orchestratorRunning": "In conversation",
+  "beginner.chat.modelPickerTitle": "Model Marblo will use",
 
   // ── Ticket detail (mini board card click) ───────────────────────────────
   "beginner.taskDetail.label": "Task detail",
