@@ -188,11 +188,11 @@ export function BeginnerShell() {
   const entryReason = useBeginnerModeStore((s) => s.entryReason);
   const enteredReported = useBeginnerModeStore((s) => s.enteredReported);
   const markEnteredReported = useBeginnerModeStore(
-    (s) => s.markEnteredReported,
+    (s) => s.markEnteredReported
   );
   const firstCompletionAt = useBeginnerModeStore((s) => s.firstCompletionAt);
   const markFirstCompletion = useBeginnerModeStore(
-    (s) => s.markFirstCompletion,
+    (s) => s.markFirstCompletion
   );
   const promotionShownAt = useBeginnerModeStore((s) => s.promotionShownAt);
   const markPromotionShown = useBeginnerModeStore((s) => s.markPromotionShown);
@@ -236,7 +236,7 @@ export function BeginnerShell() {
   // display:none 이지 조건부 렌더가 아니다(xterm 의 ResizeObserver 는 폭이 0인
   // 동안 fit 을 건너뛰고, 되돌아오면 실제 치수로 한 번 맞춘다 — TerminalView).
   const [mountedTabs, setMountedTabs] = useState<Set<BeginnerTabId>>(
-    () => new Set<BeginnerTabId>([BEGINNER_CHAT_TAB]),
+    () => new Set<BeginnerTabId>([BEGINNER_CHAT_TAB])
   );
   useEffect(() => {
     setMountedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
@@ -303,7 +303,7 @@ export function BeginnerShell() {
 
   const completedTasks = useMemo(
     () => tasks.filter((task) => task.status === "DONE").length,
-    [tasks],
+    [tasks]
   );
 
   // 진입 계측 — 세션당 한 번. 사유는 스토어가 판정한다(최초판정/재시작/설정복귀):
@@ -335,7 +335,7 @@ export function BeginnerShell() {
         mergedTasks: 0,
         elapsedMs: enteredAt ? Date.now() - enteredAt : 0,
       },
-      !!promotionShownAt,
+      !!promotionShownAt
     );
     if (trigger) {
       setPromotion(trigger);
@@ -365,7 +365,7 @@ export function BeginnerShell() {
       setPromotion(null);
       promote(trigger);
     },
-    [previewEnabled, setPreviewEnabled, promote],
+    [previewEnabled, setPreviewEnabled, promote]
   );
 
   // 에이전트 터미널 모달의 헤더가 쓰는 담당 티켓. 세션 짝짓기 규칙은 어드밴스드
@@ -373,16 +373,16 @@ export function BeginnerShell() {
   const openAgentTask = useMemo(
     () =>
       openAgent?.currentTaskId
-        ? (tasks.find((x) => x.id === openAgent.currentTaskId) ?? null)
+        ? tasks.find((x) => x.id === openAgent.currentTaskId) ?? null
         : null,
-    [openAgent, tasks],
+    [openAgent, tasks]
   );
   const openAgentSessionId = useMemo(
     () =>
       openAgent
         ? findAgentPtySessionId(terminalSessions, openAgent.name)
         : undefined,
-    [openAgent, terminalSessions],
+    [openAgent, terminalSessions]
   );
 
   // 티켓 상세의 "오케에게 물어보기" — 문장을 대화창에 **채우기만** 한다. 대신
@@ -399,7 +399,7 @@ export function BeginnerShell() {
       const target = agents.find((a) => a.id === agentId);
       if (target) openAgentTerminal(target);
     },
-    [agents, openAgentTerminal],
+    [agents, openAgentTerminal]
   );
 
   // ★심플 모드에서 팀원 끄기 — 어드밴스드 에이전트 목록(AgentListPanel)의
@@ -507,8 +507,8 @@ export function BeginnerShell() {
               setup.preview
                 ? t("beginner.preview.folderLocked")
                 : hasFolder
-                  ? t("beginner.topbar.changeFolder")
-                  : t("beginner.topbar.openFolder")
+                ? t("beginner.topbar.changeFolder")
+                : t("beginner.topbar.openFolder")
             }
             className="inline-flex h-7 min-w-0 max-w-[22rem] items-center gap-1.5 rounded-md border border-transparent px-2 text-xs text-[#a6adc8] transition-colors hover:border-[#313244] hover:bg-[#313244]/60 hover:text-[#cdd6f4] disabled:cursor-not-allowed disabled:hover:border-transparent disabled:hover:bg-transparent"
           >
@@ -603,14 +603,14 @@ export function BeginnerShell() {
                       {t(
                         sampleStatus === "preparing"
                           ? "beginner.folder.preparingTitle"
-                          : "beginner.folder.title",
+                          : "beginner.folder.title"
                       )}
                     </h1>
                     <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-[#7f849c]">
                       {t(
                         sampleStatus === "preparing"
                           ? "beginner.folder.preparingBody"
-                          : "beginner.folder.body",
+                          : "beginner.folder.body"
                       )}
                     </p>
                     {sampleStatus === "preparing" ? (
@@ -671,11 +671,18 @@ export function BeginnerShell() {
                     className="min-h-0 shrink overflow-y-auto max-h-[34%]"
                     data-coach="beginner-live"
                   >
+                    {/* ★카드의 두 진입은 셸이 목적지를 갖고 있을 때만 켠다:
+                        "바뀐 코드 보기" 는 큐레이트 코드 탭(위 점프 소비)이,
+                        에이전트 칩은 에이전트 패널과 **같은** 터미널 모달이
+                        받는다 — 한 에이전트로 가는 문이 둘이어도 도착지는
+                        하나여야 한다. */}
                     <BeginnerLiveStrip
                       sentAt={ask.deliveredAt}
                       onResend={() => void ask.resend()}
                       resending={ask.sending}
                       onTaskClick={openTaskDetail}
+                      showWorktreeDiff
+                      onAgentClick={openAgentTerminal}
                     />
                   </div>
 

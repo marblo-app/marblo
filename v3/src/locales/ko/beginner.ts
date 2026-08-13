@@ -192,12 +192,17 @@ export const beginner = {
   // ── ⑤ 미니 보드(스트립) + 에이전트 패널(하단 2분할 오른쪽) ──────────────
   // 보드·에이전트는 마블로의 핵심이라 비기너에게도 축소판을 보여 준다. 카드는
   // 눌리고(비기너 판 상세), 에이전트는 "누가 뭐하나" 까지 말한다.
-  // 워크트리·diff·모델명은 여전히 감춘다.
+  // 브랜치 이름·모델명은 여전히 감춘다 — 결과(바뀐 코드)로만 말한다.
   "beginner.board.label": "일감 흐름",
   "beginner.board.todo": "할 일",
   "beginner.board.doing": "진행 중",
   "beginner.board.done": "완료",
   "beginner.board.more": "+{count}개 더",
+  // ★카드의 두 진입 — 결과(코드) 와 사람(에이전트). 워크트리·브랜치 같은 말은
+  // 쓰지 않는다: 비기너에게 이 버튼의 뜻은 "이 일감이 바꾼 코드를 본다" 다.
+  "beginner.board.viewDiff": "바뀐 코드 보기",
+  "beginner.board.viewingDiff": "코드 보는 중",
+  "beginner.board.viewDiffTip": "이 일감이 바꾼 코드를 '코드' 탭에서 열어요",
   "beginner.agents.label": "일하는 팀",
   "beginner.agents.empty":
     "아직 붙은 팀원이 없어요. 무엇을 만들지 말씀하시면 마블로가 팀을 붙입니다.",

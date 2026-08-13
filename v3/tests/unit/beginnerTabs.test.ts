@@ -13,6 +13,7 @@ import {
   BEGINNER_TABS,
   BEGINNER_TAB_LABEL_KEY,
   beginnerHiddenExpertTabs,
+  beginnerTabForJump,
   isBeginnerTab,
 } from "../../src/lib/beginnerTabs";
 import {
@@ -93,6 +94,30 @@ describe("심플 큐레이트 탭 — 노출 목록", () => {
     expect(isBeginnerTab("board")).toBe(false);
     expect(isBeginnerTab("lanes")).toBe(false);
     expect(isBeginnerTab(undefined)).toBe(false);
+  });
+});
+
+describe("심플 셸의 탭 간 점프 소비", () => {
+  it("★코드 점프는 코드 탭으로 받는다 — 미니 보드의 '바뀐 코드 보기' 가 여기로 온다", () => {
+    // viewWorktree 는 파일 트리·에이전트 포커스·diff 를 다 바꿔 놓고 마지막에
+    // requestJump({type:"code"}) 를 남긴다. 심플 셸이 이걸 안 받으면 화면만
+    // 대화 탭에 그대로 서 있다(눌렀는데 아무 일도 안 일어나는 그 자리).
+    expect(beginnerTabForJump({ type: "code" })).toBe("code");
+  });
+
+  it("★심플에 없는 목적지는 null 이지 '비슷한 탭' 이 아니다", () => {
+    // 코드 탭으로 대충 받아 주면 유저는 방금 있던 화면에 그대로 서 있으면서
+    // "눌렀더니 아무것도 안 바뀐다" 를 겪는다 — 조용한 오배송이 진짜 no-op 보다
+    // 나쁘다. 이 목적지들은 심플에 그 탭이 생길 때 함께 열린다.
+    expect(beginnerTabForJump({ type: "worktrees" })).toBeNull();
+    expect(beginnerTabForJump({ type: "task", id: "t1" })).toBeNull();
+    expect(beginnerTabForJump({ type: "agent", id: "a1" })).toBeNull();
+    expect(beginnerTabForJump(null)).toBeNull();
+  });
+
+  it("돌려주는 값은 언제나 실재하는 심플 탭이다", () => {
+    const target = beginnerTabForJump({ type: "code" });
+    expect(target && isBeginnerTab(target)).toBe(true);
   });
 });
 

@@ -9,10 +9,15 @@
  *
  *   ① 티켓이 움직이는 게 **보여야** 한다 (그게 S4 dead-end 의 해결책)
  *   ② ★그 카드가 **눌려야** 한다 (시연 피드백 ② — 안 눌리는 보드는 그림이다)
- *   ③ 워크트리·diff·모델명은 **안 보여야** 한다 (비기너 추상화 수준)
+ *   ③ 브랜치 이름·모델명은 **안 보여야** 한다 (비기너 추상화 수준)
+ *   ④ ★그 카드에서 **나갈 수** 있어야 한다 — 결과(바뀐 코드)와 사람(에이전트).
+ *      ②와 같은 이유다: 정보를 줄이는 것과 갈 곳을 없애는 것은 다른 일이고,
+ *      후자를 하면 보드는 다시 그림이 된다.
  *
  * ③은 "안 그린다" 라서 눈으로 확인하기 가장 어렵고, compact 프롭이 나중에
- * 누락되면 조용히 깨진다 — 그래서 부재를 여기서 못박는다.
+ * 누락되면 조용히 깨진다 — 그래서 부재를 여기서 못박는다. ④는 반대로 "새 로직을
+ * 만들지 않는다" 가 계약이라, 엑스퍼트 카드와 **같은 액션**(`viewWorktree`)이
+ * 같은 인자로 불리는지를 본다.
  *
  * ★"누가 뭐하나"(에이전트)는 라이브 스트립을 떠나 `BeginnerAgentsPane`(하단
  * 2분할의 오른쪽 열)으로 갔다. 그래서 아래 에이전트 describe 는 스트립이 아니라
@@ -78,6 +83,13 @@ vi.mock("../../src/services/firestore", () => ({
 }));
 
 const ensureFreshSpy = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+
+// ★"바뀐 코드 보기" 는 새 액션을 만들지 않는다 — 엑스퍼트 카드와 같은
+// `viewWorktree` 를 부른다. 실물은 스토어 넷과 IPC 를 건드리므로 여기선 스파이.
+const viewWorktreeSpy = vi.hoisted(() => vi.fn());
+vi.mock("../../src/lib/viewWorktree", () => ({
+  viewWorktree: viewWorktreeSpy,
+}));
 
 import { BeginnerAgentsPane } from "../../src/components/beginner/BeginnerAgentsPane";
 import { BeginnerLiveStrip } from "../../src/components/beginner/BeginnerLiveStrip";
@@ -154,6 +166,7 @@ beforeEach(() => {
   stores.tasks = [];
   stores.agents = [];
   ensureFreshSpy.mockClear();
+  viewWorktreeSpy.mockClear();
   vi.useFakeTimers();
   vi.setSystemTime(new Date(10_000));
 });
@@ -237,6 +250,15 @@ describe("비기너 미니 보드", () => {
     expect(ensureFreshSpy).not.toHaveBeenCalled();
   });
 
+  it("진입을 켜지 않은 호스트에는 두 버튼이 아예 없다 (종전 동작)", () => {
+    stores.tasks = [task("t-blocked", "BLOCKED", "권한 필요")];
+    stores.agents = [agent("agent-1", "working")];
+    mount({ onTaskClick: vi.fn() });
+
+    expect(screen.queryByTestId("beginner-mini-task-diff")).toBeNull();
+    expect(screen.queryByTestId("beginner-mini-task-agent")).toBeNull();
+  });
+
   // ── ★클릭커블(시연 피드백 ②) ────────────────────────────────────────────
   it("★카드를 누르면 그 티켓이 상세로 올라온다", () => {
     stores.tasks = [
@@ -259,6 +281,79 @@ describe("비기너 미니 보드", () => {
     expect(screen.getByTestId("beginner-mini-task").className).not.toContain(
       "cursor-pointer",
     );
+  });
+});
+
+// ── ★카드의 두 진입(결과 / 사람) ─────────────────────────────────────────
+describe("비기너 미니 보드 — 바뀐 코드 / 담당 에이전트 진입", () => {
+  it("★'바뀐 코드 보기' 는 엑스퍼트 카드와 **같은** 액션을 같은 인자로 부른다", () => {
+    stores.tasks = [task("t-blocked", "IN_PROGRESS", "권한 필요")];
+    stores.agents = [agent("agent-1", "working")];
+    mount({ showWorktreeDiff: true, onTaskClick: vi.fn() });
+
+    fireEvent.click(screen.getByTestId("beginner-mini-task-diff"));
+    expect(viewWorktreeSpy).toHaveBeenCalledTimes(1);
+    const [worktree, options] = viewWorktreeSpy.mock.calls[0];
+    // 워크트리 매칭도 담당 에이전트 해석도 공용 헬퍼(findTaskWorktree /
+    // resolveTaskAgentId)를 그대로 탄다 — 심플 전용 규칙은 없다.
+    expect(worktree.branch).toBe("marblo/task-blocked");
+    expect(options.focusAgentId).toBe("agent-1");
+  });
+
+  it("★브랜치 이름은 그래도 안 보인다 — 버튼은 결과로만 말한다", () => {
+    stores.tasks = [task("t-blocked", "IN_PROGRESS", "권한 필요")];
+    stores.agents = [agent("agent-1", "working")];
+    const { container } = mount({ showWorktreeDiff: true });
+
+    expect(screen.getByTestId("beginner-mini-task-diff").textContent).toContain(
+      ko["beginner.board.viewDiff"],
+    );
+    expect(container.textContent).not.toContain("marblo/task-blocked");
+    // 진입을 켠 호스트만 워크트리 목록 신선도를 챙긴다 — 버튼의 존재 여부가
+    // 곧 워크트리 매칭이라, 낡은 목록은 버튼을 조용히 지운다.
+    expect(ensureFreshSpy).toHaveBeenCalled();
+  });
+
+  it("워크트리가 없는 티켓에는 버튼을 만들지 않는다 (막다른 버튼 금지)", () => {
+    stores.tasks = [task("t-none", "IN_PROGRESS", "아직 코드 없음")];
+    stores.agents = [agent("agent-1", "working")];
+    mount({ showWorktreeDiff: true });
+
+    expect(screen.queryByTestId("beginner-mini-task-diff")).toBeNull();
+  });
+
+  it("★에이전트 칩을 누르면 그 에이전트로 간다 — 티켓 상세는 열리지 않는다", () => {
+    stores.tasks = [task("t-blocked", "IN_PROGRESS", "권한 필요")];
+    stores.agents = [agent("agent-1", "working")];
+    const onAgentClick = vi.fn();
+    const onTaskClick = vi.fn();
+    mount({ onAgentClick, onTaskClick });
+
+    const chip = screen.getByTestId("beginner-mini-task-agent");
+    expect(chip.textContent).toContain("agent-1");
+    fireEvent.click(chip);
+    expect(onAgentClick).toHaveBeenCalledTimes(1);
+    expect(onAgentClick.mock.calls[0][0].id).toBe("agent-1");
+    // 카드도 눌리는 표면이라, 칩이 클릭을 삼키지 않으면 상세가 함께 뜬다.
+    expect(onTaskClick).not.toHaveBeenCalled();
+  });
+
+  it("diff 버튼도 카드 클릭을 삼킨다 (두 목적지가 겹치지 않는다)", () => {
+    stores.tasks = [task("t-blocked", "IN_PROGRESS", "권한 필요")];
+    stores.agents = [agent("agent-1", "working")];
+    const onTaskClick = vi.fn();
+    mount({ showWorktreeDiff: true, onTaskClick });
+
+    fireEvent.click(screen.getByTestId("beginner-mini-task-diff"));
+    expect(onTaskClick).not.toHaveBeenCalled();
+  });
+
+  it("아직 아무도 안 붙은 티켓엔 에이전트 칩이 없다", () => {
+    stores.tasks = [task("t1", "TODO", "리드미 읽기")];
+    stores.agents = [agent("agent-1", "idle")];
+    mount({ onAgentClick: vi.fn() });
+
+    expect(screen.queryByTestId("beginner-mini-task-agent")).toBeNull();
   });
 });
 

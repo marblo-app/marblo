@@ -8,6 +8,7 @@ import {
 } from "../../lib/beginnerMode";
 import { useAgentStore } from "../../stores/agentStore";
 import { useTaskStore } from "../../stores/taskStore";
+import type { Agent } from "../../types/agent";
 import type { Task } from "../../types/task";
 import { KanbanColumn } from "../board/KanbanColumn";
 import { BLOCK, BUTTON_GHOST, SectionLabel } from "./beginnerUi";
@@ -39,15 +40,23 @@ import { BLOCK, BUTTON_GHOST, SectionLabel } from "./beginnerUi";
  * 세로로 계속 자라 정작 대화창(이 화면의 주인공)을 아래로 밀어냈고, 요약만으로는
  * "누가 **뭘** 하나" 에 답하지 못했다.
  *
- * 추상화 수준은 여전히 낮게 유지한다: 워크트리·diff·모델명은 compact 프롭이
- * 걷어낸다. 비기너에게 정확한 해상도는 "일감이 움직인다" 이고, 세부는 승격 후
- * 보드에서 본다.
+ * 추상화 수준은 여전히 낮게 유지한다: 브랜치 이름·모델명·상태머신은 compact
+ * 프롭이 걷어낸다. 비기너에게 정확한 해상도는 "일감이 움직인다" 이고, 세부는
+ * 승격 후 보드에서 본다.
+ *
+ * ★단 **진입**은 정보와 다르게 다룬다(`showWorktreeDiff`·`onAgentClick`).
+ * 카드에서 갈 수 있는 곳이 없으면 이 보드는 다시 "움직이는 그림" 이 된다 —
+ * 카드 클릭(상세)을 붙인 것과 같은 이유로, 결과(바뀐 코드)와 사람(에이전트)
+ * 으로도 나갈 수 있어야 한다. 두 진입 모두 엑스퍼트 카드와 **같은 액션**을
+ * 부른다(재구현 0) — 심플에서 달라지는 건 라벨과 크기뿐이다.
  */
 export function BeginnerLiveStrip({
   sentAt,
   onResend,
   resending,
   onTaskClick,
+  showWorktreeDiff,
+  onAgentClick,
 }: {
   /** 마지막으로 오케에 **실제 전달**된 시각(ms). 0 = 아직 안 보냄. */
   sentAt: number;
@@ -55,6 +64,13 @@ export function BeginnerLiveStrip({
   resending: boolean;
   /** 미니 보드 카드 클릭. 생략하면 카드가 눌리지 않는다(종전 동작). */
   onTaskClick?: (task: Task) => void;
+  /**
+   * 카드의 "바뀐 코드 보기" 진입. 켜면 워크트리 목록 신선도도 카드가 챙긴다
+   * (TaskCard 주석). 생략하면 그리지 않는다 = 종전 동작.
+   */
+  showWorktreeDiff?: boolean;
+  /** 카드의 담당 에이전트 칩 클릭 → 그 에이전트의 터미널. */
+  onAgentClick?: (agent: Agent) => void;
 }) {
   const { t } = useTranslation();
   const tasks = useTaskStore((s) => s.tasks);
@@ -182,6 +198,8 @@ export function BeginnerLiveStrip({
                 count={col.total}
                 hiddenCount={col.hiddenCount}
                 onTaskClick={onTaskClick}
+                showWorktreeDiff={showWorktreeDiff}
+                onAgentClick={onAgentClick}
               />
             ))}
           </div>
