@@ -214,6 +214,8 @@ export const usage = {
   // 펼친 표
   "usage.ourBench.cellsTitle": "셀별 요약",
   "usage.ourBench.instancesTitle": "인스턴스 × 하네스",
+  "usage.ourBench.instanceDetails.toggle": "상세 보기",
+  "usage.ourBench.instanceDetails.hide": "접기",
   "usage.ourBench.colHarness": "하네스",
   "usage.ourBench.colModel": "모델",
   "usage.ourBench.colEffort": "effort",

@@ -206,6 +206,8 @@ export const usage: Record<keyof typeof koUsage, string> = {
 
   "usage.ourBench.cellsTitle": "Per-cell summary",
   "usage.ourBench.instancesTitle": "Instance × harness",
+  "usage.ourBench.instanceDetails.toggle": "Show details",
+  "usage.ourBench.instanceDetails.hide": "Hide details",
   "usage.ourBench.colHarness": "Harness",
   "usage.ourBench.colModel": "Model",
   "usage.ourBench.colEffort": "Effort",

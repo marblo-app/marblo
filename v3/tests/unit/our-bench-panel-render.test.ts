@@ -148,12 +148,29 @@ describe("OurBenchPanel — 접힌 상태에서 보여야 하는 것", () => {
     ).toBeTruthy();
   });
 
-  it("최신 라운드는 기본으로 펼쳐져 있어 클릭 없이 전체 표가 보인다", () => {
+  it("최신 라운드는 기본으로 펼쳐져 있어 클릭 없이 셀별 요약이 보이지만, 인스턴스×하네스 상세 매트릭스는 기본 접혀 있다", () => {
     render(createElement(OurBenchPanel));
 
-    // ★"최신 라운드만 기본 펼치고" — 클릭 없이도 셀별 요약과 인스턴스×하네스가
-    // 이미 그려져 있어야 한다.
+    // ★"최신 라운드만 기본 펼치고" — 클릭 없이도 셀별 요약은 이미 그려져 있다.
     expect(screen.getByText(ko["usage.ourBench.cellsTitle"])).toBeTruthy();
+
+    // ★인스턴스×하네스 상세 매트릭스는 per-cell 요약과 달리 기본 숨김이다(티켓
+    // hjspoTXho09iEBMb8amS) — 토글("상세 보기")은 보이되, 그 안의 인스턴스 행/
+    // F2P·P2P 근거는 펼치기 전까진 DOM 에 없어야 한다.
+    expect(
+      screen.getByText(ko["usage.ourBench.instanceDetails.toggle"]),
+    ).toBeTruthy();
+    expect(screen.queryByText("django__django-15851")).toBeNull();
+    expect(screen.queryAllByText(/F2P 1\/1 · P2P 8\/8/).length).toBe(0);
+  });
+
+  it("'상세 보기' 토글을 펼치면 인스턴스×하네스 매트릭스가 드러난다", () => {
+    render(createElement(OurBenchPanel));
+
+    fireEvent.click(
+      screen.getByText(ko["usage.ourBench.instanceDetails.toggle"]),
+    );
+
     expect(screen.getByText(ko["usage.ourBench.instancesTitle"])).toBeTruthy();
     expect(screen.getByText("django__django-15851")).toBeTruthy();
     expect(screen.getAllByText(/F2P 1\/1 · P2P 8\/8/).length).toBeGreaterThan(

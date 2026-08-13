@@ -223,7 +223,7 @@ function RoundSection({
   const floor = round.cells.find((c) => c.harness === "noop") ?? null;
   const ceiling = round.cells.find((c) => c.harness === "gold") ?? null;
   const measured = round.cells.filter(
-    (c) => c.harness !== "noop" && c.harness !== "gold"
+    (c) => c.harness !== "noop" && c.harness !== "gold",
   );
   const n = floor?.graded ?? ceiling?.graded ?? round.cells[0]?.graded ?? 0;
   const tag = roundTagOf(round.scaffold);
@@ -289,7 +289,7 @@ function RoundSection({
               에 라운드 표식(scaffold)이 없어 공유 인스턴스(두 라운드 모두에서
               돈 것)의 셀을 라운드별로 정확히 쪼갤 수 없다 — 잘못 쪼개 오귀속시키느니
               라운드 하나에만 붙여 항상 정확하게 둔다. */}
-          {isLatest && <InstanceTable report={report} />}
+          {isLatest && <InstanceMatrixDetails report={report} />}
         </div>
       )}
     </div>
@@ -424,8 +424,8 @@ function CellRow({ cell }: { cell: OurBenchCell }) {
     cell.harness === "noop"
       ? t("usage.ourBench.control.floor")
       : cell.harness === "gold"
-      ? t("usage.ourBench.control.ceiling")
-      : null;
+        ? t("usage.ourBench.control.ceiling")
+        : null;
   return (
     <tr className="border-b border-gray-800 last:border-0">
       <td className="py-1.5 pr-3">
@@ -472,6 +472,49 @@ function CellRow({ cell }: { cell: OurBenchCell }) {
 }
 
 /**
+ * 인스턴스×하네스 격자를 감싸는 접기/펼치기 토글. per-cell 요약(`CellsTable`)
+ * 만으로도 결론(모델별 resolved%)은 이미 다 보이므로, F2P/P2P 근거까지 담은
+ * 이 상세 매트릭스는 기본 접어 둔다 — 필요할 때만 "상세 보기" 로 편다.
+ *
+ * ★네이티브 `<details>` 대신 버튼+조건부 렌더를 쓴다: jsdom 은
+ * `dispatchEvent`(RTL `fireEvent.click` 이 쓰는 경로)로는 `<summary>` 의
+ * 토글 활성화 동작을 실행하지 않는다(`HTMLElement.click()` 을 직접 호출할
+ * 때만 동작) — 즉 네이티브 details 는 이 저장소의 테스트 방식으로 열고 닫는
+ * 것을 검증할 수 없다. 같은 파일의 라운드 아코디언(`RoundSection`)이 이미
+ * 쓰는, 검증된 버튼+`aria-expanded` 패턴을 그대로 따른다.
+ */
+function InstanceMatrixDetails({ report }: { report: OurBenchPayload }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const bodyId = "our-bench-instance-matrix";
+  return (
+    <div className="rounded border border-gray-800 bg-gray-950/40 px-2 py-1.5">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={() => setOpen((prev) => !prev)}
+        className="flex items-center gap-1.5 text-[11px] font-medium text-gray-400 hover:text-gray-200"
+      >
+        <span className="text-gray-500">{open ? "▾" : "▸"}</span>
+        <span>{t("usage.ourBench.instancesTitle")}</span>
+        <span aria-hidden="true">·</span>
+        <span>
+          {open
+            ? t("usage.ourBench.instanceDetails.hide")
+            : t("usage.ourBench.instanceDetails.toggle")}
+        </span>
+      </button>
+      {open && (
+        <div id={bodyId} className="mt-2">
+          <InstanceTable report={report} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * 인스턴스 × 하네스 격자. 셀별 비율만 보면 "3개 중 3개" 가 어느 문제였는지 알 수
  * 없다 — F2P/P2P 를 그대로 실어야 채점이 무엇을 봤는지가 남는다.
  */
@@ -481,9 +524,6 @@ function InstanceTable({ report }: { report: OurBenchPayload }) {
   const harnesses = report.cells.map((c) => c.harness);
   return (
     <div className="space-y-1">
-      <h3 className="text-[11px] font-medium text-gray-400">
-        {t("usage.ourBench.instancesTitle")}
-      </h3>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[640px] text-left text-xs">
           <thead className="text-[11px] text-gray-500">
