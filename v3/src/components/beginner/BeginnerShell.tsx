@@ -19,15 +19,14 @@ import { AgentInputWaitHost } from "../agents/AgentInputWaitHost";
 import {
   BEGINNER_CHAT_TAB,
   BEGINNER_CURATED_TABS,
-  beginnerTabForJump,
   type BeginnerCuratedTabId,
   type BeginnerTabId,
 } from "../../lib/beginnerTabs";
 import { useOnboardingSetup } from "../../hooks/useOnboardingSetup";
 import { useAgentStore } from "../../stores/agentStore";
 import { useBeginnerModeStore } from "../../stores/beginnerModeStore";
-import { useOnboardingPreviewStore } from "../../stores/onboardingPreviewStore";
 import { useNavigationStore } from "../../stores/navigationStore";
+import { useOnboardingPreviewStore } from "../../stores/onboardingPreviewStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useTerminalStore } from "../../stores/terminalStore";
@@ -45,10 +44,14 @@ import { BeginnerTabBar } from "./BeginnerTabBar";
 import { BeginnerTaskModal } from "./BeginnerTaskModal";
 import { BeginnerTour } from "./BeginnerTour";
 import { OnboardingPreviewBanner } from "./OnboardingPreviewBanner";
-// ★큐레이트 탭 — 엑스퍼트 탭 컴포넌트를 **그대로** 태운다(재구현 0). 어느 것도
-// props 를 받지 않으므로 어댑터도 없다. 근거·비노출 목록은 lib/beginnerTabs.
+// ★큐레이트 탭 — 엑스퍼트 탭 컴포넌트를 **그대로** 태운다(재구현 0). 하네스만
+// 얇은 래퍼를 거치는데, 그것도 props 를 안 주기 위한 것이다(아래 주석).
+// 근거·비노출 목록은 lib/beginnerTabs.
 import { GuideTab } from "../guide/GuideTab";
 import { CodeTab } from "../tabs/CodeTab";
+import { AgentsTab } from "../tabs/AgentsTab";
+import { WorktreeTab } from "../tabs/WorktreeTab";
+import { HarnessStore } from "../harness/HarnessStore";
 import { UsagePage } from "../usage/UsagePage";
 import { SettingsPage } from "../settings/SettingsPage";
 import { PrivacyConsentGate } from "../legal/PrivacyConsentGate";
@@ -60,11 +63,12 @@ import {
   SURFACE,
   SectionLabel,
 } from "./beginnerUi";
+import type { Agent } from "../../types/agent";
 
 /**
  * 비기너 셸 — **가벼운 2페인 워크스페이스** (설계: v3/docs/BEGINNER-MODE-DESIGN.md).
  *
- * 사이드바·15개 탭·워크트리·Activity·에이전트 터미널 열을 **렌더하지 않는다.**
+ * 사이드바·15개 탭·Activity·에이전트 터미널 열을 **렌더하지 않는다.**
  * 상태를 지우는 게 아니라 그리지 않을 뿐이라, 승격하면 워크스페이스 셸이 자기
  * persist 값 그대로 복원된다.
  *
@@ -79,8 +83,9 @@ import {
  *      → 하단을 **가로 2분할**로 키운다: 왼쪽 오케 대화창 / 오른쪽 에이전트.
  *
  * 그래서 이 화면은 이제 '채팅 + 작은 스트립' 이 아니라 가벼운 워크스페이스다.
- * 다만 어드밴스드와의 경계는 그대로다 — 워크트리·diff·티켓별 모델 지정은 여전히
- * 없다(미니 보드 카드는 `compact`, 오케 헤더는 `hideModelControls`). 오케가 어떤
+ * 다만 **이 대화 탭 안에서의** 경계는 그대로다 — diff·티켓별 모델 지정은 여전히
+ * 없다(미니 보드 카드는 `compact`, 오케 헤더는 `hideModelControls`). 워크트리는
+ * 이 화면이 아니라 큐레이트 탭으로 닿는다(lib/beginnerTabs). 오케가 어떤
  * 모델로 뜰지 자체는 예외다(티켓 cmp95TVin64IIlOiFlAC) — `showConnectedModelPicker`
  * 가 연결·인증된 하네스만 남긴 단순 드롭다운 하나로 되살린다.
  *
@@ -115,12 +120,29 @@ function CliSetupEngineHost() {
   return null;
 }
 
-/** 큐레이트 탭 id → 엑스퍼트 컴포넌트. 넷 다 props 가 없다. */
+/**
+ * ★하네스는 `onClose` 를 주면 **모달**로 그린다(HarnessStore.isModal). 탭 자리에
+ * 모달 크롬이 서면 닫기 버튼이 탭 안에서 아무 데도 못 가므로, 엑스퍼트 탭바와
+ * 똑같이 인라인으로 태운다 — WorkTabs.HarnessTabPanel 과 같은 래퍼다. 거기서
+ * import 하지 않는 이유는 WorkTabs 가 보드·플로우 등 엑스퍼트 탭 **전부**를
+ * 끌고 오기 때문이다(심플 셸이 태우지 않기로 한 그 화면들).
+ */
+function HarnessTabPanel() {
+  return <HarnessStore />;
+}
+
+/** 큐레이트 탭 id → 엑스퍼트 컴포넌트. 일곱 다 props 가 없다. */
 const CURATED_TAB_COMPONENTS: Record<BeginnerCuratedTabId, () => JSX.Element> =
   {
     guide: GuideTab,
     code: CodeTab,
+    // 에이전트 **관리**(정지·재시작·삭제) — 인라인 BeginnerAgentsPane 은 읽기
+    // 전용 요약이라 이 화면을 대신하지 못한다.
+    agents: AgentsTab,
+    worktrees: WorktreeTab,
     usage: UsagePage,
+    // ★심플 모드에서 GitHub·텔레그램·슬랙 연결의 진입점.
+    harness: HarnessTabPanel,
     settings: SettingsPage,
   };
 
@@ -158,6 +180,9 @@ export function BeginnerShell() {
   // 에이전트 터미널의 PTY 세션 원장. 어드밴스드 에이전트 탭이 읽는 것과 **같은**
   // 스토어다 — 비기너가 여는 터미널은 그 탭이 여는 것과 같은 세션이어야 한다.
   const terminalSessions = useTerminalStore((s) => s.sessions);
+  // 팀원 끄기(심플 모드) — 어드밴스드 목록의 닫기와 같은 초크포인트를 쓴다.
+  const deleteAgent = useAgentStore((s) => s.deleteAgent);
+  const closeTerminalSession = useTerminalStore((s) => s.closeSession);
 
   const enteredAt = useBeginnerModeStore((s) => s.enteredAt);
   const entryReason = useBeginnerModeStore((s) => s.entryReason);
@@ -200,7 +225,7 @@ export function BeginnerShell() {
   const [manualFocusSignal, setManualFocusSignal] = useState(0);
   const [promotion, setPromotion] = useState<PromotionTrigger | null>(null);
 
-  // ★큐레이트 탭 — 기본은 언제나 대화다. 넷은 **보조 진입**이라 여기 로컬
+  // ★큐레이트 탭 — 기본은 언제나 대화다. 나머지는 **보조 진입**이라 여기 로컬
   // 상태로 든다: persist 하면 앱을 다시 켠 사람이 설정 화면에서 시작하게 되고,
   // 그건 채팅-퍼스트를 정확히 뒤집는다. 셸이 살아 있는 동안만 기억한다.
   const [tab, setTab] = useState<BeginnerTabId>(BEGINNER_CHAT_TAB);
@@ -226,20 +251,41 @@ export function BeginnerShell() {
     if (pendingSettingsSection) setTab("settings");
   }, [pendingSettingsSection]);
 
-  // ★탭 간 점프 소비 — 어드밴스드 두 셸(Layout:158, WorkspaceShell:163)과 같은
-  // 자리다. 지금까지 심플 셸만 이 래치를 아무도 읽지 않아서, 미니 보드 카드의
-  // "바뀐 코드 보기"(→ viewWorktree → requestJump{code})가 파일 트리·diff 를
-  // 다 바꿔 놓고도 화면은 대화 탭에 그대로 서 있었다. 어느 탭인지는 순수함수가
-  // 정한다(lib/beginnerTabs) — 심플에 없는 목적지는 null 이고, 그 점프는 소비
-  // 하지 않는다(그 탭을 가진 셸이 나중에 받아 간다).
+  // ★탭 간 점프 래치(navigationStore) — 워크트리 탭을 심플에 들이면서 필요해졌다.
+  // 그 탭의 버튼 둘("코드에서 보기" → `{type:"code"}`, "티켓 보기" →
+  // `{type:"task"}`)은 스스로 화면을 바꾸지 않는다. **셸이** 탭을 옮겨 주고
+  // 목적지가 래치를 소거하는 구조라(어드밴스드는 WorkspaceShell:166), 소비자가
+  // 없는 심플에서는 눌러도 아무 일이 안 일어나는 죽은 버튼이 된다.
+  //
+  // 목적지 대응은 심플에 있는 것으로만 짠다:
+  //   code·worktrees → 그 큐레이트 탭
+  //   task → 보드가 없으므로 **비기너 티켓 상세 모달**(미니 보드 카드와 같은 곳)
+  //   agent → 에이전트 탭. 소거는 AgentsTab 이 한다(스크롤·플래시가 그 안에 있고,
+  //           구독이 데이터를 줄 때까지 기다린다) — 여기서 소거하면 그 효과가
+  //           영영 안 뜬다.
+  // mission·missionReplay 는 심플에 목적지가 없다. 소거하지 않고 그냥 둔다 —
+  // 다음 requestJump 가 덮어쓰고, 승격하면 어드밴스드가 받는다.
   const pendingJump = useNavigationStore((s) => s.pendingJump);
   const consumeJump = useNavigationStore((s) => s.consumeJump);
   useEffect(() => {
-    const target = beginnerTabForJump(pendingJump);
-    if (!target) return;
-    setTab(target);
-    consumeJump();
-  }, [pendingJump, consumeJump]);
+    if (!pendingJump) return;
+    if (pendingJump.type === "code") {
+      setTab("code");
+      consumeJump();
+    } else if (pendingJump.type === "worktrees") {
+      setTab("worktrees");
+      consumeJump();
+    } else if (pendingJump.type === "agent") {
+      setTab("agents");
+    } else if (pendingJump.type === "task") {
+      // 구독 스냅샷에 아직 없으면 **소거하지 않고** 기다린다(AgentsTab 과 같은
+      // 규칙). 여기서 지우면 구독이 1프레임 늦은 것만으로 클릭이 증발한다.
+      const target = tasks.find((x) => x.id === pendingJump.id);
+      if (!target) return;
+      consumeJump();
+      openTaskDetail(target);
+    }
+  }, [pendingJump, consumeJump, tasks, openTaskDetail]);
 
   // 보드가 없으므로 티켓/에이전트 구독을 이 셸이 직접 든다 — 인라인 라이브의
   // 유일한 데이터원이다.
@@ -354,6 +400,26 @@ export function BeginnerShell() {
       if (target) openAgentTerminal(target);
     },
     [agents, openAgentTerminal]
+  );
+
+  // ★심플 모드에서 팀원 끄기 — 어드밴스드 에이전트 목록(AgentListPanel)의
+  // 닫기와 **같은 순서**로 자원을 회수한다(새 경로를 만들지 않는다):
+  //   deleteAgent = agent:stop → agent:remove → 문서 삭제 → ptyMirror 회수 →
+  //   결정적 `agent-<id>` 세션 closeSession.
+  // 그 다음, 이 화면이 터미널 모달에서 무는 **이름 매칭** 세션도 한 번 더
+  // 회수한다 — 두 id 가 갈릴 수 있어서다(closeSession 은 멱등). 확인 모달과
+  // "작업 중일 때만 묻는다" 판정은 패널이 `lib/agentEntryClose` 로 든다.
+  const killAgent = useCallback(
+    async (agent: Agent) => {
+      const sessionId = findAgentPtySessionId(terminalSessions, agent.name);
+      await deleteAgent(agent.id);
+      if (sessionId) {
+        await closeTerminalSession(sessionId).catch(() => {
+          /* 이미 detach 된 세션 — 정리할 게 없다 */
+        });
+      }
+    },
+    [closeTerminalSession, deleteAgent, terminalSessions]
   );
 
   const askAboutTask = useCallback((message: string) => setDraft(message), []);
@@ -495,7 +561,7 @@ export function BeginnerShell() {
         </div>
       </header>
 
-      {/* ── 경량 탭바 (대화 + 큐레이트 4) ──────────────────────────────────
+      {/* ── 경량 탭바 (대화 + 큐레이트 7) ──────────────────────────────────
           ★연결/폴더 게이트 중에도 그린다. 이 티켓의 출발점이 "심플 유저가
           도움말·설정에 닿을 길이 없다" 인데, 그게 가장 절실한 순간이 바로
           설치가 막힌 그 화면이다 — 가이드는 그때의 답이고, 언어·프라이버시
@@ -657,6 +723,7 @@ export function BeginnerShell() {
                         tasks={tasks}
                         onTaskClick={openTaskDetail}
                         onAgentClick={openAgentTerminal}
+                        onAgentKill={killAgent}
                       />
                     </section>
                   </div>
@@ -666,7 +733,7 @@ export function BeginnerShell() {
           </main>
         </div>
 
-        {/* 큐레이트 넷 — 엑스퍼트 탭 컴포넌트 그대로. 지연 마운트라 켠 적 없는
+        {/* 큐레이트 일곱 — 엑스퍼트 탭 컴포넌트 그대로. 지연 마운트라 켠 적 없는
             탭은 여기 없다(각각 자기 구독·프로브를 들고 오므로 미리 태우지
             않는다). 스크롤은 엑스퍼트 탭바와 같은 규격으로 이 칸이 든다. */}
         {BEGINNER_CURATED_TABS.map((curated) => {

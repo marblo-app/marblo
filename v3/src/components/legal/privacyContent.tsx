@@ -97,7 +97,7 @@ const KO: PrivacyContent = {
     {
       label: "학습데이터 기여 (선택 · 원문)",
       value:
-        "(명시적으로 동의한 경우에만) 내 에이전트 턴의 프롬프트·응답 원문 텍스트를 자체 모델 학습 목적으로 별도 보안 저장소에 보관합니다. 위 비식별 지표와는 저장소·경로가 완전히 분리되며, 제3자에게 제공·판매하지 않습니다. 기본값은 꺼짐이고, Settings → Privacy 에서 언제든 끌 수 있습니다(끄면 이후 수집이 즉시 중단되고, 기존 데이터 삭제는 support@marblo.app 요청으로 처리합니다). 동의하지 않아도 모든 기능은 동일하게 작동합니다.",
+        "(명시적으로 동의한 경우에만) 내 에이전트 턴의 프롬프트·응답 원문 텍스트를 자체 모델 학습 목적으로 별도 보안 저장소에 보관합니다. 위 비식별 지표와는 저장소·경로가 완전히 분리되며, 제3자에게 제공·판매하지 않습니다. 기본값은 꺼짐이고, Settings → Privacy 에서 언제든 끌 수 있습니다(끄면 이후 수집이 즉시 중단되고, 기존 데이터 삭제는 team@marblo.app 요청으로 처리합니다). 동의하지 않아도 모든 기능은 동일하게 작동합니다.",
     },
     {
       label: "옵트인 항목 (앱 크래시)",
@@ -122,7 +122,7 @@ const KO: PrivacyContent = {
     {
       label: "보유 기간",
       value:
-        "비식별 1차 지표: 집계 분석 목적 보관 (계정 식별자 없음). 사용량·비용 기록: 구독·정산 확인 목적 보관 — 삭제 요청은 support@marblo.app(30일 이내 응답, PIPA 제36조)으로 처리하되, 정산 근거로 보존이 필요한 기간은 예외입니다. 학습데이터 기여(동의 시): 모델 학습 목적 보관 — 동의를 끄면 이후 수집이 중단되고, 기존 데이터 삭제는 support@marblo.app 요청으로 처리(30일 이내 응답, PIPA 제36조). Sentry: 90일. 웹사이트 GA4: 14개월.",
+        "비식별 1차 지표: 집계 분석 목적 보관 (계정 식별자 없음). 사용량·비용 기록: 구독·정산 확인 목적 보관 — 삭제 요청은 team@marblo.app(30일 이내 응답, PIPA 제36조)으로 처리하되, 정산 근거로 보존이 필요한 기간은 예외입니다. 학습데이터 기여(동의 시): 모델 학습 목적 보관 — 동의를 끄면 이후 수집이 중단되고, 기존 데이터 삭제는 team@marblo.app 요청으로 처리(30일 이내 응답, PIPA 제36조). Sentry: 90일. 웹사이트 GA4: 14개월.",
     },
     {
       label: "거부 효과",
@@ -131,7 +131,7 @@ const KO: PrivacyContent = {
     {
       label: "변경 권리",
       value:
-        "Settings → Privacy 토글에서 언제든 변경 (PIPA 제22조). 데이터 삭제는 support@marblo.app으로 요청 (30일 이내 응답 의무, PIPA 제36조)",
+        "Settings → Privacy 토글에서 언제든 변경 (PIPA 제22조). 데이터 삭제는 team@marblo.app으로 요청 (30일 이내 응답 의무, PIPA 제36조)",
     },
   ],
   measures: [
@@ -212,7 +212,7 @@ const EN: PrivacyContent = {
     {
       label: "Training-data contribution (optional · raw text)",
       value:
-        "(Only with your explicit consent) the raw prompt/response text of your own agent turns is stored in a separate secure store to train our own models. Its storage and pipeline are fully isolated from the de-identified metrics above, and it is never shared with or sold to third parties. Off by default, and you can turn it off any time in Settings → Privacy (collection stops immediately; deletion of already-stored data is handled by request to support@marblo.app). All features work identically if you decline.",
+        "(Only with your explicit consent) the raw prompt/response text of your own agent turns is stored in a separate secure store to train our own models. Its storage and pipeline are fully isolated from the de-identified metrics above, and it is never shared with or sold to third parties. Off by default, and you can turn it off any time in Settings → Privacy (collection stops immediately; deletion of already-stored data is handled by request to team@marblo.app). All features work identically if you decline.",
     },
     {
       label: "Opt-in items (app crashes)",
@@ -237,7 +237,7 @@ const EN: PrivacyContent = {
     {
       label: "Retention period",
       value:
-        "De-identified first-party metrics: retained for aggregate analysis (no account identifiers). Usage & cost records: retained for subscription/billing reconciliation — deletion requests go to support@marblo.app (response within 30 days, PIPA Art. 36), except where retention is required as billing evidence. Training-data contribution (with consent): retained for model training — turning consent off stops further collection, and deletion of stored data is handled by request to support@marblo.app (response within 30 days, PIPA Art. 36). Sentry: 90 days. Website GA4: 14 months.",
+        "De-identified first-party metrics: retained for aggregate analysis (no account identifiers). Usage & cost records: retained for subscription/billing reconciliation — deletion requests go to team@marblo.app (response within 30 days, PIPA Art. 36), except where retention is required as billing evidence. Training-data contribution (with consent): retained for model training — turning consent off stops further collection, and deletion of stored data is handled by request to team@marblo.app (response within 30 days, PIPA Art. 36). Sentry: 90 days. Website GA4: 14 months.",
     },
     {
       label: "Effect of declining",
@@ -247,7 +247,7 @@ const EN: PrivacyContent = {
     {
       label: "Right to change",
       value:
-        "Change anytime via the Settings → Privacy toggle (PIPA Article 22). For data deletion, request to support@marblo.app (response required within 30 days, PIPA Article 36)",
+        "Change anytime via the Settings → Privacy toggle (PIPA Article 22). For data deletion, request to team@marblo.app (response required within 30 days, PIPA Article 36)",
     },
   ],
   measures: [

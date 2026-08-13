@@ -19,7 +19,13 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 
 vi.mock("../../src/components/terminal/TerminalView", () => ({
   default: ({ sessionId }: { sessionId: string }) =>
@@ -157,6 +163,96 @@ describe("비기너 에이전트 패널 — 행 클릭", () => {
     expect(screen.getByTestId("beginner-agent-row").className).not.toContain(
       "cursor-pointer",
     );
+    expect(screen.queryByTestId("beginner-agent-open-terminal")).toBeNull();
+  });
+});
+
+// ── 행 액션 (작업 화면 · 끄기) ──────────────────────────────────────────────
+/**
+ * ★심플 모드에는 어드밴스드의 에이전트 목록이 없다 — 그래서 한 번 붙은 팀원을
+ * **끌 방법이 아예 없었다**(사장님 테스트). 여기서 못박는 건 셋이다:
+ *
+ *   ① 작업 화면 버튼 = 행 클릭과 **같은** 터미널 경로 (두 번 열리지 않는다)
+ *   ② X 는 행 클릭을 삼킨다 — 끄면서 터미널이 함께 열리면 안 된다
+ *   ③ 확인 모달 판정은 `lib/agentEntryClose` 하나다: 작업 중(working)만 묻고,
+ *      idle/stopped 는 바로 끈다(정리하려는 사람에게 모달을 되던지지 않는다)
+ */
+describe("비기너 에이전트 패널 — 행 액션", () => {
+  function mountRow(
+    props: Partial<Parameters<typeof BeginnerAgentsPane>[0]> = {},
+    agentProps: Partial<Agent> = {},
+  ) {
+    useLocaleStore.setState({ locale: "ko" });
+    const onAgentClick = vi.fn();
+    const onAgentKill = vi.fn();
+    render(
+      createElement(BeginnerAgentsPane, {
+        agents: [agent("프론트-1", agentProps)],
+        tasks: [],
+        onAgentClick,
+        onAgentKill,
+        ...props,
+      }),
+    );
+    return { onAgentClick, onAgentKill };
+  }
+
+  it("작업 화면 버튼은 행 클릭과 같은 터미널 경로로 간다 (한 번만)", () => {
+    const { onAgentClick } = mountRow();
+    fireEvent.click(screen.getByTestId("beginner-agent-open-terminal"));
+    expect(onAgentClick).toHaveBeenCalledTimes(1);
+    expect(onAgentClick.mock.calls[0][0].name).toBe("프론트-1");
+  });
+
+  it("★작업 중인 팀원의 X 는 먼저 묻는다 — 확인 전에는 끄지 않는다", async () => {
+    const { onAgentKill } = mountRow({}, { status: "working" });
+    fireEvent.click(screen.getByTestId("beginner-agent-kill"));
+
+    expect(onAgentKill).not.toHaveBeenCalled();
+    expect(
+      screen.getByTestId("beginner-agent-kill-confirm").textContent,
+    ).toContain("프론트-1");
+
+    fireEvent.click(screen.getByText(ko["agents.close.confirm"]));
+    await waitFor(() => expect(onAgentKill).toHaveBeenCalledTimes(1));
+    expect(onAgentKill.mock.calls[0][0].name).toBe("프론트-1");
+    expect(screen.queryByTestId("beginner-agent-kill-confirm")).toBeNull();
+  });
+
+  it("확인 모달에서 취소하면 아무것도 끄지 않는다", () => {
+    const { onAgentKill } = mountRow({}, { status: "working" });
+    fireEvent.click(screen.getByTestId("beginner-agent-kill"));
+    fireEvent.click(screen.getByText(ko["agents.close.cancel"]));
+    expect(onAgentKill).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("beginner-agent-kill-confirm")).toBeNull();
+  });
+
+  it.each(["idle", "stopped", "error"] as const)(
+    "%s 팀원은 확인 없이 바로 꺼진다",
+    async (status) => {
+      const { onAgentKill } = mountRow({}, { status });
+      fireEvent.click(screen.getByTestId("beginner-agent-kill"));
+      await waitFor(() => expect(onAgentKill).toHaveBeenCalledTimes(1));
+      expect(screen.queryByTestId("beginner-agent-kill-confirm")).toBeNull();
+    },
+  );
+
+  it("★X 는 행 클릭을 삼킨다 — 끄면서 터미널이 함께 열리지 않는다", async () => {
+    const { onAgentClick, onAgentKill } = mountRow({}, { status: "idle" });
+    fireEvent.click(screen.getByTestId("beginner-agent-kill"));
+    await waitFor(() => expect(onAgentKill).toHaveBeenCalledTimes(1));
+    expect(onAgentClick).not.toHaveBeenCalled();
+  });
+
+  it("핸들러가 없으면 그 버튼은 그려지지 않는다 — 없는 문을 그리지 않는다", () => {
+    useLocaleStore.setState({ locale: "ko" });
+    render(
+      createElement(BeginnerAgentsPane, {
+        agents: [agent("프론트-1")],
+        tasks: [],
+      }),
+    );
+    expect(screen.queryByTestId("beginner-agent-kill")).toBeNull();
     expect(screen.queryByTestId("beginner-agent-open-terminal")).toBeNull();
   });
 });

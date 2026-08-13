@@ -208,6 +208,10 @@ export const beginner = {
     "아직 붙은 팀원이 없어요. 무엇을 만들지 말씀하시면 마블로가 팀을 붙입니다.",
   "beginner.agents.noTask": "지금은 맡은 일이 없어요",
   "beginner.agents.openTerminal": "눌러서 무슨 작업 중인지 보기",
+  "beginner.agents.terminalAction": "작업 화면",
+  "beginner.agents.killAction": "끄기",
+  "beginner.agents.killAria": "{name} 끄기",
+  "beginner.agents.killTitle": "이 팀원을 끄고 목록에서 없애요",
   "beginner.agents.terminalEmpty":
     "아직 화면이 없어요. 이 팀원이 막 붙었거나 다시 연결하는 중입니다 — 잠시 뒤 다시 눌러 보세요.",
   "beginner.agents.terminalHint":

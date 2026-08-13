@@ -14,10 +14,10 @@
  * 무거운 것들(PTY·CLI 프로브·라이프사이클·큐레이트 탭 본체)만 스텁으로 바꾼다.
  *
  * 못박는 계약:
- *   ① 기본은 대화다 — 큐레이트 넷은 **누르기 전엔 트리에 없다**(지연 마운트)
- *   ② 탭을 누르면 그 화면이 뜬다 (가이드·코드·사용량·설정)
+ *   ① 기본은 대화다 — 큐레이트 일곱은 **누르기 전엔 트리에 없다**(지연 마운트)
+ *   ② 탭을 누르면 그 화면이 뜬다 (가이드·코드·에이전트·워크트리·사용량·하네스·설정)
  *   ③ ★탭을 옮겨도 오케 대화창은 재마운트되지 않는다 (PTY 생존)
- *   ④ 엑스퍼트 나머지 탭은 탭바에 없다
+ *   ④ 엑스퍼트 나머지 탭은 탭바에 없다 + 하네스는 모달이 아니라 인라인이다
  *   ⑤ ★상단바 "설정" 은 더 이상 **승격시키지 않는다** — 심플 안에서 연다
  *   ⑥ uiStore 의 "설정 섹션 열기" 래치가 심플에서도 도착한다
  *   ⑦ 큐레이트 탭에 가 있는 동안 코치마크 투어는 멈춘다(앵커가 display:none)
@@ -87,9 +87,15 @@ vi.mock("../../src/stores/projectStore", () => ({
     }),
   ),
 }));
+/** 구독 스냅샷. 점프 래치 테스트가 티켓 하나를 넣었다 뺐다 한다. */
+const taskSnapshot = vi.hoisted(() => ({ tasks: [] as { id: string }[] }));
+
 vi.mock("../../src/stores/taskStore", () => ({
   useTaskStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({ tasks: [], subscribeToTasks: () => () => {} }),
+    selector({
+      tasks: taskSnapshot.tasks,
+      subscribeToTasks: () => () => {},
+    }),
   ),
 }));
 vi.mock("../../src/stores/agentStore", () => ({
@@ -132,13 +138,28 @@ vi.mock("../../src/components/orchestrator/OrchestratorPanel", () => ({
   },
 }));
 
-// 큐레이트 넷 — 본체는 각자 자기 구독·에디터·결제 화면을 끌고 온다. 여기서
+// 큐레이트 일곱 — 본체는 각자 자기 구독·에디터·결제 화면을 끌고 온다. 여기서
 // 검증하는 건 "그 컴포넌트가 걸렸는가" 이지 그 화면의 내용이 아니다.
 vi.mock("../../src/components/guide/GuideTab", () => ({
   GuideTab: () => createElement("div", { "data-testid": "stub-guide" }),
 }));
 vi.mock("../../src/components/tabs/CodeTab", () => ({
   CodeTab: () => createElement("div", { "data-testid": "stub-code" }),
+}));
+vi.mock("../../src/components/tabs/AgentsTab", () => ({
+  AgentsTab: () => createElement("div", { "data-testid": "stub-agents" }),
+}));
+vi.mock("../../src/components/tabs/WorktreeTab", () => ({
+  WorktreeTab: () => createElement("div", { "data-testid": "stub-worktrees" }),
+}));
+// ★하네스 = 심플 모드의 연결(GitHub·텔레그램·슬랙) 진입점. 여기서 확인하는 건
+// "그 컴포넌트가 걸렸는가" + "모달이 아니라 인라인인가"(onClose 미전달)다.
+vi.mock("../../src/components/harness/HarnessStore", () => ({
+  HarnessStore: ({ onClose }: { onClose?: () => void }) =>
+    createElement("div", {
+      "data-testid": "stub-harness",
+      "data-modal": onClose ? "1" : "0",
+    }),
 }));
 vi.mock("../../src/components/usage/UsagePage", () => ({
   UsagePage: () => createElement("div", { "data-testid": "stub-usage" }),
@@ -173,7 +194,12 @@ vi.mock("../../src/components/beginner/BeginnerAgentTerminalModal", () => ({
   BeginnerAgentTerminalModal: () => null,
 }));
 vi.mock("../../src/components/beginner/BeginnerTaskModal", () => ({
-  BeginnerTaskModal: () => null,
+  // 점프 래치의 `task` 목적지 — 심플에는 보드가 없어서 이 모달이 목적지다.
+  BeginnerTaskModal: ({ task }: { task: { id: string } }) =>
+    createElement("div", {
+      "data-testid": "stub-task-modal",
+      "data-task": task.id,
+    }),
 }));
 vi.mock("../../src/components/beginner/BeginnerOneClickModal", () => ({
   BeginnerOneClickModal: () => null,
@@ -206,6 +232,7 @@ vi.mock("../../src/components/legal/PrivacyClarificationNotice", () => ({
 
 import { BeginnerShell } from "../../src/components/beginner/BeginnerShell";
 import { beginnerHiddenExpertTabs } from "../../src/lib/beginnerTabs";
+import { useNavigationStore } from "../../src/stores/navigationStore";
 import { useLocaleStore } from "../../src/lib/i18n";
 import { useUiStore } from "../../src/stores/uiStore";
 import { ko } from "../../src/locales/ko";
@@ -213,6 +240,8 @@ import { ko } from "../../src/locales/ko";
 beforeEach(() => {
   useLocaleStore.setState({ locale: "ko" });
   useUiStore.setState({ pendingSettingsSection: null });
+  useNavigationStore.setState({ pendingJump: null });
+  taskSnapshot.tasks = [];
   mounts.orchestrator = 0;
   beginnerStore.promote.mockClear();
 });
@@ -220,14 +249,22 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("심플 큐레이트 탭 — 배선", () => {
-  it("★기본은 대화다 — 큐레이트 넷은 누르기 전엔 트리에 없다", () => {
+  it("★기본은 대화다 — 큐레이트 일곱은 누르기 전엔 트리에 없다", () => {
     render(createElement(BeginnerShell));
 
     expect(screen.getByTestId("stub-orchestrator")).toBeTruthy();
     expect(
       screen.getByTestId("beginner-tab-chat").getAttribute("aria-selected"),
     ).toBe("true");
-    for (const stub of ["guide", "code", "usage", "settings"]) {
+    for (const stub of [
+      "guide",
+      "code",
+      "agents",
+      "worktrees",
+      "usage",
+      "harness",
+      "settings",
+    ]) {
       expect(screen.queryByTestId(`stub-${stub}`)).toBeNull();
     }
   });
@@ -235,7 +272,10 @@ describe("심플 큐레이트 탭 — 배선", () => {
   it.each([
     ["guide", "stub-guide"],
     ["code", "stub-code"],
+    ["agents", "stub-agents"],
+    ["worktrees", "stub-worktrees"],
     ["usage", "stub-usage"],
+    ["harness", "stub-harness"],
     ["settings", "stub-settings"],
   ])("%s 탭을 누르면 엑스퍼트의 그 화면이 뜬다", (tab, stub) => {
     render(createElement(BeginnerShell));
@@ -277,11 +317,21 @@ describe("심플 큐레이트 탭 — 배선", () => {
     render(createElement(BeginnerShell));
 
     const bar = screen.getByTestId("beginner-tabbar");
-    expect(bar.querySelectorAll('[role="tab"]')).toHaveLength(5);
+    expect(bar.querySelectorAll('[role="tab"]')).toHaveLength(8);
     for (const hidden of beginnerHiddenExpertTabs([])) {
       expect(screen.queryByTestId(`beginner-tab-${hidden}`)).toBeNull();
       expect(bar.textContent).not.toContain(ko[`workspace.tab.${hidden}`]);
     }
+  });
+
+  it("★하네스는 탭 자리에 **인라인**으로 뜬다 — 모달 크롬이 아니다", () => {
+    // onClose 를 주면 HarnessStore 는 스스로를 모달로 그린다(isModal). 탭 안에서
+    // 그러면 닫기 버튼이 갈 곳이 없다 — 엑스퍼트 탭바와 같은 래퍼여야 한다.
+    render(createElement(BeginnerShell));
+
+    fireEvent.click(screen.getByTestId("beginner-tab-harness"));
+
+    expect(screen.getByTestId("stub-harness").dataset.modal).toBe("0");
   });
 });
 
@@ -330,5 +380,80 @@ describe("심플 큐레이트 탭 — 코치마크", () => {
 
     fireEvent.click(screen.getByTestId("beginner-tab-chat"));
     expect(screen.getByTestId("stub-tour").dataset.blocked).toBe("0");
+  });
+});
+
+/**
+ * ★탭 간 점프 래치 — 워크트리 탭이 심플에 들어오면서 필요해진 배선.
+ *
+ * 그 탭의 "코드에서 보기"·"티켓 보기" 는 스스로 화면을 바꾸지 않고 래치만
+ * 세운다(navigationStore). 어드밴스드에서는 WorkspaceShell 이 그걸 받아 탭을
+ * 옮겨 주는데, 심플에 소비자가 없으면 **눌러도 아무 일이 없는 버튼**이 된다 —
+ * 화면에 흔적도 없이 실패하는 종류라 손으로는 안 잡힌다.
+ */
+describe("심플 큐레이트 탭 — 탭 간 점프", () => {
+  it("코드 점프가 코드 탭을 연다 (워크트리의 '코드에서 보기')", () => {
+    render(createElement(BeginnerShell));
+
+    act(() => {
+      useNavigationStore.getState().requestJump({ type: "code" });
+    });
+
+    expect(screen.getByTestId("stub-code")).toBeTruthy();
+    // 목적지가 받았으면 래치는 비어야 한다 — 남으면 다음 렌더마다 다시 튄다.
+    expect(useNavigationStore.getState().pendingJump).toBeNull();
+  });
+
+  it("워크트리 점프가 워크트리 탭을 연다 (코드 탭의 브랜치 diff 탈출구)", () => {
+    render(createElement(BeginnerShell));
+
+    act(() => {
+      useNavigationStore.getState().requestJump({ type: "worktrees" });
+    });
+
+    expect(screen.getByTestId("stub-worktrees")).toBeTruthy();
+    expect(useNavigationStore.getState().pendingJump).toBeNull();
+  });
+
+  it("★에이전트 점프는 탭만 옮기고 래치는 AgentsTab 에 넘긴다", () => {
+    // 소거는 목적지의 일이다 — 셸이 미리 지우면 스크롤·플래시가 영영 안 뜬다.
+    render(createElement(BeginnerShell));
+
+    act(() => {
+      useNavigationStore.getState().requestJump({ type: "agent", id: "a1" });
+    });
+
+    expect(screen.getByTestId("stub-agents")).toBeTruthy();
+    expect(useNavigationStore.getState().pendingJump).toEqual({
+      type: "agent",
+      id: "a1",
+    });
+  });
+
+  it("티켓 점프는 보드가 아니라 비기너 상세 모달을 연다", () => {
+    taskSnapshot.tasks = [{ id: "t1" }];
+    render(createElement(BeginnerShell));
+
+    act(() => {
+      useNavigationStore.getState().requestJump({ type: "task", id: "t1" });
+    });
+
+    expect(screen.getByTestId("stub-task-modal").dataset.task).toBe("t1");
+    expect(useNavigationStore.getState().pendingJump).toBeNull();
+  });
+
+  it("★구독에 아직 없는 티켓이면 래치를 **소거하지 않고** 기다린다", () => {
+    // 지워 버리면 구독이 한 프레임 늦은 것만으로 클릭이 증발한다.
+    render(createElement(BeginnerShell));
+
+    act(() => {
+      useNavigationStore.getState().requestJump({ type: "task", id: "t9" });
+    });
+
+    expect(screen.queryByTestId("stub-task-modal")).toBeNull();
+    expect(useNavigationStore.getState().pendingJump).toEqual({
+      type: "task",
+      id: "t9",
+    });
   });
 });
