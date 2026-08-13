@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
+  CalendarDays,
   FolderOpen,
   Link2,
   Loader2,
+  Mail,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -33,6 +35,8 @@ import type { MessageKey } from "../../locales/ko";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 /** 폴더 후보 목록 길이 — 고르는 화면이라 한 화면에 들어와야 한다. */
 const FOLDER_PAGE_SIZE = 20;
+const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 
 function drive(): DriveAPI {
   return window.electronAPI.drive;
@@ -84,6 +88,9 @@ export function DriveConnectionPanel() {
   const [message, setMessage] = useState<string | null>(null);
 
   const connected = status?.connected === true;
+  const scopes = status?.scopes ?? [];
+  const gmailConnected = connected && scopes.includes(GMAIL_SCOPE);
+  const calendarConnected = connected && scopes.includes(CALENDAR_SCOPE);
   const badge = useMemo(
     () => statusBadge(connected, !!binding),
     [connected, binding],
@@ -382,6 +389,39 @@ export function DriveConnectionPanel() {
             {t("harness.drive.accountNone")}
           </span>
         )}
+      </div>
+
+      <div className="mb-3 grid gap-2 sm:grid-cols-2">
+        <div className="flex items-center gap-2 rounded border border-[#313244] bg-[#1e1e2e] px-3 py-2 text-xs">
+          <Mail className="h-3.5 w-3.5 text-[#89b4fa]" />
+          <span className="text-[#bac2de]">{t("harness.drive.gmail")}</span>
+          <span
+            className={`ml-auto rounded px-2 py-0.5 text-[11px] ${
+              gmailConnected
+                ? "bg-[#a6e3a1]/15 text-[#a6e3a1]"
+                : "bg-[#313244] text-[#bac2de]"
+            }`}
+          >
+            {gmailConnected
+              ? t("harness.drive.scopeReady")
+              : t("harness.drive.scopeNeedsReconnect")}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 rounded border border-[#313244] bg-[#1e1e2e] px-3 py-2 text-xs">
+          <CalendarDays className="h-3.5 w-3.5 text-[#cba6f7]" />
+          <span className="text-[#bac2de]">{t("harness.drive.calendar")}</span>
+          <span
+            className={`ml-auto rounded px-2 py-0.5 text-[11px] ${
+              calendarConnected
+                ? "bg-[#a6e3a1]/15 text-[#a6e3a1]"
+                : "bg-[#313244] text-[#bac2de]"
+            }`}
+          >
+            {calendarConnected
+              ? t("harness.drive.scopeReady")
+              : t("harness.drive.scopeNeedsReconnect")}
+          </span>
+        </div>
       </div>
 
       {/* ── 프로젝트 축: 이 프로젝트의 위키 폴더 ── */}

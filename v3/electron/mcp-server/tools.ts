@@ -7326,6 +7326,14 @@ export function registerTools(server: McpServer): void {
   // userFacing:false — 읽기 조회라 활동 스트림에 노이즈를 만들지 않는다.
 
   /** 브리지의 읽기 전용 Drive 엔드포인트 호출. 실패는 문장으로 돌려준다. */
+  async function driveViaBridge(
+    endpoint:
+      | "/drive-search"
+      | "/drive-fetch"
+      | "/gmail-search"
+      | "/gmail-fetch"
+      | "/calendar-list",
+    payload: Record<string, unknown>
   async function knowledgeViaBridge(
     endpoint:
       | "/drive-search"
@@ -7712,6 +7720,206 @@ export function registerTools(server: McpServer): void {
       return text(`${header.join("\n")}\n\n${doc.text}`);
     },
     { userFacing: false },
+  );
+
+  auditedTool(
+    "gmail_search",
+    "Search the connected user's Gmail messages for THIS PROJECT context (READ-ONLY). " +
+      "Supports Gmail query syntax via `query` and label filtering via `label_ids`. " +
+      "Returns message ids/thread ids/snippets; call gmail_fetch with a returned id " +
+      "to read subject, sender, date, labels, and body. Requires the user to connect " +
+      "Google in Marblo's Harness tab with Gmail read-only consent.",
+    {
+      query: z
+        .string()
+        .optional()
+        .describe("Gmail search query, e.g. 'from:alice newer_than:30d'."),
+      label_ids: z
+        .array(z.string())
+        .optional()
+        .describe("Gmail label ids to include, e.g. ['INBOX'] or ['SENT']."),
+      page_size: z
+        .number()
+        .optional()
+        .describe("Results per page, 1-50 (default 10)."),
+      page_token: z
+        .string()
+        .optional()
+        .describe("nextPageToken from a previous gmail_search call.")
+    },
+    async ({ query, label_ids, page_size, page_token }) => {
+      const result = await driveViaBridge("/gmail-search", {
+        projectId: process.env.MARBLO_PROJECT || "",
+        query,
+        labelIds: label_ids,
+        pageSize: page_size,
+        pageToken: page_token
+      });
+      if (result.ok !== true) {
+        return text(
+          `Gmail 검색 실패: ${
+            typeof result.error === "string" ? result.error : "알 수 없는 오류"
+          }`
+        );
+      }
+      const payload = result.result as {
+        messages?: Array<{ id: string; threadId: string }>;
+        nextPageToken?: string;
+        resultSizeEstimate?: number;
+      };
+      const messages = payload.messages ?? [];
+      if (messages.length === 0) {
+        return text("조건에 맞는 Gmail 메시지가 없습니다.");
+      }
+      const lines = messages.map(
+        (message) => `- id: ${message.id}\n  threadId: ${message.threadId}`
+      );
+      if (payload.nextPageToken) {
+        lines.push(
+          `\n(더 있음 — page_token="${payload.nextPageToken}" 으로 이어서 조회하세요.)`
+        );
+      }
+      const estimate =
+        typeof payload.resultSizeEstimate === "number"
+          ? ` (estimate: ${payload.resultSizeEstimate})`
+          : "";
+      return text(
+        `Gmail 메시지 ${messages.length}개${estimate}:\n${lines.join("\n")}`
+      );
+    },
+    { userFacing: false }
+  );
+
+  auditedTool(
+    "gmail_fetch",
+    "Fetch one Gmail message as normalized text (READ-ONLY). Returns subject, " +
+      "from, date, labels, snippet, and message body. Get message ids from " +
+      "gmail_search. OAuth tokens never leave Marblo main process.",
+    {
+      message_id: z.string().describe("Gmail message id from gmail_search.")
+    },
+    async ({ message_id }) => {
+      const result = await driveViaBridge("/gmail-fetch", {
+        projectId: process.env.MARBLO_PROJECT || "",
+        messageId: message_id
+      });
+      if (result.ok !== true) {
+        return text(
+          `Gmail 메시지 조회 실패: ${
+            typeof result.error === "string" ? result.error : "알 수 없는 오류"
+          }`
+        );
+      }
+      const message = result.message as {
+        id: string;
+        threadId: string;
+        subject: string;
+        from: string;
+        date: string;
+        snippet: string;
+        body: string;
+        labelIds: string[];
+        truncated: boolean;
+      };
+      return text(
+        [
+          `subject: ${message.subject}`,
+          `from: ${message.from}`,
+          `date: ${message.date}`,
+          `id: ${message.id}`,
+          `threadId: ${message.threadId}`,
+          `labels: ${message.labelIds.join(", ") || "(none)"}`,
+          message.truncated ? "(본문이 길어 일부만 표시합니다.)" : "",
+          "",
+          message.body || message.snippet || "(본문 없음)"
+        ]
+          .filter((line, index) => line || index === 8)
+          .join("\n")
+      );
+    },
+    { userFacing: false }
+  );
+
+  auditedTool(
+    "calendar_list",
+    "List events from the connected user's primary Google Calendar for THIS " +
+      "PROJECT context (READ-ONLY). Use `time_min` and `time_max` ISO timestamps " +
+      "to bound the period. Returns title, start/end time, attendees, location, " +
+      "and link. Requires Calendar read-only consent in Marblo's Harness tab.",
+    {
+      time_min: z
+        .string()
+        .optional()
+        .describe("Inclusive lower bound as an ISO timestamp."),
+      time_max: z
+        .string()
+        .optional()
+        .describe("Exclusive upper bound as an ISO timestamp."),
+      query: z.string().optional().describe("Free-text query for events."),
+      max_results: z
+        .number()
+        .optional()
+        .describe("Results per page, 1-50 (default 10)."),
+      page_token: z
+        .string()
+        .optional()
+        .describe("nextPageToken from a previous calendar_list call.")
+    },
+    async ({ time_min, time_max, query, max_results, page_token }) => {
+      const result = await driveViaBridge("/calendar-list", {
+        projectId: process.env.MARBLO_PROJECT || "",
+        timeMin: time_min,
+        timeMax: time_max,
+        query,
+        maxResults: max_results,
+        pageToken: page_token
+      });
+      if (result.ok !== true) {
+        return text(
+          `Calendar 조회 실패: ${
+            typeof result.error === "string" ? result.error : "알 수 없는 오류"
+          }`
+        );
+      }
+      const payload = result.result as {
+        events?: Array<{
+          id: string;
+          title: string;
+          start: string;
+          end: string;
+          attendees?: Array<{
+            email?: string;
+            displayName?: string;
+            responseStatus?: string;
+          }>;
+          location?: string;
+          htmlLink?: string;
+        }>;
+        nextPageToken?: string;
+      };
+      const events = payload.events ?? [];
+      if (events.length === 0)
+        return text("조건에 맞는 Calendar 일정이 없습니다.");
+      const lines = events.map((event) => {
+        const attendees = (event.attendees ?? [])
+          .map((attendee) => attendee.displayName ?? attendee.email)
+          .filter((name): name is string => Boolean(name))
+          .join(", ");
+        return (
+          `- ${event.title}\n  id: ${event.id}\n  time: ${event.start} - ${event.end}` +
+          (attendees ? `\n  attendees: ${attendees}` : "") +
+          (event.location ? `\n  location: ${event.location}` : "") +
+          (event.htmlLink ? `\n  link: ${event.htmlLink}` : "")
+        );
+      });
+      if (payload.nextPageToken) {
+        lines.push(
+          `\n(더 있음 — page_token="${payload.nextPageToken}" 으로 이어서 조회하세요.)`
+        );
+      }
+      return text(`Calendar 일정 ${events.length}개:\n${lines.join("\n")}`);
+    },
+    { userFacing: false }
   );
 
   // send_slack_message — outbound reply to the project's Slack channel.

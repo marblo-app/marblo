@@ -58,15 +58,37 @@ import {
   type DriveConnector,
   type DriveFetchLike,
 } from "./google-drive-connector";
+import {
+  createGmailConnector,
+  type GmailConnector,
+  type GmailFetchLike,
+} from "./gmail-connector";
+import {
+  createCalendarConnector,
+  type CalendarConnector,
+  type CalendarFetchLike,
+} from "./calendar-connector";
 import { extractOfficeText } from "./office-text-extract";
 import { extractPdfText } from "./pdf-text-extract";
 
 /** 최소 시작 스코프. read-only — 쓰기 스코프는 이 앱 어디에도 없다. */
 export const DRIVE_READONLY_SCOPE =
   "https://www.googleapis.com/auth/drive.readonly";
+export const GMAIL_READONLY_SCOPE =
+  "https://www.googleapis.com/auth/gmail.readonly";
+export const CALENDAR_READONLY_SCOPE =
+  "https://www.googleapis.com/auth/calendar.readonly";
+
+export const GOOGLE_CONNECTOR_READONLY_SCOPES = [
+  DRIVE_READONLY_SCOPE,
+  GMAIL_READONLY_SCOPE,
+  CALENDAR_READONLY_SCOPE,
+] as const;
 
 /** authorize 에 실제로 보내는 스코프 문자열(위 주석 ③ 참고). */
-export const DRIVE_AUTH_SCOPE = `openid email ${DRIVE_READONLY_SCOPE}`;
+export const DRIVE_AUTH_SCOPE = `openid email ${GOOGLE_CONNECTOR_READONLY_SCOPES.join(
+  " ",
+)}`;
 
 /**
  * access_token 을 만료 몇 ms 전에 미리 갱신할지. 네트워크 왕복 + 시계 오차를
@@ -75,10 +97,10 @@ export const DRIVE_AUTH_SCOPE = `openid email ${DRIVE_READONLY_SCOPE}`;
 const REFRESH_SKEW_MS = 2 * 60 * 1000;
 
 const DRIVE_LABELS = {
-  okTitle: "Google Drive 연결 완료",
+  okTitle: "Google 커넥터 연결 완료",
   okBody:
-    "Marblo 가 Google Drive 를 읽을 수 있게 되었습니다. 이 창을 닫고 앱으로 돌아가세요.",
-  failTitle: "Google Drive 연결 실패",
+    "Marblo 가 Google Drive, Gmail, Calendar 를 읽을 수 있게 되었습니다. 이 창을 닫고 앱으로 돌아가세요.",
+  failTitle: "Google 커넥터 연결 실패",
   failBody: "연결에 실패했습니다. 이 창을 닫고 앱에서 다시 시도해 주세요.",
 };
 
@@ -251,11 +273,15 @@ export async function connectGoogleDrive(
   }
   // 사용자가 동의 화면에서 Drive 체크를 해제할 수 있다. 그 경우 토큰은 오지만
   // Drive 는 못 읽는다 — 여기서 잡지 않으면 나중에 알 수 없는 403 으로 나온다.
-  if (scope && !scope.split(/\s+/).includes(DRIVE_READONLY_SCOPE)) {
+  const grantedScopes = scope ? scope.split(/\s+/) : [];
+  const missingScopes = GOOGLE_CONNECTOR_READONLY_SCOPES.filter(
+    (requiredScope) => !grantedScopes.includes(requiredScope),
+  );
+  if (scope && missingScopes.length > 0) {
     return {
       ok: false,
       error:
-        "Drive 읽기 권한이 부여되지 않았습니다. 동의 화면에서 Google Drive 항목을 허용해 주세요.",
+        "Google 읽기 권한이 모두 부여되지 않았습니다. 동의 화면에서 Drive, Gmail, Calendar 항목을 허용해 주세요.",
     };
   }
 
@@ -277,7 +303,7 @@ export async function connectGoogleDrive(
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
   // ★로그에 토큰이 절대 안 들어가도록 값 없는 사실만 남긴다.
-  console.log("[google-drive] 연결됨", {
+  console.log("[google-connectors] 연결됨", {
     userId,
     scopes: scope ? scope.split(/\s+/).length : 0,
   });
@@ -291,7 +317,7 @@ export function disconnectGoogleDrive(
 ): { ok: boolean; error?: string } {
   try {
     removeGoogleDriveTokens(storage, userId);
-    console.log("[google-drive] 연결 해제됨", { userId });
+    console.log("[google-connectors] 연결 해제됨", { userId });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
@@ -373,6 +399,28 @@ export function createUserDriveConnector(
     getAccessToken: () => getDriveAccessToken(storage, userId),
     extractPdfText,
     extractOfficeText,
+    ...(fetchImpl ? { fetchImpl } : {}),
+  });
+}
+
+export function createUserGmailConnector(
+  storage: SafeStorage,
+  userId: string,
+  fetchImpl?: GmailFetchLike,
+): GmailConnector {
+  return createGmailConnector({
+    getAccessToken: () => getDriveAccessToken(storage, userId),
+    ...(fetchImpl ? { fetchImpl } : {}),
+  });
+}
+
+export function createUserCalendarConnector(
+  storage: SafeStorage,
+  userId: string,
+  fetchImpl?: CalendarFetchLike,
+): CalendarConnector {
+  return createCalendarConnector({
+    getAccessToken: () => getDriveAccessToken(storage, userId),
     ...(fetchImpl ? { fetchImpl } : {}),
   });
 }
