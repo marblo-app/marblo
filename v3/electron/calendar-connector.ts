@@ -1,13 +1,13 @@
 /**
- * Google Calendar 읽기 전용 커넥터.
+ * Google Calendar 커넥터.
  *
- * events.list 만 감싼다. 토큰은 Authorization 헤더에만 들어가고, 반환형은
+ * events.list/insert/patch 를 감싼다. 토큰은 Authorization 헤더에만 들어가고, 반환형은
  * 에이전트/렌더러가 쓰기 쉬운 일정 중립형으로 줄인다.
  */
 
 export type CalendarFetchLike = (
   input: string,
-  init?: { method?: string; headers?: Record<string, string> },
+  init?: { method?: string; headers?: Record<string, string>; body?: string },
 ) => Promise<Response>;
 
 export const CALENDAR_EVENTS_ENDPOINT =
@@ -52,6 +52,23 @@ export interface CalendarListResult {
   nextPageToken?: string;
 }
 
+export type CalendarSendUpdates = "all" | "externalOnly" | "none";
+
+export interface CalendarEventInput {
+  title: string;
+  start: string;
+  end: string;
+  description?: string;
+  location?: string;
+  attendees?: CalendarAttendee[];
+  timeZone?: string;
+  sendUpdates?: CalendarSendUpdates;
+}
+
+export interface CalendarPatchInput extends Partial<CalendarEventInput> {
+  eventId: string;
+}
+
 export interface CalendarConnectorOptions {
   getAccessToken: () => Promise<string>;
   fetchImpl?: CalendarFetchLike;
@@ -59,6 +76,8 @@ export interface CalendarConnectorOptions {
 
 export interface CalendarConnector {
   list(params: CalendarListParams): Promise<CalendarListResult>;
+  create(params: CalendarEventInput): Promise<CalendarEvent>;
+  patch(params: CalendarPatchInput): Promise<CalendarEvent>;
 }
 
 export class CalendarApiError extends Error {
@@ -78,6 +97,12 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function stringField(value: unknown): string | undefined {
   return typeof value === "string" && value ? value : undefined;
+}
+
+function requireNonEmpty(value: string | undefined, label: string): string {
+  const trimmed = value?.trim();
+  if (!trimmed) throw new CalendarApiError(400, `${label} 값이 필요합니다.`);
+  return trimmed;
 }
 
 function clampMaxResults(maxResults?: number): number {
@@ -164,7 +189,7 @@ export function calendarErrorMessage(status: number, body: unknown): string {
     return "Google Calendar 인증이 만료되었습니다. Harness 탭에서 Google 계정을 다시 연결해 주세요.";
   }
   if (status === 403) {
-    return `Calendar 읽기 권한이 없거나 Calendar API 가 활성화되지 않았습니다${detail ? `: ${detail}` : "."}`;
+    return `Calendar 권한이 없거나 Calendar API 가 활성화되지 않았습니다${detail ? `: ${detail}` : "."}`;
   }
   if (status === 429) {
     return "Calendar 요청 한도를 넘었습니다. 잠시 후 다시 시도하세요.";
@@ -172,17 +197,97 @@ export function calendarErrorMessage(status: number, body: unknown): string {
   return `Calendar 오류 (HTTP ${status})${detail ? `: ${detail}` : ""}`;
 }
 
+function dateTimePayload(value: string, timeZone?: string): Record<string, string> {
+  const trimmed = requireNonEmpty(value, "일정 시간");
+  const payload: Record<string, string> = /^\d{4}-\d{2}-\d{2}$/.test(trimmed)
+    ? { date: trimmed }
+    : { dateTime: trimmed };
+  const tz = timeZone?.trim();
+  if (tz && payload.dateTime) payload.timeZone = tz;
+  return payload;
+}
+
+function eventBodyFromInput(
+  params: CalendarEventInput | CalendarPatchInput,
+  mode: "create" | "patch",
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  const title = params.title?.trim();
+  if (mode === "create") body.summary = requireNonEmpty(title, "일정 제목");
+  else if (title) body.summary = title;
+  if (params.description?.trim()) body.description = params.description.trim();
+  if (params.location?.trim()) body.location = params.location.trim();
+  if (params.start !== undefined) {
+    body.start = dateTimePayload(params.start, params.timeZone);
+  }
+  if (params.end !== undefined) {
+    body.end = dateTimePayload(params.end, params.timeZone);
+  }
+  if (mode === "create" && (!body.start || !body.end)) {
+    throw new CalendarApiError(400, "일정 시작/종료 시간이 필요합니다.");
+  }
+  if (Array.isArray(params.attendees)) {
+    body.attendees = params.attendees
+      .map((attendee) => {
+        const email = attendee.email?.trim();
+        const displayName = attendee.displayName?.trim();
+        if (!email && !displayName) return null;
+        return {
+          ...(email ? { email } : {}),
+          ...(displayName ? { displayName } : {}),
+        };
+      })
+      .filter((attendee): attendee is Record<string, string> => attendee !== null);
+  }
+  return body;
+}
+
+function sendUpdatesParam(value: CalendarSendUpdates | undefined): string {
+  return value === "all" || value === "externalOnly" || value === "none"
+    ? value
+    : "none";
+}
+
 export function createCalendarConnector(
   options: CalendarConnectorOptions,
 ): CalendarConnector {
   const doFetch: CalendarFetchLike = options.fetchImpl ?? fetch;
 
-  async function authorizedFetch(url: string): Promise<Response> {
+  async function authorizedFetch(
+    url: string,
+    init: { method?: string; body?: string } = {},
+  ): Promise<Response> {
     const accessToken = await options.getAccessToken();
     return doFetch(url, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${accessToken}` },
+      method: init.method ?? "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        ...(init.body ? { "Content-Type": "application/json" } : {}),
+      },
+      ...(init.body ? { body: init.body } : {}),
     });
+  }
+
+  async function getEventJson(
+    url: string,
+    init: { method?: string; body?: string } = {},
+  ): Promise<CalendarEvent> {
+    const response = await authorizedFetch(url, init);
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new CalendarApiError(
+        response.status,
+        calendarErrorMessage(response.status, body),
+      );
+    }
+    const parsed = parseCalendarEvent(await response.json());
+    if (!parsed) {
+      throw new CalendarApiError(
+        502,
+        "Calendar 가 알 수 없는 형식의 일정 응답을 보냈습니다.",
+      );
+    }
+    return parsed;
   }
 
   return {
@@ -199,6 +304,28 @@ export function createCalendarConnector(
         );
       }
       return parseCalendarListResult(await response.json());
+    },
+    async create(params: CalendarEventInput): Promise<CalendarEvent> {
+      const search = new URLSearchParams({
+        sendUpdates: sendUpdatesParam(params.sendUpdates),
+      });
+      return getEventJson(`${CALENDAR_EVENTS_ENDPOINT}?${search}`, {
+        method: "POST",
+        body: JSON.stringify(eventBodyFromInput(params, "create")),
+      });
+    },
+    async patch(params: CalendarPatchInput): Promise<CalendarEvent> {
+      const eventId = requireNonEmpty(params.eventId, "eventId");
+      const search = new URLSearchParams({
+        sendUpdates: sendUpdatesParam(params.sendUpdates),
+      });
+      return getEventJson(
+        `${CALENDAR_EVENTS_ENDPOINT}/${encodeURIComponent(eventId)}?${search}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(eventBodyFromInput(params, "patch")),
+        },
+      );
     },
   };
 }

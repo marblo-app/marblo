@@ -7506,11 +7506,17 @@ export function registerTools(server: McpServer): void {
     endpoint:
       | "/drive-search"
       | "/drive-fetch"
+      | "/drive-write"
       | "/notion-search"
       | "/notion-fetch"
+      | "/notion-write"
       | "/gmail-search"
       | "/gmail-fetch"
+      | "/gmail-draft"
+      | "/gmail-send"
       | "/calendar-list"
+      | "/calendar-create"
+      | "/calendar-patch"
       | "/contacts-search",
     payload: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
@@ -7547,9 +7553,14 @@ export function registerTools(server: McpServer): void {
     endpoint:
       | "/drive-search"
       | "/drive-fetch"
+      | "/drive-write"
       | "/gmail-search"
       | "/gmail-fetch"
+      | "/gmail-draft"
+      | "/gmail-send"
       | "/calendar-list"
+      | "/calendar-create"
+      | "/calendar-patch"
       | "/contacts-search",
     payload: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
@@ -7557,7 +7568,7 @@ export function registerTools(server: McpServer): void {
   }
 
   async function notionViaBridge(
-    endpoint: "/notion-search" | "/notion-fetch",
+    endpoint: "/notion-search" | "/notion-fetch" | "/notion-write",
     payload: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
     return knowledgeViaBridge(endpoint, payload);
@@ -7776,6 +7787,59 @@ export function registerTools(server: McpServer): void {
   );
 
   auditedTool(
+    "drive_write",
+    "Create a Google Docs document inside THIS PROJECT'S bound Drive wiki folder. " +
+      "This is a non-destructive create action and runs immediately. The target " +
+      "folder defaults to the project's bound wiki folder; a folder_id may narrow " +
+      "creation to a subfolder inside that binding. OAuth tokens never leave Marblo.",
+    {
+      title: z.string().describe("New document title."),
+      content: z
+        .string()
+        .optional()
+        .describe("Plain text to insert into the new Google Docs document."),
+      folder_id: z
+        .string()
+        .optional()
+        .describe("Optional Drive folder id inside this project's bound wiki folder."),
+    },
+    async ({ title, content, folder_id }) => {
+      const result = await driveViaBridge("/drive-write", {
+        projectId: process.env.MARBLO_PROJECT || "",
+        title,
+        content,
+        folderId: folder_id,
+      });
+      if (result.ok !== true) {
+        return text(
+          `Drive 문서 생성 실패: ${
+            typeof result.error === "string" ? result.error : "알 수 없는 오류"
+          }`,
+        );
+      }
+      const payload = result.result as {
+        id: string;
+        title: string;
+        mimeType: string;
+        webViewLink?: string;
+        insertedTextLength?: number;
+      };
+      return text(
+        [
+          `Drive 문서를 생성했습니다: ${payload.title}`,
+          `id: ${payload.id}`,
+          `mimeType: ${payload.mimeType}`,
+          `insertedTextLength: ${payload.insertedTextLength ?? 0}`,
+          payload.webViewLink ? `link: ${payload.webViewLink}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    },
+    { userFacing: false },
+  );
+
+  auditedTool(
     "notion_search",
     "Search THIS PROJECT'S Notion wiki binding (READ-ONLY). The search is " +
       "always scoped to the Notion database or page bound to this project. " +
@@ -7900,6 +7964,62 @@ export function registerTools(server: McpServer): void {
   );
 
   auditedTool(
+    "notion_write",
+    "Create a page or append blocks inside THIS PROJECT'S bound Notion wiki. " +
+      "If page_id is provided, markdown-ish content is appended to that page after " +
+      "scope validation. Without page_id, a new page is created under the bound " +
+      "database/page. This is a non-destructive write and runs immediately.",
+    {
+      page_id: z
+        .string()
+        .optional()
+        .describe("Existing Notion page id to append to. Omit to create a page."),
+      title: z
+        .string()
+        .optional()
+        .describe("Required when creating a new page."),
+      content: z
+        .string()
+        .optional()
+        .describe("Markdown-ish text. Supports headings (#), bullets, numbers, paragraphs."),
+    },
+    async ({ page_id, title, content }) => {
+      const result = await notionViaBridge("/notion-write", {
+        projectId: process.env.MARBLO_PROJECT || "",
+        pageId: page_id,
+        title,
+        content,
+      });
+      if (result.ok !== true) {
+        return text(
+          `Notion 쓰기 실패: ${
+            typeof result.error === "string" ? result.error : "알 수 없는 오류"
+          }`,
+        );
+      }
+      const payload = result.result as {
+        action: string;
+        pageId: string;
+        title?: string;
+        url?: string;
+        appendedBlocks?: number;
+      };
+      return text(
+        [
+          `Notion ${payload.action === "append_blocks" ? "블록을 추가했습니다" : "페이지를 생성했습니다"}.`,
+          `pageId: ${payload.pageId}`,
+          payload.title ? `title: ${payload.title}` : "",
+          `blocks: ${payload.appendedBlocks ?? 0}`,
+          payload.url ? `url: ${payload.url}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    },
+    { userFacing: false },
+  );
+
+  auditedTool(
     "gmail_search",
     "Search the connected user's Gmail messages for THIS PROJECT context (READ-ONLY). " +
       "Supports Gmail query syntax via `query` and label filtering via `label_ids`. " +
@@ -8017,6 +8137,111 @@ export function registerTools(server: McpServer): void {
     { userFacing: false },
   );
 
+  const gmailComposeSchema = {
+    to: z.array(z.string()).describe("Recipient email addresses."),
+    subject: z.string().describe("Email subject."),
+    body: z.string().describe("Plain text email body."),
+    cc: z.array(z.string()).optional().describe("CC recipient email addresses."),
+    bcc: z
+      .array(z.string())
+      .optional()
+      .describe("BCC recipient email addresses."),
+    thread_id: z
+      .string()
+      .optional()
+      .describe("Optional Gmail thread id for replies."),
+  };
+
+  auditedTool(
+    "gmail_draft",
+    "Create a Gmail draft for the connected user. This is a reversible compose " +
+      "action and runs immediately. It does NOT send mail. Call gmail_send only " +
+      "after explicit user confirmation.",
+    gmailComposeSchema,
+    async ({ to, subject, body, cc, bcc, thread_id }) => {
+      const result = await driveViaBridge("/gmail-draft", {
+        projectId: process.env.MARBLO_PROJECT || "",
+        to,
+        subject,
+        body,
+        cc,
+        bcc,
+        threadId: thread_id,
+      });
+      if (result.ok !== true) {
+        return text(
+          `Gmail 초안 생성 실패: ${
+            typeof result.error === "string" ? result.error : "알 수 없는 오류"
+          }`,
+        );
+      }
+      const draft = result.draft as {
+        id: string;
+        messageId?: string;
+        threadId?: string;
+      };
+      return text(
+        [
+          "Gmail 초안을 생성했습니다.",
+          `draftId: ${draft.id}`,
+          draft.messageId ? `messageId: ${draft.messageId}` : "",
+          draft.threadId ? `threadId: ${draft.threadId}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    },
+    { userFacing: false },
+  );
+
+  auditedTool(
+    "gmail_send",
+    "Send a Gmail message for the connected user. DESTRUCTIVE/IRREVERSIBLE: " +
+      "you must have explicit user confirmation before calling this. The tool " +
+      "will refuse unless confirm=true is provided.",
+    {
+      ...gmailComposeSchema,
+      confirm: z
+        .boolean()
+        .describe("Must be true only after explicit user confirmation."),
+    },
+    async ({ to, subject, body, cc, bcc, thread_id, confirm }) => {
+      const result = await driveViaBridge("/gmail-send", {
+        projectId: process.env.MARBLO_PROJECT || "",
+        to,
+        subject,
+        body,
+        cc,
+        bcc,
+        threadId: thread_id,
+        confirm,
+      });
+      if (result.ok !== true) {
+        return text(
+          `Gmail 발송 실패: ${
+            typeof result.error === "string" ? result.error : "알 수 없는 오류"
+          }`,
+        );
+      }
+      const message = result.message as {
+        id: string;
+        threadId?: string;
+        labelIds?: string[];
+      };
+      return text(
+        [
+          "Gmail 메시지를 발송했습니다.",
+          `messageId: ${message.id}`,
+          message.threadId ? `threadId: ${message.threadId}` : "",
+          `labels: ${(message.labelIds ?? []).join(", ") || "(none)"}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    },
+    { userFacing: false },
+  );
+
   auditedTool(
     "calendar_list",
     "List events from the connected user's primary Google Calendar for THIS " +
@@ -8095,6 +8320,154 @@ export function registerTools(server: McpServer): void {
         );
       }
       return text(`Calendar 일정 ${events.length}개:\n${lines.join("\n")}`);
+    },
+    { userFacing: false },
+  );
+
+  const calendarEventSchema = {
+    title: z.string().describe("Event title."),
+    start: z
+      .string()
+      .describe("Start date or dateTime, e.g. 2026-08-13T09:00:00+09:00."),
+    end: z
+      .string()
+      .describe("End date or dateTime, e.g. 2026-08-13T10:00:00+09:00."),
+    description: z.string().optional().describe("Event description."),
+    location: z.string().optional().describe("Event location."),
+    attendees: z
+      .array(
+        z.object({
+          email: z.string().optional(),
+          displayName: z.string().optional(),
+        }),
+      )
+      .optional()
+      .describe("Attendees by email/displayName."),
+    time_zone: z.string().optional().describe("IANA timezone for dateTime values."),
+    send_updates: z
+      .enum(["all", "externalOnly", "none"])
+      .optional()
+      .describe("Google Calendar sendUpdates option. Defaults to none."),
+  };
+
+  auditedTool(
+    "calendar_create",
+    "Create an event in the connected user's primary Google Calendar. This is a " +
+      "non-destructive create action and runs immediately. Use send_updates only " +
+      "when attendees should be notified.",
+    calendarEventSchema,
+    async ({
+      title,
+      start,
+      end,
+      description,
+      location,
+      attendees,
+      time_zone,
+      send_updates,
+    }) => {
+      const result = await driveViaBridge("/calendar-create", {
+        projectId: process.env.MARBLO_PROJECT || "",
+        title,
+        start,
+        end,
+        description,
+        location,
+        attendees,
+        timeZone: time_zone,
+        sendUpdates: send_updates,
+      });
+      if (result.ok !== true) {
+        return text(
+          `Calendar 일정 생성 실패: ${
+            typeof result.error === "string" ? result.error : "알 수 없는 오류"
+          }`,
+        );
+      }
+      const event = result.event as {
+        id: string;
+        title: string;
+        start: string;
+        end: string;
+        htmlLink?: string;
+      };
+      return text(
+        [
+          `Calendar 일정을 생성했습니다: ${event.title}`,
+          `id: ${event.id}`,
+          `time: ${event.start} - ${event.end}`,
+          event.htmlLink ? `link: ${event.htmlLink}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    },
+    { userFacing: false },
+  );
+
+  auditedTool(
+    "calendar_patch",
+    "Patch an existing event in the connected user's primary Google Calendar. " +
+      "Only provided fields are updated. Use send_updates only when attendees " +
+      "should be notified.",
+    {
+      event_id: z.string().describe("Calendar event id."),
+      title: z.string().optional().describe("Event title."),
+      start: z.string().optional().describe("Start date or dateTime."),
+      end: z.string().optional().describe("End date or dateTime."),
+      description: z.string().optional().describe("Event description."),
+      location: z.string().optional().describe("Event location."),
+      attendees: calendarEventSchema.attendees,
+      time_zone: calendarEventSchema.time_zone,
+      send_updates: calendarEventSchema.send_updates,
+    },
+    async ({
+      event_id,
+      title,
+      start,
+      end,
+      description,
+      location,
+      attendees,
+      time_zone,
+      send_updates,
+    }) => {
+      const result = await driveViaBridge("/calendar-patch", {
+        projectId: process.env.MARBLO_PROJECT || "",
+        eventId: event_id,
+        title,
+        start,
+        end,
+        description,
+        location,
+        attendees,
+        timeZone: time_zone,
+        sendUpdates: send_updates,
+      });
+      if (result.ok !== true) {
+        return text(
+          `Calendar 일정 수정 실패: ${
+            typeof result.error === "string" ? result.error : "알 수 없는 오류"
+          }`,
+        );
+      }
+      const event = result.event as {
+        id: string;
+        title: string;
+        start: string;
+        end: string;
+        htmlLink?: string;
+      };
+      return text(
+        [
+          `Calendar 일정을 수정했습니다: ${event.title}`,
+          `id: ${event.id}`,
+          `time: ${event.start} - ${event.end}`,
+          event.htmlLink ? `link: ${event.htmlLink}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
     },
     { userFacing: false },
   );

@@ -340,11 +340,26 @@ interface FakeRoute {
 /** 호출 URL 을 기록하는 fake fetch. 매칭은 URL substring 으로 한다. */
 function fakeFetch(routes: Array<[string, FakeRoute]>): {
   fetchImpl: DriveFetchLike;
-  calls: Array<{ url: string; authorization?: string }>;
+  calls: Array<{
+    url: string;
+    authorization?: string;
+    method?: string;
+    body?: string;
+  }>;
 } {
-  const calls: Array<{ url: string; authorization?: string }> = [];
+  const calls: Array<{
+    url: string;
+    authorization?: string;
+    method?: string;
+    body?: string;
+  }> = [];
   const fetchImpl: DriveFetchLike = async (url, init) => {
-    calls.push({ url, authorization: init?.headers?.Authorization });
+    calls.push({
+      url,
+      authorization: init?.headers?.Authorization,
+      method: init?.method,
+      body: init?.body,
+    });
     const route = routes.find(([needle]) => url.includes(needle))?.[1];
     if (!route) throw new Error(`unmatched url: ${url}`);
     const status = route.status ?? 200;
@@ -729,5 +744,48 @@ describe("createDriveConnector", () => {
     });
     await connector.getFileMeta("a/../b");
     expect(calls[0].url).toContain("/files/a%2F..%2Fb?");
+  });
+
+  it("Google Docs 문서를 만들고 본문을 batchUpdate로 삽입한다", async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      [
+        "/drive/v3/files?",
+        {
+          json: META({
+            id: "DOC1",
+            name: "새 문서",
+            mimeType: "application/vnd.google-apps.document",
+            webViewLink: "https://docs.google.com/document/d/DOC1",
+          }),
+        },
+      ],
+      ["/documents/DOC1:batchUpdate", { json: {} }],
+    ]);
+    const connector = createDriveConnector({
+      getAccessToken: async () => "t",
+      fetchImpl,
+    });
+    const result = await connector.createGoogleDoc({
+      title: "새 문서",
+      content: "본문",
+      folderId: "FOLDER1",
+    });
+    const createBody = JSON.parse(calls[0].body ?? "{}") as {
+      name?: string;
+      parents?: string[];
+    };
+    const updateBody = JSON.parse(calls[1].body ?? "{}") as {
+      requests?: Array<{ insertText?: { text?: string } }>;
+    };
+    expect(calls[0].method).toBe("POST");
+    expect(createBody.name).toBe("새 문서");
+    expect(createBody.parents).toEqual(["FOLDER1"]);
+    expect(calls[1].url).toContain("/documents/DOC1:batchUpdate");
+    expect(updateBody.requests?.[0]?.insertText?.text).toBe("본문");
+    expect(result).toMatchObject({
+      id: "DOC1",
+      title: "새 문서",
+      insertedTextLength: 2,
+    });
   });
 });

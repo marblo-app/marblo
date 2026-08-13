@@ -1,5 +1,5 @@
 /**
- * Google Drive 커넥터 (읽기 전용 MVP) — 티켓 zqNxS9904aeeBEug1uAD.
+ * Google Drive 커넥터 — 티켓 zqNxS9904aeeBEug1uAD.
  *
  * ── 이 파일의 자리 ────────────────────────────────────────────────────────
  * 지식위키·헤르메스형 비서 에이전트의 **선행 기반**이다. 이번 티켓의 범위는
@@ -23,10 +23,12 @@ import { detectOfficeFormat, type OfficeFormat } from "./office-formats";
 
 export type DriveFetchLike = (
   input: string,
-  init?: { method?: string; headers?: Record<string, string> },
+  init?: { method?: string; headers?: Record<string, string>; body?: string },
 ) => Promise<Response>;
 
 export const DRIVE_FILES_ENDPOINT = "https://www.googleapis.com/drive/v3/files";
+export const GOOGLE_DOCS_DOCUMENTS_ENDPOINT =
+  "https://docs.googleapis.com/v1/documents";
 
 export const DRIVE_FOLDER_MIME = "application/vnd.google-apps.folder";
 
@@ -106,6 +108,20 @@ export interface DriveSearchResult {
   nextPageToken?: string;
   /** 실제로 Drive 에 보낸 q — 디버깅·감사용(토큰 없음). */
   query: string;
+}
+
+export interface DriveWriteParams {
+  title: string;
+  content?: string;
+  folderId?: string;
+}
+
+export interface DriveWriteResult {
+  id: string;
+  title: string;
+  mimeType: string;
+  webViewLink?: string;
+  insertedTextLength: number;
 }
 
 // ── 쿼리 빌더 ────────────────────────────────────────────────────────────
@@ -237,6 +253,12 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function stringField(value: unknown): string | undefined {
   return typeof value === "string" && value ? value : undefined;
+}
+
+function requireNonEmpty(value: string | undefined, label: string): string {
+  const trimmed = value?.trim();
+  if (!trimmed) throw new DriveApiError(400, `${label} 값이 필요합니다.`);
+  return trimmed;
 }
 
 /** Drive 가 문자열로 주는 size 를 숫자로. 못 읽으면 undefined. */
@@ -445,6 +467,7 @@ export interface DriveConnector {
   search(params: DriveListParams): Promise<DriveSearchResult>;
   getFileMeta(fileId: string): Promise<DriveFileMeta>;
   fetchDocument(fileId: string): Promise<DriveDocument>;
+  createGoogleDoc(params: DriveWriteParams): Promise<DriveWriteResult>;
 }
 
 /** Drive 호출 실패를 사용자 메시지와 상태코드로 함께 나르는 에러. */
@@ -464,12 +487,19 @@ export function createDriveConnector(
   const maxContentBytes = options.maxContentBytes ?? DEFAULT_MAX_CONTENT_BYTES;
   const maxTextChars = options.maxTextChars ?? DEFAULT_MAX_TEXT_CHARS;
 
-  async function authorizedFetch(url: string): Promise<Response> {
+  async function authorizedFetch(
+    url: string,
+    init: { method?: string; body?: string } = {},
+  ): Promise<Response> {
     const accessToken = await options.getAccessToken();
     return doFetch(url, {
-      method: "GET",
+      method: init.method ?? "GET",
       // ★토큰은 헤더에만. URL 에 넣으면 로그·에러메시지에 그대로 새어나간다.
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        ...(init.body ? { "Content-Type": "application/json" } : {}),
+      },
+      ...(init.body ? { body: init.body } : {}),
     });
   }
 
@@ -482,8 +512,11 @@ export function createDriveConnector(
     );
   }
 
-  async function getJson(url: string): Promise<unknown> {
-    const response = await authorizedFetch(url);
+  async function getJson(
+    url: string,
+    init: { method?: string; body?: string } = {},
+  ): Promise<unknown> {
+    const response = await authorizedFetch(url, init);
     if (!response.ok) throw await toApiError(response);
     return response.json();
   }
@@ -659,6 +692,52 @@ export function createDriveConnector(
         text: limited.text,
         extraction: "download",
         truncated: bytesTruncated || limited.truncated,
+      };
+    },
+
+    async createGoogleDoc(params: DriveWriteParams): Promise<DriveWriteResult> {
+      const title = requireNonEmpty(params.title, "title");
+      const createSearch = new URLSearchParams({ fields: DRIVE_FILE_FIELDS });
+      const createBody: Record<string, unknown> = {
+        name: title,
+        mimeType: "application/vnd.google-apps.document",
+      };
+      const folderId = params.folderId?.trim();
+      if (folderId) createBody.parents = [folderId];
+      const meta = parseDriveFile(
+        await getJson(`${DRIVE_FILES_ENDPOINT}?${createSearch}`, {
+          method: "POST",
+          body: JSON.stringify(createBody),
+        }),
+      );
+      if (!meta) {
+        throw new DriveApiError(
+          502,
+          "Drive 가 알 수 없는 형식의 문서 생성 응답을 보냈습니다.",
+        );
+      }
+
+      const content = params.content ?? "";
+      if (content) {
+        await getJson(
+          `${GOOGLE_DOCS_DOCUMENTS_ENDPOINT}/${encodeURIComponent(
+            meta.id,
+          )}:batchUpdate`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              requests: [{ insertText: { location: { index: 1 }, text: content } }],
+            }),
+          },
+        );
+      }
+
+      return {
+        id: meta.id,
+        title: meta.title,
+        mimeType: meta.mimeType,
+        webViewLink: meta.webViewLink,
+        insertedTextLength: content.length,
       };
     },
   };

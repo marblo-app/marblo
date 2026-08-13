@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildGmailRawMessage,
   buildGmailListParams,
   createGmailConnector,
+  parseGmailDraftResult,
   parseGmailMessage,
+  parseGmailSendResult,
   parseGmailSearchResult,
   type GmailFetchLike,
 } from "../../electron/gmail-connector";
@@ -112,6 +115,53 @@ describe("gmail connector", () => {
     expect(calls[0].authorization).toBe("Bearer ACCESS");
     expect(calls[0].url).not.toContain("ACCESS");
   });
+
+  it("초안 생성은 drafts.create로 raw MIME을 보낸다", async () => {
+    const calls: Array<{ url: string; method?: string; body?: string }> = [];
+    const fetchImpl: GmailFetchLike = async (url, init) => {
+      calls.push({ url, method: init?.method, body: init?.body });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ id: "D1", message: { id: "M1", threadId: "T1" } }),
+      } as unknown as Response;
+    };
+    const connector = createGmailConnector({
+      getAccessToken: async () => "ACCESS",
+      fetchImpl,
+    });
+    const draft = await connector.createDraft({
+      to: ["a@example.com"],
+      subject: "Hello",
+      body: "Body",
+    });
+    const body = JSON.parse(calls[0].body ?? "{}") as {
+      message?: { raw?: string };
+    };
+    expect(calls[0].url).toContain("/drafts");
+    expect(calls[0].method).toBe("POST");
+    expect(body.message?.raw).toBe(
+      buildGmailRawMessage({
+        to: ["a@example.com"],
+        subject: "Hello",
+        body: "Body",
+      }),
+    );
+    expect(draft).toEqual({ id: "D1", messageId: "M1", threadId: "T1" });
+  });
+
+  it("발송 응답과 초안 응답을 중립 결과로 파싱한다", () => {
+    expect(
+      parseGmailDraftResult({ id: "D1", message: { id: "M1", threadId: "T1" } }),
+    ).toEqual({ id: "D1", messageId: "M1", threadId: "T1" });
+    expect(
+      parseGmailSendResult({
+        id: "M1",
+        threadId: "T1",
+        labelIds: ["SENT"],
+      }),
+    ).toEqual({ id: "M1", threadId: "T1", labelIds: ["SENT"] });
+  });
 });
 
 describe("calendar connector", () => {
@@ -207,6 +257,72 @@ describe("calendar connector", () => {
     await connector.list({ timeMin: "2026-08-13T00:00:00.000Z" });
     expect(calls[0].authorization).toBe("Bearer ACCESS");
     expect(calls[0].url).not.toContain("ACCESS");
+  });
+
+  it("events.insert로 일정을 생성하고 sendUpdates 기본값은 none이다", async () => {
+    const calls: Array<{ url: string; method?: string; body?: string }> = [];
+    const fetchImpl: CalendarFetchLike = async (url, init) => {
+      calls.push({ url, method: init?.method, body: init?.body });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: "E1",
+          summary: "Planning",
+          start: { dateTime: "2026-08-13T09:00:00+09:00" },
+          end: { dateTime: "2026-08-13T10:00:00+09:00" },
+        }),
+      } as unknown as Response;
+    };
+    const connector = createCalendarConnector({
+      getAccessToken: async () => "ACCESS",
+      fetchImpl,
+    });
+    const event = await connector.create({
+      title: "Planning",
+      start: "2026-08-13T09:00:00+09:00",
+      end: "2026-08-13T10:00:00+09:00",
+      attendees: [{ email: "a@example.com" }],
+    });
+    const body = JSON.parse(calls[0].body ?? "{}") as {
+      summary?: string;
+      attendees?: Array<{ email?: string }>;
+    };
+    expect(calls[0].url).toContain("/calendar/v3/calendars/primary/events");
+    expect(calls[0].url).toContain("sendUpdates=none");
+    expect(calls[0].method).toBe("POST");
+    expect(body.summary).toBe("Planning");
+    expect(body.attendees?.[0]?.email).toBe("a@example.com");
+    expect(event.id).toBe("E1");
+  });
+
+  it("events.patch는 event id 경로로 PATCH를 보낸다", async () => {
+    const calls: Array<{ url: string; method?: string; body?: string }> = [];
+    const fetchImpl: CalendarFetchLike = async (url, init) => {
+      calls.push({ url, method: init?.method, body: init?.body });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: "E1",
+          summary: "Moved",
+          start: { dateTime: "2026-08-13T11:00:00+09:00" },
+          end: { dateTime: "2026-08-13T12:00:00+09:00" },
+        }),
+      } as unknown as Response;
+    };
+    const connector = createCalendarConnector({
+      getAccessToken: async () => "ACCESS",
+      fetchImpl,
+    });
+    await connector.patch({
+      eventId: "E1",
+      title: "Moved",
+      sendUpdates: "all",
+    });
+    expect(calls[0].url).toContain("/events/E1");
+    expect(calls[0].url).toContain("sendUpdates=all");
+    expect(calls[0].method).toBe("PATCH");
   });
 });
 

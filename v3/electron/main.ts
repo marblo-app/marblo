@@ -264,16 +264,23 @@ import type {
   DriveDocument,
   DriveListParams,
   DriveSearchResult,
+  DriveWriteParams,
+  DriveWriteResult,
 } from "./google-drive-connector";
 import type {
+  GmailComposeParams,
+  GmailDraftResult,
   GmailMessage,
   GmailSearchParams,
   GmailSearchResult,
+  GmailSendResult,
 } from "./gmail-connector";
 import type {
   CalendarEvent,
+  CalendarEventInput,
   CalendarListParams,
   CalendarListResult,
+  CalendarPatchInput,
 } from "./calendar-connector";
 import type {
   ContactsSearchParams,
@@ -305,6 +312,8 @@ import type {
   NotionDocument,
   NotionSearchParams,
   NotionSearchResult,
+  NotionWriteParams,
+  NotionWriteResult,
 } from "./notion-connector";
 import {
   clearNotionProjectBinding,
@@ -5356,6 +5365,42 @@ async function driveFetchFor(
   }
 }
 
+async function driveWriteFor(
+  userId: string | null,
+  params: DriveWriteParams,
+  projectId: string | null
+): Promise<
+  { ok: true; result: DriveWriteResult } | { ok: false; error: string }
+> {
+  if (!userId) return DRIVE_NOT_CONNECTED;
+  if (!projectId) return { ok: false, error: "프로젝트 id 가 필요합니다." };
+  try {
+    const binding = getDriveProjectBinding(projectId);
+    if (!binding) {
+      return {
+        ok: false,
+        error:
+          "이 프로젝트의 Drive 위키 폴더가 바인딩되어 있지 않습니다. Harness 탭에서 먼저 폴더를 선택해 주세요.",
+      };
+    }
+    const folderId = params.folderId?.trim() || binding.folderId;
+    const allowed = await authorizeScopedFetch(
+      driveScopeResolverFor(userId),
+      projectId,
+      binding,
+      folderId
+    );
+    if (!allowed.ok) return allowed;
+    const connector = createUserDriveConnector(safeStorage, userId);
+    return {
+      ok: true,
+      result: await connector.createGoogleDoc({ ...params, folderId }),
+    };
+  } catch (e) {
+    return driveFailure(e);
+  }
+}
+
 /** 렌더러가 넘긴 검색 입력을 신뢰하지 않고 형태를 좁혀서 받는다. */
 function sanitizeDriveListParams(input: unknown): DriveListParams {
   const raw =
@@ -5471,6 +5516,50 @@ async function gmailFetchFor(
   }
 }
 
+async function gmailDraftFor(
+  userId: string | null,
+  params: GmailComposeParams
+): Promise<
+  { ok: true; draft: GmailDraftResult } | { ok: false; error: string }
+> {
+  if (!userId) return DRIVE_NOT_CONNECTED;
+  try {
+    return {
+      ok: true,
+      draft: await createUserGmailConnector(safeStorage, userId).createDraft(
+        params
+      ),
+    };
+  } catch (e) {
+    return googleConnectorFailure(
+      e,
+      "Gmail 초안 생성에 실패했습니다. 잠시 후 다시 시도해 주세요."
+    );
+  }
+}
+
+async function gmailSendFor(
+  userId: string | null,
+  params: GmailComposeParams
+): Promise<
+  { ok: true; message: GmailSendResult } | { ok: false; error: string }
+> {
+  if (!userId) return DRIVE_NOT_CONNECTED;
+  try {
+    return {
+      ok: true,
+      message: await createUserGmailConnector(safeStorage, userId).sendMessage(
+        params
+      ),
+    };
+  } catch (e) {
+    return googleConnectorFailure(
+      e,
+      "Gmail 발송에 실패했습니다. 잠시 후 다시 시도해 주세요."
+    );
+  }
+}
+
 async function calendarListFor(
   userId: string | null,
   params: CalendarListParams
@@ -5489,6 +5578,46 @@ async function calendarListFor(
     return googleConnectorFailure(
       e,
       "Calendar 일정 조회에 실패했습니다. 잠시 후 다시 시도해 주세요."
+    );
+  }
+}
+
+async function calendarCreateFor(
+  userId: string | null,
+  params: CalendarEventInput
+): Promise<{ ok: true; event: CalendarEvent } | { ok: false; error: string }> {
+  if (!userId) return DRIVE_NOT_CONNECTED;
+  try {
+    return {
+      ok: true,
+      event: await createUserCalendarConnector(safeStorage, userId).create(
+        params
+      ),
+    };
+  } catch (e) {
+    return googleConnectorFailure(
+      e,
+      "Calendar 일정 생성에 실패했습니다. 잠시 후 다시 시도해 주세요."
+    );
+  }
+}
+
+async function calendarPatchFor(
+  userId: string | null,
+  params: CalendarPatchInput
+): Promise<{ ok: true; event: CalendarEvent } | { ok: false; error: string }> {
+  if (!userId) return DRIVE_NOT_CONNECTED;
+  try {
+    return {
+      ok: true,
+      event: await createUserCalendarConnector(safeStorage, userId).patch(
+        params
+      ),
+    };
+  } catch (e) {
+    return googleConnectorFailure(
+      e,
+      "Calendar 일정 수정에 실패했습니다. 잠시 후 다시 시도해 주세요."
     );
   }
 }
@@ -5705,6 +5834,8 @@ bridgeServer.setDriveGateway({
     }),
   fetch: (projectId, fileId) =>
     driveFetchFor(currentRealUserUid(), fileId, { mode: "project", projectId }),
+  write: (projectId, params) =>
+    driveWriteFor(currentRealUserUid(), params, projectId),
 });
 
 bridgeServer.setGoogleWorkspaceGateway({
@@ -5712,8 +5843,15 @@ bridgeServer.setGoogleWorkspaceGateway({
     gmailSearchFor(currentRealUserUid(), params),
   gmailFetch: (_projectId, messageId) =>
     gmailFetchFor(currentRealUserUid(), messageId),
+  gmailDraft: (_projectId, params) =>
+    gmailDraftFor(currentRealUserUid(), params),
+  gmailSend: (_projectId, params) => gmailSendFor(currentRealUserUid(), params),
   calendarList: (_projectId, params) =>
     calendarListFor(currentRealUserUid(), params),
+  calendarCreate: (_projectId, params) =>
+    calendarCreateFor(currentRealUserUid(), params),
+  calendarPatch: (_projectId, params) =>
+    calendarPatchFor(currentRealUserUid(), params),
   contactsSearch: (_projectId, params) =>
     contactsSearchFor(currentRealUserUid(), params),
 });
@@ -5799,6 +5937,50 @@ async function notionFetchFor(
       if (!allowed.ok) return allowed;
     }
     return { ok: true, document: await connector.fetchPage(trimmed) };
+  } catch (e) {
+    return notionFailure(e);
+  }
+}
+
+async function notionWriteFor(
+  userId: string | null,
+  params: NotionWriteParams,
+  projectId: string | null
+): Promise<
+  { ok: true; result: NotionWriteResult } | { ok: false; error: string }
+> {
+  if (!userId) return NOTION_NOT_CONNECTED;
+  if (!projectId) return { ok: false, error: "프로젝트 id 가 필요합니다." };
+  try {
+    const connector = createUserNotionConnector(safeStorage, userId);
+    const binding = getNotionProjectBinding(projectId);
+    if (!binding) {
+      return {
+        ok: false,
+        error:
+          "이 프로젝트의 Notion 위키가 지정되어 있지 않습니다. Harness 탭에서 Notion DB 또는 페이지를 먼저 선택해 주세요.",
+      };
+    }
+    if (params.pageId?.trim()) {
+      const allowed = await authorizeScopedNotionFetch(
+        connector,
+        projectId,
+        binding,
+        params.pageId.trim()
+      );
+      if (!allowed.ok) return allowed;
+      return { ok: true, result: await connector.appendBlocks(params) };
+    }
+    return {
+      ok: true,
+      result: await connector.createPage({
+        ...params,
+        parentDatabaseId:
+          binding.objectKind === "database" ? binding.objectId : undefined,
+        parentPageId:
+          binding.objectKind === "page" ? binding.objectId : undefined,
+      }),
+    };
   } catch (e) {
     return notionFailure(e);
   }
@@ -5961,6 +6143,8 @@ bridgeServer.setNotionGateway({
       mode: "project",
       projectId,
     }),
+  write: (projectId, params) =>
+    notionWriteFor(currentRealUserUid(), params, projectId),
 });
 
 ipcMain.handle(
