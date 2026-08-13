@@ -10,8 +10,13 @@ import { createProject } from "../services/projectService";
 import { BugReportModal } from "./settings/BugReportModal";
 import { InvitationBanner } from "./settings/InvitationBanner";
 import { PresenceIndicator } from "./collaboration/PresenceIndicator";
+import { ProjectKindPicker } from "./project/ProjectKindPicker";
 import marbloMark from "../assets/marblo-mark.svg";
-import type { Project } from "../types/project";
+import type { Project, ProjectKind } from "../types/project";
+import {
+  isAssistantProject,
+  normalizeProjectKind,
+} from "../lib/projectKind";
 
 const RECENT_PROJECTS_KEY = "marblo.header.recentProjectIds";
 const MAX_RECENT_PROJECTS = 8;
@@ -60,16 +65,26 @@ function hasNoLinkedActivity(p: Project): boolean {
 function ProjectMenuItem({
   project,
   onSelect,
+  kindLabel,
 }: {
   project: Project;
   onSelect: (project: Project) => void;
+  kindLabel: string;
 }) {
+  const showKindBadge = isAssistantProject(project);
   return (
     <button
       onClick={() => onSelect(project)}
       className="flex w-full flex-col px-3 py-2 text-left text-sm text-gray-300 hover:bg-gray-700"
     >
-      <span>{project.name}</span>
+      <span className="flex items-center gap-1.5">
+        <span className="min-w-0 truncate">{project.name}</span>
+        {showKindBadge && (
+          <span className="flex-shrink-0 rounded bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-medium text-violet-300">
+            {kindLabel}
+          </span>
+        )}
+      </span>
       {project.folderPath && (
         <span className="truncate text-[10px] text-gray-500">
           {project.folderPath.replace(/^\/Users\/[^/]+/, "~")}
@@ -216,6 +231,8 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
   const [showProjectMenu, setShowProjectMenu] = useState(false);
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+  /** 새 프로젝트 kind — 기본 dev(하위호환). */
+  const [newProjectKind, setNewProjectKind] = useState<ProjectKind>("dev");
   const [projectSearch, setProjectSearch] = useState("");
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(() =>
     readRecentProjectIds(),
@@ -271,15 +288,20 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
 
   const handleCreateProject = async () => {
     if (!newProjectName.trim() || !user) return;
+    const kind = normalizeProjectKind(newProjectKind);
     await createProject({
       name: newProjectName.trim(),
       ownerId: user.uid,
       members: [user.uid],
+      kind,
     });
     setNewProjectName("");
+    setNewProjectKind("dev");
     setShowNewProject(false);
     setShowProjectMenu(false);
   };
+
+  const assistantBadgeLabel = t("header.projectKind.badge.assistant");
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -380,6 +402,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
                           key={p.id}
                           project={p}
                           onSelect={handleSelectProject}
+                          kindLabel={assistantBadgeLabel}
                         />
                       ))
                     ) : (
@@ -399,6 +422,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
                               key={p.id}
                               project={p}
                               onSelect={handleSelectProject}
+                              kindLabel={assistantBadgeLabel}
                             />
                           ))}
                         </div>
@@ -413,6 +437,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
                               key={p.id}
                               project={p}
                               onSelect={handleSelectProject}
+                              kindLabel={assistantBadgeLabel}
                             />
                           ))}
                         </div>
@@ -423,7 +448,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
 
                 <div className="border-t border-gray-700 mt-1 pt-1">
                   {showNewProject ? (
-                    <div className="px-3 py-2 flex gap-2">
+                    <div className="flex flex-col gap-2 px-3 py-2">
                       <input
                         type="text"
                         value={newProjectName}
@@ -432,8 +457,14 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
                           e.key === "Enter" && handleCreateProject()
                         }
                         placeholder={t("header.projectName")}
-                        className="flex-1 rounded bg-gray-700 border border-gray-600 px-2 py-1 text-sm text-gray-200 focus:border-blue-500 focus:outline-none"
+                        className="w-full rounded bg-gray-700 border border-gray-600 px-2 py-1 text-sm text-gray-200 focus:border-blue-500 focus:outline-none"
                         autoFocus
+                      />
+                      <ProjectKindPicker
+                        value={newProjectKind}
+                        onChange={setNewProjectKind}
+                        compact
+                        id="header-new-project-kind"
                       />
                       <button
                         onClick={handleCreateProject}
@@ -444,7 +475,10 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
                     </div>
                   ) : (
                     <button
-                      onClick={() => setShowNewProject(true)}
+                      onClick={() => {
+                        setNewProjectKind("dev");
+                        setShowNewProject(true);
+                      }}
                       className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-400 hover:bg-gray-700 hover:text-gray-300"
                     >
                       <svg

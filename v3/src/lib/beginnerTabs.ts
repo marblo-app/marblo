@@ -115,6 +115,18 @@ export function isBeginnerTab(v: unknown): v is BeginnerTabId {
 }
 
 /**
+ * 심플 셸 기본 탭 — project kind 와 무관하게 대화.
+ * assistant 도 채팅-퍼스트(슬랙식); 위키/커넥터는 code·harness 큐레이트.
+ * 분기를 여기 두지 않고 시그니처만 열어 둔다(projectKind.defaultBeginnerTabForKind
+ * 의 re-export 자리 — 순환 import 를 피하려고 상수만 반환).
+ */
+export function defaultBeginnerTabForProjectKind(
+  _kind: "dev" | "assistant" | null | undefined,
+): BeginnerTabId {
+  return BEGINNER_CHAT_TAB;
+}
+
+/**
  * 심플에 **노출하지 않는** 엑스퍼트 탭들 — 큐레이트의 여집합.
  *
  * 계산해서 돌려주는 이유는 하나다: 엑스퍼트에 탭이 하나 늘 때 심플이 조용히

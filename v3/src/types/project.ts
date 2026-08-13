@@ -4,11 +4,26 @@ import type {
   ProjectPathResolution,
 } from "../lib/projectPaths";
 
+/**
+ * 프로젝트 용도.
+ * - `dev` — 개발 워크스페이스(보드 우선). 기본값·하위호환.
+ * - `assistant` — 비서 워크스페이스(대화·위키/문서그래프·커넥터 우선).
+ *
+ * 문서는 optional 로 두어 구버전 클라이언트·기존 Firestore 문서가 kind 없이
+ * 와도 깨지지 않게 한다. 읽을 때는 항상 `normalizeProjectKind` 로 정규화.
+ */
+export type ProjectKind = "dev" | "assistant";
+
 export interface Project {
   id: string;
   name: string;
   ownerId: string;
   members: string[];
+  /**
+   * 프로젝트 종류. 없으면 `dev`(하위호환). 생성 UI 에서 고른다.
+   * 해석·기본 서피스 분기는 `lib/projectKind` 단일 초크포인트.
+   */
+  kind?: ProjectKind;
   /**
    * ★이 기기에서 쓸 수 있는 경로, 없으면 undefined.
    *

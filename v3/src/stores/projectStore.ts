@@ -9,6 +9,11 @@ import * as projectService from "../services/projectService";
 import { useSubscriptionStore } from "./subscriptionStore";
 import { checkProjectCreate, ProjectLimitError } from "../lib/planLimits";
 import { resolveProjectPath, withMachinePath } from "../lib/projectPaths";
+import {
+  ensureAssistantMemoryFile,
+  isAssistantProject,
+  normalizeProjectKind,
+} from "../lib/projectKind";
 
 const COLLECTION = "projects";
 const DATE_FIELDS = ["createdAt", "updatedAt"];
@@ -195,6 +200,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       path,
       platform,
     );
+    // assistant 프로젝트가 나중에 폴더를 붙일 때도 MEMORY.md 시드(생성 시
+    // folderPath 가 없던 Header 경로 포함).
+    const target =
+      get().projects.find((p) => p.id === projectId) ??
+      (get().currentProject?.id === projectId ? get().currentProject : null);
+    if (isAssistantProject(target)) {
+      void ensureAssistantMemoryFile(path);
+    }
     // 낙관적 로컬 반영: onSnapshot 이 곧 같은 값을 실어오지만, 폴더 선택 직후
     // 오케 자동기동이 folderPath 를 즉시 읽으므로 왕복을 기다리지 않는다.
     const patch = (p: Project): Project =>
@@ -339,7 +352,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       throw err;
     }
     try {
-      const id = await projectService.createProject(ensureOwnerMember(data));
+      // kind 정규화: 생성 시 항상 명시값 저장(기본 dev). 구 클라이언트는
+      // 필드를 안 보내도 읽기 쪽 normalize 로 dev 취급한다.
+      const kind = normalizeProjectKind(data.kind);
+      const payload = ensureOwnerMember({ ...data, kind });
+      const id = await projectService.createProject(payload);
+      // assistant + 폴더 있음 → 위키 루트 MEMORY.md 시드(멱등, fail-soft).
+      if (isAssistantProject(payload) && payload.folderPath) {
+        void ensureAssistantMemoryFile(payload.folderPath);
+      }
       return id;
     } catch (err) {
       set({
