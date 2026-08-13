@@ -225,7 +225,7 @@ export const harness: Record<keyof typeof koHarness, string> = {
   // folder is chosen per project.
   "harness.drive.title": "Google Workspace",
   "harness.drive.subtitle":
-    "Connect once for Drive wiki, Gmail, and Calendar read-only context.",
+    "Connect once for Drive wiki, Gmail, Calendar, and Contacts read-only context.",
   "harness.drive.status.disconnected": "Disconnected",
   "harness.drive.status.needsFolder": "Folder needed",
   "harness.drive.status.bound": "Connected",
@@ -238,11 +238,12 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.drive.connectFailed": "Failed to connect Google Workspace.",
   "harness.drive.disconnect": "Disconnect account",
   "harness.drive.disconnectConfirm":
-    "Disconnect Google on this machine? Stored credentials are deleted and every project stops reading Drive, Gmail, and Calendar.",
+    "Disconnect Google on this machine? Stored credentials are deleted and every project stops reading Drive, Gmail, Calendar, and Contacts.",
   "harness.drive.disconnected": "Google Workspace disconnected.",
   "harness.drive.disconnectFailed": "Failed to disconnect.",
   "harness.drive.gmail": "Gmail read-only",
   "harness.drive.calendar": "Calendar read-only",
+  "harness.drive.contacts": "Contacts read-only",
   "harness.drive.scopeReady": "Ready",
   "harness.drive.scopeNeedsReconnect": "Reconnect",
   "harness.drive.folderSection": "This project's wiki folder",

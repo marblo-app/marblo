@@ -249,6 +249,7 @@ import {
 import {
   connectGoogleDrive,
   createUserCalendarConnector,
+  createUserContactsConnector,
   createUserDriveConnector,
   createUserGmailConnector,
   disconnectGoogleDrive,
@@ -269,6 +270,10 @@ import type {
   CalendarListParams,
   CalendarListResult,
 } from "./calendar-connector";
+import type {
+  ContactsSearchParams,
+  ContactsSearchResult,
+} from "./contacts-connector";
 import {
   clearDriveProjectBinding,
   getDriveProjectBinding,
@@ -5297,6 +5302,20 @@ function sanitizeCalendarListParams(input: unknown): CalendarListParams {
   };
 }
 
+function sanitizeContactsSearchParams(input: unknown): ContactsSearchParams {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() ? v.trim() : undefined;
+  return {
+    query: str(raw.query) ?? "",
+    pageSize: typeof raw.pageSize === "number" ? raw.pageSize : undefined,
+    maxResults: typeof raw.maxResults === "number" ? raw.maxResults : undefined,
+  };
+}
+
 async function gmailSearchFor(
   userId: string | null,
   params: GmailSearchParams
@@ -5359,6 +5378,28 @@ async function calendarListFor(
     return googleConnectorFailure(
       e,
       "Calendar 일정 조회에 실패했습니다. 잠시 후 다시 시도해 주세요."
+    );
+  }
+}
+
+async function contactsSearchFor(
+  userId: string | null,
+  params: ContactsSearchParams
+): Promise<
+  { ok: true; result: ContactsSearchResult } | { ok: false; error: string }
+> {
+  if (!userId) return DRIVE_NOT_CONNECTED;
+  try {
+    return {
+      ok: true,
+      result: await createUserContactsConnector(safeStorage, userId).search(
+        params
+      ),
+    };
+  } catch (e) {
+    return googleConnectorFailure(
+      e,
+      "Contacts 검색에 실패했습니다. 잠시 후 다시 시도해 주세요."
     );
   }
 }
@@ -5465,6 +5506,17 @@ ipcMain.handle("calendar:list", async (_event, input: unknown) => {
   );
 });
 
+ipcMain.handle("contacts:search", async (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  return contactsSearchFor(
+    resolveDriveUserId(raw.userId),
+    sanitizeContactsSearchParams(raw)
+  );
+});
+
 // ── ★프로젝트 위키 폴더 바인딩 (티켓 MCTHALmNAWPpilTFwe8o) ──────────────────
 //
 // 인증(유저)과 다른 축이다. 저장소는 drive-project-binding.ts(로컬 JSON, 0600) —
@@ -5551,6 +5603,8 @@ bridgeServer.setGoogleWorkspaceGateway({
     gmailFetchFor(currentRealUserUid(), messageId),
   calendarList: (_projectId, params) =>
     calendarListFor(currentRealUserUid(), params),
+  contactsSearch: (_projectId, params) =>
+    contactsSearchFor(currentRealUserUid(), params),
 });
 
 // ── Notion 커넥터 (읽기 전용, 티켓 gaUx2Cmsw6EN8ymjL2ks) ───────────────────

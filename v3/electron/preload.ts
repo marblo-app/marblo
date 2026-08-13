@@ -1073,6 +1073,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
       maxResults?: number;
       pageToken?: string;
     }) => ipcRenderer.invoke("calendar:list", input),
+    contactsSearch: (input: {
+      userId?: string;
+      query: string;
+      pageSize?: number;
+      maxResults?: number;
+    }) => ipcRenderer.invoke("contacts:search", input),
   },
   notion: {
     connect: (input: {

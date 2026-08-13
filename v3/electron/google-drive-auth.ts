@@ -68,6 +68,11 @@ import {
   type CalendarConnector,
   type CalendarFetchLike,
 } from "./calendar-connector";
+import {
+  createContactsConnector,
+  type ContactsConnector,
+  type ContactsFetchLike,
+} from "./contacts-connector";
 import { extractOfficeText } from "./office-text-extract";
 import { extractPdfText } from "./pdf-text-extract";
 
@@ -78,16 +83,19 @@ export const GMAIL_READONLY_SCOPE =
   "https://www.googleapis.com/auth/gmail.readonly";
 export const CALENDAR_READONLY_SCOPE =
   "https://www.googleapis.com/auth/calendar.readonly";
+export const CONTACTS_READONLY_SCOPE =
+  "https://www.googleapis.com/auth/contacts.readonly";
 
 export const GOOGLE_CONNECTOR_READONLY_SCOPES = [
   DRIVE_READONLY_SCOPE,
   GMAIL_READONLY_SCOPE,
   CALENDAR_READONLY_SCOPE,
+  CONTACTS_READONLY_SCOPE,
 ] as const;
 
 /** authorize 에 실제로 보내는 스코프 문자열(위 주석 ③ 참고). */
 export const DRIVE_AUTH_SCOPE = `openid email ${GOOGLE_CONNECTOR_READONLY_SCOPES.join(
-  " ",
+  " "
 )}`;
 
 /**
@@ -99,7 +107,7 @@ const REFRESH_SKEW_MS = 2 * 60 * 1000;
 const DRIVE_LABELS = {
   okTitle: "Google 커넥터 연결 완료",
   okBody:
-    "Marblo 가 Google Drive, Gmail, Calendar 를 읽을 수 있게 되었습니다. 이 창을 닫고 앱으로 돌아가세요.",
+    "Marblo 가 Google Drive, Gmail, Calendar, Contacts 를 읽을 수 있게 되었습니다. 이 창을 닫고 앱으로 돌아가세요.",
   failTitle: "Google 커넥터 연결 실패",
   failBody: "연결에 실패했습니다. 이 창을 닫고 앱에서 다시 시도해 주세요.",
 };
@@ -117,14 +125,14 @@ export type DriveConnectResult =
  * Firebase 쪽 `signInWithCredential` 이 한다.
  */
 export function emailFromIdToken(
-  idToken: string | undefined,
+  idToken: string | undefined
 ): string | undefined {
   if (!idToken) return undefined;
   const parts = idToken.split(".");
   if (parts.length < 2) return undefined;
   try {
     const payload: unknown = JSON.parse(
-      Buffer.from(parts[1], "base64url").toString("utf8"),
+      Buffer.from(parts[1], "base64url").toString("utf8")
     );
     if (!payload || typeof payload !== "object") return undefined;
     const email = (payload as { email?: unknown }).email;
@@ -151,7 +159,7 @@ export interface RefreshedAccessToken {
 export function parseRefreshResponse(
   status: number,
   body: unknown,
-  now: number,
+  now: number
 ): { ok: true; token: RefreshedAccessToken } | { ok: false; error: string } {
   const json =
     body && typeof body === "object" ? (body as Record<string, unknown>) : {};
@@ -195,7 +203,7 @@ export async function refreshAccessToken(
   client: GoogleDesktopOAuthClient,
   refreshToken: string,
   fetchImpl: typeof fetch = fetch,
-  now: number = Date.now(),
+  now: number = Date.now()
 ): Promise<
   { ok: true; token: RefreshedAccessToken } | { ok: false; error: string }
 > {
@@ -236,7 +244,7 @@ function missingClientError(): string {
  */
 export async function connectGoogleDrive(
   storage: SafeStorage,
-  userId: string,
+  userId: string
 ): Promise<DriveConnectResult> {
   const client = googleDesktopOAuthClient();
   if (!client) return { ok: false, error: missingClientError() };
@@ -275,13 +283,13 @@ export async function connectGoogleDrive(
   // Drive 는 못 읽는다 — 여기서 잡지 않으면 나중에 알 수 없는 403 으로 나온다.
   const grantedScopes = scope ? scope.split(/\s+/) : [];
   const missingScopes = GOOGLE_CONNECTOR_READONLY_SCOPES.filter(
-    (requiredScope) => !grantedScopes.includes(requiredScope),
+    (requiredScope) => !grantedScopes.includes(requiredScope)
   );
   if (scope && missingScopes.length > 0) {
     return {
       ok: false,
       error:
-        "Google 읽기 권한이 모두 부여되지 않았습니다. 동의 화면에서 Drive, Gmail, Calendar 항목을 허용해 주세요.",
+        "Google 읽기 권한이 모두 부여되지 않았습니다. 동의 화면에서 Drive, Gmail, Calendar, Contacts 항목을 허용해 주세요.",
     };
   }
 
@@ -313,7 +321,7 @@ export async function connectGoogleDrive(
 /** 연결 해제. 로컬 토큰만 지운다(구글 쪽 grant 철회는 사용자 계정 설정에서). */
 export function disconnectGoogleDrive(
   storage: SafeStorage,
-  userId: string,
+  userId: string
 ): { ok: boolean; error?: string } {
   try {
     removeGoogleDriveTokens(storage, userId);
@@ -326,7 +334,7 @@ export function disconnectGoogleDrive(
 
 export function driveConnectionStatus(
   storage: SafeStorage,
-  userId: string,
+  userId: string
 ): GoogleDriveConnectionStatus {
   return googleDriveConnectionStatus(storage, userId);
 }
@@ -346,12 +354,12 @@ export class DriveNotConnectedError extends Error {
 export async function getDriveAccessToken(
   storage: SafeStorage,
   userId: string,
-  now: number = Date.now(),
+  now: number = Date.now()
 ): Promise<string> {
   const tokens = getGoogleDriveTokens(storage, userId);
   if (!tokens) {
     throw new DriveNotConnectedError(
-      "Google Drive 가 연결되어 있지 않습니다. 설정에서 Drive 를 연결해 주세요.",
+      "Google Drive 가 연결되어 있지 않습니다. 설정에서 Drive 를 연결해 주세요."
     );
   }
   if (
@@ -369,7 +377,7 @@ export async function getDriveAccessToken(
     client,
     tokens.refreshToken,
     fetch,
-    now,
+    now
   );
   if (!refreshed.ok) throw new DriveNotConnectedError(refreshed.error);
 
@@ -393,7 +401,7 @@ export async function getDriveAccessToken(
 export function createUserDriveConnector(
   storage: SafeStorage,
   userId: string,
-  fetchImpl?: DriveFetchLike,
+  fetchImpl?: DriveFetchLike
 ): DriveConnector {
   return createDriveConnector({
     getAccessToken: () => getDriveAccessToken(storage, userId),
@@ -406,7 +414,7 @@ export function createUserDriveConnector(
 export function createUserGmailConnector(
   storage: SafeStorage,
   userId: string,
-  fetchImpl?: GmailFetchLike,
+  fetchImpl?: GmailFetchLike
 ): GmailConnector {
   return createGmailConnector({
     getAccessToken: () => getDriveAccessToken(storage, userId),
@@ -417,9 +425,20 @@ export function createUserGmailConnector(
 export function createUserCalendarConnector(
   storage: SafeStorage,
   userId: string,
-  fetchImpl?: CalendarFetchLike,
+  fetchImpl?: CalendarFetchLike
 ): CalendarConnector {
   return createCalendarConnector({
+    getAccessToken: () => getDriveAccessToken(storage, userId),
+    ...(fetchImpl ? { fetchImpl } : {}),
+  });
+}
+
+export function createUserContactsConnector(
+  storage: SafeStorage,
+  userId: string,
+  fetchImpl?: ContactsFetchLike
+): ContactsConnector {
+  return createContactsConnector({
     getAccessToken: () => getDriveAccessToken(storage, userId),
     ...(fetchImpl ? { fetchImpl } : {}),
   });

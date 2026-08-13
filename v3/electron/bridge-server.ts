@@ -50,6 +50,10 @@ import type {
   CalendarListResult,
 } from "./calendar-connector";
 import type {
+  ContactsSearchParams,
+  ContactsSearchResult,
+} from "./contacts-connector";
+import type {
   NotionDocument,
   NotionSearchParams,
   NotionSearchResult,
@@ -281,6 +285,12 @@ export interface GoogleWorkspaceGateway {
     params: CalendarListParams,
   ): Promise<
     { ok: true; result: CalendarListResult } | { ok: false; error: string }
+  >;
+  contactsSearch(
+    projectId: string | null,
+    params: ContactsSearchParams,
+  ): Promise<
+    { ok: true; result: ContactsSearchResult } | { ok: false; error: string }
   >;
 }
 
@@ -1375,6 +1385,11 @@ export class BridgeServer {
 
         if (req.method === "POST" && req.url === "/calendar-list") {
           this.handleCalendarList(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/contacts-search") {
+          this.handleContactsSearch(req, res);
           return;
         }
 
@@ -4775,6 +4790,49 @@ export class BridgeServer {
           JSON.stringify({
             ok: false,
             error: err instanceof Error ? err.message : "calendar list failed",
+          }),
+        );
+      }
+    })();
+  }
+
+  private handleContactsSearch(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.googleWorkspaceGateway) {
+        return this.googleWorkspaceUnavailable(res);
+      }
+
+      const str = (v: unknown): string | undefined =>
+        typeof v === "string" && v.trim() ? v.trim() : undefined;
+      const projectId = str(params.projectId) ?? null;
+      if (!this.requireGoogleWorkspaceProject(res, projectId)) return;
+      try {
+        const result = await this.googleWorkspaceGateway.contactsSearch(
+          projectId,
+          {
+            query: str(params.query) ?? "",
+            pageSize:
+              typeof params.pageSize === "number" ? params.pageSize : undefined,
+            maxResults:
+              typeof params.maxResults === "number"
+                ? params.maxResults
+                : undefined,
+          },
+        );
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error:
+              err instanceof Error ? err.message : "contacts search failed",
           }),
         );
       }

@@ -1435,6 +1435,30 @@ interface CalendarEvent {
   status?: string;
 }
 
+interface ContactEmail {
+  value: string;
+  type?: string;
+}
+
+interface ContactPhone {
+  value: string;
+  type?: string;
+}
+
+interface ContactOrganization {
+  name?: string;
+  title?: string;
+  department?: string;
+}
+
+interface ContactPerson {
+  resourceName: string;
+  names: string[];
+  emails: ContactEmail[];
+  phones: ContactPhone[];
+  organizations: ContactOrganization[];
+}
+
 interface GoogleWorkspaceAPI {
   gmailSearch: (input: {
     userId?: string;
@@ -1470,6 +1494,22 @@ interface GoogleWorkspaceAPI {
     | {
         ok: true;
         result: { events: CalendarEvent[]; nextPageToken?: string };
+      }
+    | { ok: false; error: string }
+  >;
+  contactsSearch: (input: {
+    userId?: string;
+    query: string;
+    pageSize?: number;
+    maxResults?: number;
+  }) => Promise<
+    | {
+        ok: true;
+        result: {
+          contacts: ContactPerson[];
+          totalScanned: number;
+          truncated: boolean;
+        };
       }
     | { ok: false; error: string }
   >;

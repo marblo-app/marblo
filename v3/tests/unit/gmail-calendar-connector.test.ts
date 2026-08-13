@@ -13,6 +13,12 @@ import {
   parseCalendarListResult,
   type CalendarFetchLike,
 } from "../../electron/calendar-connector";
+import {
+  buildContactsListParams,
+  createContactsConnector,
+  parseContactsPage,
+  type ContactsFetchLike,
+} from "../../electron/contacts-connector";
 
 function b64url(value: string): string {
   return Buffer.from(value, "utf8").toString("base64url");
@@ -42,7 +48,7 @@ describe("gmail connector", () => {
           { id: "BROKEN" },
           { id: "M2", threadId: "T2" },
         ],
-      }),
+      })
     ).toEqual({
       messages: [
         { id: "M1", threadId: "T1" },
@@ -137,7 +143,7 @@ describe("calendar connector", () => {
           { email: "a@example.com", responseStatus: "accepted" },
           { displayName: "No Email" },
         ],
-      }),
+      })
     ).toMatchObject({
       id: "E1",
       title: "Planning",
@@ -163,7 +169,7 @@ describe("calendar connector", () => {
           },
           { id: "BROKEN" },
         ],
-      }),
+      })
     ).toEqual({
       events: [
         {
@@ -199,6 +205,77 @@ describe("calendar connector", () => {
       fetchImpl,
     });
     await connector.list({ timeMin: "2026-08-13T00:00:00.000Z" });
+    expect(calls[0].authorization).toBe("Bearer ACCESS");
+    expect(calls[0].url).not.toContain("ACCESS");
+  });
+});
+
+describe("contacts connector", () => {
+  it("connections.list 파라미터를 People API 형태로 만든다", () => {
+    const params = buildContactsListParams(5000, "NEXT");
+    expect(params.get("personFields")).toBe(
+      "names,emailAddresses,phoneNumbers,organizations"
+    );
+    expect(params.get("pageSize")).toBe("1000");
+    expect(params.get("pageToken")).toBe("NEXT");
+    expect(params.get("fields")).toContain("connections(");
+  });
+
+  it("connections.list 응답에서 이름/이메일/전화/조직을 뽑는다", () => {
+    expect(
+      parseContactsPage({
+        nextPageToken: "N2",
+        connections: [
+          {
+            resourceName: "people/c1",
+            names: [{ displayName: "Alice Kim" }],
+            emailAddresses: [{ value: "alice@example.com", type: "work" }],
+            phoneNumbers: [{ canonicalForm: "+821012345678" }],
+            organizations: [{ name: "Acme", title: "CEO" }],
+          },
+          { resourceName: "people/broken" },
+        ],
+      })
+    ).toEqual({
+      contacts: [
+        {
+          resourceName: "people/c1",
+          names: ["Alice Kim"],
+          emails: [{ value: "alice@example.com", type: "work" }],
+          phones: [{ value: "+821012345678", type: undefined }],
+          organizations: [
+            { name: "Acme", title: "CEO", department: undefined },
+          ],
+        },
+      ],
+      nextPageToken: "N2",
+    });
+  });
+
+  it("이름/이메일 검색을 하고 토큰은 Authorization 헤더에만 싣는다", async () => {
+    const calls: Array<{ url: string; authorization?: string }> = [];
+    const fetchImpl: ContactsFetchLike = async (url, init) => {
+      calls.push({ url, authorization: init?.headers?.Authorization });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          connections: [
+            {
+              resourceName: "people/c1",
+              names: [{ displayName: "Alice Kim" }],
+              emailAddresses: [{ value: "alice@example.com" }],
+            },
+          ],
+        }),
+      } as unknown as Response;
+    };
+    const connector = createContactsConnector({
+      getAccessToken: async () => "ACCESS",
+      fetchImpl,
+    });
+    const result = await connector.search({ query: "alice" });
+    expect(result.contacts).toHaveLength(1);
     expect(calls[0].authorization).toBe("Bearer ACCESS");
     expect(calls[0].url).not.toContain("ACCESS");
   });
