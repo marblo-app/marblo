@@ -1055,6 +1055,46 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ipcRenderer.invoke("drive:binding:clear", { projectId }),
     },
   },
+  notion: {
+    connect: (input: {
+      userId?: string;
+      accessToken: string;
+      workspaceName?: string | null;
+      workspaceId?: string | null;
+      botId?: string | null;
+    }) => ipcRenderer.invoke("notion:connect", input),
+    status: (userId?: string) =>
+      ipcRenderer.invoke("notion:status", { userId }),
+    disconnect: (userId?: string) =>
+      ipcRenderer.invoke("notion:disconnect", { userId }),
+    search: (input: {
+      userId?: string;
+      projectId?: string;
+      scope?: "user" | "project";
+      query?: string;
+      object?: "page" | "database";
+      pageSize?: number;
+      startCursor?: string;
+    }) => ipcRenderer.invoke("notion:search", input),
+    fetch: (input: {
+      userId?: string;
+      projectId?: string;
+      scope?: "user" | "project";
+      pageId: string;
+    }) => ipcRenderer.invoke("notion:fetch", input),
+    binding: {
+      get: (projectId: string) =>
+        ipcRenderer.invoke("notion:binding:get", { projectId }),
+      set: (input: {
+        projectId: string;
+        objectId: string;
+        objectKind: "database" | "page";
+        title?: string | null;
+      }) => ipcRenderer.invoke("notion:binding:set", input),
+      clear: (projectId: string) =>
+        ipcRenderer.invoke("notion:binding:clear", { projectId }),
+    },
+  },
   // 오케스트레이터↔Telegram 채널 연결 (텔레그램 T1·보안 민감). T2 설정 UI 가
   // 소비한다. set 은 로컬 설정 경로 — 여기서만 권한 파일(access.json)이 갱신된다.
   // status.canEnable=false (chatId 없음 등)면 프론트가 토글을 잠가야 한다.
