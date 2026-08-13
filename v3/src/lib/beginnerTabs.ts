@@ -12,10 +12,11 @@
  * 재구현 0). 심플 모드의 약속은 "기능이 없다" 가 아니라 "고를 게 적다" 이므로,
  * 없앨 것은 화면이 아니라 **탭의 수**다.
  *
- * ★ 큐레이트 = 일곱이다. 프로덕션 엑스퍼트 탭은 13개이고 나머지 6개
- * (startHere·board·lanes·project·history·store)는 심플에 노출하지 않는다 —
- * 보드·시작하기는 심플 셸이 인라인 미니 뷰(라이브 스트립·연결 게이트)로 이미
- * 답하고 있고, 레인·팀·기록·스토어는 승격의 이유 그 자체다.
+ * ★ 큐레이트 = 여덟이다. 프로덕션 엑스퍼트 탭은 13개이고 나머지 5개
+ * (board·lanes·project·history·store)는 심플에 노출하지 않는다 —
+ * 보드는 심플 셸이 인라인 미니 뷰(라이브 스트립)로 이미 답하고 있고,
+ * 레인·팀·기록·스토어는 승격의 이유 그 자체다. 시작하기는 설치/로그인 상태의
+ * 원장이라 심플에서도 독립 탭으로 닿아야 한다.
  *
  * ★ 넷에서 일곱으로 는 이유(사장님 콜드 테스트). 처음 고른 기준은 "모드와
  * 무관하게 필요한가"(도움말·비용·내 코드·설정)였는데, 실제로 심플만 쓰면 **못
@@ -32,7 +33,7 @@
  * 쪽이 맞다.
  *
  * ★ 바 순서는 엑스퍼트(`RIGHT_TABS`)의 상대 순서를 그대로 따른다 —
- * guide → code → agents → worktrees → usage → harness → settings. 두 셸을 오가는
+ * startHere → guide → code → agents → worktrees → usage → harness → settings. 두 셸을 오가는
  * 사람에게 같은 것이 같은 순서로 보여야 하고, 승격은 "탭이 늘어나는" 일이지
  * "재배치되는" 일이 아니어야 한다. 그래서 신규 셋은 기존 넷 **뒤에 붙이지 않고**
  * 엑스퍼트가 세운 자리에 끼워 넣는다.
@@ -51,6 +52,7 @@ export const BEGINNER_CHAT_TAB = "chat";
 
 /** 엑스퍼트에서 그대로 빌려오는 일곱. 전부 `RightTabId` 여야 한다(재구현 금지). */
 export const BEGINNER_CURATED_TABS = [
+  "startHere",
   "guide",
   "code",
   "agents",
@@ -75,6 +77,7 @@ export const BEGINNER_TABS = [
  */
 export const BEGINNER_TAB_LABEL_KEY = {
   chat: "beginner.tab.chat",
+  startHere: "workspace.tab.startHere",
   guide: "workspace.tab.guide",
   code: "workspace.tab.code",
   agents: "workspace.tab.agents",

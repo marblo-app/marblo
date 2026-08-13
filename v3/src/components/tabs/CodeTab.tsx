@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useEditorStore } from "../../stores/editorStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
@@ -9,6 +9,7 @@ import { MarkdownPreview } from "../code/MarkdownPreview";
 import { NotebookView } from "../code/NotebookView";
 import { DiffSurface } from "../workspace/DiffSurface";
 import { WorktreeDiffBanner } from "../code/WorktreeDiffBanner";
+import { FileTree } from "../sidebar/FileTree";
 import { isImageFile } from "../../lib/imageFiles";
 import { isMarkdownFile } from "../../lib/markdownFiles";
 import { isNotebookFile } from "../../lib/notebookFiles";
@@ -38,6 +39,7 @@ interface CodeTabProps {
 
 export function CodeTab({ renderDiff }: CodeTabProps = {}) {
   const { t } = useTranslation();
+  const [fileTreeOpen, setFileTreeOpen] = useState(true);
   const openFiles = useEditorStore((s) => s.openFiles);
   const activeFilePath = useEditorStore((s) => s.activeFilePath);
   const showDiff = useEditorStore((s) => s.showDiff);
@@ -127,6 +129,15 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-gray-700 bg-gray-800 px-3 py-2">
+        <button
+          type="button"
+          data-testid="code-file-tree-toggle"
+          onClick={() => setFileTreeOpen((v) => !v)}
+          className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-700 hover:text-gray-100"
+          aria-expanded={fileTreeOpen}
+        >
+          {fileTreeOpen ? "Files ◀" : "Files ▶"}
+        </button>
         <span className="text-xs font-medium text-gray-400">Root</span>
         <select
           value={selectedRoot}
@@ -186,72 +197,82 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
       )}
 
       {/* Editor content */}
-      <div className="flex-1 overflow-hidden">
-        {activeFile ? (
-          showDiff ? (
-            renderDiff ? (
-              renderDiff({
-                filePath: activeFile.path,
-                language: activeFile.language,
-                currentContent: activeFile.content,
-              })
-            ) : (
-              <DiffSurface
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {fileTreeOpen && (
+          <aside
+            data-testid="code-file-tree-panel"
+            className="min-h-0 w-72 flex-shrink-0 overflow-hidden border-r border-gray-700 bg-gray-800"
+          >
+            <FileTree />
+          </aside>
+        )}
+        <div className="min-w-0 flex-1 overflow-hidden">
+          {activeFile ? (
+            showDiff ? (
+              renderDiff ? (
+                renderDiff({
+                  filePath: activeFile.path,
+                  language: activeFile.language,
+                  currentContent: activeFile.content,
+                })
+              ) : (
+                <DiffSurface
+                  filePath={activeFile.path}
+                  language={activeFile.language}
+                  currentContent={activeFile.content}
+                />
+              )
+            ) : isImageFile(activeFile.path) ? (
+              <ImagePreview
                 filePath={activeFile.path}
+                content={activeFile.content}
                 language={activeFile.language}
-                currentContent={activeFile.content}
+              />
+            ) : isNotebookFile(activeFile.path) ? (
+              <NotebookView
+                filePath={activeFile.path}
+                content={activeFile.content}
+                language={activeFile.language}
+              />
+            ) : isMarkdownFile(activeFile.path) ? (
+              <MarkdownPreview
+                filePath={activeFile.path}
+                content={activeFile.content}
+                language={activeFile.language}
+              />
+            ) : (
+              <CodeEditor
+                filePath={activeFile.path}
+                content={activeFile.content}
+                language={activeFile.language}
               />
             )
-          ) : isImageFile(activeFile.path) ? (
-            <ImagePreview
-              filePath={activeFile.path}
-              content={activeFile.content}
-              language={activeFile.language}
-            />
-          ) : isNotebookFile(activeFile.path) ? (
-            <NotebookView
-              filePath={activeFile.path}
-              content={activeFile.content}
-              language={activeFile.language}
-            />
-          ) : isMarkdownFile(activeFile.path) ? (
-            <MarkdownPreview
-              filePath={activeFile.path}
-              content={activeFile.content}
-              language={activeFile.language}
-            />
           ) : (
-            <CodeEditor
-              filePath={activeFile.path}
-              content={activeFile.content}
-              language={activeFile.language}
-            />
-          )
-        ) : (
-          <div className="flex h-full items-center justify-center text-gray-400">
-            <div className="text-center">
-              <svg
-                className="mx-auto h-16 w-16 text-gray-600"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
-                />
-              </svg>
-              <p className="mt-4 text-lg font-medium">
-                {t("code.noFileSelected.title")}
-              </p>
-              <p className="mt-1 text-sm text-gray-500">
-                {t("code.noFileSelected.hint")}
-              </p>
+            <div className="flex h-full items-center justify-center text-gray-400">
+              <div className="text-center">
+                <svg
+                  className="mx-auto h-16 w-16 text-gray-600"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+                  />
+                </svg>
+                <p className="mt-4 text-lg font-medium">
+                  {t("code.noFileSelected.title")}
+                </p>
+                <p className="mt-1 text-sm text-gray-500">
+                  {t("code.noFileSelected.hint")}
+                </p>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

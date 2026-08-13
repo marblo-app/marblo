@@ -168,12 +168,12 @@ describe("oneClickPhase — 한 흐름으로 이어 붙일 때의 국면", () =>
   });
 });
 
-describe("★구독 선택 칸 — 설치와 로그인 사이 (티켓 LLHMclpKaIAJbsiHzGoG)", () => {
-  it("설치가 끝나면 로그인 전에 '어떤 구독?' 을 묻는다", () => {
-    // 종전에는 여기서 곧장 오케 후보 하나의 로그인이 떴고, 그게 그 사용자가 가진
-    // 구독이 아니면 승인할 것이 없어 신규 유저가 그대로 멈췄다.
+describe("★구독 선택 칸 — 설치 전에 선택 (티켓 LLHMclpKaIAJbsiHzGoG)", () => {
+  it("흐름을 시작하면 설치 전에 '어떤 구독?' 을 묻는다", () => {
+    // 종전에는 먼저 기본 함대를 설치한 뒤 물었고, 그 때문에 첫 진입이 Claude
+    // 설치로 자동 진행됐다. 이제 사용자가 고른 CLI 만 설치한다.
     const s = flow({
-      bulk: { running: false, total: 2, done: 2, failedIds: [] },
+      bulk: null,
       signInTargets: 2,
       subscriptionPicked: false,
     });
@@ -182,25 +182,25 @@ describe("★구독 선택 칸 — 설치와 로그인 사이 (티켓 LLHMclpKaI
     expect(canLaunchSignIn(s)).toBe(false);
   });
 
-  it("설치 중에는 묻지 않는다 — 아직 없는 CLI 를 고르게 된다", () => {
+  it("선택을 마친 뒤 설치 중이면 installing 이다", () => {
     expect(
       oneClickPhase(
         flow({
           bulk: { running: true, total: 2, done: 1, failedIds: [] },
           signInTargets: 1,
-          subscriptionPicked: false,
+          subscriptionPicked: true,
         }),
       ),
     ).toBe("installing");
   });
 
-  it("설치가 전부 실패했으면 묻지 않고 blocked — 물어도 띄울 터미널이 없다", () => {
+  it("선택을 마친 뒤 설치가 전부 실패했으면 blocked", () => {
     expect(
       oneClickPhase(
         flow({
           bulk: { running: false, total: 2, done: 2, failedIds: ["a", "b"] },
           signInTargets: 0,
-          subscriptionPicked: false,
+          subscriptionPicked: true,
         }),
       ),
     ).toBe("blocked");
@@ -324,19 +324,21 @@ describe("BeginnerOneClickModal", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(cleanup);
 
-  it("열리자마자 공용 일괄 설치를 부른다 — 안에서 같은 결정을 다시 묻지 않는다", () => {
+  it("열리면 먼저 계정을 묻고, 고른 CLI 만 설치한다", async () => {
     seed({
       "cli-claude-code": probe(false, false),
       "cli-codex": probe(false, false),
     });
     render(createElement(BeginnerOneClickModal, { onClose: () => {} }));
 
+    expect(installAllMock().mock.calls.length).toBe(0);
+    expect(phaseAttr()).toBe("choose_subscription");
+
+    await pickSubscription("codex");
+
     expect(installAllMock().mock.calls.length).toBe(1);
-    // 대상은 기본 함대 세 줄이다 — grok 포함, antigravity 제외(k22rGEgv).
     expect(installAllMock().mock.calls[0][0].map((r) => r.id)).toEqual([
-      "cli-claude-code",
       "cli-codex",
-      "cli-grok",
     ]);
     expect(phaseAttr()).toBe("installing");
     // 설치 중에는 로그인 터미널을 띄우지 않는다.
@@ -448,7 +450,7 @@ describe("BeginnerOneClickModal", () => {
     expect(actions.installAndLogin).toHaveBeenCalledTimes(1);
   });
 
-  it("설치가 전부 실패하면 수동 명령 + 공식 문서 + 다시 시도를 띄운다", () => {
+  it("설치가 전부 실패하면 수동 명령 + 공식 문서 + 다시 시도를 띄운다", async () => {
     seed(
       {
         "cli-claude-code": probe(false, false),
@@ -465,6 +467,7 @@ describe("BeginnerOneClickModal", () => {
       },
     );
     render(createElement(BeginnerOneClickModal, { onClose: () => {} }));
+    await pickSubscription("claude", "codex");
 
     expect(phaseAttr()).toBe("blocked");
     const blocked = screen.getByTestId("beginner-oneclick-blocked");

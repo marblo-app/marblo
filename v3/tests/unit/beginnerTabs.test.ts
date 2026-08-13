@@ -24,8 +24,9 @@ import { ko } from "../../src/locales/ko";
 import { en } from "../../src/locales/en";
 
 describe("심플 큐레이트 탭 — 노출 목록", () => {
-  it("★큐레이트는 일곱이다 — 가이드·코드·에이전트·워크트리·사용량·하네스·설정", () => {
+  it("★큐레이트는 여덟이다 — 시작하기·가이드·코드·에이전트·워크트리·사용량·하네스·설정", () => {
     expect([...BEGINNER_CURATED_TABS]).toEqual([
+      "startHere",
       "guide",
       "code",
       "agents",
@@ -63,11 +64,10 @@ describe("심플 큐레이트 탭 — 노출 목록", () => {
     }
   });
 
-  it("★엑스퍼트 나머지 6탭은 심플에 노출되지 않는다", () => {
+  it("★엑스퍼트 나머지 5탭은 심플에 노출되지 않는다", () => {
     // 프로덕션 기준(dev 전용 missions/flows/deploy 는 애초에 안 뜬다).
     const hidden = beginnerHiddenExpertTabs([]);
     expect(hidden).toEqual([
-      "startHere",
       "board",
       "lanes",
       "project",

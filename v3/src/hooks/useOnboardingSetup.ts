@@ -64,7 +64,7 @@ export interface OnboardingSetupView {
   sampleStatus: FirstRunSampleStatus;
 
   /** "모두 설치" — 실 경로는 `runInstallAll`, 프리뷰는 진행률 시뮬. */
-  installAll: () => void;
+  installAll: (rows?: CliRow[]) => void;
   /** 한 줄 설치(택1 카드) — 프리뷰에서는 일괄 시뮬로 합류한다. */
   installOne: (row: CliRow) => Promise<void>;
   /**
@@ -161,7 +161,8 @@ export function useOnboardingSetup(): OnboardingSetupView {
         installErrors,
         installing,
         sampleStatus: realSampleStatus,
-        installAll: () => void runInstallAll(oneClickInstallRows(ROWS)),
+        installAll: (rows = oneClickInstallRows(ROWS)) =>
+          void runInstallAll(rows),
         installOne: (row) => runInstall(row),
         login: (model, action) => installAndLogin(model, action),
         setDefaultOrchestrator: (model) => void setDefaultOrchestrator(model),
@@ -185,7 +186,8 @@ export function useOnboardingSetup(): OnboardingSetupView {
     }
 
     // ── 시뮬 경로 — 여기서 나가는 IPC 는 하나도 없다 ──────────────────────
-    const startInstall = () => startInstallAll(ONE_CLICK_ROW_IDS.length);
+    const startInstall = (rows?: CliRow[]) =>
+      startInstallAll((rows ?? oneClickInstallRows(ROWS)).length);
     return {
       preview: true,
       ready: previewCliReady(stage),

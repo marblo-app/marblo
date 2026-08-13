@@ -42,13 +42,13 @@ import { BeginnerLiveStrip } from "./BeginnerLiveStrip";
 import { BeginnerOneClickModal } from "./BeginnerOneClickModal";
 import { BeginnerPromotionModal } from "./BeginnerPromotionModal";
 import { BeginnerTabBar } from "./BeginnerTabBar";
-import { BeginnerTaskModal } from "./BeginnerTaskModal";
 import { BeginnerTour } from "./BeginnerTour";
 import { OnboardingPreviewBanner } from "./OnboardingPreviewBanner";
 // ★큐레이트 탭 — 엑스퍼트 탭 컴포넌트를 **그대로** 태운다(재구현 0). 하네스만
 // 얇은 래퍼를 거치는데, 그것도 props 를 안 주기 위한 것이다(아래 주석).
 // 근거·비노출 목록은 lib/beginnerTabs.
 import { GuideTab } from "../guide/GuideTab";
+import { StartHereTab } from "../onboarding/StartHereTab";
 import { CodeTab } from "../tabs/CodeTab";
 import { AgentsTab } from "../tabs/AgentsTab";
 import { WorktreeTab } from "../tabs/WorktreeTab";
@@ -64,6 +64,7 @@ import {
   SURFACE,
   SectionLabel,
 } from "./beginnerUi";
+import { TaskDetailModal } from "../board/TaskDetailModal";
 import type { Agent } from "../../types/agent";
 
 /**
@@ -135,6 +136,7 @@ function HarnessTabPanel() {
 /** 큐레이트 탭 id → 엑스퍼트 컴포넌트. 일곱 다 props 가 없다. */
 const CURATED_TAB_COMPONENTS: Record<BeginnerCuratedTabId, () => JSX.Element> =
   {
+    startHere: StartHereTab,
     guide: GuideTab,
     code: CodeTab,
     // 에이전트 **관리**(정지·재시작·삭제) — 인라인 BeginnerAgentsPane 은 읽기
@@ -426,7 +428,6 @@ export function BeginnerShell() {
     [closeTerminalSession, deleteAgent, terminalSessions]
   );
 
-  const askAboutTask = useCallback((message: string) => setDraft(message), []);
   const dismissComposer = useCallback(() => setDraft(""), []);
 
   // ★상단 컴포저를 지금 그릴 것인가, 어떤 얼굴로 — 규칙은 순수함수가 든다
@@ -818,18 +819,11 @@ export function BeginnerShell() {
         <OnrampGateHost variant="beginner" onConnect={openOneClick} />
       )}
 
-      {/* 미니 보드/에이전트에서 연 티켓 상세 — 비기너 판. 정보는 보드 상세와
-          같고(목표·변경·완료기준·범위·선행 일감·진행 기록), 워크트리·diff·PR·
-          모델·상태머신 손잡이만 빠진다. `tasks` 는 선행 일감을 id 가 아니라
-          제목으로 그리기 위한 것. */}
+      {/* 미니 보드/에이전트에서 연 티켓 상세 — 어드밴스드 보드와 같은 표준 모달.
+          diff·수정 파일·activity note 가 같은 경로로 보여야 하므로 축소판을
+          유지하지 않는다. */}
       {openTask && (
-        <BeginnerTaskModal
-          task={openTask}
-          agents={agents}
-          tasks={tasks}
-          onAsk={askAboutTask}
-          onClose={closeTaskDetail}
-        />
+        <TaskDetailModal task={openTask} onClose={closeTaskDetail} />
       )}
 
       {/* ★에이전트 패널에서 연 터미널 — 어드밴스드와 같은 PTY, 같은 TerminalView. */}
