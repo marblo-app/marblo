@@ -1398,6 +1398,108 @@ interface DriveAPI {
   binding: DriveBindingAPI;
 }
 
+interface NotionConnectionStatus {
+  connected: boolean;
+  workspaceName?: string;
+  workspaceId?: string;
+  botId?: string;
+  connectedAt?: number;
+}
+
+interface NotionObjectMeta {
+  id: string;
+  object: "page" | "database";
+  title: string;
+  url?: string;
+  lastEditedTime?: string;
+}
+
+interface NotionDocument {
+  id: string;
+  title: string;
+  object: "page";
+  text: string;
+  extraction: "blocks" | "empty";
+  truncated: boolean;
+  url?: string;
+  lastEditedTime?: string;
+}
+
+interface NotionSearchInput {
+  userId?: string;
+  scope?: "user" | "project";
+  projectId?: string;
+  query?: string;
+  object?: "page" | "database";
+  pageSize?: number;
+  startCursor?: string;
+}
+
+interface NotionScopeInfo {
+  objectId: string;
+  objectKind: "database" | "page";
+  title: string | null;
+  truncated: boolean;
+}
+
+interface NotionProjectBinding {
+  projectId: string;
+  objectId: string;
+  objectKind: "database" | "page";
+  title: string | null;
+  updatedAt: number;
+}
+
+interface NotionBindingAPI {
+  get: (projectId: string) => Promise<NotionProjectBinding | null>;
+  set: (input: {
+    projectId: string;
+    objectId: string;
+    objectKind: "database" | "page";
+    title?: string | null;
+  }) => Promise<
+    { ok: true; binding: NotionProjectBinding } | { ok: false; error: string }
+  >;
+  clear: (
+    projectId: string,
+  ) => Promise<{ ok: true; removed: boolean } | { ok: false; error: string }>;
+}
+
+interface NotionAPI {
+  connect: (input: {
+    userId?: string;
+    accessToken: string;
+    workspaceName?: string | null;
+    workspaceId?: string | null;
+    botId?: string | null;
+  }) => Promise<
+    { ok: true; status: NotionConnectionStatus } | { ok: false; error: string }
+  >;
+  status: (userId?: string) => Promise<NotionConnectionStatus>;
+  disconnect: (userId?: string) => Promise<{ ok: boolean; error?: string }>;
+  search: (input: NotionSearchInput) => Promise<
+    | {
+        ok: true;
+        result: {
+          results: NotionObjectMeta[];
+          nextCursor?: string;
+          hasMore: boolean;
+        };
+        scope?: NotionScopeInfo;
+      }
+    | { ok: false; error: string }
+  >;
+  fetch: (input: {
+    userId?: string;
+    projectId?: string;
+    scope?: "user" | "project";
+    pageId: string;
+  }) => Promise<
+    { ok: true; document: NotionDocument } | { ok: false; error: string }
+  >;
+  binding: NotionBindingAPI;
+}
+
 interface UpdaterStatus {
   status:
     | "checking"
@@ -1533,6 +1635,7 @@ interface ElectronAPI {
   sample: SampleAPI;
   github: GitHubAPI;
   drive: DriveAPI;
+  notion: NotionAPI;
   updater: UpdaterAPI;
   sentry: SentryBridgeAPI;
   kg: KgBridgeAPI;

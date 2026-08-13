@@ -273,6 +273,32 @@ import {
   type DriveScopeInfo,
   type DriveScopeResolver,
 } from "./drive-scope";
+import {
+  connectNotionWithIntegrationToken,
+  createUserNotionConnector,
+  disconnectNotion,
+  notionStatus,
+} from "./notion-auth";
+import type {
+  NotionDocument,
+  NotionSearchParams,
+  NotionSearchResult,
+} from "./notion-connector";
+import {
+  clearNotionProjectBinding,
+  getNotionProjectBinding,
+  isValidNotionObjectId,
+  setNotionProjectBinding,
+  type NotionProjectBinding,
+  type NotionBindingKind,
+} from "./notion-project-binding";
+import {
+  authorizeScopedNotionFetch,
+  notionAccessFromInput,
+  planScopedNotionSearch,
+  type NotionAccess,
+  type NotionScopeInfo,
+} from "./notion-scope";
 
 type ConnectionCheckStatus = "pass" | "warn" | "fail";
 
@@ -5360,6 +5386,251 @@ bridgeServer.setDriveGateway({
     }),
   fetch: (projectId, fileId) =>
     driveFetchFor(currentRealUserUid(), fileId, { mode: "project", projectId }),
+});
+
+// ── Notion 커넥터 (읽기 전용, 티켓 gaUx2Cmsw6EN8ymjL2ks) ───────────────────
+//
+// Drive 와 같은 축 분리다. 인증은 유저 단위(safeStorage 암호화 토큰), 지식
+// 바인딩은 프로젝트 단위(DB 또는 페이지 id). MCP 경로는 항상 프로젝트 모드라
+// 바인딩 밖 페이지 id 를 fetch 해도 거절한다.
+
+function validNotionUserId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9:_-]{1,128}$/.test(value);
+}
+
+function resolveNotionUserId(value: unknown): string | null {
+  if (validNotionUserId(value)) return value;
+  return currentRealUserUid();
+}
+
+function notionFailure(e: unknown): { ok: false; error: string } {
+  return {
+    ok: false,
+    error:
+      e instanceof Error
+        ? e.message
+        : "Notion 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+  };
+}
+
+const NOTION_NOT_CONNECTED = {
+  ok: false as const,
+  error:
+    "Notion 이 연결되어 있지 않습니다. Harness 탭에서 Notion 을 연결해 주세요.",
+};
+
+async function notionSearchFor(
+  userId: string | null,
+  params: NotionSearchParams,
+  access: NotionAccess = { mode: "user" },
+): Promise<
+  | { ok: true; result: NotionSearchResult; scope?: NotionScopeInfo }
+  | { ok: false; error: string }
+> {
+  if (!userId) return NOTION_NOT_CONNECTED;
+  try {
+    const connector = createUserNotionConnector(safeStorage, userId);
+    if (access.mode === "user") {
+      return { ok: true, result: await connector.search(params) };
+    }
+    const planned = await planScopedNotionSearch(
+      connector,
+      access.projectId,
+      access.projectId ? getNotionProjectBinding(access.projectId) : null,
+      params,
+    );
+    return planned;
+  } catch (e) {
+    return notionFailure(e);
+  }
+}
+
+async function notionFetchFor(
+  userId: string | null,
+  pageId: string,
+  access: NotionAccess = { mode: "user" },
+): Promise<
+  { ok: true; document: NotionDocument } | { ok: false; error: string }
+> {
+  if (!userId) return NOTION_NOT_CONNECTED;
+  if (typeof pageId !== "string" || !pageId.trim()) {
+    return { ok: false, error: "Notion 페이지 id 가 필요합니다." };
+  }
+  const trimmed = pageId.trim();
+  try {
+    const connector = createUserNotionConnector(safeStorage, userId);
+    if (access.mode === "project") {
+      const allowed = await authorizeScopedNotionFetch(
+        connector,
+        access.projectId,
+        access.projectId ? getNotionProjectBinding(access.projectId) : null,
+        trimmed,
+      );
+      if (!allowed.ok) return allowed;
+    }
+    return { ok: true, document: await connector.fetchPage(trimmed) };
+  } catch (e) {
+    return notionFailure(e);
+  }
+}
+
+function sanitizeNotionSearchParams(input: unknown): NotionSearchParams {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() ? v.trim() : undefined;
+  const object = str(raw.object);
+  return {
+    query: str(raw.query),
+    object: object === "page" || object === "database" ? object : undefined,
+    pageSize: typeof raw.pageSize === "number" ? raw.pageSize : undefined,
+    startCursor: str(raw.startCursor),
+  };
+}
+
+ipcMain.handle("notion:connect", (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  const userId = resolveNotionUserId(raw.userId);
+  if (!userId) {
+    return {
+      ok: false,
+      error: "먼저 Marblo 에 로그인한 뒤 Notion 을 연결해 주세요.",
+    };
+  }
+  const accessToken =
+    typeof raw.accessToken === "string" ? raw.accessToken : "";
+  return connectNotionWithIntegrationToken(safeStorage, userId, {
+    accessToken,
+    workspaceName: raw.workspaceName,
+    workspaceId: raw.workspaceId,
+    botId: raw.botId,
+  });
+});
+
+ipcMain.handle("notion:status", (_event, input: unknown) => {
+  const userId = resolveNotionUserId(
+    input && typeof input === "object"
+      ? (input as { userId?: unknown }).userId
+      : input,
+  );
+  if (!userId) return { connected: false };
+  return notionStatus(safeStorage, userId);
+});
+
+ipcMain.handle("notion:disconnect", (_event, input: unknown) => {
+  const userId = resolveNotionUserId(
+    input && typeof input === "object"
+      ? (input as { userId?: unknown }).userId
+      : input,
+  );
+  if (!userId) return { ok: false, error: "로그인 정보가 없습니다." };
+  return disconnectNotion(safeStorage, userId);
+});
+
+ipcMain.handle("notion:search", async (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  return notionSearchFor(
+    resolveNotionUserId(raw.userId),
+    sanitizeNotionSearchParams(raw),
+    notionAccessFromInput(raw),
+  );
+});
+
+ipcMain.handle("notion:fetch", async (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  return notionFetchFor(
+    resolveNotionUserId(raw.userId),
+    typeof raw.pageId === "string" ? raw.pageId : "",
+    notionAccessFromInput(raw),
+  );
+});
+
+function notionProjectIdFrom(raw: Record<string, unknown>): string | null {
+  const value = raw.projectId;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function notionBindingKindFrom(value: unknown): NotionBindingKind | null {
+  return value === "database" || value === "page" ? value : null;
+}
+
+ipcMain.handle("notion:binding:get", (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : { projectId: input };
+  const projectId = notionProjectIdFrom(raw);
+  if (!projectId) return null;
+  return getNotionProjectBinding(projectId);
+});
+
+ipcMain.handle("notion:binding:set", (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  const projectId = notionProjectIdFrom(raw);
+  if (!projectId) return { ok: false, error: "프로젝트를 선택해 주세요." };
+  if (!isValidNotionObjectId(raw.objectId)) {
+    return {
+      ok: false,
+      error: "Notion 페이지/데이터베이스 id 형식이 올바르지 않습니다.",
+    };
+  }
+  const objectKind = notionBindingKindFrom(raw.objectKind);
+  if (!objectKind) {
+    return { ok: false, error: "Notion 바인딩 종류를 선택해 주세요." };
+  }
+  try {
+    const binding: NotionProjectBinding = setNotionProjectBinding({
+      projectId,
+      objectId: raw.objectId,
+      objectKind,
+      title: typeof raw.title === "string" ? raw.title : undefined,
+    });
+    return { ok: true, binding };
+  } catch (e) {
+    return {
+      ok: false,
+      error:
+        e instanceof Error ? e.message : "Notion 바인딩 저장에 실패했습니다.",
+    };
+  }
+});
+
+ipcMain.handle("notion:binding:clear", (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : { projectId: input };
+  const projectId = notionProjectIdFrom(raw);
+  if (!projectId) return { ok: false, error: "프로젝트를 선택해 주세요." };
+  const removed = clearNotionProjectBinding(projectId);
+  return { ok: true, removed };
+});
+
+bridgeServer.setNotionGateway({
+  search: (projectId, params) =>
+    notionSearchFor(currentRealUserUid(), params, {
+      mode: "project",
+      projectId,
+    }),
+  fetch: (projectId, pageId) =>
+    notionFetchFor(currentRealUserUid(), pageId, {
+      mode: "project",
+      projectId,
+    }),
 });
 
 ipcMain.handle(
