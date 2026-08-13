@@ -4,6 +4,7 @@ import { Header } from "../Header";
 import { CliSetupHost } from "../onboarding/CliSetupHost";
 import { GlobalOverlays } from "../GlobalOverlays";
 import { useAppLifecycle } from "../../hooks/useAppLifecycle";
+import { useProjectKindSurface } from "../../hooks/useProjectKindSurface";
 import { useUiStore } from "../../stores/uiStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { usePaneStore } from "../../stores/paneStore";
@@ -65,6 +66,10 @@ export function WorkspaceShell() {
   const { projectSetup, isNewWindow, restoreSettled, rootPath } =
     useAppLifecycle();
   const { handleSelectDirectory } = projectSetup;
+
+  // assistant kind → 기본 서피스(대화 좌측 + code/위키 + 문서그래프).
+  // dev 프로젝트는 훅 내부에서 no-op (현행 불변).
+  useProjectKindSurface();
 
   const pendingSettingsSection = useUiStore((s) => s.pendingSettingsSection);
 

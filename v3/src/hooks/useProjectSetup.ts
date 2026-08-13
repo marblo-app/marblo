@@ -7,7 +7,12 @@ import { useUiStore } from "../stores/uiStore";
 import { checkProjectCreate, ProjectLimitError } from "../lib/planLimits";
 import { useFirstRunSampleProject } from "./useFirstRunSampleProject";
 import telemetry from "../services/telemetryService";
-import type { Project } from "../types/project";
+import type { Project, ProjectKind } from "../types/project";
+import {
+  ensureAssistantMemoryFile,
+  isAssistantProject,
+  normalizeProjectKind,
+} from "../lib/projectKind";
 
 function basename(p: string): string {
   // Handle both POSIX (/) and Windows (\) separators, and trailing separators,
@@ -47,6 +52,9 @@ export interface ProjectSetup {
   showNewProject: boolean;
   newProjectName: string;
   setNewProjectName: (name: string) => void;
+  /** 인라인 생성 시 고른 kind (기본 dev). */
+  newProjectKind: ProjectKind;
+  setNewProjectKind: (kind: ProjectKind) => void;
   newProjectInputRef: React.RefObject<HTMLInputElement>;
   handleCreateInlineProject: () => Promise<void>;
   handleCancelInlineProject: () => void;
@@ -71,6 +79,7 @@ export function useProjectSetup(): ProjectSetup {
 
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectKind, setNewProjectKind] = useState<ProjectKind>("dev");
   const [pendingFolderPath, setPendingFolderPath] = useState<string | null>(
     null,
   );
@@ -122,11 +131,14 @@ export function useProjectSetup(): ProjectSetup {
     async (dir: string, remoteUrl: string | null): Promise<boolean> => {
       if (!user) return false;
       try {
+        // 폴더 원클릭 등록은 기본 dev — 하위호환·현행 불변. 비서 프로젝트는
+        // 헤더/인라인 생성 UI 에서 kind 를 고른 경로로 만든다.
         const data: Omit<Project, "id" | "createdAt" | "updatedAt"> = {
           name: basename(dir) || "new-project",
           ownerId: user.uid,
           members: [user.uid],
           folderPath: dir,
+          kind: "dev",
         };
         if (remoteUrl) data.gitRemoteUrl = remoteUrl;
         const id = await createProject(data);
@@ -300,11 +312,13 @@ export function useProjectSetup(): ProjectSetup {
       return;
     }
     try {
+      const kind = normalizeProjectKind(newProjectKind);
       const data: Omit<Project, "id" | "createdAt" | "updatedAt"> = {
         name: newProjectName.trim(),
         ownerId: user.uid,
         members: [user.uid],
         folderPath: pendingFolderPath,
+        kind,
       };
       if (pendingGitRemoteUrl) data.gitRemoteUrl = pendingGitRemoteUrl;
       const id = await createProject(data);
@@ -313,6 +327,11 @@ export function useProjectSetup(): ProjectSetup {
         await setFolderPathForThisMachine(id, pendingFolderPath);
       } catch (err) {
         console.error("Failed to record this machine's folder path:", err);
+      }
+      // store createProject 도 시드하지만, 서비스 직행 경로·경합을 대비해
+      // 인라인 생성에서도 한 번 더 멱등 시드한다.
+      if (isAssistantProject(data)) {
+        void ensureAssistantMemoryFile(pendingFolderPath);
       }
       setRootPath(pendingFolderPath);
       setCurrentProject({
@@ -335,11 +354,13 @@ export function useProjectSetup(): ProjectSetup {
     } finally {
       setShowNewProject(false);
       setNewProjectName("");
+      setNewProjectKind("dev");
       setPendingFolderPath(null);
       setPendingGitRemoteUrl(null);
     }
   }, [
     newProjectName,
+    newProjectKind,
     user,
     pendingFolderPath,
     pendingGitRemoteUrl,
@@ -353,6 +374,7 @@ export function useProjectSetup(): ProjectSetup {
   const handleCancelInlineProject = useCallback(() => {
     setShowNewProject(false);
     setNewProjectName("");
+    setNewProjectKind("dev");
     setPendingFolderPath(null);
     setPendingGitRemoteUrl(null);
   }, []);
@@ -363,6 +385,8 @@ export function useProjectSetup(): ProjectSetup {
     showNewProject,
     newProjectName,
     setNewProjectName,
+    newProjectKind,
+    setNewProjectKind,
     newProjectInputRef,
     handleCreateInlineProject,
     handleCancelInlineProject,

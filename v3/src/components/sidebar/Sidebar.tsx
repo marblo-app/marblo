@@ -97,6 +97,19 @@ export function Sidebar({
       window.removeEventListener("marblo:reveal-files", onRevealFiles);
   }, [isOpen, onToggle]);
 
+  // assistant 기본 서피스: 파일 패널 + 문서 그래프. useProjectKindSurface 가
+  // 프로젝트 전환 시 디스패치한다. reveal-files 와 같은 이벤트 패턴.
+  useEffect(() => {
+    const onRevealDocGraph = () => {
+      setActivePanel("files");
+      switchFilesSubView("graph");
+      if (!isOpen) onToggle();
+    };
+    window.addEventListener("marblo:reveal-doc-graph", onRevealDocGraph);
+    return () =>
+      window.removeEventListener("marblo:reveal-doc-graph", onRevealDocGraph);
+  }, [isOpen, onToggle, switchFilesSubView]);
+
   if (!isOpen) {
     return (
       <button
