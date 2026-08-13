@@ -1292,6 +1292,9 @@ type DriveExtraction =
   | "download"
   | "pdf"
   | "pdf-no-text"
+  | "office"
+  | "office-no-text"
+  | "office-unreadable"
   | "unsupported";
 
 interface DriveDocument {
@@ -1300,6 +1303,8 @@ interface DriveDocument {
   mimeType: string;
   text: string;
   extraction: DriveExtraction;
+  /** 본문이 빈 이유 등 사용자에게 보여줄 짧은 설명(성공 시엔 없다). */
+  extractionDetail?: string;
   truncated: boolean;
   modifiedTime?: string;
   webViewLink?: string;

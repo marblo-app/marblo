@@ -58,6 +58,7 @@ import {
   type DriveConnector,
   type DriveFetchLike,
 } from "./google-drive-connector";
+import { extractOfficeText } from "./office-text-extract";
 import { extractPdfText } from "./pdf-text-extract";
 
 /** 최소 시작 스코프. read-only — 쓰기 스코프는 이 앱 어디에도 없다. */
@@ -371,6 +372,7 @@ export function createUserDriveConnector(
   return createDriveConnector({
     getAccessToken: () => getDriveAccessToken(storage, userId),
     extractPdfText,
+    extractOfficeText,
     ...(fetchImpl ? { fetchImpl } : {}),
   });
 }

@@ -83,17 +83,25 @@ DriveDocument { id, title, mimeType, text, extraction, truncated, ... }
 
 본문 취득 전략:
 
-| 대상                     | 방법                                  | `extraction`  |
-| ------------------------ | ------------------------------------- | ------------- |
-| Google Docs / Slides     | `files.export` → `text/plain`         | `export`      |
-| Google Sheets            | `files.export` → `text/csv` (첫 시트) | `export`      |
-| 텍스트 계열 일반 파일    | `files.get?alt=media`                 | `download`    |
-| PDF (텍스트 레이어 있음) | `alt=media` + 자체 추출기             | `pdf`         |
-| PDF (스캔본)             | 〃 (텍스트 없음)                      | `pdf-no-text` |
-| 이미지·동영상·도면·폴더  | 받지 않는다                           | `unsupported` |
+| 대상                                | 방법                                  | `extraction`        |
+| ----------------------------------- | ------------------------------------- | ------------------- |
+| Google Docs / Slides                | `files.export` → `text/plain`         | `export`            |
+| Google Sheets                       | `files.export` → `text/csv` (첫 시트) | `export`            |
+| 텍스트 계열 일반 파일 (CSV 포함)    | `files.get?alt=media`                 | `download`          |
+| PDF (텍스트 레이어 있음)            | `alt=media` + 자체 추출기             | `pdf`               |
+| PDF (스캔본)                        | 〃 (텍스트 없음)                      | `pdf-no-text`       |
+| .docx / .pptx / .xlsx / .hwpx / .hwp| `alt=media` + 자체 추출기             | `office`            |
+| 위 형식인데 텍스트가 없음(이미지만) | 〃                                    | `office-no-text`    |
+| 위 형식인데 못 엶(암호·손상·잘림)   | 〃                                    | `office-unreadable` |
+| 이미지·동영상·도면·폴더             | 받지 않는다                           | `unsupported`       |
 
-★ 본문이 비는 두 경우를 "빈 문서" 로 뭉개지 않고 `extraction` 값으로 **이유를
-드러낸다**. 조용한 빈 본문은 후속 인덱서가 "읽었는데 내용이 없다" 로 오인한다.
+★ 본문이 비는 경우를 "빈 문서" 로 뭉개지 않고 `extraction` 값(과 `extractionDetail`
+문구)으로 **이유를 드러낸다**. 조용한 빈 본문은 후속 인덱서가 "읽었는데 내용이
+없다" 로 오인한다.
+
+Office/한글 파일의 형식 판별은 MIME → 확장자 순이다(`office-formats.ts`). Drive 는
+업로드 클라이언트가 준 MIME 을 그대로 보관해서, 한글 파일이 `application/octet-stream`
+으로, Windows 에서 올린 CSV 가 `application/vnd.ms-excel` 로 붙어 오는 일이 흔하다.
 
 **googleapis SDK 를 도입하지 않았다.** REST 엔드포인트 3개면 충분하고, SDK 는 앱
 번들과 `dist-mcp` esbuild 번들을 수 MB 불린다. 순수 `fetch` 라 **의존성 추가가
@@ -102,6 +110,23 @@ DriveDocument { id, title, mimeType, text, extraction, truncated, ... }
 PDF 도 같은 이유로 `pdf-parse`/`pdfjs-dist` 대신 node 내장 `zlib` 만 쓰는 최소
 추출기를 뒀다(`pdf-text-extract.ts`). 한계는 그 파일 머리주석에 정직하게 적혀
 있다 — 스캔본 OCR·암호화 PDF·비표준 CID 인코딩은 지원하지 않는다.
+
+Office/한글도 마찬가지다. `jszip`·`hwp.js` 없이 다음 4개 파일로 끝낸다(**의존성
+추가 0**):
+
+- `zip-archive.ts` — zlib 기반 최소 zip 리더. docx/pptx/xlsx/hwpx 가 전부 zip 이다.
+  10MB 상한에 **잘린 zip** 도 로컬 헤더 스캔으로 앞부분은 읽는다.
+- `office-text-extract.ts` — docx(`word/document.xml`)·pptx(`ppt/slides/slideN.xml`)·
+  xlsx(`sharedStrings` + 시트 → 시트별 CSV)·hwpx(`Contents/sectionN.xml`).
+- `hwp5-text-extract.ts` — 구형 .hwp 는 zip 이 아니라 **OLE 복합문서(CFB)** 라
+  CFB 리더 + 문단 텍스트 레코드(`HWPTAG_PARA_TEXT`) 파서를 직접 뒀다. 암호·배포용
+  (ViewText) 문서는 못 읽고 그 사실을 이유로 돌려준다.
+- `office-formats.ts` — MIME/확장자 판별만 하는 순수 모듈. 커넥터가 **바이트를
+  받기 전에** 지원 여부를 알아야 해서(이미지를 10MB 씩 받지 않기 위해) 추출기와
+  분리했다. 추출 자체는 `extractOfficeText` 로 주입한다.
+
+한계: 서식·표 구조·차트 데이터는 복원하지 않는다(본문 텍스트만). .doc/.xls/.ppt
+(97-2003, OLE)은 지원하지 않고 "최신 형식으로 저장" 을 안내한다.
 
 ## 6. 경계와 노출면
 
