@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildNotionBlocks,
   createNotionConnector,
   notionErrorMessage,
   parseNotionList,
@@ -152,5 +153,62 @@ describe("createNotionConnector", () => {
     expect(doc.text).toContain("# Title");
     expect(doc.text).toContain("- Item");
     expect(doc.extraction).toBe("blocks");
+  });
+
+  it("markdown-ish content를 Notion blocks로 변환한다", () => {
+    const blocks = buildNotionBlocks("# Title\n- Item\n1. Step\nParagraph");
+    expect(blocks.map((block) => block.type)).toEqual([
+      "heading_1",
+      "bulleted_list_item",
+      "numbered_list_item",
+      "paragraph",
+    ]);
+  });
+
+  it("pages.create로 새 페이지와 children을 생성한다", async () => {
+    const calls: Array<{ url: string; method?: string; body?: string }> = [];
+    const connector = createNotionConnector({
+      getAccessToken: async () => "secret_testtoken000000000000",
+      fetchImpl: async (url, init) => {
+        calls.push({ url, method: init?.method, body: init?.body });
+        return jsonResponse(200, page("p2", "New Page"));
+      },
+    });
+    const result = await connector.createPage({
+      parentPageId: "p1",
+      title: "New Page",
+      content: "Hello",
+    });
+    const body = JSON.parse(calls[0].body ?? "{}") as {
+      parent?: { page_id?: string };
+      children?: unknown[];
+    };
+    expect(calls[0].url).toBe("https://api.notion.com/v1/pages");
+    expect(calls[0].method).toBe("POST");
+    expect(body.parent?.page_id).toBe("p1");
+    expect(body.children).toHaveLength(1);
+    expect(result.pageId).toBe("p2");
+  });
+
+  it("blocks.children PATCH로 기존 페이지에 블록을 append한다", async () => {
+    const calls: Array<{ url: string; method?: string; body?: string }> = [];
+    const connector = createNotionConnector({
+      getAccessToken: async () => "secret_testtoken000000000000",
+      fetchImpl: async (url, init) => {
+        calls.push({ url, method: init?.method, body: init?.body });
+        return jsonResponse(200, { results: [] });
+      },
+    });
+    const result = await connector.appendBlocks({
+      pageId: "p1",
+      content: "Append me",
+    });
+    expect(calls[0].url).toContain("/blocks/p1/children");
+    expect(calls[0].method).toBe("PATCH");
+    expect(result).toEqual({
+      action: "append_blocks",
+      pageId: "p1",
+      appendedBlocks: 1,
+    });
   });
 });

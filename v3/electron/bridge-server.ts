@@ -39,15 +39,23 @@ import type {
   DriveDocument,
   DriveListParams,
   DriveSearchResult,
+  DriveWriteParams,
+  DriveWriteResult,
 } from "./google-drive-connector";
 import type {
+  GmailComposeParams,
+  GmailDraftResult,
   GmailMessage,
   GmailSearchParams,
   GmailSearchResult,
+  GmailSendResult,
 } from "./gmail-connector";
 import type {
+  CalendarEvent,
+  CalendarEventInput,
   CalendarListParams,
   CalendarListResult,
+  CalendarPatchInput,
 } from "./calendar-connector";
 import type {
   ContactsSearchParams,
@@ -57,6 +65,8 @@ import type {
   NotionDocument,
   NotionSearchParams,
   NotionSearchResult,
+  NotionWriteParams,
+  NotionWriteResult,
 } from "./notion-connector";
 import { mainTelemetry, type DispatchDecisionPayload } from "./telemetry";
 import { planCapErrorCategory } from "./spawn-block-reason";
@@ -265,6 +275,12 @@ export interface DriveGateway {
   ): Promise<
     { ok: true; document: DriveDocument } | { ok: false; error: string }
   >;
+  write(
+    projectId: string | null,
+    params: DriveWriteParams,
+  ): Promise<
+    { ok: true; result: DriveWriteResult } | { ok: false; error: string }
+  >;
 }
 
 export interface GoogleWorkspaceGateway {
@@ -285,6 +301,26 @@ export interface GoogleWorkspaceGateway {
     params: CalendarListParams,
   ): Promise<
     { ok: true; result: CalendarListResult } | { ok: false; error: string }
+  >;
+  calendarCreate(
+    projectId: string | null,
+    params: CalendarEventInput,
+  ): Promise<{ ok: true; event: CalendarEvent } | { ok: false; error: string }>;
+  calendarPatch(
+    projectId: string | null,
+    params: CalendarPatchInput,
+  ): Promise<{ ok: true; event: CalendarEvent } | { ok: false; error: string }>;
+  gmailDraft(
+    projectId: string | null,
+    params: GmailComposeParams,
+  ): Promise<
+    { ok: true; draft: GmailDraftResult } | { ok: false; error: string }
+  >;
+  gmailSend(
+    projectId: string | null,
+    params: GmailComposeParams,
+  ): Promise<
+    { ok: true; message: GmailSendResult } | { ok: false; error: string }
   >;
   contactsSearch(
     projectId: string | null,
@@ -316,6 +352,12 @@ export interface NotionGateway {
     pageId: string,
   ): Promise<
     { ok: true; document: NotionDocument } | { ok: false; error: string }
+  >;
+  write(
+    projectId: string | null,
+    params: NotionWriteParams,
+  ): Promise<
+    { ok: true; result: NotionWriteResult } | { ok: false; error: string }
   >;
 }
 
@@ -1373,6 +1415,11 @@ export class BridgeServer {
           return;
         }
 
+        if (req.method === "POST" && req.url === "/drive-write") {
+          this.handleDriveWrite(req, res);
+          return;
+        }
+
         if (req.method === "POST" && req.url === "/gmail-search") {
           this.handleGmailSearch(req, res);
           return;
@@ -1383,8 +1430,28 @@ export class BridgeServer {
           return;
         }
 
+        if (req.method === "POST" && req.url === "/gmail-draft") {
+          this.handleGmailDraft(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/gmail-send") {
+          this.handleGmailSend(req, res);
+          return;
+        }
+
         if (req.method === "POST" && req.url === "/calendar-list") {
           this.handleCalendarList(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/calendar-create") {
+          this.handleCalendarCreate(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/calendar-patch") {
+          this.handleCalendarPatch(req, res);
           return;
         }
 
@@ -1400,6 +1467,11 @@ export class BridgeServer {
 
         if (req.method === "POST" && req.url === "/notion-fetch") {
           this.handleNotionFetch(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/notion-write") {
+          this.handleNotionWrite(req, res);
           return;
         }
 
@@ -4570,6 +4642,16 @@ export class BridgeServer {
     return false;
   }
 
+  private str(value: unknown): string | undefined {
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  }
+
+  private strArray(value: unknown): string[] | undefined {
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string")
+      : undefined;
+  }
+
   /**
    * POST /drive-search — 읽기 전용 파일 검색.
    *
@@ -4658,6 +4740,40 @@ export class BridgeServer {
           JSON.stringify({
             ok: false,
             error: err instanceof Error ? err.message : "drive fetch failed",
+          }),
+        );
+      }
+    })();
+  }
+
+  private handleDriveWrite(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.driveGateway) return this.driveUnavailable(res);
+      const projectId = this.str(params.projectId) ?? null;
+      if (!projectId) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Missing required field: projectId" }));
+        return;
+      }
+      try {
+        const result = await this.driveGateway.write(projectId, {
+          title: this.str(params.title) ?? "",
+          content: this.str(params.content),
+          folderId: this.str(params.folderId),
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "drive write failed",
           }),
         );
       }
@@ -4753,6 +4869,86 @@ export class BridgeServer {
     })();
   }
 
+  private gmailComposeFromParams(params: Record<string, unknown>): GmailComposeParams {
+    return {
+      to: this.strArray(params.to) ?? [],
+      cc: this.strArray(params.cc),
+      bcc: this.strArray(params.bcc),
+      subject: this.str(params.subject) ?? "",
+      body: this.str(params.body) ?? "",
+      threadId: this.str(params.threadId),
+    };
+  }
+
+  private handleGmailDraft(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.googleWorkspaceGateway) return this.googleWorkspaceUnavailable(res);
+      const projectId = this.str(params.projectId) ?? null;
+      if (!this.requireGoogleWorkspaceProject(res, projectId)) return;
+      try {
+        const result = await this.googleWorkspaceGateway.gmailDraft(
+          projectId,
+          this.gmailComposeFromParams(params),
+        );
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "gmail draft failed",
+          }),
+        );
+      }
+    })();
+  }
+
+  private handleGmailSend(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.googleWorkspaceGateway) return this.googleWorkspaceUnavailable(res);
+      if (params.confirm !== true) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error:
+              "Gmail 발송은 되돌릴 수 없습니다. 내용을 확인한 뒤 confirm=true 로 다시 호출하세요.",
+          }),
+        );
+        return;
+      }
+      const projectId = this.str(params.projectId) ?? null;
+      if (!this.requireGoogleWorkspaceProject(res, projectId)) return;
+      try {
+        const result = await this.googleWorkspaceGateway.gmailSend(
+          projectId,
+          this.gmailComposeFromParams(params),
+        );
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "gmail send failed",
+          }),
+        );
+      }
+    })();
+  }
+
   private handleCalendarList(
     req: http.IncomingMessage,
     res: http.ServerResponse,
@@ -4790,6 +4986,105 @@ export class BridgeServer {
           JSON.stringify({
             ok: false,
             error: err instanceof Error ? err.message : "calendar list failed",
+          }),
+        );
+      }
+    })();
+  }
+
+  private calendarAttendees(value: unknown): CalendarEventInput["attendees"] {
+    if (!Array.isArray(value)) return undefined;
+    return value
+      .map((raw) => {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+        const item = raw as Record<string, unknown>;
+        const email = this.str(item.email);
+        const displayName = this.str(item.displayName);
+        return email || displayName
+          ? {
+              ...(email ? { email } : {}),
+              ...(displayName ? { displayName } : {}),
+            }
+          : null;
+      })
+      .filter(
+        (
+          attendee,
+        ): attendee is NonNullable<CalendarEventInput["attendees"]>[number] =>
+          attendee !== null,
+      );
+  }
+
+  private calendarEventInput(params: Record<string, unknown>): CalendarEventInput {
+    const sendUpdates = this.str(params.sendUpdates);
+    return {
+      title: this.str(params.title) ?? "",
+      start: this.str(params.start) ?? "",
+      end: this.str(params.end) ?? "",
+      description: this.str(params.description),
+      location: this.str(params.location),
+      attendees: this.calendarAttendees(params.attendees),
+      timeZone: this.str(params.timeZone),
+      sendUpdates:
+        sendUpdates === "all" || sendUpdates === "externalOnly" || sendUpdates === "none"
+          ? sendUpdates
+          : undefined,
+    };
+  }
+
+  private handleCalendarCreate(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.googleWorkspaceGateway) return this.googleWorkspaceUnavailable(res);
+      const projectId = this.str(params.projectId) ?? null;
+      if (!this.requireGoogleWorkspaceProject(res, projectId)) return;
+      try {
+        const result = await this.googleWorkspaceGateway.calendarCreate(
+          projectId,
+          this.calendarEventInput(params),
+        );
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "calendar create failed",
+          }),
+        );
+      }
+    })();
+  }
+
+  private handleCalendarPatch(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.googleWorkspaceGateway) return this.googleWorkspaceUnavailable(res);
+      const projectId = this.str(params.projectId) ?? null;
+      if (!this.requireGoogleWorkspaceProject(res, projectId)) return;
+      try {
+        const base = this.calendarEventInput(params);
+        const result = await this.googleWorkspaceGateway.calendarPatch(projectId, {
+          ...base,
+          eventId: this.str(params.eventId) ?? "",
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "calendar patch failed",
           }),
         );
       }
@@ -4914,6 +5209,42 @@ export class BridgeServer {
           JSON.stringify({
             ok: false,
             error: err instanceof Error ? err.message : "notion fetch failed",
+          }),
+        );
+      }
+    })();
+  }
+
+  private handleNotionWrite(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.notionGateway) return this.notionUnavailable(res);
+      const projectId = this.str(params.projectId) ?? null;
+      if (!projectId) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Missing required field: projectId" }));
+        return;
+      }
+      try {
+        const result = await this.notionGateway.write(projectId, {
+          parentPageId: this.str(params.parentPageId),
+          parentDatabaseId: this.str(params.parentDatabaseId),
+          pageId: this.str(params.pageId),
+          title: this.str(params.title),
+          content: this.str(params.content),
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "notion write failed",
           }),
         );
       }

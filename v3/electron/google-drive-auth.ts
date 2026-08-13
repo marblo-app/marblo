@@ -76,13 +76,19 @@ import {
 import { extractOfficeText } from "./office-text-extract";
 import { extractPdfText } from "./pdf-text-extract";
 
-/** 최소 시작 스코프. read-only — 쓰기 스코프는 이 앱 어디에도 없다. */
+/** Google Workspace 커넥터 스코프. 쓰기는 비파괴 생성 + 명시 확인 발송에 한정한다. */
 export const DRIVE_READONLY_SCOPE =
   "https://www.googleapis.com/auth/drive.readonly";
+export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 export const GMAIL_READONLY_SCOPE =
   "https://www.googleapis.com/auth/gmail.readonly";
+export const GMAIL_COMPOSE_SCOPE =
+  "https://www.googleapis.com/auth/gmail.compose";
+export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 export const CALENDAR_READONLY_SCOPE =
   "https://www.googleapis.com/auth/calendar.readonly";
+export const CALENDAR_EVENTS_SCOPE =
+  "https://www.googleapis.com/auth/calendar.events";
 export const CONTACTS_READONLY_SCOPE =
   "https://www.googleapis.com/auth/contacts.readonly";
 
@@ -93,8 +99,22 @@ export const GOOGLE_CONNECTOR_READONLY_SCOPES = [
   CONTACTS_READONLY_SCOPE,
 ] as const;
 
+export const GOOGLE_CONNECTOR_WRITE_SCOPES = [
+  DRIVE_FILE_SCOPE,
+  GMAIL_COMPOSE_SCOPE,
+  GMAIL_SEND_SCOPE,
+  CALENDAR_EVENTS_SCOPE,
+] as const;
+
+export const GOOGLE_CONNECTOR_REQUIRED_SCOPES = [
+  ...GOOGLE_CONNECTOR_READONLY_SCOPES,
+  ...GOOGLE_CONNECTOR_WRITE_SCOPES,
+] as const;
+
 /** authorize 에 실제로 보내는 스코프 문자열(위 주석 ③ 참고). */
 export const DRIVE_AUTH_SCOPE = `openid email ${GOOGLE_CONNECTOR_READONLY_SCOPES.join(
+  " "
+)} ${GOOGLE_CONNECTOR_WRITE_SCOPES.join(
   " "
 )}`;
 
@@ -282,14 +302,14 @@ export async function connectGoogleDrive(
   // 사용자가 동의 화면에서 Drive 체크를 해제할 수 있다. 그 경우 토큰은 오지만
   // Drive 는 못 읽는다 — 여기서 잡지 않으면 나중에 알 수 없는 403 으로 나온다.
   const grantedScopes = scope ? scope.split(/\s+/) : [];
-  const missingScopes = GOOGLE_CONNECTOR_READONLY_SCOPES.filter(
+  const missingScopes = GOOGLE_CONNECTOR_REQUIRED_SCOPES.filter(
     (requiredScope) => !grantedScopes.includes(requiredScope)
   );
   if (scope && missingScopes.length > 0) {
     return {
       ok: false,
       error:
-        "Google 읽기 권한이 모두 부여되지 않았습니다. 동의 화면에서 Drive, Gmail, Calendar, Contacts 항목을 허용해 주세요.",
+        "Google 커넥터 권한이 모두 부여되지 않았습니다. 동의 화면에서 Drive, Gmail, Calendar, Contacts 항목을 허용해 주세요.",
     };
   }
 

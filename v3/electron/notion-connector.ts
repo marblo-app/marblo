@@ -65,12 +65,32 @@ export interface NotionDatabaseQueryParams {
   startCursor?: string;
 }
 
+export interface NotionWriteParams {
+  parentPageId?: string;
+  parentDatabaseId?: string;
+  pageId?: string;
+  title?: string;
+  content?: string;
+}
+
+export type NotionWriteAction = "create_page" | "append_blocks";
+
+export interface NotionWriteResult {
+  action: NotionWriteAction;
+  pageId: string;
+  title?: string;
+  url?: string;
+  appendedBlocks: number;
+}
+
 export interface NotionConnector {
   search(params: NotionSearchParams): Promise<NotionSearchResult>;
   queryDatabase(params: NotionDatabaseQueryParams): Promise<NotionSearchResult>;
   getPageMeta(pageId: string): Promise<NotionObjectMeta>;
   fetchPage(pageId: string): Promise<NotionDocument>;
   listChildPages(pageId: string): Promise<NotionObjectMeta[]>;
+  createPage(params: NotionWriteParams): Promise<NotionWriteResult>;
+  appendBlocks(params: NotionWriteParams): Promise<NotionWriteResult>;
 }
 
 export interface NotionConnectorOptions {
@@ -98,6 +118,12 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function stringField(value: unknown): string | undefined {
   return typeof value === "string" && value ? value : undefined;
+}
+
+function requireNonEmpty(value: string | undefined, label: string): string {
+  const trimmed = value?.trim();
+  if (!trimmed) throw new NotionApiError(400, `${label} 값이 필요합니다.`);
+  return trimmed;
 }
 
 function clampPageSize(pageSize?: number): number {
@@ -137,6 +163,10 @@ function richTextPlain(raw: unknown): string {
       return stringField(record?.plain_text) ?? "";
     })
     .join("");
+}
+
+function plainRichText(text: string): Array<Record<string, unknown>> {
+  return [{ type: "text", text: { content: text.slice(0, 2000) } }];
 }
 
 function titleFromProperties(raw: unknown): string | null {
@@ -253,6 +283,64 @@ function blockText(raw: unknown): string {
     default:
       return text;
   }
+}
+
+function blockFromLine(line: string): Record<string, unknown> | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  const heading = /^(#{1,3})\s+(.+)$/.exec(trimmed);
+  if (heading) {
+    const type =
+      heading[1].length === 1
+        ? "heading_1"
+        : heading[1].length === 2
+          ? "heading_2"
+          : "heading_3";
+    return { object: "block", type, [type]: { rich_text: plainRichText(heading[2]) } };
+  }
+  const bullet = /^[-*]\s+(.+)$/.exec(trimmed);
+  if (bullet) {
+    return {
+      object: "block",
+      type: "bulleted_list_item",
+      bulleted_list_item: { rich_text: plainRichText(bullet[1]) },
+    };
+  }
+  const numbered = /^\d+\.\s+(.+)$/.exec(trimmed);
+  if (numbered) {
+    return {
+      object: "block",
+      type: "numbered_list_item",
+      numbered_list_item: { rich_text: plainRichText(numbered[1]) },
+    };
+  }
+  return {
+    object: "block",
+    type: "paragraph",
+    paragraph: { rich_text: plainRichText(trimmed) },
+  };
+}
+
+export function buildNotionBlocks(content: string | undefined): Record<string, unknown>[] {
+  return (content ?? "")
+    .split(/\r?\n/)
+    .map((line) => blockFromLine(line))
+    .filter((block): block is Record<string, unknown> => block !== null)
+    .slice(0, 100);
+}
+
+function parentPayload(params: NotionWriteParams): Record<string, string> {
+  const databaseId = params.parentDatabaseId?.trim();
+  if (databaseId) return { database_id: databaseId };
+  return { page_id: requireNonEmpty(params.parentPageId, "parentPageId") };
+}
+
+function createPageProperties(title: string): Record<string, unknown> {
+  return {
+    title: {
+      title: plainRichText(title),
+    },
+  };
 }
 
 function truncateText(
@@ -430,6 +518,50 @@ export function createNotionConnector(
         cursor = stringField(parsed?.next_cursor);
       } while (cursor);
       return pages;
+    },
+
+    async createPage(params: NotionWriteParams): Promise<NotionWriteResult> {
+      const title = requireNonEmpty(params.title, "title");
+      const children = buildNotionBlocks(params.content);
+      const raw = await getJson("/pages", {
+        method: "POST",
+        body: JSON.stringify({
+          parent: parentPayload(params),
+          properties: createPageProperties(title),
+          ...(children.length ? { children } : {}),
+        }),
+      });
+      const meta = parseNotionObject(raw);
+      if (!meta || meta.object !== "page") {
+        throw new NotionApiError(
+          502,
+          "Notion 이 알 수 없는 형식의 페이지 생성 응답을 보냈습니다.",
+        );
+      }
+      return {
+        action: "create_page",
+        pageId: meta.id,
+        title: meta.title,
+        url: meta.url,
+        appendedBlocks: children.length,
+      };
+    },
+
+    async appendBlocks(params: NotionWriteParams): Promise<NotionWriteResult> {
+      const pageId = requireNonEmpty(params.pageId, "pageId");
+      const children = buildNotionBlocks(params.content);
+      if (children.length === 0) {
+        throw new NotionApiError(400, "추가할 content 블록이 필요합니다.");
+      }
+      await getJson(`/blocks/${encodeURIComponent(pageId)}/children`, {
+        method: "PATCH",
+        body: JSON.stringify({ children }),
+      });
+      return {
+        action: "append_blocks",
+        pageId,
+        appendedBlocks: children.length,
+      };
     },
   };
 }

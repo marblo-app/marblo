@@ -20,8 +20,12 @@ vi.mock("electron", () => ({
 import {
   DRIVE_AUTH_SCOPE,
   CALENDAR_READONLY_SCOPE,
+  CALENDAR_EVENTS_SCOPE,
+  DRIVE_FILE_SCOPE,
   DRIVE_READONLY_SCOPE,
+  GMAIL_COMPOSE_SCOPE,
   GMAIL_READONLY_SCOPE,
+  GMAIL_SEND_SCOPE,
   emailFromIdToken,
   parseRefreshResponse,
   refreshAccessToken,
@@ -35,22 +39,33 @@ function fakeIdToken(payload: Record<string, unknown>): string {
 }
 
 describe("스코프", () => {
-  it("읽기 전용 스코프만 요청한다(쓰기 스코프 금지)", () => {
+  it("읽기 스코프와 필요한 쓰기 스코프만 요청한다", () => {
     expect(DRIVE_READONLY_SCOPE).toBe(
       "https://www.googleapis.com/auth/drive.readonly",
     );
+    expect(DRIVE_FILE_SCOPE).toBe("https://www.googleapis.com/auth/drive.file");
     expect(GMAIL_READONLY_SCOPE).toBe(
       "https://www.googleapis.com/auth/gmail.readonly",
     );
+    expect(GMAIL_COMPOSE_SCOPE).toBe(
+      "https://www.googleapis.com/auth/gmail.compose",
+    );
+    expect(GMAIL_SEND_SCOPE).toBe("https://www.googleapis.com/auth/gmail.send");
     expect(CALENDAR_READONLY_SCOPE).toBe(
       "https://www.googleapis.com/auth/calendar.readonly",
     );
+    expect(CALENDAR_EVENTS_SCOPE).toBe(
+      "https://www.googleapis.com/auth/calendar.events",
+    );
     expect(DRIVE_AUTH_SCOPE).toContain(DRIVE_READONLY_SCOPE);
+    expect(DRIVE_AUTH_SCOPE).toContain(DRIVE_FILE_SCOPE);
     expect(DRIVE_AUTH_SCOPE).toContain(GMAIL_READONLY_SCOPE);
+    expect(DRIVE_AUTH_SCOPE).toContain(GMAIL_COMPOSE_SCOPE);
+    expect(DRIVE_AUTH_SCOPE).toContain(GMAIL_SEND_SCOPE);
     expect(DRIVE_AUTH_SCOPE).toContain(CALENDAR_READONLY_SCOPE);
-    // drive.file / drive(전체 쓰기) 가 섞여 들어오면 최소권한이 깨진다.
+    expect(DRIVE_AUTH_SCOPE).toContain(CALENDAR_EVENTS_SCOPE);
+    // drive(전체 쓰기) 는 여전히 요청하지 않는다.
     expect(DRIVE_AUTH_SCOPE).not.toMatch(/auth\/drive(\s|$)/);
-    expect(DRIVE_AUTH_SCOPE).not.toContain("drive.file");
   });
 });
 
