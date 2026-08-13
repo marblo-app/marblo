@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { t } from "../lib/i18n";
+import { isAssistantProject } from "../lib/projectKind";
 import { Header } from "./Header";
 import { TabBar, type TabId } from "./TabBar";
 import { Sidebar } from "./sidebar/Sidebar";
@@ -91,6 +92,20 @@ export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const attachSession = useTerminalStore((s) => s.attachSession);
   const currentProject = useProjectStore((s) => s.currentProject);
+  // assistant 프로젝트 전환 시 기본 서피스(코드/위키 + 문서그래프).
+  // WorkspaceShell 은 useProjectKindSurface 를 쓰고, 레거시 Layout 은 자체 탭 상태.
+  const prevProjectIdForKindRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = currentProject?.id ?? null;
+    if (id === prevProjectIdForKindRef.current) return;
+    prevProjectIdForKindRef.current = id;
+    if (!isAssistantProject(currentProject)) return;
+    setActiveTab((tab) =>
+      tab === "board" || tab === "lanes" || tab === "history" ? "code" : tab,
+    );
+    setSidebarOpen(true);
+    window.dispatchEvent(new CustomEvent("marblo:reveal-doc-graph"));
+  }, [currentProject?.id, currentProject?.kind]);
 
   // Register this window's current project with main so per-project events
   // (agent:spawned, agent:statusChanged, etc.) are scoped to this window in

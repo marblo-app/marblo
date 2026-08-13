@@ -121,6 +121,8 @@ function makeProjectSetup(overrides: Partial<ProjectSetup> = {}): ProjectSetup {
     showNewProject: false,
     newProjectName: "",
     setNewProjectName: vi.fn(),
+    newProjectKind: "dev",
+    setNewProjectKind: vi.fn(),
     newProjectInputRef: { current: null },
     handleCreateInlineProject: vi.fn(),
     handleCancelInlineProject: vi.fn(),

@@ -17,4 +17,13 @@ export const header: Record<keyof typeof koHeader, string> = {
   "header.recentProjects": "Recent",
   "header.myProjects": "My Projects",
   "header.noSearchResults": "No matching projects",
+  // Project kind (dev | assistant)
+  "header.projectKind.label": "Project type",
+  "header.projectKind.dev": "Dev",
+  "header.projectKind.assistant": "Assistant",
+  "header.projectKind.devHint": "Board-first development workspace",
+  "header.projectKind.assistantHint":
+    "Chat + wiki + connectors assistant workspace",
+  "header.projectKind.badge.dev": "Dev",
+  "header.projectKind.badge.assistant": "Assistant",
 };

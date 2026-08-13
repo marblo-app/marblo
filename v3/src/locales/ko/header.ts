@@ -15,4 +15,12 @@ export const header = {
   "header.recentProjects": "최근",
   "header.myProjects": "내 프로젝트",
   "header.noSearchResults": "검색 결과 없음",
+  // 프로젝트 종류(dev | assistant)
+  "header.projectKind.label": "프로젝트 종류",
+  "header.projectKind.dev": "개발",
+  "header.projectKind.assistant": "비서",
+  "header.projectKind.devHint": "보드·코드 중심 개발 워크스페이스",
+  "header.projectKind.assistantHint": "대화·위키·커넥터 중심 비서 워크스페이스",
+  "header.projectKind.badge.dev": "개발",
+  "header.projectKind.badge.assistant": "비서",
 };

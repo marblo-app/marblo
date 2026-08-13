@@ -1,5 +1,6 @@
 import { t } from "../../lib/i18n";
 import type { ProjectSetup } from "../../hooks/useProjectSetup";
+import { ProjectKindPicker } from "../project/ProjectKindPicker";
 
 /**
  * The inline name-your-project banner for the project-setup flow. Split out of
@@ -17,6 +18,8 @@ export function ProjectSetupBanners(props: ProjectSetup) {
     showNewProject,
     newProjectName,
     setNewProjectName,
+    newProjectKind,
+    setNewProjectKind,
     newProjectInputRef,
     handleCreateInlineProject,
     handleCancelInlineProject,
@@ -80,6 +83,14 @@ export function ProjectSetupBanners(props: ProjectSetup) {
                 />
               </svg>
             </button>
+          </div>
+          <div className="mt-1.5">
+            <ProjectKindPicker
+              value={newProjectKind}
+              onChange={setNewProjectKind}
+              compact
+              id="inline-new-project-kind"
+            />
           </div>
           <p className="mt-1 text-[10px] text-gray-500">
             {t("sidebar.tree.createHint")}

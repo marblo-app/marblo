@@ -22,6 +22,7 @@ import {
   type BeginnerCuratedTabId,
   type BeginnerTabId,
 } from "../../lib/beginnerTabs";
+import { normalizeProjectKind } from "../../lib/projectKind";
 import { useOnboardingSetup } from "../../hooks/useOnboardingSetup";
 import { useAgentStore } from "../../stores/agentStore";
 import { useBeginnerModeStore } from "../../stores/beginnerModeStore";
@@ -169,6 +170,9 @@ export function BeginnerShell() {
   const sampleStatus = setup.sampleStatus;
   const currentProject = useProjectStore((s) => s.currentProject);
   const projectId = currentProject?.id ?? "";
+  // kind 는 데이터 속성·계측용. 심플 셸 탭 구성은 kind 와 무관(대화 기본) —
+  // 여기서 분기해 탭을 바꾸지 않는다(BeginnerShell 핫스팟, union-safe).
+  const projectKind = normalizeProjectKind(currentProject?.kind);
   // ★프리뷰 중에는 "폴더 없음" 으로 그린다 — 실제 프로젝트를 끊지 않고 폴더
   // 게이트(샘플 자동연결)를 재생하기 위한 것이다. 시뮬이 끝나면 실제 값으로.
   const hasFolder = setup.preview ? false : !!currentProject?.folderPath;
@@ -469,7 +473,10 @@ export function BeginnerShell() {
   }, []);
 
   return (
-    <div className="flex h-screen flex-col bg-[#11111b] text-[#cdd6f4]">
+    <div
+      className="flex h-screen flex-col bg-[#11111b] text-[#cdd6f4]"
+      data-project-kind={projectKind}
+    >
       {/* 이 셸에는 CliSetupHost(배너)가 없다 — 엔진은 여기서 한 번만 돈다.
           프리뷰 중에는 아예 마운트하지 않는다(위 주석: 자동설치 금지). */}
       {!previewEnabled && <CliSetupEngineHost />}
