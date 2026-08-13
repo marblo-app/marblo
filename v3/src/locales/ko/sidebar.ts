@@ -86,6 +86,11 @@ export const sidebar = {
   "sidebar.tab.commands": "명령어",
   "sidebar.tab.chat": "채팅",
 
+  // Files 하위: 파일트리 ↔ 문서 관계 그래프
+  "sidebar.filesSub.aria": "파일 패널 보기",
+  "sidebar.filesSub.tree": "파일 트리",
+  "sidebar.filesSub.graph": "Graph",
+
   // TabBar — pop-out affordance (tab labels themselves stay English)
   "sidebar.tab.popOut": "별도 창으로 열기",
   "sidebar.tab.popOutLabel": "{name} 별도 창으로 열기",

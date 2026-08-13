@@ -22,6 +22,8 @@ import {
   DRIVE_FOLDER_MIME,
   type DriveFetchLike,
 } from "../../electron/google-drive-connector";
+import { extractOfficeText } from "../../electron/office-text-extract";
+import { makeZip } from "./zip-fixture";
 
 // ── 쿼리 빌더 ──────────────────────────────────────────────────────────────
 
@@ -469,6 +471,195 @@ describe("createDriveConnector", () => {
     const none = await scanned.fetchDocument("F1");
     expect(none.extraction).toBe("pdf-no-text");
     expect(none.text).toBe("");
+  });
+
+  // ── Office/한글 업로드본 (티켓 0hDmMoM8oiU0d1eGUHvL) ────────────────────
+  //
+  // 사장님 위키가 전부 Office 업로드본이라, 여기서는 **진짜 추출기**를 주입해
+  // 픽스처 바이트 → 본문 텍스트까지 한 줄로 검증한다(가짜 추출기로 분기만 보면
+  // "연결은 됐는데 본문이 안 나온다" 는 실제 증상을 못 잡는다).
+
+  const DOCX_MIME =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const XLSX_MIME =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  const PPTX_MIME =
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+  const officeConnector = (routes: Array<[string, FakeRoute]>) =>
+    createDriveConnector({
+      getAccessToken: async () => "t",
+      fetchImpl: fakeFetch(routes).fetchImpl,
+      extractOfficeText,
+    });
+
+  it(".docx 업로드본의 본문 텍스트를 돌려준다", async () => {
+    const docx = makeZip([
+      {
+        name: "word/document.xml",
+        data: "<w:document xmlns:w='x'><w:body><w:p><w:r><w:t>마블로 특허 출원 명세서</w:t></w:r></w:p></w:body></w:document>",
+      },
+    ]);
+    const doc = await officeConnector([
+      ["alt=media", { body: docx }],
+      [
+        "/drive/v3/files/F1?",
+        {
+          json: META({
+            name: "마블로 특허 출원 명세서.docx",
+            mimeType: DOCX_MIME,
+          }),
+        },
+      ],
+    ]).fetchDocument("F1");
+    expect(doc.extraction).toBe("office");
+    expect(doc.text).toContain("마블로 특허 출원 명세서");
+  });
+
+  it(".xlsx 는 시트별 CSV 로, .pptx 는 슬라이드 텍스트로 돌아온다", async () => {
+    const xlsx = makeZip([
+      {
+        name: "xl/worksheets/sheet1.xml",
+        data: '<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>매출</t></is></c><c r="B1"><v>1500</v></c></row></sheetData></worksheet>',
+      },
+    ]);
+    const sheet = await officeConnector([
+      ["alt=media", { body: xlsx }],
+      [
+        "/drive/v3/files/F1?",
+        { json: META({ name: "매출.xlsx", mimeType: XLSX_MIME }) },
+      ],
+    ]).fetchDocument("F1");
+    expect(sheet.extraction).toBe("office");
+    expect(sheet.text).toContain("매출,1500");
+
+    const pptx = makeZip([
+      {
+        name: "ppt/slides/slide1.xml",
+        data: "<p:sld xmlns:a='x'><a:p><a:r><a:t>발표 제목</a:t></a:r></a:p></p:sld>",
+      },
+    ]);
+    const deck = await officeConnector([
+      ["alt=media", { body: pptx }],
+      [
+        "/drive/v3/files/F1?",
+        { json: META({ name: "발표.pptx", mimeType: PPTX_MIME }) },
+      ],
+    ]).fetchDocument("F1");
+    expect(deck.extraction).toBe("office");
+    expect(deck.text).toContain("발표 제목");
+  });
+
+  it("MIME 이 octet-stream 인 .hwpx 도 확장자로 알아보고 읽는다", async () => {
+    // 한글 파일은 Drive 에 octet-stream 으로 올라와 있는 게 보통이다.
+    const hwpx = makeZip([
+      {
+        name: "Contents/section0.xml",
+        data: "<hs:sec xmlns:hp='x'><hp:p><hp:t>한글 위키 본문</hp:t></hp:p></hs:sec>",
+      },
+    ]);
+    const doc = await officeConnector([
+      ["alt=media", { body: hwpx }],
+      [
+        "/drive/v3/files/F1?",
+        {
+          json: META({
+            name: "회의록.hwpx",
+            mimeType: "application/octet-stream",
+          }),
+        },
+      ],
+    ]).fetchDocument("F1");
+    expect(doc.extraction).toBe("office");
+    expect(doc.text).toContain("한글 위키 본문");
+  });
+
+  it("텍스트가 없는 문서와 열 수 없는 문서를 서로 다른 사실로 구분한다", async () => {
+    const routes = (name: string): Array<[string, FakeRoute]> => [
+      ["alt=media", { body: Buffer.from("이건 zip 이 아니다", "utf8") }],
+      ["/drive/v3/files/F1?", { json: META({ name, mimeType: DOCX_MIME }) }],
+    ];
+
+    const broken = await officeConnector(routes("깨진문서.docx")).fetchDocument(
+      "F1",
+    );
+    expect(broken.extraction).toBe("office-unreadable");
+    expect(broken.extractionDetail).toBeTruthy();
+
+    const imageOnly = createDriveConnector({
+      getAccessToken: async () => "t",
+      fetchImpl: fakeFetch(routes("스캔본.docx")).fetchImpl,
+      extractOfficeText: () => ({
+        text: "",
+        empty: true,
+        reason: "no-text" as const,
+        detail: "문서 안에 추출할 텍스트가 없습니다.",
+      }),
+    });
+    const scanned = await imageOnly.fetchDocument("F1");
+    expect(scanned.extraction).toBe("office-no-text");
+    expect(scanned.extractionDetail).toContain("텍스트가 없");
+  });
+
+  it("추출기를 주입하지 않으면 Office 파일은 unsupported 로 남는다", async () => {
+    const { fetchImpl } = fakeFetch([
+      ["alt=media", { body: Buffer.alloc(4) }],
+      [
+        "/drive/v3/files/F1?",
+        { json: META({ name: "문서.docx", mimeType: DOCX_MIME }) },
+      ],
+    ]);
+    const connector = createDriveConnector({
+      getAccessToken: async () => "t",
+      fetchImpl,
+    });
+    expect((await connector.fetchDocument("F1")).extraction).toBe(
+      "unsupported",
+    );
+  });
+
+  it("Excel MIME 으로 올라온 .csv 도 텍스트로 받는다", async () => {
+    // Windows 업로드에서 흔한 오분류 — MIME 만 믿으면 멀쩡한 CSV 를 놓친다.
+    const { fetchImpl } = fakeFetch([
+      ["alt=media", { body: Buffer.from("이름,금액\n사과,1500", "utf8") }],
+      [
+        "/drive/v3/files/F1?",
+        {
+          json: META({
+            name: "매출.csv",
+            mimeType: "application/vnd.ms-excel",
+          }),
+        },
+      ],
+    ]);
+    const connector = createDriveConnector({
+      getAccessToken: async () => "t",
+      fetchImpl,
+      extractOfficeText,
+    });
+    const doc = await connector.fetchDocument("F1");
+    expect(doc.extraction).toBe("download");
+    expect(doc.text).toContain("사과,1500");
+  });
+
+  it("97-2003 형식(.doc)은 여전히 다운로드 없이 unsupported 다", async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      [
+        "/drive/v3/files/F1?",
+        {
+          json: META({ name: "옛날문서.doc", mimeType: "application/msword" }),
+        },
+      ],
+    ]);
+    const connector = createDriveConnector({
+      getAccessToken: async () => "t",
+      fetchImpl,
+      extractOfficeText,
+    });
+    expect((await connector.fetchDocument("F1")).extraction).toBe(
+      "unsupported",
+    );
+    expect(calls).toHaveLength(1);
   });
 
   it("이미지처럼 텍스트로 못 바꾸는 형식은 다운로드조차 하지 않는다", async () => {

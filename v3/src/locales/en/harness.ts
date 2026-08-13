@@ -275,6 +275,53 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.drive.appliesImmediately":
     "Takes effect immediately, including for already-running agents.",
 
+  // --- Notion wiki panel (gaUx2Cmsw6EN8ymjL2ks) ---
+  "harness.notion.title": "Notion wiki",
+  "harness.notion.subtitle":
+    "Store the integration token once; pick a wiki database or page per project.",
+  "harness.notion.status.disconnected": "Disconnected",
+  "harness.notion.status.needsBinding": "Binding needed",
+  "harness.notion.status.bound": "Connected",
+  "harness.notion.account": "Notion workspace",
+  "harness.notion.accountNone": "No workspace connected",
+  "harness.notion.tokenPlaceholder": "Integration token",
+  "harness.notion.workspacePlaceholder": "Workspace name (optional)",
+  "harness.notion.connect": "Connect Notion",
+  "harness.notion.reconnect": "Reconnect",
+  "harness.notion.connected": "Notion connected.",
+  "harness.notion.connectFailed": "Failed to connect Notion.",
+  "harness.notion.disconnect": "Disconnect Notion",
+  "harness.notion.disconnectConfirm":
+    "Disconnect Notion on this machine? Stored credentials are deleted and every project stops reading Notion.",
+  "harness.notion.disconnected": "Notion disconnected.",
+  "harness.notion.disconnectFailed": "Failed to disconnect.",
+  "harness.notion.bindingSection": "This project's wiki DB/page",
+  "harness.notion.bindingNone": "No database or page selected",
+  "harness.notion.bindingHint":
+    "This project's agents read only the database or page you pick here.",
+  "harness.notion.searchPlaceholder": "Search databases/pages by name",
+  "harness.notion.search": "Find Notion",
+  "harness.notion.searching": "Searching",
+  "harness.notion.noResults": "No databases or pages matched.",
+  "harness.notion.select": "Use this item",
+  "harness.notion.bound": "Notion wiki set.",
+  "harness.notion.bindFailed": "Failed to set the Notion wiki.",
+  "harness.notion.clearBinding": "Clear Notion binding",
+  "harness.notion.clearConfirm":
+    "Clear this project's Notion wiki? Its agents will no longer be able to read Notion documents.",
+  "harness.notion.cleared": "Notion wiki cleared.",
+  "harness.notion.clearFailed": "Failed to clear the Notion wiki.",
+  "harness.notion.preview": "Check scope",
+  "harness.notion.previewTitle":
+    "Query exactly what agents see and report how many pages are in scope",
+  "harness.notion.previewOk": "{count} pages are visible in this Notion scope.",
+  "harness.notion.previewEmpty": "No pages are visible in this Notion scope.",
+  "harness.notion.loadError": "Failed to load Notion status.",
+  "harness.notion.needProject": "Select a project first.",
+  "harness.notion.refreshTitle": "Refresh Notion status",
+  "harness.notion.appliesImmediately":
+    "Takes effect immediately, including for already-running agents.",
+
   // HarnessVersionBadge — tooltip for an agent's installed CLI version
   "harness.installedCliVersion": "Installed CLI version v{version}",
 

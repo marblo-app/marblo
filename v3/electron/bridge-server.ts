@@ -49,6 +49,11 @@ import type {
   CalendarListParams,
   CalendarListResult,
 } from "./calendar-connector";
+import type {
+  NotionDocument,
+  NotionSearchParams,
+  NotionSearchResult,
+} from "./notion-connector";
 import { mainTelemetry, type DispatchDecisionPayload } from "./telemetry";
 import { planCapErrorCategory } from "./spawn-block-reason";
 import {
@@ -276,6 +281,31 @@ export interface GoogleWorkspaceGateway {
     params: CalendarListParams,
   ): Promise<
     { ok: true; result: CalendarListResult } | { ok: false; error: string }
+  >;
+}
+
+export interface NotionGateway {
+  search(
+    projectId: string | null,
+    params: NotionSearchParams,
+  ): Promise<
+    | {
+        ok: true;
+        result: NotionSearchResult;
+        scope?: {
+          objectId: string;
+          objectKind: "database" | "page";
+          title: string | null;
+          truncated: boolean;
+        };
+      }
+    | { ok: false; error: string }
+  >;
+  fetch(
+    projectId: string | null,
+    pageId: string,
+  ): Promise<
+    { ok: true; document: NotionDocument } | { ok: false; error: string }
   >;
 }
 
@@ -969,6 +999,7 @@ export class BridgeServer {
   // (the tools then report Drive as unavailable).
   private driveGateway: DriveGateway | null = null;
   private googleWorkspaceGateway: GoogleWorkspaceGateway | null = null;
+  private notionGateway: NotionGateway | null = null;
 
   constructor(
     agentManager: AgentManager,
@@ -1085,6 +1116,14 @@ export class BridgeServer {
    */
   setGoogleWorkspaceGateway(gateway: GoogleWorkspaceGateway): void {
     this.googleWorkspaceGateway = gateway;
+  }
+
+  /**
+   * Wire the read-only Notion gateway. As with Drive, bridge/MCP never receive
+   * the Notion token; main owns safeStorage and enforces project binding.
+   */
+  setNotionGateway(gateway: NotionGateway): void {
+    this.notionGateway = gateway;
   }
 
   /** Wire the outbound Telegram sender (main → TelegramPoller.sendMessage). */
@@ -1336,6 +1375,16 @@ export class BridgeServer {
 
         if (req.method === "POST" && req.url === "/calendar-list") {
           this.handleCalendarList(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/notion-search") {
+          this.handleNotionSearch(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/notion-fetch") {
+          this.handleNotionFetch(req, res);
           return;
         }
 
@@ -4480,6 +4529,17 @@ export class BridgeServer {
     );
   }
 
+  private notionUnavailable(res: http.ServerResponse): void {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        ok: false,
+        error:
+          "Notion 커넥터를 쓸 수 없습니다 (앱에서 Notion 을 연결했는지 확인하세요).",
+      }),
+    );
+  }
+
   private requireGoogleWorkspaceProject(
     res: http.ServerResponse,
     projectId: string | null,
@@ -4720,6 +4780,88 @@ export class BridgeServer {
       }
     })();
   }
+
+  /** POST /notion-search — 프로젝트 바인딩 범위의 Notion 검색. */
+  private handleNotionSearch(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.notionGateway) return this.notionUnavailable(res);
+
+      const str = (v: unknown): string | undefined =>
+        typeof v === "string" && v.trim() ? v.trim() : undefined;
+      const object = str(params.object);
+      try {
+        const result = await this.notionGateway.search(
+          str(params.projectId) ?? null,
+          {
+            query: str(params.query),
+            object:
+              object === "page" || object === "database" ? object : undefined,
+            pageSize:
+              typeof params.pageSize === "number" ? params.pageSize : undefined,
+            startCursor: str(params.startCursor),
+          },
+        );
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "notion search failed",
+          }),
+        );
+      }
+    })();
+  }
+
+  /** POST /notion-fetch — Notion page blocks as markdown-ish text. */
+  private handleNotionFetch(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.notionGateway) return this.notionUnavailable(res);
+
+      const pageId =
+        typeof params.pageId === "string" ? params.pageId.trim() : "";
+      if (!pageId) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Missing required field: pageId",
+          }),
+        );
+        return;
+      }
+      const projectId =
+        typeof params.projectId === "string" && params.projectId.trim()
+          ? params.projectId.trim()
+          : null;
+      try {
+        const result = await this.notionGateway.fetch(projectId, pageId);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "notion fetch failed",
+          }),
+        );
+      }
+    })();
+  }
+
   // ── POST /send-slack-message ────────────────────────────────
   //
   // Outbound path for the send_slack_message MCP tool — the exact mirror of

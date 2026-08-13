@@ -272,6 +272,54 @@ export const harness = {
   // 이미 떠 있는 에이전트도 재시작 없이 새 폴더를 본다.
   "harness.drive.appliesImmediately": "실행 중인 에이전트에도 즉시 적용됩니다.",
 
+  // --- Notion wiki panel (gaUx2Cmsw6EN8ymjL2ks) ---
+  "harness.notion.title": "Notion 위키",
+  "harness.notion.subtitle":
+    "integration token은 1회 저장하고, 위키 DB/페이지는 프로젝트마다 지정합니다.",
+  "harness.notion.status.disconnected": "미연결",
+  "harness.notion.status.needsBinding": "바인딩 필요",
+  "harness.notion.status.bound": "연결",
+  "harness.notion.account": "Notion 워크스페이스",
+  "harness.notion.accountNone": "연결된 워크스페이스 없음",
+  "harness.notion.tokenPlaceholder": "Integration token",
+  "harness.notion.workspacePlaceholder": "워크스페이스 이름(선택)",
+  "harness.notion.connect": "Notion 연결",
+  "harness.notion.reconnect": "다시 연결",
+  "harness.notion.connected": "Notion 을 연결했습니다.",
+  "harness.notion.connectFailed": "Notion 연결에 실패했습니다.",
+  "harness.notion.disconnect": "Notion 연결 해제",
+  "harness.notion.disconnectConfirm":
+    "이 기기에서 Notion 연결을 해제하시겠습니까? 저장된 인증 정보가 삭제되고 모든 프로젝트의 Notion 조회가 멈춥니다.",
+  "harness.notion.disconnected": "Notion 연결을 해제했습니다.",
+  "harness.notion.disconnectFailed": "연결 해제에 실패했습니다.",
+  "harness.notion.bindingSection": "이 프로젝트의 위키 DB/페이지",
+  "harness.notion.bindingNone": "DB 또는 페이지가 지정되지 않았습니다",
+  "harness.notion.bindingHint":
+    "이 프로젝트의 에이전트는 여기서 고른 DB 또는 페이지 범위만 읽습니다.",
+  "harness.notion.searchPlaceholder": "DB/페이지 이름으로 검색",
+  "harness.notion.search": "Notion 찾기",
+  "harness.notion.searching": "검색 중",
+  "harness.notion.noResults": "조건에 맞는 DB/페이지가 없습니다.",
+  "harness.notion.select": "이 항목으로 지정",
+  "harness.notion.bound": "Notion 위키를 지정했습니다.",
+  "harness.notion.bindFailed": "Notion 위키 지정에 실패했습니다.",
+  "harness.notion.clearBinding": "Notion 바인딩 해제",
+  "harness.notion.clearConfirm":
+    "이 프로젝트의 Notion 위키 지정을 해제하시겠습니까? 해제하면 이 프로젝트의 에이전트는 Notion 문서를 읽지 못합니다.",
+  "harness.notion.cleared": "Notion 위키 지정을 해제했습니다.",
+  "harness.notion.clearFailed": "Notion 지정 해제에 실패했습니다.",
+  "harness.notion.preview": "범위 확인",
+  "harness.notion.previewTitle":
+    "에이전트가 보는 Notion 범위 그대로 조회해 결과 수를 확인합니다",
+  "harness.notion.previewOk":
+    "이 Notion 범위에서 페이지 {count}개가 조회됩니다.",
+  "harness.notion.previewEmpty": "이 Notion 범위에 조회되는 페이지가 없습니다.",
+  "harness.notion.loadError": "Notion 상태를 불러오지 못했습니다.",
+  "harness.notion.needProject": "프로젝트를 먼저 선택해 주세요.",
+  "harness.notion.refreshTitle": "Notion 상태 새로고침",
+  "harness.notion.appliesImmediately":
+    "실행 중인 에이전트에도 즉시 적용됩니다.",
+
   // HarnessVersionBadge — tooltip for an agent's installed CLI version
   "harness.installedCliVersion": "설치된 CLI 버전 v{version}",
 

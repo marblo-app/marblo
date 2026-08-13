@@ -19,6 +19,7 @@
  * 4. **토큰 미로그.** access token 은 Authorization 헤더에만 쓰이고 어떤 에러
  *    메시지·로그에도 실리지 않는다.
  */
+import { detectOfficeFormat, type OfficeFormat } from "./office-formats";
 
 export type DriveFetchLike = (
   input: string,
@@ -71,6 +72,12 @@ export type DriveExtraction =
   | "pdf"
   /** PDF 이지만 텍스트 레이어가 없다(스캔본) — text 는 빈 문자열 */
   | "pdf-no-text"
+  /** Office/한글 문서(docx·pptx·xlsx·hwpx·hwp)에서 본문 텍스트 추출 */
+  | "office"
+  /** 파일은 열렸으나 텍스트가 없다(이미지만 든 문서) — text 는 빈 문자열 */
+  | "office-no-text"
+  /** 컨테이너를 열지 못했다(암호·손상·잘림·미지원 하위형식) */
+  | "office-unreadable"
   /** 텍스트로 바꿀 방법이 없는 형식(이미지·동영상·폴더 등) */
   | "unsupported";
 
@@ -83,6 +90,11 @@ export interface DriveDocument {
   mimeType: string;
   text: string;
   extraction: DriveExtraction;
+  /**
+   * 본문이 빈 이유 등, 사용자에게 그대로 보여줄 짧은 설명. 성공 시엔 없다.
+   * (조용한 빈 본문 금지 — 왜 비었는지가 값으로 따라와야 한다.)
+   */
+  extractionDetail?: string;
   /** 상한에 걸려 잘렸는가. */
   truncated: boolean;
   modifiedTime?: string;
@@ -345,11 +357,39 @@ export function isGoogleNativeMime(mimeType: string): boolean {
   return mimeType.startsWith("application/vnd.google-apps.");
 }
 
-/** alt=media 로 받은 바이트를 텍스트로 볼 수 있는 MIME 인가. */
-export function isTextualMime(mimeType: string): boolean {
+/**
+ * alt=media 로 받은 바이트를 텍스트로 볼 수 있는가.
+ *
+ * 파일명을 함께 받는 이유: Windows 에서 올린 .csv 가 `application/vnd.ms-excel`
+ * 로 붙어 오는 일이 흔하다. MIME 만 믿으면 멀쩡한 CSV 를 "미지원" 으로 되돌려
+ * 보내게 된다 — 확장자가 명백한 텍스트 형식이면 받아준다.
+ */
+export function isTextualMime(mimeType: string, fileName = ""): boolean {
   const base = mimeType.split(";")[0].trim().toLowerCase();
   if (base.startsWith("text/")) return true;
+  const extension = fileName.includes(".")
+    ? fileName.slice(fileName.lastIndexOf(".") + 1).toLowerCase()
+    : "";
+  if (
+    [
+      "csv",
+      "tsv",
+      "txt",
+      "md",
+      "markdown",
+      "json",
+      "jsonl",
+      "ndjson",
+      "xml",
+      "yaml",
+      "yml",
+      "log",
+    ].includes(extension)
+  ) {
+    return true;
+  }
   return [
+    "application/csv",
     "application/json",
     "application/xml",
     "application/xhtml+xml",
@@ -384,6 +424,19 @@ export interface DriveConnectorOptions {
   fetchImpl?: DriveFetchLike;
   /** PDF 바이트 → 텍스트. 주입식이라 이 모듈이 zlib 에 묶이지 않는다. */
   extractPdfText?: (bytes: Buffer) => { text: string; empty: boolean };
+  /**
+   * Office/한글 문서 바이트 → 텍스트. PDF 와 같은 이유로 주입식이다.
+   * `reason` 은 왜 비었는지다: `no-text`(텍스트 없는 문서) / `unreadable`(못 엶).
+   */
+  extractOfficeText?: (
+    bytes: Buffer,
+    format: OfficeFormat,
+  ) => {
+    text: string;
+    empty: boolean;
+    reason?: "no-text" | "unreadable";
+    detail?: string;
+  };
   maxContentBytes?: number;
   maxTextChars?: number;
 }
@@ -514,7 +567,13 @@ export function createDriveConnector(
 
       // (b) 일반 파일 → files.get?alt=media
       const isPdf = meta.mimeType.split(";")[0].trim() === "application/pdf";
-      if (!isPdf && !isTextualMime(meta.mimeType)) {
+      // Office/한글 문서는 MIME 이 틀려 올라온 경우가 잦아 파일명도 함께 본다.
+      const officeFormat = detectOfficeFormat(meta.mimeType, meta.title);
+      if (
+        !isPdf &&
+        !officeFormat &&
+        !isTextualMime(meta.mimeType, meta.title)
+      ) {
         return {
           ...base,
           text: "",
@@ -556,6 +615,40 @@ export function createDriveConnector(
           ...base,
           text: limited.text,
           extraction: "pdf",
+          truncated: bytesTruncated || limited.truncated,
+        };
+      }
+
+      if (officeFormat) {
+        const extract = options.extractOfficeText;
+        if (!extract) {
+          return {
+            ...base,
+            text: "",
+            extraction: "unsupported",
+            truncated: false,
+          };
+        }
+        const result = extract(bytes, officeFormat);
+        if (result.empty) {
+          // 왜 비었는지를 값으로 남긴다 — 조용한 빈 본문 금지.
+          return {
+            ...base,
+            text: "",
+            extraction:
+              result.reason === "unreadable"
+                ? "office-unreadable"
+                : "office-no-text",
+            extractionDetail: result.detail,
+            // 10MB 상한에 잘려서 못 읽었을 수 있다는 사실을 함께 알린다.
+            truncated: bytesTruncated,
+          };
+        }
+        const limited = truncateText(result.text, maxTextChars);
+        return {
+          ...base,
+          text: limited.text,
+          extraction: "office",
           truncated: bytesTruncated || limited.truncated,
         };
       }

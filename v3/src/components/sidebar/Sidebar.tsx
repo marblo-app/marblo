@@ -2,10 +2,13 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { FileTree } from "./FileTree";
 import { CommandPanel } from "./CommandPanel";
 import { ProjectChat } from "../chat/ProjectChat";
+import { DocGraphPanel } from "../code/DocGraphPanel";
 import { useChatStore } from "../../stores/chatStore";
 import { useTranslation } from "../../lib/i18n";
 
 type SidebarPanel = "files" | "commands" | "chat";
+/** Code 사이드바 Files 영역 하위: 파일트리 ↔ 문서 관계 그래프. */
+type FilesSubView = "tree" | "graph";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -17,6 +20,8 @@ interface SidebarProps {
 const MIN_WIDTH = 160;
 const MAX_WIDTH = 480;
 const DEFAULT_WIDTH = 240;
+/** 그래프 뷰는 캔버스가 필요해 트리보다 조금 넓게 연다. */
+const GRAPH_MIN_WIDTH = 280;
 
 export function Sidebar({
   isOpen,
@@ -26,10 +31,18 @@ export function Sidebar({
 }: SidebarProps) {
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [activePanel, setActivePanel] = useState<SidebarPanel>("files");
+  const [filesSubView, setFilesSubView] = useState<FilesSubView>("tree");
   const isResizing = useRef(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const unreadCount = useChatStore((s) => s.unreadCount);
   const { t } = useTranslation();
+
+  const switchFilesSubView = useCallback((view: FilesSubView) => {
+    setFilesSubView(view);
+    if (view === "graph") {
+      setWidth((w) => Math.max(w, GRAPH_MIN_WIDTH));
+    }
+  }, []);
 
   const startResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -76,6 +89,7 @@ export function Sidebar({
   useEffect(() => {
     const onRevealFiles = () => {
       setActivePanel("files");
+      setFilesSubView("tree");
       if (!isOpen) onToggle();
     };
     window.addEventListener("marblo:reveal-files", onRevealFiles);
@@ -178,9 +192,51 @@ export function Sidebar({
           </button>
         </div>
 
+        {/* Files 하위: 파일트리 ↔ 문서 그래프(옵시디언식). 최상위 탭이 아님. */}
+        {activePanel === "files" && (
+          <div
+            className="flex flex-shrink-0 border-b border-gray-700/80"
+            role="tablist"
+            aria-label={t("sidebar.filesSub.aria")}
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={filesSubView === "tree"}
+              data-testid="sidebar-files-tree-tab"
+              onClick={() => switchFilesSubView("tree")}
+              className={`flex-1 px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                filesSubView === "tree"
+                  ? "bg-gray-750 text-gray-200"
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              {t("sidebar.filesSub.tree")}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={filesSubView === "graph"}
+              data-testid="sidebar-files-graph-tab"
+              onClick={() => switchFilesSubView("graph")}
+              className={`flex-1 px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                filesSubView === "graph"
+                  ? "bg-gray-750 text-gray-200"
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              {t("sidebar.filesSub.graph")}
+            </button>
+          </div>
+        )}
+
         {/* Panel content */}
         {activePanel === "files" ? (
-          <FileTree />
+          filesSubView === "graph" ? (
+            <DocGraphPanel />
+          ) : (
+            <FileTree />
+          )
         ) : activePanel === "commands" ? (
           <CommandPanel
             onOpenOrchestrator={onOpenOrchestrator}
