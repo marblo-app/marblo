@@ -189,6 +189,11 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.board.doing": "In progress",
   "beginner.board.done": "Done",
   "beginner.board.more": "+{count} more",
+  // The card's two entries — the result (code) and the person (agent).
+  // Deliberately says nothing about worktrees or branches.
+  "beginner.board.viewDiff": "See the changes",
+  "beginner.board.viewingDiff": "Viewing changes",
+  "beginner.board.viewDiffTip": "Opens what this task changed in the Code tab",
   "beginner.agents.label": "Who's working",
   "beginner.agents.empty":
     "Nobody's on the job yet. Say what you'd like built and Marblo puts a team on it.",

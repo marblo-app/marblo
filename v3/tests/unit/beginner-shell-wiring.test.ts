@@ -72,16 +72,24 @@ vi.mock("../../src/services/telemetryService", () => ({
   default: { cliSetupStep: vi.fn() },
 }));
 
-// TaskCard(compact) 가 무는 나머지 스토어들 — compact 경로는 읽기만 하고
-// 아무것도 그리지 않는다.
+// TaskCard(compact) 가 무는 나머지 스토어들. 워크트리를 하나 심어 두는 이유는
+// 카드의 "바뀐 코드 보기" 진입이 그 매칭 위에 서기 때문이다(없으면 버튼 자체가
+// 안 뜬다 — 막다른 버튼 금지).
 vi.mock("../../src/stores/worktreeStore", () => ({
   useWorktreeStore: vi.fn((selector: (s: unknown) => unknown) =>
     selector({
-      worktrees: [],
+      worktrees: [{ path: "/tmp/wt/t2", branch: "marblo/t2", taskId: "t2" }],
       ensureFresh: vi.fn(() => Promise.resolve()),
       statusPill: () => ({ tone: "ready", icon: "✓", label: "ready" }),
     }),
   ),
+}));
+
+// 실제 액션은 스토어 넷을 동시에 움직이고 IPC 를 태운다 — 여기 관심사는 "그
+// 공용 액션이 불리는가" 다(심플 전용 사본이 생기지 않았는가).
+const viewWorktreeSpy = vi.hoisted(() => vi.fn());
+vi.mock("../../src/lib/viewWorktree", () => ({
+  viewWorktree: viewWorktreeSpy,
 }));
 
 vi.mock("../../src/stores/editorStore", () => ({
@@ -211,6 +219,11 @@ function Harness() {
       onResend: () => {},
       resending: false,
       onTaskClick: openTaskDetail,
+      // ★카드의 두 진입도 셸과 같은 배선으로. 에이전트 칩의 도착지는 에이전트
+      // 패널 행과 **같은** 터미널이어야 한다 — 한 에이전트로 가는 문이 둘인데
+      // 도착지가 갈리면, 유저는 어느 쪽이 진짜인지 알 수 없다.
+      showWorktreeDiff: true,
+      onAgentClick: openAgentTerminal,
     }),
     createElement(BeginnerAgentsPane, {
       key: "agents",
@@ -317,6 +330,33 @@ describe("비기너 셸 배선 — 클릭의 도착지", () => {
 
     expect(screen.getByTestId("beginner-task-modal").dataset.taskId).toBe("t2");
     expect(screen.queryByTestId("beginner-agent-terminal-modal")).toBeNull();
+  });
+
+  it("★카드의 에이전트 칩은 에이전트 패널 행과 **같은** 터미널로 간다", () => {
+    render(createElement(Harness));
+
+    // t2 가 a1 에게 물려 있다 → 그 카드에 칩이 선다.
+    fireEvent.click(screen.getByTestId("beginner-mini-task-agent"));
+
+    const modal = screen.getByTestId("beginner-agent-terminal-modal");
+    expect(modal.dataset.agentId).toBe("a1");
+    expect(screen.getByTestId("stub-terminal").dataset.sessionId).toBe("pty-7");
+    // 칩이 카드 클릭을 삼키므로 티켓 상세는 함께 뜨지 않는다.
+    expect(screen.queryByTestId("beginner-task-modal")).toBeNull();
+  });
+
+  it("★카드의 '바뀐 코드 보기' 는 공용 액션을 부른다 (코드 표면으로 가는 그 길)", () => {
+    render(createElement(Harness));
+
+    fireEvent.click(screen.getByTestId("beginner-mini-task-diff"));
+
+    // viewWorktree 가 파일 트리·에이전트 포커스·diff 를 한 번에 맞추고
+    // requestJump({type:"code"}) 를 남긴다 — 셸은 그 점프를 소비해 코드 탭을
+    // 켠다(규칙은 beginnerTabs.beginnerTabForJump, 테스트는 beginnerTabs.test).
+    expect(viewWorktreeSpy).toHaveBeenCalledTimes(1);
+    expect(viewWorktreeSpy.mock.calls[0][0].taskId).toBe("t2");
+    expect(viewWorktreeSpy.mock.calls[0][1].focusAgentId).toBe("a1");
+    expect(screen.queryByTestId("beginner-task-modal")).toBeNull();
   });
 
   it("★두 모달은 겹치지 않는다 — 나중에 연 것만 남는다", () => {

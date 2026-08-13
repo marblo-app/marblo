@@ -1,4 +1,5 @@
 import { useDroppable } from "@dnd-kit/core";
+import type { Agent } from "../../types/agent";
 import type { Task, TaskStatus } from "../../types/task";
 import { DraggableTaskCard, TaskCard } from "./TaskCard";
 import { useTranslation } from "../../lib/i18n";
@@ -52,6 +53,12 @@ interface KanbanColumnProps {
   count?: number;
   /** 상한 때문에 안 그린 카드 수. 0 초과일 때만 "+N" 를 붙인다. */
   hiddenCount?: number;
+  /**
+   * compact 카드의 두 진입(바뀐 코드 / 담당 에이전트) — 판단은 전부 `TaskCard`
+   * 가 한다. 이 컬럼은 통로일 뿐이라 여기서 다시 해석하지 않는다.
+   */
+  showWorktreeDiff?: boolean;
+  onAgentClick?: (agent: Agent) => void;
 }
 
 export function KanbanColumn({
@@ -63,6 +70,8 @@ export function KanbanColumn({
   label,
   count,
   hiddenCount = 0,
+  showWorktreeDiff,
+  onAgentClick,
 }: KanbanColumnProps) {
   const { t } = useTranslation();
   const config = STATUS_CONFIG[status];
@@ -108,6 +117,8 @@ export function KanbanColumn({
               // onTaskClick 을 떨어뜨려서, 보드가 "움직이는 그림" 으로 읽혔다.
               // 핸들러가 없으면 TaskCard 가 커서·hover 도 안 준다(= 종전 동작).
               onClick={onTaskClick}
+              showWorktreeDiff={showWorktreeDiff}
+              onAgentClick={onAgentClick}
             />
           ))}
           {hiddenCount > 0 && (

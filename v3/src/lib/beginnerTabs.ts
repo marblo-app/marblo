@@ -23,6 +23,7 @@
  * 보여야 하고, 승격은 "탭이 늘어나는" 일이지 "재배치되는" 일이 아니어야 한다.
  * `tests/unit/beginnerTabs.test.ts` 가 이 순서와 위 9탭 비노출을 못박는다.
  */
+import type { JumpTarget } from "../stores/navigationStore";
 import type { t } from "./i18n";
 import { visibleRightTabs, type RightTabId } from "./splitWorkspaceLayout";
 
@@ -61,6 +62,30 @@ export const BEGINNER_TAB_LABEL_KEY = {
   usage: "workspace.tab.usage",
   settings: "workspace.tab.settings",
 } as const satisfies Record<BeginnerTabId, Parameters<typeof t>[0]>;
+
+/**
+ * 탭 간 점프(`navigationStore.JumpTarget`) → 심플 셸에서 켤 탭.
+ *
+ * 두 셸(Layout·WorkspaceShell)은 이 표를 각자 if 사슬로 들고 있는데, 심플 셸은
+ * 지금까지 **아무것도 소비하지 않았다**. 그래서 미니 보드의 "바뀐 코드 보기"
+ * 처럼 `viewWorktree` 를 타는 진입이 파일 트리·diff 는 다 바꿔 놓고도 화면은
+ * 대화 탭에 머물렀다 — 눌렀는데 아무 일도 안 일어나는, 이 모드에서 가장 비싼
+ * 종류의 결함이다.
+ *
+ * 순수함수로 빼는 이유는 하나다: 셸을 통째로 마운트하지 않고도 이 규칙을
+ * 테스트에서 못박기 위해서(오케 PTY·CLI 프로브를 끌고 오지 않는다).
+ *
+ * ★모르는 목적지는 **null 이지 대충 비슷한 탭이 아니다.** 심플에 없는 탭
+ * (worktrees·agents·board…)을 코드 탭으로 받아 주면, 유저는 방금 있던 화면에
+ * 그대로 서 있으면서 "눌렀더니 아무것도 안 바뀐다" 를 겪는다. 그 목적지들은
+ * 심플에 그 탭이 실제로 생길 때(큐레이트 목록 확장) 함께 열린다.
+ */
+export function beginnerTabForJump(
+  target: JumpTarget | null | undefined,
+): BeginnerTabId | null {
+  if (!target) return null;
+  return target.type === "code" ? "code" : null;
+}
 
 export function isBeginnerTab(v: unknown): v is BeginnerTabId {
   return (

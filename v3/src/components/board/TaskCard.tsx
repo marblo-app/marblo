@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
+import type { Agent } from "../../types/agent";
 import type { Task } from "../../types/task";
 import type { WorktreeStatusTone } from "../../types/worktree";
 import { getPresenceStatus, type PresenceStatus } from "../../types/user";
@@ -121,13 +122,33 @@ interface TaskCardProps {
   onFlowNavigate?: (flowId: string, nodeId: string) => void;
   /**
    * ★경량 렌더. 비기너 모드 미니 보드가 이 카드를 **그대로** 재사용하되
-   * (중복 구현 금지) 워크트리 pill·diff 진입·모델 스탬프·PR/Flow/우선순위 칩·
-   * 담당자·생성시각을 전부 뺀 형태로 그린다.
+   * (중복 구현 금지) 워크트리 pill·모델 스탬프·PR/Flow/우선순위 칩·담당자·
+   * 생성시각을 전부 뺀 형태로 그린다.
    *
    * 뺀 것들은 장식이 아니라 "승격 후에 배우는 것" 이다. 비기너에게 정확한
    * 해상도는 제목 + 지금 굴러가는가 + 막혔는가, 딱 셋이다.
+   *
+   * ★단 **진입**은 예외다 — 아래 두 프롭 참조. 보이는 정보를 줄이는 것과
+   * 갈 수 있는 곳을 없애는 것은 다른 일이고, 후자는 심플 모드를 그림으로
+   * 만든다(미니 보드가 안 눌리던 시절과 같은 결함).
    */
   compact?: boolean;
+  /**
+   * ★compact 전용 — "바뀐 코드 보기" 진입. 워크트리가 매칭되면 카드 아래 작은
+   * 버튼이 붙고, 누르면 엑스퍼트 카드와 **같은** 액션(`viewWorktree`)이 돈다:
+   * 파일 트리 루트 전환 + 담당 에이전트 포커스 + Code 표면의 diff 열기.
+   *
+   * 프롭으로 가르는 이유는 워크트리 목록 신선도 유지(`ensureFresh`)가 여기에
+   * 딸려 있어서다 — 진입을 안 그리는 호스트는 IPC 도 태우지 않는다(종전 동작).
+   * 브랜치 이름은 compact 에서 여전히 안 보인다(라벨은 "바뀐 코드 보기").
+   */
+  showWorktreeDiff?: boolean;
+  /**
+   * ★compact 전용 — 이 티켓을 물고 있는 에이전트 칩. 누르면 그 에이전트의
+   * 터미널로 간다(심플 셸에서는 `BeginnerAgentTerminalModal`). 생략하면 칩이
+   * 뜨지 않는다 = 종전 동작(우상단 점만).
+   */
+  onAgentClick?: (agent: Agent) => void;
 }
 
 export function TaskCard({
@@ -135,6 +156,8 @@ export function TaskCard({
   onClick,
   onFlowNavigate,
   compact,
+  showWorktreeDiff,
+  onAgentClick,
 }: TaskCardProps) {
   return (
     <TaskCardContent
@@ -142,6 +165,8 @@ export function TaskCard({
       onClick={onClick}
       onFlowNavigate={onFlowNavigate}
       compact={compact}
+      showWorktreeDiff={showWorktreeDiff}
+      onAgentClick={onAgentClick}
     />
   );
 }
@@ -186,6 +211,8 @@ function TaskCardContent({
   onFlowNavigate,
   isDragging,
   compact,
+  showWorktreeDiff,
+  onAgentClick,
 }: TaskCardProps & { isDragging?: boolean }) {
   const { t } = useTranslation();
   const priority = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG[1];
@@ -229,21 +256,29 @@ function TaskCardContent({
   // missing from a stale list silently loses its "이 워크트리 보기" affordance.
   // ensureFresh is TTL+in-flight gated, so a board full of cards mounting at
   // once still costs at most one worktree:list IPC per minute.
+  // compact 는 기본적으로 워크트리를 그리지 않는다 — 미니 보드 카드가 마운트될
+  // 때마다 worktree:list IPC 를 태울 이유가 없다. ★"바뀐 코드 보기" 진입을 켠
+  // 호스트만 예외다: 그 버튼의 존재 여부가 곧 워크트리 매칭이라, 목록이 낡으면
+  // 버튼이 조용히 사라진다(아래 두 이펙트가 막으려는 바로 그 결함).
+  const needsWorktrees = !compact || !!showWorktreeDiff;
   useEffect(() => {
-    // compact 는 워크트리를 아예 그리지 않는다 — 미니 보드 카드가 마운트될
-    // 때마다 worktree:list IPC 를 태울 이유가 없다.
-    if (compact) return;
+    if (!needsWorktrees) return;
     ensureFreshWorktrees().catch(() => {});
-  }, [compact, ensureFreshWorktrees]);
+  }, [needsWorktrees, ensureFreshWorktrees]);
 
   // A claimed task without a matching worktree is the "worktree was created
   // after our snapshot" signature (claim → spawn → worktree add) — re-check.
   const missingClaimedWorktree = Boolean(task.claimedBy) && !matchingWorktree;
   useEffect(() => {
-    if (compact) return;
+    if (!needsWorktrees) return;
     if (!missingClaimedWorktree) return;
     ensureFreshWorktrees().catch(() => {});
-  }, [compact, missingClaimedWorktree, task.status, ensureFreshWorktrees]);
+  }, [
+    needsWorktrees,
+    missingClaimedWorktree,
+    task.status,
+    ensureFreshWorktrees,
+  ]);
 
   // Resolve the claimant agent → owner userId so we can show whose machine
   // is currently hosting the agent and whether that teammate is online.
@@ -284,6 +319,10 @@ function TaskCardContent({
     // 지금 굴러가는가 — 담당 에이전트의 프로세스 시그널만 본다. presence(팀원이
     // 앱을 켜뒀나)는 협업 개념이라 비기너 화면에서는 노이즈다.
     const running = claimingAgent?.status === "working";
+    // ★두 진입. 각각 자기 스위치를 갖는다 — 호스트가 갈 곳을 실제로 갖고 있을
+    // 때만 그린다(막다른 버튼 금지).
+    const diffEntry = showWorktreeDiff ? matchingWorktree : null;
+    const agentEntry = onAgentClick && claimingAgent ? claimingAgent : null;
     return (
       <div
         data-testid="beginner-mini-task"
@@ -306,7 +345,9 @@ function TaskCardContent({
           <span className="min-w-0 flex-1 text-[11px] leading-[18px] text-[#cdd6f4] line-clamp-2">
             {task.title}
           </span>
-          {running && (
+          {/* 에이전트 칩이 뜨면 그 칩이 같은 점을 들고 있다 — 한 카드에 같은
+              뜻의 초록 점이 둘이면 하나는 장식이 된다. */}
+          {running && !agentEntry && (
             <span
               aria-hidden
               className="mt-1.5 h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#a6e3a1]"
@@ -317,6 +358,63 @@ function TaskCardContent({
           <span className="mt-1 inline-flex rounded bg-[#f9e2af]/15 px-1.5 py-0.5 text-[10px] font-medium text-[#f9e2af]">
             ⚠ {t("board.taskCard.stuck")}
           </span>
+        )}
+
+        {/* ── ★진입 줄 — 결과(바뀐 코드) 와 사람(에이전트) ────────────────
+            엑스퍼트 카드의 워크트리 버튼·담당자 줄과 **같은 목적지**를 심플
+            톤으로만 다시 그린 것이다: 액션은 `viewWorktree`, 매칭은
+            `findTaskWorktree`/`resolveTaskAgentId`, 담당 판정은 `claimingAgent`
+            — 전부 위에서 이미 계산한 값이라 이 줄에는 새 규칙이 없다.
+            카드 자체도 눌리는 표면(티켓 상세)이라 두 버튼은 클릭을 삼킨다. */}
+        {(diffEntry || agentEntry) && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1">
+            {diffEntry && (
+              <button
+                type="button"
+                data-testid="beginner-mini-task-diff"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  viewWorktree(diffEntry, {
+                    focusAgentId: resolveTaskAgentId(agents, task),
+                  });
+                }}
+                title={t("beginner.board.viewDiffTip")}
+                className={`inline-flex max-w-full items-center gap-1 rounded px-1.5 py-0.5 text-[10px] leading-4 transition-colors ${
+                  viewingThisWorktree
+                    ? "bg-[#89b4fa]/15 text-[#89b4fa]"
+                    : "text-[#7f849c] hover:bg-[#313244]/70 hover:text-[#cdd6f4]"
+                }`}
+              >
+                <span aria-hidden>{viewingThisWorktree ? "👁" : "◫"}</span>
+                <span className="truncate">
+                  {viewingThisWorktree
+                    ? t("beginner.board.viewingDiff")
+                    : t("beginner.board.viewDiff")}
+                </span>
+              </button>
+            )}
+            {agentEntry && (
+              <button
+                type="button"
+                data-testid="beginner-mini-task-agent"
+                data-agent-status={agentEntry.status}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onAgentClick!(agentEntry);
+                }}
+                title={t("beginner.agents.openTerminal")}
+                className="inline-flex min-w-0 max-w-full items-center gap-1 rounded px-1.5 py-0.5 text-[10px] leading-4 text-[#7f849c] transition-colors hover:bg-[#313244]/70 hover:text-[#cdd6f4]"
+              >
+                <span
+                  aria-hidden
+                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                    running ? "animate-pulse bg-[#a6e3a1]" : "bg-[#6c7086]"
+                  }`}
+                />
+                <span className="truncate">{agentEntry.name}</span>
+              </button>
+            )}
+          </div>
         )}
       </div>
     );

@@ -19,6 +19,7 @@ import { AgentInputWaitHost } from "../agents/AgentInputWaitHost";
 import {
   BEGINNER_CHAT_TAB,
   BEGINNER_CURATED_TABS,
+  beginnerTabForJump,
   type BeginnerCuratedTabId,
   type BeginnerTabId,
 } from "../../lib/beginnerTabs";
@@ -26,6 +27,7 @@ import { useOnboardingSetup } from "../../hooks/useOnboardingSetup";
 import { useAgentStore } from "../../stores/agentStore";
 import { useBeginnerModeStore } from "../../stores/beginnerModeStore";
 import { useOnboardingPreviewStore } from "../../stores/onboardingPreviewStore";
+import { useNavigationStore } from "../../stores/navigationStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useTerminalStore } from "../../stores/terminalStore";
@@ -223,6 +225,21 @@ export function BeginnerShell() {
   useEffect(() => {
     if (pendingSettingsSection) setTab("settings");
   }, [pendingSettingsSection]);
+
+  // ★탭 간 점프 소비 — 어드밴스드 두 셸(Layout:158, WorkspaceShell:163)과 같은
+  // 자리다. 지금까지 심플 셸만 이 래치를 아무도 읽지 않아서, 미니 보드 카드의
+  // "바뀐 코드 보기"(→ viewWorktree → requestJump{code})가 파일 트리·diff 를
+  // 다 바꿔 놓고도 화면은 대화 탭에 그대로 서 있었다. 어느 탭인지는 순수함수가
+  // 정한다(lib/beginnerTabs) — 심플에 없는 목적지는 null 이고, 그 점프는 소비
+  // 하지 않는다(그 탭을 가진 셸이 나중에 받아 간다).
+  const pendingJump = useNavigationStore((s) => s.pendingJump);
+  const consumeJump = useNavigationStore((s) => s.consumeJump);
+  useEffect(() => {
+    const target = beginnerTabForJump(pendingJump);
+    if (!target) return;
+    setTab(target);
+    consumeJump();
+  }, [pendingJump, consumeJump]);
 
   // 보드가 없으므로 티켓/에이전트 구독을 이 셸이 직접 든다 — 인라인 라이브의
   // 유일한 데이터원이다.
@@ -588,11 +605,18 @@ export function BeginnerShell() {
                     className="min-h-0 shrink overflow-y-auto max-h-[34%]"
                     data-coach="beginner-live"
                   >
+                    {/* ★카드의 두 진입은 셸이 목적지를 갖고 있을 때만 켠다:
+                        "바뀐 코드 보기" 는 큐레이트 코드 탭(위 점프 소비)이,
+                        에이전트 칩은 에이전트 패널과 **같은** 터미널 모달이
+                        받는다 — 한 에이전트로 가는 문이 둘이어도 도착지는
+                        하나여야 한다. */}
                     <BeginnerLiveStrip
                       sentAt={ask.deliveredAt}
                       onResend={() => void ask.resend()}
                       resending={ask.sending}
                       onTaskClick={openTaskDetail}
+                      showWorktreeDiff
+                      onAgentClick={openAgentTerminal}
                     />
                   </div>
 
