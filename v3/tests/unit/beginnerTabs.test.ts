@@ -23,13 +23,25 @@ import { ko } from "../../src/locales/ko";
 import { en } from "../../src/locales/en";
 
 describe("심플 큐레이트 탭 — 노출 목록", () => {
-  it("★큐레이트는 넷뿐이다 — 가이드·코드·사용량·설정", () => {
+  it("★큐레이트는 일곱이다 — 가이드·코드·에이전트·워크트리·사용량·하네스·설정", () => {
     expect([...BEGINNER_CURATED_TABS]).toEqual([
       "guide",
       "code",
+      "agents",
+      "worktrees",
       "usage",
+      "harness",
       "settings",
     ]);
+  });
+
+  it("★연결·에이전트관리·git 이 심플에서 닿는다 (사장님 콜드 테스트의 셋)", () => {
+    // 이 셋이 빠지면 심플 유저는 GitHub/텔레그램/슬랙을 **연결할 수 없고**,
+    // 잘못 뜬 에이전트를 지울 수 없고, 워크트리를 볼 수 없다. 승격 말고는 길이
+    // 없던 자리라, 한 줄 지우면 조용히 그 상태로 돌아간다.
+    for (const tab of ["harness", "agents", "worktrees"]) {
+      expect(BEGINNER_CURATED_TABS as readonly string[]).toContain(tab);
+    }
   });
 
   it("★대화가 항상 처음이자 기본이다 (채팅-퍼스트)", () => {
@@ -50,19 +62,16 @@ describe("심플 큐레이트 탭 — 노출 목록", () => {
     }
   });
 
-  it("★엑스퍼트 나머지 9탭은 심플에 노출되지 않는다", () => {
+  it("★엑스퍼트 나머지 6탭은 심플에 노출되지 않는다", () => {
     // 프로덕션 기준(dev 전용 missions/flows/deploy 는 애초에 안 뜬다).
     const hidden = beginnerHiddenExpertTabs([]);
     expect(hidden).toEqual([
       "startHere",
       "board",
       "lanes",
-      "agents",
       "project",
-      "worktrees",
       "history",
       "store",
-      "harness",
     ]);
     expect(visibleRightTabs([])).toHaveLength(
       hidden.length + BEGINNER_CURATED_TABS.length,
@@ -80,8 +89,9 @@ describe("심플 큐레이트 탭 — 노출 목록", () => {
   it("isBeginnerTab 은 엑스퍼트 전용 id 를 거른다", () => {
     expect(isBeginnerTab("chat")).toBe(true);
     expect(isBeginnerTab("settings")).toBe(true);
+    expect(isBeginnerTab("harness")).toBe(true);
     expect(isBeginnerTab("board")).toBe(false);
-    expect(isBeginnerTab("worktrees")).toBe(false);
+    expect(isBeginnerTab("lanes")).toBe(false);
     expect(isBeginnerTab(undefined)).toBe(false);
   });
 });
@@ -95,7 +105,7 @@ describe("심플 큐레이트 탭 — 라벨", () => {
     }
   });
 
-  it("★넷은 엑스퍼트 탭바와 **같은** 키를 읽는다 — 이름이 셸마다 다르면 안 된다", () => {
+  it("★일곱은 엑스퍼트 탭바와 **같은** 키를 읽는다 — 이름이 셸마다 다르면 안 된다", () => {
     for (const tab of BEGINNER_CURATED_TABS) {
       expect(BEGINNER_TAB_LABEL_KEY[tab]).toBe(`workspace.tab.${tab}`);
     }
