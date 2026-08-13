@@ -288,6 +288,52 @@ function cleanEnv(extra: Record<string, string>): Record<string, string> {
   return { ...env, ...extra };
 }
 
+/**
+ * ★부팅 레이스 — `app.evaluate` 가 "Execution context was destroyed" 로 깨지는 진짜 이유.
+ *
+ * `electron.launch()` 는 메인 프로세스가 **준비됐을 때**가 아니라 Playwright 가
+ * `require('electron')` 핸들을 잡은 순간 resolve 한다. 그 시점의 메인 프로세스는
+ * 아직 `dist-electron/main.js` 의 **동기 top-level 을 돌고 있다**(실측: launch
+ * resolve 후 ~70ms 더). 그 구간에 날아든 `Runtime.callFunctionOn` 은 CDP 가
+ * `-32000 "Promise was collected"` 로 거절하고 — 마이크로태스크 큐가 안 비니
+ * 결과 promise 가 해소 전에 GC 된다 — Playwright 의 `crExecutionContext.
+ * rewriteError` 가 그 **모든** 비-JS 에러를 통째로
+ * "Execution context was destroyed, most likely because of a navigation" 으로
+ * 바꿔 던진다. 즉 이 문구는 네비게이션과 아무 상관이 없다. 메인 프로세스 부팅이
+ * 무거워질수록(계정격리·커넥터 등이 top-level 에 붙을수록) 이 창이 넓어져서
+ * 어느 순간 스위트 전체가 같은 지점에서 전멸한다.
+ *
+ * ★★재시도할 때 반드시 알아야 할 것: **거절돼도 함수 본문은 이미 실행됐다.**
+ *   (실측: 실패한 evaluate 가 남긴 부작용이 그대로 남는다.) 그래서 이 헬퍼로
+ *   재시도해도 되는 것은 **부작용이 없거나 멱등한** 함수뿐이다 — 스텁 설치
+ *   evaluate 가 맨 앞에 `if (g.__cleanroom) return;` 가드를 두는 이유가 이것이다.
+ *   가드 없이 재시도하면 두 번째 실행이 **스텁을 "원본"으로 붙잡아**
+ *   realProbe/callRealIpc 가 조용히 스텁을 부르게 된다.
+ */
+const BOOT_RACE_ERROR = /Execution context was destroyed/;
+
+async function retryThroughBootRace<T>(
+  label: string,
+  attempt: () => Promise<T>,
+  timeoutMs = 30_000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      return await attempt();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!BOOT_RACE_ERROR.test(message)) throw err;
+      if (Date.now() > deadline) {
+        throw new Error(
+          `${label}: 메인 프로세스가 ${timeoutMs}ms 안에 부팅을 끝내지 못했습니다 (마지막 에러: ${message})`,
+        );
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+}
+
 export async function launchCleanRoom(
   scenario: CleanRoomScenario = {},
 ): Promise<CleanRoom> {
@@ -358,265 +404,285 @@ export async function launchCleanRoom(
     );
   }
 
+  // ★스텁을 심기 전에 메인 프로세스의 **동기 부팅 구간이 끝났는지** 먼저 본다.
+  // 프로브는 부작용이 없으므로(값 하나만 돌려준다) 몇 번을 재시도해도 안전하다.
+  // 이 대기가 없으면 바로 아래 스텁 evaluate 가 부팅 한복판에 떨어져 본문은
+  // 실행되고 결과만 유실된다 — 위 retryThroughBootRace 주석 참조.
+  await retryThroughBootRace("클린룸 부팅 대기", () =>
+    app.evaluate(() => true),
+  );
+
   // ── main process IPC 스텁 (시나리오 축) ──────────────────────────────────
-  await app.evaluate(
-    ({ ipcMain }, s) => {
-      const g = globalThis as unknown as {
-        __cleanroom?: {
-          probeCalls: number;
-          installCalls: string[];
-          sampleCalls: string[];
-          typed: Array<{ sessionId: string; data: string }>;
-          injected: Array<{ projectId: string; message: string }>;
-          cli: Record<string, { installed: boolean; authenticated: boolean }>;
-          installSucceeds: boolean;
-          installResultsIn: { installed: boolean; authenticated: boolean };
-          installPlan: Record<
-            string,
-            { installed: boolean; authenticated: boolean } | "fail"
-          >;
-          orchestratorRunning: boolean;
-          injectDelayMs: number;
-          projectDir: string;
-          sampleDir: string;
-          sampleSeed: string;
-          sampleModule: string;
-          priorRootPath: string | null;
-          orchestratorLaunchBlock: {
-            model: string;
-            action: string;
-            installed: boolean;
-            reason?: string;
-          } | null;
+  // 재시도 안전(멱등): 본문 첫 줄에서 이미 설치된 경우 즉시 빠진다.
+  await retryThroughBootRace("클린룸 IPC 스텁 설치", () =>
+    app.evaluate(
+      ({ ipcMain }, s) => {
+        const g = globalThis as unknown as {
+          __cleanroom?: {
+            probeCalls: number;
+            installCalls: string[];
+            sampleCalls: string[];
+            typed: Array<{ sessionId: string; data: string }>;
+            injected: Array<{ projectId: string; message: string }>;
+            cli: Record<string, { installed: boolean; authenticated: boolean }>;
+            installSucceeds: boolean;
+            installResultsIn: { installed: boolean; authenticated: boolean };
+            installPlan: Record<
+              string,
+              { installed: boolean; authenticated: boolean } | "fail"
+            >;
+            orchestratorRunning: boolean;
+            injectDelayMs: number;
+            projectDir: string;
+            sampleDir: string;
+            sampleSeed: string;
+            sampleModule: string;
+            priorRootPath: string | null;
+            orchestratorLaunchBlock: {
+              model: string;
+              action: string;
+              installed: boolean;
+              reason?: string;
+            } | null;
+          };
         };
-      };
-      g.__cleanroom = {
-        probeCalls: 0,
-        installCalls: [],
-        sampleCalls: [],
-        typed: [],
-        injected: [],
-        cli: s.cli,
-        installSucceeds: s.installSucceeds,
-        installResultsIn: s.installResultsIn,
-        installPlan: s.installPlan,
-        orchestratorRunning: s.orchestratorRunning,
-        injectDelayMs: s.injectDelayMs,
-        projectDir: s.projectDir,
-        sampleDir: s.sampleDir,
-        sampleSeed: s.sampleSeed,
-        sampleModule: s.sampleModule,
-        priorRootPath: s.priorRootPath,
-        orchestratorLaunchBlock: s.orchestratorLaunchBlock,
-      };
-      const cr = g.__cleanroom!;
+        // ★멱등 가드 — 부팅 레이스로 거절된 앞선 시도가 **이미 본문을 다 돌렸을
+        //   수 있다**. 그 위에 한 번 더 깔면 rehandle 이 스텁을 "원본"으로 붙잡아
+        //   realProbe/callRealIpc 가 조용히 스텁을 부른다.
+        if (g.__cleanroom) return;
+        g.__cleanroom = {
+          probeCalls: 0,
+          installCalls: [],
+          sampleCalls: [],
+          typed: [],
+          injected: [],
+          cli: s.cli,
+          installSucceeds: s.installSucceeds,
+          installResultsIn: s.installResultsIn,
+          installPlan: s.installPlan,
+          orchestratorRunning: s.orchestratorRunning,
+          injectDelayMs: s.injectDelayMs,
+          projectDir: s.projectDir,
+          sampleDir: s.sampleDir,
+          sampleSeed: s.sampleSeed,
+          sampleModule: s.sampleModule,
+          priorRootPath: s.priorRootPath,
+          orchestratorLaunchBlock: s.orchestratorLaunchBlock,
+        };
+        const cr = g.__cleanroom!;
 
-      // Electron 은 handle() 로 넘긴 listener 를 _invokeHandlers 에 그대로
-      // 보관한다. 교체 전에 원본을 붙잡아 두면 스텁을 우회한 "진짜" 핸들러를
-      // 그대로 부를 수 있다 — realProbe(격리 누수 관측)가 이걸 쓴다.
-      const invokeHandlers = (
-        ipcMain as unknown as {
-          _invokeHandlers: Map<string, (...a: unknown[]) => unknown>;
-        }
-      )._invokeHandlers;
-      const originals = new Map<string, (...a: unknown[]) => unknown>();
-
-      const rehandle = (
-        channel: string,
-        fn: (...args: unknown[]) => unknown,
-      ) => {
-        const orig = invokeHandlers?.get(channel);
-        if (orig) originals.set(channel, orig);
-        ipcMain.removeHandler(channel);
-        ipcMain.handle(channel, (_e: unknown, ...args: unknown[]) =>
-          fn(...args),
-        );
-      };
-      (
-        globalThis as unknown as {
-          __cleanroomOriginals?: Map<string, (...a: unknown[]) => unknown>;
-        }
-      ).__cleanroomOriginals = originals;
-
-      // 설치/인증 상태 — 이 하나가 위저드 전체의 게이트다.
-      rehandle("harness:cliAuthCheck", (payload) => {
-        cr.probeCalls += 1;
-        const model = (payload as { model: string }).model;
-        return (
-          cr.cli[model] ?? {
-            installed: false,
-            authenticated: false,
-            action: "unknown",
+        // Electron 은 handle() 로 넘긴 listener 를 _invokeHandlers 에 그대로
+        // 보관한다. 교체 전에 원본을 붙잡아 두면 스텁을 우회한 "진짜" 핸들러를
+        // 그대로 부를 수 있다 — realProbe(격리 누수 관측)가 이걸 쓴다.
+        const invokeHandlers = (
+          ipcMain as unknown as {
+            _invokeHandlers: Map<string, (...a: unknown[]) => unknown>;
           }
-        );
-      });
+        )._invokeHandlers;
+        const originals = new Map<string, (...a: unknown[]) => unknown>();
 
-      // 자동설치 — node/npm 부재 시나리오는 여기서 실패한다.
-      //
-      // 행별 결과(installPlan)가 있으면 그쪽이 이긴다: "모두 설치" 한 번에 한 행만
-      // 실패하는 상황(claude EACCES · codex 성공)은 전역 boolean 으로는 못 만든다.
-      rehandle("harness:install", (id) => {
-        cr.installCalls.push(String(id));
-        const model = String(id).includes("codex")
-          ? "codex"
-          : String(id).includes("claude")
-            ? "claude"
-            : String(id).includes("grok")
-              ? "grok"
-              : "antigravity";
-        const planned = cr.installPlan[model];
-        if (planned === "fail") {
-          return {
-            success: false,
-            error: `${model} 설치 실패 (cleanroom: 권한/네트워크 시뮬)`,
-          };
-        }
-        if (!planned && !cr.installSucceeds) {
-          return {
-            success: false,
-            error: "npm 을 찾을 수 없습니다 (cleanroom: node 미설치 시나리오)",
-          };
-        }
-        cr.cli[model] = { ...(planned ?? cr.installResultsIn) };
-        return { success: true };
-      });
+        const rehandle = (
+          channel: string,
+          fn: (...args: unknown[]) => unknown,
+        ) => {
+          const orig = invokeHandlers?.get(channel);
+          if (orig) originals.set(channel, orig);
+          ipcMain.removeHandler(channel);
+          ipcMain.handle(channel, (_e: unknown, ...args: unknown[]) =>
+            fn(...args),
+          );
+        };
+        (
+          globalThis as unknown as {
+            __cleanroomOriginals?: Map<string, (...a: unknown[]) => unknown>;
+          }
+        ).__cleanroomOriginals = originals;
 
-      // ★첫 실행 샘플 시드 — 경로만 클린룸으로 돌리고 구현은 진짜를 부른다.
-      // (macOS 의 documents 경로가 HOME 격리를 안 따르므로 이 스텁이 없으면
-      //  개발자의 진짜 ~/Documents 에 폴더가 생긴다 — sampleSeed 주석 참조.)
-      if (cr.sampleSeed !== "unstubbed") {
-        rehandle("sample:ensure", async (input) => {
-          const locale =
-            input &&
-            typeof input === "object" &&
-            (input as { locale?: unknown }).locale === "en"
-              ? "en"
-              : "ko";
-          cr.sampleCalls.push(locale);
-          if (cr.sampleSeed === "fail") {
+        // 설치/인증 상태 — 이 하나가 위저드 전체의 게이트다.
+        rehandle("harness:cliAuthCheck", (payload) => {
+          cr.probeCalls += 1;
+          const model = (payload as { model: string }).model;
+          return (
+            cr.cli[model] ?? {
+              installed: false,
+              authenticated: false,
+              action: "unknown",
+            }
+          );
+        });
+
+        // 자동설치 — node/npm 부재 시나리오는 여기서 실패한다.
+        //
+        // 행별 결과(installPlan)가 있으면 그쪽이 이긴다: "모두 설치" 한 번에 한 행만
+        // 실패하는 상황(claude EACCES · codex 성공)은 전역 boolean 으로는 못 만든다.
+        rehandle("harness:install", (id) => {
+          cr.installCalls.push(String(id));
+          const model = String(id).includes("codex")
+            ? "codex"
+            : String(id).includes("claude")
+              ? "claude"
+              : String(id).includes("grok")
+                ? "grok"
+                : "antigravity";
+          const planned = cr.installPlan[model];
+          if (planned === "fail") {
             return {
-              ok: false,
-              path: cr.sampleDir,
-              created: false,
-              reused: false,
-              gitInitialized: false,
-              error: "cleanroom: 디스크 쓰기 실패 시뮬",
+              success: false,
+              error: `${model} 설치 실패 (cleanroom: 권한/네트워크 시뮬)`,
             };
           }
-          // mainCall 과 같은 입구(getBuiltinModule → createRequire): 앱이 이미
-          // 로드한 모듈 인스턴스를 그대로 잡는다.
-          const nodeModule = (
-            process as unknown as {
-              getBuiltinModule?: (id: string) => {
-                createRequire: (from: string) => (id: string) => unknown;
+          if (!planned && !cr.installSucceeds) {
+            return {
+              success: false,
+              error:
+                "npm 을 찾을 수 없습니다 (cleanroom: node 미설치 시나리오)",
+            };
+          }
+          cr.cli[model] = { ...(planned ?? cr.installResultsIn) };
+          return { success: true };
+        });
+
+        // ★첫 실행 샘플 시드 — 경로만 클린룸으로 돌리고 구현은 진짜를 부른다.
+        // (macOS 의 documents 경로가 HOME 격리를 안 따르므로 이 스텁이 없으면
+        //  개발자의 진짜 ~/Documents 에 폴더가 생긴다 — sampleSeed 주석 참조.)
+        if (cr.sampleSeed !== "unstubbed") {
+          rehandle("sample:ensure", async (input) => {
+            const locale =
+              input &&
+              typeof input === "object" &&
+              (input as { locale?: unknown }).locale === "en"
+                ? "en"
+                : "ko";
+            cr.sampleCalls.push(locale);
+            if (cr.sampleSeed === "fail") {
+              return {
+                ok: false,
+                path: cr.sampleDir,
+                created: false,
+                reused: false,
+                gitInitialized: false,
+                error: "cleanroom: 디스크 쓰기 실패 시뮬",
               };
             }
-          ).getBuiltinModule?.("module");
-          if (!nodeModule?.createRequire) {
-            throw new Error("sample-project 모듈을 로드할 수 없습니다");
-          }
-          const mod = nodeModule.createRequire(cr.sampleModule)(
-            cr.sampleModule,
-          ) as {
-            ensureSampleProject: (o: {
-              dir: string;
-              locale: string;
-            }) => Promise<unknown>;
-          };
-          return await mod.ensureSampleProject({
-            dir: cr.sampleDir,
-            locale,
+            // mainCall 과 같은 입구(getBuiltinModule → createRequire): 앱이 이미
+            // 로드한 모듈 인스턴스를 그대로 잡는다.
+            const nodeModule = (
+              process as unknown as {
+                getBuiltinModule?: (id: string) => {
+                  createRequire: (from: string) => (id: string) => unknown;
+                };
+              }
+            ).getBuiltinModule?.("module");
+            if (!nodeModule?.createRequire) {
+              throw new Error("sample-project 모듈을 로드할 수 없습니다");
+            }
+            const mod = nodeModule.createRequire(cr.sampleModule)(
+              cr.sampleModule,
+            ) as {
+              ensureSampleProject: (o: {
+                dir: string;
+                locale: string;
+              }) => Promise<unknown>;
+            };
+            return await mod.ensureSampleProject({
+              dir: cr.sampleDir,
+              locale,
+            });
           });
-        });
-      }
-
-      // 이전 세션 복원 — "이 기기에서 이미 자기 폴더를 쓰던 유저".
-      if (cr.priorRootPath) {
-        rehandle("appState:load", () => ({
-          lastRootPath: cr.priorRootPath,
-        }));
-      }
-
-      // ★터미널 자동 입력 관측(원클릭 사인인). `pty:writeAndSubmit` 는 invoke 가
-      // 아니라 send 라 rehandle(=_invokeHandlers) 로는 못 잡는다 — 리스너를 직접
-      // 갈아끼운다. 실제 입력은 **일부러 삼킨다**: 진짜로 타이핑되면 CLI 가
-      // 브라우저 인증 페이지를 열어 테스트가 사람의 승인을 기다리게 된다.
-      ipcMain.removeAllListeners("pty:writeAndSubmit");
-      ipcMain.on("pty:writeAndSubmit", (_e: unknown, payload: unknown) => {
-        const p = payload as { id?: string; data?: string };
-        cr.typed.push({ sessionId: p?.id ?? "", data: p?.data ?? "" });
-      });
-
-      // 버전 조회는 npm 네트워크 호출 → 클린룸에선 무의미하니 비운다.
-      rehandle("harness:versions", () => ({}));
-
-      // 폴더 선택 다이얼로그(네이티브)는 자동화 불가 → 임시 프로젝트 폴더 반환.
-      rehandle("fs:selectDirectory", () => cr.projectDir);
-
-      // 오케 스폰이 막혔을 때의 봉투 — 렌더러가 이걸 화면에 어떻게 옮기는지가
-      // 검증 대상이다(무음 차단 회귀 d44PLFhR).
-      if (cr.orchestratorLaunchBlock) {
-        rehandle("orchestratorSession:launch", () => ({
-          sessionId: "",
-          ptySessionId: "",
-          status: "blocked",
-          needsAuth: cr.orchestratorLaunchBlock,
-        }));
-      }
-
-      // ★ #580 의 증거 지점: 위저드 마지막 버튼이 여기까지 오는지.
-      rehandle("orchestrator:injectMessage", async (payload) => {
-        const p = payload as { projectId: string; message: string };
-        cr.injected.push({ projectId: p.projectId, message: p.message });
-        if (cr.injectDelayMs > 0) {
-          await new Promise((r) => setTimeout(r, cr.injectDelayMs));
         }
-        return cr.orchestratorRunning
-          ? { delivered: true }
-          : { delivered: false, reason: "no-local-orchestrator" };
-      });
-    },
-    {
-      cli: {
-        claude: stateToProbe(
-          scenario.claude ?? "missing",
-          "curl -fsSL https://claude.ai/install.sh | bash",
-        ),
-        codex: stateToProbe(
-          scenario.codex ?? "missing",
-          "curl -fsSL https://chatgpt.com/codex/install.sh | bash",
-        ),
-        grok: stateToProbe(
-          scenario.grok ?? "missing",
-          "curl -fsSL https://x.ai/cli/install.sh | bash",
-        ),
-        antigravity: stateToProbe(
-          scenario.antigravity ?? "missing",
-          "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-        ),
+
+        // 이전 세션 복원 — "이 기기에서 이미 자기 폴더를 쓰던 유저".
+        if (cr.priorRootPath) {
+          rehandle("appState:load", () => ({
+            lastRootPath: cr.priorRootPath,
+          }));
+        }
+
+        // ★터미널 자동 입력 관측(원클릭 사인인). `pty:writeAndSubmit` 는 invoke 가
+        // 아니라 send 라 rehandle(=_invokeHandlers) 로는 못 잡는다 — 리스너를 직접
+        // 갈아끼운다. 실제 입력은 **일부러 삼킨다**: 진짜로 타이핑되면 CLI 가
+        // 브라우저 인증 페이지를 열어 테스트가 사람의 승인을 기다리게 된다.
+        ipcMain.removeAllListeners("pty:writeAndSubmit");
+        ipcMain.on("pty:writeAndSubmit", (_e: unknown, payload: unknown) => {
+          const p = payload as { id?: string; data?: string };
+          cr.typed.push({ sessionId: p?.id ?? "", data: p?.data ?? "" });
+        });
+
+        // 버전 조회는 npm 네트워크 호출 → 클린룸에선 무의미하니 비운다.
+        rehandle("harness:versions", () => ({}));
+
+        // 폴더 선택 다이얼로그(네이티브)는 자동화 불가 → 임시 프로젝트 폴더 반환.
+        rehandle("fs:selectDirectory", () => cr.projectDir);
+
+        // 오케 스폰이 막혔을 때의 봉투 — 렌더러가 이걸 화면에 어떻게 옮기는지가
+        // 검증 대상이다(무음 차단 회귀 d44PLFhR).
+        if (cr.orchestratorLaunchBlock) {
+          rehandle("orchestratorSession:launch", () => ({
+            sessionId: "",
+            ptySessionId: "",
+            status: "blocked",
+            needsAuth: cr.orchestratorLaunchBlock,
+          }));
+        }
+
+        // ★ #580 의 증거 지점: 위저드 마지막 버튼이 여기까지 오는지.
+        rehandle("orchestrator:injectMessage", async (payload) => {
+          const p = payload as { projectId: string; message: string };
+          cr.injected.push({ projectId: p.projectId, message: p.message });
+          if (cr.injectDelayMs > 0) {
+            await new Promise((r) => setTimeout(r, cr.injectDelayMs));
+          }
+          return cr.orchestratorRunning
+            ? { delivered: true }
+            : { delivered: false, reason: "no-local-orchestrator" };
+        });
       },
-      installSucceeds: scenario.installSucceeds ?? false,
-      installResultsIn: stateToProbe(
-        scenario.installResultsIn ?? "installed",
-        "login",
-      ),
-      installPlan: Object.fromEntries(
-        Object.entries(scenario.installPlan ?? {}).map(([model, outcome]) => [
-          model,
-          outcome === "fail"
-            ? ("fail" as const)
-            : stateToProbe(outcome as CliStateName, "login"),
-        ]),
-      ),
-      orchestratorRunning: scenario.orchestratorRunning ?? false,
-      injectDelayMs: scenario.injectDelayMs ?? 0,
-      projectDir,
-      sampleDir,
-      sampleSeed: scenario.sampleSeed ?? "real",
-      sampleModule: path.join(REPO_ROOT, "dist-electron", "sample-project.js"),
-      priorRootPath: scenario.priorRootPath ?? null,
-      orchestratorLaunchBlock: scenario.orchestratorLaunchBlock ?? null,
-    },
+      {
+        cli: {
+          claude: stateToProbe(
+            scenario.claude ?? "missing",
+            "curl -fsSL https://claude.ai/install.sh | bash",
+          ),
+          codex: stateToProbe(
+            scenario.codex ?? "missing",
+            "curl -fsSL https://chatgpt.com/codex/install.sh | bash",
+          ),
+          grok: stateToProbe(
+            scenario.grok ?? "missing",
+            "curl -fsSL https://x.ai/cli/install.sh | bash",
+          ),
+          antigravity: stateToProbe(
+            scenario.antigravity ?? "missing",
+            "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+          ),
+        },
+        installSucceeds: scenario.installSucceeds ?? false,
+        installResultsIn: stateToProbe(
+          scenario.installResultsIn ?? "installed",
+          "login",
+        ),
+        installPlan: Object.fromEntries(
+          Object.entries(scenario.installPlan ?? {}).map(([model, outcome]) => [
+            model,
+            outcome === "fail"
+              ? ("fail" as const)
+              : stateToProbe(outcome as CliStateName, "login"),
+          ]),
+        ),
+        orchestratorRunning: scenario.orchestratorRunning ?? false,
+        injectDelayMs: scenario.injectDelayMs ?? 0,
+        projectDir,
+        sampleDir,
+        sampleSeed: scenario.sampleSeed ?? "real",
+        sampleModule: path.join(
+          REPO_ROOT,
+          "dist-electron",
+          "sample-project.js",
+        ),
+        priorRootPath: scenario.priorRootPath ?? null,
+        orchestratorLaunchBlock: scenario.orchestratorLaunchBlock ?? null,
+      },
+    ),
   );
 
   const page = await app.firstWindow();
@@ -1023,11 +1089,48 @@ export async function dismissBanner(page: Page): Promise<void> {
   }
 }
 
-/** 워크스페이스 셸의 우측 탭 전환 (라벨 = WorkTabs 의 i18n 라벨). */
+/**
+ * M1 온램프 차단 모달(`OnrampBlockModal` — "여기까지는 무료로 볼 수 있어요")이
+ * 떠 있는가. 인증된 CLI 가 하나도 없는 프로필에서 오케 스폰이 막히면 자기 판정
+ * 으로 뜬다(`shouldRenderOnboardingGuides`).
+ */
+export async function onrampBlockVisible(page: Page): Promise<boolean> {
+  return page
+    .getByTestId("onramp-block-modal")
+    .first()
+    .isVisible()
+    .catch(() => false);
+}
+
+/**
+ * 온램프 차단 모달을 닫는다(고스트 CTA 가 아니라 ✕ — 다른 경로로 새지 않는다).
+ * 안 떠 있으면 조용히 통과. `dismissBanner` 와 같은 자세다.
+ */
+export async function dismissOnrampBlock(page: Page): Promise<void> {
+  const x = page.getByTestId("onramp-block-close").first();
+  if (await x.isVisible().catch(() => false)) {
+    await x.click().catch(() => {});
+    await page.waitForTimeout(300);
+  }
+}
+
+/**
+ * 워크스페이스 셸의 우측 탭 전환 (라벨 = WorkTabs 의 i18n 라벨).
+ *
+ * ★탭을 누르기 전에 온램프 차단 모달을 먼저 치운다. 그 모달은 `fixed inset-0`
+ * 전면 오버레이라 **모든 탭 클릭을 가로챈다** — 인증된 CLI 가 없는 시나리오
+ * (A'·B·E)는 폴더를 붙이는 순간 오케 스폰이 막히면서 이게 떠서, 탭에 닿기도
+ * 전에 30초 클릭 타임아웃으로 죽었다. 첫실행 모달을 `passFirstRunModals` 가
+ * 치우는 것과 같은 종류의 정리다: 이 헬퍼의 일은 "탭에 도달하는 것" 이고,
+ * 안 치운 오버레이가 있으면 그 일이 불가능하다.
+ * ※ 모달 자체가 검증 대상인 spec 은 `onrampBlockVisible` 로 먼저 관측한 뒤
+ *   이 헬퍼를 부르면 된다.
+ */
 export async function openWorkTab(page: Page, label: string): Promise<void> {
   // 탭은 셸에만 있다. 예전엔 동의 모달이 부팅 뒤에 떠서 "모달을 닫았다"가
   // 곧 "셸이 떴다"였지만(F5), 이제 모달이 먼저 끝나므로 명시적으로 기다린다.
   await waitForAppShell(page);
+  await dismissOnrampBlock(page);
   await page.locator(`button:has-text("${label}")`).first().click();
   await page.waitForTimeout(400);
 }
@@ -1057,6 +1160,8 @@ export async function switchToLegacyLayout(page: Page): Promise<void> {
  */
 export async function openBoardTab(page: Page): Promise<void> {
   await waitForAppShell(page);
+  // openWorkTab 과 같은 이유 — 전면 오버레이가 클릭을 가로챈다.
+  await dismissOnrampBlock(page);
   for (const label of ["보드", "Board"]) {
     const tab = page.locator(`button:has-text("${label}")`).first();
     if (await tab.isVisible().catch(() => false)) {
