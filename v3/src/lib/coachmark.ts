@@ -28,6 +28,12 @@ export const COACHMARK_KEY = "marblo.coachmark";
 /** 비기너 셸 첫 실행 투어의 id. 투어가 늘면 여기에 형제를 추가한다. */
 export const BEGINNER_TOUR_ID = "beginner_first_run";
 
+/**
+ * 어드밴스드 셸 첫 진입 투어 — 우측 WorkTabs 탭(보드·코드·에이전트·하네스·사용량·설정)을
+ * 순서대로 짚는다. 심플→어드밴스 졸업 직후, 또는 어드밴스를 처음 여는 설치에서 1회.
+ */
+export const ADVANCED_TOUR_ID = "advanced_first_entry";
+
 export interface CoachmarkTourRecord {
   /** 투어를 실제로 화면에 띄운 횟수. */
   startedCount: number;

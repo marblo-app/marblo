@@ -249,8 +249,8 @@ export function resolveBeginnerModeForAccount(
 
 // ── 승격 ────────────────────────────────────────────────────────────────────
 
-/** 완료 N건 트리거 임계. 1건은 우연일 수 있고, 3건이면 흐름을 이해한 것. */
-export const PROMOTION_MIN_COMPLETED = 3;
+/** 완료 N건 트리거 임계. 1건은 우연일 수 있고, 5건이면 흐름을 익힌 것. */
+export const PROMOTION_MIN_COMPLETED = 5;
 /** 사용 일수 트리거 임계(일). 완료가 없어도 사흘째면 화면이 좁은 것일 수 있다. */
 export const PROMOTION_MIN_DAYS = 3;
 
