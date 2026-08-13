@@ -63,6 +63,10 @@ export const beginner = {
     "자동 설치가 막혔어요. 아래 명령을 터미널에 직접 붙여 넣으면 됩니다.",
   "beginner.oneClick.status.done": "연결됐어요. 바로 시작할 수 있습니다.",
   "beginner.oneClick.installProgress": "{done}/{total} 설치됨",
+  "beginner.oneClick.cliProgress.pending": "대기",
+  "beginner.oneClick.cliProgress.installing": "설치중",
+  "beginner.oneClick.cliProgress.done": "완료",
+  "beginner.oneClick.cliProgress.failed": "실패",
   "beginner.oneClick.partial":
     "{total}개 중 {failed}개는 실패했지만, 성공한 것으로 계속 진행해요.",
   "beginner.oneClick.terminalHint":
@@ -103,6 +107,7 @@ export const beginner = {
   "beginner.login.autoSkipped":
     "이미 로그인된 것은 자동으로 건너뛰어요 — 다시 로그인하지 않습니다.",
   "beginner.login.noSubscription": "아직 구독이 없어요",
+  "beginner.login.notSureAll": "잘 모르겠어요 · 전부 진행",
   "beginner.login.queueTitle": "아래 터미널에서 로그인 진행해주세요",
   "beginner.login.queueBody":
     "{cli} 로그인 창이에요. 브라우저가 열리면 승인해 주세요 — 끝나면 다음으로 자동으로 넘어갑니다.",

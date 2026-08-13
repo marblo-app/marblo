@@ -350,11 +350,11 @@ describe("★안전성 — 프리뷰는 실 설치/로그인을 부르지 않는
     render(createElement(BeginnerOneClickModal, { onClose: () => {} }));
     expect(
       screen.getByTestId("beginner-oneclick-modal").getAttribute("data-phase"),
-    ).toBe("installing");
+    ).toBe("choose_subscription");
     expect(realInstallAllMock().mock.calls.length).toBe(0);
     expect(actions.oneClickSignIn).not.toHaveBeenCalled();
-    // 시뮬 진행률은 우리 스토어가 든다(실 스토어의 bulkInstall 은 그대로 null).
-    expect(useOnboardingPreviewStore.getState().stage).toBe("installing");
+    // 선택 전에는 프리뷰 스토어도 설치 시뮬로 넘어가지 않는다.
+    expect(useOnboardingPreviewStore.getState().stage).toBe("connect");
     expect(useCliSetupStore.getState().bulkInstall).toBeNull();
   });
 

@@ -52,8 +52,8 @@ export interface BeginnerSubscriptionPickProps {
   selected: readonly CliModel[];
   onToggle: (model: CliModel) => void;
   onConfirm: () => void;
-  /** "아직 구독이 없어요" — 이 흐름을 벗어난다(모달의 '직접 고를게요' 와 같은 문). */
-  onNone: () => void;
+  /** "잘 모르겠어요" — 선택지를 전부 설치/로그인하는 폴백. */
+  onFallbackAll: () => void;
 }
 
 export function BeginnerSubscriptionPick({
@@ -61,7 +61,7 @@ export function BeginnerSubscriptionPick({
   selected,
   onToggle,
   onConfirm,
-  onNone,
+  onFallbackAll,
 }: BeginnerSubscriptionPickProps) {
   const { t } = useTranslation();
   const anyAlreadySignedIn = SUBSCRIPTION_CHOICES.some((model) =>
@@ -153,10 +153,10 @@ export function BeginnerSubscriptionPick({
         <button
           type="button"
           data-testid="beginner-subscription-none"
-          onClick={onNone}
+          onClick={onFallbackAll}
           className={BUTTON_GHOST}
         >
-          {t("beginner.login.noSubscription")}
+          {t("beginner.login.notSureAll")}
         </button>
         <span className="ml-auto text-[11px] text-[#7f849c]">
           {selected.length === 0

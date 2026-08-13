@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import {
   AUTO_INSTALL_KEY,
-  autoInstallComplete,
   initialWizardStep,
   requiredInstalled as computeRequiredInstalled,
   resolveGateVisibility,
@@ -11,7 +10,6 @@ import {
 } from "../lib/cliSetupGate";
 import {
   ORCHESTRATOR_CLI_IDS,
-  ROWS,
   useCliSetupStore,
 } from "../stores/cliSetupStore";
 import {
@@ -85,7 +83,6 @@ export function useStepPrdSuccess(
 
 export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
   const probeAll = useCliSetupStore((s) => s.probeAll);
-  const runInstall = useCliSetupStore((s) => s.runInstall);
   const refreshVersions = useCliSetupStore((s) => s.refreshVersions);
   const ready = useCliSetupStore((s) => s.ready);
   const loginRunning = useCliSetupStore((s) => s.loginRunning);
@@ -121,9 +118,8 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
     );
   };
 
-  // First-run: probe, then auto-install any missing auto-installable CLI
-  // (once), then decide visibility. Existing fully-set-up users are never
-  // surfaced, and auto-install skips anything already installed.
+  // First-run: probe, then decide visibility. Existing fully-set-up users are
+  // never surfaced.
   useEffect(() => {
     if (autoRunRef.current) return;
     autoRunRef.current = true;
@@ -133,44 +129,18 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
       const first = await probeAll();
       if (cancelled) return;
 
-      const autoDone = readFlag(AUTO_INSTALL_KEY);
-
       let requiredReady = first.requiredReady;
-      // Latest per-row probe results (refreshed after an auto-install pass) —
-      // the source for the install-complete (FT-8) and re-prompt (FT-6) checks.
+      // Latest per-row probe results — the source for the re-prompt checks.
       let latest = first.results;
-      // Auto-install every auto-installable CLI that's missing so the fleet is
-      // ready without a click. Optional rows install silently; only the
-      // Claude/Codex candidate set can gate visibility.
-      const missing = ROWS.filter(
-        (r) => r.autoInstall && first.results[r.id]?.installed === false,
-      );
-      if (!autoDone && missing.length > 0) {
-        // Only surface install progress once a project is connected — before
-        // that, install silently so the empty board isn't blocked.
-        if (hasProjectRef.current) openAtEarliest();
-        for (const row of missing) {
-          if (cancelled) return;
-          await runInstall(row);
-        }
-        if (cancelled) return;
-        const reprobe = await probeAll();
-        requiredReady = reprobe.requiredReady;
-        latest = reprobe.results;
-        // Only mark auto-install "done" once every previously-missing CLI is
-        // actually installed. On failure we leave the flag unset so the next
-        // launch retries rather than silently giving up (FT-8).
-        if (
-          autoInstallComplete(
-            missing.map((r) => r.id),
-            latest,
-          )
-        ) {
-          try {
-            localStorage.setItem(AUTO_INSTALL_KEY, "1");
-          } catch {
-            /* best effort */
-          }
+      // Do not auto-install on first entry. The setup surface now asks which AI
+      // account the user has, then installs only that selected set. The old
+      // background pass was the first-run auto-advance that jumped users into
+      // Claude install before they had chosen an account.
+      if (!readFlag(AUTO_INSTALL_KEY)) {
+        try {
+          localStorage.setItem(AUTO_INSTALL_KEY, "1");
+        } catch {
+          /* best effort */
         }
       }
 
@@ -197,7 +167,7 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
     return () => {
       cancelled = true;
     };
-  }, [probeAll, runInstall, refreshVersions]);
+  }, [probeAll, refreshVersions]);
 
   // Re-open on demand — the spawn guard dispatches this when a launch is
   // blocked (orchestrator/agent), and agent-manager's login-screen backstop

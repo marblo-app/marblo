@@ -138,8 +138,12 @@ vi.mock("../../src/components/orchestrator/OrchestratorPanel", () => ({
   },
 }));
 
-// 큐레이트 일곱 — 본체는 각자 자기 구독·에디터·결제 화면을 끌고 온다. 여기서
+// 큐레이트 여덟 — 본체는 각자 자기 구독·에디터·결제 화면을 끌고 온다. 여기서
 // 검증하는 건 "그 컴포넌트가 걸렸는가" 이지 그 화면의 내용이 아니다.
+vi.mock("../../src/components/onboarding/StartHereTab", () => ({
+  StartHereTab: () =>
+    createElement("div", { "data-testid": "stub-start-here" }),
+}));
 vi.mock("../../src/components/guide/GuideTab", () => ({
   GuideTab: () => createElement("div", { "data-testid": "stub-guide" }),
 }));
@@ -166,6 +170,13 @@ vi.mock("../../src/components/usage/UsagePage", () => ({
 }));
 vi.mock("../../src/components/settings/SettingsPage", () => ({
   SettingsPage: () => createElement("div", { "data-testid": "stub-settings" }),
+}));
+vi.mock("../../src/components/board/TaskDetailModal", () => ({
+  TaskDetailModal: ({ task }: { task: { id: string } }) =>
+    createElement("div", {
+      "data-testid": "stub-task-modal",
+      "data-task": task.id,
+    }),
 }));
 
 // 대화 탭의 나머지 살림 — 이 파일의 관심사가 아니다(각자 자기 테스트가 있다).
@@ -249,7 +260,7 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("심플 큐레이트 탭 — 배선", () => {
-  it("★기본은 대화다 — 큐레이트 일곱은 누르기 전엔 트리에 없다", () => {
+  it("★기본은 대화다 — 큐레이트 여덟은 누르기 전엔 트리에 없다", () => {
     render(createElement(BeginnerShell));
 
     expect(screen.getByTestId("stub-orchestrator")).toBeTruthy();
@@ -257,6 +268,7 @@ describe("심플 큐레이트 탭 — 배선", () => {
       screen.getByTestId("beginner-tab-chat").getAttribute("aria-selected"),
     ).toBe("true");
     for (const stub of [
+      "start-here",
       "guide",
       "code",
       "agents",
@@ -270,6 +282,7 @@ describe("심플 큐레이트 탭 — 배선", () => {
   });
 
   it.each([
+    ["startHere", "stub-start-here"],
     ["guide", "stub-guide"],
     ["code", "stub-code"],
     ["agents", "stub-agents"],
@@ -317,7 +330,7 @@ describe("심플 큐레이트 탭 — 배선", () => {
     render(createElement(BeginnerShell));
 
     const bar = screen.getByTestId("beginner-tabbar");
-    expect(bar.querySelectorAll('[role="tab"]')).toHaveLength(8);
+    expect(bar.querySelectorAll('[role="tab"]')).toHaveLength(9);
     for (const hidden of beginnerHiddenExpertTabs([])) {
       expect(screen.queryByTestId(`beginner-tab-${hidden}`)).toBeNull();
       expect(bar.textContent).not.toContain(ko[`workspace.tab.${hidden}`]);

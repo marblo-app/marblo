@@ -7,7 +7,6 @@ import {
   canLaunchSignIn,
   oneClickInstallRows,
   oneClickPhase,
-  signInRows,
   LOGIN_CMD,
   type OneClickPhase,
 } from "../../lib/oneClickSetup";
@@ -20,7 +19,6 @@ import {
 } from "../../lib/loginPrompt";
 import {
   DOCS_URL,
-  ORCHESTRATOR_CLI_IDS,
   ROWS,
   UPDATE_CMD,
   cliLabel,
@@ -167,11 +165,6 @@ export function BeginnerOneClickModal({
     recheck: setup.recheck,
   };
 
-  const targets = useMemo(
-    () => signInRows(ROWS, results, ORCHESTRATOR_CLI_IDS),
-    [results]
-  );
-
   // 고른 것 중 아직 로그인해야 하는 CLI — **이미 인증된 것은 여기서 빠진다**
   // (사장님 케이스: 전부 로그인돼 있으면 이 배열이 빈다).
   const pendingLogins = useMemo(
@@ -189,7 +182,7 @@ export function BeginnerOneClickModal({
       started,
       ready,
       bulk,
-      signInTargets: targets.length,
+      signInTargets: picked === null ? SUBSCRIPTION_CHOICES.length : pendingLogins.length,
       loginLaunched: loginSessionId !== null,
       subscriptionPicked: picked !== null,
       // ★`done` 을 붙잡는 값. 오케 후보 하나가 인증되면 `ready` 는 서지만, 구독을
@@ -201,7 +194,6 @@ export function BeginnerOneClickModal({
       started,
       ready,
       bulk,
-      targets.length,
       loginSessionId,
       picked,
       loginTarget,
@@ -255,12 +247,7 @@ export function BeginnerOneClickModal({
   // 모달 안에서 같은 결정을 한 번 더 묻지 않는다.
   const start = useCallback(() => {
     if (started) return;
-    // 이미 준비된 사용자(다른 창에서 먼저 로그인 등)에게 설치 패스를 돌리지
-    // 않는다 — 할 일이 없는데 셸 인스톨러가 도는 것으로 보인다.
-    if (ready) return;
     setStarted(true);
-    telemetry.cliSetupStep("install", "enter");
-    actionsRef.current.installAll();
   }, [started, ready]);
 
   useEffect(() => {
@@ -315,6 +302,10 @@ export function BeginnerOneClickModal({
     const chosen = draftPick ?? [];
     if (chosen.length === 0) return;
     setPicked(chosen);
+    telemetry.cliSetupStep("install", "enter");
+    actionsRef.current.installAll(
+      ROWS.filter((row) => chosen.includes(row.model))
+    );
     telemetry.loginPrompt("picked", {
       models: chosen,
       count: chosen.length,
@@ -325,6 +316,22 @@ export function BeginnerOneClickModal({
     // needs_auth 로 막힌다 — 이 티켓이 고치려는 바로 그 벽이다.
     applyDefaultOrchestrator(chosen, actionsRef.current.readResults());
   }, [draftPick, applyDefaultOrchestrator]);
+
+  const fallbackAll = useCallback(() => {
+    const chosen = [...SUBSCRIPTION_CHOICES];
+    setDraftPick(chosen);
+    setPicked(chosen);
+    telemetry.cliSetupStep("install", "enter");
+    actionsRef.current.installAll(
+      ROWS.filter((row) => chosen.includes(row.model))
+    );
+    telemetry.loginPrompt("picked", {
+      models: chosen,
+      count: chosen.length,
+    });
+    telemetry.cliSetupStep("auth", "enter");
+    applyDefaultOrchestrator(chosen, actionsRef.current.readResults());
+  }, [applyDefaultOrchestrator]);
 
   // ── ④ 고른 CLI 를 **차례로** 로그인시킨다 ────────────────────────────────
   // 동시에 셋을 띄우면 브라우저 승인 탭이 셋 열리고 어느 터미널이 무엇을
@@ -462,6 +469,14 @@ export function BeginnerOneClickModal({
     [results]
   );
   const firstFailed = failedRows[0];
+  const selectedRows = useMemo(
+    () =>
+      (picked ?? []).flatMap((model) => {
+        const row = ROWS.find((r) => r.model === model);
+        return row ? [row] : [];
+      }),
+    [picked]
+  );
 
   const bulkTotal = bulk?.total ?? 0;
   const bulkDone = bulk?.done ?? 0;
@@ -574,6 +589,77 @@ export function BeginnerOneClickModal({
                 })}
               </p>
             )}
+            {selectedRows.length > 0 && phase !== "choose_subscription" && (
+              <div
+                data-testid="beginner-oneclick-cli-progress-list"
+                className="mt-3 space-y-2"
+              >
+                {selectedRows.map((row) => {
+                  const installing = setup.installing === row.id;
+                  const installed = results[row.id]?.installed === true;
+                  const failed =
+                    !installing &&
+                    !installed &&
+                    !!bulk &&
+                    !bulk.running &&
+                    bulk.failedIds.includes(row.id);
+                  const pct = installing || installed ? 100 : failed ? 100 : 0;
+                  return (
+                    <div
+                      key={row.id}
+                      data-testid={`beginner-oneclick-cli-progress-${row.model}`}
+                      data-state={
+                        installing
+                          ? "installing"
+                          : installed
+                          ? "done"
+                          : failed
+                          ? "failed"
+                          : "pending"
+                      }
+                      className="rounded-md border border-[#313244] bg-[#11111b] px-3 py-2"
+                    >
+                      <div className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="font-medium text-[#cdd6f4]">
+                          {cliLabel(row.model)}
+                        </span>
+                        <span
+                          className={
+                            failed
+                              ? "text-[#f38ba8]"
+                              : installed
+                              ? "text-[#a6e3a1]"
+                              : installing
+                              ? "text-[#89b4fa]"
+                              : "text-[#7f849c]"
+                          }
+                        >
+                          {failed
+                            ? t("beginner.oneClick.cliProgress.failed")
+                            : installed
+                            ? t("beginner.oneClick.cliProgress.done")
+                            : installing
+                            ? t("beginner.oneClick.cliProgress.installing")
+                            : t("beginner.oneClick.cliProgress.pending")}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[#313244]">
+                        <div
+                          className={`h-full rounded-full transition-all duration-300 ${
+                            failed
+                              ? "bg-[#f38ba8]"
+                              : installed
+                              ? "bg-[#a6e3a1]"
+                              : "bg-[#89b4fa]"
+                          }`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {bulk &&
               !bulk.running &&
               bulk.total > 0 &&
@@ -600,7 +686,7 @@ export function BeginnerOneClickModal({
               selected={draftPick ?? []}
               onToggle={togglePick}
               onConfirm={confirmPick}
-              onNone={close}
+              onFallbackAll={fallbackAll}
             />
           )}
 

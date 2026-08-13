@@ -268,15 +268,19 @@ export function oneClickPhase(s: OneClickFlowState): OneClickPhase {
   // 인증이 끝났고 더 띄울 로그인도 없다 = 이 흐름의 끝.
   if (s.ready && (s.pendingLogins ?? 0) === 0) return "done";
   if (!s.started) return "idle";
+  // Ask before installing. The old order installed the default fleet first and
+  // only then asked which account the user had, which was the first-run
+  // auto-advance into Claude/Codex/Grok install.
+  if (s.subscriptionPicked === false) return "choose_subscription";
   if (s.bulk?.running) return "installing";
-  if (s.loginLaunched) return "awaiting_auth";
-  // ★설치가 **끝난 뒤에** 묻는다. 설치 중에 물으면 아직 없는 CLI 를 고르게 되고,
-  // 고른 순간 로그인 명령이 없는 바이너리로 날아간다.
-  // 사인인할 대상이 하나도 없으면 묻지 않는다 — 설치가 전부 실패했다는 뜻이라
-  // 물어봤자 띄울 터미널이 없다(아래 `blocked` 로 떨어진다).
-  if (s.subscriptionPicked === false && s.signInTargets > 0) {
-    return "choose_subscription";
+  if (
+    s.bulk &&
+    s.bulk.total > 0 &&
+    s.bulk.failedIds.length >= s.bulk.total
+  ) {
+    return "blocked";
   }
+  if (s.loginLaunched) return "awaiting_auth";
   if (s.signInTargets > 0) return "sign_in";
   // 설치 패스가 아직 시작 전이면(클릭 직후 한 틱) 설치 중으로 본다 — 빈
   // "막힘" 화면이 한 프레임 스치는 것을 막는다.

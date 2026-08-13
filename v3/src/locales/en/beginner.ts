@@ -62,6 +62,10 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
     "Auto-install is blocked. Paste the command below into a terminal instead.",
   "beginner.oneClick.status.done": "Connected. You're ready to start.",
   "beginner.oneClick.installProgress": "{done}/{total} installed",
+  "beginner.oneClick.cliProgress.pending": "Pending",
+  "beginner.oneClick.cliProgress.installing": "Installing",
+  "beginner.oneClick.cliProgress.done": "Done",
+  "beginner.oneClick.cliProgress.failed": "Failed",
   "beginner.oneClick.partial":
     "{failed} of {total} failed, but we're carrying on with the ones that worked.",
   "beginner.oneClick.terminalHint":
@@ -100,6 +104,7 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.login.autoSkipped":
     "Anything already signed in is skipped — we won't ask you to sign in twice.",
   "beginner.login.noSubscription": "I don't have one yet",
+  "beginner.login.notSureAll": "I'm not sure · try all",
   "beginner.login.queueTitle": "Please sign in from the terminal below",
   "beginner.login.queueBody":
     "This is the {cli} sign-in. Approve it when the browser opens — we move on to the next one automatically.",
