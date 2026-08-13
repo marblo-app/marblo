@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   CalendarDays,
+  ContactRound,
   FolderOpen,
   Link2,
   Loader2,
@@ -37,6 +38,7 @@ const FOLDER_MIME = "application/vnd.google-apps.folder";
 const FOLDER_PAGE_SIZE = 20;
 const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+const CONTACTS_SCOPE = "https://www.googleapis.com/auth/contacts.readonly";
 
 function drive(): DriveAPI {
   return window.electronAPI.drive;
@@ -50,7 +52,7 @@ interface FolderOption {
 
 function statusBadge(
   connected: boolean,
-  bound: boolean,
+  bound: boolean
 ): { labelKey: MessageKey; className: string } {
   if (!connected) {
     return {
@@ -91,9 +93,10 @@ export function DriveConnectionPanel() {
   const scopes = status?.scopes ?? [];
   const gmailConnected = connected && scopes.includes(GMAIL_SCOPE);
   const calendarConnected = connected && scopes.includes(CALENDAR_SCOPE);
+  const contactsConnected = connected && scopes.includes(CONTACTS_SCOPE);
   const badge = useMemo(
     () => statusBadge(connected, !!binding),
-    [connected, binding],
+    [connected, binding]
   );
 
   const load = useCallback(async () => {
@@ -106,7 +109,7 @@ export function DriveConnectionPanel() {
       setBinding(projectId ? await drive().binding.get(projectId) : null);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : t("harness.drive.loadError"),
+        err instanceof Error ? err.message : t("harness.drive.loadError")
       );
     } finally {
       setLoading(false);
@@ -140,7 +143,7 @@ export function DriveConnectionPanel() {
       setMessage(t("harness.drive.connected"));
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : t("harness.drive.connectFailed"),
+        err instanceof Error ? err.message : t("harness.drive.connectFailed")
       );
     } finally {
       setConnecting(false);
@@ -162,9 +165,7 @@ export function DriveConnectionPanel() {
       setMessage(t("harness.drive.disconnected"));
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : t("harness.drive.disconnectFailed"),
+        err instanceof Error ? err.message : t("harness.drive.disconnectFailed")
       );
     }
   }, [t]);
@@ -196,11 +197,11 @@ export function DriveConnectionPanel() {
             id: f.id,
             title: f.title,
             modifiedTime: f.modifiedTime,
-          })),
+          }))
       );
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : t("harness.drive.loadError"),
+        err instanceof Error ? err.message : t("harness.drive.loadError")
       );
     } finally {
       setSearching(false);
@@ -229,19 +230,17 @@ export function DriveConnectionPanel() {
         setBinding(result.binding);
         setFolders(null);
         setMessage(
-          `${t("harness.drive.bound")} ${t(
-            "harness.drive.appliesImmediately",
-          )}`,
+          `${t("harness.drive.bound")} ${t("harness.drive.appliesImmediately")}`
         );
       } catch (err) {
         setError(
-          err instanceof Error ? err.message : t("harness.drive.bindFailed"),
+          err instanceof Error ? err.message : t("harness.drive.bindFailed")
         );
       } finally {
         setSavingBinding(false);
       }
     },
-    [projectId, t],
+    [projectId, t]
   );
 
   const clearFolder = useCallback(async () => {
@@ -259,7 +258,7 @@ export function DriveConnectionPanel() {
       setMessage(t("harness.drive.cleared"));
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : t("harness.drive.clearFailed"),
+        err instanceof Error ? err.message : t("harness.drive.clearFailed")
       );
     }
   }, [projectId, t]);
@@ -293,11 +292,11 @@ export function DriveConnectionPanel() {
       setMessage(
         (count === 0
           ? t("harness.drive.previewEmpty")
-          : t("harness.drive.previewOk", { count: String(count) })) + truncated,
+          : t("harness.drive.previewOk", { count: String(count) })) + truncated
       );
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : t("harness.drive.loadError"),
+        err instanceof Error ? err.message : t("harness.drive.loadError")
       );
     } finally {
       setPreviewing(false);
@@ -346,8 +345,8 @@ export function DriveConnectionPanel() {
             {connecting
               ? t("harness.drive.connecting")
               : connected
-                ? t("harness.drive.reconnect")
-                : t("harness.drive.connect")}
+              ? t("harness.drive.reconnect")
+              : t("harness.drive.connect")}
           </button>
           {connected && (
             <button
@@ -391,7 +390,7 @@ export function DriveConnectionPanel() {
         )}
       </div>
 
-      <div className="mb-3 grid gap-2 sm:grid-cols-2">
+      <div className="mb-3 grid gap-2 sm:grid-cols-3">
         <div className="flex items-center gap-2 rounded border border-[#313244] bg-[#1e1e2e] px-3 py-2 text-xs">
           <Mail className="h-3.5 w-3.5 text-[#89b4fa]" />
           <span className="text-[#bac2de]">{t("harness.drive.gmail")}</span>
@@ -418,6 +417,21 @@ export function DriveConnectionPanel() {
             }`}
           >
             {calendarConnected
+              ? t("harness.drive.scopeReady")
+              : t("harness.drive.scopeNeedsReconnect")}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 rounded border border-[#313244] bg-[#1e1e2e] px-3 py-2 text-xs">
+          <ContactRound className="h-3.5 w-3.5 text-[#94e2d5]" />
+          <span className="text-[#bac2de]">{t("harness.drive.contacts")}</span>
+          <span
+            className={`ml-auto rounded px-2 py-0.5 text-[11px] ${
+              contactsConnected
+                ? "bg-[#a6e3a1]/15 text-[#a6e3a1]"
+                : "bg-[#313244] text-[#bac2de]"
+            }`}
+          >
+            {contactsConnected
               ? t("harness.drive.scopeReady")
               : t("harness.drive.scopeNeedsReconnect")}
           </span>

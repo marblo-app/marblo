@@ -221,7 +221,7 @@ export const harness = {
   // ★두 축이 한 패널에 있다: 계정 연결은 유저 단위(1회), 위키 폴더는 프로젝트 단위.
   "harness.drive.title": "Google Workspace",
   "harness.drive.subtitle":
-    "Drive 위키, Gmail, Calendar 읽기 권한을 Google 계정 1회 연결로 사용합니다.",
+    "Drive 위키, Gmail, Calendar, Contacts 읽기 권한을 Google 계정 1회 연결로 사용합니다.",
   "harness.drive.status.disconnected": "미연결",
   "harness.drive.status.needsFolder": "폴더 필요",
   "harness.drive.status.bound": "연결",
@@ -234,11 +234,12 @@ export const harness = {
   "harness.drive.connectFailed": "Google Workspace 연결에 실패했습니다.",
   "harness.drive.disconnect": "계정 연결 해제",
   "harness.drive.disconnectConfirm":
-    "이 기기에서 Google 연결을 해제하시겠습니까? 저장된 인증 정보가 삭제되고 모든 프로젝트의 Drive, Gmail, Calendar 조회가 멈춥니다.",
+    "이 기기에서 Google 연결을 해제하시겠습니까? 저장된 인증 정보가 삭제되고 모든 프로젝트의 Drive, Gmail, Calendar, Contacts 조회가 멈춥니다.",
   "harness.drive.disconnected": "Google Workspace 연결을 해제했습니다.",
   "harness.drive.disconnectFailed": "연결 해제에 실패했습니다.",
   "harness.drive.gmail": "Gmail 읽기",
   "harness.drive.calendar": "Calendar 읽기",
+  "harness.drive.contacts": "Contacts 읽기",
   "harness.drive.scopeReady": "준비됨",
   "harness.drive.scopeNeedsReconnect": "재연결 필요",
   "harness.drive.folderSection": "이 프로젝트의 위키 폴더",
