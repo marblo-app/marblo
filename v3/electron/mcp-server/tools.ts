@@ -7326,20 +7326,15 @@ export function registerTools(server: McpServer): void {
   // userFacing:false — 읽기 조회라 활동 스트림에 노이즈를 만들지 않는다.
 
   /** 브리지의 읽기 전용 Drive 엔드포인트 호출. 실패는 문장으로 돌려준다. */
-  async function driveViaBridge(
-    endpoint:
-      | "/drive-search"
-      | "/drive-fetch"
-      | "/gmail-search"
-      | "/gmail-fetch"
-      | "/calendar-list",
-    payload: Record<string, unknown>
   async function knowledgeViaBridge(
     endpoint:
       | "/drive-search"
       | "/drive-fetch"
       | "/notion-search"
-      | "/notion-fetch",
+      | "/notion-fetch"
+      | "/gmail-search"
+      | "/gmail-fetch"
+      | "/calendar-list",
     payload: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     const bridgePort = process.env.MARBLO_BRIDGE_PORT;
@@ -7371,7 +7366,12 @@ export function registerTools(server: McpServer): void {
   }
 
   async function driveViaBridge(
-    endpoint: "/drive-search" | "/drive-fetch",
+    endpoint:
+      | "/drive-search"
+      | "/drive-fetch"
+      | "/gmail-search"
+      | "/gmail-fetch"
+      | "/calendar-list",
     payload: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     return knowledgeViaBridge(endpoint, payload);
@@ -7581,9 +7581,7 @@ export function registerTools(server: McpServer): void {
         const truncatedNote = doc.truncated
           ? " (파일이 크기 상한에 걸려 일부만 내려받은 탓일 수 있습니다.)"
           : "";
-        return text(
-          `"${doc.title}" (${doc.mimeType}): ${why}${truncatedNote}`
-        );
+        return text(`"${doc.title}" (${doc.mimeType}): ${why}${truncatedNote}`);
       }
       const header = [
         `# ${doc.title}`,
@@ -7745,7 +7743,7 @@ export function registerTools(server: McpServer): void {
       page_token: z
         .string()
         .optional()
-        .describe("nextPageToken from a previous gmail_search call.")
+        .describe("nextPageToken from a previous gmail_search call."),
     },
     async ({ query, label_ids, page_size, page_token }) => {
       const result = await driveViaBridge("/gmail-search", {
@@ -7753,13 +7751,13 @@ export function registerTools(server: McpServer): void {
         query,
         labelIds: label_ids,
         pageSize: page_size,
-        pageToken: page_token
+        pageToken: page_token,
       });
       if (result.ok !== true) {
         return text(
           `Gmail 검색 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`
+          }`,
         );
       }
       const payload = result.result as {
@@ -7772,11 +7770,11 @@ export function registerTools(server: McpServer): void {
         return text("조건에 맞는 Gmail 메시지가 없습니다.");
       }
       const lines = messages.map(
-        (message) => `- id: ${message.id}\n  threadId: ${message.threadId}`
+        (message) => `- id: ${message.id}\n  threadId: ${message.threadId}`,
       );
       if (payload.nextPageToken) {
         lines.push(
-          `\n(더 있음 — page_token="${payload.nextPageToken}" 으로 이어서 조회하세요.)`
+          `\n(더 있음 — page_token="${payload.nextPageToken}" 으로 이어서 조회하세요.)`,
         );
       }
       const estimate =
@@ -7784,10 +7782,10 @@ export function registerTools(server: McpServer): void {
           ? ` (estimate: ${payload.resultSizeEstimate})`
           : "";
       return text(
-        `Gmail 메시지 ${messages.length}개${estimate}:\n${lines.join("\n")}`
+        `Gmail 메시지 ${messages.length}개${estimate}:\n${lines.join("\n")}`,
       );
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   auditedTool(
@@ -7796,18 +7794,18 @@ export function registerTools(server: McpServer): void {
       "from, date, labels, snippet, and message body. Get message ids from " +
       "gmail_search. OAuth tokens never leave Marblo main process.",
     {
-      message_id: z.string().describe("Gmail message id from gmail_search.")
+      message_id: z.string().describe("Gmail message id from gmail_search."),
     },
     async ({ message_id }) => {
       const result = await driveViaBridge("/gmail-fetch", {
         projectId: process.env.MARBLO_PROJECT || "",
-        messageId: message_id
+        messageId: message_id,
       });
       if (result.ok !== true) {
         return text(
           `Gmail 메시지 조회 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`
+          }`,
         );
       }
       const message = result.message as {
@@ -7831,13 +7829,13 @@ export function registerTools(server: McpServer): void {
           `labels: ${message.labelIds.join(", ") || "(none)"}`,
           message.truncated ? "(본문이 길어 일부만 표시합니다.)" : "",
           "",
-          message.body || message.snippet || "(본문 없음)"
+          message.body || message.snippet || "(본문 없음)",
         ]
           .filter((line, index) => line || index === 8)
-          .join("\n")
+          .join("\n"),
       );
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   auditedTool(
@@ -7863,7 +7861,7 @@ export function registerTools(server: McpServer): void {
       page_token: z
         .string()
         .optional()
-        .describe("nextPageToken from a previous calendar_list call.")
+        .describe("nextPageToken from a previous calendar_list call."),
     },
     async ({ time_min, time_max, query, max_results, page_token }) => {
       const result = await driveViaBridge("/calendar-list", {
@@ -7872,13 +7870,13 @@ export function registerTools(server: McpServer): void {
         timeMax: time_max,
         query,
         maxResults: max_results,
-        pageToken: page_token
+        pageToken: page_token,
       });
       if (result.ok !== true) {
         return text(
           `Calendar 조회 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`
+          }`,
         );
       }
       const payload = result.result as {
@@ -7914,12 +7912,12 @@ export function registerTools(server: McpServer): void {
       });
       if (payload.nextPageToken) {
         lines.push(
-          `\n(더 있음 — page_token="${payload.nextPageToken}" 으로 이어서 조회하세요.)`
+          `\n(더 있음 — page_token="${payload.nextPageToken}" 으로 이어서 조회하세요.)`,
         );
       }
       return text(`Calendar 일정 ${events.length}개:\n${lines.join("\n")}`);
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   // send_slack_message — outbound reply to the project's Slack channel.
