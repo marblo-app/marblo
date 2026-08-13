@@ -115,6 +115,16 @@ interface ProjectState {
   projects: Project[];
   /** 이 기기의 machineId. 아직 IPC 응답 전이면 null. */
   machineId: string | null;
+  /**
+   * 지금 스토어에 실린 프로젝트가 **누구 것인지** — 활성 구독의 uid.
+   *
+   * 계정 격리의 판정 근거다(티켓 GOiAnCMjqrEPNcmBaiBY). 두 가지를 가능하게 한다:
+   *  1. 스냅샷 콜백이 자기 uid 와 대조해, 이전 계정 구독의 늦은 스냅샷을 삼킨다.
+   *  2. UI 가 `subscribedUserId === user.uid` 로 "이 리스트가 지금 로그인한
+   *     계정의 것인가" 를 물을 수 있다 — projectsHydrated 만으로는 이전 계정
+   *     세션에서 넘어온 true 와 구분되지 않는다.
+   */
+  subscribedUserId: string | null;
   autoSelectFirstProject: boolean;
   loading: boolean;
   // True once the first projects snapshot has settled (carried data, or the
@@ -125,6 +135,11 @@ interface ProjectState {
 
   setCurrentProject: (project: Project) => void;
   clearCurrentProject: () => void;
+  /**
+   * 계정이 바뀔 때(로그아웃 포함) 계정 귀속 상태를 전부 버린다.
+   * 호출은 `lib/accountScope` 의 초크포인트를 통해서만 — 직접 부르지 말 것.
+   */
+  resetForAccountChange: () => void;
   setAutoSelectFirstProject: (enabled: boolean) => void;
   findByFolderPath: (folderPath: string) => Project | undefined;
   findByPathOrRemote: (
@@ -157,6 +172,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   currentProject: null,
   projects: [],
   machineId: null,
+  subscribedUserId: null,
   autoSelectFirstProject: true,
   loading: false,
   projectsHydrated: false,
@@ -207,6 +223,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   clearCurrentProject: () => {
     set({ currentProject: null });
+  },
+
+  resetForAccountChange: () => {
+    // machineId 는 기기 귀속이라 유지한다 — 계정과 무관하고, 버리면 다음 계정이
+    // IPC 왕복을 다시 기다리는 동안 경로 해석이 레거시로 퇴화한다.
+    // subscribedUserId=null 은 "지금 실린 데이터의 주인이 없다" 는 뜻이라,
+    // 살아남은 이전 구독의 스냅샷도 이 시점 이후로는 전부 삼켜진다.
+    set({
+      projects: [],
+      currentProject: null,
+      subscribedUserId: null,
+      loading: false,
+      projectsHydrated: false,
+      error: null,
+    });
   },
 
   setAutoSelectFirstProject: (enabled: boolean) => {
@@ -279,7 +310,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const projects = (await projectService.getProjects(userId)).map((p) =>
         applyMachineResolution(p, machineId),
       );
-      set({ projects, machineId, loading: false });
+      // 계정 격리: 왕복 도중 계정이 바뀌었으면 이 결과는 남의 것이다 — 버린다.
+      // (주인이 아직 없으면 = 방금 리셋된 상태면, 이 fetch 가 주인을 세운다.)
+      const owner = get().subscribedUserId;
+      if (owner !== null && owner !== userId) {
+        set({ loading: false });
+        return;
+      }
+      set({ projects, machineId, loading: false, subscribedUserId: userId });
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to fetch projects",
@@ -338,7 +376,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   subscribeToProjects: (userId: string) => {
-    set({ loading: true, projectsHydrated: false });
+    // ★계정 격리 (티켓 GOiAnCMjqrEPNcmBaiBY): uid 가 바뀌었으면 **스냅샷을
+    //   기다리지 않고 지금 당장** 이전 계정의 리스트를 버린다. 예전엔 loading
+    //   플래그만 세우고 `projects` 는 그대로 뒀는데, 그러면 새 계정 신원으로
+    //   렌더되는 프레임이 옛 계정 프로젝트를 그대로 그린다 — 사용자가 실제로
+    //   본 그 화면이다. 지우는 쪽은 언제나 안전하다(곧 올 스냅샷이 채운다).
+    //
+    //   ★같은 uid 면 비우지 않는다: 렌더러 재구독(sleep/wake 복귀, 이펙트 재실행)
+    //   에서 useSessionRestore 가 이미 골라 둔 currentProject 를 날려 버리면
+    //   창이 프로젝트를 잃는다. 격리에 필요한 건 "계정이 바뀔 때 비우는 것"뿐이다.
+    if (get().subscribedUserId !== userId) {
+      set({ projects: [], currentProject: null });
+    }
+    set({ subscribedUserId: userId, loading: true, projectsHydrated: false });
 
     // machineId 는 IPC 라 비동기다. 스냅샷이 먼저 도착할 수 있으므로, 도착하면
     // 이미 들고 있는 프로젝트를 다시 해석한다(applyMachineResolution 은 원본을
@@ -382,6 +432,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         [where("members", "array-contains", userId)],
         (docs) => {
           if (cancelled) return;
+          // ★uid 스탬프 가드 (계정 격리, 티켓 GOiAnCMjqrEPNcmBaiBY).
+          //   `cancelled` 는 정상 teardown 만 막는다. 해제를 놓친 구독이나 이미
+          //   비행 중이던 스냅샷이 새 계정 세션 위로 착지하는 경로는 그것으로
+          //   닫히지 않는다 — 그게 바로 남의 프로젝트가 리스트에 실리는 모양이다.
+          //   스토어가 기억하는 주인과 다르면 조용히 버린다(fail-closed).
+          if (get().subscribedUserId !== userId) return;
           const projects = docs.map((d) => toProject(d, get().machineId));
           const { currentProject, autoSelectFirstProject } = get();
 

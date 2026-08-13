@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -24,6 +25,7 @@ import {
 } from "firebase/auth";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db, isPackagedLoopbackAuth } from "../lib/firebase";
+import { resetAccountScopedState } from "../lib/accountScope";
 import { t } from "../lib/i18n";
 import {
   clearAgentFirebaseAuth,
@@ -113,7 +115,9 @@ const REDIRECT_NAV_WATCHDOG_MS = 8_000;
 const MARKETING_CONSENT_VERSION = "2026-07-22";
 const MARKETING_CONSENT_REDIRECT_KEY = "marblo:authMarketingConsentPending";
 
-export function isHumanAuthUser(firebaseUser: User | null): firebaseUser is User {
+export function isHumanAuthUser(
+  firebaseUser: User | null,
+): firebaseUser is User {
   if (!firebaseUser) return false;
   if (firebaseUser.uid === "test-user-bypass") return true;
 
@@ -220,13 +224,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // that work independently of the stalled persistence init.
   const [initDegraded, setInitDegraded] = useState(false);
 
+  // 마지막으로 채택한 신원. `undefined` = 아직 한 번도 채택 안 함(초기 mount).
+  const lastIdentityRef = useRef<string | null | undefined>(undefined);
+
+  /**
+   * 신원 채택의 **단일 초크포인트** — 티켓 GOiAnCMjqrEPNcmBaiBY (P0 계정 격리).
+   *
+   * uid 가 실제로 바뀔 때(로그아웃 → null 포함) 계정 귀속 렌더러 상태를 **먼저,
+   * 동기적으로** 버리고 나서 새 신원을 공개한다. 순서가 핵심이다: `setUser` 를
+   * 먼저 하면 그 렌더 프레임이 "새 계정 + 옛 계정 데이터" 로 그려지고, 그게 바로
+   * datagadapida 화면에 john.kim 프로젝트가 보인 그 상태다. React 이펙트로
+   * 지우는 것으로는 늦다 — 이펙트는 렌더 **뒤에** 돈다.
+   *
+   * uid 가 그대로면(토큰 갱신, 프로필 필드 변경 등) 아무것도 버리지 않는다.
+   *
+   * ★setUser 를 직접 부르지 말고 항상 이 함수를 거칠 것. 여기를 우회하는 경로가
+   *   하나라도 생기면 그 경로가 곧 격리 구멍이다.
+   */
+  const adoptIdentity = useCallback((nextUser: User | null) => {
+    const nextUid = nextUser?.uid ?? null;
+    if (lastIdentityRef.current !== nextUid) {
+      lastIdentityRef.current = nextUid;
+      resetAccountScopedState();
+    }
+    setUser(nextUser);
+  }, []);
+
   useEffect(() => {
     // Test hatch — main process 가 MARBLO_TEST_BYPASS_AUTH=1 로 launch 된
     // 경우 Firebase Auth 를 건너뛰고 mock user 로 통과. Playwright e2e 에서
     // 로그인 게이트 우회용. preload 만 process.env 접근 가능하므로 renderer
     // 임의 우회 불가 (보안).
     if (window.electronAPI?.testMode?.bypassAuth) {
-      setUser({
+      adoptIdentity({
         uid: "test-user-bypass",
         email: "test@marblo.dev",
         displayName: "Test User",
@@ -269,14 +299,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // A late-arriving real state after the degraded fallback: adopt it and
         // drop the banner so recovery is seamless.
         setInitDegraded(false);
-        setUser(firebaseUser);
+        adoptIdentity(firebaseUser);
         setFirebaseAuthReady(true);
         setLoading(false);
         return;
       }
       settled = true;
       clearTimeout(timeout);
-      setUser(firebaseUser);
+      adoptIdentity(firebaseUser);
       setFirebaseAuthReady(true);
       setLoading(false);
     });
@@ -290,7 +320,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
-        setUser(auth.currentUser);
+        adoptIdentity(auth.currentUser);
         setFirebaseAuthReady(true);
         setLoading(false);
       })
@@ -322,7 +352,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           clearTimeout(timeout);
           setError(null);
           setInitDegraded(false);
-          setUser(result.user);
+          adoptIdentity(result.user);
           setFirebaseAuthReady(true);
           setLoading(false);
           syncAgentFirebaseAuthForUser(
@@ -353,7 +383,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(timeout);
       unsubscribe();
     };
-  }, []);
+    // adoptIdentity 는 useCallback([]) 으로 안정 참조 — 재실행을 유발하지 않는다.
+  }, [adoptIdentity]);
 
   useEffect(() => {
     if (window.electronAPI?.testMode?.bypassAuth) return;

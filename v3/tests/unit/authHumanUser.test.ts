@@ -24,9 +24,14 @@ vi.mock("firebase/firestore", () => ({
   setDoc: vi.fn(),
 }));
 
+// `functions` 는 AuthProvider 가 계정 격리 초크포인트(lib/accountScope)를 통해
+// taskStore → taskService → taskOutcomeReporter 를 끌어오면서 필요해졌다
+// (티켓 GOiAnCMjqrEPNcmBaiBY). 그쪽은 모듈 로드 시점에 httpsCallable(functions)
+// 을 부르므로 mock 에도 자리가 있어야 한다.
 vi.mock("../../src/lib/firebase", () => ({
   auth: {},
   db: {},
+  functions: {},
   isPackagedLoopbackAuth: false,
 }));
 

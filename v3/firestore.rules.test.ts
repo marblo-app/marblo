@@ -9,6 +9,13 @@
  *
  * ⚠️ 반드시 vitest.rules.config.mjs 로 실행할 것. 기본 vitest.config.mjs 는
  *    firebase/firestore 를 mock 으로 alias 하므로 이 규칙 테스트가 깨진다.
+ *
+ * ⚠️ 한국어 로케일 함정 (티켓 GOiAnCMjqrEPNcmBaiBY 에서 실측):
+ *    ko_KR 로케일 JVM 에서는 룰 컴파일러가 검증 메시지 번들을 못 찾아
+ *    (MissingResourceException: JValidationMessages_messages, locale ko_KR)
+ *    룰 업로드가 500 으로 죽는다 — 룰 문법 오류처럼 보이지만 아니다.
+ *    에뮬레이터를 직접 띄운다면 JVM 에 `-Duser.language=en -Duser.country=US`
+ *    를 주고, 에뮬레이터에는 Java 11+ 가 필요하다(시스템 java 가 8이면 실패).
  */
 
 import {
@@ -595,6 +602,81 @@ describe("projects collection", () => {
   it("Admin은 프로젝트를 삭제할 수 없다", async () => {
     const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
     await assertFails(deleteDoc(doc(db, "projects", PROJECT_ID)));
+  });
+});
+
+// ===== 계정 격리: projects 쿼리(list) — 티켓 GOiAnCMjqrEPNcmBaiBY =====
+//
+// 위 describe 는 전부 단건 `get` 이다. 그런데 앱이 프로젝트 리스트를 채우는
+// 실제 모양은 **쿼리(list)** 다:
+//   projectStore.subscribeToProjects / projectService.getProjects
+//     → query(projects, where("members", "array-contains", uid))
+// get 이 격리돼 있다고 list 도 격리된 것은 아니다 — 룰 평가 단위가 다르다
+// ("security rules are not filters", 이 파일 tasks 섹션 주석의 그 규율).
+// 계정 전환 후 이전 계정 프로젝트가 보인 P0 의 심각도 판정(rules breach 인가,
+// 렌더러 스테일 상태인가)이 걸린 지점이므로 여기서 명시적으로 못 박는다.
+describe("projects 계정 격리 (list 쿼리)", () => {
+  // 방금 로그인한 새 계정 — 어떤 프로젝트에도 속하지 않는다(datagadapida 역).
+  const SWITCHED_ID = "switched-account-user";
+  const SWITCHED_EMAIL = "switched@test.com";
+
+  it("새 계정의 스코프 쿼리는 남의 프로젝트를 0건 반환한다", async () => {
+    const db = getContext(SWITCHED_ID, SWITCHED_EMAIL).firestore();
+    const snap = await assertSucceeds(
+      getDocs(
+        query(
+          collection(db, "projects"),
+          where("members", "array-contains", SWITCHED_ID),
+        ),
+      ),
+    );
+    expect(snap.docs.map((d) => d.id)).toEqual([]);
+  });
+
+  it("멤버의 스코프 쿼리는 자기 프로젝트만 반환한다(타 테넌트 제외)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    const snap = await assertSucceeds(
+      getDocs(
+        query(
+          collection(db, "projects"),
+          where("members", "array-contains", MEMBER_ID),
+        ),
+      ),
+    );
+    expect(snap.docs.map((d) => d.id).sort()).toEqual([PROJECT_ID]);
+  });
+
+  it("무스코프 list 는 통째로 거부된다(룰은 필터가 아니다)", async () => {
+    const db = getContext(SWITCHED_ID, SWITCHED_EMAIL).firestore();
+    await assertFails(getDocs(collection(db, "projects")));
+  });
+
+  // ★이 테스트가 (a) 스테일 세션 시나리오의 fail-closed 보증이다: 렌더러가
+  // 버그로 **이전 계정 uid** 로 구독을 계속하더라도, 인증 주체가 새 계정인 한
+  // Firestore 가 쿼리를 거부한다 → 남의 프로젝트가 스냅샷으로 흘러들 수 없다.
+  it("이전 계정 uid 로 스코프한 쿼리는 거부된다(스테일 구독 fail-closed)", async () => {
+    const db = getContext(SWITCHED_ID, SWITCHED_EMAIL).firestore();
+    await assertFails(
+      getDocs(
+        query(
+          collection(db, "projects"),
+          where("members", "array-contains", OWNER_ID),
+        ),
+      ),
+    );
+  });
+
+  it("미인증 상태에서는 프로젝트를 읽을 수 없다", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(getDoc(doc(db, "projects", PROJECT_ID)));
+    await assertFails(
+      getDocs(
+        query(
+          collection(db, "projects"),
+          where("members", "array-contains", OWNER_ID),
+        ),
+      ),
+    );
   });
 });
 

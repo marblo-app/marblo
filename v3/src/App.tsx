@@ -240,6 +240,7 @@ function AppContent() {
   const { user, loading } = useAuth();
   const subscribeToProjects = useProjectStore((s) => s.subscribeToProjects);
   const projectsHydrated = useProjectStore((s) => s.projectsHydrated);
+  const subscribedUserId = useProjectStore((s) => s.subscribedUserId);
   const setAutoSelectFirstProject = useProjectStore(
     (s) => s.setAutoSelectFirstProject
   );
@@ -524,7 +525,17 @@ function AppContent() {
   // refresh. Hold a loading state until the projects store has hydrated. Skipped
   // when Firebase listeners are disabled (diagnostic) — otherwise we'd hang here
   // forever since nothing would ever flip projectsHydrated.
-  if (FIREBASE_LISTENERS_ENABLED && !projectsHydrated) {
+  //
+  // ★계정 게이트도 겸한다 (티켓 GOiAnCMjqrEPNcmBaiBY): 리스트가 **지금 로그인한
+  //   계정의 것**임이 확인될 때까지 셸을 그리지 않는다. projectsHydrated 만으론
+  //   부족했다 — 이전 계정 세션에서 true 로 남아 있고, 이를 false 로 되돌리는
+  //   subscribeToProjects 는 이펙트라 렌더 **뒤에** 돈다. 그래서 새 uid 로 넘어온
+  //   첫 프레임이 옛 계정 프로젝트를 그대로 그렸다. 소유자 대조는 렌더 시점에
+  //   즉시 성립하므로 그 프레임이 존재할 수 없다.
+  if (
+    FIREBASE_LISTENERS_ENABLED &&
+    (!projectsHydrated || subscribedUserId !== user.uid)
+  ) {
     return <BrandLoader label={t("common.loadingProjects")} />;
   }
 
