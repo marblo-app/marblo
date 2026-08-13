@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
-  ChevronDown,
   Loader2,
   RefreshCw,
   Save,
@@ -12,6 +11,11 @@ import {
 import { useProjectStore } from "../../stores/projectStore";
 import { useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
+import {
+  ConnectorGuidePanel,
+  ConnectorGuideStep,
+  ConnectorGuideSteps,
+} from "./ConnectorGuidePanel";
 
 type InboundCapability = "read" | "trigger";
 
@@ -124,7 +128,6 @@ export function SlackChannelPanel() {
   const [saving, setSaving] = useState(false);
   const [probing, setProbing] = useState(false);
   const [removing, setRemoving] = useState(false);
-  const [guideOpen, setGuideOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -535,57 +538,40 @@ export function SlackChannelPanel() {
         </p>
       )}
 
-      <div className="mt-3 rounded border border-[#313244] bg-[#1e1e2e]">
-        <button
-          type="button"
-          onClick={() => setGuideOpen((open) => !open)}
-          aria-expanded={guideOpen}
-          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-[#bac2de] hover:bg-[#313244]/60"
-        >
-          <span>{t("harness.slack.guide.toggle")}</span>
-          <ChevronDown
-            className={`h-4 w-4 text-[#6c7086] transition-transform ${
-              guideOpen ? "rotate-180" : ""
-            }`}
-          />
-        </button>
-        {guideOpen && (
-          <div className="space-y-3 border-t border-[#313244] px-3 py-3 text-[11px] leading-5 text-[#bac2de]">
-            <ol className="grid gap-2 md:grid-cols-2">
-              <li className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
-                1. {t("harness.slack.guide.step1Before")}
-                <a
-                  href="https://api.slack.com/apps"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[#89b4fa] hover:underline"
-                >
-                  api.slack.com/apps
-                </a>
-                {t("harness.slack.guide.step1After")}
-              </li>
-              <li className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
-                2. {t("harness.slack.guide.step2")}
-              </li>
-              <li className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
-                3. {t("harness.slack.guide.step3")}
-              </li>
-              <li className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
-                4. {t("harness.slack.guide.step4")}
-              </li>
-              <li className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
-                5. {t("harness.slack.guide.step5")}
-              </li>
-              <li className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
-                6. {t("harness.slack.guide.step6")}
-              </li>
-              <li className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
-                7. {t("harness.slack.guide.step7")}
-              </li>
-            </ol>
-          </div>
-        )}
-      </div>
+      <ConnectorGuidePanel toggleLabel={t("harness.slack.guide.toggle")}>
+        <ConnectorGuideSteps>
+          <ConnectorGuideStep>
+            1. {t("harness.slack.guide.step1Before")}
+            <a
+              href="https://api.slack.com/apps"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[#89b4fa] hover:underline"
+            >
+              api.slack.com/apps
+            </a>
+            {t("harness.slack.guide.step1After")}
+          </ConnectorGuideStep>
+          <ConnectorGuideStep>
+            2. {t("harness.slack.guide.step2")}
+          </ConnectorGuideStep>
+          <ConnectorGuideStep>
+            3. {t("harness.slack.guide.step3")}
+          </ConnectorGuideStep>
+          <ConnectorGuideStep>
+            4. {t("harness.slack.guide.step4")}
+          </ConnectorGuideStep>
+          <ConnectorGuideStep>
+            5. {t("harness.slack.guide.step5")}
+          </ConnectorGuideStep>
+          <ConnectorGuideStep>
+            6. {t("harness.slack.guide.step6")}
+          </ConnectorGuideStep>
+          <ConnectorGuideStep>
+            7. {t("harness.slack.guide.step7")}
+          </ConnectorGuideStep>
+        </ConnectorGuideSteps>
+      </ConnectorGuidePanel>
     </div>
   );
 }

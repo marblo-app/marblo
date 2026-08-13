@@ -217,6 +217,54 @@ export const harness = {
   "harness.slack.guide.step7":
     "채널에서 봇을 멘션해 응답이 왕복하는지 확인합니다.",
 
+  // --- GitHub 연결 패널 (leyZnPBHbHUl3H9sRTDF) — 선택사항, 온보딩 필수 아님 ---
+  "harness.github.title": "GitHub 연결",
+  "harness.github.subtitle":
+    "private 저장소 clone·협업용 선택 연결입니다. 시작하기 플로우에는 없습니다.",
+  "harness.github.optionalBadge": "선택",
+  "harness.github.status.connected": "연결",
+  "harness.github.status.disconnected": "미연결",
+  "harness.github.account": "GitHub 계정",
+  "harness.github.accountNone": "연결된 계정 없음",
+  "harness.github.accountConnected": "device OAuth 연결됨",
+  "harness.github.waitingAuth": "브라우저 승인 대기 중",
+  "harness.github.connect": "연결하기",
+  "harness.github.connected":
+    "GitHub가 연결되었습니다. private 저장소를 clone할 수 있습니다.",
+  "harness.github.connectFailed": "GitHub 연결을 시작하지 못했습니다.",
+  "harness.github.denied": "GitHub 연결이 취소되었습니다.",
+  "harness.github.expired":
+    "GitHub 연결 코드가 만료되었습니다. 다시 시도하세요.",
+  "harness.github.disconnect": "연결 해제",
+  "harness.github.disconnectConfirm":
+    "이 기기에서 GitHub 연결을 해제하시겠습니까? private 저장소 clone·push 가 막힐 수 있습니다.",
+  "harness.github.disconnected": "GitHub 연결을 해제했습니다.",
+  "harness.github.disconnectFailed": "연결 해제에 실패했습니다.",
+  "harness.github.refreshTitle": "GitHub 연결 상태 새로고침",
+  "harness.github.loadError": "GitHub 연결 상태를 불러오지 못했습니다.",
+  "harness.github.needLogin": "마블로에 로그인한 뒤 GitHub를 연결할 수 있습니다.",
+  "harness.github.deviceCodeLabel": "GitHub에서 다음 코드를 입력하세요:",
+  "harness.github.deviceCodeHint":
+    "코드 입력·승인 후 이 패널이 자동으로 연결 상태로 바뀝니다.",
+  "harness.github.openGithub": "GitHub 열기",
+  "harness.github.guide.toggle": "GitHub를 어떻게 연결하나요?",
+  "harness.github.guide.step1":
+    "위 「GitHub 연결」 버튼을 누르면 device OAuth 코드가 발급됩니다.",
+  "harness.github.guide.step2Before": "",
+  "harness.github.guide.step2After":
+    "에서 표시된 코드를 입력하고 Marblo를 승인합니다.",
+  "harness.github.guide.step3":
+    "승인이 끝나면 private 저장소 clone·push 가 이 기기에서 가능해집니다.",
+  "harness.github.guide.step4":
+    "공유·repo 연결(협업) 화면에서도 같은 device OAuth 연결을 재사용합니다.",
+  "harness.github.guide.step5":
+    "나중에 GitHub App 설치 권한이 열리면 같은 신원으로 자동 상속됩니다 — 다시 로그인할 필요 없습니다.",
+  "harness.github.guide.step6":
+    "연결 해제는 이 패널의 휴지통 버튼으로 언제든 가능합니다(선택 연결).",
+  "harness.github.guide.appTitle": "device OAuth → GitHub App 자동 상속",
+  "harness.github.guide.appBody":
+    "지금은 device OAuth 가 1차 경로입니다. GitHub App 설치 토큰은 엔드게임이며, 연결 후 동일 계정 경로에서 자동으로 이어받습니다. 온보딩 필수 단계가 아닙니다.",
+
   // --- Google Drive 위키 폴더 패널 (MCTHALmNAWPpilTFwe8o) ---
   // ★두 축이 한 패널에 있다: 계정 연결은 유저 단위(1회), 위키 폴더는 프로젝트 단위.
   "harness.drive.title": "Google Workspace",

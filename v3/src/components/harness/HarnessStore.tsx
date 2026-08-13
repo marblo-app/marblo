@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
+import { GitHubConnectionPanel } from "./GitHubConnectionPanel";
 import { TelegramChannelPanel } from "./TelegramChannelPanel";
 import { SlackChannelPanel } from "./SlackChannelPanel";
 import { DriveConnectionPanel } from "./DriveConnectionPanel";
@@ -292,6 +293,8 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
             desc={t("harness.store.section.connectionsDesc")}
           />
           <ConnectionStatusPanel />
+          {/* GitHub 은 선택 연결(온보딩 필수 아님) — 협업/private repo 용 상시 노출 */}
+          <GitHubConnectionPanel />
           <TelegramChannelPanel />
           <SlackChannelPanel />
           <DriveConnectionPanel />
