@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { BEGINNER_TOUR_ID, shouldStartTour } from "../../src/lib/coachmark";
+import {
+  ADVANCED_TOUR_ID,
+  BEGINNER_TOUR_ID,
+  shouldStartTour,
+} from "../../src/lib/coachmark";
 import { selectTour, useCoachmarkStore } from "../../src/stores/coachmarkStore";
 
 /**
@@ -55,5 +59,26 @@ describe("coachmarkStore", () => {
     expect(
       selectTour(useCoachmarkStore.getState(), "other_tour").completedAt,
     ).toBe(0);
+  });
+
+  it("비기너 투어와 어드밴스 투어는 서로 독립이다", () => {
+    const s = useCoachmarkStore.getState();
+    s.markCompleted(BEGINNER_TOUR_ID);
+    expect(
+      shouldStartTour(selectTour(useCoachmarkStore.getState(), ADVANCED_TOUR_ID), {
+        anchorsReady: true,
+      }),
+    ).toBe(true);
+    s.markDismissed(ADVANCED_TOUR_ID);
+    expect(
+      shouldStartTour(selectTour(useCoachmarkStore.getState(), BEGINNER_TOUR_ID), {
+        anchorsReady: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldStartTour(selectTour(useCoachmarkStore.getState(), ADVANCED_TOUR_ID), {
+        anchorsReady: true,
+      }),
+    ).toBe(false);
   });
 });

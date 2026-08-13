@@ -141,6 +141,9 @@ export function WorkTabs() {
               type="button"
               role="tab"
               aria-selected={isActive}
+              // 어드밴스 첫 진입 코치마크 앵커(AdvancedTour). 없는 탭 id 는
+              // 투어 스텝이 안 가리키므로 붙여도 무해하다.
+              data-coach={`workspace-tab-${tab}`}
               onClick={() => setActiveTab(tab)}
               className={`relative -mb-px whitespace-nowrap border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
                 isActive
