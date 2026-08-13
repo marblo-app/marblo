@@ -12,6 +12,7 @@ import {
   beginnerBoardColumnFor,
   groupBeginnerBoard,
   beginnerComposerMode,
+  shouldRenderOnboardingGuides,
   type BeginnerModeRecord,
   type PriorInstallMarkers,
 } from "../../src/lib/beginnerMode";
@@ -405,5 +406,38 @@ describe("상단 컴포저 노출 규칙", () => {
   it("전달에 실패해 sentCount 가 안 오른 국면에서는 계속 보인다", () => {
     // 실패는 오케가 받은 적이 없다는 뜻이라, 유저가 곧바로 다시 눌러야 한다.
     expect(beginnerComposerMode(base)).toBe("intro");
+  });
+});
+
+/**
+ * ★온보딩 안내 모달의 배타 — 티켓 E3ywX1ftbVr5f1TrFsgp 의 순서 결함.
+ *
+ * 데모("▶ 데모 보기")는 연결 **전** 화면에서 열고, M1 온램프 안내는 연결이
+ * **없어서** 뜬다 — 전제가 정확히 겹쳐서, 가드가 없으면 우연히가 아니라 **항상**
+ * 대본 위에 "계정을 연결하세요" 가 덮인다.
+ */
+describe("온보딩 안내 모달을 지금 그려도 되는가", () => {
+  it("아무것도 안 떠 있으면 그린다", () => {
+    expect(
+      shouldRenderOnboardingGuides({ oneClickOpen: false, demoPlaying: false }),
+    ).toBe(true);
+  });
+
+  it("원클릭 연결 모달 위에는 그리지 않는다(종전 계약 유지)", () => {
+    expect(
+      shouldRenderOnboardingGuides({ oneClickOpen: true, demoPlaying: false }),
+    ).toBe(false);
+  });
+
+  it("★데모 재생 위에도 그리지 않는다 — 설명이 끝까지 가야 한다", () => {
+    expect(
+      shouldRenderOnboardingGuides({ oneClickOpen: false, demoPlaying: true }),
+    ).toBe(false);
+  });
+
+  it("데모를 닫으면 안내는 다시 자기 판정대로 뜬다(억제일 뿐 소거가 아니다)", () => {
+    expect(
+      shouldRenderOnboardingGuides({ oneClickOpen: false, demoPlaying: false }),
+    ).toBe(true);
   });
 });

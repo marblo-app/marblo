@@ -77,8 +77,15 @@ describe("온보딩 파리티 — M1(실행 차단) 안내는 모든 셸에 있�
   });
 
   it("★원클릭 모달과 배타다 — 겹치면 Esc 가 어느 쪽을 닫는지 알 수 없다", () => {
-    expect(src(BEGINNER_SHELL)).toMatch(
-      /!showOneClick && \(?\s*<OnrampGateHost/,
+    // ★배타의 근거가 규칙 하나로 옮겨졌다(티켓 E3ywX1ftbVr5f1TrFsgp):
+    //   `!showOneClick` 인라인 → `shouldRenderOnboardingGuides`.
+    // 데모 재생도 같은 이유로 배타여야 하는데 인라인 가드는 그걸 빠뜨리고
+    // 있었다(데모 대본 위에 "계정을 연결하세요" 가 덮였다). 규칙 자체의 표는
+    // beginnerMode.test.ts 가 덮고, 여기서는 셸이 **그 규칙에 물려 있는지**만 본다.
+    const source = src(BEGINNER_SHELL);
+    expect(source).toMatch(/guidesAllowed && \(?\s*<OnrampGateHost/);
+    expect(source).toMatch(
+      /const guidesAllowed = shouldRenderOnboardingGuides\(\{[\s\S]{0,200}oneClickOpen: showOneClick,[\s\S]{0,200}demoPlaying: showDemo,/,
     );
   });
 });

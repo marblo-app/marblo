@@ -133,9 +133,11 @@ test.describe("@cleanroom 제로마찰 온램프 엣지케이스", () => {
       // ★회귀가드: 이미 설치된 codex 행은 설치 대상이 아니다.
       expect(byClick).not.toContain("cli-codex");
       expect(byClick).toContain("cli-claude-code");
-      // probe 결과가 없는 행(grok/antigravity)은 "모르는 것" 이지 "미설치" 가
-      // 아니다 — 모두 설치의 대상(autoInstall|required)에도 들어 있지 않다.
-      expect(byClick).not.toContain("cli-grok");
+      // ★grok 은 기본 함대다(k22rGEgv) — 미설치이므로 이 패스가 같이 깐다.
+      // 시나리오가 grok 을 안 줬으면 기본값이 "missing" 이라 대상이 된다.
+      expect(byClick).toContain("cli-grok");
+      // Antigravity 는 여전히 옵트인 — 모두 설치의 대상(autoInstall|required)이
+      // 아니라서, 사용자가 고르지 않은 벤더 인스톨러는 돌지 않는다.
       expect(byClick).not.toContain("cli-antigravity");
 
       // ★설치 ≠ 준비. 둘 다 아직 미인증이므로 오케를 열어선 안 된다 — 여기서

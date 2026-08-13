@@ -245,7 +245,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const nextUid = nextUser?.uid ?? null;
     if (lastIdentityRef.current !== nextUid) {
       lastIdentityRef.current = nextUid;
-      resetAccountScopedState();
+      resetAccountScopedState(nextUid);
     }
     setUser(nextUser);
   }, []);

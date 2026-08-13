@@ -179,6 +179,8 @@ export const beginner = {
   "beginner.chat.placeholder":
     "이어서 하고 싶은 말을 적어 주세요. 예: 방금 만든 가이드에 예시를 더 넣어 줘",
   "beginner.chat.orchestratorRunning": "대화 중",
+  // 연결·인증된 모델만 골라 넣은 단순 드롭다운(오케 헤더)의 툴팁 — 티켓 cmp95TVin64IIlOiFlAC.
+  "beginner.chat.modelPickerTitle": "마블로가 사용할 모델",
 
   // ── 티켓 상세(미니 보드 카드 클릭) ──────────────────────────────────────
   "beginner.taskDetail.label": "일감 상세",

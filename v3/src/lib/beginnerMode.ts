@@ -25,8 +25,36 @@ import type { TaskStatus } from "../types/task";
 
 export type BeginnerModeState = "beginner" | "advanced";
 
-/** localStorage key holding the serialized {@link BeginnerModeRecord}. */
+/**
+ * localStorage key holding the serialized {@link BeginnerModeRecord} of an
+ * install that has not yet been claimed by an account.
+ *
+ * ★It used to be THE key, machine-wide (ticket E3ywX1ftbVr5f1TrFsgp): a second
+ * account signing in on the same Mac inherited the first account's "advanced"
+ * verdict and never saw the simple shell. The authoritative record now lives
+ * per-uid ({@link beginnerModeAccountKey}); this key survives only as the
+ * machine-level evidence the FIRST account to sign in inherits.
+ */
 export const BEGINNER_MODE_KEY = "marblo.beginnerMode";
+
+/**
+ * localStorage key holding the uid that already inherited this machine's
+ * evidence (the legacy record above + the {@link PriorInstallMarkers}).
+ *
+ * Everything that evidence proves — "somebody has used this install before" —
+ * is true of exactly one account. Recording who took it is what lets a second
+ * account be told apart from a restart, without deleting the evidence the first
+ * account still depends on.
+ */
+export const BEGINNER_MODE_CLAIM_KEY = "marblo.beginnerMode.claimedBy";
+
+/** Prefix of the per-account records. Kept public so test harnesses can sweep. */
+export const BEGINNER_MODE_ACCOUNT_PREFIX = "marblo.beginnerMode.u.";
+
+/** localStorage key holding this account's {@link BeginnerModeRecord}. */
+export function beginnerModeAccountKey(uid: string): string {
+  return `${BEGINNER_MODE_ACCOUNT_PREFIX}${uid}`;
+}
 
 export interface BeginnerModeRecord {
   state: BeginnerModeState;
@@ -141,6 +169,82 @@ export function resolveInitialBeginnerMode(
     return "advanced";
   }
   return "beginner";
+}
+
+// ── ★계정 귀속 판정 (티켓 E3ywX1ftbVr5f1TrFsgp) ─────────────────────────────
+
+/**
+ * 이번 계정 채택이 무엇을 한 것인가.
+ *
+ *   kept    — 이 계정의 레코드가 이미 있었다(재부팅/토큰 갱신).
+ *   claimed — 기기에 남은 흔적을 이 계정이 물려받았다(설치당 첫 계정, 업그레이드).
+ *   fresh   — 다른 계정이 이미 물려받은 뒤다 → 이 계정에겐 첫 실행이다.
+ */
+export type BeginnerAccountOutcome = "kept" | "claimed" | "fresh";
+
+export interface BeginnerAccountInput {
+  /** 지금 채택하는 계정. */
+  uid: string;
+  /** 이 uid 의 레코드(`beginnerModeAccountKey`). */
+  accountRecord: BeginnerModeRecord | null;
+  /** 아직 아무도 안 가져간 기기 단위 레코드(`BEGINNER_MODE_KEY`). */
+  legacyRecord: BeginnerModeRecord | null;
+  /** 기기 흔적을 이미 가져간 uid. null = 미청구. */
+  claimedBy: string | null;
+  /** 기기 단위 이전-사용 마커. `claimedBy` 가 남이면 **남의 흔적**이다. */
+  markers: PriorInstallMarkers;
+  /** 새 레코드에 찍을 시각. */
+  now: number;
+}
+
+export interface BeginnerAccountResolution {
+  record: BeginnerModeRecord;
+  outcome: BeginnerAccountOutcome;
+}
+
+/**
+ * 이 **계정**은 비기너인가 — 기기가 아니라.
+ *
+ * ★왜 "계정이 바뀌면 마커를 지운다" 가 아닌가:
+ *   지우면 그 흔적을 근거로 advanced 를 유지하던 **원래 유저**가 다음 부팅에
+ *   비기너로 떨어진다. 그건 쓰던 사람의 보드가 사라지는 사고이고,
+ *   {@link resolveInitialBeginnerMode} 의 비대칭 규율이 대놓고 막는 방향이다.
+ *   게다가 계정 채택은 최초 마운트에서도 일어나므로(로그인 상태로 앱을 켜면
+ *   undefined → uid) "바뀔 때 지우기" 는 사실상 매 부팅 지우기다.
+ *   그래서 흔적은 **남겨 두고 임자를 적어 둔다.**
+ *
+ * 규칙 셋:
+ *   ① 이 계정의 레코드가 있으면 그것이 이긴다 — 기기 흔적은 쳐다보지도 않는다.
+ *   ② 기기 흔적이 미청구(또는 임자가 나)면 상속한다. 기존 판정식을 그대로 태워
+ *      쓰므로, 업그레이드하는 기존 유저의 화면은 1픽셀도 안 바뀐다.
+ *   ③ 임자가 남이면 그 흔적은 남의 것이다 → 이 계정의 첫 실행 = 비기너.
+ *      계측 타임스탬프도 물려받지 않는다(남의 퍼널이 새 계정으로 새면 안 된다).
+ */
+export function resolveBeginnerModeForAccount(
+  input: BeginnerAccountInput,
+): BeginnerAccountResolution {
+  if (input.accountRecord) {
+    return { record: input.accountRecord, outcome: "kept" };
+  }
+
+  const unclaimed = input.claimedBy === null || input.claimedBy === input.uid;
+  if (unclaimed) {
+    const state = resolveInitialBeginnerMode(input.legacyRecord, input.markers);
+    const inherited: BeginnerModeRecord = input.legacyRecord ?? {
+      ...EMPTY_BEGINNER_RECORD,
+      enteredAt: state === "beginner" ? input.now : 0,
+    };
+    return { record: { ...inherited, state }, outcome: "claimed" };
+  }
+
+  return {
+    record: {
+      ...EMPTY_BEGINNER_RECORD,
+      state: "beginner",
+      enteredAt: input.now,
+    },
+    outcome: "fresh",
+  };
 }
 
 // ── 승격 ────────────────────────────────────────────────────────────────────
@@ -398,6 +502,38 @@ export type BeginnerComposerMode = "hidden" | "intro" | "followUp";
  * 돌아간다. 티켓이 이미 있는 설치에서 "무엇을 만들까요?" 가 다시 뜨면, 그건
  * 첫 화면이 아니라 하던 일 위에 덮인 중복 입력칸이다.
  */
+// ── 온보딩 안내 모달의 배타 ─────────────────────────────────────────────────
+
+export interface BeginnerGuideGateInput {
+  /** 원클릭 연결 모달(`BeginnerOneClickModal`)이 떠 있는가. */
+  oneClickOpen: boolean;
+  /** 캔드 데모(`DemoMode`)를 재생 중인가. */
+  demoPlaying: boolean;
+}
+
+/**
+ * 자기 판정으로 **알아서 뜨는** 온보딩 안내(M1 온램프 차단 · M2 자금 안내)를
+ * 지금 그려도 되는가.
+ *
+ * ★데모가 빠져 있던 것이 이 티켓(E3ywX1ftbVr5f1TrFsgp)에서 잡힌 순서 결함이다.
+ * 종전 가드는 `!showOneClick` 뿐이라, 유저가 "▶ 데모 보기" 를 눌러 재생을
+ * 시작한 위로 M1("계정을 연결하세요")이 그대로 겹쳐 떴다. 데모는 **연결 전**
+ * 화면에서 여는 것이고 M1 은 **연결이 없어서** 뜨는 것이라 둘의 전제가 정확히
+ * 겹친다 — 즉 우연이 아니라 항상 겹친다. 그리고 그 순간 유저가 보고 있던 것은
+ * 이 제품이 무엇인지 설명하는 대본인데, 그 위에 "연결하세요" 를 덮으면 설명은
+ * 끝까지 가지 못한다.
+ *
+ * 같은 규율을 코치마크 투어는 이미 지키고 있었다(`BeginnerTour.blocked` 에
+ * showDemo 가 들어 있다) — 이 함수는 그 규율을 안내 모달 쪽에도 맞춘 것이다.
+ * 데모를 닫으면 두 안내는 즉시 자기 판정대로 다시 뜬다(억제일 뿐 소거가 아니다).
+ */
+export function shouldRenderOnboardingGuides({
+  oneClickOpen,
+  demoPlaying,
+}: BeginnerGuideGateInput): boolean {
+  return !oneClickOpen && !demoPlaying;
+}
+
 export function beginnerComposerMode({
   sentCount,
   totalTasks,

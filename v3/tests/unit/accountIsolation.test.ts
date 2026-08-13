@@ -50,7 +50,7 @@ vi.mock("../../src/services/firestore", () => ({
   subscribeToCollection: (
     collectionName: string,
     constraints: CapturedSubscription["constraints"],
-    callback: SnapshotCb
+    callback: SnapshotCb,
   ) => {
     const sub: CapturedSubscription = {
       collectionName,
@@ -125,7 +125,7 @@ describe("계정 전환 시 프로젝트 리스트 격리", () => {
       "music-composer",
     ]);
     expect(useProjectStore.getState().currentProject?.id).toBe(
-      "music-composer"
+      "music-composer",
     );
 
     // 2) 로그아웃 → 새 계정 로그인.
@@ -203,7 +203,7 @@ describe("계정 전환 시 프로젝트 리스트 격리", () => {
 
     useProjectStore.getState().subscribeToProjects("john-uid");
     expect(useProjectStore.getState().currentProject?.id).toBe(
-      "music-composer"
+      "music-composer",
     );
   });
 });
@@ -220,7 +220,9 @@ describe("계정 귀속 상태 초크포인트", () => {
       ownedAgents: [{ id: "a1", projectId: "music-composer" }] as never,
     });
 
-    resetAccountScopedState();
+    // 인자는 **새로 채택하는** uid 다(티켓 E3ywX1ftbVr5f1TrFsgp에서 추가). 온보딩
+    // 판정을 그 계정에 귀속시키기 위한 것이고, 여기서 보는 클리어 계약과는 무관.
+    resetAccountScopedState("datagadapida-uid");
 
     expect(useProjectStore.getState().projects).toEqual([]);
     expect(useProjectStore.getState().currentProject).toBeNull();
@@ -236,7 +238,7 @@ describe("계정 귀속 상태 초크포인트", () => {
     const johnSnapshot = subscriptions[0].callback;
     johnSnapshot([projectDoc("music-composer", "john-uid")]);
 
-    resetAccountScopedState();
+    resetAccountScopedState("datagadapida-uid");
     johnSnapshot([projectDoc("music-composer", "john-uid")]);
 
     expect(useProjectStore.getState().projects).toEqual([]);

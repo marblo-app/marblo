@@ -108,16 +108,55 @@ describe("classifyCloneError", () => {
     ).toBe("network");
     expect(classifyCloneError("fatal: some other failure")).toBe("git");
   });
+
+  // macOS Xcode CLT (티켓 nETj7szjEtT5prbYsg1D). 라이선스 미동의면 git 이
+  // 실행조차 안 된 것이라 auth/network 로 분류하면 사용자가 GitHub 인증만
+  // 파다가 막힌다.
+  it("Xcode CLT 실패를 auth/network 보다 먼저 전용 분류로 잡는다", () => {
+    expect(
+      classifyCloneError(
+        "You have not agreed to the Xcode license agreements, please run 'sudo xcodebuild -license' from within a Terminal window to review and agree to the Xcode license agreements.",
+      ),
+    ).toBe("xcode-license");
+    expect(
+      classifyCloneError(
+        "xcrun: error: invalid active developer path (/Library/Developer/CommandLineTools), missing xcrun at: /Library/Developer/CommandLineTools/usr/bin/xcrun",
+      ),
+    ).toBe("xcode-missing");
+  });
+});
+
+describe("cloneRepo — Xcode CLT 실패", () => {
+  it("raw stderr 대신 안내 + 복사할 명령을 돌려준다", async () => {
+    const runner: GitRunner = async () => ({
+      code: 69,
+      stderr:
+        "You have not agreed to the Xcode license agreements, please run 'sudo xcodebuild -license' from within a Terminal window to review and agree to the Xcode license agreements.",
+    });
+    const result = await cloneRepo(
+      { repoUrl: "https://github.com/acme/app.git", parentDir: tmpDir() },
+      runner,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.errorKind).toBe("xcode-license");
+    expect(result.fixCommand).toBe("sudo xcodebuild -license accept");
+    expect(result.message).toContain("sudo xcodebuild -license accept");
+    // 원문이 그대로 새어나가면 "무엇을 하라는지" 가 다시 묻힌다.
+    expect(result.message).not.toContain("from within a Terminal window");
+  });
 });
 
 describe("tokenizedGitHubCloneUrl", () => {
   it("adds the device-flow token only to GitHub HTTPS URLs", () => {
-    expect(tokenizedGitHubCloneUrl("https://github.com/acme/app.git", "secret-token")).toBe(
-      "https://oauth2:secret-token@github.com/acme/app.git",
-    );
-    expect(tokenizedGitHubCloneUrl("git@github.com:acme/app.git", "secret-token")).toBe(
-      "git@github.com:acme/app.git",
-    );
+    expect(
+      tokenizedGitHubCloneUrl(
+        "https://github.com/acme/app.git",
+        "secret-token",
+      ),
+    ).toBe("https://oauth2:secret-token@github.com/acme/app.git");
+    expect(
+      tokenizedGitHubCloneUrl("git@github.com:acme/app.git", "secret-token"),
+    ).toBe("git@github.com:acme/app.git");
   });
 });
 
@@ -205,8 +244,15 @@ describe("cloneRepo", () => {
   it("redacts device-flow tokens and gives an access-specific 404 message", async () => {
     const token = "sensitive-device-token";
     const r = await cloneRepo(
-      { repoUrl: "https://github.com/acme/private.git", parentDir: tmpDir(), githubToken: token },
-      async () => ({ code: 128, stderr: `remote: Repository not found. ${token}` }),
+      {
+        repoUrl: "https://github.com/acme/private.git",
+        parentDir: tmpDir(),
+        githubToken: token,
+      },
+      async () => ({
+        code: 128,
+        stderr: `remote: Repository not found. ${token}`,
+      }),
     );
     expect(r.errorKind).toBe("not-found");
     expect(r.message).toContain("콜라보레이터");

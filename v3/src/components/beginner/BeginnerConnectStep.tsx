@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import TerminalView from "../terminal/TerminalView";
 import { CommandBox } from "../onboarding/CliSetupRows";
@@ -67,6 +67,7 @@ const CHOICES: Array<{
 export function BeginnerConnectStep({
   onWatchDemo,
   onOneClick,
+  manualFocusSignal = 0,
 }: {
   onWatchDemo: () => void;
   /**
@@ -76,6 +77,16 @@ export function BeginnerConnectStep({
    * 승격·데모)와 같은 층에 두는 게 이 셸의 규칙이기도 하다.
    */
   onOneClick: () => void;
+  /**
+   * 원클릭 모달의 "직접 고를게요" 가 눌린 횟수 — 늘어날 때마다 아래 택1 섹션으로
+   * 스크롤하고 잠깐 강조한다(티켓 k22rGEgv).
+   *
+   * ★boolean 이 아니라 **단조 증가 카운터**인 이유: 사용자는 모달을 다시 열고
+   * 같은 버튼을 또 누를 수 있는데, boolean 이면 두 번째 클릭에서 값이 안 변해
+   * 이펙트가 안 돌고 화면은 다시 아무 반응이 없다 — 고치려던 그 증상 그대로다.
+   * 0 은 "아직 아무도 안 눌렀다" 라 첫 렌더에서 스크롤이 튀지 않는다.
+   */
+  manualFocusSignal?: number;
 }) {
   const { t } = useTranslation();
   // ★값은 전부 이 뷰모델에서 온다 — 실제 흐름과 온보딩 프리뷰(시연)가 여기서
@@ -91,6 +102,26 @@ export function BeginnerConnectStep({
   const [picked, setPicked] = useState<CliModel | null>(null);
   const [busy, setBusy] = useState(false);
   const [loginSessionId, setLoginSessionId] = useState<string | null>(null);
+
+  // ── "직접 고를게요" 의 착지점 ────────────────────────────────────────────
+  // 이 섹션은 온램프 카드 + 원클릭 CTA 아래, 대개 스크롤 접힘 밑에 있다. 모달을
+  // 닫기만 하면 사용자가 보는 건 방금 떠나온 CTA 라, 도착을 **눈에 보이게** 해야
+  // 이동이 성립한다: 스크롤로 데려오고 잠깐 강조한다.
+  const manualRef = useRef<HTMLDivElement | null>(null);
+  const [manualHighlighted, setManualHighlighted] = useState(false);
+
+  useEffect(() => {
+    if (!manualFocusSignal) return; // 0 = 아직 아무도 안 눌렀다
+    // ★옵셔널 호출이다. jsdom 에는 scrollIntoView 가 없어서(미구현) 그냥 부르면
+    // 유닛 테스트가 TypeError 로 죽는다 — 강조는 스크롤과 독립으로 살아야 한다.
+    manualRef.current?.scrollIntoView?.({
+      behavior: "smooth",
+      block: "center",
+    });
+    setManualHighlighted(true);
+    const timer = window.setTimeout(() => setManualHighlighted(false), 2200);
+    return () => window.clearTimeout(timer);
+  }, [manualFocusSignal]);
 
   const connect = useCallback(
     async (row: CliRow) => {
@@ -200,55 +231,70 @@ export function BeginnerConnectStep({
         </p>
       </div>
 
-      <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6c7086]">
-        {t("beginner.connect.pickYourself")}
-      </p>
+      {/* ── 택1 폴백 = "직접 고를게요" 의 목적지 ─────────────────────────────
+          `scroll-mt-4` 는 스크롤 컨테이너 위쪽에 숨 쉴 틈을 남긴다(제목이 상단
+          모서리에 딱 붙어 잘려 보이지 않게). 강조는 2.2초 뒤 스스로 꺼진다 —
+          영구 링은 "여기가 에러다" 로 읽힌다. */}
+      <div
+        ref={manualRef}
+        data-testid="beginner-connect-manual"
+        data-highlighted={manualHighlighted ? "true" : "false"}
+        className={`mt-5 scroll-mt-4 rounded-lg transition-all duration-500 ${
+          manualHighlighted
+            ? "bg-[#89b4fa]/10 p-3 ring-2 ring-[#89b4fa]/60"
+            : "p-0 ring-0"
+        }`}
+      >
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6c7086]">
+          {t("beginner.connect.pickYourself")}
+        </p>
 
-      <div className="mt-2 grid gap-3 sm:grid-cols-2">
-        {CHOICES.map(({ row, nameKey, descKey }) => {
-          const state = states[row.id];
-          const ready = !!state?.installed && !!state?.authenticated;
-          const isPicked = picked === row.model;
-          const installing = installingId === row.id;
-          return (
-            <div
-              key={row.id}
-              data-testid={`beginner-connect-${row.model}`}
-              className={`rounded-lg border p-4 transition-colors ${
-                ready
-                  ? "border-[#a6e3a1]/40 bg-[#a6e3a1]/5"
-                  : isPicked
-                    ? "border-[#89b4fa]/50 bg-[#11111b]"
-                    : "border-[#45475a] bg-[#11111b]"
-              }`}
-            >
-              <p className="text-sm font-semibold text-[#cdd6f4]">
-                {t(nameKey)}
-              </p>
-              <p className="mt-1 min-h-[2.5rem] text-xs leading-5 text-[#7f849c]">
-                {t(descKey)}
-              </p>
-              {ready ? (
-                <p className="mt-2 text-xs font-medium text-[#a6e3a1]">
-                  ✓ {t("beginner.connect.ready")}
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          {CHOICES.map(({ row, nameKey, descKey }) => {
+            const state = states[row.id];
+            const ready = !!state?.installed && !!state?.authenticated;
+            const isPicked = picked === row.model;
+            const installing = installingId === row.id;
+            return (
+              <div
+                key={row.id}
+                data-testid={`beginner-connect-${row.model}`}
+                className={`rounded-lg border p-4 transition-colors ${
+                  ready
+                    ? "border-[#a6e3a1]/40 bg-[#a6e3a1]/5"
+                    : isPicked
+                      ? "border-[#89b4fa]/50 bg-[#11111b]"
+                      : "border-[#45475a] bg-[#11111b]"
+                }`}
+              >
+                <p className="text-sm font-semibold text-[#cdd6f4]">
+                  {t(nameKey)}
                 </p>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => void connect(row)}
-                  disabled={busy}
-                  className="mt-2 w-full rounded-md border border-[#45475a] px-3 py-2 text-xs font-medium text-[#cdd6f4] transition-colors hover:border-[#585b70] hover:bg-[#313244] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {installing
-                    ? t("beginner.connect.installing")
-                    : isPicked && busy
-                      ? t("beginner.connect.connecting")
-                      : t("beginner.connect.cta")}
-                </button>
-              )}
-            </div>
-          );
-        })}
+                <p className="mt-1 min-h-[2.5rem] text-xs leading-5 text-[#7f849c]">
+                  {t(descKey)}
+                </p>
+                {ready ? (
+                  <p className="mt-2 text-xs font-medium text-[#a6e3a1]">
+                    ✓ {t("beginner.connect.ready")}
+                  </p>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void connect(row)}
+                    disabled={busy}
+                    className="mt-2 w-full rounded-md border border-[#45475a] px-3 py-2 text-xs font-medium text-[#cdd6f4] transition-colors hover:border-[#585b70] hover:bg-[#313244] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {installing
+                      ? t("beginner.connect.installing")
+                      : isPicked && busy
+                        ? t("beginner.connect.connecting")
+                        : t("beginner.connect.cta")}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* 택1 경로의 설치 실패 — 수동 명령 + 공식 문서로 넘긴다. */}

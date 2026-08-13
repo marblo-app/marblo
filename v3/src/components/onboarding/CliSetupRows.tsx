@@ -311,9 +311,10 @@ export function CliRowCard({ row, phase, onLoginLaunched }: CliRowCardProps) {
  * 보여준다. 실패한 행은 자기 카드에 수동 명령 + 공식문서 링크를 그대로 띄우므로
  * 폴백은 원래대로 살아 있다.
  *
- * 대상은 오케스트레이터 후보(Claude/Codex)뿐이다 — 이 둘 중 하나만 준비되면
- * 오케가 뜬다(#579). Grok·Antigravity 는 선택 확장이라 각 행의 개별 설치 버튼에
- * 남는다: "모두 설치" 한 번이 사용자가 고르지도 않은 벤더 인스톨러 두 개를 더
+ * 대상은 기본 함대(Claude/Codex/Grok — `autoInstall`)다. 그중 오케를 띄우는 것은
+ * Claude/Codex 뿐이고 둘 중 하나만 준비되면 열린다(#579); Grok 은 같이 깔리지만
+ * 게이트를 열지는 않는다. Antigravity 는 선택 확장이라 자기 행의 개별 설치
+ * 버튼에 남는다: "모두 설치" 한 번이 사용자가 고르지도 않은 벤더 인스톨러를
  * 실행해서는 안 된다.
  */
 export function InstallAllPanel() {

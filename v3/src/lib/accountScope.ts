@@ -23,14 +23,29 @@
  *   진실이다. **계정/프로젝트에 귀속된 스토어를 새로 추가하면 여기에도 추가할 것.**
  *
  * 기기 귀속 상태(machineId 등)는 계정과 무관하므로 건드리지 않는다.
+ *
+ * ★온보딩 판정은 "지운다" 가 아니라 "다시 귀속시킨다" (티켓 E3ywX1ftbVr5f1TrFsgp):
+ *   심플 모드 진입 판정(`beginnerModeStore`)과 첫실행 투어 기록(`coachmarkStore`)
+ *   도 계정 귀속인데, 여기에 **클리어**로 붙일 수는 없었다. 이 함수는 신원이
+ *   바뀔 때마다 도는데 최초 마운트(undefined → uid)도 그 "바뀔 때" 라, 클리어면
+ *   사실상 매 부팅 지우기가 된다. 그러면 이전-사용 마커까지 날아간 다음 부팅에
+ *   기존 유저가 비기너로 떨어져 **보드가 사라진다**(lib/beginnerMode 가 명시적으로
+ *   막는 그 방향의 회귀). 그래서 판정을 uid 에 귀속시키고, 여기서는 새 uid 를
+ *   **채택**만 한다 — 판정은 계정별로 살아 있고, 다른 계정이 쓰던 기기에 처음
+ *   들어온 계정만 첫 실행으로 다시 선다.
  */
 
 import { useAgentStore } from "../stores/agentStore";
+import { useBeginnerModeStore } from "../stores/beginnerModeStore";
+import { useCoachmarkStore } from "../stores/coachmarkStore";
 import { useProjectStore } from "../stores/projectStore";
 import { useSubscriptionStore } from "../stores/subscriptionStore";
 import { useTaskStore } from "../stores/taskStore";
 
-export function resetAccountScopedState(): void {
+/**
+ * @param nextUid 새로 채택하는 신원. 로그아웃은 `null`.
+ */
+export function resetAccountScopedState(nextUid: string | null): void {
   // 프로젝트가 먼저다: 보드/에이전트 구독은 currentProject 에 매달려 있으므로
   // 여기서 끊어 두면 뒤따르는 클리어가 되살아나지 않는다.
   useProjectStore.getState().resetForAccountChange();
@@ -43,4 +58,9 @@ export function resetAccountScopedState(): void {
     error: null,
   });
   useSubscriptionStore.setState({ subscription: null, loading: false });
+
+  // 온보딩 판정 재귀속. `fresh` 는 "이 기기를 쓰던 계정이 따로 있고, 이 계정은
+  // 지금 처음 들어왔다" 는 뜻이다 — 그때만 첫실행 안내 기록도 함께 되돌린다.
+  const outcome = useBeginnerModeStore.getState().adoptAccount(nextUid);
+  if (outcome === "fresh") useCoachmarkStore.getState().resetForAccountChange();
 }

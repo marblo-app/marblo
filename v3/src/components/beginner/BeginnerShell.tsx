@@ -11,6 +11,7 @@ import { useCliSetupEngine } from "../../hooks/useCliSetupEngine";
 import {
   beginnerComposerMode,
   shouldPromote,
+  shouldRenderOnboardingGuides,
   type PromotionTrigger,
 } from "../../lib/beginnerMode";
 import { findAgentPtySessionId } from "../../lib/agentTerminal";
@@ -75,8 +76,10 @@ import {
  *      → 하단을 **가로 2분할**로 키운다: 왼쪽 오케 대화창 / 오른쪽 에이전트.
  *
  * 그래서 이 화면은 이제 '채팅 + 작은 스트립' 이 아니라 가벼운 워크스페이스다.
- * 다만 어드밴스드와의 경계는 그대로다 — 워크트리·diff·모델 선택은 여전히 없다
- * (미니 보드 카드는 `compact`, 오케 헤더는 `hideModelControls`).
+ * 다만 어드밴스드와의 경계는 그대로다 — 워크트리·diff·티켓별 모델 지정은 여전히
+ * 없다(미니 보드 카드는 `compact`, 오케 헤더는 `hideModelControls`). 오케가 어떤
+ * 모델로 뜰지 자체는 예외다(티켓 cmp95TVin64IIlOiFlAC) — `showConnectedModelPicker`
+ * 가 연결·인증된 하네스만 남긴 단순 드롭다운 하나로 되살린다.
  *
  * ★오케 대화창은 `OrchestratorPanel fill` **그대로**다. 오케는 이미 실 PTY 를
  * 태운 대화창이므로 새 챗 프로토콜을 만들지 않는다(PTY 재배선 0). 상단 컴포저도
@@ -157,11 +160,11 @@ export function BeginnerShell() {
   const entryReason = useBeginnerModeStore((s) => s.entryReason);
   const enteredReported = useBeginnerModeStore((s) => s.enteredReported);
   const markEnteredReported = useBeginnerModeStore(
-    (s) => s.markEnteredReported,
+    (s) => s.markEnteredReported
   );
   const firstCompletionAt = useBeginnerModeStore((s) => s.firstCompletionAt);
   const markFirstCompletion = useBeginnerModeStore(
-    (s) => s.markFirstCompletion,
+    (s) => s.markFirstCompletion
   );
   const promotionShownAt = useBeginnerModeStore((s) => s.promotionShownAt);
   const markPromotionShown = useBeginnerModeStore((s) => s.markPromotionShown);
@@ -189,6 +192,9 @@ export function BeginnerShell() {
   // 게이트가 폴더 게이트로 갈아치워지면서 모달째 언마운트돼, "연결됐어요" 가
   // 뜨자마자 사라진다(시연에서 화면이 뚝 끊기는 자리).
   const [showOneClick, setShowOneClick] = useState(false);
+  // 모달의 "직접 고를게요" 가 눌린 횟수 — 연결 화면이 택1 섹션으로 스크롤·강조할
+  // 신호다. 0 은 "아직 안 눌렸다"(첫 렌더에 스크롤이 튀지 않는다).
+  const [manualFocusSignal, setManualFocusSignal] = useState(0);
   const [promotion, setPromotion] = useState<PromotionTrigger | null>(null);
 
   // ★큐레이트 탭 — 기본은 언제나 대화다. 넷은 **보조 진입**이라 여기 로컬
@@ -202,7 +208,7 @@ export function BeginnerShell() {
   // display:none 이지 조건부 렌더가 아니다(xterm 의 ResizeObserver 는 폭이 0인
   // 동안 fit 을 건너뛰고, 되돌아오면 실제 치수로 한 번 맞춘다 — TerminalView).
   const [mountedTabs, setMountedTabs] = useState<Set<BeginnerTabId>>(
-    () => new Set<BeginnerTabId>([BEGINNER_CHAT_TAB]),
+    () => new Set<BeginnerTabId>([BEGINNER_CHAT_TAB])
   );
   useEffect(() => {
     setMountedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
@@ -233,7 +239,7 @@ export function BeginnerShell() {
 
   const completedTasks = useMemo(
     () => tasks.filter((task) => task.status === "DONE").length,
-    [tasks],
+    [tasks]
   );
 
   // 진입 계측 — 세션당 한 번. 사유는 스토어가 판정한다(최초판정/재시작/설정복귀):
@@ -265,7 +271,7 @@ export function BeginnerShell() {
         mergedTasks: 0,
         elapsedMs: enteredAt ? Date.now() - enteredAt : 0,
       },
-      !!promotionShownAt,
+      !!promotionShownAt
     );
     if (trigger) {
       setPromotion(trigger);
@@ -295,7 +301,7 @@ export function BeginnerShell() {
       setPromotion(null);
       promote(trigger);
     },
-    [previewEnabled, setPreviewEnabled, promote],
+    [previewEnabled, setPreviewEnabled, promote]
   );
 
   // 에이전트 터미널 모달의 헤더가 쓰는 담당 티켓. 세션 짝짓기 규칙은 어드밴스드
@@ -303,16 +309,16 @@ export function BeginnerShell() {
   const openAgentTask = useMemo(
     () =>
       openAgent?.currentTaskId
-        ? (tasks.find((x) => x.id === openAgent.currentTaskId) ?? null)
+        ? tasks.find((x) => x.id === openAgent.currentTaskId) ?? null
         : null,
-    [openAgent, tasks],
+    [openAgent, tasks]
   );
   const openAgentSessionId = useMemo(
     () =>
       openAgent
         ? findAgentPtySessionId(terminalSessions, openAgent.name)
         : undefined,
-    [openAgent, terminalSessions],
+    [openAgent, terminalSessions]
   );
 
   // 티켓 상세의 "오케에게 물어보기" — 문장을 대화창에 **채우기만** 한다. 대신
@@ -333,9 +339,28 @@ export function BeginnerShell() {
     draft,
   });
 
+  // 스스로 뜨는 온보딩 안내(M1 온램프 · M2 자금)를 지금 그려도 되는가 — 규칙은
+  // 순수함수가 든다. 원클릭 모달과 데모 재생은 화면 전체를 쓰는 표면이라, 그
+  // 위에 안내가 겹치면 두 지시가 동시에 서고 Esc 가 어느 쪽을 닫는지 알 수 없다.
+  const guidesAllowed = shouldRenderOnboardingGuides({
+    oneClickOpen: showOneClick,
+    demoPlaying: showDemo,
+  });
+
   // 안정적인 identity — 모달의 자동 닫힘 타이머가 이 콜백에 걸려 있다.
   const openOneClick = useCallback(() => setShowOneClick(true), []);
   const closeOneClick = useCallback(() => setShowOneClick(false), []);
+
+  // ★"직접 고를게요" — 닫기 **더하기** 목적지로 데려가기(티켓 k22rGEgv).
+  // 수동 선택 UI 는 이미 이 모달 아래(BeginnerConnectStep 의 택1 섹션)에 있지만
+  // 스크롤 접힘 밑이라, 닫기만 하면 사용자는 방금 떠나온 원클릭 CTA 를 다시 본다
+  // — 콜드 테스트에서 "아무 동작 없이 창만 닫힘" 으로 보고된 그 자리다. 카운터를
+  // 올려 연결 화면이 그 섹션으로 스크롤·강조하게 한다(같은 버튼을 두 번 눌러도
+  // 매번 반응해야 하므로 boolean 이 아니라 단조 증가값이다).
+  const chooseManually = useCallback(() => {
+    setShowOneClick(false);
+    setManualFocusSignal((n) => n + 1);
+  }, []);
 
   const closeDemo = useCallback(() => {
     // 데모의 CTA 는 "로그인 후 연결" 플래그를 세우는데, 우리는 이미 로그인 뒤
@@ -387,8 +412,8 @@ export function BeginnerShell() {
               setup.preview
                 ? t("beginner.preview.folderLocked")
                 : hasFolder
-                  ? t("beginner.topbar.changeFolder")
-                  : t("beginner.topbar.openFolder")
+                ? t("beginner.topbar.changeFolder")
+                : t("beginner.topbar.openFolder")
             }
             className="inline-flex h-7 min-w-0 max-w-[22rem] items-center gap-1.5 rounded-md border border-transparent px-2 text-xs text-[#a6adc8] transition-colors hover:border-[#313244] hover:bg-[#313244]/60 hover:text-[#cdd6f4] disabled:cursor-not-allowed disabled:hover:border-transparent disabled:hover:bg-transparent"
           >
@@ -466,6 +491,7 @@ export function BeginnerShell() {
                   <BeginnerConnectStep
                     onWatchDemo={() => setShowDemo(true)}
                     onOneClick={openOneClick}
+                    manualFocusSignal={manualFocusSignal}
                   />
                 </div>
               ) : !hasFolder ? (
@@ -482,14 +508,14 @@ export function BeginnerShell() {
                       {t(
                         sampleStatus === "preparing"
                           ? "beginner.folder.preparingTitle"
-                          : "beginner.folder.title",
+                          : "beginner.folder.title"
                       )}
                     </h1>
                     <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-[#7f849c]">
                       {t(
                         sampleStatus === "preparing"
                           ? "beginner.folder.preparingBody"
-                          : "beginner.folder.body",
+                          : "beginner.folder.body"
                       )}
                     </p>
                     {sampleStatus === "preparing" ? (
@@ -573,9 +599,14 @@ export function BeginnerShell() {
                         </span>
                       </div>
                       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                        {/* ★모델·effort·세션 선택은 감춘다. 비기너 화면의 차별점이
-                        "고를 게 없다" 라서, 헤더 한 줄이 그 약속을 깨면 안 된다. */}
-                        <OrchestratorPanel fill hideModelControls />
+                        {/* ★effort·버전 배지·세션 선택은 계속 감춘다(고급 손잡이).
+                            모델만은 예외다(cmp95TVin) — showConnectedModelPicker 가
+                            설치+인증된 하네스로만 목록을 좁힌다. */}
+                        <OrchestratorPanel
+                          fill
+                          hideModelControls
+                          showConnectedModelPicker
+                        />
                       </div>
                     </section>
 
@@ -637,7 +668,12 @@ export function BeginnerShell() {
         }
       />
 
-      {showOneClick && <BeginnerOneClickModal onClose={closeOneClick} />}
+      {showOneClick && (
+        <BeginnerOneClickModal
+          onClose={closeOneClick}
+          onManual={chooseManually}
+        />
+      )}
 
       {/* ★"로그인은 됐는데 아무 일도 안 일어나요" — 구독/크레딧이 없어 CLI 가 한
           턴도 못 도는 상태의 가이드(티켓 sVdwTsiGq6qZVAmSkwZB). 원클릭 모달이
@@ -648,15 +684,20 @@ export function BeginnerShell() {
           계정은 프로브가 **빨리** 실패하므로, 가드가 없으면 원클릭 모달이 성공
           문구를 1.6초 보여주는 그 위에 이 모달이 겹쳐 뜬다 — 두 개가 겹치면
           Esc 한 번이 어느 쪽을 닫는지 알 수 없다. 원클릭은 인증되면 스스로
-          닫히므로 이 안내는 곧바로 이어서 뜬다. */}
-      {!showOneClick && <FundingGuideHost />}
+          닫히므로 이 안내는 곧바로 이어서 뜬다.
+
+          ★데모 재생 중에도 뜨지 않는다(티켓 E3ywX1ftbVr5f1TrFsgp): 데모는 연결
+          전에 여는 것이고 이 안내들도 연결이 없어서 뜨는 것이라 전제가 정확히
+          겹쳐, 가드가 없으면 대본 위에 안내가 항상 덮인다. 규칙은
+          lib/beginnerMode.shouldRenderOnboardingGuides 가 든다. */}
+      {guidesAllowed && <FundingGuideHost />}
 
       {/* ★M1 — "여기까지는 무료로 볼 수 있어요"(온램프 #886 §5-A). 지금까지 이
           셸은 스폰 차단(`needsAuth`)을 해석하는 화면 목록에 아예 없어서, L0
           유저가 실행을 눌러도 화면에 **아무 일도** 일어나지 않았다.
           원클릭 모달과 배타인 이유는 위 자금 안내와 같다. M2(자금)와의 배타는
           호스트가 스스로 판정한다 — 두 모달이 서로 반대되는 지시를 준다. */}
-      {!showOneClick && (
+      {guidesAllowed && (
         <OnrampGateHost variant="beginner" onConnect={openOneClick} />
       )}
 

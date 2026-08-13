@@ -625,8 +625,14 @@ export async function launchCleanRoom(
   // 비기너 셸 옵트아웃 (기본). 셸 분기는 스토어의 모듈 평가 시점에 확정되므로
   // 시드 뒤 한 번 리로드해야 반영된다 — switchToLegacyLayout 과 같은 패턴이다.
   // `beginnerShell: true` 인 시나리오는 건드리지 않고 그대로 비기너로 부팅한다.
+  //
+  // ★기존 판정 키를 **전부 훑어 지우고** 기기 키에 심는다(티켓 E3ywX1ftbVr5f1TrFsgp).
+  //   첫 부팅에서 테스트 계정이 이미 판정을 자기 계정 키로 가져갔을 수 있는데,
+  //   그게 남아 있으면 기기 키에 심은 옵트아웃이 무시된다.
   if (!scenario.beginnerShell) {
     await page.evaluate(() => {
+      for (const key of Object.keys(localStorage))
+        if (key.startsWith("marblo.beginnerMode")) localStorage.removeItem(key);
       localStorage.setItem(
         "marblo.beginnerMode",
         JSON.stringify({
@@ -1204,7 +1210,17 @@ const MARKER_VALUE: Record<PriorInstallMarkerName, string> = {
   legacyGateDismissed: "1",
 };
 
+/**
+ * 아직 아무 계정도 안 가져간 **기기 단위** 판정 키.
+ *
+ * ★판정의 진짜 주인은 이제 계정이다(티켓 E3ywX1ftbVr5f1TrFsgp):
+ * 권위 있는 레코드는 `marblo.beginnerMode.u.<uid>` 에 있고, 이 키는 첫 계정이
+ * 상속해 가는 기기 흔적으로만 남는다. 그래서 이 하네스는 **시드는 이 키에**
+ * 하고(앱이 부팅 뒤 채택하며 계정 키로 옮겨 간다) **읽기는 계정 키 우선**으로
+ * 한다. 로그인 uid(테스트 바이패스)를 하네스가 알 필요는 없다 — 접두사로 훑는다.
+ */
 export const BEGINNER_MODE_LS_KEY = "marblo.beginnerMode";
+export const BEGINNER_MODE_ACCOUNT_LS_PREFIX = "marblo.beginnerMode.u.";
 export const COACHMARK_LS_KEY = "marblo.coachmark";
 
 export interface BeginnerRecordView {
@@ -1219,28 +1235,39 @@ export interface BeginnerRecordView {
 export async function readBeginnerRecord(
   page: Page,
 ): Promise<BeginnerRecordView> {
-  return page.evaluate((key) => {
-    const empty = {
-      state: null as "beginner" | "advanced" | null,
-      enteredAt: 0,
-      firstCompletionAt: 0,
-      promotionShownAt: 0,
-    };
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return empty;
-      const p = JSON.parse(raw) as Partial<BeginnerRecordViewShape>;
-      return {
-        state:
-          p.state === "beginner" || p.state === "advanced" ? p.state : null,
-        enteredAt: Number(p.enteredAt) || 0,
-        firstCompletionAt: Number(p.firstCompletionAt) || 0,
-        promotionShownAt: Number(p.promotionShownAt) || 0,
+  return page.evaluate(
+    (arg) => {
+      const empty = {
+        state: null as "beginner" | "advanced" | null,
+        enteredAt: 0,
+        firstCompletionAt: 0,
+        promotionShownAt: 0,
       };
-    } catch {
-      return empty;
-    }
-  }, BEGINNER_MODE_LS_KEY);
+      try {
+        // 계정 키가 있으면 그쪽이 권위다(로그인 뒤에는 항상 여기 있다). 아직
+        // 채택 전이면 기기 키를 읽는다.
+        const accountKey = Object.keys(localStorage).find((k) =>
+          k.startsWith(arg.prefix),
+        );
+        const raw = localStorage.getItem(accountKey ?? arg.legacyKey);
+        if (!raw) return empty;
+        const p = JSON.parse(raw) as Partial<BeginnerRecordViewShape>;
+        return {
+          state:
+            p.state === "beginner" || p.state === "advanced" ? p.state : null,
+          enteredAt: Number(p.enteredAt) || 0,
+          firstCompletionAt: Number(p.firstCompletionAt) || 0,
+          promotionShownAt: Number(p.promotionShownAt) || 0,
+        };
+      } catch {
+        return empty;
+      }
+    },
+    {
+      legacyKey: BEGINNER_MODE_LS_KEY,
+      prefix: BEGINNER_MODE_ACCOUNT_LS_PREFIX,
+    },
+  );
 }
 
 /** page.evaluate 안에서 쓰는 구조 타입(브라우저 컨텍스트로 넘어가지 않는다). */
@@ -1269,6 +1296,11 @@ export async function reseedBeginnerDecision(
   await page.evaluate(
     (arg) => {
       try {
+        // ★`marblo.beginnerMode` 로 시작하는 키를 **전부** 훑어 지운다: 기기
+        //   레코드 · 계정별 레코드 · 기기 흔적 청구자(claimedBy). 하나라도 남으면
+        //   다음 부팅이 "직전 런의 판정" 을 물려받아 표 전체가 vacuous 해진다.
+        for (const key of Object.keys(localStorage))
+          if (key.startsWith(arg.beginnerPrefix)) localStorage.removeItem(key);
         for (const key of arg.clear) localStorage.removeItem(key);
         for (const [key, value] of arg.seed) localStorage.setItem(key, value);
       } catch {
@@ -1276,10 +1308,8 @@ export async function reseedBeginnerDecision(
       }
     },
     {
-      clear: [
-        BEGINNER_MODE_LS_KEY,
-        ...Object.values(PRIOR_INSTALL_MARKERS),
-      ] as string[],
+      beginnerPrefix: BEGINNER_MODE_LS_KEY,
+      clear: Object.values(PRIOR_INSTALL_MARKERS) as string[],
       seed,
     },
   );
