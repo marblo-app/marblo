@@ -171,6 +171,7 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.chat.placeholder":
     "What next? e.g. add a few examples to the guide you just wrote",
   "beginner.chat.orchestratorRunning": "In conversation",
+  "beginner.chat.modelPickerTitle": "Model Marblo will use",
 
   // ── Ticket detail (mini board card click) ───────────────────────────────
   "beginner.taskDetail.label": "Task detail",

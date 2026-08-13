@@ -3,6 +3,7 @@ import {
   useCallback,
   useState,
   useEffect,
+  useMemo,
   memo,
   type ChangeEvent,
   type CSSProperties,
@@ -17,6 +18,7 @@ import {
   orchestratorBlockCopyKeys,
   orchestratorBlockLoginModel,
 } from "../../lib/orchestratorLaunchBlock";
+import { connectedOrchestratorModelOptions } from "../../lib/orchestratorConnectedModels";
 import {
   ORCHESTRATOR_MODEL_OPTIONS,
   isOrchestratorModel,
@@ -27,6 +29,7 @@ import {
   withOrchestratorEffort,
   type OrchestratorModel,
 } from "../../stores/orchestratorStore";
+import { useCliSetupStore } from "../../stores/cliSetupStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useTaskStore } from "../../stores/taskStore";
@@ -163,11 +166,23 @@ interface OrchestratorPanelProps {
    * configuration. Default false → pixel-identical to before.
    */
   hideModelControls?: boolean;
+  /**
+   * Beginner shell (티켓 cmp95TVin64IIlOiFlAC): `hideModelControls` 가 지운
+   * 자리에 **모델 축 하나짜리** 단순 드롭다운만 되살린다 — effort 축·버전 배지·
+   * 세션 피커는 계속 숨긴 채다. 목록은 `connectedOrchestratorModelOptions` 로
+   * 설치+인증이 확인된 하네스만 남긴다(연결 안 된 벤더를 보여줘 봐야 고르는 순간
+   * 스폰이 막힌다 — 비기너 화면엔 그 실패를 설명할 자리가 없다).
+   *
+   * `hideModelControls` 없이 단독으로 켜면 아무 효과가 없다 — 이 축은 항상
+   * `hideModelControls` 뒤에서만 의미가 있는 비기너 전용 조합이다.
+   */
+  showConnectedModelPicker?: boolean;
 }
 
 export default memo(function OrchestratorPanel({
   fill = false,
   hideModelControls = false,
+  showConnectedModelPicker = false,
 }: OrchestratorPanelProps) {
   const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -196,6 +211,10 @@ export default memo(function OrchestratorPanel({
     ? orchestratorBlockLoginModel(launchBlock)
     : null;
   const tasks = useTaskStore((s) => s.tasks);
+  // 비기너 전용 연결 필터가 읽는 CLI 프로브 스냅샷 — showConnectedModelPicker 가
+  // 꺼져 있으면 아래 useMemo 가 이 값을 쓰지 않는다(구독 자체는 항상 하되 비용은
+  // 리렌더 한 번뿐이다, 훅 순서를 조건부로 만들 수 없어서다).
+  const cliStates = useCliSetupStore((s) => s.states);
 
   // Resolved Claude Code build that agents actually launch with. Shown in the
   // header so a stale shadowing install (old model list) is immediately visible.
@@ -310,6 +329,20 @@ export default memo(function OrchestratorPanel({
       setCollapsed(false);
     }
   }, [status, isCollapsed, setCollapsed]);
+
+  // showConnectedModelPicker 일 때만 걸러진 목록을 쓴다 — 표준 셀렉터(어드밴스드)는
+  // 종전대로 전체 목록을 그대로 본다(연결 여부와 무관하게 골라서 launchBlock 배너로
+  // 실패를 설명하는 기존 흐름을 그대로 둔다).
+  const modelOptions = useMemo(
+    () =>
+      showConnectedModelPicker
+        ? connectedOrchestratorModelOptions(
+            cliStates,
+            orchestratorModelBase(selectedModel),
+          )
+        : ORCHESTRATOR_MODEL_OPTIONS,
+    [showConnectedModelPicker, cliStates, selectedModel],
+  );
 
   // 프로젝트가 없으면 패널 자체를 숨김
   if (!currentProject) return null;
@@ -654,7 +687,9 @@ export default memo(function OrchestratorPanel({
             )}
             <div
               ref={switchAnchorRef}
-              className={`relative ml-1 ${hideModelControls ? "hidden" : ""}`}
+              className={`relative ml-1 ${
+                hideModelControls && !showConnectedModelPicker ? "hidden" : ""
+              }`}
               onClick={(e) => e.stopPropagation()}
             >
               <select
@@ -662,15 +697,19 @@ export default memo(function OrchestratorPanel({
                 onChange={handleModelChange}
                 disabled={isSwitching}
                 className="h-6 rounded border border-[#313244] bg-[#1e1e2e] px-1.5 text-[11px] text-[#cdd6f4] outline-none hover:border-[#89b4fa] disabled:opacity-60"
-                title="Switch orchestrator model"
+                title={
+                  showConnectedModelPicker
+                    ? t("beginner.chat.modelPickerTitle")
+                    : "Switch orchestrator model"
+                }
               >
-                {ORCHESTRATOR_MODEL_OPTIONS.map((option) => (
+                {modelOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
                 ))}
               </select>
-              {effortChoices.length > 0 && (
+              {!hideModelControls && effortChoices.length > 0 && (
                 <select
                   value={selectedEffort}
                   onChange={handleEffortChange}
@@ -770,15 +809,19 @@ export default memo(function OrchestratorPanel({
             </span>
             {/* Start button + session picker toggle */}
             <div className="relative ml-2 flex items-center gap-1">
-              {!hideModelControls && (
+              {(!hideModelControls || showConnectedModelPicker) && (
                 <select
                   value={selectedBase}
                   onClick={(e) => e.stopPropagation()}
                   onChange={handleModelChange}
                   className="h-6 rounded border border-[#313244] bg-[#1e1e2e] px-1.5 text-[11px] text-[#cdd6f4] outline-none hover:border-[#89b4fa]"
-                  title="Orchestrator model"
+                  title={
+                    showConnectedModelPicker
+                      ? t("beginner.chat.modelPickerTitle")
+                      : "Orchestrator model"
+                  }
                 >
-                  {ORCHESTRATOR_MODEL_OPTIONS.map((option) => (
+                  {modelOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>

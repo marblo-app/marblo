@@ -62,8 +62,10 @@ import {
  *      → 하단을 **가로 2분할**로 키운다: 왼쪽 오케 대화창 / 오른쪽 에이전트.
  *
  * 그래서 이 화면은 이제 '채팅 + 작은 스트립' 이 아니라 가벼운 워크스페이스다.
- * 다만 어드밴스드와의 경계는 그대로다 — 워크트리·diff·모델 선택은 여전히 없다
- * (미니 보드 카드는 `compact`, 오케 헤더는 `hideModelControls`).
+ * 다만 어드밴스드와의 경계는 그대로다 — 워크트리·diff·티켓별 모델 지정은 여전히
+ * 없다(미니 보드 카드는 `compact`, 오케 헤더는 `hideModelControls`). 오케가 어떤
+ * 모델로 뜰지 자체는 예외다(티켓 cmp95TVin64IIlOiFlAC) — `showConnectedModelPicker`
+ * 가 연결·인증된 하네스만 남긴 단순 드롭다운 하나로 되살린다.
  *
  * ★오케 대화창은 `OrchestratorPanel fill` **그대로**다. 오케는 이미 실 PTY 를
  * 태운 대화창이므로 새 챗 프로토콜을 만들지 않는다(PTY 재배선 0). 상단 컴포저도
@@ -508,9 +510,17 @@ export function BeginnerShell() {
                     </span>
                   </div>
                   <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                    {/* ★모델·effort·세션 선택은 감춘다. 비기너 화면의 차별점이
-                        "고를 게 없다" 라서, 헤더 한 줄이 그 약속을 깨면 안 된다. */}
-                    <OrchestratorPanel fill hideModelControls />
+                    {/* ★effort·버전 배지·세션 선택은 계속 감춘다(고급 손잡이).
+                        모델만은 예외다(티켓 cmp95TVin64IIlOiFlAC) — 표준 오케 헤더에
+                        있던 걸 심플에만 없애 둔 게 비대칭이었다. `showConnectedModelPicker`
+                        가 목록을 설치+인증이 확인된 하네스로만 좁혀서, 고르는 순간 스폰이
+                        막히는 선택지를 애초에 보여주지 않는다(비기너 화면엔 그 실패를
+                        설명할 자리가 없다). */}
+                    <OrchestratorPanel
+                      fill
+                      hideModelControls
+                      showConnectedModelPicker
+                    />
                   </div>
                 </section>
 
