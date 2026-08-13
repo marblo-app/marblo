@@ -5,7 +5,6 @@ import {
   previewOverridesGate,
   previewResults,
   previewSampleStatus,
-  previewSignInModel,
 } from "../lib/onboardingPreview";
 import { oneClickInstallRows } from "../lib/oneClickSetup";
 import type { BulkInstallProgress, CliProbeLike } from "../lib/oneClickSetup";
@@ -19,7 +18,10 @@ import {
 } from "../stores/cliSetupStore";
 import { useFirstRunSampleStore } from "../stores/firstRunSampleStore";
 import { useOnboardingPreviewStore } from "../stores/onboardingPreviewStore";
-import { launchLogin, oneClickSignIn } from "../services/cliSetupActions";
+import {
+  installAndLogin,
+  setDefaultOrchestrator,
+} from "../services/cliSetupActions";
 import telemetry from "../services/telemetryService";
 import type { FirstRunSampleStatus } from "../stores/firstRunSampleStore";
 
@@ -66,14 +68,28 @@ export interface OnboardingSetupView {
   /** 한 줄 설치(택1 카드) — 프리뷰에서는 일괄 시뮬로 합류한다. */
   installOne: (row: CliRow) => Promise<void>;
   /**
-   * 원클릭 자동 사인인. 로그인 터미널 세션이 생기면 `onSession` 으로 알린다
-   * (프리뷰에서는 `PREVIEW_SESSION_ID` — 실 PTY 가 아니다).
+   * 고른 CLI 하나의 로그인. 안 깔렸으면 먼저 깐다(grok 처럼 자동설치 대상이 아닌
+   * CLI 를 구독 선택에서 고른 경우). 세션 id(스폰 실패면 null)를 돌려준다 —
+   * 프리뷰에서는 `PREVIEW_SESSION_ID` 로, 실 PTY 가 아니다.
    */
-  signIn: (onSession: (sessionId: string) => void) => CliModel | null;
-  /** 택1 카드의 로그인. 세션 id(스폰 실패면 null)를 돌려준다. */
   login: (model: CliModel, action?: string) => Promise<string | null>;
+  /**
+   * 이 설치의 기본 오케 하네스를 저장한다(구독 선택의 결과). 프리뷰에서는
+   * **아무것도 하지 않는다** — 시연이 진짜 설정을 바꾸면 안 된다.
+   */
+  setDefaultOrchestrator: (model: CliModel) => void;
   /** 수동 "다시 확인" — 프리뷰에서는 실 프로브를 돌리지 않는다. */
   recheck: () => void;
+  /**
+   * 인증 자동 재확인 폴(`useCliSetupEngine`)이 지금 돌고 있는가.
+   *
+   * ★로그인 큐가 읽는다. 그 폴은 **오케 후보 하나**가 인증되면 스스로 멈추므로
+   * (`requiredReady`), 사용자가 그 뒤에 grok 로그인을 이어서 하고 있으면 아무도
+   * 프로브를 다시 돌리지 않는다 — 화면이 영원히 "승인 기다리는 중" 에 머문다.
+   * 큐는 이 값이 false 일 때만 자기 폴을 돌려 그 공백을 메운다(둘이 동시에 돌면
+   * 프로브가 두 배로 나간다).
+   */
+  loginRunning: boolean;
 
   /**
    * ★인증 다음 칸 — "로그인은 됐는데 진짜 도는가"(티켓 sVdwTsiGq6qZVAmSkwZB).
@@ -96,6 +112,7 @@ export function useOnboardingSetup(): OnboardingSetupView {
   const realBulk = useCliSetupStore((s) => s.bulkInstall);
   const installErrors = useCliSetupStore((s) => s.installErrors);
   const installing = useCliSetupStore((s) => s.installing);
+  const realLoginRunning = useCliSetupStore((s) => s.loginRunning);
   const runInstall = useCliSetupStore((s) => s.runInstall);
   const runInstallAll = useCliSetupStore((s) => s.runInstallAll);
   const probeAll = useCliSetupStore((s) => s.probeAll);
@@ -146,9 +163,10 @@ export function useOnboardingSetup(): OnboardingSetupView {
         sampleStatus: realSampleStatus,
         installAll: () => void runInstallAll(oneClickInstallRows(ROWS)),
         installOne: (row) => runInstall(row),
-        signIn: (onSession) => oneClickSignIn(onSession),
-        login: (model, action) => launchLogin(model, action),
+        login: (model, action) => installAndLogin(model, action),
+        setDefaultOrchestrator: (model) => void setDefaultOrchestrator(model),
         recheck: () => void probeAll(),
+        loginRunning: realLoginRunning,
         funding: { checking: fundingChecking, outcome: fundingOutcome },
         // ★스톨 계측(티켓 9dXgBdkGn1LyJokShh1g): "이미 구독했어요 → 다시 확인"
         // 의 판정도 남긴다. 이 축이 없으면 "구독을 붙이고 실제로 풀린 사람"
@@ -182,20 +200,18 @@ export function useOnboardingSetup(): OnboardingSetupView {
       sampleStatus: previewSampleStatus(stage),
       installAll: startInstall,
       installOne: async () => startInstall(),
-      signIn: (onSession) => {
-        const model = previewSignInModel(ROWS, simResults);
-        if (!model) return null;
-        startSignIn(model);
-        onSession(PREVIEW_SESSION_ID);
-        return model;
-      },
       login: async (model) => {
         startSignIn(model);
         return PREVIEW_SESSION_ID;
       },
+      setDefaultOrchestrator: () => {
+        /* 시연이 진짜 기본 오케 설정을 바꾸지 않는다 */
+      },
       recheck: () => {
         /* 프리뷰에서는 프로브를 돌리지 않는다 — 국면이 스스로 굴러간다 */
       },
+      // 프리뷰에는 실 폴이 없다 — 큐의 자체 폴도 돌 필요가 없다(대본이 굴린다).
+      loginRunning: false,
       // 프리뷰는 구독/크레딧 문제를 **연출하지 않는다**: 시연의 목적은 신규
       // 유저의 정상 경로를 보는 것이고, 실 헤드리스 턴도 태우지 않는다.
       funding: { checking: false, outcome: null },
@@ -214,6 +230,7 @@ export function useOnboardingSetup(): OnboardingSetupView {
     realSampleStatus,
     installErrors,
     installing,
+    realLoginRunning,
     runInstall,
     runInstallAll,
     probeAll,

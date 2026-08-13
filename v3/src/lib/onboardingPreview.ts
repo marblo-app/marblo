@@ -170,9 +170,13 @@ export function previewLoginTranscript(model: CliModel): string[] {
 }
 
 /**
- * 프리뷰에서 자동 사인인이 고를 CLI. 실 흐름의 `signInRows` 와 같은 규칙(설치됨 +
- * 미인증, 오케 후보 우선)을 프리뷰 결과에 적용한 것이라, 두 경로가 같은 CLI 를
- * 고른다.
+ * 프리뷰에서 **로그인 큐가 고를 CLI 후보** — 실 흐름의 `signInRows` 와 같은
+ * 규칙(설치됨 + 미인증, 행 순서 = 오케 후보 우선)을 프리뷰 결과에 적용한 것이라,
+ * 시연과 실물이 같은 CLI 를 고른다.
+ *
+ * ★구독 선택(티켓 LLHMclpKaIAJbsiHzGoG)이 생긴 뒤로 **자동 선택은 없다**: 무엇에
+ * 로그인할지는 사용자가 고르고, 시연도 같은 화면을 그대로 지난다. 이 함수는 그
+ * 규칙이 프리뷰 결과에서도 성립하는지 확인하는 판정으로 남는다.
  */
 export function previewSignInModel<R extends { id: string; model: CliModel }>(
   rows: R[],

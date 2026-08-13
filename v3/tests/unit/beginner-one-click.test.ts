@@ -31,6 +31,10 @@ const actions = vi.hoisted(() => ({
     return "claude" as const;
   }),
   launchLogin: vi.fn(async () => "login-session-1"),
+  // ★구독 선택(티켓 LLHMclpKaIAJbsiHzGoG) 이후 모달·연결 게이트가 실제로 부르는
+  // 로그인 경로다. `launchLogin` 과 달리 안 깔린 CLI 를 먼저 설치한다.
+  installAndLogin: vi.fn(async () => "login-session-1"),
+  setDefaultOrchestrator: vi.fn(async () => true),
   connectFolder: vi.fn(),
 }));
 vi.mock("../../src/services/cliSetupActions", () => actions);
@@ -38,7 +42,7 @@ vi.mock("../../src/services/cliSetupActions", () => actions);
 // 텔레메트리는 모듈 최상단에서 firebase auth 를 초기화한다 — jsdom 유닛에서는
 // 붙일 것도, 볼 것도 없다.
 vi.mock("../../src/services/telemetryService", () => ({
-  default: { cliSetupStep: vi.fn() },
+  default: { cliSetupStep: vi.fn(), loginPrompt: vi.fn() },
 }));
 
 // xterm 은 jsdom 에서 캔버스를 요구한다 — 이 테스트가 보는 것은 "그 세션을
@@ -63,12 +67,13 @@ vi.mock("../../src/components/onboarding/OnrampDecomposeCard", () => ({
 }));
 
 import {
+  canLaunchSignIn,
   oneClickInstallRows,
   oneClickPhase,
-  shouldAutoSignIn,
   type BulkInstallProgress,
   type OneClickFlowState,
 } from "../../src/lib/oneClickSetup";
+import telemetry from "../../src/services/telemetryService";
 import { BeginnerOneClickModal } from "../../src/components/beginner/BeginnerOneClickModal";
 import { BeginnerConnectStep } from "../../src/components/beginner/BeginnerConnectStep";
 import { ROWS, useCliSetupStore } from "../../src/stores/cliSetupStore";
@@ -79,6 +84,9 @@ const flow = (over: Partial<OneClickFlowState> = {}): OneClickFlowState => ({
   bulk: null,
   signInTargets: 0,
   loginLaunched: false,
+  // 이 describe 의 관심사는 설치↔로그인 국면이라, 구독 질문은 이미 지난 것으로
+  // 둔다. 그 칸 자체는 아래 별도 describe 가 본다.
+  subscriptionPicked: true,
   ...over,
 });
 
@@ -94,7 +102,7 @@ describe("oneClickPhase — 한 흐름으로 이어 붙일 때의 국면", () =>
       signInTargets: 1,
     });
     expect(oneClickPhase(s)).toBe("installing");
-    expect(shouldAutoSignIn(s)).toBe(false);
+    expect(canLaunchSignIn(s)).toBe(false);
   });
 
   it("클릭 직후(진행 기록 전)에도 빈 '막힘' 을 스치지 않는다", () => {
@@ -107,19 +115,22 @@ describe("oneClickPhase — 한 흐름으로 이어 붙일 때의 국면", () =>
       signInTargets: 2,
     });
     expect(oneClickPhase(s)).toBe("sign_in");
-    expect(shouldAutoSignIn(s)).toBe(true);
+    expect(canLaunchSignIn(s)).toBe(true);
   });
 
-  it("★터미널을 띄운 뒤에는 awaiting_auth — 대상이 남아 있어도 다시 띄우지 않는다", () => {
-    // 브라우저 승인이 끝날 때까지 대상 행은 계속 '미인증' 이다. 이 우선순위가
-    // 없으면 폴 주기마다 같은 로그인이 새 터미널로 다시 뜬다.
+  it("★터미널을 띄운 뒤에는 awaiting_auth — 화면은 '승인 기다리는 중' 이다", () => {
+    // 브라우저 승인이 끝날 때까지 대상 행은 계속 '미인증' 이다.
     const s = flow({
       bulk: { running: false, total: 1, done: 1, failedIds: [] },
       signInTargets: 1,
       loginLaunched: true,
     });
     expect(oneClickPhase(s)).toBe("awaiting_auth");
-    expect(shouldAutoSignIn(s)).toBe(false);
+    // ★같은 로그인을 두 번 띄우지 않는 책임은 이제 국면이 아니라 **대상 선정**에
+    // 있다(구독 선택으로 로그인이 큐가 됐다 — 티켓 LLHMclpKaIAJbsiHzGoG).
+    // awaiting_auth 는 "더 띄울 게 없다" 가 아니라 "지금 하나가 진행 중" 이므로,
+    // 다음 대상이 올라오면 이 국면에서도 띄울 수 있어야 한다.
+    expect(canLaunchSignIn(s)).toBe(true);
   });
 
   it("설치가 전부 실패해 사인인 대상이 없으면 blocked(수동 경로)", () => {
@@ -157,6 +168,69 @@ describe("oneClickPhase — 한 흐름으로 이어 붙일 때의 국면", () =>
   });
 });
 
+describe("★구독 선택 칸 — 설치와 로그인 사이 (티켓 LLHMclpKaIAJbsiHzGoG)", () => {
+  it("설치가 끝나면 로그인 전에 '어떤 구독?' 을 묻는다", () => {
+    // 종전에는 여기서 곧장 오케 후보 하나의 로그인이 떴고, 그게 그 사용자가 가진
+    // 구독이 아니면 승인할 것이 없어 신규 유저가 그대로 멈췄다.
+    const s = flow({
+      bulk: { running: false, total: 2, done: 2, failedIds: [] },
+      signInTargets: 2,
+      subscriptionPicked: false,
+    });
+    expect(oneClickPhase(s)).toBe("choose_subscription");
+    // 묻는 동안에는 로그인 터미널을 띄우지 않는다 — 무엇을 띄울지 아직 모른다.
+    expect(canLaunchSignIn(s)).toBe(false);
+  });
+
+  it("설치 중에는 묻지 않는다 — 아직 없는 CLI 를 고르게 된다", () => {
+    expect(
+      oneClickPhase(
+        flow({
+          bulk: { running: true, total: 2, done: 1, failedIds: [] },
+          signInTargets: 1,
+          subscriptionPicked: false,
+        }),
+      ),
+    ).toBe("installing");
+  });
+
+  it("설치가 전부 실패했으면 묻지 않고 blocked — 물어도 띄울 터미널이 없다", () => {
+    expect(
+      oneClickPhase(
+        flow({
+          bulk: { running: false, total: 2, done: 2, failedIds: ["a", "b"] },
+          signInTargets: 0,
+          subscriptionPicked: false,
+        }),
+      ),
+    ).toBe("blocked");
+  });
+
+  it("★남은 로그인이 있으면 ready 여도 done 이 아니다 — 두 번째 로그인을 지우지 않는다", () => {
+    // `ready` 는 오케 후보 **하나**가 인증되면 선다(#579). 구독을 둘 고른 사람은
+    // 그 순간 두 번째 로그인이 아직 진행 중인데, 종전 판정으로는 모달이 곧바로
+    // "연결됐어요" 를 띄우고 1.6초 뒤 닫혀 그 터미널을 통째로 잃었다.
+    const s = flow({
+      ready: true,
+      signInTargets: 1,
+      loginLaunched: true,
+      pendingLogins: 1,
+    });
+    expect(oneClickPhase(s)).toBe("awaiting_auth");
+    expect(oneClickPhase({ ...s, pendingLogins: 0 })).toBe("done");
+  });
+
+  it("이 칸을 모르는 호출부(생략)에는 종전 동작 그대로다", () => {
+    // `subscriptionPicked` 를 안 주면 질문 국면이 아예 생기지 않는다 — 비기너
+    // 전용 단계를 다른 표면에 강제로 밀어 넣지 않는다.
+    const { subscriptionPicked: _ignored, ...rest } = flow({
+      bulk: { running: false, total: 2, done: 2, failedIds: [] },
+      signInTargets: 2,
+    });
+    expect(oneClickPhase(rest as OneClickFlowState)).toBe("sign_in");
+  });
+});
+
 describe("oneClickInstallRows — '모두 설치' 의 대상 집합", () => {
   it("기본 함대 3종을 든다 — Claude·Codex·Grok (k22rGEgv)", () => {
     const ids = oneClickInstallRows(ROWS).map((r) => r.id);
@@ -179,6 +253,26 @@ const probe = (installed: boolean, authenticated: boolean) => ({
   installed,
   authenticated,
 });
+
+/**
+ * 구독 선택 화면을 지나간다 — 설치와 로그인 사이의 질문(티켓 LLHMclpKaIAJbsiHzGoG).
+ * 종전에는 설치가 끝나면 로그인이 자동으로 떴지만, 이제 무엇에 로그인할지는
+ * 사용자가 고른다.
+ */
+async function pickSubscription(...models: string[]) {
+  for (const model of models) {
+    await act(async () => {
+      fireEvent.click(
+        screen
+          .getByTestId(`beginner-subscription-${model}`)
+          .querySelector("input")!,
+      );
+    });
+  }
+  await act(async () => {
+    fireEvent.click(screen.getByTestId("beginner-subscription-confirm"));
+  });
+}
 
 /** 모달의 `data-phase` — 국면 판정이 화면까지 도달했는지 읽는 유일한 창구. */
 function phaseAttr(): string | null {
@@ -249,9 +343,10 @@ describe("BeginnerOneClickModal", () => {
     expect(actions.oneClickSignIn).not.toHaveBeenCalled();
   });
 
-  it("★설치할 게 없으면 사인인이 스스로 시작되고 그 터미널이 모달 안에 뜬다", () => {
-    // 백그라운드 자동설치(useCliSetupEngine)가 이미 끝낸 흔한 경우 —
-    // 설치됨·미인증이면 원클릭은 곧장 사인인으로 이어져야 한다.
+  it("★설치가 끝나면 로그인 전에 '어떤 구독?' 을 먼저 묻는다", async () => {
+    // 백그라운드 자동설치(useCliSetupEngine)가 이미 끝낸 흔한 경우. 종전에는
+    // 여기서 곧장 claude 로그인 창이 떴는데, ChatGPT 구독만 가진 사람에게는
+    // 승인할 것이 하나도 없었다 — 콜드테스트가 지목한 이탈 지점이다.
     seed(
       {
         "cli-claude-code": probe(true, false),
@@ -261,31 +356,96 @@ describe("BeginnerOneClickModal", () => {
     );
     render(createElement(BeginnerOneClickModal, { onClose: () => {} }));
 
-    expect(actions.oneClickSignIn).toHaveBeenCalledTimes(1);
+    expect(phaseAttr()).toBe("choose_subscription");
+    expect(screen.getByTestId("beginner-subscription-pick")).toBeTruthy();
+    // 묻는 동안에는 아무 로그인도 띄우지 않는다.
+    expect(actions.installAndLogin).not.toHaveBeenCalled();
+
+    // 고른 것으로만 로그인한다 — claude 는 안 골랐으니 안 뜬다.
+    await pickSubscription("codex");
+    expect(actions.installAndLogin).toHaveBeenCalledTimes(1);
+    expect(actions.installAndLogin.mock.calls[0][0]).toBe("codex");
     // 임베드된 터미널이 **방금 띄운 그 세션**인가 — activeSessionId 를 훔쳐보던
     // 예전 방식은 다른 탭이 하나만 끼어도 엉뚱한 터미널을 그렸다.
     expect(
       screen.getByTestId("stub-terminal").getAttribute("data-session"),
     ).toBe("login-session-1");
     expect(phaseAttr()).toBe("awaiting_auth");
+    // ★그리고 고른 것이 기본 오케가 된다(요구 (3)).
+    expect(actions.setDefaultOrchestrator).toHaveBeenCalledWith("codex");
   });
 
-  it("자동 사인인은 한 번만 — 폴이 결과를 갱신해도 로그인을 또 띄우지 않는다", () => {
+  it("★고른 CLI 마다 로그인 터미널 — 다만 한 번에 하나씩(순차)", async () => {
+    seed(
+      {
+        "cli-claude-code": probe(true, false),
+        "cli-codex": probe(true, false),
+      },
+      { bulkOnInstall: { running: false, total: 0, done: 0, failedIds: [] } },
+    );
+    render(createElement(BeginnerOneClickModal, { onClose: () => {} }));
+    await pickSubscription("claude", "codex");
+
+    // 둘을 동시에 띄우지 않는다 — 브라우저 승인 탭이 둘 열리면 어느 터미널이
+    // 무엇을 기다리는지 알 수 없다.
+    expect(actions.installAndLogin).toHaveBeenCalledTimes(1);
+    expect(actions.installAndLogin.mock.calls[0][0]).toBe("claude");
+    expect(screen.getByTestId("beginner-login-queue-title")).toBeTruthy();
+
+    // 앞의 것이 인증되면 다음이 스스로 올라온다.
+    await act(async () => {
+      useCliSetupStore.setState({
+        results: {
+          "cli-claude-code": probe(true, true),
+          "cli-codex": probe(true, false),
+        },
+      });
+    });
+    expect(actions.installAndLogin).toHaveBeenCalledTimes(2);
+    expect(actions.installAndLogin.mock.calls[1][0]).toBe("codex");
+  });
+
+  it("★이미 로그인된 CLI 는 큐에서 빠진다 — 다시 로그인시키지 않는다", async () => {
+    // 사장님 케이스의 부분판: grok 은 이미 인증돼 있고 codex 만 남았다.
+    seed(
+      {
+        "cli-claude-code": probe(true, false),
+        "cli-codex": probe(true, false),
+        "cli-grok": probe(true, true),
+      },
+      { bulkOnInstall: { running: false, total: 0, done: 0, failedIds: [] } },
+    );
+    render(createElement(BeginnerOneClickModal, { onClose: () => {} }));
+
+    // 이미 로그인된 줄은 체크된 채로 잠겨 있고, 자동 건너뛰기를 화면이 말한다.
+    const grok = screen.getByTestId("beginner-subscription-grok");
+    expect(grok.getAttribute("data-signed-in")).toBe("true");
+    expect(grok.querySelector("input")!.disabled).toBe(true);
+    expect(screen.getByTestId("beginner-subscription-autoskip")).toBeTruthy();
+
+    await pickSubscription("codex");
+
+    // grok 은 고른 것에 들어 있지만(이미 로그인됨) 터미널은 codex 것만 뜬다.
+    expect(actions.installAndLogin).toHaveBeenCalledTimes(1);
+    expect(actions.installAndLogin.mock.calls[0][0]).toBe("codex");
+    // 기본 오케는 **지금 당장 돌 수 있는** 것 — 이미 인증된 grok 이다.
+    expect(actions.setDefaultOrchestrator).toHaveBeenCalledWith("grok");
+  });
+
+  it("로그인은 대상당 한 번만 — 폴이 결과를 갱신해도 또 띄우지 않는다", async () => {
     seed(
       { "cli-claude-code": probe(true, false) },
       { bulkOnInstall: { running: false, total: 0, done: 0, failedIds: [] } },
     );
-    const { rerender } = render(
-      createElement(BeginnerOneClickModal, { onClose: () => {} }),
-    );
-    rerender(createElement(BeginnerOneClickModal, { onClose: () => {} }));
-    act(() => {
+    render(createElement(BeginnerOneClickModal, { onClose: () => {} }));
+    await pickSubscription("claude");
+    await act(async () => {
       // 자동 재확인 폴이 도는 동안 대상 행은 계속 '설치됨·미인증' 이다.
       useCliSetupStore.setState({
         results: { "cli-claude-code": probe(true, false) },
       });
     });
-    expect(actions.oneClickSignIn).toHaveBeenCalledTimes(1);
+    expect(actions.installAndLogin).toHaveBeenCalledTimes(1);
   });
 
   it("설치가 전부 실패하면 수동 명령 + 공식 문서 + 다시 시도를 띄운다", () => {
@@ -384,6 +544,63 @@ describe("BeginnerOneClickModal", () => {
   });
 });
 
+describe("★로그인 유도 계측 · 이탈 (티켓 LLHMclpKaIAJbsiHzGoG, #932 needs_auth 와 조인)", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(cleanup);
+
+  const readyToPick = () =>
+    seed(
+      {
+        "cli-claude-code": probe(true, false),
+        "cli-codex": probe(true, false),
+      },
+      { bulkOnInstall: { running: false, total: 0, done: 0, failedIds: [] } },
+    );
+
+  const phases = () =>
+    (telemetry.loginPrompt as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls.map((c) => c[0]);
+
+  it("도달 → 선택 → 띄움 을 순서대로 남긴다", async () => {
+    readyToPick();
+    render(createElement(BeginnerOneClickModal, { onClose: () => {} }));
+    expect(phases()).toEqual(["shown"]);
+    await pickSubscription("claude");
+    expect(phases()).toEqual(["shown", "picked", "launched"]);
+  });
+
+  it("★로그인이 남았는데 닫으면 이탈로 남는다 — 이 화면의 실패율이 이 숫자다", async () => {
+    readyToPick();
+    render(createElement(BeginnerOneClickModal, { onClose: () => {} }));
+    await pickSubscription("claude");
+    fireEvent.click(screen.getByTestId("beginner-oneclick-close"));
+    expect(phases()).toContain("dismissed");
+  });
+
+  it("끝까지 간 사람은 이탈로 세지 않는다", async () => {
+    // `done` 은 성공이다 — 성공을 이탈로 세면 실패율이 100% 로 보인다.
+    seed({ "cli-claude-code": probe(true, true) }, { ready: true });
+    const onClose = vi.fn();
+    render(createElement(BeginnerOneClickModal, { onClose }));
+    fireEvent.click(screen.getByTestId("beginner-oneclick-close"));
+    expect(phases()).not.toContain("dismissed");
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("건너뛴 로그인은 큐를 멈추지 않는다 — 다음 CLI 가 곧바로 올라온다", async () => {
+    readyToPick();
+    render(createElement(BeginnerOneClickModal, { onClose: () => {} }));
+    await pickSubscription("claude", "codex");
+    expect(actions.installAndLogin.mock.calls[0][0]).toBe("claude");
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("beginner-login-skip"));
+    });
+    expect(actions.installAndLogin).toHaveBeenCalledTimes(2);
+    expect(actions.installAndLogin.mock.calls[1][0]).toBe("codex");
+  });
+});
+
 describe("BeginnerConnectStep — 원클릭이 주 경로, 택1 이 폴백", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(cleanup);
@@ -444,8 +661,8 @@ describe("BeginnerConnectStep — 원클릭이 주 경로, 택1 이 폴백", () 
         screen.getByTestId("beginner-connect-claude").querySelector("button")!,
       );
     });
-    expect(actions.launchLogin).toHaveBeenCalledTimes(1);
-    expect(actions.launchLogin.mock.calls[0].slice(0, 2)).toEqual([
+    expect(actions.installAndLogin).toHaveBeenCalledTimes(1);
+    expect(actions.installAndLogin.mock.calls[0].slice(0, 2)).toEqual([
       "claude",
       "claude login",
     ]);

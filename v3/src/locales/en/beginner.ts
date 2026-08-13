@@ -79,6 +79,38 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.oneClick.footerHint":
     "You can close this and carry on manually at any time.",
 
+  // ── ①-a-2 Which subscription? + per-CLI sign-in ─────────────────────────
+  "beginner.oneClick.step.subscription": "Subscription",
+  "beginner.oneClick.status.chooseSubscription":
+    "Installed. Tell us which subscription you have and we'll sign you in with it.",
+  "beginner.login.title": "Which subscription do you have?",
+  "beginner.login.body":
+    "Pick only the ones you actually have. We'll open one sign-in window for each. Just one is enough to start.",
+  "beginner.login.claudeName": "Claude Pro / Max",
+  "beginner.login.claudeDesc": "Run Claude Code on this subscription",
+  "beginner.login.codexName": "ChatGPT Plus / Pro",
+  "beginner.login.codexDesc": "Run the Codex CLI on this ChatGPT account",
+  "beginner.login.grokName": "SuperGrok",
+  "beginner.login.grokDesc": "Run the Grok Build CLI on this xAI account",
+  "beginner.login.alreadySignedIn": "Already signed in",
+  "beginner.login.needsInstall": "We'll install it too",
+  "beginner.login.confirm": "Sign me in",
+  "beginner.login.confirmEmpty": "Pick at least one subscription you have",
+  "beginner.login.selected": "{count} selected",
+  "beginner.login.autoSkipped":
+    "Anything already signed in is skipped — we won't ask you to sign in twice.",
+  "beginner.login.noSubscription": "I don't have one yet",
+  "beginner.login.queueTitle": "Please sign in from the terminal below",
+  "beginner.login.queueBody":
+    "This is the {cli} sign-in. Approve it when the browser opens — we move on to the next one automatically.",
+  "beginner.login.queueProgress": "{done}/{total} done",
+  "beginner.login.skip": "Skip this one for now",
+  "beginner.login.launchFail":
+    "We couldn't open the {cli} sign-in. Paste the command below into a terminal instead.",
+  "beginner.login.defaultSet": "{cli} is now your default orchestrator.",
+  "beginner.login.exhausted":
+    "That's every sign-in you picked. To start, though, you still need either Claude or ChatGPT (Codex) connected.",
+
   // ── ①-b Signed in, but nothing runs (no subscription / credits) ─────────
   "beginner.funding.unfunded.title": "You need a subscription",
   "beginner.funding.unfunded.body":

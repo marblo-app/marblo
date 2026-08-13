@@ -116,6 +116,19 @@ export type TelemetryEvent =
   // 렌더러 발화(#884 의 funding 감지 지점):
   | "onboarding:funding_probe"
   | "onboarding:funding_guide_shown"
+  // ── 로그인 유도 (ticket LLHMclpKaIAJbsiHzGoG) ────────────────────────────
+  // ★위 `spawn_blocked reason=needs_auth` 의 **짝**이다. 그 축은 "CLI 는 깔렸는데
+  // 로그인이 없어 막혔다" 는 사실을 세지만, 지금까지 그 사실을 고치러 가는 **화면
+  // 자체가 없었다** — 자동설치가 끝나면 오케 후보 하나의 로그인만 자동으로 떴고,
+  // 그게 그 사용자가 가진 구독이 아니면 승인할 것이 없었다. 이 이벤트가 그
+  // 화면의 도달·이탈을 채워 needs_auth 와 조인된다:
+  //   spawn_blocked(needs_auth) → login_prompt(shown) → login_prompt(done)
+  //                                                   ↘ login_prompt(dismissed)
+  // metadata.phase = shown(구독 질문 도달) | picked(선택 확정) |
+  //   launched(그 CLI 의 로그인 터미널을 띄움) | done(큐 소진) |
+  //   dismissed(로그인이 남았는데 화면을 닫음 = 이탈)
+  // 자유텍스트·경로는 싣지 않는다 — CLI 이름과 개수뿐이다.
+  | "onboarding:login_prompt"
   // ── 활성화 퍼널의 남은 두 칸 (ticket ygoWP1VJ) ───────────────────────────
   // 퍼널 감사 결과 "첫 대화"·"첫 티켓" 두 구간만 계측이 비어 있었다.
   //
@@ -281,7 +294,7 @@ const logHeartbeatFn = httpsCallable(functions, "logHeartbeat");
 
 export function setTelemetryEnabled(
   enabled: boolean,
-  options: { persist?: boolean } = {},
+  options: { persist?: boolean } = {}
 ) {
   const next = firstPartyTelemetryDefaultEnabled() && enabled;
   telemetryEnabled = next;
@@ -452,7 +465,7 @@ export type ModelConnectTrigger = "spawn_gate" | "cli_auth" | "funding_probe";
  */
 function noteModelConnected(
   trigger: ModelConnectTrigger,
-  metadata?: Record<string, unknown>,
+  metadata?: Record<string, unknown>
 ): void {
   stampModelConnectedAt();
   if (!markOncePerInstall(MODEL_CONNECTED_SENT_KEY)) return;
@@ -586,7 +599,7 @@ export const telemetry = {
     name: string,
     model: string,
     role: string,
-    projectId?: string,
+    projectId?: string
   ) {
     logTelemetry({
       event: "agent:spawned",
@@ -614,7 +627,7 @@ export const telemetry = {
     model?: string,
     dispatchReason?: string,
     errorCategory?: string,
-    errorMessage?: string,
+    errorMessage?: string
   ) {
     logTelemetry({
       event: "agent:crashed",
@@ -639,7 +652,7 @@ export const telemetry = {
     attempt: number,
     taskId?: string,
     model?: string,
-    dispatchReason?: string,
+    dispatchReason?: string
   ) {
     logTelemetry({
       event: "agent:restarted",
@@ -656,7 +669,7 @@ export const telemetry = {
     taskId: string,
     projectId: string,
     role: string,
-    priority?: number,
+    priority?: number
   ) {
     logTelemetry({
       event: "task:created",
@@ -671,7 +684,7 @@ export const telemetry = {
     taskId: string,
     fromStatus: string,
     toStatus: string,
-    agentId?: string,
+    agentId?: string
   ) {
     logTelemetry({
       event: "task:status_changed",
@@ -702,7 +715,7 @@ export const telemetry = {
     flowId: string,
     nodeType: string,
     durationMs: number,
-    success: boolean,
+    success: boolean
   ) {
     logTelemetry({
       event: "flow:node_executed",
@@ -717,7 +730,7 @@ export const telemetry = {
     flowId: string,
     status: string,
     durationMs: number,
-    nodeCount: number,
+    nodeCount: number
   ) {
     logTelemetry({
       event: "flow:completed",
@@ -735,7 +748,7 @@ export const telemetry = {
     tokensInput: number,
     tokensOutput: number,
     cost: number,
-    projectId?: string,
+    projectId?: string
   ) {
     logTelemetry({
       event: "token:usage",
@@ -885,7 +898,7 @@ export const telemetry = {
       | "connect"
       | "project",
     phase: "enter" | "success" | "fail",
-    reason?: string,
+    reason?: string
   ) {
     // ★10분 시계의 앵커 지점 하나(pWSnJeQN → 헤드라인 승격 Tw6m14gR). 인증 단계
     // 성공 = 이 설치가 비로소 진짜 에이전트를 돌릴 수 있게 된 순간이다(무료
@@ -1008,7 +1021,7 @@ export const telemetry = {
     tourId: string,
     stepIndex: number,
     stepCount: number,
-    permanent: boolean,
+    permanent: boolean
   ) {
     logTelemetry({
       event: "onboarding:coachmark_skipped",
@@ -1039,7 +1052,7 @@ export const telemetry = {
     verdict: "ok" | "unfunded" | "blocked" | "inconclusive",
     model: string,
     trigger: "auto" | "recheck",
-    blockedReason?: string,
+    blockedReason?: string
   ) {
     // ★10분 시계의 다른 앵커 지점(pWSnJeQN → 헤드라인 승격 Tw6m14gR). 프로브 ok
     // = 그 계정이 실제로 한 턴을 돌릴 수 있다는 관측이다. CLI 위저드를 건너뛴
@@ -1074,7 +1087,7 @@ export const telemetry = {
    */
   fundingGuideShown(
     state: "authedButUnfunded" | "authedButBlocked",
-    model?: string,
+    model?: string
   ) {
     logTelemetry({
       event: "onboarding:funding_guide_shown",
@@ -1083,6 +1096,34 @@ export const telemetry = {
       outcome: "blocked",
       errorCategory: state,
       metadata: { state },
+    });
+  },
+
+  /**
+   * 로그인 유도 화면의 한 단계(티켓 LLHMclpKaIAJbsiHzGoG).
+   *
+   * ★`dismissed` 가 이 계측의 존재 이유다: 로그인이 남아 있는데 화면을 닫은 사람
+   * = 우리가 문 앞까지 데려다 놓고 놓친 사람이다. 그 수를 `shown` 으로 나눈 것이
+   * 이 화면의 실패율이고, 그게 콜드테스트가 지목한 96% 이탈 구간의 직접 지표다.
+   *
+   * ★`success` 를 phase 로 접지 않는다 — `shown`/`picked`/`launched` 는 성공도
+   * 실패도 아닌 **경유**라, 셋을 success=true 로 세면 `dismissed` 하나만 실패로
+   * 남아 비율이 거짓말을 한다. 판정이 있는 두 칸만 싣는다.
+   *
+   * `models` 는 CLI 이름(claude/codex/grok)뿐이다 — 계정·경로·자유텍스트 없음.
+   */
+  loginPrompt(
+    phase: "shown" | "picked" | "launched" | "done" | "dismissed",
+    metadata?: Record<string, unknown>
+  ) {
+    logTelemetry({
+      event: "onboarding:login_prompt",
+      ...(phase === "done"
+        ? { success: true }
+        : phase === "dismissed"
+        ? { success: false, outcome: "blocked" }
+        : {}),
+      metadata: { phase, ...metadata },
     });
   },
 
@@ -1199,7 +1240,7 @@ export const telemetry = {
    */
   modelConnectedObserved(
     trigger: ModelConnectTrigger,
-    metadata?: Record<string, unknown>,
+    metadata?: Record<string, unknown>
   ) {
     noteModelConnected(trigger, metadata);
   },
@@ -1213,7 +1254,7 @@ export const telemetry = {
    */
   multiAgentActiveObserved(metadata?: Record<string, unknown>) {
     const firstForInstall = markOncePerInstall(
-      "marblo.telemetry.multiAgentActiveSent",
+      "marblo.telemetry.multiAgentActiveSent"
     );
     logTelemetry({
       event: "onboarding:multi_agent_active",
@@ -1245,7 +1286,7 @@ export const telemetry = {
    */
   multiAgentSuccessObserved(
     metadata?: Record<string, unknown>,
-    keys?: { taskId?: string; projectId?: string },
+    keys?: { taskId?: string; projectId?: string }
   ) {
     logTelemetry({
       event: "onboarding:multi_agent_success",
