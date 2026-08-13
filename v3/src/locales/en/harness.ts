@@ -220,6 +220,54 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.slack.guide.step7":
     "Mention the bot in the channel and confirm the reply round-trips.",
 
+  // --- GitHub connection panel (leyZnPBHbHUl3H9sRTDF) — optional, not required onboarding ---
+  "harness.github.title": "GitHub connection",
+  "harness.github.subtitle":
+    "Optional link for private repo clones and collaboration. Not part of the getting-started flow.",
+  "harness.github.optionalBadge": "Optional",
+  "harness.github.status.connected": "Connected",
+  "harness.github.status.disconnected": "Disconnected",
+  "harness.github.account": "GitHub account",
+  "harness.github.accountNone": "No account connected",
+  "harness.github.accountConnected": "Device OAuth connected",
+  "harness.github.waitingAuth": "Waiting for browser approval",
+  "harness.github.connect": "Connect",
+  "harness.github.connected":
+    "GitHub is connected. You can clone private repositories.",
+  "harness.github.connectFailed": "Could not start GitHub connection.",
+  "harness.github.denied": "GitHub connection was cancelled.",
+  "harness.github.expired":
+    "The GitHub connection code expired. Please try again.",
+  "harness.github.disconnect": "Disconnect",
+  "harness.github.disconnectConfirm":
+    "Disconnect GitHub on this device? Private clone/push may stop working.",
+  "harness.github.disconnected": "GitHub disconnected.",
+  "harness.github.disconnectFailed": "Failed to disconnect.",
+  "harness.github.refreshTitle": "Refresh GitHub connection status",
+  "harness.github.loadError": "Failed to load GitHub connection status.",
+  "harness.github.needLogin": "Sign in to Marblo before connecting GitHub.",
+  "harness.github.deviceCodeLabel": "Enter this code on GitHub:",
+  "harness.github.deviceCodeHint":
+    "After you enter the code and approve, this panel switches to connected automatically.",
+  "harness.github.openGithub": "Open GitHub",
+  "harness.github.guide.toggle": "How do I connect GitHub?",
+  "harness.github.guide.step1":
+    "Click Connect GitHub above to start device OAuth and get a one-time code.",
+  "harness.github.guide.step2Before": "Open ",
+  "harness.github.guide.step2After":
+    ", enter the code, and approve Marblo.",
+  "harness.github.guide.step3":
+    "When approval finishes, private repo clone and push work on this device.",
+  "harness.github.guide.step4":
+    "Share and repo-connect (collaboration) flows reuse the same device OAuth link.",
+  "harness.github.guide.step5":
+    "When GitHub App install permissions open later, they inherit on the same identity — no second login.",
+  "harness.github.guide.step6":
+    "Disconnect anytime with the trash button on this panel (optional link).",
+  "harness.github.guide.appTitle": "Device OAuth → GitHub App auto-inherit",
+  "harness.github.guide.appBody":
+    "Device OAuth is the first path today. GitHub App install tokens are the endgame and inherit on the same account path after connect. This is not a required onboarding step.",
+
   // --- Google Drive wiki folder panel (MCTHALmNAWPpilTFwe8o) ---
   // Two axes in one panel: the account is connected once per user, the wiki
   // folder is chosen per project.
