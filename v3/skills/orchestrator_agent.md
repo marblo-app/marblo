@@ -242,22 +242,55 @@ B안에서 너는 미션의 **운전자**다. 엔진은 **스텝 순서·품질 
    → 자동으로 idle 에이전트 재사용 / 멈춘 에이전트 재시작 / 새로 스폰
    ```
 
-3. **이종 모델 활용 (필수)**:
-   모든 `dispatch_task` 호출 시 태스크 내용에서 tags를 반드시 도출할 것:
+3. **이종 모델 활용 — tags 는 "사실 기술"이지 "모델 지목"이 아니다 (필수)**:
 
-   주력 fleet 은 **Claude Code / Codex / Antigravity 3종** (Gemini 는 제외됨):
-   - 복잡한 코딩/리팩토링: `tags=["architecture", "multi-file", "coding"]` → Claude
-   - 리서치/분석/문서: `tags=["research", "analysis", "documentation"]` → Antigravity (agy)
-   - 단순 수정/빠른 작업: `tags=["simple-fix", "quick-edit"]` → Codex
-   - 대규모 컨텍스트 / 다단계 자율: `tags=["large-context", "agentic", "multi-agent", "autonomous"]` → Antigravity (agy)
-   - GitHub 연동: `tags=["github"]` → Codex
+   주력 fleet 은 **Claude Code / Codex / Grok 3종** (Gemini 제외, Antigravity 는
+   기본 프리셋 `auto` 에서 빠져 있다 — 사다리·실단가·쿼터 프로브가 없어 라우터가
+   근거로 판단하지 못한다).
 
-   tags가 없으면 모델이 라운드로빈으로 자동 배정됨. 최적 배정을 위해 tags 명시를 권장.
+   ★규칙: **tags 에는 그 티켓이 실제로 어떤 일인지만 적는다.** 어느 모델로 갈지는
+   라우터(1층 하네스 경쟁 + 2층 칸 자동선택)가 쿼터·단가·벤치·지식그래프로 정한다.
+   태그로 모델을 겨냥하지 마라 — 그 순간 근거 기반 라우팅이 통째로 죽는다.
 
-   ★위 tags 매핑은 **기본값**이지 근거가 아니다. 어느 칸에 줄지 망설여지거나
-   (비용이 큰 티켓 / 실패하면 되돌리기 비싼 티켓 / 처음 써 보는 모델), 사용자가
-   "왜 그 모델이냐" 고 물으면 **`get_model_guidance` 를 먼저 부르고 그 출력으로
-   답하라.** 아래 §3-3 참조.
+   ⚠️ **무거운 태그를 습관적으로 달지 마라(이번 편중의 진범).**
+   `architecture` · `multi-file` · `large-context` · `complex-edit` 네 개는
+   **라우팅 두 층을 동시에** 무겁게 민다(1층 하네스 가점 + 2층 사다리 상향).
+   실측(2026-08-13, 300회 스코어링): `tags=["architecture","multi-file","coding"]`
+   을 달면 1층 **claude 100%**, 2층 **claude-opus-5 86%** 로 고정됐다. 같은 티켓을
+   태그 없이 돌리면 claude/codex/grok 이 33%씩이고 opus5 는 14% 였다. 즉 "복잡한
+   코딩이니까" 라며 이 세트를 붙이는 습관 하나가 오퍼스 편중을 만들었다.
+   → 이 네 태그는 **진짜로 그럴 때만** 붙인다: 여러 모듈에 걸친 설계 개편, 대규모
+   마이그레이션, 컨텍스트가 실제로 큰 작업. 평범한 기능 추가·버그 수정은 아니다.
+
+   태그 어휘(라우터가 실제로 읽는 것만):
+   - 일반 코딩: `["coding"]` — claude/codex/grok 이 동률 회전한다(의도된 것).
+   - 단순 수정·빠른 작업: `["simple-fix"]` 또는 `["quick-edit"]` → codex 우세.
+   - GitHub 연동: `["github"]` → codex 우세.
+   - 다단계 자율 실행: `["agentic"]` / `["autonomous"]` → grok 우세.
+   - 진짜 설계 개편: `["architecture"]` → claude 우세. **`multi-file` 을 같이 달아
+     증폭하지 마라** — 정말 여러 파일에 걸칠 때만 둘 다 붙인다.
+   - 리서치/분석/문서: `["research"]` / `["analysis"]` / `["documentation"]`.
+
+   태그가 없으면 라운드로빈으로 고루 배정된다 — **그것도 정상이고 대체로 옳다.**
+   확신이 없으면 태그를 비워 두는 편이 틀린 태그를 다는 것보다 낫다.
+
+   ★어느 칸에 줄지 망설여지거나(비용이 큰 티켓 / 실패하면 되돌리기 비싼 티켓 /
+   처음 써 보는 모델), 사용자가 "왜 그 모델이냐" 고 물으면 **`get_model_guidance`
+   를 먼저 부르고 그 출력으로 답하라.** 아래 §3-3 참조.
+
+3-1. **난도(`complexity`)를 사실대로 준다 — 비용의 주 레버다**:
+
+`complexity` 는 2층 사다리의 **진입칸**을 정한다. 생략하면 `standard` 이고,
+claude 의 standard 진입칸은 `claude-opus-5`(최고가 칸)다. 즉 난도를 안 적는
+것은 "가장 비싼 칸에서 시작하라" 고 말하는 것과 같다.
+
+- 파일 1~2개 수정, 단발 버그픽스, 조사·확인 → `complexity="simple"`
+  (claude=sonnet5 / codex=luna@low / grok — 저가 칸)
+- 보통 기능 작업 → `complexity="standard"`
+- 설계 개편·마이그레이션·실패하면 되돌리기 비싼 것만 → `complexity="complex"`
+
+★대부분의 티켓은 simple 또는 standard 다. complex 를 남발하면 사다리가 최상단에
+고정되고, 그 비용은 절약분보다 훨씬 크다.
 
 4. **사용자 모델 지정 우선 (강제)**:
    사용자가 특정 모델로 작업하라고 요청하면 (예: "코덱스 써", "use codex", "agy로 해줘"),

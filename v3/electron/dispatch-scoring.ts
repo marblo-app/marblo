@@ -526,6 +526,59 @@ export const MODEL_TAG_PENALTIES: Record<string, Record<string, number>> = {
   gpt: { architecture: -10, "large-refactor": -10 },
 };
 
+/**
+ * 한 모델의 태그 가점이 **몇 개까지** 서로 독립한 근거로 세어지나.
+ *
+ * ── 무엇이 문제였나 (라이브 측정 2026-08-13, 티켓 sgeSFIh6NAnNHKMIRNpf) ──
+ * 태그 가점은 **상한 없이 그냥 더해졌다.** 그래서 한 모델 열에서 태그 3개가
+ * 맞으면 그 모델이 다른 축 전부를 합친 것보다 큰 리드를 갖는다:
+ *
+ *   tags=["architecture","multi-file","coding"]  (오케 스킬이 "복잡한 코딩"에
+ *   달라고 지시하던 그 세트) →  claude 25+25+22 = **72**, grok 20, gpt 20−10.
+ *   총점 claude 123 vs grok 68 vs gpt 59 — 격차 55.
+ *
+ * 이 격차는 `TIED_SCORE_BAND`(5)는 물론이고 **다른 모든 축의 사거리 밖**이다:
+ * budgetBias 는 ±16, graphBias 는 ±20, costEff 는 ~12 다. 즉 claude 쿼터가 1%
+ * 남아도, 지식그래프가 이 맥락에서 claude 실패를 학습해 뒀어도, 그 태그 세트가
+ * 붙은 순간 1층은 **claude 100%** 로 고정된다(300회 스코어링 실측). 2층은 정상
+ * 작동하는데(무태그 standard 에서 opus5 는 14%뿐) 1층이 claude 를 잠그고 같은
+ * 태그가 2층 workloadIntensity 까지 최댓값으로 밀어 opus5 86% 가 된다.
+ *
+ * ── 왜 포화인가 ─────────────────────────────────────────────────────────
+ * 2층은 이미 같은 실패모드를 `model-autoselect.WORKLOAD_TAG_SATURATION` 으로
+ * 막아 뒀고 그 주석이 이유를 적어 뒀다 — "한 개로 축이 최대가 되면 태그 하나
+ * 오타·습관이 라우팅을 끝까지 밀어 버린다. 서로 동의하는 태그 2개는 실제
+ * 신호다." **같은 태그 목록을 읽는 1층에만 그 포화가 없었다.**
+ *
+ * 태그는 사람이 티켓마다 새로 재는 값이 아니라 오케가 한 번 정한 편집 행위다.
+ * 그러니 태그 **개수**는 독립 근거가 아니다. 가장 강한 매치는 온전히 세고,
+ * 둘째는 절반만 세고, 셋째부터는 세지 않는다 — "이건 설계 작업이다" 를 세 가지
+ * 말로 반복한 것이 세 개의 사실이 되지 않게.
+ *
+ * ★가점을 **깎는 것이 아니다**: 단일 태그 dispatch 는 비트 단위로 종전과 같고
+ * (`saturatedTagBonus([25]) === 25`), 여러 태그일 때도 최강 매치는 그대로 남는다.
+ * 바뀌는 것은 "리드가 다른 축의 사거리 안에 머무는가" 하나다. 위 세트에서
+ * claude 는 여전히 이기지만(88.5 vs 68) 격차가 20.5 라, 쿼터가 마르거나 그래프가
+ * 반대를 학습하면 실제로 뒤집힌다.
+ */
+export const TAG_BONUS_SATURATION = 2;
+
+/**
+ * 한 모델이 받은 태그 가점들을 포화 합산한다(강한 순으로 1, 1/2, 그 이후 0).
+ *
+ * 감점(`MODEL_TAG_PENALTIES`)에는 적용하지 않는다 — 포화가 막으려는 것은 "근거
+ * 없이 커지는 리드" 이고, 감점은 리드를 만들지 않는다. 게다가 감점을 포화시키면
+ * "이 모델은 이 축에서 두 번 약하다" 는 관측을 우리가 지우는 셈이 된다.
+ */
+export function saturatedTagBonus(matched: readonly number[]): number {
+  const sorted = [...matched].sort((a, b) => b - a);
+  let total = 0;
+  for (let i = 0; i < Math.min(sorted.length, TAG_BONUS_SATURATION); i++) {
+    total += sorted[i] / (i + 1);
+  }
+  return total;
+}
+
 // Base scores raised for Gemini and GPT so they compete on their own
 // tags instead of being shut out by Claude's larger baseline. The
 // previous 50/40/35 spread meant a "research" task scored gemini 40+20=60
@@ -1016,7 +1069,10 @@ export interface PerModelScore {
   model: ModelType;
   /** MODEL_BASE_SCORE[model] */
   base: number;
-  /** Σ matched MODEL_TAG_BONUSES (≥0). */
+  /**
+   * matched MODEL_TAG_BONUSES 의 **포화 합**(≥0) — `saturatedTagBonus`.
+   * 단일 매치는 그 값 그대로라 종전과 같고, 여러 매치는 강한 순 1·1/2·0 이다.
+   */
   tagBonus: number;
   /** Σ matched MODEL_TAG_PENALTIES (≤0). */
   tagPenalty: number;
@@ -1094,12 +1150,17 @@ export function scoreModelsDetailed(
     // Custom models use base score only (no tag bonuses/penalties).
     if (model !== "custom") {
       const bonuses = MODEL_TAG_BONUSES[model] || {};
+      // ★가점은 모아서 **포화 합산**한다(TAG_BONUS_SATURATION 주석). 단순 가산은
+      // 동의어 태그 3개를 독립 근거 3개로 세어 다른 축 전부의 사거리 밖으로
+      // 리드를 키운다 — 그게 opus 편중의 1층 기전이었다.
+      const matched: number[] = [];
       for (const tag of tags) {
         if (bonuses[tag]) {
-          tagBonus += bonuses[tag];
+          matched.push(bonuses[tag]);
           hasTags = true;
         }
       }
+      tagBonus = saturatedTagBonus(matched);
       const penalties = MODEL_TAG_PENALTIES[model] || {};
       for (const tag of tags) {
         if (penalties[tag]) {
