@@ -171,6 +171,15 @@ export const agents = {
   "agents.attention.awaitingTitle":
     "에이전트가 사용자 입력을 기다리고 있습니다",
 
+  // ── 입력 대기 알림(우상단) ──────────────────────────────────
+  "agents.inputWait.title": "{name} 이(가) 답을 기다립니다",
+  "agents.inputWait.confirmBody":
+    "확인 질문이 떠 있어 답하기 전까지 진행하지 않습니다.",
+  "agents.inputWait.promptBody":
+    "프롬프트 앞에서 멈춰 있습니다. 터미널에서 이어서 지시해 주세요.",
+  "agents.inputWait.open": "터미널 열기",
+  "agents.inputWait.dismiss": "알림 닫기",
+
   // ── Team dashboard ──────────────────────────────────────────
   "agents.team.title": "팀 대시보드",
   "agents.team.project": "프로젝트",

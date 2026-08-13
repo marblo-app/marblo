@@ -1364,6 +1364,15 @@ const agentManager = new AgentManager(
     }
   },
   () => mainWindow,
+  // ★An agent is waiting on a PERSON (agent-input-wait.ts). Same per-project
+  // scoping as agent:statusChanged above: the notification belongs in the
+  // window showing that agent's board, and the broadcast fallback keeps
+  // single-window / pre-registration setups working.
+  (event) => {
+    const pid = event.projectId || projectIdForAgent(event.agentId);
+    if (pid) sendToProject(pid, "agent:inputWait", event);
+    else broadcast("agent:inputWait", event);
+  },
 );
 
 let mainWindow: BrowserWindow | null = null; // First window — fallback for things lacking owner

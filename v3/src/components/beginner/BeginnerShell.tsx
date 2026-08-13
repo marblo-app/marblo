@@ -14,6 +14,7 @@ import {
   type PromotionTrigger,
 } from "../../lib/beginnerMode";
 import { findAgentPtySessionId } from "../../lib/agentTerminal";
+import { AgentInputWaitHost } from "../agents/AgentInputWaitHost";
 import { useOnboardingSetup } from "../../hooks/useOnboardingSetup";
 import { useAgentStore } from "../../stores/agentStore";
 import { useBeginnerModeStore } from "../../stores/beginnerModeStore";
@@ -273,6 +274,17 @@ export function BeginnerShell() {
   // ★대화가 시작된 뒤 상단 컴포저는 접혀 있는데, 이 프리필이 그것을 되살린다
   // (규칙: shouldShowBeginnerComposer 의 draft 예외). 프리필이 갈 곳이 아래
   // 오케 PTY 에는 없어서다 — 터미널에 남의 문장을 몰래 타이핑할 수는 없다.
+  // 입력 대기 알림 → 그 에이전트의 터미널 모달. 알림은 agentId 만 들고 오므로
+  // 여기서 구독 스냅샷과 맞춰 준다. 목록에 없으면(아직 구독 전·다른 프로젝트)
+  // 아무것도 열지 않는다 — 빈 터미널 모달을 띄우는 것보다 낫다.
+  const openAgentTerminalById = useCallback(
+    (agentId: string) => {
+      const target = agents.find((a) => a.id === agentId);
+      if (target) openAgentTerminal(target);
+    },
+    [agents, openAgentTerminal],
+  );
+
   const askAboutTask = useCallback((message: string) => setDraft(message), []);
   const dismissComposer = useCallback(() => setDraft(""), []);
 
@@ -542,6 +554,13 @@ export function BeginnerShell() {
           !!promotion || showDemo || showOneClick || !!openTask || !!openAgent
         }
       />
+
+      {/* ★에이전트 입력 대기 알림 — 어드밴스드 셸(GlobalOverlays)과 **같은**
+          컴포넌트다. 이 화면이야말로 이게 없으면 안 되는 쪽이다: 심플 모드는
+          터미널을 아예 그리지 않으므로, 에이전트가 프롬프트 앞에서 멈추면
+          사용자에게 남는 단서가 하나도 없다. 클릭하면 어드밴스드와 같은 PTY 를
+          그리는 터미널 모달이 열린다. */}
+      <AgentInputWaitHost onOpen={openAgentTerminalById} />
 
       {showOneClick && <BeginnerOneClickModal onClose={closeOneClick} />}
 
