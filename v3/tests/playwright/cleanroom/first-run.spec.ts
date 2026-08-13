@@ -7,6 +7,7 @@ import {
   doneSteps,
   injectProject,
   launchCleanRoom,
+  onrampBlockVisible,
   openWorkTab,
   passFirstRunModals,
   passFirstRunModalsTimed,
@@ -55,6 +56,40 @@ async function settle(page: Page, ms = 2500): Promise<void> {
 
 /** 셸 배너의 ✕(닫기 = 다시 띄우지 않기). 배너가 없으면 조용히 통과. */
 const closeBanner = dismissBanner;
+
+/** 시작하기 탭의 4스텝 id (`lib/cliSetupGate.WIZARD_STEPS`). */
+const WIZARD_STEP_IDS = ["install", "auth", "prd", "firstTicket"] as const;
+type WizardStepId = (typeof WIZARD_STEP_IDS)[number];
+
+/**
+ * 시작하기 탭의 스텝을 편다.
+ *
+ * ★낱말(`button:has-text("인증")`)로 잡지 않는다. 이 탭 하단에 "내 말로 티켓을
+ * 만들어 보세요" 의 **예시 칩**이 생기면서 `button:has-text("인증")` 의 첫 매치가
+ * 예시 문장("로그인 화면이랑 인증 API 만들어줘")으로 넘어갔다 — 클릭은 성공하고
+ * 스텝은 안 열리니, 열려 있던 ①설치의 본문을 ②인증의 본문으로 읽는 **조용한
+ * 오탐**이 된다(실측: E 가 정확히 그렇게 통과하고 있었다). 스텝 컨테이너는
+ * `start-here-step-<id>` testid 를 갖고 있으므로 그 안의 헤더 버튼만 누른다.
+ */
+async function openStartHereStep(
+  page: Page,
+  step: WizardStepId,
+): Promise<void> {
+  await page
+    .getByTestId(`start-here-step-${step}`)
+    .locator("button[aria-expanded]")
+    .first()
+    .click();
+  await page.waitForTimeout(700);
+}
+
+/** 열린 스텝의 **본문만**(`start-here-step-body-<id>`). 닫혀 있으면 없다. */
+async function startHereStepBody(
+  page: Page,
+  step: WizardStepId,
+): Promise<string> {
+  return page.getByTestId(`start-here-step-body-${step}`).innerText();
+}
 
 test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
   test("A(#579) codex 만 인증돼 있으면 재요청에도 온보딩이 다시 뜨지 않는다 — 셸 + 레거시", async () => {
@@ -170,6 +205,12 @@ test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
     try {
       await passFirstRunModals(cr.page);
       await injectProject(cr.page, cr.projectDir);
+      await settle(cr.page);
+
+      // ★M1 온램프 차단 모달 — 폴더가 붙으면 오케 스폰이 막히면서 자기 판정으로
+      //   뜬다. 이것도 "준비 안 된 유저에게 온보딩이 실제로 뜬다" 의 한 표면이라
+      //   같이 기록한다(openWorkTab 이 치우기 전에 관측해야 한다).
+      const onramp = await onrampBlockVisible(cr.page);
 
       // 셸: 다른 탭에 있을 때 배너로 유도된다.
       await openWorkTab(cr.page, "보드");
@@ -187,9 +228,11 @@ test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
       const modal = await wizardVisible(cr.page);
       await cr.shot("A2-control-modal");
 
-      console.log(`[cleanroom][A'] banner=${banner} modal=${modal}`);
-      // 둘 다 안 뜨면 A 의 "안 뜬다"는 탐지력 없는 통과다.
-      expect(banner || modal).toBe(true);
+      console.log(
+        `[cleanroom][A'] banner=${banner} modal=${modal} onramp=${onramp}`,
+      );
+      // 전부 안 뜨면 A 의 "안 뜬다"는 탐지력 없는 통과다.
+      expect(banner || modal || onramp).toBe(true);
     } finally {
       await cr.close();
     }
@@ -205,8 +248,9 @@ test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
       await passFirstRunModals(cr.page);
       await injectProject(cr.page, cr.projectDir);
       // 신규 유저의 기본 착지점 = 시작하기 탭. ① 설치 스텝을 편다.
+      // (낱말이 아니라 testid 로 — openStartHereStep 주석 참조.)
       await openWorkTab(cr.page, "시작하기");
-      await cr.page.locator('button:has-text("설치")').first().click();
+      await openStartHereStep(cr.page, "install");
       await settle(cr.page, 3000);
 
       const installs = await cr.installCalls();
@@ -335,31 +379,25 @@ test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
       await passFirstRunModals(cr.page);
       await openWorkTab(cr.page, "시작하기");
 
-      const steps = ["설치", "인증", "PRD", "첫 티켓"];
       const found: Record<string, { why: boolean; stuck: boolean }> = {};
-      for (const s of steps) {
-        await cr.page.locator(`button:has-text("${s}")`).first().click();
-        await settle(cr.page, 700);
-        const body = await cr.page.locator("body").innerText();
+      for (const s of WIZARD_STEP_IDS) {
+        await openStartHereStep(cr.page, s);
+        // ★body 가 아니라 **열린 스텝의 본문**을 읽는다. 페이지 전체를 훑으면
+        //   어느 스텝을 열어 두든 늘 참이 나와 스텝별 안내를 재지 못한다.
+        const body = await startHereStepBody(cr.page, s);
         found[s] = { why: body.length > 0, stuck: body.includes("막혔을 때:") };
         await cr.shot(`E-step-${s}`);
       }
       console.log("[cleanroom][E] 스텝별 안내:", found);
-      for (const s of steps) expect(found[s].stuck).toBe(true);
+      for (const s of WIZARD_STEP_IDS) expect(found[s].stuck).toBe(true);
 
       // 인증 스텝을 연 채로: CLI 계정연결 외의 경로(벤더 API 키)가 안내되는가.
-      await cr.page.locator('button:has-text("인증")').first().click();
-      await settle(cr.page, 700);
+      await openStartHereStep(cr.page, "auth");
       // ★ 페이지 전체(body)가 아니라 **열린 스텝의 본문**만 본다. 탭 하단의
       //   VendorModelsSection("다른 벤더 모델도 붙일 수 있어요", #632)이 항상
       //   렌더되므로 body 전체를 훑으면 "인증 스텝이 BYOM 을 안내한다"가 항상
       //   참으로 나온다 — F4 가 묻는 것과 다른 것을 재는 오탐이다.
-      //   "막혔을 때:" 문단은 열린 스텝에만 렌더되므로 그 스텝 섹션이 곧
-      //   인증 스텝의 본문이다.
-      const authStep = cr.page
-        .locator('section:has(p:has-text("막혔을 때:"))')
-        .first();
-      const authBody = await authStep.innerText();
+      const authBody = await startHereStepBody(cr.page, "auth");
       const mentionsVendorKey = /벤더|API 키|env-swap|GLM|Kimi|MiniMax/.test(
         authBody,
       );

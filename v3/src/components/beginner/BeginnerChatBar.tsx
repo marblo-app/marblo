@@ -72,7 +72,15 @@ export function BeginnerChatBar({
   // 연타의 미끼가 된다(같은 문장 재전송은 훅의 가드가 막지만, 애초에 유혹을
   // 남기지 않는 편이 낫다). 실패·큐잉은 비우지 않는다: 그 문장은 아직 오케에게
   // 닿지 않았으므로 유저가 곧바로 다시 누를 수 있어야 한다.
-  const clearedFor = useRef(0);
+  //
+  // ★초기값이 0 이 아니라 **마운트 시점의 sentCount** 인 이유(회귀: 티켓 상세의
+  // "물어보기" 가 죽어 있었다). 이 컴포저는 첫 마디가 닿으면 통째로 언마운트
+  // 된다(`beginnerComposerMode` → "hidden"). 그 뒤 "물어보기" 가 문장을 프리필해
+  // 다시 마운트되면, 0 으로 시작한 ref 는 **이미 지난 그 전송**을 "새 전송" 으로
+  // 읽고 방금 채워 준 문장을 즉시 지웠다 → draft 가 비니 규칙이 다시 컴포저를
+  // 접는다 → 눌러도 아무 일이 없다. 마운트 시점 값으로 시작하면 이 효과는
+  // **이 컴포저가 살아 있는 동안 일어난** 전송에만 반응한다(원래 의도 그대로).
+  const clearedFor = useRef(ask.sentCount);
   useEffect(() => {
     if (ask.sentCount === 0 || ask.sentCount === clearedFor.current) return;
     clearedFor.current = ask.sentCount;

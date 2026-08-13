@@ -46,6 +46,7 @@ import {
   useBeginnerAsk,
   BEGINNER_DUP_WINDOW_MS,
 } from "../../src/hooks/useBeginnerAsk";
+import { beginnerComposerMode } from "../../src/lib/beginnerMode";
 import { useLocaleStore } from "../../src/lib/i18n";
 import { ko } from "../../src/locales/ko";
 
@@ -186,5 +187,82 @@ describe("★중복 주입 가드는 형태만 바뀌었다 (진단 §7 P1-2 ①
     ).toBe("queued");
     // 오케가 받은 적이 없으니 입력도 비우지 않는다(그대로 다시 누를 수 있어야).
     expect(input().value).toBe("가이드 정리해 줘");
+  });
+});
+
+/**
+ * ★접힘/되살아남의 경계 — 컴포저가 **언마운트**되는 셸 배선에서만 재현되는 계약.
+ *
+ * 위 `Harness` 는 컴포저를 계속 마운트한 채 두므로(그쪽 관심사는 "스스로 잠기지
+ * 않는가"), 마운트 경계에서 일어나는 회귀는 잡지 못한다. 실제 셸은 첫 마디가
+ * 닿으면 컴포저를 통째로 접고(`beginnerComposerMode` → "hidden"), 티켓 상세의
+ * "물어보기" 가 문장을 프리필해 다시 펴는데 — 그때 새로 마운트된 컴포저가 이미
+ * 지난 전송을 "새 전송" 으로 읽고 방금 채운 문장을 지우면, draft 가 비니 규칙이
+ * 곧바로 다시 접는다. 즉 **눌러도 아무 일이 없는 죽은 버튼**이 된다(실측 회귀:
+ * 클린룸 G4).
+ */
+function ShellLikeHarness() {
+  const ask = useBeginnerAsk();
+  const [draft, setDraft] = useState("");
+  const mode = beginnerComposerMode({
+    sentCount: ask.sentCount,
+    totalTasks: 0,
+    draft,
+  });
+  return createElement(
+    "div",
+    null,
+    // 티켓 상세의 "물어보기" — 문장만 채워 주는 진입.
+    createElement("button", {
+      "data-testid": "prefill",
+      onClick: () => setDraft("막힌 티켓에 대해 물어볼게"),
+    }),
+    mode === "hidden"
+      ? null
+      : createElement(BeginnerChatBar, {
+          ask,
+          draft,
+          onDraftChange: setDraft,
+          mode,
+        }),
+  );
+}
+
+describe("접힌 컴포저를 프리필로 되살리기", () => {
+  it("★첫 마디가 전달되면 접힌다", async () => {
+    render(createElement(ShellLikeHarness));
+    await send("README 를 읽고 시작 가이드를 정리해 줘");
+
+    expect(routeSpy).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("beginner-first-ask")).toBeNull();
+  });
+
+  it("★'물어보기' 프리필이 컴포저를 되살리고, 채운 문장이 지워지지 않는다", async () => {
+    render(createElement(ShellLikeHarness));
+    await send("README 를 읽고 시작 가이드를 정리해 줘");
+    expect(screen.queryByTestId("beginner-first-ask")).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("prefill"));
+    });
+
+    // 되살아났고(=버튼이 죽지 않았고), 채워 준 문장이 그대로 서 있다.
+    expect(screen.getByTestId("beginner-first-ask")).toBeTruthy();
+    expect(input().value).toBe("막힌 티켓에 대해 물어볼게");
+    // 첫 화면이 아니라 이어 말하는 얼굴이다.
+    expect(screen.getByTestId("beginner-first-ask").dataset.mode).toBe("chat");
+  });
+
+  it("★되살아난 컴포저도 전달되면 다시 비우고 접는다 (한 방향 규칙이 아니다)", async () => {
+    render(createElement(ShellLikeHarness));
+    await send("README 를 읽고 시작 가이드를 정리해 줘");
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("prefill"));
+    });
+
+    await send("거기에 예시도 넣어 줘");
+
+    expect(routeSpy).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId("beginner-first-ask")).toBeNull();
   });
 });

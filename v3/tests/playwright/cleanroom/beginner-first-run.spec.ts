@@ -32,7 +32,7 @@ import {
  * 실제로 깔린 프로필로 앱을 켜면 보드가 그대로 있는가" 다.
  *
  * 시나리오
- *   G1  깨끗한 신규 설치 → 비기너 셸 (+ 어드밴스드 표면 부재)
+ *   G1  깨끗한 신규 설치 → 비기너 셸 (큐레이트 탭바만 + 비노출 엑스퍼트 탭 부재)
  *   G2  ★회귀가드: 이전-사용 마커 4종 각각 → 어드밴스드 + 보드 실재. 대조군 포함
  *   G3  인증 택1(claude 만) → 폴더 게이트 → 풀스크린 오케챗
  *   G4  첫 요청 전달 → 라이브 스트립(국면·미니보드·미니에이전트) + 중복전송 가드
@@ -68,7 +68,7 @@ async function livePhase(page: Page): Promise<string | null> {
 }
 
 test.describe("@cleanroom 비기너 모드 첫실행", () => {
-  test("G1 깨끗한 신규 설치는 비기너 셸로 들어간다 — 탭·보드는 그리지 않는다", async () => {
+  test("G1 깨끗한 신규 설치는 비기너 셸로 들어간다 — 큐레이트 탭만, 보드는 없다", async () => {
     const cr = await launchCleanRoom({
       claude: "missing",
       codex: "missing",
@@ -95,14 +95,37 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       ).toBeVisible();
       await expect(cr.page.getByTestId("beginner-connect-codex")).toBeVisible();
 
-      // ★셸의 정의: 사이드바·탭·보드를 **그리지 않는다**. 하나라도 보이면
-      //   "탭을 줄인 워크스페이스" 로 퇴화한 것이다.
+      // ★셸의 정의(갱신 — 큐레이트 탭바 도입 후). 종전 계약은 "탭을 하나도
+      //   그리지 않는다" 였지만, 심플 셸은 이제 **큐레이트 탭바**를 갖는다:
+      //   대화 + guide·code·agents·worktrees·usage·harness·settings (lib/beginnerTabs).
+      //   설정·연결·워크트리에 닿을 길이 승격뿐이던 것을 고친 변경이라, 탭이
+      //   0이라는 옛 기대값은 지금은 "닿을 수 없다" 를 지키는 셈이 된다.
+      //
+      //   그래서 여기서 재는 것을 바꾼다 — "탭이 없는가" 가 아니라 **"고를 게
+      //   적은가"**:
+      //     ① 대화가 기본 탭이다(심플의 약속은 채팅-퍼스트다).
+      //     ② 비노출로 정한 엑스퍼트 탭이 하나도 새지 않았다. 하나라도 새면
+      //        "탭을 줄인 워크스페이스" 로 퇴화한 것이고, 그게 이 줄의 원래 뜻이다.
       // ※ 낱말이 아니라 **탭 버튼**으로 잡는다: "시작하기" 는 투어 마지막 스텝의
       //   버튼 문구이기도 해서(beginner.tour.done) 본문 검색으로는 두 개가 섞인다.
-      for (const tab of ["시작하기", "보드", "Board", "워크트리"]) {
+      await expect(cr.page.getByTestId("beginner-tabbar")).toBeVisible();
+      await expect(cr.page.getByTestId("beginner-tab-chat")).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      // 비노출 6탭(startHere·board·lanes·project·history·store)의 라벨.
+      for (const tab of [
+        "시작하기",
+        "보드",
+        "Board",
+        "퀵레인",
+        "프로젝트",
+        "완료 이력",
+        "스토어",
+      ]) {
         expect(
           await cr.page.locator(`button:has-text("${tab}")`).count(),
-          `비기너 셸에 '${tab}' 탭이 그려졌다`,
+          `심플 셸에 비노출 탭 '${tab}' 이 그려졌다`,
         ).toBe(0);
       }
       expect(await cr.page.getByTestId("cli-setup-banner").count()).toBe(0);
@@ -239,42 +262,18 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       expect(injected[0].projectId).toBe("cleanroom-project");
       expect(injected[0].message).toContain("README");
 
-      await expect(
-        cr.page.getByTestId("beginner-first-ask-result"),
-      ).toHaveAttribute("data-delivery", "delivered");
-
-      // ── ★지속 대화창 — 전달돼도 입력칸이 살아 있다 ─────────────────────
-      // 종전 계약은 정반대였다(전달되면 입력칸·버튼째 사라짐). 그 잠금이 첫 질문
-      // 뒤에 오케와 이어서 말할 곳을 없애서, 상단을 지속 대화창으로 바꿨다.
-      await expect(
-        cr.page.getByTestId("beginner-first-ask-input"),
-      ).toBeVisible();
-      await expect(
-        cr.page.getByTestId("beginner-first-ask-send"),
-      ).toBeVisible();
-      // 보낸 문장은 칸에 남지 않는다 — 남으면 그게 연타의 미끼다.
-      await expect(cr.page.getByTestId("beginner-first-ask-input")).toHaveValue(
-        "",
+      // ── ★상단 컴포저는 첫 마디가 닿으면 **접힌다**(#880 `beginnerComposerMode`)
+      // 이 spec 이 쓰여진 시점(#879)의 계약은 정반대였다 — "전달돼도 입력칸이
+      // 살아 있다". 그 뒤 #880 이 되돌렸다: 아래 오케 대화창(실 PTY)과 입력칸이
+      // 둘이면 유저가 매번 "어디에 쓰냐" 를 고르게 되고, 그건 심플 모드가
+      // 없애려던 종류의 선택이라서다. 이어서 말할 곳은 사라진 게 아니라
+      // **하나로 합쳐졌다** — 하단 오케 대화창이 그 자리다.
+      // 그래서 결과 배지(`beginner-first-ask-result`)도 컴포저와 함께 접힌다.
+      await expect(cr.page.getByTestId("beginner-first-ask")).toHaveCount(0);
+      await expect(cr.page.getByTestId("beginner-first-ask-input")).toHaveCount(
+        0,
       );
-
-      // ── ★중복 전송 가드(진단 §7 P1-2 ①)는 형태만 바뀌어 살아 있다 ──────
-      // 8/4 유저는 delivered 된 요청을 14초 간격으로 3번 더 눌렀다. 이제 잠기는
-      // 것은 폼이 아니라 **같은 문장**이다: 그대로 다시 보내도 주입되지 않는다.
-      await cr.page.getByTestId("beginner-first-ask-input").fill(message);
-      await cr.page.getByTestId("beginner-first-ask-send").click();
-      await settle(cr.page, 1500);
-      expect((await cr.injected()).length).toBe(1);
-      await expect(cr.page.getByTestId("beginner-ask-duplicate")).toBeVisible();
-
-      // 다른 문장은 통과한다 — 막으려던 건 대화가 아니라 반복 주입이었다.
-      await cr.page
-        .getByTestId("beginner-first-ask-input")
-        .fill("거기에 예시도 넣어 줘");
-      await cr.page.getByTestId("beginner-first-ask-send").click();
-      await settle(cr.page, 1500);
-      const after = await cr.injected();
-      expect(after.length).toBe(2);
-      expect(after[1].message).toContain("예시");
+      // 전달됐다는 증거는 화면 배지가 아니라 위의 injectMessage + 아래 스트립이다.
 
       // ── ★S4: 챗 안 인라인 진행 ────────────────────────────────────────
       expect(await livePhase(cr.page)).toBe("thinking");
@@ -311,6 +310,46 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       await cr.shot("G4-task-detail");
       await cr.page.getByTestId("beginner-task-modal-close").click();
       await expect(detail).toHaveCount(0);
+
+      // ── ★접힌 컴포저를 되살리는 유일한 경로 = 티켓 상세의 "물어보기" ────
+      // 컴포저가 접힌 뒤에도 문장을 프리필해 주는 진입이 살아 있어야 한다.
+      // 없으면 그 버튼이 죽는다(PTY 는 프리필 대상이 아니다 — beginnerComposerMode ③).
+      await cr.page
+        .getByTestId("beginner-mini-task")
+        .filter({ hasText: "막힌 티켓" })
+        .click();
+      await expect(detail).toBeVisible();
+      await cr.page.getByTestId("beginner-task-modal-ask").click();
+      await expect(detail).toHaveCount(0);
+      const composer = cr.page.getByTestId("beginner-first-ask");
+      await expect(composer).toBeVisible();
+      // 되살아난 **얼굴**은 첫 화면(intro)이 아니어야 한다 — "무엇을 만들까요?"
+      // 와 예시 칩이 하던 일 위에 다시 깔리면 그건 뒤로 감긴 화면이다.
+      // ※ 규칙(`beginnerComposerMode`)의 이름은 `followUp` 이지만 화면에 찍히는
+      //   값은 intro 여부 둘뿐이다(`data-mode={intro ? "intro" : "chat"}`) —
+      //   이 spec 이 재는 것은 규칙의 이름이 아니라 **그려진 얼굴**이다.
+      await expect(composer).toHaveAttribute("data-mode", "chat");
+
+      // ── ★중복 전송 가드(진단 §7 P1-2 ①)는 형태만 바뀌어 살아 있다 ──────
+      // 8/4 유저는 delivered 된 요청을 14초 간격으로 3번 더 눌렀다. 이제 잠기는
+      // 것은 폼이 아니라 **같은 문장**이다(BEGINNER_DUP_WINDOW_MS 안이면 주입 안 함).
+      await cr.page.getByTestId("beginner-first-ask-input").fill(message);
+      await cr.page.getByTestId("beginner-first-ask-send").click();
+      await settle(cr.page, 1500);
+      expect((await cr.injected()).length).toBe(1);
+      await expect(cr.page.getByTestId("beginner-ask-duplicate")).toBeVisible();
+
+      // 다른 문장은 통과한다 — 막으려던 건 대화가 아니라 반복 주입이었다.
+      await cr.page
+        .getByTestId("beginner-first-ask-input")
+        .fill("거기에 예시도 넣어 줘");
+      await cr.page.getByTestId("beginner-first-ask-send").click();
+      await settle(cr.page, 1500);
+      const after = await cr.injected();
+      expect(after.length).toBe(2);
+      expect(after[1].message).toContain("예시");
+      // 전달됐으니 다시 접힌다 — 접힘/되살아남이 한 방향 규칙이 아님을 못박는다.
+      await expect(composer).toHaveCount(0);
 
       // 에이전트가 붙으면 → working + 에이전트 패널(하단 2분할 오른쪽).
       await injectAgents(cr.page, [
