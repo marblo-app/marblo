@@ -1393,6 +1393,83 @@ interface DriveAPI {
   binding: DriveBindingAPI;
 }
 
+interface GmailMessageSummary {
+  id: string;
+  threadId: string;
+}
+
+interface GmailMessage {
+  id: string;
+  threadId: string;
+  subject: string;
+  from: string;
+  date: string;
+  snippet: string;
+  body: string;
+  labelIds: string[];
+  truncated: boolean;
+}
+
+interface CalendarAttendee {
+  email?: string;
+  displayName?: string;
+  responseStatus?: string;
+}
+
+interface CalendarEvent {
+  id: string;
+  title: string;
+  start: string;
+  end: string;
+  attendees: CalendarAttendee[];
+  location?: string;
+  description?: string;
+  htmlLink?: string;
+  organizer?: CalendarAttendee;
+  updated?: string;
+  status?: string;
+}
+
+interface GoogleWorkspaceAPI {
+  gmailSearch: (input: {
+    userId?: string;
+    query?: string;
+    labelIds?: string[];
+    pageSize?: number;
+    pageToken?: string;
+  }) => Promise<
+    | {
+        ok: true;
+        result: {
+          messages: GmailMessageSummary[];
+          nextPageToken?: string;
+          resultSizeEstimate?: number;
+        };
+      }
+    | { ok: false; error: string }
+  >;
+  gmailFetch: (input: {
+    userId?: string;
+    messageId: string;
+  }) => Promise<
+    { ok: true; message: GmailMessage } | { ok: false; error: string }
+  >;
+  calendarList: (input: {
+    userId?: string;
+    timeMin?: string;
+    timeMax?: string;
+    query?: string;
+    maxResults?: number;
+    pageToken?: string;
+  }) => Promise<
+    | {
+        ok: true;
+        result: { events: CalendarEvent[]; nextPageToken?: string };
+      }
+    | { ok: false; error: string }
+  >;
+}
+
 interface UpdaterStatus {
   status:
     | "checking"
@@ -1528,6 +1605,7 @@ interface ElectronAPI {
   sample: SampleAPI;
   github: GitHubAPI;
   drive: DriveAPI;
+  googleWorkspace: GoogleWorkspaceAPI;
   updater: UpdaterAPI;
   sentry: SentryBridgeAPI;
   kg: KgBridgeAPI;

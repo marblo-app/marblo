@@ -248,7 +248,9 @@ import {
 } from "./github-token-store";
 import {
   connectGoogleDrive,
+  createUserCalendarConnector,
   createUserDriveConnector,
+  createUserGmailConnector,
   disconnectGoogleDrive,
   driveConnectionStatus,
 } from "./google-drive-auth";
@@ -257,6 +259,16 @@ import type {
   DriveListParams,
   DriveSearchResult,
 } from "./google-drive-connector";
+import type {
+  GmailMessage,
+  GmailSearchParams,
+  GmailSearchResult,
+} from "./gmail-connector";
+import type {
+  CalendarEvent,
+  CalendarListParams,
+  CalendarListResult,
+} from "./calendar-connector";
 import {
   clearDriveProjectBinding,
   getDriveProjectBinding,
@@ -5106,8 +5118,18 @@ function driveFailure(e: unknown): { ok: false; error: string } {
 const DRIVE_NOT_CONNECTED = {
   ok: false as const,
   error:
-    "Google Drive 가 연결되어 있지 않습니다. 설정에서 Drive 를 연결해 주세요.",
+    "Google 계정이 연결되어 있지 않습니다. Harness 탭에서 Google 커넥터를 연결해 주세요.",
 };
+
+function googleConnectorFailure(
+  e: unknown,
+  fallback: string,
+): { ok: false; error: string } {
+  return {
+    ok: false,
+    error: e instanceof Error ? e.message : fallback,
+  };
+}
 
 /**
  * 유저별 스코프 해석기 캐시. 커넥터는 매 호출 토큰을 새로 얻으므로 상태가 없고,
@@ -5214,6 +5236,107 @@ function sanitizeDriveListParams(input: unknown): DriveListParams {
   };
 }
 
+function sanitizeGmailSearchParams(input: unknown): GmailSearchParams {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() ? v.trim() : undefined;
+  return {
+    query: str(raw.query),
+    labelIds: Array.isArray(raw.labelIds)
+      ? raw.labelIds.filter(
+          (label): label is string => typeof label === "string",
+        )
+      : undefined,
+    pageSize: typeof raw.pageSize === "number" ? raw.pageSize : undefined,
+    pageToken: str(raw.pageToken),
+  };
+}
+
+function sanitizeCalendarListParams(input: unknown): CalendarListParams {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() ? v.trim() : undefined;
+  return {
+    timeMin: str(raw.timeMin),
+    timeMax: str(raw.timeMax),
+    query: str(raw.query),
+    maxResults: typeof raw.maxResults === "number" ? raw.maxResults : undefined,
+    pageToken: str(raw.pageToken),
+  };
+}
+
+async function gmailSearchFor(
+  userId: string | null,
+  params: GmailSearchParams,
+): Promise<
+  { ok: true; result: GmailSearchResult } | { ok: false; error: string }
+> {
+  if (!userId) return DRIVE_NOT_CONNECTED;
+  try {
+    return {
+      ok: true,
+      result: await createUserGmailConnector(safeStorage, userId).search(
+        params,
+      ),
+    };
+  } catch (e) {
+    return googleConnectorFailure(
+      e,
+      "Gmail 검색에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+    );
+  }
+}
+
+async function gmailFetchFor(
+  userId: string | null,
+  messageId: string,
+): Promise<{ ok: true; message: GmailMessage } | { ok: false; error: string }> {
+  if (!userId) return DRIVE_NOT_CONNECTED;
+  const trimmed = messageId.trim();
+  if (!trimmed) return { ok: false, error: "Gmail 메시지 id 가 필요합니다." };
+  try {
+    return {
+      ok: true,
+      message: await createUserGmailConnector(safeStorage, userId).fetch(
+        trimmed,
+      ),
+    };
+  } catch (e) {
+    return googleConnectorFailure(
+      e,
+      "Gmail 메시지 조회에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+    );
+  }
+}
+
+async function calendarListFor(
+  userId: string | null,
+  params: CalendarListParams,
+): Promise<
+  { ok: true; result: CalendarListResult } | { ok: false; error: string }
+> {
+  if (!userId) return DRIVE_NOT_CONNECTED;
+  try {
+    return {
+      ok: true,
+      result: await createUserCalendarConnector(safeStorage, userId).list(
+        params,
+      ),
+    };
+  } catch (e) {
+    return googleConnectorFailure(
+      e,
+      "Calendar 일정 조회에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+    );
+  }
+}
+
 /**
  * Drive 동의(시스템 브라우저 loopback). ★앱 창은 navigate 하지 않는다 —
  * signInWithRedirect 가 Electron 에서 깨지는 이력 때문에 이 경로만 쓴다.
@@ -5280,6 +5403,39 @@ ipcMain.handle("drive:fetch", async (_event, input: unknown) => {
     resolveDriveUserId(raw.userId),
     typeof raw.fileId === "string" ? raw.fileId : "",
     driveAccessFromInput(raw),
+  );
+});
+
+ipcMain.handle("gmail:search", async (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  return gmailSearchFor(
+    resolveDriveUserId(raw.userId),
+    sanitizeGmailSearchParams(raw),
+  );
+});
+
+ipcMain.handle("gmail:fetch", async (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  return gmailFetchFor(
+    resolveDriveUserId(raw.userId),
+    typeof raw.messageId === "string" ? raw.messageId : "",
+  );
+});
+
+ipcMain.handle("calendar:list", async (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  return calendarListFor(
+    resolveDriveUserId(raw.userId),
+    sanitizeCalendarListParams(raw),
   );
 });
 
@@ -5360,6 +5516,15 @@ bridgeServer.setDriveGateway({
     }),
   fetch: (projectId, fileId) =>
     driveFetchFor(currentRealUserUid(), fileId, { mode: "project", projectId }),
+});
+
+bridgeServer.setGoogleWorkspaceGateway({
+  gmailSearch: (_projectId, params) =>
+    gmailSearchFor(currentRealUserUid(), params),
+  gmailFetch: (_projectId, messageId) =>
+    gmailFetchFor(currentRealUserUid(), messageId),
+  calendarList: (_projectId, params) =>
+    calendarListFor(currentRealUserUid(), params),
 });
 
 ipcMain.handle(

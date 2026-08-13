@@ -223,9 +223,9 @@ export const harness: Record<keyof typeof koHarness, string> = {
   // --- Google Drive wiki folder panel (MCTHALmNAWPpilTFwe8o) ---
   // Two axes in one panel: the account is connected once per user, the wiki
   // folder is chosen per project.
-  "harness.drive.title": "Google Drive wiki",
+  "harness.drive.title": "Google Workspace",
   "harness.drive.subtitle":
-    "Connect the account once; pick a wiki folder for each project.",
+    "Connect once for Drive wiki, Gmail, and Calendar read-only context.",
   "harness.drive.status.disconnected": "Disconnected",
   "harness.drive.status.needsFolder": "Folder needed",
   "harness.drive.status.bound": "Connected",
@@ -234,13 +234,17 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.drive.connect": "Connect Google account",
   "harness.drive.reconnect": "Reconnect",
   "harness.drive.connecting": "Waiting for consent in your browser",
-  "harness.drive.connected": "Google Drive connected.",
-  "harness.drive.connectFailed": "Failed to connect Google Drive.",
+  "harness.drive.connected": "Google Workspace connected.",
+  "harness.drive.connectFailed": "Failed to connect Google Workspace.",
   "harness.drive.disconnect": "Disconnect account",
   "harness.drive.disconnectConfirm":
-    "Disconnect Google Drive on this machine? Stored credentials are deleted and every project stops reading Drive.",
-  "harness.drive.disconnected": "Google Drive disconnected.",
+    "Disconnect Google on this machine? Stored credentials are deleted and every project stops reading Drive, Gmail, and Calendar.",
+  "harness.drive.disconnected": "Google Workspace disconnected.",
   "harness.drive.disconnectFailed": "Failed to disconnect.",
+  "harness.drive.gmail": "Gmail read-only",
+  "harness.drive.calendar": "Calendar read-only",
+  "harness.drive.scopeReady": "Ready",
+  "harness.drive.scopeNeedsReconnect": "Reconnect",
   "harness.drive.folderSection": "This project's wiki folder",
   "harness.drive.folderNone": "No folder selected",
   "harness.drive.folderHint":

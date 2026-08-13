@@ -19,7 +19,9 @@ vi.mock("electron", () => ({
 
 import {
   DRIVE_AUTH_SCOPE,
+  CALENDAR_READONLY_SCOPE,
   DRIVE_READONLY_SCOPE,
+  GMAIL_READONLY_SCOPE,
   emailFromIdToken,
   parseRefreshResponse,
   refreshAccessToken,
@@ -37,7 +39,15 @@ describe("스코프", () => {
     expect(DRIVE_READONLY_SCOPE).toBe(
       "https://www.googleapis.com/auth/drive.readonly",
     );
+    expect(GMAIL_READONLY_SCOPE).toBe(
+      "https://www.googleapis.com/auth/gmail.readonly",
+    );
+    expect(CALENDAR_READONLY_SCOPE).toBe(
+      "https://www.googleapis.com/auth/calendar.readonly",
+    );
     expect(DRIVE_AUTH_SCOPE).toContain(DRIVE_READONLY_SCOPE);
+    expect(DRIVE_AUTH_SCOPE).toContain(GMAIL_READONLY_SCOPE);
+    expect(DRIVE_AUTH_SCOPE).toContain(CALENDAR_READONLY_SCOPE);
     // drive.file / drive(전체 쓰기) 가 섞여 들어오면 최소권한이 깨진다.
     expect(DRIVE_AUTH_SCOPE).not.toMatch(/auth\/drive(\s|$)/);
     expect(DRIVE_AUTH_SCOPE).not.toContain("drive.file");

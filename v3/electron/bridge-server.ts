@@ -40,6 +40,15 @@ import type {
   DriveListParams,
   DriveSearchResult,
 } from "./google-drive-connector";
+import type {
+  GmailMessage,
+  GmailSearchParams,
+  GmailSearchResult,
+} from "./gmail-connector";
+import type {
+  CalendarListParams,
+  CalendarListResult,
+} from "./calendar-connector";
 import { mainTelemetry, type DispatchDecisionPayload } from "./telemetry";
 import { planCapErrorCategory } from "./spawn-block-reason";
 import {
@@ -246,6 +255,27 @@ export interface DriveGateway {
     fileId: string,
   ): Promise<
     { ok: true; document: DriveDocument } | { ok: false; error: string }
+  >;
+}
+
+export interface GoogleWorkspaceGateway {
+  gmailSearch(
+    projectId: string | null,
+    params: GmailSearchParams,
+  ): Promise<
+    { ok: true; result: GmailSearchResult } | { ok: false; error: string }
+  >;
+  gmailFetch(
+    projectId: string | null,
+    messageId: string,
+  ): Promise<
+    { ok: true; message: GmailMessage } | { ok: false; error: string }
+  >;
+  calendarList(
+    projectId: string | null,
+    params: CalendarListParams,
+  ): Promise<
+    { ok: true; result: CalendarListResult } | { ok: false; error: string }
   >;
 }
 
@@ -938,6 +968,7 @@ export class BridgeServer {
   // POST here; the bridge itself never sees an OAuth token. Null until wired
   // (the tools then report Drive as unavailable).
   private driveGateway: DriveGateway | null = null;
+  private googleWorkspaceGateway: GoogleWorkspaceGateway | null = null;
 
   constructor(
     agentManager: AgentManager,
@@ -1045,6 +1076,15 @@ export class BridgeServer {
    */
   setDriveGateway(gateway: DriveGateway): void {
     this.driveGateway = gateway;
+  }
+
+  /**
+   * Wire read-only Gmail/Calendar gateway. The bridge still requires projectId
+   * on MCP calls so tools run in a concrete project context, but credentials
+   * stay in main/safeStorage and never cross this process boundary.
+   */
+  setGoogleWorkspaceGateway(gateway: GoogleWorkspaceGateway): void {
+    this.googleWorkspaceGateway = gateway;
   }
 
   /** Wire the outbound Telegram sender (main → TelegramPoller.sendMessage). */
@@ -1281,6 +1321,21 @@ export class BridgeServer {
 
         if (req.method === "POST" && req.url === "/drive-fetch") {
           this.handleDriveFetch(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/gmail-search") {
+          this.handleGmailSearch(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/gmail-fetch") {
+          this.handleGmailFetch(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/calendar-list") {
+          this.handleCalendarList(req, res);
           return;
         }
 
@@ -4414,6 +4469,32 @@ export class BridgeServer {
     );
   }
 
+  private googleWorkspaceUnavailable(res: http.ServerResponse): void {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        ok: false,
+        error:
+          "Google Workspace 커넥터를 쓸 수 없습니다 (Harness 탭에서 Google 계정을 연결했는지 확인하세요).",
+      }),
+    );
+  }
+
+  private requireGoogleWorkspaceProject(
+    res: http.ServerResponse,
+    projectId: string | null,
+  ): projectId is string {
+    if (projectId) return true;
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        ok: false,
+        error: "Missing required field: projectId",
+      }),
+    );
+    return false;
+  }
+
   /**
    * POST /drive-search — 읽기 전용 파일 검색.
    *
@@ -4502,6 +4583,138 @@ export class BridgeServer {
           JSON.stringify({
             ok: false,
             error: err instanceof Error ? err.message : "drive fetch failed",
+          }),
+        );
+      }
+    })();
+  }
+
+  private handleGmailSearch(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.googleWorkspaceGateway) {
+        return this.googleWorkspaceUnavailable(res);
+      }
+
+      const str = (v: unknown): string | undefined =>
+        typeof v === "string" && v.trim() ? v.trim() : undefined;
+      const projectId = str(params.projectId) ?? null;
+      if (!this.requireGoogleWorkspaceProject(res, projectId)) return;
+      try {
+        const result = await this.googleWorkspaceGateway.gmailSearch(
+          projectId,
+          {
+            query: str(params.query),
+            labelIds: Array.isArray(params.labelIds)
+              ? params.labelIds.filter(
+                  (label): label is string => typeof label === "string",
+                )
+              : undefined,
+            pageSize:
+              typeof params.pageSize === "number" ? params.pageSize : undefined,
+            pageToken: str(params.pageToken),
+          },
+        );
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "gmail search failed",
+          }),
+        );
+      }
+    })();
+  }
+
+  private handleGmailFetch(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.googleWorkspaceGateway) {
+        return this.googleWorkspaceUnavailable(res);
+      }
+      const messageId =
+        typeof params.messageId === "string" ? params.messageId.trim() : "";
+      if (!messageId) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Missing required field: messageId",
+          }),
+        );
+        return;
+      }
+      const str = (v: unknown): string | undefined =>
+        typeof v === "string" && v.trim() ? v.trim() : undefined;
+      const projectId = str(params.projectId) ?? null;
+      if (!this.requireGoogleWorkspaceProject(res, projectId)) return;
+      try {
+        const result = await this.googleWorkspaceGateway.gmailFetch(
+          projectId,
+          messageId,
+        );
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "gmail fetch failed",
+          }),
+        );
+      }
+    })();
+  }
+
+  private handleCalendarList(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.googleWorkspaceGateway) {
+        return this.googleWorkspaceUnavailable(res);
+      }
+
+      const str = (v: unknown): string | undefined =>
+        typeof v === "string" && v.trim() ? v.trim() : undefined;
+      const projectId = str(params.projectId) ?? null;
+      if (!this.requireGoogleWorkspaceProject(res, projectId)) return;
+      try {
+        const result = await this.googleWorkspaceGateway.calendarList(
+          projectId,
+          {
+            timeMin: str(params.timeMin),
+            timeMax: str(params.timeMax),
+            query: str(params.query),
+            maxResults:
+              typeof params.maxResults === "number"
+                ? params.maxResults
+                : undefined,
+            pageToken: str(params.pageToken),
+          },
+        );
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "calendar list failed",
           }),
         );
       }
