@@ -7,7 +7,7 @@
  * down (Sentry has no clean shutdown), but the per-call `enabled` gate
  * stops new events; full unload happens at next launch.
  *
- * "데이터 삭제 요청" opens a mailto: to support@marblo.app with a
+ * "데이터 삭제 요청" opens a mailto: to team@marblo.app with a
  * pre-filled template, per master plan §15.5. Real deletion runs through
  * support — Sentry has a separate deletion API that requires human action.
  * 30-day response SLA per PIPA 제36조.
@@ -46,7 +46,7 @@ const ROWS: {
 function buildDeletionMailto(uid: string): string {
   const subject = encodeURIComponent(t("settings.privacy.deletion.subject"));
   const body = encodeURIComponent(t("settings.privacy.deletion.body", { uid }));
-  return `mailto:support@marblo.app?subject=${subject}&body=${body}`;
+  return `mailto:team@marblo.app?subject=${subject}&body=${body}`;
 }
 
 export function PrivacySettings() {

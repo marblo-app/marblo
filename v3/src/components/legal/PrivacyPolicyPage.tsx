@@ -99,10 +99,10 @@ export function PrivacyPolicyPage({ onClose }: PrivacyPolicyPageProps) {
           <p className="text-[#bac2de]">
             {t("legal.privacy.contactPrefix")}
             <a
-              href="mailto:support@marblo.app"
+              href="mailto:team@marblo.app"
               className="text-[#89b4fa] hover:underline"
             >
-              support@marblo.app
+              team@marblo.app
             </a>
           </p>
         </section>
