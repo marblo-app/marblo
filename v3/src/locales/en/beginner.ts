@@ -186,6 +186,22 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.taskDetail.askDone":
     "Summarise what changed in '{title}', in plain language.",
   "beginner.taskDetail.close": "Close",
+  // ★Full detail body (ticket 8s7W0hgy) — the same information the advanced
+  // modal shows, in plain words. Goal/Changes/Acceptance/Notes headings reuse
+  // `board.section.*`: calling the same thing by two names means relearning
+  // it after promotion.
+  "beginner.taskDetail.description": "What was asked",
+  "beginner.taskDetail.scope": "Files it touches",
+  "beginner.taskDetail.dependsOn": "Has to finish first",
+  "beginner.taskDetail.depsReady": "Everything it waited on is done.",
+  "beginner.taskDetail.depsWaiting": "Still waiting on the work above.",
+  "beginner.taskDetail.note": "Note",
+  "beginner.taskDetail.activity": "Progress log",
+  "beginner.taskDetail.activityEmpty": "Nothing logged yet.",
+  "beginner.taskDetail.time.justNow": "just now",
+  "beginner.taskDetail.time.minutesAgo": "{n}m ago",
+  "beginner.taskDetail.time.hoursAgo": "{n}h ago",
+  "beginner.taskDetail.time.daysAgo": "{n}d ago",
 
   // ── Promotion modal ─────────────────────────────────────────────────────
   "beginner.promote.title": "Ready for the real thing?",

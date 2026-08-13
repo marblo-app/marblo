@@ -94,8 +94,10 @@ vi.mock("../../src/hooks/usePresence", () => ({
   usePresence: () => null,
 }));
 
+// subscribeToCollection: 티켓 상세가 진행 기록(activities)을 구독한다.
 vi.mock("../../src/services/firestore", () => ({
   subscribeToDocument: vi.fn(() => () => {}),
+  subscribeToCollection: vi.fn(() => () => {}),
 }));
 
 // 실 xterm 은 태우지 않는다 — 이 파일의 관심사는 "어느 세션이 열렸나" 다.

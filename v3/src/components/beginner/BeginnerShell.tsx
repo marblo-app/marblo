@@ -566,11 +566,15 @@ export function BeginnerShell() {
         <OnrampGateHost variant="beginner" onConnect={openOneClick} />
       )}
 
-      {/* 미니 보드/에이전트에서 연 티켓 상세 — 비기너 판(워크트리·diff·PR 없음). */}
+      {/* 미니 보드/에이전트에서 연 티켓 상세 — 비기너 판. 정보는 보드 상세와
+          같고(목표·변경·완료기준·범위·선행 일감·진행 기록), 워크트리·diff·PR·
+          모델·상태머신 손잡이만 빠진다. `tasks` 는 선행 일감을 id 가 아니라
+          제목으로 그리기 위한 것. */}
       {openTask && (
         <BeginnerTaskModal
           task={openTask}
           agents={agents}
+          tasks={tasks}
           onAsk={askAboutTask}
           onClose={closeTaskDetail}
         />

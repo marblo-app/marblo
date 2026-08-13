@@ -187,6 +187,21 @@ export const beginner = {
   "beginner.taskDetail.askDone":
     "'{title}' 에서 무엇이 어떻게 바뀌었는지 쉬운 말로 정리해 줘.",
   "beginner.taskDetail.close": "닫기",
+  // ★상세 본문(티켓 8s7W0hgy) — 어드밴스드 모달과 같은 정보를 심플한 말로.
+  // 목표/변경·접근/완료 기준/제약 제목은 `board.section.*` 를 그대로 쓴다:
+  // 같은 것을 두 화면이 다른 이름으로 부르면 승격했을 때 다시 배워야 한다.
+  "beginner.taskDetail.description": "요청 내용",
+  "beginner.taskDetail.scope": "손대는 곳",
+  "beginner.taskDetail.dependsOn": "먼저 끝나야 하는 일",
+  "beginner.taskDetail.depsReady": "먼저 할 일은 다 끝났어요.",
+  "beginner.taskDetail.depsWaiting": "앞의 일이 끝나기를 기다리는 중이에요.",
+  "beginner.taskDetail.note": "메모",
+  "beginner.taskDetail.activity": "진행 기록",
+  "beginner.taskDetail.activityEmpty": "아직 남긴 기록이 없어요.",
+  "beginner.taskDetail.time.justNow": "방금",
+  "beginner.taskDetail.time.minutesAgo": "{n}분 전",
+  "beginner.taskDetail.time.hoursAgo": "{n}시간 전",
+  "beginner.taskDetail.time.daysAgo": "{n}일 전",
 
   // ── 승격 모달 ───────────────────────────────────────────────────────────
   "beginner.promote.title": "이제 진짜 힘 좀 써볼까요?",

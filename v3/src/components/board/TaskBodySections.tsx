@@ -1,58 +1,39 @@
 // v3/src/components/board/TaskBodySections.tsx
 import type { Task } from "../../types/task";
 import { useTranslation } from "../../lib/i18n";
+import { taskBodyParts } from "../../lib/taskBody";
 
-function nonEmpty(arr?: string[]): string[] {
-  return (arr ?? []).map((s) => s.trim()).filter((s) => s.length > 0);
-}
-
-export function hasAnyBody(task: Task): boolean {
-  return Boolean(
-    task.goal?.trim() ||
-    nonEmpty(task.changes).length ||
-    nonEmpty(task.acceptance).length ||
-    nonEmpty(task.notes).length ||
-    task.description,
-  );
-}
-
-function isStructured(task: Task): boolean {
-  return Boolean(
-    task.goal?.trim() ||
-    nonEmpty(task.changes).length ||
-    nonEmpty(task.acceptance).length ||
-    nonEmpty(task.notes).length,
-  );
-}
+// 규칙(무엇이 본문인가)은 lib/taskBody 한 곳에만 있다 — 심플 모드의 티켓
+// 상세가 같은 규칙으로 같은 정보를 그린다. 여기 남은 건 어드밴스드 보드의
+// **칠**뿐이다. 기존 임포트 경로(`./TaskBodySections`)를 깨지 않게 재수출한다.
+export { hasAnyBody } from "../../lib/taskBody";
 
 export function TaskBodySections({ task }: { task: Task }) {
   const { t } = useTranslation();
-  if (!isStructured(task)) {
-    if (!task.description) return null;
+  const { goal, changes, acceptance, notes, description, structured } =
+    taskBodyParts(task);
+
+  if (!structured) {
+    if (!description) return null;
     return (
       <div>
         <h3 className="text-xs font-medium text-gray-400 uppercase mb-1">
           Description
         </h3>
         <p className="text-sm text-gray-300 whitespace-pre-wrap">
-          {task.description}
+          {description}
         </p>
       </div>
     );
   }
-  const changes = nonEmpty(task.changes);
-  const acceptance = nonEmpty(task.acceptance);
-  const notes = nonEmpty(task.notes);
   return (
     <div className="space-y-3">
-      {task.goal?.trim() && (
+      {goal && (
         <section>
           <h3 className="text-xs font-medium text-gray-400 uppercase mb-1">
             {t("board.section.goal")}
           </h3>
-          <p className="text-sm text-gray-200 whitespace-pre-wrap">
-            {task.goal}
-          </p>
+          <p className="text-sm text-gray-200 whitespace-pre-wrap">{goal}</p>
         </section>
       )}
       {changes.length > 0 && (
