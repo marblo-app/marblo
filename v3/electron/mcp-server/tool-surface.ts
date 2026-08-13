@@ -54,6 +54,8 @@ export const WORKER_CORE_MCP_TOOLS = [
  */
 export const ROLE_EXTRA_MCP_TOOLS: Readonly<Record<string, readonly string[]>> =
   {
+    // backend: 로컬 지식 위키 MCP 도구 구현/검증 경로.
+    backend: ["wiki_ingest", "wiki_query", "wiki_lint"],
     // 랜딩 역할: PR 머지 + 티켓/워크트리 클로즈아웃이 본업이다.
     merge: ["merge_and_close", "get_worktree_audit", "list_worktree_audit"],
     // devops: 플릿 상태 조회(배포/정리 판단 근거).

@@ -199,6 +199,13 @@ import {
   type MergeState,
   type MergeVerdict,
 } from "./merge-closeout.js";
+import {
+  ingestWiki,
+  lintWiki,
+  queryWiki,
+  readWiki,
+  resolveWikiRoot,
+} from "./wiki-maintenance.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -7316,6 +7323,175 @@ export function registerTools(server: McpServer): void {
         `Sent Telegram message to chat ${result.chatId ?? "(default)"}.`
       );
     }
+  );
+
+  // ── 로컬 markdown 지식 위키 유지보수 (카파시 3계층 초기 증명) ────────────
+  //
+  // 프로젝트 폴더의 md 위키를 로컬 파일로 읽고 index.md / log.md 를 자동 유지한다.
+  // 외부 커넥터와 달리 브리지/OAuth 가 필요 없는 최초 증명 경로다. root_path 를
+  // 생략하면 MARBLO_PROJECT_ROOT(없으면 cwd)를 쓴다. 프로젝트 밖 추론은 하지 않는다.
+
+  async function readBoundProjectWikiDefaults(): Promise<{
+    folderPath: string | null;
+    assistant: boolean;
+  }> {
+    if (!DEFAULT_PROJECT) return { folderPath: null, assistant: false };
+    try {
+      const snap = await getDoc(doc(db, "projects", DEFAULT_PROJECT));
+      if (!snap.exists()) return { folderPath: null, assistant: false };
+      const data = snap.data() as { folderPath?: unknown; kind?: unknown };
+      return {
+        folderPath:
+          typeof data.folderPath === "string" && data.folderPath.trim()
+            ? data.folderPath
+            : null,
+        assistant: data.kind === "assistant",
+      };
+    } catch {
+      return { folderPath: null, assistant: false };
+    }
+  }
+
+  async function resolveLocalWikiRoot(rootPath?: string): Promise<{
+    root: string;
+    assistant: boolean;
+  }> {
+    const defaults = await readBoundProjectWikiDefaults();
+    const root = await resolveWikiRoot(rootPath || defaults.folderPath || undefined);
+    return { root, assistant: defaults.assistant };
+  }
+
+  auditedTool(
+    "wiki_ingest",
+    "Ingest a local markdown wiki, maintain index.md and log.md, and optionally append durable assistant memory to MEMORY.md. Reads only markdown files under root_path, the bound project folderPath, or MARBLO_PROJECT_ROOT/cwd.",
+    {
+      root_path: z
+        .string()
+        .optional()
+        .describe(
+          "Local project/wiki folder. Defaults to MARBLO_PROJECT_ROOT, then the MCP process cwd."
+        ),
+      maintain_memory: z
+        .boolean()
+        .optional()
+        .describe(
+          "Ensure MEMORY.md exists for assistant-kind projects (default false unless memory_append is provided)."
+        ),
+      memory_append: z
+        .string()
+        .optional()
+        .describe(
+          "Durable assistant memory/progress/preference note to append to MEMORY.md."
+        ),
+    },
+    async ({ root_path, maintain_memory, memory_append }) => {
+      const { root, assistant } = await resolveLocalWikiRoot(root_path);
+      const result = await ingestWiki({
+        rootPath: root,
+        maintainMemory: maintain_memory ?? assistant,
+        assistantMemoryAppend: memory_append,
+      });
+      const lines = [
+        `Wiki ingest complete.`,
+        `root: ${result.rootPath}`,
+        `docs: ${result.graph.nodes.length}`,
+        `links: ${result.graph.edges.length}`,
+        `orphans: ${result.graph.orphanIds.size}`,
+        `written: ${result.written.join(", ")}`,
+      ];
+      if (result.truncated) {
+        lines.push("warning: file scan hit the markdown file cap.");
+      }
+      if (result.skipped.length > 0) {
+        lines.push(`skipped: ${result.skipped.slice(0, 10).join("; ")}`);
+      }
+      return text(lines.join("\n"));
+    }
+  );
+
+  auditedTool(
+    "wiki_query",
+    "Query the local markdown wiki under root_path or the bound project folderPath. Returns ranked markdown matches with short snippets; also includes MEMORY.md when present.",
+    {
+      query: z.string().describe("Search terms."),
+      root_path: z
+        .string()
+        .optional()
+        .describe(
+          "Local project/wiki folder. Defaults to MARBLO_PROJECT_ROOT, then the MCP process cwd."
+        ),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(25)
+        .optional()
+        .describe("Max matches to return (default 10, max 25)."),
+    },
+    async ({ query, root_path, limit }) => {
+      const { root } = await resolveLocalWikiRoot(root_path);
+      const wiki = await readWiki(root);
+      const matches = queryWiki(wiki.docs, query, limit ?? 10);
+      if (matches.length === 0) {
+        return text(`No wiki matches for "${query}".`);
+      }
+      const lines = matches.map(
+        (match) =>
+          `- ${match.path} (score=${match.score})\n  ${match.snippet}`
+      );
+      const suffix = wiki.truncated
+        ? "\nwarning: file scan hit the markdown file cap."
+        : "";
+      return text(
+        `Wiki query results for "${query}" (${matches.length}):\n${lines.join(
+          "\n"
+        )}${suffix}`
+      );
+    },
+    { userFacing: false }
+  );
+
+  auditedTool(
+    "wiki_lint",
+    "Lint the local markdown wiki under root_path or the bound project folderPath. Checks index.md/log.md presence, resolved document graph, and orphan documents.",
+    {
+      root_path: z
+        .string()
+        .optional()
+        .describe(
+          "Local project/wiki folder. Defaults to MARBLO_PROJECT_ROOT, then the MCP process cwd."
+        ),
+    },
+    async ({ root_path }) => {
+      const { root } = await resolveLocalWikiRoot(root_path);
+      const wiki = await readWiki(root);
+      const result = lintWiki(wiki.docs);
+      const lines = [
+        `Wiki lint: ${result.issues.length === 0 ? "OK" : "issues found"}`,
+        `root: ${root}`,
+        `docs: ${result.graph.nodes.length}`,
+        `links: ${result.graph.edges.length}`,
+        `orphans: ${result.graph.orphanIds.size}`,
+      ];
+      if (result.issues.length > 0) {
+        lines.push(
+          ...result.issues
+            .slice(0, 50)
+            .map(
+              (issue) =>
+                `- [${issue.level}] ${issue.code} ${issue.path}: ${issue.message}`
+            )
+        );
+      }
+      if (wiki.truncated) {
+        lines.push("warning: file scan hit the markdown file cap.");
+      }
+      if (wiki.skipped.length > 0) {
+        lines.push(`skipped: ${wiki.skipped.slice(0, 10).join("; ")}`);
+      }
+      return text(lines.join("\n"));
+    },
+    { userFacing: false }
   );
 
   // ── Google Drive 읽기 전용 (티켓 zqNxS9904aeeBEug1uAD) ──────────────────────
