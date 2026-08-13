@@ -1478,6 +1478,42 @@ describe("projects self-join via invitation (B2)", () => {
     );
   });
 
+  // ★오버그랜트 회귀 가드 (티켓 3YSvLFCT707GpV8FEyUp, P0).
+  //   위 "초대가 다른 프로젝트 것이면" 케이스는 **본문 projectId 위조**를 막는다.
+  //   여기서는 그 거울상 — 초대가 **진짜 유효한** 상태에서, 그 초대 하나가 같은
+  //   owner 의 **다른 프로젝트**까지 열어주지 않는지를 못박는다. 콜라보 1명을
+  //   프로젝트 1개에 추가했는데 owner 소유 프로젝트 여러 개에 멤버가 박힌 사고의
+  //   룰 층 방어선이다. 같은 테스트 안에서 대상 프로젝트 self-join 이 성공하는
+  //   것까지 확인해, 거부가 "초대가 애초에 무효라서"가 아님을 보장한다.
+  it("유효한 초대 1건은 그 프로젝트 하나만 연다 — 같은 owner 의 다른 프로젝트 self-join 은 거부", async () => {
+    const SIBLING_PROJECT_ID = "sibling-project";
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), "projects", SIBLING_PROJECT_ID), {
+        name: "Sibling Of Invited Project",
+        ownerId: OWNER_ID,
+        members: [OWNER_ID],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    // 초대받은 그 프로젝트는 열린다.
+    await assertSucceeds(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        members: arrayUnion(OUTSIDER_ID),
+        updatedAt: new Date(),
+      }),
+    );
+    // 같은 초대로 형제 프로젝트까지 열리지는 않는다(그 프로젝트용 초대 문서 없음).
+    await assertFails(
+      updateDoc(doc(db, "projects", SIBLING_PROJECT_ID), {
+        members: arrayUnion(OUTSIDER_ID),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
   it("기존 멤버의 일반 update 는 계속 허용된다 (회귀 없음)", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(

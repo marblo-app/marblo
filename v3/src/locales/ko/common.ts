@@ -38,6 +38,8 @@ export const common = {
   "common.team.inviteNotFound": "초대를 찾을 수 없습니다.",
   "common.team.inviteAlreadyHandled": "이미 처리된 초대입니다.",
   "common.team.inviteExpired": "만료된 초대입니다.",
+  "common.team.inviteMalformed":
+    "초대 정보가 손상되었습니다. 초대한 사람에게 다시 초대를 요청하세요.",
   "common.team.loadMembersFailed": "멤버 로드 실패",
   "common.team.inviteFailed": "초대 실패",
   "common.team.acceptFailed": "수락 실패",

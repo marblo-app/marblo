@@ -1,3 +1,6 @@
+/**
+ * @vitest-environment jsdom
+ */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type Constraint = {
@@ -72,7 +75,7 @@ const backend = vi.hoisted(() => {
     ) {
       const removed = new Set((value as { values: unknown[] }).values);
       return (Array.isArray(oldValue) ? oldValue : []).filter(
-        (item) => !removed.has(item),
+        (item) => !removed.has(item)
       );
     }
     return value;
@@ -114,7 +117,7 @@ const backend = vi.hoisted(() => {
   const subscribe = (
     path: string,
     constraints: Constraint[],
-    callback: (items: Array<StoredDoc & { id: string }>) => void,
+    callback: (items: Array<StoredDoc & { id: string }>) => void
   ) => {
     const listener = { path, constraints, callback };
     listeners.add(listener);
@@ -155,7 +158,7 @@ vi.mock("../../src/services/firestore", () => ({
   subscribeToCollection: (
     path: string,
     constraints: Constraint[],
-    callback: (items: Array<StoredDoc & { id: string }>) => void,
+    callback: (items: Array<StoredDoc & { id: string }>) => void
   ) => backend.subscribe(path, constraints, callback),
   toTimestamp: (date: Date) => date,
   convertTimestamps: <T>(data: StoredDoc, fields: string[]) => {
@@ -224,7 +227,7 @@ vi.mock("firebase/firestore", () => {
   const toConstraints = (constraints: unknown[]) =>
     constraints.filter(
       (constraint): constraint is Constraint =>
-        !!constraint && typeof constraint === "object" && "field" in constraint,
+        !!constraint && typeof constraint === "object" && "field" in constraint
     );
   const asSnapshot = (path: string, constraints: Constraint[]) => {
     const items = backend.snapshot(path, constraints);
@@ -270,7 +273,7 @@ vi.mock("firebase/firestore", () => {
       asSnapshot(ref.path, ref.constraints ?? []),
     onSnapshot: (
       ref: { path: string; constraints?: Constraint[] },
-      callback: (snapshot: unknown) => void,
+      callback: (snapshot: unknown) => void
     ) =>
       backend.subscribe(ref.path, ref.constraints ?? [], (items) => {
         callback({
@@ -326,7 +329,7 @@ describe("@e2e project invitation → chat → collaboration", () => {
       projectId,
       invitee.email,
       "member",
-      owner.uid,
+      owner.uid
     );
     const pending = await teamService.getMyInvitations(invitee.email);
     expect(pending).toHaveLength(1);
@@ -339,8 +342,90 @@ describe("@e2e project invitation → chat → collaboration", () => {
     const project = await projectService.getProject(projectId);
     expect(invitation).toHaveLength(0);
     expect(project?.members).toEqual(
-      expect.arrayContaining([owner.uid, invitee.uid]),
+      expect.arrayContaining([owner.uid, invitee.uid])
     );
+  });
+
+  // ★오버그랜트 회귀 가드 (티켓 3YSvLFCT707GpV8FEyUp, P0).
+  //
+  // 실제 사고: 콜라보를 프로젝트 1개에만 추가했는데 같은 owner 의 프로젝트 14개
+  // members 에 그 uid 가 박혔다. 위 픽스처는 프로젝트가 **하나뿐**이라 형제
+  // 프로젝트로의 fan-out 을 구조적으로 관측할 수 없었다 — 스위트 전체에 그
+  // 불변식을 지키는 테스트가 없었다는 뜻이다. 여기서 형제 프로젝트를 세워
+  // "1개 추가는 지정된 그 1개만 건드린다"를 문서 단위로 못박는다.
+  it("adds the invitee to the invited project only — sibling projects owned by the same owner stay untouched", async () => {
+    const teamService = await import("../../src/services/teamService");
+    const siblingIds = ["sibling-project-a", "sibling-project-b"];
+    for (const siblingId of siblingIds) {
+      backend.seed("projects", siblingId, {
+        name: `Sibling ${siblingId}`,
+        ownerId: owner.uid,
+        members: [owner.uid],
+        folderPath: `/tmp/${siblingId}`,
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        updatedAt: new Date("2026-01-01T00:00:00Z"),
+      });
+    }
+    // 수락 전 형제 문서 원본 — members 뿐 아니라 updatedAt 까지 그대로여야
+    // "쓰기 자체가 나가지 않았다"가 성립한다.
+    const before = siblingIds.map((id) =>
+      JSON.stringify(backend.read("projects", id))
+    );
+
+    const invitationId = await teamService.createInvitation(
+      projectId,
+      invitee.email,
+      "member",
+      owner.uid
+    );
+    await teamService.acceptInvitation(invitationId, invitee.uid);
+
+    const invitedProject = backend.read("projects", projectId) as {
+      members: string[];
+    };
+    expect(invitedProject.members).toContain(invitee.uid);
+
+    siblingIds.forEach((id, index) => {
+      const sibling = backend.read("projects", id) as { members: string[] };
+      expect(sibling.members).toEqual([owner.uid]);
+      expect(sibling.members).not.toContain(invitee.uid);
+      expect(JSON.stringify(sibling)).toBe(before[index]);
+    });
+  });
+
+  // 초대 문서의 id 규약({projectId}_{소문자 이메일})과 본문 projectId 가
+  // 어긋나면 "어느 프로젝트에 넣을 것인가"의 권위자가 둘로 갈린다 — 그 틈이
+  // 곧 지정하지 않은 프로젝트로 멤버십이 새는 통로다. 클라이언트가 먼저
+  // 거부해야 어떤 프로젝트에도 쓰기가 나가지 않는다.
+  it("refuses an invitation whose document id disagrees with its projectId, writing to no project", async () => {
+    const teamService = await import("../../src/services/teamService");
+    const otherProjectId = "other-owner-project";
+    backend.seed("projects", otherProjectId, {
+      name: "Other Project",
+      ownerId: owner.uid,
+      members: [owner.uid],
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+      updatedAt: new Date("2026-01-01T00:00:00Z"),
+    });
+    // id 는 projectId 를 가리키는데 본문은 otherProjectId 를 가리키는 문서.
+    backend.seed("invitations", `${projectId}_${invitee.email}`, {
+      projectId: otherProjectId,
+      invitedEmail: invitee.email,
+      invitedBy: owner.uid,
+      role: "member",
+      status: "pending",
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+
+    await expect(
+      teamService.acceptInvitation(`${projectId}_${invitee.email}`, invitee.uid)
+    ).rejects.toThrow();
+
+    for (const id of [projectId, otherProjectId]) {
+      const project = backend.read("projects", id) as { members: string[] };
+      expect(project.members).toEqual([owner.uid]);
+    }
   });
 
   it("delivers owner chat messages to the invitee listener by projectId", async () => {
@@ -351,7 +436,7 @@ describe("@e2e project invitation → chat → collaboration", () => {
       ownerInbox.push(
         ...messages
           .filter((message) => !ownerInbox.includes(message.id))
-          .map((message) => message.content),
+          .map((message) => message.content)
       );
     });
     const stopInvitee = chatService.subscribeToMessages(
@@ -360,9 +445,9 @@ describe("@e2e project invitation → chat → collaboration", () => {
         inviteeInbox.push(
           ...messages
             .filter((message) => !inviteeInbox.includes(message.id))
-            .map((message) => message.content),
+            .map((message) => message.content)
         );
-      },
+      }
     );
 
     await chatService.sendUserMessage(
@@ -370,7 +455,7 @@ describe("@e2e project invitation → chat → collaboration", () => {
       owner.uid,
       owner.displayName,
       "",
-      "hello from owner",
+      "hello from owner"
     );
 
     expect(ownerInbox).toContain("hello from owner");
@@ -380,8 +465,9 @@ describe("@e2e project invitation → chat → collaboration", () => {
   });
 
   it("shows the other authenticated member in presence and keeps the board project-scoped", async () => {
-    const collaborationService =
-      await import("../../src/services/collaborationService");
+    const collaborationService = await import(
+      "../../src/services/collaborationService"
+    );
     const taskService = await import("../../src/services/taskService");
     const seenByOwner: string[][] = [];
     const stopPresence = collaborationService.subscribeToPresence(
@@ -390,9 +476,9 @@ describe("@e2e project invitation → chat → collaboration", () => {
         seenByOwner.push(
           presence
             .filter((member) => member.userId !== owner.uid)
-            .map((member) => member.userId),
+            .map((member) => member.userId)
         );
-      },
+      }
     );
 
     await collaborationService.updatePresence(
@@ -400,7 +486,7 @@ describe("@e2e project invitation → chat → collaboration", () => {
       invitee.uid,
       "shared-board",
       invitee.displayName,
-      "",
+      ""
     );
     backend.seed("tasks", "shared-task", {
       projectId,

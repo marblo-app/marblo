@@ -181,6 +181,39 @@ export async function createInvitation(
   return docId;
 }
 
+/**
+ * 이 초대가 "정확히 어느 프로젝트 하나"를 가리키는지 확정한다
+ * (티켓 3YSvLFCT707GpV8FEyUp, P0 오버그랜트 재발 방지).
+ *
+ * ★왜 필요한가: 수락은 `addMember(invitation.projectId, uid)` 로 **본문 필드**를
+ * 믿고 쓰는데, 초대 문서를 찾은 근거는 **문서 id**(`{projectId}_{소문자 이메일}`)
+ * 다. 둘이 어긋난 문서가 하나라도 있으면 "어느 프로젝트에 넣을 것인가"의
+ * 권위자가 둘로 갈리고, 사용자가 지정하지 않은 프로젝트로 멤버십이 새는 통로가
+ * 된다 — 콜라보 1명 추가가 owner 의 다른 프로젝트들로 번진 사고가 정확히 그
+ * 모양이었다. firestore.rules 의 self-join(B2)은 이미 `inv.projectId ==
+ * projectId` 를 검증하므로, 여기서 같은 판정을 클라이언트에서 먼저 내려
+ * **어떤 프로젝트에도 쓰기가 나가지 않게** 한다(서버 거부에 기대면 대상
+ * 프로젝트를 향한 쓰기가 실제로 한 번 나간 뒤 막힌다).
+ *
+ * 검사는 id 규약 재계산 하나로 충분하다: id 가 projectId 와 이메일 둘 다에서
+ * 파생되므로, 재계산이 일치하면 본문·id·수신자가 한 프로젝트로 수렴한다.
+ */
+function assertInvitationTargetsOneProject(
+  invitationId: string,
+  invitation: Invitation,
+): void {
+  const { projectId, invitedEmail } = invitation;
+  if (
+    typeof projectId !== "string" ||
+    !projectId ||
+    typeof invitedEmail !== "string" ||
+    !invitedEmail ||
+    invitationDocId(projectId, invitedEmail) !== invitationId
+  ) {
+    throw new Error(t("common.team.inviteMalformed"));
+  }
+}
+
 export async function acceptInvitation(
   invitationId: string,
   userId: string,
@@ -192,6 +225,7 @@ export async function acceptInvitation(
   if (!raw) throw new Error(t("common.team.inviteNotFound"));
 
   const invitation = toInvitation(raw);
+  assertInvitationTargetsOneProject(invitationId, invitation);
   if (invitation.status !== "pending") {
     throw new Error(t("common.team.inviteAlreadyHandled"));
   }

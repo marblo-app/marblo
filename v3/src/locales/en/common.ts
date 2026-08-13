@@ -34,6 +34,8 @@ export const common: Record<keyof typeof koCommon, string> = {
   "common.team.inviteAlreadyHandled":
     "This invitation has already been handled.",
   "common.team.inviteExpired": "This invitation has expired.",
+  "common.team.inviteMalformed":
+    "This invitation is malformed. Ask the inviter to send a new one.",
   "common.team.loadMembersFailed": "Failed to load members",
   "common.team.inviteFailed": "Failed to send invitation",
   "common.team.acceptFailed": "Failed to accept invitation",

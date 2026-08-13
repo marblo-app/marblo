@@ -148,10 +148,31 @@ export async function setProjectFolderPathForMachine(
   return entry;
 }
 
+/**
+ * 멤버십 쓰기의 단일 초크포인트 계약 (티켓 3YSvLFCT707GpV8FEyUp, P0).
+ *
+ * ★이 앱에서 `project.members` 를 바꾸는 코드는 아래 addMember/removeMember
+ * 둘뿐이고, 둘 다 **프로젝트 하나**를 인자로 받는다. 그러므로 "1명 추가가
+ * 여러 프로젝트에 번지는" 사고는 (a) 호출자가 프로젝트를 순회하거나
+ * (b) 스코프가 깨진 값(빈 문자열·undefined·배열)이 id 자리에 들어올 때만
+ * 생긴다. (b)는 조용히 엉뚱한 문서를 만들거나 건드릴 수 있으므로 여기서
+ * 즉시 끊는다 — 실패가 조용한 광범위 쓰기보다 언제나 낫다.
+ * (a)는 코드리뷰/회귀테스트가 막는다(tests/integration/team-collaboration).
+ */
+function assertSingleMembershipTarget(projectId: string, userId: string): void {
+  if (typeof projectId !== "string" || !projectId.trim()) {
+    throw new Error("addMember/removeMember: projectId must be a non-empty id");
+  }
+  if (typeof userId !== "string" || !userId.trim()) {
+    throw new Error("addMember/removeMember: userId must be a non-empty uid");
+  }
+}
+
 export async function addMember(
   projectId: string,
   userId: string,
 ): Promise<void> {
+  assertSingleMembershipTarget(projectId, userId);
   await updateDocument(COLLECTION, projectId, {
     members: arrayUnion(userId),
     updatedAt: toTimestamp(new Date()),
@@ -162,6 +183,7 @@ export async function removeMember(
   projectId: string,
   userId: string,
 ): Promise<void> {
+  assertSingleMembershipTarget(projectId, userId);
   await updateDocument(COLLECTION, projectId, {
     members: arrayRemove(userId),
     updatedAt: toTimestamp(new Date()),
