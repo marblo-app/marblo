@@ -320,8 +320,8 @@ const DAY = 86400000;
     const after = (await db.collection("subscriptions").doc(uid).get()).data();
 
     check(
-      after.status === "active" && after.planType === "pro",
-      `★${c.label} 前결제자 → 선정 시 Pro 정상 부여(active)`,
+      after.status === "active" && after.planType === "team",
+      `★${c.label} 前결제자 → 선정 시 grant 정상 부여(team/active)`,
     );
     check(
       after.founderGrant === true &&

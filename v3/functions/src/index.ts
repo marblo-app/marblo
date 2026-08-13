@@ -64,6 +64,7 @@ import {
   pseudonymizeAnalyticsRow,
   readAnalyticsIdSalt,
 } from "./analyticsPseudonym";
+import { resolveGrantPlanType } from "./grantPlan";
 import { buildProjectAudit, toMillis } from "./projectAudit";
 import {
   verifyPaddleSignature,
@@ -3576,9 +3577,12 @@ function requireAdmin(context: functions.https.CallableContext): void {
   }
 }
 
-// 구독 doc 를 Pro/active 로 upsert 한다. 기간(currentPeriodEnd)은 기존 값과
+// 구독 doc 를 grant 플랜/active 로 upsert 한다. 기간(currentPeriodEnd)은 기존 값과
 // targetEnd 중 더 나중을 유지 — 멱등: 이미 더 긴 기간이 있으면 절대 줄이지 않는다.
 // 베타 선정(1개월)·예외승인(3개월)·인터뷰(6개월) 부여가 전부 이 경로로 수렴한다.
+// ★부여 플랜은 reason 이 결정한다(grantPlan.resolveGrantPlanType) — 베타/파운더
+// reason 은 team(협업·멤버 기능이 team 부터 열린다), 그 외는 pro. 기간과 같은
+// 이유로 플랜도 강등하지 않는다.
 // paymentProvider="founder_grant" 로 표기해 갱신 크론(scheduledChargeSubscriptions,
 // paymentProvider=="toss" 만 대상)에서 제외되고, 만료는 scheduledExpireBetaGrants
 // 가 처리한다(1회성 부여, 자동 갱신 없음).
@@ -3637,6 +3641,8 @@ function isLivePaidSubscription(
 type ProGrantOutcome = {
   granted: boolean;
   periodEnd: Date;
+  /** 실제로 doc 에 쓴(또는 스킵 시 유지된) planType. 호출부가 기록·보고에 쓴다. */
+  planType: string;
   skippedReason: "live_paid" | null;
 };
 
@@ -3679,13 +3685,18 @@ async function upsertProSubscription(
       return {
         granted: false,
         periodEnd: existingEnd ?? periodEnd,
+        planType: typeof data?.planType === "string" ? data.planType : "pro",
         skippedReason: "live_paid",
       };
     }
 
+    // 트랜잭션 안에서 읽은 data 로 판정한다 — 강등 금지 가드가 참조하는 기존
+    // 플랜이 커밋 시점과 어긋나면 안 된다.
+    const planType = resolveGrantPlanType(reason, data);
+
     const payload: Record<string, unknown> = {
       userId,
-      planType: "pro",
+      planType,
       status: "active",
       paymentProvider: "founder_grant",
       founderGrant: true,
@@ -3699,7 +3710,7 @@ async function upsertProSubscription(
       payload.createdAt = admin.firestore.FieldValue.serverTimestamp();
     }
     tx.set(subRef, payload, { merge: true });
-    return { granted: true, periodEnd, skippedReason: null };
+    return { granted: true, periodEnd, planType, skippedReason: null };
   });
 }
 
@@ -3794,7 +3805,9 @@ export const submitExperienceShareSurvey = functions.https.onCall(
       shareUrl,
       sessionCount,
       rewardMonths: EXPERIENCE_SHARE_REWARD_MONTHS,
-      rewardPlanType: "pro",
+      // 부여 플랜은 grantPlan 이 결정한다(기존 team grant 를 강등하지 않으므로
+      // 항상 pro 인 게 아니다). 하드코딩하면 기록이 실제 doc 과 어긋난다.
+      rewardPlanType: grantOutcome.planType,
       rewardGrantApplied: grantOutcome.granted,
       rewardSkippedReason: grantOutcome.skippedReason,
       rewardPeriodEnd: admin.firestore.Timestamp.fromDate(

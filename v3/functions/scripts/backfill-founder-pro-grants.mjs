@@ -249,7 +249,10 @@ async function applyGrant(plan) {
   const now = new Date();
   await patchDocument(`subscriptions/${encodeURIComponent(plan.uid)}`, {
     userId: toStringField(plan.uid),
-    planType: toStringField("pro"),
+    // ★team — 이 스크립트는 founder_backfill grant 경로다. src/grantPlan.ts 의
+    // TEAM_GRANT_REASONS 와 같은 규칙(베타/파운더 grant 는 협업·멤버 기능이
+    // 열리는 team). 여기만 pro 로 남으면 부여 경로별로 플랜이 갈린다.
+    planType: toStringField("team"),
     status: toStringField("active"),
     paymentProvider: toStringField("founder_grant"),
     founderGrant: toBooleanField(true),
