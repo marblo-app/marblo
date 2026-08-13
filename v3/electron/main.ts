@@ -219,6 +219,11 @@ import {
 } from "./slack-health";
 import { SlackPoller } from "./slack-poller";
 import {
+  AssistantTriggerManager,
+  type AssistantTriggerOrchestrator,
+  type AssistantTriggerProject,
+} from "./assistant-triggers";
+import {
   getProjectConnection,
   upsertProjectConnection,
   listProjectConnections,
@@ -2951,6 +2956,8 @@ bridgeServer.setSendSlackMessage((projectId, text, opts) =>
   slackPoller.sendMessage(projectId, text, opts)
 );
 
+let assistantTriggerManager: AssistantTriggerManager | null = null;
+
 function telegramInboundTarget(
   manager: OrchestratorManager,
   kind: "board" | "mission"
@@ -2967,6 +2974,110 @@ function telegramInboundTarget(
       };
     },
   };
+}
+
+async function ensureAssistantTriggerOrchestrator(
+  projectId: string,
+  rootPath?: string
+): Promise<AssistantTriggerOrchestrator | null> {
+  const running = orchestrators.get(projectId);
+  if (running?.isRunning()) return running;
+  const resolvedPath =
+    rootPath && rootPath.trim()
+      ? rootPath.trim() === "~"
+        ? os.homedir()
+        : rootPath.trim()
+      : "";
+  if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+    console.warn(
+      `[AssistantTriggers] cannot wake orchestrator for project=${projectId}: missing local folderPath`
+    );
+    return null;
+  }
+  const effectiveModelSetting = applyOrchestratorModelEnvForProject(projectId);
+  const orchestratorModel = resolveOrchestratorModel();
+  const orchestratorPins = orchestratorModelPins(effectiveModelSetting);
+  const orchGate = await checkSpawnAuthGate(
+    orchestratorModel,
+    splitOrchestratorModelValue(effectiveModelSetting).modelId,
+    "orchestrator_launch"
+  );
+  if (!orchGate.ok) {
+    console.warn(
+      `[AssistantTriggers] orchestrator auth gate blocked project=${projectId} model=${orchestratorModel} reason=${orchGate.reason}`
+    );
+    return null;
+  }
+  const orchMcpGate = await checkOrchestratorMcpGate(
+    orchestratorModel,
+    resolvedPath
+  );
+  if (!orchMcpGate.ok) {
+    console.warn(
+      `[AssistantTriggers] orchestrator MCP gate blocked project=${projectId}`
+    );
+    return null;
+  }
+  const port = bridgeServer.getPort();
+  if (!port) {
+    console.warn(
+      `[AssistantTriggers] cannot wake orchestrator for project=${projectId}: bridge not ready`
+    );
+    return null;
+  }
+  const orch = getOrchestrator(projectId);
+  orch.launch(
+    projectId,
+    resolvedPath,
+    port,
+    (sid, { reused }) => {
+      if (reused) return;
+      setupPtyForwarding(sid);
+      hookOrchestratorActivity(sid, projectId);
+      pendingListener.attach(`orch-${projectId}`, sid);
+      logTelegramRouteHealth(projectId, "assistant-trigger-pty-ready");
+    },
+    "latest",
+    undefined,
+    {
+      modelOverride: orchestratorModel,
+      claudeModelOverride: orchestratorPins.claudeModel,
+      codexModelOverride: orchestratorPins.codexModel,
+      codexEffortOverride: orchestratorPins.codexEffort,
+      nativeModelOverride: orchestratorPins.nativeModel,
+    }
+  );
+  saveProjectOrchestratorModel(projectId, effectiveModelSetting);
+  return orch;
+}
+
+async function listAssistantTriggerProjects(): Promise<
+  AssistantTriggerProject[]
+> {
+  const uid = currentRealUserUid();
+  if (!uid) return [];
+  const { app: fbApp, authReady } = getMissionFirebaseApp();
+  await authReady;
+  const db = getFirestore(fbApp);
+  const snap = await fbGetDocs(
+    fbQuery(
+      fbCollection(db, "projects"),
+      fbWhere("members", "array-contains", uid)
+    )
+  );
+  const projects: AssistantTriggerProject[] = [];
+  snap.forEach((docSnap) => {
+    const data = docSnap.data() as Record<string, unknown>;
+    projects.push({
+      id: docSnap.id,
+      name: typeof data.name === "string" ? data.name : docSnap.id,
+      kind: typeof data.kind === "string" ? data.kind : undefined,
+      folderPath:
+        typeof data.folderPath === "string" ? data.folderPath : undefined,
+      assistantTriggers: data.assistantTriggers,
+    });
+  });
+  return projects;
 }
 
 function logTelegramRouteHealth(projectId: string, reason: string): void {
@@ -9082,6 +9193,27 @@ app.whenReady().then(async () => {
     console.error("[Main] Slack Socket Mode start failed:", err);
   }
 
+  assistantTriggerManager = new AssistantTriggerManager({
+    listProjects: listAssistantTriggerProjects,
+    workspace: {
+      gmailSearch: (_projectId, params) =>
+        gmailSearchFor(currentRealUserUid(), params),
+      gmailFetch: (_projectId, messageId) =>
+        gmailFetchFor(currentRealUserUid(), messageId),
+      calendarList: (_projectId, params) =>
+        calendarListFor(currentRealUserUid(), params),
+    },
+    resolveOrchestrator: ensureAssistantTriggerOrchestrator,
+    log: (message) => console.log(message),
+    warn: (message, err) =>
+      console.warn(message, err instanceof Error ? err.message : err),
+  });
+  try {
+    assistantTriggerManager.start();
+  } catch (err) {
+    console.error("[Main] Assistant trigger manager start failed:", err);
+  }
+
   // 텔레그램 채널 메타 기기 간 동기화(기동 시 1회): 다른 기기가 push 한 메타를
   // 복원하고(토큰 없음·비활성 — 사용자가 토큰 재입력 시 복구), 이 기기의 기존
   // 채널 메타를 업로드한다. custom-token 인증 전(익명)이면 조용히 스킵되고,
@@ -9208,6 +9340,7 @@ app.on("window-all-closed", () => {
     kanbanBridge.detach();
     stopAllOrchestrators();
     if (telegramHealthTimer) clearInterval(telegramHealthTimer);
+    assistantTriggerManager?.stop();
     void telegramPoller.stopAll();
     void slackPoller.stopAll();
     bridgeServer.stop();
@@ -9232,6 +9365,7 @@ app.on("before-quit", () => {
   // not to strip the saved session on the way out.
   isQuitting = true;
   persistWindowSession();
+  assistantTriggerManager?.stop();
 
   // Full cleanup when actually quitting (Cmd+Q)
   kanbanBridge.detach();
