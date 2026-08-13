@@ -249,6 +249,21 @@ interface AgentAPI {
       currentTaskId: string | null;
     }) => void,
   ) => void;
+  /** An agent started/stopped waiting on a human (electron/agent-input-wait.ts).
+   * Edge-triggered — `waiting:false` retracts. */
+  onInputWait: (callback: (data: AgentInputWaitEventDTO) => void) => void;
+  offInputWait: () => void;
+}
+
+/** Mirrors electron/agent-input-wait.ts AgentInputWaitEvent. */
+interface AgentInputWaitEventDTO {
+  agentId: string;
+  agentName: string;
+  projectId: string;
+  taskId: string | null;
+  waiting: boolean;
+  reason: "confirm" | "prompt" | null;
+  since: number | null;
 }
 
 interface DecomposedTaskDTO {

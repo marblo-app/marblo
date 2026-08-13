@@ -330,6 +330,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ) => {
       ipcRenderer.on("agent:syncStatus", (_event, data) => callback(data));
     },
+    /**
+     * An agent is (or is no longer) waiting on a human — see
+     * electron/agent-input-wait.ts. Edge-triggered: `waiting:false` is the
+     * retraction, so the renderer never has to poll or de-dupe a stream.
+     */
+    onInputWait: (
+      callback: (data: {
+        agentId: string;
+        agentName: string;
+        projectId: string;
+        taskId: string | null;
+        waiting: boolean;
+        reason: "confirm" | "prompt" | null;
+        since: number | null;
+      }) => void,
+    ) => {
+      ipcRenderer.on("agent:inputWait", (_event, data) => callback(data));
+    },
+    offInputWait: () => {
+      ipcRenderer.removeAllListeners("agent:inputWait");
+    },
   },
   worktree: {
     list: () => ipcRenderer.invoke("worktree:list"),

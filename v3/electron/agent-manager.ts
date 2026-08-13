@@ -20,7 +20,17 @@ import {
   classifyPtyFrame,
   applyPtyFrame,
   resetPromptIdleOnTurnStart,
+  type PtyFrameKind,
 } from "./agent-status-reconcile";
+import {
+  foldInputWait,
+  shouldAutoAcceptBypass,
+  BYPASS_CONSENT_SELECT,
+  BYPASS_CONSENT_CONFIRM,
+  BYPASS_CONSENT_CONFIRM_DELAY_MS,
+  type AgentInputWaitEvent,
+  type InputWaitReason,
+} from "./agent-input-wait";
 import {
   createLoginScreenBackstop,
   modelToCliAuth,
@@ -296,6 +306,27 @@ export interface AgentInstance {
    * Cleared by any busy/work frame and by every turn start (noteTurnStart).
    */
   promptIdleSince: number | null;
+  /**
+   * Is a HUMAN currently being waited on, and why — folded from the very same
+   * classified frames as `promptIdleSince` above (see agent-input-wait.ts).
+   * null = nobody is being waited on.
+   *
+   * This is the renderer's half of the #935 signal. The watchdog answers a
+   * parked agent with a nudge; a nudge cannot answer a question that was meant
+   * for the user, and in simple mode there is no terminal on screen for them to
+   * find it in. Every transition of this field is pushed to the renderer, which
+   * turns it into the top-right notification.
+   */
+  inputWaitReason: InputWaitReason | null;
+  /** epoch-ms the current input-wait began; null when not waiting. */
+  inputWaitSince: number | null;
+  /**
+   * Latch: the first-run bypass-permissions consent screen was already
+   * auto-accepted for THIS instance. Per-instance rather than per-agent id so a
+   * restart (a genuinely new CLI process, which shows the screen again if it
+   * shows it at all) gets its own single answer.
+   */
+  bypassConsentAnswered: boolean;
   /**
    * ★무산출 판정용 누적 출력량(#890 F-7 · 감사 G11).
    *
@@ -591,6 +622,14 @@ export class AgentManager {
   private onRestartFailed?: (agentId: string, exitCode: number) => void;
   private getMainWindow?: () => BrowserWindow | null;
   /**
+   * Emitted on every input-wait TRANSITION (both directions — `waiting:false`
+   * is the retraction that removes the notification). Edge-triggered, not
+   * level: a standing wait is announced once, which is what makes "one
+   * notification per agent" hold without the renderer having to de-dupe a
+   * repeating stream.
+   */
+  private onInputWait?: (event: AgentInputWaitEvent) => void;
+  /**
    * 직전에 관측한 동시 live 에이전트 수(멀티에이전트 계측의 상승 엣지 판정용).
    * 프로세스 수명 동안만 유지한다 — 재시작 후 다시 2대를 띄우면 그건 새 관측이
    * 맞다(설치당 1회로 접는 건 렌더러의 localStorage 마커가 한다).
@@ -620,6 +659,7 @@ export class AgentManager {
     ) => void,
     onRestartFailed?: (agentId: string, exitCode: number) => void,
     getMainWindow?: () => BrowserWindow | null,
+    onInputWait?: (event: AgentInputWaitEvent) => void,
   ) {
     this.ptyManager = ptyManager;
     this.configGenerator = new AgentConfigGenerator();
@@ -628,6 +668,7 @@ export class AgentManager {
     this.onRestartAttempt = onRestartAttempt;
     this.onRestartFailed = onRestartFailed;
     this.getMainWindow = getMainWindow;
+    this.onInputWait = onInputWait;
 
     // P3-4: start the dead-entry pruner. Idempotent guard so re-entry can't
     // stack intervals.
@@ -1270,6 +1311,9 @@ export class AgentManager {
       lastPtyActivity: Date.now(),
       lastWorkOutput: Date.now(),
       promptIdleSince: null,
+      inputWaitReason: null,
+      inputWaitSince: null,
+      bypassConsentAnswered: false,
       outputChars: 0,
       turnCompletedAt: null,
       terminalSince: null,
@@ -1318,16 +1362,27 @@ export class AgentManager {
       // CLI parked at its prompt repaints forever and would otherwise look
       // alive to it. This NEVER changes the agent's status — status still
       // follows input/completion boundaries only.
+      const kind = classifyPtyFrame(chunk, agent.model);
       const framed = applyPtyFrame(
         {
           lastWorkOutputAt: agent.lastWorkOutput,
           promptIdleSince: agent.promptIdleSince,
         },
-        classifyPtyFrame(chunk, agent.model),
+        kind,
         Date.now(),
       );
       agent.lastWorkOutput = framed.lastWorkOutputAt;
       agent.promptIdleSince = framed.promptIdleSince;
+      // ★The first-run bypass-permissions consent screen. We are the ones who
+      // passed --dangerously-skip-permissions, so the answer is already decided
+      // and the screen is pure friction — one a simple-mode user cannot even
+      // see, since that shell renders no terminal. Answer it here and the stall
+      // never exists; only prompts we did NOT provoke reach the notification
+      // path below. Gates live in shouldAutoAcceptBypass.
+      this.maybeAcceptBypassConsent(params.id, chunk);
+      // ★The renderer's half of the #935 signal: same classified frame, asked
+      // the question the watchdog never asks — is a PERSON being waited on?
+      this.refreshInputWait(params.id, kind);
       // Output NEVER starts a turn — it only continues one. While a completion
       // report stands, these bytes are the finished turn's repaint (trailing
       // flush, then the idle prompt's spinner/cursor forever), and promoting on
@@ -1439,6 +1494,11 @@ export class AgentManager {
         );
         this.setStatus(params.id, "idle");
       }
+      // Timer-driven input-wait check. The frame path (onData) normally gets
+      // there first because a parked TUI repaints — this is the backstop for a
+      // CLI that parks and then goes completely silent, where no further frame
+      // would ever arrive to notice the grace elapsing.
+      this.refreshInputWait(params.id, null);
       const hbProjectId =
         agent.launchConfig?.env?.MARBLO_PROJECT || params.projectId || "";
       mainTelemetry.heartbeat(win, params.id, hbProjectId, agent.status, 0, 0);
@@ -1900,6 +1960,11 @@ export class AgentManager {
     // revived agent isn't pruned by the backstop reaper.
     if (status !== "stopped" && status !== "error") agent.terminalSince = null;
     agent.status = status;
+    // A terminal PTY cannot be waiting on anyone — retract the notification so
+    // a crashed/stopped agent doesn't leave a permanent "answer me" badge.
+    if (status === "stopped" || status === "error") {
+      this.clearInputWait(agentId);
+    }
     this.onStatusChange?.(agentId, status);
     // 종단 전이(→stopped/error)와 부활(error→idle)이 둘 다 여기를 지난다.
     // idle↔working 은 live 수를 바꾸지 않으므로 아무 것도 발신되지 않는다.
@@ -1971,6 +2036,121 @@ export class AgentManager {
     const fresh = resetPromptIdleOnTurnStart(Date.now());
     agent.lastWorkOutput = fresh.lastWorkOutputAt;
     agent.promptIdleSince = fresh.promptIdleSince;
+    // Someone typed. Whatever the agent was waiting for, it has been answered —
+    // retract the notification without waiting for the next frame to prove it.
+    this.clearInputWait(agentId);
+  }
+
+  /**
+   * Re-evaluate whether a human is being waited on, and push the result to the
+   * renderer IF IT CHANGED.
+   *
+   * Edge-triggered by design. A parked TUI repaints several times a second, so
+   * a level-triggered emit would be a stream, and the renderer would have to
+   * re-derive "one notification per agent" from it. Emitting only transitions
+   * makes that invariant structural: one rise, one fall, per agent.
+   *
+   * @param kind the frame just classified, or null for a timer-driven check.
+   */
+  private refreshInputWait(agentId: string, kind: PtyFrameKind | null): void {
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+    const now = Date.now();
+    const next = foldInputWait(agent.inputWaitReason, {
+      kind,
+      promptIdleSince: agent.promptIdleSince,
+      turnCompletedAt: agent.turnCompletedAt,
+      terminal:
+        agent.stopRequested ||
+        agent.status === "stopped" ||
+        agent.status === "error",
+      now,
+    });
+    if (next === agent.inputWaitReason) return;
+    agent.inputWaitReason = next;
+    agent.inputWaitSince = next === null ? null : now;
+    this.onInputWait?.({
+      agentId,
+      agentName: agent.name,
+      projectId: agent.launchConfig?.env?.MARBLO_PROJECT || "",
+      taskId: agent.currentTaskId,
+      waiting: next !== null,
+      reason: next,
+      since: agent.inputWaitSince,
+    });
+  }
+
+  /**
+   * Force-retract a standing input-wait (turn submitted, agent gone terminal,
+   * agent removed). Silent when nothing was standing, so it is safe to call
+   * from every teardown path.
+   */
+  private clearInputWait(agentId: string): void {
+    const agent = this.agents.get(agentId);
+    if (!agent || agent.inputWaitReason === null) return;
+    agent.inputWaitReason = null;
+    agent.inputWaitSince = null;
+    this.onInputWait?.({
+      agentId,
+      agentName: agent.name,
+      projectId: agent.launchConfig?.env?.MARBLO_PROJECT || "",
+      taskId: agent.currentTaskId,
+      waiting: false,
+      reason: null,
+      since: null,
+    });
+  }
+
+  /**
+   * Answer the first-run bypass-permissions consent screen, once per instance.
+   *
+   * This is not a general "click OK for the agent" facility and must never grow
+   * into one: it answers exactly the screen that OUR OWN
+   * `--dangerously-skip-permissions` flag provokes, where the user's intent is
+   * already expressed by the flag. Every other prompt is surfaced to the human
+   * instead (refreshInputWait above).
+   *
+   * The latch is set BEFORE the write, so a screen that repaints while the
+   * keystrokes are in flight can't queue a second answer.
+   */
+  private maybeAcceptBypassConsent(agentId: string, chunk: string): void {
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+    if (
+      !shouldAutoAcceptBypass({
+        chunk,
+        model: agent.model,
+        spawnedAt: agent.spawnedAt,
+        now: Date.now(),
+        alreadyAnswered: agent.bypassConsentAnswered,
+      })
+    ) {
+      return;
+    }
+    agent.bypassConsentAnswered = true;
+    const sid = agent.ptySessionId;
+    console.log(
+      `[AgentManager] Auto-accepting bypass-permissions consent for ` +
+        `${agent.name} (${agentId}) — we launched it with the flag.`,
+    );
+    try {
+      this.ptyManager.write(sid, BYPASS_CONSENT_SELECT);
+      // Two writes, one tick apart, so the TUI reads them as separate keys.
+      // Unref'd: a pending 150 ms timer must not hold up app quit.
+      const timer = setTimeout(() => {
+        try {
+          this.ptyManager.write(sid, BYPASS_CONSENT_CONFIRM);
+        } catch {
+          // PTY died between the two writes — the exit path owns it from here.
+        }
+      }, BYPASS_CONSENT_CONFIRM_DELAY_MS);
+      timer.unref?.();
+    } catch (err) {
+      console.warn(
+        `[AgentManager] bypass consent auto-accept failed for ${agentId}:`,
+        err,
+      );
+    }
   }
 
   getAgentByName(name: string): AgentInstance | null {
@@ -1991,6 +2171,10 @@ export class AgentManager {
     if (agent.status !== "stopped" && agent.status !== "error") {
       this.stop(agentId);
     }
+    // Retract before the entry disappears — clearInputWait reads the instance
+    // to build the event, so after the delete there is nothing left to retract
+    // and the renderer would keep a notification for an agent that is gone.
+    this.clearInputWait(agentId);
     this.agents.delete(agentId);
     this.noteLiveAgentCount();
     console.log(`[AgentManager] Removed agent ${agent.name} (${agentId})`);
@@ -2031,6 +2215,11 @@ export class AgentManager {
       lastPtyActivity: Date.now(),
       lastWorkOutput: Date.now(),
       promptIdleSince: null,
+      inputWaitReason: null,
+      inputWaitSince: null,
+      // Reconnect attaches to a CLI that already booted, so its consent screen
+      // (if any) is long past — the latch starts spent rather than armed.
+      bypassConsentAnswered: true,
       outputChars: 0,
       turnCompletedAt: null,
       terminalSince: null,
@@ -2045,16 +2234,21 @@ export class AgentManager {
       a.outputChars += chunk.length;
       // Same idle-at-prompt distillation as launch() — a reconnected agent can
       // fall back to its prompt mid-task just as easily.
+      const kind = classifyPtyFrame(chunk, a.model);
       const framed = applyPtyFrame(
         {
           lastWorkOutputAt: a.lastWorkOutput,
           promptIdleSince: a.promptIdleSince,
         },
-        classifyPtyFrame(chunk, a.model),
+        kind,
         Date.now(),
       );
       a.lastWorkOutput = framed.lastWorkOutputAt;
       a.promptIdleSince = framed.promptIdleSince;
+      // A reconnected agent attaches to an ALREADY-BOOTED CLI, so it is past
+      // its first-run consent screen — no auto-accept here, deliberately. The
+      // input-wait signal still applies: it can park at a prompt like any other.
+      this.refreshInputWait(agent.id, kind);
       if (
         shouldPromoteOnPtyOutput({
           status: a.status,
