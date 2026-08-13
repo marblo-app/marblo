@@ -7499,9 +7499,11 @@ export function registerTools(server: McpServer): void {
   auditedTool(
     "drive_fetch",
     "Fetch one Google Drive file's body as text (READ-ONLY). Google Docs/Slides " +
-      "are exported as plain text, Sheets as CSV, plain-text files are downloaded " +
-      "as-is, and PDFs have their text layer extracted (scanned PDFs have none — " +
-      "the tool says so instead of returning silence). Get file ids from drive_search. " +
+      "are exported as plain text, Sheets as CSV, plain-text/CSV files are downloaded " +
+      "as-is, PDFs have their text layer extracted, and Office/Hangul uploads " +
+      "(.docx/.pptx/.xlsx/.hwpx/.hwp) are parsed for their body text. Files with no " +
+      "text at all (scanned PDFs, image-only documents) say so instead of returning " +
+      "silence. Get file ids from drive_search. " +
       "The file must live inside this project's bound Drive wiki folder; ids from " +
       "outside it are refused even if the user's account can read them.",
     {
@@ -7525,6 +7527,7 @@ export function registerTools(server: McpServer): void {
         mimeType: string;
         text: string;
         extraction: string;
+        extractionDetail?: string;
         truncated: boolean;
         webViewLink?: string;
       };
@@ -7538,6 +7541,23 @@ export function registerTools(server: McpServer): void {
       if (doc.extraction === "pdf-no-text") {
         return text(
           `"${doc.title}" 은 텍스트 레이어가 없는 PDF(스캔본)입니다 — OCR 없이는 본문을 읽을 수 없습니다.`
+        );
+      }
+      // Office/한글 문서: "열었는데 텍스트가 없다" 와 "열지 못했다" 는 다른 사실이다.
+      if (
+        doc.extraction === "office-no-text" ||
+        doc.extraction === "office-unreadable"
+      ) {
+        const why =
+          doc.extractionDetail ||
+          (doc.extraction === "office-no-text"
+            ? "문서 안에 추출할 텍스트가 없습니다."
+            : "파일을 열지 못했습니다.");
+        const truncatedNote = doc.truncated
+          ? " (파일이 크기 상한에 걸려 일부만 내려받은 탓일 수 있습니다.)"
+          : "";
+        return text(
+          `"${doc.title}" (${doc.mimeType}): ${why}${truncatedNote}`
         );
       }
       const header = [
