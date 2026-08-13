@@ -109,6 +109,11 @@ export async function launchMarblo(
   // 굳은 프로필(개발 머신)에서는 값이 같아 아무 것도 달라지지 않는다.
   if (!opts.beginnerShell) {
     await page.evaluate(() => {
+      // ★판정은 계정 귀속이다(티켓 E3ywX1ftbVr5f1TrFsgp) — 이미 이 프로필의
+      //   계정이 가져간 레코드가 남아 있으면 기기 키 시드가 무시되므로 전부 훑어
+      //   지운 뒤 심는다. 앱이 부팅하며 이 흔적을 자기 계정으로 상속한다.
+      for (const key of Object.keys(localStorage))
+        if (key.startsWith("marblo.beginnerMode")) localStorage.removeItem(key);
       localStorage.setItem(
         "marblo.beginnerMode",
         JSON.stringify({

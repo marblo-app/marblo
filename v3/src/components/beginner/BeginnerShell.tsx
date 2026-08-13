@@ -11,6 +11,7 @@ import { useCliSetupEngine } from "../../hooks/useCliSetupEngine";
 import {
   beginnerComposerMode,
   shouldPromote,
+  shouldRenderOnboardingGuides,
   type PromotionTrigger,
 } from "../../lib/beginnerMode";
 import { findAgentPtySessionId } from "../../lib/agentTerminal";
@@ -288,6 +289,14 @@ export function BeginnerShell() {
     sentCount: ask.sentCount,
     totalTasks: tasks.length,
     draft,
+  });
+
+  // 스스로 뜨는 온보딩 안내(M1 온램프 · M2 자금)를 지금 그려도 되는가 — 규칙은
+  // 순수함수가 든다. 원클릭 모달과 데모 재생은 화면 전체를 쓰는 표면이라, 그
+  // 위에 안내가 겹치면 두 지시가 동시에 서고 Esc 가 어느 쪽을 닫는지 알 수 없다.
+  const guidesAllowed = shouldRenderOnboardingGuides({
+    oneClickOpen: showOneClick,
+    demoPlaying: showDemo,
   });
 
   // 안정적인 identity — 모달의 자동 닫힘 타이머가 이 콜백에 걸려 있다.
@@ -584,15 +593,20 @@ export function BeginnerShell() {
           계정은 프로브가 **빨리** 실패하므로, 가드가 없으면 원클릭 모달이 성공
           문구를 1.6초 보여주는 그 위에 이 모달이 겹쳐 뜬다 — 두 개가 겹치면
           Esc 한 번이 어느 쪽을 닫는지 알 수 없다. 원클릭은 인증되면 스스로
-          닫히므로 이 안내는 곧바로 이어서 뜬다. */}
-      {!showOneClick && <FundingGuideHost />}
+          닫히므로 이 안내는 곧바로 이어서 뜬다.
+
+          ★데모 재생 중에도 뜨지 않는다(티켓 E3ywX1ftbVr5f1TrFsgp): 데모는 연결
+          전에 여는 것이고 이 안내들도 연결이 없어서 뜨는 것이라 전제가 정확히
+          겹쳐, 가드가 없으면 대본 위에 안내가 항상 덮인다. 규칙은
+          lib/beginnerMode.shouldRenderOnboardingGuides 가 든다. */}
+      {guidesAllowed && <FundingGuideHost />}
 
       {/* ★M1 — "여기까지는 무료로 볼 수 있어요"(온램프 #886 §5-A). 지금까지 이
           셸은 스폰 차단(`needsAuth`)을 해석하는 화면 목록에 아예 없어서, L0
           유저가 실행을 눌러도 화면에 **아무 일도** 일어나지 않았다.
           원클릭 모달과 배타인 이유는 위 자금 안내와 같다. M2(자금)와의 배타는
           호스트가 스스로 판정한다 — 두 모달이 서로 반대되는 지시를 준다. */}
-      {!showOneClick && (
+      {guidesAllowed && (
         <OnrampGateHost variant="beginner" onConnect={openOneClick} />
       )}
 

@@ -46,6 +46,14 @@ interface CoachmarkStoreState {
   markDismissed: (tourId: string) => void;
   /** 설정에서 '안내 다시 보기'. 기록을 지워 처음 상태로 되돌린다. */
   resetTour: (tourId: string) => void;
+  /**
+   * ★다른 계정이 쓰던 기기에 **새 계정**이 처음 들어왔다 — 투어 기록 전체를
+   * 되돌린다 (티켓 E3ywX1ftbVr5f1TrFsgp). 이 기록은 기기 단위인데 안내는 사람
+   * 단위라, A 가 완주해 둔 투어 때문에 B 가 첫 실행 안내를 한 번도 못 보는 일이
+   * 생겼다. 호출부는 `lib/accountScope` 하나뿐이고, "새 계정" 판정도 거기서
+   * (비기너 스토어의 채택 결과로) 내린다 — 매 부팅 지우는 게 **아니다.**
+   */
+  resetForAccountChange: () => void;
 }
 
 export const useCoachmarkStore = create<CoachmarkStoreState>((set, get) => {
@@ -76,6 +84,11 @@ export const useCoachmarkStore = create<CoachmarkStoreState>((set, get) => {
       const next = { ...get().tours, [tourId]: { ...EMPTY_TOUR_RECORD } };
       persist({ tours: next });
       set({ tours: next });
+    },
+
+    resetForAccountChange: () => {
+      persist({ tours: {} });
+      set({ tours: {} });
     },
   };
 });
