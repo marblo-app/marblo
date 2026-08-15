@@ -4,9 +4,9 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import {
+  dismissOnrampBlock,
   injectProject,
   launchCleanRoom,
-  openWorkTab,
   passFirstRunModals,
   readRootPath,
   readSplitWorkspace,
@@ -46,6 +46,11 @@ import {
  */
 
 const START_HERE = "시작하기";
+const STEP_ID: Record<string, "install" | "auth" | "prd" | "firstTicket"> = {
+  설치: "install",
+  인증: "auth",
+  "첫 티켓": "firstTicket",
+};
 
 async function settle(page: Page, ms = 1200): Promise<void> {
   await page.waitForTimeout(ms);
@@ -67,9 +72,29 @@ async function waitUntil(
 
 /** 시작하기 탭을 열고 지정한 스텝 헤더를 편다. */
 async function openStep(page: Page, label: string): Promise<void> {
-  await openWorkTab(page, START_HERE);
-  await page.locator(`button:has-text("${label}")`).first().click();
+  await waitForAppShell(page);
+  await dismissAdvancedTour(page);
+  await dismissOnrampBlock(page);
+  const tab = page.getByRole("tab", { name: START_HERE, exact: true }).first();
+  if ((await tab.getAttribute("aria-selected").catch(() => null)) !== "true") {
+    await tab.click();
+  }
+  const step = STEP_ID[label];
+  if (!step) throw new Error(`알 수 없는 시작하기 스텝: ${label}`);
+  await page
+    .getByTestId(`start-here-step-${step}`)
+    .locator("button")
+    .first()
+    .click();
   await page.waitForTimeout(600);
+}
+
+async function dismissAdvancedTour(page: Page): Promise<void> {
+  const never = page.getByTestId("advanced-tour-never").first();
+  if (await never.isVisible().catch(() => false)) {
+    await never.click().catch(() => {});
+    await page.waitForTimeout(300);
+  }
 }
 
 /** 진짜 사용자 Documents 의 샘플 폴더 상태 — 하네스가 건드렸는지 대조용. */
@@ -89,7 +114,7 @@ test.describe("@cleanroom 제로마찰 온램프 엣지케이스", () => {
     const cr = await launchCleanRoom({
       claude: "missing",
       codex: "installed",
-      installPlan: { claude: "installed" },
+      installPlan: { claude: "installed", grok: "installed" },
     });
     try {
       await passFirstRunModals(cr.page);
@@ -154,8 +179,8 @@ test.describe("@cleanroom 제로마찰 온램프 엣지케이스", () => {
     const cr = await launchCleanRoom({
       claude: "missing",
       codex: "missing",
-      // claude 만 실패(EACCES/네트워크), codex 는 성공.
-      installPlan: { claude: "fail", codex: "installed" },
+      // claude 만 실패(EACCES/네트워크), codex/grok 은 성공.
+      installPlan: { claude: "fail", codex: "installed", grok: "installed" },
     });
     try {
       await passFirstRunModals(cr.page);
@@ -176,10 +201,11 @@ test.describe("@cleanroom 제로마찰 온램프 엣지케이스", () => {
       // ★부분 실패는 전부 실패와 다른 메시지다 — "1개 실패" 가 사실대로 보여야
       //   사용자가 남은 한 행만 다시 시도한다.
       expect(resultText).toContain("1");
-      // 실패했다고 패스가 중단되지 않았다 — codex 도 실제로 시도됐다.
+      // 실패했다고 패스가 중단되지 않았다 — codex/grok 도 실제로 시도됐다.
       const calls = await cr.installCalls();
       expect(calls).toContain("cli-claude-code");
       expect(calls).toContain("cli-codex");
+      expect(calls).toContain("cli-grok");
 
       // 실패 행의 폴백(수동 명령 + 공식문서)이 화면에 그대로 있다.
       const body = cr.page.locator("body");

@@ -113,9 +113,12 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
         "aria-selected",
         "true",
       );
-      // 비노출 6탭(startHere·board·lanes·project·history·store)의 라벨.
+      // 시작하기는 이제 심플 셸에서도 상시 노출된다. 설치/로그인 상태 원장과
+      // 데모 CTA 에 닿는 기본 경로라, "탭이 하나도 없다" 는 옛 계약이 아니라
+      // "대화가 기본이고 시작하기가 보조로 있다" 를 본다.
+      await expect(cr.page.getByTestId("beginner-tab-startHere")).toBeVisible();
+      // 비노출 5탭(board·lanes·project·history·store)의 라벨.
       for (const tab of [
-        "시작하기",
         "보드",
         "Board",
         "퀵레인",
@@ -298,58 +301,22 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       ).toHaveAttribute("data-column-status", "IN_PROGRESS");
       await cr.shot("G4-strip-planned-miniboard");
 
-      // ── ★미니 보드는 눌린다 — 상세는 비기너 판(워크트리·diff·PR 없음) ──
+      // ── ★미니 보드는 눌린다 — 상세는 표준 티켓 모달로 열린다 ─────────
+      // #975 이후 심플 셸도 상세/터미널 도착지를 표준 모달로 통일했다. 축소판
+      // `BeginnerTaskModal` 이 아니라, 보드 상세와 같은 정보면을 여는 것이 계약이다.
       await cr.page
         .getByTestId("beginner-mini-task")
         .filter({ hasText: "막힌 티켓" })
         .click();
-      const detail = cr.page.getByTestId("beginner-task-modal");
-      await expect(detail).toBeVisible();
-      await expect(detail).toHaveAttribute("data-task-status", "BLOCKED");
-      expect(await detail.textContent()).not.toContain("marblo/");
+      await expect(
+        cr.page.getByRole("heading", { name: "막힌 티켓" }),
+      ).toBeVisible();
+      await expect(cr.page.getByText("BLOCKED", { exact: true })).toBeVisible();
       await cr.shot("G4-task-detail");
-      await cr.page.getByTestId("beginner-task-modal-close").click();
-      await expect(detail).toHaveCount(0);
-
-      // ── ★접힌 컴포저를 되살리는 유일한 경로 = 티켓 상세의 "물어보기" ────
-      // 컴포저가 접힌 뒤에도 문장을 프리필해 주는 진입이 살아 있어야 한다.
-      // 없으면 그 버튼이 죽는다(PTY 는 프리필 대상이 아니다 — beginnerComposerMode ③).
-      await cr.page
-        .getByTestId("beginner-mini-task")
-        .filter({ hasText: "막힌 티켓" })
-        .click();
-      await expect(detail).toBeVisible();
-      await cr.page.getByTestId("beginner-task-modal-ask").click();
-      await expect(detail).toHaveCount(0);
-      const composer = cr.page.getByTestId("beginner-first-ask");
-      await expect(composer).toBeVisible();
-      // 되살아난 **얼굴**은 첫 화면(intro)이 아니어야 한다 — "무엇을 만들까요?"
-      // 와 예시 칩이 하던 일 위에 다시 깔리면 그건 뒤로 감긴 화면이다.
-      // ※ 규칙(`beginnerComposerMode`)의 이름은 `followUp` 이지만 화면에 찍히는
-      //   값은 intro 여부 둘뿐이다(`data-mode={intro ? "intro" : "chat"}`) —
-      //   이 spec 이 재는 것은 규칙의 이름이 아니라 **그려진 얼굴**이다.
-      await expect(composer).toHaveAttribute("data-mode", "chat");
-
-      // ── ★중복 전송 가드(진단 §7 P1-2 ①)는 형태만 바뀌어 살아 있다 ──────
-      // 8/4 유저는 delivered 된 요청을 14초 간격으로 3번 더 눌렀다. 이제 잠기는
-      // 것은 폼이 아니라 **같은 문장**이다(BEGINNER_DUP_WINDOW_MS 안이면 주입 안 함).
-      await cr.page.getByTestId("beginner-first-ask-input").fill(message);
-      await cr.page.getByTestId("beginner-first-ask-send").click();
-      await settle(cr.page, 1500);
-      expect((await cr.injected()).length).toBe(1);
-      await expect(cr.page.getByTestId("beginner-ask-duplicate")).toBeVisible();
-
-      // 다른 문장은 통과한다 — 막으려던 건 대화가 아니라 반복 주입이었다.
-      await cr.page
-        .getByTestId("beginner-first-ask-input")
-        .fill("거기에 예시도 넣어 줘");
-      await cr.page.getByTestId("beginner-first-ask-send").click();
-      await settle(cr.page, 1500);
-      const after = await cr.injected();
-      expect(after.length).toBe(2);
-      expect(after[1].message).toContain("예시");
-      // 전달됐으니 다시 접힌다 — 접힘/되살아남이 한 방향 규칙이 아님을 못박는다.
-      await expect(composer).toHaveCount(0);
+      await cr.page.mouse.click(10, 10);
+      await expect(
+        cr.page.getByRole("heading", { name: "막힌 티켓" }),
+      ).toHaveCount(0);
 
       // 에이전트가 붙으면 → working + 에이전트 패널(하단 2분할 오른쪽).
       await injectAgents(cr.page, [
@@ -495,10 +462,12 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       await chatReady(cr.page);
       await dismissBeginnerTour(cr.page);
 
-      // 완료 2건까지는 아직 아니다 — 임계가 실제로 3인지 확인한다.
+      // 완료 4건까지는 아직 아니다 — 임계는 5건이다.
       await injectTasks(cr.page, [
         { id: "d1", title: "완료 1", status: "DONE" },
         { id: "d2", title: "완료 2", status: "DONE" },
+        { id: "d3", title: "완료 3", status: "DONE" },
+        { id: "d4", title: "완료 4", status: "DONE" },
       ]);
       await settle(cr.page, 800);
       expect(
@@ -509,6 +478,8 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
         { id: "d1", title: "완료 1", status: "DONE" },
         { id: "d2", title: "완료 2", status: "DONE" },
         { id: "d3", title: "완료 3", status: "DONE" },
+        { id: "d4", title: "완료 4", status: "DONE" },
+        { id: "d5", title: "완료 5", status: "DONE" },
       ]);
       const modal = cr.page.getByTestId("beginner-promotion-modal").first();
       await modal.waitFor({ state: "visible", timeout: 10_000 });
@@ -531,6 +502,8 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
         { id: "d2", title: "완료 2", status: "DONE" },
         { id: "d3", title: "완료 3", status: "DONE" },
         { id: "d4", title: "완료 4", status: "DONE" },
+        { id: "d5", title: "완료 5", status: "DONE" },
+        { id: "d6", title: "완료 6", status: "DONE" },
       ]);
       await settle(cr.page, 1500);
       if ((await cr.page.getByTestId("beginner-promotion-modal").count()) > 0)
@@ -559,6 +532,8 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
         { id: "p1", title: "승격 티켓 1", status: "DONE" },
         { id: "p2", title: "승격 티켓 2", status: "DONE" },
         { id: "p3", title: "승격 티켓 3", status: "DONE" },
+        { id: "p4", title: "승격 티켓 4", status: "DONE" },
+        { id: "p5", title: "승격 티켓 5", status: "DONE" },
       ];
       await injectTasks(cr.page, seeded);
       await cr.page
