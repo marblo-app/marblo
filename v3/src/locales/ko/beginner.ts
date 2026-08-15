@@ -24,6 +24,7 @@ export const beginner = {
   "beginner.connect.title": "하나만 연결하면 시작할 수 있어요",
   "beginner.connect.subtitle":
     "Claude 또는 Codex 중 **하나만** 연결하세요. 나머지는 나중에 추가해도 됩니다.",
+  "beginner.connect.demoLead": "연결 전에 먼저 체험",
   "beginner.connect.claudeName": "Claude",
   "beginner.connect.claudeDesc": "Claude Code 구독 계정으로 연결",
   "beginner.connect.codexName": "Codex",
@@ -36,7 +37,7 @@ export const beginner = {
   "beginner.connect.recheck": "다시 확인",
   "beginner.connect.checking": "확인 중…",
   "beginner.connect.ready": "연결됐어요",
-  "beginner.connect.watchDemo": "먼저 데모 보기",
+  "beginner.connect.watchDemo": "영상 데모 보기",
   "beginner.connect.stuck":
     "잘 안 되나요? 터미널에 나온 주소를 브라우저에 직접 붙여 넣어도 됩니다.",
   "beginner.connect.pickYourself": "직접 고르기",

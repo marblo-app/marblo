@@ -91,6 +91,25 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       // 아무 CLI 도 없으므로 첫 화면은 연결 게이트(택1)다.
       await expect(cr.page.getByTestId("beginner-connect")).toBeVisible();
       await expect(
+        cr.page.getByTestId("beginner-firstscreen-demo"),
+      ).toBeVisible();
+      await expect(cr.page.getByTestId("onramp-decompose-input")).toBeVisible();
+      await expect(cr.page.getByTestId("onramp-decompose-cta")).toContainText(
+        /데모로 티켓 만들어보기|Make demo tickets/,
+      );
+      const demoBox = await cr.page
+        .getByTestId("beginner-firstscreen-demo")
+        .boundingBox();
+      const connectBox = await cr.page
+        .getByTestId("beginner-oneclick-cta-card")
+        .boundingBox();
+      expect(demoBox, "첫 화면 데모 CTA 영역이 렌더되지 않았다").toBeTruthy();
+      expect(connectBox, "연결 CTA 영역이 렌더되지 않았다").toBeTruthy();
+      expect(
+        demoBox!.y,
+        "티켓 생성 데모 CTA 가 연결 CTA 보다 아래에 있다",
+      ).toBeLessThan(connectBox!.y);
+      await expect(
         cr.page.getByTestId("beginner-connect-claude"),
       ).toBeVisible();
       await expect(cr.page.getByTestId("beginner-connect-codex")).toBeVisible();

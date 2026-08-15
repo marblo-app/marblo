@@ -708,7 +708,7 @@ export const onboarding = {
   "onramp.decompose.body":
     "하고 싶은 일을 한 문장으로 쓰면 진짜 보드에 진짜 티켓으로 쪼개 드립니다. 계정 연결 전이라 비용은 들지 않아요.",
   "onramp.decompose.placeholder": "예) 로그인 화면이랑 인증 API 가 필요해요",
-  "onramp.decompose.cta": "티켓으로 쪼개기",
+  "onramp.decompose.cta": "데모로 티켓 만들어보기",
   "onramp.decompose.working": "쪼개는 중…",
   "onramp.decompose.zeroCost": "무료 · 계정 연결 불필요",
   "onramp.decompose.example1": "로그인 화면이랑 인증 API 만들어줘",

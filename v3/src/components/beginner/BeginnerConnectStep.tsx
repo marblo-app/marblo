@@ -174,6 +174,21 @@ export function BeginnerConnectStep({
       data-testid="beginner-connect"
       className="mx-auto w-full max-w-2xl rounded-lg border border-[#313244] bg-[#181825] p-6"
     >
+      {/* ── ★콜드스타트 첫 화면의 주 CTA: 연결 전에 먼저 티켓 생성 체험 ─────
+          기존에는 이 L0 카드가 연결 제목/설명 아래에 있어, 첫 화면의 목적이
+          "이제 연결해보세요" 로 먼저 읽혔다. 콜드스타트의 첫 선택지는 계정 연결이
+          아니라 "내 문장이 티켓이 되는지 직접 해 보기" 여야 한다. 같은
+          OnrampDecomposeCard 를 StartHere 와 공유하므로 규칙 분해·티켓 생성 로직의
+          두 번째 사본은 없다. */}
+      {!setup.preview && (
+        <div data-testid="beginner-firstscreen-demo" className="mb-6">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#89b4fa]">
+            {t("beginner.connect.demoLead")}
+          </p>
+          <OnrampDecomposeCard surface="beginner_connect" />
+        </div>
+      )}
+
       <h1 className="text-lg font-semibold text-[#cdd6f4]">
         {t("beginner.connect.title")}
       </h1>
@@ -185,20 +200,6 @@ export function BeginnerConnectStep({
       >
         {emphasize(t("beginner.connect.subtitle"))}
       </p>
-
-      {/* ── ★L0: 연결 **전에** 먼저 값을 준다 (온램프 사다리 #886 §4) ─────
-          사다리의 0층은 "내 말이 진짜 티켓이 된다" 이고, 그건 계정 없이도 된다.
-          그래서 연결 카드보다 **위**에 선다 — 자격증명을 요구하기 전에 한 번은
-          제품이 무엇인지 보여준다는 게 이 설계의 순서다(불변식 I2 는 그다음
-          문을 항상 원가 0인 L1 으로 가리킨다).
-
-          ★프리뷰(시연)에서는 그리지 않는다: 이 카드는 실제 Firestore 티켓을
-          만들고, 프리뷰의 계약은 "실제 상태를 건드리지 않는다" 이다. */}
-      {!setup.preview && (
-        <div className="mt-5">
-          <OnrampDecomposeCard surface="beginner_connect" />
-        </div>
-      )}
 
       {/* ── ★주 경로: 원클릭 ─────────────────────────────────────────────
           한 번 누르면 설치 → 로그인까지 이어진다. 아래 택1 카드는 이걸
