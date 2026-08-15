@@ -165,6 +165,43 @@ describe("비기너 에이전트 패널 — 행 클릭", () => {
     );
     expect(screen.queryByTestId("beginner-agent-open-terminal")).toBeNull();
   });
+
+  it("★오케스트레이터(role)는 리스트에 안 나온다 — 워커만", () => {
+    useLocaleStore.setState({ locale: "ko" });
+    render(
+      createElement(BeginnerAgentsPane, {
+        agents: [
+          agent("오케", { role: "orchestrator", id: "orch-1" }),
+          agent("프론트-1", { id: "a1" }),
+          agent("백엔드-1", { id: "a2", role: "backend" }),
+        ],
+        tasks: [],
+        onAgentClick: vi.fn(),
+      }),
+    );
+
+    const rows = screen.getAllByTestId("beginner-agent-row");
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.textContent).join("\n")).toContain("프론트-1");
+    expect(rows.map((r) => r.textContent).join("\n")).toContain("백엔드-1");
+    expect(rows.map((r) => r.textContent).join("\n")).not.toContain("오케");
+    // 카운트 배지도 워커만.
+    expect(screen.getByTestId("beginner-agents-count").textContent).toContain(
+      "2",
+    );
+  });
+
+  it("오케만 있으면 빈 상태 — 팀원 0명으로 읽힌다", () => {
+    useLocaleStore.setState({ locale: "ko" });
+    render(
+      createElement(BeginnerAgentsPane, {
+        agents: [agent("오케", { role: "orchestrator" })],
+        tasks: [],
+      }),
+    );
+    expect(screen.queryByTestId("beginner-agent-row")).toBeNull();
+    expect(screen.getByTestId("beginner-agents-empty")).toBeTruthy();
+  });
 });
 
 // ── 행 액션 (작업 화면 · 끄기) ──────────────────────────────────────────────

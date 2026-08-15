@@ -131,6 +131,11 @@ import { ko } from "../../src/locales/ko";
 import type { Agent } from "../../src/types/agent";
 import type { Task, TaskStatus } from "../../src/types/task";
 
+/** 셸이 에이전트 패널에 넘기는 것과 같은 role 필터. */
+function workerAgentsOnly(list: Agent[]): Agent[] {
+  return list.filter((a) => a.role !== "orchestrator");
+}
+
 function task(id: string, status: TaskStatus, title: string): Task {
   return {
     id,
@@ -227,7 +232,8 @@ function Harness() {
     }),
     createElement(BeginnerAgentsPane, {
       key: "agents",
-      agents,
+      // 셸과 같은 필터 — 오케는 대화창 전담, 패널에는 워커만.
+      agents: workerAgentsOnly(agents),
       tasks,
       onTaskClick: openTaskDetail,
       onAgentClick: openAgentTerminal,
@@ -367,6 +373,26 @@ describe("비기너 셸 배선 — 클릭의 도착지", () => {
 
     expect(screen.getByTestId("beginner-agent-terminal-modal")).toBeTruthy();
     expect(screen.queryByTestId("beginner-task-modal")).toBeNull();
+  });
+
+  it("★오케스트레이터는 에이전트 패널에 안 보인다", () => {
+    stores.agents = [
+      AGENT,
+      {
+        ...AGENT,
+        id: "orch-1",
+        name: "오케스트레이터",
+        role: "orchestrator",
+        currentTaskId: null,
+        status: "working",
+      },
+    ];
+    render(createElement(Harness));
+
+    const rows = screen.getAllByTestId("beginner-agent-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain("프론트-1");
+    expect(rows[0].textContent).not.toContain("오케스트레이터");
   });
 });
 
