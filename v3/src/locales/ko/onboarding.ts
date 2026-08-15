@@ -458,10 +458,11 @@ export const onboarding = {
   "onboarding.startHere.subtitle":
     "네 단계면 첫 티켓까지 갑니다. 진행 상황은 저장되니 언제든 이어서 하세요.",
   "onboarding.startHere.progress": "{total}단계 중 {done}단계 완료",
-  "onboarding.startHere.demoLead": "먼저 어떻게 동작하는지 볼까요?",
+  "onboarding.startHere.demoLead": "대화가 티켓이 되는 흐름을 먼저 체험할까요?",
   // {seconds} = DemoMode 스크립트에서 실측 계산된 총 재생시간. 하드코딩 금지 —
   // 대본이 바뀌면 숫자도 따라 바뀌어야 하고, 그 불변식은 유닛테스트가 강제한다.
-  "onboarding.startHere.watchDemo": "{seconds}초 데모 보기",
+  // 문구: 정적 영상/미리보기와 구분 — "대화→티켓 생성 체험"임을 버튼에 박는다.
+  "onboarding.startHere.watchDemo": "대화→티켓 체험 · {seconds}초",
   "onboarding.startHere.stuckLabel": "막혔을 때:",
   "onboarding.startHere.skipStep":
     "이 단계는 나중에 하기(목록에 계속 남습니다)",
@@ -476,14 +477,14 @@ export const onboarding = {
   "onboarding.startHere.reenableLanding": "앱을 켤 때 이 탭으로 시작하기",
   "onboarding.startHere.dontLandHint":
     "어느 쪽이든 남은 단계는 이 탭에 그대로 남아 있습니다.",
-  "onboarding.startHere.value.kicker": "인증 전 가치 체험",
+  "onboarding.startHere.value.kicker": "인증 전 · 대화→티켓 체험",
   "onboarding.startHere.value.title":
-    "티켓 배정부터 에이전트 작업까지 먼저 확인하세요",
+    "대화 한 줄이 티켓으로 갈라지고 에이전트가 맡는 흐름",
   "onboarding.startHere.value.body":
-    "시연 영상은 오케스트레이터가 요청을 티켓으로 나누고, 알맞은 에이전트를 배정해 병렬로 작업시키는 흐름을 보여줍니다. CLI를 연결하고 계정을 연동하면 같은 흐름이 내 프로젝트에서 실제 터미널과 워크트리로 실행됩니다.",
-  "onboarding.startHere.value.playInteractive": "인터랙티브 데모 재생",
+    "왼쪽 영상은 미리보기입니다. 오른쪽 버튼의 인터랙티브 데모에서 요청→티켓 분해→배정→병렬 작업을 직접 밟아 보세요. CLI·계정 연결 후엔 같은 흐름이 내 프로젝트의 실제 터미널·워크트리에서 돌아갑니다.",
+  "onboarding.startHere.value.playInteractive": "데모로 티켓 생성해보기",
   "onboarding.startHere.value.zeroCost":
-    "데모는 CLI 실행·AI 호출·과금 없이 재생됩니다.",
+    "CLI 실행·AI 호출·과금 없이 · 대화→티켓 생성만 체험",
   "onboarding.startHere.activation.kicker": "CLI 연결 + 계정 연동",
   "onboarding.startHere.activation.title":
     "설치가 끝나면 하단 에이전트 탭에서 인증합니다",

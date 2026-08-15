@@ -40,18 +40,18 @@ const srcPath = (rel: string) =>
   fileURLToPath(new URL(`../../src/${rel}`, import.meta.url));
 
 describe("demo script — 재생시간이 라벨과 일치한다", () => {
-  it("글자당 노출 시간은 한글 분당 450자에서 나온다", () => {
-    // 400 → 450 (사장님: "메시지간 속도 조금만 빨라지면"). 값 자체가 아니라
-    // "분당 자수에서 파생된다" 가 계약이므로 파생식도 같이 못 박는다.
-    expect(KO_CHARS_PER_MINUTE).toBe(450);
-    expect(MS_PER_CHAR).toBe(133);
+  it("글자당 노출 시간은 한글 분당 550자에서 나온다", () => {
+    // 400 → 450 → 550 (br88d6WP: 첫 화면 데모 스텝 ~15–20% 단축). 값 자체가
+    // 아니라 "분당 자수에서 파생된다" 가 계약이므로 파생식도 같이 못 박는다.
+    expect(KO_CHARS_PER_MINUTE).toBe(550);
+    expect(MS_PER_CHAR).toBe(109);
     expect(MS_PER_CHAR).toBe(Math.round(60_000 / KO_CHARS_PER_MINUTE));
   });
 
   it("고정비는 글자수와 무관한 몫이라 읽기 속도보다 먼저 깎였다", () => {
-    // 600 → 420. 고정비는 모든 step 에 똑같이 붙어서, 여길 깎으면 짧은 step 이
-    // 많이 줄고 대사가 긴 step 은 덜 다친다.
-    expect(STEP_BASE_MS).toBe(420);
+    // 600 → 420 → 340. 고정비는 모든 step 에 똑같이 붙어서, 여길 깎으면 짧은
+    // step 이 많이 줄고 대사가 긴 step 은 덜 다친다.
+    expect(STEP_BASE_MS).toBe(340);
     // 그래도 시선 이동을 눈이 따라갈 만큼은 남아 있어야 한다.
     expect(STEP_BASE_MS).toBeGreaterThanOrEqual(300);
   });
@@ -158,9 +158,11 @@ describe("demo script — 재생시간이 라벨과 일치한다", () => {
   it("실제 재생시간은 사람이 읽을 수 있는 범위 안이다", () => {
     // 원래 10.1초는 "읽히기 전에 넘어간다" 는 사장님 피드백의 원인이었다.
     expect(DEMO_TOTAL_MS).toBeGreaterThan(40_000);
-    // 그 뒤 75.5초까지 늘렸더니 이번엔 "조금만 빨라지면" 이 왔다. 다시 그 언저리로
-    // 돌아가면(대사를 늘리든 상수를 되돌리든) 여기서 걸린다.
-    expect(DEMO_TOTAL_MS).toBeLessThan(72_000);
+    // 66s 전후에서 ~15–20% 단축 후 상한은 60s 안팎. 72s 로 되돌아가면 다시
+    // "조금만 빨라지면" 피드백 구간이다.
+    expect(DEMO_TOTAL_MS).toBeLessThan(62_000);
+    // 너무 짧아지면 다시 가독성 문제로 돌아간다(15% 단축의 하한 쪽).
+    expect(DEMO_TOTAL_MS).toBeGreaterThan(48_000);
     for (const act of DEMO_ACTS) {
       expect(actDurationMs(act)).toBeGreaterThan(10_000);
     }
@@ -378,5 +380,29 @@ describe("StartHereTab demo exposure contract", () => {
     expect(demoModeIndex).toBeGreaterThan(completeBranchIndex);
     expect(source).toContain("<ValuePreview onWatchDemo={openDemo} />");
     expect(source).toContain("<DemoMode");
+  });
+
+  it("첫 화면 데모 CTA 는 대화→티켓 체험임을 문구·testid 로 분명히 한다", () => {
+    // 정적 값-미리보기 텍스트에 "데모 보기"가 묻히던 회귀를 막는다(br88d6WP).
+    expect(koOnboarding["onboarding.startHere.value.playInteractive"]).toBe(
+      "데모로 티켓 생성해보기",
+    );
+    expect(koOnboarding["onboarding.startHere.watchDemo"]).toMatch(
+      /대화→티켓/,
+    );
+    expect(enOnboarding["onboarding.startHere.value.playInteractive"]).toMatch(
+      /ticket/i,
+    );
+    expect(enOnboarding["onboarding.startHere.watchDemo"]).toMatch(
+      /chat.*ticket|ticket.*chat/i,
+    );
+
+    const source = readFileSync(
+      srcPath("components/onboarding/StartHereTab.tsx"),
+      "utf8",
+    );
+    expect(source).toContain('data-testid="start-here-demo-cta"');
+    expect(source).toContain('data-testid="start-here-header-demo-cta"');
+    expect(source).toContain("onboarding.startHere.value.playInteractive");
   });
 });
