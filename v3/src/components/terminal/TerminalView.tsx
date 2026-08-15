@@ -38,6 +38,7 @@ export default memo(function TerminalView({
   const fitAddonRef = useRef<FitAddon | null>(null);
   const initializedRef = useRef(false);
   const repairCjkCachesRef = useRef<(reason: string) => void>(() => {});
+  const resumeRenderRef = useRef<(reason: string) => void>(() => {});
   const lastActivityStateRef = useRef<string | undefined>(activityState);
   // Shared scroll-follow state — user-input-driven (see effect for details).
   const wantBottomRef = useRef(true);
@@ -110,6 +111,13 @@ export default memo(function TerminalView({
         /* ignore */
       }
     };
+    const refreshTerminal = () => {
+      try {
+        terminal.refresh(0, Math.max(0, terminal.rows - 1));
+      } catch {
+        /* ignore */
+      }
+    };
     let cjkRepairFrame: number | null = null;
     const scheduleCjkCacheRepair = (reason: string) => {
       if (disposed || cjkRepairFrame !== null) return;
@@ -127,6 +135,19 @@ export default memo(function TerminalView({
       });
     };
     repairCjkCachesRef.current = scheduleCjkCacheRepair;
+
+    let resumeRenderFrame: number | null = null;
+    const scheduleResumeRender = (reason: string) => {
+      if (disposed || resumeRenderFrame !== null) return;
+      resumeRenderFrame = requestAnimationFrame(() => {
+        resumeRenderFrame = null;
+        if (disposed || !termOpened) return;
+        refitTerminal();
+        refreshTerminal();
+        scheduleCjkCacheRepair(`resume ${reason}`);
+      });
+    };
+    resumeRenderRef.current = scheduleResumeRender;
 
     // Drill-out gate: plain ArrowLeft with no modifiers AND an empty
     // estimated input line fires onLeftWhenEmpty instead of sending
@@ -173,6 +194,7 @@ export default memo(function TerminalView({
     let openRetries = 0;
     let termOpened = false;
     const pendingData: string[] = [];
+    let initialResumeTimer: ReturnType<typeof setTimeout> | null = null;
 
     // Clear any ghost xterm DOM from StrictMode's previous mount
     if (containerRef.current) {
@@ -220,10 +242,13 @@ export default memo(function TerminalView({
           onRebuilt: refitTerminal,
         });
 
-        requestAnimationFrame(() => {
-          if (disposed) return;
-          refitTerminal();
-        });
+        scheduleResumeRender("initial open");
+        initialResumeTimer = setTimeout(() => {
+          initialResumeTimer = null;
+          if (disposed || !termOpened) return;
+          scheduleResumeRender("initial settle");
+          nudgePtyRepaint("initial open");
+        }, 80);
       } catch (err) {
         console.warn("[TerminalView] xterm open failed:", err);
       } finally {
@@ -328,10 +353,11 @@ export default memo(function TerminalView({
     // terminal therefore stays blank until the user presses a key. Bumping
     // cols by one and restoring delivers a real SIGWINCH (the kernel only
     // signals on an actual size change), which makes Ink repaint the whole
-    // frame. Mirrors OrchestratorTerminal.nudgePtyRepaint. Called only on the
-    // alive-but-silent replay path below, so it never fires during normal work.
+    // frame. We also fire it once after initial open; the resize round trip is
+    // the reliable alt-screen resume signal for CLIs that otherwise stay black
+    // until a manual click, tab switch, or window resize.
     let nudgeRestoreTimer: ReturnType<typeof setTimeout> | null = null;
-    const nudgePtyRepaint = () => {
+    const nudgePtyRepaint = (reason = "pty repaint nudge") => {
       if (disposed || !termOpened) return;
       const cols = terminal.cols;
       const rows = terminal.rows;
@@ -342,7 +368,7 @@ export default memo(function TerminalView({
           nudgeRestoreTimer = null;
           if (disposed) return;
           window.electronAPI.pty.resize(sessionId, cols, rows);
-          scheduleCjkCacheRepair("pty repaint nudge");
+          scheduleResumeRender(reason);
         }, 50);
       } catch {
         /* ignore */
@@ -385,7 +411,7 @@ export default memo(function TerminalView({
               `\x1b[90m  ${t("terminal.session.restartHint")}\x1b[0m\r\n\r\n`,
             );
           } else {
-            nudgePtyRepaint();
+            nudgePtyRepaint("alive silent replay");
           }
         }
         if (termOpened && wantBottomRef.current) terminal.scrollToBottom();
@@ -467,6 +493,8 @@ export default memo(function TerminalView({
             containerRef.current.clientHeight > 0
           ) {
             fitAddon.fit();
+            refreshTerminal();
+            scheduleCjkCacheRepair("container resize");
           }
         } catch {
           /* ignore */
@@ -541,7 +569,9 @@ export default memo(function TerminalView({
       if (settleTimer) clearTimeout(settleTimer);
       if (maxTimer) clearTimeout(maxTimer);
       if (nudgeRestoreTimer) clearTimeout(nudgeRestoreTimer);
+      if (initialResumeTimer) clearTimeout(initialResumeTimer);
       if (cjkRepairFrame !== null) cancelAnimationFrame(cjkRepairFrame);
+      if (resumeRenderFrame !== null) cancelAnimationFrame(resumeRenderFrame);
       window.removeEventListener("resize", handleResize);
       resizeObserver?.disconnect();
       wrapperEl?.removeEventListener("wheel", onWheel, wheelOpts);
@@ -556,6 +586,7 @@ export default memo(function TerminalView({
       terminalRef.current = null;
       fitAddonRef.current = null;
       repairCjkCachesRef.current = () => {};
+      resumeRenderRef.current = () => {};
       initializedRef.current = false;
     };
   }, [sessionId]);
@@ -593,6 +624,7 @@ export default memo(function TerminalView({
         } catch {
           /* ignore */
         }
+        resumeRenderRef.current("tab active");
         // Delay scrollToBottom to ensure fit has fully rendered.
         // Only scroll if user wasn't manually scrolled-up — preserves position.
         requestAnimationFrame(() => {
