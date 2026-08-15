@@ -705,7 +705,7 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onramp.decompose.body":
     "Write what you want in one sentence and we'll split it into real tickets on your real board. No account needed yet, and it costs nothing.",
   "onramp.decompose.placeholder": "e.g. I need a login screen and an auth API",
-  "onramp.decompose.cta": "Split into tickets",
+  "onramp.decompose.cta": "Make demo tickets",
   "onramp.decompose.working": "Splitting…",
   "onramp.decompose.zeroCost": "Free · no account required",
   "onramp.decompose.example1": "Build a login screen and an auth API",

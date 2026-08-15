@@ -608,6 +608,30 @@ describe("BeginnerConnectStep — 원클릭이 주 경로, 택1 이 폴백", () 
   beforeEach(() => vi.clearAllMocks());
   afterEach(cleanup);
 
+  it("★콜드스타트 첫 화면은 티켓 생성 데모를 연결 CTA보다 먼저 보여준다", () => {
+    seed({
+      "cli-claude-code": probe(false, false),
+      "cli-codex": probe(false, false),
+    });
+    render(
+      createElement(BeginnerConnectStep, {
+        onWatchDemo: () => {},
+        onOneClick: () => {},
+      }),
+    );
+
+    const demo = screen.getByTestId("beginner-firstscreen-demo");
+    const connect = screen.getByTestId("beginner-oneclick-cta-card");
+    expect(demo.compareDocumentPosition(connect)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(
+      screen
+        .getByTestId("stub-onramp-decompose")
+        .getAttribute("data-surface"),
+    ).toBe("beginner_connect");
+  });
+
   it("원클릭 CTA 는 셸에 모달을 요청한다 — 게이트가 직접 들지 않는다", () => {
     // ★소유권이 중요하다: 인증이 성립하는 순간 셸이 이 연결 게이트를 폴더
     // 게이트로 갈아치우므로, 모달을 여기서 들면 "연결됐어요" 가 뜨자마자

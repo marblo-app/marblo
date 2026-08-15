@@ -45,6 +45,17 @@ describe("온보딩 파리티 — L0 분해 카드는 양쪽 모드에 있다", 
     expect(source).toContain('surface="beginner_connect"');
   });
 
+  it("★심플 콜드스타트: L0 티켓 생성 체험이 연결 CTA보다 먼저 선다", () => {
+    const source = src(BEGINNER_CONNECT);
+    const demoIndex = source.indexOf('data-testid="beginner-firstscreen-demo"');
+    const connectIndex = source.indexOf(
+      'data-testid="beginner-oneclick-cta-card"',
+    );
+    expect(demoIndex).toBeGreaterThan(-1);
+    expect(connectIndex).toBeGreaterThan(-1);
+    expect(demoIndex).toBeLessThan(connectIndex);
+  });
+
   it("어드밴스드: 시작하기 탭이 같은 카드를 마운트한다", () => {
     const source = src(START_HERE);
     expect(source).toContain("OnrampDecomposeCard");

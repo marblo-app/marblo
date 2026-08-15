@@ -22,6 +22,7 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.connect.title": "Connect one account and you're in",
   "beginner.connect.subtitle":
     "Connect **either** Claude or Codex — just one. You can add the other later.",
+  "beginner.connect.demoLead": "Try it before connecting",
   "beginner.connect.claudeName": "Claude",
   "beginner.connect.claudeDesc": "Sign in with your Claude Code subscription",
   "beginner.connect.codexName": "Codex",
@@ -35,7 +36,7 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.connect.recheck": "Check again",
   "beginner.connect.checking": "Checking…",
   "beginner.connect.ready": "Connected",
-  "beginner.connect.watchDemo": "Watch the demo first",
+  "beginner.connect.watchDemo": "Watch the video demo",
   "beginner.connect.stuck":
     "Stuck? You can paste the URL printed in the terminal into your browser directly.",
   "beginner.connect.pickYourself": "Or pick one yourself",
