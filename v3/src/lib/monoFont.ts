@@ -220,6 +220,23 @@ export function invalidateTerminalFontCaches(
   terminal.refresh(0, Math.max(0, terminal.rows - 1));
 }
 
+/**
+ * Re-apply the CJK cache rebuild only after the bundled face is known-good.
+ *
+ * Completion/idle UI updates can trigger a renderer reflow long after the
+ * initial font-load barrier ran. This gives callers a cheap guard for those
+ * lifecycle nudges without kicking off font downloads or rebaking fallback
+ * metrics when the face is unavailable.
+ */
+export function repairTerminalCjkFontCachesIfLoaded(
+  terminal: FontCacheInvalidatable,
+): boolean {
+  const fontSize = terminal.options.fontSize ?? 13;
+  if (!isCjkFontLoaded(fontSize)) return false;
+  invalidateTerminalFontCaches(terminal);
+  return true;
+}
+
 interface BindCjkFontOptions {
   /** Prefix for the debug/warn logs, e.g. "OrchestratorTerminal". */
   label: string;
@@ -245,9 +262,10 @@ export function bindTerminalCjkFont(
   const rebuild = (why: string) => {
     if (isStale()) return;
     try {
-      invalidateTerminalFontCaches(terminal);
-      onRebuilt?.();
-      console.debug(`[${label}] CJK glyph caches rebuilt (${why})`);
+      if (repairTerminalCjkFontCachesIfLoaded(terminal)) {
+        onRebuilt?.();
+        console.debug(`[${label}] CJK glyph caches rebuilt (${why})`);
+      }
     } catch (err) {
       console.warn(`[${label}] CJK glyph cache rebuild failed:`, err);
     }

@@ -1008,6 +1008,7 @@ export default memo(function OrchestratorPanel({
           <OrchestratorTerminal
             sessionId={ptySessionId}
             panelHeight={panelHeight}
+            status={status}
           />
         </div>
       )}
