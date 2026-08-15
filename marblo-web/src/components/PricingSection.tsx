@@ -202,6 +202,9 @@ export default function PricingSection() {
                           ? t("servicePeriod.annual")
                           : t("servicePeriod.monthly")}
                       </p>
+                      <p className="mt-1 text-zinc-400">
+                        {t("serviceDelivery")}
+                      </p>
                     </div>
                   )}
                 </div>

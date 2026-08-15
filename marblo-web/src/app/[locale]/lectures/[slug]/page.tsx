@@ -298,11 +298,7 @@ export default function LectureDetailPage() {
                   {t('notify_heading')}
                 </p>
                 <p className="text-sm text-zinc-400 leading-relaxed max-w-md">
-                  {locale === 'ko'
-                    ? '강의는 현재 제작 중입니다. 아직 판매를 시작하지 않았으며, 가격과 공개 일정은 준비되는 대로 안내드립니다.'
-                    : locale === 'ja'
-                      ? '本講座は現在制作中です。まだ販売は開始しておらず、価格と公開時期は準備でき次第ご案内します。'
-                      : 'This course is still in production. It is not on sale yet — pricing and launch date will be announced when ready.'}
+                  {t('commerceNotice')}
                 </p>
               </div>
 
@@ -581,6 +577,58 @@ export default function LectureDetailPage() {
       </section>
 
       {/* ===================== REQUIREMENTS ===================== */}
+      <section className="py-24">
+        <div className="max-w-4xl mx-auto px-4">
+          <h2 className="text-2xl font-bold mb-8">
+            {t('commerceInfoTitle')}
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="rounded-xl border border-zinc-700/50 bg-zinc-900 px-5 py-4">
+              <p className="text-sm font-semibold text-zinc-100">
+                {t('providerTitle')}
+              </p>
+              <p className="mt-2 text-sm text-zinc-400 leading-relaxed">
+                {t('providerBody', {
+                  instructor: lecture.instructor,
+                  title: lecture.instructorTitle,
+                })}
+              </p>
+            </div>
+            <div className="rounded-xl border border-zinc-700/50 bg-zinc-900 px-5 py-4">
+              <p className="text-sm font-semibold text-zinc-100">
+                {t('deliveryTitle')}
+              </p>
+              <p className="mt-2 text-sm text-zinc-400 leading-relaxed">
+                {t('deliveryBody')}
+              </p>
+            </div>
+            <div className="rounded-xl border border-zinc-700/50 bg-zinc-900 px-5 py-4">
+              <p className="text-sm font-semibold text-zinc-100">
+                {t('validityTitle')}
+              </p>
+              <p className="mt-2 text-sm text-zinc-400 leading-relaxed">
+                {t('validityBody')}
+              </p>
+            </div>
+            <div className="rounded-xl border border-zinc-700/50 bg-zinc-900 px-5 py-4">
+              <p className="text-sm font-semibold text-zinc-100">
+                {t('refundTitle')}
+              </p>
+              <p className="mt-2 text-sm text-zinc-400 leading-relaxed">
+                {t('refundBody')}
+              </p>
+              <Link
+                href={`/${locale}/legal/refund`}
+                target="_blank"
+                className="mt-3 inline-block text-sm text-indigo-400 hover:text-indigo-300 underline"
+              >
+                {t('refundLink')}
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section className="py-24">
         <div className="max-w-4xl mx-auto px-4">
           <h2 className="text-2xl font-bold mb-8">

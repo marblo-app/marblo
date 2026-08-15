@@ -155,3 +155,36 @@ PR #139 이후 PIPA 게이팅이 구현되어 **필수/선택 동의 분리는 �
 ---
 
 _근거 라인 번호는 기준 커밋 `8e50917` 시점. 후속 수정 시 라인 이동 가능._
+
+---
+
+## 8. 토스/네이버페이 심사 콘텐츠 대응 (2026-08-15)
+
+> **목적**: 결제 심사에서 요구하는 상품 상세·가격·체크아웃 고지(제공 방식, 제공 주기, 유효기간, 강사진, 환불 규정, 약관/환불 접근성)를 실제 화면에 보강한다.
+> **대상**: `src/components/PricingSection.tsx`, `src/app/[locale]/pricing/page.tsx`, `src/app/[locale]/checkout/page.tsx`, `src/app/[locale]/lectures/[slug]/page.tsx`, `messages/{ko,en,ja}.json`
+
+### 상품 구성 판정
+
+| 상품군 | 현재 상태 | 근거 | 심사 대응 |
+| --- | --- | --- | --- |
+| SaaS 구독 | 판매 중. Pro / Team / Team Plus 월간·연간 자동결제 | `PricingSection.tsx`, `checkout/page.tsx` | 가격 카드와 checkout 주문 요약에 결제 즉시 계정 활성화, 웹/데스크톱 앱 제공, 월/년 제공 주기, 월 1개월·연 12개월(1년) 유효기간 고지 |
+| 교육형 강의 | 출시 예정. 데이터와 상세 페이지는 있으나 실결제 차단 | `src/data/lectures.ts`의 `LECTURES_COMING_SOON = true`, `checkout/page.tsx`의 lecture redirect guard | 판매 전 상태를 유지하면서 상세 페이지에 강사진/교육 제공자, 웹 영상 제공 방식, 구매 후 1년 이내 유효기간 원칙, 7일 청약철회 및 다회차 부분환불 규정 링크 고지 |
+
+### 심사 체크리스트
+
+| 기준 | 반영 위치 | 상태 |
+| --- | --- | --- |
+| 결제 후 서비스 제공 방식 | `PricingSection.tsx` 가격 카드, `checkout/page.tsx` 주문 요약 | O — 결제 즉시 유료 기능 활성화, 웹 대시보드·데스크톱 앱 바로 이용 명시 |
+| 제공 주기 | `PricingSection.tsx`, `checkout/page.tsx` | O — 월 구독/연 구독, 매월/매년 자동결제 고지 |
+| 유효기간 | `PricingSection.tsx`, `checkout/page.tsx` | O — 월 1개월, 연 12개월(1년)로 1년 이내 명시 |
+| 교육 제공자/강사진 | `lectures/[slug]/page.tsx` | O — 강의 상세에 instructor / instructorTitle 기반 강사진 고지 |
+| 교육형 제공 방식 | `lectures/[slug]/page.tsx` | O — 웹 기반 내 강의 페이지에서 영상 강의·커리큘럼·예제 자료 제공 명시 |
+| 교육형 유효기간 | `lectures/[slug]/page.tsx` | O — 구매일로부터 1년 이내 운영, 판매 시작 시 확정 기간 표시 방침 명시 |
+| 교육형 환불/부분환불 | `lectures/[slug]/page.tsx`, `/legal/refund` | O — 7일 청약철회, 다회차 진도율별 부분환불 적용 및 환불정책 링크 |
+| 약관·환불 접근성 | `checkout/page.tsx` | O — 결제 버튼 전 이용약관/환불정책 링크를 새 탭으로 제공 |
+| 다국어 동기화 | `messages/ko.json`, `messages/en.json`, `messages/ja.json` | O — 신규 문구를 3개 로케일에 동시 추가 |
+
+### 남은 주의사항
+
+- 강의 판매를 재개할 때는 `src/data/lectures.ts` 상단의 되돌리기 절차에 따라 가격/구매 UI와 checkout lecture guard를 함께 복구해야 한다.
+- 강의가 실제 판매 상태로 전환되면 상품 상세과 checkout 양쪽에 확정 가격, 확정 유효기간, 교육 제공자, 제공 방식, 환불/부분환불 규정을 재검증해야 한다.
