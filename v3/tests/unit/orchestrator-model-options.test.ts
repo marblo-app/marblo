@@ -78,7 +78,7 @@ describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
     for (const option of options) {
       expect(
         normalizeOrchestratorModelSetting(option.value),
-        option.value,
+        option.value
       ).toBe(option.value);
     }
   });
@@ -89,7 +89,7 @@ describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
     for (const harness of ["grok", "antigravity"]) {
       expect(
         options.filter((o) => o.value.startsWith(`${harness}:`)),
-        harness,
+        harness
       ).toEqual([]);
     }
   });
@@ -118,7 +118,7 @@ describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
       expect(idx.length, harness).toBeGreaterThan(0);
       // 연속 구간이다(중간에 다른 하네스가 끼지 않는다).
       expect(idx, harness).toEqual(
-        Array.from({ length: idx.length }, (_, k) => idx[0] + k),
+        Array.from({ length: idx.length }, (_, k) => idx[0] + k)
       );
       // 그룹의 머리는 접미 없는 기본칸 — 종전 위치 감각 유지.
       expect(options[idx[0]].value, harness).toBe(harness);
@@ -205,40 +205,48 @@ describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
 
   it("withOrchestratorEffort 는 무효 조합을 애초에 만들지 않는다", () => {
     expect(withOrchestratorEffort("codex:gpt-5.5", "high")).toBe(
-      "codex:gpt-5.5@high",
+      "codex:gpt-5.5@high"
     );
     // 모델을 바꿀 때 effort 이월 — 새 모델이 지원하면 유지된다.
     expect(withOrchestratorEffort("codex:gpt-5.6-luna@high", "high")).toBe(
-      "codex:gpt-5.6-luna@high",
+      "codex:gpt-5.6-luna@high"
     );
     // "CLI 기본"(빈 값) 선택 → 모델 축만.
     expect(withOrchestratorEffort("codex:gpt-5.5@high", "")).toBe(
-      "codex:gpt-5.5",
+      "codex:gpt-5.5"
     );
     // effort 축이 없는 모델로 갈아타면 effort 는 조용히 떨어진다.
     expect(withOrchestratorEffort("claude:claude-opus-5", "high")).toBe(
-      "claude:claude-opus-5",
+      "claude:claude-opus-5"
     );
     // 게이트 칸은 UI 에서도 만들어지지 않는다.
     expect(withOrchestratorEffort("codex:gpt-5.6-sol", "ultra")).toBe(
-      "codex:gpt-5.6-sol",
+      "codex:gpt-5.6-sol"
     );
   });
 
   it("모든 선택지의 프로바이더가 아는 값이다", () => {
     for (const o of options) {
       expect([...ORCHESTRATOR_HARNESS_SETTINGS], o.value).toContain(
-        orchestratorModelProvider(o.value),
+        orchestratorModelProvider(o.value)
       );
     }
   });
 
-  it("★env-swap 벤더(GLM/MiniMax/Kimi)는 셀렉터에 없다 — 확정 결정", () => {
+  it("★env-swap 벤더(GLM/MiniMax/Kimi/Solar)는 셀렉터에 없다 — 확정 결정", () => {
     // 오케 선택은 프로젝트별 영구 저장이라, 조건부 크레덴셜에 의존하는 벤더가
     // 칸으로 서면 키가 빠진 순간부터 매 재시작이 말없이 네이티브 백엔드로 샌다
     // (`model-selection.selectorEligible` 주석의 확정 결정).
     const values = options.map((o) => o.value.toLowerCase());
-    for (const vendorish of ["glm", "minimax", "kimi", "zai", "moonshot"]) {
+    for (const vendorish of [
+      "glm",
+      "minimax",
+      "kimi",
+      "zai",
+      "moonshot",
+      "solar",
+      "upstage",
+    ]) {
       for (const v of values) expect(v, v).not.toContain(vendorish);
     }
   });

@@ -59,7 +59,7 @@ describe("벤더↔모델 인덱스 = 레지스트리 단일소스", () => {
       const resolved = resolveModel(m.id, INDEX);
       expect(
         resolved.registered,
-        `${m.id} 가 인덱스에 없다 — 카탈로그 파생이 끊겼다`,
+        `${m.id} 가 인덱스에 없다 — 카탈로그 파생이 끊겼다`
       ).toBe(true);
       expect(resolved.vendor).toBe(m.provider);
     }
@@ -75,7 +75,7 @@ describe("벤더↔모델 인덱스 = 레지스트리 단일소스", () => {
     expect(glm!.harness).toBe("claude");
     expect(mm!.harness).toBe("claude");
     const vendors = new Set(
-      [glm!, mm!, anthropic!].map((m) => resolveModel(m.id, INDEX).vendor),
+      [glm!, mm!, anthropic!].map((m) => resolveModel(m.id, INDEX).vendor)
     );
     expect(vendors.size).toBe(3);
   });
@@ -93,7 +93,7 @@ describe("벤더↔모델 인덱스 = 레지스트리 단일소스", () => {
     const native = MODEL_REGISTRY.filter(
       (m) =>
         m.status === "active" &&
-        (m.provider === "xai" || m.provider === "moonshot"),
+        (m.provider === "xai" || m.provider === "moonshot")
     );
     expect(native.length).toBeGreaterThan(0);
     for (const m of native) {
@@ -111,7 +111,7 @@ describe("벤더↔모델 인덱스 = 레지스트리 단일소스", () => {
 
   it("★CLI alias 도 해석된다(`grok`/`opus` 는 id 가 아니라 이동표적)", () => {
     const aliased = MODEL_REGISTRY.filter(
-      (m) => m.status === "active" && m.aliases.length > 0,
+      (m) => m.status === "active" && m.aliases.length > 0
     );
     expect(aliased.length).toBeGreaterThan(0);
     for (const m of aliased) {
@@ -174,6 +174,8 @@ describe("프리픽스 추정(레지스트리 미등록 전용)", () => {
     ["MiniMax-M9", "minimax"],
     ["grok-9", "xai"],
     ["kimi-k9", "moonshot"],
+    ["solar-pro5", "upstage"],
+    ["upstage-next", "upstage"],
     ["claude-opus-3", "anthropic"],
     ["gemini-3-flash", "google"],
     ["gpt-9", "openai"],
@@ -188,7 +190,7 @@ describe("프리픽스 추정(레지스트리 미등록 전용)", () => {
 
 describe("벤더 색 — 엔티티 고정(순위 아님)", () => {
   it("등록 벤더는 서로 다른 색을 받는다", () => {
-    const vendors = ["anthropic", "openai", "zai", "minimax", "xai"];
+    const vendors = ["anthropic", "openai", "zai", "minimax", "xai", "upstage"];
     const colors = vendors.map(vendorColor);
     expect(new Set(colors).size).toBe(vendors.length);
   });
@@ -213,7 +215,7 @@ describe("aggregateUsageByVendor", () => {
         entry(opus, { totalTokens: 100, inputTokens: 100, cost: 1 }),
         entry(opus, { totalTokens: 50, inputTokens: 50, cost: 0.5 }),
       ],
-      INDEX,
+      INDEX
     );
     expect(vendors).toHaveLength(1);
     expect(vendors[0].models).toHaveLength(1);
@@ -226,7 +228,7 @@ describe("aggregateUsageByVendor", () => {
   it("벤더별로 갈라 담고 토큰 내림차순으로 정렬한다", () => {
     const { vendors } = aggregateUsageByVendor(
       [entry(opus, { totalTokens: 10 }), entry(glm, { totalTokens: 90 })],
-      INDEX,
+      INDEX
     );
     expect(vendors.map((v) => v.vendor)).toEqual(["zai", "anthropic"]);
   });
@@ -234,16 +236,16 @@ describe("aggregateUsageByVendor", () => {
   it("색은 정렬 순서가 아니라 벤더 id 를 따라간다", () => {
     const big = aggregateUsageByVendor(
       [entry(opus, { totalTokens: 1 }), entry(glm, { totalTokens: 99 })],
-      INDEX,
+      INDEX
     );
     const flipped = aggregateUsageByVendor(
       [entry(opus, { totalTokens: 99 }), entry(glm, { totalTokens: 1 })],
-      INDEX,
+      INDEX
     );
     const colorOf = (rows: typeof big.vendors, vendor: string) =>
       rows.find((v) => v.vendor === vendor)!.color;
     expect(colorOf(big.vendors, "anthropic")).toBe(
-      colorOf(flipped.vendors, "anthropic"),
+      colorOf(flipped.vendors, "anthropic")
     );
     expect(colorOf(big.vendors, "zai")).toBe(colorOf(flipped.vendors, "zai"));
   });
@@ -259,7 +261,7 @@ describe("aggregateUsageByVendor", () => {
           cacheWriteTokens: 4,
         }),
       ],
-      INDEX,
+      INDEX
     );
     expect(totals.tokens).toBe(10);
   });
@@ -272,7 +274,7 @@ describe("aggregateUsageByVendor", () => {
         entry("", { totalTokens: 20 }),
         entry(opus, { totalTokens: 50 }),
       ],
-      INDEX,
+      INDEX
     );
     const unknownRow = vendors.find((v) => v.vendor === "unknown")!;
     expect(unknownRow.tokens).toBe(50);
@@ -290,11 +292,11 @@ describe("aggregateUsageByVendor", () => {
   it("추정 단가 플래그가 모델 행까지 전달된다", () => {
     const { vendors } = aggregateUsageByVendor(
       [entry(glm, { totalTokens: 1 })],
-      INDEX,
+      INDEX
     );
     const registryRow = MODEL_REGISTRY.find((m) => m.id === glm)!;
     expect(vendors[0].models[0].estimatedPricing).toBe(
-      Boolean(registryRow.pricing.estimated),
+      Boolean(registryRow.pricing.estimated)
     );
   });
 });
@@ -313,7 +315,7 @@ describe("에이전트 ↔ 실제 실행 모델", () => {
           detectedModelId: opus,
         },
       ],
-      INDEX,
+      INDEX
     );
     expect(row.modelId).toBe(opus);
     expect(row.source).toBe("detected");
@@ -329,7 +331,7 @@ describe("에이전트 ↔ 실제 실행 모델", () => {
           spawnedModel: "gpt-5.5@high",
         },
       ],
-      INDEX,
+      INDEX
     );
     expect(row.modelId).toBe("gpt-5.5@high");
     expect(row.source).toBe("spawned");
@@ -353,7 +355,7 @@ describe("에이전트 ↔ 실제 실행 모델", () => {
           detectedModelId: "unknown",
         },
       ],
-      INDEX,
+      INDEX
     );
     expect(row.modelId).toBe(grok.id);
     expect(row.source).toBe("spawned");
@@ -366,7 +368,7 @@ describe("에이전트 ↔ 실제 실행 모델", () => {
   it("센티넬만 있고 다른 근거가 없으면 근거 없음이다(벤더를 지어내지 않는다)", () => {
     const [row] = mapAgentsToModels(
       [{ id: "a1", name: "n", model: "grok", detectedModelId: "unknown" }],
-      INDEX,
+      INDEX
     );
     expect(row.source).toBe("none");
     expect(row.modelId).toBeNull();
@@ -384,7 +386,7 @@ describe("에이전트 ↔ 실제 실행 모델", () => {
           spawnedModel: kimi.id,
         },
       ],
-      INDEX,
+      INDEX
     );
     expect(row.vendor).toBe("moonshot");
     expect(row.registered).toBe(true);
@@ -395,7 +397,7 @@ describe("에이전트 ↔ 실제 실행 모델", () => {
   it("★근거가 하나도 없으면 모델을 추측하지 않는다", () => {
     const [row] = mapAgentsToModels(
       [{ id: "a1", name: "agent-1", model: "claude" }],
-      INDEX,
+      INDEX
     );
     expect(row.modelId).toBeNull();
     expect(row.modelLabel).toBeNull();
@@ -412,7 +414,7 @@ describe("에이전트 ↔ 실제 실행 모델", () => {
         { id: "b", name: "beta", model: "claude" },
         { id: "a", name: "omega", model: "claude", detectedModelId: opus },
       ],
-      INDEX,
+      INDEX
     );
     expect(rows.map((r) => r.name)).toEqual(["omega", "beta", "zeta"]);
   });
@@ -420,7 +422,7 @@ describe("에이전트 ↔ 실제 실행 모델", () => {
   it("공백만 있는 값은 근거로 치지 않는다", () => {
     const [row] = mapAgentsToModels(
       [{ id: "a1", name: "n", model: "claude", detectedModelId: "   " }],
-      INDEX,
+      INDEX
     );
     expect(row.source).toBe("none");
     expect(row.modelId).toBeNull();

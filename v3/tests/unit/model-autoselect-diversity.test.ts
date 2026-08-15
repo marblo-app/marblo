@@ -67,6 +67,9 @@ function plan(extra: Partial<Parameters<typeof selectAutoModel>[0]> = {}) {
     tier: "standard",
     ctx: ctxFor("standard"),
     epsilon: 0,
+    // 이 스위트는 native Codex rung 사이의 diversity 성분을 검증한다. Solar 는
+    // gpt 하네스지만 키 조건부 env-swap 벤더라 여기서는 제외해 비교 대상을 고정한다.
+    modelAvailable: (id) => id !== "solar-pro4",
     ...extra,
   });
 }
@@ -98,9 +101,9 @@ describe("model-autoselect diversity bonus", () => {
     const graph = emptyRoutingGraph();
     const { candidates, entryIndex } = autoCandidates("gpt", "standard");
     const entry = candidates[entryIndex];
-    const lean = candidates.find((c) => c.index === entryIndex - 1)!;
+    const lean = candidates.find((c) => c.index === entryIndex + 1)!;
 
-    setNeutralObservations(graph, entry.modelKey, 20, ctx);
+    setNeutralObservations(graph, entry.modelKey, 1_000, ctx);
 
     const p = plan({ ctx, graph })!;
     expect(p.modelKey).toBe(lean.modelKey);
@@ -131,7 +134,7 @@ describe("model-autoselect diversity bonus", () => {
     const entry = candidates[entryIndex];
     const lean = candidates.find((c) => c.index === entryIndex - 1)!;
 
-    setNeutralObservations(graph, entry.modelKey, 20, ctx);
+    setNeutralObservations(graph, entry.modelKey, 1_000, ctx);
 
     const disabled = plan({ ctx, graph, diversityCoefficient: 0 })!;
     expect(disabled.modelKey).toBe(entry.modelKey);

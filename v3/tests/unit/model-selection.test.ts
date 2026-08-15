@@ -281,8 +281,12 @@ describe("오케 셀렉터 compound 값", () => {
     expect(ids).toContain("gpt-5.5");
     expect(ids[0]).toBe("gpt-5.6-sol"); // frontier 가 맨 앞
     expect(choices).toHaveLength(
-      MODEL_REGISTRY.filter((m) => m.harness === "gpt" && m.status === "active")
-        .length,
+      MODEL_REGISTRY.filter(
+        (m) =>
+          m.harness === "gpt" &&
+          m.provider === "openai" &&
+          m.status === "active",
+      ).length,
     );
     // 값·라벨 포맷은 Claude 와 같은 규칙(프로바이더 프리픽스 + 레지스트리 id).
     expect(choices[0].value).toBe("codex:gpt-5.6-sol");
@@ -379,7 +383,7 @@ describe("오케 셀렉터 compound 값", () => {
   });
 });
 
-describe("§P1 벤더 숏핸드 해석 (minimax / glm / kimi)", () => {
+describe("§P1 벤더 숏핸드 해석 (minimax / glm / kimi / solar)", () => {
   it('resolveModelPin("minimax") === MiniMax-M3 (최신 flagship, M2.7 아님)', () => {
     const pin = resolveModelPin("minimax", CLI_OK);
     expect(pin).toMatchObject({
@@ -447,12 +451,26 @@ describe("§P1 벤더 숏핸드 해석 (minimax / glm / kimi)", () => {
     });
   });
 
+  it("solar / upstage → solar-pro4 (OpenAI 호환 env-swap)", () => {
+    for (const input of ["solar", "upstage", "solar-pro"]) {
+      const pin = resolveModelPin(input, CLI_OK);
+      expect(pin).toMatchObject({
+        harness: "gpt",
+        vendor: "upstage",
+        codexModel: "solar-pro4",
+        label: "solar-pro4",
+      });
+    }
+  });
+
   it("★회귀: 벤더 숏핸드는 loose index 에 없다 (숏핸드 전용 경로)", () => {
     expect(findModelLoose("minimax")).toBeUndefined();
     expect(findModelLoose("glm")).toBeUndefined();
     expect(findModelLoose("kimi")).toBeUndefined();
     expect(findModelLoose("zai")).toBeUndefined();
     expect(findModelLoose("moonshot")).toBeUndefined();
+    expect(findModelLoose("solar")).toBeUndefined();
+    expect(findModelLoose("upstage")).toBeUndefined();
   });
 
   it("★회귀: normalizeModel 은 벤더 숏핸드를 삼키지 않는다 (harness 축 유지)", () => {
@@ -460,6 +478,7 @@ describe("§P1 벤더 숏핸드 해석 (minimax / glm / kimi)", () => {
     expect(normalizeModel("minimax")).toBeUndefined();
     expect(normalizeModel("glm")).toBeUndefined();
     expect(normalizeModel("kimi")).toBeUndefined();
+    expect(normalizeModel("solar")).toBeUndefined();
     // 고치기 전: resolveModelPin("minimax") 도 undefined → antigravity/gpt 폴백
     // 고친 후: resolveVendorShorthand → MiniMax-M3 핀 성공
     expect(resolveModelPin("minimax", CLI_OK)?.claudeModel).toBe("MiniMax-M3");
@@ -479,6 +498,7 @@ describe("§P1 벤더 숏핸드 해석 (minimax / glm / kimi)", () => {
     expect(resolveVendorShorthand("MiniMax-M2.7")).toBeUndefined();
     expect(resolveVendorShorthand("MiniMax-M3")).toBeUndefined();
     expect(resolveVendorShorthand("glm-5.2")).toBeUndefined();
+    expect(resolveVendorShorthand("solar-pro4")).toBeUndefined();
     expect(parseModelSpec("MiniMax-M2.7")?.modelId).toBe("MiniMax-M2.7");
     expect(parseModelSpec("MiniMax-M3")?.modelId).toBe("MiniMax-M3");
     expect(parseModelSpec("minimax-m3")?.modelId).toBe("MiniMax-M3");
@@ -488,6 +508,9 @@ describe("§P1 벤더 숏핸드 해석 (minimax / glm / kimi)", () => {
     );
     expect(resolveModelPin("glm-5.2", CLI_OK)?.claudeModel).toBe("glm-5.2");
     expect(resolveModelPin("k3", CLI_OK)?.claudeModel).toBe("k3");
+    expect(resolveModelPin("solar-pro4", CLI_OK)?.codexModel).toBe(
+      "solar-pro4",
+    );
   });
 
   it("resolveVendorShorthand 직접: 벤더 → flagship 행", () => {
@@ -496,6 +519,8 @@ describe("§P1 벤더 숏핸드 해석 (minimax / glm / kimi)", () => {
     expect(resolveVendorShorthand("zai")?.id).toBe("glm-5.2");
     expect(resolveVendorShorthand("kimi")?.id).toBe("k3");
     expect(resolveVendorShorthand("moonshot")?.id).toBe("k3");
+    expect(resolveVendorShorthand("solar")?.id).toBe("solar-pro4");
+    expect(resolveVendorShorthand("upstage")?.id).toBe("solar-pro4");
   });
 
   it("존재하지 않는 벤더는 undefined", () => {

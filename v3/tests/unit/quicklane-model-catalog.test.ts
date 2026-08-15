@@ -23,7 +23,7 @@ import {
 
 /** 렌더러가 받는 모양(available/missingEnvKeys 는 main 이 얹는다)으로 접는다. */
 function asRendererGroups(
-  present: Record<string, string> = {},
+  present: Record<string, string> = {}
 ): QuickLaneVendorGroupShape[] {
   return quickLaneVendorCatalog().map((g) => {
     const missingEnvKeys = g.requiredEnvKeys.filter((k) => !present[k]);
@@ -61,9 +61,17 @@ describe("퀵레인 모델 카탈로그 ↔ 레지스트리", () => {
     }
   });
 
-  it("★완료기준: 4개 하네스(claude/gpt/grok) + env-swap 벤더(zai/minimax)가 전부 선다", () => {
+  it("★완료기준: 4개 하네스(claude/gpt/grok) + env-swap 벤더가 전부 선다", () => {
     const vendors = catalog.map((g) => g.vendor);
-    for (const v of ["anthropic", "openai", "xai", "zai", "minimax"]) {
+    for (const v of [
+      "anthropic",
+      "openai",
+      "xai",
+      "zai",
+      "minimax",
+      "moonshot",
+      "upstage",
+    ]) {
       expect(vendors, v).toContain(v);
     }
   });
@@ -80,6 +88,7 @@ describe("퀵레인 모델 카탈로그 ↔ 레지스트리", () => {
       "glm-5.2",
       "MiniMax-M3",
       "MiniMax-M2.7",
+      "solar-pro4",
     ]) {
       expect(ids, id).toContain(id);
     }
@@ -128,14 +137,14 @@ describe("퀵레인 모델 카탈로그 ↔ 레지스트리", () => {
       const ranks = group.models.map((m) => rank[m.capability]);
       expect(
         [...ranks].sort((a, b) => b - a),
-        group.vendor,
+        group.vendor
       ).toEqual(ranks);
     }
   });
 
   it("네이티브 벤더가 env-swap 벤더보다 앞에 선다", () => {
     const isNative = catalog.map(
-      (g) => HARNESS_NATIVE_VENDOR[g.harness] === g.vendor,
+      (g) => HARNESS_NATIVE_VENDOR[g.harness] === g.vendor
     );
     const lastNative = isNative.lastIndexOf(true);
     const firstSwap = isNative.indexOf(false);
@@ -153,6 +162,9 @@ describe("퀵레인 모델 카탈로그 ↔ 레지스트리", () => {
     expect(byVendor.zai.command).toBe("claude");
     expect(byVendor.zai.harness).toBe("claude");
     expect(byVendor.minimax.harness).toBe("claude");
+    // OpenAI 호환 env-swap 은 Codex 하네스의 OPENAI_BASE_URL 을 스왑한다.
+    expect(byVendor.upstage.command).toBe("codex");
+    expect(byVendor.upstage.harness).toBe("gpt");
   });
 });
 

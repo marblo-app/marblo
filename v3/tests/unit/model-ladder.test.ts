@@ -89,7 +89,7 @@ describe("사다리 데이터 규율", () => {
   it("칸 순서가 능력등급 비내림차순이다(상향 축 = 능력)", () => {
     for (const harness of LADDER_HARNESSES) {
       const ranks = ladderFor(harness)!.rungs.map(
-        (r) => capabilityRank(r.model)!,
+        (r) => capabilityRank(r.model)!
       );
       for (let i = 1; i < ranks.length; i++) {
         expect(ranks[i]).toBeGreaterThanOrEqual(ranks[i - 1]);
@@ -104,7 +104,7 @@ describe("사다리 데이터 규율", () => {
         if (rungs[i].model !== rungs[i - 1].model) continue;
         const efforts = getModel(rungs[i].model)!.efforts;
         expect(efforts.indexOf(rungs[i].effort!)).toBeGreaterThan(
-          efforts.indexOf(rungs[i - 1].effort!),
+          efforts.indexOf(rungs[i - 1].effort!)
         );
       }
     }
@@ -152,10 +152,10 @@ describe("★실단가 기반 순서 (PR 근거)", () => {
     expect(gptLive).toBe("gpt-5.5");
     expect(costIndexForModel(gptLive)!).toBeCloseTo(
       costIndexForModel("claude-sonnet-5")! * 1.944,
-      2,
+      2
     );
     expect(costIndexForModel(gptLive)!).toBeGreaterThan(
-      costIndexForModel("claude-sonnet-5")!,
+      costIndexForModel("claude-sonnet-5")!
     );
   });
 
@@ -165,7 +165,7 @@ describe("★실단가 기반 순서 (PR 근거)", () => {
     expect(tops[0]).toBe("gpt-5.6-terra");
     expect(tops).toContain("gpt-5.5");
     expect(costIndexForModel("gpt-5.6-terra")!).toBeLessThan(
-      costIndexForModel("gpt-5.5")!,
+      costIndexForModel("gpt-5.5")!
     );
     // 사다리의 standard 진입 칸이 실제로 그 모델이다.
     expect(entryRung("gpt", "standard")!.model).toBe("gpt-5.6-terra");
@@ -212,7 +212,7 @@ describe("★gpt-5.6 3변종 변주", () => {
   it("luna 는 ultra 칸을 갖지 않는다(레지스트리 비대칭 반영)", () => {
     expect(getModel("gpt-5.6-luna")!.efforts).not.toContain("ultra");
     const lunaRungs = ladderFor("gpt")!.rungs.filter(
-      (r) => r.model === "gpt-5.6-luna",
+      (r) => r.model === "gpt-5.6-luna"
     );
     expect(lunaRungs.every((r) => r.effort !== "ultra")).toBe(true);
   });
@@ -233,14 +233,14 @@ describe("완결성 — 레지스트리 행이 사다리에서 유령이 되지 
   // 자리가 없어진다: 사다리를 만들거나, 이유를 적거나 둘 중 하나다.
   it("모든 활성 모델은 사다리에 있거나 제외 이유가 적혀 있다(하네스 불문)", () => {
     const inLadder = new Set(
-      LADDER_HARNESSES.flatMap((p) => ladderFor(p)!.rungs.map((r) => r.model)),
+      LADDER_HARNESSES.flatMap((p) => ladderFor(p)!.rungs.map((r) => r.model))
     );
     for (const entry of MODEL_REGISTRY) {
       if (entry.status !== "active") continue;
       const covered = inLadder.has(entry.id) || entry.id in LADDER_EXCLUSIONS;
       expect(
         covered,
-        `${entry.id}(harness=${entry.harness}) 가 사다리에도 LADDER_EXCLUSIONS 에도 없다 — 라우팅이 절대 고를 수 없는 유령 모델이 된다.`,
+        `${entry.id}(harness=${entry.harness}) 가 사다리에도 LADDER_EXCLUSIONS 에도 없다 — 라우팅이 절대 고를 수 없는 유령 모델이 된다.`
       ).toBe(true);
     }
   });
@@ -260,9 +260,11 @@ describe("완결성 — 레지스트리 행이 사다리에서 유령이 되지 
 });
 
 describe("상향 이동 (nextRung)", () => {
-  it("티어 경계를 넘어 계속 올라간다: simple 진입에서 3칸 = standard 진입", () => {
+  it("티어 경계를 넘어 계속 올라간다: simple 진입에서 standard 진입까지", () => {
+    const ladder = ladderFor("gpt")!;
+    const steps = ladder.entry.standard - ladder.entry.simple;
     let rung = entryRung("gpt", "simple")!;
-    for (let i = 0; i < 3; i++) rung = nextRung("gpt", rung)!;
+    for (let i = 0; i < steps; i++) rung = nextRung("gpt", rung)!;
     expect(rungLabel(rung)).toBe(rungLabel(entryRung("gpt", "standard")!));
   });
 
@@ -307,15 +309,15 @@ describe("상향 이동 (nextRung)", () => {
 // ─────────────────────────────────────────────────────────────────────────
 describe("★max/ultra 승인 게이트", () => {
   const solMax: LadderRung = ladderFor("gpt")!.rungs.find(
-    (r) => rungLabel(r) === "gpt-5.6-sol@max",
+    (r) => rungLabel(r) === "gpt-5.6-sol@max"
   )!;
   const solUltra: LadderRung = ladderFor("gpt")!.rungs.find(
-    (r) => rungLabel(r) === "gpt-5.6-sol@ultra",
+    (r) => rungLabel(r) === "gpt-5.6-sol@ultra"
   )!;
 
   const approvalFor = (
     rung: LadderRung,
-    over: Partial<EscalationApprovalRecord> = {},
+    over: Partial<EscalationApprovalRecord> = {}
   ): EscalationApprovalRecord => ({
     questionId: "task-1#qabc",
     model: rung.model,
@@ -386,7 +388,7 @@ describe("★max/ultra 승인 게이트", () => {
 
   it("거부는 예산을 태우지 않는다(사장님이 '안 됨' 이라 답해도 재요청 가능)", () => {
     expect(
-      approvalBudgetSpent([approvalFor(solMax, { decision: "denied" })]),
+      approvalBudgetSpent([approvalFor(solMax, { decision: "denied" })])
     ).toBe(0);
   });
 
@@ -397,7 +399,7 @@ describe("★max/ultra 승인 게이트", () => {
 
   it("highestUngatedRungAtOrBelow: 최상단에서 내려오면 sol@xhigh", () => {
     expect(rungLabel(highestUngatedRungAtOrBelow(solUltra)!)).toBe(
-      "gpt-5.6-sol@xhigh",
+      "gpt-5.6-sol@xhigh"
     );
   });
 
@@ -491,14 +493,14 @@ describe("dispatch 인자에서 effort 추출", () => {
     ];
     expect(usableApprovalLoose(approved, "GPT 5.6 SOL", "max")).toBeTruthy();
     expect(
-      usableApprovalLoose(approved, "gpt-5.6-sol@max", "max"),
+      usableApprovalLoose(approved, "gpt-5.6-sol@max", "max")
     ).toBeTruthy();
     // 다른 모델·다른 effort·별칭(해석 불가)은 통과하지 않는다.
     expect(
-      usableApprovalLoose(approved, "gpt-5.6-terra", "max"),
+      usableApprovalLoose(approved, "gpt-5.6-terra", "max")
     ).toBeUndefined();
     expect(
-      usableApprovalLoose(approved, "gpt-5.6-sol", "ultra"),
+      usableApprovalLoose(approved, "gpt-5.6-sol", "ultra")
     ).toBeUndefined();
     expect(usableApprovalLoose(approved, "sol", "max")).toBeUndefined();
     expect(usableApprovalLoose(approved, undefined, "max")).toBeUndefined();
