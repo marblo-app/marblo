@@ -34,6 +34,10 @@ interface DeviceSession {
   intervalSeconds: number;
 }
 
+interface GitHubConnectionPanelProps {
+  embedded?: boolean;
+}
+
 function github(): GitHubAPI {
   return window.electronAPI.github;
 }
@@ -54,7 +58,9 @@ function statusBadge(connected: boolean): {
   };
 }
 
-export function GitHubConnectionPanel() {
+export function GitHubConnectionPanel({
+  embedded = false,
+}: GitHubConnectionPanelProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const userId = user?.uid;
@@ -200,12 +206,24 @@ export function GitHubConnectionPanel() {
   }, [t, userId]);
 
   return (
-    <div className="border-b border-[#313244] bg-[#181825] px-4 py-3">
+    <div
+      className={
+        embedded
+          ? "rounded border border-[#313244] bg-[#1e1e2e] p-3"
+          : "border-b border-[#313244] bg-[#181825] px-4 py-3"
+      }
+    >
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="flex items-center gap-2">
             <GitBranch className="h-4 w-4 text-[#cdd6f4]" aria-hidden />
-            <h3 className="text-sm font-semibold text-[#cdd6f4]">
+            <h3
+              className={
+                embedded
+                  ? "text-xs font-medium text-[#bac2de]"
+                  : "text-sm font-semibold text-[#cdd6f4]"
+              }
+            >
               {t("harness.github.title")}
             </h3>
             <span

@@ -5,7 +5,7 @@
  */
 export const harness = {
   // --- Connection status panel ---
-  "harness.conn.title": "연결 상태",
+  "harness.conn.title": "저장소(GitHub) 연결",
   "harness.conn.noProject": "프로젝트 미선택",
   "harness.conn.refreshTitle": "연결 상태 새로고침",
   "harness.conn.resyncTitle": "git 메타(repo URL·기본 브랜치) 재동기화",
@@ -25,7 +25,7 @@ export const harness = {
   "harness.conn.nodeHintAfter": "후 앱을 재시작하세요.",
   "harness.conn.noRepo": "연결된 repo가 없습니다.",
   "harness.conn.autoFillHint":
-    "현재 프로젝트의 로컬 경로로 연결을 만들면 repo URL·기본 브랜치를 git 에서 자동으로 채웁니다.",
+    "현재 프로젝트의 로컬 경로로 저장소 연결을 만들면 repo URL·기본 브랜치를 git 에서 자동으로 채웁니다. private 저장소 접근은 아래 GitHub 계정 연결을 추가로 사용합니다.",
   "harness.conn.connect": "연결하기",
   "harness.conn.connecting": "연결 중",
   "harness.conn.noFolderPath":
@@ -101,7 +101,7 @@ export const harness = {
   // Harness 탭은 "이 앱을 쓰려면 반드시 해야 하는 연결"만 담는다 — 골라 담는
   // 자산 카탈로그는 최상위 스토어 탭으로 나갔다.
   "harness.store.title": "하네스 연결",
-  "harness.store.subtitle": "CLI·벤더·채널 — 이 앱이 쓰려면 필요한 연결",
+  "harness.store.subtitle": "저장소·커넥터·채널 — 하네스가 쓰는 연결",
   "harness.store.emptyList": "표시할 패키지가 없습니다.",
   "harness.store.deprecated": "단종 예정",
   "harness.store.badge.installed": "설치됨",
@@ -131,14 +131,14 @@ export const harness = {
   // --- 연결 섹션 머리줄 ---
   "harness.store.section.connections": "연결",
   "harness.store.section.connectionsDesc":
-    "CLI·벤더·채널을 이 앱에 연결합니다.",
+    "저장소(GitHub), 커넥터, Telegram/Slack 채널을 한곳에서 연결합니다.",
   // --- Telegram channel panel ---
   // Status badge (fixed-set labels)
   "harness.telegram.status.idle": "대기",
   "harness.telegram.status.connected": "연결",
   "harness.telegram.status.needsCheck": "확인 필요",
   "harness.telegram.status.disconnected": "미연결",
-  "harness.telegram.title": "채널 연결",
+  "harness.telegram.title": "Telegram 채널 연결",
   "harness.telegram.loadError": "텔레그램 채널 상태를 불러오지 못했습니다.",
   "harness.telegram.needChatId": "chatId 를 저장해야 활성화할 수 있습니다.",
   "harness.telegram.saved": "채널 설정을 저장했습니다.",
@@ -218,9 +218,9 @@ export const harness = {
     "채널에서 봇을 멘션해 응답이 왕복하는지 확인합니다.",
 
   // --- GitHub 연결 패널 (leyZnPBHbHUl3H9sRTDF) — 선택사항, 온보딩 필수 아님 ---
-  "harness.github.title": "GitHub 연결",
+  "harness.github.title": "GitHub 계정 연결",
   "harness.github.subtitle":
-    "private 저장소 clone·협업용 선택 연결입니다. 시작하기 플로우에는 없습니다.",
+    "private 저장소 clone·협업용 선택 연결입니다. 시작하기에는 뜨지 않고, 하네스 탭에서 필요할 때만 설정합니다.",
   "harness.github.optionalBadge": "선택",
   "harness.github.status.connected": "연결",
   "harness.github.status.disconnected": "미연결",
@@ -247,23 +247,23 @@ export const harness = {
   "harness.github.deviceCodeHint":
     "코드 입력·승인 후 이 패널이 자동으로 연결 상태로 바뀝니다.",
   "harness.github.openGithub": "GitHub 열기",
-  "harness.github.guide.toggle": "GitHub를 어떻게 연결하나요?",
+  "harness.github.guide.toggle": "GitHub 저장소 접근 가이드",
   "harness.github.guide.step1":
-    "위 「GitHub 연결」 버튼을 누르면 device OAuth 코드가 발급됩니다.",
+    "먼저 이 섹션의 「연결하기」로 현재 프로젝트의 repo URL·기본 브랜치를 저장합니다.",
   "harness.github.guide.step2Before": "",
   "harness.github.guide.step2After":
     "에서 표시된 코드를 입력하고 Marblo를 승인합니다.",
   "harness.github.guide.step3":
-    "승인이 끝나면 private 저장소 clone·push 가 이 기기에서 가능해집니다.",
+    "private 저장소 clone·push 가 필요하면 위 「GitHub 계정 연결」 버튼으로 device OAuth 코드를 발급합니다.",
   "harness.github.guide.step4":
-    "공유·repo 연결(협업) 화면에서도 같은 device OAuth 연결을 재사용합니다.",
+    "승인이 끝나면 공유·repo 연결(협업) 화면에서도 같은 device OAuth 연결을 재사용합니다.",
   "harness.github.guide.step5":
     "나중에 GitHub App 설치 권한이 열리면 같은 신원으로 자동 상속됩니다 — 다시 로그인할 필요 없습니다.",
   "harness.github.guide.step6":
     "연결 해제는 이 패널의 휴지통 버튼으로 언제든 가능합니다(선택 연결).",
   "harness.github.guide.appTitle": "device OAuth → GitHub App 자동 상속",
   "harness.github.guide.appBody":
-    "지금은 device OAuth 가 1차 경로입니다. GitHub App 설치 토큰은 엔드게임이며, 연결 후 동일 계정 경로에서 자동으로 이어받습니다. 온보딩 필수 단계가 아닙니다.",
+    "GitHub 계정 연결은 하네스 탭의 선택 연결입니다. 시작하기 탭의 필수 온보딩에는 나타나지 않습니다. 지금은 device OAuth 가 1차 경로이고, GitHub App 설치 토큰은 같은 계정 경로에서 이어받는 엔드게임입니다.",
 
   // --- Google Drive 위키 폴더 패널 (MCTHALmNAWPpilTFwe8o) ---
   // ★두 축이 한 패널에 있다: 계정 연결은 유저 단위(1회), 위키 폴더는 프로젝트 단위.
