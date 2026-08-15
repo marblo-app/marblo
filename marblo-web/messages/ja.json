@@ -16,12 +16,14 @@
     "github": "GitHub"
   },
   "hero": {
-    "title": "Claude CodeとCodexは優れたコーディングエージェントです。\nMarbloはそれらをエンジニアリングチームに変えます。",
-    "subtitle": "すでに使っているコーディングエージェントのためのオーケストレーションレイヤー。",
+    "title": "コーディングエージェントを、\nひとつのエンジニアリングチームへ。",
+    "subtitle": "Claude Code、Codex、複数のAIエージェントをひとつのプロジェクトで調整しましょう。タスク分配からリアルタイム進捗追跡、意思決定、レビュー、安全なマージまで。",
+    "cta_start": "無料ベータを始める",
+    "cta_demo": "90秒デモを見る →",
     "cta_download": "ダウンロード",
     "cta_pricing": "料金を見る",
     "cta_github": "オープンソースのアセットとドキュメントをGitHubで見る",
-    "badge": "Marblo · AIエージェント・オーケストレーション・プラットフォーム",
+    "badge": "The Live Orchestration Control Plane for AI Agents",
     "clickToEnlarge": "クリックして拡大",
     "prereqNote": "AI利用料は別途 · インストール後、Claude Code・Codexなど既存のAI CLIのインストール・ログイン・アカウント連携が必要です。",
     "proof": {
