@@ -10,6 +10,7 @@ import {
   invalidateTerminalFontCaches,
   repairTerminalCjkFontCachesIfLoaded,
   bindTerminalCjkFont,
+  waitForTerminalCjkFontBeforeOpen,
   resetCjkFontLoadForTests,
   type FontCacheInvalidatable,
 } from "../../src/lib/monoFont";
@@ -235,6 +236,23 @@ describe("repairTerminalCjkFontCachesIfLoaded", () => {
     expect(repairTerminalCjkFontCachesIfLoaded(term)).toBe(false);
     expect(calls).toEqual([]);
     expect(fonts.load).not.toHaveBeenCalled();
+  });
+});
+
+describe("waitForTerminalCjkFontBeforeOpen", () => {
+  it("explicitly loads Marblo D2Coding before xterm can open and measure", async () => {
+    const fonts = installFontSet(false);
+    await expect(waitForTerminalCjkFontBeforeOpen(13)).resolves.toBe(true);
+    expect(fonts.load).toHaveBeenCalledWith('13px "Marblo D2Coding"', "가");
+    expect(fonts.ready).toBeInstanceOf(Promise);
+  });
+
+  it("shares the same renderer-process font load barrier across callers", async () => {
+    const fonts = installFontSet(false);
+    const first = waitForTerminalCjkFontBeforeOpen(13);
+    const second = waitForTerminalCjkFontBeforeOpen(13);
+    await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
+    expect(fonts.load).toHaveBeenCalledTimes(1);
   });
 });
 
