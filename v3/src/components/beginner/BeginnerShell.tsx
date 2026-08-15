@@ -15,6 +15,7 @@ import {
   type PromotionTrigger,
 } from "../../lib/beginnerMode";
 import { findAgentPtySessionId } from "../../lib/agentTerminal";
+import { getSessionIdForAgent } from "../../stores/agentSessionMap";
 import { AgentInputWaitHost } from "../agents/AgentInputWaitHost";
 import {
   BEGINNER_CHAT_TAB,
@@ -183,6 +184,13 @@ export function BeginnerShell() {
   const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
   const tasks = useTaskStore((s) => s.tasks);
   const agents = useAgentStore((s) => s.agents);
+  // 에이전트 탭/패널에는 **워커만**. 오케는 왼쪽 대화창(OrchestratorPanel)이
+  // 전담한다 — 어드밴스드 AgentListPanel 과 같은 role 필터. 오케를 목록에 두면
+  // "팀원 끄기" 대상처럼 보이고, 터미널 모달도 워커용 경로로 엉뚱하게 열린다.
+  const workerAgents = useMemo(
+    () => agents.filter((a) => a.role !== "orchestrator"),
+    [agents],
+  );
   // 에이전트 터미널의 PTY 세션 원장. 어드밴스드 에이전트 탭이 읽는 것과 **같은**
   // 스토어다 — 비기너가 여는 터미널은 그 탭이 여는 것과 같은 세션이어야 한다.
   const terminalSessions = useTerminalStore((s) => s.sessions);
@@ -383,13 +391,17 @@ export function BeginnerShell() {
         : null,
     [openAgent, tasks]
   );
-  const openAgentSessionId = useMemo(
-    () =>
-      openAgent
-        ? findAgentPtySessionId(terminalSessions, openAgent.name)
-        : undefined,
-    [openAgent, terminalSessions]
-  );
+  // 이름 매칭이 1순위(어드밴스드 목록과 동일). 맵에만 있고 라벨이 아직 안
+  // 잡힌 국면은 getSessionIdForAgent 로 폴백 — 원장에 그 id 가 있을 때만.
+  // (맵 기본값 `agent-${id}` 를 원장 확인 없이 넘기면 빈 상태 문구 대신
+  // 유령 TerminalView 가 떠 "연결 중" 과 고장을 구분 못 한다.)
+  const openAgentSessionId = useMemo(() => {
+    if (!openAgent) return undefined;
+    const byName = findAgentPtySessionId(terminalSessions, openAgent.name);
+    if (byName) return byName;
+    const mapped = getSessionIdForAgent(openAgent.id);
+    return terminalSessions.some((s) => s.id === mapped) ? mapped : undefined;
+  }, [openAgent, terminalSessions]);
 
   // 티켓 상세의 "오케에게 물어보기" — 문장을 대화창에 **채우기만** 한다. 대신
   // 보내 주면 유저가 무엇이 나갔는지 모른 채 오케가 움직이고, 문장을 고칠 기회도
@@ -727,7 +739,7 @@ export function BeginnerShell() {
                       className={`flex max-h-[14rem] min-h-0 flex-col overflow-hidden lg:max-h-none lg:w-[19rem] lg:shrink-0 ${SURFACE}`}
                     >
                       <BeginnerAgentsPane
-                        agents={agents}
+                        agents={workerAgents}
                         tasks={tasks}
                         onTaskClick={openTaskDetail}
                         onAgentClick={openAgentTerminal}
@@ -823,7 +835,14 @@ export function BeginnerShell() {
           diff·수정 파일·activity note 가 같은 경로로 보여야 하므로 축소판을
           유지하지 않는다. */}
       {openTask && (
-        <TaskDetailModal task={openTask} onClose={closeTaskDetail} />
+        <TaskDetailModal
+          task={openTask}
+          onClose={closeTaskDetail}
+          // ★심플 모드엔 터미널 탭이 없다. "터미널 보기" 가 어드밴스드 경로
+          // (openTerminalForSession)를 타면 모달만 닫히고 끝난다 — 여기서
+          // BeginnerAgentTerminalModal 로 넘긴다(행 클릭·칩 클릭과 같은 도착지).
+          onOpenAgentTerminal={openAgentTerminal}
+        />
       )}
 
       {/* ★에이전트 패널에서 연 터미널 — 어드밴스드와 같은 PTY, 같은 TerminalView. */}

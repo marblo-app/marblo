@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { closePlanFor } from "../../lib/agentEntryClose";
 import { useTranslation } from "../../lib/i18n";
 import type { Agent, AgentStatus } from "../../types/agent";
@@ -6,6 +6,11 @@ import type { Task } from "../../types/task";
 import TeamSummary from "../agents/TeamSummary";
 import { CloseConfirmModal } from "../agents/list-panel/CloseConfirmModal";
 import { BEGINNER_ROLE_ICON, SectionLabel } from "./beginnerUi";
+
+/** 에이전트 목록에서 오케스트레이터를 뺀다 — 어드밴스드 AgentListPanel 과 동일. */
+function isWorkerAgent(agent: Agent): boolean {
+  return agent.role !== "orchestrator";
+}
 
 /**
  * ★미니 에이전트 탭 — 하단 2분할의 오른쪽 열.
@@ -68,6 +73,9 @@ export function BeginnerAgentsPane({
   onAgentKill?: (agent: Agent) => void | Promise<void>;
 }) {
   const { t } = useTranslation();
+  // ★오케는 대화창이 전담. 여기 리스트에 섞이면 팀원처럼 보이고 끄기/터미널
+  // 대상이 된다 — role 로 걸러 워커만 남긴다(AgentListPanel 과 같은 규칙).
+  const workerAgents = useMemo(() => agents.filter(isWorkerAgent), [agents]);
   // 확인이 필요한 끄기는 여기서 대기한다(작업 중 팀원). 대상은 객체로 든다 —
   // 모달 문구에 이름이 들어가야 해서다.
   const [pendingKill, setPendingKill] = useState<Agent | null>(null);
@@ -126,10 +134,10 @@ export function BeginnerAgentsPane({
   // 대상이 목록에서 사라졌으면(다른 표면에서 이미 종료) 확인 모달도 닫는다 —
   // 이미 없는 팀원에게 "정말 끌까요?" 를 묻고 있을 이유가 없다.
   useEffect(() => {
-    if (pendingKill && !agents.some((a) => a.id === pendingKill.id)) {
+    if (pendingKill && !workerAgents.some((a) => a.id === pendingKill.id)) {
       setPendingKill(null);
     }
-  }, [agents, pendingKill]);
+  }, [workerAgents, pendingKill]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -137,9 +145,9 @@ export function BeginnerAgentsPane({
         <SectionLabel
           className="flex-1"
           trailing={
-            agents.length > 0 ? (
+            workerAgents.length > 0 ? (
               <span data-testid="beginner-agents-count">
-                {`${agents.length}${t("agents.summary.unit")}`}
+                {`${workerAgents.length}${t("agents.summary.unit")}`}
               </span>
             ) : null
           }
@@ -149,7 +157,7 @@ export function BeginnerAgentsPane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        {agents.length === 0 ? (
+        {workerAgents.length === 0 ? (
           // 빈 상태를 "없음" 으로 끝내지 않는다. 에이전트는 유저가 만드는 게
           // 아니라 오케가 붙이는 것이라, 지금 할 일이 없다는 사실 자체가 답이다.
           <p
@@ -160,10 +168,10 @@ export function BeginnerAgentsPane({
           </p>
         ) : (
           <>
-            <TeamSummary compact agents={agents} tasks={tasks} />
+            <TeamSummary compact agents={workerAgents} tasks={tasks} />
 
             <ul className="mt-3 flex flex-col gap-1.5">
-              {agents.map((agent) => (
+              {workerAgents.map((agent) => (
                 <AgentRow
                   key={agent.id}
                   agent={agent}

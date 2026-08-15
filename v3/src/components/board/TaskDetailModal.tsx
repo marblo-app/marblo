@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Task, TaskStatus } from "../../types/task";
 import type { Activity } from "../../types/activity";
+import type { Agent } from "../../types/agent";
 import type { TaskComment } from "../../types/chat";
 import {
   updateTask,
@@ -214,9 +215,17 @@ function AgentAssign({
 function AgentTerminalButton({
   claimedBy,
   onClose,
+  onOpenAgentTerminal,
 }: {
   claimedBy: string | null;
   onClose: () => void;
+  /**
+   * 심플(비기너) 셸처럼 **터미널 탭/열이 없는** 표면에서 넘긴다.
+   * 있으면 어드밴스드의 `openTerminalForSession` 경로를 건너뛰고 이 콜백만
+   * 부른다 — 심플 셸에 탭이 없는데 그 경로를 타면 모달만 닫히고 아무 화면도
+   * 안 뜬다(티켓 어사인 에이전트 "터미널 보기" 무반응).
+   */
+  onOpenAgentTerminal?: (agent: Agent) => void;
 }) {
   const agents = useAgentStore((s) => s.agents);
   const terminalSessions = useTerminalStore((s) => s.sessions);
@@ -242,6 +251,14 @@ function AgentTerminalButton({
   const hasSession = terminalSessions.some((s) => s.id === ptySessionId);
 
   const handleOpenTerminal = () => {
+    // ★심플 셸: 전용 터미널 모달(BeginnerAgentTerminalModal)로 넘긴다.
+    // 상세 모달을 닫는 건 호출 쪽이 같이 하든(배타 선택) 여기서 onClose 하든
+    // 같다 — 둘 다 idempotent 하다.
+    if (onOpenAgentTerminal) {
+      onOpenAgentTerminal(agent);
+      onClose();
+      return;
+    }
     const icon = MODEL_ICONS[agent.model] || "⚪";
     setFocusedAgent(agent.id);
     openTerminalForSession(ptySessionId, `${icon} ${agent.name}`);
@@ -255,6 +272,8 @@ function AgentTerminalButton({
   return (
     <div>
       <button
+        type="button"
+        data-testid="task-detail-view-terminal"
         onClick={handleOpenTerminal}
         title={
           modelLabel ? spawnedModelTitle(modelLabel, agent.model) : agent.model
@@ -294,9 +313,19 @@ function AgentTerminalButton({
 interface TaskDetailModalProps {
   task: Task;
   onClose: () => void;
+  /**
+   * 어드밴스드 터미널 탭 대신 **에이전트 터미널 오버레이**를 여는 표면이 넘긴다
+   * (비기너 셸의 `BeginnerAgentTerminalModal`). 생략하면 기존처럼 터미널 탭을
+   * 연다 — 칸반/작업내역/퀵레인 등 어드밴스드 표면은 그대로.
+   */
+  onOpenAgentTerminal?: (agent: Agent) => void;
 }
 
-export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
+export function TaskDetailModal({
+  task,
+  onClose,
+  onOpenAgentTerminal,
+}: TaskDetailModalProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -756,7 +785,11 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
           )}
 
           {/* Open Agent Terminal */}
-          <AgentTerminalButton claimedBy={task.claimedBy} onClose={onClose} />
+          <AgentTerminalButton
+            claimedBy={task.claimedBy}
+            onClose={onClose}
+            onOpenAgentTerminal={onOpenAgentTerminal}
+          />
 
           {/* Meta */}
           <div className="grid grid-cols-2 gap-3 text-sm">
