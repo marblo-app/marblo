@@ -546,6 +546,45 @@ export const ORCHESTRATOR_HARNESS_SETTINGS = [
 ] as const;
 
 /**
+ * 오케 **자동 기본값** 우선순위 (연결·인증된 네이티브 하네스 중).
+ *
+ * 사용자가 `orchestratorModel` 을 명시하지 않았을 때만 쓴다. 제품 기본은
+ * Claude → Codex → Grok 순이고, env-swap 벤더(GLM/MiniMax/Kimi)는 오케 후보가
+ * 아니라 여기 없다(목록 자체가 네이티브 3종). antigravity 도 자동 기본에는
+ * 넣지 않는다 — 구독 온보딩 선택지도 같은 3종이다.
+ */
+export const ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY = [
+  "claude",
+  "codex",
+  "grok",
+] as const;
+
+/**
+ * 연결·인증된 네이티브 하네스 중 제품 기본 우선순위로 하나를 고른다.
+ *
+ *   - 입력은 UI/저장 표기(`claude`/`codex`/`grok`) 또는 내부 ModelType(`gpt`)
+ *   - 우선순위: Claude > Codex > Grok
+ *   - 후보가 없으면 null (호출부가 hard default `claude` 로 떨어진다)
+ *   - env-swap 벤더 이름은 무시한다 (오케 후보 아님)
+ */
+export function pickPreferredOrchestratorHarness(
+  authenticated: Iterable<string>,
+): (typeof ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY)[number] | null {
+  const ready = new Set<string>();
+  for (const raw of authenticated) {
+    const v = (raw ?? "").trim().toLowerCase();
+    if (!v) continue;
+    // 내부 ModelType "gpt" ↔ 설정 표기 "codex"
+    if (v === "gpt") ready.add("codex");
+    else ready.add(v);
+  }
+  for (const harness of ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY) {
+    if (ready.has(harness)) return harness;
+  }
+  return null;
+}
+
+/**
  * 오케 모델 설정값(`provider[:modelId][@effort]`)을 정규화한다. main.ts 의 저장값·
  * env·IPC 세 입구가 전부 이 함수를 지난다.
  *

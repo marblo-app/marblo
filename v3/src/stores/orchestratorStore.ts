@@ -106,10 +106,21 @@ export const ORCHESTRATOR_MODEL_OPTIONS = [
  * 프로젝트별인 오케 패널 셀렉터의 몫이다. 파생으로 두는 이유는 하나: 종전엔
  * `SettingsPage.ORCHESTRATOR_MODELS` 에 claude/codex 두 칸이 **따로 하드코딩**돼
  * 있어서, 여기 목록이 늘어도 설정 화면은 조용히 옛 두 칸에 머물렀다.
+ *
+ * ★자동 기본 우선순위(미설정 시): Claude > Codex > Grok. 메인 프로세스
+ * `model-selection.ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY` 와 같은 순서다
+ * (mwYD1YxEc9aARgmZ4bX7). 사용자가 여기서 고른 값은 그 자동선택을 이긴다.
  */
 export const ORCHESTRATOR_HARNESS_OPTIONS = ORCHESTRATOR_MODEL_OPTIONS.filter(
   (option) => !option.value.includes(":"),
 );
+
+/** 미설정 시 자동 기본 오케 우선순위(네이티브만). env-swap 벤더 제외. */
+export const ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY = [
+  "claude",
+  "codex",
+  "grok",
+] as const;
 
 /**
  * 하네스 한 줄 설명(설정 화면 전용).

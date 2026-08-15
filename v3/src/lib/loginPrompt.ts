@@ -121,12 +121,17 @@ export function nextLoginTarget<R extends SetupRowLike>(
 }
 
 /**
- * 기본 오케로 삼을 CLI — "선택한 것(또는 첫 번째)".
+ * 기본 오케로 삼을 CLI — 연결·인증된 것 중 제품 우선순위.
  *
- * 고른 것 중 **이미 인증된** 것이 있으면 그게 먼저다: 지금 당장 오케를 태울 수
- * 있는 유일한 칸이라, 아직 로그인 중인 것을 기본값으로 박아 두면 첫 스폰이 곧장
- * 인증 벽에 부딪힌다(#932 의 `needs_auth` 가 정확히 그 숫자다). 그런 게 없으면
- * 사용자가 **가장 먼저 고른 것**이다 — 로그인 큐의 1번이기도 하다.
+ * 우선순위는 **Claude > Codex > Grok** (`SUBSCRIPTION_CHOICES` 순서와 같다).
+ * 고른 것 중 이미 인증된 것만 후보로 두고, 그 안에서 이 순서로 고른다. 여러
+ * 네이티브가 동시에 붙어 있을 때 그록이 먼저 잡히던 실패모드를 막는다
+ * (mwYD1YxEc9aARgmZ4bX7). 인증된 게 하나도 없으면 고른 것 중 같은 우선순위의
+ * 첫 칸 — 로그인 큐의 1번이기도 하다.
+ *
+ * "이미 인증된 것 우선" 규율은 유지한다: 아직 로그인 중인 칸을 기본값으로 박으면
+ * 첫 스폰이 곧장 인증 벽(#932 `needs_auth`)에 부딪힌다. 우선순위는 그 안에서만
+ * 적용한다.
  *
  * 반환값은 그대로 `orchestratorModel.set` 의 하네스 값이다(claude/codex/grok 셋 다
  * 이미 오케 후보다 — main 의 `normalizeOrchestratorModelSetting` 이 받는 값들이라
@@ -138,11 +143,17 @@ export function defaultOrchestratorModel<R extends SetupRowLike>(
   results: Record<string, CliProbeLike | undefined>
 ): CliModel | null {
   if (picked.length === 0) return null;
-  return (
-    picked.find((model) => isSignedIn(rows, results, model)) ??
-    picked[0] ??
-    null
-  );
+  const pickedSet = new Set(picked);
+  // 제품 우선순위 순회 — pick 배열 순서가 뒤집혀 있어도 Claude 가 이긴다.
+  for (const model of SUBSCRIPTION_CHOICES) {
+    if (pickedSet.has(model) && isSignedIn(rows, results, model)) {
+      return model;
+    }
+  }
+  for (const model of SUBSCRIPTION_CHOICES) {
+    if (pickedSet.has(model)) return model;
+  }
+  return picked[0] ?? null;
 }
 
 /**

@@ -148,6 +148,8 @@ import {
   orchestratorLaunchPin,
   quickLaneVendorCatalog,
   resolveModelPin,
+  pickPreferredOrchestratorHarness,
+  ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY,
 } from "./model-selection";
 import { modelFactSheetPayload } from "./model-fact-sheet";
 import { ourBenchPayload } from "./model-bench-ours";
@@ -3003,7 +3005,8 @@ async function ensureAssistantTriggerOrchestrator(
     );
     return null;
   }
-  const effectiveModelSetting = applyOrchestratorModelEnvForProject(projectId);
+  const effectiveModelSetting =
+    await resolveAndApplyOrchestratorModelForProject(projectId);
   const orchestratorModel = resolveOrchestratorModel();
   const orchestratorPins = orchestratorModelPins(effectiveModelSetting);
   const orchGate = await checkSpawnAuthGate(
@@ -3530,6 +3533,10 @@ function ensureMissionOrchestratorLaunched(
   // 모델 인지가 필수 — claude 전용 resolver(~/.claude 스캔)를 codex 에 태우면
   // claude uuid 가 `codex resume <uuid>` 로 넘어가 exit 1 즉사하거나(혼재
   // 프로젝트), 항상 null → 매 재시작 fresh(순수 codex)가 된다. (56C9L5DP 흡수)
+  //
+  // ★이 함수는 동기 계약이라 auth 프로브 자동선택(async)을 태우지 않는다.
+  // 보드 launch 가 먼저 돌며 전역/프로젝트 설정을 채우는 게 보통이고, 미설정
+  // 이면 hard default claude 로 떨어진다(보드 auto-launch 와 같은 안전 바닥).
   const missionModel = normalizeOrchestratorModelType(
     applyOrchestratorModelEnvForProject(projectId)
   );
@@ -4020,25 +4027,68 @@ function saveProjectOrchestratorModel(projectId: string, model: string): void {
 }
 
 /**
+ * 전역 `orchestratorModel` 이 **사용자가(또는 온보딩이) 써 둔 값**인가.
+ *
+ * 빈 문자열/미설정은 "미설정" 이다. `normalizeOrchestratorModelSetting` 은 빈 값을
+ * `"claude"` 로 바꿔 버리므로, 자동선택 게이트에는 정규화 전 raw 를 봐야 한다 —
+ * 미설정인데 `"claude"` 를 globalSetting 으로 넘기면 autoFallback 이 영원히
+ * 막힌다(mwYD1YxEc9aARgmZ4bX7).
+ */
+function readGlobalOrchestratorModelSetting(): string | null {
+  const raw = readAppState().orchestratorModel;
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  return normalizeOrchestratorModelSetting(raw);
+}
+
+/**
+ * 연결·인증된 네이티브 하네스(Claude/Codex/Grok)를 프로브해 제품 기본 우선순위로
+ * 하나를 고른다. env-swap 벤더는 오케 후보가 아니라 프로브 대상도 아니다.
+ *
+ * 감지=메인(App.tsx 텔레메트리 분업 주석과 같은 규율): 계정 프로브는 main 만
+ * 알고, 렌더러는 결과 설정값만 본다.
+ */
+async function probePreferredOrchestratorHarness(): Promise<string | null> {
+  const ready: string[] = [];
+  for (const harness of ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY) {
+    // checkSpawnAuthGate 는 ModelType 축(`gpt`)도 받지만 codex 표기도 통과한다.
+    const gate = await checkSpawnAuthGate(
+      harness,
+      undefined,
+      "orchestrator_auto_select"
+    );
+    if (gate.ok && gate.authenticated) {
+      ready.push(harness);
+    }
+  }
+  return pickPreferredOrchestratorHarness(ready);
+}
+
+/**
  * 이 프로젝트의 오케 launch/resolve 가 사용할 모델을 결정하고
  * MARBLO_ORCHESTRATOR_MODEL env 에 반영한다 (agent-config 의
  * resolveOrchestratorModel 이 env 를 읽으므로). 우선순위:
  * 부팅 env 오버라이드 > 이번 launch 의 명시 요청(패널 Start) >
- * 프로젝트별 저장 모델(재시작 연속성) > 전역 설정.
+ * 프로젝트별 저장 모델(재시작 연속성) > 전역 설정(사용자/온보딩 명시) >
+ * 연결·인증된 네이티브 자동선택(Claude > Codex > Grok) > hard default claude.
+ *
+ * `autoFallback` 은 호출부가 미설정일 때만 프로브해 넘긴다 — 전역 설정이 있으면
+ * 자동선택은 돌리지 않는다(사용자 명시 존중).
  */
 function applyOrchestratorModelEnvForProject(
   projectId?: string,
-  explicitModel?: string
+  explicitModel?: string,
+  autoFallback?: string | null
 ): string {
   const effective = resolveEffectiveOrchestratorModelSetting({
-    envOverride: INITIAL_ORCHESTRATOR_MODEL_ENV,
+    envOverride: INITIAL_ORCHESTRATOR_MODEL_ENV || null,
     explicit: explicitModel
       ? normalizeOrchestratorModelSetting(explicitModel)
       : null,
     perProject: readProjectOrchestratorModel(projectId),
-    globalSetting: normalizeOrchestratorModelSetting(
-      readAppState().orchestratorModel
-    ),
+    globalSetting: readGlobalOrchestratorModelSetting(),
+    autoFallback: autoFallback
+      ? normalizeOrchestratorModelSetting(autoFallback)
+      : null,
   });
   // ★env 에는 **프로바이더만** 넣는다. `resolveOrchestratorModel()`(agent-config)이
   // 이 env 를 ModelType 으로만 읽기 때문에, compound("claude:claude-fable-5")를
@@ -4048,6 +4098,36 @@ function applyOrchestratorModelEnvForProject(
   process.env.MARBLO_ORCHESTRATOR_MODEL =
     splitOrchestratorModelValue(effective).harness;
   return effective;
+}
+
+/**
+ * launch/resolve 입구: 상위 소스가 비어 있을 때만 auth 프로브로 자동 기본값을
+ * 채운 뒤 `applyOrchestratorModelEnvForProject` 에 넘긴다.
+ */
+async function resolveAndApplyOrchestratorModelForProject(
+  projectId?: string,
+  explicitModel?: string
+): Promise<string> {
+  const hasExplicit =
+    typeof explicitModel === "string" && explicitModel.trim().length > 0;
+  const needsAuto =
+    !INITIAL_ORCHESTRATOR_MODEL_ENV &&
+    !hasExplicit &&
+    !readProjectOrchestratorModel(projectId) &&
+    !readGlobalOrchestratorModelSetting();
+  const autoFallback = needsAuto
+    ? await probePreferredOrchestratorHarness()
+    : null;
+  if (autoFallback) {
+    console.info(
+      `[Main] Orchestrator model auto-selected (unset setting): ${autoFallback} (priority Claude>Codex>Grok among authenticated natives)`
+    );
+  }
+  return applyOrchestratorModelEnvForProject(
+    projectId,
+    explicitModel,
+    autoFallback
+  );
 }
 
 /** Recreate LLM provider with current stored keys and update FlowRunner */
@@ -7864,7 +7944,7 @@ ipcMain.handle(
     // 자기 홈(CODEX_HOME/GROK_HOME)의 세션 실재 여부만으로 "latest"/null 을
     // 판정한다 — grok 도 `--resume <claude-uuid>` 면 원격 404 로 똑같이 죽는다.
     const targetModel = normalizeOrchestratorModelType(
-      applyOrchestratorModelEnvForProject(projectId)
+      await resolveAndApplyOrchestratorModelForProject(projectId)
     );
     if (usesIsolatedHomeSentinelResume(targetModel)) {
       if (!projectId) return null;
@@ -8246,13 +8326,16 @@ ipcMain.handle(
     const port = bridgeServer.getPort();
     // Resolve '~' to actual home directory
     const resolvedPath = rootPath === "~" ? os.homedir() : rootPath;
-    // 모델 결정: 명시 요청(패널 Start) > 프로젝트별 저장(재시작 연속성) > 전역.
-    // 전역값만 쓰면 마지막으로 만진 프로젝트의 모델이 다른 프로젝트의 재시작에
-    // 적용돼 claude 대화를 가진 프로젝트가 codex fresh 로 부팅된다(라이브 사고).
-    const effectiveModelSetting = applyOrchestratorModelEnvForProject(
-      projectId,
-      typeof model === "string" ? model : undefined
-    );
+    // 모델 결정: 명시 요청(패널 Start) > 프로젝트별 저장(재시작 연속성) >
+    // 전역 설정(사용자 명시) > 연결·인증된 네이티브 자동(Claude>Codex>Grok) >
+    // hard default claude. 전역값만 쓰면 마지막으로 만진 프로젝트의 모델이
+    // 다른 프로젝트의 재시작에 적용돼 claude 대화를 가진 프로젝트가 codex
+    // fresh 로 부팅된다(라이브 사고).
+    const effectiveModelSetting =
+      await resolveAndApplyOrchestratorModelForProject(
+        projectId,
+        typeof model === "string" ? model : undefined
+      );
     const orchestratorModel = resolveOrchestratorModel();
     // 셀렉터가 구체 변형을 골랐으면 그 모델을 CLI 인자로 핀한다 — claude 는
     // `--model`, codex 는 `-c model=` + `-c model_reasoning_effort=`. 프로바이더만
@@ -8429,7 +8512,7 @@ ipcMain.handle(
 // is missing (the common case). Returns a concrete session id or null.
 ipcMain.handle(
   "orchestratorSession:resolvePrevious",
-  (_event, rootPath: string, projectId?: string) => {
+  async (_event, rootPath: string, projectId?: string) => {
     const resolvedPath = rootPath === "~" ? os.homedir() : rootPath;
     // Session identity is per-CLI, so this must be model-aware. Codex/Grok keep
     // their sessions in the isolated CODEX_HOME/GROK_HOME and resume via a
@@ -8437,7 +8520,7 @@ ipcMain.handle(
     // either a Claude uuid from the ~/.claude store makes it exit on launch.
     // See resolveRestartResumeSessionId. 모델은 launch 와 같은 프로젝트별
     // 우선순위로 결정해야 resolve/launch 가 서로 다른 모델을 보지 않는다.
-    applyOrchestratorModelEnvForProject(projectId);
+    await resolveAndApplyOrchestratorModelForProject(projectId);
     const targetModel = resolveOrchestratorModel();
     return resolveRestartResumeSessionId({
       targetModel,
@@ -8855,16 +8938,20 @@ ipcMain.handle(
   }
 );
 
-ipcMain.handle("orchestratorModel:get", (_event, projectId?: string) => {
+ipcMain.handle("orchestratorModel:get", async (_event, projectId?: string) => {
   if (INITIAL_ORCHESTRATOR_MODEL_ENV) {
     return normalizeOrchestratorModelSetting(INITIAL_ORCHESTRATOR_MODEL_ENV);
   }
   // 프로젝트별 저장 모델(그 프로젝트 오케가 마지막으로 돈 모델)이 있으면 그걸
   // 보여준다 — 전역값은 다른 프로젝트가 마지막으로 만진 값일 수 있다.
-  return (
-    readProjectOrchestratorModel(projectId) ??
-    normalizeOrchestratorModelSetting(readAppState().orchestratorModel)
-  );
+  const perProject = readProjectOrchestratorModel(projectId);
+  if (perProject) return perProject;
+  const global = readGlobalOrchestratorModelSetting();
+  if (global) return global;
+  // 미설정: 연결·인증된 네이티브 중 Claude > Codex > Grok. launch 와 같은
+  // 자동선택이라 셀렉터 표시와 실제 기동이 어긋나지 않는다.
+  const auto = await probePreferredOrchestratorHarness();
+  return auto ?? "claude";
 });
 
 // --- Sentry (main-process crash/error capture) ---

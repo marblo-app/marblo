@@ -286,4 +286,20 @@ describe("resolveEffectiveOrchestratorModelSetting", () => {
     ).toBe("codex");
     expect(resolveEffectiveOrchestratorModelSetting({})).toBe("claude");
   });
+
+  it("autoFallback (auth priority) only when global is unset", () => {
+    // 사용자 명시 설정이 있으면 자동선택을 이긴다.
+    expect(
+      resolveEffectiveOrchestratorModelSetting({
+        globalSetting: "grok",
+        autoFallback: "claude",
+      }),
+    ).toBe("grok");
+    // 미설정이면 연결·인증 프로브 결과(Claude>Codex>Grok)를 쓴다.
+    expect(
+      resolveEffectiveOrchestratorModelSetting({
+        autoFallback: "codex",
+      }),
+    ).toBe("codex");
+  });
 });

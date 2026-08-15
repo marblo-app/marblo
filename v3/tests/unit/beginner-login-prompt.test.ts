@@ -140,8 +140,8 @@ describe("nextLoginTarget — 한 번에 하나", () => {
   });
 });
 
-describe("defaultOrchestratorModel — '선택한 것(또는 첫 번째)'", () => {
-  it("아무것도 인증 전이면 첫 번째로 고른 것", () => {
+describe("defaultOrchestratorModel — Claude > Codex > Grok among authenticated", () => {
+  it("아무것도 인증 전이면 제품 우선순위 중 고른 것(codex before grok)", () => {
     expect(defaultOrchestratorModel(ROWS, ["codex", "grok"], FRESH)).toBe(
       "codex",
     );
@@ -156,7 +156,7 @@ describe("defaultOrchestratorModel — '선택한 것(또는 첫 번째)'", () =
     );
   });
 
-  it("둘 다 인증됐으면 고른 순서를 따른다", () => {
+  it("둘 다 인증됐으면 Claude 가 Codex 를 이긴다", () => {
     const results = {
       ...FRESH,
       "cli-claude-code": probe(true, true),
@@ -164,6 +164,30 @@ describe("defaultOrchestratorModel — '선택한 것(또는 첫 번째)'", () =
     };
     expect(defaultOrchestratorModel(ROWS, ["claude", "codex"], results)).toBe(
       "claude",
+    );
+  });
+
+  it("★세 하네스 모두 인증 → Claude (pick 순서가 grok 먼저여도)", () => {
+    // mwYD1YxEc9aARgmZ4bX7: 그록이 인증돼 있어도 기본은 Claude.
+    const results = {
+      ...FRESH,
+      "cli-claude-code": probe(true, true),
+      "cli-codex": probe(true, true),
+      "cli-grok": probe(true, true),
+    };
+    expect(
+      defaultOrchestratorModel(ROWS, ["grok", "codex", "claude"], results),
+    ).toBe("claude");
+  });
+
+  it("Claude 없고 Codex+Grok 인증 → Codex", () => {
+    const results = {
+      ...FRESH,
+      "cli-codex": probe(true, true),
+      "cli-grok": probe(true, true),
+    };
+    expect(defaultOrchestratorModel(ROWS, ["grok", "codex"], results)).toBe(
+      "codex",
     );
   });
 
