@@ -283,9 +283,10 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.startHere.subtitle":
     "Four steps to your first ticket. Your progress is saved — pick it up whenever.",
   "onboarding.startHere.progress": "{done} of {total} done",
-  "onboarding.startHere.demoLead": "Want to see how it works first?",
+  "onboarding.startHere.demoLead": "Want to try chat → tickets first?",
   // {seconds} = runtime, measured from the demo script. Never hard-code it.
-  "onboarding.startHere.watchDemo": "Watch the {seconds}-second demo",
+  // Copy must say this is a chat→ticket creation trial, not a static clip.
+  "onboarding.startHere.watchDemo": "Chat → ticket demo · {seconds}s",
   "onboarding.startHere.stuckLabel": "Stuck?",
   "onboarding.startHere.skipStep": "Skip for now (it stays on the list)",
   "onboarding.startHere.badge.done": "Done",
@@ -299,14 +300,14 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.startHere.reenableLanding": "Open this tab on launch",
   "onboarding.startHere.dontLandHint":
     "Either way, your remaining steps stay right here.",
-  "onboarding.startHere.value.kicker": "Try the value before sign-in",
+  "onboarding.startHere.value.kicker": "Before sign-in · chat → tickets",
   "onboarding.startHere.value.title":
-    "See tickets assigned and agents doing the work",
+    "Watch a chat turn into tickets agents actually pick up",
   "onboarding.startHere.value.body":
-    "The demo shows the orchestrator turning a request into tickets, assigning the right agents, and letting them work in parallel. After you connect the CLI and link your account, the same flow runs against your own project with real terminals and worktrees.",
-  "onboarding.startHere.value.playInteractive": "Play interactive demo",
+    "The video on the left is a preview. Use the button for the interactive demo: request → ticket split → assignment → parallel work. After you connect the CLI and your account, the same flow runs on your project with real terminals and worktrees.",
+  "onboarding.startHere.value.playInteractive": "Try creating tickets from chat",
   "onboarding.startHere.value.zeroCost":
-    "The demo plays without CLI runs, AI calls, or billing.",
+    "No CLI runs, AI calls, or billing — just the chat → ticket flow",
   "onboarding.startHere.activation.kicker": "CLI connect + account link",
   "onboarding.startHere.activation.title":
     "After install, sign in from the bottom Agents terminal",

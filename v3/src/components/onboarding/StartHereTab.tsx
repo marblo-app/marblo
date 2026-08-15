@@ -256,10 +256,11 @@ export function StartHereTab() {
             </span>
             <button
               type="button"
+              data-testid="start-here-header-demo-cta"
               onClick={openDemo}
-              className="rounded-md border border-[#45475a] px-2.5 py-1 text-xs font-medium text-[#cdd6f4] transition-colors hover:bg-[#313244]"
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#89b4fa]/55 bg-[#89b4fa]/15 px-3 py-1.5 text-xs font-semibold text-[#cdd6f4] shadow-sm shadow-[#89b4fa]/10 transition-colors hover:bg-[#89b4fa]/25"
             >
-              ▶{" "}
+              <PlayCircle className="h-3.5 w-3.5" aria-hidden="true" />
               {t("onboarding.startHere.watchDemo", {
                 seconds: DEMO_TOTAL_SECONDS,
               })}
@@ -454,7 +455,7 @@ function ValuePreview({ onWatchDemo }: { onWatchDemo: () => void }) {
   return (
     <section
       data-testid="start-here-value-preview"
-      className="mb-4 grid overflow-hidden rounded-lg border border-[#313244] bg-[#181825] md:grid-cols-[minmax(0,1.25fr)_minmax(260px,0.75fr)]"
+      className="mb-4 grid overflow-hidden rounded-lg border border-[#89b4fa]/35 bg-[#181825] shadow-[0_0_0_1px_rgba(137,180,250,0.08)] md:grid-cols-[minmax(0,1.25fr)_minmax(260px,0.75fr)]"
     >
       <div className="bg-black">
         <video
@@ -470,7 +471,7 @@ function ValuePreview({ onWatchDemo }: { onWatchDemo: () => void }) {
       </div>
       <div className="flex flex-col justify-between gap-4 border-t border-[#313244] p-4 md:border-l md:border-t-0">
         <div>
-          <p className="text-[11px] font-semibold uppercase text-[#89b4fa]">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#89b4fa]">
             {t("onboarding.startHere.value.kicker")}
           </p>
           <h2 className="mt-2 text-lg font-semibold text-[#cdd6f4]">
@@ -480,16 +481,21 @@ function ValuePreview({ onWatchDemo }: { onWatchDemo: () => void }) {
             {t("onboarding.startHere.value.body")}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        {/*
+          ★Primary path = interactive demo (chat → ticket), not the static video.
+          Keep the video as preview; the CTA must read as "try ticket creation".
+        */}
+        <div className="flex flex-col gap-2">
           <button
             type="button"
+            data-testid="start-here-demo-cta"
             onClick={onWatchDemo}
-            className="inline-flex items-center gap-1.5 rounded-md bg-[#89b4fa] px-3 py-2 text-xs font-semibold text-[#1e1e2e] transition-colors hover:bg-[#74c7ec]"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#89b4fa] px-4 py-2.5 text-sm font-bold text-[#1e1e2e] shadow-md shadow-[#89b4fa]/25 transition-colors hover:bg-[#74c7ec] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#89b4fa]"
           >
-            <PlayCircle className="h-3.5 w-3.5" aria-hidden="true" />
+            <PlayCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
             {t("onboarding.startHere.value.playInteractive")}
           </button>
-          <span className="text-xs text-[#7f849c]">
+          <span className="text-center text-[11px] leading-4 text-[#7f849c] sm:text-left">
             {t("onboarding.startHere.value.zeroCost")}
           </span>
         </div>
