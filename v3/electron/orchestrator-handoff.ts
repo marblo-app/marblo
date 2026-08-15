@@ -174,8 +174,19 @@ export interface EffectiveOrchestratorModelInput {
   explicit?: string | null;
   /** Model this project's orchestrator last ran with (restart continuity). */
   perProject?: string | null;
-  /** Global app-state setting (legacy single value). */
+  /**
+   * Global app-state setting (settings / onboarding wrote a value).
+   * Empty/null means **unset** — auto-select may run. Do not pass the hard
+   * default `"claude"` here when the user never chose a model; that would
+   * block autoFallback.
+   */
   globalSetting?: string | null;
+  /**
+   * Auto-picked harness among connected+authenticated natives
+   * (Claude > Codex > Grok). Used only when env/explicit/per-project/global
+   * are all empty — user-chosen settings always win.
+   */
+  autoFallback?: string | null;
 }
 
 /**
@@ -190,6 +201,10 @@ export interface EffectiveOrchestratorModelInput {
  * 0zV1apB3CvIiabHlYHxQ). Per-project memory must therefore outrank the global
  * setting, and an explicit user choice for this launch outranks both.
  *
+ * When nothing is set, `autoFallback` (auth-probed Claude > Codex > Grok) wins
+ * over the hard-coded `"claude"` safety default — so a machine with only Grok
+ * signed in does not launch into a Claude needs_auth wall.
+ *
  * Inputs are raw setting strings ("claude" | "codex" | "antigravity" | ...);
  * normalization/validation stays with the caller.
  */
@@ -198,11 +213,14 @@ export function resolveEffectiveOrchestratorModelSetting({
   explicit,
   perProject,
   globalSetting,
+  autoFallback,
 }: EffectiveOrchestratorModelInput): string {
   if (envOverride) return envOverride;
   if (explicit) return explicit;
   if (perProject) return perProject;
-  return globalSetting || "claude";
+  if (globalSetting) return globalSetting;
+  if (autoFallback) return autoFallback;
+  return "claude";
 }
 
 const ACTIVE_MISSION_STATUSES = new Set([
