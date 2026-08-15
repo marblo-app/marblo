@@ -168,6 +168,21 @@ export function loadCjkFont(fontSize: number): Promise<boolean> {
   return cjkFontLoad;
 }
 
+/**
+ * Barrier for xterm's first measurement pass.
+ *
+ * `terminal.open()` synchronously measures character cells and renderer
+ * widths. If it runs before the bundled CJK face is usable, xterm caches the
+ * fallback metrics and the terminal keeps the visible Hangul spacing gap until
+ * every cache is explicitly rebuilt. Await this before `open()` whenever the
+ * caller controls terminal creation.
+ */
+export function waitForTerminalCjkFontBeforeOpen(
+  fontSize: number,
+): Promise<boolean> {
+  return loadCjkFont(fontSize);
+}
+
 /** Test seam — drops the memoised load so each case starts clean. */
 export function resetCjkFontLoadForTests(): void {
   cjkFontLoad = null;

@@ -11,6 +11,7 @@ import {
   XTERM_CJK_RENDER_OPTIONS,
   bindTerminalCjkFont,
   repairTerminalCjkFontCachesIfLoaded,
+  waitForTerminalCjkFontBeforeOpen,
 } from "../../lib/monoFont";
 import { t } from "../../lib/i18n";
 
@@ -102,6 +103,13 @@ export default memo(function TerminalView({
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
+    const refitTerminal = () => {
+      try {
+        fitAddon.fit();
+      } catch {
+        /* ignore */
+      }
+    };
     let cjkRepairFrame: number | null = null;
     const scheduleCjkCacheRepair = (reason: string) => {
       if (disposed || cjkRepairFrame !== null) return;
@@ -110,6 +118,7 @@ export default memo(function TerminalView({
         if (disposed || !termOpened) return;
         try {
           if (repairTerminalCjkFontCachesIfLoaded(terminal)) {
+            refitTerminal();
             console.debug(`[TerminalView] CJK glyph caches repaired (${reason})`);
           }
         } catch (err) {
@@ -170,9 +179,13 @@ export default memo(function TerminalView({
       containerRef.current.innerHTML = "";
     }
 
-    const openTerminal = (el: HTMLDivElement) => {
-      if (disposed) return;
+    let openInFlight = false;
+    const openTerminal = async (el: HTMLDivElement) => {
+      if (disposed || openInFlight || termOpened) return;
+      openInFlight = true;
       try {
+        await waitForTerminalCjkFontBeforeOpen(terminal.options.fontSize ?? 13);
+        if (disposed || termOpened) return;
         terminal.open(el);
         termOpened = true;
         patchTerminalForFastIME(terminal);
@@ -204,25 +217,17 @@ export default memo(function TerminalView({
           isStale: () => disposed || !termOpened,
           // Cell metrics can change with the face, so cols/rows must be
           // recomputed (and the PTY told) rather than left at the old grid.
-          onRebuilt: () => {
-            try {
-              fitAddon.fit();
-            } catch {
-              /* ignore */
-            }
-          },
+          onRebuilt: refitTerminal,
         });
 
         requestAnimationFrame(() => {
           if (disposed) return;
-          try {
-            fitAddon.fit();
-          } catch {
-            /* ignore */
-          }
+          refitTerminal();
         });
       } catch (err) {
         console.warn("[TerminalView] xterm open failed:", err);
+      } finally {
+        openInFlight = false;
       }
     };
 
