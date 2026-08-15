@@ -16,12 +16,14 @@
     "github": "GitHub"
   },
   "hero": {
-    "title": "Claude Code and Codex are great coding agents.\nMarblo turns them into an engineering team.",
-    "subtitle": "The orchestration layer for the coding agents you already use.",
+    "title": "Turn coding agents\ninto one engineering team.",
+    "subtitle": "Coordinate Claude Code, Codex, and multiple AI agents in one project. From task assignment to real-time progress tracking, decisions, review, and safe merges.",
+    "cta_start": "Start Free Beta",
+    "cta_demo": "Watch Marblo in Action →",
     "cta_download": "Download",
     "cta_pricing": "View Pricing",
     "cta_github": "Open source assets & docs on GitHub",
-    "badge": "Marblo · AI Agent Orchestration Platform",
+    "badge": "The Live Orchestration Control Plane for AI Agents",
     "clickToEnlarge": "Click to enlarge",
     "prereqNote": "AI usage is billed separately · After install, you'll install and sign in to your existing AI CLIs (Claude Code, Codex, etc.) and connect your accounts.",
     "proof": {

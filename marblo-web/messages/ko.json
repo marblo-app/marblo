@@ -16,12 +16,14 @@
     "github": "GitHub"
   },
   "hero": {
-    "title": "Claude Code와 Codex는 훌륭한 코딩 에이전트입니다.\n마블로는 이들을 엔지니어링 팀으로 바꿉니다.",
-    "subtitle": "이미 쓰고 있는 코딩 에이전트를 위한 오케스트레이션 계층.",
+    "title": "코딩 에이전트를,\n하나의 엔지니어링 팀으로.",
+    "subtitle": "Claude Code, Codex와 여러 AI 에이전트를 하나의 프로젝트에서 조율하세요. 작업 분배부터 실시간 진행 추적, 의사결정, 리뷰와 안전한 머지까지.",
+    "cta_start": "무료 베타 시작하기",
+    "cta_demo": "90초 데모 보기 →",
     "cta_download": "다운로드",
     "cta_pricing": "가격 보기",
     "cta_github": "오픈소스 에셋과 문서를 GitHub에서 보기",
-    "badge": "마블로 · AI 에이전트 오케스트레이션 플랫폼",
+    "badge": "The Live Orchestration Control Plane for AI Agents",
     "clickToEnlarge": "클릭하여 크게 보기",
     "prereqNote": "AI 사용료는 별도입니다 · 설치 후 Claude Code·Codex 등 기존 AI CLI 설치·로그인·계정 연결이 필요합니다.",
     "proof": {

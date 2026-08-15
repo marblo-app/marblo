@@ -3,7 +3,6 @@ import Link from "next/link";
 import Image from "next/image";
 import HeroWorkspaceMockup from "@/components/HeroWorkspaceMockup";
 import HeroConstellation from "@/components/HeroConstellation";
-import GitHubIcon from "@/components/GitHubIcon";
 import {
   Check,
   CheckCircle2,
@@ -220,26 +219,17 @@ export default function HomePage() {
           </p>
           <div className="mt-10 mx-auto flex w-full max-w-[22rem] sm:max-w-none flex-col sm:flex-row sm:flex-wrap gap-4 justify-center">
             <Link
-              href={`/${locale}/download`}
+              href={`/${locale}/auth/signup`}
               className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-xl text-lg font-semibold text-center transition shadow-lg shadow-indigo-600/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
             >
-              {t("hero.cta_download")}
+              {t("hero.cta_start")}
             </Link>
             <Link
-              href={`/${locale}/pricing`}
+              href="#feature-video"
               className="border border-zinc-700 hover:bg-zinc-800 text-white px-8 py-4 rounded-xl text-lg font-semibold text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
             >
-              {t("hero.cta_pricing")}
+              {t("hero.cta_demo")}
             </Link>
-            <a
-              href="https://github.com/marblo-app/marblo"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-2 border border-zinc-700 hover:bg-zinc-800 text-white px-6 py-4 rounded-xl text-base font-semibold text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
-            >
-              <GitHubIcon className="h-5 w-5 shrink-0" />
-              {t("hero.cta_github")}
-            </a>
           </div>
 
           {/* Honest prerequisite — AI usage not included, CLI login/account

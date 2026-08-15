@@ -12,7 +12,7 @@ export default function FeatureVideoSection() {
   const [isLoaded, setIsLoaded] = useState(false);
 
   return (
-    <section className="px-4 pt-2 pb-14 md:pb-20">
+    <section id="feature-video" className="scroll-mt-24 px-4 pt-2 pb-14 md:pb-20">
       <div className="max-w-5xl mx-auto">
         <div className="text-center mb-8 md:mb-10">
           <span className="inline-flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 rounded-full px-4 py-1.5 mb-5 text-sm text-indigo-400 font-medium">
