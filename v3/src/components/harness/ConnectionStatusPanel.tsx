@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  GitBranch,
   Link2,
   Loader2,
   RefreshCw,
@@ -12,6 +13,7 @@ import {
 import { useProjectStore } from "../../stores/projectStore";
 import { useTranslation, useLocaleStore, t as translate } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
+import { GitHubConnectionPanel } from "./GitHubConnectionPanel";
 
 // spawn-node preflight 결과 — main 프로세스 resolveNodeBinary 의 실제 실행
 // 검증 결과를 그대로 받는다. ok=false 면 깨진 node 로 MCP/에이전트 자식이
@@ -319,9 +321,12 @@ export function ConnectionStatusPanel() {
     <div className="border-b border-[#313244] bg-[#181825] px-4 py-3">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold text-[#cdd6f4]">
-            {t("harness.conn.title")}
-          </h3>
+          <div className="flex items-center gap-2">
+            <GitBranch className="h-4 w-4 text-[#cdd6f4]" aria-hidden />
+            <h3 className="text-sm font-semibold text-[#cdd6f4]">
+              {t("harness.conn.title")}
+            </h3>
+          </div>
           <p className="text-xs text-[#6c7086]">
             {currentProject?.name ?? t("harness.conn.noProject")}
           </p>
@@ -428,6 +433,9 @@ export function ConnectionStatusPanel() {
                 localPath={currentProject.folderPath}
                 onConnected={loadConnection}
               />
+              <div className="mt-3">
+                <GitHubConnectionPanel embedded />
+              </div>
             </>
           ) : (
             <p className="text-xs text-[#6c7086]">
@@ -554,6 +562,8 @@ export function ConnectionStatusPanel() {
           </div>
 
           <McpStatusTable connection={connection} />
+
+          <GitHubConnectionPanel embedded />
 
           {checkResult && (
             <div className="rounded border border-[#313244] bg-[#1e1e2e] p-3">

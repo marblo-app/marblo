@@ -7,7 +7,7 @@ import type { harness as koHarness } from "../ko/harness";
 
 export const harness: Record<keyof typeof koHarness, string> = {
   // --- Connection status panel ---
-  "harness.conn.title": "Connection",
+  "harness.conn.title": "Repository (GitHub) connection",
   "harness.conn.noProject": "No project selected",
   "harness.conn.refreshTitle": "Refresh connection status",
   "harness.conn.resyncTitle":
@@ -28,7 +28,7 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.conn.nodeHintAfter": "then restart the app.",
   "harness.conn.noRepo": "No repo is connected.",
   "harness.conn.autoFillHint":
-    "Creating a connection from the project's local path auto-fills the repo URL and default branch from git.",
+    "Creating a repository connection from the project's local path auto-fills the repo URL and default branch from git. Private repository access uses the GitHub account link below.",
   "harness.conn.connect": "Connect",
   "harness.conn.connecting": "Connecting",
   "harness.conn.noFolderPath":
@@ -104,7 +104,7 @@ export const harness: Record<keyof typeof koHarness, string> = {
   // The Harness tab now holds only the connections this app REQUIRES — the
   // opt-in asset catalog moved out to the top-level Store tab.
   "harness.store.title": "Harness connections",
-  "harness.store.subtitle": "CLIs, vendors, channels — what this app needs",
+  "harness.store.subtitle": "Repositories, connectors and channels for Harness",
   "harness.store.emptyList": "No packages to show.",
   "harness.store.deprecated": "Deprecated soon",
   "harness.store.badge.installed": "Installed",
@@ -135,13 +135,13 @@ export const harness: Record<keyof typeof koHarness, string> = {
   // --- Connections section header ---
   "harness.store.section.connections": "Connections",
   "harness.store.section.connectionsDesc":
-    "Connect CLIs, vendors and channels to this app.",
+    "Connect repositories (GitHub), connectors and Telegram / Slack channels in one place.",
   // --- Telegram channel panel ---
   "harness.telegram.status.idle": "Idle",
   "harness.telegram.status.connected": "Connected",
   "harness.telegram.status.needsCheck": "Needs check",
   "harness.telegram.status.disconnected": "Disconnected",
-  "harness.telegram.title": "Channel connection",
+  "harness.telegram.title": "Telegram channel connection",
   "harness.telegram.loadError": "Failed to load Telegram channel status.",
   "harness.telegram.needChatId": "Save a chatId before enabling.",
   "harness.telegram.saved": "Channel settings saved.",
@@ -221,9 +221,9 @@ export const harness: Record<keyof typeof koHarness, string> = {
     "Mention the bot in the channel and confirm the reply round-trips.",
 
   // --- GitHub connection panel (leyZnPBHbHUl3H9sRTDF) — optional, not required onboarding ---
-  "harness.github.title": "GitHub connection",
+  "harness.github.title": "GitHub account connection",
   "harness.github.subtitle":
-    "Optional link for private repo clones and collaboration. Not part of the getting-started flow.",
+    "Optional link for private repo clones and collaboration. It appears only on the Harness tab, not in Start here.",
   "harness.github.optionalBadge": "Optional",
   "harness.github.status.connected": "Connected",
   "harness.github.status.disconnected": "Disconnected",
@@ -250,23 +250,23 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.github.deviceCodeHint":
     "After you enter the code and approve, this panel switches to connected automatically.",
   "harness.github.openGithub": "Open GitHub",
-  "harness.github.guide.toggle": "How do I connect GitHub?",
+  "harness.github.guide.toggle": "GitHub repository access guide",
   "harness.github.guide.step1":
-    "Click Connect GitHub above to start device OAuth and get a one-time code.",
+    "First use Connect in this section to save the current project's repo URL and default branch.",
   "harness.github.guide.step2Before": "Open ",
   "harness.github.guide.step2After":
     ", enter the code, and approve Marblo.",
   "harness.github.guide.step3":
-    "When approval finishes, private repo clone and push work on this device.",
+    "If private repo clone or push is needed, click GitHub account connection above to start device OAuth and get a one-time code.",
   "harness.github.guide.step4":
-    "Share and repo-connect (collaboration) flows reuse the same device OAuth link.",
+    "After approval finishes, share and repo-connect collaboration flows reuse the same device OAuth link.",
   "harness.github.guide.step5":
     "When GitHub App install permissions open later, they inherit on the same identity — no second login.",
   "harness.github.guide.step6":
     "Disconnect anytime with the trash button on this panel (optional link).",
   "harness.github.guide.appTitle": "Device OAuth → GitHub App auto-inherit",
   "harness.github.guide.appBody":
-    "Device OAuth is the first path today. GitHub App install tokens are the endgame and inherit on the same account path after connect. This is not a required onboarding step.",
+    "The GitHub account link is an optional Harness-tab connection. It is not part of the required Start here onboarding. Device OAuth is the first path today; GitHub App install tokens are the endgame and inherit on the same account path.",
 
   // --- Google Drive wiki folder panel (MCTHALmNAWPpilTFwe8o) ---
   // Two axes in one panel: the account is connected once per user, the wiki
