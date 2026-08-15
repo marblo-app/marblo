@@ -681,6 +681,7 @@ export function AgentListPanel({
               <TerminalView
                 key={r.ptySessionId}
                 sessionId={r.ptySessionId!}
+                activityState={r.status}
                 isActive={
                   !!focusedRow && focusedRow.ptySessionId === r.ptySessionId
                 }

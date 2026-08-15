@@ -263,6 +263,7 @@ export function MissionOrchestratorPanel({
               <OrchestratorTerminal
                 sessionId={session.ptySessionId}
                 panelHeight={PTY_HEIGHT}
+                status={status}
               />
             </div>
           ) : (

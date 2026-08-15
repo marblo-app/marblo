@@ -10,12 +10,14 @@ import {
   TERMINAL_FONT_FAMILY,
   XTERM_CJK_RENDER_OPTIONS,
   bindTerminalCjkFont,
+  repairTerminalCjkFontCachesIfLoaded,
 } from "../../lib/monoFont";
 import { t } from "../../lib/i18n";
 
 interface TerminalViewProps {
   sessionId: string;
   isActive: boolean;
+  activityState?: string;
   // Mimics Claude `/agents` view: pressing ← with an empty input line
   // drills out of the focused agent back to the list. We track keystrokes
   // sent via `terminal.onData` to estimate input length — when it's 0,
@@ -27,12 +29,15 @@ interface TerminalViewProps {
 export default memo(function TerminalView({
   sessionId,
   isActive,
+  activityState,
   onLeftWhenEmpty,
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const initializedRef = useRef(false);
+  const repairCjkCachesRef = useRef<(reason: string) => void>(() => {});
+  const lastActivityStateRef = useRef<string | undefined>(activityState);
   // Shared scroll-follow state — user-input-driven (see effect for details).
   const wantBottomRef = useRef(true);
   // Best-effort estimate of the user's current input line length. Reset to
@@ -96,6 +101,23 @@ export default memo(function TerminalView({
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+
+    let cjkRepairFrame: number | null = null;
+    const scheduleCjkCacheRepair = (reason: string) => {
+      if (disposed || cjkRepairFrame !== null) return;
+      cjkRepairFrame = requestAnimationFrame(() => {
+        cjkRepairFrame = null;
+        if (disposed || !termOpened) return;
+        try {
+          if (repairTerminalCjkFontCachesIfLoaded(terminal)) {
+            console.debug(`[TerminalView] CJK glyph caches repaired (${reason})`);
+          }
+        } catch (err) {
+          console.warn("[TerminalView] CJK glyph cache repair failed:", err);
+        }
+      });
+    };
+    repairCjkCachesRef.current = scheduleCjkCacheRepair;
 
     // Drill-out gate: plain ArrowLeft with no modifiers AND an empty
     // estimated input line fires onLeftWhenEmpty instead of sending
@@ -315,6 +337,7 @@ export default memo(function TerminalView({
           nudgeRestoreTimer = null;
           if (disposed) return;
           window.electronAPI.pty.resize(sessionId, cols, rows);
+          scheduleCjkCacheRepair("pty repaint nudge");
         }, 50);
       } catch {
         /* ignore */
@@ -416,6 +439,7 @@ export default memo(function TerminalView({
       terminal.write(
         `\r\n\x1b[90m[Process exited with code ${code}]\x1b[0m\r\n`,
       );
+      scheduleCjkCacheRepair("pty exit");
     });
 
     // Resize handler
@@ -512,6 +536,7 @@ export default memo(function TerminalView({
       if (settleTimer) clearTimeout(settleTimer);
       if (maxTimer) clearTimeout(maxTimer);
       if (nudgeRestoreTimer) clearTimeout(nudgeRestoreTimer);
+      if (cjkRepairFrame !== null) cancelAnimationFrame(cjkRepairFrame);
       window.removeEventListener("resize", handleResize);
       resizeObserver?.disconnect();
       wrapperEl?.removeEventListener("wheel", onWheel, wheelOpts);
@@ -525,9 +550,32 @@ export default memo(function TerminalView({
       }
       terminalRef.current = null;
       fitAddonRef.current = null;
+      repairCjkCachesRef.current = () => {};
       initializedRef.current = false;
     };
   }, [sessionId]);
+
+  useEffect(() => {
+    const previous = lastActivityStateRef.current;
+    lastActivityStateRef.current = activityState;
+    if (!activityState || previous === activityState) return;
+
+    const prev = previous?.toLowerCase();
+    const next = activityState.toLowerCase();
+    const wasBusy =
+      prev === "starting" ||
+      prev === "running" ||
+      prev === "working" ||
+      prev === "in_progress";
+    const isBusy =
+      next === "starting" ||
+      next === "running" ||
+      next === "working" ||
+      next === "in_progress";
+    if (wasBusy && !isBusy) {
+      repairCjkCachesRef.current(`activity ${previous}->${activityState}`);
+    }
+  }, [activityState]);
 
   // Re-fit when tab becomes active + scroll to bottom
   useEffect(() => {

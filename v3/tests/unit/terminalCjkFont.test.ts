@@ -8,6 +8,7 @@ import {
   cjkFontSpec,
   isCjkFontLoaded,
   invalidateTerminalFontCaches,
+  repairTerminalCjkFontCachesIfLoaded,
   bindTerminalCjkFont,
   resetCjkFontLoadForTests,
   type FontCacheInvalidatable,
@@ -216,6 +217,24 @@ describe("invalidateTerminalFontCaches", () => {
     invalidateTerminalFontCaches(term);
     expect(calls).not.toContain("resize(81,0)");
     expect(calls).toContain("refresh(0,0)");
+  });
+});
+
+describe("repairTerminalCjkFontCachesIfLoaded", () => {
+  it("rebuilds caches when the CJK face is already loaded", () => {
+    installFontSet(true);
+    const { term, calls } = fakeTerminal();
+    expect(repairTerminalCjkFontCachesIfLoaded(term)).toBe(true);
+    expect(calls).toContain("clearTextureAtlas");
+    expect(calls).toContain("resize(81,24)");
+  });
+
+  it("does not rebuild or download when the CJK face is unavailable", () => {
+    const fonts = installFontSet(false);
+    const { term, calls } = fakeTerminal();
+    expect(repairTerminalCjkFontCachesIfLoaded(term)).toBe(false);
+    expect(calls).toEqual([]);
+    expect(fonts.load).not.toHaveBeenCalled();
   });
 });
 
