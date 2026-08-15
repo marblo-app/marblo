@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  *
- * GitHubConnectionPanel(렌더러) — 티켓 leyZnPBHbHUl3H9sRTDF.
+ * GitHubAccountConnectionSection(렌더러) — 티켓 leyZnPBHbHUl3H9sRTDF.
  *
  * 계약:
  *  1) Harness 탭 선택 연결 — 접힘/열림 가이드(device OAuth → GitHub App 자동상속).
@@ -22,7 +22,13 @@ vi.mock("../../src/hooks/useAuth", () => ({
   useAuth: vi.fn(() => ({ user: { uid: "u1" } })),
 }));
 
-import { GitHubConnectionPanel } from "../../src/components/harness/GitHubConnectionPanel";
+vi.mock("../../src/stores/projectStore", () => ({
+  useProjectStore: vi.fn((selector: (state: unknown) => unknown) =>
+    selector({ currentProject: null }),
+  ),
+}));
+
+import { GitHubAccountConnectionSection } from "../../src/components/harness/ConnectionStatusPanel";
 import { useAuth } from "../../src/hooks/useAuth";
 import { useLocaleStore } from "../../src/lib/i18n";
 import { ko } from "../../src/locales/ko";
@@ -50,7 +56,19 @@ function installGithubStub(overrides: Record<string, unknown> = {}) {
 }
 
 function renderPanel() {
-  return render(createElement(GitHubConnectionPanel));
+  return render(createElement(GitHubAccountConnectionSection));
+}
+
+async function findEnabledConnectButton() {
+  await waitFor(() => {
+    const button = screen
+      .getByText(ko["harness.github.connect"])
+      .closest("button") as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
+  return screen
+    .getByText(ko["harness.github.connect"])
+    .closest("button") as HTMLButtonElement;
 }
 
 beforeEach(() => {
@@ -66,7 +84,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("GitHubConnectionPanel — 상태 표시", () => {
+describe("GitHubAccountConnectionSection — 상태 표시", () => {
   it("미연결이면 배지·선택 라벨이 보인다", async () => {
     installGithubStub();
     renderPanel();
@@ -96,15 +114,12 @@ describe("GitHubConnectionPanel — 상태 표시", () => {
   });
 });
 
-describe("GitHubConnectionPanel — device OAuth", () => {
+describe("GitHubAccountConnectionSection — device OAuth", () => {
   it("연결 클릭 시 deviceStart 를 호출하고 user code 를 보여준다", async () => {
     const api = installGithubStub();
     renderPanel();
 
-    await waitFor(() =>
-      expect(screen.getByText(ko["harness.github.connect"])).toBeTruthy(),
-    );
-    fireEvent.click(screen.getByText(ko["harness.github.connect"]));
+    fireEvent.click(await findEnabledConnectButton());
 
     await waitFor(() => expect(api.deviceStart).toHaveBeenCalledWith("u1"));
     await waitFor(() => expect(screen.getByText("ABCD-EFGH")).toBeTruthy());
@@ -132,10 +147,7 @@ describe("GitHubConnectionPanel — device OAuth", () => {
     });
     renderPanel();
 
-    await waitFor(() =>
-      expect(screen.getByText(ko["harness.github.connect"])).toBeTruthy(),
-    );
-    fireEvent.click(screen.getByText(ko["harness.github.connect"]));
+    fireEvent.click(await findEnabledConnectButton());
     await waitFor(() => expect(api.deviceStart).toHaveBeenCalled());
 
     await waitFor(
@@ -149,7 +161,7 @@ describe("GitHubConnectionPanel — device OAuth", () => {
   });
 });
 
-describe("GitHubConnectionPanel — 연결 가이드 (접힘/열림)", () => {
+describe("GitHubAccountConnectionSection — 연결 가이드 (접힘/열림)", () => {
   it("기본값은 접힘 상태이고, 토글을 누르면 가이드 단계가 펼쳐진다", async () => {
     installGithubStub();
     renderPanel();
@@ -165,13 +177,7 @@ describe("GitHubConnectionPanel — 연결 가이드 (접힘/열림)", () => {
 
     expect(toggleButton.getAttribute("aria-expanded")).toBe("true");
     const bodyText = document.body.textContent ?? "";
-    for (const step of [
-      "step1",
-      "step3",
-      "step4",
-      "step5",
-      "step6",
-    ] as const) {
+    for (const step of ["step1", "step3", "step4", "step5", "step6"] as const) {
       expect(bodyText).toContain(
         ko[`harness.github.guide.${step}` as keyof typeof ko],
       );
@@ -190,9 +196,7 @@ describe("GitHubConnectionPanel — 연결 가이드 (접힘/열림)", () => {
     installGithubStub();
     renderPanel();
 
-    fireEvent.click(
-      await screen.findByText(ko["harness.github.guide.toggle"]),
-    );
+    fireEvent.click(await screen.findByText(ko["harness.github.guide.toggle"]));
 
     const link = screen.getByText(
       "github.com/login/device",
@@ -203,7 +207,7 @@ describe("GitHubConnectionPanel — 연결 가이드 (접힘/열림)", () => {
   });
 });
 
-describe("GitHubConnectionPanel — 로그인 필요", () => {
+describe("GitHubAccountConnectionSection — 로그인 필요", () => {
   it("user 가 없으면 연결 버튼을 막고 안내를 띄운다", async () => {
     vi.mocked(useAuth).mockReturnValue({ user: null } as ReturnType<
       typeof useAuth

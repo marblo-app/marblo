@@ -158,9 +158,14 @@ export const harness = {
   "harness.telegram.guide.step2":
     "만든 봇을 사용할 채널 또는 그룹에 추가합니다.",
   "harness.telegram.guide.step3":
-    "대상이 공개 채널이면 @username을, 비공개 채널/그룹이면 Telegram API 응답에서 chatId를 확인합니다.",
+    "공개 채널은 @username을 쓸 수 있습니다. 비공개 채널/그룹은 봇을 초대한 뒤 채팅에 테스트 메시지를 보내고 getUpdates 응답의 message.chat.id 값을 복사합니다.",
   "harness.telegram.guide.step4":
     "bot token과 chatId를 입력해 저장한 뒤 활성 토글을 켭니다.",
+  "harness.telegram.chatIdGuide.title": "비공개 채널/그룹 chatId 가져오기",
+  "harness.telegram.chatIdGuide.before":
+    "봇을 채널/그룹에 추가하고 채팅에 메시지를 하나 보낸 뒤, <BOT_TOKEN>만 실제 bot token으로 바꿔 실행합니다.",
+  "harness.telegram.chatIdGuide.after":
+    "응답 JSON에서 result[].message.chat.id 또는 result[].channel_post.chat.id 값을 복사합니다. 채널 ID는 보통 -100으로 시작합니다. 응답이 비어 있으면 채팅에 새 메시지를 보낸 뒤 다시 실행하세요.",
   "harness.telegram.plugin.title": "Telegram 플러그인 필요",
   "harness.telegram.plugin.descAfter":
     "이 동작하려면 telegram 플러그인이 설치되어 있어야 합니다. 하네스 스토어에서 telegram 플러그인을 설치하거나, CLI에서 같은 플러그인 이름으로 설치한 뒤 채널을 활성화하세요.",
@@ -211,11 +216,14 @@ export const harness = {
   "harness.slack.guide.step4":
     "Event Subscriptions를 켜고 app_mention 이벤트를 구독합니다.",
   "harness.slack.guide.step5":
-    "봇을 사용할 채널에 초대하고 채널 ID를 확인합니다.",
+    "봇을 사용할 채널에 초대하고 채널 ID를 확인합니다. 채널 세부정보의 About/정보 하단 또는 Copy link의 마지막 경로에서 C/G로 시작하는 ID를 복사합니다.",
   "harness.slack.guide.step6":
     "위 패널에 Bot Token과 App Token을 입력해 저장한 뒤 확인(Probe) 버튼으로 동작을 검증합니다.",
   "harness.slack.guide.step7":
     "채널에서 봇을 멘션해 응답이 왕복하는지 확인합니다.",
+  "harness.slack.channelIdGuide.title": "채널 ID 확인",
+  "harness.slack.channelIdGuide.body":
+    "Slack 채널명(#general)이 아니라 C0123456789 같은 채널 ID가 필요합니다. 데스크톱 Slack에서 채널 이름을 누른 뒤 About/정보 하단의 Channel ID를 복사하거나, 채널 링크를 복사해 마지막 경로 조각을 사용하세요. 비공개 채널은 G로 시작할 수 있으며, 봇을 먼저 초대해야 Probe가 통과합니다.",
 
   // --- GitHub 연결 패널 (leyZnPBHbHUl3H9sRTDF) — 선택사항, 온보딩 필수 아님 ---
   "harness.github.title": "GitHub 계정 연결",
@@ -242,7 +250,8 @@ export const harness = {
   "harness.github.disconnectFailed": "연결 해제에 실패했습니다.",
   "harness.github.refreshTitle": "GitHub 연결 상태 새로고침",
   "harness.github.loadError": "GitHub 연결 상태를 불러오지 못했습니다.",
-  "harness.github.needLogin": "마블로에 로그인한 뒤 GitHub를 연결할 수 있습니다.",
+  "harness.github.needLogin":
+    "마블로에 로그인한 뒤 GitHub를 연결할 수 있습니다.",
   "harness.github.deviceCodeLabel": "GitHub에서 다음 코드를 입력하세요:",
   "harness.github.deviceCodeHint":
     "코드 입력·승인 후 이 패널이 자동으로 연결 상태로 바뀝니다.",
