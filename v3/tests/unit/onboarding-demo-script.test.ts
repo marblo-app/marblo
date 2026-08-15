@@ -345,3 +345,38 @@ describe("demo — 무과금 불변식 회귀 가드", () => {
     expect(source).toContain("DEMO_CONNECT_PENDING_KEY");
   });
 });
+
+describe("StartHereTab demo exposure contract", () => {
+  it("완료 상태에서도 완료 배너 안에 명시적인 데모 CTA가 남아 있다", () => {
+    const source = readFileSync(
+      srcPath("components/onboarding/StartHereTab.tsx"),
+      "utf8",
+    );
+    const completeBranch = source.match(/\{complete && \([\s\S]*?\n        \)\}/);
+
+    expect(completeBranch?.[0]).toContain(
+      'data-testid="start-here-complete-watch-demo"',
+    );
+    expect(completeBranch?.[0]).toContain("onClick={openDemo}");
+    expect(completeBranch?.[0]).toContain("onboarding.startHere.watchDemo");
+    expect(completeBranch?.[0]).toContain("DEMO_TOTAL_SECONDS");
+  });
+
+  it("ValuePreview와 DemoMode 진입점은 온보딩 완료 분기 밖에 있다", () => {
+    const source = readFileSync(
+      srcPath("components/onboarding/StartHereTab.tsx"),
+      "utf8",
+    );
+    const valuePreviewIndex = source.indexOf("<ValuePreview");
+    const incompleteBranchIndex = source.indexOf("{!complete && (");
+    const completeBranchIndex = source.indexOf("{complete && (");
+    const demoModeIndex = source.indexOf("{showDemo && (");
+
+    expect(valuePreviewIndex).toBeGreaterThan(-1);
+    expect(incompleteBranchIndex).toBeGreaterThan(valuePreviewIndex);
+    expect(completeBranchIndex).toBeGreaterThan(valuePreviewIndex);
+    expect(demoModeIndex).toBeGreaterThan(completeBranchIndex);
+    expect(source).toContain("<ValuePreview onWatchDemo={openDemo} />");
+    expect(source).toContain("<DemoMode");
+  });
+});

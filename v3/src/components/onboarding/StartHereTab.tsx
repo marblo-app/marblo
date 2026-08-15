@@ -298,12 +298,27 @@ export function StartHereTab() {
 
         {complete && (
           <div className="mb-4 rounded-lg border border-[#a6e3a1]/30 bg-[#a6e3a1]/10 px-4 py-3">
-            <p className="text-sm font-semibold text-[#a6e3a1]">
-              🎉 {t("onboarding.startHere.allDone.title")}
-            </p>
-            <p className="mt-1 text-xs text-[#a6adc8]">
-              {t("onboarding.startHere.allDone.body")}
-            </p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-[#a6e3a1]">
+                  🎉 {t("onboarding.startHere.allDone.title")}
+                </p>
+                <p className="mt-1 text-xs text-[#a6adc8]">
+                  {t("onboarding.startHere.allDone.body")}
+                </p>
+              </div>
+              <button
+                type="button"
+                data-testid="start-here-complete-watch-demo"
+                onClick={openDemo}
+                className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md border border-[#89b4fa]/50 bg-[#89b4fa]/15 px-3 py-2 text-xs font-semibold text-[#cdd6f4] transition-colors hover:bg-[#89b4fa]/25"
+              >
+                <PlayCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("onboarding.startHere.watchDemo", {
+                  seconds: DEMO_TOTAL_SECONDS,
+                })}
+              </button>
+            </div>
           </div>
         )}
 
