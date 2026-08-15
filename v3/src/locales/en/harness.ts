@@ -159,9 +159,15 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.telegram.guide.step2":
     "Add the bot to the channel or group you want to use.",
   "harness.telegram.guide.step3":
-    "For a public channel use its @username; for a private channel/group, find the chatId in the Telegram API response.",
+    "For a public channel you can use its @username. For a private channel/group, invite the bot, send one test message, then copy message.chat.id from the getUpdates response.",
   "harness.telegram.guide.step4":
     "Enter the bot token and chatId, save, then turn on the active toggle.",
+  "harness.telegram.chatIdGuide.title":
+    "Get the chatId for a private channel/group",
+  "harness.telegram.chatIdGuide.before":
+    "Add the bot to the channel/group, send one message there, then replace only <BOT_TOKEN> with the real bot token and run:",
+  "harness.telegram.chatIdGuide.after":
+    "Copy result[].message.chat.id or result[].channel_post.chat.id from the JSON response. Channel IDs usually start with -100. If result is empty, send a fresh message in Telegram and run it again.",
   "harness.telegram.plugin.title": "Telegram plugin required",
   "harness.telegram.plugin.descAfter":
     " requires the telegram plugin to be installed. Install it from the Harness store, or via the CLI using the same plugin name, then enable the channel.",
@@ -214,11 +220,14 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.slack.guide.step4":
     "Turn on Event Subscriptions and subscribe to the app_mention event.",
   "harness.slack.guide.step5":
-    "Invite the bot to the channel you want to use and note its channel ID.",
+    "Invite the bot to the channel you want to use and note its channel ID. Copy the C/G-prefixed ID from channel details or from the last segment of Copy link.",
   "harness.slack.guide.step6":
     "Enter the Bot Token and App Token above, save, then verify with the Probe button.",
   "harness.slack.guide.step7":
     "Mention the bot in the channel and confirm the reply round-trips.",
+  "harness.slack.channelIdGuide.title": "Find the channel ID",
+  "harness.slack.channelIdGuide.body":
+    "Use the channel ID, not the display name like #general. In Slack desktop, open the channel name and copy the Channel ID from the bottom of About/details, or copy the channel link and use the final path segment. Private channels may start with G, and the bot must be invited before Probe can pass.",
 
   // --- GitHub connection panel (leyZnPBHbHUl3H9sRTDF) — optional, not required onboarding ---
   "harness.github.title": "GitHub account connection",
@@ -254,8 +263,7 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.github.guide.step1":
     "First use Connect in this section to save the current project's repo URL and default branch.",
   "harness.github.guide.step2Before": "Open ",
-  "harness.github.guide.step2After":
-    ", enter the code, and approve Marblo.",
+  "harness.github.guide.step2After": ", enter the code, and approve Marblo.",
   "harness.github.guide.step3":
     "If private repo clone or push is needed, click GitHub account connection above to start device OAuth and get a one-time code.",
   "harness.github.guide.step4":

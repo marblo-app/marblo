@@ -571,6 +571,12 @@ export function SlackChannelPanel() {
             7. {t("harness.slack.guide.step7")}
           </ConnectorGuideStep>
         </ConnectorGuideSteps>
+        <div className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
+          <p className="mb-1 text-xs font-medium text-[#cdd6f4]">
+            {t("harness.slack.channelIdGuide.title")}
+          </p>
+          <p>{t("harness.slack.channelIdGuide.body")}</p>
+        </div>
       </ConnectorGuidePanel>
     </div>
   );

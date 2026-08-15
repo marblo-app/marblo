@@ -1,11 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  CheckCircle2,
-  Loader2,
-  RefreshCw,
-  Save,
-  XCircle,
-} from "lucide-react";
+import { CheckCircle2, Loader2, RefreshCw, Save, XCircle } from "lucide-react";
 import { useProjectStore } from "../../stores/projectStore";
 import { useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
@@ -369,6 +363,16 @@ export function TelegramChannelPanel() {
             4. {t("harness.telegram.guide.step4")}
           </ConnectorGuideStep>
         </ConnectorGuideSteps>
+        <div className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
+          <p className="mb-1 text-xs font-medium text-[#cdd6f4]">
+            {t("harness.telegram.chatIdGuide.title")}
+          </p>
+          <p className="mb-2">{t("harness.telegram.chatIdGuide.before")}</p>
+          <pre className="overflow-x-auto rounded bg-[#11111b] px-3 py-2 text-[11px] leading-5 text-[#cdd6f4]">
+            <code>{`curl -s "https://api.telegram.org/bot<BOT_TOKEN>/getUpdates"`}</code>
+          </pre>
+          <p className="mt-2">{t("harness.telegram.chatIdGuide.after")}</p>
+        </div>
         <div className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
           <p className="mb-1 text-xs font-medium text-[#cdd6f4]">
             {t("harness.telegram.plugin.title")}
