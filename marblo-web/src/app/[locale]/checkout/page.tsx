@@ -890,6 +890,9 @@ export default function CheckoutPage() {
                 <p className="mt-1 text-xs text-zinc-400">
                   {t("cancelNotice")}
                 </p>
+                <p className="mt-1 text-xs text-zinc-400">
+                  {t("subscriptionDeliveryNotice")}
+                </p>
               </div>
             )}
 
@@ -1057,6 +1060,30 @@ export default function CheckoutPage() {
                 <li>{t("thirdPartyPurpose")}</li>
                 <li>{t("thirdPartyRetention")}</li>
               </ul>
+            </div>
+
+            {/* Legal/refund links must be reachable inside the payment flow. */}
+            <div className="mt-2 rounded-lg bg-zinc-800/40 border border-zinc-700/60 px-3 py-2.5 text-xs text-zinc-400 leading-relaxed">
+              <p className="font-medium text-zinc-300">
+                {t("legalLinksTitle")}
+              </p>
+              <p className="mt-1">{t("legalLinksBody")}</p>
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                <Link
+                  href={`/${locale}/legal/terms`}
+                  target="_blank"
+                  className="text-indigo-400 hover:text-indigo-300 underline"
+                >
+                  {t("termsLink")}
+                </Link>
+                <Link
+                  href={`/${locale}/legal/refund`}
+                  target="_blank"
+                  className="text-indigo-400 hover:text-indigo-300 underline"
+                >
+                  {t("refundLink")}
+                </Link>
+              </div>
             </div>
 
             {/* Pay button */}
