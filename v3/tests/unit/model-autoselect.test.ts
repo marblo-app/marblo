@@ -60,7 +60,7 @@ const onlyOriginalClaude = (id: string) => ONLY_ORIGINAL_CLAUDE.has(id);
 
 function ctxFor(
   complexity: "simple" | "standard" | "complex",
-  taskType = "feature",
+  taskType = "feature"
 ): GraphContext {
   return { role: "backend", complexity, taskType, tags: [] };
 }
@@ -71,7 +71,7 @@ function feed(
   modelKey: string,
   mode: OutcomeMode,
   count: number,
-  ctx: GraphContext,
+  ctx: GraphContext
 ): RoutingGraph {
   for (let i = 0; i < count; i++) {
     applyOutcome(graph, {
@@ -90,7 +90,7 @@ function feed(
 function plan(
   harness: string,
   tier: "simple" | "standard" | "complex",
-  extra: Partial<Parameters<typeof selectAutoModel>[0]> = {},
+  extra: Partial<Parameters<typeof selectAutoModel>[0]> = {}
 ) {
   return selectAutoModel({
     harness,
@@ -109,7 +109,7 @@ describe("후보 구성", () => {
   it("claude 는 사다리 칸 그대로(모델 축을 실제로 핀한다) — hyKsSYYM 이후 env-swap 칸도 구조적으로 후보다", () => {
     const { candidates, pinsModel, entryIndex } = autoCandidates(
       "claude",
-      "standard",
+      "standard"
     );
     expect(pinsModel).toBe(true);
     // ★키 유무는 여기서 걸러지지 않는다(구조 단계) — `modelAvailable` 없이 부르면
@@ -130,7 +130,7 @@ describe("후보 구성", () => {
     // 진입칸은 사다리가 말하는 그 칸이다(여기서 순서를 새로 만들지 않는다) —
     // env-swap 이 편입돼도 entry 는 여전히 claude-opus-5.
     expect(candidates[entryIndex].model).toBe(
-      entryRung("claude", "standard")!.model,
+      entryRung("claude", "standard")!.model
     );
     expect(candidates[entryIndex].model).toBe("claude-opus-5");
   });
@@ -138,13 +138,13 @@ describe("후보 구성", () => {
   it("★codex 는 gpt-5.6 변종 칸을 실제 모델 핀 후보로 올린다", () => {
     const { candidates, pinsModel, entryIndex } = autoCandidates(
       "gpt",
-      "standard",
+      "standard"
     );
     expect(pinsModel).toBe(true);
     expect(candidates[entryIndex].model).toBe("gpt-5.6-terra");
     expect(candidates[entryIndex].effort).toBe("medium");
     expect(new Set(candidates.map((c) => c.model))).toEqual(
-      new Set(["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]),
+      new Set(["gpt-5.6-luna", "solar-pro4", "gpt-5.6-terra", "gpt-5.6-sol"])
     );
   });
 
@@ -153,7 +153,7 @@ describe("후보 구성", () => {
       for (const tier of ["simple", "standard", "complex"] as const) {
         const { candidates } = autoCandidates(harness, tier);
         expect(candidates.some((c) => isApprovalGatedEffort(c.effort))).toBe(
-          false,
+          false
         );
       }
     }
@@ -182,7 +182,7 @@ describe("★단순 → 저단가", () => {
   it("simple claude 는 후보 중 effective 단가가 가장 싼 구독 칸을 고른다", () => {
     const p = plan("claude", "simple")!;
     const costs = p.scores.map(
-      (s) => effectiveCostIndexForModel(s.candidate.model)!,
+      (s) => effectiveCostIndexForModel(s.candidate.model)!
     );
     expect(effectiveCostIndexForModel(p.model)).toBe(Math.min(...costs));
     expect(p.model).toBe("claude-sonnet-5");
@@ -241,7 +241,7 @@ describe("★standard opus5 편중 해소", () => {
     for (let i = 0; i < 6; i++)
       picks.add(
         plan("claude", "standard", { modelAvailable: onlyOriginalClaude })!
-          .model,
+          .model
       );
     expect(picks.size).toBeGreaterThan(1);
     expect(picks.has("claude-sonnet-5")).toBe(true);
@@ -267,13 +267,13 @@ describe("★가용성 — 못 쓰는 칸은 후보에서 빠진다", () => {
     })!;
     expect(p.model).not.toBe("claude-opus-5");
     expect(p.scores.some((s) => s.candidate.model === "claude-opus-5")).toBe(
-      false,
+      false
     );
   });
 
   it("전부 못 쓰면 계획이 없다(호출자가 종전 경로로 떨어진다)", () => {
     expect(
-      plan("claude", "standard", { modelAvailable: () => false }),
+      plan("claude", "standard", { modelAvailable: () => false })
     ).toBeNull();
   });
 });
@@ -306,7 +306,7 @@ describe("★env-swap 자동선택 편입(hyKsSYYM, 사장님 A안)", () => {
       const present = ENV_SWAP_IDS.filter((id) => modelsInScores.has(id));
       expect(
         present.length,
-        `${tier} 티어 scores 에 env-swap 후보가 하나도 없다`,
+        `${tier} 티어 scores 에 env-swap 후보가 하나도 없다`
       ).toBeGreaterThan(0);
     }
   });
@@ -317,12 +317,12 @@ describe("★env-swap 자동선택 편입(hyKsSYYM, 사장님 A안)", () => {
       const modelsInScores = new Set(p.scores.map((s) => s.candidate.model));
       for (const id of ENV_SWAP_IDS) {
         expect(modelsInScores.has(id), `${tier}: ${id} 가 키 없이도 떴다`).toBe(
-          false,
+          false
         );
       }
       // 무회귀: 키가 없으면 종전 3칸(sonnet5/opus5/fable5)만 경쟁한다.
       expect([...modelsInScores].every((m) => onlyOriginalClaude(m))).toBe(
-        true,
+        true
       );
     }
   });
@@ -335,13 +335,30 @@ describe("★env-swap 자동선택 편입(hyKsSYYM, 사장님 A안)", () => {
 
     const withoutKey = plan("claude", "standard", { modelAvailable })!;
     expect(withoutKey.scores.some((s) => s.candidate.model === "glm-5.2")).toBe(
-      false,
+      false
     );
 
     glmReady = true;
     const withKey = plan("claude", "standard", { modelAvailable })!;
     expect(withKey.scores.some((s) => s.candidate.model === "glm-5.2")).toBe(
-      true,
+      true
+    );
+  });
+
+  it("OpenAI 호환 env-swap(Solar) 도 gpt 후보에서 같은 가용성 게이트를 탄다", () => {
+    let solarReady = false;
+    const modelAvailable = (id: string) =>
+      id === "solar-pro4" ? solarReady : true;
+
+    const withoutKey = plan("gpt", "standard", { modelAvailable })!;
+    expect(
+      withoutKey.scores.some((s) => s.candidate.model === "solar-pro4")
+    ).toBe(false);
+
+    solarReady = true;
+    const withKey = plan("gpt", "standard", { modelAvailable })!;
+    expect(withKey.scores.some((s) => s.candidate.model === "solar-pro4")).toBe(
+      true
     );
   });
 
@@ -349,7 +366,7 @@ describe("★env-swap 자동선택 편입(hyKsSYYM, 사장님 A안)", () => {
     const p = plan("claude", "simple")!;
     expect(p.model).toBe("claude-sonnet-5");
     expect(effectiveCostIndexForModel(p.model)).toBeLessThan(
-      costIndexForModel("MiniMax-M2.7")!,
+      costIndexForModel("MiniMax-M2.7")!
     );
   });
 
@@ -359,13 +376,13 @@ describe("★env-swap 자동선택 편입(hyKsSYYM, 사장님 A안)", () => {
     expect(p.movedFromEntry).toBe(false);
     // env-swap 후보 전부가 fable5 보다 낮은 점수라는 것 — 강제가 아니라 점수.
     const fableScore = p.scores.find(
-      (s) => s.candidate.model === "claude-fable-5",
+      (s) => s.candidate.model === "claude-fable-5"
     )!;
     for (const id of ENV_SWAP_IDS) {
       const s = p.scores.find((s) => s.candidate.model === id);
       if (!s) continue;
       expect(s.total, `${id} 가 fable5 를 이겼다`).toBeLessThan(
-        fableScore.total,
+        fableScore.total
       );
     }
   });
@@ -413,7 +430,7 @@ describe("★exploration — 비교데이터를 만든다", () => {
     const entryIdx = efforts.findIndex(
       (c) =>
         c.model === entryRung("gpt", "complex")!.model &&
-        c.effort === entryRung("gpt", "complex")!.effort,
+        c.effort === entryRung("gpt", "complex")!.effort
     );
     const pickedIdx = efforts.findIndex((c) => c.modelKey === p.modelKey);
     expect(Math.abs(pickedIdx - entryIdx)).toBeLessThanOrEqual(1);
@@ -482,7 +499,7 @@ describe("★정적 지식은 get_model_guidance(obPe) 소스에서 온다", () 
                 benchmark: row.benchRecords[row.representativeIndex].benchmark,
                 score: row.benchRecords[row.representativeIndex].score,
               },
-      })),
+      }))
     );
     payload.models.forEach((row, i) => {
       const g = modelGuidance(row.modelId);
@@ -493,7 +510,7 @@ describe("★정적 지식은 get_model_guidance(obPe) 소스에서 온다", () 
           ? null
           : row.benchRecords[row.representativeIndex];
       expect(g!.benchScore).toBe(
-        rep && typeof rep.score === "number" ? rep.score : undefined,
+        rep && typeof rep.score === "number" ? rep.score : undefined
       );
     });
   });
@@ -505,12 +522,12 @@ describe("★정적 지식은 get_model_guidance(obPe) 소스에서 온다", () 
         const entry = modelGuidance(
           autoCandidates(harness, tier).candidates[
             autoCandidates(harness, tier).entryIndex
-          ].model,
+          ].model
         );
         for (const s of p.scores) {
           if (s.bench === 0) continue;
           expect(modelGuidance(s.candidate.model)!.benchmark).toBe(
-            entry!.benchmark,
+            entry!.benchmark
           );
         }
       }
@@ -536,7 +553,7 @@ describe("★자기강화 루프 — 관측이 선택을 바꾼다", () => {
     expect(p.model).toBe("claude-sonnet-5");
     expect(p.coldStart).toBe(false);
     expect(
-      p.scores.find((s) => s.candidate.model === "claude-sonnet-5")!.kg,
+      p.scores.find((s) => s.candidate.model === "claude-sonnet-5")!.kg
     ).toBeGreaterThan(0);
   });
 
@@ -551,7 +568,7 @@ describe("★자기강화 루프 — 관측이 선택을 바꾼다", () => {
           ctx,
           graph,
           modelAvailable: onlyOriginalClaude,
-        })!.model,
+        })!.model
       );
     expect([...picks]).toEqual(["claude-opus-5"]);
   });
@@ -570,7 +587,7 @@ describe("★잔여예산 — 쿼터가 마르면 싼 칸이 유리해진다", (
     expect(costPressureForHeadroom(null)).toBe(1);
     expect(costPressureForHeadroom(10)).toBe(1);
     expect(costPressureForHeadroom(95)).toBeGreaterThan(
-      costPressureForHeadroom(60),
+      costPressureForHeadroom(60)
     );
   });
 
@@ -597,7 +614,7 @@ describe("★잔여예산 — 쿼터가 마르면 싼 칸이 유리해진다", (
         plan("claude", "standard", {
           budgetUsedPercent: 10,
           modelAvailable: onlyOriginalClaude,
-        })!.model,
+        })!.model
       );
     expect(picks.size).toBeGreaterThan(1);
   });
@@ -646,7 +663,7 @@ describe("★잔여예산 — 쿼터가 마르면 싼 칸이 유리해진다", (
   it("★잔여 25% 에서 standard 진입칸(opus5)이 실제로 밀린다 — 종전엔 잔여 20% 까지 안 밀렸다", () => {
     const at25 = plan("claude", "standard", { budgetUsedPercent: 75 })!;
     expect(costIndexForModel(at25.model)!).toBeLessThan(
-      costIndexForModel(entryRung("claude", "standard")!.model)!,
+      costIndexForModel(entryRung("claude", "standard")!.model)!
     );
     // 그런데 잔여 40% 에서는 아직 진입칸을 지킨다(과반응 금지 경계).
     const at40 = plan("claude", "standard", { budgetUsedPercent: 60 })!;
@@ -662,7 +679,7 @@ describe("★잔여예산 — 쿼터가 마르면 싼 칸이 유리해진다", (
     })!;
     expect(p.mode).toBe("top-score");
     expect(costIndexForModel(p.model)!).toBeLessThan(
-      costIndexForModel("claude-sonnet-5")!,
+      costIndexForModel("claude-sonnet-5")!
     );
   });
 });
@@ -714,6 +731,7 @@ describe("★벤더모델 후보풀·SWE/능력 경로(5k94 감사 가드)", () 
     "k3",
     "k3-256k",
     "kimi-for-coding",
+    "solar-pro4",
     "grok-4.5",
   ] as const;
 
@@ -764,7 +782,9 @@ describe("★벤더모델 후보풀·SWE/능력 경로(5k94 감사 가드)", () 
     // 쿼터가 마르면 시장가 우위가 살아 cost 가 양수로 뒤집힌다 — 단가 축이 실제로 산다.
     expect(m3!.cost).toBeLessThan(0);
     const exhausted = plan("claude", "standard", { budgetUsedPercent: 95 })!;
-    const m3Low = exhausted.scores.find((s) => s.candidate.model === "MiniMax-M3");
+    const m3Low = exhausted.scores.find(
+      (s) => s.candidate.model === "MiniMax-M3"
+    );
     expect(m3Low!.cost).toBeGreaterThan(0);
     // bench 축은 쿼터와 무관 — 같은 음수 방향 유지.
     expect(m3Low!.bench).toBeLessThan(0);

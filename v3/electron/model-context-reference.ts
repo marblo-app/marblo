@@ -68,6 +68,7 @@ const SRC = {
   minimaxAnthropic:
     "https://platform.minimax.io/docs/api-reference/text-anthropic-api",
   kimiCodeModels: "https://www.kimi.com/code/docs/en/kimi-code/models.html",
+  upstageSolarPro4: "https://www.upstage.ai/blog/en/solar-pro-4",
 } as const;
 
 /** 이 표 전체를 수집한 날. 행마다 반복하지 않으려고 상수로 뺀다. */
@@ -222,6 +223,16 @@ const RECORDS: ContextWindowRecord[] = [
     source: SRC.kimiCodeModels,
     asOf: CRAWLED,
     note: 'K2.7 Code 열의 "256k". k3-256k 와 같은 표기 단서.',
+  },
+
+  // ── Upstage Solar Pro ─────────────────────────────────────────────────
+  {
+    model: "solar-pro4",
+    tokens: 512_000,
+    maxOutputTokens: 128_000,
+    source: SRC.upstageSolarPro4,
+    asOf: "2026-08-15",
+    note: "Solar Pro 4 발표문이 512K context / up to 128K output tokens 로 적는다. 같은 문서가 OpenAI 호환 endpoint+model name(solar-pro4) 과 공식 단가도 함께 밝힌다.",
   },
 ];
 

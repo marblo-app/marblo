@@ -81,6 +81,11 @@ export const VENDOR_BILLING: Readonly<Record<string, VendorBillingFact>> = {
   },
   google: { axis: "unknown", quotaApi: null },
   moonshot: { axis: "unknown", quotaApi: null },
+  upstage: {
+    axis: "unknown",
+    quotaApi: null,
+    consoleUrl: "https://console.upstage.ai/",
+  },
   local: { axis: "unknown", quotaApi: null },
   custom: { axis: "unknown", quotaApi: null },
 };

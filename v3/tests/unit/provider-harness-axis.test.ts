@@ -277,8 +277,13 @@ describe("★회귀 0 — 기존 벤더(claude/codex) 스폰이 그대로다", (
     // 벤더 필터는 그 벤더 행만 준다 — 하네스가 같아도 섞이지 않는다.
     for (const m of modelsByVendor("anthropic"))
       expect(m.provider).toBe("anthropic");
+    // OpenAI 호환 env-swap(Solar)도 gpt 하네스를 타므로 gpt 하네스는 openai
+    // 벤더보다 넓다. openai 행은 그대로 포함되고, 벤더 필터는 섞이지 않는다.
     expect(modelsByHarness("gpt").map((m) => m.id)).toEqual(
-      modelsByVendor("openai").map((m) => m.id),
+      expect.arrayContaining(modelsByVendor("openai").map((m) => m.id)),
+    );
+    expect(modelsByHarness("gpt").length).toBeGreaterThan(
+      modelsByVendor("openai").length,
     );
     // ★hyKsSYYM(사장님 A안) 이후 claude 사다리는 anthropic 행만이 아니다 —
     // env-swap 벤더(zai/minimax/moonshot)도 harness=claude 로 같은 사다리에

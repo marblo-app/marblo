@@ -112,6 +112,7 @@ const VENDOR_COLOR_SLOTS = [
   "#d55181", // magenta
   "#008300", // green
   "#9085e9", // violet
+  "#0e8f99", // teal
 ] as const;
 
 /**
@@ -127,6 +128,7 @@ const VENDOR_SLOT_ORDER = [
   "xai",
   "google",
   "moonshot",
+  "upstage",
 ] as const;
 
 /** 벤더 미상/사용자 지정 — 카테고리 색이 아닌 중립 회색. */
@@ -134,7 +136,7 @@ export const NEUTRAL_VENDOR_COLOR = "#9ca3af";
 
 export function vendorColor(vendor: string): string {
   const i = VENDOR_SLOT_ORDER.indexOf(
-    norm(vendor) as (typeof VENDOR_SLOT_ORDER)[number],
+    norm(vendor) as typeof VENDOR_SLOT_ORDER[number]
   );
   return i >= 0 ? VENDOR_COLOR_SLOTS[i] : NEUTRAL_VENDOR_COLOR;
 }
@@ -172,7 +174,7 @@ export interface VendorModelIndex {
 
 /** 카탈로그(레지스트리 파생)를 조회 가능한 인덱스로 뒤집는다. */
 export function buildVendorModelIndex(
-  groups: readonly QuickLaneVendorGroup[],
+  groups: readonly QuickLaneVendorGroup[]
 ): VendorModelIndex {
   const byModel = new Map<string, VendorModelInfo>();
   const vendorLabels = new Map<string, string>();
@@ -238,6 +240,7 @@ export function guessVendorFromModelId(modelId: string): string {
   if (m.startsWith("minimax")) return "minimax";
   if (m.startsWith("grok")) return "xai";
   if (m.startsWith("kimi") || m.startsWith("moonshot")) return "moonshot";
+  if (m.startsWith("solar") || m.startsWith("upstage")) return "upstage";
   if (m.startsWith("claude")) return "anthropic";
   if (m.startsWith("gemini")) return "google";
   if (/^(gpt|o\d|codex)/.test(m)) return "openai";
@@ -257,7 +260,7 @@ export interface ResolvedModel extends VendorModelInfo {
  */
 export function resolveModel(
   modelId: string,
-  index: VendorModelIndex,
+  index: VendorModelIndex
 ): ResolvedModel {
   const key = norm(modelId);
 
@@ -386,7 +389,7 @@ function addInto(acc: UsageTotals, e: UsageEntry): void {
  */
 export function aggregateUsageByVendor(
   entries: readonly UsageEntry[],
-  index: VendorModelIndex,
+  index: VendorModelIndex
 ): { vendors: VendorUsageRow[]; totals: UsageTotals } {
   const totals: UsageTotals = { ...ZERO };
   const byVendor = new Map<
@@ -506,7 +509,7 @@ export function stripEffortSuffix(modelPin: string): string {
  */
 export function mapAgentsToModels(
   agents: readonly AgentModelSource[],
-  index: VendorModelIndex,
+  index: VendorModelIndex
 ): AgentModelRow[] {
   return agents
     .map((agent) => {
@@ -521,8 +524,8 @@ export function mapAgentsToModels(
       const source: ModelIdSource = detected
         ? "detected"
         : spawned
-          ? "spawned"
-          : "none";
+        ? "spawned"
+        : "none";
 
       if (!raw) {
         // 모델 근거 없음 — 벤더는 하네스의 네이티브 벤더로 **추정하지 않는다**.

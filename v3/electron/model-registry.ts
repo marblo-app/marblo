@@ -87,6 +87,7 @@ export type VendorId =
   | "minimax"
   | "xai"
   | "moonshot"
+  | "upstage"
   | "local"
   | "custom";
 
@@ -125,6 +126,7 @@ export const VENDOR_IDS: readonly VendorId[] = [
   "minimax",
   "xai",
   "moonshot",
+  "upstage",
   "local",
   "custom",
 ] as const;
@@ -316,6 +318,22 @@ const KIMI_CODE_PROBE: ModelVerification = {
     "+ 라이브: POST https://api.kimi.com/coding/v1/messages → 401 Anthropic 에러 봉투 " +
     "(무인증 vs 더미 크레덴셜이 다른 메시지 = 크레덴셜 파싱 확인, x-api-key/Bearer 동치), " +
     "claude 2.1.220 격리홈 실스폰 → duration_api_ms=0 + modelUsage={} 인증거부",
+};
+
+/**
+ * Upstage Solar Pro — OpenAI 호환 env-swap 벤더다.
+ *
+ * 티켓은 예시 모델명을 `solar-pro` 로 줬지만, 2026-08-15 현재 Upstage 공식 Console
+ * 문서와 Solar Pro 4 발표문은 모델 id 를 `solar-pro4` 로 안내한다. `solar-pro` 는
+ * alias 로만 받되, API 로 나가는 값과 cost_logs 모델 키는 최신 공식 id 로 고정한다.
+ */
+const UPSTAGE_SOLAR_PROBE: ModelVerification = {
+  at: "2026-08-15",
+  cli: "n/a (Upstage API 키 미보유 — 라이브 프로브 대기)",
+  method:
+    "Upstage 공식 Console/API keys 예제와 Solar Pro 4 발표문 확인: " +
+    "OpenAI-compatible base_url=https://api.upstage.ai/v1, model=solar-pro4, " +
+    "공식 단가 Input $0.30 / Cached Input $0.06 / Output $1.20 per 1M tokens",
 };
 
 /** Grok Build — xAI 공식 문서/오픈소스 README 확인. 브라우저 인증형 TUI. */
@@ -818,6 +836,42 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   //     같은 구독이 위 (B)형으로 이미 열리므로 (A)형 하네스 수술(argv·격리홈
   //     auth 전파·command 정규화 3겹)을 지불할 이유가 없다.
 
+  // ── Upstage Solar Pro (OpenAI 호환 env-swap 벤더 — tUlSJc0J) ───────────
+  // Solar 는 GLM/MiniMax/Kimi 와 같은 (B)형이지만 **Anthropic 호환이 아니라
+  // OpenAI 호환**이다. 따라서 harness=claude 가 아니라 harness=gpt(codex) 로
+  // 접고, 스폰 env 도 ANTHROPIC_* 가 아니라 OPENAI_* 를 갈아끼운다. `agent-config`
+  // 의 gpt 분기가 이미 `applyVendorEnv` 를 호출하므로 신규 switch 는 없다.
+  //
+  // 공식 출처(2026-08-15 확인):
+  //   console.upstage.ai/api-keys — OpenAI SDK 예제:
+  //     api_key="UPSTAGE_API_KEY", base_url="https://api.upstage.ai/v1",
+  //     model="solar-pro4", reasoning_effort="medium"
+  //   www.upstage.ai/blog/en/solar-pro-4 — OpenAI-compatible, model name
+  //     `solar-pro4`, 정가 Input $0.30 / Cached Input $0.06 / Output $1.20 per 1M.
+  //
+  // ★티켓의 `solar-pro` 는 "예시"로만 본다. 오늘 공식 id 는 `solar-pro4` 라서
+  // 레지스트리 id 는 그 값을 쓰고, 사람이 예전 표기로 dispatch 할 수 있도록 alias
+  // `solar-pro` 를 둔다. cost_logs 와 단가표에는 구체 id 만 남겨 유령 비용을 막는다.
+  {
+    id: "solar-pro4",
+    harness: "gpt", // Codex CLI 를 그대로 스폰하고 OpenAI 호환 env 만 바꾼다
+    provider: "upstage",
+    envProfile: {
+      OPENAI_BASE_URL: "https://api.upstage.ai/v1",
+      OPENAI_API_KEY: "${UPSTAGE_API_KEY}",
+    },
+    aliases: ["solar-pro"],
+    capability: "mid",
+    // Upstage 예제가 reasoning_effort="medium" 을 싣는다. Codex 분기는 이 축을
+    // `model_reasoning_effort` 로 넘기므로 low/medium/high 까지만 연다(max/ultra
+    // 같은 승인게이트 칸은 Upstage 공식 예제에 없고, 여기서 추측하지 않는다).
+    efforts: ["low", "medium", "high"],
+    defaultEffort: "medium",
+    pricing: { inputPer1M: 0.3, outputPer1M: 1.2 },
+    verified: UPSTAGE_SOLAR_PROBE,
+    status: "active",
+  },
+
   // 의도적 미등록(§1.2 표에는 있으나 라우팅 후보가 아님):
   //   - gpt-5.3-codex-spark : api ❌ (Codex CLI 전용). 단가만 cost-tracker 의
   //     legacy 프리픽스 행("gpt-5.3-codex" $1.75/$14)이 커버한다.
@@ -879,7 +933,7 @@ for (const entry of MODEL_REGISTRY) {
     throw new Error(
       `[model-registry] "${entry.id}" 는 provider=${entry.provider} 인데 envProfile 이 없습니다. ` +
         `harness="${entry.harness}" 는 프로파일이 없으면 ${native} 로 붙습니다 — ` +
-        "벤더 이름만 바꾼 행은 조용히 네이티브 벤더 쿼터를 태웁니다.",
+        "벤더 이름만 바꾼 행은 조용히 네이티브 벤더 쿼터를 태웁니다."
     );
   }
   if (!entry.envProfile) continue;
@@ -889,8 +943,8 @@ for (const entry of MODEL_REGISTRY) {
         `harness="${
           entry.harness
         }" 에서 주입되지 않습니다(주입 가능: ${ENV_PROFILE_SUPPORTED_HARNESSES.join(
-          ", ",
-        )}). 그 하네스의 스폰 분기에 벤더 env 머지를 먼저 배선하세요.`,
+          ", "
+        )}). 그 하네스의 스폰 분기에 벤더 env 머지를 먼저 배선하세요.`
     );
   }
   for (const [key, value] of Object.entries(entry.envProfile)) {
@@ -899,7 +953,7 @@ for (const entry of MODEL_REGISTRY) {
     if (value.includes("${") && !vendorEnvSecretRef(value)) {
       throw new Error(
         `[model-registry] "${entry.id}" envProfile.${key} 의 \${...} 자리표시자는 ` +
-          '값 전체여야 합니다(부분보간 금지). 예: "${ZAI_API_KEY}"',
+          '값 전체여야 합니다(부분보간 금지). 예: "${ZAI_API_KEY}"'
       );
     }
   }
@@ -962,7 +1016,7 @@ const CAPABILITY_ORDER: Readonly<Record<CapabilityTier, number>> = {
 
 function byCapability(entries: ModelRegistryEntry[]): ModelRegistryEntry[] {
   return entries.sort(
-    (a, b) => CAPABILITY_ORDER[a.capability] - CAPABILITY_ORDER[b.capability],
+    (a, b) => CAPABILITY_ORDER[a.capability] - CAPABILITY_ORDER[b.capability]
   );
 }
 
@@ -975,9 +1029,7 @@ function byCapability(entries: ModelRegistryEntry[]): ModelRegistryEntry[] {
  */
 export function modelsByHarness(harness: HarnessId): ModelRegistryEntry[] {
   return byCapability(
-    MODEL_REGISTRY.filter(
-      (m) => m.harness === harness && m.status === "active",
-    ),
+    MODEL_REGISTRY.filter((m) => m.harness === harness && m.status === "active")
   );
 }
 
@@ -985,8 +1037,8 @@ export function modelsByHarness(harness: HarnessId): ModelRegistryEntry[] {
 export function modelsByVendor(provider: VendorId): ModelRegistryEntry[] {
   return byCapability(
     MODEL_REGISTRY.filter(
-      (m) => m.provider === provider && m.status === "active",
-    ),
+      (m) => m.provider === provider && m.status === "active"
+    )
   );
 }
 
@@ -1109,7 +1161,7 @@ export function cmpSemver(a: string, b: string): number {
 export function meetsMinCli(
   idOrAlias: string,
   installedVersion: string,
-  minCliOverride?: string,
+  minCliOverride?: string
 ): boolean {
   const entry = getModel(idOrAlias);
   const min = minCliOverride ?? entry?.minCli;

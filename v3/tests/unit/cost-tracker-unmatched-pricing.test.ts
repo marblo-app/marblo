@@ -45,7 +45,7 @@ function chargeFor(model: string, inputTokens: number, outputTokens: number) {
   const pricing = (
     tracker as unknown as {
       findPricing(
-        m: string,
+        m: string
       ): Parameters<CostTracker["computeIncrementalCost"]>[0];
     }
   ).findPricing(model);
@@ -86,7 +86,7 @@ describe("★미매칭 model id 는 Sonnet 요율로 청구되지 않는다", ()
     // 대조군: 실단가가 있는 모델은 정상 청구된다(0 이 되는 게 전면 마비가 아님).
     expect(chargeFor("claude-sonnet-5", 1_000_000, 1_000_000)).toBeCloseTo(
       18,
-      6,
+      6
     );
   });
 
@@ -100,12 +100,12 @@ describe("★미매칭 model id 는 Sonnet 요율로 청구되지 않는다", ()
   it("PTY 스크레이핑(model 미상)도 Sonnet 요율로 청구되지 않는다", () => {
     const seen: Array<{ agentId: string; cost: number; model: string }> = [];
     const tracker = new CostTracker((agentId, cost) =>
-      seen.push({ agentId, cost: cost.deltaCost, model: cost.model }),
+      seen.push({ agentId, cost: cost.deltaCost, model: cost.model })
     );
     // 모델 귀속이 없는 토큰 수치만 있는 출력. 종전엔 $3/$15 로 환산됐다.
     tracker.processOutput(
       "agent-1",
-      "input tokens: 1,000,000\noutput tokens: 1,000,000\n",
+      "input tokens: 1,000,000\noutput tokens: 1,000,000\n"
     );
 
     expect(seen).toHaveLength(1);
@@ -148,8 +148,8 @@ describe("★(a) 별칭/정규화로 registry 재조회 — 미매칭 판정 전
     // grok alias → grok-4.5. Sonnet 요율이 아니어야 한다.
     expect(perTokenRateFor("grok")).toEqual(
       (({ inputPer1M, outputPer1M }) => ({ inputPer1M, outputPer1M }))(
-        getModel("grok-4.5")!.pricing,
-      ),
+        getModel("grok-4.5")!.pricing
+      )
     );
     expect(perTokenRateFor("grok")).not.toEqual(SONNET_RATE);
   });
@@ -194,6 +194,7 @@ describe("★알려진 신규 벤더 id 는 정확한 실단가로 청구된다"
     "glm-4.7", // zai
     "MiniMax-M3", // minimax
     "MiniMax-M2.7", // minimax
+    "solar-pro4", // upstage
   ];
 
   it.each(NEW_VENDOR_IDS)("%s 가 registry 단가와 정확히 일치한다", (id) => {
@@ -214,8 +215,8 @@ describe("★알려진 신규 벤더 id 는 정확한 실단가로 청구된다"
     expect(rate.outputPer1M).toBeGreaterThan(0);
   });
 
-  it("신규 벤더 3사(xai/zai/minimax) 행이 실제로 레지스트리에 존재한다", () => {
-    for (const vendor of ["xai", "zai", "minimax"] as const) {
+  it("신규 벤더 4사(xai/zai/minimax/upstage) 행이 실제로 레지스트리에 존재한다", () => {
+    for (const vendor of ["xai", "zai", "minimax", "upstage"] as const) {
       const rows = MODEL_REGISTRY.filter((m) => m.provider === vendor);
       expect(rows.length, `${vendor} 행 없음`).toBeGreaterThan(0);
       for (const row of rows) {
@@ -312,8 +313,8 @@ describe("★(b) 미매칭 가시화 — warn 로그 + 텔레메트리 카운터
     // 트래커가 아예 안 생겨야 한다 — 생겼다면 15s 폴러가 남의 파일을 읽는다.
     expect(
       (tracker as unknown as { sessions: Map<string, unknown> }).sessions.has(
-        "agent-custom",
-      ),
+        "agent-custom"
+      )
     ).toBe(false);
     expect(emitted).toEqual([]);
     tracker.clearAll();

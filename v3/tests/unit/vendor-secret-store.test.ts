@@ -70,9 +70,10 @@ describe("★저장 가능한 키는 레지스트리 참조 이름뿐이다", ()
     expect(allVendorEnvSecretKeys()).toEqual([...fromRegistry].sort());
   });
 
-  it("오늘의 env-swap 벤더 키 두 개가 실제로 들어 있다", () => {
+  it("오늘의 env-swap 벤더 키가 실제로 들어 있다", () => {
     expect(allVendorEnvSecretKeys()).toContain("ZAI_API_KEY");
     expect(allVendorEnvSecretKeys()).toContain("MINIMAX_API_KEY");
+    expect(allVendorEnvSecretKeys()).toContain("UPSTAGE_API_KEY");
   });
 
   it("시크릿이 아닌 프로파일 키(엔드포인트·모델 매핑)는 저장 대상이 아니다", () => {
@@ -96,7 +97,7 @@ describe("★저장 가능한 키는 레지스트리 참조 이름뿐이다", ()
     ]) {
       expect(isStorableVendorSecretKey(key)).toBe(false);
       expect(() => setVendorSecret(key, FAKE_KEY)).toThrow(
-        /저장할 수 없는 env 키/,
+        /저장할 수 없는 env 키/
       );
     }
   });
@@ -114,18 +115,21 @@ describe("★저장 가능한 키는 레지스트리 참조 이름뿐이다", ()
 describe("★설정 UI 가 그릴 벤더 요구사항이 레지스트리에서 파생된다", () => {
   const reqs = envSwapVendorRequirements();
 
-  it("zai / minimax 가 각자의 키 이름과 함께 나온다", () => {
+  it("zai / minimax / upstage 가 각자의 키 이름과 함께 나온다", () => {
     const zai = reqs.find((r) => r.vendor === "zai");
     const minimax = reqs.find((r) => r.vendor === "minimax");
+    const upstage = reqs.find((r) => r.vendor === "upstage");
     expect(zai?.envKeys).toEqual(["ZAI_API_KEY"]);
     expect(minimax?.envKeys).toEqual(["MINIMAX_API_KEY"]);
+    expect(upstage?.envKeys).toEqual(["UPSTAGE_API_KEY"]);
     // 카드에 표시할 모델도 레지스트리에서 온다.
     expect(zai?.modelIds).toEqual(
-      expect.arrayContaining(["glm-5.2", "glm-4.7"]),
+      expect.arrayContaining(["glm-5.2", "glm-4.7"])
     );
     expect(minimax?.modelIds).toEqual(
-      expect.arrayContaining(["MiniMax-M3", "MiniMax-M2.7"]),
+      expect.arrayContaining(["MiniMax-M3", "MiniMax-M2.7"])
     );
+    expect(upstage?.modelIds).toEqual(["solar-pro4"]);
   });
 
   it("★하네스 네이티브 벤더(anthropic/openai)는 등록 카드가 없다 — CLI 자기 로그인이다", () => {
@@ -185,13 +189,13 @@ describe("★스냅샷에 평문 시크릿이 없다", () => {
   it("★all-or-nothing — 필요한 키가 하나라도 비면 그 벤더는 ready 가 아니다", () => {
     withEnv("ZAI_API_KEY", undefined, () => {
       const zai = vendorSecretsSnapshot().vendors.find(
-        (v) => v.vendor === "zai",
+        (v) => v.vendor === "zai"
       );
       expect(zai?.ready).toBe(false);
     });
     withEnv("ZAI_API_KEY", FAKE_KEY, () => {
       const zai = vendorSecretsSnapshot().vendors.find(
-        (v) => v.vendor === "zai",
+        (v) => v.vendor === "zai"
       );
       expect(zai?.ready).toBe(true);
     });
@@ -215,7 +219,7 @@ describe("★Electron 밖(순수 node)에서는 저장소가 조용히 없다", 
 
   it("★쓰기는 평문으로 떨어지지 않고 실패한다(P0-4: 평문 파일 0개)", () => {
     expect(() => setVendorSecret("ZAI_API_KEY", FAKE_KEY)).toThrow(
-      /키체인 암호화/,
+      /키체인 암호화/
     );
   });
 
