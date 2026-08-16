@@ -552,10 +552,15 @@ export const ORCHESTRATOR_HARNESS_SETTINGS = [
 /**
  * 오케 **자동 기본값** 우선순위 (연결·인증된 네이티브 하네스 중).
  *
- * 사용자가 `orchestratorModel` 을 명시하지 않았을 때만 쓴다. 제품 기본은
- * Claude → Codex → Grok 순이고, env-swap 벤더(GLM/MiniMax/Kimi)는 오케 후보가
- * 아니라 여기 없다(목록 자체가 네이티브 3종). antigravity 도 자동 기본에는
- * 넣지 않는다 — 구독 온보딩 선택지도 같은 3종이다.
+ * 사용자가 `orchestratorModel` 을 **명시**하지 않았을 때(또는 자동 저장으로
+ * 박힌 per-project 값을 재평가할 때) 쓴다. 제품 기본은 Claude → Codex → Grok
+ * 순이고, env-swap 벤더(GLM/MiniMax/Kimi)는 오케 후보가 아니라 여기 없다
+ * (목록 자체가 네이티브 3종). antigravity 도 자동 기본에는 넣지 않는다 —
+ * 구독 온보딩 선택지도 같은 3종이다.
+ *
+ * ★자동 픽은 프로젝트별 영구 저장에 남지만 source=`auto` 로 태깅된다. 다음
+ * resolve 때 이 우선순위로 다시 고르므로, 그록만 있을 때 박힌 값이 클로드
+ * 복원 후에도 이기는 갭이 없다(명시 source=`user` 는 존중).
  */
 export const ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY = [
   "claude",

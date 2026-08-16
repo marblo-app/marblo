@@ -258,6 +258,42 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
     }
   });
 
+  test("G3b 이미 연결되고 폴더가 있는 첫 대화 화면에도 티켓 생성 데모 CTA가 먼저 보인다", async () => {
+    const cr = await launchCleanRoom({
+      claude: "missing",
+      codex: "ready",
+      beginnerShell: true,
+    });
+    try {
+      await passFirstRunModals(cr.page);
+      await injectProject(cr.page, cr.projectDir);
+      await chatReady(cr.page);
+
+      expect(await cr.page.getByTestId("beginner-connect").count()).toBe(0);
+      expect(await cr.page.getByTestId("beginner-folder-gate").count()).toBe(0);
+
+      const demo = cr.page.getByTestId("beginner-chat-demo-cta");
+      await expect(demo).toBeVisible();
+      await expect(demo.getByTestId("onramp-decompose-input")).toBeVisible();
+      await expect(demo.getByTestId("onramp-decompose-cta")).toContainText(
+        /데모로 티켓 만들어보기|Make demo tickets/,
+      );
+
+      const demoBox = await demo.boundingBox();
+      const askBox = await cr.page.getByTestId("beginner-first-ask").boundingBox();
+      expect(demoBox, "연결 완료 첫 화면 데모 CTA 영역이 렌더되지 않았다").toBeTruthy();
+      expect(askBox, "첫 요청 입력 영역이 렌더되지 않았다").toBeTruthy();
+      expect(
+        demoBox!.y,
+        "연결 완료 첫 화면에서 데모 CTA 가 첫 요청 입력보다 아래에 있다",
+      ).toBeLessThan(askBox!.y);
+
+      await cr.shot("G3b-connected-chat-demo-cta");
+    } finally {
+      await cr.close();
+    }
+  });
+
   test("G4(★S4) 첫 요청이 전달되면 라이브 스트립이 뜨고 대화가 이어진다 — 미니보드·에이전트 패널 포함", async () => {
     const cr = await launchCleanRoom({
       claude: "missing",
