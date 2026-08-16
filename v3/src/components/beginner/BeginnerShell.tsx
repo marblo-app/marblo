@@ -39,6 +39,7 @@ import { BeginnerAgentsPane } from "./BeginnerAgentsPane";
 import { BeginnerAgentTerminalModal } from "./BeginnerAgentTerminalModal";
 import { BeginnerChatBar } from "./BeginnerChatBar";
 import { BeginnerConnectStep } from "./BeginnerConnectStep";
+import { BeginnerDemoTicketCta } from "./BeginnerDemoTicketCta";
 import { BeginnerLiveStrip } from "./BeginnerLiveStrip";
 import { BeginnerOneClickModal } from "./BeginnerOneClickModal";
 import { BeginnerPromotionModal } from "./BeginnerPromotionModal";
@@ -658,6 +659,14 @@ export function BeginnerShell() {
                 </div>
               ) : (
                 <>
+                  {!setup.preview && (
+                    <BeginnerDemoTicketCta
+                      surface="beginner_chat"
+                      testId="beginner-chat-demo-cta"
+                      className="flex-shrink-0"
+                    />
+                  )}
+
                   {/* ★첫 대화창 — 첫 마디가 오케에게 닿으면 접힌다. 아래 오케
                   대화창(실 PTY)과 입력칸이 둘이면 유저는 매번 "어디에 쓰냐" 를
                   고르게 되고, 그건 심플 모드가 없애려던 종류의 선택이다.
