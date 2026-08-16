@@ -90,9 +90,10 @@ export function OnrampDecomposeCard({
   const blockTarget = useMemo(() => {
     const rowId = ORCHESTRATOR_CLI_IDS[0];
     const row = ROWS.find((r) => r.id === rowId);
+    const results = setup.results ?? {};
     return {
       model: row?.model ?? "claude",
-      installed: setup.results[rowId]?.installed === true,
+      installed: results[rowId]?.installed === true,
     };
   }, [setup.results]);
 

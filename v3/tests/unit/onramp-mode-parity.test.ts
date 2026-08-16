@@ -32,6 +32,7 @@ const src = (rel: string) =>
 
 const BEGINNER_SHELL = "components/beginner/BeginnerShell.tsx";
 const BEGINNER_CONNECT = "components/beginner/BeginnerConnectStep.tsx";
+const BEGINNER_DEMO_CTA = "components/beginner/BeginnerDemoTicketCta.tsx";
 const START_HERE = "components/onboarding/StartHereTab.tsx";
 const GLOBAL_OVERLAYS = "components/GlobalOverlays.tsx";
 const CLI_SETUP_HOST = "components/onboarding/CliSetupHost.tsx";
@@ -39,15 +40,25 @@ const WORKSPACE_SHELL = "components/workspace/WorkspaceShell.tsx";
 const LAYOUT = "components/Layout.tsx";
 
 describe("온보딩 파리티 — L0 분해 카드는 양쪽 모드에 있다", () => {
-  it("심플: 비기너 연결 게이트가 카드를 마운트한다", () => {
-    const source = src(BEGINNER_CONNECT);
+  it("심플: 비기너 공용 CTA 가 카드를 마운트한다", () => {
+    const source = src(BEGINNER_DEMO_CTA);
     expect(source).toContain("OnrampDecomposeCard");
-    expect(source).toContain('surface="beginner_connect"');
+    expect(source).toContain("surface={surface}");
+  });
+
+  it("심플: 비기너 연결 게이트와 연결 완료 대화 탭이 같은 CTA 를 마운트한다", () => {
+    const connect = src(BEGINNER_CONNECT);
+    const shell = src(BEGINNER_SHELL);
+    expect(connect).toContain("BeginnerDemoTicketCta");
+    expect(connect).toContain('surface="beginner_connect"');
+    expect(shell).toContain("BeginnerDemoTicketCta");
+    expect(shell).toContain('surface="beginner_chat"');
+    expect(shell).toContain('testId="beginner-chat-demo-cta"');
   });
 
   it("★심플 콜드스타트: L0 티켓 생성 체험이 연결 CTA보다 먼저 선다", () => {
     const source = src(BEGINNER_CONNECT);
-    const demoIndex = source.indexOf('data-testid="beginner-firstscreen-demo"');
+    const demoIndex = source.indexOf("<BeginnerDemoTicketCta");
     const connectIndex = source.indexOf(
       'data-testid="beginner-oneclick-cta-card"',
     );
@@ -67,7 +78,10 @@ describe("온보딩 파리티 — L0 분해 카드는 양쪽 모드에 있다", 
     // 하므로 그 계약과 정면으로 충돌한다.
     const source = src(BEGINNER_CONNECT);
     expect(source).toMatch(
-      /!setup\.preview\s*&&[\s\S]{0,400}OnrampDecomposeCard/,
+      /!setup\.preview\s*&&[\s\S]{0,400}BeginnerDemoTicketCta/,
+    );
+    expect(src(BEGINNER_SHELL)).toMatch(
+      /!setup\.preview\s*&&[\s\S]{0,400}BeginnerDemoTicketCta/,
     );
   });
 });

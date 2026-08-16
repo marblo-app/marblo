@@ -16,9 +16,9 @@ import {
 import { useOnboardingSetup } from "../../hooks/useOnboardingSetup";
 import { useOnboardingPreviewStore } from "../../stores/onboardingPreviewStore";
 import telemetry from "../../services/telemetryService";
-import { OnrampDecomposeCard } from "../onboarding/OnrampDecomposeCard";
 import { PreviewTerminal } from "./PreviewTerminal";
 import { BUTTON_GHOST, BUTTON_PRIMARY, emphasize } from "./beginnerUi";
+import { BeginnerDemoTicketCta } from "./BeginnerDemoTicketCta";
 
 /**
  * 비기너 진입 게이트 — **하나만** 연결하면 통과.
@@ -181,12 +181,10 @@ export function BeginnerConnectStep({
           OnrampDecomposeCard 를 StartHere 와 공유하므로 규칙 분해·티켓 생성 로직의
           두 번째 사본은 없다. */}
       {!setup.preview && (
-        <div data-testid="beginner-firstscreen-demo" className="mb-6">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#89b4fa]">
-            {t("beginner.connect.demoLead")}
-          </p>
-          <OnrampDecomposeCard surface="beginner_connect" />
-        </div>
+        <BeginnerDemoTicketCta
+          surface="beginner_connect"
+          className="mb-6"
+        />
       )}
 
       <h1 className="text-lg font-semibold text-[#cdd6f4]">
