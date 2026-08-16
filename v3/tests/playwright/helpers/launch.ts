@@ -132,10 +132,39 @@ export async function launchMarblo(
     app,
     page,
     close: async () => {
+      let proc: ReturnType<ElectronApplication["process"]> | null = null;
       try {
-        await app.close();
+        proc = app.process();
       } catch {
-        /* 이미 닫혔으면 무시 */
+        proc = null;
+      }
+
+      const closeDeadline = new Promise<"timeout">((resolve) =>
+        setTimeout(() => resolve("timeout"), 5_000),
+      );
+      try {
+        await Promise.race([app.close(), closeDeadline]);
+      } catch {
+        /* 이미 닫혔거나 종료 요청이 거부됨 — 아래에서 프로세스 상태 확인 */
+      }
+
+      if (!proc) return;
+      const gracefulDeadline = Date.now() + 5_000;
+      while (proc.exitCode === null && proc.signalCode === null) {
+        if (Date.now() > gracefulDeadline) {
+          proc.kill("SIGKILL");
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+
+      const killDeadline = Date.now() + 5_000;
+      while (
+        proc.exitCode === null &&
+        proc.signalCode === null &&
+        Date.now() < killDeadline
+      ) {
+        await new Promise((r) => setTimeout(r, 200));
       }
     },
   };
