@@ -1,9 +1,17 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { useCallback } from "react";
+import type { SyntheticEvent } from "react";
 
 export default function FeatureVideoSection() {
   const t = useTranslations("featureVideo");
+  const setDemoPlaybackRate = useCallback(
+    (event: SyntheticEvent<HTMLVideoElement>) => {
+      event.currentTarget.playbackRate = 1.5;
+    },
+    [],
+  );
 
   return (
     <section id="feature-video" className="scroll-mt-24 px-4 pt-2 pb-14 md:pb-20">
@@ -26,6 +34,8 @@ export default function FeatureVideoSection() {
             src="/media/orchestration-demo.mp4"
             poster="/media/orchestration-demo-poster.jpg"
             title={t("iframeTitle")}
+            onLoadedMetadata={setDemoPlaybackRate}
+            onPlay={setDemoPlaybackRate}
             controls
             playsInline
           />
