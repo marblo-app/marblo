@@ -63,16 +63,16 @@ export interface MarbloHandle {
   /** 오케스트레이터 또는 에이전트 PTY 터미널에 대한 POM 반환. */
   terminal(kind: "orchestrator" | "agent"): Promise<TerminalPage>;
   /**
-   * Tier 2 mock helper — claude 없이 dummy sh PTY 를 띄워서 OrchestratorPanel
-   * 을 활성화한다. seq 명령으로 충분히 긴 출력을 발사 → xterm 스크롤 가능
-   * 상태 + wantBottomRef 회귀 시나리오 검증.
+   * Tier 2 mock helper — claude 없이 OrchestratorPanel 을 활성화한다.
+   * TerminalView 가 mount 된 뒤 dummy sh PTY 를 붙이고 seq 명령으로 충분히 긴
+   * 출력을 발사 → xterm 스크롤 가능 상태 + wantBottomRef 회귀 시나리오 검증.
    *
    * 흐름:
-   *   1. main 의 ptyManager 에 sh -c "seq..." spawn (IPC pty:create)
+   *   1. mock project inject 후 project-switch cleanup settle 대기
    *   2. orchestratorStore.setSession + setStatus("running") inject
    *      (window.__marbloTest 통해)
    *   3. OrchestratorPanel 이 자동으로 OrchestratorTerminal mount
-   *   4. PTY 데이터가 setupPtyForwarding 통해 webContents.send 됨
+   *   4. xterm mount 뒤 main 의 ptyManager 에 sh spawn + 한글 seq 출력
    *   5. TerminalView 의 onData handler 가 xterm.write
    *
    * @returns 생성된 ptySessionId
@@ -186,20 +186,20 @@ export const test = base.extend<Fixtures>({
  *   - (추후 onboarding 등 추가 시 여기 확장)
  */
 /**
- * Mock OrchestratorPanel 활성화. 진짜 claude 대신 sh dummy command 로 PTY 띄움
- * + zustand orchestratorStore 직접 manipulate. window.__marbloTest hatch 가
+ * Mock OrchestratorPanel 활성화. 진짜 claude 대신 출력 없는 sh PTY 를 띄운 뒤
+ * zustand orchestratorStore 를 직접 manipulate 한다. window.__marbloTest hatch 가
  * bypassAuth 모드에서만 노출되므로 production 영향 0.
  */
 async function openMockOrchestrator(page: Page): Promise<string> {
-  // PrivacyConsent 모달이 PrivacyConsentGate 의 useEffect 지연 mount 로 부팅 후
-  // 1-3초 뒤에 떠서 첫 dismissFirstRunDialogs 를 놓치는 경우가 있다. mock 흐름
-  // 시작 직전에 한 번 더 dismiss.
-  await dismissFirstRunDialogs(page);
+  // 0) session id 만 먼저 정한다. TerminalView 는 PTY 가 아직 없어도 mount 할 수
+  //    있고, onData listener 도 session id 기준으로 먼저 붙는다. 실제 sh spawn 은
+  //    xterm 이 열린 뒤 실행해 mount 전 IPC/replay 경합과 macOS pty fd teardown
+  //    지연을 분리한다.
+  const ptySessionId = `test-mock-orch-${Date.now()}`;
 
-  // 0) Mock project inject — OrchestratorPanel:94 의 `if (!currentProject)
-  //    return null` 게이트 통과 위해 가짜 Project 객체를 projectStore 에 set.
-  //    Firebase Auth 의 mock user uid 와 일치하는 ownerId 로 — 향후 권한 체크
-  //    분기에도 자연스럽게 통과.
+  // 1) Project inject. 이전 실제 프로젝트가 복원된 상태라면 project-switch
+  //    cleanup 이 한 번 돌며 orchestratorStore 를 clear 한다. 그래서 프로젝트
+  //    전환을 먼저 settle 시키고, 그 뒤 mock session 을 꽂는다.
   await page.evaluate(() => {
     const tw = (
       window as unknown as {
@@ -214,39 +214,23 @@ async function openMockOrchestrator(page: Page): Promise<string> {
         };
       }
     ).__marbloTest;
-    if (!tw) throw new Error("__marbloTest hatch 가 노출되지 않음");
+    if (!tw)
+      throw new Error(
+        "__marbloTest hatch 가 노출되지 않음 (bypassAuth 모드 확인)",
+      );
     tw.stores.project.getState().setCurrentProject({
       id: "test-mock-project",
       name: "Mock Project",
       ownerId: "test-user-bypass",
       members: ["test-user-bypass"],
-      folderPath: "/tmp/marblo-test",
       enabledModels: ["claude"],
       createdAt: new Date(),
       updatedAt: new Date(),
     });
   });
+  await page.waitForTimeout(100);
 
-  // 1) PTY spawn — 한글이 포함된 5천 줄 출력 (xterm scrollback + CJK metrics 검증)
-  //    + sleep 60 으로 프로세스 살아있게 (자식 종료 시 PTY 정리되어 회귀 검증 못함).
-  const ptySessionId = `test-mock-orch-${Date.now()}`;
-  await page.evaluate(async (sessionId) => {
-    await window.electronAPI.pty.create({
-      id: sessionId,
-      name: "MockOrchestrator",
-      command: "sh",
-      args: [
-        "-c",
-        'for i in $(seq 1 5000); do echo "한글 line $i"; done; sleep 60',
-      ],
-      cwd: undefined,
-    });
-  }, ptySessionId);
-
-  // 2) orchestratorStore inject — setSession + setStatus("running") 후
-  //    OrchestratorPanel 이 isRunning=true 로 판단해 OrchestratorTerminal mount.
-  //    setCollapsed(false) 로 펼침 보장. inject 후 store state 즉시 read 해서
-  //    실제 적용됐는지 확인 (실패 시 즉시 throw 로 빠른 진단).
+  // 2) orchestratorStore inject.
   const stateAfter = await page.evaluate((sessionId) => {
     const tw = (
       window as unknown as {
@@ -298,10 +282,79 @@ async function openMockOrchestrator(page: Page): Promise<string> {
 
   // 3) OrchestratorTerminal mount + xterm DOM 그려질 때까지 대기 (최대 5s).
   //    .xterm wrapper 가 나타나야 후속 wheel/scroll 검증 가능.
-  await page
-    .locator(".xterm")
-    .first()
-    .waitFor({ state: "visible", timeout: 5000 });
+  try {
+    await page
+      .locator(".xterm")
+      .first()
+      .waitFor({ state: "visible", timeout: 5000 });
+  } catch (err) {
+    const debug = await page.evaluate(() => {
+      const tw = (
+        window as unknown as {
+          __marbloTest?: {
+            stores: {
+              project: {
+                getState: () => {
+                  currentProject: { id?: string; name?: string } | null;
+                };
+              };
+              orchestrator: {
+                getState: () => {
+                  sessionId: string | null;
+                  ptySessionId: string | null;
+                  status: string;
+                  isCollapsed: boolean;
+                };
+              };
+            };
+          };
+        }
+      ).__marbloTest;
+      const project = tw?.stores.project.getState().currentProject;
+      const orchestrator = tw?.stores.orchestrator.getState();
+      return {
+        bodyText: document.body.innerText.slice(0, 800),
+        xtermCount: document.querySelectorAll(".xterm").length,
+        orchestratorText: Array.from(
+          document.querySelectorAll("body *"),
+          (el) => el.textContent ?? "",
+        ).filter((text) => text.includes("Orchestrator")).length,
+        project: project ? { id: project.id, name: project.name } : null,
+        orchestrator: orchestrator
+          ? {
+              sessionId: orchestrator.sessionId,
+              ptySessionId: orchestrator.ptySessionId,
+              status: orchestrator.status,
+              isCollapsed: orchestrator.isCollapsed,
+            }
+          : null,
+      };
+    });
+    throw new Error(
+      `.xterm mount 대기 실패: ${err instanceof Error ? err.message : String(err)}\n${JSON.stringify(
+        debug,
+        null,
+        2,
+      )}`,
+    );
+  }
+
+  // 4) xterm/listener 가 붙은 뒤 실제 PTY 를 만들고 한글 scrollback 을 생성.
+  //    300줄이면 기본 24행 viewport 에서 scrollback 검증에 충분하고, spawn-time
+  //    출력 폭주를 피한다.
+  await page.evaluate(async (sessionId) => {
+    await window.electronAPI.pty.create({
+      id: sessionId,
+      name: "MockOrchestrator",
+      command: "sh",
+      args: [],
+      cwd: undefined,
+    });
+    window.electronAPI.pty.write(
+      sessionId,
+      'for i in $(seq 1 300); do printf "한글 line %s\\r\\n" "$i"; done\r',
+    );
+  }, ptySessionId);
   // PTY 데이터 chunk 가 xterm 에 충분히 적재되어 scroll 가능 상태 보장.
   await page.waitForTimeout(800);
   return ptySessionId;

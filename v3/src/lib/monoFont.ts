@@ -196,9 +196,17 @@ export interface FontCacheInvalidatable {
   options: { fontFamily?: string; fontSize?: number };
   cols: number;
   rows: number;
+  buffer?: { active?: { type?: string } };
   resize(cols: number, rows: number): void;
   clearTextureAtlas(): void;
   refresh(start: number, end: number): void;
+}
+
+export interface TerminalFontCacheRepairResult {
+  activeBufferType: string;
+  isAlternateScreen: boolean;
+  cols: number;
+  rows: number;
 }
 
 /**
@@ -213,12 +221,19 @@ export interface FontCacheInvalidatable {
  *
  * `refresh()` only dirties rows currently owned by the viewport. The DOM renderer can keep
  * already-scrolled rows alive with their old inline spacing until a buffer reflow occurs. A
- * one-column resize round trip reflows the complete normal buffer, so those scrollback rows
- * are laid out with the freshly measured WidthCache.
+ * one-column xterm resize round trip reflows the complete normal buffer, so those scrollback
+ * rows are laid out with the freshly measured WidthCache.
+ *
+ * That xterm-only resize is deliberately limited to the normal buffer. An alt-screen TUI
+ * (Grok/Ink/etc.) owns the live frame itself; xterm can clear atlases but cannot re-layout the
+ * TUI's cells. Callers must turn an alternate-buffer rebuild into a real PTY resize so the
+ * child process receives SIGWINCH and redraws its current frame.
  */
 export function invalidateTerminalFontCaches(
   terminal: FontCacheInvalidatable,
-): void {
+): TerminalFontCacheRepairResult {
+  const activeBufferType = terminal.buffer?.active?.type ?? "normal";
+  const isAlternateScreen = activeBufferType === "alternate";
   const family = terminal.options.fontFamily ?? TERMINAL_FONT_FAMILY;
   terminal.options.fontFamily = aliasOf(family);
   terminal.options.fontFamily = family;
@@ -233,6 +248,7 @@ export function invalidateTerminalFontCaches(
     terminal.resize(cols, rows);
   }
   terminal.refresh(0, Math.max(0, terminal.rows - 1));
+  return { activeBufferType, isAlternateScreen, cols, rows };
 }
 
 /**
@@ -245,11 +261,10 @@ export function invalidateTerminalFontCaches(
  */
 export function repairTerminalCjkFontCachesIfLoaded(
   terminal: FontCacheInvalidatable,
-): boolean {
+): TerminalFontCacheRepairResult | null {
   const fontSize = terminal.options.fontSize ?? 13;
-  if (!isCjkFontLoaded(fontSize)) return false;
-  invalidateTerminalFontCaches(terminal);
-  return true;
+  if (!isCjkFontLoaded(fontSize)) return null;
+  return invalidateTerminalFontCaches(terminal);
 }
 
 interface BindCjkFontOptions {
@@ -258,7 +273,7 @@ interface BindCjkFontOptions {
   /** True when the terminal has been torn down — skip the rebuild. */
   isStale: () => boolean;
   /** Run after a successful rebuild (cell metrics may have changed → refit). */
-  onRebuilt?: () => void;
+  onRebuilt?: (result: TerminalFontCacheRepairResult) => void;
 }
 
 /**
@@ -277,8 +292,9 @@ export function bindTerminalCjkFont(
   const rebuild = (why: string) => {
     if (isStale()) return;
     try {
-      if (repairTerminalCjkFontCachesIfLoaded(terminal)) {
-        onRebuilt?.();
+      const result = repairTerminalCjkFontCachesIfLoaded(terminal);
+      if (result) {
+        onRebuilt?.(result);
         console.debug(`[${label}] CJK glyph caches rebuilt (${why})`);
       }
     } catch (err) {
