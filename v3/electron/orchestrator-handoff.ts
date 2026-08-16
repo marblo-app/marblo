@@ -167,6 +167,21 @@ export function resolveRestartResumeSessionId({
   return resolvePreviousNonGptSession() ?? null;
 }
 
+/**
+ * How a project's saved orchestrator model was chosen.
+ *
+ * - `user`: settings panel / model switch / explicit launch request persisted
+ *   the value — always respected on later resolves.
+ * - `auto`: product priority pick (Claude > Codex > Grok among authenticated
+ *   natives) wrote the value — re-probed on every resolve so a later Claude
+ *   install can promote off a previously auto-pinned Grok.
+ *
+ * Missing/unknown source is treated as `auto` (legacy app-state wrote only
+ * the model string before this flag existed; those rows are almost always
+ * launch-success echoes of the auto path).
+ */
+export type OrchestratorModelSelectionSource = "user" | "auto";
+
 export interface EffectiveOrchestratorModelInput {
   /** MARBLO_ORCHESTRATOR_MODEL passed at app boot — dev override, wins all. */
   envOverride?: string | null;
@@ -174,6 +189,11 @@ export interface EffectiveOrchestratorModelInput {
   explicit?: string | null;
   /** Model this project's orchestrator last ran with (restart continuity). */
   perProject?: string | null;
+  /**
+   * Provenance of `perProject`. Only `"user"` freezes the stored harness;
+   * `"auto"` / missing re-evaluates against `autoFallback`.
+   */
+  perProjectSource?: OrchestratorModelSelectionSource | null;
   /**
    * Global app-state setting (settings / onboarding wrote a value).
    * Empty/null means **unset** — auto-select may run. Do not pass the hard
@@ -183,10 +203,79 @@ export interface EffectiveOrchestratorModelInput {
   globalSetting?: string | null;
   /**
    * Auto-picked harness among connected+authenticated natives
-   * (Claude > Codex > Grok). Used only when env/explicit/per-project/global
-   * are all empty — user-chosen settings always win.
+   * (Claude > Codex > Grok). Used when env/explicit/user-per-project/global
+   * leave room for auto — including re-eval of a previously auto-saved
+   * per-project value when a higher-priority harness is now ready.
    */
   autoFallback?: string | null;
+}
+
+/** True when the stored per-project model must not be auto-overridden. */
+export function isUserSelectedOrchestratorSource(
+  source: OrchestratorModelSelectionSource | null | undefined
+): boolean {
+  return source === "user";
+}
+
+/**
+ * Whether resolve should auth-probe natives for auto pick / re-eval.
+ *
+ * User-explicit per-project (or env / this-launch explicit) never probes.
+ * Auto (or legacy missing-source) per-project always probes so Claude can
+ * promote over a previously auto-saved Grok. With no per-project value,
+ * probe only when global is also unset (same as pre-flag behaviour).
+ */
+export function needsOrchestratorAutoProbe(input: {
+  envOverride?: string | null;
+  explicit?: string | null;
+  perProject?: string | null;
+  perProjectSource?: OrchestratorModelSelectionSource | null;
+  globalSetting?: string | null;
+}): boolean {
+  if (input.envOverride) return false;
+  if (input.explicit) return false;
+  if (
+    input.perProject &&
+    isUserSelectedOrchestratorSource(input.perProjectSource)
+  ) {
+    return false;
+  }
+  // Auto / legacy per-project: re-evaluate every resolve.
+  if (input.perProject) return true;
+  if (input.globalSetting) return false;
+  return true;
+}
+
+/**
+ * Provenance tag to persist after a successful resolve.
+ * Explicit / user-memory / global → `user`; auto re-eval / first auto → `auto`.
+ */
+export function classifyOrchestratorSelectionSource(
+  input: EffectiveOrchestratorModelInput
+): OrchestratorModelSelectionSource {
+  if (input.envOverride) return "user";
+  if (input.explicit) return "user";
+  if (
+    input.perProject &&
+    isUserSelectedOrchestratorSource(input.perProjectSource)
+  ) {
+    return "user";
+  }
+  // Auto per-project path (including re-promotion via autoFallback).
+  if (input.perProject) return "auto";
+  if (input.globalSetting) return "user";
+  return "auto";
+}
+
+/** Harness key for comparing auto-stored compounds vs preferred harness. */
+function orchestratorHarnessKey(value: string): string {
+  const raw = (value ?? "").trim().toLowerCase();
+  if (!raw) return "";
+  const at = raw.lastIndexOf("@");
+  const body = at > 0 ? raw.slice(0, at) : raw;
+  const sep = body.indexOf(":");
+  const harness = sep < 0 ? body : body.slice(0, sep);
+  return harness === "gpt" ? "codex" : harness;
 }
 
 /**
@@ -201,9 +290,14 @@ export interface EffectiveOrchestratorModelInput {
  * 0zV1apB3CvIiabHlYHxQ). Per-project memory must therefore outrank the global
  * setting, and an explicit user choice for this launch outranks both.
  *
- * When nothing is set, `autoFallback` (auth-probed Claude > Codex > Grok) wins
- * over the hard-coded `"claude"` safety default — so a machine with only Grok
- * signed in does not launch into a Claude needs_auth wall.
+ * Auto-selected per-project values are different: they are product-priority
+ * echoes, not a user lock. On resolve they re-run against `autoFallback`
+ * (auth-probed Claude > Codex > Grok) so reinstalling Claude promotes off a
+ * Grok-only auto pin. User-tagged per-project values stay frozen.
+ *
+ * When nothing is set, `autoFallback` wins over the hard-coded `"claude"`
+ * safety default — so a machine with only Grok signed in does not launch
+ * into a Claude needs_auth wall.
  *
  * Inputs are raw setting strings ("claude" | "codex" | "antigravity" | ...);
  * normalization/validation stays with the caller.
@@ -212,12 +306,29 @@ export function resolveEffectiveOrchestratorModelSetting({
   envOverride,
   explicit,
   perProject,
+  perProjectSource,
   globalSetting,
   autoFallback,
 }: EffectiveOrchestratorModelInput): string {
   if (envOverride) return envOverride;
   if (explicit) return explicit;
-  if (perProject) return perProject;
+  if (perProject && isUserSelectedOrchestratorSource(perProjectSource)) {
+    return perProject;
+  }
+  // Auto / legacy per-project: prefer a fresh priority pick when available.
+  if (perProject) {
+    if (autoFallback) {
+      // Same harness → keep stored (preserves compound model pin if any).
+      if (
+        orchestratorHarnessKey(perProject) ===
+        orchestratorHarnessKey(autoFallback)
+      ) {
+        return perProject;
+      }
+      return autoFallback;
+    }
+    return perProject;
+  }
   if (globalSetting) return globalSetting;
   if (autoFallback) return autoFallback;
   return "claude";

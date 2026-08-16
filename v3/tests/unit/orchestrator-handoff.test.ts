@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildOrchestratorHandoffSnapshot,
+  classifyOrchestratorSelectionSource,
   formatHandoffPrompt,
+  needsOrchestratorAutoProbe,
   resolveEffectiveOrchestratorModelSetting,
   resolveRestartResumeSessionId,
   resolveSwitchHandoffResumeSessionId,
@@ -249,11 +251,12 @@ describe("resolveEffectiveOrchestratorModelSetting", () => {
   // 라이브 사고 (2026-07-18, 0zV1apB3CvIiabHlYHxQ): 전역 orchestratorModel 이
   // 마지막으로 만진 프로젝트의 값으로 덮여, 앱 재시작 시 claude 대화를 가진
   // 프로젝트가 codex 로 부팅돼 fresh 세션이 떴다("껐다 켜면 연결 안 됨").
-  // 프로젝트별 저장 모델이 전역보다 우선해야 재시작 연속성이 지켜진다.
-  it("prefers the per-project model over the global setting on restart", () => {
+  // 프로젝트별 **사용자** 저장 모델이 전역보다 우선해야 재시작 연속성이 지켜진다.
+  it("prefers the user per-project model over the global setting on restart", () => {
     expect(
       resolveEffectiveOrchestratorModelSetting({
         perProject: "claude",
+        perProjectSource: "user",
         globalSetting: "codex",
       }),
     ).toBe("claude");
@@ -264,6 +267,7 @@ describe("resolveEffectiveOrchestratorModelSetting", () => {
       resolveEffectiveOrchestratorModelSetting({
         explicit: "codex",
         perProject: "claude",
+        perProjectSource: "user",
         globalSetting: "claude",
       }),
     ).toBe("codex");
@@ -275,6 +279,7 @@ describe("resolveEffectiveOrchestratorModelSetting", () => {
         envOverride: "antigravity",
         explicit: "codex",
         perProject: "claude",
+        perProjectSource: "user",
         globalSetting: "codex",
       }),
     ).toBe("antigravity");
@@ -301,5 +306,154 @@ describe("resolveEffectiveOrchestratorModelSetting", () => {
         autoFallback: "codex",
       }),
     ).toBe("codex");
+  });
+
+  // 티켓 R5vxXmsp: 자동으로 박힌 그록이 클로드 복원 후에도 이기는 갭.
+  it("auto-saved Grok promotes to Claude when preferred harness is Claude", () => {
+    expect(
+      resolveEffectiveOrchestratorModelSetting({
+        perProject: "grok",
+        perProjectSource: "auto",
+        autoFallback: "claude",
+      }),
+    ).toBe("claude");
+  });
+
+  it("legacy per-project without source meta is treated as auto (re-eval)", () => {
+    // source 플래그 도입 전 저장값 — 거의 항상 launch 성공 에코(자동 경로).
+    expect(
+      resolveEffectiveOrchestratorModelSetting({
+        perProject: "grok",
+        // perProjectSource omitted
+        autoFallback: "claude",
+      }),
+    ).toBe("claude");
+  });
+
+  it("user-explicit Grok is respected even when Claude is preferred", () => {
+    expect(
+      resolveEffectiveOrchestratorModelSetting({
+        perProject: "grok",
+        perProjectSource: "user",
+        autoFallback: "claude",
+      }),
+    ).toBe("grok");
+  });
+
+  it("auto-saved Grok stays Grok when Grok is still the only preferred harness", () => {
+    expect(
+      resolveEffectiveOrchestratorModelSetting({
+        perProject: "grok",
+        perProjectSource: "auto",
+        autoFallback: "grok",
+      }),
+    ).toBe("grok");
+  });
+
+  it("auto per-project keeps stored compound when preferred harness matches", () => {
+    expect(
+      resolveEffectiveOrchestratorModelSetting({
+        perProject: "claude:claude-sonnet-4-6",
+        perProjectSource: "auto",
+        autoFallback: "claude",
+      }),
+    ).toBe("claude:claude-sonnet-4-6");
+  });
+
+  it("auto per-project without probe result keeps stored value", () => {
+    expect(
+      resolveEffectiveOrchestratorModelSetting({
+        perProject: "grok",
+        perProjectSource: "auto",
+      }),
+    ).toBe("grok");
+  });
+});
+
+describe("needsOrchestratorAutoProbe", () => {
+  it("probes when nothing is set", () => {
+    expect(needsOrchestratorAutoProbe({})).toBe(true);
+  });
+
+  it("does not probe for user per-project", () => {
+    expect(
+      needsOrchestratorAutoProbe({
+        perProject: "grok",
+        perProjectSource: "user",
+      }),
+    ).toBe(false);
+  });
+
+  it("probes for auto / legacy per-project (re-eval path)", () => {
+    expect(
+      needsOrchestratorAutoProbe({
+        perProject: "grok",
+        perProjectSource: "auto",
+      }),
+    ).toBe(true);
+    expect(
+      needsOrchestratorAutoProbe({
+        perProject: "grok",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not probe when global is set and no auto per-project", () => {
+    expect(
+      needsOrchestratorAutoProbe({
+        globalSetting: "codex",
+      }),
+    ).toBe(false);
+  });
+
+  it("still probes auto per-project even if global is set", () => {
+    // auto per-project outranks global; re-eval must still run.
+    expect(
+      needsOrchestratorAutoProbe({
+        perProject: "grok",
+        perProjectSource: "auto",
+        globalSetting: "codex",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not probe when env or this-launch explicit is set", () => {
+    expect(
+      needsOrchestratorAutoProbe({ envOverride: "claude" }),
+    ).toBe(false);
+    expect(
+      needsOrchestratorAutoProbe({ explicit: "codex", perProject: "grok" }),
+    ).toBe(false);
+  });
+});
+
+describe("classifyOrchestratorSelectionSource", () => {
+  it("tags explicit / user-per-project / global as user", () => {
+    expect(
+      classifyOrchestratorSelectionSource({ explicit: "claude" }),
+    ).toBe("user");
+    expect(
+      classifyOrchestratorSelectionSource({
+        perProject: "grok",
+        perProjectSource: "user",
+      }),
+    ).toBe("user");
+    expect(
+      classifyOrchestratorSelectionSource({ globalSetting: "codex" }),
+    ).toBe("user");
+  });
+
+  it("tags auto re-eval and first auto pick as auto", () => {
+    expect(
+      classifyOrchestratorSelectionSource({
+        perProject: "grok",
+        perProjectSource: "auto",
+        autoFallback: "claude",
+      }),
+    ).toBe("auto");
+    expect(
+      classifyOrchestratorSelectionSource({ autoFallback: "claude" }),
+    ).toBe("auto");
+    expect(classifyOrchestratorSelectionSource({})).toBe("auto");
   });
 });
