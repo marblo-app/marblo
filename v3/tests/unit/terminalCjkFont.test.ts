@@ -22,11 +22,12 @@ const V3 = path.resolve(__dirname, "../..");
  * the *sequence*, not just that each call happened — order is load-bearing
  * here (see invalidateTerminalFontCaches).
  */
-function fakeTerminal(fontSize = 13) {
+function fakeTerminal(fontSize = 13, activeBufferType = "normal") {
   const calls: string[] = [];
   const term = {
     cols: 80,
     rows: 24,
+    buffer: { active: { type: activeBufferType } },
     options: {
       fontSize,
       _fontFamily: TERMINAL_FONT_FAMILY,
@@ -191,7 +192,7 @@ describe("invalidateTerminalFontCaches", () => {
 
   it("clears the atlas, reflows the full buffer, then refreshes the viewport", () => {
     const { term, calls } = fakeTerminal();
-    invalidateTerminalFontCaches(term);
+    const result = invalidateTerminalFontCaches(term);
     // Ending back on the original family makes xterm re-acquire the same
     // process-wide cached atlas, so clearing first would be undone.
     expect(calls).toEqual([
@@ -202,6 +203,12 @@ describe("invalidateTerminalFontCaches", () => {
       "resize(80,24)",
       "refresh(0,23)",
     ]);
+    expect(result).toMatchObject({
+      activeBufferType: "normal",
+      isAlternateScreen: false,
+      cols: 80,
+      rows: 24,
+    });
   });
 
   it("never asks for a negative refresh range on a zero-row terminal", () => {
@@ -219,13 +226,27 @@ describe("invalidateTerminalFontCaches", () => {
     expect(calls).not.toContain("resize(81,0)");
     expect(calls).toContain("refresh(0,0)");
   });
+
+  it("reports alternate-screen rebuilds so callers can SIGWINCH the PTY", () => {
+    const { term, calls } = fakeTerminal(13, "alternate");
+    const result = invalidateTerminalFontCaches(term);
+    expect(calls).toContain("clearTextureAtlas");
+    expect(result).toMatchObject({
+      activeBufferType: "alternate",
+      isAlternateScreen: true,
+      cols: 80,
+      rows: 24,
+    });
+  });
 });
 
 describe("repairTerminalCjkFontCachesIfLoaded", () => {
   it("rebuilds caches when the CJK face is already loaded", () => {
     installFontSet(true);
     const { term, calls } = fakeTerminal();
-    expect(repairTerminalCjkFontCachesIfLoaded(term)).toBe(true);
+    expect(repairTerminalCjkFontCachesIfLoaded(term)).toMatchObject({
+      isAlternateScreen: false,
+    });
     expect(calls).toContain("clearTextureAtlas");
     expect(calls).toContain("resize(81,24)");
   });
@@ -233,9 +254,18 @@ describe("repairTerminalCjkFontCachesIfLoaded", () => {
   it("does not rebuild or download when the CJK face is unavailable", () => {
     const fonts = installFontSet(false);
     const { term, calls } = fakeTerminal();
-    expect(repairTerminalCjkFontCachesIfLoaded(term)).toBe(false);
+    expect(repairTerminalCjkFontCachesIfLoaded(term)).toBeNull();
     expect(calls).toEqual([]);
     expect(fonts.load).not.toHaveBeenCalled();
+  });
+
+  it("returns alternate-screen metadata when rebuilding an active TUI", () => {
+    installFontSet(true);
+    const { term } = fakeTerminal(13, "alternate");
+    expect(repairTerminalCjkFontCachesIfLoaded(term)).toMatchObject({
+      activeBufferType: "alternate",
+      isAlternateScreen: true,
+    });
   });
 });
 
@@ -274,7 +304,9 @@ describe("bindTerminalCjkFont", () => {
       onRebuilt,
     });
     expect(calls).toContain("clearTextureAtlas");
-    expect(onRebuilt).toHaveBeenCalledTimes(1);
+    expect(onRebuilt).toHaveBeenCalledWith(
+      expect.objectContaining({ isAlternateScreen: false }),
+    );
   });
 
   it("does not re-download when the face is already loaded", () => {
@@ -299,7 +331,29 @@ describe("bindTerminalCjkFont", () => {
     // Called on this task, not a microtask later — the fetch must not wait.
     expect(fonts.load).toHaveBeenCalledWith('13px "Marblo D2Coding"', "가");
     await vi.waitFor(() => expect(onRebuilt).toHaveBeenCalledTimes(1));
+    expect(onRebuilt).toHaveBeenCalledWith(
+      expect.objectContaining({ isAlternateScreen: false }),
+    );
     expect(calls).toContain("clearTextureAtlas");
+  });
+
+  it("passes alternate-screen rebuild metadata to the renderer hook", () => {
+    installFontSet(true);
+    const { term } = fakeTerminal(13, "alternate");
+    const onRebuilt = vi.fn();
+    bindTerminalCjkFont(term, {
+      label: "T",
+      isStale: () => false,
+      onRebuilt,
+    });
+    expect(onRebuilt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeBufferType: "alternate",
+        isAlternateScreen: true,
+        cols: 80,
+        rows: 24,
+      }),
+    );
   });
 
   it("downloads once across several terminals", async () => {

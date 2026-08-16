@@ -114,7 +114,24 @@ test.describe("터미널 한글 폰트 (회귀 #659 후속)", () => {
       .toBeGreaterThan(0);
 
     marblo.page.off("console", onConsole);
-    expect(rebuilds[0]).toContain("OrchestratorTerminal");
+    expect(rebuilds[0]).toContain("TerminalView");
+  });
+
+  test("@unit Electron PTY resize preload 경로가 실제 invoke 로 resolve 된다", async ({
+    marblo,
+  }) => {
+    const result = await marblo.page.evaluate(async () => {
+      const started = performance.now();
+      await window.electronAPI.pty.resize(
+        `missing-resize-smoke-${Date.now()}`,
+        81,
+        24,
+      );
+      return { resolved: true, elapsedMs: performance.now() - started };
+    });
+
+    expect(result.resolved).toBe(true);
+    expect(result.elapsedMs).toBeLessThan(5_000);
   });
 
   test("@mocked 재빌드 후 xterm 셀 폭이 한글 2칸과 일치한다", async ({

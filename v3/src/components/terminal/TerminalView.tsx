@@ -118,6 +118,8 @@ export default memo(function TerminalView({
         /* ignore */
       }
     };
+    let nudgeRestoreTimer: ReturnType<typeof setTimeout> | null = null;
+    let nudgePtyRepaint: (reason?: string) => void = () => {};
     let cjkRepairFrame: number | null = null;
     const scheduleCjkCacheRepair = (reason: string) => {
       if (disposed || cjkRepairFrame !== null) return;
@@ -125,9 +127,15 @@ export default memo(function TerminalView({
         cjkRepairFrame = null;
         if (disposed || !termOpened) return;
         try {
-          if (repairTerminalCjkFontCachesIfLoaded(terminal)) {
+          const repair = repairTerminalCjkFontCachesIfLoaded(terminal);
+          if (repair) {
             refitTerminal();
-            console.debug(`[TerminalView] CJK glyph caches repaired (${reason})`);
+            if (repair.isAlternateScreen) {
+              nudgePtyRepaint(`CJK font repair ${reason}`);
+            }
+            console.debug(
+              `[TerminalView] CJK glyph caches repaired (${reason})`,
+            );
           }
         } catch (err) {
           console.warn("[TerminalView] CJK glyph cache repair failed:", err);
@@ -195,6 +203,34 @@ export default memo(function TerminalView({
     let termOpened = false;
     const pendingData: string[] = [];
     let initialResumeTimer: ReturnType<typeof setTimeout> | null = null;
+    // Alt-screen TUI re-emit nudge. A resumed agent (claude --continue /
+    // --resume after an app restart) reattaches to a LIVE pty, but its Ink TUI
+    // runs in alternate-screen mode and does NOT redraw its current frame on
+    // reattach — and the replay ring no longer holds the alt-screen-enter
+    // sequence, so there's nothing to reconstruct the frame from either. The
+    // terminal therefore stays blank until the user presses a key. Bumping
+    // cols by one and restoring delivers a real SIGWINCH (the kernel only
+    // signals on an actual size change), which makes Ink repaint the whole
+    // frame. We also reuse it after CJK font cache rebuilds: xterm's internal
+    // resize only reflows the normal buffer, while alt-screen TUIs must redraw
+    // their own cells after the renderer switches from fallback to D2Coding.
+    nudgePtyRepaint = (reason = "pty repaint nudge") => {
+      if (disposed || !termOpened) return;
+      const cols = terminal.cols;
+      const rows = terminal.rows;
+      if (!cols || !rows) return;
+      try {
+        window.electronAPI.pty.resize(sessionId, cols + 1, rows);
+        nudgeRestoreTimer = setTimeout(() => {
+          nudgeRestoreTimer = null;
+          if (disposed) return;
+          window.electronAPI.pty.resize(sessionId, cols, rows);
+          scheduleResumeRender(reason);
+        }, 50);
+      } catch {
+        /* ignore */
+      }
+    };
 
     // Clear any ghost xterm DOM from StrictMode's previous mount
     if (containerRef.current) {
@@ -239,7 +275,12 @@ export default memo(function TerminalView({
           isStale: () => disposed || !termOpened,
           // Cell metrics can change with the face, so cols/rows must be
           // recomputed (and the PTY told) rather than left at the old grid.
-          onRebuilt: refitTerminal,
+          onRebuilt: (repair) => {
+            refitTerminal();
+            if (repair.isAlternateScreen) {
+              nudgePtyRepaint("CJK font rebuild");
+            }
+          },
         });
 
         scheduleResumeRender("initial open");
@@ -344,36 +385,6 @@ export default memo(function TerminalView({
         maxTimer = setTimeout(flushLive, MAX_DELAY_MS);
       }
     });
-
-    // Alt-screen TUI re-emit nudge. A resumed agent (claude --continue /
-    // --resume after an app restart) reattaches to a LIVE pty, but its Ink TUI
-    // runs in alternate-screen mode and does NOT redraw its current frame on
-    // reattach — and the replay ring no longer holds the alt-screen-enter
-    // sequence, so there's nothing to reconstruct the frame from either. The
-    // terminal therefore stays blank until the user presses a key. Bumping
-    // cols by one and restoring delivers a real SIGWINCH (the kernel only
-    // signals on an actual size change), which makes Ink repaint the whole
-    // frame. We also fire it once after initial open; the resize round trip is
-    // the reliable alt-screen resume signal for CLIs that otherwise stay black
-    // until a manual click, tab switch, or window resize.
-    let nudgeRestoreTimer: ReturnType<typeof setTimeout> | null = null;
-    const nudgePtyRepaint = (reason = "pty repaint nudge") => {
-      if (disposed || !termOpened) return;
-      const cols = terminal.cols;
-      const rows = terminal.rows;
-      if (!cols || !rows) return;
-      try {
-        window.electronAPI.pty.resize(sessionId, cols + 1, rows);
-        nudgeRestoreTimer = setTimeout(() => {
-          nudgeRestoreTimer = null;
-          if (disposed) return;
-          window.electronAPI.pty.resize(sessionId, cols, rows);
-          scheduleResumeRender(reason);
-        }, 50);
-      } catch {
-        /* ignore */
-      }
-    };
 
     const replayTimer = window.setTimeout(() => {
       if (disposed) return;
