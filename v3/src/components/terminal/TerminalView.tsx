@@ -27,6 +27,23 @@ interface TerminalViewProps {
   onLeftWhenEmpty?: () => void;
 }
 
+interface TerminalDebugSnapshot {
+  sessionId: string;
+  cols: number;
+  rows: number;
+  activeBufferType: string;
+  fontFamily: string;
+  fontSize: number;
+}
+
+type TerminalDebugRegistry = Record<string, () => TerminalDebugSnapshot | null>;
+
+declare global {
+  interface Window {
+    __marbloTerminalDebug?: TerminalDebugRegistry;
+  }
+}
+
 export default memo(function TerminalView({
   sessionId,
   isActive,
@@ -103,6 +120,18 @@ export default memo(function TerminalView({
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+
+    if (window.electronAPI?.testMode?.bypassAuth) {
+      window.__marbloTerminalDebug ??= {};
+      window.__marbloTerminalDebug[sessionId] = () => ({
+        sessionId,
+        cols: terminal.cols,
+        rows: terminal.rows,
+        activeBufferType: terminal.buffer.active.type,
+        fontFamily: terminal.options.fontFamily ?? "",
+        fontSize: terminal.options.fontSize ?? 13,
+      });
+    }
 
     const refitTerminal = () => {
       try {
@@ -591,6 +620,9 @@ export default memo(function TerminalView({
       viewportEl?.removeEventListener("keydown", onKeyDown, keyOpts);
       window.electronAPI.pty.removeListeners(sessionId);
       terminal.dispose();
+      if (window.__marbloTerminalDebug?.[sessionId]) {
+        delete window.__marbloTerminalDebug[sessionId];
+      }
       if (containerRef.current) {
         containerRef.current.innerHTML = "";
       }
