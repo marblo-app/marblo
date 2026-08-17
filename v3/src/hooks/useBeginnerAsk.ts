@@ -53,6 +53,8 @@ export interface BeginnerAsk {
   send: (message: string) => Promise<void>;
   /** 마지막으로 보낸 문장을 그대로 다시 보낸다(막힘 안내의 CTA — 가드 우회). */
   resend: () => Promise<void>;
+  /** 하단 오케 PTY 에 사용자가 직접 제출한 턴을 라이브 스트립 기준시각으로 기록한다. */
+  markTerminalSubmit: (message: string) => void;
 }
 
 export function useBeginnerAsk(): BeginnerAsk {
@@ -125,6 +127,18 @@ export function useBeginnerAsk(): BeginnerAsk {
     [deliver],
   );
 
+  const markTerminalSubmit = useCallback((message: string) => {
+    const trimmed = message.trim();
+    if (!trimmed) return;
+    const at = Date.now();
+    lastMessageRef.current = trimmed;
+    lastDeliveredRef.current = { message: trimmed, at };
+    setDuplicateBlocked(false);
+    setDelivery("delivered");
+    setDeliveredAt(at);
+    setSentCount((n) => n + 1);
+  }, []);
+
   return {
     sending,
     delivery,
@@ -134,5 +148,6 @@ export function useBeginnerAsk(): BeginnerAsk {
     duplicateBlocked,
     send,
     resend,
+    markTerminalSubmit,
   };
 }

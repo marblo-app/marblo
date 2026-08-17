@@ -687,6 +687,7 @@ export function BeginnerShell() {
                             fill
                             hideModelControls
                             showConnectedModelPicker
+                            onUserSubmit={ask.markTerminalSubmit}
                           />
                         </div>
                       </section>
