@@ -42,12 +42,18 @@ const VENDOR_META: Record<
     console: "minimax.io → API Key",
     hintKey: "settings.vendorKeys.hint.minimax",
   },
+  upstage: {
+    name: "Upstage Solar",
+    console: "console.upstage.ai → API keys",
+    hintKey: "settings.vendorKeys.hint.upstage",
+  },
 };
 
 /** VENDOR_META 가 참조하는 힌트 키만 좁게 받는다(오타는 컴파일 에러). */
 type MessageKeyLike =
   | "settings.vendorKeys.hint.zai"
-  | "settings.vendorKeys.hint.minimax";
+  | "settings.vendorKeys.hint.minimax"
+  | "settings.vendorKeys.hint.upstage";
 
 const STORE_PATH = "~/.marblo/vendor-secrets.enc.json";
 
@@ -76,12 +82,12 @@ export function VendorKeysSettings() {
   const flash = (
     envKey: string,
     type: "success" | "error",
-    message: string,
+    message: string
   ) => {
     setFeedback((prev) => ({ ...prev, [envKey]: { type, message } }));
     setTimeout(
       () => setFeedback((prev) => ({ ...prev, [envKey]: null })),
-      4000,
+      4000
     );
   };
 
@@ -92,7 +98,7 @@ export function VendorKeysSettings() {
     try {
       const res = await window.electronAPI.settings.setVendorSecret(
         envKey,
-        value,
+        value
       );
       // ★평문을 state 에 남기지 않는다 — 저장 즉시 입력을 비운다.
       setInputs((p) => ({ ...p, [envKey]: "" }));
@@ -103,9 +109,7 @@ export function VendorKeysSettings() {
       flash(
         envKey,
         "error",
-        err instanceof Error
-          ? err.message
-          : t("settings.vendorKeys.saveFailed"),
+        err instanceof Error ? err.message : t("settings.vendorKeys.saveFailed")
       );
     } finally {
       setBusy((p) => ({ ...p, [envKey]: false }));
@@ -125,7 +129,7 @@ export function VendorKeysSettings() {
         "error",
         err instanceof Error
           ? err.message
-          : t("settings.vendorKeys.deleteFailed"),
+          : t("settings.vendorKeys.deleteFailed")
       );
     } finally {
       setBusy((p) => ({ ...p, [envKey]: false }));

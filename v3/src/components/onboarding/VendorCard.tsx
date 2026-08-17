@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
 import { ROWS, useCliSetupStore } from "../../stores/cliSetupStore";
+import { useVendorSecretsStore } from "../../stores/vendorSecretsStore";
 import type { VendorSetupCard } from "../../lib/vendorOnboarding";
 import { CliRowCard, CommandBox } from "./CliSetupRows";
 
@@ -59,10 +60,35 @@ export function VendorCard({
   const [model, setModel] = useState(card.exampleModelId);
   const row = ROWS.find((r) => r.id === card.cliRowId);
   const state = useCliSetupStore((s) =>
-    card.cliRowId ? s.states[card.cliRowId] : undefined,
+    card.cliRowId ? s.states[card.cliRowId] : undefined
   );
+  const saveSecret = useVendorSecretsStore((s) => s.saveSecret);
+  const [keyInputs, setKeyInputs] = useState<Record<string, string>>({});
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [keyFeedback, setKeyFeedback] = useState<
+    Record<string, "saved" | "error" | undefined>
+  >({});
 
   const isEnvSwap = card.kind === "envSwap";
+  const keysToEnter =
+    card.missingEnvKeys.length > 0 ? card.missingEnvKeys : card.requiredEnvKeys;
+
+  const saveInlineKey = async (envKey: string) => {
+    const value = (keyInputs[envKey] ?? "").trim();
+    if (!value || savingKey) return;
+    setSavingKey(envKey);
+    setKeyFeedback((prev) => ({ ...prev, [envKey]: undefined }));
+    try {
+      await saveSecret(envKey, value);
+      // 평문은 저장 직후 제거한다. 저장소 snapshot 에도 값은 오지 않는다.
+      setKeyInputs((prev) => ({ ...prev, [envKey]: "" }));
+      setKeyFeedback((prev) => ({ ...prev, [envKey]: "saved" }));
+    } catch {
+      setKeyFeedback((prev) => ({ ...prev, [envKey]: "error" }));
+    } finally {
+      setSavingKey(null);
+    }
+  };
 
   return (
     // CLI 벤더는 `CliRowCard` 가 이미 자기 카드(테두리·이름·상태·액션)를 그린다 —
@@ -82,10 +108,12 @@ export function VendorCard({
             </p>
           </div>
           <span
-            className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-medium ${STATUS_STYLE[card.status]}`}
+            className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-medium ${
+              STATUS_STYLE[card.status]
+            }`}
           >
             {t(
-              `onboarding.startHere.vendors.status.${card.status}` as MessageKey,
+              `onboarding.startHere.vendors.status.${card.status}` as MessageKey
             )}
           </span>
         </div>
@@ -102,27 +130,82 @@ export function VendorCard({
             <>
               <p className="text-xs text-[#a6adc8]">
                 {t("onboarding.startHere.vendors.key.hint", {
-                  keys: (card.missingEnvKeys.length > 0
-                    ? card.missingEnvKeys
-                    : card.requiredEnvKeys
-                  ).join(", "),
+                  keys: keysToEnter.join(", "),
                 })}
               </p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={onOpenKeySettings}
-                  className="rounded-md bg-[#89b4fa] px-3 py-1.5 text-xs font-medium text-[#1e1e2e] transition-colors hover:bg-[#74c7ec]"
-                >
-                  {t("onboarding.startHere.vendors.key.cta")}
-                </button>
-                <button
-                  type="button"
-                  onClick={onRecheckKeys}
-                  className="rounded-md border border-[#45475a] px-2.5 py-1.5 text-xs text-[#cdd6f4] transition-colors hover:bg-[#313244]"
-                >
-                  {t("onboarding.startHere.vendors.key.recheck")}
-                </button>
+              <div className="mt-2 space-y-2">
+                {keysToEnter.map((envKey) => {
+                  const value = keyInputs[envKey] ?? "";
+                  const busy = savingKey === envKey;
+                  const feedback = keyFeedback[envKey];
+                  return (
+                    <div key={envKey}>
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          spellCheck={false}
+                          aria-label={envKey}
+                          value={value}
+                          onChange={(e) =>
+                            setKeyInputs((prev) => ({
+                              ...prev,
+                              [envKey]: e.target.value,
+                            }))
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") void saveInlineKey(envKey);
+                          }}
+                          placeholder={t(
+                            "onboarding.startHere.vendors.key.placeholder",
+                            { key: envKey }
+                          )}
+                          className="min-w-0 flex-1 rounded-md border border-[#45475a] bg-[#11111b] px-3 py-1.5 text-xs text-[#cdd6f4] placeholder-[#585b70] focus:border-[#89b4fa] focus:outline-none focus:ring-1 focus:ring-[#89b4fa]/40 disabled:opacity-50"
+                          disabled={!!savingKey}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void saveInlineKey(envKey)}
+                          disabled={!!savingKey || !value.trim()}
+                          className="rounded-md bg-[#89b4fa] px-3 py-1.5 text-xs font-medium text-[#1e1e2e] transition-colors hover:bg-[#74c7ec] disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {busy
+                            ? t("onboarding.startHere.vendors.key.saving")
+                            : t("onboarding.startHere.vendors.key.save")}
+                        </button>
+                      </div>
+                      {feedback && (
+                        <p
+                          className={`mt-1 text-[11px] ${
+                            feedback === "saved"
+                              ? "text-[#a6e3a1]"
+                              : "text-[#f38ba8]"
+                          }`}
+                        >
+                          {t(
+                            `onboarding.startHere.vendors.key.${feedback}` as MessageKey
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={onRecheckKeys}
+                    className="rounded-md border border-[#45475a] px-2.5 py-1.5 text-xs text-[#cdd6f4] transition-colors hover:bg-[#313244]"
+                  >
+                    {t("onboarding.startHere.vendors.key.recheck")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onOpenKeySettings}
+                    className="text-xs text-[#89b4fa] underline decoration-dotted hover:text-[#74c7ec]"
+                  >
+                    {t("onboarding.startHere.vendors.key.settings")}
+                  </button>
+                </div>
               </div>
             </>
           )}

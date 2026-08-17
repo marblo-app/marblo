@@ -28,6 +28,8 @@ interface VendorSecretsState {
   load: () => Promise<void>;
   /** 사용자가 "등록 상태 다시 확인" 을 눌렀을 때 — 항상 다시 읽는다. */
   reload: () => Promise<void>;
+  /** 인라인 온램프 입력에서 저장한다. 평문은 IPC 로만 흐르고 store 에 남기지 않는다. */
+  saveSecret: (envKey: string, value: string) => Promise<void>;
 }
 
 async function fetchSnapshot(): Promise<VendorSecretsSnapshot | null> {
@@ -55,5 +57,14 @@ export const useVendorSecretsStore = create<VendorSecretsState>((set, get) => ({
       // 카탈로그 판정으로 떨어지게 한다.
       set({ snapshot: null, status: "error" });
     }
+  },
+
+  saveSecret: async (envKey, value) => {
+    const api = window.electronAPI?.settings;
+    if (!api?.setVendorSecret)
+      throw new Error("Vendor key storage unavailable");
+    set({ status: "loading" });
+    const res = await api.setVendorSecret(envKey, value);
+    set({ snapshot: res.snapshot, status: "ready" });
   },
 }));
