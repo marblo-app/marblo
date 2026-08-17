@@ -18,7 +18,7 @@ import {
 
 /**
  * 클린룸 비기너 모드 E2E — 첫실행 통합 흐름 회귀가드 (#854 셸 · #857 코치마크 ·
- * #856 미니보드/미니에이전트).
+ * #856 진행 보드/에이전트 패널).
  *
  * 세 PR 이 남긴 것은 전부 **유닛테스트**다: 순수 규칙(`lib/beginnerMode`,
  * `lib/coachmark`)은 촘촘히 못박혀 있지만, 그 규칙이 `App.tsx` 의 셸 분기와 실제
@@ -26,20 +26,20 @@ import {
  * 이 spec 이 그 구간이다.
  *
  * ★가장 큰 리스크는 기능이 아니라 **진입판정**이다. 잘못된 방향의 오탐(신규를
- * 어드밴스드로)은 종전과 같은 화면일 뿐이지만, 반대(기존 유저를 비기너로)는
+ * 마블로 모드로)은 종전과 같은 화면일 뿐이지만, 반대(기존 유저를 비기너로)는
  * 쓰던 사람의 보드가 사라지는 사고다. G2 가 그 표를 화면 층위에서 재현한다 —
  * 유닛테스트는 순수함수에 마커 조합을 넣어 보지만, 여기서 묻는 것은 "그 키가
  * 실제로 깔린 프로필로 앱을 켜면 보드가 그대로 있는가" 다.
  *
  * 시나리오
  *   G1  깨끗한 신규 설치 → 비기너 셸 (큐레이트 탭바만 + 비노출 엑스퍼트 탭 부재)
- *   G2  ★회귀가드: 이전-사용 마커 4종 각각 → 어드밴스드 + 보드 실재. 대조군 포함
- *   G3  인증 택1(claude 만) → 폴더 게이트 → 풀스크린 오케챗
- *   G4  첫 요청 전달 → 라이브 스트립(국면·미니보드·미니에이전트) + 중복전송 가드
- *   G5  (대조군) 전달 실패면 폼이 잠기지 않고 스트립도 안 뜬다
- *   G6  코치마크 투어 4스텝 완주 → 재노출 없음 → 상단 개발모드 전환
+ *   G2  ★회귀가드: 이전-사용 마커 4종 각각 → 마블로 모드 + 보드 실재. 대조군 포함
+ *   G3  인증 택1(claude 만) → 폴더 게이트 → 하단 오케 대화창
+ *   G4  하단 오케 입력 → 상단 진행 보드(국면·보드) + 에이전트 패널
+ *   G5  (대조군) 오케 PTY 제출 전에는 스트립이 안 뜬다
+ *   G6  코치마크 투어 3스텝 완주 → 재노출 없음 → 상단 마블로 모드 전환
  *   G7  승격 모달(완료 3건) — '지금은 그대로' 는 다시 안 뜬다
- *   G8  승격 수락 → 어드밴스드 셸 + 보드에 티켓이 그대로 있다
+ *   G8  승격 수락 → 마블로 모드 셸 + 보드에 티켓이 그대로 있다
  *
  * 실행: npm run test:e2e:pw -- tests/playwright/cleanroom/beginner-first-run.spec.ts
  * 전제: npm run build (dist-electron/main.js + dist/)
@@ -55,9 +55,53 @@ async function settle(page: Page, ms = 1200): Promise<void> {
 /** 비기너 셸이 연결·폴더 게이트를 지나 챗 국면에 도달했는지. */
 async function chatReady(page: Page): Promise<void> {
   await page
-    .getByTestId("beginner-first-ask")
+    .locator('[data-coach="beginner-chat"]')
     .first()
     .waitFor({ state: "visible", timeout: 20_000 });
+}
+
+/** cleanroom 에서 실제 CLI 없이 하단 오케 xterm 을 결정적으로 렌더한다. */
+async function primeOrchestratorTerminal(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const hatch = (
+      window as unknown as {
+        __marbloTest?: {
+          stores: {
+            orchestrator: {
+              getState: () => {
+                setSession: (
+                  sessionId: string,
+                  ptySessionId: string,
+                  model?: "codex",
+                ) => void;
+                setStatus: (status: "running") => void;
+                setCollapsed: (collapsed: boolean) => void;
+              };
+            };
+          };
+        };
+      }
+    ).__marbloTest;
+    if (!hatch) throw new Error("cleanroom test hatch is unavailable");
+    const orchestrator = hatch.stores.orchestrator.getState();
+    orchestrator.setSession("cleanroom-orchestrator", "cleanroom-pty", "codex");
+    orchestrator.setStatus("running");
+    orchestrator.setCollapsed(false);
+  });
+  await page.locator(".xterm").first().waitFor({
+    state: "visible",
+    timeout: 10_000,
+  });
+}
+
+async function submitOrchestratorTurn(
+  page: Page,
+  message: string,
+): Promise<void> {
+  await primeOrchestratorTerminal(page);
+  await page.locator(".xterm").first().click();
+  await page.keyboard.type(message);
+  await page.keyboard.press("Enter");
 }
 
 /** 라이브 스트립의 현재 국면(`data-phase`). 스트립이 없으면 null. */
@@ -152,7 +196,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       }
       expect(await cr.page.getByTestId("cli-setup-banner").count()).toBe(0);
       expect(await cr.page.getByTestId("beginner-mini-board").count()).toBe(0);
-      // 연결 전에는 챗도 첫 요청칸도 없다 — 인증 없이 오케를 태울 수 없어서다.
+      // 연결 전에는 오케 대화창도 없다 — 인증 없이 오케를 태울 수 없어서다.
       expect(await cr.page.getByTestId("beginner-first-ask").count()).toBe(0);
 
       await cr.shot("G1-beginner-connect-gate");
@@ -161,7 +205,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
     }
   });
 
-  test("G2(★회귀가드) 이전 사용 흔적이 하나라도 있으면 어드밴스드 — 보드가 사라지지 않는다", async () => {
+  test("G2(★회귀가드) 이전 사용 흔적이 하나라도 있으면 마블로 모드 — 보드가 사라지지 않는다", async () => {
     const cr = await launchCleanRoom({
       claude: "missing",
       codex: "ready",
@@ -172,7 +216,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       await waitForAppShell(cr.page);
 
       // ── 대조군 먼저: 마커가 하나도 없으면 실제로 비기너다 ────────────────
-      // 이게 없으면 아래 네 줄은 "무슨 짓을 해도 어드밴스드" 와 구분되지 않는다.
+      // 이게 없으면 아래 네 줄은 "무슨 짓을 해도 마블로 모드" 와 구분되지 않는다.
       await reseedBeginnerDecision(cr.page, []);
       await passFirstRunModals(cr.page);
       await waitForAppShell(cr.page);
@@ -180,7 +224,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       expect(await beginnerShellVisible(cr.page)).toBe(true);
       expect((await readBeginnerRecord(cr.page)).state).toBe("beginner");
 
-      // ── 마커 4종 각각 → 어드밴스드 ─────────────────────────────────────
+      // ── 마커 4종 각각 → 마블로 모드 ────────────────────────────────────
       const markers: PriorInstallMarkerName[] = [
         "onboardingProgress",
         "workspaceTab",
@@ -204,7 +248,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       console.log("[cleanroom][G2] 마커별 판정:", verdicts);
       for (const marker of markers) expect(verdicts[marker]).toBe("advanced");
 
-      // ── 그리고 어드밴스드가 껍데기가 아니라 **진짜 보드**인가 ────────────
+      // ── 그리고 마블로 모드가 껍데기가 아니라 **진짜 보드**인가 ──────────
       // 마지막 반복은 legacyGateDismissed(=워크스페이스 셸 경로)로 서 있다.
       await injectProject(cr.page, cr.projectDir);
       await openBoardTab(cr.page);
@@ -220,7 +264,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
     }
   });
 
-  test("G3 하나만 인증하면 통과한다(택1) → 폴더 게이트 → 풀스크린 오케챗", async () => {
+  test("G3 하나만 인증하면 통과한다(택1) → 폴더 게이트 → 하단 오케 대화창", async () => {
     // codex 는 없고 claude 만 준비된 프로필. G4 는 반대 조합(codex 만)을 쓴다 —
     // 둘을 합치면 #579 의 `.some` 규칙이 비기너 진입에도 그대로 사는지가 두 방향
     // 모두에서 확인된다.
@@ -241,18 +285,19 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       expect(await cr.page.getByTestId("beginner-connect").count()).toBe(0);
       await cr.shot("G3-folder-gate");
 
-      // 폴더가 붙으면 풀스크린 오케챗 국면.
+      // 폴더가 붙으면 상단 진행 보드 + 하단 오케 대화창 국면.
       await injectProject(cr.page, cr.projectDir);
       await chatReady(cr.page);
       await expect(
         cr.page.locator('[data-coach="beginner-chat"]').first(),
       ).toBeVisible();
+      await expect(cr.page.getByTestId("beginner-agents-pane")).toBeVisible();
       expect(await cr.page.getByTestId("beginner-folder-gate").count()).toBe(0);
 
       // ★아직 아무것도 안 보냈다 — 스트립은 그리지 않는다(idle). 빈 진행줄을
       //   미리 띄우면 "아무 일도 안 일어난다" 는 인상을 오히려 강화한다.
       expect(await livePhase(cr.page)).toBeNull();
-      await cr.shot("G3-fullscreen-chat");
+      await cr.shot("G3-orchestrator-chat");
     } finally {
       await cr.close();
     }
@@ -274,10 +319,11 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
 
       await expect(cr.page.getByTestId("beginner-chat-demo-cta")).toHaveCount(0);
       await expect(cr.page.getByTestId("onramp-decompose-input")).toHaveCount(0);
-      const askBox = await cr.page
-        .getByTestId("beginner-first-ask")
+      const chatBox = await cr.page
+        .locator('[data-coach="beginner-chat"]')
         .boundingBox();
-      expect(askBox, "첫 요청 입력 영역이 렌더되지 않았다").toBeTruthy();
+      expect(chatBox, "하단 오케 대화 영역이 렌더되지 않았다").toBeTruthy();
+      await expect(cr.page.getByTestId("beginner-agents-pane")).toBeVisible();
 
       await cr.shot("G3b-connected-chat-no-demo-cta");
     } finally {
@@ -421,7 +467,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
     }
   });
 
-  test("G4(★S4) 첫 요청이 전달되면 라이브 스트립이 뜨고 대화가 이어진다 — 미니보드·에이전트 패널 포함", async () => {
+  test("G4(★S4) 하단 오케 입력 뒤 라이브 스트립이 뜨고 대화가 이어진다 — 진행 보드·에이전트 패널 포함", async () => {
     const cr = await launchCleanRoom({
       claude: "missing",
       codex: "ready",
@@ -435,32 +481,25 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       // 투어 카드가 보내기 버튼을 가릴 수 있다 — 투어 자체는 G6 이 본다.
       await dismissBeginnerTour(cr.page);
 
-      const message = "README 를 읽고 시작 가이드를 정리해 줘";
-      await cr.page.getByTestId("beginner-first-ask-input").fill(message);
-      await cr.page.getByTestId("beginner-first-ask-send").click();
+      const message = "Read README and draft a starter guide";
+      await submitOrchestratorTurn(cr.page, message);
       await settle(cr.page, 2500);
 
-      // ── 진짜 오케 라우팅까지 갔는가 ────────────────────────────────────
+      // ── 하단 오케 PTY 입력 경로로 갔는가 ───────────────────────────────
+      // BeginnerChatBar 제거 후에는 routeInstructionToOrchestrator 가 아니라
+      // xterm → pty.write 가 실제 사용자 입력 경로다. injectMessage 가 늘면
+      // 하단 오케 일원화 계약을 거꾸로 깨는 것이다.
       const injected = await cr.injected();
-      console.log("[cleanroom][G4] orchestrator injectMessage:", injected);
-      expect(injected.length).toBe(1);
-      expect(injected[0].projectId).toBe("cleanroom-project");
-      expect(injected[0].message).toContain("README");
+      expect(injected.length).toBe(0);
 
-      // ── ★상단 컴포저는 첫 마디가 닿으면 **접힌다**(#880 `beginnerComposerMode`)
-      // 이 spec 이 쓰여진 시점(#879)의 계약은 정반대였다 — "전달돼도 입력칸이
-      // 살아 있다". 그 뒤 #880 이 되돌렸다: 아래 오케 대화창(실 PTY)과 입력칸이
-      // 둘이면 유저가 매번 "어디에 쓰냐" 를 고르게 되고, 그건 심플 모드가
-      // 없애려던 종류의 선택이라서다. 이어서 말할 곳은 사라진 게 아니라
-      // **하나로 합쳐졌다** — 하단 오케 대화창이 그 자리다.
-      // 그래서 결과 배지(`beginner-first-ask-result`)도 컴포저와 함께 접힌다.
+      // 상단 컴포저는 없다. 이어서 말할 곳은 하단 오케 대화창 하나다.
       await expect(cr.page.getByTestId("beginner-first-ask")).toHaveCount(0);
       await expect(cr.page.getByTestId("beginner-first-ask-input")).toHaveCount(
         0,
       );
-      // 전달됐다는 증거는 화면 배지가 아니라 위의 injectMessage + 아래 스트립이다.
+      await expect(cr.page.locator(".xterm").first()).toBeVisible();
 
-      // ── ★S4: 챗 안 인라인 진행 ────────────────────────────────────────
+      // ── ★S4: 상단 진행 보드 ───────────────────────────────────────────
       expect(await livePhase(cr.page)).toBe("thinking");
       // 티켓이 0개인 동안은 빈 3칸을 띄우지 않는다.
       expect(await cr.page.getByTestId("beginner-mini-board").count()).toBe(0);
@@ -506,7 +545,6 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       ]);
       expect(await livePhase(cr.page)).toBe("working");
       await expect(cr.page.getByTestId("beginner-agents-pane")).toBeVisible();
-      await expect(cr.page.getByTestId("beginner-mini-agents")).toBeVisible();
       await expect(cr.page.getByTestId("beginner-agent-row")).toHaveCount(1);
       await cr.shot("G4-strip-working");
 
@@ -529,10 +567,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
     }
   });
 
-  test("G5(대조군) 오케가 없어 전달이 실패하면 폼이 잠기지 않고 스트립도 안 뜬다", async () => {
-    // G4 의 잠금이 "항상 잠긴다" 가 아니라 **전달됐을 때만** 잠기는지 확인한다.
-    // 전달되지 않은 요청에 스트립을 띄우면 90초 뒤 "막혔어요" 가 뜨는데, 정작
-    // 막힌 건 전송이 아니라 오케 부재다.
+  test("G5(대조군) 오케 PTY 제출 전에는 스트립이 안 뜬다", async () => {
     const cr = await launchCleanRoom({
       claude: "missing",
       codex: "ready",
@@ -545,25 +580,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       await chatReady(cr.page);
       await dismissBeginnerTour(cr.page);
 
-      await cr.page
-        .getByTestId("beginner-first-ask-input")
-        .fill("이 프로젝트 구조를 설명해 줘");
-      await cr.page.getByTestId("beginner-first-ask-send").click();
-      await settle(cr.page, 3000);
-
-      // 라우팅 시도는 실제로 했다.
-      expect((await cr.injected()).length).toBeGreaterThan(0);
-
-      const delivery = await cr.page
-        .getByTestId("beginner-first-ask-result")
-        .getAttribute("data-delivery");
-      console.log("[cleanroom][G5] 전달 결과:", delivery);
-      expect(delivery).not.toBe("delivered");
-      // 잠기지 않았으므로 유저는 다시 시도할 수 있다.
-      await expect(
-        cr.page.getByTestId("beginner-first-ask-send"),
-      ).toBeVisible();
-      // 그리고 진행 스트립은 뜨지 않는다(기준시각이 서지 않았다).
+      await expect(cr.page.getByTestId("beginner-first-ask")).toHaveCount(0);
       expect(await livePhase(cr.page)).toBeNull();
       await cr.shot("G5-not-locked-no-strip");
     } finally {
@@ -571,7 +588,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
     }
   });
 
-  test("G6 코치마크 투어 4스텝 완주 → 재노출 없음, 그리고 상단 개발모드 전환", async () => {
+  test("G6 코치마크 투어 3스텝 완주 → 재노출 없음, 그리고 상단 마블로 모드 전환", async () => {
     const cr = await launchCleanRoom({
       claude: "missing",
       codex: "ready",
@@ -589,14 +606,14 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       // 앵커는 셸이 붙인 data-coach 속성이 유일한 계약이다. 순서가 바뀌거나
       // 앵커가 사라지면(=스텝이 걸러지면) 여기서 깨진다.
       const seen: string[] = [];
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 3; i++) {
         const step = await overlay.getAttribute("data-step");
         if (step) seen.push(step);
         await cr.page.getByTestId("beginner-tour-next").click();
         await settle(cr.page, 500);
       }
       console.log("[cleanroom][G6] 투어 스텝:", seen);
-      expect(seen).toEqual(["chat", "ask", "live", "advanced"]);
+      expect(seen).toEqual(["chat", "live", "advanced"]);
       expect(await beginnerTourVisible(cr.page)).toBe(false);
 
       // 완주는 영속된다 — 재부팅해도 다시 권하지 않는다.
@@ -610,7 +627,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
         await cr.shot("G6-fail-tour-reopened");
       expect(await beginnerTourVisible(cr.page)).toBe(false);
 
-      // ── ★상시 개발모드 전환(#857) ──────────────────────────────────────
+      // ── ★상시 마블로 모드 전환(#857/#1002) ─────────────────────────────
       // 승격 모달(완료 3건)을 기다리지 않고 언제든 넘어갈 수 있어야 한다.
       expect(await beginnerShellVisible(cr.page)).toBe(true);
       await cr.page.getByTestId("beginner-go-advanced").click();
@@ -698,7 +715,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
     }
   });
 
-  test("G8 승격을 받아들이면 어드밴스드 셸이 뜨고 보드에 티켓이 그대로 있다", async () => {
+  test("G8 승격을 받아들이면 마블로 모드 셸이 뜨고 보드에 티켓이 그대로 있다", async () => {
     const cr = await launchCleanRoom({
       claude: "missing",
       codex: "ready",

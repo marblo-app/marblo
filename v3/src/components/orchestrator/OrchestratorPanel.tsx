@@ -177,12 +177,14 @@ interface OrchestratorPanelProps {
    * `hideModelControls` 뒤에서만 의미가 있는 비기너 전용 조합이다.
    */
   showConnectedModelPicker?: boolean;
+  onUserSubmit?: (text: string) => void;
 }
 
 export default memo(function OrchestratorPanel({
   fill = false,
   hideModelControls = false,
   showConnectedModelPicker = false,
+  onUserSubmit,
 }: OrchestratorPanelProps) {
   const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -1009,6 +1011,7 @@ export default memo(function OrchestratorPanel({
             sessionId={ptySessionId}
             panelHeight={panelHeight}
             status={status}
+            onUserSubmit={onUserSubmit}
           />
         </div>
       )}

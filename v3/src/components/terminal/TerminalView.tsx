@@ -19,6 +19,7 @@ interface TerminalViewProps {
   sessionId: string;
   isActive: boolean;
   activityState?: string;
+  onUserSubmit?: (text: string) => void;
   // Mimics Claude `/agents` view: pressing ← with an empty input line
   // drills out of the focused agent back to the list. We track keystrokes
   // sent via `terminal.onData` to estimate input length — when it's 0,
@@ -48,6 +49,7 @@ export default memo(function TerminalView({
   sessionId,
   isActive,
   activityState,
+  onUserSubmit,
   onLeftWhenEmpty,
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -68,9 +70,14 @@ export default memo(function TerminalView({
   // Keep callback in a ref so a fresh prop reference doesn't tear down
   // the entire terminal init effect.
   const onLeftWhenEmptyRef = useRef(onLeftWhenEmpty);
+  const onUserSubmitRef = useRef(onUserSubmit);
+  const submittedLineRef = useRef("");
   useEffect(() => {
     onLeftWhenEmptyRef.current = onLeftWhenEmpty;
   }, [onLeftWhenEmpty]);
+  useEffect(() => {
+    onUserSubmitRef.current = onUserSubmit;
+  }, [onUserSubmit]);
 
   useEffect(() => {
     if (!containerRef.current || initializedRef.current) return;
@@ -486,19 +493,25 @@ export default memo(function TerminalView({
       // start with ESC and shouldn't count as typed characters.
       if (!data.startsWith("\x1b")) {
         if (data === "\r" || data === "\n") {
+          const submitted = submittedLineRef.current.trim();
+          submittedLineRef.current = "";
+          if (submitted) onUserSubmitRef.current?.(submitted);
           inputLenRef.current = 0;
         } else if (data === "\x7f" || data === "\b") {
           // DEL or BS — single-char backspace
           inputLenRef.current = Math.max(0, inputLenRef.current - 1);
+          submittedLineRef.current = submittedLineRef.current.slice(0, -1);
         } else if (data === "\x03" || data === "\x15") {
           // Ctrl-C (SIGINT) or Ctrl-U (kill line) — input cleared
           inputLenRef.current = 0;
+          submittedLineRef.current = "";
         } else {
           // Treat anything else (printable runs, paste, Tab) as typed
           // input. Tab might insert N completion chars; we approximate by
           // the data length sent. False-high by a small amount is fine —
           // the gate only fires when len exactly equals 0.
           inputLenRef.current += data.length;
+          submittedLineRef.current += data;
         }
       }
       window.electronAPI.pty.write(sessionId, data);

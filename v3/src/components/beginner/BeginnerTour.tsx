@@ -10,7 +10,7 @@ import telemetry from "../../services/telemetryService";
 import { CoachmarkOverlay } from "../common/CoachmarkOverlay";
 
 /**
- * 비기너 첫 실행 투어 — 대화창·첫 요청 입력·진행 스트립·모드 전환을 순서대로
+ * 비기너 첫 실행 투어 — 오케 대화창·진행 보드·모드 전환을 순서대로
  * 한 번씩 짚는다(티켓 m7mpxqSw).
  *
  * 이 파일이 드는 건 **무엇을 짚을지와 언제 띄울지** 뿐이다: 그리기는
@@ -23,7 +23,6 @@ import { CoachmarkOverlay } from "../common/CoachmarkOverlay";
 
 /** 셸이 붙이는 앵커 이름 — 셸과 이 파일 사이의 유일한 계약. */
 export const COACH_ANCHORS = {
-  ask: '[data-coach="beginner-ask"]',
   live: '[data-coach="beginner-live"]',
   chat: '[data-coach="beginner-chat"]',
   advanced: '[data-coach="beginner-advanced"]',
@@ -65,13 +64,6 @@ export function BeginnerTour({
         title: t("beginner.tour.chat.title"),
         body: t("beginner.tour.chat.body"),
         placement: "top",
-      },
-      {
-        id: "ask",
-        anchor: COACH_ANCHORS.ask,
-        title: t("beginner.tour.ask.title"),
-        body: t("beginner.tour.ask.body"),
-        placement: "bottom",
       },
       {
         id: "live",
