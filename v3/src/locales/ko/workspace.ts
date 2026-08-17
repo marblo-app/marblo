@@ -34,7 +34,7 @@ export const workspace = {
   "workspace.tab.flows": "플로우 (베타)",
   "workspace.tab.deploy": "배포",
 
-  // ── 어드밴스 첫 진입 코치마크 투어 ─────────────────────────────────────
+  // ── 마블로 모드 첫 진입 코치마크 투어 ──────────────────────────────────
   "workspace.tour.progress": "안내 {current}/{total}",
   "workspace.tour.next": "다음",
   "workspace.tour.back": "이전",
@@ -56,7 +56,7 @@ export const workspace = {
   "workspace.tour.usage.title": "사용량 — 비용과 한도",
   "workspace.tour.usage.body":
     "이번 달 사용량과 플랜 한도를 확인합니다. 예산을 넘기기 전에 여기서 봐요.",
-  "workspace.tour.settings.title": "설정 — 계정·모드·알림",
+  "workspace.tour.settings.title": "설정 — 계정·비기너 모드·알림",
   "workspace.tour.settings.body":
-    "계정, 심플/어드밴스 모드 전환, 알림 등을 바꿉니다. 심플 모드로 돌아갈 때도 여기예요.",
+    "계정, 비기너 모드·마블로 모드 전환, 알림 등을 바꿉니다. 비기너 모드로 돌아갈 때도 여기예요.",
 };

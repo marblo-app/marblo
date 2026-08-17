@@ -29,8 +29,8 @@ export const COACHMARK_KEY = "marblo.coachmark";
 export const BEGINNER_TOUR_ID = "beginner_first_run";
 
 /**
- * 어드밴스드 셸 첫 진입 투어 — 우측 WorkTabs 탭(보드·코드·에이전트·하네스·사용량·설정)을
- * 순서대로 짚는다. 심플→어드밴스 졸업 직후, 또는 어드밴스를 처음 여는 설치에서 1회.
+ * 마블로 모드 첫 진입 투어 — 우측 WorkTabs 탭(보드·코드·에이전트·하네스·사용량·설정)을
+ * 순서대로 짚는다. 비기너→마블로 모드 전환 직후, 또는 마블로 모드를 처음 여는 설치에서 1회.
  */
 export const ADVANCED_TOUR_ID = "advanced_first_entry";
 

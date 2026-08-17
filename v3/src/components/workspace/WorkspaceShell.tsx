@@ -20,7 +20,7 @@ import {
 } from "../../lib/splitWorkspaceLayout";
 import { TerminalColumn } from "./TerminalColumn";
 import { WorkTabs } from "./WorkTabs";
-import { AdvancedTour } from "./AdvancedTour";
+import { MarbloModeTour } from "./MarbloModeTour";
 import { Sidebar } from "../sidebar/Sidebar";
 import { ActivityStreamPanel } from "../activity/ActivityStreamPanel";
 
@@ -367,9 +367,9 @@ export function WorkspaceShell() {
           mount — so the overlay is gone and every entry point routes to the
           tab. */}
 
-      {/* 어드밴스 첫 진입 탭 안내 — 폴더 게이트를 지난 뒤에만. 재노출/다시보지않기
+      {/* 마블로 모드 첫 진입 탭 안내 — 폴더 게이트를 지난 뒤에만. 재노출/다시보지않기
           는 lib/coachmark + coachmarkStore(BeginnerTour 와 동일 패턴). */}
-      <AdvancedTour ready />
+      <MarbloModeTour ready />
     </div>
   );
 }

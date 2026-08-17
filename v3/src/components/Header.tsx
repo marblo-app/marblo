@@ -164,7 +164,7 @@ function BugReportButton() {
 }
 
 /**
- * 어드밴스드 → 비기너 되돌리기. 비기너 상단바의 "개발 모드로 보기"(#857)와
+ * 마블로 모드 → 비기너 되돌리기. 비기너 상단바의 "마블로 모드로 보기"(#857)와
  * **정확히 반대 방향**의 어포던스다.
  *
  * 여기 두는 이유: 지금까지 되돌아갈 문은 설정 › 프로필 안쪽 토글 하나뿐이라,
@@ -173,13 +173,13 @@ function BugReportButton() {
  * 상태 자체는 beginnerModeStore.revertToBeginner 를 그대로 재사용한다(새 상태
  * 축을 만들지 않는다 — App 이 읽는 셀은 하나여야 한다).
  */
-function SimpleModeButton() {
+function BeginnerModeButton() {
   const { t } = useTranslation();
   const beginner = useBeginnerModeStore((s) => s.state) === "beginner";
   const revertToBeginner = useBeginnerModeStore((s) => s.revertToBeginner);
 
-  // 비기너 셸에는 이 Header 자체가 없지만, 상태가 어긋난 순간에 "간단 모드로
-  // 가기" 버튼이 이미 간단 모드인 화면에 뜨는 일은 없어야 한다.
+  // 비기너 셸에는 이 Header 자체가 없지만, 상태가 어긋난 순간에 "비기너 모드로
+  // 가기" 버튼이 이미 비기너 모드인 화면에 뜨는 일은 없어야 한다.
   if (beginner) return null;
 
   return (
@@ -522,7 +522,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
             <PresenceIndicator projectId={currentProject.id} />
           )}
 
-          <SimpleModeButton />
+          <BeginnerModeButton />
 
           <BugReportButton />
 

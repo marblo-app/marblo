@@ -9,9 +9,9 @@ export const beginner = {
   "beginner.topbar.openFolder": "내 폴더 열기",
   "beginner.topbar.changeFolder": "폴더 바꾸기",
   "beginner.topbar.settings": "설정",
-  "beginner.topbar.advanced": "개발 모드로 보기",
+  "beginner.topbar.advanced": "마블로 모드로 보기",
   "beginner.topbar.advancedHint":
-    "보드·워크트리·모델 선택이 있는 원래 화면으로 갑니다. 설정에서 언제든 돌아올 수 있어요.",
+    "보드·워크트리·모델 선택이 있는 마블로 모드로 갑니다. 설정에서 언제든 비기너 모드로 돌아올 수 있어요.",
 
   // ── 큐레이트 탭바 (lib/beginnerTabs) ────────────────────────────────────
   // 넷(가이드·코드·사용량·설정)의 라벨은 `workspace.tab.*` 를 그대로 읽는다 —
@@ -265,15 +265,16 @@ export const beginner = {
   "beginner.taskDetail.time.daysAgo": "{n}일 전",
 
   // ── 승격 모달 ───────────────────────────────────────────────────────────
-  "beginner.promote.title": "이제 진짜 힘 좀 써볼까요?",
+  "beginner.promote.title": "마블로 모드로 전환해볼까요?",
   "beginner.promote.body":
-    "여기까지 오셨으면 준비된 거예요. 고급 모드에서는 이런 걸 할 수 있어요.",
+    "여기까지 오셨으면 준비된 거예요. 마블로 모드에서는 이런 걸 할 수 있어요.",
   "beginner.promote.point1": "보드에서 여러 에이전트를 직접 지휘하기",
   "beginner.promote.point2": "워크트리·diff 로 바뀐 코드 검토하기",
   "beginner.promote.point3": "티켓마다 모델을 골라 스폰하기",
-  "beginner.promote.cta": "고급 모드로 전환",
+  "beginner.promote.cta": "마블로 모드로 전환",
   "beginner.promote.later": "지금은 그대로",
-  "beginner.promote.revertHint": "설정에서 언제든 다시 돌아올 수 있어요.",
+  "beginner.promote.revertHint":
+    "설정에서 언제든 비기너 모드로 돌아올 수 있어요.",
   "beginner.promote.reason.completed": "티켓 {count}건을 끝내셨어요",
   "beginner.promote.reason.merged": "첫 머지까지 마치셨어요",
   "beginner.promote.reason.days": "마블로를 며칠째 쓰고 계시네요",
@@ -294,23 +295,23 @@ export const beginner = {
   "beginner.tour.live.title": "진행 상황은 여기에 나와요",
   "beginner.tour.live.body":
     "요청을 보내면 티켓이 몇 개 생겼는지, 어디까지 왔는지 이 줄에서 계속 보입니다. 카드를 누르면 그 일이 무엇인지 볼 수 있고, 누가 맡았는지는 오른쪽 팀 칸에 나와요.",
-  "beginner.tour.advanced.title": "언제든 개발 모드로 넘어갈 수 있어요",
+  "beginner.tour.advanced.title": "언제든 마블로 모드로 넘어갈 수 있어요",
   "beginner.tour.advanced.body":
-    "보드·워크트리·모델 선택이 필요해지면 여기를 누르세요. 설정에서 다시 돌아올 수 있어요.",
+    "보드·워크트리·모델 선택이 필요해지면 여기를 누르세요. 설정에서 비기너 모드로 다시 돌아올 수 있어요.",
 
   // ── 설정 토글 ───────────────────────────────────────────────────────────
   "beginner.settings.heading": "비기너 모드",
   "beginner.settings.body":
     "탭·보드·워크트리를 숨기고 큰 대화창 하나만 보여 줍니다. 처음 쓰거나, 조용히 시키기만 하고 싶을 때 좋아요.",
   "beginner.settings.on": "비기너 모드 켜기",
-  "beginner.settings.off": "고급 모드로 전환",
+  "beginner.settings.off": "마블로 모드로 전환",
   "beginner.settings.restartHint":
     "화면 전체가 바뀝니다. 진행 중인 에이전트는 그대로 계속 돌아가요.",
   // 어드밴스드 상단바에 서는 **되돌리기** 어포던스(비기너 상단바의
   // `beginner.topbar.advanced` 와 정확히 반대 방향).
-  "beginner.topbar.simple": "간단 모드",
+  "beginner.topbar.simple": "비기너 모드",
   "beginner.topbar.simpleHint":
-    "탭·보드를 접고 큰 대화창 하나만 보여 줍니다. 설정에서 언제든 되돌릴 수 있어요.",
+    "탭·보드를 접고 큰 대화창 하나만 보여 줍니다. 설정에서 언제든 마블로 모드로 되돌릴 수 있어요.",
   "beginner.settings.replayTour": "첫 실행 안내 다시 보기",
   "beginner.settings.replayTourDone":
     "다음에 비기너 화면을 열면 안내가 다시 나와요.",

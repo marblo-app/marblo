@@ -36,7 +36,7 @@ export const workspace: Record<keyof typeof koWorkspace, string> = {
   "workspace.tab.flows": "Flows (Beta)",
   "workspace.tab.deploy": "Deploy",
 
-  // ── Advanced first-entry coachmark tour ────────────────────────────────
+  // ── Marblo mode first-entry coachmark tour ─────────────────────────────
   "workspace.tour.progress": "Tip {current}/{total}",
   "workspace.tour.next": "Next",
   "workspace.tour.back": "Back",
@@ -58,7 +58,7 @@ export const workspace: Record<keyof typeof koWorkspace, string> = {
   "workspace.tour.usage.title": "Usage — cost and limits",
   "workspace.tour.usage.body":
     "Check this month's usage and plan limits before you hit the ceiling.",
-  "workspace.tour.settings.title": "Settings — account, mode, alerts",
+  "workspace.tour.settings.title": "Settings — account, beginner mode, alerts",
   "workspace.tour.settings.body":
-    "Account, simple/advanced mode, and notifications. Come back here to return to simple mode.",
+    "Account, beginner mode, Marblo mode, and notifications. Come back here to return to beginner mode.",
 };
