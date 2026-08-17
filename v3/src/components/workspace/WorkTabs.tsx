@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { t } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 import {
   visibleRightTabs,
   type RightTabId,
@@ -76,7 +77,7 @@ const TAB_COMPONENTS: Record<RightTabId, () => JSX.Element> = {
   deploy: DeployTab,
 };
 
-const TAB_LABEL_KEY = {
+const TAB_LABEL_KEY: Record<RightTabId, MessageKey> = {
   startHere: "workspace.tab.startHere",
   board: "workspace.tab.board",
   agents: "workspace.tab.agents",
@@ -93,7 +94,7 @@ const TAB_LABEL_KEY = {
   missions: "workspace.tab.missions",
   flows: "workspace.tab.flows",
   deploy: "workspace.tab.deploy",
-} as const satisfies Record<RightTabId, Parameters<typeof t>[0]>;
+};
 
 // Same feature-flag mechanism as TabBar — dev-only tabs (missions/flows/deploy)
 // appear only when VITE_DEV_FEATURES lists their id. Computed once at module
@@ -141,7 +142,7 @@ export function WorkTabs() {
               type="button"
               role="tab"
               aria-selected={isActive}
-              // 어드밴스 첫 진입 코치마크 앵커(AdvancedTour). 없는 탭 id 는
+              // 마블로 모드 첫 진입 코치마크 앵커(MarbloModeTour). 없는 탭 id 는
               // 투어 스텝이 안 가리키므로 붙여도 무해하다.
               data-coach={`workspace-tab-${tab}`}
               onClick={() => setActiveTab(tab)}

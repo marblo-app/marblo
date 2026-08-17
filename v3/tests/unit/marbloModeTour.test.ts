@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * 어드밴스 첫 진입 투어의 **재노출 경계** — BeginnerTour 와 같은 계약.
+ * 마블로 모드 첫 진입 투어의 **재노출 경계** — BeginnerTour 와 같은 계약.
  * 규칙 자체는 coachmark.test.ts, 그리기는 coachmarkOverlay.test.ts 가 덮는다.
  */
 
@@ -16,11 +16,13 @@ vi.mock("../../src/services/telemetryService", () => ({
   },
 }));
 
-const { AdvancedTour } =
-  await import("../../src/components/workspace/AdvancedTour");
+const { MarbloModeTour } = await import(
+  "../../src/components/workspace/MarbloModeTour"
+);
 const { useCoachmarkStore } = await import("../../src/stores/coachmarkStore");
-const { ADVANCED_TOUR_ID, MAX_TOUR_OFFERS } =
-  await import("../../src/lib/coachmark");
+const { ADVANCED_TOUR_ID, MAX_TOUR_OFFERS } = await import(
+  "../../src/lib/coachmark"
+);
 const telemetry = (await import("../../src/services/telemetryService")).default;
 
 const TAB_IDS = [
@@ -46,7 +48,7 @@ async function flushFrames() {
   await new Promise((r) => setTimeout(r, 0));
 }
 
-describe("AdvancedTour", () => {
+describe("Marblo mode tour", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     useCoachmarkStore.setState({ tours: {} });
@@ -56,7 +58,7 @@ describe("AdvancedTour", () => {
 
   it("앵커가 준비되면 뜨고, 시작을 기록한다", async () => {
     anchors();
-    render(createElement(AdvancedTour, { ready: true }));
+    render(createElement(MarbloModeTour, { ready: true }));
     await flushFrames();
     expect(screen.getByTestId("advanced-tour")).toBeTruthy();
     expect(
@@ -70,21 +72,21 @@ describe("AdvancedTour", () => {
 
   it("폴더 게이트(ready=false)에선 안 뜬다", async () => {
     anchors();
-    render(createElement(AdvancedTour, { ready: false }));
+    render(createElement(MarbloModeTour, { ready: false }));
     await flushFrames();
     expect(screen.queryByTestId("advanced-tour")).toBeNull();
   });
 
   it("다른 오버레이(blocked) 위엔 겹쳐 띄우지 않는다", async () => {
     anchors();
-    render(createElement(AdvancedTour, { ready: true, blocked: true }));
+    render(createElement(MarbloModeTour, { ready: true, blocked: true }));
     await flushFrames();
     expect(screen.queryByTestId("advanced-tour")).toBeNull();
   });
 
   it("★건너뛰기는 그 세션 안에서 다시 뜨지 않는다", async () => {
     anchors();
-    render(createElement(AdvancedTour, { ready: true }));
+    render(createElement(MarbloModeTour, { ready: true }));
     await flushFrames();
     fireEvent.click(screen.getByTestId("advanced-tour-skip"));
     await flushFrames();
@@ -97,7 +99,7 @@ describe("AdvancedTour", () => {
 
   it("'다시 보지 않기' 는 영속 기록에 끝을 남긴다", async () => {
     anchors();
-    render(createElement(AdvancedTour, { ready: true }));
+    render(createElement(MarbloModeTour, { ready: true }));
     await flushFrames();
     fireEvent.click(screen.getByTestId("advanced-tour-never"));
     await flushFrames();
@@ -108,7 +110,7 @@ describe("AdvancedTour", () => {
 
   it("끝까지 보면 완주를 기록하고 다시 안 뜬다", async () => {
     anchors();
-    render(createElement(AdvancedTour, { ready: true }));
+    render(createElement(MarbloModeTour, { ready: true }));
     await flushFrames();
     for (let i = 0; i < 6; i++) {
       fireEvent.click(screen.getByTestId("advanced-tour-next"));
@@ -132,7 +134,7 @@ describe("AdvancedTour", () => {
         },
       },
     });
-    render(createElement(AdvancedTour, { ready: true }));
+    render(createElement(MarbloModeTour, { ready: true }));
     await flushFrames();
     expect(screen.queryByTestId("advanced-tour")).toBeNull();
   });

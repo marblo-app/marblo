@@ -10,7 +10,7 @@ import telemetry from "../../services/telemetryService";
 import { CoachmarkOverlay } from "../common/CoachmarkOverlay";
 
 /**
- * 어드밴스드 셸 첫 진입 투어 — 우측 WorkTabs 탭을 순서대로 짚는다.
+ * 마블로 모드 첫 진입 투어 — 우측 WorkTabs 탭을 순서대로 짚는다.
  *
  * 비기너 첫 실행 투어(`BeginnerTour`)와 **같은 골격**: 그리기는
  * `CoachmarkOverlay`, 재노출 규칙은 `lib/coachmark.shouldStartTour`, 영속은
@@ -30,7 +30,7 @@ export const ADVANCED_COACH_ANCHORS = {
   settings: '[data-coach="workspace-tab-settings"]',
 } as const;
 
-export function AdvancedTour({
+export function MarbloModeTour({
   /** 탭 바가 실제로 렌더된 상태인가(폴더 게이트를 지났나). */
   ready,
   /** 다른 오버레이가 떠 있는가 — 겹쳐 띄우지 않는다. */

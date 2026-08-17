@@ -301,10 +301,10 @@ const KO_FAQ: FaqItem[] = [
     q: "화면이 너무 복잡해요. 대화창 하나만 보고 싶어요.",
     a: (
       <>
-        헤더의 <strong>💬 간단 모드</strong> 를 누르면 탭 · 보드 · 워크트리를
-        접고 큰 오케스트레이터 대화창 하나만 남습니다. 반대로 간단 모드 상단바의{" "}
-        <strong>‘개발 모드로 보기’</strong> 로 언제든 돌아옵니다. 설정 ›
-        프로필에도 같은 토글이 있고,{" "}
+        헤더의 <strong>💬 비기너 모드</strong> 를 누르면 탭 · 보드 · 워크트리를
+        접고 큰 오케스트레이터 대화창 하나만 남습니다. 반대로 비기너 모드
+        상단바의 <strong>‘마블로 모드로 보기’</strong> 로 언제든 돌아옵니다.
+        설정 › 프로필에도 같은 토글이 있고,{" "}
         <strong>진행 중인 에이전트는 모드를 바꿔도 그대로 계속 돕니다</strong>.
       </>
     ),
@@ -380,11 +380,11 @@ const KO: GuideContent = {
     },
     {
       id: "first",
-      title: "2. 처음 켰다면 — 간단 모드와 개발 모드",
+      title: "2. 처음 켰다면 — 비기너 모드와 마블로 모드",
       body: (
         <div className={`${P} space-y-2`}>
           <p>
-            새로 설치한 기기는 <strong>간단 모드</strong>로 열립니다. 탭도
+            새로 설치한 기기는 <strong>비기너 모드</strong>로 열립니다. 탭도
             보드도 없이 오케스트레이터 대화창 하나뿐이라, 하고 싶은 말을 적어
             보내는 것만으로 첫 결과까지 갑니다. 진행 상황은 대화창 아래 라이브
             스트립에 미니 보드와 일하는 에이전트로 나타납니다.
@@ -395,18 +395,18 @@ const KO: GuideContent = {
           </p>
           <ul className="list-disc space-y-1 pl-5">
             <li>
-              간단 → 개발: 상단바 <strong>‘개발 모드로 보기’</strong>. 첫 작업이
-              끝나면 승격 안내도 한 번 뜹니다.
+              비기너 → 마블로: 상단바 <strong>‘마블로 모드로 보기’</strong>. 첫
+              작업이 끝나면 승격 안내도 한 번 뜹니다.
             </li>
             <li>
-              개발 → 간단: 헤더의 <strong>💬 간단 모드</strong>. 설정 ›
+              마블로 → 비기너: 헤더의 <strong>💬 비기너 모드</strong>. 설정 ›
               프로필에도 같은 토글이 있습니다.
             </li>
           </ul>
           <Note>
             모드는 <strong>보여 주는 범위만</strong> 바꿉니다. 돌고 있는
-            에이전트와 티켓은 그대로 유지되고, 개발 모드로 돌아오면 열어 두었던
-            탭까지 복원됩니다.
+            에이전트와 티켓은 그대로 유지되고, 마블로 모드로 돌아오면 열어
+            두었던 탭까지 복원됩니다.
           </Note>
         </div>
       ),
@@ -782,9 +782,9 @@ const EN_FAQ: FaqItem[] = [
     q: "This is too much screen. Can I get just the chat?",
     a: (
       <>
-        Hit <strong>💬 Simple mode</strong> in the header: tabs, board and
+        Hit <strong>💬 Beginner mode</strong> in the header: tabs, board and
         worktrees fold away and one big orchestrator chat remains. Come back any
-        time with <strong>Advanced mode</strong> in the simple-mode top bar (the
+        time with <strong>Marblo mode</strong> in the beginner-mode top bar (the
         same toggle also lives in Settings → Profile).{" "}
         <strong>Running agents keep running</strong> across the switch.
       </>
@@ -863,11 +863,11 @@ const EN: GuideContent = {
     },
     {
       id: "first",
-      title: "2. First launch — simple mode vs advanced mode",
+      title: "2. First launch — beginner mode vs Marblo mode",
       body: (
         <div className={`${P} space-y-2`}>
           <p>
-            A fresh install opens in <strong>simple mode</strong>: no tabs, no
+            A fresh install opens in <strong>beginner mode</strong>: no tabs, no
             board, just one orchestrator chat. Type what you want and you reach
             a first result from there. Progress shows up under the chat as a
             live strip with a mini board and the agents at work.
@@ -879,17 +879,17 @@ const EN: GuideContent = {
           </p>
           <ul className="list-disc space-y-1 pl-5">
             <li>
-              Simple → advanced: <strong>Advanced mode</strong> in the top bar.
+              Beginner → Marblo: <strong>Marblo mode</strong> in the top bar.
               You also get a one-time invitation once your first work finishes.
             </li>
             <li>
-              Advanced → simple: <strong>💬 Simple mode</strong> in the header.
-              The same toggle is in Settings → Profile.
+              Marblo → beginner: <strong>💬 Beginner mode</strong> in the
+              header. The same toggle is in Settings → Profile.
             </li>
           </ul>
           <Note>
             The mode changes <strong>only what is shown</strong>. Running agents
-            and tickets are untouched, and coming back to advanced mode restores
+            and tickets are untouched, and coming back to Marblo mode restores
             the tabs you had open.
           </Note>
         </div>

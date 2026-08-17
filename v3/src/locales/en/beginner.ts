@@ -10,9 +10,9 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.topbar.openFolder": "Open my folder",
   "beginner.topbar.changeFolder": "Change folder",
   "beginner.topbar.settings": "Settings",
-  "beginner.topbar.advanced": "Advanced mode",
+  "beginner.topbar.advanced": "Marblo mode",
   "beginner.topbar.advancedHint":
-    "Takes you to the full screen with the board, worktrees and model picker. You can come back any time from Settings.",
+    "Takes you to Marblo mode with the board, worktrees and model picker. You can come back to beginner mode any time from Settings.",
 
   // ── Curated tab bar (lib/beginnerTabs) ──────────────────────────────────
   "beginner.tabs.label": "Views",
@@ -257,15 +257,16 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.taskDetail.time.daysAgo": "{n}d ago",
 
   // ── Promotion modal ─────────────────────────────────────────────────────
-  "beginner.promote.title": "Ready for the real thing?",
+  "beginner.promote.title": "Try switching to Marblo mode?",
   "beginner.promote.body":
-    "You've got the hang of it. Advanced mode unlocks all of this.",
+    "You've got the hang of it. Marblo mode unlocks all of this.",
   "beginner.promote.point1": "Direct several agents yourself from the board",
   "beginner.promote.point2": "Review changed code through worktrees and diffs",
   "beginner.promote.point3": "Pick a model per ticket when you spawn",
-  "beginner.promote.cta": "Switch to advanced",
+  "beginner.promote.cta": "Switch to Marblo mode",
   "beginner.promote.later": "Not yet",
-  "beginner.promote.revertHint": "You can come back any time from Settings.",
+  "beginner.promote.revertHint":
+    "You can come back to beginner mode any time from Settings.",
   "beginner.promote.reason.completed": "You finished {count} tickets",
   "beginner.promote.reason.merged": "You landed your first merge",
   "beginner.promote.reason.days": "You've been using Marblo for a few days",
@@ -286,21 +287,21 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.tour.live.title": "Progress shows up here",
   "beginner.tour.live.body":
     "Once you send a request, this line keeps showing how many tickets exist and how far along they are. Click a card to see what it is; who's on it shows up in the team column on the right.",
-  "beginner.tour.advanced.title": "Switch to advanced mode any time",
+  "beginner.tour.advanced.title": "Switch to Marblo mode any time",
   "beginner.tour.advanced.body":
-    "Need the board, worktrees or the model picker? Click here. Settings brings you back.",
+    "Need the board, worktrees or the model picker? Click here. Settings brings you back to beginner mode.",
 
   // ── Settings toggle ─────────────────────────────────────────────────────
   "beginner.settings.heading": "Beginner mode",
   "beginner.settings.body":
     "Hides the tabs, board and worktrees and shows one big chat instead. Good when you're new, or when you just want to hand work off quietly.",
   "beginner.settings.on": "Turn on beginner mode",
-  "beginner.settings.off": "Switch to advanced",
+  "beginner.settings.off": "Switch to Marblo mode",
   "beginner.settings.restartHint":
     "The whole screen changes. Agents already running keep going.",
-  "beginner.topbar.simple": "Simple mode",
+  "beginner.topbar.simple": "Beginner mode",
   "beginner.topbar.simpleHint":
-    "Folds away tabs and the board, leaving one big chat. You can switch back any time from Settings.",
+    "Folds away tabs and the board, leaving one big chat. You can switch back to Marblo mode any time from Settings.",
   "beginner.settings.replayTour": "Replay the first-run walkthrough",
   "beginner.settings.replayTourDone":
     "The walkthrough will show up next time you open the beginner screen.",
