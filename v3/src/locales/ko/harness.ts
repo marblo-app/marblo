@@ -50,6 +50,15 @@ export const harness = {
     "git remote 가 없거나 자동으로 도출되지 않은 경우 repo URL 을 직접 입력해 연결할 수 있습니다.",
   "harness.conn.branchPlaceholder": "기본 브랜치 (선택, 예: main)",
   "harness.conn.manualConnect": "수동 연결",
+  // 리포 연결 후 티켓별 독립 워크트리 안내 (YTpcEK5Ow5LIldkJJzQc)
+  "harness.conn.worktreeGuide.badge": "독립 워크트리",
+  "harness.conn.worktreeGuide.title": "티켓별 독립 워크트리",
+  "harness.conn.worktreeGuide.body":
+    "이제 에이전트가 티켓별로 독립 워크트리에서 작업합니다. 서로 충돌 없이 병렬로 진행됩니다.",
+  "harness.conn.worktreeGuide.popupTitle": "독립 워크트리로 작업합니다",
+  "harness.conn.worktreeGuide.popupBody":
+    "깃 리포가 연결되었습니다. 이제 에이전트가 티켓별로 독립 워크트리에서 작업합니다(충돌 없이 병렬).",
+  "harness.conn.worktreeGuide.gotIt": "확인",
   // Permission state labels (enum → display)
   "harness.perm.unknown": "미확인",
   "harness.perm.pending": "대기",

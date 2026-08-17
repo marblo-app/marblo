@@ -53,6 +53,15 @@ export const harness: Record<keyof typeof koHarness, string> = {
     "If there's no git remote or it can't be derived automatically, you can connect by entering the repo URL directly.",
   "harness.conn.branchPlaceholder": "Default branch (optional, e.g. main)",
   "harness.conn.manualConnect": "Connect manually",
+  // After repo connect: per-ticket independent worktree notice (YTpcEK5Ow5LIldkJJzQc)
+  "harness.conn.worktreeGuide.badge": "Independent worktrees",
+  "harness.conn.worktreeGuide.title": "Per-ticket independent worktrees",
+  "harness.conn.worktreeGuide.body":
+    "Agents now work in an independent worktree per ticket, so they can run in parallel without colliding.",
+  "harness.conn.worktreeGuide.popupTitle": "Work happens in independent worktrees",
+  "harness.conn.worktreeGuide.popupBody":
+    "Git repo connected. Agents now work in an independent worktree per ticket (parallel, without collisions).",
+  "harness.conn.worktreeGuide.gotIt": "Got it",
   // Permission state labels (enum → display)
   "harness.perm.unknown": "Unknown",
   "harness.perm.pending": "Pending",

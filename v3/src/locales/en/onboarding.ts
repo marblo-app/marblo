@@ -360,6 +360,12 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
     "One first ticket and you're done",
   "onboarding.startHere.banner.cta": "Open Start here",
   "onboarding.startHere.banner.dismiss": "Dismiss (don't show this again)",
+  // Recommended: connect git repo → per-ticket independent worktrees (YTpcEK5Ow5LIldkJJzQc)
+  "onboarding.startHere.worktreeRecommend.badge": "Recommended",
+  "onboarding.startHere.worktreeRecommend.title":
+    "Connect a git repo for automatic independent worktrees",
+  "onboarding.startHere.worktreeRecommend.body":
+    "When you connect a git repo on the Harness tab, agents automatically work in an independent worktree per ticket (parallel, without collisions).",
 
   // — Start Here tab: connecting other vendors (XHXSIdPN) —
   // No vendor name or model id lives here: the list is derived from the model
