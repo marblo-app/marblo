@@ -952,8 +952,8 @@ export function quickLaneVendorCatalog(): QuickLaneVendorGroup[] {
     // 그때 조용히 첫 하네스로 뭉뚱그리지 않도록 여기서 갈라 준다.
     const harnesses = [...new Set(entries.map((e) => e.harness))];
     for (const harness of harnesses) {
-      const models = entries
-        .filter((e) => e.harness === harness)
+      const groupEntries = entries.filter((e) => e.harness === harness);
+      const models = groupEntries
         .sort((a, b) => rank[b.capability] - rank[a.capability])
         .map<QuickLaneModelOption>((entry) => ({
           modelId: entry.id,
@@ -973,7 +973,7 @@ export function quickLaneVendorCatalog(): QuickLaneVendorGroup[] {
       // 그룹의 필수 env 키 = 소속 모델들이 요구하는 키의 합집합. 오늘 한 벤더의
       // 행들은 같은 프로파일을 쓰므로 합집합이 곧 각 행의 키다.
       const envKeys = new Set<string>();
-      for (const entry of entries) {
+      for (const entry of groupEntries) {
         for (const key of vendorEnvSecretKeys(entry.id)) envKeys.add(key);
       }
 

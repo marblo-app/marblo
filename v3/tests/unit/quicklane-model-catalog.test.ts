@@ -13,6 +13,7 @@ import {
   MODEL_REGISTRY,
   HARNESS_NATIVE_VENDOR,
   vendorEnvSecretKeys,
+  vendorEnvSecretRef,
 } from "../../electron/model-registry";
 import {
   buildModelPin,
@@ -97,10 +98,33 @@ describe("퀵레인 모델 카탈로그 ↔ 레지스트리", () => {
   it("★env-swap 벤더는 필요한 env 키 이름을 싣는다(값은 절대 아님)", () => {
     const zai = catalog.find((g) => g.vendor === "zai");
     const minimax = catalog.find((g) => g.vendor === "minimax");
+    const upstage = catalog.find((g) => g.vendor === "upstage");
     expect(zai?.requiredEnvKeys).toEqual(["ZAI_API_KEY"]);
     expect(minimax?.requiredEnvKeys).toEqual(["MINIMAX_API_KEY"]);
+    expect(upstage?.requiredEnvKeys).toEqual(["UPSTAGE_API_KEY"]);
     // 키 이름은 레지스트리 프로파일에서 파생돼야 한다(별도 표 금지).
     expect(zai?.requiredEnvKeys).toEqual(vendorEnvSecretKeys("glm-5.2"));
+    expect(upstage?.requiredEnvKeys).toEqual(
+      vendorEnvSecretKeys("solar-pro4")
+    );
+  });
+
+  it("★각 vendor+harness 그룹의 requiredEnvKeys 는 envProfile ${...} 참조에서 파생된다", () => {
+    for (const group of catalog) {
+      const expected = new Set<string>();
+      for (const entry of activeEntries) {
+        if (entry.provider !== group.vendor || entry.harness !== group.harness) {
+          continue;
+        }
+        for (const value of Object.values(entry.envProfile ?? {})) {
+          const ref = vendorEnvSecretRef(value);
+          if (ref) expected.add(ref);
+        }
+      }
+      expect(group.requiredEnvKeys, `${group.vendor}/${group.harness}`).toEqual(
+        [...expected].sort()
+      );
+    }
   });
 
   it("★네이티브 벤더는 env 키를 요구하지 않는다(CLI 자기 로그인)", () => {
