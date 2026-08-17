@@ -258,7 +258,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
     }
   });
 
-  test("G3b 이미 연결되고 폴더가 있는 첫 대화 화면에도 티켓 생성 데모 CTA가 먼저 보인다", async () => {
+  test("G3b 오케와 폴더가 완전 연결된 대화 화면에는 데모 CTA가 뜨지 않는다", async () => {
     const cr = await launchCleanRoom({
       claude: "missing",
       codex: "ready",
@@ -272,32 +272,23 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       expect(await cr.page.getByTestId("beginner-connect").count()).toBe(0);
       expect(await cr.page.getByTestId("beginner-folder-gate").count()).toBe(0);
 
-      const demo = cr.page.getByTestId("beginner-chat-demo-cta");
-      await expect(demo).toBeVisible();
-      await expect(demo.getByTestId("onramp-decompose-input")).toBeVisible();
-      await expect(demo.getByTestId("onramp-decompose-cta")).toContainText(
-        /데모로 티켓 만들어보기|Make demo tickets/,
-      );
-
-      const demoBox = await demo.boundingBox();
-      const askBox = await cr.page.getByTestId("beginner-first-ask").boundingBox();
-      expect(demoBox, "연결 완료 첫 화면 데모 CTA 영역이 렌더되지 않았다").toBeTruthy();
+      await expect(cr.page.getByTestId("beginner-chat-demo-cta")).toHaveCount(0);
+      await expect(cr.page.getByTestId("onramp-decompose-input")).toHaveCount(0);
+      const askBox = await cr.page
+        .getByTestId("beginner-first-ask")
+        .boundingBox();
       expect(askBox, "첫 요청 입력 영역이 렌더되지 않았다").toBeTruthy();
-      expect(
-        demoBox!.y,
-        "연결 완료 첫 화면에서 데모 CTA 가 첫 요청 입력보다 아래에 있다",
-      ).toBeLessThan(askBox!.y);
 
-      await cr.shot("G3b-connected-chat-demo-cta");
+      await cr.shot("G3b-connected-chat-no-demo-cta");
     } finally {
       await cr.close();
     }
   });
 
-  test("G3c 데모 분해 한도 화면에서 다시 시작하면 입력칸이 돌아오고 데모 티켓을 정리한다", async () => {
+  test("G3c 연결 전 데모 분해 한도 화면에서 다시 시작하면 입력칸이 돌아오고 데모 티켓을 정리한다", async () => {
     const cr = await launchCleanRoom({
       claude: "missing",
-      codex: "ready",
+      codex: "missing",
       beginnerShell: true,
     });
     try {
@@ -312,8 +303,8 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       await cr.page.reload();
       await cr.page.waitForLoadState("domcontentloaded");
       await passFirstRunModals(cr.page);
-      await injectProject(cr.page, cr.projectDir);
-      await chatReady(cr.page);
+      await waitForAppShell(cr.page);
+      await expect(cr.page.getByTestId("beginner-connect")).toBeVisible();
       await cr.page.evaluate(() => {
         const hatch = (
           window as unknown as {
@@ -335,7 +326,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
           tasks: [
             {
               id: "demo-a",
-              projectId: "cleanroom-project",
+              projectId: "",
               title: "데모 티켓 A",
               description: "",
               status: "TODO",
@@ -355,7 +346,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
             },
             {
               id: "real-a",
-              projectId: "cleanroom-project",
+              projectId: "",
               title: "실제 티켓 A",
               description: "",
               status: "TODO",
@@ -384,6 +375,9 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
         });
       });
 
+      await expect(
+        cr.page.getByTestId("beginner-firstscreen-demo"),
+      ).toBeVisible();
       await expect(cr.page.getByTestId("onramp-decompose-limit")).toBeVisible();
       await expect(
         cr.page.getByTestId("onramp-decompose-limit-cta"),
