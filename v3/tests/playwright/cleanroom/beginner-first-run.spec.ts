@@ -258,7 +258,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
     }
   });
 
-  test("G3b 이미 연결되고 폴더가 있는 첫 대화 화면에도 티켓 생성 데모 CTA가 먼저 보인다", async () => {
+  test("G3b 오케와 폴더가 완전 연결된 대화 화면에는 데모 CTA가 뜨지 않는다", async () => {
     const cr = await launchCleanRoom({
       claude: "missing",
       codex: "ready",
@@ -272,23 +272,150 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       expect(await cr.page.getByTestId("beginner-connect").count()).toBe(0);
       expect(await cr.page.getByTestId("beginner-folder-gate").count()).toBe(0);
 
-      const demo = cr.page.getByTestId("beginner-chat-demo-cta");
-      await expect(demo).toBeVisible();
-      await expect(demo.getByTestId("onramp-decompose-input")).toBeVisible();
-      await expect(demo.getByTestId("onramp-decompose-cta")).toContainText(
-        /데모로 티켓 만들어보기|Make demo tickets/,
+      await expect(cr.page.getByTestId("beginner-chat-demo-cta")).toHaveCount(0);
+      await expect(cr.page.getByTestId("onramp-decompose-input")).toHaveCount(0);
+      const askBox = await cr.page
+        .getByTestId("beginner-first-ask")
+        .boundingBox();
+      expect(askBox, "첫 요청 입력 영역이 렌더되지 않았다").toBeTruthy();
+
+      await cr.shot("G3b-connected-chat-no-demo-cta");
+    } finally {
+      await cr.close();
+    }
+  });
+
+  test("G3c 연결 전 데모 분해 한도 화면에서 다시 시작하면 입력칸이 돌아오고 데모 티켓을 정리한다", async () => {
+    const cr = await launchCleanRoom({
+      claude: "missing",
+      codex: "missing",
+      beginnerShell: true,
+    });
+    try {
+      await passFirstRunModals(cr.page);
+      await waitForAppShell(cr.page);
+      await cr.page.evaluate(() => {
+        localStorage.setItem(
+          "marblo.onramp.l0",
+          JSON.stringify({ decomposeCount: 3, demoTicketCount: 21 }),
+        );
+      });
+      await cr.page.reload();
+      await cr.page.waitForLoadState("domcontentloaded");
+      await passFirstRunModals(cr.page);
+      await waitForAppShell(cr.page);
+      await expect(cr.page.getByTestId("beginner-connect")).toBeVisible();
+      await cr.page.evaluate(() => {
+        const hatch = (
+          window as unknown as {
+            __marbloTest?: {
+              stores: {
+                task: {
+                  getState: () => {
+                    tasks: Array<Record<string, unknown>>;
+                  };
+                  setState: (s: Record<string, unknown>) => void;
+                };
+              };
+            };
+          }
+        ).__marbloTest;
+        if (!hatch) throw new Error("cleanroom test hatch is unavailable");
+        const taskStore = hatch.stores.task;
+        taskStore.setState({
+          tasks: [
+            {
+              id: "demo-a",
+              projectId: "",
+              title: "데모 티켓 A",
+              description: "",
+              status: "TODO",
+              dependsOn: [],
+              dependsOnCompleted: true,
+              priority: 1,
+              role: "frontend",
+              claimedBy: null,
+              claimedAt: null,
+              scope: [],
+              comment: "",
+              prUrl: "",
+              hasPmFeedback: false,
+              origin: "onramp_demo",
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+            {
+              id: "real-a",
+              projectId: "",
+              title: "실제 티켓 A",
+              description: "",
+              status: "TODO",
+              dependsOn: [],
+              dependsOnCompleted: true,
+              priority: 1,
+              role: "frontend",
+              claimedBy: null,
+              claimedAt: null,
+              scope: [],
+              comment: "",
+              prUrl: "",
+              hasPmFeedback: false,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+          ],
+          updateTask: async (id: string, data: Record<string, unknown>) => {
+            const current = taskStore.getState().tasks;
+            taskStore.setState({
+              tasks: current.map((task) =>
+                task.id === id ? { ...task, ...data } : task,
+              ),
+            });
+          },
+        });
+      });
+
+      await expect(
+        cr.page.getByTestId("beginner-firstscreen-demo"),
+      ).toBeVisible();
+      await expect(cr.page.getByTestId("onramp-decompose-limit")).toBeVisible();
+      await expect(
+        cr.page.getByTestId("onramp-decompose-limit-cta"),
+      ).toBeVisible();
+      await cr.page.getByTestId("onramp-decompose-restart").click();
+
+      await expect(cr.page.getByTestId("onramp-decompose-input")).toBeVisible();
+      await expect(cr.page.getByTestId("onramp-decompose-limit")).toHaveCount(0);
+      const resetRecord = await cr.page.evaluate(() =>
+        JSON.parse(localStorage.getItem("marblo.onramp.l0") ?? "{}"),
+      );
+      expect(resetRecord).toEqual({ decomposeCount: 0, demoTicketCount: 0 });
+      const tasks = await cr.page.evaluate(() => {
+        const hatch = (
+          window as unknown as {
+            __marbloTest?: {
+              stores: {
+                task: {
+                  getState: () => {
+                    tasks: Array<Record<string, unknown>>;
+                  };
+                };
+              };
+            };
+          }
+        ).__marbloTest;
+        return hatch?.stores.task.getState().tasks ?? [];
+      });
+      expect(tasks.find((task) => task.id === "demo-a")?.deleted).toBe(true);
+      expect(tasks.find((task) => task.id === "real-a")?.deleted).not.toBe(
+        true,
       );
 
-      const demoBox = await demo.boundingBox();
-      const askBox = await cr.page.getByTestId("beginner-first-ask").boundingBox();
-      expect(demoBox, "연결 완료 첫 화면 데모 CTA 영역이 렌더되지 않았다").toBeTruthy();
-      expect(askBox, "첫 요청 입력 영역이 렌더되지 않았다").toBeTruthy();
-      expect(
-        demoBox!.y,
-        "연결 완료 첫 화면에서 데모 CTA 가 첫 요청 입력보다 아래에 있다",
-      ).toBeLessThan(askBox!.y);
-
-      await cr.shot("G3b-connected-chat-demo-cta");
+      await cr.page
+        .getByTestId("onramp-decompose-input")
+        .fill("검색 화면을 다시 만들어줘");
+      await expect(cr.page.getByTestId("onramp-decompose-cta")).toBeEnabled();
+      await cr.shot("G3c-onramp-demo-restarted");
     } finally {
       await cr.close();
     }
