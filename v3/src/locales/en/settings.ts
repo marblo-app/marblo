@@ -188,4 +188,6 @@ export const settings: Record<keyof typeof koSettings, string> = {
     "GLM Coding Plan subscription key. Points the claude harness at the Z.ai endpoint.",
   "settings.vendorKeys.hint.minimax":
     "MiniMax Token Plan subscription key. Points the claude harness at the MiniMax endpoint.",
+  "settings.vendorKeys.hint.upstage":
+    "Upstage Solar Pro 4 API key. Points the Codex harness at the OpenAI-compatible Upstage endpoint.",
 };

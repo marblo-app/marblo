@@ -36,7 +36,7 @@ const ORCHESTRATOR_ROW_IDS = ["cli-claude-code", "cli-codex"];
 
 /** 렌더러가 받는 모양(available/missingEnvKeys 는 main 이 얹는다)으로 접는다. */
 function catalogGroups(
-  presentEnv: Record<string, string> = {},
+  presentEnv: Record<string, string> = {}
 ): VendorCatalogGroupLike[] {
   return quickLaneVendorCatalog().map((g) => {
     const missingEnvKeys = g.requiredEnvKeys.filter((k) => !presentEnv[k]);
@@ -66,17 +66,15 @@ function input(over: Partial<VendorSetupInput> = {}): VendorSetupInput {
 /** 레지스트리에서 직접 뽑은 "env-swap 벤더" 집합 = envProfile 을 가진 행들의 벤더. */
 const ENV_SWAP_VENDORS = new Set(
   MODEL_REGISTRY.filter((m) => m.status === "active" && m.envProfile).map(
-    (m) => m.provider,
-  ),
+    (m) => m.provider
+  )
 );
 
 describe("vendorSetupCards — 레지스트리 파생", () => {
   it("활성 레지스트리 벤더를 하나도 빠뜨리지 않는다", () => {
     const cards = vendorSetupCards(catalogGroups(), input());
     const fromRegistry = new Set(
-      MODEL_REGISTRY.filter((m) => m.status === "active").map(
-        (m) => m.provider,
-      ),
+      MODEL_REGISTRY.filter((m) => m.status === "active").map((m) => m.provider)
     );
     expect(new Set(cards.map((c) => c.vendor))).toEqual(fromRegistry);
   });
@@ -87,7 +85,7 @@ describe("vendorSetupCards — 레지스트리 파생", () => {
         (m) =>
           m.status === "active" &&
           m.provider === card.vendor &&
-          m.harness === card.harness,
+          m.harness === card.harness
       ).map((m) => m.id);
       expect([...card.modelIds].sort()).toEqual([...expected].sort());
       // dispatch 예시는 반드시 실재하는 id 여야 한다(존재하지 않는 id 를 예시로
@@ -111,7 +109,7 @@ describe("vendorSetupCards — 레지스트리 파생", () => {
       .map((c) => c.vendor);
     // 오케 후보 = 그 하네스의 네이티브 벤더(claude→anthropic, codex→openai).
     expect(orchestratorVendors.sort()).toEqual(
-      [HARNESS_NATIVE_VENDOR.claude, HARNESS_NATIVE_VENDOR.gpt].sort(),
+      [HARNESS_NATIVE_VENDOR.claude, HARNESS_NATIVE_VENDOR.gpt].sort()
     );
     const shown = additionalVendorCards(cards).map((c) => c.vendor);
     for (const v of orchestratorVendors) expect(shown).not.toContain(v);
@@ -119,7 +117,7 @@ describe("vendorSetupCards — 레지스트리 파생", () => {
 
   it("자기 CLI 로 붙는 비-오케 벤더는 nativeCli 이고 ROWS 행을 물고 온다", () => {
     const native = vendorSetupCards(catalogGroups(), input()).filter(
-      (c) => c.kind === "nativeCli",
+      (c) => c.kind === "nativeCli"
     );
     expect(native.length).toBeGreaterThan(0);
     for (const card of native) {
@@ -134,7 +132,7 @@ describe("vendorSetupCards — 레지스트리 파생", () => {
 describe("상태 판정", () => {
   it("env-swap 벤더는 키가 채워지면 ready 로 바뀐다", () => {
     const before = additionalVendorCards(
-      vendorSetupCards(catalogGroups(), input()),
+      vendorSetupCards(catalogGroups(), input())
     ).filter((c) => c.kind === "envSwap");
     expect(before.length).toBeGreaterThan(0);
     for (const card of before) {
@@ -148,7 +146,7 @@ describe("상태 판정", () => {
       for (const key of vendorEnvSecretKeys(entry.id)) present[key] = "x";
     }
     const after = vendorSetupCards(catalogGroups(present), input()).filter(
-      (c) => c.kind === "envSwap",
+      (c) => c.kind === "envSwap"
     );
     for (const card of after) expect(card.status).toBe("ready");
   });
@@ -156,7 +154,7 @@ describe("상태 판정", () => {
   it("키체인 스냅샷이 process.env 판정을 이긴다(#624 로 등록한 키)", () => {
     const groups = catalogGroups(); // process.env 에는 아무 키도 없다
     const envSwap = vendorSetupCards(groups, input()).filter(
-      (c) => c.kind === "envSwap",
+      (c) => c.kind === "envSwap"
     );
     const target = envSwap[0];
     const cards = vendorSetupCards(
@@ -174,7 +172,7 @@ describe("상태 판정", () => {
             },
           ],
         },
-      }),
+      })
     );
     const got = cards.find((c) => c.vendor === target.vendor);
     expect(got?.status).toBe("ready");
@@ -182,7 +180,7 @@ describe("상태 판정", () => {
     // 스냅샷에 없는 벤더는 카탈로그 판정 그대로 남는다.
     for (const other of envSwap.slice(1)) {
       expect(cards.find((c) => c.vendor === other.vendor)?.status).toBe(
-        "needsKey",
+        "needsKey"
       );
     }
   });
@@ -190,7 +188,7 @@ describe("상태 판정", () => {
   it("CLI 벤더는 프로브 결과에 따라 설치/로그인/사용가능으로 갈린다", () => {
     const groups = catalogGroups();
     const nativeCard = vendorSetupCards(groups, input()).find(
-      (c) => c.kind === "nativeCli",
+      (c) => c.kind === "nativeCli"
     );
     const rowId = nativeCard!.cliRowId!;
 
@@ -203,28 +201,28 @@ describe("상태 판정", () => {
       checking?: boolean;
     }) =>
       vendorSetupCards(groups, input({ cliStates: { [rowId]: state } })).find(
-        (c) => c.cliRowId === rowId,
+        (c) => c.cliRowId === rowId
       )!.status;
 
     expect(statusWith({ installed: false, authenticated: false })).toBe(
-      "needsInstall",
+      "needsInstall"
     );
     expect(statusWith({ installed: true, authenticated: false })).toBe(
-      "needsLogin",
+      "needsLogin"
     );
     expect(statusWith({ installed: true, authenticated: true })).toBe("ready");
     // 프로브 중에는 이전 결과로 단정하지 않는다.
     expect(
-      statusWith({ installed: false, authenticated: false, checking: true }),
+      statusWith({ installed: false, authenticated: false, checking: true })
     ).toBe("unknown");
   });
 
   it("vendorReadyCount 는 ready 카드만 센다", () => {
     const cards = additionalVendorCards(
-      vendorSetupCards(catalogGroups(), input()),
+      vendorSetupCards(catalogGroups(), input())
     );
     expect(vendorReadyCount(cards)).toBe(
-      cards.filter((c) => c.status === "ready").length,
+      cards.filter((c) => c.status === "ready").length
     );
   });
 });
@@ -240,10 +238,28 @@ describe("상태 판정", () => {
 describe("envSwapVendorCards — 하네스 탭 env-swap 섹션", () => {
   it("레지스트리의 env-swap 벤더 전부, 그것만 담는다", () => {
     const cards = envSwapVendorCards(
-      vendorSetupCards(catalogGroups(), input()),
+      vendorSetupCards(catalogGroups(), input())
     );
     expect(new Set(cards.map((c) => c.vendor))).toEqual(ENV_SWAP_VENDORS);
     expect(cards.length).toBeGreaterThan(0);
+  });
+
+  it("Solar Pro 카드도 레지스트리 파생으로 노출된다", () => {
+    const solar = envSwapVendorCards(
+      vendorSetupCards(catalogGroups(), input())
+    ).find((c) => c.vendor === "upstage");
+    expect(solar).toMatchObject({
+      label: "Upstage Solar",
+      harness: "gpt",
+      command: "codex",
+      kind: "envSwap",
+      status: "needsKey",
+      requiredEnvKeys: ["UPSTAGE_API_KEY"],
+      missingEnvKeys: ["UPSTAGE_API_KEY"],
+      modelIds: ["solar-pro4"],
+      exampleModelId: "solar-pro4",
+      cliRowId: null,
+    });
   });
 
   it("★설치형 CLI 벤더는 하나도 안 들어온다(설치 버튼 오분류 방지)", () => {
@@ -267,13 +283,13 @@ describe("envSwapVendorCards — 하네스 탭 env-swap 섹션", () => {
 
   it("각 카드가 그 벤더의 활성 모델 id 를 그대로 물고 온다(지원 모델 표기)", () => {
     for (const card of envSwapVendorCards(
-      vendorSetupCards(catalogGroups(), input()),
+      vendorSetupCards(catalogGroups(), input())
     )) {
       const expected = MODEL_REGISTRY.filter(
         (m) =>
           m.status === "active" &&
           m.provider === card.vendor &&
-          m.harness === card.harness,
+          m.harness === card.harness
       ).map((m) => m.id);
       expect(card.modelIds.length).toBeGreaterThan(0);
       expect([...card.modelIds].sort()).toEqual([...expected].sort());
@@ -282,7 +298,7 @@ describe("envSwapVendorCards — 하네스 탭 env-swap 섹션", () => {
 
   it("키가 채워지면 준비상태가 ready 로 바뀐다(설정 #624 등록 반영)", () => {
     const before = envSwapVendorCards(
-      vendorSetupCards(catalogGroups(), input()),
+      vendorSetupCards(catalogGroups(), input())
     );
     for (const card of before) expect(card.status).toBe("needsKey");
 
@@ -291,7 +307,7 @@ describe("envSwapVendorCards — 하네스 탭 env-swap 섹션", () => {
       for (const key of vendorEnvSecretKeys(entry.id)) present[key] = "x";
     }
     const after = envSwapVendorCards(
-      vendorSetupCards(catalogGroups(present), input()),
+      vendorSetupCards(catalogGroups(present), input())
     );
     expect(after.length).toBe(before.length);
     for (const card of after) {
@@ -304,10 +320,10 @@ describe("envSwapVendorCards — 하네스 탭 env-swap 섹션", () => {
     const cards = vendorSetupCards(catalogGroups(), input());
     const target = envSwapVendorCards(cards)[0];
     const stripped = cards.map((c) =>
-      c.vendor === target.vendor ? { ...c, modelIds: [] } : c,
+      c.vendor === target.vendor ? { ...c, modelIds: [] } : c
     );
     expect(envSwapVendorCards(stripped).map((c) => c.vendor)).not.toContain(
-      target.vendor,
+      target.vendor
     );
   });
 });

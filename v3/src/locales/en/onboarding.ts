@@ -305,7 +305,8 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
     "Watch a chat turn into tickets agents actually pick up",
   "onboarding.startHere.value.body":
     "The video on the left is a preview. Use the button for the interactive demo: request → ticket split → assignment → parallel work. After you connect the CLI and your account, the same flow runs on your project with real terminals and worktrees.",
-  "onboarding.startHere.value.playInteractive": "Try creating tickets from chat",
+  "onboarding.startHere.value.playInteractive":
+    "Try creating tickets from chat",
   "onboarding.startHere.value.zeroCost":
     "No CLI runs, AI calls, or billing — just the chat → ticket flow",
   "onboarding.startHere.activation.kicker": "CLI connect + account link",
@@ -392,6 +393,12 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   // {keys} = env key NAMES only — values never reach the renderer.
   "onboarding.startHere.vendors.key.hint":
     "Keys needed: {keys} — stored encrypted in the OS keychain and never shown back on screen.",
+  "onboarding.startHere.vendors.key.placeholder": "Paste {key}",
+  "onboarding.startHere.vendors.key.save": "Save key",
+  "onboarding.startHere.vendors.key.saving": "Saving...",
+  "onboarding.startHere.vendors.key.saved": "Key saved securely.",
+  "onboarding.startHere.vendors.key.error": "Failed to save the key.",
+  "onboarding.startHere.vendors.key.settings": "Advanced settings",
   "onboarding.startHere.vendors.key.cta": "Add the key in Settings",
   "onboarding.startHere.vendors.key.recheck": "Re-check",
   "onboarding.startHere.vendors.key.ready":

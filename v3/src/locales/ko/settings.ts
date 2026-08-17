@@ -188,4 +188,6 @@ export const settings = {
     "GLM Coding Plan 구독키. claude 하네스를 Z.ai 엔드포인트로 붙입니다.",
   "settings.vendorKeys.hint.minimax":
     "MiniMax Token Plan 구독키. claude 하네스를 MiniMax 엔드포인트로 붙입니다.",
+  "settings.vendorKeys.hint.upstage":
+    "Upstage Solar Pro 4 API 키입니다. Codex 하네스를 OpenAI 호환 Upstage 엔드포인트로 붙입니다.",
 };

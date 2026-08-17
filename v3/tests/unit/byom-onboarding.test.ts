@@ -62,7 +62,7 @@ const ORCHESTRATOR_ROW_IDS = ["cli-claude-code", "cli-codex"];
 
 /** 렌더러가 받는 모양으로 접은 실제 카탈로그(available/missing 은 main 이 얹는다). */
 function catalogGroups(
-  presentEnv: Record<string, string> = {},
+  presentEnv: Record<string, string> = {}
 ): VendorCatalogGroupLike[] {
   return quickLaneVendorCatalog().map((g) => {
     const missingEnvKeys = g.requiredEnvKeys.filter((k) => !presentEnv[k]);
@@ -149,10 +149,26 @@ describe("byomOptions — 목록", () => {
     expect(options.length).toBeGreaterThan(0); // 대안이 실제로 존재한다
   });
 
+  it("시작하기 BYOM 목록에 Solar Pro가 포함되고 UPSTAGE_API_KEY 입력 대상으로 선다", () => {
+    const solar = byomOptions(realCards(), OPTION_VALUES).find(
+      (o) => o.vendor === "upstage"
+    );
+    expect(solar).toMatchObject({
+      label: "Upstage Solar",
+      kind: "envSwap",
+      status: "needsKey",
+      requiredEnvKeys: ["UPSTAGE_API_KEY"],
+      missingEnvKeys: ["UPSTAGE_API_KEY"],
+      modelIds: ["solar-pro4"],
+      exampleModelId: "solar-pro4",
+      canHostOrchestrator: false,
+    });
+  });
+
   it("모델 행이 없는 벤더는 카드가 서지 않는다", () => {
     const options = byomOptions(
       [card({ vendor: "empty", modelIds: [], exampleModelId: "" })],
-      OPTION_VALUES,
+      OPTION_VALUES
     );
     expect(options).toEqual([]);
   });
@@ -164,12 +180,12 @@ describe("byomOptions — 목록", () => {
         card({ vendor: "hosted", modelIds: [pinned[0]], kind: "nativeCli" }),
         card({ vendor: "worker", modelIds: ["not-in-any-selector"] }),
       ],
-      OPTION_VALUES,
+      OPTION_VALUES
     ).filter((o) => o.vendor === "hosted");
     expect(hosted.canHostOrchestrator).toBe(true);
     const worker = byomOptions(
       [card({ vendor: "worker", modelIds: ["not-in-any-selector"] })],
-      OPTION_VALUES,
+      OPTION_VALUES
     )[0];
     expect(worker.canHostOrchestrator).toBe(false);
   });
@@ -201,7 +217,7 @@ describe("byomOptions — 목록", () => {
     // (파생이지 리터럴이 아님을 증명하는 축).
     const closed = byomOptions(
       [grok],
-      OPTION_VALUES.filter((v) => v !== "grok"),
+      OPTION_VALUES.filter((v) => v !== "grok")
     )[0];
     expect(closed.canHostOrchestrator).toBe(false);
   });
@@ -211,7 +227,7 @@ describe("byomOptions — 목록", () => {
     // `claude` 칸의 주인은 Anthropic 계정이지, 그 바이너리를 빌려 쓰는 벤더가 아니다.
     const glmLike = card({ harness: "claude", command: "claude" });
     expect(
-      byomOptions([glmLike], ["claude", "codex"])[0].canHostOrchestrator,
+      byomOptions([glmLike], ["claude", "codex"])[0].canHostOrchestrator
     ).toBe(false);
   });
 
@@ -225,11 +241,11 @@ describe("byomOptions — 목록", () => {
     //   분기라 함께 자동으로 옳아진다 — 걷어낼 문구가 없다.
     // 모든 벤더 키가 등록되고 모든 CLI 가 로그인된 최상의 조건을 만든다.
     const cliStates = Object.fromEntries(
-      CLI_ROWS.map((r) => [r.id, { installed: true, authenticated: true }]),
+      CLI_ROWS.map((r) => [r.id, { installed: true, authenticated: true }])
     );
     const groups = catalogGroups();
     const allKeys = Object.fromEntries(
-      groups.flatMap((g) => g.requiredEnvKeys.map((k) => [k, "x"])),
+      groups.flatMap((g) => g.requiredEnvKeys.map((k) => [k, "x"]))
     );
     const cards = vendorSetupCards(catalogGroups(allKeys), {
       cliRows: CLI_ROWS,
@@ -281,13 +297,13 @@ describe("byomGateContribution — 넘길 수 있는 단계만 넘긴다", () =>
 
   it("오케 가능 env-swap 벤더의 키가 서면 ①②단계를 대신 만족시킨다", () => {
     expect(
-      byomGateContribution([option({ kind: "envSwap", status: "ready" })]),
+      byomGateContribution([option({ kind: "envSwap", status: "ready" })])
     ).toEqual({ installed: true, ready: true });
   });
 
   it("키가 없으면 아무 단계도 만족시키지 않는다", () => {
     expect(
-      byomGateContribution([option({ kind: "envSwap", status: "needsKey" })]),
+      byomGateContribution([option({ kind: "envSwap", status: "needsKey" })])
     ).toEqual({ installed: false, ready: false });
   });
 
@@ -295,14 +311,14 @@ describe("byomGateContribution — 넘길 수 있는 단계만 넘긴다", () =>
     expect(
       byomGateContribution([
         option({ kind: "nativeCli", status: "needsLogin" }),
-      ]),
+      ])
     ).toEqual({ installed: true, ready: false });
   });
 
   it("네이티브 CLI 벤더: 미설치·프로브 전에는 아무것도 만족하지 않는다", () => {
     for (const status of ["needsInstall", "unknown"] as const) {
       expect(
-        byomGateContribution([option({ kind: "nativeCli", status })]),
+        byomGateContribution([option({ kind: "nativeCli", status })])
       ).toEqual({ installed: false, ready: false });
     }
   });
@@ -312,7 +328,7 @@ describe("byomGateContribution — 넘길 수 있는 단계만 넘긴다", () =>
       byomGateContribution([
         option({ status: "needsKey" }),
         option({ status: "ready" }),
-      ]).ready,
+      ]).ready
     ).toBe(true);
   });
 });
@@ -324,7 +340,7 @@ describe("byomHeadline / byomReadyCount — 화면 문구 선택", () => {
 
   it("준비됐지만 워커 전용이면 workerOnly", () => {
     expect(
-      byomHeadline([option({ status: "ready", canHostOrchestrator: false })]),
+      byomHeadline([option({ status: "ready", canHostOrchestrator: false })])
     ).toBe("workerOnly");
   });
 
@@ -338,7 +354,7 @@ describe("byomHeadline / byomReadyCount — 화면 문구 선택", () => {
       byomReadyCount([
         option({ status: "ready", canHostOrchestrator: false }),
         option({ status: "needsKey" }),
-      ]),
+      ])
     ).toBe(1);
   });
 });
@@ -388,7 +404,7 @@ describe("게이트 통합 — BYOM 축이 ①②단계를 연다", () => {
     expect(resumeStep(EMPTY_PROGRESS, live)).toBe("firstTicket");
     expect(isOnboardingComplete(EMPTY_PROGRESS, live)).toBe(false);
     expect(
-      isOnboardingComplete({ ...EMPTY_PROGRESS, done: ["firstTicket"] }, live),
+      isOnboardingComplete({ ...EMPTY_PROGRESS, done: ["firstTicket"] }, live)
     ).toBe(true);
   });
 });

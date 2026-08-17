@@ -539,7 +539,8 @@ export const onboarding = {
   "onboarding.startHere.banner.dismiss": "이 안내 닫기(다시 띄우지 않기)",
   // 권장: 깃 리포 연결 → 티켓별 독립 워크트리 (YTpcEK5Ow5LIldkJJzQc)
   "onboarding.startHere.worktreeRecommend.badge": "권장",
-  "onboarding.startHere.worktreeRecommend.title": "깃 리포를 연결하면 독립 워크트리가 자동입니다",
+  "onboarding.startHere.worktreeRecommend.title":
+    "깃 리포를 연결하면 독립 워크트리가 자동입니다",
   "onboarding.startHere.worktreeRecommend.body":
     "하네스 탭에서 깃 리포를 연결하면 에이전트가 티켓별로 독립 워크트리에서 자동으로 작업합니다(충돌 없이 병렬).",
 
@@ -568,6 +569,12 @@ export const onboarding = {
   // {keys} = 필요한 env 키 **이름**만. 값은 렌더러에 오지 않는다.
   "onboarding.startHere.vendors.key.hint":
     "필요한 키: {keys} — 값은 OS 키체인에 암호화 저장되고 화면으로 다시 나오지 않습니다.",
+  "onboarding.startHere.vendors.key.placeholder": "{key} 붙여넣기",
+  "onboarding.startHere.vendors.key.save": "키 저장",
+  "onboarding.startHere.vendors.key.saving": "저장 중...",
+  "onboarding.startHere.vendors.key.saved": "키를 안전 저장했습니다.",
+  "onboarding.startHere.vendors.key.error": "키 저장에 실패했습니다.",
+  "onboarding.startHere.vendors.key.settings": "고급 설정",
   "onboarding.startHere.vendors.key.cta": "설정에서 키 등록하기",
   "onboarding.startHere.vendors.key.recheck": "등록 상태 다시 확인",
   "onboarding.startHere.vendors.key.ready":
