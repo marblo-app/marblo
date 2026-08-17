@@ -14,6 +14,7 @@ import telemetry from "../../services/telemetryService";
 import { ORCHESTRATOR_CLI_IDS, ROWS } from "../../stores/cliSetupStore";
 import { useOnrampStore } from "../../stores/onrampStore";
 import { useProjectStore } from "../../stores/projectStore";
+import { useTaskStore } from "../../stores/taskStore";
 import { useOnboardingSetup } from "../../hooks/useOnboardingSetup";
 
 /**
@@ -70,11 +71,13 @@ export function OnrampDecomposeCard({
   const demoTicketCount = useOnrampStore((s) => s.demoTicketCount);
   const recordDecompose = useOnrampStore((s) => s.recordDecompose);
   const quota = useOnrampStore((s) => s.quota);
+  const resetOnramp = useOnrampStore((s) => s.reset);
 
   const [draft, setDraft] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [created, setCreated] = useState<TicketDraft[]>([]);
   const [fallback, setFallback] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   // 룰 모듈은 자기 문자열을 들고 있으므로(유저 어휘와 합성되기 때문 — 설계 §4-C
   // D1) 화면의 로케일을 인자로 넘긴다.
@@ -181,6 +184,37 @@ export function OnrampDecomposeCard({
     );
   }, [blockTarget]);
 
+  const restartDemo = useCallback(async () => {
+    if (resetting) return;
+    setResetting(true);
+    const now = new Date();
+    const taskStore = useTaskStore.getState();
+    const demoTasks = taskStore.tasks.filter(
+      (task) =>
+        task.projectId === projectId &&
+        task.origin === "onramp_demo" &&
+        task.deleted !== true,
+    );
+
+    await Promise.allSettled(
+      demoTasks.map((task) =>
+        taskStore.updateTask(task.id, {
+          deleted: true,
+          deletedAt: now,
+          deletedBy: "onramp_demo_reset",
+          deleteReason: "onramp_demo_restart",
+        }),
+      ),
+    );
+
+    resetOnramp();
+    setDraft("");
+    setCreated([]);
+    setFallback(false);
+    setPhase("idle");
+    setResetting(false);
+  }, [projectId, resetOnramp, resetting]);
+
   const preparing = setup.sampleStatus === "preparing" && !projectId;
   const working = phase === "working";
 
@@ -215,14 +249,25 @@ export function OnrampDecomposeCard({
           <p className="mt-1 text-[11px] leading-5 text-[#a6adc8]">
             {t("onramp.decompose.limitBody")}
           </p>
-          <button
-            type="button"
-            data-testid="onramp-decompose-limit-cta"
-            onClick={requestRun}
-            className="mt-2 inline-flex h-7 items-center rounded-md bg-[#89b4fa] px-2.5 text-xs font-semibold text-[#1e1e2e] transition-colors hover:bg-[#74c7ec]"
-          >
-            {t("onramp.decompose.limitCta")}
-          </button>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              data-testid="onramp-decompose-limit-cta"
+              onClick={requestRun}
+              className="inline-flex h-7 items-center rounded-md bg-[#89b4fa] px-2.5 text-xs font-semibold text-[#1e1e2e] transition-colors hover:bg-[#74c7ec]"
+            >
+              {t("onramp.decompose.limitCta")}
+            </button>
+            <button
+              type="button"
+              data-testid="onramp-decompose-restart"
+              onClick={() => void restartDemo()}
+              disabled={resetting}
+              className="inline-flex h-7 items-center rounded-md border border-[#45475a] px-2.5 text-xs font-medium text-[#cdd6f4] transition-colors hover:bg-[#313244] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {appLocale === "en" ? "Restart demo" : "데모 다시 시작하기"}
+            </button>
+          </div>
         </div>
       ) : (
         <>

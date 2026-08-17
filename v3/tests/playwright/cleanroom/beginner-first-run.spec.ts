@@ -294,6 +294,139 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
     }
   });
 
+  test("G3c 데모 분해 한도 화면에서 다시 시작하면 입력칸이 돌아오고 데모 티켓을 정리한다", async () => {
+    const cr = await launchCleanRoom({
+      claude: "missing",
+      codex: "ready",
+      beginnerShell: true,
+    });
+    try {
+      await passFirstRunModals(cr.page);
+      await waitForAppShell(cr.page);
+      await cr.page.evaluate(() => {
+        localStorage.setItem(
+          "marblo.onramp.l0",
+          JSON.stringify({ decomposeCount: 3, demoTicketCount: 21 }),
+        );
+      });
+      await cr.page.reload();
+      await cr.page.waitForLoadState("domcontentloaded");
+      await passFirstRunModals(cr.page);
+      await injectProject(cr.page, cr.projectDir);
+      await chatReady(cr.page);
+      await cr.page.evaluate(() => {
+        const hatch = (
+          window as unknown as {
+            __marbloTest?: {
+              stores: {
+                task: {
+                  getState: () => {
+                    tasks: Array<Record<string, unknown>>;
+                  };
+                  setState: (s: Record<string, unknown>) => void;
+                };
+              };
+            };
+          }
+        ).__marbloTest;
+        if (!hatch) throw new Error("cleanroom test hatch is unavailable");
+        const taskStore = hatch.stores.task;
+        taskStore.setState({
+          tasks: [
+            {
+              id: "demo-a",
+              projectId: "cleanroom-project",
+              title: "데모 티켓 A",
+              description: "",
+              status: "TODO",
+              dependsOn: [],
+              dependsOnCompleted: true,
+              priority: 1,
+              role: "frontend",
+              claimedBy: null,
+              claimedAt: null,
+              scope: [],
+              comment: "",
+              prUrl: "",
+              hasPmFeedback: false,
+              origin: "onramp_demo",
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+            {
+              id: "real-a",
+              projectId: "cleanroom-project",
+              title: "실제 티켓 A",
+              description: "",
+              status: "TODO",
+              dependsOn: [],
+              dependsOnCompleted: true,
+              priority: 1,
+              role: "frontend",
+              claimedBy: null,
+              claimedAt: null,
+              scope: [],
+              comment: "",
+              prUrl: "",
+              hasPmFeedback: false,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+          ],
+          updateTask: async (id: string, data: Record<string, unknown>) => {
+            const current = taskStore.getState().tasks;
+            taskStore.setState({
+              tasks: current.map((task) =>
+                task.id === id ? { ...task, ...data } : task,
+              ),
+            });
+          },
+        });
+      });
+
+      await expect(cr.page.getByTestId("onramp-decompose-limit")).toBeVisible();
+      await expect(
+        cr.page.getByTestId("onramp-decompose-limit-cta"),
+      ).toBeVisible();
+      await cr.page.getByTestId("onramp-decompose-restart").click();
+
+      await expect(cr.page.getByTestId("onramp-decompose-input")).toBeVisible();
+      await expect(cr.page.getByTestId("onramp-decompose-limit")).toHaveCount(0);
+      const resetRecord = await cr.page.evaluate(() =>
+        JSON.parse(localStorage.getItem("marblo.onramp.l0") ?? "{}"),
+      );
+      expect(resetRecord).toEqual({ decomposeCount: 0, demoTicketCount: 0 });
+      const tasks = await cr.page.evaluate(() => {
+        const hatch = (
+          window as unknown as {
+            __marbloTest?: {
+              stores: {
+                task: {
+                  getState: () => {
+                    tasks: Array<Record<string, unknown>>;
+                  };
+                };
+              };
+            };
+          }
+        ).__marbloTest;
+        return hatch?.stores.task.getState().tasks ?? [];
+      });
+      expect(tasks.find((task) => task.id === "demo-a")?.deleted).toBe(true);
+      expect(tasks.find((task) => task.id === "real-a")?.deleted).not.toBe(
+        true,
+      );
+
+      await cr.page
+        .getByTestId("onramp-decompose-input")
+        .fill("검색 화면을 다시 만들어줘");
+      await expect(cr.page.getByTestId("onramp-decompose-cta")).toBeEnabled();
+      await cr.shot("G3c-onramp-demo-restarted");
+    } finally {
+      await cr.close();
+    }
+  });
+
   test("G4(★S4) 첫 요청이 전달되면 라이브 스트립이 뜨고 대화가 이어진다 — 미니보드·에이전트 패널 포함", async () => {
     const cr = await launchCleanRoom({
       claude: "missing",
