@@ -537,6 +537,11 @@ export const onboarding = {
   "onboarding.startHere.banner.title.firstTicket": "첫 티켓만 만들면 끝납니다",
   "onboarding.startHere.banner.cta": "시작하기 열기",
   "onboarding.startHere.banner.dismiss": "이 안내 닫기(다시 띄우지 않기)",
+  // 권장: 깃 리포 연결 → 티켓별 독립 워크트리 (YTpcEK5Ow5LIldkJJzQc)
+  "onboarding.startHere.worktreeRecommend.badge": "권장",
+  "onboarding.startHere.worktreeRecommend.title": "깃 리포를 연결하면 독립 워크트리가 자동입니다",
+  "onboarding.startHere.worktreeRecommend.body":
+    "하네스 탭에서 깃 리포를 연결하면 에이전트가 티켓별로 독립 워크트리에서 자동으로 작업합니다(충돌 없이 병렬).",
 
   // — 시작하기 탭: 다른 벤더 모델 붙이기 (XHXSIdPN) —
   // ★벤더 이름·모델 id 가 이 표에 하나도 없다. 목록은 model-registry 파생이고

@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, PlayCircle, Terminal, UserCheck } from "lucide-react";
+import {
+  CheckCircle2,
+  GitBranch,
+  PlayCircle,
+  Terminal,
+  UserCheck,
+} from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
 import {
@@ -283,6 +289,10 @@ export function StartHereTab() {
 
         <ValuePreview onWatchDemo={openDemo} />
 
+        {/* 권장: 깃 리포 연결 → 티켓별 독립 워크트리 (YTpcEK5Ow5LIldkJJzQc).
+            BeginnerShell 은 건드리지 않는다 — 시작하기 탭 본문만. */}
+        <WorktreeRecommendNote />
+
         {/* ★L0 — 내 말이 진짜 티켓이 된다 (온램프 사다리 #886 §4).
             비기너 연결 게이트와 **같은 컴포넌트**다. 한쪽에만 달면 어드밴스드로
             들어온 신규 유저(= 이 탭에 착지하는 사람)만 0층이 없는 반쪽 온보딩을
@@ -447,6 +457,37 @@ export function StartHereTab() {
         />
       )}
     </div>
+  );
+}
+
+/** 시작하기 권장사항 — 깃 리포 연결 시 독립 워크트리 자동. */
+function WorktreeRecommendNote() {
+  const { t } = useTranslation();
+  return (
+    <aside
+      data-testid="start-here-worktree-recommend"
+      className="mb-4 rounded-lg border border-[#f9e2af]/35 bg-[#f9e2af]/10 px-4 py-3"
+    >
+      <div className="flex items-start gap-2.5">
+        <GitBranch
+          className="mt-0.5 h-4 w-4 shrink-0 text-[#f9e2af]"
+          aria-hidden
+        />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded bg-[#f9e2af]/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#f9e2af]">
+              {t("onboarding.startHere.worktreeRecommend.badge")}
+            </span>
+            <p className="text-sm font-semibold text-[#cdd6f4]">
+              {t("onboarding.startHere.worktreeRecommend.title")}
+            </p>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-[#a6adc8]">
+            {t("onboarding.startHere.worktreeRecommend.body")}
+          </p>
+        </div>
+      </div>
+    </aside>
   );
 }
 

@@ -21,6 +21,55 @@ import {
   ConnectorGuideSteps,
 } from "./ConnectorGuidePanel";
 
+/** 리포 연결 성공 후 1회성 워크트리 안내 팝업 — localStorage 키. */
+export const WORKTREE_GUIDE_POPUP_KEY = "marblo:worktreeGuidePopupSeen";
+
+type StorageLike = Pick<Storage, "getItem" | "setItem">;
+
+function safeLocalStorage(): StorageLike | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** 팝업을 이미 본 적 있으면 true. storage 미사용 가능 시 true(재노출 안 함). */
+export function hasSeenWorktreeGuidePopup(
+  storage: StorageLike | null = safeLocalStorage(),
+): boolean {
+  if (!storage) return true;
+  try {
+    return storage.getItem(WORKTREE_GUIDE_POPUP_KEY) === "1";
+  } catch {
+    return true;
+  }
+}
+
+export function markWorktreeGuidePopupSeen(
+  storage: StorageLike | null = safeLocalStorage(),
+): void {
+  if (!storage) return;
+  try {
+    storage.setItem(WORKTREE_GUIDE_POPUP_KEY, "1");
+  } catch {
+    // 비영속 — 세션 상태(showPopup)로만 막는다.
+  }
+}
+
+/**
+ * 리포 연결 성공 직후 1회성 안내를 띄울지 결정한다.
+ * 이미 본 적 있으면 false. 처음이면 표시 기록 후 true.
+ */
+export function consumeWorktreeGuidePopup(
+  storage: StorageLike | null = safeLocalStorage(),
+): boolean {
+  if (hasSeenWorktreeGuidePopup(storage)) return false;
+  markWorktreeGuidePopupSeen(storage);
+  return true;
+}
+
 // spawn-node preflight 결과 — main 프로세스 resolveNodeBinary 의 실제 실행
 // 검증 결과를 그대로 받는다. ok=false 면 깨진 node 로 MCP/에이전트 자식이
 // 침묵 -32000 으로 죽을 위험이므로 행동가능 배너를 띄운다.
@@ -195,6 +244,12 @@ export function ConnectionStatusPanel() {
   const [nodePreflight, setNodePreflight] = useState<NodeSpawnPreflight | null>(
     null,
   );
+  // 리포 연결 성공 시 1회성 독립 워크트리 안내 팝업 (YTpcEK5Ow5LIldkJJzQc).
+  const [showWorktreeGuide, setShowWorktreeGuide] = useState(false);
+
+  const revealWorktreeGuideIfNeeded = useCallback(() => {
+    if (consumeWorktreeGuidePopup()) setShowWorktreeGuide(true);
+  }, []);
 
   // 하네스 진입 시 spawn-node 를 실제로 실행 검증한다. 실패하면 침묵 -32000
   // 대신 행동가능 배너를 띄운다. nodeHealth IPC 가 없는 구버전 preload 와도
@@ -255,16 +310,20 @@ export function ConnectionStatusPanel() {
   // 채우므로 사용자가 URL 을 직접 입력하지 않아도 동작한다(OAuth UI 없음).
   // accessMode 는 일부러 비워 둔다 — 신규 연결은 store 기본값 'read', 재동기화는
   // 기존 모드를 그대로 보존한다(merge: 입력 > 기존 > 기본).
+  // isFirstConnect: 기존 연결이 없을 때만 1회성 워크트리 안내 팝업을 연다
+  // (재동기화 버튼으로는 팝업을 띄우지 않는다).
   const handleConnect = useCallback(async () => {
     const projectId = currentProject?.id;
     const localPath = currentProject?.folderPath;
     if (!projectId || !localPath) return;
 
+    const isFirstConnect = !connection;
     setConnecting(true);
     setError(null);
     try {
       await window.electronAPI.connection.upsert({ projectId, localPath });
       await loadConnection();
+      if (isFirstConnect) revealWorktreeGuideIfNeeded();
     } catch (err) {
       setError(
         err instanceof Error
@@ -274,7 +333,13 @@ export function ConnectionStatusPanel() {
     } finally {
       setConnecting(false);
     }
-  }, [currentProject?.id, currentProject?.folderPath, loadConnection]);
+  }, [
+    connection,
+    currentProject?.id,
+    currentProject?.folderPath,
+    loadConnection,
+    revealWorktreeGuideIfNeeded,
+  ]);
 
   const activeAgents = useMemo(
     () => agents.filter((agent) => agent.status !== "stopped"),
@@ -465,8 +530,12 @@ export function ConnectionStatusPanel() {
               <ManualConnectForm
                 projectId={currentProject.id}
                 localPath={currentProject.folderPath}
-                onConnected={loadConnection}
+                onConnected={async () => {
+                  await loadConnection();
+                  revealWorktreeGuideIfNeeded();
+                }}
               />
+              <WorktreeGuideNote />
               <GitHubAccountConnectionSection />
             </>
           ) : (
@@ -511,11 +580,17 @@ export function ConnectionStatusPanel() {
             />
           </div>
 
+          {/* 리포 연결 섹션 아래 상시 안내 — 연결 후에도 계속 보인다. */}
+          <WorktreeGuideNote />
+
           {!connection.repoUrl && (
             <ManualConnectForm
               projectId={connection.projectId}
               localPath={connection.localPath}
-              onConnected={loadConnection}
+              onConnected={async () => {
+                await loadConnection();
+                revealWorktreeGuideIfNeeded();
+              }}
             />
           )}
 
@@ -669,6 +744,74 @@ export function ConnectionStatusPanel() {
           )}
         </div>
       )}
+
+      {showWorktreeGuide && (
+        <WorktreeGuidePopup onClose={() => setShowWorktreeGuide(false)} />
+      )}
+    </div>
+  );
+}
+
+/** 리포 연결 섹션 아래 상시 노출 — 팝업 본문과 같은 메시지. */
+export function WorktreeGuideNote() {
+  const { t } = useTranslation();
+  return (
+    <div
+      data-testid="worktree-guide-note"
+      className="rounded border border-[#89b4fa]/30 bg-[#89b4fa]/10 px-3 py-2"
+    >
+      <div className="flex items-center gap-1.5">
+        <GitBranch className="h-3.5 w-3.5 shrink-0 text-[#89b4fa]" aria-hidden />
+        <span className="text-[11px] font-semibold text-[#89b4fa]">
+          {t("harness.conn.worktreeGuide.badge")}
+        </span>
+      </div>
+      <p className="mt-1 text-[11px] leading-4 text-[#bac2de]">
+        {t("harness.conn.worktreeGuide.body")}
+      </p>
+    </div>
+  );
+}
+
+/** 리포 연결 성공 직후 1회성 모달. */
+export function WorktreeGuidePopup({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="worktree-guide-popup-title"
+        data-testid="worktree-guide-popup"
+        className="w-full max-w-md rounded-lg border border-[#313244] bg-[#1e1e2e] shadow-2xl"
+      >
+        <div className="border-b border-[#313244] px-5 py-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#89b4fa]">
+            {t("harness.conn.worktreeGuide.badge")}
+          </p>
+          <h2
+            id="worktree-guide-popup-title"
+            className="mt-1 text-base font-semibold text-[#cdd6f4]"
+          >
+            {t("harness.conn.worktreeGuide.popupTitle")}
+          </h2>
+        </div>
+        <div className="space-y-4 px-5 py-4">
+          <p className="text-sm leading-6 text-[#bac2de]">
+            {t("harness.conn.worktreeGuide.popupBody")}
+          </p>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              data-testid="worktree-guide-popup-dismiss"
+              onClick={onClose}
+              className="inline-flex h-9 items-center rounded bg-[#89b4fa] px-4 text-sm font-semibold text-[#1e1e2e] hover:bg-[#74a8f5]"
+            >
+              {t("harness.conn.worktreeGuide.gotIt")}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
