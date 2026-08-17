@@ -9,7 +9,6 @@ import { useBeginnerAsk } from "../../hooks/useBeginnerAsk";
 import { useBeginnerDetail } from "../../hooks/useBeginnerDetail";
 import { useCliSetupEngine } from "../../hooks/useCliSetupEngine";
 import {
-  beginnerComposerMode,
   shouldPromote,
   shouldRenderOnboardingGuides,
   type PromotionTrigger,
@@ -30,6 +29,7 @@ import { useBeginnerModeStore } from "../../stores/beginnerModeStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { useOnboardingPreviewStore } from "../../stores/onboardingPreviewStore";
 import { useProjectStore } from "../../stores/projectStore";
+import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useUiStore } from "../../stores/uiStore";
@@ -37,7 +37,6 @@ import { connectFolder } from "../../services/cliSetupActions";
 import telemetry from "../../services/telemetryService";
 import { BeginnerAgentsPane } from "./BeginnerAgentsPane";
 import { BeginnerAgentTerminalModal } from "./BeginnerAgentTerminalModal";
-import { BeginnerChatBar } from "./BeginnerChatBar";
 import { BeginnerConnectStep } from "./BeginnerConnectStep";
 import { BeginnerLiveStrip } from "./BeginnerLiveStrip";
 import { BeginnerOneClickModal } from "./BeginnerOneClickModal";
@@ -59,6 +58,7 @@ import { SettingsPage } from "../settings/SettingsPage";
 import { PrivacyConsentGate } from "../legal/PrivacyConsentGate";
 import { TrainingConsentCard } from "../legal/TrainingConsentCard";
 import { PrivacyClarificationNotice } from "../legal/PrivacyClarificationNotice";
+import { Sidebar } from "../sidebar/Sidebar";
 import {
   BUTTON_GHOST,
   BUTTON_PRIMARY,
@@ -202,21 +202,19 @@ export function BeginnerShell() {
   const entryReason = useBeginnerModeStore((s) => s.entryReason);
   const enteredReported = useBeginnerModeStore((s) => s.enteredReported);
   const markEnteredReported = useBeginnerModeStore(
-    (s) => s.markEnteredReported
+    (s) => s.markEnteredReported,
   );
   const firstCompletionAt = useBeginnerModeStore((s) => s.firstCompletionAt);
   const markFirstCompletion = useBeginnerModeStore(
-    (s) => s.markFirstCompletion
+    (s) => s.markFirstCompletion,
   );
   const promotionShownAt = useBeginnerModeStore((s) => s.promotionShownAt);
   const markPromotionShown = useBeginnerModeStore((s) => s.markPromotionShown);
   const promote = useBeginnerModeStore((s) => s.promote);
+  const fileTreeOpen = useSplitWorkspaceStore((s) => s.fileTreeOpen);
+  const toggleFileTree = useSplitWorkspaceStore((s) => s.toggleFileTree);
 
   const ask = useBeginnerAsk();
-  // ★대화창 입력 문자열을 셸이 든다. 미니 보드/에이전트 패널의 "오케에게
-  // 물어보기" 가 이 칸을 채우기 때문이다 — 상태가 컴포저 안에 갇혀 있으면 그
-  // 프리필이 닿지 못한다.
-  const [draft, setDraft] = useState("");
   // ★미니 보드/에이전트에서 연 상세 오버레이. 선택 상태와 재조회 규칙은 훅이
   // 든다(`useBeginnerDetail`) — 셸이 직접 들고 있던 시절에는 회귀 테스트가 그
   // 로직을 손으로 베낄 수밖에 없었고, 베낀 쪽만 맞아도 테스트는 초록이었다.
@@ -250,7 +248,7 @@ export function BeginnerShell() {
   // display:none 이지 조건부 렌더가 아니다(xterm 의 ResizeObserver 는 폭이 0인
   // 동안 fit 을 건너뛰고, 되돌아오면 실제 치수로 한 번 맞춘다 — TerminalView).
   const [mountedTabs, setMountedTabs] = useState<Set<BeginnerTabId>>(
-    () => new Set<BeginnerTabId>([BEGINNER_CHAT_TAB])
+    () => new Set<BeginnerTabId>([BEGINNER_CHAT_TAB]),
   );
   useEffect(() => {
     setMountedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
@@ -317,7 +315,7 @@ export function BeginnerShell() {
 
   const completedTasks = useMemo(
     () => tasks.filter((task) => task.status === "DONE").length,
-    [tasks]
+    [tasks],
   );
 
   // 진입 계측 — 세션당 한 번. 사유는 스토어가 판정한다(최초판정/재시작/설정복귀):
@@ -349,7 +347,7 @@ export function BeginnerShell() {
         mergedTasks: 0,
         elapsedMs: enteredAt ? Date.now() - enteredAt : 0,
       },
-      !!promotionShownAt
+      !!promotionShownAt,
     );
     if (trigger) {
       setPromotion(trigger);
@@ -379,7 +377,7 @@ export function BeginnerShell() {
       setPromotion(null);
       promote(trigger);
     },
-    [previewEnabled, setPreviewEnabled, promote]
+    [previewEnabled, setPreviewEnabled, promote],
   );
 
   // 에이전트 터미널 모달의 헤더가 쓰는 담당 티켓. 세션 짝짓기 규칙은 어드밴스드
@@ -387,9 +385,9 @@ export function BeginnerShell() {
   const openAgentTask = useMemo(
     () =>
       openAgent?.currentTaskId
-        ? tasks.find((x) => x.id === openAgent.currentTaskId) ?? null
+        ? (tasks.find((x) => x.id === openAgent.currentTaskId) ?? null)
         : null,
-    [openAgent, tasks]
+    [openAgent, tasks],
   );
   // 이름 매칭이 1순위(어드밴스드 목록과 동일). 맵에만 있고 라벨이 아직 안
   // 잡힌 국면은 getSessionIdForAgent 로 폴백 — 원장에 그 id 가 있을 때만.
@@ -403,12 +401,6 @@ export function BeginnerShell() {
     return terminalSessions.some((s) => s.id === mapped) ? mapped : undefined;
   }, [openAgent, terminalSessions]);
 
-  // 티켓 상세의 "오케에게 물어보기" — 문장을 대화창에 **채우기만** 한다. 대신
-  // 보내 주면 유저가 무엇이 나갔는지 모른 채 오케가 움직이고, 문장을 고칠 기회도
-  // 없다. 심플 모드라도 마지막 한 번은 유저가 누르는 게 맞다.
-  // ★대화가 시작된 뒤 상단 컴포저는 접혀 있는데, 이 프리필이 그것을 되살린다
-  // (규칙: shouldShowBeginnerComposer 의 draft 예외). 프리필이 갈 곳이 아래
-  // 오케 PTY 에는 없어서다 — 터미널에 남의 문장을 몰래 타이핑할 수는 없다.
   // 입력 대기 알림 → 그 에이전트의 터미널 모달. 알림은 agentId 만 들고 오므로
   // 여기서 구독 스냅샷과 맞춰 준다. 목록에 없으면(아직 구독 전·다른 프로젝트)
   // 아무것도 열지 않는다 — 빈 터미널 모달을 띄우는 것보다 낫다.
@@ -417,7 +409,7 @@ export function BeginnerShell() {
       const target = agents.find((a) => a.id === agentId);
       if (target) openAgentTerminal(target);
     },
-    [agents, openAgentTerminal]
+    [agents, openAgentTerminal],
   );
 
   // ★심플 모드에서 팀원 끄기 — 어드밴스드 에이전트 목록(AgentListPanel)의
@@ -437,19 +429,8 @@ export function BeginnerShell() {
         });
       }
     },
-    [closeTerminalSession, deleteAgent, terminalSessions]
+    [closeTerminalSession, deleteAgent, terminalSessions],
   );
-
-  const dismissComposer = useCallback(() => setDraft(""), []);
-
-  // ★상단 컴포저를 지금 그릴 것인가, 어떤 얼굴로 — 규칙은 순수함수가 든다
-  // (lib/beginnerMode). 첫 마디 전에는 여기가 대화창, 그 뒤로는 아래 오케
-  // 대화창 하나뿐이고, 티켓 프리필만 예외로 잠깐 되살린다.
-  const composerMode = beginnerComposerMode({
-    sentCount: ask.sentCount,
-    totalTasks: tasks.length,
-    draft,
-  });
 
   // 스스로 뜨는 온보딩 안내(M1 온램프 · M2 자금)를 지금 그려도 되는가 — 규칙은
   // 순수함수가 든다. 원클릭 모달과 데모 재생은 화면 전체를 쓰는 표면이라, 그
@@ -527,8 +508,8 @@ export function BeginnerShell() {
               setup.preview
                 ? t("beginner.preview.folderLocked")
                 : hasFolder
-                ? t("beginner.topbar.changeFolder")
-                : t("beginner.topbar.openFolder")
+                  ? t("beginner.topbar.changeFolder")
+                  : t("beginner.topbar.openFolder")
             }
             className="inline-flex h-7 min-w-0 max-w-[22rem] items-center gap-1.5 rounded-md border border-transparent px-2 text-xs text-[#a6adc8] transition-colors hover:border-[#313244] hover:bg-[#313244]/60 hover:text-[#cdd6f4] disabled:cursor-not-allowed disabled:hover:border-transparent disabled:hover:bg-transparent"
           >
@@ -588,188 +569,167 @@ export function BeginnerShell() {
           토글은 설정 안에 있다. 게이트는 대화 탭 **안쪽**에 남는다. */}
       <BeginnerTabBar active={tab} onSelect={setTab} />
 
-      {/* 탭 전환 영역. 모든 탭은 절대배치로 겹쳐 두고 비활성만 display:none 이다
-          — 위 mountedTabs 주석 참조(오케 PTY 를 살려 두기 위한 것). */}
-      <div className="relative min-h-0 flex-1">
-        <div
-          className="absolute inset-0 flex flex-col overflow-hidden"
-          style={{ display: tab === BEGINNER_CHAT_TAB ? undefined : "none" }}
-        >
-          {/* 위→아래 흐름(대화 → 일감 → 하단 2페인)은 그대로 두되, 폭 상한은
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        <Sidebar isOpen={fileTreeOpen} onToggle={toggleFileTree} />
+
+        {/* 탭 전환 영역. 모든 탭은 절대배치로 겹쳐 두고 비활성만 display:none 이다
+            — 위 mountedTabs 주석 참조(오케 PTY 를 살려 두기 위한 것). */}
+        <div className="relative min-h-0 min-w-0 flex-1">
+          <div
+            className="absolute inset-0 flex flex-col overflow-hidden"
+            style={{ display: tab === BEGINNER_CHAT_TAB ? undefined : "none" }}
+          >
+            {/* 위→아래 흐름(대화 → 일감 → 하단 2페인)은 그대로 두되, 폭 상한은
           68rem → 96rem 으로 연다. 68rem 은 한 열짜리 화면의 가독 폭이었는데,
           하단이 2분할이 된 지금 그 폭이면 오케 터미널이 좁아져 TUI 가 접힌다.
           상한 자체는 남긴다 — 27" 에서 카드가 끝까지 벌어지면 다시 성겨진다. */}
-          <main className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
-            <div className="mx-auto flex min-h-0 w-full max-w-[96rem] flex-1 flex-col gap-2.5 overflow-hidden">
-              {!cliReady ? (
-                <div className="min-h-0 flex-1 overflow-auto">
-                  <BeginnerConnectStep
-                    onWatchDemo={() => setShowDemo(true)}
-                    onOneClick={openOneClick}
-                    manualFocusSignal={manualFocusSignal}
-                  />
-                </div>
-              ) : !hasFolder ? (
-                <div className="min-h-0 flex-1 overflow-auto">
-                  <section
-                    data-testid="beginner-folder-gate"
-                    data-sample-status={sampleStatus}
-                    className={`mx-auto w-full max-w-xl ${SURFACE} px-6 py-7 text-center`}
-                  >
-                    {/* ★자동 연결(#872)이 도는 중에는 "폴더를 골라 주세요" 를 그리지
+            <main className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+              <div className="flex min-h-0 w-full flex-1 flex-col gap-2.5 overflow-hidden">
+                {!cliReady ? (
+                  <div className="min-h-0 flex-1 overflow-auto">
+                    <BeginnerConnectStep
+                      onWatchDemo={() => setShowDemo(true)}
+                      onOneClick={openOneClick}
+                      manualFocusSignal={manualFocusSignal}
+                    />
+                  </div>
+                ) : !hasFolder ? (
+                  <div className="min-h-0 flex-1 overflow-auto">
+                    <section
+                      data-testid="beginner-folder-gate"
+                      data-sample-status={sampleStatus}
+                      className={`mx-auto w-full max-w-xl ${SURFACE} px-6 py-7 text-center`}
+                    >
+                      {/* ★자동 연결(#872)이 도는 중에는 "폴더를 골라 주세요" 를 그리지
                     않는다. 1~2초 뒤 스스로 붙을 폴더인데 그 사이 유저가 네이티브
                     피커를 열면, 자동 연결이 뒤늦게 도착해 화면이 튄다. */}
-                    <h1 className="text-lg font-semibold leading-7 text-[#cdd6f4]">
-                      {t(
-                        sampleStatus === "preparing"
-                          ? "beginner.folder.preparingTitle"
-                          : "beginner.folder.title"
-                      )}
-                    </h1>
-                    <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-[#7f849c]">
-                      {t(
-                        sampleStatus === "preparing"
-                          ? "beginner.folder.preparingBody"
-                          : "beginner.folder.body"
-                      )}
-                    </p>
-                    {sampleStatus === "preparing" ? (
-                      <div
-                        data-testid="beginner-folder-preparing"
-                        className="mx-auto mt-5 h-1.5 w-48 overflow-hidden rounded-full bg-[#313244]"
-                      >
-                        <div className="h-full w-1/3 animate-pulse rounded-full bg-[#89b4fa]" />
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={connectFolder}
-                        className={`mt-5 ${BUTTON_PRIMARY}`}
-                      >
-                        {t("beginner.folder.cta")}
-                      </button>
-                    )}
-                    {sampleStatus === "failed" && (
-                      <p className="mt-3 text-xs leading-5 text-[#f9e2af]">
-                        {t("beginner.folder.sampleFailed")}
+                      <h1 className="text-lg font-semibold leading-7 text-[#cdd6f4]">
+                        {t(
+                          sampleStatus === "preparing"
+                            ? "beginner.folder.preparingTitle"
+                            : "beginner.folder.title",
+                        )}
+                      </h1>
+                      <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-[#7f849c]">
+                        {t(
+                          sampleStatus === "preparing"
+                            ? "beginner.folder.preparingBody"
+                            : "beginner.folder.body",
+                        )}
                       </p>
-                    )}
-                  </section>
-                </div>
-              ) : (
-                <>
-                  {/* ★첫 대화창 — 첫 마디가 오케에게 닿으면 접힌다. 아래 오케
-                  대화창(실 PTY)과 입력칸이 둘이면 유저는 매번 "어디에 쓰냐" 를
-                  고르게 되고, 그건 심플 모드가 없애려던 종류의 선택이다.
-                  티켓 상세의 "물어보기" 가 문장을 채워 주면 다시 나타난다.
-                  data-coach: 코치마크 투어의 앵커(BeginnerTour.COACH_ANCHORS).
-                  ★접혀 있으면 앵커도 함께 사라지는데, 코치마크는 없는 앵커의
-                  스텝을 알아서 건너뛴다(CoachmarkOverlay.resolveSteps). */}
-                  {composerMode !== "hidden" && (
-                    <div className="flex-shrink-0" data-coach="beginner-ask">
-                      <BeginnerChatBar
-                        ask={ask}
-                        draft={draft}
-                        onDraftChange={setDraft}
-                        mode={composerMode}
-                        // 첫 국면(이 칸이 화면의 목적)에는 치우기를 주지 않는다.
-                        onDismiss={
-                          composerMode === "followUp"
-                            ? dismissComposer
-                            : undefined
-                        }
-                      />
-                    </div>
-                  )}
-
-                  {/* ★S4: 진행상황을 별도 탭이 아니라 대화창 바로 아래에 그린다.
-                  ★높이 상한(34%)은 하단 2페인을 지키기 위한 것이다. 티켓이 대여섯
-                  건 쌓이면 미니 보드는 얼마든지 자라는데, 그걸 그대로 두면 예전처럼
-                  오케 영역이 아래로 밀려 납작해진다(시연 피드백 ③). 넘치는 만큼은
-                  이 칸 안에서 스크롤한다. */}
-                  <div
-                    className="min-h-0 shrink overflow-y-auto max-h-[34%]"
-                    data-coach="beginner-live"
-                  >
-                    {/* ★카드의 두 진입은 셸이 목적지를 갖고 있을 때만 켠다:
+                      {sampleStatus === "preparing" ? (
+                        <div
+                          data-testid="beginner-folder-preparing"
+                          className="mx-auto mt-5 h-1.5 w-48 overflow-hidden rounded-full bg-[#313244]"
+                        >
+                          <div className="h-full w-1/3 animate-pulse rounded-full bg-[#89b4fa]" />
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={connectFolder}
+                          className={`mt-5 ${BUTTON_PRIMARY}`}
+                        >
+                          {t("beginner.folder.cta")}
+                        </button>
+                      )}
+                      {sampleStatus === "failed" && (
+                        <p className="mt-3 text-xs leading-5 text-[#f9e2af]">
+                          {t("beginner.folder.sampleFailed")}
+                        </p>
+                      )}
+                    </section>
+                  </div>
+                ) : (
+                  <>
+                    {/* 상단 대화 입력은 제거했다. 오케 입력은 아래 실 PTY 패널 하나로
+                  일원화하고, 진행 보드가 워크스페이스 상단을 채운다. */}
+                    <div
+                      className="min-h-0 shrink overflow-y-auto max-h-[42%]"
+                      data-coach="beginner-live"
+                    >
+                      {/* ★카드의 두 진입은 셸이 목적지를 갖고 있을 때만 켠다:
                         "바뀐 코드 보기" 는 큐레이트 코드 탭(위 점프 소비)이,
                         에이전트 칩은 에이전트 패널과 **같은** 터미널 모달이
                         받는다 — 한 에이전트로 가는 문이 둘이어도 도착지는
                         하나여야 한다. */}
-                    <BeginnerLiveStrip
-                      sentAt={ask.deliveredAt}
-                      onResend={() => void ask.resend()}
-                      resending={ask.sending}
-                      onTaskClick={openTaskDetail}
-                      showWorktreeDiff
-                      onAgentClick={openAgentTerminal}
-                    />
-                  </div>
+                      <BeginnerLiveStrip
+                        sentAt={ask.deliveredAt}
+                        onResend={() => void ask.resend()}
+                        resending={ask.sending}
+                        onTaskClick={openTaskDetail}
+                        showWorktreeDiff
+                        onAgentClick={openAgentTerminal}
+                      />
+                    </div>
 
-                  {/* ── ★하단 2분할: 오케 대화창 | 에이전트 ──────────────────────
+                    {/* ── ★하단 2분할: 오케 대화창 | 에이전트 ──────────────────────
                   좁은 창(<1024px)에서는 세로로 쌓는다 — 두 열을 억지로 유지하면
                   오케 터미널이 40컬럼 아래로 눌려 TUI 가 접힌다. */}
-                  <div className="flex min-h-[18rem] flex-1 flex-col gap-2.5 overflow-hidden lg:flex-row">
-                    <section
-                      data-coach="beginner-chat"
-                      className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${SURFACE}`}
-                    >
-                      <div className="flex flex-shrink-0 items-center gap-2 border-b border-[#313244] px-4 py-2">
-                        <SectionLabel>{t("beginner.chat.title")}</SectionLabel>
-                        <span className="min-w-0 truncate text-[11px] text-[#585b70]">
-                          {t("beginner.chat.hint")}
-                        </span>
-                      </div>
-                      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                        {/* ★effort·버전 배지·세션 선택은 계속 감춘다(고급 손잡이).
+                    <div className="flex min-h-[18rem] flex-1 flex-col gap-2.5 overflow-hidden lg:flex-row">
+                      <section
+                        data-coach="beginner-chat"
+                        className={`flex min-h-0 min-w-0 flex-[7_1_0%] flex-col overflow-hidden ${SURFACE}`}
+                      >
+                        <div className="flex flex-shrink-0 items-center gap-2 border-b border-[#313244] px-4 py-2">
+                          <SectionLabel>
+                            {t("beginner.chat.title")}
+                          </SectionLabel>
+                          <span className="min-w-0 truncate text-[11px] text-[#585b70]">
+                            {t("beginner.chat.hint")}
+                          </span>
+                        </div>
+                        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                          {/* ★effort·버전 배지·세션 선택은 계속 감춘다(고급 손잡이).
                             모델만은 예외다(cmp95TVin) — showConnectedModelPicker 가
                             설치+인증된 하네스로만 목록을 좁힌다. */}
-                        <OrchestratorPanel
-                          fill
-                          hideModelControls
-                          showConnectedModelPicker
-                        />
-                      </div>
-                    </section>
+                          <OrchestratorPanel
+                            fill
+                            hideModelControls
+                            showConnectedModelPicker
+                          />
+                        </div>
+                      </section>
 
-                    {/* ★에이전트 열 — "누가 뭐하나". 세로 스택일 땐 높이를 묶어
+                      {/* ★에이전트 열 — "누가 뭐하나". 세로 스택일 땐 높이를 묶어
                     오케가 화면 밖으로 밀리지 않게 한다. */}
-                    <section
-                      data-testid="beginner-agents-pane"
-                      className={`flex max-h-[14rem] min-h-0 flex-col overflow-hidden lg:max-h-none lg:w-[19rem] lg:shrink-0 ${SURFACE}`}
-                    >
-                      <BeginnerAgentsPane
-                        agents={workerAgents}
-                        tasks={tasks}
-                        onTaskClick={openTaskDetail}
-                        onAgentClick={openAgentTerminal}
-                        onAgentKill={killAgent}
-                      />
-                    </section>
-                  </div>
-                </>
-              )}
-            </div>
-          </main>
-        </div>
+                      <section
+                        data-testid="beginner-agents-pane"
+                        className={`flex max-h-[14rem] min-h-0 flex-col overflow-hidden lg:max-h-none lg:min-w-[16rem] lg:flex-[3_1_0%] ${SURFACE}`}
+                      >
+                        <BeginnerAgentsPane
+                          agents={workerAgents}
+                          tasks={tasks}
+                          onTaskClick={openTaskDetail}
+                          onAgentClick={openAgentTerminal}
+                          onAgentKill={killAgent}
+                        />
+                      </section>
+                    </div>
+                  </>
+                )}
+              </div>
+            </main>
+          </div>
 
-        {/* 큐레이트 일곱 — 엑스퍼트 탭 컴포넌트 그대로. 지연 마운트라 켠 적 없는
+          {/* 큐레이트 일곱 — 엑스퍼트 탭 컴포넌트 그대로. 지연 마운트라 켠 적 없는
             탭은 여기 없다(각각 자기 구독·프로브를 들고 오므로 미리 태우지
             않는다). 스크롤은 엑스퍼트 탭바와 같은 규격으로 이 칸이 든다. */}
-        {BEGINNER_CURATED_TABS.map((curated) => {
-          if (!mountedTabs.has(curated)) return null;
-          const Comp = CURATED_TAB_COMPONENTS[curated];
-          return (
-            <div
-              key={curated}
-              data-testid={`beginner-tabpanel-${curated}`}
-              className="absolute inset-0 overflow-auto"
-              style={{ display: tab === curated ? undefined : "none" }}
-            >
-              <Comp />
-            </div>
-          );
-        })}
+          {BEGINNER_CURATED_TABS.map((curated) => {
+            if (!mountedTabs.has(curated)) return null;
+            const Comp = CURATED_TAB_COMPONENTS[curated];
+            return (
+              <div
+                key={curated}
+                data-testid={`beginner-tabpanel-${curated}`}
+                className="absolute inset-0 overflow-auto"
+                style={{ display: tab === curated ? undefined : "none" }}
+              >
+                <Comp />
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* 첫 실행 코치마크 투어. 앵커(챗·첫요청·라이브·모드전환)가 실제로 그려진
