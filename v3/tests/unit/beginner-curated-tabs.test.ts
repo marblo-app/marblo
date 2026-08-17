@@ -138,6 +138,14 @@ vi.mock("../../src/components/orchestrator/OrchestratorPanel", () => ({
   },
 }));
 
+vi.mock("../../src/components/sidebar/Sidebar", () => ({
+  Sidebar: ({ isOpen }: { isOpen: boolean; onToggle: () => void }) =>
+    createElement("div", {
+      "data-testid": "stub-sidebar",
+      "data-open": isOpen ? "1" : "0",
+    }),
+}));
+
 // 큐레이트 여덟 — 본체는 각자 자기 구독·에디터·결제 화면을 끌고 온다. 여기서
 // 검증하는 건 "그 컴포넌트가 걸렸는가" 이지 그 화면의 내용이 아니다.
 vi.mock("../../src/components/onboarding/StartHereTab", () => ({
@@ -263,7 +271,9 @@ describe("심플 큐레이트 탭 — 배선", () => {
   it("★기본은 대화다 — 큐레이트 여덟은 누르기 전엔 트리에 없다", () => {
     render(createElement(BeginnerShell));
 
+    expect(screen.getByTestId("stub-sidebar").dataset.open).toBe("1");
     expect(screen.getByTestId("stub-orchestrator")).toBeTruthy();
+    expect(screen.queryByTestId("stub-chatbar")).toBeNull();
     expect(
       screen.getByTestId("beginner-tab-chat").getAttribute("aria-selected"),
     ).toBe("true");

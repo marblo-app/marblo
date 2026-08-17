@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useEditorStore } from "../../stores/editorStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
@@ -9,7 +9,6 @@ import { MarkdownPreview } from "../code/MarkdownPreview";
 import { NotebookView } from "../code/NotebookView";
 import { DiffSurface } from "../workspace/DiffSurface";
 import { WorktreeDiffBanner } from "../code/WorktreeDiffBanner";
-import { FileTree } from "../sidebar/FileTree";
 import { isImageFile } from "../../lib/imageFiles";
 import { isMarkdownFile } from "../../lib/markdownFiles";
 import { isNotebookFile } from "../../lib/notebookFiles";
@@ -39,7 +38,6 @@ interface CodeTabProps {
 
 export function CodeTab({ renderDiff }: CodeTabProps = {}) {
   const { t } = useTranslation();
-  const [fileTreeOpen, setFileTreeOpen] = useState(true);
   const openFiles = useEditorStore((s) => s.openFiles);
   const activeFilePath = useEditorStore((s) => s.activeFilePath);
   const showDiff = useEditorStore((s) => s.showDiff);
@@ -129,15 +127,6 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-gray-700 bg-gray-800 px-3 py-2">
-        <button
-          type="button"
-          data-testid="code-file-tree-toggle"
-          onClick={() => setFileTreeOpen((v) => !v)}
-          className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-700 hover:text-gray-100"
-          aria-expanded={fileTreeOpen}
-        >
-          {fileTreeOpen ? "Files ◀" : "Files ▶"}
-        </button>
         <span className="text-xs font-medium text-gray-400">Root</span>
         <select
           value={selectedRoot}
@@ -198,14 +187,6 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
 
       {/* Editor content */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {fileTreeOpen && (
-          <aside
-            data-testid="code-file-tree-panel"
-            className="min-h-0 w-72 flex-shrink-0 overflow-hidden border-r border-gray-700 bg-gray-800"
-          >
-            <FileTree />
-          </aside>
-        )}
         <div className="min-w-0 flex-1 overflow-hidden">
           {activeFile ? (
             showDiff ? (
