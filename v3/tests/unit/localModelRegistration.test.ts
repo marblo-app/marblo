@@ -41,9 +41,19 @@ describe("registerLocalOllamaModels (유령비용 방지)", () => {
     expect(entry?.harness).toBe("claude");
     expect(entry?.provider).toBe("local");
     expect(entry?.pricing).toEqual({ inputPer1M: 0, outputPer1M: 0 });
+    expect(entry?.toolSupport).toBe("chat-only");
+    expect(entry?.capability).toBe("cheap");
     expect(harnessForModel("qwen2.5:0.5b")).toBe("claude");
     expect(vendorForModel("qwen2.5:0.5b")).toBe("local");
     expect(registeredLocalOllamaModelIds()).toContain("qwen2.5:0.5b");
+  });
+
+  it("7B+ coder 등록 행은 tool-use · mid capability", () => {
+    registerLocalOllamaModels(["qwen2.5-coder:7b"]);
+    const entry = getModel("qwen2.5-coder:7b");
+    expect(entry?.toolSupport).toBe("tool-use");
+    expect(entry?.capability).toBe("mid");
+    expect(entry?.provider).toBe("local");
   });
 
   it("재등록은 멱등이고, 빈/공백 id 는 무시된다", () => {

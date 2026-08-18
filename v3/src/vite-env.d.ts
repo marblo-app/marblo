@@ -1090,6 +1090,10 @@ interface LocalModelCard {
   downloadSizeMB: number;
   minRamGB: number;
   contextTokens: number;
+  /** 하네스 tool-use 적합성 — 7B 미만은 대화·테스트, 7B+ 는 에이전트 실작업. */
+  toolSupport: "chat-only" | "tool-use";
+  /** UI 배지 — "대화 전용" / "tool-use 지원". */
+  toolSupportLabel: string;
   /** 이 기기 메모리(minRamGB ≤ totalMemGB)로 충분한가. */
   fits: boolean;
   installed: boolean;

@@ -571,14 +571,16 @@ export function composeInitialPrompt(
   instruction: string,
   skillContent?: string,
 ): string {
-  const isClaude = model === "claude";
-  const sanitized = isClaude
+  // `local` 은 claude CLI env-swap 이라 MCP 툴 이름도 `mcp__marblo__*` 규약.
+  const isClaudeFamily = model === "claude" || model === "local";
+  const sanitized = isClaudeFamily
     ? instruction
     : instruction.replace(/mcp__marblo__/g, "");
   // agy 도 v1.20+ 부터 MCP 지원 — generateAntigravityConfig 가 글로벌
   // ~/.gemini/antigravity-cli/mcp_config.json 에 marblo 항목을 머지하므로
   // role-skill 의 add_activity / claim_task / submit_for_review 호출이
   // 정상 작동한다. 따라서 다른 비-claude 워커와 동일한 prepend 경로 사용.
+  // chat-only 로컬은 getLaunchConfig 가 skillContent 를 비워 여기로 안 온다.
   if (!skillContent) return sanitized;
   return [
     "[Role Skill — Follow the workflow and tool-use rules below]",

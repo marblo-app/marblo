@@ -72,6 +72,7 @@ describe("LocalModelsSection — Ollama 가이드 (접힘/열림)", () => {
     expect(bodyText).toContain(ko["harness.store.local.guide.step2"]);
     expect(bodyText).toContain(ko["harness.store.local.guide.step3"]);
     expect(bodyText).toContain(ko["harness.store.local.guideRam"]);
+    expect(bodyText).toContain(ko["harness.store.local.guideToolUse"]);
 
     fireEvent.click(toggleButton);
     expect(toggleButton.getAttribute("aria-expanded")).toBe("false");
@@ -122,9 +123,13 @@ describe("LocalModelsSection — Ollama pull CTA", () => {
         {
           id: "qwen2.5:0.5b",
           displayName: "Qwen 2.5 0.5B",
+          category: "general",
+          categoryLabel: "범용",
           downloadSizeMB: 397,
           minRamGB: 4,
           contextTokens: 32768,
+          toolSupport: "chat-only",
+          toolSupportLabel: "대화 전용",
           installed: false,
           fits: true,
           action: "pull",

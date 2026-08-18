@@ -560,6 +560,18 @@ export const harness: Record<keyof typeof koHarness, string> = {
     "Catalog sizes are for ollama's default 4-bit quantizations (Q4_K_M etc.). Lower-bit quantization is smaller and faster but slightly lower quality.",
   "harness.store.local.guideContext":
     "The context shown is the model's maximum. At runtime the default context is smaller (ollama defaults to ~4K), and raising it costs proportionally more memory.",
+  "harness.store.local.guideToolUse":
+    "Under 7B is chat-only (smoke/test). For Marblo agent/orchestrator work (MCP tool-use), use a 7B+ coder (e.g. qwen2.5-coder:7b). Injecting tools into tiny models makes them mimic tool-call JSON and answer nonsense.",
+  "harness.store.local.badgeChatOnly": "Chat only",
+  "harness.store.local.badgeToolUse": "Tool-use ready",
+  "harness.store.local.chatOnlyHint":
+    "For testing and chat. Use a 7B+ coder for real agent work.",
+  "harness.store.local.toolUseHint":
+    "Can run MCP tool-use / agent work. Prefer coder variants for coding tasks.",
+  "harness.store.local.installedHintChatOnly":
+    "Select under Local Model for chat/smoke tests. Install a 7B+ coder for ticket work.",
+  "harness.store.local.installedHintToolUse":
+    "Pick this under Add agent → Local Model for real agent work.",
   "harness.store.local.hardwareLine": "This machine's memory: {gb} GB",
   "harness.store.local.unifiedMemoryNote": "unified memory (shared with GPU)",
   "harness.store.local.ollamaMissing":
@@ -589,9 +601,9 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.local.installedHint":
     "Pick this model under Add agent → Local Model.",
   "harness.store.local.desc.qwen25_05b":
-    "The lightest smoke-test model — instant responses even on low-end machines.",
+    "Lightest chat/smoke model (chat-only). Do not use for agent MCP tool-use — pick a 7B+ coder instead.",
   "harness.store.local.desc.qwen25_15b":
-    "A balance of weight and quality — good for simple tasks like summarizing and classifying.",
+    "Balance of weight and quality (chat-only) — fine for summary/classify smoke tests. Real work needs 7B+ coder.",
   "harness.store.local.desc.llama32_1b":
     "Meta's tiniest model — the smallest one supporting a 128K context.",
   "harness.store.local.desc.llama32_3b":

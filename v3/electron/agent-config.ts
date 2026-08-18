@@ -30,6 +30,27 @@ import {
   toolSurfaceEnv,
   workerClaudeSettings,
 } from "./prefix-diet";
+import { isLocalChatOnlyModel } from "./local-models";
+
+/**
+ * 로컬 소형(chat-only) 모델용 system. MCP/에이전트 tool-use 루프를 넣지 않는다.
+ * 실측: 툴 스키마+tool 강제 프롬프트가 0.5b 를 tool_use JSON 흉내로 몰아넣었다.
+ */
+export const LOCAL_CHAT_ONLY_SYSTEM_PROMPT =
+  "You are a helpful local assistant running on the user's machine. " +
+  "Reply clearly in the user's language. Do not call tools or emit tool-call JSON — answer directly.";
+
+/** claude argv 에 붙이는 대화모드 플래그(유닛 테스트·스폰 경로 공유). */
+export function localChatOnlyClaudeArgExtras(): string[] {
+  return [
+    "--tools",
+    "",
+    "--bare",
+    "--system-prompt",
+    LOCAL_CHAT_ONLY_SYSTEM_PROMPT,
+    "--disable-slash-commands",
+  ];
+}
 
 export interface ResolvedCli {
   /** Absolute path to the binary, or the bare name if resolution failed. */
@@ -2265,8 +2286,17 @@ export class AgentConfigGenerator {
     // 역할별 MCP 화이트리스트(claude strict 경로) 선택용. 미지정이면 기본
     // 워커 화이트리스트가 적용된다.
     role?: string,
+    /**
+     * 로컬 소형 chat-only 스폰: marblo/글로벌 MCP 를 넣지 않는다.
+     * claude CLI 는 빈 mcpServers + `--tools ""` 로 대화모드가 된다.
+     */
+    chatOnly = false,
   ): string {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
+
+    if (chatOnly && (model === "claude" || model === "local")) {
+      return this.generateEmptyClaudeMcpConfig(agentId);
+    }
 
     const mcpEntry = buildMCPServerEntry(
       projectDir,
@@ -2278,6 +2308,7 @@ export class AgentConfigGenerator {
 
     switch (model) {
       case "claude":
+      case "local":
         return this.generateClaudeConfig(agentId, mcpEntry, role);
       case "gemini":
         return this.generateGeminiConfig(agentId, mcpEntry);
@@ -2292,6 +2323,18 @@ export class AgentConfigGenerator {
       default:
         return this.generateClaudeConfig(agentId, mcpEntry);
     }
+  }
+
+  /** chat-only 로컬 스폰용 — MCP 서버 0개. */
+  private generateEmptyClaudeMcpConfig(agentId: string): string {
+    const configPath = path.join(CONFIG_DIR, `claude-mcp-${agentId}.json`);
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ mcpServers: {} }, null, 2),
+      "utf-8",
+    );
+    this.trackFile(agentId, configPath);
+    return configPath;
   }
 
   /**
@@ -2346,6 +2389,15 @@ export class AgentConfigGenerator {
     // Optional MCP context. Quick Lane agents use lane:<id> for board isolation.
     marbloContextId?: string,
   ): LaunchConfig {
+    const pinnedForChat =
+      modelPin?.claudeModel ?? modelPin?.codexModel ?? modelPin?.nativeModel;
+    // 로컬 소형: MCP+role-skill tool 강제가 JSON 흉내를 유발 → 대화모드.
+    const chatOnly =
+      isLocalChatOnlyModel(pinnedForChat) &&
+      (agent.model === "local" ||
+        agent.model === "claude" ||
+        getModel(pinnedForChat ?? "")?.provider === "local");
+
     const mcpConfigPath = this.generateMCPConfig(
       agent.id,
       agent.model,
@@ -2353,8 +2405,12 @@ export class AgentConfigGenerator {
       marbloProjectId,
       marbloContextId,
       agent.role,
+      chatOnly,
     );
-    const skillPath = this.generateSkillFile(agent.id, agent.role, projectDir);
+    // chat-only 는 역할 스킬(tool-use 루프)을 주입하지 않는다.
+    const skillPath = chatOnly
+      ? ""
+      : this.generateSkillFile(agent.id, agent.role, projectDir);
     const skillContent =
       skillPath && fs.existsSync(skillPath)
         ? fs.readFileSync(skillPath, "utf-8")
@@ -2379,6 +2435,7 @@ export class AgentConfigGenerator {
       complexity,
       modelPin,
       marbloContextId,
+      chatOnly,
     );
 
     // ── Telegram 폴러 경합 차단 (에이전트 claude 세션) ─────────────────────
@@ -2402,7 +2459,12 @@ export class AgentConfigGenerator {
     // context7)는 애초에 per-agent --mcp-config 화이트리스트로 주입되는 별개
     // 경로라 영향 자체가 불가능하다. 플러그인 캐시(server.ts)를 건드리지 않으므로
     // 플러그인 업데이트에도 revert 되지 않는다. 티켓 pyp7odpPQ6emCWLmUrBz.
-    if (agent.model === "claude" && agent.role !== "orchestrator") {
+    //
+    // local(env-swap) 도 같은 claude 바이너리라 워커 설정이 필요하다. chat-only
+    // 는 `--bare`+`--tools ""` 대화모드라 스킵(이미 slash 비활성).
+    const claudeFamily =
+      agent.model === "claude" || agent.model === "local";
+    if (claudeFamily && agent.role !== "orchestrator" && !chatOnly) {
       // ── 부트 프리픽스 다이어트 A2/A3 (워커 전용) ──────────────────────────
       // #900 §3.4 의 통제 가능 재고 중 MCP 툴 다음으로 큰 두 덩어리가 auto-memory
       // 인덱스와 스킬 목록 설명문이다. 워커는 티켓 하나만 처리하므로 전역 메모리
@@ -3344,6 +3406,8 @@ export class AgentConfigGenerator {
     complexity?: TaskComplexity,
     modelPin?: LaunchModelPin,
     marbloContextId?: string,
+    /** 로컬 소형: `--tools ""` + bare system (MCP/툴 스키마 비주입). */
+    chatOnly = false,
   ): {
     command: string;
     args: string[];
@@ -3445,6 +3509,10 @@ export class AgentConfigGenerator {
             "--strict-mcp-config",
             "--mcp-config",
             mcpConfigPath,
+            // 로컬 소형 chat-only: 내장/MCP 툴 스키마를 API 에 실지 않는다.
+            // 실측(qwen2.5:0.5b): 툴 주입 시 tool_use JSON 흉내, `--tools ""` 면
+            // text 응답으로 회복.
+            ...(chatOnly ? localChatOnlyClaudeArgExtras() : []),
             ...sessionArgs,
           ],
           // 벤더 프로파일 주입 자리. 오늘은 프로파일을 가진 행이 없어 `env` 가
