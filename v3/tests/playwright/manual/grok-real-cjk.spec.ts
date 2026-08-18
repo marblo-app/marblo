@@ -154,6 +154,35 @@ test.describe("manual real grok CJK terminal verification", () => {
     await marblo.page.waitForTimeout(4_000);
     const streamingMetrics = await readCjkMetrics(marblo, launch.ptySessionId);
 
+    await expect
+      .poll(
+        () => readCjkMetrics(marblo, launch.ptySessionId),
+        {
+          timeout: 60_000,
+          message: "real grok should render the Korean probe before settle",
+        },
+      )
+      .toMatchObject({
+        rowsTextSample: expect.stringContaining("가각간갇갈"),
+      });
+
+    await marblo.page.evaluate((sessionId) => {
+      const snapshot = window.__marbloTerminalDebug?.[sessionId]?.();
+      snapshot?.resetPtyRepaintNudgeCountForTest?.();
+      snapshot?.scheduleActivitySettleForTest?.("real grok completion settle");
+    }, launch.ptySessionId);
+    await marblo.page.waitForTimeout(800);
+    const completionSettleMetrics = await readCjkMetrics(
+      marblo,
+      launch.ptySessionId,
+    );
+    const activitySettleRepaintCount = await marblo.page.evaluate(
+      (sessionId) =>
+        window.__marbloTerminalDebug?.[sessionId]?.()
+          ?.ptyRepaintNudgeCount ?? 0,
+      launch.ptySessionId,
+    );
+
     await marblo.page.waitForTimeout(18_000);
     const settledMetrics = await readCjkMetrics(marblo, launch.ptySessionId);
 
@@ -165,15 +194,35 @@ test.describe("manual real grok CJK terminal verification", () => {
     });
     writeFileSync(
       testInfo.outputPath("real-grok-cjk-metrics.json"),
-      `${JSON.stringify({ streamingMetrics, settledMetrics }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          streamingMetrics,
+          completionSettleMetrics,
+          settledMetrics,
+          activitySettleRepaintCount,
+        },
+        null,
+        2,
+      )}\n`,
     );
     await testInfo.attach("real-grok-cjk-metrics", {
-      body: JSON.stringify({ streamingMetrics, settledMetrics }, null, 2),
+      body: JSON.stringify(
+        {
+          streamingMetrics,
+          completionSettleMetrics,
+          settledMetrics,
+          activitySettleRepaintCount,
+        },
+        null,
+        2,
+      ),
       contentType: "application/json",
     });
 
     expectHealthyCjkMetrics(streamingMetrics);
+    expectHealthyCjkMetrics(completionSettleMetrics);
     expectHealthyCjkMetrics(settledMetrics);
+    expect(activitySettleRepaintCount).toBe(1);
 
     await marblo.page
       .evaluate(() => window.electronAPI.orchestratorSession.stop())

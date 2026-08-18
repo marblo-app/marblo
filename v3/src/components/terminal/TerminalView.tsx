@@ -36,6 +36,10 @@ interface TerminalDebugSnapshot {
   activeBufferType: string;
   fontFamily: string;
   fontSize: number;
+  ptyRepaintNudgeCount?: number;
+  activitySettleTestCallCount?: number;
+  resetPtyRepaintNudgeCountForTest?: () => void;
+  scheduleActivitySettleForTest?: (reason?: string) => void;
 }
 
 type TerminalDebugRegistry = Record<string, () => TerminalDebugSnapshot | null>;
@@ -129,6 +133,8 @@ export default memo(function TerminalView({
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+    let ptyRepaintNudgeCount = 0;
+    let activitySettleTestCallCount = 0;
 
     if (window.electronAPI?.testMode?.bypassAuth) {
       window.__marbloTerminalDebug ??= {};
@@ -139,6 +145,16 @@ export default memo(function TerminalView({
         activeBufferType: terminal.buffer.active.type,
         fontFamily: terminal.options.fontFamily ?? "",
         fontSize: terminal.options.fontSize ?? 13,
+        ptyRepaintNudgeCount,
+        activitySettleTestCallCount,
+        resetPtyRepaintNudgeCountForTest: () => {
+          ptyRepaintNudgeCount = 0;
+          activitySettleTestCallCount = 0;
+        },
+        scheduleActivitySettleForTest: (reason = "test activity settle") => {
+          activitySettleTestCallCount += 1;
+          settleActivityRenderRef.current(reason);
+        },
       });
     }
 
@@ -169,21 +185,36 @@ export default memo(function TerminalView({
     let nudgeRestoreTimer: ReturnType<typeof setTimeout> | null = null;
     let nudgePtyRepaint: (reason?: string) => void = () => {};
     let cjkRepairFrame: number | null = null;
-    const scheduleCjkCacheRepair = (reason: string) => {
-      if (disposed || cjkRepairFrame !== null) return;
+    let forceAltScreenPtyRepaintAfterCjkRepair = false;
+    const scheduleCjkCacheRepair = (
+      reason: string,
+      options?: { forceAltScreenPtyRepaint?: boolean },
+    ) => {
+      if (disposed) return;
+      forceAltScreenPtyRepaintAfterCjkRepair ||= Boolean(
+        options?.forceAltScreenPtyRepaint,
+      );
+      if (cjkRepairFrame !== null) return;
       cjkRepairFrame = requestAnimationFrame(() => {
         cjkRepairFrame = null;
         if (disposed || !termOpened) return;
+        const forceAltScreenPtyRepaint =
+          forceAltScreenPtyRepaintAfterCjkRepair;
+        forceAltScreenPtyRepaintAfterCjkRepair = false;
         try {
+          const wasAlternateScreen = terminal.buffer.active.type === "alternate";
           const repair = repairTerminalCjkFontCachesIfLoaded(terminal);
           if (repair) {
             fitTerminalIfGridChanged();
-            if (repair.isAlternateScreen) {
-              nudgePtyRepaint(`CJK font repair ${reason}`);
-            }
             console.debug(
               `[TerminalView] CJK glyph caches repaired (${reason})`,
             );
+          }
+          if (
+            repair?.isAlternateScreen ||
+            (forceAltScreenPtyRepaint && wasAlternateScreen)
+          ) {
+            nudgePtyRepaint(`CJK settle repaint ${reason}`);
           }
         } catch (err) {
           console.warn("[TerminalView] CJK glyph cache repair failed:", err);
@@ -191,14 +222,19 @@ export default memo(function TerminalView({
       });
     };
     let resumeRenderFrame: number | null = null;
-    const scheduleResumeRender = (reason: string) => {
+    const scheduleResumeRender = (
+      reason: string,
+      options?: { skipCjkCacheRepair?: boolean },
+    ) => {
       if (disposed || resumeRenderFrame !== null) return;
       resumeRenderFrame = requestAnimationFrame(() => {
         resumeRenderFrame = null;
         if (disposed || !termOpened) return;
         fitTerminalIfGridChanged();
         refreshTerminal();
-        scheduleCjkCacheRepair(`resume ${reason}`);
+        if (!options?.skipCjkCacheRepair) {
+          scheduleCjkCacheRepair(`resume ${reason}`);
+        }
       });
     };
     resumeRenderRef.current = scheduleResumeRender;
@@ -220,7 +256,7 @@ export default memo(function TerminalView({
       clearActivitySettleTimers();
       if (disposed || !reason) return;
       scheduleResumeRender(reason);
-      scheduleCjkCacheRepair(reason);
+      scheduleCjkCacheRepair(reason, { forceAltScreenPtyRepaint: true });
     };
     const cancelActivitySettle = () => {
       pendingActivitySettleReason = null;
@@ -307,12 +343,13 @@ export default memo(function TerminalView({
       const rows = terminal.rows;
       if (!cols || !rows) return;
       try {
+        ptyRepaintNudgeCount += 1;
         window.electronAPI.pty.resize(sessionId, cols + 1, rows);
         nudgeRestoreTimer = setTimeout(() => {
           nudgeRestoreTimer = null;
           if (disposed) return;
           window.electronAPI.pty.resize(sessionId, cols, rows);
-          scheduleResumeRender(reason);
+          scheduleResumeRender(reason, { skipCjkCacheRepair: true });
         }, 50);
       } catch {
         /* ignore */
