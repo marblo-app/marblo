@@ -85,6 +85,8 @@ export const code: Record<keyof typeof koCode, string> = {
   "code.docGraph.empty": "No markdown documents",
   "code.docGraph.emptyHint":
     "Add .md files to the project to see link relationships as a graph",
+  "code.docGraph.noLinksHint":
+    "Try adding links in your docs — [[wikilink]] or [text](target.md)",
   "code.docGraph.noRoot": "Select a project root first",
   "code.docGraph.summary": "{nodes} docs · {edges} links",
   "code.docGraph.orphans": "{count} orphan",
@@ -102,4 +104,14 @@ export const code: Record<keyof typeof koCode, string> = {
   "code.docGraph.tooltip.log": "Timeline (log.md)",
   "code.docGraph.tooltip.orphan": "No links to other docs",
   "code.docGraph.nodeListLabel": "Document graph nodes ({count})",
+  "code.docGraph.guide.toggle": "How to use the document graph",
+  "code.docGraph.guide.step1":
+    "Add [[wikilink]] or a markdown link [text](target.md) in a doc — they become nodes and edges on the graph.",
+  "code.docGraph.guide.step2":
+    "index.md is the list hub; log.md is the timeline.",
+  "code.docGraph.guide.step3":
+    "Orphan docs (0 links) appear faded; backlinks show who references this doc.",
+  "code.docGraph.guide.step4": "Click a node to open the file.",
+  "code.docGraph.guide.diff":
+    "Unlike Obsidian, the LLM/orchestrator keeps and refines the links.",
 };

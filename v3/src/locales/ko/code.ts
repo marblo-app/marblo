@@ -97,6 +97,8 @@ export const code = {
   "code.docGraph.empty": "마크다운 문서가 없습니다",
   "code.docGraph.emptyHint":
     "프로젝트에 .md 파일을 두면 링크 관계가 그래프로 나타납니다",
+  "code.docGraph.noLinksHint":
+    "문서에 링크를 추가해보세요 — [[wikilink]] 또는 [텍스트](대상.md)",
   "code.docGraph.noRoot": "프로젝트 루트를 먼저 선택하세요",
   "code.docGraph.summary": "문서 {nodes} · 링크 {edges}",
   "code.docGraph.orphans": "고아 {count}",
@@ -114,4 +116,14 @@ export const code = {
   "code.docGraph.tooltip.log": "타임라인 (log.md)",
   "code.docGraph.tooltip.orphan": "다른 문서와 링크 없음",
   "code.docGraph.nodeListLabel": "문서 그래프 노드 {count}개",
+  "code.docGraph.guide.toggle": "문서 그래프 사용법",
+  "code.docGraph.guide.step1":
+    "문서에 [[wikilink]] 또는 마크다운 링크 [텍스트](대상.md)를 쓰면 그래프에 노드·엣지로 연결됩니다.",
+  "code.docGraph.guide.step2":
+    "index.md는 목록 허브, log.md는 타임라인으로 표시됩니다.",
+  "code.docGraph.guide.step3":
+    "고아 문서(링크 0)는 투명하게 보이고, 백링크는 이 문서를 참조하는 문서입니다.",
+  "code.docGraph.guide.step4": "노드를 클릭하면 해당 파일이 열립니다.",
+  "code.docGraph.guide.diff":
+    "Obsidian과 달리 LLM/오케스트레이터가 링크를 유지·정제합니다.",
 };
