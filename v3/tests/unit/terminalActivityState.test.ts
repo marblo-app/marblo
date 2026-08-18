@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getTerminalActivitySettleIntent,
   isBusyTerminalActivityState,
   isSettledTerminalActivityState,
   isTerminalActivitySettlingTransition,
@@ -37,5 +38,22 @@ describe("terminal activity state transitions", () => {
       false,
     );
     expect(isTerminalActivitySettlingTransition("idle", "done")).toBe(false);
+  });
+
+  it("normalizes state names before comparing transitions", () => {
+    expect(isTerminalActivitySettlingTransition(" Running ", " idle ")).toBe(
+      true,
+    );
+    expect(isTerminalActivitySettlingTransition("RUNNING", "running")).toBe(
+      false,
+    );
+  });
+
+  it("requests one debounced settle and cancels it when work resumes", () => {
+    expect(getTerminalActivitySettleIntent("streaming", "idle")).toBe(
+      "schedule",
+    );
+    expect(getTerminalActivitySettleIntent("idle", "streaming")).toBe("cancel");
+    expect(getTerminalActivitySettleIntent("idle", "done")).toBe("ignore");
   });
 });
