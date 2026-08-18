@@ -35,9 +35,16 @@ export function MarbloModeTour({
   ready,
   /** 다른 오버레이가 떠 있는가 — 겹쳐 띄우지 않는다. */
   blocked = false,
+  /** 마일스톤 호스트가 조건을 만족시켰는가. */
+  enabled = true,
+  onFinish,
+  onSkip,
 }: {
   ready: boolean;
   blocked?: boolean;
+  enabled?: boolean;
+  onFinish?: () => void;
+  onSkip?: (permanent: boolean) => void;
 }) {
   const { t } = useTranslation();
 
@@ -103,6 +110,7 @@ export function MarbloModeTour({
   );
 
   useEffect(() => {
+    if (!enabled) return;
     if (running || shownThisSession.current) return;
     if (
       !shouldStartTour(record, {
@@ -119,7 +127,7 @@ export function MarbloModeTour({
       telemetry.coachmarkStarted(ADVANCED_TOUR_ID, steps.length);
     });
     return () => cancelAnimationFrame(raf);
-  }, [running, record, ready, blocked, markStarted, steps.length]);
+  }, [enabled, running, record, ready, blocked, markStarted, steps.length]);
 
   const finish = useCallback(
     (total: number) => {
@@ -130,8 +138,9 @@ export function MarbloModeTour({
         total,
         startedAt.current ? Date.now() - startedAt.current : 0,
       );
+      onFinish?.();
     },
-    [markCompleted],
+    [markCompleted, onFinish],
   );
 
   const skip = useCallback(
@@ -139,8 +148,9 @@ export function MarbloModeTour({
       setRunning(false);
       if (permanent) markDismissed(ADVANCED_TOUR_ID);
       telemetry.coachmarkSkipped(ADVANCED_TOUR_ID, stepIndex, total, permanent);
+      onSkip?.(permanent);
     },
-    [markDismissed],
+    [markDismissed, onSkip],
   );
 
   if (!running) return null;

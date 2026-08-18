@@ -11,6 +11,50 @@ import {
   type OnboardingProgress,
 } from "../lib/onboardingProgress";
 
+export type GraduationJourneyMilestone =
+  | "modeTour"
+  | "repoGuide"
+  | "betaSurvey";
+
+export type GraduationJourneyDisposition =
+  | "prompted"
+  | "completed"
+  | "later"
+  | "dismissed";
+
+export interface GraduationMilestoneRecord {
+  promptedAt: number;
+  completedAt: number;
+  laterAt: number;
+  dismissedAt: number;
+}
+
+export type GraduationJourneyState = Record<
+  GraduationJourneyMilestone,
+  GraduationMilestoneRecord
+>;
+
+const GRADUATION_JOURNEY_KEY = "marblo.onboarding.graduationJourney";
+
+export const ONBOARDING_REPO_CONNECTED_EVENT =
+  "marblo:onboarding:repo-connected";
+export const ONBOARDING_REPO_GUIDE_LATER_EVENT =
+  "marblo:onboarding:repo-guide-later";
+export const ONBOARDING_CALENDAR_USED_EVENT = "marblo:onboarding:calendar-used";
+
+const EMPTY_GRADUATION_RECORD: GraduationMilestoneRecord = {
+  promptedAt: 0,
+  completedAt: 0,
+  laterAt: 0,
+  dismissedAt: 0,
+};
+
+export const EMPTY_GRADUATION_JOURNEY: GraduationJourneyState = {
+  modeTour: { ...EMPTY_GRADUATION_RECORD },
+  repoGuide: { ...EMPTY_GRADUATION_RECORD },
+  betaSurvey: { ...EMPTY_GRADUATION_RECORD },
+};
+
 /**
  * Durable onboarding progress for the "시작하기" (Start Here) tab.
  *
@@ -32,10 +76,64 @@ function readString(key: string): string | null {
   }
 }
 
+function finiteAt(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+function parseGraduationJourney(raw: string | null): GraduationJourneyState {
+  if (!raw)
+    return {
+      modeTour: { ...EMPTY_GRADUATION_RECORD },
+      repoGuide: { ...EMPTY_GRADUATION_RECORD },
+      betaSurvey: { ...EMPTY_GRADUATION_RECORD },
+    };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {
+      modeTour: { ...EMPTY_GRADUATION_RECORD },
+      repoGuide: { ...EMPTY_GRADUATION_RECORD },
+      betaSurvey: { ...EMPTY_GRADUATION_RECORD },
+    };
+  }
+  const source =
+    parsed && typeof parsed === "object"
+      ? (parsed as Partial<Record<GraduationJourneyMilestone, unknown>>)
+      : {};
+  const read = (key: GraduationJourneyMilestone): GraduationMilestoneRecord => {
+    const value = source[key];
+    const o =
+      value && typeof value === "object"
+        ? (value as Record<string, unknown>)
+        : {};
+    return {
+      promptedAt: finiteAt(o.promptedAt),
+      completedAt: finiteAt(o.completedAt),
+      laterAt: finiteAt(o.laterAt),
+      dismissedAt: finiteAt(o.dismissedAt),
+    };
+  };
+  return {
+    modeTour: read("modeTour"),
+    repoGuide: read("repoGuide"),
+    betaSurvey: read("betaSurvey"),
+  };
+}
+
 function writeProgress(p: OnboardingProgress): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(ONBOARDING_PROGRESS_KEY, serializeProgress(p));
+  } catch {
+    // Private mode — keep the in-memory value for this session.
+  }
+}
+
+function writeGraduationJourney(journey: GraduationJourneyState): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(GRADUATION_JOURNEY_KEY, JSON.stringify(journey));
   } catch {
     // Private mode — keep the in-memory value for this session.
   }
@@ -71,10 +169,19 @@ export function readInitialProgress(): OnboardingProgress {
 
 interface OnboardingProgressState {
   progress: OnboardingProgress;
+  graduationJourney: GraduationJourneyState;
+  activeGraduationMilestone: GraduationJourneyMilestone | null;
   markDone: (step: WizardStep) => void;
   markSkipped: (step: WizardStep) => void;
   setCurrent: (step: WizardStep) => void;
   setDismissed: (dismissed: boolean) => void;
+  setActiveGraduationMilestone: (
+    milestone: GraduationJourneyMilestone | null,
+  ) => void;
+  markGraduationMilestone: (
+    milestone: GraduationJourneyMilestone,
+    disposition: GraduationJourneyDisposition,
+  ) => void;
 }
 
 export const useOnboardingProgressStore = create<OnboardingProgressState>(
@@ -90,6 +197,10 @@ export const useOnboardingProgressStore = create<OnboardingProgressState>(
 
     return {
       progress: readInitialProgress(),
+      graduationJourney: parseGraduationJourney(
+        readString(GRADUATION_JOURNEY_KEY),
+      ),
+      activeGraduationMilestone: null,
       markDone: (step) => apply((p) => markStepDone(p, step)),
       markSkipped: (step) => apply((p) => markStepSkipped(p, step)),
       setCurrent: (step) => apply((p) => setCurrentStep(p, step)),
@@ -99,6 +210,26 @@ export const useOnboardingProgressStore = create<OnboardingProgressState>(
         // a legacy flag that a later write dropped).
         writeLegacyDismissed(dismissed);
         apply((p) => setDismissed(p, dismissed));
+      },
+      setActiveGraduationMilestone: (milestone) =>
+        set({ activeGraduationMilestone: milestone }),
+      markGraduationMilestone: (milestone, disposition) => {
+        const current = get().graduationJourney;
+        const record = current[milestone];
+        const now = Date.now();
+        const nextRecord: GraduationMilestoneRecord = {
+          ...record,
+          ...(disposition === "prompted" ? { promptedAt: now } : {}),
+          ...(disposition === "completed" ? { completedAt: now } : {}),
+          ...(disposition === "later" ? { laterAt: now } : {}),
+          ...(disposition === "dismissed" ? { dismissedAt: now } : {}),
+        };
+        const next: GraduationJourneyState = {
+          ...current,
+          [milestone]: nextRecord,
+        };
+        writeGraduationJourney(next);
+        set({ graduationJourney: next });
       },
     };
   },

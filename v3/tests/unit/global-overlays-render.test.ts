@@ -56,6 +56,10 @@ vi.mock("../../src/components/onboarding/FirstProjectSurvey", () => ({
   FirstProjectSurvey: () =>
     createElement("div", { "data-testid": "first-project-survey" }),
 }));
+vi.mock("../../src/components/onboarding/OnboardingGraduationJourney", () => ({
+  OnboardingGraduationJourney: () =>
+    createElement("div", { "data-testid": "onboarding-graduation-journey" }),
+}));
 vi.mock("../../src/components/legal/PrivacyConsentGate", () => ({
   PrivacyConsentGate: () =>
     createElement("div", { "data-testid": "privacy-consent-gate" }),

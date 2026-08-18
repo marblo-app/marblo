@@ -13,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useProjectStore } from "../../stores/projectStore";
+import { ONBOARDING_CALENDAR_USED_EVENT } from "../../stores/onboardingProgressStore";
 import { useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
 
@@ -52,7 +53,7 @@ interface FolderOption {
 
 function statusBadge(
   connected: boolean,
-  bound: boolean
+  bound: boolean,
 ): { labelKey: MessageKey; className: string } {
   if (!connected) {
     return {
@@ -96,8 +97,13 @@ export function DriveConnectionPanel() {
   const contactsConnected = connected && scopes.includes(CONTACTS_SCOPE);
   const badge = useMemo(
     () => statusBadge(connected, !!binding),
-    [connected, binding]
+    [connected, binding],
   );
+
+  useEffect(() => {
+    if (!calendarConnected) return;
+    window.dispatchEvent(new CustomEvent(ONBOARDING_CALENDAR_USED_EVENT));
+  }, [calendarConnected]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -109,7 +115,7 @@ export function DriveConnectionPanel() {
       setBinding(projectId ? await drive().binding.get(projectId) : null);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : t("harness.drive.loadError")
+        err instanceof Error ? err.message : t("harness.drive.loadError"),
       );
     } finally {
       setLoading(false);
@@ -143,7 +149,7 @@ export function DriveConnectionPanel() {
       setMessage(t("harness.drive.connected"));
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : t("harness.drive.connectFailed")
+        err instanceof Error ? err.message : t("harness.drive.connectFailed"),
       );
     } finally {
       setConnecting(false);
@@ -165,7 +171,9 @@ export function DriveConnectionPanel() {
       setMessage(t("harness.drive.disconnected"));
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : t("harness.drive.disconnectFailed")
+        err instanceof Error
+          ? err.message
+          : t("harness.drive.disconnectFailed"),
       );
     }
   }, [t]);
@@ -197,11 +205,11 @@ export function DriveConnectionPanel() {
             id: f.id,
             title: f.title,
             modifiedTime: f.modifiedTime,
-          }))
+          })),
       );
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : t("harness.drive.loadError")
+        err instanceof Error ? err.message : t("harness.drive.loadError"),
       );
     } finally {
       setSearching(false);
@@ -230,17 +238,17 @@ export function DriveConnectionPanel() {
         setBinding(result.binding);
         setFolders(null);
         setMessage(
-          `${t("harness.drive.bound")} ${t("harness.drive.appliesImmediately")}`
+          `${t("harness.drive.bound")} ${t("harness.drive.appliesImmediately")}`,
         );
       } catch (err) {
         setError(
-          err instanceof Error ? err.message : t("harness.drive.bindFailed")
+          err instanceof Error ? err.message : t("harness.drive.bindFailed"),
         );
       } finally {
         setSavingBinding(false);
       }
     },
-    [projectId, t]
+    [projectId, t],
   );
 
   const clearFolder = useCallback(async () => {
@@ -258,7 +266,7 @@ export function DriveConnectionPanel() {
       setMessage(t("harness.drive.cleared"));
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : t("harness.drive.clearFailed")
+        err instanceof Error ? err.message : t("harness.drive.clearFailed"),
       );
     }
   }, [projectId, t]);
@@ -292,11 +300,11 @@ export function DriveConnectionPanel() {
       setMessage(
         (count === 0
           ? t("harness.drive.previewEmpty")
-          : t("harness.drive.previewOk", { count: String(count) })) + truncated
+          : t("harness.drive.previewOk", { count: String(count) })) + truncated,
       );
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : t("harness.drive.loadError")
+        err instanceof Error ? err.message : t("harness.drive.loadError"),
       );
     } finally {
       setPreviewing(false);
@@ -345,8 +353,8 @@ export function DriveConnectionPanel() {
             {connecting
               ? t("harness.drive.connecting")
               : connected
-              ? t("harness.drive.reconnect")
-              : t("harness.drive.connect")}
+                ? t("harness.drive.reconnect")
+                : t("harness.drive.connect")}
           </button>
           {connected && (
             <button
