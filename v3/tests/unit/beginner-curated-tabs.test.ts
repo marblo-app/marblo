@@ -356,6 +356,16 @@ describe("심플 큐레이트 탭 — 배선", () => {
 
     expect(screen.getByTestId("stub-harness").dataset.modal).toBe("0");
   });
+
+  it("★코드 탭은 심플 전용 사본이 아니라 큐레이트 패널의 CodeTab 자리로 열린다", () => {
+    render(createElement(BeginnerShell));
+
+    fireEvent.click(screen.getByTestId("beginner-tab-code"));
+
+    expect(screen.getByTestId("beginner-tabpanel-code")).toBeTruthy();
+    expect(screen.getByTestId("stub-code")).toBeTruthy();
+    expect(screen.getByTestId("stub-sidebar").dataset.open).toBe("1");
+  });
 });
 
 describe("심플 큐레이트 탭 — 설정으로 가는 길", () => {

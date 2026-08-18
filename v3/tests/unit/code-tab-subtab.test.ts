@@ -129,6 +129,19 @@ afterEach(() => {
 });
 
 describe("CodeTab subtab switching", () => {
+  it("renders the editor/file-graph subtabs and Markdown preview from one shared CodeTab", () => {
+    render(createElement(CodeTab));
+
+    expect(
+      screen.getByTestId("code-editor-subtab").getAttribute("aria-selected"),
+    ).toBe("true");
+    expect(screen.getByTestId("code-doc-graph-subtab")).toBeTruthy();
+    expect(screen.getByTestId("markdown-preview")).toBeTruthy();
+    expect(
+      screen.getByTestId("markdown-preview").getAttribute("data-file-path"),
+    ).toBe("/tmp/project/README.md");
+  });
+
   it("keeps the graph visible when reveal-doc-graph does not change the active file", async () => {
     render(createElement(CodeTab));
 
