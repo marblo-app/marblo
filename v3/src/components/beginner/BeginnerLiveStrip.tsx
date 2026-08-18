@@ -1,54 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import {
-  groupBeginnerBoard,
   summarizeBeginnerProgress,
-  type BeginnerBoardColumn,
   type BeginnerProgressView,
 } from "../../lib/beginnerMode";
 import { useAgentStore } from "../../stores/agentStore";
 import { useTaskStore } from "../../stores/taskStore";
 import type { Agent } from "../../types/agent";
 import type { Task } from "../../types/task";
-import { KanbanColumn } from "../board/KanbanColumn";
+import { KanbanBoard } from "../board/KanbanBoard";
 import { BLOCK, BUTTON_GHOST, SectionLabel } from "./beginnerUi";
 
 /**
- * ★S4 해결 표면 — 챗 **안**의 미니 라이브.
+ * ★S4 해결 표면 — 챗 **안**의 라이브.
  *
- * 활성화 진단 §S4 가 관측한 유일한 실 dead-end 는 "첫 티켓이 성공적으로 전달됐는데
- * 화면에서 아무 일도 일어나지 않음" 이었다(같은 버튼 14초 간격 3연타 → 이탈).
- * 근인 중 하나는 오케가 일하는 곳(터미널·보드)이 그 화면에 아예 없었다는 것이다.
+ * 종전은 3단계 세로 미니보드(할 일/진행 중/완료)였지만, 사장님 피드백으로
+ * **마블로 모드 Board(`KanbanBoard`)를 그대로** 얹는다 — 5단계 칸반
+ * (TODO·CLAIMED·IN_PROGRESS·REVIEW·DONE) + 그래프 토글. 보기는 마블로와
+ * 같고, 조작만 `simplified`/`compactCards` 로 줄인다(중복 보드 구현 금지).
  *
- * 그래서 이 컴포넌트는 **유저를 다른 탭으로 보내지 않는다.** 대화창 바로 위에서
- * 지금 오케/에이전트가 뭘 하고 있는지 말한다. 세 층이다:
- *
- *   1. 한 줄 헤드라인 — 국면 판정은 순수함수
- *      (`lib/beginnerMode.summarizeBeginnerProgress`)에 있고 여기서는 스토어를
- *      물려 그리기만 한다. 라이브 확인이 실계정을 요구하는 구간이라 규칙은
- *      유닛테스트로 못박아야 한다.
- *   2. ★미니 보드 — 티켓이 할 일 → 진행 중 → 완료로 **움직이는 것**. 보드는
- *      마블로의 핵심이라, 축소판이라도 첫날부터 보여 준다. ★카드는 누를 수
- *      있다(`onTaskClick`) — 움직이기만 하고 눌리지 않는 보드는 그림으로 읽힌다.
- *
- * ★2 는 새로 만든 컴포넌트가 아니다. 어드밴스드 보드의 `KanbanColumn` 을
- * `compact` 로 그대로 재사용한다 — 미니 보드가 자기만의 카드 렌더를 갖는 순간
- * 두 화면이 갈라지고, 갈라진 쪽은 반드시 낡는다.
- *
- * ★"누가 붙어 있나"(예전의 3층 미니 에이전트 뷰)는 이 스트립을 떠나
- * `BeginnerAgentsPane` 으로 갔다 — 하단 2분할의 오른쪽 열이다. 여기 두면 스트립이
- * 세로로 계속 자라 정작 대화창(이 화면의 주인공)을 아래로 밀어냈고, 요약만으로는
- * "누가 **뭘** 하나" 에 답하지 못했다.
- *
- * 추상화 수준은 여전히 낮게 유지한다: 브랜치 이름·모델명·상태머신은 compact
- * 프롭이 걷어낸다. 비기너에게 정확한 해상도는 "일감이 움직인다" 이고, 세부는
- * 승격 후 보드에서 본다.
- *
- * ★단 **진입**은 정보와 다르게 다룬다(`showWorktreeDiff`·`onAgentClick`).
- * 카드에서 갈 수 있는 곳이 없으면 이 보드는 다시 "움직이는 그림" 이 된다 —
- * 카드 클릭(상세)을 붙인 것과 같은 이유로, 결과(바뀐 코드)와 사람(에이전트)
- * 으로도 나갈 수 있어야 한다. 두 진입 모두 엑스퍼트 카드와 **같은 액션**을
- * 부른다(재구현 0) — 심플에서 달라지는 건 라벨과 크기뿐이다.
+ * 헤드라인(thinking/stalled/working)은 그대로 둔다 — 보드가 채워지기 전
+ * "아무 일도 안 일어난다" 를 막는 S4 계약이다.
  */
 export function BeginnerLiveStrip({
   sentAt,
@@ -62,23 +34,15 @@ export function BeginnerLiveStrip({
   sentAt: number;
   onResend: () => void;
   resending: boolean;
-  /** 미니 보드 카드 클릭. 생략하면 카드가 눌리지 않는다(종전 동작). */
+  /** 보드 카드 클릭 → 비기너 티켓 상세 모달. */
   onTaskClick?: (task: Task) => void;
-  /**
-   * 카드의 "바뀐 코드 보기" 진입. 켜면 워크트리 목록 신선도도 카드가 챙긴다
-   * (TaskCard 주석). 생략하면 그리지 않는다 = 종전 동작.
-   */
   showWorktreeDiff?: boolean;
-  /** 카드의 담당 에이전트 칩 클릭 → 그 에이전트의 터미널. */
   onAgentClick?: (agent: Agent) => void;
 }) {
   const { t } = useTranslation();
   const tasks = useTaskStore((s) => s.tasks);
   const agents = useAgentStore((s) => s.agents);
 
-  // `thinking → stalled` 는 시간이 흘러야 일어나는 전이라, 스토어 변화만으로는
-  // 절대 다시 렌더되지 않는다(티켓이 0개면 tasks 도 안 바뀐다). 보낸 뒤에만 도는
-  // 5초 틱이 그 전이를 깨운다 — 안 보낸 상태에선 타이머를 아예 걸지 않는다.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (sentAt <= 0) return;
@@ -98,8 +62,6 @@ export function BeginnerLiveStrip({
     [sentAt, now, tasks, agents],
   );
 
-  const columns = useMemo(() => groupBeginnerBoard(tasks), [tasks]);
-
   if (view.phase === "idle") return null;
 
   const headline =
@@ -117,17 +79,12 @@ export function BeginnerLiveStrip({
     <section
       data-testid="beginner-live-strip"
       data-phase={view.phase}
-      // ★한 장의 패널 안에서 블록을 헤어라인으로 나눈다. 예전엔 헤드라인·미니
-      // 보드·미니 팀뷰가 각자 `mt-3` 로 떠 있어 경계가 없는 채로 벌어졌다 —
-      // 그게 "성기다" 의 정체였다. divide-y 는 간격을 0 으로 줄이는 대신 줄을
-      // 그어 위계를 만든다.
-      className={`flex flex-col divide-y overflow-hidden rounded-lg border ${
+      className={`flex min-h-0 flex-1 flex-col divide-y overflow-hidden rounded-lg border ${
         view.phase === "stalled"
           ? "divide-[#f9e2af]/25 border-[#f9e2af]/35 bg-[#f9e2af]/10"
           : "divide-[#313244] border-[#313244] bg-[#181825]"
       }`}
     >
-      {/* ── 헤드라인 블록 ─────────────────────────────────────────────── */}
       <div className={BLOCK}>
         <SectionLabel
           trailing={
@@ -149,8 +106,6 @@ export function BeginnerLiveStrip({
           {headline}
         </p>
 
-        {/* 막힘 안내 — 진단 §7 P1-2 ④. 90초가 지나도 티켓이 없으면 "기다리세요"
-            로 방치하지 않고 다음 행동을 준다. */}
         {view.showStallHelp && (
           <div className="mt-2.5 flex flex-wrap items-center gap-3">
             <p className="min-w-0 flex-1 text-xs leading-5 text-[#a6adc8]">
@@ -169,58 +124,22 @@ export function BeginnerLiveStrip({
         )}
       </div>
 
-      {/* ── ★미니 보드 — 티켓이 하나라도 생긴 뒤에만. 티켓 0개일 때 빈 3칸을
-          띄우면 "아무 일도 안 일어난다" 는 인상을 오히려 강화한다(그 국면의
-          답은 위 헤드라인의 '읽는 중' 이다). ───────────────────────────── */}
-      {view.totalTasks > 0 && (
-        <div className={BLOCK}>
-          <SectionLabel>{t("beginner.board.label")}</SectionLabel>
-          {/* 세로 레인 셋. 상한(BEGINNER_COLUMN_LIMIT=4)이 있어도 세 레인이 다
-              차면 12장이라, 챗을 화면 밖으로 밀지 않게 여기서 한 번 더 자른다.
-              17rem 은 임의의 수가 아니다 — 흔한 국면(티켓 대여섯 건, 그중 막힌
-              카드 하나 = 실측 244px)이 **잘리지 않고** 다 들어가는 높이다.
-              그보다 낮게 잡으면 마지막 '완료' 레인이 반쯤 잘려 보이는데, 티켓이
-              완료로 넘어가는 걸 보여 주는 게 이 화면의 목적이라 그 잘림은 특히
-              나쁘다. 여기서 자리를 더 내줘도 되는 이유는 미니 보드가 뜨는
-              시점에는 위 첫 요청 카드가 이미 한 줄로 접혀 있기 때문이다
-              (보드 = 전달 후에만 생기는 티켓의 결과). */}
-          <div
-            data-testid="beginner-mini-board"
-            className="mt-2 flex max-h-[17rem] flex-col gap-2 overflow-y-auto"
-          >
-            {columns.map((col) => (
-              <KanbanColumn
-                key={col.column}
-                compact
-                status={col.status}
-                label={t(COLUMN_LABEL_KEY[col.column])}
-                tasks={col.tasks}
-                count={col.total}
-                hiddenCount={col.hiddenCount}
-                onTaskClick={onTaskClick}
-                showWorktreeDiff={showWorktreeDiff}
-                onAgentClick={onAgentClick}
-              />
-            ))}
-          </div>
-        </div>
-      )}
+      {/* ★마블로 Board 그대로 — 5단계 칸반 + 그래프. 옛 3열 미니보드 제거. */}
+      <div
+        data-testid="beginner-mini-board"
+        className="min-h-0 flex-1 overflow-hidden"
+      >
+        <KanbanBoard
+          simplified
+          compactCards
+          onTaskClick={onTaskClick}
+          showWorktreeDiff={showWorktreeDiff}
+          onAgentClick={onAgentClick}
+        />
+      </div>
     </section>
   );
 }
-
-/**
- * 압축 컬럼 → 라벨 키. 어드밴스드 보드의 영문 상태명(TODO/IN PROGRESS/DONE)을
- * 그대로 쓰지 않는 이유는, 그것들이 상태 머신의 이름이지 사람 말이 아니라서다.
- */
-const COLUMN_LABEL_KEY: Record<
-  BeginnerBoardColumn,
-  "beginner.board.todo" | "beginner.board.doing" | "beginner.board.done"
-> = {
-  todo: "beginner.board.todo",
-  doing: "beginner.board.doing",
-  done: "beginner.board.done",
-};
 
 function Pulse({ phase }: { phase: BeginnerProgressView["phase"] }) {
   const color =

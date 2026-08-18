@@ -499,36 +499,39 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       );
       await expect(cr.page.locator(".xterm").first()).toBeVisible();
 
-      // ── ★S4: 상단 진행 보드 ───────────────────────────────────────────
+      // ── ★S4: 상단 진행 보드 (마블로 5단계 칸반+그래프) ────────────────
       expect(await livePhase(cr.page)).toBe("thinking");
-      // 티켓이 0개인 동안은 빈 3칸을 띄우지 않는다.
-      expect(await cr.page.getByTestId("beginner-mini-board").count()).toBe(0);
+      // 마블로 Board 재사용 — idle 이 아니면 티켓 0개여도 5열을 띄운다.
+      await expect(cr.page.getByTestId("beginner-marblo-board")).toBeVisible();
+      await expect(cr.page.getByTestId("kanban-column")).toHaveCount(5);
+      await expect(cr.page.getByTestId("board-view-graph")).toBeVisible();
       await cr.shot("G4-strip-thinking");
 
-      // 티켓이 생기면 → planned + 미니 보드.
+      // 티켓이 생기면 → planned + 5단계 칸반.
       await injectTasks(cr.page, [
         { id: "t1", title: "README 읽기", status: "TODO" },
         { id: "t2", title: "가이드 초안", status: "IN_PROGRESS" },
-        // BLOCKED 는 별도 컬럼이 아니라 "진행 중" 으로 접힌다 — 막힌 티켓이
-        // 화면에서 사라지는 것이야말로 이 화면이 고치려는 dead-end 다.
+        // BLOCKED 는 활성 5열이 아니라 정체 레인(마블로와 동일).
         { id: "t3", title: "막힌 티켓", status: "BLOCKED" },
       ]);
       expect(await livePhase(cr.page)).toBe("planned");
       await expect(cr.page.getByTestId("beginner-mini-board")).toBeVisible();
-      const columns = cr.page.getByTestId("beginner-mini-column");
-      await expect(columns).toHaveCount(3);
+      await expect(cr.page.getByTestId("beginner-marblo-board")).toBeVisible();
+      const columns = cr.page.getByTestId("kanban-column");
+      await expect(columns).toHaveCount(5);
       await expect(
-        columns.filter({ has: cr.page.getByText("막힌 티켓") }),
+        columns.filter({ has: cr.page.getByText("README 읽기") }),
+      ).toHaveAttribute("data-column-status", "TODO");
+      await expect(
+        columns.filter({ has: cr.page.getByText("가이드 초안") }),
       ).toHaveAttribute("data-column-status", "IN_PROGRESS");
+      await expect(cr.page.getByTestId("stuck-lane")).toBeVisible();
       await cr.shot("G4-strip-planned-miniboard");
 
-      // ── ★미니 보드는 눌린다 — 상세는 표준 티켓 모달로 열린다 ─────────
-      // #975 이후 심플 셸도 상세/터미널 도착지를 표준 모달로 통일했다. 축소판
-      // `BeginnerTaskModal` 이 아니라, 보드 상세와 같은 정보면을 여는 것이 계약이다.
-      await cr.page
-        .getByTestId("beginner-mini-task")
-        .filter({ hasText: "막힌 티켓" })
-        .click();
+      // ── ★칸반은 눌린다 — 상세는 표준 티켓 모달로 열린다 ───────────────
+      // #975 이후 심플 셸도 상세/터미널 도착지를 표준 모달로 통일했다.
+      await cr.page.getByTestId("stuck-lane").locator("button").first().click();
+      await cr.page.getByText("막힌 티켓").click();
       await expect(
         cr.page.getByRole("heading", { name: "막힌 티켓" }),
       ).toBeVisible();

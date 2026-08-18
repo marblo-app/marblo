@@ -642,17 +642,14 @@ export function BeginnerShell() {
                   </div>
                 ) : (
                   <>
-                    {/* 상단 대화 입력은 제거했다. 오케 입력은 아래 실 PTY 패널 하나로
-                  일원화하고, 진행 보드가 워크스페이스 상단을 채운다. */}
+                    {/* 상단: 마블로 Board(5단계 칸반+그래프) 그대로. 옛 3열 미니보드
+                  제거. 오케 입력은 아래 실 PTY 패널 하나로 일원화. */}
                     <div
-                      className="min-h-0 shrink overflow-y-auto max-h-[42%]"
+                      className="flex max-h-[48%] min-h-0 flex-[2_1_auto] flex-col overflow-hidden empty:hidden"
                       data-coach="beginner-live"
                     >
-                      {/* ★카드의 두 진입은 셸이 목적지를 갖고 있을 때만 켠다:
-                        "바뀐 코드 보기" 는 큐레이트 코드 탭(위 점프 소비)이,
-                        에이전트 칩은 에이전트 패널과 **같은** 터미널 모달이
-                        받는다 — 한 에이전트로 가는 문이 둘이어도 도착지는
-                        하나여야 한다. */}
+                      {/* ★카드 클릭 → TaskDetailModal(#971). compact 카드의
+                        "바뀐 코드"·에이전트 칩도 셸이 목적지를 갖고 있을 때만. */}
                       <BeginnerLiveStrip
                         sentAt={ask.deliveredAt}
                         onResend={() => void ask.resend()}

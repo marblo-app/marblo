@@ -9,6 +9,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { RefreshCw } from "lucide-react";
+import type { Agent } from "../../types/agent";
 import type { Task, TaskStatus, AgentRole } from "../../types/task";
 import { useProjectStore } from "../../stores/projectStore";
 import { useTaskStore } from "../../stores/taskStore";
@@ -56,7 +57,31 @@ function readViewMode(): BoardViewMode {
   }
 }
 
-export function KanbanBoard() {
+export interface KanbanBoardProps {
+  /**
+   * ★비기너 셸 임베드. 보기는 마블로와 동일(5단계 칸반 + 그래프 토글)이고
+   * 조작만 줄인다 — New Task / AI 분해 / 역할 필터 / DnD 를 끄고 카드는
+   * compact 로 그린다. 상세 모달은 `onTaskClick` 이 있으면 호스트가 연다.
+   */
+  simplified?: boolean;
+  /** 카드만 compact (simplified 와 함께 쓰면 기본 true). */
+  compactCards?: boolean;
+  /** 외부 상세 핸들러. 있으면 내부 TaskDetailModal 을 띄우지 않는다. */
+  onTaskClick?: (task: Task) => void;
+  /** compact 카드의 담당 에이전트 칩 → 터미널. */
+  onAgentClick?: (agent: Agent) => void;
+  /** compact 카드의 "바뀐 코드 보기" 진입. */
+  showWorktreeDiff?: boolean;
+}
+
+export function KanbanBoard({
+  simplified = false,
+  compactCards,
+  onTaskClick,
+  onAgentClick,
+  showWorktreeDiff,
+}: KanbanBoardProps = {}) {
+  const useCompactCards = compactCards ?? simplified;
   const { t } = useTranslation();
   const { user } = useAuth();
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -74,6 +99,24 @@ export function KanbanBoard() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showOrchestrator, setShowOrchestrator] = useState(false);
   const [viewMode, setViewMode] = useState<BoardViewMode>(readViewMode);
+
+  const handleTaskClick = useCallback(
+    (task: Task) => {
+      if (onTaskClick) {
+        onTaskClick(task);
+        return;
+      }
+      // simplified 임베드는 호스트 상세 모달을 쓰므로, 핸들러가 없으면
+      // 카드가 "눌러지는 것처럼" 보이면 안 된다(시연 피드백 ②).
+      if (simplified) return;
+      setSelectedTask(task);
+    },
+    [onTaskClick, simplified],
+  );
+
+  /** 컬럼/그래프에 넘길 클릭 — simplified 이고 호스트 핸들러 없으면 undefined. */
+  const columnTaskClick =
+    onTaskClick || !simplified ? handleTaskClick : undefined;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -174,9 +217,9 @@ export function KanbanBoard() {
     if (!pendingJump || pendingJump.type !== "task") return;
     if (tasks.length === 0) return;
     const task = tasks.find((t) => t.id === pendingJump.id);
-    if (task) setSelectedTask(task);
+    if (task) handleTaskClick(task);
     consumeJump();
-  }, [pendingJump, tasks, consumeJump]);
+  }, [pendingJump, tasks, consumeJump, handleTaskClick]);
 
   const toggleRole = (role: AgentRole) => {
     setRoleFilters((prev) => {
@@ -292,40 +335,81 @@ export function KanbanBoard() {
     );
   }
 
-  return (
-    <div className="flex flex-col h-full">
-      <div className="px-4 pt-3">
-        <FirstShareNudge
-          projectId={currentProject.id}
-          surface="board"
-          enabled={currentProject.ownerId === user?.uid}
+  const kanbanColumns = (
+    <div
+      className={`flex-1 overflow-x-auto overflow-y-hidden ${simplified ? "p-2" : "p-4"}`}
+    >
+      <div className={`flex h-full ${simplified ? "gap-2" : "gap-4"}`}>
+        {COLUMN_STATUSES.map((status) => (
+          <KanbanColumn
+            key={status}
+            status={status}
+            tasks={tasksByColumn(status)}
+            onTaskClick={columnTaskClick}
+            isDropTarget={!simplified && validDropStatuses.has(status)}
+            cardCompact={useCompactCards}
+            showWorktreeDiff={showWorktreeDiff}
+            onAgentClick={onAgentClick}
+          />
+        ))}
+        {/* DONE 우측 — 드롭 타깃이 아니다. 정체는 사용자가 끌어다 놓는
+            컬럼이 아니라 판정 결과라, 끌어다 놓아도 판정이 그대로면 즉시
+            되돌아온다. simplified 에서도 보여 마블로와 같은 5+정체 구성을 유지. */}
+        <StuckLane
+          groups={stuck}
+          hidden={hidden}
+          onTaskClick={columnTaskClick ?? (() => {})}
         />
       </div>
+    </div>
+  );
 
-      {/* Toolbar */}
-      <div className="flex items-center gap-4 px-4 py-3 border-b border-gray-700/50 flex-shrink-0">
-        {/* Project name (read-only, selection now in Header) */}
-        <span className="text-sm font-medium text-gray-300">
-          {currentProject.name}
-        </span>
-
-        {/* Role Filters */}
-        <div className="flex items-center gap-2">
-          {ROLES.map((role) => (
-            <label
-              key={role}
-              className="flex items-center gap-1 cursor-pointer select-none"
-            >
-              <input
-                type="checkbox"
-                checked={roleFilters.has(role)}
-                onChange={() => toggleRole(role)}
-                className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-0 focus:ring-offset-0"
-              />
-              <span className="text-xs text-gray-400">{role}</span>
-            </label>
-          ))}
+  return (
+    <div
+      className="flex flex-col h-full"
+      data-testid={simplified ? "beginner-marblo-board" : "kanban-board"}
+      data-simplified={simplified ? "true" : undefined}
+    >
+      {!simplified && (
+        <div className="px-4 pt-3">
+          <FirstShareNudge
+            projectId={currentProject.id}
+            surface="board"
+            enabled={currentProject.ownerId === user?.uid}
+          />
         </div>
+      )}
+
+      {/* Toolbar — simplified 는 칸반↔그래프 토글·개수·새로고침만 남긴다. */}
+      <div
+        className={`flex flex-shrink-0 items-center border-b border-gray-700/50 ${
+          simplified ? "gap-2 px-2 py-1.5" : "gap-4 px-4 py-3"
+        }`}
+      >
+        {!simplified && (
+          <>
+            <span className="text-sm font-medium text-gray-300">
+              {currentProject.name}
+            </span>
+
+            <div className="flex items-center gap-2">
+              {ROLES.map((role) => (
+                <label
+                  key={role}
+                  className="flex items-center gap-1 cursor-pointer select-none"
+                >
+                  <input
+                    type="checkbox"
+                    checked={roleFilters.has(role)}
+                    onChange={() => toggleRole(role)}
+                    className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-0 focus:ring-offset-0"
+                  />
+                  <span className="text-xs text-gray-400">{role}</span>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
 
         <div className="flex-1" />
 
@@ -337,6 +421,7 @@ export function KanbanBoard() {
             onClick={() => setViewMode("kanban")}
             aria-pressed={viewMode === "kanban"}
             title={t("board.view.kanbanTip")}
+            data-testid="board-view-kanban"
             className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
               viewMode === "kanban"
                 ? "bg-gray-700 text-gray-100"
@@ -350,6 +435,7 @@ export function KanbanBoard() {
             onClick={() => setViewMode("graph")}
             aria-pressed={viewMode === "graph"}
             title={t("board.view.graphTip")}
+            data-testid="board-view-graph"
             className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
               viewMode === "graph"
                 ? "bg-gray-700 text-gray-100"
@@ -360,8 +446,6 @@ export function KanbanBoard() {
           </button>
         </div>
 
-        {/* Task count — 보관/삭제로 감춘 티켓은 빠진다(화면에 없는 걸 세지
-            않는다). 정체분은 여전히 보드 위에 있으므로 포함. */}
         <span className="text-xs text-gray-500">
           {visibleCount} task{visibleCount !== 1 ? "s" : ""}
         </span>
@@ -377,8 +461,7 @@ export function KanbanBoard() {
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
 
-        {/* AI Decompose button */}
-        {canUse("orchestrator") && (
+        {!simplified && canUse("orchestrator") && (
           <button
             onClick={() => setShowOrchestrator(true)}
             className="flex items-center gap-1.5 rounded border border-purple-500/50 bg-purple-500/10 px-3 py-1.5 text-sm font-medium text-purple-400 hover:bg-purple-500/20"
@@ -400,48 +483,33 @@ export function KanbanBoard() {
           </button>
         )}
 
-        {/* Create button */}
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500"
-        >
-          + New Task
-        </button>
+        {!simplified && (
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500"
+          >
+            + New Task
+          </button>
+        )}
       </div>
 
-      {/* Board body — 뷰 토글에 따라 칸반 컬럼 또는 의존 그래프. 두 뷰가 같은
-          selectedTask 를 쓰므로 상세는 아래 TaskDetailModal 하나로 끝난다. */}
+      {/* Board body — 뷰 토글에 따라 칸반 컬럼 또는 의존 그래프. */}
       {viewMode === "graph" ? (
         <div className="min-h-0 flex-1">
-          <TaskGraphView tasks={graphTasks} onSelect={setSelectedTask} />
+          <TaskGraphView
+            tasks={graphTasks}
+            onSelect={columnTaskClick ?? (() => {})}
+          />
         </div>
+      ) : simplified ? (
+        kanbanColumns
       ) : (
         <DndContext
           sensors={sensors}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
-            <div className="flex gap-4 h-full">
-              {COLUMN_STATUSES.map((status) => (
-                <KanbanColumn
-                  key={status}
-                  status={status}
-                  tasks={tasksByColumn(status)}
-                  onTaskClick={setSelectedTask}
-                  isDropTarget={validDropStatuses.has(status)}
-                />
-              ))}
-              {/* DONE 우측 — 드롭 타깃이 아니다. 정체는 사용자가 끌어다 놓는
-                컬럼이 아니라 판정 결과라, 끌어다 놓아도 판정이 그대로면 즉시
-                되돌아온다. */}
-              <StuckLane
-                groups={stuck}
-                hidden={hidden}
-                onTaskClick={setSelectedTask}
-              />
-            </div>
-          </div>
+          {kanbanColumns}
           <DragOverlay>
             {activeTask && (
               <div className="w-[220px] opacity-90">
@@ -452,20 +520,20 @@ export function KanbanBoard() {
         </DndContext>
       )}
 
-      {/* Modals */}
-      {showCreateModal && currentProject && (
+      {/* Modals — simplified + onTaskClick 이면 호스트(비기너 셸)가 상세를 연다. */}
+      {!simplified && showCreateModal && currentProject && (
         <TaskCreateModal
           projectId={currentProject.id}
           onClose={() => setShowCreateModal(false)}
         />
       )}
-      {selectedTask && (
+      {!onTaskClick && selectedTask && (
         <TaskDetailModal
           task={selectedTask}
           onClose={() => setSelectedTask(null)}
         />
       )}
-      {showOrchestrator && (
+      {!simplified && showOrchestrator && (
         <OrchestratorChat onClose={() => setShowOrchestrator(false)} />
       )}
     </div>
