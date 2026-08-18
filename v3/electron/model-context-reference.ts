@@ -69,6 +69,7 @@ const SRC = {
     "https://platform.minimax.io/docs/api-reference/text-anthropic-api",
   kimiCodeModels: "https://www.kimi.com/code/docs/en/kimi-code/models.html",
   upstageSolarPro4: "https://www.upstage.ai/blog/en/solar-pro-4",
+  deepseekPricing: "https://api-docs.deepseek.com/quick_start/pricing",
 } as const;
 
 /** 이 표 전체를 수집한 날. 행마다 반복하지 않으려고 상수로 뺀다. */
@@ -233,6 +234,24 @@ const RECORDS: ContextWindowRecord[] = [
     source: SRC.upstageSolarPro4,
     asOf: "2026-08-15",
     note: "Solar Pro 4 발표문이 512K context / up to 128K output tokens 로 적는다. 같은 문서가 OpenAI 호환 endpoint+model name(solar-pro4) 과 공식 단가도 함께 밝힌다.",
+  },
+
+  // ── DeepSeek V4 ───────────────────────────────────────────────────────
+  {
+    model: "deepseek-v4-flash",
+    tokens: 1_000_000,
+    maxOutputTokens: 384_000,
+    source: SRC.deepseekPricing,
+    asOf: "2026-08-18",
+    note: "공식 DeepSeek API Models & Pricing 표가 DeepSeek-V4-Flash-0731 행에 LENGTH 1M / MAX OUTPUT 384K 를 적는다.",
+  },
+  {
+    model: "deepseek-v4-pro",
+    tokens: 1_000_000,
+    maxOutputTokens: 384_000,
+    source: SRC.deepseekPricing,
+    asOf: "2026-08-18",
+    note: "공식 DeepSeek API Models & Pricing 표가 V4 계열에 LENGTH 1M / MAX OUTPUT 384K 를 적는다. 레지스트리의 DeepSeek-V4-Pro-0813 스폰 행과 같은 공식 가격표 출처를 쓴다.",
   },
 ];
 

@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import {
+  dismissFundingGuide,
   dismissOnrampBlock,
   injectProject,
   launchCleanRoom,
@@ -75,17 +76,27 @@ async function openStep(page: Page, label: string): Promise<void> {
   await waitForAppShell(page);
   await dismissAdvancedTour(page);
   await dismissOnrampBlock(page);
+  await dismissFundingGuide(page);
   const tab = page.getByRole("tab", { name: START_HERE, exact: true }).first();
   if ((await tab.getAttribute("aria-selected").catch(() => null)) !== "true") {
     await tab.click();
   }
   const step = STEP_ID[label];
   if (!step) throw new Error(`알 수 없는 시작하기 스텝: ${label}`);
-  await page
+  const button = page
     .getByTestId(`start-here-step-${step}`)
     .locator("button")
-    .first()
-    .click();
+    .first();
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      await button.click({ timeout: 2500 });
+      break;
+    } catch (err) {
+      if (attempt === 3) throw err;
+      await dismissOnrampBlock(page);
+      await dismissFundingGuide(page);
+    }
+  }
   await page.waitForTimeout(600);
 }
 

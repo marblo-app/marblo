@@ -1115,6 +1115,20 @@ export async function dismissOnrampBlock(page: Page): Promise<void> {
 }
 
 /**
+ * FundingGuideHost 의 구독 안내 모달을 닫는다. 이 모달도 전면 오버레이라,
+ * 인증/설치 플로우 자체가 검증 대상인 spec 은 먼저 치워야 버튼에 도달한다.
+ */
+export async function dismissFundingGuide(page: Page): Promise<void> {
+  const modal = page.getByTestId("beginner-funding-modal").first();
+  await modal.waitFor({ state: "visible", timeout: 1200 }).catch(() => {});
+  const x = page.getByTestId("beginner-funding-close").first();
+  if (!(await x.isVisible().catch(() => false))) return;
+  await x.click().catch(() => {});
+  await modal.waitFor({ state: "hidden", timeout: 3000 }).catch(() => {});
+  await page.waitForTimeout(300);
+}
+
+/**
  * 워크스페이스 셸의 우측 탭 전환 (라벨 = WorkTabs 의 i18n 라벨).
  *
  * ★탭을 누르기 전에 온램프 차단 모달을 먼저 치운다. 그 모달은 `fixed inset-0`
@@ -1131,6 +1145,7 @@ export async function openWorkTab(page: Page, label: string): Promise<void> {
   // 곧 "셸이 떴다"였지만(F5), 이제 모달이 먼저 끝나므로 명시적으로 기다린다.
   await waitForAppShell(page);
   await dismissOnrampBlock(page);
+  await dismissFundingGuide(page);
   await page.locator(`button:has-text("${label}")`).first().click();
   await page.waitForTimeout(400);
 }
