@@ -147,7 +147,7 @@ describe("Upstage Solar 주입 — OPENAI_* 전부-or-전무", () => {
     });
   });
 
-  it("키가 있으면 OPENAI_BASE_URL 과 OPENAI_API_KEY 가 함께 주입된다", () => {
+  it("키가 있으면 OPENAI_* 주입 + Codex model_provider=upstage 강제", () => {
     withUpstageKey(FAKE_KEY, () => {
       const { resolved, missing } = resolveVendorEnvProfile(
         envProfileForModel(SOLAR_ID)
@@ -162,7 +162,25 @@ describe("Upstage Solar 주입 — OPENAI_* 전부-or-전무", () => {
       const { cfg } = launchSolar();
       expect(cfg.env.OPENAI_BASE_URL).toBe(UPSTAGE_ENDPOINT);
       expect(cfg.env.OPENAI_API_KEY).toBe(FAKE_KEY);
+      // Codex env_key=UPSTAGE_API_KEY 경로 — ChatGPT 계정 우회용
+      expect(cfg.env.UPSTAGE_API_KEY).toBe(FAKE_KEY);
       expect(cfg.env.CODEX_HOME).toBeTruthy();
+      expect(cfg.args).toContain(`model_provider="upstage"`);
+
+      const configToml = fs.readFileSync(
+        path.join(String(cfg.env.CODEX_HOME), "config.toml"),
+        "utf-8",
+      );
+      expect(configToml).toMatch(/model_provider\s*=\s*"upstage"/);
+      expect(configToml).toContain("[model_providers.upstage]");
+      expect(configToml).toContain('env_key = "UPSTAGE_API_KEY"');
+      expect(configToml).toContain('wire_api = "responses"');
+      expect(configToml).toContain('preferred_auth_method = "apikey"');
+      expect(configToml).toContain('forced_login_method = "api"');
+      // ChatGPT auth.json must not be linked for vendor override.
+      expect(
+        fs.existsSync(path.join(String(cfg.env.CODEX_HOME), "auth.json")),
+      ).toBe(false);
     });
   });
 

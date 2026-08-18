@@ -156,7 +156,7 @@ describe("DeepSeek 주입 — OPENAI_* 전부-or-전무", () => {
     });
   });
 
-  it("키가 있으면 OPENAI_BASE_URL 과 OPENAI_API_KEY 가 함께 주입된다", () => {
+  it("키가 있으면 OPENAI_* 주입 + Codex model_provider=deepseek 강제", () => {
     withDeepSeekKey(FAKE_KEY, () => {
       const { resolved, missing } = resolveVendorEnvProfile(
         envProfileForModel(PRO_ID),
@@ -171,7 +171,19 @@ describe("DeepSeek 주입 — OPENAI_* 전부-or-전무", () => {
       const { cfg } = launchDeepSeek(PRO_ID);
       expect(cfg.env.OPENAI_BASE_URL).toBe(DEEPSEEK_ENDPOINT);
       expect(cfg.env.OPENAI_API_KEY).toBe(FAKE_KEY);
+      expect(cfg.env.DEEPSEEK_API_KEY).toBe(FAKE_KEY);
       expect(cfg.env.CODEX_HOME).toBeTruthy();
+      expect(cfg.args).toContain(`model_provider="deepseek"`);
+
+      const configToml = fs.readFileSync(
+        path.join(String(cfg.env.CODEX_HOME), "config.toml"),
+        "utf-8",
+      );
+      expect(configToml).toMatch(/model_provider\s*=\s*"deepseek"/);
+      expect(configToml).toContain("[model_providers.deepseek]");
+      expect(configToml).toContain('env_key = "DEEPSEEK_API_KEY"');
+      expect(configToml).toContain('wire_api = "responses"');
+      expect(configToml).toContain(`base_url = "${DEEPSEEK_ENDPOINT}"`);
     });
   });
 
