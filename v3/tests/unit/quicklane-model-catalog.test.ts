@@ -91,8 +91,8 @@ describe("퀵레인 모델 카탈로그 ↔ 레지스트리", () => {
       "MiniMax-M3",
       "MiniMax-M2.7",
       "solar-pro4",
-      "deepseek-chat",
-      "deepseek-reasoner",
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
     ]) {
       expect(ids, id).toContain(id);
     }
@@ -111,7 +111,7 @@ describe("퀵레인 모델 카탈로그 ↔ 레지스트리", () => {
     expect(zai?.requiredEnvKeys).toEqual(vendorEnvSecretKeys("glm-5.2"));
     expect(upstage?.requiredEnvKeys).toEqual(vendorEnvSecretKeys("solar-pro4"));
     expect(deepseek?.requiredEnvKeys).toEqual(
-      vendorEnvSecretKeys("deepseek-chat"),
+      vendorEnvSecretKeys("deepseek-v4-flash"),
     );
   });
 

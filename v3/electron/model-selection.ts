@@ -198,7 +198,7 @@ const VENDOR_SHORTHAND_TO_VENDOR: Record<string, VendorId> = {
   // Upstage Solar Pro
   solar: "upstage",
   upstage: "upstage",
-  // DeepSeek V3/R1
+  // DeepSeek V4
   deepseek: "deepseek",
 };
 
@@ -253,7 +253,7 @@ export function resolveVendorShorthand(
  *   "glm" / "zai"      → { provider: "claude", vendor: "zai",     modelId: "glm-5.2" }
  *   "kimi" / "moonshot"→ { provider: "claude", vendor: "moonshot",modelId: "k3" }
  *   "solar" / "upstage"→ { provider: "gpt",    vendor: "upstage", modelId: "solar-pro4" }
- *   "deepseek"         → { provider: "gpt",    vendor: "deepseek",modelId: "deepseek-chat" }
+ *   "deepseek"         → { provider: "gpt",    vendor: "deepseek",modelId: "deepseek-v4-flash" }
  *   "존재하지않음"       → undefined                                 (호출자가 폴백)
  *
  * 해석 순서: (1) 구체 id/alias loose → (2) 벤더 숏핸드 → (3) 하네스 토큰.

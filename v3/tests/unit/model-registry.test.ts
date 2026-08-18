@@ -305,8 +305,6 @@ describe("MODEL_PRICING 실단가 (P1-3)", () => {
     //            **Platform**(pay-go) 가격표의 cache-miss 값을 상한으로 옮겨 적은
     //            것이고, 우리가 실제로 태우는 것은 구독 쿼터다. k3-256k 는 가격표에
     //            별 행이 없어 k3 값을 그대로 상한으로 쓴다(과소보고 회피).
-    // deepseek-* — 티켓은 V3/R1 id 와 단가를 명시하지만, 2026-08-18 현재 공식
-    //            pricing 페이지는 V4 계열을 노출한다. 오케 확인 전까지 추정으로 둔다.
     expect(estimatedPricingModelIds()).toEqual([
       "grok-4.5",
       "glm-5.2",
@@ -316,8 +314,6 @@ describe("MODEL_PRICING 실단가 (P1-3)", () => {
       "k3",
       "k3-256k",
       "kimi-for-coding",
-      "deepseek-chat",
-      "deepseek-reasoner",
     ]);
     // ★gpt-5.4 확정 단가($2.50/$15.00, platform.openai.com/docs/models/gpt-5.4).
     // 이 두 줄이 "추정치를 지웠다" 가 아니라 "실단가로 교체했다" 를 못박는다.

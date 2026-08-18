@@ -339,20 +339,20 @@ const UPSTAGE_SOLAR_PROBE: ModelVerification = {
 };
 
 /**
- * DeepSeek V3/R1 — OpenAI 호환 env-swap 벤더다.
+ * DeepSeek V4 — OpenAI 호환 env-swap 벤더다.
  *
- * 티켓 JrxWAAGqgnso5Rik6svk 는 스폰 전용으로 `deepseek-chat`(V3) 과
- * `deepseek-reasoner`(R1) 를 명시한다. Codex(gpt) 하네스를 그대로 띄우고
- * OPENAI_* env 만 DeepSeek 으로 스왑한다.
+ * 2026-08-18 현재 공식 pricing 문서는 V4 계열만 노출한다. Codex(gpt) 하네스를
+ * 그대로 띄우고 OPENAI_* env 만 DeepSeek 으로 스왑한다.
  */
 const DEEPSEEK_PROBE: ModelVerification = {
   at: "2026-08-18",
   cli: "n/a (DeepSeek API 키 미보유 — 라이브 프로브 대기)",
   method:
-    "티켓 JrxWAAGqgnso5Rik6svk 명시 스펙 + DeepSeek 공식 API Docs 확인: " +
-    "OpenAI-compatible base_url=https://api.deepseek.com/v1, " +
-    "model=deepseek-chat(V3) / deepseek-reasoner(R1), " +
-    "R1 release pricing Input cache-miss $0.55 / Output $2.19 per 1M tokens",
+    "DeepSeek 공식 API Docs Models & Pricing 확인(2026-08-18): " +
+    "OpenAI-compatible base_url=https://api.deepseek.com, " +
+    "model=deepseek-v4-flash(DeepSeek-V4-Flash-0731) / " +
+    "deepseek-v4-pro(DeepSeek-V4-Pro-0813), " +
+    "peak pricing flash $0.44/$1.32, pro $1.32/$3.96 per 1M tokens",
 };
 
 /** Grok Build — xAI 공식 문서/오픈소스 README 확인. 브라우저 인증형 TUI. */
@@ -891,45 +891,51 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
     status: "active",
   },
 
-  // ── DeepSeek V3/R1 (OpenAI 호환 env-swap 벤더 — JrxWAAGq) ──────────────
+  // ── DeepSeek V4 (OpenAI 호환 env-swap 벤더 — JrxWAAGq) ────────────────
   // Solar 와 같은 (B)형 OpenAI 호환 벤더다. 신규 하네스 없이 Codex(gpt) 바이너리를
   // 그대로 스폰하고, OPENAI_BASE_URL/OPENAI_API_KEY 만 DeepSeek 으로 갈아끼운다.
   // `agent-config` 의 gpt 분기가 이미 `applyVendorEnv` 를 호출하므로 switch 추가는
   // 없다. 스폰/퀵레인 전용이고 오케 셀렉터는 `selectorEligible` 이 env-swap 벤더를
   // 잘라내는 기존 경계로 막는다.
   //
-  // 티켓 명시 스펙:
-  //   base_url=https://api.deepseek.com/v1, api_key=${DEEPSEEK_API_KEY}
-  //   model=deepseek-chat(V3), model=deepseek-reasoner(R1)
+  // 공식 스펙(2026-08-18):
+  //   base_url=https://api.deepseek.com, api_key=${DEEPSEEK_API_KEY}
+  //   model=deepseek-v4-flash(DeepSeek-V4-Flash-0731)
+  //   model=deepseek-v4-pro(DeepSeek-V4-Pro-0813)
+  //   둘 다 Tool Calls / Thinking mode 를 지원한다. context 1M, max output 384K.
+  //
+  // 단가는 peak 정가 기준($/1M)으로 둔다(과소보고 방지). 공식 off-peak 는 절반:
+  //   flash input/output $0.22/$0.66, pro $0.66/$1.98.
+  // cache-hit input 은 peak 기준 flash $0.014, pro $0.044(오프피크는 절반)다.
   {
-    id: "deepseek-chat",
+    id: "deepseek-v4-flash",
     harness: "gpt", // Codex CLI 를 그대로 스폰하고 OpenAI 호환 env 만 바꾼다
     provider: "deepseek",
     envProfile: {
-      OPENAI_BASE_URL: "https://api.deepseek.com/v1",
+      OPENAI_BASE_URL: "https://api.deepseek.com",
       OPENAI_API_KEY: "${DEEPSEEK_API_KEY}",
     },
-    aliases: ["deepseek-v3"],
+    aliases: [],
     capability: "mid",
     efforts: ["low", "medium", "high"],
     defaultEffort: "medium",
-    pricing: { inputPer1M: 0.27, outputPer1M: 1.1, estimated: true },
+    pricing: { inputPer1M: 0.44, outputPer1M: 1.32 },
     verified: DEEPSEEK_PROBE,
     status: "active",
   },
   {
-    id: "deepseek-reasoner",
+    id: "deepseek-v4-pro",
     harness: "gpt",
     provider: "deepseek",
     envProfile: {
-      OPENAI_BASE_URL: "https://api.deepseek.com/v1",
+      OPENAI_BASE_URL: "https://api.deepseek.com",
       OPENAI_API_KEY: "${DEEPSEEK_API_KEY}",
     },
-    aliases: ["deepseek-r1"],
+    aliases: [],
     capability: "mid",
     efforts: ["low", "medium", "high"],
     defaultEffort: "medium",
-    pricing: { inputPer1M: 0.55, outputPer1M: 2.19, estimated: true },
+    pricing: { inputPer1M: 1.32, outputPer1M: 3.96 },
     verified: DEEPSEEK_PROBE,
     status: "active",
   },

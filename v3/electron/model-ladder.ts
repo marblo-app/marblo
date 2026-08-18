@@ -534,10 +534,10 @@ export const LADDER_EXCLUSIONS: Readonly<Record<string, string>> = {
   // 를 요구하므로, 편입된 모델을 여기 남겨 두면 중복(사다리+제외 동시)이 된다.
   // 키 없는 기기에서의 안전은 이 표가 아니라 `AutoSelectInput.modelAvailable`
   // (= `vendorEnvReadiness(id).ready`, bridge-server.ts 배선)이 런타임에 맡는다.
-  "deepseek-chat":
+  "deepseek-v4-flash":
     "티켓 JrxWAAGqgnso5Rik6svk 범위는 DeepSeek 스폰/퀵레인 벤더 추가다. 오케 후보가 아니며 자동선택 사다리도 네이티브 Codex 진입칸을 흔들지 않는다 — 명시 선택/퀵레인으로만 닿는다.",
-  "deepseek-reasoner":
-    "deepseek-chat 과 같은 사유. R1 reasoning 모델이지만 이 티켓은 자동 라우팅 정책 편입이 아니라 스폰 전용 env-swap 편입이다.",
+  "deepseek-v4-pro":
+    "deepseek-v4-flash 와 같은 사유. V4 Pro 모델이지만 이 티켓은 자동 라우팅 정책 편입이 아니라 스폰 전용 env-swap 편입이다.",
 };
 
 /** rung 을 레지스트리와 대조해 검증한다(불일치 = 모듈 로드 실패). */
