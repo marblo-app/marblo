@@ -6,6 +6,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { patchTerminalForFastIME } from "../../lib/xtermIMEPatch";
 import { resolveClipboardForTerminal } from "../../utils/clipboardImage";
+import { isTerminalActivitySettlingTransition } from "./activityState";
 import {
   TERMINAL_FONT_FAMILY,
   XTERM_CJK_RENDER_OPTIONS,
@@ -652,19 +653,8 @@ export default memo(function TerminalView({
     lastActivityStateRef.current = activityState;
     if (!activityState || previous === activityState) return;
 
-    const prev = previous?.toLowerCase();
-    const next = activityState.toLowerCase();
-    const wasBusy =
-      prev === "starting" ||
-      prev === "running" ||
-      prev === "working" ||
-      prev === "in_progress";
-    const isBusy =
-      next === "starting" ||
-      next === "running" ||
-      next === "working" ||
-      next === "in_progress";
-    if (wasBusy && !isBusy) {
+    if (isTerminalActivitySettlingTransition(previous, activityState)) {
+      resumeRenderRef.current(`activity ${previous}->${activityState}`);
       repairCjkCachesRef.current(`activity ${previous}->${activityState}`);
     }
   }, [activityState]);

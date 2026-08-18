@@ -12,6 +12,69 @@ const KOREAN_PROBE =
   "가각간갇갈 한글테스트 가나다라마바사아자차카타파하\n" +
   "가각간갇갈 한글테스트 가나다라마바사아자차카타파하";
 
+async function readCjkMetrics(
+  marblo: { page: import("@playwright/test").Page },
+  sessionId: string,
+) {
+  return marblo.page.evaluate(
+    async ({ sessionId, stack, spec }) => {
+      await document.fonts.load(spec, "가");
+      await document.fonts.ready;
+      const fontLoaded = document.fonts.check(spec, "가");
+      const debug = window.__marbloTerminalDebug?.[sessionId]?.() ?? null;
+      const root = document.querySelector(".xterm") as HTMLElement | null;
+      const screen = root?.querySelector(".xterm-screen") as HTMLElement | null;
+      const rows = root?.querySelector(".xterm-rows") as HTMLElement | null;
+      const textarea = root?.querySelector("textarea") as HTMLElement | null;
+      const ctx = document.createElement("canvas").getContext("2d")!;
+      ctx.font = `13px ${stack}`;
+      const asciiWidth = ctx.measureText("0").width;
+      const hangulWidth = ctx.measureText("한").width;
+      ctx.font = spec.replace('"Marblo D2Coding"', "monospace");
+      const fallbackHangulWidth = ctx.measureText("한").width;
+      const screenWidth = screen?.getBoundingClientRect().width ?? 0;
+      const screenCellWidth = debug?.cols ? screenWidth / debug.cols : 0;
+      const text = rows?.textContent ?? "";
+      return {
+        debug,
+        fontLoaded,
+        asciiWidth,
+        hangulWidth,
+        fallbackHangulWidth,
+        hangulToAsciiRatio: hangulWidth / asciiWidth,
+        screenWidth,
+        screenCellWidth,
+        hangulToScreenCellRatio: screenCellWidth
+          ? hangulWidth / screenCellWidth
+          : 0,
+        rowsLetterSpacing: rows ? getComputedStyle(rows).letterSpacing : null,
+        textareaFontFamily: textarea
+          ? getComputedStyle(textarea).fontFamily
+          : null,
+        rowsTextSample: text.slice(-500),
+      };
+    },
+    {
+      sessionId,
+      stack: TERMINAL_FONT_FAMILY,
+      spec: CJK_SPEC,
+    },
+  );
+}
+
+function expectHealthyCjkMetrics(
+  metrics: Awaited<ReturnType<typeof readCjkMetrics>>,
+) {
+  expect(metrics.fontLoaded).toBe(true);
+  expect(metrics.debug?.activeBufferType).toBe("alternate");
+  expect(metrics.debug?.fontFamily).toContain("Marblo D2Coding");
+  expect(metrics.hangulToAsciiRatio).toBeCloseTo(2, 3);
+  expect(metrics.hangulToScreenCellRatio).toBeCloseTo(2, 1);
+  if (metrics.rowsLetterSpacing !== null) {
+    expect(metrics.rowsLetterSpacing).toMatch(/^-?\d+(\.\d+)?px$|^normal$/);
+  }
+}
+
 test.describe("manual real grok CJK terminal verification", () => {
   test.skip(
     !REAL_GROK,
@@ -88,75 +151,29 @@ test.describe("manual real grok CJK terminal verification", () => {
       { sessionId: launch.ptySessionId, prompt: KOREAN_PROBE },
     );
 
-    await marblo.page.waitForTimeout(18_000);
+    await marblo.page.waitForTimeout(4_000);
+    const streamingMetrics = await readCjkMetrics(marblo, launch.ptySessionId);
 
-    const metrics = await marblo.page.evaluate(
-      async ({ sessionId, stack, spec }) => {
-        await document.fonts.load(spec, "가");
-        const fontLoaded = document.fonts.check(spec, "가");
-        const debug = window.__marbloTerminalDebug?.[sessionId]?.() ?? null;
-        const root = document.querySelector(".xterm") as HTMLElement | null;
-        const screen = root?.querySelector(
-          ".xterm-screen",
-        ) as HTMLElement | null;
-        const rows = root?.querySelector(".xterm-rows") as HTMLElement | null;
-        const textarea = root?.querySelector("textarea") as HTMLElement | null;
-        const ctx = document.createElement("canvas").getContext("2d")!;
-        ctx.font = `13px ${stack}`;
-        const asciiWidth = ctx.measureText("0").width;
-        const hangulWidth = ctx.measureText("한").width;
-        ctx.font = spec.replace('"Marblo D2Coding"', "monospace");
-        const fallbackHangulWidth = ctx.measureText("한").width;
-        const screenWidth = screen?.getBoundingClientRect().width ?? 0;
-        const screenCellWidth = debug?.cols ? screenWidth / debug.cols : 0;
-        const text = rows?.textContent ?? "";
-        return {
-          debug,
-          fontLoaded,
-          asciiWidth,
-          hangulWidth,
-          fallbackHangulWidth,
-          hangulToAsciiRatio: hangulWidth / asciiWidth,
-          screenWidth,
-          screenCellWidth,
-          hangulToScreenCellRatio: screenCellWidth
-            ? hangulWidth / screenCellWidth
-            : 0,
-          rowsLetterSpacing: rows ? getComputedStyle(rows).letterSpacing : null,
-          textareaFontFamily: textarea
-            ? getComputedStyle(textarea).fontFamily
-            : null,
-          rowsTextSample: text.slice(-500),
-        };
-      },
-      {
-        sessionId: launch.ptySessionId,
-        stack: TERMINAL_FONT_FAMILY,
-        spec: CJK_SPEC,
-      },
-    );
+    await marblo.page.waitForTimeout(18_000);
+    const settledMetrics = await readCjkMetrics(marblo, launch.ptySessionId);
 
     await marblo.page.screenshot({
-      path: testInfo.outputPath("real-grok-alt-screen-after-korean.png"),
+      path: testInfo.outputPath(
+        "real-grok-alt-screen-after-korean-settled.png",
+      ),
       fullPage: true,
     });
     writeFileSync(
       testInfo.outputPath("real-grok-cjk-metrics.json"),
-      `${JSON.stringify(metrics, null, 2)}\n`,
+      `${JSON.stringify({ streamingMetrics, settledMetrics }, null, 2)}\n`,
     );
     await testInfo.attach("real-grok-cjk-metrics", {
-      body: JSON.stringify(metrics, null, 2),
+      body: JSON.stringify({ streamingMetrics, settledMetrics }, null, 2),
       contentType: "application/json",
     });
 
-    expect(metrics.fontLoaded).toBe(true);
-    expect(metrics.debug?.activeBufferType).toBe("alternate");
-    expect(metrics.debug?.fontFamily).toContain("Marblo D2Coding");
-    expect(metrics.hangulToAsciiRatio).toBeCloseTo(2, 3);
-    expect(metrics.hangulToScreenCellRatio).toBeCloseTo(2, 1);
-    if (metrics.rowsLetterSpacing !== null) {
-      expect(metrics.rowsLetterSpacing).toMatch(/^-?\d+(\.\d+)?px$|^normal$/);
-    }
+    expectHealthyCjkMetrics(streamingMetrics);
+    expectHealthyCjkMetrics(settledMetrics);
 
     await marblo.page
       .evaluate(() => window.electronAPI.orchestratorSession.stop())
