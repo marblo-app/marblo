@@ -535,6 +535,14 @@ export const harness = {
   "harness.store.local.subtitle":
     "내 기기에서 무료로 도는 소형 모델의 first-party 큐레이션입니다. 시스템 메모리를 실측해 맞는 모델만 원클릭(ollama pull)으로 설치되고, 설치된 모델은 에이전트 추가의 Local Model 에서 고를 수 있습니다.",
   "harness.store.local.guideTitle": "메모리·양자화 가이드",
+  "harness.store.local.guide.toggle": "Ollama를 어떻게 설치·사용하나요?",
+  "harness.store.local.guide.step1Before": "Ollama를 설치합니다 — ",
+  "harness.store.local.guide.step1After":
+    " 에서 받거나, macOS면 `brew install ollama` 로 설치한 뒤 Ollama 앱(또는 `ollama serve`)을 켭니다.",
+  "harness.store.local.guide.step2":
+    "아래 카드에서 기기에 맞는 모델을 고르고 「설치 (ollama pull)」을 누릅니다. RAM이 부족하면 버튼이 비활성으로 남습니다.",
+  "harness.store.local.guide.step3":
+    "설치가 끝나면 에이전트 추가 → Local Model 에서 그 모델을 선택해 스폰합니다. (오케스트레이터용 env-swap은 별도 후속.)",
   "harness.store.local.guideRam":
     "권장 RAM = 모델 상주 메모리 + OS/앱 여유입니다. Mac 은 통합메모리라 GPU 가 같은 RAM 을 씁니다 — 표기된 최소 권장치보다 여유가 있을수록 안정적입니다.",
   "harness.store.local.guideQuant":
