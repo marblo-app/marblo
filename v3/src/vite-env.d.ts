@@ -1085,6 +1085,8 @@ interface LocalModelCard {
   /** ollama 공식 라이브러리 태그(`ollama pull <id>`). */
   id: string;
   displayName: string;
+  category: "coding" | "general" | "reasoning";
+  categoryLabel: string;
   downloadSizeMB: number;
   minRamGB: number;
   contextTokens: number;
