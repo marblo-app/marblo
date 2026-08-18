@@ -1468,6 +1468,11 @@ export interface SeedTask {
   id: string;
   title: string;
   status: string;
+  /**
+   * 마블로 칸반 정체 판정용. CLAIMED/IN_PROGRESS 는 claimedBy 가 없거나
+   * 에이전트 목록에 없으면 STALE(정체 레인)로 빠진다 — 옛 3열 미니보드와 다름.
+   */
+  claimedBy?: string | null;
 }
 
 export interface SeedAgent {
@@ -1498,25 +1503,28 @@ export async function injectTasks(
       ).__marbloTest;
       if (!hatch) throw new Error("cleanroom test hatch is unavailable");
       hatch.stores.task.setState({
-        tasks: seed.map((t) => ({
-          id: t.id,
-          projectId: "cleanroom-project",
-          title: t.title,
-          description: "",
-          status: t.status,
-          dependsOn: [],
-          dependsOnCompleted: true,
-          priority: 1,
-          role: "test",
-          claimedBy: null,
-          claimedAt: null,
-          scope: [],
-          comment: "",
-          prUrl: "",
-          hasPmFeedback: false,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        })),
+        tasks: seed.map((t) => {
+          const claimedBy = t.claimedBy ?? null;
+          return {
+            id: t.id,
+            projectId: "cleanroom-project",
+            title: t.title,
+            description: "",
+            status: t.status,
+            dependsOn: [],
+            dependsOnCompleted: true,
+            priority: 1,
+            role: "test",
+            claimedBy,
+            claimedAt: claimedBy ? new Date() : null,
+            scope: [],
+            comment: "",
+            prUrl: "",
+            hasPmFeedback: false,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+        }),
         loading: false,
       });
     }, tasks as SeedTask[]);

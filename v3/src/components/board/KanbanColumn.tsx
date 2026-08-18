@@ -59,6 +59,11 @@ interface KanbanColumnProps {
    */
   showWorktreeDiff?: boolean;
   onAgentClick?: (agent: Agent) => void;
+  /**
+   * ★가로 5열 칸반에서 카드만 compact. `compact`(세로 미니 레인)와 다르다 —
+   * 레이아웃은 마블로 컬럼 그대로, 카드 UI 만 단순화한다(비기너 상단 보드).
+   */
+  cardCompact?: boolean;
 }
 
 export function KanbanColumn({
@@ -72,6 +77,7 @@ export function KanbanColumn({
   hiddenCount = 0,
   showWorktreeDiff,
   onAgentClick,
+  cardCompact,
 }: KanbanColumnProps) {
   const { t } = useTranslation();
   const config = STATUS_CONFIG[status];
@@ -137,6 +143,8 @@ export function KanbanColumn({
   return (
     <div
       ref={setNodeRef}
+      data-testid="kanban-column"
+      data-column-status={status}
       // The floor is 168px, not 200: a column only ever reaches it when the
       // board pane is tight, and at that point four narrow-but-readable
       // columns beat three wide ones plus a REVIEW column hidden behind the
@@ -164,9 +172,24 @@ export function KanbanColumn({
         </span>
       </div>
       <div className="flex-1 overflow-y-auto p-2 space-y-2">
-        {tasks.map((task) => (
-          <DraggableTaskCard key={task.id} task={task} onClick={onTaskClick} />
-        ))}
+        {tasks.map((task) =>
+          cardCompact ? (
+            <TaskCard
+              key={task.id}
+              task={task}
+              compact
+              onClick={onTaskClick}
+              showWorktreeDiff={showWorktreeDiff}
+              onAgentClick={onAgentClick}
+            />
+          ) : (
+            <DraggableTaskCard
+              key={task.id}
+              task={task}
+              onClick={onTaskClick}
+            />
+          ),
+        )}
         {tasks.length === 0 && (
           <div
             className={`py-4 text-center text-xs ${highlight ? "text-blue-400" : "text-gray-600"}`}

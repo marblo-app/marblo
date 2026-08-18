@@ -499,47 +499,75 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       );
       await expect(cr.page.locator(".xterm").first()).toBeVisible();
 
-      // ── ★S4: 상단 진행 보드 ───────────────────────────────────────────
+      // ── ★S4 / #1004: 하단 오케 입력 → 상단 라이브 스트립이 **실제로** 반응
+      // 보드를 KanbanBoard 로 바꿔도 markTerminalSubmit → sentAt 배선이 끊기면
+      // 안 된다. 스트립이 안 뜨면 스펙만 고치는 게 아니라 제품 회귀다.
+      await expect(cr.page.getByTestId("beginner-live-strip")).toBeVisible();
       expect(await livePhase(cr.page)).toBe("thinking");
-      // 티켓이 0개인 동안은 빈 3칸을 띄우지 않는다.
-      expect(await cr.page.getByTestId("beginner-mini-board").count()).toBe(0);
+      // 마블로 Board 재사용 — idle 이 아니면 티켓 0개여도 5열 + 그래프 토글.
+      await expect(cr.page.getByTestId("beginner-marblo-board")).toBeVisible();
+      await expect(cr.page.getByTestId("kanban-column")).toHaveCount(5);
+      await expect(cr.page.getByTestId("board-view-kanban")).toBeVisible();
+      await expect(cr.page.getByTestId("board-view-graph")).toBeVisible();
       await cr.shot("G4-strip-thinking");
 
-      // 티켓이 생기면 → planned + 미니 보드.
+      // 칸반↔그래프 전환(마블로와 동일).
+      await cr.page.getByTestId("board-view-graph").click();
+      await expect(cr.page.getByTestId("board-view-graph")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await cr.page.getByTestId("board-view-kanban").click();
+      await expect(cr.page.getByTestId("kanban-column")).toHaveCount(5);
+
+      // 티켓 + 담당 에이전트. IN_PROGRESS 는 claimedBy 가 있어야 활성 열에
+      // 남는다(없으면 마블로 정체 레인 STALE). BLOCKED 는 정체 레인.
+      await injectAgents(cr.page, [
+        { id: "a1", name: "test-1", status: "idle" },
+      ]);
       await injectTasks(cr.page, [
         { id: "t1", title: "README 읽기", status: "TODO" },
-        { id: "t2", title: "가이드 초안", status: "IN_PROGRESS" },
-        // BLOCKED 는 별도 컬럼이 아니라 "진행 중" 으로 접힌다 — 막힌 티켓이
-        // 화면에서 사라지는 것이야말로 이 화면이 고치려는 dead-end 다.
+        {
+          id: "t2",
+          title: "가이드 초안",
+          status: "IN_PROGRESS",
+          claimedBy: "a1",
+        },
         { id: "t3", title: "막힌 티켓", status: "BLOCKED" },
       ]);
+      // idle 에이전트 → 국면은 여전히 planned (working 아님).
       expect(await livePhase(cr.page)).toBe("planned");
       await expect(cr.page.getByTestId("beginner-mini-board")).toBeVisible();
-      const columns = cr.page.getByTestId("beginner-mini-column");
-      await expect(columns).toHaveCount(3);
+      await expect(cr.page.getByTestId("beginner-marblo-board")).toBeVisible();
+      const columns = cr.page.getByTestId("kanban-column");
+      await expect(columns).toHaveCount(5);
       await expect(
-        columns.filter({ has: cr.page.getByText("막힌 티켓") }),
+        columns.filter({ has: cr.page.getByText("README 읽기") }),
+      ).toHaveAttribute("data-column-status", "TODO");
+      await expect(
+        columns.filter({ has: cr.page.getByText("가이드 초안") }),
       ).toHaveAttribute("data-column-status", "IN_PROGRESS");
-      await cr.shot("G4-strip-planned-miniboard");
+      await expect(cr.page.getByTestId("stuck-lane")).toBeVisible();
+      await expect(cr.page.getByTestId("stuck-lane")).toContainText("1");
+      await cr.shot("G4-strip-planned-kanban");
 
-      // ── ★미니 보드는 눌린다 — 상세는 표준 티켓 모달로 열린다 ─────────
-      // #975 이후 심플 셸도 상세/터미널 도착지를 표준 모달로 통일했다. 축소판
-      // `BeginnerTaskModal` 이 아니라, 보드 상세와 같은 정보면을 여는 것이 계약이다.
-      await cr.page
-        .getByTestId("beginner-mini-task")
-        .filter({ hasText: "막힌 티켓" })
-        .click();
+      // ── ★칸반은 눌린다 — 상세는 표준 티켓 모달(#971) ─────────────────
+      // 정체 레인에도 같은 제목/BLOCKED 배지가 있어 모달(h2 + 헤더 배지)로만 단언.
+      await cr.page.getByTestId("stuck-lane").locator("button").first().click();
+      await cr.page.getByText("막힌 티켓").click();
+      const detailTitle = cr.page.getByRole("heading", {
+        level: 2,
+        name: "막힌 티켓",
+      });
+      await expect(detailTitle).toBeVisible();
       await expect(
-        cr.page.getByRole("heading", { name: "막힌 티켓" }),
+        detailTitle.locator("..").getByText("BLOCKED", { exact: true }),
       ).toBeVisible();
-      await expect(cr.page.getByText("BLOCKED", { exact: true })).toBeVisible();
       await cr.shot("G4-task-detail");
       await cr.page.mouse.click(10, 10);
-      await expect(
-        cr.page.getByRole("heading", { name: "막힌 티켓" }),
-      ).toHaveCount(0);
+      await expect(detailTitle).toHaveCount(0);
 
-      // 에이전트가 붙으면 → working + 에이전트 패널(하단 2분할 오른쪽).
+      // 에이전트가 일하면 → working + 에이전트 패널(하단 2분할 오른쪽).
       await injectAgents(cr.page, [
         { id: "a1", name: "test-1", status: "working" },
       ]);
@@ -554,7 +582,12 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       ]);
       await injectTasks(cr.page, [
         { id: "t1", title: "README 읽기", status: "DONE" },
-        { id: "t2", title: "가이드 초안", status: "IN_PROGRESS" },
+        {
+          id: "t2",
+          title: "가이드 초안",
+          status: "IN_PROGRESS",
+          claimedBy: "a1",
+        },
         { id: "t3", title: "막힌 티켓", status: "BLOCKED" },
       ]);
       expect(await livePhase(cr.page)).toBe("completed");

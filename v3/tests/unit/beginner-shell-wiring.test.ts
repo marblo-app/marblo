@@ -48,20 +48,66 @@ const routeSpy = vi.hoisted(() =>
 
 vi.mock("../../src/stores/taskStore", () => ({
   useTaskStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({ tasks: stores.tasks }),
+    selector({
+      tasks: stores.tasks,
+      loading: false,
+      subscribeToTasks: () => () => {},
+      refreshTasks: () => Promise.resolve(),
+    }),
   ),
 }));
 
 vi.mock("../../src/stores/agentStore", () => ({
   useAgentStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({ agents: stores.agents }),
+    selector({ agents: stores.agents, hydrated: true }),
   ),
 }));
 
 vi.mock("../../src/stores/projectStore", () => ({
   useProjectStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({ currentProject: { id: "p1", name: "demo" } }),
+    selector({
+      currentProject: {
+        id: "p1",
+        name: "demo",
+        ownerId: "u1",
+        folderPath: "/tmp/demo",
+      },
+      loading: false,
+      projectsHydrated: true,
+    }),
   ),
+}));
+
+vi.mock("../../src/stores/subscriptionStore", () => ({
+  useSubscriptionStore: vi.fn((selector: (s: unknown) => unknown) =>
+    selector({ canUse: () => false }),
+  ),
+}));
+
+vi.mock("../../src/stores/navigationStore", () => ({
+  useNavigationStore: vi.fn((selector: (s: unknown) => unknown) =>
+    selector({ pendingJump: null, consumeJump: () => {} }),
+  ),
+}));
+
+vi.mock("../../src/hooks/useAuth", () => ({
+  useAuth: () => ({ user: { uid: "u1" } }),
+}));
+
+vi.mock("../../src/components/work-history/FirstMissionShareNudge", () => ({
+  FirstShareNudge: () => null,
+}));
+
+vi.mock("../../src/components/orchestrator/OrchestratorChat", () => ({
+  OrchestratorChat: () => null,
+}));
+
+vi.mock("../../src/components/board/TaskCreateModal", () => ({
+  TaskCreateModal: () => null,
+}));
+
+vi.mock("../../src/components/board/TaskGraphView", () => ({
+  TaskGraphView: () => null,
 }));
 
 vi.mock("../../src/services/orchestratorInstructionService", () => ({
@@ -103,9 +149,30 @@ vi.mock("../../src/hooks/usePresence", () => ({
 }));
 
 // subscribeToCollection: 티켓 상세가 진행 기록(activities)을 구독한다.
+vi.mock("../../src/lib/firebase", () => ({
+  app: {},
+  auth: {},
+  db: {},
+  functions: {},
+}));
+
 vi.mock("../../src/services/firestore", () => ({
   subscribeToDocument: vi.fn(() => () => {}),
   subscribeToCollection: vi.fn(() => () => {}),
+}));
+
+vi.mock("../../src/services/taskService", () => ({
+  updateTaskStatus: vi.fn(),
+  createTask: vi.fn(),
+}));
+
+vi.mock("../../src/services/telemetryService", () => ({
+  default: {
+    taskCreated: vi.fn(),
+    taskStatusChanged: vi.fn(),
+    taskCompleted: vi.fn(),
+    cliSetupStep: vi.fn(),
+  },
 }));
 
 // 실 xterm 은 태우지 않는다 — 이 파일의 관심사는 "어느 세션이 열렸나" 다.
@@ -137,6 +204,7 @@ function workerAgentsOnly(list: Agent[]): Agent[] {
 }
 
 function task(id: string, status: TaskStatus, title: string): Task {
+  const now = new Date();
   return {
     id,
     projectId: "p1",
@@ -149,13 +217,13 @@ function task(id: string, status: TaskStatus, title: string): Task {
     dependsOn: [],
     dependsOnCompleted: true,
     claimedBy: status === "TODO" ? null : "a1",
-    claimedAt: null,
+    claimedAt: status === "TODO" ? null : now,
     scope: [],
     comment: "",
     prUrl: "",
     hasPmFeedback: false,
-    createdAt: new Date(0),
-    updatedAt: new Date(0),
+    createdAt: now,
+    updatedAt: now,
   };
 }
 
