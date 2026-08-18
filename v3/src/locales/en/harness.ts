@@ -58,7 +58,8 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.conn.worktreeGuide.title": "Per-ticket independent worktrees",
   "harness.conn.worktreeGuide.body":
     "Agents now work in an independent worktree per ticket, so they can run in parallel without colliding.",
-  "harness.conn.worktreeGuide.popupTitle": "Work happens in independent worktrees",
+  "harness.conn.worktreeGuide.popupTitle":
+    "Work happens in independent worktrees",
   "harness.conn.worktreeGuide.popupBody":
     "Git repo connected. Agents now work in an independent worktree per ticket (parallel, without collisions).",
   "harness.conn.worktreeGuide.gotIt": "Got it",
@@ -145,6 +146,13 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.section.connections": "Connections",
   "harness.store.section.connectionsDesc":
     "Connect repositories (GitHub), connectors and Telegram / Slack channels in one place.",
+  "harness.store.section.cli": "Orchestrator CLI",
+  "harness.store.section.cliDesc":
+    "Install Claude Code, Codex and Grok CLI, then verify their login state.",
+  "harness.store.section.envSwapDesc":
+    "Register API keys for vendors such as GLM, Kimi, MiniMax, Solar and DeepSeek that run through the claude harness.",
+  "harness.store.section.localDesc":
+    "Install local models through Ollama and track pull progress clearly.",
   // --- Telegram channel panel ---
   "harness.telegram.status.idle": "Idle",
   "harness.telegram.status.connected": "Connected",
@@ -570,6 +578,8 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.local.minRam": "Min RAM",
   "harness.store.local.context": "Context",
   "harness.store.local.pull": "Install (ollama pull)",
+  "harness.store.local.installing": "Installing",
+  "harness.store.local.progressPending": "Preparing",
   "harness.store.local.cancel": "Cancel",
   "harness.store.local.pullDone":
     "{id} installed — selectable under Local Model when adding an agent.",

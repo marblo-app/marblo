@@ -141,6 +141,13 @@ export const harness = {
   "harness.store.section.connections": "연결",
   "harness.store.section.connectionsDesc":
     "저장소(GitHub), 커넥터, Telegram/Slack 채널을 한곳에서 연결합니다.",
+  "harness.store.section.cli": "오케 CLI",
+  "harness.store.section.cliDesc":
+    "Claude Code, Codex, Grok CLI를 설치하고 로그인 상태를 확인합니다.",
+  "harness.store.section.envSwapDesc":
+    "GLM, Kimi, MiniMax, Solar, DeepSeek처럼 API 키만 등록해 claude 하네스로 쓰는 벤더입니다.",
+  "harness.store.section.localDesc":
+    "Ollama로 내 기기에서 실행할 로컬 모델을 설치하고 진행률을 확인합니다.",
   // --- Telegram channel panel ---
   // Status badge (fixed-set labels)
   "harness.telegram.status.idle": "대기",
@@ -567,6 +574,8 @@ export const harness = {
   "harness.store.local.minRam": "최소 RAM",
   "harness.store.local.context": "컨텍스트",
   "harness.store.local.pull": "설치 (ollama pull)",
+  "harness.store.local.installing": "설치 진행 중",
+  "harness.store.local.progressPending": "준비 중",
   "harness.store.local.cancel": "취소",
   "harness.store.local.pullDone":
     "{id} 설치 완료 — 에이전트 추가의 Local Model 에서 선택할 수 있습니다.",

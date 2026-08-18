@@ -22,12 +22,21 @@ function installLocalModelsStub(
     cards: [],
     ...overrides,
   };
+  let progressHandler: ((ev: LocalModelsPullEvent) => void) | null = null;
   const api = {
     info: vi.fn(async () => info),
-    pull: vi.fn(async () => ({ success: true })),
-    cancelPull: vi.fn(async () => undefined),
-    onPullProgress: vi.fn(),
+    pull: vi.fn(
+      async () =>
+        new Promise<{ success: boolean; cancelled?: boolean; error?: string }>(
+          () => undefined,
+        ),
+    ),
+    cancelPull: vi.fn(async () => ({ success: true })),
+    onPullProgress: vi.fn((cb: (ev: LocalModelsPullEvent) => void) => {
+      progressHandler = cb;
+    }),
     offPullProgress: vi.fn(),
+    emitProgress: (ev: LocalModelsPullEvent) => progressHandler?.(ev),
   };
   (
     globalThis as unknown as { window: { electronAPI: unknown } }
@@ -46,7 +55,9 @@ describe("LocalModelsSection — Ollama 가이드 (접힘/열림)", () => {
     installLocalModelsStub();
     render(createElement(LocalModelsSection));
 
-    const toggle = await screen.findByText(ko["harness.store.local.guide.toggle"]);
+    const toggle = await screen.findByText(
+      ko["harness.store.local.guide.toggle"],
+    );
     const toggleButton = toggle.closest("button") as HTMLButtonElement;
     expect(toggleButton.getAttribute("aria-expanded")).toBe("false");
     expect(document.body.textContent ?? "").not.toContain(
@@ -92,9 +103,7 @@ describe("LocalModelsSection — 하네스탭 섹션 크롬", () => {
     expect(
       await screen.findByText(ko["harness.store.local.title"]),
     ).toBeTruthy();
-    expect(
-      screen.getByText(ko["harness.store.local.subtitle"]),
-    ).toBeTruthy();
+    expect(screen.getByText(ko["harness.store.local.subtitle"])).toBeTruthy();
   });
 
   it("기본(스토어탭 임베드)에서는 섹션 title 을 그리지 않는다", async () => {
@@ -103,5 +112,45 @@ describe("LocalModelsSection — 하네스탭 섹션 크롬", () => {
 
     await screen.findByText(ko["harness.store.local.guide.toggle"]);
     expect(screen.queryByText(ko["harness.store.local.title"])).toBeNull();
+  });
+});
+
+describe("LocalModelsSection — Ollama pull CTA", () => {
+  it("pull 가능한 모델은 primary 버튼으로 표시하고 진행률을 progressbar로 보여준다", async () => {
+    const api = installLocalModelsStub({
+      cards: [
+        {
+          id: "qwen2.5:0.5b",
+          displayName: "Qwen 2.5 0.5B",
+          downloadSizeMB: 397,
+          minRamGB: 4,
+          contextTokens: 32768,
+          installed: false,
+          fits: true,
+          action: "pull",
+        },
+      ],
+    });
+    render(createElement(LocalModelsSection));
+
+    const pull = await screen.findByRole("button", {
+      name: ko["harness.store.local.pull"],
+    });
+    expect(pull.className).toContain("bg-[#89b4fa]");
+
+    fireEvent.click(pull);
+    api.emitProgress({
+      id: "qwen2.5:0.5b",
+      phase: "progress",
+      percent: 42,
+    });
+
+    expect(
+      await screen.findByText(ko["harness.store.local.installing"]),
+    ).toBeTruthy();
+    expect(screen.getByText("42%")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(
+      "42",
+    );
   });
 });
