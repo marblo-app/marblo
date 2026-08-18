@@ -19,6 +19,7 @@ import telemetry from "../../services/telemetryService";
 import { PreviewTerminal } from "./PreviewTerminal";
 import { BUTTON_GHOST, BUTTON_PRIMARY, emphasize } from "./beginnerUi";
 import { BeginnerDemoTicketCta } from "./BeginnerDemoTicketCta";
+import { ORCHESTRATION_DEMO_SECONDS } from "../onboarding/VideoDemoModal";
 
 /**
  * 비기너 진입 게이트 — **하나만** 연결하면 통과.
@@ -174,15 +175,11 @@ export function BeginnerConnectStep({
       data-testid="beginner-connect"
       className="mx-auto w-full max-w-2xl rounded-lg border border-[#313244] bg-[#181825] p-6"
     >
-      {/* ── ★콜드스타트 첫 화면의 주 CTA: 연결 전에 먼저 티켓 생성 체험 ─────
-          기존에는 이 L0 카드가 연결 제목/설명 아래에 있어, 첫 화면의 목적이
-          "이제 연결해보세요" 로 먼저 읽혔다. 콜드스타트의 첫 선택지는 계정 연결이
-          아니라 "내 문장이 티켓이 되는지 직접 해 보기" 여야 한다. 같은
-          OnrampDecomposeCard 를 StartHere 와 공유하므로 규칙 분해·티켓 생성 로직의
-          두 번째 사본은 없다. */}
+      {/* 연결 전에는 먼저 오케스트레이션 영상 데모를 보여준다. 인터랙티브
+          티켓 생성은 막힘이 잦아 이 첫 화면에서 제거했다. */}
       {!setup.preview && (
         <BeginnerDemoTicketCta
-          surface="beginner_connect"
+          onWatchDemo={onWatchDemo}
           className="mb-6"
         />
       )}
@@ -363,7 +360,9 @@ export function BeginnerConnectStep({
             : t("beginner.connect.recheck")}
         </button>
         <button type="button" onClick={onWatchDemo} className={BUTTON_GHOST}>
-          ▶ {t("beginner.connect.watchDemo")}
+          ▶ {t("beginner.connect.watchDemo", {
+            seconds: ORCHESTRATION_DEMO_SECONDS,
+          })}
         </button>
       </div>
     </section>

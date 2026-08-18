@@ -15,8 +15,7 @@
  * | 표면              | 심플(BeginnerShell)        | 어드밴스드(WorkspaceShell) | 레거시(Layout)     |
  * | ----------------- | -------------------------- | -------------------------- | ------------------ |
  * | 설치·인증         | BeginnerConnectStep        | StartHereTab/CliSetupHost  | CliSetupGate       |
- * | 캔드 데모         | BeginnerConnectStep        | StartHereTab               | (로그인 화면)      |
- * | **L0 룰 분해**    | BeginnerConnectStep        | StartHereTab               | —                  |
+ * | 영상 데모         | BeginnerConnectStep        | StartHereTab               | (로그인 화면)      |
  * | **M1 실행차단**   | OnrampGateHost(beginner)   | GlobalOverlays(workspace)  | GlobalOverlays     |
  * | **M2 자금안내**   | FundingGuideHost           | GlobalOverlays             | GlobalOverlays     |
  */
@@ -32,31 +31,23 @@ const src = (rel: string) =>
 
 const BEGINNER_SHELL = "components/beginner/BeginnerShell.tsx";
 const BEGINNER_CONNECT = "components/beginner/BeginnerConnectStep.tsx";
-const BEGINNER_DEMO_CTA = "components/beginner/BeginnerDemoTicketCta.tsx";
 const START_HERE = "components/onboarding/StartHereTab.tsx";
 const GLOBAL_OVERLAYS = "components/GlobalOverlays.tsx";
 const CLI_SETUP_HOST = "components/onboarding/CliSetupHost.tsx";
 const WORKSPACE_SHELL = "components/workspace/WorkspaceShell.tsx";
 const LAYOUT = "components/Layout.tsx";
 
-describe("온보딩 파리티 — L0 분해 카드는 양쪽 모드에 있다", () => {
-  it("심플: 비기너 공용 CTA 가 카드를 마운트한다", () => {
-    const source = src(BEGINNER_DEMO_CTA);
-    expect(source).toContain("OnrampDecomposeCard");
-    expect(source).toContain("surface={surface}");
-  });
-
-  it("심플: 비기너 연결 게이트와 연결 완료 대화 탭이 같은 CTA 를 마운트한다", () => {
+describe("온보딩 파리티 — 영상 데모는 연결 전 표면에만 있다", () => {
+  it("심플: 비기너 연결 게이트가 영상 CTA 를 마운트한다", () => {
     const connect = src(BEGINNER_CONNECT);
     const shell = src(BEGINNER_SHELL);
     expect(connect).toContain("BeginnerDemoTicketCta");
-    expect(connect).toContain('surface="beginner_connect"');
-    expect(shell).toContain("BeginnerDemoTicketCta");
-    expect(shell).toContain('surface="beginner_chat"');
-    expect(shell).toContain('testId="beginner-chat-demo-cta"');
+    expect(connect).toContain("onWatchDemo={onWatchDemo}");
+    expect(shell).toContain("<VideoDemoModal");
+    expect(shell).not.toContain('testId="beginner-chat-demo-cta"');
   });
 
-  it("★심플 콜드스타트: L0 티켓 생성 체험이 연결 CTA보다 먼저 선다", () => {
+  it("★심플 콜드스타트: 영상 데모 CTA 가 연결 CTA보다 먼저 선다", () => {
     const source = src(BEGINNER_CONNECT);
     const demoIndex = source.indexOf("<BeginnerDemoTicketCta");
     const connectIndex = source.indexOf(
@@ -67,20 +58,15 @@ describe("온보딩 파리티 — L0 분해 카드는 양쪽 모드에 있다", 
     expect(demoIndex).toBeLessThan(connectIndex);
   });
 
-  it("어드밴스드: 시작하기 탭이 같은 카드를 마운트한다", () => {
+  it("어드밴스드: 시작하기 탭이 같은 영상 자산을 쓴다", () => {
     const source = src(START_HERE);
-    expect(source).toContain("OnrampDecomposeCard");
-    expect(source).toContain('surface="start_here_tab"');
+    expect(source).toContain("ORCHESTRATION_DEMO_VIDEO_SRC");
+    expect(source).toContain("<VideoDemoModal");
   });
 
-  it("★프리뷰(시연)에서는 심플 쪽 카드가 그려지지 않는다 — 실제 티켓을 만들기 때문", () => {
-    // 프리뷰의 계약은 "실제 상태 미변경" 이다. 이 카드는 진짜 Firestore write 를
-    // 하므로 그 계약과 정면으로 충돌한다.
+  it("★프리뷰(시연)에서는 심플 쪽 영상 CTA가 그려지지 않는다", () => {
     const source = src(BEGINNER_CONNECT);
     expect(source).toMatch(
-      /!setup\.preview\s*&&[\s\S]{0,400}BeginnerDemoTicketCta/,
-    );
-    expect(src(BEGINNER_SHELL)).toMatch(
       /!setup\.preview\s*&&[\s\S]{0,400}BeginnerDemoTicketCta/,
     );
   });
@@ -170,30 +156,9 @@ describe("온보딩 파리티 — 차단이 조용히 지나가는 경로가 없
   });
 });
 
-describe("온보딩 파리티 — 계측 축", () => {
-  it("두 온램프 이벤트가 텔레메트리 타입에 등록돼 있다", () => {
+describe("온보딩 파리티 — 차단 계측 축", () => {
+  it("실행 차단 이벤트가 텔레메트리 타입에 등록돼 있다", () => {
     const source = src("services/telemetryService.ts");
-    expect(source).toContain('"onramp:decompose_used"');
     expect(source).toContain('"onramp:exec_blocked"');
-  });
-
-  it("★유저 문장은 계측에 실리지 않는다 — 자유 텍스트 금지 규율", () => {
-    // funding 프로브가 원문 detail 을 안 싣는 것과 같은 이유다. 판정에 필요한
-    // 것은 규칙 코드와 개수뿐이다.
-    const card = src("components/onboarding/OnrampDecomposeCard.tsx");
-    expect(card).toContain("telemetry.onrampDecomposeUsed");
-    // 호출 **인자만** 떼어 본다(그 뒤 코드까지 훑으면 무관한 변수명에 걸린다).
-    const calls = [...card.matchAll(/onrampDecomposeUsed\(\{([\s\S]*?)\}\);/g)];
-    expect(calls.length).toBeGreaterThan(0);
-    // 식별자 단위로 본다 — `drafts.length`(개수)는 괜찮고 `draft`(원문 상태)는
-    // 안 된다. 그 차이가 정확히 "센 것" 과 "실은 것" 의 경계다.
-    for (const [, args] of calls) {
-      for (const forbidden of ["draft", "text", "input", "title"]) {
-        expect(
-          new RegExp(`\\b${forbidden}\\b`).test(args),
-          `계측 인자에 ${forbidden} 이 실렸다`,
-        ).toBe(false);
-      }
-    }
   });
 });

@@ -55,17 +55,6 @@ vi.mock("../../src/components/terminal/TerminalView", () => ({
     }),
 }));
 
-// L0 분해 카드는 실제 보드(Firestore)에 티켓을 쓰는 무거운 자식이다 — 이
-// 테스트가 보는 것은 연결 게이트의 국면이지 그 카드가 아니다. 파리티(양쪽 셸에
-// 실제로 달려 있는가)는 tests/unit/onramp-mode-parity.test.ts 가 지킨다.
-vi.mock("../../src/components/onboarding/OnrampDecomposeCard", () => ({
-  OnrampDecomposeCard: ({ surface }: { surface: string }) =>
-    createElement("div", {
-      "data-testid": "stub-onramp-decompose",
-      "data-surface": surface,
-    }),
-}));
-
 import {
   canLaunchSignIn,
   oneClickInstallRows,
@@ -608,7 +597,7 @@ describe("BeginnerConnectStep — 원클릭이 주 경로, 택1 이 폴백", () 
   beforeEach(() => vi.clearAllMocks());
   afterEach(cleanup);
 
-  it("★콜드스타트 첫 화면은 티켓 생성 데모를 연결 CTA보다 먼저 보여준다", () => {
+  it("★콜드스타트 첫 화면은 영상 데모를 연결 CTA보다 먼저 보여준다", () => {
     seed({
       "cli-claude-code": probe(false, false),
       "cli-codex": probe(false, false),
@@ -625,11 +614,8 @@ describe("BeginnerConnectStep — 원클릭이 주 경로, 택1 이 폴백", () 
     expect(demo.compareDocumentPosition(connect)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
-    expect(
-      screen
-        .getByTestId("stub-onramp-decompose")
-        .getAttribute("data-surface"),
-    ).toBe("beginner_connect");
+    expect(screen.getByTestId("beginner-firstscreen-demo-watch")).toBeTruthy();
+    expect(screen.queryByTestId("onramp-decompose-input")).toBeNull();
   });
 
   it("원클릭 CTA 는 셸에 모달을 요청한다 — 게이트가 직접 들지 않는다", () => {
