@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation, t as translate } from "../../lib/i18n";
+import {
+  ConnectorGuidePanel,
+  ConnectorGuideStep,
+  ConnectorGuideSteps,
+} from "../harness/ConnectorGuidePanel";
 
 /**
  * 스토어 **'로컬 모델'(Ollama)** 탭 본문 — first-party 큐레이션 카탈로그.
@@ -15,6 +20,10 @@ import { useTranslation, t as translate } from "../../lib/i18n";
  *  - RAM 부족이면 버튼 비활성 + "부족(N GB 필요)" 사유를 그대로 보여준다.
  *  - 설치됨 판정은 요청 이력이 아니라 `ollama list` 실측이다 — 에이전트 추가에서
  *    고를 수 있는 것도 그 실측 목록뿐(유령비용 방지).
+ *
+ * `showSectionChrome` — 하네스탭(EnvSwapVendorSection 옆)에 단독 섹션으로
+ * 올릴 때 true. 스토어탭(RegistryStoreSection 로컬 탭)은 부모가 이미
+ * title/subtitle 을 그리므로 기본 false.
  */
 
 const OLLAMA_DOWNLOAD_URL = "https://ollama.com/download";
@@ -29,6 +38,11 @@ const DESC_KEYS: Record<string, string> = {
   "gemma2:2b": "harness.store.local.desc.gemma2_2b",
 };
 
+export interface LocalModelsSectionProps {
+  /** 하네스탭 단독 섹션 크롬(제목·부제). 스토어탭 임베드는 false. */
+  showSectionChrome?: boolean;
+}
+
 export function formatDownloadSize(mb: number): string {
   return mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${mb} MB`;
 }
@@ -37,7 +51,9 @@ export function formatContext(tokens: number): string {
   return tokens >= 1000 ? `${Math.round(tokens / 1000)}K` : `${tokens}`;
 }
 
-export function LocalModelsSection() {
+export function LocalModelsSection({
+  showSectionChrome = false,
+}: LocalModelsSectionProps = {}) {
   const { t } = useTranslation();
   const [info, setInfo] = useState<LocalModelsInfoResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -115,18 +131,42 @@ export function LocalModelsSection() {
     await window.electronAPI.localModels.cancelPull({ id });
   }, []);
 
-  return (
+  const body = (
     <div>
-      {/* 메모리·양자화·컨텍스트 가이드 — 게이트 판정 기준을 먼저 공시한다 */}
-      <div className="mb-3 rounded-md border border-[#313244] bg-[#181825] p-3">
-        <p className="mb-1 text-xs font-semibold text-[#cdd6f4]">
-          {t("harness.store.local.guideTitle")}
-        </p>
-        <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-[#a6adc8]">
-          <li>{t("harness.store.local.guideRam")}</li>
-          <li>{t("harness.store.local.guideQuant")}</li>
-          <li>{t("harness.store.local.guideContext")}</li>
-        </ul>
+      {/* Ollama 설치→pull→스폰 가이드 (Slack #939 ConnectorGuidePanel 패턴) */}
+      <div className="mb-3">
+        <ConnectorGuidePanel toggleLabel={t("harness.store.local.guide.toggle")}>
+          <ConnectorGuideSteps>
+            <ConnectorGuideStep>
+              1. {t("harness.store.local.guide.step1Before")}
+              <a
+                href={OLLAMA_DOWNLOAD_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[#89b4fa] hover:underline"
+              >
+                ollama.com/download
+              </a>
+              {t("harness.store.local.guide.step1After")}
+            </ConnectorGuideStep>
+            <ConnectorGuideStep>
+              2. {t("harness.store.local.guide.step2")}
+            </ConnectorGuideStep>
+            <ConnectorGuideStep>
+              3. {t("harness.store.local.guide.step3")}
+            </ConnectorGuideStep>
+          </ConnectorGuideSteps>
+          <div className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
+            <p className="mb-1 text-xs font-medium text-[#cdd6f4]">
+              {t("harness.store.local.guideTitle")}
+            </p>
+            <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-[#a6adc8]">
+              <li>{t("harness.store.local.guideRam")}</li>
+              <li>{t("harness.store.local.guideQuant")}</li>
+              <li>{t("harness.store.local.guideContext")}</li>
+            </ul>
+          </div>
+        </ConnectorGuidePanel>
       </div>
 
       {/* 이 기기 실측 — 게이트가 무엇을 기준으로 판정했는지 그대로 공시 */}
@@ -303,5 +343,22 @@ export function LocalModelsSection() {
         })}
       </div>
     </div>
+  );
+
+  if (!showSectionChrome) return body;
+
+  return (
+    <section className="border-b border-[#313244] px-4 py-3">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
+        <span className="text-base">🖥️</span>
+        <h3 className="text-sm font-semibold text-[#cdd6f4]">
+          {t("harness.store.local.title")}
+        </h3>
+      </div>
+      <p className="mb-3 text-xs text-[#7f849c]">
+        {t("harness.store.local.subtitle")}
+      </p>
+      {body}
+    </section>
   );
 }

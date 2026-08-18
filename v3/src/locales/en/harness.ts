@@ -538,6 +538,14 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.local.subtitle":
     "A first-party curation of small models that run free on your machine. Your system memory is measured so only models that fit install in one click (ollama pull); installed models become selectable under Local Model when adding an agent.",
   "harness.store.local.guideTitle": "Memory & quantization guide",
+  "harness.store.local.guide.toggle": "How do I install and use Ollama?",
+  "harness.store.local.guide.step1Before": "Install Ollama — ",
+  "harness.store.local.guide.step1After":
+    " (or `brew install ollama` on macOS), then start the Ollama app (or `ollama serve`).",
+  "harness.store.local.guide.step2":
+    "Pick a model that fits this machine below and click Install (ollama pull). If RAM is short, the button stays disabled.",
+  "harness.store.local.guide.step3":
+    "Once installed, choose it under Add agent → Local Model when spawning. (Orchestrator env-swap for local models is a follow-up.)",
   "harness.store.local.guideRam":
     "Recommended RAM = model residency + OS/app headroom. Macs use unified memory, so the GPU shares the same RAM — the more headroom above the listed minimum, the more stable.",
   "harness.store.local.guideQuant":

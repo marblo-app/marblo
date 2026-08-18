@@ -5,6 +5,7 @@ import { SlackChannelPanel } from "./SlackChannelPanel";
 import { DriveConnectionPanel } from "./DriveConnectionPanel";
 import { NotionConnectionPanel } from "./NotionConnectionPanel";
 import { EnvSwapVendorSection } from "./EnvSwapVendorSection";
+import { LocalModelsSection } from "../store/LocalModelsSection";
 import { useTranslation, t as translate } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
 
@@ -300,6 +301,11 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
           {/* env-swap 벤더 — 설치형 카탈로그에 없는 "키만 얹는" 벤더들.
               카탈로그보다 위에 두는 이유: 이 탭에서 안 보인다는 것이 문제였다. */}
           {showEnvSwap && <EnvSwapVendorSection />}
+
+          {/* 로컬 모델(Ollama) — 스토어탭 로컬 탭과 동일 컴포넌트 재사용.
+              벤더 키(env-swap)와 나란히 모델 연결 자리. 심플모드도 이
+              HarnessStore 인라인을 쓰므로 별도 분기 불필요. */}
+          {showEnvSwap && <LocalModelsSection showSectionChrome />}
 
           {/* List */}
           {showPackages && (
