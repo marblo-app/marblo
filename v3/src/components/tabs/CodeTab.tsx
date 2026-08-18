@@ -1,9 +1,10 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useEditorStore } from "../../stores/editorStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { EditorTabs } from "../code/EditorTabs";
 import { CodeEditor } from "../code/CodeEditor";
+import { DocGraphPanel } from "../code/DocGraphPanel";
 import { ImagePreview } from "../code/ImagePreview";
 import { MarkdownPreview } from "../code/MarkdownPreview";
 import { NotebookView } from "../code/NotebookView";
@@ -36,8 +37,14 @@ interface CodeTabProps {
   renderDiff?: (props: DiffRenderProps) => JSX.Element;
 }
 
+type CodeSubTab = "editor" | "graph";
+
+const EDITOR_SUBTAB_LABEL = "에디터";
+const DOC_GRAPH_SUBTAB_LABEL = "파일 그래프";
+
 export function CodeTab({ renderDiff }: CodeTabProps = {}) {
   const { t } = useTranslation();
+  const [activeSubTab, setActiveSubTab] = useState<CodeSubTab>("editor");
   const openFiles = useEditorStore((s) => s.openFiles);
   const activeFilePath = useEditorStore((s) => s.activeFilePath);
   const showDiff = useEditorStore((s) => s.showDiff);
@@ -117,6 +124,17 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
     ensureFreshWorktrees().catch(() => {});
   }, [ensureFreshWorktrees]);
 
+  useEffect(() => {
+    const onRevealDocGraph = () => setActiveSubTab("graph");
+    window.addEventListener("marblo:reveal-doc-graph", onRevealDocGraph);
+    return () =>
+      window.removeEventListener("marblo:reveal-doc-graph", onRevealDocGraph);
+  }, []);
+
+  const handleGraphDocumentOpened = useCallback(() => {
+    setActiveSubTab("editor");
+  }, []);
+
   const handleRootChange = (value: string) => {
     const nextRoot = value === "__project__" ? projectRootPath : value;
     if (nextRoot === rootPath) return;
@@ -158,103 +176,146 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
         </select>
       </div>
 
-      {/* Editor tabs */}
-      <EditorTabs />
+      <div
+        className="flex flex-shrink-0 border-b border-gray-700/80 bg-gray-850 px-2 pt-1"
+        role="tablist"
+        aria-label="Code view"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSubTab === "editor"}
+          data-testid="code-editor-subtab"
+          onClick={() => setActiveSubTab("editor")}
+          className={`rounded-t px-3 py-1.5 text-xs font-medium transition-colors ${
+            activeSubTab === "editor"
+              ? "bg-gray-800 text-gray-100"
+              : "text-gray-500 hover:text-gray-300"
+          }`}
+        >
+          {EDITOR_SUBTAB_LABEL}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSubTab === "graph"}
+          data-testid="code-doc-graph-subtab"
+          onClick={() => setActiveSubTab("graph")}
+          className={`rounded-t px-3 py-1.5 text-xs font-medium transition-colors ${
+            activeSubTab === "graph"
+              ? "bg-gray-800 text-gray-100"
+              : "text-gray-500 hover:text-gray-300"
+          }`}
+        >
+          {DOC_GRAPH_SUBTAB_LABEL}
+        </button>
+      </div>
 
-      {/* Verdict of the "이 워크트리 보기" diff auto-open — the changed-file
-          strip when it opened, and an explicit reason when it could not. Both
-          shells render CodeTab, so this covers legacy Layout and the Workspace
-          shell alike. */}
-      <WorktreeDiffBanner />
-
-      {/* Save failure — a swallowed write error means the edit never hit disk */}
-      {saveError && (
-        <div className="flex items-center gap-2 border-b border-red-800 bg-red-950/70 px-3 py-1.5 text-xs text-red-200">
-          <span className="flex-1 truncate">
-            {t("code.saveFailed", { name: saveError.name })}:{" "}
-            {saveError.message}
-          </span>
-          <button
-            type="button"
-            onClick={clearSaveError}
-            className="flex-shrink-0 rounded px-1.5 py-0.5 text-red-300 hover:bg-red-900/60 hover:text-red-100"
-            aria-label={t("code.saveFailedDismiss")}
-          >
-            ✕
-          </button>
+      {activeSubTab === "graph" ? (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <DocGraphPanel onDocumentOpened={handleGraphDocumentOpened} />
         </div>
-      )}
+      ) : (
+        <>
+          {/* Editor tabs */}
+          <EditorTabs />
 
-      {/* Editor content */}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <div className="min-w-0 flex-1 overflow-hidden">
-          {activeFile ? (
-            showDiff ? (
-              renderDiff ? (
-                renderDiff({
-                  filePath: activeFile.path,
-                  language: activeFile.language,
-                  currentContent: activeFile.content,
-                })
-              ) : (
-                <DiffSurface
-                  filePath={activeFile.path}
-                  language={activeFile.language}
-                  currentContent={activeFile.content}
-                />
-              )
-            ) : isImageFile(activeFile.path) ? (
-              <ImagePreview
-                filePath={activeFile.path}
-                content={activeFile.content}
-                language={activeFile.language}
-              />
-            ) : isNotebookFile(activeFile.path) ? (
-              <NotebookView
-                filePath={activeFile.path}
-                content={activeFile.content}
-                language={activeFile.language}
-              />
-            ) : isMarkdownFile(activeFile.path) ? (
-              <MarkdownPreview
-                filePath={activeFile.path}
-                content={activeFile.content}
-                language={activeFile.language}
-              />
-            ) : (
-              <CodeEditor
-                filePath={activeFile.path}
-                content={activeFile.content}
-                language={activeFile.language}
-              />
-            )
-          ) : (
-            <div className="flex h-full items-center justify-center text-gray-400">
-              <div className="text-center">
-                <svg
-                  className="mx-auto h-16 w-16 text-gray-600"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
-                  />
-                </svg>
-                <p className="mt-4 text-lg font-medium">
-                  {t("code.noFileSelected.title")}
-                </p>
-                <p className="mt-1 text-sm text-gray-500">
-                  {t("code.noFileSelected.hint")}
-                </p>
-              </div>
+          {/* Verdict of the "이 워크트리 보기" diff auto-open — the changed-file
+              strip when it opened, and an explicit reason when it could not.
+              Both shells render CodeTab, so this covers legacy Layout and the
+              Workspace shell alike. */}
+          <WorktreeDiffBanner />
+
+          {/* Save failure — a swallowed write error means the edit never hit disk */}
+          {saveError && (
+            <div className="flex items-center gap-2 border-b border-red-800 bg-red-950/70 px-3 py-1.5 text-xs text-red-200">
+              <span className="flex-1 truncate">
+                {t("code.saveFailed", { name: saveError.name })}:{" "}
+                {saveError.message}
+              </span>
+              <button
+                type="button"
+                onClick={clearSaveError}
+                className="flex-shrink-0 rounded px-1.5 py-0.5 text-red-300 hover:bg-red-900/60 hover:text-red-100"
+                aria-label={t("code.saveFailedDismiss")}
+              >
+                ✕
+              </button>
             </div>
           )}
-        </div>
-      </div>
+
+          {/* Editor content */}
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            <div className="min-w-0 flex-1 overflow-hidden">
+              {activeFile ? (
+                showDiff ? (
+                  renderDiff ? (
+                    renderDiff({
+                      filePath: activeFile.path,
+                      language: activeFile.language,
+                      currentContent: activeFile.content,
+                    })
+                  ) : (
+                    <DiffSurface
+                      filePath={activeFile.path}
+                      language={activeFile.language}
+                      currentContent={activeFile.content}
+                    />
+                  )
+                ) : isImageFile(activeFile.path) ? (
+                  <ImagePreview
+                    filePath={activeFile.path}
+                    content={activeFile.content}
+                    language={activeFile.language}
+                  />
+                ) : isNotebookFile(activeFile.path) ? (
+                  <NotebookView
+                    filePath={activeFile.path}
+                    content={activeFile.content}
+                    language={activeFile.language}
+                  />
+                ) : isMarkdownFile(activeFile.path) ? (
+                  <MarkdownPreview
+                    filePath={activeFile.path}
+                    content={activeFile.content}
+                    language={activeFile.language}
+                  />
+                ) : (
+                  <CodeEditor
+                    filePath={activeFile.path}
+                    content={activeFile.content}
+                    language={activeFile.language}
+                  />
+                )
+              ) : (
+                <div className="flex h-full items-center justify-center text-gray-400">
+                  <div className="text-center">
+                    <svg
+                      className="mx-auto h-16 w-16 text-gray-600"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={1.5}
+                        d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+                      />
+                    </svg>
+                    <p className="mt-4 text-lg font-medium">
+                      {t("code.noFileSelected.title")}
+                    </p>
+                    <p className="mt-1 text-sm text-gray-500">
+                      {t("code.noFileSelected.hint")}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
