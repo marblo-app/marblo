@@ -5,6 +5,7 @@ import { ProjectSetupBanners } from "./onboarding/ProjectSetupBanners";
 import { RepoConnectModal } from "./collaboration/RepoConnectModal";
 import { FirstSharedProjectModal } from "./collaboration/FirstSharedProjectModal";
 import { FirstProjectSurvey } from "./onboarding/FirstProjectSurvey";
+import { OnboardingGraduationJourney } from "./onboarding/OnboardingGraduationJourney";
 import { FundingGuideHost } from "./onboarding/FundingGuideHost";
 import { OnrampGateHost } from "./onboarding/OnrampGateHost";
 import { PrivacyConsentGate } from "./legal/PrivacyConsentGate";
@@ -14,6 +15,7 @@ import { ChatToastHost } from "./chat/ChatToastHost";
 import { BugReportNoticeToast } from "./chat/BugReportNoticeToast";
 import { UpgradeModal } from "./settings/UpgradeModal";
 import { useUiStore } from "../stores/uiStore";
+import { useOnboardingProgressStore } from "../stores/onboardingProgressStore";
 import type { ProjectSetup } from "../hooks/useProjectSetup";
 
 export interface GlobalOverlaysProps {
@@ -51,6 +53,9 @@ export interface GlobalOverlaysProps {
 export function GlobalOverlays({ projectSetup }: GlobalOverlaysProps) {
   const upgradeModal = useUiStore((s) => s.upgradeModal);
   const hideUpgrade = useUiStore((s) => s.hideUpgrade);
+  const activeGraduationMilestone = useOnboardingProgressStore(
+    (s) => s.activeGraduationMilestone,
+  );
 
   return (
     <>
@@ -79,8 +84,11 @@ export function GlobalOverlays({ projectSetup }: GlobalOverlaysProps) {
       {/* 공유받는 멤버의 첫 프로젝트 진입 맥락 — 공유 범위와 로컬 코드 원칙. */}
       <FirstSharedProjectModal />
 
+      {/* Onboarding graduation chain — gates post-activation nudges one by one. */}
+      <OnboardingGraduationJourney />
+
       {/* First project completion micro-survey */}
-      <FirstProjectSurvey />
+      <FirstProjectSurvey blocked={activeGraduationMilestone !== null} />
 
       {/* ── 온램프 사다리의 두 문(門) (v3/docs/onramp-ladder-design-2026-08-09.md) ──
           ★둘 다 여기 있는 이유는 **모드 파리티**다. 종전에 FundingGuideHost 는

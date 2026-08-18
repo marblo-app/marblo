@@ -13,6 +13,10 @@ import {
 } from "../../lib/repoConnect";
 import telemetry from "../../services/telemetryService";
 import type { MessageKey } from "../../locales/ko";
+import {
+  ONBOARDING_REPO_CONNECTED_EVENT,
+  ONBOARDING_REPO_GUIDE_LATER_EVENT,
+} from "../../stores/onboardingProgressStore";
 
 /**
  * 저장소 연결 모달 (티켓 r8VggohxLGciDVXV2rf6,
@@ -397,6 +401,7 @@ export function RepoConnectModal() {
     }
     setRootPath(localPath);
     telemetry.folderConnected(mode, true);
+    window.dispatchEvent(new CustomEvent(ONBOARDING_REPO_CONNECTED_EVENT));
   };
 
   /**
@@ -493,6 +498,7 @@ export function RepoConnectModal() {
 
   const handleLater = () => {
     setDismissed((prev) => new Set(prev).add(projectId));
+    window.dispatchEvent(new CustomEvent(ONBOARDING_REPO_GUIDE_LATER_EVENT));
   };
 
   const handleGitHubConnect = async () => {

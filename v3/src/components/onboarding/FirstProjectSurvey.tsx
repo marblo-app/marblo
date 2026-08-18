@@ -11,6 +11,16 @@ import {
   shouldShowExperienceSurveyPrompt,
 } from "../../lib/experienceSurveyPrompt";
 
+interface FirstProjectSurveyProps {
+  forceVisible?: boolean;
+  blocked?: boolean;
+  requireShareUrl?: boolean;
+  title?: string;
+  eyebrow?: string;
+  submitLabel?: string;
+  onResolved?: (disposition: "submitted" | "later" | "dismissed") => void;
+}
+
 function safeLocalStorage(): Storage | null {
   return typeof window === "undefined" ? null : window.localStorage;
 }
@@ -19,7 +29,15 @@ function safeSessionStorage(): Storage | null {
   return typeof window === "undefined" ? null : window.sessionStorage;
 }
 
-export function FirstProjectSurvey() {
+export function FirstProjectSurvey({
+  forceVisible = false,
+  blocked = false,
+  requireShareUrl = true,
+  title = "마블로 사용경험은 어땠나요?",
+  eyebrow = "Experience survey",
+  submitLabel = "링크 제출하고 5개월 Pro 받기",
+  onResolved,
+}: FirstProjectSurveyProps) {
   const [visible, setVisible] = useState(false);
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
@@ -31,6 +49,11 @@ export function FirstProjectSurvey() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (forceVisible) {
+      setVisible(true);
+      return;
+    }
+    if (blocked) return;
     const storage = safeLocalStorage();
     const currentSessionCount = incrementExperienceSurveySession(
       storage,
@@ -47,7 +70,11 @@ export function FirstProjectSurvey() {
       markExperienceSurveyPrompted(storage, currentSessionCount);
       setVisible(true);
     }
-  }, []);
+  }, [blocked, forceVisible]);
+
+  useEffect(() => {
+    if (forceVisible) setVisible(true);
+  }, [forceVisible]);
 
   if (!visible) return null;
 
@@ -57,12 +84,17 @@ export function FirstProjectSurvey() {
   const canSubmit =
     rating > 0 &&
     (trimmedLiked.length > 0 || trimmedImprovements.length > 0) &&
-    isValidShareUrl(trimmedShareUrl) &&
+    (!requireShareUrl ||
+      trimmedShareUrl.length === 0 ||
+      isValidShareUrl(trimmedShareUrl)) &&
     !submitting;
 
   const handleSubmit = async () => {
     if (rating === 0) return;
-    if (!isValidShareUrl(trimmedShareUrl)) {
+    if (
+      (requireShareUrl || trimmedShareUrl.length > 0) &&
+      !isValidShareUrl(trimmedShareUrl)
+    ) {
       setError("SNS 공유 링크를 http 또는 https URL로 붙여주세요.");
       return;
     }
@@ -70,26 +102,38 @@ export function FirstProjectSurvey() {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await submitExperienceShareSurvey({
-        rating,
-        liked: trimmedLiked,
-        improvements: trimmedImprovements,
-        shareUrl: trimmedShareUrl,
-        sessionCount,
-      });
-      if (!result.ok) {
-        throw new Error("submit_failed");
+      if (requireShareUrl) {
+        const result = await submitExperienceShareSurvey({
+          rating,
+          liked: trimmedLiked,
+          improvements: trimmedImprovements,
+          shareUrl: trimmedShareUrl,
+          sessionCount,
+        });
+        if (!result.ok) {
+          throw new Error("submit_failed");
+        }
+        markExperienceSurveySubmitted(safeLocalStorage());
+        telemetry.surveyFirstProject(rating, {
+          likedLength: trimmedLiked.length,
+          improvementsLength: trimmedImprovements.length,
+          hasShareUrl: true,
+          rewardMonths: result.rewardMonths,
+          reviewStatus: result.reviewStatus,
+          grantApplied: result.grantApplied,
+        });
+      } else {
+        telemetry.surveyFirstProject(rating, {
+          likedLength: trimmedLiked.length,
+          improvementsLength: trimmedImprovements.length,
+          hasShareUrl: false,
+          rewardMonths: 0,
+          reviewStatus: "pending_review",
+          grantApplied: false,
+        });
       }
-      markExperienceSurveySubmitted(safeLocalStorage());
-      telemetry.surveyFirstProject(rating, {
-        likedLength: trimmedLiked.length,
-        improvementsLength: trimmedImprovements.length,
-        hasShareUrl: true,
-        rewardMonths: result.rewardMonths,
-        reviewStatus: result.reviewStatus,
-        grantApplied: result.grantApplied,
-      });
       setVisible(false);
+      onResolved?.("submitted");
     } catch {
       setError("제출에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
@@ -99,6 +143,12 @@ export function FirstProjectSurvey() {
 
   const handleSkip = () => {
     setVisible(false);
+    onResolved?.("later");
+  };
+
+  const handleDismiss = () => {
+    setVisible(false);
+    onResolved?.("dismissed");
   };
 
   return (
@@ -106,20 +156,30 @@ export function FirstProjectSurvey() {
       <div className="flex justify-between items-start mb-3">
         <div>
           <p className="text-xs font-medium uppercase text-[#89b4fa]">
-            Experience survey
+            {eyebrow}
           </p>
           <h3 className="mt-1 text-base font-semibold text-[#cdd6f4]">
-            마블로 사용경험은 어땠나요?
+            {title}
           </h3>
         </div>
         <button
           type="button"
-          onClick={handleSkip}
+          onClick={handleDismiss}
           className="text-[#a6adc8] hover:text-[#cdd6f4]"
           aria-label="설문 닫기"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
           </svg>
         </button>
       </div>
@@ -137,7 +197,9 @@ export function FirstProjectSurvey() {
             onBlur={() => setHoverRating(0)}
             onClick={() => setRating(star)}
             className={`text-3xl transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#f9e2af] focus-visible:ring-offset-2 focus-visible:ring-offset-[#1e1e2e] ${
-              star <= (hoverRating || rating) ? "text-[#f9e2af]" : "text-[#45475a]"
+              star <= (hoverRating || rating)
+                ? "text-[#f9e2af]"
+                : "text-[#45475a]"
             }`}
             aria-pressed={star <= rating}
             title={`${star}점`}
@@ -146,7 +208,10 @@ export function FirstProjectSurvey() {
           </button>
         ))}
       </div>
-      <label className="mt-4 block text-sm text-[#a6adc8]" htmlFor="first-project-survey-feedback">
+      <label
+        className="mt-4 block text-sm text-[#a6adc8]"
+        htmlFor="first-project-survey-feedback"
+      >
         좋았던 점
       </label>
       <textarea
@@ -157,7 +222,10 @@ export function FirstProjectSurvey() {
         maxLength={1000}
         placeholder="작업 흐름, 에이전트 협업, 결과물 등 좋았던 점을 적어주세요."
       />
-      <label className="mt-4 block text-sm text-[#a6adc8]" htmlFor="first-project-survey-improvements">
+      <label
+        className="mt-4 block text-sm text-[#a6adc8]"
+        htmlFor="first-project-survey-improvements"
+      >
         개선점
       </label>
       <textarea
@@ -168,30 +236,48 @@ export function FirstProjectSurvey() {
         maxLength={1000}
         placeholder="막혔던 점이나 다음에 좋아졌으면 하는 부분을 적어주세요."
       />
-      <label className="mt-4 block text-sm text-[#a6adc8]" htmlFor="first-project-survey-share-url">
-        마블로 경험을 SNS에 공유하고 링크를 붙여주세요
-      </label>
-      <input
-        id="first-project-survey-share-url"
-        type="url"
-        value={shareUrl}
-        onChange={(event) => setShareUrl(event.target.value)}
-        className="mt-2 w-full rounded-lg border border-[#313244] bg-[#11111b] px-3 py-2 text-sm text-[#cdd6f4] outline-none transition-colors placeholder:text-[#6c7086] focus:border-[#89b4fa]"
-        placeholder="https://..."
-      />
-      <p className="mt-2 text-xs leading-5 text-[#a6adc8]">
-        인스타, 블로그, 유튜브 등 어떤 링크든 가능합니다. 제출하면 5개월 Pro 무료
-        리워드가 자동 적용되고 어드민 검토 플래그가 함께 남습니다.
-      </p>
+      {requireShareUrl && (
+        <>
+          <label
+            className="mt-4 block text-sm text-[#a6adc8]"
+            htmlFor="first-project-survey-share-url"
+          >
+            마블로 경험을 SNS에 공유하고 링크를 붙여주세요
+          </label>
+          <input
+            id="first-project-survey-share-url"
+            type="url"
+            value={shareUrl}
+            onChange={(event) => setShareUrl(event.target.value)}
+            className="mt-2 w-full rounded-lg border border-[#313244] bg-[#11111b] px-3 py-2 text-sm text-[#cdd6f4] outline-none transition-colors placeholder:text-[#6c7086] focus:border-[#89b4fa]"
+            placeholder="https://..."
+          />
+          <p className="mt-2 text-xs leading-5 text-[#a6adc8]">
+            인스타, 블로그, 유튜브 등 어떤 링크든 가능합니다. 제출하면 5개월 Pro
+            무료 리워드가 자동 적용되고 어드민 검토 플래그가 함께 남습니다.
+          </p>
+        </>
+      )}
       {error && <p className="mt-3 text-xs text-[#f38ba8]">{error}</p>}
-      <button
-        type="button"
-        onClick={handleSubmit}
-        disabled={!canSubmit}
-        className="mt-4 w-full rounded-lg bg-[#89b4fa] px-4 py-2 text-sm font-semibold text-[#11111b] transition-colors hover:bg-[#b4befe] disabled:cursor-not-allowed disabled:bg-[#45475a] disabled:text-[#a6adc8]"
-      >
-        {submitting ? "제출 중..." : "링크 제출하고 5개월 Pro 받기"}
-      </button>
+      <div className="mt-4 flex items-center gap-2">
+        {!requireShareUrl && (
+          <button
+            type="button"
+            onClick={handleSkip}
+            className="rounded-lg px-3 py-2 text-sm text-[#a6adc8] transition-colors hover:bg-[#313244] hover:text-[#cdd6f4]"
+          >
+            다음에
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={!canSubmit}
+          className="min-w-0 flex-1 rounded-lg bg-[#89b4fa] px-4 py-2 text-sm font-semibold text-[#11111b] transition-colors hover:bg-[#b4befe] disabled:cursor-not-allowed disabled:bg-[#45475a] disabled:text-[#a6adc8]"
+        >
+          {submitting ? "제출 중..." : submitLabel}
+        </button>
+      </div>
     </div>
   );
 }
