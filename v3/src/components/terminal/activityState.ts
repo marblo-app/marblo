@@ -29,6 +29,8 @@ function normalizeActivityState(state: string | undefined): string {
   return (state ?? "").trim().toLowerCase();
 }
 
+export type TerminalActivitySettleIntent = "schedule" | "cancel" | "ignore";
+
 export function isBusyTerminalActivityState(
   state: string | undefined,
 ): boolean {
@@ -45,10 +47,22 @@ export function isTerminalActivitySettlingTransition(
   previous: string | undefined,
   next: string | undefined,
 ): boolean {
-  if (!previous || !next || previous === next) return false;
-  const wasBusy = isBusyTerminalActivityState(previous);
+  const prev = normalizeActivityState(previous);
+  const nextState = normalizeActivityState(next);
+  if (!prev || !nextState || prev === nextState) return false;
+  const wasBusy = BUSY_ACTIVITY_STATES.has(prev);
   if (!wasBusy) return false;
   return (
-    isSettledTerminalActivityState(next) || !isBusyTerminalActivityState(next)
+    SETTLED_ACTIVITY_STATES.has(nextState) ||
+    !BUSY_ACTIVITY_STATES.has(nextState)
   );
+}
+
+export function getTerminalActivitySettleIntent(
+  previous: string | undefined,
+  next: string | undefined,
+): TerminalActivitySettleIntent {
+  if (isBusyTerminalActivityState(next)) return "cancel";
+  if (isTerminalActivitySettlingTransition(previous, next)) return "schedule";
+  return "ignore";
 }

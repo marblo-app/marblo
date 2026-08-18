@@ -6,7 +6,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { patchTerminalForFastIME } from "../../lib/xtermIMEPatch";
 import { resolveClipboardForTerminal } from "../../utils/clipboardImage";
-import { isTerminalActivitySettlingTransition } from "./activityState";
+import { getTerminalActivitySettleIntent } from "./activityState";
 import {
   TERMINAL_FONT_FAMILY,
   XTERM_CJK_RENDER_OPTIONS,
@@ -57,8 +57,9 @@ export default memo(function TerminalView({
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const initializedRef = useRef(false);
-  const repairCjkCachesRef = useRef<(reason: string) => void>(() => {});
   const resumeRenderRef = useRef<(reason: string) => void>(() => {});
+  const settleActivityRenderRef = useRef<(reason: string) => void>(() => {});
+  const cancelActivitySettleRef = useRef<() => void>(() => {});
   const lastActivityStateRef = useRef<string | undefined>(activityState);
   // Shared scroll-follow state — user-input-driven (see effect for details).
   const wantBottomRef = useRef(true);
@@ -141,11 +142,21 @@ export default memo(function TerminalView({
       });
     }
 
-    const refitTerminal = () => {
+    const fitTerminalIfGridChanged = () => {
       try {
+        const dims = fitAddon.proposeDimensions();
+        if (
+          !dims ||
+          Number.isNaN(dims.cols) ||
+          Number.isNaN(dims.rows) ||
+          (terminal.cols === dims.cols && terminal.rows === dims.rows)
+        ) {
+          return false;
+        }
         fitAddon.fit();
+        return true;
       } catch {
-        /* ignore */
+        return false;
       }
     };
     const refreshTerminal = () => {
@@ -166,7 +177,7 @@ export default memo(function TerminalView({
         try {
           const repair = repairTerminalCjkFontCachesIfLoaded(terminal);
           if (repair) {
-            refitTerminal();
+            fitTerminalIfGridChanged();
             if (repair.isAlternateScreen) {
               nudgePtyRepaint(`CJK font repair ${reason}`);
             }
@@ -179,20 +190,59 @@ export default memo(function TerminalView({
         }
       });
     };
-    repairCjkCachesRef.current = scheduleCjkCacheRepair;
-
     let resumeRenderFrame: number | null = null;
     const scheduleResumeRender = (reason: string) => {
       if (disposed || resumeRenderFrame !== null) return;
       resumeRenderFrame = requestAnimationFrame(() => {
         resumeRenderFrame = null;
         if (disposed || !termOpened) return;
-        refitTerminal();
+        fitTerminalIfGridChanged();
         refreshTerminal();
         scheduleCjkCacheRepair(`resume ${reason}`);
       });
     };
     resumeRenderRef.current = scheduleResumeRender;
+
+    const ACTIVITY_SETTLE_DEBOUNCE_MS = 140;
+    const ACTIVITY_SETTLE_MAX_WAIT_MS = 420;
+    let activitySettleTimer: ReturnType<typeof setTimeout> | null = null;
+    let activitySettleMaxTimer: ReturnType<typeof setTimeout> | null = null;
+    let pendingActivitySettleReason: string | null = null;
+    const clearActivitySettleTimers = () => {
+      if (activitySettleTimer) clearTimeout(activitySettleTimer);
+      if (activitySettleMaxTimer) clearTimeout(activitySettleMaxTimer);
+      activitySettleTimer = null;
+      activitySettleMaxTimer = null;
+    };
+    const flushActivitySettle = () => {
+      const reason = pendingActivitySettleReason;
+      pendingActivitySettleReason = null;
+      clearActivitySettleTimers();
+      if (disposed || !reason) return;
+      scheduleResumeRender(reason);
+      scheduleCjkCacheRepair(reason);
+    };
+    const cancelActivitySettle = () => {
+      pendingActivitySettleReason = null;
+      clearActivitySettleTimers();
+    };
+    const scheduleActivitySettle = (reason: string) => {
+      if (disposed) return;
+      pendingActivitySettleReason = reason;
+      if (activitySettleTimer) clearTimeout(activitySettleTimer);
+      activitySettleTimer = setTimeout(
+        flushActivitySettle,
+        ACTIVITY_SETTLE_DEBOUNCE_MS,
+      );
+      if (!activitySettleMaxTimer) {
+        activitySettleMaxTimer = setTimeout(
+          flushActivitySettle,
+          ACTIVITY_SETTLE_MAX_WAIT_MS,
+        );
+      }
+    };
+    settleActivityRenderRef.current = scheduleActivitySettle;
+    cancelActivitySettleRef.current = cancelActivitySettle;
 
     // Drill-out gate: plain ArrowLeft with no modifiers AND an empty
     // estimated input line fires onLeftWhenEmpty instead of sending
@@ -313,7 +363,7 @@ export default memo(function TerminalView({
           // Cell metrics can change with the face, so cols/rows must be
           // recomputed (and the PTY told) rather than left at the old grid.
           onRebuilt: (repair) => {
-            refitTerminal();
+            fitTerminalIfGridChanged();
             if (repair.isAlternateScreen) {
               nudgePtyRepaint("CJK font rebuild");
             }
@@ -546,7 +596,7 @@ export default memo(function TerminalView({
             containerRef.current.clientWidth > 0 &&
             containerRef.current.clientHeight > 0
           ) {
-            fitAddon.fit();
+            fitTerminalIfGridChanged();
             refreshTerminal();
             scheduleCjkCacheRepair("container resize");
           }
@@ -624,6 +674,7 @@ export default memo(function TerminalView({
       if (maxTimer) clearTimeout(maxTimer);
       if (nudgeRestoreTimer) clearTimeout(nudgeRestoreTimer);
       if (initialResumeTimer) clearTimeout(initialResumeTimer);
+      cancelActivitySettle();
       if (cjkRepairFrame !== null) cancelAnimationFrame(cjkRepairFrame);
       if (resumeRenderFrame !== null) cancelAnimationFrame(resumeRenderFrame);
       window.removeEventListener("resize", handleResize);
@@ -642,8 +693,9 @@ export default memo(function TerminalView({
       }
       terminalRef.current = null;
       fitAddonRef.current = null;
-      repairCjkCachesRef.current = () => {};
       resumeRenderRef.current = () => {};
+      settleActivityRenderRef.current = () => {};
+      cancelActivitySettleRef.current = () => {};
       initializedRef.current = false;
     };
   }, [sessionId]);
@@ -653,9 +705,13 @@ export default memo(function TerminalView({
     lastActivityStateRef.current = activityState;
     if (!activityState || previous === activityState) return;
 
-    if (isTerminalActivitySettlingTransition(previous, activityState)) {
-      resumeRenderRef.current(`activity ${previous}->${activityState}`);
-      repairCjkCachesRef.current(`activity ${previous}->${activityState}`);
+    const intent = getTerminalActivitySettleIntent(previous, activityState);
+    if (intent === "cancel") {
+      cancelActivitySettleRef.current();
+      return;
+    }
+    if (intent === "schedule") {
+      settleActivityRenderRef.current(`activity ${previous}->${activityState}`);
     }
   }, [activityState]);
 
