@@ -21,10 +21,15 @@ import { registerLocalOllamaModels } from "./model-registry";
 
 // ── first-party 카탈로그 ──────────────────────────────────────────
 
+export type LocalModelCategory = "coding" | "general" | "reasoning";
+
 export interface LocalModelCatalogEntry {
   /** ollama 공식 라이브러리 태그 — `ollama pull <id>` 에 그대로 쓰인다. */
   id: string;
   displayName: string;
+  /** 스토어 구분 라벨 — 코딩 특화 / 범용 / 추론. */
+  category: LocalModelCategory;
+  categoryLabel: string;
   /** 다운로드 크기(MB). ollama.com/library/<model>/tags 실측값(2026-08-18). */
   downloadSizeMB: number;
   /** 최소 권장 RAM(GB) — 모델 상주 + OS/앱 여유의 보수적 큐레이션 값. */
@@ -34,14 +39,16 @@ export interface LocalModelCatalogEntry {
 }
 
 /**
- * 소형 우선 + Qwen3 대표 큐레이션. 크기·컨텍스트는 ollama 공식 라이브러리
- * tags 페이지(ollama.com/library/<model>/tags) 대조값이다 — 추측으로
- * 고치지 말 것.
+ * 소형 우선 + Qwen3/Qwen Coder/최신 범용/추론 대표 큐레이션. 크기·컨텍스트는
+ * ollama 공식 라이브러리 tags 페이지(ollama.com/library/<model>/tags)
+ * 대조값이다 — 추측으로 고치지 말 것.
  */
 export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   {
     id: "qwen2.5:0.5b",
     displayName: "Qwen 2.5 0.5B",
+    category: "general",
+    categoryLabel: "범용",
     downloadSizeMB: 398,
     minRamGB: 4,
     contextTokens: 32_000,
@@ -49,6 +56,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   {
     id: "qwen3:0.6b",
     displayName: "Qwen 3 0.6B",
+    category: "general",
+    categoryLabel: "범용",
     downloadSizeMB: 523,
     minRamGB: 4,
     contextTokens: 40_000,
@@ -56,6 +65,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   {
     id: "qwen2.5:1.5b",
     displayName: "Qwen 2.5 1.5B",
+    category: "general",
+    categoryLabel: "범용",
     downloadSizeMB: 986,
     minRamGB: 4,
     contextTokens: 32_000,
@@ -63,6 +74,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   {
     id: "llama3.2:1b",
     displayName: "Llama 3.2 1B",
+    category: "general",
+    categoryLabel: "범용",
     downloadSizeMB: 1_300,
     minRamGB: 4,
     contextTokens: 128_000,
@@ -70,6 +83,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   {
     id: "gemma2:2b",
     displayName: "Gemma 2 2B",
+    category: "general",
+    categoryLabel: "범용",
     downloadSizeMB: 1_600,
     minRamGB: 6,
     contextTokens: 8_000,
@@ -77,6 +92,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   {
     id: "llama3.2:3b",
     displayName: "Llama 3.2 3B",
+    category: "general",
+    categoryLabel: "범용",
     downloadSizeMB: 2_000,
     minRamGB: 8,
     contextTokens: 128_000,
@@ -84,6 +101,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   {
     id: "phi3:mini",
     displayName: "Phi-3 Mini (3.8B)",
+    category: "general",
+    categoryLabel: "범용",
     downloadSizeMB: 2_200,
     minRamGB: 8,
     contextTokens: 128_000,
@@ -91,6 +110,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   {
     id: "qwen3:4b",
     displayName: "Qwen 3 4B (256K)",
+    category: "general",
+    categoryLabel: "범용",
     downloadSizeMB: 2_500,
     minRamGB: 8,
     contextTokens: 256_000,
@@ -98,6 +119,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   {
     id: "qwen3:8b",
     displayName: "Qwen 3 8B",
+    category: "general",
+    categoryLabel: "범용",
     downloadSizeMB: 5_200,
     minRamGB: 12,
     contextTokens: 40_000,
@@ -105,13 +128,143 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   {
     id: "qwen3:14b",
     displayName: "Qwen 3 14B",
+    category: "general",
+    categoryLabel: "범용",
     downloadSizeMB: 9_300,
     minRamGB: 24,
     contextTokens: 40_000,
   },
   {
+    id: "qwen2.5-coder:7b",
+    displayName: "Qwen 2.5 Coder 7B",
+    category: "coding",
+    categoryLabel: "코딩 특화",
+    downloadSizeMB: 4_700,
+    minRamGB: 12,
+    contextTokens: 32_000,
+  },
+  {
+    id: "qwen2.5-coder:14b",
+    displayName: "Qwen 2.5 Coder 14B",
+    category: "coding",
+    categoryLabel: "코딩 특화",
+    downloadSizeMB: 9_000,
+    minRamGB: 24,
+    contextTokens: 32_000,
+  },
+  {
+    id: "qwen2.5-coder:32b",
+    displayName: "Qwen 2.5 Coder 32B",
+    category: "coding",
+    categoryLabel: "코딩 특화",
+    downloadSizeMB: 20_000,
+    minRamGB: 48,
+    contextTokens: 32_000,
+  },
+  {
+    id: "devstral:24b",
+    displayName: "Devstral 24B",
+    category: "coding",
+    categoryLabel: "코딩 특화",
+    downloadSizeMB: 14_000,
+    minRamGB: 32,
+    contextTokens: 128_000,
+  },
+  {
+    id: "codestral:22b",
+    displayName: "Codestral 22B",
+    category: "coding",
+    categoryLabel: "코딩 특화",
+    downloadSizeMB: 13_000,
+    minRamGB: 32,
+    contextTokens: 32_000,
+  },
+  {
+    id: "gemma3:4b",
+    displayName: "Gemma 3 4B Vision",
+    category: "general",
+    categoryLabel: "범용",
+    downloadSizeMB: 3_300,
+    minRamGB: 8,
+    contextTokens: 128_000,
+  },
+  {
+    id: "gemma3:12b",
+    displayName: "Gemma 3 12B Vision",
+    category: "general",
+    categoryLabel: "범용",
+    downloadSizeMB: 8_100,
+    minRamGB: 24,
+    contextTokens: 128_000,
+  },
+  {
+    id: "gemma3:27b",
+    displayName: "Gemma 3 27B Vision",
+    category: "general",
+    categoryLabel: "범용",
+    downloadSizeMB: 17_000,
+    minRamGB: 48,
+    contextTokens: 128_000,
+  },
+  {
+    id: "llama3.3:70b",
+    displayName: "Llama 3.3 70B",
+    category: "general",
+    categoryLabel: "범용",
+    downloadSizeMB: 43_000,
+    minRamGB: 96,
+    contextTokens: 128_000,
+  },
+  {
+    id: "phi4:14b",
+    displayName: "Phi-4 14B",
+    category: "general",
+    categoryLabel: "범용",
+    downloadSizeMB: 9_100,
+    minRamGB: 24,
+    contextTokens: 16_000,
+  },
+  {
+    id: "mistral-small:24b",
+    displayName: "Mistral Small 24B",
+    category: "general",
+    categoryLabel: "범용",
+    downloadSizeMB: 14_000,
+    minRamGB: 32,
+    contextTokens: 32_000,
+  },
+  {
+    id: "deepseek-r1:8b-0528-qwen3-q4_K_M",
+    displayName: "DeepSeek-R1 Distill Qwen3 8B",
+    category: "reasoning",
+    categoryLabel: "추론",
+    downloadSizeMB: 5_200,
+    minRamGB: 12,
+    contextTokens: 128_000,
+  },
+  {
+    id: "deepseek-r1:14b-qwen-distill-q4_K_M",
+    displayName: "DeepSeek-R1 Distill Qwen 14B",
+    category: "reasoning",
+    categoryLabel: "추론",
+    downloadSizeMB: 9_000,
+    minRamGB: 24,
+    contextTokens: 128_000,
+  },
+  {
+    id: "deepseek-r1:32b-qwen-distill-q4_K_M",
+    displayName: "DeepSeek-R1 Distill Qwen 32B",
+    category: "reasoning",
+    categoryLabel: "추론",
+    downloadSizeMB: 20_000,
+    minRamGB: 48,
+    contextTokens: 128_000,
+  },
+  {
     id: "qwen3:30b",
     displayName: "Qwen 3 30B-A3B MoE (256K)",
+    category: "general",
+    categoryLabel: "범용",
     downloadSizeMB: 19_000,
     minRamGB: 48,
     contextTokens: 256_000,
@@ -119,6 +272,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   {
     id: "qwen3:32b",
     displayName: "Qwen 3 32B",
+    category: "general",
+    categoryLabel: "범용",
     downloadSizeMB: 20_000,
     minRamGB: 48,
     contextTokens: 40_000,
