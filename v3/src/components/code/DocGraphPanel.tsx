@@ -1,12 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEditorStore } from "../../stores/editorStore";
 import { useTranslation } from "../../lib/i18n";
 import {
+  buildDocGraph,
   collectMarkdownPaths,
   joinProjectPath,
   toProjectRelative,
   type DocSource,
 } from "../../lib/docGraphAnalysis";
+import {
+  ConnectorGuidePanel,
+  ConnectorGuideStep,
+  ConnectorGuideSteps,
+} from "../harness/ConnectorGuidePanel";
 import { DocGraphView } from "./DocGraphView";
 
 /**
@@ -19,6 +25,7 @@ import { DocGraphView } from "./DocGraphView";
 
 const MAX_MD_FILES = 300;
 const READ_CONCURRENCY = 8;
+const GUIDE_STORAGE_KEY = "marblo.docGraph.guide.open";
 
 interface DocGraphPanelProps {
   onDocumentOpened?: () => void;
@@ -111,6 +118,12 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
     [openFile, onDocumentOpened],
   );
 
+  const edgeCount = useMemo(
+    () => (sources.length === 0 ? 0 : buildDocGraph(sources).edges.length),
+    [sources],
+  );
+  const showNoLinksHint = !loading && sources.length > 0 && edgeCount === 0;
+
   if (!rootPath) {
     return (
       <div
@@ -124,6 +137,35 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="doc-graph-panel">
+      <div className="flex-shrink-0 px-2 pt-1">
+        <ConnectorGuidePanel
+          toggleLabel={t("code.docGraph.guide.toggle")}
+          storageKey={GUIDE_STORAGE_KEY}
+          className="mt-0 rounded border border-[#313244] bg-[#1e1e2e]"
+        >
+          <ConnectorGuideSteps>
+            <ConnectorGuideStep>
+              1. {t("code.docGraph.guide.step1")}
+            </ConnectorGuideStep>
+            <ConnectorGuideStep>
+              2. {t("code.docGraph.guide.step2")}
+            </ConnectorGuideStep>
+            <ConnectorGuideStep>
+              3. {t("code.docGraph.guide.step3")}
+            </ConnectorGuideStep>
+            <ConnectorGuideStep>
+              4. {t("code.docGraph.guide.step4")}
+            </ConnectorGuideStep>
+          </ConnectorGuideSteps>
+          <p
+            className="rounded border border-[#313244] bg-[#181825] px-3 py-2 text-[#a6adc8]"
+            data-testid="doc-graph-guide-diff"
+          >
+            {t("code.docGraph.guide.diff")}
+          </p>
+        </ConnectorGuidePanel>
+      </div>
+
       <div className="flex flex-shrink-0 items-center gap-1 border-b border-gray-700/60 px-2 py-1">
         <button
           type="button"
@@ -140,6 +182,15 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
           </span>
         )}
       </div>
+
+      {showNoLinksHint && (
+        <div
+          className="flex-shrink-0 border-b border-amber-900/40 bg-amber-950/30 px-3 py-1.5 text-[11px] text-amber-200/90"
+          data-testid="doc-graph-no-links-hint"
+        >
+          {t("code.docGraph.noLinksHint")}
+        </div>
+      )}
 
       {error ? (
         <div className="px-3 py-4 text-xs text-red-400">{error}</div>
