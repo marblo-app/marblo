@@ -31,7 +31,20 @@ import {
   toolSurfaceEnv,
   workerClaudeSettings,
 } from "./prefix-diet";
-import { toolSupportForLocalModelId } from "./local-models";
+import {
+  isLocalChatOnlyModel,
+  toolSupportForLocalModelId,
+} from "./local-models";
+import {
+  injectCodexVendorEnvKey,
+  renderCodexVendorProviderToml,
+  resolveCodexVendorProviderOverride,
+  type CodexVendorProviderOverride,
+} from "./codex-vendor-provider";
+import {
+  startCodexChatBridgeSync,
+  type CodexChatBridgeHandle,
+} from "./codex-chat-bridge";
 
 /**
  * 로컬 소형(chat-only) 모델용 system. MCP/에이전트 tool-use 루프를 넣지 않는다.
@@ -53,7 +66,8 @@ function localProfileForPinnedModel(
     agentModel === "local" ||
     registryRow?.provider === "local";
   if (!isLocal) return "full";
-  return toolSupportForLocalModelId(pinnedModelId) === "chat-only"
+  return isLocalChatOnlyModel(pinnedModelId) ||
+    toolSupportForLocalModelId(pinnedModelId) === "chat-only"
     ? "chat-only"
     : "local-tool-use";
 }
@@ -2298,6 +2312,8 @@ function discoverTfSkillDirs(projectDir: string): Array<{
 
 export class AgentConfigGenerator {
   private generatedFiles: Map<string, string[]> = new Map();
+  /** Per-agent Responses→Chat bridges (Upstage Solar). Stopped in cleanup(). */
+  private codexChatBridges: Map<string, CodexChatBridgeHandle> = new Map();
 
   /**
    * Generate model-specific MCP configuration file.
@@ -2313,6 +2329,8 @@ export class AgentConfigGenerator {
     // 워커 화이트리스트가 적용된다.
     role?: string,
     promptProfile: AgentPromptProfile = "full",
+    /** Pinned concrete model id (codexModel) — drives Codex vendor provider override. */
+    pinnedModelId?: string,
   ): string {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
 
@@ -2336,7 +2354,12 @@ export class AgentConfigGenerator {
       case "gemini":
         return this.generateGeminiConfig(agentId, mcpEntry);
       case "gpt":
-        return this.generateGPTConfig(agentId, mcpEntry, projectDir);
+        return this.generateGPTConfig(
+          agentId,
+          mcpEntry,
+          projectDir,
+          pinnedModelId,
+        );
       case "grok":
         return this.generateGrokConfig(agentId, mcpEntry, projectDir);
       case "antigravity":
@@ -2426,6 +2449,7 @@ export class AgentConfigGenerator {
       marbloContextId,
       agent.role,
       promptProfile,
+      modelPin?.codexModel ?? modelPin?.claudeModel ?? modelPin?.nativeModel,
     );
     // chat-only 는 역할 스킬(tool-use 루프)을 주입하지 않는다.
     const skillPath = chatOnly
@@ -2658,6 +2682,13 @@ export class AgentConfigGenerator {
     // 으로 오해할 여지를 없앤다(브로커는 삭제를 전파하지 않지만, 죽은 에이전트를
     // 계속 폴링할 이유도 없다).
     grokAuthBroker.release(agentId);
+    const bridge = this.codexChatBridges.get(agentId);
+    if (bridge) {
+      this.codexChatBridges.delete(agentId);
+      void bridge.stop().catch(() => {
+        /* ignore */
+      });
+    }
     const files = this.generatedFiles.get(agentId) || [];
     for (const filePath of files) {
       try {
@@ -3006,6 +3037,7 @@ export class AgentConfigGenerator {
     agentId: string,
     mcpEntry: MCPServerEntry,
     projectDir: string,
+    pinnedModelId?: string,
   ): string {
     // Codex CLI reads config from `$CODEX_HOME/config.toml` (TOML, not JSON)
     // with `[mcp_servers.<name>]` sections. Each agent gets an ISOLATED
@@ -3019,9 +3051,14 @@ export class AgentConfigGenerator {
     // any [features] block — the latter so user-enabled experimental
     // toggles like `goals=true` don't leak into Marblo agents and surface
     // unstable-feature warnings) and symlink auth.json so Codex stays
-    // authenticated.
+    // authenticated — except for OpenAI-compat env-swap vendors (Upstage /
+    // DeepSeek), where we force model_providers + apikey auth so a ChatGPT
+    // login cannot hijack the request (solar-pro4 400).
     const codexHome = path.join(CONFIG_DIR, `codex-home-${agentId}`);
     fs.mkdirSync(codexHome, { recursive: true });
+
+    const vendorOverride =
+      resolveCodexVendorProviderOverride(pinnedModelId) ?? null;
 
     // Preserve user's non-MCP Codex config so model/reasoning prefs survive.
     const userCodexDir = path.join(os.homedir(), ".codex");
@@ -3041,20 +3078,38 @@ export class AgentConfigGenerator {
         //                        trusted the same dir from their own CLI
         //                        use (codex refuses to load the config and
         //                        the agent dies on spawn).
+        //  - model_provider / [model_providers.*] when we inject a vendor
+        //    override (avoid duplicate keys / ChatGPT provider winning).
         preserved = raw
           .replace(/\[mcp_servers\.[\s\S]*?(?=\n\[(?!mcp_servers)|$)/g, "")
           .replace(/\[features\][\s\S]*?(?=\n\[|$)/g, "")
           .replace(/\[projects\.[\s\S]*?(?=\n\[(?!projects)|$)/g, "")
           .trimEnd();
+        if (vendorOverride) {
+          preserved = preserved
+            .replace(/^\s*model_provider\s*=\s*.*$/gm, "")
+            .replace(
+              /\[model_providers\.[\s\S]*?(?=\n\[(?!model_providers)|$)/g,
+              "",
+            )
+            .replace(/^\s*preferred_auth_method\s*=\s*.*$/gm, "")
+            .replace(/^\s*forced_login_method\s*=\s*.*$/gm, "")
+            .trimEnd();
+        }
       } catch {
         // Best-effort — ignore unreadable user config.
       }
     }
 
     // Symlink auth.json so Codex inherits the user's authentication.
+    // Vendor override: skip ChatGPT auth.json so API-key + model_provider win.
     const userAuth = path.join(userCodexDir, "auth.json");
     const targetAuth = path.join(codexHome, "auth.json");
-    if (fs.existsSync(userAuth) && !fs.existsSync(targetAuth)) {
+    if (
+      !vendorOverride &&
+      fs.existsSync(userAuth) &&
+      !fs.existsSync(targetAuth)
+    ) {
       try {
         fs.symlinkSync(userAuth, targetAuth);
       } catch {
@@ -3063,6 +3118,13 @@ export class AgentConfigGenerator {
         } catch {
           /* ignore */
         }
+      }
+    }
+    if (vendorOverride && fs.existsSync(targetAuth)) {
+      try {
+        fs.unlinkSync(targetAuth);
+      } catch {
+        /* ignore */
       }
     }
 
@@ -3110,7 +3172,17 @@ export class AgentConfigGenerator {
       .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
       .join("\n");
 
+    const vendorProviderToml = vendorOverride
+      ? this.buildCodexVendorProviderToml(agentId, vendorOverride)
+      : "";
+
+    // Vendor override MUST come before preserved user tables. A trailing
+    // `[tui.model_availability_nux]` (map of model→u32) would otherwise absorb
+    // top-level `model_provider = "..."` as a map entry and fail parse
+    // (`expected u32`, got `"upstage"`).
     const tomlSections = [
+      vendorProviderToml.trimEnd(),
+      "",
       preserved,
       "",
       ...trustEntries,
@@ -3127,14 +3199,67 @@ export class AgentConfigGenerator {
     if (envEntries) {
       tomlSections.push("", "[mcp_servers.marblo.env]", envEntries);
     }
-    const toml = tomlSections.join("\n") + "\n";
+    const toml = tomlSections.filter((s) => s !== undefined).join("\n") + "\n";
 
     const configPath = path.join(codexHome, "config.toml");
     fs.writeFileSync(configPath, toml, "utf-8");
     this.trackFile(agentId, configPath);
-    this.trackFile(agentId, targetAuth);
+    if (!vendorOverride) {
+      this.trackFile(agentId, targetAuth);
+    }
     // Return the file path; buildCLICommand derives CODEX_HOME from dirname.
     return configPath;
+  }
+
+  /**
+   * Start Upstage chat-bridge if needed and render [model_providers.*] TOML.
+   */
+  private buildCodexVendorProviderToml(
+    agentId: string,
+    override: CodexVendorProviderOverride,
+  ): string {
+    let baseUrl = override.upstreamBaseUrl;
+    const skipBridge =
+      process.env.VITEST === "true" ||
+      process.env.MARBLO_CODEX_SKIP_CHAT_BRIDGE === "1";
+    if (override.needsChatBridge && !skipBridge) {
+      const prev = this.codexChatBridges.get(agentId);
+      if (prev) {
+        void prev.stop().catch(() => {
+          /* ignore */
+        });
+        this.codexChatBridges.delete(agentId);
+      }
+      const secret =
+        process.env[override.envKey]?.trim() ||
+        getVendorSecret(override.envKey);
+      if (secret) {
+        try {
+          const bridge = startCodexChatBridgeSync({
+            upstreamBaseUrl: override.upstreamBaseUrl,
+            apiKey: secret,
+          });
+          this.codexChatBridges.set(agentId, bridge);
+          baseUrl = bridge.baseUrl;
+          console.log("[agent-config] Codex chat bridge started", {
+            provider: override.providerId,
+            port: bridge.port,
+          });
+        } catch (err) {
+          console.warn("[agent-config] Codex chat bridge failed to start", {
+            provider: override.providerId,
+            error: err instanceof Error ? err.message : String(err),
+            fallback: "upstream base_url (may 404 without /responses)",
+          });
+        }
+      } else {
+        console.warn(
+          "[agent-config] Codex vendor bridge skipped — missing env key",
+          { provider: override.providerId, envKey: override.envKey },
+        );
+      }
+    }
+    return renderCodexVendorProviderToml(override, baseUrl);
   }
 
   // ★projectDir 를 받는다. grok 의 **폴더 신뢰**가 프로젝트 경로에 의존하기
@@ -3644,6 +3769,17 @@ export class AgentConfigGenerator {
         if (codexReasoning) {
           codexArgs.push("-c", `model_reasoning_effort="${codexReasoning}"`);
         }
+        // OpenAI-compat env-swap (Upstage/DeepSeek): force model_provider so a
+        // ChatGPT login cannot ignore OPENAI_BASE_URL (solar-pro4 400).
+        const codexVendorOverride = resolveCodexVendorProviderOverride(
+          modelPin?.codexModel,
+        );
+        if (codexVendorOverride) {
+          codexArgs.push(
+            "-c",
+            `model_provider="${codexVendorOverride.providerId}"`,
+          );
+        }
         // Reject `baseCommand === "gpt"` — that's the model slug accidentally
         // saved to the Firestore agent doc by older builds of Layout.tsx, and
         // it shadows macOS's /usr/sbin/gpt (GUID Partition Table utility)
@@ -3657,15 +3793,19 @@ export class AgentConfigGenerator {
               ? "codex"
               : baseCommand;
         const codexLaunch = ptyCommandForCli(codexCommand, codexArgs);
+        let codexEnv = applyVendorEnv(
+          { ...env, CODEX_HOME: path.dirname(mcpConfigPath) },
+          modelPin?.codexModel,
+        );
+        if (codexVendorOverride) {
+          codexEnv = injectCodexVendorEnvKey(codexEnv, codexVendorOverride);
+        }
         return {
           command: codexLaunch.command,
           args: codexLaunch.args,
           // 벤더 프로파일 주입 자리(claude 분기와 동일 규율). CODEX_HOME 은 보호
           // 키라 프로파일이 덮어쓸 수 없다 — 덮이면 MCP 배선이 통째로 날아간다.
-          env: applyVendorEnv(
-            { ...env, CODEX_HOME: path.dirname(mcpConfigPath) },
-            modelPin?.codexModel,
-          ),
+          env: codexEnv,
         };
       }
 
