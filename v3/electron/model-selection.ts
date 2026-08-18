@@ -198,6 +198,8 @@ const VENDOR_SHORTHAND_TO_VENDOR: Record<string, VendorId> = {
   // Upstage Solar Pro
   solar: "upstage",
   upstage: "upstage",
+  // DeepSeek V3/R1
+  deepseek: "deepseek",
 };
 
 const CAPABILITY_RANK: Readonly<Record<CapabilityTier, number>> = {
@@ -216,7 +218,7 @@ const CAPABILITY_RANK: Readonly<Record<CapabilityTier, number>> = {
  * 매핑이 없으면 undefined — 호출자가 기존 `normalizeModel` 경로로 폴백한다.
  */
 export function resolveVendorShorthand(
-  input: string
+  input: string,
 ): ModelRegistryEntry | undefined {
   const key = input.trim().toLowerCase();
   const vendor = VENDOR_SHORTHAND_TO_VENDOR[key];
@@ -251,6 +253,7 @@ export function resolveVendorShorthand(
  *   "glm" / "zai"      → { provider: "claude", vendor: "zai",     modelId: "glm-5.2" }
  *   "kimi" / "moonshot"→ { provider: "claude", vendor: "moonshot",modelId: "k3" }
  *   "solar" / "upstage"→ { provider: "gpt",    vendor: "upstage", modelId: "solar-pro4" }
+ *   "deepseek"         → { provider: "gpt",    vendor: "deepseek",modelId: "deepseek-chat" }
  *   "존재하지않음"       → undefined                                 (호출자가 폴백)
  *
  * 해석 순서: (1) 구체 id/alias loose → (2) 벤더 숏핸드 → (3) 하네스 토큰.
@@ -283,7 +286,7 @@ export function parseModelSpec(input?: string): ModelSpec | undefined {
         raw,
       },
       effortPart,
-      entry
+      entry,
     );
   }
 
@@ -300,7 +303,7 @@ export function parseModelSpec(input?: string): ModelSpec | undefined {
         raw,
       },
       effortPart,
-      vendorEntry
+      vendorEntry,
     );
   }
 
@@ -314,7 +317,7 @@ export function parseModelSpec(input?: string): ModelSpec | undefined {
 function withEffort(
   base: ModelSpec,
   effortPart: string,
-  entry: ModelRegistryEntry | undefined
+  entry: ModelRegistryEntry | undefined,
 ): ModelSpec {
   if (!effortPart) return base;
   // 구체 모델을 안 골랐으면 검증할 대상이 없다 — effort 만 단독으로는 못 쓴다.
@@ -346,7 +349,7 @@ function withEffort(
  */
 export function resolveModelPin(
   input?: string,
-  installedClaudeVersion?: string
+  installedClaudeVersion?: string,
 ): ResolvedModelPin | undefined {
   const spec = parseModelSpec(input);
   if (!spec) return undefined;
@@ -362,7 +365,7 @@ export function resolveModelPin(
   if (spec.harness === "claude") {
     const resolution = resolveClaudeModelPinned(
       spec.modelId,
-      installedClaudeVersion
+      installedClaudeVersion,
     );
     return {
       harness: "claude",
@@ -443,7 +446,7 @@ export interface OrchestratorModelChoice {
 export function orchestratorModelValue(
   provider: string,
   modelId?: string,
-  effort?: string
+  effort?: string,
 ): string {
   if (!modelId) return provider;
   return effort ? `${provider}:${modelId}@${effort}` : `${provider}:${modelId}`;
@@ -577,8 +580,8 @@ export const ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY = [
  *   - env-swap 벤더 이름은 무시한다 (오케 후보 아님)
  */
 export function pickPreferredOrchestratorHarness(
-  authenticated: Iterable<string>
-): typeof ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY[number] | null {
+  authenticated: Iterable<string>,
+): (typeof ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY)[number] | null {
   const ready = new Set<string>();
   for (const raw of authenticated) {
     const v = (raw ?? "").trim().toLowerCase();
@@ -635,7 +638,7 @@ export function normalizeOrchestratorModelSetting(value: unknown): string {
 
   if (entry && entry.provider !== HARNESS_NATIVE_VENDOR[entry.harness]) {
     console.warn(
-      `[model-selection] env-swap 벤더 모델 "${modelId}"(vendor=${entry.provider})은 오케 후보가 아니라 접미를 버립니다 — 오케 선택은 영구 저장이라 조건부 크레덴셜을 얹지 않는다`
+      `[model-selection] env-swap 벤더 모델 "${modelId}"(vendor=${entry.provider})은 오케 후보가 아니라 접미를 버립니다 — 오케 선택은 영구 저장이라 조건부 크레덴셜을 얹지 않는다`,
     );
     return provider;
   }
@@ -652,7 +655,7 @@ export function normalizeOrchestratorModelSetting(value: unknown): string {
   // 저장값엔 남는데 CLI 엔 안 붙어 "골랐는데 안 먹는" 상태가 되므로 여기서 버린다.
   if (pinHarness && pinHarness === provider) {
     console.warn(
-      `[model-selection] "${provider}" 오케는 모델 핀 축이 없어 접미 "${modelId}" 를 버립니다(프로바이더 기본 모델로 뜬다)`
+      `[model-selection] "${provider}" 오케는 모델 핀 축이 없어 접미 "${modelId}" 를 버립니다(프로바이더 기본 모델로 뜬다)`,
     );
     return provider;
   }
@@ -660,7 +663,7 @@ export function normalizeOrchestratorModelSetting(value: unknown): string {
   console.warn(
     `[model-selection] 오케 모델 접미 "${modelId}"(harness=${
       pinHarness ?? "미지"
-    })가 프로바이더 "${provider}" 와 어긋나 무시합니다`
+    })가 프로바이더 "${provider}" 와 어긋나 무시합니다`,
   );
   return provider;
 }
@@ -668,7 +671,7 @@ export function normalizeOrchestratorModelSetting(value: unknown): string {
 /** 정규화된 오케 설정값 → 스폰 하네스(`ModelType`). */
 export function orchestratorModelTypeForSetting(value: unknown): ModelType {
   const { harness } = splitOrchestratorModelValue(
-    normalizeOrchestratorModelSetting(value)
+    normalizeOrchestratorModelSetting(value),
   );
   if (harness === "codex") return "gpt";
   if (harness === "grok") return "grok";
@@ -693,7 +696,7 @@ export function orchestratorModelTypeForSetting(value: unknown): ModelType {
  */
 export function orchestratorLaunchPin(
   value: string,
-  installedClaudeVersion?: string
+  installedClaudeVersion?: string,
 ): {
   claudeModel?: string;
   codexModel?: string;
@@ -705,7 +708,7 @@ export function orchestratorLaunchPin(
 
   const pin = resolveModelPin(
     effort ? `${modelId}@${effort}` : modelId,
-    installedClaudeVersion
+    installedClaudeVersion,
   );
   if (!pin) return {};
 
@@ -751,7 +754,7 @@ export function orchestratorLaunchPin(
  */
 export function claudeOrchestratorChoices(): OrchestratorModelChoice[] {
   return orchestratorChoicesFor("claude", "claude", (entry) =>
-    humanizeClaudeModelId(entry.id)
+    humanizeClaudeModelId(entry.id),
   );
 }
 
@@ -794,7 +797,7 @@ export function codexOrchestratorChoices(): OrchestratorModelChoice[] {
 function orchestratorChoicesFor(
   harness: "claude" | "gpt",
   valuePrefix: string,
-  humanize: (entry: ModelRegistryEntry) => string
+  humanize: (entry: ModelRegistryEntry) => string,
 ): OrchestratorModelChoice[] {
   const rank: Record<string, number> = {
     cheap: 0,
@@ -879,6 +882,7 @@ export const VENDOR_LABEL: Readonly<Record<VendorId, string>> = {
   xai: "Grok",
   moonshot: "Kimi",
   upstage: "Upstage Solar",
+  deepseek: "DeepSeek",
   local: "로컬",
   custom: "사용자 지정",
 };
@@ -943,7 +947,7 @@ export function quickLaneVendorCatalog(): QuickLaneVendorGroup[] {
 
   for (const vendor of VENDOR_IDS) {
     const entries = MODEL_REGISTRY.filter(
-      (m) => m.provider === vendor && m.status === "active"
+      (m) => m.provider === vendor && m.status === "active",
     );
     if (entries.length === 0) continue;
 

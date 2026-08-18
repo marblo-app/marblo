@@ -24,7 +24,7 @@ import {
 
 /** 렌더러가 받는 모양(available/missingEnvKeys 는 main 이 얹는다)으로 접는다. */
 function asRendererGroups(
-  present: Record<string, string> = {}
+  present: Record<string, string> = {},
 ): QuickLaneVendorGroupShape[] {
   return quickLaneVendorCatalog().map((g) => {
     const missingEnvKeys = g.requiredEnvKeys.filter((k) => !present[k]);
@@ -72,6 +72,7 @@ describe("퀵레인 모델 카탈로그 ↔ 레지스트리", () => {
       "minimax",
       "moonshot",
       "upstage",
+      "deepseek",
     ]) {
       expect(vendors, v).toContain(v);
     }
@@ -90,6 +91,8 @@ describe("퀵레인 모델 카탈로그 ↔ 레지스트리", () => {
       "MiniMax-M3",
       "MiniMax-M2.7",
       "solar-pro4",
+      "deepseek-chat",
+      "deepseek-reasoner",
     ]) {
       expect(ids, id).toContain(id);
     }
@@ -99,13 +102,16 @@ describe("퀵레인 모델 카탈로그 ↔ 레지스트리", () => {
     const zai = catalog.find((g) => g.vendor === "zai");
     const minimax = catalog.find((g) => g.vendor === "minimax");
     const upstage = catalog.find((g) => g.vendor === "upstage");
+    const deepseek = catalog.find((g) => g.vendor === "deepseek");
     expect(zai?.requiredEnvKeys).toEqual(["ZAI_API_KEY"]);
     expect(minimax?.requiredEnvKeys).toEqual(["MINIMAX_API_KEY"]);
     expect(upstage?.requiredEnvKeys).toEqual(["UPSTAGE_API_KEY"]);
+    expect(deepseek?.requiredEnvKeys).toEqual(["DEEPSEEK_API_KEY"]);
     // 키 이름은 레지스트리 프로파일에서 파생돼야 한다(별도 표 금지).
     expect(zai?.requiredEnvKeys).toEqual(vendorEnvSecretKeys("glm-5.2"));
-    expect(upstage?.requiredEnvKeys).toEqual(
-      vendorEnvSecretKeys("solar-pro4")
+    expect(upstage?.requiredEnvKeys).toEqual(vendorEnvSecretKeys("solar-pro4"));
+    expect(deepseek?.requiredEnvKeys).toEqual(
+      vendorEnvSecretKeys("deepseek-chat"),
     );
   });
 
@@ -113,7 +119,10 @@ describe("퀵레인 모델 카탈로그 ↔ 레지스트리", () => {
     for (const group of catalog) {
       const expected = new Set<string>();
       for (const entry of activeEntries) {
-        if (entry.provider !== group.vendor || entry.harness !== group.harness) {
+        if (
+          entry.provider !== group.vendor ||
+          entry.harness !== group.harness
+        ) {
           continue;
         }
         for (const value of Object.values(entry.envProfile ?? {})) {
@@ -122,7 +131,7 @@ describe("퀵레인 모델 카탈로그 ↔ 레지스트리", () => {
         }
       }
       expect(group.requiredEnvKeys, `${group.vendor}/${group.harness}`).toEqual(
-        [...expected].sort()
+        [...expected].sort(),
       );
     }
   });
@@ -161,14 +170,14 @@ describe("퀵레인 모델 카탈로그 ↔ 레지스트리", () => {
       const ranks = group.models.map((m) => rank[m.capability]);
       expect(
         [...ranks].sort((a, b) => b - a),
-        group.vendor
+        group.vendor,
       ).toEqual(ranks);
     }
   });
 
   it("네이티브 벤더가 env-swap 벤더보다 앞에 선다", () => {
     const isNative = catalog.map(
-      (g) => HARNESS_NATIVE_VENDOR[g.harness] === g.vendor
+      (g) => HARNESS_NATIVE_VENDOR[g.harness] === g.vendor,
     );
     const lastNative = isNative.lastIndexOf(true);
     const firstSwap = isNative.indexOf(false);
@@ -189,6 +198,8 @@ describe("퀵레인 모델 카탈로그 ↔ 레지스트리", () => {
     // OpenAI 호환 env-swap 은 Codex 하네스의 OPENAI_BASE_URL 을 스왑한다.
     expect(byVendor.upstage.command).toBe("codex");
     expect(byVendor.upstage.harness).toBe("gpt");
+    expect(byVendor.deepseek.command).toBe("codex");
+    expect(byVendor.deepseek.harness).toBe("gpt");
   });
 });
 

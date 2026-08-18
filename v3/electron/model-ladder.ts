@@ -146,7 +146,7 @@ export const HARNESS_WEEKLY_TOKEN_SOFT_LIMIT: Readonly<
 
 /** 하네스 soft 한도. 미등록·0 → undefined(압력 없음). */
 export function weeklyTokenSoftLimitForHarness(
-  harness: HarnessId | string
+  harness: HarnessId | string,
 ): number | undefined {
   const n = HARNESS_WEEKLY_TOKEN_SOFT_LIMIT[harness as HarnessId] ?? undefined;
   return typeof n === "number" && n > 0 ? n : undefined;
@@ -193,13 +193,13 @@ const CAPABILITY_ORDER: Readonly<Record<CapabilityTier, number>> = {
  */
 export function cheapestByCapability(
   harness: HarnessId,
-  capability: CapabilityTier
+  capability: CapabilityTier,
 ): ModelRegistryEntry[] {
   return MODEL_REGISTRY.filter(
     (m) =>
       m.harness === harness &&
       m.status === "active" &&
-      m.capability === capability
+      m.capability === capability,
   ).sort((a, b) => blendedCostIndex(a.pricing) - blendedCostIndex(b.pricing));
 }
 
@@ -231,7 +231,7 @@ export function rungNeedsApproval(rung: LadderRung): boolean {
 /** 이 칸에 쓸 수 있는 **미소진 승인**(정확히 같은 model+effort 만 인정). */
 export function usableApproval(
   records: readonly EscalationApprovalRecord[],
-  rung: LadderRung
+  rung: LadderRung,
 ): EscalationApprovalRecord | undefined {
   return usableApprovalFor(records, rung.model, rung.effort);
 }
@@ -261,7 +261,7 @@ export type GateOutcome =
  */
 export function gateRung(
   requested: LadderRung,
-  records: readonly EscalationApprovalRecord[] = []
+  records: readonly EscalationApprovalRecord[] = [],
 ): GateOutcome {
   if (!rungNeedsApproval(requested)) return { allowed: true, rung: requested };
 
@@ -277,14 +277,14 @@ export function gateRung(
     denied
       ? "approval-denied"
       : exhausted
-      ? "budget-exhausted"
-      : "needs-approval";
+        ? "budget-exhausted"
+        : "needs-approval";
   const why =
     reason === "approval-denied"
       ? `${label} 는 사용자가 거부했습니다`
       : reason === "budget-exhausted"
-      ? `${label} 는 고비용 승인 예산(티켓당 ${MAX_GATED_APPROVALS_PER_TASK}건)을 이미 소진했습니다`
-      : `${label} 는 사용자 승인이 필요한 고비용 칸입니다(request_model_escalation 으로 승인 왕복)`;
+        ? `${label} 는 고비용 승인 예산(티켓당 ${MAX_GATED_APPROVALS_PER_TASK}건)을 이미 소진했습니다`
+        : `${label} 는 사용자 승인이 필요한 고비용 칸입니다(request_model_escalation 으로 승인 왕복)`;
   return {
     allowed: false,
     requested,
@@ -534,6 +534,10 @@ export const LADDER_EXCLUSIONS: Readonly<Record<string, string>> = {
   // 를 요구하므로, 편입된 모델을 여기 남겨 두면 중복(사다리+제외 동시)이 된다.
   // 키 없는 기기에서의 안전은 이 표가 아니라 `AutoSelectInput.modelAvailable`
   // (= `vendorEnvReadiness(id).ready`, bridge-server.ts 배선)이 런타임에 맡는다.
+  "deepseek-chat":
+    "티켓 JrxWAAGqgnso5Rik6svk 범위는 DeepSeek 스폰/퀵레인 벤더 추가다. 오케 후보가 아니며 자동선택 사다리도 네이티브 Codex 진입칸을 흔들지 않는다 — 명시 선택/퀵레인으로만 닿는다.",
+  "deepseek-reasoner":
+    "deepseek-chat 과 같은 사유. R1 reasoning 모델이지만 이 티켓은 자동 라우팅 정책 편입이 아니라 스폰 전용 env-swap 편입이다.",
 };
 
 /** rung 을 레지스트리와 대조해 검증한다(불일치 = 모듈 로드 실패). */
@@ -541,43 +545,43 @@ function buildLadder(
   harness: HarnessId,
   rungs: LadderRung[],
   entry: Record<LadderTier, number>,
-  extra: { pinsModel: boolean; inheritedModel?: string }
+  extra: { pinsModel: boolean; inheritedModel?: string },
 ): HarnessLadder {
   rungs.forEach((rung, i) => {
     const model = getModel(rung.model);
     if (!model) {
       throw new Error(
         `[model-ladder] ${harness} rung#${i}: 레지스트리에 없는 모델 id "${rung.model}". ` +
-          "model-registry.ts 에 CLI-verified 행을 먼저 추가하세요(추론으로 id 를 쓰지 않는다)."
+          "model-registry.ts 에 CLI-verified 행을 먼저 추가하세요(추론으로 id 를 쓰지 않는다).",
       );
     }
     if (model.id !== rung.model) {
       throw new Error(
         `[model-ladder] ${harness} rung#${i}: "${rung.model}" 은 alias 입니다(→ ${model.id}). ` +
-          "사다리 칸은 구체 id 만 쓴다 — alias 는 CLI 가 뜻을 바꾸는 이동표적이다."
+          "사다리 칸은 구체 id 만 쓴다 — alias 는 CLI 가 뜻을 바꾸는 이동표적이다.",
       );
     }
     if (model.harness !== harness) {
       throw new Error(
-        `[model-ladder] ${harness} rung#${i}: "${rung.model}" 의 harness 는 ${model.harness} 입니다(벤더는 ${model.provider}).`
+        `[model-ladder] ${harness} rung#${i}: "${rung.model}" 의 harness 는 ${model.harness} 입니다(벤더는 ${model.provider}).`,
       );
     }
     if (model.status !== "active") {
       throw new Error(
-        `[model-ladder] ${harness} rung#${i}: "${rung.model}" 은 ${model.status} 입니다.`
+        `[model-ladder] ${harness} rung#${i}: "${rung.model}" 은 ${model.status} 입니다.`,
       );
     }
     if (rung.effort === undefined) {
       if (model.efforts.length > 0) {
         throw new Error(
-          `[model-ladder] ${harness} rung#${i}: "${rung.model}" 은 effort 축이 있는 모델인데 칸에 effort 가 없습니다.`
+          `[model-ladder] ${harness} rung#${i}: "${rung.model}" 은 effort 축이 있는 모델인데 칸에 effort 가 없습니다.`,
         );
       }
     } else if (!model.efforts.includes(rung.effort)) {
       throw new Error(
         `[model-ladder] ${harness} rung#${i}: "${rung.model}" 은 effort "${
           rung.effort
-        }" 를 지원하지 않습니다(지원: ${model.efforts.join(", ") || "없음"}).`
+        }" 를 지원하지 않습니다(지원: ${model.efforts.join(", ") || "없음"}).`,
       );
     }
   });
@@ -588,14 +592,14 @@ function buildLadder(
       throw new Error(
         `[model-ladder] ${harness} entry.${tier}=${idx} 가 rung 범위(0..${
           rungs.length - 1
-        }) 밖입니다.`
+        }) 밖입니다.`,
       );
     }
     if (rungNeedsApproval(rungs[idx])) {
       throw new Error(
         `[model-ladder] ${harness} entry.${tier} 이 승인 게이트 칸(${rungLabel(
-          rungs[idx]
-        )})을 가리킵니다 — 진입점은 승인 없이 써야 하므로 금지.`
+          rungs[idx],
+        )})을 가리킵니다 — 진입점은 승인 없이 써야 하므로 금지.`,
       );
     }
   }
@@ -616,7 +620,7 @@ export const MODEL_LADDERS: Readonly<
     "claude",
     CLAUDE_RUNGS,
     { simple: 3, standard: 4, complex: 9 },
-    { pinsModel: true }
+    { pinsModel: true },
   ),
   // gemini/antigravity/local/custom: CLI-verified 모델 사실이 아직 없어
   // 레지스트리 행부터 없다(레지스트리 하단 주석). 사다리도 만들지 않는다 —
@@ -625,7 +629,7 @@ export const MODEL_LADDERS: Readonly<
     "gpt",
     GPT_RUNGS,
     { simple: 0, standard: 6, complex: 9 },
-    { pinsModel: true, inheritedModel: "gpt-5.5" }
+    { pinsModel: true, inheritedModel: "gpt-5.5" },
   ),
   // grok 은 argv 로 모델을 실제로 핀한다(`-m <id>`) — codex 처럼 사용자 config 를
   // 상속하는 축이 아니라 claude 와 같은 pinsModel=true 다.
@@ -633,7 +637,7 @@ export const MODEL_LADDERS: Readonly<
     "grok",
     GROK_RUNGS,
     { simple: 0, standard: 0, complex: 0 },
-    { pinsModel: true }
+    { pinsModel: true },
   ),
 };
 
@@ -651,13 +655,13 @@ function assertMirrorsMatch(): void {
   const mirrorEfforts = EFFORT_NAMES.join(",");
   if (registryEfforts !== mirrorEfforts) {
     throw new Error(
-      `[model-ladder] effort 목록 불일치: registry=[${registryEfforts}] vs mcp-server/escalation-approval.EFFORT_NAMES=[${mirrorEfforts}]`
+      `[model-ladder] effort 목록 불일치: registry=[${registryEfforts}] vs mcp-server/escalation-approval.EFFORT_NAMES=[${mirrorEfforts}]`,
     );
   }
   for (const effort of APPROVAL_GATED_EFFORTS) {
     if (!EFFORT_LADDER.includes(effort as EffortLevel)) {
       throw new Error(
-        `[model-ladder] 게이트 effort "${effort}" 가 registry EFFORT_LADDER 에 없습니다.`
+        `[model-ladder] 게이트 effort "${effort}" 가 registry EFFORT_LADDER 에 없습니다.`,
       );
     }
   }
@@ -670,10 +674,10 @@ function assertMirrorsMatch(): void {
   if (gatedInLadder.join(",") !== mirror.join(",")) {
     throw new Error(
       `[model-ladder] 게이트 칸 목록 불일치: 사다리=[${gatedInLadder.join(
-        ", "
+        ", ",
       )}] vs mcp-server/escalation-approval.GATED_LADDER_RUNGS=[${mirror.join(
-        ", "
-      )}]. 고비용 칸을 사다리에 넣거나 뺐으면 양쪽을 같이 고쳐야 한다.`
+        ", ",
+      )}]. 고비용 칸을 사다리에 넣거나 뺐으면 양쪽을 같이 고쳐야 한다.`,
     );
   }
 }
@@ -694,7 +698,7 @@ export function ladderFor(harness: HarnessId): HarnessLadder | undefined {
 /** 티어 진입 칸. 사다리가 없는 하네스는 undefined(정책 override 없음 = 현행 상속). */
 export function entryRung(
   harness: HarnessId,
-  tier: LadderTier
+  tier: LadderTier,
 ): LadderRung | undefined {
   const ladder = ladderFor(harness);
   return ladder?.rungs[ladder.entry[tier]];
@@ -705,7 +709,7 @@ export function rungIndex(harness: HarnessId, rung: LadderRung): number {
   const ladder = ladderFor(harness);
   if (!ladder) return -1;
   return ladder.rungs.findIndex(
-    (r) => r.model === rung.model && r.effort === rung.effort
+    (r) => r.model === rung.model && r.effort === rung.effort,
   );
 }
 
@@ -719,7 +723,7 @@ export function rungIndex(harness: HarnessId, rung: LadderRung): number {
  */
 export function nextRung(
   harness: HarnessId,
-  current: LadderRung
+  current: LadderRung,
 ): LadderRung | undefined {
   const idx = rungIndex(harness, current);
   if (idx < 0) return undefined;
@@ -728,7 +732,7 @@ export function nextRung(
 
 /** 이 칸(포함) 아래에서 승인 없이 쓸 수 있는 가장 높은 칸. */
 export function highestUngatedRungAtOrBelow(
-  rung: LadderRung
+  rung: LadderRung,
 ): LadderRung | undefined {
   const ladder = ladderFor(rung.harness);
   if (!ladder) return undefined;
@@ -747,18 +751,18 @@ export function highestUngatedRungAtOrBelow(
  */
 export function usableRungs(
   harness: HarnessId,
-  records: readonly EscalationApprovalRecord[] = []
+  records: readonly EscalationApprovalRecord[] = [],
 ): LadderRung[] {
   const ladder = ladderFor(harness);
   if (!ladder) return [];
   return ladder.rungs.filter(
-    (r) => !rungNeedsApproval(r) || !!usableApproval(records, r)
+    (r) => !rungNeedsApproval(r) || !!usableApproval(records, r),
   );
 }
 
 /** 파서 — `"gpt-5.6-sol@max"` / `"claude-opus-5"` 를 칸으로. 검증 실패는 이유를 돌려준다. */
 export function parseRung(
-  spec: string
+  spec: string,
 ): { ok: true; rung: LadderRung } | { ok: false; error: string } {
   const raw = spec.trim();
   if (!raw) return { ok: false, error: "빈 문자열입니다." };
@@ -798,7 +802,7 @@ export function parseRung(
     return {
       ok: false,
       error: `effort "${effortPart}" 는 유효하지 않습니다(${EFFORT_LADDER.join(
-        ", "
+        ", ",
       )}).`,
     };
   }

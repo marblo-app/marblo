@@ -88,6 +88,7 @@ export type VendorId =
   | "xai"
   | "moonshot"
   | "upstage"
+  | "deepseek"
   | "local"
   | "custom";
 
@@ -127,6 +128,7 @@ export const VENDOR_IDS: readonly VendorId[] = [
   "xai",
   "moonshot",
   "upstage",
+  "deepseek",
   "local",
   "custom",
 ] as const;
@@ -334,6 +336,23 @@ const UPSTAGE_SOLAR_PROBE: ModelVerification = {
     "Upstage 공식 Console/API keys 예제와 Solar Pro 4 발표문 확인: " +
     "OpenAI-compatible base_url=https://api.upstage.ai/v1, model=solar-pro4, " +
     "공식 단가 Input $0.30 / Cached Input $0.06 / Output $1.20 per 1M tokens",
+};
+
+/**
+ * DeepSeek V3/R1 — OpenAI 호환 env-swap 벤더다.
+ *
+ * 티켓 JrxWAAGqgnso5Rik6svk 는 스폰 전용으로 `deepseek-chat`(V3) 과
+ * `deepseek-reasoner`(R1) 를 명시한다. Codex(gpt) 하네스를 그대로 띄우고
+ * OPENAI_* env 만 DeepSeek 으로 스왑한다.
+ */
+const DEEPSEEK_PROBE: ModelVerification = {
+  at: "2026-08-18",
+  cli: "n/a (DeepSeek API 키 미보유 — 라이브 프로브 대기)",
+  method:
+    "티켓 JrxWAAGqgnso5Rik6svk 명시 스펙 + DeepSeek 공식 API Docs 확인: " +
+    "OpenAI-compatible base_url=https://api.deepseek.com/v1, " +
+    "model=deepseek-chat(V3) / deepseek-reasoner(R1), " +
+    "R1 release pricing Input cache-miss $0.55 / Output $2.19 per 1M tokens",
 };
 
 /** Grok Build — xAI 공식 문서/오픈소스 README 확인. 브라우저 인증형 TUI. */
@@ -872,6 +891,49 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
     status: "active",
   },
 
+  // ── DeepSeek V3/R1 (OpenAI 호환 env-swap 벤더 — JrxWAAGq) ──────────────
+  // Solar 와 같은 (B)형 OpenAI 호환 벤더다. 신규 하네스 없이 Codex(gpt) 바이너리를
+  // 그대로 스폰하고, OPENAI_BASE_URL/OPENAI_API_KEY 만 DeepSeek 으로 갈아끼운다.
+  // `agent-config` 의 gpt 분기가 이미 `applyVendorEnv` 를 호출하므로 switch 추가는
+  // 없다. 스폰/퀵레인 전용이고 오케 셀렉터는 `selectorEligible` 이 env-swap 벤더를
+  // 잘라내는 기존 경계로 막는다.
+  //
+  // 티켓 명시 스펙:
+  //   base_url=https://api.deepseek.com/v1, api_key=${DEEPSEEK_API_KEY}
+  //   model=deepseek-chat(V3), model=deepseek-reasoner(R1)
+  {
+    id: "deepseek-chat",
+    harness: "gpt", // Codex CLI 를 그대로 스폰하고 OpenAI 호환 env 만 바꾼다
+    provider: "deepseek",
+    envProfile: {
+      OPENAI_BASE_URL: "https://api.deepseek.com/v1",
+      OPENAI_API_KEY: "${DEEPSEEK_API_KEY}",
+    },
+    aliases: ["deepseek-v3"],
+    capability: "mid",
+    efforts: ["low", "medium", "high"],
+    defaultEffort: "medium",
+    pricing: { inputPer1M: 0.27, outputPer1M: 1.1, estimated: true },
+    verified: DEEPSEEK_PROBE,
+    status: "active",
+  },
+  {
+    id: "deepseek-reasoner",
+    harness: "gpt",
+    provider: "deepseek",
+    envProfile: {
+      OPENAI_BASE_URL: "https://api.deepseek.com/v1",
+      OPENAI_API_KEY: "${DEEPSEEK_API_KEY}",
+    },
+    aliases: ["deepseek-r1"],
+    capability: "mid",
+    efforts: ["low", "medium", "high"],
+    defaultEffort: "medium",
+    pricing: { inputPer1M: 0.55, outputPer1M: 2.19, estimated: true },
+    verified: DEEPSEEK_PROBE,
+    status: "active",
+  },
+
   // 의도적 미등록(§1.2 표에는 있으나 라우팅 후보가 아님):
   //   - gpt-5.3-codex-spark : api ❌ (Codex CLI 전용). 단가만 cost-tracker 의
   //     legacy 프리픽스 행("gpt-5.3-codex" $1.75/$14)이 커버한다.
@@ -933,7 +995,7 @@ for (const entry of MODEL_REGISTRY) {
     throw new Error(
       `[model-registry] "${entry.id}" 는 provider=${entry.provider} 인데 envProfile 이 없습니다. ` +
         `harness="${entry.harness}" 는 프로파일이 없으면 ${native} 로 붙습니다 — ` +
-        "벤더 이름만 바꾼 행은 조용히 네이티브 벤더 쿼터를 태웁니다."
+        "벤더 이름만 바꾼 행은 조용히 네이티브 벤더 쿼터를 태웁니다.",
     );
   }
   if (!entry.envProfile) continue;
@@ -943,8 +1005,8 @@ for (const entry of MODEL_REGISTRY) {
         `harness="${
           entry.harness
         }" 에서 주입되지 않습니다(주입 가능: ${ENV_PROFILE_SUPPORTED_HARNESSES.join(
-          ", "
-        )}). 그 하네스의 스폰 분기에 벤더 env 머지를 먼저 배선하세요.`
+          ", ",
+        )}). 그 하네스의 스폰 분기에 벤더 env 머지를 먼저 배선하세요.`,
     );
   }
   for (const [key, value] of Object.entries(entry.envProfile)) {
@@ -953,7 +1015,7 @@ for (const entry of MODEL_REGISTRY) {
     if (value.includes("${") && !vendorEnvSecretRef(value)) {
       throw new Error(
         `[model-registry] "${entry.id}" envProfile.${key} 의 \${...} 자리표시자는 ` +
-          '값 전체여야 합니다(부분보간 금지). 예: "${ZAI_API_KEY}"'
+          '값 전체여야 합니다(부분보간 금지). 예: "${ZAI_API_KEY}"',
       );
     }
   }
@@ -1016,7 +1078,7 @@ const CAPABILITY_ORDER: Readonly<Record<CapabilityTier, number>> = {
 
 function byCapability(entries: ModelRegistryEntry[]): ModelRegistryEntry[] {
   return entries.sort(
-    (a, b) => CAPABILITY_ORDER[a.capability] - CAPABILITY_ORDER[b.capability]
+    (a, b) => CAPABILITY_ORDER[a.capability] - CAPABILITY_ORDER[b.capability],
   );
 }
 
@@ -1029,7 +1091,9 @@ function byCapability(entries: ModelRegistryEntry[]): ModelRegistryEntry[] {
  */
 export function modelsByHarness(harness: HarnessId): ModelRegistryEntry[] {
   return byCapability(
-    MODEL_REGISTRY.filter((m) => m.harness === harness && m.status === "active")
+    MODEL_REGISTRY.filter(
+      (m) => m.harness === harness && m.status === "active",
+    ),
   );
 }
 
@@ -1037,8 +1101,8 @@ export function modelsByHarness(harness: HarnessId): ModelRegistryEntry[] {
 export function modelsByVendor(provider: VendorId): ModelRegistryEntry[] {
   return byCapability(
     MODEL_REGISTRY.filter(
-      (m) => m.provider === provider && m.status === "active"
-    )
+      (m) => m.provider === provider && m.status === "active",
+    ),
   );
 }
 
@@ -1161,7 +1225,7 @@ export function cmpSemver(a: string, b: string): number {
 export function meetsMinCli(
   idOrAlias: string,
   installedVersion: string,
-  minCliOverride?: string
+  minCliOverride?: string,
 ): boolean {
   const entry = getModel(idOrAlias);
   const min = minCliOverride ?? entry?.minCli;
