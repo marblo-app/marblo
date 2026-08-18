@@ -246,6 +246,11 @@ export interface ModelRegistryEntry {
   verified: ModelVerification;
   /** deprecated 는 조회는 되지만 신규 라우팅 후보에서 빠진다. */
   status: "active" | "deprecated";
+  /**
+   * 로컬(Ollama) 행 전용. claude 하네스+MCP tool 주입을 견딜지.
+   * `chat-only` 면 스폰 시 대화모드(툴/MCP 비주입). 클라우드 행에는 없다.
+   */
+  toolSupport?: "chat-only" | "tool-use";
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1166,19 +1171,36 @@ const RUNTIME_LOCAL_MODEL_IDS = new Set<string>();
  * `ollama list` 실측 id 들을 스폰 축에 등록한다(멱등). 정적 레지스트리와 id 가
  * 충돌하면 정적 행이 이긴다 — 검증된 벤더 사실이 로컬 별칭에 덮이지 않게.
  */
+/**
+ * 파라미터 규모(B)만으로 toolSupport 를 판정한다(카탈로그 import 순환 회피).
+ * local-models.resolveLocalToolSupport 와 같은 7B 임계.
+ */
+function localToolSupportFromId(id: string): "chat-only" | "tool-use" {
+  const lower = id.toLowerCase();
+  if (lower === "phi3:mini" || lower.startsWith("phi3:mini-")) return "chat-only";
+  const match = /(\d+(?:\.\d+)?)b\b/.exec(lower);
+  if (!match) return "chat-only";
+  const n = Number(match[1]);
+  if (!Number.isFinite(n)) return "chat-only";
+  return n >= 7 ? "tool-use" : "chat-only";
+}
+
 export function registerLocalOllamaModels(ids: readonly string[]): void {
   for (const rawId of ids) {
     const id = rawId.trim();
     if (!id) continue;
     const key = norm(id);
     if (BY_ID.has(key)) continue; // 정적 행 우선 + 재등록 멱등
+    const toolSupport = localToolSupportFromId(id);
     const entry: ModelRegistryEntry = {
       id,
       harness: "claude",
       provider: "local",
       envProfile: LOCAL_OLLAMA_ENV_PROFILE,
       aliases: [],
-      capability: "cheap",
+      // 소형 chat-only 는 cheap, 7B+ tool-use 는 mid — 라우팅이 소형을
+      // "실작업 cheap 티어"로 오해하지 않게 규모를 반영한다.
+      capability: toolSupport === "tool-use" ? "mid" : "cheap",
       efforts: [],
       // 로컬 추론은 API 과금이 없다 — 0 요율은 사실이지 미측정이 아니다.
       pricing: { inputPer1M: 0, outputPer1M: 0 },
@@ -1188,6 +1210,7 @@ export function registerLocalOllamaModels(ids: readonly string[]): void {
         method: "ollama list 실측 — 스토어 로컬모델 설치 경로가 등록",
       },
       status: "active",
+      toolSupport,
     };
     BY_ID.set(key, entry);
     RUNTIME_LOCAL_MODEL_IDS.add(id);

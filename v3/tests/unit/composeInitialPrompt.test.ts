@@ -28,6 +28,26 @@ describe("composeInitialPrompt", () => {
     expect(out).toContain("Use mcp__marblo__claim_task to grab it.");
   });
 
+  it("local (claude env-swap): keeps mcp__marblo__ prefix like claude", () => {
+    const out = composeInitialPrompt(
+      "local",
+      "Use mcp__marblo__claim_task to grab it.",
+      SKILL,
+    );
+    expect(out).toContain("Use mcp__marblo__claim_task to grab it.");
+    expect(out).toContain("[Role Skill");
+  });
+
+  it("local chat-only path: empty skill → instruction only (no tool-use force)", () => {
+    const out = composeInitialPrompt(
+      "local",
+      "안녕, 간단히 자기소개해줘.",
+      "",
+    );
+    expect(out).toBe("안녕, 간단히 자기소개해줘.");
+    expect(out).not.toContain("[Role Skill");
+  });
+
   it("gemini: prepends skill block + strips mcp__marblo__ prefix from instruction", () => {
     const out = composeInitialPrompt(
       "gemini",

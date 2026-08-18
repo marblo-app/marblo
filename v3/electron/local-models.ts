@@ -23,6 +23,17 @@ import { registerLocalOllamaModels } from "./model-registry";
 
 export type LocalModelCategory = "coding" | "general" | "reasoning";
 
+/**
+ * 로컬 모델의 하네스 tool-use 적합성.
+ *
+ * 실측(ollama 0.32.14 + claude CLI env-swap): 소형(0.5b)은 직접 `ollama run` /
+ * tools 없는 `/v1/messages` 에서는 정상 대화하지만, Marblo 가 MCP 툴 정의 +
+ * 에이전트 system(tool 강제)을 주입하면 tool_use JSON 을 흉내 내며 엉뚱한 답을
+ * 낸다. 그래서 7B 미만은 대화·테스트 전용, 에이전트/오케 실작업은 7B+
+ * (특히 coder)만 tool-use 지원으로 표시한다.
+ */
+export type LocalToolSupport = "chat-only" | "tool-use";
+
 export interface LocalModelCatalogEntry {
   /** ollama 공식 라이브러리 태그 — `ollama pull <id>` 에 그대로 쓰인다. */
   id: string;
@@ -36,6 +47,54 @@ export interface LocalModelCatalogEntry {
   minRamGB: number;
   /** 모델 자체의 최대 컨텍스트(토큰). 실행 시 기본 컨텍스트는 이보다 작다(가이드 참조). */
   contextTokens: number;
+  /**
+   * 하네스 tool-use 적합성. 카드 배지·스폰 분기(대화모드 vs MCP 에이전트)의
+   * 단일 소스. `resolveLocalToolSupport` 가 id 파라미터 규모로 채운다.
+   */
+  toolSupport: LocalToolSupport;
+  /** UI 배지 문구 — "대화 전용" / "tool-use 지원". */
+  toolSupportLabel: string;
+}
+
+/**
+ * ollama 태그에서 파라미터 규모(B)를 읽는다. 못 읽으면 null.
+ * 예: `qwen2.5:0.5b`→0.5, `phi3:mini`→3.8, `deepseek-r1:8b-0528-…`→8.
+ */
+export function parseLocalParamBillions(id: string): number | null {
+  const trimmed = id.trim().toLowerCase();
+  if (!trimmed) return null;
+  if (trimmed === "phi3:mini" || trimmed.startsWith("phi3:mini-")) return 3.8;
+  const match = /(\d+(?:\.\d+)?)b\b/.exec(trimmed);
+  if (!match) return null;
+  const n = Number(match[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * 로컬 모델 id → tool-use 적합성.
+ *
+ * 임계 7B 는 실측·제품 안내("소형=테스트·대화, 실작업=7b+ coder")와 맞춘다.
+ * 파라미터를 못 읽으면 안전하게 chat-only.
+ */
+export function resolveLocalToolSupport(id: string): LocalToolSupport {
+  const billions = parseLocalParamBillions(id);
+  if (billions === null) return "chat-only";
+  return billions >= 7 ? "tool-use" : "chat-only";
+}
+
+export function localToolSupportLabel(support: LocalToolSupport): string {
+  return support === "tool-use" ? "tool-use 지원" : "대화 전용";
+}
+
+function withToolSupport(
+  entry: Omit<LocalModelCatalogEntry, "toolSupport" | "toolSupportLabel">,
+): LocalModelCatalogEntry {
+  const toolSupport = resolveLocalToolSupport(entry.id);
+  return {
+    ...entry,
+    toolSupport,
+    toolSupportLabel: localToolSupportLabel(toolSupport),
+  };
 }
 
 /**
@@ -44,7 +103,7 @@ export interface LocalModelCatalogEntry {
  * 대조값이다 — 추측으로 고치지 말 것.
  */
 export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
-  {
+  withToolSupport({
     id: "qwen2.5:0.5b",
     displayName: "Qwen 2.5 0.5B",
     category: "general",
@@ -52,8 +111,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 398,
     minRamGB: 4,
     contextTokens: 32_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "qwen3:0.6b",
     displayName: "Qwen 3 0.6B",
     category: "general",
@@ -61,8 +120,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 523,
     minRamGB: 4,
     contextTokens: 40_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "qwen2.5:1.5b",
     displayName: "Qwen 2.5 1.5B",
     category: "general",
@@ -70,8 +129,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 986,
     minRamGB: 4,
     contextTokens: 32_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "llama3.2:1b",
     displayName: "Llama 3.2 1B",
     category: "general",
@@ -79,8 +138,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 1_300,
     minRamGB: 4,
     contextTokens: 128_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "gemma2:2b",
     displayName: "Gemma 2 2B",
     category: "general",
@@ -88,8 +147,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 1_600,
     minRamGB: 6,
     contextTokens: 8_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "llama3.2:3b",
     displayName: "Llama 3.2 3B",
     category: "general",
@@ -97,8 +156,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 2_000,
     minRamGB: 8,
     contextTokens: 128_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "phi3:mini",
     displayName: "Phi-3 Mini (3.8B)",
     category: "general",
@@ -106,8 +165,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 2_200,
     minRamGB: 8,
     contextTokens: 128_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "qwen3:4b",
     displayName: "Qwen 3 4B (256K)",
     category: "general",
@@ -115,8 +174,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 2_500,
     minRamGB: 8,
     contextTokens: 256_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "qwen3:8b",
     displayName: "Qwen 3 8B",
     category: "general",
@@ -124,8 +183,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 5_200,
     minRamGB: 12,
     contextTokens: 40_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "qwen3:14b",
     displayName: "Qwen 3 14B",
     category: "general",
@@ -133,8 +192,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 9_300,
     minRamGB: 24,
     contextTokens: 40_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "qwen2.5-coder:7b",
     displayName: "Qwen 2.5 Coder 7B",
     category: "coding",
@@ -142,8 +201,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 4_700,
     minRamGB: 12,
     contextTokens: 32_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "qwen2.5-coder:14b",
     displayName: "Qwen 2.5 Coder 14B",
     category: "coding",
@@ -151,8 +210,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 9_000,
     minRamGB: 24,
     contextTokens: 32_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "qwen2.5-coder:32b",
     displayName: "Qwen 2.5 Coder 32B",
     category: "coding",
@@ -160,8 +219,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 20_000,
     minRamGB: 48,
     contextTokens: 32_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "devstral:24b",
     displayName: "Devstral 24B",
     category: "coding",
@@ -169,8 +228,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 14_000,
     minRamGB: 32,
     contextTokens: 128_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "codestral:22b",
     displayName: "Codestral 22B",
     category: "coding",
@@ -178,8 +237,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 13_000,
     minRamGB: 32,
     contextTokens: 32_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "gemma3:4b",
     displayName: "Gemma 3 4B Vision",
     category: "general",
@@ -187,8 +246,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 3_300,
     minRamGB: 8,
     contextTokens: 128_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "gemma3:12b",
     displayName: "Gemma 3 12B Vision",
     category: "general",
@@ -196,8 +255,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 8_100,
     minRamGB: 24,
     contextTokens: 128_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "gemma3:27b",
     displayName: "Gemma 3 27B Vision",
     category: "general",
@@ -205,8 +264,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 17_000,
     minRamGB: 48,
     contextTokens: 128_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "llama3.3:70b",
     displayName: "Llama 3.3 70B",
     category: "general",
@@ -214,8 +273,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 43_000,
     minRamGB: 96,
     contextTokens: 128_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "phi4:14b",
     displayName: "Phi-4 14B",
     category: "general",
@@ -223,8 +282,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 9_100,
     minRamGB: 24,
     contextTokens: 16_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "mistral-small:24b",
     displayName: "Mistral Small 24B",
     category: "general",
@@ -232,8 +291,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 14_000,
     minRamGB: 32,
     contextTokens: 32_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "deepseek-r1:8b-0528-qwen3-q4_K_M",
     displayName: "DeepSeek-R1 Distill Qwen3 8B",
     category: "reasoning",
@@ -241,8 +300,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 5_200,
     minRamGB: 12,
     contextTokens: 128_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "deepseek-r1:14b-qwen-distill-q4_K_M",
     displayName: "DeepSeek-R1 Distill Qwen 14B",
     category: "reasoning",
@@ -250,8 +309,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 9_000,
     minRamGB: 24,
     contextTokens: 128_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "deepseek-r1:32b-qwen-distill-q4_K_M",
     displayName: "DeepSeek-R1 Distill Qwen 32B",
     category: "reasoning",
@@ -259,8 +318,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 20_000,
     minRamGB: 48,
     contextTokens: 128_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "qwen3:30b",
     displayName: "Qwen 3 30B-A3B MoE (256K)",
     category: "general",
@@ -268,8 +327,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 19_000,
     minRamGB: 48,
     contextTokens: 256_000,
-  },
-  {
+  }),
+  withToolSupport({
     id: "qwen3:32b",
     displayName: "Qwen 3 32B",
     category: "general",
@@ -277,14 +336,28 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 20_000,
     minRamGB: 48,
     contextTokens: 40_000,
-  },
-] as const;
+  }),
+];
 
 const CATALOG_BY_ID = new Map(LOCAL_MODEL_CATALOG.map((e) => [e.id, e]));
 
 /** 렌더러가 보낸 id 를 카탈로그 화이트리스트로만 해석한다(임의 argv 차단). */
 export function catalogEntry(id: string): LocalModelCatalogEntry | undefined {
   return CATALOG_BY_ID.get(id);
+}
+
+/**
+ * 카탈로그 행이 있으면 그 toolSupport, 없으면 id 파라미터로 판정.
+ * 카탈로그 밖 설치분(사용자가 직접 pull)도 같은 7B 임계를 쓴다.
+ */
+export function toolSupportForLocalModelId(id: string): LocalToolSupport {
+  return catalogEntry(id)?.toolSupport ?? resolveLocalToolSupport(id);
+}
+
+/** 대화모드(MCP/내장 툴 비주입)로 스폰해야 하는 로컬 소형 모델인가. */
+export function isLocalChatOnlyModel(id: string | undefined | null): boolean {
+  if (!id || !id.trim()) return false;
+  return toolSupportForLocalModelId(id.trim()) === "chat-only";
 }
 
 // ── 하드웨어 게이트(순수) ─────────────────────────────────────────

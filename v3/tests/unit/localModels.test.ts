@@ -16,8 +16,11 @@ import {
   LOCAL_MODEL_CATALOG,
   catalogEntry,
   evaluateLocalModelCards,
+  isLocalChatOnlyModel,
+  parseLocalParamBillions,
   parseOllamaListOutput,
   parseOllamaPullProgress,
+  resolveLocalToolSupport,
 } from "../../electron/local-models";
 
 const OLLAMA_UP = { installed: true, daemonRunning: true };
@@ -33,11 +36,26 @@ describe("LOCAL_MODEL_CATALOG (first-party 큐레이션 위생)", () => {
     for (const e of LOCAL_MODEL_CATALOG) {
       expect(["coding", "general", "reasoning"]).toContain(e.category);
       expect(["코딩 특화", "범용", "추론"]).toContain(e.categoryLabel);
+      expect(["chat-only", "tool-use"]).toContain(e.toolSupport);
+      expect(["대화 전용", "tool-use 지원"]).toContain(e.toolSupportLabel);
       expect(e.downloadSizeMB).toBeGreaterThan(0);
       expect(e.minRamGB).toBeGreaterThan(0);
       expect(e.minRamGB).toBeLessThanOrEqual(128);
       expect(e.contextTokens).toBeGreaterThan(0);
     }
+  });
+
+  it("★소형(<7B)은 대화 전용, 7B+(특히 coder)는 tool-use 지원", () => {
+    expect(catalogEntry("qwen2.5:0.5b")?.toolSupport).toBe("chat-only");
+    expect(catalogEntry("qwen3:4b")?.toolSupport).toBe("chat-only");
+    expect(catalogEntry("gemma3:4b")?.toolSupport).toBe("chat-only");
+    expect(catalogEntry("qwen2.5-coder:7b")?.toolSupport).toBe("tool-use");
+    expect(catalogEntry("qwen3:8b")?.toolSupport).toBe("tool-use");
+    expect(resolveLocalToolSupport("qwen2.5:0.5b")).toBe("chat-only");
+    expect(resolveLocalToolSupport("qwen2.5-coder:7b")).toBe("tool-use");
+    expect(parseLocalParamBillions("phi3:mini")).toBe(3.8);
+    expect(isLocalChatOnlyModel("qwen2.5:0.5b")).toBe(true);
+    expect(isLocalChatOnlyModel("qwen2.5-coder:7b")).toBe(false);
   });
 
   it("Qwen3 최신 대표군은 공식 ollama pull id 와 실측 크기를 가진다", () => {

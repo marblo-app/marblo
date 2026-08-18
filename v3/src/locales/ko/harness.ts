@@ -556,6 +556,18 @@ export const harness = {
     "카탈로그 크기는 ollama 기본 4bit 계열 양자화(Q4_K_M 등) 기준입니다. 양자화 비트가 낮을수록 작고 빠르지만 품질이 조금 떨어집니다.",
   "harness.store.local.guideContext":
     "컨텍스트 표기는 모델의 최대치입니다. 실행 시 기본 컨텍스트는 이보다 작게 잡히며(ollama 기본 ~4K), 컨텍스트를 키우면 그만큼 메모리를 더 씁니다.",
+  "harness.store.local.guideToolUse":
+    "7B 미만은 「대화 전용」(테스트·스모크)입니다. Marblo 에이전트/오케 실작업(MCP tool-use)은 7B+ coder(예: qwen2.5-coder:7b)를 쓰세요. 소형에 툴을 주입하면 JSON 흉내·엉뚱한 답이 납니다.",
+  "harness.store.local.badgeChatOnly": "대화 전용",
+  "harness.store.local.badgeToolUse": "tool-use 지원",
+  "harness.store.local.chatOnlyHint":
+    "테스트·대화용. 에이전트 실작업에는 7B+ coder를 쓰세요.",
+  "harness.store.local.toolUseHint":
+    "MCP tool-use / 에이전트 실작업에 사용할 수 있습니다. 코딩 작업은 coder 계열 권장.",
+  "harness.store.local.installedHintChatOnly":
+    "대화·테스트용으로 Local Model에서 선택하세요. 티켓 실작업은 7B+ coder를 설치하세요.",
+  "harness.store.local.installedHintToolUse":
+    "에이전트 추가 → Local Model에서 이 모델을 선택해 실작업에 쓸 수 있습니다.",
   "harness.store.local.hardwareLine": "이 기기 메모리: {gb} GB",
   "harness.store.local.unifiedMemoryNote": "통합메모리(GPU 공유)",
   "harness.store.local.ollamaMissing":
@@ -585,9 +597,9 @@ export const harness = {
   "harness.store.local.installedHint":
     "에이전트 추가 → Local Model 에서 이 모델을 선택하세요.",
   "harness.store.local.desc.qwen25_05b":
-    "가장 가벼운 시험용 — 저사양 기기에서도 즉시 응답을 확인할 수 있습니다.",
+    "가장 가벼운 시험·대화용(대화 전용). 에이전트 실작업·MCP tool-use에는 쓰지 마세요 — 7B+ coder를 쓰세요.",
   "harness.store.local.desc.qwen25_15b":
-    "가벼움과 품질의 균형 — 요약·분류 같은 단순 작업에 적합합니다.",
+    "가벼움과 품질의 균형(대화 전용) — 요약·분류 스모크에 적합. 실작업은 7B+ coder.",
   "harness.store.local.desc.llama32_1b":
     "Meta 의 초소형 모델 — 128K 컨텍스트를 지원하는 가장 작은 축입니다.",
   "harness.store.local.desc.llama32_3b":

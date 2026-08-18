@@ -166,6 +166,7 @@ export function LocalModelsSection({
               <li>{t("harness.store.local.guideRam")}</li>
               <li>{t("harness.store.local.guideQuant")}</li>
               <li>{t("harness.store.local.guideContext")}</li>
+              <li>{t("harness.store.local.guideToolUse")}</li>
             </ul>
           </div>
         </ConnectorGuidePanel>
@@ -275,6 +276,25 @@ export function LocalModelsSection({
 
               <div className="mb-2 flex flex-wrap items-center gap-1">
                 <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8]">
+                  {card.categoryLabel}
+                </span>
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[10px] ${
+                    card.toolSupport === "tool-use"
+                      ? "bg-[#89b4fa]/20 text-[#89b4fa]"
+                      : "bg-[#f9e2af]/20 text-[#f9e2af]"
+                  }`}
+                  title={
+                    card.toolSupport === "tool-use"
+                      ? translate("harness.store.local.toolUseHint")
+                      : translate("harness.store.local.chatOnlyHint")
+                  }
+                >
+                  {card.toolSupport === "tool-use"
+                    ? t("harness.store.local.badgeToolUse")
+                    : t("harness.store.local.badgeChatOnly")}
+                </span>
+                <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8]">
                   {t("harness.store.local.downloadSize")}:{" "}
                   {formatDownloadSize(card.downloadSizeMB)}
                 </span>
@@ -323,7 +343,9 @@ export function LocalModelsSection({
                 </div>
               ) : card.action === "installed" ? (
                 <p className="text-[10px] text-[#6c7086]">
-                  {t("harness.store.local.installedHint")}
+                  {card.toolSupport === "tool-use"
+                    ? t("harness.store.local.installedHintToolUse")
+                    : t("harness.store.local.installedHintChatOnly")}
                 </p>
               ) : card.action === "pull" ? (
                 <button
