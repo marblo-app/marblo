@@ -102,3 +102,113 @@ test("@mocked Markdown Edit 뷰에서 수정 저장 후 Preview 에 반영된다
     fullPage: true,
   });
 });
+
+test("@mocked graph 서브탭에서 Markdown 파일을 열면 Preview/Edit 토글이 보인다", async ({
+  marblo,
+}) => {
+  const rootPath = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-md-graph-"));
+  const firstPath = path.join(rootPath, "docs/first.md");
+  const secondPath = path.join(rootPath, "docs/second.md");
+  fs.mkdirSync(path.dirname(firstPath), { recursive: true });
+  fs.writeFileSync(firstPath, "# First\n\nGraph stays here\n", "utf8");
+  fs.writeFileSync(secondPath, "# Second\n\nPreview returns\n", "utf8");
+
+  await marblo.openTab("code");
+  await marblo.page.waitForFunction(
+    () => {
+      const tw = (
+        window as unknown as {
+          __marbloTest?: { stores?: { editor?: unknown } };
+        }
+      ).__marbloTest;
+      return !!tw?.stores?.editor;
+    },
+    null,
+    { timeout: 5000 },
+  );
+
+  await marblo.page.evaluate(
+    ({ rootPath, firstPath }) => {
+      const tw = (
+        window as unknown as {
+          __marbloTest?: {
+            stores: {
+              editor: {
+                setState: (s: Record<string, unknown>) => void;
+              };
+            };
+          };
+        }
+      ).__marbloTest;
+      if (!tw) throw new Error("__marbloTest hatch 가 노출되지 않음");
+      tw.stores.editor.setState({
+        rootPath,
+        activeFilePath: firstPath,
+        showDiff: false,
+        saveError: null,
+        openFiles: [
+          {
+            path: firstPath,
+            name: "first.md",
+            content: "# First\n\nGraph stays here\n",
+            originalContent: "# First\n\nGraph stays here\n",
+            language: "markdown",
+            isModified: false,
+          },
+        ],
+      });
+    },
+    { rootPath, firstPath },
+  );
+
+  await marblo.page.getByTestId("code-doc-graph-subtab").click();
+  await expect(marblo.page.getByTestId("doc-graph-panel")).toBeVisible();
+
+  await marblo.page.evaluate(
+    ({ firstPath, secondPath }) => {
+      const tw = (
+        window as unknown as {
+          __marbloTest?: {
+            stores: {
+              editor: {
+                setState: (s: Record<string, unknown>) => void;
+              };
+            };
+          };
+        }
+      ).__marbloTest;
+      if (!tw) throw new Error("__marbloTest hatch 가 노출되지 않음");
+      tw.stores.editor.setState({
+        activeFilePath: secondPath,
+        openFiles: [
+          {
+            path: firstPath,
+            name: "first.md",
+            content: "# First\n\nGraph stays here\n",
+            originalContent: "# First\n\nGraph stays here\n",
+            language: "markdown",
+            isModified: false,
+          },
+          {
+            path: secondPath,
+            name: "second.md",
+            content: "# Second\n\nPreview returns\n",
+            originalContent: "# Second\n\nPreview returns\n",
+            language: "markdown",
+            isModified: false,
+          },
+        ],
+      });
+    },
+    { firstPath, secondPath },
+  );
+
+  await expect(
+    marblo.page.getByRole("heading", { name: "Second" }),
+  ).toBeVisible();
+  await expect(marblo.page.getByText("Preview returns")).toBeVisible();
+  await expect(
+    marblo.page.getByRole("button", { name: "Edit", exact: true }),
+  ).toBeVisible();
+  await expect(marblo.page.getByTestId("doc-graph-panel")).toHaveCount(0);
+});
