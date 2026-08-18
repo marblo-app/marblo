@@ -37,7 +37,13 @@ import { VendorCard } from "../onboarding/VendorCard";
  * 실제로 필요해서 기존 패키지 카탈로그 행이 맞다(분류는 이름이 아니라
  * `requiredEnvKeys` 유무가 정한다).
  */
-export function EnvSwapVendorSection() {
+interface EnvSwapVendorSectionProps {
+  showSectionChrome?: boolean;
+}
+
+export function EnvSwapVendorSection({
+  showSectionChrome = true,
+}: EnvSwapVendorSectionProps = {}) {
   const { t } = useTranslation();
   const openSettingsSection = useUiStore((s) => s.openSettingsSection);
   const { options, status, reloadCatalog, recheckKeys } = useByomOptions();
@@ -48,24 +54,42 @@ export function EnvSwapVendorSection() {
   return (
     // 위 패널들과 같은 구분선 규격. 배경은 덮지 않는다 — 카드가 `#181825` 라서
     // 같은 색을 깔면 카드 경계가 사라진다(패키지 격자도 같은 이유로 안 깐다).
-    <section className="border-b border-[#313244] px-4 py-3">
-      <div className="mb-1 flex flex-wrap items-center gap-2">
-        <span className="text-base">🔑</span>
-        <h3 className="text-sm font-semibold text-[#cdd6f4]">
-          {t("harness.store.envSwap.title")}
-        </h3>
-        {cards.length > 0 && (
+    <section
+      className={
+        showSectionChrome ? "border-b border-[#313244] px-4 py-3" : "px-4"
+      }
+    >
+      {showSectionChrome && (
+        <>
+          <div className="mb-1 flex flex-wrap items-center gap-2">
+            <span className="text-base">🔑</span>
+            <h3 className="text-sm font-semibold text-[#cdd6f4]">
+              {t("harness.store.envSwap.title")}
+            </h3>
+            {cards.length > 0 && (
+              <span className="rounded bg-[#585b70]/30 px-1.5 py-0.5 text-[10px] font-medium text-[#a6adc8]">
+                {t("harness.store.envSwap.summary", {
+                  ready: readyCount,
+                  total: cards.length,
+                })}
+              </span>
+            )}
+          </div>
+          <p className="mb-3 text-xs text-[#7f849c]">
+            {t("harness.store.envSwap.subtitle")}
+          </p>
+        </>
+      )}
+      {!showSectionChrome && cards.length > 0 && (
+        <div className="mb-3">
           <span className="rounded bg-[#585b70]/30 px-1.5 py-0.5 text-[10px] font-medium text-[#a6adc8]">
             {t("harness.store.envSwap.summary", {
               ready: readyCount,
               total: cards.length,
             })}
           </span>
-        )}
-      </div>
-      <p className="mb-3 text-xs text-[#7f849c]">
-        {t("harness.store.envSwap.subtitle")}
-      </p>
+        </div>
+      )}
 
       {status === "error" ? (
         <div className="rounded-md border border-[#f9e2af]/25 bg-[#f9e2af]/5 px-3 py-2 text-xs text-[#a6adc8]">

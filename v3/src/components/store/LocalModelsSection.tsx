@@ -135,7 +135,9 @@ export function LocalModelsSection({
     <div>
       {/* Ollama 설치→pull→스폰 가이드 (Slack #939 ConnectorGuidePanel 패턴) */}
       <div className="mb-3">
-        <ConnectorGuidePanel toggleLabel={t("harness.store.local.guide.toggle")}>
+        <ConnectorGuidePanel
+          toggleLabel={t("harness.store.local.guide.toggle")}
+        >
           <ConnectorGuideSteps>
             <ConnectorGuideStep>
               1. {t("harness.store.local.guide.step1Before")}
@@ -286,25 +288,38 @@ export function LocalModelsSection({
               </div>
 
               {isPulling ? (
-                <div className="flex items-center gap-2">
-                  <div className="h-1.5 flex-1 overflow-hidden rounded bg-[#313244]">
-                    <div
-                      className="h-full rounded bg-[#89b4fa] transition-all"
-                      style={{ width: `${pullingPercent ?? 0}%` }}
-                    />
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2 text-[10px]">
+                    <span className="font-medium text-[#cdd6f4]">
+                      {t("harness.store.local.installing")}
+                    </span>
+                    <span className="font-mono text-[#89b4fa]">
+                      {pullingPercent !== null && pullingPercent !== undefined
+                        ? `${pullingPercent}%`
+                        : t("harness.store.local.progressPending")}
+                    </span>
                   </div>
-                  <span className="w-10 text-right text-[10px] text-[#a6adc8]">
-                    {pullingPercent !== null && pullingPercent !== undefined
-                      ? `${pullingPercent}%`
-                      : "…"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void cancelPull(card.id)}
-                    className="rounded bg-[#f38ba8]/20 px-2 py-0.5 text-[10px] text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/30"
-                  >
-                    {t("harness.store.local.cancel")}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="h-2 flex-1 overflow-hidden rounded-full bg-[#313244]"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={pullingPercent ?? undefined}
+                    >
+                      <div
+                        className="h-full rounded-full bg-[#89b4fa] transition-all"
+                        style={{ width: `${pullingPercent ?? 8}%` }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void cancelPull(card.id)}
+                      className="rounded bg-[#f38ba8]/20 px-2 py-0.5 text-[10px] text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/30"
+                    >
+                      {t("harness.store.local.cancel")}
+                    </button>
+                  </div>
                 </div>
               ) : card.action === "installed" ? (
                 <p className="text-[10px] text-[#6c7086]">
@@ -314,7 +329,7 @@ export function LocalModelsSection({
                 <button
                   type="button"
                   onClick={() => void runPull(card.id)}
-                  className="rounded bg-[#89b4fa]/20 px-2.5 py-1 text-xs text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/30"
+                  className="rounded bg-[#89b4fa] px-3 py-1.5 text-xs font-semibold text-[#11111b] shadow-sm shadow-[#89b4fa]/20 transition-colors hover:bg-[#b4befe] focus:outline-none focus:ring-2 focus:ring-[#89b4fa]/60 focus:ring-offset-2 focus:ring-offset-[#181825]"
                 >
                   {t("harness.store.local.pull")}
                 </button>
