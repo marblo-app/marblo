@@ -35,6 +35,7 @@ import {
  *   G1  깨끗한 신규 설치 → 비기너 셸 (큐레이트 탭바만 + 비노출 엑스퍼트 탭 부재)
  *   G2  ★회귀가드: 이전-사용 마커 4종 각각 → 마블로 모드 + 보드 실재. 대조군 포함
  *   G3  인증 택1(claude 만) → 폴더 게이트 → 하단 오케 대화창
+ *   G3c 연결 전 데모 CTA → 90초 영상 뷰어
  *   G4  하단 오케 입력 → 상단 진행 보드(국면·보드) + 에이전트 패널
  *   G5  (대조군) 오케 PTY 제출 전에는 스트립이 안 뜬다
  *   G6  코치마크 투어 3스텝 완주 → 재노출 없음 → 상단 마블로 모드 전환
@@ -137,10 +138,12 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       await expect(
         cr.page.getByTestId("beginner-firstscreen-demo"),
       ).toBeVisible();
-      await expect(cr.page.getByTestId("onramp-decompose-input")).toBeVisible();
-      await expect(cr.page.getByTestId("onramp-decompose-cta")).toContainText(
-        /데모로 티켓 만들어보기|Make demo tickets/,
+      await expect(cr.page.getByTestId("onramp-decompose-input")).toHaveCount(
+        0,
       );
+      await expect(
+        cr.page.getByTestId("beginner-firstscreen-demo-watch"),
+      ).toContainText(/90초 영상 데모|90s video demo/);
       const demoBox = await cr.page
         .getByTestId("beginner-firstscreen-demo")
         .boundingBox();
@@ -149,10 +152,9 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
         .boundingBox();
       expect(demoBox, "첫 화면 데모 CTA 영역이 렌더되지 않았다").toBeTruthy();
       expect(connectBox, "연결 CTA 영역이 렌더되지 않았다").toBeTruthy();
-      expect(
-        demoBox!.y,
-        "티켓 생성 데모 CTA 가 연결 CTA 보다 아래에 있다",
-      ).toBeLessThan(connectBox!.y);
+      expect(demoBox!.y, "영상 데모 CTA 가 연결 CTA 보다 아래에 있다").toBeLessThan(
+        connectBox!.y,
+      );
       await expect(
         cr.page.getByTestId("beginner-connect-claude"),
       ).toBeVisible();
@@ -331,7 +333,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
     }
   });
 
-  test("G3c 연결 전 데모 분해 한도 화면에서 다시 시작하면 입력칸이 돌아오고 데모 티켓을 정리한다", async () => {
+  test("G3c 연결 전 데모 CTA는 90초 영상 뷰어를 열고 인터랙티브 분해를 노출하지 않는다", async () => {
     const cr = await launchCleanRoom({
       claude: "missing",
       codex: "missing",
@@ -340,128 +342,30 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
     try {
       await passFirstRunModals(cr.page);
       await waitForAppShell(cr.page);
-      await cr.page.evaluate(() => {
-        localStorage.setItem(
-          "marblo.onramp.l0",
-          JSON.stringify({ decomposeCount: 3, demoTicketCount: 21 }),
-        );
-      });
-      await cr.page.reload();
-      await cr.page.waitForLoadState("domcontentloaded");
-      await passFirstRunModals(cr.page);
-      await waitForAppShell(cr.page);
       await expect(cr.page.getByTestId("beginner-connect")).toBeVisible();
-      await cr.page.evaluate(() => {
-        const hatch = (
-          window as unknown as {
-            __marbloTest?: {
-              stores: {
-                task: {
-                  getState: () => {
-                    tasks: Array<Record<string, unknown>>;
-                  };
-                  setState: (s: Record<string, unknown>) => void;
-                };
-              };
-            };
-          }
-        ).__marbloTest;
-        if (!hatch) throw new Error("cleanroom test hatch is unavailable");
-        const taskStore = hatch.stores.task;
-        taskStore.setState({
-          tasks: [
-            {
-              id: "demo-a",
-              projectId: "",
-              title: "데모 티켓 A",
-              description: "",
-              status: "TODO",
-              dependsOn: [],
-              dependsOnCompleted: true,
-              priority: 1,
-              role: "frontend",
-              claimedBy: null,
-              claimedAt: null,
-              scope: [],
-              comment: "",
-              prUrl: "",
-              hasPmFeedback: false,
-              origin: "onramp_demo",
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
-            {
-              id: "real-a",
-              projectId: "",
-              title: "실제 티켓 A",
-              description: "",
-              status: "TODO",
-              dependsOn: [],
-              dependsOnCompleted: true,
-              priority: 1,
-              role: "frontend",
-              claimedBy: null,
-              claimedAt: null,
-              scope: [],
-              comment: "",
-              prUrl: "",
-              hasPmFeedback: false,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
-          ],
-          updateTask: async (id: string, data: Record<string, unknown>) => {
-            const current = taskStore.getState().tasks;
-            taskStore.setState({
-              tasks: current.map((task) =>
-                task.id === id ? { ...task, ...data } : task,
-              ),
-            });
-          },
-        });
-      });
 
       await expect(
         cr.page.getByTestId("beginner-firstscreen-demo"),
       ).toBeVisible();
-      await expect(cr.page.getByTestId("onramp-decompose-limit")).toBeVisible();
       await expect(
-        cr.page.getByTestId("onramp-decompose-limit-cta"),
+        cr.page.getByTestId("beginner-firstscreen-demo-watch"),
       ).toBeVisible();
-      await cr.page.getByTestId("onramp-decompose-restart").click();
-
-      await expect(cr.page.getByTestId("onramp-decompose-input")).toBeVisible();
-      await expect(cr.page.getByTestId("onramp-decompose-limit")).toHaveCount(0);
-      const resetRecord = await cr.page.evaluate(() =>
-        JSON.parse(localStorage.getItem("marblo.onramp.l0") ?? "{}"),
+      await expect(cr.page.getByTestId("onramp-decompose-limit")).toHaveCount(
+        0,
       );
-      expect(resetRecord).toEqual({ decomposeCount: 0, demoTicketCount: 0 });
-      const tasks = await cr.page.evaluate(() => {
-        const hatch = (
-          window as unknown as {
-            __marbloTest?: {
-              stores: {
-                task: {
-                  getState: () => {
-                    tasks: Array<Record<string, unknown>>;
-                  };
-                };
-              };
-            };
-          }
-        ).__marbloTest;
-        return hatch?.stores.task.getState().tasks ?? [];
-      });
-      expect(tasks.find((task) => task.id === "demo-a")?.deleted).toBe(true);
-      expect(tasks.find((task) => task.id === "real-a")?.deleted).not.toBe(
-        true,
+      await expect(cr.page.getByTestId("onramp-decompose-input")).toHaveCount(
+        0,
       );
 
-      await cr.page
-        .getByTestId("onramp-decompose-input")
-        .fill("검색 화면을 다시 만들어줘");
-      await expect(cr.page.getByTestId("onramp-decompose-cta")).toBeEnabled();
-      await cr.shot("G3c-onramp-demo-restarted");
+      await cr.page.getByTestId("beginner-firstscreen-demo-watch").click();
+      const modal = cr.page.getByTestId("orchestration-video-demo-modal");
+      await expect(modal).toBeVisible();
+      await expect(
+        cr.page.getByTestId("orchestration-video-demo-player"),
+      ).toHaveAttribute("src", "/media/orchestration-demo.mp4");
+      await cr.shot("G3c-video-demo-opened");
+      await cr.page.getByTestId("orchestration-video-demo-close").click();
+      await expect(modal).toHaveCount(0);
     } finally {
       await cr.close();
     }

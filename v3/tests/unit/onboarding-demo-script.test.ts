@@ -141,13 +141,16 @@ describe("demo script — 재생시간이 라벨과 일치한다", () => {
     ] as const;
     for (const [rel, key] of callSites) {
       const source = readFileSync(srcPath(rel), "utf8");
-      expect(
-        source,
-        `${rel} 이 DEMO_TOTAL_SECONDS 를 import 하지 않음`,
-      ).toContain("DEMO_TOTAL_SECONDS");
-      // t("...watchDemo", { seconds: DEMO_TOTAL_SECONDS }) 형태여야 한다.
+      const secondsConst =
+        rel === "components/onboarding/StartHereTab.tsx"
+          ? "ORCHESTRATION_DEMO_SECONDS"
+          : "DEMO_TOTAL_SECONDS";
+      expect(source, `${rel} 이 ${secondsConst} 를 import 하지 않음`).toContain(
+        secondsConst,
+      );
+      // t("...watchDemo", { seconds: CONST }) 형태여야 한다.
       const call = new RegExp(
-        `t\\(\\s*"${key.replace(/\./g, "\\.")}"\\s*,\\s*\\{\\s*seconds:\\s*DEMO_TOTAL_SECONDS`,
+        `t\\(\\s*"${key.replace(/\./g, "\\.")}"\\s*,\\s*\\{\\s*seconds:\\s*${secondsConst}`,
       );
       expect(call.test(source), `${rel} 의 ${key} 호출에 seconds 미전달`).toBe(
         true,
@@ -354,47 +357,46 @@ describe("StartHereTab demo exposure contract", () => {
       srcPath("components/onboarding/StartHereTab.tsx"),
       "utf8",
     );
-    const completeBranch = source.match(/\{complete && \([\s\S]*?\n        \)\}/);
+    const completeBranch = source.match(
+      /\{complete && \([\s\S]*?\n {8}\)\}/,
+    );
 
     expect(completeBranch?.[0]).toContain(
       'data-testid="start-here-complete-watch-demo"',
     );
     expect(completeBranch?.[0]).toContain("onClick={openDemo}");
     expect(completeBranch?.[0]).toContain("onboarding.startHere.watchDemo");
-    expect(completeBranch?.[0]).toContain("DEMO_TOTAL_SECONDS");
+    expect(completeBranch?.[0]).toContain("ORCHESTRATION_DEMO_SECONDS");
   });
 
-  it("ValuePreview와 DemoMode 진입점은 온보딩 완료 분기 밖에 있다", () => {
+  it("ValuePreview와 VideoDemoModal 진입점은 온보딩 완료 분기 밖에 있다", () => {
     const source = readFileSync(
       srcPath("components/onboarding/StartHereTab.tsx"),
       "utf8",
     );
     const valuePreviewIndex = source.indexOf("<ValuePreview");
-    const incompleteBranchIndex = source.indexOf("{!complete && (");
     const completeBranchIndex = source.indexOf("{complete && (");
     const demoModeIndex = source.indexOf("{showDemo && (");
 
     expect(valuePreviewIndex).toBeGreaterThan(-1);
-    expect(incompleteBranchIndex).toBeGreaterThan(valuePreviewIndex);
     expect(completeBranchIndex).toBeGreaterThan(valuePreviewIndex);
     expect(demoModeIndex).toBeGreaterThan(completeBranchIndex);
     expect(source).toContain("<ValuePreview onWatchDemo={openDemo} />");
-    expect(source).toContain("<DemoMode");
+    expect(source).toContain("<VideoDemoModal");
   });
 
-  it("첫 화면 데모 CTA 는 대화→티켓 체험임을 문구·testid 로 분명히 한다", () => {
-    // 정적 값-미리보기 텍스트에 "데모 보기"가 묻히던 회귀를 막는다(br88d6WP).
-    expect(koOnboarding["onboarding.startHere.value.playInteractive"]).toBe(
-      "데모로 티켓 생성해보기",
+  it("첫 화면 데모 CTA 는 90초 영상 데모임을 문구·testid 로 분명히 한다", () => {
+    expect(koOnboarding["onboarding.startHere.value.playVideo"]).toContain(
+      "{seconds}",
     );
     expect(koOnboarding["onboarding.startHere.watchDemo"]).toMatch(
-      /대화→티켓/,
+      /영상 데모/,
     );
-    expect(enOnboarding["onboarding.startHere.value.playInteractive"]).toMatch(
-      /ticket/i,
+    expect(enOnboarding["onboarding.startHere.value.playVideo"]).toContain(
+      "{seconds}",
     );
     expect(enOnboarding["onboarding.startHere.watchDemo"]).toMatch(
-      /chat.*ticket|ticket.*chat/i,
+      /video demo/i,
     );
 
     const source = readFileSync(
@@ -403,6 +405,6 @@ describe("StartHereTab demo exposure contract", () => {
     );
     expect(source).toContain('data-testid="start-here-demo-cta"');
     expect(source).toContain('data-testid="start-here-header-demo-cta"');
-    expect(source).toContain("onboarding.startHere.value.playInteractive");
+    expect(source).toContain("onboarding.startHere.value.playVideo");
   });
 });

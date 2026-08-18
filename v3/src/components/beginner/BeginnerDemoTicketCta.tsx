@@ -1,20 +1,19 @@
 import { useTranslation } from "../../lib/i18n";
-import { OnrampDecomposeCard } from "../onboarding/OnrampDecomposeCard";
+import { PlayCircle } from "lucide-react";
+import { ORCHESTRATION_DEMO_SECONDS } from "../onboarding/VideoDemoModal";
 
 export interface BeginnerDemoTicketCtaProps {
-  surface: "beginner_connect" | "beginner_chat";
+  onWatchDemo: () => void;
   testId?: string;
   className?: string;
 }
 
 /**
- * 비기너 공용 L0 CTA — "내 문장으로 티켓 만들기".
- *
- * StartHereTab 과 같은 OnrampDecomposeCard 를 태워 입력→티켓 생성 경로를 공유한다.
- * 연결 전/후 표면이 갈라도 카드 구현은 한 벌이어야 한다.
+ * 비기너 연결 전 가치 확인 CTA.
+ * 인터랙티브 티켓 생성 대신 고정 영상만 연다.
  */
 export function BeginnerDemoTicketCta({
-  surface,
+  onWatchDemo,
   testId = "beginner-firstscreen-demo",
   className = "",
 }: BeginnerDemoTicketCtaProps) {
@@ -25,7 +24,17 @@ export function BeginnerDemoTicketCta({
       <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#89b4fa]">
         {t("beginner.connect.demoLead")}
       </p>
-      <OnrampDecomposeCard surface={surface} />
+      <button
+        type="button"
+        data-testid="beginner-firstscreen-demo-watch"
+        onClick={onWatchDemo}
+        className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#89b4fa]/45 bg-[#89b4fa]/15 px-4 py-3 text-sm font-semibold text-[#cdd6f4] transition-colors hover:bg-[#89b4fa]/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#89b4fa]"
+      >
+        <PlayCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+        {t("beginner.connect.watchDemo", {
+          seconds: ORCHESTRATION_DEMO_SECONDS,
+        })}
+      </button>
     </div>
   );
 }

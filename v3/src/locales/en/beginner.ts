@@ -36,7 +36,7 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.connect.recheck": "Check again",
   "beginner.connect.checking": "Checking…",
   "beginner.connect.ready": "Connected",
-  "beginner.connect.watchDemo": "Watch the video demo",
+  "beginner.connect.watchDemo": "Watch the {seconds}s video demo",
   "beginner.connect.stuck":
     "Stuck? You can paste the URL printed in the terminal into your browser directly.",
   "beginner.connect.pickYourself": "Or pick one yourself",

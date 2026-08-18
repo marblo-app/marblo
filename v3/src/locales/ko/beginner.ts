@@ -37,7 +37,7 @@ export const beginner = {
   "beginner.connect.recheck": "다시 확인",
   "beginner.connect.checking": "확인 중…",
   "beginner.connect.ready": "연결됐어요",
-  "beginner.connect.watchDemo": "영상 데모 보기",
+  "beginner.connect.watchDemo": "{seconds}초 영상 데모 보기",
   "beginner.connect.stuck":
     "잘 안 되나요? 터미널에 나온 주소를 브라우저에 직접 붙여 넣어도 됩니다.",
   "beginner.connect.pickYourself": "직접 고르기",

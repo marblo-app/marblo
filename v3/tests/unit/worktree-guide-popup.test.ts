@@ -131,10 +131,6 @@ vi.mock("../../src/components/onboarding/demoScript", () => ({
   DEMO_TOTAL_SECONDS: 30,
 }));
 
-vi.mock("../../src/components/onboarding/OnrampDecomposeCard", () => ({
-  OnrampDecomposeCard: () => null,
-}));
-
 vi.mock("../../src/lib/onboardingProgress", () => ({
   isOnboardingComplete: () => false,
   resumeStep: () => "install",

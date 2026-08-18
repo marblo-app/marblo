@@ -23,7 +23,6 @@ import {
 import { ROWS, useCliSetupStore } from "../../stores/cliSetupStore";
 import { useOnboardingProgressStore } from "../../stores/onboardingProgressStore";
 import { useProjectStore } from "../../stores/projectStore";
-import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { useStepPrdSuccess } from "../../hooks/useCliSetupEngine";
 import { useByomOptions } from "../../hooks/useByomOptions";
 import telemetry from "../../services/telemetryService";
@@ -42,9 +41,12 @@ import {
 import { ByomStartSection } from "./ByomStartSection";
 import { FirstTicketResultNote } from "./FirstTicketResultNote";
 import { VendorModelsSection } from "./VendorModelsSection";
-import { DemoMode, DEMO_CONNECT_PENDING_KEY } from "./DemoMode";
-import { DEMO_TOTAL_SECONDS } from "./demoScript";
-import { OnrampDecomposeCard } from "./OnrampDecomposeCard";
+import {
+  ORCHESTRATION_DEMO_POSTER_SRC,
+  ORCHESTRATION_DEMO_SECONDS,
+  ORCHESTRATION_DEMO_VIDEO_SRC,
+  VideoDemoModal,
+} from "./VideoDemoModal";
 
 /**
  * "시작하기" — onboarding as a first-class TAB (ticket ZdgQMxW7).
@@ -80,9 +82,6 @@ const STEP_ICON: Record<WizardStep, string> = {
   firstTicket: "🎫",
 };
 
-const DEMO_VIDEO_SRC = "/media/orchestration-demo.mp4";
-const DEMO_POSTER_SRC = "/media/orchestration-demo-poster.jpg";
-
 const QUICK_GUIDE_STEPS = ["install", "terminal", "auth", "spawn"] as const;
 
 const QUICK_GUIDE_ICON = {
@@ -107,8 +106,6 @@ export function StartHereTab() {
   const refreshVersions = useCliSetupStore((s) => s.refreshVersions);
   const requiredInstalled = useCliSetupStore((s) => s.requiredInstalled());
   const hasProject = useProjectStore((s) => !!s.currentProject?.folderPath);
-  const setActiveTab = useSplitWorkspaceStore((s) => s.setActiveTab);
-
   const [seeding, setSeeding] = useState(false);
   const [seedMsg, setSeedMsg] = useState<ActionResult | null>(null);
   const [sendingTicket, setSendingTicket] = useState(false);
@@ -216,7 +213,7 @@ export function StartHereTab() {
     // login screen. We're already past login and the user is standing in the
     // setup tab, so clear it rather than leave a stale prompt for next launch.
     try {
-      localStorage.removeItem(DEMO_CONNECT_PENDING_KEY);
+      localStorage.removeItem("marblo.demo.connectPending");
     } catch {
       /* private mode — nothing to clear */
     }
@@ -268,7 +265,7 @@ export function StartHereTab() {
             >
               <PlayCircle className="h-3.5 w-3.5" aria-hidden="true" />
               {t("onboarding.startHere.watchDemo", {
-                seconds: DEMO_TOTAL_SECONDS,
+                seconds: ORCHESTRATION_DEMO_SECONDS,
               })}
             </button>
             <button
@@ -293,20 +290,6 @@ export function StartHereTab() {
             BeginnerShell 은 건드리지 않는다 — 시작하기 탭 본문만. */}
         <WorktreeRecommendNote />
 
-        {/* ★L0 — 내 말이 진짜 티켓이 된다 (온램프 사다리 #886 §4).
-            비기너 연결 게이트와 **같은 컴포넌트**다. 한쪽에만 달면 어드밴스드로
-            들어온 신규 유저(= 이 탭에 착지하는 사람)만 0층이 없는 반쪽 온보딩을
-            받는다. 값 미리보기(본다) 바로 다음에 오는 것도 의도다 — 본 것을
-            그 자리에서 자기 문장으로 해 보게 만든다. */}
-        {!complete && (
-          <div className="mb-4">
-            <OnrampDecomposeCard
-              surface="start_here_tab"
-              onOpenBoard={() => setActiveTab("board")}
-            />
-          </div>
-        )}
-
         {complete && (
           <div className="mb-4 rounded-lg border border-[#a6e3a1]/30 bg-[#a6e3a1]/10 px-4 py-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -326,7 +309,7 @@ export function StartHereTab() {
               >
                 <PlayCircle className="h-3.5 w-3.5" aria-hidden="true" />
                 {t("onboarding.startHere.watchDemo", {
-                  seconds: DEMO_TOTAL_SECONDS,
+                  seconds: ORCHESTRATION_DEMO_SECONDS,
                 })}
               </button>
             </div>
@@ -450,10 +433,9 @@ export function StartHereTab() {
       </div>
 
       {showDemo && (
-        <DemoMode
+        <VideoDemoModal
           surface="start_here_tab"
           onClose={closeDemo}
-          onConnect={closeDemo}
         />
       )}
     </div>
@@ -502,8 +484,8 @@ function ValuePreview({ onWatchDemo }: { onWatchDemo: () => void }) {
         <video
           data-testid="start-here-orchestration-video"
           className="aspect-video h-full w-full object-cover"
-          src={DEMO_VIDEO_SRC}
-          poster={DEMO_POSTER_SRC}
+          src={ORCHESTRATION_DEMO_VIDEO_SRC}
+          poster={ORCHESTRATION_DEMO_POSTER_SRC}
           controls
           muted
           playsInline
@@ -522,10 +504,6 @@ function ValuePreview({ onWatchDemo }: { onWatchDemo: () => void }) {
             {t("onboarding.startHere.value.body")}
           </p>
         </div>
-        {/*
-          ★Primary path = interactive demo (chat → ticket), not the static video.
-          Keep the video as preview; the CTA must read as "try ticket creation".
-        */}
         <div className="flex flex-col gap-2">
           <button
             type="button"
@@ -534,7 +512,9 @@ function ValuePreview({ onWatchDemo }: { onWatchDemo: () => void }) {
             className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#89b4fa] px-4 py-2.5 text-sm font-bold text-[#1e1e2e] shadow-md shadow-[#89b4fa]/25 transition-colors hover:bg-[#74c7ec] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#89b4fa]"
           >
             <PlayCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
-            {t("onboarding.startHere.value.playInteractive")}
+            {t("onboarding.startHere.value.playVideo", {
+              seconds: ORCHESTRATION_DEMO_SECONDS,
+            })}
           </button>
           <span className="text-center text-[11px] leading-4 text-[#7f849c] sm:text-left">
             {t("onboarding.startHere.value.zeroCost")}

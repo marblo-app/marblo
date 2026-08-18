@@ -109,9 +109,18 @@ test.describe("StartHereTab first-run mocked rendering", () => {
       "시연 영상이 StartHere 안에서 렌더링되어야 함",
     ).toHaveAttribute("src", "/media/orchestration-demo.mp4");
     await expect(
-      marblo.page.getByText(/CLI를 연결하고 계정을 연동하면/),
+      marblo.page.getByText(/90초 영상으로 먼저 확인하세요/),
       "데모 이후 실제 CLI 연결 가치 문구가 보여야 함",
     ).toBeVisible();
+    await marblo.page.getByTestId("start-here-demo-cta").click();
+    await expect(
+      marblo.page.getByTestId("orchestration-video-demo-modal"),
+      "시작하기 데모 CTA는 MP4 영상 뷰어를 열어야 함",
+    ).toBeVisible();
+    await expect(
+      marblo.page.getByTestId("orchestration-video-demo-player"),
+    ).toHaveAttribute("src", "/media/orchestration-demo.mp4");
+    await marblo.page.getByTestId("orchestration-video-demo-close").click();
     await expect(
       marblo.page.getByTestId("start-here-activation-guide"),
       "자동 설치에서 인증, 첫 스폰까지 이어지는 가이드가 보여야 함",

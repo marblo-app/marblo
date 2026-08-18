@@ -72,17 +72,6 @@ vi.mock("../../src/components/terminal/TerminalView", () => ({
     }),
 }));
 
-// L0 분해 카드는 실제 보드(Firestore)에 티켓을 쓰는 무거운 자식이다 — 이
-// 테스트가 보는 것은 연결 게이트의 국면이지 그 카드가 아니다. 파리티(양쪽 셸에
-// 실제로 달려 있는가)는 tests/unit/onramp-mode-parity.test.ts 가 지킨다.
-vi.mock("../../src/components/onboarding/OnrampDecomposeCard", () => ({
-  OnrampDecomposeCard: ({ surface }: { surface: string }) =>
-    createElement("div", {
-      "data-testid": "stub-onramp-decompose",
-      "data-surface": surface,
-    }),
-}));
-
 import {
   nextPreviewStage,
   previewCliReady,

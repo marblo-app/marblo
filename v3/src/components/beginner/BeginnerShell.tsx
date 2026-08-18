@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import OrchestratorPanel from "../orchestrator/OrchestratorPanel";
-import { DemoMode, DEMO_CONNECT_PENDING_KEY } from "../onboarding/DemoMode";
+import { VideoDemoModal } from "../onboarding/VideoDemoModal";
 import { FundingGuideHost } from "../onboarding/FundingGuideHost";
 import { OnrampGateHost } from "../onboarding/OnrampGateHost";
 import { useAppLifecycle } from "../../hooks/useAppLifecycle";
@@ -459,7 +459,7 @@ export function BeginnerShell() {
     // 데모의 CTA 는 "로그인 후 연결" 플래그를 세우는데, 우리는 이미 로그인 뒤
     // 연결 화면에 서 있다 — 다음 실행에 낡은 안내가 남지 않게 지운다.
     try {
-      localStorage.removeItem(DEMO_CONNECT_PENDING_KEY);
+      localStorage.removeItem("marblo.demo.connectPending");
     } catch {
       /* 프라이빗 모드 — 지울 게 없다 */
     }
@@ -823,10 +823,9 @@ export function BeginnerShell() {
       )}
 
       {showDemo && (
-        <DemoMode
+        <VideoDemoModal
           surface="beginner_connect"
           onClose={closeDemo}
-          onConnect={closeDemo}
         />
       )}
 
