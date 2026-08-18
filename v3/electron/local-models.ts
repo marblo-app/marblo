@@ -25,7 +25,7 @@ export interface LocalModelCatalogEntry {
   /** ollama 공식 라이브러리 태그 — `ollama pull <id>` 에 그대로 쓰인다. */
   id: string;
   displayName: string;
-  /** 다운로드 크기(MB). ollama.com/library/<model>/tags 실측값(2026-07-31). */
+  /** 다운로드 크기(MB). ollama.com/library/<model>/tags 실측값(2026-08-18). */
   downloadSizeMB: number;
   /** 최소 권장 RAM(GB) — 모델 상주 + OS/앱 여유의 보수적 큐레이션 값. */
   minRamGB: number;
@@ -34,8 +34,9 @@ export interface LocalModelCatalogEntry {
 }
 
 /**
- * 소형 우선 큐레이션. 크기·컨텍스트는 ollama 공식 라이브러리 tags 페이지
- * (ollama.com/library/<model>/tags) 대조값이다 — 추측으로 고치지 말 것.
+ * 소형 우선 + Qwen3 대표 큐레이션. 크기·컨텍스트는 ollama 공식 라이브러리
+ * tags 페이지(ollama.com/library/<model>/tags) 대조값이다 — 추측으로
+ * 고치지 말 것.
  */
 export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   {
@@ -44,6 +45,13 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 398,
     minRamGB: 4,
     contextTokens: 32_000,
+  },
+  {
+    id: "qwen3:0.6b",
+    displayName: "Qwen 3 0.6B",
+    downloadSizeMB: 523,
+    minRamGB: 4,
+    contextTokens: 40_000,
   },
   {
     id: "qwen2.5:1.5b",
@@ -79,6 +87,41 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 2_200,
     minRamGB: 8,
     contextTokens: 128_000,
+  },
+  {
+    id: "qwen3:4b",
+    displayName: "Qwen 3 4B (256K)",
+    downloadSizeMB: 2_500,
+    minRamGB: 8,
+    contextTokens: 256_000,
+  },
+  {
+    id: "qwen3:8b",
+    displayName: "Qwen 3 8B",
+    downloadSizeMB: 5_200,
+    minRamGB: 12,
+    contextTokens: 40_000,
+  },
+  {
+    id: "qwen3:14b",
+    displayName: "Qwen 3 14B",
+    downloadSizeMB: 9_300,
+    minRamGB: 24,
+    contextTokens: 40_000,
+  },
+  {
+    id: "qwen3:30b",
+    displayName: "Qwen 3 30B-A3B MoE (256K)",
+    downloadSizeMB: 19_000,
+    minRamGB: 48,
+    contextTokens: 256_000,
+  },
+  {
+    id: "qwen3:32b",
+    displayName: "Qwen 3 32B",
+    downloadSizeMB: 20_000,
+    minRamGB: 48,
+    contextTokens: 40_000,
   },
 ] as const;
 

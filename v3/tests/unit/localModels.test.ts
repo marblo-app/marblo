@@ -29,13 +29,48 @@ describe("LOCAL_MODEL_CATALOG (first-party 큐레이션 위생)", () => {
     for (const id of ids) expect(id).toMatch(/^[a-z0-9.-]+:[a-z0-9.-]+$/);
   });
 
-  it("크기·RAM·컨텍스트는 전부 양수이고 소형(≤8GB RAM) 큐레이션이다", () => {
+  it("크기·RAM·컨텍스트는 전부 양수이고 RAM 안내 범위가 명확하다", () => {
     for (const e of LOCAL_MODEL_CATALOG) {
       expect(e.downloadSizeMB).toBeGreaterThan(0);
       expect(e.minRamGB).toBeGreaterThan(0);
-      expect(e.minRamGB).toBeLessThanOrEqual(8);
+      expect(e.minRamGB).toBeLessThanOrEqual(64);
       expect(e.contextTokens).toBeGreaterThan(0);
     }
+  });
+
+  it("Qwen3 최신 대표군은 공식 ollama pull id 와 실측 크기를 가진다", () => {
+    expect(catalogEntry("qwen3:0.6b")).toMatchObject({
+      displayName: "Qwen 3 0.6B",
+      downloadSizeMB: 523,
+      minRamGB: 4,
+      contextTokens: 40_000,
+    });
+    expect(catalogEntry("qwen3:4b")).toMatchObject({
+      downloadSizeMB: 2_500,
+      minRamGB: 8,
+      contextTokens: 256_000,
+    });
+    expect(catalogEntry("qwen3:8b")).toMatchObject({
+      downloadSizeMB: 5_200,
+      minRamGB: 12,
+      contextTokens: 40_000,
+    });
+    expect(catalogEntry("qwen3:14b")).toMatchObject({
+      downloadSizeMB: 9_300,
+      minRamGB: 24,
+      contextTokens: 40_000,
+    });
+    expect(catalogEntry("qwen3:30b")).toMatchObject({
+      displayName: "Qwen 3 30B-A3B MoE (256K)",
+      downloadSizeMB: 19_000,
+      minRamGB: 48,
+      contextTokens: 256_000,
+    });
+    expect(catalogEntry("qwen3:32b")).toMatchObject({
+      downloadSizeMB: 20_000,
+      minRamGB: 48,
+      contextTokens: 40_000,
+    });
   });
 
   it("catalogEntry 는 화이트리스트다 — 카탈로그 밖 id 는 undefined", () => {
@@ -47,7 +82,7 @@ describe("LOCAL_MODEL_CATALOG (first-party 큐레이션 위생)", () => {
 
 describe("evaluateLocalModelCards (하드웨어 게이트)", () => {
   it("RAM 충분 → fits + action=pull", () => {
-    const cards = evaluateLocalModelCards(16, OLLAMA_UP, []);
+    const cards = evaluateLocalModelCards(64, OLLAMA_UP, []);
     for (const card of cards) {
       expect(card.fits).toBe(true);
       expect(card.action).toBe("pull");
@@ -56,17 +91,17 @@ describe("evaluateLocalModelCards (하드웨어 게이트)", () => {
 
   it("RAM 부족 → action=insufficient-ram, 필요치가 카드에 남는다", () => {
     const cards = evaluateLocalModelCards(4, OLLAMA_UP, []);
-    const small = cards.find((c) => c.id === "qwen2.5:0.5b");
-    const big = cards.find((c) => c.id === "llama3.2:3b");
+    const small = cards.find((c) => c.id === "qwen3:0.6b");
+    const big = cards.find((c) => c.id === "qwen3:30b");
     expect(small?.action).toBe("pull");
     expect(big?.action).toBe("insufficient-ram");
     expect(big?.fits).toBe(false);
-    expect(big?.minRamGB).toBe(8); // UI "부족 (N GB 필요)" 의 N
+    expect(big?.minRamGB).toBe(48); // UI "부족 (N GB 필요)" 의 N
   });
 
   it("경계값: totalMemGB === minRamGB 는 맞음이다", () => {
-    const cards = evaluateLocalModelCards(8, OLLAMA_UP, []);
-    expect(cards.find((c) => c.id === "llama3.2:3b")?.fits).toBe(true);
+    const cards = evaluateLocalModelCards(48, OLLAMA_UP, []);
+    expect(cards.find((c) => c.id === "qwen3:30b")?.fits).toBe(true);
   });
 
   it("★ollama 미설치 → 전 카드 action=ollama-missing (가짜 pull 버튼 금지)", () => {
@@ -88,8 +123,8 @@ describe("evaluateLocalModelCards (하드웨어 게이트)", () => {
   });
 
   it("★설치 실측된 모델은 RAM 부족이어도 installed 로 정직하게 보인다", () => {
-    const cards = evaluateLocalModelCards(2, OLLAMA_UP, ["llama3.2:3b"]);
-    const big = cards.find((c) => c.id === "llama3.2:3b");
+    const cards = evaluateLocalModelCards(2, OLLAMA_UP, ["qwen3:30b"]);
+    const big = cards.find((c) => c.id === "qwen3:30b");
     expect(big?.installed).toBe(true);
     expect(big?.action).toBe("installed");
     expect(big?.fits).toBe(false); // 경고 배지는 fits 로 따로 판단
