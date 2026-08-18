@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEditorStore } from "../../stores/editorStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
@@ -61,6 +61,7 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
 
   const activeFile = openFiles.find((f) => f.path === activeFilePath);
   const projectRootPath = currentProject?.folderPath ?? null;
+  const previousActiveFilePathRef = useRef(activeFilePath);
 
   const projectWorktrees = useMemo(() => {
     if (!currentProject) return [];
@@ -130,6 +131,15 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
     return () =>
       window.removeEventListener("marblo:reveal-doc-graph", onRevealDocGraph);
   }, []);
+
+  useEffect(() => {
+    const previousActiveFilePath = previousActiveFilePathRef.current;
+    previousActiveFilePathRef.current = activeFilePath;
+
+    if (activeFilePath && previousActiveFilePath !== activeFilePath) {
+      setActiveSubTab("editor");
+    }
+  }, [activeFilePath]);
 
   const handleGraphDocumentOpened = useCallback(() => {
     setActiveSubTab("editor");
