@@ -27,6 +27,7 @@ const { useCoachmarkStore } = await import("../../src/stores/coachmarkStore");
 const { BEGINNER_TOUR_ID, MAX_TOUR_OFFERS } =
   await import("../../src/lib/coachmark");
 const telemetry = (await import("../../src/services/telemetryService")).default;
+const BEGINNER_TOUR_STEPS = 3;
 
 function anchors() {
   for (const name of ["chat", "ask", "live", "advanced"]) {
@@ -91,7 +92,7 @@ describe("BeginnerTour", () => {
     expect(telemetry.coachmarkSkipped).toHaveBeenCalledWith(
       BEGINNER_TOUR_ID,
       0,
-      4,
+      BEGINNER_TOUR_STEPS,
       false,
     );
   });
@@ -108,7 +109,7 @@ describe("BeginnerTour", () => {
     expect(telemetry.coachmarkSkipped).toHaveBeenCalledWith(
       BEGINNER_TOUR_ID,
       0,
-      4,
+      BEGINNER_TOUR_STEPS,
       true,
     );
   });
@@ -117,7 +118,7 @@ describe("BeginnerTour", () => {
     anchors();
     render(createElement(BeginnerTour, { ready: true }));
     await flushFrames();
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < BEGINNER_TOUR_STEPS; i++) {
       fireEvent.click(screen.getByTestId("beginner-tour-next"));
     }
     await flushFrames();
