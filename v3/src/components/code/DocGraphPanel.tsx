@@ -10,7 +10,7 @@ import {
 import { DocGraphView } from "./DocGraphView";
 
 /**
- * Code 사이드바 Graph 하위탭 — 프로젝트 루트의 md 를 읽어 문서 관계 그래프를
+ * Code 탭의 파일 그래프 서브탭 — 프로젝트 루트의 md 를 읽어 문서 관계 그래프를
  * 그린다. 커넥터 문서는 후속; 초기엔 로컬 위키 증명.
  *
  * 읽기는 패널이 보일 때만. 파일 수가 많으면 상한(collectMarkdownPaths)으로
@@ -20,7 +20,11 @@ import { DocGraphView } from "./DocGraphView";
 const MAX_MD_FILES = 300;
 const READ_CONCURRENCY = 8;
 
-export function DocGraphPanel() {
+interface DocGraphPanelProps {
+  onDocumentOpened?: () => void;
+}
+
+export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
   const { t } = useTranslation();
   const rootPath = useEditorStore((s) => s.rootPath);
   const openFile = useEditorStore((s) => s.openFile);
@@ -100,9 +104,11 @@ export function DocGraphPanel() {
       const root = useEditorStore.getState().rootPath;
       if (!root) return;
       // FileTree 와 같이 절대 경로로 열어 탭 키·활성 파일이 일치하게 한다.
-      void openFile(joinProjectPath(root, relPath));
+      void openFile(joinProjectPath(root, relPath)).then(() => {
+        onDocumentOpened?.();
+      });
     },
-    [openFile],
+    [openFile, onDocumentOpened],
   );
 
   if (!rootPath) {
