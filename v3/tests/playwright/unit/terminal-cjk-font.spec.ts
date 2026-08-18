@@ -134,6 +134,64 @@ test.describe("터미널 한글 폰트 (회귀 #659 후속)", () => {
     expect(result.elapsedMs).toBeLessThan(5_000);
   });
 
+  test("@mocked alt-screen 완료 settle 이 CJK repair 결과와 별개로 PTY repaint 를 보장한다", async ({
+    marblo,
+  }) => {
+    const sessionId = await marblo.openMockOrchestrator();
+    const term = await marblo.terminal("orchestrator");
+    await term.waitReady();
+
+    await marblo.page.evaluate(async (id) => {
+      window.electronAPI.pty.write(
+        id,
+        'printf "\\033[?1049h한글 완료 settle repaint\\r\\n"\r',
+      );
+    }, sessionId);
+    await expect
+      .poll(
+        () =>
+          marblo.page.evaluate((id) => {
+            return window.__marbloTerminalDebug?.[id]?.() ?? null;
+          }, sessionId),
+        { timeout: 5_000 },
+      )
+      .toMatchObject({ activeBufferType: "alternate" });
+
+    await marblo.page.evaluate((id) => {
+      const snapshot = window.__marbloTerminalDebug?.[id]?.();
+      snapshot?.resetPtyRepaintNudgeCountForTest?.();
+      snapshot?.scheduleActivitySettleForTest?.("test running->idle settle");
+    }, sessionId);
+    await expect
+      .poll(
+        () =>
+          marblo.page.evaluate((id) => {
+            return (
+              window.__marbloTerminalDebug?.[id]?.()
+                ?.activitySettleTestCallCount ?? 0
+            );
+          }, sessionId),
+        { timeout: 1_000 },
+      )
+      .toBe(1);
+
+    await expect
+      .poll(
+        () =>
+          marblo.page.evaluate((id) => {
+            return (
+              window.__marbloTerminalDebug?.[id]?.()
+                ?.ptyRepaintNudgeCount ?? 0
+            );
+          }, sessionId),
+        {
+          message: "running->idle settle must nudge the alt-screen PTY",
+          timeout: 2_000,
+        },
+      )
+      .toBe(1);
+  });
+
   test("@mocked 재빌드 후 xterm 셀 폭이 한글 2칸과 일치한다", async ({
     marblo,
   }) => {
