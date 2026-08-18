@@ -49,6 +49,22 @@ export const WORKER_CORE_MCP_TOOLS = [
 ] as const;
 
 /**
+ * 로컬 tool-use 모델(7B+) 전용 최소 표면.
+ *
+ * 이 프로파일은 역할 자율 루프를 온전히 수행시키려는 것이 아니라, 이미 배정된
+ * 한 턴을 끝내고 오케스트레이터에 상태를 되돌리는 데 필요한 보고/막힘 경로만
+ * 남긴다. 실측상 로컬 7B+도 frontier용 40여 개 스키마와 긴 완료규약을 같이 받으면
+ * superpowers 같은 무관 스킬/툴 경로를 헤매므로, 로컬은 별도 explicit override 를
+ * 쓴다. Frontier/일반 워커의 역할별 scoped 표면은 그대로 유지한다.
+ */
+export const LOCAL_TOOL_USE_MCP_TOOLS = [
+  "submit_for_review",
+  "update_task_status",
+  "add_activity",
+  "ask_orchestrator",
+] as const;
+
+/**
  * 역할별 추가 툴. 코어에 없지만 그 역할의 정상 업무에 필요한 것만.
  * (없는 역할은 코어만 갖는다 — backend/frontend/test/flutter 가 그렇다.)
  */
@@ -134,6 +150,14 @@ export function resolveToolSurface(env: SurfaceEnv = process.env): ToolSurface {
 
   if (override === "full") {
     return { mode: "full", allowed: null, role, reason: "override=full" };
+  }
+  if (override === "local-light") {
+    return {
+      mode: "scoped",
+      allowed: new Set<string>(LOCAL_TOOL_USE_MCP_TOOLS),
+      role,
+      reason: "override=local-light",
+    };
   }
   if (override === "scoped") {
     // 강제 스코핑. 역할을 모르면 코어만 — 실측 A/B 전용 경로다.

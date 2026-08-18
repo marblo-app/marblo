@@ -9,6 +9,7 @@ import {
   LaunchConfig,
   FALLBACK_TOP_CLAUDE_MODEL,
   grokSessionsDir,
+  type AgentPromptProfile,
   type TaskComplexity,
 } from "./agent-config";
 import { mainTelemetry } from "./telemetry";
@@ -450,6 +451,25 @@ const SECRET_OUTPUT_GUARDRAIL = [
   "- When configuration checks are needed, report only whether keys exist, file paths, and masked values. If a config or env value must be logged, apply maskConfigForLogging or maskEnvForLogging-style masking.",
 ].join("\n");
 
+const LOCAL_LIGHT_SECURITY_GUARDRAIL =
+  "[Security] Do not print secrets or raw config/env files. If config status is needed, report only paths, key presence, and masked values.";
+
+function compactLocalCompletionFooter(instruction: string): string {
+  return instruction.replace(
+    /\n\n\[완료 규약 — task_id="([^"]+)"\][\s\S]*$/u,
+    (_match: string, taskId: string) =>
+      [
+        "",
+        "",
+        `[완료 규약 — task_id="${taskId}"]`,
+        `진행은 add_activity(task_id="${taskId}", message="...") 로 남긴다.`,
+        `완료/리뷰 가능: submit_for_review(task_id="${taskId}", summary?) 를 호출한다.`,
+        `실패/차단: update_task_status(task_id="${taskId}", status="FAILED"|"BLOCKED", comment="이유") 를 호출한다.`,
+        `막히면 사용자에게 묻지 말고 ask_orchestrator(task_id="${taskId}", question="필요/이유/막히는 범위") 를 호출하고 가능한 나머지 작업은 계속한다.`,
+      ].join("\n"),
+  );
+}
+
 // P3-4: backstop pruning of dead (stopped/error) entries the primary reaper
 // (cleanup_agents → remove) never reclaimed — e.g. the orchestrator never
 // calling cleanup_agents, or a naturally-completed agent whose Firestore doc was
@@ -570,12 +590,17 @@ export function composeInitialPrompt(
   model: ModelType,
   instruction: string,
   skillContent?: string,
+  promptProfile: AgentPromptProfile = "full",
 ): string {
   // `local` 은 claude CLI env-swap 이라 MCP 툴 이름도 `mcp__marblo__*` 규약.
   const isClaudeFamily = model === "claude" || model === "local";
-  const sanitized = isClaudeFamily
+  const rewritten = isClaudeFamily
     ? instruction
     : instruction.replace(/mcp__marblo__/g, "");
+  const sanitized =
+    promptProfile === "local-tool-use"
+      ? compactLocalCompletionFooter(rewritten)
+      : rewritten;
   // agy 도 v1.20+ 부터 MCP 지원 — generateAntigravityConfig 가 글로벌
   // ~/.gemini/antigravity-cli/mcp_config.json 에 marblo 항목을 머지하므로
   // role-skill 의 add_activity / claim_task / submit_for_review 호출이
@@ -586,7 +611,9 @@ export function composeInitialPrompt(
     "[Role Skill — Follow the workflow and tool-use rules below]",
     skillContent.trim(),
     "",
-    SECRET_OUTPUT_GUARDRAIL,
+    promptProfile === "local-tool-use"
+      ? LOCAL_LIGHT_SECURITY_GUARDRAIL
+      : SECRET_OUTPUT_GUARDRAIL,
     "",
     "[Task Instructions]",
     sanitized,
@@ -892,6 +919,7 @@ export class AgentManager {
         params.model,
         launchConfig.initialPrompt,
         launchConfig.skillContent,
+        launchConfig.promptProfile,
       );
       let sent = false;
       // Set once the login-screen backstop CONFIRMS the CLI is sitting at a

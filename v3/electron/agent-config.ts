@@ -9,6 +9,7 @@ import {
   envProfileForModel,
   getModel,
   harnessForModel,
+  LOCAL_OLLAMA_ENV_PROFILE,
   meetsMinCli,
   modelsByHarness,
   vendorEnvSecretRef,
@@ -30,7 +31,10 @@ import {
   toolSurfaceEnv,
   workerClaudeSettings,
 } from "./prefix-diet";
-import { isLocalChatOnlyModel } from "./local-models";
+import {
+  isLocalChatOnlyModel,
+  toolSupportForLocalModelId,
+} from "./local-models";
 import {
   injectCodexVendorEnvKey,
   renderCodexVendorProviderToml,
@@ -49,6 +53,24 @@ import {
 export const LOCAL_CHAT_ONLY_SYSTEM_PROMPT =
   "You are a helpful local assistant running on the user's machine. " +
   "Reply clearly in the user's language. Do not call tools or emit tool-call JSON — answer directly.";
+
+export type AgentPromptProfile = "full" | "local-tool-use" | "chat-only";
+
+function localProfileForPinnedModel(
+  agentModel: ModelType,
+  pinnedModelId: string | undefined,
+): AgentPromptProfile {
+  if (!pinnedModelId?.trim()) return "full";
+  const registryRow = getModel(pinnedModelId);
+  const isLocal =
+    agentModel === "local" ||
+    registryRow?.provider === "local";
+  if (!isLocal) return "full";
+  return isLocalChatOnlyModel(pinnedModelId) ||
+    toolSupportForLocalModelId(pinnedModelId) === "chat-only"
+    ? "chat-only"
+    : "local-tool-use";
+}
 
 /** claude argv 에 붙이는 대화모드 플래그(유닛 테스트·스폰 경로 공유). */
 export function localChatOnlyClaudeArgExtras(): string[] {
@@ -1343,6 +1365,7 @@ export function harnessForLaunch(
   model: ModelType,
   pinnedModelId?: string,
 ): ModelType {
+  if (model === "local" && pinnedModelId?.trim()) return "claude";
   if (!pinnedModelId) return model;
   const harness = harnessForModel(pinnedModelId);
   if (!harness || harness === model) return model;
@@ -1363,6 +1386,7 @@ export interface LaunchConfig {
   mcpConfigPath: string;
   skillContent: string;
   initialPrompt?: string;
+  promptProfile: AgentPromptProfile;
   /**
    * For Claude only: the session id this launch is PINNED to (via the
    * `--session-id` flag on a fresh launch, or the `--resume` UUID on a resume).
@@ -1653,6 +1677,7 @@ function getMCPServerEnv(
   // 역할별 tools/list 스코핑(부트 프리픽스 다이어트 A1)의 유일한 입력.
   // 미지정이면 MCP 서버가 전체 툴을 노출한다(fail-open = 종전 동작).
   role?: string,
+  promptProfile: AgentPromptProfile = "full",
 ): Record<string, string> {
   const env: Record<string, string> = {
     PATH: getEnrichedPath(),
@@ -1713,6 +1738,9 @@ function getMCPServerEnv(
   // 부트 프리픽스 다이어트 A1 — 역할별 tools/list 스코핑. 역할이 없으면 아무
   // 키도 안 들어가고 MCP 서버는 종전대로 44개 전부를 노출한다.
   Object.assign(env, toolSurfaceEnv(role));
+  if (promptProfile === "local-tool-use") {
+    env.MARBLO_TOOL_SURFACE = "local-light";
+  }
 
   return env;
 }
@@ -1789,6 +1817,7 @@ function buildMCPServerEntry(
   agentId?: string,
   marbloContextId?: string,
   role?: string,
+  promptProfile: AgentPromptProfile = "full",
 ): MCPServerEntry {
   // PATH 의 첫 node 를 믿지 않고 검증된 node 를 pin 한다. Electron 번들이면
   // ELECTRON_RUN_AS_NODE=1 가 함께 필요하므로 node.env 를 마지막에 머지해
@@ -1804,6 +1833,7 @@ function buildMCPServerEntry(
         agentId,
         marbloContextId,
         role,
+        promptProfile,
       ),
       ...node.env,
     },
@@ -2298,17 +2328,13 @@ export class AgentConfigGenerator {
     // 역할별 MCP 화이트리스트(claude strict 경로) 선택용. 미지정이면 기본
     // 워커 화이트리스트가 적용된다.
     role?: string,
-    /**
-     * 로컬 소형 chat-only 스폰: marblo/글로벌 MCP 를 넣지 않는다.
-     * claude CLI 는 빈 mcpServers + `--tools ""` 로 대화모드가 된다.
-     */
-    chatOnly = false,
+    promptProfile: AgentPromptProfile = "full",
     /** Pinned concrete model id (codexModel) — drives Codex vendor provider override. */
     pinnedModelId?: string,
   ): string {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
 
-    if (chatOnly && (model === "claude" || model === "local")) {
+    if (promptProfile === "chat-only" && (model === "claude" || model === "local")) {
       return this.generateEmptyClaudeMcpConfig(agentId);
     }
 
@@ -2318,6 +2344,7 @@ export class AgentConfigGenerator {
       agentId,
       marbloContextId,
       role,
+      promptProfile,
     );
 
     switch (model) {
@@ -2410,12 +2437,9 @@ export class AgentConfigGenerator {
   ): LaunchConfig {
     const pinnedForChat =
       modelPin?.claudeModel ?? modelPin?.codexModel ?? modelPin?.nativeModel;
+    const promptProfile = localProfileForPinnedModel(agent.model, pinnedForChat);
     // 로컬 소형: MCP+role-skill tool 강제가 JSON 흉내를 유발 → 대화모드.
-    const chatOnly =
-      isLocalChatOnlyModel(pinnedForChat) &&
-      (agent.model === "local" ||
-        agent.model === "claude" ||
-        getModel(pinnedForChat ?? "")?.provider === "local");
+    const chatOnly = promptProfile === "chat-only";
 
     const mcpConfigPath = this.generateMCPConfig(
       agent.id,
@@ -2424,7 +2448,7 @@ export class AgentConfigGenerator {
       marbloProjectId,
       marbloContextId,
       agent.role,
-      chatOnly,
+      promptProfile,
       modelPin?.codexModel ?? modelPin?.claudeModel ?? modelPin?.nativeModel,
     );
     // chat-only 는 역할 스킬(tool-use 루프)을 주입하지 않는다.
@@ -2456,6 +2480,7 @@ export class AgentConfigGenerator {
       modelPin,
       marbloContextId,
       chatOnly,
+      promptProfile,
     );
 
     // ── Telegram 폴러 경합 차단 (에이전트 claude 세션) ─────────────────────
@@ -2498,7 +2523,10 @@ export class AgentConfigGenerator {
         agent.role,
       );
       args.push("--settings", JSON.stringify(settings));
-      if (shouldDisableWorkerSkills(agent.role)) {
+      if (
+        promptProfile === "local-tool-use" ||
+        shouldDisableWorkerSkills(agent.role)
+      ) {
         // 스킬 카탈로그(전체 SKILL.md frontmatter) 주입 제거. 워커의 역할 지식은
         // MCP `get_agent_skill` + 스폰 프롬프트로 오지 슬래시 커맨드로 오지 않는다.
         args.push("--disable-slash-commands");
@@ -2513,6 +2541,7 @@ export class AgentConfigGenerator {
       mcpConfigPath,
       skillContent,
       initialPrompt,
+      promptProfile,
       claudeSessionId,
       grokSessionId,
       modelResolution,
@@ -3529,6 +3558,7 @@ export class AgentConfigGenerator {
     marbloContextId?: string,
     /** 로컬 소형: `--tools ""` + bare system (MCP/툴 스키마 비주입). */
     chatOnly = false,
+    promptProfile: AgentPromptProfile = "full",
   ): {
     command: string;
     args: string[];
@@ -3542,6 +3572,8 @@ export class AgentConfigGenerator {
       marbloProjectId,
       agentId,
       marbloContextId,
+      undefined,
+      promptProfile,
     );
     // Normalize resume signals: "new" means force-fresh, "latest" means
     // "pick the most recent" (CLI-specific syntax), anything else is a
@@ -3583,7 +3615,9 @@ export class AgentConfigGenerator {
         //   3) 그 외(simple/standard/미지정) → modelTierForComplexity 리터럴
         let claudeModel: string | undefined;
         let modelResolution: TopModelResolution | undefined;
-        if (modelPin?.claudeModel) {
+        if (model === "local" && modelPin?.nativeModel) {
+          claudeModel = modelPin.nativeModel;
+        } else if (modelPin?.claudeModel) {
           claudeModel = modelPin.claudeModel;
         } else if (complexity === "complex") {
           modelResolution = resolveTopClaudeModelDetailed();
@@ -3638,7 +3672,13 @@ export class AgentConfigGenerator {
           ],
           // 벤더 프로파일 주입 자리. 오늘은 프로파일을 가진 행이 없어 `env` 가
           // 그대로(참조까지 동일) 나간다 — 기존 Anthropic 스폰 무오염.
-          env: applyVendorEnv(env, claudeModel),
+          env:
+            model === "local"
+              ? {
+                  ...applyVendorEnv(env, claudeModel),
+                  ...LOCAL_OLLAMA_ENV_PROFILE,
+                }
+              : applyVendorEnv(env, claudeModel),
           claudeSessionId: sessionId,
           modelResolution,
         };
