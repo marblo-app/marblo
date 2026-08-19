@@ -1999,6 +1999,33 @@ function sendToPtyOwners(
 // the renderer — the user sees a blank terminal and concludes the agent
 // didn't start. drainedSids lets the second setup skip buffering.
 const drainedSids = new Set<string>();
+// When each sid's early-output buffer started filling. `pty:resize` needs this
+// to tell two very different buffers apart (see that handler for why):
+//   - young buffer = the TUI's first frame, drawn at the 80x24 spawn size,
+//                    with a TerminalView mounting alongside the spawn.
+//   - old buffer   = the WHOLE session so far, because nobody ever mounted a
+//                    terminal for it (beginner mode opens the agent modal
+//                    minutes later). Until the first `pty:replay` this buffer
+//                    is the ONLY copy — output is not sent live before then.
+const ptyBufferStartedAt = new Map<string, number>();
+// How long after a buffer starts filling a resize may still discard it as
+// "that's just the 80x24 first frame". A TerminalView mounting with the spawn
+// fits and resizes within a frame or two; a human opening a modal takes far
+// longer. Past this, the buffer is session history and has to survive.
+const PTY_INITIAL_FRAME_DISCARD_MS = 3_000;
+// Ceiling on an undrained buffer. Only reachable when no terminal is ever
+// mounted (a beginner agent runs headless until the user opens its modal), and
+// a TUI redrawing frames is not cheap in bytes. Oldest chunks go first;
+// `pty:replay` prefixes a screen clear so the surviving partial stream starts
+// from a clean screen instead of smearing over whatever was there.
+const PTY_BUFFER_MAX_CHARS = 4_000_000;
+const ptyBufferChars = new Map<string, number>();
+const ptyBufferTruncated = new Set<string>();
+function forgetPtyBufferBookkeeping(sid: string): void {
+  ptyBufferStartedAt.delete(sid);
+  ptyBufferChars.delete(sid);
+  ptyBufferTruncated.delete(sid);
+}
 // Generation counter per sid — increments on every setupPtyForwarding call.
 // node-pty's onData/onExit are attached to a specific IPty instance, so when
 // kill() + create() reuse the same sid the OLD process still owns the OLD
@@ -4924,15 +4951,31 @@ ipcMain.handle("pty:resize", (event, { id, cols, rows }) => {
   // text, two input boxes, and visual flicker (most visible in Gemini's
   // alt-screen TUI).
   //
-  // We only clear during the initial buffering window (before pty:replay
-  // drains the buffer). After replay, ptyBuffers no longer has the id, so
-  // this is a no-op.
+  // ★"initial" is a TIME window, not merely "not yet drained". A terminal that
+  // mounts late — the beginner agent modal, opened minutes after the agent
+  // spawned — fits itself on mount and sends exactly this resize. Its buffer is
+  // not a stale 80x24 frame; it is the entire session, and it is the only copy
+  // (nothing is sent live before the first pty:replay). Clearing it there is
+  // what made the beginner terminal open blank and only fill in once the user
+  // typed and the TUI redrew itself. Measured in
+  // tests/playwright/unit/terminal-late-mount-replay.spec.ts.
   const buf = ptyBuffers.get(id);
   if (buf && buf.length > 0) {
-    buf.length = 0;
-    console.log(
-      `[PTY:RESIZE] Cleared pre-resize buffer for ${id} (now ${cols}x${rows})`
-    );
+    const startedAt = ptyBufferStartedAt.get(id);
+    // Unknown age (e.g. a bridge-server-created buffer) counts as old — losing
+    // a duplicate frame is cosmetic, losing the session is a blank screen.
+    const age = startedAt === undefined ? Infinity : Date.now() - startedAt;
+    if (age <= PTY_INITIAL_FRAME_DISCARD_MS) {
+      buf.length = 0;
+      ptyBufferChars.set(id, 0);
+      console.log(
+        `[PTY:RESIZE] Cleared pre-resize buffer for ${id} (now ${cols}x${rows})`
+      );
+    } else {
+      console.log(
+        `[PTY:RESIZE] Kept ${buf.length} buffered chunks for ${id} — late mount (buffer age ${age}ms), now ${cols}x${rows}`
+      );
+    }
   }
   ptyManager.resize(id, cols, rows);
 });
@@ -7141,6 +7184,9 @@ function setupPtyForwarding(sid: string): void {
   // trap every byte in main.ts.
   if (!drainedSids.has(sid)) {
     ptyBuffers.set(sid, []);
+    ptyBufferStartedAt.set(sid, Date.now());
+    ptyBufferChars.set(sid, 0);
+    ptyBufferTruncated.delete(sid);
   }
   const gen = (sidGen.get(sid) ?? 0) + 1;
   sidGen.set(sid, gen);
@@ -7150,8 +7196,25 @@ function setupPtyForwarding(sid: string): void {
       costTracker.processOutput(sid.replace("agent-", ""), data);
     }
 
-    if (ptyBuffers.has(sid)) {
-      ptyBuffers.get(sid)!.push(data);
+    const buffer = ptyBuffers.get(sid);
+    if (buffer) {
+      buffer.push(data);
+      // Bound the buffer. It only grows unbounded when no terminal is ever
+      // mounted (a beginner agent runs headless until the user opens its
+      // modal), and a TUI redrawing frames is not cheap in bytes.
+      let chars = (ptyBufferChars.get(sid) ?? 0) + data.length;
+      if (chars > PTY_BUFFER_MAX_CHARS) {
+        while (buffer.length > 1 && chars > PTY_BUFFER_MAX_CHARS / 2) {
+          chars -= buffer.shift()!.length;
+        }
+        if (!ptyBufferTruncated.has(sid)) {
+          ptyBufferTruncated.add(sid);
+          console.warn(
+            `[PTY:BUFFER] ${sid} exceeded ${PTY_BUFFER_MAX_CHARS} buffered chars with no terminal attached — dropped the oldest output`
+          );
+        }
+      }
+      ptyBufferChars.set(sid, chars);
       return;
     }
 
@@ -7167,6 +7230,7 @@ function setupPtyForwarding(sid: string): void {
     // the renderer mid-restart.
     if (sidGen.get(sid) !== gen) return;
     ptyBuffers.delete(sid);
+    forgetPtyBufferBookkeeping(sid);
     // Notify every owner BEFORE dropping the ownership record — the process is
     // gone, so all windows showing it need the exit, not just the last one to
     // register.
@@ -7475,9 +7539,19 @@ ipcMain.handle("pty:replay", (_event, { id }: { id: string }) => {
   // the drained flag. Future setupPtyForwarding calls for this sid skip
   // re-buffering so restart output flows straight through.
   drainedSids.add(id);
-  if (!buffer) return [];
-  const data = [...buffer];
+  if (!buffer) {
+    forgetPtyBufferBookkeeping(id);
+    return [];
+  }
+  // A truncated buffer starts mid-stream, so its first surviving bytes can be a
+  // fragment addressed at wherever the cursor happened to be. Start the replay
+  // from a cleared screen; TerminalView follows it with a PTY resize nudge,
+  // which makes an alt-screen TUI repaint the frame in full anyway.
+  const data = ptyBufferTruncated.has(id)
+    ? ["\x1b[2J\x1b[H", ...buffer]
+    : [...buffer];
   ptyBuffers.delete(id);
+  forgetPtyBufferBookkeeping(id);
   return data;
 });
 
