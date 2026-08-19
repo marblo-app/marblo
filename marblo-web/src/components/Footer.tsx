@@ -14,6 +14,8 @@ export default function Footer() {
     locale === "ko" ? "강의" : locale === "ja" ? "講座" : "Lectures";
   const legalLabel =
     locale === "ko" ? "법적 고지" : locale === "ja" ? "法的情報" : "Legal";
+  const noticeLabel =
+    locale === "ko" ? "공지사항" : locale === "ja" ? "お知らせ" : "Notices";
 
   const businessRows: Array<[string, string]> = [
     [t("biz_ceo_label"), t("biz_ceo_value")],
@@ -157,6 +159,14 @@ export default function Footer() {
               {legalLabel}
             </h4>
             <ul>
+              <li>
+                <Link
+                  href={`/${locale}/notice`}
+                  className="text-zinc-400 hover:text-white text-sm block mb-2"
+                >
+                  {noticeLabel}
+                </Link>
+              </li>
               <li>
                 <Link
                   href={`/${locale}/legal/terms`}
