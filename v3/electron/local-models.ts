@@ -26,11 +26,10 @@ export type LocalModelCategory = "coding" | "general" | "reasoning";
 /**
  * 로컬 모델의 하네스 tool-use 적합성.
  *
- * 실측(ollama 0.32.14 + claude CLI env-swap): 소형(0.5b)은 직접 `ollama run` /
+ * 실측(ollama 0.32.14 + claude CLI env-swap): 7B/14B 급은 직접 `ollama run` /
  * tools 없는 `/v1/messages` 에서는 정상 대화하지만, Marblo 가 MCP 툴 정의 +
- * 에이전트 system(tool 강제)을 주입하면 tool_use JSON 을 흉내 내며 엉뚱한 답을
- * 낸다. 그래서 7B 미만은 대화·테스트 전용, 에이전트/오케 실작업은 7B+
- * (특히 coder)만 tool-use 지원으로 표시한다.
+ * 에이전트 system(tool 강제)을 주입하면 과부하/JSON 흉내로 무너진다.
+ * 그래서 30B 미만은 대화·업무분배 전용, tool-use 는 대형 로컬 모델만 표시한다.
  */
 export type LocalToolSupport = "chat-only" | "tool-use";
 
@@ -52,7 +51,7 @@ export interface LocalModelCatalogEntry {
    * 단일 소스. `resolveLocalToolSupport` 가 id 파라미터 규모로 채운다.
    */
   toolSupport: LocalToolSupport;
-  /** UI 배지 문구 — "대화 전용" / "tool-use 지원". */
+  /** UI 배지 문구 — "대화·업무 분배" / "도구 사용 가능(대형 모델)". */
   toolSupportLabel: string;
 }
 
@@ -73,17 +72,17 @@ export function parseLocalParamBillions(id: string): number | null {
 /**
  * 로컬 모델 id → tool-use 적합성.
  *
- * 임계 7B 는 실측·제품 안내("소형=테스트·대화, 실작업=7b+ coder")와 맞춘다.
+ * 임계 30B 는 실측·제품 안내("중소형=대화·업무분배, 대형=tool-use")와 맞춘다.
  * 파라미터를 못 읽으면 안전하게 chat-only.
  */
 export function resolveLocalToolSupport(id: string): LocalToolSupport {
   const billions = parseLocalParamBillions(id);
   if (billions === null) return "chat-only";
-  return billions >= 7 ? "tool-use" : "chat-only";
+  return billions >= 30 ? "tool-use" : "chat-only";
 }
 
 export function localToolSupportLabel(support: LocalToolSupport): string {
-  return support === "tool-use" ? "tool-use 지원" : "대화 전용";
+  return support === "tool-use" ? "도구 사용 가능(대형 모델)" : "대화·업무 분배";
 }
 
 function withToolSupport(
@@ -348,7 +347,7 @@ export function catalogEntry(id: string): LocalModelCatalogEntry | undefined {
 
 /**
  * 카탈로그 행이 있으면 그 toolSupport, 없으면 id 파라미터로 판정.
- * 카탈로그 밖 설치분(사용자가 직접 pull)도 같은 7B 임계를 쓴다.
+ * 카탈로그 밖 설치분(사용자가 직접 pull)도 같은 30B 임계를 쓴다.
  */
 export function toolSupportForLocalModelId(id: string): LocalToolSupport {
   return catalogEntry(id)?.toolSupport ?? resolveLocalToolSupport(id);
