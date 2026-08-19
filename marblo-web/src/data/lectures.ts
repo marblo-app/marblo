@@ -27,6 +27,24 @@ export interface LectureData {
   thumbnail: string;
   instructor: string;
   instructorTitle: string;
+  // 토스페이 가맹점 심사 대응(티켓 xRlxnHV0CDp5eVvItxHK) — 강사 이력·모집기간·
+  // 개강시점·수강기간·모집실패 시 처리를 상세페이지/목록에 노출하기 위한 필드.
+  // ko/en/ja 모두 채운다. 날짜·정책 문구는 사장님 확정분을 그대로 쓰고 추측 금지.
+  instructorBio_ko: string;
+  instructorBio_en: string;
+  instructorBio_ja: string;
+  enrollmentPeriod_ko: string;
+  enrollmentPeriod_en: string;
+  enrollmentPeriod_ja: string;
+  courseStartDate_ko: string;
+  courseStartDate_en: string;
+  courseStartDate_ja: string;
+  courseAccessPeriod_ko: string;
+  courseAccessPeriod_en: string;
+  courseAccessPeriod_ja: string;
+  enrollmentFailurePolicy_ko: string;
+  enrollmentFailurePolicy_en: string;
+  enrollmentFailurePolicy_ja: string;
   level: "beginner" | "intermediate" | "advanced";
   totalDuration: number; // seconds
   modules: LectureModule[];
@@ -133,6 +151,54 @@ From weather dashboard warmup → AI SaaS main project → GCP deployment → Sa
     thumbnail: "/images/lectures/marblo-v3-masterclass.png",
     instructor: "김동원",
     instructorTitle: "데이터가 답이다",
+    instructorBio_ko: `패스트캠퍼스에서 AI·GA4·마케팅 분석·SEO 강의를 진행하는 현직 데이터 사이언티스트입니다.
+
+현) 롯데멤버스 데이터사이언티스트 — 그룹 전사 행동 데이터 기반 대규모 추천시스템, 고객데이터플랫폼(CDP), 분석 프로덕트를 개발합니다. 머신러닝·데이터 엔지니어링·실험설계·BI·프로덕션 AI 시스템 전반을 다룹니다.
+전) 덴츠코리아(아이프로스펙트) 데이터분석 팀리더 · 제일기획 · HS애드
+
+자격·수상: Google Cloud Certified — Professional Machine Learning Engineer, Kaggle Competitions 브론즈 메달(3,700+ 팀 중 상위 10%). 유튜브 채널 「데이터가 답이다」를 운영하며 엔터프라이즈 규모 추천·분석 시스템을 설계·운영한 경험이 있습니다.
+
+전문 분야: AI·ML(추천시스템, 예측모델링, MLOps, 생성형 AI, RAG, 멀티에이전트 시스템), 데이터 프로덕트(CDP, 광고 DMP, 행동분석, GA4, BI 대시보드, 실험설계), AI 프로덕트 빌딩(AI 제품·개발자도구·워크플로우 자동화·에이전트 시스템), 계량 리서치(시장·재무·대체데이터 기반 시스템 트레이딩 전략 개발 및 백테스팅).
+
+현재 Marblo(멀티에이전트 코딩·오케스트레이션 플랫폼)와 개미날다(AI 투자 리서치·데이터 플랫폼)를 빌딩하고 있습니다.`,
+    instructorBio_en: `A working data scientist who also teaches AI, GA4, marketing analytics, and SEO at Fast Campus.
+
+Current: Data Scientist at Lotte Members — builds large-scale recommendation systems, a customer data platform (CDP), and analytics products based on company-wide behavioral data. Works across machine learning, data engineering, experiment design, BI, and production AI systems.
+Previous: Data Analytics Team Lead at Dentsu Korea (iProspect); Cheil Worldwide; HS Ad.
+
+Certifications & awards: Google Cloud Certified — Professional Machine Learning Engineer; Kaggle Competitions Bronze Medal (top 10% among 3,700+ teams). Runs the YouTube channel "데이터가 답이다" (Data Is the Answer) and has experience designing and operating enterprise-scale recommendation and analytics systems.
+
+Areas of expertise: AI/ML (recommendation systems, predictive modeling, MLOps, generative AI, RAG, multi-agent systems); data products (CDP, ad DMP, behavioral analytics, GA4, BI dashboards, experiment design); AI product building (AI products, developer tools, workflow automation, agent systems); quantitative research (systematic trading strategy development and backtesting on market, financial, and alternative data).
+
+Currently building Marblo (a multi-agent coding and orchestration platform) and 개미날다 (an AI investment research and data platform).`,
+    instructorBio_ja: `ファストキャンパスでAI・GA4・マーケティング分析・SEO講座を担当する現役データサイエンティストです。
+
+現職：ロッテメンバーズ データサイエンティスト — グループ全社の行動データに基づく大規模レコメンドシステム、カスタマーデータプラットフォーム(CDP)、分析プロダクトを開発。機械学習・データエンジニアリング・実験設計・BI・プロダクションAIシステム全般を担当します。
+前職：デンツーコリア(アイプロスペクト) データ分析チームリーダー、第一企画、HSアド
+
+資格・受賞：Google Cloud Certified — Professional Machine Learning Engineer、Kaggle Competitionsブロンズメダル(3,700+チーム中上位10%)。YouTubeチャンネル「데이터가 답이다」(データが答えだ)を運営し、エンタープライズ規模のレコメンド・分析システムの設計・運用経験があります。
+
+専門分野：AI・ML(レコメンドシステム、予測モデリング、MLOps、生成AI、RAG、マルチエージェントシステム)、データプロダクト(CDP、広告DMP、行動分析、GA4、BIダッシュボード、実験設計)、AIプロダクトビルディング(AI製品・開発者ツール・ワークフロー自動化・エージェントシステム)、定量リサーチ(市場・財務・オルタナティブデータに基づくシステムトレーディング戦略の開発とバックテスト)。
+
+現在、Marblo(マルチエージェント・コーディング&オーケストレーションプラットフォーム)と개미날다(AI投資リサーチ・データプラットフォーム)を開発中です。`,
+    enrollmentPeriod_ko:
+      "2026년 10월 5일부터 상시 모집 (녹화 강의(VOD) 상시 판매, 별도 모집 마감일 없음)",
+    enrollmentPeriod_en:
+      "Rolling enrollment from October 5, 2026 (recorded VOD course sold on an ongoing basis; no separate enrollment deadline)",
+    enrollmentPeriod_ja:
+      "2026年10月5日から常時募集(録画講座(VOD)を随時販売、別途の募集締切なし)",
+    courseStartDate_ko: "2026년 10월 5일",
+    courseStartDate_en: "October 5, 2026",
+    courseStartDate_ja: "2026年10月5日",
+    courseAccessPeriod_ko: "구매일로부터 1년",
+    courseAccessPeriod_en: "1 year from the date of purchase",
+    courseAccessPeriod_ja: "購入日から1年間",
+    enrollmentFailurePolicy_ko:
+      "녹화 강의(VOD)로 최소 모집 인원 조건이 없으며, 모집 인원과 무관하게 예정대로 오픈·제공합니다. 부득이하게 오픈이 불가능해질 경우 결제 금액을 전액 환불합니다.",
+    enrollmentFailurePolicy_en:
+      "This is a recorded (VOD) course with no minimum enrollment requirement — it opens and is provided on schedule regardless of the number of enrollees. If, in unavoidable circumstances, the course cannot open, the full payment amount will be refunded.",
+    enrollmentFailurePolicy_ja:
+      "録画講座(VOD)のため最低募集人数の条件はなく、募集人数にかかわらず予定どおり開講・提供します。やむを得ず開講が不可能になった場合は、決済金額を全額返金します。",
     level: "intermediate",
     totalDuration: 55800, // 15.5 hours in seconds
     features: [
