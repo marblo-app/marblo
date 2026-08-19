@@ -133,6 +133,7 @@ export default memo(function TerminalView({
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+    let webglAddonRef: WebglAddon | null = null;
     let ptyRepaintNudgeCount = 0;
     let activitySettleTestCallCount = 0;
 
@@ -182,8 +183,92 @@ export default memo(function TerminalView({
         /* ignore */
       }
     };
+    let settledFitFrame: number | null = null;
+    let settledFitToken = 0;
+    const clearRendererTextureAtlas = () => {
+      try {
+        if (webglAddonRef) {
+          webglAddonRef.clearTextureAtlas();
+          return;
+        }
+        (
+          terminal as unknown as { clearTextureAtlas?: () => void }
+        ).clearTextureAtlas?.();
+      } catch {
+        /* ignore */
+      }
+    };
     let nudgeRestoreTimer: ReturnType<typeof setTimeout> | null = null;
     let nudgePtyRepaint: (reason?: string) => void = () => {};
+    const fitRefreshAndRepair = (
+      reason: string,
+      options?: { nudgeAltScreen?: boolean; skipCjkCacheRepair?: boolean },
+    ) => {
+      if (disposed || !termOpened) return false;
+      const wasAlternateScreen = terminal.buffer.active.type === "alternate";
+      const previousCols = terminal.cols;
+      const gridChanged = fitTerminalIfGridChanged();
+      const colsChanged = terminal.cols !== previousCols;
+      if (gridChanged && wasAlternateScreen) {
+        clearRendererTextureAtlas();
+      }
+      refreshTerminal();
+      if (!options?.skipCjkCacheRepair) {
+        scheduleCjkCacheRepair(`resize ${reason}`, {
+          forceAltScreenPtyRepaint:
+            Boolean(options?.nudgeAltScreen) && wasAlternateScreen,
+        });
+      }
+      if (options?.nudgeAltScreen && wasAlternateScreen && colsChanged) {
+        requestAnimationFrame(() => {
+          if (disposed || !termOpened) return;
+          fitTerminalIfGridChanged();
+          refreshTerminal();
+          nudgePtyRepaint(`alt-screen resize ${reason}`);
+        });
+      }
+      return gridChanged;
+    };
+    const scheduleSettledContainerFit = (
+      reason: string,
+      options?: { nudgeAltScreen?: boolean; skipCjkCacheRepair?: boolean },
+    ) => {
+      if (disposed) return;
+      if (settledFitFrame !== null) {
+        cancelAnimationFrame(settledFitFrame);
+        settledFitFrame = null;
+      }
+      const token = ++settledFitToken;
+      let lastWidth = 0;
+      let lastHeight = 0;
+      let stableFrames = 0;
+      let frames = 0;
+      const tick = () => {
+        settledFitFrame = null;
+        if (disposed || token !== settledFitToken) return;
+        const el = containerRef.current;
+        const width = el?.clientWidth ?? 0;
+        const height = el?.clientHeight ?? 0;
+        if (width > 0 && height > 0) {
+          if (width === lastWidth && height === lastHeight) {
+            stableFrames += 1;
+          } else {
+            stableFrames = 1;
+            lastWidth = width;
+            lastHeight = height;
+          }
+          if (stableFrames >= 2 || frames >= 10) {
+            fitRefreshAndRepair(reason, options);
+            return;
+          }
+        }
+        frames += 1;
+        if (frames < 16) {
+          settledFitFrame = requestAnimationFrame(tick);
+        }
+      };
+      settledFitFrame = requestAnimationFrame(tick);
+    };
     let cjkRepairFrame: number | null = null;
     let forceAltScreenPtyRepaintAfterCjkRepair = false;
     const scheduleCjkCacheRepair = (
@@ -198,11 +283,11 @@ export default memo(function TerminalView({
       cjkRepairFrame = requestAnimationFrame(() => {
         cjkRepairFrame = null;
         if (disposed || !termOpened) return;
-        const forceAltScreenPtyRepaint =
-          forceAltScreenPtyRepaintAfterCjkRepair;
+        const forceAltScreenPtyRepaint = forceAltScreenPtyRepaintAfterCjkRepair;
         forceAltScreenPtyRepaintAfterCjkRepair = false;
         try {
-          const wasAlternateScreen = terminal.buffer.active.type === "alternate";
+          const wasAlternateScreen =
+            terminal.buffer.active.type === "alternate";
           const repair = repairTerminalCjkFontCachesIfLoaded(terminal);
           if (repair) {
             fitTerminalIfGridChanged();
@@ -230,11 +315,10 @@ export default memo(function TerminalView({
       resumeRenderFrame = requestAnimationFrame(() => {
         resumeRenderFrame = null;
         if (disposed || !termOpened) return;
-        fitTerminalIfGridChanged();
-        refreshTerminal();
-        if (!options?.skipCjkCacheRepair) {
-          scheduleCjkCacheRepair(`resume ${reason}`);
-        }
+        scheduleSettledContainerFit(`resume ${reason}`, {
+          nudgeAltScreen: true,
+          skipCjkCacheRepair: options?.skipCjkCacheRepair,
+        });
       });
     };
     resumeRenderRef.current = scheduleResumeRender;
@@ -378,10 +462,15 @@ export default memo(function TerminalView({
         if (import.meta.env.VITE_USE_WEBGL === "1") {
           try {
             const webglAddon = new WebglAddon();
-            webglAddon.onContextLoss(() => webglAddon.dispose());
+            webglAddonRef = webglAddon;
+            webglAddon.onContextLoss(() => {
+              webglAddon.dispose();
+              if (webglAddonRef === webglAddon) webglAddonRef = null;
+            });
             terminal.loadAddon(webglAddon);
             console.debug("[TerminalView] WebGL renderer active");
           } catch (err) {
+            webglAddonRef = null;
             console.warn(
               "[TerminalView] WebGL init failed, using DOM renderer:",
               err,
@@ -407,11 +496,13 @@ export default memo(function TerminalView({
           },
         });
 
-        scheduleResumeRender("initial open");
+        scheduleSettledContainerFit("initial open", { nudgeAltScreen: true });
         initialResumeTimer = setTimeout(() => {
           initialResumeTimer = null;
           if (disposed || !termOpened) return;
-          scheduleResumeRender("initial settle");
+          scheduleSettledContainerFit("initial settle", {
+            nudgeAltScreen: true,
+          });
           nudgePtyRepaint("initial open");
         }, 80);
       } catch (err) {
@@ -620,26 +711,10 @@ export default memo(function TerminalView({
       window.electronAPI.pty.resize(sessionId, cols, rows);
     });
 
-    let fitScheduled = false;
     const handleResize = () => {
-      if (disposed || fitScheduled) return;
-      fitScheduled = true;
-      requestAnimationFrame(() => {
-        fitScheduled = false;
-        if (disposed) return;
-        try {
-          if (
-            containerRef.current &&
-            containerRef.current.clientWidth > 0 &&
-            containerRef.current.clientHeight > 0
-          ) {
-            fitTerminalIfGridChanged();
-            refreshTerminal();
-            scheduleCjkCacheRepair("container resize");
-          }
-        } catch {
-          /* ignore */
-        }
+      if (disposed) return;
+      scheduleSettledContainerFit("container resize", {
+        nudgeAltScreen: true,
       });
     };
     window.addEventListener("resize", handleResize);
@@ -711,6 +786,7 @@ export default memo(function TerminalView({
       if (maxTimer) clearTimeout(maxTimer);
       if (nudgeRestoreTimer) clearTimeout(nudgeRestoreTimer);
       if (initialResumeTimer) clearTimeout(initialResumeTimer);
+      if (settledFitFrame !== null) cancelAnimationFrame(settledFitFrame);
       cancelActivitySettle();
       if (cjkRepairFrame !== null) cancelAnimationFrame(cjkRepairFrame);
       if (resumeRenderFrame !== null) cancelAnimationFrame(resumeRenderFrame);
@@ -722,6 +798,7 @@ export default memo(function TerminalView({
       viewportEl?.removeEventListener("keydown", onKeyDown, keyOpts);
       window.electronAPI.pty.removeListeners(sessionId);
       terminal.dispose();
+      webglAddonRef = null;
       if (window.__marbloTerminalDebug?.[sessionId]) {
         delete window.__marbloTerminalDebug[sessionId];
       }
@@ -754,15 +831,8 @@ export default memo(function TerminalView({
 
   // Re-fit when tab becomes active + scroll to bottom
   useEffect(() => {
-    if (isActive && fitAddonRef.current && containerRef.current) {
+    if (isActive && terminalRef.current && containerRef.current) {
       requestAnimationFrame(() => {
-        try {
-          if (containerRef.current && containerRef.current.clientWidth > 0) {
-            fitAddonRef.current?.fit();
-          }
-        } catch {
-          /* ignore */
-        }
         resumeRenderRef.current("tab active");
         // Delay scrollToBottom to ensure fit has fully rendered.
         // Only scroll if user wasn't manually scrolled-up — preserves position.
