@@ -1,11 +1,13 @@
 import { X } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "../../lib/i18n";
 
 export const ORCHESTRATION_DEMO_SECONDS = 90;
 export const ORCHESTRATION_DEMO_VIDEO_SRC = "/media/orchestration-demo.mp4";
 export const ORCHESTRATION_DEMO_POSTER_SRC =
   "/media/orchestration-demo-poster.jpg";
+// 사장님 요청: 90초가 길어서 1.5배로 고정 (재인코딩 없이 플레이어 속도만).
+export const ORCHESTRATION_DEMO_PLAYBACK_RATE = 1.5;
 
 export interface VideoDemoModalProps {
   surface: "start_here_tab" | "beginner_connect";
@@ -14,6 +16,7 @@ export interface VideoDemoModalProps {
 
 export function VideoDemoModal({ surface, onClose }: VideoDemoModalProps) {
   const { t } = useTranslation();
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -22,6 +25,19 @@ export function VideoDemoModal({ surface, onClose }: VideoDemoModalProps) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    // playbackRate 는 JSX 속성으로 못 준다(알 수 없는 DOM 속성이라 조용히 무시됨).
+    // src 재로드/재생 재시작마다 1.0 으로 리셋되므로 loadedmetadata 에도 재적용한다.
+    const applyRate = () => {
+      el.playbackRate = ORCHESTRATION_DEMO_PLAYBACK_RATE;
+    };
+    applyRate();
+    el.addEventListener("loadedmetadata", applyRate);
+    return () => el.removeEventListener("loadedmetadata", applyRate);
+  }, []);
 
   return (
     <div
@@ -59,6 +75,7 @@ export function VideoDemoModal({ surface, onClose }: VideoDemoModalProps) {
         </div>
         <div className="bg-black">
           <video
+            ref={videoRef}
             data-testid="orchestration-video-demo-player"
             className="aspect-video h-full w-full object-contain"
             src={ORCHESTRATION_DEMO_VIDEO_SRC}

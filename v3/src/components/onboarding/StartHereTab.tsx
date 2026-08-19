@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   GitBranch,
@@ -42,6 +42,7 @@ import { ByomStartSection } from "./ByomStartSection";
 import { FirstTicketResultNote } from "./FirstTicketResultNote";
 import { VendorModelsSection } from "./VendorModelsSection";
 import {
+  ORCHESTRATION_DEMO_PLAYBACK_RATE,
   ORCHESTRATION_DEMO_POSTER_SRC,
   ORCHESTRATION_DEMO_SECONDS,
   ORCHESTRATION_DEMO_VIDEO_SRC,
@@ -475,6 +476,21 @@ function WorktreeRecommendNote() {
 
 function ValuePreview({ onWatchDemo }: { onWatchDemo: () => void }) {
   const { t } = useTranslation();
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    // playbackRate 는 JSX 속성으로 못 준다(알 수 없는 DOM 속성이라 조용히 무시됨).
+    // src 재로드/재생 재시작마다 1.0 으로 리셋되므로 loadedmetadata 에도 재적용한다.
+    const applyRate = () => {
+      el.playbackRate = ORCHESTRATION_DEMO_PLAYBACK_RATE;
+    };
+    applyRate();
+    el.addEventListener("loadedmetadata", applyRate);
+    return () => el.removeEventListener("loadedmetadata", applyRate);
+  }, []);
+
   return (
     <section
       data-testid="start-here-value-preview"
@@ -482,6 +498,7 @@ function ValuePreview({ onWatchDemo }: { onWatchDemo: () => void }) {
     >
       <div className="bg-black">
         <video
+          ref={videoRef}
           data-testid="start-here-orchestration-video"
           className="aspect-video h-full w-full object-cover"
           src={ORCHESTRATION_DEMO_VIDEO_SRC}
