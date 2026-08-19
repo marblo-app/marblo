@@ -48,9 +48,17 @@ describe("registerLocalOllamaModels (유령비용 방지)", () => {
     expect(registeredLocalOllamaModelIds()).toContain("qwen2.5:0.5b");
   });
 
-  it("7B+ coder 등록 행은 tool-use · mid capability", () => {
+  it("30B 미만 coder 등록 행은 chat-only · cheap capability", () => {
     registerLocalOllamaModels(["qwen2.5-coder:7b"]);
     const entry = getModel("qwen2.5-coder:7b");
+    expect(entry?.toolSupport).toBe("chat-only");
+    expect(entry?.capability).toBe("cheap");
+    expect(entry?.provider).toBe("local");
+  });
+
+  it("30B+ coder 등록 행은 tool-use · mid capability", () => {
+    registerLocalOllamaModels(["qwen2.5-coder:32b"]);
+    const entry = getModel("qwen2.5-coder:32b");
     expect(entry?.toolSupport).toBe("tool-use");
     expect(entry?.capability).toBe("mid");
     expect(entry?.provider).toBe("local");

@@ -1173,7 +1173,7 @@ const RUNTIME_LOCAL_MODEL_IDS = new Set<string>();
  */
 /**
  * 파라미터 규모(B)만으로 toolSupport 를 판정한다(카탈로그 import 순환 회피).
- * local-models.resolveLocalToolSupport 와 같은 7B 임계.
+ * local-models.resolveLocalToolSupport 와 같은 30B 임계.
  */
 function localToolSupportFromId(id: string): "chat-only" | "tool-use" {
   const lower = id.toLowerCase();
@@ -1182,7 +1182,7 @@ function localToolSupportFromId(id: string): "chat-only" | "tool-use" {
   if (!match) return "chat-only";
   const n = Number(match[1]);
   if (!Number.isFinite(n)) return "chat-only";
-  return n >= 7 ? "tool-use" : "chat-only";
+  return n >= 30 ? "tool-use" : "chat-only";
 }
 
 export function registerLocalOllamaModels(ids: readonly string[]): void {
@@ -1198,7 +1198,7 @@ export function registerLocalOllamaModels(ids: readonly string[]): void {
       provider: "local",
       envProfile: LOCAL_OLLAMA_ENV_PROFILE,
       aliases: [],
-      // 소형 chat-only 는 cheap, 7B+ tool-use 는 mid — 라우팅이 소형을
+      // 30B 미만 chat-only 는 cheap, 대형 tool-use 는 mid — 라우팅이 중소형을
       // "실작업 cheap 티어"로 오해하지 않게 규모를 반영한다.
       capability: toolSupport === "tool-use" ? "mid" : "cheap",
       efforts: [],

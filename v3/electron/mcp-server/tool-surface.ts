@@ -49,11 +49,11 @@ export const WORKER_CORE_MCP_TOOLS = [
 ] as const;
 
 /**
- * 로컬 tool-use 모델(7B+) 전용 최소 표면.
+ * 로컬 tool-use 모델(30B+) 전용 최소 표면.
  *
  * 이 프로파일은 역할 자율 루프를 온전히 수행시키려는 것이 아니라, 이미 배정된
  * 한 턴을 끝내고 오케스트레이터에 상태를 되돌리는 데 필요한 보고/막힘 경로만
- * 남긴다. 실측상 로컬 7B+도 frontier용 40여 개 스키마와 긴 완료규약을 같이 받으면
+ * 남긴다. 실측상 로컬 중소형도 frontier용 40여 개 스키마와 긴 완료규약을 같이 받으면
  * superpowers 같은 무관 스킬/툴 경로를 헤매므로, 로컬은 별도 explicit override 를
  * 쓴다. Frontier/일반 워커의 역할별 scoped 표면은 그대로 유지한다.
  */

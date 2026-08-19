@@ -26,9 +26,11 @@ describe("local chat-only spawn flags", () => {
     expect(LOCAL_CHAT_ONLY_SYSTEM_PROMPT.toLowerCase()).toContain("do not call tools");
   });
 
-  it("0.5b is chat-only; coder 7b is tool-use", () => {
+  it("7b coder is chat-only; 32b coder keeps tool-use", () => {
     expect(isLocalChatOnlyModel("qwen2.5:0.5b")).toBe(true);
-    expect(resolveLocalToolSupport("qwen2.5-coder:7b")).toBe("tool-use");
-    expect(isLocalChatOnlyModel("qwen2.5-coder:7b")).toBe(false);
+    expect(resolveLocalToolSupport("qwen2.5-coder:7b")).toBe("chat-only");
+    expect(isLocalChatOnlyModel("qwen2.5-coder:7b")).toBe(true);
+    expect(resolveLocalToolSupport("qwen2.5-coder:32b")).toBe("tool-use");
+    expect(isLocalChatOnlyModel("qwen2.5-coder:32b")).toBe(false);
   });
 });
