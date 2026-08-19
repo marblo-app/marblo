@@ -462,10 +462,10 @@ function compactLocalCompletionFooter(instruction: string): string {
         "",
         "",
         `[완료 규약 — task_id="${taskId}"]`,
-        `진행은 add_activity(task_id="${taskId}", message="...") 로 남긴다.`,
-        `완료/리뷰 가능: submit_for_review(task_id="${taskId}", summary?) 를 호출한다.`,
-        `실패/차단: update_task_status(task_id="${taskId}", status="FAILED"|"BLOCKED", comment="이유") 를 호출한다.`,
-        `막히면 사용자에게 묻지 말고 ask_orchestrator(task_id="${taskId}", question="필요/이유/막히는 범위") 를 호출하고 가능한 나머지 작업은 계속한다.`,
+        `Log progress with add_activity(task_id="${taskId}", message="...").`,
+        `When ready for review, call submit_for_review(task_id="${taskId}", summary?).`,
+        `On failure or blockage, call update_task_status(task_id="${taskId}", status="FAILED"|"BLOCKED", comment="reason").`,
+        `If blocked, do not ask the user directly. Call ask_orchestrator(task_id="${taskId}", question="need/reason/blocked scope") and keep working on anything else that can proceed.`,
       ].join("\n"),
   );
 }

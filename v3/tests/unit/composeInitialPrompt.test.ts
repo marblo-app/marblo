@@ -110,6 +110,33 @@ describe("composeInitialPrompt", () => {
       expect(out).toBe("do work");
     }
   });
+
+  it("local tool-use profile compacts Korean completion footer with English instructions while preserving protocol keys", () => {
+    const out = composeInitialPrompt(
+      "local",
+      [
+        "작업 본문",
+        "",
+        '[완료 규약 — task_id="abc123"]',
+        "이 아래는 긴 한국어 완료 지시문",
+      ].join("\n"),
+      SKILL,
+      "local-tool-use",
+    );
+
+    expect(out).toContain('[완료 규약 — task_id="abc123"]');
+    expect(out).toContain(
+      'Log progress with add_activity(task_id="abc123", message="...").',
+    );
+    expect(out).toContain(
+      'submit_for_review(task_id="abc123", summary?)',
+    );
+    expect(out).toContain(
+      'update_task_status(task_id="abc123", status="FAILED"|"BLOCKED"',
+    );
+    expect(out).toContain('ask_orchestrator(task_id="abc123"');
+    expect(out).not.toContain("이 아래는 긴 한국어 완료 지시문");
+  });
 });
 
 describe("STARTUP_DIALOG_MATCHERS", () => {
