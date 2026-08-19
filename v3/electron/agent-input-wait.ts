@@ -100,6 +100,11 @@ export function foldInputWait(
 ): InputWaitReason | null {
   const graceMs = input.graceMs ?? INPUT_WAIT_PROMPT_GRACE_MS;
   if (input.terminal) return null;
+  // Completion report outstanding (submit_for_review / DONE / FAILED / …).
+  // The agent already said it is finished — parking at the prompt (or a leftover
+  // confirm frame) is not a request for the user. Surfacing "waiting for you"
+  // here is exactly the post-merge notification spam.
+  if (input.turnCompletedAt !== null) return null;
   // Work in flight — whatever we thought was waiting, the agent moved on.
   if (input.kind === "busy") return null;
   // A confirmation dialog is unambiguous and blocking. No grace.
@@ -108,13 +113,11 @@ export function foldInputWait(
   // Parked at the ready composer past the grace, with the turn still open.
   const parked =
     input.promptIdleSince !== null &&
-    input.turnCompletedAt === null &&
     input.now - input.promptIdleSince >= graceMs;
   if (parked) return "prompt";
 
-  // Back at the ready composer but not parked long enough (or the turn is
-  // already reported done). Either way the CLI is not showing a dialog, so a
-  // standing `confirm` is stale.
+  // Back at the ready composer but not parked long enough. The CLI is not
+  // showing a dialog, so a standing `confirm` is stale.
   if (input.kind === "idle-at-prompt") return null;
 
   // Ordinary output, a contentless repaint, or no frame at all: says nothing

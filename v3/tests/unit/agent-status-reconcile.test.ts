@@ -125,6 +125,19 @@ describe("shouldDemoteCompletedTurn", () => {
     ).toBe(false);
   });
 
+  it("demotes when lastWorkOutput is stale even if prompt repaint keeps lastPtyActivity fresh", () => {
+    expect(
+      shouldDemoteCompletedTurn({
+        status: "working",
+        stopRequested: false,
+        turnCompletedAt: NOW - 30_000,
+        lastPtyActivity: NOW - 100, // forever-repaint
+        lastWorkOutput: NOW - TURN_COMPLETE_SETTLE_MS - 1,
+        now: NOW,
+      }),
+    ).toBe(true);
+  });
+
   it("does NOT demote an agent with no completed turn (genuinely working)", () => {
     expect(
       shouldDemoteCompletedTurn({

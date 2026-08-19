@@ -1498,6 +1498,7 @@ export class AgentManager {
           stopRequested: agent.stopRequested,
           turnCompletedAt: agent.turnCompletedAt,
           lastPtyActivity: agent.lastPtyActivity,
+          lastWorkOutput: agent.lastWorkOutput,
           now: Date.now(),
         })
       ) {
@@ -2026,6 +2027,10 @@ export class AgentManager {
       agent.status = "idle";
       this.onStatusChange?.(agentId, "idle");
     }
+    // Retract any standing "waiting for you" badge immediately. foldInputWait
+    // would also drop it on the next frame/heartbeat once turnCompletedAt is
+    // set, but waiting a full heartbeat left completed agents sticky on screen.
+    this.clearInputWait(agentId);
   }
 
   setCurrentTask(agentId: string, taskId: string | null): void {
