@@ -278,7 +278,7 @@ describe("folder scope filter", () => {
         children: [],
       },
     ];
-    expect(collectTopLevelFolders(tree, "/proj")).toEqual(["강의", "docs"]);
+    expect(collectTopLevelFolders(tree, "/proj")).toEqual(["docs", "강의"]);
     expect(
       collectFolderPrefixesFromPaths([
         "docs/a.md",
