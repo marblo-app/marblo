@@ -611,6 +611,23 @@ function sleepMs(ms: number): void {
 /**
  * Sync bridge start for getLaunchConfig. Spawns a child that loads this
  * compiled module (or the TS-neighbor .js after tsc) and writes its port.
+ *
+ * ★ELECTRON_RUN_AS_NODE 는 선택이 아니라 필수다 (2026-08-19, A/B 실측으로 확정).
+ *
+ *   메인프로세스에서 `process.execPath` 는 node 가 아니라 **Electron 바이너리**다.
+ *   그 상태로 `spawn(execPath, [bridge.js, ...])` 하면 Electron 이 bridge.js 를
+ *   node 스크립트가 아니라 **GUI 앱 엔트리**로 로드한다. 그 컨텍스트에선 파일
+ *   하단의 자식 엔트리 가드가 성립하지 않아 runBridgeChildMain() 이 아예 호출되지
+ *   않고, 띄울 창도 없으니 앱이 **EXIT 0 로 조용히 종료**한다 → portFile 미생성 →
+ *   기동 실패. stdout·stderr 도 완전히 비어 있어 원인이 전혀 안 남는다.
+ *
+ *   실측(실제 Electron 바이너리 + 실제 dist-electron/codex-chat-bridge.js):
+ *     env 없음            → CHILD EXIT 0, portFile never written, stderr 빈 문자열
+ *     ELECTRON_RUN_AS_NODE=1 만 추가 → PORTFILE WRITTEN: 53512
+ *
+ *   이 침묵이 baseUrl 을 upstream 으로 되돌리는 폴백과 겹쳐, 진짜 실패 지점을
+ *   가리고 `api.upstage.ai/v1/responses` 404 추적으로 사람을 보냈다. 폴백은
+ *   agent-config 에서 제거했고, 여기서는 실패 사유를 stderr 까지 실어 던진다.
  */
 export function startCodexChatBridgeSync(
   opts: BridgeOptions,
@@ -618,7 +635,9 @@ export function startCodexChatBridgeSync(
   const host = opts.host ?? "127.0.0.1";
   const portFile = path.join(
     os.tmpdir(),
-    `marblo-codex-bridge-${process.pid}-${Date.now()}.port`,
+    `marblo-codex-bridge-${process.pid}-${Date.now()}-${randomBytes(4).toString(
+      "hex",
+    )}.port`,
   );
   try {
     fs.unlinkSync(portFile);
@@ -630,20 +649,40 @@ export function startCodexChatBridgeSync(
   const selfJs = path.join(__dirname, "codex-chat-bridge.js");
   const entry = fs.existsSync(selfJs) ? selfJs : __filename;
 
+  const childEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    MARBLO_CODEX_BRIDGE_UPSTREAM: opts.upstreamBaseUrl,
+    MARBLO_CODEX_BRIDGE_API_KEY: opts.apiKey,
+    MARBLO_CODEX_BRIDGE_HOST: host,
+  };
+  // process.execPath 가 Electron 이면 반드시 node 모드로 재실행해야 한다.
+  if (process.versions.electron) childEnv.ELECTRON_RUN_AS_NODE = "1";
+  // Electron 이 자식에게 물려주는 앱 부팅용 힌트를 지운다 — node 모드에서는
+  // 무의미하고, 남아 있으면 진단 로그만 흐린다.
+  delete childEnv.ELECTRON_NO_ATTACH_CONSOLE;
+
+  // 실패를 눈에 보이게 만든다: stdio:"ignore" 였을 때 자식이 왜 죽었는지가
+  // 전혀 남지 않아 이 버그가 오래 숨어 있었다.
   const child: ChildProcess = spawn(
     process.execPath,
     [entry, "--marblo-codex-chat-bridge", portFile],
     {
-      env: {
-        ...process.env,
-        MARBLO_CODEX_BRIDGE_UPSTREAM: opts.upstreamBaseUrl,
-        MARBLO_CODEX_BRIDGE_API_KEY: opts.apiKey,
-        MARBLO_CODEX_BRIDGE_HOST: host,
-      },
-      stdio: "ignore",
+      env: childEnv,
+      // stdin 을 파이프로 열어 둔다(쓰지는 않는다). 부모가 죽으면 이 파이프가
+      // EOF 가 되고 자식이 그걸 보고 스스로 종료한다 — 앱이 크래시해도 API 키를
+      // 물고 있는 localhost 서버가 고아로 남지 않는다. 정상 종료는 stop() 의
+      // SIGTERM 이 먼저 처리한다.
+      stdio: ["pipe", "ignore", "pipe"],
       detached: false,
     },
   );
+  let childStderr = "";
+  child.stderr?.on("data", (buf: Buffer | string) => {
+    if (childStderr.length < 4096) childStderr += String(buf);
+  });
+  child.stderr?.on("error", () => {
+    /* ignore */
+  });
 
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
@@ -669,15 +708,32 @@ export function startCodexChatBridgeSync(
         };
       }
     }
-    if (child.exitCode !== null) break;
+    if (child.exitCode !== null || child.signalCode !== null) break;
     sleepMs(50);
   }
+  const exitCode = child.exitCode;
+  const signal = child.signalCode;
   try {
     child.kill("SIGTERM");
   } catch {
     /* ignore */
   }
-  throw new Error("codex chat bridge failed to start in time");
+  try {
+    fs.unlinkSync(portFile);
+  } catch {
+    /* ignore */
+  }
+  const why =
+    exitCode !== null || signal !== null
+      ? `child exited (code=${String(exitCode)} signal=${String(signal)})`
+      : "timed out after 8s";
+  throw new Error(
+    `codex chat bridge failed to start: ${why}; ` +
+      `runtime=${process.execPath} runAsNode=${
+        childEnv.ELECTRON_RUN_AS_NODE === "1"
+      } entry=${entry}` +
+      (childStderr.trim() ? `; stderr=${childStderr.trim().slice(0, 800)}` : ""),
+  );
 }
 
 /** Child-process entry: node codex-chat-bridge.js --marblo-codex-chat-bridge <portFile> */
@@ -691,25 +747,63 @@ function runBridgeChildMain(): void {
     process.exit(2);
   }
   const server = createBridgeServer({ upstreamBaseUrl: upstream, apiKey, host });
+  server.on("error", (err: Error) => {
+    process.stderr.write(`codex-chat-bridge child: listen failed: ${err.message}\n`);
+    process.exit(4);
+  });
   server.listen(0, host, () => {
     const addr = server.address();
     if (!addr || typeof addr === "string") {
+      process.stderr.write("codex-chat-bridge child: no bound address\n");
       process.exit(3);
     }
-    fs.writeFileSync(portFile, String(addr.port), { encoding: "utf8", mode: 0o600 });
+    try {
+      fs.writeFileSync(portFile, String(addr.port), {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+    } catch (err) {
+      process.stderr.write(
+        `codex-chat-bridge child: port file write failed: ${
+          err instanceof Error ? err.message : String(err)
+        }\n`,
+      );
+      process.exit(5);
+    }
   });
   const shutdown = () => {
     server.close(() => process.exit(0));
+    // close() 가 keep-alive 커넥션 때문에 늘어지면 그냥 내려간다.
+    setTimeout(() => process.exit(0), 2000).unref();
   };
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
+  // 부모(Electron 메인)가 사라지면 stdin 이 EOF 가 된다 → 고아 브리지 방지.
+  process.stdin.on("end", shutdown);
+  process.stdin.on("close", shutdown);
+  process.stdin.resume();
 }
 
-if (
-  typeof require !== "undefined" &&
-  require.main === module &&
-  process.argv[2] === "--marblo-codex-chat-bridge"
-) {
+/**
+ * 자식 엔트리 판정. `require.main === module` 하나만 믿으면 안 된다 — Electron 이
+ * 이 파일을 앱 엔트리로 로드하거나 번들러를 거치면 그 등식이 깨져 브리지가
+ * 조용히 안 뜬다(그게 이번 근본원인이었다). argv 센티넬을 1차 근거로 삼고,
+ * 엉뚱한 프로세스가 걸리지 않도록 argv[1] 이 실제로 이 파일인지까지 확인한다.
+ */
+function isBridgeChildEntry(): boolean {
+  if (process.argv[2] !== "--marblo-codex-chat-bridge") return false;
+  if (typeof require !== "undefined" && require.main === module) return true;
+  const invoked = process.argv[1] ? path.resolve(process.argv[1]) : "";
+  if (!invoked) return false;
+  const self = path.resolve(__filename);
+  return (
+    invoked === self ||
+    invoked === self.replace(/\.ts$/, ".js") ||
+    path.basename(invoked).startsWith("codex-chat-bridge.")
+  );
+}
+
+if (isBridgeChildEntry()) {
   runBridgeChildMain();
 }
 

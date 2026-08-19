@@ -3501,32 +3501,46 @@ export class AgentConfigGenerator {
       const secret =
         process.env[override.envKey]?.trim() ||
         getVendorSecret(override.envKey);
-      if (secret) {
-        try {
-          const bridge = startCodexChatBridgeSync({
-            upstreamBaseUrl: override.upstreamBaseUrl,
-            apiKey: secret,
-          });
-          this.codexChatBridges.set(agentId, bridge);
-          baseUrl = bridge.baseUrl;
-          console.log("[agent-config] Codex chat bridge started", {
-            agentId,
-            provider: override.providerId,
-            port: bridge.port,
-            baseUrl: bridge.baseUrl,
-          });
-        } catch (err) {
-          console.warn("[agent-config] Codex chat bridge failed to start", {
-            agentId,
-            provider: override.providerId,
-            error: err instanceof Error ? err.message : String(err),
-            fallback: "upstream base_url (may 404 without /responses)",
-          });
-        }
-      } else {
-        console.warn(
-          "[agent-config] Codex vendor bridge skipped — missing env key",
-          { provider: override.providerId, envKey: override.envKey },
+      // ★폴백 금지. 브리지가 필수인 벤더에서 기동에 실패하면 upstream 으로
+      //   조용히 물러서면 안 된다 — 그러면 wire_api="responses" 가 upstream 의
+      //   존재하지 않는 /v1/responses 를 때려 `404 page not found` 가 나고,
+      //   진짜 실패 지점(브리지 기동 실패)이 완전히 가려진다. 실제로 이 폴백이
+      //   #1037 을 "브리지가 404 를 유발한다"는 잘못된 진단으로 몰아갔다.
+      //   못 뜨면 여기서 사유 그대로 스폰을 중단한다.
+      if (!secret) {
+        throw new Error(
+          `Codex chat bridge for ${override.providerId} cannot start: ` +
+            `missing API key env ${override.envKey}. ` +
+            `${override.providerId} exposes only /v1/chat/completions, so the ` +
+            `local Responses→Chat bridge is mandatory — set ${override.envKey} ` +
+            `and respawn.`,
+        );
+      }
+      try {
+        const bridge = startCodexChatBridgeSync({
+          upstreamBaseUrl: override.upstreamBaseUrl,
+          apiKey: secret,
+        });
+        this.codexChatBridges.set(agentId, bridge);
+        baseUrl = bridge.baseUrl;
+        console.log("[agent-config] Codex chat bridge started", {
+          agentId,
+          provider: override.providerId,
+          port: bridge.port,
+          baseUrl: bridge.baseUrl,
+        });
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        console.error("[agent-config] Codex chat bridge failed to start", {
+          agentId,
+          provider: override.providerId,
+          error: reason,
+        });
+        throw new Error(
+          `Codex chat bridge for ${override.providerId} failed to start: ` +
+            `${reason}. Refusing to fall back to ${override.upstreamBaseUrl} — ` +
+            `that upstream has no /v1/responses and would only produce a ` +
+            `misleading 404.`,
         );
       }
     }

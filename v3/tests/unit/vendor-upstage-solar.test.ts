@@ -174,7 +174,17 @@ describe("Upstage Solar 주입 — OPENAI_* 전부-or-전무", () => {
       expect(configToml).toMatch(/model_provider\s*=\s*"upstage"/);
       expect(configToml).toContain("[model_providers.upstage]");
       expect(configToml).toContain('env_key = "UPSTAGE_API_KEY"');
-      expect(configToml).toContain('wire_api = "chat"');
+      // codex 0.148.0 은 wire_api="chat" 을 설정 로드 단계에서 거부한다
+      // (`no longer supported`, EXIT=1). Upstage 는 /v1/chat/completions 만
+      // 열려 있으므로 responses + 로컬 브리지가 유일한 통로다.
+      expect(configToml).toContain('wire_api = "responses"');
+      expect(configToml).not.toContain('wire_api = "chat"');
+      // ★여기 base_url 이 upstream 인 것은 정상이 아니라 **테스트 한정**이다:
+      //   VITEST=true 라 buildCodexVendorProviderToml 의 skipBridge 가 켜져
+      //   브리지를 안 띄운다. 실제 스폰에서 base_url 이 localhost 브리지를
+      //   가리키는지는 agent-config-codex-chat-bridge.test.ts 가 skipBridge 를
+      //   꺼놓고 단언한다.
+      expect(process.env.VITEST).toBe("true");
       expect(configToml).toContain(`base_url = "${UPSTAGE_ENDPOINT}"`);
       expect(configToml).toContain('preferred_auth_method = "apikey"');
       expect(configToml).toContain('forced_login_method = "api"');

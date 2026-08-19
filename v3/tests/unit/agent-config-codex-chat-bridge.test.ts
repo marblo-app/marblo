@@ -110,7 +110,14 @@ function readGeneratedConfig(modelId: string): {
 }
 
 beforeEach(() => {
-  startBridge.mockClear();
+  // mockClear 로는 부족하다 — 실패 케이스가 심는 throw 구현이 다음 테스트로
+  // 새면 "브리지가 안 뜬다" 는 상태가 조용히 전파된다.
+  startBridge.mockReset();
+  startBridge.mockImplementation(() => ({
+    baseUrl: "http://127.0.0.1:45678/v1",
+    port: 45678,
+    stop: stopBridge,
+  }));
   stopBridge.mockClear();
   ptySpawns.length = 0;
 });
@@ -120,7 +127,10 @@ afterEach(() => {
 });
 
 describe("AgentConfigGenerator Codex chat bridge wiring", () => {
-  it("Solar 실 스폰 config 는 Upstage upstream chat provider 를 직결하고 bridge 를 시작하지 않는다", () => {
+  // ★이 스위트의 모든 단언은 withEnv 로 VITEST="false" + MARBLO_CODEX_SKIP_CHAT_BRIDGE
+  //   해제 상태에서 돈다. 그 가드가 켜져 있으면 buildCodexVendorProviderToml 이
+  //   브리지 경로를 통째로 건너뛰어 "브리지가 안 떠도 초록불" 인 가짜 통과가 된다.
+  it("Solar 실 스폰 config 는 브리지를 띄우고 base_url 을 그 localhost 로 가리킨다", () => {
     withEnv(
       {
         UPSTAGE_API_KEY: "test-upstage-key",
@@ -130,15 +140,24 @@ describe("AgentConfigGenerator Codex chat bridge wiring", () => {
       () => {
         const { gen, toml } = readGeneratedConfig("solar-pro4");
 
-        expect(startBridge).not.toHaveBeenCalled();
+        expect(startBridge).toHaveBeenCalledTimes(1);
+        expect(startBridge).toHaveBeenCalledWith(
+          expect.objectContaining({
+            upstreamBaseUrl: "https://api.upstage.ai/v1",
+            apiKey: "test-upstage-key",
+          }),
+        );
         expect(toml).toContain('model_provider = "upstage"');
         expect(toml).toContain("[model_providers.upstage]");
-        expect(toml).toContain('base_url = "https://api.upstage.ai/v1"');
-        expect(toml).toContain('wire_api = "chat"');
-        expect(toml).not.toContain('base_url = "http://127.0.0.1:45678/v1"');
+        expect(toml).toContain('base_url = "http://127.0.0.1:45678/v1"');
+        // codex 0.148.0 은 wire_api="chat" 을 설정 로드 단계에서 거부한다
+        // (`no longer supported`, EXIT=1). responses 만 유효하다.
+        expect(toml).toContain('wire_api = "responses"');
+        expect(toml).not.toContain('wire_api = "chat"');
+        expect(toml).not.toContain('base_url = "https://api.upstage.ai/v1"');
 
         gen.cleanupAll();
-        expect(stopBridge).not.toHaveBeenCalled();
+        expect(stopBridge).toHaveBeenCalled();
       },
     );
   });
@@ -157,6 +176,7 @@ describe("AgentConfigGenerator Codex chat bridge wiring", () => {
         expect(toml).toContain('model_provider = "deepseek"');
         expect(toml).toContain("[model_providers.deepseek]");
         expect(toml).toContain('base_url = "https://api.deepseek.com"');
+        expect(toml).toContain('wire_api = "responses"');
 
         gen.cleanupAll();
         expect(stopBridge).not.toHaveBeenCalled();
@@ -165,8 +185,38 @@ describe("AgentConfigGenerator Codex chat bridge wiring", () => {
   });
 });
 
+describe("브리지 기동 실패는 조용한 upstream 폴백 대신 스폰을 중단한다", () => {
+  // ★이 스위트가 이 티켓의 핵심 회귀 방어선이다. 종전 구현은 실패 시
+  //   console.warn 만 남기고 base_url 을 upstream 으로 뒀는데, 그러면
+  //   wire_api="responses" 가 존재하지 않는 api.upstage.ai/v1/responses 를 때려
+  //   `404 page not found` 가 나고 진짜 실패 지점(브리지 기동 실패)이 가려진다.
+  it("startCodexChatBridgeSync 가 throw 하면 getLaunchConfig 도 사유를 실어 throw 한다", () => {
+    withEnv(
+      {
+        UPSTAGE_API_KEY: "test-upstage-key",
+        VITEST: "false",
+        MARBLO_CODEX_SKIP_CHAT_BRIDGE: undefined,
+      },
+      () => {
+        startBridge.mockImplementation(() => {
+          throw new Error("codex chat bridge failed to start: child exited");
+        });
+
+        expect(() => readGeneratedConfig("solar-pro4")).toThrow(
+          /codex chat bridge failed to start: child exited/,
+        );
+        // 폴백 금지 — upstream 으로 물러섰다는 어떤 흔적도 없어야 한다.
+        expect(() => readGeneratedConfig("solar-pro4")).toThrow(
+          /Refusing to fall back to https:\/\/api\.upstage\.ai\/v1/,
+        );
+      },
+    );
+  });
+
+});
+
 describe("AgentManager Solar spawn path", () => {
-  it("agent-manager launch 경로도 Solar provider=upstage 에서 upstream chat config 를 주입하고 bridge 를 시작하지 않는다", () => {
+  it("agent-manager launch 경로도 Solar 에서 브리지를 띄우고 그 base_url 을 주입한다", () => {
     withEnv(
       {
         UPSTAGE_API_KEY: "test-upstage-key",
@@ -199,13 +249,13 @@ describe("AgentManager Solar spawn path", () => {
           path.join(String(codexHome), "config.toml"),
           "utf-8",
         );
-        expect(toml).toContain('base_url = "https://api.upstage.ai/v1"');
-        expect(toml).toContain('wire_api = "chat"');
-        expect(toml).not.toContain('base_url = "http://127.0.0.1:45678/v1"');
-        expect(startBridge).not.toHaveBeenCalled();
+        expect(toml).toContain('base_url = "http://127.0.0.1:45678/v1"');
+        expect(toml).toContain('wire_api = "responses"');
+        expect(toml).not.toContain('base_url = "https://api.upstage.ai/v1"');
+        expect(startBridge).toHaveBeenCalledTimes(1);
 
         am.stop(agent.id);
-        expect(stopBridge).not.toHaveBeenCalled();
+        expect(stopBridge).toHaveBeenCalled();
       },
     );
   });
