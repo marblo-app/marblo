@@ -3,9 +3,13 @@ import { useEditorStore } from "../../stores/editorStore";
 import { useTranslation } from "../../lib/i18n";
 import {
   buildDocGraph,
+  collectFolderPrefixesFromPaths,
   collectMarkdownPaths,
+  collectTopLevelFolders,
+  filterDocSources,
   joinProjectPath,
   toProjectRelative,
+  type DocGraphExternalLinks,
   type DocSource,
 } from "../../lib/docGraphAnalysis";
 import {
@@ -21,14 +25,40 @@ import { DocGraphView } from "./DocGraphView";
  *
  * 읽기는 패널이 보일 때만. 파일 수가 많으면 상한(collectMarkdownPaths)으로
  * 잘리고, 개별 read 실패는 건너뛴다(한 파일 때문에 전체가 비면 안 된다).
+ *
+ * 폴더 스코프: 드롭다운으로 루트 직속 폴더(docs·강의 등)를 고르면 그 prefix
+ * 아래 md 만 노드·엣지·백링크·orphan 판정. 기본=전체. 스코프 밖 링크는
+ * 제외(기본) 또는 경계 노드로 표시.
  */
 
 const MAX_MD_FILES = 300;
 const READ_CONCURRENCY = 8;
 const GUIDE_STORAGE_KEY = "marblo.docGraph.guide.open";
+const SCOPE_STORAGE_KEY = "marblo.docGraph.folderScope";
+const EXTERNAL_STORAGE_KEY = "marblo.docGraph.externalLinks";
+
+/** 전체 루트 스코프 센티널 — select value. */
+const SCOPE_ALL = "";
 
 interface DocGraphPanelProps {
   onDocumentOpened?: () => void;
+}
+
+function readStoredScope(): string {
+  try {
+    return window.localStorage.getItem(SCOPE_STORAGE_KEY) ?? SCOPE_ALL;
+  } catch {
+    return SCOPE_ALL;
+  }
+}
+
+function readStoredExternal(): DocGraphExternalLinks {
+  try {
+    const v = window.localStorage.getItem(EXTERNAL_STORAGE_KEY);
+    return v === "boundary" ? "boundary" : "exclude";
+  } catch {
+    return "exclude";
+  }
 }
 
 export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
@@ -37,6 +67,10 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
   const openFile = useEditorStore((s) => s.openFile);
 
   const [sources, setSources] = useState<DocSource[]>([]);
+  const [folders, setFolders] = useState<string[]>([]);
+  const [folderPrefix, setFolderPrefix] = useState<string>(readStoredScope);
+  const [externalLinks, setExternalLinks] =
+    useState<DocGraphExternalLinks>(readStoredExternal);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scanned, setScanned] = useState(0);
@@ -46,6 +80,7 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
     const root = useEditorStore.getState().rootPath;
     if (!root || !window.electronAPI?.fs) {
       setSources([]);
+      setFolders([]);
       setError(null);
       setScanned(0);
       return;
@@ -58,6 +93,8 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
     try {
       const tree = await window.electronAPI.fs.readTree(root);
       if (gen !== genRef.current) return;
+
+      const fromTree = collectTopLevelFolders(tree, root);
 
       // readTree 는 절대 경로를 준다. 그래프 id·위키링크 해석은 상대 경로 기준.
       const absPaths = collectMarkdownPaths(tree, { maxFiles: MAX_MD_FILES });
@@ -89,10 +126,31 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
       }
 
       if (gen !== genRef.current) return;
+
+      const fromPaths = collectFolderPrefixesFromPaths(
+        loaded.map((s) => s.path),
+      );
+      const merged = Array.from(new Set([...fromTree, ...fromPaths])).sort(
+        (a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }),
+      );
+      setFolders(merged);
       setSources(loaded);
+
+      // 저장된 스코프가 더 이상 없으면 전체로 되돌린다.
+      setFolderPrefix((prev) => {
+        if (!prev) return SCOPE_ALL;
+        if (merged.includes(prev)) return prev;
+        try {
+          window.localStorage.setItem(SCOPE_STORAGE_KEY, SCOPE_ALL);
+        } catch {
+          /* ignore */
+        }
+        return SCOPE_ALL;
+      });
     } catch (err) {
       if (gen !== genRef.current) return;
       setSources([]);
+      setFolders([]);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       if (gen === genRef.current) setLoading(false);
@@ -106,6 +164,27 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
     };
   }, [rootPath, load]);
 
+  const handleScopeChange = useCallback(
+    (next: string) => {
+      setFolderPrefix(next);
+      try {
+        window.localStorage.setItem(SCOPE_STORAGE_KEY, next);
+      } catch {
+        /* ignore */
+      }
+    },
+    [],
+  );
+
+  const handleExternalChange = useCallback((next: DocGraphExternalLinks) => {
+    setExternalLinks(next);
+    try {
+      window.localStorage.setItem(EXTERNAL_STORAGE_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const handleOpen = useCallback(
     (relPath: string) => {
       const root = useEditorStore.getState().rootPath;
@@ -118,11 +197,28 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
     [openFile, onDocumentOpened],
   );
 
-  const edgeCount = useMemo(
-    () => (sources.length === 0 ? 0 : buildDocGraph(sources).edges.length),
-    [sources],
+  const scopeOptions = useMemo(
+    () => ({
+      folderPrefix: folderPrefix || undefined,
+      externalLinks: folderPrefix ? externalLinks : ("exclude" as const),
+    }),
+    [folderPrefix, externalLinks],
   );
-  const showNoLinksHint = !loading && sources.length > 0 && edgeCount === 0;
+
+  const scopedSources = useMemo(
+    () => filterDocSources(sources, scopeOptions),
+    [sources, scopeOptions],
+  );
+
+  const edgeCount = useMemo(
+    () =>
+      scopedSources.length === 0
+        ? 0
+        : buildDocGraph(scopedSources, scopeOptions).edges.length,
+    [scopedSources, scopeOptions],
+  );
+  const showNoLinksHint =
+    !loading && scopedSources.length > 0 && edgeCount === 0;
 
   if (!rootPath) {
     return (
@@ -166,7 +262,7 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
         </ConnectorGuidePanel>
       </div>
 
-      <div className="flex flex-shrink-0 items-center gap-1 border-b border-gray-700/60 px-2 py-1">
+      <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5 border-b border-gray-700/60 px-2 py-1">
         <button
           type="button"
           onClick={() => void load()}
@@ -176,9 +272,61 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
         >
           {loading ? t("code.docGraph.loading") : t("code.docGraph.refresh")}
         </button>
+
+        <label
+          className="ml-1 flex items-center gap-1 text-[10px] text-gray-500"
+          data-testid="doc-graph-scope"
+        >
+          <span className="whitespace-nowrap">{t("code.docGraph.scope.label")}</span>
+          <select
+            value={folderPrefix}
+            onChange={(e) => handleScopeChange(e.target.value)}
+            className="max-w-[140px] rounded border border-gray-700 bg-gray-900 px-1 py-0.5 text-[10px] text-gray-300"
+            aria-label={t("code.docGraph.scope.label")}
+            data-testid="doc-graph-scope-select"
+          >
+            <option value={SCOPE_ALL}>{t("code.docGraph.scope.all")}</option>
+            {folders.map((folder) => (
+              <option key={folder} value={folder}>
+                {folder}/
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {folderPrefix ? (
+          <label
+            className="flex items-center gap-1 text-[10px] text-gray-500"
+            data-testid="doc-graph-external"
+          >
+            <span className="whitespace-nowrap">
+              {t("code.docGraph.external.label")}
+            </span>
+            <select
+              value={externalLinks}
+              onChange={(e) =>
+                handleExternalChange(e.target.value as DocGraphExternalLinks)
+              }
+              className="max-w-[120px] rounded border border-gray-700 bg-gray-900 px-1 py-0.5 text-[10px] text-gray-300"
+              aria-label={t("code.docGraph.external.label")}
+              data-testid="doc-graph-external-select"
+            >
+              <option value="exclude">
+                {t("code.docGraph.external.exclude")}
+              </option>
+              <option value="boundary">
+                {t("code.docGraph.external.boundary")}
+              </option>
+            </select>
+          </label>
+        ) : null}
+
         {!loading && scanned > 0 && (
           <span className="text-[10px] text-gray-600">
             {t("code.docGraph.scanned", { count: scanned })}
+            {folderPrefix
+              ? ` · ${t("code.docGraph.scope.filtered", { count: scopedSources.length })}`
+              : ""}
           </span>
         )}
       </div>
@@ -200,7 +348,7 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
         </div>
       ) : (
         <div className="min-h-0 flex-1">
-          <DocGraphView sources={sources} onOpenDoc={handleOpen} />
+          <DocGraphView sources={scopedSources} onOpenDoc={handleOpen} />
         </div>
       )}
     </div>
