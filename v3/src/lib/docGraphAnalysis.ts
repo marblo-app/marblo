@@ -327,7 +327,8 @@ export function collectTopLevelFolders(
     const top = (rel.split("/").filter(Boolean)[0] ?? "").trim();
     if (top && !top.startsWith(".")) folders.add(top);
   }
-  return Array.from(folders).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  // UI 표시 순서를 결정하므로 실행 환경 로케일에 관계없이 결과가 고정되도록 "en" 로케일을 명시한다.
+  return Array.from(folders).sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
 }
 
 /**
@@ -344,7 +345,7 @@ export function collectFolderPrefixesFromPaths(
     const top = p.slice(0, slash);
     if (top && !top.startsWith(".")) folders.add(top);
   }
-  return Array.from(folders).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  return Array.from(folders).sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
 }
 
 /**
