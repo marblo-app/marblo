@@ -131,6 +131,13 @@ export const settings = {
     "안녕하세요.\n\n아래 사용자의 텔레메트리 데이터 삭제를 요청합니다 (PIPA 제36조).\n\n사용자 UID: {uid}\n\n대상 서비스:\n[ ] Sentry (크래시 리포트)\n\n30일 이내 응답 부탁드립니다.\n",
   "settings.saveFailed": "저장 실패",
 
+  // ── Agent notifications (SettingsPage › Profile) ───────────────
+  "settings.notifications.agentInputWait.heading": "에이전트 입력대기 팝업",
+  "settings.notifications.agentInputWait.body":
+    "에이전트가 터미널 입력을 기다릴 때 우상단 팝업을 띄웁니다. 기본값은 꺼짐이며, 필요한 신호는 보드와 에이전트 탭 배지로 표시됩니다.",
+  "settings.notifications.agentInputWait.on": "팝업 켜짐",
+  "settings.notifications.agentInputWait.off": "팝업 꺼짐",
+
   // ── Subscription plans (SettingsPage › SubscriptionPlansSection) ─
   "settings.subscription.heading": "구독제 과금",
   "settings.subscription.help":

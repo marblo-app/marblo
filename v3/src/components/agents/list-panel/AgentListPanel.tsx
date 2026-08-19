@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, useCallback, useEffect } from "react";
+import { useAgentAttentionStore } from "../../../stores/agentAttentionStore";
 import { useAgentStore } from "../../../stores/agentStore";
 import { useTerminalStore } from "../../../stores/terminalStore";
 import { useNavigationStore } from "../../../stores/navigationStore";
@@ -66,6 +67,7 @@ export function AgentListPanel({
 }: Props) {
   const { t } = useTranslation();
   const agents = useAgentStore((s) => s.agents);
+  const inputWaitByAgentId = useAgentAttentionStore((s) => s.waiting);
   const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
   const restartAgent = useAgentStore((s) => s.restartAgent);
   const updateAgent = useAgentStore((s) => s.updateAgent);
@@ -199,6 +201,7 @@ export function AgentListPanel({
         taskId: a.currentTaskId,
         status: a.status === "working" ? "running" : a.status,
         lastActivityLabel: formatAge(a.costUpdatedAt ?? a.createdAt),
+        isInputWaiting: !!inputWaitByAgentId[a.id],
         isAgent: true,
         ptySessionId: matchedId,
       };
@@ -218,7 +221,7 @@ export function AgentListPanel({
       }));
 
     return [...agentRows, ...shellRows];
-  }, [realAgents, sessions]);
+  }, [inputWaitByAgentId, realAgents, sessions]);
 
   // Rows with a live PTY session — these get a persistent TerminalView each.
   // Mounted at the panel body level (below) so xterm instances survive focus

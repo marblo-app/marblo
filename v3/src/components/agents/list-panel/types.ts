@@ -30,6 +30,7 @@ export interface AgentRowData {
   taskId: string | null;
   status: AgentStatus | "running";
   lastActivityLabel: string;
+  isInputWaiting?: boolean;
   isAgent: boolean;
   ptySessionId?: string;
 }

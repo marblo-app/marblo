@@ -4,6 +4,7 @@ import { useWorkspaceModeStore } from "../../stores/workspaceModeStore";
 import { useBeginnerModeStore } from "../../stores/beginnerModeStore";
 import { useOnboardingPreviewStore } from "../../stores/onboardingPreviewStore";
 import { useCoachmarkStore } from "../../stores/coachmarkStore";
+import { useAgentNotificationSettingsStore } from "../../stores/agentNotificationSettingsStore";
 import { BEGINNER_TOUR_ID } from "../../lib/coachmark";
 import telemetry from "../../services/telemetryService";
 import { useProjectStore } from "../../stores/projectStore";
@@ -265,8 +266,56 @@ function ProfileSection() {
 
       {/* 워크스페이스 셸 토글은 없앴다 — 셸이 곧 제품이라 고를 축이 아니다
           (stores/workspaceModeStore 의 "프로덕션 항상 ON" 주석 참고). */}
+      <AgentNotificationSection />
       <BeginnerModeSection />
       <OnboardingPreviewSection />
+    </div>
+  );
+}
+
+function AgentNotificationSection() {
+  const { t } = useTranslation();
+  const enabled = useAgentNotificationSettingsStore(
+    (s) => s.inputWaitPopupsEnabled,
+  );
+  const setEnabled = useAgentNotificationSettingsStore(
+    (s) => s.setInputWaitPopupsEnabled,
+  );
+
+  return (
+    <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="mb-1 text-sm font-medium text-gray-200">
+            {t("settings.notifications.agentInputWait.heading")}
+          </h3>
+          <p className="text-xs leading-relaxed text-gray-500">
+            {t("settings.notifications.agentInputWait.body")}
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          data-testid="settings-agent-input-wait-popups-toggle"
+          aria-checked={enabled}
+          aria-label={t("settings.notifications.agentInputWait.heading")}
+          onClick={() => setEnabled(!enabled)}
+          className={`relative mt-0.5 h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+            enabled ? "bg-blue-600" : "bg-gray-600"
+          }`}
+        >
+          <span
+            className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+              enabled ? "translate-x-5" : "translate-x-0"
+            }`}
+          />
+        </button>
+      </div>
+      <p className="mt-2 text-xs font-medium text-gray-400">
+        {enabled
+          ? t("settings.notifications.agentInputWait.on")
+          : t("settings.notifications.agentInputWait.off")}
+      </p>
     </div>
   );
 }

@@ -131,6 +131,13 @@ export const settings: Record<keyof typeof koSettings, string> = {
     "Hello,\n\nI request deletion of the following user's telemetry data (PIPA Art. 36).\n\nUser UID: {uid}\n\nTarget services:\n[ ] Sentry (crash reports)\n\nPlease respond within 30 days.\n",
   "settings.saveFailed": "Save failed",
 
+  // ── Agent notifications (SettingsPage › Profile) ───────────────
+  "settings.notifications.agentInputWait.heading": "Agent input-wait popups",
+  "settings.notifications.agentInputWait.body":
+    "Show a top-right popup when an agent is waiting for terminal input. This is off by default; board and agent-tab badges still carry the attention signal.",
+  "settings.notifications.agentInputWait.on": "Popups on",
+  "settings.notifications.agentInputWait.off": "Popups off",
+
   // ── Subscription plans (SettingsPage › SubscriptionPlansSection) ─
   "settings.subscription.heading": "Subscription billing",
   "settings.subscription.help":

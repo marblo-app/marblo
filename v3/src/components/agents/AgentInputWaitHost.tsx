@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "../../lib/i18n";
 import { useAgentFocusStore } from "../../stores/agentFocusStore";
+import { useAgentNotificationSettingsStore } from "../../stores/agentNotificationSettingsStore";
 import { useAgentStore } from "../../stores/agentStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { useProjectStore } from "../../stores/projectStore";
@@ -68,6 +69,9 @@ export function AgentInputWaitHost({ onOpen }: AgentInputWaitHostProps) {
   const apply = useAgentAttentionStore((s) => s.apply);
   const dismiss = useAgentAttentionStore((s) => s.dismiss);
   const clearAll = useAgentAttentionStore((s) => s.clearAll);
+  const popupsEnabled = useAgentNotificationSettingsStore(
+    (s) => s.inputWaitPopupsEnabled,
+  );
   const projectId = useProjectStore((s) => s.currentProject?.id ?? null);
 
   // main 의 전이 신호를 받는 유일한 자리. 셸은 서로 배타라(심플 XOR 엑스퍼트)
@@ -119,7 +123,8 @@ export function AgentInputWaitHost({ onOpen }: AgentInputWaitHostProps) {
     const agent = agentById.get(item.agentId);
     return !!agent && agent.status !== "stopped" && agent.status !== "error";
   });
-  if (items.length === 0 || typeof document === "undefined") return null;
+  if (!popupsEnabled || items.length === 0 || typeof document === "undefined")
+    return null;
 
   return createPortal(
     <div
