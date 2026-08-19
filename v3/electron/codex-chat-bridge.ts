@@ -5,14 +5,16 @@
  * /v1/chat/completions (Upstage Solar today) need this localhost shim so
  * model_providers.<id> can still force API-key auth away from ChatGPT.
  *
- * Scope: stateless text + function tools (Codex client-executed). Hosted
- * tools (web_search / namespace) are dropped — Codex degrades without them.
+ * Scope: stateless text + function tools (Codex client-executed). Codex
+ * namespace groups (MCP servers, multi_agent_v1) are flattened into plain
+ * Chat function tools and restored on the way back. Hosted tools
+ * (web_search) have no Chat equivalent and are still dropped.
  */
 import http from "http";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { randomBytes } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { URL } from "url";
 import { spawn, type ChildProcess } from "child_process";
 import { execFileSync } from "child_process";
@@ -36,6 +38,41 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * codex 0.148.0 은 MCP 서버 도구를 개별 `type:"function"` 으로 보내지 않고
+ * `{type:"namespace", name:"mcp__marblo", tools:[...]}` 한 덩어리로 보낸다.
+ * Chat Completions 에는 namespace 개념이 없으므로 `<namespace>__<tool>` 로
+ * 평탄화해서 upstream 에 넘기고, 응답에서 다시 갈라 codex 에 돌려준다.
+ * (2026-08-19 녹음 프록시 실측: marblo 23개 + multi_agent_v1 5개가 이 필터에서
+ *  통째로 사라져 solar 에이전트가 MCP 도구를 아예 못 보던 것이 근본원인이다.)
+ */
+const NAMESPACE_SEPARATOR = "__";
+/** OpenAI-compatible function name 상한. Upstage 도 이 규격을 따른다. */
+const MAX_CHAT_TOOL_NAME = 64;
+
+export interface NamespacedToolName {
+  /** namespace 를 뺀 원래 도구 이름 (예: add_activity) */
+  name: string;
+  /** codex 가 쓰는 namespace (예: mcp__marblo) */
+  namespace: string;
+}
+
+/**
+ * namespace + 도구명 → Chat 이 받는 단일 function 이름.
+ * namespace 자체가 "__" 를 포함하므로(mcp__marblo) 문자열 분해로는 되돌릴 수
+ * 없다. 복원은 항상 요청 변환 때 만든 맵으로 한다.
+ */
+export function flattenNamespacedToolName(
+  namespace: string,
+  name: string,
+): string {
+  if (!namespace) return name;
+  const flat = `${namespace}${NAMESPACE_SEPARATOR}${name}`;
+  if (flat.length <= MAX_CHAT_TOOL_NAME) return flat;
+  const digest = createHash("sha1").update(flat).digest("hex").slice(0, 8);
+  return `${flat.slice(0, MAX_CHAT_TOOL_NAME - digest.length - 1)}_${digest}`;
+}
+
 function textFromContent(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -56,6 +93,8 @@ function textFromContent(content: unknown): string {
 /** Convert Responses request body → Chat Completions body. */
 export function responsesRequestToChatCompletions(
   body: Record<string, unknown>,
+  /** 채워서 돌려주는 역맵: 평탄화 이름 → {name, namespace}. 응답 복원에 쓴다. */
+  toolNames?: Map<string, NamespacedToolName>,
 ): Record<string, unknown> {
   const messages: Array<Record<string, unknown>> = [];
   if (typeof body.instructions === "string" && body.instructions.trim()) {
@@ -107,11 +146,16 @@ export function responsesRequestToChatCompletions(
           (typeof item.call_id === "string" && item.call_id) ||
           (typeof item.id === "string" && item.id) ||
           `call_${randomBytes(4).toString("hex")}`;
+        // 히스토리의 function_call 도 namespace 를 실어 온다. upstream 이 이전
+        // 턴에서 본 이름과 같아야 하므로 동일한 평탄화를 적용한다.
+        const rawName = typeof item.name === "string" ? item.name : "";
+        const rawNamespace =
+          typeof item.namespace === "string" ? item.namespace : "";
         pendingToolCalls.push({
           id: callId,
           type: "function",
           function: {
-            name: typeof item.name === "string" ? item.name : "",
+            name: flattenNamespacedToolName(rawNamespace, rawName),
             arguments:
               typeof item.arguments === "string"
                 ? item.arguments
@@ -142,24 +186,47 @@ export function responsesRequestToChatCompletions(
   }
 
   const toolsIn = Array.isArray(body.tools) ? body.tools : [];
-  const tools = toolsIn
-    .filter(
-      (t): t is Record<string, unknown> => isRecord(t) && t.type === "function",
-    )
-    .map((t) => {
-      if (isRecord(t.function)) {
-        return { type: "function", function: t.function };
-      }
-      return {
-        type: "function",
-        function: {
-          name: t.name,
-          description: t.description,
-          parameters: t.parameters,
-          ...(typeof t.strict === "boolean" ? { strict: t.strict } : {}),
-        },
-      };
+  const tools: Array<Record<string, unknown>> = [];
+  const pushFunctionTool = (
+    t: Record<string, unknown>,
+    namespace: string,
+  ): void => {
+    if (isRecord(t.function)) {
+      // 이미 Chat 모양으로 온 경우 (namespace 안에는 오지 않는다).
+      tools.push({ type: "function", function: t.function });
+      return;
+    }
+    const bare = typeof t.name === "string" ? t.name : "";
+    if (!bare) return;
+    const flat = flattenNamespacedToolName(namespace, bare);
+    if (namespace) toolNames?.set(flat, { name: bare, namespace });
+    tools.push({
+      type: "function",
+      function: {
+        name: flat,
+        description: t.description,
+        parameters: t.parameters,
+        ...(typeof t.strict === "boolean" ? { strict: t.strict } : {}),
+      },
     });
+  };
+
+  for (const t of toolsIn) {
+    if (!isRecord(t)) continue;
+    if (t.type === "function") {
+      pushFunctionTool(t, "");
+      continue;
+    }
+    if (t.type === "namespace" && Array.isArray(t.tools)) {
+      const namespace = typeof t.name === "string" ? t.name : "";
+      for (const nested of t.tools) {
+        if (!isRecord(nested) || nested.type !== "function") continue;
+        pushFunctionTool(nested, namespace);
+      }
+      continue;
+    }
+    // 호스티드 도구(web_search 등)는 여전히 옮길 수 없다 — Chat 규격에 없다.
+  }
 
   const chat: Record<string, unknown> = {
     model: body.model,
@@ -178,6 +245,21 @@ export function responsesRequestToChatCompletions(
   return chat;
 }
 
+/**
+ * upstream 이 부른 (평탄화된) 함수 이름을 codex 가 이해하는 모양으로 되돌린다.
+ * namespace 도구였다면 `name` 은 원래 이름으로, `namespace` 필드가 따로 붙는다
+ * — codex 의 wire 포맷이 그렇다(rollout jsonl 실측:
+ * {"type":"function_call","name":"add_activity","namespace":"mcp__marblo",...}).
+ */
+function decodeToolCallName(
+  flatName: string,
+  toolNames?: Map<string, NamespacedToolName>,
+): { name: string; namespace?: string } {
+  const hit = toolNames?.get(flatName);
+  if (!hit) return { name: flatName };
+  return { name: hit.name, namespace: hit.namespace };
+}
+
 function sseWrite(res: http.ServerResponse, event: string, data: unknown): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
@@ -194,6 +276,8 @@ async function pipeChatStreamToResponses(
   upstream: Response,
   res: http.ServerResponse,
   model: string,
+  /** 요청 변환에서 만든 평탄화 이름 → {name, namespace} 역맵. */
+  toolNames?: Map<string, NamespacedToolName>,
 ): Promise<void> {
   const responseId = newResponseId();
   const createdAt = Math.floor(Date.now() / 1000);
@@ -333,7 +417,7 @@ async function pipeChatStreamToResponses(
             item: {
               type: "function_call",
               call_id: acc.callId,
-              name: acc.name,
+              ...decodeToolCallName(acc.name, toolNames),
               arguments: "",
             },
           });
@@ -392,19 +476,20 @@ async function pipeChatStreamToResponses(
       call_id: acc.callId,
       arguments: acc.arguments,
     });
+    const decoded = decodeToolCallName(acc.name, toolNames);
     sseWrite(res, "response.output_item.done", {
       type: "response.output_item.done",
       item: {
         type: "function_call",
         call_id: acc.callId,
-        name: acc.name,
+        ...decoded,
         arguments: acc.arguments,
       },
     });
     output.push({
       type: "function_call",
       call_id: acc.callId,
-      name: acc.name,
+      ...decoded,
       arguments: acc.arguments,
     });
   }
@@ -453,7 +538,8 @@ async function handleResponsesPost(
     return;
   }
 
-  const chatBody = responsesRequestToChatCompletions(body);
+  const toolNames = new Map<string, NamespacedToolName>();
+  const chatBody = responsesRequestToChatCompletions(body, toolNames);
   const upstream = opts.upstreamBaseUrl.replace(/\/$/, "");
   const url = `${upstream}/chat/completions`;
 
@@ -490,7 +576,7 @@ async function handleResponsesPost(
 
   const model = typeof body.model === "string" ? body.model : "unknown";
   if (chatBody.stream) {
-    await pipeChatStreamToResponses(upstreamRes, res, model);
+    await pipeChatStreamToResponses(upstreamRes, res, model, toolNames);
     return;
   }
 
@@ -522,7 +608,10 @@ async function handleResponsesPost(
         typeof tc.id === "string"
           ? tc.id
           : `call_${randomBytes(4).toString("hex")}`,
-      name: typeof fn.name === "string" ? fn.name : "",
+      ...decodeToolCallName(
+        typeof fn.name === "string" ? fn.name : "",
+        toolNames,
+      ),
       arguments: typeof fn.arguments === "string" ? fn.arguments : "",
     });
   }
@@ -809,4 +898,5 @@ if (isBridgeChildEntry()) {
 
 export const __test = {
   responsesRequestToChatCompletions,
+  flattenNamespacedToolName,
 };
