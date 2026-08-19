@@ -9451,6 +9451,22 @@ app.whenReady().then(async () => {
     console.warn("[Main] grok auth symlink sweep failed (non-fatal):", err);
   }
 
+  // Register installed Ollama models during app boot, not only when the Local
+  // Models tab is opened. This keeps post-restart dispatch(model:"qwen…")
+  // from missing the runtime registry row and falling into unrelated routing.
+  try {
+    const detection = await syncInstalledLocalModels(true);
+    if (detection.installedIds.length > 0) {
+      console.log(
+        `[Main] Registered ${detection.installedIds.length} installed Ollama model(s)`
+      );
+    } else if (detection.installed && !detection.daemonRunning) {
+      console.log("[Main] Ollama daemon is not running; local model scan skipped");
+    }
+  } catch (err) {
+    console.warn("[Main] Ollama local model boot scan failed (non-fatal):", err);
+  }
+
   // 학습데이터 캡처 부트스트랩. 여기서는 타이머만 세우고 게이트를 서버에
   // 물어보기만 한다 — 인증 전이면 닫힌 상태로 남고(fail-closed), 로그인 직후
   // auth:syncAgentCustomToken 이 다시 당긴다. 지난 실행에서 업로드하지 못하고

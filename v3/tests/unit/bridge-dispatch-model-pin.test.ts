@@ -64,6 +64,7 @@ import { BridgeServer } from "../../electron/bridge-server";
 import { AgentConfigGenerator } from "../../electron/agent-config";
 import type { AgentInstance, AgentStatus } from "../../electron/agent-manager";
 import { spawnedModelFromArgs } from "../../electron/agent-manager";
+import { registerLocalOllamaModels } from "../../electron/model-registry";
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-pin-bridge-"));
 
@@ -355,6 +356,41 @@ describe("dispatch_task 지정모델 → 실제 스폰 argv", () => {
     expect(res.success).toBe(true);
     // 명시 모델로 인정되지 않았으므로 점수 경쟁이 돌았다.
     expect(lastDecision().explicitModel).toBe(false);
+  });
+
+  it("★재시작 회귀: 하네스 탭 없이 등록된 Ollama 모델은 local env-swap 으로 스폰된다", async () => {
+    registerLocalOllamaModels(["qwen2.5-coder:7b"]);
+    const { bridge, am } = makeBridge();
+    const res = await bridge.dispatchTask({
+      role: "backend",
+      instruction: "do it",
+      cwd: TMP,
+      model: "qwen2.5-coder:7b",
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.model).toBe("local");
+    expect(res.spawnedModel).toBe("qwen2.5-coder:7b");
+    const agent = am.getAgent(res.agentId!)!;
+    expect(agent.model).toBe("local");
+    expect(argsOf(am, res.agentId!)).toContain("qwen2.5-coder:7b");
+    expect(agent.launchConfig!.env.ANTHROPIC_BASE_URL).toBe(
+      "http://localhost:11434",
+    );
+  });
+
+  it("★미등록 Ollama id 는 즉석 스캔 후에도 없으면 scoring 폴백 없이 실패한다", async () => {
+    const { bridge } = makeBridge();
+    const res = await bridge.dispatchTask({
+      role: "backend",
+      instruction: "do it",
+      cwd: TMP,
+      model: "marblo-missing-local-model:999b",
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("Refusing to fall back");
+    expect(telemetry.dispatchDecision).not.toHaveBeenCalled();
   });
 
   it("★재시작 회귀: stopped agent 재시작도 요청 model pin 을 보존한다", async () => {
