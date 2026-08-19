@@ -3479,7 +3479,8 @@ export class AgentConfigGenerator {
   }
 
   /**
-   * Start Upstage chat-bridge if needed and render [model_providers.*] TOML.
+   * Start a Codex chat bridge only for vendors that still need it, then render
+   * [model_providers.*] TOML.
    */
   private buildCodexVendorProviderToml(
     agentId: string,

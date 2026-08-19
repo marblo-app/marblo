@@ -174,9 +174,11 @@ describe("Upstage Solar 주입 — OPENAI_* 전부-or-전무", () => {
       expect(configToml).toMatch(/model_provider\s*=\s*"upstage"/);
       expect(configToml).toContain("[model_providers.upstage]");
       expect(configToml).toContain('env_key = "UPSTAGE_API_KEY"');
-      expect(configToml).toContain('wire_api = "responses"');
+      expect(configToml).toContain('wire_api = "chat"');
+      expect(configToml).toContain(`base_url = "${UPSTAGE_ENDPOINT}"`);
       expect(configToml).toContain('preferred_auth_method = "apikey"');
       expect(configToml).toContain('forced_login_method = "api"');
+      expect(configToml).toContain("requires_openai_auth = false");
       // ChatGPT auth.json must not be linked for vendor override.
       expect(
         fs.existsSync(path.join(String(cfg.env.CODEX_HOME), "auth.json")),

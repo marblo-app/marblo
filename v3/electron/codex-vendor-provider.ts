@@ -9,11 +9,11 @@
  *   preferred_auth_method = "apikey"
  *   forced_login_method = "api"
  *   [model_providers.<id>]
- *   name / base_url / env_key / wire_api = "responses"
+ *   name / base_url / env_key / wire_api
  *
- * DeepSeek natively speaks Responses. Upstage currently only speaks Chat
- * Completions (/v1/responses → 404), so Solar spawns point base_url at a
- * per-agent localhost bridge that translates Responses → Chat Completions.
+ * DeepSeek natively speaks Responses. Upstage Solar Pro 4 only exposes the
+ * OpenAI Chat Completions path, so Codex must use wire_api="chat" directly
+ * against https://api.upstage.ai/v1.
  */
 import {
   envProfileForModel,
@@ -38,24 +38,36 @@ export interface CodexVendorProviderOverride {
   upstreamBaseUrl: string;
   /** Env var Codex reads for the Bearer token (must be present at spawn). */
   envKey: string;
+  /** Codex custom-provider wire protocol. */
+  wireApi: "chat" | "responses";
   /**
    * True when the upstream lacks /v1/responses and needs the local chat bridge.
-   * Upstage: yes. DeepSeek: no (official Responses support).
+   * Kept for vendors that still need Responses → Chat translation.
    */
   needsChatBridge: boolean;
 }
 
 const PROVIDER_META: Readonly<
-  Record<"upstage" | "deepseek", { name: string; upstreamBaseUrl: string; needsChatBridge: boolean }>
+  Record<
+    "upstage" | "deepseek",
+    {
+      name: string;
+      upstreamBaseUrl: string;
+      wireApi: "chat" | "responses";
+      needsChatBridge: boolean;
+    }
+  >
 > = {
   upstage: {
     name: "Upstage Solar",
     upstreamBaseUrl: "https://api.upstage.ai/v1",
-    needsChatBridge: true,
+    wireApi: "chat",
+    needsChatBridge: false,
   },
   deepseek: {
     name: "DeepSeek",
     upstreamBaseUrl: "https://api.deepseek.com",
+    wireApi: "responses",
     needsChatBridge: false,
   },
 };
@@ -97,6 +109,7 @@ export function resolveCodexVendorProviderOverride(
     name: meta.name,
     upstreamBaseUrl: meta.upstreamBaseUrl,
     envKey: envKeys[0]!,
+    wireApi: meta.wireApi,
     needsChatBridge: meta.needsChatBridge,
   };
 }
@@ -118,7 +131,7 @@ export function renderCodexVendorProviderToml(
     `name = ${JSON.stringify(override.name)}`,
     `base_url = ${JSON.stringify(baseUrl.replace(/\/$/, ""))}`,
     `env_key = ${JSON.stringify(override.envKey)}`,
-    'wire_api = "responses"',
+    `wire_api = ${JSON.stringify(override.wireApi)}`,
     // Custom providers must not reuse ChatGPT login.
     "requires_openai_auth = false",
   ];
