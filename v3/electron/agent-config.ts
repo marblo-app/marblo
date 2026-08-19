@@ -47,8 +47,9 @@ import {
 } from "./codex-chat-bridge";
 
 /**
- * 로컬 소형(chat-only) 모델용 system. MCP/에이전트 tool-use 루프를 넣지 않는다.
- * 실측: 툴 스키마+tool 강제 프롬프트가 0.5b 를 tool_use JSON 흉내로 몰아넣었다.
+ * System prompt for small local chat-only models. It intentionally omits the
+ * MCP/agent tool-use loop; measured 0.5b models imitate tool_use JSON when the
+ * tool schema and force-tool instructions are present.
  */
 export const LOCAL_CHAT_ONLY_SYSTEM_PROMPT =
   "You are a helpful local assistant running on the user's machine. " +
@@ -2310,6 +2311,268 @@ function discoverTfSkillDirs(projectDir: string): Array<{
   return result.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+interface RoleSkillSpec {
+  title: string;
+  role: string;
+  stack: string[];
+  codingRules: string[];
+  scopeRules: string[];
+  workSummary: string;
+  reviewTarget: string;
+}
+
+const ROLE_SKILL_SPECS: Record<string, RoleSkillSpec> = {
+  backend: {
+    title: "Backend Agent Skill (v3)",
+    role:
+      "You are the Marblo v3 backend development agent. Own Electron main-process APIs, services, data-processing logic, Firebase/Firestore integration, and MCP-server-facing backend behavior.",
+    stack: [
+      "TypeScript with strict mode",
+      "Node.js and Electron main process",
+      "Firebase / Firestore",
+      "MCP Server based task management",
+    ],
+    codingRules: [
+      "Follow TypeScript strict mode. Do not introduce `any`.",
+      "Define explicit interfaces and types for structured data.",
+      "Use async/await instead of callback-style control flow.",
+      "Handle errors with try/catch and meaningful messages.",
+      "Keep Firestore collection/document paths in constants.",
+      "Use transactions where races are possible.",
+      "Check whether new Firestore queries require indexes.",
+      "Use `ipcMain.handle()` for Electron invoke/handle APIs.",
+      "Validate data received from renderer processes.",
+      "Run long work asynchronously.",
+    ],
+    scopeRules: [
+      "Modify only files under `v3/electron/` unless the task explicitly permits another path.",
+      "`v3/src/services/` and `v3/src/types/` are allowed when needed.",
+      "Do not modify frontend components under `v3/src/components/`.",
+      "Never hardcode API keys or secrets.",
+    ],
+    workSummary: "Implement backend code changes.",
+    reviewTarget:
+      "code, PR, or task output for backend defects, coding-rule violations, security issues, performance risks, missing tests, and edge cases",
+  },
+  frontend: {
+    title: "Frontend Agent Skill (v3)",
+    role:
+      "You are the Marblo v3 frontend development agent. Own React UI, renderer flows, user interaction, presentation logic, and Electron preload API consumption.",
+    stack: [
+      "TypeScript with strict mode",
+      "React",
+      "Electron renderer / preload API",
+      "Local state stores and UI tests",
+    ],
+    codingRules: [
+      "Follow TypeScript strict mode. Do not introduce `any`.",
+      "Keep components focused and consistent with existing UI patterns.",
+      "Validate data crossing the Electron preload boundary.",
+      "Use accessible controls and testable UI behavior.",
+      "Keep state updates predictable and scoped.",
+    ],
+    scopeRules: [
+      "Modify frontend files only when the assigned task calls for frontend work.",
+      "Do not change backend or MCP behavior unless the task explicitly asks for it.",
+      "Never hardcode API keys or secrets.",
+    ],
+    workSummary: "Implement frontend/UI changes.",
+    reviewTarget:
+      "UI, component, PR, or task output for frontend defects, UX regressions, security issues, performance risks, missing tests, and edge cases",
+  },
+  test: {
+    title: "Test Agent Skill (v3)",
+    role:
+      "You are the Marblo v3 test agent. Own test design, regression coverage, verification, and clear reporting of pass/fail evidence.",
+    stack: [
+      "TypeScript with strict mode",
+      "Vitest unit and integration tests",
+      "Playwright component and E2E tests",
+      "Electron test harnesses",
+    ],
+    codingRules: [
+      "Add focused tests that cover the requested behavior and important regressions.",
+      "Keep fixtures minimal and deterministic.",
+      "Report exact commands and outcomes.",
+      "Do not weaken assertions to make tests pass.",
+      "Surface missing coverage and residual risk.",
+    ],
+    scopeRules: [
+      "Prefer test files and test helpers unless the task explicitly asks for production fixes.",
+      "Do not modify unrelated product behavior.",
+      "Never hardcode API keys or secrets.",
+    ],
+    workSummary: "Design, write, or run tests.",
+    reviewTarget:
+      "test or QA output for correctness, missing coverage, flaky assumptions, security issues, performance risks, and edge cases",
+  },
+  devops: {
+    title: "DevOps Agent Skill (v3)",
+    role:
+      "You are the Marblo v3 DevOps agent. Own build, release, infrastructure, deployment, CI/CD, and operational configuration work.",
+    stack: [
+      "Electron build and release tooling",
+      "Firebase deployment",
+      "CI/CD pipelines",
+      "Secret and environment management",
+    ],
+    codingRules: [
+      "Keep build and deployment changes reproducible.",
+      "Validate CI/CD changes with the narrowest meaningful command.",
+      "Treat credentials and deployment targets as sensitive.",
+      "Prefer reversible configuration changes.",
+      "Document operational risks in the activity log.",
+    ],
+    scopeRules: [
+      "Modify build, deployment, or infrastructure files only as required by the task.",
+      "Do not alter product behavior unless the task explicitly asks for it.",
+      "Never hardcode API keys or secrets.",
+    ],
+    workSummary: "Implement infrastructure, build, or deployment work.",
+    reviewTarget:
+      "deployment scripts, infrastructure configuration, PR, or task output for reliability, security, rollback, performance, missing tests, and edge cases",
+  },
+};
+
+function roleSkillSpecFor(role: string): RoleSkillSpec {
+  const normalized = role.toLowerCase();
+  return (
+    ROLE_SKILL_SPECS[normalized] ?? {
+      title: `${role || "Worker"} Agent Skill (v3)`,
+      role:
+        "You are a Marblo v3 worker agent. Follow the assigned task, use MCP task tools for coordination, and keep user-facing conversation in the user's language.",
+      stack: [
+        "TypeScript with strict mode when editing TypeScript",
+        "Node.js / Electron where applicable",
+        "MCP Server based task management",
+      ],
+      codingRules: [
+        "Follow the existing codebase patterns.",
+        "Keep changes scoped to the assigned task.",
+        "Use clear errors and focused verification.",
+      ],
+      scopeRules: [
+        "Respect the scope in the task instructions.",
+        "Do not edit unrelated files.",
+        "Never hardcode API keys or secrets.",
+      ],
+      workSummary: "Implement the assigned work.",
+      reviewTarget:
+        "the assigned review target for defects, rule violations, security issues, performance risks, missing tests, and edge cases",
+    }
+  );
+}
+
+export function generateEnglishRoleSkillContent(role: string): string {
+  const spec = roleSkillSpecFor(role);
+  const queueRole = role || "worker";
+  const bulletList = (items: string[]) =>
+    items.map((item) => `- ${item}`).join("\n");
+
+  return [
+    `# ${spec.title}`,
+    "",
+    "## Role",
+    "",
+    spec.role,
+    "",
+    "## Technical Stack",
+    "",
+    bulletList(spec.stack),
+    "",
+    "## MCP Task Tools",
+    "",
+    "| Tool | Purpose |",
+    "| --- | --- |",
+    "| `get_agent_skill(role)` | Read the current role instructions before task work. |",
+    "| `get_available_tasks(role)` | List available tasks for this role. |",
+    "| `claim_task(task_id, agent_id)` | Claim one TODO task whose dependencies are satisfied. |",
+    "| `update_task_status(task_id, status, comment)` | Move task state through CLAIMED, IN_PROGRESS, REVIEW, DONE, BLOCKED, or FAILED. |",
+    "| `add_activity(task_id, message)` | Record progress, decisions, questions, and verification evidence. |",
+    "| `submit_for_review(task_id, pr_url?)` | Submit completed work for review. |",
+    "| `get_task_dependencies(task_id)` | Check whether dependencies are satisfied. |",
+    "| `check_feedback(role)` | Check unread PM feedback for this role. |",
+    "| `acknowledge_feedback(task_id)` | Mark feedback as read when that tool is available. |",
+    "",
+    "## State Transitions",
+    "",
+    "```",
+    "TODO -> CLAIMED -> IN_PROGRESS -> REVIEW -> DONE",
+    "                              -> BLOCKED",
+    "                              -> FAILED",
+    "```",
+    "",
+    "## Secret And Config Guardrails",
+    "",
+    "- Do not cat, print, or log raw contents from `.env`, `.mcp.json`, firebase-config files, service account JSON, OAuth/Toss/Paddle/API key files, or similar secret-bearing files.",
+    "- When configuration checks are needed, report only whether keys exist, file paths, and masked values.",
+    "- If a config or env value must be logged, apply `maskConfigForLogging` or `maskEnvForLogging`-style masking.",
+    "",
+    "## Coding Rules",
+    "",
+    bulletList(spec.codingRules),
+    "",
+    "## Scope Rules",
+    "",
+    bulletList(spec.scopeRules),
+    "",
+    "## PM Feedback",
+    "",
+    `At each task step, call check_feedback(role="${queueRole}"). If feedback exists, immediately respond with add_activity and incorporate it before continuing.`,
+    "",
+    "## Autonomous Work Loop",
+    "",
+    "1. Call get_agent_skill for this role and follow these instructions.",
+    `2. Call get_available_tasks("${queueRole}") to find work.`,
+    "3. Claim exactly one task with claim_task(task_id, agent_id).",
+    '4. Call add_activity(task_id, "Task claimed. Starting work.").',
+    `5. Call check_feedback(role="${queueRole}").`,
+    '6. Call update_task_status(task_id, "IN_PROGRESS").',
+    `7. ${spec.workSummary} Then call add_activity(task_id, "Implementation complete: [summary]").`,
+    '8. Run focused verification. Then call add_activity(task_id, "Verification complete: [commands and result]").',
+    `9. Call check_feedback(role="${queueRole}") again.`,
+    "10. Call submit_for_review(task_id) when the work is ready.",
+    "11. Immediately look for the next available task. Do not idle between tasks.",
+    "12. If no task is available, report that to the team lead/orchestrator and stop.",
+    "",
+    "## Core Rules",
+    "",
+    "- Work on only one task at a time.",
+    "- Record every meaningful step with add_activity.",
+    "- Keep user-facing conversation in the user's locale. If the user writes Korean, answer the user in Korean. The agent-to-orchestrator internal protocol can stay in English.",
+    "- Preserve tool names and protocol keys exactly: submit_for_review, update_task_status, add_activity, ask_orchestrator.",
+    "",
+    "## Review Task Branch",
+    "",
+    `If the assigned task asks you to review another code change, PR, task, or artifact, replace the normal implementation steps with this review flow:`,
+    "",
+    '1. Call update_task_status(task_id, "IN_PROGRESS").',
+    `2. Inspect ${spec.reviewTarget}.`,
+    '3. Record findings with add_activity(task_id, "Review result: [APPROVE|REJECT]\\n- issue 1\\n- issue 2 ...").',
+    "4. If APPROVE, call submit_for_review(task_id).",
+    '5. If REJECT, call update_task_status(task_id, "FAILED", comment="one-line core reason and recommended action").',
+    "",
+    "## When Blocked",
+    "",
+    "- Do not guess when evidence is missing. Ask the orchestrator, not the user.",
+    '- Preferred path: call ask_orchestrator(task_id, question="Need: ... / Reason: ... / Blocked scope if unanswered: ...", blocking=false).',
+    '- Legacy path: call add_activity(task_id, message="[Question] ..."). Use the `[Question]` marker when the message must reach the orchestrator PTY.',
+    "- Asking a question must not stop the whole task. Continue all unrelated work that can proceed.",
+    '- If the unknown genuinely prevents progress, call update_task_status(task_id, "BLOCKED", comment="what is being waited on").',
+    '- You cannot enable max/ultra effort yourself. If needed, call request_model_escalation(task_id, model, effort, reason="what was tried cheaply and why it is insufficient") and continue with the best available model while waiting.',
+    "",
+    "## Completion Reporting",
+    "",
+    "When the task is done, you must call one of these MCP tools so the orchestrator is notified automatically:",
+    "",
+    "- Normal completion / ready for review: submit_for_review(task_id, pr_url?)",
+    '- Failure or blockage: update_task_status(task_id, "FAILED"|"BLOCKED", comment="reason")',
+    "",
+    "Do not finish with only a text reply. The orchestrator only receives automatic completion notifications through these tool calls.",
+    "",
+  ].join("\n");
+}
+
 export class AgentConfigGenerator {
   private generatedFiles: Map<string, string[]> = new Map();
   /** Per-agent Responses→Chat bridges (Upstage Solar). Stopped in cleanup(). */
@@ -2393,21 +2656,19 @@ export class AgentConfigGenerator {
     _projectDir: string,
   ): string {
     const safeRole = role.replace(/[^a-zA-Z0-9_]/g, "");
-    const skillSource = path.join(SKILLS_DIR, `${safeRole}_agent.md`);
-
-    // If skill file exists in v3/skills/, return its path
-    if (fs.existsSync(skillSource)) {
-      return skillSource;
+    if (!safeRole) return "";
+    const skillDir = path.join(CONFIG_DIR, "english-role-skills");
+    fs.mkdirSync(skillDir, { recursive: true });
+    const skillPath = path.join(skillDir, `${agentId}-${safeRole}_agent.md`);
+    const content = generateEnglishRoleSkillContent(safeRole);
+    const existing = fs.existsSync(skillPath)
+      ? fs.readFileSync(skillPath, "utf-8")
+      : "";
+    if (existing !== content) {
+      fs.writeFileSync(skillPath, content, "utf-8");
     }
-
-    // Fallback: try without _agent suffix
-    const altSource = path.join(SKILLS_DIR, `${safeRole}.md`);
-    if (fs.existsSync(altSource)) {
-      return altSource;
-    }
-
-    // No skill file found — return empty path
-    return "";
+    this.trackFile(agentId, skillPath);
+    return skillPath;
   }
 
   /**
@@ -2708,6 +2969,12 @@ export class AgentConfigGenerator {
   cleanupAll(): void {
     for (const [agentId] of this.generatedFiles) {
       this.cleanup(agentId);
+    }
+    for (const [agentId, bridge] of this.codexChatBridges) {
+      this.codexChatBridges.delete(agentId);
+      void bridge.stop().catch(() => {
+        /* ignore */
+      });
     }
   }
 
@@ -3242,11 +3509,14 @@ export class AgentConfigGenerator {
           this.codexChatBridges.set(agentId, bridge);
           baseUrl = bridge.baseUrl;
           console.log("[agent-config] Codex chat bridge started", {
+            agentId,
             provider: override.providerId,
             port: bridge.port,
+            baseUrl: bridge.baseUrl,
           });
         } catch (err) {
           console.warn("[agent-config] Codex chat bridge failed to start", {
+            agentId,
             provider: override.providerId,
             error: err instanceof Error ? err.message : String(err),
             fallback: "upstream base_url (may 404 without /responses)",

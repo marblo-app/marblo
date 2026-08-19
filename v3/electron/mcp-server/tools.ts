@@ -5551,7 +5551,9 @@ export function registerTools(server: McpServer): void {
             contextId?: string;
             currentTaskId?: string | null;
             lastTaskId?: string | null;
+            turnCompletedAt?: number | null;
             lastPtyActivity?: number;
+            lastWorkOutput?: number | null;
           }>;
         };
 
@@ -5601,8 +5603,10 @@ export function registerTools(server: McpServer): void {
           // Live binding first, else the binding retained across the agent's
           // completion report. markTurnComplete clears currentTaskId, so
           // requiring it here made every cleanly-finished agent unreapable.
+          // turnCompletedAt alone also proves a finished turn (submit/DONE).
           const taskId = a.currentTaskId || a.lastTaskId || null;
-          if (!taskId) {
+          const turnCompletedAt = a.turnCompletedAt ?? null;
+          if (!taskId && turnCompletedAt == null) {
             if (a.role !== "orchestrator") {
               suspects.push(`${a.name} (${a.status}, never bound to a task)`);
             }
@@ -5610,12 +5614,15 @@ export function registerTools(server: McpServer): void {
           }
 
           let taskStatus: string | null = null;
-          try {
-            const task = await fetchTask(taskId);
-            taskStatus = task?.status ?? null;
-          } catch {
-            // Lookup failure → treat as non-terminal (preserve). evaluate()
-            // below short-circuits on a null/unknown status.
+          if (taskId) {
+            try {
+              const task = await fetchTask(taskId);
+              taskStatus = task?.status ?? null;
+            } catch {
+              // Lookup failure → treat as non-terminal (preserve). evaluate()
+              // below short-circuits on a null/unknown status unless
+              // turnCompletedAt alone qualifies.
+            }
           }
 
           const decision = evaluateTerminalTaskReap({
@@ -5623,7 +5630,9 @@ export function registerTools(server: McpServer): void {
             currentTaskId: a.currentTaskId ?? null,
             lastTaskId: a.lastTaskId ?? null,
             taskStatus,
+            turnCompletedAt,
             lastPtyActivity: a.lastPtyActivity ?? now,
+            lastWorkOutput: a.lastWorkOutput ?? null,
             now,
             staleMs: STALE_TERMINAL_REAP_MS,
           });

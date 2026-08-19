@@ -7,11 +7,15 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDocGraph,
+  collectFolderPrefixesFromPaths,
   collectMarkdownPaths,
+  collectTopLevelFolders,
   docIdFromPath,
   docNodeRadius,
   extractMarkdownLinks,
   extractWikilinks,
+  filterDocSources,
+  isUnderFolderPrefix,
   joinProjectPath,
   layoutDocGraph,
   resolveDocTarget,
@@ -216,6 +220,162 @@ describe("toProjectRelative / joinProjectPath", () => {
     );
     expect(joinProjectPath("C:\\Users\\me\\proj", "docs/a.md")).toBe(
       "C:\\Users\\me\\proj\\docs\\a.md",
+    );
+  });
+});
+
+describe("folder scope filter", () => {
+  const mixed: DocSource[] = [
+    {
+      path: "docs/guide.md",
+      content: "See [[docs/api]] and [[README]] and [[lectures/intro]].\n",
+    },
+    {
+      path: "docs/api.md",
+      content: "Back to [[docs/guide]].\n",
+    },
+    {
+      path: "lectures/intro.md",
+      content: "Course start. Links [[docs/guide]].\n",
+    },
+    {
+      path: "README.md",
+      content: "Root readme.\n",
+    },
+    {
+      path: "docs/orphan.md",
+      content: "Alone in docs.\n",
+    },
+  ];
+
+  it("isUnderFolderPrefix matches prefix and nested paths only", () => {
+    expect(isUnderFolderPrefix("docs/a.md", "docs")).toBe(true);
+    expect(isUnderFolderPrefix("docs", "docs")).toBe(true);
+    expect(isUnderFolderPrefix("docs-extra/a.md", "docs")).toBe(false);
+    expect(isUnderFolderPrefix("README.md", "docs")).toBe(false);
+    expect(isUnderFolderPrefix("docs/a.md", "")).toBe(true);
+  });
+
+  it("collectTopLevelFolders + collectFolderPrefixesFromPaths", () => {
+    const tree = [
+      {
+        name: "docs",
+        path: "/proj/docs",
+        type: "directory",
+        children: [],
+      },
+      {
+        name: "강의",
+        path: "/proj/강의",
+        type: "directory",
+        children: [],
+      },
+      { name: "README.md", path: "/proj/README.md", type: "file" },
+      {
+        name: ".git",
+        path: "/proj/.git",
+        type: "directory",
+        children: [],
+      },
+    ];
+    expect(collectTopLevelFolders(tree, "/proj")).toEqual(["강의", "docs"]);
+    expect(
+      collectFolderPrefixesFromPaths([
+        "docs/a.md",
+        "docs/b.md",
+        "lectures/x.md",
+        "README.md",
+      ]),
+    ).toEqual(["docs", "lectures"]);
+  });
+
+  it("exclude mode keeps only prefix docs; orphan/backlink use subset", () => {
+    const g = buildDocGraph(mixed, {
+      folderPrefix: "docs",
+      externalLinks: "exclude",
+    });
+    const ids = g.nodes.map((n) => n.id).sort();
+    expect(ids).toEqual(["docs/api", "docs/guide", "docs/orphan"].sort());
+
+    // README · lectures 링크는 스코프 밖이라 간선 제외
+    const fromGuide = g.edges
+      .filter((e) => e.from === "docs/guide")
+      .map((e) => e.to)
+      .sort();
+    expect(fromGuide).toEqual(["docs/api"]);
+
+    expect(g.backlinks.get("docs/guide")).toEqual(["docs/api"]);
+    expect(g.orphanIds.has("docs/orphan")).toBe(true);
+    expect(g.orphanIds.has("docs/guide")).toBe(false);
+    expect(g.nodes.every((n) => !n.isBoundary)).toBe(true);
+  });
+
+  it("boundary mode adds outside targets as boundary nodes", () => {
+    const g = buildDocGraph(mixed, {
+      folderPrefix: "docs",
+      externalLinks: "boundary",
+    });
+    const ids = g.nodes.map((n) => n.id).sort();
+    expect(ids).toEqual(
+      ["README", "docs/api", "docs/guide", "docs/orphan", "lectures/intro"].sort(),
+    );
+
+    const boundary = g.nodes.filter((n) => n.isBoundary).map((n) => n.id).sort();
+    expect(boundary).toEqual(["README", "lectures/intro"].sort());
+
+    const fromGuide = g.edges
+      .filter((e) => e.from === "docs/guide")
+      .map((e) => e.to)
+      .sort();
+    expect(fromGuide).toEqual(
+      ["README", "docs/api", "lectures/intro"].sort(),
+    );
+
+    // 경계 노드 본문은 스텁 — lectures→docs 역링크는 생기지 않음
+    expect(
+      g.edges.some((e) => e.from === "lectures/intro"),
+    ).toBe(false);
+
+    // README 는 진입만 있어 orphan 아님
+    expect(g.orphanIds.has("README")).toBe(false);
+    expect(g.orphanIds.has("docs/orphan")).toBe(true);
+  });
+
+  it("empty prefix keeps full graph (전체)", () => {
+    const all = buildDocGraph(mixed);
+    const scoped = buildDocGraph(mixed, { folderPrefix: "" });
+    expect(scoped.nodes.map((n) => n.id).sort()).toEqual(
+      all.nodes.map((n) => n.id).sort(),
+    );
+    expect(scoped.edges.length).toBe(all.edges.length);
+  });
+
+  it("filterDocSources exclude/boundary match buildDocGraph node sets", () => {
+    const excluded = filterDocSources(mixed, {
+      folderPrefix: "docs",
+      externalLinks: "exclude",
+    });
+    expect(excluded.map((s) => s.path).sort()).toEqual(
+      ["docs/api.md", "docs/guide.md", "docs/orphan.md"].sort(),
+    );
+
+    const boundary = filterDocSources(mixed, {
+      folderPrefix: "docs",
+      externalLinks: "boundary",
+    });
+    expect(boundary.map((s) => s.path).sort()).toEqual(
+      [
+        "README.md",
+        "docs/api.md",
+        "docs/guide.md",
+        "docs/orphan.md",
+        "lectures/intro.md",
+      ].sort(),
+    );
+    // 경계 스텁은 본문 비움
+    expect(boundary.find((s) => s.path === "README.md")?.content).toBe("");
+    expect(boundary.find((s) => s.path === "docs/guide.md")?.content).toContain(
+      "docs/api",
     );
   });
 });

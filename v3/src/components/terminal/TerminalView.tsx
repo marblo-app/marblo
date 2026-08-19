@@ -807,7 +807,7 @@ export default memo(function TerminalView({
   return (
     <div
       ref={containerRef}
-      className="absolute inset-0"
+      className="marblo-terminal absolute inset-0"
       style={{
         // Use visibility (not display:none) so the element retains
         // dimensions while hidden — xterm.open() needs clientWidth/Height

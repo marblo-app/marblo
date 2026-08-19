@@ -35,8 +35,31 @@ export interface DocGraphNode {
   title: string;
   /** index.md / log.md 허브 표시. */
   special: DocSpecial;
+  /**
+   * 폴더 스코프 밖이지만 스코프 안 문서가 링크해서 경계로 포함한 노드.
+   * `externalLinks: "boundary"` 일 때만 true.
+   */
+  isBoundary?: boolean;
   outDegree: number;
   inDegree: number;
+}
+
+/** 스코프 밖 링크 처리. */
+export type DocGraphExternalLinks = "exclude" | "boundary";
+
+/** `buildDocGraph` / `filterDocSources` 폴더 스코프 옵션. */
+export interface DocGraphScopeOptions {
+  /**
+   * 프로젝트 상대 폴더 prefix. 빈 문자열·미지정 = 전체 루트.
+   * 예: `"docs"` → `docs/` 아래 md 만.
+   */
+  folderPrefix?: string;
+  /**
+   * 스코프 밖(상위·형제 폴더) 문서로 가는 링크.
+   * - `exclude`(기본): 간선·노드 모두 제외
+   * - `boundary`: 대상 문서를 경계 노드로 포함
+   */
+  externalLinks?: DocGraphExternalLinks;
 }
 
 export interface DocGraphEdge {
@@ -268,18 +291,151 @@ function edgeKey(from: string, to: string, kind: DocLinkKind): string {
 }
 
 /**
+ * 경로가 폴더 prefix 아래(또는 그 자체)인지.
+ * prefix 가 비면 전체(항상 true).
+ */
+export function isUnderFolderPrefix(path: string, folderPrefix: string): boolean {
+  const pref = normalizeDocPath(folderPrefix).replace(/\/+$/, "");
+  if (!pref) return true;
+  const p = normalizeDocPath(path);
+  if (!p) return false;
+  if (p === pref || p.startsWith(`${pref}/`)) return true;
+  const id = docIdFromPath(p);
+  return id === pref || id.startsWith(`${pref}/`);
+}
+
+/**
+ * 파일 트리 루트 직속 디렉터리 목록(프로젝트 상대).
+ * 숨김(`.` 시작)은 제외. `rootPath` 가 있으면 절대 경로를 상대로 변환.
+ */
+export function collectTopLevelFolders(
+  tree: readonly {
+    name: string;
+    path: string;
+    type: string;
+    children?: readonly unknown[];
+  }[],
+  rootPath = "",
+): string[] {
+  const folders = new Set<string>();
+  for (const node of tree) {
+    if (node.type !== "directory") continue;
+    if (node.name.startsWith(".")) continue;
+    const rel = rootPath
+      ? toProjectRelative(rootPath, node.path)
+      : normalizeDocPath(node.path);
+    const top = (rel.split("/").filter(Boolean)[0] ?? "").trim();
+    if (top && !top.startsWith(".")) folders.add(top);
+  }
+  return Array.from(folders).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
+/**
+ * md 경로들에서 1단 폴더 prefix 추출(트리에 없어도 스코프 후보로 쓰기 위함).
+ */
+export function collectFolderPrefixesFromPaths(
+  paths: readonly string[],
+): string[] {
+  const folders = new Set<string>();
+  for (const raw of paths) {
+    const p = normalizeDocPath(raw);
+    const slash = p.indexOf("/");
+    if (slash <= 0) continue;
+    const top = p.slice(0, slash);
+    if (top && !top.startsWith(".")) folders.add(top);
+  }
+  return Array.from(folders).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
+/**
+ * 폴더 스코프에 맞춰 원본 목록을 줄인다.
+ * - exclude: prefix 아래만
+ * - boundary: prefix 아래 + 그 안에서 링크한 스코프 밖 문서
+ */
+export function filterDocSources(
+  sources: readonly DocSource[],
+  options: DocGraphScopeOptions = {},
+): DocSource[] {
+  const prefix = normalizeDocPath(options.folderPrefix ?? "").replace(/\/+$/, "");
+  if (!prefix) return [...sources];
+
+  const mode: DocGraphExternalLinks = options.externalLinks ?? "exclude";
+  const inScope = sources.filter((s) => isUnderFolderPrefix(s.path, prefix));
+  if (mode === "exclude" || inScope.length === 0) return inScope;
+
+  const pathById = new Map<string, string>();
+  const knownIds = new Set<string>();
+  const idByBasename = new Map<string, string[]>();
+  const sourceById = new Map<string, DocSource>();
+
+  for (const src of sources) {
+    const path = normalizeDocPath(src.path);
+    if (!path) continue;
+    const id = docIdFromPath(path);
+    if (knownIds.has(id)) continue;
+    knownIds.add(id);
+    pathById.set(id, path);
+    sourceById.set(id, src);
+    const base = docTitleFromPath(id).toLowerCase();
+    const list = idByBasename.get(base);
+    if (list) list.push(id);
+    else idByBasename.set(base, [id]);
+  }
+
+  const needed = new Set<string>();
+  for (const src of inScope) {
+    const path = normalizeDocPath(src.path);
+    const from = docIdFromPath(path);
+    needed.add(from);
+    const consider = (raw: string) => {
+      const to = resolveDocTarget(raw, path, knownIds, idByBasename);
+      if (!to || to === from) return;
+      const toPath = pathById.get(to);
+      if (!toPath) return;
+      if (!isUnderFolderPrefix(toPath, prefix)) needed.add(to);
+    };
+    for (const w of extractWikilinks(src.content)) consider(w);
+    for (const m of extractMarkdownLinks(src.content)) consider(m);
+  }
+
+  const out: DocSource[] = [];
+  for (const id of needed) {
+    const src = sourceById.get(id);
+    if (!src) continue;
+    // 경계 노드는 타깃으로만 보이게 본문을 비운다(밖→안 간선·추가 pull 방지).
+    // path 는 유지해 노드 클릭 시 파일 열림이 동작한다.
+    if (!isUnderFolderPrefix(src.path, prefix)) {
+      out.push({ path: src.path, content: "" });
+    } else {
+      out.push(src);
+    }
+  }
+  return out;
+}
+
+/**
  * md 원본 목록 → 문서 관계 그래프.
  *
  * - 자기 참조·미해결 링크는 간선에서 제외(고아 판정은 "실존 노드끼리 연결" 기준)
  * - 같은 (from,to) 는 kind 우선순위 wikilink > markdown 으로 한 줄만
+ * - `folderPrefix` 가 있으면 해당 폴더 아래만(백링크·고아도 그 서브셋 기준)
  */
-export function buildDocGraph(sources: readonly DocSource[]): DocGraph {
+export function buildDocGraph(
+  sources: readonly DocSource[],
+  options: DocGraphScopeOptions = {},
+): DocGraph {
+  const prefix = normalizeDocPath(options.folderPrefix ?? "").replace(/\/+$/, "");
+  const mode: DocGraphExternalLinks = options.externalLinks ?? "exclude";
+  const scopedSources = prefix
+    ? filterDocSources(sources, { folderPrefix: prefix, externalLinks: mode })
+    : sources;
+
   const nodes: DocGraphNode[] = [];
   const knownIds = new Set<string>();
   const pathById = new Map<string, string>();
   const idByBasename = new Map<string, string[]>();
 
-  for (const src of sources) {
+  for (const src of scopedSources) {
     const path = normalizeDocPath(src.path);
     if (!path) continue;
     const id = docIdFromPath(path);
@@ -295,6 +451,7 @@ export function buildDocGraph(sources: readonly DocSource[]): DocGraph {
       path,
       title: docTitleFromPath(path),
       special: classifyDocSpecial(path),
+      isBoundary: Boolean(prefix) && mode === "boundary" && !isUnderFolderPrefix(path, prefix),
       outDegree: 0,
       inDegree: 0,
     });
@@ -303,7 +460,13 @@ export function buildDocGraph(sources: readonly DocSource[]): DocGraph {
   const edgeMap = new Map<string, DocGraphEdge>();
   const pairKind = new Map<string, DocLinkKind>(); // from→to → best kind
 
-  for (const src of sources) {
+  // 경계 모드에서도 간선은 스코프 안 문서가 건 링크만(밖→안 역방향은 스코프 밖 본문을 안 읽은 것과 동일)
+  const edgeSources =
+    prefix && mode === "boundary"
+      ? scopedSources.filter((s) => isUnderFolderPrefix(s.path, prefix))
+      : scopedSources;
+
+  for (const src of edgeSources) {
     const path = normalizeDocPath(src.path);
     const from = docIdFromPath(path);
     if (!knownIds.has(from)) continue;

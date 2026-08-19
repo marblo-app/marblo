@@ -135,6 +135,12 @@ export function shouldDemoteCompletedTurn(input: {
   stopRequested: boolean;
   turnCompletedAt: number | null;
   lastPtyActivity: number;
+  /**
+   * Preferred settle clock. Prompt repaints bump `lastPtyActivity` forever, so
+   * a completed agent parked at its composer never demoted when only that
+   * clock was consulted. `lastWorkOutput` stops advancing at the prompt.
+   */
+  lastWorkOutput?: number | null;
   now: number;
   settleMs?: number;
 }): boolean {
@@ -142,9 +148,11 @@ export function shouldDemoteCompletedTurn(input: {
   if (input.stopRequested) return false;
   if (input.status !== "working") return false;
   if (input.turnCompletedAt === null) return false;
-  // Turn completed AND the PTY has settled → the trailing flush is over and no
-  // new work resumed. Free the slot.
-  return input.now - input.lastPtyActivity >= settleMs;
+  // Turn completed AND real work output has settled → the trailing flush is
+  // over and no new work resumed. Free the slot. Fall back to raw PTY activity
+  // only when the classified clock is absent (older callers / tests).
+  const settledAt = input.lastWorkOutput ?? input.lastPtyActivity;
+  return input.now - settledAt >= settleMs;
 }
 
 /**

@@ -1,6 +1,7 @@
 /**
  * Pure decision logic for reaping stale agents whose connected task has reached
- * a terminal state.
+ * a terminal state — or whose own completion report (`turnCompletedAt`) proves
+ * the turn is finished.
  *
  * Background: `cleanup_agents` only ever reclaimed agents whose *PTY* had
  * already died (`stopped` / `error`). An agent that finished its task — the
@@ -13,16 +14,15 @@
  * deliberately conservative (requirement: never misjudge a genuinely-working
  * agent):
  *
- *   1. The agent must name a task — either a live binding (`currentTaskId`) or
- *      the retained `lastTaskId` of a turn it reported complete. With no task
- *      at all we cannot prove its work is done, so we never reap it here.
- *   2. That task must be terminal (DONE/FAILED). This is the load-bearing
- *      signal — a live task means live work, full stop.
- *   3. The agent must have been PTY-silent for at least `staleMs`. This keeps
- *      the agent that *just* reported DONE and is still finishing its turn
- *      from being rug-pulled mid-sentence.
+ *   1. The agent must prove its work is done — either a live/retained task
+ *      binding whose board status is terminal (or a completion-report status
+ *      like REVIEW when the binding was already released), OR an explicit
+ *      `turnCompletedAt` stamp from submit_for_review / update_task_status.
+ *   2. Real work output must have been quiet for at least `staleMs`. Prompt
+ *      repaints bump raw `lastPtyActivity` forever (memo
+ *      `agent_working_derived_from_pty_bytes`); we prefer `lastWorkOutput`.
  *
- * Only when all three hold do we return `{ reap: true }`. The PTY status
+ * Only when both hold do we return `{ reap: true }`. The PTY status
  * (`working` vs `idle`) is intentionally NOT a gate: a zombie can keep emitting
  * spinner noise and stay `working` indefinitely, which is exactly the case the
  * old status-only filter missed.
@@ -43,6 +43,16 @@
  * named task's board status is still re-read and still has to be terminal. We
  * are recovering evidence that was being thrown away, not lowering the bar.
  *
+ * ── Why `turnCompletedAt` is authoritative (waiting-notif spam) ────────────
+ *
+ * After submit_for_review the board status is REVIEW, which is deliberately
+ * NOT a hard terminal (a human may still send the agent back). But the agent
+ * already reported it is done: `markTurnComplete` stamped `turnCompletedAt` and
+ * released the binding. Holding those agents forever produced "X is waiting for
+ * you" badges on finished workers that cleanup_agents refused as
+ * "never bound to a task" when lastTaskId was missing. The completion stamp is
+ * the load-bearing signal — board status is a secondary check when present.
+ *
  * Deliberately NOT reaped: an agent that is merely unbound and quiet, with no
  * completion report behind it. "Idle and nobody claims it" is not proof of
  * finished work — it also describes an agent still starting up, one whose
@@ -51,9 +61,24 @@
  * cleanup_agents reports those as suspects instead of killing them.
  */
 
-/** Task statuses that mean the task is closed and its agent has no live work. */
+/** Task statuses that mean the task is closed on the board. */
 export function isTerminalTaskStatus(status: unknown): boolean {
   return status === "DONE" || status === "FAILED";
+}
+
+/**
+ * Statuses that count as a worker completion report when the agent already
+ * released its binding (`viaCompletedTurn`) or stamped `turnCompletedAt`.
+ * REVIEW/BLOCKED are included because submit_for_review /
+ * update_task_status(BLOCKED) free the agent the same way DONE/FAILED do.
+ */
+export function isCompletedReportTaskStatus(status: unknown): boolean {
+  return (
+    status === "DONE" ||
+    status === "FAILED" ||
+    status === "REVIEW" ||
+    status === "BLOCKED"
+  );
 }
 
 /**
@@ -80,17 +105,29 @@ export interface AgentReapInput {
    * The task this agent was LAST bound to, retained after `markTurnComplete`
    * released the binding on the agent's completion report. Used only when
    * `currentTaskId` is null — see the header note. null when the agent never
-   * had a binding (never dispatched a task), which stays unreapable.
+   * had a binding (never dispatched a task), which stays unreapable unless
+   * `turnCompletedAt` is set.
    */
   lastTaskId?: string | null;
   /**
    * Status of the task named by `currentTaskId ?? lastTaskId`, as read from the
    * board. `null`/`undefined` when the task could not be resolved (missing doc
-   * / lookup failure) — treated as non-terminal (preserve).
+   * / lookup failure) — treated as non-terminal for the board-status path.
    */
   taskStatus: string | null | undefined;
-  /** epoch-ms of the agent's most recent PTY output. */
+  /**
+   * epoch-ms the agent reported its turn finished (submit_for_review /
+   * update_task_status → REVIEW·DONE·FAILED·BLOCKED). When set and the agent
+   * is unbound, this alone proves the turn is done — see header.
+   */
+  turnCompletedAt?: number | null;
+  /** epoch-ms of the agent's most recent PTY output (includes prompt repaint). */
   lastPtyActivity: number;
+  /**
+   * epoch-ms of the last frame that counted as real work (not idle-prompt
+   * repaint). Preferred silence clock — falls back to `lastPtyActivity`.
+   */
+  lastWorkOutput?: number | null;
   /** epoch-ms "now" (injected for deterministic tests). */
   now: number;
   /** Override the silence window; defaults to STALE_TERMINAL_REAP_MS. */
@@ -101,6 +138,18 @@ export interface AgentReapDecision {
   reap: boolean;
   /** Human-readable rationale, logged on every decision (reap or preserve). */
   reason: string;
+}
+
+function silenceClock(input: AgentReapInput): number {
+  return input.lastWorkOutput ?? input.lastPtyActivity;
+}
+
+function pastGrace(
+  input: AgentReapInput,
+  staleMs: number,
+): { ok: boolean; idleMs: number } {
+  const idleMs = input.now - silenceClock(input);
+  return { ok: idleMs >= staleMs, idleMs };
 }
 
 /**
@@ -115,8 +164,7 @@ export function evaluateTerminalTaskReap(
     currentTaskId,
     lastTaskId,
     taskStatus,
-    lastPtyActivity,
-    now,
+    turnCompletedAt = null,
     staleMs = STALE_TERMINAL_REAP_MS,
   } = input;
 
@@ -124,6 +172,7 @@ export function evaluateTerminalTaskReap(
   // completion report. Both name a task whose board status gate 2 re-checks.
   const taskId = currentTaskId ?? lastTaskId ?? null;
   const viaCompletedTurn = !currentTaskId && !!lastTaskId;
+  const completionMarked = turnCompletedAt !== null && !currentTaskId;
 
   // The orchestrator is a permanent coordinator, never a finished worker. No
   // terminal-task + idle combination should ever reap it — preserve before any
@@ -132,6 +181,43 @@ export function evaluateTerminalTaskReap(
     return {
       reap: false,
       reason: "orchestrator is a long-lived coordinator — never auto-reaped",
+    };
+  }
+
+  // ── Path A: explicit completion stamp, binding already released ─────────
+  // submit_for_review / DONE / FAILED / BLOCKED all call markTurnComplete.
+  // Board status is optional corroboration: if a retained task is somehow back
+  // in live work, preserve; otherwise the stamp alone is enough.
+  if (completionMarked) {
+    // Live board status on the retained id (e.g. reopened IN_PROGRESS) —
+    // don't rug-pull a worker that got more work after reporting.
+    if (
+      taskId &&
+      (taskStatus === "TODO" ||
+        taskStatus === "CLAIMED" ||
+        taskStatus === "IN_PROGRESS")
+    ) {
+      return {
+        reap: false,
+        reason: `completed turn but retained task ${taskId} is ${taskStatus} (live)`,
+      };
+    }
+    const { ok, idleMs } = pastGrace(input, staleMs);
+    if (!ok) {
+      return {
+        reap: false,
+        reason: `completion reported but work-output active ${Math.round(
+          idleMs / 1000,
+        )}s ago (< ${Math.round(staleMs / 1000)}s grace)`,
+      };
+    }
+    return {
+      reap: true,
+      reason: `completion reported${
+        taskId ? ` (task ${taskId}${taskStatus ? ` ${taskStatus}` : ""})` : ""
+      }; work idle ${Math.round(idleMs / 1000)}s ≥ ${Math.round(
+        staleMs / 1000,
+      )}s`,
     };
   }
 
@@ -144,15 +230,22 @@ export function evaluateTerminalTaskReap(
 
   const label = viaCompletedTurn ? "completed task" : "connected task";
 
-  if (!isTerminalTaskStatus(taskStatus)) {
+  // Live binding still held → only hard terminals (DONE/FAILED). REVIEW while
+  // still bound is unusual and must not kill an agent mid-hand-back.
+  // Released binding (viaCompletedTurn) → completion-report statuses count too.
+  const statusOk = viaCompletedTurn
+    ? isCompletedReportTaskStatus(taskStatus)
+    : isTerminalTaskStatus(taskStatus);
+
+  if (!statusOk) {
     return {
       reap: false,
       reason: `${label} ${taskId} is ${taskStatus ?? "unknown"} (not terminal)`,
     };
   }
 
-  const idleMs = now - lastPtyActivity;
-  if (idleMs < staleMs) {
+  const { ok, idleMs } = pastGrace(input, staleMs);
+  if (!ok) {
     return {
       reap: false,
       reason: `${label} ${taskId} ${taskStatus} but agent active ${Math.round(
@@ -163,7 +256,7 @@ export function evaluateTerminalTaskReap(
 
   return {
     reap: true,
-    reason: `${label} ${taskId} ${taskStatus}; PTY idle ${Math.round(
+    reason: `${label} ${taskId} ${taskStatus}; work idle ${Math.round(
       idleMs / 1000,
     )}s ≥ ${Math.round(staleMs / 1000)}s`,
   };

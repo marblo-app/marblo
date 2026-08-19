@@ -19,6 +19,18 @@
   contain: layout style;
 }
 
+/*
+ * Marblo terminals use bundled D2Coding as the primary face, so ASCII and CJK
+ * cells are already metrically aligned. xterm's DOM renderer derives CSS
+ * letter-spacing from a WidthCache entry for "W"; if that cache was filled
+ * before the webfont settled, stale positive spacing stays visible as Korean
+ * 자간 even when cell-width ratio checks pass. Keep the visual spacing at zero.
+ */
+.marblo-terminal .xterm-rows,
+.marblo-terminal .xterm-rows span {
+  letter-spacing: 0 !important;
+}
+
 body {
   margin: 0;
   padding: 0;
