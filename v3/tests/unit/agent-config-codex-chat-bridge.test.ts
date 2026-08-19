@@ -120,7 +120,7 @@ afterEach(() => {
 });
 
 describe("AgentConfigGenerator Codex chat bridge wiring", () => {
-  it("Solar 실 스폰 config 는 Upstage upstream 이 아니라 localhost bridge base_url 을 주입한다", () => {
+  it("Solar 실 스폰 config 는 Upstage upstream chat provider 를 직결하고 bridge 를 시작하지 않는다", () => {
     withEnv(
       {
         UPSTAGE_API_KEY: "test-upstage-key",
@@ -130,17 +130,15 @@ describe("AgentConfigGenerator Codex chat bridge wiring", () => {
       () => {
         const { gen, toml } = readGeneratedConfig("solar-pro4");
 
-        expect(startBridge).toHaveBeenCalledWith({
-          upstreamBaseUrl: "https://api.upstage.ai/v1",
-          apiKey: "test-upstage-key",
-        });
+        expect(startBridge).not.toHaveBeenCalled();
         expect(toml).toContain('model_provider = "upstage"');
         expect(toml).toContain("[model_providers.upstage]");
-        expect(toml).toContain('base_url = "http://127.0.0.1:45678/v1"');
-        expect(toml).not.toContain('base_url = "https://api.upstage.ai/v1"');
+        expect(toml).toContain('base_url = "https://api.upstage.ai/v1"');
+        expect(toml).toContain('wire_api = "chat"');
+        expect(toml).not.toContain('base_url = "http://127.0.0.1:45678/v1"');
 
         gen.cleanupAll();
-        expect(stopBridge).toHaveBeenCalledTimes(1);
+        expect(stopBridge).not.toHaveBeenCalled();
       },
     );
   });
@@ -168,7 +166,7 @@ describe("AgentConfigGenerator Codex chat bridge wiring", () => {
 });
 
 describe("AgentManager Solar spawn path", () => {
-  it("agent-manager launch 경로도 Solar provider=upstage 에서 localhost bridge config 를 주입한다", () => {
+  it("agent-manager launch 경로도 Solar provider=upstage 에서 upstream chat config 를 주입하고 bridge 를 시작하지 않는다", () => {
     withEnv(
       {
         UPSTAGE_API_KEY: "test-upstage-key",
@@ -201,11 +199,13 @@ describe("AgentManager Solar spawn path", () => {
           path.join(String(codexHome), "config.toml"),
           "utf-8",
         );
-        expect(toml).toContain('base_url = "http://127.0.0.1:45678/v1"');
-        expect(toml).not.toContain('base_url = "https://api.upstage.ai/v1"');
+        expect(toml).toContain('base_url = "https://api.upstage.ai/v1"');
+        expect(toml).toContain('wire_api = "chat"');
+        expect(toml).not.toContain('base_url = "http://127.0.0.1:45678/v1"');
+        expect(startBridge).not.toHaveBeenCalled();
 
         am.stop(agent.id);
-        expect(stopBridge).toHaveBeenCalledTimes(1);
+        expect(stopBridge).not.toHaveBeenCalled();
       },
     );
   });
