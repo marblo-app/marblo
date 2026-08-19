@@ -613,6 +613,16 @@ export default memo(function TerminalView({
             pendingData.push(chunk);
           }
         }
+        if (buffered.length > 0 && termOpened) {
+          // A late mount (the beginner agent modal, opened long after the
+          // agent spawned) replays a frame the TUI drew for whatever size the
+          // PTY had while nobody was watching — usually the 80x24 spawn size,
+          // not this container. Settle the fit and, if the replay put us in
+          // alt-screen, nudge the PTY so the TUI redraws the frame at the size
+          // actually on screen. Without this the restored frame stays laid out
+          // for the old grid until the user types.
+          scheduleResumeRender("late-mount replay");
+        }
         // Empty buffer can mean two things:
         //   (a) PTY is genuinely dead (e.g. after app restart) → warn.
         //   (b) PTY is alive but this is a re-mount (collapse + reopen in
