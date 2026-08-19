@@ -11,9 +11,19 @@
  *   [model_providers.<id>]
  *   name / base_url / env_key / wire_api
  *
- * DeepSeek natively speaks Responses. Upstage Solar Pro 4 only exposes the
- * OpenAI Chat Completions path, so Codex must use wire_api="chat" directly
- * against https://api.upstage.ai/v1.
+ * DeepSeek natively speaks Responses, so Codex talks to it directly.
+ *
+ * Upstage Solar Pro 4 only exposes /v1/chat/completions. Talking to it with
+ * wire_api="chat" is no longer an option: codex-cli 0.148.0 **removed** chat
+ * support and refuses to even load the config —
+ *
+ *   Error loading config.toml: wire_api = "chat" is no longer supported.
+ *   How to fix: set wire_api = "responses"      (EXIT=1, agent dies instantly)
+ *   github.com/openai/codex/discussions/7782
+ *
+ * So Upstage must go through the local Responses → Chat bridge
+ * (codex-chat-bridge.ts): wire_api="responses" pointed at a 127.0.0.1 shim
+ * that translates to https://api.upstage.ai/v1/chat/completions.
  */
 import {
   envProfileForModel,
@@ -61,8 +71,10 @@ const PROVIDER_META: Readonly<
   upstage: {
     name: "Upstage Solar",
     upstreamBaseUrl: "https://api.upstage.ai/v1",
-    wireApi: "chat",
-    needsChatBridge: false,
+    // codex 0.148.0 rejects wire_api="chat" at config-load time, so the only
+    // path to a chat-only upstream is responses-over-bridge.
+    wireApi: "responses",
+    needsChatBridge: true,
   },
   deepseek: {
     name: "DeepSeek",
