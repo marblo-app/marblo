@@ -5,7 +5,7 @@ import Link from "next/link";
 import LegalPageLayout from "@/components/LegalPageLayout";
 
 const LAST_UPDATED = "2026-08-19";
-const EFFECTIVE_DATE = "2026년 8월 19일";
+const EFFECTIVE_DATE = "2026년 7월 14일";
 
 export default function TermsOfServicePage() {
   const t = useTranslations("footer");
