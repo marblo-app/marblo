@@ -22,6 +22,17 @@ import { TERMINAL_FONT_FAMILY } from "../../../src/lib/monoFont";
  */
 
 const CJK_SPEC = '13px "Marblo D2Coding"';
+const MAX_HEALTHY_LETTER_SPACING_PX = 0.05;
+
+function expectZeroLetterSpacing(
+  spacing: { raw: string | null; px: number | null },
+) {
+  if (spacing.px === null) return;
+  expect(
+    Math.abs(spacing.px),
+    `xterm DOM letter-spacing = ${spacing.raw}`,
+  ).toBeLessThanOrEqual(MAX_HEALTHY_LETTER_SPACING_PX);
+}
 
 test.describe("터미널 한글 폰트 (회귀 #659 후속)", () => {
   test("@unit 번들 D2Coding 이 프로덕션 정적 서버에서 폰트로 서빙된다", async ({
@@ -217,10 +228,27 @@ test.describe("터미널 한글 폰트 (회귀 #659 후속)", () => {
         const rows = document.querySelector(
           ".xterm-rows",
         ) as HTMLElement | null;
+        const parseCssPx = (value: string | null) => {
+          if (!value || value === "normal") return 0;
+          const parsed = Number.parseFloat(value);
+          return Number.isFinite(parsed) ? parsed : null;
+        };
+        const rowsLetterSpacing = rows
+          ? getComputedStyle(rows).letterSpacing
+          : null;
+        const spanLetterSpacingPx = rows
+          ? Array.from(rows.querySelectorAll("span"), (span) =>
+              parseCssPx(getComputedStyle(span).letterSpacing),
+            ).filter((value): value is number => value !== null)
+          : [];
         return {
           cellW,
           hanW,
-          letterSpacing: rows ? getComputedStyle(rows).letterSpacing : null,
+          letterSpacing: rowsLetterSpacing,
+          letterSpacingPx: parseCssPx(rowsLetterSpacing),
+          maxAbsSpanLetterSpacingPx: spanLetterSpacingPx.length
+            ? Math.max(...spanLetterSpacingPx.map((value) => Math.abs(value)))
+            : null,
         };
       },
       { stack: TERMINAL_FONT_FAMILY, spec: CJK_SPEC },
@@ -239,10 +267,17 @@ test.describe("터미널 한글 폰트 (회귀 #659 후속)", () => {
       `한글 advance/셀폭 = ${ratio.toFixed(4)} (정확히 2.0 이어야 자간 0)`,
     ).toBeCloseTo(2, 3);
 
-    // DOM 렌더러일 때만: letter-spacing 이 빈값/NaN 이면 WidthCache 가 깨진 상태.
-    if (geom!.letterSpacing !== null) {
-      expect(geom!.letterSpacing).toMatch(/^-?\d+(\.\d+)?px$|^normal$/);
-    }
+    expectZeroLetterSpacing({
+      raw: geom!.letterSpacing,
+      px: geom!.letterSpacingPx,
+    });
+    expectZeroLetterSpacing({
+      raw:
+        geom!.maxAbsSpanLetterSpacingPx === null
+          ? null
+          : String(geom!.maxAbsSpanLetterSpacingPx),
+      px: geom!.maxAbsSpanLetterSpacingPx,
+    });
   });
 
   test("@mocked scrollback 한글도 재측정돼 자간 없이 2칸을 차지한다", async ({
@@ -271,8 +306,23 @@ test.describe("터미널 한글 폰트 (회귀 #659 후속)", () => {
         const cellW = ctx.measureText("0").width;
         ctx.font = spec;
         const hanW = ctx.measureText("한").width;
+        const parseCssPx = (value: string | null) => {
+          if (!value || value === "normal") return 0;
+          const parsed = Number.parseFloat(value);
+          return Number.isFinite(parsed) ? parsed : null;
+        };
+        const letterSpacing = rows ? getComputedStyle(rows).letterSpacing : null;
+        const spanLetterSpacingPx = rows
+          ? Array.from(rows.querySelectorAll("span"), (span) =>
+              parseCssPx(getComputedStyle(span).letterSpacing),
+            ).filter((value): value is number => value !== null)
+          : [];
         return {
-          letterSpacing: rows ? getComputedStyle(rows).letterSpacing : null,
+          letterSpacing,
+          letterSpacingPx: parseCssPx(letterSpacing),
+          maxAbsSpanLetterSpacingPx: spanLetterSpacingPx.length
+            ? Math.max(...spanLetterSpacingPx.map((value) => Math.abs(value)))
+            : null,
           ratio: hanW / cellW,
         };
       },
@@ -283,8 +333,16 @@ test.describe("터미널 한글 폰트 (회귀 #659 후속)", () => {
       geom.ratio,
       `스크롤백 한글 advance/셀폭 = ${geom.ratio.toFixed(4)} (2.0이어야 함)`,
     ).toBeCloseTo(2, 3);
-    if (geom.letterSpacing !== null) {
-      expect(geom.letterSpacing).toMatch(/^-?\d+(\.\d+)?px$|^normal$/);
-    }
+    expectZeroLetterSpacing({
+      raw: geom.letterSpacing,
+      px: geom.letterSpacingPx,
+    });
+    expectZeroLetterSpacing({
+      raw:
+        geom.maxAbsSpanLetterSpacingPx === null
+          ? null
+          : String(geom.maxAbsSpanLetterSpacingPx),
+      px: geom.maxAbsSpanLetterSpacingPx,
+    });
   });
 });
