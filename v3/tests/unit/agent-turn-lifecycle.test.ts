@@ -147,6 +147,7 @@ describe("turn lifecycle — a completed agent becomes reapable and STAYS idle",
     // ...but the EVIDENCE survives. This single field is the load-44 fix:
     // without it the reaper's gate could never match a clean completion.
     expect(agent.lastTaskId).toBe("task-1");
+    expect(agent.turnCompletedAt).not.toBeNull();
 
     // The finished CLI now repaints its prompt forever. Previously the first
     // chunk after the 12s settle window pinned it back at [working].
@@ -155,6 +156,42 @@ describe("turn lifecycle — a completed agent becomes reapable and STAYS idle",
       pty.emitData(REPAINT);
     }
     expect(am.getAgent("ag1")?.status).toBe("idle");
+    // Completion stamp must survive forever-repaint — otherwise waiting-notif
+    // spam and unreapable "working, never bound" zombies return.
+    expect(am.getAgent("ag1")?.turnCompletedAt).not.toBeNull();
+  });
+
+  it("markTurnComplete immediately retracts a standing input-wait notification", () => {
+    const waits: Array<{ waiting: boolean; reason: string | null }> = [];
+    // onInputWait is the 6th constructor arg (after optional crash/restart hooks).
+    const am = new AgentManager(
+      new PtyManager(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (e) => waits.push({ waiting: e.waiting, reason: e.reason }),
+    );
+    launchBound(am);
+    const pty = spawned[spawned.length - 1] as FakePtyInst;
+
+    // Park at the ready prompt long enough for the waiting badge to rise.
+    // Claude's verified idle-at-prompt marker (agent-status-reconcile.ts).
+    const prompt = "? for shortcuts";
+    pty.emitData(prompt);
+    vi.advanceTimersByTime(25_000);
+    pty.emitData(prompt); // frame path re-evaluates after grace
+    // Heartbeat also re-checks.
+    vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+
+    const rose = waits.some((w) => w.waiting && w.reason === "prompt");
+    expect(rose).toBe(true);
+
+    am.markTurnComplete("ag1");
+    const last = waits[waits.length - 1];
+    expect(last).toMatchObject({ waiting: false, reason: null });
+    expect(am.getAgent("ag1")?.inputWaitReason).toBeNull();
   });
 
   it("the retained binding makes cleanup_agents' gate fire (the actual incident)", () => {

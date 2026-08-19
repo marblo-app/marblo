@@ -11,6 +11,7 @@
 import { describe, it, expect } from "vitest";
 import {
   evaluateTerminalTaskReap,
+  isCompletedReportTaskStatus,
   isTerminalTaskStatus,
   STALE_TERMINAL_REAP_MS,
 } from "../../electron/mcp-server/agent-reap";
@@ -37,6 +38,20 @@ describe("isTerminalTaskStatus", () => {
       "",
     ]) {
       expect(isTerminalTaskStatus(s)).toBe(false);
+    }
+  });
+});
+
+describe("isCompletedReportTaskStatus", () => {
+  it("includes submit/DONE/FAILED/BLOCKED — the statuses that free the agent", () => {
+    for (const s of ["DONE", "FAILED", "REVIEW", "BLOCKED"]) {
+      expect(isCompletedReportTaskStatus(s)).toBe(true);
+    }
+  });
+
+  it("excludes live work statuses", () => {
+    for (const s of ["TODO", "CLAIMED", "IN_PROGRESS", null, undefined, ""]) {
+      expect(isCompletedReportTaskStatus(s)).toBe(false);
     }
   });
 });
@@ -272,10 +287,10 @@ describe("evaluateTerminalTaskReap — reaping a cleanly-completed agent (the lo
     expect(d.reason).toContain("completed task");
   });
 
-  it("still re-checks the board — a retained task that is NOT terminal is preserved", () => {
+  it("still re-checks the board — a retained task back in live work is preserved", () => {
     // The fallback recovers evidence; it does not lower the bar. If the task
     // the agent reported on is somehow back in flight, the agent stays.
-    for (const taskStatus of ["IN_PROGRESS", "REVIEW", "TODO", "BLOCKED"]) {
+    for (const taskStatus of ["IN_PROGRESS", "TODO", "CLAIMED"]) {
       const d = evaluateTerminalTaskReap({
         currentTaskId: null,
         lastTaskId: "t-reopened",
@@ -286,6 +301,79 @@ describe("evaluateTerminalTaskReap — reaping a cleanly-completed agent (the lo
       expect(d.reap).toBe(false);
       expect(d.reason).toContain("not terminal");
     }
+  });
+
+  it("reaps a released binding whose board status is REVIEW/BLOCKED (completion report)", () => {
+    // submit_for_review → REVIEW; update_task_status(BLOCKED) → BLOCKED. Both
+    // free the agent via markTurnComplete. Holding them forever was the
+    // waiting-notif spam + unreapable zombie combo.
+    for (const taskStatus of ["REVIEW", "BLOCKED"]) {
+      const d = evaluateTerminalTaskReap({
+        currentTaskId: null,
+        lastTaskId: "t-submitted",
+        taskStatus,
+        lastPtyActivity: PAST_GRACE,
+        lastWorkOutput: PAST_GRACE,
+        now: NOW,
+      });
+      expect(d.reap, `should reap viaCompletedTurn + ${taskStatus}`).toBe(true);
+    }
+  });
+
+  it("does NOT reap a LIVE binding still held on a REVIEW task", () => {
+    // Unusual — markTurnComplete normally releases — but if somehow still
+    // bound, REVIEW must not kill mid-hand-back.
+    const d = evaluateTerminalTaskReap({
+      currentTaskId: "t-review",
+      lastTaskId: "t-review",
+      taskStatus: "REVIEW",
+      lastPtyActivity: PAST_GRACE,
+      lastWorkOutput: PAST_GRACE,
+      now: NOW,
+    });
+    expect(d.reap).toBe(false);
+  });
+
+  it("reaps on turnCompletedAt alone even when never bound (completion stamp)", () => {
+    // Agents that reported done without a retained lastTaskId used to show up
+    // as "never bound to a task" suspects forever.
+    const d = evaluateTerminalTaskReap({
+      currentTaskId: null,
+      lastTaskId: null,
+      taskStatus: null,
+      turnCompletedAt: NOW - 60_000,
+      lastPtyActivity: NOW, // prompt still repainting
+      lastWorkOutput: PAST_GRACE, // but real work stopped
+      now: NOW,
+    });
+    expect(d.reap).toBe(true);
+    expect(d.reason).toContain("completion reported");
+  });
+
+  it("ignores prompt-repaint noise when lastWorkOutput is stale", () => {
+    const d = evaluateTerminalTaskReap({
+      currentTaskId: null,
+      lastTaskId: "t-done",
+      taskStatus: "DONE",
+      lastPtyActivity: WITHIN_GRACE, // repaint keeps this fresh
+      lastWorkOutput: PAST_GRACE,
+      now: NOW,
+    });
+    expect(d.reap).toBe(true);
+  });
+
+  it("preserves a completion-stamped agent whose retained task is live again", () => {
+    const d = evaluateTerminalTaskReap({
+      currentTaskId: null,
+      lastTaskId: "t-reopened",
+      taskStatus: "IN_PROGRESS",
+      turnCompletedAt: NOW - 60_000,
+      lastPtyActivity: PAST_GRACE,
+      lastWorkOutput: PAST_GRACE,
+      now: NOW,
+    });
+    expect(d.reap).toBe(false);
+    expect(d.reason).toContain("live");
   });
 
   it("preserves a retained-task agent that is still emitting (within grace)", () => {

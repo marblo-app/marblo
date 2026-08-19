@@ -89,6 +89,27 @@ describe("foldInputWait", () => {
     expect(foldInputWait(null, done)).toBeNull();
   });
 
+  it("완료 보고 뒤에는 confirm 프레임·서 있던 prompt 도 전부 철회한다", () => {
+    // submit_for_review 직후 CLI 가 프롬프트/잔여 다이얼로그를 그려도
+    // "waiting for you" 스팸이 되면 안 된다.
+    expect(
+      foldInputWait(
+        "prompt",
+        base({
+          kind: "idle-at-prompt",
+          promptIdleSince: T0 - INPUT_WAIT_PROMPT_GRACE_MS * 10,
+          turnCompletedAt: T0 - 1,
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      foldInputWait(
+        "confirm",
+        base({ kind: "awaiting-input", turnCompletedAt: T0 - 1 }),
+      ),
+    ).toBeNull();
+  });
+
   it("종단(stopped/error/stopRequested) 에이전트는 무엇이 서 있든 철회한다", () => {
     expect(
       foldInputWait(

@@ -1,7 +1,8 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "../../lib/i18n";
 import { useAgentFocusStore } from "../../stores/agentFocusStore";
+import { useAgentStore } from "../../stores/agentStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { useProjectStore } from "../../stores/projectStore";
 import {
@@ -97,7 +98,27 @@ export function AgentInputWaitHost({ onOpen }: AgentInputWaitHostProps) {
     [onOpen, dismiss],
   );
 
-  const items = selectWaitingAgents({ waiting });
+  const agents = useAgentStore((s) => s.agents);
+  const agentById = useMemo(() => {
+    const map = new Map(agents.map((a) => [a.id, a]));
+    return map;
+  }, [agents]);
+
+  // Defense in depth: once cleanup_agents / remove drops the agent (or it goes
+  // terminal), drop any sticky badge even if a retract event was missed.
+  useEffect(() => {
+    for (const id of Object.keys(waiting)) {
+      const agent = agentById.get(id);
+      if (!agent || agent.status === "stopped" || agent.status === "error") {
+        dismiss(id);
+      }
+    }
+  }, [agentById, waiting, dismiss]);
+
+  const items = selectWaitingAgents({ waiting }).filter((item) => {
+    const agent = agentById.get(item.agentId);
+    return !!agent && agent.status !== "stopped" && agent.status !== "error";
+  });
   if (items.length === 0 || typeof document === "undefined") return null;
 
   return createPortal(
