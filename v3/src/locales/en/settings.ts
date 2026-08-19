@@ -41,7 +41,7 @@ export const settings: Record<keyof typeof koSettings, string> = {
     "Saved. Applies after the next orchestrator restart.",
   "settings.language.heading": "Language",
   "settings.language.help": "Switch the UI language. Takes effect immediately.",
-  "settings.language.korean": "한국어",
+  "settings.language.korean": "Korean",
   "settings.language.english": "English",
 
   // ── Team management (TeamManagement) ─────────────────────
