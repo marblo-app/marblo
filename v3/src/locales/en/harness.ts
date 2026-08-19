@@ -128,6 +128,50 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.auth.loginHintBefore": "Login required. In a terminal, run",
   "harness.store.auth.loginHintAfter":
     "then click Re-check. (Spawning while unauthenticated stalls at the login prompt.)",
+  "harness.store.pkg.cliClaude.desc":
+    "CLI required to run the orchestrator and Claude agents. Installed with the official native installer; after installation, authenticate with OAuth or an API key on first launch.",
+  "harness.store.pkg.cliCodex.desc":
+    "CLI required to run Codex (gpt) agents. Installed with the official native installer; after installation, authenticate with `codex login`.",
+  "harness.store.pkg.cliGrok.desc":
+    "CLI required to run Grok Build agents. Installed with the official shell installer; the first launch or `grok login` opens browser authentication.",
+  "harness.store.pkg.cliClaude.postInstall":
+    "After installing, run `claude` once in a terminal to complete Anthropic account OAuth or API key authentication. Then restart Marblo.",
+  "harness.store.pkg.cliCodex.postInstall":
+    "After installing, run `codex login` in a terminal to complete OpenAI account authentication. The /goal feature is auto-enabled, so once authenticated you can use autonomous mode with `/goal <objective>` in a Codex session.",
+  "harness.store.pkg.cliGrok.postInstall":
+    "After installing, run `grok login` or `grok` in a terminal to complete browser authentication. Restart Marblo after authenticating.",
+  "harness.store.pkg.marbloTfCommands.name": "TaskForce Slash Commands",
+  "harness.store.pkg.marbloTfCommands.desc":
+    "18 /tf-* slash commands for the Marblo workflow. Auto-installed with the app.",
+  "harness.store.pkg.marbloMcp.name": "Marblo MCP Server",
+  "harness.store.pkg.marbloMcp.desc":
+    "MCP tool set for TaskForce / Kanban / agent management. Agents spawned inside the Marblo dashboard (Claude / Codex / Gemini) connect automatically with a per-agent isolated config. Not registered for external terminal CLI sessions — manage those separately with your own taskforce MCP setup.",
+  "harness.store.pkg.cliGemini.desc":
+    "⚠️ Being sunset (personal tier EOL 2026-06-18). Merging into the Antigravity (agy) CLI. New installs aren't recommended — the primary lineup is Claude Code / Codex / Antigravity. Only Enterprise Code Assist or paid API key users keep working.",
+  "harness.store.pkg.cliGemini.postInstall":
+    "⚠️ The Gemini CLI personal tier ends 2026-06-18. Use the Antigravity (agy) CLI instead of a new install. Existing users keep working only with Enterprise Code Assist or a paid API key.",
+  "harness.store.pkg.cliAntigravity.desc":
+    "The agy CLI for Antigravity 2.0 (announced at Google I/O 2026). Marblo's 4th 1st-class agent model. Auto-installed via curl shell installer. OAuth browser authentication on first launch.",
+  "harness.store.pkg.cliAntigravity.postInstall":
+    "After installing, run `agy` once in a terminal to complete OAuth browser authentication. The binary installs to `~/.local/bin/agy` and your shell rc's PATH is updated. Restart Marblo after authenticating. On the first agy worker spawn, a Marblo MCP entry is auto-merged into `~/.gemini/antigravity-cli/mcp_config.json` (existing MCP entries are preserved).",
+  "harness.store.pkg.superpowers.desc":
+    "Anthropic's Claude Code skill collection (TDD, debugging, brainstorming, code review, and more).",
+  "harness.store.pkg.superpowers.instructions":
+    "Install via the Claude Code plugin system. Full guide: https://github.com/anthropics/claude-code-plugins",
+  "harness.store.pkg.gstack.desc":
+    "A full-stack workflow skill set — design, QA, deploy, security, retros, and more.",
+  "harness.store.pkg.context7.name": "context7 (library docs)",
+  "harness.store.pkg.context7.desc":
+    "MCP for looking up up-to-date library/API docs — React, Next.js, Tailwind, and more.",
+  "harness.store.pkg.filesystem.name": "filesystem (file system)",
+  "harness.store.pkg.filesystem.desc":
+    "Official MCP that lets Claude read and write files in a directory you specify.",
+  "harness.store.pkg.github.name": "github (issues / PRs / code search)",
+  "harness.store.pkg.github.desc":
+    "Official MCP for managing GitHub issues/PRs and searching repos, code, and users.",
+  "harness.store.pkg.playwright.name": "playwright (browser automation)",
+  "harness.store.pkg.playwright.desc":
+    "Lets agents open pages, click, fill forms, screenshot, and capture console logs directly via headless Chromium. Covers ~90% of the need while the native IDE-embedded browser (P2-10) is deferred.",
   "harness.store.installing": "Installing...",
   "harness.store.viewGuide": "View guide",
   "harness.store.bundled": "Auto-installed",

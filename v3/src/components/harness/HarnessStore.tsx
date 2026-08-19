@@ -106,18 +106,133 @@ const CLI_AUTH_MODELS: Record<string, "claude" | "codex" | "grok"> = {
   "cli-grok": "grok",
 };
 
+// Fixed union of `harness-catalog.ts` package ids. Kept as an exhaustive
+// `Record` (not `Partial<Record<string, ...>>`) below so adding a catalog
+// package without an i18n overlay decision is a tsc error here, not a
+// silent Korean-in-en-locale fallback.
+type CatalogPackageId =
+  | "marblo-tf-commands"
+  | "marblo-mcp"
+  | "cli-claude-code"
+  | "cli-codex"
+  | "cli-grok"
+  | "cli-gemini"
+  | "cli-antigravity"
+  | "superpowers"
+  | "gstack"
+  | "mcp-context7"
+  | "mcp-filesystem"
+  | "mcp-github"
+  | "mcp-playwright";
+
+// Every catalog package's `description` is hardcoded Korean in
+// harness-catalog.ts, so every id needs an overlay key.
+const PACKAGE_DESCRIPTION_KEYS: Record<CatalogPackageId, MessageKey> = {
+  "marblo-tf-commands": "harness.store.pkg.marbloTfCommands.desc",
+  "marblo-mcp": "harness.store.pkg.marbloMcp.desc",
+  "cli-claude-code": "harness.store.pkg.cliClaude.desc",
+  "cli-codex": "harness.store.pkg.cliCodex.desc",
+  "cli-grok": "harness.store.pkg.cliGrok.desc",
+  "cli-gemini": "harness.store.pkg.cliGemini.desc",
+  "cli-antigravity": "harness.store.pkg.cliAntigravity.desc",
+  superpowers: "harness.store.pkg.superpowers.desc",
+  gstack: "harness.store.pkg.gstack.desc",
+  "mcp-context7": "harness.store.pkg.context7.desc",
+  "mcp-filesystem": "harness.store.pkg.filesystem.desc",
+  "mcp-github": "harness.store.pkg.github.desc",
+  "mcp-playwright": "harness.store.pkg.playwright.desc",
+};
+
+// Only some catalog `name` values are Korean (the rest are already
+// vendor/product names in English) — `null` marks "no overlay, use
+// pkg.name as-is" explicitly rather than by silent map-miss.
+const PACKAGE_NAME_KEYS: Record<CatalogPackageId, MessageKey | null> = {
+  "marblo-tf-commands": "harness.store.pkg.marbloTfCommands.name",
+  "marblo-mcp": "harness.store.pkg.marbloMcp.name",
+  "cli-claude-code": null,
+  "cli-codex": null,
+  "cli-grok": null,
+  "cli-gemini": null,
+  "cli-antigravity": null,
+  superpowers: null,
+  gstack: null,
+  "mcp-context7": "harness.store.pkg.context7.name",
+  "mcp-filesystem": "harness.store.pkg.filesystem.name",
+  "mcp-github": "harness.store.pkg.github.name",
+  "mcp-playwright": "harness.store.pkg.playwright.name",
+};
+
+// `install.postInstall` (npm-global/shell kinds). Only the CLI packages
+// define one in the catalog.
+const PACKAGE_POST_INSTALL_KEYS: Record<CatalogPackageId, MessageKey | null> = {
+  "marblo-tf-commands": null,
+  "marblo-mcp": null,
+  "cli-claude-code": "harness.store.pkg.cliClaude.postInstall",
+  "cli-codex": "harness.store.pkg.cliCodex.postInstall",
+  "cli-grok": "harness.store.pkg.cliGrok.postInstall",
+  "cli-gemini": "harness.store.pkg.cliGemini.postInstall",
+  "cli-antigravity": "harness.store.pkg.cliAntigravity.postInstall",
+  superpowers: null,
+  gstack: null,
+  "mcp-context7": null,
+  "mcp-filesystem": null,
+  "mcp-github": null,
+  "mcp-playwright": null,
+};
+
+// `install.instructions` (manual kind). Only `superpowers` uses kind=manual.
+const PACKAGE_INSTRUCTIONS_KEYS: Record<CatalogPackageId, MessageKey | null> = {
+  "marblo-tf-commands": null,
+  "marblo-mcp": null,
+  "cli-claude-code": null,
+  "cli-codex": null,
+  "cli-grok": null,
+  "cli-gemini": null,
+  "cli-antigravity": null,
+  superpowers: "harness.store.pkg.superpowers.instructions",
+  gstack: null,
+  "mcp-context7": null,
+  "mcp-filesystem": null,
+  "mcp-github": null,
+  "mcp-playwright": null,
+};
+
+// `pkg.id` crosses the IPC boundary typed as plain `string` (see
+// `HarnessPackage` in vite-env.d.ts), so these narrow it against the fixed
+// union above. An id outside the union (a future catalog addition not yet
+// wired here) falls through to the raw catalog string rather than crashing.
+function packageDisplayName(pkg: HarnessPackage): string {
+  const key = PACKAGE_NAME_KEYS[pkg.id as CatalogPackageId];
+  return key ? translate(key) : pkg.name;
+}
+
+function packageDescription(pkg: HarnessPackage): string {
+  const key = PACKAGE_DESCRIPTION_KEYS[pkg.id as CatalogPackageId];
+  return key ? translate(key) : pkg.description;
+}
+
+function packagePostInstall(pkg: HarnessPackage): string | undefined {
+  const key = PACKAGE_POST_INSTALL_KEYS[pkg.id as CatalogPackageId];
+  return key ? translate(key) : pkg.install.postInstall;
+}
+
+function packageInstructions(pkg: HarnessPackage): string | undefined {
+  const key = PACKAGE_INSTRUCTIONS_KEYS[pkg.id as CatalogPackageId];
+  return key ? translate(key) : pkg.install.instructions;
+}
+
 export function HarnessStore({ onClose }: HarnessStoreProps) {
   const { t } = useTranslation();
   const [packages, setPackages] = useState<HarnessPackage[]>([]);
   const [versions, setVersions] = useState<Record<string, HarnessVersionInfo>>(
-    {},
+    {}
   );
   const [filter, setFilter] = useState<CategoryFilter>("all");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [authStates, setAuthStates] = useState<Record<string, CliAuthResult>>(
-    {},
+    {}
   );
   const [authChecking, setAuthChecking] = useState<Record<string, boolean>>({});
 
@@ -141,9 +256,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
       setPackages(list);
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : translate("harness.store.loadFail"),
+        err instanceof Error ? err.message : translate("harness.store.loadFail")
       );
     }
     // Versions are looked up lazily — they require network (npm view) and
@@ -173,7 +286,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
   const showPackages = filter !== "envswap";
   const showEnvSwap = filter === "all" || filter === "envswap";
   const filtered = packages.filter(
-    (p) => filter === "all" || p.category === filter,
+    (p) => filter === "all" || p.category === filter
   );
   const orchestratorCliPackages = (
     filter === "all" ? packages : filtered
@@ -184,7 +297,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
       filter === "cli" ||
       orchestratorCliPackages.length > 0);
   const fallbackPackageGrid = filtered.filter(
-    (p) => !(p.id in CLI_AUTH_MODELS),
+    (p) => !(p.id in CLI_AUTH_MODELS)
   );
 
   const handleInstall = async (pkg: HarnessPackage) => {
@@ -192,7 +305,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
     setInfo(null);
     if (pkg.install.kind === "manual") {
       setInfo(
-        pkg.install.instructions ?? translate("harness.store.noManualGuide"),
+        packageInstructions(pkg) ?? translate("harness.store.noManualGuide")
       );
       return;
     }
@@ -202,8 +315,10 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
       if (!result.success) {
         setError(result.error ?? translate("harness.store.installFail"));
       } else {
-        const postInstall = pkg.install.postInstall;
-        const done = translate("harness.store.installDone", { name: pkg.name });
+        const postInstall = packagePostInstall(pkg);
+        const done = translate("harness.store.installDone", {
+          name: packageDisplayName(pkg),
+        });
         setInfo(postInstall ? `${done} ${postInstall}` : done);
       }
     } finally {
@@ -216,7 +331,11 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
     setError(null);
     setInfo(null);
     if (
-      !confirm(translate("harness.store.uninstallConfirm", { name: pkg.name }))
+      !confirm(
+        translate("harness.store.uninstallConfirm", {
+          name: packageDisplayName(pkg),
+        })
+      )
     )
       return;
     setBusy(pkg.id);
@@ -225,7 +344,11 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
       if (!result.success) {
         setError(result.error ?? translate("harness.store.uninstallFail"));
       } else {
-        setInfo(translate("harness.store.uninstallDone", { name: pkg.name }));
+        setInfo(
+          translate("harness.store.uninstallDone", {
+            name: packageDisplayName(pkg),
+          })
+        );
       }
     } finally {
       setBusy(null);
@@ -253,6 +376,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
           const ver = versions[pkg.id];
           const auth = CLI_AUTH_MODELS[pkg.id] ? authStates[pkg.id] : undefined;
           const authBusy = !!authChecking[pkg.id];
+          const displayName = packageDisplayName(pkg);
           return (
             <div
               key={pkg.id}
@@ -261,7 +385,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
               <div className="mb-1 flex items-start justify-between gap-2">
                 <div className="flex items-center gap-1.5">
                   <span className="text-sm font-semibold text-[#cdd6f4]">
-                    {pkg.name}
+                    {displayName}
                   </span>
                   <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] uppercase text-[#6c7086]">
                     {pkg.type}
@@ -278,15 +402,15 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                       isInstalled
                         ? "bg-[#a6e3a1]/20 text-[#a6e3a1]"
                         : isManual
-                          ? "bg-[#f9e2af]/20 text-[#f9e2af]"
-                          : "bg-[#313244] text-[#6c7086]"
+                        ? "bg-[#f9e2af]/20 text-[#f9e2af]"
+                        : "bg-[#313244] text-[#6c7086]"
                     }`}
                   >
                     {isInstalled
                       ? t("harness.store.badge.installed")
                       : isManual
-                        ? t("harness.store.badge.manual")
-                        : t("harness.store.badge.notInstalled")}
+                      ? t("harness.store.badge.manual")
+                      : t("harness.store.badge.notInstalled")}
                   </span>
                   {auth && isInstalled && (
                     <span
@@ -299,13 +423,15 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                       {authBusy
                         ? t("harness.store.auth.checking")
                         : auth.authenticated
-                          ? "Ready"
-                          : t("harness.store.auth.needed")}
+                        ? "Ready"
+                        : t("harness.store.auth.needed")}
                     </span>
                   )}
                 </div>
               </div>
-              <p className="mb-2 text-xs text-[#bac2de]">{pkg.description}</p>
+              <p className="mb-2 text-xs text-[#bac2de]">
+                {packageDescription(pkg)}
+              </p>
               {ver && isInstalled && ver.localVersion && (
                 <div className="mb-3 flex items-center gap-1.5 text-[10px]">
                   <span className="text-[#6c7086]">v{ver.localVersion}</span>
@@ -358,12 +484,12 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                     {isBusy
                       ? t("harness.store.installing")
                       : isManual
-                        ? t("harness.store.viewGuide")
-                        : isBundled
-                          ? t("harness.store.bundled")
-                          : isRequired
-                            ? t("harness.store.requiredInstall")
-                            : statusLabel(pkg.status)}
+                      ? t("harness.store.viewGuide")
+                      : isBundled
+                      ? t("harness.store.bundled")
+                      : isRequired
+                      ? t("harness.store.requiredInstall")
+                      : statusLabel(pkg.status)}
                   </button>
                 )}
                 {isInstalled && !isRequired && (
