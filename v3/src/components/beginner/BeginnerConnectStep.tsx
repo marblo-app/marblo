@@ -19,7 +19,7 @@ import telemetry from "../../services/telemetryService";
 import { PreviewTerminal } from "./PreviewTerminal";
 import { BUTTON_GHOST, BUTTON_PRIMARY, emphasize } from "./beginnerUi";
 import { BeginnerDemoTicketCta } from "./BeginnerDemoTicketCta";
-import { ORCHESTRATION_DEMO_SECONDS } from "../onboarding/VideoDemoModal";
+import { ORCHESTRATION_DEMO_DISPLAY_SECONDS } from "../onboarding/VideoDemoModal";
 
 /**
  * 비기너 진입 게이트 — **하나만** 연결하면 통과.
@@ -178,10 +178,7 @@ export function BeginnerConnectStep({
       {/* 연결 전에는 먼저 오케스트레이션 영상 데모를 보여준다. 인터랙티브
           티켓 생성은 막힘이 잦아 이 첫 화면에서 제거했다. */}
       {!setup.preview && (
-        <BeginnerDemoTicketCta
-          onWatchDemo={onWatchDemo}
-          className="mb-6"
-        />
+        <BeginnerDemoTicketCta onWatchDemo={onWatchDemo} className="mb-6" />
       )}
 
       <h1 className="text-lg font-semibold text-[#cdd6f4]">
@@ -360,8 +357,9 @@ export function BeginnerConnectStep({
             : t("beginner.connect.recheck")}
         </button>
         <button type="button" onClick={onWatchDemo} className={BUTTON_GHOST}>
-          ▶ {t("beginner.connect.watchDemo", {
-            seconds: ORCHESTRATION_DEMO_SECONDS,
+          ▶{" "}
+          {t("beginner.connect.watchDemo", {
+            seconds: ORCHESTRATION_DEMO_DISPLAY_SECONDS,
           })}
         </button>
       </div>

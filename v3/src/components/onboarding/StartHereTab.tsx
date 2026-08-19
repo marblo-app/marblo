@@ -42,9 +42,9 @@ import { ByomStartSection } from "./ByomStartSection";
 import { FirstTicketResultNote } from "./FirstTicketResultNote";
 import { VendorModelsSection } from "./VendorModelsSection";
 import {
+  ORCHESTRATION_DEMO_DISPLAY_SECONDS,
   ORCHESTRATION_DEMO_PLAYBACK_RATE,
   ORCHESTRATION_DEMO_POSTER_SRC,
-  ORCHESTRATION_DEMO_SECONDS,
   ORCHESTRATION_DEMO_VIDEO_SRC,
   VideoDemoModal,
 } from "./VideoDemoModal";
@@ -266,7 +266,7 @@ export function StartHereTab() {
             >
               <PlayCircle className="h-3.5 w-3.5" aria-hidden="true" />
               {t("onboarding.startHere.watchDemo", {
-                seconds: ORCHESTRATION_DEMO_SECONDS,
+                seconds: ORCHESTRATION_DEMO_DISPLAY_SECONDS,
               })}
             </button>
             <button
@@ -310,7 +310,7 @@ export function StartHereTab() {
               >
                 <PlayCircle className="h-3.5 w-3.5" aria-hidden="true" />
                 {t("onboarding.startHere.watchDemo", {
-                  seconds: ORCHESTRATION_DEMO_SECONDS,
+                  seconds: ORCHESTRATION_DEMO_DISPLAY_SECONDS,
                 })}
               </button>
             </div>
@@ -434,10 +434,7 @@ export function StartHereTab() {
       </div>
 
       {showDemo && (
-        <VideoDemoModal
-          surface="start_here_tab"
-          onClose={closeDemo}
-        />
+        <VideoDemoModal surface="start_here_tab" onClose={closeDemo} />
       )}
     </div>
   );
@@ -530,7 +527,7 @@ function ValuePreview({ onWatchDemo }: { onWatchDemo: () => void }) {
           >
             <PlayCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
             {t("onboarding.startHere.value.playVideo", {
-              seconds: ORCHESTRATION_DEMO_SECONDS,
+              seconds: ORCHESTRATION_DEMO_DISPLAY_SECONDS,
             })}
           </button>
           <span className="text-center text-[11px] leading-4 text-[#7f849c] sm:text-left">

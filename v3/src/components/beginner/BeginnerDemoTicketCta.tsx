@@ -1,6 +1,6 @@
 import { useTranslation } from "../../lib/i18n";
 import { PlayCircle } from "lucide-react";
-import { ORCHESTRATION_DEMO_SECONDS } from "../onboarding/VideoDemoModal";
+import { ORCHESTRATION_DEMO_DISPLAY_SECONDS } from "../onboarding/VideoDemoModal";
 
 export interface BeginnerDemoTicketCtaProps {
   onWatchDemo: () => void;
@@ -32,7 +32,7 @@ export function BeginnerDemoTicketCta({
       >
         <PlayCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
         {t("beginner.connect.watchDemo", {
-          seconds: ORCHESTRATION_DEMO_SECONDS,
+          seconds: ORCHESTRATION_DEMO_DISPLAY_SECONDS,
         })}
       </button>
     </div>

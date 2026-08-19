@@ -2,12 +2,18 @@ import { X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "../../lib/i18n";
 
+// 원본 영상 길이(재인코딩 없음). 화면에 노출하지 말 것 — 사용자에게는 실제
+// 체감 길이인 ORCHESTRATION_DEMO_DISPLAY_SECONDS 를 보여준다.
 export const ORCHESTRATION_DEMO_SECONDS = 90;
 export const ORCHESTRATION_DEMO_VIDEO_SRC = "/media/orchestration-demo.mp4";
 export const ORCHESTRATION_DEMO_POSTER_SRC =
   "/media/orchestration-demo-poster.jpg";
 // 사장님 요청: 90초가 길어서 1.5배로 고정 (재인코딩 없이 플레이어 속도만).
 export const ORCHESTRATION_DEMO_PLAYBACK_RATE = 1.5;
+// 화면에 노출하는 체감 길이 — 배속에서 파생되므로 속도를 바꿔도 자동으로 맞는다.
+export const ORCHESTRATION_DEMO_DISPLAY_SECONDS = Math.round(
+  ORCHESTRATION_DEMO_SECONDS / ORCHESTRATION_DEMO_PLAYBACK_RATE,
+);
 
 export interface VideoDemoModalProps {
   surface: "start_here_tab" | "beginner_connect";
@@ -56,7 +62,7 @@ export function VideoDemoModal({ surface, onClose }: VideoDemoModalProps) {
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-[#89b4fa]">
               {t("onboarding.videoDemo.kicker", {
-                seconds: ORCHESTRATION_DEMO_SECONDS,
+                seconds: ORCHESTRATION_DEMO_DISPLAY_SECONDS,
               })}
             </p>
             <h2 className="mt-1 truncate text-base font-semibold text-[#cdd6f4]">
