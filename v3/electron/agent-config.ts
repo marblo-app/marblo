@@ -2709,6 +2709,12 @@ export class AgentConfigGenerator {
     for (const [agentId] of this.generatedFiles) {
       this.cleanup(agentId);
     }
+    for (const [agentId, bridge] of this.codexChatBridges) {
+      this.codexChatBridges.delete(agentId);
+      void bridge.stop().catch(() => {
+        /* ignore */
+      });
+    }
   }
 
   // --- Private: Model-specific config generators ---
@@ -3242,11 +3248,14 @@ export class AgentConfigGenerator {
           this.codexChatBridges.set(agentId, bridge);
           baseUrl = bridge.baseUrl;
           console.log("[agent-config] Codex chat bridge started", {
+            agentId,
             provider: override.providerId,
             port: bridge.port,
+            baseUrl: bridge.baseUrl,
           });
         } catch (err) {
           console.warn("[agent-config] Codex chat bridge failed to start", {
+            agentId,
             provider: override.providerId,
             error: err instanceof Error ? err.message : String(err),
             fallback: "upstream base_url (may 404 without /responses)",
