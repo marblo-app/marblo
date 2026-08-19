@@ -124,6 +124,50 @@ export const harness = {
   "harness.store.auth.loginHintBefore": "로그인이 필요합니다. 터미널에서",
   "harness.store.auth.loginHintAfter":
     "실행 후 Re-check 하세요. (미인증 상태로 spawn 시 로그인 프롬프트에서 멈춥니다)",
+  "harness.store.pkg.cliClaude.desc":
+    "오케스트레이터 및 Claude 에이전트 실행에 필요한 CLI입니다. 공식 네이티브 인스톨러로 설치되며, 설치 후 첫 실행 시 OAuth 또는 API 키로 인증합니다.",
+  "harness.store.pkg.cliCodex.desc":
+    "Codex(gpt) 에이전트 실행에 필요한 CLI입니다. 공식 네이티브 인스톨러로 설치되며, 설치 후 `codex login`으로 인증합니다.",
+  "harness.store.pkg.cliGrok.desc":
+    "Grok Build 에이전트 실행에 필요한 CLI입니다. 공식 shell 인스톨러로 설치하며, 첫 실행 또는 `grok login` 시 브라우저 인증을 엽니다.",
+  "harness.store.pkg.cliClaude.postInstall":
+    "설치 후 터미널에서 `claude` 한 번 실행해서 Anthropic 계정 OAuth 또는 API 키 인증을 완료하세요. 그 후 Marblo 재시작.",
+  "harness.store.pkg.cliCodex.postInstall":
+    "설치 후 터미널에서 `codex login` 실행해서 OpenAI 계정 인증을 완료하세요. /goal 기능이 자동 활성화됐으니, 인증 후 Codex 세션에서 `/goal <목표>`로 자율 모드 사용 가능.",
+  "harness.store.pkg.cliGrok.postInstall":
+    "설치 후 터미널에서 `grok login` 또는 `grok`를 실행해 브라우저 인증을 완료하세요. 인증 후 Marblo 재시작.",
+  "harness.store.pkg.marbloTfCommands.name": "TaskForce 슬래시 커맨드",
+  "harness.store.pkg.marbloTfCommands.desc":
+    "Marblo 워크플로우용 /tf-* 슬래시 커맨드 18종. 앱 설치 시 자동 설치됨.",
+  "harness.store.pkg.marbloMcp.name": "Marblo MCP 서버",
+  "harness.store.pkg.marbloMcp.desc":
+    "TaskForce / 칸반 / 에이전트 관리 MCP 도구 모음. Marblo 대시보드 내부에서 spawn 된 에이전트(Claude / Codex / Gemini)는 per-agent isolated config 로 자동 연결됩니다. 외부 터미널 CLI 세션에는 등록하지 않습니다 — 그쪽은 사용자의 taskforce MCP 등 별도 설정으로 관리하세요.",
+  "harness.store.pkg.cliGemini.desc":
+    "⚠️ 단종 예정 (2026-06-18 개인 티어 EOL). Antigravity (agy) CLI 로 통합됩니다. 신규 설치는 권장하지 않습니다 — 주력은 Claude Code / Codex / Antigravity 3종. 엔터프라이즈 Code Assist 또는 유료 API 키 사용자만 계속 동작합니다.",
+  "harness.store.pkg.cliGemini.postInstall":
+    "⚠️ Gemini CLI 개인 티어는 2026-06-18 종료됩니다. 신규 설치 대신 Antigravity (agy) CLI 를 사용하세요. 기존 사용자는 엔터프라이즈 Code Assist 또는 유료 API 키로만 계속 동작합니다.",
+  "harness.store.pkg.cliAntigravity.desc":
+    "Antigravity 2.0 (Google I/O 2026 발표) 의 agy CLI. Marblo 의 4번째 1st-class 에이전트 모델. curl shell 인스톨러로 자동 설치. 첫 실행 시 OAuth 브라우저 인증.",
+  "harness.store.pkg.cliAntigravity.postInstall":
+    "설치 후 터미널에서 `agy` 한 번 실행해서 OAuth 브라우저 인증을 완료하세요. 바이너리는 `~/.local/bin/agy` 에 설치되고 shell rc 의 PATH 가 업데이트됩니다. 인증 후 Marblo 재시작. 첫 agy 워커 스폰 시 `~/.gemini/antigravity-cli/mcp_config.json` 에 Marblo MCP 항목이 자동 머지됩니다 (기존 MCP 항목 보존).",
+  "harness.store.pkg.superpowers.desc":
+    "Anthropic의 Claude Code 스킬 모음 (TDD, debugging, brainstorming, code review 등).",
+  "harness.store.pkg.superpowers.instructions":
+    "Claude Code 플러그인 시스템으로 설치하세요. 자세한 안내: https://github.com/anthropics/claude-code-plugins",
+  "harness.store.pkg.gstack.desc":
+    "디자인 / QA / 배포 / 보안 / 회고 등 풀스택 워크플로우 스킬셋.",
+  "harness.store.pkg.context7.name": "context7 (라이브러리 문서)",
+  "harness.store.pkg.context7.desc":
+    "라이브러리 / API 최신 문서를 조회하는 MCP. React / Next.js / Tailwind 등.",
+  "harness.store.pkg.filesystem.name": "filesystem (파일 시스템)",
+  "harness.store.pkg.filesystem.desc":
+    "Claude가 사용자 지정 디렉터리의 파일을 읽고 쓸 수 있게 하는 공식 MCP.",
+  "harness.store.pkg.github.name": "github (이슈 / PR / 코드 검색)",
+  "harness.store.pkg.github.desc":
+    "GitHub 이슈 / PR 관리, 저장소 / 코드 / 사용자 검색을 위한 공식 MCP.",
+  "harness.store.pkg.playwright.name": "playwright (브라우저 자동화)",
+  "harness.store.pkg.playwright.desc":
+    "에이전트가 헤드리스 Chromium으로 페이지 열기 / 클릭 / 폼 입력 / 스크린샷 / 콘솔 로그 캡처를 직접 수행. 자체 IDE 임베드 브라우저(P2-10) 미루는 동안 90% 대체.",
   "harness.store.installing": "설치 중...",
   "harness.store.viewGuide": "안내 보기",
   "harness.store.bundled": "자동 설치됨",
