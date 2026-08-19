@@ -91,6 +91,7 @@ import {
   resolveEpsilon,
   type AutoModelPlan,
 } from "./model-autoselect";
+import { syncInstalledLocalModels } from "./local-models";
 import { buildShadowRequest, routingShadowEnabled } from "./routing-shadow";
 import {
   filterAvailableHarnesses,
@@ -119,6 +120,16 @@ import {
 } from "./mcp-server/skill-registry";
 import { issueFreshAgentCustomToken } from "./firebase-auth-sync";
 import type { WorktreeCoordinator } from "./worktree-coordinator";
+
+function requestedOllamaModelId(input?: string): string | null {
+  const raw = (input ?? "").trim();
+  if (!raw) return null;
+  const at = raw.lastIndexOf("@");
+  const modelPart = at > 0 ? raw.slice(0, at).trim() : raw;
+  return /^[a-z0-9._-]+:[A-Za-z0-9._-]+$/.test(modelPart)
+    ? modelPart
+    : null;
+}
 
 /**
  * 계정 프로브 + 주간 롤업 → 라우팅이 읽는 예산 스냅샷.
@@ -2441,10 +2452,33 @@ export class BridgeServer {
     // 그 항목에서 파생한다. 프로바이더만 말한 기존 호출("codex")은 modelId 없이
     // 그대로 통과하므로 동작이 바뀌지 않는다.
     const modelSpecInput = joinModelAndEffort(params.model, params.effort);
-    const resolvedPin = resolveModelPin(modelSpecInput);
+    let resolvedPin = resolveModelPin(modelSpecInput);
+    const requestedLocalId = requestedOllamaModelId(modelSpecInput);
+    if (!resolvedPin && requestedLocalId) {
+      const detection = await syncInstalledLocalModels(true);
+      resolvedPin = resolveModelPin(modelSpecInput);
+      if (!resolvedPin) {
+        const reason = !detection.installed
+          ? "ollama binary not found"
+          : !detection.daemonRunning
+            ? "ollama daemon is not running"
+            : `model not installed (installed: ${
+                detection.installedIds.join(", ") || "none"
+              })`;
+        const error =
+          `Local Ollama model '${requestedLocalId}' is not registered after ` +
+          `a fresh ollama scan: ${reason}. Refusing to fall back to another ` +
+          "provider; install/start Ollama or choose an installed local model.";
+        console.warn(`[BridgeServer] ${error}`);
+        return { success: false, error };
+      }
+    }
     // ★스폰할 CLI 는 **하네스** 축이다(USbdRV4k 축분리). 벤더(anthropic/zai…)는
     // env 로 갈릴 뿐 바이너리를 바꾸지 않으므로 이 자리 값은 종전과 동일하다.
-    const requestedModel = resolvedPin?.harness ?? normalizeModel(params.model);
+    const requestedModel =
+      resolvedPin?.vendor === "local"
+        ? "local"
+        : (resolvedPin?.harness ?? normalizeModel(params.model));
     const model =
       requiresTrackedModel && requestedModel === "antigravity"
         ? undefined
@@ -2452,7 +2486,10 @@ export class BridgeServer {
     // 프로바이더가 무시된 경우(antigravity 트래킹 요구)엔 모델 핀도 함께 버린다 —
     // 다른 프로바이더로 라우팅되는데 그쪽 CLI 에 없는 모델 id 를 넘기면 안 된다.
     const modelPin: LaunchModelPin | undefined =
-      model && resolvedPin && resolvedPin.harness === model
+      model &&
+      resolvedPin &&
+      (resolvedPin.harness === model ||
+        (model === "local" && resolvedPin.vendor === "local"))
         ? {
             claudeModel: resolvedPin.claudeModel,
             codexModel: resolvedPin.codexModel,
@@ -3948,6 +3985,40 @@ export class BridgeServer {
         installed: true,
       });
       return { success: false, error: cap.reason };
+    }
+
+    if (!params.modelPin) {
+      const requestedLocalId = requestedOllamaModelId(String(params.model));
+      if (requestedLocalId) {
+        let pin = resolveModelPin(requestedLocalId);
+        if (!pin) {
+          const detection = await syncInstalledLocalModels(true);
+          pin = resolveModelPin(requestedLocalId);
+          if (!pin) {
+            const reason = !detection.installed
+              ? "ollama binary not found"
+              : !detection.daemonRunning
+                ? "ollama daemon is not running"
+                : `model not installed (installed: ${
+                    detection.installedIds.join(", ") || "none"
+                  })`;
+            const error =
+              `Local Ollama model '${requestedLocalId}' is not registered ` +
+              `after a fresh ollama scan: ${reason}. Refusing to fall back ` +
+              "to another provider; install/start Ollama or choose an " +
+              "installed local model.";
+            console.warn(`[BridgeServer] ${error}`);
+            return { success: false, error };
+          }
+        }
+        params.model = "local";
+        params.modelPin = {
+          claudeModel: pin.claudeModel,
+          codexModel: pin.codexModel,
+          codexEffort: pin.codexEffort,
+          nativeModel: pin.nativeModel,
+        };
+      }
     }
 
     // Fold model aliases ("codex" → "gpt", "agy" → "antigravity") at the
