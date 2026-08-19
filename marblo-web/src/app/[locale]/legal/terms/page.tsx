@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import LegalPageLayout from "@/components/LegalPageLayout";
 
-const LAST_UPDATED = "2026-05-25";
+const LAST_UPDATED = "2026-08-19";
 const EFFECTIVE_DATE = "2026년 7월 14일";
 
 export default function TermsOfServicePage() {
@@ -426,6 +426,14 @@ export default function TermsOfServicePage() {
       <p>
         유료 서비스의 환불에 관한 사항은 회사가 별도로 정하는{" "}
         <Link href="/ko/legal/refund">환불정책</Link> 에 따릅니다.
+      </p>
+      <p>
+        회사의 시스템 오류, 서비스 또는 콘텐츠의 하자, 약정한 서비스·콘텐츠의
+        미제공 등 회사 귀책 사유가 발생한 경우, 강의 및 구독 서비스 모두에
+        대하여 해당 사유가 발생한 날부터 7일 이내 환불을 신청할 수 있으며,
+        강의 진도율·자료 다운로드 여부·이용량 또는 구독 경과 기간과 관계없이
+        결제 금액을 전액 환불합니다. 예정된 강의의 오픈이 불가능한 경우는
+        콘텐츠 미제공에 해당합니다.
       </p>
 
       <h2>제17조 (책임 제한)</h2>

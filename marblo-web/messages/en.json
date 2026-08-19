@@ -734,7 +734,7 @@
     "validityTitle": "Validity period",
     "validityBody": "Course access and update availability will be operated within 1 year from purchase; the confirmed period will be shown on the product detail and checkout screens when sales open.",
     "refundTitle": "Refund policy",
-    "refundBody": "Withdrawal is available within 7 days after payment. For multi-session courses, partial refund rules apply according to course progress.",
+    "refundBody": "Withdrawal is available within 7 days after payment. For multi-session courses, partial refund rules apply according to course progress. If a seller-caused system error, defect, or non-provision occurs, a full refund is available within 7 days of the issue regardless of course progress or material downloads.",
     "refundLink": "View Refund Policy",
     "completed": "Completed",
     "resume": "Resume"
