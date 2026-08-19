@@ -91,6 +91,15 @@ function AgentRowImpl({
         {row.displayName}
       </span>
 
+      {row.isInputWaiting && (
+        <span
+          className="shrink-0 rounded bg-[#f9e2af]/10 px-1.5 py-0.5 text-[10px] font-medium text-[#f9e2af]"
+          title={t("agents.attention.awaitingTitle")}
+        >
+          ⏸ {t("agents.attention.awaiting")}
+        </span>
+      )}
+
       {modelLabel && (
         <span
           className="max-w-[140px] shrink-0 truncate rounded border border-[#45475a] bg-[#181825] px-1.5 py-0.5 text-[10px] font-mono text-[#a6adc8]"
