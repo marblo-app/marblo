@@ -26,6 +26,19 @@ async function readCjkMetrics(
       const screen = root?.querySelector(".xterm-screen") as HTMLElement | null;
       const rows = root?.querySelector(".xterm-rows") as HTMLElement | null;
       const textarea = root?.querySelector("textarea") as HTMLElement | null;
+      const parseCssPx = (value: string | null) => {
+        if (!value || value === "normal") return 0;
+        const parsed = Number.parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : null;
+      };
+      const rowsLetterSpacingRaw = rows
+        ? getComputedStyle(rows).letterSpacing
+        : null;
+      const spanLetterSpacingPx = rows
+        ? Array.from(rows.querySelectorAll("span"), (span) =>
+            parseCssPx(getComputedStyle(span).letterSpacing),
+          ).filter((value): value is number => value !== null)
+        : [];
       const ctx = document.createElement("canvas").getContext("2d")!;
       ctx.font = `13px ${stack}`;
       const asciiWidth = ctx.measureText("0").width;
@@ -47,7 +60,11 @@ async function readCjkMetrics(
         hangulToScreenCellRatio: screenCellWidth
           ? hangulWidth / screenCellWidth
           : 0,
-        rowsLetterSpacing: rows ? getComputedStyle(rows).letterSpacing : null,
+        rowsLetterSpacing: rowsLetterSpacingRaw,
+        rowsLetterSpacingPx: parseCssPx(rowsLetterSpacingRaw),
+        maxAbsSpanLetterSpacingPx: spanLetterSpacingPx.length
+          ? Math.max(...spanLetterSpacingPx.map((value) => Math.abs(value)))
+          : null,
         textareaFontFamily: textarea
           ? getComputedStyle(textarea).fontFamily
           : null,
@@ -70,8 +87,17 @@ function expectHealthyCjkMetrics(
   expect(metrics.debug?.fontFamily).toContain("Marblo D2Coding");
   expect(metrics.hangulToAsciiRatio).toBeCloseTo(2, 3);
   expect(metrics.hangulToScreenCellRatio).toBeCloseTo(2, 1);
-  if (metrics.rowsLetterSpacing !== null) {
-    expect(metrics.rowsLetterSpacing).toMatch(/^-?\d+(\.\d+)?px$|^normal$/);
+  if (metrics.rowsLetterSpacingPx !== null) {
+    expect(
+      Math.abs(metrics.rowsLetterSpacingPx),
+      `xterm row container letter-spacing = ${metrics.rowsLetterSpacing}`,
+    ).toBeLessThanOrEqual(0.05);
+  }
+  if (metrics.maxAbsSpanLetterSpacingPx !== null) {
+    expect(
+      metrics.maxAbsSpanLetterSpacingPx,
+      "xterm visible span letter-spacing must be zeroed",
+    ).toBeLessThanOrEqual(0.05);
   }
 }
 
