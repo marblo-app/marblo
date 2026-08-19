@@ -4630,6 +4630,9 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
   });
 
   win.once("ready-to-show", () => {
+    if (!detachedView) {
+      win.maximize();
+    }
     win.show();
 
     // Tell renderer if this is a new window (skip session restore)
