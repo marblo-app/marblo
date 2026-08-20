@@ -445,6 +445,19 @@ function CellRow({ cell }: { cell: OurBenchCell }) {
             {t("usage.ourBench.cliDefault")}
           </span>
         )}
+        {/* ★벤더 경유 배지. 같은 `codex` 하네스라도 env-swap 벤더는 다른 셀에
+            없는 홉(로컬 Responses→Chat 브리지)을 탄다 — 그 사실을 표에서
+            지우지 않는다. 경로 문자열 전문은 title 로 붙인다. */}
+        {cell.vendorRoute && (
+          <span
+            className="ml-1.5 rounded bg-sky-500/15 px-1 text-[9px] text-sky-300"
+            title={t("usage.ourBench.vendorRouteTip", {
+              route: cell.vendorRoute,
+            })}
+          >
+            {t("usage.ourBench.vendorRouteBadge")}
+          </span>
+        )}
       </td>
       <td className="py-1.5 pr-3 text-gray-400">{cell.effort ?? "—"}</td>
       <td className="py-1.5 pr-3 text-right font-mono text-gray-200">

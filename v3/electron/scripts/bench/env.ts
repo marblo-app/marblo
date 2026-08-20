@@ -205,6 +205,19 @@ export function restoreTestFiles(
   }
 }
 
+/**
+ * 워크트리를 base 커밋 상태로 되돌린다(추적 파일 되돌리기 + 미추적 파일 제거).
+ *
+ * ★프로바이더 실패(429) 재시도 전에만 부른다. 앞 시도가 남긴 편집이 다음 시도에
+ * 섞이면 "무엇을 잰 것인가" 가 흐려진다 — 두 시도의 산출물이 합쳐진 diff 를
+ * 채점하게 되기 때문이다. venv 는 건드리지 않는다(레포 밖에 있다).
+ */
+export function resetWorktree(repoDir: string, baseCommit: string): void {
+  exec("git", ["-C", repoDir, "checkout", "-f", baseCommit, "--", "."]);
+  // `-e` 없이 지우면 .gitignore 된 빌드 산출물까지 날아가 재설치가 필요해진다.
+  exec("git", ["-C", repoDir, "clean", "-fd", "-e", "*.egg-info"]);
+}
+
 /** 테스트 러너 실행. 로그 전문을 돌려준다(파싱은 호출자 몫). */
 export function runTests(
   spec: RepoSpec,

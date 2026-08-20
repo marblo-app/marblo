@@ -26,6 +26,7 @@ import {
   captureWorkingPatch,
   ensureBareRepo,
   removeWorktree,
+  resetWorktree,
   restoreTestFiles,
   runTests,
   setupPythonEnv,
@@ -39,7 +40,18 @@ import {
   REPO_SPECS,
   SCAFFOLD_ID,
 } from "./manifest";
-import { buildInvocation, buildPrompt, cliVersion, runAgent } from "./agent";
+import {
+  buildInvocation,
+  buildPrompt,
+  cliVersion,
+  providerFailure,
+  runAgent,
+} from "./agent";
+import {
+  benchVendorFor,
+  startBenchVendorSession,
+  type BenchVendorSession,
+} from "./vendor";
 import type { BenchHarness, Grade, RunRecord, TestStatusMap } from "./types";
 
 interface Options {
@@ -53,6 +65,14 @@ interface Options {
   refreshDataset: boolean;
   agentTimeoutMs: number;
   testTimeoutMs: number;
+  /** ★프로바이더 실패(429 등)일 때만 쓰는 시도 상한. 모델 실패는 재시도하지 않는다. */
+  agentRetries: number;
+  retryBackoffMs: number;
+}
+
+/** 백오프용. async main 안에서만 부르므로 타이머가 정상 동작한다. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function parseArgs(argv: string[]): Options {
@@ -82,6 +102,8 @@ function parseArgs(argv: string[]): Options {
     refreshDataset: argv.includes("--refresh-dataset"),
     agentTimeoutMs: Number(get("agent-timeout") || 900) * 1000,
     testTimeoutMs: Number(get("test-timeout") || 1800) * 1000,
+    agentRetries: Number(get("agent-retries") || 2),
+    retryBackoffMs: Number(get("retry-backoff") || 90) * 1000,
   };
 }
 
@@ -165,128 +187,186 @@ async function main(): Promise<void> {
       : cliVersion(opts.harness);
   fs.mkdirSync(path.dirname(opts.out), { recursive: true });
 
-  for (const instanceId of opts.instances) {
-    const instance = dataset.get(instanceId);
-    if (!instance) {
-      throw new Error(
-        `instance ${instanceId} not in ${DATASET} — 오타이거나 데이터셋이 바뀐 것이다.`,
-      );
-    }
-    const spec = REPO_SPECS[instance.repo];
-    if (!spec) {
-      throw new Error(
-        `no RepoSpec for ${instance.repo}. 새 레포를 추가하려면 manifest.ts 에 ` +
-          `레시피를 넣고 --harness=gold 로 자체검증부터 통과시킬 것.`,
-      );
-    }
+  // ★OpenAI 호환 env-swap 벤더(Upstage Solar)면 브리지 + 격리 CODEX_HOME 을
+  // 런 묶음당 **한 번** 세운다. 키가 없으면 여기서 죽는다 — 조용히 기본 계정으로
+  // 떨어져 "solar 라고 라벨된 남의 모델" 을 재는 것보다 안 도는 편이 낫다.
+  const vendorSpec = benchVendorFor(opts.model);
+  let vendor: BenchVendorSession | null = null;
+  if (vendorSpec) {
+    vendor = await startBenchVendorSession(
+      vendorSpec,
+      path.join(opts.root, "runs", runId),
+    );
+    console.log(`[bench] vendorRoute=${vendor.route}`);
+  }
 
-    const record: RunRecord = {
-      label: "our-measured",
-      runId,
-      startedAt,
-      dataset: DATASET,
-      instanceId,
-      repo: instance.repo,
-      baseCommit: instance.base_commit,
-      harness: opts.harness,
-      model: opts.model,
-      effort: opts.effort,
-      scaffold: SCAFFOLD_ID,
-      execEnv: EXEC_ENV_ID,
-      graderVersion: GRADER_VERSION,
-      cliVersion: version,
-      agent: null,
-      grade: null,
-      error: null,
-    };
-
-    const workDir = path.join(opts.root, "runs", runId, instanceId);
-    const repoDir = path.join(workDir, "repo");
-    const venvDir = path.join(workDir, "venv");
-    let bare = "";
-
-    try {
-      console.log(
-        `\n[${instanceId}] base=${instance.base_commit.slice(0, 10)} (${instance.difficulty})`,
-      );
-      bare = ensureBareRepo(instance.repo, path.join(opts.root, "cache"));
-      addWorktree(bare, instance.base_commit, repoDir);
-      console.log(`[${instanceId}] building env (${spec.python}) …`);
-      const python = setupPythonEnv(spec, repoDir, venvDir, opts.testTimeoutMs);
-
-      if (opts.harness === "gold") {
-        // 자체검증: 정답 패치를 넣는다. resolved 가 1 이 아니면 채점기 결함.
-        applyPatch(repoDir, instance.patch, "gold");
-      } else if (opts.harness !== "noop") {
-        const prompt = buildPrompt(instance);
-        const invocation = buildInvocation(
-          opts.harness,
-          prompt,
-          opts.model,
-          opts.effort,
+  try {
+    for (const instanceId of opts.instances) {
+      const instance = dataset.get(instanceId);
+      if (!instance) {
+        throw new Error(
+          `instance ${instanceId} not in ${DATASET} — 오타이거나 데이터셋이 바뀐 것이다.`,
         );
-        console.log(`[${instanceId}] spawning ${invocation.command} …`);
-        const { run } = runAgent(invocation, repoDir, opts.agentTimeoutMs);
-        record.agent = { ...run, patch: "", noOutput: true };
-        console.log(
-          `[${instanceId}] agent exit=${run.exitCode} ${(run.durationMs / 1000).toFixed(0)}s` +
-            (run.timedOut ? " (TIMED OUT)" : ""),
+      }
+      const spec = REPO_SPECS[instance.repo];
+      if (!spec) {
+        throw new Error(
+          `no RepoSpec for ${instance.repo}. 새 레포를 추가하려면 manifest.ts 에 ` +
+            `레시피를 넣고 --harness=gold 로 자체검증부터 통과시킬 것.`,
         );
       }
 
-      // ★테스트 파일 복구가 먼저다. 에이전트가 테스트를 고쳤다면 그 편집은
-      // 채점 대상이 아니고, 되돌린 뒤에 남는 것이 실질 산출물이다.
-      const testFiles = testFilesFromPatch(instance.test_patch);
-      restoreTestFiles(repoDir, instance.base_commit, testFiles);
-
-      if (record.agent) {
-        const effective = captureWorkingPatch(repoDir);
-        record.agent.patch = effective;
-        record.agent.noOutput = effective.trim().length === 0;
-        if (record.agent.noOutput)
-          console.log(`[${instanceId}] ★no source output`);
-      }
-
-      applyPatch(repoDir, instance.test_patch, "test");
-      const directives = testFiles.map(spec.toDirective);
-      console.log(`[${instanceId}] running tests: ${directives.join(" ")}`);
-      const testRun = runTests(
-        spec,
-        repoDir,
-        python,
-        directives,
-        opts.testTimeoutMs,
-      );
-      const log = testRun.stdout + "\n" + testRun.stderr;
-      fs.writeFileSync(path.join(workDir, "test.log"), log);
-
-      const status = parseTestLog(spec.parser, log);
-      assertIdsMatch(
+      const record: RunRecord = {
+        label: "our-measured",
+        runId,
+        startedAt,
+        dataset: DATASET,
         instanceId,
-        status,
-        instance.FAIL_TO_PASS,
-        instance.PASS_TO_PASS,
-      );
-      record.grade = grade(
-        status,
-        instance.FAIL_TO_PASS,
-        instance.PASS_TO_PASS,
-      );
-      console.log(
-        `[${instanceId}] resolved=${record.grade.resolved} ` +
-          `F2P ${record.grade.f2pPassed}/${record.grade.f2pTotal} ` +
-          `P2P ${record.grade.p2pPassed}/${record.grade.p2pTotal}`,
-      );
-    } catch (err) {
-      record.error = err instanceof Error ? err.message : String(err);
-      console.error(`[${instanceId}] ERROR: ${record.error}`);
-    } finally {
-      fs.appendFileSync(opts.out, JSON.stringify(record) + "\n");
-      if (!opts.keep && bare) removeWorktree(bare, repoDir);
-      if (!opts.keep && fs.existsSync(venvDir)) {
-        fs.rmSync(venvDir, { recursive: true, force: true });
+        repo: instance.repo,
+        baseCommit: instance.base_commit,
+        harness: opts.harness,
+        model: opts.model,
+        effort: opts.effort,
+        scaffold: SCAFFOLD_ID,
+        execEnv: EXEC_ENV_ID,
+        graderVersion: GRADER_VERSION,
+        cliVersion: version,
+        vendorRoute: vendor?.route ?? null,
+        agent: null,
+        grade: null,
+        error: null,
+      };
+
+      const workDir = path.join(opts.root, "runs", runId, instanceId);
+      const repoDir = path.join(workDir, "repo");
+      const venvDir = path.join(workDir, "venv");
+      let bare = "";
+
+      try {
+        console.log(
+          `\n[${instanceId}] base=${instance.base_commit.slice(0, 10)} (${instance.difficulty})`,
+        );
+        bare = ensureBareRepo(instance.repo, path.join(opts.root, "cache"));
+        addWorktree(bare, instance.base_commit, repoDir);
+        console.log(`[${instanceId}] building env (${spec.python}) …`);
+        const python = setupPythonEnv(
+          spec,
+          repoDir,
+          venvDir,
+          opts.testTimeoutMs,
+        );
+
+        if (opts.harness === "gold") {
+          // 자체검증: 정답 패치를 넣는다. resolved 가 1 이 아니면 채점기 결함.
+          applyPatch(repoDir, instance.patch, "gold");
+        } else if (opts.harness !== "noop") {
+          const prompt = buildPrompt(instance);
+          const invocation = buildInvocation(
+            opts.harness,
+            prompt,
+            opts.model,
+            opts.effort,
+          );
+          // ★프로바이더 실패(429 등)일 때**만** 다시 시도한다. 모델이 못 풀었을
+          // 때는 절대 다시 돌리지 않는다 — 그건 표본을 유리하게 고르는 짓이다.
+          // 재시도 사유는 codex 가 스스로 "포기했다" 고 적은 줄 하나로만 판정한다.
+          let attempts = 0;
+          let failure: string | null = null;
+          for (;;) {
+            attempts += 1;
+            console.log(
+              `[${instanceId}] spawning ${invocation.command} (attempt ${attempts}) …`,
+            );
+            const { run } = runAgent(
+              invocation,
+              repoDir,
+              opts.agentTimeoutMs,
+              vendor?.env ?? {},
+            );
+            record.agent = { ...run, patch: "", noOutput: true };
+            record.agentAttempts = attempts;
+            console.log(
+              `[${instanceId}] agent exit=${run.exitCode} ${(run.durationMs / 1000).toFixed(0)}s` +
+                (run.timedOut ? " (TIMED OUT)" : ""),
+            );
+            failure = providerFailure(run.tailLog);
+            if (!failure) break;
+            console.log(`[${instanceId}] ★provider failure: ${failure}`);
+            if (attempts >= opts.agentRetries) break;
+            console.log(
+              `[${instanceId}] backing off ${(opts.retryBackoffMs / 1000).toFixed(0)}s …`,
+            );
+            await sleep(opts.retryBackoffMs);
+            // 재시도는 깨끗한 트리에서 한다 — 앞 시도가 남긴 편집이 섞이면
+            // "무엇을 잰 것인가" 가 흐려진다.
+            resetWorktree(repoDir, instance.base_commit);
+          }
+          if (failure) {
+            // ★채점하지 않는다. 모델이 답을 낸 적이 없는 런을 0점으로 적으면
+            // 벤더 장애가 모델 실력으로 둔갑한다. 리포트는 이 행을 분모 밖
+            // "에러" 로 따로 센다.
+            throw new Error(
+              `agent could not reach the provider after ${attempts} attempt(s): ${failure}`,
+            );
+          }
+        }
+
+        // ★테스트 파일 복구가 먼저다. 에이전트가 테스트를 고쳤다면 그 편집은
+        // 채점 대상이 아니고, 되돌린 뒤에 남는 것이 실질 산출물이다.
+        const testFiles = testFilesFromPatch(instance.test_patch);
+        restoreTestFiles(repoDir, instance.base_commit, testFiles);
+
+        if (record.agent) {
+          const effective = captureWorkingPatch(repoDir);
+          record.agent.patch = effective;
+          record.agent.noOutput = effective.trim().length === 0;
+          if (record.agent.noOutput)
+            console.log(`[${instanceId}] ★no source output`);
+        }
+
+        applyPatch(repoDir, instance.test_patch, "test");
+        const directives = testFiles.map(spec.toDirective);
+        console.log(`[${instanceId}] running tests: ${directives.join(" ")}`);
+        const testRun = runTests(
+          spec,
+          repoDir,
+          python,
+          directives,
+          opts.testTimeoutMs,
+        );
+        const log = testRun.stdout + "\n" + testRun.stderr;
+        fs.writeFileSync(path.join(workDir, "test.log"), log);
+
+        const status = parseTestLog(spec.parser, log);
+        assertIdsMatch(
+          instanceId,
+          status,
+          instance.FAIL_TO_PASS,
+          instance.PASS_TO_PASS,
+        );
+        record.grade = grade(
+          status,
+          instance.FAIL_TO_PASS,
+          instance.PASS_TO_PASS,
+        );
+        console.log(
+          `[${instanceId}] resolved=${record.grade.resolved} ` +
+            `F2P ${record.grade.f2pPassed}/${record.grade.f2pTotal} ` +
+            `P2P ${record.grade.p2pPassed}/${record.grade.p2pTotal}`,
+        );
+      } catch (err) {
+        record.error = err instanceof Error ? err.message : String(err);
+        console.error(`[${instanceId}] ERROR: ${record.error}`);
+      } finally {
+        fs.appendFileSync(opts.out, JSON.stringify(record) + "\n");
+        if (!opts.keep && bare) removeWorktree(bare, repoDir);
+        if (!opts.keep && fs.existsSync(venvDir)) {
+          fs.rmSync(venvDir, { recursive: true, force: true });
+        }
       }
     }
+  } finally {
+    if (vendor) await vendor.stop();
   }
 
   console.log(`\n[bench] results appended to ${opts.out}`);

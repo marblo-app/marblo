@@ -98,6 +98,36 @@ export function buildInvocation(
   throw new Error(`harness ${harness} has no agent invocation`);
 }
 
+/**
+ * ★프로바이더 실패 판정 — "측정이 성립하지 않은 런" 을 0점과 가르는 게이트.
+ *
+ * 왜 필요한가: Upstage 429(레이트리밋)로 codex 가 재시도 한도를 넘겨 죽으면, 그
+ * 런에서 **모델은 답을 낸 적이 없다**. 그런데 종전 배선은 그 런을 그대로 채점해
+ * `resolved=false`(=0점)로 적었다. 그건 **벤더 장애를 모델 실력으로 둔갑**시키는
+ * 것이고, 이 하네스가 `assertIdsMatch` 로 이미 한 번 막아 둔 실패모드(조용한
+ * 오채점)와 정확히 같은 종류다.
+ *
+ * ★판정 근거는 **codex 자신이 포기했다고 적은 줄** 하나뿐이다. 모델이 못 푼 것과
+ * 헷갈릴 여지가 없어야 하므로, 우리가 로그를 해석해 추측하지 않는다.
+ *
+ * ★반대로 `unsupported call: apply_patch`(도구 표면 불일치)는 **여기서 잡지
+ * 않는다.** 그건 모델이 답을 냈는데 하네스가 그 행동을 거절한 것이라 측정이
+ * 성립하긴 했다(다만 하네스가 깎은 측정이다). 분모에서 빼면 점수를 유리하게
+ * 만드는 조작이 된다 — 그래서 리포트에는 진단으로만 따로 센다.
+ */
+const PROVIDER_FAILURE_PATTERNS: readonly RegExp[] = [
+  // codex: `ERROR: exceeded retry limit, last status: 429 Too Many Requests`
+  /exceeded retry limit, last status:\s*(\d{3})/i,
+];
+
+export function providerFailure(tailLog: string): string | null {
+  for (const re of PROVIDER_FAILURE_PATTERNS) {
+    const m = re.exec(tailLog);
+    if (m) return m[0].trim();
+  }
+  return null;
+}
+
 export function cliVersion(harness: BenchHarness): string | null {
   const bin =
     harness === "claude"
@@ -120,6 +150,12 @@ export function runAgent(
   invocation: HarnessInvocation,
   repoDir: string,
   timeoutMs: number,
+  /**
+   * OpenAI 호환 env-swap 벤더 배선(CODEX_HOME + 벤더 키). `vendor.ts` 가 만든
+   * 것만 들어오고, 없으면 기본 경로 그대로다 — 즉 기존 라운드의 스폰은
+   * 이 인자가 비어 있어 **한 글자도 달라지지 않는다**.
+   */
+  extraEnv: Record<string, string> = {},
 ): { exec: ExecResult; run: Omit<AgentRun, "patch" | "noOutput"> } {
   const started = Date.now();
   const r = exec(invocation.command, invocation.args, {
@@ -127,7 +163,7 @@ export function runAgent(
     timeoutMs,
     // 에이전트가 우리 벤치 venv 를 건드리지 않게 PATH 는 그대로 두되,
     // 마블로 MCP 배선은 주입하지 않는다(§scaffold 경계).
-    env: { ...process.env },
+    env: { ...process.env, ...extraEnv },
   });
   const durationMs = Date.now() - started;
   return {

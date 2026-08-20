@@ -125,6 +125,19 @@ export interface RunRecord {
    */
   graderVersion: string;
   cliVersion: string | null;
+  /**
+   * ★벤더 경유 경로. OpenAI 호환 env-swap 벤더(Upstage Solar)는 다른 codex 런에
+   * **없는 홉**을 탄다(로컬 Responses→Chat 브리지 + 커스텀 프로바이더). 그 차이를
+   * 표에서 지우지 않으려고 행마다 문자열로 들고 다닌다. 기본 경로면 null.
+   * (옛 행에는 이 필드가 없다 — 리포트는 없는 것을 "기본 경로" 로 읽는다.)
+   */
+  vendorRoute?: string | null;
+  /**
+   * 에이전트를 몇 번 띄웠나. ★프로바이더 실패(429 등)로 **측정이 성립하지 않은**
+   * 시도만 다시 센다 — 모델이 못 푼 런은 절대 다시 돌리지 않는다. 1 이면 한 번에
+   * 끝난 것이고, 없으면 재시도 개념이 없던 옛 행이다.
+   */
+  agentAttempts?: number;
   agent: AgentRun | null;
   grade: Grade | null;
   /** 파이프라인이 채점 전에 깨졌으면 그 이유. 채점 실패와 구분된다. */

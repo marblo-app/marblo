@@ -58,6 +58,8 @@ interface Cell {
   execEnv: string;
   graderVersion: string;
   cliVersion: string;
+  /** 벤더 경유 경로(env-swap 벤더만). 기본 경로면 null. */
+  vendorRoute: string | null;
   resolved: number;
   graded: number;
   errored: number;
@@ -73,6 +75,10 @@ function summarize(records: RunRecord[]): Cell[] {
     // ★채점기 버전이 셀 키에 들어간다. 버전이 다른 런은 절대 합산되지 않는다.
     // 이 필드가 없는 옛 행(버그 있던 채점기)은 `v1(pre-fix)` 로 분리된다.
     const graderVersion = r.graderVersion ?? "v1(pre-fix)";
+    // ★벤더 경유 경로도 셀 키다. 같은 모델을 다른 경로(기본 vs 브리지 경유)로
+    // 잰 런은 다른 실험이라 합산되면 안 된다. 옛 행은 이 필드가 없어 전부
+    // 같은 값(null)으로 접히므로 기존 셀은 한 칸도 갈라지지 않는다.
+    const vendorRoute = r.vendorRoute ?? null;
     const key = [
       r.harness,
       model,
@@ -80,6 +86,7 @@ function summarize(records: RunRecord[]): Cell[] {
       r.scaffold,
       r.execEnv,
       graderVersion,
+      vendorRoute ?? "-",
     ].join("|");
     let c = cells.get(key);
     if (!c) {
@@ -92,6 +99,7 @@ function summarize(records: RunRecord[]): Cell[] {
         execEnv: r.execEnv,
         graderVersion,
         cliVersion: r.cliVersion ?? "-",
+        vendorRoute,
         resolved: 0,
         graded: 0,
         errored: 0,
@@ -180,9 +188,12 @@ function render(records: RunRecord[], generatedAt: string): string {
   }
   lines.push("");
   for (const c of cells) {
+    // ★벤더 경유 경로는 있을 때만 적는다. 다른 codex 런에 **없는 홉**을 탄
+    // 셀(Upstage Solar)이 그 사실을 표에서 감추지 않게 하는 줄이다.
+    const route = c.vendorRoute ? ` vendorRoute=\`${c.vendorRoute}\`` : "";
     lines.push(
       `- \`${c.harness}\` ${c.model} scaffold=\`${c.scaffold}\` execEnv=\`${c.execEnv}\` ` +
-        `grader=\`${c.graderVersion}\` cli=\`${c.cliVersion}\``,
+        `grader=\`${c.graderVersion}\` cli=\`${c.cliVersion}\`${route}`,
     );
   }
   lines.push("");
@@ -306,6 +317,7 @@ function buildOurBench(
       avgAgentSeconds:
         runs > 0 && c.totalMs > 0 ? Math.round(c.totalMs / runs / 1000) : null,
       cliVersion: c.cliVersion === "-" ? null : c.cliVersion,
+      vendorRoute: c.vendorRoute,
       scaffold: c.scaffold,
       execEnv: c.execEnv,
       graderVersion: c.graderVersion,

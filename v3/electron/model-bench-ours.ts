@@ -101,6 +101,14 @@ export interface OurBenchCell {
   /** 평균 에이전트 실행 시간(초). 측정치가 없으면 null(대조행이 그렇다). */
   avgAgentSeconds: number | null;
   cliVersion: string | null;
+  /**
+   * ★벤더 경유 경로. OpenAI 호환 env-swap 벤더(Upstage Solar)는 같은 `codex`
+   * 하네스라도 다른 셀에 **없는 홉**을 탄다 — 로컬 Responses→Chat 브리지와
+   * codex 커스텀 프로바이더다. 그 차이를 표에서 지우면 "같은 조건" 이라는
+   * 거짓 인상이 남으므로, 셀이 문자열로 들고 다니고 화면이 그대로 그린다.
+   * 기본 경로(다른 모든 셀)면 null.
+   */
+  vendorRoute: string | null;
   scaffold: string;
   execEnv: string;
   graderVersion: string;

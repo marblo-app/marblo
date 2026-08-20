@@ -227,6 +227,12 @@ export const usage = {
   "usage.ourBench.colAvg": "평균 시간",
   "usage.ourBench.colInstance": "인스턴스",
   "usage.ourBench.cliDefault": "(CLI 기본값)",
+  // ★벤더 경유 배지 — 같은 `codex` 하네스라도 env-swap 벤더(Upstage Solar)는
+  // 다른 셀에 없는 홉(로컬 Responses→Chat 브리지)을 탄다. 그 차이를 표에서
+  // 지우면 "같은 조건" 이라는 거짓 인상이 남으므로 셀에 배지로 남긴다.
+  "usage.ourBench.vendorRouteBadge": "벤더 경유",
+  "usage.ourBench.vendorRouteTip":
+    "이 셀은 다른 셀과 달리 벤더 전용 경로를 한 홉 더 탔습니다: {route}. 하네스·태스크셋·채점기는 같지만 전송 경로가 동일하지 않다는 뜻이라, 소수점 단위 비교는 이 사실을 감안해서 읽어야 합니다.",
   "usage.ourBench.seconds": "{n}초",
   "usage.ourBench.control.floor": "대조·바닥",
   "usage.ourBench.control.ceiling": "대조·천장",

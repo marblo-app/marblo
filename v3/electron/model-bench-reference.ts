@@ -267,6 +267,7 @@ const SRC = {
   openaiGpt54: "https://platform.openai.com/docs/models/gpt-5.4",
   openaiGpt54Mini: "https://platform.openai.com/docs/models/gpt-5.4-mini",
   benchlmSwePro: "BenchLM (benchlm.ai/benchmarks/swePro)",
+  upstageSolarPro4: "https://www.upstage.ai/blog/en/solar-pro-4",
 } as const;
 
 const BENCHLM_SWE_PRO_NOTE =
@@ -850,6 +851,38 @@ const REGISTRY_ROWS: BenchRecord[] = [
   benchlmPro("glm-5.2", "registry", 62.1),
   benchlmPro("MiniMax-M3", "registry", 59.0),
   benchlmPro("MiniMax-M2.7", "registry", 56.2),
+
+  // ── Upstage Solar Pro 4 (네 번째 env-swap 벤더 — dz2ggYyH) ─────────────
+  // ★이 행은 벤더 **공개치**다. 같은 티켓에서 우리가 직접 잰 값은 형제 표
+  // (`model-bench-ours.ts`)에 따로 있고, 두 표는 절대 같은 표에 놓지 않는다.
+  // 두 숫자가 크게 다를 수 있고 **그것이 정상**이다 — 아래 harness/config 를
+  // 보면 이유가 보인다.
+  //
+  // 출처(2026-08-11 게시, 2026-08-20 확인): 공식 블로그 "Solar Pro 4" 의
+  // Agent execution 표. 행 표기가 `SWE-Bench Verified (OpenHands)*` 이고,
+  // 별표는 같은 페이지 각주가 "in-house under the same internal evaluation
+  // environment" 라고 밝힌 표시다 — 즉 제3자 채점이 아니라 **벤더 자체 실행**
+  // 이고, 스캐폴드는 OpenHands 다. 우리 벤치(single-shot, no-scaffold)와는
+  // 하네스 축이 아예 달라 직접 비교 대상이 아니다.
+  //
+  // 같은 표의 직전 세대(Solar Open 2)는 69.2 였다(+1.4).
+  {
+    model: "solar-pro4",
+    kind: "registry",
+    benchmark: "swe-bench-verified",
+    variantLabel: "SWE-Bench Verified (OpenHands)",
+    version: "unspecified",
+    harness: {
+      name: "vendor-internal (Upstage, OpenHands)",
+      config:
+        "블로그 각주: 별표 벤치는 Upstage 사내 동일 평가환경에서 자체 실행(설정 미공개)",
+    },
+    score: 70.6,
+    source: SRC.upstageSolarPro4,
+    sourceKind: "model-vendor",
+    asOf: "2026-08-11",
+    note: "Agent execution 표의 `SWE-Bench Verified (OpenHands)*` 행. 같은 표 Solar Open 2 69.2 대비 +1.4. Pro/Multilingual/Multimodal 은 이 발표에 없다.",
+  },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────

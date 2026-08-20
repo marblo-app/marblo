@@ -219,6 +219,9 @@ export const usage: Record<keyof typeof koUsage, string> = {
   "usage.ourBench.colAvg": "Avg time",
   "usage.ourBench.colInstance": "Instance",
   "usage.ourBench.cliDefault": "(CLI default)",
+  "usage.ourBench.vendorRouteBadge": "vendor route",
+  "usage.ourBench.vendorRouteTip":
+    "Unlike the other cells, this one took an extra vendor-specific hop: {route}. The harness, task set and grader are the same, but the transport path is not identical — read small differences with that in mind.",
   "usage.ourBench.seconds": "{n}s",
   "usage.ourBench.control.floor": "control · floor",
   "usage.ourBench.control.ceiling": "control · ceiling",

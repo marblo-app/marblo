@@ -6,6 +6,7 @@
 | 문서                                                                                                     | 무엇                                                              | 성격                 |
 | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | -------------------- |
 | [`swebench-our-measured.md`](./swebench-our-measured.md)                                                 | 공개 SWE-bench Verified 인스턴스를 **우리 스폰 경로**로 돌린 실측 | 실행됨 (tiny N)      |
+| [`swebench-solar-pro4-2026-08-20.md`](./swebench-solar-pro4-2026-08-20.md)                               | Solar Pro 4 의 라운드2 합류 — 조건 대조·교란요인·파일럿 대조      | 실행됨 (n=12)        |
 | [`../marblo-swe-benchmark-feasibility-2026-08-09.md`](../marblo-swe-benchmark-feasibility-2026-08-09.md) | 자체 벤치를 만들 것인가에 대한 전략 판단 (#896)                   | 코드 무변경 스파이크 |
 
 ## 세 물건을 섞지 않는다
@@ -47,3 +48,44 @@ results/runs.jsonl                     ← 정본(실행 머신)
 - 화면은 **접힌 상태에서도** 한 줄 요약·대조행(noop 0% / gold 100%)·"공식 Docker
   아님 → 리더보드 비교 불가" 캡션을 지우지 않는다. 캡션 문구는 위 마크다운 헤더와
   같은 문자열이고, 그 일치도 테스트가 못박는다.
+
+## env-swap 벤더(Upstage Solar)를 태울 때
+
+`solar-pro4` 는 codex 하네스를 쓰지만 **다른 codex 모델과 스폰 경로가 같지 않다.**
+codex 0.147+ 는 ChatGPT 로그인이 있으면 `OPENAI_BASE_URL` 을 무시하고 ChatGPT
+백엔드로 보내고(solar-pro4 → HTTP 400), codex 0.148.0 은 `wire_api="chat"` 을
+설정 로드 시점에 거부한다. 그래서 벤치는 **커스텀 프로바이더 + 로컬
+Responses→Chat 브리지**로 붙는다(`scripts/bench/vendor.ts`).
+
+```
+npm run bench:swe:vendor -- --harness=codex --model=solar-pro4 --effort=medium --out=electron/scripts/bench/results/runs.jsonl
+```
+
+- 키(`UPSTAGE_API_KEY`)는 `~/.marblo/vendor-secrets.enc.json` 에 safeStorage 로만
+  있다. 순수 node 인 러너는 그걸 못 열기 때문에 `scripts/bench/secret-launcher.ts`
+  가 Electron 으로 떠서 복호화하고 **자식 env 로만** 넘긴다. 평문은 stdout·로그·
+  argv 어디에도 나가지 않는다.
+- ★키가 없으면 러너가 **죽는다**. 조용히 기본 경로로 떨어지면 codex 가 기본
+  계정으로 붙어 "다른 모델을 재고 라벨만 solar" 인 행이 남는데, 그게 이 벤치에서
+  가장 비싼 사고다.
+- 이 셀만 다른 홉을 탄다는 사실은 행마다 `vendorRoute` 로 박히고, 마크다운 표와
+  사용량 탭("벤더 경유" 배지)이 그대로 보여 준다 — 조건 차이를 표에서 지우지 않는다.
+- ★조건 차이 하나 더: 라운드2의 gpt 셀들은 `codex-cli 0.147.0` 으로 쟀고 Solar 는
+  `0.148.0` 이다(벤더 경로가 0.148 에서만 성립한다). 셀별 `cliVersion` 이 그 사실을
+  들고 다니므로 표에서 확인할 수 있다.
+
+### ★프로바이더 실패는 0점이 아니다
+
+벤더가 429(레이트리밋)로 응답을 주지 않아 codex 가 재시도 한도를 넘겨 죽으면, 그 런에서
+**모델은 답을 낸 적이 없다.** 그걸 그대로 채점해 `resolved=false` 로 적으면 **벤더 장애가
+모델 실력으로 둔갑**한다(2026-08-20 solar 파일럿에서 6건 중 2건이 이 상태였다).
+
+- `agent.ts: providerFailure(tailLog)` — codex 가 **스스로 포기했다고 적은 줄**
+  (`exceeded retry limit, last status: NNN`) 하나로만 판정한다. 로그를 해석해 추측하지 않는다.
+- `run.ts` — 그 판정이 섰을 때**만** 재시도한다(`--agent-retries`, `--retry-backoff`).
+  ★모델이 못 푼 런은 절대 재시도하지 않는다 — 그건 표본을 유리하게 고르는 짓이다.
+  재시도 전에 `resetWorktree()` 로 base 커밋 상태를 복구해 앞 시도의 편집이 섞이지 않게 한다.
+- 상한까지 가도 실패면 `record.error` 로 분류돼 **분모 밖**으로 나가고 리포트에 따로 뜬다.
+- ★반대로 `unsupported call: apply_patch`(도구 표면 불일치)는 **프로바이더 실패로 치지 않는다.**
+  모델이 답을 냈고 하네스가 그 행동을 거절한 것이라 측정은 성립했다 — 분모에서 빼면 점수를
+  유리하게 만드는 조작이 된다.

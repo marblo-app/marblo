@@ -698,6 +698,12 @@ interface OurBenchCell {
   errored: number;
   avgAgentSeconds: number | null;
   cliVersion: string | null;
+  /**
+   * ★벤더 경유 경로(OpenAI 호환 env-swap 벤더만). 같은 `codex` 하네스라도 이
+   * 셀만 다른 홉(로컬 Responses→Chat 브리지)을 탔다는 사실을 표에서 지우지
+   * 않기 위한 필드다. 기본 경로면 null.
+   */
+  vendorRoute: string | null;
   scaffold: string;
   execEnv: string;
   graderVersion: string;
