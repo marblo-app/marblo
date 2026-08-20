@@ -41,6 +41,7 @@ import {
  *   G6  코치마크 투어 3스텝 완주 → 재노출 없음 → 상단 마블로 모드 전환
  *   G7  승격 모달(완료 3건) — '지금은 그대로' 는 다시 안 뜬다
  *   G8  승격 수락 → 마블로 모드 셸 + 보드에 티켓이 그대로 있다
+ *   G9  ★오케가 멈춘 비기너 화면에도 이전 대화 복구 수단이 있다(BzxAJXxqhHgYzy1Aq4IV)
  *
  * 실행: npm run test:e2e:pw -- tests/playwright/cleanroom/beginner-first-run.spec.ts
  * 전제: npm run build (dist-electron/main.js + dist/)
@@ -690,6 +691,63 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
         cr.page.getByText("승격 티켓 1", { exact: true }).first(),
       ).toBeVisible();
       await cr.shot("G8-promoted-board");
+    } finally {
+      await cr.close();
+    }
+  });
+
+  test("G9 오케가 멈춘 비기너 화면에도 이전 대화 복구 수단이 있다", async () => {
+    // 티켓 BzxAJXxqhHgYzy1Aq4IV — 검은 화면의 다른 쪽 절반.
+    // 비기너 헤더는 `hideModelControls` 로 세션 피커를 통째로 감추고 있었다.
+    // 그래서 오케가 멈추면 이 화면에 남는 건 Start 하나뿐이고, Start 는
+    // resolvePrevious 가 고른 세션을 말없이 이어받는다 — 엉뚱한 걸 물어도
+    // 되돌릴 곳이 화면에 없다. 어드밴스드로 도망칠 수도 없는 유저에게.
+    const cr = await launchCleanRoom({
+      claude: "ready",
+      codex: "missing",
+      beginnerShell: true,
+    });
+    try {
+      await passFirstRunModals(cr.page);
+      await waitForAppShell(cr.page);
+      await injectProject(cr.page, cr.projectDir);
+      await chatReady(cr.page);
+
+      // 오케를 '멈춤' 국면으로 고정한다 — 복구 어포던스가 필요한 바로 그 상태.
+      await cr.page.evaluate(() => {
+        const hatch = (
+          window as unknown as {
+            __marbloTest?: {
+              stores: {
+                orchestrator: {
+                  getState: () => {
+                    clear: () => void;
+                    setStatus: (status: "stopped") => void;
+                  };
+                };
+              };
+            };
+          }
+        ).__marbloTest;
+        if (!hatch) throw new Error("cleanroom test hatch is unavailable");
+        const orchestrator = hatch.stores.orchestrator.getState();
+        orchestrator.clear();
+        orchestrator.setStatus("stopped");
+      });
+
+      const picker = cr.page.getByTestId("orchestrator-session-picker").first();
+      await expect(picker).toBeVisible();
+      await picker.click();
+
+      const popup = cr.page.getByTestId("orchestrator-session-popup").first();
+      await expect(popup).toBeVisible();
+      // 비기너 문구 — "세션" 이 아니라 "대화" 로 말한다.
+      await expect(popup).toContainText("이전 대화 이어가기");
+      await expect(popup).toContainText("새 대화로 시작");
+      // ★세션 id·KB 는 계속 안 가르친다. 이 셸이 세션을 파일처럼 다루기
+      //   시작하면 "설정할 게 없다" 는 약속이 이 한 줄에서 깨진다.
+      await expect(popup).not.toContainText("KB");
+      await cr.shot("G9-beginner-session-recovery");
     } finally {
       await cr.close();
     }

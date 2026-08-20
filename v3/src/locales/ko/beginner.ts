@@ -233,6 +233,16 @@ export const beginner = {
   "beginner.chat.orchestratorRunning": "대화 중",
   // 연결·인증된 모델만 골라 넣은 단순 드롭다운(오케 헤더)의 툴팁 — 티켓 cmp95TVin64IIlOiFlAC.
   "beginner.chat.modelPickerTitle": "마블로가 사용할 모델",
+  // ── 이전 대화 복구(오케 헤더) — 티켓 BzxAJXxqhHgYzy1Aq4IV ────────────────
+  // 비기너에는 세션 피커가 아예 없었다. 오케가 멈춘 순간 유저에게 남는 건
+  // "Start" 하나뿐이라, 그게 엉뚱한 세션을 물면 되돌릴 길이 없었다. 어드밴스드
+  // 피커를 그대로 열지는 않는다 — 세션 id·KB 는 이 화면이 가르치지 않기로 한
+  // 개념이므로, 같은 목록을 "언제 나눈 대화인지" 로만 보여준다.
+  "beginner.chat.sessionPicker": "이전 대화",
+  "beginner.chat.sessionPickerTitle": "이전 대화 이어가기",
+  "beginner.chat.sessionNew": "새 대화로 시작",
+  "beginner.chat.sessionLatest": "가장 최근",
+  "beginner.chat.sessionEmpty": "아직 이전 대화가 없어요.",
 
   // ── 티켓 상세(미니 보드 카드 클릭) ──────────────────────────────────────
   "beginner.taskDetail.label": "일감 상세",

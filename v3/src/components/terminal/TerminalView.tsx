@@ -601,6 +601,24 @@ export default memo(function TerminalView({
       }
     });
 
+    /**
+     * xterm 이 실제로 열릴 때까지 기다린다 (최대 TERMINAL_OPEN_WAIT_MS).
+     * `terminal.write` 는 open() 전에는 화면에 아무것도 남기지 못하므로, 열리기
+     * 전에 쓴 안내문은 그냥 사라진다. 한도를 넘으면 false — 그 경우는 컨테이너가
+     * 끝내 치수를 못 얻은 것이고, 안내문을 억지로 쓸 곳도 없다.
+     */
+    const TERMINAL_OPEN_WAIT_MS = 5_000;
+    const TERMINAL_OPEN_POLL_MS = 100;
+    const waitForTerminalOpen = async (): Promise<boolean> => {
+      const deadline = Date.now() + TERMINAL_OPEN_WAIT_MS;
+      while (!termOpened && !disposed && Date.now() < deadline) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, TERMINAL_OPEN_POLL_MS),
+        );
+      }
+      return termOpened && !disposed;
+    };
+
     const replayTimer = window.setTimeout(() => {
       if (disposed) return;
       window.electronAPI.pty.replay(sessionId).then(async (buffered) => {
@@ -631,7 +649,18 @@ export default memo(function TerminalView({
         // Probe pty:exists to disambiguate: warn for case (a), nudge a repaint
         // for case (b) so a resumed alt-screen TUI re-emits its frame instead
         // of sitting blank until the user presses a key.
-        if (!hasReceivedData && termOpened) {
+        //
+        // ★`termOpened` 를 여기서 **기다린다**(티켓 BzxAJXxqhHgYzy1Aq4IV).
+        // 종전엔 `!hasReceivedData && termOpened` 한 줄이라, replay 가 도는
+        // 200ms 안에 xterm 이 아직 안 열렸으면 (a)(b) 둘 다 통째로 건너뛰었다 —
+        // 즉 죽은 PTY 인데 경고 한 줄 없이 그냥 검은 화면이 남았다. 셸을 통째로
+        // 갈아끼우는 모드 전환처럼 무거운 재마운트에서 정확히 그 창에 걸린다.
+        if (!hasReceivedData) {
+          const opened = await waitForTerminalOpen();
+          if (disposed || !opened) return;
+          // 기다리는 동안 라이브 출력이 도착했으면 진단할 게 없다 — 화면은 이미
+          // 그려지고 있다. (onData 가 hasReceivedData 를 올린다.)
+          if (hasReceivedData) return;
           const alive = await window.electronAPI.pty
             .exists(sessionId)
             .catch(() => false);

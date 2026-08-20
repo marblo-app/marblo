@@ -224,6 +224,14 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
     "What next? e.g. add a few examples to the guide you just wrote",
   "beginner.chat.orchestratorRunning": "In conversation",
   "beginner.chat.modelPickerTitle": "Model Marblo will use",
+  // Prior-conversation recovery in the orchestrator header (ticket
+  // BzxAJXxqhHgYzy1Aq4IV). Same session list the advanced picker shows, minus
+  // the session ids and sizes this shell deliberately never teaches.
+  "beginner.chat.sessionPicker": "Past chats",
+  "beginner.chat.sessionPickerTitle": "Pick up a past chat",
+  "beginner.chat.sessionNew": "Start a new chat",
+  "beginner.chat.sessionLatest": "Most recent",
+  "beginner.chat.sessionEmpty": "No past chats yet.",
 
   // ── Ticket detail (mini board card click) ───────────────────────────────
   "beginner.taskDetail.label": "Task detail",

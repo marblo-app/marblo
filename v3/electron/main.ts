@@ -2026,6 +2026,79 @@ function forgetPtyBufferBookkeeping(sid: string): void {
   ptyBufferChars.delete(sid);
   ptyBufferTruncated.delete(sid);
 }
+
+// ── Retained replay ring (orchestrator PTYs only) ──────────────────────────
+// `ptyBuffers` above is a ONE-SHOT buffer, not scrollback: the first
+// `pty:replay` drains it, records the sid in `drainedSids`, and from then on
+// output is forwarded live and kept nowhere. That is fine as long as the
+// terminal that drained it stays mounted — and for an agent terminal it does.
+//
+// The orchestrator's does not. `App.tsx` renders <BeginnerShell/> and
+// <WorkspaceShell/> as SIBLING branches, so switching modes unmounts the whole
+// subtree and OrchestratorPanel → TerminalView remounts with a fresh xterm.
+// That new terminal calls `pty:replay` and — with only the one-shot buffer —
+// gets back an empty array, so it has nothing to draw until the next byte of
+// output arrives. The user sees a black panel and concludes the orchestrator
+// dropped, even though the PTY never died (the unmount deliberately does not
+// stop it; see useOrchestratorAutoLaunch + orchestratorTeardownAction).
+//
+// So orchestrator sids keep a bounded ring that SURVIVES the drain, and replay
+// serves it on every mount. Deliberately not extended to agent PTYs: there is
+// exactly one live orchestrator per project window, while agents come by the
+// dozen, and this ring's whole cost is paid per sid. Agent terminals keep the
+// old behavior byte for byte.
+//
+// ★This is NOT the #1047 fix and must not shadow it. #1047 was `pty:resize`
+// wiping a buffer that was still THERE; this is the buffer being already GONE.
+// The resize discard below still runs, and now clears the ring inside the same
+// time window so the stale 80x24 first frame cannot come back through it.
+// Same ceiling as the one-shot buffer, deliberately. Two reasons: a mount must
+// never get back LESS than it would have before this ring existed (a smaller
+// cap would silently shorten the first mount's replay), and the justification
+// is identical — a TUI redrawing frames is not cheap in bytes. The cost that
+// IS new is that this one is held for the life of the PTY rather than until
+// the first drain: ~8MB of UTF-16 for the single orchestrator per window. That
+// is the whole reason `retainsPtyScrollback` refuses to cover agent PTYs.
+const PTY_SCROLLBACK_MAX_CHARS = PTY_BUFFER_MAX_CHARS;
+const ptyScrollback = new Map<string, string[]>();
+const ptyScrollbackChars = new Map<string, number>();
+const ptyScrollbackTruncated = new Set<string>();
+
+/** Which sids pay for a retained ring. Orchestrator only — see above. */
+function retainsPtyScrollback(sid: string): boolean {
+  return isOrchestratorPtyId(sid);
+}
+
+/** Start (or restart) a sid's ring. Called per PTY process, not per mount. */
+function resetPtyScrollback(sid: string): void {
+  if (!retainsPtyScrollback(sid)) return;
+  ptyScrollback.set(sid, []);
+  ptyScrollbackChars.set(sid, 0);
+  ptyScrollbackTruncated.delete(sid);
+}
+
+function forgetPtyScrollback(sid: string): void {
+  ptyScrollback.delete(sid);
+  ptyScrollbackChars.delete(sid);
+  ptyScrollbackTruncated.delete(sid);
+}
+
+/** Append one PTY chunk, evicting the oldest once the ring is over budget. */
+function pushPtyScrollback(sid: string, data: string): void {
+  const ring = ptyScrollback.get(sid);
+  if (!ring) return;
+  ring.push(data);
+  let chars = (ptyScrollbackChars.get(sid) ?? 0) + data.length;
+  if (chars > PTY_SCROLLBACK_MAX_CHARS) {
+    while (ring.length > 1 && chars > PTY_SCROLLBACK_MAX_CHARS / 2) {
+      chars -= ring.shift()!.length;
+    }
+    // Once evicted, the ring starts mid-stream — replay has to prefix a screen
+    // clear so the first surviving fragment doesn't smear over the new screen.
+    ptyScrollbackTruncated.add(sid);
+  }
+  ptyScrollbackChars.set(sid, chars);
+}
 // Generation counter per sid — increments on every setupPtyForwarding call.
 // node-pty's onData/onExit are attached to a specific IPty instance, so when
 // kill() + create() reuse the same sid the OLD process still owns the OLD
@@ -4968,6 +5041,10 @@ ipcMain.handle("pty:resize", (event, { id, cols, rows }) => {
     if (age <= PTY_INITIAL_FRAME_DISCARD_MS) {
       buf.length = 0;
       ptyBufferChars.set(id, 0);
+      // The retained ring holds that same stale frame — clear it in lockstep,
+      // or the ring would hand #1047's duplicate 80x24 frame straight back on
+      // the very next replay and quietly undo that fix.
+      resetPtyScrollback(id);
       console.log(
         `[PTY:RESIZE] Cleared pre-resize buffer for ${id} (now ${cols}x${rows})`
       );
@@ -7188,6 +7265,11 @@ function setupPtyForwarding(sid: string): void {
     ptyBufferChars.set(sid, 0);
     ptyBufferTruncated.delete(sid);
   }
+  // The retained ring resets on EVERY call — unlike the one-shot buffer above,
+  // which is keyed to "has a renderer drained this sid yet". A second call for
+  // the same sid means a new PTY process (restart), and the previous process's
+  // output is not this one's history.
+  resetPtyScrollback(sid);
   const gen = (sidGen.get(sid) ?? 0) + 1;
   sidGen.set(sid, gen);
 
@@ -7195,6 +7277,10 @@ function setupPtyForwarding(sid: string): void {
     if (sid.startsWith("agent-")) {
       costTracker.processOutput(sid.replace("agent-", ""), data);
     }
+
+    // Retained ring first — it must capture BOTH the pre-drain output and the
+    // live stream, since a remount can land at either point in the session.
+    pushPtyScrollback(sid, data);
 
     const buffer = ptyBuffers.get(sid);
     if (buffer) {
@@ -7231,6 +7317,10 @@ function setupPtyForwarding(sid: string): void {
     if (sidGen.get(sid) !== gen) return;
     ptyBuffers.delete(sid);
     forgetPtyBufferBookkeeping(sid);
+    // Drop the ring too. A dead PTY must replay as EMPTY so TerminalView's
+    // pty:exists probe can tell "session expired" from "alive but silent" —
+    // serving history for a corpse would suppress that warning.
+    forgetPtyScrollback(sid);
     // Notify every owner BEFORE dropping the ownership record — the process is
     // gone, so all windows showing it need the exit, not just the last one to
     // register.
@@ -7539,6 +7629,30 @@ ipcMain.handle("pty:replay", (_event, { id }: { id: string }) => {
   // the drained flag. Future setupPtyForwarding calls for this sid skip
   // re-buffering so restart output flows straight through.
   drainedSids.add(id);
+
+  // Orchestrator sids serve the retained ring instead, on EVERY mount. It is a
+  // superset of the one-shot buffer (both are fed from the same onData), so
+  // this is not "buffer + ring" — it is the same bytes from the copy that
+  // survives. The ring is deliberately NOT deleted here: the next remount
+  // (mode switch) has to be able to redraw the session too.
+  const ring = ptyScrollback.get(id);
+  if (ring) {
+    ptyBuffers.delete(id);
+    forgetPtyBufferBookkeeping(id);
+    if (ring.length === 0) return [];
+    // Joined into ONE string, unlike the buffer path above. A full ring is
+    // thousands of chunks, and this replay now runs on every mount rather than
+    // once per session — collapsing/expanding the panel remounts too. Sending
+    // them individually pays a structured clone per chunk across IPC and then
+    // one `terminal.write` per chunk in the renderer; one string is the same
+    // bytes for a fraction of both. (xterm time-slices a large write, so this
+    // does not block the frame.)
+    const joined = ring.join("");
+    return ptyScrollbackTruncated.has(id)
+      ? [`\x1b[2J\x1b[H${joined}`]
+      : [joined];
+  }
+
   if (!buffer) {
     forgetPtyBufferBookkeeping(id);
     return [];

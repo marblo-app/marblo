@@ -694,10 +694,18 @@ export function BeginnerShell() {
                             가이드 패널이 형제로 추가된 지금은 flex 가 남는
                             공간을 계산해 줘야 그 100%가 올바른 높이가 된다. */}
                           <div className="min-h-0 flex-1">
+                            {/* ★showSessionRecovery(티켓 BzxAJXxqhHgYzy1Aq4IV):
+                              오케가 멈췄을 때 이 셸에 남는 어포던스가 Start 하나
+                              뿐이었다. Start 는 resolvePrevious 가 고른 세션을
+                              말없이 이어받으므로, 엉뚱한 걸 물면 되돌릴 수단이
+                              화면에 없다 — 어드밴스드로 도망칠 수도 없는 화면에서.
+                              세션 id·KB 는 계속 감춘 채 "언제 나눈 대화인지" 로만
+                              고르게 한다. */}
                             <OrchestratorPanel
                               fill
                               hideModelControls
                               showConnectedModelPicker
+                              showSessionRecovery
                               onUserSubmit={ask.markTerminalSubmit}
                             />
                           </div>

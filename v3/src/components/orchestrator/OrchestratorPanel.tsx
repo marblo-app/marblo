@@ -177,6 +177,27 @@ interface OrchestratorPanelProps {
    * `hideModelControls` 뒤에서만 의미가 있는 비기너 전용 조합이다.
    */
   showConnectedModelPicker?: boolean;
+  /**
+   * Beginner shell (티켓 BzxAJXxqhHgYzy1Aq4IV): bring back the **session
+   * picker** that `hideModelControls` removed, in a beginner-shaped form.
+   *
+   * Why it can't stay hidden: when the orchestrator stops, the only affordance
+   * left in this shell is `Start`, which silently resumes whatever
+   * `resolvePrevious` happens to match. If that lands on the wrong session —
+   * or the user wants the one before it — there is nothing on screen to
+   * correct it with, and the beginner has no advanced shell to escape to.
+   * That's the same "화면이 비었는데 되돌릴 방법이 없다" the black-screen half
+   * of this ticket is about, one layer up.
+   *
+   * Why not simply un-hide the advanced picker: it lists raw session ids and
+   * KB sizes. Sessions-as-files is exactly the concept this shell doesn't
+   * teach. The list is the same; only its labels change to "when was this
+   * conversation".
+   *
+   * Independent of `showConnectedModelPicker` — model choice and conversation
+   * recovery are different axes, and only this one is a recovery affordance.
+   */
+  showSessionRecovery?: boolean;
   onUserSubmit?: (text: string) => void;
 }
 
@@ -184,6 +205,7 @@ export default memo(function OrchestratorPanel({
   fill = false,
   hideModelControls = false,
   showConnectedModelPicker = false,
+  showSessionRecovery = false,
   onUserSubmit,
 }: OrchestratorPanelProps) {
   const { t } = useTranslation();
@@ -361,6 +383,11 @@ export default memo(function OrchestratorPanel({
   const selectedBase = orchestratorModelBase(selectedModel);
   const selectedEffort = orchestratorModelEffort(selectedModel);
   const effortChoices = orchestratorEffortsFor(selectedModel);
+  // 세션 피커 문구는 축이 하나다: 비기너면 "이전 대화", 아니면 "세션 선택".
+  // 목록·동작은 완전히 같고 라벨만 갈린다 — 두 벌의 복구 경로를 만들지 않는다.
+  const sessionPickerLabelKey: MessageKey = showSessionRecovery
+    ? "beginner.chat.sessionPicker"
+    : "orchestrator.sessionPicker";
 
   const handleStartWithSession = async (resumeSessionId?: string) => {
     setShowSessionPicker(false);
@@ -854,21 +881,20 @@ export default memo(function OrchestratorPanel({
               </button>
               <button
                 ref={sessionBtnRef}
+                data-testid="orchestrator-session-picker"
                 onClick={handleShowSessionPicker}
                 aria-haspopup="menu"
                 aria-expanded={showSessionPicker}
                 className={`flex flex-shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 transition-colors ${
-                  hideModelControls ? "hidden" : ""
+                  hideModelControls && !showSessionRecovery ? "hidden" : ""
                 } ${
                   showSessionPicker
                     ? "bg-[#313244] text-[#cdd6f4]"
                     : "bg-[#313244]/50 text-[#a6adc8] hover:bg-[#313244] hover:text-[#cdd6f4]"
                 }`}
-                title={t("orchestrator.sessionPicker")}
+                title={t(sessionPickerLabelKey)}
               >
-                <span className="text-[10px]">
-                  {t("orchestrator.sessionPicker")}
-                </span>
+                <span className="text-[10px]">{t(sessionPickerLabelKey)}</span>
                 <svg
                   className="h-3.5 w-3.5"
                   fill="none"
@@ -887,6 +913,7 @@ export default memo(function OrchestratorPanel({
                 createPortal(
                   <div
                     ref={sessionPopupRef}
+                    data-testid="orchestrator-session-popup"
                     role="menu"
                     onClick={(e) => e.stopPropagation()}
                     style={anchoredPopupStyle(
@@ -898,15 +925,27 @@ export default memo(function OrchestratorPanel({
                     className="z-[60] overflow-auto rounded-md border border-[#313244] bg-[#1e1e2e] shadow-lg"
                   >
                     <div className="px-3 py-1.5 text-[10px] text-[#6c7086] border-b border-[#313244] uppercase tracking-wider">
-                      Select Session
+                      {showSessionRecovery
+                        ? t("beginner.chat.sessionPickerTitle")
+                        : "Select Session"}
                     </div>
                     <button
                       onClick={() => handleStartWithSession("new")}
                       className="w-full text-left px-3 py-2 text-xs text-[#a6e3a1] hover:bg-[#313244]/60 transition-colors flex items-center gap-2"
                     >
                       <span className="text-sm">+</span>
-                      New Session
+                      {showSessionRecovery
+                        ? t("beginner.chat.sessionNew")
+                        : "New Session"}
                     </button>
+                    {/* ★비기너에서는 "이전 대화가 없다" 를 말로 해 준다. 목록이
+                        비면 팝업에 "새로 시작" 한 줄만 남아, 고를 게 없는 건지
+                        불러오다 만 건지 화면만 봐선 구분이 안 된다. */}
+                    {showSessionRecovery && sessions.length === 0 && (
+                      <div className="border-t border-[#313244] px-3 py-2 text-[11px] leading-4 text-[#6c7086]">
+                        {t("beginner.chat.sessionEmpty")}
+                      </div>
+                    )}
                     {sessions.length > 0 && (
                       <div className="border-t border-[#313244]">
                         {sessions.slice(0, 8).map((s, i) => {
@@ -927,18 +966,27 @@ export default memo(function OrchestratorPanel({
                               }
                               className="w-full text-left px-3 py-2 text-xs hover:bg-[#313244]/60 transition-colors flex items-center justify-between gap-2"
                             >
+                              {/* 비기너는 "언제 나눈 대화인지" 만 본다 — 세션 id
+                                  와 KB 는 이 셸이 가르치지 않기로 한 개념이라,
+                                  같은 목록에서 그 두 칸만 빠진다. */}
                               <span className="text-[#cdd6f4] truncate flex items-center gap-1.5">
                                 {i === 0 && (
                                   <span className="text-[#89b4fa] text-[10px]">
-                                    latest
+                                    {showSessionRecovery
+                                      ? t("beginner.chat.sessionLatest")
+                                      : "latest"}
                                   </span>
                                 )}
-                                <span className="text-[#6c7086] font-mono text-[10px]">
-                                  {s.label || s.id.slice(0, 8) + "\u2026"}
-                                </span>
+                                {!showSessionRecovery && (
+                                  <span className="text-[#6c7086] font-mono text-[10px]">
+                                    {s.label || s.id.slice(0, 8) + "\u2026"}
+                                  </span>
+                                )}
                               </span>
                               <span className="text-[#6c7086] text-[10px] flex-shrink-0">
-                                {timeStr} · {s.sizeKB}KB
+                                {showSessionRecovery
+                                  ? timeStr
+                                  : `${timeStr} · ${s.sizeKB}KB`}
                               </span>
                             </button>
                           );
