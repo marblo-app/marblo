@@ -27,7 +27,9 @@ import {
   codexOrchestratorChoices,
   grokOrchestratorChoices,
   normalizeOrchestratorModelSetting,
+  ORCHESTRATOR_SELECTOR_RETIRED,
 } from "../../electron/model-selection";
+import { getModel } from "../../electron/model-registry";
 
 describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
   const options = ORCHESTRATOR_MODEL_OPTIONS as ReadonlyArray<{
@@ -152,16 +154,34 @@ describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
     }
   });
 
-  it("완료기준: Opus5·Fable5·Opus4.8·Sonnet5 를 고를 수 있다", () => {
+  it("완료기준: Opus5·Fable5·Sonnet5 를 고를 수 있다", () => {
     const values = options.map((o) => o.value);
-    for (const id of [
-      "claude-opus-5",
-      "claude-fable-5",
-      "claude-opus-4-8",
-      "claude-sonnet-5",
-    ]) {
+    for (const id of ["claude-opus-5", "claude-fable-5", "claude-sonnet-5"]) {
       expect(values, id).toContain(`claude:${id}`);
     }
+  });
+
+  it("★오케 선택에서 내린 칸은 안 서고, 레지스트리엔 그대로 있다", () => {
+    // 2026-08-20(티켓 6AsbulPe): `get_routing_effectiveness` 전체 스캔 491건 중
+    // model@effort 해상도가 붙은 299건 기준으로 아래 넷은 **실사용 0건**이었다.
+    // 그래서 오케 선택 경로에서만 내렸다 — 레지스트리 행은 그대로라 퀵레인·
+    // dispatch_task 명시 지정·과거 티켓 단가 계산이 전부 무회귀다.
+    // (종전 이 테스트는 opus-4.8 이 **있어야** 한다고 주장했다. 그 완료기준은
+    //  "레지스트리 파생이 리터럴 표를 대체했나" 를 보던 것이고, 지금은 그 파생에
+    //  퇴출 필터가 한 겹 얹혔다 — 아래 파생 대조 테스트가 그것까지 본다.)
+    const values = options.map((o) => o.value);
+    for (const id of Object.keys(ORCHESTRATOR_SELECTOR_RETIRED)) {
+      expect(values, id).not.toContain(`claude:${id}`);
+      expect(values, id).not.toContain(`codex:${id}`);
+      // 레지스트리에는 살아 있다("숨김"이지 "삭제"가 아니다).
+      expect(getModel(id), id).toBeDefined();
+    }
+    expect(Object.keys(ORCHESTRATOR_SELECTOR_RETIRED).sort()).toEqual([
+      "claude-haiku-4-5-20251001",
+      "claude-opus-4-8",
+      "gpt-5.4",
+      "gpt-5.4-mini",
+    ]);
   });
 
   it("★완료기준: Codex 변형(gpt-5.6 sol/terra/luna + gpt-5.5)을 고를 수 있다", () => {

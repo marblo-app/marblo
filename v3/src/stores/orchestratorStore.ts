@@ -50,6 +50,14 @@ export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
  * 파생)와 원소단위로 대조한다. 모델을 추가하려면 레지스트리에 행을 넣고 그 테스트가
  * 시키는 대로 여기 반영하면 된다 — 두 곳이 조용히 어긋나는 경로는 없다.
  *
+ * ★목록에 없는 모델이 곧 "레지스트리에 없는 모델" 은 아니다. 실사용 집계에서
+ * 0건이 나온 칸은 `model-selection.ORCHESTRATOR_SELECTOR_RETIRED` 로 **오케 선택
+ * 경로에서만** 내린다(2026-08-20: claude-opus-4-8 / claude-haiku-4-5-20251001 /
+ * gpt-5.4 / gpt-5.4-mini). 레지스트리 행은 그대로 살아 있어서 퀵레인·
+ * `dispatch_task(model=…)` 명시 지정·과거 티켓 단가 계산이 전부 무회귀다. 위
+ * 파생 대조 테스트가 그 필터를 지난 결과와 이 배열을 맞춰 보므로, 여기서 손으로
+ * 지우고 저기 표에 안 넣으면(또는 반대로) 곧바로 깨진다.
+ *
  * ★effort 목록에 max/ultra 가 없는 것은 누락이 아니다. 그 두 칸은 #602 승인게이트
  * 대상이고, 오케 선택은 프로젝트별로 영구 저장돼 재시작마다 되살아나므로 "1회용
  * 승인" 과 수명이 맞지 않는다. 근거는 `model-selection.selectableEfforts` 주석.
@@ -60,13 +68,7 @@ export const ORCHESTRATOR_MODEL_OPTIONS = [
   { value: "claude", label: "Claude (CLI default)", efforts: [] },
   { value: "claude:claude-fable-5", label: "Claude (Fable 5)", efforts: [] },
   { value: "claude:claude-opus-5", label: "Claude (Opus 5)", efforts: [] },
-  { value: "claude:claude-opus-4-8", label: "Claude (Opus 4.8)", efforts: [] },
   { value: "claude:claude-sonnet-5", label: "Claude (Sonnet 5)", efforts: [] },
-  {
-    value: "claude:claude-haiku-4-5-20251001",
-    label: "Claude (Haiku 4.5)",
-    efforts: [],
-  },
   // Codex(GPT) — 같은 규칙. 라벨은 레지스트리 실명 그대로다("gpt-5.6-sol").
   { value: "codex", label: "Codex (CLI default)", efforts: [] },
   {
@@ -87,16 +89,6 @@ export const ORCHESTRATOR_MODEL_OPTIONS = [
   {
     value: "codex:gpt-5.6-luna",
     label: "Codex (gpt-5.6-luna)",
-    efforts: ["low", "medium", "high", "xhigh"],
-  },
-  {
-    value: "codex:gpt-5.4",
-    label: "Codex (gpt-5.4)",
-    efforts: ["low", "medium", "high", "xhigh"],
-  },
-  {
-    value: "codex:gpt-5.4-mini",
-    label: "Codex (gpt-5.4-mini)",
     efforts: ["low", "medium", "high", "xhigh"],
   },
   // Grok Build(xAI 네이티브 하네스). 라벨은 codex 와 같은 규칙으로 레지스트리

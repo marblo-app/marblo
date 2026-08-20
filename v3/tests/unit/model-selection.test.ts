@@ -20,6 +20,9 @@ import {
   orchestratorModelValue,
   claudeOrchestratorChoices,
   codexOrchestratorChoices,
+  grokOrchestratorChoices,
+  ORCHESTRATOR_SELECTOR_RETIRED,
+  normalizeOrchestratorModelSetting,
   selectableEfforts,
   humanizeClaudeModelId,
   resolveVendorShorthand,
@@ -250,8 +253,12 @@ describe("오케 셀렉터 compound 값", () => {
     const ids = choices.map((c) => c.modelId);
     expect(ids).toContain("claude-fable-5");
     expect(ids).toContain("claude-opus-5");
-    expect(ids).toContain("claude-opus-4-8");
     expect(ids).toContain("claude-sonnet-5");
+    // ★opus-4.8 / haiku-4.5 는 2026-08-20 에 오케 선택에서 내려갔다
+    // (`ORCHESTRATOR_SELECTOR_RETIRED` — 효과집계 299건 중 실사용 0건).
+    // 레지스트리 행은 살아 있고 퀵레인·명시 지정으로는 그대로 닿는다.
+    expect(ids).not.toContain("claude-opus-4-8");
+    expect(ids).not.toContain("claude-haiku-4-5-20251001");
     // frontier(fable5)가 맨 앞.
     expect(ids[0]).toBe("claude-fable-5");
     // 레지스트리의 active claude **네이티브 벤더** 행 수와 일치 — 목록을 따로
@@ -263,7 +270,8 @@ describe("오케 셀렉터 compound 값", () => {
         (m) =>
           m.harness === "claude" &&
           m.status === "active" &&
-          m.provider === "anthropic",
+          m.provider === "anthropic" &&
+          !(m.id in ORCHESTRATOR_SELECTOR_RETIRED),
       ).length,
     );
     expect(choices.every((c) => c.vendor === "anthropic")).toBe(true);
@@ -279,18 +287,84 @@ describe("오케 셀렉터 compound 값", () => {
     expect(ids).toContain("gpt-5.6-terra");
     expect(ids).toContain("gpt-5.6-luna");
     expect(ids).toContain("gpt-5.5");
+    // ★5.4 계열은 2026-08-20 에 오케 선택에서 내려갔다(실사용 0건).
+    expect(ids).not.toContain("gpt-5.4");
+    expect(ids).not.toContain("gpt-5.4-mini");
     expect(ids[0]).toBe("gpt-5.6-sol"); // frontier 가 맨 앞
     expect(choices).toHaveLength(
       MODEL_REGISTRY.filter(
         (m) =>
           m.harness === "gpt" &&
           m.provider === "openai" &&
-          m.status === "active",
+          m.status === "active" &&
+          !(m.id in ORCHESTRATOR_SELECTOR_RETIRED),
       ).length,
     );
     // 값·라벨 포맷은 Claude 와 같은 규칙(프로바이더 프리픽스 + 레지스트리 id).
     expect(choices[0].value).toBe("codex:gpt-5.6-sol");
     expect(choices[0].label).toBe("Codex (gpt-5.6-sol)");
+  });
+
+  it("★Grok 변형 목록도 같은 파생 경로다(신형이 맨 앞)", () => {
+    const choices = grokOrchestratorChoices();
+    expect(choices.map((c) => c.modelId)).toEqual(["grok-4.6", "grok-4.5"]);
+    expect(choices[0].value).toBe("grok:grok-4.6");
+    expect(choices[0].label).toBe("Grok (grok-4.6)");
+    expect(choices.every((c) => c.vendor === "xai")).toBe(true);
+    // effort 축은 없다 — `buildCLICommand` 의 grok 분기가 그 플래그를 안 붙인다.
+    expect(choices.every((c) => c.efforts.length === 0)).toBe(true);
+  });
+
+  // ── 오케 선택에서 내린 칸(2026-08-20, 티켓 6AsbulPe) ────────────────────
+  describe("ORCHESTRATOR_SELECTOR_RETIRED — 숨기기와 지우기는 다르다", () => {
+    it("내린 모델은 셀렉터에 안 서지만 레지스트리엔 그대로 살아 있다", () => {
+      const selectorIds = new Set([
+        ...claudeOrchestratorChoices().map((c) => c.modelId),
+        ...codexOrchestratorChoices().map((c) => c.modelId),
+        ...grokOrchestratorChoices().map((c) => c.modelId),
+      ]);
+      for (const id of Object.keys(ORCHESTRATOR_SELECTOR_RETIRED)) {
+        expect(selectorIds.has(id), `${id} 가 아직 셀렉터에 있다`).toBe(false);
+        // ★이 줄이 "드롭다운에서 내린다 ≠ 레지스트리에서 지운다" 를 못박는다.
+        // 지워버리면 그 모델로 돌았던 과거 티켓의 단가가 미매칭이 되고
+        // 집계 해석이 깨진다(효과집계 리포트의 모델미상 154건이 그 위험이다).
+        expect(getModel(id), `${id} 가 레지스트리에서 사라졌다`).toBeDefined();
+        expect(getModel(id)!.status).toBe("active");
+      }
+    });
+
+    it("내린 모델의 옛 저장값은 하네스 기본으로 강등된다(화면 = argv)", () => {
+      // 셀렉터만 막고 정규화를 안 막으면 UI 는 "Claude (CLI default)" 를 표시하는데
+      // 메인은 `--model claude-opus-4-8` 로 뜨는 갈림이 생긴다.
+      expect(
+        normalizeOrchestratorModelSetting("claude:claude-opus-4-8")
+      ).toBe("claude");
+      expect(
+        normalizeOrchestratorModelSetting(
+          "claude:claude-haiku-4-5-20251001"
+        )
+      ).toBe("claude");
+      expect(normalizeOrchestratorModelSetting("codex:gpt-5.4")).toBe("codex");
+      expect(normalizeOrchestratorModelSetting("codex:gpt-5.4-mini@high")).toBe(
+        "codex"
+      );
+    });
+
+    it("★사유 없는 퇴출은 없다 — 표의 모든 값이 실질 문자열이다", () => {
+      // LADDER_EXCLUSIONS 와 같은 규율. 이유 없이 사라진 칸은 다음 사람이
+      // 복원해야 할지 판단할 수 없다.
+      for (const [id, why] of Object.entries(ORCHESTRATOR_SELECTOR_RETIRED)) {
+        expect(why.trim().length, id).toBeGreaterThan(20);
+      }
+    });
+
+    it("내린 모델도 명시 핀 경로(dispatch_task)로는 그대로 닿는다", () => {
+      // 오케 선택은 프로젝트별 영구 저장이라 수명이 무한이고, 명시 지정은 티켓
+      // 1건 수명이다. 수명이 다르니 대우도 다르다 — 이 경로는 안 막는다.
+      const pin = resolveModelPin("claude-opus-4-8");
+      expect(pin?.claudeModel).toBe("claude-opus-4-8");
+      expect(resolveModelPin("gpt-5.4-mini")?.codexModel).toBe("gpt-5.4-mini");
+    });
   });
 
   it("★셀렉터 effort 는 승인게이트 칸(max/ultra)을 뺀 것이다 — #602", () => {

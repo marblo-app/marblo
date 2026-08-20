@@ -632,6 +632,17 @@ export function normalizeOrchestratorModelSetting(value: unknown): string {
   if (!modelId) return provider;
 
   const entry = getModel(modelId);
+
+  // ★오케 선택 경로에서 내린 모델(`ORCHESTRATOR_SELECTOR_RETIRED`)은 접미를 버리고
+  // 하네스 기본으로 강등한다. 셀렉터가 이미 그 칸을 안 세우므로, 여기 들어오는
+  // 값은 옛 저장값·env·손편집뿐이다 — 그것을 살려두면 화면(하네스 기본)과
+  // argv(내려간 모델)가 갈린다. 레지스트리 행은 그대로라 과거 티켓 해석은 무회귀다.
+  if (modelId in ORCHESTRATOR_SELECTOR_RETIRED) {
+    console.warn(
+      `[model-selection] 오케 선택에서 내린 모델 "${modelId}" 의 접미를 버립니다(하네스 기본으로 뜬다) — 사유: ${ORCHESTRATOR_SELECTOR_RETIRED[modelId]}`,
+    );
+    return provider;
+  }
   // ★핀이 어느 CLI 로 뜨는지는 **하네스** 축이 정한다(USbdRV4k). 벤더는 env 로
   // 갈릴 뿐 바이너리를 바꾸지 않으므로, 여기서 봐야 하는 값은 harness 다.
   const pinHarness = entry?.harness;
@@ -849,6 +860,54 @@ function orchestratorChoicesFor(
 }
 
 /**
+ * 오케 **선택 경로에서만** 내린 모델 → 내린 사유.
+ *
+ * ★이 표의 존재 이유는 "지운다" 와 "숨긴다" 를 코드 층위에서 갈라 놓는 것이다.
+ * 모델을 라인업에서 빼는 방법은 네 단계가 있고 파괴력이 전부 다르다:
+ *
+ *   ① `model-ladder.LADDER_EXCLUSIONS` — 자동선택 후보에서만 뺀다.
+ *      드롭다운엔 그대로 서고 명시 핀도 그대로 된다.
+ *   ② **이 표** — 오케 선택 경로(셀렉터 + 저장·env 정규화)에서만 뺀다. 퀵레인
+ *      카탈로그(`quickLaneVendorCatalog`, 레지스트리 전 행)·`dispatch_task(model=…)`
+ *      명시 지정·과거 티켓 조회는 전부 그대로다. 오케 선택은 프로젝트별 영구 저장
+ *      이라 "고를 수 있는 칸" 의 수명이 가장 길고, 그래서 여기가 정리의 기본 칸이다.
+ *
+ *      ★셀렉터만 막고 정규화를 안 막으면 갈라진다: 옛 저장값 `claude:claude-opus-4-8`
+ *      은 셀렉터에서 사라져 UI 가 "Claude (CLI default)" 를 표시하는데
+ *      (`OrchestratorPanel` 이 `isOrchestratorModel` 로 걸러 "claude" 로 떨어뜨린다)
+ *      메인은 여전히 `--model claude-opus-4-8` 로 띄운다. 화면과 argv 가 다른 상태다.
+ *      그래서 두 문을 같이 닫는다 — 내려간 핀은 하네스 기본으로 강등된다.
+ *   ③ `status: "deprecated"` — `modelsByHarness`/`modelsByVendor` 가 걸러서 **선택
+ *      경로 전부**에서 사라진다. `getModel` 은 계속 답하므로 과거 단가 계산은 산다.
+ *   ④ 레지스트리 행 삭제 — **하지 않는다**. `getModel` 이 null 이 되는 순간 그
+ *      모델로 돌았던 과거 티켓이 단가 미매칭이 되고 집계 해석이 깨진다.
+ *
+ * ★사유 문자열을 필수로 둔다(`Record<string, string>`). `LADDER_EXCLUSIONS` 와 같은
+ * 규율이다 — 이유 없이 사라진 칸은 다음 사람이 복원해야 할지 판단할 수 없다.
+ *
+ * ★여기 넣는 근거는 "오래됐다" 가 아니라 **실사용 집계**여야 한다. 아래 넷은
+ * 2026-08-20 `get_routing_effectiveness` 전체 스캔에서 나온 수치다: 스캔 491건 중
+ * model@effort 해상도가 붙은 299건(성공 295·실패 4) 기준으로 **네 모델 전부 0건**
+ * — 리포트에 행 자체가 없다. 같은 스캔에서 비교군은 claude-opus-5 약 74건,
+ * gpt-5.5@medium 50건(전부 성공), grok-4.5 15건, claude-sonnet-5 10건이었다.
+ *
+ * ★한계도 같이 적는다: 그 스캔은 **모델미상 154건**을 집계에서 뺀다(P2-2 이전
+ * 티켓엔 `dispatchMeta.spawnedModelKey` 가 없다). 그 안에 이 넷으로 돈 티켓이
+ * 섞여 있을 수 있으므로 "0건" 은 "최근 운영에서 안 쓰인다" 의 강한 근거이지
+ * "한 번도 안 쓰였다" 의 증명이 아니다. 그래서 ②에서 멈추고 ③④로 가지 않는다.
+ */
+export const ORCHESTRATOR_SELECTOR_RETIRED: Readonly<Record<string, string>> = {
+  "claude-opus-4-8":
+    "실사용 0건(2026-08-20 효과집계 299건 기준). claude-opus-5 와 능력등급·단가($5/$25)가 동일해서 이 칸을 고를 이유가 원래 없었고, 실제로 아무도 안 골랐다. 이미 LADDER_EXCLUSIONS 라 자동선택도 안 쓴다. env(MARBLO_STANDARD_CLAUDE_MODEL)·dispatch_task 명시 지정·퀵레인으로는 그대로 닿는다.",
+  "claude-haiku-4-5-20251001":
+    "실사용 0건(같은 집계). 현행 simple 바닥은 claude-sonnet-5 이고 그 아래 칸을 만드는 것은 하향 정책이라 자동선택에서도 이미 빠져 있다. 오케(=무한 수명 기본값)에 세워 둘 칸이 아니다 — 필요하면 티켓 1건 수명인 명시 지정으로 쓴다.",
+  "gpt-5.4":
+    "실사용 0건(같은 집계). 같은 하네스에 gpt-5.5(50건 전부 성공, 비용당성공 0.2~0.5/$)와 gpt-5.6 3변종이 서 있어 고를 자리가 없다. 자동선택에서도 이미 빠져 있다.",
+  "gpt-5.4-mini":
+    "실사용 0건(같은 집계). 코딩 에이전트로서의 적합성이 한 번도 측정된 적이 없고(그래서 LADDER_EXCLUSIONS 이기도 하다), 측정 없는 칸을 영구 저장되는 오케 기본값 자리에 두면 조용히 굳는다.",
+};
+
+/**
  * 오케 셀렉터에 세울 수 있는 행인가 — **하네스 네이티브 벤더만** 통과한다.
  *
  * ★사유는 max/ultra 를 셀렉터에서 빼는 것(`selectableEfforts`)과 정확히 같다:
@@ -863,6 +922,7 @@ function orchestratorChoicesFor(
  * 검증(서베이 V1-2)이 끝나면 이 필터를 걷고 벤더별 표기 라벨을 붙인다.
  */
 function selectorEligible(entry: ModelRegistryEntry): boolean {
+  if (entry.id in ORCHESTRATOR_SELECTOR_RETIRED) return false;
   return entry.provider === HARNESS_NATIVE_VENDOR[entry.harness];
 }
 
