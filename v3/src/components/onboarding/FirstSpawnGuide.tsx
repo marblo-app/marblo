@@ -1,22 +1,51 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
+import { placeAnchoredPopup } from "../../lib/anchoredPopup";
 import type { MessageKey } from "../../locales/ko";
 import { useOrchestratorStore } from "../../stores/orchestratorStore";
 import { SLASH_COMMANDS } from "../orchestrator/SlashCommandPopup";
 
 /**
- * 첫 스폰 가이드 — 오케 터미널 경계의 얇은 재진입 바와 위쪽 오버레이.
+ * 첫 스폰 가이드 — 오케 터미널 경계의 얇은 재진입 바와 위쪽 팝업.
  *
  * ★접힌 바 자체가 실행 명령을 들고 있다. 첫 시작 가이드의 값은 "무엇을
  * 쳐야 하는가" 이므로, 그 네 개(/tf-add · /tf-spawn-agents · /tf-plan ·
  * /tf-start)는 접힌 상태에서도 바 위에 칩으로 보이고, 펼치지 않고 바로
- * 눌러 오케에 삽입된다. 펼침은 "언제 어느 경로를 쓰나" 를 설명하는
- * 부가 계층이지, 명령을 감추는 서랍이 아니다.
+ * 눌러 오케에 삽입된다.
  *
- * ★바는 정상 흐름에 남겨 재진입 경로를 제공하지만, 펼친 본문은 바의 위쪽에
- * absolute로 띄운다. 그래서 안내를 열고 닫아도 아래 오케 터미널의 위치와
- * 높이가 바뀌지 않는다.
+ * ★펼침은 명령을 감추는 서랍이 아니라 "언제 어느 경로를 쓰나" 를 설명하는
+ * 계층이다. 그래서 패널에는 두 경로가 통째로 들어간다 — 작은 일(/tf-add →
+ * /tf-spawn-agents)과 큰 일(/tf-plan → /tf-start)이 각각 무엇을 하는지
+ * 한 줄씩, 그리고 전체 목록·/tf-guide 푸터. 명령이 접힌 바에도 보인다는
+ * 이유로 이 설명을 덜어내면 가이드는 "칩 네 개" 로 쪼그라든다(그렇게 세 번
+ * 반복됐다). 이 패널의 내용은 유닛으로 고정돼 있다 —
+ * tests/unit/first-spawn-guide.test.ts.
+ *
+ * ★패널 안의 명령도 접힌 칩과 똑같이 눌러서 오케에 삽입된다. 설명을 읽은
+ * 자리에서 바로 실행되지 않으면, 읽고 나서 다시 접고 칩을 찾아야 한다.
+ *
+ * ★배치: body 포탈 + position:fixed, 레일의 뷰포트 rect 기준으로 위쪽.
+ * `absolute + bottom-full` 로는 안 된다 — 절대위치 요소는 containing
+ * block(이 컴포넌트)의 조상이 가진 overflow:hidden 에 그대로 잘리는데,
+ * 이 레일은 두 셸 모두에서 클리핑 컨테이너 상단에 박혀 있다(BeginnerShell
+ * 의 하단 2분할 행, WorkspaceShell 의 터미널 열 래퍼 + 스플릿 래퍼). 그
+ * 결과 위로 뜬 패널은 위쪽이 통째로 잘리고 레일에 가장 가까운 마지막 줄만
+ * 남아, 설명이 "사라진" 것처럼 보였다. 오케 세션 피커가 같은 이유로 사라진
+ * 적이 있고, lib/anchoredPopup.ts 가 그때 만든 house 해법이다. fixed 는
+ * containing block 이 뷰포트라 조상 overflow 를 전부 벗어난다.
+ *
+ * ★포탈이어도 "오케 터미널 높이 불변" 계약은 그대로다 — 오히려 더 강해진다.
+ * 레일만 정상 흐름에 남고 패널은 흐름 밖이라, 열고 닫아도 아래 PTY 는
+ * 리사이즈되지 않는다.
  *
  * ★바는 한 줄을 넘지 않는다 — 칩은 shrink-0 으로 항상 온전히 보이고,
  * 줄어드는 쪽은 제목이다(가장 덜 급한 정보부터 접힌다).
@@ -36,6 +65,11 @@ import { SLASH_COMMANDS } from "../orchestrator/SlashCommandPopup";
 const SEEN_KEY = "marblo.firstSpawnGuide.seen";
 const COLLAPSED_KEY = "marblo.firstSpawnGuide.collapsed";
 const BUNDLED_COMMANDS = new Set(SLASH_COMMANDS.map(({ command }) => command));
+
+/** 두 경로 카드 + 푸터의 대략 높이. 뒤집기 판정에만 쓰는 추정치다. */
+const PANEL_EST_HEIGHT = 208;
+/** 레일이 극단적으로 좁아져도(MIN_RATIO 0.2) 문장이 읽히는 최소 폭. */
+const PANEL_MIN_WIDTH = 260;
 
 function readFlag(key: string): boolean {
   try {
@@ -110,10 +144,29 @@ const PATHS: GuidePath[] = [
     descKey: "onboarding.firstSpawn.big.desc",
     steps: [
       { command: "/tf-plan", labelKey: "onboarding.firstSpawn.big.step1" },
+      // ★/tf-start 는 태스크 생성과 스폰을 한 번에 한다. 두 단계로 쪼개
+      //   설명하지 말 것 — 로케일 문구가 그 계약을 들고 있다.
       { command: "/tf-start", labelKey: "onboarding.firstSpawn.big.step2" },
     ],
   },
 ];
+
+interface AnchorBox {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
+function sameBox(a: AnchorBox | null, b: AnchorBox): boolean {
+  return (
+    a !== null &&
+    a.top === b.top &&
+    a.bottom === b.bottom &&
+    a.left === b.left &&
+    a.right === b.right
+  );
+}
 
 export function FirstSpawnGuide() {
   const { t } = useTranslation();
@@ -121,7 +174,10 @@ export function FirstSpawnGuide() {
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [pulse, setPulse] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [anchor, setAnchor] = useState<AnchorBox | null>(null);
   const guideRef = useRef<HTMLDivElement | null>(null);
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!collapsed || readFlag(SEEN_KEY)) return;
@@ -142,11 +198,46 @@ export function FirstSpawnGuide() {
     });
   }, []);
 
+  // Track the rail's viewport rect while open. The terminal column is
+  // drag-resizable and the window is resizable, so a rect measured once at
+  // open time goes stale; re-measuring keeps the panel glued to the rail.
+  useEffect(() => {
+    if (collapsed) {
+      setAnchor(null);
+      return;
+    }
+
+    const measure = () => {
+      const rail = railRef.current;
+      if (!rail) return;
+      const { top, bottom, left, right } = rail.getBoundingClientRect();
+      const next = { top, bottom, left, right };
+      setAnchor((prev) => (sameBox(prev, next) ? prev : next));
+    };
+
+    measure();
+    window.addEventListener("resize", measure);
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    if (observer && railRef.current) observer.observe(railRef.current);
+    return () => {
+      window.removeEventListener("resize", measure);
+      observer?.disconnect();
+    };
+  }, [collapsed]);
+
   useEffect(() => {
     if (collapsed) return;
 
     const closeFromOutside = (event: PointerEvent) => {
-      if (guideRef.current?.contains(event.target as Node)) return;
+      const target = event.target as Node;
+      // The panel is portalled to <body>, so it is NOT inside guideRef —
+      // it needs its own containment check or every click inside the guide
+      // would close it.
+      if (guideRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
       setCollapsed(true);
       writeCollapsed(true);
     };
@@ -193,21 +284,127 @@ export function FirstSpawnGuide() {
       }
       window.setTimeout(() => setFeedback(null), 1800);
     },
-    [ptySessionId],
+    [ptySessionId]
   );
 
   const actionLabel = ptySessionId
     ? t("onboarding.firstSpawn.send")
     : t("onboarding.cliGate.copy");
 
+  const feedbackFor = (command: GuideCommand): "sent" | "copied" | null =>
+    feedback === `${command}:sent`
+      ? "sent"
+      : feedback === `${command}:copied`
+      ? "copied"
+      : null;
+
+  const placement = anchor
+    ? placeAnchoredPopup(
+        anchor,
+        { width: window.innerWidth, height: window.innerHeight },
+        Math.max(PANEL_MIN_WIDTH, anchor.right - anchor.left),
+        PANEL_EST_HEIGHT,
+        "left",
+        // ★위쪽이 기본이다 — 레일 바로 아래가 오케 터미널이라, 아래로 열면
+        //   지금 읽어야 할 대화창을 덮는다. 위쪽이 정말 좁을 때만 뒤집힌다.
+        "up"
+      )
+    : null;
+
+  const panelStyle: CSSProperties | null = placement && {
+    position: "fixed",
+    left: placement.left,
+    width: placement.width,
+    maxHeight: placement.maxHeight,
+    ...(placement.top === undefined
+      ? { bottom: placement.bottom }
+      : { top: placement.top }),
+  };
+
+  const panel = !collapsed && panelStyle && (
+    <div
+      ref={panelRef}
+      id="first-spawn-guide-body"
+      data-testid="first-spawn-guide-body"
+      data-direction={placement?.top === undefined ? "up" : "down"}
+      style={panelStyle}
+      className="z-[60] space-y-2 overflow-y-auto rounded-lg border border-[#313244] bg-[#181825] px-3 py-2.5 shadow-xl"
+    >
+      {/* ★두 경로 설명이 이 패널의 본체다. 최초 구현(#1050)과 같은 수준으로
+          "작은 일 / 큰 일 각각 무엇을, 어떤 순서로" 를 담는다. */}
+      {PATHS.map((path) => (
+        <div
+          key={path.id}
+          data-testid={`first-spawn-guide-path-${path.id}`}
+          className="rounded-md border border-[#45475a] bg-[#11111b] px-2.5 py-2"
+        >
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="rounded bg-[#89b4fa]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[#89b4fa]">
+              {t(path.badgeKey)}
+            </span>
+            <span className="min-w-0 flex-1 text-[11px] leading-4 text-[#a6adc8]">
+              {t(path.descKey)}
+            </span>
+          </div>
+          <ul className="mt-1.5 space-y-0.5">
+            {path.steps.map((step) => {
+              const state = feedbackFor(step.command);
+              return (
+                <li key={step.command}>
+                  {/* ★패널 안의 명령도 접힌 칩과 동일하게 PTY 에 삽입된다. */}
+                  <button
+                    type="button"
+                    data-testid={`first-spawn-guide-panel-cmd-${step.command}`}
+                    onClick={() => void runCommand(step.command)}
+                    title={`${t(step.labelKey)} — ${actionLabel}`}
+                    className="flex w-full items-baseline gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-[#313244]"
+                  >
+                    <code className="shrink-0 font-mono text-[11px] leading-4 text-[#a6e3a1]">
+                      {step.command}
+                    </code>
+                    <span className="min-w-0 flex-1 text-[11px] leading-4 text-[#7f849c]">
+                      {t(step.labelKey)}
+                    </span>
+                    <span className="shrink-0 text-[10px] leading-4 text-[#585b70]">
+                      {state === "sent"
+                        ? t("onboarding.firstSpawn.sent")
+                        : state === "copied"
+                        ? t("onboarding.cliGate.copied")
+                        : actionLabel}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+
+      {/* 가장 덜 급한 정보 — 접힌 바가 아니라 여기에 있어야 한다. */}
+      <p className="text-[11px] leading-5 text-[#7f849c]">
+        {t("onboarding.firstSpawn.allCommands")}{" "}
+        {t("onboarding.firstSpawn.guideHint")}{" "}
+        <button
+          type="button"
+          data-testid="first-spawn-guide-cmd-/tf-guide"
+          onClick={() => void runCommand("/tf-guide")}
+          className="font-mono text-[#89b4fa] underline decoration-dotted hover:text-[#74c7ec]"
+        >
+          /tf-guide
+        </button>
+      </p>
+    </div>
+  );
+
   return (
     <div
       ref={guideRef}
       data-testid="first-spawn-guide"
       data-layout="upward-overlay"
-      className={`relative shrink-0 ${collapsed ? "z-10" : "z-30"}`}
+      className="relative shrink-0"
     >
       <div
+        ref={railRef}
         data-testid="first-spawn-guide-rail"
         className={`flex w-full flex-nowrap items-center gap-2 overflow-hidden rounded-lg border bg-[#181825] px-2 py-1.5 transition-shadow ${
           pulse
@@ -224,7 +421,7 @@ export function FirstSpawnGuide() {
           title={t(
             collapsed
               ? "onboarding.firstSpawn.expand"
-              : "onboarding.firstSpawn.collapse",
+              : "onboarding.firstSpawn.collapse"
           )}
           className="flex min-w-0 flex-1 items-center gap-1 text-left"
         >
@@ -265,19 +462,16 @@ export function FirstSpawnGuide() {
                 </span>
               )}
               {path.steps.map((step) => {
-                const state =
-                  feedback === `${step.command}:sent`
-                    ? "sent"
-                    : feedback === `${step.command}:copied`
-                      ? "copied"
-                      : null;
+                const state = feedbackFor(step.command);
                 return (
                   <button
                     key={step.command}
                     type="button"
                     data-testid={`first-spawn-guide-cmd-${step.command}`}
                     onClick={() => void runCommand(step.command)}
-                    title={`${t(path.badgeKey)} · ${t(step.labelKey)} — ${actionLabel}`}
+                    title={`${t(path.badgeKey)} · ${t(
+                      step.labelKey
+                    )} — ${actionLabel}`}
                     className={`shrink-0 whitespace-nowrap rounded border px-1.5 py-0.5 font-mono text-[11px] leading-none transition-colors ${
                       state
                         ? "border-[#a6e3a1] bg-[#a6e3a1]/10 text-[#a6e3a1]"
@@ -300,64 +494,7 @@ export function FirstSpawnGuide() {
         </div>
       </div>
 
-      {!collapsed && (
-        <div
-          id="first-spawn-guide-body"
-          data-testid="first-spawn-guide-body"
-          className="absolute inset-x-0 bottom-full z-30 mb-1 space-y-2 rounded-lg border border-[#313244] bg-[#181825] px-3 py-2.5 shadow-xl"
-        >
-          {/* 펼침은 설명 계층이다 — 명령 자체는 위 바에 그대로 있으므로
-              여기서는 어떤 상황에 어느 경로를 쓰는지만 풀어 준다. */}
-          <p className="text-[11px] leading-5 text-[#7f849c]">
-            {t("onboarding.firstSpawn.chipHint")}
-          </p>
-
-          {PATHS.map((path) => (
-            <div
-              key={path.id}
-              className="rounded-md border border-[#45475a] bg-[#11111b] px-2.5 py-2"
-            >
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="rounded bg-[#89b4fa]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[#89b4fa]">
-                  {t(path.badgeKey)}
-                </span>
-                <span className="min-w-0 flex-1 text-[11px] text-[#a6adc8]">
-                  {t(path.descKey)}
-                </span>
-              </div>
-              <ul className="mt-1.5 space-y-1">
-                {path.steps.map((step) => (
-                  <li
-                    key={step.command}
-                    className="flex items-baseline gap-2 text-[11px] leading-tight"
-                  >
-                    <code className="shrink-0 font-mono text-[#a6e3a1]">
-                      {step.command}
-                    </code>
-                    <span className="min-w-0 flex-1 text-[#7f849c]">
-                      {t(step.labelKey)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-
-          {/* 가장 덜 급한 정보 — 접힌 바가 아니라 여기에 있어야 한다. */}
-          <p className="text-[11px] leading-5 text-[#7f849c]">
-            {t("onboarding.firstSpawn.allCommands")}{" "}
-            {t("onboarding.firstSpawn.guideHint")}{" "}
-            <button
-              type="button"
-              data-testid="first-spawn-guide-cmd-/tf-guide"
-              onClick={() => void runCommand("/tf-guide")}
-              className="font-mono text-[#89b4fa] underline decoration-dotted hover:text-[#74c7ec]"
-            >
-              /tf-guide
-            </button>
-          </p>
-        </div>
-      )}
+      {panel && createPortal(panel, document.body)}
     </div>
   );
 }

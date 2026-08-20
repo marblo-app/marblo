@@ -78,6 +78,65 @@ describe("placeAnchoredPopup", () => {
     expect(p.maxHeight).toBeGreaterThanOrEqual(0);
   });
 
+  // prefer:"up" — the first-spawn guide rail sits directly on top of the live
+  // orchestrator terminal, so falling downward would cover the very window the
+  // panel is telling you to type into. Upward is the preference, not a
+  // guarantee: it still flips rather than rendering off screen.
+  it("opens upward on prefer:up even when there is room below", () => {
+    const p = placeAnchoredPopup(
+      rect({ top: 600, bottom: 620 }),
+      VIEWPORT,
+      WIDTH,
+      EST_HEIGHT,
+      "left",
+      "up",
+    );
+    expect(p.bottom).toBe(VIEWPORT.height - 600 + 4);
+    expect(p.top).toBeUndefined();
+  });
+
+  it("flips downward on prefer:up when the trigger is pinned near the top", () => {
+    const p = placeAnchoredPopup(
+      rect({ top: 40, bottom: 60 }),
+      VIEWPORT,
+      WIDTH,
+      EST_HEIGHT,
+      "left",
+      "up",
+    );
+    expect(p.top).toBe(64);
+    expect(p.bottom).toBeUndefined();
+    expect(p.maxHeight).toBeGreaterThan(0);
+  });
+
+  // The discriminating case: room on BOTH sides. The default must still fall
+  // downward (every existing caller depends on it) while prefer:"up" rises.
+  it("keeps the historical downward default when prefer is omitted", () => {
+    const roomy = { width: 1440, height: 1200 };
+    const anchor = rect({ top: 600, bottom: 620 });
+
+    const withDefault = placeAnchoredPopup(
+      anchor,
+      roomy,
+      WIDTH,
+      EST_HEIGHT,
+      "left",
+    );
+    expect(withDefault.top).toBe(624);
+    expect(withDefault.bottom).toBeUndefined();
+
+    const preferUp = placeAnchoredPopup(
+      anchor,
+      roomy,
+      WIDTH,
+      EST_HEIGHT,
+      "left",
+      "up",
+    );
+    expect(preferUp.bottom).toBe(roomy.height - 600 + 4);
+    expect(preferUp.top).toBeUndefined();
+  });
+
   it("left-aligns to the trigger's left edge", () => {
     const p = placeAnchoredPopup(
       rect({ left: 200, right: 260 }),
