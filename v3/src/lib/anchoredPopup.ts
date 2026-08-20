@@ -37,10 +37,23 @@ export interface AnchoredPopupPlacement {
 }
 
 /**
+ * Which side the caller wants when both sides fit.
+ *
+ * `"down"` is the historical behavior (session/model pickers hanging off a
+ * header). `"up"` is for a trigger that sits ON TOP of the thing the popup
+ * must not cover — the first-spawn guide rail, whose panel has to rise over
+ * the board above rather than fall across the live orchestrator terminal
+ * below. Either way the popup flips to the other side rather than going off
+ * screen, so "prefer" is a preference and never a guarantee of vanishing.
+ */
+export type AnchoredPopupPreference = "down" | "up";
+
+/**
  * Place a popup of `width` next to `rect`.
  *
- * Opens downward by default and flips up only when there genuinely isn't room
- * below AND there is more room above — so the common case (trigger near the top
+ * Opens toward `prefer` (downward unless asked otherwise) and flips to the
+ * other side only when there genuinely isn't room on the preferred side AND
+ * there is more room on the other — so the common case (trigger near the top
  * of the window, as in the split shell's terminal column) stays on screen.
  * `left` is clamped into the viewport, and `maxHeight` is capped to the space
  * actually available so a long session list scrolls instead of overflowing.
@@ -51,11 +64,15 @@ export function placeAnchoredPopup(
   width: number,
   estHeight: number,
   align: "left" | "right",
+  prefer: AnchoredPopupPreference = "down",
 ): AnchoredPopupPlacement {
   const spaceBelow = viewport.height - rect.bottom;
   const spaceAbove = rect.top;
+  const fits = (space: number) => space >= estHeight + VIEWPORT_MARGIN;
   const openUp =
-    spaceBelow < estHeight + VIEWPORT_MARGIN && spaceAbove > spaceBelow;
+    prefer === "up"
+      ? fits(spaceAbove) || spaceAbove >= spaceBelow
+      : !fits(spaceBelow) && spaceAbove > spaceBelow;
 
   const rawLeft = align === "left" ? rect.left : rect.right - width;
   const maxLeft = Math.max(

@@ -784,12 +784,9 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   // tasks from the PRD and spawn agents).
   "onboarding.firstSpawn.big.step2": "Create tasks + spawn agents",
   // ★Accessibility label for the command chips pinned to the collapsed
-  // rail, plus the line that explains what they do. The commands stay
-  // visible while collapsed, so the panel only carries the "which path
-  // when" explanation.
+  // rail. The commands stay visible while collapsed; the expanded panel
+  // carries the two-path "which route when" explanation.
   "onboarding.firstSpawn.commandsLabel": "Starter commands",
-  "onboarding.firstSpawn.chipHint":
-    "The commands above send straight to the orchestrator, collapsed or not.",
   "onboarding.firstSpawn.allCommands":
     "See the full list in the left command menu.",
   "onboarding.firstSpawn.guideHint": "Not sure what to type?",
