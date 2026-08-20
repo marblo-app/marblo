@@ -3,6 +3,12 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { registerLocalOllamaModels } from "./model-registry";
+import {
+  isChatOnlyToolSupport,
+  localToolSupportLabel,
+  resolveLocalToolSupport,
+  type LocalToolSupport,
+} from "./local-tool-tier";
 
 /**
  * **로컬 모델(Ollama) 스토어** 메인 프로세스 축 — first-party 큐레이션 카탈로그 +
@@ -24,14 +30,17 @@ import { registerLocalOllamaModels } from "./model-registry";
 export type LocalModelCategory = "coding" | "general" | "reasoning";
 
 /**
- * 로컬 모델의 하네스 tool-use 적합성.
- *
- * 실측(ollama 0.32.14 + claude CLI env-swap): 7B/14B 급은 직접 `ollama run` /
- * tools 없는 `/v1/messages` 에서는 정상 대화하지만, Marblo 가 MCP 툴 정의 +
- * 에이전트 system(tool 강제)을 주입하면 과부하/JSON 흉내로 무너진다.
- * 그래서 30B 미만은 대화·업무분배 전용, tool-use 는 대형 로컬 모델만 표시한다.
+ * 티어 판정은 `local-tool-tier.ts` 가 단일 소스다(임계 상수·근거·실측 지표 포함).
+ * 여기서는 기존 import 경로를 깨지 않도록 그대로 재수출한다.
  */
-export type LocalToolSupport = "chat-only" | "tool-use";
+export {
+  LOCAL_TOOL_USE_LITE_MIN_BILLIONS,
+  LOCAL_TOOL_USE_MIN_BILLIONS,
+  localToolSupportLabel,
+  parseLocalParamBillions,
+  resolveLocalToolSupport,
+} from "./local-tool-tier";
+export type { LocalToolSupport } from "./local-tool-tier";
 
 export interface LocalModelCatalogEntry {
   /** ollama 공식 라이브러리 태그 — `ollama pull <id>` 에 그대로 쓰인다. */
@@ -47,54 +56,75 @@ export interface LocalModelCatalogEntry {
   /** 모델 자체의 최대 컨텍스트(토큰). 실행 시 기본 컨텍스트는 이보다 작다(가이드 참조). */
   contextTokens: number;
   /**
-   * 하네스 tool-use 적합성. 카드 배지·스폰 분기(대화모드 vs MCP 에이전트)의
-   * 단일 소스. `resolveLocalToolSupport` 가 id 파라미터 규모로 채운다.
+   * 하네스 tool-use 적합성. 카드 배지·스폰 분기(대화모드 / 경량 주입 / 전체 주입)의
+   * 단일 소스. 기본은 `resolveLocalToolSupport` 가 id 파라미터 규모로 채우고,
+   * 크기로 판단이 안 되는 행만 명시 override 로 덮는다.
    */
   toolSupport: LocalToolSupport;
-  /** UI 배지 문구 — "대화·업무 분배" / "도구 사용 가능(대형 모델)". */
+  /**
+   * UI 배지 문구 — "대화·업무 분배" / "도구 사용 가능(경량 주입)" /
+   * "도구 사용 가능(대형 모델)".
+   */
   toolSupportLabel: string;
+  /**
+   * 크기 규칙을 명시 override 한 행만 채워지는 근거. 규칙대로면 undefined.
+   *
+   * ★근거를 데이터에 남기는 이유: override 는 "왜 이 모델만 예외인가"가 코드에서
+   * 사라지는 순간 아무도 되돌리지 못하는 부채가 된다. 타입이 근거를 강제한다
+   * (`buildLocalCatalogEntry` 의 입력 유니온 참조).
+   */
+  toolSupportOverrideReason?: string;
 }
 
-/**
- * ollama 태그에서 파라미터 규모(B)를 읽는다. 못 읽으면 null.
- * 예: `qwen2.5:0.5b`→0.5, `phi3:mini`→3.8, `deepseek-r1:8b-0528-…`→8.
- */
-export function parseLocalParamBillions(id: string): number | null {
-  const trimmed = id.trim().toLowerCase();
-  if (!trimmed) return null;
-  if (trimmed === "phi3:mini" || trimmed.startsWith("phi3:mini-")) return 3.8;
-  const match = /(\d+(?:\.\d+)?)b\b/.exec(trimmed);
-  if (!match) return null;
-  const n = Number(match[1]);
-  return Number.isFinite(n) ? n : null;
-}
+/** 카탈로그 행의 크기 규칙 부분 — toolSupport 계열은 팩토리가 채운다. */
+type LocalCatalogBase = Omit<
+  LocalModelCatalogEntry,
+  "toolSupport" | "toolSupportLabel" | "toolSupportOverrideReason"
+>;
 
 /**
- * 로컬 모델 id → tool-use 적합성.
+ * ★개별 모델 toolSupport override.
  *
- * 임계 30B 는 실측·제품 안내("중소형=대화·업무분배, 대형=tool-use")와 맞춘다.
- * 파라미터를 못 읽으면 안전하게 chat-only.
+ * 크기만으로는 판단이 안 되는 행이 실재한다 — 코더 특화 모델(devstral 24b,
+ * codestral 22b)은 같은 규모의 범용 모델보다 도구 호출 포맷을 잘 지키는 반면,
+ * 비전/MoE 계열은 파라미터 수가 실효 활성 파라미터와 다르다. 그래서 규칙을
+ * 고치는 대신 행 단위로 덮을 수 있어야 한다.
+ *
+ * ★근거(`toolSupportOverrideReason`)를 **타입으로 강제**한다. 근거 없는 예외는
+ * 6개월 뒤 아무도 못 건드리는 상수가 된다.
  */
-export function resolveLocalToolSupport(id: string): LocalToolSupport {
-  const billions = parseLocalParamBillions(id);
-  if (billions === null) return "chat-only";
-  return billions >= 30 ? "tool-use" : "chat-only";
+interface LocalToolSupportOverride {
+  toolSupport: LocalToolSupport;
+  toolSupportOverrideReason: string;
 }
 
-export function localToolSupportLabel(support: LocalToolSupport): string {
-  return support === "tool-use" ? "도구 사용 가능(대형 모델)" : "대화·업무 분배";
-}
+type LocalCatalogInput = LocalCatalogBase &
+  (
+    | LocalToolSupportOverride
+    | { toolSupport?: undefined; toolSupportOverrideReason?: undefined }
+  );
 
-function withToolSupport(
-  entry: Omit<LocalModelCatalogEntry, "toolSupport" | "toolSupportLabel">,
+/**
+ * 카탈로그 행 하나를 만든다. override 가 없으면 id 규모 규칙(`resolveLocalToolSupport`),
+ * 있으면 그 값을 그대로 쓰고 근거를 행에 남긴다.
+ *
+ * 테스트에서 override 경로를 직접 검증할 수 있도록 export 한다.
+ */
+export function buildLocalCatalogEntry(
+  entry: LocalCatalogInput,
 ): LocalModelCatalogEntry {
-  const toolSupport = resolveLocalToolSupport(entry.id);
+  const { toolSupport: override, toolSupportOverrideReason, ...rest } = entry;
+  const toolSupport = override ?? resolveLocalToolSupport(rest.id);
   return {
-    ...entry,
+    ...rest,
     toolSupport,
     toolSupportLabel: localToolSupportLabel(toolSupport),
+    ...(override ? { toolSupportOverrideReason } : {}),
   };
 }
+
+/** 카탈로그 리터럴용 짧은 별칭 — 아래 표가 한 줄이라도 좁아지게. */
+const withToolSupport = buildLocalCatalogEntry;
 
 /**
  * 소형 우선 + Qwen3/Qwen Coder/최신 범용/추론 대표 큐레이션. 크기·컨텍스트는
@@ -227,6 +257,14 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 14_000,
     minRamGB: 32,
     contextTokens: 128_000,
+    // 크기 규칙(24B < 25B)으로도 chat-only 지만, **명시 override 로 고정**한다.
+    // #1036 에서 "devstral 24b 는 사장님 판단 위해 일단 chat-only 로" 결정됐다.
+    // 코더 특화라 규모만으로는 판단이 안 되는 대표 케이스 — 실측이 나오면 이 두
+    // 줄만 "tool-use-lite" 로 바꾸면 되고, 임계를 24B 로 내려 다른 24B 범용
+    // 모델까지 끌어올리는 일이 없다.
+    toolSupport: "chat-only",
+    toolSupportOverrideReason:
+      "#1036 — 코더 특화라 크기 규칙으로 판단 불가. 사장님 실측 전까지 chat-only 유지.",
   }),
   withToolSupport({
     id: "codestral:22b",
@@ -236,6 +274,9 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     downloadSizeMB: 13_000,
     minRamGB: 32,
     contextTokens: 32_000,
+    toolSupport: "chat-only",
+    toolSupportOverrideReason:
+      "#1036 — devstral 과 같은 사유(코더 특화). 실측 전까지 chat-only 유지.",
   }),
   withToolSupport({
     id: "gemma3:4b",
@@ -319,6 +360,26 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     contextTokens: 128_000,
   }),
   withToolSupport({
+    // ★태그 실측(ollama.com/library/qwen3.8/tags, 2026-08-20): `qwen3.8:27b`.
+    // `qwen3:27b` 은 **존재하지 않는다** — qwen3 라이브러리는 0.6b/1.7b/14b/
+    // 30b/32b/235b 뿐이고 27B 는 별도 라이브러리 `qwen3.8` 로 올라와 있다.
+    // 없는 태그를 넣으면 dispatch 가 정상적으로 거부하므로 여기 값은 추측 금지.
+    // ollama 모델 페이지가 `tools` capability 를 명시한다(vision/thinking 도).
+    id: "qwen3.8:27b",
+    displayName: "Qwen 3.8 27B (256K)",
+    // 코딩 벤치가 높아 들여오지만 모델 자체는 범용(vision/thinking 포함)이다.
+    // "코딩 특화" 버킷은 qwen2.5-coder/devstral/codestral 처럼 코드 전용 학습
+    // 모델만 두는 자리라 사실대로 범용으로 둔다.
+    category: "general",
+    categoryLabel: "범용",
+    // 태그 페이지 실측: 18GB / 256K context.
+    downloadSizeMB: 18_000,
+    // 큐레이션 기준을 gemma3:27b(17GB→48GB) 와 맞춘다. ★이 값은 신규 다운로드
+    // 게이트일 뿐 설치분 실행을 막지 않는다 — 맥미니 실측 후 조정 가능.
+    minRamGB: 48,
+    contextTokens: 256_000,
+  }),
+  withToolSupport({
     id: "qwen3:30b",
     displayName: "Qwen 3 30B-A3B MoE (256K)",
     category: "general",
@@ -346,8 +407,9 @@ export function catalogEntry(id: string): LocalModelCatalogEntry | undefined {
 }
 
 /**
- * 카탈로그 행이 있으면 그 toolSupport, 없으면 id 파라미터로 판정.
- * 카탈로그 밖 설치분(사용자가 직접 pull)도 같은 30B 임계를 쓴다.
+ * 카탈로그 행이 있으면 그 toolSupport(= override 반영), 없으면 id 파라미터 규칙.
+ * 카탈로그 밖 설치분(사용자가 직접 pull)도 같은 임계를 쓴다 — override 는
+ * 카탈로그 행에만 달 수 있으므로 밖의 모델은 크기 규칙이 전부다.
  */
 export function toolSupportForLocalModelId(id: string): LocalToolSupport {
   return catalogEntry(id)?.toolSupport ?? resolveLocalToolSupport(id);
@@ -356,7 +418,15 @@ export function toolSupportForLocalModelId(id: string): LocalToolSupport {
 /** 대화모드(MCP/내장 툴 비주입)로 스폰해야 하는 로컬 소형 모델인가. */
 export function isLocalChatOnlyModel(id: string | undefined | null): boolean {
   if (!id || !id.trim()) return false;
-  return toolSupportForLocalModelId(id.trim()) === "chat-only";
+  return isChatOnlyToolSupport(toolSupportForLocalModelId(id.trim()));
+}
+
+/** 경량 주입(도구는 주되 컨텍스트를 깎는) 티어로 스폰해야 하는 모델인가. */
+export function isLocalToolUseLiteModel(
+  id: string | undefined | null,
+): boolean {
+  if (!id || !id.trim()) return false;
+  return toolSupportForLocalModelId(id.trim()) === "tool-use-lite";
 }
 
 // ── 하드웨어 게이트(순수) ─────────────────────────────────────────

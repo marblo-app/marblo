@@ -9,6 +9,7 @@ import {
   LaunchConfig,
   FALLBACK_TOP_CLAUDE_MODEL,
   grokSessionsDir,
+  isLocalToolProfile,
   type AgentPromptProfile,
   type TaskComplexity,
 } from "./agent-config";
@@ -597,21 +598,23 @@ export function composeInitialPrompt(
   const rewritten = isClaudeFamily
     ? instruction
     : instruction.replace(/mcp__marblo__/g, "");
-  const sanitized =
-    promptProfile === "local-tool-use"
-      ? compactLocalCompletionFooter(rewritten)
-      : rewritten;
+  // 로컬 프로파일(대형 tool-use / 경량 lite 공통)은 완료규약 전문을 compact 로
+  // 줄인다 — lite 에서는 이게 "긴 컨텍스트 제거"의 한 축이다.
+  const sanitized = isLocalToolProfile(promptProfile)
+    ? compactLocalCompletionFooter(rewritten)
+    : rewritten;
   // agy 도 v1.20+ 부터 MCP 지원 — generateAntigravityConfig 가 글로벌
   // ~/.gemini/antigravity-cli/mcp_config.json 에 marblo 항목을 머지하므로
   // role-skill 의 add_activity / claim_task / submit_for_review 호출이
   // 정상 작동한다. 따라서 다른 비-claude 워커와 동일한 prepend 경로 사용.
   // chat-only 로컬은 getLaunchConfig 가 skillContent 를 비워 여기로 안 온다.
+  // lite 로컬은 역할 스킬 전문 대신 짧은 브리프가 skillContent 로 들어온다.
   if (!skillContent) return sanitized;
   return [
     "[Role Skill — Follow the workflow and tool-use rules below]",
     skillContent.trim(),
     "",
-    promptProfile === "local-tool-use"
+    isLocalToolProfile(promptProfile)
       ? LOCAL_LIGHT_SECURITY_GUARDRAIL
       : SECRET_OUTPUT_GUARDRAIL,
     "",
