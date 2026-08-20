@@ -6,6 +6,7 @@ import { registerLocalOllamaModels } from "./model-registry";
 import {
   isChatOnlyToolSupport,
   localToolSupportLabel,
+  parseLocalParamBillions,
   resolveLocalToolSupport,
   type LocalToolSupport,
 } from "./local-tool-tier";
@@ -56,6 +57,21 @@ export interface LocalModelCatalogEntry {
   /** 모델 자체의 최대 컨텍스트(토큰). 실행 시 기본 컨텍스트는 이보다 작다(가이드 참조). */
   contextTokens: number;
   /**
+   * 모델 원본(HuggingFace) 페이지. 카드에서 "이 모델이 뭔지" 확인하러 가는 경로다.
+   *
+   * ★**필수 필드다** — 새 행을 추가하면서 빠뜨릴 수 없게 타입으로 강제한다.
+   * ollama 태그는 어떤 upstream 스냅샷을 담았는지 공시하지 않으므로(예:
+   * `devstral:24b`), 여기 값은 태그에서 유도하지 말고 실제 존재를 확인한 repo 를
+   * 적을 것. 이 파일의 27개 URL 은 전부 HTTP 200 실측(2026-08-20)이다.
+   */
+  huggingFaceUrl: string;
+  /**
+   * 파라미터 규모(B). `parseLocalParamBillions` 단일 소스로 팩토리가 채운다 —
+   * 티어 판정이 쓰는 것과 **같은 숫자**라, 카드에 그대로 노출하면 "왜 이 모델이
+   * chat-only 인가"가 UI 에서 스스로 설명된다(phi3:mini = 3.8B 처럼).
+   */
+  paramBillions: number | null;
+  /**
    * 하네스 tool-use 적합성. 카드 배지·스폰 분기(대화모드 / 경량 주입 / 전체 주입)의
    * 단일 소스. 기본은 `resolveLocalToolSupport` 가 id 파라미터 규모로 채우고,
    * 크기로 판단이 안 되는 행만 명시 override 로 덮는다.
@@ -79,7 +95,10 @@ export interface LocalModelCatalogEntry {
 /** 카탈로그 행의 크기 규칙 부분 — toolSupport 계열은 팩토리가 채운다. */
 type LocalCatalogBase = Omit<
   LocalModelCatalogEntry,
-  "toolSupport" | "toolSupportLabel" | "toolSupportOverrideReason"
+  | "toolSupport"
+  | "toolSupportLabel"
+  | "toolSupportOverrideReason"
+  | "paramBillions"
 >;
 
 /**
@@ -117,6 +136,7 @@ export function buildLocalCatalogEntry(
   const toolSupport = override ?? resolveLocalToolSupport(rest.id);
   return {
     ...rest,
+    paramBillions: parseLocalParamBillions(rest.id),
     toolSupport,
     toolSupportLabel: localToolSupportLabel(toolSupport),
     ...(override ? { toolSupportOverrideReason } : {}),
@@ -134,6 +154,7 @@ const withToolSupport = buildLocalCatalogEntry;
 export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   withToolSupport({
     id: "qwen2.5:0.5b",
+    huggingFaceUrl: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct",
     displayName: "Qwen 2.5 0.5B",
     category: "general",
     categoryLabel: "범용",
@@ -143,6 +164,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "qwen3:0.6b",
+    huggingFaceUrl: "https://huggingface.co/Qwen/Qwen3-0.6B",
     displayName: "Qwen 3 0.6B",
     category: "general",
     categoryLabel: "범용",
@@ -152,6 +174,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "qwen2.5:1.5b",
+    huggingFaceUrl: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct",
     displayName: "Qwen 2.5 1.5B",
     category: "general",
     categoryLabel: "범용",
@@ -161,6 +184,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "llama3.2:1b",
+    huggingFaceUrl: "https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct",
     displayName: "Llama 3.2 1B",
     category: "general",
     categoryLabel: "범용",
@@ -170,6 +194,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "gemma2:2b",
+    huggingFaceUrl: "https://huggingface.co/google/gemma-2-2b-it",
     displayName: "Gemma 2 2B",
     category: "general",
     categoryLabel: "범용",
@@ -179,6 +204,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "llama3.2:3b",
+    huggingFaceUrl: "https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct",
     displayName: "Llama 3.2 3B",
     category: "general",
     categoryLabel: "범용",
@@ -188,6 +214,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "phi3:mini",
+    huggingFaceUrl: "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct",
     displayName: "Phi-3 Mini (3.8B)",
     category: "general",
     categoryLabel: "범용",
@@ -197,6 +224,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "qwen3:4b",
+    huggingFaceUrl: "https://huggingface.co/Qwen/Qwen3-4B",
     displayName: "Qwen 3 4B (256K)",
     category: "general",
     categoryLabel: "범용",
@@ -206,6 +234,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "qwen3:8b",
+    huggingFaceUrl: "https://huggingface.co/Qwen/Qwen3-8B",
     displayName: "Qwen 3 8B",
     category: "general",
     categoryLabel: "범용",
@@ -215,6 +244,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "qwen3:14b",
+    huggingFaceUrl: "https://huggingface.co/Qwen/Qwen3-14B",
     displayName: "Qwen 3 14B",
     category: "general",
     categoryLabel: "범용",
@@ -224,6 +254,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "qwen2.5-coder:7b",
+    huggingFaceUrl: "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct",
     displayName: "Qwen 2.5 Coder 7B",
     category: "coding",
     categoryLabel: "코딩 특화",
@@ -233,6 +264,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "qwen2.5-coder:14b",
+    huggingFaceUrl: "https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct",
     displayName: "Qwen 2.5 Coder 14B",
     category: "coding",
     categoryLabel: "코딩 특화",
@@ -242,6 +274,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "qwen2.5-coder:32b",
+    huggingFaceUrl: "https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct",
     displayName: "Qwen 2.5 Coder 32B",
     category: "coding",
     categoryLabel: "코딩 특화",
@@ -251,6 +284,9 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "devstral:24b",
+    // ★ollama `devstral:24b` 는 어느 스냅샷인지 태그 페이지에 없다. Devstral
+    // Small 계열의 현행 릴리스로 건다(2505/2507 모두 24B·128K 로 동일 규격).
+    huggingFaceUrl: "https://huggingface.co/mistralai/Devstral-Small-2507",
     displayName: "Devstral 24B",
     category: "coding",
     categoryLabel: "코딩 특화",
@@ -268,6 +304,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "codestral:22b",
+    huggingFaceUrl: "https://huggingface.co/mistralai/Codestral-22B-v0.1",
     displayName: "Codestral 22B",
     category: "coding",
     categoryLabel: "코딩 특화",
@@ -280,6 +317,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "gemma3:4b",
+    huggingFaceUrl: "https://huggingface.co/google/gemma-3-4b-it",
     displayName: "Gemma 3 4B Vision",
     category: "general",
     categoryLabel: "범용",
@@ -289,6 +327,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "gemma3:12b",
+    huggingFaceUrl: "https://huggingface.co/google/gemma-3-12b-it",
     displayName: "Gemma 3 12B Vision",
     category: "general",
     categoryLabel: "범용",
@@ -298,6 +337,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "gemma3:27b",
+    huggingFaceUrl: "https://huggingface.co/google/gemma-3-27b-it",
     displayName: "Gemma 3 27B Vision",
     category: "general",
     categoryLabel: "범용",
@@ -307,6 +347,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "llama3.3:70b",
+    huggingFaceUrl: "https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct",
     displayName: "Llama 3.3 70B",
     category: "general",
     categoryLabel: "범용",
@@ -316,6 +357,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "phi4:14b",
+    huggingFaceUrl: "https://huggingface.co/microsoft/phi-4",
     displayName: "Phi-4 14B",
     category: "general",
     categoryLabel: "범용",
@@ -325,6 +367,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "mistral-small:24b",
+    huggingFaceUrl:
+      "https://huggingface.co/mistralai/Mistral-Small-24B-Instruct-2501",
     displayName: "Mistral Small 24B",
     category: "general",
     categoryLabel: "범용",
@@ -334,6 +378,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "deepseek-r1:8b-0528-qwen3-q4_K_M",
+    huggingFaceUrl:
+      "https://huggingface.co/deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
     displayName: "DeepSeek-R1 Distill Qwen3 8B",
     category: "reasoning",
     categoryLabel: "추론",
@@ -343,6 +389,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "deepseek-r1:14b-qwen-distill-q4_K_M",
+    huggingFaceUrl:
+      "https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
     displayName: "DeepSeek-R1 Distill Qwen 14B",
     category: "reasoning",
     categoryLabel: "추론",
@@ -352,6 +400,8 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "deepseek-r1:32b-qwen-distill-q4_K_M",
+    huggingFaceUrl:
+      "https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
     displayName: "DeepSeek-R1 Distill Qwen 32B",
     category: "reasoning",
     categoryLabel: "추론",
@@ -366,6 +416,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
     // 없는 태그를 넣으면 dispatch 가 정상적으로 거부하므로 여기 값은 추측 금지.
     // ollama 모델 페이지가 `tools` capability 를 명시한다(vision/thinking 도).
     id: "qwen3.8:27b",
+    huggingFaceUrl: "https://huggingface.co/Qwen/Qwen3.8-27B",
     displayName: "Qwen 3.8 27B (256K)",
     // 코딩 벤치가 높아 들여오지만 모델 자체는 범용(vision/thinking 포함)이다.
     // "코딩 특화" 버킷은 qwen2.5-coder/devstral/codestral 처럼 코드 전용 학습
@@ -381,6 +432,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "qwen3:30b",
+    huggingFaceUrl: "https://huggingface.co/Qwen/Qwen3-30B-A3B",
     displayName: "Qwen 3 30B-A3B MoE (256K)",
     category: "general",
     categoryLabel: "범용",
@@ -390,6 +442,7 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelCatalogEntry[] = [
   }),
   withToolSupport({
     id: "qwen3:32b",
+    huggingFaceUrl: "https://huggingface.co/Qwen/Qwen3-32B",
     displayName: "Qwen 3 32B",
     category: "general",
     categoryLabel: "범용",
@@ -438,12 +491,86 @@ export type LocalModelAction =
   | "ollama-missing"
   | "daemon-stopped";
 
-export interface LocalModelCard extends LocalModelCatalogEntry {
+/**
+ * 스토어 목록을 묶는 **메모리 구간**. 사장님 요청("메모리 용량별로 나눠서")의
+ * 축이고, 사용자가 자기 기기에서 뭐가 도는지 한눈에 보게 하는 것이 목적이다.
+ *
+ * ★경계는 새로 지어낸 값이 아니라 **카탈로그의 기존 `minRamGB` 분포를 그대로
+ * 접은 것**이다. 실재하는 값은 4·6·8·12·24·32·48·96 뿐이라
+ *   ≤8 → "8", ≤16 → "16", ≤32 → "32", 그 위 → "48plus"
+ * 로 접으면 어떤 행도 구간 경계에 걸치지 않는다. 특히 gemma3:27b(48) 와
+ * qwen3.8:27b(48) 이 같이 48GB+ 로 떨어져 기존 큐레이션 기준과 어긋나지 않는다.
+ * minRamGB 를 고칠 때는 이 문단을 같이 확인할 것.
+ */
+export type LocalMemoryTier = "8" | "16" | "32" | "48plus";
+
+/** 구간 정렬 순서 — UI 가 이 순서로 섹션을 쌓는다. */
+export const LOCAL_MEMORY_TIERS: readonly LocalMemoryTier[] = [
+  "8",
+  "16",
+  "32",
+  "48plus",
+];
+
+/** 최소 권장 RAM(GB) → 메모리 구간. 임계의 단일 소스. */
+export function localMemoryTier(minRamGB: number): LocalMemoryTier {
+  if (minRamGB <= 8) return "8";
+  if (minRamGB <= 16) return "16";
+  if (minRamGB <= 32) return "32";
+  return "48plus";
+}
+
+/**
+ * 이 기기 메모리로 그 구간을 감당하는가. 구간 헤더의 "내 기기에서 실행 가능"
+ * 표시에 쓴다 — 구간의 **상한**이 아니라 그 구간 행들의 minRamGB 를 보는 것이
+ * 정확하지만, 구간 정의상 상한이 곧 그 구간 최댓값이라 상한 비교로 충분하다.
+ */
+export function memoryTierFits(
+  tier: LocalMemoryTier,
+  totalMemGB: number,
+): boolean {
+  switch (tier) {
+    case "8":
+      return totalMemGB >= 8;
+    case "16":
+      return totalMemGB >= 16;
+    case "32":
+      return totalMemGB >= 32;
+    default:
+      return totalMemGB >= 48;
+  }
+}
+
+export interface LocalModelCard extends Omit<
+  LocalModelCatalogEntry,
+  "downloadSizeMB" | "contextTokens" | "huggingFaceUrl"
+> {
+  /** 다운로드 크기(MB). 카탈로그 밖 설치분은 모르므로 undefined. */
+  downloadSizeMB?: number;
+  /** 최대 컨텍스트(토큰). 카탈로그 밖 설치분은 모르므로 undefined. */
+  contextTokens?: number;
+  /** 모델 원본 페이지. 카탈로그 밖 설치분은 모르므로 undefined. */
+  huggingFaceUrl?: string;
   /** 이 기기 메모리로 충분한가(minRamGB ≤ totalMemGB). */
   fits: boolean;
   installed: boolean;
   /** 카드의 단일 행동 상태 — UI 는 이 값 하나로 버튼/안내를 가른다. */
   action: LocalModelAction;
+  /** 목록을 묶는 메모리 구간. 소요 RAM 을 모르는 설치분은 null. */
+  memoryTier: LocalMemoryTier | null;
+  /**
+   * 이 카드가 어디서 왔는가.
+   *   catalog                    first-party 큐레이션 행.
+   *   installed-outside-catalog  `ollama list` 에만 있는 설치분(사용자가 직접 pull).
+   *
+   * ★후자가 존재하는 이유: **카탈로그에서 내리는 것과, 이미 설치해 쓰는 모델이
+   * 화면에서 사라지는 것은 다른 일이다.** 큐레이션을 정리하려면 delist 된
+   * 설치분이 계속 보여야 하고, 그래야 정리가 사용자 자산을 지우지 않는다.
+   * 신뢰경계는 그대로다 — 이 카드는 **표시 전용**이라 pull 버튼을 주지 않고,
+   * `localModels:pull` IPC 도 여전히 `catalogEntry()` 화이트리스트로만 실행한다
+   * (카탈로그 밖 id 는 "not-in-catalog" 로 거부).
+   */
+  source: "catalog" | "installed-outside-catalog";
 }
 
 export interface OllamaAvailability {
@@ -466,7 +593,7 @@ export function evaluateLocalModelCards(
   catalog: readonly LocalModelCatalogEntry[] = LOCAL_MODEL_CATALOG,
 ): LocalModelCard[] {
   const installed = new Set(installedIds);
-  return catalog.map((entry) => {
+  const cards: LocalModelCard[] = catalog.map((entry) => {
     const fits = totalMemGB >= entry.minRamGB;
     const action: LocalModelAction = installed.has(entry.id)
       ? "installed"
@@ -477,8 +604,42 @@ export function evaluateLocalModelCards(
           : !fits
             ? "insufficient-ram"
             : "pull";
-    return { ...entry, fits, installed: installed.has(entry.id), action };
+    return {
+      ...entry,
+      fits,
+      installed: installed.has(entry.id),
+      action,
+      memoryTier: localMemoryTier(entry.minRamGB),
+      source: "catalog",
+    };
   });
+
+  // ★카탈로그 밖 설치분 — 표시 전용 카드.
+  // 사용자가 직접 `ollama pull` 한 모델과, 큐레이션에서 내려간 모델이 여기 온다.
+  // 이 목록이 없으면 카탈로그 정리가 곧 "쓰던 모델이 사라짐"이 된다.
+  const catalogIds = new Set(catalog.map((e) => e.id));
+  for (const id of installedIds) {
+    if (catalogIds.has(id)) continue;
+    const toolSupport = resolveLocalToolSupport(id);
+    cards.push({
+      id,
+      // 큐레이션 표시명이 없으므로 태그를 그대로 보여준다(지어내지 않는다).
+      displayName: id,
+      category: "general",
+      categoryLabel: "설치됨",
+      // 소요 RAM 을 모른다 → 게이트를 걸지 않는다. 이미 설치돼 도는 모델이다.
+      minRamGB: 0,
+      paramBillions: parseLocalParamBillions(id),
+      toolSupport,
+      toolSupportLabel: localToolSupportLabel(toolSupport),
+      fits: true,
+      installed: true,
+      action: "installed",
+      memoryTier: null,
+      source: "installed-outside-catalog",
+    });
+  }
+  return cards;
 }
 
 /** Mac 은 통합메모리(GPU 공유)라 os.totalmem() 이 곧 모델 가용 메모리 축이다. */

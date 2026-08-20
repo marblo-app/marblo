@@ -38,6 +38,48 @@ const DESC_KEYS: Record<string, string> = {
   "gemma2:2b": "harness.store.local.desc.gemma2_2b",
 };
 
+/**
+ * 메모리 구간 표시 순서. **임계값은 여기 없다** — 어떤 카드가 어느 구간인지는
+ * 메인 프로세스(`electron/local-models.ts` 의 `localMemoryTier`)가 정해서
+ * `card.memoryTier` 로 내려준다. 렌더러가 GB 경계를 다시 계산하면 두 곳이
+ * 갈라지므로, 여기서는 **순서만** 안다.
+ */
+const MEMORY_TIER_ORDER = ["8", "16", "32", "48plus"] as const;
+
+/** 구간 헤더 문구 — 계산된 키 대신 리터럴 매핑이라 i18n 키 타입이 유지된다. */
+const MEMORY_TIER_TITLE_KEYS = {
+  "8": "harness.store.local.memoryTierTitle.8",
+  "16": "harness.store.local.memoryTierTitle.16",
+  "32": "harness.store.local.memoryTierTitle.32",
+  "48plus": "harness.store.local.memoryTierTitle.48plus",
+} as const;
+
+/**
+ * 3티어 배지 — ★`toolSupport === "tool-use"` 로 **이분하지 말 것**.
+ * 이분하면 경량 티어(gemma3:27b, qwen3.8:27b)가 "대화 전용"으로 잘못 뜬다.
+ * 새 티어가 생기면 이 맵에 한 줄을 더하고, switch 가 없으니 빠뜨릴 곳도 없다.
+ */
+const TOOL_SUPPORT_BADGE = {
+  "chat-only": {
+    labelKey: "harness.store.local.badgeChatOnly",
+    hintKey: "harness.store.local.chatOnlyHint",
+    installedHintKey: "harness.store.local.installedHintChatOnly",
+    className: "bg-[#f9e2af]/20 text-[#f9e2af]",
+  },
+  "tool-use-lite": {
+    labelKey: "harness.store.local.badgeToolUseLite",
+    hintKey: "harness.store.local.toolUseLiteHint",
+    installedHintKey: "harness.store.local.installedHintToolUseLite",
+    className: "bg-[#94e2d5]/20 text-[#94e2d5]",
+  },
+  "tool-use": {
+    labelKey: "harness.store.local.badgeToolUse",
+    hintKey: "harness.store.local.toolUseHint",
+    installedHintKey: "harness.store.local.installedHintToolUse",
+    className: "bg-[#89b4fa]/20 text-[#89b4fa]",
+  },
+} as const;
+
 export interface LocalModelsSectionProps {
   /** 하네스탭 단독 섹션 크롬(제목·부제). 스토어탭 임베드는 false. */
   showSectionChrome?: boolean;
@@ -49,6 +91,26 @@ export function formatDownloadSize(mb: number): string {
 
 export function formatContext(tokens: number): string {
   return tokens >= 1000 ? `${Math.round(tokens / 1000)}K` : `${tokens}`;
+}
+
+/** 파라미터 규모 배지 문구. 태그에서 못 읽은 모델은 호출부가 미상으로 처리한다. */
+export function formatParamBillions(billions: number): string {
+  return `${billions}B`;
+}
+
+/**
+ * 구간 헤더의 "실행 가능/부족" 칩 상태.
+ *
+ * ★임계를 다시 계산하지 않고 **카드가 이미 들고 있는 `fits`** 만 접는다. 일부만
+ * 맞는 구간(예: 24GB 기기 × 32GB 구간)은 칩을 아예 달지 않는다 — 구간 단위로
+ * 뭉뚱그리면 거짓말이 되고, 카드마다 붙는 배지가 이미 정확한 답을 준다.
+ */
+export function memoryTierFitState(
+  cards: readonly LocalModelCard[],
+): "all" | "none" | "mixed" {
+  if (cards.every((c) => c.fits)) return "all";
+  if (cards.every((c) => !c.fits)) return "none";
+  return "mixed";
 }
 
 export function LocalModelsSection({
@@ -130,6 +192,195 @@ export function LocalModelsSection({
   const cancelPull = useCallback(async (id: string) => {
     await window.electronAPI.localModels.cancelPull({ id });
   }, []);
+
+  const cards = info?.cards ?? [];
+  /**
+   * 메모리 구간별 그룹. 카탈로그 밖 설치분은 소요 RAM 을 모르므로
+   * `memoryTier === null` 이고, 여기서 자연히 빠져 별도 섹션으로 간다.
+   */
+  const tierGroups = MEMORY_TIER_ORDER.map((tier) => ({
+    tier,
+    cards: cards.filter((c) => c.memoryTier === tier),
+  })).filter((g) => g.cards.length > 0);
+  const outsideCatalog = cards.filter(
+    (c) => c.source === "installed-outside-catalog",
+  );
+
+  const renderCard = (card: LocalModelCard) => {
+    const pullingPercent = pulling[card.id];
+    const isPulling = card.id in pulling;
+    const descKey = DESC_KEYS[card.id];
+    const badge = TOOL_SUPPORT_BADGE[card.toolSupport];
+    return (
+      <div
+        key={card.id}
+        className="rounded-md border border-[#313244] bg-[#181825] p-3 transition-colors hover:border-[#45475a]"
+      >
+        <div className="mb-1 flex items-start justify-between gap-2">
+          {/*
+            ★이름은 자르지 않는다. 종전에는 displayName 에 `truncate`,
+            id 는 한 줄 안에서 밀려 `deepseek-r1:14b-qwen-distill-q4_K_M`
+            같은 긴 태그가 잘려 보였다. 이름은 단어 단위로, 태그는 임의
+            위치에서(`break-all`) 줄바꿈해 끝까지 보이게 한다.
+          */}
+          <div className="min-w-0 flex-1">
+            <div className="break-words text-sm font-semibold text-[#cdd6f4]">
+              {card.displayName}
+            </div>
+            <div className="break-all font-mono text-[10px] leading-tight text-[#6c7086]">
+              {card.id}
+            </div>
+          </div>
+          <div className="flex flex-shrink-0 items-center gap-1">
+            {card.installed ? (
+              <span className="rounded bg-[#a6e3a1]/20 px-1.5 py-0.5 text-[10px] text-[#a6e3a1]">
+                {t("harness.store.local.installed")}
+              </span>
+            ) : card.fits ? (
+              <span className="rounded bg-[#a6e3a1]/20 px-1.5 py-0.5 text-[10px] text-[#a6e3a1]">
+                {t("harness.store.local.fits")}
+              </span>
+            ) : (
+              <span className="rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] text-[#f38ba8]">
+                {t("harness.store.local.insufficientRam", {
+                  gb: String(card.minRamGB),
+                })}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {descKey && (
+          <p className="mb-2 text-xs text-[#bac2de]">
+            {t(descKey as Parameters<typeof t>[0])}
+          </p>
+        )}
+
+        <div className="mb-2 flex flex-wrap items-center gap-1">
+          <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8]">
+            {card.categoryLabel}
+          </span>
+          {/* ★3티어 분기 — 이분하면 경량 티어가 "대화 전용"으로 잘못 뜬다. */}
+          <span
+            className={`rounded px-1.5 py-0.5 text-[10px] ${badge.className}`}
+            title={translate(badge.hintKey)}
+          >
+            {t(badge.labelKey)}
+          </span>
+          <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8]">
+            {card.paramBillions === null
+              ? t("harness.store.local.paramUnknown")
+              : `${t("harness.store.local.paramSize")}: ${formatParamBillions(
+                  card.paramBillions,
+                )}`}
+          </span>
+          {card.downloadSizeMB !== undefined && (
+            <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8]">
+              {t("harness.store.local.downloadSize")}:{" "}
+              {formatDownloadSize(card.downloadSizeMB)}
+            </span>
+          )}
+          {card.minRamGB > 0 && (
+            <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8]">
+              {t("harness.store.local.minRam")}: {card.minRamGB} GB
+            </span>
+          )}
+          {card.contextTokens !== undefined && (
+            <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8]">
+              {t("harness.store.local.context")}:{" "}
+              {formatContext(card.contextTokens)}
+            </span>
+          )}
+          {/*
+            모델 원본(HuggingFace). 새 IPC 를 만들지 않는다 — main 의
+            setWindowOpenHandler 가 https + target=_blank 를
+            shell.openExternal 로 넘겨 OS 기본 브라우저로 연다(이 파일의
+            ollama.com/download 링크와 같은 처리).
+          */}
+          {card.huggingFaceUrl && (
+            <a
+              href={card.huggingFaceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={translate("harness.store.local.huggingFaceAria", {
+                name: card.displayName,
+              })}
+              className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#89b4fa] transition-colors hover:bg-[#45475a] hover:underline"
+            >
+              {t("harness.store.local.huggingFace")} ↗
+            </a>
+          )}
+        </div>
+
+        {isPulling ? (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2 text-[10px]">
+              <span className="font-medium text-[#cdd6f4]">
+                {t("harness.store.local.installing")}
+              </span>
+              <span className="font-mono text-[#89b4fa]">
+                {pullingPercent !== null && pullingPercent !== undefined
+                  ? `${pullingPercent}%`
+                  : t("harness.store.local.progressPending")}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div
+                className="h-2 flex-1 overflow-hidden rounded-full bg-[#313244]"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={pullingPercent ?? undefined}
+              >
+                <div
+                  className="h-full rounded-full bg-[#89b4fa] transition-all"
+                  style={{ width: `${pullingPercent ?? 8}%` }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => void cancelPull(card.id)}
+                className="rounded bg-[#f38ba8]/20 px-2 py-0.5 text-[10px] text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/30"
+              >
+                {t("harness.store.local.cancel")}
+              </button>
+            </div>
+          </div>
+        ) : card.action === "installed" ? (
+          <p className="text-[10px] text-[#6c7086]">
+            {t(badge.installedHintKey)}
+          </p>
+        ) : card.action === "pull" ? (
+          <button
+            type="button"
+            onClick={() => void runPull(card.id)}
+            className="rounded bg-[#89b4fa] px-3 py-1.5 text-xs font-semibold text-[#11111b] shadow-sm shadow-[#89b4fa]/20 transition-colors hover:bg-[#b4befe] focus:outline-none focus:ring-2 focus:ring-[#89b4fa]/60 focus:ring-offset-2 focus:ring-offset-[#181825]"
+          >
+            {t("harness.store.local.pull")}
+          </button>
+        ) : (
+          // insufficient-ram / ollama-missing / daemon-stopped:
+          // 비활성 버튼 + 사유(가짜 활성 버튼 금지)
+          <button
+            type="button"
+            disabled
+            title={
+              card.action === "insufficient-ram"
+                ? translate("harness.store.local.insufficientRam", {
+                    gb: String(card.minRamGB),
+                  })
+                : card.action === "ollama-missing"
+                  ? translate("harness.store.local.ollamaMissingShort")
+                  : translate("harness.store.local.daemonStoppedShort")
+            }
+            className="cursor-not-allowed rounded bg-[#313244] px-2.5 py-1 text-xs text-[#6c7086] opacity-60"
+          >
+            {t("harness.store.local.pull")}
+          </button>
+        )}
+      </div>
+    );
+  };
 
   const body = (
     <div>
@@ -230,155 +481,59 @@ export function LocalModelsSection({
         </p>
       )}
 
-      <div className="grid gap-3 md:grid-cols-2">
-        {(info?.cards ?? []).map((card) => {
-          const pullingPercent = pulling[card.id];
-          const isPulling = card.id in pulling;
-          const descKey = DESC_KEYS[card.id];
-          return (
-            <div
-              key={card.id}
-              className="rounded-md border border-[#313244] bg-[#181825] p-3 transition-colors hover:border-[#45475a]"
-            >
-              <div className="mb-1 flex items-start justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <span className="truncate text-sm font-semibold text-[#cdd6f4]">
-                    {card.displayName}
-                  </span>
-                  <span className="flex-shrink-0 font-mono text-[10px] text-[#6c7086]">
-                    {card.id}
-                  </span>
-                </div>
-                <div className="flex flex-shrink-0 items-center gap-1">
-                  {card.installed ? (
-                    <span className="rounded bg-[#a6e3a1]/20 px-1.5 py-0.5 text-[10px] text-[#a6e3a1]">
-                      {t("harness.store.local.installed")}
-                    </span>
-                  ) : card.fits ? (
-                    <span className="rounded bg-[#a6e3a1]/20 px-1.5 py-0.5 text-[10px] text-[#a6e3a1]">
-                      {t("harness.store.local.fits")}
-                    </span>
-                  ) : (
-                    <span className="rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] text-[#f38ba8]">
-                      {t("harness.store.local.insufficientRam", {
-                        gb: String(card.minRamGB),
-                      })}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {descKey && (
-                <p className="mb-2 text-xs text-[#bac2de]">
-                  {t(descKey as Parameters<typeof t>[0])}
-                </p>
+      {/* 메모리 구간별 섹션 — 사용자가 "내 기기에서 뭐가 도나"를 먼저 본다. */}
+      {tierGroups.map(({ tier, cards: tierCards }) => {
+        const fitState = memoryTierFitState(tierCards);
+        return (
+          <section key={tier} className="mb-4 last:mb-0">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <h4 className="text-xs font-semibold text-[#cdd6f4]">
+                {t(MEMORY_TIER_TITLE_KEYS[tier])}
+              </h4>
+              <span className="text-[10px] text-[#6c7086]">
+                {t("harness.store.local.memoryTierCount", {
+                  count: String(tierCards.length),
+                })}
+              </span>
+              {fitState === "all" && (
+                <span className="rounded bg-[#a6e3a1]/20 px-1.5 py-0.5 text-[10px] text-[#a6e3a1]">
+                  {t("harness.store.local.memoryTierRunnable")}
+                </span>
               )}
-
-              <div className="mb-2 flex flex-wrap items-center gap-1">
-                <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8]">
-                  {card.categoryLabel}
+              {fitState === "none" && (
+                <span className="rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] text-[#f38ba8]">
+                  {t("harness.store.local.memoryTierTooBig")}
                 </span>
-                <span
-                  className={`rounded px-1.5 py-0.5 text-[10px] ${
-                    card.toolSupport === "tool-use"
-                      ? "bg-[#89b4fa]/20 text-[#89b4fa]"
-                      : "bg-[#f9e2af]/20 text-[#f9e2af]"
-                  }`}
-                  title={
-                    card.toolSupport === "tool-use"
-                      ? translate("harness.store.local.toolUseHint")
-                      : translate("harness.store.local.chatOnlyHint")
-                  }
-                >
-                  {card.toolSupport === "tool-use"
-                    ? t("harness.store.local.badgeToolUse")
-                    : t("harness.store.local.badgeChatOnly")}
-                </span>
-                <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8]">
-                  {t("harness.store.local.downloadSize")}:{" "}
-                  {formatDownloadSize(card.downloadSizeMB)}
-                </span>
-                <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8]">
-                  {t("harness.store.local.minRam")}: {card.minRamGB} GB
-                </span>
-                <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#a6adc8]">
-                  {t("harness.store.local.context")}:{" "}
-                  {formatContext(card.contextTokens)}
-                </span>
-              </div>
-
-              {isPulling ? (
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between gap-2 text-[10px]">
-                    <span className="font-medium text-[#cdd6f4]">
-                      {t("harness.store.local.installing")}
-                    </span>
-                    <span className="font-mono text-[#89b4fa]">
-                      {pullingPercent !== null && pullingPercent !== undefined
-                        ? `${pullingPercent}%`
-                        : t("harness.store.local.progressPending")}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="h-2 flex-1 overflow-hidden rounded-full bg-[#313244]"
-                      role="progressbar"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={pullingPercent ?? undefined}
-                    >
-                      <div
-                        className="h-full rounded-full bg-[#89b4fa] transition-all"
-                        style={{ width: `${pullingPercent ?? 8}%` }}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void cancelPull(card.id)}
-                      className="rounded bg-[#f38ba8]/20 px-2 py-0.5 text-[10px] text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/30"
-                    >
-                      {t("harness.store.local.cancel")}
-                    </button>
-                  </div>
-                </div>
-              ) : card.action === "installed" ? (
-                <p className="text-[10px] text-[#6c7086]">
-                  {card.toolSupport === "tool-use"
-                    ? t("harness.store.local.installedHintToolUse")
-                    : t("harness.store.local.installedHintChatOnly")}
-                </p>
-              ) : card.action === "pull" ? (
-                <button
-                  type="button"
-                  onClick={() => void runPull(card.id)}
-                  className="rounded bg-[#89b4fa] px-3 py-1.5 text-xs font-semibold text-[#11111b] shadow-sm shadow-[#89b4fa]/20 transition-colors hover:bg-[#b4befe] focus:outline-none focus:ring-2 focus:ring-[#89b4fa]/60 focus:ring-offset-2 focus:ring-offset-[#181825]"
-                >
-                  {t("harness.store.local.pull")}
-                </button>
-              ) : (
-                // insufficient-ram / ollama-missing / daemon-stopped:
-                // 비활성 버튼 + 사유(가짜 활성 버튼 금지)
-                <button
-                  type="button"
-                  disabled
-                  title={
-                    card.action === "insufficient-ram"
-                      ? translate("harness.store.local.insufficientRam", {
-                          gb: String(card.minRamGB),
-                        })
-                      : card.action === "ollama-missing"
-                        ? translate("harness.store.local.ollamaMissingShort")
-                        : translate("harness.store.local.daemonStoppedShort")
-                  }
-                  className="cursor-not-allowed rounded bg-[#313244] px-2.5 py-1 text-xs text-[#6c7086] opacity-60"
-                >
-                  {t("harness.store.local.pull")}
-                </button>
               )}
             </div>
-          );
-        })}
-      </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {tierCards.map(renderCard)}
+            </div>
+          </section>
+        );
+      })}
+
+      {/* ★카탈로그 밖 설치분 — 큐레이션 정리가 "쓰던 모델이 사라짐"이 되지 않게. */}
+      {outsideCatalog.length > 0 && (
+        <section className="mt-4 border-t border-[#313244] pt-3">
+          <div className="mb-1 flex flex-wrap items-center gap-2">
+            <h4 className="text-xs font-semibold text-[#cdd6f4]">
+              {t("harness.store.local.outsideCatalogTitle")}
+            </h4>
+            <span className="text-[10px] text-[#6c7086]">
+              {t("harness.store.local.memoryTierCount", {
+                count: String(outsideCatalog.length),
+              })}
+            </span>
+          </div>
+          <p className="mb-2 text-[11px] text-[#7f849c]">
+            {t("harness.store.local.outsideCatalogNote")}
+          </p>
+          <div className="grid gap-3 md:grid-cols-2">
+            {outsideCatalog.map(renderCard)}
+          </div>
+        </section>
+      )}
     </div>
   );
 
