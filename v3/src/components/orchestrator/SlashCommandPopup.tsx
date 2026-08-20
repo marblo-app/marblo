@@ -53,20 +53,6 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     category: "project-step",
   },
 
-  // 에이전트 관리
-  {
-    command: "/tf-spawn",
-    label: "tf-spawn",
-    description: "orchestrator.cmd.tf-spawn.desc",
-    category: "agent",
-  },
-  {
-    command: "/tf-agent",
-    label: "tf-agent",
-    description: "orchestrator.cmd.tf-agent.desc",
-    category: "agent",
-  },
-
   // 작업 진행
   {
     command: "/tf-work",
@@ -86,13 +72,6 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: "orchestrator.cmd.tf-add.desc",
     category: "work",
   },
-  {
-    command: "/tf-flow",
-    label: "tf-flow",
-    description: "orchestrator.cmd.tf-flow.desc",
-    category: "work",
-  },
-
   // 중단 / 재개
   {
     command: "/tf-hold",
@@ -131,14 +110,6 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     label: "tf-handoff",
     description: "orchestrator.cmd.tf-handoff.desc",
     category: "review",
-  },
-
-  // 배포
-  {
-    command: "/tf-deploy",
-    label: "tf-deploy",
-    description: "orchestrator.cmd.tf-deploy.desc",
-    category: "deploy",
   },
 
   // 동기화 / 정리
@@ -182,15 +153,10 @@ export const SLASH_PROMPTS: Record<string, string> = {
     "분석 결과를 기반으로 create_tasks_bulk로 태스크를 생성해줘. 먼저 목록 보여주고 확인받고.",
   "/tf-spawn-agents":
     "태스크 확인하고 에이전트 라인업 제안해줘. 확인받고 spawn_agent로 물리 에이전트 스폰.",
-  "/tf-spawn":
-    "태스크 확인하고 에이전트 라인업 제안해줘. 확인받고 spawn_agent로 물리 에이전트 스폰. 절대 TeamCreate/Task 도구 사용 금지.",
-  "/tf-agent":
-    "빠른 조사가 필요합니다. Claude Code 내부 서브에이전트로 처리해줘.",
   "/tf-work": "가능한 태스크를 확인하고 하나를 골라서 claim해줘. 코딩 시작.",
   "/tf-status": "전체 태스크 상태 확인하고 요약해줘",
   "/tf-add":
     "현재 태스크 목록을 확인하고 새 태스크를 추가하거나 기존 태스크를 수정해줘.",
-  "/tf-flow": "파이프라인 플로우 그래프 설계해줘. 구조 먼저 보여주고",
   "/tf-hold": "작업을 멈추고 현황을 정리해줘. 다음 행동을 제안해줘.",
   "/tf-resume": "중단된 프로젝트의 전체 컨텍스트를 복원하고 이어서 진행해줘.",
   "/tf-review": "REVIEW 상태 태스크를 확인하고 코드 리뷰해줘",
@@ -200,8 +166,6 @@ export const SLASH_PROMPTS: Record<string, string> = {
   "/tf-sync": "실제 코드 상태와 티켓 상태의 불일치를 감지하고 동기화해줘.",
   "/tf-done": "프로젝트를 마무리하고 결과 요약 + 아카이브해줘.",
   "/tf-ralph": "같은 작업을 여러 대상에 반복 적용해줘. 티켓 단위로 추적.",
-  "/tf-deploy":
-    "현재 프로젝트를 GCP Cloud Run에 배포해줘. gcloud CLI로 Docker 빌드 → Cloud Run 배포 → Scheduler 등록까지.",
   "/tf-guide": "Marblo 슬래시 명령어 가이드를 보여줘",
 };
 
