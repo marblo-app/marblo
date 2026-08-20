@@ -767,4 +767,29 @@ export const onboarding = {
   "onramp.block.close": "닫기",
   "onramp.block.reason.limit": "데모 분해 한도에 도달했어요.",
   "onramp.block.reason.run": "실행은 계정 연결 뒤부터 가능합니다.",
+
+  // — 첫 스폰 가이드 — 오케 터미널 바로 위, 접고 펼 수 있는 인라인 패널
+  // (티켓 YYD71y0KU8cNhIFI5YSu). 연결 + 폴더가 끝나 오케 대화창이 뜬 화면에
+  // 항상 함께 있다 — 오버레이가 아니라 대상 창과 같은 화면에 있어야
+  // "무엇을 쳐야 하는지" 가 가려지지 않는다. 여기 안내하는 명령은 전부
+  // 번들 18종 안(SlashCommandPopup.SLASH_COMMANDS)에서만 고른다.
+  "onboarding.firstSpawn.title": "이제 오케에게 뭘 시키나요?",
+  "onboarding.firstSpawn.small.badge": "작은 일",
+  "onboarding.firstSpawn.small.desc": "티켓 하나 열고 에이전트를 스폰해요.",
+  "onboarding.firstSpawn.small.step1": "티켓 열기",
+  "onboarding.firstSpawn.small.step2": "에이전트 스폰",
+  "onboarding.firstSpawn.big.badge": "큰 일",
+  "onboarding.firstSpawn.big.desc":
+    "PRD부터 써서 태스크 생성과 스폰을 한 번에 해요.",
+  "onboarding.firstSpawn.big.step1": "PRD 작성",
+  // ★/tf-start 는 태스크 생성 + 스폰을 한 번에 한다 — "만들고 그 다음
+  // 스폰" 으로 쪼개 쓰지 말 것(오케 원문: Create tasks from the PRD and
+  // spawn agents).
+  "onboarding.firstSpawn.big.step2": "태스크 생성 + 스폰 한 번에",
+  "onboarding.firstSpawn.allCommands": "전체 명령은 왼쪽 커맨드 메뉴에서.",
+  "onboarding.firstSpawn.guideHint": "뭘 쓸지 모르겠으면",
+  "onboarding.firstSpawn.send": "보내기",
+  "onboarding.firstSpawn.sent": "보냈어요",
+  "onboarding.firstSpawn.collapse": "접기",
+  "onboarding.firstSpawn.expand": "펼치기",
 };
