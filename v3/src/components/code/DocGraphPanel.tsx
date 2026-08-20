@@ -6,7 +6,10 @@ import {
   collectFolderPrefixesFromPaths,
   collectMarkdownPaths,
   collectTopLevelFolders,
+  DOC_GRAPH_FOLDER_MAX_DEPTH,
   filterDocSources,
+  hasFolderPrefixDepthOverflowFromPaths,
+  hasFolderPrefixDepthOverflowFromTree,
   joinProjectPath,
   toProjectRelative,
   type DocGraphExternalLinks,
@@ -39,6 +42,12 @@ const EXTERNAL_STORAGE_KEY = "marblo.docGraph.externalLinks";
 
 /** 전체 루트 스코프 센티널 — select value. */
 const SCOPE_ALL = "";
+
+function folderOptionLabel(folder: string): string {
+  const segments = folder.split("/");
+  const name = segments[segments.length - 1] ?? folder;
+  return `${"\u00a0\u00a0".repeat(Math.max(0, segments.length - 1))}${name}/`;
+}
 
 interface DocGraphPanelProps {
   onDocumentOpened?: () => void;
@@ -74,6 +83,7 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scanned, setScanned] = useState(0);
+  const [folderDepthLimited, setFolderDepthLimited] = useState(false);
   const genRef = useRef(0);
 
   const load = useCallback(async () => {
@@ -83,6 +93,7 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
       setFolders([]);
       setError(null);
       setScanned(0);
+      setFolderDepthLimited(false);
       return;
     }
 
@@ -95,6 +106,7 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
       if (gen !== genRef.current) return;
 
       const fromTree = collectTopLevelFolders(tree, root);
+      const treeDepthLimited = hasFolderPrefixDepthOverflowFromTree(tree, root);
 
       // readTree 는 절대 경로를 준다. 그래프 id·위키링크 해석은 상대 경로 기준.
       const absPaths = collectMarkdownPaths(tree, { maxFiles: MAX_MD_FILES });
@@ -130,11 +142,15 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
       const fromPaths = collectFolderPrefixesFromPaths(
         loaded.map((s) => s.path),
       );
+      const pathDepthLimited = hasFolderPrefixDepthOverflowFromPaths(
+        loaded.map((s) => s.path),
+      );
       const merged = Array.from(new Set([...fromTree, ...fromPaths])).sort(
-        (a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }),
+        (a, b) => a.localeCompare(b, "en", { sensitivity: "base" }),
       );
       setFolders(merged);
       setSources(loaded);
+      setFolderDepthLimited(treeDepthLimited || pathDepthLimited);
 
       // 저장된 스코프가 더 이상 없으면 전체로 되돌린다.
       setFolderPrefix((prev) => {
@@ -288,7 +304,7 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
             <option value={SCOPE_ALL}>{t("code.docGraph.scope.all")}</option>
             {folders.map((folder) => (
               <option key={folder} value={folder}>
-                {folder}/
+                {folderOptionLabel(folder)}
               </option>
             ))}
           </select>
@@ -327,6 +343,16 @@ export function DocGraphPanel({ onDocumentOpened }: DocGraphPanelProps = {}) {
             {folderPrefix
               ? ` · ${t("code.docGraph.scope.filtered", { count: scopedSources.length })}`
               : ""}
+          </span>
+        )}
+        {folderDepthLimited && (
+          <span
+            className="text-[10px] text-amber-300/80"
+            data-testid="doc-graph-folder-depth-limited"
+          >
+            {t("code.docGraph.scope.depthLimited", {
+              count: DOC_GRAPH_FOLDER_MAX_DEPTH,
+            })}
           </span>
         )}
       </div>

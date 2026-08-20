@@ -97,6 +97,7 @@ export const code: Record<keyof typeof koCode, string> = {
   "code.docGraph.scope.label": "Folder",
   "code.docGraph.scope.all": "All",
   "code.docGraph.scope.filtered": "{count} shown",
+  "code.docGraph.scope.depthLimited": "Folders shown to {count} levels",
   "code.docGraph.external.label": "External",
   "code.docGraph.external.exclude": "Exclude",
   "code.docGraph.external.boundary": "Boundary",
