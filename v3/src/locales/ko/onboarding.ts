@@ -786,6 +786,12 @@ export const onboarding = {
   // 스폰" 으로 쪼개 쓰지 말 것(오케 원문: Create tasks from the PRD and
   // spawn agents).
   "onboarding.firstSpawn.big.step2": "태스크 생성 + 스폰 한 번에",
+  // ★접힌 바에 얹히는 명령 칩 묶음의 접근성 라벨과, 그 칩이 무엇을
+  // 하는지 펼침 첫 줄에서 알려 주는 설명. 명령 자체는 접혀 있어도
+  // 보이므로, 펼침은 "언제 어느 경로냐" 만 담는다.
+  "onboarding.firstSpawn.commandsLabel": "시작 명령",
+  "onboarding.firstSpawn.chipHint":
+    "위 명령은 접은 채로도 눌러서 바로 보낼 수 있어요.",
   "onboarding.firstSpawn.allCommands": "전체 명령은 왼쪽 커맨드 메뉴에서.",
   "onboarding.firstSpawn.guideHint": "뭘 쓸지 모르겠으면",
   "onboarding.firstSpawn.send": "보내기",
