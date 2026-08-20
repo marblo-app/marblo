@@ -10,6 +10,7 @@ import {
   collectFolderPrefixesFromPaths,
   collectMarkdownPaths,
   collectTopLevelFolders,
+  DOC_GRAPH_FOLDER_MAX_DEPTH,
   docIdFromPath,
   docNodeRadius,
   extractMarkdownLinks,
@@ -256,13 +257,27 @@ describe("folder scope filter", () => {
     expect(isUnderFolderPrefix("docs/a.md", "")).toBe(true);
   });
 
-  it("collectTopLevelFolders + collectFolderPrefixesFromPaths", () => {
+  it("collects nested prefixes, including empty intermediate folders", () => {
     const tree = [
       {
         name: "docs",
         path: "/proj/docs",
         type: "directory",
-        children: [],
+        children: [
+          {
+            name: "lectures",
+            path: "/proj/docs/lectures",
+            type: "directory",
+            children: [
+              {
+                name: "v3",
+                path: "/proj/docs/lectures/v3",
+                type: "directory",
+                children: [],
+              },
+            ],
+          },
+        ],
       },
       {
         name: "강의",
@@ -278,15 +293,43 @@ describe("folder scope filter", () => {
         children: [],
       },
     ];
-    expect(collectTopLevelFolders(tree, "/proj")).toEqual(["docs", "강의"]);
+    expect(collectTopLevelFolders(tree, "/proj")).toEqual([
+      "docs",
+      "docs/lectures",
+      "docs/lectures/v3",
+      "강의",
+    ]);
     expect(
       collectFolderPrefixesFromPaths([
-        "docs/a.md",
-        "docs/b.md",
+        "docs/lectures/v3/HOME.md",
         "lectures/x.md",
         "README.md",
       ]),
-    ).toEqual(["docs", "lectures"]);
+    ).toEqual(["docs", "docs/lectures", "docs/lectures/v3", "lectures"]);
+  });
+
+  it("limits folder choices to three levels while parent prefix scopes include descendants", () => {
+    const paths = ["docs/lectures/v3/advanced/HOME.md", "notes/intro.md"];
+    expect(collectFolderPrefixesFromPaths(paths)).toEqual([
+      "docs",
+      "docs/lectures",
+      "docs/lectures/v3",
+      "notes",
+    ]);
+    expect(DOC_GRAPH_FOLDER_MAX_DEPTH).toBe(3);
+    expect(filterDocSources([
+      { path: "docs/lectures/v3/HOME.md", content: "" },
+      { path: "docs/other.md", content: "" },
+    ], { folderPrefix: "docs/lectures" }).map((source) => source.path)).toEqual([
+      "docs/lectures/v3/HOME.md",
+    ]);
+  });
+
+  it("keeps one-level folder projects unchanged", () => {
+    expect(collectFolderPrefixesFromPaths(["docs/a.md", "notes/b.md", "README.md"])).toEqual([
+      "docs",
+      "notes",
+    ]);
   });
 
   it("exclude mode keeps only prefix docs; orphan/backlink use subset", () => {

@@ -305,47 +305,108 @@ export function isUnderFolderPrefix(path: string, folderPrefix: string): boolean
 }
 
 /**
- * 파일 트리 루트 직속 디렉터리 목록(프로젝트 상대).
- * 숨김(`.` 시작)은 제외. `rootPath` 가 있으면 절대 경로를 상대로 변환.
+ * 폴더 선택지는 문서 경로를 따라 늘어나므로, 대규모 저장소에서 드롭다운이
+ * 수백 단계로 팽창하지 않게 탐색 깊이를 3단계로 제한한다. 더 깊은 문서는
+ * 가장 가까운 3단계 부모 스코프를 선택해 계속 탐색할 수 있다.
+ */
+export const DOC_GRAPH_FOLDER_MAX_DEPTH = 3;
+
+interface FolderTreeNode {
+  name: string;
+  path: string;
+  type: string;
+  children?: readonly FolderTreeNode[];
+}
+
+function folderPrefixes(path: string, maxDepth: number): string[] {
+  const segments = normalizeDocPath(path).split("/").filter(Boolean);
+  const usable = segments.slice(0, Math.max(0, maxDepth));
+  const prefixes: string[] = [];
+  for (let depth = 1; depth <= usable.length; depth += 1) {
+    prefixes.push(usable.slice(0, depth).join("/"));
+  }
+  return prefixes;
+}
+
+function isVisibleFolderPath(path: string): boolean {
+  return !normalizeDocPath(path)
+    .split("/")
+    .filter(Boolean)
+    .some((segment) => segment.startsWith("."));
+}
+
+/**
+ * 파일 트리의 폴더 prefix 목록(프로젝트 상대). 빈 중간 폴더도 트리에서
+ * 수집하므로 하위 문서만 가진 경로가 끊기지 않는다. 숨김 폴더는 제외한다.
+ * `rootPath` 가 있으면 절대 경로를 상대로 변환한다.
  */
 export function collectTopLevelFolders(
-  tree: readonly {
-    name: string;
-    path: string;
-    type: string;
-    children?: readonly unknown[];
-  }[],
+  tree: readonly FolderTreeNode[],
   rootPath = "",
+  maxDepth = DOC_GRAPH_FOLDER_MAX_DEPTH,
 ): string[] {
   const folders = new Set<string>();
-  for (const node of tree) {
-    if (node.type !== "directory") continue;
-    if (node.name.startsWith(".")) continue;
-    const rel = rootPath
-      ? toProjectRelative(rootPath, node.path)
-      : normalizeDocPath(node.path);
-    const top = (rel.split("/").filter(Boolean)[0] ?? "").trim();
-    if (top && !top.startsWith(".")) folders.add(top);
-  }
+  const visit = (nodes: readonly FolderTreeNode[]): void => {
+    for (const node of nodes) {
+      if (node.type !== "directory") continue;
+      const rel = rootPath
+        ? toProjectRelative(rootPath, node.path)
+        : normalizeDocPath(node.path);
+      if (!isVisibleFolderPath(rel)) continue;
+      for (const prefix of folderPrefixes(rel, maxDepth)) folders.add(prefix);
+      if (node.children) visit(node.children);
+    }
+  };
+  visit(tree);
   // UI 표시 순서를 결정하므로 실행 환경 로케일에 관계없이 결과가 고정되도록 "en" 로케일을 명시한다.
   return Array.from(folders).sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
 }
 
 /**
- * md 경로들에서 1단 폴더 prefix 추출(트리에 없어도 스코프 후보로 쓰기 위함).
+ * md 경로들에서 모든 폴더 prefix 추출(트리에 없어도 스코프 후보로 쓰기 위함).
  */
 export function collectFolderPrefixesFromPaths(
   paths: readonly string[],
+  maxDepth = DOC_GRAPH_FOLDER_MAX_DEPTH,
 ): string[] {
   const folders = new Set<string>();
   for (const raw of paths) {
     const p = normalizeDocPath(raw);
-    const slash = p.indexOf("/");
-    if (slash <= 0) continue;
-    const top = p.slice(0, slash);
-    if (top && !top.startsWith(".")) folders.add(top);
+    const directory = p.split("/").slice(0, -1).join("/");
+    if (!directory || !isVisibleFolderPath(directory)) continue;
+    for (const prefix of folderPrefixes(directory, maxDepth)) folders.add(prefix);
   }
   return Array.from(folders).sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
+}
+
+/** 3단계보다 깊은 폴더가 있어 선택지 표시가 제한됐는지 UI에 알리기 위한 신호. */
+export function hasFolderPrefixDepthOverflowFromPaths(
+  paths: readonly string[],
+  maxDepth = DOC_GRAPH_FOLDER_MAX_DEPTH,
+): boolean {
+  return paths.some((raw) => {
+    const directory = normalizeDocPath(raw).split("/").slice(0, -1);
+    return isVisibleFolderPath(directory.join("/")) && directory.length > maxDepth;
+  });
+}
+
+/** 파일 트리의 빈 중간 폴더까지 포함해 깊이 제한 여부를 확인한다. */
+export function hasFolderPrefixDepthOverflowFromTree(
+  tree: readonly FolderTreeNode[],
+  rootPath = "",
+  maxDepth = DOC_GRAPH_FOLDER_MAX_DEPTH,
+): boolean {
+  for (const node of tree) {
+    if (node.type !== "directory") continue;
+    const rel = rootPath ? toProjectRelative(rootPath, node.path) : node.path;
+    if (isVisibleFolderPath(rel) && normalizeDocPath(rel).split("/").filter(Boolean).length > maxDepth) {
+      return true;
+    }
+    if (node.children && hasFolderPrefixDepthOverflowFromTree(node.children, rootPath, maxDepth)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

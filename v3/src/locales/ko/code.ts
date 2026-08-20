@@ -109,6 +109,7 @@ export const code = {
   "code.docGraph.scope.label": "폴더",
   "code.docGraph.scope.all": "전체",
   "code.docGraph.scope.filtered": "표시 {count}",
+  "code.docGraph.scope.depthLimited": "폴더는 {count}단계까지 표시",
   "code.docGraph.external.label": "외부 링크",
   "code.docGraph.external.exclude": "제외",
   "code.docGraph.external.boundary": "경계 표시",
