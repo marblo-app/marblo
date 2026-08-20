@@ -36,10 +36,14 @@ describe("LOCAL_MODEL_CATALOG (first-party 큐레이션 위생)", () => {
     for (const e of LOCAL_MODEL_CATALOG) {
       expect(["coding", "general", "reasoning"]).toContain(e.category);
       expect(["코딩 특화", "범용", "추론"]).toContain(e.categoryLabel);
-      expect(["chat-only", "tool-use"]).toContain(e.toolSupport);
-      expect(["대화·업무 분배", "도구 사용 가능(대형 모델)"]).toContain(
-        e.toolSupportLabel,
+      expect(["chat-only", "tool-use-lite", "tool-use"]).toContain(
+        e.toolSupport,
       );
+      expect([
+        "대화·업무 분배",
+        "도구 사용 가능(경량 주입)",
+        "도구 사용 가능(대형 모델)",
+      ]).toContain(e.toolSupportLabel);
       expect(e.downloadSizeMB).toBeGreaterThan(0);
       expect(e.minRamGB).toBeGreaterThan(0);
       expect(e.minRamGB).toBeLessThanOrEqual(128);
@@ -47,14 +51,19 @@ describe("LOCAL_MODEL_CATALOG (first-party 큐레이션 위생)", () => {
     }
   });
 
-  it("★30B 미만은 chat-only, 30B+ 대형 모델만 tool-use 지원", () => {
+  it("★25B 미만 chat-only / 25~30B 경량 / 30B+ 전체 tool-use", () => {
     expect(catalogEntry("qwen2.5:0.5b")?.toolSupport).toBe("chat-only");
     expect(catalogEntry("qwen3:4b")?.toolSupport).toBe("chat-only");
     expect(catalogEntry("gemma3:4b")?.toolSupport).toBe("chat-only");
     expect(catalogEntry("qwen2.5-coder:7b")?.toolSupport).toBe("chat-only");
     expect(catalogEntry("qwen2.5-coder:14b")?.toolSupport).toBe("chat-only");
-    expect(catalogEntry("gemma3:27b")?.toolSupport).toBe("chat-only");
     expect(catalogEntry("phi4:14b")?.toolSupport).toBe("chat-only");
+    // ★의도된 동작 변경: 27B 는 이제 경량 티어다(사장님 요청 "25B 이상은 경량
+    // 주입과 도구 호출"). 단순 임계 하향이 아니라 주입량을 깎은 별도 티어라
+    // X8ZzPLey1Uk7uFm8q3bv 의 과부하 조건을 복원하지 않는다.
+    expect(catalogEntry("gemma3:27b")?.toolSupport).toBe("tool-use-lite");
+    expect(catalogEntry("qwen3.8:27b")?.toolSupport).toBe("tool-use-lite");
+    // 코더 특화 2종은 명시 override 로 chat-only 고정(#1036, 사장님 판단 대기).
     expect(catalogEntry("devstral:24b")?.toolSupport).toBe("chat-only");
     expect(catalogEntry("codestral:22b")?.toolSupport).toBe("chat-only");
     expect(catalogEntry("qwen2.5-coder:32b")?.toolSupport).toBe("tool-use");

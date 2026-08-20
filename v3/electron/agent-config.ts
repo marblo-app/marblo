@@ -31,10 +31,7 @@ import {
   toolSurfaceEnv,
   workerClaudeSettings,
 } from "./prefix-diet";
-import {
-  isLocalChatOnlyModel,
-  toolSupportForLocalModelId,
-} from "./local-models";
+import { toolSupportForLocalModelId } from "./local-models";
 import {
   injectCodexVendorEnvKey,
   renderCodexVendorProviderToml,
@@ -55,9 +52,38 @@ export const LOCAL_CHAT_ONLY_SYSTEM_PROMPT =
   "You are a helpful local assistant running on the user's machine. " +
   "Reply clearly in the user's language. Do not call tools or emit tool-call JSON — answer directly.";
 
-export type AgentPromptProfile = "full" | "local-tool-use" | "chat-only";
+/**
+ * 스폰 프롬프트/주입 프로파일.
+ *
+ *   full                 클라우드·프론티어 워커. 종전 그대로 전부 주입.
+ *   local-tool-use       로컬 대형(30B+). MCP 표면 최소(local-light) + 완료규약
+ *                        compact + 역할 스킬 **전문** 주입.
+ *   local-tool-use-lite  로컬 경량(25B ≤ x < 30B). 도구는 주되 긴 컨텍스트를
+ *                        뺀다 — 역할 스킬 전문 대신 짧은 브리프, MCP 표면은
+ *                        local-lite(5툴). ★티켓 X8ZzPLey1Uk7uFm8q3bv 에서 26B 급이
+ *                        "스킬+41툴+완료규약 full" 조합에 과부하로 측정됐다.
+ *                        임계만 25B 로 내리면 그 실패 조건을 그대로 복원하게 되므로
+ *                        이 티어가 주입량을 갈라 준다.
+ *   chat-only            로컬 소형. 툴 스키마 자체를 안 싣는다(`--tools ""`).
+ */
+export type AgentPromptProfile =
+  | "full"
+  | "local-tool-use"
+  | "local-tool-use-lite"
+  | "chat-only";
 
-function localProfileForPinnedModel(
+/** 도구를 싣는 로컬 프로파일인가(lite 포함). */
+export function isLocalToolProfile(profile: AgentPromptProfile): boolean {
+  return profile === "local-tool-use" || profile === "local-tool-use-lite";
+}
+
+/**
+ * 핀된 로컬 모델 → 주입 프로파일. 티어 판정 자체는 local-models 가 하고
+ * (카탈로그 override 포함) 여기서는 프로파일로만 옮긴다.
+ *
+ * 테스트가 임계·프로파일 매핑을 고정할 수 있게 export 한다.
+ */
+export function localProfileForPinnedModel(
   agentModel: ModelType,
   pinnedModelId: string | undefined,
 ): AgentPromptProfile {
@@ -67,10 +93,39 @@ function localProfileForPinnedModel(
     agentModel === "local" ||
     registryRow?.provider === "local";
   if (!isLocal) return "full";
-  return isLocalChatOnlyModel(pinnedModelId) ||
-    toolSupportForLocalModelId(pinnedModelId) === "chat-only"
-    ? "chat-only"
-    : "local-tool-use";
+  switch (toolSupportForLocalModelId(pinnedModelId.trim())) {
+    case "chat-only":
+      return "chat-only";
+    case "tool-use-lite":
+      return "local-tool-use-lite";
+    default:
+      return "local-tool-use";
+  }
+}
+
+/**
+ * lite 티어가 역할 스킬 **전문** 대신 받는 짧은 브리프.
+ *
+ * 역할 스킬(`generateEnglishRoleSkillContent`)은 수 KB 짜리 자율 루프 문서다.
+ * lite 는 dispatch 로 배정받은 한 건을 끝내는 티어라 그 루프 전체가 필요 없고,
+ * 그 길이가 정확히 26B 급이 과부하로 측정된 축이다. 그래서 "무슨 역할인지 +
+ * 어떤 툴로 보고하는지"만 남긴다 — MCP 표면(local-lite)에 실제로 존재하는
+ * 5개 툴만 언급한다(없는 툴을 지시하면 가짜 JSON 을 유발한다).
+ */
+export function localLiteRoleBrief(role: string): string {
+  const safeRole = (role || "").trim() || "worker";
+  return [
+    `You are the Marblo ${safeRole} agent working on ONE assigned ticket.`,
+    "Work in the current repository. Keep changes scoped to that ticket.",
+    "Available MCP tools (these are the only ones you have):",
+    "- get_task(task_id) — read the ticket body when you need the spec.",
+    "- add_activity(task_id, message) — log progress and decisions.",
+    "- submit_for_review(task_id, pr_url?, summary?) — report normal completion.",
+    '- update_task_status(task_id, status, comment) — report "FAILED" or "BLOCKED".',
+    "- ask_orchestrator(task_id, question) — ask when evidence is missing.",
+    "Never guess when you are missing evidence: ask_orchestrator instead of the user.",
+    "Call a tool by actually invoking it. Never write tool-call JSON as message text.",
+  ].join("\n");
 }
 
 /** claude argv 에 붙이는 대화모드 플래그(유닛 테스트·스폰 경로 공유). */
@@ -1741,6 +1796,9 @@ function getMCPServerEnv(
   Object.assign(env, toolSurfaceEnv(role));
   if (promptProfile === "local-tool-use") {
     env.MARBLO_TOOL_SURFACE = "local-light";
+  } else if (promptProfile === "local-tool-use-lite") {
+    // 경량 티어 전용 표면(5툴). 남긴/뺀 툴의 근거는 tool-surface.ts 참조.
+    env.MARBLO_TOOL_SURFACE = "local-lite";
   }
 
   return env;
@@ -2712,12 +2770,18 @@ export class AgentConfigGenerator {
       promptProfile,
       modelPin?.codexModel ?? modelPin?.claudeModel ?? modelPin?.nativeModel,
     );
-    // chat-only 는 역할 스킬(tool-use 루프)을 주입하지 않는다.
-    const skillPath = chatOnly
-      ? ""
-      : this.generateSkillFile(agent.id, agent.role, projectDir);
-    const skillContent =
-      skillPath && fs.existsSync(skillPath)
+    // chat-only 는 역할 스킬(tool-use 루프)을 아예 주입하지 않는다.
+    // lite 는 ★전문 대신 짧은 브리프로 대체한다 — 이 티어의 존재 이유가
+    // "도구는 주되 긴 컨텍스트를 뺀다"이고, 역할 스킬 전문이 그 중 가장 큰
+    // 덩어리다(26B 급 과부하 측정의 주 원인, 티켓 X8ZzPLey1Uk7uFm8q3bv).
+    const liteProfile = promptProfile === "local-tool-use-lite";
+    const skillPath =
+      chatOnly || liteProfile
+        ? ""
+        : this.generateSkillFile(agent.id, agent.role, projectDir);
+    const skillContent = liteProfile
+      ? localLiteRoleBrief(agent.role)
+      : skillPath && fs.existsSync(skillPath)
         ? fs.readFileSync(skillPath, "utf-8")
         : "";
 
@@ -2784,10 +2848,7 @@ export class AgentConfigGenerator {
         agent.role,
       );
       args.push("--settings", JSON.stringify(settings));
-      if (
-        promptProfile === "local-tool-use" ||
-        shouldDisableWorkerSkills(agent.role)
-      ) {
+      if (isLocalToolProfile(promptProfile) || shouldDisableWorkerSkills(agent.role)) {
         // 스킬 카탈로그(전체 SKILL.md frontmatter) 주입 제거. 워커의 역할 지식은
         // MCP `get_agent_skill` + 스폰 프롬프트로 오지 슬래시 커맨드로 오지 않는다.
         args.push("--disable-slash-commands");

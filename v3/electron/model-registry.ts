@@ -60,6 +60,12 @@
  * 신규 **벤더**(자기 CLI 가 없는 env-swap 형: GLM, MiniMax)는 이 유니온을 건드리지
  * 않는다 — `VendorId` 에 한 줄 + 레지스트리 행 하나로 끝난다.
  */
+import {
+  isToolCapableToolSupport,
+  resolveLocalToolSupport,
+  type LocalToolSupport,
+} from "./local-tool-tier";
+
 export type HarnessId =
   | "claude"
   | "gemini"
@@ -250,7 +256,7 @@ export interface ModelRegistryEntry {
    * 로컬(Ollama) 행 전용. claude 하네스+MCP tool 주입을 견딜지.
    * `chat-only` 면 스폰 시 대화모드(툴/MCP 비주입). 클라우드 행에는 없다.
    */
-  toolSupport?: "chat-only" | "tool-use";
+  toolSupport?: LocalToolSupport;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1172,18 +1178,19 @@ const RUNTIME_LOCAL_MODEL_IDS = new Set<string>();
  * 충돌하면 정적 행이 이긴다 — 검증된 벤더 사실이 로컬 별칭에 덮이지 않게.
  */
 /**
- * 파라미터 규모(B)만으로 toolSupport 를 판정한다(카탈로그 import 순환 회피).
- * local-models.resolveLocalToolSupport 와 같은 30B 임계.
+ * 파라미터 규모(B)만으로 toolSupport 를 판정한다.
+ *
+ * ★예전에는 임계값을 여기 복붙해 뒀다("카탈로그 import 순환 회피"). local-models
+ * → model-registry 방향 import 가 이미 있어 반대 방향을 못 넣었기 때문인데, 그
+ * 복붙이 곧 드리프트였다 — 임계를 한쪽만 고치면 스토어 카드와 스폰 레지스트리가
+ * 다른 말을 한다. 판정을 의존성 0 인 `local-tool-tier.ts` 로 빼서 양쪽이 같은
+ * 함수를 부른다(순환 없음, 단일 소스).
+ *
+ * 여기서는 카탈로그의 **행 단위 override 를 볼 수 없다**(그건 local-models 소관).
+ * 이 경로로 오는 id 는 `ollama list` 실측분이고, 카탈로그에 있는 행은 스토어/스폰
+ * 분기가 `toolSupportForLocalModelId` 로 다시 조회하므로 override 가 최종 판단에서
+ * 유실되지는 않는다.
  */
-function localToolSupportFromId(id: string): "chat-only" | "tool-use" {
-  const lower = id.toLowerCase();
-  if (lower === "phi3:mini" || lower.startsWith("phi3:mini-")) return "chat-only";
-  const match = /(\d+(?:\.\d+)?)b\b/.exec(lower);
-  if (!match) return "chat-only";
-  const n = Number(match[1]);
-  if (!Number.isFinite(n)) return "chat-only";
-  return n >= 30 ? "tool-use" : "chat-only";
-}
 
 export function registerLocalOllamaModels(ids: readonly string[]): void {
   for (const rawId of ids) {
@@ -1191,16 +1198,17 @@ export function registerLocalOllamaModels(ids: readonly string[]): void {
     if (!id) continue;
     const key = norm(id);
     if (BY_ID.has(key)) continue; // 정적 행 우선 + 재등록 멱등
-    const toolSupport = localToolSupportFromId(id);
+    const toolSupport = resolveLocalToolSupport(id);
     const entry: ModelRegistryEntry = {
       id,
       harness: "claude",
       provider: "local",
       envProfile: LOCAL_OLLAMA_ENV_PROFILE,
       aliases: [],
-      // 30B 미만 chat-only 는 cheap, 대형 tool-use 는 mid — 라우팅이 중소형을
-      // "실작업 cheap 티어"로 오해하지 않게 규모를 반영한다.
-      capability: toolSupport === "tool-use" ? "mid" : "cheap",
+      // chat-only 는 cheap, 도구를 싣는 티어(lite 포함)는 mid — 라우팅이 대화
+      // 전용 모델을 "실작업 cheap 티어"로 오해하지 않게 한다. lite 를 mid 로 두는
+      // 이유: 주입량은 깎지만 티켓 한 건을 끝내는 실작업 경로 자체는 같다.
+      capability: isToolCapableToolSupport(toolSupport) ? "mid" : "cheap",
       efforts: [],
       // 로컬 추론은 API 과금이 없다 — 0 요율은 사실이지 미측정이 아니다.
       pricing: { inputPer1M: 0, outputPer1M: 0 },

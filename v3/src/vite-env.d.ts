@@ -1090,9 +1090,16 @@ interface LocalModelCard {
   downloadSizeMB: number;
   minRamGB: number;
   contextTokens: number;
-  /** 하네스 tool-use 적합성 — 7B 미만은 대화·테스트, 7B+ 는 에이전트 실작업. */
-  toolSupport: "chat-only" | "tool-use";
-  /** UI 배지 — "대화 전용" / "tool-use 지원". */
+  /**
+   * 하네스 tool-use 적합성 — 3티어. 판정 근거·임계는
+   * `electron/local-tool-tier.ts` 가 단일 소스다.
+   *   chat-only     툴 비주입(대화 전용)
+   *   tool-use-lite 도구는 주되 주입량을 깎는다(25B ≤ x < 30B)
+   *   tool-use      전체 주입(30B+)
+   */
+  toolSupport: "chat-only" | "tool-use-lite" | "tool-use";
+  /** UI 배지 문구. ★배지는 이 라벨을 쓰는 것이 안전하다 — toolSupport 를
+   *  `=== "tool-use"` 로 이분하면 lite 가 대화 전용으로 잘못 보인다. */
   toolSupportLabel: string;
   /** 이 기기 메모리(minRamGB ≤ totalMemGB)로 충분한가. */
   fits: boolean;

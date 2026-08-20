@@ -49,6 +49,44 @@ export const WORKER_CORE_MCP_TOOLS = [
 ] as const;
 
 /**
+ * 로컬 **경량(lite) tool-use** 모델(25B ≤ x < 30B) 전용 표면.
+ *
+ * ★왜 lite 가 full tool-use 보다 툴이 **한 개 더** 많은가 — 트레이드다.
+ * lite 프로파일은 역할 스킬 전문(수 KB)과 미션 프롬프트를 프리픽스에서 뺀다.
+ * 그러면 에이전트가 자기 티켓 본문을 읽을 통로가 사라지므로, 뺀 수 KB 대신
+ * `get_task` 스키마 한 개(~200B)를 넣어 필요할 때 끌어오게 한다. 프리픽스는
+ * 매 요청 재전송되지만 툴 호출은 필요한 턴에 한 번이다 — 방향이 맞다.
+ *
+ * ── 남긴 것과 근거 ──────────────────────────────────────────────────
+ *   get_task           티켓 본문 조회. 위 트레이드의 대상. 이게 없으면 lite
+ *                      에이전트는 "무엇을 하라는 건지" 물을 방법이 없다.
+ *   add_activity       진행/근거 기록. 오케가 워커를 보는 유일한 창이다.
+ *   update_task_status FAILED/BLOCKED 보고. 없으면 실패가 조용해진다.
+ *   submit_for_review  정상 완료 보고.
+ *   ask_orchestrator   막힘 경로. ★어떤 다이어트에서도 빼지 않는다 — 빼면
+ *                      워커가 막혔을 때 추측으로 진행한다(최악의 회귀).
+ *
+ * ── 뺀 것과 근거 ────────────────────────────────────────────────────
+ *   get_agent_skill                lite 는 짧은 역할 브리프를 프롬프트로 직접
+ *                                  받는다. 스킬 전문을 다시 끌어오면 이 티어의
+ *                                  존재 이유(주입량 감축)가 사라진다.
+ *   claim_task/get_available_tasks lite 는 dispatch 로 배정받은 한 건을 끝내는
+ *                                  티어다. 스스로 보드를 뒤져 고르지 않는다.
+ *   check_feedback/acknowledge_…   자율 루프의 폴링 단계. 위와 같은 이유.
+ *   search_tasks/get_task_deps/…   탐색 계열. 배정된 한 건에는 불필요.
+ *   역할 추가분(wiki·gmail 계열)   스키마가 크고 lite 의 한 턴 범위 밖이다.
+ * 뺀 툴이 실제로 필요하다고 판명되면 이 배열에 한 줄 추가면 된다 — 되돌리는
+ * 비용이 낮은 쪽으로 기본값을 잡았다.
+ */
+export const LOCAL_LITE_MCP_TOOLS = [
+  "get_task",
+  "add_activity",
+  "update_task_status",
+  "submit_for_review",
+  "ask_orchestrator",
+] as const;
+
+/**
  * 로컬 tool-use 모델(30B+) 전용 최소 표면.
  *
  * 이 프로파일은 역할 자율 루프를 온전히 수행시키려는 것이 아니라, 이미 배정된
@@ -157,6 +195,14 @@ export function resolveToolSurface(env: SurfaceEnv = process.env): ToolSurface {
       allowed: new Set<string>(LOCAL_TOOL_USE_MCP_TOOLS),
       role,
       reason: "override=local-light",
+    };
+  }
+  if (override === "local-lite") {
+    return {
+      mode: "scoped",
+      allowed: new Set<string>(LOCAL_LITE_MCP_TOOLS),
+      role,
+      reason: "override=local-lite",
     };
   }
   if (override === "scoped") {
