@@ -4,6 +4,7 @@ import OrchestratorPanel from "../orchestrator/OrchestratorPanel";
 import { VideoDemoModal } from "../onboarding/VideoDemoModal";
 import { FundingGuideHost } from "../onboarding/FundingGuideHost";
 import { OnrampGateHost } from "../onboarding/OnrampGateHost";
+import { FirstSpawnGuide } from "../onboarding/FirstSpawnGuide";
 import { useAppLifecycle } from "../../hooks/useAppLifecycle";
 import { useBeginnerAsk } from "../../hooks/useBeginnerAsk";
 import { useBeginnerDetail } from "../../hooks/useBeginnerDetail";
@@ -189,7 +190,7 @@ export function BeginnerShell() {
   // "팀원 끄기" 대상처럼 보이고, 터미널 모달도 워커용 경로로 엉뚱하게 열린다.
   const workerAgents = useMemo(
     () => agents.filter((a) => a.role !== "orchestrator"),
-    [agents],
+    [agents]
   );
   // 에이전트 터미널의 PTY 세션 원장. 어드밴스드 에이전트 탭이 읽는 것과 **같은**
   // 스토어다 — 비기너가 여는 터미널은 그 탭이 여는 것과 같은 세션이어야 한다.
@@ -202,11 +203,11 @@ export function BeginnerShell() {
   const entryReason = useBeginnerModeStore((s) => s.entryReason);
   const enteredReported = useBeginnerModeStore((s) => s.enteredReported);
   const markEnteredReported = useBeginnerModeStore(
-    (s) => s.markEnteredReported,
+    (s) => s.markEnteredReported
   );
   const firstCompletionAt = useBeginnerModeStore((s) => s.firstCompletionAt);
   const markFirstCompletion = useBeginnerModeStore(
-    (s) => s.markFirstCompletion,
+    (s) => s.markFirstCompletion
   );
   const promotionShownAt = useBeginnerModeStore((s) => s.promotionShownAt);
   const markPromotionShown = useBeginnerModeStore((s) => s.markPromotionShown);
@@ -248,7 +249,7 @@ export function BeginnerShell() {
   // display:none 이지 조건부 렌더가 아니다(xterm 의 ResizeObserver 는 폭이 0인
   // 동안 fit 을 건너뛰고, 되돌아오면 실제 치수로 한 번 맞춘다 — TerminalView).
   const [mountedTabs, setMountedTabs] = useState<Set<BeginnerTabId>>(
-    () => new Set<BeginnerTabId>([BEGINNER_CHAT_TAB]),
+    () => new Set<BeginnerTabId>([BEGINNER_CHAT_TAB])
   );
   useEffect(() => {
     setMountedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
@@ -315,7 +316,7 @@ export function BeginnerShell() {
 
   const completedTasks = useMemo(
     () => tasks.filter((task) => task.status === "DONE").length,
-    [tasks],
+    [tasks]
   );
 
   // 진입 계측 — 세션당 한 번. 사유는 스토어가 판정한다(최초판정/재시작/설정복귀):
@@ -347,7 +348,7 @@ export function BeginnerShell() {
         mergedTasks: 0,
         elapsedMs: enteredAt ? Date.now() - enteredAt : 0,
       },
-      !!promotionShownAt,
+      !!promotionShownAt
     );
     if (trigger) {
       setPromotion(trigger);
@@ -377,7 +378,7 @@ export function BeginnerShell() {
       setPromotion(null);
       promote(trigger);
     },
-    [previewEnabled, setPreviewEnabled, promote],
+    [previewEnabled, setPreviewEnabled, promote]
   );
 
   // 에이전트 터미널 모달의 헤더가 쓰는 담당 티켓. 세션 짝짓기 규칙은 어드밴스드
@@ -385,9 +386,9 @@ export function BeginnerShell() {
   const openAgentTask = useMemo(
     () =>
       openAgent?.currentTaskId
-        ? (tasks.find((x) => x.id === openAgent.currentTaskId) ?? null)
+        ? tasks.find((x) => x.id === openAgent.currentTaskId) ?? null
         : null,
-    [openAgent, tasks],
+    [openAgent, tasks]
   );
   // 이름 매칭이 1순위(어드밴스드 목록과 동일). 맵에만 있고 라벨이 아직 안
   // 잡힌 국면은 getSessionIdForAgent 로 폴백 — 원장에 그 id 가 있을 때만.
@@ -409,7 +410,7 @@ export function BeginnerShell() {
       const target = agents.find((a) => a.id === agentId);
       if (target) openAgentTerminal(target);
     },
-    [agents, openAgentTerminal],
+    [agents, openAgentTerminal]
   );
 
   // ★심플 모드에서 팀원 끄기 — 어드밴스드 에이전트 목록(AgentListPanel)의
@@ -429,7 +430,7 @@ export function BeginnerShell() {
         });
       }
     },
-    [closeTerminalSession, deleteAgent, terminalSessions],
+    [closeTerminalSession, deleteAgent, terminalSessions]
   );
 
   // 스스로 뜨는 온보딩 안내(M1 온램프 · M2 자금)를 지금 그려도 되는가 — 규칙은
@@ -508,8 +509,8 @@ export function BeginnerShell() {
               setup.preview
                 ? t("beginner.preview.folderLocked")
                 : hasFolder
-                  ? t("beginner.topbar.changeFolder")
-                  : t("beginner.topbar.openFolder")
+                ? t("beginner.topbar.changeFolder")
+                : t("beginner.topbar.openFolder")
             }
             className="inline-flex h-7 min-w-0 max-w-[22rem] items-center gap-1.5 rounded-md border border-transparent px-2 text-xs text-[#a6adc8] transition-colors hover:border-[#313244] hover:bg-[#313244]/60 hover:text-[#cdd6f4] disabled:cursor-not-allowed disabled:hover:border-transparent disabled:hover:bg-transparent"
           >
@@ -607,14 +608,14 @@ export function BeginnerShell() {
                         {t(
                           sampleStatus === "preparing"
                             ? "beginner.folder.preparingTitle"
-                            : "beginner.folder.title",
+                            : "beginner.folder.title"
                         )}
                       </h1>
                       <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-[#7f849c]">
                         {t(
                           sampleStatus === "preparing"
                             ? "beginner.folder.preparingBody"
-                            : "beginner.folder.body",
+                            : "beginner.folder.body"
                         )}
                       </p>
                       {sampleStatus === "preparing" ? (
@@ -677,15 +678,28 @@ export function BeginnerShell() {
                           </span>
                         </div>
                         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                          {/* 첫 스폰 가이드 — 오케 터미널 바로 위의 인라인 패널
+                            (티켓 YYD71y0KU8cNhIFI5YSu). "그래서 이제 뭘 쳐야
+                            하지" 가 막히는 지점이 바로 이 터미널이라, 안내도
+                            같은 화면·같은 컬럼에 둔다(오버레이 금지). */}
+                          <div className="shrink-0 px-3 pt-2">
+                            <FirstSpawnGuide />
+                          </div>
                           {/* ★effort·버전 배지·세션 선택은 계속 감춘다(고급 손잡이).
                             모델만은 예외다(cmp95TVin) — showConnectedModelPicker 가
-                            설치+인증된 하네스로만 목록을 좁힌다. */}
-                          <OrchestratorPanel
-                            fill
-                            hideModelControls
-                            showConnectedModelPicker
-                            onUserSubmit={ask.markTerminalSubmit}
-                          />
+                            설치+인증된 하네스로만 목록을 좁힌다.
+                            ★`min-h-0 flex-1` 래퍼가 필요하다 — OrchestratorPanel
+                            의 fill 모드는 `h-full`(부모 100%)로 재는데, 위에
+                            가이드 패널이 형제로 추가된 지금은 flex 가 남는
+                            공간을 계산해 줘야 그 100%가 올바른 높이가 된다. */}
+                          <div className="min-h-0 flex-1">
+                            <OrchestratorPanel
+                              fill
+                              hideModelControls
+                              showConnectedModelPicker
+                              onUserSubmit={ask.markTerminalSubmit}
+                            />
+                          </div>
                         </div>
                       </section>
 
@@ -823,10 +837,7 @@ export function BeginnerShell() {
       )}
 
       {showDemo && (
-        <VideoDemoModal
-          surface="beginner_connect"
-          onClose={closeDemo}
-        />
+        <VideoDemoModal surface="beginner_connect" onClose={closeDemo} />
       )}
 
       {/* ★동의 게이트 — 심플 모드에도 있어야 한다(ticket QFNrT4Z4dG9nGoRYmTlr).

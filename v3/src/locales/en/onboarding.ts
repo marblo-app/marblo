@@ -762,4 +762,32 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onramp.block.close": "Close",
   "onramp.block.reason.limit": "You've hit the demo split limit.",
   "onramp.block.reason.run": "Running requires a connected account.",
+
+  // — First-spawn guide — an inline panel right above the orchestrator
+  // terminal, collapsible not dismissible (ticket YYD71y0KU8cNhIFI5YSu). It
+  // stays on the same screen once connect + folder are done, since an
+  // overlay would hide the very window it's telling you what to type into.
+  // Every command here is one of the 18 bundled slash commands
+  // (SlashCommandPopup.SLASH_COMMANDS) — nothing unbundled.
+  "onboarding.firstSpawn.title": "So what do you tell the orchestrator?",
+  "onboarding.firstSpawn.small.badge": "Small task",
+  "onboarding.firstSpawn.small.desc":
+    "Open one ticket and spawn an agent for it.",
+  "onboarding.firstSpawn.small.step1": "Open a ticket",
+  "onboarding.firstSpawn.small.step2": "Spawn agents",
+  "onboarding.firstSpawn.big.badge": "Big task",
+  "onboarding.firstSpawn.big.desc":
+    "Write a PRD, then create tasks and spawn agents in one shot.",
+  "onboarding.firstSpawn.big.step1": "Write a PRD",
+  // ★/tf-start creates tasks AND spawns agents in one shot — don't split it
+  // into "create tasks, then spawn" (the orchestrator's own line: Create
+  // tasks from the PRD and spawn agents).
+  "onboarding.firstSpawn.big.step2": "Create tasks + spawn agents",
+  "onboarding.firstSpawn.allCommands":
+    "See the full list in the left command menu.",
+  "onboarding.firstSpawn.guideHint": "Not sure what to type?",
+  "onboarding.firstSpawn.send": "Send",
+  "onboarding.firstSpawn.sent": "Sent",
+  "onboarding.firstSpawn.collapse": "Collapse",
+  "onboarding.firstSpawn.expand": "Expand",
 };

@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import OrchestratorPanel from "../orchestrator/OrchestratorPanel";
 import { AgentListPanel } from "../agents/list-panel/AgentListPanel";
+import { FirstSpawnGuide } from "../onboarding/FirstSpawnGuide";
 import { t } from "../../lib/i18n";
 import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { verticalRatioFromPointer } from "../../lib/splitWorkspaceLayout";
@@ -46,7 +47,7 @@ export function TerminalColumn({
       const move = (ev: MouseEvent) => {
         const rect = el.getBoundingClientRect();
         setVerticalRatio(
-          verticalRatioFromPointer(ev.clientY, rect.top, rect.height),
+          verticalRatioFromPointer(ev.clientY, rect.top, rect.height)
         );
       };
       const up = () => {
@@ -58,7 +59,7 @@ export function TerminalColumn({
       window.addEventListener("mousemove", move);
       window.addEventListener("mouseup", up);
     },
-    [setVerticalRatio],
+    [setVerticalRatio]
   );
 
   if (collapsed) {
@@ -122,6 +123,14 @@ export function TerminalColumn({
             />
           </svg>
         </button>
+      </div>
+
+      {/* First-spawn guide — pinned above the split so it never eats into the
+          draggable orchestrator/agents ratio below. Collapsible, not
+          dismissible (ticket YYD71y0KU8cNhIFI5YSu) — same panel as the
+          beginner shell, right above the same orchestrator terminal. */}
+      <div className="shrink-0 px-2 pt-2">
+        <FirstSpawnGuide />
       </div>
 
       {/* Vertical split: orchestrator (top) · draggable divider · agents
