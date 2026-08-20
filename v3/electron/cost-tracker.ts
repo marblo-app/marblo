@@ -1155,7 +1155,7 @@ export class CostTracker {
         (format === "codex"
           ? "gpt-5.5"
           : format === "grok"
-            ? "grok-4.5"
+            ? "grok-4.6"
             : "gemini-2.5-pro"),
       totalCostUsd: 0,
       timer: setInterval(

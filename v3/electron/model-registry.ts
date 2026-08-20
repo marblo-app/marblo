@@ -366,13 +366,28 @@ const DEEPSEEK_PROBE: ModelVerification = {
     "peak pricing flash $0.44/$1.32, pro $1.32/$3.96 per 1M tokens",
 };
 
-/** Grok Build — xAI 공식 문서/오픈소스 README 확인. 브라우저 인증형 TUI. */
+/**
+ * Grok Build — **라이브 CLI 실측**.
+ *
+ * 2026-08-20 에 로그인된 `grok` 1.0.5 에서 `grok models` 를 직접 돌려 받은 목록이
+ * 이 두 행의 근거다(종전엔 공식 문서/README 대조뿐이었다):
+ *
+ *   $ grok models
+ *   Default model: grok-4.6
+ *   Available models:
+ *     * grok-4.6 (default)
+ *     - grok-4.5
+ *
+ * 즉 **서빙 목록 자체**를 CLI 가 불러 준다 — claude 처럼 무효 id 를 때려 보고
+ * 구분할 필요가 없다. 단가·컨텍스트는 같은 날 docs.x.ai/developers/models 카드로
+ * 대조했다(두 모델 모두 500k / $2.00 / $6.00 — 세대가 올라도 단가축이 안 움직였다).
+ */
 const GROK_BUILD_PROBE: ModelVerification = {
-  at: "2026-07-26",
-  cli: "n/a (grok Build 공식 문서/README 확인 — 라이브 브라우저 인증 대기)",
+  at: "2026-08-20",
+  cli: "1.0.5",
   method:
-    "docs.x.ai/build/overview + github.com/xai-org/grok-build README: " +
-    "`grok` CLI, first launch browser auth, `grok -p`, `grok -p ... -m grok-4.5`",
+    "`grok models` (로그인 상태) → 서빙 목록 실측: grok-4.6(default) / grok-4.5. " +
+    "단가·컨텍스트는 docs.x.ai/developers/models 카드 대조(500k, $2.00/$6.00)",
 };
 
 /** 5.6 계열 effort 축(max/ultra 까지). */
@@ -551,11 +566,39 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   },
 
   // ── Grok Build (xAI native harness) ───────────────────────────────────
+  //
+  // ★두 행의 순서가 곧 "신형이 위" 다(같은 등급 안에서는 등재 순서가 보존된다 —
+  // `modelsByHarness` 는 안정정렬이고 셀렉터·사다리가 그 순서를 그대로 읽는다).
+  //
+  // ★effort 축은 **일부러 비워 둔다**. docs.x.ai 는 grok-4.6 을 "Reasoning:
+  // Configurable" 로 적고 `grok --help` 에도 `--reasoning-effort` 가 있지만,
+  // `agent-config.buildCLICommand` 의 grok 분기는 그 플래그를 argv 에 붙이지
+  // 않는다. 지금 여기에 effort 를 적으면 셀렉터에 "골랐는데 CLI 엔 안 붙는" 둘째
+  // 드롭다운이 서게 된다 — grok 오케가 이미 한 번 겪은 실패모드(#638/#639)다.
+  // argv 배선이 생기는 날 이 배열이 열린다.
+  {
+    id: "grok-4.6",
+    harness: "grok",
+    provider: "xai",
+    // ★alias `grok` 은 **4.5 에서 여기로 옮겨왔다**. `grok models` 가 4.6 을
+    // default 로 찍고, docs.x.ai 의 alias 규칙이 "`<modelname>` is aliased to the
+    // latest stable version" 이라고 명문화한다. alias 는 이동표적이라는 이 파일
+    // 상단 규율의 실례 — 그래서 핀에는 alias 가 아니라 이 id 를 쓴다.
+    aliases: ["grok"],
+    capability: "top",
+    efforts: [],
+    // grok-4.5 와 **동일** 단가($2/$6, 500k). 세대가 올라도 과금축이 안 움직였다.
+    // estimated 인 사유는 4.5 와 같다(아래 주석).
+    pricing: { inputPer1M: 2, outputPer1M: 6, estimated: true },
+    verified: GROK_BUILD_PROBE,
+    status: "active",
+  },
   {
     id: "grok-4.5",
     harness: "grok",
     provider: "xai",
-    aliases: ["grok"],
+    // alias 없음 — `grok` 은 위 4.6 으로 해석된다(2026-08-20 `grok models` 실측).
+    aliases: [],
     capability: "top",
     efforts: [],
     // API list 단가. Grok Build 의 현재 무료 프로모/구독 경로와는 과금축이

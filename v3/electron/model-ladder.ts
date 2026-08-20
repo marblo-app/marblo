@@ -478,8 +478,14 @@ const GPT_RUNGS: LadderRung[] = [
 ];
 
 /**
- * grok(Grok Build) 사다리 — 오늘 레지스트리에 grok 하네스 행이 **하나**뿐이라 칸도
- * 하나다. 칸이 하나면 고를 것이 없는데 왜 사다리를 만드는가:
+ * grok(Grok Build) 사다리 — 레지스트리에 grok 행이 둘(4.6/4.5)이 됐지만 칸은
+ * 여전히 **하나**(grok-4.6)다. 4.5 는 `LADDER_EXCLUSIONS` 로 내렸다. 사유는
+ * 그 표의 항목에 적어 뒀다 — 요약하면 단가·컨텍스트·능력등급이 4.6 과 **완전히
+ * 동일**해서(둘 다 500k/$2/$6/top) 자동선택이 4.5 를 고를 근거가 존재하지 않고,
+ * 같은 값의 칸을 둘 두면 사다리 순서가 무의미해지기 때문이다(claude-opus-4-8 을
+ * 내린 것과 같은 원칙). 4.5 는 명시 핀(`grok:grok-4.5`)으로 계속 닿는다.
+ *
+ * 칸이 하나면 고를 것이 없는데 왜 사다리를 만드는가:
  *
  * 사다리가 없으면 `selectAutoModel` 이 `null` 을 돌려주고(=계획 없음),
  * `bridge-server.graphKeysFor` 는 그때 `predictedModelKey` 로 떨어진다. 그런데 그
@@ -492,19 +498,19 @@ const GPT_RUNGS: LadderRung[] = [
  * 레지스트리·단가표 어디에도 없는 유령 셀이다.
  *
  * 칸이 하나이므로 **스폰 argv 는 한 바이트도 바뀌지 않는다**: 자동선택이
- * `grok-4.5` 를 고르면 `nativeModel` 핀이 되어 `-m grok-4.5` 가 붙는데, 그것은
+ * `grok-4.6` 을 고르면 `nativeModel` 핀이 되어 `-m grok-4.6` 이 붙는데, 그것은
  * `buildCLICommand` 의 grok 분기가 핀 없이도 넣던 기본값(`GROK_DEFAULT_MODEL`)과
  * 같은 값이다. 바뀌는 것은 그래프 셀 키뿐이다.
  *
- * ★난도 3티어가 같은 칸을 가리키는 것도 사실 그대로다 — Grok Build 는 우리가 argv 로
- * 고를 수 있는 다른 모델을 아직 레지스트리에 갖고 있지 않다. 변종(grok-code-fast 등)이
+ * ★난도 3티어가 같은 칸을 가리키는 것도 사실 그대로다 — 4.5 는 4.6 과 값이 같아
+ * 티어를 가를 축이 되지 못한다. 변종(grok-code-fast 등)이나 세대가 갈리는 단가가
  * CLI-verified 로 등록되면 그때 칸이 늘고 티어 진입점이 갈린다.
  */
 const GROK_RUNGS: LadderRung[] = [
   {
-    model: "grok-4.5",
+    model: "grok-4.6",
     harness: "grok",
-    why: "오늘 grok 하네스의 유일한 CLI-verified 행(top 등급). 핀 값이 buildCLICommand 의 기본 -m 값과 같아 argv 무변경이고, 사다리가 있어야 라우팅 그래프의 읽는 셀이 실제 스폰 키(grok-4.5)와 일치한다.",
+    why: "grok 하네스의 최신 CLI-verified 행이자 `grok models` 가 찍는 default(top 등급). 4.5 와 단가·컨텍스트가 같아 아래 칸을 둘 이유가 없다. 핀 값이 buildCLICommand 의 기본 -m 값과 같아 argv 무변경이고, 사다리가 있어야 라우팅 그래프의 읽는 셀이 실제 스폰 키(grok-4.6)와 일치한다.",
   },
 ];
 
@@ -527,6 +533,8 @@ export const LADDER_EXCLUSIONS: Readonly<Record<string, string>> = {
     "단가가 추정치(pricing.estimated) 다. 추정 단가로 순서를 정하면 '실단가 기반 사다리' 라는 이 파일의 전제가 깨진다 — db3qs0o6 서베이가 실단가를 확정하면 편입 검토.",
   "gpt-5.4-mini":
     "cheap 등급 최저단가($0.75/$4.5)지만 코딩 에이전트로서의 적합성이 한 번도 측정되지 않았다. 진입점으로 쓰면 simple 티켓 실패율이 오를 수 있고, 그 판정은 P2-4 효과집계의 몫이다.",
+  "grok-4.5":
+    "grok-4.6 과 능력등급·단가·컨텍스트가 **완전히 동일**하다(top / $2·$6 / 500k, 2026-08-20 docs.x.ai 카드 실측). 같은 값의 칸을 둘 만들면 사다리 순서가 무의미해진다(claude-opus-4-8 과 같은 사유). 자동선택은 항상 신형인 4.6 을 쓰고, 4.5 는 명시 핀 `grok:grok-4.5` / dispatch_task(model=\"grok-4.5\") 로 계속 닿는다.",
   // ── ★env-swap 벤더(GLM/MiniMax/Kimi) — 이 티켓(hyKsSYYM, 사장님 A안)으로
   // 위 CLAUDE_RUNGS 에 편입됐다. "명시 지정 전용" 배제는 여기서 끝났다:
   // glm-5.2·glm-4.7·MiniMax-M3·MiniMax-M2.7·k3·k3-256k·kimi-for-coding 은

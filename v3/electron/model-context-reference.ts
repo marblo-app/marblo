@@ -163,6 +163,13 @@ const RECORDS: ContextWindowRecord[] = [
 
   // ── xAI ───────────────────────────────────────────────────────────────
   {
+    model: "grok-4.6",
+    tokens: 500_000,
+    source: SRC.xaiModels,
+    asOf: "2026-08-20",
+    note: '공식 모델 페이지의 grok-4.6 카드가 "Context 500k tokens / Input $2.00 / Output $6.00" 으로 적는다 — 4.5 와 창·단가가 **동일**하다(세대가 올라도 과금축이 안 움직였다). 같은 날 `grok models`(CLI 1.0.5)가 이 id 를 default 로 찍는다.',
+  },
+  {
     model: "grok-4.5",
     tokens: 500_000,
     source: SRC.xaiModels,

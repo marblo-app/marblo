@@ -201,8 +201,8 @@ describe("byomOptions — 목록", () => {
       kind: "nativeCli",
       status: "needsLogin",
       requiredEnvKeys: [],
-      modelIds: ["grok-4.5"],
-      exampleModelId: "grok-4.5",
+      modelIds: ["grok-4.6", "grok-4.5"],
+      exampleModelId: "grok-4.6",
       cliRowId: "cli-grok",
     });
     // 라이브 목록(=셀렉터가 실제로 세우는 칸)엔 grok 이 있다.
@@ -215,11 +215,20 @@ describe("byomOptions — 목록", () => {
     });
     // 반대 방향도 그대로 산다: 셀렉터가 그 칸을 안 세우면 후보가 아니다
     // (파생이지 리터럴이 아님을 증명하는 축).
+    // ★grok 은 맨몸 칸 + 모델 핀 칸(grok:grok-4.6/4.5)을 함께 갖는다. 어느 하나만
+    // 지우면 나머지가 여전히 후보 자격을 준다 — 그것도 파생이라는 증거다. 그래서
+    // 이 방향을 증명하려면 grok 계열 칸을 **통째로** 내려야 한다.
     const closed = byomOptions(
+      [grok],
+      OPTION_VALUES.filter((v) => v !== "grok" && !v.startsWith("grok:"))
+    )[0];
+    expect(closed.canHostOrchestrator).toBe(false);
+    // 맨몸 칸만 내리면? 모델 핀 칸이 남아 있으므로 여전히 오케 후보다.
+    const pinnedOnly = byomOptions(
       [grok],
       OPTION_VALUES.filter((v) => v !== "grok")
     )[0];
-    expect(closed.canHostOrchestrator).toBe(false);
+    expect(pinnedOnly.canHostOrchestrator).toBe(true);
   });
 
   it("env-swap 벤더는 하네스 이름이 같다는 이유로 오케 후보가 되지 않는다", () => {

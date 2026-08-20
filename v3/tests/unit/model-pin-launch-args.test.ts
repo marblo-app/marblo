@@ -195,12 +195,24 @@ describe("grok — 지정 모델이 -m 으로 나간다", () => {
     expect(args[args.indexOf("-m") + 1]).toBe("grok-4.5");
   });
 
-  it("핀 없음 → 기본 grok-4.5", () => {
+  it("핀 없음 → 기본 grok-4.6(= `grok models` 의 default)", () => {
+    // ★맨몸 grok 칸("Grok (CLI default)")이 실제로 무엇으로 뜨는지를 못박는 줄이다.
+    // 우리는 핀을 안 붙이는 게 아니라 `GROK_DEFAULT_MODEL` 을 명시적으로 붙인다
+    // (그래야 cost_logs·라우팅 그래프가 어느 모델이 돌았는지 안다). 대가로 이
+    // 상수가 CLI default 와 벌어지면 그 라벨이 거짓말이 되므로, 이 줄이 어긋남의
+    // 트립와이어다 — 2026-08-20 `grok models` 실측: Default model: grok-4.6.
     const args = launchArgs("grok");
-    expect(args[args.indexOf("-m") + 1]).toBe("grok-4.5");
+    expect(args[args.indexOf("-m") + 1]).toBe("grok-4.6");
   });
 
-  it("nativeModel 핀이 기본 grok-4.5 를 덮는다", () => {
+  it("model='grok-4.6' → -m grok-4.6", () => {
+    const pin = resolveModelPin("grok-4.6", CLI_OK);
+    expect(pin?.nativeModel).toBe("grok-4.6");
+    const args = launchArgs("grok", pin);
+    expect(args[args.indexOf("-m") + 1]).toBe("grok-4.6");
+  });
+
+  it("nativeModel 핀이 기본값을 덮는다", () => {
     const args = launchArgs("grok", { nativeModel: "grok-code-fast-1" });
     expect(args[args.indexOf("-m") + 1]).toBe("grok-code-fast-1");
   });
@@ -440,6 +452,12 @@ describe("오케 셀렉터 값 → grok launch 인자", () => {
     const i = args.indexOf("-m");
     return i >= 0 ? args[i + 1] : undefined;
   };
+
+  it("★완료기준: 'grok:grok-4.6' 가 -m 까지 살아서 도달한다", () => {
+    const pin = orchestratorLaunchPin("grok:grok-4.6", CLI_OK);
+    expect(pin.nativeModel).toBe("grok-4.6");
+    expect(modelArg(launchArgs("grok", pin))).toBe("grok-4.6");
+  });
 
   it("★완료기준: 'grok:grok-4.5' 가 -m 까지 살아서 도달한다", () => {
     const pin = orchestratorLaunchPin("grok:grok-4.5", CLI_OK);

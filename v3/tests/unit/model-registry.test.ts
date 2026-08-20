@@ -151,13 +151,38 @@ describe("model-registry", () => {
     });
 
     it("Grok Build 모델은 native grok 하네스로 등록된다", () => {
-      expect(getModel("grok-4.5")).toMatchObject({
-        id: "grok-4.5",
-        harness: "grok",
-        provider: "xai",
-        status: "active",
-      });
-      expect(modelsByHarness("grok").map((m) => m.id)).toEqual(["grok-4.5"]);
+      for (const id of ["grok-4.6", "grok-4.5"]) {
+        expect(getModel(id), id).toMatchObject({
+          id,
+          harness: "grok",
+          provider: "xai",
+          status: "active",
+        });
+      }
+      // 순서 = 신형이 위. 같은 등급(top) 안에서는 등재 순서가 보존되고,
+      // 셀렉터·사다리가 그 순서를 그대로 읽는다.
+      expect(modelsByHarness("grok").map((m) => m.id)).toEqual([
+        "grok-4.6",
+        "grok-4.5",
+      ]);
+    });
+
+    it("★alias `grok` 은 최신 세대(4.6)를 가리킨다 — alias 는 이동표적", () => {
+      // 2026-08-20 `grok models` 실측: Default model: grok-4.6.
+      // docs.x.ai 도 "`<modelname>` is aliased to the latest stable version" 로
+      // 명문화한다. 그래서 alias 는 4.5 에서 4.6 으로 **옮겨왔다** — 이 파일 상단
+      // "핀에는 alias 가 아니라 구체 id 를 쓴다" 규율의 실례다.
+      expect(getModel("grok")?.id).toBe("grok-4.6");
+      expect(getModel("grok-4.5")?.aliases).toEqual([]);
+    });
+
+    it("★grok 행은 effort 축을 열지 않는다 — argv 에 안 붙기 때문", () => {
+      // `agent-config.buildCLICommand` 의 grok 분기가 `--reasoning-effort` 를
+      // 붙이지 않는다. 배선 없이 레지스트리만 열면 셀렉터에 "골랐는데 안 먹는"
+      // 칸이 선다.
+      for (const id of ["grok-4.6", "grok-4.5"]) {
+        expect(getModel(id)?.efforts, id).toEqual([]);
+      }
     });
   });
 });
@@ -300,12 +325,15 @@ describe("MODEL_PRICING 실단가 (P1-3)", () => {
     // MiniMax-* — 같은 사유(정액 Token Plan). 게다가 M3 는 문서 단가 자체가
     //            "Permanent 50% off" 가 붙은 값이라, 우리는 **할인 전 리스트**를
     //            상한으로 적는다(할인은 벤더가 언제든 거둔다).
-    // grok-4.5 — Grok Build 무료 프로모/구독 경로와 API 리스트 단가 축이 다르다.
+    // grok-4.6 / grok-4.5 — Grok Build 무료 프로모/구독 경로와 API 리스트 단가 축이
+    //            다르다. 두 세대의 카드 단가는 $2.00/$6.00 으로 **동일**하다
+    //            (2026-08-20 docs.x.ai/developers/models 실측).
     // k3 / k3-256k / kimi-for-coding — 같은 사유(정액 Kimi 멤버십). 단가는 Kimi
     //            **Platform**(pay-go) 가격표의 cache-miss 값을 상한으로 옮겨 적은
     //            것이고, 우리가 실제로 태우는 것은 구독 쿼터다. k3-256k 는 가격표에
     //            별 행이 없어 k3 값을 그대로 상한으로 쓴다(과소보고 회피).
     expect(estimatedPricingModelIds()).toEqual([
+      "grok-4.6",
       "grok-4.5",
       "glm-5.2",
       "glm-4.7",

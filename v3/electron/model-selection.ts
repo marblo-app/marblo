@@ -645,14 +645,23 @@ export function normalizeOrchestratorModelSetting(value: unknown): string {
 
   if (
     (provider === "claude" && pinHarness === "claude") ||
-    (provider === "codex" && pinHarness === "gpt")
+    (provider === "codex" && pinHarness === "gpt") ||
+    // ★grok 축이 여기 합류한 이유(2026-08-20): `orchestratorLaunchPin` 은 이미
+    // grok 분기(`nativeModel` → `nativeModelOverride` → buildCLICommand 의 `-m`)를
+    // 갖고 있고 main.ts 의 오케 launch 두 자리가 그 값을 그대로 넘긴다. 아래 분기의
+    // 근거였던 "핀 축이 claude/codex 뿐" 은 그 분기가 들어온 날부터 사실이 아니었고,
+    // 그 동안 `grok:grok-4.5` 는 **저장 직전에** 접미가 잘려 UI 에서 닿을 수 없었다.
+    // 즉 이건 새 축을 파는 변경이 아니라 **낡은 가드를 걷는** 변경이다.
+    (provider === "grok" && pinHarness === "grok")
   ) {
     return orchestratorModelValue(provider, modelId, effort);
   }
 
-  // grok/antigravity 는 하네스로는 뜨지만 **모델 핀 축이 launch 옵션에 아직 없다**
-  // (`orchestratorLaunchPin` 은 claude/codex 두 축만 만든다). 접미를 살려두면
-  // 저장값엔 남는데 CLI 엔 안 붙어 "골랐는데 안 먹는" 상태가 되므로 여기서 버린다.
+  // antigravity 는 하네스로는 뜨지만 **모델 핀 축이 launch 옵션에 아직 없다**
+  // (`orchestratorLaunchPin` 이 그 축을 만들지 않는다). 접미를 살려두면 저장값엔
+  // 남는데 CLI 엔 안 붙어 "골랐는데 안 먹는" 상태가 되므로 여기서 버린다.
+  // (레지스트리에 antigravity 행이 아직 없어 셀렉터도 그 칸을 세우지 않지만,
+  //  env·손편집·옛 저장값은 이 문을 지난다.)
   if (pinHarness && pinHarness === provider) {
     console.warn(
       `[model-selection] "${provider}" 오케는 모델 핀 축이 없어 접미 "${modelId}" 를 버립니다(프로바이더 기본 모델로 뜬다)`,
@@ -778,6 +787,26 @@ export function codexOrchestratorChoices(): OrchestratorModelChoice[] {
 }
 
 /**
+ * 셀렉터에 넣을 Grok(Grok Build) 변형 목록 — claude/codex 와 **같은 경로**.
+ *
+ * ★이 함수가 없던 동안 grok 은 "맨몸 칸 하나" 였고, 어떤 모델로 뜨는지는
+ * `agent-config.GROK_DEFAULT_MODEL` 상수만 알았다. 그 상수는 세대가 올라도 사람이
+ * 안 고치면 조용히 낡는다 — 실제로 `grok models` 의 default 가 grok-4.6 으로
+ * 바뀐 뒤에도 우리는 계속 `-m grok-4.5` 를 붙이고 있었다.
+ *
+ * 라벨은 codex 와 같은 규칙으로 **레지스트리 실명 그대로**다(`Grok (grok-4.6)`).
+ * xAI 는 4.5/4.6 처럼 소수점 세대를 촘촘히 올려서, 예쁘게 접으면 화면과 argv 가
+ * 어긋나도 눈에 안 띈다.
+ *
+ * effort 둘째 드롭다운은 서지 않는다 — 레지스트리 grok 행의 `efforts` 가 빈
+ * 배열이고(그 이유는 model-registry.ts 의 grok 블록 주석), `selectableEfforts`
+ * 가 그것을 그대로 옮긴다.
+ */
+export function grokOrchestratorChoices(): OrchestratorModelChoice[] {
+  return orchestratorChoicesFor("grok", "grok", (entry) => entry.id);
+}
+
+/**
  * 하네스 하나의 셀렉터 칸들. 두 하네스가 같은 정렬·같은 값 포맷을 쓰도록
  * 한 곳에 둔다(#601 이 claude 에만 깔아둔 규칙을 codex 가 복제하지 않게).
  *
@@ -790,12 +819,12 @@ export function codexOrchestratorChoices(): OrchestratorModelChoice[] {
  * 통째로 뒤집으면 그 동률 순서까지 뒤집혀 `top` 등급의 Opus 5 밑에 Opus 4.8 이 아니라
  * 위에 오게 된다. 등급만 뒤집고 동률 순서는 보존해야 "신형이 위" 가 성립한다.
  *
- * @param harness    레지스트리 하네스 축("claude" | "gpt")
+ * @param harness    레지스트리 하네스 축("claude" | "gpt" | "grok")
  * @param valuePrefix compound 값·라벨에 쓸 UI 이름. gpt 는 UI 에서
  *                    "codex" 다(메모리: Codex==gpt, 내부 model id 는 "gpt").
  */
 function orchestratorChoicesFor(
-  harness: "claude" | "gpt",
+  harness: "claude" | "gpt" | "grok",
   valuePrefix: string,
   humanize: (entry: ModelRegistryEntry) => string,
 ): OrchestratorModelChoice[] {
