@@ -607,6 +607,26 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.local.guideToolUse":
     "Under 7B is chat-only (smoke/test). For Marblo agent/orchestrator work (MCP tool-use), use a 7B+ coder (e.g. qwen2.5-coder:7b). Injecting tools into tiny models makes them mimic tool-call JSON and answer nonsense.",
   "harness.store.local.badgeChatOnly": "Chat only",
+  "harness.store.local.badgeToolUseLite": "Tool-use (lite)",
+  "harness.store.local.toolUseLiteHint":
+    "Spawns with a reduced-injection profile that still carries tools (25-30B): minimal MCP surface, short role brief, compact completion protocol.",
+  "harness.store.local.installedHintToolUseLite":
+    "Pick this under Add agent → Local Model to use tools with the lite injection profile.",
+  "harness.store.local.paramSize": "Parameters",
+  "harness.store.local.paramUnknown": "Size unknown",
+  "harness.store.local.huggingFace": "HuggingFace",
+  "harness.store.local.huggingFaceAria":
+    "Open the source model page for {name} on HuggingFace",
+  "harness.store.local.memoryTierTitle.8": "Runs in 8GB or less",
+  "harness.store.local.memoryTierTitle.16": "16GB class",
+  "harness.store.local.memoryTierTitle.32": "32GB class",
+  "harness.store.local.memoryTierTitle.48plus": "48GB and up (tool-use range)",
+  "harness.store.local.memoryTierRunnable": "Runs on this machine",
+  "harness.store.local.memoryTierTooBig": "Not enough memory on this machine",
+  "harness.store.local.memoryTierCount": "{count}",
+  "harness.store.local.outsideCatalogTitle": "Installed outside the catalog",
+  "harness.store.local.outsideCatalogNote":
+    "Models installed on this machine that are not in the curated list (pulled directly with `ollama pull`, or delisted from curation). They remain selectable under Add agent.",
   "harness.store.local.badgeToolUse": "Tool-use ready",
   "harness.store.local.chatOnlyHint":
     "For testing and chat. Use a 7B+ coder for real agent work.",

@@ -603,6 +603,27 @@ export const harness = {
   "harness.store.local.guideToolUse":
     "7B 미만은 「대화 전용」(테스트·스모크)입니다. Marblo 에이전트/오케 실작업(MCP tool-use)은 7B+ coder(예: qwen2.5-coder:7b)를 쓰세요. 소형에 툴을 주입하면 JSON 흉내·엉뚱한 답이 납니다.",
   "harness.store.local.badgeChatOnly": "대화 전용",
+  "harness.store.local.badgeToolUseLite": "tool-use 지원(경량)",
+  "harness.store.local.toolUseLiteHint":
+    "도구는 쓰되 주입량을 깎은 경량 프로파일로 스폰됩니다(25~30B). MCP 표면 최소 + 역할 브리프 + 완료규약 compact.",
+  "harness.store.local.installedHintToolUseLite":
+    "에이전트 추가 → Local Model 에서 선택하면 경량 주입 프로파일로 도구를 쓸 수 있습니다.",
+  "harness.store.local.paramSize": "파라미터",
+  "harness.store.local.paramUnknown": "파라미터 미상",
+  "harness.store.local.huggingFace": "HuggingFace",
+  "harness.store.local.huggingFaceAria":
+    "{name} 모델 원본 페이지(HuggingFace) 열기",
+  "harness.store.local.memoryTierTitle.8": "8GB 이하로 도는 모델",
+  "harness.store.local.memoryTierTitle.16": "16GB 급",
+  "harness.store.local.memoryTierTitle.32": "32GB 급",
+  "harness.store.local.memoryTierTitle.48plus":
+    "48GB 이상 (도구 사용 가능 구간)",
+  "harness.store.local.memoryTierRunnable": "내 기기에서 실행 가능",
+  "harness.store.local.memoryTierTooBig": "내 기기 메모리로는 부족",
+  "harness.store.local.memoryTierCount": "{count}개",
+  "harness.store.local.outsideCatalogTitle": "카탈로그 외 설치됨",
+  "harness.store.local.outsideCatalogNote":
+    "큐레이션 목록에는 없지만 이 기기에 설치되어 있는 모델입니다(직접 `ollama pull` 했거나, 큐레이션에서 내려간 모델). 에이전트 추가에서는 그대로 선택할 수 있습니다.",
   "harness.store.local.badgeToolUse": "tool-use 지원",
   "harness.store.local.chatOnlyHint":
     "테스트·대화용. 에이전트 실작업에는 7B+ coder를 쓰세요.",

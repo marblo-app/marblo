@@ -13,7 +13,9 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  LOCAL_MEMORY_TIERS,
   LOCAL_MODEL_CATALOG,
+  localMemoryTier,
   catalogEntry,
   evaluateLocalModelCards,
   isLocalChatOnlyModel,
@@ -48,6 +50,48 @@ describe("LOCAL_MODEL_CATALOG (first-party 큐레이션 위생)", () => {
       expect(e.minRamGB).toBeGreaterThan(0);
       expect(e.minRamGB).toBeLessThanOrEqual(128);
       expect(e.contextTokens).toBeGreaterThan(0);
+    }
+  });
+
+  it("★모든 행이 HuggingFace 원본 링크를 갖는다(카드의 '더 알아보기' 경로)", () => {
+    const urls = LOCAL_MODEL_CATALOG.map((e) => e.huggingFaceUrl);
+    // 타입이 필수로 강제하지만, 빈 문자열/오타 호스트까지는 못 막는다.
+    for (const url of urls) {
+      expect(url).toMatch(/^https:\/\/huggingface\.co\/[\w.-]+\/[\w.-]+$/);
+    }
+    // 서로 다른 모델이 같은 repo 를 가리키면 둘 중 하나가 복붙 실수다.
+    expect(new Set(urls).size).toBe(urls.length);
+  });
+
+  it("★파라미터 규모를 전 행에서 읽을 수 있다 — phi3:mini 회귀", () => {
+    for (const e of LOCAL_MODEL_CATALOG) {
+      // null 이면 그 행은 크기 규칙이 조용히 chat-only 로 떨군다는 뜻이라,
+      // 명시 override 없이는 티어가 사실과 달라진다.
+      expect(e.paramBillions).not.toBeNull();
+      expect(e.paramBillions).toBeGreaterThan(0);
+    }
+    // ★이름에 파라미터가 없는 대표 케이스. `local-tool-tier` 가 3.8B 로 읽어
+    // 주므로 "미상 → chat-only" 가 아니라 "3.8B 라서 chat-only" 다.
+    expect(catalogEntry("phi3:mini")?.paramBillions).toBe(3.8);
+    expect(catalogEntry("qwen3.8:27b")?.paramBillions).toBe(27);
+  });
+
+  it("★메모리 구간은 기존 minRamGB 기준과 어긋나지 않는다", () => {
+    // 27B 두 행은 큐레이션상 같은 급(17GB/18GB 가중치 → minRamGB 48)이라
+    // 반드시 같은 구간에 떨어져야 한다.
+    expect(localMemoryTier(48)).toBe("48plus");
+    expect(catalogEntry("gemma3:27b")?.minRamGB).toBe(48);
+    expect(catalogEntry("qwen3.8:27b")?.minRamGB).toBe(48);
+    // 경계값 — 구간 정의 그대로.
+    expect(localMemoryTier(8)).toBe("8");
+    expect(localMemoryTier(9)).toBe("16");
+    expect(localMemoryTier(16)).toBe("16");
+    expect(localMemoryTier(24)).toBe("32");
+    expect(localMemoryTier(32)).toBe("32");
+    expect(localMemoryTier(96)).toBe("48plus");
+    // 어떤 행도 구간 밖으로 새지 않는다.
+    for (const e of LOCAL_MODEL_CATALOG) {
+      expect(LOCAL_MEMORY_TIERS).toContain(localMemoryTier(e.minRamGB));
     }
   });
 
@@ -262,10 +306,42 @@ describe("evaluateLocalModelCards (하드웨어 게이트)", () => {
     expect(big?.fits).toBe(false); // 경고 배지는 fits 로 따로 판단
   });
 
-  it("설치 목록은 실측 id 만 매칭한다 — 카탈로그 밖 실측 id 는 카드에 없다", () => {
+  it("★카탈로그 밖 실측 id 는 '표시 전용' 카드로 남는다 — pull 버튼은 주지 않는다", () => {
+    // ★의도된 동작 변경(eVe336EESa7azzfLvDZV). 종전에는 카탈로그 밖 설치분이
+    // 카드에서 아예 빠졌는데, 그러면 큐레이션에서 한 줄 내리는 순간 **이미
+    // 설치해 쓰던 모델이 화면에서 사라진다**. 카탈로그에서 내리는 것과 설치분을
+    // 감추는 것은 다른 일이라, 표시 전용 카드로 남긴다.
+    //
+    // 신뢰경계는 그대로다 — action 이 항상 "installed" 라 pull 버튼이 없고,
+    // `localModels:pull` IPC 는 여전히 catalogEntry() 화이트리스트로만 실행한다
+    // (아래 not-in-catalog 회귀 테스트 참조).
     const cards = evaluateLocalModelCards(16, OLLAMA_UP, ["mystery:7b"]);
-    expect(cards.some((c) => c.id === "mystery:7b")).toBe(false);
-    expect(cards.every((c) => !c.installed)).toBe(true);
+    const outside = cards.find((c) => c.id === "mystery:7b");
+    expect(outside).toBeDefined();
+    expect(outside?.source).toBe("installed-outside-catalog");
+    expect(outside?.installed).toBe(true);
+    expect(outside?.action).toBe("installed");
+    // 소요 RAM 을 모르므로 게이트를 걸지 않고, 메모리 구간에도 넣지 않는다.
+    expect(outside?.minRamGB).toBe(0);
+    expect(outside?.fits).toBe(true);
+    expect(outside?.memoryTier).toBeNull();
+    // 크기·컨텍스트·원본 링크는 모르는 값이라 지어내지 않는다.
+    expect(outside?.downloadSizeMB).toBeUndefined();
+    expect(outside?.contextTokens).toBeUndefined();
+    expect(outside?.huggingFaceUrl).toBeUndefined();
+    // 티어는 카탈로그 밖에서도 같은 크기 규칙을 쓴다(7B → chat-only).
+    expect(outside?.toolSupport).toBe("chat-only");
+    expect(outside?.paramBillions).toBe(7);
+    // 카탈로그 행들은 영향을 받지 않는다.
+    expect(
+      cards.filter((c) => c.source === "catalog").every((c) => !c.installed),
+    ).toBe(true);
+  });
+
+  it("카탈로그 밖 설치분이 없으면 카드는 카탈로그 행뿐이다", () => {
+    const cards = evaluateLocalModelCards(16, OLLAMA_UP, []);
+    expect(cards).toHaveLength(LOCAL_MODEL_CATALOG.length);
+    expect(cards.every((c) => c.source === "catalog")).toBe(true);
   });
 });
 

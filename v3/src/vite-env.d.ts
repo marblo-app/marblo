@@ -1080,6 +1080,13 @@ interface RegistryIndexResponse {
   items: RegistryStoreItem[];
 }
 
+/**
+ * 스토어 목록을 묶는 메모리 구간 — electron `local-models.localMemoryTier`.
+ * 경계(≤8 / ≤16 / ≤32 / 그 위)의 단일 소스는 메인 프로세스다. 렌더러는 이
+ * 값으로 섹션을 나누기만 하고 임계를 다시 계산하지 않는다(드리프트 방지).
+ */
+type LocalMemoryTier = "8" | "16" | "32" | "48plus";
+
 /** 스토어 '로컬 모델' 카드 — electron local-models.evaluateLocalModelCards 직렬화. */
 interface LocalModelCard {
   /** ollama 공식 라이브러리 태그(`ollama pull <id>`). */
@@ -1087,9 +1094,20 @@ interface LocalModelCard {
   displayName: string;
   category: "coding" | "general" | "reasoning";
   categoryLabel: string;
-  downloadSizeMB: number;
+  /** 카탈로그 밖 설치분은 크기를 모른다 — undefined 면 배지를 그리지 않는다. */
+  downloadSizeMB?: number;
+  /** 카탈로그 밖 설치분은 0(게이트 없음). */
   minRamGB: number;
-  contextTokens: number;
+  /** 카탈로그 밖 설치분은 모른다. */
+  contextTokens?: number;
+  /**
+   * 모델 원본(HuggingFace) 페이지. 카탈로그 행은 항상 있고, 카탈로그 밖
+   * 설치분은 없다. 외부 링크는 `target="_blank"` 로 열어 main 의
+   * setWindowOpenHandler 가 shell.openExternal 로 넘기게 한다(새 IPC 없음).
+   */
+  huggingFaceUrl?: string;
+  /** 파라미터 규모(B). 태그에서 못 읽으면 null. 티어 판정과 같은 숫자다. */
+  paramBillions: number | null;
   /**
    * 하네스 tool-use 적합성 — 3티어. 판정 근거·임계는
    * `electron/local-tool-tier.ts` 가 단일 소스다.
@@ -1110,6 +1128,14 @@ interface LocalModelCard {
     | "insufficient-ram"
     | "ollama-missing"
     | "daemon-stopped";
+  /** 목록을 묶는 메모리 구간. 소요 RAM 을 모르는 설치분은 null. */
+  memoryTier: LocalMemoryTier | null;
+  /**
+   * catalog                   first-party 큐레이션 행.
+   * installed-outside-catalog `ollama list` 에만 있는 설치분 — **표시 전용**이라
+   *                           pull 버튼을 주지 않는다(IPC 도 카탈로그 밖 id 를 거부).
+   */
+  source: "catalog" | "installed-outside-catalog";
 }
 
 interface LocalModelsInfoResponse {
