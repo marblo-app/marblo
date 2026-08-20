@@ -53,6 +53,8 @@ describe("FirstSpawnGuide", () => {
   it("작은 일·큰 일·도움말의 정확한 번들 명령만, 순서대로 표시한다", () => {
     render(createElement(FirstSpawnGuide));
 
+    fireEvent.click(screen.getByTestId("first-spawn-guide-toggle"));
+
     const commands = [...document.querySelectorAll("[data-testid^='first-spawn-guide-cmd-']")]
       .map((element) => element.getAttribute("data-testid")?.replace("first-spawn-guide-cmd-", ""));
     expect(commands).toEqual(GUIDE_COMMANDS);
@@ -60,19 +62,51 @@ describe("FirstSpawnGuide", () => {
     expect(commands).not.toContain("/tf-spawn");
   });
 
-  it("접어도 사라지지 않고, 다시 펼칠 수 있다", () => {
-    render(createElement(FirstSpawnGuide));
+  it("첫 진입은 접힌 한 줄이고, 펼침 선택을 다시 열어도 기억한다", () => {
+    const firstRender = render(createElement(FirstSpawnGuide));
 
     const toggle = screen.getByTestId("first-spawn-guide-toggle");
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByTestId("first-spawn-guide-body")).toBeNull();
-    expect(storage.get(COLLAPSED_KEY)).toBe("1");
-
     fireEvent.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByTestId("first-spawn-guide-body")).toBeTruthy();
+    expect(storage.get(COLLAPSED_KEY)).toBe("0");
+
+    firstRender.unmount();
+    render(createElement(FirstSpawnGuide));
+    expect(screen.getByTestId("first-spawn-guide-toggle").getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.click(screen.getByTestId("first-spawn-guide-toggle"));
+    expect(screen.getByTestId("first-spawn-guide-toggle").getAttribute("aria-expanded")).toBe("false");
+    expect(storage.get(COLLAPSED_KEY)).toBe("1");
+  });
+
+  it("펼친 본문은 위쪽 absolute 오버레이여서 레일의 레이아웃 높이를 바꾸지 않는다", () => {
+    render(createElement(FirstSpawnGuide));
+
+    const guide = screen.getByTestId("first-spawn-guide");
+    const rail = screen.getByTestId("first-spawn-guide-rail");
+    fireEvent.click(screen.getByTestId("first-spawn-guide-toggle"));
+    const body = screen.getByTestId("first-spawn-guide-body");
+
+    expect(guide.dataset.layout).toBe("upward-overlay");
+    expect(body.parentElement).toBe(guide);
+    expect(body.className).toContain("absolute");
+    expect(body.className).toContain("bottom-full");
+    expect(rail.nextElementSibling).toBe(body);
+  });
+
+  it("바깥 클릭과 Escape로 펼친 패널을 닫는다", () => {
+    render(createElement(FirstSpawnGuide));
+    const toggle = screen.getByTestId("first-spawn-guide-toggle");
+
+    fireEvent.click(toggle);
+    fireEvent.pointerDown(document.body);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(toggle);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("칩 클릭은 보이는 명령 자체를 오케스트레이터에 삽입한다", async () => {
@@ -84,6 +118,7 @@ describe("FirstSpawnGuide", () => {
     useOrchestratorStore.setState({ ptySessionId: "orch-1" });
 
     render(createElement(FirstSpawnGuide));
+    fireEvent.click(screen.getByTestId("first-spawn-guide-toggle"));
     fireEvent.click(screen.getByTestId("first-spawn-guide-cmd-/tf-start"));
 
     await vi.waitFor(() => {
@@ -92,8 +127,8 @@ describe("FirstSpawnGuide", () => {
   });
 
   it("처음 한 번만 펄스를 표시한다", () => {
-    const { container } = render(createElement(FirstSpawnGuide));
+    render(createElement(FirstSpawnGuide));
     expect(storage.get(SEEN_KEY)).toBe("1");
-    expect(container.firstElementChild?.className).toContain("shadow-[0_0_0_3px");
+    expect(screen.getByTestId("first-spawn-guide-rail").className).toContain("shadow-[0_0_0_3px");
   });
 });

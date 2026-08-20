@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
@@ -6,13 +6,11 @@ import { useOrchestratorStore } from "../../stores/orchestratorStore";
 import { SLASH_COMMANDS } from "../orchestrator/SlashCommandPopup";
 
 /**
- * 첫 스폰 가이드 — 오케 터미널 바로 위(또는 옆)에 붙는 인라인 패널
- * (티켓 YYD71y0KU8cNhIFI5YSu, 사장님 재지시로 오버레이 금지 확정).
+ * 첫 스폰 가이드 — 오케 터미널 경계의 얇은 재진입 바와 위쪽 오버레이.
  *
- * ★오버레이가 아니라 인라인인 이유: 이 안내의 내용 자체가 "아래 오케창에
- * 이걸 치세요" 다. 안내와 대상 창이 같은 화면에 함께 있어야 한다 — 모달로
- * 띄우면 그 순간 대상을 가린다. 비기너 셸에는 이미 모달/호스트가 여럿
- * 쌓여 있어(BeginnerTour·원클릭·승격…) 하나 더 얹으면 안 읽고 닫힌다.
+ * ★바는 정상 흐름에 남겨 재진입 경로를 제공하지만, 펼친 본문은 바의 위쪽에
+ * absolute로 띄운다. 그래서 안내를 열고 닫아도 아래 오케 터미널의 위치와
+ * 높이가 바뀌지 않는다.
  *
  * ★닫으면 사라지지 않는다 — 접기만 한다(collapsed, localStorage 로 유지).
  * 이게 "나중에 다시 찾을 재진입 경로" 요구를 공짜로 만족한다: 탭을 새로
@@ -43,6 +41,24 @@ function writeFlag(key: string, value: boolean) {
   try {
     if (value) localStorage.setItem(key, "1");
     else localStorage.removeItem(key);
+  } catch {
+    /* 프라이빗 모드 — 이번 세션만 기억한다 */
+  }
+}
+
+function readCollapsed(): boolean {
+  try {
+    // A missing value is a first visit, and first visits start compact. "0" is
+    // deliberately persisted too, so an explicit expand choice survives restart.
+    return localStorage.getItem(COLLAPSED_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function writeCollapsed(value: boolean) {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, value ? "1" : "0");
   } catch {
     /* 프라이빗 모드 — 이번 세션만 기억한다 */
   }
@@ -94,25 +110,51 @@ const PATHS: GuidePath[] = [
 export function FirstSpawnGuide() {
   const { t } = useTranslation();
   const ptySessionId = useOrchestratorStore((s) => s.ptySessionId);
-  const [collapsed, setCollapsed] = useState(() => readFlag(COLLAPSED_KEY));
+  const [collapsed, setCollapsed] = useState(readCollapsed);
   const [pulse, setPulse] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const guideRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (readFlag(SEEN_KEY)) return;
+    if (!collapsed || readFlag(SEEN_KEY)) return;
     writeFlag(SEEN_KEY, true);
     setPulse(true);
     const timer = window.setTimeout(() => setPulse(false), 2400);
     return () => window.clearTimeout(timer);
+    // The initial compact rail is the only state that may call for attention.
+    // This intentionally runs once; reopening the rail must stay quiet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggle = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
-      writeFlag(COLLAPSED_KEY, next);
+      writeCollapsed(next);
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    if (collapsed) return;
+
+    const closeFromOutside = (event: PointerEvent) => {
+      if (guideRef.current?.contains(event.target as Node)) return;
+      setCollapsed(true);
+      writeCollapsed(true);
+    };
+    const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setCollapsed(true);
+      writeCollapsed(true);
+    };
+
+    document.addEventListener("pointerdown", closeFromOutside);
+    document.addEventListener("keydown", closeFromEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeFromOutside);
+      document.removeEventListener("keydown", closeFromEscape);
+    };
+  }, [collapsed]);
 
   const runCommand = useCallback(
     async (command: GuideCommand) => {
@@ -148,18 +190,25 @@ export function FirstSpawnGuide() {
 
   return (
     <div
+      ref={guideRef}
       data-testid="first-spawn-guide"
-      className={`mb-2 shrink-0 rounded-lg border bg-[#181825] transition-shadow ${
+      data-layout="upward-overlay"
+      className={`relative shrink-0 ${collapsed ? "z-10" : "z-30"}`}
+    >
+      <div
+        data-testid="first-spawn-guide-rail"
+        className={`rounded-lg border bg-[#181825] transition-shadow ${
         pulse
           ? "border-[#89b4fa] shadow-[0_0_0_3px_rgba(137,180,250,0.35)]"
           : "border-[#313244]"
-      }`}
-    >
+        }`}
+      >
       <button
         type="button"
         data-testid="first-spawn-guide-toggle"
         onClick={toggle}
         aria-expanded={!collapsed}
+        aria-controls="first-spawn-guide-body"
         title={t(
           collapsed
             ? "onboarding.firstSpawn.expand"
@@ -182,11 +231,13 @@ export function FirstSpawnGuide() {
           {t("onboarding.firstSpawn.title")}
         </span>
       </button>
+      </div>
 
       {!collapsed && (
         <div
+          id="first-spawn-guide-body"
           data-testid="first-spawn-guide-body"
-          className="space-y-2 border-t border-[#313244] px-3 py-2.5"
+          className="absolute inset-x-0 bottom-full z-30 mb-1 space-y-2 rounded-lg border border-[#313244] bg-[#181825] px-3 py-2.5 shadow-xl"
         >
           {PATHS.map((path) => (
             <div
