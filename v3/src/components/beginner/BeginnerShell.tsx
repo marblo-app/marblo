@@ -667,7 +667,7 @@ export function BeginnerShell() {
                     <div className="flex min-h-[18rem] flex-1 flex-col gap-2.5 overflow-hidden lg:flex-row">
                       <section
                         data-coach="beginner-chat"
-                        className={`flex min-h-0 min-w-0 flex-[7_1_0%] flex-col overflow-hidden ${SURFACE}`}
+                        className={`flex min-h-0 min-w-0 flex-[7_1_0%] flex-col overflow-visible ${SURFACE}`}
                       >
                         <div className="flex flex-shrink-0 items-center gap-2 border-b border-[#313244] px-4 py-2">
                           <SectionLabel>
@@ -677,12 +677,13 @@ export function BeginnerShell() {
                             {t("beginner.chat.hint")}
                           </span>
                         </div>
-                        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                          {/* 첫 스폰 가이드 — 오케 터미널 바로 위의 인라인 패널
-                            (티켓 YYD71y0KU8cNhIFI5YSu). "그래서 이제 뭘 쳐야
-                            하지" 가 막히는 지점이 바로 이 터미널이라, 안내도
-                            같은 화면·같은 컬럼에 둔다(오버레이 금지). */}
-                          <div className="shrink-0 px-3 pt-2">
+                        <div className="flex min-h-0 flex-1 flex-col overflow-visible">
+                          {/* The rail consumes one line; the body opens upward
+                            over the live content without resizing the PTY. */}
+                          <div
+                            data-testid="beginner-first-spawn-guide-anchor"
+                            className="relative shrink-0 px-3 pt-2"
+                          >
                             <FirstSpawnGuide />
                           </div>
                           {/* ★effort·버전 배지·세션 선택은 계속 감춘다(고급 손잡이).

@@ -97,7 +97,7 @@ export function TerminalColumn({
   }
 
   return (
-    <div className="flex h-full w-full min-w-0 flex-col overflow-hidden bg-gray-900">
+    <div className="flex h-full w-full min-w-0 flex-col overflow-visible bg-gray-900">
       <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-700 bg-gray-800 px-3 py-1.5">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
           {t("workspace.terminals")}
@@ -125,11 +125,12 @@ export function TerminalColumn({
         </button>
       </div>
 
-      {/* First-spawn guide — pinned above the split so it never eats into the
-          draggable orchestrator/agents ratio below. Collapsible, not
-          dismissible (ticket YYD71y0KU8cNhIFI5YSu) — same panel as the
-          beginner shell, right above the same orchestrator terminal. */}
-      <div className="shrink-0 px-2 pt-2">
+      {/* The rail owns a fixed single-line slot. Its expanded guide is an
+          upward absolute overlay, so this split keeps the same dimensions. */}
+      <div
+        data-testid="terminal-first-spawn-guide-anchor"
+        className="relative shrink-0 px-2 pt-2"
+      >
         <FirstSpawnGuide />
       </div>
 
