@@ -261,11 +261,34 @@ describe("오케 모델 설정 정규화 — grok 편입 / env-swap 미편입", 
     expect(orchestratorModelTypeForSetting("grok")).toBe("grok");
   });
 
-  it("grok 은 모델 핀 축이 없어 접미를 버리고 프로바이더로 뜬다", () => {
-    // launch 옵션엔 claude/codex 두 축만 있다 — 접미를 살려두면 저장값엔 남는데
-    // CLI 엔 안 붙는 "골랐는데 안 먹는" 상태가 된다.
-    expect(normalizeOrchestratorModelSetting("grok:grok-4.5")).toBe("grok");
-    expect(orchestratorModelTypeForSetting("grok:grok-4.5")).toBe("grok");
+  it("★grok 모델 핀은 살아남는다 — launch 옵션에 grok 축이 있다", () => {
+    // 2026-08-20(티켓 6AsbulPe)에 열렸다. 근거는 취향이 아니라 배선이다:
+    // `orchestratorLaunchPin` 의 grok 분기(`nativeModel`) → main.ts 오케 launch 의
+    // `nativeModelOverride` → `buildCLICommand` 의 `-m`. 그 분기가 들어온 뒤에도
+    // 이 함수만 접미를 버리고 있어서, 셀렉터가 세워도 저장 직전에 잘려 나갔다.
+    for (const id of ["grok-4.6", "grok-4.5"]) {
+      expect(normalizeOrchestratorModelSetting(`grok:${id}`)).toBe(
+        `grok:${id}`
+      );
+      expect(orchestratorModelTypeForSetting(`grok:${id}`)).toBe("grok");
+    }
+    // effort 축은 여전히 없다 — argv 에 `--reasoning-effort` 를 안 붙이므로
+    // 접미 effort 는 버려진다(레지스트리 grok 행의 `efforts: []`).
+    expect(normalizeOrchestratorModelSetting("grok:grok-4.6@high")).toBe(
+      "grok:grok-4.6"
+    );
+    // 레지스트리에 없는 id 는 그대로 강등된다(오타·옛 빌드 저장값).
+    expect(normalizeOrchestratorModelSetting("grok:grok-9.9")).toBe("grok");
+  });
+
+  it("antigravity 는 아직 모델 핀 축이 없어 접미를 버린다", () => {
+    // 레지스트리에 antigravity 행 자체가 없다 → 접미가 살아남을 근거가 없다.
+    expect(normalizeOrchestratorModelSetting("antigravity:agy-1")).toBe(
+      "antigravity"
+    );
+    expect(orchestratorModelTypeForSetting("antigravity:agy-1")).toBe(
+      "antigravity"
+    );
   });
 
   it("★env-swap 벤더는 오케 후보가 아니다 — 손편집/옛 저장값도 강등된다", () => {

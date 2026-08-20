@@ -632,6 +632,17 @@ export function normalizeOrchestratorModelSetting(value: unknown): string {
   if (!modelId) return provider;
 
   const entry = getModel(modelId);
+
+  // ★오케 선택 경로에서 내린 모델(`ORCHESTRATOR_SELECTOR_RETIRED`)은 접미를 버리고
+  // 하네스 기본으로 강등한다. 셀렉터가 이미 그 칸을 안 세우므로, 여기 들어오는
+  // 값은 옛 저장값·env·손편집뿐이다 — 그것을 살려두면 화면(하네스 기본)과
+  // argv(내려간 모델)가 갈린다. 레지스트리 행은 그대로라 과거 티켓 해석은 무회귀다.
+  if (modelId in ORCHESTRATOR_SELECTOR_RETIRED) {
+    console.warn(
+      `[model-selection] 오케 선택에서 내린 모델 "${modelId}" 의 접미를 버립니다(하네스 기본으로 뜬다) — 사유: ${ORCHESTRATOR_SELECTOR_RETIRED[modelId]}`,
+    );
+    return provider;
+  }
   // ★핀이 어느 CLI 로 뜨는지는 **하네스** 축이 정한다(USbdRV4k). 벤더는 env 로
   // 갈릴 뿐 바이너리를 바꾸지 않으므로, 여기서 봐야 하는 값은 harness 다.
   const pinHarness = entry?.harness;
@@ -645,14 +656,23 @@ export function normalizeOrchestratorModelSetting(value: unknown): string {
 
   if (
     (provider === "claude" && pinHarness === "claude") ||
-    (provider === "codex" && pinHarness === "gpt")
+    (provider === "codex" && pinHarness === "gpt") ||
+    // ★grok 축이 여기 합류한 이유(2026-08-20): `orchestratorLaunchPin` 은 이미
+    // grok 분기(`nativeModel` → `nativeModelOverride` → buildCLICommand 의 `-m`)를
+    // 갖고 있고 main.ts 의 오케 launch 두 자리가 그 값을 그대로 넘긴다. 아래 분기의
+    // 근거였던 "핀 축이 claude/codex 뿐" 은 그 분기가 들어온 날부터 사실이 아니었고,
+    // 그 동안 `grok:grok-4.5` 는 **저장 직전에** 접미가 잘려 UI 에서 닿을 수 없었다.
+    // 즉 이건 새 축을 파는 변경이 아니라 **낡은 가드를 걷는** 변경이다.
+    (provider === "grok" && pinHarness === "grok")
   ) {
     return orchestratorModelValue(provider, modelId, effort);
   }
 
-  // grok/antigravity 는 하네스로는 뜨지만 **모델 핀 축이 launch 옵션에 아직 없다**
-  // (`orchestratorLaunchPin` 은 claude/codex 두 축만 만든다). 접미를 살려두면
-  // 저장값엔 남는데 CLI 엔 안 붙어 "골랐는데 안 먹는" 상태가 되므로 여기서 버린다.
+  // antigravity 는 하네스로는 뜨지만 **모델 핀 축이 launch 옵션에 아직 없다**
+  // (`orchestratorLaunchPin` 이 그 축을 만들지 않는다). 접미를 살려두면 저장값엔
+  // 남는데 CLI 엔 안 붙어 "골랐는데 안 먹는" 상태가 되므로 여기서 버린다.
+  // (레지스트리에 antigravity 행이 아직 없어 셀렉터도 그 칸을 세우지 않지만,
+  //  env·손편집·옛 저장값은 이 문을 지난다.)
   if (pinHarness && pinHarness === provider) {
     console.warn(
       `[model-selection] "${provider}" 오케는 모델 핀 축이 없어 접미 "${modelId}" 를 버립니다(프로바이더 기본 모델로 뜬다)`,
@@ -778,6 +798,26 @@ export function codexOrchestratorChoices(): OrchestratorModelChoice[] {
 }
 
 /**
+ * 셀렉터에 넣을 Grok(Grok Build) 변형 목록 — claude/codex 와 **같은 경로**.
+ *
+ * ★이 함수가 없던 동안 grok 은 "맨몸 칸 하나" 였고, 어떤 모델로 뜨는지는
+ * `agent-config.GROK_DEFAULT_MODEL` 상수만 알았다. 그 상수는 세대가 올라도 사람이
+ * 안 고치면 조용히 낡는다 — 실제로 `grok models` 의 default 가 grok-4.6 으로
+ * 바뀐 뒤에도 우리는 계속 `-m grok-4.5` 를 붙이고 있었다.
+ *
+ * 라벨은 codex 와 같은 규칙으로 **레지스트리 실명 그대로**다(`Grok (grok-4.6)`).
+ * xAI 는 4.5/4.6 처럼 소수점 세대를 촘촘히 올려서, 예쁘게 접으면 화면과 argv 가
+ * 어긋나도 눈에 안 띈다.
+ *
+ * effort 둘째 드롭다운은 서지 않는다 — 레지스트리 grok 행의 `efforts` 가 빈
+ * 배열이고(그 이유는 model-registry.ts 의 grok 블록 주석), `selectableEfforts`
+ * 가 그것을 그대로 옮긴다.
+ */
+export function grokOrchestratorChoices(): OrchestratorModelChoice[] {
+  return orchestratorChoicesFor("grok", "grok", (entry) => entry.id);
+}
+
+/**
  * 하네스 하나의 셀렉터 칸들. 두 하네스가 같은 정렬·같은 값 포맷을 쓰도록
  * 한 곳에 둔다(#601 이 claude 에만 깔아둔 규칙을 codex 가 복제하지 않게).
  *
@@ -790,12 +830,12 @@ export function codexOrchestratorChoices(): OrchestratorModelChoice[] {
  * 통째로 뒤집으면 그 동률 순서까지 뒤집혀 `top` 등급의 Opus 5 밑에 Opus 4.8 이 아니라
  * 위에 오게 된다. 등급만 뒤집고 동률 순서는 보존해야 "신형이 위" 가 성립한다.
  *
- * @param harness    레지스트리 하네스 축("claude" | "gpt")
+ * @param harness    레지스트리 하네스 축("claude" | "gpt" | "grok")
  * @param valuePrefix compound 값·라벨에 쓸 UI 이름. gpt 는 UI 에서
  *                    "codex" 다(메모리: Codex==gpt, 내부 model id 는 "gpt").
  */
 function orchestratorChoicesFor(
-  harness: "claude" | "gpt",
+  harness: "claude" | "gpt" | "grok",
   valuePrefix: string,
   humanize: (entry: ModelRegistryEntry) => string,
 ): OrchestratorModelChoice[] {
@@ -820,6 +860,54 @@ function orchestratorChoicesFor(
 }
 
 /**
+ * 오케 **선택 경로에서만** 내린 모델 → 내린 사유.
+ *
+ * ★이 표의 존재 이유는 "지운다" 와 "숨긴다" 를 코드 층위에서 갈라 놓는 것이다.
+ * 모델을 라인업에서 빼는 방법은 네 단계가 있고 파괴력이 전부 다르다:
+ *
+ *   ① `model-ladder.LADDER_EXCLUSIONS` — 자동선택 후보에서만 뺀다.
+ *      드롭다운엔 그대로 서고 명시 핀도 그대로 된다.
+ *   ② **이 표** — 오케 선택 경로(셀렉터 + 저장·env 정규화)에서만 뺀다. 퀵레인
+ *      카탈로그(`quickLaneVendorCatalog`, 레지스트리 전 행)·`dispatch_task(model=…)`
+ *      명시 지정·과거 티켓 조회는 전부 그대로다. 오케 선택은 프로젝트별 영구 저장
+ *      이라 "고를 수 있는 칸" 의 수명이 가장 길고, 그래서 여기가 정리의 기본 칸이다.
+ *
+ *      ★셀렉터만 막고 정규화를 안 막으면 갈라진다: 옛 저장값 `claude:claude-opus-4-8`
+ *      은 셀렉터에서 사라져 UI 가 "Claude (CLI default)" 를 표시하는데
+ *      (`OrchestratorPanel` 이 `isOrchestratorModel` 로 걸러 "claude" 로 떨어뜨린다)
+ *      메인은 여전히 `--model claude-opus-4-8` 로 띄운다. 화면과 argv 가 다른 상태다.
+ *      그래서 두 문을 같이 닫는다 — 내려간 핀은 하네스 기본으로 강등된다.
+ *   ③ `status: "deprecated"` — `modelsByHarness`/`modelsByVendor` 가 걸러서 **선택
+ *      경로 전부**에서 사라진다. `getModel` 은 계속 답하므로 과거 단가 계산은 산다.
+ *   ④ 레지스트리 행 삭제 — **하지 않는다**. `getModel` 이 null 이 되는 순간 그
+ *      모델로 돌았던 과거 티켓이 단가 미매칭이 되고 집계 해석이 깨진다.
+ *
+ * ★사유 문자열을 필수로 둔다(`Record<string, string>`). `LADDER_EXCLUSIONS` 와 같은
+ * 규율이다 — 이유 없이 사라진 칸은 다음 사람이 복원해야 할지 판단할 수 없다.
+ *
+ * ★여기 넣는 근거는 "오래됐다" 가 아니라 **실사용 집계**여야 한다. 아래 넷은
+ * 2026-08-20 `get_routing_effectiveness` 전체 스캔에서 나온 수치다: 스캔 491건 중
+ * model@effort 해상도가 붙은 299건(성공 295·실패 4) 기준으로 **네 모델 전부 0건**
+ * — 리포트에 행 자체가 없다. 같은 스캔에서 비교군은 claude-opus-5 약 74건,
+ * gpt-5.5@medium 50건(전부 성공), grok-4.5 15건, claude-sonnet-5 10건이었다.
+ *
+ * ★한계도 같이 적는다: 그 스캔은 **모델미상 154건**을 집계에서 뺀다(P2-2 이전
+ * 티켓엔 `dispatchMeta.spawnedModelKey` 가 없다). 그 안에 이 넷으로 돈 티켓이
+ * 섞여 있을 수 있으므로 "0건" 은 "최근 운영에서 안 쓰인다" 의 강한 근거이지
+ * "한 번도 안 쓰였다" 의 증명이 아니다. 그래서 ②에서 멈추고 ③④로 가지 않는다.
+ */
+export const ORCHESTRATOR_SELECTOR_RETIRED: Readonly<Record<string, string>> = {
+  "claude-opus-4-8":
+    "실사용 0건(2026-08-20 효과집계 299건 기준). claude-opus-5 와 능력등급·단가($5/$25)가 동일해서 이 칸을 고를 이유가 원래 없었고, 실제로 아무도 안 골랐다. 이미 LADDER_EXCLUSIONS 라 자동선택도 안 쓴다. env(MARBLO_STANDARD_CLAUDE_MODEL)·dispatch_task 명시 지정·퀵레인으로는 그대로 닿는다.",
+  "claude-haiku-4-5-20251001":
+    "실사용 0건(같은 집계). 현행 simple 바닥은 claude-sonnet-5 이고 그 아래 칸을 만드는 것은 하향 정책이라 자동선택에서도 이미 빠져 있다. 오케(=무한 수명 기본값)에 세워 둘 칸이 아니다 — 필요하면 티켓 1건 수명인 명시 지정으로 쓴다.",
+  "gpt-5.4":
+    "실사용 0건(같은 집계). 같은 하네스에 gpt-5.5(50건 전부 성공, 비용당성공 0.2~0.5/$)와 gpt-5.6 3변종이 서 있어 고를 자리가 없다. 자동선택에서도 이미 빠져 있다.",
+  "gpt-5.4-mini":
+    "실사용 0건(같은 집계). 코딩 에이전트로서의 적합성이 한 번도 측정된 적이 없고(그래서 LADDER_EXCLUSIONS 이기도 하다), 측정 없는 칸을 영구 저장되는 오케 기본값 자리에 두면 조용히 굳는다.",
+};
+
+/**
  * 오케 셀렉터에 세울 수 있는 행인가 — **하네스 네이티브 벤더만** 통과한다.
  *
  * ★사유는 max/ultra 를 셀렉터에서 빼는 것(`selectableEfforts`)과 정확히 같다:
@@ -834,6 +922,7 @@ function orchestratorChoicesFor(
  * 검증(서베이 V1-2)이 끝나면 이 필터를 걷고 벤더별 표기 라벨을 붙인다.
  */
 function selectorEligible(entry: ModelRegistryEntry): boolean {
+  if (entry.id in ORCHESTRATOR_SELECTOR_RETIRED) return false;
   return entry.provider === HARNESS_NATIVE_VENDOR[entry.harness];
 }
 

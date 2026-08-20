@@ -167,13 +167,13 @@ describe("후보 구성", () => {
   it("★grok 은 칸이 하나라도 계획이 나온다 — 그래프 읽는 셀 = 쓰는 셀", () => {
     // 사다리가 없던 동안 grok dispatch 는 계획이 null 이라 그래프 조회 키가
     // 하네스 이름 "grok"(=모델미상 유령 셀)으로 떨어졌다. 결과를 쓰는 쪽은 argv
-    // 에서 되읽은 "grok-4.5" 라 읽기·쓰기가 갈렸다.
+    // 에서 되읽은 모델 id 라 읽기·쓰기가 갈렸다.
     const p = plan("grok", "complex")!;
     expect(p).not.toBeNull();
-    expect(p.modelKey).toBe("grok-4.5");
+    expect(p.modelKey).toBe("grok-4.6");
     expect(p.pinsModel).toBe(true);
     expect(p.mode).toBe("single");
-    // 진입칸을 벗어나지 않는다 = 스폰 argv 가 종전(`-m grok-4.5` 기본값)과 같다.
+    // 진입칸을 벗어나지 않는다 = 스폰 argv 가 기본값(`-m grok-4.6`)과 같다.
     expect(p.movedFromEntry).toBe(false);
   });
 });
@@ -732,7 +732,10 @@ describe("★벤더모델 후보풀·SWE/능력 경로(5k94 감사 가드)", () 
     "k3-256k",
     "kimi-for-coding",
     "solar-pro4",
-    "grok-4.5",
+    // ★grok-4.5 는 여기 없다 — 2026-08-20 부터 `LADDER_EXCLUSIONS` 다(grok-4.6 과
+    // 능력등급·단가·컨텍스트가 완전히 동일해서 자동선택이 고를 근거가 없다).
+    // 대신 4.6 이 후보풀에 있어야 한다.
+    "grok-4.6",
   ] as const;
 
   it("벤더 활성 모델이 구조적으로 autoCandidates 후보풀에 있다", () => {
@@ -814,11 +817,13 @@ describe("★벤더모델 후보풀·SWE/능력 경로(5k94 감사 가드)", () 
     expect(plan("antigravity", "standard")).toBeNull();
   });
 
-  it("Grok 은 단일 칸이지만 계획이 나와 modelKey=grok-4.5(그래프 셀 일치)", () => {
+  it("Grok 은 단일 칸이지만 계획이 나와 modelKey=grok-4.6(그래프 셀 일치)", () => {
     const p = plan("grok", "standard")!;
-    expect(p.model).toBe("grok-4.5");
-    expect(p.modelKey).toBe("grok-4.5");
+    expect(p.model).toBe("grok-4.6");
+    expect(p.modelKey).toBe("grok-4.6");
     expect(p.mode).toBe("single");
+    // grok-4.5 는 사다리에서 내려도 레지스트리에 그대로 살아 있어서, 그 모델로
+    // 돌았던 과거 티켓의 가이던스 조회가 계속 답을 준다(집계 해석 무회귀).
     expect(modelGuidance("grok-4.5")!.benchmark).toBe("swe-bench-pro");
     expect(modelGuidance("grok-4.5")!.benchScore).toBe(64.7);
   });

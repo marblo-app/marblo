@@ -85,6 +85,7 @@ describe("퀵레인 모델 카탈로그 ↔ 레지스트리", () => {
       "claude-opus-5",
       "gpt-5.6-terra",
       "gpt-5.6-sol",
+      "grok-4.6",
       "grok-4.5",
       "glm-4.7",
       "glm-5.2",
@@ -255,6 +256,7 @@ describe("퀵레인 선택 헬퍼", () => {
     const sel = selectionFor(grok, grok.models[0], "");
     expect(sel.harness).toBe("grok");
     expect(sel.command).toBe("grok");
-    expect(sel.modelId).toBe("grok-4.5");
+    // 그룹의 첫 칸 = 신형(레지스트리 등재 순서 보존).
+    expect(sel.modelId).toBe("grok-4.6");
   });
 });

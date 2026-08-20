@@ -567,7 +567,16 @@ const MODEL_BINARY: Partial<Record<ModelType, string>> = {
   antigravity: "agy",
 };
 
-const GROK_DEFAULT_MODEL = "grok-4.5";
+/**
+ * 핀이 없을 때 grok argv 에 붙는 `-m` 값.
+ *
+ * ★"핀을 안 붙이고 CLI 기본에 맡긴다" 가 아니라 **우리가 명시적으로 못박는** 값이다
+ * (그래야 cost_logs·라우팅 그래프가 어느 모델이 돌았는지 안다). 대가로 세대가
+ * 올라가면 사람이 여기를 고쳐야 하고, 안 고치면 조용히 낡는다 — 실제로 `grok models`
+ * 의 default 가 grok-4.6 으로 바뀐 뒤에도 한동안 grok-4.5 로 남아 있었다.
+ * 2026-08-20 `grok models` 실측(Default model: grok-4.6)에 맞춰 갱신했다.
+ */
+const GROK_DEFAULT_MODEL = "grok-4.6";
 
 /**
  * 이 하네스가 스폰하는 CLI 이름 — 에이전트 doc 의 `command` 필드에 넣을 값.

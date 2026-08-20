@@ -25,8 +25,11 @@ import {
   ORCHESTRATOR_HARNESS_SETTINGS,
   claudeOrchestratorChoices,
   codexOrchestratorChoices,
+  grokOrchestratorChoices,
   normalizeOrchestratorModelSetting,
+  ORCHESTRATOR_SELECTOR_RETIRED,
 } from "../../electron/model-selection";
+import { getModel } from "../../electron/model-registry";
 
 describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
   const options = ORCHESTRATOR_MODEL_OPTIONS as ReadonlyArray<{
@@ -36,6 +39,7 @@ describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
   }>;
   const claudeVariants = options.filter((o) => o.value.startsWith("claude:"));
   const codexVariants = options.filter((o) => o.value.startsWith("codex:"));
+  const grokVariants = options.filter((o) => o.value.startsWith("grok:"));
 
   it("★Claude 변형 목록이 레지스트리 파생 목록과 정확히 일치한다", () => {
     const expected = claudeOrchestratorChoices().map((c) => ({
@@ -83,15 +87,40 @@ describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
     }
   });
 
-  it("★grok/antigravity 는 모델 접미 칸을 세우지 않는다 — 핀 축이 없다", () => {
+  it("★antigravity 는 모델 접미 칸을 세우지 않는다 — 핀 축이 없다", () => {
     // 핀을 세워봐야 `normalizeOrchestratorModelSetting` 이 접미를 버려서 저장값엔
     // 남고 CLI 엔 안 붙는다. 그 상태를 UI 에서 애초에 만들지 않는다.
-    for (const harness of ["grok", "antigravity"]) {
-      expect(
-        options.filter((o) => o.value.startsWith(`${harness}:`)),
-        harness
-      ).toEqual([]);
-    }
+    expect(options.filter((o) => o.value.startsWith("antigravity:"))).toEqual(
+      []
+    );
+  });
+
+  it("★Grok 변형 목록이 레지스트리 파생 목록과 정확히 일치한다", () => {
+    // grok 은 2026-08-20 에 접미 칸이 열렸다(티켓 6AsbulPe). 열 수 있었던 근거는
+    // 배선이다: `orchestratorLaunchPin` 의 grok 분기(`nativeModel`)와 main.ts 오케
+    // launch 의 `nativeModelOverride` 가 이미 살아 있었고, 막고 있던 것은
+    // `normalizeOrchestratorModelSetting` 의 낡은 가드 하나였다. claude/codex 와
+    // 같은 파생 대조를 받는다 — 미러가 벌어지면 여기서 깨진다.
+    const expected = grokOrchestratorChoices().map((c) => ({
+      value: c.value,
+      label: c.label,
+      efforts: c.efforts,
+    }));
+    expect(grokVariants).toEqual(expected);
+    // 실측 근거: `grok models`(CLI 1.0.5) → grok-4.6(default) / grok-4.5.
+    expect(grokVariants.map((o) => o.value)).toEqual([
+      "grok:grok-4.6",
+      "grok:grok-4.5",
+    ]);
+  });
+
+  it("★grok 칸은 effort 둘째 드롭다운을 세우지 않는다 — argv 에 안 붙는다", () => {
+    // docs.x.ai 는 grok-4.6 을 "Reasoning: Configurable" 로 적고 `grok --help` 에도
+    // `--reasoning-effort` 가 있지만, `agent-config.buildCLICommand` 의 grok 분기가
+    // 그 플래그를 argv 에 붙이지 않는다. 안 붙는 축을 셀렉터에 세우면 "골랐는데 안
+    // 먹는" 칸이 된다 — grok 오케가 이미 겪은 실패모드(#638/#639)와 같은 모양.
+    for (const o of grokVariants) expect(o.efforts, o.value).toEqual([]);
+    expect(isOrchestratorModel("grok:grok-4.6@high")).toBe(false);
   });
 
   it("설명 표는 목록을 가로막지 않는다(칸 없는 설명이 없다)", () => {
@@ -125,16 +154,34 @@ describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
     }
   });
 
-  it("완료기준: Opus5·Fable5·Opus4.8·Sonnet5 를 고를 수 있다", () => {
+  it("완료기준: Opus5·Fable5·Sonnet5 를 고를 수 있다", () => {
     const values = options.map((o) => o.value);
-    for (const id of [
-      "claude-opus-5",
-      "claude-fable-5",
-      "claude-opus-4-8",
-      "claude-sonnet-5",
-    ]) {
+    for (const id of ["claude-opus-5", "claude-fable-5", "claude-sonnet-5"]) {
       expect(values, id).toContain(`claude:${id}`);
     }
+  });
+
+  it("★오케 선택에서 내린 칸은 안 서고, 레지스트리엔 그대로 있다", () => {
+    // 2026-08-20(티켓 6AsbulPe): `get_routing_effectiveness` 전체 스캔 491건 중
+    // model@effort 해상도가 붙은 299건 기준으로 아래 넷은 **실사용 0건**이었다.
+    // 그래서 오케 선택 경로에서만 내렸다 — 레지스트리 행은 그대로라 퀵레인·
+    // dispatch_task 명시 지정·과거 티켓 단가 계산이 전부 무회귀다.
+    // (종전 이 테스트는 opus-4.8 이 **있어야** 한다고 주장했다. 그 완료기준은
+    //  "레지스트리 파생이 리터럴 표를 대체했나" 를 보던 것이고, 지금은 그 파생에
+    //  퇴출 필터가 한 겹 얹혔다 — 아래 파생 대조 테스트가 그것까지 본다.)
+    const values = options.map((o) => o.value);
+    for (const id of Object.keys(ORCHESTRATOR_SELECTOR_RETIRED)) {
+      expect(values, id).not.toContain(`claude:${id}`);
+      expect(values, id).not.toContain(`codex:${id}`);
+      // 레지스트리에는 살아 있다("숨김"이지 "삭제"가 아니다).
+      expect(getModel(id), id).toBeDefined();
+    }
+    expect(Object.keys(ORCHESTRATOR_SELECTOR_RETIRED).sort()).toEqual([
+      "claude-haiku-4-5-20251001",
+      "claude-opus-4-8",
+      "gpt-5.4",
+      "gpt-5.4-mini",
+    ]);
   });
 
   it("★완료기준: Codex 변형(gpt-5.6 sol/terra/luna + gpt-5.5)을 고를 수 있다", () => {
@@ -254,8 +301,33 @@ describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
   it("★새 하네스도 isOrchestratorModel 을 통과한다(셀렉터 값 = 유효값)", () => {
     expect(isOrchestratorModel("grok")).toBe(true);
     expect(isOrchestratorModel("antigravity")).toBe(true);
-    // 핀 축이 없으므로 접미/effort 는 인정하지 않는다.
-    expect(isOrchestratorModel("grok:grok-4.5")).toBe(false);
+    // grok 은 모델 핀 축이 열렸다(위 파생 대조 테스트 참조).
+    expect(isOrchestratorModel("grok:grok-4.6")).toBe(true);
+    expect(isOrchestratorModel("grok:grok-4.5")).toBe(true);
+    // 그래도 effort 축은 없다 — 접미 effort 는 여전히 인정하지 않는다.
     expect(isOrchestratorModel("grok@high")).toBe(false);
+    // antigravity 는 레지스트리 행 자체가 없어 어떤 접미도 인정되지 않는다.
+    expect(isOrchestratorModel("antigravity:agy-1")).toBe(false);
+  });
+
+  it("★맨몸 칸 4개가 전부 자기가 무엇으로 뜨는지 라벨에 적는다", () => {
+    // 사장님 지적("맨 위 그냥 Claude 는 아래 Claude (Opus 5) 들과 뭐가 다른지
+    // 모르겠다")의 회귀 가드. 제거가 아니라 **명확화**로 푼 이유는
+    // `ORCHESTRATOR_HARNESS_OPTIONS` 주석에 있다(하네스 축·기본 우선순위·저장값
+    // 연속성이 전부 이 칸에 걸려 있다). 네 칸 모두 같은 규칙을 받는다 —
+    // 하나만 고치면 나머지 셋이 똑같이 모호한 채로 남는다.
+    for (const o of ORCHESTRATOR_HARNESS_OPTIONS) {
+      expect(o.label, o.value).toContain("(CLI default)");
+    }
+    // 구체 모델명을 적지 않는 것도 규칙이다 — claude/codex CLI 의 기본 모델은
+    // 우리가 측정하지 않는 이동표적이라, 적는 순간 다음 주에 거짓말이 된다.
+    expect(
+      ORCHESTRATOR_HARNESS_OPTIONS.map((o) => o.label)
+    ).toEqual([
+      "Claude (CLI default)",
+      "Codex (CLI default)",
+      "Grok (CLI default)",
+      "Antigravity (CLI default)",
+    ]);
   });
 });

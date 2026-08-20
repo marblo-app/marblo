@@ -11,7 +11,8 @@ export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
  *   "codex"                      — Codex CLI 기본 모델(종전 값. 바이트 동일)
  *   "codex:gpt-5.6-terra"        — Codex CLI 를 이 구체 모델로 핀(effort=CLI 기본)
  *   "codex:gpt-5.6-terra@high"   — 모델 + reasoning effort 까지 지정
- *   "grok" / "antigravity"       — 그 CLI 기본 모델(모델 핀 축 없음. 아래 참조)
+ *   "grok:grok-4.6"              — Grok Build CLI 를 이 구체 모델로 핀(`-m`)
+ *   "grok" / "antigravity"       — 그 CLI 기본 모델(아래 참조)
  * 접미가 없는 값은 종전과 완전히 같은 의미라 앱상태에 저장된 기존 값
  * ("claude"/"codex")이 그대로 유효하다(재시작 연속성 하위호환).
  *
@@ -24,11 +25,16 @@ export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
  * 그래서 하네스 칸은 그 배열과 **원소·순서까지** 같아야 하고,
  * `tests/unit/orchestrator-model-options.test.ts` 가 그것을 못박는다.
  *
- * ★grok/antigravity 는 모델 접미 칸을 세우지 않는다. 두 하네스는 launch 옵션에
- * 모델 핀 축이 없어서(`orchestratorLaunchPin` 은 claude/codex 두 축만 만든다)
- * 접미를 세워봐야 저장값에만 남고 CLI 엔 안 붙는다 — `normalizeOrchestratorModel
- * Setting` 이 그 접미를 버린다. 핀 축이 생기는 날 그 함수가 먼저 열리고, 이 목록은
- * 위 테스트가 시키는 대로 따라간다.
+ * ★antigravity 는 모델 접미 칸을 세우지 않는다. 그 하네스는 launch 옵션에 모델
+ * 핀 축이 없어서(`orchestratorLaunchPin` 이 그 축을 만들지 않는다) 접미를 세워봐야
+ * 저장값에만 남고 CLI 엔 안 붙는다 — `normalizeOrchestratorModelSetting` 이 그
+ * 접미를 버린다. 레지스트리에 antigravity 행 자체가 아직 없기도 하다.
+ *
+ * ★grok 은 2026-08-20 에 접미 칸이 열렸다. 열 수 있었던 근거는 취향이 아니라 배선
+ * 이다: `orchestratorLaunchPin` 의 grok 분기(`nativeModel`)와 main.ts 오케 launch
+ * 두 자리의 `nativeModelOverride` 가 이미 살아 있었고, 막고 있던 것은
+ * `normalizeOrchestratorModelSetting` 안의 **낡은 가드** 하나뿐이었다(그 가드의
+ * 근거 주석은 grok 분기가 들어온 날부터 사실이 아니었다).
  *
  * ★이 배열은 **모델 축만** 담는다. effort 는 모델마다 지원 목록이 달라서 곱집합으로
  * 펼치면(6모델 × 4effort) 아무도 못 고르는 드롭다운이 되므로, 각 칸이 자기가 허용
@@ -44,6 +50,14 @@ export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
  * 파생)와 원소단위로 대조한다. 모델을 추가하려면 레지스트리에 행을 넣고 그 테스트가
  * 시키는 대로 여기 반영하면 된다 — 두 곳이 조용히 어긋나는 경로는 없다.
  *
+ * ★목록에 없는 모델이 곧 "레지스트리에 없는 모델" 은 아니다. 실사용 집계에서
+ * 0건이 나온 칸은 `model-selection.ORCHESTRATOR_SELECTOR_RETIRED` 로 **오케 선택
+ * 경로에서만** 내린다(2026-08-20: claude-opus-4-8 / claude-haiku-4-5-20251001 /
+ * gpt-5.4 / gpt-5.4-mini). 레지스트리 행은 그대로 살아 있어서 퀵레인·
+ * `dispatch_task(model=…)` 명시 지정·과거 티켓 단가 계산이 전부 무회귀다. 위
+ * 파생 대조 테스트가 그 필터를 지난 결과와 이 배열을 맞춰 보므로, 여기서 손으로
+ * 지우고 저기 표에 안 넣으면(또는 반대로) 곧바로 깨진다.
+ *
  * ★effort 목록에 max/ultra 가 없는 것은 누락이 아니다. 그 두 칸은 #602 승인게이트
  * 대상이고, 오케 선택은 프로젝트별로 영구 저장돼 재시작마다 되살아나므로 "1회용
  * 승인" 과 수명이 맞지 않는다. 근거는 `model-selection.selectableEfforts` 주석.
@@ -51,18 +65,12 @@ export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 export const ORCHESTRATOR_MODEL_OPTIONS = [
   // Claude — 능력등급 높음 → 낮음(레지스트리 modelsByProvider 역순).
   // claude 는 effort 축이 아예 없다(레지스트리 `efforts: []`).
-  { value: "claude", label: "Claude", efforts: [] },
+  { value: "claude", label: "Claude (CLI default)", efforts: [] },
   { value: "claude:claude-fable-5", label: "Claude (Fable 5)", efforts: [] },
   { value: "claude:claude-opus-5", label: "Claude (Opus 5)", efforts: [] },
-  { value: "claude:claude-opus-4-8", label: "Claude (Opus 4.8)", efforts: [] },
   { value: "claude:claude-sonnet-5", label: "Claude (Sonnet 5)", efforts: [] },
-  {
-    value: "claude:claude-haiku-4-5-20251001",
-    label: "Claude (Haiku 4.5)",
-    efforts: [],
-  },
   // Codex(GPT) — 같은 규칙. 라벨은 레지스트리 실명 그대로다("gpt-5.6-sol").
-  { value: "codex", label: "Codex", efforts: [] },
+  { value: "codex", label: "Codex (CLI default)", efforts: [] },
   {
     value: "codex:gpt-5.6-sol",
     label: "Codex (gpt-5.6-sol)",
@@ -83,24 +91,42 @@ export const ORCHESTRATOR_MODEL_OPTIONS = [
     label: "Codex (gpt-5.6-luna)",
     efforts: ["low", "medium", "high", "xhigh"],
   },
-  {
-    value: "codex:gpt-5.4",
-    label: "Codex (gpt-5.4)",
-    efforts: ["low", "medium", "high", "xhigh"],
-  },
-  {
-    value: "codex:gpt-5.4-mini",
-    label: "Codex (gpt-5.4-mini)",
-    efforts: ["low", "medium", "high", "xhigh"],
-  },
-  // Grok Build(xAI 네이티브 하네스) · Antigravity(agy). 둘 다 자기 계정으로 자기
-  // CLI 가 뜨므로 오케 후보다(ORCHESTRATOR_HARNESS_SETTINGS). 모델 핀 축은 없다.
-  { value: "grok", label: "Grok", efforts: [] },
-  { value: "antigravity", label: "Antigravity", efforts: [] },
+  // Grok Build(xAI 네이티브 하네스). 라벨은 codex 와 같은 규칙으로 레지스트리
+  // 실명 그대로다 — xAI 는 4.5/4.6 처럼 소수점 세대를 촘촘히 올려서, 예쁘게 접으면
+  // 화면과 argv 가 어긋나도 눈에 안 띈다.
+  { value: "grok", label: "Grok (CLI default)", efforts: [] },
+  { value: "grok:grok-4.6", label: "Grok (grok-4.6)", efforts: [] },
+  { value: "grok:grok-4.5", label: "Grok (grok-4.5)", efforts: [] },
+  // Antigravity(agy). 자기 계정으로 자기 CLI 가 뜨므로 오케 후보다
+  // (ORCHESTRATOR_HARNESS_SETTINGS). 모델 핀 축은 아직 없다.
+  { value: "antigravity", label: "Antigravity (CLI default)", efforts: [] },
 ] as const;
 
 /**
  * 모델 접미가 없는 칸들 = **하네스 축**(claude/codex/grok/antigravity).
+ *
+ * ★네 칸의 라벨 원칙(2026-08-20, 티켓 6AsbulPe) — "(CLI default)".
+ *
+ * 사장님 지적은 "맨 위 그냥 Claude 는 아래 Claude (Opus 5) 들과 뭐가 다른지
+ * 화면만 봐선 모르겠다" 였다. 맞는 지적인데, **제거는 답이 아니다**: 이 칸들은
+ * 아래 핀 칸들의 중복이 아니라 서로 다른 축이다.
+ *
+ *   핀 칸  — "이 CLI 를 **이 모델로 못박아** 띄운다"(argv 에 --model/-c model/-m).
+ *   맨몸 칸 — "이 CLI 를 **핀 없이** 띄운다"(argv 무변경 = 그 CLI 의 기본 모델).
+ *
+ * 그리고 맨몸 칸은 이 배열 밖에서도 일을 한다: `ORCHESTRATOR_HARNESS_OPTIONS` 가
+ * 설정 화면의 "실행 모델" 셀렉터 전체이고, `ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY`
+ * (Claude > Codex > Grok)와 `ORCHESTRATOR_HARNESS_SETTINGS` 가 같은 값을 쓴다.
+ * 지우면 그 축이 통째로 무너진다. 저장된 기존 값 "claude"/"codex" 의 재시작
+ * 연속성도 이 칸이 진다.
+ *
+ * 그래서 목적("무엇이 골라지는지 모르는 칸을 없앤다")은 **라벨**로 달성한다.
+ * `"Claude"` → `"Claude (CLI default)"`. 값이 아니라 **규칙**을 적는 이유는,
+ * claude/codex CLI 의 기본 모델은 우리가 측정하지 않는 이동표적이라 구체 모델명을
+ * 적으면 그게 다음 주에 거짓말이 되기 때문이다. 규칙은 안 낡는다.
+ *
+ * ★네 칸에 **같은 규칙**을 적용한다. Claude 만 고치면 codex/grok/antigravity 가
+ * 똑같이 모호한 채로 남고, 다음 사람이 같은 질문을 다시 한다.
  *
  * 설정 화면의 "실행 모델"(전역 기본 오케 CLI)은 이 축만 다룬다 — 구체 모델 핀은
  * 프로젝트별인 오케 패널 셀렉터의 몫이다. 파생으로 두는 이유는 하나: 종전엔
@@ -130,10 +156,13 @@ export const ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY = [
  * 조용히 사라진다. 이번 티켓이 고치는 실패모드가 정확히 그 모양이다.
  */
 export const ORCHESTRATOR_HARNESS_DESC: Readonly<Record<string, string>> = {
-  claude: "Highest quality; uses Claude weekly limits. Default.",
-  codex: "Good for saving Claude quota; uses OpenAI/Codex limits.",
-  grok: "xAI Grok Build CLI. Needs the project folder trusted so Marblo MCP attaches.",
-  antigravity: "Google Antigravity (agy) CLI; uses your Google account.",
+  claude:
+    "Highest quality; uses Claude weekly limits. Default. No --model pin — runs whatever the Claude CLI defaults to.",
+  codex:
+    "Good for saving Claude quota; uses OpenAI/Codex limits. No model pin — runs whatever the Codex CLI defaults to.",
+  grok: "xAI Grok Build CLI. Needs the project folder trusted so Marblo MCP attaches. Unpinned runs grok-4.6 (the CLI default).",
+  antigravity:
+    "Google Antigravity (agy) CLI; uses your Google account. No model pin available yet.",
 };
 
 /** 모델 축의 값(effort 접미 없음). 셀렉터 첫째 드롭다운이 다루는 값. */
