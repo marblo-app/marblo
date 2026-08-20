@@ -458,10 +458,10 @@ export default function LectureDetailPage() {
       <section className="max-w-5xl mx-auto px-4 mb-10">
         <div className="rounded-2xl overflow-hidden border border-zinc-700/50 shadow-2xl shadow-indigo-900/10">
           <Image
-            src="/images/lectures/marblo-v3-masterclass.png"
+            src="/images/lectures/marblo-workspace-board.png"
             alt="Marblo AI Agent Masterclass"
-            width={2950}
-            height={1344}
+            width={1480}
+            height={960}
             className="w-full h-auto"
             priority
           />

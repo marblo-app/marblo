@@ -148,7 +148,7 @@ Run Claude + Codex + Antigravity agents simultaneously on one board, manage task
 From weather dashboard warmup → AI SaaS main project → GCP deployment → SaaS launch, complete a real project in 15.5 hours.`,
     price: 149000,
     originalPrice: 199000,
-    thumbnail: "/images/lectures/marblo-v3-masterclass.png",
+    thumbnail: "/images/lectures/marblo-workspace-board.png",
     instructor: "김동원",
     instructorTitle: "데이터가 답이다",
     instructorBio_ko: `패스트캠퍼스에서 AI·GA4·마케팅 분석·SEO 강의를 진행하는 현직 데이터 사이언티스트입니다.
