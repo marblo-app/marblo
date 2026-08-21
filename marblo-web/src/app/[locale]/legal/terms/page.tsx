@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import LegalPageLayout from "@/components/LegalPageLayout";
 
-const LAST_UPDATED = "2026-08-19";
+const LAST_UPDATED = "2026-08-21";
 const EFFECTIVE_DATE = "2026년 7월 14일";
 
 export default function TermsOfServicePage() {
@@ -430,10 +430,14 @@ export default function TermsOfServicePage() {
       <p>
         회사의 시스템 오류, 서비스 또는 콘텐츠의 하자, 약정한 서비스·콘텐츠의
         미제공 등 회사 귀책 사유가 발생한 경우, 강의 및 구독 서비스 모두에
-        대하여 해당 사유가 발생한 날부터 7일 이내 환불을 신청할 수 있으며,
-        강의 진도율·자료 다운로드 여부·이용량 또는 구독 경과 기간과 관계없이
-        결제 금액을 전액 환불합니다. 예정된 강의의 오픈이 불가능한 경우는
-        콘텐츠 미제공에 해당합니다.
+        대하여 전자상거래법 제17조 제3항에 따라 그 사실을 안 날 또는 알 수
+        있었던 날부터 30일 이내, 또는 해당 강의·서비스를 공급받은 날부터 3개월
+        이내(둘 중 어느 하나에 해당하면 가능) 환불을 신청할 수 있으며, 강의
+        진도율·자료 다운로드 여부·이용량 또는 구독 경과 기간과 관계없이 결제
+        금액을 전액 환불합니다. 위 기간은 법령이 보장하는 최소 기간이며, 회사는
+        이보다 이용자에게 불리한 기간을 적용하지 않습니다. 이는 이용자의 무과실
+        청약 철회(전자상거래법 제17조 제1항의 7일)와 별개의 기준입니다. 예정된
+        강의의 오픈이 불가능한 경우는 콘텐츠 미제공에 해당합니다.
       </p>
 
       <h2>제17조 (책임 제한)</h2>

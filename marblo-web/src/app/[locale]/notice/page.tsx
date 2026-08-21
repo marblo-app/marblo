@@ -5,7 +5,7 @@ import Link from "next/link";
 import LegalPageLayout from "@/components/LegalPageLayout";
 import { lectures } from "@/data/lectures";
 
-const PUBLISHED_AT = "2026-08-19";
+const PUBLISHED_AT = "2026-08-21";
 
 const noticeTitle = (locale: string) =>
   locale === "ja" ? "お知らせ" : locale === "en" ? "Notices" : "공지사항";
@@ -81,12 +81,17 @@ export default function NoticePage() {
         <p>
           Marblo의 <strong>시스템 오류, 서비스 또는 콘텐츠의 하자, 약정한
           서비스·콘텐츠의 미제공</strong> 등 판매자 귀책 사유가 발생한 경우,
-          강의와 구독(Pro / Team / Team Plus) 모두에 대하여 해당 사유가 발생한
-          날부터 <strong>7일 이내</strong> 환불을 신청할 수 있으며, 결제 금액을
-          <strong>전액 환불</strong>합니다.
+          강의와 구독(Pro / Team / Team Plus) 모두에 대하여 전자상거래법 제17조
+          제3항에 따라 <strong>그 사실을 안 날 또는 알 수 있었던 날부터 30일
+          이내, 또는 해당 강의·서비스를 공급받은 날부터 3개월 이내</strong>{" "}
+          환불을 신청할 수 있으며, 결제 금액을 <strong>전액 환불</strong>합니다.
+          위 두 기간 중 <strong>어느 하나에 해당하면</strong> 환불을 신청하실 수
+          있습니다. 위 기간은 법령이 보장하는 <strong>최소 기간</strong> 이며,
+          Marblo 는 이보다 이용자에게 불리한 기간을 적용하지 않습니다.
         </p>
         <p>
-          이 조항은 이용자의 무과실 청약 철회와 별도의 환불 기준이며,{" "}
+          이 조항은 이용자의 무과실 청약 철회(전자상거래법 제17조 제1항의 7일)와
+          별도의 환불 기준이며,{" "}
           <Link href={`/${locale}/legal/refund`}>환불정책</Link>에 명시된 강의
           청약 철회 및 부분 환불 기준에 우선하여 적용됩니다. 따라서 판매자 귀책
           사유에 따른 환불에는 <strong>강의 진도율, 자료 다운로드 여부, 이용량

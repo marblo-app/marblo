@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import LegalPageLayout from "@/components/LegalPageLayout";
 
-const LAST_UPDATED = "2026-08-20";
+const LAST_UPDATED = "2026-08-21";
 
 export default function RefundPolicyPage() {
   const t = useTranslations("footer");
@@ -24,14 +24,23 @@ export default function RefundPolicyPage() {
           시스템 오류, 서비스 또는 콘텐츠의 하자, 약정한 서비스·콘텐츠의 미제공
         </strong>{" "}
         등 판매자 귀책 사유가 발생한 경우, 강의와 구독(Pro / Team / Team Plus)
-        모두에 대하여 해당 사유가 발생한 날부터 <strong>7일 이내</strong> 환불을
-        신청할 수 있으며, 결제 금액을
-        <strong>전액 환불</strong>합니다.
+        모두에 대하여 전자상거래법 제17조 제3항에 따라{" "}
+        <strong>
+          그 사실을 안 날 또는 알 수 있었던 날부터 30일 이내, 또는 해당
+          강의·서비스를 공급받은 날부터 3개월 이내
+        </strong>{" "}
+        환불을 신청할 수 있으며, 결제 금액을 <strong>전액 환불</strong>합니다.
+        위 두 기간 중 <strong>어느 하나에 해당하면</strong> 환불을 신청하실 수
+        있습니다.
       </p>
       <p>
-        이 조항은 이용자의 무과실 청약 철회와 별도의 환불 기준이며, 아래 강의
-        청약 철회 및 부분 환불 기준에 우선하여 적용됩니다. 따라서 판매자 귀책
-        사유에 따른 환불에는{" "}
+        위 기간은 법령이 보장하는 <strong>최소 기간</strong> 이며, Marblo 는
+        이보다 이용자에게 불리한 기간을 적용하지 않습니다.
+      </p>
+      <p>
+        이 조항은 이용자의 무과실 청약 철회(아래 제2항·제3항의 7일, 전자상거래법
+        제17조 제1항)와 별도의 환불 기준이며, 아래 강의 청약 철회 및 부분 환불
+        기준에 우선하여 적용됩니다. 따라서 판매자 귀책 사유에 따른 환불에는{" "}
         <strong>
           강의 진도율, 자료 다운로드 여부, 이용량 또는 구독 경과 기간
         </strong>
@@ -43,10 +52,10 @@ export default function RefundPolicyPage() {
       <h3>2-1. 청약 철회 기간 이내</h3>
       <p>
         <strong>결제일</strong> 과 <strong>강의 수강이 개시된 날</strong> 중{" "}
-        <strong>나중에 도래하는 날로부터 7일 이내</strong> 에는 다음 조건 모두를
-        만족하는 경우 무조건 청약 철회가 가능합니다. 사전 판매(오픈 예정) 강의와
-        같이 결제 이후에 수강이 개시되는 경우, 기산점은 실제 수강 개시일이
-        됩니다.
+        <strong>나중에 도래하는 날로부터 7일 이내</strong> (전자상거래법 제17조
+        제1항) 에는 다음 조건 모두를 만족하는 경우 무조건 청약 철회가
+        가능합니다. 사전 판매(오픈 예정) 강의와 같이 결제 이후에 수강이
+        개시되는 경우, 기산점은 실제 수강 개시일이 됩니다.
       </p>
       <ul>
         <li>
@@ -84,7 +93,8 @@ export default function RefundPolicyPage() {
         </strong>{" "}
         다만 위 <strong>제1항(판매자 귀책 사유에 따른 환불)</strong> 은 본 항의
         30일 기간 제한 및 진도율·다운로드 조건과 무관하게, 경과 기간에 관계없이
-        우선하여 적용됩니다.
+        우선하여 적용되며, 제1항의 신청 기간(그 사실을 안 날 또는 알 수 있었던
+        날부터 30일 이내, 또는 공급받은 날부터 3개월 이내)이 그대로 적용됩니다.
       </p>
 
       <h2>3. 구독(Pro / Team / Team Plus) 환불</h2>

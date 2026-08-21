@@ -465,7 +465,7 @@
     "q4_title": "4. How do I get into the Founder Discord?",
     "q4_body": "Once your application is reviewed and you're selected, we email access instructions along with a Discord invite link to the email you applied with.\n\nThe channel is a private space for Founders only, and your access stays for life even if you cancel Pro later. Inside the channel you get early beta access to new features, a direct line to the developer, and shared workflows among members.",
     "q5_title": "5. What about cost and refunds?",
-    "q5_body": "Joining the Founder beta is free — there's no payment, so there's nothing to refund.\n\nMarblo Pro free coupon — this is a benefit issued for free when you submit feedback, and it is not refundable. Once you activate Pro with the coupon, no separate refund applies from the start date of use.\n\nCourses (optional purchase) — independent of Founder benefits, you can buy them at full price if you'd like, and under Korean e-commerce law you may withdraw within 7 days of payment.\n\nFounder Discord channel — kept open for life, independent of payment or coupon."
+    "q5_body": "Joining the Founder beta is free — there's no payment, so there's nothing to refund.\n\nMarblo Pro free coupon — this is a benefit issued for free when you submit feedback, and it is not refundable. Once you activate Pro with the coupon, no separate refund applies from the start date of use.\n\nCourses (optional purchase) — independent of Founder benefits, you can buy them at full price if you'd like, and under Korean e-commerce law you may withdraw within 7 days from the later of the payment date and the date the course becomes accessible.\n\nFounder Discord channel — kept open for life, independent of payment or coupon."
   },
   "betatester50": {
     "badge": "🌟 Founders open · selective",
@@ -734,7 +734,7 @@
     "validityTitle": "Validity period",
     "validityBody": "Course access and update availability will be operated within 1 year from purchase; the confirmed period will be shown on the product detail and checkout screens when sales open.",
     "refundTitle": "Refund policy",
-    "refundBody": "Withdrawal is available within 7 days after payment. Within 30 days of payment, partial refund rules apply based on course progress (and whether course materials have been downloaded); after 30 days, partial refunds are no longer available. If a seller-caused system error, defect, or non-provision occurs, a full refund is available within 7 days of the issue, regardless of course progress, material downloads, or elapsed time.",
+    "refundBody": "Withdrawal is available within 7 days from the later of the payment date and the date the course becomes accessible. Within 30 days of payment, partial refund rules apply based on course progress (and whether course materials have been downloaded); after 30 days, partial refunds are no longer available. If a seller-caused system error, defect, or non-provision occurs, a full refund is available regardless of course progress, material downloads, or elapsed time, when requested within 30 days of the date you learned (or could have learned) of the issue, or within 3 months of the date the course or service was supplied (Article 17(3) of the Korean E-Commerce Act).",
     "refundLink": "View Refund Policy",
     "operationInfoHeading": "Enrollment & Course Schedule",
     "instructorBioTitle": "Instructor Background",
