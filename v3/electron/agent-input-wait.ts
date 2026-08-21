@@ -171,10 +171,77 @@ export const BYPASS_CONSENT_CONFIRM = "\r";
 export const BYPASS_CONSENT_CONFIRM_DELAY_MS = 150;
 
 /**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE COMPOSER IS ALIVE  —  the gate that closes the consent window early
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * The 180 s boot window above was the ONLY thing standing between a quoted
+ * string and a live composer, and it is not enough. The latch
+ * (`alreadyAnswered`) only arms itself by MEETING the consent screen, and a
+ * returning user never sees that screen — so on their machine the latch stays
+ * false forever and every one of the first 180 seconds is armed. Live PTY
+ * capture (scenario R, 2026-08-21): boot prompt submitted at 1741 ms, the CLI
+ * printed the accept line at 8243 ms while quoting THIS FILE, and `2` + `\r`
+ * went into the live conversation at 8244 / 8396 ms.
+ *
+ * ★Why this is not fixed by making the MARKER stricter. See
+ * BYPASS_ACCEPT_MARKER's comment: chunks are classified individually with no
+ * rolling buffer, and the warning headline sits five lines above the option
+ * list, so the two routinely arrive in different writes. A conjunction would
+ * stop matching the REAL screen, and a new Mac would stall again — trading a
+ * misfire for the outage the auto-accept exists to prevent.
+ *
+ * So the marker is left exactly as it was and the ARMING is narrowed instead,
+ * on evidence that the consent screen is behind us rather than on how the TUI
+ * happened to chunk. Two proofs, each one-way (once true, true for this PTY's
+ * whole life), and the real consent screen precedes BOTH of them:
+ *
+ *   composer frame — a frame carrying Claude Code's composer-mode footer
+ *     glyph. Verified against live frames: the glyph appears on the ready
+ *     composer and on NO first-run screen (consent, folder trust, theme
+ *     picker, login menu) — the same capture that made it the orchestrator's
+ *     readiness marker. The consent dialog cannot carry it: claude mounts
+ *     `BypassPermissionsModeDialog` as an awaited modal BEFORE the REPL exists
+ *     (two mount sites in 2.1.238, both pre-REPL), so there is no code path
+ *     that repaints the consent screen once a composer has been drawn.
+ *
+ *   we typed — we submitted the boot prompt (or injected a message) into this
+ *     PTY. We only ever write into a composer we believe is live, and the
+ *     orchestrator proves it before writing: sendPrompt() holds the boot prompt
+ *     while looksLikeFirstRunDialog() is true, and BYPASS_ACCEPT_MARKER is one
+ *     of those markers. "Boot prompt sent" therefore already MEANS "the consent
+ *     screen was not on screen".
+ *
+ * The order matters at the call site: fold the frame into the proof BEFORE
+ * asking whether to answer it. An agent quoting the accept line does so inside
+ * a live composer, and claude repaints the whole screen — footer included — so
+ * the quoting frame usually carries its own disproof.
+ */
+const LIVE_COMPOSER_MARKER = /\u23f5\u23f5/;
+
+/**
+ * Does this frame prove the CLI is at its live composer?
+ *
+ * Pure; the frame is read and dropped (the F-7 원문 금지 contract).
+ *
+ * ★Matched as a GLYPH, not as words, for the same reason the orchestrator's
+ * readiness pattern is: the same footer renders as `⏵⏵ bypass permissions on`
+ * and, when claude paints with cursor-forward escapes instead of spaces, as
+ * `⏵⏵bypasspermissionson`. The glyph survives both.
+ *
+ * Claude Code only. antigravity carries the same bypass flag but not this
+ * footer, so its consent window is closed by the "we typed" proof alone —
+ * strictly better than the 180 s free-for-all it had before, and never worse.
+ */
+export function looksLikeLiveComposer(frame: string): boolean {
+  return LIVE_COMPOSER_MARKER.test(stripFrameAnsi(frame));
+}
+
+/**
  * Should this PTY chunk be answered as the first-run bypass consent screen?
  * Pure — the chunk is read and dropped.
  *
- * All four gates must hold. The marker alone is not enough: it is a string, and
+ * All five gates must hold. The marker alone is not enough: it is a string, and
  * strings show up in transcripts.
  */
 export function shouldAutoAcceptBypass(input: {
@@ -186,9 +253,17 @@ export function shouldAutoAcceptBypass(input: {
   now: number;
   /** Latch — this instance already answered once. */
   alreadyAnswered: boolean;
+  /**
+   * This PTY has been proven to be at a live composer at or before this chunk
+   * (see the block comment above). One-way: callers never clear it.
+   */
+  composerProvenLive: boolean;
   windowMs?: number;
 }): boolean {
   if (input.alreadyAnswered) return false;
+  // ★The gate this ticket exists for. A live composer means the consent screen
+  // is behind us for good, so the remaining boot window is not ours to use.
+  if (input.composerProvenLive) return false;
   if (!input.model || !BYPASS_FLAG_MODELS.has(input.model)) return false;
   const windowMs = input.windowMs ?? BYPASS_CONSENT_WINDOW_MS;
   if (input.now - input.spawnedAt > windowMs) return false;

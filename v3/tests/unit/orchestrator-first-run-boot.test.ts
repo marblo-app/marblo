@@ -30,6 +30,7 @@ import {
   BYPASS_CONSENT_WINDOW_MS,
   BYPASS_FLAG_MODELS,
   looksLikeFirstRunDialog,
+  looksLikeLiveComposer,
   shouldAutoAcceptBypass,
 } from "../../electron/agent-input-wait";
 import { stripFrameAnsi } from "../../electron/agent-status-reconcile";
@@ -139,6 +140,7 @@ describe("claude first-run: the bypass-permissions consent screen", () => {
         spawnedAt: 0,
         now: f.t,
         alreadyAnswered: false,
+        composerProvenLive: false,
       }),
     );
     // The consent screen is real, and exactly one recorded frame carries the
@@ -259,6 +261,7 @@ describe("the model axis is one axis", () => {
           spawnedAt: 0,
           now: 1_000,
           alreadyAnswered: false,
+          composerProvenLive: false,
         }),
       ).toBe(false);
     }
@@ -270,6 +273,7 @@ describe("the model axis is one axis", () => {
           spawnedAt: 0,
           now: 1_000,
           alreadyAnswered: false,
+          composerProvenLive: false,
         }),
       ).toBe(true);
     }
@@ -286,8 +290,104 @@ describe("the model axis is one axis", () => {
         spawnedAt: 0,
         now: BYPASS_CONSENT_WINDOW_MS + 1,
         alreadyAnswered: false,
+        composerProvenLive: false,
       }),
     ).toBe(false);
+  });
+});
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ★F-3 — THE MISFIRE INSIDE THE BOOT WINDOW
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * The suite above pins "never OUTSIDE the 180 s window". That was the whole
+ * guard, and it is not enough: the `alreadyAnswered` latch only arms itself by
+ * MEETING the consent screen, so a returning user — who never sees it — is
+ * armed for the entire window. Live PTY capture (scenario R, 2026-08-21): boot
+ * prompt submitted at 1741 ms, the CLI quoted the accept line at 8243 ms, and
+ * `2` + `\r` went into the live conversation at 8244 / 8396 ms. Both instants
+ * are comfortably INSIDE 180 s, which is why nothing here caught it.
+ *
+ * These are the cases that box was missing.
+ */
+describe("the composer footer tells a live conversation from the consent screen", () => {
+  it("matches the composer YOLO mode actually renders", () => {
+    const composer = frames("claude-composer-after-consent");
+    expect(composer.some((f) => looksLikeLiveComposer(f.chunk))).toBe(true);
+  });
+
+  it("matches NO first-run screen — that is what makes it usable as the closer", () => {
+    // The consent recording walks the whole first-run chain. If the footer
+    // glyph appeared anywhere on it, closing the window on the glyph would
+    // suppress the auto-accept on a brand-new Mac.
+    for (const f of frames("claude-first-run-consent")) {
+      expect(looksLikeLiveComposer(f.chunk)).toBe(false);
+    }
+    for (const f of frames("codex-skeleton-then-login")) {
+      expect(looksLikeLiveComposer(f.chunk)).toBe(false);
+    }
+  });
+
+  it("survives however the TUI spaces the footer", () => {
+    // Same reason BYPASS_ACCEPT_MARKER is written with \s*: claude paints this
+    // footer with cursor-forward escapes instead of spaces in one render path.
+    expect(looksLikeLiveComposer("\u23f5\u23f5 bypass permissions on")).toBe(
+      true,
+    );
+    expect(looksLikeLiveComposer("\u23f5\u23f5bypasspermissionson")).toBe(true);
+  });
+});
+
+describe("★the consent auto-accept is disarmed by a live composer", () => {
+  function consentChunk(): string {
+    return frames("claude-first-run-consent").find((f) =>
+      /yes,\s*i\s*accept/i.test(stripFrameAnsi(f.chunk)),
+    )!.chunk;
+  }
+
+  it("fires on the real screen when nothing has proven the composer live", () => {
+    // The regression guard for the guard: the new gate must not cost a new Mac
+    // its auto-accept.
+    expect(
+      shouldAutoAcceptBypass({
+        chunk: consentChunk(),
+        model: "claude",
+        spawnedAt: 0,
+        now: 1_000,
+        alreadyAnswered: false,
+        composerProvenLive: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("★never fires once the composer is proven live — INSIDE the boot window", () => {
+    expect(
+      shouldAutoAcceptBypass({
+        chunk: consentChunk(),
+        model: "claude",
+        spawnedAt: 0,
+        // 8243 ms: the exact instant of the live misfire, deep inside 180 s.
+        now: 8_243,
+        alreadyAnswered: false,
+        composerProvenLive: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("stays disarmed for the rest of the window, not just for one frame", () => {
+    for (const now of [1_000, 8_243, BYPASS_CONSENT_WINDOW_MS - 1]) {
+      expect(
+        shouldAutoAcceptBypass({
+          chunk: consentChunk(),
+          model: "claude",
+          spawnedAt: 0,
+          now,
+          alreadyAnswered: false,
+          composerProvenLive: true,
+        }),
+      ).toBe(false);
+    }
   });
 });
 
@@ -433,5 +533,89 @@ describe("OrchestratorManager wires the consent auto-accept to its own PTY", () 
     feed(consentFrame());
     vi.advanceTimersByTime(BYPASS_CONSENT_CONFIRM_DELAY_MS);
     expect(ptyManager.write).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * ★The box that was empty. Everything above proves the auto-accept fires and
+   * fires once; the only thing pinned about NOT firing was "after 180 s". The
+   * accident happened at 8.2 s.
+   */
+  function composerFrame(): string {
+    return frames("claude-composer-after-consent").find((f) =>
+      looksLikeLiveComposer(f.chunk),
+    )!.chunk;
+  }
+
+  it("★never answers a quoted accept line INSIDE the boot window once the composer went live", () => {
+    const { manager, ptyManager, feed } = makeHarness();
+    manager.launch("proj-1", root, 4242, undefined, "new", undefined, {
+      modelOverride: "claude",
+    });
+
+    // Scenario R, frame for frame: the CLI comes up at its composer, and then
+    // — 8 seconds later, well inside 180 s — an agent quotes this very file.
+    feed(composerFrame());
+    vi.advanceTimersByTime(8_000);
+    ptyManager.write.mockClear();
+    feed(consentFrame());
+    vi.advanceTimersByTime(BYPASS_CONSENT_CONFIRM_DELAY_MS);
+
+    // Not one byte. A `2` here lands in a live conversation.
+    expect(ptyManager.write).not.toHaveBeenCalled();
+  });
+
+  it("★never answers after the boot prompt was submitted, even with no composer frame", () => {
+    const { manager, ptyManager, feed } = makeHarness();
+    manager.launch("proj-1", root, 4242, undefined, "new", undefined, {
+      modelOverride: "claude",
+    });
+
+    // Drive the real readiness path to an actual boot-prompt submission…
+    feed("\u23f5\u23f5 bypass permissions on (shift+tab to cycle)");
+    vi.advanceTimersByTime(2_000);
+    expect(ptyManager.writeAndSubmit).toHaveBeenCalled();
+
+    ptyManager.write.mockClear();
+    vi.advanceTimersByTime(6_000);
+    feed(consentFrame());
+    vi.advanceTimersByTime(BYPASS_CONSENT_CONFIRM_DELAY_MS);
+    expect(ptyManager.write).not.toHaveBeenCalled();
+  });
+
+  it("★refuses a single frame carrying BOTH the footer and the accept line", () => {
+    const { manager, ptyManager, feed } = makeHarness();
+    manager.launch("proj-1", root, 4242, undefined, "new", undefined, {
+      modelOverride: "claude",
+    });
+
+    // How the misfire actually arrives in the wild: claude repaints the whole
+    // screen around the agent's answer, so the quoting frame carries the
+    // composer footer too. The proof must be folded in BEFORE the question.
+    feed(
+      "\u23f5\u23f5 bypass permissions on\r\nassistant: the marker is 2. Yes, I accept\r\n",
+    );
+    vi.advanceTimersByTime(BYPASS_CONSENT_CONFIRM_DELAY_MS);
+    expect(ptyManager.write).not.toHaveBeenCalled();
+  });
+
+  it("still answers a new Mac: consent first, composer only afterwards", () => {
+    const { manager, ptyManager, feed } = makeHarness();
+    manager.launch("proj-1", root, 4242, undefined, "new", undefined, {
+      modelOverride: "claude",
+    });
+
+    // The live ordering (scenario 1c): consent at 379 ms, composer at 529 ms.
+    // Nothing has proven the composer live yet, so the screen is answered.
+    feed(consentFrame());
+    vi.advanceTimersByTime(BYPASS_CONSENT_CONFIRM_DELAY_MS);
+    expect(ptyManager.write).toHaveBeenCalledTimes(2);
+
+    // …and the composer that replaces it disarms the rest of the window.
+    ptyManager.write.mockClear();
+    feed(composerFrame());
+    vi.advanceTimersByTime(5_000);
+    feed(consentFrame());
+    vi.advanceTimersByTime(BYPASS_CONSENT_CONFIRM_DELAY_MS);
+    expect(ptyManager.write).not.toHaveBeenCalled();
   });
 });

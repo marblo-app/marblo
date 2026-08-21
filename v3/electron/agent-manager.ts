@@ -26,6 +26,7 @@ import {
 } from "./agent-status-reconcile";
 import {
   foldInputWait,
+  looksLikeLiveComposer,
   shouldAutoAcceptBypass,
   BYPASS_CONSENT_SELECT,
   BYPASS_CONSENT_CONFIRM,
@@ -33,6 +34,7 @@ import {
   type AgentInputWaitEvent,
   type InputWaitReason,
 } from "./agent-input-wait";
+import { ensureClaudeFolderTrust } from "./claude-workspace-trust";
 import {
   createLoginScreenBackstop,
   modelToCliAuth,
@@ -330,6 +332,16 @@ export interface AgentInstance {
    */
   bypassConsentAnswered: boolean;
   /**
+   * ★F-3. This PTY has been PROVEN to be at a live composer — either a frame
+   * carried the composer footer glyph, or we submitted the initial prompt into
+   * it. One-way: nothing ever clears it.
+   *
+   * Workers are the likeliest victims of the misfire this guards: the accident
+   * reproduced live was an agent QUOTING agent-input-wait.ts, and reading that
+   * file is exactly a worker's job. See looksLikeLiveComposer for the evidence.
+   */
+  composerProvenLive: boolean;
+  /**
    * ★무산출 판정용 누적 출력량(#890 F-7 · 감사 G11).
    *
    * 이 프로세스가 살아 있는 동안 PTY 로 뱉은 **문자 수**다. 내용은 세지 않고
@@ -550,8 +562,21 @@ export const STARTUP_DIALOG_MATCHERS: StartupDialogMatcher[] = [
  * needsAuth 는 철회한다).
  *
  * ★`╭─+` 같은 박스 테두리는 금지 — "Do you trust this folder?" 다이얼로그 테두리와
- * 같아서, 1500ms 뒤 보내는 `\r` 이 기본값("No")을 확정해 에이전트를 즉사시킨다.
- * 준비된 **입력 프롬프트**에만 나타나는 문구만 담는다.
+ * 같아서, 1500ms 뒤 보내는 `\r` 이 그 다이얼로그를 확정해버린다.
+ *
+ * ★이 주석은 오래도록 "기본값이 No 라 즉사한다" 고 적혀 있었는데 **틀렸다.**
+ * 2.1.238 을 화면으로 확인했다: 신뢰 다이얼로그의 기본 하이라이트는
+ * `❯ 1. Yes, I trust this folder` 다(라이브 PTY 캡처 2026-08-21, 그리고 CLI
+ * 번들에서도 교차확인 — 신뢰 다이얼로그는 `<sc confirmLabel="Yes, I trust this
+ * folder" …>` 로 `focus` 를 안 넘기고 `sc` 의 기본값이 `focus:"confirm"` 이다.
+ * 반대로 bypass 동의 화면은 `cancelFirst focus:"cancel"` 이라 기본이 "No, exit"
+ * 이고, 그래서 그쪽만 `2` 로 옮겨야 한다).
+ *
+ * 결과가 즉사가 아니라 **조용한 소실**이라는 뜻이라 오히려 더 나쁘다: `\r` 이
+ * 신뢰를 수락하고, 같이 타이핑된 지시문은 select 리스트가 삼켜서 사라지며,
+ * 상태만 working 으로 승격된다(F-2 실측). 규칙은 그대로 — 준비된 **입력
+ * 프롬프트**에만 나타나는 문구만 담는다. 애초에 이 화면이 안 뜨게 하는 쪽은
+ * claude-workspace-trust.ts 가 맡는다.
  */
 export const CLI_READINESS_PATTERNS: RegExp[] = [
   // Antigravity (agy) verified via live PTY capture: its post-trust input
@@ -621,6 +646,45 @@ export function composeInitialPrompt(
     "[Task Instructions]",
     sanitized,
   ].join("\n");
+}
+
+/**
+ * ★F-1. Pre-empt claude's folder-trust dialog for `cwd` before the CLI can
+ * render it. Idempotent, synchronous, and never fatal — see
+ * claude-workspace-trust.ts for why pre-empting beats answering and why the
+ * write honours claude's own config lock.
+ *
+ * Scoped to claude: codex has been pre-empted since agent-config.ts's
+ * `trust_level = "trusted"`, and no other harness renders this screen.
+ */
+function preemptClaudeFolderTrust(
+  model: string,
+  cwd: string | undefined,
+  who: string,
+): void {
+  if (model !== "claude" || !cwd) return;
+  try {
+    const r = ensureClaudeFolderTrust(cwd);
+    if (r.alreadyTrusted) return;
+    if (r.ok) {
+      console.info(
+        `[${who}] claude folder trust pre-empted for ${cwd} ` +
+          `(${r.written.length} config key(s) recorded) — the trust dialog will not render.`,
+      );
+      return;
+    }
+    // Not fatal: without the entry we behave exactly as before — the dialog is
+    // recognised, the boot prompt is held, and nothing is typed into it.
+    console.warn(
+      `[${who}] claude folder trust could not be pre-empted for ${cwd}: ${r.reason}. ` +
+        "The trust dialog may appear and boot will stall until a human answers it.",
+    );
+  } catch (err) {
+    console.warn(
+      `[${who}] claude folder trust pre-emption threw (continuing):`,
+      err,
+    );
+  }
 }
 
 export class AgentManager {
@@ -893,6 +957,12 @@ export class AgentManager {
     // Claude Code 중첩 세션 방지 — 부모의 CLAUDECODE 변수 제거
     delete mergedEnv.CLAUDECODE;
 
+    // ★F-1. Pre-empt the folder-trust dialog BEFORE the spawn. Workers matter
+    // more than the orchestrator here: each one runs in its own git worktree,
+    // and trust is recorded per directory, so a brand-new worktree is exactly
+    // the case that re-arms the screen (F-2's silent instruction loss).
+    preemptClaudeFolderTrust(params.model, params.cwd, `Agent:${params.id}`);
+
     // Create PTY session with the CLI command + MCP args
     this.ptyManager.create(
       ptySessionId,
@@ -946,6 +1016,11 @@ export class AgentManager {
         if (sent || authBlocked) return;
         sent = true;
         loginBackstop.dispose();
+        // ★F-3. We are about to type into this PTY as if it were a live
+        // composer — from here on the consent auto-accept must never fire,
+        // whatever this agent later quotes.
+        const launching = this.agents.get(params.id);
+        if (launching) launching.composerProvenLive = true;
         // Split text and \r so Claude Code registers Enter as a discrete
         // keystroke (single-chunk write gets paste-buffered, leaving the
         // CR inside the message body without submitting).
@@ -1025,9 +1100,11 @@ export class AgentManager {
       // Watch PTY output for CLI readiness indicators
       // Only match patterns that confirm the CLI is actually ready for input.
       // Do NOT match `╭─+` — it also matches the "Do you trust this folder?"
-      // dialog box border, and our 1500ms-delayed `\r` would confirm the
-      // default ("No") and immediately kill the agent. Match only patterns
-      // that appear in the post-trust input prompt.
+      // dialog box border, and our 1500ms-delayed `\r` would answer it. The
+      // default highlight there is `❯ 1. Yes, I trust this folder` (measured on
+      // 2.1.238, see CLI_READINESS_PATTERNS above), so the damage is a silent
+      // accept that swallows the instruction — not the instant death this
+      // comment used to claim. Match only post-trust input-prompt patterns.
       let outputBuffer = "";
       const readinessPatterns = CLI_READINESS_PATTERNS;
 
@@ -1347,6 +1424,7 @@ export class AgentManager {
       inputWaitReason: null,
       inputWaitSince: null,
       bypassConsentAnswered: false,
+      composerProvenLive: false,
       outputChars: 0,
       turnCompletedAt: null,
       terminalSince: null,
@@ -2154,6 +2232,13 @@ export class AgentManager {
   private maybeAcceptBypassConsent(agentId: string, chunk: string): void {
     const agent = this.agents.get(agentId);
     if (!agent) return;
+    // ★Fold this frame into the proof BEFORE asking whether to answer it — an
+    // agent quoting the accept line does so inside a live composer, and claude
+    // repaints the whole screen (footer included), so the quoting frame usually
+    // carries its own disproof.
+    if (!agent.composerProvenLive && looksLikeLiveComposer(chunk)) {
+      agent.composerProvenLive = true;
+    }
     if (
       !shouldAutoAcceptBypass({
         chunk,
@@ -2161,6 +2246,7 @@ export class AgentManager {
         spawnedAt: agent.spawnedAt,
         now: Date.now(),
         alreadyAnswered: agent.bypassConsentAnswered,
+        composerProvenLive: agent.composerProvenLive,
       })
     ) {
       return;
@@ -2258,6 +2344,7 @@ export class AgentManager {
       // Reconnect attaches to a CLI that already booted, so its consent screen
       // (if any) is long past — the latch starts spent rather than armed.
       bypassConsentAnswered: true,
+      composerProvenLive: true,
       outputChars: 0,
       turnCompletedAt: null,
       terminalSince: null,

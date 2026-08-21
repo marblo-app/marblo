@@ -30,8 +30,10 @@ import {
   BYPASS_CONSENT_SELECT,
   BYPASS_FLAG_MODELS,
   looksLikeFirstRunDialog,
+  looksLikeLiveComposer,
   shouldAutoAcceptBypass,
 } from "./agent-input-wait";
+import { ensureClaudeFolderTrust } from "./claude-workspace-trust";
 
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 
@@ -349,6 +351,18 @@ export interface OrchestratorSession {
   spawnedAt?: number;
   /** Per-instance latch — this PTY already answered the consent screen once. */
   bypassConsentAnswered?: boolean;
+  /**
+   * ★F-3. This PTY has been PROVEN to be at a live composer — either a frame
+   * carried the composer footer glyph, or we submitted the boot prompt /
+   * injected a message into it. One-way: nothing ever clears it.
+   *
+   * Its only job is to disarm the consent auto-accept. The 180 s boot window
+   * alone left a returning user (who never meets the consent screen, so the
+   * `bypassConsentAnswered` latch never arms) exposed for the whole window,
+   * and a worker quoting agent-input-wait.ts put `2⏎` into a live composer at
+   * 8243 ms. See looksLikeLiveComposer's comment for the frame evidence.
+   */
+  composerProvenLive?: boolean;
 }
 
 export interface OrchestratorLaunchOptions {
@@ -538,6 +552,45 @@ function withBoardRoutingGate(text: string): string {
  * Manages the single orchestrator Claude Code session.
  * One orchestrator per app — it supervises agents via MCP tools.
  */
+/**
+ * ★F-1. Pre-empt claude's folder-trust dialog for `cwd` before the CLI can
+ * render it. Idempotent, synchronous, and never fatal — see
+ * claude-workspace-trust.ts for why pre-empting beats answering and why the
+ * write honours claude's own config lock.
+ *
+ * Scoped to claude: codex has been pre-empted since agent-config.ts's
+ * `trust_level = "trusted"`, and no other harness renders this screen.
+ */
+function preemptClaudeFolderTrust(
+  model: string,
+  cwd: string | undefined,
+  who: string,
+): void {
+  if (model !== "claude" || !cwd) return;
+  try {
+    const r = ensureClaudeFolderTrust(cwd);
+    if (r.alreadyTrusted) return;
+    if (r.ok) {
+      console.info(
+        `[${who}] claude folder trust pre-empted for ${cwd} ` +
+          `(${r.written.length} config key(s) recorded) — the trust dialog will not render.`,
+      );
+      return;
+    }
+    // Not fatal: without the entry we behave exactly as before — the dialog is
+    // recognised, the boot prompt is held, and nothing is typed into it.
+    console.warn(
+      `[${who}] claude folder trust could not be pre-empted for ${cwd}: ${r.reason}. ` +
+        "The trust dialog may appear and boot will stall until a human answers it.",
+    );
+  } catch (err) {
+    console.warn(
+      `[${who}] claude folder trust pre-emption threw (continuing):`,
+      err,
+    );
+  }
+}
+
 export class OrchestratorManager {
   private session: OrchestratorSession | null = null;
   private ptyManager: PtyManager;
@@ -698,6 +751,9 @@ export class OrchestratorManager {
             `[OrchestratorManager:${this.kind}] injectMessage PTY changed while queued; routing to current PTY ${cur}.`,
           );
         }
+        // Same reasoning as the boot prompt: an injected message goes into a
+        // composer we believe is live, so the consent window is over.
+        this.markComposerProvenLive(cur);
         const wrote = await this.ptyManager.writeAndSubmit(cur, injectedText);
         if (!wrote) return false;
         // 다음 주입이 이 메시지의 제출 사이클과 겹치지 않도록 여유를 둔다(직렬화).
@@ -732,6 +788,14 @@ export class OrchestratorManager {
     // A PTY that is no longer ours (relaunch reclaimed the id, or stop() ran)
     // must never be typed into.
     if (!session || session.ptySessionId !== ptySessionId) return;
+    // ★Fold this frame into the proof BEFORE asking whether to answer it. An
+    // agent quoting the accept line does so inside a live composer, and claude
+    // repaints the whole screen — footer included — so the quoting frame
+    // usually carries its own disproof. Doing this after the question would
+    // throw that away and answer the very frame that refutes itself.
+    if (!session.composerProvenLive && looksLikeLiveComposer(chunk)) {
+      session.composerProvenLive = true;
+    }
     if (
       !shouldAutoAcceptBypass({
         chunk,
@@ -741,6 +805,7 @@ export class OrchestratorManager {
         spawnedAt: session.spawnedAt ?? 0,
         now: Date.now(),
         alreadyAnswered: session.bypassConsentAnswered === true,
+        composerProvenLive: session.composerProvenLive === true,
       })
     ) {
       return;
@@ -768,6 +833,18 @@ export class OrchestratorManager {
         err,
       );
     }
+  }
+
+  /**
+   * Record that we typed into this PTY as if it were a live composer, which
+   * permanently disarms the consent auto-accept for it (F-3). Scoped to the
+   * session id so a write aimed at a PTY we no longer own cannot disarm the
+   * current one.
+   */
+  private markComposerProvenLive(ptySessionId: string): void {
+    const session = this.session;
+    if (!session || session.ptySessionId !== ptySessionId) return;
+    session.composerProvenLive = true;
   }
 
   private async waitForStableBootGate(): Promise<boolean> {
@@ -1218,6 +1295,14 @@ export class OrchestratorManager {
     // Prevent nested Claude Code sessions
     delete mergedEnv.CLAUDECODE;
 
+    // ★F-1. Pre-empt the folder-trust dialog BEFORE the spawn — an async write
+    // could land after claude has already read its config and drawn the screen.
+    preemptClaudeFolderTrust(
+      launchConfig.model,
+      rootPath,
+      `Orchestrator:${this.kind}`,
+    );
+
     // Create PTY. create() now rejects a missing/non-directory cwd up front
     // (it used to spawn a shell that died in ~6ms with no error). Surface that
     // as an error status + explicit notice rather than letting it escape as an
@@ -1283,6 +1368,7 @@ export class OrchestratorManager {
       claudeSessionId: resumedSessionId ?? undefined,
       spawnedAt: Date.now(),
       bypassConsentAnswered: false,
+      composerProvenLive: false,
     };
 
     // ★The first-run `--dangerously-skip-permissions` consent screen (P0, new
@@ -1551,6 +1637,12 @@ export class OrchestratorManager {
         }
         sent = true;
         loginBackstop.dispose();
+        // ★F-3. We are about to type into this PTY, which we only do once the
+        // screen is not a first-run dialog (the holdReason gate above, whose
+        // marker list includes BYPASS_ACCEPT_MARKER). So "boot prompt sent"
+        // already MEANS "the consent screen was not up" — record it and never
+        // auto-accept on this PTY again.
+        this.markComposerProvenLive(ptySessionId);
         this.ptyManager.writeAndSubmit(ptySessionId, initialPrompt);
         this.setStatus("running");
         // 부팅 프롬프트의 제출 사이클(text→150ms→CR+재시도 ~2s)이 끝난 뒤에야
