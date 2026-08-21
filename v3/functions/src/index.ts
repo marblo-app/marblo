@@ -142,6 +142,20 @@ import {
   type EmailMarketingConsent,
 } from "./marketingContacts";
 import {
+  ANALYTICS_PURCHASE_TABLE,
+  type BuildResult,
+  type PurchaseMapContext,
+} from "./analyticsPurchase";
+import { loadPurchaseRows, type BqLike } from "./analyticsPurchaseLoad";
+import {
+  buildPurchaseRows,
+  readPurchaseSources,
+} from "./analyticsPurchaseSource";
+import {
+  ANALYTICS_USER_KEY_BLOCKER,
+  resolveAnalyticsUserKeyFn,
+} from "./analyticsUserKey";
+import {
   planAmountKRW,
   normalizeBillingCycle,
   applyCouponDiscount,
@@ -13984,4 +13998,150 @@ export const getAdminCountryFunnel = functions
       coverage: funnel.coverage,
       notes,
     };
+  });
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// analytics_purchase — Firestore 결제 원장 → BigQuery (ticket 6EnTiEzL7T2NpjOnTTSj)
+// ════════════════════════════════════════════════════════════════════════════
+// marblo_telemetry 에는 결제 테이블이 아예 없었고(6개 테이블 전부 제품사용 축),
+// 그래서 어드민 '수익' 탭은 **채울 소스가 없어서** 비어 있었다. 여기서 그 소스를
+// 만든다. 매핑 규칙·프라이버시 판단은 analyticsPurchase.ts 에, 적재(로드 잡 +
+// MERGE)는 analyticsPurchaseLoad.ts 에 있다 — 여기 있는 건 배선뿐이다.
+//
+// ★읽기 전용이다. 이 경로는 Firestore 에 한 글자도 쓰지 않고 실제 결제 흐름을
+//   건드리지 않는다. 결제 원장을 **읽어서 복제**할 뿐이다.
+// ★멱등이다. row_id(소스 문서키의 HMAC 가명) 로 MERGE 하므로 몇 번을 돌려도
+//   행 수가 같다. 재실행에서 affected=0 이면 멱등이 지켜진 것이다.
+// ★금액·주문번호·PG 응답 원문을 로그에 남기지 않는다. 아래 로그는 건수와 사유
+//   코드만 싣는다.
+
+/** 적재 1회 결과 — 로그와 어드민 콜러블 응답이 공유한다(금액 없음). */
+interface PurchaseLoadReport {
+  /** 소스 컬렉션별 원본 문서 수. Firestore 대조의 기준값. */
+  sourceCounts: { charges: number; lectures: number; subscriptions: number };
+  /** 만들어진 행 수. */
+  mapped: number;
+  /** 사유별 스킵 건수. 조용히 버리지 않는다. */
+  skipped: Record<string, number>;
+  staged: number;
+  collapsed: number;
+  affected: number;
+  tableState: string;
+  /** 진행을 막은 것이 있으면 사람이 읽을 수 있는 사유. 없으면 null. */
+  blocker: string | null;
+}
+
+/**
+ * 결제 원장을 읽어 analytics_purchase 로 적재한다.
+ *
+ * ★user_key 공용 HMAC 함수(사람 축 PR #1084 → analyticsUserKey.ts)가 배선되지
+ *   않았으면 **행을 만들지 않고**
+ *   blocker 를 돌려준다. 임시 해시로 메꾸지 않는다 — 그렇게 적재한 과거분은
+ *   analytics_identity 와 영원히 조인되지 않고, 그 사실이 숫자로 드러나지
+ *   않는다(조인 결과가 0 이 아니라 그냥 비어 보인다).
+ */
+async function loadAnalyticsPurchaseInternal(
+  opts: { dryRun?: boolean } = {}
+): Promise<PurchaseLoadReport> {
+  const salt = getAnalyticsIdSalt();
+  const deriveUserKey = resolveAnalyticsUserKeyFn();
+  const ctx: PurchaseMapContext = {
+    salt,
+    deriveUserKey,
+    ingestedAt: new Date(),
+  };
+
+  const sources = await readPurchaseSources(db);
+  const built: BuildResult = buildPurchaseRows(sources, ctx);
+
+  const blocker = !deriveUserKey
+    ? ANALYTICS_USER_KEY_BLOCKER
+    : !salt
+    ? `${ANALYTICS_ID_SALT_ENV} 미설정 — 가명키를 만들 수 없어 적재하지 않는다`
+    : !firebaseProjectId
+    ? "GCLOUD_PROJECT 미설정 — MERGE 대상 테이블을 정규화할 수 없다"
+    : null;
+
+  const base: PurchaseLoadReport = {
+    sourceCounts: sources.counts,
+    mapped: built.rows.length,
+    skipped: built.skipped as Record<string, number>,
+    staged: 0,
+    collapsed: 0,
+    affected: 0,
+    tableState: "skipped",
+    blocker,
+  };
+
+  if (blocker || opts.dryRun || built.rows.length === 0) {
+    functions.logger.warn("[analytics_purchase] load skipped", {
+      table: ANALYTICS_PURCHASE_TABLE,
+      dryRun: opts.dryRun === true,
+      blocker,
+      sourceCounts: base.sourceCounts,
+      mapped: base.mapped,
+      skipped: base.skipped,
+    });
+    return base;
+  }
+
+  // BigQuery 클라이언트는 BqLike 를 구조적으로 만족하지만 타입 선언이 더
+  // 넓다(제네릭 응답 튜플). 캐스트는 이 한 곳으로 가둔다.
+  const outcome = await loadPurchaseRows(bigquery as unknown as BqLike, {
+    projectId: firebaseProjectId as string,
+    datasetId: BQ_DATASET,
+    location: BQ_LOCATION,
+    rows: built.rows,
+  });
+
+  const report: PurchaseLoadReport = {
+    ...base,
+    staged: outcome.staged,
+    collapsed: outcome.collapsed,
+    affected: outcome.affected,
+    tableState: outcome.tableState,
+  };
+  // 건수와 사유 코드만 남긴다 — 금액·주문번호·PG 응답 원문은 싣지 않는다.
+  functions.logger.info("[analytics_purchase] loaded", {
+    table: ANALYTICS_PURCHASE_TABLE,
+    sourceCounts: report.sourceCounts,
+    mapped: report.mapped,
+    skipped: report.skipped,
+    staged: report.staged,
+    collapsed: report.collapsed,
+    affected: report.affected,
+    tableState: report.tableState,
+  });
+  return report;
+}
+
+// 갱신 크론(04:30 KST)과 마케팅 미러(04:45) 뒤에 둔다 — 그날 새로 생긴 청구
+// 원장이 이미 확정된 뒤에 읽기 위해서다.
+export const scheduledLoadAnalyticsPurchase = functions
+  .runWith({ timeoutSeconds: 540, memory: "512MB" })
+  .pubsub.schedule("0 5 * * *")
+  .timeZone("Asia/Seoul")
+  .onRun(async () => {
+    try {
+      await loadAnalyticsPurchaseInternal();
+    } catch (err) {
+      // 예외 메시지에 PG 응답이 섞일 수 있어 원문을 그대로 싣지 않는다.
+      functions.logger.error("[analytics_purchase] load failed", {
+        message: safeAnalyticsErrorMessage(err),
+      });
+    }
+    return null;
+  });
+
+/**
+ * 수동 트리거(어드민) — 백필 직후 첫 적재, 또는 대조용 dry-run.
+ * `{ dryRun: true }` 면 BigQuery 를 건드리지 않고 건수만 돌려준다.
+ */
+export const loadAnalyticsPurchase = functions
+  .runWith({ timeoutSeconds: 540, memory: "512MB" })
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const dryRun = (data as { dryRun?: unknown } | null)?.dryRun === true;
+    return loadAnalyticsPurchaseInternal({ dryRun });
   });

@@ -79,23 +79,46 @@ import { createHmac } from "node:crypto";
 /**
  * 가명 공간(종류). 종류가 다르면 같은 원시값이어도 다른 가명이 된다.
  *
+ * ★이 목록은 **더하는 형태로만** 관리한다. 축이 하나 늘 때마다 여기서 충돌이
+ *   난다(#1075 ↔ #1077 이 실제로 그랬다). 한 줄에 몰아쓰지 말고 축별 항목으로
+ *   남겨야 다음 축이 붙을 때 충돌이 한 줄 추가로 끝난다.
+ *
  * - `agent`/`task`/`project`/`flow`: 익명 세계 row 의 내부 조인키(#915).
- * - `install`/`ga`: analytics_identity 의 익명축 키.
- * - `user`: 계정 uid 축. `us_` + HMAC(salt, "user:" + uid) — 설계 §3.3.
+ * - `install`/`ga`: analytics_identity 의 **익명축** 키
+ *   (ticket dTpcKWwRw5DvEMKxpCZi).
+ * - `user`: **계정축** uid 키. `us_` + HMAC(salt, "user:" + uid) — 설계 §3.3.
+ *   사람 축 구현(#1084)이 한 벌만 추가했다. 두 벌이 생기면 계정축 **안**의 조인이
+ *   조용히 갈라진다(행은 그대로 있고 조인 결과만 빈다).
+ * - `order`/`purchase`: analytics_purchase 의 **계정축** 키
+ *   (ticket 6EnTiEzL7T2NpjOnTTSj).
+ *     - `order`    : 주문번호/paymentId → `od_...`
+ *     - `purchase` : 소스 문서키 → `pu_...` (행 멱등키 row_id)
+ *   결제 원장의 주문번호와 소스 문서키는 **원시값이 BigQuery 에 닿으면 안 되는
+ *   값**이다(주문번호는 PG 콘솔 조회키, 문서키는 `${uid}_${ms}` 라 uid 를
+ *   품는다). 같은 솔트·같은 스킴을 쓰므로 새 가명 체계가 생기지 않는다.
  *
  * ★`person` kind 를 만들지 마라. `person_key` 와 `user_key` 는 같은 uid 에서 나온
  *   **서로 다른 두 값**이다(kind 가 HMAC 입력에 들어가므로). 둘을 다 두면
  *   `WHERE person_key = user_key` 가 영원히 0행이 되는데, 조인이 에러를 내지 않고
  *   그냥 빈다 — 행은 그대로 있고 표만 비어 보인다(설계 §3.1). 키는 하나다.
+ *
+ * ★익명축(install/ga)과 계정축(user/order/purchase)이 이 파일에 나란히 있더라도
+ *   **두 축을 잇는 표는 만들지 않는다** — 위 경계 참조. 잇는 자리는
+ *   `marblo_identity.analytics_user_install` 하나뿐이고 게이트가 열려야 채워진다.
  */
 export type AnalyticsIdKind =
   | "agent"
   | "task"
   | "project"
   | "flow"
+  // 익명축 — analytics_identity (dTpcKWwRw5DvEMKxpCZi)
   | "install"
   | "ga"
-  | "user";
+  // 계정축 — 사람 축 (#1084)
+  | "user"
+  // 계정축 — analytics_purchase (6EnTiEzL7T2NpjOnTTSj)
+  | "order"
+  | "purchase";
 
 /** 가명 앞에 붙는 짧은 태그 — BQ 에서 눈으로 종류를 구분하기 위한 것뿐이다. */
 const KIND_PREFIX: Record<AnalyticsIdKind, string> = {
@@ -106,6 +129,8 @@ const KIND_PREFIX: Record<AnalyticsIdKind, string> = {
   install: "in",
   ga: "ga",
   user: "us",
+  order: "od",
+  purchase: "pu",
 };
 
 /**
