@@ -1,9 +1,18 @@
 import type { MetadataRoute } from "next";
 import { getAllPosts, getPostLocales } from "@/lib/blog";
+import { routing } from "@/i18n/routing";
+import { SITE_URL } from "@/lib/seo";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = "https://marblo.app";
-  const locales = ["ko", "en", "ja"];
+  // Derived from the single source of truth, never re-declared. `lib/seo.ts`
+  // builds the <head> hreflang cluster from `routing`; this file builds the
+  // sitemap one. Google treats the HTML, HTTP-header, and sitemap methods as
+  // equivalent, so the two must agree — a hardcoded copy here meant that
+  // changing `routing.defaultLocale` would silently move x-default in <head>
+  // while leaving the sitemap pointing at the old locale, emitting two
+  // conflicting x-default targets for the same cluster.
+  const baseUrl = SITE_URL;
+  const locales = routing.locales;
   const pages = [
     "",
     "/guide",
@@ -34,7 +43,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     for (const locale of locales) {
       languages[locale] = `${baseUrl}/${locale}${page}`;
     }
-    languages["x-default"] = `${baseUrl}/en${page}`;
+    languages["x-default"] = `${baseUrl}/${routing.defaultLocale}${page}`;
     return languages;
   };
 
@@ -102,7 +111,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       for (const l of available) {
         languages[l] = `${baseUrl}/${l}/blog/${post.slug}`;
       }
-      const xDefault = available.includes("en") ? "en" : available[0];
+      // Mirrors buildBlogAlternates() in lib/seo.ts: prefer the default locale,
+      // fall back to the first locale the post actually exists in, so we never
+      // point x-default at a translation that was never written.
+      const xDefault = available.includes(routing.defaultLocale)
+        ? routing.defaultLocale
+        : available[0];
       if (xDefault) {
         languages["x-default"] = `${baseUrl}/${xDefault}/blog/${post.slug}`;
       }
