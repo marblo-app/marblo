@@ -50,6 +50,44 @@
  *    카탈로그 파싱이 실패해 codex 가 EXIT=1 로 즉사한다.
  * 3. `model_catalog_json` 은 **최상위 키**다. `[model_providers.*]` 테이블보다
  *    뒤에 쓰면 그 테이블의 하위 키로 흡수돼 설정 로드가 깨진다.
+ *
+ * ── ★미해결: 이 카탈로그로 뜬 벤더는 MCP 도구를 못 쓸 가능성이 높다 ──────
+ * (2026-08-21 실측, 티켓 giW7eJbD. codex 0.149.0 + 로컬 mock Responses upstream
+ *  으로 요청 바디 전량 캡처. DeepSeek 키는 쓰지 않았다 — 우리가 upstream 이다.)
+ *
+ * 이 카탈로그로 `deepseek-v4-flash` 를 띄우면 codex 가 보내는 `tools` 는:
+ *
+ *   function exec_command / write_stdin / update_plan / view_image / …
+ *   custom   apply_patch                     ← 이 파일이 고친 그것. 정상 등록된다.
+ *   namespace mcp__marblo   -> [add_activity, dispatch_task]   ← ★
+ *   namespace multi_agent_v1 -> [spawn_agent, wait_agent, …]   ← ★
+ *   web_search
+ *
+ * 즉 **MCP 도구는 개별 `type:"function"` 이 아니라 `type:"namespace"` 한 덩어리**로
+ * 실린다(`codex-chat-bridge.ts` 가 Upstage 용으로 평탄화하는 바로 그 모양).
+ *
+ * 그런데 DeepSeek 공식 Responses API 호환표(api-docs.deepseek.com/guides/
+ * responses_api, Tools 절)는 `function` / `web_search` / `custom`(apply_patch 만)
+ * 세 가지만 받고 **"그 외 built-in 도구는 무시"** 라고 적는다. `namespace` 는 그
+ * 셋 중 어디에도 없다 → 두 namespace 가 통째로 **조용히 버려진다**는 뜻이다.
+ * 그러면 에이전트는 뜨지만 MCP 도구가 0개다(= 티켓을 못 만드는 오케).
+ *
+ * ★증거 등급을 섞지 않는다:
+ *   · "codex 가 namespace 로 보낸다"      → **실측**(위 캡처).
+ *   · "DeepSeek 이 그걸 무시한다"          → **공식 문서 기반 추론**. DEEPSEEK_API_KEY
+ *     가 없어 라이브로 확인하지 못했다. 확정은 키를 받은 뒤 라이브 프로브에서 한다.
+ *
+ * 대조군도 같이 떴다: 같은 배선에서 모델만 `gpt-5.5`(codex 내장 카탈로그)로 바꾸면
+ * namespace 가 사라지고 `tool_search` 하나가 실린다 — 즉 이 모양은 **카탈로그가
+ * 정하는 것**이지 provider 설정 탓이 아니다. 다만 DeepSeek 은 `tool_search` 역시
+ * 받지 않으므로(같은 "그 외 → 무시" 행) 그 경로도 해법이 아니다.
+ *
+ * 남은 해법 후보(전부 라이브 프로브 뒤에 판단한다):
+ *   ① Responses→Responses 셔틀을 하나 두고 `namespace` 를 평탄화해서 넘긴다
+ *      (`codex-chat-bridge` 가 Chat 으로 접으며 하는 일과 같되 Responses 유지).
+ *   ② codex 쪽 카탈로그 필드로 평탄 방출을 유도할 수 있는지 확인
+ *      (`experimental_supported_tools` 는 현재 레퍼런스에서 `[]` 로 물려받는다).
+ * 어느 쪽도 키 없이 "된다" 고 적을 수 없다.
  */
 import fs from "fs";
 import os from "os";
@@ -320,12 +358,28 @@ export function buildCodexModelCatalog(
 
     // 벤더의 OpenAI 호환 API 에는 `text.verbosity` 가 없다. true 로 두면 codex 가
     // 요청 바디에 `text` 객체를 얹는다(실측: gpt-5.5 요청엔 있고 폴백 solar 요청엔
-    // 없다). 네이티브 Responses 로 붙는 DeepSeek 에서 그대로 400 을 부를 수 있다.
+    // 없다).
+    //
+    // ★2026-08-21 정정: 종전 주석은 "그대로 400 을 부를 수 있다" 였지만 DeepSeek
+    //   공식 문서는 **미지원 파라미터는 400 이 아니라 조용히 무시**된다고 명시하고,
+    //   verbosity 는 "accepted but has no effect" 로 적혀 있다. 즉 false 의 근거는
+    //   "400 회피" 가 아니라 "효과 없는 필드를 요청에 얹지 않는다" 다.
+    //   (참고: DeepSeek 공식 models.json 은 support_verbosity: true 로 준다.
+    //    어느 쪽이든 wire 동작은 같으므로 무변경으로 둔다.)
     support_verbosity: false,
 
-    // hosted web_search 는 ChatGPT 백엔드 도구다. API 키로 붙는 커스텀 provider
-    // 에선 닿지 않고, Upstage 는 chat 브리지가 hosted 도구를 어차피 버린다.
-    // 광고해봐야 apply_patch 와 똑같은 "unsupported call" 을 한 종류 더 만든다.
+    // hosted web_search 를 광고하지 않는다.
+    //
+    // ★2026-08-21 정정(티켓 giW7eJbD): 종전 주석은 "hosted web_search 는 ChatGPT
+    //   백엔드 도구라 커스텀 provider 에선 닿지 않는다" 였는데, **DeepSeek 에
+    //   대해서는 사실이 아니다.** DeepSeek 공식 Responses 호환표는 web_search 를
+    //   서버측 실행으로 지원한다고 적고, DeepSeek 이 배포하는 공식 codex
+    //   models.json 도 `web_search_tool_type: "text"` 를 켠다.
+    //   Upstage 는 여전히 chat 브리지가 hosted 도구를 버리므로 종전 판단 그대로다.
+    //
+    //   그래도 지금은 **끈 채로 둔다**: 켜는 것은 동작 변경이고, DEEPSEEK_API_KEY
+    //   가 없어 라이브로 확인할 수 없다. 이 레지스트리에서 미검증 변경을 먼저
+    //   넣는 것이 가장 비싼 사고다. 키가 오면 라이브 프로브에서 같이 연다.
     // ★끄는 방법은 `null` 이 아니라 **키 삭제**다 — 이 필드의 디시리얼라이저는
     //   "string or map" 만 받고 null 을 거부해 카탈로그 파싱이 통째로 실패한다
     //   (실측: codex EXIT=1). 삭제는 아래에서 한다.

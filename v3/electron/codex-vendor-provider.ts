@@ -113,7 +113,37 @@ export function resolveCodexVendorProviderOverride(
     ),
   ];
   if (envKeys.length === 0) return null;
-  if (envKeys.some((k) => !secretPresent(k))) return null;
+
+  // ★크레덴셜이 없을 때 **조용히** null 을 주면 안 된다.
+  //
+  // null 은 "이 모델은 벤더가 아니다" 와 "벤더인데 키가 없다" 를 같은 값으로
+  // 접는데, 두 번째 경우의 결과는 전혀 다르다: 호출자는 model_provider 를 안
+  // 붙이고 ChatGPT auth.json 을 그대로 심링크한 채, argv 에는 여전히
+  // `-c model="deepseek-v4-flash"` 를 붙여 스폰한다. 그러면 codex 는 우리
+  // ChatGPT 계정으로 ChatGPT 백엔드에 벤더 slug 를 물어보고 HTTP 400 을 받는다.
+  // 게다가 `model_catalog_json` 도 같이 빠져 apply_patch 마저 등록되지 않는다.
+  //
+  // 이건 가설이 아니라 이 레포가 이미 하루를 태운 실패 모양이다(solar-pro4 400,
+  // #1037 은 그 400 을 "브리지 탓" 으로 오진했다). `applyVendorEnv` 가 남기는
+  // 경고는 env 미주입만 말하고 이 config 조합은 말하지 않으므로, 진짜 위험한
+  // 상태를 여기서 이름 붙여 남긴다. 값은 절대 안 남기고 **키 이름만** 남긴다.
+  const missing = envKeys.filter((k) => !secretPresent(k));
+  if (missing.length > 0) {
+    console.error(
+      "[codex-vendor-provider] 벤더 크레덴셜 없음 — model_provider 오버라이드를 " +
+        "붙이지 않고 스폰한다(조용한 실패 아님, 사유는 이 줄이다)",
+      {
+        model: pinnedModelId,
+        vendor: entry.provider,
+        missingEnvKeys: missing,
+        effect:
+          "codex 가 ChatGPT 로그인으로 벤더 slug 를 요청해 HTTP 400 이 나고, " +
+          "model_catalog_json 도 빠져 apply_patch 가 등록되지 않는다",
+        fix: `설정 → API 키 → 벤더 API 키에서 ${missing.join(", ")} 를 등록하고 재스폰`,
+      },
+    );
+    return null;
+  }
 
   const meta = PROVIDER_META[entry.provider];
   return {

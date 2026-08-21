@@ -31,8 +31,10 @@ import {
   quickLaneVendorCatalog,
   resolveModelPin,
   resolveVendorShorthand,
+  selectableEfforts,
 } from "../../electron/model-selection";
 import { LADDER_EXCLUSIONS } from "../../electron/model-ladder";
+import { resolveCodexVendorProviderOverride } from "../../electron/codex-vendor-provider";
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-deepseek-"));
 const FLASH_ID = "deepseek-v4-flash";
@@ -91,7 +93,7 @@ describe("DeepSeek 등록 — provider=deepseek / harness=gpt", () => {
       harness: "gpt",
       status: "active",
       capability: "mid",
-      defaultEffort: "medium",
+      defaultEffort: "high",
     });
     expect(getModel(PRO_ID)).toMatchObject({
       id: PRO_ID,
@@ -99,7 +101,7 @@ describe("DeepSeek 등록 — provider=deepseek / harness=gpt", () => {
       harness: "gpt",
       status: "active",
       capability: "mid",
-      defaultEffort: "medium",
+      defaultEffort: "high",
     });
     expect(harnessForModel(FLASH_ID)).toBe("gpt");
     expect(vendorForModel(PRO_ID)).toBe("deepseek");
@@ -123,6 +125,29 @@ describe("DeepSeek 등록 — provider=deepseek / harness=gpt", () => {
     expect(parseModelSpec(FLASH_ID)?.modelId).toBe(FLASH_ID);
     expect(resolveModelPin(PRO_ID)?.codexModel).toBe(PRO_ID);
     expect(resolveVendorShorthand("deepseek")?.id).toBe(FLASH_ID);
+  });
+
+  it("★effort 축이 DeepSeek 공식 models.json 과 일치한다 — low/high/max, 기본 high", () => {
+    // 2026-08-21 재확인(티켓 giW7eJbD). DeepSeek 은 Codex 용 `models.json` 을 직접
+    // 배포하고(api-docs.deepseek.com/quick_start/agent_integrations/codex) 거기서
+    // 두 모델 모두 supported_reasoning_levels = low/high/max, default = high 다.
+    //
+    // ★종전 이 레지스트리는 low/medium/high + default medium 이었다. DeepSeek 은
+    // `medium` 을 **정의하지 않는다** — 즉 우리가 매 스폰에 붙이던 기본 effort 가
+    // 벤더에 없는 값이었다. 08-18 에 pricing 페이지만 보고 적었을 때 생긴 오차고,
+    // 이 테스트가 그 회귀를 막는다. 값을 바꾸려면 공식 models.json 을 먼저 본다.
+    for (const id of [FLASH_ID, PRO_ID]) {
+      expect(getModel(id)!.efforts, id).toEqual(["low", "high", "max"]);
+      expect(getModel(id)!.defaultEffort, id).toBe("high");
+    }
+  });
+
+  it("★max 는 승인게이트 칸이라 셀렉터에는 서지 않는다(레지스트리엔 있다)", () => {
+    // gpt 행들과 완전히 같은 취급이다. 레지스트리는 벤더 사실을 그대로 적고,
+    // 고를 수 있는 칸을 줄이는 것은 `selectableEfforts` 의 몫이다.
+    for (const id of [FLASH_ID, PRO_ID]) {
+      expect(selectableEfforts(getModel(id)!), id).toEqual(["low", "high"]);
+    }
   });
 
   it("단가는 레지스트리 단일소스로 흘러간다", () => {
@@ -194,6 +219,65 @@ describe("DeepSeek 주입 — OPENAI_* 전부-or-전무", () => {
       expect(base.OPENAI_API_KEY).toBe("original-openai-key");
       expect(base.OPENAI_BASE_URL).toBeUndefined();
     });
+  });
+});
+
+describe("DeepSeek 키 부재 — 조용히 실패하지 않는다", () => {
+  // 완료기준(티켓 giW7eJbD): "키가 없을 때 조용히 실패하지 않는다 — 사유가 화면이나
+  // 로그에 남을 것." Solar 때 브리지가 조용히 죽어 404 로 보였던 게 하루를 태웠다.
+  //
+  // ★이 계약은 **키가 없는 지금이 검증 적기**다. 키를 받은 뒤에는 이 경로를
+  // 재현하려면 일부러 키를 빼야 한다.
+  it("★벤더 모델인데 크레덴셜이 없으면 사유를 로그로 남기고 null 을 준다", () => {
+    withDeepSeekKey(undefined, () => {
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      expect(resolveCodexVendorProviderOverride(FLASH_ID)).toBeNull();
+
+      expect(spy).toHaveBeenCalled();
+      const [message, detail] = spy.mock.calls[0] as [
+        string,
+        Record<string, unknown>,
+      ];
+      expect(message).toContain("codex-vendor-provider");
+      expect(detail).toMatchObject({
+        model: FLASH_ID,
+        vendor: "deepseek",
+        missingEnvKeys: ["DEEPSEEK_API_KEY"],
+      });
+      // 화면/로그에 **왜 위험한지**가 남아야 한다 — null 만 돌려주면 호출자는
+      // model_provider 없이(=ChatGPT 백엔드로) 벤더 slug 를 물어보게 된다.
+      expect(String(detail.effect)).toContain("400");
+      expect(String(detail.fix)).toContain("DEEPSEEK_API_KEY");
+    });
+  });
+
+  it("★그 로그에 시크릿 값은 절대 안 실린다 — 키 이름만", () => {
+    withDeepSeekKey(undefined, () => {
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      resolveCodexVendorProviderOverride(PRO_ID);
+      const serialized = JSON.stringify(spy.mock.calls);
+      expect(serialized).not.toContain(FAKE_KEY);
+      expect(serialized).not.toMatch(/sk-[A-Za-z0-9]/);
+    });
+  });
+
+  it("키가 있으면 조용하다(정상 경로에 노이즈를 만들지 않는다)", () => {
+    withDeepSeekKey(FAKE_KEY, () => {
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      expect(resolveCodexVendorProviderOverride(FLASH_ID)).toMatchObject({
+        providerId: "deepseek",
+        wireApi: "responses",
+        needsChatBridge: false,
+      });
+      expect(spy).not.toHaveBeenCalled();
+    });
+  });
+
+  it("벤더가 아닌 모델은 로그도 안 남긴다(경고 인플레 방지)", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(resolveCodexVendorProviderOverride("gpt-5.5")).toBeNull();
+    expect(resolveCodexVendorProviderOverride(undefined)).toBeNull();
+    expect(spy).not.toHaveBeenCalled();
   });
 });
 

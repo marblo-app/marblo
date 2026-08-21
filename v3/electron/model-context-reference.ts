@@ -249,16 +249,16 @@ const RECORDS: ContextWindowRecord[] = [
     tokens: 1_000_000,
     maxOutputTokens: 384_000,
     source: SRC.deepseekPricing,
-    asOf: "2026-08-18",
-    note: "공식 DeepSeek API Models & Pricing 표가 DeepSeek-V4-Flash-0731 행에 LENGTH 1M / MAX OUTPUT 384K 를 적는다.",
+    asOf: "2026-08-21",
+    note: "공식 DeepSeek API Models & Pricing 표가 DeepSeek-V4-Flash-0731 행에 LENGTH 1M / MAX OUTPUT 384K 를 적는다. 2026-08-21 재확인 — 모델 버전(-0731)·context·단가 전부 변동 없음.",
   },
   {
     model: "deepseek-v4-pro",
     tokens: 1_000_000,
     maxOutputTokens: 384_000,
     source: SRC.deepseekPricing,
-    asOf: "2026-08-18",
-    note: "공식 DeepSeek API Models & Pricing 표가 V4 계열에 LENGTH 1M / MAX OUTPUT 384K 를 적는다. 레지스트리의 DeepSeek-V4-Pro-0813 스폰 행과 같은 공식 가격표 출처를 쓴다.",
+    asOf: "2026-08-21",
+    note: "공식 DeepSeek API Models & Pricing 표가 V4 계열에 LENGTH 1M / MAX OUTPUT 384K 를 적는다. 레지스트리의 DeepSeek-V4-Pro-0813 스폰 행과 같은 공식 가격표 출처를 쓴다. 2026-08-21 재확인 — 모델 버전(-0813)·context·단가 전부 변동 없음.",
   },
 ];
 

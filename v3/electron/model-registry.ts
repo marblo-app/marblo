@@ -352,18 +352,33 @@ const UPSTAGE_SOLAR_PROBE: ModelVerification = {
 /**
  * DeepSeek V4 — OpenAI 호환 env-swap 벤더다.
  *
- * 2026-08-18 현재 공식 pricing 문서는 V4 계열만 노출한다. Codex(gpt) 하네스를
- * 그대로 띄우고 OPENAI_* env 만 DeepSeek 으로 스왑한다.
+ * 공식 pricing 문서는 V4 계열만 노출한다. Codex(gpt) 하네스를 그대로 띄우고
+ * OPENAI_* env 만 DeepSeek 으로 스왑한다.
+ *
+ * ★2026-08-21 재확인(티켓 giW7eJbD). 08-18 항목은 pricing 페이지만 봤고, 이번엔
+ * DeepSeek 이 **Codex 용으로 직접 배포하는 공식 `models.json`** 까지 대조했다
+ * (quick_start/agent_integrations/codex). 거기서 effort 축이 틀렸다는 게 드러났다 —
+ * 아래 `efforts` 주석 참조. 모델 id·단가는 08-18 그대로다.
+ *
+ * ★여전히 **라이브 프로브 전**이다. `cli` 를 "미보유" 로 두는 것이 이 레코드의
+ * 요점이다 — 문서 대조는 문서 대조지 동작 확인이 아니다.
  */
 const DEEPSEEK_PROBE: ModelVerification = {
-  at: "2026-08-18",
+  at: "2026-08-21",
   cli: "n/a (DeepSeek API 키 미보유 — 라이브 프로브 대기)",
   method:
-    "DeepSeek 공식 API Docs Models & Pricing 확인(2026-08-18): " +
-    "OpenAI-compatible base_url=https://api.deepseek.com, " +
-    "model=deepseek-v4-flash(DeepSeek-V4-Flash-0731) / " +
-    "deepseek-v4-pro(DeepSeek-V4-Pro-0813), " +
-    "peak pricing flash $0.44/$1.32, pro $1.32/$3.96 per 1M tokens",
+    "DeepSeek 공식 API Docs 3개 대조(2026-08-21 재확인, 최초 2026-08-18): " +
+    "① quick_start/pricing — model=deepseek-v4-flash(DeepSeek-V4-Flash-0731) / " +
+    "deepseek-v4-pro(DeepSeek-V4-Pro-0813) 그대로 최신, context 1M / max output 384K, " +
+    "peak pricing flash $0.44/$1.32, pro $1.32/$3.96 per 1M tokens(변동 없음), " +
+    "cache-hit input peak flash $0.014 / pro $0.044, off-peak 는 정확히 절반이고 " +
+    "peak 구간은 01:00-04:00 · 06:00-10:00 UTC 두 덩어리(하루 7시간)뿐이다. " +
+    "② guides/responses_api — base_url=https://api.deepseek.com 로 Responses API 네이티브 지원, " +
+    "tools 는 function/web_search 지원 · custom 은 apply_patch 만 허용(다른 이름은 400) · " +
+    "mcp 등 나머지 built-in 타입은 무시, 미지원 파라미터는 400 이 아니라 조용히 무시. " +
+    "③ quick_start/agent_integrations/codex — DeepSeek 이 배포하는 공식 codex models.json 및 " +
+    "config.toml 예시(model_provider/preferred_auth_method/forced_login_method/" +
+    "wire_api=\"responses\"/model_catalog_json)가 우리 생성 config 와 형태 일치",
 };
 
 /**
@@ -952,7 +967,7 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   // 없다. 스폰/퀵레인 전용이고 오케 셀렉터는 `selectorEligible` 이 env-swap 벤더를
   // 잘라내는 기존 경계로 막는다.
   //
-  // 공식 스펙(2026-08-18):
+  // 공식 스펙(2026-08-18 최초, 2026-08-21 재확인 — 모델 id·단가 전부 변동 없음):
   //   base_url=https://api.deepseek.com, api_key=${DEEPSEEK_API_KEY}
   //   model=deepseek-v4-flash(DeepSeek-V4-Flash-0731)
   //   model=deepseek-v4-pro(DeepSeek-V4-Pro-0813)
@@ -961,6 +976,18 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   // 단가는 peak 정가 기준($/1M)으로 둔다(과소보고 방지). 공식 off-peak 는 절반:
   //   flash input/output $0.22/$0.66, pro $0.66/$1.98.
   // cache-hit input 은 peak 기준 flash $0.014, pro $0.044(오프피크는 절반)다.
+  // ★2026-08-21 확보: peak 는 하루 종일이 아니라 01:00-04:00 · 06:00-10:00 UTC
+  //   두 구간(합 7시간)뿐이고 나머지 17시간은 전부 off-peak 다. 즉 우리 peak 기준
+  //   기록은 실사용 대비 최대 2배 **과대**보고 방향이다 — 그래서 그대로 둔다.
+  //
+  // ★effort 축은 DeepSeek 이 Codex 용으로 직접 배포하는 공식 `models.json`
+  //   (quick_start/agent_integrations/codex)이 권위다. 두 모델 모두
+  //   supported_reasoning_levels = low / high / **max** 이고 default 는 **high** 다.
+  //   종전 이 파일은 low/medium/high + default medium 으로 적혀 있었는데, DeepSeek
+  //   은 `medium` 을 정의하지 않는다 — 즉 우리 **기본값이 벤더에 없는 값**이었다.
+  //   (공식 config.toml 예시도 `model_reasoning_effort = "high"` 로 준다.)
+  //   `max` 는 우리 쪽 승인게이트 칸이라 `selectableEfforts` 가 셀렉터에서 이미
+  //   걷어낸다 — gpt 행들과 완전히 같은 취급이고, 명시 지정 경로로만 닿는다.
   {
     id: "deepseek-v4-flash",
     harness: "gpt", // Codex CLI 를 그대로 스폰하고 OpenAI 호환 env 만 바꾼다
@@ -971,8 +998,9 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
     },
     aliases: [],
     capability: "mid",
-    efforts: ["low", "medium", "high"],
-    defaultEffort: "medium",
+    // 공식 models.json: low / high / max, default high (위 블록 주석 참조).
+    efforts: ["low", "high", "max"],
+    defaultEffort: "high",
     pricing: { inputPer1M: 0.44, outputPer1M: 1.32 },
     verified: DEEPSEEK_PROBE,
     status: "active",
@@ -987,8 +1015,9 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
     },
     aliases: [],
     capability: "mid",
-    efforts: ["low", "medium", "high"],
-    defaultEffort: "medium",
+    // flash 와 동일 — 공식 models.json 기준 low / high / max, default high.
+    efforts: ["low", "high", "max"],
+    defaultEffort: "high",
     pricing: { inputPer1M: 1.32, outputPer1M: 3.96 },
     verified: DEEPSEEK_PROBE,
     status: "active",
