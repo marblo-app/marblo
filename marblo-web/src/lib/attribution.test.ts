@@ -7,6 +7,7 @@ import {
   deriveFirstTouch,
   parseFirstTouch,
   parseGaClientId,
+  sanitizeBuildChannel,
   sanitizeField,
   sanitizeInstallId,
   type AttributionStorage,
@@ -162,6 +163,7 @@ test("buildLinkInstallPayload: 유효 installId 면 first-touch 를 실어 만�
     },
     platform: "darwin",
     appVersion: "3.0.22",
+    buildChannel: "prod",
   });
   assert.deepEqual(payload, {
     installId: uuid,
@@ -173,7 +175,30 @@ test("buildLinkInstallPayload: 유효 installId 면 first-touch 를 실어 만�
     landingPath: "/ko",
     platform: "darwin",
     appVersion: "3.0.22",
+    buildChannel: "prod",
   });
+});
+
+test("sanitizeBuildChannel: dev/prod 만 통과, 나머지는 null", () => {
+  assert.equal(sanitizeBuildChannel("dev"), "dev");
+  assert.equal(sanitizeBuildChannel("prod"), "prod");
+  assert.equal(sanitizeBuildChannel(" PROD "), "prod");
+  assert.equal(sanitizeBuildChannel("staging"), null);
+  assert.equal(sanitizeBuildChannel(null), null);
+  assert.equal(sanitizeBuildChannel(undefined), null);
+});
+
+test("buildLinkInstallPayload: 표식 없는 구버전 앱 링크도 그대로 만든다", () => {
+  // `?c=` 를 안 보내는 앱의 유입을 잃으면 안 된다 — null 로 접고 통과시킨다.
+  const uuid = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+  const payload = buildLinkInstallPayload({
+    installId: uuid,
+    gaClientId: null,
+    firstTouch: null,
+    platform: "darwin",
+    appVersion: "3.0.22",
+  });
+  assert.equal(payload?.buildChannel, null);
 });
 
 test("buildLinkInstallPayload: GA4 client_id 가 없어도(광고차단) 페이로드는 만든다", () => {

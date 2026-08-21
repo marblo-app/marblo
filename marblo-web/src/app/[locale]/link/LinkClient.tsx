@@ -55,6 +55,9 @@ export default function LinkClient() {
         firstTouch: readFirstTouch(),
         platform: params.get("p") ?? "",
         appVersion: params.get("v") ?? "",
+        // `c` = 앱의 빌드 채널(dev/prod). 개발 재실행을 실유입과 나누는 표식이다.
+        // 구버전 앱은 안 보내고, 그때는 null 로 접힌다.
+        buildChannel: params.get("c"),
       });
 
       // 설치 ID 가 없거나 형식이 아니면(사람이 URL 을 직접 연 경우) 아무것도 안 한다.

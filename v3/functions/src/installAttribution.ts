@@ -23,6 +23,17 @@ export interface InstallAttributionRow {
   landingPath: string | null;
   platform: string | null;
   appVersion: string | null;
+  /**
+   * `"dev"` = 개발/테스트 재실행, `"prod"` = 배포된 앱의 첫 실행,
+   * `null` = 표식이 붙기 전(2026-08-21 이전) 앱이 보낸 행.
+   *
+   * ★유입 집계는 `buildChannel = "prod"` 만 세야 한다. 이 컬럼이 생기기 전
+   *   550행은 전부 개발 루프였고(gaClientId 3개·10~30초 간격 버스트), 그걸
+   *   다운로드 수로 읽으면 유입을 두 자릿수 배로 부풀린다.
+   * ★클라이언트가 보내는 값이라 위조 가능하다 — 집계 위생용이지 보안 통제가
+   *   아니다. 이 값으로 권한을 가르지 않는다.
+   */
+  buildChannel: string | null;
   linkedAt: string;
   linkSource: string;
 }
@@ -32,6 +43,9 @@ export type AttributionRejectReason =
   | "missing_install_id"
   | "bad_install_id"
   | "bad_ga_client_id";
+
+/** 허용되는 빌드 채널. 이 둘 밖의 값은 조용히 null 로 접는다. */
+export const BUILD_CHANNELS = ["dev", "prod"] as const;
 
 export type ParseResult =
   | { ok: true; row: InstallAttributionRow }
@@ -75,6 +89,18 @@ export function parseGaClientId(raw: unknown): string | null {
 }
 
 /**
+ * 빌드 채널 검증. 구버전 앱은 이 필드를 아예 안 보내므로 **없음(null)이
+ * 정상값**이다 — 거부하지 않는다(거부하면 구버전 앱의 유입이 통째로 사라진다).
+ * 형식이 틀린 값도 거부 대신 null 로 접는다: 이 표식은 집계 위생용이고,
+ * 쓰레기 값 하나 때문에 어트리뷰션 행 자체를 잃는 게 더 손해다.
+ */
+export function parseBuildChannel(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const v = raw.trim().toLowerCase();
+  return (BUILD_CHANNELS as readonly string[]).includes(v) ? v : null;
+}
+
+/**
  * 콜러블 입력 → BigQuery 행. 실패하면 사유만 돌려준다.
  *
  * @param now  적재 시각(테스트 주입). ISO 문자열로 행에 실린다.
@@ -112,6 +138,7 @@ export function parseLinkInstallRequest(data: unknown, now: Date): ParseResult {
       landingPath: cleanField(d.landingPath),
       platform: cleanField(d.platform),
       appVersion: cleanField(d.appVersion),
+      buildChannel: parseBuildChannel(d.buildChannel),
       linkedAt: now.toISOString(),
       linkSource: "app_first_run",
     },
@@ -129,6 +156,7 @@ export const INSTALL_ATTRIBUTION_SCHEMA = [
   { name: "landingPath", type: "STRING", mode: "NULLABLE" },
   { name: "platform", type: "STRING", mode: "NULLABLE" },
   { name: "appVersion", type: "STRING", mode: "NULLABLE" },
+  { name: "buildChannel", type: "STRING", mode: "NULLABLE" },
   { name: "linkedAt", type: "TIMESTAMP", mode: "REQUIRED" },
   { name: "linkSource", type: "STRING", mode: "NULLABLE" },
 ] as const;

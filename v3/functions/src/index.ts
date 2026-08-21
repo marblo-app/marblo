@@ -12615,7 +12615,15 @@ const WEB_VISITOR_LIMIT = 200000;
 
 let attributionTableReady = false;
 
-/** 어트리뷰션 테이블을 최초 1회 생성한다(trainingCapture 와 같은 패턴). */
+/**
+ * 어트리뷰션 테이블을 최초 1회 생성한다(trainingCapture 와 같은 패턴).
+ *
+ * ★테이블이 **이미 있으면** 스키마에 새로 생긴 NULLABLE 컬럼만 덧붙인다.
+ *   컬럼을 코드에만 추가하고 BQ 를 그대로 두면 insert 가 "no such field" 로
+ *   통째로 죽고, 그 실패는 어트리뷰션 행의 영구 유실이 된다(아래 insert 의
+ *   보상 로직은 Firestore 마커만 되돌린다). 붙이기만 하고 **기존 컬럼의 삭제·
+ *   타입변경·데이터 수정은 하지 않는다** — BigQuery 도 NULLABLE 추가만 허용한다.
+ */
 async function ensureAttributionTable(): Promise<void> {
   if (attributionTableReady) return;
   const dataset = bigquery.dataset(BQ_DATASET);
@@ -12633,6 +12641,28 @@ async function ensureAttributionTable(): Promise<void> {
     functions.logger.info(
       "[installAttribution] created install_attribution table"
     );
+    attributionTableReady = true;
+    return;
+  }
+
+  const [metadata] = await table.getMetadata();
+  const live: { name: string }[] = metadata?.schema?.fields ?? [];
+  const liveNames = new Set(live.map((f) => f.name));
+  const missing = INSTALL_ATTRIBUTION_SCHEMA.filter(
+    (f) => !liveNames.has(f.name)
+  );
+  if (missing.length > 0) {
+    // 새 컬럼은 전부 NULLABLE 이어야 한다 — REQUIRED 를 기존 테이블에 붙이는
+    // 건 BigQuery 가 거부하고, 거부당하면 여기서 던져 insert 까지 막힌다.
+    const additive = missing.filter((f) => f.mode === "NULLABLE");
+    if (additive.length > 0) {
+      await table.setMetadata({
+        schema: { fields: [...live, ...additive] },
+      });
+      functions.logger.info("[installAttribution] schema columns added", {
+        added: additive.map((f) => f.name),
+      });
+    }
   }
   attributionTableReady = true;
 }

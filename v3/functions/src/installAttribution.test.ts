@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   cleanField,
+  parseBuildChannel,
   parseGaClientId,
   parseInstallId,
   parseLinkInstallRequest,
@@ -71,6 +72,7 @@ test("parseLinkInstallRequest: 정상 페이로드 → BQ 행", () => {
     landingPath: "/ko/download",
     platform: "darwin",
     appVersion: "3.0.22",
+    buildChannel: null,
     linkedAt: "2026-08-10T00:00:00.000Z",
     linkSource: "app_first_run",
   });
@@ -133,4 +135,41 @@ test("parseLinkInstallRequest: 계정 식별자는 실려 와도 행에 남지 �
       `${forbidden} 가 행에 남았다`,
     );
   }
+});
+
+test("parseBuildChannel: dev/prod 만 통과하고 나머지는 null 로 접는다", () => {
+  assert.equal(parseBuildChannel("dev"), "dev");
+  assert.equal(parseBuildChannel("prod"), "prod");
+  assert.equal(parseBuildChannel(" PROD "), "prod");
+  // ★거부가 아니라 null 이다: 표식 하나 때문에 어트리뷰션 행을 잃으면 안 된다.
+  assert.equal(parseBuildChannel("staging"), null);
+  assert.equal(parseBuildChannel(""), null);
+  assert.equal(parseBuildChannel(undefined), null);
+  assert.equal(parseBuildChannel(123), null);
+});
+
+test("parseLinkInstallRequest: buildChannel 을 행에 싣는다", () => {
+  const r = parseLinkInstallRequest(
+    { installId: UUID, gaClientId: null, buildChannel: "prod" },
+    NOW,
+  );
+  assert.equal(r.ok, true);
+  assert.equal(r.ok && r.row.buildChannel, "prod");
+});
+
+test("parseLinkInstallRequest: 표식을 안 보내는 구버전 앱도 그대로 받는다", () => {
+  // 구버전 앱은 `c` 파라미터 자체가 없다. 그 유입을 잃으면 안 되므로 null 로
+  // 채워 통과시킨다 — "표식 이전 행" 은 null 로 식별된다.
+  const r = parseLinkInstallRequest({ installId: UUID, gaClientId: null }, NOW);
+  assert.equal(r.ok, true);
+  assert.equal(r.ok && r.row.buildChannel, null);
+});
+
+test("INSTALL_ATTRIBUTION_SCHEMA: buildChannel 은 NULLABLE 이다", () => {
+  // 이미 존재하는 테이블에 덧붙는 컬럼이라 REQUIRED 면 BigQuery 가 거부한다
+  // (index.ts ensureAttributionTable 의 추가 마이그레이션 조건).
+  const f = INSTALL_ATTRIBUTION_SCHEMA.find((x) => x.name === "buildChannel");
+  assert.ok(f);
+  assert.equal(f?.type, "STRING");
+  assert.equal(f?.mode, "NULLABLE");
 });

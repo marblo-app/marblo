@@ -16,15 +16,19 @@
  *   (GA4 client_id, 유입 채널)는 웹이 자기 브라우저에서 읽는다. uid·이메일은
  *   이 경로에 존재하지 않는다(티켓 woXp2c70 과 정합).
  * ★게이트: 텔레메트리 옵트아웃 상태면 열지 않는다. 설치당 1회만 연다.
+ * ★빌드 채널(dev/prod)도 함께 보낸다 — 개발 루프의 재실행이 실사용자 유입과
+ *   같은 행으로 섞이면 유입 수를 못 믿게 된다(첫 550행이 정확히 그랬다).
+ *   비식별 빌드 사실 하나이고 사람·기기에 대한 정보가 아니다.
  */
 import { getClientId, isTelemetryEnabled } from "./telemetryService";
 import { useLocaleStore } from "../lib/i18n";
 import {
   INSTALL_LINK_SENT_KEY,
   buildInstallLinkUrl,
+  resolveBuildChannel,
 } from "../lib/attributionLink";
 
-export { INSTALL_LINK_SENT_KEY, buildInstallLinkUrl };
+export { INSTALL_LINK_SENT_KEY, buildInstallLinkUrl, resolveBuildChannel };
 
 /** 설치당 1회 마커를 찍는다. 이미 찍혀 있으면 false. */
 function markOnce(): boolean {
@@ -56,6 +60,11 @@ export function notifyInstallAttribution(): void {
         (typeof navigator !== "undefined" && navigator.platform) || "unknown",
       appVersion:
         typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : undefined,
+      buildChannel: resolveBuildChannel({
+        dev: import.meta.env.DEV,
+        protocol:
+          typeof window !== "undefined" ? window.location.protocol : "file:",
+      }),
     });
     if (!url) return;
     if (!markOnce()) return;

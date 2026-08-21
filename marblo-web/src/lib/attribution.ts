@@ -215,6 +215,23 @@ export function sanitizeInstallId(raw: unknown): string | null {
     : null;
 }
 
+/**
+ * 앱이 `?c=` 로 알려 주는 빌드 채널. 개발 루프의 재실행(`dev`)이 실사용자
+ * 유입(`prod`)과 같은 행으로 섞이지 않게 하는 표식이다 — 첫 550행이 정확히
+ * 그렇게 섞여 유입 수를 못 믿게 만들었다. 표식을 안 보내는 구버전 앱은 null.
+ */
+export type BuildChannel = "dev" | "prod";
+
+/**
+ * 빌드 채널 검증. 없거나 형식이 틀리면 null — **거부하지 않는다.** 구버전 앱은
+ * 아예 안 보내고, 표식 하나 때문에 어트리뷰션 행을 통째로 잃는 게 더 손해다.
+ */
+export function sanitizeBuildChannel(raw: unknown): BuildChannel | null {
+  if (typeof raw !== "string") return null;
+  const v = raw.trim().toLowerCase();
+  return v === "dev" || v === "prod" ? v : null;
+}
+
 /** 앱→웹 링크백 페이로드(콜러블 `linkInstallAttribution` 입력과 1:1). */
 export interface LinkInstallPayload {
   installId: string;
@@ -226,6 +243,7 @@ export interface LinkInstallPayload {
   landingPath: string;
   platform: string;
   appVersion: string;
+  buildChannel: BuildChannel | null;
 }
 
 /**
@@ -238,6 +256,7 @@ export function buildLinkInstallPayload(args: {
   firstTouch: FirstTouch | null;
   platform: unknown;
   appVersion: unknown;
+  buildChannel?: unknown;
 }): LinkInstallPayload | null {
   const installId = sanitizeInstallId(args.installId);
   if (!installId) return null;
@@ -252,5 +271,6 @@ export function buildLinkInstallPayload(args: {
     landingPath: ft?.landingPath ?? "",
     platform: sanitizeField(args.platform),
     appVersion: sanitizeField(args.appVersion),
+    buildChannel: sanitizeBuildChannel(args.buildChannel),
   };
 }
