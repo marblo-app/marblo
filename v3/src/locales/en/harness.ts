@@ -93,8 +93,6 @@ export const harness: Record<keyof typeof koHarness, string> = {
   // No vendor or model id literals live here — the list is registry-derived and
   // these strings only carry the classification ("key, not install").
   "harness.store.envSwap.title": "Env-swap vendors",
-  "harness.store.envSwap.subtitle":
-    "These vendors run on the claude harness with just an API key — nothing to install; register the key and they turn on.",
   "harness.store.envSwap.summary": "{ready} of {total} ready",
   "harness.store.envSwap.loading": "Loading the vendor list…",
   "harness.store.envSwap.loadFailed": "Could not load the vendor list.",
@@ -193,8 +191,11 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.section.cli": "Orchestrator CLI",
   "harness.store.section.cliDesc":
     "Install Claude Code, Codex and Grok CLI, then verify their login state.",
+  // Section head is two lines (title + this one). See the ko note: the old
+  // "How to launch it" line only introduced the snippet below, so it folded
+  // into the tail of this sentence instead of standing on its own.
   "harness.store.section.envSwapDesc":
-    "Register API keys for vendors such as GLM, Kimi, MiniMax, Solar and DeepSeek that run through the claude harness.",
+    "These vendors run on the claude harness with just an API key. Ask the orchestrator with the model named.",
   "harness.store.section.localDesc":
     "Install local models through Ollama and track pull progress clearly.",
   // --- Telegram channel panel ---

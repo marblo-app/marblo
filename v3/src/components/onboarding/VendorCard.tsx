@@ -44,8 +44,8 @@ const STATUS_STYLE: Record<VendorSetupCard["status"], string> = {
  *   어디에도 없다. 처음 보는 사람에게 그건 장식이 아니라 첫인상 그 자체다.
  *
  * `compact`(하네스탭) — 섹션이 env-swap 벤더만 담고, 바깥 `HarnessSetupSection` 이
- *   `harness.store.section.envSwapDesc`("API 키만 등록해 claude 하네스로 쓰는
- *   벤더입니다")로 같은 말을 **이미 한 번** 했다. 카드가 그걸 또 하면 벤더 수만큼
+ *   `harness.store.section.envSwapDesc`("claude 하네스에 API 키만 얹어 쓰는
+ *   벤더입니다…")로 같은 말을 **이미 한 번** 했다. 카드가 그걸 또 하면 벤더 수만큼
  *   반복된다(곧 5장). 그래서 카드에는 카드마다 **실제로 다른 것**(=어느 바이너리로
  *   도는지)만 칩으로 남기고, 공통 문장은 hover 로 닿게 둔다 — 지우는 게 아니다.
  */

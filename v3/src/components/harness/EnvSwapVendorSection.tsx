@@ -32,7 +32,7 @@ import { VendorCard } from "../onboarding/VendorCard";
  * ── 재사용 ───────────────────────────────────────────────────────────────
  * 카드 자체는 시작하기 탭·②단계 BYOM 대안과 **같은 `VendorCard`**(#632)이되, 이
  * 섹션만 `density="compact"` 로 넘긴다. 이 섹션은 env-swap 벤더만 담고 바깥
- * `HarnessSetupSection` 이 "API 키만 등록해 claude 하네스로 쓰는 벤더" 라고 이미
+ * `HarnessSetupSection` 이 "claude 하네스에 API 키만 얹어 쓰는 벤더" 라고 이미
  * 한 번 말했지만, 온보딩 쪽 두 섹션은 목록에 자체 CLI 벤더(Grok)가 섞여 있어 그
  * 문장을 카드가 직접 말해야 한다 — 같은 카드지만 필요한 밀도가 다르다. 상태
  * 판정도 같은 store(`vendorSecretsStore`)에서 오므로, 한 화면에서 "등록 상태 다시
@@ -79,8 +79,11 @@ export function EnvSwapVendorSection({
               </span>
             )}
           </div>
+          {/* 제목 바로 아래 한 줄이 이 섹션 머리의 전부다 — chrome 을 바깥
+              `StoreSectionHeader` 가 그리는 경우와 **같은 키**를 쓴다(두 경로가
+              서로 다른 말을 하면 같은 섹션이 화면마다 달라진다). */}
           <p className="mb-3 text-xs text-[#7f849c]">
-            {t("harness.store.envSwap.subtitle")}
+            {t("harness.store.section.envSwapDesc")}
           </p>
         </>
       )}
@@ -114,13 +117,14 @@ export function EnvSwapVendorSection({
         </p>
       ) : (
         <>
-          {/* ★"띄우는 법" 은 섹션에 한 번만. 예전엔 카드마다 이 라벨을 들고 있어서
-              벤더 수만큼(곧 5번) 같은 문장이 섰다 — 정작 카드마다 다른 것은 라벨이
-              아니라 아래 model id 스니펫뿐이다. 그래서 라벨은 여기로 올리고, 카드는
-              `density="compact"` 로 칩·스니펫·Copy 만 남긴다. */}
-          <p className="mb-2 text-xs text-[#7f849c]">
-            {t("onboarding.startHere.vendors.dispatchLabel")}
-          </p>
+          {/* ★"띄우는 법" 라벨은 더 이상 여기 서지 않는다. #1066 에서 카드마다
+              반복되던 이 문장을 섹션으로 한 번만 올렸는데, 그러고 나니 섹션 머리가
+              제목·설명·라벨 세 줄이 됐다. 라벨이 하던 일(= 아래 스니펫을 어디에
+              쓰는지 말해 주기)은 문장 하나면 되므로 `envSwapDesc` 꼬리로 합쳤다
+              ("…모델을 명시해서 오케에게 요청해보세요"). ★온보딩 카드가 쓰는
+              `onboarding.startHere.vendors.dispatchLabel` 원문은 건드리지 않는다 —
+              시작하기 탭·②단계 BYOM 은 목록에 자체 CLI 벤더가 섞여 있어 그 라벨을
+              카드가 직접 말해야 하고, 여기서 문구를 갈면 거기까지 같이 바뀐다. */}
           <div className="grid gap-3 md:grid-cols-2">
             {cards.map((card) => (
               <VendorCard

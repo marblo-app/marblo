@@ -89,8 +89,6 @@ export const harness = {
   // ★벤더 이름·모델 id 가 이 표에 하나도 없다. 목록은 model-registry 파생이고,
   //   여기 있는 것은 "설치할 CLI 가 아니라 키를 얹는 것" 이라는 분류 문구뿐이다.
   "harness.store.envSwap.title": "env-swap 벤더",
-  "harness.store.envSwap.subtitle":
-    "claude 하네스에 API 키만 얹어 쓰는 벤더입니다 — 설치할 CLI 가 없고, 키를 등록하면 바로 켜집니다.",
   "harness.store.envSwap.summary": "{total}개 중 {ready}개 준비됨",
   "harness.store.envSwap.loading": "벤더 목록을 불러오는 중…",
   "harness.store.envSwap.loadFailed": "벤더 목록을 불러오지 못했습니다.",
@@ -188,8 +186,12 @@ export const harness = {
   "harness.store.section.cli": "오케 CLI",
   "harness.store.section.cliDesc":
     "Claude Code, Codex, Grok CLI를 설치하고 로그인 상태를 확인합니다.",
+  // ★섹션 머리는 두 줄(제목 + 이 한 줄)까지다. 예전엔 여기 아래로 "띄우는 법 —
+  // 오케스트레이터에게 이렇게 말하세요" 가 한 줄 더 섰는데, 그 문장이 하던 일은
+  // 아래 스니펫이 무엇인지 말해 주는 것뿐이라 이 줄 뒤에 붙여 하나로 합쳤다.
+  // 벤더 열거(GLM·Kimi·…)는 바로 밑 카드가 이미 이름으로 말하므로 뺀다.
   "harness.store.section.envSwapDesc":
-    "GLM, Kimi, MiniMax, Solar, DeepSeek처럼 API 키만 등록해 claude 하네스로 쓰는 벤더입니다.",
+    "claude 하네스에 API 키만 얹어 쓰는 벤더입니다. 모델을 명시해서 오케에게 요청해보세요.",
   "harness.store.section.localDesc":
     "Ollama로 내 기기에서 실행할 로컬 모델을 설치하고 진행률을 확인합니다.",
   // --- Telegram channel panel ---
