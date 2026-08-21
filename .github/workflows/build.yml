@@ -1,5 +1,23 @@
 name: Build & Release
 
+# WHO RUNS WHAT (this split exists for billing reasons — read before widening it):
+#   pull_request       → `verify` only. One ubuntu-latest runner (1x minute
+#                        multiplier). typecheck + unit tests. NO installers.
+#   push: main         → `build` matrix, LINUX LEG ONLY (~6 min, 1x). Real
+#                        electron-builder packaging, so main keeps a daily
+#                        "did packaging break" signal at a price it can pay.
+#   tag v*             → `build` matrix, ALL platforms, then `release`.
+#   workflow_dispatch  → `build` matrix, filtered by the `platform` input.
+#
+# Private-repo minute multipliers are macOS 10x, Windows 2x, Linux 1x, and the
+# two mac legs sign + notarize (~25 min each), so one full matrix pass costs
+# ~518 Linux-equivalent minutes — of which ~500 (96%) is the two mac legs.
+# This workflow triggers on BOTH pull_request and push:main, so a single PR
+# used to pay for that twice (~1,036 min): over half the 2,000 min/month
+# private-repo allowance for ONE pull request, and ~15,540 min/day at the
+# observed ~30 merges/day. mac and win installers are therefore produced only
+# where an installer is actually consumed — a v* tag — or on demand via
+# workflow_dispatch. Per PR that is 1,036 → 11 minutes.
 on:
   push:
     branches: [main]
@@ -30,8 +48,94 @@ on:
         default: false
         type: boolean
 
+# Superseded PR runs are pure waste: pushing three times to a PR used to leave
+# two doomed runs burning runners. Cancel only on pull_request — a main or tag
+# run must never be cancelled by the next push, so those queue instead.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # PR gate. Everything a PR can be told about the code WITHOUT packaging an
+  # installer: both TypeScript projects typecheck, and the vitest suite runs.
+  # ESLint is not duplicated here — lint.yml already gates PRs on it.
+  # One ubuntu-latest runner, 1x multiplier. If this ever needs to grow, grow it
+  # on ubuntu; adding a mac or win leg here re-creates the bill this replaced.
+  verify:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    # Typecheck + unit tests are a few minutes. Cap well under the 360-min
+    # default so a hung vitest cannot pin a runner.
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: v3/package-lock.json
+
+      # `npm install`, not `npm ci`: the committed lock is generated on macOS and
+      # omits electron-builder's optional win32 subtree, so `npm ci` fails on
+      # Linux with "Missing … from lock file" (same reason lint.yml uses install).
+      #
+      # `--ignore-scripts` skips the postinstall electron-rebuild, which builds
+      # the node-pty native module and is the step that needs a working
+      # node-gyp/Python toolchain. Nothing here needs node-pty: vitest runs with
+      # environment "node" and no test imports it.
+      #
+      # NOT `--omit=optional` (lint.yml can afford that, this job cannot):
+      # rollup ships its platform binary as an OPTIONAL dependency, so omitting
+      # optionals makes vite/vitest die at startup with
+      # "Cannot find module @rollup/rollup-linux-x64-gnu". Verified locally.
+      - name: Install dependencies
+        working-directory: v3
+        run: npm install --no-audit --no-fund --ignore-scripts
+
+      # --ignore-scripts also skips electron's own postinstall, which downloads
+      # the Electron binary and writes node_modules/electron/path.txt.
+      # tests/unit/bundleInstaller.test.ts requires("electron"), which throws
+      # ("Electron failed to install correctly") without it. Run just that one
+      # download script — it is a plain fetch+unzip with no native compile, so it
+      # brings back the binary without dragging in the electron-rebuild toolchain.
+      - name: Fetch Electron binary (for tests that require("electron"))
+        working-directory: v3
+        run: node node_modules/electron/install.js
+
+      - name: Typecheck
+        working-directory: v3
+        run: npm run typecheck
+
+      # NON-BLOCKING ON PURPOSE, AND ONLY UNTIL THE 4 KNOWN FAILURES ARE FIXED.
+      # `main` currently fails 4 of 7,183 tests, all pre-existing and unrelated
+      # to CI config:
+      #   tests/unit/model-autoselect.test.ts        2 (expects claude-sonnet-5,
+      #                                                 selector returns claude-opus-5)
+      #   tests/unit/onboarding-demo-script.test.ts  2 (constant / CTA markup drift)
+      # Blocking on them would paint every PR red, which stops the team rather
+      # than gating it. Owner of the fix: task OfbgCyJSp2g8k3E4uYzB.
+      #
+      # ★ PROMOTION CONDITION — delete `continue-on-error` and make this a
+      #   blocking gate as soon as `npm test` is green on main (i.e. the moment
+      #   OfbgCyJSp2g8k3E4uYzB lands). Leaving it advisory past that point means
+      #   the suite silently stops protecting anything.
+      - name: Test
+        working-directory: v3
+        continue-on-error: true
+        run: npm test
+
   build:
+    # ── COST GATE ──────────────────────────────────────────────────────────
+    # Installers are never built for a pull_request. This is a JOB-level `if:`
+    # on purpose and it is legal here because it touches only the `github`
+    # context — see the matrix-context trap documented on the guard step below.
+    # A PR gets the `verify` job above instead.
+    if: github.event_name != 'pull_request'
+
     strategy:
       fail-fast: false
       matrix:
@@ -72,19 +176,60 @@ jobs:
       # before matrix expansion → "Unrecognized named-value: 'matrix'" → the whole
       # workflow fails validation and spawns 0 jobs). This guard step is the only
       # place that decides whether the rest of the matrix leg should run.
+      # (The job-level `if:` above is fine because it reads only `github`.)
       - name: Determine whether to build this platform
         id: guard
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" != "workflow_dispatch" \
-                || "${{ github.event.inputs.platform }}" == "all" \
-                || "${{ github.event.inputs.platform }}" == "${{ matrix.platform }}" ]]; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            echo "Building ${{ matrix.platform }}-${{ matrix.arch }}"
-          else
-            echo "build=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping ${{ matrix.platform }} (workflow_dispatch selected '${{ github.event.inputs.platform }}')"
-          fi
+          case "${{ github.event_name }}" in
+            pull_request)
+              # Belt and braces. The job-level `if:` already keeps this job off
+              # PRs; this makes the matrix inert even if someone deletes it.
+              echo "build=false" >> "$GITHUB_OUTPUT"
+              echo "Skipping ${{ matrix.platform }}: installers are not built on pull_request (see the header comment)."
+              ;;
+            workflow_dispatch)
+              # Manual builds keep their platform picker — this is the path used
+              # to cut a Windows build by hand. Do not narrow it.
+              if [[ "${{ github.event.inputs.platform }}" == "all" \
+                    || "${{ github.event.inputs.platform }}" == "${{ matrix.platform }}" ]]; then
+                echo "build=true" >> "$GITHUB_OUTPUT"
+                echo "Building ${{ matrix.platform }}-${{ matrix.arch }}"
+              else
+                echo "build=false" >> "$GITHUB_OUTPUT"
+                echo "Skipping ${{ matrix.platform }} (workflow_dispatch selected '${{ github.event.inputs.platform }}')"
+              fi
+              ;;
+            push)
+              if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+                # v* tag → every platform. A release needs all of them.
+                echo "build=true" >> "$GITHUB_OUTPUT"
+                echo "Building ${{ matrix.platform }}-${{ matrix.arch }} (tag build — full matrix)"
+              elif [[ "${{ matrix.platform }}" == "linux" ]]; then
+                # push to main → linux ONLY (1x). This leg is not a formality:
+                # it runs the real `electron-builder --linux`, which rebuilds
+                # node-pty natively (no npmRebuild override outside windows) and
+                # packages .AppImage/.deb through fpm. That is where the
+                # packaging breakages this file has actually hit live —
+                # the fpm author field, electron-builder config overrides — so
+                # main keeps a daily packaging signal for ~6 Linux-minutes.
+                echo "build=true" >> "$GITHUB_OUTPUT"
+                echo "Building ${{ matrix.platform }}-${{ matrix.arch }} (main push — linux-only smoke)"
+              else
+                # mac (10x) and win (2x) on every merge to main is what made the
+                # bill. Installers for those come from a v* tag, or on demand via
+                # workflow_dispatch.
+                echo "build=false" >> "$GITHUB_OUTPUT"
+                echo "Skipping ${{ matrix.platform }}: main pushes build linux only. Cut a v* tag or use workflow_dispatch for mac/win."
+              fi
+              ;;
+            *)
+              # Unlisted event. Default to NOT spending money: whoever adds a
+              # trigger to `on:` must come here and say what it should build.
+              echo "build=false" >> "$GITHUB_OUTPUT"
+              echo "Skipping ${{ matrix.platform }}: event '${{ github.event_name }}' has no rule in this guard."
+              ;;
+          esac
 
       - name: Checkout
         if: steps.guard.outputs.build == 'true'
