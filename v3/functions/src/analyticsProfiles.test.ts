@@ -28,10 +28,15 @@ import {
   HORIZON_DEFINITION_WINDOW,
   HORIZON_DEFINITION_PENDING,
   PROFILE_HORIZONS,
+  FORBIDDEN_ON_ANONYMOUS_AXIS,
+  FORBIDDEN_ON_LINK_AXIS,
+  LINK_AXIS_TABLES,
+  TABLE_USER_INSTALL,
   type BqField,
   type DailySourceRow,
   type UserDailyRow,
 } from "./analyticsProfiles";
+import { USER_INSTALL_SCHEMA } from "./personAxis";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 1) 축 분리 — 주석은 안 읽힐 수 있으니 기계가 읽는다
@@ -111,7 +116,81 @@ test("축이 선언되지 않은 테이블은 통과시키지 않는다", () => 
   // 목록 자체도 겹치지 않아야 한다.
   for (const t of ANONYMOUS_AXIS_TABLES) {
     assert.ok(!ACCOUNT_AXIS_TABLES.includes(t), `${t} 이 양쪽에 있다`);
+    assert.ok(!LINK_AXIS_TABLES.includes(t), `${t} 이 익명축과 링크축 양쪽에 있다`);
   }
+  for (const t of ACCOUNT_AXIS_TABLES) {
+    assert.ok(!LINK_AXIS_TABLES.includes(t), `${t} 이 계정축과 링크축 양쪽에 있다`);
+  }
+});
+
+// ── 링크축 추가분 (ticket cZWmTzoOXpHCg9HAUwqw / 사람 축 설계 §4, §6.1) ──────
+//
+// ★축이 셋이 됐다고 익명축이 넓어진 것이 아니다. 아래 첫 테스트가 그 사실을
+//   못 박는다 — FORBIDDEN_ON_ANONYMOUS_AXIS 에서 항목이 빠지면 빨개진다.
+
+test("★★익명축 금지 목록은 사람 축이 생겨도 한 항목도 줄지 않는다", () => {
+  // #1079 가 넣은 목록이다. 사람 축을 열려고 여기서 user_key 를 빼는 것이
+  // 가장 쉬운 우회로이고, 그래서 여기가 제일 먼저 빨개져야 한다.
+  for (const name of [
+    "user_key",
+    "user_id",
+    "uid",
+    "account_key",
+    "email",
+    "cost_usd",
+    "mrr_usd",
+    "ltv_usd",
+    "cache_hit_rate",
+    "is_admin",
+  ]) {
+    assert.ok(
+      FORBIDDEN_ON_ANONYMOUS_AXIS.includes(name),
+      `${name} 이 익명축 금지 목록에서 사라졌다`
+    );
+  }
+  // 그리고 실제로 계속 잡는다(목록만 있고 검사가 안 도는 상태 방지).
+  assert.throws(
+    () =>
+      assertAxisPurity(TABLE_USER_DAILY, [
+        ...USER_DAILY_SCHEMA,
+        { name: "user_key", type: "STRING", mode: "NULLABLE" },
+      ]),
+    /user_key/
+  );
+});
+
+test("링크표 스키마는 링크축에서 통과한다 — 두 키를 한 행에 담는 유일한 자리", () => {
+  assertAxisPurity(TABLE_USER_INSTALL, USER_INSTALL_SCHEMA as BqField[]);
+});
+
+test("★같은 스키마를 익명축 표에 넣으면 여전히 거부된다", () => {
+  // 링크축이 허용됐다고 익명축이 함께 열린 게 아니라는 확인.
+  assert.throws(
+    () => assertAxisPurity(TABLE_USER_DAILY, USER_INSTALL_SCHEMA as BqField[]),
+    /user_key/
+  );
+});
+
+test("★링크표에 원시 식별자를 붙이면 즉시 실패한다 — 가명 매핑이지 명부가 아니다", () => {
+  for (const name of ["uid", "email", "person_key", "ip", "device_name"]) {
+    assert.throws(
+      () =>
+        assertAxisPurity(TABLE_USER_INSTALL, [
+          ...(USER_INSTALL_SCHEMA as BqField[]),
+          { name, type: "STRING", mode: "NULLABLE" },
+        ]),
+      new RegExp(name),
+      `${name} 이 링크축에서 통과했다`
+    );
+    assert.ok(FORBIDDEN_ON_LINK_AXIS.includes(name));
+  }
+});
+
+test("★링크축 목록은 표 하나다 — 잇는 자리가 늘면 되돌리기가 깨진다", () => {
+  // 링크표를 지우면 사람 축이 통째로 사라진다는 성질은 "잇는 자리가 하나뿐"
+  // 이라는 사실에 걸려 있다(설계 §4.2-5).
+  assert.equal(LINK_AXIS_TABLES.length, 1);
+  assert.equal(LINK_AXIS_TABLES[0], TABLE_USER_INSTALL);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

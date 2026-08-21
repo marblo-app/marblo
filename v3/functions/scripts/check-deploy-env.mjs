@@ -10,6 +10,13 @@ import { fileURLToPath } from "node:url";
 // 막으려면 배포 전에 막는 게 맞다. 값은 아무 고엔트로피 문자열이면 되고,
 // 한 번 정하면 바꾸지 않는다 — 바꾸면 그 시점 전후의 가명이 갈라져
 // events↔task_outcomes 조인이 끊긴다.
+// ★PERSON_AXIS_EFFECTIVE_FROM 은 **일부러 여기 없다.** 사람 축(가명 계정키)의
+// 소급 상한이고, 값이 없으면(unset) 사람 축이 0행 + 사유를 돌려주는 것이
+// **설계된 정상 상태**다(functions/src/personAxis.ts,
+// v3/docs/person-axis-user-key-design-2026-08-21.md §5.4). 여기에 올리면
+// 배포가 막히고, 막힌 배포를 뚫으려고 아무 날짜나 채우게 되며, 그 순간 개정
+// 고지가 발효되기도 전에 소급이 열린다. 채우는 조건은 personAxis.ts 의
+// PERSON_AXIS_EFFECTIVE_FROM_UNSET_NOTE 위에 체크리스트로 있다.
 const REQUIRED_KEYS = ["ADMIN_UID", "ANALYTICS_ID_SALT"];
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -71,7 +78,7 @@ function parseEnvKeys(raw) {
 function fail(message) {
   console.error(`\n[functions-env-gate] ${message}`);
   console.error(
-    "[functions-env-gate] Cloud Functions deploy is blocked before Firebase can silently deploy without required env.",
+    "[functions-env-gate] Cloud Functions deploy is blocked before Firebase can silently deploy without required env."
   );
   process.exit(1);
 }
@@ -79,14 +86,14 @@ function fail(message) {
 const projectId = resolveProjectId();
 if (!projectId) {
   fail(
-    "Could not resolve Firebase project id. Pass --project <project-id> or configure .firebaserc.",
+    "Could not resolve Firebase project id. Pass --project <project-id> or configure .firebaserc."
   );
 }
 
 const envPath = resolve(functionsDir, `.env.${projectId}`);
 if (!existsSync(envPath)) {
   fail(
-    `Missing ${envPath}. This file is gitignored and is not present in isolated Marblo worktrees. Deploy functions from the main checkout that has functions/.env.${projectId}, not from ~/.marblo/worktrees/<project>/<task>.`,
+    `Missing ${envPath}. This file is gitignored and is not present in isolated Marblo worktrees. Deploy functions from the main checkout that has functions/.env.${projectId}, not from ~/.marblo/worktrees/<project>/<task>.`
   );
 }
 
@@ -94,10 +101,14 @@ const envKeys = parseEnvKeys(readFileSync(envPath, "utf8"));
 const missing = REQUIRED_KEYS.filter((key) => !envKeys.has(key));
 if (missing.length > 0) {
   fail(
-    `Missing required key(s) in functions/.env.${projectId}: ${missing.join(", ")}. Values are intentionally not printed.`,
+    `Missing required key(s) in functions/.env.${projectId}: ${missing.join(
+      ", "
+    )}. Values are intentionally not printed.`
   );
 }
 
 console.log(
-  `[functions-env-gate] OK: functions/.env.${projectId} exists and required key(s) are present: ${REQUIRED_KEYS.join(", ")}`,
+  `[functions-env-gate] OK: functions/.env.${projectId} exists and required key(s) are present: ${REQUIRED_KEYS.join(
+    ", "
+  )}`
 );

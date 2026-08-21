@@ -29,28 +29,41 @@
 // scripts/check-deploy-env.mjs 가 ANALYTICS_ID_SALT 부재로 막고, 런타임도
 // 인스턴스당 1회 에러 로그를 남긴다 — 조용한 열화가 아니라 시끄러운 실패다.
 
-// ── ★축 경계 — 지우지 마라 (ticket dTpcKWwRw5DvEMKxpCZi) ─────────────────────
+// ── ★축 경계 — 지우지 마라 (ticket dTpcKWwRw5DvEMKxpCZi → cZWmTzoOXpHCg9HAUwqw) ─
 //
 //   익명축  analytics_identity              install_key / ga_key / first_touch
 //   계정축  analytics_purchase / cost_logs  user_key / 금액
+//   링크축  analytics_user_install          (user_key, install_key) 쌍 ★단 하나
 //
-//   ★두 축은 조인하지 않는다. 조인키를 만들지도 않는다.
-//     근거: 배포된 처리방침 v3/src/components/legal/privacyContent.tsx:95
-//           (EN :210) "두 기록이 공유하는 조인 키는 없습니다 /
-//           the two share no join key"
+// ★2026-08-21 개정: 이 주석은 원래 "두 축은 조인하지 않는다. 조인키를 만들지도
+//   않는다" 였다. 사람 축 설계(v3/docs/person-axis-user-key-design-2026-08-21.md,
+//   PR #1081)가 그 규칙을 **좁은 예외 하나**로 바꿨다. 지금 참인 문장은 이것이다:
 //
-// ★analytics_identity 에 `user_key` 가 없는 것은 **빠뜨린 게 아니라 뺀 것**이다.
-// install_key(익명 설치) 와 user_key(계정) 를 같은 행에 두면 그 행 자체가 위
-// 문구가 없다고 말한 그 조인키가 된다. 실측: agent_heartbeats.userId 는 36자
-// 익명 설치 UUID(고유 14), cost_logs.userId 는 28자 계정 UID(고유 5) — 두 축을
-// 이으면 산출물은 "익명 설치 → 계정" 매핑, 즉 계정 재식별이다. 양쪽을 같은
-// salt 로 HMAC 해도 조인은 그대로 성립한다(그게 조인의 목적이니까). 가명화는
-// 익명화가 아니다. 컬럼 자리조차 만들지 않은 이유도 같다 — 빈 컬럼이 있으면
-// 다음 사람이 "채우면 되겠네" 로 읽는다.
+//     두 축을 잇는 자리는 `marblo_identity.analytics_user_install` **하나뿐**이고,
+//     그 자리는 `PERSON_AXIS_EFFECTIVE_FROM` 게이트가 열려 있을 때만 채워진다.
+//
+//   ★코드만 고치고 이 주석을 안 고치면 다음 사람이 주석을 믿는다. 그래서 kind
+//   `user` 추가와 이 문단은 같은 커밋에 있다.
+//
+// ★그래도 바뀌지 않은 것 셋 — 이쪽이 규칙의 본체다.
+//
+//  1) **익명 테이블에는 여전히 `user_key` 가 없다.** `analytics_identity` 에도,
+//     `analytics_user_daily`/`analytics_install_profile` 에도 컬럼 자리조차 없다.
+//     실측: agent_heartbeats.userId 는 36자 익명 설치 UUID(고유 14),
+//     cost_logs.userId 는 28자 계정 UID(고유 5) — 두 축을 **한 행에** 이으면
+//     산출물은 "익명 설치 → 계정" 매핑, 즉 계정 재식별 그 자체다. 같은 salt 로
+//     HMAC 해도 조인은 그대로 성립한다(그게 조인의 목적이니까).
+//     기계가 대신 읽는다: analyticsProfiles.assertAxisPurity /
+//     FORBIDDEN_ON_ANONYMOUS_AXIS.
+//  2) **소급은 저장이 아니라 조회로 한다.** 이벤트 행에 `user_key` 컬럼을 만들지
+//     않는다. 링크는 별도 표에만 있고, 그 표를 지우면 소급이 그 자리에서 취소된다.
+//  3) **가명화는 익명화가 아니다.** `user_key` 는 HMAC 가명이지 익명값이 아니고
+//     PIPA 상 여전히 개인정보다. "HMAC 을 씌웠으니 괜찮다" 는 근거가 아니다 —
+//     근거는 개정된 고지와 그에 따른 동의이고, 그 발효일이 게이트다.
 //
 // ★과잉 적용 금지: 계정축 **안에서의** 조인은 금지가 아니다. 처리방침이 명시적
 // 으로 허용한다("이 기록만은 성격상 익명일 수 없습니다"). 금지된 건 두 축을
-// **잇는 것** 하나다.
+// **아무 데서나** 잇는 것이고, 잇는 자리는 위의 링크표 하나로 못박혀 있다.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { createHmac } from "node:crypto";
@@ -60,9 +73,12 @@ import { createHmac } from "node:crypto";
  *
  * - `agent`/`task`/`project`/`flow`: 익명 세계 row 의 내부 조인키(#915).
  * - `install`/`ga`: analytics_identity 의 익명축 키.
- * - ★`user`(계정 uid 축)는 여기 **없다.** analytics_purchase 티켓
- *   (`6EnTiEzL7T2NpjOnTTSj`)이 자기 축의 것으로 추가한다. 이 파일에서
- *   익명축과 계정축이 만나더라도 **두 축을 잇는 표는 만들지 않는다** — 위 경계 참조.
+ * - `user`: 계정 uid 축. `us_` + HMAC(salt, "user:" + uid) — 설계 §3.3.
+ *
+ * ★`person` kind 를 만들지 마라. `person_key` 와 `user_key` 는 같은 uid 에서 나온
+ *   **서로 다른 두 값**이다(kind 가 HMAC 입력에 들어가므로). 둘을 다 두면
+ *   `WHERE person_key = user_key` 가 영원히 0행이 되는데, 조인이 에러를 내지 않고
+ *   그냥 빈다 — 행은 그대로 있고 표만 비어 보인다(설계 §3.1). 키는 하나다.
  */
 export type AnalyticsIdKind =
   | "agent"
@@ -70,7 +86,8 @@ export type AnalyticsIdKind =
   | "project"
   | "flow"
   | "install"
-  | "ga";
+  | "ga"
+  | "user";
 
 /** 가명 앞에 붙는 짧은 태그 — BQ 에서 눈으로 종류를 구분하기 위한 것뿐이다. */
 const KIND_PREFIX: Record<AnalyticsIdKind, string> = {
@@ -80,6 +97,7 @@ const KIND_PREFIX: Record<AnalyticsIdKind, string> = {
   flow: "fl",
   install: "in",
   ga: "ga",
+  user: "us",
 };
 
 /**
@@ -91,12 +109,18 @@ const KIND_PREFIX: Record<AnalyticsIdKind, string> = {
  * `retryOf` 는 재시도 대상 티켓 id 다(telemetryService 의 recordTaskRetry 는
  * taskId 축) — taskId 와 같은 공간에 둔다.
  *
- * ★`install`/`ga` kind 는 **일부러 여기 없다.** 이 표는 익명 세계 테이블에
+ * ★`install`/`ga`/`user` kind 는 **일부러 여기 없다.** 이 표는 익명 세계 테이블에
  * insert 하기 직전 `pseudonymizeAnalyticsRow` 가 훑는 목록이다. 여기에
  * `userId: "install"` 을 올리면 지금 살아 있는 events/agent_heartbeats 의
- * 쓰기 동작이 바뀌어 기존 분석이 그 시점에 끊긴다. 그 두 kind 는
- * analytics_identity 백필이 `pseudonymizeAnalyticsId` 를 **명시적으로** 불러
- * 쓴다 — 자동 치환 대상이 아니다.
+ * 쓰기 동작이 바뀌어 기존 분석이 그 시점에 끊긴다. 그 kind 들은
+ * 백필·링크 적재가 `pseudonymizeAnalyticsId` 를 **명시적으로** 불러 쓴다 —
+ * 자동 치환 대상이 아니다.
+ *
+ * ★★특히 `userId: "user"` 는 **절대 금지**다(설계 §3.4). 익명 세계의 `userId`
+ * 컬럼에 들어 있는 값은 계정 uid 가 아니라 **익명 설치 UUID**(36자, 고유 14)다.
+ * 이걸 `user` kind 로 가명화하면 그 순간부터 `install` kind 로 만든
+ * `analytics_identity.install_key` 와 값이 달라져서 익명축 조인이 통째로 끊긴다.
+ * 행은 계속 쌓이고 조인만 0 이 된다 — 조용한 실패다.
  */
 export const ANALYTICS_ID_FIELDS: Readonly<Record<string, AnalyticsIdKind>> = {
   projectId: "project",

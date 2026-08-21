@@ -65,6 +65,11 @@ import {
   ACTIVITY_DEFINITION_INSTALL,
   type RetentionCountedRate,
 } from "./adminAnalytics";
+import {
+  FORBIDDEN_ON_LINK_AXIS,
+  LINK_AXIS_TABLES,
+  TABLE_USER_INSTALL,
+} from "./personAxis";
 
 // ── 테이블 좌표 ──────────────────────────────────────────────────────────────
 // 데이터셋은 원본과 같은 marblo_telemetry 다(cost_logs 가 여기 있어야 계정축
@@ -84,6 +89,16 @@ export const ANONYMOUS_AXIS_TABLES: ReadonlyArray<string> = [
 export const ACCOUNT_AXIS_TABLES: ReadonlyArray<string> = [
   TABLE_ACCOUNT_PROFILE,
 ];
+/**
+ * ★링크축 테이블 — `user_key` 와 `install_key` 를 한 행에 담는 것이 허용된
+ * **유일한** 자리다(사람 축 설계 §4, PR #1081). 목록의 정본은 personAxis.ts 에
+ * 있고 여기서는 축 판정에 쓰기 위해 다시 내보낸다.
+ *
+ * ★이 축이 생겼다고 익명축이 넓어진 것이 아니다. `FORBIDDEN_ON_ANONYMOUS_AXIS`
+ * 는 한 글자도 바뀌지 않았고, `analytics_user_daily`/`analytics_install_profile`
+ * 에 `user_key` 를 넣으려는 시도는 여전히 여기서 던진다. 축이 셋이 된 것뿐이다.
+ */
+export { LINK_AXIS_TABLES, FORBIDDEN_ON_LINK_AXIS, TABLE_USER_INSTALL };
 
 /**
  * ★익명축 테이블에 **절대** 나타나면 안 되는 컬럼명(계정으로 되짚는 다리).
@@ -1540,6 +1555,10 @@ export const ACCOUNT_PROFILE_SCHEMA: ReadonlyArray<BqField> = [
  * 스키마에 반대 축의 컬럼이 들어오면 여기서 던진다. 테스트가 이걸 돌리고,
  * ensure*Table() 도 테이블을 만들기 전에 돌린다 — 잘못된 스키마가 BQ 에
  * **생성되기 전에** 막는 게 요점이다(생성 후엔 컬럼 삭제가 안 된다).
+ *
+ * 축은 셋이다: 익명축 / 계정축 / 링크축. 링크축(`analytics_user_install`)만
+ * 두 키를 한 행에 담을 수 있고, 그래서 목록이 표 하나다 — 잇는 자리가 하나뿐인
+ * 것이 "링크표를 지우면 사람 축이 통째로 사라진다" 의 근거다.
  */
 export function assertAxisPurity(
   table: string,
@@ -1549,11 +1568,14 @@ export function assertAxisPurity(
     ? FORBIDDEN_ON_ANONYMOUS_AXIS
     : ACCOUNT_AXIS_TABLES.includes(table)
     ? FORBIDDEN_ON_ACCOUNT_AXIS
+    : LINK_AXIS_TABLES.includes(table)
+    ? FORBIDDEN_ON_LINK_AXIS
     : null;
   if (forbidden == null) {
     throw new Error(
       `[analyticsProfiles] 축이 선언되지 않은 테이블: ${table}. ` +
-        "ANONYMOUS_AXIS_TABLES 또는 ACCOUNT_AXIS_TABLES 에 등록해라."
+        "ANONYMOUS_AXIS_TABLES / ACCOUNT_AXIS_TABLES / LINK_AXIS_TABLES 중 " +
+        "하나에 등록해라."
     );
   }
   const walk = (fs: ReadonlyArray<BqField>, path: string): void => {

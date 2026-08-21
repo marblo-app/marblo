@@ -8,6 +8,7 @@
 // 원시 agentId/taskId/projectId 를 공유하는 한 계정 재연결은 가능했다.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 
 import {
   ANALYTICS_ID_FIELDS,
@@ -169,26 +170,70 @@ test("readAnalyticsIdSalt — 미설정/공백은 null, 값은 trim 후 반환",
 
 // ── 익명축 kind 추가분 (ticket dTpcKWwRw5DvEMKxpCZi) ─────────────────────────
 
-test("★install/ga kind 는 ANALYTICS_ID_FIELDS 에 없다 — 라이브 쓰기 동작 불변", () => {
+test("★install/ga/user kind 는 ANALYTICS_ID_FIELDS 에 없다 — 라이브 쓰기 동작 불변", () => {
   // 여기에 올리면 살아 있는 events/agent_heartbeats 쓰기가 바뀌어 기존 분석이
   // 그 시점에 끊긴다. 백필은 pseudonymizeAnalyticsId 를 직접 부른다.
   const kinds = Object.values(ANALYTICS_ID_FIELDS);
   assert.ok(!kinds.includes("install"));
   assert.ok(!kinds.includes("ga"));
+  assert.ok(!kinds.includes("user"));
   // userId 는 어느 축에서도 자동 치환 대상이 아니다.
   assert.ok(!("userId" in ANALYTICS_ID_FIELDS));
 });
 
-test("★계정축 kind('user')는 이 모듈에 존재하지 않는다", () => {
-  // analytics_identity 에 user_key 가 생기는 순간 익명축↔계정축 조인키가 된다.
-  // 이 테스트가 빨개지면 축 경계가 무너진 것이다 — 파일 상단 주석을 읽어라.
+// ── 사람 축 kind 추가분 (ticket cZWmTzoOXpHCg9HAUwqw / 설계 §3, §7) ──────────
+//
+// ★이 자리에는 원래 "계정축 kind('user')는 이 모듈에 존재하지 않는다" 가 있었다.
+//   사람 축 설계(PR #1081 §3.3, §7)가 kind 하나를 추가하기로 확정했으므로 그
+//   테스트는 더 이상 참이 아니다. 지우지 않고 **더 센 것으로 바꾼다** — 원래
+//   테스트가 지키던 것은 "kind 가 없다" 가 아니라 "익명 테이블이 계정으로 되짚히지
+//   않는다" 였고, 그 불변식은 아래 세 테스트 + analyticsProfiles 의
+//   FORBIDDEN_ON_ANONYMOUS_AXIS 가 계속 지킨다.
+
+test("★user kind 는 자동 치환 목록에 오르지 않는다 (설계 §3.4 — 익명축 조인 보호)", () => {
+  // 익명 세계의 userId 는 계정 uid 가 아니라 **익명 설치 UUID** 다. 이걸 user
+  // kind 로 가명화하면 install kind 로 만든 install_key 와 값이 갈려서 익명축
+  // 조인이 통째로 끊긴다 — 행은 쌓이고 조인만 0 이 되는 조용한 실패다.
+  const row = { userId: "8f14e45f-ceea-467a-9d3f-b0a2f0a1c111", agentId: "a1" };
+  const out = pseudonymizeAnalyticsRow(row, SALT);
+  assert.equal(out.userId, row.userId, "userId 는 자동 치환되면 안 된다");
+  assert.notEqual(out.agentId, row.agentId, "등재된 필드는 치환돼야 한다");
+});
+
+test("★user kind 와 install kind 는 같은 원시값에서도 다른 가명 — 두 축은 값이 안 겹친다", () => {
+  const asUser = pseudonymizeAnalyticsId("user", "same-id", SALT);
+  const asInstall = pseudonymizeAnalyticsId("install", "same-id", SALT);
+  assert.notEqual(asUser, asInstall);
+  assert.equal(String(asUser).startsWith("us_"), true);
+  assert.equal(String(asInstall).startsWith("in_"), true);
+});
+
+test("user kind — 결정적 + 솔트 없으면 null(fail-safe), 기존 kind 무회귀", () => {
+  assert.equal(
+    pseudonymizeAnalyticsId("user", "uid-abc", SALT),
+    pseudonymizeAnalyticsId("user", "uid-abc", SALT)
+  );
+  assert.equal(pseudonymizeAnalyticsId("user", "uid-abc", null), null);
+  // ★기존 kind 6종의 출력은 한 글자도 바뀌지 않는다(kind 가 HMAC 입력에 들어가
+  //   서로 간섭이 없다). 593행·1,100만행 무회귀의 근거.
+  assert.equal(
+    pseudonymizeAnalyticsId("agent", "agent_77", SALT),
+    "ag_" + createHmac("sha256", SALT)
+      .update("agent:agent_77")
+      .digest("hex")
+      .slice(0, 24)
+  );
+});
+
+test("★person kind 를 만들지 않았다 — 키는 user_key 하나 (설계 §3.1)", () => {
+  // person_key 와 user_key 를 둘 다 두면 WHERE person_key = user_key 가 영원히
+  // 0행이 된다. 에러가 아니라 빈 표라서 아무도 못 알아챈다.
   const asRecord = pseudonymizeAnalyticsId as unknown as (
     k: string,
     r: unknown,
     s: string | null
   ) => unknown;
-  // 'user' 는 KIND_PREFIX 에 없으므로 접두가 undefined 로 샌다.
-  const out = String(asRecord("user", "some-uid", SALT));
+  const out = String(asRecord("person", "some-uid", SALT));
   assert.ok(out.startsWith("undefined_"), `예상 밖 출력: ${out.slice(0, 12)}…`);
 });
 
