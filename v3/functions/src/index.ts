@@ -56,6 +56,27 @@ import {
   type GrantHolderRow,
   type SegmentActivityRow,
 } from "./betaSegments";
+import {
+  ACCOUNT_PROFILE_SCHEMA,
+  ANALYTICS_DATASET,
+  INSTALL_PROFILE_SCHEMA,
+  TABLE_ACCOUNT_PROFILE,
+  TABLE_INSTALL_PROFILE,
+  TABLE_USER_DAILY,
+  USER_DAILY_SCHEMA,
+  assertAxisPurity,
+  buildAccountProfileRows,
+  buildInstallProfileRows,
+  buildUserDailyRows,
+  summarizeInstallRetention,
+  type AccountBillingRow,
+  type AccountCostRow,
+  type BqField,
+  type DailySourceRow,
+  type InstallFirstTouchRow,
+  type InstallMilestoneRow,
+  type InstallProfileRow,
+} from "./analyticsProfiles";
 import { buildMetadata } from "./telemetryMetadata";
 import {
   ROUTING_SHADOW_SCHEMA_VERSION,
@@ -12563,6 +12584,552 @@ export const mirrorMarketingContactsToBq = functions.https.onCall(
     return mirrorMarketingContactsToBqInternal();
   }
 );
+// ════════════════════════════════════════════════════════════════════════════
+// 파생 분석 테이블 스케줄 빌드 — analytics_user_daily / *_install_profile /
+//                                *_account_profile
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ★★ 축이 둘인 이유와 그 근거는 analyticsProfiles.ts 파일 머리에 있다.
+//    한 줄 요약: 배포된 개인정보처리방침이 "두 기록이 공유하는 조인 키는
+//    없습니다"(v3/src/components/legal/privacyContent.tsx:95, EN :210) 라고
+//    적었다. 그래서 익명축(install_key)과 계정축(user_key)은 **다른 테이블**이고
+//    서로 조인하지 않는다. 합치지 마라.
+//
+// ★원본은 건드리지 않는다. 아래 쿼리는 전부 읽기 전용 SELECT 다 —
+//  events / agent_heartbeats / task_outcomes / install_attribution / cost_logs.
+//
+// ★멱등: 계산은 순수 함수(analyticsProfiles.ts)가 하고, 적재는 load job 의
+//  WRITE_TRUNCATE 로 **테이블을 통째로 교체**한다. 스트리밍 insert + DELETE
+//  조합을 쓰지 않는 이유는 marketing 미러에서 이미 데인 자리이기 때문이다 —
+//  직전 ~90분 내 스트리밍 버퍼가 있으면 DELETE 가 실패하고, 그때 insert 를
+//  강행하면 중복 행이 쌓인다. load job 은 버퍼와 무관하고 원자적이다.
+
+const ANALYTICS_PROFILE_WINDOW_DAYS = 90;
+
+/** 한 번에 스캔할 daily 원시 행 상한. 넘으면 잘린 사실을 로그에 남긴다. */
+const ANALYTICS_PROFILE_ROW_LIMIT = 500000;
+
+type ProfileBuildResult = {
+  today: string;
+  windowDays: number;
+  dailyRows: number;
+  installProfiles: number;
+  accountProfiles: number;
+  /** 조용한 부분 실패를 막는다 — 비어서 건너뛴 테이블을 이름으로 남긴다. */
+  skipped: string[];
+  notes: string[];
+};
+
+/**
+ * 테이블을 보장한다. **스키마를 BQ 에 만들기 전에 축 검사를 돌린다** —
+ * 한 번 만들어진 컬럼은 BigQuery 에서 지울 수 없으므로, 잘못된 축의 컬럼은
+ * 생성 전에 막는 것 말고는 되돌릴 방법이 없다.
+ *
+ * 이미 있으면 NULLABLE 컬럼만 덧붙인다(ensureAttributionTable 과 같은 규약).
+ * 기존 컬럼의 삭제·타입변경은 하지 않는다.
+ */
+async function ensureAnalyticsProfileTable(
+  tableName: string,
+  schema: ReadonlyArray<BqField>,
+  partitionField?: string
+): Promise<void> {
+  assertAxisPurity(tableName, schema);
+
+  const dataset = bigquery.dataset(ANALYTICS_DATASET);
+  const table = dataset.table(tableName);
+  const [exists] = await table.exists();
+  if (!exists) {
+    await table.create({
+      schema: schema as unknown as { name: string; type: string }[],
+      ...(partitionField
+        ? { timePartitioning: { type: "DAY", field: partitionField } }
+        : {}),
+    });
+    functions.logger.info("[analyticsProfiles] created table", { tableName });
+    return;
+  }
+
+  const [metadata] = await table.getMetadata();
+  const live: { name: string }[] = metadata?.schema?.fields ?? [];
+  const liveNames = new Set(live.map((f) => f.name));
+  const missing = schema.filter(
+    (f) => !liveNames.has(f.name) && f.mode === "NULLABLE"
+  );
+  if (missing.length > 0) {
+    await table.setMetadata({ schema: { fields: [...live, ...missing] } });
+    functions.logger.info("[analyticsProfiles] schema columns added", {
+      tableName,
+      added: missing.map((f) => f.name),
+    });
+  }
+}
+
+/**
+ * 행 전체를 WRITE_TRUNCATE 로 교체한다(원자적·멱등).
+ *
+ * ★행이 0개면 **교체하지 않고 건너뛴다.** 소스 쿼리가 0행을 돌려주는 건
+ * 십중팔구 장애(권한·리전·컬럼명)지 "정말 아무도 안 썼다" 가 아니다. 그때
+ * 테이블을 비워 버리면 어제까지 있던 분석이 통째로 사라진다 — 조용한 소실보다
+ * 오래된 데이터가 낫고, 건너뛴 사실은 호출측이 skipped 로 밝힌다.
+ */
+async function replaceAnalyticsProfileRows(
+  tableName: string,
+  schema: ReadonlyArray<BqField>,
+  rows: ReadonlyArray<Record<string, unknown>>
+): Promise<boolean> {
+  if (rows.length === 0) {
+    functions.logger.warn("[analyticsProfiles] 0 rows — 교체를 건너뛴다", {
+      tableName,
+    });
+    return false;
+  }
+  const table = bigquery.dataset(ANALYTICS_DATASET).table(tableName);
+  const ndjson = rows.map((r) => JSON.stringify(r)).join("\n");
+  await new Promise<void>((resolve, reject) => {
+    const stream = table.createWriteStream({
+      sourceFormat: "NEWLINE_DELIMITED_JSON",
+      schema: { fields: schema as unknown as { name: string; type: string }[] },
+      writeDisposition: "WRITE_TRUNCATE",
+      createDisposition: "CREATE_IF_NEEDED",
+      location: BQ_LOCATION,
+    });
+    stream.on("error", reject);
+    stream.on("complete", () => resolve());
+    stream.end(Buffer.from(ndjson, "utf8"));
+  });
+  return true;
+}
+
+/** UTC 'YYYY-MM-DD'. 리텐션 판정 기준일 — 순수 함수에 주입한다. */
+function analyticsTodayUtc(nowMs: number): string {
+  return new Date(nowMs).toISOString().slice(0, 10);
+}
+
+// ── 익명축 소스 쿼리 ────────────────────────────────────────────────────────
+//
+// ★install_key = events/agent_heartbeats/task_outcomes 의 `userId` 다. 이 컬럼은
+//   계정 uid 가 **아니라** 클라이언트가 보낸 익명 설치 ID(clientId)다
+//   (logTelemetryBatch / logHeartbeat / logTaskOutcome 주석 참조).
+//
+// ★id_scheme 은 여기서 길이를 실어 보내지 않는다. 오늘은 install_key 가 원시
+//   설치 id 라 길이로 판정되지만, 선행 티켓(analytics_identity)이 이걸 HMAC
+//   가명으로 바꾸면 가명 길이는 원시 길이와 무관해진다. 그때 LENGTH(userId) 를
+//   보내고 있으면 **틀린 스킴을 자신 있게 적게** 된다. 그래서 안 보낸다 —
+//   가명이 되는 순간 classifyIdScheme 은 "unknown" 을 돌려주고, 그게 맞다.
+//   (가명화 이후 스킴을 되살리려면 analytics_identity 가 스킴을 컬럼으로 준다.)
+
+const ANALYTICS_DAILY_EVENTS_SQL = `
+WITH e AS (
+  SELECT
+    userId AS install_key,
+    DATE(TIMESTAMP(timestamp)) AS d,
+    model, role, taskType, appVersion, errorCategory,
+    COALESCE(tokensInput, 0) AS ti,
+    COALESCE(tokensOutput, 0) AS tout
+  FROM \`${ANALYTICS_DATASET}.${BQ_EVENTS_TABLE}\`
+  WHERE TIMESTAMP(timestamp) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+    AND userId IS NOT NULL AND userId != '' AND userId != 'anon'
+),
+base AS (
+  SELECT install_key, d,
+    COUNT(*) AS eventCount,
+    SUM(ti) AS tokensInput,
+    SUM(tout) AS tokensOutput,
+    MAX(appVersion) AS appVersion,
+    ARRAY_AGG(DISTINCT role IGNORE NULLS) AS roles,
+    ARRAY_AGG(DISTINCT taskType IGNORE NULLS) AS taskTypes
+  FROM e GROUP BY install_key, d
+),
+m AS (
+  SELECT install_key, d, ARRAY_AGG(STRUCT(model, calls)) AS models FROM (
+    SELECT install_key, d, model, COUNT(*) AS calls
+    FROM e WHERE model IS NOT NULL AND model != '' GROUP BY install_key, d, model
+  ) GROUP BY install_key, d
+),
+er AS (
+  SELECT install_key, d, ARRAY_AGG(STRUCT(category, count)) AS errorCategories FROM (
+    SELECT install_key, d, errorCategory AS category, COUNT(*) AS count
+    FROM e WHERE errorCategory IS NOT NULL AND errorCategory != ''
+    GROUP BY install_key, d, errorCategory
+  ) GROUP BY install_key, d
+)
+SELECT
+  base.install_key AS installKey,
+  FORMAT_DATE('%Y-%m-%d', base.d) AS day,
+  base.eventCount, base.tokensInput, base.tokensOutput, base.appVersion,
+  base.roles, base.taskTypes,
+  m.models, er.errorCategories
+FROM base
+LEFT JOIN m ON m.install_key = base.install_key AND m.d = base.d
+LEFT JOIN er ON er.install_key = base.install_key AND er.d = base.d
+LIMIT @rowLimit`;
+
+// ★활동 판정의 핵심 소스. presenceBeats(전체)와 workingBeats(status='working')를
+//   **따로** 세어 보낸다 — 순수 로직이 둘을 구분해야 좀비를 격리할 수 있다.
+const ANALYTICS_DAILY_HEARTBEATS_SQL = `
+SELECT
+  userId AS installKey,
+  FORMAT_DATE('%Y-%m-%d', DATE(TIMESTAMP(timestamp))) AS day,
+  COUNT(*) AS presenceBeats,
+  COUNTIF(status = 'working') AS workingBeats
+FROM \`${ANALYTICS_DATASET}.agent_heartbeats\`
+WHERE TIMESTAMP(timestamp) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+  AND userId IS NOT NULL AND userId != '' AND userId != 'anon'
+GROUP BY installKey, day
+LIMIT @rowLimit`;
+
+// 완료·실패는 task_outcomes 단일 소스다. events 의 'task:completed' 로 또 세면
+// 같은 완료가 두 번 잡힌다 — 분모가 부풀면 success_rate 가 통째로 틀어진다.
+// 토큰도 여기서 다시 더하지 않는다(events 가 이미 실었다).
+const ANALYTICS_DAILY_OUTCOMES_SQL = `
+SELECT
+  userId AS installKey,
+  FORMAT_DATE('%Y-%m-%d', DATE(TIMESTAMP(completedAt))) AS day,
+  COUNTIF(success IS TRUE) AS tasksCompleted,
+  COUNTIF(success IS FALSE) AS tasksFailed
+FROM \`${ANALYTICS_DATASET}.task_outcomes\`
+WHERE TIMESTAMP(completedAt) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+  AND userId IS NOT NULL AND userId != '' AND userId != 'anon'
+GROUP BY installKey, day
+LIMIT @rowLimit`;
+
+// first-touch. install_attribution 은 설치당 1행이 원칙(linkInstallAttribution
+// 이 Firestore create 로 선착 1건만 적재)이라 창을 두지 않고 전량 읽는다.
+// ★first_visit_at(웹 첫 방문)은 GA4 export 에 있는데 리전이 달라 한 쿼리에서
+//   조인되지 않는다(getAdminCountryFunnel 의 리전 블로커와 같은 제약). 지금은
+//   null 로 두고 그 사실을 notes 에 밝힌다 — 0 으로 채우거나 linkedAt 을
+//   first_visit 인 척 넣지 않는다.
+//
+// ★상수가 아니라 **비동기 함수**인 이유가 둘 있다.
+//  1) BQ_ATTRIBUTION_TABLE 이 이 지점보다 아래에서 선언돼 모듈 로드 시점에는
+//     아직 TDZ 다.
+//  2) ★install_attribution 은 코드 스키마(INSTALL_ATTRIBUTION_SCHEMA)와 실제
+//     BQ 스키마가 어긋나 있다. `buildChannel` 은 코드에만 있고 라이브 테이블에는
+//     없다(2026-08-21 실측: installId·gaClientId·utmSource·utmMedium·
+//     utmCampaign·referrerHost·landingPath·platform·appVersion·linkedAt·
+//     linkSource 뿐). ensureAttributionTable 이 다음 어트리뷰션 적재 때 붙여
+//     주긴 하지만, 그게 언제일지 모르는 채로 SELECT 하면 쿼리가 통째로 죽는다.
+//     그렇다고 여기서 원본 테이블 스키마를 고칠 수는 없다(BQ 원본 수정 금지).
+//     → 라이브 스키마를 읽어 **있는 컬럼만 고르고, 없는 컬럼은 NULL 로 채운다.**
+//       컬럼이 나중에 생기면 자동으로 값이 붙는다(코드를 다시 고칠 필요 없다).
+const FIRST_TOUCH_OPTIONAL_COLUMNS = [
+  "utmSource",
+  "utmMedium",
+  "utmCampaign",
+  "referrerHost",
+  "landingPath",
+  "linkSource",
+  "platform",
+  "buildChannel",
+] as const;
+
+async function analyticsFirstTouchSql(): Promise<string> {
+  let live = new Set<string>();
+  try {
+    const [meta] = await bigquery
+      .dataset(ANALYTICS_DATASET)
+      .table(BQ_ATTRIBUTION_TABLE)
+      .getMetadata();
+    live = new Set(
+      ((meta?.schema?.fields ?? []) as { name: string }[]).map((f) => f.name)
+    );
+  } catch (err) {
+    // 스키마를 못 읽으면 선택 컬럼을 전부 NULL 로 둔다 — 쿼리가 죽는 것보다
+    // 낫고, 비어 있다는 사실은 그 컬럼이 null 이라는 걸로 드러난다.
+    functions.logger.warn("[analyticsProfiles] attribution 스키마 조회 실패", {
+      message: safeAnalyticsErrorMessage(err),
+    });
+  }
+  const optional = FIRST_TOUCH_OPTIONAL_COLUMNS.map((c) =>
+    live.size === 0 || live.has(c) ? c : `CAST(NULL AS STRING) AS ${c}`
+  ).join(",\n  ");
+  return `
+SELECT
+  installId AS installKey,
+  gaClientId AS gaKey,
+  ${optional},
+  FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%E3SZ', linkedAt) AS linkedAt
+FROM \`${ANALYTICS_DATASET}.${BQ_ATTRIBUTION_TABLE}\`
+WHERE installId IS NOT NULL AND installId != ''`;
+}
+
+// 이정표. 이벤트 이름은 ACTIVATION_GATE_STEPS 규약을 그대로 쓴다 — 여기서
+// 새 이름을 만들면 퍼널 화면과 프로필이 다른 사람을 세게 된다.
+const ANALYTICS_MILESTONES_SQL = `
+SELECT
+  userId AS installKey,
+  FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%E3SZ', MIN(IF(event = 'app:first_run', TIMESTAMP(timestamp), NULL))) AS firstRunAt,
+  FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%E3SZ', MIN(IF(event = 'agent:spawned', TIMESTAMP(timestamp), NULL))) AS firstSpawnAt,
+  FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%E3SZ', MIN(IF(event = 'task:completed', TIMESTAMP(timestamp), NULL))) AS firstCompletedAt
+FROM \`${ANALYTICS_DATASET}.${BQ_EVENTS_TABLE}\`
+WHERE userId IS NOT NULL AND userId != '' AND userId != 'anon'
+GROUP BY installKey`;
+
+// ── 계정축 소스 쿼리 ────────────────────────────────────────────────────────
+// ★cost_logs 만 본다. 익명 테이블은 이 쿼리에 등장하지 않는다 — 등장하는 순간
+//   두 축을 잇는 다리가 된다.
+const ANALYTICS_ACCOUNT_COSTS_SQL = `
+SELECT
+  userId AS userKey,
+  FORMAT_DATE('%Y-%m-%d', DATE(TIMESTAMP(timestamp))) AS day,
+  model,
+  COUNT(*) AS calls,
+  SUM(COALESCE(inputTokens, 0)) AS inputTokens,
+  SUM(COALESCE(outputTokens, 0)) AS outputTokens,
+  SUM(COALESCE(cacheReadTokens, 0)) AS cacheReadTokens,
+  SUM(COALESCE(cacheWriteTokens, 0)) AS cacheWriteTokens,
+  SUM(COALESCE(totalCost, 0)) AS totalCost
+FROM \`${ANALYTICS_DATASET}.${BQ_COST_TABLE}\`
+WHERE userId IS NOT NULL AND userId != ''
+GROUP BY userKey, day, model
+LIMIT @rowLimit`;
+
+async function runAnalyticsQuery(
+  label: string,
+  query: string,
+  params: Record<string, unknown>,
+  notes: string[]
+): Promise<Record<string, unknown>[]> {
+  try {
+    const [rows] = await bigquery.query({
+      query,
+      params,
+      location: BQ_LOCATION,
+    });
+    return rows as Record<string, unknown>[];
+  } catch (err) {
+    // 한 소스가 죽어도 나머지는 만든다. 다만 **조용히** 비우지 않는다 —
+    // 실패한 소스를 notes 에 남겨 화면이 "그날 아무도 안 썼다" 로 오독하지
+    // 않게 한다.
+    functions.logger.error("[analyticsProfiles] query failed", {
+      label,
+      message: safeAnalyticsErrorMessage(err),
+    });
+    notes.push(`★소스 '${label}' 조회 실패 — 이 소스가 빠진 결과다.`);
+    return [];
+  }
+}
+
+/**
+ * 계정축 결제 정보. `first_paid_at` 은 billingCharges 의 성공 청구 중 가장
+ * 이른 것이다 — comped(무료 grant)는 결제가 아니므로 세지 않는다.
+ *
+ * ★mrr_usd / ltv_usd 는 여기서 채우지 않는다. 구매 티켓(analytics_purchase)이
+ *   그 두 값의 주인이고, 여기서 임의로 추정치를 넣으면 나중에 두 개의 서로 다른
+ *   MRR 이 생긴다. 값이 없으면 0 이 아니라 null 로 둔다.
+ */
+async function loadAccountBillingRows(
+  notes: string[]
+): Promise<AccountBillingRow[]> {
+  const byUser = new Map<string, AccountBillingRow>();
+  try {
+    const subs = await db.collection("subscriptions").get();
+    for (const doc of subs.docs) {
+      const d = doc.data() as Record<string, unknown>;
+      const plan = typeof d.planType === "string" ? d.planType : null;
+      byUser.set(doc.id, { userKey: doc.id, plan, firstPaidAt: null });
+    }
+  } catch (err) {
+    functions.logger.warn("[analyticsProfiles] subscriptions 조회 실패", {
+      message: safeAnalyticsErrorMessage(err),
+    });
+    notes.push("★subscriptions 조회 실패 — plan 이 빠진 결과다.");
+  }
+  try {
+    const charges = await db
+      .collection("billingCharges")
+      .where("status", "==", "succeeded")
+      .get();
+    for (const doc of charges.docs) {
+      const d = doc.data() as Record<string, unknown>;
+      const userId = typeof d.userId === "string" ? d.userId : "";
+      if (userId === "") continue;
+      const ms = tsToMillis(d.createdAt);
+      if (ms == null) continue;
+      const iso = new Date(ms).toISOString();
+      const cur = byUser.get(userId) ?? { userKey: userId, plan: null };
+      const prev = typeof cur.firstPaidAt === "string" ? cur.firstPaidAt : null;
+      cur.firstPaidAt = prev == null || iso < prev ? iso : prev;
+      byUser.set(userId, cur);
+    }
+  } catch (err) {
+    functions.logger.warn("[analyticsProfiles] billingCharges 조회 실패", {
+      message: safeAnalyticsErrorMessage(err),
+    });
+    notes.push("★billingCharges 조회 실패 — first_paid_at 이 빠진 결과다.");
+  }
+  return Array.from(byUser.values());
+}
+
+export async function buildAnalyticsProfileTablesInternal(
+  windowDays = ANALYTICS_PROFILE_WINDOW_DAYS
+): Promise<ProfileBuildResult> {
+  const nowMs = Date.now();
+  const today = analyticsTodayUtc(nowMs);
+  const builtAt = new Date(nowMs).toISOString();
+  const notes: string[] = [];
+  const skipped: string[] = [];
+  const days = Math.max(1, Math.floor(windowDays));
+  const qp = { days, rowLimit: ANALYTICS_PROFILE_ROW_LIMIT };
+
+  // ── 익명축 ────────────────────────────────────────────────────────────────
+  const [eventRows, beatRows, outcomeRows, firstTouchRows, milestoneRows] =
+    await Promise.all([
+      runAnalyticsQuery("events", ANALYTICS_DAILY_EVENTS_SQL, qp, notes),
+      runAnalyticsQuery(
+        "heartbeats",
+        ANALYTICS_DAILY_HEARTBEATS_SQL,
+        qp,
+        notes
+      ),
+      runAnalyticsQuery(
+        "task_outcomes",
+        ANALYTICS_DAILY_OUTCOMES_SQL,
+        qp,
+        notes
+      ),
+      runAnalyticsQuery("first_touch", await analyticsFirstTouchSql(), {}, notes),
+      runAnalyticsQuery("milestones", ANALYTICS_MILESTONES_SQL, {}, notes),
+    ]);
+
+  const daily = buildUserDailyRows([
+    ...(eventRows as DailySourceRow[]),
+    ...(beatRows as DailySourceRow[]),
+    ...(outcomeRows as DailySourceRow[]),
+  ]);
+  const installProfiles = buildInstallProfileRows({
+    today,
+    daily,
+    firstTouch: firstTouchRows as InstallFirstTouchRow[],
+    milestones: milestoneRows as InstallMilestoneRow[],
+  });
+
+  // ── 계정축 (익명축 행을 여기서 절대 참조하지 않는다) ────────────────────
+  const costRows = await runAnalyticsQuery(
+    "cost_logs",
+    ANALYTICS_ACCOUNT_COSTS_SQL,
+    { rowLimit: ANALYTICS_PROFILE_ROW_LIMIT },
+    notes
+  );
+  const accountProfiles = buildAccountProfileRows({
+    costs: costRows as AccountCostRow[],
+    billing: await loadAccountBillingRows(notes),
+    adminUid: process.env.ADMIN_UID?.trim() ?? null,
+  });
+
+  // ── 적재 ─────────────────────────────────────────────────────────────────
+  await ensureAnalyticsProfileTable(TABLE_USER_DAILY, USER_DAILY_SCHEMA, "day");
+  await ensureAnalyticsProfileTable(
+    TABLE_INSTALL_PROFILE,
+    INSTALL_PROFILE_SCHEMA
+  );
+  await ensureAnalyticsProfileTable(
+    TABLE_ACCOUNT_PROFILE,
+    ACCOUNT_PROFILE_SCHEMA
+  );
+
+  const stamp = <T extends object>(rows: T[]): Record<string, unknown>[] =>
+    rows.map((r) => ({ ...r, built_at: builtAt }));
+
+  const loaded = await Promise.all([
+    replaceAnalyticsProfileRows(
+      TABLE_USER_DAILY,
+      USER_DAILY_SCHEMA,
+      stamp(daily)
+    ),
+    replaceAnalyticsProfileRows(
+      TABLE_INSTALL_PROFILE,
+      INSTALL_PROFILE_SCHEMA,
+      stamp(installProfiles)
+    ),
+    replaceAnalyticsProfileRows(
+      TABLE_ACCOUNT_PROFILE,
+      ACCOUNT_PROFILE_SCHEMA,
+      stamp(accountProfiles)
+    ),
+  ]);
+  const tableNames = [
+    TABLE_USER_DAILY,
+    TABLE_INSTALL_PROFILE,
+    TABLE_ACCOUNT_PROFILE,
+  ];
+  loaded.forEach((ok, i) => {
+    if (!ok) skipped.push(tableNames[i]);
+  });
+
+  notes.push(
+    "★익명축(analytics_user_daily / analytics_install_profile)과 계정축" +
+      "(analytics_account_profile)은 조인하지 않는다. 조인 키를 만들지도 마라 — " +
+      "privacyContent.tsx:95(EN :210)."
+  );
+  notes.push(
+    "first_visit_at(웹 첫 방문)은 GA4 export 리전이 달라 이 쿼리에서 채우지 " +
+      "못한다. null 은 '방문이 없었다' 가 아니라 '이 파이프라인이 모른다' 다."
+  );
+  notes.push(
+    "mrr_usd / ltv_usd 는 구매 티켓(analytics_purchase)이 채운다. null 이면 " +
+      "0 이 아니라 미기입이다."
+  );
+
+  const result: ProfileBuildResult = {
+    today,
+    windowDays: days,
+    dailyRows: daily.length,
+    installProfiles: installProfiles.length,
+    accountProfiles: accountProfiles.length,
+    skipped,
+    notes,
+  };
+  functions.logger.info("[analyticsProfiles] build done", result);
+  return result;
+}
+
+// 매일 05:30 KST. 다른 BQ 잡(04:00~05:00)이 끝난 뒤에 돈다.
+export const scheduledBuildAnalyticsProfiles = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .pubsub.schedule("30 5 * * *")
+  .timeZone("Asia/Seoul")
+  .onRun(async () => {
+    try {
+      await buildAnalyticsProfileTablesInternal();
+    } catch (err) {
+      functions.logger.error("[analyticsProfiles] scheduled build failed", {
+        message: safeAnalyticsErrorMessage(err),
+      });
+    }
+    return null;
+  });
+
+// 수동 트리거(어드민) — 스키마 변경 직후 재빌드 등. 멱등이라 몇 번 눌러도 된다.
+export const buildAnalyticsProfileTables = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const raw = Number((data as { windowDays?: unknown })?.windowDays);
+    const windowDays = Number.isFinite(raw) && raw > 0 ? raw : undefined;
+    return buildAnalyticsProfileTablesInternal(windowDays);
+  });
+
+/**
+ * 익명축 리텐션 요약(분자·분모 보존). 화면이 각자 SQL 로 분모를 세면 정의가
+ * 갈라지므로, 세는 곳을 한 군데로 모은다(summarizeInstallRetention).
+ */
+export const getAdminInstallRetentionSummary = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .https.onCall(async (_data, context) => {
+    requireAdmin(context);
+    const notes: string[] = [];
+    const rows = await runAnalyticsQuery(
+      "install_profile",
+      `SELECT * FROM \`${ANALYTICS_DATASET}.${TABLE_INSTALL_PROFILE}\``,
+      {},
+      notes
+    );
+    const summary = summarizeInstallRetention(
+      rows as unknown as InstallProfileRow[]
+    );
+    return { ...summary, notes: [...summary.notes, ...notes] };
+  });
 
 // ════════════════════════════════════════════════════════════════════════════
 // 어드민 프로젝트 감사 (읽기 전용) — marblo.app/admin "프로젝트 감사" 탭

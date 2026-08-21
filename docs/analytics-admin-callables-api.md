@@ -578,6 +578,67 @@ type BetaSegmentSummary = {
 
 ---
 
+## `buildAnalyticsProfileTables` · `scheduledBuildAnalyticsProfiles` (티켓 EJrLwysi)
+
+파생 분석 테이블 3종을 **다시 만든다**(멱등). 원본은 읽기만 한다.
+
+| | |
+| --- | --- |
+| 스케줄 | 매일 05:30 KST |
+| 수동 | `buildAnalyticsProfileTables({ windowDays?: number })` — 어드민 전용 |
+| 응답 | `{ today, windowDays, dailyRows, installProfiles, accountProfiles, skipped[], notes[] }` |
+
+만드는 테이블:
+
+- `analytics_user_daily` — **익명축** `install_key` × `day`
+- `analytics_install_profile` — **익명축** 설치당 1행
+- `analytics_account_profile` — **계정축** 계정당 1행
+
+★**익명축과 계정축은 조인하지 않는다. 조인 키를 만들지도 마라.** 근거는 배포된
+개인정보처리방침 — *"두 기록이 공유하는 조인 키는 없습니다"*
+(`v3/src/components/legal/privacyContent.tsx:95`, EN `:210`). 계정축 **안에서의** 조인
+(`analytics_account_profile` ↔ `cost_logs` ↔ `analytics_purchase`)은 허용된다.
+
+스키마·정의·컬럼별 축 감사는 `docs/analytics-profile-tables.md` 에 전부 있다. 특히:
+
+- `active` = `status="working"` 하트비트 ≥1 **또는** 이벤트 ≥1 (하트비트 존재로 세지 않는다).
+  좀비는 `present_only` 로 격리된다.
+- D1/D3/D7/D14/D30 은 **exact / window 두 정의를 다 저장**하고, 관측창 미도달은 `pending`
+  으로 분모에서 뺀다.
+- 캐시 지표·비용·`is_admin` 은 **계정축에만** 있다 — `cacheReadTokens` 는 `cost_logs` 에만
+  존재하기 때문이다.
+
+`assertAxisPurity()` 가 테이블 생성 **전에** 반대 축 컬럼을 검사하고 던진다(BigQuery 는 만든
+컬럼을 지울 수 없다).
+
+## `getAdminInstallRetentionSummary` (티켓 EJrLwysi)
+
+`analytics_install_profile` 을 읽어 지평별 **분자·분모**를 돌려준다. 화면이 각자 SQL 로 분모를
+세면 정의가 갈라지므로 세는 곳을 한 군데로 모은 것이다(`summarizeInstallRetention`).
+
+```
+{
+  installsObserved,
+  installsNeverActive,          // = installsZombie + installsNeverRan
+  installsZombie,               // 하트비트는 왔는데 working·이벤트 0 (떠 있던 프로세스)
+  installsNeverRan,             // 어트리뷰션만 있고 신호 자체가 없음 (안 온 사람)
+  installsCohort,               // ★모든 분모의 뿌리
+  horizons: [{ key:"d7", days:7, pending, exact:{numerator,denominator,rate,display}, window:{...} }],
+  activityDefinition, presentOnlyDefinition, horizonDefinitions, notes[]
+}
+```
+
+`installsZombie + installsNeverRan + installsCohort === installsObserved` 가 항상 성립한다.
+프로필은 **활동이 없는 설치도** 행을 만든다 — 안 그러면 "다운로드는 했는데 한 번도 안 쓴
+사람" 이 사라져 활성화 퍼널 분모가 무너진다(2026-08-21 실측: 558 vs 8).
+
+분모 0 이면 `rate` 는 `0` 이 아니라 `null`, `display` 는 `"0/0 (—)"` 다 — "아무도 안 돌아왔다"
+와 "판단할 표본이 없다" 는 다른 말이다. 유의미 사용 표본이 지금 2개다.
+
+순수 로직은 `analyticsProfiles.ts` (BQ/Firestore 무의존, `npm run test:analytics-profiles`).
+
+---
+
 ## 범위 밖 (기획 §2.3 / §6 후속 티켓)
 
 - **안정성/에러 KPI(🔴):** Sentry 미설치 → v1 제외. 대시보드 안정성 섹션은 "미연동" 고정(T0-2/T3-6).
