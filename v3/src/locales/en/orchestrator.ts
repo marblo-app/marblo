@@ -74,6 +74,14 @@ export const orchestrator: Record<keyof typeof koOrchestrator, string> = {
   "orchestrator.halt.unknownTitle": "The orchestrator stopped",
   "orchestrator.halt.unknownHint":
     "We could not identify the reason. Check the last screen in the terminal below if it is still there, then press Start again.",
+  // Price tag on the model selector. Only on rows billed per token (env-swap
+  // vendors) — native rows run on a subscription, so $/1M is not the bill.
+  // Keeps two rows of the same vendor that differ 3× (DeepSeek flash/pro) from
+  // looking interchangeable. Rates are peak list price; the off-peak half-price
+  // note lives in the Usage tab's model fact sheet.
+  "orchestrator.modelPrice": "{in} in / {out} out per 1M",
+  "orchestrator.modelPriceTip":
+    "{in} input / {out} output per 1M tokens, billed per token against prepaid vendor balance rather than a subscription. Rates shown are peak list price; off-peak is half (see Usage → Model info).",
   // Category labels
   "orchestrator.cat.project": "Start project",
   "orchestrator.cat.project-step": "Step-by-step start",

@@ -8,6 +8,11 @@ import {
   shortHarness,
 } from "../../lib/modelFactFormat";
 import { groupModelsByTier, type ModelTier } from "../../lib/modelTier";
+import {
+  KST_OFFSET_MINUTES,
+  deepseekPeakWindowsLabel,
+  isDeepSeekPeak,
+} from "../../lib/deepseekOffPeak";
 
 /**
  * 사용량 탭 상단 **모델 정보표** — 기본 접힘.
@@ -255,6 +260,12 @@ export function ModelFactSheet() {
                   ))}
                 </table>
               </div>
+              {/* ★DeepSeek 행이 **지금 보일 때만** 그린다 — 티어 필터로 그 행이
+                  빠지면 이 줄도 같이 빠진다. 다른 벤더 행 밑에 이 문구가 서면
+                  "내 모델도 시간대 할인이 있나" 로 읽혀서 거짓이 된다. */}
+              {visibleGroups.some((g) =>
+                g.rows.some((a) => a.row.row.vendor === "deepseek"),
+              ) && <DeepSeekOffPeakNote />}
               <p className="text-[11px] leading-snug text-gray-600">
                 ⓘ {t("usage.factSheet.footer")}
               </p>
@@ -266,6 +277,74 @@ export function ModelFactSheet() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * **DeepSeek off-peak 안내 한 줄** — 모델 정보표 바로 아래.
+ *
+ * ── 무엇을 말하고, 무엇을 말하지 않나 ──────────────────────────────────────
+ * 말하는 것: peak 구간(UTC·KST 양쪽)과 "그 외 시간은 단가 절반".
+ * 말하지 않는 것: **표의 단가는 한 글자도 안 바꾼다.** 표시값은 계속 peak 정가다
+ * (과소보고 방지 — 레지스트리 DeepSeek 블록 주석). off-peak 는 "실제 청구는 이보다
+ * 낮을 수 있다" 는 보조 설명이지 단가의 대체값이 아니다. 두 정책이 충돌하는 것처럼
+ * 보이지만 방향이 하나다: **화면이 실제보다 싸게 보이는 경우를 만들지 않는다.**
+ *
+ * ── ★KST 를 같이 적는 이유(ko 한정) ───────────────────────────────────────
+ * 벤더 고시가 UTC 라 UTC 를 지우면 출처 대조가 안 되고, UTC 만 적으면 사용자가 볼
+ * 때마다 +9 를 암산해야 한다. 그래서 **한국어 문구는** 둘 다 적되 **KST 는 UTC
+ * 에서 파생**한다(`deepseekPeakWindowsLabel`) — 손으로 두 벌 적으면 한쪽만
+ * 고쳐지는 날이 온다.
+ *
+ * ★en 문구는 **UTC 만** 적는다(사장님 지시). 영어 독자는 KST 에 살지 않아
+ * 남의 지역시계가 한 줄 더 붙는 셈이고, UTC 는 벤더가 고시한 축 그대로다.
+ * 지우는 건 **표시뿐**이다: `kst` 는 여기서 계속 넘기고(en 템플릿이 그 자리를
+ * 안 쓸 뿐이다 — `i18n.format` 은 안 쓰인 변수를 조용히 무시한다), 아래 실시간
+ * 배지의 판정 축도 변함없이 UTC 하나다. 두 로케일이 **같은 UTC 구간**을 뜻한다는
+ * 사실은 `tests/unit/deepseek-off-peak.test.ts` 가 못박는다.
+ *
+ * ── ★실시간 배지를 다는 조건 ──────────────────────────────────────────────
+ * 틀린 실시간 배지는 정확한 정적 문구보다 나쁘다(없는 할인을 약속하게 된다).
+ * 그래서 판정을 컴포넌트 안에서 즉석 계산하지 않고 순수 함수로 떼어
+ * (`lib/deepseekOffPeak.isDeepSeekPeak`) 경계 6개를 테스트로 못박은 뒤에만 단다.
+ * 판정 축은 UTC 하나뿐이라 기기 타임존·서머타임이 결과에 끼어들지 않는다.
+ *
+ * ★1분마다 다시 계산한다. 사용량 탭을 열어둔 채 경계를 넘으면 배지가 조용히
+ * 거짓이 되는데, 그 상태가 바로 "틀린 실시간 배지" 다. 타이머는 이 줄이 화면에
+ * 있는 동안만 돈다(표가 접혀 있으면 이 컴포넌트 자체가 마운트되지 않는다).
+ */
+function DeepSeekOffPeakNote() {
+  const { t } = useTranslation();
+  const [peak, setPeak] = useState(() => isDeepSeekPeak(new Date()));
+
+  useEffect(() => {
+    const tick = () => setPeak(isDeepSeekPeak(new Date()));
+    tick();
+    const timer = setInterval(tick, 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <p className="text-[11px] leading-snug text-gray-500">
+      ⓘ{" "}
+      <span
+        className={`mr-1 rounded px-1 py-0.5 text-[10px] ${
+          peak
+            ? "bg-gray-500/15 text-gray-400"
+            : "bg-emerald-500/15 text-emerald-300"
+        }`}
+      >
+        {t(
+          peak
+            ? "usage.factSheet.deepseekNowPeak"
+            : "usage.factSheet.deepseekNowOffPeak",
+        )}
+      </span>
+      {t("usage.factSheet.deepseekOffPeak", {
+        utc: deepseekPeakWindowsLabel(0),
+        kst: deepseekPeakWindowsLabel(KST_OFFSET_MINUTES),
+      })}
+    </p>
   );
 }
 

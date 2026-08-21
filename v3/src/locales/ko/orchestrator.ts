@@ -86,6 +86,14 @@ export const orchestrator = {
   // 말한다**. 여기서 main 이 준 문자열을 그대로 그리지 않는 것이 규약이다.
   "orchestrator.halt.unknownHint":
     "사유를 확인하지 못했습니다. 아래 터미널에 마지막 화면이 남아 있으면 그걸 확인하고, [다시 시작] 을 눌러 주세요.",
+  // 모델 셀렉터의 **단가 꼬리표**. 토큰당 청구되는 칸(env-swap 벤더)에만 붙는다 —
+  // 네이티브 칸은 구독으로 돌아 $/1M 이 청구서가 아니다.
+  // ★같은 벤더 안에서 3배 차이가 나는 칸들(DeepSeek flash/pro)을 라벨만 보고
+  // 고르지 않게 하려는 것이다. 표기는 peak 정가이고, off-peak 절반 안내는
+  // 사용량탭 모델 정보표가 한다.
+  "orchestrator.modelPrice": "입력 {in} / 출력 {out} · 1M 토큰",
+  "orchestrator.modelPriceTip":
+    "1M 토큰당 입력 {in} / 출력 {out}. 구독이 아니라 벤더 선불 잔액에서 토큰당 차감됩니다. 표시 단가는 peak 정가이고, off-peak 에는 절반입니다(사용량 탭 → 모델 정보 참조).",
   // Category labels
   "orchestrator.cat.project": "프로젝트 시작",
   "orchestrator.cat.project-step": "단계별 시작",

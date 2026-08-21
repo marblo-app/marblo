@@ -200,6 +200,27 @@ export const usage: Record<keyof typeof koUsage, string> = {
     "Tiers are derived from the facts in this table, not from a hand-written list of model names. The base is the registry capability grade (frontier/top → Premier, mid → Standard, cheap → Value), plus one more move in a single direction: a Standard model is promoted to Value only if its output price is at or below the table's median AND its performance-per-dollar is at or above the median. Performance is normalized against the best score on the same benchmark so different benchmarks never get compared directly. A cheap price never demotes a Premier model — a cheap Premier is still Premier.",
   "usage.factSheet.tierFooter":
     "Tiers are derived automatically from the numbers above (registry capability grade + performance-per-dollar). Add a model to the registry and it lands in the right group here on its own. A model with no official benchmark number is never promoted to Value: we know it is cheap, but not that it is good enough. Benchmark conditions differ per model, so treat this grouping as rough guidance rather than a precise ranking. A tier is a property of the model, so switching the benchmark variant above never moves it: the table cells follow the variant you picked, but tiers are judged from each model's one representative benchmark.",
+  // DeepSeek off-peak note (2026-08-21). DeepSeek rates in this table are peak
+  // list price on purpose (never under-report), but peak is only 7 hours a day
+  // and the other 17 cost exactly half — so the list price overstates the real
+  // bill for ~70% of the day. This line closes that gap without touching the
+  // rate itself. DeepSeek only: the screen renders this line only when a
+  // DeepSeek row is visible.
+  //
+  // ★UTC only in English — no KST. The Korean copy keeps both because its
+  // reader converts +9 in their head every time; an English reader is not in
+  // KST, so a second local-to-someone-else clock is noise, and UTC is exactly
+  // what the vendor publishes. This drops the *display* only: KST is still
+  // derived (deepseekPeakWindowsLabel) and the peak/off-peak verdict still runs
+  // on a single UTC axis (lib/deepseekOffPeak.ts). Both locales therefore mean
+  // the same UTC window — deepseek-off-peak.test.ts locks that.
+  "usage.factSheet.deepseekOffPeak":
+    "DeepSeek prices depend on the time of day. Peak is {utc} UTC; every other hour is off-peak and costs exactly half. The DeepSeek rates above are the peak list price so we never under-report, which means work run off-peak is billed at half of what you see.",
+  // Live badge. The verdict is computed in UTC only (no device timezone or DST
+  // in the path) and refreshes every minute — see src/lib/deepseekOffPeak.ts
+  // and its boundary tests.
+  "usage.factSheet.deepseekNowOffPeak": "off-peak right now · half the rate shown",
+  "usage.factSheet.deepseekNowPeak": "peak right now · the rate shown",
   "usage.factSheet.footer":
     "Prices are read verbatim from the model registry (electron/model-registry.ts) as the single source — add a model there and it shows up here automatically. SWE-bench is four different problem sets, and each model reports under different benchmark and scaffold conditions, so these are rough figures. Every number links to its primary source and the date it was read; cells with no official number say 'needs checking' rather than guessing.",
 

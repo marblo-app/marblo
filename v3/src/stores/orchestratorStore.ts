@@ -109,15 +109,26 @@ export const ORCHESTRATOR_MODEL_OPTIONS = [
   // effort 가 low/high 뿐인 것도 누락이 아니다 — DeepSeek 이 Codex 용으로 직접
   // 배포하는 공식 models.json 이 low/high/max 만 정의하고(medium 이 없다) max 는
   // 우리 승인게이트 칸이라 `selectableEfforts` 가 걷어낸다.
+  //
+  // ★`pricing` 이 이 두 칸에만 있는 것도 누락이 아니다. 네이티브 칸은 사용자의
+  // 구독·CLI 로그인으로 돌아 $/1M 이 청구서에 그대로 나타나지 않지만, env-swap
+  // 벤더는 **선불 잔액에서 토큰당** 깎여 이 숫자가 곧 청구액이다. 그리고 같은
+  // 벤더 안에서 pro 가 flash 의 **3배**라(0.44→1.32 / 1.32→3.96), 라벨만 보면
+  // 이름 한 글자 차이인 두 칸을 모르고 골랐다가 청구서로 알게 되는 경로가 열려
+  // 있다 — 그래서 셀렉터가 숫자를 같이 말한다. 표기는 **peak 정가**이고
+  // (과소보고 방지), off-peak 절반 안내는 사용량탭 정보표가 한다.
+  // 이 값들 역시 레지스트리 미러다 — 벌어지면 파생 대조 테스트가 깨진다.
   {
     value: "codex:deepseek-v4-flash",
     label: "DeepSeek (deepseek-v4-flash)",
     efforts: ["low", "high"],
+    pricing: { inputPer1M: 0.44, outputPer1M: 1.32 },
   },
   {
     value: "codex:deepseek-v4-pro",
     label: "DeepSeek (deepseek-v4-pro)",
     efforts: ["low", "high"],
+    pricing: { inputPer1M: 1.32, outputPer1M: 3.96 },
   },
   // Grok Build(xAI 네이티브 하네스). 라벨은 codex 와 같은 규칙으로 레지스트리
   // 실명 그대로다 — xAI 는 4.5/4.6 처럼 소수점 세대를 촘촘히 올려서, 예쁘게 접으면
@@ -218,6 +229,31 @@ export function orchestratorEffortsFor(
   const base = orchestratorModelBase(model);
   const option = ORCHESTRATOR_MODEL_OPTIONS.find((o) => o.value === base);
   return (option?.efforts ?? []) as readonly OrchestratorEffort[];
+}
+
+/** 셀렉터 한 칸의 토큰 단가($/1M). `pricing` 이 없는 칸(네이티브 전부)은 null. */
+export interface OrchestratorModelPricing {
+  inputPer1M: number;
+  outputPer1M: number;
+}
+
+/**
+ * 이 값의 **토큰 단가**($/1M) — 없으면 null.
+ *
+ * null 은 "모른다" 가 아니라 **"이 칸은 토큰당 청구가 아니다"** 다. 네이티브
+ * 칸(claude/codex/grok/antigravity)은 사용자의 구독·CLI 로그인으로 돌아서
+ * $/1M 을 적으면 거짓말이 된다. 값이 있는 칸은 env-swap 벤더뿐이고, 거기선
+ * 선불 잔액에서 토큰당 깎여 이 숫자가 곧 청구액이다(목록 주석 참조).
+ *
+ * effort 접미는 단가를 바꾸지 않으므로(레지스트리 §단가 주석: "effort 는 토큰
+ * 수량만 바꾼다") 모델 축으로 접어서 찾는다.
+ */
+export function orchestratorModelPricing(
+  model: string,
+): OrchestratorModelPricing | null {
+  const base = orchestratorModelBase(model);
+  const option = ORCHESTRATOR_MODEL_OPTIONS.find((o) => o.value === base);
+  return option && "pricing" in option ? option.pricing : null;
 }
 
 export function isOrchestratorModel(

@@ -18,6 +18,7 @@ import {
   orchestratorEffortsFor,
   orchestratorModelBase,
   orchestratorModelEffort,
+  orchestratorModelPricing,
   orchestratorModelProvider,
   withOrchestratorEffort,
 } from "../../src/stores/orchestratorStore";
@@ -41,22 +42,33 @@ describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
   const codexVariants = options.filter((o) => o.value.startsWith("codex:"));
   const grokVariants = options.filter((o) => o.value.startsWith("grok:"));
 
-  it("★Claude 변형 목록이 레지스트리 파생 목록과 정확히 일치한다", () => {
-    const expected = claudeOrchestratorChoices().map((c) => ({
-      value: c.value,
-      label: c.label,
-      efforts: c.efforts,
-    }));
-    expect(claudeVariants).toEqual(expected);
+  /**
+   * 미러가 들고 있어야 하는 필드만 뽑는다.
+   *
+   * ★`pricing` 이 여기 낀 이유: 셀렉터가 화면에 **단가를 적기** 시작했고(같은
+   * 벤더 안에서 pro 가 flash 의 3배라 라벨만으로는 구분이 안 된다), 화면이 말하는
+   * 숫자는 레지스트리 `pricing` 과 한 글자도 달라선 안 된다. `undefined` 는 빼서
+   * 넣는다 — 네이티브 칸은 이 키 자체가 없어야 하고(구독으로 도는 칸에 $/1M 을
+   * 적는 것은 거짓말이다), `{pricing: undefined}` 로 두면 그 부재가 흐려진다.
+   */
+  const mirrorFields = (c: {
+    value: string;
+    label: string;
+    efforts: readonly string[];
+    pricing?: { inputPer1M: number; outputPer1M: number };
+  }) => ({
+    value: c.value,
+    label: c.label,
+    efforts: c.efforts,
+    ...(c.pricing ? { pricing: c.pricing } : {}),
   });
 
-  it("★Codex 변형 목록이 레지스트리 파생 목록과 정확히 일치한다(effort 포함)", () => {
-    const expected = codexOrchestratorChoices().map((c) => ({
-      value: c.value,
-      label: c.label,
-      efforts: c.efforts,
-    }));
-    expect(codexVariants).toEqual(expected);
+  it("★Claude 변형 목록이 레지스트리 파생 목록과 정확히 일치한다", () => {
+    expect(claudeVariants).toEqual(claudeOrchestratorChoices().map(mirrorFields));
+  });
+
+  it("★Codex 변형 목록이 레지스트리 파생 목록과 정확히 일치한다(effort·단가 포함)", () => {
+    expect(codexVariants).toEqual(codexOrchestratorChoices().map(mirrorFields));
   });
 
   it("프로바이더 기본 선택지(접미 없는 값)가 그대로 남아 있다 — 하위호환", () => {
@@ -339,6 +351,41 @@ describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
     // 값 프리픽스는 여전히 하네스 축이다(어느 바이너리로 뜨나) — 여기가 갈리면
     // `orchestratorLaunchPin` 이 핀을 통째로 버려서 조용히 CLI 기본으로 뜬다.
     expect(orchestratorModelProvider("codex:deepseek-v4-flash")).toBe("codex");
+  });
+
+  it("★두 DeepSeek 칸이 **단가를 들고 선다** — pro 가 flash 의 3배라 라벨만으론 못 고른다", () => {
+    // 완료기준 "단가 차이가 화면에서 읽힌다" 의 회귀 락. 화면 문자열이 아니라
+    // 화면이 먹는 **값**을 본다(렌더러 컴포넌트 테스트 하네스가 이 레포엔 없다 —
+    // `lib/modelFactFormat.ts` 상단 주석과 같은 이유로 순수 축에서 검증한다).
+    const flash = orchestratorModelPricing("codex:deepseek-v4-flash");
+    const pro = orchestratorModelPricing("codex:deepseek-v4-pro");
+    expect(flash).toEqual({ inputPer1M: 0.44, outputPer1M: 1.32 });
+    expect(pro).toEqual({ inputPer1M: 1.32, outputPer1M: 3.96 });
+    // 3배라는 사실 자체를 못박는다 — 어느 한쪽만 갱신되면 여기서 깨진다.
+    expect(pro!.inputPer1M / flash!.inputPer1M).toBeCloseTo(3, 10);
+    expect(pro!.outputPer1M / flash!.outputPer1M).toBeCloseTo(3, 10);
+    // 레지스트리와 같은 값인가(미러가 벌어지면 화면이 거짓 단가를 말한다).
+    for (const id of ["deepseek-v4-flash", "deepseek-v4-pro"]) {
+      const entry = getModel(id)!;
+      expect(orchestratorModelPricing(`codex:${id}`)).toEqual({
+        inputPer1M: entry.pricing.inputPer1M,
+        outputPer1M: entry.pricing.outputPer1M,
+      });
+    }
+    // ★effort 접미가 붙어도 같은 답이다 — effort 는 토큰 수량만 바꾸고 단가는
+    // 안 바꾼다(레지스트리 §단가 주석).
+    expect(orchestratorModelPricing("codex:deepseek-v4-pro@high")).toEqual(pro);
+  });
+
+  it("★네이티브 칸엔 단가가 **없다** — 구독으로 도는 칸에 $/1M 은 거짓말이다", () => {
+    // 이 부재가 곧 규칙이다. claude/codex/grok 은 사용자의 구독·CLI 로그인으로
+    // 돌아서 레지스트리 $/1M 이 그대로 청구되지 않는다. 여기가 뚫리면 셀렉터가
+    // "Claude (Opus 5) · $5.00/$25.00" 처럼 안 나올 청구액을 광고하게 된다.
+    for (const o of options) {
+      const native = !o.value.startsWith("codex:deepseek-");
+      if (native) expect(orchestratorModelPricing(o.value), o.value).toBeNull();
+      else expect(orchestratorModelPricing(o.value), o.value).not.toBeNull();
+    }
   });
 
   it("★저장·env 로 들어온 DeepSeek 값이 정규화에서 살아남는다(두 문이 같은 술어)", () => {

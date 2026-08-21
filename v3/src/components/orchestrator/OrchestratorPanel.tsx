@@ -30,10 +30,12 @@ import {
   orchestratorEffortsFor,
   orchestratorModelBase,
   orchestratorModelEffort,
+  orchestratorModelPricing,
   useOrchestratorStore,
   withOrchestratorEffort,
   type OrchestratorModel,
 } from "../../stores/orchestratorStore";
+import { formatRate } from "../../lib/modelFactFormat";
 import { useCliSetupStore } from "../../stores/cliSetupStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useEditorStore } from "../../stores/editorStore";
@@ -403,6 +405,37 @@ export default memo(function OrchestratorPanel({
   const selectedBase = orchestratorModelBase(selectedModel);
   const selectedEffort = orchestratorModelEffort(selectedModel);
   const effortChoices = orchestratorEffortsFor(selectedModel);
+  /**
+   * 칸 글자 = 라벨 + (토큰당 청구되는 칸이면) **단가**.
+   *
+   * ★DeepSeek flash/pro 는 라벨이 이름 한 글자 차이인데 단가는 **3배** 다르다.
+   * 라벨만 적으면 모르고 고른 뒤 청구서로 알게 되는 경로가 열린다. 네이티브
+   * 칸(구독으로 도는 claude/codex/grok)엔 `pricing` 이 아예 없어 종전과 글자가
+   * 완전히 같다 — 거기에 $ 를 적으면 오히려 거짓말이 된다(store 주석 참조).
+   *
+   * `<option>` 안엔 마크업이 못 들어가므로(네이티브 select) 한 줄 텍스트로 접고,
+   * 자세한 설명은 아래 select 의 `title` 이 맡는다.
+   */
+  const modelOptionText = (option: {
+    value: string;
+    label: string;
+  }): string => {
+    const price = orchestratorModelPricing(option.value);
+    if (!price) return option.label;
+    return `${option.label} · ${t("orchestrator.modelPrice", {
+      in: formatRate(price.inputPer1M),
+      out: formatRate(price.outputPer1M),
+    })}`;
+  };
+  /** 지금 고른 칸이 토큰당 청구면 select 툴팁에 그 사실을 덧붙인다. */
+  const withPriceTip = (base: string): string => {
+    const price = orchestratorModelPricing(selectedBase);
+    if (!price) return base;
+    return `${base}\n${t("orchestrator.modelPriceTip", {
+      in: formatRate(price.inputPer1M),
+      out: formatRate(price.outputPer1M),
+    })}`;
+  };
   // 세션 피커 문구는 축이 하나다: 비기너면 "이전 대화", 아니면 "세션 선택".
   // 목록·동작은 완전히 같고 라벨만 갈린다 — 두 벌의 복구 경로를 만들지 않는다.
   const sessionPickerLabelKey: MessageKey = showSessionRecovery
@@ -755,15 +788,15 @@ export default memo(function OrchestratorPanel({
                 onChange={handleModelChange}
                 disabled={isSwitching}
                 className="h-6 rounded border border-[#313244] bg-[#1e1e2e] px-1.5 text-[11px] text-[#cdd6f4] outline-none hover:border-[#89b4fa] disabled:opacity-60"
-                title={
+                title={withPriceTip(
                   showConnectedModelPicker
                     ? t("beginner.chat.modelPickerTitle")
-                    : "Switch orchestrator model"
-                }
+                    : "Switch orchestrator model",
+                )}
               >
                 {modelOptions.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {option.label}
+                    {modelOptionText(option)}
                   </option>
                 ))}
               </select>
@@ -799,6 +832,23 @@ export default memo(function OrchestratorPanel({
                       Switch orchestrator to{" "}
                       {describeOrchestratorModel(targetSwitchModel)}
                     </div>
+                    {/* ★확인 단계에서 한 번 더 단가를 말한다 — 여기가 "되돌리기
+                        전 마지막 화면" 이고, 3배 차이(flash→pro)를 이 시점에도
+                        모르면 청구서가 첫 통지가 된다. 토큰당 청구 칸에만 뜬다. */}
+                    {(() => {
+                      const price = orchestratorModelPricing(
+                        orchestratorModelBase(targetSwitchModel),
+                      );
+                      if (!price) return null;
+                      return (
+                        <div className="mb-1 text-[11px] leading-4 text-amber-300/80">
+                          {t("orchestrator.modelPriceTip", {
+                            in: formatRate(price.inputPer1M),
+                            out: formatRate(price.outputPer1M),
+                          })}
+                        </div>
+                      );
+                    })()}
                     <div className="mb-3 text-[11px] leading-4 text-[#a6adc8]">
                       Snapshot will include active missions and board work.
                       {activeTaskCount > 0
@@ -882,15 +932,15 @@ export default memo(function OrchestratorPanel({
                   onClick={(e) => e.stopPropagation()}
                   onChange={handleModelChange}
                   className="h-6 rounded border border-[#313244] bg-[#1e1e2e] px-1.5 text-[11px] text-[#cdd6f4] outline-none hover:border-[#89b4fa]"
-                  title={
+                  title={withPriceTip(
                     showConnectedModelPicker
                       ? t("beginner.chat.modelPickerTitle")
-                      : "Orchestrator model"
-                  }
+                      : "Orchestrator model",
+                  )}
                 >
                   {modelOptions.map((option) => (
                     <option key={option.value} value={option.value}>
-                      {option.label}
+                      {modelOptionText(option)}
                     </option>
                   ))}
                 </select>

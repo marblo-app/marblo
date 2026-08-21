@@ -451,6 +451,27 @@ export interface OrchestratorModelChoice {
    * — 사유는 `selectableEfforts` 주석.
    */
   efforts: EffortLevel[];
+  /**
+   * 이 칸의 **토큰 단가**($/1M, 레지스트리 `pricing` 그대로) — **런타임 게이트
+   * 벤더 칸에만** 채운다(= `runtimeGated: true`. 오늘 DeepSeek flash/pro 둘).
+   *
+   * ★왜 전 칸이 아니라 그 칸들만인가. 네이티브 칸(claude/codex/grok)은 사용자의
+   * **구독·CLI 로그인**으로 돌아서 이 숫자가 청구서에 그대로 나타나지 않는다 —
+   * 거기에 $ 를 적으면 "이만큼 더 나온다" 는 거짓말이 된다. 반대로 env-swap 벤더는
+   * 사용자의 **선불 잔액에서 토큰당** 깎이므로 이 숫자가 곧 청구액이다. 즉 이
+   * 필드는 `runtimeGated` 와 같은 경계를 공유한다(같은 이유로 갈린 축이다).
+   *
+   * ★단가를 화면이 말해야 하는 구체적 이유: 같은 벤더 안에 3배 차이가 있다
+   * (flash $0.44/$1.32 vs pro $1.32/$3.96). 라벨만 보면 둘은 이름 한 글자 차이라,
+   * 모르고 고른 뒤 청구서로 알게 되는 경로가 열려 있다.
+   *
+   * ★표기 단가는 **peak 정가**다. DeepSeek 은 off-peak 에 정확히 절반이지만 우리는
+   * 낮은 쪽을 적지 않는다 — 과소보고 방지(레지스트리 DeepSeek 블록 주석). 그
+   * 보조설명은 사용량탭 정보표가 한다(`ModelFactSheet` 의 off-peak 안내).
+   *
+   * 렌더러가 통화·문구를 조립하도록 **숫자 그대로** 내려보낸다(i18n 은 렌더러 몫).
+   */
+  pricing?: { inputPer1M: number; outputPer1M: number };
 }
 
 /**
@@ -897,6 +918,16 @@ function orchestratorChoicesFor(
         requiredEnvKeys: native ? [] : [...vendorEnvSecretKeys(entry.id)],
         label: `${head} (${humanize(entry)})`,
         efforts: selectableEfforts(entry),
+        // ★네이티브 칸엔 안 붙인다 — 그 칸은 구독으로 돌아 이 숫자가 청구서가
+        // 아니다(필드 주석의 경계). 조건부 크레덴셜 칸에서만 단가 = 청구액이다.
+        ...(native
+          ? {}
+          : {
+              pricing: {
+                inputPer1M: entry.pricing.inputPer1M,
+                outputPer1M: entry.pricing.outputPer1M,
+              },
+            }),
       };
     });
 }
