@@ -33,6 +33,7 @@ import {
   CreditCard,
   Database,
   TriangleAlert,
+  Link2,
 } from "lucide-react";
 
 // ── 콜러블 응답 타입 (docs/analytics-admin-callables-api.md 미러) ───────────────
@@ -196,6 +197,8 @@ export type RetentionCohorts = {
     maxDrop: ActivationGateStep | null;
     note: string;
   };
+  /** ★선행 티켓이 실어 보낼 사람 축 커버리지. 없으면 배선 전이다. */
+  personAxis?: PersonAxisCoverage | null;
 };
 
 // ── D7·D14 리텐션 + 연속사용 스트릭 (getAdminStreakRetention) ────────────────
@@ -279,6 +282,49 @@ type StreakRetention = {
   adminExcluded?: AdminExcludedTelemetry;
   install: StreakRetentionAxis;
   account: StreakRetentionAxis;
+  /** ★선행 티켓이 실어 보낼 사람 축 커버리지. 없으면 배선 전이다. */
+  personAxis?: PersonAxisCoverage | null;
+};
+// ── 설치축 리텐션 요약 (getAdminInstallRetentionSummary) ─────────────────────
+// 파생표 `analytics_install_profile` 의 분자·분모 롤업. 서버 순수 빌더
+// (analyticsProfiles.summarizeInstallRetention)의 응답 미러다.
+//
+// ★이 축이 따로 있는 이유. 스트릭 뷰의 설치축은 **조회 구간의 코호트**만 보고,
+//   이쪽은 **프로필 전량**을 본다 — 그래서 "다운로드만 하고 한 번도 안 켠 설치"
+//   가 여기서만 보인다. 두 수를 같은 표에 섞지 않는다.
+//
+// ★좀비 격리. `installsNeverActive` 를 하나로 그리면 원인이 사라진다 —
+//   좀비(하트비트만 있고 working 0)는 프로세스가 떠 있던 것이고, neverRan 은
+//   사람이 아예 안 온 것이다. 원인이 다르면 할 일도 다르므로 나눠서 그린다.
+type InstallRetentionHorizon = {
+  key: "d1" | "d3" | "d7" | "d14" | "d30";
+  days: number;
+  /** 판정 불가(관측창 미도달)로 분모에서 뺀 설치 수. */
+  pending: number;
+  exact: RetentionCountedRate;
+  window: RetentionCountedRate;
+};
+export type InstallRetentionSummary = {
+  /** 프로필 전체 설치 수(좀비·무활동 포함). */
+  installsObserved: number;
+  /** 활동일이 0인 설치 = 아래 둘의 합. 합쳐 그리지 않는다(원인이 다르다). */
+  installsNeverActive: number;
+  /** 하트비트는 왔는데 working·이벤트가 0 인 설치(떠 있던 프로세스). */
+  installsZombie: number;
+  /** 어트리뷰션만 있고 활동 신호가 아예 없는 설치(다운로드 후 미실행). */
+  installsNeverRan: number;
+  /** 첫 활동일이 있어 코호트에 들어간 설치 수. ★모든 분모의 뿌리. */
+  installsCohort: number;
+  horizons: InstallRetentionHorizon[];
+  activityDefinition: string;
+  presentOnlyDefinition: string;
+  horizonDefinitions: string;
+  notes: string[];
+  /**
+   * ★선행 티켓(표·뷰 생성 + 링크 MERGE 배선)이 실어 보낼 사람 축 커버리지.
+   * 없으면 상태가 아니라 **배선 전**이다 — 화면은 그때 '적재 전' 으로 접는다.
+   */
+  personAxis?: PersonAxisCoverage | null;
 };
 
 // ── KPI 코크핏 (getAdminKpiCockpit) — 지표기반 베타종료 게이지 + 신규 온보딩 ──
@@ -1378,7 +1424,7 @@ function ThinLabelNotice() {
 // 이어 읽으면 "이탈"로 보이는 낙차가 실제로는 id 가 갈린 자리다. 시계열에는 그
 // 날짜에 세로선을 긋고, 선 왼쪽과 오른쪽을 같은 유닛으로 취급하지 않는다.
 const ID_SCHEME_SWITCH_DATE = "2026-06-13";
-type ChartMarker = { date: string; label: string; hint?: string };
+export type ChartMarker = { date: string; label: string; hint?: string };
 export const ID_SCHEME_MARKER: ChartMarker = {
   date: ID_SCHEME_SWITCH_DATE,
   label: "06-13 식별자 교체",
@@ -1510,8 +1556,8 @@ export function SmallSampleNotice({
           {fmtInt(n)}
           {unit}
         </b>{" "}
-        입니다. 이 규모에서 퍼센트는 한 건이 움직일 때마다 수십 %p 씩 흔들립니다 —
-        분수(<span className="font-mono">1/2</span>)를 읽고 퍼센트는 참고만
+        입니다. 이 규모에서 퍼센트는 한 건이 움직일 때마다 수십 %p 씩 흔들립니다
+        — 분수(<span className="font-mono">1/2</span>)를 읽고 퍼센트는 참고만
         하세요.
       </span>
     </p>
@@ -1526,25 +1572,50 @@ export function PendingIngestion({
   title,
   waitingOn,
   willShow,
+  missing = "source",
 }: {
   title: string;
   waitingOn: string;
   willShow: string[];
+  /**
+   * ★없는 것이 **소스**인지 **조회 경로**인지 가른다.
+   *
+   * `analytics_user_daily` 처럼 스케줄이 매일 채우고 있는데 화면이 읽어 오는
+   * 콜러블만 없는 칸이 있다. 그걸 "적재 전" 이라고 쓰면 그 자체가 작은 거짓말이고,
+   * 다음 사람이 "적재부터 해야겠네" 로 읽어 이미 있는 표를 다시 만든다.
+   * 그래서 배지를 **'연결 전'** 으로 가른다(오케스트레이터 확정 문구).
+   * 어느 쪽이든 **가짜 0 을 그리지 않는다**는 규약은 같다.
+   *
+   * ★'연결 전' 의 '연결' 은 **화면↔표** 를 잇는 조회 경로다. 사람 축의
+   * '연결된 설치'(설치↔사람 링크)와 다른 말이라, 본문 문장이 어느 쪽인지
+   * 매번 못 박는다 — 배지 두 글자만 보고 헷갈릴 자리를 남기지 않는다.
+   */
+  missing?: "source" | "read-path";
 }) {
+  const noSource = missing === "source";
   return (
     <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-5">
       <div className="flex flex-wrap items-center gap-2">
         <Database className="h-4 w-4 text-zinc-600" />
         <h4 className="text-sm font-semibold text-zinc-300">{title}</h4>
         <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
-          적재 전
+          {noSource ? "적재 전" : "연결 전"}
         </span>
       </div>
-      <p className="mt-2 text-xs leading-relaxed text-zinc-500">
-        아직 <b className="text-zinc-400">수치가 0 인 게 아니라 소스가 없습니다</b>
-        . 여기에 0 이나 빈 표를 그리면 &ldquo;아무도 안 했다&rdquo;로 읽히기
-        때문에 그리지 않습니다.
-      </p>
+      {noSource ? (
+        <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+          아직{" "}
+          <b className="text-zinc-400">수치가 0 인 게 아니라 소스가 없습니다</b>
+          . 여기에 0 이나 빈 표를 그리면 &ldquo;아무도 안 했다&rdquo;로 읽히기
+          때문에 그리지 않습니다.
+        </p>
+      ) : (
+        <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+          소스는 <b className="text-zinc-400">이미 쌓이고 있습니다</b> — 없는
+          것은 이 화면이 그걸 읽어 오는 경로입니다. 그래서 여기 0 을 그리면 두
+          겹으로 틀립니다(아무도 안 한 것도, 소스가 없는 것도 아닙니다).
+        </p>
+      )}
       <dl className="mt-3 space-y-1.5 text-xs">
         <div className="flex gap-2">
           <dt className="w-20 shrink-0 text-zinc-600">기다리는 것</dt>
@@ -1580,8 +1651,8 @@ export function AxisLimitNote({
   return (
     <div className="rounded-xl border border-amber-900/40 bg-amber-950/20 p-3">
       <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-amber-200">
-        <TriangleAlert className="h-3.5 w-3.5" />이 탭에서 0 은 &ldquo;없음&rdquo;
-        이 아닐 수 있습니다
+        <TriangleAlert className="h-3.5 w-3.5" />이 탭에서 0 은
+        &ldquo;없음&rdquo; 이 아닐 수 있습니다
       </p>
       <ul className="space-y-1 text-[11px] leading-relaxed text-amber-200/80">
         {clean.map((n, i) => (
@@ -1592,10 +1663,411 @@ export function AxisLimitNote({
   );
 }
 
+// ── ★사람 축 — 기준을 말하지 않는 숫자를 금지한다 ────────────────────────────
+// v3/functions/src/personAxis.ts 응답의 미러. 설계 정본은
+// v3/docs/person-axis-user-key-design-2026-08-21.md §10.3(서버가 싣는 것) /
+// §10.4(화면 규칙 일곱) / §5.5(공용 기기).
+//
+// ★이 블록이 존재하는 이유는 하나다. 사람 축은 **커버리지가 오르는 동안 숫자가
+//   저절로 좋아진다.** 링크는 그 설치가 다시 인증해야 생기므로(forward-only)
+//   켠 직후엔 거의 비어 있고 며칠에 걸쳐 채워지는데, 그 구간에 평소 화면을 그리면
+//   "리텐션이 개선됐다" 로 읽힌다 — 실제로는 분모가 늘어난 것뿐이다. 그래서
+//   `PendingIngestion`(0%) 과 정상(100%) 사이에 상태를 하나 더 둔다.
+
+/** 어느 뷰로 사람에게 귀속했나. 값이 아니라 **말**이 라벨의 본체다(§10.4-5). */
+export type PersonAxisBasis = "since_link" | "all_time";
+
+/**
+ * 화면에 그대로 그리는 배지 문구. ★서버 `PERSON_AXIS_BASIS_LABEL` 와 **같은 말**
+ * 이어야 한다 — 두 벌이 갈라지면 "뷰 이름이 곧 고지" 라는 장치가 무너진다
+ * (설계 §5.4-4).
+ */
+export const PERSON_AXIS_BASIS_LABEL: Readonly<
+  Record<PersonAxisBasis, string>
+> = {
+  since_link: "연결 이후 기준",
+  all_time: "설치 전체 이력 기준(소급)",
+};
+
+/**
+ * 사람 축을 쓰는 **모든** 응답에 실려 오는 커버리지(설계 §10.3).
+ *
+ * ★`state` 는 넷이다. 설계 §10.3 의 셋에 `disabled` 가 더 붙었다(#1084 §9 가
+ *   프론트 몫으로 남긴 자리) — 게이트가 닫힌 것은 '적재 전'(pending)이 **아니다.**
+ *   소스가 없는 게 아니라 아직 열면 안 되는 것이고, 그 둘을 같은 말로 그리면
+ *   화면이 "곧 채워집니다" 라는 거짓 기대를 만든다.
+ */
+export type PersonAxisCoverage = {
+  state: "disabled" | "pending" | "ingesting" | "complete";
+  /** disabled 일 때만 채워진다. 화면이 이 문장을 그대로 그린다. */
+  disabledReason: string | null;
+  linkedInstalls: number;
+  totalInstalls: number;
+  /** ★조회 구간에 활동한 설치 중 링크된 수 — complete 판정은 이쪽으로 한다. */
+  linkedActiveInstalls: number;
+  activeInstalls: number;
+  /** 공용 기기로 판정돼 제외된 설치 수(설계 §5.5). 값을 만들지 않고 센다. */
+  excludedSharedInstalls: number;
+  /** 개정 발효일 — 소급 상한. 게이트가 닫혔으면 null. */
+  effectiveFrom: string | null;
+  basis: PersonAxisBasis;
+  lastLinkedAt: string | null;
+};
+
+/**
+ * ★배포 직후 사람 축이 비어 있는 것은 고장이 아니다. 이 문장을 화면에서 빼면
+ * "켰는데 왜 비어 있지" 로 읽힌다 — 그래서 상수로 박아 여러 자리에서 같은 말을
+ * 쓴다(문장이 갈라지면 어느 쪽이 맞는지 화면이 스스로 못 말한다).
+ */
+export const PERSON_AXIS_FORWARD_ONLY_NOTE =
+  "사람 축 링크는 forward-only 입니다 — 각 설치는 '다음에 인증할 때' 부터 " +
+  "붙습니다. 그래서 켠 직후에 연결된 설치가 거의 없는 것이 정상이고, 여기 " +
+  "낮은 커버리지는 '사람이 없다' 가 아니라 '아직 안 붙었다' 입니다. 잠자는 " +
+  "설치는 며칠에서 영원히 안 붙을 수 있습니다.";
+
+/** 사람 축 지표의 분모는 '전체 설치' 가 아니라 '링크된 설치' 다(§10.4-2). */
+export const PERSON_AXIS_DENOMINATOR_NOTE =
+  "사람 축 지표의 분모는 전체 설치가 아니라 '링크된 설치' 입니다. 분모가 " +
+  "커버리지와 함께 자라기 때문에, 분모를 '전체 설치' 로 읽으면 커버리지 상승이 " +
+  "지표 개선으로 보입니다.";
+
+/** 링크 MERGE 배선 전(서버가 커버리지를 아직 안 싣는 상태)에 기다리는 것. */
+export const PERSON_AXIS_WAITING_ON =
+  "인증 경로 링크 MERGE 배선 + 사람 축 뷰 2벌(v_person_since_link / " +
+  "v_person_all_time) — 선행 티켓 진행 중";
+
+/** 붙으면 무엇이 보이는지. '적재 전' 규약은 이 목록을 요구한다. */
+export const PERSON_AXIS_WILL_SHOW = [
+  "사람 단위 리텐션(설치가 아니라 사람 — 한 사람이 설치 여러 대를 쓴다)",
+  "설치 전체 이력 기준(소급) 캠페인 귀속 — 라벨과 함께",
+  "커버리지: 활동한 설치 중 몇 대가 사람에 연결됐나 (분자/분모)",
+];
+
+/**
+ * 조회 구간의 시작일('YYYY-MM-DD'). 서버가 준 `generatedAt` 을 기준으로 센다 —
+ * 클라 시계로 세면 시차 하루가 경계 고지를 켜고 끈다.
+ */
+export function analyticsRangeStart(
+  generatedAt: string | null | undefined,
+  rangeDays: number | null | undefined
+): string | null {
+  if (!generatedAt || !rangeDays || rangeDays <= 0) return null;
+  const end = new Date(generatedAt);
+  if (Number.isNaN(end.getTime())) return null;
+  const start = new Date(end.getTime() - (rangeDays - 1) * 86400000);
+  return start.toISOString().slice(0, 10);
+}
+
+/**
+ * §10.4-7. 조회 구간이 발효일보다 앞으로 뻗으면 탭 머리에 적는다 — 그 구간의
+ * 0 은 '없음' 이 아니라 '사람 축이 없던 때' 다. 겹치지 않으면 null(없는 고지를
+ * 적는 것도 거짓말이다).
+ */
+export function personAxisRangeNote(
+  coverage: PersonAxisCoverage | null | undefined,
+  rangeStartDay: string | null | undefined
+): string | null {
+  const from = coverage?.effectiveFrom;
+  if (!from || !rangeStartDay) return null;
+  if (rangeStartDay >= from) return null;
+  return (
+    `이 조회 구간은 사람 축 발효일(${from}) 이전까지 뻗습니다. 발효일 왼쪽의 ` +
+    `0 은 '없음' 이 아니라 '사람 축이 없던 때' 입니다 — 소급은 발효일에서 ` +
+    `끊깁니다.`
+  );
+}
+
+/**
+ * 발효일 경계선. 06-13 교체선과 **같은 장치**를 쓴다(§10.4-7).
+ *
+ * ★지금 화면에는 이 마커를 받을 **사람 축 시계열이 아직 없다**(사람 축 카드는
+ * 커버리지 하나뿐이다). 그래서 이 함수는 지금 어느 차트에도 안 걸려 있다 —
+ * 대신 익명축 차트에 갖다 붙이지 **않는다.** 다른 축의 선을 긋는 것은 없는 선을
+ * 긋는 것과 같은 종류의 거짓말이다. 규칙 7 의 글 절반(AxisLimitNote)은 이미
+ * 걸려 있고, 선 절반은 사람 축 시계열이 붙는 티켓에서 이 함수를 그대로 쓴다.
+ */
+export function personAxisMarker(
+  coverage: PersonAxisCoverage | null | undefined
+): ChartMarker | undefined {
+  const from = coverage?.effectiveFrom;
+  if (!from) return undefined;
+  return {
+    date: from,
+    label: `${from} 사람 축 발효`,
+    hint:
+      `사람 축 소급 상한(${from}). 이 선 왼쪽 구간은 사람에게 귀속하지 ` +
+      `않습니다 — 거기 0 은 '없음' 이 아니라 '사람 축이 없던 때' 입니다.`,
+  };
+}
+
+/**
+ * §10.4-1. `complete` 가 아니면 퍼센트를 헤드라인으로 그리지 않는다 — 분수만
+ * 그린다. 기존 `Ratio`/`RatioCard` 규약의 연장이지 새 규약이 아니다.
+ */
+export function personAxisHeadlineAllowed(
+  coverage: PersonAxisCoverage | null | undefined
+): boolean {
+  return coverage?.state === "complete";
+}
+
+/**
+ * ★사람 축 숫자를 그리는 **유일한** 자리. `basis` 가 필수 prop 이라 라벨을 빼고
+ * 숫자만 그릴 방법이 타입 수준에서 없다 — 규약을 주석이 아니라 시그니처가
+ * 지킨다(§10.4-5). 새 사람 축 카드는 `Ratio` 가 아니라 이걸 쓴다.
+ *
+ * §10.4-1 도 여기서 같이 지킨다: `state !== "complete"` 면 퍼센트를 크게 그리지
+ * 않는다. 퍼센트가 커지는 것은 커버리지가 찼을 때뿐이다.
+ */
+export function PersonAxisNumber({
+  numerator,
+  denominator,
+  coverage,
+  label,
+}: {
+  numerator: number;
+  denominator: number;
+  coverage: PersonAxisCoverage;
+  /** 분모가 무엇인지. ★"전체 설치" 라고 쓰지 마라 — 분모는 링크된 설치다(§10.4-2). */
+  label: string;
+}) {
+  return (
+    <span className="inline-flex flex-wrap items-baseline gap-1.5">
+      <Ratio
+        numerator={numerator}
+        denominator={denominator}
+        size={personAxisHeadlineAllowed(coverage) ? "lg" : "sm"}
+        title={`${label} · ${PERSON_AXIS_BASIS_LABEL[coverage.basis]}`}
+      />
+      <span className="text-[11px] text-zinc-500">{label}</span>
+      <PersonAxisBasisBadge
+        basis={coverage.basis}
+        effectiveFrom={coverage.effectiveFrom}
+      />
+    </span>
+  );
+}
+
+/** §10.4-5. 사람 축 숫자 옆에는 **항상** 이 배지가 붙는다. */
+export function PersonAxisBasisBadge({
+  basis,
+  effectiveFrom,
+}: {
+  basis: PersonAxisBasis;
+  effectiveFrom?: string | null;
+}) {
+  const retro = basis === "all_time";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] ${
+        retro
+          ? "border-violet-800/60 bg-violet-950/30 text-violet-200"
+          : "border-zinc-700 bg-zinc-900 text-zinc-400"
+      }`}
+      title={
+        retro
+          ? `v_person_all_time — 링크 이전의 설치 이력까지 그 사람에게 귀속합니다(소급).${
+              effectiveFrom ? ` 상한: ${effectiveFrom}.` : ""
+            }`
+          : "v_person_since_link — 링크가 생긴 뒤의 행만 그 사람에게 귀속합니다."
+      }
+    >
+      <Link2 className="h-3 w-3" />
+      {PERSON_AXIS_BASIS_LABEL[basis]}
+    </span>
+  );
+}
+
+/**
+ * §10.4-3. `PendingIngestion` 과 **같은 자리, 같은 문법**의 세 번째 상태.
+ * 퍼센트를 헤드라인으로 쓰지 않고(§10.4-1) 분수로만 그린다.
+ */
+export function IngestionProgress({
+  coverage,
+}: {
+  coverage: PersonAxisCoverage;
+}) {
+  const remaining = Math.max(
+    coverage.activeInstalls - coverage.linkedActiveInstalls,
+    0
+  );
+  return (
+    <div className="rounded-xl border border-dashed border-sky-900/60 bg-sky-950/20 p-5">
+      <div className="flex flex-wrap items-center gap-2">
+        <Database className="h-4 w-4 text-sky-500" />
+        <h4 className="text-sm font-semibold text-zinc-200">
+          사람 축 커버리지
+        </h4>
+        <span className="rounded-full border border-sky-800 bg-sky-950 px-2 py-0.5 text-[11px] text-sky-200">
+          적재 중
+        </span>
+        <PersonAxisBasisBadge
+          basis={coverage.basis}
+          effectiveFrom={coverage.effectiveFrom}
+        />
+      </div>
+
+      {/* ★분수만. 커버리지를 퍼센트 헤드라인으로 그리면 그 자체가 지표처럼
+          읽힌다 — 이건 지표가 아니라 "지금 몇 %만 보고 있다" 는 경고다. */}
+      <p className="mt-2.5 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-zinc-400">
+        <span>활동한 설치</span>
+        <Ratio
+          numerator={coverage.linkedActiveInstalls}
+          denominator={coverage.activeInstalls}
+          size="lg"
+          title="분자=조회 구간에 활동하면서 사람에 연결된 설치 · 분모=조회 구간에 활동한 설치"
+        />
+        <span>연결됨</span>
+      </p>
+
+      <ul className="mt-2 space-y-1 text-[11px] leading-relaxed text-zinc-400">
+        <li>
+          · 남은{" "}
+          <b className="tabular-nums text-zinc-200">{fmtInt(remaining)}대</b>는
+          다음에 인증할 때 붙습니다 · 지금 표는{" "}
+          <b className="tabular-nums text-zinc-200">
+            {fmtInt(coverage.linkedActiveInstalls)}대 기준
+          </b>
+          입니다
+        </li>
+        <li>
+          · 공용 기기로 판정돼 제외:{" "}
+          <b className="tabular-nums text-zinc-200">
+            {fmtInt(coverage.excludedSharedInstalls)}대
+          </b>{" "}
+          <span className="text-zinc-600">
+            (한 설치에 사람이 둘 이상 — 몰아주지 않고 뺍니다)
+          </span>
+        </li>
+        <li>
+          · 전체 설치 기준 연결:{" "}
+          <Ratio
+            numerator={coverage.linkedInstalls}
+            denominator={coverage.totalInstalls}
+            title="잠자는 설치를 포함한 전체 기준. complete 판정은 이 분수가 아니라 '활동한 설치' 쪽으로 합니다."
+          />
+          {coverage.lastLinkedAt ? (
+            <span className="text-zinc-600">
+              {" "}
+              · 마지막 연결 {fmtDay(coverage.lastLinkedAt.slice(0, 10))}
+            </span>
+          ) : null}
+        </li>
+      </ul>
+
+      {/* ★§10.4-4 — "이 수치는 아직 커집니다" 를 먼저 말한다. */}
+      <p className="mt-3 flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/20 p-2.5 text-[11px] leading-relaxed text-amber-200">
+        <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          <b>이 수치는 아직 커집니다.</b> 같은 기간을 내일 다시 조회하면 값이
+          올라갑니다 — 커버리지가 오르는 중이기 때문입니다. 지금 화면을 캡처해
+          나중 값과 비교하지 마세요. 그 비교는 개선이 아니라 분모의 증가입니다.
+        </span>
+      </p>
+
+      <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+        {PERSON_AXIS_DENOMINATOR_NOTE}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * ★네 번째 상태 — 게이트가 닫혀 있다(#1084 §9 가 프론트 몫으로 남긴 자리).
+ * '적재 전' 과 **다른 말**을 쓴다. 소스가 없는 게 아니라 아직 열지 않은 것이고,
+ * '곧 채워집니다' 라고 읽히면 안 된다.
+ */
+export function PersonAxisDisabled({
+  coverage,
+}: {
+  coverage: PersonAxisCoverage;
+}) {
+  return (
+    <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-5">
+      <div className="flex flex-wrap items-center gap-2">
+        <Lock className="h-4 w-4 text-zinc-600" />
+        <h4 className="text-sm font-semibold text-zinc-300">사람 축</h4>
+        <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
+          아직 열지 않음
+        </span>
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+        소스가 없어서 비어 있는 게 아니라{" "}
+        <b className="text-zinc-400">아직 열면 안 되는 것</b>입니다. 곧 채워지는
+        칸이 아니므로 &lsquo;적재 전&rsquo; 과 같은 말로 읽지 마세요.
+      </p>
+      {coverage.disabledReason ? (
+        <p className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[11px] leading-relaxed text-zinc-400">
+          {coverage.disabledReason}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * 사람 축 커버리지 한 자리. **네 상태 + 미배선**을 여기 한 곳에서 가른다 —
+ * 호출부마다 분기하면 어느 자리에서 규약 하나가 조용히 빠진다.
+ *
+ * ★`coverage` 가 없는 것은 상태가 아니라 **배선 전**이다. 선행 티켓이 응답에
+ *   커버리지를 싣기 전까지 여기는 기존 '적재 전' 규약으로 접힌다(§10.4-6 이
+ *   커버리지 0 에 새 상태를 만들지 말라고 한 것과 같은 이유).
+ */
+export function PersonAxisCoverageNote({
+  coverage,
+}: {
+  coverage: PersonAxisCoverage | null | undefined;
+}) {
+  if (!coverage) {
+    return (
+      <PendingIngestion
+        title="사람 축 (설치가 아니라 사람 단위)"
+        waitingOn={PERSON_AXIS_WAITING_ON}
+        willShow={PERSON_AXIS_WILL_SHOW}
+      />
+    );
+  }
+  if (coverage.state === "disabled")
+    return <PersonAxisDisabled coverage={coverage} />;
+  // §10.4-6 — 커버리지 0 에 새 상태를 만들지 않는다. 기존 규약 그대로.
+  if (coverage.state === "pending")
+    return (
+      <PendingIngestion
+        title="사람 축 (설치가 아니라 사람 단위)"
+        waitingOn={`연결된 설치가 아직 없습니다 — ${PERSON_AXIS_FORWARD_ONLY_NOTE}`}
+        willShow={PERSON_AXIS_WILL_SHOW}
+      />
+    );
+  if (coverage.state === "ingesting")
+    return <IngestionProgress coverage={coverage} />;
+
+  // complete — 여기서만 커버리지가 접힌 한 줄이 된다. 그래도 기준 라벨은 남는다.
+  return (
+    <p className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+      <Info className="h-3.5 w-3.5 shrink-0" />
+      <span>사람 축 커버리지 완료 — 활동한 설치</span>
+      <Ratio
+        numerator={coverage.linkedActiveInstalls}
+        denominator={coverage.activeInstalls}
+      />
+      <span>
+        연결됨 · 공용 기기 제외 {fmtInt(coverage.excludedSharedInstalls)}대
+      </span>
+      <PersonAxisBasisBadge
+        basis={coverage.basis}
+        effectiveFrom={coverage.effectiveFrom}
+      />
+    </p>
+  );
+}
+
 // ── ★4탭 구조 ──────────────────────────────────────────────────────────────
 // 지금까지 이 화면은 지표가 시간순으로 쌓여 있어 "무엇부터 봐야 하나" 가 없었다.
 // 탭 하나 = 질문 하나로 세운다. 탭은 새 페이지가 아니라 기존 섹션의 재배치다.
-export type AnalyticsTab = "acquisition" | "activation" | "retention" | "revenue";
+export type AnalyticsTab =
+  | "acquisition"
+  | "activation"
+  | "retention"
+  | "revenue";
 
 export const ANALYTICS_TABS: {
   id: AnalyticsTab;
@@ -2016,7 +2488,22 @@ function mapErr(err: CallableError): string {
 }
 
 // 개별 콜러블 로딩 결과 래퍼.
-type Loaded<T> = { data: T | null; loading: boolean; error: string | null };
+type Loaded<T> = {
+  data: T | null;
+  loading: boolean;
+  error: string | null;
+  /**
+   * ★그 콜러블이 **아직 서버에 없다**(functions/not-found). 장애가 아니라
+   * '연결 전' 이다 — 빨간 에러 박스로 그리면 사장님이 고장으로 읽으신다.
+   * 표는 이미 스케줄로 채워지고 있고 없는 것은 읽어 오는 길뿐이다.
+   */
+  notDeployed?: boolean;
+};
+
+/** `functions/not-found` = 그 함수가 아직 배포되지 않았다. */
+function isNotDeployed(err: CallableError): boolean {
+  return err?.code === "functions/not-found";
+}
 
 // ── 온보딩 첫10분 퍼널 시각화 ────────────────────────────────────────────────
 // 단계별 "도달 고유 clientId"를 세로 막대로, 인접 단계 이탈을 화살표로 표기한다.
@@ -2782,8 +3269,8 @@ function StreakGrid({ grid }: { grid: string }) {
             c === "x"
               ? "text-emerald-400"
               : c === "~"
-                ? "text-amber-500"
-                : "text-zinc-700"
+              ? "text-amber-500"
+              : "text-zinc-700"
           }
         >
           {c}
@@ -2799,9 +3286,11 @@ function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
     ? "설치 축 (익명 설치 ID)"
     : "계정 축 (cost_logs 계정 uid)";
   // D7·D14 를 먼저, 크게. 사장님이 "매우 중요한 지표" 라고 지목한 두 칸이다.
-  const primary = axis.horizons.filter((h) => h.key === "d7" || h.key === "d14");
+  const primary = axis.horizons.filter(
+    (h) => h.key === "d7" || h.key === "d14"
+  );
   const secondary = axis.horizons.filter(
-    (h) => h.key !== "d7" && h.key !== "d14",
+    (h) => h.key !== "d7" && h.key !== "d14"
   );
   const rows = [...primary, ...secondary];
   const cohortEmpty = axis.unitsCohort === 0;
@@ -3076,24 +3565,370 @@ function StreakRetentionView({ data }: { data: StreakRetention }) {
           · <b className="text-zinc-300">분모를 먼저 보라.</b> 모든 비율은{" "}
           <span className="font-mono">1/2 (50.0%)</span> 형태로 분자·분모와 함께
           나온다. 퍼센트만 보면 두 명짜리 표본이 절반의 시장처럼 보인다.{" "}
-          <span className="font-mono">0/0 (—)</span> 은 0% 가 아니라 판단할 표본이
-          없다는 뜻이다.
+          <span className="font-mono">0/0 (—)</span> 은 0% 가 아니라 판단할
+          표본이 없다는 뜻이다.
         </p>
         <p>
-          · <b className="text-zinc-300">설치 축과 계정 축은 다른 단위다.</b>{" "}
-          한 사람이 설치를 여러 대 쓴다(실측에서 계정 1개가 설치 9대를 썼다).
-          한 표에 섞어 읽으면 인원이 부풀려진다.
+          · <b className="text-zinc-300">설치 축과 계정 축은 다른 단위다.</b> 한
+          사람이 설치를 여러 대 쓴다(실측에서 계정 1개가 설치 9대를 썼다). 한
+          표에 섞어 읽으면 인원이 부풀려진다.
         </p>
         <p>
-          · <b className="text-zinc-300">전 구간 {fmtInt(data.historyDays)}일</b>{" "}
-          이력으로 첫 활동일·최대연속을 계산하고, 조회 기간({data.rangeDays}일)은
-          D7/D14 표에 넣을 코호트만 고른다.
+          ·{" "}
+          <b className="text-zinc-300">전 구간 {fmtInt(data.historyDays)}일</b>{" "}
+          이력으로 첫 활동일·최대연속을 계산하고, 조회 기간({data.rangeDays}
+          일)은 D7/D14 표에 넣을 코호트만 고른다.
         </p>
       </div>
 
       <StreakAxisView axis={data.install} />
       <StreakAxisView axis={data.account} />
     </div>
+  );
+}
+
+// ── 콜러블이 오면 붙는 모양 (② analytics_user_daily / ④ analytics_account_profile) ──
+//
+// ★두 표는 **이미 매일 채워지고 있다**(scheduledBuildAnalyticsProfiles, 05:30 KST).
+//   없는 것은 소스가 아니라 그걸 읽어 오는 콜러블이다. 그래서 이 칸은 '적재 전' 이
+//   아니라 '연결 전' 이고, 콜러블이 배포되는 순간 프론트 변경 없이 값이 들어오도록
+//   **지금 호출까지 걸어 둔다** — `functions/not-found` 를 장애가 아니라 '연결 전'
+//   으로 접는 게 그 장치다.
+//
+// ★이름을 여기 박는다. 한쪽이 다른 이름을 쓰면 조용히 undefined 가 되고 화면은
+//   영원히 '연결 전' 을 띄운다. 계약은 docs/analytics-admin-callables-api.md.
+export const CALLABLE_USER_DAILY = "getAdminUserDailySummary";
+export const CALLABLE_ACCOUNT_PROFILE = "getAdminAccountProfileSummary";
+
+/** analytics_user_daily 한 날(익명축, 설치 × 날짜). ★user_key 컬럼이 없다. */
+type UserDailyDay = {
+  day: string;
+  /** 그날 active 였던 설치 수. */
+  activeInstalls: number;
+  /** ★그날 하트비트만 있던 설치 수(좀비). active 와 섞지 않는다. */
+  presentOnlyInstalls: number;
+  eventCount: number;
+  tokensTotal: number;
+};
+export type UserDailySummary = {
+  rangeDays: number;
+  generatedAt: string;
+  /** 구간에 행이 하나라도 있는 설치 수 = 아래 둘의 합이 아니다(겹친다). */
+  installsObserved: number;
+  /** 구간에 active 인 날이 하루라도 있는 설치. ★모든 분모의 뿌리. */
+  installsActive: number;
+  /** ★present_only 만 있고 active 인 날이 하루도 없는 설치 — 좀비. */
+  installsPresentOnly: number;
+  byDay: UserDailyDay[];
+  notes: string[];
+  personAxis?: PersonAxisCoverage | null;
+};
+
+/** analytics_account_profile 롤업(계정축). ★익명축 컬럼이 없다. */
+export type AccountProfileSummary = {
+  generatedAt: string;
+  accountsObserved: number;
+  /** cost_logs 흔적이 있는 계정(지출을 한 계정). */
+  accountsWithSpend: number;
+  /** ★mrr_usd 가 null 이 아닌 계정. analytics_purchase 적재 전이라 지금은 0 이 정상. */
+  accountsWithMrr: number;
+  /** ★null = 미기입이다. 0 이 아니다 — 0 으로 그리면 "아무도 안 냈다"로 읽힌다. */
+  mrrUsdTotal: number | null;
+  ltvUsdTotal: number | null;
+  costUsdTotal: number | null;
+  notes: string[];
+};
+
+/** null 을 0 으로 접지 않는다. 미기입은 '—' 이고 그 옆에 이유가 붙는다. */
+function NullableMoney({
+  value,
+  label,
+  whyNull,
+}: {
+  value: number | null;
+  label: string;
+  whyNull: string;
+}) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
+      <p className="text-xs font-medium text-zinc-500">{label}</p>
+      <p className="mt-1 text-2xl font-bold tabular-nums text-zinc-100">
+        {value == null ? "—" : fmtCost(value)}
+      </p>
+      <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
+        {value == null ? whyNull : "합계"}
+      </p>
+    </div>
+  );
+}
+
+export function UserDailySummaryView({ data }: { data: UserDailySummary }) {
+  return (
+    <Panel
+      title="설치 × 날짜 활동 (analytics_user_daily)"
+      note={`${data.rangeDays}일 · 익명축(install_key). ★위 '제품 사용·활성' 은 events 옵트인 표본이라 분모가 다르다 — 두 수를 나눠 읽지 마라`}
+    >
+      <SmallSampleNotice n={data.installsActive} what="활동 설치" unit="대" />
+      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3">
+        <RatioCard
+          label="활동한 설치"
+          numerator={data.installsActive}
+          denominator={data.installsObserved}
+          sub="분모 = 구간에 행이 있는 설치"
+          title="active = status:working 또는 이벤트 1건 이상. 하트비트만으로는 active 가 아니다."
+        />
+        <StatCard
+          label="좀비 설치"
+          value={fmtInt(data.installsPresentOnly)}
+          sub="하트비트만 · active 0일"
+          accent={data.installsPresentOnly > 0 ? STATUS_WARN : undefined}
+        />
+        <StatCard
+          label="관측 설치"
+          value={fmtInt(data.installsObserved)}
+          sub="구간에 행이 하나라도 있음"
+        />
+      </div>
+
+      <div className="mt-4">
+        <Panel
+          title="일별 활동 설치 vs 좀비"
+          note="★두 계열을 겹쳐 읽지 마라 — 좀비는 활동이 아니다"
+        >
+          <TwoLineChart
+            data={data.byDay.map((d) => ({
+              date: d.day,
+              first: d.activeInstalls,
+              second: d.presentOnlyInstalls,
+            }))}
+            first={{ label: "활동", color: SERIES_2 }}
+            second={{ label: "좀비(하트비트만)", color: STATUS_WARN }}
+            emptyLabel="이 구간에 설치 × 날짜 행이 없습니다."
+            marker={ID_SCHEME_MARKER}
+          />
+        </Panel>
+      </div>
+
+      <div className="mt-3 space-y-1.5">
+        {[ANON_AXIS_ADMIN_TOGGLE_INERT, ...data.notes].map((note, i) => (
+          <p
+            key={i}
+            className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-500"
+          >
+            <Info className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>{note}</span>
+          </p>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+export function AccountProfileSummaryView({
+  data,
+}: {
+  data: AccountProfileSummary;
+}) {
+  const noMoney = data.mrrUsdTotal == null && data.ltvUsdTotal == null;
+  return (
+    <Panel
+      title="계정 프로필 (analytics_account_profile)"
+      note="계정축(user_key). 지출은 cost_logs, 매출은 analytics_purchase 가 채운다"
+    >
+      <SmallSampleNotice n={data.accountsObserved} what="계정" unit="개" />
+      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <RatioCard
+          label="지출이 있는 계정"
+          numerator={data.accountsWithSpend}
+          denominator={data.accountsObserved}
+          sub="cost_logs 흔적 기준"
+        />
+        <RatioCard
+          label="MRR 이 기입된 계정"
+          numerator={data.accountsWithMrr}
+          denominator={data.accountsObserved}
+          sub="analytics_purchase 적재 전이면 0/N 이 정상"
+          title="분자 0 은 '아무도 안 냈다' 가 아니라 'mrr_usd 가 아직 안 채워졌다' 입니다."
+        />
+        <NullableMoney
+          value={data.mrrUsdTotal}
+          label="MRR 합계"
+          whyNull="null 은 0 이 아니라 미기입입니다 — analytics_purchase 가 채웁니다"
+        />
+        <NullableMoney
+          value={data.costUsdTotal}
+          label="지출 합계"
+          whyNull="cost_logs 집계가 비어 있습니다"
+        />
+      </div>
+
+      {noMoney ? (
+        <p className="mt-3 flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/20 p-2.5 text-[11px] leading-relaxed text-amber-200">
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            <b>mrr_usd · ltv_usd 가 전부 null 입니다.</b> 이 표의 계정 행은 매일
+            채워지지만 금액 칸은 `analytics_purchase` 가 붙어야 들어옵니다 —
+            여기 &lsquo;—&rsquo; 를 0 으로 읽지 마세요.
+          </span>
+        </p>
+      ) : null}
+
+      <div className="mt-3 space-y-1.5">
+        {data.notes.map((note, i) => (
+          <p
+            key={i}
+            className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-500"
+          >
+            <Info className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>{note}</span>
+          </p>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+// ── 설치축 리텐션 요약 뷰 (analytics_install_profile 전량) ───────────────────
+// ★스트릭 뷰의 설치축과 **분모가 다르다.** 저쪽은 조회 구간 코호트, 이쪽은
+//   프로필 전량이다. 그래서 두 표를 나란히 두되 한 번도 "저 수 나누기 이 수" 를
+//   시키지 않는다 — 축이 다르면 그 비율은 무의미하다.
+
+/** 익명축이라 운영자 토글이 **닿지 않는다.** 토글만 띄우고 침묵하면 거짓말이다. */
+export const ANON_AXIS_ADMIN_TOGGLE_INERT =
+  "이 표는 익명 설치축이라 위의 '운영자 포함' 토글이 동작하지 않습니다 — " +
+  "설치 프로필에는 is_admin 이 없어 운영자 자기제외가 구조적으로 불가능합니다. " +
+  "토글을 켜든 끄든 같은 수이고, 그만큼 운영자 도그푸드 쪽으로 낙관 편향될 수 " +
+  "있습니다.";
+
+export function InstallRetentionSummaryView({
+  data,
+}: {
+  data: InstallRetentionSummary;
+}) {
+  const cohortEmpty = data.installsCohort === 0;
+  // D7·D14 를 먼저, 크게 — 사장님이 지목한 두 칸이다(스트릭 뷰와 같은 순서).
+  const primary = data.horizons.filter(
+    (h) => h.key === "d7" || h.key === "d14"
+  );
+  const rows = [
+    ...primary,
+    ...data.horizons.filter((h) => h.key !== "d7" && h.key !== "d14"),
+  ];
+
+  return (
+    <Panel
+      title="설치 프로필 전량 (analytics_install_profile)"
+      note="분모 = 첫 활동일이 있는 설치. 조회 기간과 무관한 전량 기준이라 위 스트릭 표와 분모가 다르다"
+    >
+      {/* ── 모수. 어떤 비율보다 먼저 읽혀야 한다.
+          ★좀비와 '한 번도 안 켬' 을 합쳐 그리지 않는다 — 원인이 다르다. ── */}
+      <div className="mb-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span className="text-xs text-zinc-500">코호트 모수</span>
+          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-sm font-semibold tabular-nums text-zinc-100">
+            N = {fmtInt(data.installsCohort)}
+          </span>
+          <span className="text-xs text-zinc-600">
+            / 관측 {fmtInt(data.installsObserved)}
+          </span>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500">
+          <span>
+            코호트 밖 {fmtInt(data.installsNeverActive)}대:{" "}
+            <span className="tabular-nums text-amber-500">
+              좀비 {fmtInt(data.installsZombie)}
+            </span>
+            {" · "}
+            <span className="tabular-nums text-zinc-400">
+              한 번도 안 켬 {fmtInt(data.installsNeverRan)}
+            </span>
+          </span>
+          <span className="text-zinc-600">
+            (좀비는 프로세스가 떠 있던 것, 안 켬은 사람이 안 온 것 — 원인이 달라
+            합치지 않는다)
+          </span>
+        </div>
+      </div>
+
+      <SmallSampleNotice n={data.installsCohort} what="설치 코호트" unit="대" />
+
+      {cohortEmpty ? (
+        <EmptyState label="첫 활동일이 있는 설치가 없습니다 — 비율을 계산할 표본 자체가 없다는 뜻입니다(0% 가 아닙니다)." />
+      ) : (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[480px] text-xs">
+            <thead>
+              <tr className="text-zinc-500">
+                <th className="py-1 pr-3 text-left font-medium">지평</th>
+                <th className="py-1 pr-3 text-left font-medium">
+                  exact (+N일 당일)
+                </th>
+                <th className="py-1 pr-3 text-left font-medium">
+                  window (1~N일 중)
+                </th>
+                <th className="py-1 pr-3 text-right font-medium">
+                  관측창 미도달
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((h) => {
+                const isPrimary = h.key === "d7" || h.key === "d14";
+                return (
+                  <tr
+                    key={h.key}
+                    className={`border-t border-zinc-900 ${
+                      isPrimary ? "bg-zinc-900/30" : ""
+                    }`}
+                  >
+                    <td
+                      className={`py-1.5 pr-3 tabular-nums ${
+                        isPrimary
+                          ? "font-semibold text-zinc-100"
+                          : "text-zinc-400"
+                      }`}
+                    >
+                      {h.key.toUpperCase()}
+                    </td>
+                    <td className="py-1.5 pr-3">
+                      <CountedRateCell r={h.exact} />
+                    </td>
+                    <td className="py-1.5 pr-3">
+                      <CountedRateCell r={h.window} />
+                    </td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-zinc-500">
+                      {h.pending > 0 ? `${fmtInt(h.pending)}대 제외` : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── 정의·경고. 화면이 정의를 안 적으면 다음 사람이 다르게 읽는다 ── */}
+      <div className="mt-3 space-y-1.5">
+        {Array.from(
+          new Set([
+            data.activityDefinition,
+            data.presentOnlyDefinition,
+            data.horizonDefinitions,
+            ...data.notes,
+          ])
+        )
+          .filter((n) => typeof n === "string" && n !== "")
+          .map((note, i) => (
+            <p
+              key={i}
+              className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-500"
+            >
+              <Info className="mt-0.5 h-3 w-3 shrink-0" />
+              <span>{note}</span>
+            </p>
+          ))}
+      </div>
+    </Panel>
   );
 }
 
@@ -3215,7 +4050,10 @@ export function RetentionCohortTableView({ data }: { data: RetentionCohorts }) {
                   <th className="py-1 pr-3 text-left font-medium">코호트</th>
                   <th className="py-1 pr-3 text-right font-medium">인원</th>
                   {horizons.map(([, label]) => (
-                    <th key={label} className="py-1 pr-3 text-right font-medium">
+                    <th
+                      key={label}
+                      className="py-1 pr-3 text-right font-medium"
+                    >
                       {label}
                     </th>
                   ))}
@@ -3267,7 +4105,6 @@ export function RetentionCohortTableView({ data }: { data: RetentionCohorts }) {
     </Panel>
   );
 }
-
 
 // ── 온보딩 스톨 카드 (#888) ─────────────────────────────────────────────────
 // "구독/크레딧/인증이 없어 최초에 멈춘 설치"의 규모. 서버는 진작 내려주고 있었는데
@@ -3775,7 +4612,15 @@ function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
   );
 }
 
-export default function AnalyticsPanel() {
+export default function AnalyticsPanel({
+  /**
+   * 처음 열릴 탭. 기본은 ① 획득이고 화면에는 이 prop 을 주는 자리가 없다 —
+   * ★테스트가 네 탭을 **각각 SSR 로 세워** 정직성 규약이 그 탭에서도 살아
+   * 있는지 보기 위한 이음매다. 규약을 한 탭에서만 확인하면 나머지 셋에서
+   * 조용히 빠져도 아무도 모른다.
+   */
+  initialTab = "acquisition",
+}: { initialTab?: AnalyticsTab } = {}) {
   const [days, setDays] = useState(30);
   // 운영자(존킴) 포함 토글. 기본 false = 제외(고객 지표). ON = 전체 포함.
   // ★blind spot: 제외기는 cost_logs 에 흔적 있는 세션만 존킴으로 잡는다 —
@@ -3834,12 +4679,36 @@ export default function AnalyticsPanel() {
     loading: true,
     error: null,
   });
+  // ★설치축 리텐션 요약. 콜러블은 이미 서버에 있었는데(getAdminInstallRetentionSummary)
+  //   화면이 한 번도 부르지 않아 파생표가 매일 채워지기만 하고 아무도 안 봤다.
+  const [installRet, setInstallRet] = useState<Loaded<InstallRetentionSummary>>(
+    {
+      data: null,
+      loading: true,
+      error: null,
+    }
+  );
+  // ★아직 서버에 없는 콜러블 둘. 지금 호출까지 걸어 두면 백엔드가 배포되는
+  //   순간 프론트 변경 없이 값이 들어온다 — 그때까지는 not-found 를 장애가
+  //   아니라 '연결 전' 으로 접는다.
+  const [userDaily, setUserDaily] = useState<Loaded<UserDailySummary>>({
+    data: null,
+    loading: true,
+    error: null,
+  });
+  const [acctProfile, setAcctProfile] = useState<Loaded<AccountProfileSummary>>(
+    {
+      data: null,
+      loading: true,
+      error: null,
+    }
+  );
   const [modelView, setModelView] = useState<"overview" | "routing">(
     "overview"
   );
   // ★4탭. 한 탭 = 한 질문. 새 페이지가 아니라 기존 섹션의 재배치다 —
   // 콜러블·로딩·토글은 전부 그대로 공유하고, 어느 탭에 있든 같은 모집단을 본다.
-  const [tab, setTab] = useState<AnalyticsTab>("acquisition");
+  const [tab, setTab] = useState<AnalyticsTab>(initialTab);
   // 드릴다운 — 열려 있는 요청과 그 응답.
   const [drill, setDrill] = useState<DrilldownRequest | null>(null);
   const [drillState, setDrillState] = useState<Loaded<DrilldownResult>>({
@@ -3930,6 +4799,23 @@ export default function AnalyticsPanel() {
         { days: number; includeAdmin: boolean },
         CountryFunnel
       >(fns, "getAdminCountryFunnel");
+      // ★인자가 없다. 이 축에는 is_admin 이 없어 운영자 제외가 구조적으로
+      //   불가능하고, 기간도 안 받는다(프로필 전량 기준). 없는 인자를 넣어
+      //   보내면 화면이 "걸러진다" 고 착각하게 된다 — 안 보낸다.
+      const callInstallRet = httpsCallable<
+        Record<string, never>,
+        InstallRetentionSummary
+      >(fns, "getAdminInstallRetentionSummary");
+      // ★이름은 상수로 둔다. 백엔드가 다른 이름으로 내보내면 조용히 not-found 가
+      //   되고 화면은 영원히 '연결 전' 을 띄운다 — 계약은 문서에 박혀 있다.
+      const callUserDaily = httpsCallable<{ days: number }, UserDailySummary>(
+        fns,
+        CALLABLE_USER_DAILY
+      );
+      const callAcctProfile = httpsCallable<
+        Record<string, never>,
+        AccountProfileSummary
+      >(fns, CALLABLE_ACCOUNT_PROFILE);
 
       setBiz((s) => ({ ...s, loading: true, error: null }));
       setUsage((s) => ({ ...s, loading: true, error: null }));
@@ -3941,6 +4827,19 @@ export default function AnalyticsPanel() {
       setRetention((s) => ({ ...s, loading: true, error: null }));
       setStreak((s) => ({ ...s, loading: true, error: null }));
       setCountryFunnel((s) => ({ ...s, loading: true, error: null }));
+      setInstallRet((s) => ({ ...s, loading: true, error: null }));
+      setUserDaily((s) => ({
+        ...s,
+        loading: true,
+        error: null,
+        notDeployed: false,
+      }));
+      setAcctProfile((s) => ({
+        ...s,
+        loading: true,
+        error: null,
+        notDeployed: false,
+      }));
 
       // 각 콜러블 독립 처리 — 하나 실패해도 나머지는 렌더.
       callBiz({ days: d })
@@ -4041,6 +4940,50 @@ export default function AnalyticsPanel() {
             error: mapErr(e as CallableError),
           })
         );
+      callInstallRet({})
+        .then((r) =>
+          setInstallRet({ data: r.data, loading: false, error: null })
+        )
+        .catch((e) =>
+          setInstallRet({
+            data: null,
+            loading: false,
+            error: mapErr(e as CallableError),
+          })
+        );
+      callUserDaily({ days: d })
+        .then((r) => setUserDaily({ data: r.data, loading: false, error: null }))
+        .catch((e) => {
+          const err = e as CallableError;
+          // ★미배포는 장애가 아니다 — 빨간 박스 대신 '연결 전' 으로 접는다.
+          if (isNotDeployed(err)) {
+            setUserDaily({
+              data: null,
+              loading: false,
+              error: null,
+              notDeployed: true,
+            });
+            return;
+          }
+          setUserDaily({ data: null, loading: false, error: mapErr(err) });
+        });
+      callAcctProfile({})
+        .then((r) =>
+          setAcctProfile({ data: r.data, loading: false, error: null })
+        )
+        .catch((e) => {
+          const err = e as CallableError;
+          if (isNotDeployed(err)) {
+            setAcctProfile({
+              data: null,
+              loading: false,
+              error: null,
+              notDeployed: true,
+            });
+            return;
+          }
+          setAcctProfile({ data: null, loading: false, error: mapErr(err) });
+        });
     },
     []
   );
@@ -4070,6 +5013,23 @@ export default function AnalyticsPanel() {
     byCycleCount: {},
     paddleGap: "",
   };
+
+  // ★사람 축 커버리지는 사람 축을 쓰는 **모든** 응답에 실려 온다(설계 §10.3).
+  //   어느 콜러블이 먼저 배포되든 화면이 같게 동작하도록 여기 한 자리에서 고른다 —
+  //   호출부마다 분기하면 어느 자리에서 기준 라벨이 조용히 빠진다.
+  const personAxis =
+    installRet.data?.personAxis ??
+    streak.data?.personAxis ??
+    retention.data?.personAxis ??
+    null;
+  // §10.4-7 — 조회 구간이 발효일 왼쪽까지 뻗는지. 서버 시각 기준으로 센다.
+  const personAxisNote = personAxisRangeNote(
+    personAxis,
+    analyticsRangeStart(
+      streak.data?.generatedAt ?? retention.data?.generatedAt,
+      streak.data?.rangeDays ?? retention.data?.rangeDays ?? days
+    )
+  );
 
   const tierRows = useMemo(
     () =>
@@ -4308,7 +5268,7 @@ export default function AnalyticsPanel() {
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <PendingIngestion
                 title="캠페인·소스별 유입과 CAC"
-                waitingOn="GA4 브리지(캠페인·광고비 축) 적재 — 별도 티켓 진행 중"
+                waitingOn="GA4 얇은 브리지 적재 — ga4_first_touch_current(캠페인·소스 first touch) + analytics_identity.ga_key(익명 조인키). 광고비 축은 아직 소스 자체가 없다 · 선행 티켓 진행 중"
                 willShow={[
                   "캠페인/소스/매체별 방문 → 다운로드 → 설치 (분자/분모 동반)",
                   "채널별 CAC = 광고비 / 획득 설치수",
@@ -4317,11 +5277,8 @@ export default function AnalyticsPanel() {
               />
               <PendingIngestion
                 title="획득 비용 회수 (채널별)"
-                waitingOn="GA4 브리지 + analytics_purchase(구매 이벤트) 적재"
-                willShow={[
-                  "채널별 CAC 대비 회수 기간",
-                  "채널 × 코호트 LTV",
-                ]}
+                waitingOn="ga4_first_touch_current(획득 채널) + analytics_purchase(결제 금액 이벤트) 적재 · 둘 다 선행 티켓"
+                willShow={["채널별 CAC 대비 회수 기간", "채널 × 코호트 LTV"]}
               />
             </div>
           </div>
@@ -4395,7 +5352,11 @@ export default function AnalyticsPanel() {
 
           {/* ── 제품 사용 (🟡) ────────────────────────────────────────── */}
           <div className="space-y-4">
-            <SectionHeader icon={Activity} title="제품 사용·활성" trust="yellow">
+            <SectionHeader
+              icon={Activity}
+              title="제품 사용·활성"
+              trust="yellow"
+            >
               {u && <SampleBadge n={u.sampleClientCount} />}
             </SectionHeader>
             {usage.loading ? (
@@ -4414,7 +5375,9 @@ export default function AnalyticsPanel() {
                   <StatCard
                     label="태스크 성공률"
                     value={fmtPct(u.tasks.successRate)}
-                    sub={`${fmtInt(u.tasks.succeeded)}/${fmtInt(u.tasks.total)}`}
+                    sub={`${fmtInt(u.tasks.succeeded)}/${fmtInt(
+                      u.tasks.total
+                    )}`}
                     accent={u.tasks.total > 0 ? STATUS_GOOD : undefined}
                   />
                   <StatCard
@@ -4524,6 +5487,40 @@ export default function AnalyticsPanel() {
             ) : null}
           </div>
 
+          {/* ── 설치 단위 활성 (🔴, analytics_user_daily) ─────────────────
+              ★위 '제품 사용·활성' 은 events 옵트인 표본을 센다. 이 칸은 파생표
+              analytics_user_daily(설치 × 날짜)를 센다 — 좀비(present_only)를
+              활동에서 갈라내고 설치 단위로 활동일을 세는 축이라 같은 수가
+              아니다. 두 수를 나눠 읽지 마라.
+              ★그리고 이 표는 **이미 매일 채워지고 있다.** 없는 것은 소스가
+              아니라 이 화면이 읽어 오는 경로다 — 그래서 '적재 전' 이 아니라
+              '연결 전' 이라고 적는다. ── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Database}
+              title="설치 단위 활성 (설치 × 날짜)"
+              trust="red"
+            />
+            {userDaily.loading ? (
+              <LoadingBox />
+            ) : userDaily.data ? (
+              <UserDailySummaryView data={userDaily.data} />
+            ) : userDaily.error ? (
+              <ErrorBox msg={userDaily.error} />
+            ) : (
+              <PendingIngestion
+                missing="read-path"
+                title="설치 단위 활동일 · 좀비 분리"
+                waitingOn={`${CALLABLE_USER_DAILY} — analytics_user_daily 를 읽는 어드민 콜러블. 표는 매일 05:30 KST 스케줄(scheduledBuildAnalyticsProfiles)로 이미 채워지고 있고, 없는 것은 조회 경로다`}
+                willShow={[
+                  "설치 × 날짜 활동일 (active 와 present_only 를 갈라서)",
+                  "좀비 격리 후의 설치 단위 DAU — 위 옵트인 표본 DAU 와 분모가 다르다",
+                  "설치별 이벤트·토큰 총량 분포 (분자/분모 동반)",
+                ]}
+              />
+            )}
+          </div>
+
           {/* ── 베타 세그먼트 사용패턴 (🟡 grant 모수는 🟢) ──────────────
               "grant 를 준 사람들이 실제로 쓰는가". 모수(grant 명단)와 관측 카운트는
               Firestore/cost_logs 라 항상 정확하고, 기능사용·세션·채택만 텔레메트리에
@@ -4579,11 +5576,11 @@ export default function AnalyticsPanel() {
               </p>
               <p className="max-w-md text-xs text-zinc-600">
                 앱의 Sentry 크래시 리포팅은 DSN 이 설정되어 있고 사용자 동의 시
-                동작합니다. 다만 이 패널이 Sentry API 에서 지표를 읽어오는 연동은
-                아직 구현되지 않아 표시할 수치가 없습니다. 예외/스택트레이스 단위
-                지표는 sentry.io 프로젝트에서 확인하세요. (버전별 에이전트
-                크래시율은 위 &ldquo;릴리스·버전 헬스&rdquo; 섹션이 텔레메트리로
-                이미 보여줍니다.)
+                동작합니다. 다만 이 패널이 Sentry API 에서 지표를 읽어오는
+                연동은 아직 구현되지 않아 표시할 수치가 없습니다.
+                예외/스택트레이스 단위 지표는 sentry.io 프로젝트에서 확인하세요.
+                (버전별 에이전트 크래시율은 위 &ldquo;릴리스·버전 헬스&rdquo;
+                섹션이 텔레메트리로 이미 보여줍니다.)
               </p>
             </div>
           </div>
@@ -4604,6 +5601,12 @@ export default function AnalyticsPanel() {
               ID_SCHEME_MARKER.hint,
               retention.data?.cohorts.note,
               streak.data?.account.identityScheme.note,
+              // ★익명축에는 운영자 제외가 구조적으로 불가능하다. 토글은 화면에
+              //   떠 있는데 이 표에는 닿지 않는다 — 그 사실을 숫자보다 먼저 적는다.
+              ANON_AXIS_ADMIN_TOGGLE_INERT,
+              // 사람 축을 쓰는 카드가 화면에 있을 때만 forward-only 를 적는다.
+              personAxis ? PERSON_AXIS_FORWARD_ONLY_NOTE : null,
+              personAxisNote,
             ]}
           />
 
@@ -4640,6 +5643,38 @@ export default function AnalyticsPanel() {
             ) : streak.data ? (
               <StreakRetentionView data={streak.data} />
             ) : null}
+          </div>
+
+          {/* ── 설치축 리텐션 요약 (🟡, analytics_install_profile 전량) ──
+              파생표는 매일 05:30 KST 스케줄로 채워지는데(scheduledBuildAnalyticsProfiles)
+              화면이 한 번도 안 불러서 아무도 안 봤다. 여기서 붙인다. ── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Database}
+              title="설치축 리텐션 (프로필 전량)"
+              trust="yellow"
+            />
+            {installRet.loading ? (
+              <LoadingBox />
+            ) : installRet.error ? (
+              <ErrorBox msg={installRet.error} />
+            ) : installRet.data ? (
+              <InstallRetentionSummaryView data={installRet.data} />
+            ) : null}
+          </div>
+
+          {/* ── 사람 축 (🔴/🟡, v_person_since_link · v_person_all_time) ──
+              ★설치 ≠ 사람이다. 한 사람이 설치를 여러 대 쓴다(실측에서 계정 1개가
+              설치 9대). 위 두 표를 사람 수로 읽으면 인원이 부풀려진다.
+              ★링크가 forward-only 라 켠 직후엔 거의 비어 있는 것이 정상이고,
+              화면이 그걸 커버리지로 말한다(설계 §10.4). ── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Link2}
+              title="사람 축 커버리지 (설치가 아니라 사람 단위)"
+              trust={personAxis?.state === "complete" ? "yellow" : "red"}
+            />
+            <PersonAxisCoverageNote coverage={personAxis} />
           </div>
 
           {/* ── 모델 준비 (🟡) ────────────────────────────────────────── */}
@@ -4768,7 +5803,9 @@ export default function AnalyticsPanel() {
                       ) : (
                         <ModelRoleTable
                           rows={m.modelRoleStats}
-                          onDrill={(scope, key) => openDrill({ scope, key, days })}
+                          onDrill={(scope, key) =>
+                            openDrill({ scope, key, days })
+                          }
                         />
                       )}
                     </Panel>
@@ -4915,7 +5952,9 @@ export default function AnalyticsPanel() {
                     value={fmtInt(b.subscriptions.paidProActive)}
                     sub={`현재 ${fmtInt(
                       b.subscriptions.paidCurrent
-                    )} · 무료부여 ${fmtInt(b.subscriptions.founderGrantActive)}`}
+                    )} · 무료부여 ${fmtInt(
+                      b.subscriptions.founderGrantActive
+                    )}`}
                     accent={SERIES}
                   />
                   <StatCard
@@ -4931,7 +5970,9 @@ export default function AnalyticsPanel() {
                     value={fmtInt(b.subscriptions.churnedInWindow)}
                     sub={`연체 ${fmtInt(b.subscriptions.pastDue)} · ${days}일`}
                     accent={
-                      b.subscriptions.churnedInWindow > 0 ? STATUS_CRIT : undefined
+                      b.subscriptions.churnedInWindow > 0
+                        ? STATUS_CRIT
+                        : undefined
                     }
                   />
                   {/* ★유료 전환율은 카드에서도 분수를 크게. 분모가 대기자냐
@@ -5070,7 +6111,8 @@ export default function AnalyticsPanel() {
                             (f.value / fmax) * 100,
                             f.value > 0 ? 3 : 0
                           );
-                          const color = f.trust === "yellow" ? STATUS_WARN : SERIES;
+                          const color =
+                            f.trust === "yellow" ? STATUS_WARN : SERIES;
                           // ★단계 전환은 전 단계를 분모로 함께 적는다. 여기 가운데
                           //   칸은 옵트인 표본이라 분모가 서로 다른 축이 섞인다 —
                           //   그래서 퍼센트만 남기면 곱해서 읽는 오독이 생긴다.
@@ -5114,6 +6156,36 @@ export default function AnalyticsPanel() {
             ) : null}
           </div>
 
+          {/* ── 계정 프로필 (🟡, analytics_account_profile) ─────────────
+              ★이 표도 매일 채워진다. 없는 건 읽어 오는 콜러블이라 '적재 전' 이
+              아니라 '연결 전' 이다. 다만 그 표의 mrr_usd · ltv_usd 는 지금 전부
+              null 이고, 그건 **적재 전**이다 — 두 사실을 한 칸에 섞지 않는다. ── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Database}
+              title="계정 프로필 (지출·매출 기입 현황)"
+              trust={acctProfile.data ? "yellow" : "red"}
+            />
+            {acctProfile.loading ? (
+              <LoadingBox />
+            ) : acctProfile.data ? (
+              <AccountProfileSummaryView data={acctProfile.data} />
+            ) : acctProfile.error ? (
+              <ErrorBox msg={acctProfile.error} />
+            ) : (
+              <PendingIngestion
+                missing="read-path"
+                title="계정별 지출·매출 기입 현황"
+                waitingOn={`${CALLABLE_ACCOUNT_PROFILE} — analytics_account_profile 을 읽는 어드민 콜러블. 표는 매일 채워지고 있고 없는 것은 조회 경로다`}
+                willShow={[
+                  "지출이 있는 계정 / 전체 계정 (분자/분모 동반)",
+                  "mrr_usd 가 기입된 계정 수 — 지금 0/N 이 정상이다(analytics_purchase 적재 전)",
+                  "지출 합계 · MRR 합계 (null 은 0 이 아니라 '—')",
+                ]}
+              />
+            )}
+          </div>
+
           {/* ── MRR·LTV·회수 — 구매 적재 전 (🔴) ──────────────────────── */}
           <div className="space-y-4">
             <SectionHeader
@@ -5124,7 +6196,7 @@ export default function AnalyticsPanel() {
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <PendingIngestion
                 title="MRR · ARPU · LTV"
-                waitingOn="analytics_purchase(결제 금액 이벤트) 적재 — 별도 티켓 진행 중"
+                waitingOn="analytics_purchase(결제 금액 이벤트) 적재 — analytics_account_profile 은 매일 채워지지만 그 표의 mrr_usd · ltv_usd 는 지금 전부 null 이다. null 은 0 이 아니라 미기입이다 · 선행 티켓 진행 중"
                 willShow={[
                   "월 반복 매출(MRR)과 증감 분해(신규/확장/이탈)",
                   "ARPU · 코호트별 LTV",
@@ -5133,7 +6205,7 @@ export default function AnalyticsPanel() {
               />
               <PendingIngestion
                 title="코호트별 회수"
-                waitingOn="analytics_purchase + GA4 브리지(획득 비용)"
+                waitingOn="analytics_purchase(매출) + ga4_first_touch_current(획득 채널) · 광고비 축은 소스 자체가 아직 없다"
                 willShow={[
                   "가입 코호트별 누적 매출 곡선",
                   "CAC 회수 시점(개월)",

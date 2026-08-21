@@ -82,14 +82,19 @@ test("적재 전 칸은 0 을 그리지 않고 무엇을 기다리는지 말한�
 
 test("축 한계 고지는 events 계정축의 NULL 구간을 그대로 싣는다", () => {
   const html = renderToStaticMarkup(
-    <P.AxisLimitNote notes={[P.EVENTS_ACCOUNT_AXIS_LIMIT, null, undefined, ""]} />
+    <P.AxisLimitNote
+      notes={[P.EVENTS_ACCOUNT_AXIS_LIMIT, null, undefined, ""]}
+    />
   );
   assert.match(html, /2026-08-06~08-10/);
   assert.match(html, /측정되지 않았다/);
 });
 
 test("축 한계 고지는 실을 문장이 없으면 아무것도 안 그린다", () => {
-  assert.equal(renderToStaticMarkup(<P.AxisLimitNote notes={[null, ""]} />), "");
+  assert.equal(
+    renderToStaticMarkup(<P.AxisLimitNote notes={[null, ""]} />),
+    ""
+  );
 });
 
 // ── 06-13 식별자 교체 경계선 ────────────────────────────────────────────────
@@ -122,13 +127,18 @@ test("4탭이 각각 한 질문에 대응하고 tablist 로 노출된다", () =>
   );
   assert.match(html, /role="tablist"/);
   assert.equal((html.match(/role="tab"/g) ?? []).length, 4);
-  assert.match(html, /aria-selected="true"[^>]*aria-controls="analytics-panel-retention"/);
+  assert.match(
+    html,
+    /aria-selected="true"[^>]*aria-controls="analytics-panel-retention"/
+  );
   assert.match(html, /남아서 계속 쓰나/);
 });
 
 // ── 리텐션/활성화 뷰 ────────────────────────────────────────────────────────
 
-function cohortsFixture(over: Partial<RetentionCohorts> = {}): RetentionCohorts {
+function cohortsFixture(
+  over: Partial<RetentionCohorts> = {}
+): RetentionCohorts {
   return {
     rangeDays: 30,
     generatedAt: "2026-08-21T00:00:00.000Z",
@@ -240,4 +250,436 @@ test("운영자 제외가 기본값이다 (체크박스 off)", () => {
   const box = html.match(/<input type="checkbox"[^>]*>/)?.[0] ?? "";
   assert.ok(box.length > 0, "운영자 포함 토글이 있어야 한다");
   assert.doesNotMatch(box, /checked/);
+});
+// ── ★사람 축 — 기준 라벨 없는 숫자를 금지한다 (설계 §10.4) ──────────────────
+// 이 탭의 실패 모드는 버그가 아니라 **커버리지가 오르는 동안 지표가 저절로
+// 좋아 보이는 것**이다. 그래서 아래 테스트는 "값이 맞나"가 아니라 "화면이 아직
+// 덜 찼다고 말하고 있나 / 어느 기준인지 말하고 있나"를 본다.
+
+function coverageFixture(
+  over: Partial<import("./AnalyticsPanel").PersonAxisCoverage> = {}
+): import("./AnalyticsPanel").PersonAxisCoverage {
+  return {
+    state: "ingesting",
+    disabledReason: null,
+    linkedInstalls: 6,
+    totalInstalls: 43,
+    linkedActiveInstalls: 6,
+    activeInstalls: 14,
+    excludedSharedInstalls: 0,
+    effectiveFrom: "2026-04-01",
+    basis: "since_link",
+    lastLinkedAt: "2026-08-21T00:00:00.000Z",
+    ...over,
+  };
+}
+
+test("★소급 뷰를 쓰는 카드엔 '설치 전체 이력 기준(소급)' 라벨이 붙는다", () => {
+  const html = renderToStaticMarkup(
+    <P.PersonAxisBasisBadge basis="all_time" effectiveFrom="2026-04-01" />
+  );
+  assert.match(html, /설치 전체 이력 기준\(소급\)/);
+  // 뷰 이름이 곧 고지다 — 어느 뷰인지 툴팁에 남아야 한다.
+  assert.match(html, /v_person_all_time/);
+  const since = renderToStaticMarkup(
+    <P.PersonAxisBasisBadge basis="since_link" />
+  );
+  assert.match(since, /연결 이후 기준/);
+  assert.match(since, /v_person_since_link/);
+  // 두 라벨은 서로 다른 말이어야 한다. 같아지면 배지가 아무것도 고지하지 않는다.
+  assert.notEqual(
+    P.PERSON_AXIS_BASIS_LABEL.since_link,
+    P.PERSON_AXIS_BASIS_LABEL.all_time
+  );
+});
+
+test("★적재 중 화면은 커버리지를 분수로 그리고 라벨 없이 숫자를 내놓지 않는다", () => {
+  const html = renderToStaticMarkup(
+    <P.IngestionProgress
+      coverage={coverageFixture({ excludedSharedInstalls: 2 })}
+    />
+  );
+  // §10.4-3 — "활동한 설치 14대 중 6대 연결됨" 이 분자/분모로 남는다.
+  assert.match(html, /6\/14/);
+  assert.match(html, /남은/);
+  assert.match(html, /8대/); // 14 - 6
+  assert.match(html, /지금 표는/);
+  // §10.4-1 — complete 가 아니면 퍼센트가 헤드라인이 아니다. 분수가 먼저 온다.
+  assert.ok(html.indexOf("6/14") < html.indexOf("42.9%"));
+  // §5.5 — 공용 기기 제외는 값을 만들지 않고 센다. 0 이어도 화면에 적는다.
+  assert.match(html, /공용 기기로 판정돼 제외/);
+  assert.match(html, /2대/);
+  // §10.4-4 — "이 수치는 아직 커집니다" 를 먼저 말한다.
+  assert.match(html, /아직 커집니다/);
+  assert.match(html, /캡처해/);
+  // §10.4-2 — 분모는 '전체 설치' 가 아니라 '링크된 설치' 다.
+  assert.match(html, /링크된 설치/);
+  // §10.4-5 — 기준 배지가 항상 붙는다.
+  assert.match(html, /연결 이후 기준/);
+});
+
+test("★게이트가 닫힌 것은 '적재 전' 이 아니다 — 다른 말을 쓴다", () => {
+  const html = renderToStaticMarkup(
+    <P.PersonAxisCoverageNote
+      coverage={coverageFixture({
+        state: "disabled",
+        disabledReason: "PERSON_AXIS_EFFECTIVE_FROM 미설정",
+      })}
+    />
+  );
+  assert.match(html, /아직 열지 않음/);
+  assert.match(html, /PERSON_AXIS_EFFECTIVE_FROM 미설정/);
+  // ★배지가 '적재 전' 이면 "곧 채워집니다" 라는 거짓 기대가 생긴다. 본문에서
+  //   '적재 전 과 같은 말로 읽지 마세요' 라고 **가리키는** 것은 그 반대다 —
+  //   그래서 배지 자리(>...<)만 본다.
+  assert.doesNotMatch(html, />적재 전</);
+  assert.match(html, /적재 전.{0,4}과 같은 말로 읽지 마세요/);
+  // 가짜 0 금지는 여기서도 같다.
+  assert.doesNotMatch(html, />\s*0\s*</);
+});
+
+test("커버리지 0 이면 새 상태를 만들지 않고 기존 '적재 전' 규약을 쓴다 (§10.4-6)", () => {
+  const html = renderToStaticMarkup(
+    <P.PersonAxisCoverageNote
+      coverage={coverageFixture({
+        state: "pending",
+        linkedInstalls: 0,
+        linkedActiveInstalls: 0,
+      })}
+    />
+  );
+  assert.match(html, /적재 전/);
+  // ★배포 직후가 정상이라는 사실을 화면이 말해야 한다 — 안 적으면 "켰는데 왜
+  //   비어 있지" 로 읽힌다.
+  assert.match(html, /forward-only/);
+  assert.match(html, /다음에 인증할 때/);
+  assert.doesNotMatch(html, /0%/);
+});
+
+test("커버리지 자체가 안 실려 오면(배선 전) 가짜 0 대신 '적재 전' 이다", () => {
+  const html = renderToStaticMarkup(
+    <P.PersonAxisCoverageNote coverage={null} />
+  );
+  assert.match(html, /적재 전/);
+  assert.match(html, /v_person_since_link/);
+  assert.doesNotMatch(html, />\s*0\s*</);
+  assert.doesNotMatch(html, /0%/);
+});
+
+test("완료 상태에서도 기준 라벨과 공용기기 제외 수는 남는다", () => {
+  const html = renderToStaticMarkup(
+    <P.PersonAxisCoverageNote
+      coverage={coverageFixture({
+        state: "complete",
+        basis: "all_time",
+        linkedActiveInstalls: 14,
+      })}
+    />
+  );
+  assert.match(html, /14\/14/);
+  assert.match(html, /설치 전체 이력 기준\(소급\)/);
+  assert.match(html, /공용 기기 제외/);
+});
+
+test("퍼센트 헤드라인은 complete 일 때만 열린다 (§10.4-1)", () => {
+  assert.equal(P.personAxisHeadlineAllowed(null), false);
+  assert.equal(P.personAxisHeadlineAllowed(coverageFixture()), false);
+  assert.equal(
+    P.personAxisHeadlineAllowed(coverageFixture({ state: "pending" })),
+    false
+  );
+  assert.equal(
+    P.personAxisHeadlineAllowed(coverageFixture({ state: "disabled" })),
+    false
+  );
+  assert.equal(
+    P.personAxisHeadlineAllowed(coverageFixture({ state: "complete" })),
+    true
+  );
+});
+
+test("발효일 이전으로 뻗는 조회에만 경계 고지를 적는다 (§10.4-7)", () => {
+  const cov = coverageFixture();
+  assert.match(
+    P.personAxisRangeNote(cov, "2026-03-01") ?? "",
+    /사람 축이 없던 때/
+  );
+  // 구간이 통째로 발효일 이후 → 없는 고지를 적는 것도 거짓말이다.
+  assert.equal(P.personAxisRangeNote(cov, "2026-05-01"), null);
+  assert.equal(P.personAxisRangeNote(cov, "2026-04-01"), null);
+  assert.equal(P.personAxisRangeNote(null, "2026-03-01"), null);
+  // 게이트가 닫혀 effectiveFrom 이 없으면 그을 근거가 없다.
+  assert.equal(
+    P.personAxisRangeNote(
+      coverageFixture({ effectiveFrom: null }),
+      "2026-01-01"
+    ),
+    null
+  );
+});
+
+test("발효일 경계선은 06-13 교체선과 같은 장치를 쓴다", () => {
+  const marker = P.personAxisMarker(coverageFixture());
+  assert.equal(marker?.date, "2026-04-01");
+  assert.match(marker?.hint ?? "", /사람 축이 없던 때/);
+  // 구간 밖이면 선을 긋지 않는다 — markerIndex 규약을 그대로 탄다.
+  assert.equal(P.markerIndex(["2026-03-30", "2026-04-02"], marker), 1);
+  assert.equal(P.markerIndex(["2026-05-01", "2026-05-02"], marker), null);
+  assert.equal(
+    P.personAxisMarker(coverageFixture({ effectiveFrom: null })),
+    undefined
+  );
+});
+
+test("조회 구간 시작일은 클라 시계가 아니라 서버 generatedAt 으로 센다", () => {
+  assert.equal(
+    P.analyticsRangeStart("2026-08-21T00:00:00.000Z", 30),
+    "2026-07-23"
+  );
+  assert.equal(
+    P.analyticsRangeStart("2026-08-21T00:00:00.000Z", 1),
+    "2026-08-21"
+  );
+  assert.equal(P.analyticsRangeStart(null, 30), null);
+  assert.equal(P.analyticsRangeStart("2026-08-21T00:00:00.000Z", 0), null);
+  assert.equal(P.analyticsRangeStart("not-a-date", 30), null);
+});
+
+// ── 설치축 리텐션 요약 (analytics_install_profile) ──────────────────────────
+
+function installSummaryFixture(): import("./AnalyticsPanel").InstallRetentionSummary {
+  const rate = (n: number, d: number) => ({
+    numerator: n,
+    denominator: d,
+    rate: d > 0 ? n / d : null,
+    display: `${n}/${d}`,
+  });
+  return {
+    installsObserved: 43,
+    installsNeverActive: 37,
+    installsZombie: 9,
+    installsNeverRan: 28,
+    installsCohort: 6,
+    horizons: [
+      { key: "d1", days: 1, pending: 0, exact: rate(1, 6), window: rate(2, 6) },
+      { key: "d7", days: 7, pending: 2, exact: rate(0, 4), window: rate(1, 4) },
+      {
+        key: "d14",
+        days: 14,
+        pending: 6,
+        exact: rate(0, 0),
+        window: rate(0, 0),
+      },
+    ],
+    activityDefinition: "활동 정의: status=working 또는 이벤트 1건 이상",
+    presentOnlyDefinition: "present_only: 하트비트만 있고 working 이 0",
+    horizonDefinitions: "exact = D+N 당일, window = 1~N일 중 하루라도",
+    notes: [
+      "이 축에는 is_admin 이 없다 — 익명축이라 운영자 자기제외가 불가능하다",
+    ],
+  };
+}
+
+test("★설치축 요약은 좀비와 '한 번도 안 켬' 을 합쳐 그리지 않는다", () => {
+  const html = renderToStaticMarkup(
+    <P.InstallRetentionSummaryView data={installSummaryFixture()} />
+  );
+  assert.match(html, /좀비 9/);
+  assert.match(html, /한 번도 안 켬 28/);
+  // 합계(37)도 함께 남아야 한다 — 두 수만 보이면 나머지가 어디 갔는지 모른다.
+  assert.match(html, /37대/);
+  assert.match(html, /원인이 달라/);
+});
+
+test("설치축 요약의 모든 칸은 분자/분모를 남기고 미도달은 0% 가 아니다", () => {
+  const html = renderToStaticMarkup(
+    <P.InstallRetentionSummaryView data={installSummaryFixture()} />
+  );
+  assert.match(html, /1\/6/);
+  assert.match(html, /0\/4/); // 0 도 분모와 함께
+  assert.match(html, /0\/0/);
+  assert.match(html, /\(—\)/); // 분모 0 → 0.0% 가 아니라 —
+  assert.match(html, /2대 제외/); // 관측창 미도달
+  // 6대짜리 표본이면 경고가 함께 뜬다.
+  assert.match(html, /6대/);
+  assert.match(html, /퍼센트/);
+  // ★익명축이라 운영자 제외가 불가능하다는 서버 note 를 화면이 그대로 싣는다.
+  assert.match(html, /is_admin/);
+});
+
+test("코호트가 비면 0% 가 아니라 '표본이 없다' 고 말한다", () => {
+  const data = installSummaryFixture();
+  data.installsCohort = 0;
+  const html = renderToStaticMarkup(
+    <P.InstallRetentionSummaryView data={data} />
+  );
+  assert.match(html, /0% 가 아닙니다/);
+  assert.doesNotMatch(html, /0\.0%/);
+});
+
+// ── 소스가 없는 것과 조회 경로가 없는 것을 가른다 ──────────────────────────
+
+test("★이미 쌓이는 표에는 '적재 전' 이 아니라 '연결 전' 이라고 적는다", () => {
+  const html = renderToStaticMarkup(
+    <P.PendingIngestion
+      missing="read-path"
+      title="설치 단위 활동일"
+      waitingOn="analytics_user_daily 를 읽는 어드민 콜러블"
+      willShow={["설치 × 날짜 활동일"]}
+    />
+  );
+  assert.match(html, /연결 전/);
+  assert.doesNotMatch(html, /적재 전/);
+  assert.match(html, /이미 쌓이고 있습니다/);
+  // 어느 쪽이든 가짜 0 은 금지다.
+  assert.doesNotMatch(html, />\s*0\s*</);
+  assert.doesNotMatch(html, /0%/);
+});
+
+// ── 네 탭 각각을 SSR 로 세워 규약이 살아 있는지 본다 ────────────────────────
+// 한 탭에서만 확인하면 나머지 셋에서 조용히 빠져도 아무도 모른다.
+
+test("★리텐션 탭은 익명축에 운영자 토글이 닿지 않는다고 적는다", () => {
+  const html = renderToStaticMarkup(<P.default initialTab="retention" />);
+  assert.match(html, /id="analytics-panel-retention"/);
+  // 토글은 화면에 떠 있다 — 그런데 이 축에는 닿지 않는다. 그 사실을 적는다.
+  assert.match(html, /<input type="checkbox"/);
+  assert.match(html, /운영자 포함/);
+  assert.match(html, /토글이 동작하지 않습니다/);
+  assert.match(html, /is_admin 이 없어/);
+  // 사람 축 칸이 서 있고, 배선 전이라 '적재 전' 으로 접힌다.
+  assert.match(html, /사람 축 커버리지/);
+  assert.match(html, /적재 전/);
+});
+
+test("★활성화 탭은 설치 단위 활성 자리를 세운다 (콜러블 응답 대기)", () => {
+  const html = renderToStaticMarkup(<P.default initialTab="activation" />);
+  assert.match(html, /id="analytics-panel-activation"/);
+  // SSR 에서는 useEffect 가 안 돌아 콜러블이 아직 loading 이다. 자리(섹션)가
+  // 서 있는지만 본다 — '연결 전' 문구 자체는 컴포넌트 테스트가 고정한다.
+  assert.match(html, /설치 단위 활성/);
+  // ★가짜 0 금지는 로딩 중에도 같다.
+  assert.doesNotMatch(html, /설치 단위 활성[\s\S]{0,400}0%/);
+});
+
+test("★콜러블 이름은 상수 한 곳에서만 나온다 (계약 이름 고정)", () => {
+  // 백엔드가 다른 이름으로 내보내면 조용히 not-found 가 되고 화면은 영원히
+  // '연결 전' 을 띄운다. 이름이 바뀌면 이 테스트가 먼저 빨개진다.
+  assert.equal(P.CALLABLE_USER_DAILY, "getAdminUserDailySummary");
+  assert.equal(P.CALLABLE_ACCOUNT_PROFILE, "getAdminAccountProfileSummary");
+});
+
+test("★수익 탭은 null 을 0 으로 그리지 않는다 (mrr_usd · ltv_usd 미기입)", () => {
+  const html = renderToStaticMarkup(<P.default initialTab="revenue" />);
+  assert.match(html, /id="analytics-panel-revenue"/);
+  assert.match(html, /analytics_purchase/);
+  assert.match(html, /적재 전/);
+  assert.match(html, /null 은 0 이 아니라 미기입/);
+});
+
+test("★획득 탭은 기다리는 표 이름을 실제 이름으로 적는다", () => {
+  const html = renderToStaticMarkup(<P.default initialTab="acquisition" />);
+  assert.match(html, /ga4_first_touch_current/);
+  assert.match(html, /analytics_identity/);
+  assert.match(html, /적재 전/);
+});
+
+test("initialTab 은 선택된 탭만 렌더한다는 기존 규약을 깨지 않는다", () => {
+  const html = renderToStaticMarkup(<P.default initialTab="revenue" />);
+  assert.doesNotMatch(html, /id="analytics-panel-acquisition"/);
+  assert.doesNotMatch(html, /id="analytics-panel-activation"/);
+  assert.doesNotMatch(html, /id="analytics-panel-retention"/);
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 4);
+  assert.match(
+    html,
+    /aria-selected="true"[^>]*aria-controls="analytics-panel-revenue"/
+  );
+});
+
+test("★사람 축 숫자는 라벨 없이 그릴 방법이 없다 (시그니처가 규약을 지킨다)", () => {
+  const html = renderToStaticMarkup(
+    <P.PersonAxisNumber
+      numerator={3}
+      denominator={6}
+      coverage={coverageFixture({ basis: "all_time" })}
+      label="링크된 설치 중 D7 잔존"
+    />
+  );
+  assert.match(html, /3\/6/);
+  assert.match(html, /설치 전체 이력 기준\(소급\)/);
+  // §10.4-2 — 분모 라벨이 함께 나온다. "전체 설치" 로 읽히면 안 된다.
+  assert.match(html, /링크된 설치 중 D7 잔존/);
+  // §10.4-1 — ingesting 이면 퍼센트가 헤드라인이 아니다(작은 글씨 유지).
+  assert.doesNotMatch(html, /text-lg/);
+  const done = renderToStaticMarkup(
+    <P.PersonAxisNumber
+      numerator={3}
+      denominator={6}
+      coverage={coverageFixture({ state: "complete" })}
+      label="링크된 설치 중 D7 잔존"
+    />
+  );
+  // complete 에서만 분수가 커진다 — 그래도 커지는 건 퍼센트가 아니라 분수다.
+  assert.match(done, /text-lg/);
+  assert.ok(done.indexOf("3/6") < done.indexOf("50.0%"));
+});
+
+// ── 콜러블이 오면 붙는 모양 (② analytics_user_daily / ④ account_profile) ────
+
+test("★설치 × 날짜 뷰는 좀비를 활동에 섞지 않고 익명축 한계를 적는다", () => {
+  const html = renderToStaticMarkup(
+    <P.UserDailySummaryView
+      data={{
+        rangeDays: 30,
+        generatedAt: "2026-08-21T00:00:00.000Z",
+        installsObserved: 12,
+        installsActive: 5,
+        installsPresentOnly: 4,
+        byDay: [
+          {
+            day: "2026-08-20",
+            activeInstalls: 3,
+            presentOnlyInstalls: 2,
+            eventCount: 40,
+            tokensTotal: 900,
+          },
+        ],
+        notes: ["익명축 note"],
+      }}
+    />
+  );
+  assert.match(html, /5\/12/); // 활동 설치는 분자/분모와 함께
+  assert.match(html, /좀비/);
+  assert.match(html, /하트비트만/);
+  // ★익명축이라 운영자 토글이 닿지 않는다 — 뷰가 스스로 적는다.
+  assert.match(html, /토글이 동작하지 않습니다/);
+  assert.match(html, /익명축 note/);
+  // 5대짜리 표본이면 경고가 함께 뜬다.
+  assert.match(html, /퍼센트/);
+});
+
+test("★계정 프로필 뷰는 null 을 0 으로 접지 않는다", () => {
+  const html = renderToStaticMarkup(
+    <P.AccountProfileSummaryView
+      data={{
+        generatedAt: "2026-08-21T00:00:00.000Z",
+        accountsObserved: 5,
+        accountsWithSpend: 2,
+        accountsWithMrr: 0,
+        mrrUsdTotal: null,
+        ltvUsdTotal: null,
+        costUsdTotal: 12.5,
+        notes: [],
+      }}
+    />
+  );
+  assert.match(html, /2\/5/);
+  // ★mrr 기입 계정 0 도 분모와 함께 — "아무도 안 냈다" 가 아니다.
+  assert.match(html, /0\/5/);
+  assert.match(html, /미기입/);
+  assert.match(html, /—/);
+  // 금액 칸에 0 을 그리지 않는다.
+  assert.doesNotMatch(html, /\$0\.00/);
+  // 지출은 실제 값이 있으므로 그대로 나온다.
+  assert.match(html, /12\.5/);
 });

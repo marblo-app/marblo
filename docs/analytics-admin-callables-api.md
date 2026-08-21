@@ -637,6 +637,113 @@ type BetaSegmentSummary = {
 
 순수 로직은 `analyticsProfiles.ts` (BQ/Firestore 무의존, `npm run test:analytics-profiles`).
 
+★**2026-08-21 갱신.** 이 콜러블은 만들어진 뒤 한동안 **화면이 한 번도 부르지 않았다** —
+파생표는 매일 05:30 KST 스케줄로 채워지는데 읽는 쪽이 없어 아무도 안 봤다. 어드민 4탭의
+**③ 리텐션** 탭이 이제 이걸 부른다(`InstallRetentionSummaryView`).
+
+호출 인자는 **없다.** 이 축에는 `is_admin` 이 없어 운영자 자기제외가 구조적으로 불가능하고
+기간도 받지 않는다(프로필 전량 기준). ★없는 인자를 보내면 화면이 "걸러진다" 고 착각한다 —
+그래서 프론트는 `{}` 를 보내고, 리텐션 탭 머리에 **"이 표는 운영자 포함 토글이 동작하지
+않습니다"** 를 축 한계 고지로 적는다. 그리고 이 축의 분모는 스트릭 뷰(`getAdminStreakRetention`)
+의 설치축과 **다르다**(저쪽은 조회 구간 코호트, 이쪽은 프로필 전량) — 두 수를 나눠 읽으면 안 된다.
+
+---
+
+## ★아직 없는 콜러블 둘 — 이름을 여기 박는다 (백엔드 티켓 `euSq4AwHJrxSagMCjXeM`)
+
+`analytics_user_daily` 와 `analytics_account_profile` 은 **이미 매일 채워지고 있다**
+(`scheduledBuildAnalyticsProfiles`, 05:30 KST). 없는 것은 소스가 아니라 **읽어 오는 콜러블**이다.
+그래서 어드민 화면의 그 칸은 '적재 전' 이 아니라 **'연결 전'** 으로 접힌다 — 두 사실을 같은
+말로 하면 다음 사람이 "적재부터 해야겠네" 로 읽고 이미 있는 표를 다시 만든다.
+
+프론트는 **지금 이 이름으로 이미 호출하고 있다.** `functions/not-found` 를 장애가 아니라
+'연결 전' 으로 접기 때문에, 백엔드가 이 이름으로 배포하는 순간 **프론트 변경 없이** 값이 들어온다.
+★한쪽이 다른 이름을 쓰면 조용히 `undefined` 가 되고 화면은 영원히 '연결 전' 을 띄운다.
+이름은 `AnalyticsPanel.tsx` 의 `CALLABLE_USER_DAILY` / `CALLABLE_ACCOUNT_PROFILE` 상수이고
+테스트가 문자열을 고정한다.
+
+### `getAdminUserDailySummary` — ② 활성화 (익명축, `analytics_user_daily`)
+
+인자 `{ days }`. ★`includeAdmin` 을 **받지 마라** — 이 축엔 `is_admin` 이 없어 운영자
+자기제외가 구조적으로 불가능하고, 인자를 받으면 화면이 "걸러진다" 고 착각한다.
+
+```
+{
+  rangeDays, generatedAt,
+  installsObserved,        // 구간에 행이 하나라도 있는 설치
+  installsActive,          // active 인 날이 하루라도 있는 설치 ★분모의 뿌리
+  installsPresentOnly,     // ★present_only 만 있고 active 0일 — 좀비. active 와 합치지 마라
+  byDay: [{ day, activeInstalls, presentOnlyInstalls, eventCount, tokensTotal }],
+  notes: [],
+  personAxis?: PersonAxisCoverage,
+}
+```
+
+### `getAdminAccountProfileSummary` — ④ 수익 (계정축, `analytics_account_profile`)
+
+인자 없음(`{}`). 계정축이라 기간 창이 의미가 없다(프로필 전량).
+
+```
+{
+  generatedAt,
+  accountsObserved,
+  accountsWithSpend,       // cost_logs 흔적이 있는 계정
+  accountsWithMrr,         // ★mrr_usd 가 null 이 아닌 계정. 지금 0 이 정상이다
+  mrrUsdTotal:  number | null,   // ★null = 미기입. 0 으로 접지 마라
+  ltvUsdTotal:  number | null,
+  costUsdTotal: number | null,
+  notes: [],
+}
+```
+
+★`mrr_usd` / `ltv_usd` 가 전부 null 인 것은 **적재 전**이다(`analytics_purchase` 대기).
+표 자체가 매일 채워지는 것(→ 연결 전)과 그 금액 칸이 비어 있는 것(→ 적재 전)은 **다른 사실**이라
+화면이 두 칸으로 나눠 그린다. 응답에서 `null` 을 `0` 으로 바꿔 보내면 그 구분이 무너진다.
+
+---
+
+## `personAxis` — 사람 축 커버리지 봉투 (선행 티켓 `euSq4AwHJrxSagMCjXeM` 대기)
+
+설계 §10.3. 사람 축을 쓰는 **모든** 응답에 실린다. 프론트는 이 필드를 **옵셔널**로 읽고,
+`getAdminInstallRetentionSummary` → `getAdminStreakRetention` → `getAdminRetentionCohorts`
+순으로 처음 있는 것을 쓴다. **없으면 상태가 아니라 배선 전**이라 기존 '적재 전' 규약으로 접힌다 —
+그래서 프론트와 백엔드의 머지 순서가 어느 쪽이든 화면이 깨지지 않는다.
+
+```
+personAxis?: {
+  state: "disabled" | "pending" | "ingesting" | "complete",   // ★넷이다
+  disabledReason: string | null,   // disabled 일 때만. 화면이 이 문장을 그대로 그린다
+  linkedInstalls, totalInstalls,
+  linkedActiveInstalls, activeInstalls,   // ★complete 판정은 이 두 수로 한다
+  excludedSharedInstalls,          // 공용 기기로 판정돼 제외된 설치 수 (설계 §5.5)
+  effectiveFrom: string | null,    // 소급 상한. 게이트가 닫혔으면 null
+  basis: "since_link" | "all_time",
+  lastLinkedAt: string | null,
+}
+```
+
+값은 `personAxis.computePersonAxisCoverage()` 가 그대로 만든다 — 프론트는 계산하지 않는다.
+
+화면이 이 봉투로 하는 일(설계 §10.4 화면 규칙 일곱):
+
+| 규칙 | 화면 |
+| --- | --- |
+| 1 | `state !== "complete"` 면 퍼센트를 헤드라인으로 안 그린다 — 분수만 (`personAxisHeadlineAllowed`) |
+| 2 | 분모 라벨은 "전체 설치" 가 아니라 **"링크된 설치"** |
+| 3 | `ingesting` → `IngestionProgress` ("활동한 설치 14대 중 6대 연결됨 · 남은 8대는 다음에 인증할 때") |
+| 4 | "이 수치는 아직 커집니다 — 캡처해서 비교하지 마세요" 를 먼저 말한다 |
+| 5 | ★`basis` 를 그대로 배지로 (`연결 이후 기준` / **`설치 전체 이력 기준(소급)`**). 라벨 없는 사람 축 숫자 금지 |
+| 6 | `pending`(커버리지 0) 은 새 상태를 만들지 않고 기존 `PendingIngestion` 재사용 |
+| 7 | 조회 구간이 `effectiveFrom` 왼쪽으로 뻗으면 `AxisLimitNote` + 그 날짜에 점선(06-13 경계선과 같은 장치) |
+
+★`disabled`(넷째 상태)는 설계 §10.3 의 셋에 없던 것이다 — 게이트가 닫힌 것은 '적재 전' 이
+**아니다.** 소스가 없는 게 아니라 아직 열면 안 되는 것이고, 같은 말로 그리면 화면이
+"곧 채워집니다" 라는 거짓 기대를 만든다. 배지 문구가 다르다(`아직 열지 않음`).
+
+★**forward-only.** 링크는 그 설치가 **다음에 인증할 때** 생긴다. 배포 직후 커버리지가
+0 에 가까운 것이 정상이고, 화면이 그 사실을 적는다(`PERSON_AXIS_FORWARD_ONLY_NOTE`) —
+안 적으면 "켰는데 왜 비어 있지" 로 읽힌다.
+
 ---
 
 ## 범위 밖 (기획 §2.3 / §6 후속 티켓)
