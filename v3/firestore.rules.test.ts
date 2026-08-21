@@ -587,10 +587,13 @@ describe("projects collection", () => {
     );
   });
 
-  it("프로젝트 멤버는 프로젝트를 수정할 수 있다", async () => {
+  it("프로젝트 멤버는 멤버 티어 필드를 수정할 수 있다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
-      updateDoc(doc(db, "projects", PROJECT_ID), { name: "Updated Name" }),
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        gitRemoteUrl: "github.com/acme/repo",
+        updatedAt: new Date(),
+      }),
     );
   });
 
@@ -602,6 +605,256 @@ describe("projects collection", () => {
   it("Admin은 프로젝트를 삭제할 수 없다", async () => {
     const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
     await assertFails(deleteDoc(doc(db, "projects", PROJECT_ID)));
+  });
+});
+
+// ===== projects 필드별 쓰기 권한 (티켓 wWl44fSBwmQ4vRylmHsF, P1) =====
+//
+// 규칙은 allowlist 다: 멤버 티어 / 관리자(owner·admin) 티어 / 그 외 전부 차단.
+// 아래는 **양방향** 검증이다 — 허용 필드가 그대로 되는지(회귀 0)와 금지 필드가
+// 실제로 거부되는지를 같은 블록에서 못박는다. 한쪽만 있으면 "전부 막혔는데
+// 테스트는 통과"하거나 그 반대가 된다.
+//
+// 필드 목록의 근거(어느 코드가 무엇을 쓰는지)는 firestore.rules 의
+// projectMemberWritableFields 주석에 census 로 남겼다.
+
+describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
+  // ── 멤버 티어: 지금 멤버가 정당하게 쓰는 필드는 계속 써진다 ──────────
+  //   각 케이스 옆 주석이 그 필드를 실제로 쓰는 코드 경로다.
+
+  it("멤버: gitRemoteUrl 을 쓸 수 있다 (RepoConnectModal / teamService backfill)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        gitRemoteUrl: "github.com/acme/repo",
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("멤버: folderPaths 기기 칸을 merge 로 쓸 수 있다 (setProjectFolderPathForMachine)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(
+        doc(db, "projects", PROJECT_ID),
+        {
+          folderPaths: {
+            m_machine1: { path: "/Users/x/repo", platform: "darwin" },
+          },
+          updatedAt: new Date(),
+        },
+        { merge: true },
+      ),
+    );
+  });
+
+  it("멤버: telegramChannel 을 쓸 수 있다 (telegram-channel-sync.writeChannelMeta)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(
+        doc(db, "projects", PROJECT_ID),
+        { telegramChannel: { chatId: "123" }, updatedAt: new Date() },
+        { merge: true },
+      ),
+    );
+  });
+
+  it("멤버: enabledModels 를 쓸 수 있다 (디스패치 설정)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        enabledModels: ["claude"],
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("★ 멤버는 assistantTriggers 를 쓸 수 없다 (서버 전용)", async () => {
+    // census 결과 이 앱에는 쓰기 경로가 아예 없다(읽기만 존재). 이 값은
+    // 오케스트레이터를 깨우는 실행 스위치라 멤버가 임의로 켜면 남의 기기에서
+    // 에이전트가 돈다. 콘솔·서버는 Admin SDK 라 규칙을 우회해 그대로 설정한다.
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        assistantTriggers: { enabled: true },
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("★ owner/admin 도 assistantTriggers 를 쓸 수 없다 (서버 전용)", async () => {
+    const ownerDb = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(ownerDb, "projects", PROJECT_ID), {
+        assistantTriggers: { enabled: true },
+        updatedAt: new Date(),
+      }),
+    );
+    const adminDb = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(adminDb, "projects", PROJECT_ID), {
+        assistantTriggers: { enabled: true },
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  // ── 관리자 티어: name / kind / members ────────────────────────────────
+
+  it("멤버: name 은 쓸 수 없다 (관리자 티어)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        name: "Renamed By Member",
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("멤버: kind 는 쓸 수 없다 (관리자 티어)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        kind: "assistant",
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("멤버: 허용 필드에 금지 필드를 끼워 넣어도 통째로 거부된다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        gitRemoteUrl: "github.com/acme/repo",
+        name: "Smuggled",
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("멤버: 다른 사람을 members 에 추가할 수 없다 (manage_members 는 owner/admin)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        members: arrayUnion("smuggled-user"),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("owner: name / kind 를 쓸 수 있다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        name: "Renamed By Owner",
+        kind: "assistant",
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("admin: name 과 members 를 쓸 수 있다 (TeamManagement 경로)", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        name: "Renamed By Admin",
+        members: [OWNER_ID, ADMIN_ID],
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  // ── 서버 전용 / 불변 필드: 누구도 클라이언트에서 못 쓴다 ───────────────
+
+  it("★ 멤버는 githubInstallationId 를 쓸 수 없다 (크로스테넌트 권한 상승 차단)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        githubInstallationId: "12345678",
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("★ owner/admin 도 githubInstallationId 를 쓸 수 없다 (서버 전용)", async () => {
+    const ownerDb = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(ownerDb, "projects", PROJECT_ID), {
+        githubInstallationId: "12345678",
+        updatedAt: new Date(),
+      }),
+    );
+    const adminDb = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(adminDb, "projects", PROJECT_ID), {
+        githubInstallationId: "12345678",
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("★ 생성 시점에도 githubInstallationId 를 심을 수 없다 (create 우회로 차단)", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(doc(db, "projects", "gh-smuggle-project"), {
+        name: "Smuggle",
+        ownerId: OUTSIDER_ID,
+        members: [OUTSIDER_ID],
+        githubInstallationId: "12345678",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("owner 도 ownerId 를 바꿀 수 없다 (소유권 이전 경로 없음 = 불변)", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        ownerId: ADMIN_ID,
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("멤버는 createdAt 을 바꿀 수 없다 (불변)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("모르는 신규 필드는 기본 차단된다 (allowlist 이므로 fail-closed)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        someFutureServerField: "x",
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  // ── 정상 생성 경로 회귀 가드 ───────────────────────────────────────────
+
+  it("앱이 실제로 만드는 형태의 프로젝트 생성은 그대로 성공한다", async () => {
+    // useProjectSetup.autoRegisterProject / Header.handleCreateProject 가
+    // 보내는 필드 조합 그대로.
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(doc(db, "projects", "app-shaped-project"), {
+        name: "new-project",
+        ownerId: OUTSIDER_ID,
+        members: [OUTSIDER_ID],
+        kind: "dev",
+        folderPath: "/Users/x/new-project",
+        gitRemoteUrl: "github.com/acme/new-project",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
   });
 });
 
@@ -1515,9 +1768,15 @@ describe("projects self-join via invitation (B2)", () => {
   });
 
   it("기존 멤버의 일반 update 는 계속 허용된다 (회귀 없음)", async () => {
+    // 필드별 권한 도입(티켓 wWl44fSBwmQ4vRylmHsF) 이후 name 은 관리자 티어라
+    // 여기서는 멤버 티어 필드로 "self-join 게이트가 일반 update 를 막지
+    // 않는다"만 확인한다. name 의 티어 자체는 전용 describe 가 검증한다.
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
-      updateDoc(doc(db, "projects", PROJECT_ID), { name: "Renamed" }),
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        gitRemoteUrl: "github.com/acme/repo",
+        updatedAt: new Date(),
+      }),
     );
   });
 });

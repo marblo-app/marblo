@@ -137,15 +137,110 @@ service cloud.firestore {
         && hasValidPendingInvite(projectId);
     }
 
+    // ===== projects 필드별 쓰기 권한 (티켓 wWl44fSBwmQ4vRylmHsF, P1) =====
+    //
+    // 이전엔 update 게이트가 `isProjectMember` 하나뿐이라 **멤버 누구나 프로젝트
+    // 문서의 아무 필드나** 쓸 수 있었다. 지금 당장은 메타 변조(name/ownerId
+    // 위조 시도)지만, 진짜 문제는 앞으로 들어올 필드다: GitHub App 설계가
+    // `githubInstallationId` 를 프로젝트 문서에 두는 걸 전제하는데, 그 상태로
+    // 필드가 추가되면 **프로젝트 A 의 멤버가 그 필드를 써넣어 B 의 private repo
+    // 에 접근하는 크로스테넌트 권한 상승**이 성립한다.
+    //
+    // ★그래서 denylist 가 아니라 allowlist 다. denylist 는 "새로 생기는 필드가
+    //   기본 허용"이라 이 사고를 다시 만든다. allowlist 는 **새 필드가 기본
+    //   차단**이므로, githubInstallationId 같은 서버 전용 필드를 규칙 수정 없이
+    //   추가해도 클라이언트는 처음부터 못 쓴다.
+    //
+    // 목록은 추측이 아니라 전수 census 로 만들었다 — 이 앱에서 projects 문서를
+    // 쓰는 코드는 아래가 전부다(admin SDK 경로인 functions/scripts 는 규칙을
+    // 우회하므로 제외; functions 는 project 문서에 필드를 쓰지 않고 읽기/삭제만
+    // 한다).
+    //
+    //   MEMBER (일반 멤버가 정당하게 쓰는 필드)
+    //     folderPath        projectService.createProject (신규 등록 시 1회)
+    //     folderPaths       projectService.setProjectFolderPathForMachine
+    //                       (기기별 경로 칸, merge 쓰기)
+    //     gitRemoteUrl      RepoConnectModal.backfillRepoUrl /
+    //                       useProjectSetup(기존 프로젝트 backfill) /
+    //                       teamService.backfillProjectRepoUrl /
+    //                       teamService.propagateInvitationRepoUrl
+    //     telegramChannel   electron/telegram-channel-sync.writeChannelMeta
+    //     enabledModels     Project 타입 필드(현재 영속 쓰기 경로 없음, 디스패치
+    //                       설정이라 멤버 티어 유지)
+    //     legacyFolderPath / folderPathResolution
+    //                       스토어가 클라이언트에서 파생시키는 값. 영속 쓰기
+    //                       경로는 없지만 Project 객체를 그대로 updateProject 에
+    //                       넘기는 코드가 생겨도 깨지지 않도록 열어 둔다
+    //                       (보안 가치 없음 = 열어도 무해).
+    //     updatedAt         projectService 의 모든 쓰기가 함께 싣는다.
+    //
+    //   ADMIN/OWNER (owner 또는 memberRoles.role == 'admin' 만)
+    //     name              생성 시점 외 쓰기 경로 없음. 프로젝트 정체성이라
+    //                       관리자 티어.
+    //     kind              생성 시점 외 쓰기 경로 없음(dev/assistant 전환은
+    //                       워크스페이스 성격 자체를 바꾼다).
+    //     members           UI 게이트와 동일 판정 — TeamManagement 의
+    //                       manage_members 권한이 owner/admin 뿐이다
+    //                       (types/invitation.ts ROLE_PERMISSIONS).
+    //                       초대 수락 self-join 은 아래 isInvitedSelfJoin 분기가
+    //                       따로 처리하므로 이 제한에 걸리지 않는다.
+    //
+    //   서버 전용 / 불변 (클라이언트 write 전면 차단 — 위 목록에 없는 전부)
+    //     ownerId           소유권 이전 기능이 없다. 위조 차단.
+    //     createdAt         생성 후 갱신 경로 없음.
+    //     assistantTriggers ★census 결과 이 앱에는 **쓰기 경로가 아예 없다** —
+    //                       electron/main.ts listAssistantTriggerProjects 와
+    //                       electron/assistant-triggers.ts 가 읽기만 한다.
+    //                       이 값은 트리거로 오케스트레이터를 깨우는 실행 스위치라
+    //                       (main.ts ensureAssistantTriggerOrchestrator) 멤버가
+    //                       임의로 켜면 남의 기기에서 에이전트가 돌아간다.
+    //                       쓰는 코드가 없으므로 막아도 회귀가 없고, 콘솔·서버는
+    //                       Admin SDK 라 규칙을 우회해 그대로 설정할 수 있다.
+    //                       → 서버 전용으로 둔다.
+    //     githubInstallationId 및 향후 서버 관리 필드
+    //                       ★App 설계의 전제. allowlist 이므로 필드를 추가하는
+    //                       것만으로 클라이언트 write 가 막혀 있다.
+    function projectMemberWritableFields() {
+      return [
+        'folderPath', 'folderPaths', 'legacyFolderPath', 'folderPathResolution',
+        'gitRemoteUrl', 'telegramChannel', 'enabledModels', 'updatedAt'
+      ];
+    }
+
+    function projectAdminWritableFields() {
+      return projectMemberWritableFields().concat(['name', 'kind', 'members']);
+    }
+
+    // create 시 허용 키. update 와 달리 문서 전체 키를 본다.
+    // ownerId/createdAt 은 여기서만 쓸 수 있고(그래서 update 에서는 불변),
+    // 그 외 서버 전용 필드는 **생성 시점에도** 심을 수 없다 — 신규 프로젝트에
+    // 남의 githubInstallationId 를 박아 넣는 우회로를 함께 닫는다.
+    function projectCreatableFields() {
+      return projectAdminWritableFields().concat(['ownerId', 'createdAt']);
+    }
+
+    function projectUpdateKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
     match /projects/{projectId} {
       allow read: if isAuthenticated()
         && (request.auth.uid in resource.data.get('members', [])
             || request.auth.uid == resource.data.ownerId);
       allow create: if isAuthenticated()
         && request.resource.data.ownerId == request.auth.uid
-        && request.auth.uid in request.resource.data.members;
+        && request.auth.uid in request.resource.data.members
+        && request.resource.data.keys().hasOnly(projectCreatableFields());
+      // 멤버 필드만 바뀌면 memberRoles 조회 없이 통과한다(추가 get 비용 회피).
+      // 관리자 전용 필드가 섞이면 그때만 역할을 확인한다.
       allow update: if isAuthenticated()
-        && (isProjectMember(projectId) || isInvitedSelfJoin(projectId));
+        && (
+          (isProjectMember(projectId)
+            && (projectUpdateKeys().hasOnly(projectMemberWritableFields())
+                || (projectUpdateKeys().hasOnly(projectAdminWritableFields())
+                    && isAdminOrOwner(projectId))))
+          || isInvitedSelfJoin(projectId)
+        );
       allow delete: if isAuthenticated() && isProjectOwner(projectId);
     }
 
