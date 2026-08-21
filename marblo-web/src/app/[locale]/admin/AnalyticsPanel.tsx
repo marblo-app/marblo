@@ -29,6 +29,10 @@ import {
   Lock,
   UserCheck,
   Globe,
+  Repeat,
+  CreditCard,
+  Database,
+  TriangleAlert,
 } from "lucide-react";
 
 // ── 콜러블 응답 타입 (docs/analytics-admin-callables-api.md 미러) ───────────────
@@ -182,7 +186,7 @@ type RetentionCohort = {
   returningUsers: Record<string, number>;
   rates: Record<string, number | null>;
 };
-type RetentionCohorts = {
+export type RetentionCohorts = {
   rangeDays: number;
   generatedAt: string;
   adminExcluded?: AdminExcludedTelemetry;
@@ -995,18 +999,52 @@ function pickLabelIndices(values: number[]): Set<number> {
 
 // 시계열 라인/영역 차트 — 단일 시리즈, 인라인 SVG. 빈/단일점 안전.
 // onDrill 이 있으면 각 데이터 포인트가 클릭 가능한 히트 타깃이 된다.
+// ★시계열 위의 경계선. 06-13 식별자 교체처럼 "선 왼쪽과 오른쪽이 같은 단위가
+// 아니다" 를 말하는 자리다 — 색·툴팁에만 의존하지 않도록 라벨을 선 옆에 박는다.
+function ChartMarkerLine({
+  cx,
+  top,
+  bottom,
+  marker,
+}: {
+  cx: number;
+  top: number;
+  bottom: number;
+  marker: ChartMarker;
+}) {
+  return (
+    <g>
+      <line
+        x1={cx}
+        x2={cx}
+        y1={top}
+        y2={bottom}
+        stroke="#7dd3fc"
+        strokeWidth={1}
+        strokeDasharray="4 3"
+      />
+      <text x={cx + 4} y={top + 9} fontSize={9} fontWeight={600} fill="#7dd3fc">
+        {marker.label}
+      </text>
+      <title>{marker.hint ?? marker.label}</title>
+    </g>
+  );
+}
+
 function LineChart({
   data,
   color = SERIES,
   format = fmtInt,
   emptyLabel,
   onDrill,
+  marker,
 }: {
   data: { date: string; value: number }[];
   color?: string;
   format?: (n: number) => string;
   emptyLabel?: string;
   onDrill?: (date: string) => void;
+  marker?: ChartMarker;
 }) {
   const clean = data.filter((d) => d && isFinite(d.value));
   const allZero = clean.every((d) => d.value === 0);
@@ -1036,6 +1074,10 @@ function LineChart({
   // x축 라벨: 처음/중간/끝만.
   const labelIdx = n === 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
   const gid = `area-${color.replace("#", "")}`;
+  const mIdx = markerIndex(
+    clean.map((d) => d.date),
+    marker
+  );
 
   return (
     <div className="w-full">
@@ -1064,6 +1106,14 @@ function LineChart({
             strokeWidth={1}
           />
         ))}
+        {mIdx != null && marker && (
+          <ChartMarkerLine
+            cx={x(mIdx)}
+            top={padT}
+            bottom={padT + innerH}
+            marker={marker}
+          />
+        )}
         <polygon points={areaPts} fill={`url(#${gid})`} />
         <polyline
           points={linePts}
@@ -1134,12 +1184,14 @@ function TwoLineChart({
   second,
   emptyLabel,
   onDrill,
+  marker,
 }: {
   data: { date: string; first: number; second: number }[];
   first: { label: string; color: string; format?: (n: number) => string };
   second: { label: string; color: string; format?: (n: number) => string };
   emptyLabel?: string;
   onDrill?: (date: string) => void;
+  marker?: ChartMarker;
 }) {
   const clean = data.filter(
     (d) => d && isFinite(d.first) && isFinite(d.second)
@@ -1174,6 +1226,10 @@ function TwoLineChart({
   };
   const firstPeak = peak("first");
   const secondPeak = peak("second");
+  const mIdx = markerIndex(
+    clean.map((d) => d.date),
+    marker
+  );
 
   return (
     <div className="w-full">
@@ -1195,6 +1251,14 @@ function TwoLineChart({
             strokeWidth={1}
           />
         ))}
+        {mIdx != null && marker && (
+          <ChartMarkerLine
+            cx={x(mIdx)}
+            top={padT}
+            bottom={padT + innerH}
+            marker={marker}
+          />
+        )}
         <polyline
           points={points("first")}
           fill="none"
@@ -1305,6 +1369,312 @@ function ThinLabelNotice() {
         비용 0 라벨 결함 때문에 얇게 보일 수 있으며, 3.0.17 이후 수정된 라벨이
         축적되면서 성공률·비용·재작업 지표가 채워집니다.
       </p>
+    </div>
+  );
+}
+
+// ── ★식별자 스킴 교체 경계 ──────────────────────────────────────────────────
+// 2026-06-13 에 설치/계정 식별자 스킴이 바뀌었다. 그 앞뒤를 한 선 위에서 그대로
+// 이어 읽으면 "이탈"로 보이는 낙차가 실제로는 id 가 갈린 자리다. 시계열에는 그
+// 날짜에 세로선을 긋고, 선 왼쪽과 오른쪽을 같은 유닛으로 취급하지 않는다.
+const ID_SCHEME_SWITCH_DATE = "2026-06-13";
+type ChartMarker = { date: string; label: string; hint?: string };
+export const ID_SCHEME_MARKER: ChartMarker = {
+  date: ID_SCHEME_SWITCH_DATE,
+  label: "06-13 식별자 교체",
+  hint:
+    "2026-06-13 식별자 스킴 교체 경계. 이 선 왼쪽 유닛과 오른쪽 유닛은 같은 " +
+    "id 체계가 아니다 — 선 근처의 낙차는 이탈이 아니라 id 가 바뀐 것일 수 있다.",
+};
+
+/** 시계열 x 인덱스 중 마커를 그릴 자리. 구간 밖이면 null(선을 긋지 않는다). */
+export function markerIndex(
+  dates: string[],
+  marker: ChartMarker | undefined
+): number | null {
+  if (!marker) return null;
+  const idx = dates.findIndex((d) => d >= marker.date);
+  // idx<=0 이면 조회 구간 전체가 교체 이후 — 경계선이 화면 밖이라 긋지 않는다.
+  if (idx <= 0) return null;
+  return idx;
+}
+
+// ── ★분자/분모 규약 ────────────────────────────────────────────────────────
+// 이 화면의 가장 큰 실패 모드는 두 명짜리 표본을 "50%" 로 크게 띄우는 것이다.
+// 그래서 분수를 크게, 퍼센트를 그 옆 작은 글씨로 그린다(그 반대가 아니다).
+// 분모가 0 이면 "0.0%" 가 아니라 "—" 다 — 실패가 아니라 판단할 표본이 없다는 뜻.
+/** 이 수 이하의 분모는 "작은 표본" 으로 보고 화면이 경고를 띄운다. */
+const SMALL_SAMPLE_MAX = 10;
+
+export function Ratio({
+  numerator,
+  denominator,
+  size = "sm",
+  title,
+}: {
+  numerator: number | null | undefined;
+  denominator: number | null | undefined;
+  size?: "sm" | "lg";
+  title?: string;
+}) {
+  const n = numerator ?? 0;
+  const d = denominator ?? 0;
+  // 분모 0 → "0.0%" 가 아니라 "—". fmtRate 가 그 규약의 단일 출처다.
+  const pct = fmtRate(d > 0 ? n / d : null);
+  return (
+    <span
+      className="inline-flex items-baseline gap-1.5 whitespace-nowrap"
+      title={title}
+    >
+      <span
+        className={`font-semibold tabular-nums text-zinc-100 ${
+          size === "lg" ? "text-lg" : "text-sm"
+        }`}
+      >
+        {fmtInt(n)}/{fmtInt(d)}
+      </span>
+      <span
+        className={`tabular-nums ${d > 0 ? "text-zinc-500" : "text-zinc-600"} ${
+          size === "lg" ? "text-xs" : "text-[11px]"
+        }`}
+      >
+        ({pct})
+      </span>
+    </span>
+  );
+}
+
+// ★비율 카드 — 큰 글씨가 분수, 작은 글씨가 퍼센트. 큰 글씨 자리에 퍼센트를 넣는
+// 순간 2명짜리 표본이 "시장의 절반" 처럼 읽힌다. 순서를 뒤집지 말 것.
+export function RatioCard({
+  label,
+  numerator,
+  denominator,
+  sub,
+  title,
+  accent,
+}: {
+  label: string;
+  numerator: number;
+  denominator: number;
+  sub?: string;
+  title?: string;
+  accent?: string;
+}) {
+  return (
+    <div
+      className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4"
+      title={title}
+    >
+      <p className="text-xs font-medium text-zinc-500">{label}</p>
+      <p
+        className="mt-1 text-2xl font-bold tabular-nums text-zinc-100"
+        style={accent ? { color: accent } : undefined}
+      >
+        {fmtInt(numerator)}/{fmtInt(denominator)}
+      </p>
+      <p className="mt-0.5 text-xs text-zinc-500">
+        {fmtRate(denominator > 0 ? numerator / denominator : null)}
+        {sub ? ` · ${sub}` : ""}
+      </p>
+    </div>
+  );
+}
+
+// ★events 계정축의 한계. 서버가 note 로 실어 보내는 것과 같은 사실을, 표 아래
+// 각주가 아니라 탭 머리에서 먼저 말한다(v3/functions/src/index.ts 계정축 주석).
+export const EVENTS_ACCOUNT_AXIS_LIMIT =
+  "events 의 계정축(metadata.accountUserId)은 실측상 2026-08-06~08-10 5일간 " +
+  "uid 1개에만 존재하고 그 밖의 전 구간은 NULL 입니다. 이 축의 0 은 '아무도 안 " +
+  "썼다'가 아니라 '측정되지 않았다' 입니다 — 그 0 을 이탈로 읽으면 두 겹으로 " +
+  "틀립니다. 계정 단위 활동은 cost_logs 축을, 설치 단위 동치 지표는 온보딩 " +
+  "퍼널·설치 축을 보세요.";
+
+// 표본이 작으면 화면이 그렇게 말한다. 분모가 SMALL_SAMPLE_MAX 를 넘으면 조용하다.
+export function SmallSampleNotice({
+  n,
+  what,
+  unit = "개",
+}: {
+  n: number;
+  what: string;
+  unit?: string;
+}) {
+  if (n > SMALL_SAMPLE_MAX) return null;
+  return (
+    <p className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/20 p-2.5 text-[11px] leading-relaxed text-amber-200">
+      <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span>
+        {what} 표본이{" "}
+        <b className="tabular-nums">
+          {fmtInt(n)}
+          {unit}
+        </b>{" "}
+        입니다. 이 규모에서 퍼센트는 한 건이 움직일 때마다 수십 %p 씩 흔들립니다 —
+        분수(<span className="font-mono">1/2</span>)를 읽고 퍼센트는 참고만
+        하세요.
+      </span>
+    </p>
+  );
+}
+
+// ── ★'적재 전' 상태 ────────────────────────────────────────────────────────
+// 소스가 아직 안 붙은 지표는 0 을 그리지 않는다. 0 을 그리면 "아무도 안 샀다"로
+// 읽히는데 그건 데이터가 아니라 배선이 없는 것이다. 빈 표를 채우는 대신 무엇을
+// 기다리는지와, 붙으면 무엇이 보이는지를 화면이 직접 말한다.
+export function PendingIngestion({
+  title,
+  waitingOn,
+  willShow,
+}: {
+  title: string;
+  waitingOn: string;
+  willShow: string[];
+}) {
+  return (
+    <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-5">
+      <div className="flex flex-wrap items-center gap-2">
+        <Database className="h-4 w-4 text-zinc-600" />
+        <h4 className="text-sm font-semibold text-zinc-300">{title}</h4>
+        <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
+          적재 전
+        </span>
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+        아직 <b className="text-zinc-400">수치가 0 인 게 아니라 소스가 없습니다</b>
+        . 여기에 0 이나 빈 표를 그리면 &ldquo;아무도 안 했다&rdquo;로 읽히기
+        때문에 그리지 않습니다.
+      </p>
+      <dl className="mt-3 space-y-1.5 text-xs">
+        <div className="flex gap-2">
+          <dt className="w-20 shrink-0 text-zinc-600">기다리는 것</dt>
+          <dd className="text-zinc-400">{waitingOn}</dd>
+        </div>
+        <div className="flex gap-2">
+          <dt className="w-20 shrink-0 text-zinc-600">붙으면 보임</dt>
+          <dd className="text-zinc-400">
+            <ul className="space-y-0.5">
+              {willShow.map((w) => (
+                <li key={w}>· {w}</li>
+              ))}
+            </ul>
+          </dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
+// ── ★축 한계 고지 ──────────────────────────────────────────────────────────
+// 0 이 '없음'인지 '미측정'인지 구분한다. 서버가 note 로 실어 보내는 축 한계를
+// 표 아래 각주가 아니라 탭 머리에 둔다 — 숫자를 읽기 전에 읽혀야 하는 문장이다.
+export function AxisLimitNote({
+  notes,
+}: {
+  notes: (string | null | undefined)[];
+}) {
+  const clean = Array.from(
+    new Set(notes.filter((n): n is string => typeof n === "string" && n !== ""))
+  );
+  if (clean.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-amber-900/40 bg-amber-950/20 p-3">
+      <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-amber-200">
+        <TriangleAlert className="h-3.5 w-3.5" />이 탭에서 0 은 &ldquo;없음&rdquo;
+        이 아닐 수 있습니다
+      </p>
+      <ul className="space-y-1 text-[11px] leading-relaxed text-amber-200/80">
+        {clean.map((n, i) => (
+          <li key={i}>· {n}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// ── ★4탭 구조 ──────────────────────────────────────────────────────────────
+// 지금까지 이 화면은 지표가 시간순으로 쌓여 있어 "무엇부터 봐야 하나" 가 없었다.
+// 탭 하나 = 질문 하나로 세운다. 탭은 새 페이지가 아니라 기존 섹션의 재배치다.
+export type AnalyticsTab = "acquisition" | "activation" | "retention" | "revenue";
+
+export const ANALYTICS_TABS: {
+  id: AnalyticsTab;
+  label: string;
+  question: string;
+  icon: typeof Users;
+}[] = [
+  {
+    id: "acquisition",
+    label: "① 획득",
+    question: "어디서 오고, 얼마 쓰면 몇 명 오나",
+    icon: Globe,
+  },
+  {
+    id: "activation",
+    label: "② 활성화",
+    question: "들어온 사람이 가치를 보나",
+    icon: Activity,
+  },
+  {
+    id: "retention",
+    label: "③ 리텐션",
+    question: "남아서 계속 쓰나",
+    icon: Repeat,
+  },
+  {
+    id: "revenue",
+    label: "④ 수익",
+    question: "쓰는 사람이 돈을 내나",
+    icon: CreditCard,
+  },
+];
+
+export function AnalyticsTabBar({
+  tab,
+  onChange,
+}: {
+  tab: AnalyticsTab;
+  onChange: (t: AnalyticsTab) => void;
+}) {
+  const active = ANALYTICS_TABS.find((t) => t.id === tab);
+  return (
+    <div className="space-y-2">
+      <div
+        role="tablist"
+        aria-label="분석 축"
+        className="flex flex-wrap gap-2 border-b border-zinc-800 pb-3"
+      >
+        {ANALYTICS_TABS.map((t) => {
+          const Icon = t.icon;
+          const on = t.id === tab;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              id={`analytics-tab-${t.id}`}
+              aria-selected={on}
+              aria-controls={`analytics-panel-${t.id}`}
+              onClick={() => onChange(t.id)}
+              title={t.question}
+              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                on
+                  ? "bg-indigo-600 text-white"
+                  : "bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+      {active && (
+        <p className="text-xs text-zinc-500">
+          이 탭이 답하는 질문 —{" "}
+          <b className="text-zinc-300">{active.question}</b>
+        </p>
+      )}
     </div>
   );
 }
@@ -1669,11 +2039,20 @@ function CountryFunnelTable({
           <tr className="border-b border-zinc-800">
             <th className="py-2 pr-3 font-medium">{keyLabel}</th>
             <th className="py-2 pr-3 text-right font-medium">방문</th>
-            <th className="py-2 pr-3 text-right font-medium">다운로드</th>
-            <th className="py-2 pr-3 text-right font-medium">전환</th>
-            <th className="py-2 pr-3 text-right font-medium">설치</th>
-            <th className="py-2 pr-3 text-right font-medium">연결</th>
-            <th className="py-2 pr-3 text-right font-medium">10분 성공</th>
+            {/* ★단계별 전환은 언제나 분자/분모다. "23%" 만 있으면 그게 4명 중
+                1명인지 4천명 중 900명인지 화면에서 구분이 안 된다. */}
+            <th className="py-2 pr-3 text-right font-medium">
+              다운로드 <span className="text-zinc-600">/방문</span>
+            </th>
+            <th className="py-2 pr-3 text-right font-medium">
+              설치 <span className="text-zinc-600">/다운로드</span>
+            </th>
+            <th className="py-2 pr-3 text-right font-medium">
+              연결 <span className="text-zinc-600">/설치</span>
+            </th>
+            <th className="py-2 pr-3 text-right font-medium">
+              10분 성공 <span className="text-zinc-600">/연결</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -1696,26 +2075,21 @@ function CountryFunnelTable({
               <td className="py-2 pr-3 text-right tabular-nums">
                 {fmtInt(r.visitors)}
               </td>
-              <td className="py-2 pr-3 text-right tabular-nums">
-                {fmtInt(r.downloads)}
-              </td>
               <td
-                className={`py-2 pr-3 text-right tabular-nums ${
-                  r.visitors > 0 && r.downloads === 0
-                    ? "text-amber-400"
-                    : "text-zinc-400"
+                className={`py-2 pr-3 text-right ${
+                  r.visitors > 0 && r.downloads === 0 ? "text-amber-400" : ""
                 }`}
               >
-                {fmtRate(r.downloadRate)}
+                <Ratio numerator={r.downloads} denominator={r.visitors} />
               </td>
-              <td className="py-2 pr-3 text-right tabular-nums">
-                {fmtInt(r.installs)}
+              <td className="py-2 pr-3 text-right">
+                <Ratio numerator={r.installs} denominator={r.downloads} />
               </td>
-              <td className="py-2 pr-3 text-right tabular-nums">
-                {fmtInt(r.connected)}
+              <td className="py-2 pr-3 text-right">
+                <Ratio numerator={r.connected} denominator={r.installs} />
               </td>
-              <td className="py-2 pr-3 text-right tabular-nums">
-                {fmtInt(r.activated10m)}
+              <td className="py-2 pr-3 text-right">
+                <Ratio numerator={r.activated10m} denominator={r.connected} />
               </td>
             </tr>
           ))}
@@ -1750,8 +2124,11 @@ function CountryFunnelView({ data }: { data: CountryFunnel }) {
           {data.join.webRegion} ⋈ {data.join.appRegion} · 메모리 조인
         </span>
         <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5">
-          링크백 매칭 {fmtInt(data.coverage.matchedToWeb)}/
-          {fmtInt(data.coverage.installs)} ({fmtRate(data.coverage.matchRate)})
+          링크백 매칭{" "}
+          <Ratio
+            numerator={data.coverage.matchedToWeb}
+            denominator={data.coverage.installs}
+          />
         </span>
       </div>
 
@@ -2721,43 +3098,44 @@ function StreakRetentionView({ data }: { data: StreakRetention }) {
 }
 
 // ── 활성화 게이트 + 리텐션 코호트 뷰 (계정 identity 축) ─────────────────────
-function RetentionCohortsView({ data }: { data: RetentionCohorts }) {
+// ── 활성화 게이트 (계정 identity 축) ────────────────────────────────────────
+// ★4탭 재배치에서 이 함수는 둘로 갈렸다. 게이트는 "들어온 사람이 가치를 보나"
+// (②활성화)를, 코호트 표는 "남아서 계속 쓰나"(③리텐션)를 답한다 — 한 컴포넌트가
+// 두 질문을 답하고 있던 게 이 화면이 지저분했던 이유 중 하나다.
+export function ActivationGateView({ data }: { data: RetentionCohorts }) {
   const gate = data.activationGate;
   const maxUsers = Math.max(1, ...gate.steps.map((s) => s.users));
   const gateEmpty = gate.steps.every((s) => s.users === 0);
-  const cohorts = data.cohorts.week.length > 0 ? data.cohorts.week : [];
-  const horizons: Array<["d1" | "d7" | "d14" | "d30", string]> = [
-    ["d1", "D1"],
-    ["d7", "D7"],
-    ["d14", "D14"],
-    ["d30", "D30"],
-  ];
+  const entry = gate.steps[0]?.users ?? 0;
   return (
-    <div className="space-y-4">
-      <Panel
-        title="순차 활성화 게이트 (계정 identity)"
-        note="설치 → 최초실행 → 로그인 → 폴더연결 → 오케오픈 → 스폰 → 첫 티켓 완료"
-      >
-        {gateEmpty ? (
-          <EmptyState label="계정 귀속 이벤트가 이 기간에 없습니다 — 프라이버시 결정으로 텔레메트리 이벤트에서 계정 식별자를 제거해, 이 축은 은퇴일 이전 구간에서만 계산됩니다(0 은 '아무도 안 왔다'가 아닙니다). 설치 단위 동일 퍼널은 위 '온보딩 퍼널' 을 보세요." />
-        ) : (
-          <div className="space-y-1">
+    <Panel
+      title="순차 활성화 게이트 (계정 identity)"
+      note="설치 → 최초실행 → 로그인 → 폴더연결 → 오케오픈 → 스폰 → 첫 티켓 완료"
+    >
+      {gateEmpty ? (
+        <EmptyState label="계정 귀속 이벤트가 이 기간에 없습니다 — 프라이버시 결정으로 텔레메트리 이벤트에서 계정 식별자를 제거해, 이 축은 은퇴일 이전 구간에서만 계산됩니다(0 은 '아무도 안 왔다'가 아닙니다). 설치 단위 동일 퍼널은 위 '온보딩 퍼널' 을 보세요." />
+      ) : (
+        <>
+          <SmallSampleNotice n={entry} what="이 게이트의 진입" unit="명" />
+          <div className="mt-2 space-y-1">
             {gate.steps.map((s, i) => {
               const widthPct = Math.round((s.users / maxUsers) * 100);
               const drop = s.dropFromPrev;
+              const prev = s.users + (drop ?? 0);
               return (
                 <div key={s.key}>
                   {i > 0 && drop != null && drop > 0 && (
                     <div
-                      className={`flex items-center gap-1.5 py-0.5 pl-1 text-xs ${
+                      className={`flex flex-wrap items-center gap-1.5 py-0.5 pl-1 text-xs ${
                         s.isMaxDrop
                           ? "font-semibold text-red-400"
                           : "text-zinc-500"
                       }`}
                     >
                       <span>↓</span>
+                      {/* ★−50% 만 띄우지 않는다. 전 단계 분모를 옆에 박아 둔다. */}
                       <span className="tabular-nums">
-                        −{fmtInt(drop)}
+                        −{fmtInt(drop)}/{fmtInt(prev)}
                         {s.dropRateFromPrev != null &&
                           ` (−${fmtPct(s.dropRateFromPrev)})`}
                       </span>
@@ -2776,10 +3154,19 @@ function RetentionCohortsView({ data }: { data: RetentionCohorts }) {
                           backgroundColor: s.isMaxDrop ? STATUS_CRIT : SERIES,
                         }}
                       />
-                      <div className="absolute inset-0 flex items-center px-2">
+                      <div className="absolute inset-0 flex items-center gap-2 px-2">
                         <span className="text-xs font-semibold tabular-nums text-zinc-100">
                           {fmtInt(s.users)}명
                         </span>
+                        {i > 0 && (
+                          <span className="text-[11px] tabular-nums text-zinc-300/80">
+                            진입 대비 {fmtInt(s.users)}/{fmtInt(entry)} (
+                            {entry > 0
+                              ? `${((s.users / entry) * 100).toFixed(1)}%`
+                              : "—"}
+                            )
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -2787,31 +3174,48 @@ function RetentionCohortsView({ data }: { data: RetentionCohorts }) {
               );
             })}
           </div>
-        )}
-        <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>{gate.note}</span>
-        </p>
-      </Panel>
+        </>
+      )}
+      <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>{gate.note}</span>
+      </p>
+    </Panel>
+  );
+}
 
-      <Panel
-        title="리텐션 코호트 (주간)"
-        note="first-active 주 기준 · D1/D7/D14/D30 복귀율 · 관측창 미도달 칸은 —"
-      >
-        {cohorts.length === 0 ? (
-          <EmptyState label="코호트가 없습니다 (계정 귀속 활동 표본 없음)." />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[420px] text-xs">
+// ── 리텐션 코호트 표 (주간, 계정 identity 축) ───────────────────────────────
+export function RetentionCohortTableView({ data }: { data: RetentionCohorts }) {
+  const cohorts = data.cohorts.week.length > 0 ? data.cohorts.week : [];
+  const totalCohortUsers = cohorts.reduce((a, c) => a + c.cohortUsers, 0);
+  const horizons: Array<["d1" | "d7" | "d14" | "d30", string]> = [
+    ["d1", "D1"],
+    ["d7", "D7"],
+    ["d14", "D14"],
+    ["d30", "D30"],
+  ];
+  return (
+    <Panel
+      title="리텐션 코호트 (주간)"
+      note="first-active 주 기준 · D1/D7/D14/D30 복귀율 · 관측창 미도달 칸은 —"
+    >
+      {cohorts.length === 0 ? (
+        <EmptyState label="코호트가 없습니다 (계정 귀속 활동 표본 없음) — 0% 가 아니라 비율을 계산할 모수 자체가 없다는 뜻입니다." />
+      ) : (
+        <>
+          <SmallSampleNotice
+            n={totalCohortUsers}
+            what="이 표 전체의 코호트"
+            unit="명"
+          />
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full min-w-[520px] text-xs">
               <thead>
                 <tr className="text-zinc-500">
                   <th className="py-1 pr-3 text-left font-medium">코호트</th>
                   <th className="py-1 pr-3 text-right font-medium">인원</th>
                   {horizons.map(([, label]) => (
-                    <th
-                      key={label}
-                      className="py-1 pr-3 text-right font-medium"
-                    >
+                    <th key={label} className="py-1 pr-3 text-right font-medium">
                       {label}
                     </th>
                   ))}
@@ -2837,16 +3241,14 @@ function RetentionCohortsView({ data }: { data: RetentionCohorts }) {
                           className="py-1 pr-3 text-right tabular-nums text-zinc-400"
                         >
                           {rate == null ? (
-                            "—"
-                          ) : (
-                            <span className="whitespace-nowrap">
-                              <span className="text-zinc-200">
-                                {fmtInt(back)}/{fmtInt(c.cohortUsers)}
-                              </span>{" "}
-                              <span className="text-[11px] text-zinc-500">
-                                ({fmtPct(rate)})
-                              </span>
+                            <span title="관측창이 아직 안 왔거나 모수가 0 — 0% 가 아니라 판단 불가입니다.">
+                              —
                             </span>
+                          ) : (
+                            <Ratio
+                              numerator={back}
+                              denominator={c.cohortUsers}
+                            />
                           )}
                         </td>
                       );
@@ -2856,15 +3258,16 @@ function RetentionCohortsView({ data }: { data: RetentionCohorts }) {
               </tbody>
             </table>
           </div>
-        )}
-        <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>{data.cohorts.note}</span>
-        </p>
-      </Panel>
-    </div>
+        </>
+      )}
+      <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>{data.cohorts.note}</span>
+      </p>
+    </Panel>
   );
 }
+
 
 // ── 온보딩 스톨 카드 (#888) ─────────────────────────────────────────────────
 // "구독/크레딧/인증이 없어 최초에 멈춘 설치"의 규모. 서버는 진작 내려주고 있었는데
@@ -3064,13 +3467,19 @@ function ZeroFrictionCard({
           <EmptyState label="멀티에이전트 신호 0건 — 이 계측이 실린 빌드의 실사용 전이거나, 아직 아무도 2대를 동시에 굴리지 않았습니다." />
         </div>
       )}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard
-          label={`연결 후 ${ten.windowMinutes}분 내 첫 multi-agent 성공률`}
-          value={ten.rate == null ? "—" : fmtPct(ten.rate)}
-          sub={`${fmtInt(ten.withinClients)} / 모델 연결 ${fmtInt(
-            ten.base
-          )} · 연결→성공 중앙값 ${fmtDuration(ten.medianMs)}`}
+      <SmallSampleNotice
+        n={ten.base}
+        what="이 패널의 분모(모델 연결 완료 설치)"
+        unit="개"
+      />
+      <div className="mt-2 grid grid-cols-2 gap-3 md:grid-cols-4">
+        {/* ★큰 글씨는 분수다. 이 분모가 실측에서 한 자릿수라 퍼센트를 크게
+            띄우면 한 사람이 움직일 때마다 화면이 수십 %p 씩 출렁인다. */}
+        <RatioCard
+          label={`연결 후 ${ten.windowMinutes}분 내 첫 multi-agent 성공`}
+          numerator={ten.withinClients}
+          denominator={ten.base}
+          sub={`모델 연결 기준 · 연결→성공 중앙값 ${fmtDuration(ten.medianMs)}`}
           accent={
             ten.rate == null
               ? undefined
@@ -3081,36 +3490,33 @@ function ZeroFrictionCard({
         />
         {/* ★앞단(설치→연결). 여기서 죽은 사람은 위 KPI 의 실패가 아니라 앞단
             이탈이다 — 두 수를 나란히 두는 것이 이 카드의 요점이다. */}
-        <StatCard
-          label="모델 연결 도달률 (앞단)"
-          value={
-            connect == null || connect.connectRate == null
-              ? "—"
-              : fmtPct(connect.connectRate)
-          }
-          sub={
-            connect == null
-              ? "구버전 functions — 재배포 후 표시"
-              : `${fmtInt(connect.connectedClients)} / 최초 실행 ${fmtInt(
-                  connect.firstRunBase
-                )} · 미연결 ${fmtInt(
-                  connect.notConnectedClients
-                )}명은 10분 분모 밖`
-          }
-        />
-        <StatCard
+        {connect == null ? (
+          <StatCard
+            label="모델 연결 도달 (앞단)"
+            value="—"
+            sub="구버전 functions — 재배포 후 표시"
+          />
+        ) : (
+          <RatioCard
+            label="모델 연결 도달 (앞단)"
+            numerator={connect.connectedClients}
+            denominator={connect.firstRunBase}
+            sub={`최초 실행 기준 · 미연결 ${fmtInt(
+              connect.notConnectedClients
+            )}명은 10분 분모 밖`}
+          />
+        )}
+        <RatioCard
           label="동시 2대+ 사용 설치"
-          value={usage.activeRate == null ? "—" : fmtPct(usage.activeRate)}
-          sub={`${fmtInt(usage.activeClients)} / 모델 연결 ${fmtInt(
-            usage.base
-          )} · 관측 ${fmtInt(usage.activeEvents)}회`}
+          numerator={usage.activeClients}
+          denominator={usage.base}
+          sub={`모델 연결 기준 · 관측 ${fmtInt(usage.activeEvents)}회`}
         />
-        <StatCard
+        <RatioCard
           label="무료 → 유료 전환"
-          value={zf.freeToPaid.rate == null ? "—" : fmtPct(zf.freeToPaid.rate)}
-          sub={`${fmtInt(zf.freeToPaid.paidClients)} / 최초 실행 ${fmtInt(
-            zf.freeToPaid.base
-          )} · 가입 대비 ${
+          numerator={zf.freeToPaid.paidClients}
+          denominator={zf.freeToPaid.base}
+          sub={`최초 실행 기준 · 가입 대비 ${
             zf.freeToPaid.rateOfSignups == null
               ? "—"
               : fmtPct(zf.freeToPaid.rateOfSignups)
@@ -3119,23 +3525,17 @@ function ZeroFrictionCard({
         />
       </div>
       <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-        <StatCard
+        <RatioCard
           label="주 2회+ 사용"
-          value={
-            zf.weeklyTwicePlus.rate == null
-              ? "—"
-              : fmtPct(zf.weeklyTwicePlus.rate)
-          }
-          sub={`${fmtInt(zf.weeklyTwicePlus.clients)} / 최근 7일 활동 ${fmtInt(
-            zf.weeklyTwicePlus.base
-          )}명 (분모 다름)`}
+          numerator={zf.weeklyTwicePlus.clients}
+          denominator={zf.weeklyTwicePlus.base}
+          sub="분모가 다르다 — 최근 7일 활동 설치 기준"
         />
-        <StatCard
+        <RatioCard
           label="첫 성공 도달(창 무관)"
-          value={ten.successRate == null ? "—" : fmtPct(ten.successRate)}
-          sub={`${fmtInt(ten.successClients)}명 · ${
-            ten.windowMinutes
-          }분 밖 성공 포함`}
+          numerator={ten.successClients}
+          denominator={ten.base}
+          sub={`${ten.windowMinutes}분 밖 성공 포함`}
         />
         <StatCard
           label="동시 2대+ 에서의 성공"
@@ -3149,21 +3549,20 @@ function ZeroFrictionCard({
         />
         {/* 앵커 변경 전과 같은 축(앞단 포함). 두 수의 차이가 곧 '설치→연결'
             구간이 KPI 를 얼마나 눌렀는지다. */}
-        <StatCard
-          label="참고: 최초 실행 기준"
-          value={
-            fromFirstRun == null || fromFirstRun.rate == null
-              ? "—"
-              : fmtPct(fromFirstRun.rate)
-          }
-          sub={
-            fromFirstRun == null
-              ? "구버전 functions — 재배포 후 표시"
-              : `${fmtInt(fromFirstRun.withinClients)} / 최초 실행 ${fmtInt(
-                  fromFirstRun.base
-                )} · 중앙값 ${fmtDuration(fromFirstRun.medianMs)}`
-          }
-        />
+        {fromFirstRun == null ? (
+          <StatCard
+            label="참고: 최초 실행 기준"
+            value="—"
+            sub="구버전 functions — 재배포 후 표시"
+          />
+        ) : (
+          <RatioCard
+            label="참고: 최초 실행 기준"
+            numerator={fromFirstRun.withinClients}
+            denominator={fromFirstRun.base}
+            sub={`중앙값 ${fmtDuration(fromFirstRun.medianMs)}`}
+          />
+        )}
         <StatCard
           label="목표창"
           value={`${ten.windowMinutes}분`}
@@ -3438,6 +3837,9 @@ export default function AnalyticsPanel() {
   const [modelView, setModelView] = useState<"overview" | "routing">(
     "overview"
   );
+  // ★4탭. 한 탭 = 한 질문. 새 페이지가 아니라 기존 섹션의 재배치다 —
+  // 콜러블·로딩·토글은 전부 그대로 공유하고, 어느 탭에 있든 같은 모집단을 본다.
+  const [tab, setTab] = useState<AnalyticsTab>("acquisition");
   // 드릴다운 — 열려 있는 요청과 그 응답.
   const [drill, setDrill] = useState<DrilldownRequest | null>(null);
   const [drillState, setDrillState] = useState<Loaded<DrilldownResult>>({
@@ -3819,721 +4221,928 @@ export default function AnalyticsPanel() {
 
       <AdminExclusionNote biz={b} usage={u} model={m} />
 
-      {/* ── ★KPI 코크핏: 베타종료 게이지·재사용·스폰·신규 온보딩 이벤트 (🟡) ── */}
-      <div className="space-y-4">
-        <SectionHeader
-          icon={Gauge}
-          title="지표기반 베타종료 · 활성화 코크핏"
-          trust="yellow"
-        />
-        {kpi.loading ? (
-          <LoadingBox />
-        ) : kpi.error ? (
-          <ErrorBox msg={kpi.error} />
-        ) : kpi.data ? (
-          <KpiCockpitView kpi={kpi.data} />
-        ) : null}
-      </div>
+      <AnalyticsTabBar tab={tab} onChange={setTab} />
 
-      {/* ── 사업 (🟢) ─────────────────────────────────────────────── */}
-      <div className="space-y-4">
-        <SectionHeader icon={Users} title="사업 퍼널·성장" trust="green" />
-        {biz.loading ? (
-          <LoadingBox />
-        ) : biz.error ? (
-          <ErrorBox msg={biz.error} />
-        ) : b ? (
-          <>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-              <StatCard
-                label="대기자(가입)"
-                value={fmtInt(b.waitlist.total)}
-                sub={`+${fmtInt(b.waitlist.newInWindow)} / ${days}일`}
-              />
-              <StatCard
-                label="활성 파운더"
-                value={fmtInt(b.founders.accessGranted)}
-                sub={`설문 ${fmtInt(
-                  b.founders.feedbackSubmitted
-                )} · 인터뷰 ${fmtInt(b.founders.interviewCompleted)}`}
-              />
-              <StatCard
-                label="활성 구독자"
-                value={fmtInt(b.subscriptions.activeCurrent)}
-                sub="active · 만료일 미래"
-                accent={STATUS_GOOD}
-              />
-              <StatCard
-                label="유료 Pro(active)"
-                value={fmtInt(b.subscriptions.paidProActive)}
-                sub={`현재 ${fmtInt(
-                  b.subscriptions.paidCurrent
-                )} · 무료부여 ${fmtInt(b.subscriptions.founderGrantActive)}`}
-                accent={SERIES}
-              />
-              <StatCard
-                label="연속 구독자"
-                value={fmtInt(consecutiveBilling.subscribers)}
-                sub={`Toss 평균 ${consecutiveBilling.averageCycleCount.toFixed(
-                  1
-                )}회`}
-                accent={SERIES_2}
-              />
-              <StatCard
-                label="이탈(Churn)"
-                value={fmtInt(b.subscriptions.churnedInWindow)}
-                sub={`연체 ${fmtInt(b.subscriptions.pastDue)} · ${days}일`}
-                accent={
-                  b.subscriptions.churnedInWindow > 0 ? STATUS_CRIT : undefined
-                }
-              />
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <Panel
-                title="구독 티어 분포 (active)"
-                note={`활성 구독 ${fmtInt(
-                  Object.values(b.subscriptions.byPlanActive || {}).reduce(
-                    (a, c) => a + c,
-                    0
-                  )
-                )}건`}
-              >
-                <BarList
-                  data={tierRows}
-                  colorMap={TIER_COLOR}
-                  labelMap={TIER_LABEL}
-                  showShare
-                  emptyLabel="활성 구독이 없습니다."
-                  onDrill={(key) =>
-                    openDrill({ scope: "segment:plan", key, days })
-                  }
-                />
-              </Panel>
-              <Panel
-                title="구독 상태 분포"
-                note={`전체 ${fmtInt(b.subscriptions.total)}건`}
-              >
-                <BarList
-                  data={statusRows}
-                  colorMap={SUB_STATUS_COLOR}
-                  showShare
-                  emptyLabel="구독 데이터가 없습니다."
-                  onDrill={(key) =>
-                    openDrill({ scope: "segment:status", key, days })
-                  }
-                />
-              </Panel>
-              <Panel title="결제 수단 (active)">
-                <BarList
-                  data={providerRows}
-                  colorMap={PROVIDER_COLOR}
-                  showShare
-                  emptyLabel="활성 결제 구독이 없습니다."
-                  onDrill={(key) =>
-                    openDrill({ scope: "segment:provider", key, days })
-                  }
-                />
-              </Panel>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <Panel
-                title="활성 구독자 추이"
-                note="status=active · currentPeriodEnd 미래"
-              >
-                <LineChart
-                  data={subscriptionTrend.map((d) => ({
-                    date: d.date,
-                    value: d.active,
-                  }))}
-                  color={STATUS_GOOD}
-                  emptyLabel="활성 구독자 추이 데이터가 없습니다."
-                  onDrill={(date) =>
-                    openDrill({ scope: "subscription:day", date, days })
-                  }
-                />
-              </Panel>
-              <Panel
-                title="성장/이탈 추이"
-                note="신규 구독 doc · canceled/past_due"
-              >
-                <TwoLineChart
-                  data={subscriptionTrend.map((d) => ({
-                    date: d.date,
-                    first: d.new,
-                    second: d.churned,
-                  }))}
-                  first={{ label: "성장", color: SERIES_2 }}
-                  second={{ label: "이탈", color: STATUS_CRIT }}
-                  emptyLabel="성장/이탈 이벤트가 없습니다."
-                  onDrill={(date) =>
-                    openDrill({ scope: "subscription:day", date, days })
-                  }
-                />
-              </Panel>
-              <Panel
-                title="연속 청구 사이클"
-                note={`Toss billingCharges 기준 · Paddle ${fmtInt(
-                  b.subscriptions.paddleActiveCurrent
-                )}건은 원장 공백`}
-              >
-                <BarList
-                  data={consecutiveRows}
-                  color={SERIES_2}
-                  labelMap={{
-                    "2": "2회",
-                    "3": "3회",
-                    "4": "4회",
-                    "5": "5회",
-                    "6+": "6회 이상",
-                  }}
-                  emptyLabel="연속 succeeded 청구가 없습니다."
-                />
-              </Panel>
-            </div>
-
-            <Panel
-              title="가입 → 활성 → Pro 퍼널"
-              note="양끝(가입·Pro)은 식별 데이터(🟢), 가운데 활성은 옵트인 표본(🟡)."
-            >
-              {funnel.every((f) => f.value === 0) ? (
-                <EmptyState label="퍼널 데이터가 없습니다." />
-              ) : (
-                <ul className="space-y-2.5">
-                  {(() => {
-                    const fmax = Math.max(...funnel.map((f) => f.value), 1);
-                    return funnel.map((f) => {
-                      const pct = Math.max(
-                        (f.value / fmax) * 100,
-                        f.value > 0 ? 3 : 0
-                      );
-                      const color = f.trust === "yellow" ? STATUS_WARN : SERIES;
-                      return (
-                        <li key={f.key}>
-                          <div className="mb-0.5 flex items-baseline justify-between gap-2">
-                            <span className="text-xs text-zinc-300">
-                              {f.key}
-                            </span>
-                            <span className="text-xs font-medium tabular-nums text-zinc-400">
-                              {fmtInt(f.value)}
-                            </span>
-                          </div>
-                          <div className="h-3 w-full overflow-hidden rounded bg-zinc-900">
-                            <div
-                              className="h-full rounded"
-                              style={{
-                                width: `${pct}%`,
-                                backgroundColor: color,
-                              }}
-                            />
-                          </div>
-                        </li>
-                      );
-                    });
-                  })()}
-                </ul>
-              )}
-            </Panel>
-          </>
-        ) : null}
-      </div>
-
-      {/* ── 베타 세그먼트 사용패턴 (🟡 grant 모수는 🟢) ──────────────
-          "grant 를 준 사람들이 실제로 쓰는가". 모수(grant 명단)와 관측 카운트는
-          Firestore/cost_logs 라 항상 정확하고, 기능사용·세션·채택만 텔레메트리에
-          걸린다 — 그래서 섹션 신뢰도는 🟡 로 두되 카드가 둘을 구분해 말한다. */}
-      <div className="space-y-4">
-        <SectionHeader
-          icon={UserCheck}
-          title="베타 세그먼트 사용패턴"
-          trust="yellow"
+      {/* ── ① 획득 — "어디서 오고, 얼마 쓰면 몇 명 오나" ────────────────── */}
+      {tab === "acquisition" && (
+        <div
+          id="analytics-panel-acquisition"
+          role="tabpanel"
+          aria-labelledby="analytics-tab-acquisition"
+          className="space-y-8"
         >
-          {betaSeg.data && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950/40 px-2.5 py-1 text-xs text-zinc-400">
-              <Lock className="h-3.5 w-3.5" />
-              최소 코호트 {fmtInt(betaSeg.data.minCohortSize)}명 가드
-            </span>
-          )}
-        </SectionHeader>
-        {betaSeg.loading ? (
-          <LoadingBox />
-        ) : betaSeg.error ? (
-          <ErrorBox msg={betaSeg.error} />
-        ) : betaSeg.data ? (
-          <BetaSegmentView data={betaSeg.data} />
-        ) : null}
-      </div>
+          <AxisLimitNote
+            notes={[
+              "소스·캠페인·광고비 축은 GA4 브리지가 붙어야 채워집니다. 아래 표에 없는 채널은 유입이 0 인 게 아니라 아직 적재되지 않은 것입니다 — 그래서 이 탭은 빈 표를 채우지 않고 '적재 전' 이라고 적습니다.",
+              "국가·채널 조인은 익명 GA4 client_id 링크백으로만 이뤄집니다. 조인이 안 된 설치는 (unknown) 으로 모이므로, 특정 국가 칸의 0 은 '유입이 없다' 가 아니라 '조인이 안 됐다' 일 수 있습니다.",
+            ]}
+          />
 
-      {/* ── 제품 사용 (🟡) ────────────────────────────────────────── */}
-      <div className="space-y-4">
-        <SectionHeader icon={Activity} title="제품 사용·활성" trust="yellow">
-          {u && <SampleBadge n={u.sampleClientCount} />}
-        </SectionHeader>
-        {usage.loading ? (
-          <LoadingBox />
-        ) : usage.error ? (
-          <ErrorBox msg={usage.error} />
-        ) : u ? (
-          <>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <StatCard label="WAU (7일 고유)" value={fmtInt(u.wau)} />
-              <StatCard
-                label="옵트인 표본"
-                value={fmtInt(u.sampleClientCount)}
-                sub={`고유 clientId / ${days}일`}
-              />
-              <StatCard
-                label="태스크 성공률"
-                value={fmtPct(u.tasks.successRate)}
-                sub={`${fmtInt(u.tasks.succeeded)}/${fmtInt(u.tasks.total)}`}
-                accent={u.tasks.total > 0 ? STATUS_GOOD : undefined}
-              />
-              <StatCard
-                label="평균 완료시간"
-                value={fmtDuration(u.tasks.avgDurationMs)}
-              />
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <Panel
-                title="DAU 추이"
-                note="일별 고유 활성 clientId (옵트인 표본)"
-              >
-                <LineChart
-                  data={u.activeByDay.map((d) => ({
-                    date: d.date,
-                    value: d.dau,
-                  }))}
-                  emptyLabel="활성 데이터가 없습니다 (텔레메트리 공백)."
-                  onDrill={(date) =>
-                    openDrill({ scope: "usage:day", date, days })
-                  }
-                />
-              </Panel>
-              <Panel title="에이전트 스폰 추이" note="agent:spawned 일별">
-                <LineChart
-                  data={u.spawnsByDay.map((d) => ({
-                    date: d.date,
-                    value: d.count,
-                  }))}
-                  color={SERIES_2}
-                  emptyLabel="스폰 이벤트가 없습니다."
-                  onDrill={(date) =>
-                    openDrill({ scope: "spawn:day", date, days })
-                  }
-                />
-              </Panel>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <Panel
-                title="상위 이벤트"
-                note={
-                  (u.metricMode ?? "events") === "clients"
-                    ? "단위: 고유 사용자 수(clientId)"
-                    : "단위: 이벤트 발생 수"
-                }
-              >
-                <BarList
-                  data={u.topEvents.map((e) => ({
-                    key: e.key,
-                    value: e.count,
-                  }))}
-                  showShare
-                  emptyLabel="이벤트 데이터가 없습니다."
-                  onDrill={(key) =>
-                    openDrill({ scope: "segment:event", key, days })
-                  }
-                />
-              </Panel>
-              <Panel
-                title="스폰 — 역할별"
-                note={
-                  (u.metricMode ?? "events") === "clients"
-                    ? "단위: 고유 사용자 수(clientId)"
-                    : "단위: 스폰 발생 수"
-                }
-              >
-                <BarList
-                  data={u.spawnsByRole.map((e) => ({
-                    key: e.key,
-                    value: e.count,
-                  }))}
-                  color={SERIES_2}
-                  showShare
-                  emptyLabel="스폰 데이터가 없습니다."
-                  onDrill={(key) =>
-                    openDrill({ scope: "segment:role", key, days })
-                  }
-                />
-              </Panel>
-              <Panel
-                title="스폰 — 모델별"
-                note={
-                  (u.metricMode ?? "events") === "clients"
-                    ? "단위: 고유 사용자 수(clientId)"
-                    : "단위: 스폰 발생 수"
-                }
-              >
-                <BarList
-                  data={u.spawnsByModel.map((e) => ({
-                    key: e.key,
-                    value: e.count,
-                  }))}
-                  color={SERIES_2}
-                  showShare
-                  emptyLabel="스폰 데이터가 없습니다."
-                  onDrill={(key) =>
-                    openDrill({ scope: "segment:model", key, days })
-                  }
-                />
-              </Panel>
-            </div>
-          </>
-        ) : null}
-      </div>
-
-      {/* ── 온보딩 첫10분 퍼널 (🟡) ───────────────────────────────── */}
-      <div className="space-y-4">
-        <SectionHeader
-          icon={Activity}
-          title="온보딩 첫 10분 퍼널 (활성화)"
-          trust="yellow"
-        />
-        {onbFunnel.loading ? (
-          <LoadingBox />
-        ) : onbFunnel.error ? (
-          <ErrorBox msg={onbFunnel.error} />
-        ) : onbFunnel.data ? (
-          <OnboardingFunnelView funnel={onbFunnel.data} />
-        ) : null}
-      </div>
-
-      {/* ── 유입국가·채널 퍼널 (🟡, 익명 GA4 client_id 축) ─────────────── */}
-      <div className="space-y-4">
-        <SectionHeader
-          icon={Globe}
-          title="유입국가·채널 퍼널 (방문→다운로드→설치→10분)"
-          trust="yellow"
-        />
-        {countryFunnel.loading ? (
-          <LoadingBox />
-        ) : countryFunnel.error ? (
-          <ErrorBox msg={countryFunnel.error} />
-        ) : countryFunnel.data ? (
-          <CountryFunnelView data={countryFunnel.data} />
-        ) : null}
-      </div>
-
-      {/* ── 활성화 게이트 · 리텐션 코호트 (🟡, 계정 identity 축) ───────── */}
-      <div className="space-y-4">
-        <SectionHeader
-          icon={Activity}
-          title="활성화 게이트 · 리텐션 코호트"
-          trust="yellow"
-        />
-        {retention.loading ? (
-          <LoadingBox />
-        ) : retention.error ? (
-          <ErrorBox msg={retention.error} />
-        ) : retention.data ? (
-          <RetentionCohortsView data={retention.data} />
-        ) : null}
-      </div>
-
-      {/* ── D7·D14 리텐션 · 연속사용 스트릭 (🟡) ─────────────────────
-          사장님이 "매우 중요한 지표" 로 지목한 축. 위 코호트와 달리 설치/계정
-          두 축을 분리하고, 활동을 status="working" 또는 이벤트로 정의해
-          좀비 프로세스를 코호트에서 뺀다. 모든 비율은 분자/분모와 함께. */}
-      <div className="space-y-4">
-        <SectionHeader
-          icon={Activity}
-          title="D7 · D14 리텐션 · 연속사용 스트릭"
-          trust="yellow"
-        />
-        {streak.loading ? (
-          <LoadingBox />
-        ) : streak.error ? (
-          <ErrorBox msg={streak.error} />
-        ) : streak.data ? (
-          <StreakRetentionView data={streak.data} />
-        ) : null}
-      </div>
-
-      {/* ── 모델 준비 (🟡) ────────────────────────────────────────── */}
-      <div className="space-y-4">
-        <SectionHeader icon={Cpu} title="모델 선정·라우팅" trust="yellow">
-          <div className="flex overflow-hidden rounded-lg border border-zinc-700">
-            {[
-              ["overview", "비용/성과"],
-              ["routing", "SLM/라우팅"],
-            ].map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => setModelView(key as "overview" | "routing")}
-                className={`px-3 py-1.5 text-xs font-medium transition ${
-                  modelView === key
-                    ? "bg-indigo-600 text-white"
-                    : "bg-zinc-950 text-zinc-400 hover:bg-zinc-800"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </SectionHeader>
-        {model.loading ? (
-          <LoadingBox />
-        ) : model.error ? (
-          <ErrorBox msg={model.error} />
-        ) : m ? (
-          <>
-            <ThinLabelNotice />
-
-            {modelView === "overview" ? (
+          <div className="space-y-4">
+            <SectionHeader icon={Users} title="가입 유입" trust="green" />
+            {biz.loading ? (
+              <LoadingBox />
+            ) : biz.error ? (
+              <ErrorBox msg={biz.error} />
+            ) : b ? (
               <>
+                <SmallSampleNotice
+                  n={b.waitlist.total}
+                  what="대기자(가입)"
+                  unit="명"
+                />
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <StatCard
+                    label="대기자(가입)"
+                    value={fmtInt(b.waitlist.total)}
+                    sub={`+${fmtInt(b.waitlist.newInWindow)} / ${days}일`}
+                  />
+                  <StatCard
+                    label="활성 파운더"
+                    value={fmtInt(b.founders.accessGranted)}
+                    sub={`설문 ${fmtInt(
+                      b.founders.feedbackSubmitted
+                    )} · 인터뷰 ${fmtInt(b.founders.interviewCompleted)}`}
+                  />
+                  {/* ★전환은 카드에서도 분수가 먼저다 — "12%" 만 큰 글씨로
+                      띄우면 분모가 몇인지 화면 어디에도 남지 않는다. */}
+                  <RatioCard
+                    label="대기자 → 파운더 선정"
+                    numerator={b.founders.accessGranted}
+                    denominator={b.waitlist.total}
+                    sub="누적(조회 기간 무관)"
+                    title="선정률 = accessGranted / 대기자 총원. 둘 다 Firestore 원장이라 항상 켜져 있는 축입니다."
+                  />
+                  <RatioCard
+                    label="파운더 → 설문 제출"
+                    numerator={b.founders.feedbackSubmitted}
+                    denominator={b.founders.accessGranted}
+                    sub="누적(조회 기간 무관)"
+                  />
+                </div>
+              </>
+            ) : null}
+          </div>
+
+          {/* ── 유입국가·채널 퍼널 (🟡, 익명 GA4 client_id 축) ─────────────── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Globe}
+              title="유입국가·채널 퍼널 (방문→다운로드→설치→10분)"
+              trust="yellow"
+            />
+            {countryFunnel.loading ? (
+              <LoadingBox />
+            ) : countryFunnel.error ? (
+              <ErrorBox msg={countryFunnel.error} />
+            ) : countryFunnel.data ? (
+              <CountryFunnelView data={countryFunnel.data} />
+            ) : null}
+          </div>
+
+          {/* ── 소스·캠페인·CAC — GA4 브리지 적재 전 (🔴) ─────────────
+              ★가짜 0 을 그리지 않는다. 여기에 빈 표나 0 을 그리면 "광고가 하나도
+              안 먹었다" 로 읽히는데, 사실은 배선이 아직 없는 것이다. ── */}
+          <div className="space-y-4">
+            <SectionHeader icon={Globe} title="소스·캠페인·CAC" trust="red" />
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <PendingIngestion
+                title="캠페인·소스별 유입과 CAC"
+                waitingOn="GA4 브리지(캠페인·광고비 축) 적재 — 별도 티켓 진행 중"
+                willShow={[
+                  "캠페인/소스/매체별 방문 → 다운로드 → 설치 (분자/분모 동반)",
+                  "채널별 CAC = 광고비 / 획득 설치수",
+                  "유입 품질: 채널별 10분 활성화 도달률",
+                ]}
+              />
+              <PendingIngestion
+                title="획득 비용 회수 (채널별)"
+                waitingOn="GA4 브리지 + analytics_purchase(구매 이벤트) 적재"
+                willShow={[
+                  "채널별 CAC 대비 회수 기간",
+                  "채널 × 코호트 LTV",
+                ]}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ② 활성화 — "들어온 사람이 가치를 보나" ──────────────────────── */}
+      {tab === "activation" && (
+        <div
+          id="analytics-panel-activation"
+          role="tabpanel"
+          aria-labelledby="analytics-tab-activation"
+          className="space-y-8"
+        >
+          <AxisLimitNote
+            notes={[
+              EVENTS_ACCOUNT_AXIS_LIMIT,
+              retention.data?.activationGate.note,
+            ]}
+          />
+
+          {/* ── ★KPI 코크핏: 베타종료 게이지·재사용·스폰·신규 온보딩 이벤트 (🟡) ── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Gauge}
+              title="지표기반 베타종료 · 활성화 코크핏"
+              trust="yellow"
+            />
+            {kpi.loading ? (
+              <LoadingBox />
+            ) : kpi.error ? (
+              <ErrorBox msg={kpi.error} />
+            ) : kpi.data ? (
+              <KpiCockpitView kpi={kpi.data} />
+            ) : null}
+          </div>
+
+          {/* ── 온보딩 첫10분 퍼널 (🟡) ───────────────────────────────── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Activity}
+              title="온보딩 첫 10분 퍼널 (활성화)"
+              trust="yellow"
+            />
+            {onbFunnel.loading ? (
+              <LoadingBox />
+            ) : onbFunnel.error ? (
+              <ErrorBox msg={onbFunnel.error} />
+            ) : onbFunnel.data ? (
+              <OnboardingFunnelView funnel={onbFunnel.data} />
+            ) : null}
+          </div>
+
+          {/* ── 활성화 게이트 (🟡, 계정 identity 축) ────────────────────
+              리텐션 코호트 표와 한 컴포넌트였던 것을 여기서 갈랐다 — 게이트는
+              "가치를 보나", 코호트는 "남아 있나" 로 서로 다른 질문이다. ── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Activity}
+              title="순차 활성화 게이트"
+              trust="yellow"
+            />
+            {retention.loading ? (
+              <LoadingBox />
+            ) : retention.error ? (
+              <ErrorBox msg={retention.error} />
+            ) : retention.data ? (
+              <ActivationGateView data={retention.data} />
+            ) : null}
+          </div>
+
+          {/* ── 제품 사용 (🟡) ────────────────────────────────────────── */}
+          <div className="space-y-4">
+            <SectionHeader icon={Activity} title="제품 사용·활성" trust="yellow">
+              {u && <SampleBadge n={u.sampleClientCount} />}
+            </SectionHeader>
+            {usage.loading ? (
+              <LoadingBox />
+            ) : usage.error ? (
+              <ErrorBox msg={usage.error} />
+            ) : u ? (
+              <>
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <StatCard label="WAU (7일 고유)" value={fmtInt(u.wau)} />
+                  <StatCard
+                    label="옵트인 표본"
+                    value={fmtInt(u.sampleClientCount)}
+                    sub={`고유 clientId / ${days}일`}
+                  />
+                  <StatCard
+                    label="태스크 성공률"
+                    value={fmtPct(u.tasks.successRate)}
+                    sub={`${fmtInt(u.tasks.succeeded)}/${fmtInt(u.tasks.total)}`}
+                    accent={u.tasks.total > 0 ? STATUS_GOOD : undefined}
+                  />
+                  <StatCard
+                    label="평균 완료시간"
+                    value={fmtDuration(u.tasks.avgDurationMs)}
+                  />
+                </div>
+
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                   <Panel
-                    title="모델별 비용"
-                    note={`${days}일 누적 (cost_logs)`}
+                    title="DAU 추이"
+                    note="일별 고유 활성 clientId (옵트인 표본)"
                   >
-                    <BarList
-                      data={m.costByModel.map((c) => ({
-                        key: c.model,
-                        value: c.cost,
+                    <LineChart
+                      data={u.activeByDay.map((d) => ({
+                        date: d.date,
+                        value: d.dau,
                       }))}
-                      format={fmtCost}
-                      showShare
-                      emptyLabel="비용 데이터가 없습니다."
-                      onDrill={(key) =>
-                        openDrill({ scope: "segment:model", key, days })
+                      emptyLabel="활성 데이터가 없습니다 (텔레메트리 공백)."
+                      marker={ID_SCHEME_MARKER}
+                      onDrill={(date) =>
+                        openDrill({ scope: "usage:day", date, days })
                       }
                     />
                   </Panel>
-                  <Panel title="일별 비용 추이">
+                  <Panel title="에이전트 스폰 추이" note="agent:spawned 일별">
                     <LineChart
-                      data={m.costByDay.map((d) => ({
+                      data={u.spawnsByDay.map((d) => ({
                         date: d.date,
-                        value: d.cost,
+                        value: d.count,
                       }))}
-                      format={fmtCost}
-                      emptyLabel="비용 데이터가 없습니다."
+                      color={SERIES_2}
+                      emptyLabel="스폰 이벤트가 없습니다."
+                      marker={ID_SCHEME_MARKER}
                       onDrill={(date) =>
-                        openDrill({ scope: "cost:day", date, days })
+                        openDrill({ scope: "spawn:day", date, days })
                       }
                     />
                   </Panel>
                 </div>
 
-                {/* 기간별 모델 분해 — 위 '일별 비용 추이'는 총합이라 어느 모델이
-                    그날 비용을 만들었는지 못 본다. 구버전 functions 응답에는
-                    없는 필드라 optional 가드(배포순서 soft-fail). */}
-                {m.costByDayModel && (
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                   <Panel
-                    title="일별 모델별 비용"
+                    title="상위 이벤트"
                     note={
-                      m.costByDayModel.truncatedModels > 0
-                        ? `상위 ${
-                            m.costByDayModel.models.length - 1
-                          }종 + 그 외 ${
-                            m.costByDayModel.truncatedModels
-                          }종 (총합 보존)`
-                        : `모델 ${m.costByDayModel.models.length}종 (cost_logs)`
+                      (u.metricMode ?? "events") === "clients"
+                        ? "단위: 고유 사용자 수(clientId)"
+                        : "단위: 이벤트 발생 수"
                     }
                   >
-                    <StackedBarChart
-                      dates={m.costByDayModel.dates}
-                      series={m.costByDayModel.models.map((mm, i) => ({
-                        key: mm.model,
-                        values: m.costByDayModel!.matrix[i] ?? [],
+                    <BarList
+                      data={u.topEvents.map((e) => ({
+                        key: e.key,
+                        value: e.count,
                       }))}
-                      format={fmtCost}
-                      emptyLabel="비용 데이터가 없습니다."
-                      onDrill={(date) =>
-                        openDrill({ scope: "cost:day", date, days })
+                      showShare
+                      emptyLabel="이벤트 데이터가 없습니다."
+                      onDrill={(key) =>
+                        openDrill({ scope: "segment:event", key, days })
                       }
                     />
                   </Panel>
-                )}
-
-                {/* ★하위모델 분해는 은퇴했다 — 이 표를 만들던 agentId 조인이 곧
-                    익명 텔레메트리를 계정으로 되짚는 경로였다(티켓
-                    U5OPOKf0D3I2TSRP8yUq). 패널을 조용히 지우지 않고 사유를
-                    서버 note 로 그대로 보여준다. */}
-                {m.modelBreakdown && (
                   <Panel
-                    title="하네스 → 하위모델 분해 (은퇴)"
-                    note="프라이버시 — 익명 텔레메트리와 cost_logs 의 조인을 끊으면서 함께 은퇴"
+                    title="스폰 — 역할별"
+                    note={
+                      (u.metricMode ?? "events") === "clients"
+                        ? "단위: 고유 사용자 수(clientId)"
+                        : "단위: 스폰 발생 수"
+                    }
                   >
-                    <SubModelBreakdownTable
-                      harnesses={m.modelBreakdown.harnesses}
+                    <BarList
+                      data={u.spawnsByRole.map((e) => ({
+                        key: e.key,
+                        value: e.count,
+                      }))}
+                      color={SERIES_2}
+                      showShare
+                      emptyLabel="스폰 데이터가 없습니다."
+                      onDrill={(key) =>
+                        openDrill({ scope: "segment:role", key, days })
+                      }
+                    />
+                  </Panel>
+                  <Panel
+                    title="스폰 — 모델별"
+                    note={
+                      (u.metricMode ?? "events") === "clients"
+                        ? "단위: 고유 사용자 수(clientId)"
+                        : "단위: 스폰 발생 수"
+                    }
+                  >
+                    <BarList
+                      data={u.spawnsByModel.map((e) => ({
+                        key: e.key,
+                        value: e.count,
+                      }))}
+                      color={SERIES_2}
+                      showShare
+                      emptyLabel="스폰 데이터가 없습니다."
                       onDrill={(key) =>
                         openDrill({ scope: "segment:model", key, days })
                       }
                     />
-                    <p className="mt-3 text-xs leading-relaxed text-zinc-600">
-                      {m.modelBreakdown.note}
-                    </p>
                   </Panel>
+                </div>
+              </>
+            ) : null}
+          </div>
+
+          {/* ── 베타 세그먼트 사용패턴 (🟡 grant 모수는 🟢) ──────────────
+              "grant 를 준 사람들이 실제로 쓰는가". 모수(grant 명단)와 관측 카운트는
+              Firestore/cost_logs 라 항상 정확하고, 기능사용·세션·채택만 텔레메트리에
+              걸린다 — 그래서 섹션 신뢰도는 🟡 로 두되 카드가 둘을 구분해 말한다. */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={UserCheck}
+              title="베타 세그먼트 사용패턴"
+              trust="yellow"
+            >
+              {betaSeg.data && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950/40 px-2.5 py-1 text-xs text-zinc-400">
+                  <Lock className="h-3.5 w-3.5" />
+                  최소 코호트 {fmtInt(betaSeg.data.minCohortSize)}명 가드
+                </span>
+              )}
+            </SectionHeader>
+            {betaSeg.loading ? (
+              <LoadingBox />
+            ) : betaSeg.error ? (
+              <ErrorBox msg={betaSeg.error} />
+            ) : betaSeg.data ? (
+              <BetaSegmentView data={betaSeg.data} />
+            ) : null}
+          </div>
+
+          {/* ── 릴리스·버전 헬스 (🟡 BQ events.appVersion) ─────────────── */}
+          <div className="space-y-4">
+            <SectionHeader icon={Tag} title="릴리스·버전 헬스" trust="yellow" />
+            {release.loading ? (
+              <LoadingBox />
+            ) : release.error ? (
+              <ErrorBox msg={release.error} />
+            ) : release.data ? (
+              <ReleaseHealthView data={release.data} />
+            ) : null}
+          </div>
+
+          {/* ── 안정성 상세 (🔴 Sentry 선행) ──────────────────────────── */}
+          {/* 위 릴리스 섹션이 채우는 것은 **에이전트 크래시 이벤트**(agent:crashed)
+              기반 버전별 안정성이다. 앱 자체의 예외/스택트레이스 집계는 Sentry
+              연동이 선행이라 여전히 비어 있다 — 두 개를 한 칸으로 합치지 않는다. */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={ShieldOff}
+              title="앱 예외·스택트레이스"
+              trust="red"
+            />
+            <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 py-10 text-center">
+              <ShieldOff className="h-6 w-6 text-zinc-600" />
+              <p className="text-sm font-medium text-zinc-400">
+                어드민 대시보드 연동 대기
+              </p>
+              <p className="max-w-md text-xs text-zinc-600">
+                앱의 Sentry 크래시 리포팅은 DSN 이 설정되어 있고 사용자 동의 시
+                동작합니다. 다만 이 패널이 Sentry API 에서 지표를 읽어오는 연동은
+                아직 구현되지 않아 표시할 수치가 없습니다. 예외/스택트레이스 단위
+                지표는 sentry.io 프로젝트에서 확인하세요. (버전별 에이전트
+                크래시율은 위 &ldquo;릴리스·버전 헬스&rdquo; 섹션이 텔레메트리로
+                이미 보여줍니다.)
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ③ 리텐션 — "남아서 계속 쓰나" ──────────────────────────────── */}
+      {tab === "retention" && (
+        <div
+          id="analytics-panel-retention"
+          role="tabpanel"
+          aria-labelledby="analytics-tab-retention"
+          className="space-y-8"
+        >
+          <AxisLimitNote
+            notes={[
+              EVENTS_ACCOUNT_AXIS_LIMIT,
+              ID_SCHEME_MARKER.hint,
+              retention.data?.cohorts.note,
+              streak.data?.account.identityScheme.note,
+            ]}
+          />
+
+          {/* ── 리텐션 코호트 (🟡, 계정 identity 축) ─────────────────── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Repeat}
+              title="리텐션 코호트 (주간)"
+              trust="yellow"
+            />
+            {retention.loading ? (
+              <LoadingBox />
+            ) : retention.error ? (
+              <ErrorBox msg={retention.error} />
+            ) : retention.data ? (
+              <RetentionCohortTableView data={retention.data} />
+            ) : null}
+          </div>
+
+          {/* ── D7·D14 리텐션 · 연속사용 스트릭 (🟡) ─────────────────────
+              사장님이 "매우 중요한 지표" 로 지목한 축. 위 코호트와 달리 설치/계정
+              두 축을 분리하고, 활동을 status="working" 또는 이벤트로 정의해
+              좀비 프로세스를 코호트에서 뺀다. 모든 비율은 분자/분모와 함께. */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Activity}
+              title="D7 · D14 리텐션 · 연속사용 스트릭"
+              trust="yellow"
+            />
+            {streak.loading ? (
+              <LoadingBox />
+            ) : streak.error ? (
+              <ErrorBox msg={streak.error} />
+            ) : streak.data ? (
+              <StreakRetentionView data={streak.data} />
+            ) : null}
+          </div>
+
+          {/* ── 모델 준비 (🟡) ────────────────────────────────────────── */}
+          <div className="space-y-4">
+            <SectionHeader icon={Cpu} title="모델 선정·라우팅" trust="yellow">
+              <div className="flex overflow-hidden rounded-lg border border-zinc-700">
+                {[
+                  ["overview", "비용/성과"],
+                  ["routing", "SLM/라우팅"],
+                ].map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => setModelView(key as "overview" | "routing")}
+                    className={`px-3 py-1.5 text-xs font-medium transition ${
+                      modelView === key
+                        ? "bg-indigo-600 text-white"
+                        : "bg-zinc-950 text-zinc-400 hover:bg-zinc-800"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </SectionHeader>
+            {model.loading ? (
+              <LoadingBox />
+            ) : model.error ? (
+              <ErrorBox msg={model.error} />
+            ) : m ? (
+              <>
+                <ThinLabelNotice />
+
+                {modelView === "overview" ? (
+                  <>
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                      <Panel
+                        title="모델별 비용"
+                        note={`${days}일 누적 (cost_logs)`}
+                      >
+                        <BarList
+                          data={m.costByModel.map((c) => ({
+                            key: c.model,
+                            value: c.cost,
+                          }))}
+                          format={fmtCost}
+                          showShare
+                          emptyLabel="비용 데이터가 없습니다."
+                          onDrill={(key) =>
+                            openDrill({ scope: "segment:model", key, days })
+                          }
+                        />
+                      </Panel>
+                      <Panel title="일별 비용 추이">
+                        <LineChart
+                          data={m.costByDay.map((d) => ({
+                            date: d.date,
+                            value: d.cost,
+                          }))}
+                          format={fmtCost}
+                          emptyLabel="비용 데이터가 없습니다."
+                          onDrill={(date) =>
+                            openDrill({ scope: "cost:day", date, days })
+                          }
+                        />
+                      </Panel>
+                    </div>
+
+                    {/* 기간별 모델 분해 — 위 '일별 비용 추이'는 총합이라 어느 모델이
+                        그날 비용을 만들었는지 못 본다. 구버전 functions 응답에는
+                        없는 필드라 optional 가드(배포순서 soft-fail). */}
+                    {m.costByDayModel && (
+                      <Panel
+                        title="일별 모델별 비용"
+                        note={
+                          m.costByDayModel.truncatedModels > 0
+                            ? `상위 ${
+                                m.costByDayModel.models.length - 1
+                              }종 + 그 외 ${
+                                m.costByDayModel.truncatedModels
+                              }종 (총합 보존)`
+                            : `모델 ${m.costByDayModel.models.length}종 (cost_logs)`
+                        }
+                      >
+                        <StackedBarChart
+                          dates={m.costByDayModel.dates}
+                          series={m.costByDayModel.models.map((mm, i) => ({
+                            key: mm.model,
+                            values: m.costByDayModel!.matrix[i] ?? [],
+                          }))}
+                          format={fmtCost}
+                          emptyLabel="비용 데이터가 없습니다."
+                          onDrill={(date) =>
+                            openDrill({ scope: "cost:day", date, days })
+                          }
+                        />
+                      </Panel>
+                    )}
+
+                    {/* ★하위모델 분해는 은퇴했다 — 이 표를 만들던 agentId 조인이 곧
+                        익명 텔레메트리를 계정으로 되짚는 경로였다(티켓
+                        U5OPOKf0D3I2TSRP8yUq). 패널을 조용히 지우지 않고 사유를
+                        서버 note 로 그대로 보여준다. */}
+                    {m.modelBreakdown && (
+                      <Panel
+                        title="하네스 → 하위모델 분해 (은퇴)"
+                        note="프라이버시 — 익명 텔레메트리와 cost_logs 의 조인을 끊으면서 함께 은퇴"
+                      >
+                        <SubModelBreakdownTable
+                          harnesses={m.modelBreakdown.harnesses}
+                          onDrill={(key) =>
+                            openDrill({ scope: "segment:model", key, days })
+                          }
+                        />
+                        <p className="mt-3 text-xs leading-relaxed text-zinc-600">
+                          {m.modelBreakdown.note}
+                        </p>
+                      </Panel>
+                    )}
+
+                    <Panel
+                      title="모델 × 역할 성공률·효율"
+                      note="성공률·평균비용·비용대비효율 (task_outcomes)"
+                    >
+                      {m.modelRoleStats.length === 0 ? (
+                        <EmptyState label="라벨 준비중입니다. 3.0.17 이후 task_outcomes가 축적되면 채워집니다." />
+                      ) : (
+                        <ModelRoleTable
+                          rows={m.modelRoleStats}
+                          onDrill={(scope, key) => openDrill({ scope, key, days })}
+                        />
+                      )}
+                    </Panel>
+                  </>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                      <StatCard
+                        label="라우팅 결정"
+                        value={fmtInt(
+                          m.routing.byReuseVsSpawn.reduce(
+                            (sum, r) => sum + r.count,
+                            0
+                          )
+                        )}
+                        sub="dispatch:decision"
+                      />
+                      <StatCard
+                        label="선택 모델"
+                        value={fmtInt(m.routing.bySelectedModel.length)}
+                        sub="모델 종류"
+                      />
+                      <StatCard
+                        label="Outcome 모델"
+                        value={fmtInt(m.outcomeByModel.length)}
+                        sub="task_outcomes"
+                      />
+                      <StatCard
+                        label="재작업"
+                        value={fmtInt(
+                          m.outcomeByModel.reduce(
+                            (sum, r) => sum + r.reworkCount,
+                            0
+                          )
+                        )}
+                        sub="retriesCount 합계"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
+                      <Panel title="선택 모델">
+                        <BarList
+                          data={m.routing.bySelectedModel.map((e) => ({
+                            key: e.key,
+                            value: e.count,
+                          }))}
+                          showShare
+                          emptyLabel="라우팅 결정 데이터가 없습니다. 라벨 준비중/3.0.17 이후 축적 상태입니다."
+                          onDrill={(key) =>
+                            openDrill({ scope: "segment:model", key, days })
+                          }
+                        />
+                      </Panel>
+                      <Panel title="결정 사유">
+                        <BarList
+                          data={m.routing.byDecisionReason.map((e) => ({
+                            key: e.key,
+                            value: e.count,
+                          }))}
+                          showShare
+                          emptyLabel="결정 사유 데이터가 없습니다."
+                        />
+                      </Panel>
+                      <Panel title="재사용 vs 스폰">
+                        <BarList
+                          data={m.routing.byReuseVsSpawn.map((e) => ({
+                            key: e.key,
+                            value: e.count,
+                          }))}
+                          colorMap={{
+                            reuse: STATUS_GOOD,
+                            restart: STATUS_WARN,
+                            spawn: SERIES,
+                          }}
+                          showShare
+                          emptyLabel="데이터가 없습니다."
+                        />
+                      </Panel>
+                      <Panel title="선정 모드">
+                        <BarList
+                          data={m.routing.byModelSelectionMode.map((e) => ({
+                            key: e.key,
+                            value: e.count,
+                          }))}
+                          showShare
+                          emptyLabel="데이터가 없습니다."
+                        />
+                      </Panel>
+                    </div>
+
+                    <Panel
+                      title="매칭점수 분포"
+                      note="perModelScores[].total + reuse/restart agentScore 버킷"
+                    >
+                      <RoutingScoreTable rows={m.routing.scoreBuckets} />
+                    </Panel>
+
+                    <Panel
+                      title="모델별 Outcome"
+                      note="성공·비용·재작업 라벨은 준비중이며 3.0.17 이후 축적분부터 해석 가능"
+                    >
+                      <OutcomeByModelTable rows={m.outcomeByModel} />
+                    </Panel>
+                  </>
                 )}
+              </>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* ── ④ 수익 — "쓰는 사람이 돈을 내나" ───────────────────────────── */}
+      {tab === "revenue" && (
+        <div
+          id="analytics-panel-revenue"
+          role="tabpanel"
+          aria-labelledby="analytics-tab-revenue"
+          className="space-y-8"
+        >
+          <AxisLimitNote
+            notes={[
+              "구독·결제 상태는 Firestore 원장이라 항상 켜져 있습니다(🟢). 다만 결제 금액 단위 이벤트(analytics_purchase)가 아직 적재 전이라 MRR·LTV·코호트별 회수는 계산할 소스가 없습니다 — 그 칸에 0 을 그리지 않고 '적재 전' 으로 둡니다.",
+              "연속 청구 사이클은 Toss billingCharges 원장만 채웁니다. Paddle 구독은 원장 공백이라 그 칸의 0 은 '연속 결제가 없다' 가 아니라 '이 원장에 없다' 입니다.",
+            ]}
+          />
+
+          <div className="space-y-4">
+            <SectionHeader icon={CreditCard} title="구독·전환" trust="green" />
+            {biz.loading ? (
+              <LoadingBox />
+            ) : biz.error ? (
+              <ErrorBox msg={biz.error} />
+            ) : b ? (
+              <>
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+                  <StatCard
+                    label="활성 구독자"
+                    value={fmtInt(b.subscriptions.activeCurrent)}
+                    sub="active · 만료일 미래"
+                    accent={STATUS_GOOD}
+                  />
+                  <StatCard
+                    label="유료 Pro(active)"
+                    value={fmtInt(b.subscriptions.paidProActive)}
+                    sub={`현재 ${fmtInt(
+                      b.subscriptions.paidCurrent
+                    )} · 무료부여 ${fmtInt(b.subscriptions.founderGrantActive)}`}
+                    accent={SERIES}
+                  />
+                  <StatCard
+                    label="연속 구독자"
+                    value={fmtInt(consecutiveBilling.subscribers)}
+                    sub={`Toss 평균 ${consecutiveBilling.averageCycleCount.toFixed(
+                      1
+                    )}회`}
+                    accent={SERIES_2}
+                  />
+                  <StatCard
+                    label="이탈(Churn)"
+                    value={fmtInt(b.subscriptions.churnedInWindow)}
+                    sub={`연체 ${fmtInt(b.subscriptions.pastDue)} · ${days}일`}
+                    accent={
+                      b.subscriptions.churnedInWindow > 0 ? STATUS_CRIT : undefined
+                    }
+                  />
+                  {/* ★유료 전환율은 카드에서도 분수를 크게. 분모가 대기자냐
+                      구독자냐에 따라 완전히 다른 수인데, 퍼센트만 띄우면
+                      어느 쪽인지 화면에 안 남는다. */}
+                  <RatioCard
+                    label="유료 전환 (vs 대기자)"
+                    numerator={b.subscriptions.paidProActive}
+                    denominator={b.waitlist.total}
+                    sub="누적"
+                  />
+                  <RatioCard
+                    label="유료 전환 (vs 전체 구독)"
+                    numerator={b.subscriptions.paidProActive}
+                    denominator={b.subscriptions.total}
+                    sub="무료 부여 포함 분모"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <Panel
+                    title="구독 티어 분포 (active)"
+                    note={`활성 구독 ${fmtInt(
+                      Object.values(b.subscriptions.byPlanActive || {}).reduce(
+                        (a, c) => a + c,
+                        0
+                      )
+                    )}건`}
+                  >
+                    <BarList
+                      data={tierRows}
+                      colorMap={TIER_COLOR}
+                      labelMap={TIER_LABEL}
+                      showShare
+                      emptyLabel="활성 구독이 없습니다."
+                      onDrill={(key) =>
+                        openDrill({ scope: "segment:plan", key, days })
+                      }
+                    />
+                  </Panel>
+                  <Panel
+                    title="구독 상태 분포"
+                    note={`전체 ${fmtInt(b.subscriptions.total)}건`}
+                  >
+                    <BarList
+                      data={statusRows}
+                      colorMap={SUB_STATUS_COLOR}
+                      showShare
+                      emptyLabel="구독 데이터가 없습니다."
+                      onDrill={(key) =>
+                        openDrill({ scope: "segment:status", key, days })
+                      }
+                    />
+                  </Panel>
+                  <Panel title="결제 수단 (active)">
+                    <BarList
+                      data={providerRows}
+                      colorMap={PROVIDER_COLOR}
+                      showShare
+                      emptyLabel="활성 결제 구독이 없습니다."
+                      onDrill={(key) =>
+                        openDrill({ scope: "segment:provider", key, days })
+                      }
+                    />
+                  </Panel>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <Panel
+                    title="활성 구독자 추이"
+                    note="status=active · currentPeriodEnd 미래"
+                  >
+                    <LineChart
+                      data={subscriptionTrend.map((d) => ({
+                        date: d.date,
+                        value: d.active,
+                      }))}
+                      color={STATUS_GOOD}
+                      emptyLabel="활성 구독자 추이 데이터가 없습니다."
+                      onDrill={(date) =>
+                        openDrill({ scope: "subscription:day", date, days })
+                      }
+                    />
+                  </Panel>
+                  <Panel
+                    title="성장/이탈 추이"
+                    note="신규 구독 doc · canceled/past_due"
+                  >
+                    <TwoLineChart
+                      data={subscriptionTrend.map((d) => ({
+                        date: d.date,
+                        first: d.new,
+                        second: d.churned,
+                      }))}
+                      first={{ label: "성장", color: SERIES_2 }}
+                      second={{ label: "이탈", color: STATUS_CRIT }}
+                      emptyLabel="성장/이탈 이벤트가 없습니다."
+                      onDrill={(date) =>
+                        openDrill({ scope: "subscription:day", date, days })
+                      }
+                    />
+                  </Panel>
+                  <Panel
+                    title="연속 청구 사이클"
+                    note={`Toss billingCharges 기준 · Paddle ${fmtInt(
+                      b.subscriptions.paddleActiveCurrent
+                    )}건은 원장 공백`}
+                  >
+                    <BarList
+                      data={consecutiveRows}
+                      color={SERIES_2}
+                      labelMap={{
+                        "2": "2회",
+                        "3": "3회",
+                        "4": "4회",
+                        "5": "5회",
+                        "6+": "6회 이상",
+                      }}
+                      emptyLabel="연속 succeeded 청구가 없습니다."
+                    />
+                  </Panel>
+                </div>
 
                 <Panel
-                  title="모델 × 역할 성공률·효율"
-                  note="성공률·평균비용·비용대비효율 (task_outcomes)"
+                  title="가입 → 활성 → Pro 퍼널"
+                  note="양끝(가입·Pro)은 식별 데이터(🟢), 가운데 활성은 옵트인 표본(🟡)."
                 >
-                  {m.modelRoleStats.length === 0 ? (
-                    <EmptyState label="라벨 준비중입니다. 3.0.17 이후 task_outcomes가 축적되면 채워집니다." />
+                  {funnel.every((f) => f.value === 0) ? (
+                    <EmptyState label="퍼널 데이터가 없습니다." />
                   ) : (
-                    <ModelRoleTable
-                      rows={m.modelRoleStats}
-                      onDrill={(scope, key) => openDrill({ scope, key, days })}
-                    />
+                    <ul className="space-y-2.5">
+                      {(() => {
+                        const fmax = Math.max(...funnel.map((f) => f.value), 1);
+                        return funnel.map((f, i) => {
+                          const pct = Math.max(
+                            (f.value / fmax) * 100,
+                            f.value > 0 ? 3 : 0
+                          );
+                          const color = f.trust === "yellow" ? STATUS_WARN : SERIES;
+                          // ★단계 전환은 전 단계를 분모로 함께 적는다. 여기 가운데
+                          //   칸은 옵트인 표본이라 분모가 서로 다른 축이 섞인다 —
+                          //   그래서 퍼센트만 남기면 곱해서 읽는 오독이 생긴다.
+                          const prev = i > 0 ? funnel[i - 1].value : null;
+                          return (
+                            <li key={f.key}>
+                              <div className="mb-0.5 flex flex-wrap items-baseline justify-between gap-2">
+                                <span className="text-xs text-zinc-300">
+                                  {f.key}
+                                </span>
+                                <span className="inline-flex items-baseline gap-2 text-xs font-medium tabular-nums text-zinc-400">
+                                  {prev != null && (
+                                    <span className="text-[11px] text-zinc-500">
+                                      전 단계 대비{" "}
+                                      <Ratio
+                                        numerator={f.value}
+                                        denominator={prev}
+                                      />
+                                    </span>
+                                  )}
+                                  <span>{fmtInt(f.value)}</span>
+                                </span>
+                              </div>
+                              <div className="h-3 w-full overflow-hidden rounded bg-zinc-900">
+                                <div
+                                  className="h-full rounded"
+                                  style={{
+                                    width: `${pct}%`,
+                                    backgroundColor: color,
+                                  }}
+                                />
+                              </div>
+                            </li>
+                          );
+                        });
+                      })()}
+                    </ul>
                   )}
                 </Panel>
               </>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                  <StatCard
-                    label="라우팅 결정"
-                    value={fmtInt(
-                      m.routing.byReuseVsSpawn.reduce(
-                        (sum, r) => sum + r.count,
-                        0
-                      )
-                    )}
-                    sub="dispatch:decision"
-                  />
-                  <StatCard
-                    label="선택 모델"
-                    value={fmtInt(m.routing.bySelectedModel.length)}
-                    sub="모델 종류"
-                  />
-                  <StatCard
-                    label="Outcome 모델"
-                    value={fmtInt(m.outcomeByModel.length)}
-                    sub="task_outcomes"
-                  />
-                  <StatCard
-                    label="재작업"
-                    value={fmtInt(
-                      m.outcomeByModel.reduce(
-                        (sum, r) => sum + r.reworkCount,
-                        0
-                      )
-                    )}
-                    sub="retriesCount 합계"
-                  />
-                </div>
+            ) : null}
+          </div>
 
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
-                  <Panel title="선택 모델">
-                    <BarList
-                      data={m.routing.bySelectedModel.map((e) => ({
-                        key: e.key,
-                        value: e.count,
-                      }))}
-                      showShare
-                      emptyLabel="라우팅 결정 데이터가 없습니다. 라벨 준비중/3.0.17 이후 축적 상태입니다."
-                      onDrill={(key) =>
-                        openDrill({ scope: "segment:model", key, days })
-                      }
-                    />
-                  </Panel>
-                  <Panel title="결정 사유">
-                    <BarList
-                      data={m.routing.byDecisionReason.map((e) => ({
-                        key: e.key,
-                        value: e.count,
-                      }))}
-                      showShare
-                      emptyLabel="결정 사유 데이터가 없습니다."
-                    />
-                  </Panel>
-                  <Panel title="재사용 vs 스폰">
-                    <BarList
-                      data={m.routing.byReuseVsSpawn.map((e) => ({
-                        key: e.key,
-                        value: e.count,
-                      }))}
-                      colorMap={{
-                        reuse: STATUS_GOOD,
-                        restart: STATUS_WARN,
-                        spawn: SERIES,
-                      }}
-                      showShare
-                      emptyLabel="데이터가 없습니다."
-                    />
-                  </Panel>
-                  <Panel title="선정 모드">
-                    <BarList
-                      data={m.routing.byModelSelectionMode.map((e) => ({
-                        key: e.key,
-                        value: e.count,
-                      }))}
-                      showShare
-                      emptyLabel="데이터가 없습니다."
-                    />
-                  </Panel>
-                </div>
-
-                <Panel
-                  title="매칭점수 분포"
-                  note="perModelScores[].total + reuse/restart agentScore 버킷"
-                >
-                  <RoutingScoreTable rows={m.routing.scoreBuckets} />
-                </Panel>
-
-                <Panel
-                  title="모델별 Outcome"
-                  note="성공·비용·재작업 라벨은 준비중이며 3.0.17 이후 축적분부터 해석 가능"
-                >
-                  <OutcomeByModelTable rows={m.outcomeByModel} />
-                </Panel>
-              </>
-            )}
-          </>
-        ) : null}
-      </div>
-
-      {/* ── 릴리스·버전 헬스 (🟡 BQ events.appVersion) ─────────────── */}
-      <div className="space-y-4">
-        <SectionHeader icon={Tag} title="릴리스·버전 헬스" trust="yellow" />
-        {release.loading ? (
-          <LoadingBox />
-        ) : release.error ? (
-          <ErrorBox msg={release.error} />
-        ) : release.data ? (
-          <ReleaseHealthView data={release.data} />
-        ) : null}
-      </div>
-
-      {/* ── 안정성 상세 (🔴 Sentry 선행) ──────────────────────────── */}
-      {/* 위 릴리스 섹션이 채우는 것은 **에이전트 크래시 이벤트**(agent:crashed)
-          기반 버전별 안정성이다. 앱 자체의 예외/스택트레이스 집계는 Sentry
-          연동이 선행이라 여전히 비어 있다 — 두 개를 한 칸으로 합치지 않는다. */}
-      <div className="space-y-4">
-        <SectionHeader
-          icon={ShieldOff}
-          title="앱 예외·스택트레이스"
-          trust="red"
-        />
-        <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 py-10 text-center">
-          <ShieldOff className="h-6 w-6 text-zinc-600" />
-          <p className="text-sm font-medium text-zinc-400">
-            어드민 대시보드 연동 대기
-          </p>
-          <p className="max-w-md text-xs text-zinc-600">
-            앱의 Sentry 크래시 리포팅은 DSN 이 설정되어 있고 사용자 동의 시
-            동작합니다. 다만 이 패널이 Sentry API 에서 지표를 읽어오는 연동은
-            아직 구현되지 않아 표시할 수치가 없습니다. 예외/스택트레이스 단위
-            지표는 sentry.io 프로젝트에서 확인하세요. (버전별 에이전트
-            크래시율은 위 &ldquo;릴리스·버전 헬스&rdquo; 섹션이 텔레메트리로
-            이미 보여줍니다.)
-          </p>
+          {/* ── MRR·LTV·회수 — 구매 적재 전 (🔴) ──────────────────────── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={CreditCard}
+              title="MRR · LTV · 코호트별 회수"
+              trust="red"
+            />
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <PendingIngestion
+                title="MRR · ARPU · LTV"
+                waitingOn="analytics_purchase(결제 금액 이벤트) 적재 — 별도 티켓 진행 중"
+                willShow={[
+                  "월 반복 매출(MRR)과 증감 분해(신규/확장/이탈)",
+                  "ARPU · 코호트별 LTV",
+                  "구독 시작 → 첫 결제까지 걸린 일수 분포",
+                ]}
+              />
+              <PendingIngestion
+                title="코호트별 회수"
+                waitingOn="analytics_purchase + GA4 브리지(획득 비용)"
+                willShow={[
+                  "가입 코호트별 누적 매출 곡선",
+                  "CAC 회수 시점(개월)",
+                ]}
+              />
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
       {drill && (
         <DrilldownModal
