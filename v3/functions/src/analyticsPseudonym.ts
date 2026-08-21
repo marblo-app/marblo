@@ -29,10 +29,48 @@
 // scripts/check-deploy-env.mjs 가 ANALYTICS_ID_SALT 부재로 막고, 런타임도
 // 인스턴스당 1회 에러 로그를 남긴다 — 조용한 열화가 아니라 시끄러운 실패다.
 
+// ── ★축 경계 — 지우지 마라 (ticket dTpcKWwRw5DvEMKxpCZi) ─────────────────────
+//
+//   익명축  analytics_identity              install_key / ga_key / first_touch
+//   계정축  analytics_purchase / cost_logs  user_key / 금액
+//
+//   ★두 축은 조인하지 않는다. 조인키를 만들지도 않는다.
+//     근거: 배포된 처리방침 v3/src/components/legal/privacyContent.tsx:95
+//           (EN :210) "두 기록이 공유하는 조인 키는 없습니다 /
+//           the two share no join key"
+//
+// ★analytics_identity 에 `user_key` 가 없는 것은 **빠뜨린 게 아니라 뺀 것**이다.
+// install_key(익명 설치) 와 user_key(계정) 를 같은 행에 두면 그 행 자체가 위
+// 문구가 없다고 말한 그 조인키가 된다. 실측: agent_heartbeats.userId 는 36자
+// 익명 설치 UUID(고유 14), cost_logs.userId 는 28자 계정 UID(고유 5) — 두 축을
+// 이으면 산출물은 "익명 설치 → 계정" 매핑, 즉 계정 재식별이다. 양쪽을 같은
+// salt 로 HMAC 해도 조인은 그대로 성립한다(그게 조인의 목적이니까). 가명화는
+// 익명화가 아니다. 컬럼 자리조차 만들지 않은 이유도 같다 — 빈 컬럼이 있으면
+// 다음 사람이 "채우면 되겠네" 로 읽는다.
+//
+// ★과잉 적용 금지: 계정축 **안에서의** 조인은 금지가 아니다. 처리방침이 명시적
+// 으로 허용한다("이 기록만은 성격상 익명일 수 없습니다"). 금지된 건 두 축을
+// **잇는 것** 하나다.
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { createHmac } from "node:crypto";
 
-/** 가명 공간(종류). 종류가 다르면 같은 원시값이어도 다른 가명이 된다. */
-export type AnalyticsIdKind = "agent" | "task" | "project" | "flow";
+/**
+ * 가명 공간(종류). 종류가 다르면 같은 원시값이어도 다른 가명이 된다.
+ *
+ * - `agent`/`task`/`project`/`flow`: 익명 세계 row 의 내부 조인키(#915).
+ * - `install`/`ga`: analytics_identity 의 익명축 키.
+ * - ★`user`(계정 uid 축)는 여기 **없다.** analytics_purchase 티켓
+ *   (`6EnTiEzL7T2NpjOnTTSj`)이 자기 축의 것으로 추가한다. 이 파일에서
+ *   익명축과 계정축이 만나더라도 **두 축을 잇는 표는 만들지 않는다** — 위 경계 참조.
+ */
+export type AnalyticsIdKind =
+  | "agent"
+  | "task"
+  | "project"
+  | "flow"
+  | "install"
+  | "ga";
 
 /** 가명 앞에 붙는 짧은 태그 — BQ 에서 눈으로 종류를 구분하기 위한 것뿐이다. */
 const KIND_PREFIX: Record<AnalyticsIdKind, string> = {
@@ -40,6 +78,8 @@ const KIND_PREFIX: Record<AnalyticsIdKind, string> = {
   task: "tk",
   project: "pj",
   flow: "fl",
+  install: "in",
+  ga: "ga",
 };
 
 /**
@@ -50,6 +90,13 @@ const KIND_PREFIX: Record<AnalyticsIdKind, string> = {
  *
  * `retryOf` 는 재시도 대상 티켓 id 다(telemetryService 의 recordTaskRetry 는
  * taskId 축) — taskId 와 같은 공간에 둔다.
+ *
+ * ★`install`/`ga` kind 는 **일부러 여기 없다.** 이 표는 익명 세계 테이블에
+ * insert 하기 직전 `pseudonymizeAnalyticsRow` 가 훑는 목록이다. 여기에
+ * `userId: "install"` 을 올리면 지금 살아 있는 events/agent_heartbeats 의
+ * 쓰기 동작이 바뀌어 기존 분석이 그 시점에 끊긴다. 그 두 kind 는
+ * analytics_identity 백필이 `pseudonymizeAnalyticsId` 를 **명시적으로** 불러
+ * 쓴다 — 자동 치환 대상이 아니다.
  */
 export const ANALYTICS_ID_FIELDS: Readonly<Record<string, AnalyticsIdKind>> = {
   projectId: "project",

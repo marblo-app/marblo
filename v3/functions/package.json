@@ -39,8 +39,11 @@
     "test:portone-cron": "tsc src/billing.ts src/portone.ts --outDir lib --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node tests/portoneBillingCron.test.mjs",
     "test:portone-easypay": "tsc src/billing.ts src/portone.ts --outDir lib --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node tests/portoneEasyPay.test.mjs",
     "test:analytics-pseudonym": "tsc src/analyticsPseudonym.ts src/analyticsPseudonym.test.ts --outDir .test-out/analytics-pseudonym --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/analytics-pseudonym/analyticsPseudonym.test.js",
+    "test:analytics-id-scheme": "tsc src/analyticsIdScheme.ts src/analyticsIdScheme.test.ts --outDir .test-out/analytics-id-scheme --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/analytics-id-scheme/analyticsIdScheme.test.js",
     "test:routing-shadow": "tsc src/routingShadow.ts src/routingShadow.test.ts --outDir .test-out/routing-shadow --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/routing-shadow/routingShadow.test.js",
-    "test:routingShadow": "npm run test:routing-shadow"
+    "test:routingShadow": "npm run test:routing-shadow",
+    "backfill:analytics-identity:build": "tsc src/analyticsPseudonym.ts src/analyticsIdScheme.ts scripts/backfill-analytics-identity.ts --outDir .script-out/analytics-identity --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck",
+    "backfill:analytics-identity": "npm run backfill:analytics-identity:build && node .script-out/analytics-identity/scripts/backfill-analytics-identity.js"
   },
   "engines": {
     "node": "20"

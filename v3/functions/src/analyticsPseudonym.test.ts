@@ -166,3 +166,54 @@ test("readAnalyticsIdSalt — 미설정/공백은 null, 값은 trim 후 반환",
     "s3cret"
   );
 });
+
+// ── 익명축 kind 추가분 (ticket dTpcKWwRw5DvEMKxpCZi) ─────────────────────────
+
+test("★install/ga kind 는 ANALYTICS_ID_FIELDS 에 없다 — 라이브 쓰기 동작 불변", () => {
+  // 여기에 올리면 살아 있는 events/agent_heartbeats 쓰기가 바뀌어 기존 분석이
+  // 그 시점에 끊긴다. 백필은 pseudonymizeAnalyticsId 를 직접 부른다.
+  const kinds = Object.values(ANALYTICS_ID_FIELDS);
+  assert.ok(!kinds.includes("install"));
+  assert.ok(!kinds.includes("ga"));
+  // userId 는 어느 축에서도 자동 치환 대상이 아니다.
+  assert.ok(!("userId" in ANALYTICS_ID_FIELDS));
+});
+
+test("★계정축 kind('user')는 이 모듈에 존재하지 않는다", () => {
+  // analytics_identity 에 user_key 가 생기는 순간 익명축↔계정축 조인키가 된다.
+  // 이 테스트가 빨개지면 축 경계가 무너진 것이다 — 파일 상단 주석을 읽어라.
+  const asRecord = pseudonymizeAnalyticsId as unknown as (
+    k: string,
+    r: unknown,
+    s: string | null
+  ) => unknown;
+  // 'user' 는 KIND_PREFIX 에 없으므로 접두가 undefined 로 샌다.
+  const out = String(asRecord("user", "some-uid", SALT));
+  assert.ok(out.startsWith("undefined_"), `예상 밖 출력: ${out.slice(0, 12)}…`);
+});
+
+test("install/ga — 같은 원시값이어도 kind 가 다르면 다른 가명", () => {
+  const asInstall = pseudonymizeAnalyticsId("install", "same-id", SALT);
+  const asGa = pseudonymizeAnalyticsId("ga", "same-id", SALT);
+  const asAgent = pseudonymizeAnalyticsId("agent", "same-id", SALT);
+  assert.notEqual(asInstall, asGa);
+  assert.notEqual(asInstall, asAgent);
+  assert.equal(String(asInstall).startsWith("in_"), true);
+  assert.equal(String(asGa).startsWith("ga_"), true);
+});
+
+test("install/ga — 결정적(같은 입력 → 같은 가명), 백필 재실행 안전", () => {
+  const a = pseudonymizeAnalyticsId("install", "uuid-abc", SALT);
+  const b = pseudonymizeAnalyticsId("install", "uuid-abc", SALT);
+  assert.equal(a, b);
+});
+
+test("install/ga — 솔트 없으면 null (fail-safe, 원시값 폴백 금지)", () => {
+  assert.equal(pseudonymizeAnalyticsId("install", "uuid-abc", null), null);
+  assert.equal(pseudonymizeAnalyticsId("ga", "123.456", null), null);
+});
+
+test("install/ga — 빈 값은 모양 유지(NULL 관례 보존)", () => {
+  assert.equal(pseudonymizeAnalyticsId("ga", null, SALT), null);
+  assert.equal(pseudonymizeAnalyticsId("ga", "", SALT), "");
+});
