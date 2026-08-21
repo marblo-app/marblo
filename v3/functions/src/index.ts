@@ -89,6 +89,35 @@ import {
   type PersonAxisBasis,
   type PersonAxisCoverage,
 } from "./personAxis";
+import {
+  TEAM_USAGE_CACHE_COLLECTION,
+  TEAM_USAGE_CACHE_SCHEMA_VERSION,
+  TEAM_USAGE_CACHE_TTL_SECONDS,
+  TEAM_USAGE_DEFAULT_RANGE_DAYS,
+  TEAM_USAGE_MAX_PROJECTS_IN_SCOPE,
+  TEAM_USAGE_MEMORY_TTL_SECONDS,
+  TEAM_USAGE_NOT_PROVISIONED_OPERATOR_NOTE,
+  buildSelfUsageDailyQuery,
+  buildTeamUsageCacheDocId,
+  buildTeamUsageDailyQuery,
+  buildTeamUsageEnvelope,
+  buildUnattributedRowsQuery,
+  canManualRefresh,
+  capProjectScope,
+  canSeeTeamBreakdown,
+  clampWindowToGate,
+  computeUsageWindow,
+  foldCachedTeamUsage,
+  intersectProjectScope,
+  isCacheUsable,
+  resolveTeamUsageGate,
+  resolveUsageScope,
+  teamMemberKey,
+  toCacheRows,
+  type TeamRole,
+  type TeamUsageCacheDoc,
+  type TeamUsageDailyRow,
+} from "./teamUsage";
 import { buildMetadata } from "./telemetryMetadata";
 import {
   ROUTING_SHADOW_SCHEMA_VERSION,
@@ -14194,6 +14223,694 @@ export const loadAnalyticsPurchase = functions
     const dryRun = (data as { dryRun?: unknown } | null)?.dryRun === true;
     return loadAnalyticsPurchaseInternal({ dryRun });
   });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 팀 오버뷰 — 오너가 보는 멤버별 사용량 (#1103 설계 §10-T4)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 정본: docs/team-usage-overview-design-2026-08-21.md
+// 판정·집계·가명화·라벨은 전부 `teamUsage.ts`(순수, node --test) 에 있다. 여기는
+// **인증·권한 조회·BQ 질의·캐시 IO** 만 한다 — projectAudit.ts 와 같은 분업이다.
+//
+// ── ★이 콜러블이 지키는 넷 ─────────────────────────────────────────────────
+//
+//  1) ★Admin SDK 는 보안 규칙을 **우회한다.** "룰이 막아주겠지" 로 기대지 않고
+//     서버 코드가 스스로 역할을 확인한다. 신원의 출처는 `context.auth` 하나뿐이고
+//     `X-Plan`/`X-User-Id` 같은 클라 제어 헤더는 읽지 않는다.
+//  2) ★클라가 준 projectId 를 권한 근거로 쓰지 않는다. 서버가 uid 로 만든 집합과의
+//     **교집합 필터**로만 쓴다 — 확장이 구조적으로 불가능하다.
+//  3) ★원시 uid·이메일을 응답·캐시·로그 어디에도 남기지 않는다. BQ 결과를 받는
+//     즉시 팀 전용 가명(`tm_`)으로 바꾸고, 그 뒤로 uid 를 들고 다니지 않는다.
+//  4) ★게이트가 닫혀 있으면 **질의 자체를 하지 않고** 0행 + 사유를 돌려준다.
+//     그래도 self 스코프는 산다 — 화면 절반이 죽지 않는다.
+
+/**
+ * ★게이트 운영자 사유는 **로그로만** 나간다 — 봉투에 실으면 오너 화면에 env 키가
+ * 박힌다. 인스턴스당 1회만 남긴다(`personAxisGateWarned` 와 같은 규약): 닫힘은
+ * 설계된 정상 상태라 요청마다 경고를 쌓으면 진짜 문제가 묻힌다.
+ */
+let teamUsageGateWarned = false;
+
+/** 뷰가 사는 BigQuery 프로젝트. PERSON_AXIS_PROJECT_ID 와 같은 규약. */
+const TEAM_USAGE_BQ_PROJECT_ID =
+  process.env.GCLOUD_PROJECT ??
+  process.env.GOOGLE_CLOUD_PROJECT ??
+  process.env.GCP_PROJECT ??
+  "marblo-2253d";
+
+/** 한 번에 훑는 프로젝트 상한. 읽기 폭주를 막고 응답 시간을 묶어 둔다. */
+const TEAM_USAGE_PROJECT_SCAN_LIMIT = 50;
+
+/**
+ * L1 — 인스턴스 메모리 캐시(TTL 60초). 같은 인스턴스가 처리하는 연속 요청
+ * (탭 전환, 차트 여러 개가 같은 데이터를 쓰는 경우)을 흡수한다. 인스턴스 churn
+ * 에 사라지므로 **보조 수단**이고, 본체는 L2(Firestore) 다.
+ *
+ * ★키에 uid 를 넣지 않는다 — 프로젝트 단위 캐시다(권한이 다른 둘이 같은 캐시를
+ *   나눠 쓰지 않게 하려면 키가 프로젝트여야 한다, 설계 §6.2).
+ */
+const teamUsageMemoryCache = new Map<
+  string,
+  {
+    rows: Array<Record<string, unknown>>;
+    expiresAtMs: number;
+    generatedAtMs: number;
+  }
+>();
+const TEAM_USAGE_MEMORY_CACHE_MAX = 200;
+
+type TeamProjectRef = {
+  projectId: string;
+  name: string | null;
+  ownerId: string;
+  members: string[];
+  role: TeamRole;
+};
+
+/** 문자열 배열 파라미터를 안전하게 읽는다(형이 흔들려도 권한이 넓어지지 않는다). */
+function parseProjectIdsParam(data: unknown): string[] | null {
+  const raw = (data as { projectIds?: unknown } | null | undefined)?.projectIds;
+  if (!Array.isArray(raw)) return null;
+  const out: string[] = [];
+  for (const v of raw) {
+    if (typeof v !== "string") continue;
+    const t = v.trim();
+    if (t !== "") out.push(t);
+  }
+  // ★여기서 자르지 않는다. 상한은 `capProjectScope` 한 곳에서만 적용하고
+  //   잘린 개수를 센다 — 자르는 자리가 둘이면 한 쪽이 조용해진다.
+  return out.length > 0 ? out : null;
+}
+
+/**
+ * ★서버가 uid 로 "내가 속한 프로젝트와 그 역할" 을 만든다.
+ *
+ * 세 갈래를 합친다:
+ *   - `projects.ownerId == uid`                → owner
+ *   - `memberRoles` 의 내 문서(role == admin)  → admin
+ *   - `projects.members array-contains uid`    → member/viewer(역할 문서 기준)
+ *
+ * ★`memberRoles` 는 `userId` 단일 필드로 조회한다 — 복합 인덱스를 새로 요구하지
+ *   않기 위해서다(인덱스가 없으면 쿼리가 통째로 죽고, 그러면 팀 탭이 안 뜬다).
+ *   역할 필터는 코드에서 한다.
+ */
+async function resolveTeamProjects(uid: string): Promise<TeamProjectRef[]> {
+  const [ownedSnap, memberSnap, roleSnap] = await Promise.all([
+    db
+      .collection("projects")
+      .where("ownerId", "==", uid)
+      .limit(TEAM_USAGE_PROJECT_SCAN_LIMIT)
+      .get(),
+    db
+      .collection("projects")
+      .where("members", "array-contains", uid)
+      .limit(TEAM_USAGE_PROJECT_SCAN_LIMIT)
+      .get(),
+    db
+      .collection("memberRoles")
+      .where("userId", "==", uid)
+      .limit(TEAM_USAGE_PROJECT_SCAN_LIMIT)
+      .get(),
+  ]);
+
+  const roleByProject = new Map<string, string>();
+  for (const doc of roleSnap.docs) {
+    const d = doc.data() as { projectId?: unknown; role?: unknown };
+    const pid = typeof d.projectId === "string" ? d.projectId : null;
+    const role = typeof d.role === "string" ? d.role : null;
+    if (pid && role) roleByProject.set(pid, role);
+  }
+
+  const byId = new Map<string, TeamProjectRef>();
+  const add = (
+    doc: FirebaseFirestore.QueryDocumentSnapshot
+  ): void => {
+    if (byId.has(doc.id)) return;
+    const d = doc.data() as {
+      name?: unknown;
+      ownerId?: unknown;
+      members?: unknown;
+    };
+    const ownerId = typeof d.ownerId === "string" ? d.ownerId : "";
+    const members = Array.isArray(d.members)
+      ? d.members.filter((m): m is string => typeof m === "string")
+      : [];
+    // ★역할 판정은 firestore.rules 의 isAdminOrOwner 와 같은 정본을 쓴다.
+    const declared = roleByProject.get(doc.id);
+    const role: TeamRole =
+      ownerId === uid
+        ? "owner"
+        : declared === "admin"
+        ? "admin"
+        : declared === "viewer"
+        ? "viewer"
+        : "member";
+    byId.set(doc.id, {
+      projectId: doc.id,
+      name: typeof d.name === "string" && d.name.trim() !== "" ? d.name : null,
+      ownerId,
+      members,
+      role,
+    });
+  };
+  for (const doc of ownedSnap.docs) add(doc);
+  for (const doc of memberSnap.docs) add(doc);
+
+  // ★admin 역할 문서는 있는데 `members[]` 에는 없는 프로젝트를 놓치지 않는다.
+  //   두 곳이 어긋나 있어도 admin 이 조용히 권한을 잃으면 안 된다(그 반대는
+  //   위험하지만 이쪽은 역할 문서가 근거이므로 안전하다).
+  const orphanAdminIds = [...roleByProject.entries()]
+    .filter(([pid, role]) => role === "admin" && !byId.has(pid))
+    .map(([pid]) => pid)
+    .slice(0, TEAM_USAGE_PROJECT_SCAN_LIMIT);
+  if (orphanAdminIds.length > 0) {
+    const docs = await db.getAll(
+      ...orphanAdminIds.map((pid) => db.collection("projects").doc(pid))
+    );
+    for (const doc of docs) {
+      if (doc.exists) add(doc as FirebaseFirestore.QueryDocumentSnapshot);
+    }
+  }
+
+  // 상한에 걸렸으면 조용히 자르지 않는다 — 잘린 사실을 로그에 남긴다.
+  if (
+    ownedSnap.size >= TEAM_USAGE_PROJECT_SCAN_LIMIT ||
+    memberSnap.size >= TEAM_USAGE_PROJECT_SCAN_LIMIT
+  ) {
+    functions.logger.warn(
+      "[teamUsage] 프로젝트 스캔 상한에 걸렸다 — 일부 프로젝트가 스코프에서 빠졌다.",
+      { limit: TEAM_USAGE_PROJECT_SCAN_LIMIT }
+    );
+  }
+  return [...byId.values()];
+}
+
+/**
+ * uid → 표시명. ★이메일을 폴백으로 쓰지 않는다(설계 §5.4).
+ *
+ * 이름을 모르면 null 이고 화면이 "이름 미상" 으로 그린다. 이메일로 채우면
+ * 이 응답이 이메일 배포 경로가 된다 — `users` 문서에 이메일이 있다는 사실과
+ * 그걸 팀 화면에 실어 보내는 것은 다른 얘기다.
+ */
+async function resolveMemberDisplayNames(
+  uids: ReadonlyArray<string>
+): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  const unique = [...new Set(uids)].filter((u) => u.trim() !== "");
+  if (unique.length === 0) return out;
+  const refs = unique.map((u) => db.collection("users").doc(u));
+  const docs = await db.getAll(...refs);
+  for (const doc of docs) {
+    const d = doc.data() as { displayName?: unknown } | undefined;
+    const name =
+      typeof d?.displayName === "string" && d.displayName.trim() !== ""
+        ? d.displayName.trim()
+        : null;
+    out.set(doc.id, name);
+  }
+  return out;
+}
+
+/** BQ 뷰가 아직 없어서 실패한 건가(= 적재 전). */
+function isBqViewMissingError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  return /not found/i.test(msg) && /table|view/i.test(msg);
+}
+
+type TeamUsageQueryOutcome =
+  | { ok: true; rows: Array<Record<string, unknown>> }
+  | { ok: false; notProvisioned: boolean };
+
+/**
+ * ★신선도를 숨기지 않는다. 캐시가 섞이면 응답의 `generatedAt` 은 **가장 오래된**
+ * 조각의 생성 시각이다 — 낙관적으로 반올림하면 화면의 "N분 전 기준" 이 거짓말이 된다.
+ */
+type TeamUsageLoadResult = TeamUsageQueryOutcome & {
+  cacheHits: number;
+  oldestGeneratedAtMs: number;
+};
+
+/**
+ * 한 창의 팀 사용량 행을 모은다. 프로젝트 단위 캐시(L1→L2)를 먼저 보고, 미스인
+ * 프로젝트만 BQ 로 간다.
+ *
+ * ★반환 행은 **이미 가명화된 캐시 행 모양**이다 — 원시 uid 는 이 함수 밖으로
+ *   나가지 않는다.
+ */
+async function loadTeamUsageRows(args: {
+  projectIds: string[];
+  window: ReturnType<typeof computeUsageWindow>;
+  gateEffectiveFrom: string | null;
+  salt: string | null;
+  nowMs: number;
+  forceRefresh: boolean;
+}): Promise<TeamUsageLoadResult> {
+  const { projectIds, window, gateEffectiveFrom, salt, nowMs } = args;
+  const rows: Array<Record<string, unknown>> = [];
+  const missing: string[] = [];
+  let cacheHits = 0;
+  let refreshThrottled = 0;
+  let oldestGeneratedAtMs = nowMs;
+
+  // L1 — 인스턴스 메모리. 수동 새로고침은 이 층을 건너뛴다.
+  for (const projectId of projectIds) {
+    const docId = buildTeamUsageCacheDocId(projectId, window.windowKey);
+    if (args.forceRefresh) {
+      missing.push(projectId);
+      continue;
+    }
+    const mem = teamUsageMemoryCache.get(docId);
+    if (mem && mem.expiresAtMs > nowMs) {
+      rows.push(...mem.rows);
+      cacheHits += 1;
+      oldestGeneratedAtMs = Math.min(oldestGeneratedAtMs, mem.generatedAtMs);
+      continue;
+    }
+    missing.push(projectId);
+  }
+
+  // L2 — Firestore. ★서버 전용 티어라 Admin SDK 로만 닿는다.
+  //
+  // ★수동 새로고침도 이 문서를 **먼저 읽는다.** 레이트리밋 시각이 여기 있기
+  //   때문이다(프로젝트당 5분에 1회). 별도 컬렉션을 만들면 룰 표면이 늘고,
+  //   인스턴스 메모리에 두면 인스턴스가 바뀔 때마다 리밋이 리셋된다.
+  const stillMissing: string[] = [];
+  const manualRefreshAtByProject = new Map<string, number>();
+  const generatedAtById = new Map<string, number>();
+  if (missing.length > 0) {
+    const refs = missing.map((p) =>
+      db
+        .collection(TEAM_USAGE_CACHE_COLLECTION)
+        .doc(buildTeamUsageCacheDocId(p, window.windowKey))
+    );
+    const docs = await db.getAll(...refs);
+    const hitById = new Map<string, Array<Record<string, unknown>>>();
+    for (const doc of docs) {
+      const data = doc.data() as
+        | (TeamUsageCacheDoc & { manualRefreshAtMs?: unknown })
+        | undefined;
+      const lastManual =
+        typeof data?.manualRefreshAtMs === "number" ? data.manualRefreshAtMs : null;
+      if (lastManual !== null) manualRefreshAtByProject.set(doc.id, lastManual);
+      if (typeof data?.generatedAtMs === "number") {
+        generatedAtById.set(doc.id, data.generatedAtMs);
+      }
+      if (
+        isCacheUsable(data ?? null, {
+          windowKey: window.windowKey,
+          gateEffectiveFrom,
+          nowMs,
+        })
+      ) {
+        hitById.set(doc.id, (data?.rows ?? []) as Array<Record<string, unknown>>);
+      }
+    }
+    for (const projectId of missing) {
+      const docId = buildTeamUsageCacheDocId(projectId, window.windowKey);
+      const hit = hitById.get(docId);
+      // 수동 새로고침이 너무 잦으면 캐시가 살아 있는 한 그걸 준다 —
+      // 던지지 않는다(새로고침 버튼이 에러를 뱉는 것보다 낡은 값이 낫다).
+      const throttled =
+        args.forceRefresh &&
+        !canManualRefresh(manualRefreshAtByProject.get(docId) ?? null, nowMs);
+      if (hit && (!args.forceRefresh || throttled)) {
+        if (throttled) refreshThrottled += 1;
+        rows.push(...hit);
+        cacheHits += 1;
+        const cachedAt = generatedAtById.get(docId) ?? nowMs;
+        oldestGeneratedAtMs = Math.min(oldestGeneratedAtMs, cachedAt);
+        teamUsageMemoryCache.set(docId, {
+          rows: hit,
+          expiresAtMs: nowMs + TEAM_USAGE_MEMORY_TTL_SECONDS * 1000,
+          generatedAtMs: cachedAt,
+        });
+      } else {
+        stillMissing.push(projectId);
+      }
+    }
+  }
+  if (refreshThrottled > 0) {
+    functions.logger.info("[teamUsage] 수동 새로고침 레이트리밋 — 캐시로 응답", {
+      projects: refreshThrottled,
+    });
+  }
+
+  if (stillMissing.length === 0) {
+    return { ok: true, rows, cacheHits, oldestGeneratedAtMs };
+  }
+
+  // 창이 비었으면(발효일이 창보다 뒤) 질의하지 않는다 — 0행이 정답이다.
+  if (window.fromDay >= window.toDayExclusive) {
+    return { ok: true, rows, cacheHits, oldestGeneratedAtMs };
+  }
+
+  let fresh: Array<Record<string, unknown>>;
+  try {
+    const [bqRows] = await bigquery.query({
+      query: buildTeamUsageDailyQuery(TEAM_USAGE_BQ_PROJECT_ID),
+      params: {
+        fromDay: window.fromDay,
+        toDayExclusive: window.toDayExclusive,
+        projectIds: stillMissing,
+      },
+      types: {
+        fromDay: "DATE",
+        toDayExclusive: "DATE",
+        projectIds: ["STRING"],
+      },
+      location: BQ_LOCATION,
+    });
+    // ★받는 즉시 가명화한다. 이 줄 아래로 원시 uid 가 흐르지 않는다.
+    fresh = toCacheRows(bqRows as TeamUsageDailyRow[], salt);
+  } catch (err) {
+    if (isBqViewMissingError(err)) {
+      functions.logger.warn(
+        "[teamUsage] 뷰가 없다 — 적재 전으로 응답한다(0 으로 그리지 않는다).",
+        {
+          projects: stillMissing.length,
+          operatorReason: TEAM_USAGE_NOT_PROVISIONED_OPERATOR_NOTE,
+        }
+      );
+      return { ok: false, notProvisioned: true, cacheHits, oldestGeneratedAtMs };
+    }
+    throw err;
+  }
+
+  const freshByProject = new Map<string, Array<Record<string, unknown>>>();
+  for (const p of stillMissing) freshByProject.set(p, []);
+  for (const row of fresh) {
+    const pid = typeof row.project_id === "string" ? row.project_id : "";
+    const bucket = freshByProject.get(pid);
+    if (bucket) bucket.push(row);
+  }
+
+  const expiresAtMs = nowMs + TEAM_USAGE_CACHE_TTL_SECONDS * 1000;
+  await Promise.all(
+    [...freshByProject.entries()].map(async ([projectId, projectRows]) => {
+      const docId = buildTeamUsageCacheDocId(projectId, window.windowKey);
+      rows.push(...projectRows);
+      teamUsageMemoryCache.set(docId, {
+        rows: projectRows,
+        expiresAtMs: nowMs + TEAM_USAGE_MEMORY_TTL_SECONDS * 1000,
+        generatedAtMs: nowMs,
+      });
+      try {
+        await db
+          .collection(TEAM_USAGE_CACHE_COLLECTION)
+          .doc(docId)
+          .set({
+            schemaVersion: TEAM_USAGE_CACHE_SCHEMA_VERSION,
+            gateEffectiveFrom,
+            windowKey: window.windowKey,
+            generatedAtMs: nowMs,
+            expiresAtMs,
+            // 수동 새로고침 레이트리밋의 근거. 자동 재적재는 직전 값을 보존한다.
+            manualRefreshAtMs: args.forceRefresh
+              ? nowMs
+              : manualRefreshAtByProject.get(docId) ?? null,
+            // Firestore TTL 정책이 이 필드를 본다(자동 삭제).
+            expiresAt: admin.firestore.Timestamp.fromMillis(expiresAtMs),
+            // ★숫자와 가명만. 표시명은 매 응답에 조립한다(캐시가 낡은 이름을
+            //   붙들지 않고, 이름이 캐시에 남지도 않는다).
+            rows: projectRows,
+          });
+      } catch (err) {
+        // 캐시 쓰기 실패로 응답을 죽이지 않는다 — 다음 요청이 다시 시도한다.
+        functions.logger.warn("[teamUsage] 캐시 쓰기 실패(응답은 계속)", {
+          message: err instanceof Error ? err.message : "unknown",
+        });
+      }
+    })
+  );
+
+  if (teamUsageMemoryCache.size > TEAM_USAGE_MEMORY_CACHE_MAX) {
+    teamUsageMemoryCache.clear();
+  }
+  return { ok: true, rows, cacheHits, oldestGeneratedAtMs };
+}
+
+/**
+ * 귀속 불가 행의 **규모**. ★행 수만 — 금액·토큰은 뷰에 컬럼조차 없다.
+ * 실패해도 화면을 죽이지 않는다(0 으로 두고 계속) — 이 값은 보조 라벨이다.
+ */
+async function loadUnattributedRows(
+  accountUids: ReadonlyArray<string>,
+  window: ReturnType<typeof computeUsageWindow>
+): Promise<number> {
+  const uids = [...new Set(accountUids)].filter((u) => u.trim() !== "");
+  if (uids.length === 0 || window.fromDay >= window.toDayExclusive) return 0;
+  try {
+    const [rows] = await bigquery.query({
+      query: buildUnattributedRowsQuery(TEAM_USAGE_BQ_PROJECT_ID),
+      params: {
+        fromDay: window.fromDay,
+        toDayExclusive: window.toDayExclusive,
+        accountUids: uids,
+      },
+      types: {
+        fromDay: "DATE",
+        toDayExclusive: "DATE",
+        accountUids: ["STRING"],
+      },
+      location: BQ_LOCATION,
+    });
+    const raw = (rows as Array<{ rows_n?: unknown }>)[0]?.rows_n;
+    const n = typeof raw === "string" ? Number(raw) : Number(raw ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  } catch (err) {
+    functions.logger.warn("[teamUsage] 귀속불가 규모 조회 실패(0 으로 계속)", {
+      message: err instanceof Error ? err.message : "unknown",
+    });
+    return 0;
+  }
+}
+
+/**
+ * `getTeamUsageSummary` — 팀/본인 사용량 요약.
+ *
+ * Request:  `{ days?: number, projectIds?: string[], scope?: "team"|"self", refresh?: boolean }`
+ * Response: `teamUsage.ts` 의 `TeamUsageSummary`(설계 §7).
+ *
+ * ★게이트가 닫힌 채로 배포해도 안전하다 — team 스코프는 `disabled` + 사유로
+ *   태어나고 self 스코프만 동작한다. 그게 §5.1 설계의 목적이다.
+ */
+export const getTeamUsageSummary = functions.https.onCall(
+  async (data, context) => {
+    // ★신원의 출처는 이것 하나다. 클라 제어 헤더는 읽지 않는다.
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const nowMs = Date.now();
+    const rangeDays = parseAnalyticsDays(data, TEAM_USAGE_DEFAULT_RANGE_DAYS);
+    const requestedProjectIds = parseProjectIdsParam(data);
+    const wantRefresh =
+      (data as { refresh?: unknown } | null | undefined)?.refresh === true;
+
+    const gate = resolveTeamUsageGate();
+    const salt = readAnalyticsIdSalt();
+
+    // ★Admin SDK 는 룰을 우회한다 — 역할을 서버가 직접 조회해 판정한다.
+    const projects = await resolveTeamProjects(uid);
+    const teamEligible = projects.filter((p) => canSeeTeamBreakdown(p.role));
+    const { scope, downgradedReasonCode } = resolveUsageScope(
+      (data as { scope?: unknown } | null | undefined)?.scope,
+      teamEligible.length > 0
+    );
+
+    // ★클라 입력은 **교집합 필터**로만 쓴다. 확장은 불가능하다.
+    const candidates = scope === "team" ? teamEligible : projects;
+    // ★상한은 여기 한 곳에서만 적용하고, **잘린 개수를 센다.** 조용히 자르면
+    //   합계가 전체의 합이 아닌데도 화면이 "이게 전부" 라고 말한다.
+    const { ids: scopeIds, omitted: projectsOmitted } = capProjectScope(
+      intersectProjectScope(
+        requestedProjectIds,
+        candidates.map((p) => p.projectId)
+      )
+    );
+    if (projectsOmitted > 0) {
+      functions.logger.warn("[teamUsage] 프로젝트 상한 초과 — 합계가 전체가 아니다", {
+        omitted: projectsOmitted,
+        max: TEAM_USAGE_MAX_PROJECTS_IN_SCOPE,
+      });
+    }
+    const inScope = candidates.filter((p) => scopeIds.includes(p.projectId));
+
+    let baseWindow = computeUsageWindow(nowMs, rangeDays);
+    let scopeNoteCode = downgradedReasonCode;
+
+    // ── 게이트: 닫혔으면 **질의 자체를 하지 않는다** ─────────────────────────
+    if (scope === "team" && !gate.open) {
+      if (!teamUsageGateWarned) {
+        teamUsageGateWarned = true;
+        // ★조치가 있는 쪽은 운영자다. 오너 화면에는 gate.reason 만 나간다.
+        functions.logger.warn("[teamUsage] 팀 스코프 게이트 닫힘", {
+          reasonCode: gate.reasonCode,
+          operatorReason: gate.operatorReason,
+        });
+      }
+      return buildTeamUsageEnvelope({
+        scope: "team",
+        scopeNoteCode,
+        window: baseWindow,
+        generatedAtMs: nowMs,
+        gate,
+        projectsInScope: inScope.length,
+        projectsOmitted,
+        cache: { hit: false, ageSeconds: 0, ttlSeconds: TEAM_USAGE_CACHE_TTL_SECONDS },
+        folded: null,
+      });
+    }
+
+    // 팀 스코프는 게이트 상한으로 창을 자른다(경계 포함). self 는 게이트 밖이다.
+    if (scope === "team" && gate.open) {
+      baseWindow = clampWindowToGate(baseWindow, gate.effectiveFrom);
+    }
+
+    if (scopeIds.length === 0) {
+      // ★존재 여부를 말하지 않는다 — "권한 없음" 이 아니라 "볼 게 없다" 로 끝난다.
+      return buildTeamUsageEnvelope({
+        scope,
+        scopeNoteCode: scopeNoteCode ?? "no_team_scope",
+        window: baseWindow,
+        generatedAtMs: nowMs,
+        gate,
+        projectsInScope: 0,
+        cache: { hit: false, ageSeconds: 0, ttlSeconds: TEAM_USAGE_CACHE_TTL_SECONDS },
+        folded: null,
+      });
+    }
+
+    // ── 명부 ────────────────────────────────────────────────────────────────
+    // 행이 없는 멤버도 0 으로 그리려면 명부가 필요하다(설계 §7 화면규칙 4).
+    const rosterUids =
+      scope === "team"
+        ? [
+            ...new Set(
+              inScope.flatMap((p) => [p.ownerId, ...p.members]).filter((u) => u !== "")
+            ),
+          ]
+        : [uid];
+
+    let rows: Array<Record<string, unknown>> = [];
+    let cacheHits = 0;
+    let notProvisioned = false;
+    let dataGeneratedAtMs = nowMs;
+
+    if (scope === "team") {
+      const out = await loadTeamUsageRows({
+        projectIds: scopeIds,
+        window: baseWindow,
+        gateEffectiveFrom: gate.open ? gate.effectiveFrom : null,
+        salt,
+        nowMs,
+        forceRefresh: wantRefresh,
+      });
+      cacheHits = out.cacheHits;
+      dataGeneratedAtMs = out.oldestGeneratedAtMs;
+      if (out.ok) rows = out.rows;
+      else notProvisioned = out.notProvisioned;
+    } else if (baseWindow.fromDay < baseWindow.toDayExclusive) {
+      // ★self 는 캐시하지 않는다. 캐시 키에 계정을 넣어야 하는데, 그러면 캐시
+      //   문서 id 에 계정 식별자가 남는다 — §5.4 의 "캐시 doc 에 uid 없음" 을
+      //   어기는 길이다. self 질의는 단일 계정이라 스캔도 작다.
+      try {
+        const [bqRows] = await bigquery.query({
+          query: buildSelfUsageDailyQuery(TEAM_USAGE_BQ_PROJECT_ID),
+          params: {
+            fromDay: baseWindow.fromDay,
+            toDayExclusive: baseWindow.toDayExclusive,
+            accountUid: uid,
+            projectIds: scopeIds,
+          },
+          types: {
+            fromDay: "DATE",
+            toDayExclusive: "DATE",
+            accountUid: "STRING",
+            projectIds: ["STRING"],
+          },
+          location: BQ_LOCATION,
+        });
+        rows = toCacheRows(bqRows as TeamUsageDailyRow[], salt);
+      } catch (err) {
+        if (isBqViewMissingError(err)) notProvisioned = true;
+        else throw err;
+      }
+    }
+
+    if (notProvisioned) {
+      return buildTeamUsageEnvelope({
+        scope,
+        scopeNoteCode,
+        window: baseWindow,
+        generatedAtMs: nowMs,
+        gate,
+        projectsInScope: inScope.length,
+        projectsOmitted,
+        cache: { hit: false, ageSeconds: 0, ttlSeconds: TEAM_USAGE_CACHE_TTL_SECONDS },
+        folded: null,
+        notProvisioned: true,
+      });
+    }
+
+    // ── 라벨 조립 ───────────────────────────────────────────────────────────
+    // ★가명 → 표시명. uid 로 조회하고 **가명으로 키를 바꿔** 넘긴다 — 접기 단계
+    //   아래로 uid 가 흐르지 않는다.
+    const includeMemberBreakdown = scope === "team";
+    const displayNames = new Map<string, string | null>();
+    const rosterMemberKeys: string[] = [];
+    if (includeMemberBreakdown) {
+      const names = await resolveMemberDisplayNames(rosterUids);
+      for (const memberUid of rosterUids) {
+        const key = teamMemberKey(memberUid, salt);
+        if (key === null) continue;
+        rosterMemberKeys.push(key);
+        displayNames.set(key, names.get(memberUid) ?? null);
+      }
+    }
+
+    const projectNames = new Map<string, string | null>(
+      inScope.map((p) => [p.projectId, p.name])
+    );
+
+    const unattributedRows = await loadUnattributedRows(rosterUids, baseWindow);
+
+    const folded = foldCachedTeamUsage(rows, {
+      todayUtc: baseWindow.todayUtc,
+      includeMemberBreakdown,
+      // ★잘린 스코프 위에서는 "기록 없음" 을 단정하지 않는다(오탐 방지).
+      scopeTruncated: projectsOmitted > 0,
+      displayNames,
+      projectNames,
+      rosterMemberKeys,
+      unattributedRows,
+    });
+
+    // ★self 로 내려온 이유가 따로 없으면 "멤버는 자기 것만 본다" 를 붙인다 —
+    //   화면이 "왜 팀 총계가 없지" 를 스스로 답하게.
+    if (scope === "self" && scopeNoteCode === null) {
+      scopeNoteCode = "member_self_only";
+    }
+
+    return buildTeamUsageEnvelope({
+      scope,
+      scopeNoteCode,
+      window: baseWindow,
+      // ★가장 오래된 조각 기준. 낙관적으로 반올림하면 화면이 거짓말한다.
+      generatedAtMs: dataGeneratedAtMs,
+      gate,
+      projectsInScope: inScope.length,
+      projectsOmitted,
+      cache: {
+        hit: cacheHits > 0,
+        // ★"N분 전 기준" 을 화면이 정직하게 그리게 한다.
+        ageSeconds: Math.max(0, Math.round((nowMs - dataGeneratedAtMs) / 1000)),
+        ttlSeconds: TEAM_USAGE_CACHE_TTL_SECONDS,
+      },
+      folded,
+    });
+  }
+);
 
 // ── ★수익 탭 읽기 경로 — "실매출 0" 과 "적재 전" 을 가른다 ──────────────────
 // 이 콜러블이 없던 동안 수익 탭은 MRR 칸에 '적재 전' 만 띄웠다. 이제 표가

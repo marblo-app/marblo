@@ -37,6 +37,12 @@ import {
   type UserDailyRow,
 } from "./analyticsProfiles";
 import { USER_INSTALL_SCHEMA } from "./personAxis";
+import {
+  TEAM_USAGE_DAILY_SCHEMA,
+  TEAM_USAGE_UNATTRIBUTED_SCHEMA,
+  VIEW_TEAM_USAGE_DAILY,
+  VIEW_TEAM_USAGE_UNATTRIBUTED,
+} from "./teamUsage";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 1) 축 분리 — 주석은 안 읽힐 수 있으니 기계가 읽는다
@@ -121,6 +127,44 @@ test("축이 선언되지 않은 테이블은 통과시키지 않는다", () => 
   for (const t of ACCOUNT_AXIS_TABLES) {
     assert.ok(!LINK_AXIS_TABLES.includes(t), `${t} 이 계정축과 링크축 양쪽에 있다`);
   }
+});
+
+// ── 팀 오버뷰 뷰 (#1103 설계 §4.2) ──────────────────────────────────────────
+//
+// ★"조심하겠다" 가 아니라 기계가 대신 읽는다. 뷰를 계정축에 **등재**했으므로
+//   누가 나중에 뷰에 익명축 조인키를 더하면 아래 테스트가 깨진다.
+
+test("팀 오버뷰 뷰 두 벌이 계정축에 등재돼 있고 축 검사를 통과한다", () => {
+  assert.ok(ACCOUNT_AXIS_TABLES.includes(VIEW_TEAM_USAGE_DAILY));
+  assert.ok(ACCOUNT_AXIS_TABLES.includes(VIEW_TEAM_USAGE_UNATTRIBUTED));
+  assertAxisPurity(VIEW_TEAM_USAGE_DAILY, TEAM_USAGE_DAILY_SCHEMA as BqField[]);
+  assertAxisPurity(
+    VIEW_TEAM_USAGE_UNATTRIBUTED,
+    TEAM_USAGE_UNATTRIBUTED_SCHEMA as BqField[]
+  );
+});
+
+test("★팀 오버뷰 뷰에 익명축 조인키를 더하면 즉시 실패한다", () => {
+  for (const name of ["install_key", "client_id", "ga_key", "install_label"]) {
+    assert.throws(
+      () =>
+        assertAxisPurity(VIEW_TEAM_USAGE_DAILY, [
+          ...(TEAM_USAGE_DAILY_SCHEMA as BqField[]),
+          { name, type: "STRING", mode: "NULLABLE" },
+        ]),
+      new RegExp(name),
+      `${name} 이 팀 오버뷰 뷰에서 통과했다`
+    );
+  }
+});
+
+test("★귀속 불가 뷰에는 금액·토큰 컬럼이 자리조차 없다 — 크로스테넌트 방지", () => {
+  // 귀속 못 하는 행은 조회자가 속하지 않은 프로젝트의 지출일 수 있다(설계 §5.3-3).
+  // 규모(행 수)만 낸다는 약속을 스키마 상수로 못 박는다.
+  assert.deepEqual(
+    TEAM_USAGE_UNATTRIBUTED_SCHEMA.map((f) => f.name),
+    ["day", "account_uid", "rows_n"]
+  );
 });
 
 // ── 링크축 추가분 (ticket cZWmTzoOXpHCg9HAUwqw / 사람 축 설계 §4, §6.1) ──────

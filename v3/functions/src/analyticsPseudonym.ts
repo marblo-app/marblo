@@ -97,6 +97,15 @@ import { createHmac } from "node:crypto";
  *   값**이다(주문번호는 PG 콘솔 조회키, 문서키는 `${uid}_${ms}` 라 uid 를
  *   품는다). 같은 솔트·같은 스킴을 쓰므로 새 가명 체계가 생기지 않는다.
  *
+ * - `teamMember`: **팀 오버뷰 응답 전용** 가명 공간 — `tm_` + HMAC(salt, …).
+ *   설계 #1103 §4.6. ★계정축 사람 키(`us_`)를 재사용하면 안 되는 이유가 있다:
+ *   팀 응답은 가명 옆에 **표시명**을 싣는데, 사람 키는 링크축 표의 조인 키다.
+ *   두 가명이 같으면 (팀 응답) 키→이름 ⨝ (링크표) 키→설치키 로
+ *   **설치키 → 사람 이름** 이 성립한다. 즉 팀 화면이 링크표의 이름 사전이 되고,
+ *   `PERSON_AXIS_EFFECTIVE_FROM` 게이트가 막으려던 결과가 게이트를 건드리지도
+ *   않고 성립한다. kind 를 달리하면 같은 솔트라도 다이제스트가 달라져 조인이
+ *   성립하지 않는다. ★바깥으로 나가는 가명은 그 화면 전용 공간이다.
+ *
  * ★`person` kind 를 만들지 마라. `person_key` 와 `user_key` 는 같은 uid 에서 나온
  *   **서로 다른 두 값**이다(kind 가 HMAC 입력에 들어가므로). 둘을 다 두면
  *   `WHERE person_key = user_key` 가 영원히 0행이 되는데, 조인이 에러를 내지 않고
@@ -116,6 +125,8 @@ export type AnalyticsIdKind =
   | "ga"
   // 계정축 — 사람 축 (#1084)
   | "user"
+  // 계정축 — 팀 오버뷰 응답 전용 가명 공간 (#1103 설계 §4.6)
+  | "teamMember"
   // 계정축 — analytics_purchase (6EnTiEzL7T2NpjOnTTSj)
   | "order"
   | "purchase";
@@ -129,6 +140,7 @@ const KIND_PREFIX: Record<AnalyticsIdKind, string> = {
   install: "in",
   ga: "ga",
   user: "us",
+  teamMember: "tm",
   order: "od",
   purchase: "pu",
 };

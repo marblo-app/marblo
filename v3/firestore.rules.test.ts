@@ -3254,6 +3254,77 @@ describe("publicReplayOwners — 비공개 소유권 인덱스", () => {
 
 // ===== 미인증 접근 테스트 =====
 
+// ===== 팀 오버뷰 캐시 — ★서버 전용 티어 (#1103 설계 §5.5) =====
+//
+// 이 문서에는 프로젝트 전체의 **멤버별 사용량 숫자**가 들어 있다. 클라 읽기를
+// 여는 순간 `getTeamUsageSummary` 콜러블의 역할 게이트(오너/admin 만 팀 분해)가
+// 통째로 우회되고, 일반 멤버가 남의 사용량을 본다 — 그건 팀 기능이 아니라 감시다.
+//
+// ★오너도 못 읽는다. "오너는 어차피 콜러블로 볼 수 있으니 룰도 열자" 가 가장
+//   그럴듯한 실수인데, 룰을 열면 **역할 판정 자체가 클라로 내려간다.**
+//   서버는 Admin SDK 로 룰을 우회해 읽으므로 여는 이득이 없고 위험만 는다.
+
+describe("teamUsageCache — 서버 전용 티어 (클라는 누구도 못 읽는다)", () => {
+  const CACHE_DOC_ID = `${PROJECT_ID}__d30@2026-08-21`;
+
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "teamUsageCache", CACHE_DOC_ID), {
+        schemaVersion: 1,
+        gateEffectiveFrom: null,
+        windowKey: "d30@2026-08-21",
+        generatedAtMs: 0,
+        expiresAtMs: 0,
+        rows: [],
+      });
+    });
+  });
+
+  it("★오너도 읽지 못한다 — 역할 판정은 서버 콜러블에만 있다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "teamUsageCache", CACHE_DOC_ID)));
+  });
+
+  it("★admin 도 읽지 못한다", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "teamUsageCache", CACHE_DOC_ID)));
+  });
+
+  it("★일반 멤버는 당연히 읽지 못한다 — 남의 사용량을 보는 길이 없다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "teamUsageCache", CACHE_DOC_ID)));
+  });
+
+  it("★플랫폼 admin 클레임으로도 열리지 않는다", async () => {
+    const db = adminContext().firestore();
+    await assertFails(getDoc(doc(db, "teamUsageCache", CACHE_DOC_ID)));
+  });
+
+  it("미인증도 못 읽는다", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(getDoc(doc(db, "teamUsageCache", CACHE_DOC_ID)));
+  });
+
+  it("★쓰기도 전부 막혀 있다 — 클라가 캐시를 조작해 숫자를 바꿀 수 없다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      setDoc(doc(db, "teamUsageCache", "forged__d30@2026-08-21"), {
+        schemaVersion: 1,
+        rows: [],
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db, "teamUsageCache", CACHE_DOC_ID), { rows: [] }),
+    );
+    await assertFails(deleteDoc(doc(db, "teamUsageCache", CACHE_DOC_ID)));
+  });
+
+  it("열거(list)도 막혀 있다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(getDocs(collection(db, "teamUsageCache")));
+  });
+});
+
 describe("unauthenticated access", () => {
   it("미인증 사용자는 어떤 컬렉션도 접근할 수 없다", async () => {
     const db = unauthContext().firestore();

@@ -70,6 +70,10 @@ import {
   LINK_AXIS_TABLES,
   TABLE_USER_INSTALL,
 } from "./personAxis";
+import {
+  VIEW_TEAM_USAGE_DAILY,
+  VIEW_TEAM_USAGE_UNATTRIBUTED,
+} from "./teamUsage";
 
 // ── 테이블 좌표 ──────────────────────────────────────────────────────────────
 // 데이터셋은 원본과 같은 marblo_telemetry 다(cost_logs 가 여기 있어야 계정축
@@ -85,10 +89,21 @@ export const ANONYMOUS_AXIS_TABLES: ReadonlyArray<string> = [
   TABLE_USER_DAILY,
   TABLE_INSTALL_PROFILE,
 ];
-/** 계정축 테이블. */
+/**
+ * 계정축 테이블·뷰.
+ *
+ * ★팀 오버뷰 뷰 두 벌(#1103 설계 §4.2)이 여기 등재돼 있다. 등재돼 있어야
+ * `assertAxisPurity()` 가 그 컬럼 목록을 `FORBIDDEN_ON_ACCOUNT_AXIS` 로 검사하고,
+ * 테스트가 CI 에서 그 검사를 돌린다 — 누가 나중에 뷰에 익명축 조인키를 더하면
+ * **테스트가 깨진다.** 주석이 아니라 빨간불이다.
+ */
 export const ACCOUNT_AXIS_TABLES: ReadonlyArray<string> = [
   TABLE_ACCOUNT_PROFILE,
+  VIEW_TEAM_USAGE_DAILY,
+  VIEW_TEAM_USAGE_UNATTRIBUTED,
 ];
+
+export { VIEW_TEAM_USAGE_DAILY, VIEW_TEAM_USAGE_UNATTRIBUTED };
 /**
  * ★링크축 테이블 — `user_key` 와 `install_key` 를 한 행에 담는 것이 허용된
  * **유일한** 자리다(사람 축 설계 §4, PR #1081). 목록의 정본은 personAxis.ts 에

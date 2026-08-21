@@ -928,6 +928,25 @@ service cloud.firestore {
         && request.resource.data.publishedAt is timestamp;
     }
 
+    // ===== 팀 오버뷰 캐시 — ★서버 전용 티어 (#1103 설계 §5.5/§6.2) =====
+    //
+    // ★클라가 이걸 직접 읽으면 `getTeamUsageSummary` 콜러블의 역할 게이트(오너/
+    //   admin 만 팀 분해)를 **통째로 우회**한다. 캐시 문서에는 프로젝트 전체의
+    //   멤버별 숫자가 들어 있으므로, 읽기를 여는 것은 곧 일반 멤버에게 남의
+    //   사용량을 여는 것이다 — 그건 팀 기능이 아니라 감시다.
+    //
+    // ★Admin SDK 는 이 규칙을 **우회한다.** 그래서 서버는 그대로 읽고 쓰고,
+    //   권한 판정은 콜러블 안에서 서버 코드가 스스로 한다(룰에 기대지 않는다).
+    //
+    // ★#1096 의 `projects` 필드별 allowlist 를 한 글자도 늘리지 않는다 —
+    //   캐시를 별도 컬렉션에 둔 이유가 그것이다. 룰 표면 증가는 0 이다.
+    //
+    // 문서 id 규약: `{projectId}__{windowKey}` (teamUsage.buildTeamUsageCacheDocId).
+    // 만료는 Firestore TTL 정책이 `expiresAt` 필드로 지운다.
+    match /teamUsageCache/{docId} {
+      allow read, write: if false;
+    }
+
     match /publicReplays/{replayId} {
       // 미인증 read 허용 — 단 발행된 문서 1건 get 만. 열거는 막는다.
       allow get: if resource.data.get('status', '') == 'published';
