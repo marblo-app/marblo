@@ -6,6 +6,23 @@ directories:
 files:
   - "dist-electron/**/*"
   - "dist/**/*"
+  # directories.output 이 dist 라서 위 dist/**/* 글롭이 "렌더러 산출물" 뿐 아니라
+  # "electron-builder 가 지금 만들고 있는 출력물" 까지 같이 삼킨다. 패키징 중에
+  # win-unpacked/ 가 dist 안에 쓰이는 중이라 그 시점 스냅샷(electron.exe/*.pak/
+  # dll/locales)이 app.asar 안으로 통째로 복사됐다 — 실측 asar 556MB 중 268MB.
+  # dist 를 미리 비워도 막히지 않는다(win-unpacked 는 빌드 도중에 생기므로).
+  # 아래 negation 들이 출력물만 걷어낸다. 렌더러(index.html, assets, fonts,
+  # media, notebook-fonts, pyodide)는 전부 그대로 남는다.
+  - "!dist/*-unpacked/**"
+  - "!dist/mac*/**"
+  - "!dist/.icon-*/**"
+  - "!dist/*.exe"
+  - "!dist/*.blockmap"
+  - "!dist/*.dmg"
+  - "!dist/*.zip"
+  - "!dist/*.AppImage"
+  - "!dist/*.deb"
+  - "!dist/*.yml"
   - "skills/**/*"
   - "package.json"
 
