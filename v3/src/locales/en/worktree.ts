@@ -72,6 +72,12 @@ export const worktree: Record<keyof typeof koWorktree, string> = {
   "worktree.emptyHint":
     "When an agent creates a worktree for a task, it shows up here.",
   "worktree.noMatches": "No worktrees match the filter.",
+  "worktree.filtersHidden":
+    "Filters hide {hidden} worktrees. Showing {visible} of {total}.",
+  "worktree.filtersEmptyTitle": "Filters are hiding every worktree.",
+  "worktree.filtersEmptyHint":
+    "The {count} loaded worktrees are still available. Reset filters to show them.",
+  "worktree.resetFilters": "Reset filters",
 
   // Action result banners / confirms
   "worktree.msg.opened": "Opened {branch} worktree in the Code tab.",
@@ -88,10 +94,10 @@ export const worktree: Record<keyof typeof koWorktree, string> = {
   "worktree.msg.cleanupDone": "{removed} stale worktree(s) cleaned",
   "worktree.error.cleanupFailed": "stale cleanup failed",
 
-  // Archive (hide) / restore — default view shows active/ongoing only
-  "worktree.archivedToggleLabel": "🗄 Archived ({count})",
+  // Archive (hide) / restore — default view includes archived worktrees
+  "worktree.archivedToggleLabel": "🗄 Include archived ({count})",
   "worktree.archivedToggleTip":
-    "Merged/stale (auto) or manually-archived worktrees — hidden from the default list. Restore them here",
+    "Include or hide merged/stale (auto) and manually archived worktrees.",
   "worktree.action.archive":
     "Archive this worktree (hide from the default list)",
   "worktree.action.restore": "Restore from archive (show in the default list)",

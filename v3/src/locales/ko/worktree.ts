@@ -70,6 +70,12 @@ export const worktree = {
   "worktree.emptyHint":
     "에이전트가 태스크용 워크트리를 만들면 여기에 표시됩니다.",
   "worktree.noMatches": "필터 조건에 맞는 워크트리가 없습니다.",
+  "worktree.filtersHidden":
+    "필터로 워크트리 {hidden}개가 숨겨져 있습니다. 현재 {visible}/{total}개 표시 중",
+  "worktree.filtersEmptyTitle": "워크트리가 필터로 모두 숨겨졌습니다.",
+  "worktree.filtersEmptyHint":
+    "불러온 워크트리 {count}개는 그대로 있습니다. 필터를 초기화해 표시하세요.",
+  "worktree.resetFilters": "필터 초기화",
 
   // Action result banners / confirms
   "worktree.msg.opened": "{branch} worktree를 Code 탭에 열었습니다.",
@@ -85,10 +91,10 @@ export const worktree = {
   "worktree.msg.cleanupDone": "stale 워크트리 {removed}개 정리 완료",
   "worktree.error.cleanupFailed": "stale cleanup 실패",
 
-  // Archive (숨김) / restore — 기본 뷰는 활성/온고잉만, 아카이브는 별도 뷰
-  "worktree.archivedToggleLabel": "🗄 아카이브 ({count})",
+  // Archive (숨김) / restore — 기본 뷰에는 아카이브도 포함, 필요 시 숨김
+  "worktree.archivedToggleLabel": "🗄 아카이브 포함 ({count})",
   "worktree.archivedToggleTip":
-    "머지/stale(자동) 또는 수동 보관된 워크트리 — 기본 목록에서 숨겨집니다. 여기서 복원 가능",
+    "머지/stale(자동) 또는 수동 보관된 워크트리를 목록에 포함하거나 숨깁니다.",
   "worktree.action.archive": "이 워크트리를 아카이브(기본 목록에서 숨김)",
   "worktree.action.restore": "아카이브 해제(기본 목록에 다시 표시)",
   "worktree.archiveAction": "보관",

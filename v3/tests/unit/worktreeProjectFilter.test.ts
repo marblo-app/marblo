@@ -33,5 +33,19 @@ describe("worktree project filter", () => {
       WORKTREE_PROJECT_FILTER_LOADING,
     );
   });
-});
 
+  it("falls back to all projects when a restored binding has no worktrees", () => {
+    expect(
+      nextWorktreeProjectFilter("project-a", "stale-project", ["project-a"]),
+    ).toBe(WORKTREE_PROJECT_FILTER_ALL);
+  });
+
+  it("converges to the real project once its worktrees arrive", () => {
+    expect(
+      nextWorktreeProjectFilter("project-a", "project-b", [
+        "project-a",
+        "project-b",
+      ]),
+    ).toBe("project-b");
+  });
+});

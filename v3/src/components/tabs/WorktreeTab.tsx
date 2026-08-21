@@ -720,9 +720,9 @@ export function WorktreeTab() {
     "all",
   );
   const [mergeableOnly, setMergeableOnly] = useState(false);
-  // 아카이브 뷰: 기본은 활성/온고잉만. 켜면 아카이브(머지/stale/수동보관)된 것만
-  // 보여주고 각 행에서 복원 가능.
-  const [archivedView, setArchivedView] = useState(false);
+  // A successful IPC response must be visible after restart. Keep archived
+  // worktrees included by default; users can opt into the active-only view.
+  const [archivedView, setArchivedView] = useState(true);
   // 예외 뷰: 자동머지 안 되고 사람이 봐야 하는 것만 (충돌/머지불가 or stale).
   // 자율성 다이얼 L1에서 clean+mergeable은 자동머지되므로 예외가 아님.
   const [exceptionsOnly, setExceptionsOnly] = useState(false);
@@ -744,6 +744,11 @@ export function WorktreeTab() {
     {},
   );
   const fetchedRootsRef = useRef<Set<string>>(new Set());
+
+  const worktreeProjectIds = useMemo(
+    () => Array.from(new Set(worktrees.map((wt) => wt.projectId))),
+    [worktrees],
+  );
 
   // mount 시 1회 로드. 실패는 store.lastError 로 표면화되므로 swallow.
   useEffect(() => {
@@ -783,9 +788,13 @@ export function WorktreeTab() {
 
   useEffect(() => {
     setProjectFilter((currentFilter) =>
-      nextWorktreeProjectFilter(currentFilter, currentProjectId),
+      nextWorktreeProjectFilter(
+        currentFilter,
+        currentProjectId,
+        worktreeProjectIds,
+      ),
     );
-  }, [currentProjectId]);
+  }, [currentProjectId, worktreeProjectIds]);
 
   // 완료 이력은 뷰가 켜졌을 때만 구독 (on-demand 리스너).
   // ★현재 프로젝트로 스코프한다: merge_history read 룰이 isProjectMember 로 조여지면
@@ -867,16 +876,15 @@ export function WorktreeTab() {
   // 필터 적용 후 프로젝트별 그룹.
   const groups = useMemo(() => {
     const filtered = worktrees.filter((wt) => {
-      // Base layer: the default view shows only active/ongoing worktrees;
-      // archived (merged / stale / manually-archived) ones move to the archive
-      // view. This is what collapses a 100+-worktree project to just the live
-      // work.
+      // The default view includes every successful IPC result. The archive
+      // control is an explicit active-only filter, so a restart cannot make a
+      // healthy set of old worktrees look as if it disappeared.
       const isArchived = isWorktreeArchived(
         wt,
         archiveOverrides,
         archiveSignals,
       );
-      if (archivedView ? !isArchived : isArchived) {
+      if (!archivedView && isArchived) {
         return false;
       }
       if (
@@ -924,11 +932,10 @@ export function WorktreeTab() {
 
   // 필터 드롭다운에 노출할 프로젝트 목록 (worktree 가 존재하는 것만).
   const projectOptions = useMemo(() => {
-    const ids = Array.from(new Set(worktrees.map((wt) => wt.projectId)));
-    return ids
+    return worktreeProjectIds
       .map((id) => ({ id, name: projectName(id) }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [worktrees, projectName]);
+  }, [worktreeProjectIds, projectName]);
 
   // 일괄 cleanup 대상 — ★'정리 필요(머지됨)' 카테고리(DONE 티켓, base에 안착)만.
   // 개발 중·충돌·미커밋 워크트리는 절대 포함하지 않는다(오늘 미커밋 워크트리가
@@ -965,6 +972,17 @@ export function WorktreeTab() {
     !loading &&
     worktrees.length > 0 &&
     groups.length === 0;
+  const hiddenCount = worktrees.length - groups.reduce(
+    (count, [, items]) => count + items.length,
+    0,
+  );
+  const resetFilters = () => {
+    setProjectFilter(WORKTREE_PROJECT_FILTER_ALL);
+    setStatusFilter("all");
+    setMergeableOnly(false);
+    setExceptionsOnly(false);
+    setArchivedView(true);
+  };
 
   const openWorktree = (worktree: Worktree) => {
     // Worktrees-tab "Open" = open the checkout in the Code editor. Route through
@@ -1245,6 +1263,7 @@ export function WorktreeTab() {
           type="button"
           onClick={() => setArchivedView((v) => !v)}
           title={t("worktree.archivedToggleTip")}
+          aria-pressed={archivedView}
           className={`rounded border px-2 py-1 text-xs transition ${
             archivedView
               ? "border-gray-400/50 bg-gray-500/15 text-gray-200"
@@ -1326,6 +1345,25 @@ export function WorktreeTab() {
         </div>
       )}
 
+      {!loading && worktrees.length > 0 && hiddenCount > 0 && !historyView && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+          <span>
+            {t("worktree.filtersHidden", {
+              visible: worktrees.length - hiddenCount,
+              total: worktrees.length,
+              hidden: hiddenCount,
+            })}
+          </span>
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="rounded border border-amber-300/50 px-2 py-1 font-medium text-amber-100 hover:bg-amber-500/10"
+          >
+            {t("worktree.resetFilters")}
+          </button>
+        </div>
+      )}
+
       {/* 범례 — 상태(카테고리) + 버튼 한 줄 설명 */}
       {showLegend && <WorktreeLegend />}
 
@@ -1382,20 +1420,23 @@ export function WorktreeTab() {
               </p>
             </div>
           </div>
-        ) : archivedView && groups.length === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <div className="rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
-              <p className="text-sm text-gray-300">
-                {t("worktree.archivedEmptyTitle")}
-              </p>
-              <p className="mt-1 text-xs text-gray-500">
-                {t("worktree.archivedEmptyHint")}
-              </p>
-            </div>
-          </div>
         ) : noMatches ? (
-          <div className="flex h-full items-center justify-center text-sm text-gray-500">
-            {t("worktree.noMatches")}
+          <div className="flex h-full items-center justify-center">
+            <div className="rounded-xl border border-dashed border-amber-500/40 bg-amber-500/5 p-6 text-center">
+              <p className="text-sm text-gray-200">
+                {t("worktree.filtersEmptyTitle")}
+              </p>
+              <p className="mt-1 text-xs text-gray-400">
+                {t("worktree.filtersEmptyHint", { count: worktrees.length })}
+              </p>
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="mt-3 rounded border border-amber-300/50 px-2 py-1 text-xs font-medium text-amber-100 hover:bg-amber-500/10"
+              >
+                {t("worktree.resetFilters")}
+              </button>
+            </div>
           </div>
         ) : (
           <div className="space-y-4">
