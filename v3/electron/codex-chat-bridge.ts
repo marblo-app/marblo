@@ -53,8 +53,61 @@ const MAX_CHAT_TOOL_NAME = 64;
 export interface NamespacedToolName {
   /** namespace 를 뺀 원래 도구 이름 (예: add_activity) */
   name: string;
-  /** codex 가 쓰는 namespace (예: mcp__marblo) */
-  namespace: string;
+  /** codex 가 쓰는 namespace (예: mcp__marblo). 평탄화 대상이 아니면 없다. */
+  namespace?: string;
+  /**
+   * Responses 전용 `type:"custom"` freeform 도구(= apply_patch)인가.
+   *
+   * ★codex 는 apply_patch 를 JSON function 이 아니라 lark 문법을 실은 custom
+   * 도구로 보낸다. Chat Completions 규격엔 그런 타입이 없어서 종전 변환기는 이
+   * 도구를 **통째로 버렸다** — 모델 카탈로그를 고쳐 apply_patch 가 등록돼도
+   * Upstage 는 브리지에서 다시 잃어버린다는 뜻이다. 그래서 여기서 `input` 문자열
+   * 하나짜리 function 으로 접어 upstream 에 넘기고, 응답에서 다시 custom 으로
+   * 편다. 이 플래그가 그 왕복의 표식이다.
+   */
+  freeform?: boolean;
+}
+
+/** freeform(custom) 도구를 Chat 으로 접을 때 쓰는 단일 파라미터 스키마. */
+function freeformToolParameters(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      input: {
+        type: "string",
+        description:
+          "The raw, unwrapped tool payload text. Emit it verbatim as a JSON " +
+          "string value — do not add commentary, markdown fences, or extra keys.",
+      },
+    },
+    required: ["input"],
+    additionalProperties: false,
+  };
+}
+
+/**
+ * Chat 쪽 tool_call 인자에서 freeform 원문을 되꺼낸다.
+ * 정상 경로는 `{"input":"..."}` 이지만, 모델이 스키마를 무시하고 원문을 그대로
+ * 뱉는 경우도 흔하다. 그때 인자를 버리면 편집이 조용히 사라지므로 원문으로 본다.
+ */
+export function extractFreeformToolInput(rawArguments: string): string {
+  const trimmed = rawArguments.trim();
+  if (!trimmed) return "";
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (typeof parsed === "string") return parsed;
+    if (isRecord(parsed)) {
+      if (typeof parsed.input === "string") return parsed.input;
+      if (typeof parsed.patch === "string") return parsed.patch;
+      const values = Object.values(parsed);
+      if (values.length === 1 && typeof values[0] === "string") {
+        return values[0];
+      }
+    }
+  } catch {
+    // JSON 이 아니면 모델이 원문을 그대로 보낸 것으로 취급한다.
+  }
+  return rawArguments;
 }
 
 /**
@@ -165,7 +218,27 @@ export function responsesRequestToChatCompletions(
         continue;
       }
 
-      if (type === "function_call_output") {
+      if (type === "custom_tool_call") {
+        // 히스토리의 freeform 호출. upstream 은 이 도구를 function 으로 봤으므로
+        // 같은 모양(`{"input": ...}`)으로 되돌려줘야 대화가 이어진다.
+        const callId =
+          (typeof item.call_id === "string" && item.call_id) ||
+          (typeof item.id === "string" && item.id) ||
+          `call_${randomBytes(4).toString("hex")}`;
+        pendingToolCalls.push({
+          id: callId,
+          type: "function",
+          function: {
+            name: typeof item.name === "string" ? item.name : "",
+            arguments: JSON.stringify({
+              input: typeof item.input === "string" ? item.input : "",
+            }),
+          },
+        });
+        continue;
+      }
+
+      if (type === "function_call_output" || type === "custom_tool_call_output") {
         flushAssistant();
         const callId =
           (typeof item.call_id === "string" && item.call_id) ||
@@ -215,6 +288,35 @@ export function responsesRequestToChatCompletions(
     if (!isRecord(t)) continue;
     if (t.type === "function") {
       pushFunctionTool(t, "");
+      continue;
+    }
+    if (t.type === "custom") {
+      // apply_patch 등 freeform 도구. Chat 에는 custom 타입이 없으므로 `input`
+      // 문자열 하나짜리 function 으로 접는다. 문법(lark) 은 강제할 수 없으니
+      // description 에 그대로 실어 모델이 형식을 지키게 한다.
+      const bare = typeof t.name === "string" ? t.name : "";
+      if (!bare) continue;
+      const grammar =
+        isRecord(t.format) && typeof t.format.definition === "string"
+          ? t.format.definition
+          : "";
+      const description = [
+        typeof t.description === "string" ? t.description : "",
+        grammar
+          ? "The `input` string MUST match this grammar exactly:\n" + grammar
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      toolNames?.set(bare, { name: bare, freeform: true });
+      tools.push({
+        type: "function",
+        function: {
+          name: bare,
+          description,
+          parameters: freeformToolParameters(),
+        },
+      });
       continue;
     }
     if (t.type === "namespace" && Array.isArray(t.tools)) {
@@ -308,7 +410,14 @@ async function pipeChatStreamToResponses(
   let outputText = "";
   const toolAcc = new Map<
     number,
-    { callId: string; name: string; arguments: string; itemEmitted: boolean }
+    {
+      callId: string;
+      name: string;
+      arguments: string;
+      itemEmitted: boolean;
+      /** freeform(custom) 도구면 스트리밍 중엔 아무것도 내보내지 않는다. */
+      freeform: boolean;
+    }
   >();
   let usage: Record<string, unknown> | undefined;
 
@@ -404,11 +513,19 @@ async function pipeChatStreamToResponses(
             name: typeof fn.name === "string" ? fn.name : "",
             arguments: "",
             itemEmitted: false,
+            freeform: false,
           };
           toolAcc.set(index, acc);
         }
         if (typeof fn.name === "string" && fn.name) acc.name = fn.name;
         if (typeof fn.arguments === "string") acc.arguments += fn.arguments;
+        if (acc.name) acc.freeform = toolNames?.get(acc.name)?.freeform === true;
+
+        // ★freeform 도구는 스트리밍 델타를 내보내지 않는다. upstream 이 보내는
+        //   조각은 `{"input":"*** Beg` 같은 **JSON 파편**이라, 그걸 codex 의
+        //   custom_tool_call_input.delta 로 그대로 흘리면 패치 원문이 깨진다.
+        //   인자가 다 모인 뒤 아래 종료 루프에서 한 번에 편다.
+        if (acc.freeform) continue;
 
         if (!acc.itemEmitted && acc.name) {
           acc.itemEmitted = true;
@@ -470,6 +587,38 @@ async function pipeChatStreamToResponses(
   }
 
   for (const acc of toolAcc.values()) {
+    if (acc.freeform && acc.name) {
+      // Chat function → Responses custom_tool_call 로 되편다. codex 가 이
+      // 모양이라야 apply_patch 를 실행한다(`function_call` 로 오면 라우터가
+      // 모르는 호출로 처리한다).
+      const input = extractFreeformToolInput(acc.arguments);
+      const item = {
+        type: "custom_tool_call",
+        call_id: acc.callId,
+        name: acc.name,
+        input,
+      };
+      sseWrite(res, "response.output_item.added", {
+        type: "response.output_item.added",
+        item: { ...item, input: "" },
+      });
+      sseWrite(res, "response.custom_tool_call_input.delta", {
+        type: "response.custom_tool_call_input.delta",
+        call_id: acc.callId,
+        delta: input,
+      });
+      sseWrite(res, "response.custom_tool_call_input.done", {
+        type: "response.custom_tool_call_input.done",
+        call_id: acc.callId,
+        input,
+      });
+      sseWrite(res, "response.output_item.done", {
+        type: "response.output_item.done",
+        item,
+      });
+      output.push(item);
+      continue;
+    }
     if (!acc.itemEmitted) continue;
     sseWrite(res, "response.function_call_arguments.done", {
       type: "response.function_call_arguments.done",

@@ -42,6 +42,10 @@ import {
   startCodexChatBridgeSync,
   type CodexChatBridgeHandle,
 } from "./codex-chat-bridge";
+import {
+  buildCodexModelCatalog,
+  renderCodexModelCatalogJson,
+} from "./codex-model-catalog";
 
 /**
  * System prompt for small local chat-only models. It intentionally omits the
@@ -3425,6 +3429,9 @@ export class AgentConfigGenerator {
         if (vendorOverride) {
           preserved = preserved
             .replace(/^\s*model_provider\s*=\s*.*$/gm, "")
+            // 우리가 벤더 카탈로그를 주입하므로 사용자 값은 반드시 걷어낸다 —
+            // TOML 은 최상위 키 중복을 파싱 에러로 처리한다(= 에이전트 즉사).
+            .replace(/^\s*model_catalog_json\s*=\s*.*$/gm, "")
             .replace(
               /\[model_providers\.[\s\S]*?(?=\n\[(?!model_providers)|$)/g,
               "",
@@ -3509,8 +3516,48 @@ export class AgentConfigGenerator {
       .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
       .join("\n");
 
+    // ★codex 가 모르는 벤더 slug 는 폴백 메타데이터로 떨어지고, 그 폴백에는
+    //   apply_patch 가 등록되지 않는다(프롬프트는 계속 그 도구를 안내한다) →
+    //   `unsupported call: apply_patch` 로 편집이 통째로 실패한다. 벤더 모델의
+    //   ModelInfo 를 직접 선언해 그 경로를 막는다. 이 카탈로그는 내장 카탈로그를
+    //   **대체**하므로 벤더 오버라이드 에이전트에만 쓴다 — openai gpt 에이전트의
+    //   config 에는 이 키가 아예 들어가지 않는다(무회귀).
+    let modelCatalogPath: string | undefined;
+    if (vendorOverride) {
+      const catalog = buildCodexModelCatalog(pinnedModelId);
+      if (catalog) {
+        modelCatalogPath = path.join(codexHome, "model-catalog.json");
+        fs.writeFileSync(
+          modelCatalogPath,
+          renderCodexModelCatalogJson(catalog),
+          "utf-8",
+        );
+        this.trackFile(agentId, modelCatalogPath);
+      } else {
+        // ★조용히 넘기지 않는다. 카탈로그 없이 뜬 벤더 에이전트는 apply_patch 가
+        //   등록되지 않아 "진단은 맞는데 파일을 안 고치는" 그 증상으로 되돌아간다.
+        //   그렇다고 스폰을 막으면 오늘보다 나빠지므로, 사유를 크게 남기고 뜬다.
+        console.error(
+          "[agent-config] Codex vendor model catalog unavailable — " +
+            "apply_patch will NOT be registered for this agent",
+          {
+            agentId,
+            model: pinnedModelId,
+            provider: vendorOverride.providerId,
+            reason:
+              "could not read a reference ModelInfo from the installed codex " +
+              "(~/.codex/models_cache.json or the codex binary catalog)",
+          },
+        );
+      }
+    }
+
     const vendorProviderToml = vendorOverride
-      ? this.buildCodexVendorProviderToml(agentId, vendorOverride)
+      ? this.buildCodexVendorProviderToml(
+          agentId,
+          vendorOverride,
+          modelCatalogPath,
+        )
       : "";
 
     // Vendor override MUST come before preserved user tables. A trailing
@@ -3555,6 +3602,7 @@ export class AgentConfigGenerator {
   private buildCodexVendorProviderToml(
     agentId: string,
     override: CodexVendorProviderOverride,
+    modelCatalogPath?: string,
   ): string {
     let baseUrl = override.upstreamBaseUrl;
     const skipBridge =
@@ -3614,7 +3662,7 @@ export class AgentConfigGenerator {
         );
       }
     }
-    return renderCodexVendorProviderToml(override, baseUrl);
+    return renderCodexVendorProviderToml(override, baseUrl, modelCatalogPath);
   }
 
   // ★projectDir 를 받는다. grok 의 **폴더 신뢰**가 프로젝트 경로에 의존하기

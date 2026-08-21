@@ -129,15 +129,25 @@ export function resolveCodexVendorProviderOverride(
 /**
  * TOML fragment for an isolated CODEX_HOME config.toml.
  * `baseUrl` is the URL Codex will call (upstream or local bridge).
+ *
+ * `modelCatalogPath` 는 벤더 모델의 `ModelInfo` 를 선언한 JSON 경로다. 이걸 주지
+ * 않으면 codex 는 모르는 slug 에 대해 폴백 메타데이터를 쓰고, 그 폴백에는
+ * `apply_patch` 가 등록되지 않아 편집이 통째로 실패한다(codex-model-catalog.ts
+ * 주석의 실측 근거 참조). ★최상위 키이므로 반드시 `[model_providers.*]` 테이블
+ * **앞**에 놓는다 — 뒤에 두면 그 테이블의 하위 키로 흡수돼 설정 로드가 깨진다.
  */
 export function renderCodexVendorProviderToml(
   override: CodexVendorProviderOverride,
   baseUrl: string,
+  modelCatalogPath?: string,
 ): string {
   const lines = [
     `model_provider = ${JSON.stringify(override.providerId)}`,
     'preferred_auth_method = "apikey"',
     'forced_login_method = "api"',
+    ...(modelCatalogPath
+      ? [`model_catalog_json = ${JSON.stringify(modelCatalogPath)}`]
+      : []),
     "",
     `[model_providers.${override.providerId}]`,
     `name = ${JSON.stringify(override.name)}`,
