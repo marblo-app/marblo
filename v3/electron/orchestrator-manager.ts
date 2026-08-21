@@ -35,6 +35,11 @@ import {
   shouldAutoAcceptBypass,
 } from "./agent-input-wait";
 import { ensureClaudeFolderTrust } from "./claude-workspace-trust";
+import type { OrchestratorCostSession } from "./session-kind";
+
+// 비용 축 이벤트 타입의 정본은 session-kind.ts 다(순수 · 회귀 테스트 대상).
+// 기존 import 경로 호환을 위해 여기서 다시 내보낸다.
+export type { OrchestratorCostSession };
 
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 
@@ -1376,6 +1381,20 @@ export class OrchestratorManager {
       composerProvenLive: false,
     };
 
+    // ★비용 수집 초크포인트 #1 — 세션이 실제로 떴다 (ticket TaDiWyLNi5ihBnjfVmMs).
+    // 격리 홈 하네스(codex/grok/gemini)는 세션 id 를 저장하지 않으므로 이 지점이
+    // 유일한 등록 기회다. claude 는 여기서 resume id 를 알면 그것으로, 모르면
+    // null 로 넘기고 초크포인트 #2(saveOrchSessionId)에서 확정된 id 로 다시
+    // 발화한다.
+    this.emitCostSession({
+      phase: "start",
+      costAgentId: sessionId,
+      rootPath,
+      projectId,
+      model: launchConfig.model ?? null,
+      claudeSessionId: resumedSessionId ?? null,
+    });
+
     // ★The first-run `--dangerously-skip-permissions` consent screen (P0, new
     // Mac). The worker path has answered this since agent-manager.ts:2154; the
     // orchestrator never did, and the orchestrator is the ONE terminal a new
@@ -1781,6 +1800,19 @@ export class OrchestratorManager {
     // Monitor PTY exit — auto-restart on crash
     this.ptyManager.onExit(ptySessionId, (exitCode) => {
       if (this.session?.ptySessionId !== ptySessionId) return;
+
+      // ★비용 수집 초크포인트 #3 — 프로세스가 죽었다. 폴러를 여기서 놓아준다
+      // (ticket TaDiWyLNi5ihBnjfVmMs). 정상종료·크래시·rootPath 소실이 전부 이
+      // 지점을 지나므로 분기마다 중복해 달지 않는다. 크래시 자동재시작이면
+      // 재런치의 초크포인트 #1 이 다시 등록한다.
+      this.emitCostSession({
+        phase: "stop",
+        costAgentId: sessionId,
+        rootPath,
+        projectId,
+        model: launchConfig.model ?? null,
+        claudeSessionId: this.session?.claudeSessionId ?? null,
+      });
 
       // Intentional stop or clean exit — release our resume lock so another
       // instance (or our own next launch) can attach without false contention.
@@ -2291,6 +2323,39 @@ export class OrchestratorManager {
     this.onSessionTranscript = handler;
   }
 
+  /**
+   * Observer of this orchestrator's session **for cost attribution**
+   * (ticket TaDiWyLNi5ihBnjfVmMs).
+   *
+   * ★왜 transcript 훅과 따로인가: 그 훅은 claude 세션 id 가 확정되는 순간에만
+   * 발화한다. 격리 홈 하네스(codex/grok/gemini)는 세션 id 를 저장하지 않으므로
+   * 그 훅을 영원히 안 탄다 — 거기에 비용을 얹으면 codex 오케가 조용히 0 으로
+   * 남는다. 그래서 launch/exit 라는 **수명주기** 초크포인트에서 따로 발화한다.
+   *
+   * transcript 훅과 마찬가지로 주입식이다 — 이 매니저는 비용·단가·BigQuery 를
+   * 계속 모른다.
+   */
+  private onCostSession?: (input: OrchestratorCostSession) => void;
+
+  /** Register the cost-session observer (see {@link onCostSession}). */
+  setCostSessionHandler(
+    handler: (input: OrchestratorCostSession) => void,
+  ): void {
+    this.onCostSession = handler;
+  }
+
+  /** 관측자 발화. 던져도 오케 수명주기에 영향이 없어야 한다. */
+  private emitCostSession(input: OrchestratorCostSession): void {
+    try {
+      this.onCostSession?.(input);
+    } catch (err) {
+      console.warn(
+        `[Orchestrator:${this.kind}] cost-session handler threw:`,
+        err,
+      );
+    }
+  }
+
   /** Persist this orchestrator's claude session id under its store key. */
   saveOrchSessionId(rootPath: string, claudeSessionId: string): void {
     const store = this.readOrchStore(rootPath);
@@ -2334,6 +2399,23 @@ export class OrchestratorManager {
         `[Orchestrator:${this.kind}] session-transcript handler threw:`,
         err,
       );
+    }
+
+    // ★비용 수집 초크포인트 #2 — claude 세션 파일 id 가 **확정된** 순간
+    // (ticket TaDiWyLNi5ihBnjfVmMs). 신규 세션은 launch 시점에 id 를 모른다
+    // (claude 가 파일을 쓴 뒤에야 알 수 있다) — 그래서 여기서 다시 발화한다.
+    // trackSession 은 같은 agentId 재등록 시 이전 트래커를 먼저 정리하고, 파스
+    // 워터마크(#874)가 이미 청구한 지점을 기억하므로 중복 청구가 아니다.
+    if (this.session?.sessionId) {
+      this.emitCostSession({
+        phase: "start",
+        costAgentId: this.session.sessionId,
+        rootPath,
+        projectId:
+          this.session?.projectId ?? this.lastLaunchArgs?.projectId ?? null,
+        model: this.session?.launchConfig?.model ?? null,
+        claudeSessionId,
+      });
     }
   }
 

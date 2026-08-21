@@ -63,6 +63,7 @@ import {
   type PendingInstruction,
 } from "./agent-watchdog";
 import { OrchestratorManager } from "./orchestrator-manager";
+import type { OrchestratorCostSession } from "./session-kind";
 import { OwnerRegistry } from "./owner-registry";
 import {
   buildOrchestratorHandoffSnapshot,
@@ -168,6 +169,10 @@ import {
 } from "./vendor-secrets";
 import { CostTracker, onUnmatchedPricing } from "./cost-tracker";
 import { isCliHomeTracked } from "./session-parsers";
+import {
+  classifyPtySessionId,
+  planOrchestratorCostTracking,
+} from "./session-kind";
 import {
   ingestSessionLines,
   initTrainingCapture,
@@ -2796,6 +2801,10 @@ function createOrchestratorInstance(projectId: string): OrchestratorManager {
   // 안 타서 cost-tracker sink 로는 절대 안 들어온다 — 세션 id 초크포인트에
   // 직접 붙인다. 게이트가 닫혀 있으면 파일을 읽지도 않는다.
   orchestrator.setSessionTranscriptHandler(trackOrchestratorSession);
+  // ★오케 비용 수집(ticket TaDiWyLNi5ihBnjfVmMs). transcript 훅과 별도인 이유는
+  // orchestrator-manager 의 setCostSessionHandler 주석 참조 — 격리 홈 하네스는
+  // claude 세션 id 초크포인트를 영원히 안 탄다.
+  orchestrator.setCostSessionHandler(trackOrchestratorCostSession);
   return orchestrator;
 }
 
@@ -3678,6 +3687,10 @@ function createMissionOrchestratorInstance(
   // 안 타서 cost-tracker sink 로는 절대 안 들어온다 — 세션 id 초크포인트에
   // 직접 붙인다. 게이트가 닫혀 있으면 파일을 읽지도 않는다.
   orchestrator.setSessionTranscriptHandler(trackOrchestratorSession);
+  // ★오케 비용 수집(ticket TaDiWyLNi5ihBnjfVmMs). transcript 훅과 별도인 이유는
+  // orchestrator-manager 의 setCostSessionHandler 주석 참조 — 격리 홈 하네스는
+  // claude 세션 id 초크포인트를 영원히 안 탄다.
+  orchestrator.setCostSessionHandler(trackOrchestratorCostSession);
   return orchestrator;
 }
 
@@ -3991,9 +4004,23 @@ function getFlowDb() {
 const flowDb = getFlowDb();
 
 // --- Cost Tracking ---
+
+// ── 오케 비용 수집 (ticket TaDiWyLNi5ihBnjfVmMs) ────────────────────────
+//
+// 오케는 agent-manager 를 안 타므로 `agentManager.getAgent(costAgentId)` 가
+// 영원히 undefined 다 — 아래 cost 콜백의 projectId 해석이 그 조회 하나에 기대고
+// 있어서, 배선만 하고 이 맵을 안 두면 오케 행이 전부 projectId="" 로 적재된다
+// (수집은 됐는데 테넌트 축이 비는, 절반짜리 수리).
+const orchestratorCostProjects = new Map<string, string>();
+
 const costTracker = new CostTracker((agentId, cost) => {
   const agent = agentManager.getAgent(agentId);
-  const projectId = agent?.launchConfig?.env?.MARBLO_PROJECT || "";
+  // 오케는 agent-manager 에 없다 — 그 경우 오케 등록 시 기억해 둔 projectId 로
+  // 떨어진다(ticket TaDiWyLNi5ihBnjfVmMs). 둘 다 없으면 종전대로 빈 문자열.
+  const projectId =
+    agent?.launchConfig?.env?.MARBLO_PROJECT ||
+    orchestratorCostProjects.get(agentId) ||
+    "";
   // ★과금 세션이 기록한 실제 모델 id 를 AgentManager 로 되먹인다. argv 에 모델을
   // 핀하지 않은 launch(오케 기본 경로·Agents 탭 ▶Start·콜드부트 reconnect)에서는
   // 이것이 그 에이전트의 유일한 모델 관측이고, 이후 dispatchMeta(→라우팅 KG)가
@@ -4063,6 +4090,48 @@ const costTracker = new CostTracker((agentId, cost) => {
     projectId
   );
 });
+
+/**
+ * 오케 세션 수명주기 → 비용 트래커 등록/해제.
+ *
+ * 판단은 전부 `planOrchestratorCostTracking`(session-kind.ts, 순수함수)이 한다 —
+ * 여기는 그 결정을 실행만 한다. 회귀 테스트가 붙을 수 있는 표면을 electron 이
+ * 없는 쪽에 두기 위해서다(ticket TaDiWyLNi5ihBnjfVmMs).
+ */
+function trackOrchestratorCostSession(input: OrchestratorCostSession): void {
+  const plan = planOrchestratorCostTracking(input, isCliHomeTracked);
+
+  if (plan.action === "stop") {
+    costTracker.stopSession(plan.costAgentId);
+    orchestratorCostProjects.delete(plan.costAgentId);
+    return;
+  }
+
+  if (plan.action === "skip") {
+    // ★조용히 넘어가지 않는다. 이 사고의 재발 형태가 정확히 "아무도 못 보는
+    // 사이 빠지는 것" 이었다. session-id-pending 은 정상 대기이므로 log,
+    // 나머지는 화면/표가 0 으로 오해할 수 있는 상태이므로 warn.
+    const line = `[CostTracker:Orch] ${plan.costAgentId} not tracked — ${plan.reason}`;
+    if (plan.reason === "session-id-pending") console.log(line);
+    else console.warn(line);
+    return;
+  }
+
+  if (input.projectId) {
+    orchestratorCostProjects.set(plan.costAgentId, input.projectId);
+  }
+  costTracker.trackSession(
+    plan.costAgentId,
+    plan.rootPath,
+    plan.sessionId,
+    plan.model
+  );
+  console.log(
+    `[CostTracker:Orch] tracking ${plan.costAgentId} (${plan.model}) session=${
+      plan.sessionId ?? "(cli-home)"
+    }`
+  );
+}
 
 // Surface models we cannot price. Those tokens are billed at $0 (never at a
 // borrowed rate), so without this event the under-reporting would be silent —
@@ -7501,8 +7570,18 @@ function setupPtyForwarding(sid: string): void {
   sidGen.set(sid, gen);
 
   ptyManager.onData(sid, (data) => {
-    if (sid.startsWith("agent-")) {
-      costTracker.processOutput(sid.replace("agent-", ""), data);
+    // ★세션 종류 판정은 session-kind.ts 가 정본이다(ticket TaDiWyLNi5ihBnjfVmMs).
+    // 종전엔 여기에 `sid.startsWith("agent-")` 가 인라인으로 박혀 있었고, 그래서
+    // 오케 PTY(`orch-`)는 어느 분기에도 안 걸린 채 조용히 빠졌다.
+    //
+    // ★오케를 여기로 끌어오지 않는 것이 맞다: processOutput 은 자기 사용량을
+    // 터미널에 찍는 CLI 를 위한 **스크래핑 폴백**이고, claude/codex 오케는
+    // 세션 파일이라는 정확한 출처가 있다(trackOrchestratorCostSession). 스크래핑을
+    // 겹치면 없는 행을 지어낸다. 여기서는 "오케는 여기가 아니다" 를 명시적으로
+    // 남기는 것까지가 이 판정의 역할이다.
+    const ptyIdentity = classifyPtySessionId(sid);
+    if (ptyIdentity.kind === "agent" && ptyIdentity.costAgentId) {
+      costTracker.processOutput(ptyIdentity.costAgentId, data);
     }
 
     // Retained ring first — it must capture BOTH the pre-drain output and the
