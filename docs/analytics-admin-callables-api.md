@@ -702,7 +702,17 @@ type BetaSegmentSummary = {
 
 ---
 
-## `personAxis` — 사람 축 커버리지 봉투 (선행 티켓 `euSq4AwHJrxSagMCjXeM` 대기)
+## `personAxis` — 사람 축 커버리지 봉투 (선행 티켓 `euSq4AwHJrxSagMCjXeM` **완료**)
+
+> ★**2026-08-21 갱신.** 이 봉투는 이제 **실제로 실려 온다.** 서버가 싣는 자리는 아래
+> 세 콜러블이고 값은 `personAxis.computePersonAxisCoverage()` 가 그대로 만든다.
+> 창(`activeInstalls` 의 분모)은 각 콜러블이 보고 있는 기간을 쓴다 —
+> `getAdminInstallRetentionSummary` 는 조회 창이 없어(프로필 전량) 파생표가 도는
+> 창(90일)으로 센다. 창이 넓으면 분모가 커져 `complete` 가 늦게 뜰 뿐이라 **안전한
+> 쪽으로** 틀린다.
+> ★단 링크는 **forward-only** 라 배포 직후 `state` 는 `pending` 이 정상이다.
+> 그리고 배포 머신에 `PERSON_AXIS_EFFECTIVE_FROM` 이 없으면 `disabled` 다 —
+> 절차는 `v3/docs/person-axis-activation-2026-08-21.md` §6.
 
 설계 §10.3. 사람 축을 쓰는 **모든** 응답에 실린다. 프론트는 이 필드를 **옵셔널**로 읽고,
 `getAdminInstallRetentionSummary` → `getAdminStreakRetention` → `getAdminRetentionCohorts`
@@ -723,6 +733,13 @@ personAxis?: {
 ```
 
 값은 `personAxis.computePersonAxisCoverage()` 가 그대로 만든다 — 프론트는 계산하지 않는다.
+
+★**전용 콜러블은 없다.** 같은 사실에 두 경로가 생기면 어느 쪽이 맞는지 화면이 스스로
+못 말한다. 사람 축만 따로 폴링해야 할 화면이 생기면 그때 후속 티켓으로 낸다.
+
+★**서버가 봉투를 못 만들면 `null` 을 싣는다**(던지지 않는다). 0 으로 채우면 화면이
+"사람이 없다" 로 읽고, 던지면 리텐션 탭 전체가 죽는다. `null` 이면 프론트가 다음
+콜러블의 봉투로 넘어가고, 셋 다 없으면 '배선 전' 으로 접힌다.
 
 화면이 이 봉투로 하는 일(설계 §10.4 화면 규칙 일곱):
 

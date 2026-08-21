@@ -47,7 +47,9 @@
     "test:routing-shadow": "tsc src/routingShadow.ts src/routingShadow.test.ts --outDir .test-out/routing-shadow --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/routing-shadow/routingShadow.test.js",
     "test:routingShadow": "npm run test:routing-shadow",
     "backfill:analytics-identity:build": "tsc src/analyticsPseudonym.ts src/analyticsIdScheme.ts scripts/backfill-analytics-identity.ts --outDir .script-out/analytics-identity --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck",
-    "backfill:analytics-identity": "npm run backfill:analytics-identity:build && node .script-out/analytics-identity/scripts/backfill-analytics-identity.js"
+    "backfill:analytics-identity": "npm run backfill:analytics-identity:build && node .script-out/analytics-identity/scripts/backfill-analytics-identity.js",
+    "provision:person-axis:build": "tsc src/personAxis.ts src/analyticsProfiles.ts src/adminAnalytics.ts scripts/provision-person-axis.ts --outDir .script-out/person-axis-provision --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck",
+    "provision:person-axis": "npm run provision:person-axis:build && node .script-out/person-axis-provision/scripts/provision-person-axis.js"
   },
   "engines": {
     "node": "20"

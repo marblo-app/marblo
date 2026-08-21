@@ -19,15 +19,20 @@ import {
   LINK_SOURCE_UID28_INLINE,
   PERSON_AXIS_BASIS_LABEL,
   PERSON_AXIS_EFFECTIVE_FROM_ENV,
+  PERSON_AXIS_FORWARD_ONLY_NOTE,
+  PERSON_AXIS_LINK_POLICY_VERSION,
   PERSON_AXIS_VIEW_COLUMNS,
   TABLE_USER_INSTALL,
   USER_INSTALL_SCHEMA,
   assertLinkDatasetIsolation,
   attributePersonRows,
   buildLinkRowId,
+  buildPersonAxisCoverageSql,
   buildPersonAxisEraseSql,
   buildPersonAxisViewDdl,
   buildPersonAxisViewSql,
+  buildUserInstallInlineMergeSql,
+  buildUserInstallMergeParams,
   buildUserInstallMergeSql,
   buildUserInstallTableDdl,
   computePersonAxisCoverage,
@@ -623,4 +628,178 @@ test("리포트는 이메일 원문을 남기지 않는다", () => {
   const dump = JSON.stringify(rep);
   assert.ok(!dump.includes("john.kim"));
   assert.ok(!dump.includes("owner@hypemarc.com"));
+});
+
+// ── §10 인증 경로 배선 ──────────────────────────────────────────────────────
+
+test("★인라인 MERGE 는 스테이징 판과 **같은 갱신 규칙**이다 (first_linked_at 은 LEAST)", () => {
+  const inline = buildUserInstallInlineMergeSql(PROJECT);
+  const staged = buildUserInstallMergeSql(PROJECT, "stg_user_install");
+  // 두 SQL 의 MATCHED/NOT MATCHED 절은 글자까지 같아야 한다 — 갈라지면
+  // 백필과 실시간 배선이 서로 다른 first_linked_at 을 남긴다.
+  const clause = (sql: string) => sql.slice(sql.indexOf("WHEN MATCHED"));
+  assert.equal(clause(inline), clause(staged));
+  assert.ok(inline.includes("LEAST(T.first_linked_at, S.first_linked_at)"));
+  assert.ok(inline.includes("ON T.row_id = S.row_id"));
+});
+
+test("★인라인 MERGE 는 스테이징 표를 만들지 않는다", () => {
+  const sql = buildUserInstallInlineMergeSql(PROJECT);
+  assert.ok(!/CREATE\s+TABLE/i.test(sql));
+  assert.ok(!/DROP\s+TABLE/i.test(sql));
+  assert.ok(sql.includes("USING ("));
+});
+
+test("★MERGE 파라미터에 원시 uid 가 들어갈 자리가 없다", () => {
+  const planned = planUserInstallLink(
+    {
+      userKey: "us_deadbeefdeadbeefdeadbeef",
+      installKey: "in_cafecafecafecafecafecafe",
+      idScheme: "uuid36",
+      linkSource: LINK_SOURCE_TELEMETRY_AUTH,
+      observedAt: "2026-09-02T03:04:05.000Z",
+      policyVersion: PERSON_AXIS_LINK_POLICY_VERSION,
+      salt: SALT,
+    },
+    OPEN_GATE
+  );
+  assert.equal(planned.written, true);
+  if (!planned.written) return;
+  const params = buildUserInstallMergeParams(planned.row);
+  // SQL 이 참조하는 이름과 params 의 키가 정확히 같아야 한다(둘이 갈라지면
+  // BQ 가 "parameter not found" 로 죽고, 그 실패는 요청당 한 번씩 난다).
+  const sql = buildUserInstallInlineMergeSql(PROJECT);
+  const referenced = new Set(
+    [...sql.matchAll(/@([a-z_]+)/g)].map((m) => m[1])
+  );
+  assert.deepEqual(
+    [...referenced].sort(),
+    Object.keys(params).sort()
+  );
+  for (const key of FORBIDDEN_ON_LINK_AXIS) {
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(params, key),
+      `MERGE 파라미터에 링크축 금지 컬럼이 있다: ${key}`
+    );
+  }
+  // 값 쪽도 본다 — 가명 prefix 가 아닌 것이 섞이면 원시값이 흘러든 것이다.
+  assert.ok(params.user_key.startsWith("us_"));
+  assert.ok(params.install_key.startsWith("in_"));
+  assert.ok(params.row_id.startsWith("lk_"));
+});
+
+test("★고지 버전은 재동의 축(CURRENT_POLICY_VERSION)이 아니라 고지 축이다", () => {
+  // privacyClarification.ts 의 PRIVACY_CLARIFICATION_VERSION 과 같아야 한다.
+  // 이 값이 "2026-06-01"(CURRENT_POLICY_VERSION)로 바뀌면 링크표가 "어느 고지
+  // 하에서 만들어졌나" 를 틀리게 말한다 — 설계 §5.4-a 의 거래 조건이 그 고지다.
+  assert.equal(PERSON_AXIS_LINK_POLICY_VERSION, "2026-08-21");
+  assert.notEqual(PERSON_AXIS_LINK_POLICY_VERSION, "2026-06-01");
+});
+
+test("★forward-only 문장은 프론트 미러와 **글자까지** 같다", () => {
+  // ★프론트(#1090) marblo-web/src/app/[locale]/admin/AnalyticsPanel.tsx 의
+  //   PERSON_AXIS_FORWARD_ONLY_NOTE 를 그대로 옮긴 것이다. 렌더러 모듈이라
+  //   import 할 수 없어 값을 한 벌 더 두는데, **갈라지면 서버 문서와 화면이
+  //   서로 다른 말을 하고 어느 쪽이 맞는지 아무도 못 말한다.**
+  //   저쪽을 고칠 때 여기도 같이 고쳐라 — 이 테스트가 그때 빨개진다.
+  assert.equal(
+    PERSON_AXIS_FORWARD_ONLY_NOTE,
+    "사람 축 링크는 forward-only 입니다 — 각 설치는 '다음에 인증할 때' 부터 " +
+      "붙습니다. 그래서 켠 직후에 연결된 설치가 거의 없는 것이 정상이고, 여기 " +
+      "낮은 커버리지는 '사람이 없다' 가 아니라 '아직 안 붙었다' 입니다. 잠자는 " +
+      "설치는 며칠에서 영원히 안 붙을 수 있습니다."
+  );
+});
+
+test("★커버리지 봉투의 모양은 프론트 미러와 **한 글자도** 다르면 안 된다", () => {
+  // ★docs/analytics-admin-callables-api.md §personAxis 와 프론트 타입
+  //   PersonAxisCoverage 의 필드 목록. 하나라도 이름이 다르면 프론트에서
+  //   조용히 undefined 가 되고 화면은 영원히 "배선 전" 을 띄운다 — 에러가
+  //   나지 않는 종류의 고장이라 테스트로 못 박는다.
+  const CONTRACT_FIELDS = [
+    "state",
+    "disabledReason",
+    "linkedInstalls",
+    "totalInstalls",
+    "linkedActiveInstalls",
+    "activeInstalls",
+    "excludedSharedInstalls",
+    "effectiveFrom",
+    "basis",
+    "lastLinkedAt",
+  ].sort();
+
+  const coverage = computePersonAxisCoverage({
+    gate: OPEN_GATE,
+    basis: "since_link",
+    linkedInstalls: 3,
+    totalInstalls: 14,
+    linkedActiveInstalls: 3,
+    activeInstalls: 6,
+    excludedSharedInstalls: 0,
+    lastLinkedAt: "2026-09-02T00:00:00.000Z",
+  });
+  assert.deepEqual(Object.keys(coverage).sort(), CONTRACT_FIELDS);
+
+  // 게이트가 닫혀도 **모양이 같아야 한다** — 닫혔을 때만 필드가 사라지면
+  // 프론트가 "닫힘" 을 장애로 읽는다.
+  const closed = computePersonAxisCoverage({
+    gate: resolvePersonAxisGate({}),
+    basis: "since_link",
+    linkedInstalls: 0,
+    totalInstalls: 0,
+    linkedActiveInstalls: 0,
+    activeInstalls: 0,
+    excludedSharedInstalls: 0,
+    lastLinkedAt: null,
+  });
+  assert.deepEqual(Object.keys(closed).sort(), CONTRACT_FIELDS);
+  assert.equal(closed.state, "disabled");
+  assert.ok(closed.disabledReason);
+});
+
+test("★basis 값은 프론트 미러의 두 리터럴뿐이다", () => {
+  // 프론트: export type PersonAxisBasis = "since_link" | "all_time";
+  // 한 글자만 달라도 배지가 빈다 — 라벨 없는 사람 축 숫자 금지가 무너진다.
+  assert.deepEqual(Object.keys(PERSON_AXIS_BASIS_LABEL).sort(), [
+    "all_time",
+    "since_link",
+  ]);
+  assert.equal(PERSON_AXIS_BASIS_LABEL.since_link, "연결 이후 기준");
+  assert.equal(PERSON_AXIS_BASIS_LABEL.all_time, "설치 전체 이력 기준(소급)");
+});
+
+// ── §11 커버리지 SQL ────────────────────────────────────────────────────────
+
+test("★커버리지 SQL 은 값을 만들지 않고 센다 — 상수 분모가 없다", () => {
+  const sql = buildPersonAxisCoverageSql(PROJECT);
+  // 분자·분모가 전부 COUNT 다. 리터럴로 채운 분모가 있으면 화면이 거짓말한다.
+  assert.equal((sql.match(/COUNT\(/g) ?? []).length >= 5, true);
+  assert.ok(sql.includes("excluded_shared_installs"));
+  assert.ok(sql.includes("HAVING COUNT(DISTINCT user_key) > 1"));
+});
+
+test("★complete 분모(active)는 조회 구간과 **상한**을 둘 다 탄다", () => {
+  const sql = buildPersonAxisCoverageSql(PROJECT);
+  assert.ok(
+    sql.includes("GREATEST(DATE(@since), DATE(@effective_from))"),
+    "상한을 빼먹으면 커버리지가 영원히 100% 가 안 된다"
+  );
+});
+
+test("★커버리지 SQL 에 원시 uid·솔트가 들어갈 자리가 없다", () => {
+  const sql = buildPersonAxisCoverageSql(PROJECT);
+  const params = new Set([...sql.matchAll(/@([a-z_]+)/g)].map((m) => m[1]));
+  assert.deepEqual([...params].sort(), ["effective_from", "since"]);
+  for (const key of FORBIDDEN_ON_LINK_AXIS) {
+    assert.ok(!sql.includes(`${key} `), `커버리지 SQL 이 ${key} 를 참조한다`);
+  }
+});
+
+test("★커버리지 SQL 은 링크표를 익명축과 **다른 데이터셋**에서 읽는다", () => {
+  const sql = buildPersonAxisCoverageSql(PROJECT);
+  assert.ok(sql.includes(`${PROJECT}.marblo_identity.${TABLE_USER_INSTALL}`));
+  assert.ok(sql.includes(`${PROJECT}.marblo_telemetry.analytics_user_daily`));
+  // ★읽기만 한다 — 커버리지가 원본을 고치면 그건 커버리지가 아니다.
+  assert.ok(!/\b(INSERT|UPDATE|DELETE|MERGE|CREATE|DROP|ALTER)\b/.test(sql));
 });

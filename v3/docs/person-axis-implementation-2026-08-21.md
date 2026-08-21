@@ -19,6 +19,14 @@
 > `personAxis.ts` 는 지금도 `index.ts` 어디에서도 import 되지 않는다(순수 로직 +
 > 축 순수성 가드만 쓰인다). 게이트가 열린 뒤의 0행은 **여기가 원인**이지 게이트
 > 문제가 아니다. 3~6 은 별도 티켓이다.
+>
+> ★**2026-08-21 재갱신(티켓 `euSq4AwHJrxSagMCjXeM`).** 위 문단은 이제 **낡았다** —
+> 3~6 을 했다. 표·뷰가 프로덕션 BQ 에 실재하고 `personAxis.ts` 는 `index.ts` 가
+> import 한다(`logTelemetryBatch` 의 링크 MERGE + `getAdminPersonAxisCoverage`).
+> **남은 것은 배포 하나다**: `PERSON_AXIS_EFFECTIVE_FROM` 을 배포 머신에 넣고
+> 함수를 배포해야 적재가 열린다. 절차는 `person-axis-activation-2026-08-21.md` §6.
+> ★그리고 링크는 **forward-only** 라 배포 직후에도 사람 축은 거의 비어 있다 —
+> 그게 정상이다(활성화 문서 §1).
 
 ---
 
@@ -41,6 +49,12 @@ unset 일 때 가능한 동작 셋 중 하나를 골라야 했다.
 쌓이면 나중에 여는 순간 개정 전에 만들어진 링크가 소급에 참여하기 때문이다.
 `scripts/check-deploy-env.mjs` 의 `REQUIRED_KEYS` 에 **일부러 올리지 않았다** —
 올리면 배포가 막히고, 막힌 배포를 뚫으려고 아무 날짜나 채우게 된다.
+
+> ★**정정(2026-08-21, #1089).** 이 문단도 낡았다 — `PERSON_AXIS_EFFECTIVE_FROM` 은
+> 그 뒤 `REQUIRED_KEYS` 로 **올라갔다.** 전제가 바뀌었기 때문이다: 값이 정해지기
+> 전에는 unset 이 "아직 안 정했다" 였지만, 값이 정해진 뒤의 unset 은 **설정 누락**
+> 이고 누락되면 사람 축 화면이 조용히 0행으로 남는다. 사유는 그 파일 상단 주석에
+> 있다.
 
 ## 2. ★소급은 저장이 아니라 조회
 
@@ -158,10 +172,26 @@ npm run build                     OK (index.ts 포함 전체)
    설계 §5.4-a 에 있다. ★이 파일은 gitignore 대상이라 **커밋으로 배포되지 않는다** —
    배포 머신(메인 체크아웃)에서 직접 넣어야 한다. 넣었는지는
    `npm run check:deploy-env` 가 본다(2026-08-21 부터 필수 키).
-3. `buildUserInstallTableDdl()` 로 빈 표 생성 → `npm run check:person-axis-isolation`
-   이 초록인지 확인. **빨가면 여기서 멈춘다.**
-4. `buildPersonAxisViewDdl()` 두 벌 실행(닫힌 상태로 먼저 만들어도 안전하다 — 0행).
-5. 인증 텔레메트리 콜러블에 링크 MERGE 배선(forward-only).
-6. 커버리지 노출 → `state === "complete"` 일 때만 퍼센트 헤드라인 개방.
+3. ~~`buildUserInstallTableDdl()` 로 빈 표 생성 → `npm run check:person-axis-isolation`
+   이 초록인지 확인.~~ **[x] 완료 2026-08-21** — 티켓 `euSq4AwHJrxSagMCjXeM`.
+   `npm run provision:person-axis -- --apply`. 격리 점검 **[ok]**.
+4. ~~`buildPersonAxisViewDdl()` 두 벌 실행.~~ **[x] 완료 2026-08-21** —
+   ★**열린 형태**(상한 2026-04-01)로 만들었다. 이유는 활성화 문서 §2.1.
+5. ~~인증 텔레메트리 콜러블에 링크 MERGE 배선(forward-only).~~
+   **[x] 완료 2026-08-21** — `logTelemetryBatch` → `recordPersonAxisLink`.
+6. ~~커버리지 노출.~~ **[x] 완료 2026-08-21** — `getAdminPersonAxisCoverage` +
+   어드민 리텐션 탭의 `PersonAxisCoverageCard`. `state === "complete"` 일 때만
+   퍼센트 헤드라인.
+
+> ★**남은 것은 배포 하나다.** `PERSON_AXIS_EFFECTIVE_FROM=2026-04-01` 은
+> `.env.<project>`(gitignore)라 **배포 머신에 직접 넣어야** 적재가 열리고,
+> `scheduledBuildAnalyticsProfiles` 가 아직 배포돼 있지 않아 뷰의 원천
+> (`analytics_user_daily`)이 비어 있다. 절차·확인·되돌리기는
+> **`person-axis-activation-2026-08-21.md` §6** 에 있다.
+
+> ★**그리고 링크는 forward-only 다.** 배선 뒤에도 각 설치는 **다음에 인증할
+> 때부터** 붙으므로 배포 직후 사람 축은 거의 비어 있다 — 그게 정상이다. 이
+> 문장은 코드(`PERSON_AXIS_FORWARD_ONLY_NOTE`)·응답(`forwardOnlyNote`)·화면
+> (`PersonAxisCoverageCard`) 세 군데에 박혀 있다.
 
 ★1·2·3·4 는 **화면을 바꾸지 않는다.** 값이 흐르기 시작하는 것은 5부터다.

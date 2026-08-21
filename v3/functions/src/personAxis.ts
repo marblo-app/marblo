@@ -1074,3 +1074,181 @@ export function buildPersonAxisEraseSql(projectId: string): string {
     "--   (BQ 는 쿼리 본문을 job 히스토리에 수개월 보관한다).",
   ].join("\n");
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// 10. 인증 경로 배선용 — 스테이징 없이 한 줄을 MERGE 한다
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ★설계를 바꾸는 절이 아니다. 설계 §6.1 이 요구한 성질은 **"row_id 로 MERGE 해서
+//   재실행 중복을 막는다"** 이고, 그 근거는 "스트리밍 insert 의 insertId 중복제거는
+//   수 분 창의 best-effort 라 재실행 중복을 못 막는다" 였다. 아래 SQL 은 그 성질을
+//   그대로 유지하면서 **스테이징 표만 뺀다.**
+//
+//   왜 뺐나: 부여 시점이 "그 설치의 로그인 후 첫 인증 요청"(§5.1)이라 한 번에
+//   들어오는 링크가 **한 줄**이다. 한 줄을 위해 스테이징 표를 만들고·로드하고·
+//   MERGE 하고·지우면 BQ 잡이 요청당 3~4개가 되고, 그 중 하나라도 실패하면
+//   스테이징 표가 고아로 남는다. `USING (SELECT @param ...)` 는 잡 하나다.
+//
+//   백필처럼 **여러 줄**을 한꺼번에 넣는 경로는 그대로 `buildUserInstallMergeSql`
+//   (스테이징 판)을 쓴다. 두 함수는 MATCHED/NOT MATCHED 절이 같아야 한다.
+//
+// ★파라미터에는 원시 uid 가 들어갈 자리가 없다 — 전부 가명(us_/in_/lk_)과
+//   타임스탬프다. BQ 는 쿼리 본문을 job 히스토리에 수개월 보관하므로 이게 중요하다.
+
+/**
+ * 링크가 만들어진 고지의 버전.
+ *
+ * ★정본은 `v3/src/services/privacyClarification.ts` 의
+ * `PRIVACY_CLARIFICATION_VERSION` 이다(현재 "2026-08-21"). 렌더러 모듈이라
+ * functions 에서 import 할 수 없어 값을 한 벌 더 둔다 — **둘이 갈라지면
+ * 링크가 어느 고지 하에서 만들어졌는지 표가 거짓말을 한다.** 저쪽을 올릴 때
+ * 여기도 같이 올려라.
+ *
+ * ★`CURRENT_POLICY_VERSION`(동의 재프롬프트 축, "2026-06-01")이 아니다.
+ * 이 링크를 정당화하는 것은 재동의가 아니라 1회성 고지다(설계 §5.4-a 거래 조건).
+ */
+export const PERSON_AXIS_LINK_POLICY_VERSION = "2026-08-21";
+
+/**
+ * ★배선 뒤에도 각 설치는 **다음에 인증할 때부터** 붙는다(forward-only).
+ *
+ * 배포 직후 사람 축이 거의 비어 있는 것은 장애가 아니라 설계다. 이 문장을
+ * 화면·문서에 적지 않으면 "켰는데 왜 비어 있지" 로 읽힌다.
+ *
+ * ★화면에 그리는 쪽은 프론트 상수다 — `marblo-web/.../AnalyticsPanel.tsx` 의
+ * 같은 이름 상수(#1090). 프론트는 응답에 `personAxis` 봉투가 **있을 때만** 그
+ * 문장을 띄우므로, 서버가 할 일은 문자열을 한 벌 더 보내는 게 아니라 **봉투를
+ * 싣는 것**이다(두 벌을 보내면 화면에 두 번 찍힌다).
+ *
+ * ★그래서 이 상수는 프론트 미러와 **글자까지 같아야 한다.** 갈라지면 서버 문서와
+ * 화면이 서로 다른 말을 하고, 어느 쪽이 맞는지 아무도 못 말한다. 아래 테스트가
+ * 그걸 고정한다(`★forward-only 문장은 프론트 미러와 글자까지 같다`).
+ */
+export const PERSON_AXIS_FORWARD_ONLY_NOTE =
+  "사람 축 링크는 forward-only 입니다 — 각 설치는 '다음에 인증할 때' 부터 " +
+  "붙습니다. 그래서 켠 직후에 연결된 설치가 거의 없는 것이 정상이고, 여기 " +
+  "낮은 커버리지는 '사람이 없다' 가 아니라 '아직 안 붙었다' 입니다. 잠자는 " +
+  "설치는 며칠에서 영원히 안 붙을 수 있습니다.";
+
+/** MERGE 파라미터 이름. SQL 과 params 가 갈라지지 않게 한 곳에서 센다. */
+const MERGE_PARAM_NAMES: ReadonlyArray<keyof UserInstallLinkRow> = [
+  "row_id",
+  "user_key",
+  "install_key",
+  "id_scheme",
+  "link_source",
+  "first_linked_at",
+  "last_seen_at",
+  "policy_version",
+  "ingested_at",
+];
+
+/** TIMESTAMP 로 캐스팅해야 하는 파라미터(나머지는 STRING). */
+const MERGE_TIMESTAMP_PARAMS = new Set<string>([
+  "first_linked_at",
+  "last_seen_at",
+  "ingested_at",
+]);
+
+/**
+ * 한 줄짜리 파라미터 MERGE. `buildUserInstallMergeSql` 과 **같은 갱신 규칙**이다
+ * — `first_linked_at` 은 LEAST 로 작은 쪽을 남긴다(소급 경계의 단일 출처).
+ */
+export function buildUserInstallInlineMergeSql(projectId: string): string {
+  const target = `\`${projectId}.${IDENTITY_DATASET}.${TABLE_USER_INSTALL}\``;
+  const using = MERGE_PARAM_NAMES.map((n) =>
+    MERGE_TIMESTAMP_PARAMS.has(n)
+      ? `    TIMESTAMP(@${n}) AS ${n}`
+      : `    @${n} AS ${n}`
+  ).join(",\n");
+  return [
+    `MERGE ${target} T`,
+    "USING (",
+    "  SELECT",
+    using,
+    ") S",
+    "ON T.row_id = S.row_id",
+    "WHEN MATCHED THEN UPDATE SET",
+    "  T.last_seen_at = GREATEST(T.last_seen_at, S.last_seen_at),",
+    "  -- ★first_linked_at 은 덮지 않는다(MIN 유지) — 소급 경계의 단일 출처다.",
+    "  T.first_linked_at = LEAST(T.first_linked_at, S.first_linked_at),",
+    "  T.id_scheme = S.id_scheme,",
+    "  T.link_source = S.link_source,",
+    "  T.policy_version = S.policy_version,",
+    "  T.ingested_at = S.ingested_at",
+    "WHEN NOT MATCHED THEN INSERT (",
+    "  row_id, user_key, install_key, id_scheme, link_source,",
+    "  first_linked_at, last_seen_at, policy_version, ingested_at",
+    ") VALUES (",
+    "  S.row_id, S.user_key, S.install_key, S.id_scheme, S.link_source,",
+    "  S.first_linked_at, S.last_seen_at, S.policy_version, S.ingested_at",
+    ")",
+  ].join("\n");
+}
+
+/**
+ * MERGE 파라미터. ★행에 있는 값만 그대로 넘긴다 — 여기서 값을 만들지 않는다.
+ * (행은 `planUserInstallLink` 가 게이트를 통과시킨 것만 돌려준다.)
+ */
+export function buildUserInstallMergeParams(
+  row: UserInstallLinkRow
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const name of MERGE_PARAM_NAMES) out[name] = row[name];
+  return out;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 11. 커버리지 SQL — 값을 만들지 않고 **세는** 쿼리
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ★SQL 을 이 모듈에 두는 이유는 §2 의 DDL 과 같다 — 여기 있으면 단위테스트가
+//   읽을 수 있고, index.ts 안에 있으면 아무도 못 읽는다.
+//
+// ★본문에 원시 uid 도 솔트도 없다. 파라미터는 날짜 둘뿐이다(@since,
+//   @effective_from) — BQ 가 쿼리 본문을 job 히스토리에 수개월 보관한다.
+
+/**
+ * 커버리지 한 벌을 세는 SQL (설계 §10.3).
+ *
+ * ★`complete` 판정의 분모인 `active_installs` 는 **조회 구간 ∩ 상한** 안에서
+ * 센다. 상한을 빼먹으면 발효일 이전 설치까지 분모에 들어가 커버리지가 영원히
+ * 100% 가 안 되고, 그러면 이 장치가 늑대소년이 된다.
+ *
+ * ★공용 기기 설치는 `linked` 에서 빼고 `excluded_shared_installs` 로 **센다.**
+ * 뷰(`buildOpenGateSql`)와 같은 규칙이어야 화면의 분모와 표의 행 수가 맞는다.
+ */
+export function buildPersonAxisCoverageSql(projectId: string): string {
+  const link = `\`${projectId}.${IDENTITY_DATASET}.${TABLE_USER_INSTALL}\``;
+  const daily = `\`${projectId}.${TELEMETRY_DATASET}.${SOURCE_TABLE_USER_DAILY}\``;
+  return [
+    "WITH shared AS (",
+    "  -- 공용 기기: 한 설치에 계정이 둘 이상(설계 §5.5). 값을 만들지 않고 센다.",
+    `  SELECT install_key FROM ${link}`,
+    "  GROUP BY install_key HAVING COUNT(DISTINCT user_key) > 1",
+    "),",
+    "linked AS (",
+    `  SELECT DISTINCT install_key FROM ${link}`,
+    "  WHERE install_key NOT IN (SELECT install_key FROM shared)",
+    "),",
+    "active AS (",
+    "  -- ★조회 구간 ∩ 상한. complete 판정의 분모라 여기가 틀리면 화면이",
+    "  --   완전성을 거짓말한다.",
+    `  SELECT DISTINCT install_key FROM ${daily}`,
+    "  WHERE day >= GREATEST(DATE(@since), DATE(@effective_from)) AND active",
+    "),",
+    "total AS (",
+    `  SELECT DISTINCT install_key FROM ${daily}`,
+    "  WHERE day >= DATE(@effective_from)",
+    ")",
+    "SELECT",
+    "  (SELECT COUNT(*) FROM linked) AS linked_installs,",
+    "  (SELECT COUNT(*) FROM total) AS total_installs,",
+    "  (SELECT COUNT(*) FROM active a JOIN linked l USING (install_key))",
+    "    AS linked_active_installs,",
+    "  (SELECT COUNT(*) FROM active) AS active_installs,",
+    "  (SELECT COUNT(*) FROM shared) AS excluded_shared_installs,",
+    `  (SELECT CAST(MAX(first_linked_at) AS STRING) FROM ${link})`,
+    "    AS last_linked_at",
+  ].join("\n");
+}

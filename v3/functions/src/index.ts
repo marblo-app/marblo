@@ -77,6 +77,18 @@ import {
   type InstallMilestoneRow,
   type InstallProfileRow,
 } from "./analyticsProfiles";
+import {
+  LINK_SOURCE_TELEMETRY_AUTH,
+  PERSON_AXIS_LINK_POLICY_VERSION,
+  buildPersonAxisCoverageSql,
+  buildUserInstallInlineMergeSql,
+  buildUserInstallMergeParams,
+  computePersonAxisCoverage,
+  planUserInstallLink,
+  resolvePersonAxisGate,
+  type PersonAxisBasis,
+  type PersonAxisCoverage,
+} from "./personAxis";
 import { buildMetadata } from "./telemetryMetadata";
 import {
   ROUTING_SHADOW_SCHEMA_VERSION,
@@ -86,9 +98,11 @@ import {
 } from "./routingShadow";
 import {
   ANALYTICS_ID_SALT_ENV,
+  pseudonymizeAnalyticsId,
   pseudonymizeAnalyticsRow,
   readAnalyticsIdSalt,
 } from "./analyticsPseudonym";
+import { classifyIdScheme } from "./analyticsIdScheme";
 import { resolveGrantPlanType } from "./grantPlan";
 import { buildProjectAudit, toMillis } from "./projectAudit";
 import {
@@ -6530,6 +6544,134 @@ interface TelemetryRow {
 // "events 에 계정 식별자를 넣지 않는다" 는 프라이버시 불변식을 단위테스트가
 // 지킬 수 있는 자리에 두기 위해서다(ticket woXp2c70oR0tliGB8Vs6).
 
+// ── 사람 축 링크 배선 (설계 §5.1 / 구현문서 §10-5) ─────────────────────────
+//
+// ★부여 시점은 **그 설치의 로그인 후 첫 인증 요청**이다. 텔레메트리 콜러블은
+//   auth 강제라 이미 uid 를 갖고 있고(telemetryMetadata.ts 가 그걸 일부러
+//   버린다), 우리는 그 uid 를 **저장하지 않고 파생만** 한다. 수집 항목은 늘지
+//   않는다 — 클라이언트가 새로 보내는 값도 없다.
+//
+// ★forward-only. 배선 뒤에도 각 설치는 **다음에 인증할 때** 붙는다. 배포 직후
+//   링크가 0 에 가까운 것은 장애가 아니라 설계다(PERSON_AXIS_FORWARD_ONLY_NOTE).
+//
+// ★이 경로가 events 적재를 죽이면 안 된다. 링크는 분석 편의이고 텔레메트리는
+//   제품 기능이다 — 실패하면 사유만 남기고 요청은 성공시킨다.
+//
+// ★uid 도 user_key 도 **이벤트 행에는 붙지 않는다.** 링크표에만 간다.
+
+/** 링크표가 사는 프로젝트. check-person-axis-isolation.ts 와 같은 규약. */
+const PERSON_AXIS_PROJECT_ID =
+  process.env.GCLOUD_PROJECT ??
+  process.env.GOOGLE_CLOUD_PROJECT ??
+  process.env.GCP_PROJECT ??
+  "marblo-2253d";
+
+/**
+ * 같은 (user_key, install_key) 를 다시 MERGE 하기까지 기다리는 시간.
+ *
+ * ★MERGE 자체는 멱등이라 몇 번을 돌려도 표는 같다. 이 창은 **정확성이 아니라
+ * 비용·쿼터** 때문이다 — 텔레메트리는 배치마다 오는데 링크는 설치당 사실상
+ * 한 번 정해지는 값이라, 배치마다 DML 을 돌리면 같은 한 줄을 하루에 수백 번
+ * 다시 쓰게 되고 BQ 의 테이블당 DML 동시성에 그대로 부딪힌다.
+ *
+ * ★대신 `last_seen_at` 이 최대 이 창만큼 늦다. 그 컬럼은 소급 경계가 아니라
+ * "최근 확인 시각" 이고(경계는 first_linked_at 이다), 6시간 해상도로 충분하다.
+ *
+ * ★두 번째 대가: MERGE 를 **await 한다**. 안 하면 Cloud Functions 가 응답 뒤
+ * 인스턴스를 얼려서 쿼리가 중간에 죽는다. 그래서 이 창이 열리는 요청 하나는
+ * MERGE 잡(수 초)만큼 느려진다 — 설치당 6시간에 한 번이라 감수한다. 실패해도
+ * 이벤트는 이미 들어갔고 요청은 성공한다(호출측 try/catch).
+ */
+const PERSON_AXIS_LINK_TTL_MS = 6 * 60 * 60 * 1000;
+
+/** 인스턴스 메모리 캐시 상한. 넘으면 통째로 비운다(비워도 MERGE 가 멱등이다). */
+const PERSON_AXIS_LINK_CACHE_MAX = 5000;
+
+/** key = `${user_key}|${install_key}` — ★원시 uid·설치 id 는 담기지 않는다. */
+const personAxisLinkSeen = new Map<string, number>();
+
+let personAxisGateWarned = false;
+
+/**
+ * 인증된 요청 하나에서 링크 한 줄을 MERGE 한다.
+ *
+ * 돌려주는 값은 로그·테스트용 사유 코드다. ★값에 식별자를 넣지 않는다 —
+ * 이 문자열이 그대로 Cloud Logging 에 남는다.
+ */
+async function recordPersonAxisLink(
+  uid: string,
+  clientId: unknown,
+  nowIso: string
+): Promise<string> {
+  const gate = resolvePersonAxisGate();
+  if (!gate.open) {
+    // ★게이트가 닫혀 있으면 **적재도** 막는다. 닫힌 채로 링크가 쌓이면 나중에
+    //   여는 순간 고지 개정 전에 만들어진 링크가 소급에 참여한다(설계 §1).
+    if (!personAxisGateWarned) {
+      personAxisGateWarned = true;
+      functions.logger.warn("[personAxis] gate closed — 링크를 만들지 않는다", {
+        reasonCode: gate.reasonCode,
+        reason: gate.reason,
+      });
+    }
+    return `gate_closed:${gate.reasonCode}`;
+  }
+
+  const salt = getAnalyticsIdSalt();
+  if (!salt) return "no_salt";
+
+  const rawInstall = typeof clientId === "string" ? clientId.trim() : "";
+  // "anon" 은 clientId 가 없을 때 events 가 쓰는 자리표시자다(위 rows 매핑).
+  // 그걸 설치로 링크하면 서로 다른 사람이 한 설치를 공유한 것처럼 보인다.
+  if (rawInstall.length === 0 || rawInstall === "anon") return "no_install_id";
+
+  const userKey = pseudonymizeAnalyticsId("user", uid, salt);
+  const installKey = pseudonymizeAnalyticsId("install", rawInstall, salt);
+  if (typeof userKey !== "string" || typeof installKey !== "string") {
+    return "pseudonym_failed";
+  }
+
+  const cacheKey = `${userKey}|${installKey}`;
+  const nowMs = Date.parse(nowIso);
+  const last = personAxisLinkSeen.get(cacheKey);
+  if (last !== undefined && nowMs - last < PERSON_AXIS_LINK_TTL_MS) {
+    return "throttled";
+  }
+
+  const planned = planUserInstallLink(
+    {
+      userKey,
+      installKey,
+      // ★스킴은 **원시 설치 id** 로 판정한다. 가명은 길이가 원시와 무관해서
+      //   가명으로 재면 항상 unknown 이 나온다(analyticsProfiles.ts 주석 참조).
+      idScheme: classifyIdScheme(rawInstall),
+      linkSource: LINK_SOURCE_TELEMETRY_AUTH,
+      observedAt: nowIso,
+      policyVersion: PERSON_AXIS_LINK_POLICY_VERSION,
+      salt,
+    },
+    gate
+  );
+  if (!planned.written) {
+    functions.logger.info("[personAxis] 링크를 만들지 않았다", {
+      reason: planned.reason,
+    });
+    return "not_written";
+  }
+
+  await bigquery.query({
+    query: buildUserInstallInlineMergeSql(PERSON_AXIS_PROJECT_ID),
+    params: buildUserInstallMergeParams(planned.row),
+    location: BQ_LOCATION,
+  });
+
+  if (personAxisLinkSeen.size >= PERSON_AXIS_LINK_CACHE_MAX) {
+    personAxisLinkSeen.clear();
+  }
+  personAxisLinkSeen.set(cacheKey, nowMs);
+  return "merged";
+}
+
 export const logTelemetryBatch = functions.https.onCall(
   async (data, context) => {
     if (!context.auth) {
@@ -6621,7 +6763,31 @@ export const logTelemetryBatch = functions.https.onCall(
 
     await bigquery.dataset(BQ_DATASET).table(BQ_EVENTS_TABLE).insert(rows);
 
-    return { inserted: rows.length };
+    // ── 사람 축 링크 (설계 §5.1) ─────────────────────────────────────────
+    // ★events 적재가 끝난 **뒤에** 한다. 링크는 분석 편의고 텔레메트리는 제품
+    //   기능이라, 링크가 죽어도 이벤트는 들어가야 한다.
+    // ★uid 는 여기서 소비되고 버려진다 — 이벤트 행에도, 응답에도 없다.
+    let personAxisLink = "skipped";
+    try {
+      // 한 배치는 한 설치에서 온다(clientId 는 설치당 상수). 그래도 빈 값이
+      // 섞일 수 있어 **처음 비어 있지 않은 것**을 쓴다.
+      const batchClientId = events.find(
+        (e) => typeof e.clientId === "string" && e.clientId.trim().length > 0
+      )?.clientId;
+      personAxisLink = await recordPersonAxisLink(
+        context.auth.uid,
+        batchClientId,
+        now
+      );
+    } catch (err) {
+      // 조용히 삼키지 않는다 — 사유는 남기고 요청은 성공시킨다.
+      personAxisLink = "error";
+      functions.logger.error("[personAxis] 링크 MERGE 실패", {
+        message: safeAnalyticsErrorMessage(err),
+      });
+    }
+
+    return { inserted: rows.length, personAxisLink };
   }
 );
 
@@ -9241,6 +9407,9 @@ export const getAdminRetentionCohorts = functions
       },
       cohorts: buildRetentionCohorts(cohortRows as RetentionCohortSourceRow[]),
       activationGate: buildActivationGateFunnel(gateRows[0]),
+      // ★사람 축 커버리지 봉투(설계 §10.3). 우선순위상 셋째지만, 앞의 둘이
+      //   실패해도 화면이 기준 라벨을 잃지 않도록 여기도 싣는다.
+      personAxis: await loadPersonAxisCoverage(rangeDays),
     };
   });
 
@@ -9444,6 +9613,10 @@ export const getAdminStreakRetention = functions
       },
       install,
       account,
+      // ★사람 축 커버리지 봉투(설계 §10.3). 설치 축은 한 사람이 여러 대를 쓰면
+      //   중복 계상되는데, 화면이 그 한계를 말하려면 커버리지를 알아야 한다.
+      //   조회 창은 이 카드의 코호트 창과 같게 맞춘다.
+      personAxis: await loadPersonAxisCoverage(rangeDays),
     };
   });
 
@@ -13110,6 +13283,101 @@ export const buildAnalyticsProfileTables = functions
     return buildAnalyticsProfileTablesInternal(windowDays);
   });
 
+// ════════════════════════════════════════════════════════════════════════════
+// 사람 축 커버리지 봉투 (설계 §10.3 / docs/analytics-admin-callables-api.md)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ★별도 콜러블을 만들지 않는다. 프론트(#1090)는 이미 **기존 응답에 실려 오는
+//   옵셔널 `personAxis` 필드**를 읽도록 머지돼 있고, 우선순위는
+//   getAdminInstallRetentionSummary → getAdminStreakRetention →
+//   getAdminRetentionCohorts 다(처음 있는 것을 쓴다). 같은 사실에 두 경로를
+//   만들면 어느 쪽이 맞는지 화면이 스스로 못 말한다.
+//
+// ★없으면 상태가 아니라 **배선 전**이다 — 그때 화면은 기존 '적재 전' 규약으로
+//   접힌다. 그래서 프론트·백엔드 머지 순서가 어느 쪽이든 화면이 안 깨진다.
+//
+// ★값은 computePersonAxisCoverage() 가 그대로 만든다. 프론트는 계산하지 않는다 —
+//   여기서 모양을 한 글자라도 바꾸면 조용히 undefined 가 되고 화면은 영원히
+//   "배선 전" 을 띄운다.
+//
+// ★게이트가 닫혀 있으면 BQ 를 **아예 조회하지 않는다.** 닫힘은 장애가 아니라
+//   정상 상태이므로, 0 과 사유를 돌려주는 것으로 끝난다.
+//
+// ★forward-only 문장은 프론트 상수(PERSON_AXIS_FORWARD_ONLY_NOTE)가 그린다.
+//   프론트는 `personAxis` 가 **있을 때만** 그 문장을 띄우므로, 이 봉투를 싣는
+//   것이 곧 "배포 직후엔 거의 0이다" 를 화면에 띄우는 것이다. 서버가 같은
+//   문장을 한 벌 더 보내면 두 번 찍힌다 — 그래서 안 보낸다.
+
+function personAxisCount(
+  row: Record<string, unknown> | undefined,
+  key: string
+): number {
+  const v = row?.[key];
+  const n = typeof v === "number" ? v : Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * 사람 축 커버리지 한 벌. **던지지 않는다.**
+ *
+ * ★조회에 실패하면 `null` 을 돌려준다. 0 으로 채우면 화면이 "사람이 없다" 로
+ * 읽고, 던지면 리텐션 탭 전체가 죽는다. `null` 이면 프론트가 다음 콜러블의
+ * 봉투로 넘어가고(우선순위 폴백), 셋 다 없으면 '배선 전' 으로 접힌다.
+ *
+ * @param rangeDays `activeInstalls`(= complete 판정의 분모)를 세는 창.
+ *        ★그 카드가 보고 있는 기간과 같아야 한다. 창이 넓으면 분모가 커져
+ *        complete 가 늦게 뜰 뿐이라 **안전한 쪽으로** 틀린다.
+ */
+async function loadPersonAxisCoverage(
+  rangeDays: number,
+  basis: PersonAxisBasis = "since_link"
+): Promise<PersonAxisCoverage | null> {
+  const gate = resolvePersonAxisGate();
+  const empty = {
+    basis,
+    linkedInstalls: 0,
+    totalInstalls: 0,
+    linkedActiveInstalls: 0,
+    activeInstalls: 0,
+    excludedSharedInstalls: 0,
+    lastLinkedAt: null,
+  };
+  if (!gate.open) {
+    // ★'적재 전'(pending)이 아니라 'disabled' 다 — 소스가 없는 게 아니라 아직
+    //   열면 안 되는 것이고, 같은 말로 그리면 "곧 채워집니다" 라는 거짓 기대가 된다.
+    return computePersonAxisCoverage({ gate, ...empty });
+  }
+  try {
+    const since = new Date(Date.now() - rangeDays * 86400000)
+      .toISOString()
+      .slice(0, 10);
+    const [rows] = await bigquery.query({
+      query: buildPersonAxisCoverageSql(PERSON_AXIS_PROJECT_ID),
+      params: { since, effective_from: gate.effectiveFrom },
+      location: BQ_LOCATION,
+    });
+    const row = (rows as Record<string, unknown>[])[0];
+    if (!row) return null;
+    return computePersonAxisCoverage({
+      gate,
+      basis,
+      linkedInstalls: personAxisCount(row, "linked_installs"),
+      totalInstalls: personAxisCount(row, "total_installs"),
+      linkedActiveInstalls: personAxisCount(row, "linked_active_installs"),
+      activeInstalls: personAxisCount(row, "active_installs"),
+      excludedSharedInstalls: personAxisCount(row, "excluded_shared_installs"),
+      lastLinkedAt:
+        typeof row.last_linked_at === "string" ? row.last_linked_at : null,
+    });
+  } catch (err) {
+    // 조용히 0 으로 접지 않는다 — 사유를 남기고 봉투를 뺀다.
+    functions.logger.error("[personAxis] 커버리지 조회 실패", {
+      message: safeAnalyticsErrorMessage(err),
+    });
+    return null;
+  }
+}
+
 /**
  * 익명축 리텐션 요약(분자·분모 보존). 화면이 각자 SQL 로 분모를 세면 정의가
  * 갈라지므로, 세는 곳을 한 군데로 모은다(summarizeInstallRetention).
@@ -13128,7 +13396,16 @@ export const getAdminInstallRetentionSummary = functions
     const summary = summarizeInstallRetention(
       rows as unknown as InstallProfileRow[]
     );
-    return { ...summary, notes: [...summary.notes, ...notes] };
+    // ★이 축은 조회 창이 없다(프로필 전량). 커버리지의 분모만 파생표가 도는
+    //   창(ANALYTICS_PROFILE_WINDOW_DAYS)으로 센다 — 이 표가 그 창의 산물이다.
+    const personAxis = await loadPersonAxisCoverage(
+      ANALYTICS_PROFILE_WINDOW_DAYS
+    );
+    return {
+      ...summary,
+      notes: [...summary.notes, ...notes],
+      personAxis,
+    };
   });
 
 // ════════════════════════════════════════════════════════════════════════════
