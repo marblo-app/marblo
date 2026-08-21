@@ -1,0 +1,33 @@
+{
+ "note": "claude 2.1.238, isolated HOME (onboarding done, skipDangerousModePermissionPrompt set) spawned with --dangerously-skip-permissions in a directory claude has never seen — i.e. every dispatched worker worktree. NOTHING was typed into this pty; the recording stops with the dialog still on screen. Captured 2026-08-21.",
+ "frames": [
+  {
+   "t": 471,
+   "b64": "GzcbW3IbOBtbPzI1aA=="
+  },
+  {
+   "t": 478,
+   "b64": "G1s/MjVs"
+  },
+  {
+   "t": 478,
+   "b64": "G1s/MjAwNGgbWz8xMDA0aBtbPzIwMzFo"
+  },
+  {
+   "t": 483,
+   "b64": "DQ0KG1szODsyOzI1NTsxOTM7N23ilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIAbWzM5bQ0NChtbMkcbWzM4OzI7MjU1OzE5Mzs3bRtbMW1BY2Nlc3NpbmcbWzEyR3dvcmtzcGFjZTobWzIybRtbMzltDQ0KDQ0KG1syRxtbMW0vcHJpdmF0ZS92YXIvZm9sZGVycy9qNy9jMm16ZnNiMTV2eF94X3FycHAwZ2tfYjQwMDAwZ24vVC9tYi10cnVzdC1jYXB0dXJlL2ZyZXMbWzIybQ0NChtbMkcbWzFtaC13b3JrdHJlZRtbMjJtDQ0KDQ0KG1syR1F1aWNrG1s4R3NhZmV0eRtbMTVHY2hlY2s6G1syMkdJcxtbMjVHdGhpcxtbMzBHYRtbMzJHcHJvamVjdBtbNDBHeW91G1s0NEdjcmVhdGVkG1s1MkdvchtbNTVHb25lG1s1OUd5b3UbWzYzR3RydXN0PxtbNzBHKExpa2UbWzc2R3lvdXINDQobWzJHb3duG1s2R2NvZGUsG1sxMkdhG1sxNEd3ZWxsLWtub3duG1syNUdvcGVuG1szMEdzb3VyY2UbWzM3R3Byb2plY3QsG1s0NkdvchtbNDlHd29yaxtbNTRHZnJvbRtbNTlHeW91chtbNjRHdGVhbSkuG1s3MUdJZhtbNzRHbm90LA0NChtbMkd0YWtlG1s3R2EbWzlHbW9tZW50G1sxNkd0bxtbMTlHcmV2aWV3G1syNkd3aGF0J3MbWzMzR2luG1szNkd0aGlzG1s0MUdmb2xkZXIbWzQ4R2ZpcnN0Lg0NCg0NChtbMkdDbGF1ZGUbWzlHQ29kZSdsbBtbMTdHYmUbWzIwR2FibGUbWzI1R3RvG1syOEdyZWFkLBtbMzRHZWRpdCwbWzQwR2FuZBtbNDRHZXhlY3V0ZRtbNTJHZmlsZXMbWzU4R2hlcmUuDQ0KDQ0KG1syRxtbMzg7MjsxNTM7MTUzOzE1M21TZWN1cml0eRtbMTFHZ3VpZGUbWzM5bQ0NCg0NChtbMkcbWzM4OzI7MTc3OzE4NTsyNDlt4p2vG1s0RxtbMzg7Mg=="
+  },
+  {
+   "t": 483,
+   "b64": "OzE1MzsxNTM7MTUzbTEuG1s3RxtbMzg7MjsxNzc7MTg1OzI0OW1ZZXMsG1sxMkdJG1sxNEd0cnVzdBtbMjBHdGhpcxtbMjVHZm9sZGVyG1szOW0NDQobWzRHG1szODsyOzE1MzsxNTM7MTUzbTIuG1s3RxtbMzltTm8sG1sxMUdleGl0DQ0KDQ0KG1syRxtbMzg7MjsxNTM7MTUzOzE1M21FbnRlchtbOEd0bxtbMTFHY29uZmlybRtbMTlHwrcbWzIxR0VzYxtbMjVHdG8bWzI4R2NhbmNlbBtbMzltDQ0KG1sxQxtbNEE="
+  },
+  {
+   "t": 484,
+   "b64": "G1s+MHE="
+  },
+  {
+   "t": 484,
+   "b64": "G1tj"
+  }
+ ]
+}

@@ -29,6 +29,7 @@ import {
   BYPASS_CONSENT_CONFIRM_DELAY_MS,
   BYPASS_CONSENT_SELECT,
   BYPASS_FLAG_MODELS,
+  FIRST_RUN_DIALOG_GIVE_UP_MS,
   looksLikeFirstRunDialog,
   looksLikeLiveComposer,
   shouldAutoAcceptBypass,
@@ -113,7 +114,11 @@ const INJECT_BOOT_GATE_STABILITY_ATTEMPTS = 5;
 // 올려 실측에 맞추는 선택도 있었지만, 그러면 "얼마나 기다리나" 가 하네스별 blind
 // fallback(claude 10s / gpt 3.5s)에 따라 달라지는 값이 된다 — 기준점을 옮겨서
 // 60s 가 어느 하네스에서나 60s 를 뜻하게 했다.
-const ORCH_FIRST_RUN_DIALOG_GIVE_UP_MS = 60_000;
+//
+// ★상수 자체는 게이트 옆(agent-input-wait)에 두고 워커 경로와 **공유**한다: 양쪽이
+// 같은 화면을 같은 이유로 붙잡는데 정책 숫자가 두 벌이면 한쪽만 조정되고 다른
+// 쪽은 조용히 낡는다 — 워커 경로에 게이트가 아예 없던 것이 정확히 그 모양이었다.
+const ORCH_FIRST_RUN_DIALOG_GIVE_UP_MS = FIRST_RUN_DIALOG_GIVE_UP_MS;
 
 // --- Concurrent-resume guard ---
 // Two orchestrator instances — e.g. two worktrees in the fleet, which are
@@ -1656,8 +1661,11 @@ export class OrchestratorManager {
       let outputBuffer = "";
       // Patterns must match ONLY the actual input prompt — never the trust
       // folder dialog which also uses ╭─╮ box borders. If we match the
-      // trust dialog and send `\r` 1500ms later, it confirms the default
-      // ("No") and exits Claude Code immediately.
+      // trust dialog and send `\r` 1500ms later, it ANSWERS it. ★The default
+      // highlight there is `❯ 1. Yes, I trust this folder` (claude 2.1.238,
+      // live capture) — not "No" as this comment used to say, so the failure is
+      // not a visible exit but a silent one: prompt swallowed, trust granted,
+      // CLI alive at an empty composer.
       //
       // ★These are necessary, not sufficient. Live capture (codex 0.149.0)
       // showed `? for shortcuts` and `Ask Codex` on a PRE-INITIALISATION frame

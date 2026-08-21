@@ -217,7 +217,7 @@ export const BYPASS_CONSENT_CONFIRM_DELAY_MS = 150;
  * a live composer, and claude repaints the whole screen — footer included — so
  * the quoting frame usually carries its own disproof.
  */
-const LIVE_COMPOSER_MARKER = /\u23f5\u23f5/;
+export const LIVE_COMPOSER_MARKER = /\u23f5\u23f5/;
 
 /**
  * Does this frame prove the CLI is at its live composer?
@@ -352,6 +352,24 @@ export function looksLikeFirstRunDialog(frame: string): boolean {
   const text = stripFrameAnsi(frame);
   return FIRST_RUN_DIALOG_MARKERS.some((re) => re.test(text));
 }
+
+/**
+ * How long a held boot prompt may stay held before the CLI is declared stuck
+ * and the panel/board is told so.
+ *
+ * ★Lives next to the gate rather than inside each caller: the orchestrator and
+ * the worker hold the SAME screens for the SAME reason, and a second copy of
+ * this number is the shape that lets one side get fixed and the other rot —
+ * which is precisely how the worker path ended up with no gate at all while
+ * the orchestrator had one.
+ *
+ * Why 60 s: the screens this holds for are answered by something else (the
+ * bypass auto-accept, a pre-emptied trust entry, a human at the terminal tab),
+ * and every one of those resolves in seconds. A minute of holding therefore
+ * means nobody is going to answer — waiting longer only lengthens the window in
+ * which the board shows a state nothing will leave.
+ */
+export const FIRST_RUN_DIALOG_GIVE_UP_MS = 60_000;
 
 /** What main sends the renderer on every input-wait transition. Carries no PTY
  * content — an id, a name, and why. */

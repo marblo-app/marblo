@@ -93,6 +93,21 @@ export interface PromotionInput {
   now: number;
   /** Override the settle window (defaults to TURN_COMPLETE_SETTLE_MS). */
   settleMs?: number;
+  /**
+   * True while this launch's instruction has NOT been delivered yet — the boot
+   * prompt is still waiting for the composer (or is being held back because a
+   * first-run dialog is on screen). Absent/false for resumes and reconnects,
+   * which attach to an already-instructed session.
+   *
+   * ★Why output must not promote while this stands: everything a CLI paints
+   * before it is told anything is boot chrome — the banner, the theme picker,
+   * the folder-trust dialog. Promoting on it makes the board say `working`
+   * about an agent that has not been given a task, which is the exact lie a
+   * live run produced when a 6,447-char instruction was typed into the trust
+   * dialog and swallowed: the write "succeeded", the agent received nothing,
+   * and the repaint that followed flipped it to `working`.
+   */
+  bootPromptPending?: boolean;
 }
 
 /**
@@ -119,6 +134,9 @@ export function shouldPromoteOnPtyOutput(input: PromotionInput): boolean {
   if (status !== "idle") return false;
   // Completion report outstanding → these bytes are repaint, not work.
   if (turnCompletedAt !== null) return false;
+  // Nothing has been ASKED of this agent yet → these bytes are boot chrome, and
+  // an agent that was never given its instruction is not working.
+  if (input.bootPromptPending) return false;
   return true;
 }
 

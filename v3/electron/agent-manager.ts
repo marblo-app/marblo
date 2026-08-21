@@ -22,15 +22,19 @@ import {
   classifyPtyFrame,
   applyPtyFrame,
   resetPromptIdleOnTurnStart,
+  stripFrameAnsi,
   type PtyFrameKind,
 } from "./agent-status-reconcile";
 import {
   foldInputWait,
+  LIVE_COMPOSER_MARKER,
   looksLikeLiveComposer,
   shouldAutoAcceptBypass,
   BYPASS_CONSENT_SELECT,
   BYPASS_CONSENT_CONFIRM,
   BYPASS_CONSENT_CONFIRM_DELAY_MS,
+  FIRST_RUN_DIALOG_GIVE_UP_MS,
+  looksLikeFirstRunDialog,
   type AgentInputWaitEvent,
   type InputWaitReason,
 } from "./agent-input-wait";
@@ -342,6 +346,23 @@ export interface AgentInstance {
    */
   composerProvenLive: boolean;
   /**
+   * This launch's instruction has not been delivered yet.
+   *
+   * ★While it stands, PTY output must NOT promote the agent to `working`
+   * (shouldPromoteOnPtyOutput). Everything a CLI paints before it is told
+   * anything is boot chrome — banner, theme picker, folder-trust dialog — and a
+   * live run showed exactly what promoting on it buys: a 6,447-char instruction
+   * was typed into the trust dialog, swallowed by the select list, and the
+   * repaint that followed flipped the agent to `working`. The agent had been
+   * given nothing; the board said it was busy. Silence would have been better
+   * than that lie, and an error is better than silence.
+   *
+   * Cleared by delivery (noteBootPromptDelivered) or by any real turn start —
+   * a human typing in the terminal tab counts (noteTurnStart). false for
+   * resumes and reconnects, which attach to an already-instructed session.
+   */
+  bootPromptPending: boolean;
+  /**
    * ★무산출 판정용 누적 출력량(#890 F-7 · 감사 G11).
    *
    * 이 프로세스가 살아 있는 동안 PTY 로 뱉은 **문자 수**다. 내용은 세지 않고
@@ -610,6 +631,27 @@ export const CLI_READINESS_PATTERNS: RegExp[] = [
   // 로 확인했다. 로그인/승인 화면의 푸터는 "ctrl+q quit" 뿐이고 이 문구가 없다
   // (라이브 device-code 로그인 캡처 130KB 에 "/help for commands" 0회).
   /\/help for commands/i,
+  // ── Claude Code composer footer, matched by GLYPH ───────────────────────
+  // `⏵⏵ bypass permissions on` / `⏵⏵ auto mode`. ★Live-capture evidence
+  // (tests/fixtures/pty/claude-composer-after-consent.json, claude 2.1.238):
+  // on a bypass-mode boot NOT ONE of the patterns above appears on the real
+  // composer — the footer that would have carried `? for shortcuts` carries
+  // this instead. Workers are always spawned with
+  // `--dangerously-skip-permissions`, so until this line existed EVERY claude
+  // worker boot fell through to the 10 s blind fallback: it never detected
+  // readiness, it just eventually typed. That is the condition that made the
+  // trust-dialog incident possible, and the orchestrator had already fixed its
+  // half (orchestrator-manager.ts) while this side kept booting blind.
+  //
+  // ★Glyph, not words: the same footer renders as `bypass permissions on` or,
+  // when claude paints it with cursor-forward escapes, `bypasspermissionson`.
+  // The glyph is immune to that, and appears on no consent/trust/theme/login
+  // screen.
+  //
+  // ★The regex itself is agent-input-wait's — the SAME glyph already proves
+  // "composer is live" for the consent auto-accept gate (looksLikeLiveComposer).
+  // One screen fact, one literal: a second copy is how the two would drift.
+  LIVE_COMPOSER_MARKER,
 ];
 
 export function composeInitialPrompt(
@@ -963,6 +1005,12 @@ export class AgentManager {
     // the case that re-arms the screen (F-2's silent instruction loss).
     preemptClaudeFolderTrust(params.model, params.cwd, `Agent:${params.id}`);
 
+    // ★홀드 포기창의 기준점. 오케와 같은 이유로 **PTY 스폰 시각**이다: 홀드가
+    // 처음 걸린 순간을 기준으로 세면 첫 sendPrompt 가 blind fallback 만큼
+    // (claude 10s) 밀린 뒤부터 60s 를 더 세서 실측이 70.2s 로 나왔다(F-6 과 같은
+    // 오차). 기준점을 스폰으로 옮겨야 60s 가 어느 하네스에서나 60s 를 뜻한다.
+    const bootStartedAt = Date.now();
+
     // Create PTY session with the CLI command + MCP args
     this.ptyManager.create(
       ptySessionId,
@@ -1012,8 +1060,110 @@ export class AgentManager {
         params.model === "gpt" ||
         params.model === "grok" ||
         params.model === "antigravity";
+      // ANSI-stripped window of the CURRENT screen — the thing the dialog gate
+      // reads at write time. Separate from `outputBuffer` (raw, 4 KB, what
+      // readiness patterns match) because claude paints these dialogs with
+      // cursor-forward escapes rather than spaces, so only the stripped text
+      // matches the markers. 1024 chars is more than one screen's key lines and
+      // is emptied of a dismissed dialog by the repaint that replaces it.
+      let dialogBuffer = "";
+      // Set when a send was held back. Every later frame retries, so the
+      // instruction goes out on the first frame after the screen clears rather
+      // than waiting for a readiness match that may never come again (the
+      // dialog's replacement is the composer, not a re-render).
+      let deferredByDialog = false;
+      let deferredSince = 0;
+      let gaveUp = false;
+      let deferRetryTimer: ReturnType<typeof setTimeout> | null = null;
+      // A held send needs a retry source other than the next PTY frame: a grace
+      // window expiring is not a frame, and a CLI that has finished painting a
+      // dialog goes quiet. Cheap 1 s ticker, alive only while held.
+      const scheduleDeferRetry = (): void => {
+        // Stop ticking once we have declared the boot stuck: the state is
+        // already visible, and a 1 s timer per dead agent is not. Recovery does
+        // not depend on the ticker — if someone answers the dialog, the frames
+        // that follow retry the held send (see the onData handler).
+        if (deferRetryTimer || sent || gaveUp) return;
+        deferRetryTimer = setTimeout(() => {
+          deferRetryTimer = null;
+          sendPrompt();
+        }, 1000);
+        deferRetryTimer.unref?.();
+      };
       const sendPrompt = () => {
         if (sent || authBlocked) return;
+        // The held send outlives this launch by up to the give-up window, and
+        // `agent-<id>` is reused verbatim by a restart — so identity, not the
+        // session string, decides whether this PTY is still ours (the same
+        // reason onExit compares `agent !== instance`). Without it a restart
+        // inside the window could receive the PREVIOUS launch's instruction.
+        const live = this.agents.get(params.id);
+        if (!live || live !== instance || live.stopRequested) return;
+        // ★Re-read the screen at the moment of the WRITE. This is the ORCHESTRATOR'S
+        // gate (agent-input-wait.looksLikeFirstRunDialog), imported rather than
+        // re-implemented: PR #1070 put it in front of the orchestrator's write and
+        // left the worker path — every dispatched task, every fresh worktree —
+        // without one. A live run of a new worktree measured what that costs:
+        //
+        //     381 ms  "Do you trust this folder?"
+        //   10068 ms  blind fallback types a 6,447-char instruction INTO it
+        //             → the trailing \r confirms `1. Yes, I trust this folder`
+        //
+        // The composer came up empty. Nothing died, which is worse than dying:
+        // the instruction was gone and the board still said the agent was working.
+        // Readiness matching cannot prevent this — a dialog can arrive between the
+        // match and the write — and neither can a longer fallback, which only moves
+        // the same blind write later. Only re-reading can.
+        const holdReason = looksLikeFirstRunDialog(dialogBuffer)
+          ? "a first-run dialog is on screen"
+          : // The backstop's contract is "stop typing unless clear". Only its
+            // FIRED state was honoured here, so a login screen still inside its
+            // grace window (pre-spawn probe not back yet) left the gate open —
+            // the same hole the orchestrator had.
+            loginBackstop.state() !== "clear"
+            ? "a login screen may be on screen"
+            : null;
+        if (holdReason) {
+          if (!deferredByDialog) {
+            deferredByDialog = true;
+            deferredSince = Date.now();
+            console.warn(
+              `[Agent:${params.id}] Initial prompt held — ${holdReason}; ` +
+                "will send once it clears.",
+            );
+          } else if (
+            !gaveUp &&
+            // ★스폰 기준(위 bootStartedAt 주석). 오케와 같은 상수를 쓰는 이상
+            // 기준점도 같아야 한다 — 아니면 같은 60_000 이 한쪽에선 60s,
+            // 다른 쪽에선 blind fallback 만큼 늦은 70s 를 뜻한다.
+            Date.now() - bootStartedAt > FIRST_RUN_DIALOG_GIVE_UP_MS
+          ) {
+            // ★Say it, don't stall. An agent whose instruction never arrived is
+            // not working and never will be, and the board claiming otherwise is
+            // the actual damage this bug does — the dispatcher keeps the slot
+            // busy and nobody looks at the screen that is asking a question.
+            gaveUp = true;
+            const reason = `boot-dialog-timeout: ${holdReason}`;
+            console.error(
+              `[Agent:${params.id}] Initial prompt held for ` +
+                `${Math.round((Date.now() - deferredSince) / 1000)}s ` +
+                `(${holdReason}) and was never delivered — the agent needs a human.`,
+            );
+            this.setStatus(params.id, "error");
+            this.getMainWindow?.()?.webContents.send("agent:bootBlocked", {
+              agentId: params.id,
+              model: params.model,
+              reason,
+            });
+          }
+          scheduleDeferRetry();
+          return;
+        }
+        deferredByDialog = false;
+        if (deferRetryTimer) {
+          clearTimeout(deferRetryTimer);
+          deferRetryTimer = null;
+        }
         sent = true;
         loginBackstop.dispose();
         // ★F-3. We are about to type into this PTY as if it were a live
@@ -1025,6 +1175,20 @@ export class AgentManager {
         // keystroke (single-chunk write gets paste-buffered, leaving the
         // CR inside the message body without submitting).
         this.ptyManager.writeAndSubmit(ptySessionId, prompt);
+        // The instruction is out — PTY output may mean `working` from here on.
+        // Until this line runs, every byte is boot chrome (see
+        // AgentInstance.bootPromptPending).
+        this.noteBootPromptDelivered(params.id);
+        if (gaveUp) {
+          // We had declared this boot stuck; someone answered the screen after
+          // all. Withdraw the error rather than leaving a working agent parked
+          // behind a red badge — the same retraction shape as authResolved.
+          console.warn(
+            `[Agent:${params.id}] The held screen cleared after all — instruction ` +
+              "delivered, withdrawing the error.",
+          );
+          this.setStatus(params.id, "idle");
+        }
         console.log(
           `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`,
         );
@@ -1123,6 +1287,9 @@ export class AgentManager {
         // Only keep last 4KB to avoid memory growth
         if (outputBuffer.length > 4096)
           outputBuffer = outputBuffer.slice(-4096);
+        dialogBuffer += stripFrameAnsi(data);
+        if (dialogBuffer.length > 1024)
+          dialogBuffer = dialogBuffer.slice(-1024);
 
         // Login-screen backstop: while the CLI looks like it may be sitting at
         // an interactive login prompt ("hold"/"blocked"), never type into it —
@@ -1132,6 +1299,12 @@ export class AgentManager {
         const loginState = watchLoginScreen
           ? loginBackstop.observe(outputBuffer)
           : "clear";
+
+        // A send we held back: retry the moment the screen stops being a dialog.
+        if (deferredByDialog) {
+          sendPrompt();
+          if (sent) return;
+        }
 
         if (loginState === "clear") {
           for (const dlg of activeMatchers) {
@@ -1154,15 +1327,20 @@ export class AgentManager {
         }
 
         for (const pattern of readinessPatterns) {
-          if (pattern.test(outputBuffer)) {
-            // readiness 도달 = 로그인 화면이 아니었다는 최종 증거. 보류 중이던
-            // grace 를 닫고, 이미 발화했었다면 철회한다(agent:authResolved).
-            loginBackstop.noteReadiness();
-            if (authBlocked) return;
-            // Delay to let CLI fully render its prompt
-            setTimeout(sendPrompt, 1500);
-            return;
-          }
+          if (!pattern.test(outputBuffer)) continue;
+          // ★A readiness marker printed ON a first-run dialog is not readiness.
+          // Latching it here would ALSO settle the login backstop permanently
+          // (noteReadiness is one-way) — which is how codex's skeleton composer,
+          // painted ~200 ms before its login menu, disarmed the very check that
+          // would have caught the menu. Wait for a frame that is the composer.
+          if (looksLikeFirstRunDialog(dialogBuffer)) break;
+          // readiness 도달 = 로그인 화면이 아니었다는 최종 증거. 보류 중이던
+          // grace 를 닫고, 이미 발화했었다면 철회한다(agent:authResolved).
+          loginBackstop.noteReadiness();
+          if (authBlocked) return;
+          // Delay to let CLI fully render its prompt
+          setTimeout(sendPrompt, 1500);
+          return;
         }
       });
 
@@ -1171,6 +1349,10 @@ export class AgentManager {
       // first-spawn OAuth browser flow (harness-catalog.ts antigravity)
       // can easily blow past 10s, and the 10s default would dump the
       // prompt into the auth dialog.
+      // ★No longer blind: it funnels through the same gate as every other
+      // path, which is the point — "we gave up waiting for readiness" was never
+      // a reason to type into whatever happens to be on screen. A dialog still
+      // up at this point defers the send instead of answering it.
       const fallbackMs = params.model === "antigravity" ? 25000 : 10000;
       setTimeout(sendPrompt, fallbackMs);
     }
@@ -1425,6 +1607,9 @@ export class AgentManager {
       inputWaitSince: null,
       bypassConsentAnswered: false,
       composerProvenLive: false,
+      // A new session with an instruction owes that instruction before any of
+      // its output may be read as work. Resumes/reconnects are already past it.
+      bootPromptPending: !isResume && !!launchConfig.initialPrompt,
       outputChars: 0,
       turnCompletedAt: null,
       terminalSince: null,
@@ -1505,6 +1690,7 @@ export class AgentManager {
           status: agent.status,
           stopRequested: agent.stopRequested,
           turnCompletedAt: agent.turnCompletedAt,
+          bootPromptPending: agent.bootPromptPending,
           now: Date.now(),
         })
       ) {
@@ -2140,11 +2326,27 @@ export class AgentManager {
    * Does not itself set `working`; the first output byte does that (promotion is
    * now unblocked). Ignored for terminal agents.
    */
+  /**
+   * The boot prompt reached the composer — output may mean `working` from here.
+   * Separate from noteTurnStart because delivery is not a turn boundary: the
+   * turn opens when PtyManager reports the submit, and clearing turnCompletedAt
+   * here would step on that.
+   */
+  private noteBootPromptDelivered(agentId: string): void {
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+    agent.bootPromptPending = false;
+  }
+
   noteTurnStart(agentId: string): void {
     const agent = this.agents.get(agentId);
     if (!agent) return;
     if (agent.status === "stopped" || agent.status === "error") return;
     agent.turnCompletedAt = null;
+    // Submitted input IS an instruction — whether ours, a nudge, or a human
+    // typing in the terminal tab. Whatever the boot prompt did or didn't do,
+    // this agent has now been told something, so its output may count as work.
+    agent.bootPromptPending = false;
     // The agent is no longer parked at its prompt, and the submission itself is
     // fresh evidence of life. A nudged agent therefore gets a FULL new
     // idle-at-prompt window before the watchdog may judge it parked again —
@@ -2345,6 +2547,9 @@ export class AgentManager {
       // (if any) is long past — the latch starts spent rather than armed.
       bypassConsentAnswered: true,
       composerProvenLive: true,
+      // Same reason: a reconnected session was instructed before we ever saw
+      // it, so nothing is owed and its output counts as work immediately.
+      bootPromptPending: false,
       outputChars: 0,
       turnCompletedAt: null,
       terminalSince: null,
@@ -2379,6 +2584,7 @@ export class AgentManager {
           status: a.status,
           stopRequested: a.stopRequested,
           turnCompletedAt: a.turnCompletedAt,
+          bootPromptPending: a.bootPromptPending,
           now: Date.now(),
         })
       ) {

@@ -2,13 +2,30 @@
  * The AGENT (worker) half of the same question.
  *
  * PR #1070 put `looksLikeFirstRunDialog` in front of the ORCHESTRATOR's write.
- * The worker path (agent-manager.ts) has no such gate — it still has only
+ * The worker path (agent-manager.ts) had no such gate — only
  * STARTUP_DIALOG_MATCHERS (antigravity trust + codex update) and a 10 s blind
  * fallback. This runs the REAL AgentManager.launch() against the REAL claude
- * CLI in a directory claude has never seen, which is what every worker worktree
- * is, and records what we type.
+ * CLI and records what we type.
  *
- *   node agentrunner.mjs <outfile>
+ * Two scenarios, because a gate that never opens is as broken as one that never
+ * closes:
+ *
+ *   a1 (default)  a directory claude has NEVER seen — i.e. every dispatched
+ *                 worker worktree. ★Since P0 (LIdW3JrjgaQmZ3V92xaM) landed,
+ *                 launch() pre-empts the trust key before the spawn, so the
+ *                 dialog no longer renders at all. PASS = composer, and the
+ *                 instruction delivered to it.
+ *   a2            the same home with the directory already trusted. Nothing to
+ *                 hold for. ★PASS = the instruction IS delivered.
+ *   a3            ★the reason the gate still exists. Same new worktree as a1,
+ *                 but claude's own `<config>.lock` is held by a live holder for
+ *                 the whole run, so the pre-emption CANNOT record the key and
+ *                 returns ok:false — exactly what it does on a machine with
+ *                 busy claude sessions, an unwritable config, or a key shape
+ *                 that drifts in a future CLI. The dialog comes back.
+ *                 PASS = writes 0, never `working`, then a stated `error`.
+ *
+ *   node agentrunner.mjs [a1|a2|a3] <outfile>
  */
 import fs from "fs";
 import path from "path";
@@ -28,10 +45,65 @@ async function main() {
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.ANTHROPIC_AUTH_TOKEN;
 
-  // A worktree claude has never been run in — i.e. every dispatched task.
+  const wantsTrusted = process.argv[2] === "a2";
+  const wantsLockedOut = process.argv[2] === "a3";
+  const scenario = wantsTrusted
+    ? "a2-agent-claude-trusted-worktree"
+    : wantsLockedOut
+      ? "a3-agent-claude-preemption-blocked"
+      : "a1-agent-claude-new-worktree";
+  const outfile =
+    process.argv[2] === "a1" || wantsTrusted || wantsLockedOut
+      ? process.argv[3]
+      : process.argv[2];
+
+  // a1: a worktree claude has never been run in — i.e. every dispatched task.
+  // a2: the same, with the trust already recorded for that exact directory
+  //     (`projects[dir].hasTrustDialogAccepted` — per-directory, siblings do
+  //     NOT inherit; see tests/live/README.md).
   const cwd = path.join(BASE, `worktree-${Date.now()}`);
   fs.mkdirSync(cwd, { recursive: true });
   fs.writeFileSync(path.join(cwd, "README.md"), "# fresh worktree\n");
+  if (scenario.startsWith("a2")) {
+    const cfgPath = path.join(home, ".claude.json");
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8")) as {
+      projects?: Record<string, Record<string, unknown>>;
+    };
+    cfg.projects = cfg.projects ?? {};
+    // ★Key by the RESOLVED path. claude records trust under the realpath, so on
+    // macOS an entry written as `/var/folders/…` is invisible to a CLI that
+    // resolved its cwd to `/private/var/folders/…` — the dialog comes up anyway.
+    // Measured here, and it is the trap any pre-emption of this dialog has to
+    // avoid (ticket LIdW3JrjgaQmZ3V92xaM).
+    const key = fs.realpathSync(cwd);
+    cfg.projects[key] = {
+      ...(cfg.projects[key] ?? {}),
+      hasTrustDialogAccepted: true,
+    };
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+  }
+
+  // a3: stand in for a live claude session that is writing its config right
+  // now. claude locks `~/.claude.json` with proper-lockfile, whose lock IS the
+  // directory `<file>.lock` and whose liveness IS its mtime — so a held lock is
+  // a held DIRECTORY with a fresh mtime, and that is all it takes to reproduce.
+  // ★We do NOT touch the pre-emption code to make this happen: the product runs
+  // exactly as shipped and simply loses the race, which is the failure mode the
+  // gate is the backstop for.
+  let lockKeeper: ReturnType<typeof setInterval> | null = null;
+  const lockPath = path.join(home, ".claude.json.lock");
+  if (wantsLockedOut) {
+    fs.mkdirSync(lockPath, { recursive: true });
+    // The stealer reaps a lock older than 10 s; a real holder keeps it fresh.
+    lockKeeper = setInterval(() => {
+      try {
+        fs.utimesSync(lockPath, new Date(), new Date());
+      } catch {
+        /* ignore */
+      }
+    }, 2_000);
+    lockKeeper.unref?.();
+  }
 
   const { PtyManager } = await import("../../electron/pty-manager");
   const { AgentManager } = await import("../../electron/agent-manager");
@@ -142,12 +214,24 @@ async function main() {
     }
   });
 
-  await new Promise((r) => setTimeout(r, 30_000));
+  // a3 has to outlive the hold's give-up window (60 s, counted from the PTY
+  // spawn on both the worker and the orchestrator) — the whole point is to see
+  // whether the agent ends up as a stated error rather than a silent `working`.
+  // a1 and a2 now both deliver in seconds, so they need only a short tail.
+  await new Promise((r) => setTimeout(r, wantsLockedOut ? 80_000 : 30_000));
   events.push({ t: now(), kind: "HARNESS-STOP" });
   try {
     real.kill(ptySessionId);
   } catch {
     /* ignore */
+  }
+  if (lockKeeper) {
+    clearInterval(lockKeeper);
+    try {
+      fs.rmdirSync(lockPath);
+    } catch {
+      /* ignore */
+    }
   }
   await new Promise((r) => setTimeout(r, 400));
 
@@ -163,7 +247,7 @@ async function main() {
   })();
 
   const out = {
-    scenario: "a1-agent-claude-new-worktree",
+    scenario,
     cwd,
     events,
     writes,
@@ -173,7 +257,6 @@ async function main() {
   console.log(JSON.stringify(out.events, null, 1));
   console.log("writes:", JSON.stringify(writes));
   console.log("trust recorded after run:", JSON.stringify(trustRecorded));
-  const outfile = process.argv[2];
   if (outfile) fs.writeFileSync(outfile, JSON.stringify(out, null, 2));
   process.exit(0);
 }

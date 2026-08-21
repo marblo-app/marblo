@@ -65,8 +65,33 @@ it presses them as the USER (standing in for "they ran `claude` once by hand"),
 never as the product.
 
 `agentrunner.ts` is the same question for the **worker** path
-(`AgentManager.launch()`), which matters because `looksLikeFirstRunDialog` is
-wired to the orchestrator only.
+(`AgentManager.launch()`). It mattered because `looksLikeFirstRunDialog` was
+wired to the orchestrator only — the worker typed a 6,447-char instruction into
+claude's folder-trust dialog at 10068 ms and then reported itself `working`
+(ticket `f6t9trvIVBvAfEKvtFrt`). Both halves now import the same gate.
+
+★Since `claude-workspace-trust.ts` landed, `launch()` pre-empts the trust key
+before the spawn, so on a new worktree the dialog **no longer renders** — a1 now
+measures a clean boot rather than the accident. `a3` is the scenario that still
+exercises the gate: it holds claude's own `<config>.lock` for the whole run, so
+the pre-emption loses the race exactly as it does on a machine with live claude
+sessions, and the dialog comes back. Nothing in the product is stubbed for it.
+
+| id             | machine state                                | ★PASS is                                |
+| -------------- | -------------------------------------------- | --------------------------------------- |
+| `a1` (default) | new worktree; pre-emption succeeds pre-spawn | composer at ~0.5 s, instruction sent    |
+| `a2`           | same home, that directory pre-trusted        | the instruction IS delivered            |
+| `a3`           | new worktree + `<config>.lock` held → dialog | writes 0, never `working`, then `error` |
+
+```sh
+node node_modules/.cache/mb-live/agentrunner.mjs a3 /tmp/a3.json
+```
+
+a3 runs 80 s on purpose — the hold's give-up window is 60 s counted from the PTY
+SPAWN (the same basis the orchestrator uses; counting from the held send would
+add each harness's blind fallback on top and make the shared constant mean 70 s
+here and 60 s there). A 30 s run would stop before the error it exists to
+observe. a1/a2 deliver in ~2 s and run 30 s.
 
 ## Re-arming the screens
 
@@ -74,9 +99,11 @@ wired to the orchestrator only.
   `skipDangerousModePermissionPrompt` in `~/.claude/settings.json`. Delete that
   key to see the screen again.
 - **claude folder trust** — **per directory**, recorded as
-  `projects["<dir>"].hasTrustDialogAccepted` in `~/.claude.json`. A directory
-  under an already-trusted ancestor does NOT prompt; a sibling does. Point a run
-  at a brand-new directory to see it again.
+  `projects["<dir>"].hasTrustDialogAccepted` in `~/.claude.json`, keyed by the
+  **realpath** (write `/var/folders/…` on macOS and the CLI, which resolved its
+  cwd to `/private/var/folders/…`, never sees it — measured). A directory under
+  an already-trusted ancestor does NOT prompt; a sibling does. Point a run at a
+  brand-new directory to see it again.
 - **codex folder trust** — pre-empted by `trust_level = "trusted"` in the
   isolated `CODEX_HOME/config.toml` (agent-config.ts writes it).
 - **codex login menu** — an isolated `CODEX_HOME` with no `auth.json`.

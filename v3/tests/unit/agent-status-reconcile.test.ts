@@ -98,6 +98,35 @@ describe("shouldPromoteOnPtyOutput", () => {
       }),
     ).toBe(false);
   });
+
+  it("SUPPRESSES promotion while the boot instruction is undelivered", () => {
+    // ★A live run typed a 6,447-char instruction into claude's folder-trust
+    // dialog; the select list swallowed it, the CLI repainted, and that repaint
+    // flipped the agent to `working`. The agent had been told nothing. This is
+    // the predicate half of that fix: bytes emitted before the instruction
+    // lands are boot chrome — banner, theme picker, trust dialog — never work.
+    expect(
+      shouldPromoteOnPtyOutput({
+        status: "idle",
+        stopRequested: false,
+        turnCompletedAt: null,
+        bootPromptPending: true,
+        now: NOW,
+      }),
+    ).toBe(false);
+  });
+
+  it("promotes again once the instruction has been delivered", () => {
+    expect(
+      shouldPromoteOnPtyOutput({
+        status: "idle",
+        stopRequested: false,
+        turnCompletedAt: null,
+        bootPromptPending: false,
+        now: NOW,
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("shouldDemoteCompletedTurn", () => {

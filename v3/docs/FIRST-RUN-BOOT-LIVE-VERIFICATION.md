@@ -302,3 +302,111 @@ write 로 온다 → 결합 조건은 **실제 화면에서 아예 매칭이 안
 
 ★신규 회귀 10개 중 **"180s 안쪽 오발" 5개는 게이트를 지우면 실제로 빨간불이
 된다**(게이트를 주석 처리하고 확인). 지금까지 비어 있던 칸이 이제 막혀 있다.
+
+---
+
+## 6. 워커 경로 (티켓 `f6t9trvIVBvAfEKvtFrt`) — 같은 사고, 반대편
+
+위 검증이 오케 경로를 찍은 뒤, **같은 게이트가 워커에는 없다**는 것이 시나리오
+A 로 드러났다. `looksLikeFirstRunDialog` 는 `orchestrator-manager.ts` 에서만
+쓰이고 있었다.
+
+### 6.1 고치기 전 실측 (시나리오 A, 새 워크트리)
+
+```
+  381ms  화면: "Do you trust this folder?"
+10068ms  블라인드 폴백 → 6447자 지시문을 그 다이얼로그에 타이핑
+         뒤따른 \r 이 "❯ 1. Yes, I trust this folder" 를 확정
+→ composer 비어 있음 · 지시문 소실 · 상태는 working 으로 승격
+```
+
+★즉사가 아니라 **조용한 소실**이다. `agent-manager` 주석이 신뢰 다이얼로그
+기본값을 "No"(=즉사) 라고 적어둔 것이 오판의 출처였고, 2.1.238 실측 기본
+하이라이트는 **`❯ 1. Yes, I trust this folder`** 다. 그 정정은 §5(P0)에서
+이미 들어갔다.
+
+### 6.2 ★선점이 들어온 뒤 다시 잰 값 — 시나리오 A 는 재현되지 않는다
+
+이 문서의 §5(P0 `LIdW3JrjgaQmZ3V92xaM`, `claude-workspace-trust.ts`)가 그
+사이 머지됐고, 그 선점은 **워커 경로에도 걸려 있다**
+(`agent-manager.launch()` → `preemptClaudeFolderTrust`, 스폰 직전). 그래서
+이 PR 을 main 에 리베이스한 뒤 **같은 하네스로 다시 쟀다.**
+
+`node node_modules/.cache/mb-live/agentrunner.mjs a1|a2|a3 <out.json>`
+(격리 HOME `mb-firstrun-live/home-agent`, 실 claude 2.1.238)
+
+| 시나리오                        | 화면                   | 우리가 친 키  | 상태 전이               |
+| ------------------------------- | ---------------------- | ------------- | ----------------------- |
+| a1 새 워크트리 (선점 성공)      | 480ms composer(`⏵⏵`)   | 1980ms 6447자 | 1989ms → `working`      |
+| a2 이미 신뢰된 워크트리         | 493ms composer(`⏵⏵`)   | 1994ms 6447자 | 2002ms → `working`      |
+| ★a3 새 워크트리 + **선점 실패** | 2368ms 신뢰 다이얼로그 | **writes 0**  | 62111ms → `error`(사유) |
+
+- **a1 에서 신뢰 다이얼로그가 아예 뜨지 않는다.** 로그: `claude folder trust
+pre-empted … (2 config key(s) recorded) — the trust dialog will not render.`
+  즉 6.1 의 사고는 **선점이 사는 한 발생하지 않는다.** 그래서 이 PR 은 선점을
+  중복 구현하지 않았고, 이 PR 에 `hasTrustDialogAccepted` 를 쓰는 코드는 없다.
+
+- **그런데 선점은 실패할 수 있다.** a3 가 그 실측이다. `~/.claude.json` 을
+  claude 자신의 `<config>.lock`(proper-lockfile — 락이 곧 디렉터리, 수명이 곧
+  mtime) 으로 다른 산 세션이 붙잡고 있으면 선점은 2s 대기 후
+  `ok:false / "another writer held the claude config lock"` 로 물러난다. 사장님
+  기계의 그 파일은 240KB 고 살아있는 세션들이 계속 다시 쓴다 — 가정이 아니다.
+  같은 결과가 나오는 다른 경로: 설정 파일이 파싱 불가·쓰기 불가, `local` 처럼
+  선점 대상 밖 모델, 미래 CLI 의 키 모양 변경.
+  **a3 에서 다이얼로그는 2.4s 에 되돌아왔다.**
+
+- ★그 되돌아온 다이얼로그 앞에서 워커가 하는 일이 이 PR 이다: **writes 0**,
+  `working` **0회**, 62.1s 에 사유를 남기고 `error`. 실행 후 격리
+  `.claude.json` 의 `projects` 에 그 워크트리가 **없다** = 우리의 `\r` 이 신뢰를
+  확정한 적 없다. 선점 없이 이 게이트만 없던 6.1 과 정확히 반대다.
+  선점의 실패 경로 주석(`claude-workspace-trust.ts`: "dialog recognised, boot
+  prompt held, no keystroke")이 약속하는 동작이 바로 이것이고, 이 PR 이전의
+  워커에는 그 동작이 **없었다.**
+
+- 62.1s 는 **스폰 기준 60s** + 1s 재시도 틱이다. 종전 워커 구현은 "홀드가 걸린
+  순간" 기준이라 하네스별 블라인드 폴백(claude 10s)만큼 늦게 울렸다(실측
+  70.2s). 오케가 §5 에서 스폰 기준으로 옮겼으므로 워커도 같은 기준으로 맞췄다 —
+  같은 `FIRST_RUN_DIALOG_GIVE_UP_MS` 하나를 양쪽이 공유하는 이상, 기준점이
+  다르면 그 상수가 한쪽에서 거짓말을 한다.
+
+- a1/a2 는 지시문이 **10s 폴백이 아니라 2.0s 에** 나간다 — claude bypass 모드
+  composer 푸터 글리프(`⏵⏵`)를 워커 readiness 에 넣었기 때문. 종전 워커 패턴
+  8종은 bypass 부팅 실 프레임에 **하나도** 매칭되지 않아 매 부팅이
+  블라인드였다(오케는 이미 이 글리프를 갖고 있었다 — 한쪽만 고쳐진 그 모양).
+  글리프 리터럴은 `agent-input-wait` 의 `LIVE_COMPOSER_MARKER` 하나를 공유한다.
+
+- 상태 승격이 **지시문 전달 이후**로 이동했다(`bootPromptPending`). 보드가
+  "일하는 중" 이라고 거짓말하던 구간이 사라진다 — a3 에서 `working` 이 0회인
+  것이 그 값이다.
+
+### 6.3 신뢰 선점을 할 때의 함정 (P0 에 남기는 실측)
+
+`~/.claude.json` 의 `projects[dir].hasTrustDialogAccepted` 로 선점할 때
+**키는 realpath 여야 한다.** macOS 에서 `/var/folders/...` 로 적으면 cwd 를
+`/private/var/folders/...` 로 해석한 CLI 에는 안 보여서 다이얼로그가 그대로
+뜬다 — a2 첫 시도가 정확히 그렇게 실패했고 `fs.realpathSync(cwd)` 로 통과했다.
+현 `claudeTrustKeyCandidates` 는 raw·realpath·git main root 를 모두 쓰므로 이
+함정을 이미 피한다(a1 로그의 "2 config key(s) recorded" 가 그 두 키다).
+
+### 6.4 사장님 실제 설정 무변경
+
+세 실행 모두 격리 HOME 으로만 돌았다. 실행 후 `~/.claude.json` 의 `projects`
+45개 중 격리/임시 경로(`mb-firstrun-live`, `mb-trust-capture`,
+`marblo-firstrun`) 항목 **0개**, 파일 크기 239117B, 실 HOME 에 남은
+`.claude.json.lock` **없음**. `~/.claude/settings.json` mtime 그대로.
+
+### 6.5 회귀 테스트
+
+★선점이 시나리오 A 를 막는 지금, 이 게이트는 **평소에 발화하지 않는 백스톱**이다.
+그래서 회귀 테스트가 유일한 상시 감시자다 — 선점이 나중에 깨졌을 때 워커가
+조용히 지시문을 잃지 않는다는 것을 이 8개가 지킨다.
+
+- `tests/unit/agent-first-run-boot.test.ts` **8/8** — 녹화 프레임
+  (`tests/fixtures/pty/claude-folder-trust.json`, 실 PTY 캡처)을 실
+  `AgentManager.launch()` 에 흘려 넣는다. 게이트를 무력화하면 5개가 깨지고, 그
+  실패 내용이 정확히 사고 그대로다 — 지시문이 다이얼로그로 들어가고 상태가
+  `working` 이 된다.
+- `tests/unit/agent-status-reconcile.test.ts` 21/21 (미전달 승격 억제 2건 추가).
+- `tests/unit/orchestrator-first-run-boot.test.ts` 28/28 ·
+  `tests/unit/claude-workspace-trust.test.ts` 17/17 (§5 것, 리베이스 후에도 녹색).
+- `npm run typecheck` 통과 · 변경 파일 `eslint` 통과.
