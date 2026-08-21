@@ -40,6 +40,24 @@ describe("worktree project filter", () => {
     ).toBe(WORKTREE_PROJECT_FILTER_ALL);
   });
 
+  it("treats an empty current project id as unavailable", () => {
+    expect(nextWorktreeProjectFilter("project-a", "", ["project-a"])).toBe(
+      WORKTREE_PROJECT_FILTER_LOADING,
+    );
+  });
+
+  it("keeps the current project while no worktree response has arrived", () => {
+    expect(nextWorktreeProjectFilter("project-a", "stale-project", [])).toBe(
+      "stale-project",
+    );
+  });
+
+  it("preserves All projects when the current project becomes unavailable", () => {
+    expect(nextWorktreeProjectFilter(WORKTREE_PROJECT_FILTER_ALL, null)).toBe(
+      WORKTREE_PROJECT_FILTER_ALL,
+    );
+  });
+
   it("converges to the real project once its worktrees arrive", () => {
     expect(
       nextWorktreeProjectFilter("project-a", "project-b", [
