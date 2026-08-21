@@ -51,9 +51,9 @@
  * 3. `model_catalog_json` 은 **최상위 키**다. `[model_providers.*]` 테이블보다
  *    뒤에 쓰면 그 테이블의 하위 키로 흡수돼 설정 로드가 깨진다.
  *
- * ── ★미해결: 이 카탈로그로 뜬 벤더는 MCP 도구를 못 쓸 가능성이 높다 ──────
- * (2026-08-21 실측, 티켓 giW7eJbD. codex 0.149.0 + 로컬 mock Responses upstream
- *  으로 요청 바디 전량 캡처. DeepSeek 키는 쓰지 않았다 — 우리가 upstream 이다.)
+ * ── MCP 도구는 `namespace` 로 실린다 — 그리고 **DeepSeek 은 그걸 받는다** ──
+ * (2026-08-21. 요청 캡처는 티켓 giW7eJbD(#1067), **라이브 확정은 티켓
+ *  Wx8jLTVl5inuMwv03yb5**. codex 0.149.0.)
  *
  * 이 카탈로그로 `deepseek-v4-flash` 를 띄우면 codex 가 보내는 `tools` 는:
  *
@@ -66,28 +66,38 @@
  * 즉 **MCP 도구는 개별 `type:"function"` 이 아니라 `type:"namespace"` 한 덩어리**로
  * 실린다(`codex-chat-bridge.ts` 가 Upstage 용으로 평탄화하는 바로 그 모양).
  *
- * 그런데 DeepSeek 공식 Responses API 호환표(api-docs.deepseek.com/guides/
- * responses_api, Tools 절)는 `function` / `web_search` / `custom`(apply_patch 만)
- * 세 가지만 받고 **"그 외 built-in 도구는 무시"** 라고 적는다. `namespace` 는 그
- * 셋 중 어디에도 없다 → 두 namespace 가 통째로 **조용히 버려진다**는 뜻이다.
- * 그러면 에이전트는 뜨지만 MCP 도구가 0개다(= 티켓을 못 만드는 오케).
+ * ★여기서 한때 **틀린 추론**을 적어 뒀었다. DeepSeek 공식 Responses 호환표
+ * (api-docs.deepseek.com/guides/responses_api, Tools 절)가 `function` /
+ * `web_search` / `custom`(apply_patch 만) 셋만 열거하고 "그 외 built-in 도구는
+ * 무시" 라고 적기에, `namespace` 도 조용히 버려질 것이라고 썼다. 그건 **문서
+ * 기반 추론이었고, 라이브에서 반증됐다.**
  *
- * ★증거 등급을 섞지 않는다:
- *   · "codex 가 namespace 로 보낸다"      → **실측**(위 캡처).
- *   · "DeepSeek 이 그걸 무시한다"          → **공식 문서 기반 추론**. DEEPSEEK_API_KEY
- *     가 없어 라이브로 확인하지 못했다. 확정은 키를 받은 뒤 라이브 프로브에서 한다.
+ * 라이브 실측(codex → 로컬 기록형 프록시 → api.deepseek.com, 요청·응답 양쪽 캡처.
+ * `scripts/probe-codex-vendor-tools.mjs --live`):
+ *
+ *   ← DeepSeek 응답 SSE
+ *   {"type":"function_call","name":"add_activity","namespace":"mcp__marblo",
+ *    "arguments":"{\"task_id\": \"probe-001\"}"}
+ *
+ * 도구를 받았을 뿐 아니라 **`namespace` 필드를 codex 가 기대하는 모양 그대로
+ * 되돌려준다.** 그 호출은 codex 를 지나 MCP 서버까지 실제로 도달했고(`tools/call`
+ * 수신 확인), 결과가 모델까지 돌아갔다. → **DeepSeek 으로 뜬 에이전트·오케는
+ * MCP 도구를 정상적으로 쓴다.** 공식 호환표의 열거는 완전하지 않다.
+ *
+ * ★그래서 아래 두 해법 후보는 **불필요**하다(구현하지 않는다). 기록만 남긴다:
+ *   ① Responses→Responses 셔틀로 `namespace` 평탄화 — 필요 없음.
+ *   ② codex `experimental_supported_tools` 로 평탄 방출 유도 — 필요 없음.
+ *
+ * ★함정 하나를 같이 남긴다(같은 오판 재발 방지). 첫 라이브 시도는 probe 가
+ * `sandbox_mode="read-only"` 로 떠서 codex 가 **스스로** MCP 호출을 막았다
+ * (`MCP tool call requires approval, but approval policy is never`) — MCP 서버가
+ * 받은 호출이 0건이라 "벤더가 도구를 버렸다" 와 **똑같이 보이는 그림**이었다.
+ * 갈라준 것은 응답 바디였다: 벤더는 이미 function_call 을 냈고 막은 것은 우리
+ * 쪽이었다. 도구 문제를 진단할 땐 **요청과 응답을 같이** 봐야 한다.
  *
  * 대조군도 같이 떴다: 같은 배선에서 모델만 `gpt-5.5`(codex 내장 카탈로그)로 바꾸면
  * namespace 가 사라지고 `tool_search` 하나가 실린다 — 즉 이 모양은 **카탈로그가
- * 정하는 것**이지 provider 설정 탓이 아니다. 다만 DeepSeek 은 `tool_search` 역시
- * 받지 않으므로(같은 "그 외 → 무시" 행) 그 경로도 해법이 아니다.
- *
- * 남은 해법 후보(전부 라이브 프로브 뒤에 판단한다):
- *   ① Responses→Responses 셔틀을 하나 두고 `namespace` 를 평탄화해서 넘긴다
- *      (`codex-chat-bridge` 가 Chat 으로 접으며 하는 일과 같되 Responses 유지).
- *   ② codex 쪽 카탈로그 필드로 평탄 방출을 유도할 수 있는지 확인
- *      (`experimental_supported_tools` 는 현재 레퍼런스에서 `[]` 로 물려받는다).
- * 어느 쪽도 키 없이 "된다" 고 적을 수 없다.
+ * 정하는 것**이지 provider 설정 탓이 아니다.
  */
 import fs from "fs";
 import os from "os";
@@ -268,7 +278,10 @@ function instructionsTemplate(info: CodexModelInfo): string {
     return info.base_instructions;
   }
   const messages = info.model_messages;
-  if (isRecord(messages) && typeof messages.instructions_template === "string") {
+  if (
+    isRecord(messages) &&
+    typeof messages.instructions_template === "string"
+  ) {
     return messages.instructions_template;
   }
   return "";
@@ -298,8 +311,10 @@ export function pickCodexReferenceModelInfo(
   );
   if (candidates.length === 0) return null;
   candidates.sort((a, b) => {
-    const pa = typeof a.priority === "number" ? a.priority : Number.MAX_SAFE_INTEGER;
-    const pb = typeof b.priority === "number" ? b.priority : Number.MAX_SAFE_INTEGER;
+    const pa =
+      typeof a.priority === "number" ? a.priority : Number.MAX_SAFE_INTEGER;
+    const pb =
+      typeof b.priority === "number" ? b.priority : Number.MAX_SAFE_INTEGER;
     if (pa !== pb) return pa - pb;
     return String(a.slug).localeCompare(String(b.slug));
   });
@@ -319,13 +334,18 @@ export function pickCodexReferenceModelInfo(
  */
 export function buildCodexModelCatalog(
   pinnedModelId?: string,
-  options?: { models?: CodexModelInfo[]; codexHome?: string; binaryPath?: string },
+  options?: {
+    models?: CodexModelInfo[];
+    codexHome?: string;
+    binaryPath?: string;
+  },
 ): CodexModelCatalog | null {
   if (!pinnedModelId) return null;
   const entry = getModel(pinnedModelId);
   if (!entry || entry.harness !== "gpt") return null;
   // openai 는 codex 내장 카탈로그가 이미 아는 벤더다 — 건드리지 않는다.
-  if (entry.provider !== "upstage" && entry.provider !== "deepseek") return null;
+  if (entry.provider !== "upstage" && entry.provider !== "deepseek")
+    return null;
 
   const models = options?.models ?? loadCodexModelInfos(options);
   const reference = pickCodexReferenceModelInfo(models);

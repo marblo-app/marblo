@@ -360,12 +360,37 @@ const UPSTAGE_SOLAR_PROBE: ModelVerification = {
  * (quick_start/agent_integrations/codex). 거기서 effort 축이 틀렸다는 게 드러났다 —
  * 아래 `efforts` 주석 참조. 모델 id·단가는 08-18 그대로다.
  *
- * ★여전히 **라이브 프로브 전**이다. `cli` 를 "미보유" 로 두는 것이 이 레코드의
- * 요점이다 — 문서 대조는 문서 대조지 동작 확인이 아니다.
+ * ★2026-08-21 **라이브 프로브 완료**(티켓 Wx8jLTVl5inuMwv03yb5, 잔액 충전 후).
+ * 이 레코드의 규율은 문서 확인과 라이브 검증을 **같은 칸에 섞지 않는 것**이다.
+ * 그래서 `method`(문서 대조)는 그대로 두고 `cli`(라이브 실측)만 채운다.
+ *
+ * ★라이브가 문서를 **반증한 것이 하나 있다**: 공식 Responses 호환표는 tools 로
+ * function/web_search/custom(apply_patch) 셋만 열거하는데, 실제로는
+ * `type:"namespace"`(codex 가 MCP 도구를 싣는 모양)도 받아서 처리하고 응답에
+ * `namespace` 필드까지 되돌려준다. 열거가 완전하지 않았다 —
+ * `codex-model-catalog.ts` 상단의 정정 기록을 같이 볼 것.
+ *
+ * ★반대로 라이브로도 **확정하지 못한 것**을 확정한 것처럼 적지 않는다: effort 는
+ * 네 값(low/medium/high/max) 모두 200 으로 수용되지만, effort 별로 행동이 달라진다는
+ * 증거는 얻지 못했다. 아래 `cli` 문자열이 그 경계를 그대로 적는다.
  */
 const DEEPSEEK_PROBE: ModelVerification = {
   at: "2026-08-21",
-  cli: "n/a (DeepSeek API 키 미보유 — 라이브 프로브 대기)",
+  cli:
+    "codex-cli 0.149.0 라이브 실측(2026-08-21, 실계정). codex → 로컬 기록형 프록시 → " +
+    "https://api.deepseek.com 로 **요청·응답 바디를 양쪽 다** 캡처했다 " +
+    "(scripts/probe-codex-vendor-tools.mjs --live). model=deepseek-v4-flash. " +
+    '① 도구 표면: MCP 도구가 type:"namespace" 로 실려 나가는데 DeepSeek 이 이를 ' +
+    "**정상 처리**했다 — 응답 SSE 가 function_call{name:add_activity, namespace:mcp__marblo} " +
+    "를 돌려줬고 그 호출이 MCP 서버까지 도달해 결과가 모델로 되돌아갔다(공식 호환표 반증). " +
+    "② apply_patch: 시드 파일을 실제로 편집했고(bravo → PATCHED_BY_PROBE, 다른 줄 무변경) " +
+    "`unsupported call: apply_patch` 거절 0건 — model_catalog_json 경로 확증. " +
+    '③ effort: 핀 없으면 요청에 reasoning={effort:"high"} 가 실린다(default=high 확인). ' +
+    "low/medium/high/max 네 값 **모두 HTTP 200** — codex 는 카탈로그 선언값을 게이트하지 " +
+    "않고 medium 도 그대로 보내며 벤더도 400 을 내지 않는다. ★단 effort 별 행동 차이는 " +
+    "**관측되지 않았다**(같은 프롬프트에서 reasoning_tokens 가 low 136 / medium 124 / max 124 로 " +
+    "단조성 없음, 프롬프트 2종 각 n=1) — '수용된다' 까지만 확정이고 '먹는다' 는 미확정이다. " +
+    "④ SWE 벤치: docs/benchmark/swebench-deepseek-v4-flash-2026-08-21.md",
   method:
     "DeepSeek 공식 API Docs 3개 대조(2026-08-21 재확인, 최초 2026-08-18): " +
     "① quick_start/pricing — model=deepseek-v4-flash(DeepSeek-V4-Flash-0731) / " +
@@ -378,7 +403,7 @@ const DEEPSEEK_PROBE: ModelVerification = {
     "mcp 등 나머지 built-in 타입은 무시, 미지원 파라미터는 400 이 아니라 조용히 무시. " +
     "③ quick_start/agent_integrations/codex — DeepSeek 이 배포하는 공식 codex models.json 및 " +
     "config.toml 예시(model_provider/preferred_auth_method/forced_login_method/" +
-    "wire_api=\"responses\"/model_catalog_json)가 우리 생성 config 와 형태 일치",
+    'wire_api="responses"/model_catalog_json)가 우리 생성 config 와 형태 일치',
 };
 
 /**

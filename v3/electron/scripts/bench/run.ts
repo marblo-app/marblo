@@ -196,6 +196,7 @@ async function main(): Promise<void> {
     vendor = await startBenchVendorSession(
       vendorSpec,
       path.join(opts.root, "runs", runId),
+      opts.model,
     );
     console.log(`[bench] vendorRoute=${vendor.route}`);
   }

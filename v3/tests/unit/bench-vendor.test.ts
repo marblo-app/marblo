@@ -22,6 +22,7 @@ import {
 } from "../../electron/scripts/bench/vendor";
 
 const solar = BENCH_VENDORS["solar-pro4"]!;
+const deepseek = BENCH_VENDORS["deepseek-v4-flash"]!;
 const tmpDirs: string[] = [];
 
 afterEach(() => {
@@ -38,8 +39,26 @@ function tmpRoot(): string {
 }
 
 describe("benchVendorFor", () => {
-  it("solar-pro4 만 벤더 경로로 접는다", () => {
+  it("env-swap 벤더 모델만 벤더 경로로 접는다", () => {
     expect(benchVendorFor("solar-pro4")?.providerId).toBe("upstage");
+    expect(benchVendorFor("deepseek-v4-flash")?.providerId).toBe("deepseek");
+    expect(benchVendorFor("deepseek-v4-pro")?.providerId).toBe("deepseek");
+  });
+
+  it("★DeepSeek 은 브리지 홉이 없다(Responses 네이티브) — Solar 와 조건이 다르다", () => {
+    // 2026-08-21 라이브 확인: codex → 프록시 → api.deepseek.com 이 200 +
+    // Responses SSE 를 그대로 돌려줬다. 이 비대칭이 리포트 셀에 남아야 한다.
+    expect(deepseek.needsChatBridge).toBe(false);
+    expect(solar.needsChatBridge).toBe(true);
+    expect(deepseek.route).not.toBe(solar.route);
+  });
+
+  it("★카탈로그 방출 여부가 셀별로 갈린다 — 점수를 움직이는 축이라 지우지 않는다", () => {
+    // 켜면 apply_patch 가 등록되고, 끄면 `unsupported call: apply_patch` 로
+    // 거절당한다(Solar 무산출 8/12 의 원인). Solar 라운드는 이 배선 이전이라
+    // 꺼진 채 측정됐고, 그 사실을 사후에 바꾸지 않는다.
+    expect(solar.emitModelCatalog).toBe(false);
+    expect(deepseek.emitModelCatalog).toBe(true);
   });
 
   it("기존 라운드의 모델은 벤더 경로가 아니다(스폰이 한 글자도 안 바뀐다)", () => {
@@ -79,6 +98,26 @@ describe("renderBenchVendorToml", () => {
 
   it("env_key 는 codex 가 읽을 이름이고 값(시크릿)은 담기지 않는다", () => {
     expect(toml).toContain('env_key = "UPSTAGE_API_KEY"');
+  });
+
+  it("카탈로그 경로를 안 주면 model_catalog_json 키가 아예 없다(Solar 라운드 보존)", () => {
+    expect(toml).not.toContain("model_catalog_json");
+  });
+
+  it("★model_catalog_json 은 [model_providers.*] 테이블보다 **앞**에 온다", () => {
+    // 뒤에 쓰면 그 테이블의 하위 키로 흡수돼 설정 로드가 깨진다
+    // (codex-model-catalog.ts 머리말 3번 — 실측으로 확정된 함정).
+    const withCatalog = renderBenchVendorToml(
+      deepseek,
+      "https://api.deepseek.com",
+      "/tmp/model-catalog.json",
+    );
+    expect(withCatalog).toContain(
+      'model_catalog_json = "/tmp/model-catalog.json"',
+    );
+    expect(withCatalog.indexOf("model_catalog_json")).toBeLessThan(
+      withCatalog.indexOf("[model_providers."),
+    );
   });
 });
 
@@ -120,6 +159,21 @@ describe("startBenchVendorSession", () => {
     } finally {
       if (saved === undefined) delete process.env.UPSTAGE_API_KEY;
       else process.env.UPSTAGE_API_KEY = saved;
+    }
+  });
+
+  it("★카탈로그를 켰는데 모델 id 가 없으면 조용히 넘어가지 않고 throw 한다", async () => {
+    // 카탈로그 없이 뜨면 codex 가 폴백 메타데이터로 떨어져 apply_patch 를
+    // 등록하지 않는다. 그 상태의 점수는 이 셀이 재려던 조건의 점수가 아니다.
+    const saved = process.env.DEEPSEEK_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "test-key-not-a-real-secret";
+    try {
+      await expect(
+        startBenchVendorSession(deepseek, tmpRoot(), null),
+      ).rejects.toThrow(/model_catalog_json/);
+    } finally {
+      if (saved === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = saved;
     }
   });
 

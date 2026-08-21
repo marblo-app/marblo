@@ -3,11 +3,12 @@
 이 디렉터리는 **우리가 실행한 측정**만 담는다. 벤더가 발표한 점수는 여기 오지
 않는다 — 그건 `v3/electron/model-bench-reference.ts` 의 참조표가 정본이다.
 
-| 문서                                                                                                     | 무엇                                                              | 성격                 |
-| -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | -------------------- |
-| [`swebench-our-measured.md`](./swebench-our-measured.md)                                                 | 공개 SWE-bench Verified 인스턴스를 **우리 스폰 경로**로 돌린 실측 | 실행됨 (tiny N)      |
-| [`swebench-solar-pro4-2026-08-20.md`](./swebench-solar-pro4-2026-08-20.md)                               | Solar Pro 4 의 라운드2 합류 — 조건 대조·교란요인·파일럿 대조      | 실행됨 (n=12)        |
-| [`../marblo-swe-benchmark-feasibility-2026-08-09.md`](../marblo-swe-benchmark-feasibility-2026-08-09.md) | 자체 벤치를 만들 것인가에 대한 전략 판단 (#896)                   | 코드 무변경 스파이크 |
+| 문서                                                                                                     | 무엇                                                                  | 성격                 |
+| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------- |
+| [`swebench-our-measured.md`](./swebench-our-measured.md)                                                 | 공개 SWE-bench Verified 인스턴스를 **우리 스폰 경로**로 돌린 실측     | 실행됨 (tiny N)      |
+| [`swebench-solar-pro4-2026-08-20.md`](./swebench-solar-pro4-2026-08-20.md)                               | Solar Pro 4 의 라운드2 합류 — 조건 대조·교란요인·파일럿 대조          | 실행됨 (n=12)        |
+| [`swebench-deepseek-v4-flash-2026-08-21.md`](./swebench-deepseek-v4-flash-2026-08-21.md)                 | DeepSeek V4 Flash 의 라운드2 합류 — 조건 대조(★카탈로그 축)·유리 요인 | 실행됨 (n=12)        |
+| [`../marblo-swe-benchmark-feasibility-2026-08-09.md`](../marblo-swe-benchmark-feasibility-2026-08-09.md) | 자체 벤치를 만들 것인가에 대한 전략 판단 (#896)                       | 코드 무변경 스파이크 |
 
 ## 세 물건을 섞지 않는다
 
@@ -49,7 +50,7 @@ results/runs.jsonl                     ← 정본(실행 머신)
   아님 → 리더보드 비교 불가" 캡션을 지우지 않는다. 캡션 문구는 위 마크다운 헤더와
   같은 문자열이고, 그 일치도 테스트가 못박는다.
 
-## env-swap 벤더(Upstage Solar)를 태울 때
+## env-swap 벤더(Upstage Solar / DeepSeek)를 태울 때
 
 `solar-pro4` 는 codex 하네스를 쓰지만 **다른 codex 모델과 스폰 경로가 같지 않다.**
 codex 0.147+ 는 ChatGPT 로그인이 있으면 `OPENAI_BASE_URL` 을 무시하고 ChatGPT
@@ -73,6 +74,28 @@ npm run bench:swe:vendor -- --harness=codex --model=solar-pro4 --effort=medium -
 - ★조건 차이 하나 더: 라운드2의 gpt 셀들은 `codex-cli 0.147.0` 으로 쟀고 Solar 는
   `0.148.0` 이다(벤더 경로가 0.148 에서만 성립한다). 셀별 `cliVersion` 이 그 사실을
   들고 다니므로 표에서 확인할 수 있다.
+
+### DeepSeek 은 같은 배선을 쓰지만 **두 축이 다르다**
+
+`bench:swe:vendor` 는 `--secret=UPSTAGE_API_KEY` 가 박혀 있으므로 DeepSeek 은 전용 스크립트를 쓴다
+(꺼내는 키 이름만 다르고 나머지 배선은 같다):
+
+```
+npm run bench:swe:vendor:deepseek -- --harness=codex --model=deepseek-v4-flash --effort=high \
+  --out=$HOME/.marblo/swe-bench/results/runs.jsonl
+```
+
+- **브리지 홉이 없다.** DeepSeek 은 `/v1/responses` 를 네이티브로 연다(2026-08-21 라이브 확인).
+  `needsChatBridge=false` 라 Solar 가 타는 변환 홉을 타지 않는다.
+- ★**`model_catalog_json` 을 방출한다**(`emitModelCatalog=true`). 이건 **점수를 움직이는 축**이다 —
+  방출하지 않으면 codex 가 폴백 메타데이터로 떠서 `apply_patch` 를 등록하지 않고, 모델이 부르면
+  `unsupported call: apply_patch` 로 거절된다(Solar 무산출 8/12 의 원인). Solar 라운드는 이 배선
+  **이전**에 측정됐으므로 꺼진 채로 남아 있고, 그 사실을 사후에 바꾸지 않는다.
+  → 두 셀은 **도구 표면이 다르다.** 같은 축에서 비교하려면 Solar 를 다시 재야 한다.
+- effort 도 다르다: DeepSeek 은 `medium` 이 축에 없어 벤더 공식 기본값 `high` 로 잰다.
+  자세한 조건 대조는 [`swebench-deepseek-v4-flash-2026-08-21.md`](./swebench-deepseek-v4-flash-2026-08-21.md) §1.
+- 도구 표면을 라이브로 확정하는 계측기는 `scripts/probe-codex-vendor-tools.mjs --live` 다.
+  전말은 [`../deepseek-namespace-mcp-live-probe-2026-08-21.md`](../deepseek-namespace-mcp-live-probe-2026-08-21.md).
 
 ### ★프로바이더 실패는 0점이 아니다
 
