@@ -2,6 +2,11 @@ import * as fs from "fs";
 import * as path from "path";
 import { spawn } from "child_process";
 import { gitSpawnEnv } from "./git-path";
+import {
+  hasGitUrlCredentials,
+  isAppInjectedCredential,
+  stripGitUrlCredentials,
+} from "./git-url-safety";
 import { annotateGitFailure } from "./xcode-clt";
 
 export interface FileNode {
@@ -393,7 +398,57 @@ export class FsManager {
     });
   }
 
+  /**
+   * origin remote URL — ★크레덴셜을 벗겨서만 돌려준다
+   * (티켓 d0d0JkRd1SeGTxVRx4nQ, P0 보안).
+   *
+   * 이 메서드가 IPC `fs:gitRemoteUrl` 의 유일한 구현이고, 그 값은 렌더러를
+   * 거쳐 화면과 Firestore `projects.gitRemoteUrl`(팀 전원이 읽는다)까지
+   * 간다. 그러니 **여기가 마지막 관문**이다: `.git/config` 에 토큰이 박힌
+   * 구버전 clone 이 남아 있어도 그 토큰이 프로세스 밖으로 못 나간다.
+   *
+   * 우리가 심었던 형태(`oauth2:`/`x-access-token:`)면 디스크의 origin 도
+   * 무자격 URL 로 되돌린다 — 정화가 조회 때마다 다시 필요해지지 않게.
+   * 사람이 손으로 넣은 크레덴셜은 지우지 않는다(그 사람의 push 가 깨진다).
+   */
   async getGitRemoteUrl(rootPath: string): Promise<string | null> {
+    const raw = await this.readGitRemoteUrl(rootPath);
+    if (!raw) return null;
+    if (!hasGitUrlCredentials(raw)) return raw;
+
+    const clean = stripGitUrlCredentials(raw);
+    if (isAppInjectedCredential(raw)) {
+      await this.setGitRemoteUrl(rootPath, clean);
+    } else {
+      // ★값은 절대 찍지 않는다 — 경로와 사실만.
+      console.warn(
+        `[fs-manager] origin URL carries credentials; stripped before leaving the main process (${rootPath})`
+      );
+    }
+    return clean;
+  }
+
+  /** origin URL 을 덮어쓴다(정화 전용, fail-soft). */
+  private async setGitRemoteUrl(
+    rootPath: string,
+    url: string
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      try {
+        const proc = spawn("git", ["remote", "set-url", "origin", url], {
+          cwd: rootPath,
+          env: gitSpawnEnv(),
+        });
+        proc.on("close", (code) => resolve(code === 0));
+        proc.on("error", () => resolve(false));
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+
+  /** `git remote get-url origin` 원문. ★호출부는 반드시 정화해서 쓴다. */
+  private async readGitRemoteUrl(rootPath: string): Promise<string | null> {
     return new Promise((resolve) => {
       try {
         const proc = spawn("git", ["remote", "get-url", "origin"], {

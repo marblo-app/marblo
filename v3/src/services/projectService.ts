@@ -1,5 +1,6 @@
 import { where, arrayUnion, arrayRemove } from "firebase/firestore";
 import type { Project } from "../types/project";
+import { sanitizeGitRemoteUrl } from "../lib/gitUrlSafety";
 import {
   buildMachinePathEntry,
   machineKeyFor,
@@ -28,12 +29,28 @@ export async function findProjectByPath(
   return docs.length > 0 ? toProject(docs[0]) : null;
 }
 
+/**
+ * remote URL → **비교 전용** 정규형 `host/owner/repo`.
+ *
+ * ★크레덴셜을 먼저 벗긴다 (티켓 d0d0JkRd1SeGTxVRx4nQ, P0 보안).
+ * 이전 구현은 `https://` 뒤를 `([^/]+)` 로 잡아 `token@github.com` 전체를
+ * 호스트로 삼았다 — userinfo 가 안 벗겨진 채, 게다가 전체 `.toLowerCase()`
+ * 로 토큰이 뭉개져 **항상 mismatch** 였다. 그래서 같은 repo 인데도 매칭이
+ * 안 돼 프로젝트가 중복 생성되는 실버그까지 같이 있었다.
+ *
+ * ★경로 대소문자를 접는 이유 — 이 함수의 결과는 **오직 비교 키**로만 쓰인다
+ * (findProjectByPathOrRemote·projectStore 중복가드). 표시·git 명령에 쓰는
+ * 값은 원문을 보존하는 `sanitizeGitRemoteUrl` 쪽이다. GitHub 는 owner/repo
+ * 를 대소문자 구분 없이 같은 repo 로 해석하므로, 여기서 대소문자를 살리면
+ * `Acme/App` 로 clone 한 멤버가 `acme/app` 로 등록된 같은 프로젝트를 못 찾고
+ * 중복 프로젝트를 만든다. 비교 키는 접는 쪽이 맞다.
+ */
 export function normalizeGitRemoteUrl(
   url: string | null | undefined,
 ): string | null {
-  if (!url) return null;
-  let s = url.trim().toLowerCase();
-  if (!s) return null;
+  const sanitized = sanitizeGitRemoteUrl(url);
+  if (!sanitized) return null;
+  let s = sanitized.toLowerCase();
 
   // git@host:path
   let m = s.match(/^git@([^:]+):(.+)$/);
@@ -92,6 +109,25 @@ export async function getProject(projectId: string): Promise<Project | null> {
   return raw ? toProject(raw) : null;
 }
 
+/**
+ * ★Firestore 쓰기의 크레덴셜 초크포인트 (티켓 d0d0JkRd1SeGTxVRx4nQ).
+ *
+ * `projects` 문서는 **팀 전원이 읽는다**. gitRemoteUrl 에 userinfo 가 실려
+ * 오면 한 멤버의 개인 토큰이 팀 전체에 공개된다. 호출부가 늘어나도
+ * (useProjectSetup·RepoConnectModal·teamService…) 새는 곳이 안 생기도록
+ * 필드를 여기 한 곳에서 정화한다. 값이 없으면 그대로 둔다 — undefined 를
+ * 만들어 넣으면 Firestore 가 거부한다.
+ */
+function withSanitizedRemote<T extends { gitRemoteUrl?: string }>(data: T): T {
+  if (typeof data.gitRemoteUrl !== "string") return data;
+  const clean = sanitizeGitRemoteUrl(data.gitRemoteUrl);
+  if (clean === data.gitRemoteUrl) return data;
+  // 정화 후 빈 값이면 필드를 아예 빼서 오염된 원문이 남지 않게 한다.
+  const next = { ...data, gitRemoteUrl: clean ?? undefined };
+  if (next.gitRemoteUrl === undefined) delete next.gitRemoteUrl;
+  return next;
+}
+
 export async function createProject(
   data: Omit<Project, "id" | "createdAt" | "updatedAt">,
 ): Promise<string> {
@@ -100,7 +136,7 @@ export async function createProject(
     ? data.members
     : [data.ownerId, ...data.members];
   return createDocument(COLLECTION, {
-    ...data,
+    ...withSanitizedRemote(data),
     members,
     createdAt: toTimestamp(now),
     updatedAt: toTimestamp(now),
@@ -112,7 +148,7 @@ export async function updateProject(
   data: Partial<Omit<Project, "id" | "createdAt">>,
 ): Promise<void> {
   await updateDocument(COLLECTION, projectId, {
-    ...data,
+    ...withSanitizedRemote(data),
     updatedAt: toTimestamp(new Date()),
   });
 }

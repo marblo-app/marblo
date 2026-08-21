@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { gitSpawnEnv } from "./git-path";
+import { stripGitUrlCredentials } from "./git-url-safety";
 import { describeXcodeCltFailure } from "./xcode-clt";
 
 /**
@@ -67,7 +68,7 @@ export function defaultCloneParentDir(): string {
  * 공백/개행 포함)는 전부 null — 옵션 주입·로컬 파일 접근을 차단한다.
  */
 export function validateCloneUrl(
-  url: string | null | undefined,
+  url: string | null | undefined
 ): string | null {
   if (typeof url !== "string") return null;
   const s = url.trim();
@@ -149,41 +150,74 @@ export function classifyCloneError(stderr: string): CloneErrorKind {
 }
 
 /**
- * GitHub HTTPS URL에만 device-flow token을 붙인다. SSH와 다른 Git host는
- * 기존 gh auth/SSH fallback을 그대로 사용한다.
+ * device-flow token 을 **URL 밖에서** git 에 넘기는 환경변수를 만든다
+ * (티켓 d0d0JkRd1SeGTxVRx4nQ, P0 보안).
+ *
+ * ★왜 URL 에 박으면 안 되나 — `git clone https://oauth2:<token>@github.com/...`
+ * 는 그 URL 을 새 repo 의 `.git/config` `remote.origin.url` 에 **평문으로
+ * 영구 기록**한다. 사용자가 폴더를 압축해 공유하거나 백업하면 토큰이 같이
+ * 가고, 우리 앱 스스로도 `git remote get-url origin` 으로 그 값을 읽어
+ * Firestore 까지 실어 날랐다.
+ *
+ * 대신 `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` (git ≥
+ * 2.31) 로 `http.<url>.extraHeader` 를 **이 프로세스에만** 주입한다.
+ *  - `.git/config` 에 남지 않는다(환경변수 기반 config 는 in-memory 다).
+ *    `git clone -c key=val` 은 반대로 새 repo config 에 **적히므로** 쓰지 않는다.
+ *  - argv 에 안 실린다 → 같은 머신의 다른 사용자가 `ps` 로 못 본다.
+ *  - URL 스코프를 `https://github.com/` 로 못박아 리다이렉트로 다른 호스트에
+ *    Authorization 헤더가 따라가지 않는다.
+ *
+ * GitHub HTTPS 가 아니면 아무것도 주입하지 않는다(SSH·타 호스트는 기존
+ * gh auth / SSH 폴백 그대로).
+ *
+ * @param baseEnv 이미 만들어진 spawn env — 사용자가 쓰던 GIT_CONFIG_* 가
+ *        있으면 덮지 않고 그 뒤 인덱스에 이어 붙인다.
  */
-export function tokenizedGitHubCloneUrl(
+export function githubTokenGitConfigEnv(
   url: string,
-  token?: string | null,
-): string {
-  if (!token) return url;
+  token: string | null | undefined,
+  baseEnv: NodeJS.ProcessEnv = {}
+): Record<string, string> {
+  if (!token) return {};
+  let parsed: URL;
   try {
-    const parsed = new URL(url);
-    if (
-      parsed.protocol !== "https:" ||
-      parsed.hostname.toLowerCase() !== "github.com"
-    ) {
-      return url;
-    }
-    parsed.username = "oauth2";
-    parsed.password = token;
-    return parsed.toString();
+    parsed = new URL(url);
   } catch {
-    return url;
+    return {};
   }
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.hostname.toLowerCase() !== "github.com"
+  ) {
+    return {};
+  }
+
+  const existing = Number.parseInt(baseEnv.GIT_CONFIG_COUNT ?? "", 10);
+  const start = Number.isFinite(existing) && existing > 0 ? existing : 0;
+  const basic = Buffer.from(`x-access-token:${token}`, "utf8").toString(
+    "base64"
+  );
+  return {
+    GIT_CONFIG_COUNT: String(start + 1),
+    [`GIT_CONFIG_KEY_${start}`]: "http.https://github.com/.extraHeader",
+    [`GIT_CONFIG_VALUE_${start}`]: `Authorization: Basic ${basic}`,
+  };
 }
 
 function redactToken(value: string, token?: string | null): string {
   return token ? value.split(token).join("[redacted]") : value;
 }
 
-/** 테스트 주입용 git 실행기 — 실제 구현은 spawn("git", ...). */
+/**
+ * 테스트 주입용 git 실행기 — 실제 구현은 spawn("git", ...).
+ * `env` 는 spawn env 에 **덧붙일** 항목이다(크레덴셜 주입 전용).
+ */
 export type GitRunner = (
   args: string[],
-  opts: { cwd: string; timeoutMs: number },
+  opts: { cwd: string; timeoutMs: number; env?: Record<string, string> }
 ) => Promise<{ code: number; stderr: string }>;
 
-const realGitRunner: GitRunner = (args, { cwd, timeoutMs }) =>
+const realGitRunner: GitRunner = (args, { cwd, timeoutMs, env: extraEnv }) =>
   new Promise((resolve) => {
     let stderr = "";
     let settled = false;
@@ -202,6 +236,9 @@ const realGitRunner: GitRunner = (args, { cwd, timeoutMs }) =>
           // 인증 프롬프트 대기로 hang 하지 않고 즉시 실패 → auth 로 분류.
           GIT_TERMINAL_PROMPT: "0",
           GIT_SSH_COMMAND: "ssh -oBatchMode=yes",
+          // 토큰은 여기(자식 프로세스 env)까지만 간다 — argv 에도,
+          // clone 된 repo 의 .git/config 에도 남지 않는다.
+          ...extraEnv,
         },
       });
       timer = setTimeout(() => {
@@ -245,9 +282,16 @@ export async function cloneRepo(
     parentDir?: string | null;
     githubToken?: string | null;
   },
-  runner: GitRunner = realGitRunner,
+  runner: GitRunner = realGitRunner
 ): Promise<CloneResult> {
-  const url = validateCloneUrl(input.repoUrl);
+  // ★들어온 URL 자체가 이미 오염돼 있을 수 있다 — 구버전이 Firestore 에
+  // 적어둔 토큰 URL, 사용자가 수동입력에 붙여넣은 토큰 URL. 그대로 clone
+  // 하면 남의 토큰을 다시 .git/config 에 새로 심는다. 검증 전에 벗긴다.
+  const url = validateCloneUrl(
+    typeof input.repoUrl === "string"
+      ? stripGitUrlCredentials(input.repoUrl.trim())
+      : input.repoUrl
+  );
   if (!url) {
     return {
       ok: false,
@@ -283,10 +327,11 @@ export async function cloneRepo(
     };
   }
 
-  const cloneUrl = tokenizedGitHubCloneUrl(url, input.githubToken);
-  const r = await runner(["clone", "--", cloneUrl, dest], {
+  // URL 은 크레덴셜 없는 값 그대로 넘기고, 토큰은 env 로만 준다.
+  const r = await runner(["clone", "--", url, dest], {
     cwd: parent,
     timeoutMs: CLONE_TIMEOUT_MS,
+    env: githubTokenGitConfigEnv(url, input.githubToken, gitSpawnEnv()),
   });
   if (r.code === 0 && fs.existsSync(dest)) {
     return { ok: true, path: dest };

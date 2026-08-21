@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import { gitSpawnEnv } from "./git-path";
+import { sanitizeGitRemoteUrl } from "./git-url-safety";
 import * as path from "node:path";
 
 /**
@@ -158,7 +159,12 @@ export class ConnectionStore {
     const merged: ProjectConnection = {
       projectId: input.projectId,
       localPath: input.localPath,
-      repoUrl: input.repoUrl ?? existing?.repoUrl ?? null,
+      // ★렌더러가 준 값도 믿지 않는다 — 오염된 project.gitRemoteUrl 이 그대로
+      // 넘어올 수 있으므로 저장 전에 크레덴셜을 벗긴다.
+      repoUrl:
+        sanitizeGitRemoteUrl(input.repoUrl) ??
+        sanitizeGitRemoteUrl(existing?.repoUrl) ??
+        null,
       defaultBranch: input.defaultBranch ?? existing?.defaultBranch ?? null,
       connectedHarness:
         input.connectedHarness ?? existing?.connectedHarness ?? null,
@@ -269,7 +275,9 @@ export async function deriveGitRepoMeta(
 
   const remote = await runGit(["remote", "get-url", "origin"], localPath);
   if (remote.code === 0) {
-    const url = remote.stdout.trim();
+    // ★크레덴셜을 벗겨서만 싣는다 (티켓 d0d0JkRd1SeGTxVRx4nQ) — 이 값은
+    // ~/.marblo/connections.json 에 평문으로 저장되고 Harness 탭에 표시된다.
+    const url = sanitizeGitRemoteUrl(remote.stdout);
     if (url) meta.repoUrl = url;
   }
 

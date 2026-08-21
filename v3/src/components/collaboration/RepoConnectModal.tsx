@@ -4,6 +4,7 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useAuth } from "../../hooks/useAuth";
 import { normalizeGitRemoteUrl } from "../../services/projectService";
+import { sanitizeGitRemoteUrl } from "../../lib/gitUrlSafety";
 import {
   shouldOfferRepoConnect,
   resolveRepoConnectVisible,
@@ -470,7 +471,11 @@ export function RepoConnectModal() {
     if (!dir) return;
     setBusy(true);
     try {
-      const origin = await window.electronAPI.fs.gitRemoteUrl(dir);
+      // ★화면에도 크레덴셜을 띄우지 않는다 (티켓 d0d0JkRd1SeGTxVRx4nQ) —
+      // 아래 errorMismatch 는 origin 원문을 그대로 상세에 렌더한다.
+      const origin = sanitizeGitRemoteUrl(
+        await window.electronAPI.fs.gitRemoteUrl(dir),
+      );
       if (!origin) {
         fail("collab.repoConnect.errorNoRemote");
         return;

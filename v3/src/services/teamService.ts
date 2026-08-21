@@ -15,6 +15,7 @@ import {
 } from "./firestore";
 import * as projectService from "./projectService";
 import { resolveProjectFolderPath } from "../lib/projectPaths";
+import { sanitizeGitRemoteUrl } from "../lib/gitUrlSafety";
 import { t } from "../lib/i18n";
 
 const INVITATIONS = "invitations";
@@ -71,7 +72,7 @@ export async function captureProjectRepoUrl(
     return null;
   }
   if (!project) return null;
-  if (project.gitRemoteUrl) return project.gitRemoteUrl;
+  if (project.gitRemoteUrl) return sanitizeGitRemoteUrl(project.gitRemoteUrl);
 
   // 이 기기 칸의 경로만 본다 — 다른 기기의 경로는 이 디스크에 없다
   // (projectPaths 의 "폴백 금지" 불변식).
@@ -79,7 +80,12 @@ export async function captureProjectRepoUrl(
     { folderPath: project.folderPath, folderPaths: project.folderPaths },
     await thisMachineId(),
   );
-  const origin = localPath ? await localGitRemoteUrl(localPath) : null;
+  // ★크레덴셜을 벗겨서만 쓴다 — 이 값은 projects/invitations 문서에 실려
+  // 팀 전원에게 읽힌다 (티켓 d0d0JkRd1SeGTxVRx4nQ). 메인 프로세스가 이미
+  // 정화해 주지만, 구버전 IPC·오염된 캐시를 대비한 2중 방어다.
+  const origin = sanitizeGitRemoteUrl(
+    localPath ? await localGitRemoteUrl(localPath) : null,
+  );
   if (!origin) return null;
 
   try {
@@ -125,7 +131,8 @@ async function localGitRemoteUrl(path: string): Promise<string | null> {
 async function propagateInvitationRepoUrl(
   invitation: Invitation,
 ): Promise<void> {
-  const url = invitation.gitRemoteUrl;
+  // 오염된 초대 문서(구버전이 쓴 토큰 URL)를 프로젝트로 옮겨 심지 않는다.
+  const url = sanitizeGitRemoteUrl(invitation.gitRemoteUrl);
   // 정규화가 null 이면 URL 로서 의미가 없는 값 — 쓰지 않는다.
   if (!url || !projectService.normalizeGitRemoteUrl(url)) return;
   try {

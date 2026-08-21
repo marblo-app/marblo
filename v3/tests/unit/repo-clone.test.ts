@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -7,7 +8,7 @@ import {
   cloneRepo,
   defaultCloneParentDir,
   deriveRepoDirName,
-  tokenizedGitHubCloneUrl,
+  githubTokenGitConfigEnv,
   validateCloneUrl,
   type GitRunner,
 } from "../../electron/repo-clone";
@@ -146,17 +147,88 @@ describe("cloneRepo — Xcode CLT 실패", () => {
   });
 });
 
-describe("tokenizedGitHubCloneUrl", () => {
-  it("adds the device-flow token only to GitHub HTTPS URLs", () => {
+// ★티켓 d0d0JkRd1SeGTxVRx4nQ (P0 보안) 회귀 — 토큰이 URL 로 들어가면 git 이
+// 그 값을 clone 된 repo 의 .git/config 에 평문으로 영구 기록한다. 여기서
+// 쓰는 토큰은 전부 더미다.
+const DUMMY_TOKEN = "dummy-token-not-real";
+
+describe("githubTokenGitConfigEnv", () => {
+  it("hands the token to git as env-only config, never in the URL", () => {
+    const env = githubTokenGitConfigEnv(
+      "https://github.com/acme/app.git",
+      DUMMY_TOKEN,
+    );
+    expect(env.GIT_CONFIG_COUNT).toBe("1");
+    expect(env.GIT_CONFIG_KEY_0).toBe("http.https://github.com/.extraHeader");
+    // Basic 헤더는 base64(x-access-token:<token>) 여야 한다.
+    expect(env.GIT_CONFIG_VALUE_0).toBe(
+      `Authorization: Basic ${Buffer.from(
+        `x-access-token:${DUMMY_TOKEN}`,
+        "utf8",
+      ).toString("base64")}`,
+    );
+    // 그리고 토큰 원문이 어떤 값에도 평문으로 실려선 안 된다.
+    expect(JSON.stringify(env)).not.toContain(DUMMY_TOKEN);
+  });
+
+  it("injects nothing for SSH / non-GitHub hosts / no token", () => {
     expect(
-      tokenizedGitHubCloneUrl(
-        "https://github.com/acme/app.git",
-        "secret-token",
-      ),
-    ).toBe("https://oauth2:secret-token@github.com/acme/app.git");
+      githubTokenGitConfigEnv("git@github.com:acme/app.git", DUMMY_TOKEN),
+    ).toEqual({});
     expect(
-      tokenizedGitHubCloneUrl("git@github.com:acme/app.git", "secret-token"),
-    ).toBe("git@github.com:acme/app.git");
+      githubTokenGitConfigEnv("https://gitlab.com/acme/app.git", DUMMY_TOKEN),
+    ).toEqual({});
+    expect(githubTokenGitConfigEnv("https://github.com/acme/app", null)).toEqual(
+      {},
+    );
+  });
+
+  // ★git 의 실제 동작에 기대는 계약이므로 진짜 git 으로 못박는다.
+  // (`git -c`/`git clone -c` 는 반대로 새 repo config 에 **적힌다** —
+  //  그래서 그 방식을 안 쓴다. 이 테스트가 그 차이를 지킨다.)
+  it("★env-passed config does not persist into the cloned .git/config", () => {
+    const root = tmpDir();
+    const src = path.join(root, "src");
+    fs.mkdirSync(src);
+    execFileSync("git", ["init", "-q"], { cwd: src });
+    execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "init"], {
+      cwd: src,
+      env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t" },
+    });
+
+    const injected = githubTokenGitConfigEnv(
+      "https://github.com/acme/app.git",
+      DUMMY_TOKEN,
+    );
+    const dest = path.join(root, "viaenv");
+    execFileSync("git", ["clone", "-q", "--", src, dest], {
+      env: { ...process.env, ...injected },
+    });
+    const config = fs.readFileSync(path.join(dest, ".git", "config"), "utf8");
+    expect(config.toLowerCase()).not.toContain("extraheader");
+    expect(config).not.toContain(DUMMY_TOKEN);
+    expect(config).not.toContain(injected.GIT_CONFIG_VALUE_0);
+
+    // 대조군: `clone -c` 였다면 그대로 남는다.
+    const destFlag = path.join(root, "viaflag");
+    execFileSync(
+      "git",
+      ["clone", "-q", "-c", "http.extraHeader=Authorization: Basic x", "--", src, destFlag],
+    );
+    expect(
+      fs.readFileSync(path.join(destFlag, ".git", "config"), "utf8").toLowerCase(),
+    ).toContain("extraheader");
+  });
+
+  it("appends after a user's existing GIT_CONFIG_* entries", () => {
+    const env = githubTokenGitConfigEnv(
+      "https://github.com/acme/app.git",
+      DUMMY_TOKEN,
+      { GIT_CONFIG_COUNT: "2" },
+    );
+    expect(env.GIT_CONFIG_COUNT).toBe("3");
+    expect(env.GIT_CONFIG_KEY_2).toBe("http.https://github.com/.extraHeader");
+    expect(env.GIT_CONFIG_KEY_0).toBeUndefined();
   });
 });
 
@@ -183,6 +255,53 @@ describe("cloneRepo", () => {
     expect(r.path).toBe(path.join(parent, "app"));
     expect(seenArgs.slice(0, 2)).toEqual(["clone", "--"]);
     expect(seenArgs[2]).toBe("https://github.com/acme/app.git");
+  });
+
+  it("★never puts the token in the clone URL (it would land in .git/config)", async () => {
+    const parent = tmpDir();
+    let seenArgs: string[] = [];
+    let seenEnv: Record<string, string> | undefined;
+    const runner: GitRunner = async (args, opts) => {
+      seenArgs = args;
+      seenEnv = opts.env;
+      return okRunner(args, opts);
+    };
+    const r = await cloneRepo(
+      {
+        repoUrl: "https://github.com/acme/app.git",
+        parentDir: parent,
+        githubToken: DUMMY_TOKEN,
+      },
+      runner,
+    );
+    expect(r.ok).toBe(true);
+    expect(seenArgs[2]).toBe("https://github.com/acme/app.git");
+    expect(seenArgs.join(" ")).not.toContain(DUMMY_TOKEN);
+    expect(seenArgs.join(" ")).not.toContain("@github.com");
+    // 토큰은 env 로만 — 그리고 그 env 는 .git/config 에 안 남는 형태여야 한다.
+    expect(seenEnv?.GIT_CONFIG_KEY_0).toBe(
+      "http.https://github.com/.extraHeader",
+    );
+  });
+
+  it("★strips credentials already present in the incoming repo URL", async () => {
+    const parent = tmpDir();
+    let seenArgs: string[] = [];
+    const runner: GitRunner = async (args, opts) => {
+      seenArgs = args;
+      return okRunner(args, opts);
+    };
+    const r = await cloneRepo(
+      {
+        // 구버전이 Firestore 에 적어둔 오염 URL 이 그대로 돌아온 상황.
+        repoUrl: `https://oauth2:${DUMMY_TOKEN}@github.com/acme/app.git`,
+        parentDir: parent,
+      },
+      runner,
+    );
+    expect(r.ok).toBe(true);
+    expect(seenArgs[2]).toBe("https://github.com/acme/app.git");
+    expect(seenArgs.join(" ")).not.toContain(DUMMY_TOKEN);
   });
 
   it("rejects invalid urls without running git", async () => {
