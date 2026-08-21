@@ -231,10 +231,24 @@ function nestedFieldPayload(fieldPath, cleanUrl) {
   return { [parts[0]]: value };
 }
 
-async function patchRemoteUrl(projectId, token, collection, id, field, cleanUrl) {
+async function patchRemoteUrl(
+  projectId,
+  token,
+  collection,
+  id,
+  field,
+  cleanUrl,
+  updateTime,
+) {
   const url = new URL(documentUrl(projectId, `${collection}/${id}`));
   url.searchParams.append("updateMask.fieldPaths", field);
-  url.searchParams.set("currentDocument.exists", "true");
+  // ★스캔 시점 이후 문서가 바뀌었으면 서버가 FAILED_PRECONDITION 으로 거절한다.
+  // updateTime 을 못 얻은 경우에만 "존재하기만 하면" 으로 물러선다.
+  if (updateTime) {
+    url.searchParams.set("currentDocument.updateTime", updateTime);
+  } else {
+    url.searchParams.set("currentDocument.exists", "true");
+  }
   await fetchJson(url.toString(), token, {
     method: "PATCH",
     body: JSON.stringify({ fields: nestedFieldPayload(field, cleanUrl) }),
@@ -271,6 +285,9 @@ function scan(docs, collection, field) {
       collection,
       field,
       id: docId(doc.name),
+      // ★낙관적 락 — 스캔과 PATCH 사이에 누가 이 문서를 바꿨으면 쓰지 않는다.
+      // "예상과 다른 값을 덮지 않는다" 를 서버가 보장하게 한다.
+      updateTime: doc.updateTime ?? null,
       // ★값이 아니라 "정화 후" 만 남긴다. 호스트/경로는 비밀이 아니고
       // 어느 팀에 알려야 하는지 판단하는 데 필요하다.
       cleanUrl: clean,
@@ -343,8 +360,23 @@ async function main() {
       row.id,
       row.field,
       row.cleanUrl,
+      row.updateTime,
     );
-    console.log(`  cleaned ${row.collection}/${row.id} (${row.field})`);
+    // ★"실행했다" 가 아니라 "없어졌다" 를 확인한다 — 쓰기 직후 재조회.
+    const after = await fetchJson(
+      documentUrl(projectId, `${row.collection}/${row.id}`),
+      token,
+    );
+    const verdict = inspect(readStringField(after, row.field));
+    console.log(
+      `  cleaned ${row.collection}/${row.id} (${row.field}) ` +
+        `verify: userinfo=${verdict.present} secret=${verdict.secret}`,
+    );
+    if (verdict.secret) {
+      throw new Error(
+        `${row.collection}/${row.id}: 정화 후에도 크레덴셜이 남아 있다 — 중단한다`,
+      );
+    }
   }
   console.log(`\nApplied to ${findings.length} document(s).`);
 }
