@@ -15,6 +15,13 @@ import {
   waitForTerminalCjkFontBeforeOpen,
 } from "../../lib/monoFont";
 import { t } from "../../lib/i18n";
+import {
+  classifyTerminalSessionOwnership,
+  deadSessionNoticeCopy,
+} from "../../lib/terminalSessionOwnership";
+import { useAgentSessionMap } from "../../stores/agentSessionMap";
+import { useAgentStore } from "../../stores/agentStore";
+import { useProjectStore } from "../../stores/projectStore";
 
 interface TerminalViewProps {
   sessionId: string;
@@ -48,6 +55,39 @@ declare global {
   interface Window {
     __marbloTerminalDebug?: TerminalDebugRegistry;
   }
+}
+
+/**
+ * 죽은/없는 PTY 앞에서 화면이 할 말을 고른다.
+ *
+ * 스토어는 **그 순간에** 비반응형으로 읽는다: 이 안내문은 replay 가 빈 걸
+ * 확인한 시점에 딱 한 번 버퍼에 써지는 1회성 문장이고, 그 뒤 스토어가
+ * 바뀐다고 이미 쓴 줄을 고쳐 쓸 방법도 없다. 구독을 걸면 xterm init 이펙트
+ * 전체가 재실행돼 터미널이 통째로 다시 뜬다.
+ *
+ * 판정·문구 매핑 자체는 `lib/terminalSessionOwnership` 의 순수 함수다(테스트가
+ * "어떤 상태에서 복구 안내가 나가는가" 를 직접 못 박는다). 여기서는 스토어를
+ * 읽어 그 함수에 넘기고, 돌아온 키를 번역만 한다.
+ */
+function describeDeadSessionNotice(sessionId: string) {
+  const agentState = useAgentStore.getState();
+  const projectState = useProjectStore.getState();
+  const { ownership } = classifyTerminalSessionOwnership({
+    sessionId,
+    sessionIdByAgentId: useAgentSessionMap.getState().map,
+    agents: agentState.agents,
+    agentsHydrated: agentState.hydrated,
+    localMachineId: projectState.machineId,
+    localUserId: projectState.subscribedUserId,
+  });
+  const copy = deadSessionNoticeCopy(ownership);
+  return {
+    color: copy.color,
+    glyph: copy.glyph,
+    title: t(copy.titleKey),
+    reason: t(copy.reasonKey),
+    hint: t(copy.hintKey),
+  };
 }
 
 export default memo(function TerminalView({
@@ -666,15 +706,17 @@ export default memo(function TerminalView({
             .catch(() => false);
           if (disposed) return;
           if (!alive) {
+            // ★"왜 비어 있는가" 는 세 가지고, 셋은 서로 다른 사실이다
+            // (티켓 r44KdZ4SJL4mZ2K8wC0P). 종전엔 셋 다 "세션 만료" 로
+            // 뭉뚱그려져, 남의 기기에서 멀쩡히 도는 에이전트를 보고도
+            // 사용자가 "내 게 죽었나" 하고 복구를 시도했다.
+            // 판정 근거가 없으면 `unknown` → 종전 문구 그대로다.
+            const notice = describeDeadSessionNotice(sessionId);
             terminal.write(
-              `\r\n\x1b[33m  ⚠ ${t("terminal.session.expired")}\x1b[0m\r\n`,
+              `\r\n\x1b[${notice.color}m  ${notice.glyph} ${notice.title}\x1b[0m\r\n`,
             );
-            terminal.write(
-              `\x1b[90m  ${t("terminal.session.expiredReason")}\x1b[0m\r\n`,
-            );
-            terminal.write(
-              `\x1b[90m  ${t("terminal.session.restartHint")}\x1b[0m\r\n\r\n`,
-            );
+            terminal.write(`\x1b[90m  ${notice.reason}\x1b[0m\r\n`);
+            terminal.write(`\x1b[90m  ${notice.hint}\x1b[0m\r\n\r\n`);
           } else {
             nudgePtyRepaint("alive silent replay");
           }

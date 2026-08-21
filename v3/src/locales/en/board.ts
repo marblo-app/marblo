@@ -101,6 +101,8 @@ export const board: Record<keyof typeof koBoard, string> = {
   "board.taskDetail.worktreeRefindFailed": "Worktree lookup failed",
   "board.taskDetail.viewTerminal": "View {name} terminal",
   "board.taskDetail.connect": "(connect)",
+  "board.taskDetail.remoteUser": "(on a teammate's machine)",
+  "board.taskDetail.remoteMachine": "(on another machine)",
   "board.taskDetail.edit": "Edit",
   "board.taskDetail.titleLabel": "Title",
   "board.taskDetail.descriptionLabel": "Description",

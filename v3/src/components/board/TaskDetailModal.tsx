@@ -19,6 +19,10 @@ import { useTaskStore } from "../../stores/taskStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useAgentFocusStore } from "../../stores/agentFocusStore";
 import { getSessionIdForAgent } from "../../stores/agentSessionMap";
+import {
+  classifyAgentMachine,
+  isRunningElsewhere,
+} from "../../lib/terminalSessionOwnership";
 import { useProjectStore } from "../../stores/projectStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useAuth } from "../../hooks/useAuth";
@@ -233,6 +237,8 @@ function AgentTerminalButton({
     (s) => s.openTerminalForSession,
   );
   const setFocusedAgent = useAgentFocusStore((s) => s.setFocusedAgent);
+  const localMachineId = useProjectStore((s) => s.machineId);
+  const localUserId = useProjectStore((s) => s.subscribedUserId);
   const { t } = useTranslation();
 
   if (!claimedBy) return null;
@@ -249,6 +255,15 @@ function AgentTerminalButton({
 
   const ptySessionId = getSessionIdForAgent(agent.id);
   const hasSession = terminalSessions.some((s) => s.id === ptySessionId);
+  // 이 기기가 띄운 에이전트가 아니면 "(연결)" 은 거짓말이다 — 눌러도 이 기기엔
+  // 붙을 PTY 가 없다. 근거(machineId 스탬프)가 없으면 `unknown` 으로 떨어져
+  // 종전 표시 그대로다(티켓 r44KdZ4SJL4mZ2K8wC0P).
+  const machineOwnership = classifyAgentMachine(
+    agent,
+    localMachineId,
+    localUserId,
+  );
+  const runsElsewhere = isRunningElsewhere(machineOwnership);
 
   const handleOpenTerminal = () => {
     // ★심플 셸: 전용 터미널 모달(BeginnerAgentTerminalModal)로 넘긴다.
@@ -300,10 +315,23 @@ function AgentTerminalButton({
             {modelLabel}
           </span>
         )}
-        {!hasSession && (
-          <span className="text-[10px] text-gray-500">
-            {t("board.taskDetail.connect")}
+        {runsElsewhere ? (
+          <span
+            data-testid="task-detail-terminal-remote"
+            className="text-[10px] text-gray-500"
+          >
+            {t(
+              machineOwnership === "foreign-user"
+                ? "board.taskDetail.remoteUser"
+                : "board.taskDetail.remoteMachine",
+            )}
           </span>
+        ) : (
+          !hasSession && (
+            <span className="text-[10px] text-gray-500">
+              {t("board.taskDetail.connect")}
+            </span>
+          )
         )}
       </button>
     </div>

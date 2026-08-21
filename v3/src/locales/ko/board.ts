@@ -99,6 +99,9 @@ export const board = {
   "board.taskDetail.worktreeRefindFailed": "워크트리 조회 실패",
   "board.taskDetail.viewTerminal": "{name} 터미널 보기",
   "board.taskDetail.connect": "(연결)",
+  // 이 기기가 띄운 게 아닌 에이전트 — "(연결)" 대신 왜 안 보이는지 말한다.
+  "board.taskDetail.remoteUser": "(다른 팀원의 기기)",
+  "board.taskDetail.remoteMachine": "(다른 기기)",
   "board.taskDetail.edit": "수정",
   "board.taskDetail.titleLabel": "제목",
   "board.taskDetail.descriptionLabel": "설명",
