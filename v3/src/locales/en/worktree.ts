@@ -78,6 +78,11 @@ export const worktree: Record<keyof typeof koWorktree, string> = {
   "worktree.filtersEmptyHint":
     "The {count} loaded worktrees are still available. Reset filters to show them.",
   "worktree.resetFilters": "Reset filters",
+  // A fetch-side loss, not a filter one. Resetting filters cannot fix it, so
+  // this message must not blame them (ticket NHCsWfnp).
+  "worktree.unfetched":
+    "{missing} worktrees exist on disk but are not listed. This is not a filter — they could not be read from their repository, so resetting filters will not bring them back.",
+  "worktree.unfetchedRoots": "Unreadable repositories: {roots}",
 
   // Action result banners / confirms
   "worktree.msg.opened": "Opened {branch} worktree in the Code tab.",

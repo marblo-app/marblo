@@ -76,6 +76,11 @@ export const worktree = {
   "worktree.filtersEmptyHint":
     "불러온 워크트리 {count}개는 그대로 있습니다. 필터를 초기화해 표시하세요.",
   "worktree.resetFilters": "필터 초기화",
+  // 필터가 아니라 '가져오지 못한' 손실. 필터 초기화로는 해결되지 않으므로
+  // 원인을 필터로 지목하지 않는다(티켓 NHCsWfnp).
+  "worktree.unfetched":
+    "디스크에 있는 워크트리 {missing}개가 목록에 없습니다. 필터 때문이 아니라 저장소에서 읽어오지 못한 것이라, 필터를 초기화해도 나타나지 않습니다.",
+  "worktree.unfetchedRoots": "읽어오지 못한 저장소: {roots}",
 
   // Action result banners / confirms
   "worktree.msg.opened": "{branch} worktree를 Code 탭에 열었습니다.",

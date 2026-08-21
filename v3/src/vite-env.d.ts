@@ -878,6 +878,22 @@ interface WorktreeLightGroup {
   worktrees: { path: string; branch: string; head: string }[];
 }
 
+/**
+ * On-disk vs on-screen accounting from `worktree:coverage`. Lets the worktree
+ * tab distinguish "a filter hid these" from "these never arrived" instead of
+ * blaming filters for both (ticket NHCsWfnp).
+ */
+interface WorktreeCoverage {
+  projectId: string;
+  onDisk: number;
+  listed: number;
+  /** Real worktrees that never reached the renderer. */
+  missing: number;
+  /** Pool folders that are not worktrees — diagnosis only, never "missing". */
+  strayDirs: number;
+  unreachableRoots: string[];
+}
+
 interface WorktreeMergeArgs {
   repoRoot: string;
   path: string;
@@ -899,6 +915,8 @@ interface WorktreeAPI {
   list: () => Promise<WorktreeProjectGroup[]>;
   /** Enumeration without per-worktree git probes (~0.17s vs ~20s at 681). */
   listLight?: () => Promise<WorktreeLightGroup[]>;
+  /** Optional: absent on an older preload, so callers must tolerate undefined. */
+  coverage?: () => Promise<WorktreeCoverage[]>;
   refresh: () => Promise<WorktreeProjectGroup[]>;
   status: (path: string, baseRef: string) => Promise<WorktreeStatus>;
   remove: (

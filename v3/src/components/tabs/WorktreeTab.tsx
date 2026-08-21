@@ -37,6 +37,7 @@ import {
   WORKTREE_PROJECT_FILTER_ALL,
   WORKTREE_PROJECT_FILTER_LOADING,
 } from "./worktreeProjectFilter";
+import { selectUnfetchedNotice } from "./worktreeCoverageBanner";
 
 const TONE_CLASSES: Record<WorktreeStatusTone, string> = {
   danger: "bg-red-500/15 text-red-300 border border-red-500/30",
@@ -744,6 +745,11 @@ export function WorktreeTab() {
     {},
   );
   const fetchedRootsRef = useRef<Set<string>>(new Set());
+  // On-disk vs listed accounting. The filter banner below is computed from the
+  // IPC response and so can only ever explain losses that happened AFTER the
+  // fetch; this is the independent second number that explains losses which
+  // happened before it (ticket NHCsWfnp).
+  const [coverage, setCoverage] = useState<WorktreeCoverage[]>([]);
 
   const worktreeProjectIds = useMemo(
     () => Array.from(new Set(worktrees.map((wt) => wt.projectId))),
@@ -754,6 +760,24 @@ export function WorktreeTab() {
   useEffect(() => {
     refresh().catch(() => {});
   }, [refresh]);
+
+  // Coverage rides alongside every list result. It is advisory — a failure (or
+  // an older preload without the channel) just leaves the extra banner silent
+  // and never blocks or degrades the list itself.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const next = (await window.electronAPI.worktree.coverage?.()) ?? [];
+        if (!cancelled) setCoverage(next);
+      } catch {
+        if (!cancelled) setCoverage([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [worktrees]);
 
   // repoRoot 별 GitHub 리모트 base 를 lazily 채운다(중복 방지=fetchedRootsRef).
   useEffect(() => {
@@ -972,9 +996,14 @@ export function WorktreeTab() {
     !loading &&
     worktrees.length > 0 &&
     groups.length === 0;
-  const hiddenCount = worktrees.length - groups.reduce(
-    (count, [, items]) => count + items.length,
-    0,
+  const hiddenCount =
+    worktrees.length -
+    groups.reduce((count, [, items]) => count + items.length, 0);
+  // Losses that happened BEFORE the renderer saw anything — a different cause
+  // from hiddenCount, so it gets its own banner and no reset button.
+  const unfetched = useMemo(
+    () => selectUnfetchedNotice(coverage, projectFilter),
+    [coverage, projectFilter],
   );
   const resetFilters = () => {
     setProjectFilter(WORKTREE_PROJECT_FILTER_ALL);
@@ -1342,6 +1371,27 @@ export function WorktreeTab() {
       {actionMessage && (
         <div className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
           {actionMessage}
+        </div>
+      )}
+
+      {/*
+        Fetch-side loss. Deliberately separate from the filter banner below and
+        deliberately without a "reset filters" button: resetting would do
+        nothing, and saying "filters" would name the wrong cause (NHCsWfnp).
+      */}
+      {!loading && unfetched && !historyView && (
+        <div
+          role="status"
+          className="rounded border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100"
+        >
+          <div>{t("worktree.unfetched", { missing: unfetched.missing })}</div>
+          {unfetched.unreachableRoots.length > 0 && (
+            <div className="mt-1 break-all text-rose-200/80">
+              {t("worktree.unfetchedRoots", {
+                roots: unfetched.unreachableRoots.join(", "),
+              })}
+            </div>
+          )}
         </div>
       )}
 

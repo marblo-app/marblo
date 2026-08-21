@@ -8,10 +8,44 @@ import type {
   WorktreeStatus,
 } from "./worktree-manager";
 import { classifyChangeType } from "./merge-features";
+import { discoverWorktreeRoots } from "./worktree-root-discovery";
 
 export interface WorktreeProjectRoot {
   projectId: string;
   repoRoot: string;
+}
+
+/**
+ * On-disk vs on-screen accounting for one project, so the renderer can tell a
+ * filter problem apart from a fetch problem (ticket NHCsWfnp).
+ */
+export interface WorktreeCoverage {
+  projectId: string;
+  /** Directories in this project's worktree pool. */
+  onDisk: number;
+  /** Distinct worktree paths git reported across every enumerated root. */
+  listed: number;
+  /**
+   * Real worktrees (git ownership pointer present) that no listing reported.
+   * Nonzero means worktrees are missing for a reason a filter reset cannot fix.
+   */
+  missing: number;
+  /**
+   * Pool directories that are not worktrees at all (leftover folders). Reported
+   * for diagnosis only — never counted as missing worktrees.
+   */
+  strayDirs: number;
+  /** Owning clones that are gone, or that no project root enumerates. */
+  unreachableRoots: string[];
+}
+
+/** Resolve symlinks (macOS `/var` → `/private/var`) so path sets compare. */
+function realPathOrSelf(target: string): string {
+  try {
+    return fs.realpathSync(target);
+  } catch {
+    return target;
+  }
 }
 
 export interface WorktreeListItem extends WorktreeInfo {
@@ -340,11 +374,13 @@ export function registerWorktreeIpc(
   // is a notification, not a gate.
   onWorktreesRemoved?: (paths: string[]) => void,
 ): void {
-  const resolveShowCommitRepoRoot = (parsed: WorktreeShowCommitArgs): string => {
+  const resolveShowCommitRepoRoot = (
+    parsed: WorktreeShowCommitArgs,
+  ): string => {
     if (fs.existsSync(parsed.repoRoot)) return parsed.repoRoot;
 
     const roots = uniqueProjectRoots(getProjectRoots()).filter((root) =>
-      fs.existsSync(root.repoRoot)
+      fs.existsSync(root.repoRoot),
     );
     const projectRoot = parsed.projectId
       ? roots.find((root) => root.projectId === parsed.projectId)?.repoRoot
@@ -423,9 +459,72 @@ export function registerWorktreeIpc(
     );
   };
 
+  // How much of what is ON DISK actually reached the renderer.
+  //
+  // The worktree tab's "filters are hiding N" banner is computed from the IPC
+  // response, so it is structurally blind to anything the response never
+  // carried — it stayed silent through the entire NHCsWfnp outage, in which 74
+  // of 81 worktrees were missing for a reason that had nothing to do with
+  // filters. A banner that can only ever say "filters" would have to lie here.
+  // This gives the renderer the second, independent number so it can name the
+  // real cause instead.
+  const coverage = async (): Promise<WorktreeCoverage[]> => {
+    const roots = uniqueProjectRoots(getProjectRoots());
+    const byProject = new Map<string, string[]>();
+    for (const { projectId, repoRoot } of roots) {
+      byProject.set(projectId, [...(byProject.get(projectId) ?? []), repoRoot]);
+    }
+
+    return Promise.all(
+      Array.from(byProject.entries()).map(async ([projectId, repoRoots]) => {
+        const found = discoverWorktreeRoots(
+          worktreeManager.getWorktreesRoot(),
+          projectId,
+        );
+
+        // Paths git actually reported, across every root we enumerate.
+        const listed = new Set<string>();
+        for (const repoRoot of repoRoots) {
+          for (const worktree of await worktreeManager.list(repoRoot)) {
+            listed.add(worktree.path);
+          }
+        }
+
+        // An owner clone that is gone, or one nothing enumerates, cannot
+        // contribute its worktrees — name it so the cause is diagnosable.
+        const enumerated = new Set(repoRoots.map(realPathOrSelf));
+        const unreachableRoots = found.roots
+          .filter(
+            (root) =>
+              !root.exists || !enumerated.has(realPathOrSelf(root.repoRoot)),
+          )
+          .map((root) => root.repoRoot);
+
+        // Real worktrees — git's own ownership pointer says so — that no
+        // listing reported. Diffing against `owned` rather than against every
+        // pool directory keeps a stray leftover folder from being announced as
+        // a missing worktree, which would be a smaller version of the same lie
+        // this banner exists to avoid.
+        const missing = found.owned.filter(
+          (entry) => !listed.has(realPathOrSelf(entry.dir)),
+        ).length;
+
+        return {
+          projectId,
+          onDisk: found.onDiskCount,
+          listed: listed.size,
+          missing,
+          strayDirs: found.unresolved.length,
+          unreachableRoots,
+        };
+      }),
+    );
+  };
+
   ipcMain.handle("worktree:list", listWorktrees);
   ipcMain.handle("worktree:refresh", listWorktrees);
   ipcMain.handle("worktree:listLight", listWorktreesLight);
+  ipcMain.handle("worktree:coverage", coverage);
 
   ipcMain.handle("worktree:status", async (_event, args: unknown) => {
     const parsed = parseStatusArgs(args);
@@ -539,7 +638,7 @@ export function registerWorktreeIpc(
     const parsed = parseShowCommitArgs(args);
     const diff = await worktreeManager.showCommit(
       resolveShowCommitRepoRoot(parsed),
-      parsed.sha
+      parsed.sha,
     );
     return { ok: true, diff };
   });

@@ -179,6 +179,7 @@ import {
   type BuiltMissionEngine,
 } from "./mission-engine/wire";
 import { WorktreeManager } from "./worktree-manager";
+import { discoverWorktreeRoots } from "./worktree-root-discovery";
 import { WorktreeCoordinator } from "./worktree-coordinator";
 import {
   registerWorktreeIpc,
@@ -3350,6 +3351,26 @@ function collectWorktreeProjectRoots(): WorktreeProjectRoot[] {
   addRoot(state.lastProjectId, state.lastRootPath);
   for (const connection of listProjectConnections()) {
     addRoot(connection.projectId, connection.localPath);
+  }
+
+  // Every source above answers "where is this project bound NOW". None of them
+  // can answer "which clones actually own the worktrees in this project's
+  // pool" — and those diverge as soon as a project is re-bound to a second
+  // clone of the same repo. Ticket NHCsWfnp: 81 pool directories owned 74 / 7
+  // by two clones, only the bound one was ever listed, so the tab showed 7 and
+  // the other 74 were never fetched (not filtered — never fetched).
+  //
+  // Git's own per-worktree `gitdir:` pointer is the authoritative ownership
+  // record, so we read it back rather than guessing. `uniqueProjectRoots`
+  // already keys on projectId+repoRoot and `listWorktrees` maps over every
+  // root, so a second owner simply adds a group the renderer merges by
+  // projectId. A clone that no longer exists is skipped — enumerating it would
+  // only spawn a doomed git process; `worktree:coverage` reports it instead.
+  const worktreePool = worktreeManager.getWorktreesRoot();
+  for (const projectId of new Set(roots.map((root) => root.projectId))) {
+    for (const owner of discoverWorktreeRoots(worktreePool, projectId).roots) {
+      if (owner.exists) addRoot(projectId, owner.repoRoot);
+    }
   }
 
   return roots;

@@ -357,6 +357,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // Topology-only enumeration (no per-worktree status probes) — the cheap
     // freshness path for board cards / ticket modal (ticket yJgz7s03).
     listLight: () => ipcRenderer.invoke("worktree:listLight"),
+    // On-disk vs listed accounting, so the tab can tell "a filter hid these"
+    // apart from "these never arrived" (ticket NHCsWfnp).
+    coverage: () => ipcRenderer.invoke("worktree:coverage"),
     refresh: () => ipcRenderer.invoke("worktree:refresh"),
     status: (path: string, baseRef: string) =>
       ipcRenderer.invoke("worktree:status", { path, baseRef }),
