@@ -19,6 +19,7 @@ import { MissionEventForwarder } from "./event-forwarder";
 import { createConductorDriver, getMissionDriver } from "./conductor-driver";
 import { verifyStepGate } from "./gates";
 import { isImplicitMission } from "./types";
+import { chunkProjectIds } from "./mission-project-scope";
 
 // MissionEngine 팩토리 — main.ts wiring 진입점.
 //
@@ -46,6 +47,16 @@ export interface BuildMissionEngineDeps {
   ptyManager: PtyManager;
   bridgePort: () => number;
   dispatchOne: (params: DispatchTaskRequest) => DispatchTaskResponse;
+  /**
+   * 이 사용자가 멤버인 프로젝트 id 들 — missions 구독/조회의 스코프.
+   *
+   * ★missions 룰이 멤버 스코프가 되면서 필수가 됐다(티켓 Ciriq5ASEvAlA8TnKxhW).
+   *   예전엔 `where("status","==","planning")` 무스코프로 쐈고 룰이
+   *   `isAuthenticated()` 뿐이라 통과했지만, 지금 그 모양은 통째로 거부된다.
+   *   main.ts 가 `currentRealUserUid()` + projects(members array-contains)로
+   *   공급한다 — listAssistantTriggerProjects 와 같은 경로다.
+   */
+  memberProjectIds: () => Promise<readonly string[]>;
 }
 
 export interface BuiltMissionEngine {
@@ -148,22 +159,41 @@ export function buildMissionEngine(
     { driver: missionDriver, conductor },
   );
 
-  const forwarder = new MissionEventForwarder({ app, authReady, eventBus });
+  const forwarder = new MissionEventForwarder({
+    app,
+    authReady,
+    eventBus,
+    memberProjectIds: deps.memberProjectIds,
+  });
 
   // Planning 미션 픽업 — UI 가 status='planning' 으로 만들어 둔 미션을 engine.resume
   // 으로 이어 받는다. 1회 startup 조회 후 onSnapshot 으로 런타임 신규 mission 도 자동 픽업.
   // resume 은 inFlight set 으로 중복 호출 방지하므로 (initial getDocs + onSnapshot
   // added 이벤트가 동일 doc 으로 두 번 들어와도) 안전.
-  let planningUnsub: (() => void) | null = null;
+  // ★프로젝트 스코프 청크마다 구독이 하나씩 — missions 룰이 멤버 스코프라
+  //   `in` 상한(30) 때문에 프로젝트가 많으면 구독이 쪼개진다.
+  const planningUnsubs: Array<() => void> = [];
   const pickedUp = new Set<string>();
 
   async function pickupPlanningMissions(): Promise<void> {
     await authReady;
-    if (planningUnsub) return; // idempotent — 두 번 호출돼도 한 번만 구독
+    if (planningUnsubs.length > 0) return; // idempotent — 두 번 호출돼도 한 번만 구독
     try {
       const { getFirestore, collection, query, where, onSnapshot, getDocs } =
         await import("firebase/firestore");
       const db = getFirestore(app);
+
+      // ★프로젝트 스코프 — 룰이 멤버 스코프라 무스코프 쿼리는 거부된다.
+      //   스코프가 비면(로그인 전 등) 아무것도 하지 않는다. 거부될 쿼리를 쏘고
+      //   catch 로 삼키면 "미션이 없다"로 조용히 오인되는데, 그게 이 코드가
+      //   피해야 하는 실패 모드다(mcp-server/project-scope.ts 상단 참조).
+      const projectChunks = chunkProjectIds(await deps.memberProjectIds());
+      if (projectChunks.length === 0) {
+        console.log(
+          "[MissionEngine] planning pickup skipped — no member projects in scope",
+        );
+        return;
+      }
 
       // 1회성 in-flight 복구 — 앱이 꺼질 때 active/sleeping 이던 미션을 이어서
       // 진행한다. recoverInFlight 가 step type 별로 안전 처리(gstack 재실행 /
@@ -171,10 +201,18 @@ export function buildMissionEngine(
       // 아래 구독이 처리하므로 제외, waiting_for_human 은 사용자 답 대기라 제외.
       for (const status of ["active", "sleeping"] as const) {
         try {
-          const snap = await getDocs(
-            query(collection(db, "missions"), where("status", "==", status)),
+          const snaps = await Promise.all(
+            projectChunks.map((projectIds) =>
+              getDocs(
+                query(
+                  collection(db, "missions"),
+                  where("projectId", "in", projectIds),
+                  where("status", "==", status),
+                ),
+              ),
+            ),
           );
-          for (const d of snap.docs) {
+          for (const d of snaps.flatMap((snap) => snap.docs)) {
             if (pickedUp.has(d.id)) continue;
             // ★암묵적 미션(오케가 ad-hoc 배치에 붙인 Replay 라벨)은 실행 계획이
             // 없다(steps=[]). 엔진이 이어받으면 0-스텝 미션을 헛돌린다.
@@ -200,11 +238,13 @@ export function buildMissionEngine(
         }
       }
 
+      for (const projectIds of projectChunks) {
       const q = query(
         collection(db, "missions"),
+        where("projectId", "in", projectIds),
         where("status", "==", "planning"),
       );
-      planningUnsub = onSnapshot(
+      planningUnsubs.push(onSnapshot(
         q,
         (snap) => {
           console.log(
@@ -233,8 +273,11 @@ export function buildMissionEngine(
           }
         },
         (err) => console.warn("[MissionEngine] planning subscribe error:", err),
+      ));
+      }
+      console.log(
+        `[MissionEngine] planning subscription started (${projectChunks.length} project chunk(s))`,
       );
-      console.log("[MissionEngine] planning subscription started");
     } catch (err) {
       console.warn("[MissionEngine] planning pickup setup failed:", err);
     }
@@ -258,10 +301,14 @@ export function buildMissionEngine(
   }
 
   function dispose(): void {
-    if (planningUnsub) {
-      planningUnsub();
-      planningUnsub = null;
+    for (const unsub of planningUnsubs) {
+      try {
+        unsub();
+      } catch {
+        /* best-effort */
+      }
     }
+    planningUnsubs.length = 0;
     forwarder.stop();
     engine.dispose();
   }

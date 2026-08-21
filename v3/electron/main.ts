@@ -3247,6 +3247,35 @@ async function listAssistantTriggerProjects(): Promise<
   return projects;
 }
 
+/**
+ * 이 사용자가 멤버인 프로젝트 id 들 — 미션 엔진의 Firestore 구독 스코프.
+ *
+ * ★missions 룰이 멤버 스코프로 바뀌면서 필요해졌다(티켓 Ciriq5ASEvAlA8TnKxhW).
+ *   엔진은 예전에 `where("status","==","planning")` 무스코프 쿼리를 쐈고 룰이
+ *   `isAuthenticated()` 뿐이라 통과했다. 지금은 통째로 거부되므로 projectId 를
+ *   고정해야 한다("security rules are not filters").
+ *
+ * 실사용자로 로그인돼 있지 않으면 빈 배열 — 익명 uid 로는 어차피 어떤 프로젝트
+ * 문서도 읽을 수 없고, 호출부는 빈 스코프에서 구독을 건너뛴다.
+ * (listAssistantTriggerProjects 와 동일한 경로/전제다.)
+ */
+async function listMemberProjectIds(): Promise<string[]> {
+  const uid = currentRealUserUid();
+  if (!uid) return [];
+  const { app: fbApp, authReady } = getMissionFirebaseApp();
+  await authReady;
+  const db = getFirestore(fbApp);
+  const snap = await fbGetDocs(
+    fbQuery(
+      fbCollection(db, "projects"),
+      fbWhere("members", "array-contains", uid)
+    )
+  );
+  const ids: string[] = [];
+  snap.forEach((docSnap) => ids.push(docSnap.id));
+  return ids;
+}
+
 function logTelegramRouteHealth(projectId: string, reason: string): void {
   const health = telegramPoller.getRouteHealth(projectId);
   const target = health.lastDeliveredTarget;
@@ -3871,6 +3900,7 @@ if (missionsEnabled)
     createOrchestratorInstance: createMissionOrchestratorInstance,
     ensureOrchestratorLaunched: (projectId, missionId) =>
       ensureMissionOrchestratorLaunched(projectId, undefined, missionId),
+    memberProjectIds: listMemberProjectIds,
     notifier: notifyMissionNeedsInput,
     ptyManager,
     bridgePort: () => bridgeServer.getPort(),
@@ -5291,6 +5321,22 @@ ipcMain.handle(
       // 있는 첫 시점이다(익명 세션에선 콜러블이 거부한다). 여기서 한 번 당겨
       // 두면 첫 폴부터 캡처가 붙고, 스풀에 남아 있던 이전 세션분도 함께 나간다.
       void refreshTrainingCapture().catch(() => undefined);
+      // ★미션 엔진 구독 재동기화 (티켓 Ciriq5ASEvAlA8TnKxhW).
+      //   missions 룰이 멤버 스코프가 된 뒤로 엔진 구독은 "내가 멤버인 프로젝트"
+      //   목록을 필요로 한다. startup 이 로그인보다 먼저 돌면 그 목록이 비어
+      //   구독을 건너뛰므로(=거부될 쿼리를 안 쏜다), 실사용자 인증이 성립한
+      //   지금 다시 건다. pickupPlanningMissions 는 구독이 없을 때만 동작하는
+      //   멱등 함수라 이미 붙어 있으면 no-op 이다. fail-soft.
+      if (missionBundle) {
+        void (async () => {
+          try {
+            await missionBundle.forwarder.resync();
+            await missionBundle.pickupPlanningMissions();
+          } catch (err) {
+            console.error("[Main] mission engine resync failed:", err);
+          }
+        })();
+      }
     }
     return result;
   }

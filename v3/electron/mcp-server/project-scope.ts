@@ -34,9 +34,13 @@
  * 여기 없는 것들과 그 이유:
  *   - activities  : read 룰이 `isTaskProjectMember(resource.data.taskId)` — 쿼리가
  *                   taskId 를 고정하므로 그 자체로 증명된다.
- *   - missions    : read 룰이 isAuthenticated() 뿐(한시 완화 상태).
- *   - cost_logs   : read 룰이 isAuthenticated() 뿐.
  *   - projects    : projectId 필드가 아니라 members/ownerId 를 본다(별도 규율).
+ *
+ * ★missions / cost_logs 는 원래 "read 룰이 isAuthenticated() 뿐"이라 이 목록에서
+ *   빠져 있었다. 티켓 Ciriq5ASEvAlA8TnKxhW 가 그 룰을 크로스테넌트 구멍으로 보고
+ *   `canReadProjectScopedDoc()`(= isProjectMember) 으로 조였으므로 이제 여기 속한다.
+ *   같은 티켓에서 mission-engine 의 무스코프 구독도 함께 스코프했다
+ *   (electron/mission-engine/mission-project-scope.ts).
  */
 export const PROJECT_SCOPED_COLLECTIONS: readonly string[] = [
   "tasks",
@@ -50,6 +54,8 @@ export const PROJECT_SCOPED_COLLECTIONS: readonly string[] = [
   "telemetry_events",
   "projectAuditLog",
   "publicReplayOwners",
+  "missions",
+  "cost_logs",
 ];
 
 const SCOPED = new Set(PROJECT_SCOPED_COLLECTIONS);

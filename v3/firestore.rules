@@ -96,6 +96,21 @@ service cloud.firestore {
         );
     }
 
+    // 프로젝트 귀속 문서의 공통 read 게이트 — 테넌트 경계 (티켓 Ciriq5ASEvAlA8TnKxhW).
+    //
+    // canReadLedgerDoc() 과 **일부러 다르다**: 저쪽은 projectId=="" 를 플랫폼
+    // admin 에게 연다. 그 예외는 "감사 이벤트가 유실됐다"는 기록 자체를 살리기
+    // 위한 것이라, 유실 가시성 요구가 없는 컬렉션에 그대로 복사하면 admin 을
+    // 만능 백도어로 넓히기만 한다. 그래서 여기는 예외 없이 fail-closed 다 —
+    // 귀속할 테넌트가 없는 문서(projectId 부재/공백)는 아무도 못 읽는다.
+    //
+    // .get('projectId', '') 로 필드 부재(구/손상 문서)도 ""(=거부)로 처리한다.
+    function canReadProjectScopedDoc() {
+      return isAuthenticated()
+        && resource.data.get('projectId', '') != ''
+        && isProjectMember(resource.data.projectId);
+    }
+
     // ===== Users =====
     match /users/{userId} {
       allow read: if isAuthenticated();
@@ -388,29 +403,61 @@ service cloud.firestore {
     }
 
     // ===== Missions (Phase 3) =====
-    // 현재 룰: tasks / agents 패턴과 동일하게 isAuthenticated 만 검사.
     //
-    // 한시 완화 이유 (Step 5b, 2026-05-13):
-    //   MissionEngine 이 Electron main process 안에서 자체 firebase app
-    //   (anonymous auth) 으로 missions doc 을 read/update 한다.
-    //   isProjectMember 강제 시 main 의 anon uid 가 project.members 에 없어
-    //   engine 의 write 가 전부 실패한다.
+    // ★read 테넌트 경계 (티켓 Ciriq5ASEvAlA8TnKxhW):
+    //   이전엔 `allow read: if isAuthenticated()` 라 **로그인만 하면 남의 테넌트
+    //   미션이 통째로 읽혔다** — 프로젝트 멤버십을 보지도 않았다. 원장 계열은
+    //   #L2(#540)에서 닫혔는데 이 컬렉션만 남아 있었다.
     //
-    // v3.1 hardening 에서 다시 좁힐 계획:
-    //   1. Renderer 가 user id token 을 IPC 로 main 에 전달.
-    //   2. Main 이 signInWithCustomToken (Cloud Function 발급) 로 갈아끼움.
-    //   3. 동시에 tasks / agents 도 isProjectMember 강제로 일괄 hardening.
-    // 자세한 내용: v3/docs/MISSIONS-PROGRESS.md 보안 critical 체크리스트.
+    //   여기 있던 "한시 완화" 주석은 MissionEngine 이 main process 에서 **익명
+    //   auth** 로 붙기 때문에 멤버 스코프를 걸면 죽는다는 것이었고, 해소 계획으로
+    //   ①렌더러가 id 토큰을 IPC 로 전달 ②main 이 signInWithCustomToken 으로 교체
+    //   를 적어 뒀다. ★그 ①②는 이미 구현돼 있다 — 주석만 남아 있었다:
+    //     - electron/mission-engine/firebase-app.ts : MARBLO_FIREBASE_CUSTOM_TOKEN
+    //       우선, 없을 때만 익명 베이스라인
+    //     - electron/firebase-auth-sync.ts syncAgentCustomToken ← main.ts IPC
+    //       ← AuthProvider 가 로그인·onAuthStateChanged·onIdTokenChanged 마다
+    //       재동기화(재시도 포함)
+    //     - electron/mcp-server/firebase.ts : 익명 폴백을 아예 하지 않는다
+    //   남는 익명 창은 "로그인 전" 뿐이고, 그 구간엔 정당하게 읽을 프로젝트
+    //   데이터가 없다. 그래서 완화를 유지할 근거가 없어졌다.
+    //
+    // ★list(쿼리) 주의 — 읽는 쪽이 반드시 지켜야 하는 규율:
+    //   Firestore 는 list 를 문서가 아니라 **쿼리 제약식**으로 판정한다
+    //   ("security rules are not filters"). projectId 동등조건이 없는 쿼리는
+    //   결과가 전부 내 프로젝트 문서여도 통째로 거부된다. 그래서 missions 를
+    //   electron/mcp-server/project-scope.ts 의 PROJECT_SCOPED_COLLECTIONS 에
+    //   함께 등록했다. 무스코프 쿼리를 쏘던 mission-engine 경로
+    //   (wire.ts / event-forwarder.ts)는 프로젝트별로 쪼개 발사한다.
+    //
+    // ★create/update/delete 는 이 티켓에서 건드리지 않는다(읽기 경로 전용).
+    //   즉 **쓰기 쪽 크로스테넌트 구멍은 아직 열려 있다** — 로그인한 외부인이
+    //   남의 미션을 update/delete 할 수 있다. 별건으로 보고했다. 여기서 같이
+    //   조이지 않는 이유는 쓰기 게이트가 main(익명 가능)·MCP·렌더러 세 주체의
+    //   실측을 더 요구하고, 그 조사 없이 조이면 엔진이 조용히 죽기 때문이다.
     match /missions/{missionId} {
-      allow read: if isAuthenticated();
+      allow read: if canReadProjectScopedDoc();
       allow create: if isAuthenticated();
       allow update: if isAuthenticated();
       allow delete: if isAuthenticated();
     }
 
     // ===== Cost Logs (Phase 3) =====
+    //
+    // ★read 테넌트 경계 (티켓 Ciriq5ASEvAlA8TnKxhW): missions 와 같은 구멍이었다
+    //   — `isAuthenticated()` 만이라 로그인만 하면 남의 테넌트 비용이 읽혔다.
+    //
+    // ★실측: 이 **Firestore** 컬렉션을 읽거나 쓰는 코드 경로는 현재 0건이다.
+    //   코드베이스의 `cost_logs` 는 전부 **BigQuery 테이블**이고
+    //   (functions/src/index.ts 의 BQ_COST_TABLE, analytics 계열), 사용량은
+    //   렌더러 choke → functions → BigQuery 로 간다. harness-quota.ts 가 말하는
+    //   "cost_logs 로컬 거울"도 Firestore 가 아니라 usage-rollup.ts 의 로컬 파일이다.
+    //   → 조여도 깨질 정당한 읽기가 없다. 다만 firestore.indexes.json 에
+    //     cost_logs(projectId, createdAt) 인덱스가 남아 있어 잔존 문서가 있을 수
+    //     있으므로, 그 문서가 로그인만으로 읽히던 것을 닫는다.
+    //   telemetry_events 를 "쓰는 코드가 없어도 닫는다"고 판단한 것과 같은 결이다.
     match /cost_logs/{logId} {
-      allow read: if isAuthenticated();
+      allow read: if canReadProjectScopedDoc();
       allow create: if isAuthenticated();
       allow update: if false;
       allow delete: if false;
@@ -441,6 +488,33 @@ service cloud.firestore {
     // 프로젝트 멤버(정상 레코드) / 플랫폼 admin(projectId="" 유실 마커)만 읽게
     // 조인다. create/update(L1.6 멱등 재시도)/delete 는 건드리지 않는다 —
     // update 규칙을 되돌리면 스풀 고착(L1.6 회귀)이 되살아난다.
+    // ★`params` 노출 범위 — 유지한다. 근거 (티켓 Ciriq5ASEvAlA8TnKxhW):
+    //
+    //   문제는 실재한다. `params` 는 툴 인자 **원문**이라 지시문·경로·자격증명이
+    //   섞일 수 있는데(ledger.ts 가 `params: input.params` 로 그대로 쓴다 —
+    //   대조적으로 `instruction` 은 instructionHash + instructionRedacted 로 이미
+    //   해시·스크럽된다), read 게이트는 `isProjectMember` 라 **프로젝트 멤버 누구나
+    //   직접 쿼리로 원문을 읽는다.** 감사 콜러블이 아무리 잘 걸러도 클라이언트가
+    //   원본을 직접 읽으면 소용없다 — "멤버가 남의 이력을 못 본다"는 콜러블
+    //   수준에서만 참이고 플랫폼 수준에선 거짓이다.
+    //
+    //   그런데 **룰로는 못 고친다.** Firestore 에는 필드 단위 read 게이팅이 없다.
+    //   컬렉션을 통째로 owner/admin 으로 조이는 선택지는 있지만 그러면
+    //   ActivityStreamPanel(일반 멤버의 액티비티 스트림)이 통째로 죽는다 —
+    //   projectAuditLog 블록 주석이 설명하는 바로 그 트레이드오프이고, 이 티켓의
+    //   완료 기준은 "앱 기존 경로 회귀 0" 이다. 한 컬렉션을 필드별로 다른 등급으로
+    //   게이팅하는 것도 불가하다(쿼리 결과의 모든 문서가 통과해야 쿼리가 허용됨 —
+    //   #406/#428 에서 겪은 실패 모드).
+    //
+    //   ★그래서 올바른 수정 지점은 read 룰이 아니라 **write 쪽**이다: `instruction`
+    //   이 이미 하고 있듯 `params` 를 기록 시점에 스크럽/화이트리스트하면 원문이
+    //   애초에 원장에 남지 않는다. 그건 이 티켓의 범위 밖(읽기 경로 전용)이라
+    //   손대지 않고 별건으로 보고한다. 여기서 어설프게 조이면 회귀만 만들고
+    //   원문은 여전히 문서 안에 남는다 — 노출 범위를 줄인 것처럼 보이지만
+    //   실제로는 아무것도 못 지운다.
+    //
+    //   현 상태의 정확한 서술: `params` 원문은 **프로젝트 멤버 경계까지** 노출된다.
+    //   크로스테넌트는 닫혀 있고(L2), 프로젝트 내부에서는 열려 있다.
     match /audit_logs/{logId} {
       allow read: if canReadLedgerDoc();
       allow create: if isAuthenticated();

@@ -11,6 +11,7 @@ import {
 import type { MissionEventBus } from "./ports";
 import { getMissionDriver } from "./conductor-driver";
 import { isImplicitMission } from "./types";
+import { chunkProjectIds } from "./mission-project-scope";
 
 // Wait-step wakeup 메커니즘.
 // MissionEngine 은 wait step 진입 시 sleeping 으로 전환되고, eventBus 에 들어오는
@@ -26,6 +27,11 @@ import { isImplicitMission } from "./types";
 //
 // 주의:
 //   - tasks 룰은 isAuthenticated 만 검사하므로 main 의 anon auth 로 동작.
+//   - ★missions 룰은 멤버 스코프다(티켓 Ciriq5ASEvAlA8TnKxhW). 그래서 (1)의
+//     구독은 `where(projectId,in,내 멤버 프로젝트들)` 로 스코프해야 한다 —
+//     예전의 무스코프 status 쿼리는 이제 통째로 거부된다. 프로젝트가 30개를
+//     넘으면 `in` 상한 때문에 구독이 여러 개로 쪼개지므로, 스냅샷을 청크별로
+//     보관했다가 합쳐서 활성 미션 집합을 만든다(mergeChunkDocs).
 //   - dispatcher-impl 가 task doc 에 `missionId` 필드를 함께 쓴다 (Step 5b 도입).
 //     fix-runner-impl 도 동일.
 
@@ -83,7 +89,16 @@ export interface MissionEventForwarderDeps {
   authReady?: Promise<void>;
   eventBus: MissionEventBus;
   logger?: (msg: string, meta?: Record<string, unknown>) => void;
+  /**
+   * 이 사용자가 멤버인 프로젝트 id 들. missions 구독의 스코프이자, 룰이 허용하는
+   * 범위 그 자체다. 빈 배열이면 구독하지 않는다 — 로그인 전/비멤버 상태에서
+   * 거부될 게 뻔한 쿼리를 쏘지 않기 위해서다.
+   */
+  memberProjectIds: () => Promise<readonly string[]>;
 }
+
+/** 청크별 미션 스냅샷 한 장. */
+type MissionDocLike = { id: string; data(): Record<string, unknown> };
 
 export class MissionEventForwarder {
   private db: Firestore;
@@ -91,7 +106,11 @@ export class MissionEventForwarder {
   private eventBus: MissionEventBus;
   private log: (msg: string, meta?: Record<string, unknown>) => void;
 
-  private missionsUnsub: Unsubscribe | null = null;
+  private memberProjectIds: () => Promise<readonly string[]>;
+  private missionsUnsubs: Unsubscribe[] = [];
+  // 청크 index → 그 구독이 마지막으로 본 문서들. 구독이 여러 개일 때 한 청크의
+  // 스냅샷이 다른 청크의 미션을 지우지 않도록 **합쳐서** 활성 집합을 만든다.
+  private chunkDocs: Map<number, readonly MissionDocLike[]> = new Map();
   // projectId → unsubscribe of that project's tasks listener
   private tasksUnsubs: Map<string, Unsubscribe> = new Map();
   // missionId → projectId (snapshot of current active missions)
@@ -107,6 +126,7 @@ export class MissionEventForwarder {
     this.db = getFirestore(deps.app);
     this.ready = deps.authReady ?? Promise.resolve();
     this.eventBus = deps.eventBus;
+    this.memberProjectIds = deps.memberProjectIds;
     this.log =
       deps.logger ??
       ((m, meta) => console.log(`[MissionEventForwarder] ${m}`, meta ?? ""));
@@ -114,18 +134,54 @@ export class MissionEventForwarder {
 
   async start(): Promise<void> {
     await this.ready;
-    if (this.missionsUnsub) return;
+    if (this.missionsUnsubs.length > 0) return;
 
-    const q = query(
-      collection(this.db, "missions"),
-      where("status", "in", ACTIVE_STATUSES),
-    );
-    this.missionsUnsub = onSnapshot(
-      q,
-      (snap) => this.handleMissionsSnapshot(snap.docs),
-      (err) => this.log("missions subscribe error", { err: String(err) }),
-    );
-    this.log("started");
+    const chunks = chunkProjectIds(await this.memberProjectIds());
+    if (chunks.length === 0) {
+      // 스코프가 비면 구독하지 않는다. 무스코프로 쏘면 룰에 거부되고(그건 곧
+      // "미션이 없다"로 오인된다), 빈 배열을 `in` 에 주면 SDK 가 던진다.
+      this.log("missions subscribe skipped — no member projects in scope");
+      return;
+    }
+
+    chunks.forEach((projectIds, index) => {
+      const q = query(
+        collection(this.db, "missions"),
+        where("projectId", "in", projectIds),
+        where("status", "in", ACTIVE_STATUSES),
+      );
+      this.missionsUnsubs.push(
+        onSnapshot(
+          q,
+          (snap) => {
+            this.chunkDocs.set(index, snap.docs);
+            this.handleMissionsSnapshot(this.mergeChunkDocs());
+          },
+          (err) =>
+            this.log("missions subscribe error", {
+              err: String(err),
+              chunk: index,
+            }),
+        ),
+      );
+    });
+    this.log("started", { projectChunks: chunks.length });
+  }
+
+  /** 모든 청크 구독의 최신 스냅샷을 하나의 문서 목록으로 합친다. */
+  private mergeChunkDocs(): MissionDocLike[] {
+    const merged: MissionDocLike[] = [];
+    for (const docs of this.chunkDocs.values()) merged.push(...docs);
+    return merged;
+  }
+
+  /**
+   * 멤버 프로젝트 집합이 바뀌었을 때(로그인/프로젝트 참여) 구독을 다시 건다.
+   * stop() 이 청크 스냅샷까지 비우므로 재구독 후 첫 스냅샷으로 상태가 재구성된다.
+   */
+  async resync(): Promise<void> {
+    this.stop();
+    await this.start();
   }
 
   /** 현재 활성 (non-terminal) 미션 ID 목록 — 즉시 broadcast 용. */
@@ -134,10 +190,15 @@ export class MissionEventForwarder {
   }
 
   stop(): void {
-    if (this.missionsUnsub) {
-      this.missionsUnsub();
-      this.missionsUnsub = null;
+    for (const unsub of this.missionsUnsubs) {
+      try {
+        unsub();
+      } catch {
+        /* best-effort */
+      }
     }
+    this.missionsUnsubs = [];
+    this.chunkDocs.clear();
     for (const unsub of this.tasksUnsubs.values()) {
       try {
         unsub();

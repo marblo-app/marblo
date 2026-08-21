@@ -388,6 +388,57 @@ beforeEach(async () => {
       createdAt: new Date(),
     });
 
+    // missions: 우리 프로젝트 / 타 테넌트 / projectId 없는 손상 문서.
+    // ★이 셋이 크로스테넌트 티켓(Ciriq5ASEvAlA8TnKxhW)의 관측 대상이다 — 옛 룰은
+    //   `allow read: if isAuthenticated()` 라 로그인만 하면 셋 다 읽혔다.
+    await setDoc(doc(db, "missions", "mission-ours"), {
+      projectId: PROJECT_ID,
+      status: "active",
+      goal: "our mission",
+      taskIds: [],
+      lastActivityAt: new Date(),
+    });
+    await setDoc(doc(db, "missions", "mission-other-tenant"), {
+      projectId: OTHER_PROJECT_ID,
+      status: "planning",
+      goal: "other tenant mission",
+      taskIds: [],
+      lastActivityAt: new Date(),
+    });
+    // projectId 필드가 아예 없는 구/손상 문서 — 귀속할 테넌트가 없으므로
+    // 아무도 못 읽어야 한다(fail-closed). projection.ts 가 이미 이 경우를
+    // "스코프 쿼리를 만들 수 없다"며 건너뛴다.
+    await setDoc(doc(db, "missions", "mission-legacy-no-project"), {
+      status: "active",
+      goal: "legacy mission without projectId",
+      taskIds: [],
+      lastActivityAt: new Date(),
+    });
+
+    // cost_logs: 우리 프로젝트 / 타 테넌트 / projectId 없는 구 문서.
+    // ★살아 있는 Firestore 읽기 경로는 0건이다(코드베이스의 cost_logs 는 전부
+    //   BigQuery 테이블). 그래도 잔존 문서가 로그인만으로 읽히던 구멍이라 닫는다.
+    await setDoc(doc(db, "cost_logs", "cost-ours"), {
+      projectId: PROJECT_ID,
+      userId: MEMBER_ID,
+      model: "test-model",
+      totalCost: 0.01,
+      createdAt: new Date(),
+    });
+    await setDoc(doc(db, "cost_logs", "cost-other-tenant"), {
+      projectId: OTHER_PROJECT_ID,
+      userId: OUTSIDER_ID,
+      model: "test-model",
+      totalCost: 9.99,
+      createdAt: new Date(),
+    });
+    await setDoc(doc(db, "cost_logs", "cost-legacy-no-project"), {
+      userId: OUTSIDER_ID,
+      model: "test-model",
+      totalCost: 1.23,
+      createdAt: new Date(),
+    });
+
     // telemetry_events: 우리 프로젝트 / 타 테넌트
     await setDoc(doc(db, "telemetry_events", "telemetry-ours"), {
       projectId: PROJECT_ID,
@@ -2510,6 +2561,175 @@ describe("audit_logs — L2 read 스코프", () => {
   it("미인증 사용자는 감사로그를 읽을 수 없다", async () => {
     const db = unauthContext().firestore();
     await assertFails(getDoc(doc(db, "audit_logs", "audit-ours")));
+  });
+});
+
+// ===== missions / cost_logs 크로스테넌트 격리 (티켓 Ciriq5ASEvAlA8TnKxhW) =====
+//
+// 옛 룰은 둘 다 `allow read: if isAuthenticated()` 였다 — 로그인만 하면 남의
+// 테넌트 미션·비용로그를 읽었고 프로젝트 멤버십은 보지도 않았다. 원장 계열은
+// #L2 에서 닫혔는데 이 둘만 남아 있었다.
+//
+// ★가드 실효성: 아래 "타 테넌트/외부인 읽기 거부" 테스트는 **옛 룰에서 읽기가
+//   허용돼 assertFails 가 실패**하고 새 룰에서만 통과한다. 즉 구멍을 실제로
+//   막는지 증명한다. 반대로 "정당한 읽기 통과" 테스트들은 룰을 과하게 조여
+//   앱을 죽이지 않았음을 증명한다 — 이 티켓은 양쪽을 다 못박아야 한다.
+
+describe("missions — 크로스테넌트 read 격리", () => {
+  it("프로젝트 멤버는 자기 프로젝트 미션을 읽을 수 있다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "missions", "mission-ours")));
+  });
+
+  it("★멤버라도 타 테넌트 미션은 읽을 수 없다 (옛 룰에선 뚫렸음)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "missions", "mission-other-tenant")));
+  });
+
+  it("★외부인은 우리 미션을 읽을 수 없다 (옛 룰에선 로그인만으로 뚫렸음)", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "missions", "mission-ours")));
+  });
+
+  it("미인증 사용자는 미션을 읽을 수 없다", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(getDoc(doc(db, "missions", "mission-ours")));
+  });
+
+  it("★projectId 없는 손상 미션은 아무도 못 읽는다 (fail-closed)", async () => {
+    // 원장(canReadLedgerDoc)과 다른 점: 저기선 projectId="" 가 '유실의 기록'
+    // 이라 플랫폼 admin 에게 열어야 했지만, 미션엔 그런 요구가 없다. 귀속할
+    // 테넌트가 없는 문서는 그냥 아무도 못 읽는 게 맞다.
+    const member = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(getDoc(doc(member, "missions", "mission-legacy-no-project")));
+    const admin = adminContext().firestore();
+    await assertFails(getDoc(doc(admin, "missions", "mission-legacy-no-project")));
+  });
+
+  // ── 정당한 읽기 경로가 살아 있는지 (회귀 0 증명) ──────────────────────────
+  //
+  // "security rules are not filters" — list 는 쿼리 제약식만으로 룰이 증명돼야
+  // 한다. 아래 두 테스트가 electron/mcp-server/project-scope.ts 의 규율이
+  // missions 에도 적용돼야 하는 이유의 실측 근거다.
+
+  it("★projectId 스코프 쿼리는 통과한다 — missionService/main.ts/tools.ts 실경로", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      getDocs(
+        query(collection(db, "missions"), where("projectId", "==", PROJECT_ID)),
+      ),
+    );
+  });
+
+  it("★projectId + implicitLabel 복합 스코프 쿼리도 통과한다 — resolveImplicitMissionId 실경로", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      getDocs(
+        query(
+          collection(db, "missions"),
+          where("projectId", "==", PROJECT_ID),
+          where("implicitLabel", "==", "some-label"),
+        ),
+      ),
+    );
+  });
+
+  it("★무스코프 status 쿼리는 거부된다 — mission-engine 이 스코프돼야 하는 이유", async () => {
+    // wire.ts / event-forwarder.ts 가 쓰던 모양. 결과가 전부 내 프로젝트여도
+    // 룰은 쿼리 제약식만 보므로 통째로 거부된다.
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      getDocs(
+        query(collection(db, "missions"), where("status", "==", "active")),
+      ),
+    );
+  });
+
+  it("★타 테넌트를 겨냥한 스코프 쿼리는 거부된다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      getDocs(
+        query(
+          collection(db, "missions"),
+          where("projectId", "==", OTHER_PROJECT_ID),
+        ),
+      ),
+    );
+  });
+});
+
+// ★mission-engine 이 의존하는 계약 — 실측으로 정한 것이다(추론 아님).
+//
+// wire.ts / event-forwarder.ts 는 원래 무스코프 status 쿼리를 쐈고, 멤버 스코프
+// 룰에서는 그게 통째로 거부된다(위 "무스코프 status 쿼리는 거부된다" 참조).
+// 프로젝트마다 쿼리를 쪼개는 대신 `in` 한 방으로 덮을 수 있는지를 에뮬레이터로
+// 재 본 결과가 아래다. 통과하므로 엔진은 `where(projectId,in,내프로젝트들)` 로
+// 고친다 — 구독 개수가 프로젝트 수만큼 늘지 않는다.
+//
+// ★이 describe 가 깨지면 엔진 쿼리 모양을 되돌려야 한다는 신호다.
+describe("missions — in-스코프 쿼리 계약 (mission-engine 이 의존)", () => {
+  it("★where(projectId,in,[내프로젝트]) 는 통과한다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      getDocs(query(collection(db, "missions"), where("projectId", "in", [PROJECT_ID]))),
+    );
+  });
+  it("★in-스코프 + status 동등조건 조합도 통과한다 — 엔진이 실제로 쏘는 모양", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      getDocs(query(collection(db, "missions"),
+        where("projectId", "in", [PROJECT_ID]), where("status", "==", "active"))),
+    );
+  });
+  it("★in 목록에 남의 프로젝트가 섞이면 통째로 거부된다 (경계가 실재한다)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      getDocs(query(collection(db, "missions"),
+        where("projectId", "in", [PROJECT_ID, OTHER_PROJECT_ID]))),
+    );
+  });
+});
+
+describe("cost_logs — 크로스테넌트 read 격리", () => {
+  it("프로젝트 멤버는 자기 프로젝트 비용로그를 읽을 수 있다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "cost_logs", "cost-ours")));
+  });
+
+  it("★멤버라도 타 테넌트 비용로그는 읽을 수 없다 (옛 룰에선 뚫렸음)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "cost_logs", "cost-other-tenant")));
+  });
+
+  it("★외부인은 우리 비용로그를 읽을 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "cost_logs", "cost-ours")));
+  });
+
+  it("미인증 사용자는 비용로그를 읽을 수 없다", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(getDoc(doc(db, "cost_logs", "cost-ours")));
+  });
+
+  it("★projectId 없는 구 비용로그는 아무도 못 읽는다 (fail-closed)", async () => {
+    const member = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(getDoc(doc(member, "cost_logs", "cost-legacy-no-project")));
+    const admin = adminContext().firestore();
+    await assertFails(getDoc(doc(admin, "cost_logs", "cost-legacy-no-project")));
+  });
+
+  it("★projectId 스코프 쿼리는 통과한다 (인덱스가 전제하는 모양)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      getDocs(
+        query(collection(db, "cost_logs"), where("projectId", "==", PROJECT_ID)),
+      ),
+    );
+  });
+
+  it("★무스코프 전체 조회는 거부된다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(getDocs(query(collection(db, "cost_logs"))));
   });
 });
 

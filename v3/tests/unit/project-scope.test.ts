@@ -24,7 +24,6 @@ describe("requireProjectScope", () => {
 
   it("스코프 컬렉션이 아니면 null (projectId 조건을 붙이면 안 되는 경우)", () => {
     expect(requireProjectScope("activities", "", "op")).toBeNull();
-    expect(requireProjectScope("missions", undefined, "op")).toBeNull();
   });
 
   it("에러 메시지가 원인과 조치를 모두 말한다", () => {
@@ -49,10 +48,21 @@ describe("PROJECT_SCOPED_COLLECTIONS", () => {
     }
   });
 
-  it("taskId 로 증명되는 activities 와 룰이 열린 missions 는 제외한다", () => {
+  it("taskId 로 증명되는 activities 는 제외한다", () => {
     expect(isProjectScopedCollection("activities")).toBe(false);
-    expect(isProjectScopedCollection("missions")).toBe(false);
     expect(PROJECT_SCOPED_COLLECTIONS).not.toContain("activities");
+  });
+
+  // 티켓 Ciriq5ASEvAlA8TnKxhW — missions/cost_logs 의 read 룰이
+  // isAuthenticated() 에서 멤버 스코프로 조여졌으므로, 이제 쿼리에 projectId
+  // 동등조건이 필수다. 이 규율 목록이 룰과 어긋나면 무스코프 쿼리가 다시
+  // permission-denied 로 조용히 죽는다.
+  it("★멤버 스코프로 조여진 missions/cost_logs 를 포함한다", () => {
+    expect(isProjectScopedCollection("missions")).toBe(true);
+    expect(isProjectScopedCollection("cost_logs")).toBe(true);
+    expect(() => requireProjectScope("missions", undefined, "op")).toThrow(
+      MissingProjectScopeError,
+    );
   });
 });
 
