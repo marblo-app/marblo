@@ -2749,8 +2749,20 @@ function createOrchestratorInstance(projectId: string): OrchestratorManager {
   const orchestrator = new OrchestratorManager(
     ptyManager,
     agentManager.getConfigGenerator(),
-    (status) => {
+    (status, detail) => {
       refreshWorkPowerSaveBlocker();
+      // ★사유를 status 와 같은 봉투에 담는다. 예전엔 `{ status }` 만 실려 나가서
+      // 렌더러가 "멈췄다" 는 알아도 "왜" 를 알 길이 없었고, 사유는 main 의
+      // console.error 에만 남았다(F-4, ymRo9BtilQnb48Y5ol68).
+      //
+      // ★실리는 것은 **분류값뿐**이다 — `reason` 은 OrchestratorHaltReason 유니온의
+      // 리터럴, `model` 은 CLI id. PTY 원문은 이 경로로 나가지 않는다(그 규약의
+      // 근거는 orchestrator-manager 의 ORCHESTRATOR_HALT_REASONS 주석).
+      const payload = {
+        status,
+        ...(detail?.reason ? { reason: detail.reason } : {}),
+        ...(detail?.model ? { model: detail.model } : {}),
+      };
       // Route status to every window showing this project's orchestrator
       // (they share one instance, so they must all see the same status).
       // Broadcast as fallback when no owner is known (e.g., scratch instance
@@ -2758,10 +2770,10 @@ function createOrchestratorInstance(projectId: string): OrchestratorManager {
       const owners = orchestratorOwners.ownersOf(projectId);
       if (owners && owners.size > 0) {
         for (const ownerId of owners) {
-          sendToOwner(ownerId, "orchestrator:statusChanged", { status });
+          sendToOwner(ownerId, "orchestrator:statusChanged", payload);
         }
       } else {
-        broadcast("orchestrator:statusChanged", { status });
+        broadcast("orchestrator:statusChanged", payload);
       }
       // Mirror the agent listener policy: detach only on "stopped". "error"
       // can be transient (orchestrator-manager auto-restarts up to 3 times

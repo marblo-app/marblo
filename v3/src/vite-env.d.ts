@@ -400,7 +400,20 @@ interface OrchestratorSessionAPI {
     rootPath: string,
     projectId?: string
   ) => Promise<string | null>;
-  onStatusChange: (callback: (data: { status: string }) => void) => void;
+  /**
+   * 오케 상태 변화 구독 — **해제 함수를 돌려준다**(제네릭 off 는
+   * removeAllListeners 라 App.tsx 의 dev IPC 카운터를 같이 지운다).
+   *
+   * `reason` 은 main 이 분류한 정지 사유(`lib/orchestratorHalt` 가 해석한다),
+   * `model` 은 멈춘 하네스의 CLI id. ★PTY 원문은 이 봉투로 오지 않는다.
+   */
+  onStatusChange: (
+    callback: (data: {
+      status: string;
+      reason?: string;
+      model?: string;
+    }) => void
+  ) => () => void;
   onAgentSpawned: (
     callback: (data: {
       agentId: string;

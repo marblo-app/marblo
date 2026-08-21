@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { OrchestratorLaunchBlock } from "../lib/orchestratorLaunchBlock";
+import type { OrchestratorHalt } from "../lib/orchestratorHalt";
 
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 /**
@@ -301,6 +302,15 @@ interface OrchestratorState {
    * 인증 차단은 종전대로 CLI 설정 위저드가 받아가므로 여기 안 온다.
    */
   launchBlock: OrchestratorLaunchBlock | null;
+  /**
+   * **뜬 뒤에** 멈춘 사유(로그인 화면·첫 실행 다이얼로그·폴더 소실·크래시 루프).
+   *
+   * ★`launchBlock` 과 다른 축이다. 저건 스폰 **전** 게이트가 launch 반환값으로
+   * 동기로 주는 것이고, 이건 PTY 가 이미 뜬 뒤 main 이 IPC 로 밀어 주는 것이다.
+   * 둘을 한 필드에 합치면 "로그인 화면은 스폰 전엔 못 잡고 스폰 후엔 못 그린다"
+   * 는 지금 버그가 그대로 남는다 — 실제로 그 사각이 F-4 였다.
+   */
+  halt: OrchestratorHalt | null;
 
   setSession: (
     sessionId: string,
@@ -313,6 +323,18 @@ interface OrchestratorState {
   setSwitchStatus: (status: OrchestratorSwitchStatus) => void;
   setHandoffSummary: (summary: HandoffSummary | null) => void;
   setLaunchBlock: (block: OrchestratorLaunchBlock | null) => void;
+  setHalt: (halt: OrchestratorHalt | null) => void;
+  /**
+   * "launch 가 성공 반환했다" → running. ★단 main 이 이미 정지 사유를 보냈다면
+   * **무시한다.**
+   *
+   * launch 의 반환은 "PTY 를 띄웠다" 이지 "오케가 부팅됐다" 가 아니다. 실측
+   * (ymRo9BtilQnb48Y5ol68 시나리오 4)에서 codex 미인증은 스폰 **445ms** 에 이미
+   * error 였다 — 그 사이 IPC 가 먼저 도착하면, 뒤늦게 도는 `setStatus("running")`
+   * 이 사유를 덮어 화면을 다시 초록으로 만든다. 이 티켓의 버그를 경합으로 재현하는
+   * 정확한 경로라서, "running 으로 올린다" 는 조작 자체를 이 가드 안에 가둔다.
+   */
+  confirmLaunched: () => void;
   toggleCollapsed: () => void;
   clear: () => void;
 }
@@ -327,6 +349,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
   switchStatus: "idle",
   lastHandoffSummary: null,
   launchBlock: null,
+  halt: null,
 
   setSession: (sessionId, ptySessionId, model) =>
     set((state) => ({
@@ -336,9 +359,18 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
       runningModel: model ?? state.selectedModel,
       // 실제로 떴다 = 앞선 차단 안내는 이제 거짓이다.
       launchBlock: null,
+      // 같은 이유로 앞선 정지 사유도 거짓이다(재시작이 성공했다는 뜻).
+      halt: null,
     })),
 
-  setStatus: (status) => set({ status }),
+  // ★error 가 아닌 상태로 가면 정지 사유를 **여기서** 지운다. 사유를 지우는 책임을
+  // 호출부마다 흩으면 한 곳만 빠뜨려도 초록 점 옆에 "로그인이 필요합니다" 가 남는다
+  // — 이 티켓이 고치는 거짓말의 정확한 반대 방향이다.
+  setStatus: (status) =>
+    set((state) => ({
+      status,
+      halt: status === "error" ? state.halt : null,
+    })),
 
   setCollapsed: (collapsed) => set({ isCollapsed: collapsed }),
 
@@ -353,6 +385,10 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
 
   setLaunchBlock: (launchBlock) => set({ launchBlock }),
 
+  setHalt: (halt) => set({ halt }),
+
+  confirmLaunched: () => set((state) => (state.halt ? {} : { status: "running" })),
+
   toggleCollapsed: () => set({ isCollapsed: !get().isCollapsed }),
 
   clear: () =>
@@ -362,5 +398,6 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
       status: "stopped",
       runningModel: null,
       switchStatus: "idle",
+      halt: null,
     }),
 }));

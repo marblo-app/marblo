@@ -35,6 +35,45 @@ import {
 
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 
+/**
+ * 오케가 **왜** 멈췄나 — 렌더러로 나가는 유일한 사유 표현.
+ *
+ * ★PTY 원문은 이 축으로 절대 안 나간다. 나가는 것은 아래 유니온의 리터럴 하나와
+ * (있으면) 하네스 id 뿐이다. 이 프로젝트는 PTY 원문을 렌더러/로그 밖으로 내보내지
+ * 않는 규약이 있고, 사유 표시를 붙이면서 그 규약을 깨는 것이 가장 쉬운 실수다 —
+ * "화면에 사유를 띄우자" 는 요구를 `console.error` 문자열을 그대로 실어 보내는
+ * 것으로 만족시키면 로그인 화면에 찍힌 계정 이메일이나 경로가 그대로 새어 나간다.
+ * 그래서 사유는 **분류 결과**이고, 사람이 읽을 문장은 렌더러의 i18n 이 만든다.
+ *
+ *   needsAuth       — 로그인 화면이 확정됐다(백스톱 발화 / 홀드 중 로그인 화면).
+ *   firstRunDialog  — 첫 실행 다이얼로그(폴더 신뢰·테마 선택 등)가 떠 있는데
+ *                     답하는 주체가 없어 부팅 프롬프트를 못 보냈다.
+ *   rootPathMissing — 작업 폴더가 사라졌다(워크트리 삭제 등).
+ *   spawnFailed     — PTY 를 만들지도 못했다.
+ *   crashLoop       — 자동 재시작 예산을 다 썼다.
+ */
+export const ORCHESTRATOR_HALT_REASONS = [
+  "needsAuth",
+  "firstRunDialog",
+  "rootPathMissing",
+  "spawnFailed",
+  "crashLoop",
+] as const;
+
+export type OrchestratorHaltReason = (typeof ORCHESTRATOR_HALT_REASONS)[number];
+
+/** statusChanged 에 함께 실리는 분류 정보. 원문 금지(위 주석). */
+export interface OrchestratorStatusDetail {
+  reason?: OrchestratorHaltReason;
+  /**
+   * 멈춘 하네스의 **CLI id**("claude" / "codex" / "grok"). 문구가 "codex 로그인이
+   * 필요합니다" 처럼 무엇을 로그인해야 하는지 말하려면 이 축이 있어야 한다.
+   * 분류값이라 원문 규약에 걸리지 않는다. 모르면 생략한다(문구가 하네스 이름 없이
+   * 성립하도록 i18n 이 짜여 있다).
+   */
+  model?: string;
+}
+
 // --- Auto-restart constants ---
 // Codex 세션 소유권 마커. codex 는 concrete rollout id 로 resume 하지 않고
 // 격리 CODEX_HOME 의 `resume --last` 로만 이어가므로, orch store 에는 세션
@@ -64,6 +103,14 @@ const INJECT_BOOT_GATE_STABILITY_ATTEMPTS = 5;
 // ticket exists for was a panel that stopped with no badge and no notification.
 // Generously above the blind fallback (10 s) so a slow-but-normal boot never
 // trips it.
+//
+// ★측정 기준은 **PTY 스폰 시각**(`bootStartedAt`)이다. 예전엔 "홀드가 처음 걸린
+// 순간" 기준이라 실측이 70.1s 로 나왔다(F-6, ymRo9BtilQnb48Y5ol68): 첫 실행
+// 다이얼로그가 떠 있으면 readiness 마커가 안 맞아 첫 sendPrompt 가 blind
+// fallback(claude 10s)까지 밀리고, 거기서 60s 를 더 셌기 때문이다. 상수를 70 으로
+// 올려 실측에 맞추는 선택도 있었지만, 그러면 "얼마나 기다리나" 가 하네스별 blind
+// fallback(claude 10s / gpt 3.5s)에 따라 달라지는 값이 된다 — 기준점을 옮겨서
+// 60s 가 어느 하네스에서나 60s 를 뜻하게 했다.
 const ORCH_FIRST_RUN_DIALOG_GIVE_UP_MS = 60_000;
 
 // --- Concurrent-resume guard ---
@@ -495,7 +542,10 @@ export class OrchestratorManager {
   private session: OrchestratorSession | null = null;
   private ptyManager: PtyManager;
   private configGenerator: AgentConfigGenerator;
-  private onStatusChange?: (status: OrchestratorStatus) => void;
+  private onStatusChange?: (
+    status: OrchestratorStatus,
+    detail?: OrchestratorStatusDetail,
+  ) => void;
   // --- Auto-restart state ---
   private stopRequested = false;
   private restartCount = 0;
@@ -562,7 +612,10 @@ export class OrchestratorManager {
   constructor(
     ptyManager: PtyManager,
     configGenerator: AgentConfigGenerator,
-    onStatusChange?: (status: OrchestratorStatus) => void,
+    onStatusChange?: (
+      status: OrchestratorStatus,
+      detail?: OrchestratorStatusDetail,
+    ) => void,
     kind: string = "board",
   ) {
     this.ptyManager = ptyManager;
@@ -1179,9 +1232,17 @@ export class OrchestratorManager {
         mergedEnv,
       );
     } catch (err) {
-      this.setStatus("error");
-      this.configGenerator.cleanup(sessionId);
       const code = (err as NodeJS.ErrnoException)?.code;
+      // 사유를 status 와 **같은 이벤트에** 실어 보낸다. 예전엔 여기서 error 만
+      // 나가고 이유는 console.error 로만 갔다 — 화면은 아무것도 몰랐다.
+      this.setStatus("error", {
+        reason:
+          code === "ENOENT" || code === "ENOTDIR"
+            ? "rootPathMissing"
+            : "spawnFailed",
+        model: modelToCliAuth(launchConfig.model) ?? undefined,
+      });
+      this.configGenerator.cleanup(sessionId);
       if (code === "ENOENT" || code === "ENOTDIR") {
         console.error(
           `[Orchestrator] Cannot launch in "${rootPath}" — the directory is gone.`,
@@ -1190,6 +1251,13 @@ export class OrchestratorManager {
       }
       throw err;
     }
+    // 부팅 데드라인의 기준점 = **PTY 가 뜬 순간**. F-6(ymRo9BtilQnb48Y5ol68) 이
+    // 실측한 70.1s 가 여기서 나왔다: 예전 데드라인은 `deferredSince`(= 홀드가
+    // 처음 걸린 순간)를 기준으로 60s 를 셌는데, 첫 실행 다이얼로그가 떠 있으면
+    // readiness 마커가 영영 안 맞아 sendPrompt 의 첫 호출이 blind fallback
+    // (claude 10s)까지 미뤄진다 → 10s + 60s = 70s. 상수는 60 인데 사람이 70 을
+    // 기다리는, 코드와 화면이 어긋나는 전형이었다.
+    const bootStartedAt = Date.now();
 
     // P3-3: enforce (not just log) the dangerous-command guard on THIS PTY. The
     // orchestrator drives the non-isolated MAIN checkout under YOLO
@@ -1352,7 +1420,12 @@ export class OrchestratorManager {
             `[Orchestrator:${this.kind}] Login prompt confirmed (${reason}) — ` +
               `suppressing boot prompt (${orchCliAuthModel ?? launchConfig.model} needs auth).`,
           );
-          this.setStatus("error");
+          // ★`reason` 은 백스톱 내부 사유 문자열이고 화면에 나가지 않는다.
+          // 나가는 것은 분류값 "needsAuth" 와 CLI id 뿐이다.
+          this.setStatus("error", {
+            reason: "needsAuth",
+            model: orchCliAuthModel ?? undefined,
+          });
         },
         onResolved: () => {
           authBlocked = false;
@@ -1415,17 +1488,29 @@ export class OrchestratorManager {
         // The blind fallback below funnels through here too, which is the point:
         // "we gave up waiting for readiness" was never a reason to type into
         // whatever happens to be on screen.
-        const holdReason = looksLikeFirstRunDialog(dialogBuffer)
-          ? "a first-run dialog is on screen"
+        // ★홀드 사유는 이제 두 벌이다: 로그로 가는 영문 문장과, 화면으로 가는
+        // **분류값**. 문장 쪽을 그대로 IPC 에 실으면 편하지만, 그러면 이 자리가
+        // 자연스럽게 "화면 텍스트를 만드는 곳" 이 되고 다음 사람이 여기에 PTY
+        // 발췌를 덧붙인다. 축을 갈라 두면 그 길이 애초에 없다.
+        const holdKind: OrchestratorHaltReason | null = looksLikeFirstRunDialog(
+          dialogBuffer,
+        )
+          ? "firstRunDialog"
           : // ★The backstop's own contract: "호출자는 clear 가 아니면 대화형 키
             // 입력을 멈춘다". Only its FIRED state was ever honoured, so a login
             // screen still inside its grace window (pre-spawn probe not back
             // yet) left the gate open — and the blind fallback walked straight
             // through it into `1. Sign in with ChatGPT`.
             loginBackstop.state() !== "clear"
-            ? "a login screen may be on screen"
+            ? "needsAuth"
             : null;
-        if (holdReason) {
+        const holdReason =
+          holdKind === "firstRunDialog"
+            ? "a first-run dialog is on screen"
+            : holdKind === "needsAuth"
+              ? "a login screen may be on screen"
+              : null;
+        if (holdReason && holdKind) {
           if (!deferredByDialog) {
             deferredByDialog = true;
             deferredSince = Date.now();
@@ -1435,7 +1520,9 @@ export class OrchestratorManager {
             );
           } else if (
             !gaveUp &&
-            Date.now() - deferredSince > ORCH_FIRST_RUN_DIALOG_GIVE_UP_MS
+            // ★스폰 기준(위 bootStartedAt 주석). 홀드 시작 기준이면 blind
+            // fallback 만큼(claude 10s) 늦게 울려 상수가 거짓말을 한다.
+            Date.now() - bootStartedAt > ORCH_FIRST_RUN_DIALOG_GIVE_UP_MS
           ) {
             // Say it out loud rather than stalling silently — a panel that stops
             // with no badge and no notification is the exact failure this ticket
@@ -1443,11 +1530,16 @@ export class OrchestratorManager {
             gaveUp = true;
             console.error(
               `[Orchestrator:${this.kind}] Boot held for ` +
-                `${Math.round(ORCH_FIRST_RUN_DIALOG_GIVE_UP_MS / 1000)}s ` +
+                `${Math.round((Date.now() - deferredSince) / 1000)}s ` +
                 `(${holdReason}) and the boot prompt was never sent — the ` +
                 "orchestrator needs a human.",
             );
-            this.setStatus("error");
+            // ★사유를 실어 보낸다. 여기가 사장님이 오늘 아침 겪으신 화면이다 —
+            // 폴더 신뢰 다이얼로그가 떠 있는데 패널은 초록 running 이었다.
+            this.setStatus("error", {
+              reason: holdKind,
+              model: orchCliAuthModel ?? undefined,
+            });
           }
           scheduleDeferRetry();
           return;
@@ -1615,7 +1707,7 @@ export class OrchestratorManager {
         if (this.session?.claudeSessionId) {
           this.releaseResumeLock(rootPath, this.session.claudeSessionId);
         }
-        this.setStatus("error");
+        this.setStatus("error", { reason: "rootPathMissing" });
         this.configGenerator.cleanup(sessionId);
         console.error(
           `[Orchestrator] Working directory no longer exists — not restarting: "${rootPath}" (exit ${exitCode}). Reopen the project on a path that still exists.`,
@@ -1687,7 +1779,10 @@ export class OrchestratorManager {
         if (this.session?.claudeSessionId) {
           this.releaseResumeLock(rootPath, this.session.claudeSessionId);
         }
-        this.setStatus("error");
+        this.setStatus("error", {
+          reason: "crashLoop",
+          model: modelToCliAuth(launchConfig.model) ?? undefined,
+        });
         this.configGenerator.cleanup(sessionId);
         console.error(
           `[Orchestrator] Max restarts (${ORCH_MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`,
@@ -2382,10 +2477,21 @@ export class OrchestratorManager {
     }
   }
 
-  private setStatus(status: OrchestratorStatus): void {
+  /**
+   * 상태를 바꾸고 구독자에게 알린다.
+   *
+   * ★`detail` 은 **"error" 일 때만** 의미가 있다. 성공 경로에서 사유를 실어 보내면
+   * 렌더러가 초록 상태 위에 낡은 사유를 덧그리게 된다 — 이 티켓이 고치는 버그의
+   * 정확한 거울상이다. 그래서 error 가 아니면 detail 을 버린다(구독자가 "사유가
+   * 없다 = 지금 멈춘 게 아니다" 로 읽어도 항상 옳다).
+   */
+  private setStatus(
+    status: OrchestratorStatus,
+    detail?: OrchestratorStatusDetail,
+  ): void {
     if (this.session) {
       this.session.status = status;
     }
-    this.onStatusChange?.(status);
+    this.onStatusChange?.(status, status === "error" ? detail : undefined);
   }
 }

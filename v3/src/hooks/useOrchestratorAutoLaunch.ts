@@ -12,6 +12,7 @@ import {
 } from "../lib/orchestratorTeardown";
 import { planOrchestratorBlockUi } from "../lib/orchestratorLaunchBlock";
 import { reportOnrampExecBlocked } from "../services/onrampBlockSignal";
+import { useOrchestratorStatusSync } from "./useOrchestratorStatusSync";
 
 /**
  * - Stops the orchestrator when project/folder changes or unmounts.
@@ -28,6 +29,10 @@ import { reportOnrampExecBlocked } from "../services/onrampBlockSignal";
  * still tearing down on a genuine project switch.
  */
 export function useOrchestratorAutoLaunch() {
+  // main 의 상태 변화를 렌더러 스토어로 흘린다. 여기 다는 이유는 이 훅이 마블로
+  // 셸(Layout)과 비기너 셸(useAppLifecycle)의 **공통 조상**이라서다 — 한 곳에
+  // 달면 두 모드가 같이 고쳐진다(useOrchestratorStatusSync 주석).
+  useOrchestratorStatusSync();
   const currentProject = useProjectStore((s) => s.currentProject);
   // Project fixed root — see header comment. Falls back to null when the
   // project has no folder bound (orchestrator can't run without a root).
@@ -72,6 +77,7 @@ export function useOrchestratorAutoLaunch() {
   const setSession = useOrchestratorStore((s) => s.setSession);
   const setStatus = useOrchestratorStore((s) => s.setStatus);
   const setLaunchBlock = useOrchestratorStore((s) => s.setLaunchBlock);
+  const confirmLaunched = useOrchestratorStore((s) => s.confirmLaunched);
 
   const tryAutoConnect = useCallback(async () => {
     const projectId = currentProject?.id;
@@ -129,7 +135,9 @@ export function useOrchestratorAutoLaunch() {
         // 첫 에이전트(오케스트레이터)가 실제로 뜬 순간. resumed=이전 세션 재접속.
         telemetry.orchestratorOpened(!!priorId);
         setSession(result.sessionId, result.ptySessionId);
-        setStatus("running");
+        // ★`setStatus("running")` 이 아니다 — main 이 이미 정지 사유를 보낸 뒤라면
+        // 무시해야 한다(codex 미인증은 스폰 445ms 에 이미 error 다).
+        confirmLaunched();
         // Mirror the manual-Start path: upsert the canonical orchestrator
         // agent doc so the Activity feed's agentId filter accepts events
         // emitted by this auto-reconnected session.
@@ -147,7 +155,14 @@ export function useOrchestratorAutoLaunch() {
       telemetry.orchestratorBlocked("launch_error");
       setStatus("stopped");
     }
-  }, [currentProject?.id, fixedRoot, setSession, setStatus, setLaunchBlock]);
+  }, [
+    currentProject?.id,
+    fixedRoot,
+    setSession,
+    setStatus,
+    setLaunchBlock,
+    confirmLaunched,
+  ]);
 
   useEffect(() => {
     if (autoConnectRef.current || !currentProject?.id || !fixedRoot) return;

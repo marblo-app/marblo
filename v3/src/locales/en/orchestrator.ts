@@ -35,6 +35,45 @@ export const orchestrator: Record<keyof typeof koOrchestrator, string> = {
     "This is not a sign-in problem. This model runs on prepaid vendor credit rather than a subscription, so a zero balance or a missing key stops it even when the CLI is signed in. Do the action above, then refresh (⟳) under Usage → Vendor credits to confirm the balance and start again. We deliberately do not fall back to the default model here: silently running a different backend than the one you picked is far worse.",
   "orchestrator.blocked.login": "Sign in to {model}",
   "orchestrator.blocked.dismiss": "Dismiss",
+
+  // Halt reasons — the orchestrator stopped AFTER it was up (F-4/F-5).
+  // Title says what happened; Hint MUST say what to do next. Label is the
+  // one-line header form that replaces the bare "Error".
+  "orchestrator.halt.restart": "Start again",
+
+  "orchestrator.halt.needsAuthLabel": "Sign-in needed",
+  "orchestrator.halt.needsAuthTitle":
+    "{model} needs to be signed in — the orchestrator stopped",
+  "orchestrator.halt.needsAuthHint":
+    "This CLI's sign-in screen came up, so the boot was stopped (nothing was typed into that screen). Press Sign in below to open the login in a terminal tab, then press Start again.",
+
+  "orchestrator.halt.firstRunDialogLabel": "A dialog is waiting",
+  "orchestrator.halt.firstRunDialogTitle":
+    "A first-run screen — folder trust or similar — is waiting, so the orchestrator stopped",
+  "orchestrator.halt.firstRunDialogHint":
+    "Answer the question in the terminal below yourself (arrow keys, then Enter). We do not press it for you: sending a key into a screen we cannot identify confirms whichever option happens to be highlighted. If it is still stuck after you answer, press Start again.",
+
+  "orchestrator.halt.rootPathMissingLabel": "Folder missing",
+  "orchestrator.halt.rootPathMissingTitle":
+    "The working folder is gone, so the orchestrator stopped",
+  "orchestrator.halt.rootPathMissingHint":
+    "The folder this project pointed at was deleted or moved — common after cleaning up worktrees. Point the project at a path that still exists in the sidebar, then start it.",
+
+  "orchestrator.halt.spawnFailedLabel": "Launch failed",
+  "orchestrator.halt.spawnFailedTitle": "Could not launch the orchestrator",
+  "orchestrator.halt.spawnFailedHint":
+    "The terminal process could not be created. Check that the project folder really exists, then press Start again. If it keeps failing at the same point, check this harness under Settings → CLI connections.",
+
+  "orchestrator.halt.crashLoopLabel": "Keeps exiting",
+  "orchestrator.halt.crashLoopTitle":
+    "The orchestrator kept exiting, so auto-restart gave up",
+  "orchestrator.halt.crashLoopHint":
+    "It was restarted three times and exited immediately each time. Press Start again for a fresh session, and if that repeats, start it on a different model.",
+
+  "orchestrator.halt.unknownLabel": "Stopped",
+  "orchestrator.halt.unknownTitle": "The orchestrator stopped",
+  "orchestrator.halt.unknownHint":
+    "We could not identify the reason. Check the last screen in the terminal below if it is still there, then press Start again.",
   // Category labels
   "orchestrator.cat.project": "Start project",
   "orchestrator.cat.project-step": "Step-by-step start",

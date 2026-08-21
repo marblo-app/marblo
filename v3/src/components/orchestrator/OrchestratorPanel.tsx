@@ -14,6 +14,11 @@ import type { MessageKey } from "../../locales/ko";
 import { placeAnchoredPopup } from "../../lib/anchoredPopup";
 import { launchLogin } from "../../services/cliSetupActions";
 import {
+  orchestratorHaltCopyKeys,
+  orchestratorHaltKeepsTerminal,
+  orchestratorHaltLoginModel,
+} from "../../lib/orchestratorHalt";
+import {
   planOrchestratorBlockUi,
   orchestratorBlockCopyKeys,
   orchestratorBlockLoginModel,
@@ -229,6 +234,12 @@ export default memo(function OrchestratorPanel({
   const setHandoffSummary = useOrchestratorStore((s) => s.setHandoffSummary);
   const launchBlock = useOrchestratorStore((s) => s.launchBlock);
   const setLaunchBlock = useOrchestratorStore((s) => s.setLaunchBlock);
+  // 뜬 뒤에 멈춘 사유(로그인 화면·첫 실행 다이얼로그·폴더 소실·크래시 루프).
+  // launchBlock 과 다른 축이다 — 저건 스폰 **전** 게이트다.
+  const halt = useOrchestratorStore((s) => s.halt);
+  const confirmLaunched = useOrchestratorStore((s) => s.confirmLaunched);
+  const haltCopy = orchestratorHaltCopyKeys(halt?.kind ?? "unknown");
+  const haltLoginModel = halt ? orchestratorHaltLoginModel(halt) : null;
   // 차단 배너의 문구·CTA 는 순수 규칙이 정한다(kind 별 i18n 키, 로그인 가능 CLI).
   const blockCopy = orchestratorBlockCopyKeys(launchBlock?.kind ?? "auth");
   const blockLoginModel = launchBlock
@@ -372,8 +383,17 @@ export default memo(function OrchestratorPanel({
   if (!currentProject) return null;
 
   const isRunning = status === "running" || status === "starting";
+  // ★멈췄지만 PTY 는 살아 있고, 사용자가 그 화면에서 직접 답해야 풀리는 사유
+  // (첫 실행 다이얼로그·로그인 화면)면 터미널을 계속 보여준다. 종전 조건
+  // (`isRunning` 하나)대로 두면 사유를 띄우는 순간 터미널이 사라져서, 고치라고
+  // 안내해 놓고 고칠 도구를 뺏는다 — 비기너에겐 그게 유일한 조작 수단이다.
+  const haltKeepsTerminal = !!halt && orchestratorHaltKeepsTerminal(halt.kind);
   const isSwitching = switchStatus !== "idle" && switchStatus !== "error";
   const height = isCollapsed ? COLLAPSED_HEIGHT : panelHeight;
+  // 터미널이 실제로 그려지는가. 높이 계산이 이 값에 달려 있다 — 아래 컨테이너
+  // style 주석 참조.
+  const showsTerminal =
+    !isCollapsed && !!ptySessionId && (isRunning || haltKeepsTerminal);
   const activeTaskCount = tasks.filter((task) =>
     ["CLAIMED", "IN_PROGRESS", "BLOCKED", "REVIEW"].includes(task.status),
   ).length;
@@ -422,7 +442,8 @@ export default memo(function OrchestratorPanel({
       }
       if (result) {
         setSession(result.sessionId, result.ptySessionId, selectedModel);
-        setStatus("running");
+        // ★main 이 이미 정지 사유를 보낸 뒤면 승격하지 않는다(confirmLaunched 주석).
+        confirmLaunched();
 
         // Upsert the single canonical orchestrator agent doc (stable ID
         // = orchestrator-<projectId>) so the Activity feed's `agentId in
@@ -536,7 +557,7 @@ export default memo(function OrchestratorPanel({
       setSwitchStatus("starting");
       setHandoffSummary(result.handoffSummary);
       setSession(result.sessionId, result.ptySessionId, targetModel);
-      setStatus("running");
+      confirmLaunched();
       setSelectedModel(targetModel);
       setPendingSwitchModel(null);
       await window.electronAPI.orchestratorModel.set(targetModel, projectId);
@@ -627,9 +648,17 @@ export default memo(function OrchestratorPanel({
           : "flex flex-col flex-shrink-0 border-t border-[#313244] bg-[#181825]"
       }
       style={
-        // 차단 배너가 서 있는 동안은 고정 높이를 놓는다. 접힘 높이(36px)는 헤더
+        // 배너가 서 있는 동안은 고정 높이를 놓는다. 접힘 높이(36px)는 헤더
         // 한 줄분이라, 고정한 채로 배너를 그리면 안내가 패널 밖으로 삐져나온다.
-        fill || launchBlock ? undefined : { height }
+        // 차단 배너(스폰 전)와 정지 사유 배너(스폰 후)가 같은 처리를 받는다.
+        //
+        // ★단 **터미널을 그릴 땐 고정한다**. 터미널 래퍼는 `flex-1 min-h-0` 라
+        // 부모 높이가 있어야 의미가 있고, 높이를 놓으면 컨텐츠 기준으로 접혀
+        // 0px 이 된다. 정지 사유 배너는 터미널을 살려 둔 채로 뜨는 경우가 있어
+        // (첫 실행 다이얼로그·로그인 화면) 차단 배너와 달리 이 구분이 필요하다.
+        fill || (!showsTerminal && (launchBlock || halt))
+          ? undefined
+          : { height }
       }
     >
       {/* Resize handle — suppressed in fill mode (shell divider owns sizing). */}
@@ -833,8 +862,17 @@ export default memo(function OrchestratorPanel({
           </>
         ) : (
           <>
-            <span className="text-[#6c7086]">
-              {status === "error" ? "Error" : "Stopped"}
+            {/* ★"Error" 한 단어로 끝내지 않는다. 사장님이 겪으신 것이 정확히
+                "설명 없이 멈춘 화면" 이었다 — 헤더는 사유를 한 줄로 말하고,
+                무엇을 해야 하는지는 아래 배너가 잇는다. 사유를 모르면(구버전
+                main) 종전대로 "Error" 로 접힌다. */}
+            <span
+              className="text-[#6c7086]"
+              data-testid="orchestrator-status-label"
+            >
+              {status === "error"
+                ? t(haltCopy.label as MessageKey)
+                : "Stopped"}
             </span>
             {/* Start button + session picker toggle */}
             <div className="relative ml-2 flex items-center gap-1">
@@ -1006,6 +1044,53 @@ export default memo(function OrchestratorPanel({
         )}
       </div>
 
+      {/* ★정지 사유 안내 — 오케가 **뜬 뒤에** 멈춘 경우.
+          이 배너가 이 티켓의 본체다. 종전엔 이 축의 사유가 화면 어디에도 없었다:
+          `orchestrator:statusChanged` 는 `{status}` 만 실었고 보드 렌더러엔 그
+          채널 구독자가 0 이었으며, 패널은 launch 성공 반환 뒤로 초록 running 에
+          고정돼 있었다. 사유는 main 의 console.error 에만 남았다.
+          접힘 여부와 무관하게 뜬다(차단 배너와 같은 이유). */}
+      {halt && (
+        <div
+          role="alert"
+          data-testid="orchestrator-halt"
+          data-halt-kind={halt.kind}
+          className="mx-3 mb-2 rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-3 py-2 text-[11px] leading-4 text-[#f38ba8]"
+        >
+          <div className="font-medium">
+            {t(haltCopy.title as MessageKey, { model: halt.model ?? "CLI" })}
+          </div>
+          {/* ★다음 행동. 이 줄이 비면 배너는 "오류" 와 같은 값이 된다. */}
+          <div className="mt-1 text-[#f5e0dc]">
+            {t(haltCopy.hint as MessageKey)}
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            {haltLoginModel && (
+              <button
+                data-testid="orchestrator-halt-login"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void launchLogin(haltLoginModel);
+                }}
+                className="rounded border border-[#f38ba8]/60 px-2 py-0.5 text-[10px] font-medium text-[#f38ba8] hover:bg-[#f38ba8]/20"
+              >
+                {t("orchestrator.blocked.login", { model: haltLoginModel })}
+              </button>
+            )}
+            <button
+              data-testid="orchestrator-halt-restart"
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleStartWithSession();
+              }}
+              className="rounded border border-[#45475a] px-2 py-0.5 text-[10px] text-[#a6adc8] hover:bg-[#313244]"
+            >
+              {t("orchestrator.halt.restart")}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 스폰 차단 안내 — **모든** 차단 사유가 여기로 온다(인증·MCP 둘 다).
           접힘 상태여도 보여준다: 이 배너가 안 보이면 사용자는 "Start/전환을
           눌렀는데 아무 일도 안 일어난다" 만 겪는다. 인증 축을 위저드에만 맡겼을
@@ -1052,8 +1137,9 @@ export default memo(function OrchestratorPanel({
         </div>
       )}
 
-      {/* Terminal content */}
-      {!isCollapsed && ptySessionId && isRunning && (
+      {/* Terminal content — 멈춘 뒤에도 사용자가 답해야 풀리는 사유면 계속
+          보여준다(haltKeepsTerminal 주석). */}
+      {showsTerminal && (
         <div className="flex-1 min-h-0 relative">
           <OrchestratorTerminal
             sessionId={ptySessionId}

@@ -36,6 +36,56 @@ export const orchestrator = {
     "로그인 문제가 아닙니다. 이 모델은 구독이 아니라 벤더 선불 크레딧으로 돌아서, 잔액이 0 이 되거나 키가 없으면 CLI 로그인이 멀쩡해도 뜨지 않습니다. 위 조치를 끝낸 뒤 [사용량] 탭 → 벤더 크레딧에서 새로고침(⟳)해 잔액을 확인하고 다시 시작하세요. 여기서 조용히 기본 모델로 바꿔 띄우지 않는 이유는, 고른 것과 다른 백엔드가 말없이 도는 편이 훨씬 나쁘기 때문입니다.",
   "orchestrator.blocked.login": "{model} 로그인",
   "orchestrator.blocked.dismiss": "닫기",
+
+  // ───────────────────────────────────────────────────────────────────────
+  // ★정지 사유 — 오케가 **뜬 뒤에** 멈춘 경우(F-4/F-5, ymRo9BtilQnb48Y5ol68).
+  //
+  // 위의 `blocked.*` 는 스폰 **전** 게이트고, 이쪽은 PTY 가 이미 뜬 뒤 main 이
+  // IPC 로 밀어 주는 축이다. 종전엔 이 축의 사유가 화면 어디에도 없어서 패널이
+  // 초록 running 에 고정됐다 — 사장님이 오늘 아침 보신 화면이 그것이다.
+  //
+  // ★문구 규칙: Title 은 "무슨 일이 났나", Hint 는 **"무엇을 하면 되나"**.
+  // "오류" 한 줄로 끝내면 정보량이 종전(=아무것도 없음)과 같다. Label 은 헤더
+  // 한 줄에 들어가는 짧은 형태로, 종전의 "Error" 를 대신한다.
+  // {model} 은 분류된 CLI id 뿐이다(PTY 원문 아님 — orchestratorHalt 주석).
+  "orchestrator.halt.restart": "다시 시작",
+
+  "orchestrator.halt.needsAuthLabel": "로그인 필요",
+  "orchestrator.halt.needsAuthTitle":
+    "{model} 로그인이 필요합니다 — 오케스트레이터가 멈췄습니다",
+  "orchestrator.halt.needsAuthHint":
+    "이 CLI 의 로그인 화면이 떠 있어서 부팅을 중단했습니다(로그인 화면에 아무것도 입력하지 않았습니다). 아래 [로그인] 을 누르면 터미널 탭에서 로그인이 열립니다 — 끝낸 뒤 [다시 시작] 을 누르세요.",
+
+  "orchestrator.halt.firstRunDialogLabel": "확인 창이 떠 있습니다",
+  "orchestrator.halt.firstRunDialogTitle":
+    "폴더 신뢰 확인 같은 첫 실행 화면이 떠 있습니다 — 오케스트레이터가 멈췄습니다",
+  "orchestrator.halt.firstRunDialogHint":
+    "아래 터미널에 뜬 질문에 직접 답해 주세요(방향키로 고르고 Enter). 저희가 대신 누르지 않는 이유는, 무슨 화면인지 확실하지 않은 상태에서 키를 보내면 엉뚱한 선택이 확정되기 때문입니다. 답한 뒤에도 멈춰 있으면 [다시 시작] 을 누르세요.",
+
+  "orchestrator.halt.rootPathMissingLabel": "폴더 없음",
+  "orchestrator.halt.rootPathMissingTitle":
+    "작업 폴더가 사라져서 오케스트레이터가 멈췄습니다",
+  "orchestrator.halt.rootPathMissingHint":
+    "이 프로젝트가 가리키던 폴더가 지워졌거나 옮겨졌습니다(워크트리를 정리하면 흔히 생깁니다). 사이드바에서 프로젝트 폴더를 지금 있는 경로로 다시 지정한 뒤 시작하세요.",
+
+  "orchestrator.halt.spawnFailedLabel": "실행 실패",
+  "orchestrator.halt.spawnFailedTitle":
+    "오케스트레이터를 실행하지 못했습니다",
+  "orchestrator.halt.spawnFailedHint":
+    "터미널 프로세스를 만들지 못했습니다. 프로젝트 폴더가 실제로 있는지 확인한 뒤 [다시 시작] 을 눌러 주세요. 계속 같은 자리에서 멈추면 [설정] → CLI 연결에서 이 하네스가 정상인지 확인하세요.",
+
+  "orchestrator.halt.crashLoopLabel": "반복 종료",
+  "orchestrator.halt.crashLoopTitle":
+    "오케스트레이터가 반복해서 종료돼 자동 재시작을 멈췄습니다",
+  "orchestrator.halt.crashLoopHint":
+    "세 번 자동으로 다시 띄웠지만 매번 곧바로 종료됐습니다. [다시 시작] 을 눌러 새 세션으로 띄워 보고, 그래도 같으면 다른 모델로 바꿔서 시작해 보세요.",
+
+  "orchestrator.halt.unknownLabel": "멈춤",
+  "orchestrator.halt.unknownTitle": "오케스트레이터가 멈췄습니다",
+  // ★사유를 모를 때(구버전 main 이거나 우리가 모르는 표식)도 **다음 행동은
+  // 말한다**. 여기서 main 이 준 문자열을 그대로 그리지 않는 것이 규약이다.
+  "orchestrator.halt.unknownHint":
+    "사유를 확인하지 못했습니다. 아래 터미널에 마지막 화면이 남아 있으면 그걸 확인하고, [다시 시작] 을 눌러 주세요.",
   // Category labels
   "orchestrator.cat.project": "프로젝트 시작",
   "orchestrator.cat.project-step": "단계별 시작",

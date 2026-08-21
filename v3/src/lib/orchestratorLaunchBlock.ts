@@ -157,7 +157,12 @@ export function orchestratorBlockCopyKeys(kind: OrchestratorBlockKind): {
  *   ② 설치돼 있다      — 미설치면 로그인이 아니라 설치가 먼저다(문구가 그렇게 온다).
  *   ③ 아는 CLI 다      — 모르는 이름으로 로그인 터미널을 띄우지 않는다.
  */
-const LOGIN_CTA_MODELS = ["claude", "codex", "grok", "antigravity"] as const;
+export const LOGIN_CTA_MODELS = [
+  "claude",
+  "codex",
+  "grok",
+  "antigravity",
+] as const;
 
 export type OrchestratorBlockLoginModel = (typeof LOGIN_CTA_MODELS)[number];
 
