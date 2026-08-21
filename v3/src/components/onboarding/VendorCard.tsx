@@ -9,9 +9,10 @@ import { CliRowCard, CommandBox } from "./CliSetupRows";
 /**
  * 벤더 한 칸의 UI — **첫 켰을 때 해야 하는 한 가지** + **띄우는 법 한 줄**.
  *
- * 두 화면이 이 컴포넌트를 공유한다:
+ * 세 화면이 이 컴포넌트를 공유한다:
  *   - 시작하기 탭의 "다른 벤더 모델 붙이기" 섹션(#632, VendorModelsSection)
  *   - ②단계의 BYOM 대안(F4, ByomStartSection)
+ *   - 하네스 탭의 env-swap 벤더 섹션(EnvSwapVendorSection) — 여기만 `density="compact"`
  * 그래서 원래 #632 안에 있던 이 카드를 밖으로 꺼냈다 — 두 번째 소비자가 생긴 순간
  * 복제하면 같은 벤더를 두고 두 화면이 다른 말을 하기 시작한다(이 코드베이스가
  * `CliRowCard` 로 이미 해결해 둔 문제와 정확히 같은 형태다).
@@ -34,6 +35,22 @@ const STATUS_STYLE: Record<VendorSetupCard["status"], string> = {
   unknown: "bg-[#585b70]/30 text-[#a6adc8]",
 };
 
+/**
+ * 표시 밀도 — **어느 화면에서 보느냐**에 달린 값이라 카드가 스스로 정하지 않는다.
+ *
+ * `full`(기본, 온보딩) — 시작하기 탭·②단계 BYOM 대안. 이 두 섹션의 목록에는 자체
+ *   CLI 벤더(Grok)가 섞여 있고 섹션 설명도 "①②단계가 Claude·Codex 입니다" 뿐이라,
+ *   "새 CLI 없이 구독키만 얹으면 된다" 를 카드가 직접 말하지 않으면 그 사실이 화면
+ *   어디에도 없다. 처음 보는 사람에게 그건 장식이 아니라 첫인상 그 자체다.
+ *
+ * `compact`(하네스탭) — 섹션이 env-swap 벤더만 담고, 바깥 `HarnessSetupSection` 이
+ *   `harness.store.section.envSwapDesc`("API 키만 등록해 claude 하네스로 쓰는
+ *   벤더입니다")로 같은 말을 **이미 한 번** 했다. 카드가 그걸 또 하면 벤더 수만큼
+ *   반복된다(곧 5장). 그래서 카드에는 카드마다 **실제로 다른 것**(=어느 바이너리로
+ *   도는지)만 칩으로 남기고, 공통 문장은 hover 로 닿게 둔다 — 지우는 게 아니다.
+ */
+export type VendorCardDensity = "full" | "compact";
+
 export interface VendorCardProps {
   card: VendorSetupCard;
   /** #624 벤더키 설정으로 딥링크. */
@@ -46,6 +63,8 @@ export interface VendorCardProps {
    * 달린 값이라 바깥에서 주입한다.
    */
   footNote?: ReactNode;
+  /** 표시 밀도(위 `VendorCardDensity` 주석 참고). 기본은 온보딩 밀도. */
+  density?: VendorCardDensity;
 }
 
 export function VendorCard({
@@ -53,6 +72,7 @@ export function VendorCard({
   onOpenKeySettings,
   onRecheckKeys,
   footNote,
+  density = "full",
 }: VendorCardProps) {
   const { t } = useTranslation();
   // dispatch 예시에 넣을 모델. 기본값은 최상위 등급 모델이고, 아래 칩으로 이 벤더의
@@ -68,8 +88,23 @@ export function VendorCard({
   const [keyFeedback, setKeyFeedback] = useState<
     Record<string, "saved" | "error" | undefined>
   >({});
+  /**
+   * 이 카드에서 **방금** 키를 저장했나. 저장이 성공하면 상태가 ready 로 뒤집히면서
+   * 입력 UI(그리고 그 아래 "안전 저장했습니다" 피드백)가 통째로 언마운트된다 —
+   * 즉 확인 문구가 뜨자마자 사라진다. 그래서 그 순간에만 `key.ready` 를 띄운다:
+   * "키 등록 뒤 **새로 스폰하는** 에이전트부터 적용된다" 는 정확히 이때 필요한
+   * 정보고(이미 떠 있는 에이전트는 안 바뀐다), 그 외 평상시엔 `Ready` 배지가
+   * 같은 말을 하므로 카드마다 반복시키지 않는다(배지 hover 로 남는다).
+   */
+  const [justSaved, setJustSaved] = useState(false);
 
   const isEnvSwap = card.kind === "envSwap";
+  const isCompact = density === "compact";
+  /** 카드마다 문장으로 반복되던 "이 벤더는 {command} 로 돈다" 원문. */
+  const kindLine = t("onboarding.startHere.vendors.kind.envSwap", {
+    command: card.command,
+  });
+  const readyLine = t("onboarding.startHere.vendors.key.ready");
   const keysToEnter =
     card.missingEnvKeys.length > 0 ? card.missingEnvKeys : card.requiredEnvKeys;
 
@@ -83,6 +118,7 @@ export function VendorCard({
       // 평문은 저장 직후 제거한다. 저장소 snapshot 에도 값은 오지 않는다.
       setKeyInputs((prev) => ({ ...prev, [envKey]: "" }));
       setKeyFeedback((prev) => ({ ...prev, [envKey]: "saved" }));
+      setJustSaved(true);
     } catch {
       setKeyFeedback((prev) => ({ ...prev, [envKey]: "error" }));
     } finally {
@@ -101,13 +137,25 @@ export function VendorCard({
             <span className="text-sm font-medium text-[#cdd6f4]">
               {card.label}
             </span>
-            <p className="mt-0.5 text-xs text-[#7f849c]">
-              {t("onboarding.startHere.vendors.kind.envSwap", {
-                command: card.command,
-              })}
-            </p>
+            {isCompact ? (
+              // 카드마다 **실제로 다른 것**은 어느 바이너리로 도느냐뿐이다. 그것만
+              // 이름 옆 칩으로 남긴다 — 줄을 하나도 더 쓰지 않고, 문장 전체는
+              // hover 로 그대로 닿는다(섹션 설명이 이미 같은 말을 했다).
+              <span
+                title={kindLine}
+                className="ml-2 inline-block rounded border border-[#45475a] px-1.5 py-0.5 align-middle font-mono text-[10px] text-[#a6adc8]"
+              >
+                {card.command}
+              </span>
+            ) : (
+              <p className="mt-0.5 text-xs text-[#7f849c]">{kindLine}</p>
+            )}
           </div>
           <span
+            // ready 일 때 배지 hover 에 `key.ready` 원문을 남긴다. 카드마다 한 줄씩
+            // 서던 그 문장은 배지와 같은 말이라 평상시엔 숨기지만, 괄호 안의
+            // "새로 스폰하는 에이전트부터 적용" 은 버릴 정보가 아니다.
+            title={card.status === "ready" ? readyLine : undefined}
             className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-medium ${
               STATUS_STYLE[card.status]
             }`}
@@ -121,11 +169,13 @@ export function VendorCard({
 
       {/* ── 첫 켰을 때 해야 하는 한 가지 ──────────────────────────────── */}
       {isEnvSwap ? (
-        <div className="mt-3">
+        // ready 카드는 평상시 여기에 아무 줄도 세우지 않는다 — 배지가 상태를 말하고,
+        // 아래 칩+스니펫이 다음 행동을 말한다. 방금 저장한 그 순간에만 확인 줄이 뜬다.
+        <div className={card.status === "ready" && !justSaved ? "" : "mt-3"}>
           {card.status === "ready" ? (
-            <p className="text-xs text-[#a6e3a1]">
-              ✓ {t("onboarding.startHere.vendors.key.ready")}
-            </p>
+            justSaved ? (
+              <p className="text-xs text-[#a6e3a1]">✓ {readyLine}</p>
+            ) : null
           ) : (
             <>
               <p className="text-xs text-[#a6adc8]">
@@ -218,9 +268,14 @@ export function VendorCard({
 
       {/* ── 띄우는 법 한 줄(dispatch 지정 예시) ───────────────────────── */}
       <div className={isEnvSwap ? "mt-3" : VENDOR_SUB_BOX}>
-        <p className="text-xs font-medium text-[#a6adc8]">
-          {t("onboarding.startHere.vendors.dispatchLabel")}
-        </p>
+        {/* compact 에서는 이 라벨을 섹션이 한 번만 말한다(EnvSwapVendorSection).
+            카드마다 들고 있으면 벤더 수만큼 같은 문장이 선다. 칩·스니펫·Copy 는
+            어느 밀도에서도 그대로 — 그게 이 카드의 실제 기능이다. */}
+        {!isCompact && (
+          <p className="text-xs font-medium text-[#a6adc8]">
+            {t("onboarding.startHere.vendors.dispatchLabel")}
+          </p>
+        )}
         {card.modelIds.length > 1 && (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {card.modelIds.map((id) => (

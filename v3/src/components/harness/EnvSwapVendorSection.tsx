@@ -30,7 +30,11 @@ import { VendorCard } from "../onboarding/VendorCard";
  * 레지스트리에 `envProfile` 행이 늘면 카드가 저절로 생긴다.
  *
  * ── 재사용 ───────────────────────────────────────────────────────────────
- * 카드 자체는 시작하기 탭·②단계 BYOM 대안과 **같은 `VendorCard`**(#632)다. 상태
+ * 카드 자체는 시작하기 탭·②단계 BYOM 대안과 **같은 `VendorCard`**(#632)이되, 이
+ * 섹션만 `density="compact"` 로 넘긴다. 이 섹션은 env-swap 벤더만 담고 바깥
+ * `HarnessSetupSection` 이 "API 키만 등록해 claude 하네스로 쓰는 벤더" 라고 이미
+ * 한 번 말했지만, 온보딩 쪽 두 섹션은 목록에 자체 CLI 벤더(Grok)가 섞여 있어 그
+ * 문장을 카드가 직접 말해야 한다 — 같은 카드지만 필요한 밀도가 다르다. 상태
  * 판정도 같은 store(`vendorSecretsStore`)에서 오므로, 한 화면에서 "등록 상태 다시
  * 확인" 을 누르면 다른 화면도 같이 갱신된다 — 같은 벤더를 두고 두 탭이 다른 말을 할
  * 수 없다. 자체 CLI 로 붙는 Grok(cli-grok)은 여기 안 나온다: 그쪽은 설치·로그인이
@@ -109,16 +113,26 @@ export function EnvSwapVendorSection({
             : t("harness.store.envSwap.loading")}
         </p>
       ) : (
-        <div className="grid gap-3 md:grid-cols-2">
-          {cards.map((card) => (
-            <VendorCard
-              key={`${card.vendor}:${card.harness}`}
-              card={card}
-              onOpenKeySettings={() => openSettingsSection("apikeys")}
-              onRecheckKeys={recheckKeys}
-            />
-          ))}
-        </div>
+        <>
+          {/* ★"띄우는 법" 은 섹션에 한 번만. 예전엔 카드마다 이 라벨을 들고 있어서
+              벤더 수만큼(곧 5번) 같은 문장이 섰다 — 정작 카드마다 다른 것은 라벨이
+              아니라 아래 model id 스니펫뿐이다. 그래서 라벨은 여기로 올리고, 카드는
+              `density="compact"` 로 칩·스니펫·Copy 만 남긴다. */}
+          <p className="mb-2 text-xs text-[#7f849c]">
+            {t("onboarding.startHere.vendors.dispatchLabel")}
+          </p>
+          <div className="grid gap-3 md:grid-cols-2">
+            {cards.map((card) => (
+              <VendorCard
+                key={`${card.vendor}:${card.harness}`}
+                card={card}
+                onOpenKeySettings={() => openSettingsSection("apikeys")}
+                onRecheckKeys={recheckKeys}
+                density="compact"
+              />
+            ))}
+          </div>
+        </>
       )}
     </section>
   );
