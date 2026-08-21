@@ -430,16 +430,63 @@ service cloud.firestore {
     //   함께 등록했다. 무스코프 쿼리를 쏘던 mission-engine 경로
     //   (wire.ts / event-forwarder.ts)는 프로젝트별로 쪼개 발사한다.
     //
-    // ★create/update/delete 는 이 티켓에서 건드리지 않는다(읽기 경로 전용).
-    //   즉 **쓰기 쪽 크로스테넌트 구멍은 아직 열려 있다** — 로그인한 외부인이
-    //   남의 미션을 update/delete 할 수 있다. 별건으로 보고했다. 여기서 같이
-    //   조이지 않는 이유는 쓰기 게이트가 main(익명 가능)·MCP·렌더러 세 주체의
-    //   실측을 더 요구하고, 그 조사 없이 조이면 엔진이 조용히 죽기 때문이다.
+    // ★쓰기 테넌트 경계 (티켓 tGQ2c13YNalM5rqRetOE) — **이제 read/write 전부 닫혔다.**
+    //
+    //   #1113(위 read 항목)은 읽기만 닫았고 쓰기 세 축은 `isAuthenticated()` 로
+    //   남겨 뒀다. 즉 **로그인만 하면 남의 테넌트 미션을 update/delete 할 수 있었다.**
+    //   읽기 유출보다 나쁜 축이다 — 유출은 되돌릴 수 있지만 삭제는 못 되돌린다.
+    //   이 티켓이 그 셋을 flows 블록과 같은 관용구로 조인다.
+    //
+    // ★delete 를 `if false` 로 잠그지 못한 이유 — 실측:
+    //   "앱이 안 쓰면 if false 가 가장 싼 잠금"이라는 가설로 시작했는데
+    //   **미션 삭제는 실사용 경로다**:
+    //     - src/components/tabs/MissionsTab.tsx:268 handleDelete (미션 영구 삭제)
+    //     - src/components/tabs/MissionsTab.tsx:301 handleClearArchive (아카이브 일괄)
+    //     → src/services/missionService.ts:111 deleteMission
+    //   조사 없이 잠갔으면 미션탭의 삭제·아카이브 정리가 통째로 죽었다. 그래서
+    //   "차단"이 아니라 "멤버로 제한"이 정답이다.
+    //
+    // ★조여도 안 깨지는 근거 — 쓰기 경로 전수 조사(주체 3):
+    //   [렌더러·실사용자 auth] MissionsTab.tsx:145/235 create(projectId 명시),
+    //     missionService.ts:106 updateDoc, :160/:193 txn.update, :268/:301 delete
+    //   [main/mission-engine·custom token] store-impl.ts:155 addDoc(projectId 명시),
+    //     :171 updateDoc, dispatcher-impl.ts:81 updateDoc(taskIds)
+    //   [MCP 서버·custom token, 익명폴백 없음] tools.ts:1530 addDoc
+    //     (implicit-mission.ts:162 이 projectId 를 항상 채운다), :1551 updateDoc,
+    //     mcp-server/projection.ts:378 txn.update
+    //   [Cloud Functions] index.ts:13554 는 admin SDK **read 전용** — 룰을 우회하며
+    //     이 변경의 영향을 받지 않는다.
+    //   → create 3곳은 전부 payload 에 projectId 를 넣는다(멤버십 요구 OK).
+    //   → update 9곳은 전부 **부분 패치이고 projectId 를 건드리지 않는다**.
+    //     updateDoc/txn.update 의 `request.resource.data` 는 "기존 문서 + 패치"의
+    //     병합값이라, projectId 핀은 정상 쓰기를 하나도 막지 않고 테넌트 이전
+    //     (남의 미션을 내 프로젝트로 끌어오기)만 막는다. 프로덕션에 문서를 통째로
+    //     덮는 setDoc 경로는 0건이다.
+    //   → 애초에 read 가 #1113 로 이미 멤버 스코프인데 세 주체 모두 정상 동작
+    //     중이다 = 같은 isProjectMember 게이트를 쓰기에 걸어도 통과할 수 있는
+    //     신원이라는 실측 증거다.
+    //
+    // ★projectId 부재 문서(구/손상)는 쓰기도 fail-closed 다 — read 와 같은 규율.
+    //   `.get('projectId','')` 로 필드 부재를 ""(=거부)로 떨어뜨린다. 그런 문서는
+    //   이미 아무도 못 읽으므로, 못 고치는 대신 남이 지울 수도 없게 된다.
+    //   (정리가 필요하면 룰을 우회하는 admin SDK 로 한다.)
+    //
+    // ★남은 것: 없다. read/create/update/delete 네 축 모두 프로젝트 멤버 스코프다.
+    //   필드 단위 무결성(예: 남의 projectId 로 create, status 전이 검증)은 이
+    //   경계와 별개 층이고, projectId 위조 create 는 아래 create 규칙이 이미 막는다
+    //   (자기가 멤버인 프로젝트로만 만들 수 있다).
     match /missions/{missionId} {
       allow read: if canReadProjectScopedDoc();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      allow create: if isAuthenticated()
+        && request.resource.data.get('projectId', '') != ''
+        && isProjectMember(request.resource.data.projectId);
+      allow update: if isAuthenticated()
+        && resource.data.get('projectId', '') != ''
+        && isProjectMember(resource.data.projectId)
+        && request.resource.data.get('projectId', '') == resource.data.projectId;
+      allow delete: if isAuthenticated()
+        && resource.data.get('projectId', '') != ''
+        && isProjectMember(resource.data.projectId);
     }
 
     // ===== Cost Logs (Phase 3) =====

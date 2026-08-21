@@ -59,14 +59,24 @@ async function signInWithCustomTokenOrAnonymousBaseline(
       throw error;
     }
     // 토큰이 무효로 확정된 경우: 죽은 토큰이 spawn 되는 에이전트들에게 상속되지
-    // 않도록 env 에서 제거하고, missions 컬렉션 전용 익명 베이스라인으로 내려간다
-    // (missions 룰은 isAuthenticated 만 검사하는 한시 완화 상태 — firestore.rules
-    // 참조). 무증상이 되지 않도록: renderer 의 syncAgentCustomToken 경로는 거부를
-    // ok:false 로 정직하게 반환하며(firebase-auth-sync.ts), 여기는 startup 잔존
-    // 토큰 처리 전용이다.
+    // 않도록 env 에서 제거하고, 익명 베이스라인으로 내려간다.
+    //
+    // ★여기 있던 "missions 컬렉션 전용 접근" 설명은 이제 사실이 아니다.
+    //   missions 룰의 `isAuthenticated()` 한시 완화는 두 티켓에 걸쳐 사라졌다:
+    //     - read              → 티켓 Ciriq5ASEvAlA8TnKxhW (canReadProjectScopedDoc)
+    //     - create/update/delete → 티켓 tGQ2c13YNalM5rqRetOE (isProjectMember)
+    //   익명 uid 는 어떤 프로젝트의 멤버도 아니므로 **익명 베이스라인은 missions
+    //   에 대해 읽기도 쓰기도 전부 PERMISSION_DENIED 다.** 즉 이 폴백이 확보해
+    //   주는 미션 접근 권한은 0이고, 남는 역할은 "auth 상태를 settle 시켜
+    //   startup 이 매달리지 않게 한다" 뿐이다.
+    //   무증상이 되지 않도록: renderer 의 syncAgentCustomToken 경로는 거부를
+    //   ok:false 로 정직하게 반환하며(firebase-auth-sync.ts), 여기는 startup 잔존
+    //   토큰 처리 전용이다. 정상 동작은 renderer 가 신선한 토큰을 재동기화할 때
+    //   복구된다.
     console.error(
       `[MissionEngine] custom-token REJECTED (code=${code}); clearing bad token from env, ` +
-        "using anonymous baseline (missions-only access) until renderer re-syncs a fresh token",
+        "falling back to anonymous baseline — mission data stays PERMISSION_DENIED " +
+        "until renderer re-syncs a fresh token",
     );
     delete process.env.MARBLO_FIREBASE_CUSTOM_TOKEN;
     await signInAnonymously(auth);

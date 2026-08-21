@@ -2690,6 +2690,246 @@ describe("missions — in-스코프 쿼리 계약 (mission-engine 이 의존)", 
   });
 });
 
+// ===== missions 쓰기 축 테넌트 격리 (티켓 tGQ2c13YNalM5rqRetOE) =====
+//
+// #1113 은 read 만 닫았고 create/update/delete 는 `isAuthenticated()` 로 남아
+// 있었다 — 로그인만 하면 남의 테넌트 미션을 고치거나 **지울 수 있었다**.
+// 읽기 유출은 되돌릴 수 있지만 삭제는 못 되돌린다.
+//
+// ★두 방향을 다 못박는다:
+//   (거부) 아래 "★" 테스트들은 **옛 룰에서 전부 통과해 assertFails 가 실패**한다.
+//          즉 구멍을 실제로 막았다는 증거다.
+//   (통과) "정당한 쓰기" describe 는 앱의 실제 write payload 모양 그대로다.
+//          하나라도 깨지면 룰을 과하게 조여 미션 엔진/탭을 죽였다는 신호다.
+//
+// 참고: OUTSIDER_ID 는 OTHER_PROJECT_ID 의 owner 다 — "남의 테넌트의 정당한
+// 멤버"이지 미인증 사용자가 아니다. 경계가 인증이 아니라 **멤버십**임을 검증한다.
+
+describe("missions — 쓰기 축 크로스테넌트 격리 (거부되어야 하는 것)", () => {
+  it("★외부인은 우리 미션을 삭제할 수 없다 (옛 룰에선 로그인만으로 지워졌다)", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(deleteDoc(doc(db, "missions", "mission-ours")));
+  });
+
+  it("★멤버라도 타 테넌트 미션은 삭제할 수 없다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(deleteDoc(doc(db, "missions", "mission-other-tenant")));
+  });
+
+  it("★외부인은 우리 미션을 수정할 수 없다 (옛 룰에선 뚫렸음)", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "missions", "mission-ours"), { status: "abandoned" }),
+    );
+  });
+
+  it("★멤버라도 타 테넌트 미션은 수정할 수 없다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "missions", "mission-other-tenant"), {
+        goal: "hijacked",
+      }),
+    );
+  });
+
+  it("★남의 프로젝트 이름으로 미션을 만들 수 없다 (create 위조)", async () => {
+    // 외부인이 우리 projectId 를 알아내 우리 보드에 미션을 심는 공격.
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      addDoc(collection(db, "missions"), {
+        projectId: PROJECT_ID,
+        goal: "injected mission",
+        status: "planning",
+        taskIds: [],
+        lastActivityAt: new Date(),
+      }),
+    );
+  });
+
+  it("★멤버도 자기가 속하지 않은 프로젝트로는 미션을 만들 수 없다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      addDoc(collection(db, "missions"), {
+        projectId: OTHER_PROJECT_ID,
+        goal: "cross-tenant create",
+        status: "planning",
+        taskIds: [],
+        lastActivityAt: new Date(),
+      }),
+    );
+  });
+
+  it("★projectId 없는 미션은 만들 수 없다 (귀속 불가 문서 생성 차단)", async () => {
+    // 이게 열려 있으면 "아무도 못 읽고 아무도 못 지우는" 좀비 문서를 누구나
+    // 무한히 심을 수 있다 — fail-closed read 의 부작용을 무기로 쓰는 경로다.
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      addDoc(collection(db, "missions"), {
+        goal: "no project",
+        status: "planning",
+        taskIds: [],
+        lastActivityAt: new Date(),
+      }),
+    );
+  });
+
+  it("★미션을 다른 테넌트로 옮길 수 없다 (projectId 핀)", async () => {
+    // 멤버는 이 문서에 쓸 권한이 있다. 그래도 projectId 를 바꿔 남의 프로젝트로
+    // 밀어넣거나(또는 남의 것을 끌어오거나) 하는 것은 막혀야 한다.
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "missions", "mission-ours"), {
+        projectId: OTHER_PROJECT_ID,
+      }),
+    );
+  });
+
+  it("★projectId 없는 손상 미션은 아무도 수정·삭제할 수 없다 (read 와 같은 fail-closed)", async () => {
+    const member = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(member, "missions", "mission-legacy-no-project"), {
+        status: "completed",
+      }),
+    );
+    await assertFails(
+      deleteDoc(doc(member, "missions", "mission-legacy-no-project")),
+    );
+    // 플랫폼 admin 도 예외가 아니다 — 원장(canReadLedgerDoc)의 projectId="" 예외를
+    // 여기 복사하지 않기로 한 #1113 의 판단을 쓰기에도 그대로 유지한다.
+    const admin = adminContext().firestore();
+    await assertFails(
+      deleteDoc(doc(admin, "missions", "mission-legacy-no-project")),
+    );
+  });
+
+  it("미인증 사용자는 미션을 만들거나 고치거나 지울 수 없다", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(
+      addDoc(collection(db, "missions"), { projectId: PROJECT_ID, goal: "x" }),
+    );
+    await assertFails(
+      updateDoc(doc(db, "missions", "mission-ours"), { goal: "x" }),
+    );
+    await assertFails(deleteDoc(doc(db, "missions", "mission-ours")));
+  });
+});
+
+// ★회귀 0 증명 — 아래 payload 는 전부 앱의 **실제** 쓰기 모양이다(파일:라인 명시).
+//   #1113 이 read 를 조일 때 무스코프 쿼리 3곳을 먼저 찾아 엔진이 죽는 걸 막았듯,
+//   쓰기도 "정당한 write 가 살아 있다"를 못박지 않으면 조용히 죽는다.
+describe("missions — 정당한 쓰기가 살아 있다 (앱 실경로 payload)", () => {
+  it("멤버는 자기 프로젝트에 미션을 만들 수 있다 — MissionsTab.tsx:145 handleLaunch", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      addDoc(collection(db, "missions"), {
+        projectId: PROJECT_ID,
+        goal: "ship the thing",
+        templateId: "quick-fix",
+        status: "planning",
+        ownerOrchestratorSessionId: "pending",
+        steps: [],
+        currentStepIndex: 0,
+        taskIds: [],
+        contextLog: [],
+        launchedAt: new Date(),
+        lastActivityAt: new Date(),
+        completedAt: null,
+      }),
+    );
+  });
+
+  it("MCP 암묵적 미션 생성도 통과한다 — implicit-mission.ts:162 buildImplicitMissionDoc", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      addDoc(collection(db, "missions"), {
+        projectId: PROJECT_ID,
+        goal: "implicit",
+        templateId: "implicit",
+        status: "active",
+        missionKind: "implicit",
+        implicitLabel: "some-label",
+        ownerOrchestratorSessionId: "",
+        steps: [],
+        currentStepIndex: 0,
+        taskIds: [],
+        contextLog: [],
+        launchedAt: new Date(),
+        lastActivityAt: new Date(),
+        completedAt: null,
+      }),
+    );
+  });
+
+  it("★projectId 를 안 보내는 부분 패치가 통과한다 — missionService.ts:106 updateMission", async () => {
+    // 이 테스트가 이 티켓 설계의 핵심 근거다: 앱의 update 는 전부 부분 패치라
+    // projectId 를 보내지 않는다. updateDoc 의 request.resource.data 는 "기존
+    // 문서 + 패치" 병합값이므로 projectId 핀이 정상 쓰기를 막지 않는다.
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "missions", "mission-ours"), {
+        status: "completed",
+        lastActivityAt: new Date(),
+        completedAt: new Date(),
+      }),
+    );
+  });
+
+  it("taskIds arrayUnion 갱신이 통과한다 — tools.ts:1551 / dispatcher-impl.ts:81", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "missions", "mission-ours"), {
+        taskIds: arrayUnion("task-1"),
+        lastActivityAt: new Date(),
+      }),
+    );
+  });
+
+  it("projection 점표기 갱신이 통과한다 — mcp-server/projection.ts:378 txn.update", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "missions", "mission-ours"), {
+        taskIds: ["task-1"],
+        "projection.statusCounts": { DONE: 1 },
+        "projection.lastTaskActivityAt": new Date(),
+        lastActivityAt: new Date(),
+      }),
+    );
+  });
+
+  it("projectId 를 같은 값으로 실어 보내도 통과한다 (핀은 no-op 재확인을 막지 않는다)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "missions", "mission-ours"), {
+        projectId: PROJECT_ID,
+        status: "active",
+      }),
+    );
+  });
+
+  it("멤버는 자기 프로젝트 미션을 삭제할 수 있다 — MissionsTab.tsx:268 handleDelete", async () => {
+    // ★delete 를 `if false` 로 잠갔다면 이 테스트가 깨진다. 그래서 못 잠갔다.
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(deleteDoc(doc(db, "missions", "mission-ours")));
+  });
+
+  it("owner 도 미션을 삭제할 수 있다 — MissionsTab.tsx:301 handleClearArchive 일괄정리", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(deleteDoc(doc(db, "missions", "mission-ours")));
+  });
+
+  it("타 테넌트 멤버는 자기 테넌트 미션을 정상적으로 다룰 수 있다 (경계는 대칭이다)", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "missions", "mission-other-tenant"), {
+        status: "completed",
+      }),
+    );
+    await assertSucceeds(
+      deleteDoc(doc(db, "missions", "mission-other-tenant")),
+    );
+  });
+});
+
 describe("cost_logs — 크로스테넌트 read 격리", () => {
   it("프로젝트 멤버는 자기 프로젝트 비용로그를 읽을 수 있다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
