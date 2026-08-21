@@ -543,7 +543,7 @@ export const LADDER_EXCLUSIONS: Readonly<Record<string, string>> = {
   // 키 없는 기기에서의 안전은 이 표가 아니라 `AutoSelectInput.modelAvailable`
   // (= `vendorEnvReadiness(id).ready`, bridge-server.ts 배선)이 런타임에 맡는다.
   "deepseek-v4-flash":
-    "티켓 JrxWAAGqgnso5Rik6svk 범위는 DeepSeek 스폰/퀵레인 벤더 추가다. 오케 후보가 아니며 자동선택 사다리도 네이티브 Codex 진입칸을 흔들지 않는다 — 명시 선택/퀵레인으로만 닿는다.",
+    "티켓 JrxWAAGqgnso5Rik6svk 범위는 DeepSeek 스폰/퀵레인 벤더 추가이고, 자동선택 사다리는 네이티브 Codex 진입칸을 흔들지 않는다 — 명시 선택/퀵레인으로만 닿는다. ★2026-08-21(7HthjBEf)에 오케 셀렉터에는 편입됐지만 그것은 사용자가 **명시적으로 고르는** 축이라 이 표(=자동선택 후보)와는 별개다. 자동 라우팅이 사용자 동의 없이 유료 선불 잔액을 태우는 것은 여전히 막는다.",
   "deepseek-v4-pro":
     "deepseek-v4-flash 와 같은 사유. V4 Pro 모델이지만 이 티켓은 자동 라우팅 정책 편입이 아니라 스폰 전용 env-swap 편입이다.",
 };

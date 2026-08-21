@@ -347,6 +347,21 @@ export interface OrchestratorLaunchOptions {
   nativeModelOverride?: string;
   handoffPrompt?: string;
   handoffMode?: "wait" | "takeover";
+  /**
+   * 부트 프롬프트에 덧붙일 **사용자 대상 공지** 한 줄(2026-08-21, 7HthjBEf).
+   *
+   * 오늘 유일한 발신자는 벤더 잔액 게이트다 — DeepSeek 잔액이 임계 이하일 때
+   * "충전하세요" 를 사장님이 말한 **내부 터미널**로 띄우는 채널이다. 차단이 아니라
+   * 경고라 스폰은 그대로 진행되고, 오케가 이 문장을 읽어 사용자에게 먼저 전한다.
+   *
+   * ★왜 `PtyManager.write` 가 아닌가: 그건 stdin 이라 표시가 아니라 **키 입력**이고,
+   * CLI 프롬프트에 문자열이 타이핑돼 들어간다. `pty:data` 위조도 못 쓴다 — codex
+   * TUI 는 alt-screen 이라 끼워 넣은 줄이 다음 리드로우에 덮이거나 화면을 깨뜨린다.
+   * 부트 프롬프트는 `handoffPrompt` 가 이미 쓰는, 검증된 같은 채널이다.
+   *
+   * 미지정이면 프롬프트가 종전과 **바이트 동일**하다.
+   */
+  bootNotice?: string;
 }
 
 /** Second argument handed to launch()'s `onPtyReady` callback. */
@@ -1291,9 +1306,14 @@ export class OrchestratorManager {
             ]
               .filter(Boolean)
               .join(" ");
-      const initialPrompt = launchOptions?.handoffPrompt
-        ? `${baseInitialPrompt}\n\n${launchOptions.handoffPrompt}`
+      // 공지는 핸드오프보다 **앞**에 붙는다 — 핸드오프 프롬프트는 "이 일을 이어서
+      // 하라" 는 지시라, 뒤에 붙이면 오케가 작업에 들어간 뒤에야 공지를 읽는다.
+      const promptWithNotice = launchOptions?.bootNotice
+        ? `${baseInitialPrompt}\n\n${launchOptions.bootNotice}`
         : baseInitialPrompt;
+      const initialPrompt = launchOptions?.handoffPrompt
+        ? `${promptWithNotice}\n\n${launchOptions.handoffPrompt}`
+        : promptWithNotice;
 
       let sent = false;
       // Login-screen backstop. If the CLI boots into its login menu

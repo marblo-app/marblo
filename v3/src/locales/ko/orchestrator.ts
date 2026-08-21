@@ -26,6 +26,14 @@ export const orchestrator = {
     "{model} 오케를 띄우지 못했습니다 — 이 CLI 의 로그인이 필요합니다",
   "orchestrator.blocked.authHint":
     "다른 CLI 가 로그인돼 있어도 오케로 고른 이 CLI 는 따로 로그인해야 합니다. 아래 조치를 실행한 뒤 다시 시작하세요.",
+  // 스폰 차단 안내 — 벤더 크레덴셜/잔액으로 막힌 경우(7HthjBEf, DeepSeek).
+  // ★조치가 넷으로 갈린다(충전 / 키 등록 / 키 교체 / 네트워크). 어느 것인지는
+  // main 이 준 `action` 한 줄이 말하고, 여기 hint 는 그 위에 얹는 공통 맥락이다 —
+  // "로그인 문제가 아니다" 를 먼저 못박지 않으면 사용자는 위저드를 찾으러 간다.
+  "orchestrator.blocked.vendorTitle":
+    "{model} 오케를 띄우지 못했습니다 — 이 모델을 돌리는 벤더 크레덴셜/잔액 문제입니다",
+  "orchestrator.blocked.vendorHint":
+    "로그인 문제가 아닙니다. 이 모델은 구독이 아니라 벤더 선불 크레딧으로 돌아서, 잔액이 0 이 되거나 키가 없으면 CLI 로그인이 멀쩡해도 뜨지 않습니다. 위 조치를 끝낸 뒤 [사용량] 탭 → 벤더 크레딧에서 새로고침(⟳)해 잔액을 확인하고 다시 시작하세요. 여기서 조용히 기본 모델로 바꿔 띄우지 않는 이유는, 고른 것과 다른 백엔드가 말없이 도는 편이 훨씬 나쁘기 때문입니다.",
   "orchestrator.blocked.login": "{model} 로그인",
   "orchestrator.blocked.dismiss": "닫기",
   // Category labels

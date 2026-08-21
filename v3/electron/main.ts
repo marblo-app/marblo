@@ -80,6 +80,7 @@ import {
 } from "./orchestrator-handoff";
 import {
   ORCHESTRATOR_BLOCK_REASON_MCP,
+  ORCHESTRATOR_BLOCK_REASON_VENDOR,
   OrchestratorSwitchStepTimeoutError,
   runOrchestratorSwitch,
   type OrchestratorSwitchStage,
@@ -149,7 +150,11 @@ import {
   normalizeOrchestratorModelSetting as normalizeOrchestratorModelSettingImpl,
   orchestratorModelTypeForSetting,
   orchestratorLaunchPin,
+  orchestratorVendorGateTarget,
   quickLaneVendorCatalog,
+  claudeOrchestratorChoices,
+  codexOrchestratorChoices,
+  grokOrchestratorChoices,
   resolveModelPin,
   pickPreferredOrchestratorHarness,
   ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY,
@@ -172,6 +177,11 @@ import {
 } from "./training-capture";
 import { getAccountRateLimits } from "./account-usage";
 import { getVendorBalance, hasBalanceProbe } from "./vendor-balance";
+import {
+  decideOrchestratorVendorGate,
+  orchestratorVendorBootNotice,
+  type OrchestratorVendorGateStatus,
+} from "./orchestrator-vendor-gate";
 import { mainTelemetry } from "./telemetry";
 import { initMainSentry } from "./sentry-main";
 import { loadPackagedMainFirebaseConfigEnv } from "./firebase-config-env";
@@ -3143,6 +3153,17 @@ async function ensureAssistantTriggerOrchestrator(
     );
     return null;
   }
+  // 3번째 관문(벤더 잔액). ★이 경로는 **사용자가 화면 앞에 없을 때** 오케를
+  // 깨우므로 배너를 띄울 상대가 없다 — 그래서 조용히 안 띄우는 대신 사유를 로그로
+  // 남기고 멈춘다. 여기서 통과시키면 무인 기동이 매번 400 을 뱉는 오케를 세운다.
+  const orchVendorGate =
+    await checkOrchestratorVendorGate(effectiveModelSetting);
+  if (!orchVendorGate.ok) {
+    console.warn(
+      `[AssistantTriggers] orchestrator vendor gate blocked project=${projectId} status=${orchVendorGate.status} — ${orchVendorGate.action}`
+    );
+    return null;
+  }
   const port = bridgeServer.getPort();
   if (!port) {
     console.warn(
@@ -3170,6 +3191,11 @@ async function ensureAssistantTriggerOrchestrator(
       codexModelOverride: orchestratorPins.codexModel,
       codexEffortOverride: orchestratorPins.codexEffort,
       nativeModelOverride: orchestratorPins.nativeModel,
+      // 임계 이하 잔액 경고를 오케 자신에게 전달한다(없으면 필드 자체가 안 붙어
+      // 부트 프롬프트가 종전과 바이트 동일하다).
+      ...(orchVendorGate.bootNotice
+        ? { bootNotice: orchVendorGate.bootNotice }
+        : {}),
     }
   );
   saveProjectOrchestratorModel(
@@ -4141,6 +4167,127 @@ async function checkOrchestratorMcpGate(
     ok: false,
     action: `grok 오케 차단 — ${probe.detail}. 프로젝트 폴더 신뢰/설정을 확인하세요.`,
   };
+}
+
+/**
+ * 오케 스폰 **3번째 관문** — 인증·MCP 다음으로, 이 오케가 **이번 달 실제로 돌 수
+ * 있는 크레덴셜을 갖고 있는지** 본다. (2026-08-21, 티켓 7HthjBEf)
+ *
+ * ── 왜 세 번째 관문이 필요했나 ──────────────────────────────────────────
+ * 오케 모델 선택은 프로젝트별 **영구 저장**이다. 그래서 종전 규율은 "env-swap 벤더는
+ * 아예 셀렉터에 세우지 않는다" 였다 — 키가 빠진 순간부터 매 재시작이 말없이 하네스
+ * 기본 백엔드로 새기 때문이다(`model-selection.orchestratorSelectorEligible` 주석).
+ *
+ * DeepSeek 은 그 필터의 첫 예외인데, 예외를 **지탱하는 것이 이 함수**다. DeepSeek 은
+ * 구독제가 아니라 선불 충전이라 만료일이 없고 잔액이 말없이 0 이 된다(2026-08-21
+ * 아침 실측). 즉 "저장된 값이 나중에 못 쓰게 되는" 구간이 GLM 보다 더 잘 온다.
+ * 그때 **조용히 Codex 기본 백엔드로 새지 않고 사유를 띄우고 멈추는 것**이 이 관문의
+ * 유일한 일이다.
+ *
+ * ── 호출 빈도 ───────────────────────────────────────────────────────────
+ * ★스폰마다 벤더 API 를 때리지 않는다. `getVendorBalance` 가 TTL 10분 캐시 +
+ * in-flight 접기를 이미 쥐고 있어 대부분의 스폰은 요청 0 이다. 임계 **근처에서만**
+ * 한 번 더 확인한다(캐시가 low 로 답하면 force 로 재조회 — 그것도
+ * `MIN_REFRESH_INTERVAL_MS`(15초) 하한이 걸려 연타가 API 연타가 되지 않는다).
+ * 잔액은 0 에 가까울수록 빨리 변하므로, 자주 볼 값어치가 있는 구간이 거기뿐이다.
+ *
+ * ── 기존 경로 무변경 ────────────────────────────────────────────────────
+ * ★네이티브 하네스(claude/codex/grok/antigravity)와 접미 없는 칸은
+ * `orchestratorVendorGateTarget` 이 즉시 null 을 돌려 **요청도 판정도 없이** 통과한다
+ * — 기존 오케 스폰은 바이트 동일하다.
+ *
+ * ── ★이 관문이 **덮지 않는** 자리(알고 남긴다) ─────────────────────────
+ * 오케를 띄우는 입구는 넷인데 이 관문은 셋에 걸려 있다: launch IPC · switch ·
+ * assistant-trigger 기동. 넷째는 `OrchestratorManager` 의 **크래시 자동재시작**
+ * 이고, 그 경로는 `lastLaunchOptions` 를 그대로 재사용해 main 을 거치지 않는다.
+ *
+ * 안 건 이유: (a) 티켓이 지목한 위험 구간은 "잔액 0 이 된 뒤 **앱 재시작**" 이고
+ * 그 경로는 launch IPC 라 여기서 잡힌다. (b) 세션 도중 0 이 되어 CLI 가 죽는
+ * 경우에도 크래시 예산(`ORCH_MAX_RESTARTS`)이 재시작을 3회로 끊고 status=error
+ * 로 멈춘다 — 무한 루프가 아니다. (c) 이 관문을 거기 걸려면 매니저가 main 의
+ * 비동기 게이트를 콜백으로 되받아야 해서 의존 방향이 뒤집힌다.
+ * 재시작 루프가 실제로 관측되면 그때 콜백 축을 판다.
+ */
+async function checkOrchestratorVendorGate(setting: string): Promise<{
+  ok: boolean;
+  action?: string;
+  status?: OrchestratorVendorGateStatus;
+  /** 임계 이하(비차단)일 때 오케 부트 프롬프트에 실을 충전 안내. */
+  bootNotice?: string;
+}> {
+  const target = orchestratorVendorGateTarget(setting);
+  if (!target) return { ok: true };
+
+  let balance = await getVendorBalance(target.vendor);
+  let verdict = decideOrchestratorVendorGate({
+    vendor: target.vendor,
+    vendorLabel: target.vendorLabel,
+    balance,
+    requiredEnvKeys: target.requiredEnvKeys,
+  });
+  // ★임계 근처에서만 한 번 더. 캐시가 "얼마 안 남았다" 로 답했다면 그 값은 이미
+  // 낡았을 수 있고, 여기서 틀리면 사용자는 세션 중간에 말없이 끊긴다.
+  if (verdict.status === "low" && balance.cached) {
+    balance = await getVendorBalance(target.vendor, { force: true });
+    verdict = decideOrchestratorVendorGate({
+      vendor: target.vendor,
+      vendorLabel: target.vendorLabel,
+      balance,
+      requiredEnvKeys: target.requiredEnvKeys,
+    });
+  }
+
+  if (!verdict.allowed) {
+    // ★키 값도 응답 원문도 남기지 않는다 — 상태·모델·키 이름뿐이다.
+    console.error(
+      `[orchestratorSession] Blocked by vendor gate — ${target.vendor}/${target.modelId} status=${verdict.status}`,
+      {
+        vendor: target.vendor,
+        model: target.modelId,
+        status: verdict.status,
+        ...(verdict.httpStatus ? { httpStatus: verdict.httpStatus } : {}),
+        ...(verdict.missingEnvKeys
+          ? { missingEnvKeys: verdict.missingEnvKeys }
+          : {}),
+      }
+    );
+    return { ok: false, action: verdict.action, status: verdict.status };
+  }
+
+  if (verdict.status === "low") {
+    console.warn(
+      `[orchestratorSession] ${target.vendor} 잔액 임계 이하 — 스폰은 허용하고 충전 안내를 띄운다`,
+      { vendor: target.vendor, model: target.modelId }
+    );
+    const notice = orchestratorVendorBootNotice(verdict);
+    return {
+      ok: true,
+      status: verdict.status,
+      action: verdict.action,
+      ...(notice ? { bootNotice: notice } : {}),
+    };
+  }
+  return { ok: true, status: verdict.status };
+}
+
+/**
+ * 인증 게이트가 막았을 때 **렌더러가 어느 화면을 열어야 하나**의 표식.
+ *
+ * `checkSpawnAuthGate` 는 env-swap 벤더의 키 부재도 같은 봉투로 돌려준다
+ * (`reason: "vendor-not-configured"`). 그것을 표식 없이 흘리면 렌더러는 "auth" 로
+ * 읽어 **CLI 로그인 위저드**를 여는데, DeepSeek 오케를 고른 사용자는 Codex 로그인이
+ * 멀쩡하므로 위저드가 "연결됨" 만 보여주고 끝난다 — 실패 사유 넷 중 "키 없음" 이
+ * 화면에서 사라지는 자리가 정확히 여기다.
+ *
+ * 오케 후보 중 env-swap 벤더는 오늘 DeepSeek 뿐이므로(런타임 게이트 집합) 이
+ * 재라벨은 다른 하네스의 종전 동작을 한 글자도 바꾸지 않는다.
+ */
+function orchestratorAuthBlockReason(
+  gateReason?: string
+): { reason: string } | Record<string, never> {
+  return gateReason === "vendor-not-configured"
+    ? { reason: ORCHESTRATOR_BLOCK_REASON_VENDOR }
+    : {};
 }
 
 /** 프로젝트별 저장 모델 (없으면 null). 반환값은 정규화된 설정 문자열. */
@@ -7408,6 +7555,51 @@ ipcMain.handle("models:quickLaneCatalog", () => {
 });
 
 /**
+ * 오케 모델 셀렉터 카탈로그 — **레지스트리 파생 목록 + 이 프로세스의 벤더 판정**.
+ *
+ * `models:quickLaneCatalog` 과 같은 분업이다: 목록은 순수 모듈이 만들고
+ * (`*OrchestratorChoices`), 시크릿·잔액을 봐야 답할 수 있는 축만 여기서 얹는다.
+ * `selectorEligible` 이 시크릿을 안 읽는 순수함수인 것은 우연이 아니라 "영구 저장
+ * 되는 기본값" 결정의 구현이라(`orchestratorSelectorEligible` 주석) 그 성질을
+ * 유지한 채 판정만 main 이 붙여 내린다.
+ *
+ * ★값은 내려가지 않는다 — 금액·통화·상태·키 **이름**뿐이다.
+ * ★런타임 게이트가 없는 칸(claude/codex/grok 네이티브 전부)은 `gate` 가 undefined 라
+ *   종전 목록과 의미가 완전히 같다. 벤더 API 도 그 칸들 때문에는 한 번도 안 맞는다.
+ */
+ipcMain.handle("models:orchestratorCatalog", async () => {
+  const choices = [
+    ...claudeOrchestratorChoices(),
+    ...codexOrchestratorChoices(),
+    ...grokOrchestratorChoices(),
+  ];
+  // 벤더당 한 번만 조회한다(같은 벤더 칸이 둘 이상이다 — flash/pro). 조회 자체도
+  // `getVendorBalance` 의 TTL 캐시 + in-flight 접기를 그대로 탄다.
+  const verdicts = new Map<
+    string,
+    Awaited<ReturnType<typeof decideOrchestratorVendorGate>>
+  >();
+  for (const choice of choices) {
+    if (!choice.runtimeGated || !choice.vendor) continue;
+    if (verdicts.has(choice.vendor)) continue;
+    const balance = await getVendorBalance(choice.vendor);
+    verdicts.set(
+      choice.vendor,
+      decideOrchestratorVendorGate({
+        vendor: choice.vendor,
+        vendorLabel: choice.vendorLabel,
+        balance,
+        requiredEnvKeys: choice.requiredEnvKeys,
+      })
+    );
+  }
+  return choices.map((choice) => {
+    const gate = choice.vendor ? verdicts.get(choice.vendor) : undefined;
+    return { ...choice, ...(gate ? { gate } : {}) };
+  });
+});
+
+/**
  * 사용량 탭 상단 **모델 정보표**(단가 · 개략 SWE-bench · 컨텍스트).
  *
  * quickLaneCatalog 과 같은 이유로 IPC 다 — 렌더러는 `electron/model-registry.ts`
@@ -8471,6 +8663,12 @@ ipcMain.handle(
       stage: "queued",
     };
 
+    // 잔액 임계 경고는 checkAuth 단계에서 판정되고 launchNew 단계에서 쓰인다.
+    // (`runOrchestratorSwitch` 는 두 단계 사이로 값을 넘기는 축이 없다 — 그 축을
+    //  늘리는 대신 이 스코프의 지역변수로 나른다. 스위치는 프로젝트당 락이 걸려
+    //  동시에 둘이 돌지 않으므로 이 변수가 경합하지 않는다.)
+    let switchVendorBootNotice: string | undefined;
+
     const op = runOrchestratorSwitch(args, {
       buildSnapshot: (switchArgs) =>
         buildSwitchHandoffSnapshot(switchArgs, resolvedRootPath, targetModel),
@@ -8486,6 +8684,8 @@ ipcMain.handle(
             model: gate.model,
             action: gate.action,
             installed: gate.installed,
+            // launch 와 같은 재라벨 — 벤더 키 부재를 로그인 위저드로 보내지 않는다.
+            ...orchestratorAuthBlockReason(gate.reason),
           };
         }
         // launch 와 같은 2번째 관문 — MCP 툴이 안 붙는 오케로는 스위치하지 않는다.
@@ -8501,6 +8701,22 @@ ipcMain.handle(
             // 인증이 아니라 MCP 가용성 — 렌더러가 CLI 로그인 위저드 대신
             // 폴더신뢰/MCP 안내를 띄우게 하는 표식.
             reason: ORCHESTRATOR_BLOCK_REASON_MCP,
+          };
+        }
+        // launch 와 같은 3번째 관문 — 잔액이 없는 오케로는 스위치하지 않는다.
+        // ★스위치는 **항상 현재 오케를 stop 한 뒤** 새로 띄우므로, 여기서 막지
+        // 않으면 사용자는 멀쩡히 돌던 오케를 잃고 그 자리에 400 만 뱉는 껍데기를
+        // 받는다(MCP 관문을 여기 둔 것과 정확히 같은 이유).
+        const vendorGate =
+          await checkOrchestratorVendorGate(targetModelSetting);
+        switchVendorBootNotice = vendorGate.bootNotice;
+        if (!vendorGate.ok) {
+          return {
+            ok: false,
+            model,
+            action: vendorGate.action,
+            installed: true,
+            reason: ORCHESTRATOR_BLOCK_REASON_VENDOR,
           };
         }
         return {
@@ -8543,6 +8759,9 @@ ipcMain.handle(
             codexModelOverride: targetPins.codexModel,
             codexEffortOverride: targetPins.codexEffort,
             nativeModelOverride: targetPins.nativeModel,
+            ...(switchVendorBootNotice
+              ? { bootNotice: switchVendorBootNotice }
+              : {}),
             handoffPrompt,
             handoffMode: switchArgs.mode,
           }
@@ -8659,6 +8878,8 @@ ipcMain.handle(
           model: orchGate.model ?? orchestratorModel,
           action: orchGate.action ?? "claude login",
           installed: orchGate.installed,
+          // 키 부재는 로그인으로 안 풀린다 — 위저드가 아니라 벤더 키 안내로 보낸다.
+          ...orchestratorAuthBlockReason(orchGate.reason),
         },
       };
     }
@@ -8680,6 +8901,28 @@ ipcMain.handle(
           // ★인증 실패가 아니다 — 렌더러가 CLI 로그인 위저드를 열면 "이미
           // 로그인됨" 만 보여주고 사용자는 이유 없이 막힌 채로 끝난다.
           reason: ORCHESTRATOR_BLOCK_REASON_MCP,
+        },
+      };
+    }
+
+    // 3번째 관문 — 인증도 MCP 도 통과했지만 **벤더 잔액이 없는** 오케 차단.
+    // ★여기가 이 축의 본체다: 잔액 0 이 된 뒤 재시작하면 저장된 DeepSeek 오케가
+    // 그대로 뜨는데, 막지 않으면 codex 가 우리 ChatGPT 로그인으로 벤더 slug 를
+    // 물어보고 HTTP 400 을 받거나(키 있음/잔액 없음) 조용히 기본 백엔드로 샌다.
+    // 그 조용한 샘이 `orchestratorSelectorEligible` 주석이 원래 두려워한 그것이다.
+    const orchVendorGate =
+      await checkOrchestratorVendorGate(effectiveModelSetting);
+    if (!orchVendorGate.ok) {
+      return {
+        sessionId: "",
+        ptySessionId: "",
+        status: "blocked",
+        needsAuth: {
+          model: orchestratorModel,
+          action: orchVendorGate.action ?? "벤더 크레딧 확인",
+          installed: true,
+          // ★로그인 문제가 아니다. 표식이 없으면 렌더러가 CLI 위저드를 연다.
+          reason: ORCHESTRATOR_BLOCK_REASON_VENDOR,
         },
       };
     }
@@ -8735,6 +8978,11 @@ ipcMain.handle(
         codexModelOverride: orchestratorPins.codexModel,
         codexEffortOverride: orchestratorPins.codexEffort,
         nativeModelOverride: orchestratorPins.nativeModel,
+        // 임계 이하 잔액 경고 — 사장님이 말한 "내부 터미널 충전 알림" 이 여기서
+        // 나간다. 차단이 아니므로 스폰은 그대로 진행된다.
+        ...(orchVendorGate.bootNotice
+          ? { bootNotice: orchVendorGate.bootNotice }
+          : {}),
       }
     );
 

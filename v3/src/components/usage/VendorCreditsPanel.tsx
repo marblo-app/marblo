@@ -5,6 +5,7 @@ import type { MessageKey } from "../../locales/ko";
 import { billingFor } from "../../lib/vendorBilling";
 import type { BillingAxis } from "../../lib/vendorBilling";
 import { vendorColor } from "../../lib/usageBreakdown";
+import { vendorBalanceLevel } from "../../lib/vendorBalanceLevel";
 import {
   useVendorBalanceStore,
   vendorBalanceEntry,
@@ -147,6 +148,16 @@ export function balanceProblemMessage(
 ): string | null {
   if (bridgeError) return t("usage.credits.balance.err.bridge");
   if (!result) return null;
+  // ★조회는 성공했는데 **잔액 자체가 문제**인 경우(7HthjBEf). 종전엔 이 줄이 없어
+  // 0.30 USD 도 그냥 숫자 하나로 그려졌고, 사용자는 다음 오케가 왜 안 뜨는지 그때
+  // 처음 알았다. 수위 판정은 오케 스폰 게이트와 **같은 임계**를 쓴다(미러 대조
+  // 테스트가 지킨다) — 화면이 "충분함" 인데 스폰이 막히는 어긋남을 없앤다.
+  if (result.status === "ok") {
+    const level = vendorBalanceLevel(result.amounts);
+    if (level === "depleted") return t("usage.credits.balance.err.depleted");
+    if (level === "low") return t("usage.credits.balance.err.low");
+    return null;
+  }
   switch (result.status) {
     case "no-key":
       return t("usage.credits.balance.err.noKey", {

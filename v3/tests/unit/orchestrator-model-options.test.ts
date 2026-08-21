@@ -225,9 +225,26 @@ describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
   it("★승인게이트 effort(max/ultra)는 셀렉터가 인정하지 않는다 — #602", () => {
     expect(isOrchestratorModel("codex:gpt-5.6-sol@ultra")).toBe(false);
     expect(isOrchestratorModel("codex:gpt-5.6-sol@max")).toBe(false);
+    // ★게이트 칸을 뺀 **나머지는 모델마다 다르다**. 종전엔 codex 칸이 전부
+    // openai 행이라 네 칸으로 같았지만, DeepSeek 이 편입된 뒤로는 그 등식이
+    // 사실이 아니다 — DeepSeek 공식 models.json 은 low/high/max 만 정의하고
+    // medium 이 아예 없어서 셀렉터 칸이 low/high 다(누락이 아니라 벤더 사실).
+    // 그래서 단언을 "게이트 칸이 없다 + 축이 살아 있다" 로 좁힌다. 목록 자체의
+    // 정확성은 위 파생 대조 테스트가 이미 본다.
     for (const o of codexVariants) {
-      expect(o.efforts, o.value).toEqual(["low", "medium", "high", "xhigh"]);
+      expect(o.efforts, o.value).not.toContain("max");
+      expect(o.efforts, o.value).not.toContain("ultra");
+      expect(o.efforts.length, o.value).toBeGreaterThan(0);
     }
+    for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.5", "gpt-5.6-luna"]) {
+      expect(
+        options.find((o) => o.value === `codex:${id}`)?.efforts,
+        id
+      ).toEqual(["low", "medium", "high", "xhigh"]);
+    }
+    expect(isOrchestratorModel("codex:deepseek-v4-flash@max")).toBe(false);
+    expect(isOrchestratorModel("codex:deepseek-v4-flash@medium")).toBe(false);
+    expect(isOrchestratorModel("codex:deepseek-v4-flash@high")).toBe(true);
   });
 
   it("effort 축이 없는 칸은 effort 를 인정하지 않는다(claude)", () => {
@@ -280,11 +297,18 @@ describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
     }
   });
 
-  it("★env-swap 벤더(GLM/MiniMax/Kimi/Solar)는 셀렉터에 없다 — 확정 결정", () => {
+  it("★env-swap 벤더(GLM/MiniMax/Kimi/Solar)는 여전히 셀렉터에 없다 — 확정 결정", () => {
     // 오케 선택은 프로젝트별 영구 저장이라, 조건부 크레덴셜에 의존하는 벤더가
     // 칸으로 서면 키가 빠진 순간부터 매 재시작이 말없이 네이티브 백엔드로 샌다
-    // (`model-selection.selectorEligible` 주석의 확정 결정).
+    // (`model-selection.orchestratorSelectorEligible` 주석의 확정 결정).
+    //
+    // ★2026-08-21(7HthjBEf) 회귀 락: 그날 열린 것은 **DeepSeek 하나뿐**이다.
+    // 이 넷은 잔액/소진을 런타임에 관측할 방법이 없어서(그 벤더들엔
+    // `vendor-balance.BALANCE_PROBES` 항목이 없다) 예외의 전제를 못 만족한다.
+    // 값·라벨 두 축을 다 본다 — 라벨이 벤더 표기로 바뀌었으므로 라벨로 새는
+    // 경로가 새로 생겼다.
     const values = options.map((o) => o.value.toLowerCase());
+    const labels = options.map((o) => o.label.toLowerCase());
     for (const vendorish of [
       "glm",
       "minimax",
@@ -295,7 +319,40 @@ describe("오케 모델 셀렉터 ↔ 레지스트리", () => {
       "upstage",
     ]) {
       for (const v of values) expect(v, v).not.toContain(vendorish);
+      for (const l of labels) expect(l, l).not.toContain(vendorish);
     }
+  });
+
+  it("★DeepSeek 만 열렸고, 벤더 표기 라벨을 달고 선다 — 7HthjBEf", () => {
+    // 완료기준: 잔액이 있으면 드롭다운에 선다. 여기서는 **칸이 존재하는가**만
+    // 본다(잔액 판정은 main 이 얹으므로 이 목록은 순수하게 남는다 —
+    // `orchestrator-vendor-gate.test.ts` 가 그 판정을 따로 검증한다).
+    const values = options.map((o) => o.value);
+    expect(values).toContain("codex:deepseek-v4-flash");
+    expect(values).toContain("codex:deepseek-v4-pro");
+    // ★라벨의 머리가 "Codex" 면 사용자는 자기 OpenAI 구독으로 도는 줄 안다.
+    // 확정 결정 주석이 필터를 걷을 때 **같이** 요구한 것이 이 벤더 표기다.
+    for (const id of ["deepseek-v4-flash", "deepseek-v4-pro"]) {
+      const option = options.find((o) => o.value === `codex:${id}`)!;
+      expect(option.label).toBe(`DeepSeek (${id})`);
+    }
+    // 값 프리픽스는 여전히 하네스 축이다(어느 바이너리로 뜨나) — 여기가 갈리면
+    // `orchestratorLaunchPin` 이 핀을 통째로 버려서 조용히 CLI 기본으로 뜬다.
+    expect(orchestratorModelProvider("codex:deepseek-v4-flash")).toBe("codex");
+  });
+
+  it("★저장·env 로 들어온 DeepSeek 값이 정규화에서 살아남는다(두 문이 같은 술어)", () => {
+    // 셀렉터만 열고 정규화를 안 열면 화면은 "Codex (CLI default)" 인데 argv 엔
+    // 아무 핀도 안 붙는 상태가 된다 — `ORCHESTRATOR_SELECTOR_RETIRED` 주석이
+    // 경고하는 그 어긋남의 거울상이다.
+    expect(normalizeOrchestratorModelSetting("codex:deepseek-v4-flash")).toBe(
+      "codex:deepseek-v4-flash"
+    );
+    expect(
+      normalizeOrchestratorModelSetting("codex:deepseek-v4-pro@high")
+    ).toBe("codex:deepseek-v4-pro@high");
+    // 반대로 프로브 없는 env-swap 벤더 핀은 종전대로 접미가 잘려 강등된다.
+    expect(normalizeOrchestratorModelSetting("codex:solar-pro4")).toBe("codex");
   });
 
   it("★새 하네스도 isOrchestratorModel 을 통과한다(셀렉터 값 = 유효값)", () => {

@@ -3,16 +3,18 @@
  *
  * ── 무엇이 틀려 있었나 ───────────────────────────────────────────────────
  * main 은 스폰 차단을 전부 `needsAuth` 라는 한 봉투로 돌려준다. 그런데 관문은
- * 둘이다:
+ * 셋이다:
  *   ① 인증      — `checkSpawnAuthGate` (CLI 미설치 / 미로그인 / 벤더키 부재)
  *   ② MCP 가용성 — `checkOrchestratorMcpGate` (#639, grok 한정)
+ *   ③ 벤더 잔액  — `checkOrchestratorVendorGate` (7HthjBEf, DeepSeek 한정)
  * 렌더러는 그 봉투를 보면 무조건 CLI 설정 위저드를 열었다. ②로 막힌 사용자는
  * 로그인이 멀쩡하므로 위저드가 "grok 연결됨" 을 보여주고 끝난다 — 화면 어디에도
  * "폴더 신뢰가 없어 marblo MCP 가 안 붙는다" 는 말이 없다. 고를 수는 있는데 왜
  * 안 되는지 알 길이 없는, 활성화 장벽의 전형이다.
  *
  * ── 규칙 ────────────────────────────────────────────────────────────────
- * `reason` 이 MCP 표식이면 "mcp", 그 밖(표식 없음 포함)은 종전대로 "auth".
+ * `reason` 이 MCP 표식이면 "mcp", 벤더 표식이면 "vendor", 그 밖(표식 없음 포함)은
+ * 종전대로 "auth".
  * 표식이 없을 때 auth 로 떨어지는 것은 **의도된 하위호환**이다 — 구버전 main 이
  * 든 패키지 앱에서도 종전 동작이 한 글자도 안 바뀐다.
  *
@@ -25,6 +27,16 @@
 /** MCP 가용성으로 막혔다는 표식 — electron/orchestrator-switch 의 미러. */
 export const ORCHESTRATOR_BLOCK_REASON_MCP = "mcp-unavailable";
 
+/**
+ * 벤더 크레덴셜·잔액으로 막혔다는 표식 — 같은 파일의 미러(2026-08-21, 7HthjBEf).
+ *
+ * DeepSeek 오케는 선불 잔액으로 돈다. 잔액 0·키 없음·401·네트워크 넷 중 무엇으로
+ * 막히든 **로그인으로는 하나도 안 풀린다** — 표식 없이 흘리면 아래 classify 가
+ * "auth" 로 읽어 CLI 로그인 위저드를 열고, 사용자는 "Codex 연결됨" 만 보고 끝난다.
+ * MCP 축이 이미 겪은 실패모드와 같은 모양이라 같은 방식으로 가른다.
+ */
+export const ORCHESTRATOR_BLOCK_REASON_VENDOR = "vendor-credential";
+
 /** main 이 돌려주는 차단 봉투(모양만. 필드 추가에 관대하다). */
 export interface OrchestratorNeedsAuth {
   model: string;
@@ -33,7 +45,7 @@ export interface OrchestratorNeedsAuth {
   reason?: string;
 }
 
-export type OrchestratorBlockKind = "auth" | "mcp";
+export type OrchestratorBlockKind = "auth" | "mcp" | "vendor";
 
 export interface OrchestratorLaunchBlock {
   kind: OrchestratorBlockKind;
@@ -51,7 +63,11 @@ export function classifyOrchestratorBlock(
   needsAuth: OrchestratorNeedsAuth,
 ): OrchestratorLaunchBlock {
   const kind: OrchestratorBlockKind =
-    needsAuth.reason === ORCHESTRATOR_BLOCK_REASON_MCP ? "mcp" : "auth";
+    needsAuth.reason === ORCHESTRATOR_BLOCK_REASON_MCP
+      ? "mcp"
+      : needsAuth.reason === ORCHESTRATOR_BLOCK_REASON_VENDOR
+        ? "vendor"
+        : "auth";
   return {
     kind,
     model: needsAuth.model,
@@ -108,15 +124,26 @@ export function orchestratorBlockCopyKeys(kind: OrchestratorBlockKind): {
   title: string;
   hint: string;
 } {
-  return kind === "mcp"
-    ? {
-        title: "orchestrator.blocked.mcpTitle",
-        hint: "orchestrator.blocked.mcpHint",
-      }
-    : {
-        title: "orchestrator.blocked.authTitle",
-        hint: "orchestrator.blocked.authHint",
-      };
+  if (kind === "mcp") {
+    return {
+      title: "orchestrator.blocked.mcpTitle",
+      hint: "orchestrator.blocked.mcpHint",
+    };
+  }
+  if (kind === "vendor") {
+    // ★문구가 로그인·폴더신뢰 어느 쪽으로도 새면 안 된다. 이 축의 조치는
+    // "충전 / 키 등록 / 네트워크 확인" 셋뿐이고, **어느 것인지는 main 이 준
+    // `action` 한 줄이 말한다**(배너가 그 줄을 그대로 그린다). 여기 hint 는 그
+    // 위에 얹는 공통 맥락 — "이건 로그인 문제가 아니다" 를 먼저 못박는다.
+    return {
+      title: "orchestrator.blocked.vendorTitle",
+      hint: "orchestrator.blocked.vendorHint",
+    };
+  }
+  return {
+    title: "orchestrator.blocked.authTitle",
+    hint: "orchestrator.blocked.authHint",
+  };
 }
 
 /**
@@ -137,6 +164,7 @@ export type OrchestratorBlockLoginModel = (typeof LOGIN_CTA_MODELS)[number];
 export function orchestratorBlockLoginModel(
   block: OrchestratorLaunchBlock,
 ): OrchestratorBlockLoginModel | null {
+  // ①은 이제 "auth 축인가" 로 읽는다 — MCP 도 벤더도 로그인으로 안 풀린다.
   if (block.kind !== "auth" || !block.installed) return null;
   const match = LOGIN_CTA_MODELS.find((m) => m === block.model);
   return match ?? null;

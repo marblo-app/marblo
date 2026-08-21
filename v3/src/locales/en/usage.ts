@@ -93,6 +93,10 @@ export const usage: Record<keyof typeof koUsage, string> = {
     "The vendor rejected the key (HTTP {status}). The key is wrong or revoked — this is not an empty balance.",
   "usage.credits.balance.err.http":
     "Vendor responded with an error (HTTP {status}). Likely on their side — refresh in a moment.",
+  "usage.credits.balance.err.depleted":
+    "Balance is zero — nothing can run on this vendor right now. Top up the vendor account, then hit refresh (⟳) above.",
+  "usage.credits.balance.err.low":
+    "Balance is nearly gone — a single orchestrator session can drain it. Top up now (once it hits zero, an orchestrator pinned to this vendor stops with a reason instead of starting).",
   "usage.credits.balance.err.network":
     "Could not reach the vendor (offline or timed out). The balance is unknown, not zero.",
   "usage.credits.balance.err.malformed":

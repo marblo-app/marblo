@@ -28,6 +28,8 @@ import {
 } from "../../electron/agent-config";
 import {
   codexOrchestratorChoices,
+  normalizeOrchestratorModelSetting,
+  ORCHESTRATOR_RUNTIME_GATED_VENDORS,
   parseModelSpec,
   quickLaneVendorCatalog,
   resolveModelPin,
@@ -214,10 +216,32 @@ describe("Upstage Solar 라우팅/오케 경계", () => {
     expect(solarRungs.map((r) => r.effort)).toEqual(["low", "medium", "high"]);
   });
 
-  it("오케스트레이터 후보에서는 빠진다(네이티브 Codex 만 오케 후보)", () => {
+  it("★오케스트레이터 후보에서는 여전히 빠진다 — DeepSeek 예외가 여기로 안 샌다", () => {
+    // 2026-08-21(7HthjBEf) 회귀 락. 그날 오케 셀렉터의 "네이티브 벤더만" 필터가
+    // 처음으로 열렸지만, 열린 것은 **DeepSeek 하나뿐**이다. Solar 가 같이 열리면
+    // 안 되는 이유는 취향이 아니라 사실이다:
+    //
+    //   · 예외의 전제는 "조건부성을 런타임에 관측할 수 있다" 인데, Upstage 는
+    //     잔여 쿼터 조회 API 를 공개하지 않아 `vendor-balance.BALANCE_PROBES` 에
+    //     항목이 없다(`src/lib/vendorBilling.ts` 의 `quotaApi: null`).
+    //   · 그래서 Solar 를 열면 "키가 빠진 순간부터 매 재시작이 말없이 네이티브
+    //     백엔드로 새는" 원래의 실패모드가 그대로 돌아온다 — 이 레포가 Solar 로
+    //     하루를 태운 그 실패다.
+    //
+    // 이 단언이 깨지는 날은 Upstage 에 소진 관측이 생긴 날이어야 한다.
     const choices = codexOrchestratorChoices();
     expect(choices.map((c) => c.modelId)).not.toContain(SOLAR_ID);
-    expect(choices.every((c) => c.vendor === "openai")).toBe(true);
+    expect(choices.some((c) => c.vendor === "upstage")).toBe(false);
+    // 오케 후보로 선 벤더는 네이티브(openai) 아니면 런타임 게이트 벤더뿐이다.
+    for (const c of choices) {
+      expect(
+        c.vendor === "openai" ||
+          ORCHESTRATOR_RUNTIME_GATED_VENDORS.has(c.vendor!),
+        c.value
+      ).toBe(true);
+    }
+    // 저장값·env·손편집으로 들어온 Solar 핀도 종전대로 강등된다(두 문이 같은 술어).
+    expect(normalizeOrchestratorModelSetting(`codex:${SOLAR_ID}`)).toBe("codex");
   });
 
   it("퀵레인/벤더 키 UI 계약에는 Upstage 카드가 파생된다", () => {

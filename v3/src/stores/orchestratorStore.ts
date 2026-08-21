@@ -91,6 +91,33 @@ export const ORCHESTRATOR_MODEL_OPTIONS = [
     label: "Codex (gpt-5.6-luna)",
     efforts: ["low", "medium", "high", "xhigh"],
   },
+  // ── DeepSeek (2026-08-21, 티켓 7HthjBEf) ────────────────────────────────
+  // ★값 프리픽스가 `codex:` 인 것은 오타가 아니다. 프리픽스는 **하네스 축**이고
+  // (어느 바이너리로 뜨나), DeepSeek 은 Codex CLI 를 그대로 스폰하면서
+  // OPENAI_BASE_URL/OPENAI_API_KEY 만 갈아끼우는 env-swap 벤더다. 라벨의 머리만
+  // 벤더로 갈린다 — "Codex (deepseek-v4-flash)" 로 서면 사용자는 자기 OpenAI
+  // 구독으로 도는 줄 안다.
+  //
+  // ★이 두 칸은 다른 칸들과 **수명 계약이 다르다**. 나머지는 CLI 로그인만
+  // 살아 있으면 항상 뜨지만, DeepSeek 은 선불 충전이라 잔액이 말없이 0 이 된다.
+  // 그래서 목록에 서 있다는 것이 "지금 띄울 수 있다" 를 뜻하지 않는다 — 잔액·키
+  // 판정은 main 이 하고(`electron/orchestrator-vendor-gate.ts`), 잔액이 없으면
+  // 스폰이 **사유를 띄우고 멈춘다**(조용히 Codex 기본 백엔드로 새지 않는다).
+  // 근거 전문은 `electron/model-selection.orchestratorSelectorEligible` 주석.
+  //
+  // effort 가 low/high 뿐인 것도 누락이 아니다 — DeepSeek 이 Codex 용으로 직접
+  // 배포하는 공식 models.json 이 low/high/max 만 정의하고(medium 이 없다) max 는
+  // 우리 승인게이트 칸이라 `selectableEfforts` 가 걷어낸다.
+  {
+    value: "codex:deepseek-v4-flash",
+    label: "DeepSeek (deepseek-v4-flash)",
+    efforts: ["low", "high"],
+  },
+  {
+    value: "codex:deepseek-v4-pro",
+    label: "DeepSeek (deepseek-v4-pro)",
+    efforts: ["low", "high"],
+  },
   // Grok Build(xAI 네이티브 하네스). 라벨은 codex 와 같은 규칙으로 레지스트리
   // 실명 그대로다 — xAI 는 4.5/4.6 처럼 소수점 세대를 촘촘히 올려서, 예쁘게 접으면
   // 화면과 argv 가 어긋나도 눈에 안 띈다.

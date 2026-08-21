@@ -26,6 +26,21 @@ export interface OrchestratorSwitchArgs {
  */
 export const ORCHESTRATOR_BLOCK_REASON_MCP = "mcp-unavailable";
 
+/**
+ * 스폰 차단 사유가 **벤더 크레덴셜/잔액** 인 경우의 표식(2026-08-21, 7HthjBEf).
+ *
+ * 관문이 셋이 됐다: 인증(`checkSpawnAuthGate`) · MCP 가용성
+ * (`checkOrchestratorMcpGate`) · **벤더 게이트**(`checkOrchestratorVendorGate`).
+ * 셋째는 DeepSeek 처럼 선불 잔액으로 도는 오케 후보에만 걸린다.
+ *
+ * ★이 표식이 없으면 렌더러는 종전대로 "auth" 로 읽어 **CLI 로그인 위저드**를 연다.
+ * 그런데 잔액 0 인 사용자는 Codex CLI 로그인이 멀쩡하므로 위저드가 "연결됨" 만
+ * 보여주고 끝난다 — MCP 축에서 이미 한 번 겪은 실패모드와 정확히 같은 모양이고
+ * (`ORCHESTRATOR_BLOCK_REASON_MCP` 주석), 조치도 정반대다(로그인이 아니라 충전).
+ * 표식이 없을 때 auth 로 떨어지는 하위호환은 그대로다.
+ */
+export const ORCHESTRATOR_BLOCK_REASON_VENDOR = "vendor-credential";
+
 export interface OrchestratorSwitchSession {
   sessionId: string;
   ptySessionId: string;

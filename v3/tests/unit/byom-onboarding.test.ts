@@ -272,27 +272,59 @@ describe("byomOptions — 목록", () => {
     expect(byomHeadline(options)).toBe("ready");
 
     // ★단, 그 통과는 **오케를 태울 수 있는 벤더** 때문이지 "준비된 벤더가 있어서"
-    // 가 아니다. env-swap 벤더(GLM/MiniMax/Kimi)만 준비된 상태는 여전히 ②단계를
-    // 못 넘는다 — 그 규율(오케 선택은 영구저장이라 env-swap 미편입)이 이 티켓으로
-    // 느슨해지지 않았음을 같은 데이터로 확인한다.
-    const envSwapOnly = options.filter((o) => o.kind === "envSwap");
-    expect(envSwapOnly.length).toBeGreaterThan(0);
-    expect(envSwapOnly.every((o) => o.status === "ready")).toBe(true);
-    expect(byomGateContribution(envSwapOnly)).toEqual({
+    // 가 아니다.
+    //
+    // ★2026-08-21(7HthjBEf): 종전 이 단언은 "env-swap 벤더 전체" 를 한 덩이로
+    // 묶어 `{installed:false, ready:false}` 를 주장했다. 그 덩이가 이제 둘로
+    // 갈린다 — DeepSeek 은 오케 후보로 편입됐고(잔액 프로브가 있어 조건부성을
+    // 런타임에 관측할 수 있다), 나머지 넷은 그대로다. 그래서 단언도 **벤더별로**
+    // 좁힌다: 덩이째 두면 "GLM 도 열렸다" 를 이 테스트가 못 잡는다.
+    const gatedFree = options.filter(
+      (o) => o.kind === "envSwap" && o.vendor !== "deepseek"
+    );
+    expect(gatedFree.length).toBeGreaterThan(0);
+    expect(gatedFree.every((o) => o.status === "ready")).toBe(true);
+    expect(byomGateContribution(gatedFree)).toEqual({
       installed: false,
       ready: false,
     });
-    expect(byomHeadline(envSwapOnly)).toBe("workerOnly");
+    expect(byomHeadline(gatedFree)).toBe("workerOnly");
+
+    // DeepSeek 만 반대다 — 키가 서면 그 자체로 오케를 태울 수 있는 경로다.
+    // (잔액이 0 이면 스폰이 사유를 띄우고 멈춘다. 그 판정은 온보딩이 아니라
+    //  main 의 3번째 관문이 진다 — `orchestrator-vendor-gate.test.ts`.)
+    const deepseekOnly = options.filter((o) => o.vendor === "deepseek");
+    expect(deepseekOnly.length).toBe(1);
+    expect(deepseekOnly[0].canHostOrchestrator).toBe(true);
+    expect(byomGateContribution(deepseekOnly)).toEqual({
+      installed: true,
+      ready: true,
+    });
   });
 
-  it("★라이브 사실: 오케 후보로 서는 것은 하네스 네이티브 벤더뿐이다", () => {
-    // `model-selection.selectorEligible` 의 규율(오케 선택은 프로젝트별로 영구
-    // 저장되므로 조건부 크레덴셜을 기본값에 얹지 않는다)이 실제로 지켜지는지를
-    // 화면 쪽에서 한 번 더 확인한다. 그 규율이 걷히면 여기가 먼저 알려준다.
+  it("★라이브 사실: 오케 후보 = 네이티브 벤더 + 런타임 게이트 예외(DeepSeek)", () => {
+    // `model-selection.orchestratorSelectorEligible` 의 규율(오케 선택은 프로젝트별로
+    // 영구 저장되므로 조건부 크레덴셜을 기본값에 얹지 않는다)이 실제로 지켜지는지를
+    // 화면 쪽에서 한 번 더 확인한다. 그 규율이 **더** 걷히면 여기가 먼저 알려준다.
+    //
+    // 2026-08-21(7HthjBEf)에 열린 예외는 DeepSeek 하나뿐이고, 그 예외를 지탱하는
+    // 것은 잔액 게이트다(그래서 "얹지 않는다" 가 여전히 참이다 — 조건을 런타임에
+    // 검사한다). 이 목록이 늘어나면 그 벤더에도 잔액 프로브가 있는지 먼저 물어야
+    // 한다.
+    const exceptions = new Set(["deepseek"]);
     for (const o of byomOptions(realCards(), OPTION_VALUES)) {
       if (!o.canHostOrchestrator) continue;
-      expect(o.vendor).toBe(HARNESS_NATIVE_VENDOR[o.harness]);
+      if (exceptions.has(o.vendor)) continue;
+      expect(o.vendor, o.vendor).toBe(HARNESS_NATIVE_VENDOR[o.harness]);
     }
+    // 예외가 조용히 늘지 않게, 실제로 선 칸의 벤더 집합도 함께 못박는다.
+    const hosting = byomOptions(realCards(), OPTION_VALUES)
+      .filter((o) => o.canHostOrchestrator && !exceptions.has(o.vendor))
+      .map((o) => o.vendor);
+    expect(hosting).not.toContain("zai");
+    expect(hosting).not.toContain("minimax");
+    expect(hosting).not.toContain("moonshot");
+    expect(hosting).not.toContain("upstage");
   });
 });
 

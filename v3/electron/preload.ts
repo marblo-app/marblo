@@ -681,6 +681,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
      */
     quickLaneCatalog: () => ipcRenderer.invoke("models:quickLaneCatalog"),
     /**
+     * 오케 모델 셀렉터 카탈로그 — 목록(`model-selection` 파생) + **벤더 판정**.
+     *
+     * 퀵레인 카탈로그와 같은 분업이다: 시크릿·잔액을 봐야 답할 수 있는 축만 main 이
+     * 얹는다. 런타임 게이트 벤더(오늘 DeepSeek)의 칸에만 `gate` 가 붙고, 네이티브
+     * 칸에는 아예 안 붙는다 — 그 칸들 때문에 벤더 API 가 호출되는 일은 없다.
+     * ★내려오는 것은 금액·통화·상태·키 **이름**뿐이다(시크릿 값 금지).
+     */
+    orchestratorCatalog: () =>
+      ipcRenderer.invoke("models:orchestratorCatalog"),
+    /**
      * 사용량 탭 상단 정보표(단가·개략 SWE-bench·컨텍스트). `model-registry` +
      * 컨텍스트/벤치 참조표의 조인이고, env·시크릿은 지나가지 않는다.
      */

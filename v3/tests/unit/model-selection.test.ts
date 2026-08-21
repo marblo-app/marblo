@@ -22,6 +22,7 @@ import {
   codexOrchestratorChoices,
   grokOrchestratorChoices,
   ORCHESTRATOR_SELECTOR_RETIRED,
+  ORCHESTRATOR_RUNTIME_GATED_VENDORS,
   normalizeOrchestratorModelSetting,
   selectableEfforts,
   humanizeClaudeModelId,
@@ -291,15 +292,23 @@ describe("오케 셀렉터 compound 값", () => {
     expect(ids).not.toContain("gpt-5.4");
     expect(ids).not.toContain("gpt-5.4-mini");
     expect(ids[0]).toBe("gpt-5.6-sol"); // frontier 가 맨 앞
+    // ★2026-08-21(7HthjBEf): 이 목록은 이제 네이티브(openai) **+ 런타임 게이트
+    // 벤더**다. DeepSeek 은 잔액 프로브가 있어 "저장된 값이 나중에 못 쓰게 되는"
+    // 구간을 런타임에 잡을 수 있으므로 예외로 열렸다(`orchestratorSelectorEligible`
+    // 주석). 다른 env-swap 벤더는 여전히 빠진다 — 아래 별도 테스트가 못박는다.
     expect(choices).toHaveLength(
       MODEL_REGISTRY.filter(
         (m) =>
           m.harness === "gpt" &&
-          m.provider === "openai" &&
+          (m.provider === "openai" ||
+            ORCHESTRATOR_RUNTIME_GATED_VENDORS.has(m.provider)) &&
           m.status === "active" &&
           !(m.id in ORCHESTRATOR_SELECTOR_RETIRED),
       ).length,
     );
+    // 네이티브 칸이 먼저, 게이트 벤더 칸이 뒤 — 능력등급 내림차순의 결과다.
+    expect(choices.filter((c) => c.vendor === "deepseek").map((c) => c.value))
+      .toEqual(["codex:deepseek-v4-flash", "codex:deepseek-v4-pro"]);
     // 값·라벨 포맷은 Claude 와 같은 규칙(프로바이더 프리픽스 + 레지스트리 id).
     expect(choices[0].value).toBe("codex:gpt-5.6-sol");
     expect(choices[0].label).toBe("Codex (gpt-5.6-sol)");
@@ -371,9 +380,15 @@ describe("오케 셀렉터 compound 값", () => {
     for (const choice of codexOrchestratorChoices()) {
       expect(choice.efforts, choice.value).not.toContain("max");
       expect(choice.efforts, choice.value).not.toContain("ultra");
-      // 무게이트 칸은 그대로 남는다(축이 통째로 사라지면 안 된다).
-      expect(choice.efforts, choice.value).toContain("high");
-      expect(choice.efforts, choice.value).toContain("xhigh");
+      // 무게이트 칸은 그대로 남는다(축이 통째로 사라지면 안 된다). ★"xhigh 가
+      // 있어야 한다" 로 못박지 않는 이유: 게이트 칸을 뺀 나머지는 **모델마다
+      // 다르다**. DeepSeek 은 공식 models.json 이 low/high/max 만 정의해서(medium
+      // 이 아예 없다) 셀렉터 칸이 low/high 다 — 누락이 아니라 벤더 사실이다.
+      // 그래서 단언을 "레지스트리에서 게이트 칸만 뺀 것과 같다" 로 바꾼다.
+      expect(choice.efforts.length, choice.value).toBeGreaterThan(0);
+      expect(choice.efforts, choice.value).toEqual(
+        selectableEfforts(getModel(choice.modelId!)!)
+      );
     }
     // sol 은 레지스트리상 max/ultra 를 지원한다 — 즉 위 단언은 "원래 없어서"가
     // 아니라 "게이트로 뺐기 때문"이다.

@@ -10,12 +10,16 @@
 import { describe, it, expect } from "vitest";
 import {
   ORCHESTRATOR_BLOCK_REASON_MCP as RENDERER_MCP_REASON,
+  ORCHESTRATOR_BLOCK_REASON_VENDOR as RENDERER_VENDOR_REASON,
   classifyOrchestratorBlock,
   planOrchestratorBlockUi,
   orchestratorBlockCopyKeys,
   orchestratorBlockLoginModel,
 } from "../../src/lib/orchestratorLaunchBlock";
-import { ORCHESTRATOR_BLOCK_REASON_MCP as MAIN_MCP_REASON } from "../../electron/orchestrator-switch";
+import {
+  ORCHESTRATOR_BLOCK_REASON_MCP as MAIN_MCP_REASON,
+  ORCHESTRATOR_BLOCK_REASON_VENDOR as MAIN_VENDOR_REASON,
+} from "../../electron/orchestrator-switch";
 import { ko } from "../../src/locales/ko";
 import { en } from "../../src/locales/en";
 
@@ -190,6 +194,56 @@ describe("차단 배너의 로그인 CTA 대상", () => {
         }),
       ),
     ).toBeNull();
+  });
+
+  // ── 벤더 크레덴셜/잔액 축(2026-08-21, 7HthjBEf) ────────────────────────
+  it("★벤더 표식 문자열도 main 과 정확히 같다", () => {
+    expect(RENDERER_VENDOR_REASON).toBe(MAIN_VENDOR_REASON);
+    // 세 표식이 서로 달라야 한다 — 겹치면 분류가 무너진다.
+    expect(new Set([RENDERER_MCP_REASON, RENDERER_VENDOR_REASON]).size).toBe(2);
+  });
+
+  it("★벤더 차단은 위저드를 열지 않는다 — 로그인으로 안 풀린다", () => {
+    // 잔액 0 인 사용자는 Codex CLI 로그인이 멀쩡하다. 위저드를 열면 "연결됨" 만
+    // 보여주고 끝나는, MCP 축이 이미 겪은 그 실패모드가 그대로 재현된다.
+    const block = classifyOrchestratorBlock({
+      model: "codex",
+      action: "DeepSeek 잔액이 0 입니다(0.00 USD) — … 크레딧을 충전해야 …",
+      installed: true,
+      reason: MAIN_VENDOR_REASON,
+    });
+    expect(block.kind).toBe("vendor");
+    expect(block.opensCliSetup).toBe(false);
+    expect(orchestratorBlockLoginModel(block)).toBeNull();
+    // 조치 문구는 main 이 준 값 그대로 흘린다(넷 중 어느 사유인지는 그 줄이 말한다).
+    expect(block.action).toContain("충전");
+  });
+
+  it("★벤더 차단도 패널 배너는 반드시 뜬다(무음 차단 금지)", () => {
+    const ui = planOrchestratorBlockUi({
+      model: "codex",
+      action: "DeepSeek API 키가 없습니다 — …",
+      installed: true,
+      reason: MAIN_VENDOR_REASON,
+    });
+    expect(ui.showPanelNotice).toBe(true);
+    expect(ui.openCliSetup).toBe(false);
+  });
+
+  it("★벤더 문구가 로그인·폴더신뢰 쪽으로 새지 않는다", () => {
+    const copy = orchestratorBlockCopyKeys("vendor");
+    expect(copy.title).not.toBe(orchestratorBlockCopyKeys("auth").title);
+    expect(copy.title).not.toBe(orchestratorBlockCopyKeys("mcp").title);
+    for (const dict of [ko, en]) {
+      const hint = (dict as Record<string, string>)[copy.hint];
+      const title = (dict as Record<string, string>)[copy.title];
+      expect(hint, copy.hint).toBeDefined();
+      expect(title, copy.title).toBeDefined();
+      // ★"조용히 기본 모델로 갈아타지 않는다" 를 사용자에게 말한다 — 그 침묵이
+      // 이 티켓이 막으려는 실패모드 그 자체다.
+      expect(hint.toLowerCase()).not.toContain("trust the folder");
+      expect(hint).not.toContain("폴더 신뢰");
+    }
   });
 
   it("모르는 CLI 이름이면 CTA 없이 문구만 보여준다", () => {

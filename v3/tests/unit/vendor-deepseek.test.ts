@@ -27,6 +27,7 @@ import {
 } from "../../electron/agent-config";
 import {
   codexOrchestratorChoices,
+  orchestratorVendorGateTarget,
   parseModelSpec,
   quickLaneVendorCatalog,
   resolveModelPin,
@@ -287,11 +288,53 @@ describe("DeepSeek 라우팅/오케 경계", () => {
     expect(LADDER_EXCLUSIONS[PRO_ID]).toContain("스폰 전용");
   });
 
-  it("오케스트레이터 후보에서는 빠진다(네이티브 Codex 만 오케 후보)", () => {
+  it("★오케스트레이터 후보에 편입됐다 — 단, 런타임 잔액 게이트를 조건으로", () => {
+    // 2026-08-21(7HthjBEf). 종전 이 테스트는 "빠진다" 를 주장했고 그 근거는
+    // "영구 저장되는 기본값에 조건부 크레덴셜을 얹지 않는다" 였다. 그 근거는
+    // **폐기되지 않았다** — 바뀐 것은 DeepSeek 의 조건부성을 런타임에 관측할 수
+    // 있게 됐다는 사실 하나다(`vendor-balance` 의 `GET /user/balance`).
+    //
+    // 그래서 이 테스트가 보는 것은 "칸이 선다" 까지고, 그 칸이 실제로 뜰지는
+    // `orchestrator-vendor-gate.test.ts` 가 본다. 둘을 한 테스트에 합치면
+    // "목록에 있다 = 띄울 수 있다" 라는, 이 티켓이 부수려는 등식이 되살아난다.
     const choices = codexOrchestratorChoices();
-    expect(choices.map((c) => c.modelId)).not.toContain(FLASH_ID);
-    expect(choices.map((c) => c.modelId)).not.toContain(PRO_ID);
-    expect(choices.every((c) => c.vendor === "openai")).toBe(true);
+    expect(choices.map((c) => c.modelId)).toContain(FLASH_ID);
+    expect(choices.map((c) => c.modelId)).toContain(PRO_ID);
+    // 벤더 표기 라벨 — 사용자가 "이건 내 키로 도는 벤더" 임을 목록에서 알아야 한다.
+    const flash = choices.find((c) => c.modelId === FLASH_ID)!;
+    expect(flash.label).toBe(`DeepSeek (${FLASH_ID})`);
+    expect(flash.vendor).toBe("deepseek");
+    expect(flash.runtimeGated).toBe(true);
+    expect(flash.requiredEnvKeys).toEqual(["DEEPSEEK_API_KEY"]);
+    // 네이티브 칸은 종전 그대로다(게이트가 안 붙는다 = 벤더 API 를 안 때린다).
+    for (const c of choices.filter((x) => x.vendor === "openai")) {
+      expect(c.runtimeGated, c.value).toBe(false);
+      expect(c.requiredEnvKeys, c.value).toEqual([]);
+    }
+  });
+
+  it("★게이트 대상 판정이 DeepSeek 핀에만 붙는다(네이티브 경로 무변경)", () => {
+    // main 의 3번째 관문이 "이 스폰에 잔액을 물어봐야 하나" 를 이 함수로 묻는다.
+    // 네이티브 칸이 null 이 아니게 되는 순간 모든 오케 스폰이 벤더 API 를 때린다.
+    expect(orchestratorVendorGateTarget("codex:deepseek-v4-flash")).toMatchObject(
+      {
+        vendor: "deepseek",
+        vendorLabel: "DeepSeek",
+        modelId: FLASH_ID,
+        requiredEnvKeys: ["DEEPSEEK_API_KEY"],
+      },
+    );
+    for (const setting of [
+      "claude",
+      "codex",
+      "grok",
+      "antigravity",
+      "claude:claude-opus-5",
+      "codex:gpt-5.6-sol@high",
+      "grok:grok-4.6",
+    ]) {
+      expect(orchestratorVendorGateTarget(setting), setting).toBeNull();
+    }
   });
 
   it("퀵레인/벤더 키 UI 계약에는 DeepSeek 카드가 파생된다", () => {

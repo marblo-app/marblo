@@ -744,8 +744,55 @@ interface OurBenchPayload {
   disclaimersPlain: string[];
 }
 
+/**
+ * 오케 셀렉터 한 칸의 **벤더 게이트 판정**. 형태는
+ * `electron/orchestrator-vendor-gate.OrchestratorVendorGateVerdict` 와 같다.
+ *
+ * ★`allowed === false` 인 칸은 "목록엔 있지만 지금은 못 띄운다" 는 뜻이고, 그 이유는
+ * `status` 가 넷(+2)으로 갈라서 말한다 — 뭉치면 사용자는 충전을 해야 하는지 키를
+ * 넣어야 하는지 알 수 없다. `action` 에 **무엇을 해야 하는지**가 적혀 있다.
+ */
+interface OrchestratorVendorGate {
+  vendor: string;
+  status:
+    | "ok"
+    | "low"
+    | "depleted"
+    | "no-key"
+    | "unauthorized"
+    | "unreachable"
+    | "indeterminate";
+  allowed: boolean;
+  action: string;
+  amounts: Array<{ currency: string; total: number }>;
+  missingEnvKeys?: string[];
+  httpStatus?: number;
+}
+
+/**
+ * 오케 셀렉터 한 칸. 형태는 `electron/model-selection.OrchestratorModelChoice`
+ * + main 이 얹는 `gate` 다.
+ *
+ * ★`gate` 는 **런타임 게이트 벤더의 칸에만** 붙는다. 네이티브 칸(claude/codex/
+ * grok)에는 없고, 없다는 것 자체가 "조건부 크레덴셜이 아니다" 라는 뜻이다.
+ */
+interface OrchestratorCatalogChoice {
+  value: string;
+  harness: string;
+  vendor?: string;
+  vendorLabel: string;
+  modelId?: string;
+  runtimeGated: boolean;
+  requiredEnvKeys: string[];
+  label: string;
+  efforts: Array<"low" | "medium" | "high" | "xhigh">;
+  gate?: OrchestratorVendorGate;
+}
+
 interface ModelsAPI {
   quickLaneCatalog: () => Promise<QuickLaneVendorGroup[]>;
+  /** 오케 셀렉터 카탈로그 + 벤더 잔액 판정. 값은 안 내려온다(금액·상태·키 이름만). */
+  orchestratorCatalog: () => Promise<OrchestratorCatalogChoice[]>;
   factSheet: () => Promise<ModelFactSheetPayload>;
   /** ★벤더 공개치(factSheet)와 **다른 채널**. 섞지 않기 위한 분리다. */
   ourBench: () => Promise<OurBenchPayload>;

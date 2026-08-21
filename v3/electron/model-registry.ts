@@ -989,8 +989,14 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   // Solar 와 같은 (B)형 OpenAI 호환 벤더다. 신규 하네스 없이 Codex(gpt) 바이너리를
   // 그대로 스폰하고, OPENAI_BASE_URL/OPENAI_API_KEY 만 DeepSeek 으로 갈아끼운다.
   // `agent-config` 의 gpt 분기가 이미 `applyVendorEnv` 를 호출하므로 switch 추가는
-  // 없다. 스폰/퀵레인 전용이고 오케 셀렉터는 `selectorEligible` 이 env-swap 벤더를
-  // 잘라내는 기존 경계로 막는다.
+  // 없다.
+  //
+  // ★오케 셀렉터 경계(2026-08-21, 7HthjBEf 로 갱신): 종전엔 `selectorEligible` 이
+  // env-swap 벤더를 통째로 잘라냈고 DeepSeek 도 거기 걸렸다. 지금은 DeepSeek 만
+  // 예외로 통과하는데, 그 예외를 지탱하는 것은 **잔액 게이트**다 — 이 벤더는
+  // `GET /user/balance` 를 공개해서 "선불 잔액이 말없이 0 이 되는" 조건부성을
+  // 런타임에 관측할 수 있다(`electron/orchestrator-vendor-gate.ts`). 프로브가 없는
+  // 다른 env-swap 벤더(GLM/MiniMax/Kimi/Solar)는 그대로 잘린다.
   //
   // 공식 스펙(2026-08-18 최초, 2026-08-21 재확인 — 모델 id·단가 전부 변동 없음):
   //   base_url=https://api.deepseek.com, api_key=${DEEPSEEK_API_KEY}

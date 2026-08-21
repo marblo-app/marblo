@@ -26,6 +26,13 @@ export const orchestrator: Record<keyof typeof koOrchestrator, string> = {
     "Could not start the {model} orchestrator — this CLI needs to be signed in",
   "orchestrator.blocked.authHint":
     "Another CLI being signed in is not enough: the CLI you picked as orchestrator has its own sign-in. Run the action below, then start again.",
+  // Spawn blocked by vendor credentials / prepaid balance (7HthjBEf, DeepSeek).
+  // The concrete fix (top up / add key / replace key / check network) comes
+  // from main's `action` line; this hint is the shared context above it.
+  "orchestrator.blocked.vendorTitle":
+    "Could not start the {model} orchestrator — vendor credential / balance problem",
+  "orchestrator.blocked.vendorHint":
+    "This is not a sign-in problem. This model runs on prepaid vendor credit rather than a subscription, so a zero balance or a missing key stops it even when the CLI is signed in. Do the action above, then refresh (⟳) under Usage → Vendor credits to confirm the balance and start again. We deliberately do not fall back to the default model here: silently running a different backend than the one you picked is far worse.",
   "orchestrator.blocked.login": "Sign in to {model}",
   "orchestrator.blocked.dismiss": "Dismiss",
   // Category labels

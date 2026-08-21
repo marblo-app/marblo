@@ -95,6 +95,10 @@ export const usage = {
     "벤더가 키를 거부했습니다(HTTP {status}). 키가 틀렸거나 폐기된 키입니다 — 잔액 부족이 아닙니다.",
   "usage.credits.balance.err.http":
     "벤더 응답 오류(HTTP {status}). 벤더 쪽 문제일 수 있으니 잠시 후 새로고침하세요.",
+  "usage.credits.balance.err.depleted":
+    "잔액이 0 입니다 — 이 벤더로는 지금 아무것도 띄울 수 없습니다. 벤더 계정에 크레딧을 충전한 뒤 위 새로고침(⟳)으로 반영하세요.",
+  "usage.credits.balance.err.low":
+    "잔액이 얼마 남지 않았습니다 — 오케 한 세션에 소진될 수 있습니다. 지금 충전해 두세요(다 떨어지면 이 벤더로 고른 오케가 뜨지 않고 사유를 띄우며 멈춥니다).",
   "usage.credits.balance.err.network":
     "벤더에 닿지 못했습니다(네트워크 끊김 또는 응답 지연). 잔액은 알 수 없는 상태입니다.",
   "usage.credits.balance.err.malformed":

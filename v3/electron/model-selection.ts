@@ -218,7 +218,7 @@ const CAPABILITY_RANK: Readonly<Record<CapabilityTier, number>> = {
  * 매핑이 없으면 undefined — 호출자가 기존 `normalizeModel` 경로로 폴백한다.
  */
 export function resolveVendorShorthand(
-  input: string,
+  input: string
 ): ModelRegistryEntry | undefined {
   const key = input.trim().toLowerCase();
   const vendor = VENDOR_SHORTHAND_TO_VENDOR[key];
@@ -286,7 +286,7 @@ export function parseModelSpec(input?: string): ModelSpec | undefined {
         raw,
       },
       effortPart,
-      entry,
+      entry
     );
   }
 
@@ -303,7 +303,7 @@ export function parseModelSpec(input?: string): ModelSpec | undefined {
         raw,
       },
       effortPart,
-      vendorEntry,
+      vendorEntry
     );
   }
 
@@ -317,7 +317,7 @@ export function parseModelSpec(input?: string): ModelSpec | undefined {
 function withEffort(
   base: ModelSpec,
   effortPart: string,
-  entry: ModelRegistryEntry | undefined,
+  entry: ModelRegistryEntry | undefined
 ): ModelSpec {
   if (!effortPart) return base;
   // 구체 모델을 안 골랐으면 검증할 대상이 없다 — effort 만 단독으로는 못 쓴다.
@@ -349,7 +349,7 @@ function withEffort(
  */
 export function resolveModelPin(
   input?: string,
-  installedClaudeVersion?: string,
+  installedClaudeVersion?: string
 ): ResolvedModelPin | undefined {
   const spec = parseModelSpec(input);
   if (!spec) return undefined;
@@ -365,7 +365,7 @@ export function resolveModelPin(
   if (spec.harness === "claude") {
     const resolution = resolveClaudeModelPinned(
       spec.modelId,
-      installedClaudeVersion,
+      installedClaudeVersion
     );
     return {
       harness: "claude",
@@ -420,7 +420,27 @@ export interface OrchestratorModelChoice {
   harness: ModelType;
   /** 벤더(백엔드 주인). 모델 핀이 있는 칸에만. */
   vendor?: VendorId;
+  /**
+   * 벤더 표시 라벨(`VENDOR_LABEL`). 네이티브 벤더 칸에도 채워진다 — 화면이
+   * "이건 내 키로 도는 벤더인가" 를 묻는 자리에서 `vendor` id 를 그대로 그리지
+   * 않게 하려는 것이다(퀵레인 그룹이 `label` 을 실어 보내는 것과 같은 이유).
+   */
+  vendorLabel: string;
   modelId?: string;
+  /**
+   * 이 칸이 **런타임 게이트 벤더**인가(`ORCHESTRATOR_RUNTIME_GATED_VENDORS`).
+   *
+   * true 면 목록에 서 있다는 것이 "지금 띄울 수 있다" 를 뜻하지 않는다 — 잔액·키
+   * 판정을 main 이 따로 붙여 내린다(`models:orchestratorCatalog`). 이 필드가 없으면
+   * 렌더러는 네이티브 칸과 조건부 칸을 구분할 방법이 없다.
+   */
+  runtimeGated: boolean;
+  /**
+   * 이 칸에 붙으려면 있어야 하는 env 키 **이름들**(값 아님). 네이티브 벤더는 빈
+   * 배열 — CLI 자기 로그인으로 붙는다. 퀵레인 그룹의 `requiredEnvKeys` 와 같은
+   * 규율이고, 판정(=`process.env` 조회)은 이 모듈이 아니라 main 이 한다.
+   */
+  requiredEnvKeys: string[];
   label: string;
   /**
    * 이 칸에서 **셀렉터로 고를 수 있는** effort 들(낮음 → 높음). 비었으면 effort
@@ -446,7 +466,7 @@ export interface OrchestratorModelChoice {
 export function orchestratorModelValue(
   provider: string,
   modelId?: string,
-  effort?: string,
+  effort?: string
 ): string {
   if (!modelId) return provider;
   return effort ? `${provider}:${modelId}@${effort}` : `${provider}:${modelId}`;
@@ -540,10 +560,16 @@ export function splitOrchestratorModelValue(value: string): {
  * 얹어도 조건부 상태가 없다. grok 은 네이티브 CLI(하네스 A형)라 여기 속한다 —
  * 종전엔 목록에 없어 "grok" 설정이 조용히 claude 로 강등됐다(BYOM 게이트 티켓).
  *
- * ★env-swap 벤더(GLM/MiniMax/Kimi)는 여기 없다. 그들은 **하네스가 아니라 모델 핀**
- * 으로만 지정되는데, 오케 선택은 프로젝트별 영구 저장이라 키가 빠진 순간부터 매
- * 재시작이 말없이 네이티브 백엔드로 샌다(`selectorEligible` 주석의 확정 결정).
- * 그 차단은 목록이 아니라 아래 모델 핀 검사가 한다.
+ * ★env-swap 벤더(GLM/MiniMax/Kimi/Solar/DeepSeek)는 여기 없다 — **DeepSeek 도
+ * 없다**. 그들은 **하네스가 아니라 모델 핀**으로만 지정되기 때문이다. 이 목록은
+ * "접미 없는 칸" 의 집합, 즉 "그 CLI 를 자기 기본 모델로 띄운다" 는 뜻인데
+ * env-swap 벤더에는 그런 칸이 성립하지 않는다(`codex` 맨몸 칸의 주인은 OpenAI 지
+ * DeepSeek 이 아니다). DeepSeek 은 `codex:deepseek-v4-flash` 라는 **핀**으로만
+ * 선다 — 그래서 이 목록은 7HthjBEf 로도 한 글자도 안 바뀌었다.
+ *
+ * 프로브 없는 env-swap 벤더의 차단은 목록이 아니라 아래 모델 핀 검사
+ * (`orchestratorSelectorEligible`)가 하고, DeepSeek 핀은 그 검사를 통과한 뒤
+ * main 의 잔액 게이트를 한 번 더 지난다.
  */
 export const ORCHESTRATOR_HARNESS_SETTINGS = [
   "claude",
@@ -580,8 +606,8 @@ export const ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY = [
  *   - env-swap 벤더 이름은 무시한다 (오케 후보 아님)
  */
 export function pickPreferredOrchestratorHarness(
-  authenticated: Iterable<string>,
-): (typeof ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY)[number] | null {
+  authenticated: Iterable<string>
+): typeof ORCHESTRATOR_DEFAULT_HARNESS_PRIORITY[number] | null {
   const ready = new Set<string>();
   for (const raw of authenticated) {
     const v = (raw ?? "").trim().toLowerCase();
@@ -639,7 +665,7 @@ export function normalizeOrchestratorModelSetting(value: unknown): string {
   // argv(내려간 모델)가 갈린다. 레지스트리 행은 그대로라 과거 티켓 해석은 무회귀다.
   if (modelId in ORCHESTRATOR_SELECTOR_RETIRED) {
     console.warn(
-      `[model-selection] 오케 선택에서 내린 모델 "${modelId}" 의 접미를 버립니다(하네스 기본으로 뜬다) — 사유: ${ORCHESTRATOR_SELECTOR_RETIRED[modelId]}`,
+      `[model-selection] 오케 선택에서 내린 모델 "${modelId}" 의 접미를 버립니다(하네스 기본으로 뜬다) — 사유: ${ORCHESTRATOR_SELECTOR_RETIRED[modelId]}`
     );
     return provider;
   }
@@ -647,9 +673,14 @@ export function normalizeOrchestratorModelSetting(value: unknown): string {
   // 갈릴 뿐 바이너리를 바꾸지 않으므로, 여기서 봐야 하는 값은 harness 다.
   const pinHarness = entry?.harness;
 
-  if (entry && entry.provider !== HARNESS_NATIVE_VENDOR[entry.harness]) {
+  // ★셀렉터와 **같은 술어**를 쓴다. 두 문이 갈라지면 화면과 argv 가 갈라진다
+  // (`ORCHESTRATOR_SELECTOR_RETIRED` 주석 §"셀렉터만 막고 정규화를 안 막으면").
+  // DeepSeek 이 여기를 통과하는 근거는 `orchestratorSelectorEligible` 주석의
+  // 갱신 블록이다 — 통과는 "칸이 선다" 까지고, 실제로 뜰지는 main 의 3번째 관문
+  // (`checkOrchestratorVendorGate`)이 잔액을 보고 정한다.
+  if (entry && !orchestratorSelectorEligible(entry)) {
     console.warn(
-      `[model-selection] env-swap 벤더 모델 "${modelId}"(vendor=${entry.provider})은 오케 후보가 아니라 접미를 버립니다 — 오케 선택은 영구 저장이라 조건부 크레덴셜을 얹지 않는다`,
+      `[model-selection] env-swap 벤더 모델 "${modelId}"(vendor=${entry.provider})은 오케 후보가 아니라 접미를 버립니다 — 오케 선택은 영구 저장이라 (런타임 잔액 게이트가 없는) 조건부 크레덴셜을 얹지 않는다`
     );
     return provider;
   }
@@ -675,7 +706,7 @@ export function normalizeOrchestratorModelSetting(value: unknown): string {
   //  env·손편집·옛 저장값은 이 문을 지난다.)
   if (pinHarness && pinHarness === provider) {
     console.warn(
-      `[model-selection] "${provider}" 오케는 모델 핀 축이 없어 접미 "${modelId}" 를 버립니다(프로바이더 기본 모델로 뜬다)`,
+      `[model-selection] "${provider}" 오케는 모델 핀 축이 없어 접미 "${modelId}" 를 버립니다(프로바이더 기본 모델로 뜬다)`
     );
     return provider;
   }
@@ -683,7 +714,7 @@ export function normalizeOrchestratorModelSetting(value: unknown): string {
   console.warn(
     `[model-selection] 오케 모델 접미 "${modelId}"(harness=${
       pinHarness ?? "미지"
-    })가 프로바이더 "${provider}" 와 어긋나 무시합니다`,
+    })가 프로바이더 "${provider}" 와 어긋나 무시합니다`
   );
   return provider;
 }
@@ -691,7 +722,7 @@ export function normalizeOrchestratorModelSetting(value: unknown): string {
 /** 정규화된 오케 설정값 → 스폰 하네스(`ModelType`). */
 export function orchestratorModelTypeForSetting(value: unknown): ModelType {
   const { harness } = splitOrchestratorModelValue(
-    normalizeOrchestratorModelSetting(value),
+    normalizeOrchestratorModelSetting(value)
   );
   if (harness === "codex") return "gpt";
   if (harness === "grok") return "grok";
@@ -716,7 +747,7 @@ export function orchestratorModelTypeForSetting(value: unknown): ModelType {
  */
 export function orchestratorLaunchPin(
   value: string,
-  installedClaudeVersion?: string,
+  installedClaudeVersion?: string
 ): {
   claudeModel?: string;
   codexModel?: string;
@@ -728,7 +759,7 @@ export function orchestratorLaunchPin(
 
   const pin = resolveModelPin(
     effort ? `${modelId}@${effort}` : modelId,
-    installedClaudeVersion,
+    installedClaudeVersion
   );
   if (!pin) return {};
 
@@ -774,7 +805,7 @@ export function orchestratorLaunchPin(
  */
 export function claudeOrchestratorChoices(): OrchestratorModelChoice[] {
   return orchestratorChoicesFor("claude", "claude", (entry) =>
-    humanizeClaudeModelId(entry.id),
+    humanizeClaudeModelId(entry.id)
   );
 }
 
@@ -837,7 +868,7 @@ export function grokOrchestratorChoices(): OrchestratorModelChoice[] {
 function orchestratorChoicesFor(
   harness: "claude" | "gpt" | "grok",
   valuePrefix: string,
-  humanize: (entry: ModelRegistryEntry) => string,
+  humanize: (entry: ModelRegistryEntry) => string
 ): OrchestratorModelChoice[] {
   const rank: Record<string, number> = {
     cheap: 0,
@@ -849,14 +880,25 @@ function orchestratorChoicesFor(
   return modelsByHarness(harness)
     .filter(selectorEligible)
     .sort((a, b) => rank[b.capability] - rank[a.capability])
-    .map((entry) => ({
-      value: orchestratorModelValue(valuePrefix, entry.id),
-      harness: harness as ModelType,
-      vendor: entry.provider,
-      modelId: entry.id,
-      label: `${uiName} (${humanize(entry)})`,
-      efforts: selectableEfforts(entry),
-    }));
+    .map((entry) => {
+      const native = entry.provider === HARNESS_NATIVE_VENDOR[entry.harness];
+      // ★라벨의 머리는 **벤더**다(네이티브 칸에서는 그게 곧 하네스 이름이라 종전과
+      // 바이트 동일하다). 이 갈래가 없으면 DeepSeek 칸이 "Codex (deepseek-v4-flash)"
+      // 로 서서, 사용자는 자기 OpenAI 구독으로 도는 줄 안다 — 확정 결정 주석이
+      // 필터를 걷을 때 **같이** 요구한 "벤더별 표기 라벨" 이 이것이다.
+      const head = native ? uiName : VENDOR_LABEL[entry.provider];
+      return {
+        value: orchestratorModelValue(valuePrefix, entry.id),
+        harness: harness as ModelType,
+        vendor: entry.provider,
+        vendorLabel: VENDOR_LABEL[entry.provider],
+        modelId: entry.id,
+        runtimeGated: !native,
+        requiredEnvKeys: native ? [] : [...vendorEnvSecretKeys(entry.id)],
+        label: `${head} (${humanize(entry)})`,
+        efforts: selectableEfforts(entry),
+      };
+    });
 }
 
 /**
@@ -908,8 +950,10 @@ export const ORCHESTRATOR_SELECTOR_RETIRED: Readonly<Record<string, string>> = {
 };
 
 /**
- * 오케 셀렉터에 세울 수 있는 행인가 — **하네스 네이티브 벤더만** 통과한다.
+ * 오케 셀렉터에 세울 수 있는 행인가 — **하네스 네이티브 벤더 + 런타임 게이트를
+ * 통과한 예외 벤더**.
  *
+ * ── 원래의 확정 결정 (그대로 유효하다) ──────────────────────────────────
  * ★사유는 max/ultra 를 셀렉터에서 빼는 것(`selectableEfforts`)과 정확히 같다:
  * 오케 모델 선택은 **프로젝트별로 영구 저장**된다. env-swap 벤더(GLM 등)는 별도
  * 구독키가 있어야 도는데, 키가 없는 상태로 한 번 저장되면 앱 재시작·크래시
@@ -918,12 +962,92 @@ export const ORCHESTRATOR_SELECTOR_RETIRED: Readonly<Record<string, string>> = {
  * 조건부 크레덴셜을 얹지 않는다.
  *
  * env-swap 벤더는 **명시 지정**(`dispatch_task(model="glm-4.7")`)으로 닿는다 —
- * 그 경로는 티켓 1건짜리 수명이라 실패해도 그 티켓에서 끝난다. 구독 확보 + 라이브
- * 검증(서베이 V1-2)이 끝나면 이 필터를 걷고 벤더별 표기 라벨을 붙인다.
+ * 그 경로는 티켓 1건짜리 수명이라 실패해도 그 티켓에서 끝난다.
+ *
+ * ── 갱신 (2026-08-21, 티켓 7HthjBEf): 왜 DeepSeek 만 예외인가 ────────────
+ * ★위 결정은 **폐기되지 않았다**. 바뀐 것은 "조건부 크레덴셜" 이라는 조건을
+ * **런타임에 검사할 수 있게 됐다**는 사실 하나뿐이고, 예외는 그 검사가 가능한
+ * 벤더에만 허용된다.
+ *
+ * 해제 조건 셋 중 둘은 다른 티켓이 채웠다:
+ *   ① 라이브 검증 — PR #1074 가 namespace/MCP 가설을 라이브로 반증했고
+ *      SWE 벤치 11/12(91.7%)로 gpt-5.6-sol·opus-5 와 동률이다. PR #1069 에서
+ *      실작업 1건을 완주했다(claim → activity ×3 → submit).
+ *   ② 키 등록 — `DEEPSEEK_API_KEY` 가 vendor-secrets 에 있다.
+ *
+ * 셋째가 이 예외를 **지탱하는 것**이다:
+ *   ③ **잔액 게이트.** DeepSeek 은 구독제가 없다. 만료일이 있는 게 아니라 선불
+ *      잔액이 **말없이** 떨어진다(2026-08-21 아침 실측 0). 즉 위 주석이 두려워한
+ *      "저장된 값이 나중에 못 쓰게 되는" 시나리오가 GLM 보다 **더 잘** 일어난다.
+ *      그래서 필터를 그냥 걷지 않고, 걷은 자리에 세 겹을 세웠다:
+ *        · 목록 — `models:orchestratorCatalog`(main)이 이 칸들에 잔액 판정을 얹어
+ *          내린다. 판정 자체는 `orchestrator-vendor-gate.ts`(순수)가 한다.
+ *        · 스폰 — 오케 **3번째 관문** `checkOrchestratorVendorGate`(main.ts).
+ *          잔액 0 인 저장값으로 재시작하면 **조용히 기본 백엔드로 새지 않고**
+ *          사유를 띄우고 멈춘다. 그 조용한 샘이 원래 주석이 막던 바로 그것이다.
+ *        · 사유 — 잔액 0 / 키 없음 / 401 / 네트워크를 끝까지 구분해서 문구가
+ *          "무엇을 해야 하는지" 까지 말한다(Solar 조용한 실패 학습).
+ *
+ * ★그래서 이 예외를 다른 벤더로 복사하려면 그 벤더에도 잔액(또는 동등한 소진
+ * 관측) 프로브가 **먼저** 있어야 한다. `vendor-balance.BALANCE_PROBES` 에 항목이
+ * 없는 벤더를 아래 집합에 넣으면 게이트가 매번 `indeterminate` 로 차단하므로
+ * 칸만 서고 절대 안 뜨는 상태가 된다 — 그 어긋남은
+ * `tests/unit/orchestrator-vendor-gate.test.ts` 가 잡는다.
+ *
+ * ★이 함수는 **여전히 순수하다**. 시크릿도 네트워크도 안 읽는다(model-registry
+ * 상단 규율). 그 성질을 지키려고 판정은 main 이 붙여 내린다 — 퀵레인이
+ * `requiredEnvKeys` 를 실어 보내고 main 이 `process.env` 를 보는 이 파일 하단의
+ * 패턴과 같은 분업이다.
  */
-function selectorEligible(entry: ModelRegistryEntry): boolean {
+export const ORCHESTRATOR_RUNTIME_GATED_VENDORS: ReadonlySet<VendorId> =
+  new Set<VendorId>(["deepseek"]);
+
+export function orchestratorSelectorEligible(
+  entry: ModelRegistryEntry
+): boolean {
   if (entry.id in ORCHESTRATOR_SELECTOR_RETIRED) return false;
-  return entry.provider === HARNESS_NATIVE_VENDOR[entry.harness];
+  if (entry.provider === HARNESS_NATIVE_VENDOR[entry.harness]) return true;
+  return ORCHESTRATOR_RUNTIME_GATED_VENDORS.has(entry.provider);
+}
+
+/** 파일 안쪽 호출부용 별칭(종전 이름을 유지해 diff 를 좁게 둔다). */
+const selectorEligible = orchestratorSelectorEligible;
+
+/** 런타임 게이트가 걸린 오케 선택 하나. 게이트 대상이 아니면 `null`. */
+export interface OrchestratorVendorGateTarget {
+  vendor: VendorId;
+  vendorLabel: string;
+  /** 이 선택이 실제로 스폰할 구체 모델 id. */
+  modelId: string;
+  /** 필요한 env 키 **이름들**(값 아님). */
+  requiredEnvKeys: string[];
+}
+
+/**
+ * 오케 설정값 하나가 **런타임 잔액 게이트 대상인가**를 판정한다 — 순수.
+ *
+ * main 의 3번째 관문(`checkOrchestratorVendorGate`)이 "지금 이 스폰에 잔액을
+ * 물어봐야 하나" 를 이 함수로 묻는다. 네이티브 칸(claude/codex/grok/antigravity)과
+ * 접미 없는 하네스 칸은 전부 `null` 이라, **기존 경로는 이 함수 하나의 조기
+ * 반환으로 바이트 동일**하다(벤더 API 를 때리지 않는다).
+ *
+ * ★입력은 이미 정규화된 값이어야 한다 — 호출부가
+ * `normalizeOrchestratorModelSetting` 을 먼저 지난다.
+ */
+export function orchestratorVendorGateTarget(
+  setting: string
+): OrchestratorVendorGateTarget | null {
+  const { modelId } = splitOrchestratorModelValue(setting);
+  if (!modelId) return null;
+  const entry = getModel(modelId);
+  if (!entry) return null;
+  if (!ORCHESTRATOR_RUNTIME_GATED_VENDORS.has(entry.provider)) return null;
+  return {
+    vendor: entry.provider,
+    vendorLabel: VENDOR_LABEL[entry.provider],
+    modelId: entry.id,
+    requiredEnvKeys: [...vendorEnvSecretKeys(entry.id)],
+  };
 }
 
 /**
@@ -946,8 +1070,13 @@ export function humanizeClaudeModelId(id: string): string {
 // 선택은 수명이 다르기 때문이다:
 //
 //   오케 선택   — 프로젝트별로 **영구 저장**된다. 그래서 env-swap 벤더를
-//                 `selectorEligible` 로 잘라낸다(키가 없는 값이 매 재시작마다
-//                 되살아나 조용히 네이티브 벤더로 새는 것을 막으려고).
+//                 `orchestratorSelectorEligible` 로 잘라낸다(키가 없는 값이 매
+//                 재시작마다 되살아나 조용히 네이티브 벤더로 새는 것을 막으려고).
+//                 ★유일한 예외는 **소진을 런타임에 관측할 수 있는** 벤더다
+//                 (오늘 DeepSeek 하나). 그 칸은 목록엔 서지만 스폰 직전 잔액
+//                 게이트를 한 번 더 지난다 — 즉 "영구 저장에 조건부 크레덴셜을
+//                 얹지 않는다" 는 규율은 걷힌 게 아니라 **런타임 검사로 대체**된
+//                 것이다. 근거 전문은 위 `orchestratorSelectorEligible` 주석.
 //   퀵레인 선택 — **레인 1개짜리 수명**이다. 티켓 하나를 띄우는 그 순간의
 //                 선택이고, 실패해도 그 레인에서 끝난다 — `dispatch_task(model=…)`
 //                 명시 지정과 같은 수명이라 같은 대우를 받는다.
@@ -1036,7 +1165,7 @@ export function quickLaneVendorCatalog(): QuickLaneVendorGroup[] {
 
   for (const vendor of VENDOR_IDS) {
     const entries = MODEL_REGISTRY.filter(
-      (m) => m.provider === vendor && m.status === "active",
+      (m) => m.provider === vendor && m.status === "active"
     );
     if (entries.length === 0) continue;
 
