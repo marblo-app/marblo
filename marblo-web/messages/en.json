@@ -1222,5 +1222,264 @@
       "retries": "Retries",
       "costTotal": "Cost"
     }
+  },
+  "team": {
+    "title": "Team usage",
+    "subtitle": "Token usage by member and by actor, from the account usage record.",
+    "tabs": {
+      "usage": "Usage",
+      "audit": "Audit"
+    },
+    "money": {
+      "label": "Estimated usage cost",
+      "note": "This is not an invoice amount. There is no per-seat billing record, so this screen cannot answer whose invoice a cost lands on — these are token volumes converted at list prices."
+    },
+    "basis": {
+      "label": "Basis",
+      "missing": "It is not confirmed what this number counts, so it is not shown large."
+    },
+    "freshness": {
+      "minutes": "As of {minutes} min ago",
+      "justNow": "As of just now",
+      "unknown": "It is not confirmed when this was measured"
+    },
+    "cache": {
+      "hit": "cached",
+      "miss": "fresh query"
+    },
+    "today": {
+      "partialBadge": "in progress"
+    },
+    "cell": {
+      "zeroBadge": "measured 0",
+      "zeroNote": "Actually zero for this window — not a missing number.",
+      "notCollectedBadge": "not collected",
+      "notCollectedBody": "This is not a zero. Nothing is being collected for this, so there is no number to show. A zero here would read as “this costs nothing”.",
+      "pendingBadge": "not yet ingested",
+      "pendingBody": "Collection has started, but nothing has arrived for this period yet. This is not a measured zero.",
+      "pendingSince": "Collecting since {since}",
+      "partialBadge": "partial window",
+      "partialBody": "Only part of this window is collected (from {from}). Do not read this as a full-window total.",
+      "unwiredBadge": "not wired",
+      "unwiredBody": "This value is not being delivered yet. It is not that the result measured zero — it is not connected yet, so no number is shown here.",
+      "legacySegment": "Entries left from {from} – {to} cannot be read as usage."
+    },
+    "disabled": {
+      "badge": "not opened yet",
+      "title": "Team-wide usage is not open yet",
+      "body": "No data is missing. This view stays closed until the privacy policy covers it. Do not read it as “not yet ingested”."
+    },
+    "orchestrator": {
+      "title": "Orchestrator vs worker",
+      "stake": "Orchestrator cost is not collected yet. That is why this shows as “not collected” rather than 0.",
+      "worker": "Workers",
+      "orchestrator": "Orchestrator"
+    },
+    "empty": {
+      "title": "No usage to show yet",
+      "body": "This is the normal state for a team that has not started yet — not an error, and not a zero.",
+      "willShowTitle": "Once your team is working, this page answers",
+      "invite": "Invite members to the project and this starts filling in."
+    },
+    "totals": {
+      "title": "Total",
+      "tokens": "Tokens (in + out)",
+      "cacheRead": "Cache read tokens",
+      "cacheWrite": "Cache write tokens"
+    },
+    "members": {
+      "title": "By member",
+      "name": "Member",
+      "unnamed": "Unnamed member",
+      "share": "Share",
+      "optOutNote": "A member at 0 may have opted out of telemetry rather than done no work. This screen cannot tell those apart — do not read this ranking as effort.",
+      "hostNote": "Usage is attributed to the account signed in on the machine that ran the work, not to whoever filed the ticket.",
+      "noRows": "no records",
+      "noRowsNote": "“No records” is not zero — it can mean nothing was sent at all."
+    },
+    "projects": {
+      "title": "By project",
+      "unnamed": "Unnamed project"
+    },
+    "models": {
+      "title": "By model"
+    },
+    "byDay": {
+      "title": "By day"
+    },
+    "coverage": {
+      "title": "What this page does not cover",
+      "rowsZero": "Entries carrying no usage at all: {value} of the record.",
+      "rowsWithoutTask": "Entries with no ticket recorded: {value} — breaking spend down per ticket is only half possible.",
+      "unattributed": "Rows with no project: {value} (counted only, no amounts).",
+      "membersWithNoRows": "Members with no rows at all: {value}.",
+      "unknown": "How much is missing from this period is not confirmed."
+    },
+    "scope": {
+      "selfBadge": "your usage only",
+      "selfNote": "You are seeing your own usage. Team-wide numbers are shown to project owners and admins only.",
+      "projectsInScope": "{count} project(s) in scope"
+    },
+    "action": {
+      "refresh": "Refresh",
+      "retry": "Try again",
+      "signIn": "Sign in"
+    },
+    "state": {
+      "loading": "Loading…",
+      "signInRequired": "Sign in to see your usage."
+    },
+    "error": {
+      "unauthenticated": "Sign in to see this page.",
+      "permissionDenied": "You do not have access to this project's team usage.",
+      "notDeployed": "The team usage service is not deployed yet.",
+      "unknown": "Could not load team usage."
+    },
+    "reason": {
+      "fallback": "No reason was delivered. Read this as unknown, not as zero."
+    },
+    "reasons": {
+      "unset": "Team usage is not open yet — the published privacy policy describes usage and cost records only as your own subscription and billing check, and does not yet cover a project owner viewing an individual member's usage.",
+      "invalid": "The start date for opening team usage is not a valid date. It stays closed until that setting is fixed.",
+      "no_permission": "There is no project whose team-wide usage you can see — it opens only where you are the owner or an administrator.",
+      "orchestrator_not_wired": "What the orchestrator used is not recorded anywhere yet. Making it record is separate work already under way.",
+      "no_role": "You do not have permission to see this project's activity record.",
+      "no_project": "There is no project to show.",
+      "no_events": "No activity was recorded in this period.",
+      "partial_sources": "Part of the record could not be loaded, so the list below is not complete. An empty entry means “not confirmed”, not “none”.",
+      "scan_truncated": "Only recent activity was loaded. Older activity is not on this screen.",
+      "self_scope_unattributable": "Your own activity record cannot be shown right now. If this keeps happening, let support know.",
+      "withheld_tool_params": "The input an agent passed to a tool — secret keys can end up in it, and once a record is written it cannot be erased.",
+      "withheld_instruction": "The instructions given to an agent — even with sensitive parts masked, the instructions themselves are not carried here.",
+      "withheld_tool_result": "What a tool returned — code or file contents can land in it verbatim.",
+      "withheld_activity_body": "The body of an agent's progress notes — code, paths and error output land in it verbatim.",
+      "withheld_personal_tool_calls": "Command runs, file access, reads and searches, reports and questions — that is how a person works, not something the team shares.",
+      "withheld_escalation": "Requests and approvals to use a larger model — that amounts to evaluating a person's work.",
+      "withheld_mission_goal": "The goal written on a mission — a person wrote it as an instruction.",
+      "withheld_repo_path": "The folder path where a repository sits — that is a path on someone else's computer.",
+      "withheld_money": "All cost and token figures — they are only ever shown on the usage tab.",
+      "withheld_raw_identity": "A member's account identifier, email address and display name — whoever acted is shown only as a team-only alias.",
+      "note_read_only": "This screen only reads the record — nothing here changes or deletes anything.",
+      "note_allowlist_only": "This list holds only actions that changed a ticket, a merge, an agent or a workflow. Command runs, file access, reads and searches, reports and questions are not held here.",
+      "note_self_scope": "Only your own activity is shown. Other members' records are not included in this list.",
+      "note_self_scope_board_is_project_wide": "Ticket, mission and agent figures are project-wide. They are already visible on the shared board; what narrows to you is the activity list.",
+      "note_merge_actor_absent": "Some merge records do not carry who performed them, so those show as unknown.",
+      "note_merge_actor_absent_self": "Merge records that do not carry who performed them are not included in your own activity.",
+      "note_member_key_unavailable": "Who acted cannot be shown. The activity record itself is fine; if this keeps happening, let support know.",
+      "note_event_scan_truncated": "Only recent activity was loaded — older activity is not on this screen.",
+      "note_orphan_claim_unknown": "Agent status could not be loaded, so the check for tickets with no assignee was skipped. That does not mean there are none.",
+      "note_stalled_threshold": "“Stalled” is shown only for in-progress tickets with no record for a while. Done, archived and deleted tickets never enter the attention list.",
+      "gate_unset": "Team usage is not open yet — the published privacy policy describes usage and cost records only as your own subscription and billing check, and does not yet cover a project owner viewing an individual member's usage.",
+      "gate_invalid": "The start date for opening team usage is not a valid date. It stays closed until that setting is fixed.",
+      "not_provisioned": "This does not mean usage is zero. There is nowhere to read from yet, so no number is drawn here.",
+      "no_team_scope": "There is no project whose team-wide usage you can see — it opens only where you are the owner or an administrator.",
+      "member_self_only": "Members see only their own usage — opening the team total would reveal someone else's usage by simple subtraction.",
+      "orchestrator_not_collected": "What the orchestrator used is not recorded anywhere yet. Making it record is separate work already under way.",
+      "note_stalled_threshold_hours": "“Stalled” is shown only for in-progress tickets with no record for {hours} hours. Done, archived and deleted tickets never enter the attention list.",
+      "note_agents_truncated": "There are many agents, so only some were loaded. The agent figures and the check for tickets with no assignee are based on that sample.",
+      "note_stalled_unknown_for_some": "There are many tickets, so only some recent activity was checked. Tickets that were not checked are not marked “stalled” — that does not mean they are not stalled.",
+      "note_projects_truncated": "There are many projects, so only part of the list was loaded. There may be projects that are not shown here."
+    },
+    "willShow": [
+      "How much the team spent this month, and how that compares with last month",
+      "Which member, project and model that spend went to",
+      "Whether the orchestrator costs more than the workers"
+    ],
+    "audit": {
+      "subtitle": "What happened to the shared work — tickets, merges, agents, flows.",
+      "noMoneyNote": "This tab carries no cost or token figures, by design. Spend is only ever shown under the usage notice gate — putting it here would route around that gate.",
+      "unknown": "unknown",
+      "project": {
+        "label": "Project"
+      },
+      "scope": {
+        "selfNote": "You are seeing your own events only. Tickets, agents and missions below are project-wide — they are already shared board state."
+      },
+      "role": {
+        "owner": "owner",
+        "admin": "admin",
+        "member": "member"
+      },
+      "disabled": {
+        "title": "This audit feed is not available to you",
+        "body": "Nothing is drawn here on purpose. This says nothing about whether the project exists."
+      },
+      "empty": {
+        "title": "No project events recorded",
+        "body": "Nothing has happened to the shared work in this window. This is an empty feed, not a zero count."
+      },
+      "partial": {
+        "badge": "not the whole picture",
+        "body": "Some sources could not be read, so this feed is incomplete. Blank cells mean unknown, not zero."
+      },
+      "actor": {
+        "label": "Who",
+        "unknown": "unknown",
+        "pseudonymNote": "Whoever acted is shown only as a team-only alias, with no name beside it. Some merge records do not keep who performed them, so “unknown” there is expected.",
+        "redacted": "hidden",
+        "redactedNote": "This name looked like an email address or an account identifier, so it is hidden. Hidden is not the same as absent."
+      },
+      "kind": {
+        "task_create": "ticket created",
+        "task_transition": "ticket moved",
+        "merge": "merged",
+        "agent_spawn": "agent started",
+        "flow_change": "flow changed"
+      },
+      "summary": {
+        "title": "In this window",
+        "events": "Events",
+        "tasksOpen": "Open tickets",
+        "tasksDone": "Done tickets",
+        "merges": "Merges",
+        "agents": "Agents",
+        "missionsActive": "Active missions",
+        "critical": "Critical"
+      },
+      "attention": {
+        "title": "Needs attention"
+      },
+      "events": {
+        "title": "Event feed",
+        "failed": "failed"
+      },
+      "merge": {
+        "pr": "PR #{value}",
+        "files": "{value} files",
+        "lines": "+{added} / -{deleted}"
+      },
+      "workload": {
+        "title": "Agents",
+        "agent": "Agent",
+        "model": "Model",
+        "status": "Status",
+        "open": "Open",
+        "done": "Done"
+      },
+      "page": {
+        "more": "Load more",
+        "end": "End of feed",
+        "loading": "Loading…"
+      },
+      "notes": {
+        "title": "About this feed"
+      },
+      "withheld": {
+        "title": "Deliberately not shown here",
+        "body": "What this screen leaves out is listed below, as-is. If it were only written in a document, nobody looking at this would ever see it."
+      },
+      "error": {
+        "invalidCursor": "The feed position expired. Reload to start from the top."
+      }
+    },
+    "basisValues": {
+      "account_ledger": "Account usage record",
+      "project_event_ledger": "Project activity record"
+    },
+    "notProvisioned": {
+      "badge": "not yet ingested",
+      "title": "The data to aggregate is not ready yet",
+      "body": "This does not mean usage is zero. There is nowhere to read from yet, so no number is drawn here."
+    }
   }
 }
