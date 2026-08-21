@@ -171,6 +171,7 @@ import {
   trainingCaptureStatus,
 } from "./training-capture";
 import { getAccountRateLimits } from "./account-usage";
+import { getVendorBalance, hasBalanceProbe } from "./vendor-balance";
 import { mainTelemetry } from "./telemetry";
 import { initMainSentry } from "./sentry-main";
 import { loadPackagedMainFirebaseConfigEnv } from "./firebase-config-env";
@@ -9614,6 +9615,35 @@ ipcMain.handle("localModels:cancelPull", (_event, payload: { id: string }) => {
 // rollout across all codex homes. null fields = no information (logged out /
 // probe failed), never zero usage. See account-usage.ts.
 ipcMain.handle("usage:accountRateLimits", () => getAccountRateLimits());
+
+/**
+ * 벤더 **선불 잔액**(사용량 탭 벤더 크레딧 패널).
+ *
+ * ★키는 이 프로세스를 벗어나지 않는다. 렌더러가 보내는 건 벤더 id 와 "새로고침을
+ * 눌렀나" boolean 뿐이고, 돌아가는 건 금액·통화·상태·**키 이름**뿐이다
+ * (`models:quickLaneCatalog` 이 세운 규율과 같은 축). 인증·엔드포인트·캐시는 전부
+ * `vendor-balance.ts` 안에 있다.
+ *
+ * ★렌더러가 임의 벤더 문자열로 네트워크를 유발할 수 없다 — 프로브가 배선된 벤더가
+ * 아니면 요청 없이 `unsupported` 로 답한다. 호출 빈도 하한도 그 모듈이 쥔다.
+ */
+ipcMain.handle(
+  "usage:vendorBalance",
+  async (_event, payload: { vendor?: unknown; force?: unknown }) => {
+    const vendor =
+      typeof payload?.vendor === "string" ? payload.vendor.trim() : "";
+    if (!vendor || !hasBalanceProbe(vendor)) {
+      return {
+        vendor: vendor.toLowerCase(),
+        status: "unsupported" as const,
+        amounts: [],
+        fetchedAt: Date.now(),
+        cached: false,
+      };
+    }
+    return getVendorBalance(vendor, { force: payload?.force === true });
+  }
+);
 
 app.whenReady().then(async () => {
   console.log("[Marblo] auth=redirect build");

@@ -70,6 +70,37 @@ export const usage = {
   "usage.credits.axis.subscription": "구독",
   "usage.credits.axis.subscriptionQuota": "구독 쿼터(5시간+주간)",
   "usage.credits.axis.unknown": "과금축 미상",
+  "usage.credits.axis.prepaid": "선불 충전",
+  // ★조회가 되는 벤더의 안내문. "API 미제공" 문장과 섞이면 안 된다.
+  "usage.credits.prepaidNote":
+    "선불 충전식이라 계정 잔액에서 토큰 단가만큼 차감됩니다. 아래 잔액은 벤더 API 실측이며, 무료분(만료 가능)이 충전액보다 먼저 소진됩니다.",
+
+  // ── 벤더 잔액(선불 충전 벤더 전용) ──────────────────────────
+  // ★통화는 벤더가 준 코드를 그대로 씁니다 — 임의 환산하지 않습니다(우리가 환율을
+  //   지어내면 그건 거짓 숫자가 됩니다).
+  "usage.credits.balance.total": "총 잔액",
+  "usage.credits.balance.granted": "무료분",
+  "usage.credits.balance.toppedUp": "충전액",
+  "usage.credits.balance.grantedHint": "만료될 수 있고 충전액보다 먼저 소진됩니다",
+  "usage.credits.balance.refresh": "잔액 새로고침",
+  "usage.credits.balance.loading": "잔액 조회 중…",
+  "usage.credits.balance.fetchedAt": "{time} 기준",
+  "usage.credits.balance.notAvailableFlag":
+    "벤더가 이 계정을 '사용 불가' 로 표시했습니다. 잔액이 남아 있어도 호출이 막힐 수 있습니다.",
+  // ★실패 사유를 구분해서 말합니다. 한 문장으로 뭉치면 사용자는 충전이 안 된 건지
+  //   키가 틀린 건지 알 수 없습니다.
+  "usage.credits.balance.err.noKey":
+    "키가 없어 잔액을 조회하지 못했습니다({keys}). 설정 → API 키에서 등록하세요.",
+  "usage.credits.balance.err.unauthorized":
+    "벤더가 키를 거부했습니다(HTTP {status}). 키가 틀렸거나 폐기된 키입니다 — 잔액 부족이 아닙니다.",
+  "usage.credits.balance.err.http":
+    "벤더 응답 오류(HTTP {status}). 벤더 쪽 문제일 수 있으니 잠시 후 새로고침하세요.",
+  "usage.credits.balance.err.network":
+    "벤더에 닿지 못했습니다(네트워크 끊김 또는 응답 지연). 잔액은 알 수 없는 상태입니다.",
+  "usage.credits.balance.err.malformed":
+    "벤더 응답 형식이 예상과 다릅니다. 숫자를 추측하지 않고 비웁니다.",
+  "usage.credits.balance.err.bridge":
+    "앱 브리지가 없어 잔액을 조회하지 못했습니다(브라우저 미리보기에서는 조회되지 않습니다).",
   "usage.credits.unavailable": "조회불가",
   "usage.credits.noApi":
     "벤더가 잔여 쿼터 조회 API 를 공개하지 않습니다(1차 문서 전수 확인). 실제 소진 현황은 벤더 콘솔에서 확인하세요.",

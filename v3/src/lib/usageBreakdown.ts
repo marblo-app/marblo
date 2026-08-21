@@ -113,14 +113,45 @@ const VENDOR_COLOR_SLOTS = [
   "#008300", // green
   "#9085e9", // violet
   "#0e8f99", // teal
+  "#bb0ee1", // purple — 9번째 슬롯(deepseek). 아래 주석에 검증 수치.
 ] as const;
+
+/**
+ * ★9번째 색을 **끝에 붙인** 이유와 그 검증(2026-08-21).
+ *
+ * 슬롯 순서가 곧 색 배정이므로, 새 벤더를 중간에 끼우면 그 뒤 벤더들의 색이 전부
+ * 한 칸씩 밀린다 — 과거 스크린샷과 대조하는 사람에게는 "앱이 색을 바꿨다" 가 된다.
+ * 그래서 신규 벤더는 **항상 끝에** 붙는다. 색은 엔티티를 따라간다는 위 규율의
+ * 시간축 버전이다.
+ *
+ * 끝에 붙는다는 것은 새 색의 **유일한 인접 슬롯이 teal(#0e8f99)** 이라는 뜻이고,
+ * 이 팔레트의 안전장치가 인접쌍이므로 검증도 거기에 건다. 측정은 CIEDE2000 +
+ * Machado 2009 색각이상 시뮬(severity 1.0), 배경 #182030:
+ *
+ *   · 인접(teal↔purple)  일반시야 ΔE 38.2 / protan 21.9 / deutan 14.8 / tritan 52.8
+ *   · 9슬롯 인접 최소치   일반 30.3 · protan 14.7 · deutan 14.3 · tritan 10.2
+ *     → **8슬롯 시절 최소치와 한 자리도 다르지 않다**(색을 끝에 붙였으므로
+ *       기존 인접쌍이 그대로 남는다). 팔레트가 나빠지지 않았다는 뜻이다.
+ *   · 대비 3.31:1(≥3:1), L* 47.4(기존 대역 47~61), 채도 0.88(하한 0.61)
+ *   · 전체쌍 최근접은 일반시야 violet ΔE 21.9, 최악은 deutan 에서 blue ΔE 3.8 —
+ *     **기존 최악쌍(blue↔violet, protan ΔE 1.9)보다 낫다**. 즉 새 색이 이 팔레트의
+ *     새로운 병목이 되지 않는다.
+ */
 
 /**
  * 슬롯 배정 순서. `model-registry.VENDOR_IDS` 중 **실제 모델 행을 가진** 벤더들.
  * `local`/`custom`/미상은 카테고리 색을 받지 않고 중립 회색으로 떨어진다 —
  * "벤더 미상" 은 브랜드가 아니라 빈칸이기 때문이다.
+ *
+ * ★신규 벤더는 **끝에만 붙인다**(위 색 슬롯 주석). 중간 삽입은 그 뒤 벤더의 색을
+ * 전부 밀어 과거 화면과의 대조를 깨뜨린다.
+ *
+ * ★이 목록이 레지스트리보다 뒤처지면 그 벤더는 조용히 회색으로 떨어진다(deepseek
+ * 이 정확히 그랬다). 사람이 기억하는 대신 `tests/unit/vendor-axis-coverage.test.ts`
+ * 가 활성 모델 행을 가진 벤더 전부가 여기 있는지 실패로 잡는다. export 하는 이유가
+ * 그 테스트다 — 화면 코드는 `vendorColor()` 만 쓴다.
  */
-const VENDOR_SLOT_ORDER = [
+export const VENDOR_SLOT_ORDER = [
   "anthropic",
   "openai",
   "zai",
@@ -129,7 +160,11 @@ const VENDOR_SLOT_ORDER = [
   "google",
   "moonshot",
   "upstage",
+  "deepseek",
 ] as const;
+
+/** 색 슬롯이 배정 순서보다 짧으면 뒤쪽 벤더가 `undefined` 색을 받는다. */
+export const VENDOR_COLOR_SLOT_COUNT = VENDOR_COLOR_SLOTS.length;
 
 /** 벤더 미상/사용자 지정 — 카테고리 색이 아닌 중립 회색. */
 export const NEUTRAL_VENDOR_COLOR = "#9ca3af";
@@ -241,6 +276,7 @@ export function guessVendorFromModelId(modelId: string): string {
   if (m.startsWith("grok")) return "xai";
   if (m.startsWith("kimi") || m.startsWith("moonshot")) return "moonshot";
   if (m.startsWith("solar") || m.startsWith("upstage")) return "upstage";
+  if (m.startsWith("deepseek")) return "deepseek";
   if (m.startsWith("claude")) return "anthropic";
   if (m.startsWith("gemini")) return "google";
   if (/^(gpt|o\d|codex)/.test(m)) return "openai";

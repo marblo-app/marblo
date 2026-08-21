@@ -460,3 +460,82 @@ describe("기간 선택기", () => {
     expect(periodById("nope" as never).days).toBe(30);
   });
 });
+
+describe("★모델별 집계 — flash/pro 가 한 줄로 뭉치지 않는다 (티켓 zGlnSwXk)", () => {
+  // 두 모델의 단가가 3배 차이다($0.44/$1.32 vs $1.32/$3.96, 레지스트리 실측).
+  // 벤더로만 접혀 한 줄이 되면 "DeepSeek 에 얼마 썼나" 는 답할 수 있어도 "어느
+  // 모델에 썼나" 를 잃는다 — 그 순간 비용 해석이 3배까지 틀어진다.
+  const FLASH = "deepseek-v4-flash";
+  const PRO = "deepseek-v4-pro";
+
+  it("레지스트리 단가가 실제로 3배 차이다(이 테스트가 지키는 이유)", () => {
+    const flash = MODEL_REGISTRY.find((m) => m.id === FLASH)!;
+    const pro = MODEL_REGISTRY.find((m) => m.id === PRO)!;
+    expect(pro.pricing.inputPer1M / flash.pricing.inputPer1M).toBeCloseTo(3, 5);
+    expect(pro.pricing.outputPer1M / flash.pricing.outputPer1M).toBeCloseTo(
+      3,
+      5,
+    );
+  });
+
+  it("두 모델이 같은 벤더 아래 **각각의 행**으로 집계된다", () => {
+    const { vendors } = aggregateUsageByVendor(
+      [
+        entry(FLASH, { totalTokens: 300, cost: 3 }),
+        entry(PRO, { totalTokens: 100, cost: 9 }),
+      ],
+      INDEX,
+    );
+    const ds = vendors.find((v) => v.vendor === "deepseek");
+    expect(ds, "deepseek 벤더 행이 없다").toBeTruthy();
+    // 벤더는 하나로 접히고
+    expect(ds!.tokens).toBe(400);
+    expect(ds!.cost).toBe(12);
+    // 모델은 갈라진다
+    expect(ds!.models.map((m) => m.modelId).sort()).toEqual([FLASH, PRO]);
+    const byId = new Map(ds!.models.map((m) => [m.modelId, m]));
+    expect(byId.get(FLASH)!.tokens).toBe(300);
+    expect(byId.get(FLASH)!.cost).toBe(3);
+    expect(byId.get(PRO)!.tokens).toBe(100);
+    expect(byId.get(PRO)!.cost).toBe(9);
+  });
+
+  it("같은 모델의 여러 날 행은 그 모델 행 안에서만 합쳐진다", () => {
+    const { vendors } = aggregateUsageByVendor(
+      [
+        entry(FLASH, { totalTokens: 10, cost: 1 }),
+        entry(FLASH, { totalTokens: 20, cost: 2 }),
+        entry(PRO, { totalTokens: 5, cost: 5 }),
+      ],
+      INDEX,
+    );
+    const ds = vendors.find((v) => v.vendor === "deepseek")!;
+    expect(ds.models).toHaveLength(2);
+    const flash = ds.models.find((m) => m.modelId === FLASH)!;
+    expect(flash.tokens).toBe(30);
+    expect(flash.cost).toBe(3);
+  });
+
+  it("두 모델 다 레지스트리 등록으로 잡힌다(‘미등록’ 배지가 붙지 않는다)", () => {
+    for (const id of [FLASH, PRO]) {
+      const r = resolveModel(id, INDEX);
+      expect(r.registered, `${id} 가 카탈로그에 없다`).toBe(true);
+      expect(r.vendor).toBe("deepseek");
+    }
+  });
+
+  it("effort 접미사가 붙어 와도 같은 모델 행으로 모인다", () => {
+    // 스폰 argv·로그에는 `deepseek-v4-pro@high` 같은 표기가 섞인다.
+    expect(stripEffortSuffix(`${PRO}@high`)).toBe(PRO);
+  });
+
+  it("벤더 색이 중립 회색이 아니다(이 티켓이 고친 그 증상)", () => {
+    const { vendors } = aggregateUsageByVendor(
+      [entry(FLASH, { totalTokens: 1 })],
+      INDEX,
+    );
+    const ds = vendors.find((v) => v.vendor === "deepseek")!;
+    expect(ds.color).not.toBe(NEUTRAL_VENDOR_COLOR);
+    expect(ds.label).toBe("DeepSeek");
+  });
+});

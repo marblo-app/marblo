@@ -1,4 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
+// 타입만 가져온다(esbuild 가 지워서 런타임 require 가 생기지 않는다). 잔액 응답의
+// 모양이 메인과 갈라지지 않게 하는 유일한 방법이라 여기서만 예외적으로 쓴다.
+import type { VendorBalanceResult } from "./vendor-balance";
 // Sets up the @sentry/electron renderer↔main IPC bridge for this (sandboxed,
 // contextIsolated) preload. Inert until BOTH the main and renderer SDKs are
 // initialized — which only happens after the user opts in AND a DSN is
@@ -911,6 +914,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
           secondaryWindowDurationMins?: number | null;
         } | null;
       }>,
+    // Vendor prepaid balance (Usage tab credits panel). The API key never
+    // leaves the main process — only amount, currency and a status code come
+    // back, plus env key NAMES when a key is missing. Cached in main with a
+    // TTL; `force` is the user pressing refresh (still rate-limited there).
+    vendorBalance: (vendor: string, opts?: { force?: boolean }) =>
+      ipcRenderer.invoke("usage:vendorBalance", {
+        vendor,
+        force: opts?.force === true,
+      }) as Promise<VendorBalanceResult>,
   },
   fs: {
     readTree: (rootPath: string, options?: { showHidden?: boolean }) =>

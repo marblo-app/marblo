@@ -1763,6 +1763,48 @@ interface RateLimitSnapshot {
   secondaryWindowDurationMins?: number | null;
 }
 
+/**
+ * 벤더 잔액 조회의 **결과 성격**. 형태는 `electron/vendor-balance.ts` 와 같다.
+ *
+ * ★하나로 접지 않는 것 자체가 요구사항이다 — "잔액 표시 안 됨" 한 줄이면 사용자는
+ * 충전이 안 된 건지 키가 틀린 건지 알 수 없다.
+ */
+type VendorBalanceStatus =
+  | "ok"
+  | "unsupported"
+  | "no-key"
+  | "unauthorized"
+  | "http-error"
+  | "network-error"
+  | "malformed";
+
+/** 한 통화의 잔액. ★임의 환산 금지 — 벤더가 준 통화 코드를 그대로 그린다. */
+interface VendorBalanceAmount {
+  currency: string;
+  total: number;
+  /** 만료 가능한 무료분(먼저 소진된다). `null` = 벤더가 안 준 칸(0 아님). */
+  granted: number | null;
+  /** 사용자가 충전한 금액. `null` 의 뜻은 `granted` 와 같다. */
+  toppedUp: number | null;
+}
+
+/**
+ * `usage:vendorBalance` 응답. ★키는 한 바이트도 들어 있지 않다 — 담기는 것은
+ * 금액·통화·상태, 그리고 키가 없을 때 그 **이름**뿐이다.
+ */
+interface VendorBalanceResult {
+  vendor: string;
+  status: VendorBalanceStatus;
+  /** `status !== "ok"` 이면 빈 배열(잔액 0 이 아니라 **모른다**). */
+  amounts: VendorBalanceAmount[];
+  isAvailable?: boolean;
+  httpStatus?: number;
+  missingEnvKeys?: string[];
+  fetchedAt: number;
+  /** 이번 호출이 벤더 API 를 때리지 않고 캐시로 답했는가. */
+  cached: boolean;
+}
+
 interface UsageAPI {
   /** Account-level rate limits independent of any running agent. */
   accountRateLimits: () => Promise<{
@@ -1770,6 +1812,14 @@ interface UsageAPI {
     gpt: RateLimitSnapshot | null;
     grok: RateLimitSnapshot | null;
   }>;
+  /**
+   * 벤더 선불 잔액. 메인이 캐시를 쥐고 있어 이 호출이 곧 네트워크 요청은 아니다.
+   * `force` 는 사용자가 새로고침을 눌렀다는 뜻이고, 그때도 메인의 하한이 걸린다.
+   */
+  vendorBalance: (
+    vendor: string,
+    opts?: { force?: boolean }
+  ) => Promise<VendorBalanceResult>;
 }
 
 interface ElectronAPI {

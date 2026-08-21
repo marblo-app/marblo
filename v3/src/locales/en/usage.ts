@@ -68,6 +68,37 @@ export const usage: Record<keyof typeof koUsage, string> = {
   "usage.credits.axis.subscription": "Subscription",
   "usage.credits.axis.subscriptionQuota": "Subscription quota (5h + weekly)",
   "usage.credits.axis.unknown": "Billing axis unknown",
+  "usage.credits.axis.prepaid": "Prepaid credit",
+  // ★Note for a vendor we CAN query. Must not blend with the "no API" line.
+  "usage.credits.prepaidNote":
+    "Prepaid: token spend is deducted from the account balance. The balance below is measured from the vendor API, and the granted (expirable) portion is consumed before topped-up credit.",
+
+  // ── Vendor balance (prepaid vendors only) ────────────────
+  // ★Currency is shown exactly as the vendor reports it — never converted
+  //   (an exchange rate we invented would be a false number).
+  "usage.credits.balance.total": "Total balance",
+  "usage.credits.balance.granted": "Granted",
+  "usage.credits.balance.toppedUp": "Topped up",
+  "usage.credits.balance.grantedHint": "can expire, and is consumed before topped-up credit",
+  "usage.credits.balance.refresh": "Refresh balance",
+  "usage.credits.balance.loading": "Checking balance…",
+  "usage.credits.balance.fetchedAt": "as of {time}",
+  "usage.credits.balance.notAvailableFlag":
+    "The vendor marks this account as unavailable. Calls may be blocked even with a balance left.",
+  // ★Distinct reasons. Collapsed into one line, the user cannot tell an empty
+  //   wallet from a wrong key.
+  "usage.credits.balance.err.noKey":
+    "No key, so the balance could not be read ({keys}). Add it under Settings → API keys.",
+  "usage.credits.balance.err.unauthorized":
+    "The vendor rejected the key (HTTP {status}). The key is wrong or revoked — this is not an empty balance.",
+  "usage.credits.balance.err.http":
+    "Vendor responded with an error (HTTP {status}). Likely on their side — refresh in a moment.",
+  "usage.credits.balance.err.network":
+    "Could not reach the vendor (offline or timed out). The balance is unknown, not zero.",
+  "usage.credits.balance.err.malformed":
+    "The vendor response did not match the expected shape. Left blank rather than guessed.",
+  "usage.credits.balance.err.bridge":
+    "No app bridge, so the balance could not be read (not available in the browser preview).",
   "usage.credits.unavailable": "Not queryable",
   "usage.credits.noApi":
     "This vendor publishes no remaining-quota API (verified across their full docs index). Check actual consumption in the vendor console.",
