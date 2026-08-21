@@ -1,4 +1,4 @@
-import { SITE_URL } from "@/lib/seo";
+import { SITE_URL, localeUrl } from "@/lib/seo";
 
 /**
  * Schema.org JSON-LD builders for SEO + GEO (generative-engine optimization).
@@ -130,7 +130,7 @@ export function buildSoftwareApplicationSchema(locale: string) {
     applicationCategory: "DeveloperApplication",
     operatingSystem: "macOS, Windows",
     url: SITE_URL,
-    downloadUrl: `${SITE_URL}/${locale}/download`,
+    downloadUrl: localeUrl(locale, "/download"),
     description: pick(locale, APP_DESCRIPTION),
     publisher: { "@id": ORG_ID },
     offers: [

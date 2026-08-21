@@ -7,6 +7,7 @@ import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { ArrowRight, CheckCircle2, Download } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { trackGenerateLead } from "@/lib/gtag";
+import { localeHref } from "@/i18n/routing";
 
 const COLLECTION = "betatester50_waitlist";
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -108,7 +109,7 @@ export default function BetaTester50SignupForm({
             {t("success_body")}
           </p>
           <Link
-            href={`/${locale}/download`}
+            href={localeHref(locale, "/download")}
             className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-300 px-4 py-2 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-200"
           >
             <Download className="h-4 w-4" />
@@ -205,7 +206,7 @@ export default function BetaTester50SignupForm({
         <span className="leading-snug">
           {t("consent_label")}{" "}
           <Link
-            href={`/${locale}/legal/privacy`}
+            href={localeHref(locale, "/legal/privacy")}
             target="_blank"
             className="text-indigo-300 hover:text-indigo-200 underline"
           >

@@ -10,6 +10,7 @@ import { auth } from "@/lib/firebase";
 import { sanitizeRedirect } from "@/lib/sanitizeRedirect";
 import { refreshEmailVerified } from "@/lib/emailVerification";
 import EmailVerificationActions from "@/components/EmailVerificationActions";
+import { localeHref } from "@/i18n/routing";
 
 /**
  * Email verification hub. Two ways in:
@@ -45,7 +46,7 @@ function VerifyEmailContent() {
   const t = useTranslations("emailVerify");
   const locale = useLocale();
   const searchParams = useSearchParams();
-  const redirect = sanitizeRedirect(searchParams.get("redirect"), `/${locale}`);
+  const redirect = sanitizeRedirect(searchParams.get("redirect"), localeHref(locale));
   // Signup hands off with ?sent=1 so we don't double-fire the first email.
   const alreadySent = searchParams.get("sent") === "1";
 
@@ -85,9 +86,9 @@ function VerifyEmailContent() {
           {t("signed_out_body")}
         </p>
         <Link
-          href={`/${locale}/auth/login?redirect=${encodeURIComponent(
+          href={localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
             `/${locale}/auth/verify`
-          )}`}
+          )}`)}
           className="inline-flex items-center justify-center mt-6 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl text-sm font-semibold transition"
         >
           {t("login")}

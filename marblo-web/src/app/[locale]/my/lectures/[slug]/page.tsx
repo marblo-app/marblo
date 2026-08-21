@@ -21,6 +21,7 @@ import {
   SAVE_DEBOUNCE_MS,
   type LectureProgress,
 } from "@/lib/lectureProgress";
+import { localeHref } from "@/i18n/routing";
 
 interface LectureSection {
   title: string;
@@ -62,7 +63,7 @@ export default function WatchLecturePage() {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (!user) {
-        router.push(`/${locale}/auth/login`);
+        router.push(localeHref(locale, "/auth/login"));
         return;
       }
       // 결제 게이팅: 구매 기록이 있어야 재생 (무회귀 — 기존 로직 유지).
@@ -73,7 +74,7 @@ export default function WatchLecturePage() {
       );
       const snap = await getDocs(q);
       if (snap.empty) {
-        router.push(`/${locale}/lectures/${slug}`);
+        router.push(localeHref(locale, `/lectures/${slug}`));
         return;
       }
       setUid(user.uid);

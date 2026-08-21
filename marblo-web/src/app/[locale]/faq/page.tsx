@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
-import { SITE_URL, buildAlternates } from "@/lib/seo";
+import { buildAlternates, localeUrl } from "@/lib/seo";
 import {
   buildFAQPageSchema,
   buildBreadcrumbSchema,
   stringifyJsonLd,
 } from "@/lib/schema";
+import { localeHref } from "@/i18n/routing";
 
 type FaqItem = { q: string; a: string };
 
@@ -24,7 +25,7 @@ export async function generateMetadata({
     openGraph: {
       title: `${t("title")} | Marblo`,
       description: t("subtitle"),
-      url: `${SITE_URL}/${locale}/faq`,
+      url: localeUrl(locale, "/faq"),
       type: "website",
     },
   };
@@ -45,8 +46,8 @@ export default async function FaqPage({
     items.map((it) => ({ question: it.q, answer: it.a }))
   );
   const breadcrumbSchema = buildBreadcrumbSchema([
-    { name: t("home"), url: `${SITE_URL}/${locale}` },
-    { name: t("title"), url: `${SITE_URL}/${locale}/faq` },
+    { name: t("home"), url: localeUrl(locale) },
+    { name: t("title"), url: localeUrl(locale, "/faq") },
   ]);
 
   return (
@@ -61,7 +62,7 @@ export default async function FaqPage({
       />
 
       <nav className="mb-8 text-sm text-zinc-500" aria-label="Breadcrumb">
-        <Link href={`/${locale}`} className="hover:text-zinc-300">
+        <Link href={localeHref(locale)} className="hover:text-zinc-300">
           {t("home")}
         </Link>
         <span className="mx-2" aria-hidden>

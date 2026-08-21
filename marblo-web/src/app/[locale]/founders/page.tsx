@@ -15,6 +15,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import BetaTester50SignupForm from "@/components/BetaTester50SignupForm";
+import { localeHref } from "@/i18n/routing";
 
 export default function Foundation50Page() {
   const t = useTranslations("foundation50");
@@ -211,19 +212,19 @@ export default function Foundation50Page() {
 
         <div className="flex flex-col sm:flex-row gap-3 justify-center mt-8">
           <Link
-            href={`/${locale}/founders/faq`}
+            href={localeHref(locale, "/founders/faq")}
             className="bg-indigo-600/20 border border-indigo-500/50 hover:bg-indigo-600/30 text-indigo-100 px-6 py-3 rounded-lg font-medium transition text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
           >
             {t("faq_link")}
           </Link>
           <Link
-            href={`/${locale}/pricing`}
+            href={localeHref(locale, "/pricing")}
             className="border border-zinc-700 hover:bg-zinc-800 text-zinc-200 px-6 py-3 rounded-lg font-medium transition text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
           >
             {t("footer_pricing_cta")}
           </Link>
           <Link
-            href={`/${locale}/lectures`}
+            href={localeHref(locale, "/lectures")}
             className="border border-zinc-700 hover:bg-zinc-800 text-zinc-200 px-6 py-3 rounded-lg font-medium transition text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
           >
             {t("footer_lectures_cta")}

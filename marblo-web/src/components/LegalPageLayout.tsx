@@ -3,6 +3,7 @@
 import { useLocale } from "next-intl";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { localeHref } from "@/i18n/routing";
 
 interface Props {
   title: string;
@@ -36,7 +37,7 @@ export default function LegalPageLayout({
     <div className="min-h-screen bg-zinc-950 text-white">
       <section className="max-w-3xl mx-auto px-4 pt-20 pb-12">
         <Link
-          href={`/${locale}`}
+          href={localeHref(locale)}
           className="inline-flex items-center gap-1.5 text-sm text-indigo-300 hover:text-indigo-200 transition mb-6"
         >
           <ArrowLeft className="w-4 h-4" />

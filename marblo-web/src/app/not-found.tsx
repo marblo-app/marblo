@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import "./globals.css";
+import { localeHref } from "@/i18n/routing";
 
 const LOCALES = ["ko", "en", "ja"] as const;
 type Locale = typeof LOCALES[number];
@@ -58,7 +59,7 @@ export default function RootNotFound() {
             </p>
             <div className="mt-10">
               <Link
-                href={`/${locale}`}
+                href={localeHref(locale)}
                 className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-7 py-3.5 rounded-xl text-base font-semibold transition shadow-lg shadow-indigo-600/25"
               >
                 {copy.cta}

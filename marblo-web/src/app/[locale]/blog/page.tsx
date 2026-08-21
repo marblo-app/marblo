@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { getAllPosts, getCategories } from "@/lib/blog";
-import { SITE_URL, buildAlternates } from "@/lib/seo";
+import { buildAlternates, localeUrl } from "@/lib/seo";
 import { buildBlogListSchema, stringifyJsonLd } from "@/lib/schema";
+import { localeHref } from "@/i18n/routing";
 
 export async function generateMetadata({
   params,
@@ -22,13 +23,13 @@ export async function generateMetadata({
     alternates: {
       ...buildAlternates(locale, "/blog"),
       types: {
-        "application/rss+xml": `${SITE_URL}/${locale}/blog/rss.xml`,
+        "application/rss+xml": localeUrl(locale, "/blog/rss.xml"),
       },
     },
     openGraph: {
       title: `${t("title")} | Marblo`,
       description: t("subtitle"),
-      url: `${SITE_URL}/${locale}/blog`,
+      url: localeUrl(locale, "/blog"),
       type: "website",
     },
   };
@@ -60,11 +61,11 @@ export default async function BlogIndexPage({
   };
 
   const blogSchema = buildBlogListSchema({
-    url: `${SITE_URL}/${locale}/blog`,
+    url: localeUrl(locale, "/blog"),
     name: t("title"),
     description: t("subtitle"),
     posts: allPosts.map((p) => ({
-      url: `${SITE_URL}/${locale}/blog/${p.slug}`,
+      url: localeUrl(locale, `/blog/${p.slug}`),
       title: p.title,
     })),
   });
@@ -91,7 +92,7 @@ export default async function BlogIndexPage({
       {categories.length > 0 && (
         <nav className="mb-10 flex flex-wrap gap-2" aria-label={t("title")}>
           <Link
-            href={`/${locale}/blog`}
+            href={localeHref(locale, "/blog")}
             className={`px-3 py-1.5 rounded-full text-sm border transition ${
               activeCategory === null
                 ? "bg-indigo-600 border-indigo-500 text-white"
@@ -103,7 +104,7 @@ export default async function BlogIndexPage({
           {categories.map((c) => (
             <Link
               key={c}
-              href={`/${locale}/blog?category=${c}`}
+              href={localeHref(locale, `/blog?category=${c}`)}
               className={`px-3 py-1.5 rounded-full text-sm border transition ${
                 activeCategory === c
                   ? "bg-indigo-600 border-indigo-500 text-white"
@@ -120,7 +121,7 @@ export default async function BlogIndexPage({
         {posts.map((post) => (
           <li key={post.slug}>
             <Link
-              href={`/${locale}/blog/${post.slug}`}
+              href={localeHref(locale, `/blog/${post.slug}`)}
               className="block rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 hover:border-zinc-600 transition"
             >
               <div className="flex items-center gap-3 text-sm text-zinc-500 mb-2">

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
 import { Sparkles, ArrowRight, X } from "lucide-react";
 import { isPromoBarOpen, PROMO_BAR_DISMISS_KEY } from "@/lib/foundation50";
+import { localeHref } from "@/i18n/routing";
 
 function subscribeDismissed(callback: () => void) {
   if (typeof window === "undefined") return () => {};
@@ -61,7 +62,7 @@ export default function PromoBar() {
           </span>
 
           <Link
-            href={`/${locale}/founders`}
+            href={localeHref(locale, "/founders")}
             className="inline-flex items-center gap-1 shrink-0 font-semibold text-white underline-offset-4 hover:underline rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 focus-visible:ring-offset-2 focus-visible:ring-offset-indigo-950"
           >
             {t("cta")}

@@ -14,6 +14,7 @@ import {
   type ConsentLocale,
 } from "@/lib/privacyConsent";
 import { ShieldCheck, Loader2, Mail, ExternalLink } from "lucide-react";
+import { localeHref } from "@/i18n/routing";
 
 /** PIPA 제36조 — 보유 개인정보 삭제 요청 메일 템플릿. */
 function buildDeletionMailto(uid: string, email: string | null): string {
@@ -62,9 +63,9 @@ export default function PrivacySettingsPage() {
     const unsub = onAuthStateChanged(auth, async (u) => {
       if (!u) {
         router.push(
-          `/${locale}/auth/login?redirect=${encodeURIComponent(
+          localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
             `/${locale}/my/privacy`
-          )}`
+          )}`)
         );
         return;
       }
@@ -220,7 +221,7 @@ export default function PrivacySettingsPage() {
         </section>
 
         <Link
-          href={`/${locale}/legal/privacy`}
+          href={localeHref(locale, "/legal/privacy")}
           className="inline-flex items-center gap-1.5 text-sm text-indigo-300 hover:text-indigo-200"
         >
           {t("settings_view_policy")}

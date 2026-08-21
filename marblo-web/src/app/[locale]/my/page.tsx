@@ -16,6 +16,7 @@ import {
   ChevronRight,
   UserRound,
 } from "lucide-react";
+import { localeHref } from "@/i18n/routing";
 
 type PlanType = "free" | "pro" | "team" | "team_plus" | "enterprise";
 type SubStatus = "active" | "canceled" | "past_due" | "trialing";
@@ -39,9 +40,9 @@ export default function AccountHubPage() {
     const unsub = onAuthStateChanged(auth, async (u) => {
       if (!u) {
         router.push(
-          `/${locale}/auth/login?redirect=${encodeURIComponent(
+          localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
             `/${locale}/my`
-          )}`
+          )}`)
         );
         return;
       }
@@ -69,7 +70,7 @@ export default function AccountHubPage() {
 
   const handleLogout = async () => {
     await signOut(auth);
-    router.push(`/${locale}`);
+    router.push(localeHref(locale));
   };
 
   if (loading) {
@@ -122,7 +123,7 @@ export default function AccountHubPage() {
 
         {/* 구독 요약 */}
         <Link
-          href={`/${locale}/my/subscription`}
+          href={localeHref(locale, "/my/subscription")}
           className="block bg-zinc-900 border border-zinc-800 rounded-2xl p-6 mb-6 hover:border-indigo-500 transition"
         >
           <div className="flex items-center justify-between gap-4">
@@ -150,7 +151,7 @@ export default function AccountHubPage() {
         {/* 바로가기 링크 */}
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl divide-y divide-zinc-800 mb-6">
           <Link
-            href={`/${locale}/my/lectures`}
+            href={localeHref(locale, "/my/lectures")}
             className="flex items-center justify-between gap-4 p-6 hover:bg-zinc-800/40 transition first:rounded-t-2xl"
           >
             <div className="flex items-center gap-3">
@@ -162,7 +163,7 @@ export default function AccountHubPage() {
             <ChevronRight className="w-5 h-5 text-zinc-600" />
           </Link>
           <Link
-            href={`/${locale}/my/privacy`}
+            href={localeHref(locale, "/my/privacy")}
             className="flex items-center justify-between gap-4 p-6 hover:bg-zinc-800/40 transition last:rounded-b-2xl"
           >
             <div className="flex items-center gap-3">

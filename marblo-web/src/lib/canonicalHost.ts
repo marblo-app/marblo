@@ -56,10 +56,16 @@ export type CanonicalRedirect = { url: string; status: 301 | 307 };
  *    visitor's browser and pin them to English forever. Nothing is lost here:
  *    the chain this replaces already ended in next-intl's own 307, so search
  *    engines never saw an end-to-end permanent chain to begin with.
+ *  - 301 again when `permanent` is set, which the proxy passes for the one
+ *    locale redirect that is NOT negotiated: the `/ko/x` → `/x` default-prefix
+ *    strip. Both halves of that hop (hostname and prefix) are structural, so
+ *    www.marblo.app/ko/pricing reaches https://marblo.app/pricing in a single
+ *    permanent redirect. See src/lib/localeRedirect.ts.
  */
 export function canonicalTarget(
   requestUrl: string,
-  intlLocation: string | null | undefined
+  intlLocation: string | null | undefined,
+  permanent: boolean = false
 ): CanonicalRedirect {
   const request = new URL(requestUrl);
   const target = new URL(
@@ -78,5 +84,8 @@ export function canonicalTarget(
   // not — never drop the visitor's params (utm_*, ?redirect=, …).
   if (!target.search && request.search) target.search = request.search;
 
-  return { url: target.toString(), status: intlLocation ? 307 : 301 };
+  return {
+    url: target.toString(),
+    status: intlLocation && !permanent ? 307 : 301,
+  };
 }

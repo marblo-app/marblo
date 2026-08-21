@@ -5,13 +5,14 @@ import { notFound } from "next/navigation";
 import { MDXRemote } from "next-mdx-remote/rsc";
 import { getTranslations } from "next-intl/server";
 import { getPost, getPostLocales, getAllPostParams } from "@/lib/blog";
-import { SITE_URL, buildBlogAlternates } from "@/lib/seo";
+import { buildBlogAlternates, localeUrl } from "@/lib/seo";
 import {
   buildBlogPostingSchema,
   buildBreadcrumbSchema,
   stringifyJsonLd,
 } from "@/lib/schema";
 import Comments from "@/components/Comments";
+import { localeHref } from "@/i18n/routing";
 
 type MdxNode = {
   type?: string;
@@ -38,7 +39,7 @@ export async function generateMetadata({
   const post = getPost(locale, slug);
   if (!post) return {};
 
-  const url = `${SITE_URL}/${locale}/blog/${slug}`;
+  const url = localeUrl(locale, `/blog/${slug}`);
   const available = getPostLocales(slug, post.locales);
   const ogImage = post.ogImage ?? "/images/product-demo.png";
 
@@ -192,7 +193,7 @@ export default async function BlogPostPage({
   if (!post) notFound();
 
   const t = await getTranslations({ locale, namespace: "blog" });
-  const url = `${SITE_URL}/${locale}/blog/${slug}`;
+  const url = localeUrl(locale, `/blog/${slug}`);
   const dateFmt = new Intl.DateTimeFormat(locale, {
     year: "numeric",
     month: "long",
@@ -217,8 +218,8 @@ export default async function BlogPostPage({
   });
 
   const breadcrumbSchema = buildBreadcrumbSchema([
-    { name: t("home"), url: `${SITE_URL}/${locale}` },
-    { name: t("title"), url: `${SITE_URL}/${locale}/blog` },
+    { name: t("home"), url: localeUrl(locale) },
+    { name: t("title"), url: localeUrl(locale, "/blog") },
     { name: post.title, url },
   ]);
 
@@ -234,13 +235,13 @@ export default async function BlogPostPage({
       />
 
       <nav className="mb-8 text-sm text-zinc-500" aria-label="Breadcrumb">
-        <Link href={`/${locale}`} className="hover:text-zinc-300">
+        <Link href={localeHref(locale)} className="hover:text-zinc-300">
           {t("home")}
         </Link>
         <span className="mx-2" aria-hidden>
           /
         </span>
-        <Link href={`/${locale}/blog`} className="hover:text-zinc-300">
+        <Link href={localeHref(locale, "/blog")} className="hover:text-zinc-300">
           {t("title")}
         </Link>
       </nav>
@@ -273,7 +274,7 @@ export default async function BlogPostPage({
 
       <footer className="mt-14 border-t border-zinc-800 pt-8">
         <Link
-          href={`/${locale}/blog`}
+          href={localeHref(locale, "/blog")}
           className="text-indigo-400 hover:text-indigo-300"
         >
           ← {t("backToList")}

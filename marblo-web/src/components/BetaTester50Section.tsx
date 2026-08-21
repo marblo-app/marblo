@@ -4,6 +4,7 @@ import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
 import { Sparkles } from "lucide-react";
 import BetaTester50SignupForm from "./BetaTester50SignupForm";
+import { localeHref } from "@/i18n/routing";
 
 export default function BetaTester50Section() {
   const t = useTranslations("betatester50");
@@ -60,7 +61,7 @@ export default function BetaTester50Section() {
             </p>
 
             <Link
-              href={`/${locale}/founders`}
+              href={localeHref(locale, "/founders")}
               className="inline-flex items-center gap-1 mt-4 text-sm text-indigo-300 hover:text-indigo-200 transition"
             >
               {t("details_link")}

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
+import { localeHref } from "@/i18n/routing";
 
 // V2 개편: 성실 설문은 /[locale]/beta-survey 로 이전되었다. 기존 안내 이메일/북마크가
 // /founders/feedback 을 가리킬 수 있으므로 이 라우트는 새 설문으로 리다이렉트만 한다.
@@ -12,7 +13,7 @@ export default function FounderFeedbackRedirect() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace(`/${locale}/beta-survey`);
+    router.replace(localeHref(locale, "/beta-survey"));
   }, [locale, router]);
 
   return (

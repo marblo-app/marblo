@@ -4,6 +4,7 @@ import { useLocale } from "next-intl";
 import Link from "next/link";
 import LegalPageLayout from "@/components/LegalPageLayout";
 import { lectures } from "@/data/lectures";
+import { localeHref } from "@/i18n/routing";
 
 const PUBLISHED_AT = "2026-08-21";
 
@@ -92,7 +93,7 @@ export default function NoticePage() {
         <p>
           이 조항은 이용자의 무과실 청약 철회(전자상거래법 제17조 제1항의 7일)와
           별도의 환불 기준이며,{" "}
-          <Link href={`/${locale}/legal/refund`}>환불정책</Link>에 명시된 강의
+          <Link href={localeHref(locale, "/legal/refund")}>환불정책</Link>에 명시된 강의
           청약 철회 및 부분 환불 기준에 우선하여 적용됩니다. 따라서 판매자 귀책
           사유에 따른 환불에는 <strong>강의 진도율, 자료 다운로드 여부, 이용량
           또는 구독 경과 기간</strong>과 관계없이 환불 제한을 적용하지 않습니다.

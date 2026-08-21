@@ -3,6 +3,8 @@
 import { useLocale } from 'next-intl';
 import { useRouter, usePathname } from 'next/navigation';
 import { useState, useRef, useEffect } from 'react';
+import { localeHref } from "@/i18n/routing";
+import { pagePathFromPathname } from "@/lib/seo";
 
 const LOCALES = [
   { code: 'ko', label: '한국어' },
@@ -28,7 +30,12 @@ export default function LanguageToggle() {
   const current = LOCALES.find((l) => l.code === locale) || LOCALES[0];
 
   const switchLocale = (newLocale: string) => {
-    const newPath = pathname.replace(`/${locale}`, `/${newLocale}`);
+    // Rebuild the path rather than string-replacing the prefix: under
+    // `localePrefix: "as-needed"` Korean has NO prefix, so there is nothing to
+    // replace on the way out of it and nothing to find on the way back in.
+    // Strip to the bare page path first, then let localeHref decide whether the
+    // target locale wants a prefix at all.
+    const newPath = localeHref(newLocale, pagePathFromPathname(pathname, locale));
     router.push(newPath);
     setOpen(false);
   };

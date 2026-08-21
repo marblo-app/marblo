@@ -13,8 +13,12 @@ import type { MetadataRoute } from "next";
  * indexed URL-only and reported as "Indexed, though blocked by robots.txt".
  *
  * The previous rules also silently missed their targets: `/*​/my/` (trailing
- * slash) does not match `/ko/my`, and the unprefixed `/auth/` and `/my/` forms
- * never exist at all under next-intl always-prefix routing.
+ * slash) did not match `/ko/my`, and at the time the unprefixed `/auth/` and
+ * `/my/` forms did not exist at all. (Since the move to
+ * `localePrefix: "as-needed"` the unprefixed forms ARE the Korean ones — which
+ * is exactly why path-pattern rules here would have been a maintenance trap,
+ * and why the noindex meta tag in each route layout, which follows the route
+ * rather than the URL shape, remains the right mechanism.)
  *
  * /api/ stays blocked: those responses are not HTML, so they cannot carry a
  * meta robots tag.

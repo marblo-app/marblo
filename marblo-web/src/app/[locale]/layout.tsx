@@ -5,7 +5,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { getMessages } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { headers } from "next/headers";
-import { routing } from "@/i18n/routing";
+import { localeHref, routing } from "@/i18n/routing";
 import {
   SITE_URL,
   buildAlternates,
@@ -145,7 +145,7 @@ export async function generateMetadata({
   // x-pathname is injected by the middleware (src/proxy.ts) so we can build
   // self-referencing per-page canonical + hreflang for every route, including
   // client-component pages that cannot export their own generateMetadata.
-  const pathname = (await headers()).get("x-pathname") ?? `/${locale}`;
+  const pathname = (await headers()).get("x-pathname") ?? localeHref(locale);
   const pagePath = pagePathFromPathname(pathname, locale);
   const alternates = buildAlternates(locale, pagePath);
   const og = buildOpenGraphLocale(locale);

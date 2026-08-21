@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
 import { ArrowLeft } from "lucide-react";
+import { localeHref } from "@/i18n/routing";
 
 export default function LocaleNotFound() {
   const t = useTranslations("notFound");
@@ -27,7 +28,7 @@ export default function LocaleNotFound() {
         <p className="mt-4 text-zinc-400 leading-relaxed">{t("description")}</p>
         <div className="mt-10">
           <Link
-            href={`/${locale}`}
+            href={localeHref(locale)}
             className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-7 py-3.5 rounded-xl text-base font-semibold transition shadow-lg shadow-indigo-600/25"
           >
             <ArrowLeft className="w-4 h-4" />

@@ -2,11 +2,23 @@ import createMiddleware from "next-intl/middleware";
 import { NextResponse } from "next/server";
 import { routing } from "./i18n/routing";
 import { canonicalTarget, isWwwHost } from "./lib/canonicalHost";
+import { isPermanentLocaleRedirect } from "./lib/localeRedirect";
 
 const intlMiddleware = createMiddleware(routing);
 
 export function proxy(request: import("next/server").NextRequest) {
   const response = intlMiddleware(request);
+  const location = response.headers.get("location");
+
+  // Is this next-intl's `/ko/pricing` → `/pricing` prefix strip? That one is
+  // structural and permanent; every other locale redirect is negotiated per
+  // visitor and must stay 307. See src/lib/localeRedirect.ts.
+  const permanent = isPermanentLocaleRedirect(
+    request.nextUrl.pathname,
+    location,
+    request.url,
+    routing.defaultLocale
+  );
 
   // www → apex in ONE hop. next-intl has already decided this request's final
   // path (a locale redirect, or nothing when the path is already prefixed), so
@@ -18,15 +30,24 @@ export function proxy(request: import("next/server").NextRequest) {
   // /robots.txt) are canonicalized by the redirects in next.config.ts, which
   // run ahead of the proxy.
   if (isWwwHost(request.headers.get("host"))) {
-    const { url, status } = canonicalTarget(
-      request.url,
-      response.headers.get("location")
-    );
+    const { url, status } = canonicalTarget(request.url, location, permanent);
     return NextResponse.redirect(url, status);
   }
 
+  if (permanent) {
+    // Re-emit next-intl's own redirect with a permanent status. Its headers are
+    // carried over wholesale rather than rebuilt, which keeps two things we
+    // would otherwise have to reimplement: the `Location` it computed (query
+    // string included) and the `Set-Cookie: NEXT_LOCALE=ko` it attaches, so a
+    // visitor arriving on a stale /ko/* link still lands on Korean content
+    // after the hop instead of being re-negotiated into their browser language.
+    return new NextResponse(null, { status: 301, headers: response.headers });
+  }
+
   // Expose the current pathname so Server Components (the [locale] layout's
-  // generateMetadata) can build per-page canonical/hreflang URLs.
+  // generateMetadata) can build per-page canonical/hreflang URLs. Under
+  // `as-needed` this is the locale-LESS path for Korean (`/pricing`), which is
+  // exactly what lib/seo.ts `pagePathFromPathname` expects.
   response.headers.set("x-pathname", request.nextUrl.pathname);
   return response;
 }

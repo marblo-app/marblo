@@ -21,6 +21,7 @@ import {
   MailWarning,
   Sparkles,
 } from "lucide-react";
+import { localeHref } from "@/i18n/routing";
 
 type Status = "idle" | "submitting" | "success";
 
@@ -67,9 +68,9 @@ export default function BetaSurveyPage() {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setAuthLoading(false);
       if (!u) {
-        const redirectPath = `/${locale}/beta-survey`;
+        const redirectPath = localeHref(locale, "/beta-survey");
         router.push(
-          `/${locale}/auth/login?redirect=${encodeURIComponent(redirectPath)}`
+          localeHref(locale, `/auth/login?redirect=${encodeURIComponent(redirectPath)}`)
         );
         return;
       }
@@ -166,7 +167,7 @@ export default function BetaSurveyPage() {
             {t("success_body")}
           </p>
           <Link
-            href={`/${locale}/download`}
+            href={localeHref(locale, "/download")}
             className="inline-flex items-center justify-center gap-2 mt-6 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-semibold transition"
           >
             {t("success_cta")}
@@ -182,7 +183,7 @@ export default function BetaSurveyPage() {
         <div className="absolute inset-0 bg-gradient-to-b from-indigo-950/40 via-zinc-950 to-zinc-950" />
         <div className="relative max-w-2xl mx-auto px-4 pt-16 pb-8">
           <Link
-            href={`/${locale}/founders`}
+            href={localeHref(locale, "/founders")}
             className="inline-flex items-center gap-1.5 text-sm text-indigo-300 hover:text-indigo-200 transition mb-6"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -219,7 +220,7 @@ export default function BetaSurveyPage() {
               className="mt-5"
               user={user}
               locale={locale}
-              redirect={`/${locale}/beta-survey`}
+              redirect={localeHref(locale, "/beta-survey")}
               onVerified={handleVerified}
             />
           </div>

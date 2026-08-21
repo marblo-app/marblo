@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
 import { Check } from "lucide-react";
+import { localeHref } from "@/i18n/routing";
 
 const plans = ["free", "pro", "team", "team_plus", "enterprise"] as const;
 type Plan = typeof plans[number];
@@ -232,16 +233,16 @@ export default function PricingSection() {
                   </a>
                 ) : plan === "free" ? (
                   <Link
-                    href={`/${locale}/download`}
+                    href={localeHref(locale, "/download")}
                     className="block w-full text-center py-3 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 transition font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
                   >
                     {t("free_cta")}
                   </Link>
                 ) : (
                   <Link
-                    href={`/${locale}/checkout?plan=${plan}${
+                    href={localeHref(locale, `/checkout?plan=${plan}${
                       isAnnual ? "&billing=annual" : ""
-                    }`}
+                    }`)}
                     className={`block w-full text-center py-3 rounded-lg transition font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 ${
                       highlighted
                         ? "bg-indigo-600 hover:bg-indigo-500 text-white"

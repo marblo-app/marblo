@@ -18,11 +18,12 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
-import { SITE_URL } from "@/lib/seo";
+import { localeUrl } from "@/lib/seo";
 import { fetchPublicReplay } from "@/lib/publicReplay";
 import PublicReplayArticle, {
   type ReplayLabels,
 } from "@/components/PublicReplayArticle";
+import { localeHref } from "@/i18n/routing";
 
 /**
  * ISR. 해제(unpublish)가 404 로 반영되기까지의 우리 층 최대 지연이다. 설계 §7.1
@@ -70,7 +71,7 @@ export async function generateMetadata({
     tasks: replay.stats.tasksDone ?? replay.stats.tasks ?? 0,
     agents: replay.stats.agents ?? replay.cast.length,
   });
-  const url = `${SITE_URL}/${locale}/replay/${replayId}`;
+  const url = localeUrl(locale, `/replay/${replayId}`);
   const image = replay.cardImageUrl ?? FALLBACK_OG_IMAGE;
 
   return {
@@ -143,7 +144,7 @@ export default async function PublicReplayPage({
     <PublicReplayArticle
       replay={replay}
       labels={labels}
-      homeHref={`/${locale}`}
+      homeHref={localeHref(locale)}
     />
   );
 }

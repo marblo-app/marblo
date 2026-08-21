@@ -16,6 +16,7 @@
 
 import { sendEmailVerification, type User } from "firebase/auth";
 import { sanitizeRedirect } from "./sanitizeRedirect";
+import { localeHref } from "@/i18n/routing";
 
 /** Fallback origin when `window` is unavailable (SSR) or the origin looks bogus. */
 const FALLBACK_ORIGIN = "https://marblo.app";
@@ -27,7 +28,7 @@ const STORAGE_PREFIX = "marblo.emailVerifySentAt.";
 
 /** Route that Firebase's verification link returns the user to. */
 export function verifyPath(locale: string): string {
-  return `/${locale}/auth/verify`;
+  return localeHref(locale, "/auth/verify");
 }
 
 /**

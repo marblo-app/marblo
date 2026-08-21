@@ -17,9 +17,12 @@ test("continue url points at the locale verify route", () => {
     buildVerifyContinueUrl({ origin: PROD, locale: "en" }),
     "https://marblo.app/en/auth/verify"
   );
+  // Korean carries no locale prefix under `localePrefix: "as-needed"` — see
+  // src/i18n/routing.ts. English keeps /en, which is what the assertion above
+  // pins down.
   assert.equal(
     buildVerifyContinueUrl({ origin: PROD, locale: "ko" }),
-    "https://marblo.app/ko/auth/verify"
+    "https://marblo.app/auth/verify"
   );
 });
 
@@ -87,7 +90,7 @@ test("continue url drops a self-referential redirect", () => {
       locale: "ko",
       redirect: verifyPath("ko"),
     }),
-    "https://marblo.app/ko/auth/verify"
+    "https://marblo.app/auth/verify"
   );
 });
 

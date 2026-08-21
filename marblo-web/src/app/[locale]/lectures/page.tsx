@@ -21,6 +21,7 @@ import {
   comingSoonLabel,
   type LectureData,
 } from "@/data/lectures";
+import { localeHref } from "@/i18n/routing";
 
 function formatHours(seconds: number): string {
   return (seconds / 3600).toFixed(1);
@@ -152,7 +153,7 @@ export default function LecturesPage() {
             return (
               <Link
                 key={lecture.slug}
-                href={`/${locale}/lectures/${lecture.slug}`}
+                href={localeHref(locale, `/lectures/${lecture.slug}`)}
                 className="group bg-zinc-900 border border-zinc-700/50 rounded-2xl overflow-hidden hover:border-indigo-500/50 transition-all hover:shadow-xl hover:shadow-indigo-500/5 flex flex-col"
               >
                 {/* Thumbnail */}

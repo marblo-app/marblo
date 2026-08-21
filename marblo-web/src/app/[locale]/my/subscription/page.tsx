@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   Info,
 } from "lucide-react";
+import { localeHref } from "@/i18n/routing";
 
 type PlanType = "free" | "pro" | "team" | "team_plus" | "enterprise";
 type SubStatus = "active" | "canceled" | "past_due" | "trialing";
@@ -56,9 +57,9 @@ export default function SubscriptionPage() {
     const unsub = onAuthStateChanged(auth, async (u) => {
       if (!u) {
         router.push(
-          `/${locale}/auth/login?redirect=${encodeURIComponent(
+          localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
             `/${locale}/my/subscription`
-          )}`
+          )}`)
         );
         return;
       }
@@ -161,7 +162,7 @@ export default function SubscriptionPage() {
             </div>
             {!isPaid && (
               <Link
-                href={`/${locale}/pricing`}
+                href={localeHref(locale, "/pricing")}
                 className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-500 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-400 transition"
               >
                 {t("upgrade")}
@@ -202,7 +203,7 @@ export default function SubscriptionPage() {
         {/* 업그레이드 (유료 사용자) */}
         {isPaid && isActive && (
           <Link
-            href={`/${locale}/pricing`}
+            href={localeHref(locale, "/pricing")}
             className="flex items-center justify-between gap-4 bg-zinc-900 border border-zinc-800 rounded-2xl p-6 mb-6 hover:border-indigo-500 transition"
           >
             <div>
@@ -298,7 +299,7 @@ export default function SubscriptionPage() {
 
         <div className="mt-6">
           <Link
-            href={`/${locale}/my`}
+            href={localeHref(locale, "/my")}
             className="text-sm text-indigo-300 hover:text-indigo-200"
           >
             ← {t("back_to_account")}

@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { sanitizeRedirect } from '@/lib/sanitizeRedirect';
+import { localeHref } from "@/i18n/routing";
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Login failed';
@@ -17,7 +18,7 @@ export default function LoginPage() {
   const locale = useLocale();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = sanitizeRedirect(searchParams.get('redirect'), `/${locale}`);
+  const redirect = sanitizeRedirect(searchParams.get('redirect'), localeHref(locale));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -61,7 +62,7 @@ export default function LoginPage() {
           <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-lg font-medium transition">{t('login')}</button>
         </form>
         <p className="text-center text-zinc-400 text-sm mt-6">
-          {t('noAccount')} <Link href={`/${locale}/auth/signup`} className="text-indigo-400 hover:underline">{t('signupLink')}</Link>
+          {t('noAccount')} <Link href={localeHref(locale, "/auth/signup")} className="text-indigo-400 hover:underline">{t('signupLink')}</Link>
         </p>
       </div>
     </div>

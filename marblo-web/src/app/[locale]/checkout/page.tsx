@@ -18,6 +18,7 @@ import {
   type PaymentErrorTone,
 } from "@/lib/paymentErrors";
 import { ArrowLeft, Loader2, AlertCircle, ShoppingCart, RotateCcw, Info } from "lucide-react";
+import { localeHref } from "@/i18n/routing";
 
 type PaymentProvider = "toss" | "portone";
 
@@ -219,8 +220,8 @@ export default function CheckoutPage() {
     if (type === "lecture") {
       router.replace(
         lectureSlug
-          ? `/${locale}/lectures/${lectureSlug}`
-          : `/${locale}/lectures`,
+          ? localeHref(locale, `/lectures/${lectureSlug}`)
+          : localeHref(locale, "/lectures"),
       );
     }
   }, [type, lectureSlug, locale, router]);
@@ -232,10 +233,10 @@ export default function CheckoutPage() {
       setAuthLoading(false);
       if (!u) {
         const redirectPath = isLecture
-          ? `/${locale}/checkout?type=lecture&slug=${lectureSlug}`
-          : `/${locale}/checkout?plan=${plan}`;
+          ? localeHref(locale, `/checkout?type=lecture&slug=${lectureSlug}`)
+          : localeHref(locale, `/checkout?plan=${plan}`);
         router.push(
-          `/${locale}/auth/login?redirect=${encodeURIComponent(redirectPath)}`,
+          localeHref(locale, `/auth/login?redirect=${encodeURIComponent(redirectPath)}`),
         );
       } else {
         setUser(u);
@@ -436,7 +437,7 @@ export default function CheckoutPage() {
       setCanRetryFirstCharge(false);
       releasePaymentLock();
       router.push(
-        `/${locale}/checkout/success?plan=${plan || "pro"}&billing=${billing}&amount=${finalAmount}&retry=1`,
+        localeHref(locale, `/checkout/success?plan=${plan || "pro"}&billing=${billing}&amount=${finalAmount}&retry=1`),
       );
     } catch (err: unknown) {
       console.error("retryFirstCharge error:", err);
@@ -565,7 +566,7 @@ export default function CheckoutPage() {
             totalAmount: intent.amount,
             currency: "KRW",
             payMethod: "CARD",
-            redirectUrl: `${window.location.origin}/${locale}/checkout/success?provider=portone&type=lecture&slug=${encodeURIComponent(lectureSlug)}&paymentId=${encodeURIComponent(intent.paymentId)}&plan=${safePlan}&billing=${billing}&amount=${intent.amount}`,
+            redirectUrl: `${window.location.origin}${localeHref(locale, `/checkout/success?provider=portone&type=lecture&slug=${encodeURIComponent(lectureSlug)}&paymentId=${encodeURIComponent(intent.paymentId)}&plan=${safePlan}&billing=${billing}&amount=${intent.amount}`)}`,
             customer,
           });
           if (response.code) {
@@ -580,7 +581,7 @@ export default function CheckoutPage() {
           });
           // amount/paymentId 로 success 페이지가 GA4 purchase 발화(멱등 complete + dedupe).
           router.push(
-            `/${locale}/checkout/success?provider=portone&type=lecture&slug=${encodeURIComponent(lectureSlug)}&paymentId=${encodeURIComponent(intent.paymentId)}&plan=${safePlan}&amount=${intent.amount}`,
+            localeHref(locale, `/checkout/success?provider=portone&type=lecture&slug=${encodeURIComponent(lectureSlug)}&paymentId=${encodeURIComponent(intent.paymentId)}&plan=${safePlan}&amount=${intent.amount}`),
           );
         } else if (plan) {
           // KG이니시스 issueId 40자 제한 — uid 삽입 시 초과하므로 짧은 고정 prefix + UUID(무하이픈)
@@ -631,7 +632,7 @@ export default function CheckoutPage() {
           releasePaymentLock();
           // tx=issueId → success 페이지 GA4 purchase transaction_id (중복 가드 키)
           router.push(
-            `/${locale}/checkout/success?provider=portone&plan=${plan}&billing=${billing}&amount=${finalAmount}&tx=${encodeURIComponent(issueId)}`,
+            localeHref(locale, `/checkout/success?provider=portone&plan=${plan}&billing=${billing}&amount=${finalAmount}&tx=${encodeURIComponent(issueId)}`),
           );
         }
       } else if (isLecture && lectureSlug) {
@@ -652,8 +653,8 @@ export default function CheckoutPage() {
           amount: { currency: "KRW", value: data.amount },
           orderId: data.orderId,
           orderName: data.orderName,
-          successUrl: `${window.location.origin}/${locale}/checkout/success?type=lecture&slug=${lectureSlug}`,
-          failUrl: `${window.location.origin}/${locale}/checkout/fail`,
+          successUrl: `${window.location.origin}${localeHref(locale, `/checkout/success?type=lecture&slug=${lectureSlug}`)}`,
+          failUrl: `${window.location.origin}${localeHref(locale, "/checkout/fail")}`,
         });
       } else if (plan) {
         const { loadTossPayments } =
@@ -666,8 +667,8 @@ export default function CheckoutPage() {
         // Toss 가 authKey/customerKey 등을 쿼리에 추가한다.
         await payment.requestBillingAuth({
           method: "CARD",
-          successUrl: `${window.location.origin}/${locale}/checkout/success?plan=${plan}&billing=${billing}&coupon=${encodeURIComponent(couponCode || "")}&amount=${finalAmount}`,
-          failUrl: `${window.location.origin}/${locale}/checkout/fail`,
+          successUrl: `${window.location.origin}${localeHref(locale, `/checkout/success?plan=${plan}&billing=${billing}&coupon=${encodeURIComponent(couponCode || "")}&amount=${finalAmount}`)}`,
+          failUrl: `${window.location.origin}${localeHref(locale, "/checkout/fail")}`,
         });
       }
     } catch (err: unknown) {
@@ -677,7 +678,7 @@ export default function CheckoutPage() {
       if (mapped.alreadySubscribed) {
         // 이미 구독 중 — 내 구독 페이지로 안내(잠깐 메시지 후 이동)
         setTimeout(() => {
-          router.push(`/${locale}/my/subscription`);
+          router.push(localeHref(locale, "/my/subscription"));
         }, 1500);
       }
     } finally {
@@ -711,7 +712,7 @@ export default function CheckoutPage() {
           <button
             onClick={() =>
               router.push(
-                isLecture ? `/${locale}/lectures` : `/${locale}/pricing`,
+                isLecture ? localeHref(locale, "/lectures") : localeHref(locale, "/pricing"),
               )
             }
             className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg transition"
@@ -1030,7 +1031,7 @@ export default function CheckoutPage() {
               <span className="text-sm text-zinc-300 leading-snug">
                 {t("consentLabel", { processor: paymentProcessorName })}{" "}
                 <Link
-                  href={`/${locale}/legal/privacy`}
+                  href={localeHref(locale, "/legal/privacy")}
                   target="_blank"
                   className="text-indigo-400 hover:text-indigo-300 underline"
                 >
@@ -1070,14 +1071,14 @@ export default function CheckoutPage() {
               <p className="mt-1">{t("legalLinksBody")}</p>
               <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
                 <Link
-                  href={`/${locale}/legal/terms`}
+                  href={localeHref(locale, "/legal/terms")}
                   target="_blank"
                   className="text-indigo-400 hover:text-indigo-300 underline"
                 >
                   {t("termsLink")}
                 </Link>
                 <Link
-                  href={`/${locale}/legal/refund`}
+                  href={localeHref(locale, "/legal/refund")}
                   target="_blank"
                   className="text-indigo-400 hover:text-indigo-300 underline"
                 >

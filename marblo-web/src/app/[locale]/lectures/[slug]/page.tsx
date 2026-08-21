@@ -32,6 +32,7 @@ import {
   comingSoonLabel,
   type LectureData,
 } from "@/data/lectures";
+import { localeHref } from "@/i18n/routing";
 
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -327,7 +328,7 @@ export default function LectureDetailPage() {
           {/* Breadcrumb */}
           <div className="flex items-center gap-2 text-sm text-zinc-500 mb-6">
             <Link
-              href={`/${locale}/lectures`}
+              href={localeHref(locale, "/lectures")}
               className="hover:text-zinc-300 transition"
             >
               {locale === "ko" ? "강의" : locale === "ja" ? "講座" : "Lectures"}
@@ -1001,7 +1002,7 @@ export default function LectureDetailPage() {
                 {t("refundBody")}
               </p>
               <Link
-                href={`/${locale}/legal/refund`}
+                href={localeHref(locale, "/legal/refund")}
                 target="_blank"
                 className="mt-3 inline-block text-sm text-indigo-400 hover:text-indigo-300 underline"
               >
@@ -1152,7 +1153,7 @@ export default function LectureDetailPage() {
               {t("notify_subtitle")}
             </p>
             <Link
-              href={`/${locale}/founders`}
+              href={localeHref(locale, "/founders")}
               className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white px-10 py-4 rounded-2xl text-lg font-bold transition-all shadow-lg shadow-indigo-600/25 hover:shadow-indigo-500/40 hover:scale-105"
             >
               {t("notify_beta_cta")}

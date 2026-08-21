@@ -13,6 +13,7 @@ import {
   Bug,
   Info,
 } from "lucide-react";
+import { localeHref } from "@/i18n/routing";
 
 // 버전 고정 다운로드 링크 — 새 빌드 릴리스 시 이 값만 갱신.
 // 실제 릴리스 자산 파일명 패턴: Marblo-<ver>-arm64.dmg / Marblo-Setup-<ver>.exe
@@ -166,7 +167,7 @@ export default function DownloadPage() {
 
         <p className="mt-10 text-sm text-zinc-500">
           <Link
-            href={`/${locale}/bugs`}
+            href={localeHref(locale, "/bugs")}
             className="inline-flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200 transition"
           >
             <Bug className="w-4 h-4" />

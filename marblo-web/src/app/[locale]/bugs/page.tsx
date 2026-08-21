@@ -9,6 +9,7 @@ import { httpsCallable, getFunctions } from "firebase/functions";
 import { auth } from "@/lib/firebase";
 import app from "@/lib/firebase";
 import { Bug, Check, Loader2, Home, AlertCircle } from "lucide-react";
+import { localeHref } from "@/i18n/routing";
 
 // Firebase callable 에러는 "functions/unauthenticated" 형태의 code 를 담는다.
 // 앱 BugReportModal 과 동일한 분기로 사용자 안내 문구를 고른다.
@@ -45,9 +46,9 @@ export default function BugsPage() {
       setAuthLoading(false);
       if (!u) {
         router.push(
-          `/${locale}/auth/login?redirect=${encodeURIComponent(
+          localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
             `/${locale}/bugs`
-          )}`
+          )}`)
         );
       } else {
         setUser(u);
@@ -160,7 +161,7 @@ export default function BugsPage() {
                 {t("submitAnother")}
               </button>
               <Link
-                href={`/${locale}`}
+                href={localeHref(locale)}
                 className="inline-flex items-center justify-center gap-2 border border-zinc-700 hover:bg-zinc-800 text-zinc-200 px-5 py-2.5 rounded-lg text-sm font-medium transition"
               >
                 <Home className="w-4 h-4" />

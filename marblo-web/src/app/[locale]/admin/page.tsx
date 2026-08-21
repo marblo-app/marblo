@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import AnalyticsPanel from "./AnalyticsPanel";
 import ProjectAuditPanel from "./ProjectAuditPanel";
+import { localeHref } from "@/i18n/routing";
 
 // 신청 목록 항목 (getFounderWaitlist 함수 응답; 날짜는 ISO 문자열).
 // 서버가 정규화 이메일 기준으로 중복 신청을 1건(최신)으로 접어서 내려준다.
@@ -389,9 +390,9 @@ export default function AdminPage() {
       setAuthLoading(false);
       if (!u) {
         router.push(
-          `/${locale}/auth/login?redirect=${encodeURIComponent(
+          localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
             "/" + locale + "/admin"
-          )}`
+          )}`)
         );
       } else {
         setUser(u);
@@ -844,7 +845,7 @@ export default function AdminPage() {
             </p>
           </div>
           <button
-            onClick={() => router.push(`/${locale}`)}
+            onClick={() => router.push(localeHref(locale))}
             className="inline-flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition"
           >
             홈으로 가기

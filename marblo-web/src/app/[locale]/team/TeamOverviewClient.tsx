@@ -33,6 +33,7 @@ import {
   type TeamAuditEnvelope,
 } from "./teamAuditContract";
 import { TeamAuditView } from "./TeamAuditView";
+import { localeHref } from "@/i18n/routing";
 
 /** 설계 §7 이 이름까지 정해 둔 콜러블. 새 이름을 발명하지 않는다. */
 const CALLABLE_TEAM_USAGE = "getTeamUsageSummary";
@@ -198,9 +199,9 @@ export default function TeamOverviewClient({
           {copy.text["state.signInRequired"]}
         </p>
         <Link
-          href={`/${locale}/auth/login?redirect=${encodeURIComponent(
+          href={localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
             projectId ? `/${locale}/team/${projectId}` : `/${locale}/team`
-          )}`}
+          )}`)}
           className="mt-4 inline-flex items-center rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900"
         >
           {copy.text["action.signIn"]}
@@ -318,7 +319,7 @@ function ProjectSwitcher({
       {projects.map((p) => (
         <Link
           key={p.id}
-          href={`/${locale}/team/${p.id}`}
+          href={localeHref(locale, `/team/${p.id}`)}
           aria-current={p.id === currentId ? "page" : undefined}
           className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs ${
             p.id === currentId

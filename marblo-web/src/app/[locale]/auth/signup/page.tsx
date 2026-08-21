@@ -14,6 +14,7 @@ import {
   type ConsentFlags,
   type ConsentLocale,
 } from "@/lib/privacyConsent";
+import { localeHref } from "@/i18n/routing";
 
 export default function SignupPage() {
   const t = useTranslations("auth");
@@ -64,7 +65,7 @@ export default function SignupPage() {
       } catch {
         // 무시 — verify 페이지가 '보내기' 상태로 열린다.
       }
-      router.push(`/${locale}/auth/verify${sent ? "?sent=1" : ""}`);
+      router.push(localeHref(locale, `/auth/verify${sent ? "?sent=1" : ""}`));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSubmitting(false);
@@ -124,7 +125,7 @@ export default function SignupPage() {
         <p className="text-center text-zinc-400 text-sm mt-6">
           {t("hasAccount")}{" "}
           <Link
-            href={`/${locale}/auth/login`}
+            href={localeHref(locale, "/auth/login")}
             className="text-indigo-400 hover:underline"
           >
             {t("loginLink")}

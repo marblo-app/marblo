@@ -1,33 +1,38 @@
 import type { MetadataRoute } from "next";
 import { getAllPosts, getPostLocales } from "@/lib/blog";
-import { routing } from "@/i18n/routing";
-import { SITE_URL } from "@/lib/seo";
+import { isSearchLocale, searchLocales, xDefaultLocale } from "@/i18n/routing";
+import { localeUrl } from "@/lib/seo";
 
 /**
  * ⚠️ INVARIANT: every URL emitted here must return 200 on the apex.
  *
- * Never add the bare root `https://marblo.app/`. Under next-intl always-prefix
- * routing the root is a 307 to the negotiated locale, and a sitemap must not
- * list URLs that redirect — Google reports them as "Page with redirect" and
- * drops them, which makes the sitemap look broken rather than making the root
- * indexable. The root only becomes eligible if it is ever made a real 200 page
- * (see docs/SEO-REDIRECT-CHAIN-2026-08-21.md §B, where that was weighed and
- * declined). The same rule kills the other redirect sources: /foundation50,
- * /founders/feedback, and any www.* host.
+ * A sitemap must not list URLs that redirect — Google files them under "Page
+ * with redirect" and drops them, which makes the sitemap look broken rather
+ * than making the redirecting URL indexable. That rules out /foundation50,
+ * /founders/feedback, any www.* host, and — since the move to
+ * `localePrefix: "as-needed"` — every /ko/* URL, which now 301s to its
+ * unprefixed form.
  *
- * This is why every entry below is built as `${baseUrl}/${locale}${page}` —
- * the locale prefix is what makes the URL a 200.
+ * ★ The bare root `https://marblo.app/` IS listed now, and that is a change.
+ * Under the previous always-prefix routing the root was a 307 to a negotiated
+ * locale and was correctly excluded (see docs/SEO-REDIRECT-CHAIN-2026-08-21.md
+ * §B, where making it a real page was weighed and declined at the time). It is
+ * now the Korean home page, served 200 to any visitor whose Accept-Language
+ * does not match en or ja — which includes Googlebot, since it sends no
+ * Accept-Language at all. The condition that comment set has been met; see
+ * docs/SEO-LOCALE-AS-NEEDED-2026-08-21.md for the measured proof.
+ *
+ * This is why no entry below is built by hand. `localeUrl()` (lib/seo.ts, over
+ * `localeHref()` in i18n/routing.ts) is the single place that knows which
+ * locales carry a prefix, so the sitemap cannot drift from the <link
+ * rel="canonical"> tags the pages themselves emit.
  */
 export default function sitemap(): MetadataRoute.Sitemap {
-  // Derived from the single source of truth, never re-declared. `lib/seo.ts`
-  // builds the <head> hreflang cluster from `routing`; this file builds the
-  // sitemap one. Google treats the HTML, HTTP-header, and sitemap methods as
-  // equivalent, so the two must agree — a hardcoded copy here meant that
-  // changing `routing.defaultLocale` would silently move x-default in <head>
-  // while leaving the sitemap pointing at the old locale, emitting two
-  // conflicting x-default targets for the same cluster.
-  const baseUrl = SITE_URL;
-  const locales = routing.locales;
+  // Only the locales we advertise to search engines — NOT every locale the app
+  // serves. ja is currently withheld, so /ja/* is absent from this file while
+  // still building, routing and rendering normally. Single source of truth (and
+  // the one-line revert) lives in src/i18n/routing.ts.
+  const locales: readonly string[] = searchLocales;
   const pages = [
     "",
     "/guide",
@@ -56,9 +61,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const languagesFor = (page: string): Record<string, string> => {
     const languages: Record<string, string> = {};
     for (const locale of locales) {
-      languages[locale] = `${baseUrl}/${locale}${page}`;
+      languages[locale] = localeUrl(locale, page);
     }
-    languages["x-default"] = `${baseUrl}/${routing.defaultLocale}${page}`;
+    // Derived, never hardcoded: a literal "en" here would silently disagree
+    // with the x-default that lib/seo.ts stamps into each page's
+    // <link rel="alternate"> the moment defaultLocale changes, and two
+    // conflicting x-defaults are a signal crawlers are entitled to ignore.
+    languages["x-default"] = localeUrl(xDefaultLocale, page);
     return languages;
   };
 
@@ -92,7 +101,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   // lastmod values it judges unreliable, so a wrong date is strictly worse
   // than no date — the field is simply omitted for those pages.
   const newestPostDate = (): Date | undefined => {
-    const times = locales
+    const times = searchLocales
       .flatMap((l) => getAllPosts(l))
       .map((p) => new Date(p.updated ?? p.date).getTime())
       .filter((t) => Number.isFinite(t));
@@ -106,7 +115,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     for (const page of pages) {
       const lastModified = page === "/blog" ? blogIndexModified : undefined;
       entries.push({
-        url: `${baseUrl}/${locale}${page}`,
+        url: localeUrl(locale, page),
         ...(lastModified ? { lastModified } : {}),
         changeFrequency: changeFrequencyFor(page),
         priority: priorityFor(page),
@@ -118,25 +127,28 @@ export default function sitemap(): MetadataRoute.Sitemap {
   }
 
   // Blog posts — added per locale, with hreflang limited to the locales in which
-  // each post actually exists (never link a missing translation).
+  // each post actually exists (never link a missing translation) AND that we
+  // advertise to search engines.
   for (const locale of locales) {
     for (const post of getAllPosts(locale)) {
-      const available = getPostLocales(post.slug, post.locales);
+      const available = getPostLocales(post.slug, post.locales).filter(
+        isSearchLocale
+      );
       const languages: Record<string, string> = {};
       for (const l of available) {
-        languages[l] = `${baseUrl}/${l}/blog/${post.slug}`;
+        languages[l] = localeUrl(l, `/blog/${post.slug}`);
       }
-      // Mirrors buildBlogAlternates() in lib/seo.ts: prefer the default locale,
-      // fall back to the first locale the post actually exists in, so we never
-      // point x-default at a translation that was never written.
-      const xDefault = available.includes(routing.defaultLocale)
-        ? routing.defaultLocale
+      // Mirrors buildBlogAlternates() in lib/seo.ts: prefer the x-default
+      // locale, fall back to the first locale the post actually exists in, so
+      // we never point x-default at a translation that was never written.
+      const xDefault = available.includes(xDefaultLocale)
+        ? xDefaultLocale
         : available[0];
       if (xDefault) {
-        languages["x-default"] = `${baseUrl}/${xDefault}/blog/${post.slug}`;
+        languages["x-default"] = localeUrl(xDefault, `/blog/${post.slug}`);
       }
       entries.push({
-        url: `${baseUrl}/${locale}/blog/${post.slug}`,
+        url: localeUrl(locale, `/blog/${post.slug}`),
         lastModified: new Date(post.updated ?? post.date),
         changeFrequency: "monthly",
         priority: 0.7,

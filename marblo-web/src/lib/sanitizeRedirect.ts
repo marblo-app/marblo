@@ -10,7 +10,8 @@
  *   - control characters that browsers may strip to smuggle past the check
  *
  * @param redirect The raw value from `searchParams.get('redirect')`.
- * @param fallback Safe internal default (e.g. `/${locale}`).
+ * @param fallback Safe internal default — build it with `localeHref(locale)`
+ *   (src/i18n/routing.ts), never by hand, so it is not a URL that redirects.
  */
 export function sanitizeRedirect(
   redirect: string | null | undefined,

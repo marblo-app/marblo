@@ -3,6 +3,14 @@
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import LegalPageLayout from "@/components/LegalPageLayout";
+import { localeHref } from "@/i18n/routing";
+
+// The body of these terms is Korean law text that cites the Korean policy
+// pages by name, so the two cross-references below are deliberately pinned to
+// Korean rather than following the reader's locale. Built through localeHref
+// so they track the prefix rules — under `as-needed` Korean has no prefix, and
+// a literal "/ko/legal/privacy" would now be a link that 301s.
+const KO = "ko";
 
 const LAST_UPDATED = "2026-08-21";
 const EFFECTIVE_DATE = "2026년 7월 14일";
@@ -366,7 +374,7 @@ export default function TermsOfServicePage() {
       <p>
         회사는 이용자의 개인정보를 보호하기 위해 노력하며, 이용자의 개인정보
         보호에 관한 사항은 회사가 별도로 정하는{" "}
-        <Link href="/ko/legal/privacy">개인정보처리방침</Link> 에 따릅니다.
+        <Link href={localeHref(KO, "/legal/privacy")}>개인정보처리방침</Link> 에 따릅니다.
       </p>
 
       <h2>제14조 (서비스의 변경 및 중단)</h2>
@@ -425,7 +433,7 @@ export default function TermsOfServicePage() {
       <h2>제16조 (환불)</h2>
       <p>
         유료 서비스의 환불에 관한 사항은 회사가 별도로 정하는{" "}
-        <Link href="/ko/legal/refund">환불정책</Link> 에 따릅니다.
+        <Link href={localeHref(KO, "/legal/refund")}>환불정책</Link> 에 따릅니다.
       </p>
       <p>
         회사의 시스템 오류, 서비스 또는 콘텐츠의 하자, 약정한 서비스·콘텐츠의

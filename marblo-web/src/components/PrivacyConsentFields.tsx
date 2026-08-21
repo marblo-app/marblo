@@ -3,6 +3,7 @@
 import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
 import type { ConsentFlags } from "@/lib/privacyConsent";
+import { localeHref } from "@/i18n/routing";
 
 interface Props {
   value: ConsentFlags;
@@ -75,7 +76,7 @@ export default function PrivacyConsentFields({
           </span>
         </span>
         <Link
-          href={`/${locale}/legal/privacy`}
+          href={localeHref(locale, "/legal/privacy")}
           target="_blank"
           className="text-xs text-zinc-400 hover:text-indigo-300 underline shrink-0"
         >

@@ -3,6 +3,7 @@
 import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { localeHref } from "@/i18n/routing";
 
 const QUESTIONS = ["q1", "q2", "q3", "q4", "q5"] as const;
 
@@ -17,7 +18,7 @@ export default function Foundation50FaqPage() {
 
         <div className="relative max-w-3xl mx-auto px-4 pt-20 pb-10">
           <Link
-            href={`/${locale}/founders`}
+            href={localeHref(locale, "/founders")}
             className="inline-flex items-center gap-1.5 text-sm text-indigo-300 hover:text-indigo-200 transition mb-6"
           >
             <ArrowLeft className="w-4 h-4" />

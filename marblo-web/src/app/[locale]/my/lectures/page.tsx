@@ -7,6 +7,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
+import { localeHref } from "@/i18n/routing";
 
 interface PurchasedLecture {
   slug: string;
@@ -25,7 +26,7 @@ export default function MyLecturesPage() {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) { router.push(`/${locale}/auth/login`); return; }
+      if (!user) { router.push(localeHref(locale, "/auth/login")); return; }
       try {
         const q = query(collection(db, 'lecturePurchases'), where('userId', '==', user.uid));
         const snap = await getDocs(q);
@@ -71,7 +72,7 @@ export default function MyLecturesPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {lectures.map((lecture) => (
-              <Link key={lecture.slug} href={`/${locale}/my/lectures/${lecture.slug}`} className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-indigo-500 transition">
+              <Link key={lecture.slug} href={localeHref(locale, `/my/lectures/${lecture.slug}`)} className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-indigo-500 transition">
                 {lecture.thumbnail && <img src={lecture.thumbnail} alt="" className="aspect-video w-full object-cover" />}
                 <div className="p-6">
                   <h3 className="text-lg font-semibold">{locale === 'ko' ? lecture.title_ko : lecture.title_en}</h3>

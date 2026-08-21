@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
 import { comingSoonLabel } from "@/data/lectures";
+import { localeHref } from "@/i18n/routing";
 
 export default function Footer() {
   const t = useTranslations("footer");
@@ -44,7 +45,7 @@ export default function Footer() {
             <ul>
               <li>
                 <Link
-                  href={`/${locale}/#features`}
+                  href={localeHref(locale, "/#features")}
                   className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {locale === "ko"
@@ -56,7 +57,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href={`/${locale}/pricing`}
+                  href={localeHref(locale, "/pricing")}
                   className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {locale === "ko"
@@ -68,7 +69,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href={`/${locale}/download`}
+                  href={localeHref(locale, "/download")}
                   className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {locale === "ko"
@@ -80,7 +81,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href={`/${locale}/guide`}
+                  href={localeHref(locale, "/guide")}
                   className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {locale === "ko"
@@ -92,7 +93,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href={`/${locale}/bugs`}
+                  href={localeHref(locale, "/bugs")}
                   className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {locale === "ko"
@@ -128,7 +129,7 @@ export default function Footer() {
             <ul>
               <li>
                 <Link
-                  href={`/${locale}/lectures`}
+                  href={localeHref(locale, "/lectures")}
                   className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {locale === "ko"
@@ -140,7 +141,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href={`/${locale}/lectures/marblo-v3-masterclass`}
+                  href={localeHref(locale, "/lectures/marblo-v3-masterclass")}
                   className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {locale === "ko"
@@ -161,7 +162,7 @@ export default function Footer() {
             <ul>
               <li>
                 <Link
-                  href={`/${locale}/notice`}
+                  href={localeHref(locale, "/notice")}
                   className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {noticeLabel}
@@ -169,7 +170,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href={`/${locale}/legal/terms`}
+                  href={localeHref(locale, "/legal/terms")}
                   className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {t("terms")}
@@ -177,7 +178,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href={`/${locale}/legal/privacy`}
+                  href={localeHref(locale, "/legal/privacy")}
                   className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {t("privacy")}
@@ -185,7 +186,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href={`/${locale}/legal/refund`}
+                  href={localeHref(locale, "/legal/refund")}
                   className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {t("refund")}
@@ -193,7 +194,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href={`/${locale}/legal/business`}
+                  href={localeHref(locale, "/legal/business")}
                   className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {t("business_info")}

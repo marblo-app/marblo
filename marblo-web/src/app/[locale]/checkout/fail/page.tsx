@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { X, RotateCcw, MessageCircle, Home, Info } from 'lucide-react';
 import { mapFailPageParams } from '@/lib/paymentErrors';
+import { localeHref } from "@/i18n/routing";
 
 export default function CheckoutFailPage() {
   const t = useTranslations('checkout');
@@ -85,7 +86,7 @@ export default function CheckoutFailPage() {
         {/* Action buttons */}
         <div className="flex flex-col gap-3 pt-2">
           <Link
-            href={`/${locale}/pricing`}
+            href={localeHref(locale, "/pricing")}
             className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg transition font-semibold"
           >
             <RotateCcw className="w-5 h-5" />
@@ -107,7 +108,7 @@ export default function CheckoutFailPage() {
           )}
 
           <Link
-            href={`/${locale}`}
+            href={localeHref(locale)}
             className="inline-flex items-center justify-center gap-2 text-zinc-400 hover:text-white transition mt-2"
           >
             <Home className="w-4 h-4" />

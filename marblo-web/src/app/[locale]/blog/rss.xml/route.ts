@@ -1,5 +1,5 @@
 import { getAllPosts } from "@/lib/blog";
-import { SITE_URL } from "@/lib/seo";
+import { localeUrl } from "@/lib/seo";
 import { routing } from "@/i18n/routing";
 
 export function generateStaticParams() {
@@ -25,13 +25,13 @@ export async function GET(
   }
 
   const posts = getAllPosts(locale).slice(0, 20);
-  const feedUrl = `${SITE_URL}/${locale}/blog/rss.xml`;
-  const blogUrl = `${SITE_URL}/${locale}/blog`;
+  const feedUrl = localeUrl(locale, "/blog/rss.xml");
+  const blogUrl = localeUrl(locale, "/blog");
   const now = new Date().toUTCString();
 
   const items = posts
     .map((post) => {
-      const link = `${SITE_URL}/${locale}/blog/${post.slug}`;
+      const link = localeUrl(locale, `/blog/${post.slug}`);
       const pubDate = new Date(post.updated ?? post.date).toUTCString();
       return `    <item>
       <title>${escapeXml(post.title)}</title>

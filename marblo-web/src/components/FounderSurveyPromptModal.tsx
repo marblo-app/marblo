@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
 import { Sparkles, ArrowRight, X } from "lucide-react";
+import { localeHref } from "@/i18n/routing";
 
 interface Props {
   /** 닫기(뒤로/X/오버레이) — 호스트가 dismiss 기록 후 모달을 내린다. */
@@ -63,7 +64,7 @@ export default function FounderSurveyPromptModal({ onDismiss }: Props) {
 
         <div className="flex flex-col gap-2 px-6 py-5 sm:flex-row-reverse">
           <Link
-            href={`/${locale}/beta-survey`}
+            href={localeHref(locale, "/beta-survey")}
             onClick={onDismiss}
             className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
           >

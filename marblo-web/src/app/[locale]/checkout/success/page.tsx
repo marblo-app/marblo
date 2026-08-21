@@ -20,6 +20,7 @@ import {
   Home,
   CreditCard,
 } from "lucide-react";
+import { localeHref } from "@/i18n/routing";
 
 const PLAN_NAMES: Record<string, string> = {
   pro: "Pro",
@@ -413,14 +414,14 @@ export default function CheckoutSuccessPage() {
             </div>
             <div className="flex flex-col gap-3">
               <Link
-                href={`/${locale}/my/subscription`}
+                href={localeHref(locale, "/my/subscription")}
                 className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg transition font-semibold"
               >
                 <CreditCard className="w-5 h-5" />
                 {t("goToMySubscription")}
               </Link>
               <Link
-                href={`/${locale}`}
+                href={localeHref(locale)}
                 className="inline-flex items-center justify-center gap-2 text-zinc-400 hover:text-white transition mt-2"
               >
                 <Home className="w-4 h-4" />
@@ -486,7 +487,7 @@ export default function CheckoutSuccessPage() {
             <div className="flex flex-col gap-3">
               {isLecture ? (
                 <Link
-                  href={`/${locale}/lectures/my`}
+                  href={localeHref(locale, "/lectures/my")}
                   className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg transition font-semibold"
                 >
                   <BookOpen className="w-5 h-5" />
@@ -495,14 +496,14 @@ export default function CheckoutSuccessPage() {
               ) : (
                 <>
                   <Link
-                    href={`/${locale}/download`}
+                    href={localeHref(locale, "/download")}
                     className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg transition font-semibold"
                   >
                     <Download className="w-5 h-5" />
                     {t("goToDownload")}
                   </Link>
                   <Link
-                    href={`/${locale}`}
+                    href={localeHref(locale)}
                     className="inline-flex items-center justify-center gap-2 bg-zinc-700 hover:bg-zinc-600 text-white px-6 py-3 rounded-lg transition"
                   >
                     <LayoutDashboard className="w-5 h-5" />
@@ -511,7 +512,7 @@ export default function CheckoutSuccessPage() {
                 </>
               )}
               <Link
-                href={`/${locale}`}
+                href={localeHref(locale)}
                 className="inline-flex items-center justify-center gap-2 text-zinc-400 hover:text-white transition mt-2"
               >
                 <Home className="w-4 h-4" />
@@ -532,16 +533,16 @@ export default function CheckoutSuccessPage() {
             <Link
               href={
                 errorMsg === t("loginRequired")
-                  ? `/${locale}/auth/login?redirect=${encodeURIComponent(
+                  ? localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
                       `/${locale}/my/subscription`,
-                    )}`
+                    )}`)
                   : errorMsg === t("firstChargeFailed") && plan
-                    ? `/${locale}/checkout?plan=${encodeURIComponent(
+                    ? localeHref(locale, `/checkout?plan=${encodeURIComponent(
                         plan,
                       )}&billing=${encodeURIComponent(
                         searchParams.get("billing") || "monthly",
-                      )}`
-                    : `/${locale}/pricing`
+                      )}`)
+                    : localeHref(locale, "/pricing")
               }
               className="inline-block bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg transition"
             >

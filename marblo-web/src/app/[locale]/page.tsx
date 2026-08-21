@@ -21,6 +21,7 @@ import {
   buildFAQPageSchema,
   stringifyJsonLd,
 } from "@/lib/schema";
+import { localeHref } from "@/i18n/routing";
 
 // Answer-first FAQ for GEO (generative-engine optimization). Each answer opens
 // with the direct, citable claim so LLM crawlers can lift a self-contained
@@ -219,7 +220,7 @@ export default function HomePage() {
           </p>
           <div className="mt-10 mx-auto flex w-full max-w-[22rem] sm:max-w-none flex-col sm:flex-row sm:flex-wrap gap-4 justify-center">
             <Link
-              href={`/${locale}/auth/signup`}
+              href={localeHref(locale, "/auth/signup")}
               className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-xl text-lg font-semibold text-center transition shadow-lg shadow-indigo-600/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
             >
               {t("hero.cta_start")}
@@ -549,7 +550,7 @@ export default function HomePage() {
               </div>
               <div>
                 <Link
-                  href={`/${locale}/lectures`}
+                  href={localeHref(locale, "/lectures")}
                   className="inline-block bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-xl text-lg font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
                 >
                   {t("bundle.cta")}
@@ -595,13 +596,13 @@ export default function HomePage() {
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link
-              href={`/${locale}/download`}
+              href={localeHref(locale, "/download")}
               className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-xl text-lg font-semibold transition shadow-lg shadow-indigo-600/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
             >
               {t("cta_final.download")}
             </Link>
             <Link
-              href={`/${locale}/pricing`}
+              href={localeHref(locale, "/pricing")}
               className="border border-zinc-700 hover:bg-zinc-800 text-white px-8 py-4 rounded-xl text-lg font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
             >
               {t("cta_final.pricing")}

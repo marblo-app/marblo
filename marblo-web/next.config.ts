@@ -52,9 +52,55 @@ const nextConfig: NextConfig = {
         destination: "https://marblo.app/:file",
         statusCode: 301,
       },
-      // Public route renamed /foundation50 → /founders. Keep old links alive
-      // with a permanent (308) redirect. The [locale] segment is part of the
-      // actual URL path (next-intl always-prefix), so we capture it explicitly.
+      // ── Renamed public routes ────────────────────────────────────────────
+      // /foundation50 → /founders, and /founders/feedback → /beta-survey (the
+      // old feedback route was a client-side JS redirect, which search engines
+      // crawl as a thin 200 page — soft-404 / "page with redirect" noise).
+      //
+      // ★ Each rename needs THREE forms because `localePrefix: "as-needed"`
+      // gives Korean no prefix (see src/i18n/routing.ts):
+      //
+      //   1. unprefixed  — the live Korean URL (/foundation50)
+      //   2. /ko-prefixed — the stale Korean URL that is still in the index
+      //   3. /:locale     — en and ja, which keep their prefix
+      //
+      // Order matters: Next takes the FIRST matching rule. The /ko forms are
+      // listed ahead of the generic /:locale one so a stale /ko/foundation50
+      // reaches /founders in ONE hop instead of 308-ing to /ko/founders and
+      // then paying a second 301 in the proxy to lose the prefix.
+      //
+      // These stay `permanent: true` (308) like every other path-level
+      // redirect here; only the host-level rules above use an explicit 301.
+      {
+        source: "/foundation50",
+        destination: "/founders",
+        permanent: true,
+      },
+      {
+        source: "/foundation50/:path*",
+        destination: "/founders/:path*",
+        permanent: true,
+      },
+      {
+        source: "/founders/feedback",
+        destination: "/beta-survey",
+        permanent: true,
+      },
+      {
+        source: "/ko/foundation50",
+        destination: "/founders",
+        permanent: true,
+      },
+      {
+        source: "/ko/foundation50/:path*",
+        destination: "/founders/:path*",
+        permanent: true,
+      },
+      {
+        source: "/ko/founders/feedback",
+        destination: "/beta-survey",
+        permanent: true,
+      },
       {
         source: "/:locale/foundation50",
         destination: "/:locale/founders",
@@ -65,10 +111,6 @@ const nextConfig: NextConfig = {
         destination: "/:locale/founders/:path*",
         permanent: true,
       },
-      // The founder survey moved to /beta-survey. The old /founders/feedback
-      // route was a client-side JS redirect, which search engines crawl as a
-      // thin 200 page (soft-404 / "page with redirect" noise). Serve a real
-      // 308 at the routing layer instead so no crawlable page is emitted.
       {
         source: "/:locale/founders/feedback",
         destination: "/:locale/beta-survey",

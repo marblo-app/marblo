@@ -9,7 +9,7 @@ import {
   Info,
   Lightbulb,
 } from "lucide-react";
-import { SITE_URL, buildAlternates } from "@/lib/seo";
+import { buildAlternates, localeUrl } from "@/lib/seo";
 import { buildBreadcrumbSchema, stringifyJsonLd } from "@/lib/schema";
 import {
   GUIDE_ANCHOR_IDS,
@@ -22,6 +22,7 @@ import GuideSidebar, {
 } from "@/components/guide/GuideSidebar";
 import CopyButton from "@/components/guide/CopyButton";
 import GuideShot from "@/components/guide/GuideShot";
+import { localeHref } from "@/i18n/routing";
 
 export async function generateMetadata({
   params,
@@ -37,7 +38,7 @@ export async function generateMetadata({
     openGraph: {
       title: `${t("meta.title")} | Marblo`,
       description: t("meta.description"),
-      url: `${SITE_URL}/${locale}/guide`,
+      url: localeUrl(locale, "/guide"),
       type: "article",
     },
   };
@@ -135,7 +136,7 @@ function renderBlock(
           {block.items.map((item) => (
             <Link
               key={item.href}
-              href={`/${locale}${item.href}`}
+              href={localeHref(locale, item.href)}
               className="inline-flex items-center gap-1.5 rounded-button border border-brand-500/40 bg-brand-500/10 px-4 py-2 text-sm font-medium text-brand-200 transition hover:border-brand-400 hover:bg-brand-500/20"
             >
               {t(item.key)}
@@ -256,8 +257,8 @@ export default async function GuidePage({
   }));
 
   const breadcrumbSchema = buildBreadcrumbSchema([
-    { name: t("meta.breadcrumbHome"), url: `${SITE_URL}/${locale}` },
-    { name: t("meta.breadcrumbGuide"), url: `${SITE_URL}/${locale}/guide` },
+    { name: t("meta.breadcrumbHome"), url: localeUrl(locale) },
+    { name: t("meta.breadcrumbGuide"), url: localeUrl(locale, "/guide") },
   ]);
 
   return (
@@ -268,7 +269,7 @@ export default async function GuidePage({
       />
 
       <nav className="mb-8 text-sm text-zinc-500" aria-label="Breadcrumb">
-        <Link href={`/${locale}`} className="hover:text-zinc-300">
+        <Link href={localeHref(locale)} className="hover:text-zinc-300">
           {t("meta.breadcrumbHome")}
         </Link>
         <span className="mx-2" aria-hidden>

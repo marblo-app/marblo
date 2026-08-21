@@ -12,6 +12,7 @@ import {
   type LinkInstallPayload,
 } from "@/lib/attribution";
 import { CheckCircle2, BookOpen, Rocket, ShieldCheck } from "lucide-react";
+import { localeHref } from "@/i18n/routing";
 
 /**
  * 설치 환영 + **익명 어트리뷰션 링크백** 페이지.
@@ -100,7 +101,7 @@ export default function LinkClient() {
 
         <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
           <Link
-            href={`/${locale}/guide`}
+            href={localeHref(locale, "/guide")}
             className="group flex flex-col gap-2 p-5 rounded-xl border border-zinc-800 bg-zinc-900/40 hover:border-indigo-500/60 transition"
           >
             <BookOpen className="w-5 h-5 text-indigo-300" />
@@ -112,7 +113,7 @@ export default function LinkClient() {
             </span>
           </Link>
           <Link
-            href={`/${locale}/download`}
+            href={localeHref(locale, "/download")}
             className="group flex flex-col gap-2 p-5 rounded-xl border border-zinc-800 bg-zinc-900/40 hover:border-indigo-500/60 transition"
           >
             <Rocket className="w-5 h-5 text-indigo-300" />
