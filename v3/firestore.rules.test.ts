@@ -35,6 +35,7 @@ import {
   collection,
   addDoc,
   arrayUnion,
+  deleteField,
   query,
   where,
   orderBy,
@@ -654,6 +655,20 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       setDoc(
         doc(db, "projects", PROJECT_ID),
         { telegramChannel: { chatId: "123" }, updatedAt: new Date() },
+        { merge: true },
+      ),
+    );
+  });
+
+  it("멤버: telegramChannel 을 deleteField 로 지울 수 있다 (채널 연결 해제)", async () => {
+    // telegram-channel-sync.writeChannelMeta 는 meta 가 null 이면
+    // `{ telegramChannel: deleteField() }` 를 merge 로 보낸다. 필드 삭제도
+    // affectedKeys 에 잡히므로 allowlist 에 걸리는지 확인한다.
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(
+        doc(db, "projects", PROJECT_ID),
+        { telegramChannel: deleteField(), updatedAt: new Date() },
         { merge: true },
       ),
     );
