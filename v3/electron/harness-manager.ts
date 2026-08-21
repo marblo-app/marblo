@@ -1433,6 +1433,10 @@ export async function checkSpawnAuthGate(
 export const LOGIN_SCREEN_PATTERNS: RegExp[] = [
   /Sign in with ChatGPT/i, // codex login menu
   /Welcome to Codex/i, // codex first-run when logged out
+  // codex 0.149.0 OAuth wait screen (라이브 캡처): 로그인 메뉴에서 넘어간 뒤
+  // 브라우저 승인을 기다리는 화면이다. 메뉴 문구가 사라진 뒤에도 CLI 는 여전히
+  // 멈춰 있으므로 이 문구가 없으면 그 구간이 "로그인 화면 아님" 으로 읽힌다.
+  /Finish signing in via your browser/i,
   /Provide (an )?API key/i, // codex/claude API-key entry
   /Device Code/i, // codex device-code login
   /Select login method/i, // claude login menu

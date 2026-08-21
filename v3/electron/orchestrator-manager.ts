@@ -23,6 +23,15 @@ import {
   probeCliAuth,
 } from "./harness-manager";
 import { maskConfigForLogging } from "./config-redaction";
+import { stripFrameAnsi } from "./agent-status-reconcile";
+import {
+  BYPASS_CONSENT_CONFIRM,
+  BYPASS_CONSENT_CONFIRM_DELAY_MS,
+  BYPASS_CONSENT_SELECT,
+  BYPASS_FLAG_MODELS,
+  looksLikeFirstRunDialog,
+  shouldAutoAcceptBypass,
+} from "./agent-input-wait";
 
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 
@@ -47,6 +56,15 @@ const ORCH_BACKOFF_MAX_MS = 30000;
 // disabled auto-recovery even though every crash had recovered fine.
 const ORCH_CRASH_LOOP_WINDOW_MS = 60_000;
 const INJECT_BOOT_GATE_STABILITY_ATTEMPTS = 5;
+
+// How long the boot prompt may stay held because a first-run dialog is still on
+// screen before we stop waiting and say so. Reaching this means a screen we do
+// not know how to answer is up (an unhandled onboarding step, a login the probe
+// missed), and the honest outcome is a visible error — the whole failure this
+// ticket exists for was a panel that stopped with no badge and no notification.
+// Generously above the blind fallback (10 s) so a slow-but-normal boot never
+// trips it.
+const ORCH_FIRST_RUN_DIALOG_GIVE_UP_MS = 60_000;
 
 // --- Concurrent-resume guard ---
 // Two orchestrator instances — e.g. two worktrees in the fleet, which are
@@ -274,6 +292,16 @@ export interface OrchestratorSession {
   // freshly-detected one). Tracked so we can release the cross-process resume
   // lock on exit/stop. Undefined until a session id is known.
   claudeSessionId?: string;
+  /**
+   * epoch-ms this PTY was spawned. Feeds shouldAutoAcceptBypass's boot-window
+   * gate — the same field AgentInstance.spawnedAt feeds on the worker path.
+   * Absent on an ATTACHED session (we did not spawn it and cannot date it), and
+   * the auto-accept treats that as "outside the window": a consent screen only
+   * ever appears during boot, so a session we merely attached to is past it.
+   */
+  spawnedAt?: number;
+  /** Per-instance latch — this PTY already answered the consent screen once. */
+  bypassConsentAnswered?: boolean;
 }
 
 export interface OrchestratorLaunchOptions {
@@ -612,6 +640,68 @@ export class OrchestratorManager {
     return next;
   }
 
+  /**
+   * Answer the first-run bypass-permissions consent screen, once per PTY.
+   *
+   * Reuses agent-input-wait's shouldAutoAcceptBypass verbatim — the gates
+   * (flag-bearing model · 180 s boot window · one answer per instance) and the
+   * reasoning behind each of them live there, and a second copy here would be
+   * the one that stops getting fixed. Only the STATE differs between the two
+   * callers: the worker path reads it off AgentInstance, this one off
+   * OrchestratorSession.
+   *
+   * The model axis is the same on both sides — `LaunchConfig.model` and
+   * `AgentInstance.model` are both `ModelType`, and the set that gets YOLO_FLAG
+   * in launch() above is exactly BYPASS_FLAG_MODELS. That equality is not a
+   * coincidence to be re-checked by hand every time; it is pinned by
+   * tests/unit/orchestrator-first-run-boot.test.ts.
+   *
+   * The latch is set BEFORE the write, so a screen repainting while the
+   * keystrokes are in flight cannot queue a second answer.
+   */
+  private maybeAcceptBypassConsent(ptySessionId: string, chunk: string): void {
+    const session = this.session;
+    // A PTY that is no longer ours (relaunch reclaimed the id, or stop() ran)
+    // must never be typed into.
+    if (!session || session.ptySessionId !== ptySessionId) return;
+    if (
+      !shouldAutoAcceptBypass({
+        chunk,
+        model: session.launchConfig?.model,
+        // An attached session carries no spawn time; `0` puts it far outside
+        // the boot window, which is the safe answer (see spawnedAt's doc).
+        spawnedAt: session.spawnedAt ?? 0,
+        now: Date.now(),
+        alreadyAnswered: session.bypassConsentAnswered === true,
+      })
+    ) {
+      return;
+    }
+    session.bypassConsentAnswered = true;
+    console.log(
+      `[Orchestrator:${this.kind}] Auto-accepting bypass-permissions consent — ` +
+        "we launched it with the flag.",
+    );
+    try {
+      this.ptyManager.write(ptySessionId, BYPASS_CONSENT_SELECT);
+      // Two writes, one tick apart, so the TUI reads them as separate keys.
+      // Unref'd: a pending 150 ms timer must not hold up app quit.
+      const timer = setTimeout(() => {
+        try {
+          this.ptyManager.write(ptySessionId, BYPASS_CONSENT_CONFIRM);
+        } catch {
+          // PTY died between the two writes — the exit path owns it from here.
+        }
+      }, BYPASS_CONSENT_CONFIRM_DELAY_MS);
+      timer.unref?.();
+    } catch (err) {
+      console.warn(
+        `[Orchestrator:${this.kind}] bypass consent auto-accept failed:`,
+        err,
+      );
+    }
+  }
+
   private async waitForStableBootGate(): Promise<boolean> {
     for (let i = 0; i < INJECT_BOOT_GATE_STABILITY_ATTEMPTS; i += 1) {
       const gate = this.bootGate;
@@ -868,9 +958,15 @@ export class OrchestratorManager {
     // 정확히 1개만 소유하며, 오케 churn(재기동/resume/handover)과 무관하게 돈다.
     // 그래서 여기서의 채널 플래그 주입·단일 소유자 게이팅·토큰 env 주입은 전부 제거됐다
     // (ticket vw38IB2VcmOIOlFV51Wa).
+    //
+    // ★모델 축 단일화(2026-08-21): 종전엔 여기 `claude || antigravity` 리터럴이
+    // 있었고, agent-input-wait.ts 의 BYPASS_FLAG_MODELS 가 **같은 집합을 따로**
+    // 들고 있었다. 두 곳이 갈라지면 "플래그는 다는데 그 플래그가 띄우는 동의화면은
+    // 자동수락하지 않는(또는 그 반대인)" 하네스가 조용히 생긴다 — 그게 바로 이
+    // 티켓의 P0 가 나는 자리다. 그래서 리터럴을 지우고 **그 집합 하나를 그대로
+    // 쓴다**: 이제 축이 어긋날 방법이 없다.
     if (
-      (launchConfig.model === "claude" ||
-        launchConfig.model === "antigravity") &&
+      BYPASS_FLAG_MODELS.has(launchConfig.model) &&
       !launchConfig.args.includes(YOLO_FLAG)
     ) {
       launchConfig.args.unshift(YOLO_FLAG);
@@ -1102,7 +1198,24 @@ export class OrchestratorManager {
       rootPath,
       launchConfig,
       claudeSessionId: resumedSessionId ?? undefined,
+      spawnedAt: Date.now(),
+      bypassConsentAnswered: false,
     };
+
+    // ★The first-run `--dangerously-skip-permissions` consent screen (P0, new
+    // Mac). The worker path has answered this since agent-manager.ts:2154; the
+    // orchestrator never did, and the orchestrator is the ONE terminal a new
+    // user cannot route around. The screen is not a [y/n] dialog and not the
+    // ready composer, so it never becomes `awaiting-input` — no badge, no
+    // notification, just a panel that stops. See agent-input-wait.ts.
+    //
+    // Registered here, on BOTH the fresh and resumed branches, and deliberately
+    // NOT inside the boot-prompt listener below: that one stops looking the
+    // moment the prompt is sent, while a consent screen provoked by our own
+    // flag can only be answered by us.
+    this.ptyManager.onData(ptySessionId, (chunk) => {
+      this.maybeAcceptBypassConsent(ptySessionId, chunk);
+    });
 
     // 격리 홈 하네스(codex/grok)의 세션 id 는 우리가 저장하지 않으므로(resume 은
     // 항상 네이티브 sentinel), 대신 "이 미션이 이 홈의 마지막 세션 소유자" 라는
@@ -1183,19 +1296,27 @@ export class OrchestratorManager {
         : baseInitialPrompt;
 
       let sent = false;
-      // Login-screen backstop (claude orchestrator). If it boots into
-      // `claude login` (unauthenticated), suppress the boot prompt rather than
-      // typing it into the login menu (which navigates the menu and exits
-      // Claude cleanly → dead PTY). checkSpawnAuthGate at the IPC layer
-      // normally prevents this; this is the defense-in-depth backstop.
+      // Login-screen backstop. If the CLI boots into its login menu
+      // (unauthenticated), suppress the boot prompt rather than typing it into
+      // that menu — for claude the stray `\r` navigates the menu and exits
+      // cleanly (dead PTY); for codex it CONFIRMS "1. Sign in with ChatGPT",
+      // which is the browser OAuth window users reported as "it opened login by
+      // itself" while the boot prompt vanished. checkSpawnAuthGate at the IPC
+      // layer normally prevents this; this is the defense-in-depth backstop.
       //
       // ★ agent-manager 와 **같은 조정기**를 쓴다: 사전 probe 가 인증됨이었으면
       // 패턴 1회 매칭으로 즉시 래치하지 않고 grace 창 동안 readiness 를 기다리고,
       // 발화한 뒤라도 readiness 에 도달하면 철회한다. 오케 부팅은 blind fallback 이
       // 10s 라 grace(7s)가 그 안에서 끝난다.
+      //
+      // ★2026-08-21: this used to be gated to `model === "claude"`, which left
+      // the codex orchestrator with no backstop at all even though
+      // LOGIN_SCREEN_PATTERNS has carried `Sign in with ChatGPT` / `Welcome to
+      // Codex` the whole time. Gate on "does this harness have a pre-spawn auth
+      // probe" instead (claude · gpt · grok) so the reconciler covers every
+      // harness whose login screen we can actually recognise.
       let authBlocked = false;
-      const orchCliAuthModel =
-        launchConfig.model === "claude" ? modelToCliAuth("claude") : null;
+      const orchCliAuthModel = modelToCliAuth(launchConfig.model);
       const loginBackstop = createLoginScreenBackstop({
         hasProbe: orchCliAuthModel !== null,
         onGrace: (graceMs) => {
@@ -1209,7 +1330,7 @@ export class OrchestratorManager {
           authBlocked = true;
           console.error(
             `[Orchestrator:${this.kind}] Login prompt confirmed (${reason}) — ` +
-              "suppressing boot prompt (claude needs auth: run `claude login`).",
+              `suppressing boot prompt (${orchCliAuthModel ?? launchConfig.model} needs auth).`,
           );
           this.setStatus("error");
         },
@@ -1226,9 +1347,96 @@ export class OrchestratorManager {
           .then((r) => loginBackstop.setPreProbeAuthenticated(r.authenticated))
           .catch(() => loginBackstop.setPreProbeAuthenticated(false));
       }
+      // ★A first-run dialog is on screen RIGHT NOW.
+      //
+      // Kept as its own short, ANSI-stripped window rather than reusing
+      // outputBuffer, for two reasons measured on live PTY frames:
+      //   · escapes — codex emits long runs of 48-byte pure-escape chunks, so a
+      //     4096-char RAW window forgets the actual screen text within a few
+      //     hundred milliseconds while looking full.
+      //   · staleness — a TUI repaints in full, so the CURRENT screen is what
+      //     matters. A boot-long transcript would keep this gate shut long after
+      //     the consent screen was answered and the composer was up.
+      // 1024 stripped chars is comfortably more than one screen's key lines and
+      // is emptied of a dismissed dialog by the very repaint that replaces it.
+      let dialogBuffer = "";
+      // Set when a send was held back because a dialog was up. Every later frame
+      // retries, so the prompt goes out on the first frame after the dialog
+      // clears instead of waiting for another readiness match that may never
+      // come (the consent screen's replacement is the composer, not a re-render).
+      let deferredByDialog = false;
+      let deferredSince = 0;
+      let gaveUp = false;
+      let deferRetryTimer: ReturnType<typeof setTimeout> | null = null;
+      // A held send has to be retried by something other than the next PTY
+      // frame: a grace window expiring is not a frame, and a CLI that finishes
+      // painting a dialog can go quiet. Cheap 1 s ticker, alive only while held.
+      const scheduleDeferRetry = (): void => {
+        if (deferRetryTimer || sent) return;
+        deferRetryTimer = setTimeout(() => {
+          deferRetryTimer = null;
+          sendPrompt();
+        }, 1000);
+        deferRetryTimer.unref?.();
+      };
+
       const sendPrompt = () => {
         if (sent || authBlocked) return;
         if (this.session?.ptySessionId !== ptySessionId) return;
+        // ★Re-read the screen at the moment of the WRITE, not at the moment the
+        // readiness marker matched. Those are different instants and a first-run
+        // dialog can arrive between them — codex paints a skeleton composer
+        // carrying `? for shortcuts` at ~120 ms, then swaps in its login menu at
+        // ~320 ms, well inside the 250 ms we wait. Every one of these screens is
+        // a select list: the prompt text is swallowed and the trailing Enter
+        // answers whichever option is highlighted. No delay tweak can fix an
+        // ordering this way round; only re-reading can.
+        //
+        // The blind fallback below funnels through here too, which is the point:
+        // "we gave up waiting for readiness" was never a reason to type into
+        // whatever happens to be on screen.
+        const holdReason = looksLikeFirstRunDialog(dialogBuffer)
+          ? "a first-run dialog is on screen"
+          : // ★The backstop's own contract: "호출자는 clear 가 아니면 대화형 키
+            // 입력을 멈춘다". Only its FIRED state was ever honoured, so a login
+            // screen still inside its grace window (pre-spawn probe not back
+            // yet) left the gate open — and the blind fallback walked straight
+            // through it into `1. Sign in with ChatGPT`.
+            loginBackstop.state() !== "clear"
+            ? "a login screen may be on screen"
+            : null;
+        if (holdReason) {
+          if (!deferredByDialog) {
+            deferredByDialog = true;
+            deferredSince = Date.now();
+            console.warn(
+              `[Orchestrator:${this.kind}] Boot prompt held — ${holdReason}; ` +
+                "will send once it clears.",
+            );
+          } else if (
+            !gaveUp &&
+            Date.now() - deferredSince > ORCH_FIRST_RUN_DIALOG_GIVE_UP_MS
+          ) {
+            // Say it out loud rather than stalling silently — a panel that stops
+            // with no badge and no notification is the exact failure this ticket
+            // is about.
+            gaveUp = true;
+            console.error(
+              `[Orchestrator:${this.kind}] Boot held for ` +
+                `${Math.round(ORCH_FIRST_RUN_DIALOG_GIVE_UP_MS / 1000)}s ` +
+                `(${holdReason}) and the boot prompt was never sent — the ` +
+                "orchestrator needs a human.",
+            );
+            this.setStatus("error");
+          }
+          scheduleDeferRetry();
+          return;
+        }
+        deferredByDialog = false;
+        if (deferRetryTimer) {
+          clearTimeout(deferRetryTimer);
+          deferRetryTimer = null;
+        }
         sent = true;
         loginBackstop.dispose();
         this.ptyManager.writeAndSubmit(ptySessionId, initialPrompt);
@@ -1246,6 +1454,12 @@ export class OrchestratorManager {
       // folder dialog which also uses ╭─╮ box borders. If we match the
       // trust dialog and send `\r` 1500ms later, it confirms the default
       // ("No") and exits Claude Code immediately.
+      //
+      // ★These are necessary, not sufficient. Live capture (codex 0.149.0)
+      // showed `? for shortcuts` and `Ask Codex` on a PRE-INITIALISATION frame
+      // whose header still read `model: loading`. Matching one of these means
+      // "this could be the composer"; looksLikeFirstRunDialog decides whether it
+      // actually is.
       const readinessPatterns = [
         /\? for shortcuts/, // Claude Code: footer help (only in input prompt)
         /Type your message/i, // Input prompt placeholder
@@ -1259,32 +1473,57 @@ export class OrchestratorManager {
         // agent-manager.ts CLI_READINESS_PATTERNS 주석과
         // tests/unit/grok-login-detection.test.ts.
         /\/help for commands/i,
+        // Claude Code composer mode footer (`\u23f5\u23f5 bypass permissions on`,
+        // `\u23f5\u23f5 auto mode`, …). ★라이브 캡처 근거: 새 HOME 부팅에서 위 8개 중
+        // **하나도** 매칭되지 않았다 — bypass 모드에서는 `? for shortcuts` 자리에
+        // 이 푸터가 들어가기 때문이다. 오케는 항상 YOLO_FLAG 로 뜨므로 사실상
+        // claude 오케의 유일한 준비 지표이고, 없으면 매 부팅이 10s blind fallback
+        // 이 된다.
+        //
+        // ★문구가 아니라 **글리프**로 잡는 이유: 같은 푸터가 렌더 경로에 따라
+        // `bypass permissions on` 로도, 커서이동으로 공백이 빠진
+        // `bypasspermissionson` 으로도 나온다(두 캡처 모두 보유). 글리프는 그
+        // 차이에 영향받지 않고, 동의·신뢰·테마·로그인 화면 어디에도 없다.
+        /\u23f5\u23f5/,
       ];
       this.ptyManager.onData(ptySessionId, (data) => {
         if (sent) return;
         outputBuffer += data;
         if (outputBuffer.length > 4096)
           outputBuffer = outputBuffer.slice(-4096);
-        // Login-screen backstop — never inject the boot prompt into a
-        // `claude login` menu; surface an error the UI can act on instead.
+        dialogBuffer += stripFrameAnsi(data);
+        if (dialogBuffer.length > 1024)
+          dialogBuffer = dialogBuffer.slice(-1024);
+        // Login-screen backstop — never inject the boot prompt into a login
+        // menu; surface an error the UI can act on instead.
         // readiness 는 blocked 상태에서도 계속 본다(철회 신호).
-        if (launchConfig.model === "claude")
-          loginBackstop.observe(outputBuffer);
+        loginBackstop.observe(outputBuffer);
+        // A send we held back: retry as soon as the screen is no longer a dialog.
+        if (deferredByDialog) {
+          sendPrompt();
+          if (sent) return;
+        }
         for (const pattern of readinessPatterns) {
-          if (pattern.test(outputBuffer)) {
-            loginBackstop.noteReadiness();
-            if (authBlocked) return;
-            // Wait for the input prompt to fully render before sending.
-            setTimeout(sendPrompt, launchConfig.model === "gpt" ? 250 : 1500);
-            return;
-          }
+          if (!pattern.test(outputBuffer)) continue;
+          // ★A readiness marker printed ON a first-run dialog is not readiness.
+          // Latching it here would also settle the login backstop permanently
+          // (noteReadiness is one-way), which is how the codex skeleton frame
+          // disarmed the very check that would have caught the login menu 200 ms
+          // later. Wait for a frame that is actually the composer.
+          if (looksLikeFirstRunDialog(dialogBuffer)) break;
+          loginBackstop.noteReadiness();
+          if (authBlocked) return;
+          // Wait for the input prompt to fully render before sending.
+          setTimeout(sendPrompt, launchConfig.model === "gpt" ? 250 : 1500);
+          return;
         }
       });
 
       // Fallback: send after a model-specific timeout even if no readiness
       // pattern matched. Codex gets a shorter backstop because its project dir
       // is pre-trusted in config.toml; keeping Claude at 10s preserves the
-      // existing trust/auth-dialog safety margin.
+      // existing trust/auth-dialog safety margin. A dialog still on screen at
+      // this point defers the send rather than typing into it.
       setTimeout(sendPrompt, launchConfig.model === "gpt" ? 3500 : 10000);
     }
 

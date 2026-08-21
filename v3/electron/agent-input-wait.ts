@@ -131,7 +131,7 @@ export function foldInputWait(
  * named flag. Any other harness never renders this consent screen, so it is
  * excluded rather than probed.
  */
-const BYPASS_FLAG_MODELS = new Set(["claude", "antigravity"]);
+export const BYPASS_FLAG_MODELS = new Set(["claude", "antigravity"]);
 
 /**
  * How long after spawn the consent screen may be auto-accepted. It is a
@@ -193,6 +193,89 @@ export function shouldAutoAcceptBypass(input: {
   const windowMs = input.windowMs ?? BYPASS_CONSENT_WINDOW_MS;
   if (input.now - input.spawnedAt > windowMs) return false;
   return BYPASS_ACCEPT_MARKER.test(stripFrameAnsi(input.chunk));
+}
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * FIRST-RUN SCREENS THAT MUST NEVER BE TYPED INTO
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * A freshly spawned CLI does not go straight to its composer on a machine that
+ * has never run it. It walks a short chain of full-screen dialogs first, and
+ * every one of them is a SELECT LIST: arbitrary text is swallowed and the
+ * trailing Enter picks whatever option is highlighted. Typing a boot prompt
+ * into one is therefore not "a message that failed to send" — it is a keystroke
+ * that answers a question nobody meant to answer.
+ *
+ * ★These are live measurements, not guesses (2026-08-21, PTY frames captured
+ * against an isolated HOME/CODEX_HOME — see the ticket's activity log):
+ *
+ *   claude 2.1.238, fresh HOME
+ *     0.6s  theme picker      "Choose the text style…"      (7 numbered options)
+ *     ~     login menu        "Select login method:"        → LOGIN_SCREEN_PATTERNS
+ *     0.3s  folder trust      "…trust this folder"          "Enter to confirm"
+ *     1.0s  bypass consent    "2. Yes, I accept"            "Enter to confirm"
+ *     2.8s  composer          "⏵⏵ bypass permissions on (shift+tab to cycle)"
+ *
+ *   codex 0.149.0, fresh CODEX_HOME
+ *     0.12s SKELETON composer "› Ask Codex to do anything   ? for shortcuts"
+ *           ← header still reads `model: loading` / `directory: loading`.
+ *             This frame is a LIE: it carries two of our readiness markers
+ *             while the TUI is not yet accepting input.
+ *     0.17s folder trust      "Do you trust the contents of this directory?"
+ *     0.32s login menu        "1. Sign in with ChatGPT … Press enter to continue"
+ *
+ * The codex skeleton is why a delay tweak cannot fix this: the readiness marker
+ * arrives BEFORE the dialog does, so any fixed wait lands inside the dialog
+ * rather than after it. The only sound gate is to re-read the screen at the
+ * moment of the write, which is what looksLikeFirstRunDialog is for.
+ *
+ * Login screens are deliberately NOT listed here — harness-manager's
+ * LOGIN_SCREEN_PATTERNS / createLoginScreenBackstop already own that decision
+ * (including its probe + grace reconciliation), and duplicating it here would
+ * be the second copy that only one side ever gets fixed in.
+ */
+const FIRST_RUN_DIALOG_MARKERS: RegExp[] = [
+  // claude: bypass consent. SAME marker the auto-accept uses — imported by
+  // reference rather than retyped, so the two can never drift apart.
+  BYPASS_ACCEPT_MARKER,
+  /trust\s*this\s*folder/i, // claude: folder trust dialog
+  /Choose\s*the\s*text\s*style/i, // claude: first-run theme picker
+  /Do\s*you\s*trust\s*the\s*contents\s*of\s*this\s*directory/i, // codex: folder trust
+  // Confirmation footers. Both CLIs print one on every full-screen select list,
+  // so they catch first-run screens we have not enumerated by name. Neither
+  // appears on a ready composer.
+  /Enter\s*to\s*confirm/i, // claude select lists
+  /Press\s*enter\s*to\s*continue/i, // codex select lists
+  // codex: the pre-initialisation skeleton. `model:` / `directory:` read
+  // "loading" until the real session exists, and that word is what tells the
+  // frame apart from the identical-looking ready header.
+  /\bmodel:\s*loading\b/i,
+  /\bdirectory:\s*loading\b/i,
+];
+
+/**
+ * ★Why every marker above tolerates missing whitespace (`\s*`, never a literal
+ * space): claude paints these screens with cursor-forward escapes instead of
+ * spaces, so `stripFrameAnsi` yields `Yes,Iaccept` / `Entertoconfirm` /
+ * `Itrustthisfolder`. A pattern written with real spaces matches the same
+ * screen in one render path and misses it in another — the failure mode is
+ * invisible until it is a P0. BYPASS_ACCEPT_MARKER has always been written this
+ * way; the rest follow it.
+ */
+
+/**
+ * Is this frame one of the first-run dialogs above — i.e. a screen where a
+ * boot prompt would be swallowed and its Enter would answer a question?
+ *
+ * Pure; the frame is read and dropped (the F-7 원문 금지 contract). Callers
+ * pass the CURRENT screen, not a boot-long transcript: a TUI repaints in full,
+ * so a stale dialog scrolls out of a short window on its own and a long one
+ * would keep the gate shut long after the dialog was answered.
+ */
+export function looksLikeFirstRunDialog(frame: string): boolean {
+  const text = stripFrameAnsi(frame);
+  return FIRST_RUN_DIALOG_MARKERS.some((re) => re.test(text));
 }
 
 /** What main sends the renderer on every input-wait transition. Carries no PTY
