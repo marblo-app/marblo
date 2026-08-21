@@ -13,7 +13,21 @@ const nextConfig: NextConfig = {
       // but canonical is a hint, not a directive, and it still splits crawl
       // budget and any link equity pointed at the www form.
       //
-      // This must stay ONE-directional (www → apex only). The apex is the
+      // These two rules cover ONLY what src/proxy.ts cannot see: /api/*, Next
+      // internals, and any path carrying a file extension (/sitemap.xml,
+      // /robots.txt, /favicon.ico, /public assets). Everything else — every
+      // HTML route — is canonicalized inside the proxy.
+      //
+      // That split is the fix for the redirect chain. next.config redirects run
+      // BEFORE the proxy, so while this rule was a catch-all it fired first and
+      // a locale-less www URL paid two hops:
+      //
+      //     https://www.marblo.app/  →301→  https://marblo.app/  →307→  /en
+      //
+      // The proxy can read next-intl's negotiated destination and emit a single
+      // redirect straight to https://marblo.app/en. See src/lib/canonicalHost.ts.
+      //
+      // Both rules stay ONE-directional (www → apex only). The apex is the
       // established canonical everywhere else: lib/seo.ts SITE_URL, sitemap.ts
       // baseUrl, robots.ts `host` + `sitemap`, and layout.tsx `metadataBase`.
       // Adding the mirror rule would produce an infinite redirect loop.
@@ -23,14 +37,19 @@ const nextConfig: NextConfig = {
       // primary market, and Yeti's handling of 308 is not documented the way
       // 301 is. Google and Bing treat the two identically for canonicalization,
       // so 301 costs nothing and is the safer choice for the domain-level rule.
-      //
-      // Runs before src/proxy.ts locale negotiation (next.config redirects are
-      // evaluated ahead of middleware), so www/guide canonicalizes to the apex
-      // first and only then negotiates to /en/guide.
       {
-        source: "/:path*",
+        source: "/api/:path*",
         has: [{ type: "host", value: "www.marblo.app" }],
-        destination: "https://marblo.app/:path*",
+        destination: "https://marblo.app/api/:path*",
+        statusCode: 301,
+      },
+      {
+        // Any path containing a dot — exactly the `.*\\..*` arm of the proxy
+        // matcher's exclusion list. A single greedy param rather than
+        // `/:path*.:ext` so it also spans nested asset paths (/img/a/b.png).
+        source: "/:file(.*\\..*)",
+        has: [{ type: "host", value: "www.marblo.app" }],
+        destination: "https://marblo.app/:file",
         statusCode: 301,
       },
       // Public route renamed /foundation50 → /founders. Keep old links alive

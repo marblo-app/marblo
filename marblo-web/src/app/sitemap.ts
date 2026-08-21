@@ -3,6 +3,21 @@ import { getAllPosts, getPostLocales } from "@/lib/blog";
 import { routing } from "@/i18n/routing";
 import { SITE_URL } from "@/lib/seo";
 
+/**
+ * ⚠️ INVARIANT: every URL emitted here must return 200 on the apex.
+ *
+ * Never add the bare root `https://marblo.app/`. Under next-intl always-prefix
+ * routing the root is a 307 to the negotiated locale, and a sitemap must not
+ * list URLs that redirect — Google reports them as "Page with redirect" and
+ * drops them, which makes the sitemap look broken rather than making the root
+ * indexable. The root only becomes eligible if it is ever made a real 200 page
+ * (see docs/SEO-REDIRECT-CHAIN-2026-08-21.md §B, where that was weighed and
+ * declined). The same rule kills the other redirect sources: /foundation50,
+ * /founders/feedback, and any www.* host.
+ *
+ * This is why every entry below is built as `${baseUrl}/${locale}${page}` —
+ * the locale prefix is what makes the URL a 200.
+ */
 export default function sitemap(): MetadataRoute.Sitemap {
   // Derived from the single source of truth, never re-declared. `lib/seo.ts`
   // builds the <head> hreflang cluster from `routing`; this file builds the

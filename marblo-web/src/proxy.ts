@@ -1,10 +1,30 @@
 import createMiddleware from "next-intl/middleware";
+import { NextResponse } from "next/server";
 import { routing } from "./i18n/routing";
+import { canonicalTarget, isWwwHost } from "./lib/canonicalHost";
 
 const intlMiddleware = createMiddleware(routing);
 
 export function proxy(request: import("next/server").NextRequest) {
   const response = intlMiddleware(request);
+
+  // www → apex in ONE hop. next-intl has already decided this request's final
+  // path (a locale redirect, or nothing when the path is already prefixed), so
+  // we fold the hostname swap into that decision instead of chaining after it.
+  // See src/lib/canonicalHost.ts for why, and for the 301/307 split.
+  //
+  // Only paths this matcher covers reach here; the routes it excludes (/api,
+  // Next internals, anything with a file extension such as /sitemap.xml and
+  // /robots.txt) are canonicalized by the redirects in next.config.ts, which
+  // run ahead of the proxy.
+  if (isWwwHost(request.headers.get("host"))) {
+    const { url, status } = canonicalTarget(
+      request.url,
+      response.headers.get("location")
+    );
+    return NextResponse.redirect(url, status);
+  }
+
   // Expose the current pathname so Server Components (the [locale] layout's
   // generateMetadata) can build per-page canonical/hreflang URLs.
   response.headers.set("x-pathname", request.nextUrl.pathname);
