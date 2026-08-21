@@ -26,6 +26,7 @@ import * as admin from "firebase-admin";
 
 import {
   ANALYTICS_PURCHASE_TABLE,
+  tallyPurchaseRows,
   type PurchaseMapContext,
 } from "../src/analyticsPurchase";
 import { loadPurchaseRows, type BqLike } from "../src/analyticsPurchaseLoad";
@@ -121,9 +122,19 @@ async function main(): Promise<void> {
     return;
   }
 
+  // ★내부(운영자) 계정 축 — 사람이 아니라 성격으로 가른다. 원시 uid 는 여기서
+  //   가명키로 바뀌고 그 뒤로는 어디에도 안 나간다(로그·행 포함).
+  //   못 구하면 null 을 넘겨 "판정 불가" 를 그대로 남긴다 — 빈 Set 으로 접으면
+  //   모든 행이 external(=실매출)로 승격된다.
+  const adminUid = process.env.ADMIN_UID?.trim() ?? "";
+  const adminKey =
+    adminUid && deriveUserKey ? deriveUserKey(adminUid) : null;
+  const internalUserKeys = adminKey ? new Set([adminKey]) : null;
+
   const ctx: PurchaseMapContext = {
     salt,
     deriveUserKey,
+    internalUserKeys,
     ingestedAt: new Date(),
   };
 
@@ -147,6 +158,20 @@ async function main(): Promise<void> {
     .sort()
     .join(" ");
   console.log(`매핑: rows=${built.rows.length} 스킵[${skipped || "없음"}]`);
+
+  // ★갈라낸 결과를 건수로 찍는다. 값(금액 개별·uid)은 안 찍는다.
+  const t = tallyPurchaseRows(built.rows);
+  console.log(
+    `갈라내기: 실매출(external)=${t.externalRevenue}원/${t.externalRevenueRows}건 ` +
+      `내부(internal)=${t.internalRows}건 그랜트=${t.grantRows}건 ` +
+      `미분류=${t.unclassifiedRows}건 금액미상=${t.amountUnknownRows}건`
+  );
+  if (!internalUserKeys) {
+    console.warn(
+      "★ADMIN_UID 미설정 — 내부 계정 판정을 못 했다. 전 행이 미분류(null)이고, " +
+        "매출로 승격되지 않는다."
+    );
+  }
 
   // ★게이트. 여기서 멈추는 것이 정상 동작이다 — 임시 해시로 메꾸지 않는다.
   if (!deriveUserKey) {

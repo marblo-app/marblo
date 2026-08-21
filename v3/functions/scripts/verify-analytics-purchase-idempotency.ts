@@ -52,6 +52,7 @@ function synthetic(n: number, amount: number): PurchaseRow {
     provider: "portone",
     order_id: n === 3 ? null : `od_selftest${n}`,
     reason: n === 3 ? "pg_cancel" : "first",
+    account_class: "external",
     source: "selftest",
     ingested_at: new Date().toISOString(),
   };

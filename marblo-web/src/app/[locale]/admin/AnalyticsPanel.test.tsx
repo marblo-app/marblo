@@ -683,3 +683,123 @@ test("★계정 프로필 뷰는 null 을 0 으로 접지 않는다", () => {
   // 지출은 실제 값이 있으므로 그대로 나온다.
   assert.match(html, /12\.5/);
 });
+
+// ── ★실매출 갈라내기 (ticket cDvehpHhz1sn0ZHNpNq5) ──────────────────────────
+//
+// 이 화면의 실패 모드는 "숫자가 작다" 가 아니라 **"숫자가 틀렸다"** 다.
+// 운영자 본인의 테스트 결제 1건을 매출로 그리면 첫 화면부터 거짓이 된다.
+
+const PURCHASE_BASIS =
+  "전 기간 · analytics_purchase · account_class='external' · " +
+  "amount_known=true · kind ∈ {paid, renew}";
+
+function purchaseSummary(
+  over: Partial<Parameters<typeof P.PurchaseSplitView>[0]["data"]> = {}
+): Parameters<typeof P.PurchaseSplitView>[0]["data"] {
+  return {
+    generatedAt: "2026-08-21T00:00:00.000Z",
+    state: "ingested",
+    reason: null,
+    revenue: {
+      externalKrw: 0,
+      externalRows: 0,
+      internalRows: 1,
+      grantRows: 33,
+      unclassifiedRows: 0,
+      amountUnknownRows: 34,
+      totalRows: 35,
+    },
+    basis: PURCHASE_BASIS,
+    notes: [],
+    ...over,
+  };
+}
+
+test("★실매출 0 은 '적재 전' 이 아니라 0 으로 그린다 — 둘은 완전히 다른 뜻이다", () => {
+  const html = renderToStaticMarkup(
+    <P.PurchaseSplitView data={purchaseSummary()} />
+  );
+  assert.match(html, /₩0/, "표가 있는데 0 을 안 그리면 측정값을 숨기는 것이다");
+  // ★'적재 전' **배지**(PendingIngestion 의 단독 span)가 뜨면 안 된다. 본문에서
+  //   "적재 전이 아니라" 라고 부정하는 문장은 그 반대이므로 배지 형태로만 잰다.
+  assert.doesNotMatch(
+    html,
+    />적재 전</,
+    "0 옆에 '적재 전' 배지를 붙이면 거짓말이다"
+  );
+  assert.match(html, /적재 전이 아니라 측정된 0/);
+});
+
+test("★표가 없으면 0 을 그리지 않고 '적재 전' 으로 둔다", () => {
+  const html = renderToStaticMarkup(
+    <P.PurchaseSplitView
+      data={purchaseSummary({
+        state: "not_ingested",
+        reason: "analytics_purchase 테이블이 없다",
+        revenue: null,
+      })}
+    />
+  );
+  assert.match(html, />적재 전</);
+  assert.doesNotMatch(html, /₩0/, "소스가 없는데 0 을 그리면 두 겹으로 틀린다");
+});
+
+test("★뺀 내부 결제 건수가 화면에 그대로 보인다 — 지운 게 아니라 가른 것", () => {
+  const html = renderToStaticMarkup(
+    <P.PurchaseSplitView data={purchaseSummary()} />
+  );
+  assert.match(html, /내부·운영자 결제/);
+  assert.match(html, /매출에서 뺌/);
+  // 건수가 안 보이면 다음 사람이 "왜 결제가 하나도 안 잡히지" 로 또 판다.
+  assert.match(html, />1</);
+});
+
+test("★founder_grant 건수는 0 으로 뭉개지지 않는다", () => {
+  const html = renderToStaticMarkup(
+    <P.PurchaseSplitView data={purchaseSummary()} />
+  );
+  assert.match(html, /무상 부여/);
+  assert.match(html, />33</);
+});
+
+test("★기준 라벨 없는 숫자를 그리지 않는다", () => {
+  const html = renderToStaticMarkup(
+    <P.PurchaseSplitView data={purchaseSummary()} />
+  );
+  assert.match(html, /기준/);
+  assert.match(html, /account_class/);
+  assert.match(html, /amount_known/);
+});
+
+test("★금액 미상은 0 이 아니라고 화면이 직접 말한다", () => {
+  const html = renderToStaticMarkup(
+    <P.PurchaseSplitView data={purchaseSummary()} />
+  );
+  assert.match(html, /금액 미상/);
+  assert.match(html, /미상은 0 이 아니라서/);
+});
+
+test("★계정 성격 미분류는 매출로 승격되지 않고 따로 세어진다", () => {
+  const html = renderToStaticMarkup(
+    <P.PurchaseSplitView
+      data={purchaseSummary({
+        revenue: {
+          externalKrw: 0,
+          externalRows: 0,
+          internalRows: 0,
+          grantRows: 0,
+          unclassifiedRows: 7,
+          amountUnknownRows: 0,
+          totalRows: 7,
+        },
+      })}
+    />
+  );
+  assert.match(html, /계정 성격 미분류/);
+  assert.match(html, /매출로 올리지 않음/);
+  assert.match(html, /₩0/);
+});
+
+test("콜러블 이름 계약이 백엔드와 같다", () => {
+  assert.equal(P.CALLABLE_PURCHASE_SUMMARY, "getAdminPurchaseSummary");
+});

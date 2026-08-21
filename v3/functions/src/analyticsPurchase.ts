@@ -30,6 +30,32 @@
  * 읽힌다 — 그게 이 컬럼이 있는 이유다. 정확한 순매출은 환불 원장을 남기는
  * 후속 작업이 필요하다(결제 흐름 변경이라 이 티켓 범위 밖).
  *
+ * ── ★내부·테스트 결제를 매출에서 가른다 (ticket cDvehpHhz1sn0ZHNpNq5) ──────
+ * 실측(2026-08-21): 운영 `subscriptions` 34건 중 활성 portone 구독 1건이
+ * **운영자 본인의 테스트 결제**고 실제 결제 고객은 0명이다. 그 1건을 매출로
+ * 적으면 대시보드의 첫 숫자가 틀린 값이 된다 — 매출 0 을 0 으로 보여주는 건
+ * 정확한 것이고, 테스트 1건을 매출로 보여주는 게 부정확한 것이다.
+ *
+ * ★지우지 않고 **가른다.** `account_class` 컬럼을 붙여 기본 매출에서는 빼되
+ *   건수는 남긴다. 지워 버리면 다음 사람이 "왜 결제가 하나도 안 잡히지" 로
+ *   다시 판다.
+ *
+ * ★#1071(installAttribution.buildChannel)이 어트리뷰션에서 **개발 재실행을
+ *   실유입과 가른** 패턴을 그대로 재사용한다 — 새 개념을 만들지 않는다:
+ *     NULLABLE 컬럼 · 허용값 화이트리스트 · 집계는 한쪽만 · null = 표식 이전.
+ *
+ * ★판정은 **사람이 아니라 성격**으로 한다. 운영자 uid 를 코드에 박지 않고
+ *   기존 운영자 축(`ADMIN_UID` → analyticsProfiles 의 `is_admin`, 어드민
+ *   콜러블의 `adminExcluded`)을 그대로 쓴다. 운영자가 바뀌면 env 만 바뀌고
+ *   판정은 계속 동작한다. 게다가 그 축은 **가명키 집합으로 주입**되므로 이
+ *   모듈은 원시 uid 를 비교하지도 않는다.
+ *
+ * ★"PG 테스트키로 결제됐나" 는 **판정할 수 없다.** billingCharges 문서에
+ *   남는 필드에 채널/스토어 정보가 없고(index.ts 의 PortOne storeId·channelKey
+ *   는 전부 env 이며 문서에 저장되지 않는다), 토스도 마찬가지다. 없는 표식을
+ *   있다고 가정하지 않는다 — 그래서 이 컬럼이 뜻하는 것은 "테스트 채널"이
+ *   아니라 **"내부(운영자) 계정"** 이고, 이름도 그렇게 붙였다.
+ *
  * ── ★로그·컬럼에 남기지 않는 것 ────────────────────────────────────────────
  *  - 원시 uid: `user_key` 는 사람 축(PR #1084)이 넣은 **공용 HMAC 함수**
  *    (`analyticsPseudonym` 의 `user` kind)를 주입받아 만든다. 여기서 두 번째
@@ -50,19 +76,55 @@ export const ANALYTICS_PURCHASE_TABLE = "analytics_purchase";
 export const ANALYTICS_PURCHASE_STAGING_TABLE = "analytics_purchase_staging";
 
 /**
+ * 계정 성격. #1071 의 `BUILD_CHANNELS`(["dev","prod"]) 와 같은 규약 —
+ * 화이트리스트 밖의 값은 만들지 않고, **집계는 한쪽("external")만 센다.**
+ *  - `internal` : 운영자(내부) 계정에서 일어난 결제·구독. 매출이 아니다.
+ *  - `external` : 그 외 = 실제 고객.
+ * `null` 은 **표식이 붙기 전(2026-08-21 이전) 적재된 행**이거나 운영자 축이
+ * 설정되지 않아 판정 자체를 못 한 행이다. 0 도 아니고 external 도 아니다 —
+ * 화면은 이 수를 따로 세어 보여야 한다.
+ */
+export const ACCOUNT_CLASSES = ["internal", "external"] as const;
+export type AccountClass = (typeof ACCOUNT_CLASSES)[number];
+
+/**
+ * 매출로 합산해도 되는 계정 성격. 질의가 이 상수를 쓰게 해서 "external 만"
+ * 이라는 규약이 코드 한 곳에만 있게 한다.
+ */
+export const REVENUE_ACCOUNT_CLASS: AccountClass = "external";
+
+/**
+ * ★#1071 에는 `parseBuildChannel`(클라가 보낸 값 검증)이 있지만 여기엔 없다.
+ * 이 컬럼의 값은 **우리 매퍼가 직접 만든다** — 신뢰할 수 없는 입력 경로가
+ * 없으므로 파서를 두면 절대 안 도는 코드가 된다. 값을 만드는 곳은
+ * `classifyAccount()` 하나뿐이고, 그래서 화이트리스트 밖의 값이 나올 수 없다.
+ */
+
+/**
  * 구매 이벤트 종류.
  *  - `trial`  : 금액 0 으로 자격만 부여된 건(쿠폰 전액할인 = 원장 status 'comped').
  *  - `paid`   : 첫 결제 / 수동 청구 / 단건 결제.
  *  - `renew`  : 정기 갱신 청구.
  *  - `refund` : PG 쪽에서 결제가 취소(환불)된 사실. **금액 미상**(위 주석 참조).
  *  - `cancel` : 사용자가 다음 결제를 멈춘 것. 돈이 움직이지 않는다.
+ *  - `grant`  : PG 를 거치지 않은 **무상 자격 부여**(founder_grant). 매출이
+ *               아니지만 **건수 자체가 경영 정보**다 — 예전엔 `not_a_payment`
+ *               로 조용히 버려져 33건이 어디에도 남지 않았다. 지우지 않고
+ *               가른다: 금액은 없고(`amount_known=false`) 매출 합산에 들어갈
+ *               수 없다.
  */
-export type PurchaseKind = "trial" | "paid" | "renew" | "refund" | "cancel";
+export type PurchaseKind =
+  | "trial"
+  | "paid"
+  | "renew"
+  | "refund"
+  | "cancel"
+  | "grant";
 
 /**
  * 행의 사유. 매출 축이 아니라 "왜 이 행이 생겼나" 를 남긴다.
  *  - 청구 원장에서: first | renewal | manual | one_time
- *  - 구독 상태에서: user_cancel | billing_failure | pg_cancel
+ *  - 구독 상태에서: user_cancel | billing_failure | pg_cancel | founder_grant
  */
 export type PurchaseReason =
   | "first"
@@ -71,13 +133,16 @@ export type PurchaseReason =
   | "one_time"
   | "user_cancel"
   | "billing_failure"
-  | "pg_cancel";
+  | "pg_cancel"
+  | "founder_grant";
 
 /** 행을 만들지 않은 사유. 호출부가 **집계해서 보고**해야 한다(조용히 버리지 말 것). */
 export type SkipReason =
   | "not_revenue" // 청구가 pending/failed — 아직 매출이 아니다.
   | "duplicate_portone_lecture" // PortOne 단건은 billingCharges 쪽으로 이미 잡혔다.
-  | "not_a_payment" // founder grant 등 PG 를 거치지 않은 구독.
+  // PG 도 안 거쳤고 무상 부여도 아닌 구독(예: 원장이 없는 paddle). founder
+  // grant 는 더 이상 여기로 오지 않는다 — kind='grant' 행이 된다.
+  | "not_a_payment"
   | "still_active" // 해지/환불 흔적이 없는 구독.
   | "missing_user" // userId 가 없다(구조적 이상 — 반드시 보고).
   | "missing_timestamp" // 시각을 못 정했다.
@@ -108,6 +173,12 @@ export interface PurchaseRow {
   /** 주문번호 HMAC 가명(`od_...`). 원문은 절대 싣지 않는다. */
   order_id: string | null;
   reason: PurchaseReason;
+  /**
+   * ★`internal` | `external` | null. 매출 집계는 `external` 만 센다.
+   * null 은 표식 이전 행이거나 운영자 축 미설정으로 판정 불가였던 행이다 —
+   * external 로 접지 않는다(접으면 내부 결제가 조용히 매출이 된다).
+   */
+  account_class: AccountClass | null;
   /** billingCharges | lecturePurchases | subscriptions. 대조·감사용. */
   source: string;
   ingested_at: string;
@@ -152,6 +223,9 @@ export const ANALYTICS_PURCHASE_SCHEMA = [
   { name: "provider", type: "STRING", mode: "NULLABLE" },
   { name: "order_id", type: "STRING", mode: "NULLABLE" },
   { name: "reason", type: "STRING", mode: "NULLABLE" },
+  // ★NULLABLE 이어야 한다. 기존 테이블에 REQUIRED 를 붙이면 BigQuery 가
+  // 거부하고, 그러면 이 컬럼이 영영 안 생겨 갈라내기가 조용히 죽는다.
+  { name: "account_class", type: "STRING", mode: "NULLABLE" },
   { name: "source", type: "STRING", mode: "REQUIRED" },
   { name: "ingested_at", type: "TIMESTAMP", mode: "REQUIRED" },
 ] as const;
@@ -176,6 +250,17 @@ export interface PurchaseMapContext {
   salt: string | null;
   /** ★공용 계정 가명키 함수. 없으면 null. */
   deriveUserKey: ((uid: string) => string | null) | null;
+  /**
+   * ★내부(운영자) 계정의 **가명키** 집합. 호출부가 기존 운영자 축
+   * (`ADMIN_UID` → `getAdminExclusionUid()`)을 `deriveUserKey` 로 가명화해서
+   * 넘긴다 — 이 모듈은 원시 uid 를 비교하지 않는다.
+   *
+   * `null` 은 "운영자 축을 못 구했다" 는 뜻이고, 그때는 `account_class` 가
+   * null 이 된다. **빈 Set 과 다르다**: 빈 Set 은 "축은 있는데 내부 계정이
+   * 없다"(= 전부 external)이고, null 은 "판정 불가"다. 두 상태를 합치면
+   * 화면이 내부 결제를 매출로 보여주면서 그 사실을 숨긴다.
+   */
+  internalUserKeys: ReadonlySet<string> | null;
   /** 적재 시각(테스트 주입). */
   ingestedAt: Date;
 }
@@ -230,6 +315,8 @@ export interface SubscriptionSource {
   paymentProvider: unknown;
   founderGrant: unknown;
   billingFailedCount: unknown;
+  /** 부여/구독 생성 시각. `grant` 행의 event_at 은 이 값을 먼저 쓴다. */
+  createdAtMs: number | null;
   canceledAtMs: number | null;
   updatedAtMs: number | null;
 }
@@ -289,6 +376,25 @@ export function classifyCharge(
 }
 
 /**
+ * PG 를 거치지 않은 **무상 부여**인가.
+ *
+ * ★정본은 `paymentProvider === "founder_grant"` 다. 레거시 부여 문서에는
+ *   provider 없이 `founderGrant: true` 만 있는 것들이 있어(백필 스크립트
+ *   계열) 그것도 받는다 — 안 받으면 그만큼이 조용히 사라진다.
+ * ★단 **provider 가 명시된 문서는 그 값을 믿는다.** 실측(2026-08-21) 결과
+ *   운영 구독은 grant 플래그가 거의 전부에 붙어 있어서, 플래그만 보면
+ *   paddle 같은 실제 PG 구독까지 "무상 부여" 로 바뀐다. 라벨을 잘못 붙이는
+ *   건 안 붙이는 것보다 나쁘다 — 화면이 확신을 갖고 틀린 말을 한다.
+ * ★호출부는 이 함수를 toss/portone 판정 **뒤에** 부른다 — grant 플래그가
+ *   붙은 채 PG 를 거친 구독이 실제로 존재하기 때문이다(위 주석 참조).
+ */
+export function isFounderGrant(sub: SubscriptionSource): boolean {
+  const provider = str(sub.paymentProvider);
+  if (provider === "founder_grant") return true;
+  return provider === null && sub.founderGrant === true;
+}
+
+/**
  * 구독 문서 → 해지/환불 판정.
  *
  * ★세 경로를 어떻게 가르는가(index.ts 실측):
@@ -312,7 +418,20 @@ export function classifySubscriptionEvent(
   //   구독이 존재한다. 플래그만 보고 버리면 그 실결제자의 해지·환불이 통째로
   //   사라진다. 판단 기준은 "PG 를 거쳤는가"(paymentProvider)여야 한다.
   const provider = str(sub.paymentProvider);
-  if (provider !== "toss" && provider !== "portone") return null;
+  if (provider !== "toss" && provider !== "portone") {
+    // ★매출은 아니지만 **버리지 않는다.** 무상 부여 건수 자체가 경영 정보다
+    //   (실측 33건). 예전엔 이 자리에서 null 을 돌려 `not_a_payment` 로 세었고,
+    //   그 숫자는 적재 로그에만 남아 화면 어디에도 안 나왔다.
+    if (isFounderGrant(sub)) {
+      return {
+        kind: "grant",
+        reason: "founder_grant",
+        // 부여 시각이 정본. 없으면 마지막 변경 시각으로 근사한다.
+        atMs: sub.createdAtMs ?? sub.updatedAtMs,
+      };
+    }
+    return null;
+  }
 
   if (sub.canceledAtMs !== null) {
     return { kind: "cancel", reason: "user_cancel", atMs: sub.canceledAtMs };
@@ -367,7 +486,10 @@ function finish(
   ctx: PurchaseMapContext,
   uidRaw: unknown,
   sourceKey: string,
-  partial: Omit<PurchaseRow, "row_id" | "user_key" | "ingested_at">
+  partial: Omit<
+    PurchaseRow,
+    "row_id" | "user_key" | "ingested_at" | "account_class"
+  >
 ): MapResult {
   if (!ctx.salt) return { ok: false, reason: "no_salt" };
   const uid = str(uidRaw);
@@ -388,9 +510,25 @@ function finish(
       row_id: rowId,
       user_key: userKey,
       ingested_at: ctx.ingestedAt.toISOString(),
+      account_class: classifyAccount(userKey, ctx.internalUserKeys),
       ...partial,
     },
   };
+}
+
+/**
+ * 가명키 → 계정 성격. 판정은 **가명 공간에서만** 일어난다(원시 uid 없음).
+ *
+ * ★집합이 `null`(운영자 축 미설정)이면 external 로 접지 않고 null 을 남긴다.
+ *   접으면 "판정을 못 했다" 가 "고객 결제다" 로 승격되고, 그 승격이 정확히
+ *   이 티켓이 고치려는 거짓말이다.
+ */
+export function classifyAccount(
+  userKey: string,
+  internalUserKeys: ReadonlySet<string> | null
+): AccountClass | null {
+  if (internalUserKeys === null) return null;
+  return internalUserKeys.has(userKey) ? "internal" : "external";
 }
 
 /** `billingCharges` 한 건 → 행. */
@@ -458,7 +596,10 @@ export function mapLecturePurchase(
   });
 }
 
-/** `subscriptions` 한 건 → 해지/환불 행. 금액은 싣지 않는다. */
+/**
+ * `subscriptions` 한 건 → 해지/환불/무상부여 행. 금액은 싣지 않는다.
+ * (`amount_known=false` 라 어떤 매출 합산에도 들어갈 수 없다.)
+ */
 export function mapSubscriptionEvent(
   doc: SubscriptionSource,
   ctx: PurchaseMapContext
@@ -479,6 +620,7 @@ export function mapSubscriptionEvent(
   // ★row_id 에 시각을 넣지 않는다. 넣으면 같은 해지가 updatedAt 이 바뀔 때마다
   // 새 행이 되어 중복이 된다(해지는 사용자당 사이클당 한 번이면 충분하다).
   // 대신 (uid, kind) 로 고정하고 MERGE 가 시각을 갱신한다.
+  // grant 도 같다 — 구독 문서당 부여 행은 하나다(해지돼도 부여 사실은 하나).
   return finish(ctx, doc.userId, `subscriptions/${doc.docId}/${cls.kind}`, {
     event_at: new Date(cls.atMs).toISOString(),
     kind: cls.kind,
@@ -492,6 +634,67 @@ export function mapSubscriptionEvent(
     reason: cls.reason,
     source: "subscriptions",
   });
+}
+
+/**
+ * 매출로 세는 행 종류. `trial`(comped 0원)은 **건수에서 뺀다** — 돈이 오간
+ * 적이 없어 "결제 N건" 에 넣으면 건수가 부풀고, 금액은 아는 0 이라 합계엔
+ * 어차피 영향이 없다. `refund`/`cancel`/`grant` 는 amount_known=false 라
+ * 구조적으로 합산 대상이 아니다.
+ */
+export const REVENUE_KINDS: readonly PurchaseKind[] = ["paid", "renew"];
+
+/**
+ * 한 배치의 행 → 성격별 건수·금액. 적재 로그와 어드민 콜러블이 **같은 정의**를
+ * 쓰게 하려고 순수 함수로 둔다(정의가 두 벌이면 화면과 로그가 다른 말을 한다).
+ *
+ * ★금액은 `external` + `amount_known` + 매출 종류일 때만 더한다. 나머지는
+ *   건수로만 남는다 — 지우는 게 아니라 가르는 것이다.
+ */
+export interface PurchaseTally {
+  /** 실매출(외부 고객) 합계. 원 단위 정수. 행이 없으면 **0**(미상이 아니다). */
+  externalRevenue: number;
+  /** 실매출로 센 행 수. */
+  externalRevenueRows: number;
+  /** 내부(운영자) 계정 결제 건수 — 매출에서 뺐지만 화면에 보여야 하는 수. */
+  internalRows: number;
+  /** 무상 부여(founder_grant) 건수. */
+  grantRows: number;
+  /** 계정 성격을 판정하지 못한 행 수(표식 이전 적재분 / 운영자 축 미설정). */
+  unclassifiedRows: number;
+  /** 금액이 미상인 행 수(환불·해지·부여). 0 으로 읽히면 안 되는 수. */
+  amountUnknownRows: number;
+  total: number;
+}
+
+export function tallyPurchaseRows(
+  rows: ReadonlyArray<PurchaseRow>
+): PurchaseTally {
+  const t: PurchaseTally = {
+    externalRevenue: 0,
+    externalRevenueRows: 0,
+    internalRows: 0,
+    grantRows: 0,
+    unclassifiedRows: 0,
+    amountUnknownRows: 0,
+    total: rows.length,
+  };
+  for (const r of rows) {
+    if (r.account_class === null) t.unclassifiedRows++;
+    else if (r.account_class === "internal") t.internalRows++;
+    if (r.kind === "grant") t.grantRows++;
+    if (!r.amount_known) t.amountUnknownRows++;
+    if (
+      r.account_class === REVENUE_ACCOUNT_CLASS &&
+      r.amount_known &&
+      typeof r.amount === "number" &&
+      REVENUE_KINDS.includes(r.kind)
+    ) {
+      t.externalRevenue += r.amount;
+      t.externalRevenueRows++;
+    }
+  }
+  return t;
 }
 
 /** 스킵 사유별 집계. 호출부가 이걸 그대로 보고한다(조용히 버리지 않기 위해). */

@@ -1636,6 +1636,93 @@ export function PendingIngestion({
   );
 }
 
+// ── ★실매출 — 내부·테스트 결제를 갈라서 보여준다 ───────────────────────────
+//
+// 이 블록의 존재 이유 한 줄: **매출 0 을 0 으로 보여주는 건 정확한 것이고,
+// 테스트 1건을 매출로 보여주는 게 부정확한 것이다.**
+//
+// 그래서 세 상태를 절대 섞지 않는다.
+//   1. 표가 없다        → '적재 전'  (숫자를 그리지 않는다)
+//   2. 콜러블이 없다     → '연결 전'  (표는 차 있고 읽는 길만 없다)
+//   3. 표가 있고 0 이다  → **0 을 그린다.** 이건 데이터다.
+//
+// 그리고 갈라낸 것은 **지운 게 아니라 뺀 것**이므로 건수를 나란히 띄운다.
+// 안 띄우면 다음 사람이 "왜 결제가 하나도 안 잡히지" 로 또 판다.
+export function PurchaseSplitView({ data }: { data: PurchaseSummary }) {
+  const r = data.revenue;
+  if (data.state === "not_ingested" || r == null) {
+    return (
+      <PendingIngestion
+        title="실매출 (analytics_purchase)"
+        waitingOn={
+          data.reason ??
+          "analytics_purchase 적재 — 표가 아직 없어 0 을 그리지 않는다"
+        }
+        willShow={[
+          "실매출(외부 고객) 합계 — 기준 라벨과 함께",
+          "매출에서 뺀 내부(운영자) 결제 건수",
+          "무상 부여(founder_grant) 건수",
+        ]}
+      />
+    );
+  }
+
+  const zeroRevenue = r.externalRows === 0;
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {/* ★분모가 아니라 기준을 적는다. 0 옆에 '적재 전' 을 쓰지 않는다 —
+            표가 있는 이상 이 0 은 미상이 아니라 측정값이다. */}
+        <StatCard
+          label="실매출 (외부 고객)"
+          value={`₩${fmtInt(r.externalKrw)}`}
+          sub={
+            zeroRevenue
+              ? "결제 고객 0명 — 적재 전이 아니라 측정된 0"
+              : `${fmtInt(r.externalRows)}건`
+          }
+          accent={zeroRevenue ? undefined : STATUS_GOOD}
+        />
+        <StatCard
+          label="내부·운영자 결제"
+          value={fmtInt(r.internalRows)}
+          sub="매출에서 뺌 · 지운 게 아니라 가른 것"
+          accent={r.internalRows > 0 ? STATUS_WARN : undefined}
+        />
+        <StatCard
+          label="무상 부여 (grant)"
+          value={fmtInt(r.grantRows)}
+          sub="PG 미경유 · 매출 아님"
+          accent={SERIES_2}
+        />
+        <StatCard
+          label="계정 성격 미분류"
+          value={fmtInt(r.unclassifiedRows)}
+          sub={
+            r.unclassifiedRows > 0
+              ? "표식 이전 적재분 — 매출로 올리지 않음"
+              : "없음"
+          }
+          accent={r.unclassifiedRows > 0 ? STATUS_WARN : undefined}
+        />
+      </div>
+      <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-500">
+        <b className="text-zinc-400">기준</b> {data.basis} · 적재 행{" "}
+        {fmtInt(r.totalRows)}건.
+        {r.amountUnknownRows > 0 && (
+          <>
+            {" "}
+            금액 미상 {fmtInt(r.amountUnknownRows)}건(환불·해지·부여) —{" "}
+            <b className="text-zinc-400">미상은 0 이 아니라서</b> 순매출은 아직
+            계산하지 않습니다.
+          </>
+        )}
+      </p>
+      <AxisLimitNote notes={data.notes} />
+    </div>
+  );
+}
+
 // ── ★축 한계 고지 ──────────────────────────────────────────────────────────
 // 0 이 '없음'인지 '미측정'인지 구분한다. 서버가 note 로 실어 보내는 축 한계를
 // 표 아래 각주가 아니라 탭 머리에 둔다 — 숫자를 읽기 전에 읽혀야 하는 문장이다.
@@ -3599,6 +3686,39 @@ function StreakRetentionView({ data }: { data: StreakRetention }) {
 //   영원히 '연결 전' 을 띄운다. 계약은 docs/analytics-admin-callables-api.md.
 export const CALLABLE_USER_DAILY = "getAdminUserDailySummary";
 export const CALLABLE_ACCOUNT_PROFILE = "getAdminAccountProfileSummary";
+export const CALLABLE_PURCHASE_SUMMARY = "getAdminPurchaseSummary";
+
+/**
+ * analytics_purchase 요약 — ★"실매출 0" 과 "적재 전" 을 가르는 응답.
+ *
+ * 실측(2026-08-21): 활성 portone 구독 1건은 **운영자 본인의 테스트 결제**고
+ * 실제 결제 고객은 0명이다. 그 1건을 매출로 그리면 대시보드의 첫 숫자가 틀린
+ * 값이 된다 — 그래서 서버가 `account_class` 로 갈라 주고, 이 화면은 **뺀 건수를
+ * 숨기지 않는다.** 숨기면 다음 사람이 "왜 결제가 하나도 안 잡히지" 로 또 판다.
+ */
+type PurchaseSummary = {
+  generatedAt: string;
+  /** `not_ingested` = 표가 없다(적재 전). `ingested` = 아래 숫자는 진짜다. */
+  state: "not_ingested" | "ingested";
+  reason: string | null;
+  revenue: {
+    /** ★실매출(외부 고객). state=ingested 면 0 도 **정확한 0** 이다. */
+    externalKrw: number;
+    externalRows: number;
+    /** 매출에서 뺐지만 화면에 보여야 하는 내부(운영자) 결제 건수. */
+    internalRows: number;
+    /** 무상 부여(founder_grant) 건수 — 매출은 아니지만 경영 정보다. */
+    grantRows: number;
+    /** 계정 성격 미분류(표식 이전 적재분 / 운영자 축 미설정). */
+    unclassifiedRows: number;
+    /** 금액 미상 행(환불·해지·부여). 0 이 아니다. */
+    amountUnknownRows: number;
+    totalRows: number;
+  } | null;
+  /** ★기준 라벨. "기준 라벨 없는 숫자 금지" — 숫자 옆에 그대로 붙인다. */
+  basis: string;
+  notes: string[];
+};
 
 /** analytics_user_daily 한 날(익명축, 설치 × 날짜). ★user_key 컬럼이 없다. */
 type UserDailyDay = {
@@ -4703,6 +4823,11 @@ export default function AnalyticsPanel({
       error: null,
     }
   );
+  const [purchase, setPurchase] = useState<Loaded<PurchaseSummary>>({
+    data: null,
+    loading: true,
+    error: null,
+  });
   const [modelView, setModelView] = useState<"overview" | "routing">(
     "overview"
   );
@@ -4816,6 +4941,12 @@ export default function AnalyticsPanel({
         Record<string, never>,
         AccountProfileSummary
       >(fns, CALLABLE_ACCOUNT_PROFILE);
+      // ★인자가 없다. 실매출은 **전 기간** 합계로 본다 — 기간을 걸면 "이 기간엔
+      //   0" 인지 "아예 0" 인지 화면에서 구분이 안 되고, 지금 필요한 건 후자다.
+      const callPurchase = httpsCallable<
+        Record<string, never>,
+        PurchaseSummary
+      >(fns, CALLABLE_PURCHASE_SUMMARY);
 
       setBiz((s) => ({ ...s, loading: true, error: null }));
       setUsage((s) => ({ ...s, loading: true, error: null }));
@@ -4829,6 +4960,12 @@ export default function AnalyticsPanel({
       setCountryFunnel((s) => ({ ...s, loading: true, error: null }));
       setInstallRet((s) => ({ ...s, loading: true, error: null }));
       setUserDaily((s) => ({
+        ...s,
+        loading: true,
+        error: null,
+        notDeployed: false,
+      }));
+      setPurchase((s) => ({
         ...s,
         loading: true,
         error: null,
@@ -4983,6 +5120,21 @@ export default function AnalyticsPanel({
             return;
           }
           setAcctProfile({ data: null, loading: false, error: mapErr(err) });
+        });
+      callPurchase({})
+        .then((r) => setPurchase({ data: r.data, loading: false, error: null }))
+        .catch((e) => {
+          const err = e as CallableError;
+          if (isNotDeployed(err)) {
+            setPurchase({
+              data: null,
+              loading: false,
+              error: null,
+              notDeployed: true,
+            });
+            return;
+          }
+          setPurchase({ data: null, loading: false, error: mapErr(err) });
         });
     },
     []
@@ -5927,7 +6079,8 @@ export default function AnalyticsPanel({
         >
           <AxisLimitNote
             notes={[
-              "구독·결제 상태는 Firestore 원장이라 항상 켜져 있습니다(🟢). 다만 결제 금액 단위 이벤트(analytics_purchase)가 아직 적재 전이라 MRR·LTV·코호트별 회수는 계산할 소스가 없습니다 — 그 칸에 0 을 그리지 않고 '적재 전' 으로 둡니다.",
+              "구독·결제 상태는 Firestore 원장이라 항상 켜져 있습니다(🟢). MRR·LTV·코호트별 회수는 아직 계산 소스가 없어 그 칸에 0 을 그리지 않고 '적재 전' 으로 둡니다.",
+              "★아래 '구독·전환' 숫자는 건수이고 매출이 아닙니다. 실제로 들어온 돈은 '실매출' 칸에서만 봅니다 — 그 칸은 내부·운영자 계정 결제와 무상 부여(founder_grant)를 매출에서 빼고, 뺀 건수를 옆에 그대로 표시합니다(지운 게 아니라 가른 것입니다).",
               "연속 청구 사이클은 Toss billingCharges 원장만 채웁니다. Paddle 구독은 원장 공백이라 그 칸의 0 은 '연속 결제가 없다' 가 아니라 '이 원장에 없다' 입니다.",
             ]}
           />
@@ -6184,6 +6337,37 @@ export default function AnalyticsPanel({
                 ]}
               />
             )}
+          </div>
+
+          {/* ── ★실매출 — 내부·테스트 결제를 갈라낸 뒤의 숫자 ─────────────
+              ★수익 탭에서 **가장 먼저 읽혀야 하는 칸**이다. 위 '구독·전환' 은
+              구독 건수고, 돈이 실제로 들어왔는지는 여기서만 보인다. 그리고 그
+              숫자는 내부·테스트 결제를 뺀 값이며, 뺀 건수를 옆 칸에 그대로
+              띄운다 — 빼놓고 말 안 하면 그것도 거짓말이다. ── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={CreditCard}
+              title="실매출 (내부·테스트 제외)"
+              trust={purchase.data?.state === "ingested" ? "green" : "red"}
+            />
+            {purchase.loading ? (
+              <LoadingBox />
+            ) : purchase.notDeployed ? (
+              <PendingIngestion
+                missing="read-path"
+                title="실매출 (analytics_purchase)"
+                waitingOn={`${CALLABLE_PURCHASE_SUMMARY} — analytics_purchase 를 읽는 어드민 콜러블. 표는 적재 경로가 돌고 있고 없는 것은 조회 경로다`}
+                willShow={[
+                  "실매출(외부 고객) 합계 — 기준 라벨과 함께",
+                  "매출에서 뺀 내부(운영자) 결제 건수",
+                  "무상 부여(founder_grant) 건수",
+                ]}
+              />
+            ) : purchase.data ? (
+              <PurchaseSplitView data={purchase.data} />
+            ) : purchase.error ? (
+              <ErrorBox msg={purchase.error} />
+            ) : null}
           </div>
 
           {/* ── MRR·LTV·회수 — 구매 적재 전 (🔴) ──────────────────────── */}

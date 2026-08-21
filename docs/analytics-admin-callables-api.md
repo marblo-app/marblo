@@ -700,6 +700,48 @@ type BetaSegmentSummary = {
 표 자체가 매일 채워지는 것(→ 연결 전)과 그 금액 칸이 비어 있는 것(→ 적재 전)은 **다른 사실**이라
 화면이 두 칸으로 나눠 그린다. 응답에서 `null` 을 `0` 으로 바꿔 보내면 그 구분이 무너진다.
 
+### `getAdminPurchaseSummary` — ④ 수익 (실매출, `analytics_purchase`)
+
+인자 없음(`{}`). ★기간 창을 받지 않는다 — 기간을 걸면 "이 기간엔 0" 과 "아예 0" 이
+화면에서 구분되지 않는데, 지금 답해야 하는 질문은 후자다.
+
+```
+{
+  generatedAt,
+  state: "not_ingested" | "ingested",   // ★표가 없다 vs 표가 있다
+  reason: string | null,                // not_ingested 인 이유. ingested 면 null
+  revenue: {                            // ★not_ingested 면 통째로 null
+    externalKrw,          // 실매출(외부 고객). state=ingested 면 0 도 **정확한 0**
+    externalRows,
+    internalRows,         // ★매출에서 뺀 내부(운영자) 결제 건수 — 화면에 보여야 한다
+    grantRows,            // 무상 부여(founder_grant) 건수. 매출은 아니지만 경영 정보
+    unclassifiedRows,     // account_class 가 null 인 행(표식 이전 / 운영자 축 미설정)
+    amountUnknownRows,    // 금액 미상(환불·해지·부여). ★0 이 아니다
+    totalRows,
+  } | null,
+  basis,                  // ★기준 라벨. 화면이 숫자 옆에 그대로 그린다
+  notes: [],
+}
+```
+
+★**`state` 가 이 응답의 전부다.** `not_ingested` 는 '적재 전' 이라 화면이 0 을 그리면
+안 되고, `ingested` 의 `externalKrw: 0` 은 **측정된 0** 이라 반드시 0 으로 그려야 한다.
+두 상태를 한 칸에 섞는 순간 "아무도 결제 안 했다" 와 "배선이 없다" 가 같은 그림이 된다.
+
+★**갈라내되 지우지 않는다.** 내부·운영자 결제와 무상 부여는 `externalKrw` 에서 빠지지만
+`internalRows` / `grantRows` 로 **건수가 그대로 보인다.** 숨기면 다음 사람이 "왜 결제가
+하나도 안 잡히지" 로 같은 자리를 다시 판다.
+
+★판정은 `analytics_purchase.account_class`(`internal` | `external` | `null`) 컬럼이 한다.
+`internal` 은 **사람이 아니라 성격**이다 — 기존 운영자 축(`ADMIN_UID` → `is_admin`,
+`adminExcluded`)을 가명키로 바꿔 비교하며, 운영자가 바뀌면 env 만 바뀐다.
+`null`(미분류)은 external 로 접지 않는다 — 접으면 판정 실패가 '고객 결제' 로 승격된다.
+★"PG 테스트키로 결제됐나" 는 원장에 표식이 없어 **판정할 수 없다**(채널·스토어 정보가
+결제 문서에 저장되지 않는다). 그래서 이 컬럼이 뜻하는 것은 "테스트 채널" 이 아니라
+**"내부(운영자) 계정"** 이다.
+
+★응답에 개별 행·uid·이메일·주문번호는 없다. 건수와 합계뿐이다.
+
 ---
 
 ## `personAxis` — 사람 축 커버리지 봉투 (선행 티켓 `euSq4AwHJrxSagMCjXeM` **완료**)

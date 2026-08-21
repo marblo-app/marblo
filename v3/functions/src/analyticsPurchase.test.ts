@@ -13,10 +13,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  ACCOUNT_CLASSES,
   ANALYTICS_PURCHASE_COLUMNS,
   ANALYTICS_PURCHASE_SCHEMA,
   CANCEL_BILLING_FAILURE_THRESHOLD,
   REJECTED_FIELDS,
+  REVENUE_ACCOUNT_CLASS,
+  REVENUE_KINDS,
+  classifyAccount,
   classifyCharge,
   classifySubscriptionEvent,
   collect,
@@ -24,8 +28,10 @@ import {
   mapBillingCharge,
   mapLecturePurchase,
   mapSubscriptionEvent,
+  isFounderGrant,
   pseudonymizeOrderId,
   purchaseRowId,
+  tallyPurchaseRows,
   toNdjson,
   type BillingChargeSource,
   type LecturePurchaseSource,
@@ -50,9 +56,14 @@ const RAW_ORDER = "sub_first_firebase-uid-abc123_pro_monthly";
 const fakeUserKey = (uid: string): string =>
   `uk_${uid.length}_${uid.slice(-3)}`;
 
+/** 운영자(내부) 계정의 가명키. 호출부가 ADMIN_UID 를 가명화해 넣는 자리다. */
+const ADMIN_RAW_UID = "firebase-uid-operator";
+const INTERNAL_KEYS: ReadonlySet<string> = new Set([fakeUserKey(ADMIN_RAW_UID)]);
+
 const CTX: PurchaseMapContext = {
   salt: SALT,
   deriveUserKey: fakeUserKey,
+  internalUserKeys: INTERNAL_KEYS,
   ingestedAt: new Date("2026-08-21T00:00:00.000Z"),
 };
 
@@ -137,6 +148,7 @@ test("★해지 행의 row_id 에 시각이 들어가지 않는다 — updatedAt
     paymentProvider: "toss",
     founderGrant: false,
     billingFailedCount: 0,
+    createdAtMs: Date.parse("2026-07-01T00:00:00.000Z"),
     canceledAtMs: Date.parse("2026-07-10T00:00:00.000Z"),
     updatedAtMs: Date.parse("2026-07-10T00:00:01.000Z"),
   };
@@ -376,6 +388,7 @@ const CANCELED_SUB: SubscriptionSource = {
   paymentProvider: "toss",
   founderGrant: false,
   billingFailedCount: 0,
+  createdAtMs: Date.parse("2026-07-01T00:00:00.000Z"),
   canceledAtMs: null,
   updatedAtMs: Date.parse("2026-07-20T12:00:00.000Z"),
 };
@@ -432,17 +445,13 @@ test("해지 행에도 금액을 싣지 않는다(돈이 움직이지 않았다)
   assert.equal(row.amount_known, false);
 });
 
-test("PG 를 거치지 않은 구독(파운더 grant 전용)은 구매 행을 만들지 않는다", () => {
+test("PG 도 안 거쳤고 무상부여도 아닌 구독은 아무 행도 만들지 않는다", () => {
   assert.equal(
     classifySubscriptionEvent({
       ...CANCELED_SUB,
-      founderGrant: true,
-      paymentProvider: "founder_grant",
+      founderGrant: false,
+      paymentProvider: null,
     }),
-    null
-  );
-  assert.equal(
-    classifySubscriptionEvent({ ...CANCELED_SUB, paymentProvider: null }),
     null
   );
 });
@@ -527,4 +536,208 @@ test("음수·비숫자 금액은 행을 만들지 않는다(쓰레기 금액이
     assert.equal(r.ok, false, `amount=${String(bad)} 이 통과했다`);
     assert.equal((r as { ok: false; reason: string }).reason, "missing_amount");
   }
+});
+
+
+// ─── ★내부·테스트 결제 갈라내기 (ticket cDvehpHhz1sn0ZHNpNq5) ───────────────
+//
+// 이 블록이 지키는 것: "지우지 말고 갈라라 · 사람이 아니라 성격으로 판정하라 ·
+// 실매출 0 과 '적재 전' 은 다른 말이다."
+
+test("★운영자 계정 결제는 internal 로 갈린다 — 매출 합산에서 빠진다", () => {
+  const row = okRow(
+    mapBillingCharge({ ...CHARGE, userId: ADMIN_RAW_UID }, CTX)
+  );
+  assert.equal(row.account_class, "internal");
+  const t = tallyPurchaseRows([row]);
+  assert.equal(t.externalRevenue, 0, "내부 결제가 매출에 들어갔다");
+  assert.equal(t.internalRows, 1, "★갈랐으면 건수는 그대로 보여야 한다");
+});
+
+test("★내부 결제는 지워지지 않는다 — 행은 남고 건수로 보인다", () => {
+  const internal = okRow(
+    mapBillingCharge({ ...CHARGE, userId: ADMIN_RAW_UID }, CTX)
+  );
+  const external = okRow(mapBillingCharge(CHARGE, CTX));
+  const t = tallyPurchaseRows([internal, external]);
+  assert.equal(t.total, 2, "행을 지우면 다음 사람이 또 판다");
+  assert.equal(t.internalRows, 1);
+  assert.equal(t.externalRevenueRows, 1);
+  assert.equal(t.externalRevenue, 19000);
+});
+
+test("일반 고객 결제는 external — 실매출로 센다", () => {
+  const row = okRow(mapBillingCharge(CHARGE, CTX));
+  assert.equal(row.account_class, "external");
+  assert.equal(row.account_class, REVENUE_ACCOUNT_CLASS);
+});
+
+test("★운영자 축을 못 구하면 external 로 접지 않고 null(미분류) 로 남긴다", () => {
+  // 빈 Set(내부 계정이 없다)과 null(판정 불가)은 다른 상태다. 합치면
+  // 판정 실패가 '고객 결제' 로 승격되고, 그게 이 티켓이 고치는 거짓말이다.
+  const unknown = okRow(
+    mapBillingCharge(CHARGE, { ...CTX, internalUserKeys: null })
+  );
+  assert.equal(unknown.account_class, null);
+  const t = tallyPurchaseRows([unknown]);
+  assert.equal(t.externalRevenue, 0, "미분류를 매출로 올리면 안 된다");
+  assert.equal(t.unclassifiedRows, 1);
+
+  const empty = okRow(
+    mapBillingCharge(CHARGE, { ...CTX, internalUserKeys: new Set() })
+  );
+  assert.equal(empty.account_class, "external", "빈 Set 은 '내부 없음' 이다");
+});
+
+test("★판정은 가명 공간에서만 일어난다 — 원시 uid 를 비교하지 않는다", () => {
+  // 매퍼에 넘어가는 것은 가명키 집합이다. 원시 uid 를 그대로 넣으면 안 맞는다.
+  const rawSet: ReadonlySet<string> = new Set([ADMIN_RAW_UID]);
+  const row = okRow(
+    mapBillingCharge(
+      { ...CHARGE, userId: ADMIN_RAW_UID },
+      { ...CTX, internalUserKeys: rawSet }
+    )
+  );
+  assert.equal(row.account_class, "external");
+  assert.equal(
+    classifyAccount(fakeUserKey(ADMIN_RAW_UID), INTERNAL_KEYS),
+    "internal"
+  );
+});
+
+test("★account_class 는 화이트리스트 밖의 값을 만들지 않는다(#1071 규약)", () => {
+  assert.deepEqual([...ACCOUNT_CLASSES], ["internal", "external"]);
+  // 값을 만드는 곳은 classifyAccount 하나뿐이다 — 그래서 세 결과밖에 없다.
+  assert.equal(classifyAccount("uk_x", null), null);
+  assert.equal(classifyAccount("uk_x", new Set()), "external");
+  assert.equal(classifyAccount("uk_x", new Set(["uk_x"])), "internal");
+});
+
+test("★account_class 컬럼은 NULLABLE 이다 — REQUIRED 면 기존 표에 못 붙는다", () => {
+  const f = ANALYTICS_PURCHASE_SCHEMA.find((x) => x.name === "account_class");
+  assert.ok(f, "account_class 컬럼이 스키마에 없다");
+  assert.equal(f?.mode, "NULLABLE");
+  assert.equal(f?.type, "STRING");
+  assert.ok(ANALYTICS_PURCHASE_COLUMNS.includes("account_class"));
+});
+
+test("★무상 부여(founder_grant)는 버려지지 않고 kind=grant 행이 된다", () => {
+  const grant: SubscriptionSource = {
+    ...CANCELED_SUB,
+    status: "active",
+    paymentProvider: "founder_grant",
+    founderGrant: true,
+  };
+  const row = okRow(mapSubscriptionEvent(grant, CTX));
+  assert.equal(row.kind, "grant");
+  assert.equal(row.reason, "founder_grant");
+  assert.equal(row.event_at, new Date(grant.createdAtMs as number).toISOString());
+});
+
+test("★그랜트 행은 금액이 미상이라 어떤 매출 합산에도 못 들어간다", () => {
+  const row = okRow(
+    mapSubscriptionEvent(
+      { ...CANCELED_SUB, paymentProvider: "founder_grant", founderGrant: true },
+      CTX
+    )
+  );
+  assert.equal(row.amount, null);
+  assert.equal(row.amount_known, false);
+  const t = tallyPurchaseRows([row]);
+  assert.equal(t.externalRevenue, 0);
+  assert.equal(t.grantRows, 1, "★그랜트 건수는 0 으로 뭉개지지 않는다");
+  assert.equal(t.amountUnknownRows, 1);
+});
+
+test("레거시 부여 문서(provider 없이 founderGrant=true)도 grant 로 잡는다", () => {
+  assert.equal(
+    isFounderGrant({
+      ...CANCELED_SUB,
+      paymentProvider: null,
+      founderGrant: true,
+    }),
+    true
+  );
+  const cls = classifySubscriptionEvent({
+    ...CANCELED_SUB,
+    paymentProvider: null,
+    founderGrant: true,
+  });
+  assert.equal(cls?.kind, "grant");
+});
+
+test("★provider 가 명시된 구독은 grant 플래그가 붙어도 무상부여로 바꾸지 않는다", () => {
+  // 실측상 grant 플래그가 거의 모든 구독에 붙어 있다. 플래그만 보면 paddle
+  // 같은 실제 PG 구독까지 "무상 부여" 가 된다 — 확신을 갖고 틀린 라벨이다.
+  const paddle: SubscriptionSource = {
+    ...CANCELED_SUB,
+    paymentProvider: "paddle",
+    founderGrant: true,
+  };
+  assert.equal(isFounderGrant(paddle), false);
+  assert.equal(classifySubscriptionEvent(paddle), null);
+  const r = mapSubscriptionEvent(paddle, CTX);
+  assert.equal(r.ok, false);
+  assert.equal((r as { ok: false; reason: string }).reason, "not_a_payment");
+});
+
+test("★grant 행의 row_id 는 해지 행과 겹치지 않고 재실행에도 같다", () => {
+  const grant: SubscriptionSource = {
+    ...CANCELED_SUB,
+    paymentProvider: "founder_grant",
+    founderGrant: true,
+  };
+  const a = okRow(mapSubscriptionEvent(grant, CTX));
+  const b = okRow(
+    mapSubscriptionEvent({ ...grant, updatedAtMs: Date.now() }, CTX)
+  );
+  assert.equal(a.row_id, b.row_id, "재실행이 그랜트를 두 줄로 만들면 안 된다");
+
+  const cancel = okRow(
+    mapSubscriptionEvent(
+      { ...CANCELED_SUB, canceledAtMs: CANCELED_SUB.updatedAtMs },
+      CTX
+    )
+  );
+  assert.notEqual(a.row_id, cancel.row_id);
+});
+
+test("★실매출 0 은 미상이 아니라 정확한 0 이다", () => {
+  // 내부 1건 + 그랜트 1건만 있는 상태 = 실제 결제 고객 0명. 이때 매출은
+  // "모른다" 가 아니라 **0** 이어야 하고, 갈라낸 건수는 보여야 한다.
+  const internal = okRow(
+    mapBillingCharge({ ...CHARGE, userId: ADMIN_RAW_UID }, CTX)
+  );
+  const grant = okRow(
+    mapSubscriptionEvent(
+      { ...CANCELED_SUB, paymentProvider: "founder_grant", founderGrant: true },
+      CTX
+    )
+  );
+  const t = tallyPurchaseRows([internal, grant]);
+  assert.equal(t.externalRevenue, 0);
+  assert.equal(t.externalRevenueRows, 0);
+  assert.equal(t.internalRows, 1);
+  assert.equal(t.grantRows, 1);
+  assert.equal(t.unclassifiedRows, 0);
+});
+
+test("매출 종류에 trial 은 없다 — comped 0원을 결제 건수로 세지 않는다", () => {
+  assert.deepEqual([...REVENUE_KINDS], ["paid", "renew"]);
+  const comped = okRow(
+    mapBillingCharge({ ...CHARGE, status: "comped", amount: 0 }, CTX)
+  );
+  assert.equal(comped.kind, "trial");
+  const t = tallyPurchaseRows([comped]);
+  assert.equal(t.externalRevenueRows, 0);
+  assert.equal(t.externalRevenue, 0);
+});
+
+test("★account_class 는 원시 uid 를 담지 않는다(행 어디에도 uid 가 없다)", () => {
+  const row = okRow(
+    mapBillingCharge({ ...CHARGE, userId: ADMIN_RAW_UID }, CTX)
+  );
+  const json = JSON.stringify(row);
+  assert.ok(!json.includes(ADMIN_RAW_UID), "행에 운영자 원시 uid 가 샜다");
+  assert.equal(row.account_class, "internal");
 });

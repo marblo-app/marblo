@@ -157,6 +157,7 @@ export async function readPurchaseSources(
           paymentProvider: d.paymentProvider,
           founderGrant: d.founderGrant,
           billingFailedCount: d.billingFailedCount,
+          createdAtMs: tsToMillis(d.createdAt),
           canceledAtMs: tsToMillis(d.canceledAt),
           updatedAtMs: tsToMillis(d.updatedAt),
         });

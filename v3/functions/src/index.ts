@@ -143,8 +143,12 @@ import {
 } from "./marketingContacts";
 import {
   ANALYTICS_PURCHASE_TABLE,
+  REVENUE_ACCOUNT_CLASS,
+  REVENUE_KINDS,
+  tallyPurchaseRows,
   type BuildResult,
   type PurchaseMapContext,
+  type PurchaseTally,
 } from "./analyticsPurchase";
 import { loadPurchaseRows, type BqLike } from "./analyticsPurchaseLoad";
 import {
@@ -14016,7 +14020,7 @@ export const getAdminCountryFunnel = functions
 // ★금액·주문번호·PG 응답 원문을 로그에 남기지 않는다. 아래 로그는 건수와 사유
 //   코드만 싣는다.
 
-/** 적재 1회 결과 — 로그와 어드민 콜러블 응답이 공유한다(금액 없음). */
+/** 적재 1회 결과 — 로그와 어드민 콜러블 응답이 공유한다. */
 interface PurchaseLoadReport {
   /** 소스 컬렉션별 원본 문서 수. Firestore 대조의 기준값. */
   sourceCounts: { charges: number; lectures: number; subscriptions: number };
@@ -14024,12 +14028,48 @@ interface PurchaseLoadReport {
   mapped: number;
   /** 사유별 스킵 건수. 조용히 버리지 않는다. */
   skipped: Record<string, number>;
+  /**
+   * ★계정 성격별 건수 + 실매출. 적재 로그가 "이번 배치에서 내부 몇 건을
+   * 갈랐는지" 를 그대로 말하게 한다 — 화면과 로그가 같은 정의를 쓴다.
+   */
+  tally: PurchaseTally;
+  /**
+   * 내부(운영자) 판정 축을 어디서 얻었는지. `"none"` 이면 판정 자체를 못 해
+   * 모든 행의 account_class 가 null 이 된다(= 매출로 승격되지 않는다).
+   */
+  internalMarker: "env" | "fallback" | "none";
   staged: number;
   collapsed: number;
   affected: number;
   tableState: string;
   /** 진행을 막은 것이 있으면 사람이 읽을 수 있는 사유. 없으면 null. */
   blocker: string | null;
+}
+
+/**
+ * 내부(운영자) 계정의 **가명키 집합**을 만든다.
+ *
+ * ★사람이 아니라 성격으로 판정한다. 운영자 uid 를 코드에 박지 않고 기존
+ *   운영자 축(`getAdminExclusionUid()` = env `ADMIN_UID`)을 그대로 쓴다 —
+ *   analyticsProfiles.ts 가 "새 운영자 판정 규약을 만들지 마라" 로 못박은 그
+ *   축이다. 운영자가 바뀌면 env 만 바뀌고 판정은 계속 동작한다.
+ * ★원시 uid 는 이 함수 밖으로 나가지 않는다. 매퍼에는 가명키만 넘어간다.
+ * ★키를 못 만들면 `null` 을 돌려 "판정 불가" 를 그대로 남긴다 — 빈 Set 으로
+ *   접으면 모든 행이 external(=실매출)로 승격된다.
+ */
+function resolveInternalUserKeys(
+  deriveUserKey: ((uid: string) => string | null) | null
+): {
+  keys: ReadonlySet<string> | null;
+  marker: PurchaseLoadReport["internalMarker"];
+} {
+  if (!deriveUserKey) return { keys: null, marker: "none" };
+  const uid = getAdminExclusionUid();
+  if (!uid) return { keys: null, marker: "none" };
+  const key = deriveUserKey(uid);
+  if (!key) return { keys: null, marker: "none" };
+  const fromEnv = (process.env.ADMIN_UID?.trim() ?? "") !== "";
+  return { keys: new Set([key]), marker: fromEnv ? "env" : "fallback" };
 }
 
 /**
@@ -14046,9 +14086,11 @@ async function loadAnalyticsPurchaseInternal(
 ): Promise<PurchaseLoadReport> {
   const salt = getAnalyticsIdSalt();
   const deriveUserKey = resolveAnalyticsUserKeyFn();
+  const internal = resolveInternalUserKeys(deriveUserKey);
   const ctx: PurchaseMapContext = {
     salt,
     deriveUserKey,
+    internalUserKeys: internal.keys,
     ingestedAt: new Date(),
   };
 
@@ -14067,6 +14109,8 @@ async function loadAnalyticsPurchaseInternal(
     sourceCounts: sources.counts,
     mapped: built.rows.length,
     skipped: built.skipped as Record<string, number>,
+    tally: tallyPurchaseRows(built.rows),
+    internalMarker: internal.marker,
     staged: 0,
     collapsed: 0,
     affected: 0,
@@ -14082,6 +14126,8 @@ async function loadAnalyticsPurchaseInternal(
       sourceCounts: base.sourceCounts,
       mapped: base.mapped,
       skipped: base.skipped,
+      tally: base.tally,
+      internalMarker: base.internalMarker,
     });
     return base;
   }
@@ -14108,6 +14154,9 @@ async function loadAnalyticsPurchaseInternal(
     sourceCounts: report.sourceCounts,
     mapped: report.mapped,
     skipped: report.skipped,
+    // ★건수와 합계만. 개별 금액·주문번호·uid 는 여전히 로그에 없다.
+    tally: report.tally,
+    internalMarker: report.internalMarker,
     staged: report.staged,
     collapsed: report.collapsed,
     affected: report.affected,
@@ -14145,3 +14194,158 @@ export const loadAnalyticsPurchase = functions
     const dryRun = (data as { dryRun?: unknown } | null)?.dryRun === true;
     return loadAnalyticsPurchaseInternal({ dryRun });
   });
+
+// ── ★수익 탭 읽기 경로 — "실매출 0" 과 "적재 전" 을 가른다 ──────────────────
+// 이 콜러블이 없던 동안 수익 탭은 MRR 칸에 '적재 전' 만 띄웠다. 이제 표가
+// 채워지므로 읽어 온다. ★다만 **0 을 그냥 그리지 않는다**: 표가 없으면
+// '적재 전', 표가 있고 외부 매출 행이 0 이면 **정확한 0** 이다. 그 둘은 완전히
+// 다른 뜻이고 지금 상황에서는 그 구분이 이 화면의 전부다.
+//
+// 응답에는 건수·합계만 담는다 — uid·이메일·주문번호·개별 행은 내리지 않는다.
+
+/** 어드민 수익 탭이 읽는 요약. 금액은 합계뿐이고 개별 행은 없다. */
+interface PurchaseSummaryResponse {
+  generatedAt: string;
+  /**
+   * `not_ingested` — 표 자체가 없다(적재 전). 화면은 0 을 그리면 안 된다.
+   * `ingested` — 표가 있다. 그 아래 숫자는 **진짜 숫자**다(0 이면 0 이다).
+   */
+  state: "not_ingested" | "ingested";
+  /** state 가 not_ingested 인 이유. ingested 면 null. */
+  reason: string | null;
+  revenue: {
+    /** ★실매출(외부 고객). state=ingested 면 0 도 정확한 0 이다. */
+    externalKrw: number;
+    externalRows: number;
+    /** 매출에서 뺐지만 **화면에 보여야 하는** 내부(운영자) 결제 건수. */
+    internalRows: number;
+    /** 무상 부여(founder_grant) 건수. 매출은 아니지만 경영 정보다. */
+    grantRows: number;
+    /** 계정 성격 미분류 — 표식 이전 적재분이거나 운영자 축 미설정. */
+    unclassifiedRows: number;
+    /** 금액 미상 행(환불·해지·부여). 0 으로 읽히면 안 되는 수. */
+    amountUnknownRows: number;
+    totalRows: number;
+  } | null;
+  /** ★기준 라벨. "기준 라벨 없는 숫자 금지" 규약 — 숫자와 함께 화면에 뜬다. */
+  basis: string;
+  /** 축 한계 고지. 화면이 숫자 위에 그대로 띄운다. */
+  notes: string[];
+}
+
+/** 매출 합산 기준을 한 문장으로. 화면이 이 문자열을 숫자 옆에 그대로 쓴다. */
+const PURCHASE_BASIS_LABEL =
+  `전 기간 · analytics_purchase · account_class='${REVENUE_ACCOUNT_CLASS}' · ` +
+  `amount_known=true · kind ∈ {${REVENUE_KINDS.join(", ")}}`;
+
+export const getAdminPurchaseSummary = functions.https.onCall(
+  async (_data, context) => {
+    requireAdmin(context);
+    const generatedAt = new Date().toISOString();
+    const notes: string[] = [];
+
+    // 표가 있는지, 그리고 account_class 컬럼이 이미 붙었는지 먼저 본다.
+    // ★컬럼이 없는 표에 그 컬럼을 쓰는 질의를 던지면 통째로 실패한다(웹 선배포
+    //   / 적재 1회 전 상태). 그때 빨간 에러가 아니라 "미분류" 로 접어야 화면이
+    //   거짓말을 하지 않는다.
+    let liveColumns: Set<string>;
+    try {
+      const [meta] = await bigquery
+        .dataset(BQ_DATASET)
+        .table(ANALYTICS_PURCHASE_TABLE)
+        .getMetadata();
+      liveColumns = new Set(
+        ((meta?.schema?.fields ?? []) as { name: string }[]).map((f) => f.name)
+      );
+    } catch (err) {
+      functions.logger.info("[analytics_purchase] summary: table missing", {
+        message: safeAnalyticsErrorMessage(err),
+      });
+      const out: PurchaseSummaryResponse = {
+        generatedAt,
+        state: "not_ingested",
+        reason:
+          `${ANALYTICS_PURCHASE_TABLE} 테이블이 없다 — 아직 한 번도 적재되지 ` +
+          `않았다. 여기 0 을 그리면 '아무도 결제하지 않았다' 로 읽히는데 그건 ` +
+          `데이터가 아니라 배선이 없는 것이다.`,
+        revenue: null,
+        basis: PURCHASE_BASIS_LABEL,
+        notes,
+      };
+      return out;
+    }
+
+    const hasClass = liveColumns.has("account_class");
+    if (!hasClass) {
+      notes.push(
+        "★account_class 컬럼이 아직 표에 없다(적재 1회 전). 모든 행을 " +
+          "'미분류' 로 센다 — 내부 결제를 매출로 올리지 않기 위해서다."
+      );
+    }
+    // 컬럼이 없으면 external 조건이 성립할 수 없다 → 매출 0 + 전량 미분류.
+    const classExpr = hasClass ? "account_class" : "CAST(NULL AS STRING)";
+    const revenueCond =
+      `${classExpr} = @revenueClass AND amount_known ` +
+      `AND kind IN UNNEST(@revenueKinds)`;
+
+    const query = `
+SELECT
+  COUNT(*) AS totalRows,
+  COUNTIF(${revenueCond}) AS externalRows,
+  COALESCE(SUM(IF(${revenueCond}, amount, 0)), 0) AS externalKrw,
+  COUNTIF(${classExpr} = 'internal') AS internalRows,
+  COUNTIF(kind = 'grant') AS grantRows,
+  COUNTIF(${classExpr} IS NULL) AS unclassifiedRows,
+  COUNTIF(NOT amount_known) AS amountUnknownRows
+FROM \`${BQ_DATASET}.${ANALYTICS_PURCHASE_TABLE}\``;
+
+    const [rows] = await bigquery.query({
+      query,
+      params: {
+        revenueClass: REVENUE_ACCOUNT_CLASS,
+        revenueKinds: REVENUE_KINDS as string[],
+      },
+      location: BQ_LOCATION,
+    });
+    const r = (rows?.[0] ?? {}) as Record<string, number | string | undefined>;
+    const revenue = {
+      // NUMERIC 은 Big 객체로 오므로 String() 을 거쳐 숫자로 만든다.
+      externalKrw: toNumber(String(r.externalKrw ?? 0)),
+      externalRows: toNumber(r.externalRows),
+      internalRows: toNumber(r.internalRows),
+      grantRows: toNumber(r.grantRows),
+      unclassifiedRows: toNumber(r.unclassifiedRows),
+      amountUnknownRows: toNumber(r.amountUnknownRows),
+      totalRows: toNumber(r.totalRows),
+    };
+
+    if (revenue.totalRows === 0) {
+      notes.push(
+        "★표는 있는데 행이 0 이다 — 적재가 아직 한 번도 성공하지 않았거나 " +
+          "결제 원장이 비어 있다. 아래 매출 0 은 그 두 경우를 구분하지 못한다."
+      );
+    }
+    if (revenue.internalRows > 0) {
+      notes.push(
+        `내부(운영자) 계정 ${revenue.internalRows}건을 매출에서 뺐다 — ` +
+          "지운 게 아니라 가른 것이라 건수는 그대로 보인다."
+      );
+    }
+    if (revenue.amountUnknownRows > 0) {
+      notes.push(
+        `금액 미상 ${revenue.amountUnknownRows}건(환불·해지·무상부여). ` +
+          "미상은 0 이 아니라서 순매출은 아직 계산할 수 없다."
+      );
+    }
+
+    const out: PurchaseSummaryResponse = {
+      generatedAt,
+      state: "ingested",
+      reason: null,
+      revenue,
+      basis: PURCHASE_BASIS_LABEL,
+      notes,
+    };
+    return out;
+  }
+);
