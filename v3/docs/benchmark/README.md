@@ -8,6 +8,7 @@
 | [`swebench-our-measured.md`](./swebench-our-measured.md)                                                 | 공개 SWE-bench Verified 인스턴스를 **우리 스폰 경로**로 돌린 실측     | 실행됨 (tiny N)      |
 | [`swebench-solar-pro4-2026-08-20.md`](./swebench-solar-pro4-2026-08-20.md)                               | Solar Pro 4 의 라운드2 합류 — 조건 대조·교란요인·파일럿 대조          | 실행됨 (n=12)        |
 | [`swebench-deepseek-v4-flash-2026-08-21.md`](./swebench-deepseek-v4-flash-2026-08-21.md)                 | DeepSeek V4 Flash 의 라운드2 합류 — 조건 대조(★카탈로그 축)·유리 요인 | 실행됨 (n=12)        |
+| [`swebench-deepseek-v4-pro-2026-08-21.md`](./swebench-deepseek-v4-pro-2026-08-21.md)                     | DeepSeek V4 Pro 의 라운드2 합류 — ★flash 와 **비용당 성과** 짝 비교   | 실행됨 (n=12)        |
 | [`../marblo-swe-benchmark-feasibility-2026-08-09.md`](../marblo-swe-benchmark-feasibility-2026-08-09.md) | 자체 벤치를 만들 것인가에 대한 전략 판단 (#896)                       | 코드 무변경 스파이크 |
 
 ## 세 물건을 섞지 않는다
