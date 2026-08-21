@@ -102,6 +102,29 @@ export default function LectureDetailPage() {
     };
   }, [lecture]);
 
+  // 본편(부록 제외) 통계 — 킬링포인트/빌드 섹션/패키지 카드가 전부 이 값을 참조한다.
+  // 손으로 "8모듈 36강 15.5시간"을 여러 군데에 따로 적어두면 커리큘럼이 바뀔 때마다
+  // 다시 어긋난다(#1059 사고 원인). 부록 모듈만 골라내 총계에서 뺀다.
+  const coreStats = useMemo(() => {
+    if (!lecture) return null;
+    const coreModules = lecture.modules.filter(
+      (m) => !m.title.includes("부록") && !m.title_en.includes("Appendix")
+    );
+    const totalSections = coreModules.reduce(
+      (sum, m) => sum + m.sections.length,
+      0
+    );
+    const totalDuration = coreModules.reduce(
+      (sum, m) => sum + m.sections.reduce((s, sec) => s + sec.duration, 0),
+      0
+    );
+    return {
+      modules: coreModules.length,
+      sections: totalSections,
+      hours: (totalDuration / 3600).toFixed(1),
+    };
+  }, [lecture]);
+
   const toggleModule = (idx: number) => {
     setOpenModules((prev) => {
       const next = new Set(prev);
@@ -111,7 +134,7 @@ export default function LectureDetailPage() {
     });
   };
 
-  if (!lecture || !stats) {
+  if (!lecture || !stats || !coreStats) {
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
         <div className="animate-pulse text-zinc-500 text-lg">Loading...</div>
@@ -176,7 +199,7 @@ export default function LectureDetailPage() {
           {
             icon: Rocket,
             title: "실전 SaaS 빌드 & 배포",
-            desc: "날씨 대시보드 워밍업 → AI SaaS 메인 프로젝트 → GCP Cloud Run 배포. 15.5시간 만에 프로덕션 레벨 서비스 완성.",
+            desc: `할 일 앱(P1) → 날씨 대시보드(P2, 멀티에이전트) → AI SaaS(P3, ReachWave) → GCP Cloud Run 배포. 난이도가 점증하는 프로젝트 3개를 ${coreStats.hours}시간 만에 완성.`,
           },
         ]
       : locale === "ja"
@@ -194,7 +217,7 @@ export default function LectureDetailPage() {
           {
             icon: Rocket,
             title: "実践SaaSビルド＆デプロイ",
-            desc: "天気ダッシュボードウォームアップ → AI SaaSメインプロジェクト → GCP Cloud Runデプロイ。15.5時間でプロダクションレベルのサービス完成。",
+            desc: `Todoアプリ(P1) → 天気ダッシュボード(P2、マルチエージェント) → AI SaaS(P3、ReachWave) → GCP Cloud Runデプロイ。難易度が上がる3つのプロジェクトを${coreStats.hours}時間で完成。`,
           },
         ]
       : [
@@ -211,7 +234,7 @@ export default function LectureDetailPage() {
           {
             icon: Rocket,
             title: "Real SaaS Build & Deploy",
-            desc: "Weather dashboard warmup → AI SaaS main project → GCP Cloud Run deployment. Production-level service in 15.5 hours.",
+            desc: `Todo app (P1) → Weather Dashboard (P2, multi-agent) → AI SaaS (P3, ReachWave) → GCP Cloud Run deployment. Complete three projects of increasing difficulty in ${coreStats.hours} hours.`,
           },
         ];
 
@@ -232,8 +255,8 @@ export default function LectureDetailPage() {
       features:
         locale === "ko"
           ? [
-              "전체 8모듈 15.5시간 강의",
-              "완성 소스코드 2개 프로젝트",
+              `본편 ${coreStats.modules}모듈 ${coreStats.sections}강 ${coreStats.hours}시간 강의`,
+              "할 일 앱 · 날씨 대시보드 · AI SaaS(ReachWave) 완성 소스코드",
               "디스코드 커뮤니티 액세스",
               "마블로 Pro 6개월 무료 쿠폰",
               "마블로 초기 앰배서더 인증서",
@@ -241,16 +264,16 @@ export default function LectureDetailPage() {
             ]
           : locale === "ja"
           ? [
-              "全8モジュール 15.5時間講座",
-              "完成ソースコード2プロジェクト",
+              `本編${coreStats.modules}モジュール${coreStats.sections}講${coreStats.hours}時間講座`,
+              "Todoアプリ・天気ダッシュボード・AI SaaS（ReachWave）完成ソースコード",
               "Discordコミュニティアクセス",
               "Marblo Pro 6ヶ月無料クーポン",
               "Marblo初期アンバサダー認定証",
               "購入後1年間アップデート無料",
             ]
           : [
-              "All 8 modules, 15.5h video",
-              "2 complete project source codes",
+              `Core: ${coreStats.modules} modules, ${coreStats.sections} lessons, ${coreStats.hours}h video`,
+              "Todo App, Weather Dashboard & AI SaaS (ReachWave) complete source code",
               "Discord community access",
               "Marblo Pro 6-month free coupon",
               "Marblo Early Ambassador Certificate",
@@ -609,28 +632,35 @@ export default function LectureDetailPage() {
           <div className="text-center mb-14">
             <h2 className="text-3xl font-bold mb-3">
               {locale === "ko"
-                ? "15.5시간 동안 이것들을 만듭니다"
+                ? `${coreStats.hours}시간 동안 이것들을 만듭니다`
                 : locale === "ja"
-                ? "15.5時間でこれらを作ります"
-                : "What You'll Build in 15.5 Hours"}
+                ? `${coreStats.hours}時間でこれらを作ります`
+                : `What You'll Build in ${coreStats.hours} Hours`}
             </h2>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {(locale === "ko"
               ? [
                   {
+                    icon: Layers,
+                    iconColor: "text-indigo-400",
+                    title: "할 일 앱 (P1)",
+                    desc: "보드 + 오케스트레이터로 완성하는 첫 풀사이클 미니 프로젝트. 자연어 요청 → 태스크 분해 → 워크트리 머지까지.",
+                    tag: "첫 프로젝트",
+                  },
+                  {
                     icon: Monitor,
                     iconColor: "text-indigo-400",
-                    title: "날씨 대시보드",
-                    desc: "워밍업 프로젝트로 마블로의 전체 워크플로우를 체험합니다. /tf-plan → /tf-start → 에이전트 스폰 → 배포까지.",
-                    tag: "워밍업",
+                    title: "날씨 대시보드 (P2)",
+                    desc: "Claude + Codex 멀티에이전트로 빌드하는 풀스택 프로젝트. 의존성 체인 + 병렬 레인 + 리뷰 거버넌스.",
+                    tag: "멀티에이전트",
                   },
                   {
                     icon: Rocket,
                     iconColor: "text-indigo-400",
-                    title: "AI SaaS 서비스",
-                    desc: "풀스택 AI SaaS를 멀티 에이전트로 빌드합니다. 백엔드 + 프론트엔드 + 통합 테스트 → GCP Cloud Run 배포.",
-                    tag: "메인 프로젝트",
+                    title: "AI SaaS · ReachWave (P3)",
+                    desc: "칸반 거버넌스로 진행하는 실전 SaaS 스프린트. 백엔드 + 프론트엔드 통합 → GCP Cloud Run 배포.",
+                    tag: "실전 SaaS",
                   },
                   {
                     icon: Workflow,
@@ -650,18 +680,25 @@ export default function LectureDetailPage() {
               : locale === "ja"
               ? [
                   {
+                    icon: Layers,
+                    iconColor: "text-indigo-400",
+                    title: "Todoアプリ (P1)",
+                    desc: "ボード＋オーケストレーターで完成させる最初のフルサイクルミニプロジェクト。自然言語リクエスト → タスク分解 → ワークツリーマージまで。",
+                    tag: "最初のプロジェクト",
+                  },
+                  {
                     icon: Monitor,
                     iconColor: "text-indigo-400",
-                    title: "天気ダッシュボード",
-                    desc: "ウォームアッププロジェクトでMarbloの全ワークフローを体験。/tf-plan → /tf-start → エージェントスポーン → デプロイまで。",
-                    tag: "ウォームアップ",
+                    title: "天気ダッシュボード (P2)",
+                    desc: "Claude + Codexのマルチエージェントでビルドするフルスタックプロジェクト。依存関係チェーン＋並列レーン＋レビューガバナンス。",
+                    tag: "マルチエージェント",
                   },
                   {
                     icon: Rocket,
                     iconColor: "text-indigo-400",
-                    title: "AI SaaSサービス",
-                    desc: "フルスタックAI SaaSをマルチエージェントでビルド。バックエンド＋フロントエンド＋統合テスト → GCP Cloud Runデプロイ。",
-                    tag: "メインプロジェクト",
+                    title: "AI SaaS・ReachWave (P3)",
+                    desc: "カンバンガバナンスで進める実践SaaSスプリント。バックエンド＋フロントエンド統合 → GCP Cloud Runデプロイ。",
+                    tag: "実践SaaS",
                   },
                   {
                     icon: Workflow,
@@ -680,18 +717,25 @@ export default function LectureDetailPage() {
                 ]
               : [
                   {
+                    icon: Layers,
+                    iconColor: "text-indigo-400",
+                    title: "Todo App (P1)",
+                    desc: "Your first full-cycle mini project with the board + orchestrator. Plain-language request → task decomposition → worktree merge.",
+                    tag: "First Project",
+                  },
+                  {
                     icon: Monitor,
                     iconColor: "text-indigo-400",
-                    title: "Weather Dashboard",
-                    desc: "Experience Marblo's full workflow as a warmup. /tf-plan → /tf-start → agent spawn → deployment.",
-                    tag: "Warmup",
+                    title: "Weather Dashboard (P2)",
+                    desc: "A full-stack project built with Claude + Codex multi-agents. Dependency chains, parallel lanes, and review governance.",
+                    tag: "Multi-Agent",
                   },
                   {
                     icon: Rocket,
                     iconColor: "text-indigo-400",
-                    title: "AI SaaS Service",
-                    desc: "Build a full-stack AI SaaS with multi-agents. Backend + Frontend + integration tests → GCP Cloud Run deployment.",
-                    tag: "Main Project",
+                    title: "AI SaaS · ReachWave (P3)",
+                    desc: "A real SaaS sprint run with kanban governance. Backend + frontend integration → GCP Cloud Run deployment.",
+                    tag: "Real SaaS",
                   },
                   {
                     icon: Workflow,
