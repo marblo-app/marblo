@@ -13,6 +13,24 @@ import {
   INSTALL_ATTRIBUTION_SCHEMA,
 } from "./installAttribution";
 import {
+  GA4_BRIDGE_TABLE,
+  GA4_BRIDGE_CURRENT_VIEW,
+  GA4_BRIDGE_SCHEMA,
+  GA4_SYNC_ROW_LIMIT,
+  GA4_SYNC_DEFAULT_DAYS,
+  buildGa4FirstTouchQuery,
+  buildExistingKeysQuery,
+  buildBridgeCurrentViewSql,
+  toBridgeRow,
+  selectNewBridgeRows,
+  chunkRows,
+  parseSyncDays,
+  isGaClientId,
+  isSafeBqIdentifier,
+  type Ga4BridgeRow,
+  type Ga4BridgeSourceRow,
+} from "./ga4Bridge";
+import {
   buildCountryFunnel,
   type InstallRow,
   type WebVisitorRow,
@@ -127,6 +145,7 @@ import {
 } from "./routingShadow";
 import {
   ANALYTICS_ID_SALT_ENV,
+  deriveGaKey,
   pseudonymizeAnalyticsId,
   pseudonymizeAnalyticsRow,
   readAnalyticsIdSalt,
@@ -13818,6 +13837,11 @@ export const linkInstallAttribution = functions.https.onCall(
 
     try {
       await ensureAttributionTable();
+      // ★적재 직전에만 가명을 붙인다 — 솔트는 런타임 env 에만 있다. 이 컬럼이
+      //   `ga_key` 는 여기서 만들지 않는다 — analytics_identity 백필
+      //   (scripts/backfill-analytics-identity.ts)이 `gaClientId` 에서
+      //   pseudonymizeAnalyticsId("ga", ...) 로 직접 파생한다. 두 벌을 만들면
+      //   익명축 조인이 조용히 갈라진다.
       await bigquery
         .dataset(BQ_DATASET)
         .table(BQ_ATTRIBUTION_TABLE)
@@ -15066,3 +15090,315 @@ FROM \`${BQ_DATASET}.${ANALYTICS_PURCHASE_TABLE}\``;
     return out;
   }
 );
+
+// ════════════════════════════════════════════════════════════════════════════
+// GA4 리전 브리지 — asia-northeast3 → US 사용자당 1행 (티켓 Th9VRMvm2HkyWSjwF12X)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// 설계·근거(귀속 소스 선택 포함): v3/docs/ga4-region-bridge-2026-08-21.md
+// 순수 로직(SQL 조립·정규화·중복제거)은 전부 ga4Bridge.ts 에 있고, 여기서는
+// BigQuery I/O 와 실패 격리만 한다.
+//
+// ★GA4 전체를 복사하지 않는다. GA4 쪽(서울)에서 **먼저 방문자당 1행으로 집계**
+//   하고 그 결과만 US 로 옮긴다. 옮기는 조인키도 원시 user_pseudo_id 가 아니라
+//   HMAC 가명(gaKey)이다 — GA4 원문 이벤트도, 원시 GA4 식별자도 US 로 넘어가지
+//   않는다.
+// ★기존 getAdminCountryFunnel 의 메모리 조인은 **그대로 둔다.** 브리지가 첫
+//   적재 전이거나 실패해도 화면이 죽지 않아야 한다. 브리지는 SQL 조인이 필요한
+//   분석(코호트·리텐션·BQML)을 열어 주는 쪽이고, 둘을 한 번에 바꾸면 회귀
+//   원인을 가릴 수 없다.
+
+const BQ_PROJECT = "marblo-2253d";
+
+/** insert 요청 하나당 행 수. BQ streaming insert 요청 크기 한계 회피용. */
+const GA4_BRIDGE_INSERT_CHUNK = 500;
+
+/** 기존 ga_key 조회를 한 번에 던지는 후보 수. */
+const GA4_BRIDGE_KEY_LOOKUP_CHUNK = 5000;
+
+let ga4BridgeTableReady = false;
+
+/** 동기화 1회 결과. 콜러블 응답 겸 스케줄 로그. */
+interface Ga4BridgeSyncResult {
+  rangeDays: number;
+  /** GA4 에서 읽은 방문자 행 수(집계 후). */
+  scanned: number;
+  /** 그중 조인키로 쓸 수 있는 행(형식 검증 + 가명 파생 성공). */
+  eligible: number;
+  /** 실제로 US 브리지에 새로 적재된 행. */
+  inserted: number;
+  /** 이미 브리지에 있어 건너뛴 행 — first-touch 는 덮지 않는다. */
+  skippedExisting: number;
+  /** collected_traffic_source 를 못 읽어 content/term 이 null 로 간 경우. */
+  collectedTrafficSourceAvailable: boolean;
+  notes: string[];
+}
+
+/**
+ * 브리지 테이블 보장. ensureAttributionTable 과 **같은 규약**이다 —
+ * 없으면 만들고, 있으면 **NULLABLE 컬럼만 덧붙인다**. 컬럼을 코드에만 추가하고
+ * BQ 를 두면 insert 가 `no such field` 로 통째로 죽는다.
+ *
+ * 파티션은 `firstVisitDate`(유입 코호트 축, 분석이 실제로 거는 조건),
+ * 클러스터는 `gaKey`(조인 축).
+ */
+async function ensureGa4BridgeTable(): Promise<void> {
+  if (ga4BridgeTableReady) return;
+  const dataset = bigquery.dataset(BQ_DATASET);
+  const table = dataset.table(GA4_BRIDGE_TABLE);
+  const [exists] = await table.exists();
+  if (!exists) {
+    await table.create({
+      schema: GA4_BRIDGE_SCHEMA as unknown as {
+        name: string;
+        type: string;
+      }[],
+      timePartitioning: { type: "DAY", field: "firstVisitDate" },
+      clustering: { fields: ["gaKey"] },
+    });
+    functions.logger.info("[ga4Bridge] created bridge table", {
+      table: GA4_BRIDGE_TABLE,
+    });
+    ga4BridgeTableReady = true;
+    return;
+  }
+
+  const [metadata] = await table.getMetadata();
+  const live: { name: string }[] = metadata?.schema?.fields ?? [];
+  const liveNames = new Set(live.map((f) => f.name));
+  const additive = GA4_BRIDGE_SCHEMA.filter(
+    (f) => !liveNames.has(f.name) && f.mode === "NULLABLE"
+  );
+  if (additive.length > 0) {
+    await table.setMetadata({ schema: { fields: [...live, ...additive] } });
+    functions.logger.info("[ga4Bridge] schema columns added", {
+      added: additive.map((f) => f.name),
+    });
+  }
+  ga4BridgeTableReady = true;
+}
+
+/**
+ * 뷰 하나를 만들거나(없으면) 정의를 최신으로 맞춘다(있으면).
+ *
+ * ★기존 객체가 **뷰가 아니면 건드리지 않고 던진다.** 이유는 가정이 아니라
+ *   실측이다(2026-08-21): `analytics_identity` 라는 이름이 이미 다른
+ *   파이프라인의 살아있는 TABLE 로 `marblo_telemetry` 에 있었다. 그때의
+ *   구현은 `exists()` 만 보고 곧장 `setMetadata({view})` 로 갔는데, 그건
+ *   **남의 표를 뷰로 덮으려는 요청**이다. 우리 뷰 이름은 이제 충돌하지
+ *   않지만(ga4_install_identity), 이름은 언제든 다시 겹칠 수 있으므로
+ *   규율을 주석이 아니라 코드로 세운다 — 뷰가 아닌 것은 절대 덮지 않는다.
+ */
+async function ensureView(name: string, query: string): Promise<void> {
+  const dataset = bigquery.dataset(BQ_DATASET);
+  const table = dataset.table(name);
+  const [exists] = await table.exists();
+  if (!exists) {
+    await dataset.createTable(name, { view: { query, useLegacySql: false } });
+    functions.logger.info("[ga4Bridge] created view", { view: name });
+    return;
+  }
+
+  const [metadata] = await table.getMetadata();
+  if (metadata?.type !== "VIEW") {
+    // 이름만 남기고 내용은 남기지 않는다 — 남의 표 스키마를 로그로 흘리지 않는다.
+    throw new Error(
+      `refusing to overwrite existing ${String(
+        metadata?.type ?? "UNKNOWN"
+      )} "${name}" with a view; pick a different view name`
+    );
+  }
+  await table.setMetadata({ view: { query, useLegacySql: false } });
+}
+
+/**
+ * 브리지의 정본 읽기 뷰를 보장한다.
+ *
+ * - `ga4_first_touch_current` — `gaKey` 당 가장 이른 유입 1행.
+ *
+ * ★신원 뷰는 만들지 않는다. 조인 상대인 `analytics_identity`(익명축:
+ *   `install_key` ↔ `ga_key`)는 사람 축 작업에서 이미 착지했고, 그쪽 백필이
+ *   우리와 **같은 kind·같은 솔트**로 `ga_key` 를 파생한다(ga4Bridge.ts 의
+ *   ANALYTICS_IDENTITY_TABLE 주석 참조). 신원표를 두 벌 만들면 익명축 조인이
+ *   에러 없이 갈라진다 — 그래서 브리지는 표 한 장만 얹는다.
+ */
+async function ensureGa4BridgeViews(): Promise<void> {
+  await ensureView(
+    GA4_BRIDGE_CURRENT_VIEW,
+    buildBridgeCurrentViewSql({ project: BQ_PROJECT, dataset: BQ_DATASET })
+  );
+}
+
+/** 후보 ga_key 중 이미 브리지에 있는 것을 돌려준다(청크로 나눠 조회). */
+async function readExistingBridgeKeys(
+  keys: readonly string[]
+): Promise<Set<string>> {
+  const found = new Set<string>();
+  if (keys.length === 0) return found;
+  const sql = buildExistingKeysQuery({
+    project: BQ_PROJECT,
+    dataset: BQ_DATASET,
+  });
+  for (const chunk of chunkRows(keys, GA4_BRIDGE_KEY_LOOKUP_CHUNK)) {
+    const [rows] = await bigquery.query({
+      query: sql,
+      params: { keys: chunk },
+      types: { keys: ["STRING"] },
+      location: BQ_LOCATION,
+    });
+    for (const r of rows as { gaKey?: unknown }[]) {
+      if (typeof r.gaKey === "string") found.add(r.gaKey);
+    }
+  }
+  return found;
+}
+
+/**
+ * GA4(서울) 집계 → US 브리지 적재. 한 번 돌 때 하는 일 전부.
+ *
+ * ★조회창(`days`)은 스케줄에서 짧다(기본 3일). 그래서 **최초 1회는 반드시
+ *   백필**(syncGa4Bridge 콜러블에 days=400)을 돌려야 한다. 안 그러면 창 밖에
+ *   첫 방문이 있던 사람의 first-touch 가 창 안 값으로 잘못 잡힌다. 나중에
+ *   백필을 돌려도 `ga4_first_touch_current` 뷰가 **더 이른 유입을 우선**하므로
+ *   자가 치유된다.
+ */
+async function syncGa4BridgeInternal(
+  rangeDays: number
+): Promise<Ga4BridgeSyncResult> {
+  const notes: string[] = [];
+
+  // GA4 데이터셋 이름은 SQL 에 그대로 박히므로 화이트리스트를 강제한다.
+  if (!isSafeBqIdentifier(GA4_BQ_DATASET)) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "GA4_BQ_DATASET is not a valid BigQuery identifier"
+    );
+  }
+
+  // ★솔트가 없으면 **아무것도 적재하지 않는다.** 원시 GA4 client_id 로 폴백해
+  //   US 에 적재하는 건 이 설계의 전제(원시 식별자는 리전을 넘지 않는다)를
+  //   조용히 깨는 것이다. 시끄럽게 실패한다.
+  const salt = getAnalyticsIdSalt();
+  if (!salt) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      `${ANALYTICS_ID_SALT_ENV} is not configured; refusing to write raw GA4 identifiers to US`
+    );
+  }
+
+  // GA4 집계 — collected_traffic_source 는 비교적 최근 export 스키마에만 있다.
+  // 참조가 실패하면 그 컬럼 없이 1회 재시도한다. **컬럼을 빼는 게 아니라**
+  // content/term 이 null 로 가는 것이고, 그 사실을 note 로 드러낸다.
+  let collectedAvailable = true;
+  let sourceRows: Ga4BridgeSourceRow[];
+  try {
+    const [rows] = await bigquery.query({
+      query: buildGa4FirstTouchQuery({
+        project: BQ_PROJECT,
+        dataset: GA4_BQ_DATASET,
+        includeCollectedTrafficSource: true,
+      }),
+      params: { days: rangeDays },
+      location: GA4_BQ_LOCATION,
+    });
+    sourceRows = rows as Ga4BridgeSourceRow[];
+  } catch (e) {
+    collectedAvailable = false;
+    functions.logger.warn("[ga4Bridge] collected_traffic_source unavailable", {
+      message: safeAnalyticsErrorMessage(e),
+    });
+    const [rows] = await bigquery.query({
+      query: buildGa4FirstTouchQuery({
+        project: BQ_PROJECT,
+        dataset: GA4_BQ_DATASET,
+        includeCollectedTrafficSource: false,
+      }),
+      params: { days: rangeDays },
+      location: GA4_BQ_LOCATION,
+    });
+    sourceRows = rows as Ga4BridgeSourceRow[];
+    notes.push(
+      "GA4 export 에서 collected_traffic_source 를 읽지 못했다 — content/term 은 이번 적재분에서 null 이다(컬럼은 그대로 있다)."
+    );
+  }
+
+  if (sourceRows.length >= GA4_SYNC_ROW_LIMIT) {
+    notes.push(
+      `GA4 방문자가 상한 ${GA4_SYNC_ROW_LIMIT.toLocaleString()}행에서 잘렸다 — 이번 적재분은 전량이 아니다.`
+    );
+  }
+
+  const syncedAt = new Date().toISOString();
+  const candidates: Ga4BridgeRow[] = [];
+  for (const raw of sourceRows) {
+    // 형식이 틀린 client_id 는 조인키가 될 수 없다 — 쓰레기가 들어가면
+    // 매칭률 지표 자체를 못 믿게 된다(installAttribution 과 같은 규약).
+    if (!isGaClientId(raw.gaClientId)) continue;
+    const gaKey = deriveGaKey(raw.gaClientId, salt);
+    if (!gaKey) continue;
+    candidates.push(toBridgeRow(raw, gaKey, syncedAt));
+  }
+
+  await ensureGa4BridgeTable();
+  const existing = await readExistingBridgeKeys(candidates.map((r) => r.gaKey));
+  const fresh = selectNewBridgeRows(candidates, existing);
+
+  for (const chunk of chunkRows(fresh, GA4_BRIDGE_INSERT_CHUNK)) {
+    await bigquery.dataset(BQ_DATASET).table(GA4_BRIDGE_TABLE).insert(chunk);
+  }
+
+  // 뷰는 적재 뒤에 보장한다 — 테이블이 먼저 있어야 뷰가 컴파일된다.
+  await ensureGa4BridgeViews();
+
+  if (fresh.length === 0 && candidates.length > 0) {
+    notes.push(
+      "새로 적재된 방문자가 없다 — 이번 창의 방문자는 전부 이미 브리지에 있다(first-touch 는 덮지 않는다)."
+    );
+  }
+
+  return {
+    rangeDays,
+    scanned: sourceRows.length,
+    eligible: candidates.length,
+    inserted: fresh.length,
+    skippedExisting: candidates.length - fresh.length,
+    collectedTrafficSourceAvailable: collectedAvailable,
+    notes,
+  };
+}
+
+/**
+ * 일 1회 동기화. GA4 일별 export 는 D+1 이라 새벽에 돈다(어제치가 확정된 뒤).
+ * 실패해도 던지지 않는다 — 다음 날 창이 겹치므로 자동으로 따라잡는다.
+ */
+export const scheduledSyncGa4Bridge = functions.pubsub
+  .schedule("30 5 * * *")
+  .timeZone("Asia/Seoul")
+  .onRun(async () => {
+    try {
+      const result = await syncGa4BridgeInternal(GA4_SYNC_DEFAULT_DAYS);
+      functions.logger.info("[ga4Bridge] sync ok", {
+        scanned: result.scanned,
+        inserted: result.inserted,
+        skippedExisting: result.skippedExisting,
+      });
+    } catch (e) {
+      // 값은 남기지 않는다 — 사유만.
+      functions.logger.error("[ga4Bridge] sync failed", {
+        message: safeAnalyticsErrorMessage(e),
+      });
+    }
+    return null;
+  });
+
+/**
+ * 수동 트리거(어드민) — **최초 백필**과 스케줄 실패 복구용.
+ * 배포 직후 1회 `{ days: 400 }` 으로 돌려 전 구간을 덮어야 한다.
+ */
+export const syncGa4Bridge = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const rangeDays = parseSyncDays((data as { days?: unknown })?.days);
+    return syncGa4BridgeInternal(rangeDays);
+  });

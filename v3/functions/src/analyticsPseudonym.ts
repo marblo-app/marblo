@@ -233,3 +233,24 @@ export function pseudonymizeAnalyticsRow<T extends Record<string, unknown>>(
   }
   return out as T;
 }
+
+/**
+ * GA4 client_id → `ga_key` 가명. 리전 브리지(ga4Bridge.ts)와 링크백 적재
+ * (installAttribution) 양쪽이 **같은 함수**를 써야 US 안에서 조인이 성립한다.
+ *
+ * ★`gaClientId` 를 ANALYTICS_ID_FIELDS 에 올리지 않은 건 의도다. 그 표는
+ *   `pseudonymizeAnalyticsRow` 가 익명 세계 **이벤트 행**에 적용하는 목록인데,
+ *   GA4 조인키는 이벤트 행에 실리지 않는다(브리지 테이블과 어트리뷰션 행에만
+ *   있다). 표에 올리면 적용 지점이 아닌 곳까지 훑게 된다.
+ *
+ * @returns 솔트가 없으면 null(fail-safe — 원시값 폴백 금지).
+ */
+export function deriveGaKey(
+  gaClientId: unknown,
+  salt: string | null
+): string | null {
+  const v = typeof gaClientId === "string" ? gaClientId.trim() : "";
+  if (v.length === 0) return null;
+  const out = pseudonymizeAnalyticsId("ga", v, salt);
+  return typeof out === "string" ? out : null;
+}
