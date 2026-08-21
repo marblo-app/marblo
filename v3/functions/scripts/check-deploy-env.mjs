@@ -10,14 +10,29 @@ import { fileURLToPath } from "node:url";
 // 막으려면 배포 전에 막는 게 맞다. 값은 아무 고엔트로피 문자열이면 되고,
 // 한 번 정하면 바꾸지 않는다 — 바꾸면 그 시점 전후의 가명이 갈라져
 // events↔task_outcomes 조인이 끊긴다.
-// ★PERSON_AXIS_EFFECTIVE_FROM 은 **일부러 여기 없다.** 사람 축(가명 계정키)의
-// 소급 상한이고, 값이 없으면(unset) 사람 축이 0행 + 사유를 돌려주는 것이
-// **설계된 정상 상태**다(functions/src/personAxis.ts,
-// v3/docs/person-axis-user-key-design-2026-08-21.md §5.4). 여기에 올리면
-// 배포가 막히고, 막힌 배포를 뚫으려고 아무 날짜나 채우게 되며, 그 순간 개정
-// 고지가 발효되기도 전에 소급이 열린다. 채우는 조건은 personAxis.ts 의
-// PERSON_AXIS_EFFECTIVE_FROM_UNSET_NOTE 위에 체크리스트로 있다.
-const REQUIRED_KEYS = ["ADMIN_UID", "ANALYTICS_ID_SALT"];
+// ★PERSON_AXIS_EFFECTIVE_FROM 은 2026-08-21 에 **여기로 올라왔다.** 전에는
+// 일부러 빠져 있었다 — 발효일이 정해지기 전에는 unset 이 곧 "사람 축 0행" 이라는
+// **설계된 정상 상태**였고, 필수로 걸면 막힌 배포를 뚫으려고 아무 날짜나 채워
+// 고지 발효 전에 소급이 열릴 위험이 있었다.
+// 그 전제가 사라졌다: 사장님이 값을 정했고(2026-08-21, 값 `2026-04-01` — 과거
+// 포함), 개정 고지와 1회성 배너가 같이 나간다. 이제 unset 은 "아직 안 정했다" 가
+// 아니라 **설정 누락**이고, 누락되면 사람 축 화면이 조용히 0행으로 남는다.
+// 조용한 열화보다 시끄러운 실패가 낫다는 이 파일의 원칙 그대로 필수로 건다.
+// 근거·경위: functions/src/personAxis.ts 의 PERSON_AXIS_EFFECTIVE_FROM_UNSET_NOTE
+// 위 주석, v3/docs/person-axis-user-key-design-2026-08-21.md §5.4(추기 포함).
+// ★형식은 'YYYY-MM-DD'. 형식이 틀리면 배포는 지나가지만 게이트가 닫힌 채로
+// 남는다(personAxis.resolvePersonAxisGate 의 invalid 경로) — 그래서 값 형식도
+// 여기서 같이 본다.
+const REQUIRED_KEYS = ["ADMIN_UID", "ANALYTICS_ID_SALT", "PERSON_AXIS_EFFECTIVE_FROM"];
+
+/** 값 형식까지 봐야 하는 키. 값은 절대 출력하지 않는다 — 형식 판정만 한다. */
+const KEY_VALUE_FORMATS = [
+  {
+    key: "PERSON_AXIS_EFFECTIVE_FROM",
+    test: (v) => /^\d{4}-\d{2}-\d{2}$/.test(v),
+    hint: "must be 'YYYY-MM-DD' (UTC date)",
+  },
+];
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const functionsDir = resolve(__dirname, "..");
@@ -58,8 +73,8 @@ function resolveProjectId() {
   ).trim();
 }
 
-function parseEnvKeys(raw) {
-  const keys = new Set();
+function parseEnvEntries(raw) {
+  const entries = new Map();
   for (const line of raw.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
@@ -70,9 +85,9 @@ function parseEnvKeys(raw) {
     if (eq <= 0) continue;
     const key = withoutExport.slice(0, eq).trim();
     const value = withoutExport.slice(eq + 1).trim();
-    if (key && value) keys.add(key);
+    if (key && value) entries.set(key, value);
   }
-  return keys;
+  return entries;
 }
 
 function fail(message) {
@@ -97,13 +112,25 @@ if (!existsSync(envPath)) {
   );
 }
 
-const envKeys = parseEnvKeys(readFileSync(envPath, "utf8"));
-const missing = REQUIRED_KEYS.filter((key) => !envKeys.has(key));
+const envEntries = parseEnvEntries(readFileSync(envPath, "utf8"));
+const missing = REQUIRED_KEYS.filter((key) => !envEntries.has(key));
 if (missing.length > 0) {
   fail(
     `Missing required key(s) in functions/.env.${projectId}: ${missing.join(
       ", "
     )}. Values are intentionally not printed.`
+  );
+}
+
+// 값 형식 검사 — 값 자체는 출력하지 않고 "형식이 틀렸다" 만 말한다.
+const malformed = KEY_VALUE_FORMATS.filter(
+  ({ key, test }) => envEntries.has(key) && !test(envEntries.get(key))
+);
+if (malformed.length > 0) {
+  fail(
+    `Malformed value(s) in functions/.env.${projectId}: ${malformed
+      .map(({ key, hint }) => `${key} (${hint})`)
+      .join(", ")}. Values are intentionally not printed.`
   );
 }
 

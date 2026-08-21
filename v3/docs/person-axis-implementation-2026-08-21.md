@@ -11,9 +11,18 @@
 **표도 뷰도 적재 경로도 다 만들었고, `PERSON_AXIS_EFFECTIVE_FROM` 이 unset 이라
 사람 축은 0행 + 사유를 돌려준다.** 처리방침 문안이 확정되면 env 한 줄로 열린다.
 
+> ★**2026-08-21 갱신(티켓 `vilkbSrnzbAv4ezbZMRT`).** 처리방침 개정이 머지됐고
+> 발효일도 정해졌다 — `PERSON_AXIS_EFFECTIVE_FROM=2026-04-01`(사장님 결정,
+> **과거 포함**. 설계 §5.4-a). 즉 아래 §10 "켜는 순서" 의 **1·2 는 끝났다.**
+> ★그래도 사람 축 뷰는 아직 행을 돌려주지 않는다. 게이트가 열리는 것과 데이터가
+> 흐르는 것은 다른 일이고, **3~6(표·뷰 DDL 실행, 링크 MERGE 배선)이 남아 있다** —
+> `personAxis.ts` 는 지금도 `index.ts` 어디에서도 import 되지 않는다(순수 로직 +
+> 축 순수성 가드만 쓰인다). 게이트가 열린 뒤의 0행은 **여기가 원인**이지 게이트
+> 문제가 아니다. 3~6 은 별도 티켓이다.
+
 ---
 
-## 1. ★게이트 — 왜 unset 이 안전한 기본값인가
+## 1. ★게이트 — 왜 unset 이 안전한 기본값인가 (★값이 정해진 뒤의 의미는 §0 참조)
 
 `v3/functions/src/personAxis.ts` 의 `PERSON_AXIS_EFFECTIVE_FROM_ENV`.
 **기본값을 코드에 두지 않았다.** 이유는 상수 바로 위 주석에 길게 적어 뒀고, 요지는
@@ -141,10 +150,14 @@ npm run build                     OK (index.ts 포함 전체)
 
 ## 10. 켜는 순서 (다음 사람에게)
 
-1. 처리방침 개정 승인·배포 → 발효일 확정.
-2. `functions/.env.<project>` 에 `PERSON_AXIS_EFFECTIVE_FROM=YYYY-MM-DD`.
-   ★이 한 줄이 소급을 여는 스위치다. 앞의 체크리스트(`personAxis.ts` 상수 주석)를
-   다 채우기 전에 넣지 마라.
+1. ~~처리방침 개정 승인·배포 → 발효일 확정.~~ **[x] 완료 2026-08-21** — PR #1080
+   (사장님 승인 ③안) + 1회성 고지 배너(`PRIVACY_CLARIFICATION_VERSION` 상승).
+   `CURRENT_POLICY_VERSION` 은 **올리지 않았다**(재동의 없음).
+2. `functions/.env.<project>` 에 **`PERSON_AXIS_EFFECTIVE_FROM=2026-04-01`**.
+   ★이 한 줄이 소급을 여는 스위치다. 값·근거는 `personAxis.ts` 상수 주석과
+   설계 §5.4-a 에 있다. ★이 파일은 gitignore 대상이라 **커밋으로 배포되지 않는다** —
+   배포 머신(메인 체크아웃)에서 직접 넣어야 한다. 넣었는지는
+   `npm run check:deploy-env` 가 본다(2026-08-21 부터 필수 키).
 3. `buildUserInstallTableDdl()` 로 빈 표 생성 → `npm run check:person-axis-isolation`
    이 초록인지 확인. **빨가면 여기서 멈춘다.**
 4. `buildPersonAxisViewDdl()` 두 벌 실행(닫힌 상태로 먼저 만들어도 안전하다 — 0행).

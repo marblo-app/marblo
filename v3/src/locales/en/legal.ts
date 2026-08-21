@@ -73,9 +73,9 @@ export const legal: Record<keyof typeof koLegal, string> = {
   // ── One-time privacy-policy clarification (PrivacyClarificationNotice) ──
   // ★This copy informs; it does not ask. No "agree"/"accept" wording — the
   //   banner stores nothing.
-  "legal.clarification.label": "Privacy policy update",
+  "legal.clarification.label": "Your privacy policy has changed",
   "legal.clarification.body":
-    "Product usage analytics contain no account identifiers (anonymous install ID only). Token usage and cost records are linked to your account so we can show you your own usage and billing.",
+    "We previously wrote that we would not analyse usage per person — we are taking that back: product usage analytics now also carry a pseudonymous key that tells you apart from other users. Your account identifier itself is still never stored, and we collect nothing new from you. Token usage and cost records stay linked to your account so we can show you your own usage and billing, as before.",
   "legal.clarification.viewDetails": "Details",
   "legal.clarification.dismiss": "Dismiss",
 };

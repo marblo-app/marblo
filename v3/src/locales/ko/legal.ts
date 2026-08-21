@@ -73,9 +73,9 @@ export const legal = {
   // ── 처리방침 1회성 명확화 고지 (PrivacyClarificationNotice) ──
   // ★동의를 받는 문구가 아니라 알리는 문구다. "동의"/"확인" 같은 승낙 어휘를
   //   쓰지 않는다 — 이 배너는 아무것도 저장하지 않는다.
-  "legal.clarification.label": "개인정보 처리방침 안내",
+  "legal.clarification.label": "처리방침이 바뀌었습니다",
   "legal.clarification.body":
-    "제품 사용 분석에는 계정 식별자가 없습니다(익명 설치 ID만 사용). 토큰 사용량·비용 기록은 본인 사용량·요금 확인을 위해 계정에 연결됩니다.",
+    "전에는 '사람 단위 분석은 하지 않겠다'고 적어 두었지만 그 부분을 거둡니다 — 이제 제품 사용 분석에 회원님을 다른 이용자와 구분하는 가명 구분값을 함께 적습니다. 계정 식별자 자체는 여전히 저장하지 않고, 회원님께 새로 받는 정보도 없습니다. 토큰 사용량·비용 기록이 본인 사용량·요금 확인을 위해 계정에 연결되는 것은 전과 같습니다.",
   "legal.clarification.viewDetails": "자세히",
   "legal.clarification.dismiss": "닫기",
 };

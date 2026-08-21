@@ -1,12 +1,18 @@
 /**
  * 처리방침 1회성 명확화 고지 배너 — 얇은 1줄(모달 아님).
  *
- * 왜 있는가(ticket woXp2c70oR0tliGB8Vs6): 이번 처리방침 변경은 (1) 서버가
+ * 왜 있는가(ticket woXp2c70oR0tliGB8Vs6): 1차 처리방침 변경은 (1) 서버가
  * 이벤트에 붙이던 계정 UID 부착 중단(수집 **축소**)과 (2) 이미 하고 있던
- * 사용량·비용 기록(계정 연결)의 **누락된 고지 추가** 두 조각이다. 둘 다 새로
+ * 사용량·비용 기록(계정 연결)의 **누락된 고지 추가** 두 조각이었다. 둘 다 새로
  * 받을 동의가 없어 CURRENT_POLICY_VERSION 을 올리지 않지만(올리면 전 사용자
  * PIPA 모달 재프롬프트 — #797~#809 saga), (2)는 사용자가 몰랐을 수 있는 사실이라
  * 조용히 넘기지 않는다. 그 사이의 자리가 이 배너다.
+ *
+ * ★2차(2026-08-21, ticket vilkbSrnzbAv4ezbZMRT): 사람 축 분석 개방. 이번 건은
+ * 축소가 아니라 **약속을 거두는** 변경이다("사람 단위 분석은 하지 않겠다" 철회).
+ * 사장님 결정으로 CURRENT_POLICY_VERSION 은 그대로 두고 이 배너로만 알린다 —
+ * 즉 **이 배너가 유일한 고지 경로다.** 여기가 안 뜨면 "약속을 거뒀는데 아무도
+ * 모르는" 상태가 된다. 판정은 privacyClarification.ts 의 버전 상승이 만든다.
  *
  * ── 불변식 ──────────────────────────────────────────────────────────
  *  - **아무것도 write 하지 않는다.** 체크박스도 동의 버튼도 없다 — 받을 동의가
@@ -81,7 +87,9 @@ export function PrivacyClarificationNotice() {
       <span className="shrink-0 text-[#89b4fa]">
         {t("legal.clarification.label")}
       </span>
-      <span className="min-w-0 flex-1 truncate text-[11px] text-[#a6adc8]">
+      {/* ★truncate 가 아니라 line-clamp-2 다. 2차 고지 문안은 첫 절(약속 철회)이
+          잘리면 배너가 존재 이유를 잃는다 — 한 줄 디자인보다 문장이 우선이다. */}
+      <span className="line-clamp-2 min-w-0 flex-1 text-[11px] leading-[16px] text-[#a6adc8]">
         {t("legal.clarification.body")}
       </span>
       <button

@@ -52,6 +52,38 @@
  *   - ★단, 과장하지 않는다: 사용량·비용 기록이 계정에 연결된다는 사실은 그대로
  *     적어 둔다. "전부 익명" 이 아니라 "분석은 식별 불가, 사용량·요금은 본인
  *     것" 이다. 그 한 줄을 지우는 순간 이 문서는 과소고지가 된다.
+ *
+ * ★변경 넷(ticket CjNfGmXvynZ5bk5vLuCZ) — 사람 축 분석 개방. ★이건 예외가
+ * 아니다. 앞의 셋과 방향이 반대라서, 버전 판정을 이 파일 안에서 끝내지 않고
+ * 사장님 결정까지 올렸다(결론은 아래 "★결정됨" 항목).
+ *   - 무엇이 바뀌었나: 익명 세계 row 에 계정에서 파생한 **가명 사용자키**가
+ *     들어간다. 계정 UID 자체는 여전히 저장하지 않고, 솔트는 그대로 함수 런타임
+ *     env 에만 있다(ANALYTICS_ID_SALT). 수집 항목은 늘지 않고 새로 수집하는
+ *     식별자도 없다 — 로그인 확인에만 쓰고 버리던 값에서 **파생**할 뿐이다.
+ *   - 그래도 앞의 셋과 다르다: 예외 하나/둘/셋은 전부 축소이거나 누락 고지
+ *     보완이었다. 이번은 **저장되는 값이 처음으로 계정에서 파생된다**. 게다가
+ *     지우는 문장이 "계정 단위 이벤트 분석과 운영자 본인 활동 제외는
+ *     포기했습니다" 라는 **약속**이다. 약속을 거두는 변경을 "수집이 안 늘었다"
+ *     하나로 조용히 넘기면, 위 세 예외가 쌓아온 기준 자체가 무너진다.
+ *   - ★결정됨(사장님, 2026-08-21): **CURRENT_POLICY_VERSION 은 올리지 않는다.**
+ *     전 사용자 재동의 모달은 띄우지 않고, 대신 고지 축인
+ *     privacyClarification.ts 의 PRIVACY_CLARIFICATION_VERSION 을 올려
+ *     **1회성 인앱 고지 배너**로 알린다.
+ *     ★조용히 넘기지 않는 것이 이 선택의 조건이다 — 버전을 안 올리기로 한 이상
+ *     배너는 반드시 떠야 한다. 배너를 빠뜨리면 "약속을 거뒀는데 아무도 모르는"
+ *     상태가 되고, 그게 바로 위 문단이 경고한 결말이다.
+ *   - ★범위 밖(문구에도 적었다): 개정해도 "다운로드했지만 로그인 안 한 사람" 은
+ *     사람 축으로 보이지 않는다. 로그인 전엔 계정이 없어 파생할 근거가 없다.
+ *   - ★후속 영향: functions/src/analyticsPseudonym.ts 의 축 경계 주석이 이 파일
+ *     :127 / :246 "두 기록이 공유하는 조인 키는 없습니다" 를 근거로 인용한다.
+ *     그 문장은 이번에 지운 게 아니라 **범위를 넓혀 유지**했다(계정 파생 키까지
+ *     전부 가명 + 솔트는 데이터가 저장되는 곳에 없음).
+ *   - ★정정(2026-08-21): 이 자리에는 원래 "AnalyticsIdKind 에서 `user` 를 뺐다"
+ *     라고 적혀 있었다. 그 뒤 사람 축 구현(PR #1084)이 `user` kind 를 **추가**해
+ *     지금은 틀린 말이다. 지금 참인 문장은 이것이다 — `user` kind 는 **있고**,
+ *     다만 PERSON_AXIS_EFFECTIVE_FROM 게이트가 닫혀 있으면 사람 축 데이터가
+ *     0행이며, 축 경계는 여전히 유효하다: 이벤트 행에는 `user_key` 컬럼이 없고
+ *     두 축은 링크표(analytics_user_install) + 뷰로만 이어진다.
  */
 import type { Locale } from "../../lib/i18n";
 
@@ -72,9 +104,10 @@ const KO: PrivacyContent = {
     <>
       마블로 데스크톱 앱은 외부 <b>제3자 서비스(Sentry, 크래시 리포트)</b>{" "}
       송신을 <b>명시적 옵트인</b>으로 운영합니다.{" "}
-      <b>제품 사용 분석에는 계정 식별자가 없습니다</b> — 익명 설치 ID 하나로만
-      기록되고, 프로젝트·에이전트·티켓 ID 같은 앱 내부 식별자도 그 기록에서는
-      가명으로 적혀 <b>사용량·비용 기록과 이어붙일 수 없습니다</b>. 다만{" "}
+      <b>제품 사용 분석에는 계정 식별자가 없습니다</b> — 익명 설치 ID 와,
+      회원님을 다른 이용자와 구분하는 <b>가명 구분값</b>으로만 기록되고,
+      프로젝트·에이전트·티켓 ID 같은 앱 내부 식별자도 그 기록에서는 가명으로
+      적혀 <b>사용량·비용 기록과 이어붙일 수 없습니다</b>. 다만{" "}
       <b>토큰 사용량·비용 기록</b>은 계정에 연결됩니다: 회원님께 본인
       사용량·요금을 되돌려 보여드리려면 그래야 하기 때문입니다. 정리하면{" "}
       <b>분석 기록은 식별 불가, 사용량·요금 기록은 본인 것</b>입니다. 동의하지
@@ -87,12 +120,12 @@ const KO: PrivacyContent = {
     {
       label: "비식별 1차 지표 (BigQuery)",
       value:
-        "마블로 자체 운영 품질을 위해 식별정보를 제거한 비식별 데이터만 우리 GCP(BigQuery)에 상시 수집합니다. 수집 항목: 익명 설치 ID(계정 UID 아님), 이벤트 종류, 토큰/지속시간 등 집계 지표. 계정 식별자·코드·입력 텍스트는 포함되지 않으며, 에러 메시지는 송신 전 PII 마스킹됩니다. ★계정 식별자(UID)는 클라이언트도 보내지 않고 서버도 부착하지 않습니다 — 이 기록의 상관키는 익명 설치 ID 하나뿐입니다. 프로젝트·에이전트·티켓 ID 처럼 앱 내부에서 쓰는 식별자도 이 기록에는 가명으로만 적히며, 가명을 만드는 키는 이 데이터가 저장되는 곳에 없습니다 — 그래서 이 기록을 아래 사용량·비용 기록과 이어붙여 계정을 알아내는 일이 성립하지 않습니다(그 대가로 계정 단위 이벤트 분석과 운영자 본인 활동 제외는 포기했습니다). 설치 ID 는 기기·설치별로 새로 생성되며 앱 데이터를 지우면 새 값이 됩니다. 이용 목적: 서비스 품질 분석과 함께, 이 비식별 데이터에서 파생된 특징(모델·소요시간·성공 여부 등)을 모델 라우팅(어떤 작업을 어떤 모델에 배정할지) 품질 개선에 이용합니다 — 프롬프트·응답 원문은 여기에 포함되지 않습니다.",
+        "마블로 자체 운영 품질을 위해 식별정보를 제거한 비식별 데이터만 우리 GCP(BigQuery)에 상시 수집합니다. 수집 항목: 익명 설치 ID(계정 UID 아님), 이벤트 종류, 토큰/지속시간 등 집계 지표. 계정 식별자·코드·입력 텍스트는 포함되지 않으며, 에러 메시지는 송신 전 PII 마스킹됩니다. ★계정 식별자(UID) 자체는 앱도 보내지 않고 서버도 저장하지 않습니다. 다만 기기 단위가 아니라 사람 단위로 볼 수 있어야 해서, 로그인한 계정의 식별자를 그대로 쓰지 않고 가명처리해 만든 가명 구분값을 이 기록에 함께 적습니다. 이 값은 회원님을 다른 이용자와 구분하는 데만 쓰이며, 이 값만으로는 회원님이 누구인지 알 수 없습니다 — 이 값을 원래의 계정 식별자로 되돌리는 데 필요한 정보(추가정보)를 이 데이터가 저장되는 곳에 두지 않고 분리해 보관하기 때문입니다. UID 자체는 이 기록 어디에도 남지 않습니다. ★이것은 수집 항목이 늘어나는 변경이 아닙니다: 회원님께 새로 받는 정보는 없으며, 이미 로그인 여부를 확인할 때만 쓰고 저장하지 않던 값을 가명처리한 것뿐입니다. 프로젝트·에이전트·티켓 ID 처럼 앱 내부에서 쓰는 식별자도 같은 방식으로 이 기록에는 가명으로만 적힙니다 — 그래서 이 기록과 아래 사용량·비용 기록을 이어 붙여 계정을 알아내는 일이 성립하지 않습니다. 이 가명 구분값으로 할 수 있게 되는 일은 두 가지입니다: 사람 단위로 이용 흐름을 보는 것과, 통계에서 운영자 본인의 활동을 빼는 것. 반대로 로그인하지 않은 상태의 사용은 여전히 사람 단위로 묶이지 않습니다 — 계정이 없어 구분값을 만들 근거가 없기 때문입니다. 설치 ID 는 기기·설치별로 새로 생성되며 앱 데이터를 지우면 새 값이 됩니다. 이용 목적: 서비스 품질 분석과 함께, 이 비식별 데이터에서 파생된 특징(모델·소요시간·성공 여부 등)을 모델 라우팅(어떤 작업을 어떤 모델에 배정할지) 품질 개선에 이용합니다 — 프롬프트·응답 원문은 여기에 포함되지 않습니다.",
     },
     {
       label: "사용량·비용 기록 (계정 연결)",
       value:
-        "구독·요금 정산과 회원님 본인의 사용량 확인(설정 → 사용량)을 위해, 에이전트 실행의 토큰 수·추정 비용·모델명·시각을 계정에 연결해 기록합니다. 이 기록만은 성격상 익명일 수 없습니다 — 본인 지출을 본인에게 보여드리려면 계정과 이어져 있어야 하기 때문입니다. 위 비식별 지표와는 별도 테이블이고, 두 기록이 공유하는 조인 키는 없습니다(위 기록의 내부 식별자는 가명입니다). 즉 이 기록은 회원님 본인에게 본인 사용량을 보여드리는 데 쓰이고, 위 분석 기록을 특정 계정으로 되짚는 데는 쓰이지 않습니다. 코드·프롬프트·응답 원문은 여기에도 포함되지 않습니다.",
+        "구독·요금 정산과 회원님 본인의 사용량 확인(설정 → 사용량)을 위해, 에이전트 실행의 토큰 수·추정 비용·모델명·시각을 계정에 연결해 기록합니다. 이 기록만은 성격상 익명일 수 없습니다 — 본인 지출을 본인에게 보여드리려면 계정과 이어져 있어야 하기 때문입니다. 위 비식별 지표와는 별도 테이블이고, 두 기록이 공유하는 조인 키는 없습니다 — 즉 두 기록을 서로 이어 붙일 수 있는 공통 항목이 없습니다. 위 기록에 적히는 식별자는 계정에서 만든 가명 구분값까지 포함해 전부 가명이고, 그것을 원래대로 되돌리는 데 필요한 정보는 그 데이터가 저장되는 곳에 두지 않기 때문입니다. 즉 이 기록은 회원님 본인에게 본인 사용량을 보여드리는 데 쓰이고, 위 분석 기록을 특정 계정으로 되짚는 데는 쓰이지 않습니다. 코드·프롬프트·응답 원문은 여기에도 포함되지 않습니다.",
     },
     {
       label: "학습데이터 기여 (선택 · 원문)",
@@ -160,12 +193,15 @@ const KO: PrivacyContent = {
     </>,
     <>
       ★제품 사용 분석에는 계정 UID가 <b>없습니다</b> — 앱도 보내지 않고, 수신
-      함수도 로그인 여부만 확인하고(도용 방지) uid는 저장하지 않습니다
+      함수도 로그인 여부만 확인하고(도용 방지) uid 자체는 저장하지 않습니다.
+      사람 단위 분석에는 그 uid 를 가명처리해 만든 <b>가명 구분값</b>만 쓰고, 그
+      값을 원래대로 되돌리는 데 필요한 정보는 분석 데이터가 저장되는 곳과 분리해
+      보관합니다
     </>,
     <>
       ★앱 내부 식별자(프로젝트·에이전트·티켓 ID) → 분석 기록에서는{" "}
-      <b>가명으로 치환</b>. 가명 키는 분석 데이터가 있는 곳에 두지 않으므로,
-      계정에 연결된 사용량·비용 기록과 조인되지 않습니다
+      <b>가명으로 치환</b>. 가명을 되돌리는 데 필요한 정보는 분석 데이터가 있는
+      곳에 두지 않으므로, 계정에 연결된 사용량·비용 기록과 이어 붙지 않습니다
     </>,
   ],
   measuresFootnote: (
@@ -186,7 +222,8 @@ const EN: PrivacyContent = {
       <b>third-party services (Sentry, crash reports)</b> on{" "}
       <b>explicit opt-in</b>.{" "}
       <b>Product usage analytics contain no account identifiers</b> — rows are
-      keyed by an anonymous install ID alone, and the app's own internal ids
+      keyed by an anonymous install ID and a <b>pseudonymous key</b> that only{" "}
+      separates one person from another, and the app's own internal ids
       (project, agent, ticket) appear there only as pseudonyms, so those rows{" "}
       <b>cannot be joined to your usage and cost records</b>. One record works
       differently: <b>token usage and cost</b> is linked to your account,
@@ -202,12 +239,12 @@ const EN: PrivacyContent = {
     {
       label: "De-identified first-party metrics (BigQuery)",
       value:
-        "For Marblo's own operational quality, only de-identified data with identifiers removed is collected continuously into our GCP (BigQuery). Collected: anonymous install ID (not the account UID), event type, and aggregate metrics like tokens/duration. Account identifiers, code, and input text are not included, and error messages are PII-masked before send. ★The account UID is withheld by the app and is not attached by our receiving function either — the only correlation key on these rows is the anonymous install ID. The app's own internal ids (project, agent, ticket) are written here as pseudonyms, and the key that produces them does not live where this data is stored — so joining these rows to the usage and cost records below to recover an account does not work (the price we pay is giving up account-level event analysis and excluding our own operator activity from the stats). The install ID is generated per device/installation and becomes a new value if you clear app data. Purpose of use: service quality analysis, plus improving model routing quality (which task is assigned to which model) from features derived from this de-identified data (model, duration, success) — raw prompts and responses are never part of this.",
+        "For Marblo's own operational quality, only de-identified data with identifiers removed is collected continuously into our GCP (BigQuery). Collected: anonymous install ID (not the account UID), event type, and aggregate metrics like tokens/duration. Account identifiers, code, and input text are not included, and error messages are PII-masked before send. ★The account UID itself is withheld by the app and is never stored by our receiving function. So that we can look at these rows per person rather than per device, we do not write your account identifier itself; we write a pseudonymous key made from it instead. That key only separates one person from another — on its own it does not tell us who you are, because the information needed to turn it back into your account identifier is kept separately and not where this data is stored. The UID itself appears nowhere in these rows. ★This is not an expansion of what we collect: nothing new is asked of you, only a pseudonym made from a value we already saw and did not store while checking that you were signed in. The app's own internal ids (project, agent, ticket) are written here as pseudonyms in the same way — so joining these rows to the usage and cost records below to recover an account does not work. What this pseudonymous key makes possible is exactly two things: seeing how one person moves through the product, and leaving our own operator activity out of the stats. What it does not do: use while signed out is still not counted per person, because with no account there is nothing to make a pseudonym from. The install ID is generated per device/installation and becomes a new value if you clear app data. Purpose of use: service quality analysis, plus improving model routing quality (which task is assigned to which model) from features derived from this de-identified data (model, duration, success) — raw prompts and responses are never part of this.",
     },
     {
       label: "Usage & cost records (account-linked)",
       value:
-        "For subscription/billing reconciliation and for showing you your own usage (Settings → Usage), we record each agent run's token counts, estimated cost, model name, and timestamp linked to your account. This record cannot be anonymous by nature — showing you your own spend requires it to be tied to your account. It lives in a separate table from the de-identified metrics above, and the two share no join key (the internal ids on those rows are pseudonyms). So this record is used to show you your own usage — not to trace the analytics rows back to an account. Code and raw prompts/responses are not included here either.",
+        "For subscription/billing reconciliation and for showing you your own usage (Settings → Usage), we record each agent run's token counts, estimated cost, model name, and timestamp linked to your account. This record cannot be anonymous by nature — showing you your own spend requires it to be tied to your account. It lives in a separate table from the de-identified metrics above, and the two share no join key — that is, the two records have no field in common that anyone could match them up on. Every identifier on those rows, including the one made from your account, is a pseudonym, and the information needed to turn those pseudonyms back is not kept where that data is stored. So this record is used to show you your own usage — not to trace the analytics rows back to an account. Code and raw prompts/responses are not included here either.",
     },
     {
       label: "Training-data contribution (optional · raw text)",
@@ -278,13 +315,16 @@ const EN: PrivacyContent = {
     <>
       ★Product usage analytics carry <b>no account UID</b> — the app does not
       send one, and the receiving function checks only that you are signed in
-      (abuse prevention) and never stores the uid
+      (abuse prevention) and never stores the uid itself. Per-person analysis
+      uses only a <b>pseudonymous key</b> made from it, and the information
+      needed to turn that key back into the uid is kept apart from where the
+      analytics data lives
     </>,
     <>
       ★App-internal ids (project·agent·ticket) → <b>replaced by pseudonyms</b>{" "}
-      in the analytics rows. The key that produces them is not kept where that
-      data lives, so those rows do not join to the account-linked usage and cost
-      records
+      in the analytics rows. The information needed to turn those pseudonyms
+      back is not kept where that data lives, so those rows cannot be matched up
+      with the account-linked usage and cost records
     </>,
   ],
   measuresFootnote: (

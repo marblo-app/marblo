@@ -7,9 +7,12 @@
 // ── ★축 경계 ────────────────────────────────────────────────────────────────
 //   익명축  analytics_identity              install_key / ga_key / first_touch
 //   계정축  analytics_purchase / cost_logs  user_key / 금액
-//   ★두 축은 조인하지 않는다. 조인키를 만들지도 않는다.
-//     근거: 배포된 처리방침 privacyContent.tsx:95 (EN :210)
+//   링크축  analytics_user_install          (user_key, install_key) 쌍 ★단 하나
+//   ★두 축을 잇는 자리는 위 링크표 **하나뿐**이고, 그마저 PERSON_AXIS_EFFECTIVE_FROM
+//     게이트가 열려 있을 때만 채워진다(#1084). 그 밖에서는 잇지 않는다.
+//     근거: 배포된 처리방침 privacyContent.tsx:127 (EN :246)
 //           "두 기록이 공유하는 조인 키는 없습니다 / the two share no join key"
+//           — 이 문장은 개정(#1080)에서 지운 게 아니라 범위를 넓혀 유지했다.
 //
 // 이 스크립트는 `user_key` 를 만들지 않는다. 컬럼 자리도 만들지 않는다 —
 // 빈 컬럼이 있으면 다음 사람이 "채우면 되겠네" 로 읽는다. 왜 없는지는

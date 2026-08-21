@@ -148,3 +148,62 @@ describe("★고지 배너는 동의를 받지 않는다 (구조 가드)", () =>
     expect(NOTICE).not.toMatch(/privacyConsentService/);
   });
 });
+
+describe("★2차 고지 — 버전을 안 올린 대신 배너가 뜬다 (ticket vilkbSrnzbAv4ezbZMRT)", () => {
+  const SRC = path.resolve(__dirname, "../../src");
+  const read = (rel: string) => readFileSync(path.join(SRC, rel), "utf-8");
+
+  it("고지 버전이 1차(2026-08-10)보다 뒤다 — 이미 닫은 사람에게도 한 번 더 뜬다", () => {
+    // 사장님 결정(2026-08-21): CURRENT_POLICY_VERSION 은 올리지 않는다. 그러면
+    // 이 배너가 **유일한 고지 경로**가 된다. 버전을 되돌리면 "약속을 거뒀는데
+    // 아무도 모르는" 상태가 되므로 여기서 막는다. ISO 날짜라 사전순 비교가 곧
+    // 시간순 비교다.
+    expect(PRIVACY_CLARIFICATION_VERSION > "2026-08-10").toBe(true);
+  });
+
+  it("CURRENT_POLICY_VERSION 은 올리지 않았다 — 전 사용자 재동의 모달을 띄우지 않는다", () => {
+    // 이 두 축이 같이 움직이면 "고지하려다 전 사용자 재동의" 가 된다.
+    expect(read("services/privacyConsentService.ts")).toMatch(
+      /CURRENT_POLICY_VERSION = "2026-06-01"/,
+    );
+  });
+
+  it("ko·en 배너 문구가 같은 사실을 말한다 — 약속 철회 + 가명 구분값", () => {
+    const ko = read("locales/ko/legal.ts");
+    const en = read("locales/en/legal.ts");
+    const koBody = /"legal\.clarification\.body":\s*\n?\s*"([^"]+)"/.exec(ko)?.[1];
+    const enBody = /"legal\.clarification\.body":\s*\n?\s*"([^"]+)"/.exec(en)?.[1];
+    expect(koBody).toBeTruthy();
+    expect(enBody).toBeTruthy();
+
+    // (1) 약속을 거둔다는 사실이 양쪽에 있다.
+    expect(koBody).toMatch(/거둡니다/);
+    expect(enBody).toMatch(/taking that back/);
+    // (2) 무엇이 새로 적히는지가 양쪽에 있다.
+    expect(koBody).toMatch(/가명 구분값/);
+    expect(enBody).toMatch(/pseudonymous key/);
+    // (3) 과장 금지 — 계정 식별자 자체는 저장하지 않는다는 한 줄도 양쪽에 있다.
+    expect(koBody).toMatch(/계정 식별자 자체는 여전히 저장하지 않/);
+    expect(enBody).toMatch(/account identifier itself is still never stored/);
+  });
+
+  it("문구가 개발 용어로 새지 않는다 (이용자 언어 — #1080 ③안 규약)", () => {
+    const bodies = [read("locales/ko/legal.ts"), read("locales/en/legal.ts")].map(
+      (f) => /"legal\.clarification\.body":\s*\n?\s*"([^"]+)"/.exec(f)?.[1] ?? "",
+    );
+    for (const body of bodies) {
+      expect(body).not.toMatch(/HMAC|솔트|\bsalt\b|조인 키|join key|user_key/i);
+    }
+  });
+
+  it("첫 절이 잘리지 않는다 — truncate 로는 약속 철회가 화면에 안 남는다", () => {
+    // 본문 첫 절이 이번 고지의 전부다. 한 줄 truncate 로 돌리면 배너는 떠도
+    // 알리는 일은 실패한다.
+    const notice = read("components/legal/PrivacyClarificationNotice.tsx");
+    const bodySpan = /<span className="([^"]*)">\s*\{t\("legal\.clarification\.body"\)\}/
+      .exec(notice)?.[1];
+    expect(bodySpan).toBeTruthy();
+    expect(bodySpan).toMatch(/line-clamp-2/);
+    expect(bodySpan).not.toMatch(/truncate/);
+  });
+});
