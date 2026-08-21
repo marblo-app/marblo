@@ -194,6 +194,89 @@ type RetentionCohorts = {
   };
 };
 
+// ── D7·D14 리텐션 + 연속사용 스트릭 (getAdminStreakRetention) ────────────────
+// 사장님이 D7·D14 를 "매우 중요한 지표" 라고 했는데 지금까지 이 숫자는 사람이 BQ 를
+// 직접 쳐야만 나왔다. 서버 순수 빌더(adminAnalytics.buildStreakRetention)의 응답
+// 미러다.
+//
+// ★이 화면의 가장 큰 위험은 작은 표본을 퍼센트로 크게 보여주는 것이다. 실측 계정이
+// 5개, 유의미 사용이 2개다 — "50%" 라고만 띄우면 2명짜리 표본에 확신이 생긴다.
+// 그래서 서버는 rate 단독 필드를 주지 않고 언제나 분자/분모를 함께 준다. 화면도
+// 분수를 크게, 퍼센트를 작게 그린다(그 반대가 아니다).
+type RetentionCountedRate = {
+  numerator: number;
+  denominator: number;
+  /** 분모 0 이면 null — 0% 가 아니라 '판단 불가'다. */
+  rate: number | null;
+  display: string;
+};
+type StreakRetentionHorizon = {
+  key: "d1" | "d7" | "d14" | "d30";
+  days: number;
+  /** 아직 D+N 일이 오지 않아 판정 불가한 유닛 수. 분모에서 빠져 있다. */
+  pending: number;
+  exact: RetentionCountedRate;
+  window: RetentionCountedRate;
+};
+type StreakUnit = {
+  label: string;
+  axis: "install" | "account";
+  firstActive: string | null;
+  lastActive: string | null;
+  activeDays: number;
+  workingDays: number;
+  presentDays: number;
+  maxStreak: number;
+  currentStreak: number;
+  daysSinceLastActive: number | null;
+  grid: string;
+  gridStart: string;
+  gridEnd: string;
+  zombie: boolean;
+  adminExcluded: boolean;
+  legacyIdScheme: boolean;
+  suspectedIdSwitchChurn: boolean;
+  inCohortWindow: boolean;
+  mappedAccountLabel: string | null;
+  mappingStatus: "mapped" | "ambiguous" | "unmapped" | "n/a";
+};
+type StreakRetentionAxis = {
+  axis: "install" | "account";
+  activityDefinition: string;
+  gridLegend: string;
+  gridDays: number;
+  cohortWindowDays: number;
+  unitsObserved: number;
+  unitsZombie: number;
+  unitsAdminExcluded: number;
+  unitsBeforeWindow: number;
+  unitsCohort: number;
+  horizons: StreakRetentionHorizon[];
+  units: StreakUnit[];
+  identityScheme: {
+    date: string;
+    legacyUnits: number;
+    currentUnits: number;
+    suspectedIdSwitchChurn: number;
+    note: string;
+  };
+  mapping: {
+    mappedInstalls: number;
+    ambiguousInstalls: number;
+    unmappedInstalls: number;
+    note: string;
+  } | null;
+  notes: string[];
+};
+type StreakRetention = {
+  rangeDays: number;
+  generatedAt: string;
+  historyDays: number;
+  adminExcluded?: AdminExcludedTelemetry;
+  install: StreakRetentionAxis;
+  account: StreakRetentionAxis;
+};
+
 // ── KPI 코크핏 (getAdminKpiCockpit) — 지표기반 베타종료 게이지 + 신규 온보딩 ──
 // 이벤트(설문·데모·동의·CLI셋업) + 재사용/리텐션 + 스폰 헬스. 서버 순수 빌더
 // (adminAnalytics.buildKpiCockpit)의 응답 shape 미러. ★신규 이벤트는 3.0.19 전 값 0.
@@ -2288,6 +2371,355 @@ function SurveyStars({ nps }: { nps: NpsResult }) {
   );
 }
 
+// ── D7·D14 리텐션 + 연속사용 스트릭 뷰 ──────────────────────────────────────
+// 설계 원칙 하나: **퍼센트를 주인공으로 만들지 않는다.** 분수를 크게, 퍼센트를
+// 괄호 안 작게 그린다. 표본이 한 자릿수인 화면에서 큰 퍼센트는 정보가 아니라
+// 착시다.
+function CountedRateCell({ r }: { r: RetentionCountedRate }) {
+  const pct = r.rate == null ? "—" : `${(r.rate * 100).toFixed(1)}%`;
+  return (
+    <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap">
+      <span className="text-sm font-semibold tabular-nums text-zinc-100">
+        {r.numerator}/{r.denominator}
+      </span>
+      <span
+        className={`text-xs tabular-nums ${
+          r.rate == null ? "text-zinc-600" : "text-zinc-500"
+        }`}
+      >
+        ({pct})
+      </span>
+    </span>
+  );
+}
+
+// 격자 한 줄. x=활동 / ~=하트비트만(활동 아님) / .=신호 없음.
+// '~' 를 눈에 띄게 다른 색으로 칠하는 게 요점이다 — 그게 좀비를 알아보는 방법이다.
+function StreakGrid({ grid }: { grid: string }) {
+  return (
+    <span className="font-mono text-[13px] leading-none tracking-[0.12em]">
+      {grid.split("").map((c, i) => (
+        <span
+          key={i}
+          className={
+            c === "x"
+              ? "text-emerald-400"
+              : c === "~"
+                ? "text-amber-500"
+                : "text-zinc-700"
+          }
+        >
+          {c}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
+  const isInstall = axis.axis === "install";
+  const title = isInstall
+    ? "설치 축 (익명 설치 ID)"
+    : "계정 축 (cost_logs 계정 uid)";
+  // D7·D14 를 먼저, 크게. 사장님이 "매우 중요한 지표" 라고 지목한 두 칸이다.
+  const primary = axis.horizons.filter((h) => h.key === "d7" || h.key === "d14");
+  const secondary = axis.horizons.filter(
+    (h) => h.key !== "d7" && h.key !== "d14",
+  );
+  const rows = [...primary, ...secondary];
+  const cohortEmpty = axis.unitsCohort === 0;
+
+  return (
+    <Panel
+      title={title}
+      note={`코호트 기준일 = 그 유닛의 첫 활동일 · 코호트 창 ${axis.cohortWindowDays}일 · 격자 ${axis.gridDays}일`}
+    >
+      {/* ── 모수. 어떤 비율보다 먼저 읽혀야 한다.
+          ★뺄셈 체인으로 그리지 않는다 — 아래 항목들은 서로 겹칠 수 있어서
+            (운영자이면서 창 밖인 설치처럼) 43−1−9−28 이 6 이 되지 않는다.
+            맞지 않는 산식을 화면에 그리면 그 화면 전체를 못 믿게 된다. ── */}
+      <div className="mb-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span className="text-xs text-zinc-500">코호트 모수</span>
+          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-sm font-semibold tabular-nums text-zinc-100">
+            N = {fmtInt(axis.unitsCohort)}
+          </span>
+          <span className="text-xs text-zinc-600">
+            / 관측 {fmtInt(axis.unitsObserved)}
+          </span>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500">
+          <span>
+            코호트 밖:{" "}
+            <span className="tabular-nums text-amber-500">
+              좀비 {fmtInt(axis.unitsZombie)}
+            </span>
+            {" · "}
+            <span className="tabular-nums text-zinc-400">
+              운영자 {fmtInt(axis.unitsAdminExcluded)}
+            </span>
+            {" · "}
+            <span className="tabular-nums text-zinc-400">
+              코호트창 밖 {fmtInt(axis.unitsBeforeWindow)}
+            </span>
+          </span>
+          <span className="text-zinc-600">
+            (항목이 서로 겹칠 수 있어 합계가 관측 수와 맞지 않는다)
+          </span>
+        </div>
+      </div>
+
+      {cohortEmpty ? (
+        <EmptyState label="이 창에 코호트 모수가 없습니다 — 비율을 계산할 표본 자체가 없다는 뜻입니다(0% 가 아닙니다). 아래 스트릭 격자는 전 구간 기준이라 그대로 보입니다." />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[480px] text-xs">
+            <thead>
+              <tr className="text-zinc-500">
+                <th className="py-1 pr-3 text-left font-medium">지평</th>
+                <th className="py-1 pr-3 text-left font-medium">
+                  exact (+N일 당일)
+                </th>
+                <th className="py-1 pr-3 text-left font-medium">
+                  window (1~N일 중)
+                </th>
+                <th className="py-1 pr-3 text-right font-medium">
+                  관측창 미도달
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((h) => {
+                const key = h.key.toUpperCase();
+                const isPrimary = h.key === "d7" || h.key === "d14";
+                return (
+                  <tr
+                    key={h.key}
+                    className={`border-t border-zinc-900 ${
+                      isPrimary ? "bg-zinc-900/30" : ""
+                    }`}
+                  >
+                    <td
+                      className={`py-1.5 pr-3 tabular-nums ${
+                        isPrimary
+                          ? "font-semibold text-zinc-100"
+                          : "text-zinc-400"
+                      }`}
+                    >
+                      {key}
+                    </td>
+                    <td className="py-1.5 pr-3">
+                      <CountedRateCell r={h.exact} />
+                    </td>
+                    <td className="py-1.5 pr-3">
+                      <CountedRateCell r={h.window} />
+                    </td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-zinc-500">
+                      {h.pending > 0 ? `${fmtInt(h.pending)}개 제외` : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── 사용자별 연속사용 격자 ── */}
+      <div className="mt-4">
+        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+          <h5 className="text-xs font-semibold text-zinc-300">
+            사용자별 연속사용 (전 구간 기준)
+          </h5>
+          <span className="text-[11px] text-zinc-500">{axis.gridLegend}</span>
+        </div>
+        {axis.units.length === 0 ? (
+          <EmptyState label="이 축에 관측된 유닛이 없습니다." />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-xs">
+              <thead>
+                <tr className="text-zinc-500">
+                  <th className="py-1 pr-3 text-left font-medium">라벨</th>
+                  <th className="py-1 pr-3 text-right font-medium">최대연속</th>
+                  <th className="py-1 pr-3 text-right font-medium">현재연속</th>
+                  <th className="py-1 pr-3 text-left font-medium">첫 활동</th>
+                  <th className="py-1 pr-3 text-left font-medium">
+                    최근 {axis.gridDays}일
+                  </th>
+                  <th className="py-1 pr-3 text-right font-medium">활동일</th>
+                  {isInstall && (
+                    <th className="py-1 pr-3 text-right font-medium">
+                      working일
+                    </th>
+                  )}
+                  <th className="py-1 pr-3 text-right font-medium">경과일</th>
+                  {isInstall && (
+                    <th className="py-1 pr-3 text-left font-medium">계정</th>
+                  )}
+                  <th className="py-1 pr-3 text-left font-medium">비고</th>
+                </tr>
+              </thead>
+              <tbody>
+                {axis.units.map((u) => (
+                  <tr
+                    key={u.label}
+                    className={`border-t border-zinc-900 ${
+                      u.zombie || u.adminExcluded ? "opacity-60" : ""
+                    }`}
+                  >
+                    <td className="py-1 pr-3 font-mono text-[11px] text-zinc-300">
+                      {u.label}
+                    </td>
+                    <td className="py-1 pr-3 text-right tabular-nums text-zinc-200">
+                      {fmtInt(u.maxStreak)}
+                    </td>
+                    <td className="py-1 pr-3 text-right tabular-nums text-zinc-400">
+                      {u.currentStreak > 0 ? fmtInt(u.currentStreak) : "—"}
+                    </td>
+                    <td className="py-1 pr-3 tabular-nums text-zinc-400">
+                      {u.firstActive ?? "—"}
+                    </td>
+                    <td className="py-1 pr-3">
+                      <StreakGrid grid={u.grid} />
+                    </td>
+                    <td className="py-1 pr-3 text-right tabular-nums text-zinc-300">
+                      {fmtInt(u.activeDays)}
+                    </td>
+                    {isInstall && (
+                      <td className="py-1 pr-3 text-right tabular-nums text-zinc-400">
+                        {fmtInt(u.workingDays)}
+                      </td>
+                    )}
+                    <td className="py-1 pr-3 text-right tabular-nums text-zinc-500">
+                      {u.daysSinceLastActive == null
+                        ? "—"
+                        : fmtInt(u.daysSinceLastActive)}
+                    </td>
+                    {isInstall && (
+                      <td className="py-1 pr-3 font-mono text-[11px] text-zinc-500">
+                        {u.mappedAccountLabel ??
+                          (u.mappingStatus === "unmapped" ? "매핑 불가" : "—")}
+                        {u.mappingStatus === "ambiguous" && (
+                          <span className="ml-1 text-amber-500">(모호)</span>
+                        )}
+                      </td>
+                    )}
+                    <td className="py-1 pr-3">
+                      <span className="flex flex-wrap gap-1">
+                        {u.zombie && (
+                          <span
+                            className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-400"
+                            title="최근 격자 구간에 하트비트만 있고 활동(working 하트비트·이벤트)이 0 — 사용자가 아니라 떠 있는 프로세스. 하트비트를 세면 이런 게 리텐션을 부풀린다."
+                          >
+                            좀비
+                          </span>
+                        )}
+                        {u.adminExcluded && (
+                          <span className="rounded bg-zinc-700/40 px-1.5 py-0.5 text-[10px] text-zinc-300">
+                            운영자·제외
+                          </span>
+                        )}
+                        {u.suspectedIdSwitchChurn && (
+                          <span
+                            className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] text-sky-400"
+                            title="2026-06-13 식별자 스킴 교체 경계에서 끊긴 구 스킴 유닛 — 이탈이 아니라 id 가 바뀐 것일 가능성이 높다."
+                          >
+                            id교체 추정
+                          </span>
+                        )}
+                        {u.legacyIdScheme && !u.suspectedIdSwitchChurn && (
+                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                            구 스킴
+                          </span>
+                        )}
+                        {!u.inCohortWindow && u.firstActive != null && (
+                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">
+                            코호트창 밖
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── 설치→계정 매핑 요약 (설치 축만) ── */}
+      {axis.mapping && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-400">
+          <span className="text-zinc-500">설치→계정</span>
+          <span className="tabular-nums text-zinc-200">
+            매핑 {fmtInt(axis.mapping.mappedInstalls)}
+          </span>
+          <span className="text-zinc-700">·</span>
+          <span className="tabular-nums text-amber-500">
+            모호 {fmtInt(axis.mapping.ambiguousInstalls)}
+          </span>
+          <span className="text-zinc-700">·</span>
+          <span className="tabular-nums text-zinc-300">
+            매핑 불가 {fmtInt(axis.mapping.unmappedInstalls)}
+          </span>
+        </div>
+      )}
+
+      {/* ── 정의·경고. 화면이 정의를 안 적으면 다음 사람이 다르게 읽는다 ── */}
+      <div className="mt-3 space-y-1.5">
+        {[
+          axis.activityDefinition,
+          axis.identityScheme.note,
+          ...(axis.mapping ? [axis.mapping.note] : []),
+          ...axis.notes.filter((n) => n !== axis.activityDefinition),
+        ].map((note, i) => (
+          <p
+            key={i}
+            className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-500"
+          >
+            <Info className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>{note}</span>
+          </p>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function StreakRetentionView({ data }: { data: StreakRetention }) {
+  return (
+    <div className="space-y-4">
+      {/* ★두 축을 한 표에 섞지 않는다 — 단위가 다르다(설치 ≠ 사람 ≠ 계정). */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-3 text-[11px] leading-relaxed text-zinc-400">
+        <p className="mb-1 text-xs font-semibold text-zinc-200">
+          이 숫자를 읽는 법
+        </p>
+        <p>
+          · <b className="text-zinc-300">분모를 먼저 보라.</b> 모든 비율은{" "}
+          <span className="font-mono">1/2 (50.0%)</span> 형태로 분자·분모와 함께
+          나온다. 퍼센트만 보면 두 명짜리 표본이 절반의 시장처럼 보인다.{" "}
+          <span className="font-mono">0/0 (—)</span> 은 0% 가 아니라 판단할 표본이
+          없다는 뜻이다.
+        </p>
+        <p>
+          · <b className="text-zinc-300">설치 축과 계정 축은 다른 단위다.</b>{" "}
+          한 사람이 설치를 여러 대 쓴다(실측에서 계정 1개가 설치 9대를 썼다).
+          한 표에 섞어 읽으면 인원이 부풀려진다.
+        </p>
+        <p>
+          · <b className="text-zinc-300">전 구간 {fmtInt(data.historyDays)}일</b>{" "}
+          이력으로 첫 활동일·최대연속을 계산하고, 조회 기간({data.rangeDays}일)은
+          D7/D14 표에 넣을 코호트만 고른다.
+        </p>
+      </div>
+
+      <StreakAxisView axis={data.install} />
+      <StreakAxisView axis={data.account} />
+    </div>
+  );
+}
+
 // ── 활성화 게이트 + 리텐션 코호트 뷰 (계정 identity 축) ─────────────────────
 function RetentionCohortsView({ data }: { data: RetentionCohorts }) {
   const gate = data.activationGate;
@@ -2396,12 +2828,26 @@ function RetentionCohortsView({ data }: { data: RetentionCohorts }) {
                     </td>
                     {horizons.map(([h, label]) => {
                       const rate = c.rates?.[h];
+                      const back = c.returningUsers?.[h];
+                      // ★퍼센트만 띄우지 않는다. 표본이 한 자릿수라 "50%" 만
+                      //   보면 1/2 이 절반의 시장처럼 읽힌다.
                       return (
                         <td
                           key={label}
                           className="py-1 pr-3 text-right tabular-nums text-zinc-400"
                         >
-                          {rate == null ? "—" : fmtPct(rate)}
+                          {rate == null ? (
+                            "—"
+                          ) : (
+                            <span className="whitespace-nowrap">
+                              <span className="text-zinc-200">
+                                {fmtInt(back)}/{fmtInt(c.cohortUsers)}
+                              </span>{" "}
+                              <span className="text-[11px] text-zinc-500">
+                                ({fmtPct(rate)})
+                              </span>
+                            </span>
+                          )}
                         </td>
                       );
                     })}
@@ -2979,6 +3425,11 @@ export default function AnalyticsPanel() {
     loading: true,
     error: null,
   });
+  const [streak, setStreak] = useState<Loaded<StreakRetention>>({
+    data: null,
+    loading: true,
+    error: null,
+  });
   const [countryFunnel, setCountryFunnel] = useState<Loaded<CountryFunnel>>({
     data: null,
     loading: true,
@@ -3069,6 +3520,10 @@ export default function AnalyticsPanel() {
         { days: number; includeAdmin: boolean },
         RetentionCohorts
       >(fns, "getAdminRetentionCohorts");
+      const callStreak = httpsCallable<
+        { days: number; includeAdmin: boolean },
+        StreakRetention
+      >(fns, "getAdminStreakRetention");
       const callCountry = httpsCallable<
         { days: number; includeAdmin: boolean },
         CountryFunnel
@@ -3082,6 +3537,7 @@ export default function AnalyticsPanel() {
       setRelease((s) => ({ ...s, loading: true, error: null }));
       setBetaSeg((s) => ({ ...s, loading: true, error: null }));
       setRetention((s) => ({ ...s, loading: true, error: null }));
+      setStreak((s) => ({ ...s, loading: true, error: null }));
       setCountryFunnel((s) => ({ ...s, loading: true, error: null }));
 
       // 각 콜러블 독립 처리 — 하나 실패해도 나머지는 렌더.
@@ -3158,6 +3614,15 @@ export default function AnalyticsPanel() {
         )
         .catch((e) =>
           setRetention({
+            data: null,
+            loading: false,
+            error: mapErr(e as CallableError),
+          })
+        );
+      callStreak({ days: d, includeAdmin: inc })
+        .then((r) => setStreak({ data: r.data, loading: false, error: null }))
+        .catch((e) =>
+          setStreak({
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
@@ -3774,6 +4239,25 @@ export default function AnalyticsPanel() {
           <ErrorBox msg={retention.error} />
         ) : retention.data ? (
           <RetentionCohortsView data={retention.data} />
+        ) : null}
+      </div>
+
+      {/* ── D7·D14 리텐션 · 연속사용 스트릭 (🟡) ─────────────────────
+          사장님이 "매우 중요한 지표" 로 지목한 축. 위 코호트와 달리 설치/계정
+          두 축을 분리하고, 활동을 status="working" 또는 이벤트로 정의해
+          좀비 프로세스를 코호트에서 뺀다. 모든 비율은 분자/분모와 함께. */}
+      <div className="space-y-4">
+        <SectionHeader
+          icon={Activity}
+          title="D7 · D14 리텐션 · 연속사용 스트릭"
+          trust="yellow"
+        />
+        {streak.loading ? (
+          <LoadingBox />
+        ) : streak.error ? (
+          <ErrorBox msg={streak.error} />
+        ) : streak.data ? (
+          <StreakRetentionView data={streak.data} />
         ) : null}
       </div>
 

@@ -25,6 +25,10 @@
 //     되돌려주는 용도라 유지) 로만 남는다.
 // 화면이 0 을 제품 실패로 오독하지 않도록, 해당 콜러블은 아래 note 를 응답에
 // 실어 보낸다.
+// 라벨 해시 전용. BQ/Firestore 무의존 규약은 그대로다 — node 표준 모듈만 쓴다
+// (analyticsPseudonym.ts 와 같은 선례).
+import { createHash } from "node:crypto";
+
 export const EVENTS_ACCOUNT_AXIS_RETIRED_ON = "2026-08-10";
 
 export const EVENTS_ACCOUNT_AXIS_NOTE =
@@ -2073,4 +2077,678 @@ export function buildCostByDayModel(
   for (const m of models) m.share = grandTotal > 0 ? m.total / grandTotal : 0;
 
   return { dates, models, matrix, grandTotal, truncatedModels: rest.length };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// D7/D14 리텐션 + 사용자별 연속사용(스트릭)  — ticket b1L3L2zmL2HFWMo91BVr
+//
+// 사장님이 D7·D14 를 "매우 중요한 지표" 라고 했는데, 지금까지 이 숫자는 사람이
+// BQ 를 직접 쳐야만 나왔다. 여기서 그 계산을 순수 로직으로 내려 화면이 매번
+// 같은 정의로 같은 숫자를 뽑게 한다. (BQ 쿼리는 index.ts 의 onCall 담당.)
+//
+// ── 이 파일이 지키는 3가지 (전부 2026-08-21 실측에서 나온 함정이다) ──────────
+//
+// 1) ★활동 = "하트비트 존재" 가 아니다.
+//    실측에서 어떤 설치는 14일 중 13일 "활동" 으로 잡혔는데, 하트비트 35,170건
+//    중 status="working" 이 0건이고 이벤트도 0건이었다 — 35일간 등장한 agentId
+//    가 2개뿐인 **좀비 프로세스**다. 하트비트 존재를 세면 이런 게 코호트에
+//    들어와 리텐션을 부풀린다.
+//    → 활동 = 그날 working 신호 ≥1 **또는** 이벤트 ≥1. 그 정의를 응답에 문자열로
+//      실어 화면이 그대로 적게 한다(ACTIVITY_DEFINITION_*).
+//
+// 2) ★N 을 숨기지 않는다.
+//    실측 계정이 5개, 그중 유의미 사용은 2개다. "50%" 라고만 띄우면 사장님이
+//    2명짜리 표본에 확신을 갖는다. 그래서 모든 비율은 rate 하나가 아니라
+//    {numerator, denominator, rate, display="1/2 (50%)"} 로만 나간다
+//    (RetentionCountedRate). 분모 0 이면 rate 는 0 이 아니라 null 이다 —
+//    "아무도 안 돌아왔다" 와 "판단할 표본이 없다" 는 다른 말이다.
+//    관측창이 아직 안 찬 유닛(가입 3일차에게 D7 을 묻는 것)은 분모에서 빼고
+//    pending 으로 따로 센다. 분모에 넣으면 최근 유입이 자동으로 이탈로 찍힌다.
+//
+// 3) ★2026-06-13 식별자 스킴 교체 경계.
+//    그 전 설치 id 는 Firebase uid(28자), 이후는 UUID(36자)다. 실측에서 어떤
+//    설치의 "06-13 이탈" 은 이탈이 아니라 **같은 사람의 id 가 바뀐 것**이었다.
+//    id 가 다르니 계산이 저절로 끊기는데, 문제는 그 끊김이 화면에서 이탈로
+//    보인다는 것이다. → 경계 이전 스킴 유닛을 플래그로 표시하고, 경계에서
+//    끊긴 유닛은 suspectedIdSwitchChurn 으로 구분해 이탈로 읽히지 않게 한다.
+//    (계산에서 두 id 를 이어붙이지는 않는다 — 근거 없이 같은 사람이라고 단정
+//     하는 쪽이 더 위험하다.)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** 설치 식별자 스킴이 Firebase uid(28) → UUID(36) 로 바뀐 날. */
+export const IDENTITY_SCHEME_SWITCH_ON = "2026-06-13";
+
+/** 교체 이전 설치 id = Firebase uid 길이. 이후는 UUID(36). */
+export const LEGACY_INSTALL_ID_LENGTH = 28;
+
+/** 스트릭 격자 기본 길이(일). */
+export const STREAK_GRID_DAYS = 14;
+
+/** 리텐션 축. 두 축은 절대 한 표에 섞지 않는다 — 단위가 다르다. */
+export type RetentionAxis = "install" | "account";
+
+/**
+ * 축별 "활동" 정의. 화면이 이 문자열을 그대로 적는다 — 정의를 안 적으면 다음
+ * 사람이 다르게 읽고, 같은 화면이 다른 숫자로 보인다.
+ */
+export const ACTIVITY_DEFINITION_INSTALL =
+  "활동 = 그날 status=\"working\" 하트비트 ≥1건 **또는** 이벤트 ≥1건. " +
+  "하트비트가 떠 있기만 한 날은 활동이 아니다 — 실측에서 하트비트 35,170건 중 " +
+  "working 0건·이벤트 0건인 좀비 프로세스가 14일 중 13일 '활동'으로 잡혔다.";
+
+export const ACTIVITY_DEFINITION_ACCOUNT =
+  "활동 = 그날 cost_logs 에 과금된 모델 호출 ≥1건. 계정 축에는 하트비트가 없어 " +
+  "좀비 문제가 발생하지 않는다(호출 기록 자체가 실사용의 증거다).";
+
+export function activityDefinitionFor(axis: RetentionAxis): string {
+  return axis === "install"
+    ? ACTIVITY_DEFINITION_INSTALL
+    : ACTIVITY_DEFINITION_ACCOUNT;
+}
+
+/** 격자 기호 범례 — 화면과 계산이 같은 문자를 쓰게 한다. */
+export const STREAK_GRID_LEGEND =
+  "x = 활동(정의 충족) · ~ = 하트비트만 있고 활동 아님 · . = 아무 신호 없음";
+
+// ── 날짜 유틸(UTC, 순수) ─────────────────────────────────────────────────────
+// BQ 는 DATE 를 'YYYY-MM-DD' 로 준다. 여기서는 문자열↔일련번호 변환만 한다.
+
+const MS_PER_DAY = 86_400_000;
+
+/** 'YYYY-MM-DD' → epoch 기준 일련번호. 형식이 아니면 null. */
+export function dayNumber(date: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const ms = Date.parse(`${date}T00:00:00Z`);
+  return Number.isNaN(ms) ? null : Math.floor(ms / MS_PER_DAY);
+}
+
+/** 일련번호 → 'YYYY-MM-DD'. */
+export function dayString(n: number): string {
+  return new Date(n * MS_PER_DAY).toISOString().slice(0, 10);
+}
+
+/** 두 날짜 사이 일수(b - a). 형식 오류면 null. */
+export function daysBetween(a: string, b: string): number | null {
+  const na = dayNumber(a);
+  const nb = dayNumber(b);
+  return na == null || nb == null ? null : nb - na;
+}
+
+// ── 안정 라벨 ────────────────────────────────────────────────────────────────
+// ★원시 식별자(uid/UUID/이메일)는 응답에도 화면에도 절대 나가지 않는다. 대신
+// 결정적 해시 접두를 쓴다. 순번이 아니라 해시인 이유는 **다음 조회에서도 같은
+// 사람이 같은 라벨**이어야 시계열 추적이 되기 때문이다 — 순번은 조회 창이
+// 바뀌거나 신규 유닛이 끼면 통째로 밀린다.
+//
+// 라벨 규칙은 고정이다. 바꾸면 과거 스크린샷·메모와 대조가 불가능해지므로,
+// 규칙을 바꿔야 할 땐 VERSION 을 올려 "다른 규칙" 임을 명시적으로 드러낸다.
+export const ANALYTICS_LABEL_VERSION = "v1";
+
+const LABEL_PREFIX: Record<RetentionAxis, string> = {
+  install: "I",
+  account: "A",
+};
+
+/**
+ * 원시 식별자 → 안정 라벨(예: "I-3f9a1c").
+ *
+ * 같은 (version, axis, raw) 면 언제 어디서 불러도 같은 값이다. 역산은 원시
+ * 식별자 후보 목록을 이미 가진 쪽만 가능한데, 이 응답을 받는 쪽은 requireAdmin
+ * 을 통과한 운영자뿐이라 그 경로로 새로 새는 정보는 없다.
+ */
+export function analyticsUnitLabel(axis: RetentionAxis, raw: string): string {
+  const digest = createHash("sha256")
+    .update(`${ANALYTICS_LABEL_VERSION}:${axis}:${raw}`)
+    .digest("hex")
+    .slice(0, 6);
+  return `${LABEL_PREFIX[axis]}-${digest}`;
+}
+
+// ── 입력 shape ───────────────────────────────────────────────────────────────
+
+/**
+ * (유닛 × 날짜) 활동 집계 한 줄. index.ts 가 BQ 에서 이 모양으로 뽑아 준다.
+ *
+ * `unit` 은 **원시 식별자**다 — 여기서 라벨로 바꾸고 밖으로는 내보내지 않는다.
+ * 신호 3종의 의미는 축마다 다르다:
+ *   - install : workingSignals=status="working" 하트비트 수 /
+ *               presenceSignals=전체 하트비트 수 / eventSignals=events 행 수
+ *   - account : workingSignals=presenceSignals=과금 호출 수 / eventSignals=0
+ */
+export type UnitDayActivityRow = {
+  unit?: unknown;
+  date?: unknown;
+  workingSignals?: unknown;
+  presenceSignals?: unknown;
+  eventSignals?: unknown;
+};
+
+/** 설치 ↔ 계정 조인 후보 한 줄(agentId 다리). */
+export type InstallAccountMappingRow = {
+  installUnit?: unknown;
+  accountUnit?: unknown;
+  joins?: unknown;
+};
+
+export type StreakRetentionInput = {
+  axis: RetentionAxis;
+  /** 'YYYY-MM-DD'(UTC). 호출측이 주입한다 — 순수 함수를 시계에 묶지 않는다. */
+  today: string;
+  rows: ReadonlyArray<UnitDayActivityRow>;
+  /**
+   * 코호트 창(일). 첫 활동일이 최근 N일 안인 유닛만 D7/D14 코호트에 넣는다.
+   * 창 밖에서 시작한 유닛은 조용히 빼지 않고 unitsBeforeWindow 로 센다.
+   */
+  cohortWindowDays: number;
+  /**
+   * 운영자로 판정된 원시 unit 들. includeAdmin=true 면 호출측이 빈 배열을 준다
+   * (제외 안 함). 설치 축에서는 agentId 다리로 역추적한 목록이라 완전하지 않다 —
+   * 그 불완전성은 mapping.unmappedInstalls 로 화면에 드러난다.
+   */
+  adminUnits?: ReadonlyArray<string>;
+  /** 설치→계정 조인 후보(설치 축에서만 의미 있다). */
+  mappingRows?: ReadonlyArray<InstallAccountMappingRow>;
+  /** 격자 길이(기본 STREAK_GRID_DAYS). */
+  gridDays?: number;
+};
+
+// ── 출력 shape ───────────────────────────────────────────────────────────────
+
+/**
+ * ★비율은 절대 홀로 나가지 않는다. 분자·분모를 항상 달고 다닌다.
+ * display 는 화면이 그대로 찍을 수 있는 "1/2 (50%)" 문자열이다.
+ */
+export type RetentionCountedRate = {
+  numerator: number;
+  denominator: number;
+  /** 분모 0 이면 null — 0% 가 아니다. */
+  rate: number | null;
+  display: string;
+};
+
+export function countedRate(
+  numerator: number,
+  denominator: number,
+): RetentionCountedRate {
+  const rate = denominator > 0 ? numerator / denominator : null;
+  const pct = rate == null ? "—" : `${(rate * 100).toFixed(1)}%`;
+  return {
+    numerator,
+    denominator,
+    rate,
+    display: `${numerator}/${denominator} (${pct})`,
+  };
+}
+
+export type RetentionHorizonKey = "d1" | "d7" | "d14" | "d30";
+
+/**
+ * 한 지평(D7 등)의 결과.
+ *
+ * ★두 정의를 **둘 다** 낸다. 업계에 두 정의가 다 쓰이고, 하나만 내면 다음
+ * 사람이 다르게 읽는다. 표본이 작을수록 둘의 차이가 커서 어느 쪽을 골랐는지가
+ * 결론을 바꾼다 — 그래서 고르지 않고 나란히 보여 준다.
+ *   - exact  : 첫 활동일 + N일 **당일**에 활동 (bracket/classic 정의)
+ *   - window : 첫 활동일 다음날 ~ +N일 **사이 하루라도** 활동 (rolling/range 정의)
+ */
+export type StreakRetentionHorizon = {
+  key: RetentionHorizonKey;
+  days: number;
+  /** 아직 D+N 일이 오지 않아 판정 불가한 유닛 수. 분모에서 뺀다. */
+  pending: number;
+  exact: RetentionCountedRate;
+  window: RetentionCountedRate;
+};
+
+export type StreakUnitMappingStatus =
+  | "mapped"
+  | "ambiguous"
+  | "unmapped"
+  | "n/a";
+
+export type StreakUnit = {
+  /** 안정 라벨. 원시 식별자는 여기 없다. */
+  label: string;
+  axis: RetentionAxis;
+  /** 첫 "활동" 일. 활동이 한 번도 없으면 null(=좀비). */
+  firstActive: string | null;
+  lastActive: string | null;
+  /** 활동 정의를 충족한 날 수. */
+  activeDays: number;
+  /** working 신호가 있던 날 수. */
+  workingDays: number;
+  /** 어떤 신호든(하트비트 포함) 있던 날 수. activeDays 와 벌어지면 좀비 신호다. */
+  presentDays: number;
+  maxStreak: number;
+  /** 오늘/어제까지 이어진 연속일. 끊겼으면 0 — 과거 연속은 maxStreak 에 있다. */
+  currentStreak: number;
+  daysSinceLastActive: number | null;
+  /** 최근 gridDays 일 격자. STREAK_GRID_LEGEND 참조. */
+  grid: string;
+  gridStart: string;
+  gridEnd: string;
+  /**
+   * ★격자 구간에서 하트비트만 있고 활동이 0 — 사용자가 아니라 떠 있는 프로세스.
+   *
+   * 판정을 **격자 구간(최근 gridDays)** 으로 잡는 이유: 실측의 그 설치는 전 기간
+   * 으로 보면 7월에 활동한 날이 며칠 있었고, 최근 35일이 순수 좀비였다. 평생
+   * 기준으로 재면 "좀비 0" 이라고 뜨는데 격자에는 좀비가 13칸 그려진다 — 헤드라인
+   * 숫자와 눈에 보이는 격자가 어긋나면 헤드라인 쪽을 믿게 된다. 화면이 보여주는
+   * 구간과 같은 구간으로 센다.
+   *
+   * ★이 플래그는 설명용이다. 코호트 제외는 이 플래그가 아니라 활동 정의 자체가
+   * 한다(하트비트만 있는 날은 애초에 활동일이 아니다) — 플래그를 지워도 숫자는
+   * 부풀지 않는다.
+   */
+  zombie: boolean;
+  /** 운영자로 판정돼 코호트에서 빠진 유닛. */
+  adminExcluded: boolean;
+  /** 2026-06-13 이전 식별자 스킴(Firebase uid 28자)으로 만들어진 유닛. */
+  legacyIdScheme: boolean;
+  /**
+   * ★경계에서 끊긴 구 스킴 유닛. 이 "이탈" 은 이탈이 아니라 id 교체일 가능성이
+   * 높다 — 실측에서 실제로 그랬다. 이탈 근거로 쓰면 안 된다.
+   */
+  suspectedIdSwitchChurn: boolean;
+  /** 코호트 창(cohortWindowDays) 안에서 시작했는가. */
+  inCohortWindow: boolean;
+  /** 설치→계정 매핑(설치 축에서만). 못 붙였으면 null + status 로 밝힌다. */
+  mappedAccountLabel: string | null;
+  mappingStatus: StreakUnitMappingStatus;
+};
+
+export type InstallAccountMappingSummary = {
+  /** 계정에 붙은 설치 수. */
+  mappedInstalls: number;
+  /** 여러 계정에 걸쳐 모호한 설치 수(우세 계정으로 표시하되 플래그를 남긴다). */
+  ambiguousInstalls: number;
+  /** ★못 붙인 설치 수. 조용히 빼면 인원이 줄어 보인다 — 세어서 화면에 남긴다. */
+  unmappedInstalls: number;
+  note: string;
+};
+
+export type IdentitySchemeBoundary = {
+  date: string;
+  /** 구 스킴(uid 28자) 유닛 수. */
+  legacyUnits: number;
+  /** 신 스킴(UUID) 유닛 수. */
+  currentUnits: number;
+  /** 경계에서 끊긴 구 스킴 유닛 수 — 이탈로 읽으면 안 되는 것들. */
+  suspectedIdSwitchChurn: number;
+  note: string;
+};
+
+export type StreakRetentionAxisResult = {
+  axis: RetentionAxis;
+  activityDefinition: string;
+  gridLegend: string;
+  gridDays: number;
+  cohortWindowDays: number;
+  /** 관측된 전체 유닛 수(좀비·운영자·창 밖 전부 포함). */
+  unitsObserved: number;
+  /** 격자 구간에서 하트비트만 있고 활동이 0 인 유닛 수. */
+  unitsZombie: number;
+  /** 운영자로 판정돼 빠진 유닛 수. */
+  unitsAdminExcluded: number;
+  /** 코호트 창보다 먼저 시작해 코호트에서 빠진 유닛 수. */
+  unitsBeforeWindow: number;
+  /** 최종 코호트 모수. ★모든 비율의 분모 뿌리다. */
+  unitsCohort: number;
+  horizons: StreakRetentionHorizon[];
+  /** 스트릭 격자 — 좀비·운영자도 플래그를 달고 전부 들어온다(숨기지 않는다). */
+  units: StreakUnit[];
+  identityScheme: IdentitySchemeBoundary;
+  mapping: InstallAccountMappingSummary | null;
+  /** 화면이 그대로 적어야 하는 경고들. */
+  notes: string[];
+};
+
+const HORIZON_DAYS: ReadonlyArray<{ key: RetentionHorizonKey; days: number }> = [
+  { key: "d1", days: 1 },
+  { key: "d7", days: 7 },
+  { key: "d14", days: 14 },
+  { key: "d30", days: 30 },
+];
+
+type UnitAccumulator = {
+  raw: string;
+  /** dayNumber → 신호 합계 */
+  byDay: Map<number, { working: number; presence: number; events: number }>;
+};
+
+function foldUnitDays(
+  rows: ReadonlyArray<UnitDayActivityRow>,
+): Map<string, UnitAccumulator> {
+  const units = new Map<string, UnitAccumulator>();
+  for (const row of rows) {
+    const raw = coerceStr(row.unit);
+    const date = coerceStr(row.date);
+    if (raw === "" || raw === "anon") continue;
+    const dn = dayNumber(date);
+    if (dn == null) continue;
+    let acc = units.get(raw);
+    if (!acc) {
+      acc = { raw, byDay: new Map() };
+      units.set(raw, acc);
+    }
+    const cur = acc.byDay.get(dn) ?? { working: 0, presence: 0, events: 0 };
+    cur.working += coerceNumber(row.workingSignals);
+    cur.presence += coerceNumber(row.presenceSignals);
+    cur.events += coerceNumber(row.eventSignals);
+    acc.byDay.set(dn, cur);
+  }
+  return units;
+}
+
+/**
+ * 설치→계정 매핑을 접는다. 한 설치가 여러 계정에 걸리면 조인 수가 가장 많은
+ * 계정을 쓰되 ambiguous 로 표시한다 — 조용히 하나를 고르면 그게 사실처럼 보인다.
+ */
+function foldInstallAccountMapping(
+  rows: ReadonlyArray<InstallAccountMappingRow>,
+): Map<string, { account: string; ambiguous: boolean }> {
+  const byInstall = new Map<string, Map<string, number>>();
+  for (const row of rows) {
+    const installUnit = coerceStr(row.installUnit);
+    const accountUnit = coerceStr(row.accountUnit);
+    if (installUnit === "" || accountUnit === "") continue;
+    const joins = Math.max(1, coerceNumber(row.joins));
+    const bucket = byInstall.get(installUnit) ?? new Map<string, number>();
+    bucket.set(accountUnit, (bucket.get(accountUnit) ?? 0) + joins);
+    byInstall.set(installUnit, bucket);
+  }
+  const out = new Map<string, { account: string; ambiguous: boolean }>();
+  for (const [installUnit, bucket] of byInstall) {
+    const ranked = Array.from(bucket.entries()).sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+    );
+    const top = ranked[0];
+    if (!top) continue;
+    out.set(installUnit, { account: top[0], ambiguous: ranked.length > 1 });
+  }
+  return out;
+}
+
+/** 정렬된 일련번호 배열에서 최대 연속 길이와 마지막 연속 길이를 구한다. */
+function streaksOf(sortedDays: number[]): { max: number; last: number } {
+  if (sortedDays.length === 0) return { max: 0, last: 0 };
+  let max = 1;
+  let run = 1;
+  for (let i = 1; i < sortedDays.length; i += 1) {
+    run = sortedDays[i] === sortedDays[i - 1] + 1 ? run + 1 : 1;
+    if (run > max) max = run;
+  }
+  return { max, last: run };
+}
+
+/**
+ * D7/D14 리텐션 + 스트릭 격자를 한 축에 대해 만든다.
+ *
+ * 순수 함수다 — 시계도, BQ 도, Firestore 도 건드리지 않는다. `today` 는 반드시
+ * 주입받는다(테스트가 시계에 흔들리면 이런 지표는 검증할 수 없다).
+ */
+export function buildStreakRetention(
+  input: StreakRetentionInput,
+): StreakRetentionAxisResult {
+  const { axis } = input;
+  const gridDays = Math.max(1, Math.floor(input.gridDays ?? STREAK_GRID_DAYS));
+  const cohortWindowDays = Math.max(1, Math.floor(input.cohortWindowDays));
+  const todayNum = dayNumber(input.today);
+  const switchNum = dayNumber(IDENTITY_SCHEME_SWITCH_ON);
+  const adminSet = new Set(input.adminUnits ?? []);
+  const mapping =
+    axis === "install"
+      ? foldInstallAccountMapping(input.mappingRows ?? [])
+      : new Map<string, { account: string; ambiguous: boolean }>();
+
+  const folded = foldUnitDays(input.rows);
+
+  // 라벨 충돌은 사실상 없지만(6 hex), 생겨도 결정적으로 갈라야 다음 조회에서
+  // 같은 라벨이 유지된다 — 원시값 정렬 순서로 접미사를 붙인다.
+  const labelBuckets = new Map<string, string[]>();
+  for (const raw of Array.from(folded.keys()).sort()) {
+    const base = analyticsUnitLabel(axis, raw);
+    const bucket = labelBuckets.get(base) ?? [];
+    bucket.push(raw);
+    labelBuckets.set(base, bucket);
+  }
+  const labelOf = new Map<string, string>();
+  for (const [base, raws] of labelBuckets) {
+    raws.forEach((raw, i) => {
+      labelOf.set(raw, i === 0 ? base : `${base}#${i + 1}`);
+    });
+  }
+
+  // 지평 판정에 쓸 유닛별 활동일 집합/첫 활동일. StreakUnit 에는 원시 일련번호를
+  // 싣지 않으므로(응답 shape 를 얇게 유지) 계산 중에만 옆에 들고 간다.
+  const unitActiveSets = new Map<string, Set<number>>();
+  const unitFirstNums = new Map<string, number | null>();
+
+  const units: StreakUnit[] = [];
+  for (const acc of folded.values()) {
+    const days = Array.from(acc.byDay.keys()).sort((a, b) => a - b);
+    // ★활동 정의는 여기 한 곳에만 있다. 하트비트 존재는 활동이 아니다.
+    const activeDays = days.filter((d) => {
+      const s = acc.byDay.get(d);
+      return s != null && (s.working >= 1 || s.events >= 1);
+    });
+    const workingDays = days.filter(
+      (d) => (acc.byDay.get(d)?.working ?? 0) >= 1,
+    );
+    const presentDays = days.filter((d) => {
+      const s = acc.byDay.get(d);
+      return s != null && (s.working >= 1 || s.events >= 1 || s.presence >= 1);
+    });
+
+    const activeSet = new Set(activeDays);
+    const firstNum = activeDays.length > 0 ? activeDays[0] : null;
+    const lastNum =
+      activeDays.length > 0 ? activeDays[activeDays.length - 1] : null;
+    const { max: maxStreak, last: lastRun } = streaksOf(activeDays);
+    const daysSinceLastActive =
+      lastNum != null && todayNum != null ? todayNum - lastNum : null;
+    // 끊긴 연속을 "현재 연속" 으로 부르지 않는다. 부분 집계된 오늘 때문에
+    // 어제까지는 살아 있는 것으로 본다.
+    const currentStreak =
+      daysSinceLastActive != null && daysSinceLastActive <= 1 ? lastRun : 0;
+
+    const gridEndNum = todayNum ?? lastNum ?? 0;
+    const gridStartNum = gridEndNum - (gridDays - 1);
+    let grid = "";
+    for (let d = gridStartNum; d <= gridEndNum; d += 1) {
+      const s = acc.byDay.get(d);
+      if (s != null && (s.working >= 1 || s.events >= 1)) grid += "x";
+      else if (s != null && s.presence >= 1) grid += "~";
+      else grid += ".";
+    }
+    // 좀비 판정은 화면이 보여주는 격자와 **같은 구간**으로 잰다(위 필드 주석 참조).
+    const zombie = grid.includes("~") && !grid.includes("x");
+
+    const legacyIdScheme =
+      axis === "install" && acc.raw.length === LEGACY_INSTALL_ID_LENGTH;
+    const suspectedIdSwitchChurn =
+      legacyIdScheme &&
+      lastNum != null &&
+      switchNum != null &&
+      lastNum <= switchNum;
+
+    const inCohortWindow =
+      firstNum != null &&
+      todayNum != null &&
+      todayNum - firstNum <= cohortWindowDays;
+
+    const mapped = mapping.get(acc.raw);
+    const mappingStatus: StreakUnitMappingStatus =
+      axis !== "install"
+        ? "n/a"
+        : mapped == null
+          ? "unmapped"
+          : mapped.ambiguous
+            ? "ambiguous"
+            : "mapped";
+
+    units.push({
+      label: labelOf.get(acc.raw) ?? analyticsUnitLabel(axis, acc.raw),
+      axis,
+      firstActive: firstNum == null ? null : dayString(firstNum),
+      lastActive: lastNum == null ? null : dayString(lastNum),
+      activeDays: activeDays.length,
+      workingDays: workingDays.length,
+      presentDays: presentDays.length,
+      maxStreak,
+      currentStreak,
+      daysSinceLastActive,
+      grid,
+      gridStart: dayString(gridStartNum),
+      gridEnd: dayString(gridEndNum),
+      zombie,
+      adminExcluded: adminSet.has(acc.raw),
+      legacyIdScheme,
+      suspectedIdSwitchChurn,
+      inCohortWindow,
+      mappedAccountLabel:
+        mapped == null ? null : analyticsUnitLabel("account", mapped.account),
+      mappingStatus,
+    });
+
+    // 지평 판정용 활동 집합을 유닛에 잠시 붙여 둘 필요 없이, 아래에서 다시 쓴다.
+    unitActiveSets.set(units[units.length - 1].label, activeSet);
+    unitFirstNums.set(units[units.length - 1].label, firstNum);
+  }
+
+  // 정렬: 최근 활동 우선 → 최대연속 → 라벨(결정적).
+  units.sort(
+    (a, b) =>
+      (a.daysSinceLastActive ?? 9_999) - (b.daysSinceLastActive ?? 9_999) ||
+      b.maxStreak - a.maxStreak ||
+      a.label.localeCompare(b.label),
+  );
+
+  // ── 코호트 구성 ────────────────────────────────────────────────────────────
+  // 좀비(활동 0)는 활동 정의 자체로 이미 걸러진다 — firstActive 가 null 이다.
+  // 운영자 제외와 창 밖 유닛은 세어서 밖으로 내보낸다(조용히 빼지 않는다).
+  const unitsZombie = units.filter((u) => u.zombie).length;
+  const unitsAdminExcluded = units.filter((u) => u.adminExcluded).length;
+  const cohortCandidates = units.filter(
+    (u) => u.firstActive != null && !u.adminExcluded,
+  );
+  const unitsBeforeWindow = cohortCandidates.filter(
+    (u) => !u.inCohortWindow,
+  ).length;
+  const cohort = cohortCandidates.filter((u) => u.inCohortWindow);
+
+  const horizons: StreakRetentionHorizon[] = HORIZON_DAYS.map(
+    ({ key, days }) => {
+      let pending = 0;
+      let exactNum = 0;
+      let exactDen = 0;
+      let windowNum = 0;
+      let windowDen = 0;
+      for (const u of cohort) {
+        const firstNum = unitFirstNums.get(u.label);
+        const activeSet = unitActiveSets.get(u.label);
+        if (firstNum == null || activeSet == null || todayNum == null) continue;
+        // ★관측창 미도달은 분모에 넣지 않는다. 넣으면 최근 유입이 자동 이탈이 된다.
+        if (todayNum - firstNum < days) {
+          pending += 1;
+          continue;
+        }
+        exactDen += 1;
+        windowDen += 1;
+        if (activeSet.has(firstNum + days)) exactNum += 1;
+        for (let d = firstNum + 1; d <= firstNum + days; d += 1) {
+          if (activeSet.has(d)) {
+            windowNum += 1;
+            break;
+          }
+        }
+      }
+      return {
+        key,
+        days,
+        pending,
+        exact: countedRate(exactNum, exactDen),
+        window: countedRate(windowNum, windowDen),
+      };
+    },
+  );
+
+  const legacyUnits = units.filter((u) => u.legacyIdScheme).length;
+  const identityScheme: IdentitySchemeBoundary = {
+    date: IDENTITY_SCHEME_SWITCH_ON,
+    legacyUnits,
+    currentUnits: units.length - legacyUnits,
+    suspectedIdSwitchChurn: units.filter((u) => u.suspectedIdSwitchChurn)
+      .length,
+    note:
+      `★${IDENTITY_SCHEME_SWITCH_ON} 에 설치 식별자 스킴이 Firebase uid(28자) → ` +
+      "UUID(36자) 로 바뀌었다. 이 경계를 넘겨 이어붙이면 **같은 사람이 이탈한 것처럼** " +
+      "보인다 — 실측에서 실제로 그렇게 보였다. 경계 이전 유닛은 따로 표시하고, " +
+      "두 id 를 같은 사람으로 잇지는 않는다(근거 없이 동일인이라 단정하는 쪽이 더 위험하다).",
+  };
+
+  const mappingSummary: InstallAccountMappingSummary | null =
+    axis === "install"
+      ? {
+          mappedInstalls: units.filter((u) => u.mappingStatus === "mapped")
+            .length,
+          ambiguousInstalls: units.filter(
+            (u) => u.mappingStatus === "ambiguous",
+          ).length,
+          unmappedInstalls: units.filter((u) => u.mappingStatus === "unmapped")
+            .length,
+          note:
+            "설치→계정은 agent_heartbeats.agentId ↔ cost_logs.agentId 조인으로만 " +
+            "붙는다. ★2026-08 부터 익명 세계의 agentId 는 HMAC 가명이라 그 조인이 " +
+            "성립하지 않는다 — 즉 이 다리는 가명화 이전 과거 row 에서만 걸리고, " +
+            "시간이 지날수록 '매핑 불가' 가 늘어난다. 못 붙인 설치를 빼지 않고 " +
+            "세어서 보여주는 이유다(조용히 빼면 인원이 줄어 보인다).",
+        }
+      : null;
+
+  const notes: string[] = [activityDefinitionFor(axis)];
+  notes.push(
+    "★비율은 언제나 분자/분모와 함께 읽어라. 표본이 한 자릿수라 퍼센트 하나만 " +
+      "보면 실제보다 훨씬 강한 결론이 된다 — 분모 0 이면 0% 가 아니라 '—'(판단 불가)다.",
+  );
+  notes.push(
+    "D7/D14 는 두 정의를 나란히 낸다. exact = 첫 활동일 +N일 **당일** 활동, " +
+      "window = 첫 활동일 다음날부터 +N일 **사이 하루라도** 활동. 표본이 작을수록 " +
+      "두 값이 크게 벌어지므로 어느 쪽을 인용하는지 반드시 같이 말해야 한다.",
+  );
+  notes.push(
+    `관측창이 아직 안 찬 유닛은 분모에서 빼고 pending 으로 센다 — 가입 3일차에게 ` +
+      "D7 을 물으면 무조건 이탈로 찍히기 때문이다.",
+  );
+  if (axis === "install") {
+    notes.push(
+      "설치 축의 운영자 제외는 agentId 다리로 역추적한 것이라 완전하지 않다. " +
+        "매핑 불가 설치는 운영자인지 아닌지 판정할 수 없어 그대로 남는다 — " +
+        "그만큼 이 축은 운영자 도그푸드 쪽으로 낙관 편향될 수 있다.",
+    );
+  } else {
+    notes.push(
+      "계정 축의 유일한 소스는 cost_logs.userId 다. events.metadata.accountUserId " +
+        "는 5일치 uid 1개뿐이라 쓰지 않는다. " +
+        EVENTS_ACCOUNT_AXIS_NOTE,
+    );
+  }
+
+  return {
+    axis,
+    activityDefinition: activityDefinitionFor(axis),
+    gridLegend: STREAK_GRID_LEGEND,
+    gridDays,
+    cohortWindowDays,
+    unitsObserved: units.length,
+    unitsZombie,
+    unitsAdminExcluded,
+    unitsBeforeWindow,
+    unitsCohort: cohort.length,
+    horizons,
+    units,
+    identityScheme,
+    mapping: mappingSummary,
+    notes,
+  };
 }

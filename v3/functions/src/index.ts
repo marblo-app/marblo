@@ -43,7 +43,11 @@ import {
   type ReleaseVersionSourceRow,
   type ReleaseAdoptionSourceRow,
   type CostByDayModelSourceRow,
+  buildStreakRetention,
+  STREAK_GRID_DAYS,
   type RetentionCohortSourceRow,
+  type UnitDayActivityRow,
+  type InstallAccountMappingRow,
   type ActiveByDaySourceRow,
   type ThirtyDayRetentionSourceRow,
 } from "./adminAnalytics";
@@ -9216,6 +9220,209 @@ export const getAdminRetentionCohorts = functions
       },
       cohorts: buildRetentionCohorts(cohortRows as RetentionCohortSourceRow[]),
       activationGate: buildActivationGateFunnel(gateRows[0]),
+    };
+  });
+
+/**
+ * getAdminStreakRetention — D7/D14 리텐션 + 사용자별 연속사용(스트릭) 격자.
+ *
+ * 사장님이 D7·D14 를 "매우 중요한 지표" 라고 했는데 지금까지 이 숫자는 사람이
+ * BQ 를 직접 쳐야만 나왔다(분석 티켓 9Ns5DYu2hTXlGimIUI8N). 그 조회를 화면으로
+ * 옮긴다. 집계·판정은 전부 adminAnalytics.buildStreakRetention(순수 로직,
+ * node --test 검증)이 하고, 여기서는 BQ 에서 (유닛 × 날짜) 신호만 뽑는다.
+ *
+ * ── 위의 getAdminRetentionCohorts 와 무엇이 다른가 ──────────────────────────
+ * 그쪽은 계정 identity 한 축(events.metadata.accountUserId + cost_logs)만 보고,
+ * 활동을 "행이 있었는가" 로 센다. 여기는 두 가지가 다르다:
+ *   1) 설치 축과 계정 축을 **분리해서** 각각 낸다(한 표에 섞으면 단위가 섞인다).
+ *   2) 설치 축의 활동을 status="working" 또는 이벤트로 정의한다 — 하트비트가
+ *      떠 있기만 한 좀비 프로세스를 코호트에서 빼기 위해서다(실측에서 어떤
+ *      설치가 14일 중 13일 "활동" 이었는데 working 0건·이벤트 0건이었다).
+ * 그리고 모든 비율을 분자/분모와 함께 낸다 — 계정 5개, 유의미 사용 2개인
+ * 표본에서 "50%" 만 띄우는 게 이 화면의 가장 큰 위험이다.
+ *
+ * ── 축별 소스 ──────────────────────────────────────────────────────────────
+ *   설치 축 = agent_heartbeats(working/전체 하트비트) + events(이벤트 수).
+ *             둘 다 userId 가 익명 설치 ID 다(index.ts:6555 userId = clientId).
+ *   계정 축 = cost_logs.userId(=Firebase uid). ★events.metadata.accountUserId 는
+ *             실측상 2026-08-06~08-10 5일간 uid 1개에만 존재해 축으로 쓸 수 없다
+ *             (전 구간 null). flow_executions 는 코드상 계정 축이 맞지만 row 0.
+ *
+ * ★원시 식별자는 응답에 싣지 않는다. 조회한 uid/UUID 는 이 함수 안에서만 살고,
+ * 밖으로 나가는 것은 buildStreakRetention 이 만든 안정 라벨(I-xxxxxx/A-xxxxxx)뿐이다.
+ *
+ * params: { days?: number, includeAdmin?: boolean } (기본 30, 운영자 제외)
+ */
+export const getAdminStreakRetention = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const rangeDays = parseAnalyticsDays(data);
+    const includeAdmin = parseIncludeAdmin(data);
+    // ★활동 이력은 조회 창이 아니라 **전 구간**을 봐야 한다. 첫 활동일과 최대
+    // 연속일은 창을 자르는 순간 거짓이 된다(창 시작일이 첫 활동일로 둔갑한다).
+    // rangeDays 는 "어느 코호트를 D7/D14 표에 넣을지" 만 정한다.
+    const historyDays = 400;
+    const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
+    const costTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\``;
+    const heartbeatsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_HEARTBEATS_TABLE}\``;
+
+    // 설치 축: working 하트비트 / 전체 하트비트 / 이벤트를 (설치 × 날짜)로.
+    // 세 신호를 나눠 담는 이유가 곧 좀비 판정이다 — presence 만 있고 working·
+    // event 가 0 인 날은 "활동" 이 아니다.
+    const installActivityQuery = `
+      WITH beats AS (
+        SELECT
+          userId AS unit,
+          DATE(timestamp) AS activity_date,
+          COUNTIF(status = 'working') AS workingSignals,
+          COUNT(*) AS presenceSignals,
+          0 AS eventSignals
+        FROM ${heartbeatsTable}
+        WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @historyDays DAY)
+          AND userId IS NOT NULL AND userId != '' AND userId != 'anon'
+        GROUP BY unit, activity_date
+      ),
+      evs AS (
+        SELECT
+          userId AS unit,
+          DATE(timestamp) AS activity_date,
+          0 AS workingSignals,
+          0 AS presenceSignals,
+          COUNT(*) AS eventSignals
+        FROM ${eventsTable}
+        WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @historyDays DAY)
+          AND userId IS NOT NULL AND userId != '' AND userId != 'anon'
+        GROUP BY unit, activity_date
+      )
+      SELECT
+        unit,
+        FORMAT_DATE('%F', activity_date) AS date,
+        SUM(workingSignals) AS workingSignals,
+        SUM(presenceSignals) AS presenceSignals,
+        SUM(eventSignals) AS eventSignals
+      FROM (SELECT * FROM beats UNION ALL SELECT * FROM evs)
+      GROUP BY unit, date
+    `;
+
+    // 계정 축: cost_logs 행 자체가 실사용의 증거다(과금된 모델 호출). 그래서
+    // working/presence 를 같은 값으로 채운다 — 이 축에는 좀비가 없다.
+    const accountActivityQuery = `
+      SELECT
+        userId AS unit,
+        FORMAT_DATE('%F', DATE(timestamp)) AS date,
+        COUNT(*) AS workingSignals,
+        COUNT(*) AS presenceSignals,
+        0 AS eventSignals
+      FROM ${costTable}
+      WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @historyDays DAY)
+        AND userId IS NOT NULL AND userId != ''
+      GROUP BY unit, date
+    `;
+
+    // 설치 ↔ 계정 다리. ★2026-08 부터 익명 세계의 agentId 는 HMAC 가명이라
+    // (analyticsPseudonym.ts) 이 조인은 가명화 이전 과거 row 에서만 걸린다.
+    // 즉 시간이 지날수록 "매핑 불가" 가 늘어난다 — 그 사실을 숨기지 않고
+    // mapping.unmappedInstalls 로 화면에 그대로 내보낸다.
+    // ★양쪽을 DISTINCT (userId, agentId) 로 먼저 접고 조인한다. 원본끼리 바로
+    // 조인하면 agentId 하나가 하트비트 수만 건 × cost 수만 건의 곱집합으로
+    // 터진다(한 설치가 하트비트 35,000건을 남긴 실측이 있다). 접고 나면
+    // joins = 두 축이 공유하는 **서로 다른 agentId 수** 가 되어, 우세 계정을
+    // 고르는 신호로도 곱집합보다 정직하다.
+    const bridgeQuery = `
+      WITH install_agents AS (
+        SELECT DISTINCT userId AS installUnit, agentId
+        FROM ${heartbeatsTable}
+        WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @historyDays DAY)
+          AND agentId IS NOT NULL AND agentId != ''
+          AND userId IS NOT NULL AND userId != '' AND userId != 'anon'
+      ),
+      account_agents AS (
+        SELECT DISTINCT userId AS accountUnit, agentId
+        FROM ${costTable}
+        WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @historyDays DAY)
+          AND agentId IS NOT NULL AND agentId != ''
+          AND userId IS NOT NULL AND userId != ''
+      )
+      SELECT
+        i.installUnit AS installUnit,
+        a.accountUnit AS accountUnit,
+        COUNT(DISTINCT i.agentId) AS joins
+      FROM install_agents i
+      JOIN account_agents a USING (agentId)
+      GROUP BY installUnit, accountUnit
+    `;
+
+    const params = { historyDays };
+    const [installRows, accountRows, bridgeRows] =
+      await runAdminAnalyticsQueries([
+        { name: "streak.installActivity", query: installActivityQuery, params },
+        { name: "streak.accountActivity", query: accountActivityQuery, params },
+        { name: "streak.installAccountBridge", query: bridgeQuery, params },
+      ]);
+
+    const mappingRows = bridgeRows as InstallAccountMappingRow[];
+
+    // ── 운영자 제외 ──────────────────────────────────────────────────────────
+    // 계정 축은 uid 로 정확히 빠진다. 설치 축은 그렇지 않다: 익명 세계에는 uid 가
+    // 없어서 agentId 다리로 역추적해야 하고, 그 다리는 가명화 이후 끊겨 있다.
+    // 그래서 설치 축의 제외는 **불완전**하고, 화면은 그 불완전성을 mapping 요약과
+    // note 로 드러낸다(조용히 "제외했다" 고 말하는 쪽이 더 위험하다).
+    //
+    // 예외 하나: 2026-06-13 이전 설치 id 는 Firebase uid 그 자체였다(실측에서
+    // 운영자의 옛 설치 id 가 운영자 uid 와 동일했다). 그건 다리 없이 직접 빠진다.
+    const adminUid = includeAdmin ? null : getAdminExclusionUid();
+    const adminInstallUnits: string[] = [];
+    if (adminUid) {
+      for (const row of mappingRows) {
+        if (
+          typeof row.accountUnit === "string" &&
+          row.accountUnit === adminUid &&
+          typeof row.installUnit === "string" &&
+          row.installUnit !== ""
+        ) {
+          adminInstallUnits.push(row.installUnit);
+        }
+      }
+      adminInstallUnits.push(adminUid);
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const install = buildStreakRetention({
+      axis: "install",
+      today,
+      rows: installRows as UnitDayActivityRow[],
+      cohortWindowDays: rangeDays,
+      adminUnits: Array.from(new Set(adminInstallUnits)),
+      mappingRows,
+      gridDays: STREAK_GRID_DAYS,
+    });
+    const account = buildStreakRetention({
+      axis: "account",
+      today,
+      rows: accountRows as UnitDayActivityRow[],
+      cohortWindowDays: rangeDays,
+      adminUnits: adminUid ? [adminUid] : [],
+      gridDays: STREAK_GRID_DAYS,
+    });
+
+    return {
+      rangeDays,
+      generatedAt: new Date().toISOString(),
+      historyDays,
+      adminExcluded: {
+        applied: !includeAdmin,
+        uidFiltered: getAdminExclusionUid() != null,
+        // 익명 세계 자기제외는 은퇴했지만(U5OPOKf0D3I2TSRP8yUq), 이 지표는 가명화
+        // 이전 과거 row 의 agentId 다리로 **부분적으로만** 되살린다. 몇 개를
+        // 실제로 지웠는지 세어서 내보낸다 — 0 이면 설치 축은 운영자 도그푸드를
+        // 포함한 숫자라는 뜻이다.
+        clientIdCount: adminUid
+          ? Math.max(0, new Set(adminInstallUnits).size - 1)
+          : 0,
+      },
+      install,
+      account,
     };
   });
 

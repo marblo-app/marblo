@@ -509,6 +509,75 @@ type BetaSegmentSummary = {
 
 ---
 
+## 8. `getAdminStreakRetention` — D7·D14 리텐션 + 연속사용 스트릭 (🟡 BQ)
+
+`{ days?: number, includeAdmin?: boolean }` → `{ rangeDays, generatedAt, historyDays, adminExcluded, install, account }`.
+`install` / `account` 는 같은 shape(`StreakRetentionAxisResult`)의 **별개 축**이다 — 한 표에
+섞지 않는다(설치 ≠ 사람 ≠ 계정. 실측에서 계정 1개가 설치 9대를 썼다).
+
+지금까지 D7·D14 는 사람이 BQ 를 직접 쳐야만 나왔다(분석 티켓 `9Ns5DYu2hTXlGimIUI8N`).
+그 조회를 화면으로 옮긴 콜러블이다. 위 `getAdminRetentionCohorts` 와 다른 점 셋:
+
+1. **활동 정의가 다르다.** 그쪽은 "행이 있었는가", 여기는
+   `status="working"` 하트비트 ≥1 **또는** 이벤트 ≥1.
+   > ★실측에서 어떤 설치가 14일 중 13일 "활동"으로 잡혔는데 하트비트 35,170건 중
+   > `working` 이 0건, 이벤트도 0건인 **좀비 프로세스**였다. 하트비트 존재를 세면
+   > 이런 게 코호트에 들어와 숫자를 부풀린다. 좀비는 활동일이 0 이 되어 정의만으로
+   > 코호트에서 빠지고, 화면에는 `zombie` 플래그로 남아 **왜 빠졌는지**가 보인다.
+2. **비율이 홀로 나가지 않는다.** 모든 값은
+   `{ numerator, denominator, rate, display: "1/2 (50.0%)" }`. `rate` 단독 필드는 없다.
+   분모 0 이면 `rate=null` / `display="0/0 (—)"` — **0% 가 아니라 판단 불가**다.
+   > ★실측 계정이 5개, 유의미 사용이 2개다. 이 화면의 가장 큰 위험은 작은 표본을
+   > 퍼센트로 크게 보여주는 것이다.
+3. **관측창 미도달을 분모에서 뺀다.** 가입 3일차에게 D7 을 물으면 무조건 이탈로
+   찍히므로, 판정 불가한 유닛은 `pending` 으로 따로 센다.
+
+`horizons[]` 는 D1/D7/D14/D30 각각에 대해 **두 정의를 다 낸다** — 업계에 둘 다 쓰이고,
+표본이 작을수록 갈려서 어느 쪽을 인용하느냐가 결론을 뒤집는다:
+
+| 필드 | 정의 |
+| --- | --- |
+| `exact` | 첫 활동일 **+N일 당일**에 활동 (bracket/classic) |
+| `window` | 첫 활동일 다음날 ~ +N일 **사이 하루라도** 활동 (rolling/range) |
+
+축별 소스와 한계:
+
+| 축 | 소스 | 한계 |
+| --- | --- | --- |
+| `install` | `agent_heartbeats`(working/전체) + `events` | `userId` 는 익명 설치 ID. 운영자 제외가 **불완전**하다(아래) |
+| `account` | `cost_logs.userId` (Firebase uid) | 유일한 계정 축. `events.metadata.accountUserId` 는 실측상 2026-08-06~08-10 **5일간 uid 1개**에만 존재해 쓸 수 없고, `flow_executions` 는 코드상 계정 축이 맞지만 **row 0** |
+
+**2026-06-13 식별자 스킴 교체.** 그 전 설치 id 는 Firebase uid(28자), 이후는 UUID(36자)다.
+`identityScheme` 요약과 유닛별 `legacyIdScheme` / `suspectedIdSwitchChurn` 플래그로 경계를
+표시한다.
+> ★이 경계를 넘겨 이어붙이면 **같은 사람이 이탈한 것처럼 보인다** — 실측에서 실제로
+> 그렇게 보였다. 그렇다고 두 id 를 같은 사람으로 잇지도 않는다(근거 없이 동일인이라
+> 단정하는 쪽이 더 위험하다). 끊긴 것을 끊긴 채로 두고, **왜 끊겼는지**를 표시한다.
+
+**`includeAdmin` 토글**(기본 false=제외)은 이 지표에도 걸린다. 계정 축은 uid 로 정확히
+빠진다. 설치 축은 익명 세계에 uid 가 없어 `agent_heartbeats.agentId ↔ cost_logs.agentId`
+다리로 역추적하고, 2026-06-13 이전 설치 id(=uid 그 자체)는 직접 뺀다.
+> ★그 다리는 2026-08 부터 익명 세계의 `agentId` 가 HMAC 가명이라(`analyticsPseudonym.ts`)
+> **가명화 이전 과거 row 에서만** 걸린다. 즉 설치 축의 운영자 제외는 불완전하고
+> 시간이 지날수록 더 불완전해진다. 숨기지 않고 `mapping.unmappedInstalls` 와
+> `adminExcluded.clientIdCount` 로 드러낸다 — 조용히 "제외했다"고 말하는 쪽이 더 위험하다.
+> 실측상 운영자가 전체 cost 행의 **99.95%** 라 포함/제외에 따라 화면이 완전히 달라진다.
+
+**원시 식별자는 응답에 없다.** uid/UUID 는 함수 안에서만 살고, 밖으로 나가는 것은
+`analyticsUnitLabel` 이 만든 안정 라벨(`I-3f9a1c` / `A-7c21bd` = `sha256("v1:axis:raw")`
+앞 6자리)뿐이다. 순번이 아니라 해시인 이유는 **다음 조회에서도 같은 사람이 같은 라벨**
+이어야 시계열 추적이 되기 때문이다 — 순번은 조회 창이 바뀌거나 신규 유닛이 끼면 통째로
+밀린다. 규칙은 `ANALYTICS_LABEL_VERSION` 으로 고정한다.
+
+`historyDays=400` 전 구간으로 첫 활동일·최대연속을 계산하고, `days` 는 D7/D14 표에 넣을
+코호트만 고른다(창을 자르면 창 시작일이 첫 활동일로 둔갑한다). 코호트 창 밖 유닛은
+`unitsBeforeWindow` 로 세어서 내보낸다 — 조용히 빼면 인원이 줄어 보인다.
+
+순수 조립은 `adminAnalytics.buildStreakRetention` (BQ/Firestore 무의존,
+`npm run test:admin-analytics`).
+
+---
+
 ## 범위 밖 (기획 §2.3 / §6 후속 티켓)
 
 - **안정성/에러 KPI(🔴):** Sentry 미설치 → v1 제외. 대시보드 안정성 섹션은 "미연동" 고정(T0-2/T3-6).

@@ -34,6 +34,16 @@ import {
   MULTI_AGENT_TARGET_WINDOW_MINUTES,
   MODEL_CONNECT_ANCHOR_EVENTS,
   modelConnectedPredicateSql,
+  buildStreakRetention,
+  analyticsUnitLabel,
+  countedRate,
+  dayNumber,
+  dayString,
+  daysBetween,
+  IDENTITY_SCHEME_SWITCH_ON,
+  STREAK_GRID_DAYS,
+  ACTIVITY_DEFINITION_INSTALL,
+  type UnitDayActivityRow,
 } from "./adminAnalytics";
 
 // ── parseIncludeAdmin ──────────────────────────────────────────────────────
@@ -1480,4 +1490,481 @@ test("코크핏은 stall 입력이 없으면 null(구버전 호출부 하위호�
       ?.stalledClients,
     7
   );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// D7/D14 리텐션 + 스트릭 (buildStreakRetention) — ticket b1L3L2zmL2HFWMo91BVr
+//
+// 이 블록이 지키는 것은 세 가지 함정이다. 전부 2026-08-21 BQ 실측에서 나왔다:
+//   1) 하트비트 존재를 활동으로 세면 좀비 프로세스가 코호트를 부풀린다.
+//   2) 분모를 숨기면 1/2 이 "50%" 로 보인다.
+//   3) 2026-06-13 식별자 교체를 이탈로 읽으면 안 된다.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── 날짜 유틸 ──────────────────────────────────────────────────────────────
+test("dayNumber/dayString round-trip and reject malformed dates", () => {
+  const n = dayNumber("2026-06-13");
+  assert.notEqual(n, null);
+  assert.equal(dayString(n as number), "2026-06-13");
+  assert.equal(dayNumber("2026-6-13"), null);
+  assert.equal(dayNumber("not-a-date"), null);
+  assert.equal(dayNumber(""), null);
+  assert.equal(daysBetween("2026-08-01", "2026-08-15"), 14);
+  assert.equal(daysBetween("2026-08-15", "2026-08-01"), -14);
+  assert.equal(daysBetween("bad", "2026-08-01"), null);
+});
+
+// ── countedRate: N 을 숨기지 않는다 ────────────────────────────────────────
+test("countedRate always carries numerator/denominator in display", () => {
+  assert.equal(countedRate(1, 2).display, "1/2 (50.0%)");
+  assert.equal(countedRate(1, 2).rate, 0.5);
+  assert.equal(countedRate(0, 3).display, "0/3 (0.0%)");
+});
+
+test("countedRate with zero denominator is '판단 불가', not 0%", () => {
+  const r = countedRate(0, 0);
+  // ★분모 0 을 0% 로 눕히면 "아무도 안 돌아왔다" 로 읽힌다. 다른 말이다.
+  assert.equal(r.rate, null);
+  assert.equal(r.display, "0/0 (—)");
+});
+
+// ── 라벨 안정성 ────────────────────────────────────────────────────────────
+test("analyticsUnitLabel is stable and never leaks the raw identifier", () => {
+  const raw = "b3f1c2d4-1111-2222-3333-444455556666";
+  const a = analyticsUnitLabel("install", raw);
+  const b = analyticsUnitLabel("install", raw);
+  // 같은 입력 → 같은 라벨. 다음 조회에서도 같은 사람이 같은 라벨이어야
+  // 시계열 추적이 된다.
+  assert.equal(a, b);
+  assert.match(a, /^I-[0-9a-f]{6}$/);
+  assert.ok(!a.includes(raw));
+  // 축이 다르면 다른 공간.
+  assert.notEqual(analyticsUnitLabel("account", raw), a);
+  assert.match(analyticsUnitLabel("account", raw), /^A-[0-9a-f]{6}$/);
+});
+
+// ── 테스트 픽스처 헬퍼 ─────────────────────────────────────────────────────
+function day(base: string, offset: number): string {
+  return dayString((dayNumber(base) as number) + offset);
+}
+/** 활동일 목록 → (유닛×날짜) 행. working 신호로 활동을 만든다. */
+function activeRows(
+  unit: string,
+  base: string,
+  offsets: number[],
+): UnitDayActivityRow[] {
+  return offsets.map((o) => ({
+    unit,
+    date: day(base, o),
+    workingSignals: 1,
+    presenceSignals: 3,
+    eventSignals: 0,
+  }));
+}
+
+// ── ★함정 1: 좀비 프로세스 ─────────────────────────────────────────────────
+test("zombie install (heartbeats only, working=0, events=0) is not activity", () => {
+  const today = "2026-08-21";
+  // 실측 I10: 14일 중 13일 하트비트가 있는데 working 0 · 이벤트 0.
+  const zombieRows: UnitDayActivityRow[] = [];
+  for (let i = 0; i < 13; i += 1) {
+    zombieRows.push({
+      unit: "zombie-uuid-0000-0000-000000000000",
+      date: day(today, -i),
+      workingSignals: 0,
+      presenceSignals: 2_700,
+      eventSignals: 0,
+    });
+  }
+  const res = buildStreakRetention({
+    axis: "install",
+    today,
+    rows: zombieRows,
+    cohortWindowDays: 30,
+  });
+  const z = res.units[0];
+  assert.equal(res.unitsObserved, 1);
+  // 하트비트가 13일 있어도 활동일은 0 이다.
+  assert.equal(z.presentDays, 13);
+  assert.equal(z.activeDays, 0);
+  assert.equal(z.workingDays, 0);
+  assert.equal(z.firstActive, null);
+  assert.equal(z.zombie, true);
+  // ★코호트에 들어오지 않는다 — 들어오면 리텐션이 부풀려진다.
+  assert.equal(res.unitsCohort, 0);
+  assert.equal(res.unitsZombie, 1);
+  assert.equal(res.units[0].firstActive, null);
+  // 격자에서도 활동(x)이 아니라 '떠 있음'(~)으로 그려져야 오독을 막는다.
+  assert.ok(z.grid.includes("~"));
+  assert.ok(!z.grid.includes("x"));
+});
+
+test("a single event with zero working heartbeats still counts as activity", () => {
+  const today = "2026-08-21";
+  const res = buildStreakRetention({
+    axis: "install",
+    today,
+    // 활동 정의는 working ≥1 "또는" 이벤트 ≥1 이다. 이벤트만 있어도 활동이다.
+    rows: [
+      {
+        unit: "ev-only-uuid-0000-0000-00000000",
+        date: today,
+        workingSignals: 0,
+        presenceSignals: 0,
+        eventSignals: 42,
+      },
+    ],
+    cohortWindowDays: 30,
+  });
+  assert.equal(res.units[0].activeDays, 1);
+  assert.equal(res.units[0].zombie, false);
+  assert.equal(res.units[0].grid.endsWith("x"), true);
+});
+
+// ── ★함정 2: 작은 N ────────────────────────────────────────────────────────
+test("D7/D14 report numerator and denominator, and exclude pending units", () => {
+  const today = "2026-08-21";
+  const base = "2026-08-01"; // today-20 → D7 은 판정 가능, D14 도 판정 가능
+  const rows: UnitDayActivityRow[] = [
+    // retained: 첫날 + D7 당일 + D14 당일에 활동
+    ...activeRows("u-retained-0000-0000-000000", base, [0, 7, 14]),
+    // churned: 첫날만
+    ...activeRows("u-churned-0000-0000-0000000", base, [0]),
+    // pending: 3일 전에 시작 → D7/D14 관측창 미도달
+    ...activeRows("u-pending-0000-0000-0000000", day(today, -3), [0]),
+  ];
+  const res = buildStreakRetention({
+    axis: "install",
+    today,
+    rows,
+    cohortWindowDays: 60,
+  });
+  assert.equal(res.unitsCohort, 3);
+  const d7 = res.horizons.find((h) => h.key === "d7");
+  assert.ok(d7);
+  // ★분모는 3이 아니라 2다 — 관측창이 안 찬 유닛을 분모에 넣으면 최근 유입이
+  //   자동으로 이탈로 찍힌다.
+  assert.equal(d7.pending, 1);
+  assert.equal(d7.exact.denominator, 2);
+  assert.equal(d7.exact.numerator, 1);
+  assert.equal(d7.exact.display, "1/2 (50.0%)");
+  const d14 = res.horizons.find((h) => h.key === "d14");
+  assert.ok(d14);
+  assert.equal(d14.pending, 1);
+  assert.equal(d14.exact.display, "1/2 (50.0%)");
+});
+
+test("exact and window definitions are both reported and can differ", () => {
+  const today = "2026-08-21";
+  const base = "2026-08-01";
+  // D7 당일에는 없고 D3 에만 돌아온 유닛 → exact 0, window 1.
+  const res = buildStreakRetention({
+    axis: "install",
+    today,
+    rows: activeRows("u-window-0000-0000-00000000", base, [0, 3]),
+    cohortWindowDays: 60,
+  });
+  const d7 = res.horizons.find((h) => h.key === "d7");
+  assert.ok(d7);
+  assert.equal(d7.exact.display, "0/1 (0.0%)");
+  assert.equal(d7.window.display, "1/1 (100.0%)");
+  // 두 정의가 이렇게 갈리므로 하나만 인용하면 결론이 뒤집힌다.
+  assert.notEqual(d7.exact.rate, d7.window.rate);
+});
+
+test("first-day-only activity does not count as its own retention", () => {
+  const today = "2026-08-21";
+  const res = buildStreakRetention({
+    axis: "install",
+    today,
+    rows: activeRows("u-oneshot-0000-0000-0000000", "2026-08-01", [0]),
+    cohortWindowDays: 60,
+  });
+  const d1 = res.horizons.find((h) => h.key === "d1");
+  assert.ok(d1);
+  // window 는 firstActive+1 부터 센다 — 첫날 자신이 리텐션으로 잡히면 안 된다.
+  assert.equal(d1.window.numerator, 0);
+  assert.equal(d1.exact.numerator, 0);
+});
+
+test("units outside the cohort window are counted, not silently dropped", () => {
+  const today = "2026-08-21";
+  const res = buildStreakRetention({
+    axis: "install",
+    today,
+    // 90일 전 시작 → 30일 코호트 창 밖
+    rows: activeRows("u-old-0000-0000-0000000000", day(today, -90), [0, 7]),
+    cohortWindowDays: 30,
+  });
+  assert.equal(res.unitsObserved, 1);
+  assert.equal(res.unitsCohort, 0);
+  // ★조용히 빠지면 "관측된 사람이 없다" 로 읽힌다. 세어서 밖으로 내보낸다.
+  assert.equal(res.unitsBeforeWindow, 1);
+  // 스트릭 격자에는 그대로 남는다.
+  assert.equal(res.units.length, 1);
+});
+
+// ── ★함정 3: 2026-06-13 식별자 스킴 교체 ───────────────────────────────────
+test("legacy 28-char install id churning at the switch date is flagged, not churn", () => {
+  const today = "2026-08-21";
+  const legacyId = "a".repeat(28); // Firebase uid 길이
+  const uuidId = "b3f1c2d4-1111-2222-3333-444455556666"; // 36
+  const res = buildStreakRetention({
+    axis: "install",
+    today,
+    rows: [
+      // 구 스킴: 4월부터 쓰다가 교체일에 끊김 → 이탈이 아니라 id 교체다
+      ...activeRows(legacyId, "2026-04-19", [0, 1, 2]),
+      ...activeRows(legacyId, IDENTITY_SCHEME_SWITCH_ON, [0]),
+      // 신 스킴: 같은 날 시작
+      ...activeRows(uuidId, IDENTITY_SCHEME_SWITCH_ON, [0, 1]),
+    ],
+    cohortWindowDays: 400,
+  });
+  const legacy = res.units.find((u) => u.legacyIdScheme);
+  const current = res.units.find((u) => !u.legacyIdScheme);
+  assert.ok(legacy);
+  assert.ok(current);
+  assert.equal(legacy.lastActive, IDENTITY_SCHEME_SWITCH_ON);
+  assert.equal(legacy.suspectedIdSwitchChurn, true);
+  assert.equal(current.suspectedIdSwitchChurn, false);
+  assert.equal(res.identityScheme.date, IDENTITY_SCHEME_SWITCH_ON);
+  assert.equal(res.identityScheme.legacyUnits, 1);
+  assert.equal(res.identityScheme.currentUnits, 1);
+  assert.equal(res.identityScheme.suspectedIdSwitchChurn, 1);
+  // 두 id 를 같은 사람으로 이어붙이지 않는다 — 유닛은 여전히 2개다.
+  assert.equal(res.unitsObserved, 2);
+});
+
+test("account axis never marks legacy scheme (uid is its normal identity)", () => {
+  const res = buildStreakRetention({
+    axis: "account",
+    today: "2026-08-21",
+    rows: activeRows("a".repeat(28), "2026-08-01", [0, 7]),
+    cohortWindowDays: 60,
+  });
+  assert.equal(res.units[0].legacyIdScheme, false);
+  assert.equal(res.units[0].suspectedIdSwitchChurn, false);
+  assert.equal(res.identityScheme.legacyUnits, 0);
+  // 계정 축에는 설치→계정 매핑 개념이 없다.
+  assert.equal(res.mapping, null);
+  assert.equal(res.units[0].mappingStatus, "n/a");
+});
+
+// ── 스트릭 계산 ────────────────────────────────────────────────────────────
+test("max streak, current streak, and 14-day grid", () => {
+  const today = "2026-08-21";
+  const res = buildStreakRetention({
+    axis: "install",
+    today,
+    // 5일 연속(오래 전) + 최근 3일 연속(오늘까지)
+    rows: [
+      ...activeRows("u-streak-0000-0000-00000000", day(today, -30), [
+        0, 1, 2, 3, 4,
+      ]),
+      ...activeRows("u-streak-0000-0000-00000000", day(today, -2), [0, 1, 2]),
+    ],
+    cohortWindowDays: 400,
+  });
+  const u = res.units[0];
+  assert.equal(u.maxStreak, 5);
+  assert.equal(u.currentStreak, 3);
+  assert.equal(u.daysSinceLastActive, 0);
+  assert.equal(u.grid.length, STREAK_GRID_DAYS);
+  assert.equal(u.gridEnd, today);
+  assert.equal(u.grid.slice(-3), "xxx");
+});
+
+test("a broken streak is not reported as a current streak", () => {
+  const today = "2026-08-21";
+  const res = buildStreakRetention({
+    axis: "install",
+    today,
+    rows: activeRows("u-stale-0000-0000-000000000", day(today, -10), [0, 1, 2]),
+    cohortWindowDays: 400,
+  });
+  const u = res.units[0];
+  assert.equal(u.maxStreak, 3);
+  // 8일 전에 끊긴 연속을 "현재 연속" 이라 부르면 살아 있는 사용자로 보인다.
+  assert.equal(u.currentStreak, 0);
+  assert.equal(u.daysSinceLastActive, 8);
+});
+
+// ── 운영자 제외 (includeAdmin 토글) ────────────────────────────────────────
+test("adminUnits are excluded from the cohort but stay visible with a flag", () => {
+  const today = "2026-08-21";
+  const adminInstall = "admin-uuid-0000-0000-00000000";
+  const rows = [
+    ...activeRows(adminInstall, "2026-08-01", [0, 7, 14]),
+    ...activeRows("u-real-0000-0000-00000000000", "2026-08-01", [0]),
+  ];
+  const excluded = buildStreakRetention({
+    axis: "install",
+    today,
+    rows,
+    cohortWindowDays: 60,
+    adminUnits: [adminInstall],
+  });
+  assert.equal(excluded.unitsAdminExcluded, 1);
+  assert.equal(excluded.unitsCohort, 1);
+  assert.equal(
+    excluded.horizons.find((h) => h.key === "d7")?.exact.display,
+    "0/1 (0.0%)",
+  );
+  // 화면에서 사라지지는 않는다 — 플래그를 달고 남는다.
+  assert.equal(excluded.units.length, 2);
+  assert.equal(
+    excluded.units.filter((u) => u.adminExcluded).length,
+    1,
+  );
+
+  // includeAdmin=true 면 호출측이 빈 목록을 준다 → 운영자가 코호트에 들어와
+  // 숫자가 완전히 달라진다(실측: 운영자가 cost 행의 99.95%).
+  const included = buildStreakRetention({
+    axis: "install",
+    today,
+    rows,
+    cohortWindowDays: 60,
+    adminUnits: [],
+  });
+  assert.equal(included.unitsAdminExcluded, 0);
+  assert.equal(included.unitsCohort, 2);
+  assert.equal(
+    included.horizons.find((h) => h.key === "d7")?.exact.display,
+    "1/2 (50.0%)",
+  );
+});
+
+// ── 설치 ↔ 계정 매핑 ───────────────────────────────────────────────────────
+test("install→account mapping labels what joins and counts what does not", () => {
+  const today = "2026-08-21";
+  const mappedInstall = "i-mapped-0000-0000-000000000";
+  const ambiguousInstall = "i-ambig-0000-0000-0000000000";
+  const unmappedInstall = "i-unmapped-0000-0000-0000000";
+  const res = buildStreakRetention({
+    axis: "install",
+    today,
+    rows: [
+      ...activeRows(mappedInstall, "2026-08-01", [0]),
+      ...activeRows(ambiguousInstall, "2026-08-01", [0]),
+      ...activeRows(unmappedInstall, "2026-08-01", [0]),
+    ],
+    cohortWindowDays: 60,
+    mappingRows: [
+      { installUnit: mappedInstall, accountUnit: "acct-1", joins: 100 },
+      { installUnit: ambiguousInstall, accountUnit: "acct-1", joins: 5 },
+      { installUnit: ambiguousInstall, accountUnit: "acct-2", joins: 2 },
+    ],
+  });
+  const byLabel = new Map(res.units.map((u) => [u.label, u]));
+  const m = byLabel.get(analyticsUnitLabel("install", mappedInstall));
+  const a = byLabel.get(analyticsUnitLabel("install", ambiguousInstall));
+  const un = byLabel.get(analyticsUnitLabel("install", unmappedInstall));
+  assert.ok(m && a && un);
+  assert.equal(m.mappingStatus, "mapped");
+  // 계정도 라벨로만 나간다 — 원시 uid 는 응답에 없다.
+  assert.equal(m.mappedAccountLabel, analyticsUnitLabel("account", "acct-1"));
+  assert.ok(!JSON.stringify(res).includes("acct-1"));
+  // 모호한 매핑은 우세 계정으로 표시하되 조용히 확정하지 않는다.
+  assert.equal(a.mappingStatus, "ambiguous");
+  assert.equal(a.mappedAccountLabel, analyticsUnitLabel("account", "acct-1"));
+  assert.equal(un.mappingStatus, "unmapped");
+  assert.equal(un.mappedAccountLabel, null);
+  assert.equal(res.mapping?.mappedInstalls, 1);
+  assert.equal(res.mapping?.ambiguousInstalls, 1);
+  // ★못 붙인 것을 빼지 않고 센다 — 조용히 빼면 인원이 줄어 보인다.
+  assert.equal(res.mapping?.unmappedInstalls, 1);
+});
+
+// ── 응답 위생 ──────────────────────────────────────────────────────────────
+test("raw identifiers never appear anywhere in the result", () => {
+  const rawInstall = "b3f1c2d4-1111-2222-3333-444455556666";
+  const rawAccount = "RSALO1rljtWBSZ70MoBiaeFORxr1";
+  const res = buildStreakRetention({
+    axis: "install",
+    today: "2026-08-21",
+    rows: activeRows(rawInstall, "2026-08-01", [0, 7]),
+    cohortWindowDays: 60,
+    mappingRows: [
+      { installUnit: rawInstall, accountUnit: rawAccount, joins: 10 },
+    ],
+  });
+  const json = JSON.stringify(res);
+  assert.ok(!json.includes(rawInstall));
+  assert.ok(!json.includes(rawAccount));
+  // 정의는 반대로 반드시 실려 나가야 한다 — 화면이 그대로 적는다.
+  assert.equal(res.activityDefinition, ACTIVITY_DEFINITION_INSTALL);
+  assert.ok(res.notes.length > 0);
+});
+
+test("malformed rows are skipped without throwing", () => {
+  const res = buildStreakRetention({
+    axis: "install",
+    today: "2026-08-21",
+    rows: [
+      { unit: "", date: "2026-08-01", workingSignals: 1 },
+      { unit: "anon", date: "2026-08-01", workingSignals: 1 },
+      { unit: "u-ok-0000-0000-00000000000", date: "nope", workingSignals: 1 },
+      { unit: null, date: null },
+      {},
+      ...activeRows("u-ok-0000-0000-00000000000", "2026-08-01", [0]),
+    ],
+    cohortWindowDays: 60,
+  });
+  // "anon" 폴백과 빈 unit 은 사람이 아니다.
+  assert.equal(res.unitsObserved, 1);
+  assert.equal(res.units[0].activeDays, 1);
+});
+
+test("a unit that went zombie recently is flagged, even if it was active long ago", () => {
+  const today = "2026-08-21";
+  const unit = "u-went-zombie-0000-0000-0000";
+  // 실측 케이스: 7월에는 실제로 활동했고, 최근 격자 구간은 순수 하트비트뿐이다.
+  // 평생 기준으로 재면 "좀비 0" 이라 뜨는데 격자에는 좀비가 13칸 그려진다 —
+  // 헤드라인과 눈에 보이는 격자가 어긋나면 안 된다.
+  const rows: UnitDayActivityRow[] = [
+    ...activeRows(unit, day(today, -40), [0, 1, 2]),
+  ];
+  for (let i = 0; i < 13; i += 1) {
+    rows.push({
+      unit,
+      date: day(today, -i - 1),
+      workingSignals: 0,
+      presenceSignals: 2_700,
+      eventSignals: 0,
+    });
+  }
+  const res = buildStreakRetention({
+    axis: "install",
+    today,
+    rows,
+    cohortWindowDays: 400,
+  });
+  const u = res.units[0];
+  assert.equal(u.zombie, true);
+  assert.equal(res.unitsZombie, 1);
+  // 과거 활동은 지워지지 않는다 — 첫 활동일과 최대연속은 그대로 남는다.
+  assert.equal(u.activeDays, 3);
+  assert.equal(u.maxStreak, 3);
+  // ★핵심: 하트비트 13일은 활동으로 세지 않는다. 격자에 x 가 하나도 없어야 한다.
+  assert.ok(!u.grid.includes("x"));
+  assert.equal(u.grid.split("~").length - 1, 13);
+});
+
+test("an active unit is never flagged as a zombie even with idle heartbeats", () => {
+  const today = "2026-08-21";
+  const unit = "u-active-0000-0000-000000000";
+  const rows: UnitDayActivityRow[] = [
+    // 대부분의 날은 하트비트만, 하루는 실제 활동 → 좀비가 아니다.
+    { unit, date: day(today, -5), workingSignals: 0, presenceSignals: 500 },
+    { unit, date: today, workingSignals: 3, presenceSignals: 500 },
+  ];
+  const res = buildStreakRetention({
+    axis: "install",
+    today,
+    rows,
+    cohortWindowDays: 400,
+  });
+  assert.equal(res.units[0].zombie, false);
+  assert.equal(res.unitsZombie, 0);
 });
