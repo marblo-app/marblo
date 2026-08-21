@@ -16,7 +16,7 @@ import pytest
 # Tests run against the source tree, not an installed package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import auth  # noqa: E402
+from app import auth, plan_source  # noqa: E402
 
 
 class FakeRedis:
@@ -79,3 +79,52 @@ def reset_token_verifier():
     auth.set_token_verifier(None)
     yield
     auth.set_token_verifier(None)
+
+
+class FakeSubscriptions:
+    """In-memory stand-in for the ``subscriptions`` collection.
+
+    Records every uid looked up so tests can assert *which* document was read --
+    the security property is that the server reads the verified caller's own
+    record and nothing else.
+    """
+
+    def __init__(self) -> None:
+        self.docs: dict[str, dict] = {}
+        self.reads: list[str] = []
+        self.error: Exception | None = None
+
+    def grant(self, uid: str, **fields) -> None:
+        """Write a subscription document for ``uid`` (defaults to active)."""
+
+        doc = {"status": "active", **fields}
+        self.docs[uid] = doc
+
+    def __call__(self, uid: str):
+        self.reads.append(uid)
+        if self.error is not None:
+            raise self.error
+        return self.docs.get(uid)
+
+
+@pytest.fixture
+def subscriptions() -> FakeSubscriptions:
+    """Install an in-memory subscription store as the server-side plan source."""
+
+    store = FakeSubscriptions()
+    plan_source.set_subscription_lookup(store)
+    return store
+
+
+@pytest.fixture(autouse=True)
+def reset_plan_source():
+    """Keep the process-wide lookup and its cache from leaking between tests.
+
+    The default for a test that installs nothing is "this user has no
+    subscription" -- i.e. free -- so no test accidentally reaches a real
+    Firestore.
+    """
+
+    plan_source.set_subscription_lookup(lambda uid: None)
+    yield
+    plan_source.set_subscription_lookup(None)

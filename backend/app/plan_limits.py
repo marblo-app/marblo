@@ -8,8 +8,10 @@ Provides Redis-backed usage tracking and FastAPI dependencies for:
 4. Feature gating middleware     -> :func:`require_feature`
 5. Usage dashboard for users     -> :func:`get_usage_summary`
 
-The caller's identity and plan come from :mod:`app.auth` (a verified Firebase
-ID token) -- never from request headers, which a client controls.
+The caller's identity comes from :mod:`app.auth` (a verified Firebase ID token)
+and their plan from :mod:`app.plan_source` (the server's own ``subscriptions``
+record) -- never from request headers or token claims, which a client controls or
+which nothing writes.
 
 The Redis client is injected so the pure logic stays testable without a live
 server (see ``app.plan_limits`` verification script / fakeredis). All counters
@@ -26,6 +28,7 @@ import redis.asyncio as redis
 from fastapi import Depends, HTTPException
 
 from app.auth import Claims, extract_uid, get_verified_claims
+from app.entitlement import now_millis, resolve_entitled_plan
 from app.events import get_redis
 from app.plan_config import (
     UNLIMITED,
@@ -35,6 +38,7 @@ from app.plan_config import (
     get_plan_limits,
     parse_plan,
 )
+from app.plan_source import fetch_subscription
 
 # Key namespaces -------------------------------------------------------------
 
@@ -57,10 +61,16 @@ _CHANNEL_TTL_SECONDS = 60 * 60 * 24 * 90
 class UserContext:
     """Identity + plan resolved for an incoming request.
 
-    Both fields come from a verified Firebase ID token (see :mod:`app.auth`).
-    Request headers are never consulted: ``X-User-Id`` / ``X-Plan`` used to be
-    the source here, which let any caller impersonate a user or claim a paid
-    tier. ``parse_plan`` still guarantees an unrecognised plan value can never
+    ``user_id`` is the subject of a verified Firebase ID token (see
+    :mod:`app.auth`). ``plan`` is what the server's own subscription record
+    grants that subject right now (see :func:`resolve_plan_for_uid`).
+
+    Neither is anything the caller said. Request headers are never consulted:
+    ``X-User-Id`` / ``X-Plan`` used to be the source here, which let any caller
+    impersonate a user or claim a paid tier. Token claims are not consulted
+    either -- not because they are forgeable (they are server-signed) but because
+    nothing writes a plan claim, so trusting them resolved every paying customer
+    to free. ``parse_plan`` still guarantees an unrecognised plan value can never
     escalate above the free tier.
     """
 
@@ -72,21 +82,22 @@ class UserContext:
         return get_plan_limits(self.plan)
 
 
-# Claim names carrying the subscription tier. These are Firebase *custom
-# claims*: only a privileged server (Admin SDK ``setCustomUserClaims``) can
-# write them, so a client cannot mint or edit its own plan. A user with no
-# plan claim resolves to free -- gating fails closed, never open.
-PLAN_CLAIM_KEYS = ("plan", "planType")
+async def resolve_plan_for_uid(uid: str, *, now_ms: int | None = None) -> Plan:
+    """Look up ``uid``'s subscription server-side and judge what it grants now.
 
+    Two steps, both on the server: read ``subscriptions/{uid}`` from Firestore
+    (:mod:`app.plan_source`), then apply the entitlement rule
+    (:mod:`app.entitlement`) that the desktop app and Cloud Functions already
+    share -- so a cancelled-but-paid-through user keeps what they bought here
+    too, and a refunded user does not.
 
-def resolve_plan_from_claims(claims: Claims) -> Plan:
-    """Read the caller's plan out of their verified token claims."""
+    Raises 503 if the subscription cannot be read; see
+    :class:`app.plan_source.PlanLookupUnavailable` for why that is not "free".
+    """
 
-    for key in PLAN_CLAIM_KEYS:
-        value = claims.get(key)
-        if isinstance(value, str) and value.strip():
-            return parse_plan(value)
-    return parse_plan(None)
+    document = await fetch_subscription(uid)
+    at = now_millis() if now_ms is None else now_ms
+    return parse_plan(resolve_entitled_plan(document, at))
 
 
 async def get_user_context(
@@ -94,12 +105,13 @@ async def get_user_context(
 ) -> UserContext:
     """FastAPI dependency resolving the caller's identity and plan.
 
-    Rejects the request (401) unless it carries a valid Firebase ID token.
+    Identity is the verified token's subject; the plan is read from the server's
+    own subscription record for that subject. Rejects the request (401) unless it
+    carries a valid Firebase ID token.
     """
 
-    return UserContext(
-        user_id=extract_uid(claims), plan=resolve_plan_from_claims(claims)
-    )
+    uid = extract_uid(claims)
+    return UserContext(user_id=uid, plan=await resolve_plan_for_uid(uid))
 
 
 # Errors ---------------------------------------------------------------------

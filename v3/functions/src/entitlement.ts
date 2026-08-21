@@ -7,6 +7,11 @@
  * 테스트로 막는다 — tests/unit/subscription-entitlement.test.ts 가 두 구현을 모두
  * import 해 동일 케이스표에서 판정이 일치하는지 검증한다. 한쪽만 고치면 red 다.
  *
+ * ★3번째 사본이 있다: `backend/app/entitlement.py` (FastAPI 백엔드의 plan 게이팅이
+ * 이 규칙으로 요금제를 판정한다. Python 이라 여기서 import 할 수 없다). 규칙을
+ * 고치면 **세 곳을 함께** 고쳐라 — 백엔드 쪽 drift 는
+ * `backend/tests/test_entitlement.py` 가 같은 케이스표로 잡는다.
+ *
  * ─── 왜 status 단독으로는 안 되는가 ───────────────────────────────────
  * 토스 자발 해지(cancelTossSubscription)는 status="canceled" 만 쓰고 planType 은
  * 건드리지 않는다. status 단독 판정이면 결제 2일차에 해지한 사용자가 즉시 free 로
