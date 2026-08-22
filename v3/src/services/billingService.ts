@@ -175,11 +175,46 @@ export async function cancelSubscription(): Promise<{
   return result.data;
 }
 
-// ─── TossPayments (국내 결제) ────────────────────────────────────
+// ─── TossPayments (국내 결제) — ★신규 진입 차단(1단계) ──────────────
+// 토스페이먼츠 PG 직결은 신규 결제를 받지 않는다. 국내 신규 결제는 포트원으로
+// 일원화됐다(marblo-web /checkout). 아래 두 함수는 호출되면 서버에서
+// failed-precondition(toss_entry_disabled) 로 거절되므로, 왕복하지 않고
+// 클라이언트에서 먼저 끊는다 — 사용자가 결제창을 띄운 뒤에 실패하는 것보다
+// 누르기 전에 막히는 편이 낫다.
+//
+// ★함수 시그니처는 남긴다. 호출부(BillingPage)를 아직 정리하지 않았고, 지우면
+// 빌드가 깨져 "가리기 먼저" 라는 이 티켓의 방침과 어긋난다.
+// 되돌리려면 서버 TOSS_ENTRY_ENABLED="true" + 아래 상수를 false 로.
+export const TOSS_ENTRY_DISABLED: boolean = true;
+export const TOSS_ENTRY_DISABLED_CODE = "toss_entry_disabled";
+
+/** 신규 토스 결제 진입이 막혀 있으면 던진다. 호출 전에 부르는 가드. */
+function assertTossEntryEnabled(): void {
+  if (!TOSS_ENTRY_DISABLED) return;
+  const err = new Error(
+    "토스페이먼츠 결제는 더 이상 신규 접수하지 않습니다. 포트원으로 결제해 주세요.",
+  );
+  err.name = TOSS_ENTRY_DISABLED_CODE;
+  throw err;
+}
+
+/**
+ * 결제수단 목록에서 토스 진입을 걸러낸다. 화면단이 이 함수를 통과시킨
+ * 목록만 그리면, 차단 정책이 컴포넌트가 아니라 여기 한 곳에 남는다.
+ */
+export function filterAvailablePaymentMethods<T extends { provider: string }>(
+  methods: readonly T[],
+): T[] {
+  if (!TOSS_ENTRY_DISABLED) return [...methods];
+  return methods.filter((m) => m.provider !== "toss");
+}
+
 export async function createTossCheckout(
   userId: string,
   planType: PlanType,
 ): Promise<{ paymentKey: string; orderId: string; amount: number }> {
+  assertTossEntryEnabled();
+
   const fn = httpsCallable<
     { userId: string; planType: PlanType },
     { paymentKey: string; orderId: string; amount: number }
@@ -194,6 +229,8 @@ export async function confirmTossPayment(
   paymentKey: string,
   amount: number,
 ): Promise<void> {
+  assertTossEntryEnabled();
+
   const fn = httpsCallable<
     { orderId: string; paymentKey: string; amount: number },
     { success: boolean }

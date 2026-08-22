@@ -45,6 +45,7 @@
     "test:release-announcement": "tsc src/releaseAnnouncement.ts src/releaseAnnouncement.test.ts --outDir .test-out/release --module commonjs --target es2020 --esModuleInterop --strict && node --test .test-out/release/releaseAnnouncement.test.js",
     "test:release-update-announcement": "tsc src/releaseUpdateAnnouncement.ts src/releaseUpdateAnnouncement.test.ts --outDir .test-out/release-update --module commonjs --target es2020 --esModuleInterop --strict && node --test .test-out/release-update/releaseUpdateAnnouncement.test.js",
     "test:billing": "tsc src/billing.ts --outDir lib --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node tests/billing.test.mjs",
+    "test:toss-shutdown": "tsc src/billing.ts --outDir lib --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node tests/tossEntryShutdown.test.mjs",
     "test:portone": "tsc src/billing.ts src/portone.ts --outDir lib --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node tests/portone.test.mjs",
     "test:portone-cron": "tsc src/billing.ts src/portone.ts --outDir lib --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node tests/portoneBillingCron.test.mjs",
     "test:portone-easypay": "tsc src/billing.ts src/portone.ts --outDir lib --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node tests/portoneEasyPay.test.mjs",

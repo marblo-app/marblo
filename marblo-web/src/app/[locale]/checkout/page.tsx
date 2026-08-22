@@ -19,8 +19,10 @@ import {
 } from "@/lib/paymentErrors";
 import { ArrowLeft, Loader2, AlertCircle, ShoppingCart, RotateCcw, Info } from "lucide-react";
 import { localeHref } from "@/i18n/routing";
-
-type PaymentProvider = "toss" | "portone";
+import {
+  resolveCheckoutProvider,
+  type PaymentProvider,
+} from "@/lib/paymentProvider";
 
 interface PortOneSDK {
   requestPayment(params: {
@@ -114,11 +116,11 @@ export default function CheckoutPage() {
   const lectureSlug = searchParams.get("slug");
   const type = searchParams.get("type") || "subscription";
   const billing = searchParams.get("billing") || "monthly";
-  const paymentProvider: PaymentProvider =
-    searchParams.get("provider") === "portone" ||
-    process.env.NEXT_PUBLIC_PAYMENT_PROVIDER === "portone"
-      ? "portone"
-      : "toss";
+  // ★결제수단은 포트원으로 일원화됐다. 토스페이먼츠 PG 직결은 신규 진입을
+  // 닫았다(서버 게이트: TOSS_ENTRY_ENABLED). 상세는 lib/paymentProvider.ts.
+  const paymentProvider: PaymentProvider = resolveCheckoutProvider({
+    envProvider: process.env.NEXT_PUBLIC_PAYMENT_PROVIDER,
+  });
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [loading, setLoading] = useState(false);

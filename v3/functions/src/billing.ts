@@ -305,6 +305,40 @@ export function hasPaymentEvidence(
   );
 }
 
+// ─── 토스 진입 경로 차단(1단계: "가리기") ─────────────────────────────
+// 토스페이먼츠는 PG 직결이고 신규 결제는 포트원으로만 간다. 여기서 닫는 것은
+// **신규 돈이 움직이는 경로뿐**이다 — 빌링키 발급·신규/수동 청구·결제 confirm·
+// 토스 전용 갱신 크론.
+//
+// ★닫지 않는 것(의도적으로 남긴다. 지우면 조용히 깨지는 것들이다):
+//   1) hasPaymentEvidence 의 tossBillingKey 검사 — "결제한 흔적이 있나" 판정.
+//      해지·실효한 前토스 결제자를 파운더 그랜트에서 올바르게 다루려면 필요하다.
+//      떼면 그랜트가 잘못 나간다(index.ts 의 동명 로컬 헬퍼 주석 참조).
+//   2) billingCharges 원장 읽기 — 과거 매출이 안 보이게 된다.
+//      ★토스 원장 행에는 `provider` 필드가 아예 없다(포트원 미러만 provider 를
+//      쓴다). 그래서 `where("provider","==","toss")` 는 행이 몇 건이든 0 을
+//      돌려준다 — 그 0 을 "토스 원장이 없다" 로 읽으면 안 된다.
+//   3) 해지(cancelTossSubscription)·웹훅 상태동기·어드민 과거 표시.
+//
+// 되돌리는 법: 환경변수 TOSS_ENTRY_ENABLED="true". 기본값은 차단이다.
+// 포트원 실결제가 한 번도 완주 검증된 적이 없어서, 코드 재배포 없이 한 줄로
+// 되돌릴 수 있는 스위치를 남긴다.
+export const TOSS_ENTRY_DISABLED_CODE = "toss_entry_disabled";
+export const TOSS_ENTRY_DISABLED_MESSAGE =
+  "토스페이먼츠 결제는 더 이상 신규 접수하지 않습니다. 포트원으로 결제해 주세요.";
+
+/**
+ * 신규 토스 결제 진입이 허용되는가. 명시적으로 "true" 일 때만 열린다 —
+ * 미설정·오타·빈 문자열은 전부 차단(fail-closed)이다.
+ */
+export function isTossEntryEnabled(raw: string | null | undefined): boolean {
+  return (
+    String(raw ?? "")
+      .trim()
+      .toLowerCase() === "true"
+  );
+}
+
 // ★주기(billingCycle)는 "언제 청구할지"에 관여하지 않는다 — 만료 경계
 // currentPeriodEnd 가 이미 주기를 반영해 계산돼 있기 때문이다(연간이면 12개월
 // 뒤에 찍힌다). 주기가 관여하는 곳은 "얼마를 청구할지"(planAmountKRW)와

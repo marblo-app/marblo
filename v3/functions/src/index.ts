@@ -268,6 +268,9 @@ import {
   applyChargeSuccess,
   applyChargeFailure,
   hasPaymentEvidence as hasBillingPaymentEvidence,
+  isTossEntryEnabled,
+  TOSS_ENTRY_DISABLED_CODE,
+  TOSS_ENTRY_DISABLED_MESSAGE,
   type FirstChargeReceipt,
   type SubscriptionSnapshot,
   type BillingCycle,
@@ -771,8 +774,22 @@ const PADDLE_API_KEY = process.env.PADDLE_API_KEY!;
 const PADDLE_WEBHOOK_SECRET = process.env.PADDLE_WEBHOOK_SECRET!;
 const PADDLE_API_BASE = "https://api.paddle.com";
 
+// ★TOSS_SECRET_KEY 는 지우지 않는다 — 신규 결제를 닫아도 과거 원장 조회·
+// 미반영 정산(reconcileTossPending)·웹훅 재조회에 여전히 쓰인다.
 const TOSS_SECRET_KEY = process.env.TOSS_SECRET_KEY!;
 const TOSS_API_BASE = "https://api.tosspayments.com/v1";
+
+// ─── 토스 신규 진입 차단 게이트 ───────────────────────────────────────
+// 신규로 돈이 움직이는 토스 경로 앞에만 세운다. 읽기·판정·해지·정산은 통과한다.
+// 되돌리려면 TOSS_ENTRY_ENABLED="true" (기본 차단). 상세는 billing.ts 주석.
+function assertTossEntryEnabled(): void {
+  if (isTossEntryEnabled(process.env.TOSS_ENTRY_ENABLED)) return;
+  throw new functions.https.HttpsError(
+    "failed-precondition",
+    TOSS_ENTRY_DISABLED_MESSAGE,
+    { code: TOSS_ENTRY_DISABLED_CODE }
+  );
+}
 
 const PORTONE_API_SECRET = process.env.PORTONE_API_SECRET || "";
 const PORTONE_STORE_ID = process.env.PORTONE_STORE_ID || "";
@@ -1037,6 +1054,8 @@ export const createTossCheckout = functions.https.onCall(
         "로그인이 필요합니다."
       );
     }
+    // ★신규 토스 결제 진입 차단(1단계). 읽기·판정·해지·정산은 통과한다.
+    assertTossEntryEnabled();
 
     const { planType, billing } = data as {
       planType: string;
@@ -1079,6 +1098,8 @@ export const confirmTossPayment = functions.https.onCall(
         "로그인이 필요합니다."
       );
     }
+    // ★신규 토스 결제 confirm 차단(1단계).
+    assertTossEntryEnabled();
 
     const { orderId, paymentKey, amount } = data as {
       orderId: string;
@@ -2550,6 +2571,9 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
   if (!userId)
     throw new functions.https.HttpsError("unauthenticated", "Login required");
 
+  // ★토스 빌링키 신규 발급 차단(1단계) — 여기가 신규 정기결제의 실제 입구다.
+  assertTossEntryEnabled();
+
   const planType = plan || "pro";
   // ★결제 주기를 여기서 받아 금액·기간 양쪽에 반영한다. 이 인자가 없던 시절엔
   // 연간을 고른 사용자에게 ₩190,000 을 보여주고 ₩19,000·1개월을 청구했다.
@@ -2836,6 +2860,9 @@ export const retryFirstCharge = functions.https.onCall(
     }
 
     const provider = sub.paymentProvider === "portone" ? "portone" : "toss";
+    // ★토스 첫청구 재시도만 차단한다. 포트원 재시도는 그대로 살린다 —
+    // provider 구분 없이 막으면 유일하게 살아 있는 결제 경로가 끊긴다.
+    if (provider === "toss") assertTossEntryEnabled();
     const generation =
       typeof sub.firstChargeGeneration === "number"
         ? sub.firstChargeGeneration
@@ -3008,6 +3035,9 @@ export const chargeBillingKey = functions.https.onCall(
     const userId = context.auth?.uid;
     if (!userId)
       throw new functions.https.HttpsError("unauthenticated", "Login required");
+
+    // ★토스 빌링키 수동 청구 차단(1단계) — 신규로 돈이 움직이는 경로다.
+    assertTossEntryEnabled();
 
     // 호출자 본인의 구독 문서에서 billingKey/customerKey/plan 을 읽는다 —
     // 클라이언트 입력은 신뢰하지 않는다.
@@ -3293,6 +3323,10 @@ export const confirmLecturePayment = functions.https.onCall(
     const userId = context.auth?.uid;
     if (!userId)
       throw new functions.https.HttpsError("unauthenticated", "Login required");
+
+    // ★강의 단건 토스 confirm 차단(1단계). 강의 결제도 포트원
+    // (completePortOnePayment)이 동일하게 수강권을 지급한다.
+    assertTossEntryEnabled();
 
     // 주문 소유권/금액/멱등을 PG confirm 전에 검증한다(confirmTossPayment 와 동일
     // 방어). orderId 는 클라이언트가 넘기고 열거 가능하므로, 소유권 확인이 없으면
@@ -7526,6 +7560,18 @@ export const scheduledChargeSubscriptions = functions.pubsub
   .schedule("30 4 * * *")
   .timeZone("Asia/Seoul")
   .onRun(async () => {
+    // ★토스 전용 갱신 크론 정지(1단계).
+    // 안전 근거: 이 크론은 `paymentProvider=="toss"` 만 스캔하고, 포트원 갱신은
+    // 별도 크론 scheduledChargePortOneSubscriptions(05:00 KST)가 처리한다 —
+    // 여기서 멈춰도 살아 있는 결제 경로는 영향받지 않는다.
+    // 함수 자체는 남긴다(배포에서 지우면 되살릴 때 스케줄 재생성이 필요하고
+    // 실행 로그도 끊긴다). 되돌리려면 TOSS_ENTRY_ENABLED="true".
+    if (!isTossEntryEnabled(process.env.TOSS_ENTRY_ENABLED)) {
+      console.log(
+        "[Billing Cron] toss entry disabled; skipping toss renewal sweep"
+      );
+      return null;
+    }
     const nowMs = Date.now();
     const result = {
       scanned: 0,
