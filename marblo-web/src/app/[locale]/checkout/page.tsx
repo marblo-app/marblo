@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { onAuthStateChanged, User } from "firebase/auth";
+import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import { httpsCallable, getFunctions } from "firebase/functions";
 import { auth } from "@/lib/firebase";
 import app from "@/lib/firebase";
@@ -23,6 +23,12 @@ import {
   resolveCheckoutProvider,
   type PaymentProvider,
 } from "@/lib/paymentProvider";
+import {
+  ACCOUNT_HINT_PARAM,
+  shouldBlockCheckout,
+  verifyAccountHint,
+  type AccountHintVerdict,
+} from "@/lib/checkoutAccountHint";
 
 interface PortOneSDK {
   requestPayment(params: {
@@ -116,6 +122,14 @@ export default function CheckoutPage() {
   const lectureSlug = searchParams.get("slug");
   const type = searchParams.get("type") || "subscription";
   const billing = searchParams.get("billing") || "monthly";
+  // ★데스크톱 앱이 실어 보낸 계정 핸드오프 힌트(티켓 3Notu54M, lib/checkoutAccountHint).
+  // 앱 세션(A)과 이 브라우저 세션(B)이 다른 계정이면 결제 전에 멈추고 사람에게
+  // 보여준다 — 안 그러면 서버는 B 에 쓰고 앱은 A 를 들어 앱이 영원히 Free 다.
+  // 힌트가 없으면(웹 직접 진입) 검사하지 않는다.
+  const accountHint = searchParams.get(ACCOUNT_HINT_PARAM);
+  // 로그인 리다이렉트에 보존할 쿼리 전체(provider·billing·acct…). 한 번의 로그인
+  // 왕복에 앱이 실어 보낸 값이 떨어지면 안 된다.
+  const subscriptionQuery = searchParams.toString();
   // ★결제수단은 포트원으로 일원화됐다. 토스페이먼츠 PG 직결은 신규 진입을
   // 닫았다(서버 게이트: TOSS_ENTRY_ENABLED). 상세는 lib/paymentProvider.ts.
   const paymentProvider: PaymentProvider = resolveCheckoutProvider({
@@ -123,6 +137,12 @@ export default function CheckoutPage() {
   });
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  /** 앱 계정 힌트 대조 결과. 힌트가 있으면 대조가 끝날 때까지 결제 폼을 띄우지 않는다. */
+  const [accountVerdict, setAccountVerdict] = useState<
+    AccountHintVerdict | "checking"
+  >(accountHint ? "checking" : "none");
+  /** 불일치를 보고도 "이 브라우저 계정으로 계속" 을 명시적으로 고른 상태. */
+  const [mismatchAcknowledged, setMismatchAcknowledged] = useState(false);
   const [loading, setLoading] = useState(false);
   const [sdkReady, setSdkReady] = useState(false);
   const [discount, setDiscount] = useState(0);
@@ -236,7 +256,12 @@ export default function CheckoutPage() {
       if (!u) {
         const redirectPath = isLecture
           ? localeHref(locale, `/checkout?type=lecture&slug=${lectureSlug}`)
-          : localeHref(locale, `/checkout?plan=${plan}`);
+          : // ★쿼리를 통째로 보존한다 — 예전엔 plan 만 남겨 provider·billing 이
+            // 로그인 한 번에 떨어졌고, 앱의 계정 힌트(acct)도 같이 사라졌을 경로다.
+            localeHref(
+              locale,
+              `/checkout?${subscriptionQuery || `plan=${plan}`}`,
+            );
         router.push(
           localeHref(locale, `/auth/login?redirect=${encodeURIComponent(redirectPath)}`),
         );
@@ -245,7 +270,36 @@ export default function CheckoutPage() {
       }
     });
     return () => unsub();
-  }, [locale, plan, lectureSlug, isLecture, type, router]);
+  }, [locale, plan, lectureSlug, isLecture, type, router, subscriptionQuery]);
+
+  // 앱 계정 힌트 대조 — 로그인이 확정된 뒤, 결제 폼이 뜨기 전에. 계정이 바뀌면
+  // (로그아웃 후 다른 계정으로 로그인) 다시 대조하고 이전 선택은 버린다.
+  useEffect(() => {
+    if (!user) return;
+    setMismatchAcknowledged(false);
+    if (!accountHint) {
+      setAccountVerdict("none");
+      return;
+    }
+    let cancelled = false;
+    setAccountVerdict("checking");
+    void verifyAccountHint(accountHint, user.uid).then((verdict) => {
+      if (!cancelled) setAccountVerdict(verdict);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, accountHint]);
+
+  /** 불일치 화면에서 "앱과 같은 계정으로 로그인" — 로그아웃하면 위 onAuthStateChanged
+   *  가 쿼리(acct 포함)를 보존한 채 로그인 페이지로 보낸다. */
+  const handleSwitchAccount = async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error("signOut for account switch failed:", err);
+    }
+  };
 
   const loadPortOneSDK = useCallback(async (): Promise<PortOneSDK> => {
     if (window.PortOne) return window.PortOne;
@@ -702,6 +756,10 @@ export default function CheckoutPage() {
 
   if (!user) return null;
 
+  /** 불일치 화면에 보여줄 "지금 이 브라우저의 계정" 라벨. 이메일이 없는 계정도 있다. */
+  const browserAccountLabel =
+    user.email || user.displayName || t("accountMismatchThisAccount");
+
   // Invalid params
   if (!isValid) {
     return (
@@ -727,6 +785,64 @@ export default function CheckoutPage() {
     );
   }
 
+  // ★앱 계정 힌트를 아직 대조하는 중 — 결제 폼을 먼저 띄우지 않는다(순간이다).
+  if (accountVerdict === "checking") {
+    return (
+      <div className="py-24 px-4 flex justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-zinc-400" />
+      </div>
+    );
+  }
+
+  // ★앱은 A, 이 브라우저는 B — 결제 전에 멈추고 어느 계정으로 결제할지 고르게 한다.
+  // 결제 버튼은 이 화면에 없다. 돈은 어디로 가든 사라지지 않지만, 여기서 고르지
+  // 않으면 앱이 그 결제를 영영 못 본다.
+  if (shouldBlockCheckout(accountVerdict, mismatchAcknowledged)) {
+    return (
+      <div className="py-24 px-4">
+        <div
+          role="alertdialog"
+          aria-labelledby="checkout-account-mismatch-title"
+          className="max-w-lg mx-auto bg-zinc-900 border border-amber-800/60 rounded-2xl p-8"
+        >
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-6 h-6 mt-0.5 shrink-0 text-amber-400" />
+            <div className="min-w-0">
+              <h1
+                id="checkout-account-mismatch-title"
+                className="text-xl font-bold text-zinc-100"
+              >
+                {t("accountMismatchTitle")}
+              </h1>
+              <p className="mt-3 text-sm text-zinc-300 leading-relaxed">
+                {t("accountMismatchBody", { email: browserAccountLabel })}
+              </p>
+              <p className="mt-2 text-xs text-zinc-500 leading-relaxed">
+                {t("accountMismatchHint")}
+              </p>
+            </div>
+          </div>
+          <div className="mt-6 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => void handleSwitchAccount()}
+              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-lg font-medium transition"
+            >
+              {t("accountMismatchSwitch")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMismatchAcknowledged(true)}
+              className="w-full border border-zinc-700 hover:border-zinc-500 text-zinc-200 py-3 rounded-lg font-medium transition"
+            >
+              {t("accountMismatchContinue", { email: browserAccountLabel })}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="py-24 px-4">
       <div className="max-w-lg mx-auto">
@@ -745,6 +861,19 @@ export default function CheckoutPage() {
             <ShoppingCart className="w-6 h-6 text-indigo-400" />
             <h1 className="text-2xl font-bold">{t("title")}</h1>
           </div>
+
+          {/* ★앱과 다른 계정으로 결제하기를 고른 상태 — 고지는 결제 끝까지 남는다. */}
+          {accountVerdict === "mismatch" && mismatchAcknowledged && (
+            <div
+              role="status"
+              className="flex items-start gap-3 text-amber-200/90 mb-6 p-4 bg-amber-950/25 border border-amber-800/40 rounded-lg"
+            >
+              <AlertCircle className="w-5 h-5 mt-0.5 shrink-0 text-amber-400" />
+              <p className="text-sm leading-relaxed">
+                {t("accountMismatchAcknowledged", { email: browserAccountLabel })}
+              </p>
+            </div>
+          )}
 
           {/* SDK loading indicator */}
           {!sdkReady && !error && !sdkLoadFailed && (

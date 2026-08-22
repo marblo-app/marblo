@@ -66,6 +66,20 @@ export const billing = {
   "billing.webCheckout.refresh": "결제 상태 새로고침",
   "billing.webCheckout.refreshing": "확인 중...",
   "billing.webCheckout.dismiss": "닫기",
+  // ── 미반영 / 계정 불일치 의심 (티켓 3Notu54M) ─────────────
+  // 수동 새로고침 후에도 구독이 안 바뀌면 그린다. 가장 흔한 원인은 브라우저에
+  // 앱과 다른 계정으로 로그인한 채 결제한 것 — 돈은 그 계정에 정상 반영됐다.
+  // 실패를 0 으로 그리지 않고, 다음 행동을 함께 준다.
+  "billing.webCheckout.unresolved.heading":
+    "결제를 마쳤는데 아직 반영되지 않았나요?",
+  "billing.webCheckout.unresolved.desc":
+    "가장 흔한 원인은 브라우저에 앱과 다른 계정으로 로그인한 채 결제한 경우입니다. 이 앱은 {email} 계정의 구독만 봅니다. 결제한 계정에는 권한이 정상적으로 부여되어 있어 결제가 사라지지는 않습니다.",
+  "billing.webCheckout.unresolved.descNoEmail":
+    "가장 흔한 원인은 브라우저에 앱과 다른 계정으로 로그인한 채 결제한 경우입니다. 이 앱은 지금 로그인된 계정의 구독만 봅니다. 결제한 계정에는 권한이 정상적으로 부여되어 있어 결제가 사라지지는 않습니다.",
+  "billing.webCheckout.unresolved.reopen": "이 계정으로 결제 다시 열기",
+  "billing.webCheckout.unresolved.switchAccount":
+    "결제한 계정으로 앱에 다시 로그인",
+  "billing.webCheckout.unresolved.notPaid": "아직 결제하지 않았어요",
 
   // ── Subscription management ─────────────────────────────
   "billing.manage.heading": "구독 관리",

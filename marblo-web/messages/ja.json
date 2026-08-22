@@ -706,7 +706,14 @@
     "cancelSoftDescription": "決済画面を閉じたかキャンセルしました。準備ができたら再度お支払いできます。",
     "testCardHintTitle": "テスト決済のご案内",
     "testCardHintBody": "開発/ステージング環境です。一部のカード会社（国民・カカオバンクなど）はテストチャネルで利用できない場合があります。PortOne/KGイニシスのテストカードガイドをご確認ください。",
-    "errorDetailOptional": "エラーコード（サポート用）"
+    "errorDetailOptional": "エラーコード（サポート用）",
+    "accountMismatchTitle": "アプリとは別のアカウントでログインしています",
+    "accountMismatchBody": "Marblo アプリは別のアカウントでログインしており、このブラウザは {email} でログインしています。このまま決済すると、サブスクリプションは {email} に付与され、アプリではそのアカウントで再ログインするまで反映されません。",
+    "accountMismatchHint": "アプリの「プランと請求」画面にアプリのアカウントが表示されています。どのアカウントで決済するか先に選んでください。",
+    "accountMismatchSwitch": "アプリと同じアカウントでログイン",
+    "accountMismatchContinue": "{email} のまま決済を続ける",
+    "accountMismatchAcknowledged": "アプリとは別のアカウント（{email}）で決済します。決済後、このアカウントでアプリに再ログインするとサブスクリプションが表示されます。",
+    "accountMismatchThisAccount": "このブラウザのアカウント"
   },
   "lectures": {
     "title": "講座",

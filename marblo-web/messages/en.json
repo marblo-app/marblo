@@ -706,7 +706,14 @@
     "cancelSoftDescription": "You closed or cancelled the payment window. You can try again when ready.",
     "testCardHintTitle": "Test payment tips",
     "testCardHintBody": "This is a development/staging environment. Some issuers (e.g. KB, KakaoBank) may not work on the test channel. Use the PortOne/KG Inicis test card guide.",
-    "errorDetailOptional": "Error code (for support)"
+    "errorDetailOptional": "Error code (for support)",
+    "accountMismatchTitle": "This browser is signed in to a different account than the app",
+    "accountMismatchBody": "The Marblo app is signed in to another account, while this browser is signed in as {email}. If you pay now, the subscription goes to {email}, and the app will only show it after you sign in there with that account.",
+    "accountMismatchHint": "The app's Plans & Billing screen shows which account it is using. Choose which account to pay with first.",
+    "accountMismatchSwitch": "Sign in with the same account as the app",
+    "accountMismatchContinue": "Continue as {email}",
+    "accountMismatchAcknowledged": "You are paying with a different account ({email}) than the app. After payment, sign in to the app with this account to see the subscription.",
+    "accountMismatchThisAccount": "this browser's account"
   },
   "lectures": {
     "title": "Lectures",

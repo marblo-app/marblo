@@ -76,6 +76,26 @@ describe("buildWebCheckoutUrl", () => {
     );
   });
 
+  it("★accountHint 를 acct 로 싣는다 — 앱이 누구인지 웹이 검증할 수 있어야 한다 (티켓 3Notu54M)", () => {
+    // 데스크톱 세션(A)과 브라우저 세션(B)은 별개다. 힌트가 없으면 서버는 B 에
+    // 쓰고 앱은 A 를 듣는다 — 앱은 영원히 Free 다. 힌트는 원시 uid 가 아니라
+    // lib/checkoutAccountHint 가 만든 불투명·검증 가능 값이다.
+    const url = buildWebCheckoutUrl({
+      plan: "pro",
+      locale: "ko",
+      accountHint: "1.0123456789abcdef.56317b4a5d2e5ef436750eaeb319aebd",
+    });
+    expect(url).toBe(
+      `${WEB_CHECKOUT_BASE_URL}/checkout?plan=pro&provider=portone&billing=monthly&acct=1.0123456789abcdef.56317b4a5d2e5ef436750eaeb319aebd`,
+    );
+  });
+
+  it("accountHint 를 안 주면 acct 파라미터 자체가 없다(기존 호출부 호환)", () => {
+    expect(buildWebCheckoutUrl({ plan: "pro", locale: "ko" })).not.toContain(
+      "acct=",
+    );
+  });
+
   it("★successUrl 류의 앱 로컬 오리진을 절대 싣지 않는다", () => {
     // 회귀 방지: 예전 인앱 토스 경로가 successUrl 을
     // `${window.location.origin}/settings/billing?toss_success=true` 로 줬고,

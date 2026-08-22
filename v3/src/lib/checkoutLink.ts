@@ -27,6 +27,7 @@
  *   onSnapshot 구독으로 그 변경을 받는다(BillingPage 참조).
  */
 import type { PlanType } from "../types/subscription";
+import { ACCOUNT_HINT_PARAM } from "./checkoutAccountHint";
 
 /** 웹 서비스 오리진. services/publicReplayService·lib/attributionLink 와 같은 값. */
 export const WEB_CHECKOUT_BASE_URL = "https://marblo.app";
@@ -56,6 +57,12 @@ export interface WebCheckoutUrlArgs {
   billing?: CheckoutBillingCycle;
   /** 테스트·스테이징 오버라이드. 프로덕션에서는 넘기지 않는다. */
   baseUrl?: string;
+  /**
+   * 계정 핸드오프 힌트(lib/checkoutAccountHint.createAccountHint). 데스크톱
+   * 세션과 브라우저 세션이 다른 계정이면 웹이 **결제 전에** 멈추고 보여준다.
+   * ★원시 uid·이메일을 여기 넣지 마라 — 이 값은 검증 가능한 불투명 해시다.
+   */
+  accountHint?: string;
 }
 
 /**
@@ -76,6 +83,8 @@ export function buildWebCheckoutUrl(args: WebCheckoutUrlArgs): string | null {
     provider: "portone",
     billing: args.billing ?? "monthly",
   });
+  // 계정 힌트는 맨 뒤에 — 기존 테스트·로그가 보는 앞부분 순서를 바꾸지 않는다.
+  if (args.accountHint) params.set(ACCOUNT_HINT_PARAM, args.accountHint);
 
   const base = (args.baseUrl ?? WEB_CHECKOUT_BASE_URL).replace(/\/+$/, "");
   const prefix = locale === WEB_DEFAULT_LOCALE ? "" : `/${locale}`;

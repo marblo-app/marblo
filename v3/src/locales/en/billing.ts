@@ -64,6 +64,17 @@ export const billing: Record<keyof typeof koBilling, string> = {
   "billing.webCheckout.refresh": "Refresh payment status",
   "billing.webCheckout.refreshing": "Checking...",
   "billing.webCheckout.dismiss": "Dismiss",
+  // ── Not reflected / suspected account mismatch ─────────
+  "billing.webCheckout.unresolved.heading":
+    "Paid, but nothing changed here?",
+  "billing.webCheckout.unresolved.desc":
+    "The most common cause is paying while the browser was signed in to a different account than this app. This app only watches the subscription of {email}. The account you paid with has been upgraded — your payment is not lost.",
+  "billing.webCheckout.unresolved.descNoEmail":
+    "The most common cause is paying while the browser was signed in to a different account than this app. This app only watches the subscription of the account signed in here. The account you paid with has been upgraded — your payment is not lost.",
+  "billing.webCheckout.unresolved.reopen": "Reopen checkout as this account",
+  "billing.webCheckout.unresolved.switchAccount":
+    "Sign in to the app with the account you paid with",
+  "billing.webCheckout.unresolved.notPaid": "I haven't paid yet",
 
   // ── Subscription management ─────────────────────────────
   "billing.manage.heading": "Manage subscription",

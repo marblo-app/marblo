@@ -706,7 +706,14 @@
     "cancelSoftDescription": "결제창을 닫았거나 취소했습니다. 준비가 되면 다시 결제할 수 있습니다.",
     "testCardHintTitle": "테스트 결제 안내",
     "testCardHintBody": "개발/스테이징 환경입니다. 일부 카드사(국민·카카오뱅크 등)는 테스트 채널에서 지원되지 않을 수 있습니다. 이니시스/포트원 테스트 카드 가이드를 확인하세요.",
-    "errorDetailOptional": "상세 코드 (고객지원용)"
+    "errorDetailOptional": "상세 코드 (고객지원용)",
+    "accountMismatchTitle": "앱과 다른 계정으로 로그인되어 있습니다",
+    "accountMismatchBody": "마블로 앱은 다른 계정으로 로그인되어 있고, 이 브라우저는 {email} 계정입니다. 이대로 결제하면 구독은 {email} 계정에 부여되고, 앱에서는 그 계정으로 다시 로그인해야 반영됩니다.",
+    "accountMismatchHint": "앱의 '플랜 및 결제' 화면에 앱 계정 이메일이 표시되어 있습니다. 어느 계정으로 결제할지 먼저 골라 주세요.",
+    "accountMismatchSwitch": "앱과 같은 계정으로 로그인",
+    "accountMismatchContinue": "{email} 계정으로 계속 결제",
+    "accountMismatchAcknowledged": "앱과 다른 계정({email})으로 결제합니다. 결제 후 앱에서 이 계정으로 다시 로그인해야 구독이 보입니다.",
+    "accountMismatchThisAccount": "이 브라우저의 계정"
   },
   "lectures": {
     "title": "강의",

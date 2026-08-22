@@ -16,12 +16,20 @@
  * 쓰는 순간 반영된다. 브라우저를 다녀오는 동안 렌더러가 백그라운드로 눌려 있을
  * 수 있으므로, 창 포커스 복귀 시 1회 재조회 + 수동 새로고침 버튼을 덧댄다.
  *
+ * ★계정 핸드오프(티켓 3Notu54M): 데스크톱 Firebase 세션과 OS 브라우저 세션은
+ * 별개다. 앱이 A, 브라우저가 B 면 서버는 subscriptions/B 에 쓰고 앱은 A 를
+ * 듣는다 — 앱은 영원히 Free 다. 그래서 (1) 링크에 검증 가능한 불투명 계정
+ * 힌트를 실어 웹이 **결제 전에** 불일치를 멈추게 하고(lib/checkoutAccountHint),
+ * (2) 수동 새로고침 후에도 미반영이면 이 화면이 "계정 불일치 의심" 상태를
+ * 다음 행동과 함께 그린다. 실패를 0(=Free)으로 그리지 않는다.
+ *
  * 해외 결제(Paddle)는 그대로다 — 오버레이 체크아웃이라 리다이렉트를 타지 않는다.
  */
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useTranslation } from "../../lib/i18n";
 import { buildWebCheckoutUrl } from "../../lib/checkoutLink";
+import { createAccountHint } from "../../lib/checkoutAccountHint";
 import type { MessageKey } from "../../locales/ko";
 import type {
   PlanType,
@@ -151,9 +159,20 @@ const PROVIDER_LABEL_KEYS: Record<PaymentProvider, MessageKey> = {
   paddle: "billing.data.provider.paddle",
 };
 
+/**
+ * 서버가 쓴 구독 문서가 "이 결제" 를 반영했는가. 앱은 결제 결과를 직접 보지
+ * 못하므로 이것만이 믿을 수 있는 신호다(대기 안내 접기·의심 상태 판정 공용).
+ */
+function isCheckoutReflected(
+  sub: Subscription | null,
+  plan: PlanType,
+): boolean {
+  return sub?.planType === plan && sub.status !== "canceled";
+}
+
 export function BillingPage() {
   const { t, locale } = useTranslation();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -166,9 +185,12 @@ export function BillingPage() {
   const [paymentError, setPaymentError] = useState<string | null>(null);
   // 브라우저로 웹 체크아웃을 넘긴 뒤의 대기 상태. url 을 들고 있는 이유는
   // "결제창을 실수로 닫음" 이 흔해서 — 다시 열기가 한 번의 클릭이어야 한다.
+  // unresolved: 사용자가 수동 새로고침을 눌렀는데도 구독이 그대로다 — "결제했다"
+  // 고 믿는 사람 앞에서 Free 만 그리지 않고, 계정 불일치 의심을 행동과 함께 그린다.
   const [pendingCheckout, setPendingCheckout] = useState<{
     plan: PlanType;
     url: string;
+    unresolved: boolean;
   } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   // 취소 확인 모달 상태. 네이티브 confirm/alert 은 Electron 렌더러를 통째로
@@ -198,18 +220,32 @@ export function BillingPage() {
    * 다녀오는 동안 렌더러가 백그라운드로 눌려 스냅샷이 늦게 도착하는 경우와,
    * 사용자가 "지금 확인해줘" 라고 누르는 경우를 위해 둔다.
    */
-  const refreshSubscription = useCallback(async () => {
-    if (!user) return;
-    setRefreshing(true);
-    try {
-      setSubscription(await getSubscription(user.uid));
-    } catch (err) {
-      // 조회 실패는 화면을 막지 않는다 — onSnapshot 이 계속 살아 있다.
-      console.error("구독 상태 조회 실패:", err);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [user]);
+  const refreshSubscription = useCallback(
+    async (source: "focus" | "manual" = "focus") => {
+      if (!user) return;
+      setRefreshing(true);
+      try {
+        const sub = await getSubscription(user.uid);
+        setSubscription(sub);
+        // ★수동 새로고침인데도 여전히 기대 플랜이 아니다 — 사용자는 "결제했는데
+        // 왜 안 바뀌지?" 하고 누른 것이다. 포커스 복귀 재조회는 결제 도중
+        // 알트탭만으로도 일어나므로 여기서 의심을 올리지 않는다.
+        if (source === "manual") {
+          setPendingCheckout((p) =>
+            p && !isCheckoutReflected(sub, p.plan)
+              ? { ...p, unresolved: true }
+              : p,
+          );
+        }
+      } catch (err) {
+        // 조회 실패는 화면을 막지 않는다 — onSnapshot 이 계속 살아 있다.
+        console.error("구독 상태 조회 실패:", err);
+      } finally {
+        setRefreshing(false);
+      }
+    },
+    [user],
+  );
 
   const handleUpgrade = (planType: PlanType) => {
     if (!user || planType === "free") return;
@@ -218,8 +254,19 @@ export function BillingPage() {
   };
 
   /** 국내 결제 — 웹 체크아웃을 기본 브라우저로 연다(결제는 앱 밖에서 끝난다). */
-  const openWebCheckout = (plan: PlanType): boolean => {
-    const url = buildWebCheckoutUrl({ plan, locale });
+  const openWebCheckout = async (plan: PlanType): Promise<boolean> => {
+    if (!user) return false;
+    // 계정 힌트: 앱 세션(A)과 브라우저 세션(B)이 다르면 웹이 결제 전에 멈춘다.
+    // ★원시 uid·이메일이 아니라 검증 가능한 불투명 해시다(checkoutAccountHint).
+    // 힌트 생성이 실패해도 결제 진입 자체를 막지는 않는다 — 그 경우 웹의
+    // 불일치 차단은 빠지고 아래 '의심 상태' 가 마지막 방어가 된다.
+    let accountHint: string | undefined;
+    try {
+      accountHint = await createAccountHint(user.uid);
+    } catch (err) {
+      console.warn("체크아웃 계정 힌트 생성 실패 — 힌트 없이 진행:", err);
+    }
+    const url = buildWebCheckoutUrl({ plan, locale, accountHint });
     if (!url) {
       // free/enterprise. 플랜 카드가 그 둘에 업그레이드 버튼을 주지 않으므로
       // 정상 경로로는 오지 않지만, 조용히 아무 일도 안 하는 것보다는 낫다.
@@ -229,7 +276,7 @@ export function BillingPage() {
     // main 의 setWindowOpenHandler 가 외부 https + _blank 를 shell.openExternal
     // 로 넘긴다(새 IPC 없음 — installAttribution/WorktreeTab 과 같은 경로).
     window.open(url, "_blank");
-    setPendingCheckout({ plan, url });
+    setPendingCheckout({ plan, url, unresolved: false });
     return true;
   };
 
@@ -244,7 +291,7 @@ export function BillingPage() {
     if (method.provider === "portone") {
       // 브라우저로 넘기는 것은 동기다. actionLoading 을 걸면 되돌릴 시점이
       // 없어서(결제 완료를 앱이 관측하지 못한다) 아예 걸지 않는다.
-      if (openWebCheckout(selectedPlan)) setSelectedPlan(null);
+      if (await openWebCheckout(selectedPlan)) setSelectedPlan(null);
       return;
     }
 
@@ -297,10 +344,7 @@ export function BillingPage() {
   // 직접 관측하지 못하므로 이것만이 믿을 수 있는 신호다.
   useEffect(() => {
     if (!pendingCheckout) return;
-    if (
-      subscription?.planType === pendingCheckout.plan &&
-      subscription.status !== "canceled"
-    ) {
+    if (isCheckoutReflected(subscription, pendingCheckout.plan)) {
       setPendingCheckout(null);
     }
   }, [subscription, pendingCheckout]);
@@ -464,6 +508,49 @@ export function BillingPage() {
               {t("billing.webCheckout.account", { email: user.email })}
             </p>
           )}
+          {/* 미반영 / 계정 불일치 의심 — 수동 새로고침 후에도 구독이 그대로일 때.
+              실패를 Free(0)로 그리지 않고, 다음 행동 세 개를 준다:
+              같은 계정으로 다시 열기(웹이 힌트로 대조) / 결제한 계정으로 재로그인 /
+              아직 결제 전이라 이 의심을 접기. */}
+          {pendingCheckout.unresolved && (
+            <div
+              role="alert"
+              className="mt-3 rounded-md border border-amber-700 bg-amber-950/40 p-3"
+            >
+              <p className="text-sm font-medium text-amber-100">
+                {t("billing.webCheckout.unresolved.heading")}
+              </p>
+              <p className="mt-1 text-xs text-amber-200/90">
+                {user?.email
+                  ? t("billing.webCheckout.unresolved.desc", {
+                      email: user.email,
+                    })
+                  : t("billing.webCheckout.unresolved.descNoEmail")}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={() => window.open(pendingCheckout.url, "_blank")}
+                  className="rounded bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-500"
+                >
+                  {t("billing.webCheckout.unresolved.reopen")}
+                </button>
+                <button
+                  onClick={() => void logout()}
+                  className="rounded border border-amber-700 px-3 py-1.5 text-xs text-amber-100 transition-colors hover:bg-amber-900/50"
+                >
+                  {t("billing.webCheckout.unresolved.switchAccount")}
+                </button>
+                <button
+                  onClick={() =>
+                    setPendingCheckout({ ...pendingCheckout, unresolved: false })
+                  }
+                  className="rounded px-3 py-1.5 text-xs text-amber-200/80 transition-colors hover:text-amber-100"
+                >
+                  {t("billing.webCheckout.unresolved.notPaid")}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               onClick={() => window.open(pendingCheckout.url, "_blank")}
@@ -472,7 +559,7 @@ export function BillingPage() {
               {t("billing.webCheckout.reopen")}
             </button>
             <button
-              onClick={() => void refreshSubscription()}
+              onClick={() => void refreshSubscription("manual")}
               disabled={refreshing}
               className="rounded border border-gray-600 px-3 py-1.5 text-xs text-gray-200 transition-colors hover:bg-gray-700 disabled:opacity-50"
             >

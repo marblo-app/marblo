@@ -78,6 +78,7 @@ vi.mock("../../src/services/billingService", () => ({
 // 실제 useAuth 는 AuthContext 값을 그대로 돌려주므로 참조가 안정적이다.
 const authMock = vi.hoisted(() => ({
   user: { uid: "user-1", email: "u@example.com" },
+  logout: vi.fn(),
 }));
 
 vi.mock("../../src/hooks/useAuth", () => ({
@@ -87,6 +88,10 @@ vi.mock("../../src/hooks/useAuth", () => ({
 import { BillingPage } from "../../src/components/settings/BillingPage";
 import { useLocaleStore } from "../../src/lib/i18n";
 import { WEB_CHECKOUT_BASE_URL } from "../../src/lib/checkoutLink";
+import {
+  ACCOUNT_HINT_PARAM,
+  verifyAccountHint,
+} from "../../src/lib/checkoutAccountHint";
 
 function makeSub(overrides: Partial<Subscription> = {}): Subscription {
   return {
@@ -127,6 +132,7 @@ beforeEach(() => {
   billingMock.openPaddleCheckout.mockResolvedValue(undefined);
   billingMock.getSubscription.mockReset();
   billingMock.getSubscription.mockResolvedValue(null);
+  authMock.logout.mockReset();
 });
 
 afterEach(() => {
@@ -163,8 +169,10 @@ describe("BillingPage 국내 결제 — 웹 체크아웃으로 넘긴다", () =>
 
     await waitFor(() => expect(openSpy).toHaveBeenCalledTimes(1));
     const [url, target] = openSpy.mock.calls[0];
-    expect(url).toBe(
-      `${WEB_CHECKOUT_BASE_URL}/checkout?plan=pro&provider=portone&billing=monthly`,
+    expect(url).toMatch(
+      new RegExp(
+        `^${WEB_CHECKOUT_BASE_URL}/checkout\\?plan=pro&provider=portone&billing=monthly&acct=`,
+      ),
     );
     // _blank 여야 main 의 setWindowOpenHandler 가 shell.openExternal 로 넘긴다.
     expect(target).toBe("_blank");
@@ -236,6 +244,115 @@ describe("BillingPage 국내 결제 — 웹 체크아웃으로 넘긴다", () =>
 
     await waitFor(() => expect(openSpy).toHaveBeenCalledTimes(2));
     expect(openSpy.mock.calls[1][0]).toBe(openSpy.mock.calls[0][0]);
+  });
+});
+
+describe("BillingPage 국내 결제 — 계정 핸드오프 (티켓 3Notu54M)", () => {
+  /**
+   * 데스크톱 Firebase 세션(A)과 OS 브라우저 세션(B)은 별개다. URL 에 계정
+   * 힌트가 없으면 B 로 결제되고 서버는 subscriptions/B 에 쓰는데 앱은
+   * subscriptions/A 를 듣는다 — 앱은 영원히 Free 다. 폴링으로도 안 풀린다.
+   */
+  it("★체크아웃 URL 에 검증 가능한 계정 힌트가 실린다 — uid·email 원문은 아니다", async () => {
+    const openSpy = stubWindowOpen();
+    await openPaymentModal();
+    fireEvent.click(screen.getByText(ko["billing.pay"]));
+    await waitFor(() => expect(openSpy).toHaveBeenCalledTimes(1));
+
+    const url = new URL(openSpy.mock.calls[0][0] as string);
+    const hint = url.searchParams.get(ACCOUNT_HINT_PARAM);
+    expect(hint).toBeTruthy();
+    // 웹이 로그인된 uid 로 재계산해 대조할 수 있다.
+    expect(await verifyAccountHint(hint, "user-1")).toBe("match");
+    expect(await verifyAccountHint(hint, "user-2")).toBe("mismatch");
+    // ★원시 식별자는 어디에도 없다 — 브라우저 이력·리퍼러·어깨너머.
+    expect(url.toString()).not.toContain("user-1");
+    expect(url.toString()).not.toContain("u@example.com");
+    expect(url.toString()).not.toContain(encodeURIComponent("u@example.com"));
+  });
+
+  it("★수동 새로고침 후에도 미반영이면 '계정 불일치 의심' 상태를 그린다 — 다음 행동과 함께", async () => {
+    const openSpy = stubWindowOpen();
+    await openPaymentModal();
+    fireEvent.click(screen.getByText(ko["billing.pay"]));
+    await screen.findByText(ko["billing.webCheckout.heading"]);
+
+    // 사용자가 "결제했는데 왜 안 바뀌지?" 하고 직접 누른다 — 서버 문서는 여전히 없다(A 기준).
+    fireEvent.click(screen.getByText(ko["billing.webCheckout.refresh"]));
+
+    // 실패를 0 으로 그리지 않는다: 의심 상태가 뜬다.
+    expect(
+      await screen.findByText(ko["billing.webCheckout.unresolved.heading"]),
+    ).toBeTruthy();
+    // 다음 행동이 화면에 있다: 이 계정으로 다시 열기 / 결제한 계정으로 재로그인 / 아직 결제 안 함.
+    const switchBtn = screen.getByText(
+      ko["billing.webCheckout.unresolved.switchAccount"],
+    );
+    const reopenBtn = screen.getByText(
+      ko["billing.webCheckout.unresolved.reopen"],
+    );
+    expect(screen.getByText(ko["billing.webCheckout.unresolved.notPaid"])).toBeTruthy();
+
+    // 다시 열기 = 같은 URL(같은 계정 힌트) — 웹이 B 로 로그인돼 있으면 거기서 막는다.
+    fireEvent.click(reopenBtn);
+    await waitFor(() => expect(openSpy).toHaveBeenCalledTimes(2));
+    expect(openSpy.mock.calls[1][0]).toBe(openSpy.mock.calls[0][0]);
+
+    // 결제한 계정으로 앱에 다시 로그인 = 로그아웃으로 보낸다.
+    fireEvent.click(switchBtn);
+    await waitFor(() => expect(authMock.logout).toHaveBeenCalledTimes(1));
+  });
+
+  it("'아직 결제하지 않았어요' 는 의심 상태만 접고 대기 안내는 남긴다", async () => {
+    stubWindowOpen();
+    await openPaymentModal();
+    fireEvent.click(screen.getByText(ko["billing.pay"]));
+    await screen.findByText(ko["billing.webCheckout.heading"]);
+    fireEvent.click(screen.getByText(ko["billing.webCheckout.refresh"]));
+    await screen.findByText(ko["billing.webCheckout.unresolved.heading"]);
+
+    fireEvent.click(screen.getByText(ko["billing.webCheckout.unresolved.notPaid"]));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText(ko["billing.webCheckout.unresolved.heading"]),
+      ).toBeNull(),
+    );
+    expect(screen.getByText(ko["billing.webCheckout.heading"])).toBeTruthy();
+  });
+
+  it("포커스 복귀 재조회만으로는 의심 상태를 띄우지 않는다(결제 도중 알트탭이 흔하다)", async () => {
+    stubWindowOpen();
+    await openPaymentModal();
+    fireEvent.click(screen.getByText(ko["billing.pay"]));
+    await screen.findByText(ko["billing.webCheckout.heading"]);
+
+    fireEvent.focus(window);
+    await waitFor(() =>
+      expect(billingMock.getSubscription).toHaveBeenCalledWith("user-1"),
+    );
+
+    expect(
+      screen.queryByText(ko["billing.webCheckout.unresolved.heading"]),
+    ).toBeNull();
+  });
+
+  it("의심 상태에서도 서버가 구독 문서를 쓰면 전부 접힌다 — 판정은 여전히 문서다", async () => {
+    stubWindowOpen();
+    await openPaymentModal();
+    fireEvent.click(screen.getByText(ko["billing.pay"]));
+    await screen.findByText(ko["billing.webCheckout.heading"]);
+    fireEvent.click(screen.getByText(ko["billing.webCheckout.refresh"]));
+    await screen.findByText(ko["billing.webCheckout.unresolved.heading"]);
+
+    billingMock.emit?.(makeSub({ planType: "pro" }));
+
+    await waitFor(() =>
+      expect(screen.queryByText(ko["billing.webCheckout.heading"])).toBeNull(),
+    );
+    expect(
+      screen.queryByText(ko["billing.webCheckout.unresolved.heading"]),
+    ).toBeNull();
   });
 });
 
