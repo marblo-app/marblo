@@ -701,11 +701,19 @@ export function BeginnerShell() {
                               화면에 없다 — 어드밴스드로 도망칠 수도 없는 화면에서.
                               세션 id·KB 는 계속 감춘 채 "언제 나눈 대화인지" 로만
                               고르게 한다. */}
+                            {/* ★gateBootOutput(티켓 fDceJJvz3eam2PMNOWyB): 이 패널은
+                              오케 PTY 를 그대로 그리는 xterm 이라, 오케가 말하기
+                              전엔 CLI 배너·YOLO mode·주입 프롬프트 전문·/var/folders
+                              경로·get_agent_skill 반환 본문이 첫 화면이 됐다.
+                              프롬프트로는 못 막는 자리(모델이 말하기 전의 원시
+                              스트림)라 렌더러 write 경계에서 가른다 —
+                              lib/orchestratorBootGate. 첫 발화 전엔 로딩 골격. */}
                             <OrchestratorPanel
                               fill
                               hideModelControls
                               showConnectedModelPicker
                               showSessionRecovery
+                              gateBootOutput
                               onUserSubmit={ask.markTerminalSubmit}
                             />
                           </div>

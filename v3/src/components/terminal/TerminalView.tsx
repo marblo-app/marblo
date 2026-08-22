@@ -22,12 +22,22 @@ import {
 import { useAgentSessionMap } from "../../stores/agentSessionMap";
 import { useAgentStore } from "../../stores/agentStore";
 import { useProjectStore } from "../../stores/projectStore";
+import type { PtyOutputGate } from "../../lib/orchestratorBootGate";
 
 interface TerminalViewProps {
   sessionId: string;
   isActive: boolean;
   activityState?: string;
   onUserSubmit?: (text: string) => void;
+  /**
+   * PTY → 화면 사이의 출력 게이트(비기너 오케 대화창 전용, 티켓 fDceJJvz3eam2PMNOWyB).
+   * 있으면 PTY 에서 온 바이트(라이브·replay)는 전부 `gate.feed` 를 거치고, 게이트가
+   * sink 로 돌려준 것만 xterm 에 쓴다 — 부트 배너·주입 프롬프트 에코·툴 출력은 첫
+   * 어시스턴트 발화 전까지 버려진다. ★없으면(마블로/엑스퍼트·에이전트 터미널) 종전과
+   * 바이트 단위로 같은 직결 경로다. 터미널 자체가 쓰는 안내문(세션 만료·프로세스
+   * 종료)은 게이트를 타지 않는다.
+   */
+  outputGate?: PtyOutputGate;
   // Mimics Claude `/agents` view: pressing ← with an empty input line
   // drills out of the focused agent back to the list. We track keystrokes
   // sent via `terminal.onData` to estimate input length — when it's 0,
@@ -96,6 +106,7 @@ export default memo(function TerminalView({
   activityState,
   onUserSubmit,
   onLeftWhenEmpty,
+  outputGate,
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -118,6 +129,12 @@ export default memo(function TerminalView({
   const onLeftWhenEmptyRef = useRef(onLeftWhenEmpty);
   const onUserSubmitRef = useRef(onUserSubmit);
   const submittedLineRef = useRef("");
+  // 게이트도 ref 로 — init 이펙트는 sessionId 에만 묶여 있고, 게이트는 세션당 하나라
+  // 마운트 시점의 값이면 충분하다(OrchestratorTerminal 이 sessionId 별로 만든다).
+  const outputGateRef = useRef(outputGate);
+  useEffect(() => {
+    outputGateRef.current = outputGate;
+  }, [outputGate]);
   useEffect(() => {
     onLeftWhenEmptyRef.current = onLeftWhenEmpty;
   }, [onLeftWhenEmpty]);
@@ -593,6 +610,42 @@ export default memo(function TerminalView({
     };
 
     let hasReceivedData = false;
+
+    // ★PTY → 화면 경로는 하나다. 라이브 청크·replay 청크 모두 `ingestPty` 로 들어오고,
+    // 비기너 대화창이면 `outputGate`(lib/orchestratorBootGate) 가 첫 어시스턴트
+    // 발화 전의 부트 출력을 버린다. 게이트가 없으면 `ingestPty === writePtyToTerminal`
+    // 이라 종전과 같은 직결 경로다. xterm 이 아직 안 열렸으면 pendingData 에 쌓였다가
+    // 아래 flushInterval 이 쓴다 — 그 버퍼에는 게이트를 **통과한** 바이트만 들어간다.
+    const writePtyToTerminal = (text: string) => {
+      if (disposed || !text) return;
+      if (!termOpened) {
+        pendingData.push(text);
+        return;
+      }
+      terminal.write(text);
+      if (wantBottomRef.current) terminal.scrollToBottom();
+    };
+    const outputGate = outputGateRef.current;
+    let unsubscribeOutputGate: (() => void) | null = null;
+    if (outputGate) {
+      // 새 마운트 = replay 가 처음부터 다시 온다. 판정도 처음부터.
+      outputGate.reset();
+      outputGate.setSink(writePtyToTerminal);
+      unsubscribeOutputGate = outputGate.subscribe(() => {
+        if (disposed || outputGate.state !== "open") return;
+        // 열리는 순간 xterm 에는 인사말 줄만 있고 컴포저·상태줄은 없다 — 그 프레임은
+        // 버린 구간에 있었고, 인라인 TUI 는 바뀐 셀만 다시 그린다. SIGWINCH 를
+        // 한 번 주면 TUI 가 뷰포트 전체를 다시 그린다(alt-screen 복귀와 같은 넛지).
+        requestAnimationFrame(() => {
+          if (disposed || !termOpened) return;
+          nudgePtyRepaint("boot gate open");
+        });
+      });
+    }
+    const ingestPty = outputGate
+      ? (text: string) => outputGate.feed(text)
+      : writePtyToTerminal;
+
     // Settle-window batching for live PTY chunks. Busy TUI apps (Gemini Ink,
     // Claude Code streaming) emit a SINGLE logical redraw (e.g. arrow-key
     // menu navigation) as several stdout flushes spaced 5-40ms apart. With
@@ -619,14 +672,14 @@ export default memo(function TerminalView({
       if (liveQueue.length === 0) return;
       const joined = liveQueue.join("");
       liveQueue = [];
-      terminal.write(joined);
-      if (wantBottomRef.current) terminal.scrollToBottom();
+      ingestPty(joined);
     };
     window.electronAPI.pty.onData(sessionId, (data) => {
       hasReceivedData = true;
       if (disposed) return;
       if (!termOpened) {
-        pendingData.push(data);
+        // 열리기 전 바이트도 게이트를 거쳐 pendingData 로 간다(위 writePtyToTerminal).
+        ingestPty(data);
         return;
       }
       liveQueue.push(data);
@@ -664,13 +717,7 @@ export default memo(function TerminalView({
       window.electronAPI.pty.replay(sessionId).then(async (buffered) => {
         if (disposed) return;
         if (buffered.length > 0) hasReceivedData = true;
-        for (const chunk of buffered) {
-          if (termOpened) {
-            terminal.write(chunk);
-          } else {
-            pendingData.push(chunk);
-          }
-        }
+        for (const chunk of buffered) ingestPty(chunk);
         if (buffered.length > 0 && termOpened) {
           // A late mount (the beginner agent modal, opened long after the
           // agent spawned) replays a frame the TUI drew for whatever size the
@@ -878,6 +925,8 @@ export default memo(function TerminalView({
       viewportEl?.removeEventListener("wheel", onWheel, wheelOpts);
       viewportEl?.removeEventListener("keydown", onKeyDown, keyOpts);
       window.electronAPI.pty.removeListeners(sessionId);
+      unsubscribeOutputGate?.();
+      outputGate?.setSink(null);
       terminal.dispose();
       webglAddonRef = null;
       if (window.__marbloTerminalDebug?.[sessionId]) {

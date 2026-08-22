@@ -206,6 +206,14 @@ interface OrchestratorPanelProps {
    */
   showSessionRecovery?: boolean;
   onUserSubmit?: (text: string) => void;
+  /**
+   * 비기너 대화창(티켓 fDceJJvz3eam2PMNOWyB): 오케가 처음 말하기 전의 PTY 부트
+   * 출력(CLI 배너·YOLO mode·주입 프롬프트 에코·내부 경로·툴 호출/반환 본문)을
+   * 터미널에 그리지 않고 로딩 골격을 보인다. `OrchestratorTerminal.gateBootOutput`
+   * 로 내려가며, 멈춤 사유가 사용자의 답을 요구하면(`halt`) 게이트를 연다.
+   * ★마블로(엑스퍼트)는 주지 않는다 — 원시 출력이 진단에 쓰인다.
+   */
+  gateBootOutput?: boolean;
 }
 
 export default memo(function OrchestratorPanel({
@@ -214,6 +222,7 @@ export default memo(function OrchestratorPanel({
   showConnectedModelPicker = false,
   showSessionRecovery = false,
   onUserSubmit,
+  gateBootOutput = false,
 }: OrchestratorPanelProps) {
   const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -1196,6 +1205,10 @@ export default memo(function OrchestratorPanel({
             panelHeight={panelHeight}
             status={status}
             onUserSubmit={onUserSubmit}
+            gateBootOutput={gateBootOutput}
+            // 멈춤(로그인·첫 실행 다이얼로그)은 사용자가 원시 화면에 답해야 풀린다 —
+            // 그때는 골격 뒤에 가두지 않는다(버린 부트 출력은 그대로 버린 채).
+            gateBypass={!!halt}
           />
         </div>
       )}

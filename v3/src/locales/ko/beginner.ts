@@ -231,6 +231,8 @@ export const beginner = {
   "beginner.chat.placeholder":
     "이어서 하고 싶은 말을 적어 주세요. 예: 방금 만든 가이드에 예시를 더 넣어 줘",
   "beginner.chat.orchestratorRunning": "대화 중",
+  // 오케가 처음 말하기 전의 자리(로딩 골격 위 한 줄) — 티켓 fDceJJvz3eam2PMNOWyB.
+  "beginner.chat.preparing": "마블로가 준비하고 있어요",
   // 연결·인증된 모델만 골라 넣은 단순 드롭다운(오케 헤더)의 툴팁 — 티켓 cmp95TVin64IIlOiFlAC.
   "beginner.chat.modelPickerTitle": "마블로가 사용할 모델",
   // ── 이전 대화 복구(오케 헤더) — 티켓 BzxAJXxqhHgYzy1Aq4IV ────────────────

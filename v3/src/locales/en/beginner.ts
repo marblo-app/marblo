@@ -223,6 +223,7 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.chat.placeholder":
     "What next? e.g. add a few examples to the guide you just wrote",
   "beginner.chat.orchestratorRunning": "In conversation",
+  "beginner.chat.preparing": "Marblo is getting ready",
   "beginner.chat.modelPickerTitle": "Model Marblo will use",
   // Prior-conversation recovery in the orchestrator header (ticket
   // BzxAJXxqhHgYzy1Aq4IV). Same session list the advanced picker shows, minus
