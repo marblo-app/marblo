@@ -34,6 +34,7 @@ import {
   Database,
   TriangleAlert,
   Link2,
+  Unlink,
 } from "lucide-react";
 
 // ── 콜러블 응답 타입 (docs/analytics-admin-callables-api.md 미러) ───────────────
@@ -1480,6 +1481,64 @@ export function markerIndex(
 /** 이 수 이하의 분모는 "작은 표본" 으로 보고 화면이 경고를 띄운다. */
 const SMALL_SAMPLE_MAX = 10;
 
+// ── ★분자 > 분모 방어 — 막는 자리는 렌더 직전이 아니라 **나누기 그 자체**다 ──
+//
+// 실화면에서 코크핏 '모델 연결 도달 (앞단)' 이 9/7 = 128.6% 로 나왔다. 두 수는
+// 서로 다른 이벤트에서, 서로 다른 창으로 온다:
+//   · 분자 `connectedClients`(= d_model_connected) 는 정본 앵커 + 하위호환 두
+//     신호의 **합집합**이라, 이 조회 구간 밖에서 이미 연결을 끝낸 설치까지 센다.
+//   · 분모 `firstRunBase`(= d_first_run_base) 는 이 구간에 `app:first_run` 을
+//     찍은 설치만 센다.
+// 그래서 분자가 분모를 넘는 것은 고장이 아니라 **정상적으로 일어나는 일**이다.
+// 서버(buildZeroFrictionKpis)는 이미 앞단 이탈을 `Math.max(0, ...)` 로 자르며
+// 그 사실을 인정하고 있는데, **비율은 안 잘랐다** — 그 구멍으로 128.6% 가 화면까지
+// 왔다.
+//
+// ★그래서 여기서 막는다. 아래 `ratioVerdict` 가 이 화면에서 n/d 를 나누는 유일한
+//   자리이고, 나눌 수 없는 두 수는 나누기 전에 '비교 불가' 로 갈린다.
+//
+// ★clamp 하지 않는다. 128.6% 를 100% 로 눕히는 것은 **수치를 고치는 것**이라 더
+//   나쁘다 — 없던 상한을 지어내고, 다음 사람이 "100% 달성" 으로 읽는다.
+// ★분수는 남긴다. 9/7 을 지우면 측정값을 숨기는 것이다. 퍼센트만 내지 않는다.
+// ★빈칸으로 두지 않는다. 빈칸은 고장으로 읽힌다 — 대신 '비교 불가' 라고 쓴다.
+export type RatioVerdict =
+  | { kind: "ok"; rate: number }
+  /** 분모가 0 이거나 없다 — 실패가 아니라 판단할 표본이 없다. */
+  | { kind: "no-denominator" }
+  /** 분자 > 분모 — 두 수의 모집단·관측창이 다르다. 나누면 안 된다. */
+  | { kind: "incomparable" };
+
+/** 나눌 수 없는 두 수 자리에 그리는 말. 빈칸도 0% 도 아니다. */
+export const RATIO_INCOMPARABLE_LABEL = "비교 불가";
+
+/** 왜 퍼센트가 없는지. 툴팁으로 붙어 화면이 스스로 설명한다. */
+export const RATIO_INCOMPARABLE_HINT =
+  "분자가 분모보다 큽니다 — 두 수가 서로 다른 모집단(또는 서로 다른 관측창)에서 " +
+  "왔다는 뜻이라 나눌 수 없습니다. 분수는 그대로 둡니다: 지우면 측정값을 숨기는 " +
+  "것이고, 나누면 없는 비율을 지어내는 것입니다.";
+
+/**
+ * ★이 화면에서 분자/분모를 **나누는 유일한 자리**. 퍼센트가 필요한 곳은 전부
+ * 여기를 거친다 — 두 벌로 나누면 한쪽에만 방어가 붙고 다른 쪽으로 새어 나간다.
+ */
+export function ratioVerdict(
+  numerator: number | null | undefined,
+  denominator: number | null | undefined
+): RatioVerdict {
+  const n = numerator ?? 0;
+  const d = denominator ?? 0;
+  if (!isFinite(n) || !isFinite(d) || d <= 0) return { kind: "no-denominator" };
+  // ★경계(n === d)는 정상이다. 100% 는 있을 수 있는 값이라 막지 않는다.
+  if (n > d) return { kind: "incomparable" };
+  return { kind: "ok", rate: n / d };
+}
+
+/** 판정 → 화면 글자. `fmtRate` 규약(분모 0 → "—")을 그대로 잇는다. */
+export function fmtRatioVerdict(v: RatioVerdict): string {
+  if (v.kind === "incomparable") return RATIO_INCOMPARABLE_LABEL;
+  return fmtRate(v.kind === "ok" ? v.rate : null);
+}
+
 export function Ratio({
   numerator,
   denominator,
@@ -1493,13 +1552,21 @@ export function Ratio({
 }) {
   const n = numerator ?? 0;
   const d = denominator ?? 0;
-  // 분모 0 → "0.0%" 가 아니라 "—". fmtRate 가 그 규약의 단일 출처다.
-  const pct = fmtRate(d > 0 ? n / d : null);
+  // 분모 0 → "0.0%" 가 아니라 "—", 분자 > 분모 → 퍼센트 자체를 내지 않는다.
+  // 두 규약 모두 ratioVerdict 한 곳에서 나온다.
+  const v = ratioVerdict(n, d);
+  const pct = fmtRatioVerdict(v);
+  const incomparable = v.kind === "incomparable";
   return (
     <span
       className="inline-flex items-baseline gap-1.5 whitespace-nowrap"
-      title={title}
+      title={
+        incomparable
+          ? `${title ? `${title} · ` : ""}${RATIO_INCOMPARABLE_HINT}`
+          : title
+      }
     >
+      {/* ★분수는 언제나 그대로 남는다 — 비교 불가에서도 지우지 않는다. */}
       <span
         className={`font-semibold tabular-nums text-zinc-100 ${
           size === "lg" ? "text-lg" : "text-sm"
@@ -1508,9 +1575,9 @@ export function Ratio({
         {fmtInt(n)}/{fmtInt(d)}
       </span>
       <span
-        className={`tabular-nums ${d > 0 ? "text-zinc-500" : "text-zinc-600"} ${
-          size === "lg" ? "text-xs" : "text-[11px]"
-        }`}
+        className={`${incomparable ? "" : "tabular-nums "}${
+          v.kind === "ok" ? "text-zinc-500" : "text-zinc-600"
+        } ${size === "lg" ? "text-xs" : "text-[11px]"}`}
       >
         ({pct})
       </span>
@@ -1535,10 +1602,16 @@ export function RatioCard({
   title?: string;
   accent?: string;
 }) {
+  const incomparable =
+    ratioVerdict(numerator, denominator).kind === "incomparable";
   return (
     <div
       className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4"
-      title={title}
+      title={
+        incomparable
+          ? `${title ? `${title} · ` : ""}${RATIO_INCOMPARABLE_HINT}`
+          : title
+      }
     >
       <p className="text-xs font-medium text-zinc-500">{label}</p>
       <p
@@ -1548,7 +1621,7 @@ export function RatioCard({
         {fmtInt(numerator)}/{fmtInt(denominator)}
       </p>
       <p className="mt-0.5 text-xs text-zinc-500">
-        {fmtRate(denominator > 0 ? numerator / denominator : null)}
+        {fmtRatioVerdict(ratioVerdict(numerator, denominator))}
         {sub ? ` · ${sub}` : ""}
       </p>
     </div>
@@ -1840,6 +1913,23 @@ export const PERSON_AXIS_FORWARD_ONLY_NOTE =
   "낮은 커버리지는 '사람이 없다' 가 아니라 '아직 안 붙었다' 입니다. 잠자는 " +
   "설치는 며칠에서 영원히 안 붙을 수 있습니다.";
 
+/**
+ * ★'적재 전' 과 **행동이 다르다**는 사실. 이 문장이 이 상태의 존재 이유다.
+ *
+ * '적재 전' 은 기다리면 채워진다 — 파생표가 만들어지면 한 번에 다 들어온다.
+ * '매핑 불가' 는 **기다려도 안 채워질 수 있다.** 링크는 설치마다 따로, 그 설치가
+ * 다음에 인증할 때 생기고(forward-only), 잠자는 설치는 그날이 안 온다. 그리고
+ * 소급 백필로 앞당길 수 없다 — 인증하지 않은 설치를 사람에 붙일 근거가 없다.
+ *
+ * 이 둘을 같은 배지로 그리면 오너가 "곧 채워지겠지" 로 읽고 기다린다. 그 기다림이
+ * 영원히 안 끝나는 자리라 화면이 먼저 말해야 한다.
+ */
+export const PERSON_AXIS_NO_BACKFILL_NOTE =
+  "소급 백필로 앞당길 방법이 없습니다 — 인증하지 않은 설치를 사람에 붙일 근거 " +
+  "자체가 없기 때문입니다. 그래서 '적재 전' 처럼 시간이 해결해 주는 칸이 아닙니다: " +
+  "커버리지가 영영 낮은 채로 남을 수 있고, 여기 분수는 '아직 적은 값' 이 아니라 " +
+  "'이게 최종일 수도 있는 값' 으로 읽어야 합니다.";
+
 /** 사람 축 지표의 분모는 '전체 설치' 가 아니라 '링크된 설치' 다(§10.4-2). */
 export const PERSON_AXIS_DENOMINATOR_NOTE =
   "사람 축 지표의 분모는 전체 설치가 아니라 '링크된 설치' 입니다. 분모가 " +
@@ -2087,7 +2177,87 @@ export function IngestionProgress({
 }
 
 /**
- * ★네 번째 상태 — 게이트가 닫혀 있다(#1084 §9 가 프론트 몫으로 남긴 자리).
+ * ★'매핑 불가' — 측정은 됐는데 사람에 못 붙은 상태(coverage.state === "pending").
+ *
+ * 예전에는 이 자리도 `PendingIngestion`('적재 전')으로 접혀 있었다. 그런데 그
+ * 배지가 달고 오는 본문은 **"수치가 0 인 게 아니라 소스가 없습니다"** 다 — 이
+ * 자리에서 그건 **사실이 아니다.** 소스는 있다(활동한 설치가 실제로 세어졌다).
+ * 없는 것은 사람 링크뿐이다. 그 문장을 그대로 두면 다음 사람이 적재부터 다시 판다.
+ *
+ * 그리고 **행동이 다르다**(→ `PERSON_AXIS_NO_BACKFILL_NOTE`). '적재 전' 은
+ * 기다리면 채워지고, 여기는 기다려도 안 채워질 수 있다. 보는 사람이 할 일이
+ * 다르므로 이건 내부 구분이 아니라 **화면 상태**다.
+ *
+ * ★반대로 `coverage == null`(미배선)은 여전히 '적재 전' 으로 접는다 — §10.4-6.
+ *   거기서 보는 사람이 할 일은 '적재 전' 과 똑같이 **기다린다** 하나뿐이다.
+ */
+export function PersonAxisUnmapped({
+  coverage,
+}: {
+  coverage: PersonAxisCoverage;
+}) {
+  return (
+    <div className="rounded-xl border border-dashed border-amber-900/50 bg-amber-950/10 p-5">
+      <div className="flex flex-wrap items-center gap-2">
+        <Unlink className="h-4 w-4 text-amber-500" />
+        <h4 className="text-sm font-semibold text-zinc-300">
+          사람 축 (설치가 아니라 사람 단위)
+        </h4>
+        <span className="rounded-full border border-amber-800/60 bg-amber-950/40 px-2 py-0.5 text-[11px] text-amber-200">
+          매핑 불가
+        </span>
+        <PersonAxisBasisBadge
+          basis={coverage.basis}
+          effectiveFrom={coverage.effectiveFrom}
+        />
+      </div>
+
+      {/* ★첫 문장이 '적재 전' 과 갈리는 지점이다 — 소스는 있다. */}
+      <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+        <b className="text-zinc-200">측정은 됐습니다.</b> 없는 것은 소스가 아니라{" "}
+        <b className="text-zinc-200">사람 링크</b>입니다 — 활동한 설치{" "}
+        <b className="tabular-nums text-zinc-200">
+          {`${fmtInt(coverage.activeInstalls)}대`}
+        </b>{" "}
+        중 사람에 연결된 설치가{" "}
+        <b className="tabular-nums text-zinc-200">
+          {`${fmtInt(coverage.linkedActiveInstalls)}대`}
+        </b>
+        입니다. 그래서 사람 축 비율(퍼센트)은 내지 않습니다 — 사람에 못 붙은
+        설치를 사람 축 분모로 쓰면 없는 비율을 지어내는 것입니다.
+      </p>
+
+      {/* ★"곧 채워지겠지" 로 읽히면 안 되는 자리. 그 말을 화면이 직접 막는다. */}
+      <p className="mt-3 flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/20 p-2.5 text-[11px] leading-relaxed text-amber-200">
+        <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          <b>기다린다고 채워지는 칸이 아닙니다.</b>{" "}
+          {PERSON_AXIS_NO_BACKFILL_NOTE}
+        </span>
+      </p>
+
+      <dl className="mt-3 space-y-1.5 text-xs">
+        <div className="flex gap-2">
+          <dt className="w-20 shrink-0 text-zinc-600">붙으면 보임</dt>
+          <dd className="text-zinc-400">
+            <ul className="space-y-0.5">
+              {PERSON_AXIS_WILL_SHOW.map((w) => (
+                <li key={w}>· {w}</li>
+              ))}
+            </ul>
+          </dd>
+        </div>
+      </dl>
+
+      <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
+        {PERSON_AXIS_FORWARD_ONLY_NOTE}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * ★다섯 번째 상태 — 게이트가 닫혀 있다(#1084 §9 가 프론트 몫으로 남긴 자리).
  * '적재 전' 과 **다른 말**을 쓴다. 소스가 없는 게 아니라 아직 열지 않은 것이고,
  * '곧 채워집니다' 라고 읽히면 안 된다.
  */
@@ -2124,8 +2294,12 @@ export function PersonAxisDisabled({
  * 호출부마다 분기하면 어느 자리에서 규약 하나가 조용히 빠진다.
  *
  * ★`coverage` 가 없는 것은 상태가 아니라 **배선 전**이다. 선행 티켓이 응답에
- *   커버리지를 싣기 전까지 여기는 기존 '적재 전' 규약으로 접힌다(§10.4-6 이
- *   커버리지 0 에 새 상태를 만들지 말라고 한 것과 같은 이유).
+ *   커버리지를 싣기 전까지 여기는 기존 '적재 전' 규약으로 접힌다 — **보는 사람이
+ *   할 일이 '적재 전' 과 같기 때문**이다(기다린다). 할 일이 같은 내부 구분은
+ *   화면 상태로 만들지 않는다는 §10.4-6 그대로다.
+ *
+ * ★반대로 `state === "pending"`(매핑 불가)은 갈랐다. 거기서는 할 일이 다르다 —
+ *   기다려도 안 채워질 수 있다. `PersonAxisUnmapped` 주석 참조.
  */
 export function PersonAxisCoverageNote({
   coverage,
@@ -2143,15 +2317,17 @@ export function PersonAxisCoverageNote({
   }
   if (coverage.state === "disabled")
     return <PersonAxisDisabled coverage={coverage} />;
-  // §10.4-6 — 커버리지 0 에 새 상태를 만들지 않는다. 기존 규약 그대로.
+  // ★§10.4-6 개정 — '커버리지 0 에 새 상태를 만들지 않는다' 는 규약은 **미배선**
+  //   에는 그대로 살아 있고(위 `!coverage` 분기), `state === "pending"` 에서만
+  //   갈랐다. 가른 이유는 두 개다:
+  //     ① '적재 전' 이 달고 오는 본문("소스가 없습니다")이 이 자리에서 거짓이다.
+  //        소스는 있고 사람 링크만 없다.
+  //     ② **보는 사람이 할 일이 다르다.** '적재 전' 은 기다리면 되고, 여기는
+  //        기다려도 안 채워질 수 있다(forward-only · 소급 백필 불가).
+  //   §10.4-6 이 막으려던 것은 '할 일이 같은 내부 구분을 화면 상태로 만드는 것'
+  //   이었다. 미배선은 여전히 거기 해당하므로 접어 두고, 매핑 불가만 나온다.
   if (coverage.state === "pending")
-    return (
-      <PendingIngestion
-        title="사람 축 (설치가 아니라 사람 단위)"
-        waitingOn={`연결된 설치가 아직 없습니다 — ${PERSON_AXIS_FORWARD_ONLY_NOTE}`}
-        willShow={PERSON_AXIS_WILL_SHOW}
-      />
-    );
+    return <PersonAxisUnmapped coverage={coverage} />;
   if (coverage.state === "ingesting")
     return <IngestionProgress coverage={coverage} />;
 
@@ -3540,15 +3716,23 @@ function SurveyStars({ nps }: { nps: NpsResult }) {
 // 괄호 안 작게 그린다. 표본이 한 자릿수인 화면에서 큰 퍼센트는 정보가 아니라
 // 착시다.
 function CountedRateCell({ r }: { r: RetentionCountedRate }) {
-  const pct = r.rate == null ? "—" : `${(r.rate * 100).toFixed(1)}%`;
+  // ★서버가 rate 를 실어 보내지만 퍼센트 판정은 여기서 다시 한다 — 분자/분모가
+  //   같이 오는 자리라 '나눌 수 있는 두 수인가' 를 화면이 스스로 확인할 수 있고,
+  //   서버가 안 자른 비율이 그대로 새어 나오는 길(코크핏 128.6%)을 닫는다.
+  const v = ratioVerdict(r.numerator, r.denominator);
+  const pct = fmtRatioVerdict(v);
+  const incomparable = v.kind === "incomparable";
   return (
-    <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap">
+    <span
+      className="inline-flex items-baseline gap-1.5 whitespace-nowrap"
+      title={incomparable ? RATIO_INCOMPARABLE_HINT : undefined}
+    >
       <span className="text-sm font-semibold tabular-nums text-zinc-100">
         {r.numerator}/{r.denominator}
       </span>
       <span
-        className={`text-xs tabular-nums ${
-          r.rate == null ? "text-zinc-600" : "text-zinc-500"
+        className={`text-xs ${incomparable ? "" : "tabular-nums "}${
+          v.kind === "ok" ? "text-zinc-500" : "text-zinc-600"
         }`}
       >
         ({pct})
@@ -4647,12 +4831,16 @@ export function ActivationGateView({ data }: { data: RetentionCohorts }) {
                           {fmtInt(s.users)}명
                         </span>
                         {i > 0 && (
-                          <span className="text-[11px] tabular-nums text-zinc-300/80">
-                            진입 대비 {fmtInt(s.users)}/{fmtInt(entry)} (
-                            {entry > 0
-                              ? `${((s.users / entry) * 100).toFixed(1)}%`
-                              : "—"}
-                            )
+                          // ★여기도 n/d 를 나누는 자리다 — 퍼널 단계와 진입은
+                          //   같은 창에서 오지만, 뒤 단계가 앞을 넘는 봉투가
+                          //   오면 그대로 100% 초과가 찍힌다. 다른 분수 자리와
+                          //   같은 판정을 쓴다(코크핏 128.6% 와 같은 종류).
+                          <span className="text-[11px] text-zinc-300/80">
+                            진입 대비{" "}
+                            <span className="tabular-nums">
+                              {`${fmtInt(s.users)}/${fmtInt(entry)}`}
+                            </span>{" "}
+                            ({fmtRatioVerdict(ratioVerdict(s.users, entry))})
                           </span>
                         )}
                       </div>
