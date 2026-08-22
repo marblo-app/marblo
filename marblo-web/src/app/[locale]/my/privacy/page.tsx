@@ -64,7 +64,7 @@ export default function PrivacySettingsPage() {
       if (!u) {
         router.push(
           localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
-            `/${locale}/my/privacy`
+            localeHref(locale, "/my/privacy")
           )}`)
         );
         return;

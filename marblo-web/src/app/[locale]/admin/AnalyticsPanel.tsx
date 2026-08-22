@@ -238,14 +238,14 @@ export type RetentionCohorts = {
 // 5개, 유의미 사용이 2개다 — "50%" 라고만 띄우면 2명짜리 표본에 확신이 생긴다.
 // 그래서 서버는 rate 단독 필드를 주지 않고 언제나 분자/분모를 함께 준다. 화면도
 // 분수를 크게, 퍼센트를 작게 그린다(그 반대가 아니다).
-type RetentionCountedRate = {
+export type RetentionCountedRate = {
   numerator: number;
   denominator: number;
   /** 분모 0 이면 null — 0% 가 아니라 '판단 불가'다. */
   rate: number | null;
   display: string;
 };
-type StreakRetentionHorizon = {
+export type StreakRetentionHorizon = {
   key: "d1" | "d7" | "d14" | "d30";
   days: number;
   /** 아직 D+N 일이 오지 않아 판정 불가한 유닛 수. 분모에서 빠져 있다. */
@@ -253,7 +253,7 @@ type StreakRetentionHorizon = {
   exact: RetentionCountedRate;
   window: RetentionCountedRate;
 };
-type StreakUnit = {
+export type StreakUnit = {
   label: string;
   axis: "install" | "account";
   firstActive: string | null;
@@ -275,7 +275,7 @@ type StreakUnit = {
   mappedAccountLabel: string | null;
   mappingStatus: "mapped" | "ambiguous" | "unmapped" | "n/a";
 };
-type StreakRetentionAxis = {
+export type StreakRetentionAxis = {
   axis: "install" | "account";
   activityDefinition: string;
   gridLegend: string;
@@ -3580,7 +3580,181 @@ function StreakGrid({ grid }: { grid: string }) {
   );
 }
 
-function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
+// ── 코호트 셀 ↔ 아래 유닛 표를 잇는다 ────────────────────────────────────────
+//
+// ★요구의 실체는 "D7 window 1/3 의 그 1명이 아래 표의 누구냐" 다. 두 표가 같은
+//   화면에 있으면서 서로를 가리키지 않아, 위에서 본 비율을 아래에서 사람으로
+//   확인할 방법이 없었다. 그래서 **셀을 누르면 그 셀의 분모가 아래 표에 남는다.**
+//
+// ★"GA4처럼" 을 문자 그대로 하지 않았다. GA4 코호트 격자는 주(週) 코호트 × 경과주
+//   삼각행렬이고, 그 형태는 코호트마다 수십~수백 명이 있어 **색의 농담이 패턴으로**
+//   읽힐 때 작동한다. 이 축의 코호트 모수는 한 자릿수다 — 같은 격자를 그리면 칸의
+//   대부분이 빈칸이거나 0/1 이 되고, GA4 처럼 **보이지만** 읽히지는 않는다.
+//   표본이 한 자릿수일 때 실제로 읽히는 단위는 비율이 아니라 **사람**이다. 그래서
+//   지평 4행 표는 그대로 두고, 대신 셀 → 사람으로 내려가는 길을 냈다.
+//
+// ★계산은 서버 것을 그대로 쓴다. 아래 재구성은 "그 셀에 누가 들어갔나"만 되찾는
+//   것이고, 되찾은 수가 서버 분자·분모와 **정확히 일치할 때만** 링크를 연다. 하나라도
+//   어긋나면 링크를 닫고 이유를 적는다 — 화면이 서버와 다른 수를 말하기 시작하면
+//   이 패널이 지금 갖고 있는 유일한 자산(정직함)이 통째로 무너진다.
+
+const STREAK_DAY_MS = 86_400_000;
+
+/** "YYYY-MM-DD" → 에폭 일련번호. 서버 dayNumber 와 같은 기준(UTC 자정)이다. */
+function streakDayNumber(day: string | null | undefined): number | null {
+  if (day == null || day === "") return null;
+  const t = Date.parse(`${day}T00:00:00Z`);
+  return Number.isFinite(t) ? Math.round(t / STREAK_DAY_MS) : null;
+}
+
+export type HorizonMembership = {
+  /** 이 셀 분모에 들어간 유닛 라벨. 순서는 서버가 준 유닛 정렬 그대로다. */
+  denominator: string[];
+  /** 그중 잔존(분자)으로 센 유닛 라벨. */
+  retained: string[];
+};
+
+/**
+ * 지평 셀 하나의 분모·분자에 **어느 유닛이 들어갔는지** 되찾는다.
+ *
+ * ★이건 리텐션을 다시 계산하는 게 아니다. 판정 규칙은 서버(buildStreakRetention)와
+ *   같은 걸 쓰되, 마지막에 **서버가 이미 센 분자/분모와 대조**해서 한 개라도
+ *   다르면 `null` 을 돌려준다. 즉 이 함수는 "링크를 열어도 되는가" 를 답한다.
+ *
+ * `null` 이 되는 정상적인 경우가 하나 있다: 격자(최근 gridDays 일)가 판정에 필요한
+ * 날을 덮지 못할 때다. 오래전에 시작한 코호트의 D7 구간은 격자 밖이라 화면 데이터만
+ * 으로는 누가 그 안에서 돌아왔는지 알 수 없다 — 그때는 모르는 채로 두는 게 맞다.
+ */
+export function deriveHorizonMembership(
+  axis: StreakRetentionAxis,
+  horizon: StreakRetentionHorizon,
+  kind: "window" | "exact"
+): HorizonMembership | null {
+  // 서버의 `today` 는 응답에 따로 없지만 모든 유닛의 gridEnd 가 그 날이다.
+  const todayNum = axis.units.reduce<number | null>((acc, u) => {
+    const n = streakDayNumber(u.gridEnd);
+    if (n == null) return acc;
+    return acc == null || n > acc ? n : acc;
+  }, null);
+  if (todayNum == null) return null;
+
+  const denominator: string[] = [];
+  const retained: string[] = [];
+  for (const u of axis.units) {
+    // 코호트 조건은 서버와 같다: 첫 활동이 있고 · 운영자가 아니고 · 코호트 창 안.
+    if (u.firstActive == null || u.adminExcluded || !u.inCohortWindow) continue;
+    const firstNum = streakDayNumber(u.firstActive);
+    const gridStartNum = streakDayNumber(u.gridStart);
+    if (firstNum == null || gridStartNum == null) return null;
+    // 관측창 미도달은 분모에 넣지 않는다(pending). 서버와 같은 판정이다.
+    if (todayNum - firstNum < horizon.days) continue;
+    denominator.push(u.label);
+
+    const from = kind === "exact" ? firstNum + horizon.days : firstNum + 1;
+    const to = firstNum + horizon.days;
+    // 격자가 판정 구간을 못 덮으면 재구성 불가 — 추측해서 그리지 않는다.
+    if (from - gridStartNum < 0 || to - gridStartNum >= u.grid.length) {
+      return null;
+    }
+    let hit = false;
+    for (let d = from; d <= to; d += 1) {
+      if (u.grid[d - gridStartNum] === "x") {
+        hit = true;
+        break;
+      }
+    }
+    if (hit) retained.push(u.label);
+  }
+
+  // ★자기검증. 서버 수와 하나라도 어긋나면 링크를 열지 않는다.
+  const rate = kind === "exact" ? horizon.exact : horizon.window;
+  if (
+    denominator.length !== rate.denominator ||
+    retained.length !== rate.numerator
+  ) {
+    return null;
+  }
+  return { denominator, retained };
+}
+
+type StreakHorizonKey = StreakRetentionHorizon["key"];
+type HorizonCellRef = { horizon: StreakHorizonKey; kind: "window" | "exact" };
+
+/**
+ * ★두 정의가 왜 다른지 화면이 직접 말한다. 지금까지는 두 숫자가 나란히 있을 뿐
+ *   **어느 걸 봐야 하는지** 화면이 안 알려줬고, 그래서 `D7 exact 0%` 가 "활성 사용자
+ *   없음" 으로 읽혔다. 그게 이 패널의 진짜 결함이었다.
+ */
+export const WINDOW_VS_EXACT_ONE_LINER =
+  "★기본은 window 다 — 첫 활동 다음날부터 +N일 사이 하루라도 왔으면 잔존으로 센다. " +
+  "exact 는 +N일 당일만 세기 때문에 6일째·8일째 온 사람이 D7 에서 0 으로 떨어진다 " +
+  "(표본이 한 자릿수인 지금은 그 0 이 이탈이 아니라 대부분 노이즈다). " +
+  "exact 는 '정해진 주기로 그날 켜는가'(습관화)를 볼 때만 펴서 보라.";
+
+/** 링크를 못 여는 셀에 붙는 이유. 숫자는 서버 판정 그대로 남는다. */
+const CELL_LINK_UNAVAILABLE =
+  "이 셀은 아래 격자가 덮지 못하는 날짜로 판정돼서 아래 표로 좁힐 수 없습니다 — " +
+  "숫자 자체는 서버 판정 그대로입니다(격자는 최근 구간만 담습니다).";
+
+/** 지평 표의 한 칸. membership 이 있을 때만 아래 표로 내려가는 버튼이 된다. */
+function HorizonRateCell({
+  rate,
+  membership,
+  selected,
+  onSelect,
+  ariaLabel,
+}: {
+  rate: RetentionCountedRate;
+  membership: HorizonMembership | null;
+  selected: boolean;
+  onSelect: () => void;
+  ariaLabel: string;
+}) {
+  const linkable = membership != null && rate.denominator > 0;
+  if (!linkable) {
+    const unavailable = membership == null && rate.denominator > 0;
+    return (
+      <span
+        className="inline-flex items-center gap-1.5"
+        title={unavailable ? CELL_LINK_UNAVAILABLE : undefined}
+      >
+        <CountedRateCell r={rate} />
+        {unavailable && (
+          <span className="text-[10px] text-zinc-600">(연결 불가)</span>
+        )}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      aria-label={ariaLabel}
+      title={
+        selected
+          ? "선택 해제 — 아래 표를 전체로 되돌린다"
+          : "이 셀의 분모를 아래 사용자별 표에서 보기"
+      }
+      className={`group inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors ${
+        selected
+          ? "bg-emerald-500/15 ring-1 ring-emerald-500/50"
+          : "hover:bg-zinc-800/70"
+      }`}
+    >
+      <CountedRateCell r={rate} />
+      <Link2
+        className={`h-3 w-3 shrink-0 ${
+          selected
+            ? "text-emerald-400"
+            : "text-zinc-600 group-hover:text-zinc-300"
+        }`}
+      />
+    </button>
+  );
+}
+
+export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
   const isInstall = axis.axis === "install";
   const title = isInstall
     ? "설치 축 (익명 설치 ID)"
@@ -3594,6 +3768,47 @@ function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
   );
   const rows = [...primary, ...secondary];
   const cohortEmpty = axis.unitsCohort === 0;
+
+  // ★exact 는 지우지 않는다 — 접는다. 기본 화면은 window 하나뿐이다.
+  const [showExact, setShowExact] = useState(false);
+  const [cell, setCell] = useState<HorizonCellRef | null>(null);
+
+  const membershipByCell = useMemo(() => {
+    const m = new Map<string, HorizonMembership | null>();
+    for (const h of axis.horizons) {
+      m.set(`${h.key}:window`, deriveHorizonMembership(axis, h, "window"));
+      m.set(`${h.key}:exact`, deriveHorizonMembership(axis, h, "exact"));
+    }
+    return m;
+  }, [axis]);
+
+  // exact 를 접으면 exact 셀 선택도 같이 풀린다(보이지 않는 필터를 남기지 않는다).
+  const activeCell = cell != null && (cell.kind === "window" || showExact) ? cell : null;
+  const activeMembership = activeCell
+    ? membershipByCell.get(`${activeCell.horizon}:${activeCell.kind}`) ?? null
+    : null;
+  const denomSet = useMemo(
+    () => new Set(activeMembership?.denominator ?? []),
+    [activeMembership]
+  );
+  const retainedSet = useMemo(
+    () => new Set(activeMembership?.retained ?? []),
+    [activeMembership]
+  );
+  const filtered = activeCell != null && activeMembership != null;
+  const visibleUnits = filtered
+    ? axis.units.filter((u) => denomSet.has(u.label))
+    : axis.units;
+  const activeLabel = activeCell
+    ? `${activeCell.horizon.toUpperCase()} ${activeCell.kind}`
+    : "";
+
+  const toggleCell = (horizon: StreakHorizonKey, kind: "window" | "exact") =>
+    setCell((cur) =>
+      cur != null && cur.horizon === horizon && cur.kind === kind
+        ? null
+        : { horizon, kind }
+    );
 
   return (
     <Panel
@@ -3638,57 +3853,108 @@ function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
       {cohortEmpty ? (
         <EmptyState label="이 창에 코호트 모수가 없습니다 — 비율을 계산할 표본 자체가 없다는 뜻입니다(0% 가 아닙니다). 아래 스트릭 격자는 전 구간 기준이라 그대로 보입니다." />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[480px] text-xs">
-            <thead>
-              <tr className="text-zinc-500">
-                <th className="py-1 pr-3 text-left font-medium">지평</th>
-                <th className="py-1 pr-3 text-left font-medium">
-                  exact (+N일 당일)
-                </th>
-                <th className="py-1 pr-3 text-left font-medium">
-                  window (1~N일 중)
-                </th>
-                <th className="py-1 pr-3 text-right font-medium">
-                  관측창 미도달
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((h) => {
-                const key = h.key.toUpperCase();
-                const isPrimary = h.key === "d7" || h.key === "d14";
-                return (
-                  <tr
-                    key={h.key}
-                    className={`border-t border-zinc-900 ${
-                      isPrimary ? "bg-zinc-900/30" : ""
-                    }`}
-                  >
-                    <td
-                      className={`py-1.5 pr-3 tabular-nums ${
-                        isPrimary
-                          ? "font-semibold text-zinc-100"
-                          : "text-zinc-400"
+        <>
+          {/* ── ★어느 숫자를 봐야 하는지 화면이 먼저 말한다 ── */}
+          <div className="mb-2 flex flex-wrap items-start justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2">
+            <p className="max-w-[60ch] text-[11px] leading-relaxed text-zinc-400">
+              {WINDOW_VS_EXACT_ONE_LINER}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setShowExact((v) => !v);
+                // 접을 때 exact 셀 선택이 남아 있으면 같이 푼다.
+                setCell((cur) =>
+                  showExact && cur?.kind === "exact" ? null : cur
+                );
+              }}
+              aria-pressed={showExact}
+              className="shrink-0 rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 transition-colors hover:bg-zinc-800"
+            >
+              {showExact ? "exact 접기" : "exact 펴기 (습관화용)"}
+            </button>
+          </div>
+
+          {/* ★열을 페이지 폭까지 늘리지 않는다 — window 한 열만 남으면 지평과 숫자가
+              화면 양 끝으로 벌어져서 한 행을 눈으로 잇기 어려워진다. */}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[480px] max-w-2xl text-xs">
+              <thead>
+                <tr className="text-zinc-500">
+                  <th className="py-1 pr-3 text-left font-medium">지평</th>
+                  <th className="py-1 pr-3 text-left font-medium text-zinc-300">
+                    돌아왔나 · window (1~N일 중)
+                  </th>
+                  {showExact && (
+                    <th className="py-1 pr-3 text-left font-medium">
+                      exact (+N일 당일)
+                    </th>
+                  )}
+                  <th className="py-1 pr-3 text-right font-medium">
+                    관측창 미도달
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((h) => {
+                  const key = h.key.toUpperCase();
+                  const isPrimary = h.key === "d7" || h.key === "d14";
+                  return (
+                    <tr
+                      key={h.key}
+                      className={`border-t border-zinc-900 ${
+                        isPrimary ? "bg-zinc-900/30" : ""
                       }`}
                     >
-                      {key}
-                    </td>
-                    <td className="py-1.5 pr-3">
-                      <CountedRateCell r={h.exact} />
-                    </td>
-                    <td className="py-1.5 pr-3">
-                      <CountedRateCell r={h.window} />
-                    </td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-zinc-500">
-                      {h.pending > 0 ? `${fmtInt(h.pending)}개 제외` : "—"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      <td
+                        className={`py-1.5 pr-3 tabular-nums ${
+                          isPrimary
+                            ? "font-semibold text-zinc-100"
+                            : "text-zinc-400"
+                        }`}
+                      >
+                        {key}
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        <HorizonRateCell
+                          rate={h.window}
+                          membership={
+                            membershipByCell.get(`${h.key}:window`) ?? null
+                          }
+                          selected={
+                            activeCell?.horizon === h.key &&
+                            activeCell?.kind === "window"
+                          }
+                          onSelect={() => toggleCell(h.key, "window")}
+                          ariaLabel={`${key} window ${h.window.numerator}/${h.window.denominator} — 아래 사용자별 표를 이 셀의 분모로 좁히기`}
+                        />
+                      </td>
+                      {showExact && (
+                        <td className="py-1.5 pr-3">
+                          <HorizonRateCell
+                            rate={h.exact}
+                            membership={
+                              membershipByCell.get(`${h.key}:exact`) ?? null
+                            }
+                            selected={
+                              activeCell?.horizon === h.key &&
+                              activeCell?.kind === "exact"
+                            }
+                            onSelect={() => toggleCell(h.key, "exact")}
+                            ariaLabel={`${key} exact ${h.exact.numerator}/${h.exact.denominator} — 아래 사용자별 표를 이 셀의 분모로 좁히기`}
+                          />
+                        </td>
+                      )}
+                      <td className="py-1.5 pr-3 text-right tabular-nums text-zinc-500">
+                        {h.pending > 0 ? `${fmtInt(h.pending)}개 제외` : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {/* ── 사용자별 연속사용 격자 ── */}
@@ -3699,14 +3965,55 @@ function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
           </h5>
           <span className="text-[11px] text-zinc-500">{axis.gridLegend}</span>
         </div>
-        {axis.units.length === 0 ? (
-          <EmptyState label="이 축에 관측된 유닛이 없습니다." />
+
+        {/* ★위 셀에서 내려온 필터. 무엇으로 좁혔는지 · 몇 개인지 · 어떻게 푸는지를
+            한 줄에 다 적는다. 이유 없이 줄어든 표가 제일 위험하다. */}
+        {filtered && activeMembership != null && (
+          <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-emerald-800/50 bg-emerald-950/20 px-3 py-2 text-[11px]">
+            <span className="text-zinc-300">
+              위 표{" "}
+              <b className="font-semibold text-zinc-100">{activeLabel}</b> 의
+              분모 {fmtInt(activeMembership.denominator.length)}개만 보는 중
+            </span>
+            <span className="tabular-nums text-emerald-400">
+              잔존 {fmtInt(activeMembership.retained.length)}
+            </span>
+            <span className="tabular-nums text-zinc-500">
+              미복귀{" "}
+              {fmtInt(
+                activeMembership.denominator.length -
+                  activeMembership.retained.length
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={() => setCell(null)}
+              className="rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-300 transition-colors hover:bg-zinc-800"
+            >
+              전체 보기
+            </button>
+          </div>
+        )}
+
+        {visibleUnits.length === 0 ? (
+          <EmptyState
+            label={
+              filtered
+                ? "이 셀의 분모에 해당하는 유닛이 표에 없습니다."
+                : "이 축에 관측된 유닛이 없습니다."
+            }
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-xs">
               <thead>
                 <tr className="text-zinc-500">
                   <th className="py-1 pr-3 text-left font-medium">라벨</th>
+                  {filtered && (
+                    <th className="py-1 pr-3 text-left font-medium">
+                      {activeLabel}
+                    </th>
+                  )}
                   <th className="py-1 pr-3 text-right font-medium">최대연속</th>
                   <th className="py-1 pr-3 text-right font-medium">현재연속</th>
                   <th className="py-1 pr-3 text-left font-medium">첫 활동</th>
@@ -3727,7 +4034,7 @@ function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
                 </tr>
               </thead>
               <tbody>
-                {axis.units.map((u) => (
+                {visibleUnits.map((u) => (
                   <tr
                     key={u.label}
                     className={`border-t border-zinc-900 ${
@@ -3737,6 +4044,19 @@ function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
                     <td className="py-1 pr-3 font-mono text-[11px] text-zinc-300">
                       {u.label}
                     </td>
+                    {filtered && (
+                      <td className="py-1 pr-3">
+                        {retainedSet.has(u.label) ? (
+                          <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-400">
+                            잔존
+                          </span>
+                        ) : (
+                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                            미복귀
+                          </span>
+                        )}
+                      </td>
+                    )}
                     <td className="py-1 pr-3 text-right tabular-nums text-zinc-200">
                       {fmtInt(u.maxStreak)}
                     </td>

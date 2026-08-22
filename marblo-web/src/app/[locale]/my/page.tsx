@@ -41,7 +41,7 @@ export default function AccountHubPage() {
       if (!u) {
         router.push(
           localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
-            `/${locale}/my`
+            localeHref(locale, "/my")
           )}`)
         );
         return;

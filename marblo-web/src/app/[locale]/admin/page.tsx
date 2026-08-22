@@ -391,7 +391,7 @@ export default function AdminPage() {
       if (!u) {
         router.push(
           localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
-            "/" + locale + "/admin"
+            localeHref(locale, "/admin")
           )}`)
         );
       } else {

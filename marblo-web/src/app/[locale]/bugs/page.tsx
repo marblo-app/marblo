@@ -47,7 +47,7 @@ export default function BugsPage() {
       if (!u) {
         router.push(
           localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
-            `/${locale}/bugs`
+            localeHref(locale, "/bugs")
           )}`)
         );
       } else {

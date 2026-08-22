@@ -16,6 +16,8 @@ import type {
   RetentionCohorts,
   OnboardingFunnel,
   OnboardingFunnelStep,
+  StreakRetentionAxis,
+  StreakUnit,
 } from "./AnalyticsPanel";
 
 type PanelModule = typeof import("./AnalyticsPanel");
@@ -229,6 +231,200 @@ test("계정 귀속 이벤트가 0 이면 '아무도 안 왔다'가 아니라고
   }));
   const html = renderToStaticMarkup(<P.ActivationGateView data={data} />);
   assert.match(html, /0 은 &#x27;아무도 안 왔다&#x27;가 아닙니다/);
+});
+
+// ── ★리텐션 표현: window 가 기본, exact 는 접힌다 (ticket baJU0Yv1gvux6Q5RQrQt) ──
+//
+// 이 표의 실패 모드는 "숫자가 틀리는 것" 이 아니라 **어느 숫자를 봐야 하는지 화면이
+// 말해 주지 않는 것**이었다. `D7 exact 0%` 가 "활성 사용자 없음" 으로 읽혔다.
+// 그래서 테스트도 계산이 아니라 **표현 규약**을 고정한다.
+
+function streakUnitFixture(over: Partial<StreakUnit> = {}): StreakUnit {
+  return {
+    label: "I-aaaaaa",
+    axis: "install",
+    firstActive: "2026-08-10",
+    lastActive: "2026-08-22",
+    activeDays: 3,
+    workingDays: 3,
+    presentDays: 3,
+    maxStreak: 1,
+    currentStreak: 1,
+    daysSinceLastActive: 0,
+    // 격자 = 2026-08-09 ~ 2026-08-22 (14일). x 는 08-10 · 08-14 · 08-22.
+    grid: ".x...x.......x",
+    gridStart: "2026-08-09",
+    gridEnd: "2026-08-22",
+    zombie: false,
+    adminExcluded: false,
+    legacyIdScheme: false,
+    suspectedIdSwitchChurn: false,
+    inCohortWindow: true,
+    mappedAccountLabel: null,
+    mappingStatus: "unmapped",
+    ...over,
+  };
+}
+
+/**
+ * 실측을 축소한 축: 코호트 3개 중 D7 판정 가능한 게 2개(1개는 관측창 미도달),
+ * window 는 1/2 인데 exact 는 0/2 다 — 사장님이 본 그 벌어짐이다.
+ */
+function streakAxisFixture(
+  over: Partial<StreakRetentionAxis> = {}
+): StreakRetentionAxis {
+  return {
+    axis: "install",
+    activityDefinition: "활동 = working 하트비트 또는 이벤트가 있는 날",
+    gridLegend: "x=활동 · ~=하트비트만 · .=신호 없음",
+    gridDays: 14,
+    cohortWindowDays: 30,
+    unitsObserved: 3,
+    unitsZombie: 0,
+    unitsAdminExcluded: 0,
+    unitsBeforeWindow: 0,
+    unitsCohort: 3,
+    horizons: [
+      {
+        key: "d7",
+        days: 7,
+        pending: 1,
+        exact: { numerator: 0, denominator: 2, rate: 0, display: "0/2" },
+        window: { numerator: 1, denominator: 2, rate: 0.5, display: "1/2" },
+      },
+    ],
+    units: [
+      // 08-10 시작 → D7 창(08-11~08-17)에 08-14 활동 = 잔존. exact(08-17)는 아니다.
+      streakUnitFixture(),
+      // 08-11 시작 → 그날 말고는 안 왔다 = 미복귀.
+      streakUnitFixture({
+        label: "I-bbbbbb",
+        firstActive: "2026-08-11",
+        lastActive: "2026-08-11",
+        grid: "..x...........",
+        activeDays: 1,
+        currentStreak: 0,
+        daysSinceLastActive: 11,
+      }),
+      // 08-21 시작 → D7 관측창 미도달(pending). 분모에 넣지 않는다.
+      streakUnitFixture({
+        label: "I-cccccc",
+        firstActive: "2026-08-21",
+        lastActive: "2026-08-21",
+        grid: "............x.",
+        activeDays: 1,
+        daysSinceLastActive: 1,
+      }),
+    ],
+    identityScheme: {
+      date: "2026-06-13",
+      legacyUnits: 0,
+      currentUnits: 3,
+      suspectedIdSwitchChurn: 0,
+      note: "식별자 스킴 note",
+    },
+    mapping: null,
+    notes: ["축 note"],
+    ...over,
+  };
+}
+
+test("★기본 화면은 window 하나다 — exact 는 지우지 않고 접는다", () => {
+  const html = renderToStaticMarkup(
+    <P.StreakAxisView axis={streakAxisFixture()} />
+  );
+  // window 가 열(column)로 서 있다.
+  assert.match(html, /window \(1~N일 중\)/);
+  // exact 열은 접혀 있다 — 기본 화면에 헤더가 없다.
+  assert.doesNotMatch(html, /exact \(\+N일 당일\)/);
+  // ★그러나 지워지지 않았다. 펴는 장치가 화면에 있다(습관화를 볼 때 쓴다).
+  assert.match(html, /exact 펴기/);
+  assert.match(html, /습관화/);
+});
+
+test("★왜 두 숫자가 다른지 화면이 한 줄로 말한다", () => {
+  const html = renderToStaticMarkup(
+    <P.StreakAxisView axis={streakAxisFixture()} />
+  );
+  assert.match(html, /기본은 window/);
+  // exact 의 0 이 이탈이 아니라 노이즈일 수 있다는 걸 화면이 직접 적는다.
+  assert.match(html, /노이즈/);
+  assert.match(html, /6일째·8일째/);
+});
+
+test("★셀 → 아래 사용자별 표. 어느 유닛이 그 셀에 들어갔는지 되찾는다", () => {
+  const axis = streakAxisFixture();
+  const m = P.deriveHorizonMembership(axis, axis.horizons[0], "window");
+  assert.ok(m, "서버 수와 일치하면 링크가 열려야 한다");
+  // 관측창 미도달(I-cccccc)은 분모에 없다 — 서버 pending 판정과 같다.
+  assert.deepEqual(m.denominator, ["I-aaaaaa", "I-bbbbbb"]);
+  assert.deepEqual(m.retained, ["I-aaaaaa"]);
+
+  const ex = P.deriveHorizonMembership(axis, axis.horizons[0], "exact");
+  assert.ok(ex);
+  assert.deepEqual(ex.denominator, ["I-aaaaaa", "I-bbbbbb"]);
+  assert.deepEqual(ex.retained, []);
+});
+
+test("★링크는 서버 수와 일치할 때만 열린다 (어긋나면 닫는다)", () => {
+  const axis = streakAxisFixture();
+  const tampered = {
+    ...axis.horizons[0],
+    // 서버가 2/2 라고 말하는데 격자로는 1 밖에 안 나온다 → 링크를 열면 안 된다.
+    window: { numerator: 2, denominator: 2, rate: 1, display: "2/2" },
+  };
+  assert.equal(P.deriveHorizonMembership(axis, tampered, "window"), null);
+});
+
+test("★격자가 판정 구간을 못 덮으면 추측하지 않고 '연결 불가' 로 둔다", () => {
+  // 첫 활동이 격자(최근 14일) 이전 — D7 창이 화면 데이터 밖이다.
+  const axis = streakAxisFixture({
+    unitsObserved: 1,
+    unitsCohort: 1,
+    units: [
+      streakUnitFixture({
+        firstActive: "2026-07-20",
+        lastActive: "2026-08-22",
+        grid: "x............x",
+      }),
+    ],
+    horizons: [
+      {
+        key: "d7",
+        days: 7,
+        pending: 0,
+        exact: { numerator: 0, denominator: 1, rate: 0, display: "0/1" },
+        window: { numerator: 1, denominator: 1, rate: 1, display: "1/1" },
+      },
+    ],
+  });
+  assert.equal(P.deriveHorizonMembership(axis, axis.horizons[0], "window"), null);
+
+  const html = renderToStaticMarkup(<P.StreakAxisView axis={axis} />);
+  // 숫자는 서버 판정 그대로 남고, 링크만 닫힌다.
+  assert.match(html, /1\/1/);
+  assert.match(html, /연결 불가/);
+  assert.doesNotMatch(html, /aria-pressed="true"/);
+});
+
+test("★링크 가능한 셀은 키보드로 누를 수 있는 버튼이다", () => {
+  const html = renderToStaticMarkup(
+    <P.StreakAxisView axis={streakAxisFixture()} />
+  );
+  assert.match(html, /<button[^>]*aria-pressed="false"/);
+  assert.match(html, /아래 사용자별 표를 이 셀의 분모로 좁히기/);
+});
+
+test("★아래 표의 최근 14일 스파크라인은 그대로다 (이미 좋다 — 유지)", () => {
+  const html = renderToStaticMarkup(
+    <P.StreakAxisView axis={streakAxisFixture()} />
+  );
+  assert.match(html, /최근 14일/);
+  assert.match(html, /x=활동/);
+  // 격자 한 칸이 한 span 이다. 픽스처의 x 는 3+1+1 = 5개.
+  assert.equal((html.match(/>x<\/span>/g) ?? []).length, 5);
+  // 활동/신호없음이 색으로 갈린다(단, 색만으로 식별하지 않게 문자도 남는다).
+  assert.match(html, /text-emerald-400/);
 });
 
 // ── 패널 전체가 실제로 서는가 (4탭 재배치 스모크) ──────────────────────────

@@ -58,7 +58,7 @@ export default function SubscriptionPage() {
       if (!u) {
         router.push(
           localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
-            `/${locale}/my/subscription`
+            localeHref(locale, "/my/subscription")
           )}`)
         );
         return;

@@ -534,7 +534,7 @@ export default function CheckoutSuccessPage() {
               href={
                 errorMsg === t("loginRequired")
                   ? localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
-                      `/${locale}/my/subscription`,
+                      localeHref(locale, "/my/subscription"),
                     )}`)
                   : errorMsg === t("firstChargeFailed") && plan
                     ? localeHref(locale, `/checkout?plan=${encodeURIComponent(

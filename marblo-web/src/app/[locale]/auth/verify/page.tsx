@@ -87,7 +87,7 @@ function VerifyEmailContent() {
         </p>
         <Link
           href={localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
-            `/${locale}/auth/verify`
+            localeHref(locale, "/auth/verify")
           )}`)}
           className="inline-flex items-center justify-center mt-6 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl text-sm font-semibold transition"
         >
