@@ -420,6 +420,26 @@ service cloud.firestore {
         && isProjectMember(resource.data.projectId);
     }
 
+    // ===== Orchestrator Work Chains (티켓 fQtXQ2NzyYs0MRpqByTS) =====
+    // 오케가 "다음에 할 일" 을 남기는 프로젝트당 1문서. 문서 id 가 곧 projectId 라
+    // 테넌트 경계가 **경로**에 있다 — missions 가 projectId 필드를 빼먹어 열렸던
+    // 구멍(Ciriq5ASEvAlA8TnKxhW)이 여기선 구조적으로 생길 수 없다. 그래도 본문의
+    // projectId 가 경로와 어긋난 문서는 만들지도 고치지도 못하게 한 번 더 묶는다
+    // (렌더러/MCP 가 필드로 필터할 일이 생겨도 거짓 소속이 없도록).
+    // 멤버면 읽고 쓴다(오케 = 사용자 auth 로 쓰고, 사장님도 화면에서 항목을 더한다).
+    // 삭제는 없다 — 체인은 비우는 것이지 지우는 게 아니다(닫힌 항목이 곧 이력).
+    match /workChains/{projectId} {
+      allow read: if isAuthenticated()
+        && isProjectMember(projectId);
+      allow create: if isAuthenticated()
+        && isProjectMember(projectId)
+        && request.resource.data.projectId == projectId;
+      allow update: if isAuthenticated()
+        && isProjectMember(projectId)
+        && request.resource.data.projectId == projectId;
+      allow delete: if false;
+    }
+
     // ===== Missions (Phase 3) =====
     //
     // ★read 테넌트 경계 (티켓 Ciriq5ASEvAlA8TnKxhW):

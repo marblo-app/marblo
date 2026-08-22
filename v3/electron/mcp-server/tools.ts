@@ -74,6 +74,18 @@ import {
 } from "./implicit-mission.js";
 import { evaluateDeleteGuards, type DeleteMode } from "./task-delete.js";
 import {
+  addWorkChainItem,
+  loadWorkChain,
+  updateWorkChainItem,
+  workChainNudgeAfterTransition,
+} from "./work-chain.js";
+import {
+  WORK_CHAIN_DONE_WHEN_VALUES,
+  formatWorkChain,
+  workChainFooter,
+  type WorkChainDoneWhen,
+} from "./work-chain-core.js";
+import {
   getClaimOwnershipError,
   shouldReleaseClaimForStoppedAgent,
 } from "./task-ownership.js";
@@ -3231,6 +3243,20 @@ export function registerTools(server: McpServer): void {
           t.id
         }${proj}${ctx})${claimed}`;
       });
+      // 워크체인 푸터 — 오케가 보드를 읽는 바로 이 자리가 "다음 할 일" 을 다시
+      // 보는 가장 자연스러운 지점이다. 이미 읽은 티켓은 재조회하지 않고, 부기가
+      // 실패해도 목록은 그대로 돌려준다(fail-open).
+      let chainFooter = "";
+      try {
+        const known = new Map<string, { status: string; title?: string }>();
+        for (const t of [...openDocs, ...terminalDocs]) {
+          known.set(t.id, { status: t.status, title: t.title });
+        }
+        const chain = await loadWorkChain(db, projectId, known);
+        chainFooter = workChainFooter(chain.derived);
+      } catch (err) {
+        console.error("[get_all_tasks] work chain footer skipped:", err);
+      }
       // State the open-row count explicitly. A truncated board and a short
       // board used to render identically, so the orchestrator read a partial
       // list as the whole board — that silence is what hid this bug.
@@ -3241,7 +3267,7 @@ export function registerTools(server: McpServer): void {
           listing.openHidden > 0
             ? `${listing.openHidden} of ${listing.openTotal} OPEN tasks are hidden by limit=${rowLimit} — raise limit or filter by role to see them all`
             : `${listing.openTotal} open tasks shown in full; the rest are completed`
-        )
+        ) + (chainFooter ? `\n${chainFooter}` : "")
       );
     },
     { userFacing: false }
@@ -4030,6 +4056,17 @@ export function registerTools(server: McpServer): void {
       // event only — never an orch PTY wake — so the board orch isn't flooded
       // with Quick Lane churn. Only submit_for_review routes a lane to the orch
       // (the final review gate). board/mission progress is unaffected.
+      // 워크체인 재열람 지점 — 이 티켓을 참조하는 체인 항목의 파생 상태가 이
+      // 전이로 바뀌었으면(완료/준비) 결과와 오케 알림 양쪽에 붙인다. 부기라
+      // 실패해도 "" 이고 전이는 이미 커밋됐다.
+      const chainNudge = await workChainNudgeAfterTransition(
+        db,
+        task.projectId || DEFAULT_PROJECT,
+        task_id,
+        task.status,
+        newStatus
+      );
+      const chainNudgeSuffix = chainNudge ? `\n${chainNudge}` : "";
       if (!isLaneContextId(task.contextId)) {
         const commentNote = comment ? ` — ${comment}` : "";
         const roleLabel = formatAgentTaskRoleLabel(
@@ -4037,7 +4074,7 @@ export function registerTools(server: McpServer): void {
           await fetchAgentRole(MARBLO_AGENT_ID)
         );
         notifyOrchestrator(
-          `[Task Update] "${task.title}" ${task.status} → ${newStatus} (${roleLabel}, id=${task_id})${commentNote}`,
+          `[Task Update] "${task.title}" ${task.status} → ${newStatus} (${roleLabel}, id=${task_id})${commentNote}${chainNudgeSuffix}`,
           task.contextId
         );
       }
@@ -4079,7 +4116,7 @@ export function registerTools(server: McpServer): void {
           : "";
 
       return text(
-        `Task '${task.title}' status updated to ${newStatus}.${unblockedNote}${replayNote}${overrideNote}${completionNudge}`
+        `Task '${task.title}' status updated to ${newStatus}.${unblockedNote}${replayNote}${overrideNote}${completionNudge}${chainNudgeSuffix}`
       );
     }
   );
@@ -4281,8 +4318,18 @@ export function registerTools(server: McpServer): void {
         task.role,
         await fetchAgentRole(MARBLO_AGENT_ID)
       );
+      // 워크체인 재열람 지점 — doneWhen=review 항목이 이 제출로 완료됐으면 오케
+      // 알림에 같이 싣는다(워커 프로세스에서 읽지만 체인 문서는 멤버 읽기라 된다).
+      const chainNudge = await workChainNudgeAfterTransition(
+        db,
+        task.projectId || DEFAULT_PROJECT,
+        task_id,
+        task.status,
+        "REVIEW"
+      );
+      const chainNudgeSuffix = chainNudge ? `\n${chainNudge}` : "";
       notifyOrchestrator(
-        `[Review Submitted] "${task.title}" is ready for review (${roleLabel}, id=${task_id})${prNote}`,
+        `[Review Submitted] "${task.title}" is ready for review (${roleLabel}, id=${task_id})${prNote}${chainNudgeSuffix}`,
         task.contextId
       );
 
@@ -4300,7 +4347,7 @@ export function registerTools(server: McpServer): void {
       );
 
       return text(
-        `Task '${task.title}' submitted for review. Status: REVIEW${completionNudge}`
+        `Task '${task.title}' submitted for review. Status: REVIEW${completionNudge}${chainNudgeSuffix}`
       );
     }
   );
@@ -6126,6 +6173,243 @@ export function registerTools(server: McpServer): void {
       await updateDoc(ref, updates);
       const flowName = name || snap.data()?.name || flow_id;
       return text(`Flow '${flowName}' updated successfully.`);
+    }
+  );
+
+  // ── 오케스트레이터 워크체인 (티켓 fQtXQ2NzyYs0MRpqByTS) ─────────────────
+  // 오케가 "A 끝나면 B, 그다음 C" 를 적어 두고 A 를 마친 뒤 **다시 읽는** 목록.
+  // 대화 맥락이 요약되거나 세션이 바뀌어도 `workChains/{projectId}` 에 남는다.
+  // ★완료 판정은 오케 자기보고가 아니라 연결 티켓의 보드 상태다 — 모델·규칙은
+  // work-chain-core.ts, I/O 는 work-chain.ts. 워커 역할 표면에는 등록되지 않는다
+  // (tool-surface.ts 의 워커 화이트리스트에 없으므로 오케/전체 표면에만 보인다).
+  auditedTool(
+    "get_work_chain",
+    "Read the orchestrator's work chain — the persistent 'what I do next' list for this project (what / why / prerequisites / live state). Item state is DERIVED from the linked tickets' real board status, never from self-report: an item linked to tickets is done only when they reach done_when. Call this right after finishing any unit of work (merge, close-out, dispatch) and at session start, then do the item marked ▶ 다음.",
+    {
+      include_closed: z
+        .boolean()
+        .optional()
+        .describe("Also list done/dropped items (default: false — open items only)"),
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
+        ),
+    },
+    async ({ include_closed, project_id }) => {
+      const projectId = await enforceProjectLock("get_work_chain", project_id);
+      if (!projectId) {
+        return text(
+          "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter."
+        );
+      }
+      const membership = await requireReadableProjectMember(projectId);
+      if (!membership.ok) return text(membership.message);
+      const chain = await loadWorkChain(db, projectId);
+      return text(
+        formatWorkChain(chain.derived, {
+          taskTitles: chain.facts.titles,
+          taskStatuses: chain.facts.statuses,
+          includeClosed: !!include_closed,
+        }) + `\n(rev=${chain.rev})`
+      );
+    },
+    { userFacing: false }
+  );
+
+  auditedTool(
+    "add_work_chain_item",
+    "Append an item to the orchestrator's work chain: WHAT you will do next and WHY (both required — 'why' is what lets a future you judge whether the item is still valid, e.g. '배포가 급해서 보류'). Link real tickets: task_ids = the tickets whose board status PROVES this item done (done_when: exists|review|done); after_task_ids = prerequisite tickets that must be DONE before this item is ready. Promised-to-do-later things ('I'll open a web ticket for X', 'resume design 3/8 after deploy', 'close out NTQY after merge') belong here the moment you say them.",
+    {
+      what: z.string().describe("What to do — one line (≤200 chars)"),
+      why: z
+        .string()
+        .describe("Why it matters / why it is deferred — the validity condition (≤500 chars)"),
+      task_ids: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Tickets whose board status proves completion. Attach later with update_work_chain_item(add_task_ids) if they do not exist yet."
+        ),
+      after_task_ids: z
+        .array(z.string())
+        .optional()
+        .describe("Prerequisite tickets — item stays WAITING until all are DONE"),
+      after_item_ids: z
+        .array(z.string())
+        .optional()
+        .describe("Prerequisite chain items (ids from get_work_chain)"),
+      done_when: z
+        .enum(["exists", "review", "done"])
+        .optional()
+        .describe(
+          "When linked tickets count as reached: exists (ticket was created), review (REVIEW or DONE), done (DONE, default)"
+        ),
+      note: z.string().optional().describe("Free-form context"),
+      position: z
+        .number()
+        .int()
+        .optional()
+        .describe("Insert index (0 = do this first). Default: append"),
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
+        ),
+    },
+    async ({
+      what,
+      why,
+      task_ids,
+      after_task_ids,
+      after_item_ids,
+      done_when,
+      note,
+      position,
+      project_id,
+    }) => {
+      const projectId = await enforceProjectLock(
+        "add_work_chain_item",
+        project_id
+      );
+      if (!projectId) {
+        return text(
+          "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter."
+        );
+      }
+      const membership = await requireReadableProjectMember(projectId);
+      if (!membership.ok) return text(membership.message);
+      const doneWhen: WorkChainDoneWhen | undefined =
+        done_when && WORK_CHAIN_DONE_WHEN_VALUES.includes(done_when)
+          ? done_when
+          : undefined;
+      const res = await addWorkChainItem(
+        db,
+        projectId,
+        MARBLO_AGENT_ID,
+        {
+          what,
+          why,
+          ...(task_ids ? { taskIds: task_ids } : {}),
+          ...(after_task_ids ? { afterTaskIds: after_task_ids } : {}),
+          ...(after_item_ids ? { afterItemIds: after_item_ids } : {}),
+          ...(doneWhen ? { doneWhen } : {}),
+          ...(note ? { note } : {}),
+        },
+        position
+      );
+      if (res.error || !res.item) return text(`Error: ${res.error ?? "unknown"}`);
+      const chain = await loadWorkChain(db, projectId);
+      const evidenceNote =
+        res.item.taskIds.length === 0
+          ? "\n⚠️ 연결 티켓이 없다 — 이 항목은 보드가 완료를 판정할 수 없다. 티켓이 생기면 update_work_chain_item(item_id, add_task_ids=[...]) 로 붙여라. 티켓 없이 닫을 땐 close=self_reported + reason(근거) 이 필요하고 그 사실은 SELF-REPORTED 로 표시된다."
+          : "";
+      return text(
+        `워크체인에 추가됨: '${res.item.what}' (id=${res.item.id}, rev=${res.rev})${evidenceNote}\n` +
+          workChainFooter(chain.derived)
+      );
+    }
+  );
+
+  auditedTool(
+    "update_work_chain_item",
+    "Edit a work chain item: reword what/why, attach tickets (add_task_ids) so the board can judge completion, change prerequisites or done_when, move it (position), or close it. close=dropped needs reason (why it is no longer valid). close=self_reported is REFUSED for items linked to tickets — the board decides those; it is allowed only for ticket-less items and needs reason (what you verified), and stays visibly marked SELF-REPORTED.",
+    {
+      item_id: z.string().describe("Chain item id (from get_work_chain)"),
+      what: z.string().optional(),
+      why: z.string().optional(),
+      note: z.string().optional().describe("Replace note ('' clears)"),
+      task_ids: z
+        .array(z.string())
+        .optional()
+        .describe("Replace linked tickets"),
+      add_task_ids: z
+        .array(z.string())
+        .optional()
+        .describe("Add linked tickets (e.g. the ticket you just created for this item)"),
+      after_task_ids: z.array(z.string()).optional(),
+      after_item_ids: z.array(z.string()).optional(),
+      done_when: z.enum(["exists", "review", "done"]).optional(),
+      close: z
+        .enum(["dropped", "self_reported"])
+        .optional()
+        .describe("Close the item. dropped = no longer valid; self_reported = ticket-less item you verified yourself"),
+      reason: z
+        .string()
+        .optional()
+        .describe("Required with close: why dropped / what evidence for self_reported"),
+      reopen: z.boolean().optional().describe("Reopen a closed item"),
+      position: z.number().int().optional().describe("Move to index (0 = first)"),
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
+        ),
+    },
+    async ({
+      item_id,
+      what,
+      why,
+      note,
+      task_ids,
+      add_task_ids,
+      after_task_ids,
+      after_item_ids,
+      done_when,
+      close,
+      reason,
+      reopen,
+      position,
+      project_id,
+    }) => {
+      const projectId = await enforceProjectLock(
+        "update_work_chain_item",
+        project_id
+      );
+      if (!projectId) {
+        return text(
+          "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter."
+        );
+      }
+      const membership = await requireReadableProjectMember(projectId);
+      if (!membership.ok) return text(membership.message);
+      const res = await updateWorkChainItem(
+        db,
+        projectId,
+        MARBLO_AGENT_ID,
+        item_id,
+        {
+          ...(what !== undefined ? { what } : {}),
+          ...(why !== undefined ? { why } : {}),
+          ...(note !== undefined ? { note } : {}),
+          ...(task_ids !== undefined ? { taskIds: task_ids } : {}),
+          ...(add_task_ids !== undefined ? { addTaskIds: add_task_ids } : {}),
+          ...(after_task_ids !== undefined
+            ? { afterTaskIds: after_task_ids }
+            : {}),
+          ...(after_item_ids !== undefined
+            ? { afterItemIds: after_item_ids }
+            : {}),
+          ...(done_when !== undefined ? { doneWhen: done_when } : {}),
+          ...(close !== undefined ? { close } : {}),
+          ...(reason !== undefined ? { reason } : {}),
+          ...(reopen !== undefined ? { reopen } : {}),
+          ...(position !== undefined ? { position } : {}),
+        }
+      );
+      if (res.error || !res.item) return text(`Error: ${res.error ?? "unknown"}`);
+      const chain = await loadWorkChain(db, projectId);
+      const mine = chain.derived.items.find((d) => d.item.id === item_id);
+      const stateLine = mine
+        ? `상태: ${mine.state}${mine.evidence ? ` (evidence=${mine.evidence})` : ""}`
+        : "";
+      return text(
+        `워크체인 항목 갱신됨: '${res.item.what}' (id=${res.item.id}, rev=${res.rev}). ${stateLine}\n` +
+          workChainFooter(chain.derived)
+      );
     }
   );
 
@@ -9482,6 +9766,15 @@ export function registerTools(server: McpServer): void {
 
       if (applied.length > 0) {
         lines.push(`상태: ${task.status} → ${applied.join(" → ")}`);
+        // 워크체인 재열람 지점 — 머지 마감은 오케가 "다음" 을 잊기 가장 쉬운 자리다.
+        const chainNudge = await workChainNudgeAfterTransition(
+          db,
+          task.projectId || DEFAULT_PROJECT,
+          task_id,
+          task.status,
+          current
+        );
+        if (chainNudge) lines.push(chainNudge);
       }
 
       // Dependents must be resolved on DONE or the gate sticks (PR#507).

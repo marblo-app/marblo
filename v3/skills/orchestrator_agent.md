@@ -212,6 +212,35 @@ B안에서 너는 미션의 **운전자**다. 엔진은 **스텝 순서·품질 
      이후 대기/재시도/다음 스텝 grant 는 지휘자 책임이다.
    - 배정이 불가능하면 `mission_step_done(result:{success:false, error:"실패 원인"})` 로 보고한다.
 
+### 7. ★워크체인 — 네가 다음에 할 일은 대화가 아니라 체인에 적는다
+
+너는 A·B·C 를 계획해 놓고 A 를 끝내면 B·C 를 잊는다. 계획이 네 대화 맥락에만 있어서
+맥락이 요약되거나 세션이 바뀌면 사라지기 때문이다(2026-08-22 실측: "내가 웹 티켓으로
+열겠다" 고 해 놓고 안 열었고, "배포 급해서 3/8 보류" 가 어디에도 안 남았고, 머지한 티켓
+둘을 REVIEW 로 방치했다). 그래서 **다음에 할 일은 말하는 순간 체인에 적는다.**
+
+| 도구 | 언제 |
+| --- | --- |
+| `add_work_chain_item(what, why, task_ids?, after_task_ids?, done_when?)` | "나중에 ~하겠다" / "~끝나면 ~한다" / "잠시 보류" 를 **말하는 그 턴에**. why 는 필수 — 나중에 아직 유효한지 판단하는 근거다 |
+| `get_work_chain()` | ★작업 하나를 마친 직후(merge_and_close / update_task_status(DONE) / dispatch 직후)와 **세션 시작 때**. `▶ 다음` 을 집어 진행한다 |
+| `update_work_chain_item(item_id, add_task_ids=[...])` | 항목을 위해 티켓을 만들었으면 즉시 붙인다 — 그래야 보드가 완료를 판정한다 |
+| `update_work_chain_item(item_id, close="dropped", reason=...)` | 더 이상 유효하지 않을 때. 사유 필수 |
+
+규칙:
+
+- ★**완료는 네가 적는 게 아니다.** 항목에 티켓이 연결돼 있으면 그 티켓의 보드 상태
+  (`done_when`: done/review/exists)가 완료를 판정한다. `close="self_reported"` 는 티켓이
+  연결된 항목에서 **거부**되고, 티켓 없는 항목에서만 근거(reason)와 함께 허용되며
+  SELF-REPORTED 로 표시된다. "했다고 생각하는 것" 과 "실제로 된 것" 이 갈리는 걸 막는
+  장치다 — 티켓 있는 일은 티켓을 실제로 그 상태로 만들어라(머지했으면 `merge_and_close`).
+- 선행조건은 `after_task_ids`(티켓 DONE) / `after_item_ids`(체인 항목 완료)로 건다.
+  선행이 끝나면 항목은 자동으로 READY 가 되고, 그 전이는 `update_task_status`/
+  `merge_and_close` 결과에 `▶ 체인 항목 '…' 이 준비됨` 으로 붙어 온다.
+- `get_all_tasks` 결과 끝에 `🔗 워크체인 open=N — 다음: …` 푸터가 붙는다. 그 줄이 보이면
+  보드를 다 읽은 뒤 `get_work_chain` 을 열어라.
+- 체인은 `workChains/{projectId}` 에 남는다. 세션이 바뀌어도, 맥락이 요약돼도 남는다.
+  사장님도 오케 패널의 "다음 할 일" 에서 같은 목록을 본다 — 거기서 항목을 더하실 수도 있다.
+
 ## MCP 도구 사용법
 
 ### 에이전트 배정 (필수 워크플로우)
@@ -331,6 +360,14 @@ claude 의 standard 진입칸은 `claude-opus-5`(최고가 칸)다. 즉 난도�
 | `update_task_status(task_id, status)` | 태스크 상태 변경      |
 | `search_tasks(keyword)`               | 태스크 검색           |
 | `add_activity(task_id, message)`      | 진행 상황 기록        |
+
+### 워크체인 (다음 할 일)
+
+| 도구                                             | 용도                                  |
+| ------------------------------------------------ | ------------------------------------- |
+| `get_work_chain(include_closed?)`                | 다음 할 일 목록 + 보드 근거 파생 상태 |
+| `add_work_chain_item(what, why, task_ids?, …)`   | 항목 추가(무엇·왜·선행·근거 티켓)     |
+| `update_work_chain_item(item_id, …)`             | 티켓 붙이기·선행 변경·이동·닫기        |
 
 ### 플로우 관리
 

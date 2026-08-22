@@ -66,6 +66,13 @@ vi.mock("../../src/services/cliSetupActions", () => ({
 vi.mock("../../src/services/orchestratorAgentDoc", () => ({
   upsertOrchestratorAgentDoc: vi.fn(),
 }));
+// 워크체인 패널(티켓 fQtXQ2NzyYs0MRpqByTS)은 Firestore 구독을 서비스로 감싼다 —
+// 이 테스트가 보는 건 패널 자체가 아니라 오케 헤더/배너이므로 서비스만 비운다.
+vi.mock("../../src/services/workChainService", () => ({
+  subscribeWorkChain: vi.fn(() => () => {}),
+  addWorkChainItemFromUi: vi.fn(async () => ({ ok: true, itemId: "wc_x" })),
+  dropWorkChainItemFromUi: vi.fn(async () => ({ ok: true })),
+}));
 vi.mock("../../src/services/onrampBlockSignal", () => ({
   reportOnrampExecBlocked: vi.fn(),
 }));

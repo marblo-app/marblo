@@ -1,0 +1,425 @@
+/**
+ * WorkChainPanel — 오케가 "다음에 할 작정인 것" 을 사장님이 보는 자리
+ * (티켓 fQtXQ2NzyYs0MRpqByTS).
+ *
+ * 한 줄 요약(열림/준비 수 + ▶ 다음 항목)은 항상 보이고, 펼치면 항목마다
+ * 무엇·왜·근거 티켓·기다리는 것이 보인다. 상태는 저장값이 아니라 **보드 스토어의
+ * 티켓 status 로 파생**한다(`deriveWorkChain` — MCP 의 get_work_chain 과 같은 함수).
+ * 그래서 오케가 "했다" 고 적어도 티켓이 DONE 이 아니면 여기선 완료로 안 보인다.
+ *
+ * 화면에서 할 수 있는 쓰기는 둘뿐이다 — 항목 적기(what/why), 내리기(dropped, 사유
+ * 필수). 완료를 적는 버튼은 없다: 완료는 보드가 판정한다.
+ *
+ * 빈/실패/로딩은 `StateBlock` 이 그린다 — 빈 상태엔 "항목 적기" 가, 실패엔 "다시
+ * 시도" 가 붙는다(`loadState.ts` 의 규칙: 다음 행동 없는 상태는 타입이 거부).
+ */
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "../../lib/i18n";
+import { useTaskStore } from "../../stores/taskStore";
+import {
+  deriveWorkChain,
+  referencedTaskIds,
+  taskStatusLookupFrom,
+  taskTitlesFrom,
+  type DerivedWorkChain,
+  type DerivedWorkChainItem,
+  type WorkChainItem,
+} from "../../lib/workChain";
+import {
+  addWorkChainItemFromUi,
+  dropWorkChainItemFromUi,
+  subscribeWorkChain,
+} from "../../services/workChainService";
+import { StateBlock } from "../common/StateBlock";
+import type { LoadState } from "../common/loadState";
+
+export interface WorkChainPanelProps {
+  projectId: string | null;
+}
+
+type ChainLoad =
+  | { kind: "loading"; since: number }
+  | { kind: "ready"; items: WorkChainItem[]; exists: boolean }
+  | { kind: "failed"; detail: string };
+
+const STATE_CHIP: Record<
+  DerivedWorkChainItem["state"] | "doneSelf",
+  { cls: string; key: string }
+> = {
+  ready: {
+    cls: "bg-[#a6e3a1]/15 text-[#a6e3a1]",
+    key: "orchestrator.chain.state.ready",
+  },
+  waiting: {
+    cls: "bg-[#f9e2af]/15 text-[#f9e2af]",
+    key: "orchestrator.chain.state.waiting",
+  },
+  done: {
+    cls: "bg-[#89b4fa]/15 text-[#89b4fa]",
+    key: "orchestrator.chain.state.done",
+  },
+  doneSelf: {
+    cls: "bg-[#fab387]/15 text-[#fab387]",
+    key: "orchestrator.chain.state.doneSelf",
+  },
+  dropped: {
+    cls: "bg-[#6c7086]/20 text-[#a6adc8]",
+    key: "orchestrator.chain.state.dropped",
+  },
+};
+
+function chipFor(d: DerivedWorkChainItem): keyof typeof STATE_CHIP {
+  if (d.state === "done" && d.evidence === "self") return "doneSelf";
+  return d.state;
+}
+
+export default memo(function WorkChainPanel({
+  projectId,
+}: WorkChainPanelProps) {
+  const { t } = useTranslation();
+  const tasks = useTaskStore((s) => s.tasks);
+  const [load, setLoad] = useState<ChainLoad>({
+    kind: "loading",
+    since: Date.now(),
+  });
+  const [retryToken, setRetryToken] = useState(0);
+  const [expanded, setExpanded] = useState(false);
+  const [showClosed, setShowClosed] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [what, setWhat] = useState("");
+  const [why, setWhy] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!projectId) return;
+    setLoad({ kind: "loading", since: Date.now() });
+    const unsub = subscribeWorkChain(projectId, (res) => {
+      if (res.kind === "error") {
+        setLoad({ kind: "failed", detail: res.error.message });
+        return;
+      }
+      setLoad({
+        kind: "ready",
+        items: res.snapshot.items,
+        exists: res.snapshot.exists,
+      });
+    });
+    return unsub;
+  }, [projectId, retryToken]);
+
+  const derived: DerivedWorkChain | null = useMemo(() => {
+    if (load.kind !== "ready") return null;
+    const ids = referencedTaskIds(load.items);
+    return deriveWorkChain(load.items, taskStatusLookupFrom(tasks, ids));
+  }, [load, tasks]);
+
+  const titles = useMemo(() => {
+    if (load.kind !== "ready") return {};
+    return taskTitlesFrom(tasks, referencedTaskIds(load.items));
+  }, [load, tasks]);
+
+  const openForm = useCallback(() => {
+    setExpanded(true);
+    setAdding(true);
+    setFormError(null);
+  }, []);
+
+  const submit = useCallback(async () => {
+    if (!projectId) return;
+    if (!what.trim() || !why.trim()) {
+      setFormError(t("orchestrator.chain.form.required"));
+      return;
+    }
+    setBusy(true);
+    const res = await addWorkChainItemFromUi(projectId, { what, why });
+    setBusy(false);
+    if (!res.ok) {
+      setFormError(t("orchestrator.chain.writeFailed", { error: res.error }));
+      return;
+    }
+    setWhat("");
+    setWhy("");
+    setAdding(false);
+    setFormError(null);
+  }, [projectId, what, why, t]);
+
+  const drop = useCallback(
+    async (itemId: string) => {
+      if (!projectId) return;
+      const reason = window.prompt(t("orchestrator.chain.dropPrompt")) ?? "";
+      if (!reason.trim()) {
+        setFormError(t("orchestrator.chain.dropReasonRequired"));
+        return;
+      }
+      const res = await dropWorkChainItemFromUi(projectId, itemId, reason);
+      if (!res.ok)
+        setFormError(t("orchestrator.chain.writeFailed", { error: res.error }));
+    },
+    [projectId, t],
+  );
+
+  if (!projectId) return null;
+
+  const state: LoadState =
+    load.kind === "loading"
+      ? { kind: "loading", since: load.since }
+      : load.kind === "failed"
+        ? {
+            kind: "failed",
+            reasonCode: "orchestrator.chain.failed.reason",
+            detail: load.detail,
+            retry: () => setRetryToken((n) => n + 1),
+          }
+        : load.items.length === 0
+          ? {
+              kind: "empty",
+              title: "orchestrator.chain.empty.title",
+              hint: "orchestrator.chain.empty.hint",
+              create: {
+                label: "orchestrator.chain.empty.create",
+                onClick: openForm,
+              },
+            }
+          : { kind: "ready" };
+
+  const openCount = derived?.open.length ?? 0;
+  const readyCount = derived?.ready.length ?? 0;
+  const closedCount = derived ? derived.items.length - derived.open.length : 0;
+  const next = derived?.next ?? null;
+  const visible = derived ? (showClosed ? derived.items : derived.open) : [];
+
+  return (
+    <div
+      data-testid="work-chain-panel"
+      className="mx-3 mb-2 rounded border border-[#313244] bg-[#1e1e2e] text-[11px] text-[#cdd6f4]"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* 요약 줄 — 항상 보인다. 오케가 다음에 뭘 할 작정인지가 여기 한 줄이다. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1">
+        <span className="font-medium text-[#cba6f7]">
+          {t("orchestrator.chain.title")}
+        </span>
+        {derived && derived.items.length > 0 && (
+          <>
+            <span className="text-[#a6adc8]">
+              {t("orchestrator.chain.countOpen", { open: openCount })} ·{" "}
+              {t("orchestrator.chain.countReady", { ready: readyCount })}
+            </span>
+            {next ? (
+              <span
+                data-testid="work-chain-next"
+                className="truncate text-[#a6e3a1]"
+                title={next.item.why}
+              >
+                ▶ {next.item.what}
+              </span>
+            ) : openCount > 0 ? (
+              <span className="text-[#f9e2af]">
+                ▶ {t("orchestrator.chain.state.waiting")}
+              </span>
+            ) : null}
+          </>
+        )}
+        <span className="ml-auto flex items-center gap-1">
+          {load.kind === "ready" && (
+            <button
+              type="button"
+              onClick={openForm}
+              className="rounded border border-[#45475a] px-1.5 py-0.5 text-[10px] text-[#a6adc8] hover:bg-[#313244]"
+            >
+              + {t("orchestrator.chain.add")}
+            </button>
+          )}
+          <button
+            type="button"
+            data-testid="work-chain-toggle"
+            onClick={() => setExpanded((v) => !v)}
+            className="rounded border border-[#45475a] px-1.5 py-0.5 text-[10px] text-[#a6adc8] hover:bg-[#313244]"
+            aria-expanded={expanded}
+          >
+            {expanded
+              ? t("orchestrator.chain.toggleHide")
+              : t("orchestrator.chain.toggleShow")}
+          </button>
+        </span>
+      </div>
+
+      {expanded && (
+        <div className="border-t border-[#313244] px-2 py-1.5">
+          <div className="mb-1 text-[10px] text-[#6c7086]">
+            {t("orchestrator.chain.subtitle")}
+          </div>
+          {formError && (
+            <div className="mb-1 rounded bg-[#f38ba8]/10 px-2 py-1 text-[10px] text-[#f38ba8]">
+              {formError}
+            </div>
+          )}
+          {adding && (
+            <div
+              data-testid="work-chain-form"
+              className="mb-2 flex flex-col gap-1 rounded border border-[#45475a] p-2"
+            >
+              <label className="flex flex-col gap-0.5 text-[10px] text-[#a6adc8]">
+                {t("orchestrator.chain.form.what")}
+                <input
+                  value={what}
+                  onChange={(e) => setWhat(e.target.value)}
+                  placeholder={t("orchestrator.chain.form.whatPlaceholder")}
+                  maxLength={200}
+                  className="rounded border border-[#313244] bg-[#181825] px-1.5 py-1 text-[11px] text-[#cdd6f4] outline-none focus:border-[#89b4fa]"
+                />
+              </label>
+              <label className="flex flex-col gap-0.5 text-[10px] text-[#a6adc8]">
+                {t("orchestrator.chain.form.why")}
+                <input
+                  value={why}
+                  onChange={(e) => setWhy(e.target.value)}
+                  placeholder={t("orchestrator.chain.form.whyPlaceholder")}
+                  maxLength={500}
+                  className="rounded border border-[#313244] bg-[#181825] px-1.5 py-1 text-[11px] text-[#cdd6f4] outline-none focus:border-[#89b4fa]"
+                />
+              </label>
+              <div className="flex justify-end gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdding(false);
+                    setFormError(null);
+                  }}
+                  className="rounded border border-[#45475a] px-2 py-0.5 text-[10px] text-[#a6adc8] hover:bg-[#313244]"
+                >
+                  {t("orchestrator.chain.form.cancel")}
+                </button>
+                <button
+                  type="button"
+                  data-testid="work-chain-submit"
+                  disabled={busy}
+                  onClick={() => void submit()}
+                  className="rounded bg-[#89b4fa]/20 px-2 py-0.5 text-[10px] font-medium text-[#89b4fa] hover:bg-[#89b4fa]/30 disabled:opacity-50"
+                >
+                  {t("orchestrator.chain.form.submit")}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <StateBlock
+            variant="block"
+            state={state}
+            minHeight={48}
+            skeletonLines={2}
+          >
+            {() => (
+              <ol className="flex flex-col gap-1">
+                {visible.map((d) => {
+                  const chip = STATE_CHIP[chipFor(d)];
+                  const isNext = next?.item.id === d.item.id;
+                  return (
+                    <li
+                      key={d.item.id}
+                      data-testid="work-chain-item"
+                      data-state={d.state}
+                      data-evidence={d.evidence ?? ""}
+                      className={`rounded border px-2 py-1 ${
+                        isNext
+                          ? "border-[#a6e3a1]/50 bg-[#a6e3a1]/5"
+                          : "border-[#313244]"
+                      } ${d.state === "done" || d.state === "dropped" ? "opacity-70" : ""}`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] ${chip.cls}`}
+                        >
+                          {t(chip.key as Parameters<typeof t>[0])}
+                        </span>
+                        {isNext && (
+                          <span className="text-[10px] text-[#a6e3a1]">
+                            ▶ {t("orchestrator.chain.next")}
+                          </span>
+                        )}
+                        <span className="truncate font-medium">
+                          {d.item.what}
+                        </span>
+                        {d.state !== "done" && d.state !== "dropped" && (
+                          <button
+                            type="button"
+                            onClick={() => void drop(d.item.id)}
+                            className="ml-auto rounded border border-[#45475a] px-1.5 py-0.5 text-[10px] text-[#a6adc8] hover:bg-[#313244]"
+                          >
+                            {t("orchestrator.chain.drop")}
+                          </button>
+                        )}
+                      </div>
+                      <div className="mt-0.5 text-[10px] text-[#a6adc8]">
+                        <span className="text-[#6c7086]">
+                          {t("orchestrator.chain.why")}:
+                        </span>{" "}
+                        {d.item.why}
+                      </div>
+                      {d.item.taskIds.length > 0 && (
+                        <div className="mt-0.5 text-[10px] text-[#a6adc8]">
+                          <span className="text-[#6c7086]">
+                            {t("orchestrator.chain.evidence")}
+                            {` (${d.item.doneWhen})`}:
+                          </span>{" "}
+                          {d.item.taskIds.map((id) => {
+                            const st = tasks.find((x) => x.id === id)?.status;
+                            return (
+                              <span key={id} className="mr-2">
+                                {titles[id] ?? id}
+                                <span className="text-[#6c7086]">
+                                  {" "}
+                                  = {st ?? "—"}
+                                </span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {d.state === "waiting" && (
+                        <div className="mt-0.5 text-[10px] text-[#f9e2af]">
+                          <span className="text-[#6c7086]">
+                            {t("orchestrator.chain.waitingOn")}:
+                          </span>{" "}
+                          {[
+                            ...d.pendingTaskIds.map((id) => titles[id] ?? id),
+                            ...d.pendingItemIds,
+                          ].join(", ")}
+                        </div>
+                      )}
+                      {d.missingTaskIds.length > 0 && (
+                        <div className="mt-0.5 text-[10px] text-[#f38ba8]">
+                          ⚠ {t("orchestrator.chain.missingTask")}:{" "}
+                          {d.missingTaskIds.join(", ")}
+                        </div>
+                      )}
+                      {d.item.closed && (
+                        <div className="mt-0.5 text-[10px] text-[#6c7086]">
+                          {t("orchestrator.chain.closedReason")}:{" "}
+                          {d.item.closed.reason}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+          </StateBlock>
+
+          {closedCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowClosed((v) => !v)}
+              className="mt-1 text-[10px] text-[#6c7086] hover:text-[#a6adc8]"
+            >
+              {showClosed
+                ? t("orchestrator.chain.hideClosed")
+                : t("orchestrator.chain.showClosed", { count: closedCount })}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});

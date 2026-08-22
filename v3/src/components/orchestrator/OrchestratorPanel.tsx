@@ -43,6 +43,7 @@ import { useTaskStore } from "../../stores/taskStore";
 import { upsertOrchestratorAgentDoc } from "../../services/orchestratorAgentDoc";
 import { reportOnrampExecBlocked } from "../../services/onrampBlockSignal";
 import OrchestratorTerminal from "./OrchestratorTerminal";
+import WorkChainPanel from "./WorkChainPanel";
 
 const MIN_HEIGHT = 80;
 const MAX_HEIGHT = 600;
@@ -1194,6 +1195,13 @@ export default memo(function OrchestratorPanel({
             </button>
           </div>
         </div>
+      )}
+
+      {/* 워크체인 — 오케가 다음에 할 작정인 것(티켓 fQtXQ2NzyYs0MRpqByTS).
+          터미널 위 한 줄 요약 + 펼침. 접힘 상태에선 숨기고, 비기너 화면
+          (hideModelControls)에서도 숨긴다 — 첫 화면을 어지럽히지 않기 위해. */}
+      {!isCollapsed && !hideModelControls && currentProject && (
+        <WorkChainPanel projectId={currentProject.id} />
       )}
 
       {/* Terminal content — 멈춘 뒤에도 사용자가 답해야 풀리는 사유면 계속

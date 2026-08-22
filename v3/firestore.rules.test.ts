@@ -43,6 +43,12 @@ import {
 import { readFileSync } from "fs";
 import { describe, it, beforeAll, afterAll, beforeEach, expect } from "vitest";
 import { applyProjection } from "./electron/mcp-server/projection";
+import {
+  addWorkChainItem,
+  loadWorkChain,
+  updateWorkChainItem,
+  workChainNudgeAfterTransition,
+} from "./electron/mcp-server/work-chain";
 
 let testEnv: RulesTestEnvironment;
 
@@ -197,6 +203,36 @@ beforeEach(async () => {
       name: "Test Flow",
       status: "draft",
       createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    // 오케 워크체인 (티켓 fQtXQ2NzyYs0MRpqByTS): 우리 프로젝트 / 타 테넌트.
+    // 문서 id == projectId — 경로가 테넌트 경계다.
+    await setDoc(doc(db, "workChains", PROJECT_ID), {
+      projectId: PROJECT_ID,
+      items: [
+        {
+          id: "wc_seed00001",
+          what: "디자인 3/8 재개",
+          why: "배포가 급해서 보류",
+          afterTaskIds: ["task-1"],
+          afterItemIds: [],
+          taskIds: [],
+          doneWhen: "done",
+          createdAt: 1,
+          updatedAt: 1,
+          createdBy: "orchestrator-test",
+        },
+      ],
+      rev: 1,
+      updatedBy: "orchestrator-test",
+      updatedAt: new Date(),
+    });
+    await setDoc(doc(db, "workChains", OTHER_PROJECT_ID), {
+      projectId: OTHER_PROJECT_ID,
+      items: [],
+      rev: 1,
+      updatedBy: "orchestrator-other",
       updatedAt: new Date(),
     });
 
@@ -1616,6 +1652,137 @@ describe("flows collection", () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       }),
+    );
+  });
+});
+
+// ===== Orchestrator Work Chains (티켓 fQtXQ2NzyYs0MRpqByTS) =====
+// 문서 id 가 projectId 다. 테넌트 경계가 경로에 있어 missions 처럼 projectId 필드를
+// 빼먹어 열리는 구멍이 없지만, 그 사실을 테스트로 못 박는다 — 멤버는 자기 체인을
+// 읽고 쓰고, 외부인은 읽지도 못하고, 경로와 본문 projectId 가 어긋난 문서는 못 만든다.
+
+describe("workChains — 멤버 read/write", () => {
+  it("프로젝트 멤버는 자기 프로젝트 체인을 읽을 수 있다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "workChains", PROJECT_ID)));
+  });
+
+  it("owner/admin 도 읽는다", async () => {
+    await assertSucceeds(
+      getDoc(doc(getContext(OWNER_ID, OWNER_EMAIL).firestore(), "workChains", PROJECT_ID)),
+    );
+    await assertSucceeds(
+      getDoc(doc(getContext(ADMIN_ID, ADMIN_EMAIL).firestore(), "workChains", PROJECT_ID)),
+    );
+  });
+
+  it("멤버는 항목을 갱신(update)할 수 있다 — 오케(사용자 auth)와 화면의 쓰기 경로", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "workChains", PROJECT_ID), {
+        projectId: PROJECT_ID,
+        items: [],
+        rev: 2,
+        updatedBy: MEMBER_ID,
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("멤버는 체인 문서가 없을 때 만들 수 있다(첫 add_work_chain_item 경로)", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await deleteDoc(doc(context.firestore(), "workChains", PROJECT_ID));
+    });
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(doc(db, "workChains", PROJECT_ID), {
+        projectId: PROJECT_ID,
+        items: [],
+        rev: 1,
+        updatedBy: MEMBER_ID,
+        updatedAt: new Date(),
+        createdAt: new Date(),
+      }),
+    );
+  });
+
+  it("삭제는 누구도 못 한다 — 체인은 비우는 것이지 지우는 게 아니다", async () => {
+    await assertFails(
+      deleteDoc(doc(getContext(OWNER_ID, OWNER_EMAIL).firestore(), "workChains", PROJECT_ID)),
+    );
+  });
+});
+
+describe("workChains — 크로스테넌트 격리", () => {
+  it("외부인은 남의 체인을 읽을 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "workChains", PROJECT_ID)));
+  });
+
+  it("멤버라도 자기가 속하지 않은 타 테넌트 체인은 읽을 수 없다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "workChains", OTHER_PROJECT_ID)));
+  });
+
+  it("외부인은 남의 체인을 고칠 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "workChains", PROJECT_ID), {
+        projectId: PROJECT_ID,
+        items: [],
+        rev: 99,
+        updatedBy: OUTSIDER_ID,
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("외부인은 남의 프로젝트 id 로 체인을 만들 수 없다", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await deleteDoc(doc(context.firestore(), "workChains", PROJECT_ID));
+    });
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(doc(db, "workChains", PROJECT_ID), {
+        projectId: PROJECT_ID,
+        items: [],
+        rev: 1,
+        updatedBy: OUTSIDER_ID,
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("경로(projectId)와 본문 projectId 가 어긋난 문서는 멤버도 못 만들고 못 고친다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "workChains", PROJECT_ID), {
+        projectId: OTHER_PROJECT_ID,
+        items: [],
+        rev: 2,
+        updatedBy: MEMBER_ID,
+        updatedAt: new Date(),
+      }),
+    );
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await deleteDoc(doc(context.firestore(), "workChains", PROJECT_ID));
+    });
+    await assertFails(
+      setDoc(doc(db, "workChains", PROJECT_ID), {
+        projectId: OTHER_PROJECT_ID,
+        items: [],
+        rev: 1,
+        updatedBy: MEMBER_ID,
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("미인증은 읽지도 쓰지도 못한다", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(getDoc(doc(db, "workChains", PROJECT_ID)));
+    await assertFails(
+      updateDoc(doc(db, "workChains", PROJECT_ID), { rev: 2 }),
     );
   });
 });
@@ -3780,6 +3947,174 @@ describe("프로젝트 스코프 쿼리 규율 — 무스코프 list 는 거부"
 // 오케(=프로젝트 owner uid 로 인증한 MCP)와 에이전트가 실제로 쓰는 전이 전 구간이
 // 룰을 통과하는지 — applyProjection 의 진짜 코드경로로 검증한다. 순수 룰 테스트만으론
 // 이 버그를 못 잡았다: 거부된 건 write 가 아니라 write 직전의 **읽기 쿼리**였다.
+
+// ===== 오케 워크체인 — 쓰기/읽기 왕복 + 보드 근거 판정 (실 SDK · 룰 통과 · 에뮬레이터) =====
+// 티켓 fQtXQ2NzyYs0MRpqByTS 의 완료 기준 두 줄을 여기서 실제로 돌린다:
+//   · "오케가 체인을 쓰고 읽는 왕복이 실제로 동작함을 보일 것"
+//   · "항목 완료 판정이 오케 자기보고가 아니라 보드 사실에 근거함을 보일 것"
+// 오케 MCP 가 쓰는 그 함수(work-chain.ts)를 멤버 auth 컨텍스트로 그대로 호출한다.
+describe("workChains — 오케 쓰기/읽기 왕복 (work-chain.ts 실제 경로)", () => {
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await deleteDoc(doc(db, "workChains", PROJECT_ID));
+      await setDoc(doc(db, "tasks", "wc-deploy"), {
+        projectId: PROJECT_ID,
+        contextId: "board",
+        title: "배포",
+        status: "IN_PROGRESS",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await setDoc(doc(db, "tasks", "wc-design"), {
+        projectId: PROJECT_ID,
+        contextId: "board",
+        title: "디자인 3/8",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+  });
+
+  it("add → load 왕복: 없던 문서가 만들어지고, 같은 항목이 파생 상태와 함께 읽힌다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore() as never;
+    const added = await addWorkChainItem(db, PROJECT_ID, "orchestrator-test", {
+      what: "디자인 3/8 재개",
+      why: "배포가 급해서 보류",
+      afterTaskIds: ["wc-deploy"],
+      taskIds: ["wc-design"],
+    });
+    expect(added.error).toBeUndefined();
+    expect(added.item?.id).toMatch(/^wc_/);
+
+    const loaded = await loadWorkChain(db, PROJECT_ID);
+    expect(loaded.exists).toBe(true);
+    expect(loaded.rev).toBe(1);
+    expect(loaded.items).toHaveLength(1);
+    expect(loaded.items[0].what).toBe("디자인 3/8 재개");
+    // 선행 배포가 IN_PROGRESS → waiting. 저장값이 아니라 티켓 라이브 상태로 파생됐다.
+    expect(loaded.derived.items[0].state).toBe("waiting");
+    expect(loaded.derived.items[0].pendingTaskIds).toEqual(["wc-deploy"]);
+    expect(loaded.facts.titles["wc-design"]).toBe("디자인 3/8");
+  });
+
+  it("★보드 사실이 판정한다: 배포 DONE → READY, 디자인 DONE → done(board). 오케는 아무것도 '완료' 라 적지 않았다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore() as never;
+    await addWorkChainItem(db, PROJECT_ID, "orchestrator-test", {
+      what: "디자인 3/8 재개",
+      why: "배포가 급해서 보류",
+      afterTaskIds: ["wc-deploy"],
+      taskIds: ["wc-design"],
+    });
+    // 배포 티켓을 applyProjection(실제 상태 전이 경로)로 DONE 으로.
+    await applyProjection(db, "wc-deploy", {
+      newStatus: "DONE",
+      lastAgentId: "agent-1",
+      lastActivitySummary: "deploy done",
+    });
+    const nudge = await workChainNudgeAfterTransition(
+      db,
+      PROJECT_ID,
+      "wc-deploy",
+      "IN_PROGRESS",
+      "DONE",
+    );
+    expect(nudge).toContain("준비됨");
+    let loaded = await loadWorkChain(db, PROJECT_ID);
+    expect(loaded.derived.items[0].state).toBe("ready");
+    expect(loaded.derived.next?.item.what).toBe("디자인 3/8 재개");
+
+    // 디자인 티켓이 DONE 이 되면 항목은 board 근거로 done.
+    await applyProjection(db, "wc-design", {
+      newStatus: "DONE",
+      lastAgentId: "agent-2",
+      lastActivitySummary: "design done",
+    });
+    loaded = await loadWorkChain(db, PROJECT_ID);
+    expect(loaded.derived.items[0].state).toBe("done");
+    expect(loaded.derived.items[0].evidence).toBe("board");
+    expect(loaded.derived.open).toHaveLength(0);
+  });
+
+  it("★자기보고 거부: 티켓이 연결된 항목은 self_reported 로 닫을 수 없다 — 저장도 안 된다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore() as never;
+    const added = await addWorkChainItem(db, PROJECT_ID, "orchestrator-test", {
+      what: "NTQY 마감",
+      why: "머지함",
+      taskIds: ["wc-design"],
+    });
+    const res = await updateWorkChainItem(
+      db,
+      PROJECT_ID,
+      "orchestrator-test",
+      added.item!.id,
+      { close: "self_reported", reason: "내가 닫았음" },
+    );
+    expect(res.error).toMatch(/보드 상태/);
+    const loaded = await loadWorkChain(db, PROJECT_ID);
+    expect(loaded.items[0].closed).toBeUndefined();
+    expect(loaded.derived.items[0].state).toBe("ready"); // 아직 열려 있다 — 잊지 않게
+    expect(loaded.rev).toBe(1); // 거부된 쓰기는 rev 도 올리지 않는다
+  });
+
+  it("티켓 없는 항목: 만들었다가 티켓을 붙이면(add_task_ids) 그때부터 보드가 판정한다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore() as never;
+    const added = await addWorkChainItem(db, PROJECT_ID, "orchestrator-test", {
+      what: "에이전트 요청을 웹 티켓으로 열기",
+      why: "05:29 에 열겠다고 약속함",
+      doneWhen: "exists",
+    });
+    let loaded = await loadWorkChain(db, PROJECT_ID);
+    expect(loaded.derived.items[0].state).toBe("ready");
+    const upd = await updateWorkChainItem(
+      db,
+      PROJECT_ID,
+      "orchestrator-test",
+      added.item!.id,
+      { addTaskIds: ["wc-design"] },
+    );
+    expect(upd.error).toBeUndefined();
+    loaded = await loadWorkChain(db, PROJECT_ID);
+    expect(loaded.derived.items[0].state).toBe("done");
+    expect(loaded.derived.items[0].evidence).toBe("board");
+    expect(loaded.rev).toBe(2);
+  });
+
+  it("dropped 는 사유 없이는 안 되고, 사유가 있으면 닫히며 이력으로 남는다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore() as never;
+    const added = await addWorkChainItem(db, PROJECT_ID, "orchestrator-test", {
+      what: "x",
+      why: "y",
+    });
+    const noReason = await updateWorkChainItem(
+      db,
+      PROJECT_ID,
+      "orchestrator-test",
+      added.item!.id,
+      { close: "dropped" },
+    );
+    expect(noReason.error).toMatch(/reason/);
+    const ok = await updateWorkChainItem(
+      db,
+      PROJECT_ID,
+      "orchestrator-test",
+      added.item!.id,
+      { close: "dropped", reason: "범위 밖으로 판단" },
+    );
+    expect(ok.error).toBeUndefined();
+    const loaded = await loadWorkChain(db, PROJECT_ID);
+    expect(loaded.derived.items[0].state).toBe("dropped");
+    expect(loaded.items[0].closed?.reason).toBe("범위 밖으로 판단");
+  });
+
+  it("외부인은 같은 함수로도 쓸 수 없다(룰이 막는다)", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore() as never;
+    await expect(
+      addWorkChainItem(db, PROJECT_ID, "orchestrator-evil", { what: "x", why: "y" }),
+    ).rejects.toThrow();
+  });
+});
 
 describe("task 상태전이 — applyProjection 실제 경로", () => {
   const MISSION_ID = "mission-live";

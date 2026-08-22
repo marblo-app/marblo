@@ -297,6 +297,11 @@ export const PROJECT_ID_TOOL_CONTRACTS: Readonly<
   get_model_guidance: "locked",
   list_worktree_audit: "locked",
   get_worktree_audit: "locked",
+  // 오케스트레이터 워크체인(티켓 fQtXQ2NzyYs0MRpqByTS) — 프로젝트당 1문서라
+  // project_id 는 곧 문서 id 다. 다른 프로젝트의 체인을 읽거나 적는 일은 없다.
+  get_work_chain: "locked",
+  add_work_chain_item: "locked",
+  update_work_chain_item: "locked",
   create_task: "cross-project-create",
   create_tasks_bulk: "cross-project-create",
 };

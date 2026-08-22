@@ -1,0 +1,331 @@
+/**
+ * 오케 워크체인 코어 (티켓 fQtXQ2NzyYs0MRpqByTS).
+ *
+ * 여기서 못 박는 것은 하나다 — **완료 판정은 오케 자기보고가 아니라 보드 사실이다.**
+ *   · 티켓이 연결된 항목은 그 티켓의 status 가 doneWhen 에 닿아야 done 이다.
+ *   · 오케가 self_reported 로 닫으려 해도 티켓이 연결돼 있으면 거부된다.
+ *   · 선행 티켓이 DONE 이 아니면 waiting, 되면 ready — 저장값이 아니라 파생이다.
+ * 그리고 2026-08-22 의 실제 세 사례가 이 모델로 표현·판정되는지를 그대로 재현한다.
+ */
+import { describe, expect, it } from "vitest";
+import {
+  buildWorkChainItem,
+  deriveWorkChain,
+  formatWorkChain,
+  insertItem,
+  newWorkChainItemId,
+  normalizeWorkChainItems,
+  referencedTaskIds,
+  rejectSelfReportReason,
+  statusSatisfiesDoneWhen,
+  validateNewItem,
+  workChainFooter,
+  workChainNudgeForTaskChange,
+  type TaskStatusLookup,
+  type WorkChainItem,
+} from "../../electron/mcp-server/work-chain-core";
+
+function item(
+  over: Partial<WorkChainItem> & { id: string; what: string },
+): WorkChainItem {
+  return {
+    why: "because",
+    afterTaskIds: [],
+    afterItemIds: [],
+    taskIds: [],
+    doneWhen: "done",
+    createdAt: 1,
+    updatedAt: 1,
+    createdBy: "orchestrator-p1",
+    ...over,
+  };
+}
+
+describe("statusSatisfiesDoneWhen", () => {
+  it("done 은 DONE 만, review 는 REVIEW|DONE, exists 는 보드에 있기만 하면 된다", () => {
+    expect(statusSatisfiesDoneWhen("REVIEW", "done")).toBe(false);
+    expect(statusSatisfiesDoneWhen("DONE", "done")).toBe(true);
+    expect(statusSatisfiesDoneWhen("REVIEW", "review")).toBe(true);
+    expect(statusSatisfiesDoneWhen("DONE", "review")).toBe(true);
+    expect(statusSatisfiesDoneWhen("IN_PROGRESS", "review")).toBe(false);
+    expect(statusSatisfiesDoneWhen("TODO", "exists")).toBe(true);
+    expect(statusSatisfiesDoneWhen(null, "exists")).toBe(false);
+  });
+});
+
+describe("deriveWorkChain — 완료는 보드 사실로", () => {
+  it("사례 3: 머지한 티켓이 보드에서 REVIEW 면 '마감' 항목은 아직 열려 있다", () => {
+    const items = [
+      item({ id: "a", what: "NTQY·IcjP 마감", taskIds: ["NTQY", "IcjP"] }),
+    ];
+    const stillReview: TaskStatusLookup = { NTQY: "REVIEW", IcjP: "REVIEW" };
+    const d1 = deriveWorkChain(items, stillReview);
+    expect(d1.items[0].state).toBe("ready");
+    expect(d1.next?.item.id).toBe("a");
+
+    // 하나만 DONE 이어도 아직 아니다 — 전부 닿아야 한다.
+    const half: TaskStatusLookup = { NTQY: "DONE", IcjP: "REVIEW" };
+    expect(deriveWorkChain(items, half).items[0].state).toBe("ready");
+
+    const closed: TaskStatusLookup = { NTQY: "DONE", IcjP: "DONE" };
+    const d2 = deriveWorkChain(items, closed);
+    expect(d2.items[0].state).toBe("done");
+    expect(d2.items[0].evidence).toBe("board");
+    expect(d2.open).toHaveLength(0);
+    expect(d2.next).toBeNull();
+  });
+
+  it("사례 2: '배포 급해서 3/8 보류' — 배포 티켓이 DONE 되면 자동으로 READY", () => {
+    const items = [
+      item({
+        id: "d38",
+        what: "디자인 3/8 재개",
+        why: "배포가 급해서 보류",
+        afterTaskIds: ["deploy"],
+        taskIds: ["design38"],
+      }),
+    ];
+    const before = deriveWorkChain(items, {
+      deploy: "IN_PROGRESS",
+      design38: "TODO",
+    });
+    expect(before.items[0].state).toBe("waiting");
+    expect(before.items[0].pendingTaskIds).toEqual(["deploy"]);
+    expect(before.next).toBeNull();
+
+    const after = deriveWorkChain(items, { deploy: "DONE", design38: "TODO" });
+    expect(after.items[0].state).toBe("ready");
+    expect(after.next?.item.id).toBe("d38");
+
+    const nudge = workChainNudgeForTaskChange(before, after, "deploy");
+    expect(nudge).toContain("준비됨");
+    expect(nudge).toContain("디자인 3/8 재개");
+  });
+
+  it("사례 1: '내가 웹 티켓으로 열겠다' — 티켓을 붙이기 전엔 READY, 붙이면 exists 로 즉시 done", () => {
+    const promise = item({
+      id: "web",
+      what: "에이전트 요청 웹 티켓으로 열기",
+      doneWhen: "exists",
+    });
+    const d1 = deriveWorkChain([promise], {});
+    expect(d1.items[0].state).toBe("ready"); // 잊지 않게 계속 떠 있다
+    const linked = { ...promise, taskIds: ["q8ENCS944JZxoPwxNI68"] };
+    const d2 = deriveWorkChain([linked], { q8ENCS944JZxoPwxNI68: "TODO" });
+    expect(d2.items[0].state).toBe("done");
+    expect(d2.items[0].evidence).toBe("board");
+  });
+
+  it("★자기보고는 티켓이 연결된 항목에서 무시된다 — 보드가 이긴다", () => {
+    const lying = item({
+      id: "x",
+      what: "티켓 있는 일",
+      taskIds: ["t1"],
+      closed: { kind: "self_reported", reason: "했음", at: 2, by: "orch" },
+    });
+    const d = deriveWorkChain([lying], { t1: "IN_PROGRESS" });
+    expect(d.items[0].state).toBe("ready");
+    expect(d.items[0].evidence).toBeUndefined();
+  });
+
+  it("티켓 없는 항목의 self_reported 는 done 이되 evidence=self 로 구분된다", () => {
+    const it1 = item({
+      id: "y",
+      what: "사장님께 말씀드리기",
+      closed: {
+        kind: "self_reported",
+        reason: "텔레그램으로 전달",
+        at: 2,
+        by: "orch",
+      },
+    });
+    const d = deriveWorkChain([it1], {});
+    expect(d.items[0].state).toBe("done");
+    expect(d.items[0].evidence).toBe("self");
+  });
+
+  it("dropped 는 티켓 상태와 무관하게 dropped", () => {
+    const it1 = item({
+      id: "z",
+      what: "x",
+      taskIds: ["t1"],
+      closed: { kind: "dropped", reason: "범위 밖", at: 2, by: "orch" },
+    });
+    expect(deriveWorkChain([it1], { t1: "DONE" }).items[0].state).toBe(
+      "dropped",
+    );
+  });
+
+  it("보드에 없는 티켓은 missingTaskIds 로 드러난다(근거 사라짐)", () => {
+    const it1 = item({ id: "m", what: "x", taskIds: ["gone"] });
+    const d = deriveWorkChain([it1], { gone: null });
+    expect(d.items[0].state).toBe("ready");
+    expect(d.items[0].missingTaskIds).toEqual(["gone"]);
+  });
+
+  it("선행 체인 항목: 앞 항목이 done/dropped 여야 ready, 뒤 항목을 선행으로 건 역참조는 waiting", () => {
+    const a = item({ id: "a", what: "A", taskIds: ["ta"] });
+    const b = item({ id: "b", what: "B", afterItemIds: ["a"] });
+    const c = item({ id: "c", what: "C", afterItemIds: ["zzz"] }); // 뒤/없는 참조
+    const d1 = deriveWorkChain([a, b, c], { ta: "REVIEW" });
+    expect(d1.items.map((x) => x.state)).toEqual([
+      "ready",
+      "waiting",
+      "waiting",
+    ]);
+    expect(d1.next?.item.id).toBe("a");
+    const d2 = deriveWorkChain([a, b, c], { ta: "DONE" });
+    expect(d2.items.map((x) => x.state)).toEqual(["done", "ready", "waiting"]);
+    expect(d2.next?.item.id).toBe("b");
+  });
+
+  it("next 는 배열 순서상 첫 READY — 순서가 우선순위다", () => {
+    const items = [
+      item({ id: "w", what: "W", afterTaskIds: ["t"] }),
+      item({ id: "r1", what: "R1" }),
+      item({ id: "r2", what: "R2" }),
+    ];
+    expect(deriveWorkChain(items, { t: "TODO" }).next?.item.id).toBe("r1");
+  });
+});
+
+describe("rejectSelfReportReason — 자기보고 종료 거부 규칙", () => {
+  it("티켓이 연결돼 있으면 reason 이 있어도 거부한다", () => {
+    const r = rejectSelfReportReason(
+      item({ id: "a", what: "x", taskIds: ["t1"] }),
+      "확인했음",
+    );
+    expect(r).toMatch(/보드 상태/);
+    expect(r).toMatch(/t1/);
+  });
+  it("티켓이 없으면 reason 이 비면 거부, 있으면 허용", () => {
+    expect(rejectSelfReportReason(item({ id: "a", what: "x" }), "")).toMatch(
+      /근거/,
+    );
+    expect(
+      rejectSelfReportReason(item({ id: "a", what: "x" }), "전달 완료"),
+    ).toBeNull();
+  });
+});
+
+describe("validateNewItem / buildWorkChainItem", () => {
+  it("what 과 why 는 둘 다 필수다", () => {
+    expect(validateNewItem({ what: "", why: "y" })).toMatch(/what/);
+    expect(validateNewItem({ what: "x", why: "  " })).toMatch(/why/);
+    expect(validateNewItem({ what: "x", why: "y" })).toBeNull();
+  });
+  it("길이 상한", () => {
+    expect(validateNewItem({ what: "x".repeat(201), why: "y" })).toMatch(
+      /너무 길다/,
+    );
+  });
+  it("중복 id 는 한 번만, 공백은 걷어낸다", () => {
+    const b = buildWorkChainItem(
+      { what: " x ", why: " y ", taskIds: ["a", " a ", "b", ""] },
+      { id: "wc_1", now: 5, by: "orch" },
+    );
+    expect(b.what).toBe("x");
+    expect(b.taskIds).toEqual(["a", "b"]);
+    expect(b.doneWhen).toBe("done");
+    expect(b.createdAt).toBe(5);
+  });
+});
+
+describe("normalizeWorkChainItems — 손상/구버전 문서에 관대", () => {
+  it("필수 필드 없는 항목은 버리고 나머지는 기본값으로 채운다", () => {
+    const out = normalizeWorkChainItems([
+      { id: "ok", what: "fine" },
+      { id: "", what: "no id" },
+      { id: "x" },
+      "garbage",
+      {
+        id: "bad-done-when",
+        what: "w",
+        doneWhen: "banana",
+        closed: { kind: "weird" },
+      },
+    ]);
+    expect(out.map((i) => i.id)).toEqual(["ok", "bad-done-when"]);
+    expect(out[1].doneWhen).toBe("done");
+    expect(out[1].closed).toBeUndefined();
+    expect(out[0].afterTaskIds).toEqual([]);
+  });
+  it("배열이 아니면 빈 배열", () => {
+    expect(normalizeWorkChainItems(undefined)).toEqual([]);
+    expect(normalizeWorkChainItems({})).toEqual([]);
+  });
+});
+
+describe("insertItem / referencedTaskIds / id", () => {
+  it("position 없거나 범위 밖이면 끝, 범위 안이면 그 자리", () => {
+    const a = item({ id: "a", what: "A" });
+    const b = item({ id: "b", what: "B" });
+    const n = item({ id: "n", what: "N" });
+    expect(insertItem([a, b], n).map((i) => i.id)).toEqual(["a", "b", "n"]);
+    expect(insertItem([a, b], n, 0).map((i) => i.id)).toEqual(["n", "a", "b"]);
+    expect(insertItem([a, b], n, 9).map((i) => i.id)).toEqual(["a", "b", "n"]);
+  });
+  it("referencedTaskIds 는 선행+실체 티켓을 중복 없이", () => {
+    expect(
+      referencedTaskIds([
+        item({
+          id: "a",
+          what: "A",
+          afterTaskIds: ["t1"],
+          taskIds: ["t2", "t1"],
+        }),
+        item({ id: "b", what: "B", taskIds: ["t3"] }),
+      ]),
+    ).toEqual(["t1", "t2", "t3"]);
+  });
+  it("id 는 wc_ 접두 + 10자", () => {
+    expect(newWorkChainItemId(() => 0)).toBe("wc_aaaaaaaaaa");
+  });
+});
+
+describe("텍스트 렌더 — 오케가 읽는 형태", () => {
+  it("빈 체인은 적으라는 안내만", () => {
+    expect(formatWorkChain(deriveWorkChain([], {}))).toMatch(
+      /add_work_chain_item/,
+    );
+  });
+  it("▶ 다음 이 맨 위에 못 박히고, 근거 줄에 티켓 status 가 보인다", () => {
+    const items = [item({ id: "a", what: "마감", taskIds: ["t1"] })];
+    const out = formatWorkChain(deriveWorkChain(items, { t1: "REVIEW" }), {
+      taskStatuses: { t1: "REVIEW" },
+      taskTitles: { t1: "센트리" },
+    });
+    expect(out).toMatch(/▶ 다음: 마감/);
+    expect(out).toMatch(/evidence\(doneWhen=done\): 센트리 t1=REVIEW/);
+  });
+  it("SELF-REPORTED 는 글자로 드러난다", () => {
+    const items = [
+      item({
+        id: "a",
+        what: "말씀",
+        closed: { kind: "self_reported", reason: "전달", at: 1, by: "o" },
+      }),
+    ];
+    expect(
+      formatWorkChain(deriveWorkChain(items, {}), { includeClosed: true }),
+    ).toMatch(/SELF-REPORTED/);
+  });
+  it("footer 는 열린 항목이 있을 때만", () => {
+    expect(workChainFooter(deriveWorkChain([], {}))).toBe("");
+    expect(
+      workChainFooter(deriveWorkChain([item({ id: "a", what: "A" })], {})),
+    ).toMatch(/open=1 — 다음: A/);
+  });
+  it("nudge 는 이 티켓이 바꾼 항목만 말하고, 변화 없으면 조용하다", () => {
+    const items = [
+      item({ id: "a", what: "A", taskIds: ["t1"] }),
+      item({ id: "b", what: "B", taskIds: ["t2"] }),
+    ];
+    const before = deriveWorkChain(items, { t1: "REVIEW", t2: "REVIEW" });
+    const after = deriveWorkChain(items, { t1: "DONE", t2: "REVIEW" });
+    const n = workChainNudgeForTaskChange(before, after, "t1");
+    expect(n).toMatch(/'A' 완료/);
+    expect(n).not.toMatch(/'B'/);
+    expect(workChainNudgeForTaskChange(before, before, "t1")).toBe("");
+  });
+});
