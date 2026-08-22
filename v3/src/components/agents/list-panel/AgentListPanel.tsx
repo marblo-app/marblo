@@ -12,6 +12,7 @@ import { CloseConfirmModal } from "./CloseConfirmModal";
 import { VENDOR_VISUALS, type AgentRowData, type VendorKind } from "./types";
 import TerminalView from "../../terminal/TerminalView";
 import { findAgentPtySessionId } from "../../../lib/agentTerminal";
+import { resolveAgentVendorKind } from "../../../lib/agentVendorBadge";
 import {
   closePlanFor,
   neighborIdAfterClose,
@@ -124,7 +125,7 @@ export function AgentListPanel({
       const delta = startY - moveEvent.clientY;
       const newHeight = Math.min(
         MAX_HEIGHT,
-        Math.max(MIN_HEIGHT, startHeight + delta),
+        Math.max(MIN_HEIGHT, startHeight + delta)
       );
       setPanelHeight(newHeight);
     };
@@ -137,7 +138,7 @@ export function AgentListPanel({
       try {
         window.localStorage.setItem(
           HEIGHT_STORAGE_KEY,
-          String(panelHeightRef.current),
+          String(panelHeightRef.current)
         );
       } catch {
         // private mode / quota — ignore
@@ -154,7 +155,7 @@ export function AgentListPanel({
     terminalSpawnCounter++;
     try {
       const id = await createTerminalSession(
-        `Terminal ${terminalSpawnCounter}`,
+        `Terminal ${terminalSpawnCounter}`
       );
       setFocusedId(`terminal:${id}`);
     } catch (err) {
@@ -175,7 +176,7 @@ export function AgentListPanel({
   // directly above this one — don't double-render it as just another row.
   const realAgents = useMemo(
     () => agents.filter((a) => a.role !== "orchestrator"),
-    [agents],
+    [agents]
   );
 
   const rows = useMemo<AgentRowData[]>(() => {
@@ -186,13 +187,14 @@ export function AgentListPanel({
     // screens drift the day another attachSession label appears.
     const agentRows: AgentRowData[] = realAgents.map((a) => {
       const matchedId = findAgentPtySessionId(sessions, a.name);
-      // Firestore 에 들어온 model 값이 VENDOR_VISUALS 키에 없으면 (옛 값,
-      // 빈 문자열, 신규 모델 미등록 등) AgentRow 에서 vendor.stripeColor 가
-      // undefined 로 crash. 안전한 fallback 으로 "custom"(회색 X) 노출.
-      const vendor: VendorKind =
-        a.model && VENDOR_VISUALS[a.model as VendorKind]
-          ? (a.model as VendorKind)
-          : "custom";
+      // env-swap 벤더(GLM/MiniMax/DeepSeek/...)는 claude/gpt 하네스를 그대로
+      // 쓰므로 `a.model` 만 보면 전부 harness 로 보인다 — spawnedModel 을
+      // 레지스트리에 되물어 진짜 벤더를 가려낸다. 알 수 없으면 "custom"(회색
+      // X) 으로 안전하게 떨어진다(빈칸 금지).
+      const vendor: VendorKind = resolveAgentVendorKind(
+        a.model,
+        a.spawnedModel
+      );
       return {
         id: a.id,
         vendor,
@@ -230,7 +232,7 @@ export function AgentListPanel({
   // unmount) reproduces the "exact same screen" UX of Claude's /agents view.
   const rowsWithPty = useMemo(
     () => rows.filter((r) => !!r.ptySessionId),
-    [rows],
+    [rows]
   );
 
   const recent = useMemo(
@@ -240,19 +242,21 @@ export function AgentListPanel({
         .slice(0, 3)
         .map((a) => ({
           id: a.id,
-          vendor: VENDOR_VISUALS[a.model as VendorKind]?.label ?? a.model,
+          vendor:
+            VENDOR_VISUALS[resolveAgentVendorKind(a.model, a.spawnedModel)]
+              ?.label ?? a.model,
           ageLabel: formatAge(a.costUpdatedAt ?? a.createdAt),
         })),
-    [realAgents],
+    [realAgents]
   );
 
   const activeAgents = useMemo(
     () => realAgents.filter((a) => a.status !== "stopped"),
-    [realAgents],
+    [realAgents]
   );
   const stoppedAgents = useMemo(
     () => realAgents.filter((a) => a.status === "stopped"),
-    [realAgents],
+    [realAgents]
   );
 
   const setDeleting = useCallback((ids: string[], isDeleting: boolean) => {
@@ -276,7 +280,7 @@ export function AgentListPanel({
       const confirmed = window.confirm(
         row.status === "stopped"
           ? `Remove stopped agent "${row.displayName}"?`
-          : `Kill agent "${row.displayName}"?`,
+          : `Kill agent "${row.displayName}"?`
       );
       if (!confirmed) return;
 
@@ -296,7 +300,7 @@ export function AgentListPanel({
         setDeleting([row.id], false);
       }
     },
-    [deleteAgent, focusedId, setDeleting, setFocusedId, stopAgent],
+    [deleteAgent, focusedId, setDeleting, setFocusedId, stopAgent]
   );
 
   const setClosing = useCallback((id: string, isClosing: boolean) => {
@@ -363,7 +367,7 @@ export function AgentListPanel({
       rows,
       setClosing,
       setFocusedId,
-    ],
+    ]
   );
 
   /**
@@ -379,7 +383,7 @@ export function AgentListPanel({
       }
       void performClose(row);
     },
-    [closingIds, performClose],
+    [closingIds, performClose]
   );
 
   const handleConfirmClose = useCallback(() => {
@@ -394,7 +398,7 @@ export function AgentListPanel({
     const confirmed = window.confirm(
       `Kill ${activeAgents.length} active agent${
         activeAgents.length === 1 ? "" : "s"
-      }?`,
+      }?`
     );
     if (!confirmed) return;
 
@@ -417,7 +421,7 @@ export function AgentListPanel({
     const confirmed = window.confirm(
       `Remove ${stoppedAgents.length} stopped agent${
         stoppedAgents.length === 1 ? "" : "s"
-      }?`,
+      }?`
     );
     if (!confirmed) return;
 
@@ -501,7 +505,7 @@ export function AgentListPanel({
         if (id) setFocusedId(id);
       }
     },
-    [rows, highlightedId, setFocusedId],
+    [rows, highlightedId, setFocusedId]
   );
 
   const focusedIndex = focusedId
@@ -543,7 +547,7 @@ export function AgentListPanel({
         onJumpToAgent(row.id);
       }
     },
-    [requestJump, onJumpToAgent],
+    [requestJump, onJumpToAgent]
   );
 
   const handleStartFocused = useCallback(
@@ -557,14 +561,14 @@ export function AgentListPanel({
         setStartingId(null);
       }
     },
-    [restartAgent],
+    [restartAgent]
   );
 
   const handleRename = useCallback(
     async (id: string, newName: string) => {
       await updateAgent(id, { name: newName });
     },
-    [updateAgent],
+    [updateAgent]
   );
 
   return (
