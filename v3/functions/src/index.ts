@@ -67,6 +67,7 @@ import {
   buildOnboardingFunnel,
   ONBOARDING_FUNNEL_STEPS,
   ONBOARDING_FAILURE_EVENTS,
+  type FunnelCoverageRow,
   buildKpiCockpit,
   buildCliSetupSummary,
   buildReleaseHealth,
@@ -9214,6 +9215,59 @@ export const getAdminOnboardingFunnel = functions
       ORDER BY n DESC
     `;
 
+    // ── ★단계별 신호 커버리지 (ticket 4KqBDPkH) ───────────────────────────
+    // 위 퍼널 쿼리는 "순차 체인을 통과한 사람" 만 센다. 그 값이 0 일 때 그게
+    // "안 했다" 인지 "창 앞부분엔 신호가 없었다" 인지 화면이 구분할 근거가 없었다 —
+    // 그래서 첫대화 0 · 첫티켓 0 · 스폰 2 라는 자기모순이 그려졌다.
+    //
+    // ★이 쿼리는 값을 고치지 않는다(소급 보정 금지). 이벤트별로
+    //   (a) 전기간 최초 관측일  (b) 조회창 안 실제 발생 설치 수
+    // 만 읽어 온다. 둘 다 BigQuery 원값이고, 화면은 이걸로 `0` 과 '미수집' 과
+    // '부분 구간' 을 가른다.
+    //
+    // ★(a)는 조회창을 안 건다 — "전기간 한 번도 없었나" 를 물어야 하기 때문이다.
+    //   events 는 timestamp 파티션 테이블이라 풀스캔이 되지만, 대상 이벤트가
+    //   상수 IN 목록으로 좁혀져 있고 하루 한 번 보는 어드민 화면이라 감수한다.
+    const coverageQuery = `
+      WITH first_seen AS (
+        SELECT event, MIN(DATE(${eventTs})) AS first_seen_day
+        FROM ${eventsTable}
+        WHERE event IN (${inList})${ex.clause}
+        GROUP BY event
+      ),
+      in_window AS (
+        SELECT
+          event,
+          COUNT(DISTINCT COALESCE(
+            NULLIF(JSON_VALUE(metadata, '$.accountUserId'), ''),
+            userId
+          )) AS clients_in_window
+        FROM ${eventsTable}
+        WHERE ${eventTs} >= ${since}
+          AND event IN (${inList})
+          AND userId IS NOT NULL${ex.clause}
+        GROUP BY event
+      )
+      SELECT
+        f.event AS event,
+        FORMAT_DATE('%F', f.first_seen_day) AS first_seen_day,
+        COALESCE(w.clients_in_window, 0) AS clients_in_window
+      FROM first_seen f
+      LEFT JOIN in_window w USING (event)
+    `;
+
+    // ★운영자 제외가 **실제로 걸리는 행이 남아 있는지** 를 센다.
+    //   adminEventExclusion() 은 metadata.accountUserId 로만 거르는데, 계정축
+    //   은퇴 이후 row 에는 그 필드가 없다 — 즉 절은 통과하고 아무도 안 빠진다.
+    //   그런데 응답은 applied=true 를 그대로 내려보내고 있어서, 화면은 "운영자가
+    //   빠졌다" 고 믿는다. 실측값을 같이 내려보내 그 믿음을 검증 가능하게 한다.
+    const adminMatchableQuery = `
+      SELECT COUNT(*) AS n
+      FROM ${eventsTable}
+      WHERE ${eventTs} >= ${since}
+        AND NULLIF(JSON_VALUE(metadata, '$.accountUserId'), '') IS NOT NULL
+    `;
+
     const queryResults = await runAdminAnalyticsQueriesWithStatus([
       {
         name: "onboarding.funnel",
@@ -9224,6 +9278,16 @@ export const getAdminOnboardingFunnel = functions
         name: "onboarding.failureReasons",
         query: reasonQuery,
         params: { days: rangeDays, ...failureParams, ...ex.params },
+      },
+      {
+        name: "onboarding.coverage",
+        query: coverageQuery,
+        params: { days: rangeDays, ...eventParams, ...ex.params },
+      },
+      {
+        name: "onboarding.adminMatchable",
+        query: adminMatchableQuery,
+        params: { days: rangeDays },
       },
     ]);
     const funnelResult = queryResults[0] ?? {
@@ -9243,10 +9307,47 @@ export const getAdminOnboardingFunnel = functions
         error: result.error ?? "unknown query failure",
       }));
 
+    const coverageResult = queryResults[2] ?? {
+      name: "onboarding.coverage",
+      rows: [],
+      error: "missing query result",
+    };
+    const matchableResult = queryResults[3] ?? {
+      name: "onboarding.adminMatchable",
+      rows: [],
+      error: "missing query result",
+    };
+
+    // ★커버리지 쿼리가 실패했으면 빈 배열이 아니라 undefined 를 넘긴다.
+    //   빈 배열은 "전 이벤트 전기간 0건" 과 같은 뜻이 되어 화면이 통째로
+    //   '미수집' 이 된다 — 조회 실패를 신호 공백으로 둔갑시키는 짓이다.
+    const coverageRows =
+      coverageResult.error == null
+        ? (coverageResult.rows as unknown as FunnelCoverageRow[])
+        : undefined;
+    const windowStartDay =
+      coverageRows != null
+        ? new Date(Date.now() - rangeDays * 86400000)
+            .toISOString()
+            .slice(0, 10)
+        : null;
+
     const funnel = buildOnboardingFunnel(
       funnelResult.rows[0] as Record<string, unknown> | undefined,
-      reasonResult.rows as ReasonRow[]
+      reasonResult.rows as ReasonRow[],
+      coverageRows,
+      windowStartDay
     );
+
+    // 조회창 안에 accountUserId 가 남아 있는 행 수. 0 이면 제외절이 걸릴 대상이
+    // 아예 없다는 뜻 = 운영자가 사실상 안 빠진다.
+    const adminMatchableRows =
+      matchableResult.error == null
+        ? toNumber(
+            (matchableResult.rows[0] as Record<string, unknown> | undefined)
+              ?.n as number | string | undefined
+          )
+        : null;
 
     return {
       rangeDays,
@@ -9256,6 +9357,9 @@ export const getAdminOnboardingFunnel = functions
         uidFiltered: getAdminExclusionUid() != null,
         // 익명 세계 자기제외 은퇴(U5OPOKf0D3I2TSRP8yUq) — 항상 0.
         clientIdCount: 0,
+        // ★제외절이 걸릴 수 있는 행 수(실측). null=측정 실패.
+        //   0 이면 applied=true 라도 실제로는 아무도 안 빠진 것이다.
+        matchableRows: adminMatchableRows,
       },
       queryStatus: {
         ok: queryErrors.length === 0,
@@ -13500,6 +13604,47 @@ export const getAdminInstallRetentionSummary = functions
       personAxis,
     };
   });
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★어드민 콜러블 매니페스트 (ticket 4KqBDPkH)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// 왜 필요한가 — 어드민 화면이 **아직 구현되지 않은 콜러블**을 부르면, 화면은
+// '연결 전'(회색, 상태) 이 아니라 **빨간 내부 오류**를 그린다. 실측한 이유:
+//
+//   $ curl -X OPTIONS https://us-central1-marblo-2253d.cloudfunctions.net/
+//           getAdminUserDailySummary -H "Origin: https://marblo.app" ...
+//     HTTP/2 404, content-type: text/html, **Access-Control-Allow-Origin 없음**
+//
+// 미배포 함수의 404 는 Google Frontend 가 내는 HTML 이라 CORS 헤더가 없다.
+// 브라우저는 preflight 에서 응답을 통째로 차단하고 fetch 가 TypeError 로 끝난다.
+// firebase-js-sdk 는 그걸 status 0 으로 보고 `functions/internal` 로 매핑한다 —
+// 그래서 프론트의 `err.code === "functions/not-found"` 가드는 **브라우저에서는
+// 절대 참이 될 수 없다.** 가드가 있는데 죽어 있었다.
+//
+// ★고치는 방향: 클라가 에러 코드로 추측하게 두지 않고, **서버가 자기가 무엇을
+//   갖고 있는지 말한다.** 없는 함수를 부르는 대신, 매니페스트에 없으면 아예
+//   부르지 않고 '연결 전' 으로 접는다. 에러 코드 문자열 매칭 같은 SDK 내부 구현에
+//   기대지 않으므로 SDK 판올림에도 안 깨진다.
+//
+// ★목록은 하드코딩하지 않는다. CommonJS 로 컴파일되므로 이 모듈이 실제로
+//   내보낸 심볼(module.exports)을 실행 시점에 읽으면 드리프트가 원천 봉쇄된다 —
+//   "문서에는 있는데 구현이 없다"(= 지금 getAdminUserDailySummary 의 상태)가
+//   화면에 그대로 드러난다.
+export const getAdminCallableManifest = functions.https.onCall(
+  async (_data, context) => {
+    requireAdmin(context);
+    const exported = module.exports as Record<string, unknown>;
+    const callables = Object.keys(exported)
+      .filter((name) => name.startsWith("getAdmin"))
+      .sort();
+    return {
+      generatedAt: new Date().toISOString(),
+      // 이 배포본이 실제로 갖고 있는 어드민 콜러블 이름들.
+      callables,
+    };
+  }
+);
 
 // ════════════════════════════════════════════════════════════════════════════
 // 어드민 프로젝트 감사 (읽기 전용) — marblo.app/admin "프로젝트 감사" 탭

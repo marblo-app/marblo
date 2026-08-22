@@ -13,6 +13,8 @@ import {
   coerceNumber,
   buildOnboardingFunnel,
   buildActivationHeadline,
+  buildFunnelCoverageMap,
+  classifyStepCoverage,
   ONBOARDING_FUNNEL_STEPS,
   ONBOARDING_FAILURE_EVENTS,
   safeRate,
@@ -1967,4 +1969,166 @@ test("an active unit is never flagged as a zombie even with idle heartbeats", ()
   });
   assert.equal(res.units[0].zombie, false);
   assert.equal(res.unitsZombie, 0);
+});
+
+// ── ★단계별 계측 커버리지 (ticket 4KqBDPkH) ────────────────────────────────
+// 회귀 대상: 사장님 화면의 "첫 대화 0 / 첫 티켓 0 / 에이전트 스폰 2".
+// 실측상 이벤트는 있었고(30일 창 안 4설치·3설치), 0 이 나온 건 그 계측이
+// 조회창 도중에 처음 생겼기 때문이다. 값은 그대로 두되 **그 0 이 무슨 0 인지**를
+// 화면이 알 수 있어야 한다.
+
+test("coverage: 전기간 0건 이벤트는 맵에 안 들어가고 'missing' 으로 판정된다", () => {
+  const map = buildFunnelCoverageMap([
+    { event: "app:first_run", first_seen_day: "2026-04-18", clients_in_window: 7 },
+  ]);
+  // app:installed 는 전기간 0건 → 행 자체가 없다.
+  assert.equal(map.has("app:installed"), false);
+  assert.equal(classifyStepCoverage(map.get("app:installed"), "2026-07-23"), "missing");
+});
+
+test("coverage: 최초 발신일이 조회창 시작보다 늦으면 'partial'", () => {
+  const map = buildFunnelCoverageMap([
+    {
+      event: "onboarding:first_conversation",
+      first_seen_day: "2026-08-10",
+      clients_in_window: 4,
+    },
+  ]);
+  const cov = map.get("onboarding:first_conversation");
+  assert.equal(classifyStepCoverage(cov, "2026-07-23"), "partial");
+  // 창이 계측 이후로 좁혀지면 더 이상 partial 이 아니다.
+  assert.equal(classifyStepCoverage(cov, "2026-08-15"), "ok");
+  // 같은 날 시작이면 창 전체가 덮이므로 ok.
+  assert.equal(classifyStepCoverage(cov, "2026-08-10"), "ok");
+});
+
+test("coverage: 창 시작일을 모르면 partial 딱지를 붙이지 않는다", () => {
+  const map = buildFunnelCoverageMap([
+    { event: "e", first_seen_day: "2026-08-10", clients_in_window: 1 },
+  ]);
+  assert.equal(classifyStepCoverage(map.get("e"), null), "ok");
+});
+
+test("coverage: 날짜 형식이 아닌 first_seen_day 행은 신호로 치지 않는다", () => {
+  const map = buildFunnelCoverageMap([
+    { event: "e1", first_seen_day: null, clients_in_window: 9 },
+    { event: "e2", first_seen_day: "not-a-date", clients_in_window: 9 },
+    { event: "", first_seen_day: "2026-08-10", clients_in_window: 9 },
+  ]);
+  assert.equal(map.size, 0);
+});
+
+test("★funnel: 커버리지를 안 주면 예전과 똑같이 동작한다(회귀 방지)", () => {
+  const f = buildOnboardingFunnel({ d_first_run: 7 }, []);
+  for (const s of f.steps) {
+    assert.equal(s.coverage, "ok");
+    assert.equal(s.firstObservedDay, null);
+    assert.equal(s.everInWindow, null);
+  }
+  assert.equal(f.headline.everActivatedInWindow, null);
+});
+
+test("★funnel: 사장님 화면 재현 — 첫대화 0 은 '안 했다'가 아니라 '부분 계측'이다", () => {
+  // BQ 실측(2026-08-22, 30일 창, 운영자 제외절 적용)을 그대로 넣는다.
+  const row = {
+    d_install: 7,
+    d_first_run: 7,
+    d_login_attempt: 5,
+    d_login_success: 5,
+    d_folder_connected: 2,
+    d_orchestrator_opened: 2,
+    d_first_conversation: 0,
+    d_first_ticket: 0,
+    d_agent_spawned: 2,
+    n_agent_spawned: 2452,
+    d_task_completed: 0,
+    d_signup_base: 5,
+    d_activated_30m: 0,
+  };
+  const coverage = [
+    { event: "app:first_run", first_seen_day: "2026-04-18", clients_in_window: 7 },
+    { event: "auth:login_attempt", first_seen_day: "2026-04-19", clients_in_window: 5 },
+    { event: "auth:login_success", first_seen_day: "2026-04-19", clients_in_window: 5 },
+    {
+      event: "onboarding:folder_connected",
+      first_seen_day: "2026-04-19",
+      clients_in_window: 6,
+    },
+    {
+      event: "onboarding:orchestrator_opened",
+      first_seen_day: "2026-04-19",
+      clients_in_window: 7,
+    },
+    {
+      event: "onboarding:first_conversation",
+      first_seen_day: "2026-08-10",
+      clients_in_window: 4,
+    },
+    {
+      event: "onboarding:first_ticket",
+      first_seen_day: "2026-08-09",
+      clients_in_window: 3,
+    },
+    { event: "agent:spawned", first_seen_day: "2026-04-18", clients_in_window: 6 },
+    { event: "task:completed", first_seen_day: "2026-06-17", clients_in_window: 2 },
+    { event: "session:started", first_seen_day: "2026-04-19", clients_in_window: 10 },
+  ];
+  const f = buildOnboardingFunnel(row, [], coverage, "2026-07-23");
+  const byKey = new Map(f.steps.map((s) => [s.key, s]));
+
+  // ★핵심: 값은 그대로 0 이지만(소급 보정 금지), 상태가 붙는다.
+  const conv = byKey.get("first_conversation")!;
+  assert.equal(conv.clients, 0);
+  assert.equal(conv.coverage, "partial");
+  assert.equal(conv.firstObservedDay, "2026-08-10");
+  assert.equal(conv.everInWindow, 4); // ← 화면이 "실제로는 4설치" 라고 말할 근거
+
+  const ticket = byKey.get("first_ticket")!;
+  assert.equal(ticket.coverage, "partial");
+  assert.equal(ticket.everInWindow, 3);
+
+  // ★전기간 0건인 칸은 'missing' — 화면은 숫자가 아니라 '미수집' 을 그린다.
+  assert.equal(byKey.get("install")!.coverage, "missing");
+
+  // 계측이 창 전체를 덮는 칸은 손대지 않는다.
+  assert.equal(byKey.get("agent_spawned")!.coverage, "ok");
+  assert.equal(byKey.get("agent_spawned")!.clients, 2);
+
+  // ★활성화율 0/5 는 그대로 두되, 같은 창의 실측 완료 설치 수를 함께 싣는다.
+  assert.equal(f.headline.activatedClients, 0);
+  assert.equal(f.headline.baseClients, 5);
+  assert.equal(f.headline.rate, 0);
+  assert.equal(f.headline.everActivatedInWindow, 2);
+});
+
+test("★funnel: 계측 공백 칸은 최대 이탈 구간으로 붉게 칠하지 않는다", () => {
+  // install(전기간 0건) 이 0 이고 first_run 이 20 인 억지 상황을 만들어도,
+  // 'missing' 칸은 절벽 후보에서 빠져야 한다.
+  const row = {
+    d_install: 0,
+    d_first_run: 20,
+    d_login_attempt: 20,
+    d_login_success: 4,
+  };
+  const f = buildOnboardingFunnel(
+    row,
+    [],
+    [
+      { event: "app:first_run", first_seen_day: "2026-01-01", clients_in_window: 20 },
+      { event: "auth:login_attempt", first_seen_day: "2026-01-01", clients_in_window: 20 },
+      { event: "auth:login_success", first_seen_day: "2026-01-01", clients_in_window: 4 },
+    ],
+    "2026-07-23",
+  );
+  const byKey = new Map(f.steps.map((s) => [s.key, s]));
+  assert.equal(byKey.get("install")!.coverage, "missing");
+  assert.equal(byKey.get("install")!.isMaxDrop, false);
+  // 진짜 절벽(20 → 4)만 표시된다.
+  assert.equal(byKey.get("login_success")!.isMaxDrop, true);
+});
+
+test("coverage: note 가 '미수집/부분 계측' 규약을 실제로 말한다", () => {
+  const f = buildOnboardingFunnel(undefined, []);
+  assert.ok(f.note.includes("미수집"));
+  assert.ok(f.note.includes("부분 구간"));
 });

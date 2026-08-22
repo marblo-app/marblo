@@ -321,6 +321,88 @@ export type ReasonRow = {
   clients: unknown;
 };
 
+// ════════════════════════════════════════════════════════════════════════════
+// ★단계별 계측 커버리지 (ticket 4KqBDPkH)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// 사장님 화면이 "첫 대화 0명 / 첫 티켓 0명 / 에이전트 스폰 2명" 을 동시에 띄웠다.
+// 실측해 보니 이벤트는 **있었다**(30일 창 안 first_conversation 4설치 ·
+// first_ticket 3설치). 0 이 나온 이유는 두 칸의 판정식이
+//   reached_orchestrator_opened AND ts BETWEEN orch_ts AND login_success_ts+24h
+// 라서, 그 계측이 처음 생긴 날(2026-08-09 / 08-10)보다 **먼저 로그인한 설치**는
+// 구조적으로 창 밖이기 때문이다. 즉 "안 했다"가 아니라 "이 정의로는 셀 수 없다".
+//
+// ★그래서 값을 고치지 않는다(소급 보정 금지). 대신 **그 0 이 무슨 0 인지**를
+//   같이 내려보낸다. 화면은 이 커버리지를 보고 `0` 대신 '미수집'/'부분 계측'을
+//   그린다 — 0·미수집·적재 전을 가르는 이 화면의 기존 규약과 같은 규율이다.
+//
+//   missing — 그 이벤트가 **전기간 한 번도** BQ 에 없다(앱이 안 보낸다).
+//             실측: app:installed / onboarding:agent_needs_auth /
+//             onboarding:funding_guide_shown 셋이 여기 해당한다.
+//   partial — 이벤트는 있는데 **최초 발신일이 조회창 시작보다 늦다**(forward-only).
+//             창의 앞부분은 계측이 아예 없던 구간이라 0 이 "안 했다"가 아니다.
+//   ok      — 조회창 전체를 덮는 계측이다.
+export type StepCoverage = "ok" | "partial" | "missing";
+
+/** 커버리지 입력 1행 — BQ 가 이벤트별로 뽑아 준다. */
+export type FunnelCoverageRow = {
+  event: unknown;
+  /** 그 이벤트의 **전기간** 최초 발신일(YYYY-MM-DD). 한 번도 없으면 행 자체가 없다. */
+  first_seen_day: unknown;
+  /** 조회창 안에서 그 이벤트를 낸 고유 identity 수(순차 체인 무시, 있는 그대로). */
+  clients_in_window: unknown;
+};
+
+/** 커버리지 맵 1건 — 이벤트명 → (최초 관측일, 창 안 실제 설치 수). */
+export type FunnelCoverage = {
+  /** 항상 실제 날짜다 — 최초 관측일이 없는 이벤트는 맵에 아예 안 들어간다. */
+  firstSeenDay: string;
+  clientsInWindow: number;
+};
+
+/** YYYY-MM-DD 문자열만 통과시킨다(BQ DATE 는 문자열로 온다). */
+function asDayString(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+}
+
+/**
+ * 커버리지 rows → 이벤트명 맵. 행이 없는 이벤트는 맵에도 없다(= missing 판정).
+ */
+export function buildFunnelCoverageMap(
+  rows: readonly FunnelCoverageRow[] | undefined | null,
+): Map<string, FunnelCoverage> {
+  const map = new Map<string, FunnelCoverage>();
+  for (const r of rows ?? []) {
+    const ev = typeof r.event === "string" ? r.event : "";
+    if (ev === "") continue;
+    const firstSeenDay = asDayString(r.first_seen_day);
+    // ★전기간 최초 관측일이 없으면 그 행은 신호가 아니다 — 넣지 않는다.
+    if (firstSeenDay == null) continue;
+    map.set(ev, {
+      firstSeenDay,
+      clientsInWindow: coerceNumber(r.clients_in_window),
+    });
+  }
+  return map;
+}
+
+/**
+ * 한 단계의 계측 커버리지 판정(순수).
+ *
+ * @param cov          그 단계 이벤트의 커버리지(없으면 전기간 0건 = missing)
+ * @param windowStartDay 조회창 시작일(YYYY-MM-DD). 없으면 partial 판정을 포기하고
+ *                     ok 로 둔다 — 근거 없이 '부분 계측' 딱지를 붙이지 않는다.
+ */
+export function classifyStepCoverage(
+  cov: FunnelCoverage | undefined,
+  windowStartDay: string | null,
+): StepCoverage {
+  if (cov == null) return "missing";
+  if (windowStartDay == null) return "ok";
+  return cov.firstSeenDay > windowStartDay ? "partial" : "ok";
+}
+
 export type FunnelStep = {
   key: OnboardingStepKey;
   event: string;
@@ -337,6 +419,24 @@ export type FunnelStep = {
   /** 최초 단계(install) 대비 누적 전환율. 분모 0 이면 null. */
   conversionFromStart: number | null;
   isMaxDrop: boolean; // 최대 이탈 구간 표시(★22→6 같은 지점)
+  /**
+   * ★이 칸의 `clients` 를 믿어도 되는가. 'missing' 이면 화면은 숫자가 아니라
+   * '미수집' 을 그려야 한다 — 0 으로 그리면 계측 공백이 제품 실패로 읽힌다.
+   * 구버전 응답에는 없으므로 프론트는 optional 로 읽는다.
+   */
+  coverage: StepCoverage;
+  /**
+   * 그 이벤트가 **전기간 처음 관측된 날**(YYYY-MM-DD). 전기간 0건이면 null.
+   * ★'계측이 생긴 날' 이라고 단정하지 않는다 — BQ 는 관측만 안다.
+   */
+  firstObservedDay: string | null;
+  /**
+   * 순차 체인을 **무시하고** 조회창 안에 그 이벤트를 낸 고유 설치 수.
+   * ★추정이 아니라 실측이다. `clients`(순차 도달)와 크게 벌어지면 그 0 은
+   * "안 했다"가 아니라 "이 정의로 못 센다"는 뜻이고, 화면이 그렇게 말해야 한다.
+   * 전기간 0건(missing)이면 null.
+   */
+  everInWindow: number | null;
 };
 
 export type FailureBranch = {
@@ -359,6 +459,17 @@ export type ActivationHeadline = {
   rate: number | null; // activated / base (base=0 이면 null)
   windowMinutes: number; // 시간창(분). 기본 1440(24h)
   label: string;
+  /**
+   * ★순차 정의를 무시하고 조회창 안에서 `task:completed` 를 실제로 낸 고유 설치 수.
+   *
+   * 이 칸이 있는 이유: 사장님 화면의 `0.0% (0/5)` 는 **정의 안에서는 사실**이지만
+   * ("30일 안에 새로 로그인한 5명 중 24h 안에 첫 티켓을 완료한 사람 0명"),
+   * 같은 창 안에 티켓을 실제로 완료한 설치는 2개 있었다 — 그 둘은 로그인이 창
+   * 밖이라 분모에 없다. 이 값이 없으면 화면의 0% 가 "아무도 제품을 완주하지
+   * 않았다"로 읽히고, 그건 거짓이다. 실측값이지 추정이 아니다.
+   * 커버리지 정보가 없는(구버전) 경로에서는 null.
+   */
+  everActivatedInWindow: number | null;
 };
 
 export type OnboardingFunnelResult = {
@@ -372,6 +483,7 @@ export type OnboardingFunnelResult = {
 export function buildActivationHeadline(
   row: FunnelCountsRow | undefined | null,
   windowMinutes = 24 * 60,
+  everActivatedInWindow: number | null = null,
 ): ActivationHeadline {
   const safeRow = row ?? {};
   const activatedClients = coerceNumber(safeRow["d_activated_30m"]);
@@ -380,6 +492,7 @@ export function buildActivationHeadline(
     activatedClients,
     baseClients,
     rate: baseClients > 0 ? activatedClients / baseClients : null,
+    everActivatedInWindow,
     windowMinutes,
     label:
       windowMinutes % 60 === 0
@@ -406,22 +519,44 @@ function failureEvents(row: FunnelCountsRow, col: string): number {
   return coerceNumber(row[`n_${col}`]);
 }
 
+/**
+ * @param coverageRows   이벤트별 (전기간 최초 발신일, 창 안 실제 설치 수). 빈 배열이면
+ *                       모든 단계가 'missing' 이 되어 화면이 통째로 '미수집' 이 된다 —
+ *                       그래서 index.ts 는 이 쿼리가 **실패했을 때** 아예 undefined 를
+ *                       넘겨 커버리지 판정을 포기한다(아래 hasCoverage 참조).
+ * @param windowStartDay 조회창 시작일(YYYY-MM-DD). null 이면 partial 판정을 포기한다.
+ */
 export function buildOnboardingFunnel(
   row: FunnelCountsRow | undefined | null,
   reasonRows: ReasonRow[] = [],
+  coverageRows?: readonly FunnelCoverageRow[] | null,
+  windowStartDay: string | null = null,
 ): OnboardingFunnelResult {
   const safeRow = row ?? {};
 
+  // ★커버리지 쿼리가 아예 안 왔으면(구버전 호출·쿼리 실패) 판정을 하지 않는다.
+  //   근거 없이 전 칸에 '미수집' 딱지를 붙이면 그것대로 거짓말이다.
+  const hasCoverage = coverageRows != null;
+  const coverageMap = buildFunnelCoverageMap(coverageRows);
+
   // 1) 단계 reach(본선 + 스폰이후 활성화).
-  const base = ONBOARDING_FUNNEL_STEPS.map((s) => ({
-    key: s.key,
-    event: s.event,
-    label: s.label,
-    kind: s.kind,
-    gating: s.gating,
-    clients: stepClients(safeRow, s.key),
-    events: stepEvents(safeRow, s.key),
-  }));
+  const base = ONBOARDING_FUNNEL_STEPS.map((s) => {
+    const cov = coverageMap.get(s.event);
+    return {
+      key: s.key,
+      event: s.event,
+      label: s.label,
+      kind: s.kind,
+      gating: s.gating,
+      clients: stepClients(safeRow, s.key),
+      events: stepEvents(safeRow, s.key),
+      coverage: hasCoverage
+        ? classifyStepCoverage(cov, windowStartDay)
+        : ("ok" as StepCoverage),
+      firstObservedDay: cov?.firstSeenDay ?? null,
+      everInWindow: cov?.clientsInWindow ?? null,
+    };
+  });
 
   // 2) 이탈·전환(음수는 0 으로 clamp — 비단조 정상, §비단조 주석).
   // ★기준선은 "배열의 직전 칸"이 아니라 "직전 **gating** 칸"이다. 계측 공백이나
@@ -451,7 +586,14 @@ export function buildOnboardingFunnel(
     }
     const drop = Math.max(0, prev.clients - s.clients);
     const rate = prev.clients > 0 ? drop / prev.clients : null;
-    if (drop > maxDrop && s.kind === "reach" && s.gating) {
+    // ★계측이 통째로 없는 칸(coverage='missing')은 최대 이탈 후보에서 뺀다.
+    //   그 칸의 0 은 이탈이 아니라 계측 공백이라, 붉게 칠하면 없는 절벽을 만든다.
+    if (
+      drop > maxDrop &&
+      s.kind === "reach" &&
+      s.gating &&
+      s.coverage !== "missing"
+    ) {
       maxDrop = drop;
       maxDropIdx = i;
     }
@@ -504,7 +646,12 @@ export function buildOnboardingFunnel(
   return {
     steps,
     failureBranches,
-    headline: buildActivationHeadline(safeRow),
+    headline: buildActivationHeadline(
+      safeRow,
+      undefined,
+      // 헤드라인 분자와 같은 이벤트(task:completed)의 창 안 실측 설치 수.
+      coverageMap.get("task:completed")?.clientsInWindow ?? null,
+    ),
     note:
       "순차 퍼널 기준: 각 단계는 앞 단계 도달자의 부분집합이다. 신규 row 는 " +
       "accountUserId 기준으로 dedup 하고, 과거 row 는 BigQuery events.userId 에 남은 " +
@@ -520,7 +667,15 @@ export function buildOnboardingFunnel(
       "24h 가 아니라 7일 창이다. 이 세 칸은 gating=false — 화면에는 보이되 뒤 단계의 " +
       "이탈률 기준선이 되지 않는다(계측 공백이 제품 실패로 둔갑하지 않게). 이탈률/전환율은 " +
       "직전 gating 단계 대비값이다. needsAuth·authedButUnfunded 는 전진 단계가 아니라 " +
-      "실패 분기로 집계한다(같은 이벤트를 온보딩 스톨 요약과 공유).",
+      "실패 분기로 집계한다(같은 이벤트를 온보딩 스톨 요약과 공유). " +
+      "★각 칸에는 신호 커버리지가 붙는다(ticket 4KqBDPkH): '미수집' = 그 이벤트가 " +
+      "전기간 한 번도 관측된 적이 없다, '부분 구간' = 처음 관측된 날이 조회창 시작보다 " +
+      "늦어 창 앞부분에는 신호가 아예 없다. 이 두 경우의 0 은 '안 했다'가 아니므로 " +
+      "화면이 숫자 대신 그 상태를 그린다. '부분 구간' 칸에는 순차 체인을 무시한 창 안 " +
+      "실측 설치 수(everInWindow)를 함께 싣는다 — 추정이 아니라 BigQuery 원값이며, " +
+      "순차 도달 수와 크게 벌어지면 그 0 은 정의의 한계지 제품 실패가 아니다. " +
+      "★단, BQ 가 아는 것은 '언제 처음 관측됐나' 뿐이다 — 계측이 늦게 생긴 것인지 " +
+      "그때까지 아무도 안 한 것인지는 이 축만으로 가르지 못한다.",
   };
 }
 

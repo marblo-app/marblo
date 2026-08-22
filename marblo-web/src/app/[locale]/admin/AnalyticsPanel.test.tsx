@@ -12,7 +12,11 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { RetentionCohorts } from "./AnalyticsPanel";
+import type {
+  RetentionCohorts,
+  OnboardingFunnel,
+  OnboardingFunnelStep,
+} from "./AnalyticsPanel";
 
 type PanelModule = typeof import("./AnalyticsPanel");
 let P: PanelModule;
@@ -802,4 +806,223 @@ test("★계정 성격 미분류는 매출로 승격되지 않고 따로 세어�
 
 test("콜러블 이름 계약이 백엔드와 같다", () => {
   assert.equal(P.CALLABLE_PURCHASE_SUMMARY, "getAdminPurchaseSummary");
+});
+
+
+// ── ★퍼널 계측 커버리지 (ticket 4KqBDPkH) ──────────────────────────────────
+// 회귀 대상: 사장님 화면이 "첫 대화 0명 / 첫 티켓 0명 / 에이전트 스폰 2명" 을
+// 한 화면에서 동시에 보여줬다. BQ 실측상 첫대화 이벤트는 30일 창 안에 4설치가
+// 냈고, 0 은 순차 정의(로그인 성공 +24h 창) 밖이라 버려진 결과였다. 값을 고치는
+// 대신 **그 0 이 무슨 0 인지**를 화면이 말해야 한다.
+
+function funnelStep(
+  over: Partial<OnboardingFunnelStep> &
+    Pick<OnboardingFunnelStep, "key" | "event" | "label">
+): OnboardingFunnelStep {
+  return {
+    kind: "reach",
+    gating: true,
+    clients: 0,
+    events: 0,
+    dropFromPrev: null,
+    dropRateFromPrev: null,
+    isMaxDrop: false,
+    ...over,
+  };
+}
+
+function funnelFixture(
+  steps: OnboardingFunnelStep[],
+  over: Partial<OnboardingFunnel> = {}
+): OnboardingFunnel {
+  return {
+    rangeDays: 30,
+    generatedAt: "2026-08-22T00:00:00.000Z",
+    steps,
+    failureBranches: [],
+    note: "테스트 픽스처",
+    ...over,
+  };
+}
+
+test("★계측이 전기간 0건인 칸은 '0명' 이 아니라 '미수집' 으로 그린다", () => {
+  const html = renderToStaticMarkup(
+    <P.OnboardingFunnelView
+      funnel={funnelFixture([
+        funnelStep({
+          key: "install",
+          event: "app:installed",
+          label: "설치(최초 실행 대체 신호)",
+          clients: 0,
+          coverage: "missing",
+          firstObservedDay: null,
+          everInWindow: null,
+        }),
+        funnelStep({
+          key: "agent_spawned",
+          event: "agent:spawned",
+          label: "에이전트 스폰",
+          clients: 2,
+          events: 2452,
+          coverage: "ok",
+        }),
+      ])}
+    />
+  );
+  assert.match(html, /미수집/);
+  // 이벤트 이름을 적어 다음 사람이 "무엇이 없는지" 를 알게 한다.
+  assert.match(html, /app:installed/);
+  // ★계측 공백 칸에 "0명" 막대를 그리면 안 된다 — 그게 오독의 출발점이다.
+  assert.doesNotMatch(html, /설치\(최초 실행 대체 신호\)[\s\S]{0,300}0명/);
+});
+
+test("★순차 0 인데 창 안 실측이 있으면 두 수를 나란히 보여 준다", () => {
+  const html = renderToStaticMarkup(
+    <P.OnboardingFunnelView
+      funnel={funnelFixture([
+        funnelStep({
+          key: "orchestrator_opened",
+          event: "onboarding:orchestrator_opened",
+          label: "오케 오픈(첫 스폰 시도)",
+          clients: 2,
+          coverage: "ok",
+        }),
+        funnelStep({
+          key: "first_conversation",
+          event: "onboarding:first_conversation",
+          label: "첫 대화(오케에 첫 지시 전송)",
+          gating: false,
+          clients: 0,
+          coverage: "partial",
+          firstObservedDay: "2026-08-10",
+          everInWindow: 4,
+        }),
+        funnelStep({
+          key: "agent_spawned",
+          event: "agent:spawned",
+          label: "에이전트 스폰",
+          clients: 2,
+          coverage: "ok",
+        }),
+      ])}
+    />
+  );
+  // 배지가 '참고' 가 아니라 왜 못 믿는지를 말한다.
+  assert.match(html, /부분 구간/);
+  // 실측값과 계측 시작일이 화면에 남는다.
+  assert.match(html, /4개/);
+  assert.match(html, /2026-08-10/);
+  // ★값 자체는 고치지 않는다(소급 보정 금지) — 0 도 그대로 남아 있다.
+  assert.match(html, /0명/);
+});
+
+test("★활성화율 0% 옆에는 '같은 기간 실제 완료 설치 수' 가 붙는다", () => {
+  const html = renderToStaticMarkup(
+    <P.OnboardingFunnelView
+      funnel={funnelFixture(
+        [
+          funnelStep({
+            key: "agent_spawned",
+            event: "agent:spawned",
+            label: "에이전트 스폰",
+            clients: 2,
+            coverage: "ok",
+          }),
+        ],
+        {
+          headline: {
+            activatedClients: 0,
+            baseClients: 5,
+            rate: 0,
+            windowMinutes: 1440,
+            label: "가입 후 24시간 내 …",
+            everActivatedInWindow: 2,
+          },
+        }
+      )}
+    />
+  );
+  assert.match(html, /0\.0%/);
+  assert.match(html, /2개 설치/);
+  // 0% 를 "아무도 못 썼다" 로 읽지 말라는 문장이 실제로 있어야 한다.
+  assert.match(html, /끝까지 못 썼다/);
+});
+
+test("★활성화율 0% 라도 창 안 실측이 0 이면 군더더기를 붙이지 않는다", () => {
+  const html = renderToStaticMarkup(
+    <P.OnboardingFunnelView
+      funnel={funnelFixture(
+        [
+          funnelStep({
+            key: "agent_spawned",
+            event: "agent:spawned",
+            label: "에이전트 스폰",
+            clients: 2,
+            coverage: "ok",
+          }),
+        ],
+        {
+          headline: {
+            activatedClients: 0,
+            baseClients: 5,
+            rate: 0,
+            windowMinutes: 1440,
+            label: "가입 후 24시간 내 …",
+            everActivatedInWindow: 0,
+          },
+        }
+      )}
+    />
+  );
+  assert.doesNotMatch(html, /끝까지 못 썼다/);
+});
+
+// ── ★운영자 제외 표기 ──────────────────────────────────────────────────────
+
+test("★제외절이 걸릴 행이 0 이면 '제외됨' 이라고 말하지 않는다", () => {
+  const html = renderToStaticMarkup(
+    <P.FunnelAdminExclusionNote
+      adminExcluded={{
+        applied: true,
+        uidFiltered: true,
+        clientIdCount: 0,
+        matchableRows: 0,
+      }}
+    />
+  );
+  assert.match(html, /운영자 제외가 실제로는 적용되지 않았습니다/);
+  assert.match(html, /포함돼/);
+});
+
+test("★measurable 을 모르면(구버전 응답) 아무 단정도 하지 않는다", () => {
+  assert.equal(
+    renderToStaticMarkup(
+      <P.FunnelAdminExclusionNote
+        adminExcluded={{ uidFiltered: true, clientIdCount: 0 }}
+      />
+    ),
+    ""
+  );
+  assert.equal(renderToStaticMarkup(<P.FunnelAdminExclusionNote />), "");
+});
+
+test("★걸릴 행이 남아 있어도 '최근 구간은 안 빠진다' 를 함께 말한다", () => {
+  const html = renderToStaticMarkup(
+    <P.FunnelAdminExclusionNote
+      adminExcluded={{
+        applied: true,
+        uidFiltered: true,
+        clientIdCount: 0,
+        matchableRows: 51031,
+      }}
+    />
+  );
+  assert.match(html, /51,031<\/span>행/);
+  assert.match(html, /제외되지 않습니다/);
+});
+
+test("★미배포 판정은 에러 코드가 아니라 서버 매니페스트로 한다", () => {
+  // 미배포 콜러블의 404 는 CORS 에 막혀 브라우저에서 functions/internal 로
+  // 도착한다 — 그래서 not-found 가드만 믿으면 영원히 빨간 오류가 뜬다.
+  assert.equal(P.CALLABLE_MANIFEST, "getAdminCallableManifest");
 });

@@ -46,12 +46,20 @@ type AdminExcludedFirestore = {
   founders: number;
   agents: number;
 };
-type AdminExcludedTelemetry = {
+export type AdminExcludedTelemetry = {
   // 이번 응답에 운영자 제외가 실제로 적용됐는지(includeAdmin 토글 상태의 반영).
   // 구버전 functions 는 이 필드를 안 내려주므로 optional — 없으면 제외로 간주.
   applied?: boolean;
   uidFiltered: boolean;
   clientIdCount: number;
+  /**
+   * ★조회창 안에 `metadata.accountUserId` 가 **남아 있는 행 수**(실측).
+   *
+   * events 제외절은 그 필드로만 거르는데 계정축 은퇴로 신규 row 에는 필드가 없다 —
+   * 즉 `applied:true` 여도 실제로는 한 행도 안 빠질 수 있다. 0 이면 화면이
+   * "제외됨" 이라고 말하면 안 된다. 구버전 functions 는 안 내려주므로 optional.
+   */
+  matchableRows?: number | null;
 };
 
 // ── 베타 세그먼트 사용패턴 (getAdminBetaSegmentUsage) ───────────────────────
@@ -114,7 +122,7 @@ type BetaSegmentUsage = {
 };
 
 // ── 온보딩 "첫 10분" 퍼널 (getAdminOnboardingFunnel) ─────────────────────────
-type OnboardingFunnelStep = {
+export type OnboardingFunnelStep = {
   key: string;
   event: string;
   label: string;
@@ -131,6 +139,20 @@ type OnboardingFunnelStep = {
   /** 최초 단계(설치) 대비 누적 전환율. 구버전은 미제공. */
   conversionFromStart?: number | null;
   isMaxDrop: boolean;
+  /**
+   * ★이 칸의 `clients` 를 믿어도 되는가(ticket 4KqBDPkH). 구버전 응답은 미제공.
+   *   'missing' — 그 이벤트가 **전기간 한 번도** 관측된 적 없다 → '미수집'.
+   *   'partial' — 처음 관측된 날이 조회창 시작보다 늦다 → 창 앞부분엔 신호가 없다.
+   * 이 둘의 0 은 "안 했다"가 아니라서 숫자로 그리면 거짓말이 된다.
+   */
+  coverage?: "ok" | "partial" | "missing";
+  /** 그 이벤트가 전기간 처음 **관측된** 날(YYYY-MM-DD). 전기간 0건이면 null. */
+  firstObservedDay?: string | null;
+  /**
+   * 순차 체인을 무시하고 조회창 안에 그 이벤트를 낸 고유 설치 수(BigQuery 실측).
+   * `clients` 와 벌어지면 그 0 은 정의의 한계지 제품 실패가 아니다.
+   */
+  everInWindow?: number | null;
 };
 // ★헤드라인 — 가입 후 30분 내 첫 티켓 완료 활성화율.
 type ActivationHeadline = {
@@ -139,6 +161,12 @@ type ActivationHeadline = {
   rate: number | null;
   windowMinutes: number;
   label: string;
+  /**
+   * ★같은 창에서 `task:completed` 를 실제로 낸 고유 설치 수(실측).
+   * 0% 가 "아무도 완주 안 했다" 로 읽히는 걸 막는 유일한 근거다 — 로그인이 창
+   * 밖인 설치는 분모에 없기 때문에 분자도 0 이 된다. 구버전 응답은 미제공.
+   */
+  everActivatedInWindow?: number | null;
 };
 type OnboardingFailureBranch = {
   key: string;
@@ -149,7 +177,7 @@ type OnboardingFailureBranch = {
   byCategory: { key: string; count: number; clients: number }[];
 };
 type QueryStatus = { ok: boolean; errors: { name: string; error: string }[] };
-type OnboardingFunnel = {
+export type OnboardingFunnel = {
   rangeDays: number;
   generatedAt: string;
   adminExcluded?: AdminExcludedTelemetry;
@@ -2247,7 +2275,16 @@ function SectionHeader({
 }: {
   icon: typeof Users;
   title: string;
-  trust: "green" | "yellow" | "red";
+  /**
+   * ★'red'(소스 없음)와 'unwired'(연결 전)는 다른 말이다.
+   *
+   * `analytics_user_daily` 는 매일 05:30 KST 스케줄로 **이미 채워지고 있다**
+   * (실측: 229행, 어제 갱신). 없는 건 소스가 아니라 그걸 읽어 오는 콜러블이다.
+   * 그런데 배지는 '🔴 소스 없음' 이라고 적혀 있었고, 그 옆에는 빨간 내부 오류가
+   * 같이 떴다 — 화면이 서로 다른 세 가지 이야기를 동시에 한 셈이다(ticket
+   * 4KqBDPkH). 상태를 아는 화면은 그걸 에러가 아니라 **상태**로 그려야 한다.
+   */
+  trust: "green" | "yellow" | "red" | "unwired";
   children?: React.ReactNode;
 }) {
   const badge =
@@ -2260,6 +2297,11 @@ function SectionHeader({
       ? {
           c: "text-amber-300 bg-amber-950/30 border-amber-900/40",
           t: "🟡 옵트인 표본",
+        }
+      : trust === "unwired"
+      ? {
+          c: "text-zinc-400 bg-zinc-900 border-zinc-800",
+          t: "⚪ 연결 전 (표는 적재 중)",
         }
       : { c: "text-zinc-400 bg-zinc-900 border-zinc-800", t: "🔴 소스 없음" };
   return (
@@ -2569,8 +2611,16 @@ function mapErr(err: CallableError): string {
   // 신규 콜러블이 아직 배포 전(web 선배포)일 때의 안내 — 나머지 섹션은 정상.
   if (err?.code === "functions/not-found")
     return "이 지표는 Cloud Functions 배포 후 표시됩니다(신규 함수 미배포).";
+  // ★'internal' 은 두 가지가 겹쳐 있다: (a) 배포된 함수가 실제로 던졌다,
+  //   (b) 함수가 아예 없어 404 가 CORS 에 막혔다(브라우저에선 이쪽이 흔하다).
+  //   둘 다 가능하다고 말하지 않으면 (b) 를 장애로 오독한다.
   if (err?.code === "functions/internal")
-    return "지표 데이터를 불러오지 못했습니다. 서버 로그에서 BigQuery/Cloud Functions 오류를 확인해야 합니다.";
+    return (
+      "지표를 불러오지 못했습니다. 이 함수가 아직 배포되지 않았거나(브라우저에서는 " +
+      "미배포 404 가 CORS 에 막혀 내부 오류로 보입니다), 배포된 함수가 실패한 " +
+      "것입니다. 먼저 배포 여부를 확인하고, 배포돼 있다면 서버 로그에서 " +
+      "BigQuery/Cloud Functions 오류를 확인해야 합니다."
+    );
   return err?.message || "데이터를 불러오지 못했습니다.";
 }
 
@@ -2587,10 +2637,30 @@ type Loaded<T> = {
   notDeployed?: boolean;
 };
 
-/** `functions/not-found` = 그 함수가 아직 배포되지 않았다. */
+/**
+ * `functions/not-found` = 그 함수가 아직 배포되지 않았다.
+ *
+ * ★단, **브라우저에서는 이게 거의 안 걸린다**(ticket 4KqBDPkH 실측).
+ * 미배포 콜러블의 404 는 Google Frontend 가 내는 HTML 이라 CORS 헤더가 없고,
+ * 브라우저는 preflight 에서 응답을 통째로 차단한다 → fetch 가 TypeError 로
+ * 끝나고 firebase-js-sdk 는 status 0 으로 보아 `functions/internal` 을 준다.
+ * 그래서 "미배포인데 빨간 내부 오류" 가 떴다. 진짜 판정은 에러 코드가 아니라
+ * 서버 매니페스트(CALLABLE_MANIFEST)로 한다 — 이 함수는 그 폴백일 뿐이다.
+ */
 function isNotDeployed(err: CallableError): boolean {
   return err?.code === "functions/not-found";
 }
+
+/**
+ * ★이 배포본이 실제로 갖고 있는 어드민 콜러블 목록.
+ *
+ * 없는 함수를 부르면 화면이 '연결 전' 이 아니라 빨간 오류를 그리는 문제(위
+ * isNotDeployed 주석)를 에러 코드 추측이 아니라 **서버에 직접 물어서** 없앤다.
+ * 매니페스트 자체가 아직 배포 전이면 이 호출도 실패하는데, 그때는 예전처럼
+ * 그냥 호출해 보는 경로로 접힌다(하위호환).
+ */
+export const CALLABLE_MANIFEST = "getAdminCallableManifest";
+type CallableManifest = { generatedAt: string; callables: string[] };
 
 // ── 온보딩 첫10분 퍼널 시각화 ────────────────────────────────────────────────
 // 단계별 "도달 고유 clientId"를 세로 막대로, 인접 단계 이탈을 화살표로 표기한다.
@@ -2768,10 +2838,69 @@ function CountryFunnelView({ data }: { data: CountryFunnel }) {
   );
 }
 
-function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
+/**
+ * ★운영자(존킴) 제외가 **실제로 걸렸는지** 를 이 퍼널 기준으로 말한다.
+ *
+ * 지금까지 응답은 `applied: !includeAdmin` 만 내려보냈고 화면은 그걸 "제외됨"
+ * 으로 읽었다. 그런데 events 제외절은 `metadata.accountUserId` 로만 거르는데,
+ * 계정축 은퇴로 신규 row 에는 그 필드가 아예 없다 — 절은 통과하고 **아무도 안
+ * 빠진다.** 서버가 실측으로 준 matchableRows(창 안에 그 필드가 남아 있는 행 수)
+ * 가 0 이면, "제외됨" 이라고 말하는 것 자체가 거짓이다.
+ *
+ * 사장님이 물으신 "최근 데이터 존킴 계정은 빠진 거지?" 에 대한 화면의 답이 여기다.
+ */
+export function FunnelAdminExclusionNote({
+  adminExcluded,
+}: {
+  adminExcluded?: AdminExcludedTelemetry;
+}) {
+  if (!adminExcluded) return null;
+  const requested = adminExcluded.applied !== false;
+  const matchable = adminExcluded.matchableRows;
+  // 구버전 functions(미제공)면 아무 말도 하지 않는다 — 근거 없이 단정하지 않는다.
+  if (matchable == null) return null;
+
+  if (!requested) {
+    return (
+      <p className="rounded-lg border border-amber-900/40 bg-amber-950/20 p-3 text-xs text-amber-200/90">
+        🟠 운영자 포함 모드입니다 — 이 퍼널에는 운영자(도그푸딩) 활동이 그대로
+        들어 있습니다.
+      </p>
+    );
+  }
+  if (matchable === 0) {
+    return (
+      <p className="rounded-lg border border-amber-900/40 bg-amber-950/20 p-3 text-xs leading-relaxed text-amber-200/90">
+        ⚠️ <b>운영자 제외가 실제로는 적용되지 않았습니다.</b> 이 축의 제외기는
+        이벤트에 붙어 있던 계정 UID로만 걸러내는데, 계정축 은퇴 이후 이벤트에는
+        그 값이 붙지 않습니다 — 이 조회창 안에 걸러낼 수 있는 행이{" "}
+        <b>한 건도 없습니다</b>. 따라서 아래 숫자에는 운영자 본인의 설치가 포함돼
+        있을 수 있습니다. (설치 단위 익명 축이라 사후 식별도 불가능합니다.)
+      </p>
+    );
+  }
+  return (
+    <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-500">
+      운영자 제외: 계정 UID가 남아 있는 행에만 적용됩니다(이 조회창{" "}
+      <span className="tabular-nums">{fmtInt(matchable)}</span>행). 계정축 은퇴
+      이후의 이벤트에는 UID가 붙지 않아 그 구간은 제외되지 않습니다 — 최근으로
+      올수록 운영자 활동이 섞여 있을 수 있습니다.
+    </p>
+  );
+}
+
+export function OnboardingFunnelView({
+  funnel,
+}: {
+  funnel: OnboardingFunnel;
+}) {
   const steps = funnel.steps;
   const maxClients = Math.max(1, ...steps.map((s) => s.clients));
-  const hasAny = steps.some((s) => s.clients > 0 || s.events > 0);
+  // ★순차 도달이 전부 0 이어도 창 안 실측(everInWindow)이 있으면 빈 화면이
+  //   아니다 — 오히려 그때가 "정의가 다 걸러냈다" 는 걸 말해야 하는 순간이다.
+  const hasAny = steps.some(
+    (s) => s.clients > 0 || s.events > 0 || (s.everInWindow ?? 0) > 0
+  );
   const failuresWithData = funnel.failureBranches.filter(
     (f) => f.clients > 0 || f.events > 0
   );
@@ -2793,6 +2922,7 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
     <div className="space-y-4">
       {/* ★부분 쿼리 실패는 '0' 이 아니라 '못 읽음' — 먼저 밝힌다. */}
       <QueryStatusBanner status={funnel.queryStatus} />
+      <FunnelAdminExclusionNote adminExcluded={funnel.adminExcluded} />
       {/* ★헤드라인 활성화 지표 — 가입 후 30분 내 첫 티켓 완료 비율. */}
       {headline && (
         <div className="rounded-xl border border-indigo-800/60 bg-indigo-950/30 p-4">
@@ -2810,6 +2940,25 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
             {fmtInt(headline.activatedClients)} / {fmtInt(headline.baseClients)}
             명 (분자=활성화 · 분모=가입)
           </p>
+          {/* ★0% 가 "아무도 제품을 완주 안 했다" 로 읽히는 걸 막는다.
+              분모(가입)는 조회창 안에 로그인한 설치만 센다 — 그 전에 로그인해
+              계속 쓰고 있는 설치는 분자에도 분모에도 없다. 서버가 실측으로 준
+              everActivatedInWindow 가 그 차이를 드러내는 유일한 값이다. */}
+          {headline.activatedClients === 0 &&
+            headline.everActivatedInWindow != null &&
+            headline.everActivatedInWindow > 0 && (
+              <p className="mt-2 rounded-lg border border-amber-900/40 bg-amber-950/20 p-2 text-[11px] leading-relaxed text-amber-200/90">
+                ★이 0% 를 &ldquo;아무도 제품을 끝까지 못 썼다&rdquo;로 읽지
+                마십시오. 같은 기간에{" "}
+                <b className="tabular-nums">
+                  {fmtInt(headline.everActivatedInWindow)}개 설치
+                </b>
+                가 실제로 첫 티켓을 완료했습니다 — 그 설치들은 로그인이 조회창
+                밖이라 분모(가입)에 없어서 분자에서도 빠집니다. 참인 명제는
+                &ldquo;이 기간에 새로 가입한 {fmtInt(headline.baseClients)}명 중
+                24시간 안에 완료한 사람은 없다&rdquo;까지입니다.
+              </p>
+            )}
         </div>
       )}
       <Panel
@@ -2820,9 +2969,20 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
           {steps.map((s, i) => {
             const widthPct = Math.round((s.clients / maxClients) * 100);
             const drop = s.dropFromPrev;
-            const showDrop = i > 0 && drop != null && drop > 0;
-            // 구버전 functions 응답(gating 미제공)은 전부 체인 칸으로 본다.
+            // 구버전 functions 응답(gating/coverage 미제공)은 전부 체인 칸·
+            // 정상 계측으로 본다 — 근거 없이 딱지를 붙이지 않는다.
             const isGating = s.gating !== false;
+            const coverage = s.coverage ?? "ok";
+            const isMissing = coverage === "missing";
+            const isPartial = coverage === "partial";
+            // ★계측이 통째로 없는 칸의 '이탈' 은 이탈이 아니다 — 화살표를 숨긴다.
+            const showDrop = i > 0 && drop != null && drop > 0 && !isMissing;
+            // ★순차 도달 0 인데 창 안에 실제 발생이 있으면, 그 0 은 "안 했다"가
+            //   아니라 "이 정의로는 못 센다" 다. 그 사실을 칸 안에서 말한다.
+            const undercounted =
+              isPartial &&
+              s.everInWindow != null &&
+              s.everInWindow > s.clients;
             return (
               <div key={s.key}>
                 {showDrop && (
@@ -2853,15 +3013,51 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
                     {/* ★체인 밖 칸임을 화면에서도 밝힌다 — 이 칸의 감소를
                         "제품 누수"로 읽으면 안 된다(계측이 늦게 생겼거나
                         시간창이 다르다). 서버 note 와 같은 이야기. */}
-                    {!isGating && (
+                    {/* ★계측 상태를 먼저 말한다. '참고' 는 "왜 믿기 어려운지"를
+                        안 알려줘서 결국 0 이 그대로 읽혔다 — 사장님 화면의
+                        "첫 대화 0명 / 스폰 2명" 이 그렇게 나왔다. */}
+                    {isMissing ? (
                       <span
                         className="rounded bg-zinc-800 px-1 text-[9px] font-medium text-zinc-400"
-                        title="참고 지표 — 뒤 단계의 이탈률 기준선으로 쓰이지 않습니다(계측 시점/시간창이 본선과 다름)."
+                        title={`이 단계의 이벤트(${s.event})는 전 기간 한 번도 관측된 적이 없습니다. 0 이 아니라 신호 자체가 없는 것입니다.`}
                       >
-                        참고
+                        미수집
                       </span>
+                    ) : isPartial ? (
+                      <span
+                        className="rounded bg-amber-900/40 px-1 text-[9px] font-medium text-amber-300"
+                        title={`이 이벤트(${s.event})가 처음 관측된 날은 ${
+                          s.firstObservedDay ?? "조회창 시작 이후"
+                        }입니다 — 조회창 앞부분에는 신호가 아예 없어 이 칸의 0 은 "안 했다"는 뜻이 아닙니다. (계측이 나중에 생긴 것인지, 그때까지 아무도 안 한 것인지는 이 축만으로 구분되지 않습니다.)`}
+                      >
+                        부분 구간
+                      </span>
+                    ) : (
+                      !isGating && (
+                        <span
+                          className="rounded bg-zinc-800 px-1 text-[9px] font-medium text-zinc-400"
+                          title="참고 지표 — 뒤 단계의 이탈률 기준선으로 쓰이지 않습니다(시간창이 본선과 다름)."
+                        >
+                          참고
+                        </span>
+                      )
                     )}
                   </div>
+                  {/* ★계측이 전기간 0건인 칸은 막대를 그리지 않는다. 길이 0 짜리
+                      막대 + "0명" 은 화면에서 "아무도 안 했다" 와 구분이 안 된다 —
+                      이 화면의 규약(0 / 미수집 / 적재 전)이 바로 그걸 막으려고
+                      있는 것이다. */}
+                  {isMissing ? (
+                    <div className="flex h-7 flex-1 items-center rounded border border-dashed border-zinc-800 bg-zinc-950/60 px-2">
+                      <span className="text-xs font-medium text-zinc-500">
+                        미수집
+                      </span>
+                      <span className="ml-2 text-[11px] text-zinc-600">
+                        · <span className="font-mono">{s.event}</span> 이 전 기간
+                        관측된 적 없음 (0 이 아니라 신호 없음)
+                      </span>
+                    </div>
+                  ) : (
                   <div className="relative h-7 flex-1 overflow-hidden rounded bg-zinc-900">
                     <div
                       className="h-full rounded"
@@ -2904,7 +3100,24 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
                       )}
                     </div>
                   </div>
+                  )}
                 </div>
+                {/* ★순차 0 인데 창 안 실측은 N — 이 한 줄이 "첫 대화 0명인데
+                    스폰 2명" 이라는 자기모순의 정체다. 값을 고치지 않고(소급
+                    보정 금지) 두 수를 나란히 보여 준다. */}
+                {undercounted && (
+                  <p className="mt-0.5 pl-[10.75rem] text-[11px] leading-relaxed text-amber-300/80">
+                    ↳ 순차 정의로는 {fmtInt(s.clients)}명이지만, 같은 기간에 이
+                    이벤트를 실제로 낸 설치는{" "}
+                    <b className="tabular-nums">{fmtInt(s.everInWindow ?? 0)}개</b>
+                    입니다
+                    {s.firstObservedDay
+                      ? ` (이 신호가 처음 보인 날 ${s.firstObservedDay})`
+                      : ""}
+                    . 앞 단계(로그인 성공)가 조회창 밖이면 순차 체인에서 통째로
+                    빠집니다 — 이 칸의 0 은 제품 실패가 아니라 정의의 한계입니다.
+                  </p>
+                )}
               </div>
             );
           })}
@@ -5088,54 +5301,57 @@ export default function AnalyticsPanel({
             error: mapErr(e as CallableError),
           })
         );
-      callUserDaily({ days: d })
-        .then((r) => setUserDaily({ data: r.data, loading: false, error: null }))
-        .catch((e) => {
-          const err = e as CallableError;
-          // ★미배포는 장애가 아니다 — 빨간 박스 대신 '연결 전' 으로 접는다.
-          if (isNotDeployed(err)) {
-            setUserDaily({
-              data: null,
-              loading: false,
-              error: null,
-              notDeployed: true,
-            });
+      // ── ★선택 콜러블(아직 서버에 없을 수 있는 것들) ────────────────────
+      // 매니페스트에 이름이 없으면 **호출하지 않고** 곧장 '연결 전' 으로 접는다.
+      // 없는 함수를 부르면 브라우저에서는 CORS 에 막혀 `functions/internal` 이
+      // 돌아오고(위 isNotDeployed 주석), 그게 사장님 화면의 빨간 오류였다.
+      // 매니페스트를 못 얻으면(그 함수도 미배포 등) 예전처럼 그냥 호출한다.
+      const callManifest = httpsCallable<
+        Record<string, never>,
+        CallableManifest
+      >(fns, CALLABLE_MANIFEST);
+      const deployedNames: Promise<Set<string> | null> = callManifest({})
+        .then((r) => new Set(r.data?.callables ?? []))
+        .catch(() => null);
+
+      const runOptional = <T,>(
+        name: string,
+        invoke: () => Promise<{ data: T }>,
+        set: (v: Loaded<T>) => void
+      ) => {
+        void deployedNames.then((names) => {
+          if (names != null && !names.has(name)) {
+            // 서버가 "그런 함수 없다" 고 말했다 — 장애가 아니라 배선 전이다.
+            set({ data: null, loading: false, error: null, notDeployed: true });
             return;
           }
-          setUserDaily({ data: null, loading: false, error: mapErr(err) });
-        });
-      callAcctProfile({})
-        .then((r) =>
-          setAcctProfile({ data: r.data, loading: false, error: null })
-        )
-        .catch((e) => {
-          const err = e as CallableError;
-          if (isNotDeployed(err)) {
-            setAcctProfile({
-              data: null,
-              loading: false,
-              error: null,
-              notDeployed: true,
+          return invoke()
+            .then((r) => set({ data: r.data, loading: false, error: null }))
+            .catch((e) => {
+              const err = e as CallableError;
+              if (isNotDeployed(err)) {
+                set({
+                  data: null,
+                  loading: false,
+                  error: null,
+                  notDeployed: true,
+                });
+                return;
+              }
+              set({ data: null, loading: false, error: mapErr(err) });
             });
-            return;
-          }
-          setAcctProfile({ data: null, loading: false, error: mapErr(err) });
         });
-      callPurchase({})
-        .then((r) => setPurchase({ data: r.data, loading: false, error: null }))
-        .catch((e) => {
-          const err = e as CallableError;
-          if (isNotDeployed(err)) {
-            setPurchase({
-              data: null,
-              loading: false,
-              error: null,
-              notDeployed: true,
-            });
-            return;
-          }
-          setPurchase({ data: null, loading: false, error: mapErr(err) });
-        });
+      };
+
+      runOptional(CALLABLE_USER_DAILY, () => callUserDaily({ days: d }), (v) =>
+        setUserDaily(v)
+      );
+      runOptional(CALLABLE_ACCOUNT_PROFILE, () => callAcctProfile({}), (v) =>
+        setAcctProfile(v)
+      );
+      runOptional(CALLABLE_PURCHASE_SUMMARY, () => callPurchase({}), (v) =>
+        setPurchase(v)
+      );
     },
     []
   );
@@ -5651,7 +5867,9 @@ export default function AnalyticsPanel({
             <SectionHeader
               icon={Database}
               title="설치 단위 활성 (설치 × 날짜)"
-              trust="red"
+              // ★'소스 없음' 이 아니다 — 표는 매일 채워지고 있고 조회 경로만 없다.
+              //   값이 붙으면 그 표가 events(옵트인 표본)의 파생표이므로 🟡 이다.
+              trust={userDaily.data ? "yellow" : "unwired"}
             />
             {userDaily.loading ? (
               <LoadingBox />

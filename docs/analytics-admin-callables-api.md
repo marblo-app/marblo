@@ -335,6 +335,11 @@
     applied: boolean;
     uidFiltered: boolean;
     clientIdCount: number;
+    // ★조회창 안에 metadata.accountUserId 가 **남아 있는 행 수**(실측, ticket 4KqBDPkH).
+    //   events 제외절은 그 필드로만 거르는데 계정축 은퇴 이후 row 에는 필드가 없다.
+    //   0 이면 applied:true 여도 실제로는 한 행도 안 빠진다 — 화면은 그때 "제외됨"
+    //   이라고 말하면 안 된다. null = 측정 실패(단정 금지).
+    matchableRows: number | null;
   }
   // 부분 쿼리 실패 상태 — 서버 러너는 개별 쿼리 실패를 삼키고 빈 배열을 준다.
   // ok=false 면 그 칸의 0 은 "정말 0" 이 아니라 "못 읽음" 이다.
@@ -381,6 +386,18 @@
     conversionFromPrev: number | null; // 직전 gating 대비 전환율
     conversionFromStart: number | null; // 최초 단계(install) 대비 누적 전환율
     isMaxDrop: boolean;
+    // ★계측 커버리지 (ticket 4KqBDPkH) — 이 칸의 clients 를 믿어도 되는가.
+    //   "missing" = 그 이벤트가 **전기간 한 번도** BQ 에 관측된 적이 없다.
+    //   "partial" = 처음 관측된 날이 조회창 시작보다 늦다(창 앞부분에 신호 없음).
+    //   두 경우의 0 은 "안 했다"가 아니라서, 화면은 숫자 대신 '미수집'/'부분 구간'을
+    //   그린다. 커버리지 쿼리가 실패하면 판정을 포기하고 전 칸 "ok" 로 둔다.
+    //   ★BQ 가 아는 건 '최초 관측일' 뿐이다 — 계측이 늦게 생긴 것인지 그때까지
+    //     아무도 안 한 것인지는 이 축만으로 못 가른다. 라벨도 그렇게 적혀 있다.
+    coverage: "ok" | "partial" | "missing";
+    firstObservedDay: string | null; // 전기간 최초 관측일(YYYY-MM-DD)
+    // 순차 체인을 **무시하고** 조회창 안에 그 이벤트를 낸 고유 설치 수(BQ 원값).
+    // clients 와 벌어지면 그 0 은 제품 실패가 아니라 정의의 한계다.
+    everInWindow: number | null;
   }
   [];
   // 실패-분기(퍼널 밖 이탈 사유) — errorCategory 로 세분.
@@ -409,9 +426,57 @@
     []; // count 내림차순
   }
   [];
+  // ★헤드라인 활성화율. everActivatedInWindow 는 순차 정의를 무시하고 같은 창에서
+  //   task:completed 를 실제로 낸 고유 설치 수(실측) — 0% 가 "아무도 완주 안 했다"로
+  //   읽히는 걸 막는 유일한 근거다. 커버리지 쿼리가 없으면 null.
+  headline: {
+    activatedClients: number;
+    baseClients: number;
+    rate: number | null;
+    windowMinutes: number;
+    label: string;
+    everActivatedInWindow: number | null;
+  };
   note: string; // 측정 방법·한계(auth-gated flush, 비단조 resume) 고지 문자열
 }
 ```
+
+### ★단계 ↔ 이벤트 ↔ BQ 실측 대조표 (2026-08-22, 조회창 30일, 운영자 제외절 적용)
+
+티켓 `4KqBDPkH` 에서 실측했다. "화면 순차값" 은 사장님이 보신 그 숫자이고,
+"창 안 실측" 은 순차 체인을 무시하고 그 이벤트를 낸 고유 설치 수다.
+
+| 단계 | 이벤트 | 전기간 최초 관측일 | 창 안 실측 | 화면 순차값 | 커버리지 |
+| --- | --- | --- | --- | --- | --- |
+| 설치 | `app:installed` | **없음(전기간 0건)** | — | 7 (first_run 대체) | `missing` |
+| 앱 최초 실행 | `app:first_run` | 2026-04-18 | 7 | 7 | ok |
+| 로그인 시도 | `auth:login_attempt` | 2026-04-19 | 5 | 5 | ok |
+| 로그인 성공 | `auth:login_success` | 2026-04-19 | 5 | 5 | ok |
+| 폴더 연결 | `onboarding:folder_connected` | 2026-04-19 | 6 | 2 | ok |
+| 오케 오픈 | `onboarding:orchestrator_opened` | 2026-04-19 | 7 | 2 | ok |
+| 첫 대화 | `onboarding:first_conversation` | **2026-08-10** | **4** | **0** | `partial` |
+| 첫 티켓 생성 | `onboarding:first_ticket` | **2026-08-09** | **3** | **0** | `partial` |
+| 에이전트 스폰 | `agent:spawned` | 2026-04-18 | 6 | 2 | ok |
+| 첫 티켓 완료 | `task:completed` | 2026-06-17 | 2 | 0 | ok |
+| 첫 머지 | `task:merged` | 2026-07-20 | 1 | 0 | ok |
+| 7일 잔존 | `session:started` | 2026-04-19 | 10 | 0 | ok |
+| (실패) 스폰 사전 차단 | `onboarding:spawn_blocked` | 2026-08-13 | 2 | — | `partial` |
+| (실패) CLI 인증 스톨 | `onboarding:agent_needs_auth` | **없음(전기간 0건)** | — | 0 | `missing` |
+| (실패) 크레딧 없음 | `onboarding:funding_guide_shown` | **없음(전기간 0건)** | — | 0 | `missing` |
+
+★**"첫 대화 0 / 첫 티켓 0 / 스폰 2" 의 정체.** 계측이 빠진 게 아니다. 두 칸의 판정식이
+`reached_orchestrator_opened AND ts BETWEEN orchestrator_opened_ts AND login_success_ts + 24h`
+라서, 첫 대화를 낸 4설치 중 **3개는 조회창 안에 `auth:login_success` 자체가 없고**(그 전에
+로그인함) 1개는 **로그인 +289시간 뒤**에 대화해 창 밖으로 버려진다. 스폰 2는 오케 오픈 2의
+부분집합이라 체인상 모순이 아니다 — 거짓인 쪽은 0 이다.
+
+★**활성화율 0.0% (0/5).** 그 정의(창 안에 로그인한 설치 중 24h 내 완료) 안에서는 **사실**이다.
+다만 같은 창에서 `task:completed` 를 실제로 낸 설치는 **2개** 있고, 둘 다 로그인이 창 밖이라
+분모에 없다. 화면은 `everActivatedInWindow` 로 그 차이를 밝힌다.
+
+★**운영자(존킴) 제외는 이 축에서 사실상 작동하지 않는다.** 30일 302,660행 중 `accountUserId`
+가 남아 있는 행은 51,031행이고 **그 마지막 날짜가 2026-08-10** 이다 — 최근 구간은 한 행도
+제외되지 않는다. `adminExcluded.matchableRows` 가 그 사실을 화면에 드러낸다.
 
 > 페이로드 매핑(실 스키마): `orchestrator_blocked` 의 reason·`agent:crashed` 의 errorCategory·`login_failed` 의 code 는 전부 events 테이블 **top-level `errorCategory` 컬럼**(metadata 아님). `folder_connected.mode`·`orchestrator_opened.resumed`·`login.method` 는 `metadata` JSON.
 > 순수 집계·이탈 계산은 `v3/functions/src/adminAnalytics.ts`(`buildOnboardingFunnel`)로 분리 — `npm run test:admin-analytics`(node:test, devDep 무추가)로 단위검증.
@@ -656,11 +721,42 @@ type BetaSegmentSummary = {
 그래서 어드민 화면의 그 칸은 '적재 전' 이 아니라 **'연결 전'** 으로 접힌다 — 두 사실을 같은
 말로 하면 다음 사람이 "적재부터 해야겠네" 로 읽고 이미 있는 표를 다시 만든다.
 
-프론트는 **지금 이 이름으로 이미 호출하고 있다.** `functions/not-found` 를 장애가 아니라
-'연결 전' 으로 접기 때문에, 백엔드가 이 이름으로 배포하는 순간 **프론트 변경 없이** 값이 들어온다.
-★한쪽이 다른 이름을 쓰면 조용히 `undefined` 가 되고 화면은 영원히 '연결 전' 을 띄운다.
-이름은 `AnalyticsPanel.tsx` 의 `CALLABLE_USER_DAILY` / `CALLABLE_ACCOUNT_PROFILE` 상수이고
-테스트가 문자열을 고정한다.
+프론트는 **지금 이 이름으로 이미 호출하고 있다.** 백엔드가 이 이름으로 배포하는 순간
+**프론트 변경 없이** 값이 들어온다. ★한쪽이 다른 이름을 쓰면 조용히 `undefined` 가 되고 화면은
+영원히 '연결 전' 을 띄운다. 이름은 `AnalyticsPanel.tsx` 의 `CALLABLE_USER_DAILY` /
+`CALLABLE_ACCOUNT_PROFILE` 상수이고 테스트가 문자열을 고정한다.
+
+> ⚠️ **`functions/not-found` 로 미배포를 감지하는 방식은 브라우저에서 동작하지 않는다**
+> (ticket `4KqBDPkH` 실측). 미배포 콜러블의 404 는 Google Frontend 가 내는 HTML 이라
+> `Access-Control-Allow-Origin` 헤더가 없고, 브라우저는 preflight 에서 응답을 통째로 차단한다 →
+> fetch 가 TypeError 로 끝나고 firebase-js-sdk 는 status 0 으로 보아 **`functions/internal`** 을
+> 준다. 그래서 '연결 전'(회색 상태) 대신 **빨간 내부 오류**가 떴다.
+>
+> ```
+> $ curl -sI -X OPTIONS https://us-central1-marblo-2253d.cloudfunctions.net/getAdminUserDailySummary \
+>     -H "Origin: https://marblo.app" -H "Access-Control-Request-Method: POST"
+> HTTP/2 404
+> content-type: text/html; charset=UTF-8      ← ACAO 헤더 없음
+> ```
+>
+> **판정은 에러 코드가 아니라 아래 매니페스트로 한다.** 프론트는 매니페스트에 없는 이름을
+> **아예 호출하지 않고** '연결 전' 으로 접는다.
+
+### `getAdminCallableManifest` — 이 배포본이 실제로 가진 어드민 콜러블 목록
+
+인자 없음(`{}`). 응답:
+
+```ts
+{
+  generatedAt: string;
+  callables: string[]; // 이 배포본이 내보낸 getAdmin* 이름들(정렬)
+}
+```
+
+★목록은 하드코딩하지 않는다 — CJS 로 컴파일되므로 실행 시점에 `module.exports` 를 읽는다.
+그래서 "문서에는 있는데 구현이 없다"(2026-08-22 기준 `getAdminUserDailySummary` /
+`getAdminAccountProfileSummary` 가 정확히 그 상태다)가 화면에 그대로 드러나고, 목록이
+코드와 어긋날 방법이 없다. 매니페스트 자체가 미배포면 프론트는 예전처럼 그냥 호출해 본다.
 
 ### `getAdminUserDailySummary` — ② 활성화 (익명축, `analytics_user_daily`)
 
