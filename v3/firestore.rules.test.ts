@@ -859,6 +859,82 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
     );
   });
 
+  // ── GitHub App 자동상속: 서버 전용 컬렉션 + 탈퇴 차단 ──────────────────
+  // (티켓 ddbN2KvxHZ08rakiVfL0, 설계 §3·§7.1)
+
+  it("★ github_app_setup_states 는 누구도 읽거나 쓸 수 없다 (state 위조 재료 차단)", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), "github_app_setup_states", "n1"), {
+        uid: OWNER_ID,
+        projectId: PROJECT_ID,
+        expiresAt: Date.now() + 60_000,
+        consumedAt: null,
+      });
+    });
+    for (const ctx of [
+      getContext(OWNER_ID, OWNER_EMAIL),
+      getContext(MEMBER_ID, MEMBER_EMAIL),
+      getContext(OUTSIDER_ID, OUTSIDER_EMAIL),
+    ]) {
+      const db = ctx.firestore();
+      await assertFails(getDoc(doc(db, "github_app_setup_states", "n1")));
+      await assertFails(
+        setDoc(doc(db, "github_app_setup_states", "n2"), {
+          uid: OUTSIDER_ID,
+          projectId: PROJECT_ID,
+        }),
+      );
+    }
+  });
+
+  it("★ github_app_access_logs 는 클라이언트가 쓸 수 없다 (감사 원장 위조 차단)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      addDoc(collection(db, "github_app_access_logs"), {
+        uid: MEMBER_ID,
+        projectId: PROJECT_ID,
+        outcome: "issued",
+      }),
+    );
+  });
+
+  it("★ 탈퇴 차단: members 에서 빠지는 즉시 프로젝트 문서를 못 읽는다 (T+0)", async () => {
+    // 설계 §7.1 의 첫 줄 — 오너가 removeMember() 하면 그 순간부터 그 사람은
+    // projects/{id} 를 못 읽는다. 서버의 발급 함수도 같은 문서를 Admin SDK 로
+    // 읽어 같은 판정을 하므로(githubApp.evaluateInstallationTokenRequest),
+    // "룰이 막는 것"과 "발급이 막히는 것"이 같은 사실 하나에 묶여 있다.
+    const memberDb = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(memberDb, "projects", PROJECT_ID)));
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), "projects", PROJECT_ID), {
+        members: [OWNER_ID, ADMIN_ID],
+        githubInstallationId: "12345678",
+      });
+    });
+
+    await assertFails(getDoc(doc(memberDb, "projects", PROJECT_ID)));
+    // 남은 멤버는 영향 없다 — 제거는 O(1) 이고 다른 사람에게 번지지 않는다.
+    const ownerDb = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(ownerDb, "projects", PROJECT_ID)));
+  });
+
+  it("★ 멤버는 gitRemoteUrl 을 바꿀 수 있다 — 그래서 서버가 GitHub 에 되묻는다", async () => {
+    // 이 성공은 버그가 아니라 **전제**다. gitRemoteUrl 은 멤버 쓰기 필드라
+    // (projectMemberWritableFields) 크로스테넌트 공격의 입력이 될 수 있고,
+    // 그래서 issueRepoInstallationToken 이 슬러그를 믿지 않고
+    // GET /repos/{owner}/{repo}/installation 로 되물어 installation id 일치를
+    // 확인한다(githubApp.verifyRepoInstallationBinding). 이 테스트가 실패하면
+    // (=룰이 막게 되면) 서버의 되묻기 방어를 재검토해야 한다는 신호다.
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        gitRemoteUrl: "https://github.com/victim/private.git",
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
   it("★ 생성 시점에도 githubInstallationId 를 심을 수 없다 (create 우회로 차단)", async () => {
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
     await assertFails(

@@ -259,6 +259,24 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && isProjectOwner(projectId);
     }
 
+    // ===== GitHub App 자동상속: 서버 전용 컬렉션 =====
+    // (티켓 ddbN2KvxHZ08rakiVfL0, 설계 §3)
+    //
+    // 매치되지 않는 경로는 어차피 기본 거부지만, **명시적으로 닫아 둔다** —
+    // 나중에 누가 "이 컬렉션은 룰이 없네" 하고 여는 것을 막고, 아래 규칙
+    // 테스트가 그 사실을 회귀 가드로 붙잡을 수 있게.
+    //
+    //  - github_app_setup_states: 설치 콜백의 1회용 state nonce. 클라가 읽으면
+    //    남의 설치를 자기 프로젝트에 바인딩하는 위조 재료가 된다.
+    //  - github_app_access_logs: 저장소 접근 감사 원장. Admin SDK 만 쓴다.
+    //    (기존 audit_logs 는 MCP 툴 원장이라 스키마가 달라 섞지 않는다.)
+    match /github_app_setup_states/{stateId} {
+      allow read, write: if false;
+    }
+    match /github_app_access_logs/{logId} {
+      allow read, write: if false;
+    }
+
     // ===== Tasks =====
     // 크로스테넌트 누출 차단: renderer, Electron main, MCP 서버 모두 실제 사용자
     // uid 로 인증한 뒤 자기 프로젝트 task 만 읽고 쓸 수 있다.

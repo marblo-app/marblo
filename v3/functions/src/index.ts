@@ -37,6 +37,28 @@ import {
 } from "./countryFunnel";
 import { reconcileTossPending, reconcilePaddlePending } from "./reconciliation";
 import { redactSecrets } from "./redact";
+// GitHub App 자동상속 — 인가 판정·서명·검증은 전부 이 순수 모듈에 있다.
+// (설계: v3/docs/github-app-installation-inheritance-design-2026-08-21.md)
+import {
+  buildAppJwt,
+  buildAuditEntry,
+  buildInstallUrl,
+  evaluateInstallationTokenRequest,
+  evaluateMintResponse,
+  evaluateRepoInstallationLookup,
+  GITHUB_API_BASE,
+  GITHUB_API_VERSION,
+  INSTALLATION_TOKEN_PERMISSIONS,
+  INSTALLATION_TOKEN_RULES,
+  normalizeInstallationId,
+  normalizePrivateKeyPem,
+  repoSlugKey,
+  SETUP_STATE_TTL_MS,
+  signSetupState,
+  verifySetupState,
+  type ProjectSnapshotForIssue,
+  type RepoSlug,
+} from "./githubApp";
 import {
   parseIncludeAdmin,
   parseMetricMode,
@@ -13227,7 +13249,12 @@ export async function buildAnalyticsProfileTablesInternal(
         qp,
         notes
       ),
-      runAnalyticsQuery("first_touch", await analyticsFirstTouchSql(), {}, notes),
+      runAnalyticsQuery(
+        "first_touch",
+        await analyticsFirstTouchSql(),
+        {},
+        notes
+      ),
       runAnalyticsQuery("milestones", ANALYTICS_MILESTONES_SQL, {}, notes),
     ]);
 
@@ -15402,3 +15429,587 @@ export const syncGa4Bridge = functions
     const rangeDays = parseSyncDays((data as { days?: unknown })?.days);
     return syncGa4BridgeInternal(rangeDays);
   });
+
+// ═══════════════════════════════════════════════════════════════════
+// GitHub App 자동상속 (티켓 ddbN2KvxHZ08rakiVfL0)
+//
+// 설계: v3/docs/github-app-installation-inheritance-design-2026-08-21.md (#1092)
+//
+// ★역할 경계 — App 은 인증이 아니다(설계 §2). device OAuth 가 "너는 누구인가"
+// 를 답하고, App 은 "이 저장소를 읽어도 되는가" 를 답한다. 그래서 여기서
+// 발급하는 것은 사용자 신원이 아니라 **저장소 1개 · contents:read · 1시간** 짜리
+// installation 토큰이다.
+//
+// ★토큰 규율(설계 §5-B2/B4):
+//   - private key 는 **여기(서버)에만** 있다. Electron 에 절대 넣지 않는다.
+//   - App JWT·installation 토큰을 로그·Firestore 어디에도 남기지 않는다.
+//   - 발급 토큰은 콜러블 응답에 한 번 실려 나가고 끝. 서버는 저장하지 않는다.
+//   - 감사 기록은 githubApp.buildAuditEntry 가 만든 항목뿐이다(토큰 필드 없음).
+//
+// ★기존 사용자 회귀 0(설계 §6): 여기서 실패·거부가 나면 클라이언트는
+// device 경로로 내려간다. 어느 경로도 **기존 동작을 막지 않는다** — installation
+// 이 없는 프로젝트는 이 함수를 호출조차 하지 않는다.
+// ═══════════════════════════════════════════════════════════════════
+
+const GITHUB_APP_ID = process.env.GITHUB_APP_ID || "";
+const GITHUB_APP_SLUG = process.env.GITHUB_APP_SLUG || "";
+// ★PEM 원문. 절대 로그·응답에 싣지 않는다. 존재 여부만 판정한다.
+const GITHUB_APP_PRIVATE_KEY_RAW = process.env.GITHUB_APP_PRIVATE_KEY || "";
+const GITHUB_APP_SETUP_STATE_SECRET =
+  process.env.GITHUB_APP_SETUP_STATE_SECRET || "";
+
+/** 설치 콜백 state nonce 보관소 — 서버 전용(클라 룰 미매치 = 기본 거부). */
+const GITHUB_APP_SETUP_STATES = "github_app_setup_states";
+/**
+ * 저장소 접근 감사 원장 — 서버 전용.
+ *
+ * ★기존 `audit_logs`(MCP 툴 원장, electron/mcp-server/ledger.ts 스키마)에
+ * 섞지 않는다. 그 컬렉션은 `{agentId, toolName, params, duration}` 형태라
+ * 서버 이벤트를 넣으면 감사 뷰의 에이전트 워크로드 집계가 오염된다. 목적
+ * (사람별 저장소 접근 기록)은 같고 그릇만 분리한다.
+ */
+const GITHUB_APP_ACCESS_LOGS = "github_app_access_logs";
+
+/** App 이 아직 등록되지 않았으면(=env 미설정) 기능 전체가 잠들어 있다. */
+function githubAppConfigured(): boolean {
+  return (
+    !!GITHUB_APP_ID &&
+    !!githubAppPrivateKey() &&
+    !!GITHUB_APP_SETUP_STATE_SECRET
+  );
+}
+
+function githubAppPrivateKey(): string | null {
+  return normalizePrivateKeyPem(GITHUB_APP_PRIVATE_KEY_RAW);
+}
+
+/** 요청 시마다 즉석 생성. 반환값을 로그·저장하지 않는다(설계 §3.3). */
+function githubAppJwt(): string {
+  const pem = githubAppPrivateKey();
+  if (!pem) throw new Error("GitHub App private key is not configured");
+  return buildAppJwt({
+    appId: GITHUB_APP_ID,
+    privateKeyPem: pem,
+    nowSec: Math.floor(Date.now() / 1000),
+  });
+}
+
+interface GitHubApiResult {
+  status: number;
+  body: unknown;
+}
+
+/**
+ * App JWT 로 GitHub API 호출. **응답 본문을 로그에 남기지 않는다** — 발급
+ * 엔드포인트의 본문에는 토큰이 들어 있다. 남기는 것은 status 뿐이다.
+ */
+async function githubAppApi(
+  path: string,
+  init: { method: "GET" | "POST"; body?: unknown }
+): Promise<GitHubApiResult> {
+  const res = await fetch(`${GITHUB_API_BASE}${path}`, {
+    method: init.method,
+    headers: {
+      authorization: `Bearer ${githubAppJwt()}`,
+      accept: "application/vnd.github+json",
+      "x-github-api-version": GITHUB_API_VERSION,
+      "user-agent": "marblo-app",
+      ...(init.body ? { "content-type": "application/json" } : {}),
+    },
+    ...(init.body ? { body: JSON.stringify(init.body) } : {}),
+  });
+  let body: unknown = null;
+  try {
+    body = await res.json();
+  } catch {
+    body = null;
+  }
+  return { status: res.status, body };
+}
+
+/** 감사 기록 — fail-soft. 원장 write 실패가 발급을 막지 않는다. */
+async function recordGitHubAppAccess(entry: {
+  uid: string;
+  projectId: string;
+  slug: RepoSlug | null;
+  installationId: string | null;
+  outcome: "issued" | "denied" | "error";
+  reason: string | null;
+}): Promise<void> {
+  try {
+    const row = buildAuditEntry({ ...entry, nowMs: Date.now() });
+    await db.collection(GITHUB_APP_ACCESS_LOGS).add({
+      ...row,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (err) {
+    functions.logger.warn(
+      "[githubApp] access log write failed (non-fatal)",
+      err instanceof Error ? err.message : "unknown"
+    );
+  }
+}
+
+function projectSnapshotForIssue(
+  snap: admin.firestore.DocumentSnapshot
+): ProjectSnapshotForIssue {
+  const data = snap.exists ? snap.data() || {} : {};
+  const members = Array.isArray(data.members)
+    ? data.members.filter((m: unknown): m is string => typeof m === "string")
+    : [];
+  return {
+    exists: snap.exists,
+    ownerId: typeof data.ownerId === "string" ? data.ownerId : null,
+    members,
+    githubInstallationId: data.githubInstallationId,
+    gitRemoteUrl: data.gitRemoteUrl,
+  };
+}
+
+/** 프로젝트 **오너**의 유효 플랜. enforceProjectLimit 과 같은 규율. */
+async function ownerEntitledPlan(ownerId: string | null): Promise<string> {
+  if (!ownerId) return "free";
+  const subSnap = await db.collection("subscriptions").doc(ownerId).get();
+  const sub = subSnap.exists ? subSnap.data() || {} : {};
+  return resolveEntitledPlan(
+    {
+      status: typeof sub.status === "string" ? sub.status : null,
+      planType: typeof sub.planType === "string" ? sub.planType : null,
+      currentPeriodEndMs: tsToMillis(sub.currentPeriodEnd),
+    },
+    Date.now()
+  );
+}
+
+function requireProjectId(data: unknown): string {
+  const raw =
+    data && typeof data === "object"
+      ? (data as { projectId?: unknown }).projectId
+      : undefined;
+  if (typeof raw !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(raw)) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "projectId 가 필요합니다."
+    );
+  }
+  return raw;
+}
+
+/**
+ * 설치 시작 — **오너만** 호출할 수 있다(설계 §3.1 [2]).
+ *
+ * 서명된 state nonce 를 발급해 GitHub 설치 URL 을 돌려준다. nonce 는 uid·
+ * projectId 에 바인딩되고 10분 뒤 만료되며, 콜백에서 **1회만** 소비된다.
+ * 그래서 남이 자기 설치를 남의 프로젝트에 붙일 수 없다.
+ */
+export const startGitHubAppInstall = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다."
+      );
+    }
+    if (!githubAppConfigured() || !GITHUB_APP_SLUG) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "GitHub App 이 아직 설정되지 않았습니다."
+      );
+    }
+    const uid = context.auth.uid;
+    const projectId = requireProjectId(data);
+
+    const snap = await db.collection("projects").doc(projectId).get();
+    const project = projectSnapshotForIssue(snap);
+    // ★오너만. 멤버가 설치를 바인딩하면 오너가 모르는 사이 저장소 접근이
+    // 위임된다.
+    if (!project.exists || project.ownerId !== uid) {
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "프로젝트 오너만 App 을 설치할 수 있습니다."
+      );
+    }
+
+    const nonceRef = db.collection(GITHUB_APP_SETUP_STATES).doc();
+    const exp = Date.now() + SETUP_STATE_TTL_MS;
+    await nonceRef.set({
+      uid,
+      projectId,
+      expiresAt: exp,
+      consumedAt: null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const state = signSetupState(
+      { nonce: nonceRef.id, uid, projectId, exp },
+      GITHUB_APP_SETUP_STATE_SECRET
+    );
+    return {
+      installUrl: buildInstallUrl(GITHUB_APP_SLUG, state),
+      expiresAt: exp,
+    };
+  }
+);
+
+/**
+ * 설치 콜백(GitHub 의 Setup URL). `?installation_id=&setup_action=&state=`
+ *
+ * 1. state 서명 검증 → 2. nonce 1회 소비(트랜잭션) → 3. nonce.uid 가 그
+ * 프로젝트 오너인지 재확인 → 4. App JWT 로 installation 실재 확인 →
+ * 5. Admin SDK 로 `githubInstallationId` 기록.
+ *
+ * ★5번이 Admin SDK 인 게 핵심이다. `githubInstallationId` 는 firestore.rules
+ * 의 어떤 클라 allowlist 에도 없다(#1096) — 서버만 쓴다.
+ */
+export const githubAppSetupCallback = functions.https.onRequest(
+  async (req, res) => {
+    const fail = (code: number, message: string): void => {
+      // 사람이 브라우저에서 보는 화면이다. 내부 사유를 노출하지 않는다.
+      res
+        .status(code)
+        .set("content-type", "text/html; charset=utf-8")
+        .send(
+          `<!doctype html><meta charset="utf-8"><title>Marblo</title>` +
+            `<body style="font-family:system-ui;padding:40px;max-width:640px">` +
+            `<h2>GitHub App 설치를 완료하지 못했습니다</h2><p>${message}</p>` +
+            `<p>Marblo 앱에서 다시 시도해 주세요.</p></body>`
+        );
+    };
+
+    if (req.method !== "GET") {
+      res.set("Allow", "GET").status(405).send("Method Not Allowed");
+      return;
+    }
+    if (!githubAppConfigured()) {
+      fail(503, "서버 설정이 아직 완료되지 않았습니다.");
+      return;
+    }
+
+    const installationId = normalizeInstallationId(req.query.installation_id);
+    const verified = verifySetupState(
+      req.query.state,
+      GITHUB_APP_SETUP_STATE_SECRET,
+      Date.now()
+    );
+    if (!verified.ok) {
+      functions.logger.warn(
+        `[githubAppSetupCallback] state rejected (${verified.reason})`
+      );
+      fail(400, "설치 요청이 만료되었거나 유효하지 않습니다.");
+      return;
+    }
+    if (!installationId) {
+      fail(400, "설치 정보를 읽지 못했습니다.");
+      return;
+    }
+
+    const { uid, projectId, nonce } = verified.payload;
+
+    // nonce 1회 소비 — 같은 state 로 두 번 바인딩할 수 없다.
+    const nonceRef = db.collection(GITHUB_APP_SETUP_STATES).doc(nonce);
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(nonceRef);
+        const d = snap.exists ? snap.data() || {} : null;
+        if (!d) throw new Error("nonce-missing");
+        if (d.consumedAt) throw new Error("nonce-consumed");
+        if (d.uid !== uid || d.projectId !== projectId) {
+          throw new Error("nonce-mismatch");
+        }
+        if (typeof d.expiresAt === "number" && d.expiresAt <= Date.now()) {
+          throw new Error("nonce-expired");
+        }
+        tx.update(nonceRef, { consumedAt: Date.now() });
+      });
+    } catch (err) {
+      functions.logger.warn(
+        `[githubAppSetupCallback] nonce rejected (${
+          err instanceof Error ? err.message : "unknown"
+        })`
+      );
+      fail(400, "설치 요청이 이미 사용되었거나 만료되었습니다.");
+      return;
+    }
+
+    // 오너 재확인 — nonce 발급 이후 소유권이 바뀌었을 수 있다.
+    const projectSnap = await db.collection("projects").doc(projectId).get();
+    const project = projectSnapshotForIssue(projectSnap);
+    if (!project.exists || project.ownerId !== uid) {
+      await recordGitHubAppAccess({
+        uid,
+        projectId,
+        slug: null,
+        installationId,
+        outcome: "denied",
+        reason: "setup-not-owner",
+      });
+      fail(403, "이 프로젝트의 오너만 설치를 연결할 수 있습니다.");
+      return;
+    }
+
+    // installation 실재 확인.
+    let installation: GitHubApiResult;
+    try {
+      installation = await githubAppApi(
+        `/app/installations/${installationId}`,
+        {
+          method: "GET",
+        }
+      );
+    } catch (err) {
+      functions.logger.error(
+        "[githubAppSetupCallback] GitHub 호출 실패",
+        err instanceof Error ? err.message : "unknown"
+      );
+      fail(502, "GitHub 과 통신하지 못했습니다.");
+      return;
+    }
+    if (installation.status !== 200) {
+      functions.logger.warn(
+        `[githubAppSetupCallback] installation lookup ${installation.status}`
+      );
+      fail(400, "설치를 확인하지 못했습니다.");
+      return;
+    }
+
+    await db.collection("projects").doc(projectId).set(
+      {
+        githubInstallationId: installationId,
+        githubInstallationLinkedAt:
+          admin.firestore.FieldValue.serverTimestamp(),
+        githubInstallationLinkedBy: uid,
+      },
+      { merge: true }
+    );
+
+    await recordGitHubAppAccess({
+      uid,
+      projectId,
+      slug: null,
+      installationId,
+      outcome: "issued",
+      reason: "installation-linked",
+    });
+
+    res
+      .status(200)
+      .set("content-type", "text/html; charset=utf-8")
+      .send(
+        `<!doctype html><meta charset="utf-8"><title>Marblo</title>` +
+          `<body style="font-family:system-ui;padding:40px;max-width:640px">` +
+          `<h2>GitHub App 설치가 연결되었습니다</h2>` +
+          `<p>이제 이 프로젝트의 팀원은 GitHub 개별 초대 없이 저장소를 받을 수 있습니다.</p>` +
+          `<p>이 창을 닫고 Marblo 로 돌아가세요.</p></body>`
+      );
+  }
+);
+
+/**
+ * installation 토큰 발급 — 설계 §3.2 의 검증 순서를 그대로 구현한다.
+ *
+ * in : { projectId }               ★repo·installationId 를 클라에서 받지 않는다
+ * out: { token, expiresAt, repo }  ★token 은 이 응답에만 존재한다
+ *
+ * 거부 사유는 **뭉뚱그려** 반환한다. 정밀한 사유는 감사 원장에만 남는다 —
+ * 클라에 그대로 주면 projectId·설치 유무 프로빙 도구가 된다.
+ */
+export const issueRepoInstallationToken = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다."
+      );
+    }
+    const uid = context.auth.uid;
+    const projectId = requireProjectId(data);
+
+    if (!githubAppConfigured()) {
+      // App 미등록 = 이 기능이 아직 없는 상태. 클라는 device 경로로 간다.
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "GitHub App 접근을 사용할 수 없습니다."
+      );
+    }
+
+    // ★계정이 털렸을 때 토큰 양산을 막는다(설계 §3.2 2번).
+    const rate = await enforceRateLimit(`ghapp:${uid}:${projectId}`, [
+      ...INSTALLATION_TOKEN_RULES,
+    ]);
+    if (!rate.allowed) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        `요청이 너무 잦습니다. ${rate.retryAfter}초 후 다시 시도하세요.`
+      );
+    }
+
+    // ★감사 write 를 **await 한다.** 콜러블이 응답/던지고 나면 컨테이너가
+    // 얼어붙을 수 있어, 떼어놓은 write 는 조용히 유실된다 — 거부 기록이
+    // 유실되면 원장이 거짓말을 한다.
+    const deny = async (
+      reason: string,
+      slug: RepoSlug | null,
+      inst: string | null
+    ): Promise<functions.https.HttpsError> => {
+      await recordGitHubAppAccess({
+        uid,
+        projectId,
+        slug,
+        installationId: inst,
+        outcome: "denied",
+        reason,
+      });
+      return new functions.https.HttpsError(
+        "failed-precondition",
+        "GitHub App 접근을 사용할 수 없습니다."
+      );
+    };
+
+    const snap = await db.collection("projects").doc(projectId).get();
+    const project = projectSnapshotForIssue(snap);
+    const decision = evaluateInstallationTokenRequest({
+      uid,
+      project,
+      ownerPlan: await ownerEntitledPlan(project.ownerId),
+    });
+    if (!decision.ok) {
+      throw await deny(decision.code, null, null);
+    }
+    const { installationId, slug } = decision;
+
+    // ★설계 §3.2 7번 — GitHub 에 되묻는다. 룰만 믿지 않는다.
+    //
+    // 설계 원문은 `GET /installation/repositories` 로 적혀 있지만, 그 엔드포인트는
+    // **installation 토큰**을 먼저 발급해야 부를 수 있다(= 검증 전에 넓은 토큰을
+    // 한 번 만들어야 한다). 같은 보증을 토큰 발급 **전에** 얻는 경로가
+    // `GET /repos/{owner}/{repo}/installation` 이다(App JWT 로 호출 가능):
+    //   - 이 저장소에 App 이 안 깔렸으면 404 → 거부
+    //   - 오너가 App 을 제거했으면 404 → 거부  ★탈퇴/제거 차단이 여기서 실동작
+    //   - 남의 저장소면 다른 installation id → mismatch → 거부 (크로스테넌트 차단)
+    // 보증은 동일하고 노출 표면은 더 작다. 판정은 verifyRepoInstallationBinding.
+    let lookup: GitHubApiResult;
+    try {
+      lookup = await githubAppApi(
+        `/repos/${encodeURIComponent(slug.owner)}/${encodeURIComponent(
+          slug.repo
+        )}/installation`,
+        { method: "GET" }
+      );
+    } catch (err) {
+      functions.logger.error(
+        "[issueRepoInstallationToken] GitHub 조회 실패",
+        err instanceof Error ? err.message : "unknown"
+      );
+      throw await deny("github-unreachable", slug, installationId);
+    }
+    // ★판정은 순수 함수가 한다 — 여기서 다시 조건을 세우지 않는다. 그래야
+    // "오너가 App 을 제거하면 끊긴다" 를 라이브 App 없이 테스트가 증명한다.
+    const access = evaluateRepoInstallationLookup(
+      lookup.status,
+      lookup.body,
+      installationId,
+      slug
+    );
+    if (!access.ok) {
+      throw await deny(access.reason, slug, installationId);
+    }
+
+    // 다운스코프 발급 — 이 저장소 1개 · contents:read.
+    let minted: GitHubApiResult;
+    try {
+      minted = await githubAppApi(
+        `/app/installations/${installationId}/access_tokens`,
+        {
+          method: "POST",
+          body: {
+            repositories: [slug.repo],
+            permissions: { ...INSTALLATION_TOKEN_PERMISSIONS },
+          },
+        }
+      );
+    } catch (err) {
+      functions.logger.error(
+        "[issueRepoInstallationToken] GitHub 발급 실패",
+        err instanceof Error ? err.message : "unknown"
+      );
+      throw await deny("github-unreachable", slug, installationId);
+    }
+    // ★201 여부 + 다운스코프 검증을 한 함수가 한다. 넓게 온 토큰은 버린다.
+    const checked = evaluateMintResponse(minted.status, minted.body, slug);
+    if (!checked.ok) {
+      functions.logger.warn(
+        `[issueRepoInstallationToken] mint rejected (${checked.reason})`
+      );
+      throw await deny(checked.reason, slug, installationId);
+    }
+
+    await recordGitHubAppAccess({
+      uid,
+      projectId,
+      slug,
+      installationId,
+      outcome: "issued",
+      reason: null,
+    });
+
+    // ★서버는 이 토큰을 저장하지 않는다(설계 §5-B2). 응답에 한 번 실려 끝.
+    return {
+      token: checked.minted.token,
+      expiresAt: checked.minted.expiresAtMs,
+      repo: repoSlugKey(slug),
+    };
+  }
+);
+
+/**
+ * App 상태 조회 — 토큰을 발급하지 않는다. 화면이 "설치됨/재설치 필요" 를
+ * 보여주기 위한 최소 정보만 준다(설계 §5-B3: `{installed, repoAccessible}`).
+ */
+export const getGitHubAppStatus = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다."
+      );
+    }
+    const uid = context.auth.uid;
+    const projectId = requireProjectId(data);
+    const off = { installed: false, repoAccessible: false, configured: false };
+    if (!githubAppConfigured()) return off;
+
+    const snap = await db.collection("projects").doc(projectId).get();
+    const project = projectSnapshotForIssue(snap);
+    const decision = evaluateInstallationTokenRequest({
+      uid,
+      project,
+      ownerPlan: await ownerEntitledPlan(project.ownerId),
+    });
+    if (!decision.ok) {
+      return {
+        installed: false,
+        repoAccessible: false,
+        configured: true,
+      };
+    }
+
+    try {
+      const lookup = await githubAppApi(
+        `/repos/${encodeURIComponent(decision.slug.owner)}/${encodeURIComponent(
+          decision.slug.repo
+        )}/installation`,
+        { method: "GET" }
+      );
+      const bound = evaluateRepoInstallationLookup(
+        lookup.status,
+        lookup.body,
+        decision.installationId,
+        decision.slug
+      ).ok;
+      return { installed: true, repoAccessible: bound, configured: true };
+    } catch {
+      // 조회 실패는 "모름" 이다 — 접근 가능으로 위장하지 않는다.
+      return { installed: true, repoAccessible: false, configured: true };
+    }
+  }
+);

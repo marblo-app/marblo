@@ -1052,6 +1052,23 @@ contextBridge.exposeInMainWorld("electronAPI", {
     status: (userId: string) => ipcRenderer.invoke("github:status", userId),
     disconnect: (userId: string) =>
       ipcRenderer.invoke("github:disconnect", userId),
+    // ── GitHub App 자동상속 (티켓 ddbN2KvxHZ08rakiVfL0) ────────────────────
+    // ★위의 device 채널은 그대로다 — App 은 대체가 아니라 추가다(설계 §6 G4).
+    // ★어떤 응답에도 토큰이 실리지 않는다. status 는 boolean 3개뿐.
+    //   installed && !repoAccessible → 오너가 App 을 제거했거나 저장소를
+    //   이전했다는 뜻이고, 화면은 그 때 재설치를 안내하면 된다.
+    appStatus: (
+      projectId: string
+    ): Promise<{
+      installed: boolean;
+      repoAccessible: boolean;
+      configured: boolean;
+    }> => ipcRenderer.invoke("github:appStatus", projectId),
+    // 오너만 성공한다(서버가 판정). 시스템 브라우저로 설치 화면을 연다.
+    appInstall: (
+      projectId: string
+    ): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke("github:appInstall", projectId),
   },
   // Google Drive 읽기 전용 커넥터 (티켓 zqNxS9904aeeBEug1uAD + MCTHALmNAWPpilTFwe8o).
   // ★connect 는 시스템 브라우저를 열어 동의를 받는다(앱 창은 navigate 안 함).

@@ -273,6 +273,18 @@ import {
   removeGitHubToken,
   saveGitHubToken,
 } from "./github-token-store";
+// GitHub App 자동상속 (티켓 ddbN2KvxHZ08rakiVfL0). ★device OAuth 를 대체하지
+// 않는다 — 두 경로가 같은 타입을 만들어 **하나의 clone 구현**에 들어간다.
+import {
+  resolveCloneCredential,
+  type CloneCredential,
+} from "./github-clone-credential";
+import {
+  getGitHubAppStatus,
+  issueRepoInstallationToken,
+  readProjectInstallationId,
+  startGitHubAppInstall,
+} from "./github-app-client";
 import {
   connectGoogleDrive,
   createUserCalendarConnector,
@@ -5797,6 +5809,44 @@ ipcMain.handle("github:disconnect", (_event, userId: unknown) => {
   }
 });
 
+// ── GitHub App 자동상속 (티켓 ddbN2KvxHZ08rakiVfL0) ────────────────────────
+//
+// ★device OAuth 채널(위)의 시그니처·반환형은 하나도 건드리지 않았다 —
+// 설계 §6.2 G4(IPC 계약 불변). 아래 두 채널은 **추가**일 뿐이다.
+//
+// ★어떤 응답에도 토큰이 실리지 않는다(설계 §5-B3). status 는 boolean 3개,
+// install 은 URL 하나뿐이다.
+
+function validProjectIdArg(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+}
+
+/** 이 프로젝트에 App 이 붙어 있는가 / 지금도 저장소를 열 수 있는가. */
+ipcMain.handle("github:appStatus", async (_event, projectId: unknown) => {
+  if (!validProjectIdArg(projectId)) {
+    return { installed: false, repoAccessible: false, configured: false };
+  }
+  return getGitHubAppStatus(projectId);
+});
+
+/**
+ * 오너의 설치 시작. ★앱 창을 navigate 하지 않고 **시스템 브라우저**로 연다
+ * (Drive 커넥터와 같은 규율) — GitHub 로그인 화면을 앱 안에 띄우지 않는다.
+ */
+ipcMain.handle("github:appInstall", async (_event, projectId: unknown) => {
+  if (!validProjectIdArg(projectId)) {
+    return { ok: false, error: "프로젝트 정보가 올바르지 않습니다." };
+  }
+  const started = await startGitHubAppInstall(projectId);
+  if (!started.ok || !started.installUrl) return started;
+  try {
+    await shell.openExternal(started.installUrl);
+  } catch {
+    return { ok: false, error: "브라우저를 열지 못했습니다." };
+  }
+  return { ok: true };
+});
+
 // ── Google Drive 커넥터 (읽기 전용, 티켓 zqNxS9904aeeBEug1uAD) ──────────────
 //
 // 지식위키·비서 에이전트 에픽의 선행 기반. 여기 있는 것은 커넥터까지고, 인덱스
@@ -6740,9 +6790,28 @@ ipcMain.handle(
       userId?: string;
     }
   ) => {
-    const githubToken = validGitHubOAuthUserId(userId)
-      ? getGitHubToken(safeStorage, userId)
-      : null;
+    // ★자격증명 분기 선택 (티켓 ddbN2KvxHZ08rakiVfL0, 설계 §6).
+    //
+    // App 설치가 바인딩된 프로젝트면 서버에서 1시간짜리 installation 토큰을
+    // 받아 쓰고, 그 외 전부는 **지금까지와 똑같이** device 토큰을 쓴다.
+    // 어떤 실패도 device 경로를 막지 않는다(G2) — resolveCloneCredential 이
+    // 던지지 않고 흡수한다.
+    //
+    // ★토큰은 여기서 cloneRepo 로만 흘러간다. cloneRepo 는 #1097 이후
+    // `GIT_CONFIG_*` 로 헤더만 주입하므로 argv 에도 `.git/config` 에도 남지
+    // 않는다. **clone 구현을 새로 만들지 않는다.**
+    const credential: CloneCredential = await resolveCloneCredential(
+      { projectId, repoUrl },
+      {
+        getInstallationId: readProjectInstallationId,
+        issueInstallationToken: issueRepoInstallationToken,
+        getDeviceToken: () =>
+          validGitHubOAuthUserId(userId)
+            ? getGitHubToken(safeStorage, userId)
+            : null,
+      }
+    );
+    const githubToken = credential.kind === "none" ? null : credential.token;
     const result = await cloneRepo({ repoUrl, parentDir, githubToken });
     // 성공 시 이 머신의 연결 단일 진실원(connection-store)에도 기록해
     // Harness 탭/미션 선택이 즉시 연결 상태를 본다. repoUrl/defaultBranch
