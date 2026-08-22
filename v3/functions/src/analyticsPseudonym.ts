@@ -97,14 +97,20 @@ import { createHmac } from "node:crypto";
  *   값**이다(주문번호는 PG 콘솔 조회키, 문서키는 `${uid}_${ms}` 라 uid 를
  *   품는다). 같은 솔트·같은 스킴을 쓰므로 새 가명 체계가 생기지 않는다.
  *
- * - `teamMember`: **팀 오버뷰 응답 전용** 가명 공간 — `tm_` + HMAC(salt, …).
- *   설계 #1103 §4.6. ★계정축 사람 키(`us_`)를 재사용하면 안 되는 이유가 있다:
- *   팀 응답은 가명 옆에 **표시명**을 싣는데, 사람 키는 링크축 표의 조인 키다.
- *   두 가명이 같으면 (팀 응답) 키→이름 ⨝ (링크표) 키→설치키 로
- *   **설치키 → 사람 이름** 이 성립한다. 즉 팀 화면이 링크표의 이름 사전이 되고,
- *   `PERSON_AXIS_EFFECTIVE_FROM` 게이트가 막으려던 결과가 게이트를 건드리지도
- *   않고 성립한다. kind 를 달리하면 같은 솔트라도 다이제스트가 달라져 조인이
- *   성립하지 않는다. ★바깥으로 나가는 가명은 그 화면 전용 공간이다.
+ * - `teamMember`: **팀 축** 구성원 가명. `tm_` + HMAC(salt, "teamMember:" + uid) —
+ *   설계 §5.4. 팀 오버뷰의 사용량 탭(`getTeamUsageSummary`)과 감사 탭
+ *   (`getTeamProjectAudit`)이 **이 한 벌을 같이 쓴다.** 두 벌이 생기면 두 탭이
+ *   같은 사람을 다른 가명으로 부르고, 화면이 둘을 대조하지 못한다.
+ *
+ *   ★**여기서 `user` kind 를 재사용하면 안 된다**(설계 §5.4). 팀 응답은 가명 옆에
+ *   표시 이름을 실을 수 있는데, `user_key` 는 링크축
+ *   `marblo_identity.analytics_user_install` 의 조인 키다. 두 가명이 같으면
+ *   `user_key → displayName` ⨝ `user_key → install_key` 로 **익명 설치 기록이
+ *   사람 이름으로 되짚어진다** — `PERSON_AXIS_EFFECTIVE_FROM` 게이트가 막으려던
+ *   결과가 게이트를 건드리지도 않고 성립한다. kind 를 달리하면 같은 솔트라도
+ *   다이제스트가 달라져 조인이 성립하지 않는다.
+ *
+ *   ★바깥으로 나가는 가명은 그 화면 전용 공간이다.
  *
  * ★`person` kind 를 만들지 마라. `person_key` 와 `user_key` 는 같은 uid 에서 나온
  *   **서로 다른 두 값**이다(kind 가 HMAC 입력에 들어가므로). 둘을 다 두면
@@ -129,7 +135,9 @@ export type AnalyticsIdKind =
   | "teamMember"
   // 계정축 — analytics_purchase (6EnTiEzL7T2NpjOnTTSj)
   | "order"
-  | "purchase";
+  | "purchase"
+  // 팀 축 — 팀 오버뷰(사용량·감사) 응답의 구성원 가명. 설계 §5.4.
+  | "teamMember";
 
 /** 가명 앞에 붙는 짧은 태그 — BQ 에서 눈으로 종류를 구분하기 위한 것뿐이다. */
 const KIND_PREFIX: Record<AnalyticsIdKind, string> = {

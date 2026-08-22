@@ -183,6 +183,21 @@ import { classifyIdScheme } from "./analyticsIdScheme";
 import { resolveGrantPlanType } from "./grantPlan";
 import { buildProjectAudit, toMillis } from "./projectAudit";
 import {
+  DEFAULT_TEAM_AUDIT_LIMIT,
+  PROJECT_EVENT_TOOLS,
+  decodeAuditCursor,
+  deniedTeamAudit,
+  narrowAuditForTeam,
+  normalizeLimit,
+  runtimeNote,
+  scopeForRole,
+  type LedgerEventInput,
+  type MergeEventInput,
+  type TeamAuditProjectRef,
+  type TeamProjectAuditResult,
+  type TeamProjectRole,
+} from "./teamAudit";
+import {
   verifyPaddleSignature,
   classifyTossPaymentResponse,
   resolveTossWebhookAction,
@@ -13871,6 +13886,439 @@ export const getAdminProjectAudit = functions.https.onCall(
       );
     }
 
+    return result;
+  }
+);
+
+// ════════════════════════════════════════════════════════════════════════════
+// 팀 프로젝트 감사 (읽기 전용) — 팀 오버뷰 "감사" 탭
+// ════════════════════════════════════════════════════════════════════════════
+// 설계: docs/team-usage-overview-design-2026-08-21.md §3.2 · §5 · §7 · §12.
+// 경계 판정·좁히기는 전부 teamAudit.ts(순수, node --test). 여기서는 **역할 확인과
+// Firestore fetch** 만 한다.
+//
+// ★위의 `getAdminProjectAudit` 와 대상은 같지만 **축이 다르다.**
+//   `getAdminProjectAudit` = 마블로 운영자(`ADMIN_UID`) 축 · 전 테넌트
+//   `getTeamProjectAudit`  = 팀 오너/admin/member 축 · 한 프로젝트
+//   ★`requireAdmin` 을 부르지 않는다. 두 축을 섞으면 "이 사람이 왜 이걸 보나" 를
+//   두 번 다시 풀 수 없다.
+//
+// ★Admin SDK 는 보안 규칙을 우회한다. 그래서 이 핸들러는 `firestore.rules` 의
+//   `isProjectOwner`/`isAdminOrOwner`/`isProjectMember` 와 **같은 판정을 서버가
+//   다시** 한다. 룰이 막아주리라 기대하지 않는다.
+//
+// ★쓰기 경로가 없다. `audit_logs` 는 읽기 전용이다.
+
+/** 팀 감사 스캔 상한. 감사는 최근 사건을 보는 화면이라 전량 스캔하지 않는다. */
+const TEAM_AUDIT_EVENT_SCAN_LIMIT = 1000;
+const TEAM_AUDIT_TASK_SCAN_LIMIT = 500;
+const TEAM_AUDIT_AGENT_SCAN_LIMIT = 300;
+const TEAM_AUDIT_LEDGER_CONTEXT_LIMIT = 500;
+const TEAM_AUDIT_MISSION_SCAN_LIMIT = 200;
+const TEAM_AUDIT_MERGE_SCAN_LIMIT = 200;
+const TEAM_AUDIT_PROJECT_SCAN_LIMIT = 100;
+/** 활동은 taskId 축이라 `in` 청크(30개 상한)로 읽는다. 30 × 2. */
+const TEAM_AUDIT_ACTIVITY_TASK_CAP = 60;
+
+/** 허용목록을 Firestore `in` 절로 쓸 배열. 9개 — `in` 상한(30) 안이다. */
+const TEAM_AUDIT_EVENT_TOOL_LIST = [...PROJECT_EVENT_TOOLS];
+
+function teamAuditString(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return t === "" ? null : t;
+}
+
+/**
+ * 팀 축 역할 판정. ★`firestore.rules` 와 같은 판정을 서버가 다시 한다.
+ *
+ * 순서가 의미 있다: owner → admin → member. `memberRoles` 문서가 없으면 룰의
+ * `getMemberRole` 기본값과 같게 'member' 로 본다(단, `members` 배열에 있을 때만).
+ */
+async function resolveTeamProjectRole(
+  uid: string,
+  projectId: string
+): Promise<{ role: TeamProjectRole; projectName: string | null }> {
+  let projectDoc: FirebaseFirestore.DocumentSnapshot;
+  try {
+    projectDoc = await db.collection("projects").doc(projectId).get();
+  } catch (err) {
+    functions.logger.warn(
+      `[getTeamProjectAudit] project 조회 실패(projectId=${projectId}): ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+    // ★읽지 못했으면 "권한 있음" 으로 접지 않는다. 모르면 닫는다.
+    return { role: "none", projectName: null };
+  }
+  if (!projectDoc.exists) return { role: "none", projectName: null };
+
+  const data = (projectDoc.data() ?? {}) as Record<string, unknown>;
+  const projectName = teamAuditString(data.name);
+  if (teamAuditString(data.ownerId) === uid) {
+    return { role: "owner", projectName };
+  }
+
+  const members = Array.isArray(data.members) ? data.members : [];
+  const isMember = members.some((m) => m === uid);
+
+  try {
+    const roleDoc = await db
+      .collection("memberRoles")
+      .doc(`${projectId}_${uid}`)
+      .get();
+    if (roleDoc.exists) {
+      const roleData = (roleDoc.data() ?? {}) as Record<string, unknown>;
+      // ★docId ↔ 본문 결속 확인. 룰(firestore.rules:594)이 같은 규약을 강제하지만
+      //   Admin SDK 는 룰을 안 타므로 여기서 다시 본다.
+      const boundProject = teamAuditString(roleData.projectId);
+      if (boundProject === null || boundProject === projectId) {
+        if (teamAuditString(roleData.role) === "admin") {
+          return { role: "admin", projectName };
+        }
+      }
+    }
+  } catch (err) {
+    functions.logger.warn(
+      `[getTeamProjectAudit] memberRoles 조회 실패(projectId=${projectId}): ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+    // admin 승격만 못 한다 — 아래 member 판정은 그대로 간다(좁은 쪽으로 실패).
+  }
+
+  return { role: isMember ? "member" : "none", projectName };
+}
+
+/**
+ * 호출자가 역할을 가진 프로젝트 목록(셀렉터용).
+ *
+ * ★클라가 준 id 를 권한 근거로 쓰지 않는다(설계 §5.3). 서버가 uid 로 만든 이
+ * 집합이 스코프의 상한이고, 클라 입력은 이 집합과의 교집합으로만 쓰인다.
+ */
+async function resolveTeamProjectRefs(
+  uid: string
+): Promise<{ refs: TeamAuditProjectRef[]; truncated: boolean }> {
+  const [ownedRes, memberRes] = await Promise.all([
+    auditQuery("team:projects(owner)", () =>
+      db
+        .collection("projects")
+        .where("ownerId", "==", uid)
+        .limit(TEAM_AUDIT_PROJECT_SCAN_LIMIT)
+        .get()
+    ),
+    auditQuery("team:projects(member)", () =>
+      db
+        .collection("projects")
+        .where("members", "array-contains", uid)
+        .limit(TEAM_AUDIT_PROJECT_SCAN_LIMIT)
+        .get()
+    )
+  ]);
+
+  // ★셀렉터의 role 은 **하한**이다. `memberRoles` 를 프로젝트마다 읽으면 한 호출에
+  //   최대 100 read 가 더 붙으므로, 목록에서는 owner 만 정확히 가르고 나머지는
+  //   'member' 로 둔다. **데이터를 가르는 역할은 이 목록이 아니라** 선택된 프로젝트
+  //   하나에 대한 `resolveTeamProjectRole` 결과이고, 그건 항상 정확하다.
+  const byId = new Map<string, TeamAuditProjectRef>();
+  for (const doc of ownedRes.docs) {
+    byId.set(doc.id, {
+      id: doc.id,
+      name: teamAuditString(doc.name),
+      role: "owner",
+    });
+  }
+  for (const doc of memberRes.docs) {
+    // owner 로 이미 잡혔으면 격상 상태를 유지한다.
+    if (byId.has(doc.id)) continue;
+    byId.set(doc.id, {
+      id: doc.id,
+      name: teamAuditString(doc.name),
+      role: "member",
+    });
+  }
+  // ★상한에 닿았으면 잘린 것이다. Firestore 는 "몇 개가 더 있었나" 를 알려주지
+  //   않으므로 개수를 지어내지 않고 **사실만** 돌려준다.
+  const truncated =
+    ownedRes.docs.length >= TEAM_AUDIT_PROJECT_SCAN_LIMIT ||
+    memberRes.docs.length >= TEAM_AUDIT_PROJECT_SCAN_LIMIT;
+  return { refs: [...byId.values()], truncated };
+}
+
+/**
+ * 팀 전용 구성원 가명. `tm_` + HMAC(salt, "teamMember:" + uid).
+ *
+ * ★솔트가 없으면 **null** 이다 — 원시 uid 폴백은 조용히 약속을 깨는 길이다
+ * (`analyticsPseudonym.ts` 상단 fail-safe 규율과 같은 방향).
+ * ★`user` kind 를 재사용하지 않는다 — 링크축 조인이 성립해 익명 설치가 이름으로
+ *   되짚어진다(설계 §5.4).
+ */
+function makeTeamMemberKey(uid: string, salt: string | null): string | null {
+  const key = pseudonymizeAnalyticsId("teamMember", uid, salt);
+  return typeof key === "string" ? key : null;
+}
+
+export const getTeamProjectAudit = functions.https.onCall(
+  async (data, context): Promise<TeamProjectAuditResult> => {
+    // ★신원의 출처는 `context.auth` 하나뿐이다. 클라 제어 헤더는 읽지 않는다
+    //   (설계 §5.3-2). ★requireAdmin 은 부르지 않는다 — 다른 축이다.
+    const uid = context.auth?.uid;
+    if (!uid) {
+      throw new functions.https.HttpsError("unauthenticated", "Login required");
+    }
+
+    const nowMs = Date.now();
+    const limit = normalizeLimit(data?.limit ?? DEFAULT_TEAM_AUDIT_LIMIT);
+    const rawCursor = data?.cursor;
+    const cursor =
+      rawCursor == null || rawCursor === ""
+        ? null
+        : decodeAuditCursor(rawCursor);
+    if (rawCursor != null && rawCursor !== "" && cursor === null) {
+      // ★조용히 1페이지로 접으면 화면이 같은 페이지를 무한히 돈다.
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "cursor 를 해석할 수 없다. 이전 응답의 page.nextCursor 를 그대로 넘겨라."
+      );
+    }
+
+    const { refs: projects, truncated: projectsTruncated } =
+      await resolveTeamProjectRefs(uid);
+    const requested = teamAuditString(data?.projectId);
+
+    // ★클라가 준 projectId 는 **선택**일 뿐 권한 근거가 아니다(설계 §5.3-1).
+    //   바로 아래 `resolveTeamProjectRole` 이 그 프로젝트에 대한 역할을 서버가
+    //   직접 확인하고, 역할이 없으면 어떤 행도 나가지 않는다. 즉 클라 입력으로
+    //   스코프를 넓히는 길이 없다.
+    const projectId =
+      requested ?? (projects.length > 0 ? projects[0].id : null);
+    if (!projectId) {
+      return deniedTeamAudit(nowMs, "no_project");
+    }
+
+    const { role, projectName } = await resolveTeamProjectRole(uid, projectId);
+    const scope = scopeForRole(role);
+    if (role === "none" || scope === null) {
+      // ★존재하지 않는 프로젝트와 남의 프로젝트가 **구분되지 않는** 같은 응답이다
+      //   — 그래야 열람 시도가 존재 탐지가 되지 않는다(설계 §5.3).
+      return deniedTeamAudit(nowMs, "no_role");
+    }
+
+    // 셀렉터 목록에 현재 프로젝트의 실제 역할을 반영한다(admin 은 members 배열
+    // 조회만으로는 안 잡힌다).
+    const projectRefs: TeamAuditProjectRef[] = (() => {
+      const existing = projects.find((p) => p.id === projectId);
+      if (existing) {
+        return projects.map((p) => (p.id === projectId ? { ...p, role } : p));
+      }
+      return [{ id: projectId, name: projectName, role }, ...projects];
+    })();
+
+    const salt = readAnalyticsIdSalt();
+    const memberKeyCache = new Map<string, string | null>();
+    const memberKeyOf = (rawUid: string): string | null => {
+      const cached = memberKeyCache.get(rawUid);
+      if (cached !== undefined) return cached;
+      const key = makeTeamMemberKey(rawUid, salt);
+      memberKeyCache.set(rawUid, key);
+      return key;
+    };
+    const selfMemberKey = makeTeamMemberKey(uid, salt);
+
+    // ── 1) 사건 원장 — ★허용목록으로 서버에서 거른다 ──────────────────────
+    //   `in` 절이라 목록 밖 툴은 Firestore 밖으로 아예 안 나온다. self 스코프면
+    //   `actorUid` 동등절을 추가해 **남의 행을 애초에 읽지 않는다.**
+    //   색인: (projectId, toolName, createdAt) / (projectId, actorUid, toolName,
+    //   createdAt) — firestore.indexes.json 에 이미 있다.
+    const eventsRes = await auditQuery("team:audit_logs(events)", () => {
+      let q: FirebaseFirestore.Query = db
+        .collection("audit_logs")
+        .where("projectId", "==", projectId);
+      if (scope === "self") q = q.where("actorUid", "==", uid);
+      return q
+        .where("toolName", "in", TEAM_AUDIT_EVENT_TOOL_LIST)
+        .orderBy("createdAt", "desc")
+        .limit(TEAM_AUDIT_EVENT_SCAN_LIMIT)
+        .get();
+    });
+
+    // ── 2) 프로젝트 축 소스들(요약·주의 필요 판정용). 서로 독립이라 병렬. ──
+    const [tasksRes, agentsRes, missionsRes, contextLedgerRes, mergesRes] =
+      await Promise.all([
+        auditQuery("team:tasks", () =>
+          db
+            .collection("tasks")
+            .where("projectId", "==", projectId)
+            .limit(TEAM_AUDIT_TASK_SCAN_LIMIT)
+            .get()
+        ),
+        auditQuery("team:agents", () =>
+          db
+            .collection("agents")
+            .where("projectId", "==", projectId)
+            .limit(TEAM_AUDIT_AGENT_SCAN_LIMIT)
+            .get()
+        ),
+        auditQuery("team:missions", () =>
+          db
+            .collection("missions")
+            .where("projectId", "==", projectId)
+            .limit(TEAM_AUDIT_MISSION_SCAN_LIMIT)
+            .get()
+        ),
+        // 최근 원장(허용목록 무관) — `failedActions` 수와 마지막 기록 시각만 쓴다.
+        // ★이 행들의 **본문은 응답에 실리지 않는다.** 매퍼가 만든 timeline 은
+        //   버리고, 사건 목록은 위 1) 의 허용목록 결과로만 만든다.
+        auditQuery("team:audit_logs(context)", () =>
+          db
+            .collection("audit_logs")
+            .where("projectId", "==", projectId)
+            .orderBy("createdAt", "desc")
+            .limit(TEAM_AUDIT_LEDGER_CONTEXT_LIMIT)
+            .get()
+        ),
+        auditQuery("team:merge_history", () =>
+          db
+            .collection("merge_history")
+            .where("projectId", "==", projectId)
+            .orderBy("mergedAt", "desc")
+            .limit(TEAM_AUDIT_MERGE_SCAN_LIMIT)
+            .get()
+        )
+      ]);
+
+    // ★에이전트 목록이 상한에 닿았나. 아래 두 곳이 이 값을 쓴다 — 판정 생략과 고지.
+    const agentsTruncated =
+      agentsRes.docs.length >= TEAM_AUDIT_AGENT_SCAN_LIMIT;
+
+    // ── 3) 활동은 taskId 축. 카운트와 시각만 쓴다(본문은 응답에 안 나간다). ──
+    const orderedTaskIds = [...tasksRes.docs]
+      .sort(
+        (a, b) => (toMillis(b.updatedAt) ?? 0) - (toMillis(a.updatedAt) ?? 0)
+      )
+      .map((t) => t.id);
+    const activityTaskIds = orderedTaskIds.slice(
+      0,
+      TEAM_AUDIT_ACTIVITY_TASK_CAP
+    );
+    const activityChunks: string[][] = [];
+    for (let i = 0; i < activityTaskIds.length; i += 30) {
+      activityChunks.push(activityTaskIds.slice(i, i + 30));
+    }
+    const activityResults = await Promise.all(
+      activityChunks.map((chunk, i) =>
+        auditQuery(`team:activities[${i}]`, () =>
+          db.collection("activities").where("taskId", "in", chunk).get()
+        )
+      )
+    );
+    const activities = activityResults.flatMap((r) => r.docs);
+
+    // ── 4) ★매퍼 재사용(설계 §3.2). 새 매퍼를 만들지 않는다. ────────────────
+    const base = buildProjectAudit({
+      projects: [],
+      projectId,
+      tasks: tasksRes.docs,
+      agents: agentsRes.docs,
+      activities,
+      ledger: contextLedgerRes.docs,
+      missions: missionsRes.docs,
+      merges: mergesRes.docs,
+      // ★잘린 목록은 "없다" 가 아니라 "모른다" 다. 잘린 채로 판정하면 상한 밖
+      //   에이전트가 물고 있는 티켓이 전부 '주인 없는 클레임' 거짓 경보로 뜬다
+      //   (projectAudit.evaluateAttention 주석의 실패 모드 그대로).
+      agentsLoaded: agentsRes.ok && !agentsTruncated,
+      nowMs,
+      // 타임라인은 어차피 좁히기에서 통째로 버린다 — 조립 비용만 최소화한다.
+      timelineLimit: 1,
+    });
+
+    // ── 5) 사건 입력 추출. ★`actorUid` 는 여기까지만 산다 — 좁히기가 가명으로
+    //      바꾸고, 응답 타입에는 그 필드 자리가 없다.
+    const ledgerEvents: LedgerEventInput[] = eventsRes.docs.map((doc) => ({
+      id: doc.id,
+      toolName: doc.toolName,
+      atMs: toMillis(doc.createdAt),
+      taskId: teamAuditString(doc.taskId),
+      agentId: teamAuditString(doc.agentId),
+      actorUid: teamAuditString(doc.actorUid),
+      success: typeof doc.success === "boolean" ? doc.success : null,
+    }));
+    const mergeEvents: MergeEventInput[] = mergesRes.docs.map((doc) => {
+      const prNumber = Number(doc.prNumber);
+      return {
+        id: doc.id,
+        atMs: toMillis(doc.mergedAt ?? doc.createdAt),
+        taskId: teamAuditString(doc.taskId),
+        branch: teamAuditString(doc.branch),
+        prNumber: Number.isFinite(prNumber) && prNumber > 0 ? prNumber : null,
+        filesChanged:
+          doc.filesChanged == null ? null : Number(doc.filesChanged) || 0,
+        linesAdded: doc.linesAdded == null ? null : Number(doc.linesAdded) || 0,
+        linesDeleted:
+          doc.linesDeleted == null ? null : Number(doc.linesDeleted) || 0,
+        // ★`repoRoot` 를 **읽어서 넘기지도 않는다** — 타입에 자리가 없다.
+      };
+    });
+
+    const sourcesIncomplete =
+      !eventsRes.ok ||
+      !tasksRes.ok ||
+      !agentsRes.ok ||
+      !missionsRes.ok ||
+      !contextLedgerRes.ok ||
+      !mergesRes.ok ||
+      activityResults.some((r) => !r.ok);
+    // ★자르는 자리는 전부 여기서 센다. 하나라도 빠지면 그 소스는 **조용히** 잘린다
+    //   — 감사에서 조용한 누락은 가장 나쁜 실패다(파일 상단 규율).
+    const scanTruncated =
+      eventsRes.docs.length >= TEAM_AUDIT_EVENT_SCAN_LIMIT ||
+      tasksRes.docs.length >= TEAM_AUDIT_TASK_SCAN_LIMIT ||
+      agentsTruncated ||
+      missionsRes.docs.length >= TEAM_AUDIT_MISSION_SCAN_LIMIT ||
+      mergesRes.docs.length >= TEAM_AUDIT_MERGE_SCAN_LIMIT ||
+      contextLedgerRes.docs.length >= TEAM_AUDIT_LEDGER_CONTEXT_LIMIT ||
+      orderedTaskIds.length > activityTaskIds.length ||
+      projectsTruncated;
+
+    // ── 6) ★팀 경계 강제. 넓히는 경로는 없다. ──────────────────────────────
+    const result = narrowAuditForTeam({
+      base,
+      ledger: ledgerEvents,
+      merges: mergeEvents,
+      scope,
+      role,
+      projects: projectRefs,
+      memberKeyOf,
+      selfMemberKey,
+      limit,
+      cursor,
+      sourcesIncomplete,
+      scanTruncated,
+      agentsLoaded: agentsRes.ok && !agentsTruncated,
+      agentsTruncated,
+      projectsTruncated,
+      // ★활동을 실제로 훑은 티켓만 '정체' 판정 대상이다. 상한에 안 걸렸으면 null
+      //   (= 전부 훑었다). 잘렸을 때만 집합을 넘겨 판정을 좁힌다.
+      activityScannedTaskIds:
+        orderedTaskIds.length > activityTaskIds.length
+          ? new Set(activityTaskIds)
+          : null,
+      nowMs,
+    });
+
+    // ★문장이 아니라 **코드**를 붙인다 — 화면이 ko·en·ja 로 번역할 수 있어야 한다.
+    //   ★솔트 이름(`ANALYTICS_ID_SALT_ENV`)을 응답 문장에 넣지 않는다. env 키 이름은
+    //   서버 설정 정보라 사용자 화면에 나갈 값이 아니다(부재 사실은 서버 로그에 남는다).
+    if (!salt) {
+      functions.logger.warn(
+        `[getTeamProjectAudit] ${ANALYTICS_ID_SALT_ENV} is not configured; actor attribution is dropped (no raw uid fallback).`
+      );
+      result.notes.push(runtimeNote("note_member_key_unavailable"));
+    }
+    if (eventsRes.docs.length >= TEAM_AUDIT_EVENT_SCAN_LIMIT) {
+      result.notes.push(runtimeNote("note_event_scan_truncated"));
+    }
     return result;
   }
 );
