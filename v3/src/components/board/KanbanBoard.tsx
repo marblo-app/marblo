@@ -27,6 +27,8 @@ import { FirstShareNudge } from "../work-history/FirstMissionShareNudge";
 import { getNextStatuses, canTransition } from "../../services/stateMachine";
 import { updateTaskStatus } from "../../services/taskService";
 import { useStuckLane } from "../../hooks/useStuckLane";
+import { useBoardPan } from "../../hooks/useBoardPan";
+import { sortDoneTasks } from "../../lib/boardSort";
 import { useTranslation } from "../../lib/i18n";
 
 const COLUMN_STATUSES: TaskStatus[] = [
@@ -264,8 +266,18 @@ export function KanbanBoard({
     );
   }, [tasks, hidden, roleFilters]);
 
-  const tasksByColumn = (columnStatus: TaskStatus) =>
-    activeTasks.filter((t) => t.status === columnStatus);
+  // 컬럼별 카드. 정렬은 DONE 만 건다 — 나머지 컬럼은 스토어가 넘긴 priority
+  // 순서가 곧 "무엇부터 볼 것인가" 라 그대로 두고, 완료 컬럼만 "방금 끝난 게
+  // 어디 있나" 가 질문이라 최근 완료순(completedAt, 없으면 updatedAt 폴백)이다.
+  // lib/boardSort.ts 참조.
+  const tasksByColumn = (columnStatus: TaskStatus) => {
+    const column = activeTasks.filter((t) => t.status === columnStatus);
+    return columnStatus === "DONE" ? sortDoneTasks(column) : column;
+  };
+
+  // 빈 배경 드래그로 보드 좌우 이동. 카드 DnD(dnd-kit)와는 훅 안에서 가른다 —
+  // 카드·버튼 위에서 시작한 포인터는 손대지 않는다. hooks/useBoardPan.ts 참조.
+  const { isPanning, containerProps: panProps } = useBoardPan();
 
   if (!currentProject) {
     // Distinguish "still loading on cold start" from "genuinely no project".
@@ -337,7 +349,13 @@ export function KanbanBoard({
 
   const kanbanColumns = (
     <div
-      className={`flex-1 overflow-x-auto overflow-y-hidden ${simplified ? "p-2" : "p-4"}`}
+      data-testid="kanban-scroll"
+      {...panProps}
+      // pan 중: 잡은 손 커서 + 텍스트 선택 금지. 끌기는 포인터와 1:1 이라
+      // 애니메이션이 없다 — prefers-reduced-motion 에서 줄일 움직임이 없다.
+      className={`flex-1 overflow-x-auto overflow-y-hidden ${simplified ? "p-2" : "p-4"} ${
+        isPanning ? "cursor-grabbing select-none" : ""
+      }`}
     >
       <div className={`flex h-full ${simplified ? "gap-2" : "gap-4"}`}>
         {COLUMN_STATUSES.map((status) => (

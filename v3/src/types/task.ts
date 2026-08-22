@@ -33,6 +33,20 @@ export interface Task {
   flowNodeId?: string;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * DONE 으로 **처음** 전이한 시각. 완료 컬럼의 "최근 완료순" 정렬 축.
+   *
+   * ★updatedAt 은 축이 못 된다 — 완료 뒤 코멘트 하나만 달아도 갱신돼서 오래된
+   * 완료 티켓이 맨 위로 튀어 오른다. 그래서 쓰는 쪽(렌더러 taskService.
+   * updateTaskStatus · MCP applyProjection · flow-engine kanban-bridge)이 DONE
+   * 전이 시점에 한 번 기록한다. 이미 DONE 인 문서를 force 로 다시 DONE 해도
+   * 덮어쓰지 않는다.
+   *
+   * 이 필드가 생기기 전에 완료된 티켓에는 없다(백필하지 않는다) — 읽는 쪽은
+   * `lib/boardSort.completedAtOf` 로 updatedAt 폴백을 탄다. 시간이 지나면 저절로
+   * 정확해진다.
+   */
+  completedAt?: Date | null;
 
   // ── Per-task rollups (services/taskRollups.ts) ────────────────────────
   // Accumulated from the cost:update and agent-restart streams while the task

@@ -191,6 +191,64 @@ describe("applyMissionStatusDelta — mission statusCounts 점진 갱신", () =>
   });
 });
 
+describe("applyProjection — completedAt (보드 완료 컬럼 '최근 완료순' 축)", () => {
+  const db = {} as never;
+  beforeEach(() => __resetStore());
+
+  it("REVIEW → DONE 전이에 completedAt 이 같은 트랜잭션으로 찍힌다(update_task_status / merge_and_close 공통 경로)", async () => {
+    await setDoc(doc(db, "tasks", "t1"), {
+      status: "REVIEW",
+      projectId: PROJECT_ID,
+    });
+    await applyProjection(db, "t1", {
+      newStatus: "DONE",
+      lastAgentId: "agent-1",
+      validateFrom: (s) => s === "REVIEW",
+    });
+    const t1 = (await getDoc(doc(db, "tasks", "t1"))).data() as {
+      status: string;
+      completedAt?: Timestamp;
+      updatedAt?: Timestamp;
+    };
+    expect(t1.status).toBe("DONE");
+    expect(t1.completedAt).toBeInstanceOf(Timestamp);
+    expect(t1.completedAt!.toMillis()).toBe(t1.updatedAt!.toMillis());
+  });
+
+  it("DONE 이 아닌 전이에는 completedAt 을 건드리지 않는다", async () => {
+    await setDoc(doc(db, "tasks", "t1"), {
+      status: "IN_PROGRESS",
+      projectId: PROJECT_ID,
+    });
+    await applyProjection(db, "t1", {
+      newStatus: "REVIEW",
+      lastAgentId: "agent-1",
+    });
+    const t1 = (await getDoc(doc(db, "tasks", "t1"))).data() as {
+      completedAt?: unknown;
+    };
+    expect(t1.completedAt).toBeUndefined();
+  });
+
+  it("이미 DONE 인 문서를 force 로 다시 DONE 해도 원래 completedAt 은 보존된다", async () => {
+    const FIRST = Timestamp.fromMillis(1_700_000_000_000);
+    await setDoc(doc(db, "tasks", "t1"), {
+      status: "DONE",
+      projectId: PROJECT_ID,
+      completedAt: FIRST,
+    });
+    await applyProjection(db, "t1", {
+      newStatus: "DONE",
+      lastAgentId: "agent-1",
+      // force=true 경로: validateFrom 없음
+    });
+    const t1 = (await getDoc(doc(db, "tasks", "t1"))).data() as {
+      completedAt: Timestamp;
+    };
+    expect(t1.completedAt.toMillis()).toBe(FIRST.toMillis());
+  });
+});
+
 describe("applyProjection — Firestore 통합 (seed self-heal + TOCTOU 가드)", () => {
   const db = {} as never;
   beforeEach(() => __resetStore());

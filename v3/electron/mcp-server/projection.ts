@@ -379,6 +379,15 @@ export async function applyProjection(
       updatedAt: now,
     };
     if (mut.newStatus) taskUpdate.status = mut.newStatus;
+    // completedAt — DONE 으로 **처음** 전이하는 순간만 찍는다(보드 완료 컬럼의
+    // "최근 완료순" 축, src/types/task.ts 주석). update_task_status ·
+    // merge_and_close · submit_for_review 가 전부 이 트랜잭션을 지나므로 여기
+    // 한 곳이면 서버 경유 완료가 빠지지 않는다. 이미 DONE 인 문서를 force 로
+    // 다시 DONE 해도 원래 완료 시각은 보존한다(extraTaskFields 보다 뒤에 둬서
+    // 호출자가 우연히 다른 값을 실어도 규약이 이긴다).
+    if (mut.newStatus === "DONE" && oldStatus !== "DONE") {
+      taskUpdate.completedAt = now;
+    }
     if (missionId && !taskData.missionId) taskUpdate.missionId = missionId;
     if (missionId && !taskData.contextId) taskUpdate.contextId = missionId;
     txn.update(taskRef, taskUpdate);

@@ -233,9 +233,14 @@ export class KanbanBridge {
       if (bridged.flowId === flowId && bridged.nodeId === nodeId) {
         try {
           const ref = doc(this.db, 'tasks', bridged.taskId);
+          const now = Timestamp.now();
           await updateDoc(ref, {
             status,
-            updatedAt: Timestamp.now(),
+            updatedAt: now,
+            // 완료 컬럼 "최근 완료순" 축 — DONE 을 직접 쓰는 경로라 여기서도 찍는다
+            // (src/types/task.ts completedAt 주석). bridged 태스크는 이 브리지가
+            // IN_PROGRESS 로 만든 것이라 DONE 을 두 번 쓰지 않는다.
+            ...(status === 'DONE' ? { completedAt: now } : {}),
           });
         } catch {
           // Non-fatal

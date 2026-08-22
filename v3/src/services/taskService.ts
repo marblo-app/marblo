@@ -24,6 +24,7 @@ const DATE_FIELDS = [
   "claimedAt",
   "createdAt",
   "updatedAt",
+  "completedAt",
   "archivedAt",
   "deletedAt",
 ];
@@ -113,6 +114,9 @@ export async function updateTask(
   };
   if (data.claimedAt) {
     payload.claimedAt = toTimestamp(data.claimedAt);
+  }
+  if (data.completedAt) {
+    payload.completedAt = toTimestamp(data.completedAt);
   }
   await updateDocument(COLLECTION, taskId, payload);
 }
@@ -260,7 +264,15 @@ export async function updateTaskStatus(
   assertTransition(task.status, status);
 
   const currentStatus = task.status;
-  await updateTask(taskId, { status });
+  // DONE 으로 **처음** 넘어가는 순간만 completedAt 을 찍는다(types/task.ts 주석).
+  // 이 함수는 사람이 UI 로 옮긴 경로 전용이고, 에이전트 경로(MCP)는
+  // electron/mcp-server/projection.ts 의 applyProjection 이 같은 규약으로 찍는다.
+  await updateTask(
+    taskId,
+    status === "DONE" && currentStatus !== "DONE"
+      ? { status, completedAt: new Date() }
+      : { status },
+  );
 
   telemetry.taskStatusChanged(
     taskId,
