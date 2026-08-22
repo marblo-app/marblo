@@ -9,7 +9,9 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
-    "smoke:waitlist": "tsx scripts/waitlist-public-smoke.ts"
+    "smoke:waitlist": "tsx scripts/waitlist-public-smoke.ts",
+    "lectures:diff": "tsx scripts/diff-lectures.ts",
+    "lectures:seed": "tsx scripts/seed-lectures.ts"
   },
   "dependencies": {
     "@tosspayments/tosspayments-sdk": "^2.6.0",
