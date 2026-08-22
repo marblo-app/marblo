@@ -33,6 +33,11 @@ import {
   revealedCharsAt,
   statusKeyFor,
 } from "../../src/components/onboarding/demoScript";
+import {
+  ORCHESTRATION_DEMO_DISPLAY_SECONDS,
+  ORCHESTRATION_DEMO_PLAYBACK_RATE,
+  ORCHESTRATION_DEMO_SECONDS,
+} from "../../src/components/onboarding/VideoDemoModal";
 import { onboarding as koOnboarding } from "../../src/locales/ko/onboarding";
 import { onboarding as enOnboarding } from "../../src/locales/en/onboarding";
 
@@ -129,6 +134,28 @@ describe("demo script — 재생시간이 라벨과 일치한다", () => {
     }
   });
 
+  it("★영상 데모의 표시 길이는 원본 길이 ÷ 배속에서 파생된다 — 원본 90초를 화면에 적지 않는다", () => {
+    // 90초 원본을 1.5배속으로 틀면 체감은 60초다. 라벨이 원본 길이를 말하면 사용자가
+    // 본 시간과 어긋난다(f2256208). 상수 자체와 파생식을 같이 못 박는다.
+    expect(ORCHESTRATION_DEMO_SECONDS).toBe(90);
+    expect(ORCHESTRATION_DEMO_PLAYBACK_RATE).toBe(1.5);
+    expect(ORCHESTRATION_DEMO_DISPLAY_SECONDS).toBe(
+      Math.round(ORCHESTRATION_DEMO_SECONDS / ORCHESTRATION_DEMO_PLAYBACK_RATE),
+    );
+    // 사용자에게 보이는 t() 호출 어디에도 원본 상수를 seconds 로 넘기지 않는다.
+    for (const rel of [
+      "components/onboarding/StartHereTab.tsx",
+      "components/beginner/BeginnerConnectStep.tsx",
+      "components/beginner/BeginnerDemoTicketCta.tsx",
+    ]) {
+      const source = readFileSync(srcPath(rel), "utf8");
+      expect(
+        /seconds:\s*ORCHESTRATION_DEMO_SECONDS\b/.test(source),
+        `${rel} 이 원본 길이(ORCHESTRATION_DEMO_SECONDS)를 화면에 적는다`,
+      ).toBe(false);
+    }
+  });
+
   it("★두 진입점이 실제로 {seconds} 를 채워 넣는다(안 채우면 화면에 '{seconds}초' 가 뜬다)", () => {
     // 라벨을 자리표시자로 바꾼 대가: 호출부가 vars 를 빠뜨리면 t() 는 조용히
     // "{seconds}" 를 그대로 렌더한다. 데모는 두 곳에서 열리므로 둘 다 검사한다.
@@ -141,9 +168,13 @@ describe("demo script — 재생시간이 라벨과 일치한다", () => {
     ] as const;
     for (const [rel, key] of callSites) {
       const source = readFileSync(srcPath(rel), "utf8");
+      // StartHereTab 은 영상 데모(VideoDemoModal)를 연다. 화면에 적는 숫자는
+      // 원본 길이(ORCHESTRATION_DEMO_SECONDS=90)가 아니라 배속에서 파생된 체감
+      // 길이(ORCHESTRATION_DEMO_DISPLAY_SECONDS)여야 한다 — f2256208 에서 "90초"
+      // 라벨이 1.5배속 실제 체감(60초)과 어긋나던 걸 그렇게 고쳤다.
       const secondsConst =
         rel === "components/onboarding/StartHereTab.tsx"
-          ? "ORCHESTRATION_DEMO_SECONDS"
+          ? "ORCHESTRATION_DEMO_DISPLAY_SECONDS"
           : "DEMO_TOTAL_SECONDS";
       expect(source, `${rel} 이 ${secondsConst} 를 import 하지 않음`).toContain(
         secondsConst,
@@ -366,7 +397,7 @@ describe("StartHereTab demo exposure contract", () => {
     );
     expect(completeBranch?.[0]).toContain("onClick={openDemo}");
     expect(completeBranch?.[0]).toContain("onboarding.startHere.watchDemo");
-    expect(completeBranch?.[0]).toContain("ORCHESTRATION_DEMO_SECONDS");
+    expect(completeBranch?.[0]).toContain("ORCHESTRATION_DEMO_DISPLAY_SECONDS");
   });
 
   it("ValuePreview와 VideoDemoModal 진입점은 온보딩 완료 분기 밖에 있다", () => {
@@ -385,7 +416,7 @@ describe("StartHereTab demo exposure contract", () => {
     expect(source).toContain("<VideoDemoModal");
   });
 
-  it("첫 화면 데모 CTA 는 90초 영상 데모임을 문구·testid 로 분명히 한다", () => {
+  it("첫 화면 데모 CTA 는 영상 데모임을 문구·testid 로 분명히 한다(길이는 {seconds} 로 파생)", () => {
     expect(koOnboarding["onboarding.startHere.value.playVideo"]).toContain(
       "{seconds}",
     );

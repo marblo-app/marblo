@@ -139,6 +139,12 @@ export interface CleanRoomScenario {
    * 켠다. 설계: v3/docs/BEGINNER-MODE-DESIGN.md
    */
   beginnerShell?: boolean;
+  /**
+   * 녹화 — Playwright 의 `recordVideo` 를 그대로 넘긴다(온보딩 프리뷰 홍보 영상,
+   * 티켓 l14I6AhpUBzyD8zqYoW1). 영상은 컨텍스트가 닫힐 때 `dir` 에 떨어진다.
+   * 격리(userData/HOME/PATH)는 녹화 여부와 무관하게 동일하다.
+   */
+  recordVideo?: { dir: string; size?: { width: number; height: number } };
 }
 
 export interface InjectedMessage {
@@ -390,6 +396,7 @@ export async function launchCleanRoom(
       MARBLO_TEST_BYPASS_AUTH: "1",
     }),
     timeout: 60_000,
+    ...(scenario.recordVideo ? { recordVideo: scenario.recordVideo } : {}),
   });
 
   // 메인 프로세스 로그 — 창이 안 뜨는 류의 부팅 실패는 여기 말고는 단서가 없다.
@@ -878,8 +885,14 @@ export async function launchCleanRoom(
       } catch {
         proc = null;
       }
+      // `app.close()` 자체가 영영 resolve 하지 않는 경우가 있다(녹화 하네스에서
+      // 실측: 렌더러가 대기 중인 채로 종료 요청이 걸리면 10분 테스트 타임아웃까지
+      // 붙잡혔다). helpers/launch.ts 와 같이 마감을 걸고 아래 강제 종료로 넘긴다.
+      const closeDeadline = new Promise<"timeout">((resolve) =>
+        setTimeout(() => resolve("timeout"), 8_000),
+      );
       try {
-        await app.close();
+        await Promise.race([app.close(), closeDeadline]);
       } catch {
         /* 이미 닫혔거나 종료 요청이 거부됨 — 아래에서 강제 종료 */
       }
