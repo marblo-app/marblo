@@ -42,6 +42,28 @@ export const billing: Record<keyof typeof koBilling, string> = {
   "billing.modal.amountPerMonth": "₩{amount}/mo",
   "billing.processing": "Processing...",
   "billing.pay": "Pay",
+  "billing.method.portone.desc":
+    "Opens in your default browser (PortOne · KG Inicis)",
+  "billing.method.paddle.desc": "Paddle checkout opens inside the app",
+  "billing.error.checkoutUnavailable":
+    "This plan cannot be purchased from the app. Please contact support.",
+  "billing.error.paddleNotConfigured":
+    "International payment is not configured yet. Please use domestic payment.",
+  "billing.error.paddleFailed":
+    "Could not open the checkout window. Please try again shortly.",
+
+  // ── Web checkout handoff (domestic · PortOne) ────────────
+  // The app does not process payment; it hands off to the browser. This
+  // notice stands in for the time in between.
+  "billing.webCheckout.heading": "Finish your payment in the browser",
+  "billing.webCheckout.desc":
+    "We opened checkout for the {plan} plan in your default browser. This screen updates automatically once payment completes.",
+  "billing.webCheckout.account":
+    "Sign in with the same account you use here ({email}).",
+  "billing.webCheckout.reopen": "Reopen checkout",
+  "billing.webCheckout.refresh": "Refresh payment status",
+  "billing.webCheckout.refreshing": "Checking...",
+  "billing.webCheckout.dismiss": "Dismiss",
 
   // ── Subscription management ─────────────────────────────
   "billing.manage.heading": "Manage subscription",
@@ -73,11 +95,12 @@ export const billing: Record<keyof typeof koBilling, string> = {
   "billing.cancel.close": "Close",
 
   // ── Data-as-label: checkout payment methods (BillingPage) ──
+  // The four Korean methods (card / Naver Pay / Kakao Pay / Toss Pay) were
+  // labels for the in-app TossPayments SDK path. They went out with that
+  // path — domestic payment is now a single web-checkout (PortOne) entry.
+  // The provider.toss label stays: existing Toss subscribers still show it.
+  "billing.data.method.portoneKr": "Korea (Card / Easy Pay)",
   "billing.data.method.paddle": "International (Card/PayPal)",
-  "billing.data.method.cardKr": "Domestic card",
-  "billing.data.method.naverpay": "Naver Pay",
-  "billing.data.method.kakaopay": "Kakao Pay",
-  "billing.data.method.tosspay": "Toss Pay",
 
   // ── Data-as-label: price unit suffixes (KRW amount stays literal) ──
   "billing.data.unit.perMonth": "/mo",

@@ -1,6 +1,27 @@
-import { useEffect, useState } from "react";
+/**
+ * 설정 → 플랜 및 결제.
+ *
+ * ★국내 결제는 이 화면에서 처리하지 않는다 — 기본 브라우저의 웹 체크아웃
+ * (marblo-web /checkout, 포트원·KG이니시스)으로 넘긴다. 이유는 lib/checkoutLink.ts
+ * 상단 주석에 길게 적어뒀다. 요약하면:
+ *   · 예전엔 토스페이먼츠 SDK 를 이 렌더러에 임베드하고 successUrl 을
+ *     `${window.location.origin}/settings/billing?toss_success=true` 로 줬는데,
+ *     Electron 에서 그 origin 은 앱 자신의 로더라 PG 리다이렉트가 돌아오지 않았다.
+ *   · 포트원 SDK 로 갈아끼워도 리다이렉트·3DS·PG 팝업은 그대로라 같은 함정이다.
+ *   · 웹 체크아웃은 이미 있고 실제 테스트 결제를 완주한 유일한 경로다. 앱에
+ *     두 번째 결제 구현을 두면 둘 중 하나만 고쳐지는 상태가 반드시 온다.
+ *
+ * 결제 후 상태 갱신은 별도 폴링을 새로 만들지 않는다 — 이 화면은 이미
+ * subscribeToSubscription(onSnapshot) 을 걸고 있어 서버가 subscriptions 문서를
+ * 쓰는 순간 반영된다. 브라우저를 다녀오는 동안 렌더러가 백그라운드로 눌려 있을
+ * 수 있으므로, 창 포커스 복귀 시 1회 재조회 + 수동 새로고침 버튼을 덧댄다.
+ *
+ * 해외 결제(Paddle)는 그대로다 — 오버레이 체크아웃이라 리다이렉트를 타지 않는다.
+ */
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useTranslation } from "../../lib/i18n";
+import { buildWebCheckoutUrl } from "../../lib/checkoutLink";
 import type { MessageKey } from "../../locales/ko";
 import type {
   PlanType,
@@ -9,10 +30,9 @@ import type {
 } from "../../types/subscription";
 import {
   subscribeToSubscription,
+  getSubscription,
   openPaddleCheckout,
   cancelSubscription,
-  createTossCheckout,
-  confirmTossPayment,
   PLAN_PRICES_KRW,
 } from "../../services/billingService";
 
@@ -89,43 +109,36 @@ const PADDLE_PRICE_IDS: Record<string, string> = {
   team: import.meta.env.VITE_PADDLE_TEAM_PRICE_ID || "",
 };
 
-type PaymentMethod = "paddle" | "card_kr" | "naverpay" | "kakaopay" | "tosspay";
+type PaymentMethod = "portone" | "paddle";
 
+// 국내 4종(card_kr·naverpay·kakaopay·tosspay)은 전부 provider:"toss" 였고,
+// 전부 이 컴포넌트가 직접 띄우는 토스 SDK 로 흘렀다. 그 경로를 걷어내면서
+// 목록에서도 지웠다 — 국내 결제는 웹 체크아웃 진입점 하나로 합쳐진다.
+// 개별 수단(카드/네이버페이/카카오페이/토스페이) 선택은 웹 체크아웃이 맡는다.
+//
+// ★그래서 이 목록에는 provider:"toss" 항목이 없다. 토스 진입 차단
+// (billingService 의 filterAvailablePaymentMethods)이 걸러낼 대상 자체가
+// 남지 않았다 — 가리는 게 아니라 없앤 것이다.
 const PAYMENT_METHODS: {
   id: PaymentMethod;
   labelKey: MessageKey;
+  descKey: MessageKey;
   provider: PaymentProvider;
   icon: string;
 }[] = [
   {
-    id: "paddle",
-    labelKey: "billing.data.method.paddle",
-    provider: "paddle",
-    icon: "🌍",
-  },
-  {
-    id: "card_kr",
-    labelKey: "billing.data.method.cardKr",
-    provider: "toss",
+    id: "portone",
+    labelKey: "billing.data.method.portoneKr",
+    descKey: "billing.method.portone.desc",
+    provider: "portone",
     icon: "💳",
   },
   {
-    id: "naverpay",
-    labelKey: "billing.data.method.naverpay",
-    provider: "toss",
-    icon: "🟢",
-  },
-  {
-    id: "kakaopay",
-    labelKey: "billing.data.method.kakaopay",
-    provider: "toss",
-    icon: "🟡",
-  },
-  {
-    id: "tosspay",
-    labelKey: "billing.data.method.tosspay",
-    provider: "toss",
-    icon: "🔵",
+    id: "paddle",
+    labelKey: "billing.data.method.paddle",
+    descKey: "billing.method.paddle.desc",
+    provider: "paddle",
+    icon: "🌍",
   },
 ];
 
@@ -145,8 +158,19 @@ export function BillingPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PlanType | null>(null);
+  // 국내 결제가 기본 선택 — 앱의 1차 시장이고, 해외(Paddle)는 명시 선택이다.
   const [selectedMethod, setSelectedMethod] =
-    useState<PaymentMethod>("card_kr");
+    useState<PaymentMethod>("portone");
+  // 결제 수단 모달 안에서 보여줄 오류. 예전엔 console.error 로만 남아서
+  // "결제하기를 눌렀는데 아무 일도 안 일어남" 으로 보였다(Paddle priceId 미설정).
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  // 브라우저로 웹 체크아웃을 넘긴 뒤의 대기 상태. url 을 들고 있는 이유는
+  // "결제창을 실수로 닫음" 이 흔해서 — 다시 열기가 한 번의 클릭이어야 한다.
+  const [pendingCheckout, setPendingCheckout] = useState<{
+    plan: PlanType;
+    url: string;
+  } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   // 취소 확인 모달 상태. 네이티브 confirm/alert 은 Electron 렌더러를 통째로
   // 블로킹하고 웹(my/subscription)의 인라인 확인 UX 와도 어긋나서 쓰지 않는다.
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -169,86 +193,117 @@ export function BillingPage() {
     return unsubscribe;
   }, [user]);
 
+  /**
+   * 구독 문서 1회 재조회. onSnapshot 이 정본이고 이건 보조다 — 브라우저를
+   * 다녀오는 동안 렌더러가 백그라운드로 눌려 스냅샷이 늦게 도착하는 경우와,
+   * 사용자가 "지금 확인해줘" 라고 누르는 경우를 위해 둔다.
+   */
+  const refreshSubscription = useCallback(async () => {
+    if (!user) return;
+    setRefreshing(true);
+    try {
+      setSubscription(await getSubscription(user.uid));
+    } catch (err) {
+      // 조회 실패는 화면을 막지 않는다 — onSnapshot 이 계속 살아 있다.
+      console.error("구독 상태 조회 실패:", err);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [user]);
+
   const handleUpgrade = (planType: PlanType) => {
     if (!user || planType === "free") return;
+    setPaymentError(null);
     setSelectedPlan(planType);
+  };
+
+  /** 국내 결제 — 웹 체크아웃을 기본 브라우저로 연다(결제는 앱 밖에서 끝난다). */
+  const openWebCheckout = (plan: PlanType): boolean => {
+    const url = buildWebCheckoutUrl({ plan, locale });
+    if (!url) {
+      // free/enterprise. 플랜 카드가 그 둘에 업그레이드 버튼을 주지 않으므로
+      // 정상 경로로는 오지 않지만, 조용히 아무 일도 안 하는 것보다는 낫다.
+      setPaymentError(t("billing.error.checkoutUnavailable"));
+      return false;
+    }
+    // main 의 setWindowOpenHandler 가 외부 https + _blank 를 shell.openExternal
+    // 로 넘긴다(새 IPC 없음 — installAttribution/WorktreeTab 과 같은 경로).
+    window.open(url, "_blank");
+    setPendingCheckout({ plan, url });
+    return true;
   };
 
   const handlePayment = async () => {
     if (!user || !selectedPlan) return;
-    setActionLoading(true);
 
     const method = PAYMENT_METHODS.find((m) => m.id === selectedMethod);
     if (!method) return;
 
+    setPaymentError(null);
+
+    if (method.provider === "portone") {
+      // 브라우저로 넘기는 것은 동기다. actionLoading 을 걸면 되돌릴 시점이
+      // 없어서(결제 완료를 앱이 관측하지 못한다) 아예 걸지 않는다.
+      if (openWebCheckout(selectedPlan)) setSelectedPlan(null);
+      return;
+    }
+
+    // 해외 결제(Paddle) — 오버레이 체크아웃이라 앱 안에서 그대로 끝난다.
+    setActionLoading(true);
     try {
-      if (method.provider === "paddle") {
-        const priceId = PADDLE_PRICE_IDS[selectedPlan];
-        if (!priceId) {
-          console.error("Paddle Price ID가 설정되지 않았습니다.");
-          return;
-        }
-        await openPaddleCheckout(user.uid, priceId, user.email || undefined);
-      } else {
-        // TossPayments
-        const { orderId, amount } = await createTossCheckout(
-          user.uid,
-          selectedPlan
-        );
-        await loadTossPaymentsSDK();
-        const tossPayments = window.TossPayments!(
-          import.meta.env.VITE_TOSS_CLIENT_KEY
-        );
-        const payment = tossPayments.payment({ customerKey: user.uid });
-
-        const methodMap: Record<string, string> = {
-          card_kr: "CARD",
-          naverpay: "NAVERPAY",
-          kakaopay: "KAKAOPAY",
-          tosspay: "TOSSPAY",
-        };
-
-        const result = await payment.requestPayment({
-          method: methodMap[selectedMethod] || "CARD",
-          amount: { currency: "KRW", value: amount },
-          orderId,
-          orderName: `Marblo ${
-            selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1)
-          } 플랜`,
-          successUrl: `${window.location.origin}/settings/billing?toss_success=true`,
-          failUrl: `${window.location.origin}/settings/billing?toss_fail=true`,
-        });
-
-        if (result?.paymentKey) {
-          await confirmTossPayment(orderId, result.paymentKey, amount);
-        }
+      const priceId = PADDLE_PRICE_IDS[selectedPlan];
+      if (!priceId) {
+        console.error("Paddle Price ID가 설정되지 않았습니다.");
+        setPaymentError(t("billing.error.paddleNotConfigured"));
+        return;
       }
+      await openPaddleCheckout(user.uid, priceId, user.email || undefined);
+      setSelectedPlan(null);
     } catch (err) {
-      if ((err as Error).message !== "결제 취소") {
+      // openPaddleCheckout 은 사용자가 창을 닫아도 reject 한다 — 그건 오류가 아니다.
+      const canceled =
+        (err as Error).message === t("common.payment.checkoutCanceled");
+      if (!canceled) {
         console.error("결제 처리 실패:", err);
+        setPaymentError(t("billing.error.paddleFailed"));
+      } else {
+        setSelectedPlan(null);
       }
     } finally {
       setActionLoading(false);
-      setSelectedPlan(null);
     }
   };
 
-  // Handle TossPayments redirect callback
+  // 웹 체크아웃을 다녀오면 앱 창이 다시 포커스를 받는다. 그때 1회 재조회한다.
+  // onSnapshot 이 이미 반영했다면 같은 값을 다시 쓰는 것뿐이라 비용이 없다.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("toss_success") === "true") {
-      const paymentKey = params.get("paymentKey");
-      const orderId = params.get("orderId");
-      const amount = params.get("amount");
-      if (paymentKey && orderId && amount) {
-        confirmTossPayment(orderId, paymentKey, Number(amount))
-          .then(() => {
-            window.history.replaceState({}, "", "/settings/billing");
-          })
-          .catch(console.error);
-      }
+    if (!user || !pendingCheckout) return;
+    const onFocus = () => {
+      void refreshSubscription();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refreshSubscription();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [user, pendingCheckout, refreshSubscription]);
+
+  // 결제가 실제로 반영되면 대기 안내를 스스로 접는다. 판정 기준은 "결제했다"
+  // 라는 앱의 추측이 아니라 **서버가 쓴 구독 문서**다 — 앱은 결제 결과를
+  // 직접 관측하지 못하므로 이것만이 믿을 수 있는 신호다.
+  useEffect(() => {
+    if (!pendingCheckout) return;
+    if (
+      subscription?.planType === pendingCheckout.plan &&
+      subscription.status !== "canceled"
+    ) {
+      setPendingCheckout(null);
     }
-  }, []);
+  }, [subscription, pendingCheckout]);
 
   const handleManageSubscription = async () => {
     if (!user || !subscription) return;
@@ -386,6 +441,55 @@ export function BillingPage() {
         </div>
       </div>
 
+      {/* 웹 체크아웃 대기 안내 — 국내 결제는 브라우저에서 끝난다.
+          결제 결과를 앱이 직접 보지 못하므로, 서버가 구독 문서를 쓸 때까지
+          "무슨 일이 벌어지고 있는지" 를 사용자에게 말해주는 자리다. */}
+      {pendingCheckout && (
+        <div
+          role="status"
+          className="mb-8 rounded-lg border border-blue-700 bg-blue-950/40 p-4"
+        >
+          <p className="text-sm font-medium text-white">
+            {t("billing.webCheckout.heading")}
+          </p>
+          <p className="mt-1 text-xs text-gray-300">
+            {t("billing.webCheckout.desc", {
+              plan:
+                pendingCheckout.plan.charAt(0).toUpperCase() +
+                pendingCheckout.plan.slice(1),
+            })}
+          </p>
+          {user?.email && (
+            <p className="mt-1 text-xs text-gray-400">
+              {t("billing.webCheckout.account", { email: user.email })}
+            </p>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => window.open(pendingCheckout.url, "_blank")}
+              className="rounded border border-gray-600 px-3 py-1.5 text-xs text-gray-200 transition-colors hover:bg-gray-700"
+            >
+              {t("billing.webCheckout.reopen")}
+            </button>
+            <button
+              onClick={() => void refreshSubscription()}
+              disabled={refreshing}
+              className="rounded border border-gray-600 px-3 py-1.5 text-xs text-gray-200 transition-colors hover:bg-gray-700 disabled:opacity-50"
+            >
+              {refreshing
+                ? t("billing.webCheckout.refreshing")
+                : t("billing.webCheckout.refresh")}
+            </button>
+            <button
+              onClick={() => setPendingCheckout(null)}
+              className="rounded px-3 py-1.5 text-xs text-gray-400 transition-colors hover:text-gray-200"
+            >
+              {t("billing.webCheckout.dismiss")}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 플랜 카드 */}
       <div className="mb-8 grid grid-cols-3 gap-4">
         {PLANS.map((plan) => {
@@ -471,7 +575,11 @@ export function BillingPage() {
                 {t("billing.selectPaymentMethod")}
               </h2>
               <button
-                onClick={() => setSelectedPlan(null)}
+                onClick={() => {
+                  setSelectedPlan(null);
+                  setPaymentError(null);
+                }}
+                aria-label={t("billing.cancel.close")}
                 className="rounded p-1 text-gray-400 hover:bg-gray-700 hover:text-white"
               >
                 <svg
@@ -525,8 +633,15 @@ export function BillingPage() {
                     className="sr-only"
                   />
                   <span className="text-lg">{method.icon}</span>
-                  <span className="text-sm text-gray-200">
-                    {t(method.labelKey)}
+                  <span className="min-w-0">
+                    <span className="block text-sm text-gray-200">
+                      {t(method.labelKey)}
+                    </span>
+                    {/* 어디서 결제가 벌어지는지를 미리 말해준다 — 국내 결제는
+                        앱을 벗어나 브라우저로 간다. 누른 뒤에 알게 되면 사고다. */}
+                    <span className="block text-xs text-gray-500">
+                      {t(method.descKey)}
+                    </span>
                   </span>
                   {selectedMethod === method.id && (
                     <svg
@@ -546,6 +661,15 @@ export function BillingPage() {
                 </label>
               ))}
             </div>
+
+            {paymentError && (
+              <p
+                role="alert"
+                className="mt-4 rounded border border-red-800 bg-red-900/20 px-3 py-2 text-xs text-red-300"
+              >
+                {paymentError}
+              </p>
+            )}
 
             <button
               onClick={handlePayment}
@@ -662,48 +786,4 @@ export function BillingPage() {
       )}
     </div>
   );
-}
-
-// ─── TossPayments SDK Loader ─────────────────────────────────────
-interface TossPaymentMethods {
-  requestPayment(options: {
-    method: string;
-    amount: { currency: string; value: number };
-    orderId: string;
-    orderName: string;
-    successUrl: string;
-    failUrl: string;
-  }): Promise<{ paymentKey?: string } | undefined>;
-}
-
-interface TossPaymentsInstance {
-  payment(options: { customerKey: string }): TossPaymentMethods;
-}
-
-type TossPaymentsSDK = (clientKey: string) => TossPaymentsInstance;
-
-declare global {
-  interface Window {
-    TossPayments?: TossPaymentsSDK;
-  }
-}
-
-let tossSDKLoaded = false;
-
-function loadTossPaymentsSDK(): Promise<void> {
-  if (tossSDKLoaded || window.TossPayments) {
-    tossSDKLoaded = true;
-    return Promise.resolve();
-  }
-
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://js.tosspayments.com/v2/standard";
-    script.onload = () => {
-      tossSDKLoaded = true;
-      resolve();
-    };
-    script.onerror = () => reject(new Error("TossPayments SDK 로드 실패"));
-    document.head.appendChild(script);
-  });
 }
