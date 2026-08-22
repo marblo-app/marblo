@@ -6,9 +6,14 @@ import {
   isHiddenTask,
   lastProgressAt,
   partitionBoardTasks,
+  staleThresholdFor,
   type StuckAgentSnapshot,
   type StuckContext,
 } from "../../src/lib/stuckLane";
+import {
+  STALL_QUIET_NORMAL_MS,
+  STALL_QUIET_URGENT_MS,
+} from "../../electron/agent-stall-policy";
 import type { Task, TaskStatus } from "../../src/types/task";
 import type { Agent } from "../../src/types/agent";
 
@@ -201,7 +206,36 @@ describe("STALE — 죽은 에이전트가 물고 있는 티켓", () => {
 describe("STALE — 무진척 시계", () => {
   const live = [agent({ id: "a1", currentTaskId: "t" })];
 
-  it("살아있는 에이전트라도 임계(30분)를 넘기면 STALE", () => {
+  it("임계는 우선순위별이다 — P4+ 는 20분, 그 외 45분(워치독·dispatch 와 같은 상수)", () => {
+    expect(staleThresholdFor({ priority: 5 })).toBe(STALL_QUIET_URGENT_MS);
+    expect(staleThresholdFor({ priority: 4 })).toBe(STALL_QUIET_URGENT_MS);
+    expect(staleThresholdFor({ priority: 3 })).toBe(STALL_QUIET_NORMAL_MS);
+    expect(STALE_THRESHOLD_MS).toBe(STALL_QUIET_NORMAL_MS);
+  });
+
+  it("★P5 티켓은 25분 무진척이면 STALE, 같은 25분이라도 P3 은 아직 아니다", () => {
+    const urgent = task({
+      id: "t",
+      status: "IN_PROGRESS",
+      priority: 5,
+      claimedBy: "a1",
+      updatedAt: new Date(NOW - 25 * MINUTE),
+    });
+    expect(classifyStuck(urgent, ctx({ agents: live }))).toMatchObject({
+      kind: "STALE",
+      staleReason: "no-progress",
+    });
+    const normal = task({
+      id: "t",
+      status: "IN_PROGRESS",
+      priority: 3,
+      claimedBy: "a1",
+      updatedAt: new Date(NOW - 25 * MINUTE),
+    });
+    expect(classifyStuck(normal, ctx({ agents: live }))).toBe(null);
+  });
+
+  it("살아있는 에이전트라도 임계(일반 45분)를 넘기면 STALE", () => {
     const ticket = task({
       id: "t",
       status: "IN_PROGRESS",

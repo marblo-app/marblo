@@ -5080,6 +5080,13 @@ export function registerTools(server: McpServer): void {
               ptySessionId: string;
               currentTaskId?: string | null;
               restartCount: number;
+              stallSignal?: {
+                taskId: string;
+                quietMs: number;
+                pty: string;
+                model: string | null;
+                repeat: number;
+              } | null;
             }>;
           };
 
@@ -5091,7 +5098,12 @@ export function registerTools(server: McpServer): void {
             const task = a.currentTaskId
               ? `, currentTaskId=${a.currentTaskId}`
               : "";
-            return `- [${a.status}] ${a.name} (model=${a.model}, role=${a.role}, agentId=${a.id}${task}${restart})`;
+            // W8: 워치독의 "조용하다" 신호. status 가 working 이어도 보드에
+            // 아무 보고가 없다는 뜻 — 생존 ≠ 진행. 판단은 오케 몫.
+            const quiet = a.stallSignal
+              ? ` ⚠ quiet ${Math.round(a.stallSignal.quietMs / 60_000)}m on task ${a.stallSignal.taskId} (pty=${a.stallSignal.pty}, model=${a.stallSignal.model ?? "?"}) — 진행 여부 확인 필요`
+              : "";
+            return `- [${a.status}] ${a.name} (model=${a.model}, role=${a.role}, agentId=${a.id}${task}${restart})${quiet}`;
           });
           return text(
             `Agents (${data.agents.length}, real-time):\n${capLines(
@@ -5604,6 +5616,14 @@ export function registerTools(server: McpServer): void {
           // 모델 믹스(§4) 동반 에이전트 / 단계분할(§5) 스텝 에이전트들.
           companionAgentId?: string;
           stageAgentIds?: string[];
+          // 정지 의심(보드 무활동 임계 초과)으로 우회된 이전 담당 — 바인딩만
+          // 해제, 킬 안 함. bridge-server.ts BypassedStaleAgent.
+          bypassedStaleAgents?: Array<{
+            agentId: string;
+            agentName: string;
+            quietMinutes: number | null;
+            reason: string;
+          }>;
         };
 
         if (!result.success) {
@@ -5753,6 +5773,26 @@ export function registerTools(server: McpServer): void {
           lines.push(`  Mix companion (Codex): ${result.companionAgentId}`);
         if (result.stageAgentIds && result.stageAgentIds.length > 0)
           lines.push(`  Stage agents: ${result.stageAgentIds.join(", ")}`);
+        // ★정지 의심 담당을 우회했다 — 죽이지는 않았다. 같은 워크트리에 두 워커가
+        // 앉게 되므로 오케가 여기서 결정해야 한다(2026-08-22 배포 정지 건: 오케가
+        // kill_agent 후 재스폰해서 해결했다 — 그 결정을 워치독/dispatch 가 대신
+        // 내리지 않는다).
+        if (
+          result.bypassedStaleAgents &&
+          result.bypassedStaleAgents.length > 0
+        ) {
+          for (const b of result.bypassedStaleAgents) {
+            const quiet =
+              b.quietMinutes === null
+                ? "보드 활동 없음"
+                : `마지막 보드 활동 ${b.quietMinutes}분 전`;
+            lines.push(
+              `  ⚠ 이전 담당 '${b.agentName}'(${b.agentId}) 은 정지 의심으로 우회됨(${quiet}) — ` +
+                `바인딩만 해제했고 **아직 살아 있다**. 같은 워크트리에서 계속 돌게 둘 게 아니면 ` +
+                `kill_agent('${b.agentName}') 로 정리하라.`
+            );
+          }
+        }
         if (result.action === "logical") {
           lines.push(
             `\nAction required: Use internal sub-agent (Task/Agent tool) to handle this simple task directly.`
@@ -5859,6 +5899,11 @@ export function registerTools(server: McpServer): void {
             turnCompletedAt?: number | null;
             lastPtyActivity?: number;
             lastWorkOutput?: number | null;
+            stallSignal?: {
+              taskId: string;
+              quietMs: number;
+              pty: string;
+            } | null;
           }>;
         };
 
@@ -5911,6 +5956,19 @@ export function registerTools(server: McpServer): void {
           // turnCompletedAt alone also proves a finished turn (submit/DONE).
           const taskId = a.currentTaskId || a.lastTaskId || null;
           const turnCompletedAt = a.turnCompletedAt ?? null;
+          // W8: a live agent the watchdog flagged as board-quiet on its bound
+          // task. Deliberately NOT reaped here — "quiet" is a suspicion, and
+          // the '#509 invariant' (never reap live work without completion
+          // evidence) stands. It is SURFACED so the orchestrator judging the
+          // report sees it in the same place; kill_agent is its call.
+          if (a.stallSignal && a.currentTaskId) {
+            suspects.push(
+              `${a.name} (${a.status}, ⚠ quiet ${Math.round(
+                a.stallSignal.quietMs / 60_000
+              )}m on task ${a.stallSignal.taskId}, pty=${a.stallSignal.pty} — stall suspect, orchestrator decides)`
+            );
+            continue;
+          }
           if (!taskId && turnCompletedAt == null) {
             if (a.role !== "orchestrator") {
               suspects.push(`${a.name} (${a.status}, never bound to a task)`);
@@ -5947,7 +6005,7 @@ export function registerTools(server: McpServer): void {
         }
         const suspectNote =
           suspects.length > 0
-            ? `\nNot reaped (no completed turn to prove they're done — check manually): ${suspects.join(
+            ? `\nNot reaped (no completed turn to prove they're done, or only a stall SUSPICION — check manually; kill_agent if you judge them dead): ${suspects.join(
                 ", "
               )}`
             : "";

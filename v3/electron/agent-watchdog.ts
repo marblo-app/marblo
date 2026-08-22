@@ -25,11 +25,32 @@
 //   acts on tickets that are already CLAIMED/IN_PROGRESS AND carry an assigned
 //   agent. listActiveTickets() is responsible for excluding TODO/terminal
 //   states; the sweep additionally skips any ticket with no bound agent.
+//
+// ★ W8 (2026-08-22, 티켓 Lfy6jvpil57eYf896km5) — the board-quiet SIGNAL.
+//   Alongside the ladder above, every sweep also asks one question judged on
+//   BOARD activity alone: "has this ticket's bound, locally-hosted agent posted
+//   nothing for longer than the stall threshold for its priority?" (thresholds
+//   and rationale: agent-stall-policy.ts). If so it raises a signal — to the
+//   orchestrator PTY, the ticket timeline, telemetry (with the concrete model)
+//   and the agent's stallSignal marker — and does NOTHING else. No nudge, no
+//   respawn, no kill hangs off it: "워치독은 판정하지 말고 신호만 올려라. 죽일지
+//   기다릴지는 맥락을 아는 쪽이 정한다." The ladder's liveness clock folds PTY
+//   work output in (right for "don't kill a reasoning agent"), which is exactly
+//   why an agent spinning on a hung tool for 80 minutes was never flagged by it.
 
 // Type-only import — erased at compile/test time, so the watchdog stays a pure,
 // Electron-free unit (the test imports only this module). Keeps the respawn
 // model in lockstep with the dispatch model union instead of duplicating it.
 import type { ModelType } from "./agent-manager";
+import {
+  DEFAULT_STALL_POLICY,
+  classifyPtyLiveness,
+  describePtyLiveness,
+  evaluateBoardQuiet,
+  resolveStallPolicy,
+  type StallPolicy,
+  type StallSignal,
+} from "./agent-stall-policy";
 
 export type WatchdogTicketStatus = "CLAIMED" | "IN_PROGRESS";
 
@@ -76,6 +97,9 @@ export interface WatchdogTicket {
   complexity?: "simple" | "standard" | "complex";
   /** Human-readable dispatch decision reason, persisted with dispatchMeta. */
   dispatchReason?: string;
+  /** Board priority (1~5, 5 highest). Picks the quiet-signal tier — see
+   * agent-stall-policy.ts. Missing ⇒ normal tier (the conservative one). */
+  priority?: number | null;
 }
 
 export type WatchdogAgentLiveStatus = "idle" | "working" | "error" | "stopped";
@@ -105,6 +129,14 @@ export interface WatchdogAgentHealth {
    * waiting out graceMs — see evaluatePromptIdleStall. */
   promptIdleSinceMs?: number | null;
   currentTaskId: string | null;
+  /** Display name, for the quiet-signal message. Optional. */
+  agentName?: string | null;
+  /** Concrete model actually running (model@effort) or the vendor. Carried
+   * on the quiet signal so stall cases record WHICH model stalled. */
+  concreteModel?: string | null;
+  /** agent-input-wait.ts InputWaitReason — a human is being waited on. Only
+   * used to DESCRIBE the PTY state on the quiet signal. */
+  inputWaitReason?: string | null;
 }
 
 export type RecoveryPhase =
@@ -119,7 +151,9 @@ export type RecoveryPhase =
   | "review-stale" // W5: a dead-assignee REVIEW ticket surfaced
   | "in-progress-reset" // orphaned IN_PROGRESS reset to TODO for re-claim
   | "in-progress-stall" // orphaned IN_PROGRESS surfaced when reset is unwired
-  | "pending-fallback"; // W2: an undelivered instruction force-delivered via PTY
+  | "pending-fallback" // W2: an undelivered instruction force-delivered via PTY
+  | "quiet" // W8: board quiet past the stall threshold — SIGNAL ONLY
+  | "quiet-cleared"; // W8: board activity resumed after a quiet signal
 
 export interface WatchdogDeps {
   /** Active tickets in CLAIMED/IN_PROGRESS. Recovery-only: the implementation
@@ -209,6 +243,22 @@ export interface WatchdogDeps {
   /** Flip a pending instruction's isDelivered flag after a direct delivery. */
   markInstructionDelivered?: (docId: string) => Promise<void>;
 
+  // ── W8: quiet signal (optional) ─────────────────────────────
+  /**
+   * The ticket's bound, locally-hosted agent has posted NOTHING to the board
+   * for longer than the stall threshold for its priority. This is a SIGNAL for
+   * the orchestrator — the watchdog does not nudge, kill, or respawn on it.
+   * The host wires it to: orchestrator PTY injection, a ticket activity line,
+   * telemetry (with the model), and the agent's `stallSignal` marker.
+   */
+  signalQuiet?: (
+    ticket: WatchdogTicket,
+    signal: StallSignal,
+    detail: string,
+  ) => void;
+  /** Board activity resumed after a quiet signal — retract the marker. */
+  clearQuiet?: (ticket: WatchdogTicket, agentId: string) => void;
+
   /** Injectable clock (epoch-ms) for deterministic tests. */
   now?: () => number;
   logger?: (msg: string, meta?: Record<string, unknown>) => void;
@@ -286,6 +336,9 @@ export interface WatchdogConfig {
    * actively working (2026-07-18 실측), so anything shorter converts a mere
    * "hosted elsewhere / attribution drift" miss into a destructive reset. */
   inProgressOrphanResetMs: number;
+  /** W8: board-quiet thresholds per priority tier + repeat gap. Shared with
+   * dispatch and the renderer's stuck lane — see agent-stall-policy.ts. */
+  stall: StallPolicy;
 }
 
 export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
@@ -317,6 +370,7 @@ export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
   // 2–11 min add_activity cadence measured on live workers. The old 90 s
   // default reset actively-working agents' tickets to TODO within one silent
   // stretch (watchdog-false-death, 2026-07-18).
+  stall: DEFAULT_STALL_POLICY,
 };
 
 function intEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
@@ -377,6 +431,7 @@ export function resolveWatchdogConfig(
       "MARBLO_WATCHDOG_IN_PROGRESS_ORPHAN_RESET_MS",
       d.inProgressOrphanResetMs,
     ),
+    stall: resolveStallPolicy(env),
   };
 }
 
@@ -669,6 +724,18 @@ export class AgentWatchdog {
   /** W2: pending-instruction doc ids already force-delivered this process, so a
    * fallback isn't attempted twice while the isDelivered flip propagates. */
   private pendingAttempted = new Set<string>();
+  /** W8: per-ticket quiet-signal memory — when it was last raised, the board
+   * clock it was raised against (advancing past it = cleared), and how many
+   * times this quiet stretch has been surfaced. Pruned alongside `states`. */
+  private quietRaised = new Map<
+    string,
+    {
+      lastRaisedAtMs: number;
+      baselineBoardMs: number;
+      repeat: number;
+      ticket: WatchdogTicket;
+    }
+  >();
   private timer: ReturnType<typeof setInterval> | null = null;
   private sweeping = false;
 
@@ -713,6 +780,7 @@ export class AgentWatchdog {
     this.firstSeen.clear();
     this.reviewEscalatedAt.clear();
     this.pendingAttempted.clear();
+    this.quietRaised.clear();
     this.log("stopped");
   }
 
@@ -743,6 +811,22 @@ export class AgentWatchdog {
       }
       for (const taskId of [...this.firstSeen.keys()]) {
         if (!seen.has(taskId)) this.firstSeen.delete(taskId);
+      }
+      // W8: a ticket that left the active set (submitted / closed / reassigned)
+      // takes its quiet marker with it — retract it from the agent.
+      for (const [taskId, q] of [...this.quietRaised.entries()]) {
+        if (seen.has(taskId)) continue;
+        this.quietRaised.delete(taskId);
+        if (q.ticket.agentId) {
+          try {
+            this.deps.clearQuiet?.(q.ticket, q.ticket.agentId);
+          } catch (err) {
+            this.log("clearQuiet threw (best-effort)", {
+              taskId,
+              err: String(err),
+            });
+          }
+        }
       }
       // W2 + W5 run alongside the active-ticket sweep. Isolated so a failure in
       // one never aborts the others (all best-effort).
@@ -878,6 +962,109 @@ export class AgentWatchdog {
     }
   }
 
+  /**
+   * W8 — raise / repeat / clear the board-quiet signal for one ticket.
+   *
+   * Fires only for a LOCALLY-hosted, non-terminal bound agent: a missing agent
+   * belongs to another instance (which runs its own sweep — two instances
+   * raising the same signal would double-ping the orchestrator), and a dead one
+   * is the recovery ladder's business. Rate-limited per ticket to one signal
+   * per `stall.repeatMs`; any board activity after a signal clears it.
+   */
+  private sweepQuiet(
+    ticket: WatchdogTicket,
+    health: WatchdogAgentHealth | null,
+    lastBoardMs: number,
+    now: number,
+    missing: boolean,
+    terminalLocal: boolean,
+  ): void {
+    if (!this.deps.signalQuiet || !ticket.agentId) return;
+    const prior = this.quietRaised.get(ticket.taskId);
+    if (prior && lastBoardMs > prior.baselineBoardMs) {
+      // The board moved — whatever was wrong, someone is reporting again.
+      this.quietRaised.delete(ticket.taskId);
+      try {
+        this.deps.clearQuiet?.(ticket, ticket.agentId);
+      } catch (err) {
+        this.log("clearQuiet threw (best-effort)", {
+          taskId: ticket.taskId,
+          err: String(err),
+        });
+      }
+      this.deps.recordRecovery?.(
+        ticket,
+        "quiet-cleared",
+        `board activity resumed after ${prior.repeat} quiet signal(s)`,
+      );
+      this.log("quiet cleared", { taskId: ticket.taskId });
+      return;
+    }
+    if (missing || terminalLocal) return;
+
+    const verdict = evaluateBoardQuiet({
+      now,
+      lastBoardActivityMs: ticket.lastActivityAtMs,
+      activeSinceMs: ticket.activeSinceMs,
+      priority: ticket.priority,
+      policy: this.cfg.stall,
+    });
+    if (!verdict.quiet) return;
+    if (prior && now - prior.lastRaisedAtMs < this.cfg.stall.repeatMs) return;
+
+    const repeat = (prior?.repeat ?? 0) + 1;
+    const lastWork = health?.lastWorkOutputMs ?? health?.lastPtyActivityMs;
+    const pty = classifyPtyLiveness({
+      now,
+      status: health?.status ?? null,
+      lastWorkOutputMs: lastWork,
+      promptIdleSinceMs: health?.promptIdleSinceMs,
+      inputWaitReason: health?.inputWaitReason,
+    });
+    const signal: StallSignal = {
+      taskId: ticket.taskId,
+      tier: verdict.tier,
+      quietMs: verdict.quietMs,
+      thresholdMs: verdict.thresholdMs,
+      pty,
+      model: health?.concreteModel ?? ticket.model ?? null,
+      raisedAtMs: now,
+      repeat,
+    };
+    const detail =
+      `보드 활동 없음 ${Math.round(verdict.quietMs / 60_000)}분 ` +
+      `(임계 ${Math.round(verdict.thresholdMs / 60_000)}분 · ` +
+      `${verdict.tier === "urgent" ? "긴급 P4+" : "일반"}) · ` +
+      `${describePtyLiveness(pty, { now, lastWorkOutputMs: lastWork })} · ` +
+      `모델 ${signal.model ?? "?"}` +
+      (repeat > 1 ? ` · ${repeat}회째 알림` : "") +
+      ` — 워치독은 판정하지 않습니다. 오케/사람이 확인 후 결정하세요.`;
+    this.quietRaised.set(ticket.taskId, {
+      lastRaisedAtMs: now,
+      baselineBoardMs: lastBoardMs,
+      repeat,
+      ticket,
+    });
+    try {
+      this.deps.signalQuiet(ticket, signal, detail);
+    } catch (err) {
+      this.log("signalQuiet threw (best-effort)", {
+        taskId: ticket.taskId,
+        err: String(err),
+      });
+    }
+    this.deps.recordRecovery?.(ticket, "quiet", detail);
+    this.log("quiet signal", {
+      taskId: ticket.taskId,
+      agentId: ticket.agentId,
+      tier: verdict.tier,
+      quietMs: verdict.quietMs,
+      pty,
+      model: signal.model,
+      repeat,
+    });
+  }
+
   /** Inspect one ticket and, if stuck, take the next recovery step. */
   private async inspect(ticket: WatchdogTicket): Promise<void> {
     if (!isRecoverableWatchdogStatus(ticket.status)) return;
@@ -905,6 +1092,17 @@ export class AgentWatchdog {
     // start so a just-dispatched foreign-hosted worker isn't instantly
     // "inactive since epoch".
     const lastBoardMs = ticket.lastActivityAtMs ?? ticket.activeSinceMs ?? 0;
+
+    // ── W8: board-quiet SIGNAL (not a rung of the ladder) ──────────────────
+    // Judged on board activity ALONE, on purpose. Everything below this line
+    // folds PTY work output into liveness — correct for "don't kill a reasoning
+    // agent", but it is exactly why an agent spinning on a hung tool call for
+    // 80 minutes (2026-08-22 P0 deploy) was never flagged: its spinner counted
+    // as work. The quiet signal asks a different question — "has anyone been
+    // TOLD anything?" — and only tells the orchestrator. No nudge, no respawn,
+    // no kill hangs off it; the decision belongs to whoever knows the context.
+    this.sweepQuiet(ticket, health, lastBoardMs, now, missing, terminalLocal);
+
     // Freshest overall signal of life: board activity OR local PTY WORK output.
     // ★Work output, not raw bytes: a CLI parked at its input prompt repaints its
     // composer forever, and counting that as life is why a mid-task stall was

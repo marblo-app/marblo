@@ -132,9 +132,14 @@ export const board = {
   "board.stuck.group.STALE": "STALE",
   "board.stuck.reason.agent-missing": "담당 에이전트가 목록에 없음",
   "board.stuck.reason.agent-dead": "담당 에이전트가 정지·오류 상태",
-  "board.stuck.reason.no-progress": "30분 넘게 진척 없음",
+  // 임계는 우선순위별(P4+ 20분 · 그 외 45분, electron/agent-stall-policy.ts) —
+  // 문구에 숫자를 박지 않는다. 경과 분은 stateTitle 이 보여준다.
+  "board.stuck.reason.no-progress": "임계를 넘도록 진척 보고가 없음",
   "board.stuck.reason.worktree-idle": "워크트리가 하루 넘게 무변경",
   "board.stuck.idleFor": "{minutes}분째",
+  // StateBlock(failed) 제목 — "멈춘 것 같다" 는 다음 행동(다시 시도)이 붙는 상태.
+  "board.stuck.stateTitle": "{minutes}분째 보고 없음 — 확인이 필요합니다",
+  "board.stuck.stateTitleNoClock": "진척 시각을 알 수 없음 — 확인이 필요합니다",
   "board.stuck.action.retry": "재시도",
   "board.stuck.action.archive": "보관",
   "board.stuck.action.delete": "삭제",

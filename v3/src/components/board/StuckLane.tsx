@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { Archive, ChevronDown, ChevronRight, RotateCw, X } from "lucide-react";
 import type { Task } from "../../types/task";
 import type { StuckGroups, StuckKind, StuckVerdict } from "../../lib/stuckLane";
-import { STALE_THRESHOLD_MS } from "../../lib/stuckLane";
 import { useStuckTaskActions } from "../../hooks/useStuckTaskActions";
 import { TaskCard } from "./TaskCard";
 import { useTranslation } from "../../lib/i18n";
+import { StateBlock } from "../common/StateBlock";
+import type { FailedState } from "../common/loadState";
 
 const EXPANDED_STORAGE_KEY = "marblo.board.stuckLane.expanded";
 
@@ -281,28 +282,51 @@ function StuckTaskCard({
   const busy = actions.busy?.taskId === task.id ? actions.busy.action : null;
   const disabled = busy !== null;
 
+  // ★STALE 은 "멈춘 것 같다" 다 — 빨간 점이 아니라 **다음 행동이 있는 상태**로
+  // 그린다(components/common/loadState 의 `failed`: 사유 + 재시도가 타입상 필수).
+  // 재시도 = 정체 레인의 기존 retry(담당 재기동/재디스패치)와 같은 행동이므로
+  // 아래 액션 바의 재시도 버튼은 STALE 에서 배너로 이동한다(같은 버튼 둘 금지).
+  // 워치독이 오케에게 올리는 "조용하다" 신호와 같은 임계(agent-stall-policy)로
+  // 같은 시각에 같은 카드가 여기로 온다.
+  const staleState: FailedState | null =
+    verdict?.kind === "STALE"
+      ? {
+          kind: "failed",
+          title:
+            verdict.idleMs !== undefined
+              ? {
+                  key: "board.stuck.stateTitle",
+                  vars: { minutes: Math.floor(verdict.idleMs / 60_000) },
+                }
+              : "board.stuck.stateTitleNoClock",
+          reasonCode: `board.stuck.reason.${verdict.staleReason ?? "no-progress"}`,
+          retry: () => actions.retry(task),
+        }
+      : null;
+
   return (
     <div className="rounded-lg border border-gray-700/50">
       <TaskCard task={task} onClick={onTaskClick} />
-      {verdict?.kind === "STALE" && (
-        <p className="px-3 pt-1 text-[11px] text-amber-400/90">
-          {t(`board.stuck.reason.${verdict.staleReason ?? "no-progress"}`)}
-          {verdict.idleMs !== undefined &&
-            verdict.idleMs > STALE_THRESHOLD_MS &&
-            ` · ${t("board.stuck.idleFor", {
-              minutes: Math.floor(verdict.idleMs / 60_000),
-            })}`}
-        </p>
+      {staleState && (
+        <div
+          className="px-2 pt-1.5"
+          data-testid="stuck-stale-state"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <StateBlock variant="banner" state={staleState} />
+        </div>
       )}
       <div className="flex items-center gap-1 px-2 py-1.5">
-        <StuckActionButton
-          label={t("board.stuck.action.retry")}
-          icon={<RotateCw className="h-3 w-3" />}
-          running={busy === "retry"}
-          disabled={disabled}
-          tone="text-blue-300 hover:bg-blue-500/10"
-          onClick={() => actions.retry(task)}
-        />
+        {!staleState && (
+          <StuckActionButton
+            label={t("board.stuck.action.retry")}
+            icon={<RotateCw className="h-3 w-3" />}
+            running={busy === "retry"}
+            disabled={disabled}
+            tone="text-blue-300 hover:bg-blue-500/10"
+            onClick={() => actions.retry(task)}
+          />
+        )}
         <StuckActionButton
           label={t("board.stuck.action.archive")}
           icon={<Archive className="h-3 w-3" />}

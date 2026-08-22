@@ -71,6 +71,11 @@ import type {
 import { mainTelemetry, type DispatchDecisionPayload } from "./telemetry";
 import { planCapErrorCategory } from "./spawn-block-reason";
 import {
+  evaluateBoundAgent,
+  resolveStallPolicy,
+  type StallPolicy,
+} from "./agent-stall-policy";
+import {
   modelTierForComplexity,
   resolveTopClaudeModelDetailed,
   vendorEnvReadiness,
@@ -858,6 +863,35 @@ export interface DispatchTaskResponse {
   companionAgentId?: string;
   /** 단계분할(§5) 디스패치된 각 스텝 에이전트 id. */
   stageAgentIds?: string[];
+  /**
+   * Task-bound agents this dispatch REFUSED to route back to because their
+   * last board activity was older than the stall threshold (2026-08-22: the
+   * re-dispatch of a P0 deploy was routed back to an agent quiet for 80 min
+   * as "live activity evidence"). They are unbound from the task but NOT
+   * killed — killing is the orchestrator's call; the MCP layer prints a hint.
+   */
+  bypassedStaleAgents?: BypassedStaleAgent[];
+}
+
+/** Proof returned by the task-agent activity hook (main.ts). */
+export interface TaskAgentActivityProof {
+  /** ≥1 real board activity attributed to the agent beyond the dispatch
+   * baseline ("dispatched to …"). */
+  hasBoardActivity: boolean;
+  /** epoch-ms of the task's last board activity (projection.lastActivityAt).
+   * Optional — an older hook omits it and the age check is skipped. */
+  lastActivityAtMs?: number | null;
+  /** Board priority (1~5) — picks the stall tier. Optional. */
+  priority?: number | null;
+}
+
+export interface BypassedStaleAgent {
+  agentId: string;
+  agentName: string;
+  /** Minutes since the agent's last board activity (null = never beyond the
+   * dispatch baseline). */
+  quietMinutes: number | null;
+  reason: string;
 }
 
 /**
@@ -1006,17 +1040,22 @@ export class BridgeServer {
     | null = null;
 
   // Hook injected by main: checks whether a task-bound agent produced at least
-  // one real board activity after the dispatch/bind baseline. Used by the
-  // per-task reuse short-circuit so a born-dead, non-terminal CLI cannot keep
-  // winning "already bound" forever.
+  // one real board activity after the dispatch/bind baseline — AND WHEN. Used
+  // by the per-task reuse short-circuit so a born-dead, non-terminal CLI cannot
+  // keep winning "already bound" forever, and (2026-08-22) so an agent whose
+  // last activity is older than the stall threshold stops winning it too.
   private taskAgentActivityHook:
     | ((
         taskId: string,
         agentId: string,
-      ) =>
-        | Promise<{ hasBoardActivity: boolean }>
-        | { hasBoardActivity: boolean })
+      ) => Promise<TaskAgentActivityProof> | TaskAgentActivityProof)
     | null = null;
+  /** Stall thresholds shared with the watchdog (agent-stall-policy.ts). */
+  private stallPolicy: StallPolicy = resolveStallPolicy();
+  /** Task-bound agents bypassed as stale during the CURRENT dispatch, keyed by
+   * taskId — drained into the response by dispatchTask() (inside the per-task
+   * lock, so two dispatches can't cross-read). */
+  private staleBypassByTask = new Map<string, BypassedStaleAgent[]>();
 
   // Outbound Telegram sender — main wires this to the electron-owned
   // TelegramPoller.sendMessage (the poller holds the bot token + last-inbound
@@ -1155,9 +1194,14 @@ export class BridgeServer {
     hook: (
       taskId: string,
       agentId: string,
-    ) => Promise<{ hasBoardActivity: boolean }> | { hasBoardActivity: boolean },
+    ) => Promise<TaskAgentActivityProof> | TaskAgentActivityProof,
   ): void {
     this.taskAgentActivityHook = hook;
+  }
+
+  /** Override the stall policy (tests). Defaults to env-resolved policy. */
+  setStallPolicy(policy: StallPolicy): void {
+    this.stallPolicy = policy;
   }
 
   /**
@@ -1579,6 +1623,10 @@ export class BridgeServer {
         lastPtyActivity: a.lastPtyActivity,
         // Preferred silence clock: ignores idle-prompt repaint forever-noise.
         lastWorkOutput: a.lastWorkOutput,
+        // W8: the watchdog's standing board-quiet signal (or null). Lets
+        // get_agents / cleanup_agents show "⚠ quiet Nm" — signal only, the
+        // orchestrator decides what to do with it.
+        stallSignal: a.stallSignal ?? null,
       }));
 
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -2234,9 +2282,24 @@ export class BridgeServer {
     params: DispatchTaskRequest,
   ): Promise<DispatchTaskResponse> {
     const res = params.taskId
-      ? await this.withTaskLock(params.taskId, () =>
-          this.dispatchTaskInner(params),
-        )
+      ? await this.withTaskLock(params.taskId, async () => {
+          const taskId = params.taskId as string;
+          this.staleBypassByTask.delete(taskId);
+          const inner = await this.dispatchTaskInner(params);
+          // Surface any task-bound agent that was bypassed as stale so the
+          // caller (orchestrator via MCP dispatch_task) learns the previous
+          // worker is still running and can decide to kill_agent it.
+          const bypassed = this.staleBypassByTask.get(taskId);
+          this.staleBypassByTask.delete(taskId);
+          if (bypassed && bypassed.length > 0) {
+            inner.bypassedStaleAgents = bypassed;
+            const names = bypassed.map((b) => b.agentName).join(", ");
+            inner.reason =
+              `${inner.reason ?? ""} ` +
+              `[bypassed stale task-bound agent(s): ${names} — unbound, not killed]`;
+          }
+          return inner;
+        })
       : await this.dispatchTaskInner(params);
     // Persist the resolved cwd/model/complexity so the watchdog can restore them
     // on respawn (no fresh base worktree, no claude→gpt). Only when a real agent
@@ -3549,6 +3612,19 @@ export class BridgeServer {
     return null;
   }
 
+  /**
+   * Is this task-bound agent still the task's LIVE worker — i.e. may dispatch
+   * route the new instruction back to it instead of reassigning/spawning?
+   *
+   * Board activity is the evidence, and since 2026-08-22 its AGE matters: the
+   * old check was "has it ever posted anything?", which treated an agent quiet
+   * for 80 minutes as "live activity evidence" and sent a P0 re-dispatch right
+   * back to it. The threshold is the watchdog's own stall threshold for the
+   * task's priority (agent-stall-policy.ts), so the moment the watchdog would
+   * tell the orchestrator "this is quiet" is the moment a re-dispatch stops
+   * being absorbed. A stale agent is UNBOUND (currentTaskId cleared, lastTaskId
+   * kept) and reported via `bypassedStaleAgents`; it is never killed here.
+   */
   private async isLiveTaskAgentCandidate(
     agent: AgentInstance,
     taskId: string,
@@ -3559,15 +3635,16 @@ export class BridgeServer {
     // bound worker instead of being absorbed by the task-bound short-circuit.
     if (requestedModel && agent.model !== requestedModel) return false;
 
-    const ageMs = Date.now() - agent.spawnedAt;
-    if (Number.isFinite(ageMs) && ageMs <= taskAgentFirstActivityGraceMs()) {
-      return true;
-    }
+    const now = Date.now();
+    const ageMs = now - agent.spawnedAt;
+    const withinFirstActivityGrace =
+      Number.isFinite(ageMs) && ageMs <= taskAgentFirstActivityGraceMs();
+    if (withinFirstActivityGrace) return true;
 
     if (!this.taskAgentActivityHook) return false;
+    let proof: TaskAgentActivityProof;
     try {
-      const proof = await this.taskAgentActivityHook(taskId, agent.id);
-      return proof.hasBoardActivity;
+      proof = await this.taskAgentActivityHook(taskId, agent.id);
     } catch (err) {
       console.warn(
         `[BridgeServer] task-bound activity lookup failed for task ${taskId}, agent ${agent.id}:`,
@@ -3575,6 +3652,34 @@ export class BridgeServer {
       );
       return false;
     }
+    const verdict = evaluateBoundAgent({
+      withinFirstActivityGrace,
+      hasBoardActivity: proof.hasBoardActivity,
+      lastBoardActivityMs: proof.lastActivityAtMs ?? null,
+      priority: proof.priority,
+      now,
+      policy: this.stallPolicy,
+    });
+    if (verdict.live) return true;
+    // Not live any more. Only a CURRENTLY bound agent needs unbinding — a
+    // worktree-only candidate never held the binding. Either way, report it.
+    if (agent.currentTaskId === taskId) {
+      this.agentManager.setCurrentTask(agent.id, null);
+    }
+    const list = this.staleBypassByTask.get(taskId) ?? [];
+    list.push({
+      agentId: agent.id,
+      agentName: agent.name,
+      quietMinutes:
+        verdict.quietMs === null ? null : Math.round(verdict.quietMs / 60_000),
+      reason: verdict.reason,
+    });
+    this.staleBypassByTask.set(taskId, list);
+    console.log(
+      `[BridgeServer] Dispatch: bypassing stale task-bound agent '${agent.name}' ` +
+        `(task=${taskId}) — ${verdict.reason}; unbound, not killed`,
+    );
+    return false;
   }
 
   private routeToTaskAgent(

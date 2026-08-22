@@ -820,6 +820,147 @@ describe("dispatchTask — per-task uniqueness (L3)", () => {
   });
 });
 
+// ── 정지 의심 담당 우회 — 2026-08-22 배포 정지 건 (티켓 Lfy6jvpil57eYf896km5) ──
+//
+// 실사례: P0 배포를 문 devops 에이전트가 80분간 보드 활동 0건. 오케가 dispatch_task
+// 로 재배정했더니 "Agent already bound to task with live activity evidence" 로
+// **같은 정지 에이전트에게 되돌아갔다.** 종전 판정은 `hasBoardActivity`(활동이 1건
+// 이라도 있었나)만 봤고 시각을 안 봤다. 이제 마지막 보드 활동의 나이가 그 티켓
+// 우선순위의 정지 임계(agent-stall-policy: P4+ 20분 / 그 외 45분)를 넘으면 우회한다.
+// 구 담당은 바인딩만 풀고(죽이지 않음) 응답에 실어 오케가 kill 을 결정하게 한다.
+describe("dispatchTask — stale task-bound agent bypass (W8)", () => {
+  it("★P5 티켓의 담당이 80분 조용하면 되돌려보내지 않고 새로 스폰한다 — 구 담당은 unbind + 보고, kill 안 함", async () => {
+    const { bridge, am, pty } = makeBridge();
+    const taskId = "tHTkcSA6QRdcNjYC72hC";
+    const now = Date.now();
+    bridge.setTaskAgentActivityHook(() => ({
+      hasBoardActivity: true,
+      lastActivityAtMs: now - 80 * 60_000,
+      priority: 5,
+    }));
+    am.seed(
+      makeInstance({
+        id: "deploy-stuck",
+        name: "deploy-githubapp-fns",
+        role: "devops",
+        status: "working",
+        model: "claude",
+        cwd: path.join("/wt", "px", taskId),
+        projectId: "px",
+        currentTaskId: taskId,
+        spawnedAt: now - 90 * 60_000,
+      }),
+    );
+
+    const res = await bridge.dispatchTask(
+      dispatch({ role: "devops", projectId: "px", taskId }),
+    );
+
+    expect(res.success).toBe(true);
+    expect(res.action).toBe("spawned");
+    expect(res.agentId).not.toBe("deploy-stuck");
+    expect(am.launchCalls).toBe(1);
+    // Nothing was typed into the stuck agent's PTY.
+    expect(pty.writes.some((w) => w.sid === "pty-deploy-stuck")).toBe(false);
+    // It was unbound (not killed): still registered, still working.
+    const old = am.getAgent("deploy-stuck")!;
+    expect(old.currentTaskId).toBeNull();
+    expect(old.status).toBe("working");
+    // …and reported so the orchestrator can decide.
+    expect(res.bypassedStaleAgents).toHaveLength(1);
+    expect(res.bypassedStaleAgents![0]).toMatchObject({
+      agentId: "deploy-stuck",
+      agentName: "deploy-githubapp-fns",
+      quietMinutes: 80,
+    });
+    expect(res.reason).toContain("bypassed stale task-bound agent");
+  });
+
+  it("담당의 마지막 보드 활동이 5분 전이면 종전대로 그 담당에게 라우팅한다(우회 없음)", async () => {
+    const { bridge, am, pty } = makeBridge();
+    const taskId = "liveRecent001";
+    const now = Date.now();
+    bridge.setTaskAgentActivityHook(() => ({
+      hasBoardActivity: true,
+      lastActivityAtMs: now - 5 * 60_000,
+      priority: 5,
+    }));
+    am.seed(
+      makeInstance({
+        id: "live-worker",
+        role: "backend",
+        status: "working",
+        model: "claude",
+        cwd: path.join("/wt", "px", taskId),
+        projectId: "px",
+        currentTaskId: taskId,
+        spawnedAt: now - 60 * 60_000,
+      }),
+    );
+    const res = await bridge.dispatchTask(
+      dispatch({ projectId: "px", taskId }),
+    );
+    expect(res.action).toBe("reused");
+    expect(res.agentId).toBe("live-worker");
+    expect(res.bypassedStaleAgents).toBeUndefined();
+    expect(am.launchCalls).toBe(0);
+    expect(pty.writes.some((w) => w.sid === "pty-live-worker")).toBe(true);
+  });
+
+  it("일반 우선순위(P2) 티켓은 30분 조용해도 아직 live — 정상 장시간 작업은 45분까지 우회하지 않는다", async () => {
+    const { bridge, am } = makeBridge();
+    const taskId = "longNormal001";
+    const now = Date.now();
+    bridge.setTaskAgentActivityHook(() => ({
+      hasBoardActivity: true,
+      lastActivityAtMs: now - 30 * 60_000,
+      priority: 2,
+    }));
+    am.seed(
+      makeInstance({
+        id: "refactor-worker",
+        role: "backend",
+        status: "working",
+        model: "claude",
+        cwd: path.join("/wt", "px", taskId),
+        projectId: "px",
+        currentTaskId: taskId,
+        spawnedAt: now - 60 * 60_000,
+      }),
+    );
+    const res = await bridge.dispatchTask(
+      dispatch({ projectId: "px", taskId }),
+    );
+    expect(res.action).toBe("reused");
+    expect(res.agentId).toBe("refactor-worker");
+    expect(am.launchCalls).toBe(0);
+    expect(am.getAgent("refactor-worker")!.currentTaskId).toBe(taskId);
+  });
+
+  it("시각을 안 주는 구 hook(hasBoardActivity 만)은 종전 동작 유지 — 증거 부족을 '정지' 로 기울이지 않는다", async () => {
+    const { bridge, am } = makeBridge();
+    const taskId = "legacyHook001";
+    bridge.setTaskAgentActivityHook(() => ({ hasBoardActivity: true }));
+    am.seed(
+      makeInstance({
+        id: "legacy-worker",
+        role: "backend",
+        status: "working",
+        model: "claude",
+        cwd: path.join("/wt", "px", taskId),
+        projectId: "px",
+        currentTaskId: taskId,
+        spawnedAt: Date.now() - 600_000,
+      }),
+    );
+    const res = await bridge.dispatchTask(
+      dispatch({ projectId: "px", taskId }),
+    );
+    expect(res.action).toBe("reused");
+    expect(res.agentId).toBe("legacy-worker");
+  });
+});
+
 // ── [RG] distinct-task fan-out — 배정 라이프사이클 증상① 회귀 가드 ───────
 //
 // 사용자 보고(증상①): "여러 태스크를 한 번에 만들면 각각 서로 다른 실제

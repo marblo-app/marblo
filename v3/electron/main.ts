@@ -62,6 +62,7 @@ import {
   type StaleReviewTicket,
   type PendingInstruction,
 } from "./agent-watchdog";
+import { isOtherLiveWorkerForTask } from "./agent-stall-policy";
 import { OrchestratorManager } from "./orchestrator-manager";
 import type { OrchestratorCostSession } from "./session-kind";
 import { OwnerRegistry } from "./owner-registry";
@@ -2279,6 +2280,11 @@ const agentWatchdog = new AgentWatchdog(
             typeof meta?.dispatchReason === "string" && meta.dispatchReason
               ? meta.dispatchReason
               : undefined,
+          // W8: picks the board-quiet tier (P4+ = urgent, else normal).
+          priority:
+            typeof data.priority === "number" && Number.isFinite(data.priority)
+              ? data.priority
+              : null,
         });
       });
       return out;
@@ -2296,6 +2302,14 @@ const agentWatchdog = new AgentWatchdog(
         lastWorkOutputMs: a.lastWorkOutput,
         promptIdleSinceMs: a.promptIdleSince,
         currentTaskId: a.currentTaskId,
+        // W8: description axes for the quiet signal. The concrete model is
+        // what makes a stall case usable as a per-model completion-failure
+        // datapoint later (today that data is not recorded at all).
+        agentName: a.name,
+        concreteModel:
+          formatModelAtEffort(agentManager.resolveConcreteModel(a.id)) ??
+          a.model,
+        inputWaitReason: a.inputWaitReason,
       };
     },
     nudgeAgent: (agentId, message) => {
@@ -2406,12 +2420,13 @@ const agentWatchdog = new AgentWatchdog(
       // recorded agentId looks dead. Excluding the ticket's own agentId keeps
       // the normal nudge/respawn of the bound worker intact (else a silent-but-
       // alive bound agent would always match itself and never get nudged).
-      return agentManager.listAgents().some((a) => {
-        if (a.id === ticket.agentId) return false;
-        if (a.status === "stopped" || a.status === "error") return false;
-        if (a.currentTaskId && a.currentTaskId === ticket.taskId) return true;
-        return !!a.cwd && a.cwd.includes(ticket.taskId);
-      });
+      // An agent RELEASED from this task (currentTaskId cleared, lastTaskId
+      // kept — completion report or stale-bypass) does not count either, or a
+      // retired predecessor parked in the worktree would block its
+      // successor's recovery forever (agent-stall-policy.isOtherLiveWorkerForTask).
+      return agentManager
+        .listAgents()
+        .some((a) => isOtherLiveWorkerForTask(a, ticket));
     },
     probeFreshness: async (ticket) => {
       // Original worker demonstrably alive if its isolated worktree was touched
@@ -2555,6 +2570,65 @@ const agentWatchdog = new AgentWatchdog(
       } catch (err) {
         console.error("[AgentWatchdog] escalate telegram failed:", err);
       }
+    },
+
+    // ── W8: board-quiet SIGNAL — tell the orchestrator, decide nothing ──
+    // 사장님 요청(2026-08-22): "워치독이 체크가 되서 일중인지 죽은건지 판단이
+    // 되도록해서 오케가 판단 후 새로 스폰하거나". Three outlets, zero actions:
+    //   1. orchestrator PTY — the reader who can actually decide.
+    //   2. the agent's stallSignal marker — so get_agents / cleanup_agents
+    //      show it next to the agent (the orchestrator's own tools).
+    //   3. telemetry with the CONCRETE MODEL — per-model stall data, which
+    //      today is not recorded anywhere (the respawn-phase agentWentStale
+    //      only fires when the ladder gets that far, and it carries the
+    //      dispatchMeta vendor string, not the model that actually ran).
+    // The ticket-timeline activity line comes from recordRecovery("quiet").
+    signalQuiet: (ticket, signal, detail) => {
+      const agent = ticket.agentId
+        ? agentManager.getAgent(ticket.agentId)
+        : null;
+      const agentLabel = agent
+        ? `${agent.name} (${signal.model ?? agent.model})`
+        : `${ticket.agentId ?? "(unknown)"} (${signal.model ?? "?"})`;
+      const quietMin = Math.round(signal.quietMs / 60_000);
+      const msg =
+        `🕵️ [Watchdog] 티켓 ${ticket.taskId} "${ticket.title ?? ""}" ` +
+        `(P${ticket.priority ?? "?"}) — ${quietMin}분째 보드 활동 없음. ` +
+        `담당 ${agentLabel}. ${detail}\n` +
+        `   판단 재료: get_task_activities(${ticket.taskId}) · get_agents 의 ⚠ 표시. ` +
+        `선택지: 기다리기(정상 장시간 작업일 수 있음) / reuse_agent 로 진행 보고 요청 / ` +
+        `kill_agent 후 dispatch_task 재배정 — 이제 dispatch_task 는 ${quietMin}분 조용한 ` +
+        `담당에게 되돌려보내지 않습니다.`;
+      try {
+        orchestrators.get(ticket.projectId)?.injectMessage(msg);
+      } catch (err) {
+        console.error("[AgentWatchdog] quiet-signal orch nudge failed:", err);
+      }
+      if (ticket.agentId) {
+        agentManager.setStallSignal(ticket.agentId, signal);
+      }
+      mainTelemetry.agentQuietSignal(mainWindow, {
+        taskId: ticket.taskId,
+        agentId: ticket.agentId,
+        model: signal.model,
+        role: ticket.role,
+        dispatchReason: ticket.dispatchReason ?? null,
+        errorCategory: "agent_quiet",
+        errorMessage: detail,
+        metadata: {
+          tier: signal.tier,
+          quietMs: signal.quietMs,
+          thresholdMs: signal.thresholdMs,
+          pty: signal.pty,
+          repeat: signal.repeat,
+          priority: ticket.priority ?? null,
+          status: ticket.status,
+          projectId: ticket.projectId,
+        },
+      });
+    },
+    clearQuiet: (_ticket, agentId) => {
+      agentManager.setStallSignal(agentId, null);
     },
     resetStalledInProgress: async (ticket, detail) => {
       try {
@@ -2931,9 +3005,11 @@ bridgeServer.setTaskAgentActivityHook(async (taskId, agentId) => {
   const snap = await fbGetDoc(fbDoc(db, "tasks", taskId));
   if (!snap.exists()) return { hasBoardActivity: false };
   const data = snap.data() as {
+    priority?: unknown;
     projection?: {
       lastAgentId?: unknown;
       lastActivitySummary?: unknown;
+      lastActivityAt?: unknown;
     };
   };
   const projection = data.projection;
@@ -2947,6 +3023,13 @@ bridgeServer.setTaskAgentActivityHook(async (taskId, agentId) => {
   return {
     hasBoardActivity:
       lastAgentId === agentId && summary !== "" && !isDispatchBaseline,
+    // ★WHEN — without this the proof was "has it ever posted?", and an agent
+    // quiet for 80 minutes kept winning "already bound" (2026-08-22).
+    lastActivityAtMs: watchdogMillis(projection?.lastActivityAt),
+    priority:
+      typeof data.priority === "number" && Number.isFinite(data.priority)
+        ? data.priority
+        : null,
   };
 });
 

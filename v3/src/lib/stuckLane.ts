@@ -1,5 +1,9 @@
 import type { Agent } from "../types/agent";
 import type { Task, TaskStatus } from "../types/task";
+import {
+  STALL_QUIET_NORMAL_MS,
+  quietThresholdMs,
+} from "../../electron/agent-stall-policy";
 
 /**
  * 정체(Stuck) 레인 — DONE 우측에 붙는 **가상** 레인의 판정 로직.
@@ -18,8 +22,25 @@ import type { Task, TaskStatus } from "../types/task";
  * 되살아나는 순간 판정이 저절로 풀린다.
  */
 
-/** 무진척 임계 — 30분. */
-export const STALE_THRESHOLD_MS = 30 * 60 * 1000;
+/**
+ * 무진척 임계 — **우선순위별**이며, 워치독·dispatch 와 같은 상수를 쓴다
+ * (electron/agent-stall-policy.ts: P4–P5 = 20분, P1–P3 = 45분, 근거는 그 파일).
+ *
+ * 왜 공유하나: 보드가 "정체" 라고 그리는 순간과 워치독이 오케에게 "조용하다" 고
+ * 올리는 순간과 dispatch_task 가 그 담당을 우회하기 시작하는 순간이 **같아야**
+ * 사람·오케·도구가 같은 사실을 본다. 2026-08-22 배포 정지 건은 셋이 달라서
+ * 보드는 working, 오케는 무소식, dispatch 는 "live" 였다.
+ *
+ * `STALE_THRESHOLD_MS` 는 일반 티어 값이다 — 우선순위를 모르는 표시용
+ * (StuckLane 의 idleFor)과 기존 호출자 호환을 위해 남긴다. 판정은
+ * `staleThresholdFor(task)` 를 쓴다.
+ */
+export const STALE_THRESHOLD_MS = STALL_QUIET_NORMAL_MS;
+
+/** 이 티켓의 무진척 임계(ms) — priority 로 티어를 고른다. */
+export function staleThresholdFor(task: Pick<Task, "priority">): number {
+  return quietThresholdMs(task.priority);
+}
 
 /**
  * 워크트리가 "확실히 오래 안 만져졌다" 고 볼 일 수 임계.
@@ -93,7 +114,7 @@ export interface StuckContext {
   now: number;
   /** taskId → 워크트리 idleDays (worktreeStore 스냅샷에서 1패스로 만든다). */
   worktreeIdleDays?: ReadonlyMap<string, number>;
-  /** 무진척 임계 override (기본 {@link STALE_THRESHOLD_MS}). */
+  /** 무진척 임계 override (기본은 티켓 우선순위별 {@link staleThresholdFor}). */
   thresholdMs?: number;
 }
 
@@ -188,7 +209,7 @@ export function isHiddenTask(task: Task): boolean {
  *   3. CLAIMED/IN_PROGRESS 인데 아래 중 하나 → STALE
  *      a. 바인딩 에이전트가 목록에 없음        (agent-missing)
  *      b. 바인딩 에이전트가 stopped/error      (agent-dead)
- *      c. 마지막 진척이 임계(30분) 초과        (no-progress)
+ *      c. 마지막 진척이 임계(우선순위별 20/45분) 초과 (no-progress)
  *      d. 워크트리가 하루 넘게 무변경          (worktree-idle)
  *
  * (a)(b) 는 "누가 이 일을 하고 있나" 가 무너진 경우, (c)(d) 는 "일이 실제로
@@ -210,7 +231,7 @@ export function classifyStuck(
 }
 
 function classifyStale(task: Task, ctx: StuckContext): StuckVerdict | null {
-  const threshold = ctx.thresholdMs ?? STALE_THRESHOLD_MS;
+  const threshold = ctx.thresholdMs ?? staleThresholdFor(task);
   const progressAt = lastProgressAt(task);
   const idleMs =
     progressAt === null ? undefined : Math.max(0, ctx.now - progressAt);

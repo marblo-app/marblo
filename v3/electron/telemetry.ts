@@ -203,6 +203,29 @@ export const mainTelemetry = {
     });
   },
 
+  /**
+   * W8 — the watchdog's board-quiet SIGNAL (not an outcome). Carries the
+   * concrete model so stall cases accumulate per model; `success` is left out
+   * on purpose — a quiet stretch is a suspicion, the orchestrator's judgement
+   * (kill / wait) is what turns it into an outcome.
+   */
+  agentQuietSignal(
+    win: BrowserWindow | null,
+    payload: AgentLifecycleOutcomePayload,
+  ) {
+    sendTelemetry(win, "agent:quiet_signal", {
+      agentId: payload.agentId,
+      taskId: payload.taskId,
+      model: payload.model,
+      role: payload.role,
+      dispatchReason: payload.dispatchReason,
+      outcome: "quiet",
+      errorCategory: payload.errorCategory,
+      errorMessage: payload.errorMessage,
+      metadata: payload.metadata,
+    });
+  },
+
   agentWentStale(
     win: BrowserWindow | null,
     payload: AgentLifecycleOutcomePayload,

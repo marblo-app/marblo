@@ -11,6 +11,9 @@ export type TelemetryEvent =
   | "agent:crashed"
   | "agent:restarted"
   | "agent:went_stale"
+  // W8 워치독 "조용하다" 신호 — 결과(outcome)가 아니라 의심이다. 모델을 실어
+  // 모델별 정지 건을 쌓는다(electron/agent-stall-policy.ts · agent-watchdog.ts).
+  | "agent:quiet_signal"
   | "agent:heartbeat"
   | "task:created"
   | "task:status_changed"
@@ -250,7 +253,14 @@ interface TelemetryPayload {
   errorCategory?: string;
   errorMessage?: string;
   dispatchReason?: string;
-  outcome?: "completed" | "crashed" | "stale" | "spawn_failed" | "blocked";
+  outcome?:
+    | "completed"
+    | "crashed"
+    | "stale"
+    | "spawn_failed"
+    | "blocked"
+    // W8 워치독 조용함 신호 — 의심이지 결과가 아니다(agent:quiet_signal).
+    | "quiet";
 }
 
 /**

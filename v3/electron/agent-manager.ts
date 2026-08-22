@@ -4,6 +4,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { PtyManager } from "./pty-manager";
+import type { StallSignal } from "./agent-stall-policy";
 import {
   AgentConfigGenerator,
   LaunchConfig,
@@ -436,6 +437,16 @@ export interface AgentInstance {
    * never reaped (e.g. the orchestrator never calling it). Reset to null on any
    * revival. */
   terminalSince: number | null;
+  /**
+   * W8 — the watchdog's standing "board quiet past the stall threshold" signal
+   * for this agent's bound task, or null. SIGNAL ONLY: nothing in this class
+   * acts on it. It exists so the orchestrator's own tools (get_agents /
+   * cleanup_agents via GET /agents) show "⚠ quiet 80m" next to the agent —
+   * the signal has to reach whoever judges, and that is not the watchdog.
+   * Set/cleared by main.ts from the watchdog's signalQuiet/clearQuiet ports;
+   * also cleared by every turn start (noteTurnStart) and terminal transition.
+   */
+  stallSignal: StallSignal | null;
 }
 
 /**
@@ -1613,6 +1624,7 @@ export class AgentManager {
       outputChars: 0,
       turnCompletedAt: null,
       terminalSince: null,
+      stallSignal: null,
       topClaudeModel,
       claudeModelOverride: params.claudeModelOverride,
       codexModelOverride: params.codexModelOverride,
@@ -2262,6 +2274,7 @@ export class AgentManager {
     // a crashed/stopped agent doesn't leave a permanent "answer me" badge.
     if (status === "stopped" || status === "error") {
       this.clearInputWait(agentId);
+      agent.stallSignal = null;
     }
     this.onStatusChange?.(agentId, status);
     // 종단 전이(→stopped/error)와 부활(error→idle)이 둘 다 여기를 지난다.
@@ -2305,6 +2318,16 @@ export class AgentManager {
     if (!agent) return;
     agent.currentTaskId = taskId;
     if (taskId) agent.lastTaskId = taskId;
+  }
+
+  /**
+   * W8 — attach / retract the watchdog's board-quiet signal. Pure bookkeeping:
+   * no status change, no PTY write, no broadcast. Read back via GET /agents.
+   */
+  setStallSignal(agentId: string, signal: StallSignal | null): void {
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+    agent.stallSignal = signal;
   }
 
   setDispatchReason(agentId: string, dispatchReason: string | null): void {
@@ -2357,6 +2380,9 @@ export class AgentManager {
     // Someone typed. Whatever the agent was waiting for, it has been answered —
     // retract the notification without waiting for the next frame to prove it.
     this.clearInputWait(agentId);
+    // A new instruction is a decision taken on the quiet signal (nudge /
+    // re-route) — the watchdog re-raises it if the board stays quiet.
+    agent.stallSignal = null;
   }
 
   /**
@@ -2553,6 +2579,7 @@ export class AgentManager {
       outputChars: 0,
       turnCompletedAt: null,
       terminalSince: null,
+      stallSignal: null,
     };
     this.agents.set(agent.id, instance);
     // Same PTY-activity hook as launch() — reconnected agents need

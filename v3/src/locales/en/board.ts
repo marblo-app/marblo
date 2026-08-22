@@ -133,9 +133,13 @@ export const board: Record<keyof typeof koBoard, string> = {
   "board.stuck.group.STALE": "STALE",
   "board.stuck.reason.agent-missing": "Bound agent is gone from the list",
   "board.stuck.reason.agent-dead": "Bound agent is stopped or errored",
-  "board.stuck.reason.no-progress": "No progress for over 30 minutes",
+  "board.stuck.reason.no-progress":
+    "No progress report past the stall threshold",
   "board.stuck.reason.worktree-idle": "Worktree untouched for over a day",
   "board.stuck.idleFor": "{minutes}m and counting",
+  "board.stuck.stateTitle": "Quiet for {minutes}m — needs a decision",
+  "board.stuck.stateTitleNoClock":
+    "Last progress time unknown — needs a decision",
   "board.stuck.action.retry": "Retry",
   "board.stuck.action.archive": "Archive",
   "board.stuck.action.delete": "Delete",
