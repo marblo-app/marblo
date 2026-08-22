@@ -65,11 +65,11 @@ export function SectionLabel({
 }) {
   return (
     <div className={`flex items-center gap-2 ${className}`}>
-      <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#6c7086]">
+      <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
         {children}
       </span>
       {trailing !== undefined && trailing !== null && (
-        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-[#7f849c]">
+        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted">
           {trailing}
         </span>
       )}
