@@ -64,4 +64,26 @@ export const common: Record<keyof typeof koCommon, string> = {
 
   // — collaboration conflict banner —
   "common.conflict.editing": "{names} is editing this file",
+
+  // — failure vocabulary (components/common/StateBlock · loadState) —
+  "common.state.loading.still": "Still trying…",
+  "common.state.empty.title": "Nothing here yet",
+  "common.state.failed.title": "Couldn't load",
+  "common.state.failed.label": "Couldn't load",
+  "common.state.failed.detail": "Details",
+  "common.state.denied.title":
+    "No permission to read this — it's unknown, not 0",
+  "common.state.denied.ask": "Ask {whom}",
+  "common.state.notReady.label": "Not collected yet",
+  "common.state.partial.title": "Showing {shown}/{total}",
+  // ★the one retry label — "Retry" (49 of 55 English occurrences today)
+  "common.state.action.retry": "Retry",
+  "common.state.action.create": "Create the first one",
+  "common.state.action.askOwner": "Ask {whom}",
+  "common.state.action.showMore": "Show more",
+  "common.state.reason.network": "Check your network connection.",
+  "common.state.reason.server": "The server did not respond.",
+  "common.state.reason.unknown": "The cause is unknown.",
+  "common.state.reason.ownerOnly": "Only the team owner can see this.",
+  "common.state.reason.notCollected": "This metric has not started collecting yet.",
 };

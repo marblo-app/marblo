@@ -70,4 +70,30 @@ export const common = {
 
   // — collaboration conflict banner (components/collaboration/ConflictWarning) —
   "common.conflict.editing": "{names} 님이 이 파일을 수정 중입니다",
+
+  // — "안 될 때" 의 어휘 (components/common/StateBlock · loadState) —
+  // 정본: docs/design-tokens-and-failure-vocabulary-2026-08-22.md §3.
+  // 한 벌로 박는다 — 화면마다 새로 쓰면 어휘가 다시 갈라진다.
+  "common.state.loading.still": "계속 시도 중…",
+  "common.state.empty.title": "아직 항목이 없습니다",
+  "common.state.failed.title": "불러오지 못했습니다",
+  "common.state.failed.label": "불러오지 못함",
+  "common.state.failed.detail": "상세",
+  "common.state.denied.title":
+    "권한이 없어 읽지 못했습니다 — 0 이 아니라 알 수 없음입니다",
+  "common.state.denied.ask": "{whom}에게 요청하세요",
+  "common.state.notReady.label": "아직 수집되지 않음",
+  "common.state.partial.title": "{shown}/{total} 만 그렸습니다",
+  // 행동 라벨 — ★재시도 버튼은 이 키 하나다(지금 4종: 다시 시도 46 · 재시도 29 ·
+  // Retry 49 · Try again 6). '다시 시도' 를 고른 이유: ko 최다 + 정본 §3-5 의 정정안.
+  "common.state.action.retry": "다시 시도",
+  "common.state.action.create": "첫 항목 만들기",
+  "common.state.action.askOwner": "{whom}에게 요청",
+  "common.state.action.showMore": "더 보기",
+  // 사유 코드 — `reasonCode` 는 i18n 키다. err.message 원문은 여기 오지 않는다.
+  "common.state.reason.network": "네트워크 연결을 확인하세요.",
+  "common.state.reason.server": "서버가 응답하지 않았습니다.",
+  "common.state.reason.unknown": "원인을 알 수 없습니다.",
+  "common.state.reason.ownerOnly": "팀 오너만 볼 수 있는 정보입니다.",
+  "common.state.reason.notCollected": "이 지표는 아직 수집을 시작하지 않았습니다.",
 };
