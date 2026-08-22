@@ -1043,6 +1043,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
       parentDir?: string | null;
       userId?: string;
     }) => ipcRenderer.invoke("repo:clone", input),
+    // ── 브랜치 push (티켓 FYIyUuhJbv2cDVjgkRGf, v2) ─────────────────────────
+    // ★응답에 토큰이 실리지 않는다 — `{ok, branch, errorKind, message}` 뿐이다.
+    // ★역할 거부는 `errorKind: "denied"` 로 온다. 화면은 그걸 device 재시도로
+    //   덮지 말아야 한다(그 폴백 금지가 main 쪽에서 이미 강제된다).
+    push: (input: {
+      projectId?: string;
+      repoPath: string;
+      repoUrl: string;
+      branch: string;
+      userId?: string;
+    }) => ipcRenderer.invoke("repo:push", input),
+    // 커밋 귀속 (재)설정. ★이메일을 돌려주지 않는다 — login 과 noreply 여부만.
+    setCommitIdentity: (input: { repoPath: string; userId?: string }) =>
+      ipcRenderer.invoke("repo:setCommitIdentity", input),
   },
   github: {
     deviceStart: (userId: string) =>

@@ -5,6 +5,16 @@
 - 상태: **설계만.** GitHub App 을 만들지도, 설치하지도 않았다. 코드도 바꾸지 않았다.
 - 대상 코드: `v3/electron/repo-clone.ts`, `v3/electron/github-token-store.ts`, `v3/electron/github-device-oauth.ts`, `v3/functions/src/`, `v3/firestore.rules`
 
+> ★**v2(티켓 `FYIyUuhJbv2cDVjgkRGf`) 이후 이 문서를 읽는 사람에게.** 이 설계는 `contents: read` 기준이다. v2 가 바꾼 것은 **세 가지뿐**이고 나머지는 전부 그대로다:
+>
+> 1. §3.2 8번의 `permissions: { contents: "read" }` → 요청이 read/write 중 무엇이냐에 따라 **협상**된다(`negotiateInstallationAccess`). 재승인 전에는 여기 적힌 대로 read 그대로다.
+> 2. §3.2 3번의 `uid ∈ members || uid == ownerId` 앞에 **역할 게이트**가 붙었다 — write 요청은 `viewer` 를 거부하고, 기본 브랜치는 `owner/admin` 만. 기존 `memberRoles` 모델(`DbAZ5C6gbO6nWNx9FZ4Q`)을 그대로 쓴다.
+> 3. §3.2 9번의 감사 항목에 `{role, access, branch}` 가 추가됐다. **토큰 금지는 그대로다.**
+>
+> ★**§3.2 7번(크로스테넌트 되묻기)은 write 에서 더 중요해졌을 뿐 설계가 바뀌지 않았다.** 아래 "7번이 왜 필수인가" 의 두 겹 방어(룰 + GitHub 되묻기)가 write 경로에도 **같은 자리에서** 적용된다 — `gitRemoteUrl` 을 남의 저장소로 바꿔도 `installation-mismatch` 에서 막힌다. 다만 뚫렸을 때의 피해가 "남의 코드를 읽는다" 에서 "남의 코드를 고친다" 로 바뀌었다.
+>
+> v2 의 결정·등록값·검증 런북: `v3/docs/github-app-registration-values-2026-08-21.md` §1.1 / §7 / §8 / §9 / §10.
+
 > 상위 에픽(`FFrgruR7qUYANYvL9ETt`)에 이미 적힌 것(무엇을 만들지 · 3개 서브티켓 분할 · functions 배포 주의)은 여기서 반복하지 않는다.
 > 이 문서가 새로 정하는 것: ① device OAuth 와 App 의 **역할 경계**, ② **scope 항목별 정당화**, ③ 회귀 0 을 폴백이 아니라 **분기 선택**으로 보장하는 방법, ④ **탈퇴 시 접근 차단 경로**, ⑤ **org 선행 여부 판단**, ⑥ 토큰 유출 경계 — 그리고 그 과정에서 **실측된 기존 결함 3건**.
 

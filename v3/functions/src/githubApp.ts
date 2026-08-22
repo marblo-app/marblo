@@ -34,15 +34,47 @@ export const GITHUB_API_BASE = "https://api.github.com";
 export const GITHUB_API_VERSION = "2022-11-28";
 
 /**
- * v1 이 요청하는 유일한 저장소 권한(설계 §4.1). Metadata:read 는 GitHub 이
- * 강제로 딸려 붙이므로 여기 적지 않는다(적을 수도 없다).
+ * 저장소 접근 수준. **역할이 아니라 이 요청이 무엇을 하려는지**다 —
+ * clone/fetch 는 read, push 는 write.
+ */
+export type RepoAccess = "read" | "write";
+
+/**
+ * read 요청이 받는 권한(설계 §4.1). Metadata:read 는 GitHub 이 강제로 딸려
+ * 붙으므로 여기 적지 않는다(적을 수도 없다).
  *
- * ★`contents: "write"` 를 넣지 않는다 — 확정된 결정이다(설계 §4.2). 모든 push
- * 가 `marblo[bot]` 으로 뭉개져 감사 추적이 죽고, 서버 침해 시 폭발 반경이
- * "읽기"에서 "고객 코드 변조"로 뛴다.
+ * ★v1 의 이름을 그대로 둔다 — 이 상수를 참조하는 곳이 곧 "읽기 경로" 라는
+ * 뜻이고, v2 가 그 의미를 바꾸지 않는다.
  */
 export const INSTALLATION_TOKEN_PERMISSIONS: Readonly<Record<string, string>> =
   Object.freeze({ contents: "read" });
+
+/**
+ * write 요청이 받는 권한(v2, 티켓 FYIyUuhJbv2cDVjgkRGf).
+ *
+ * ★v1 문서의 "Contents: Write 를 주지 않는다 — 확정된 결정" 은 **v2 로
+ * 갱신됐다.** 근거를 다시 적어 둔다:
+ *
+ *  - 잃는 것: push 이벤트와 PR 작성자가 `marblo[bot]` 으로 기록된다.
+ *  - ★잃지 않는 것: **커밋 작성자**. git author 이메일로 GitHub 이 그 사람의
+ *    계정에 그대로 귀속시킨다(github-commit-identity.ts 가 그 이메일을 박는다).
+ *    "누가 이 코드를 썼나" 는 살아 있고, 사라지는 건 "누가 밀었나" 뿐이다.
+ *  - ★여전히 유효한 대가: 서버가 침해되면 폭발 반경이 "읽기" 에서 "고객 코드
+ *    변조" 로 뛴다. 그건 없애는 게 아니라 **감수하고 방어를 두껍게** 한다 —
+ *    (a) 저장소 1개 다운스코프 유지, (b) 마블로 역할 게이트(viewer 는 write
+ *    토큰을 영원히 못 받는다), (c) 기본 브랜치 push 는 merge 권한 역할만,
+ *    (d) 발급 응답 권한 재검증(요청보다 넓으면 버린다).
+ *
+ * `pull_requests: write` 를 함께 요청하는 이유: 브랜치만 밀고 PR 은 브라우저
+ * 에서 열라고 하면 "PR 까지 간다" 가 아니다. contents 와 달리 이 권한은
+ * **코드를 바꾸지 못한다** — 폭발 반경이 늘지 않는 쪽의 최소 추가다.
+ *
+ * ★설치가 아직 이 권한을 승인하지 않았으면 요청하지 않는다 —
+ * `negotiateInstallationAccess` 가 승인된 만큼으로 깎는다(재승인 전 회귀 0).
+ */
+export const INSTALLATION_TOKEN_PERMISSIONS_WRITE: Readonly<
+  Record<string, string>
+> = Object.freeze({ contents: "write", pull_requests: "write" });
 
 /** App JWT 수명 — GitHub 상한은 10분. 시계 흔들림 여유를 두고 9분. */
 export const APP_JWT_TTL_SECONDS = 9 * 60;
@@ -158,6 +190,101 @@ export function normalizeInstallationId(v: unknown): string | null {
   return null;
 }
 
+// ── 마블로 역할 모델 (v2, 티켓 FYIyUuhJbv2cDVjgkRGf) ────────────────────────
+//
+// ★권한의 진실원은 GitHub 이 아니라 마블로다. 그래서 GitHub 초대를 쓰지 않고,
+// 대신 **우리가 역할을 판정해서** 그만큼의 토큰을 발급한다.
+//
+// ★MIRROR — `v3/src/types/invitation.ts` 의 `ROLE_PERMISSIONS`,
+// `v3/src/lib/teamRoles.ts` 의 `canMergeAsRole`, `v3/firestore.rules` 의
+// `getMemberRole`/`isAdminOrOwner` 와 **같은 판정**이다. functions 는 별도 npm
+// 패키지라 렌더러 src 를 import 할 수 없어 부득이 두 벌을 둔다(TEAM_COLLAB_PLANS
+// 와 같은 규약). drift 는 githubApp.test.ts 가 잡는다.
+//
+// ★새 권한 개념을 만들지 않았다. write = 기존 `write` 퍼미션, 기본 브랜치 =
+// 기존 `merge` 퍼미션. 화면이 막는 것과 토큰이 막는 것이 같아야 게이트가 뚫리지
+// 않는다.
+
+export type ProjectRole = "owner" | "admin" | "member" | "viewer";
+
+const PROJECT_ROLES: readonly ProjectRole[] = [
+  "owner",
+  "admin",
+  "member",
+  "viewer",
+];
+
+/**
+ * 역할별 퍼미션 — `src/types/invitation.ts` 의 ROLE_PERMISSIONS 중 이 파일이
+ * 쓰는 두 가지(`write`, `merge`)만 옮긴다. 목록 전체를 복사하면 쓰지도 않는
+ * 항목이 조용히 갈라진다.
+ */
+const ROLE_CAN_WRITE: Readonly<Record<ProjectRole, boolean>> = Object.freeze({
+  owner: true,
+  admin: true,
+  member: true,
+  viewer: false,
+});
+
+const ROLE_CAN_MERGE: Readonly<Record<ProjectRole, boolean>> = Object.freeze({
+  owner: true,
+  admin: true,
+  member: false,
+  viewer: false,
+});
+
+/** 저장소에 **밀 수** 있는 역할인가(= ROLE_PERMISSIONS 의 `write`). */
+export function roleCanWriteRepo(role: ProjectRole): boolean {
+  return ROLE_CAN_WRITE[role] === true;
+}
+
+/**
+ * 코드를 **랜딩**할 수 있는 역할인가(= ROLE_PERMISSIONS 의 `merge`,
+ * `teamRoles.canMergeAsRole` 와 같은 집합).
+ *
+ * ★이게 기본 브랜치 push 게이트다. 화면의 Merge 버튼을 owner/admin 으로
+ * 막아 놓고 git 으로는 `push origin main` 이 되면 그 게이트는 뚫린 것이다.
+ */
+export function roleCanMerge(role: ProjectRole): boolean {
+  return ROLE_CAN_MERGE[role] === true;
+}
+
+/**
+ * `memberRoles/{projectId}_{uid}.role` 원문 → 역할.
+ *
+ * ★모르는 값·빈 문서는 **member** 로 접는다 — firestore.rules 의
+ * `getMemberRole` 이 문서가 없을 때 'member' 를 쓰는 것과 정확히 같다. 여기서
+ * viewer 로 접으면 룰이 허용하는 사람을 코드가 막고, owner 로 접으면 그 반대다.
+ *
+ * ★`owner` 는 이 문서로 얻지 않는다 — 프로젝트 `ownerId` 가 진실원이다
+ * (룰의 `isProjectOwner` 와 같다). 멤버가 자기 memberRoles 문서에 'owner' 를
+ * 써 넣어 승격하는 경로를 여기서 끊는다.
+ */
+export function normalizeMemberRole(raw: unknown): ProjectRole {
+  if (typeof raw !== "string") return "member";
+  const t = raw.trim().toLowerCase();
+  if (t === "owner") return "member"; // ownerId 로만 owner 가 된다(위 주석)
+  return (PROJECT_ROLES as readonly string[]).includes(t)
+    ? (t as ProjectRole)
+    : "member";
+}
+
+/**
+ * 이 uid 의 프로젝트 역할. 멤버가 아니면 null — 그 뒤 어떤 것도 알려주지
+ * 않는다(v1 의 `not-a-member` 정보 노출 경계 그대로).
+ */
+export function resolveProjectRole(input: {
+  uid: string;
+  project: ProjectSnapshotForIssue;
+  memberRole?: unknown;
+}): ProjectRole | null {
+  const { uid, project } = input;
+  if (!project.exists || !uid) return null;
+  if (project.ownerId === uid) return "owner";
+  if (!project.members.includes(uid)) return null;
+  return normalizeMemberRole(input.memberRole);
+}
+
 // ── 인가 판정 (설계 §3.2 3~6번) ─────────────────────────────────────────────
 
 export interface ProjectSnapshotForIssue {
@@ -177,10 +304,20 @@ export type IssueDenyCode =
   | "not-a-member"
   | "no-team-entitlement"
   | "no-installation"
-  | "no-repo-url";
+  | "no-repo-url"
+  // v2 — 역할이 쓰기를 허용하지 않는다(viewer). read 요청은 그대로 통과한다.
+  | "role-cannot-write";
 
 export type IssueDecision =
-  | { ok: true; installationId: string; slug: RepoSlug }
+  | {
+      ok: true;
+      installationId: string;
+      slug: RepoSlug;
+      /** 이 요청자의 마블로 프로젝트 역할. 감사 원장에 남는다. */
+      role: ProjectRole;
+      /** 이 판정이 허용한 접근 수준. 실제 발급 권한은 설치 승인과 한 번 더 협상한다. */
+      access: RepoAccess;
+    }
   | { ok: false; code: IssueDenyCode };
 
 export interface IssueRequestInput {
@@ -188,6 +325,13 @@ export interface IssueRequestInput {
   project: ProjectSnapshotForIssue;
   /** 프로젝트 **오너**의 유효 플랜(resolveEntitledPlan 결과). */
   ownerPlan: string;
+  /**
+   * `memberRoles/{projectId}_{uid}.role` 원문. 문서가 없으면 undefined —
+   * firestore.rules 의 `getMemberRole` 과 **같은 기본값**(member)으로 접힌다.
+   */
+  memberRole?: unknown;
+  /** 이 요청이 원하는 접근 수준. 생략하면 read(= v1 동작 그대로). */
+  requestedAccess?: RepoAccess;
 }
 
 /**
@@ -211,15 +355,23 @@ export function evaluateInstallationTokenRequest(
   input: IssueRequestInput
 ): IssueDecision {
   const { uid, project, ownerPlan } = input;
+  const requestedAccess: RepoAccess = input.requestedAccess ?? "read";
 
-  const isMember =
-    project.exists &&
-    !!uid &&
-    (project.members.includes(uid) || project.ownerId === uid);
-  if (!isMember) return { ok: false, code: "not-a-member" };
+  const role = resolveProjectRole({ uid, project, memberRole: input.memberRole });
+  if (!role) return { ok: false, code: "not-a-member" };
 
   if (!planHasTeamCollab(ownerPlan)) {
     return { ok: false, code: "no-team-entitlement" };
+  }
+
+  // ★v2 역할 게이트 — **엔타이틀먼트 다음, 설치 조회 앞**이다.
+  //
+  // 앞에 두지 않는 이유: 역할 거부가 멤버십 거부보다 먼저 나오면 "너는 멤버는
+  // 맞는데 역할이 모자라다" 가 새어 프로젝트 존재를 프로빙할 수 있다.
+  // 뒤에 두지 않는 이유: 설치 조회는 GitHub 왕복이다 — 어차피 줄 수 없는
+  // 권한이면 남의 저장소에 요청을 쏘기 전에 끝낸다.
+  if (requestedAccess === "write" && !roleCanWriteRepo(role)) {
+    return { ok: false, code: "role-cannot-write" };
   }
 
   const installationId = normalizeInstallationId(project.githubInstallationId);
@@ -228,7 +380,7 @@ export function evaluateInstallationTokenRequest(
   const slug = parseGitHubRepoSlug(project.gitRemoteUrl);
   if (!slug) return { ok: false, code: "no-repo-url" };
 
-  return { ok: true, installationId, slug };
+  return { ok: true, installationId, slug, role, access: requestedAccess };
 }
 
 // ── App JWT (RS256) ─────────────────────────────────────────────────────────
@@ -402,6 +554,13 @@ export interface RepoInstallationResponse {
   id: unknown;
   account?: { login?: unknown } | null;
   repository_selection?: unknown;
+  /**
+   * ★이 설치에 **오너가 실제로 승인한** 권한(v2). 우리가 원하는 것이 아니라
+   * GitHub 이 지금 인정하는 것이다 — 권한을 올려도 기존 설치처는 오너가
+   * 재승인하기 전까지 옛 권한 그대로다. `negotiateInstallationAccess` 가
+   * 이 값으로 요청을 깎아 **재승인 전 회귀 0** 을 만든다.
+   */
+  permissions?: Record<string, unknown> | null;
 }
 
 export type RepoBindingFailure =
@@ -484,7 +643,14 @@ export type MintResult =
  */
 export function verifyMintedToken(
   response: AccessTokenResponse | null | undefined,
-  slug: RepoSlug
+  slug: RepoSlug,
+  /**
+   * 우리가 **요청한** 권한. 기본값은 v1 의 contents:read 라서, 이 인자를 안
+   * 넘기는 호출부는 v1 과 바이트 동일하게 동작한다.
+   */
+  expectedPermissions: Readonly<
+    Record<string, string>
+  > = INSTALLATION_TOKEN_PERMISSIONS
 ): MintResult {
   if (!response || typeof response.token !== "string" || !response.token) {
     return { ok: false, reason: "no-token" };
@@ -507,21 +673,110 @@ export function verifyMintedToken(
     return { ok: false, reason: "over-scoped-repos" };
   }
 
+  // ★"요청한 만큼만 왔는가" 를 **요청과 대조**해서 본다. v1 은 contents:read
+  // 를 상수로 박아 놨는데, v2 는 요청 자체가 두 가지(read/write)라 그 방식으로는
+  // write 토큰이 전부 over-scoped 로 버려진다. 대신 규칙을 일반화한다:
+  //   - 응답에 요청하지 않은 **권한 이름**이 있으면 버린다(metadata 는 예외 —
+  //     GitHub 이 강제로 붙인다, 설계 §4.1).
+  //   - 요청한 이름이라도 **수준이 더 높으면** 버린다(read 요청에 write 응답).
+  //   - 요청한 이름이 응답에 **없으면** 버린다 — 있다고 믿고 push 했다가
+  //     403 을 만나는 것보다, 여기서 끊고 read 로 내려가는 편이 낫다.
   const perms = response.permissions ?? {};
-  const entries = Object.entries(perms);
-  // metadata:read 는 GitHub 이 강제로 붙이므로 허용한다(설계 §4.1).
-  const allowed = new Set(["contents", "metadata"]);
-  for (const [key, value] of entries) {
-    if (!allowed.has(key))
+  const rank = (v: unknown): number =>
+    v === "admin" ? 3 : v === "write" ? 2 : v === "read" ? 1 : 0;
+  for (const [key, value] of Object.entries(perms)) {
+    if (key === "metadata") {
+      if (value !== "read") return { ok: false, reason: "over-scoped-permissions" };
+      continue;
+    }
+    const want = expectedPermissions[key];
+    if (!want) return { ok: false, reason: "over-scoped-permissions" };
+    if (rank(value) > rank(want) || rank(value) === 0) {
       return { ok: false, reason: "over-scoped-permissions" };
-    if (value !== "read")
-      return { ok: false, reason: "over-scoped-permissions" };
+    }
   }
-  if (perms.contents !== "read") {
-    return { ok: false, reason: "over-scoped-permissions" };
+  for (const [key, want] of Object.entries(expectedPermissions)) {
+    if (rank(perms[key]) < rank(want)) {
+      return { ok: false, reason: "over-scoped-permissions" };
+    }
   }
 
   return { ok: true, minted: { token: response.token, expiresAtMs } };
+}
+
+// ── 기본 브랜치 게이트 (v2) ─────────────────────────────────────────────────
+
+/**
+ * 밀려는 ref 정규화. `refs/heads/x` · `x` 둘 다 받고 브랜치 이름만 돌려준다.
+ * git 이 거부하는 모양(`-` 시작, 공백, `..`, `~^:?*[`, 끝의 `.lock`)은 null —
+ * 이 값은 인자로 git 에 들어가므로 옵션 주입도 함께 막는다.
+ */
+export function normalizePushRef(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  let t = raw.trim();
+  if (!t || t.length > 255) return null;
+  if (t.startsWith("refs/heads/")) t = t.slice("refs/heads/".length);
+  if (!t || t.startsWith("-") || t.startsWith("/") || t.endsWith("/")) return null;
+  if (t.endsWith(".lock") || t.endsWith(".")) return null;
+  if (t.includes("..") || t.includes("@{")) return null;
+  if (/[\s~^:?*[\\]/.test(t)) return null;
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f]/.test(t)) return null;
+  return t;
+}
+
+export type PushRefDenyCode =
+  | "no-push-ref"
+  | "unknown-default-branch"
+  | "default-branch-requires-merge-role";
+
+export type PushRefDecision =
+  | { ok: true; branch: string; isDefaultBranch: boolean }
+  | { ok: false; code: PushRefDenyCode };
+
+/**
+ * ★역할 게이트와 화면 게이트의 모순을 없애는 자리.
+ *
+ * 마블로는 "코드 머지 = owner/admin" 을 화면(WorktreeTab Merge 버튼)과
+ * Firestore 룰(REVIEW→DONE)에서 이미 막고 있다. 그런데 member 에게 준
+ * `contents: write` 토큰으로 `git push origin main` 이 되면 **그 게이트는 뚫린
+ * 것**이다. 그래서 write 토큰을 발급하기 전에 "어느 ref 로 밀 건가" 를 받아
+ * 기본 브랜치면 merge 권한 역할만 통과시킨다.
+ *
+ * ★정직하게 — 이건 **암호학적 경계가 아니다.** installation 토큰에는 브랜치
+ * 스코프가 없어서, 일단 손에 들어간 write 토큰은 어느 브랜치로든 밀 수 있다.
+ * 이 판정이 막는 것은 "마블로를 통한 경로" 이고, 그걸 넘어서는 강제는
+ * **오너 저장소의 브랜치 보호 규칙**뿐이다(그건 App 이 아니라 저장소 설정이라
+ * GitHub 이 App 토큰에도 똑같이 적용한다). 등록 문서가 그 설정을 권고한다.
+ */
+export function evaluatePushRef(input: {
+  role: ProjectRole;
+  ref: unknown;
+  /** `GET /repos/{o}/{r}` 의 `default_branch`. 모르면 null. */
+  defaultBranch: string | null;
+}): PushRefDecision {
+  const branch = normalizePushRef(input.ref);
+  if (!branch) return { ok: false, code: "no-push-ref" };
+
+  // ★기본 브랜치를 모르면 판정을 하지 않고 **거부**한다. merge 권한이 있는
+  // 역할까지 같이 막히지만, 그 반대(모르니까 통과)는 GitHub 조회가 한 번
+  // 흔들릴 때마다 게이트가 열린다는 뜻이라 받아들일 수 없다. 호출부는 이
+  // 코드를 GitHub 도달 실패와 같은 등급으로 다룬다.
+  const known = input.defaultBranch?.trim();
+  if (!known) return { ok: false, code: "unknown-default-branch" };
+
+  const isDefaultBranch = branch.toLowerCase() === known.toLowerCase();
+  if (isDefaultBranch && !roleCanMerge(input.role)) {
+    return { ok: false, code: "default-branch-requires-merge-role" };
+  }
+  return { ok: true, branch, isDefaultBranch };
+}
+
+/** `GET /repos/{o}/{r}` 응답에서 기본 브랜치만 뽑는다. 모양이 어긋나면 null. */
+export function parseDefaultBranch(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const raw = (body as { default_branch?: unknown }).default_branch;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
 }
 
 /**
@@ -536,6 +791,15 @@ export interface GitHubAppAuditEntry {
   outcome: "issued" | "denied" | "error";
   reason: string | null;
   at: number;
+  /**
+   * ★v2 — "누가 밀었나" 가 GitHub 쪽에서 `marblo[bot]` 으로 뭉개지는 대신,
+   * **여기**에 남는다. 발급 시점의 역할·접근수준·대상 브랜치가 있으면
+   * "이 사람이 이 시각에 write 를 받아 갔다" 를 우리 원장이 답할 수 있다.
+   * 읽기 경로(v1)에는 role 만 붙고 나머지는 null 이다.
+   */
+  role: ProjectRole | null;
+  access: RepoAccess | null;
+  branch: string | null;
 }
 
 export function buildAuditEntry(input: {
@@ -546,6 +810,9 @@ export function buildAuditEntry(input: {
   outcome: GitHubAppAuditEntry["outcome"];
   reason: string | null;
   nowMs: number;
+  role?: ProjectRole | null;
+  access?: RepoAccess | null;
+  branch?: string | null;
 }): GitHubAppAuditEntry {
   return {
     uid: input.uid,
@@ -555,6 +822,9 @@ export function buildAuditEntry(input: {
     outcome: input.outcome,
     reason: input.reason,
     at: input.nowMs,
+    role: input.role ?? null,
+    access: input.access ?? null,
+    branch: input.branch ?? null,
   };
 }
 
@@ -581,7 +851,11 @@ export type RepoAccessDenyReason =
   | RepoBindingFailure;
 
 export type RepoAccessCheck =
-  | { ok: true }
+  | {
+      ok: true;
+      /** 오너가 이 설치에 승인해 둔 권한(`{contents: "read"}` 등). */
+      permissions: Readonly<Record<string, string>>;
+    }
   | { ok: false; reason: RepoAccessDenyReason };
 
 /**
@@ -620,7 +894,85 @@ export function evaluateRepoInstallationLookup(
     expectedInstallationId,
     slug
   );
-  return binding.ok ? { ok: true } : { ok: false, reason: binding.reason };
+  return binding.ok
+    ? {
+        ok: true,
+        permissions: parseInstallationPermissions(
+          (body as RepoInstallationResponse | null)?.permissions
+        ),
+      }
+    : { ok: false, reason: binding.reason };
+}
+
+// ── 설치 승인 권한 ↔ 요청 권한 협상 (v2) ────────────────────────────────────
+
+/**
+ * `GET /repos/{o}/{r}/installation` 의 `permissions` 를 문자열 맵으로 정규화.
+ * 모르는 모양은 통째로 버린다 — "없다" 로 접히면 read 로 내려가고, 그건
+ * 안전한 쪽 오답이다.
+ */
+export function parseInstallationPermissions(
+  raw: unknown
+): Readonly<Record<string, string>> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof k === "string" && typeof v === "string") out[k] = v;
+  }
+  return Object.freeze(out);
+}
+
+export interface AccessNegotiation {
+  /** 실제로 발급할 접근 수준. */
+  access: RepoAccess;
+  /** 발급 요청에 실을 `permissions` 본문. */
+  permissions: Readonly<Record<string, string>>;
+  /**
+   * ★write 를 원했지만 설치가 아직 승인하지 않아 read 로 내려갔는가.
+   * 이게 참이면 **오너의 재승인이 필요하다** — 화면이 그렇게 안내한다.
+   * 실패가 아니라 v1 동작으로의 정상 강등이다(회귀 0).
+   */
+  downgraded: boolean;
+}
+
+/**
+ * 요청 접근 수준 × 설치가 승인한 권한 → 실제 발급 권한.
+ *
+ * ★권한을 올리면 GitHub 이 **기존 설치처 오너에게 재승인을 요구**하고, 그
+ * 전까지 그 설치는 옛 권한(contents:read)만 갖는다. 그 상태에서 write 를
+ * 요청하면 GitHub 은 422 로 발급 자체를 거절한다 — 그러면 clone 까지 같이
+ * 죽는다. 그래서 **요청 전에** 승인된 만큼으로 깎는다.
+ *
+ * `pull_requests` 는 승인됐을 때만 붙인다. 없어도 push 는 되고 PR 은 브라우저
+ * 에서 열 수 있으므로, 이것 때문에 write 전체를 포기하지 않는다.
+ */
+export function negotiateInstallationAccess(
+  requested: RepoAccess,
+  installationPermissions: Readonly<Record<string, string>>
+): AccessNegotiation {
+  if (requested !== "write") {
+    return {
+      access: "read",
+      permissions: INSTALLATION_TOKEN_PERMISSIONS,
+      downgraded: false,
+    };
+  }
+  if (installationPermissions.contents !== "write") {
+    return {
+      access: "read",
+      permissions: INSTALLATION_TOKEN_PERMISSIONS,
+      downgraded: true,
+    };
+  }
+  const permissions: Record<string, string> = { contents: "write" };
+  if (installationPermissions.pull_requests === "write") {
+    permissions.pull_requests = "write";
+  }
+  return {
+    access: "write",
+    permissions: Object.freeze(permissions),
+    downgraded: false,
+  };
 }
 
 export type MintHttpFailure = MintFailure | `mint-${number}`;
@@ -637,12 +989,20 @@ export type MintHttpResult =
 export function evaluateMintResponse(
   status: number,
   body: unknown,
-  slug: RepoSlug
+  slug: RepoSlug,
+  /** 우리가 요청한 권한. 생략하면 v1 의 contents:read. */
+  expectedPermissions: Readonly<
+    Record<string, string>
+  > = INSTALLATION_TOKEN_PERMISSIONS
 ): MintHttpResult {
   if (status !== 201) {
     return { ok: false, reason: `mint-${status}` as MintHttpFailure };
   }
-  const checked = verifyMintedToken(body as AccessTokenResponse, slug);
+  const checked = verifyMintedToken(
+    body as AccessTokenResponse,
+    slug,
+    expectedPermissions
+  );
   return checked.ok
     ? { ok: true, minted: checked.minted }
     : { ok: false, reason: checked.reason };

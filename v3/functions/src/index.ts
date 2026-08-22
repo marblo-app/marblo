@@ -48,15 +48,21 @@ import {
   evaluateRepoInstallationLookup,
   GITHUB_API_BASE,
   GITHUB_API_VERSION,
-  INSTALLATION_TOKEN_PERMISSIONS,
+  evaluatePushRef,
   INSTALLATION_TOKEN_RULES,
+  negotiateInstallationAccess,
   normalizeInstallationId,
   normalizePrivateKeyPem,
+  parseDefaultBranch,
   repoSlugKey,
+  roleCanMerge,
+  roleCanWriteRepo,
   SETUP_STATE_TTL_MS,
   signSetupState,
   verifySetupState,
+  type ProjectRole,
   type ProjectSnapshotForIssue,
+  type RepoAccess,
   type RepoSlug,
 } from "./githubApp";
 import {
@@ -15680,6 +15686,11 @@ async function recordGitHubAppAccess(entry: {
   installationId: string | null;
   outcome: "issued" | "denied" | "error";
   reason: string | null;
+  /** ★v2 — GitHub 쪽 push 이벤트가 `marblo[bot]` 으로 뭉개지는 만큼, "누가
+   *  어떤 역할로 write 를 받아 갔나" 는 이 원장이 답한다. */
+  role?: ProjectRole | null;
+  access?: RepoAccess | null;
+  branch?: string | null;
 }): Promise<void> {
   try {
     const row = buildAuditEntry({ ...entry, nowMs: Date.now() });
@@ -15724,6 +15735,41 @@ async function ownerEntitledPlan(ownerId: string | null): Promise<string> {
     },
     Date.now()
   );
+}
+
+/**
+ * ★역할 조회 — `memberRoles/{projectId}_{uid}` (티켓 DbAZ5C6gbO6nWNx9FZ4Q 가
+ * 도입한 컬렉션 그대로). 새 권한 개념을 만들지 않는다.
+ *
+ * 문서가 없으면 undefined 를 돌려주고, `normalizeMemberRole` 이
+ * firestore.rules 의 `getMemberRole` 과 **같은 기본값**(member)으로 접는다.
+ * 조회 실패는 던진다 — 실패를 member 로 접으면 viewer 가 write 를 받는다.
+ */
+async function readMemberRoleValue(
+  projectId: string,
+  uid: string
+): Promise<unknown> {
+  const snap = await db
+    .collection("memberRoles")
+    .doc(`${projectId}_${uid}`)
+    .get();
+  return snap.exists ? (snap.data() || {}).role : undefined;
+}
+
+/** 요청이 원하는 접근 수준. 생략·모르는 값은 read(= v1 동작). */
+function requestedRepoAccess(data: unknown): RepoAccess {
+  const raw =
+    data && typeof data === "object"
+      ? (data as { access?: unknown }).access
+      : undefined;
+  return raw === "write" ? "write" : "read";
+}
+
+/** write 요청이 밀려는 ref. 판정은 evaluatePushRef 가 한다. */
+function requestedPushRef(data: unknown): unknown {
+  return data && typeof data === "object"
+    ? (data as { ref?: unknown }).ref
+    : undefined;
 }
 
 function requireProjectId(data: unknown): string {
@@ -15994,7 +16040,12 @@ export const issueRepoInstallationToken = functions.https.onCall(
     const deny = async (
       reason: string,
       slug: RepoSlug | null,
-      inst: string | null
+      inst: string | null,
+      extra?: {
+        role?: ProjectRole | null;
+        access?: RepoAccess | null;
+        branch?: string | null;
+      }
     ): Promise<functions.https.HttpsError> => {
       await recordGitHubAppAccess({
         uid,
@@ -16003,24 +16054,61 @@ export const issueRepoInstallationToken = functions.https.onCall(
         installationId: inst,
         outcome: "denied",
         reason,
+        ...extra,
       });
+      // ★거부 사유는 여전히 뭉뚱그린다 — 정밀한 사유는 원장에만 남는다.
+      //
+      // 단 하나의 예외: **역할 때문에 write 가 거부된 경우**만 `denyClass:
+      // "role"` 을 붙인다. 이건 새는 정보가 아니다 — 자기 역할은 이미 화면에
+      // 보이고(getGitHubAppStatus 의 role/canWrite/canMerge), 이게 없으면
+      // 클라가 "역할 거부" 와 "서버 장애" 를 구분하지 못해 **역할 거부인데도
+      // device 토큰으로 폴백**해 게이트를 스스로 뚫는다.
+      const roleDenied =
+        reason === "role-cannot-write" ||
+        reason === "default-branch-requires-merge-role";
+      if (roleDenied) {
+        return new functions.https.HttpsError(
+          "permission-denied",
+          reason === "default-branch-requires-merge-role"
+            ? "기본 브랜치에 직접 밀 수 없습니다. 브랜치를 올리고 PR 로 보내세요."
+            : "이 프로젝트에서 코드를 밀 수 있는 역할이 아닙니다.",
+          { denyClass: "role" }
+        );
+      }
       return new functions.https.HttpsError(
         "failed-precondition",
         "GitHub App 접근을 사용할 수 없습니다."
       );
     };
 
+    const requestedAccess = requestedRepoAccess(data);
     const snap = await db.collection("projects").doc(projectId).get();
     const project = projectSnapshotForIssue(snap);
+    // ★역할은 **멤버일 때만** 의미가 있다. 멤버가 아니면 이 조회 결과도
+    // 무시되므로(resolveProjectRole 이 null), 조회를 먼저 해도 정보가 새지
+    // 않는다. 조회 실패는 흡수하지 않는다 — member 로 접히면 viewer 가
+    // write 를 받게 된다.
+    let memberRole: unknown;
+    try {
+      memberRole = await readMemberRoleValue(projectId, uid);
+    } catch (err) {
+      functions.logger.error(
+        "[issueRepoInstallationToken] 역할 조회 실패",
+        err instanceof Error ? err.message : "unknown"
+      );
+      throw await deny("role-lookup-failed", null, null);
+    }
     const decision = evaluateInstallationTokenRequest({
       uid,
       project,
       ownerPlan: await ownerEntitledPlan(project.ownerId),
+      memberRole,
+      requestedAccess,
     });
     if (!decision.ok) {
       throw await deny(decision.code, null, null);
     }
-    const { installationId, slug } = decision;
+    const { installationId, slug, role } = decision;
 
     // ★설계 §3.2 7번 — GitHub 에 되묻는다. 룰만 믿지 않는다.
     //
@@ -16056,10 +16144,57 @@ export const issueRepoInstallationToken = functions.https.onCall(
       slug
     );
     if (!access.ok) {
-      throw await deny(access.reason, slug, installationId);
+      throw await deny(access.reason, slug, installationId, { role });
     }
 
-    // 다운스코프 발급 — 이 저장소 1개 · contents:read.
+    // ★재승인 협상(v2) — 우리가 원하는 권한이 아니라 **오너가 이 설치에 실제로
+    // 승인해 둔 권한**으로 요청을 깎는다. App 권한을 write 로 올려도 기존
+    // 설치처는 오너가 재승인하기 전까지 read 그대로이고, 그 상태에서 write 를
+    // 요청하면 GitHub 이 422 로 발급 자체를 거절해 **clone 까지 같이 죽는다.**
+    // 여기서 깎으면 재승인 전에는 정확히 v1 동작이다(회귀 0).
+    const negotiated = negotiateInstallationAccess(
+      decision.access,
+      access.permissions
+    );
+
+    // ★기본 브랜치 게이트 — write 일 때만. 화면이 Merge 를 owner/admin 으로
+    // 막아 놓았으므로 토큰도 같은 선을 그어야 게이트가 뚫리지 않는다.
+    let branch: string | null = null;
+    if (negotiated.access === "write") {
+      let repoMeta: GitHubApiResult;
+      try {
+        repoMeta = await githubAppApi(
+          `/repos/${encodeURIComponent(slug.owner)}/${encodeURIComponent(
+            slug.repo
+          )}`,
+          { method: "GET" }
+        );
+      } catch (err) {
+        functions.logger.error(
+          "[issueRepoInstallationToken] 기본 브랜치 조회 실패",
+          err instanceof Error ? err.message : "unknown"
+        );
+        throw await deny("github-unreachable", slug, installationId, {
+          role,
+          access: "write",
+        });
+      }
+      const refDecision = evaluatePushRef({
+        role,
+        ref: requestedPushRef(data),
+        defaultBranch:
+          repoMeta.status === 200 ? parseDefaultBranch(repoMeta.body) : null,
+      });
+      if (!refDecision.ok) {
+        throw await deny(refDecision.code, slug, installationId, {
+          role,
+          access: "write",
+        });
+      }
+      branch = refDecision.branch;
+    }
+
+    // 다운스코프 발급 — 이 저장소 1개 · 협상된 권한만.
     let minted: GitHubApiResult;
     try {
       minted = await githubAppApi(
@@ -16068,7 +16203,7 @@ export const issueRepoInstallationToken = functions.https.onCall(
           method: "POST",
           body: {
             repositories: [slug.repo],
-            permissions: { ...INSTALLATION_TOKEN_PERMISSIONS },
+            permissions: { ...negotiated.permissions },
           },
         }
       );
@@ -16077,15 +16212,30 @@ export const issueRepoInstallationToken = functions.https.onCall(
         "[issueRepoInstallationToken] GitHub 발급 실패",
         err instanceof Error ? err.message : "unknown"
       );
-      throw await deny("github-unreachable", slug, installationId);
+      throw await deny("github-unreachable", slug, installationId, {
+        role,
+        access: negotiated.access,
+        branch,
+      });
     }
     // ★201 여부 + 다운스코프 검증을 한 함수가 한다. 넓게 온 토큰은 버린다.
-    const checked = evaluateMintResponse(minted.status, minted.body, slug);
+    // 대조 기준은 **우리가 요청한 권한**이라, write 토큰이 read 기준으로
+    // 버려지지도 않고 read 요청에 write 가 와도 통과하지 않는다.
+    const checked = evaluateMintResponse(
+      minted.status,
+      minted.body,
+      slug,
+      negotiated.permissions
+    );
     if (!checked.ok) {
       functions.logger.warn(
         `[issueRepoInstallationToken] mint rejected (${checked.reason})`
       );
-      throw await deny(checked.reason, slug, installationId);
+      throw await deny(checked.reason, slug, installationId, {
+        role,
+        access: negotiated.access,
+        branch,
+      });
     }
 
     await recordGitHubAppAccess({
@@ -16094,14 +16244,21 @@ export const issueRepoInstallationToken = functions.https.onCall(
       slug,
       installationId,
       outcome: "issued",
-      reason: null,
+      reason: negotiated.downgraded ? "downgraded-to-read" : null,
+      role,
+      access: negotiated.access,
+      branch,
     });
 
     // ★서버는 이 토큰을 저장하지 않는다(설계 §5-B2). 응답에 한 번 실려 끝.
+    // ★`downgraded` 는 실패가 아니라 "오너 재승인 필요" 라는 사실이다 —
+    // 클라가 이걸 보고 push 를 시도하지 않고 안내로 바꾼다.
     return {
       token: checked.minted.token,
       expiresAt: checked.minted.expiresAtMs,
       repo: repoSlugKey(slug),
+      access: negotiated.access,
+      downgraded: negotiated.downgraded,
     };
   }
 );
@@ -16120,23 +16277,45 @@ export const getGitHubAppStatus = functions.https.onCall(
     }
     const uid = context.auth.uid;
     const projectId = requireProjectId(data);
-    const off = { installed: false, repoAccessible: false, configured: false };
+    // ★v2 필드는 전부 **보수적 기본값**이다. 상태 조회가 어디서 멈추든
+    // "쓰기 가능" 이 참으로 새지 않는다.
+    const off = {
+      installed: false,
+      repoAccessible: false,
+      configured: false,
+      role: null as ProjectRole | null,
+      canWrite: false,
+      canMerge: false,
+      writeGranted: false,
+    };
     if (!githubAppConfigured()) return off;
 
     const snap = await db.collection("projects").doc(projectId).get();
     const project = projectSnapshotForIssue(snap);
+    let memberRole: unknown;
+    try {
+      memberRole = await readMemberRoleValue(projectId, uid);
+    } catch {
+      memberRole = undefined;
+    }
     const decision = evaluateInstallationTokenRequest({
       uid,
       project,
       ownerPlan: await ownerEntitledPlan(project.ownerId),
+      memberRole,
     });
     if (!decision.ok) {
-      return {
-        installed: false,
-        repoAccessible: false,
-        configured: true,
-      };
+      return { ...off, configured: true };
     }
+    const { role } = decision;
+    // ★역할이 주는 상한. 설치가 write 를 승인했는지와는 **별개**다 —
+    // 화면은 둘을 다르게 안내해야 한다("당신 역할로는 못 민다" vs
+    // "오너가 재승인해야 한다").
+    const roleCaps = {
+      role,
+      canWrite: roleCanWriteRepo(role),
+      canMerge: roleCanMerge(role),
+    };
 
     try {
       const lookup = await githubAppApi(
@@ -16145,16 +16324,31 @@ export const getGitHubAppStatus = functions.https.onCall(
         )}/installation`,
         { method: "GET" }
       );
-      const bound = evaluateRepoInstallationLookup(
+      const checked = evaluateRepoInstallationLookup(
         lookup.status,
         lookup.body,
         decision.installationId,
         decision.slug
-      ).ok;
-      return { installed: true, repoAccessible: bound, configured: true };
+      );
+      return {
+        installed: true,
+        repoAccessible: checked.ok,
+        configured: true,
+        ...roleCaps,
+        // ★오너가 이 설치에 contents:write 를 승인했는가. 거짓이면 push 는
+        // 아직 안 되고, 화면은 오너에게 **재승인**을 안내한다(회귀 0 —
+        // 그동안 clone 은 그대로 된다).
+        writeGranted: checked.ok && checked.permissions.contents === "write",
+      };
     } catch {
       // 조회 실패는 "모름" 이다 — 접근 가능으로 위장하지 않는다.
-      return { installed: true, repoAccessible: false, configured: true };
+      return {
+        installed: true,
+        repoAccessible: false,
+        configured: true,
+        ...roleCaps,
+        writeGranted: false,
+      };
     }
   }
 );

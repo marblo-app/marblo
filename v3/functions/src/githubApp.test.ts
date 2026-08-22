@@ -21,7 +21,16 @@ import {
   buildAuditEntry,
   buildInstallUrl,
   evaluateInstallationTokenRequest,
+  evaluatePushRef,
   INSTALLATION_TOKEN_PERMISSIONS,
+  INSTALLATION_TOKEN_PERMISSIONS_WRITE,
+  negotiateInstallationAccess,
+  normalizeMemberRole,
+  normalizePushRef,
+  parseDefaultBranch,
+  resolveProjectRole,
+  roleCanMerge,
+  roleCanWriteRepo,
   normalizeInstallationId,
   normalizePrivateKeyPem,
   parseGitHubRepoSlug,
@@ -32,7 +41,9 @@ import {
   verifyMintedToken,
   verifyRepoInstallationBinding,
   verifySetupState,
+  type ProjectRole,
   type ProjectSnapshotForIssue,
+  type RepoAccess,
 } from "./githubApp";
 
 // ── 픽스처 ──────────────────────────────────────────────────────────────────
@@ -476,13 +487,18 @@ test("★감사 항목에 토큰이 들어가지 않는다 (필드 자체가 없
     reason: null,
     nowMs: NOW,
   });
+  // ★v2 가 role/access/branch 를 더했다("누가 밀었나" 의 답이 여기 남는다).
+  //   ★token 은 여전히 **필드 자체가 없다** — 그게 이 테스트의 요지다.
   assert.deepEqual(Object.keys(entry).sort(), [
+    "access",
     "at",
+    "branch",
     "installationId",
     "outcome",
     "projectId",
     "reason",
     "repoSlug",
+    "role",
     "uid",
   ]);
   assert.equal(JSON.stringify(entry).includes("ghs_"), false);
@@ -506,9 +522,11 @@ import {
 const LOOKUP_OK = { id: 12345678, account: { login: "acme" } };
 
 test("★평시: 저장소가 설치에 있으면 통과하고 토큰이 발급된다", () => {
+  // v2: ok 응답이 설치 승인 권한을 함께 실어 온다(협상 입력). LOOKUP_OK 에는
+  // permissions 가 없으므로 빈 맵 = "write 승인 없음" 으로 접힌다.
   assert.deepEqual(
     evaluateRepoInstallationLookup(200, LOOKUP_OK, INSTALLATION_ID, SLUG),
-    { ok: true }
+    { ok: true, permissions: {} }
   );
   const mint = evaluateMintResponse(201, OK_TOKEN, SLUG);
   assert.equal(mint.ok, true);
@@ -590,4 +608,554 @@ test("★차단 시나리오 전체 — 멤버 제거 → 발급 거부, 이미 
     assert.equal("refreshToken" in mint.minted, false);
     assert.equal(Object.keys(mint.minted).sort().join(","), "expiresAtMs,token");
   }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// v2 — contents:write · 역할 게이트 · 재승인 협상 (티켓 FYIyUuhJbv2cDVjgkRGf)
+//
+// ★여기서 증명하는 것:
+//   1. 역할 모델이 마블로의 기존 판정과 **같다** (새 권한 개념을 안 만들었다)
+//   2. viewer 는 write 토큰을 못 받는다 — 판정 순서까지
+//   3. ★역할 회수가 T+0 에 먹힌다 (member → viewer 로 바꾸면 즉시 거부)
+//   4. ★화면의 Merge 게이트와 토큰 게이트가 모순이 없다 (기본 브랜치)
+//   5. ★재승인 전에는 v1(read) 로 동작한다 — 회귀 0
+//   6. 발급 응답 권한 재검증이 write 요청에서도 정확히 동작한다
+// ═════════════════════════════════════════════════════════════════════════════
+
+const ADMIN = "admin-uid";
+const VIEWER = "viewer-uid";
+
+function projectWithRoles(
+  over: Partial<ProjectSnapshotForIssue> = {}
+): ProjectSnapshotForIssue {
+  return project({ members: [OWNER, ADMIN, MEMBER, VIEWER], ...over });
+}
+
+function issueV2(
+  uid: string,
+  opts: {
+    memberRole?: unknown;
+    requestedAccess?: RepoAccess;
+    over?: Partial<ProjectSnapshotForIssue>;
+    plan?: string;
+  } = {}
+) {
+  return evaluateInstallationTokenRequest({
+    uid,
+    project: projectWithRoles(opts.over),
+    ownerPlan: opts.plan ?? "team",
+    memberRole: opts.memberRole,
+    requestedAccess: opts.requestedAccess,
+  });
+}
+
+// ── v2-1. 역할 모델은 마블로의 기존 판정 그대로다 ───────────────────────────
+
+test("v2 역할 모델: write=owner/admin/member, merge=owner/admin (MIRROR)", () => {
+  // ★src/types/invitation.ts 의 ROLE_PERMISSIONS 와 같은 집합이어야 한다.
+  //   owner/admin/member 에 'write', owner/admin 에만 'merge'.
+  //   여기가 갈라지면 화면이 막는 것과 토큰이 막는 것이 달라진다.
+  assert.deepEqual(
+    (["owner", "admin", "member", "viewer"] as ProjectRole[]).map(
+      roleCanWriteRepo
+    ),
+    [true, true, true, false]
+  );
+  assert.deepEqual(
+    (["owner", "admin", "member", "viewer"] as ProjectRole[]).map(roleCanMerge),
+    [true, true, false, false]
+  );
+});
+
+test("normalizeMemberRole: 문서가 없거나 모르는 값이면 member — 룰의 getMemberRole 과 같다", () => {
+  assert.equal(normalizeMemberRole(undefined), "member");
+  assert.equal(normalizeMemberRole(null), "member");
+  assert.equal(normalizeMemberRole(""), "member");
+  assert.equal(normalizeMemberRole("maintainer"), "member");
+  assert.equal(normalizeMemberRole(42), "member");
+  assert.equal(normalizeMemberRole(" ADMIN "), "admin");
+  assert.equal(normalizeMemberRole("Viewer"), "viewer");
+});
+
+test("normalizeMemberRole: memberRoles 문서의 'owner' 로는 승격되지 않는다", () => {
+  // ★멤버가 자기 역할 문서에 owner 를 써 넣어 승격하는 경로를 끊는다.
+  //   owner 는 projects.ownerId 로만 된다(룰의 isProjectOwner 와 같다).
+  assert.equal(normalizeMemberRole("owner"), "member");
+});
+
+test("resolveProjectRole: ownerId 가 역할 문서를 이긴다", () => {
+  assert.equal(
+    resolveProjectRole({
+      uid: OWNER,
+      project: projectWithRoles(),
+      memberRole: "viewer",
+    }),
+    "owner"
+  );
+});
+
+test("resolveProjectRole: 남이면 null — 역할도 알려주지 않는다", () => {
+  assert.equal(
+    resolveProjectRole({
+      uid: OUTSIDER,
+      project: projectWithRoles(),
+      memberRole: "admin",
+    }),
+    null
+  );
+  assert.equal(
+    resolveProjectRole({
+      uid: MEMBER,
+      project: projectWithRoles({ exists: false }),
+    }),
+    null
+  );
+});
+
+// ── v2-2. viewer 는 write 토큰을 못 받는다 ──────────────────────────────────
+
+test("★viewer 는 write 를 거부당한다 — read 는 v1 그대로 통과한다", () => {
+  const denied = issueV2(VIEWER, {
+    memberRole: "viewer",
+    requestedAccess: "write",
+  });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.ok === false && denied.code, "role-cannot-write");
+
+  // 같은 사람이 clone(read)은 그대로 된다 — v1 기능을 뺏지 않는다.
+  const allowed = issueV2(VIEWER, {
+    memberRole: "viewer",
+    requestedAccess: "read",
+  });
+  assert.equal(allowed.ok, true);
+  assert.equal(allowed.ok === true && allowed.access, "read");
+  assert.equal(allowed.ok === true && allowed.role, "viewer");
+});
+
+test("member/admin/owner 는 write 를 받는다", () => {
+  for (const [uid, role] of [
+    [OWNER, undefined],
+    [ADMIN, "admin"],
+    [MEMBER, "member"],
+  ] as const) {
+    const d = issueV2(uid, { memberRole: role, requestedAccess: "write" });
+    assert.equal(d.ok, true, `${uid} 는 write 를 받아야 한다`);
+    assert.equal(d.ok === true && d.access, "write");
+  }
+});
+
+test("access 를 안 주면 read — v1 호출부가 그대로 동작한다", () => {
+  const d = issueV2(MEMBER, { memberRole: "member" });
+  assert.equal(d.ok === true && d.access, "read");
+});
+
+test("★판정 순서: 남이면 역할 거부가 아니라 not-a-member 다", () => {
+  // 역할 거부가 멤버십 거부보다 먼저 나오면 "너는 멤버는 맞다" 가 새어
+  // 프로젝트 존재를 프로빙하는 도구가 된다.
+  const d = issueV2(OUTSIDER, {
+    memberRole: "viewer",
+    requestedAccess: "write",
+  });
+  assert.equal(d.ok === false && d.code, "not-a-member");
+});
+
+test("★판정 순서: 엔타이틀먼트가 역할보다 먼저다", () => {
+  const d = issueV2(VIEWER, {
+    memberRole: "viewer",
+    requestedAccess: "write",
+    plan: "free",
+  });
+  assert.equal(d.ok === false && d.code, "no-team-entitlement");
+});
+
+test("★판정 순서: 역할 거부가 설치 조회보다 먼저다 — 남의 저장소에 요청을 쏘지 않는다", () => {
+  const d = issueV2(VIEWER, {
+    memberRole: "viewer",
+    requestedAccess: "write",
+    over: { githubInstallationId: null },
+  });
+  assert.equal(d.ok === false && d.code, "role-cannot-write");
+});
+
+// ── v2-3. ★역할 회수가 T+0 에 먹힌다 ───────────────────────────────────────
+
+test("★역할 회수: member → viewer 로 강등되면 다음 발급에서 즉시 write 거부", () => {
+  const before = issueV2(MEMBER, {
+    memberRole: "member",
+    requestedAccess: "write",
+  });
+  assert.equal(before.ok, true);
+
+  // 오너가 보드에서 역할을 viewer 로 내린 직후. 재로그인·캐시 만료를
+  // 기다리지 않는다 — 판정이 매 요청마다 새로 읽은 역할로 이루어진다.
+  const after = issueV2(MEMBER, {
+    memberRole: "viewer",
+    requestedAccess: "write",
+  });
+  assert.equal(after.ok === false && after.code, "role-cannot-write");
+});
+
+test("★멤버 제거: members 에서 빠지면 read 조차 T+0 에 거부 (v1 규율 유지)", () => {
+  const after = issueV2(MEMBER, {
+    memberRole: "member",
+    requestedAccess: "write",
+    over: { members: [OWNER, ADMIN, VIEWER] },
+  });
+  assert.equal(after.ok === false && after.code, "not-a-member");
+});
+
+// ── v2-4. ★기본 브랜치 게이트 — 화면의 Merge 와 모순이 없다 ────────────────
+
+test("★member 는 기본 브랜치에 직접 밀 수 없다 (화면 Merge 게이트와 같은 선)", () => {
+  const d = evaluatePushRef({
+    role: "member",
+    ref: "main",
+    defaultBranch: "main",
+  });
+  assert.equal(d.ok === false && d.code, "default-branch-requires-merge-role");
+});
+
+test("member 도 피처 브랜치는 민다 — PR 을 올릴 수 있어야 제품이 성립한다", () => {
+  const d = evaluatePushRef({
+    role: "member",
+    ref: "feature/login",
+    defaultBranch: "main",
+  });
+  assert.equal(d.ok, true);
+  assert.equal(d.ok === true && d.isDefaultBranch, false);
+});
+
+test("owner/admin 은 기본 브랜치에 민다", () => {
+  for (const role of ["owner", "admin"] as ProjectRole[]) {
+    const d = evaluatePushRef({ role, ref: "main", defaultBranch: "main" });
+    assert.equal(d.ok, true, `${role} 는 기본 브랜치에 밀 수 있어야 한다`);
+    assert.equal(d.ok === true && d.isDefaultBranch, true);
+  }
+});
+
+test("기본 브랜치 판정은 이름 대소문자·refs/heads 접두사를 흡수한다", () => {
+  const d = evaluatePushRef({
+    role: "member",
+    ref: "refs/heads/MAIN",
+    defaultBranch: "main",
+  });
+  assert.equal(d.ok === false && d.code, "default-branch-requires-merge-role");
+});
+
+test("★기본 브랜치를 모르면 통과시키지 않는다 — 조회가 흔들릴 때 게이트가 열리면 안 된다", () => {
+  const d = evaluatePushRef({
+    role: "member",
+    ref: "feature/x",
+    defaultBranch: null,
+  });
+  assert.equal(d.ok === false && d.code, "unknown-default-branch");
+});
+
+test("normalizePushRef: git 이 거부하는 모양·옵션 주입을 전부 막는다", () => {
+  for (const bad of [
+    "",
+    "   ",
+    "-force",
+    "--upload-pack=evil",
+    "a b",
+    "a..b",
+    "a~1",
+    "a^",
+    "a:b",
+    "a?",
+    "a*",
+    "a[1]",
+    "a\\b",
+    "a@{0}",
+    "a.lock",
+    "trailing.",
+    "/leading",
+    "trailing/",
+    "with\nnewline",
+    42,
+    null,
+  ]) {
+    assert.equal(normalizePushRef(bad), null, `거부해야 한다: ${String(bad)}`);
+  }
+  assert.equal(normalizePushRef("feature/login"), "feature/login");
+  assert.equal(normalizePushRef("refs/heads/feature/login"), "feature/login");
+  assert.equal(normalizePushRef("  main  "), "main");
+});
+
+test("parseDefaultBranch: 모양이 어긋나면 null", () => {
+  assert.equal(parseDefaultBranch({ default_branch: "trunk" }), "trunk");
+  assert.equal(parseDefaultBranch({ default_branch: "  main  " }), "main");
+  assert.equal(parseDefaultBranch({ default_branch: "" }), null);
+  assert.equal(parseDefaultBranch({ default_branch: 7 }), null);
+  assert.equal(parseDefaultBranch(null), null);
+});
+
+// ── v2-5. ★재승인 전에는 v1(read) 로 동작한다 — 회귀 0 ─────────────────────
+
+test("★오너 재승인 전: write 요청이 read 로 강등되고 downgraded 로 표시된다", () => {
+  // App 권한을 write 로 올려도 **기존 설치처**는 오너가 재승인하기 전까지
+  // contents:read 그대로다. 그 상태에서 write 를 요청하면 GitHub 이 422 로
+  // 발급 자체를 거절해 clone 까지 죽는다. 그래서 요청 전에 깎는다.
+  const n = negotiateInstallationAccess("write", { contents: "read" });
+  assert.equal(n.access, "read");
+  assert.equal(n.downgraded, true);
+  assert.deepEqual({ ...n.permissions }, { contents: "read" });
+});
+
+test("재승인 후: write 요청이 그대로 나간다", () => {
+  const n = negotiateInstallationAccess("write", {
+    contents: "write",
+    pull_requests: "write",
+    metadata: "read",
+  });
+  assert.equal(n.access, "write");
+  assert.equal(n.downgraded, false);
+  assert.deepEqual(
+    { ...n.permissions },
+    { contents: "write", pull_requests: "write" }
+  );
+});
+
+test("pull_requests 가 승인 안 됐으면 그것만 빼고 write 로 간다", () => {
+  const n = negotiateInstallationAccess("write", { contents: "write" });
+  assert.equal(n.access, "write");
+  assert.deepEqual({ ...n.permissions }, { contents: "write" });
+});
+
+test("read 요청은 설치가 write 를 줘도 read 만 받는다 — 다운스코프 유지", () => {
+  const n = negotiateInstallationAccess("read", {
+    contents: "write",
+    pull_requests: "write",
+  });
+  assert.equal(n.access, "read");
+  assert.equal(n.downgraded, false);
+  assert.deepEqual({ ...n.permissions }, { contents: "read" });
+});
+
+test("evaluateRepoInstallationLookup 이 설치 승인 권한을 함께 돌려준다", () => {
+  const r = evaluateRepoInstallationLookup(
+    200,
+    {
+      id: Number(INSTALLATION_ID),
+      account: { login: "acme" },
+      permissions: { contents: "write", metadata: "read", junk: 7 },
+    },
+    INSTALLATION_ID,
+    { owner: "acme", repo: "app" }
+  );
+  assert.equal(r.ok, true);
+  // 문자열이 아닌 값은 버린다 — 모르는 모양은 "없다" 로 접혀 read 로 내려간다.
+  assert.deepEqual(r.ok === true ? { ...r.permissions } : null, {
+    contents: "write",
+    metadata: "read",
+  });
+});
+
+test("permissions 가 없는 응답은 빈 맵 — write 요청이 read 로 강등된다", () => {
+  const r = evaluateRepoInstallationLookup(
+    200,
+    { id: Number(INSTALLATION_ID), account: { login: "acme" } },
+    INSTALLATION_ID,
+    { owner: "acme", repo: "app" }
+  );
+  assert.equal(r.ok, true);
+  const n = negotiateInstallationAccess(
+    "write",
+    r.ok === true ? r.permissions : {}
+  );
+  assert.equal(n.downgraded, true);
+});
+
+// ── v2-6. 발급 응답 권한 재검증 (write 판) ──────────────────────────────────
+
+const V2_SLUG = { owner: "acme", repo: "app" };
+const OK_REPOS = [{ full_name: "acme/app" }];
+
+function minted(permissions: Record<string, string>) {
+  return {
+    token: "ghs_dummy",
+    expires_at: "2026-08-22T01:00:00Z",
+    permissions,
+    repositories: OK_REPOS,
+  };
+}
+
+test("write 요청: 정확히 요청한 권한이면 통과한다", () => {
+  const want = { contents: "write", pull_requests: "write" };
+  const r = verifyMintedToken(minted({ ...want, metadata: "read" }), V2_SLUG, want);
+  assert.equal(r.ok, true);
+});
+
+test("★write 요청이어도 요청보다 넓으면 버린다 (admin 승격·미요청 권한)", () => {
+  const want = { contents: "write" };
+  assert.equal(
+    verifyMintedToken(minted({ contents: "admin" }), V2_SLUG, want).ok,
+    false
+  );
+  assert.equal(
+    verifyMintedToken(
+      minted({ contents: "write", administration: "write" }),
+      V2_SLUG,
+      want
+    ).ok,
+    false
+  );
+});
+
+test("★read 요청에 write 토큰이 오면 버린다 — 다운스코프가 한 방향으로만 샌다", () => {
+  const r = verifyMintedToken(
+    minted({ contents: "write" }),
+    V2_SLUG,
+    INSTALLATION_TOKEN_PERMISSIONS
+  );
+  assert.equal(r.ok, false);
+  assert.equal(r.ok === false && r.reason, "over-scoped-permissions");
+});
+
+test("요청한 권한이 응답에 없으면 버린다 — 있다고 믿고 push 하지 않는다", () => {
+  const r = verifyMintedToken(minted({ contents: "read" }), V2_SLUG, {
+    contents: "write",
+  });
+  assert.equal(r.ok, false);
+});
+
+test("v1 호출부(기대권한 미지정)는 바이트 동일하게 동작한다", () => {
+  assert.equal(verifyMintedToken(minted({ contents: "read" }), V2_SLUG).ok, true);
+  assert.equal(verifyMintedToken(minted({ contents: "write" }), V2_SLUG).ok, false);
+});
+
+test("write 요청이어도 저장소는 여전히 1개로 다운스코프된다", () => {
+  const want = { contents: "write" };
+  const r = verifyMintedToken(
+    {
+      token: "ghs_dummy",
+      expires_at: "2026-08-22T01:00:00Z",
+      permissions: want,
+      repositories: [{ full_name: "acme/app" }, { full_name: "acme/other" }],
+    },
+    V2_SLUG,
+    want
+  );
+  assert.equal(r.ok === false && r.reason, "over-scoped-repos");
+});
+
+test("evaluateMintResponse 가 기대권한을 그대로 넘긴다", () => {
+  const want = { contents: "write", pull_requests: "write" };
+  assert.equal(
+    evaluateMintResponse(201, minted(want), V2_SLUG, want).ok,
+    true
+  );
+  assert.equal(evaluateMintResponse(201, minted(want), V2_SLUG).ok, false);
+  // 재승인 전이면 GitHub 이 422 를 준다 — 그것도 거부로 접힌다.
+  assert.equal(evaluateMintResponse(422, null, V2_SLUG, want).ok, false);
+});
+
+// ── v2-7. 감사 원장 ─────────────────────────────────────────────────────────
+
+test("★감사 원장에 role/access/branch 가 남고 token 은 여전히 없다", () => {
+  const row = buildAuditEntry({
+    uid: MEMBER,
+    projectId: PROJECT_ID,
+    slug: V2_SLUG,
+    installationId: INSTALLATION_ID,
+    outcome: "issued",
+    reason: null,
+    nowMs: 1_700_000_000_000,
+    role: "member",
+    access: "write",
+    branch: "feature/login",
+  });
+  assert.equal(row.role, "member");
+  assert.equal(row.access, "write");
+  assert.equal(row.branch, "feature/login");
+  // ★"누가 밀었나" 가 GitHub 에서 marblo[bot] 으로 뭉개지는 만큼, 그 답은
+  //   여기 있어야 한다. 그리고 토큰은 타입에도 값에도 없어야 한다.
+  assert.equal("token" in row, false);
+  assert.deepEqual(Object.values(row).includes("ghs_dummy"), false);
+});
+
+test("v1 경로는 role/access/branch 가 null 로 남는다", () => {
+  const row = buildAuditEntry({
+    uid: MEMBER,
+    projectId: PROJECT_ID,
+    slug: V2_SLUG,
+    installationId: INSTALLATION_ID,
+    outcome: "denied",
+    reason: "not-a-member",
+    nowMs: 1,
+  });
+  assert.equal(row.role, null);
+  assert.equal(row.access, null);
+  assert.equal(row.branch, null);
+});
+
+// ── v2-8. 상수 ──────────────────────────────────────────────────────────────
+
+test("write 권한 상수는 contents+pull_requests 뿐이다 — repo 전권으로 돌아가지 않는다", () => {
+  assert.deepEqual(
+    { ...INSTALLATION_TOKEN_PERMISSIONS_WRITE },
+    { contents: "write", pull_requests: "write" }
+  );
+  // administration 은 영구 거부 후보다(등록값 문서 §1.1).
+  assert.equal("administration" in INSTALLATION_TOKEN_PERMISSIONS_WRITE, false);
+});
+
+// ── v2-9. ★역할 회수 창(window) 실측 ────────────────────────────────────────
+//
+// "이미 발급된 토큰은 만료까지 산다" 는 창이 **얼마인지** 를 코드로 못박는다.
+// 라이브 App 없이 측정 가능한 것은 셋이고, 그 셋이 창의 전부다:
+//
+//   (a) 발급 응답의 `expires_at` — GitHub 이 정하고 우리가 못 줄인다.
+//       `POST /app/installations/{id}/access_tokens` 에 TTL 파라미터가 없다
+//       (API 버전 2022-11-28). index.ts 의 요청 본문에도 없다.
+//   (b) 우리가 그 토큰을 **저장하지 않는다** → 창을 늘리는 캐시가 없다.
+//   (c) 역할 판정이 **매 발급마다** 새로 이루어진다 → 새 작업은 T+0 에 끊긴다.
+//
+// 결론(보고용): **잔여 노출 ≤ 60분, 저장소 1개, 그 시점 역할의 권한 한도 안.**
+// 갱신 경로가 없다(응답에 refresh 토큰이 존재하지 않는다).
+
+test("★실측: 발급 토큰의 잔여 수명 상한은 60분이다", () => {
+  const issuedAtMs = Date.parse("2026-08-22T00:00:00Z");
+  // GitHub 이 실제로 내려주는 모양 — 발급 시각 + 1시간.
+  const response = {
+    token: "ghs_dummy",
+    expires_at: "2026-08-22T01:00:00Z",
+    permissions: { contents: "write" },
+    repositories: [{ full_name: "acme/app" }],
+  };
+  const r = verifyMintedToken(response, V2_SLUG, { contents: "write" });
+  assert.equal(r.ok, true);
+  const windowMs = r.ok === true ? r.minted.expiresAtMs - issuedAtMs : -1;
+  assert.equal(windowMs, 60 * 60_000);
+});
+
+test("★실측: 만료 시각을 못 읽으면 토큰을 쓰지 않는다 — 창을 추측하지 않는다", () => {
+  for (const bad of [undefined, null, "", "not-a-date", 12345]) {
+    const r = verifyMintedToken(
+      {
+        token: "ghs_dummy",
+        expires_at: bad,
+        permissions: { contents: "read" },
+        repositories: [{ full_name: "acme/app" }],
+      },
+      V2_SLUG
+    );
+    assert.equal(r.ok, false);
+    assert.equal(r.ok === false && r.reason, "bad-expiry");
+  }
+});
+
+test("★역할 판정에 캐시가 없다 — 같은 입력 함수를 두 번 부르면 두 번 다 판정한다", () => {
+  // 역할이 바뀌면 그 다음 호출이 곧바로 새 역할로 판정된다는 뜻이다.
+  // (index.ts 도 요청마다 memberRoles 를 새로 읽는다 — 메모이즈하지 않는다.)
+  const asMember = issueV2(MEMBER, {
+    memberRole: "member",
+    requestedAccess: "write",
+  });
+  const asViewer = issueV2(MEMBER, {
+    memberRole: "viewer",
+    requestedAccess: "write",
+  });
+  assert.equal(asMember.ok, true);
+  assert.equal(asViewer.ok, false);
 });

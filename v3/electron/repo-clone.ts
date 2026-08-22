@@ -217,7 +217,16 @@ export type GitRunner = (
   opts: { cwd: string; timeoutMs: number; env?: Record<string, string> }
 ) => Promise<{ code: number; stderr: string }>;
 
-const realGitRunner: GitRunner = (args, { cwd, timeoutMs, env: extraEnv }) =>
+/**
+ * ★repo-push 가 **이 실행기를 그대로 재사용한다**(티켓 FYIyUuhJbv2cDVjgkRGf).
+ * 여기에 모여 있는 것들 — `GIT_TERMINAL_PROMPT=0`(인증 프롬프트로 hang 하지
+ * 않기), ssh BatchMode, 타임아웃 SIGKILL, "토큰은 자식 env 까지만" — 은 push
+ * 에도 똑같이 필요하다. 두 벌을 만들면 한쪽만 고쳐진다.
+ */
+export const realGitRunner: GitRunner = (
+  args,
+  { cwd, timeoutMs, env: extraEnv }
+) =>
   new Promise((resolve) => {
     let stderr = "";
     let settled = false;
@@ -247,7 +256,7 @@ const realGitRunner: GitRunner = (args, { cwd, timeoutMs, env: extraEnv }) =>
         } catch {
           /* already gone */
         }
-        stderr += "\nclone timed out";
+        stderr += "\ngit command timed out";
         finish(1);
       }, timeoutMs);
       timer.unref?.();

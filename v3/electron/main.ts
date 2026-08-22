@@ -258,7 +258,17 @@ import {
   type ProjectConnectionInput,
   type AccessMode,
 } from "./connection-store";
-import { cloneRepo, defaultCloneParentDir } from "./repo-clone";
+import {
+  cloneRepo,
+  defaultCloneParentDir,
+  realGitRunner,
+} from "./repo-clone";
+import { pushBranch, normalizeBranchName } from "./repo-push";
+import {
+  applyCommitIdentity,
+  fetchCommitIdentity,
+  type CommitIdentity,
+} from "./github-commit-identity";
 // macOS Xcode CLT 라이선스/설치 문제를 git 실패에서 감지·사전감지한다
 // (티켓 nETj7szjEtT5prbYsg1D).
 import { annotateGitFailure, probeXcodeClt } from "./xcode-clt";
@@ -277,11 +287,13 @@ import {
 // 않는다 — 두 경로가 같은 타입을 만들어 **하나의 clone 구현**에 들어간다.
 import {
   resolveCloneCredential,
+  resolvePushCredential,
   type CloneCredential,
 } from "./github-clone-credential";
 import {
   getGitHubAppStatus,
   issueRepoInstallationToken,
+  issueRepoInstallationWriteToken,
   readProjectInstallationId,
   startGitHubAppInstall,
 } from "./github-app-client";
@@ -6823,9 +6835,156 @@ ipcMain.handle(
       } catch (err) {
         console.warn("[repo:clone] connection upsert failed (non-fatal):", err);
       }
+      // ★커밋 귀속을 clone 직후에 박는다(v2, 티켓 FYIyUuhJbv2cDVjgkRGf).
+      //
+      // 여기서 박아야 하는 이유: 커밋을 만드는 것은 우리가 아니라 그 폴더에서
+      // 도는 **에이전트/사람**이다. push 시점에 고치면 이미 만들어진 커밋의
+      // 작성자는 못 고친다. repo-local config 라 전역 설정을 건드리지 않는다.
+      //
+      // fail-soft — 귀속 실패가 clone 성공을 가리면 안 된다. 대신 조용히
+      // 넘기지 않고 로그를 남긴다(조용히 깨지는 게 이 기능의 실패 모드다).
+      await applyCommitIdentityForRepo(result.path, userId);
     }
     return result;
   }
+);
+
+/**
+ * 저장소에 커밋 신원을 박는다 — v2 커밋 귀속의 유일한 진입점.
+ *
+ * ★이메일은 **GitHub 이 답한 값**만 쓴다. 마블로 계정 이메일을 쓰면 GitHub
+ * 계정에 매칭되지 않아 귀속이 조용히 깨진다(github-commit-identity 참조).
+ * 그래서 device OAuth 를 한 번도 안 한 사용자에게는 **아무것도 박지 않고**
+ * false 를 돌려준다 — 틀린 이메일을 박는 것보다 안 박는 게 낫다.
+ */
+async function applyCommitIdentityForRepo(
+  repoPath: string,
+  userId?: string,
+): Promise<{ ok: boolean; identity?: CommitIdentity }> {
+  const deviceToken = validGitHubOAuthUserId(userId)
+    ? getGitHubToken(safeStorage, userId)
+    : null;
+  if (!deviceToken) {
+    console.info(
+      "[commitIdentity] GitHub 계정 미연결 — 커밋 귀속을 설정하지 않았다",
+    );
+    return { ok: false };
+  }
+  const identity = await fetchCommitIdentity(deviceToken);
+  if (!identity) return { ok: false };
+
+  const applied = await applyCommitIdentity(repoPath, identity, (args, opts) =>
+    realGitRunner(args, { cwd: opts.cwd, timeoutMs: 15_000 }),
+  );
+  if (!applied) {
+    console.warn("[commitIdentity] git config 쓰기 실패 — 귀속이 안 붙었다");
+    return { ok: false };
+  }
+  // ★이메일을 로그하지 않는다. login 만 남긴다.
+  console.info(
+    `[commitIdentity] ${identity.login} 로 커밋 귀속 설정${
+      identity.usesNoreply ? " (noreply 주소)" : ""
+    }`,
+  );
+  return { ok: true, identity };
+}
+
+/**
+ * 브랜치 push — 팀원이 GitHub 개별 초대 없이 코드를 올리는 경로 (v2).
+ *
+ * ★clone 과 **같은 자격증명 게이트**를 쓰고(github-clone-credential), **같은
+ * git 실행기·같은 토큰 주입 방식**(#1097 의 `GIT_CONFIG_*`)을 쓴다. 새로 만든
+ * 것은 push 고유의 것뿐이다.
+ *
+ * ★역할 거부는 **폴백하지 않는다.** device 토큰으로 내려가면 화면의 Merge
+ * 게이트를 우리 손으로 뚫는 것이다(resolvePushCredential 참조).
+ */
+ipcMain.handle(
+  "repo:push",
+  async (
+    _event,
+    {
+      projectId,
+      repoPath,
+      repoUrl,
+      branch,
+      userId,
+    }: {
+      projectId?: string;
+      repoPath: string;
+      repoUrl: string;
+      branch: string;
+      userId?: string;
+    },
+  ) => {
+    const safeBranch = normalizeBranchName(branch);
+    if (!safeBranch) {
+      return {
+        ok: false,
+        errorKind: "invalid-branch",
+        message: "브랜치 이름이 올바르지 않습니다.",
+      };
+    }
+    if (typeof repoPath !== "string" || !repoPath.trim()) {
+      return {
+        ok: false,
+        errorKind: "git",
+        message: "저장소 경로를 찾을 수 없습니다.",
+      };
+    }
+
+    // 커밋 귀속을 한 번 더 맞춰 둔다 — clone 이 아니라 기존 폴더를 연결한
+    // 사용자에게는 여기가 첫 기회다. 실패해도 push 는 막지 않는다(이미
+    // 만들어진 커밋의 작성자는 어차피 여기서 못 고친다).
+    await applyCommitIdentityForRepo(repoPath, userId);
+
+    const credential = await resolvePushCredential(
+      { projectId, repoUrl, ref: safeBranch },
+      {
+        getInstallationId: readProjectInstallationId,
+        issueWriteToken: issueRepoInstallationWriteToken,
+        getDeviceToken: () =>
+          validGitHubOAuthUserId(userId)
+            ? getGitHubToken(safeStorage, userId)
+            : null,
+      },
+    );
+
+    if (credential.kind === "denied") {
+      // ★역할 거부. 토큰을 만들지도, device 로 내려가지도 않는다.
+      return { ok: false, errorKind: "denied", message: credential.message };
+    }
+
+    const githubToken =
+      credential.kind === "none" ? null : credential.token;
+    return pushBranch({
+      repoPath,
+      remoteUrl: repoUrl,
+      branch: safeBranch,
+      githubToken,
+    });
+  },
+);
+
+/**
+ * 이 저장소의 커밋 귀속을 (재)설정한다. 화면이 "귀속이 안 붙었습니다" 를
+ * 띄우고 사용자가 GitHub 을 연결한 뒤 누르는 버튼용.
+ * ★이메일을 렌더러로 돌려주지 않는다 — login 과 noreply 여부만.
+ */
+ipcMain.handle(
+  "repo:setCommitIdentity",
+  async (
+    _event,
+    { repoPath, userId }: { repoPath: string; userId?: string },
+  ) => {
+    if (typeof repoPath !== "string" || !repoPath.trim()) {
+      return { ok: false };
+    }
+    const r = await applyCommitIdentityForRepo(repoPath, userId);
+    return r.ok && r.identity
+      ? { ok: true, login: r.identity.login, usesNoreply: r.identity.usesNoreply }
+      : { ok: false };
+  },
 );
 
 // 이 기기의 안정적 식별자를 렌더러에 넘긴다. 프로젝트 폴더 경로를 기기별로
