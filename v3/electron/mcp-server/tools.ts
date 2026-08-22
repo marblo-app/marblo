@@ -78,6 +78,13 @@ import {
   shouldReleaseClaimForStoppedAgent,
 } from "./task-ownership.js";
 import {
+  assessClaimHolder,
+  decideClaimAuthority,
+  formatClaimOverrideAudit,
+  type ClaimAuthorityDecision,
+  type ClaimHolderAssessment,
+} from "./claim-authority.js";
+import {
   appendQuestion,
   answerQuestion,
   clampQuestionText,
@@ -794,6 +801,12 @@ interface TaskDoc {
   hasPmFeedback: boolean;
   /** soft-delete 표식 — true 면 목록/조회에서 숨긴다. */
   deleted?: boolean;
+  /**
+   * Layer A projection (projection.ts). fetchTask 가 문서를 통째로 spread 하므로
+   * 런타임에는 늘 있었는데 타입에만 없었다. claim 보유자의 `silent` 판정이
+   * lastActivityAt 를 읽으므로 여기 명시한다.
+   */
+  projection?: { lastActivityAt?: Timestamp };
 }
 
 interface AgentIdHint {
@@ -1848,24 +1861,182 @@ function attributionAgentId(paramId?: string): string {
   return WORKER_AGENT_ID || workerAgentId(paramId || MARBLO_AGENT_ID);
 }
 
-function canAgentMutateClaimedTask(
-  actorAgentId: string
-): (task: Record<string, unknown>) => boolean {
-  return (task) => {
-    const claimedBy =
-      typeof task.claimedBy === "string" && task.claimedBy
-        ? task.claimedBy
-        : null;
-    return !claimedBy || claimedBy === actorAgentId;
-  };
-}
-
 function claimOwnershipErrorFromTask(task: Record<string, unknown>): string {
   const claimedBy =
     typeof task.claimedBy === "string" && task.claimedBy
       ? task.claimedBy
       : "unknown";
   return getClaimOwnershipError({ claimedBy, actorAgentId: "" }) ?? "";
+}
+
+// ── Claim override 권한 (티켓 r2rrPsblZPlUOTCWzc3Z) ──────────────
+//
+// 설계 근거·오판 비용 분석은 claim-authority.ts 헤더에 있다. 여기는 그 순수 판정에
+// 필요한 **증거를 실제로 조회하는** I/O 껍데기다.
+
+/**
+ * claim 보유자가 살아 있는지 플릿에 물어본다.
+ *
+ * ★"못 찾았다" 와 "조회에 실패했다" 를 반드시 구분한다. fetchAgentIdHint 는 둘 다
+ * null 로 뭉개므로 여기서 따로 조회한다 — 그 구분이 무너지면 브리지가 잠깐 흔들릴
+ * 때마다 살아있는 에이전트의 티켓이 강탈된다(false-dead, 되돌릴 수 없는 오판).
+ */
+async function probeClaimHolder(
+  claimedBy: string,
+  taskLastActivityMs: number | null
+): Promise<ClaimHolderAssessment> {
+  let firestoreFailed = false;
+  try {
+    const snap = await getDoc(doc(db, "agents", claimedBy));
+    if (snap.exists()) {
+      const data = snap.data() as Record<string, unknown>;
+      return assessClaimHolder({
+        found: true,
+        lookupFailed: false,
+        status: nonEmptyString(data.status),
+        lastActivityAtMs: taskLastActivityMs,
+        nowMs: Date.now(),
+      });
+    }
+  } catch (err) {
+    firestoreFailed = true;
+    console.warn("[MCP] claim holder lookup (Firestore) failed:", err);
+  }
+
+  // Firestore 에 문서가 없어도 아직 "부재" 로 단정하지 않는다 — 브리지의 인메모리
+  // 플릿에만 있는 갓 스폰된 에이전트가 실재한다. 두 곳 모두에서 없어야 absent 다.
+  const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+  if (!bridgePort) {
+    // 브리지 주소를 모르면 플릿의 절반을 못 본 것이다. Firestore 조회가 성공했고
+    // 거기에 없었더라도 fail-closed 로 간다.
+    return assessClaimHolder({ found: false, lookupFailed: true });
+  }
+  try {
+    const projectId = process.env.MARBLO_PROJECT || "";
+    const url = projectId
+      ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(
+          projectId
+        )}`
+      : `http://127.0.0.1:${bridgePort}/agents`;
+    const response = await fetch(url, { headers: bridgeHeaders() });
+    if (!response.ok) {
+      return assessClaimHolder({ found: false, lookupFailed: true });
+    }
+    const data = (await response.json()) as {
+      agents?: Array<Record<string, unknown>>;
+    };
+    const agents = Array.isArray(data.agents) ? data.agents : [];
+    const match = agents.find((a) => nonEmptyString(a.id) === claimedBy);
+    if (match) {
+      return assessClaimHolder({
+        found: true,
+        lookupFailed: false,
+        status: nonEmptyString(match.status),
+        lastActivityAtMs: taskLastActivityMs,
+        nowMs: Date.now(),
+      });
+    }
+    // 브리지는 확실히 답했고 거기 없다. Firestore 도 (성공했다면) 없었다.
+    return assessClaimHolder({ found: false, lookupFailed: firestoreFailed });
+  } catch (err) {
+    console.warn("[MCP] claim holder lookup (bridge) failed:", err);
+    return assessClaimHolder({ found: false, lookupFailed: true });
+  }
+}
+
+interface ResolvedClaimAuthority {
+  /** null 이 아니면 그대로 도구 응답으로 내보내고 중단한다. */
+  error: string | null;
+  decision: ClaimAuthorityDecision;
+  /** override 였다면 감사 기록에 실을 문장. */
+  auditMessage: string | null;
+}
+
+/**
+ * projection.lastActivityAt(epoch ms). silent 판정 전용 — 못 읽으면 null 이고,
+ * 그러면 assessClaimHolder 가 무활동 판정을 통째로 건너뛴다(권한에는 영향 없음).
+ */
+function taskLastActivityAtMs(task: TaskDoc): number | null {
+  const at = task.projection?.lastActivityAt;
+  if (!at || typeof at.toMillis !== "function") return null;
+  try {
+    return at.toMillis();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 두 단계 판정 실행기 — 순수 로직이 증거를 요구하면 플릿을 조회해 한 번 더 부른다.
+ *
+ * `action` 은 감사 기록의 "대상" 줄에 그대로 들어간다("status CLAIMED → DONE" 등).
+ * `reason` 은 override 일 때 필수 — 도구의 comment/message 를 그대로 넘긴다.
+ */
+async function resolveClaimAuthority(opts: {
+  task: TaskDoc;
+  actorAgentId: string;
+  action: string;
+  reason: string;
+}): Promise<ResolvedClaimAuthority> {
+  const base = {
+    claimedBy: opts.task.claimedBy,
+    actorAgentId: opts.actorAgentId,
+    actorIsOrchestrator: isOrchestratorAgentId(MARBLO_AGENT_ID),
+    actorProjectId: process.env.MARBLO_PROJECT || "",
+    taskProjectId: opts.task.projectId,
+    reason: opts.reason,
+  };
+
+  let decision = decideClaimAuthority(base);
+  if (decision.needsHolderEvidence) {
+    const holder = await probeClaimHolder(
+      (opts.task.claimedBy ?? "").trim(),
+      taskLastActivityAtMs(opts.task)
+    );
+    decision = decideClaimAuthority({ ...base, holder });
+  }
+
+  if (!decision.allowed) {
+    return { error: decision.error, decision, auditMessage: null };
+  }
+  if (!decision.override || !decision.grant) {
+    return { error: null, decision, auditMessage: null };
+  }
+  return {
+    error: null,
+    decision,
+    auditMessage: formatClaimOverrideAudit({
+      grant: decision.grant,
+      // 감사 기록에는 오케의 실제 id 를 그대로 남긴다 — 귀속용 "" 로 지우면
+      // "누가" 가 사라져 기록의 절반이 날아간다.
+      actorAgentId: opts.actorAgentId || MARBLO_AGENT_ID,
+      claimedBy: (opts.task.claimedBy ?? "").trim(),
+      action: opts.action,
+      reason: opts.reason,
+      overrideWhy: decision.overrideWhy,
+    }),
+  };
+}
+
+/**
+ * override 를 허용하더라도 TOCTOU 는 그대로 닫는다. 우리가 근거를 확인한 **그**
+ * 보유자일 때만 넘는다 — 판정과 커밋 사이에 다른 에이전트가 새로 claim 했다면
+ * 트랜잭션을 중단한다. (claim 보호를 없애는 게 아니라 탈출구를 여는 것이므로,
+ * "동시 수정 금지" 는 override 경로에서도 유지되어야 한다.)
+ */
+function canActorMutateClaimedTask(
+  actorAgentId: string,
+  overriddenClaimBy: string | null
+): (task: Record<string, unknown>) => boolean {
+  return (task) => {
+    const claimedBy =
+      typeof task.claimedBy === "string" && task.claimedBy
+        ? task.claimedBy
+        : null;
+    if (!claimedBy) return true;
+    if (claimedBy === actorAgentId) return true;
+    return !!overriddenClaimBy && claimedBy === overriddenClaimBy;
+  };
 }
 
 /**
@@ -3710,27 +3881,30 @@ export function registerTools(server: McpServer): void {
   // 6. update_task_status
   auditedTool(
     "update_task_status",
-    "Update a task status. Valid: TODO, CLAIMED, IN_PROGRESS, REVIEW, BLOCKED, FAILED, DONE. State machine rules enforced. Use force=true to skip validation (e.g., marking already-completed tasks as DONE).",
+    "Update a task status. Valid: TODO, CLAIMED, IN_PROGRESS, REVIEW, BLOCKED, FAILED, DONE. State machine rules enforced. Use force=true to skip state-machine validation (e.g., marking already-completed tasks as DONE). force does NOT bypass another agent's claim — the orchestrator (or a provably-dead claim holder) is what authorizes that, and `comment` becomes the recorded reason.",
     {
       task_id: z.string().describe("Task ID"),
       status: z.string().describe("New status"),
-      comment: z.string().optional().describe("Comment for the status change"),
+      comment: z
+        .string()
+        .optional()
+        .describe(
+          "Comment for the status change. ★Required when overriding another agent's claim — it becomes the recorded reason."
+        ),
       force: z
         .boolean()
         .optional()
-        .describe("Skip state machine validation (default: false)"),
+        .describe(
+          "Skip state machine validation (default: false). Does NOT bypass claim ownership."
+        ),
       summary: completionSummaryShape,
     },
     async ({ task_id, status, comment, force, summary }) => {
       const task = await fetchTask(task_id);
       if (!task) return text(`Error: Task ${task_id} not found.`);
 
-      const ownershipError = getClaimOwnershipError({
-        claimedBy: task.claimedBy,
-        actorAgentId: WORKER_AGENT_ID,
-        force,
-      });
-      if (ownershipError) return text(`Error: ${ownershipError}`);
+      // ★claim 소유권 판정은 상태값 검증 **뒤**로 옮겼다 — 감사 기록의 "대상" 줄에
+      // `status CLAIMED → DONE` 을 적으려면 목표 상태가 먼저 확정돼야 한다.
 
       // P2-2: Validate the status VALUE against the 7-member TaskStatus domain
       // BEFORE the force branch. force=true is an escape hatch for *transition
@@ -3758,6 +3932,26 @@ export function registerTools(server: McpServer): void {
         );
       }
 
+      // ★claim 권한 판정 (티켓 r2rrPsblZPlUOTCWzc3Z). 예전엔 여기서
+      // `getClaimOwnershipError({actorAgentId: WORKER_AGENT_ID, force})` 하나로
+      // 끝났는데, 그 한 줄은 두 방향으로 다 틀려 있었다:
+      //   - 오케는 WORKER_AGENT_ID 가 늘 "" 라 **자기가 만들고 배정한 티켓조차**
+      //     닫지 못했다(오늘 하루 다섯 번 멈춘 원인).
+      //   - 반대로 아무 워커나 force=true 한 줄로 남의 claim 을 조용히 뺏을 수
+      //     있었고, 그 사실이 아무 데도 남지 않았다.
+      // 이제 권한은 신원(오케)과 증거(죽은 claim)로만 나오고, 넘은 것은 아래에서
+      // 같은 트랜잭션의 감사 activity 로 반드시 기록된다.
+      const authority = await resolveClaimAuthority({
+        task,
+        actorAgentId: WORKER_AGENT_ID,
+        action: `status ${task.status} → ${newStatus}`,
+        reason: comment ?? "",
+      });
+      if (authority.error) return text(`Error: ${authority.error}`);
+      const overriddenClaimBy = authority.decision.override
+        ? (task.claimedBy ?? "").trim()
+        : null;
+
       // Status update + Firestore projection in one transaction (Layer A).
       // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
       const projMut: ApplyProjectionInput = {
@@ -3775,9 +3969,25 @@ export function registerTools(server: McpServer): void {
         // transaction (projection.ts) — the escape hatch was effectively dead.
         validateFrom: force ? undefined : (s) => canTransition(s, newStatus),
       };
-      if (!force) {
-        projMut.validateTask = canAgentMutateClaimedTask(WORKER_AGENT_ID);
-        projMut.validateTaskError = claimOwnershipErrorFromTask;
+      // ★TOCTOU 가드는 override 경로에서도 유지한다 — 우리가 근거를 확인한 **그**
+      // 보유자일 때만 넘는다. 판정과 커밋 사이에 다른 에이전트가 새로 claim 했다면
+      // 트랜잭션이 중단된다. (예전엔 `if (!force)` 로 이 가드까지 통째로 꺼져서
+      // force 한 줄이 claim 보호를 무력화했다. force 는 이제 상태머신 전이 규칙만
+      // 건너뛴다 — 그건 validateFrom 쪽 얘기다.)
+      projMut.validateTask = canActorMutateClaimedTask(
+        WORKER_AGENT_ID,
+        overriddenClaimBy
+      );
+      projMut.validateTaskError = claimOwnershipErrorFromTask;
+      // 상태만 바꾸는 이 경로에는 남길 activity 가 아예 없다 — 그래서 override 근거를
+      // 담은 감사 activity 를 같은 트랜잭션에서 하나 만든다.
+      if (authority.auditMessage && overriddenClaimBy) {
+        projMut.overrideAuditPayload = {
+          agentId: MARBLO_AGENT_ID,
+          message: authority.auditMessage,
+          overrideGrant: authority.decision.grant ?? "",
+          overriddenClaimBy,
+        };
       }
       if (comment) projMut.extraTaskFields = { comment };
       if (newStatus === "BLOCKED")
@@ -3857,13 +4067,19 @@ export function registerTools(server: McpServer): void {
 
       // 완료 보고 규약 — REVIEW/DONE 으로 닫을 때만. 보고 누락은 soft nudge 로만
       // 보완 요청하고, 상태 전이는 위에서 이미 커밋됐다(절대 블록 안 함).
+      // 넘었다는 사실을 호출자에게도 되돌려준다 — 조용히 통과시키면 "내 권한으로
+      // 정상 처리된 것" 으로 오인하고, 근거가 기록됐다는 것도 모른다.
+      const overrideNote = overriddenClaimBy
+        ? ` ⚠️ ${overriddenClaimBy} 의 claim 을 넘었습니다(${authority.decision.grant}) — 사유가 감사 기록으로 남았습니다.`
+        : "";
+
       const completionNudge =
         newStatus === "REVIEW" || newStatus === "DONE"
           ? await applyCompletionReport(task_id, newStatus, summary)
           : "";
 
       return text(
-        `Task '${task.title}' status updated to ${newStatus}.${unblockedNote}${replayNote}${completionNudge}`
+        `Task '${task.title}' status updated to ${newStatus}.${unblockedNote}${replayNote}${overrideNote}${completionNudge}`
       );
     }
   );
@@ -3886,11 +4102,28 @@ export function registerTools(server: McpServer): void {
       // Agents tab Activity feed filters by `agentId in [our agents]`, so
       // logging "unknown" makes the activity invisible.
       const resolvedAgentId = agent_id || MARBLO_AGENT_ID;
-      const ownershipError = getClaimOwnershipError({
-        claimedBy: task.claimedBy,
+
+      // ★이 게이트가 이 티켓의 나쁜 절반이었다(r2rrPsblZPlUOTCWzc3Z).
+      // `update_task_status` 에는 force 탈출구가 있었는데 여기는 **없었다** —
+      // 그래서 오케·정리 에이전트가 티켓을 닫을 수는 있는데 **왜 닫았는지는 못
+      // 적었다**. 근거 없는 상태 변경만 남고, 다음 사람이 "이거 왜 닫혔지" 를
+      // 처음부터 다시 판다. 실제로 정리 에이전트가 자기 보고의 오류를 정정하려다
+      // 여기서 막혀 comment 로 우회했다.
+      //
+      // 이제 두 도구가 **같은** 권한 판정을 쓴다. force 파라미터는 여기에도 만들지
+      // 않는다 — 자칭 플래그가 아니라 신원(오케)과 증거(죽은 claim)로만 넘고,
+      // message 자체가 사유이므로 override 라도 추가 인자 없이 통과한다.
+      const activityAuthority = await resolveClaimAuthority({
+        task,
         actorAgentId: attributionAgentId(agent_id),
+        action: "activity 기록",
+        reason: message,
       });
-      if (ownershipError) return text(`Error: ${ownershipError}`);
+      if (activityAuthority.error)
+        return text(`Error: ${activityAuthority.error}`);
+      const activityOverriddenClaimBy = activityAuthority.decision.override
+        ? (task.claimedBy ?? "").trim()
+        : null;
 
       // First real activity promotes a freshly-dispatched task CLAIMED →
       // IN_PROGRESS — dispatch only advances TODO → CLAIMED, so this is the
@@ -3899,15 +4132,21 @@ export function registerTools(server: McpServer): void {
       // promotion race); IN_PROGRESS/REVIEW/etc are left untouched. Done in its
       // OWN best-effort transaction, BEFORE the activity write below, so a
       // promotion race can never drop the activity log itself.
-      if (task.status === "CLAIMED") {
+      //
+      // ★override 로 적은 기록은 승격시키지 않는다. 이 승격의 뜻은 "물고 있는
+      // 에이전트가 실제로 착수했다" 인데, 오케가 죽은 claim 티켓에 코멘트를 달았을
+      // 뿐인 걸 IN_PROGRESS 로 올리면 28일 멈춰 있던 티켓이 방금 살아난 것처럼
+      // 보이고, 보드와 워치독이 그 거짓 신호를 그대로 믿는다.
+      if (task.status === "CLAIMED" && !activityOverriddenClaimBy) {
         try {
           await applyProjection(db, task_id, {
             newStatus: "IN_PROGRESS",
             lastAgentId: attributionAgentId(agent_id),
             lastActivitySummary: message,
             validateFrom: (s) => s === "CLAIMED",
-            validateTask: canAgentMutateClaimedTask(
-              attributionAgentId(agent_id)
+            validateTask: canActorMutateClaimedTask(
+              attributionAgentId(agent_id),
+              activityOverriddenClaimBy
             ),
             validateTaskError: claimOwnershipErrorFromTask,
           });
@@ -3929,13 +4168,29 @@ export function registerTools(server: McpServer): void {
       // 오판한다. 오케/unknown 은 "" 로 떨어져 직전 실제 작업자를 보존.
       // activity 로그 자체의 agentId 는 누가 남겼는지 보여주려
       // resolvedAgentId 그대로 유지한다.
-      await applyProjection(db, task_id, {
+      const activityMut: ApplyProjectionInput = {
         lastAgentId: attributionAgentId(agent_id),
         lastActivitySummary: message,
         activityPayload: { agentId: resolvedAgentId, message },
-        validateTask: canAgentMutateClaimedTask(attributionAgentId(agent_id)),
+        validateTask: canActorMutateClaimedTask(
+          attributionAgentId(agent_id),
+          activityOverriddenClaimBy
+        ),
         validateTaskError: claimOwnershipErrorFromTask,
-      });
+      };
+      // 남의 claim 을 넘어 적었다면 그 사실을 **이 기록 자체에** 새긴다. 별도
+      // 감사 문서를 또 만들면 같은 얘기가 피드에 두 번 뜬다 — 누가(agentId)·
+      // 언제(createdAt)·왜(message)는 이미 이 문서에 있으므로, 기계 판독용
+      // 두 필드만 얹으면 "누구의 claim 을 어떤 권한으로 넘었는지" 가 복원된다.
+      if (activityOverriddenClaimBy && activityAuthority.decision.grant) {
+        activityMut.activityPayload = {
+          agentId: resolvedAgentId,
+          message,
+          overrideGrant: activityAuthority.decision.grant,
+          overriddenClaimBy: activityOverriddenClaimBy,
+        };
+      }
+      await applyProjection(db, task_id, activityMut);
 
       // Lane activity is silent on the orch PTY (P4) — the comment lives on the
       // board card + Firestore activity stream only. board/mission unchanged.
@@ -3951,7 +4206,10 @@ export function registerTools(server: McpServer): void {
           task.contextId
         );
       }
-      return text(`Activity logged: ${message}`);
+      const activityOverrideNote = activityOverriddenClaimBy
+        ? ` (⚠️ ${activityOverriddenClaimBy} 의 claim 을 넘어 기록했습니다 — ${activityAuthority.decision.grant})`
+        : "";
+      return text(`Activity logged: ${message}${activityOverrideNote}`);
     }
   );
 

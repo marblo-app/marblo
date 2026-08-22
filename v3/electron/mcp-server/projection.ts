@@ -132,8 +132,40 @@ export function applyMissionStatusDelta(
 export interface ApplyProjectionInput extends ProjectionMutation {
   /** task 본체 doc 에 함께 쓸 필드 — claim 의 claimedBy, status 변경의 comment 등. */
   extraTaskFields?: Record<string, unknown>;
-  /** add_activity — 같은 트랜잭션에서 activities/{auto} 도 set. */
-  activityPayload?: { agentId: string; message: string };
+  /**
+   * add_activity — 같은 트랜잭션에서 activities/{auto} 도 set.
+   *
+   * override 필드는 **이 문서 자체에** 붙는다. add_activity 는 기록이 곧 본문이라
+   * 별도 감사 문서를 또 만들면 같은 얘기가 피드에 두 번 뜬다 — 누가(agentId)·
+   * 언제(createdAt)·왜(message)가 이미 여기 다 있으므로, 기계 판독용 두 필드만
+   * 얹으면 "남의 claim 을 넘어 적었다" 가 완전히 복원된다.
+   */
+  activityPayload?: {
+    agentId: string;
+    message: string;
+    overrideGrant?: string;
+    overriddenClaimBy?: string;
+  };
+  /**
+   * claim override 감사 기록 (티켓 r2rrPsblZPlUOTCWzc3Z).
+   *
+   * 상태만 바꾸고 끝나는 경로(update_task_status)에는 남길 activity 문서가 아예
+   * 없다 — 그래서 여기서 하나 만든다. add_activity 처럼 이미 기록이 있는 경로는
+   * activityPayload 의 override 필드를 쓰고 이걸 쓰지 않는다.
+   *
+   * ★반드시 상태 write 와 **같은 트랜잭션**이어야 한다. 별도 write 로 빼면 상태는
+   * 바뀌었는데 근거 기록만 실패하는 조합이 생기고, 그게 바로 이 티켓이 고치려는
+   * 그림이다("닫을 수는 있는데 왜 닫았는지 못 적는다"). 한 트랜잭션에 묶으면
+   * 근거 없는 override 는 구조적으로 존재할 수 없다.
+   */
+  overrideAuditPayload?: {
+    agentId: string;
+    message: string;
+    /** "orchestrator" | "dead-claim" — 보드가 배지로 걸러 볼 수 있게 기계 판독용. */
+    overrideGrant: string;
+    /** override 당한 claim 보유자. */
+    overriddenClaimBy: string;
+  };
   /**
    * 트랜잭션 내부에서 다시 읽은 실제 oldStatus 가 전이 가능한 상태인지 검사.
    * false 면 throw → 트랜잭션 abort (TOCTOU 방어). 핸들러가 트랜잭션 밖에서 한
@@ -229,6 +261,11 @@ export async function applyProjection(
 ): Promise<void> {
   const taskRef = doc(db, "tasks", taskId);
   const activityRef = mut.activityPayload
+    ? doc(collection(db, "activities"))
+    : null;
+  // 감사 기록은 본 activity 와 **별개 문서**다 — 본문이 섞이면 보드에서 근거만
+  // 따로 걸러 보거나 배지를 걸 수 없다. 같은 트랜잭션에 함께 커밋된다.
+  const overrideAuditRef = mut.overrideAuditPayload
     ? doc(collection(db, "activities"))
     : null;
 
@@ -346,12 +383,27 @@ export async function applyProjection(
     if (missionId && !taskData.contextId) taskUpdate.contextId = missionId;
     txn.update(taskRef, taskUpdate);
 
+    if (overrideAuditRef && mut.overrideAuditPayload) {
+      txn.set(overrideAuditRef, {
+        taskId,
+        ...(missionId ? { missionId } : {}),
+        agentId: mut.overrideAuditPayload.agentId,
+        message: mut.overrideAuditPayload.message,
+        overrideGrant: mut.overrideAuditPayload.overrideGrant,
+        overriddenClaimBy: mut.overrideAuditPayload.overriddenClaimBy,
+        createdAt: now,
+      });
+    }
+
     if (activityRef && mut.activityPayload) {
+      const { overrideGrant, overriddenClaimBy } = mut.activityPayload;
       txn.set(activityRef, {
         taskId,
         ...(missionId ? { missionId } : {}),
         agentId: mut.activityPayload.agentId,
         message: mut.activityPayload.message,
+        ...(overrideGrant ? { overrideGrant } : {}),
+        ...(overriddenClaimBy ? { overriddenClaimBy } : {}),
         createdAt: now,
       });
     }

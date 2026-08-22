@@ -19,8 +19,19 @@ export function collection(_db: unknown, path: string) {
   return { path, type: "collection" };
 }
 
-export function doc(_db: unknown, collectionPath: string, docId: string) {
-  return { collectionPath, docId, type: "doc" };
+export function doc(
+  dbOrCollection: unknown,
+  collectionPath?: string,
+  docId?: string,
+) {
+  // 실제 SDK 처럼 `doc(collectionRef)` 단일 인자(자동 id) 형태도 받는다.
+  // 예전엔 이 형태가 collectionPath 를 잃어버려 문서가 "_auto" 로 떨어졌고,
+  // 그래서 activities 로 나가는 write 를 테스트가 아예 볼 수 없었다.
+  if (collectionPath === undefined) {
+    const ref = dbOrCollection as { path?: string } | null;
+    return { path: ref?.path, type: "doc" as const };
+  }
+  return { collectionPath, docId, type: "doc" as const };
 }
 
 export async function getDoc(ref: { collectionPath: string; docId: string }) {

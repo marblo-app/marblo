@@ -7,7 +7,14 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { Timestamp } from "firebase/firestore";
 // `firebase/firestore` is aliased to the in-memory mock (vitest.config), so the
 // same store backs applyProjection and these direct seed/read helpers.
-import { doc, setDoc, getDoc, __resetStore } from "../mocks/firebase-firestore";
+import {
+  doc,
+  setDoc,
+  getDoc,
+  getDocs,
+  collection,
+  __resetStore,
+} from "../mocks/firebase-firestore";
 import {
   computeTaskProjection,
   applyMissionStatusDelta,
@@ -369,5 +376,160 @@ describe("applyProjection — Firestore 통합 (seed self-heal + TOCTOU 가드)"
     };
     expect(t1.status).toBe("DONE");
     expect(t1.claimedBy).toBe("agent-1");
+  });
+});
+
+// ── claim override 감사 기록 (티켓 r2rrPsblZPlUOTCWzc3Z) ──────────
+//
+// ★핵심은 "기록이 남는다" 가 아니라 "상태 변경과 **원자적으로** 남는다" 다.
+// 별도 write 로 빼면 상태는 바뀌었는데 근거만 유실되는 조합이 생기고, 그게 바로
+// 이 티켓이 고치려는 그림이다 — 닫을 수는 있는데 왜 닫았는지 못 적는다.
+describe("applyProjection — claim override 감사 기록", () => {
+  const db = { type: "mock-firestore" } as unknown as Parameters<
+    typeof applyProjection
+  >[0];
+
+  beforeEach(() => {
+    __resetStore();
+  });
+
+  async function activityDocs() {
+    const snap = await getDocs(collection(db, "activities") as never);
+    return snap.docs.map((d) => d.data() as Record<string, unknown>);
+  }
+
+  it("override 감사 문서가 상태 변경과 같은 트랜잭션에서 함께 남는다", async () => {
+    await setDoc(doc(db, "tasks", "t1"), {
+      projectId: PROJECT_ID,
+      status: "CLAIMED",
+      claimedBy: "ghost-agent",
+    });
+
+    await applyProjection(db, "t1", {
+      newStatus: "DONE",
+      lastAgentId: "",
+      lastActivitySummary: "PR 머지 완료",
+      overrideAuditPayload: {
+        agentId: "orchestrator-proj-1",
+        message: "⚠️ claim override — 사유: PR 머지 완료",
+        overrideGrant: "orchestrator",
+        overriddenClaimBy: "ghost-agent",
+      },
+    });
+
+    const t1 = (await getDoc(doc(db, "tasks", "t1"))).data() as {
+      status: string;
+    };
+    expect(t1.status).toBe("DONE");
+
+    const audits = await activityDocs();
+    expect(audits).toHaveLength(1);
+    expect(audits[0].taskId).toBe("t1");
+    expect(audits[0].overrideGrant).toBe("orchestrator");
+    expect(audits[0].overriddenClaimBy).toBe("ghost-agent");
+    expect(audits[0].agentId).toBe("orchestrator-proj-1");
+  });
+
+  it("★상태 변경이 거부되면 감사 문서도 남지 않는다(원자성)", async () => {
+    await setDoc(doc(db, "tasks", "t1"), {
+      projectId: PROJECT_ID,
+      status: "CLAIMED",
+      // 판정 이후 **다른** 에이전트가 새로 claim 한 상황.
+      claimedBy: "someone-else",
+    });
+
+    await expect(
+      applyProjection(db, "t1", {
+        newStatus: "DONE",
+        lastAgentId: "",
+        validateTask: (t) => t.claimedBy === "ghost-agent",
+        validateTaskError: "claim holder changed",
+        overrideAuditPayload: {
+          agentId: "orchestrator-proj-1",
+          message: "⚠️ claim override",
+          overrideGrant: "orchestrator",
+          overriddenClaimBy: "ghost-agent",
+        },
+      }),
+    ).rejects.toThrow("claim holder changed");
+
+    const t1 = (await getDoc(doc(db, "tasks", "t1"))).data() as {
+      status: string;
+    };
+    expect(t1.status).toBe("CLAIMED");
+    expect(await activityDocs()).toHaveLength(0);
+  });
+
+  it("add_activity 경로는 기록 문서 자체에 override 를 새긴다(피드 중복 없음)", async () => {
+    await setDoc(doc(db, "tasks", "t1"), {
+      projectId: PROJECT_ID,
+      status: "IN_PROGRESS",
+      claimedBy: "ghost-agent",
+    });
+
+    await applyProjection(db, "t1", {
+      lastAgentId: "",
+      lastActivitySummary: "직전 보고 정정",
+      activityPayload: {
+        agentId: "orchestrator-proj-1",
+        message: "직전 보고 정정: 실제로는 REVIEW 가 아니라 FAILED 였다",
+        overrideGrant: "orchestrator",
+        overriddenClaimBy: "ghost-agent",
+      },
+    });
+
+    const docs = await activityDocs();
+    expect(docs).toHaveLength(1);
+    expect(docs[0].overrideGrant).toBe("orchestrator");
+    expect(docs[0].overriddenClaimBy).toBe("ghost-agent");
+    expect(docs[0].agentId).toBe("orchestrator-proj-1");
+  });
+
+  it("override 가 아닌 평범한 activity 에는 override 필드가 붙지 않는다", async () => {
+    await setDoc(doc(db, "tasks", "t1"), {
+      projectId: PROJECT_ID,
+      status: "IN_PROGRESS",
+      claimedBy: "agent-1",
+    });
+
+    await applyProjection(db, "t1", {
+      lastAgentId: "agent-1",
+      activityPayload: { agentId: "agent-1", message: "진행 중" },
+    });
+
+    const docs = await activityDocs();
+    expect(docs).toHaveLength(1);
+    expect(docs[0].overrideGrant).toBeUndefined();
+    expect(docs[0].overriddenClaimBy).toBeUndefined();
+  });
+
+  it("override 감사와 본 activity 는 별개 문서로 남는다", async () => {
+    await setDoc(doc(db, "tasks", "t1"), {
+      projectId: PROJECT_ID,
+      status: "IN_PROGRESS",
+      claimedBy: "ghost-agent",
+    });
+
+    await applyProjection(db, "t1", {
+      lastAgentId: "",
+      lastActivitySummary: "직전 보고 정정",
+      activityPayload: {
+        agentId: "orchestrator-proj-1",
+        message: "직전 보고 정정",
+      },
+      overrideAuditPayload: {
+        agentId: "orchestrator-proj-1",
+        message: "⚠️ claim override — 사유: 직전 보고 정정",
+        overrideGrant: "orchestrator",
+        overriddenClaimBy: "ghost-agent",
+      },
+    });
+
+    const docs = await activityDocs();
+    expect(docs).toHaveLength(2);
+    expect(docs.filter((d) => d.overrideGrant === "orchestrator")).toHaveLength(
+      1,
+    );
+    expect(docs.filter((d) => d.overrideGrant === undefined)).toHaveLength(1);
   });
 });
