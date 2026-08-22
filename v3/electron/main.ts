@@ -5836,7 +5836,18 @@ function validProjectIdArg(value: unknown): value is string {
 /** 이 프로젝트에 App 이 붙어 있는가 / 지금도 저장소를 열 수 있는가. */
 ipcMain.handle("github:appStatus", async (_event, projectId: unknown) => {
   if (!validProjectIdArg(projectId)) {
-    return { installed: false, repoAccessible: false, configured: false };
+    // ★전 필드를 채운다. v2 필드를 빼고 돌려주면 렌더러가 선언된 타입을
+    // 믿고 `writeGranted` 를 undefined 로 읽는데, 그게 곧 "권한 없음" 과
+    // "모름" 이 구분되지 않는 상태다. 보수적 기본값으로 전부 false.
+    return {
+      installed: false,
+      repoAccessible: false,
+      configured: false,
+      role: null,
+      canWrite: false,
+      canMerge: false,
+      writeGranted: false,
+    };
   }
   return getGitHubAppStatus(projectId);
 });

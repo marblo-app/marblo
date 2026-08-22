@@ -26,18 +26,26 @@ const MESSAGES: Record<Locale, Record<MessageKey, string>> = {
   en,
 };
 
+/** 저장된 값 / navigator 언어가 우리가 아는 로케일인가. */
+function asLocale(value: unknown): Locale | null {
+  return value === "ko" || value === "en" ? value : null;
+}
+
 function detectInitialLocale(): Locale {
   if (typeof window === "undefined") return "ko";
   try {
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    if (saved === "ko" || saved === "en") return saved;
+    const saved = asLocale(window.localStorage.getItem(STORAGE_KEY));
+    if (saved) return saved;
   } catch {
     // localStorage unavailable (e.g. sandboxed) — fall through
   }
   // Browser language fallback. Anything starting with "ko" is Korean,
   // everything else defaults to English for international visitors.
-  const nav = typeof navigator !== "undefined" ? navigator.language : "";
-  return nav.toLowerCase().startsWith("ko") ? "ko" : "en";
+  const nav = (
+    typeof navigator !== "undefined" ? navigator.language : ""
+  ).toLowerCase();
+  if (nav.startsWith("ko")) return "ko";
+  return "en";
 }
 
 /**
@@ -49,8 +57,7 @@ function detectInitialLocale(): Locale {
 export function hasChosenLocale(): boolean {
   if (typeof window === "undefined") return true;
   try {
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    return saved === "ko" || saved === "en";
+    return asLocale(window.localStorage.getItem(STORAGE_KEY)) !== null;
   } catch {
     // localStorage unavailable (e.g. sandboxed) — treat as chosen so we
     // never trap the user behind a modal we can't dismiss persistently.
@@ -111,11 +118,11 @@ export function t(
 export function useTranslation() {
   const locale = useLocaleStore((s) => s.locale);
   const setLocale = useLocaleStore((s) => s.setLocale);
-  const table = MESSAGES[locale];
   const translate = (
     key: MessageKey,
     vars?: Record<string, string | number>,
   ): string => {
+    const table = MESSAGES[locale];
     const raw = table[key] ?? key;
     return format(raw, vars);
   };

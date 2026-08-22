@@ -1377,11 +1377,40 @@ interface GitHubDevicePollResult {
   message?: string;
 }
 
+/**
+ * `github:appStatus` 응답 — 프로젝트에 붙은 GitHub App 설치의 화면용 상태.
+ * ★토큰은 없다. boolean 과 역할뿐이다(설계 §5-B3).
+ *
+ * ★두 개의 축을 섞지 말 것:
+ *   `writeGranted` — **설치가 승인한 권한**(오너가 GitHub 에서 재승인해야 함)
+ *   `canWrite`     — **마블로 역할**(viewer 는 영원히 false)
+ * 화면은 둘을 다르게 안내한다. 하나로 뭉개면 오너에게 재승인을 시켜도
+ * 안 풀리는 사용자가 생긴다.
+ */
+interface GitHubAppStatusResult {
+  /** 이 프로젝트에 설치가 바인딩돼 있는가(`githubInstallationId` 존재). */
+  installed: boolean;
+  /** 그 설치가 **지금도** 이 저장소를 열 수 있는가. */
+  repoAccessible: boolean;
+  /** 이 배포의 서버에 App 자격증명이 설정돼 있는가. */
+  configured: boolean;
+  /** 요청자의 마블로 프로젝트 역할. 서버가 거부하면 null. */
+  role: string | null;
+  canWrite: boolean;
+  canMerge: boolean;
+  writeGranted: boolean;
+}
+
 interface GitHubAPI {
   deviceStart: (userId: string) => Promise<GitHubDeviceStartResult>;
   devicePoll: (sessionId: string) => Promise<GitHubDevicePollResult>;
   status: (userId: string) => Promise<{ connected: boolean }>;
   disconnect: (userId: string) => Promise<{ ok: boolean }>;
+  // ── GitHub App 자동상속 (티켓 ddbN2KvxHZ08rakiVfL0 / 화면 kzxsRzC37uVvYftpVZO4)
+  // ★위의 device 채널은 그대로다 — App 은 대체가 아니라 추가다(설계 §6 G4).
+  appStatus: (projectId: string) => Promise<GitHubAppStatusResult>;
+  /** 오너만 성공한다(서버가 판정). 시스템 브라우저로 설치 화면을 연다. */
+  appInstall: (projectId: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 // ── Google Drive 읽기 전용 커넥터 (티켓 zqNxS9904aeeBEug1uAD) ────────────────

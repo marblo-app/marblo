@@ -85,7 +85,6 @@
  *     0행이며, 축 경계는 여전히 유효하다: 이벤트 행에는 `user_key` 컬럼이 없고
  *     두 축은 링크표(analytics_user_install) + 뷰로만 이어진다.
  */
-import type { Locale } from "../../lib/i18n";
 
 export interface PrivacyRow {
   label: string;
@@ -338,7 +337,7 @@ const EN: PrivacyContent = {
   ),
 };
 
-export const PRIVACY_CONTENT: Record<Locale, PrivacyContent> = {
+export const PRIVACY_CONTENT: Record<"ko" | "en", PrivacyContent> = {
   ko: KO,
   en: EN,
 };

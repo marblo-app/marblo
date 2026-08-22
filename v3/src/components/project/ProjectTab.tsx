@@ -11,6 +11,7 @@ import { PlanGate } from "../settings/PlanGate";
 import { MemberWorkloadPanel } from "./MemberWorkloadPanel";
 import { ProjectAuditPanel } from "./ProjectAuditPanel";
 import { REPO_CONNECT_OPEN_EVENT } from "../collaboration/RepoConnectModal";
+import { GitHubAccessGuide } from "../collaboration/GitHubAccessGuide";
 import { githubCollaboratorsUrl } from "../../lib/githubWebUrl";
 import { FirstShareNudge } from "../work-history/FirstMissionShareNudge";
 
@@ -37,6 +38,15 @@ export function ProjectTab() {
   const { user } = useAuth();
   const { members, memberRoles, currentRole, loading } = useTeam(projectId);
   const [invitationCreated, setInvitationCreated] = useState(false);
+  /**
+   * GitHub App 경로가 살아 있는가(설치됨 + 이 저장소 접근 가능).
+   *
+   * ★아래 레거시 콜라보레이터 안내를 끄는 데 쓴다. App 이 붙어 있으면 팀원을
+   * GitHub 콜라보레이터로 초대할 필요가 **없고**, 그런데도 "추가하세요" 를
+   * 띄우면 새 가이드("팀원은 GitHub 에서 할 게 없습니다")와 정면으로 모순된다.
+   * `null` 은 아직 모른다는 뜻 — 모를 때는 기존 동작(안내 표시)을 유지한다.
+   */
+  const [appConnected, setAppConnected] = useState<boolean | null>(null);
 
   useEffect(() => {
     const onInvitationCreated = (event: Event) => {
@@ -147,16 +157,34 @@ export function ProjectTab() {
           </div>
         </div>
 
-        {invitationCreated && githubCollaboratorsUrl(currentProject?.gitRemoteUrl) && (
+        {/* ★GitHub 연결 안내 — 오너용 설치 가이드 / 팀원용 "나는 뭘 하나"
+            (티켓 kzxsRzC37uVvYftpVZO4). 두 사람이 서로 다른 것을 해야 하는
+            기능이라 화면도 역할에 따라 갈린다. 멤버 목록·역할 UI 보다 위에
+            두는 이유: 역할을 주기 전에 "코드가 어떻게 전달되는가" 를 먼저
+            알아야 오너가 무엇을 하는지 이해한 채로 역할을 준다. */}
+        <GitHubAccessGuide
+          projectId={projectId}
+          isOwner={currentProject?.ownerId === user?.uid}
+          role={currentRole}
+          hasRepoUrl={!!currentProject?.gitRemoteUrl}
+          onAppConnectedChange={setAppConnected}
+        />
+
+        {/* ★App 이 붙어 있으면 이 안내는 **틀린 말**이 되므로 감춘다 —
+            콜라보레이터 초대는 App 이 없을 때의 경로다. 아직 모를 때(null)는
+            기존 동작 그대로 표시한다. */}
+        {appConnected !== true &&
+          invitationCreated &&
+          githubCollaboratorsUrl(currentProject?.gitRemoteUrl) && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-            <span>이 프로젝트는 private 저장소와 연결됨. 초대한 멤버가 코드를 받으려면 GitHub 콜라보레이터로도 추가하세요</span>
+            <span>{t("githubGuide.legacyCollaborator.notice")}</span>
             <a
               href={githubCollaboratorsUrl(currentProject?.gitRemoteUrl) ?? undefined}
               target="_blank"
               rel="noreferrer"
               className="shrink-0 underline hover:text-white"
             >
-              협업자 페이지 열기
+              {t("githubGuide.legacyCollaborator.link")}
             </a>
           </div>
         )}

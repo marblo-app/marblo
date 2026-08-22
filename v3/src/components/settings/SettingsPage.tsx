@@ -17,7 +17,7 @@ import {
 } from "../../stores/orchestratorStore";
 import { useSubscriptionStore } from "../../stores/subscriptionStore";
 import { useUiStore } from "../../stores/uiStore";
-import { useTranslation } from "../../lib/i18n";
+import { useTranslation, type Locale } from "../../lib/i18n";
 import { BillingPage } from "./BillingPage";
 import { TeamManagement } from "./TeamManagement";
 import { PlanGate } from "./PlanGate";
@@ -467,11 +467,12 @@ function BeginnerModeSection() {
 function LanguageSection() {
   const { t, locale, setLocale } = useTranslation();
   const OPTIONS: {
-    id: "ko" | "en";
+    id: Locale;
     labelKey: "settings.language.korean" | "settings.language.english";
+    flag: string;
   }[] = [
-    { id: "ko", labelKey: "settings.language.korean" },
-    { id: "en", labelKey: "settings.language.english" },
+    { id: "ko", labelKey: "settings.language.korean", flag: "🇰🇷" },
+    { id: "en", labelKey: "settings.language.english", flag: "🇺🇸" },
   ];
   return (
     <div className="space-y-4">
@@ -493,7 +494,7 @@ function LanguageSection() {
                   : "border-gray-700 hover:border-gray-600 hover:bg-gray-700/50"
               }`}
             >
-              <span className="text-xl">{opt.id === "ko" ? "🇰🇷" : "🇺🇸"}</span>
+              <span className="text-xl">{opt.flag}</span>
               <div className="flex-1">
                 <span
                   className={`text-sm font-medium ${

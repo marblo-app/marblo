@@ -43,6 +43,7 @@ import { diffComment } from "./diffComment";
 import { collaboration } from "./collaboration";
 import { project } from "./project";
 import { beginner } from "./beginner";
+import { githubGuide } from "./githubGuide";
 
 export const ko = {
   ...header,
@@ -77,6 +78,7 @@ export const ko = {
   ...collaboration,
   ...project,
   ...beginner,
+  ...githubGuide,
 };
 
 export type MessageKey = keyof typeof ko;

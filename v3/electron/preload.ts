@@ -1071,12 +1071,23 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ★어떤 응답에도 토큰이 실리지 않는다. status 는 boolean 3개뿐.
     //   installed && !repoAccessible → 오너가 App 을 제거했거나 저장소를
     //   이전했다는 뜻이고, 화면은 그 때 재설치를 안내하면 된다.
+    // ★v2 필드(role/canWrite/canMerge/writeGranted)까지 선언한다. 핸들러는
+    //   이미 이 값들을 돌려주고 있었는데 타입이 v1 모양에 멈춰 있어서,
+    //   렌더러가 "권한이 read 뿐" 과 "역할이 write 를 못 한다" 를 **구분할
+    //   방법이 타입상 없었다**(티켓 kzxsRzC37uVvYftpVZO4).
+    // ★두 축을 섞지 말 것: `writeGranted` 는 **설치가 승인한 권한**이고,
+    //   `canWrite` 는 **마블로 역할**이다. 화면은 둘을 다르게 안내한다 —
+    //   전자는 "오너가 재승인해야 한다", 후자는 "당신 역할로는 못 민다".
     appStatus: (
       projectId: string
     ): Promise<{
       installed: boolean;
       repoAccessible: boolean;
       configured: boolean;
+      role: string | null;
+      canWrite: boolean;
+      canMerge: boolean;
+      writeGranted: boolean;
     }> => ipcRenderer.invoke("github:appStatus", projectId),
     // 오너만 성공한다(서버가 판정). 시스템 브라우저로 설치 화면을 연다.
     appInstall: (

@@ -29,7 +29,6 @@
  * Translation boundary: `/tf-*` slash-command names, MCP tool names, file paths
  * and keyboard chords are identifiers — kept verbatim in both locales.
  */
-import type { Locale } from "../../lib/i18n";
 import { useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
 import {
@@ -1132,4 +1131,4 @@ const EN: GuideContent = {
   ],
 };
 
-export const GUIDE_CONTENT: Record<Locale, GuideContent> = { ko: KO, en: EN };
+export const GUIDE_CONTENT: Record<"ko" | "en", GuideContent> = { ko: KO, en: EN };
