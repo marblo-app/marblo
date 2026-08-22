@@ -6,6 +6,14 @@
 // pure decision function (in-window count + remaining + retryAfter)
 // against an inlined version. The production transaction wrapper is
 // trivial glue around this logic.
+//
+// ★NOTE (ticket qpDZQ0wS7PWLDSAncIDK): the production decision function is
+// no longer trapped behind firebase-admin — it now lives on its own in
+// `src/rateLimitCore.ts` and is imported and exercised directly by
+// `src/rateLimitCore.test.ts` (`npm run test:rate-limit`). That test proves
+// the SHIPPED code; the copy below only proves itself, so it can drift.
+// Prefer adding new cases there. This file is kept as-is (it is wired to no
+// npm script or CI job) rather than deleted out of scope.
 
 function decideRate(existingAttempts, rules, nowMs) {
   const maxWindowMs = Math.max(...rules.map((r) => r.windowSeconds)) * 1000;

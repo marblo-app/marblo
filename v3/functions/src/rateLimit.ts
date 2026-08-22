@@ -8,8 +8,12 @@
  *
  * Atomicity: Firestore transaction read-modify-write so two concurrent
  * callers can't both squeeze through the last allowed slot.
+ *
+ * The judgement itself lives in `rateLimitCore.ts` — dependency-free so the
+ * shipped budgets are provable by `node --test` without an emulator.
  */
 import * as admin from "firebase-admin";
+import { decide, type RateCheck, type RateRule } from "./rateLimitCore";
 
 // Lazy — admin.firestore() must NOT run at module load. index.ts imports this
 // module (which executes it) before it calls admin.initializeApp(), so a
@@ -20,20 +24,8 @@ let _db: admin.firestore.Firestore | null = null;
 const db = (): admin.firestore.Firestore => (_db ??= admin.firestore());
 const COLLECTION = "rate_limits";
 
-export interface RateRule {
-  /** Window in seconds. Older attempts dropped. */
-  windowSeconds: number;
-  /** Max attempts allowed in the window. The N+1th is rejected. */
-  max: number;
-}
-
-export interface RateCheck {
-  allowed: boolean;
-  /** Attempts remaining inside the window (0 when blocked). */
-  remaining: number;
-  /** Epoch seconds until the oldest in-window attempt expires. */
-  retryAfter: number;
-}
+export { decide } from "./rateLimitCore";
+export type { RateRule, RateCheck, RateDecision } from "./rateLimitCore";
 
 /**
  * Check + atomically record an attempt against a key.
@@ -41,6 +33,12 @@ export interface RateCheck {
  * caller should throw `resource-exhausted` (HTTP 429-equivalent).
  *
  * Pass multiple rules to enforce them jointly: ALL must pass.
+ *
+ * ★Two callers that must NOT share a budget must pass **different keys** —
+ * one key is one attempt list, so same key + different rules means the two
+ * budgets eat the same array. (See `installationTokenRateKey` in
+ * `githubApp.ts`, which encodes the access level into the key for exactly
+ * this reason.)
  */
 export async function enforce(
   key: string,
@@ -50,53 +48,13 @@ export async function enforce(
     return { allowed: true, remaining: Infinity, retryAfter: 0 };
   const docRef = db().collection(COLLECTION).doc(key);
   const nowMs = Date.now();
-  const maxWindowMs = Math.max(...rules.map((r) => r.windowSeconds)) * 1000;
 
   return db().runTransaction(async (tx) => {
     const snap = await tx.get(docRef);
     const existing = (snap.data()?.attempts as number[] | undefined) ?? [];
-    // Drop entries older than the longest window — bounds storage.
-    const trimmed = existing.filter((t) => nowMs - t < maxWindowMs);
-
-    // Each rule independently: count attempts within its own window.
-    let worstRemaining = Infinity;
-    let earliestInWindow = nowMs;
-    for (const rule of rules) {
-      const windowMs = rule.windowSeconds * 1000;
-      const inWindow = trimmed.filter((t) => nowMs - t < windowMs);
-      const remaining = rule.max - inWindow.length;
-      if (remaining < worstRemaining) worstRemaining = remaining;
-      if (remaining <= 0) {
-        // Record the attempt anyway so the window doesn't slide forward
-        // when an attacker keeps banging the door. Caller will reject.
-        trimmed.push(nowMs);
-        tx.set(
-          docRef,
-          { attempts: trimmed, updatedAt: nowMs },
-          { merge: true }
-        );
-        // retryAfter = when the oldest in-window slot expires
-        const oldest = inWindow[0] ?? nowMs;
-        const retryAfterSec = Math.ceil((oldest + windowMs - nowMs) / 1000);
-        return {
-          allowed: false,
-          remaining: 0,
-          retryAfter: Math.max(1, retryAfterSec),
-        };
-      }
-      if (inWindow.length > 0 && inWindow[0] < earliestInWindow) {
-        earliestInWindow = inWindow[0];
-      }
-    }
-
-    // All rules passed — record this attempt and let caller proceed.
-    trimmed.push(nowMs);
-    tx.set(docRef, { attempts: trimmed, updatedAt: nowMs }, { merge: true });
-    return {
-      allowed: true,
-      remaining: Math.max(0, worstRemaining - 1),
-      retryAfter: 0,
-    };
+    const { attempts, ...check } = decide(existing, rules, nowMs);
+    tx.set(docRef, { attempts, updatedAt: nowMs }, { merge: true });
+    return check;
   });
 }
 

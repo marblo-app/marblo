@@ -45,11 +45,11 @@ import {
   buildInstallUrl,
   evaluateInstallationTokenRequest,
   evaluateMintResponse,
+  evaluatePushRef,
   evaluateRepoInstallationLookup,
   GITHUB_API_BASE,
   GITHUB_API_VERSION,
-  evaluatePushRef,
-  INSTALLATION_TOKEN_RULES,
+  installationTokenBudgetFor,
   negotiateInstallationAccess,
   normalizeInstallationId,
   normalizePrivateKeyPem,
@@ -16517,17 +16517,6 @@ export const issueRepoInstallationToken = functions.https.onCall(
       );
     }
 
-    // ★계정이 털렸을 때 토큰 양산을 막는다(설계 §3.2 2번).
-    const rate = await enforceRateLimit(`ghapp:${uid}:${projectId}`, [
-      ...INSTALLATION_TOKEN_RULES,
-    ]);
-    if (!rate.allowed) {
-      throw new functions.https.HttpsError(
-        "resource-exhausted",
-        `요청이 너무 잦습니다. ${rate.retryAfter}초 후 다시 시도하세요.`
-      );
-    }
-
     // ★감사 write 를 **await 한다.** 콜러블이 응답/던지고 나면 컨테이너가
     // 얼어붙을 수 있어, 떼어놓은 write 는 조용히 유실된다 — 거부 기록이
     // 유실되면 원장이 거짓말을 한다.
@@ -16603,6 +16592,57 @@ export const issueRepoInstallationToken = functions.https.onCall(
       throw await deny(decision.code, null, null);
     }
     const { installationId, slug, role } = decision;
+
+    // ★계정이 털렸을 때 토큰 양산을 막는다(설계 §3.2 2번).
+    //
+    // 예산은 read/write 로 나뉘어 있다 — 왜 나눠야 하는지, 숫자의 근거가
+    // 무엇인지, 어떻게 재조정하는지는 전부 `githubApp.ts` 의
+    // `INSTALLATION_TOKEN_RULES_READ` 위 주석에 있다. ★그 주석을 읽지 않고
+    // 이 숫자를 만지지 마라.
+    //
+    // ── ★왜 이 자리인가 — v1 은 함수 맨 앞이었다 ─────────────────────────
+    //
+    // "얼마나 쓸지 정하려면 무엇을 발급할지 알아야 한다." 함수 맨 앞에서 아는
+    // 것은 **클라이언트의 주장**뿐이다. 그 주장으로 키를 고르면 누구나
+    // `access:"write"` 를 실어 60회/시간 버킷을 스스로 고른다 — read 상한
+    // 20회/시간이 **클라이언트가 해제할 수 있는 값**이 되어 사실상 사라진다.
+    //
+    // `decision.access` 는 그 주장이 **서버 권위로 걸러진 뒤**의 값이다.
+    // `evaluateInstallationTokenRequest` 의 역할 게이트를 통과한 것만 write 로
+    // 남는다 — viewer 의 write 요청은 여기 오기 전에 `role-cannot-write` 로
+    // 죽는다. 즉 ★**write 버킷은 실제로 밀 수 있는 역할만 고를 수 있다.**
+    //
+    // 그러면서 이 자리는 여전히 **GitHub 왕복과 민팅보다 앞**이다. 이 리미터가
+    // 지키는 자원(§3.2 2번의 토큰 양산 + 우리 App 이 공유하는 GitHub 쿼터)은
+    // 전부 아래에 있다. 리미터 앞으로 넘어간 것은 우리 Firestore 읽기(프로젝트
+    // 문서 · 오너 플랜 · 역할)와 거부 시 감사 write 뿐이다 — 우리 자원이고,
+    // 콜러블이 한 번 호출된 것만으로 이미 치르는 비용과 같은 급이다. ★이게
+    // 이 트레이드오프의 전부다: 싼 것을 앞으로 보내고 비싼 것을 뒤에 남겼다.
+    //
+    // ★왜 `negotiated.access` 가 아닌가 — 그쪽이 "실제로 발급되는 것" 이라 더
+    // 정확하다. 하지만 협상은 `GET /repos/{o}/{r}/installation` 왕복을 **먼저**
+    // 요구한다. 협상 뒤로 리미터를 옮기면 리미터가 GitHub 왕복을 못 막는다 =
+    // 존재 이유가 사라진다. 그래서 협상 **앞**에 둔다.
+    //
+    // 그 대가는 하나뿐이고, 알고 받아들인다: write 를 요청했다가 설치 미승인으로
+    // read 로 깎여 발급되면(`downgraded`) 그 요청은 write 슬롯을 먹고 read 토큰을
+    // 받는다. ★**환불하지 않는다** — 예산에 남아야 하는 사실은 "write 를
+    // 시도했다" 이고, 위 근거대로 read 는 발급 횟수가 폭발 반경을 줄이지 않으므로
+    // 이 방향으로는 잃는 게 없다. 막아야 하는 건 반대 방향
+    // (**read 예산으로 write 토큰을 얻는 것**)이고, 그건 위 역할 게이트가 막는다.
+    //
+    // ★예산 선택을 여기서 손으로 하지 않는다 — `installationTokenBudgetFor` 가
+    // **판정 객체**를 받아 키와 룰을 함께 낸다. 문자열을 받게 두면 `"read"`
+    // 리터럴 한 줄이 다시 기어들어오고, 그건 컴파일도 테스트도 통과하면서
+    // 효과만 0이다.
+    const budget = installationTokenBudgetFor(uid, projectId, decision);
+    const rate = await enforceRateLimit(budget.key, [...budget.rules]);
+    if (!rate.allowed) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        `요청이 너무 잦습니다. ${rate.retryAfter}초 후 다시 시도하세요.`
+      );
+    }
 
     // ★설계 §3.2 7번 — GitHub 에 되묻는다. 룰만 믿지 않는다.
     //

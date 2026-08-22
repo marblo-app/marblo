@@ -366,6 +366,45 @@ App → Settings → **General**:
 
 ### 10-1. 권한 올리기 전 — ★회귀 0 확인 (이걸 먼저 한다)
 
+> ### ★선행 조건 — 레이트리밋 read/write 분리가 **배포**돼 있어야 한다
+>
+> **"머지" 가 아니라 "배포" 다.** 화면은 배포됐는데 콜러블이 프로덕션에 없던
+> 사고를 이미 한 번 겪었다. 머지만 보고 권한을 올리지 마라.
+>
+> v1 은 이 발급 예산을 **clone 만** 썼다(프로젝트당 사실상 1회). v2 는 **push 도**
+> 같은 예산을 쓰고, 토큰을 캐시하지 않으므로 **push 1회 = 발급 1회**다. 분리
+> 전에 write 를 켜면 첫 실사용 팀이 **시간당 20회에서 push 실패**를 겪고
+> (`resource-exhausted` → device 경로 폴백 → 콜라보레이터가 아닌 팀원은 push
+> 실패), **"초대 없이 된다" 는 약속이 그 자리에서 깨진다.**
+>
+> **확인 방법 — `INSTALLATION_TOKEN_RULES_WRITE` 가 배포본에 있는가.**
+>
+> **(a) 코드 확인 (필요조건)** — 배포한 커밋에서:
+>
+> ```bash
+> git grep -n "INSTALLATION_TOKEN_RULES_WRITE" v3/functions/src/githubApp.ts
+> git grep -n "installationTokenBudgetFor" v3/functions/src/index.ts
+> ```
+>
+> 둘 다 나와야 한다. 특히 `issueRepoInstallationToken` 이
+> `installationTokenBudgetFor(uid, projectId, decision)` 로 예산을 고르는지 본다 —
+> 접근 수준이 `"read"` 리터럴로 굳어 있으면 **컴파일도 테스트도 통과하면서
+> write push 가 read 예산을 쓴다.** 이 함수가 문자열이 아니라 판정 객체를 받는
+> 이유가 그것이다.
+>
+> **(b) ★배포본 확인 (충분조건 — 이게 진짜 확인이다)** — 코드가 머지된 것과
+> 프로덕션이 그 코드를 돌리는 것은 다르다. 팀원 1명으로 push 를 **한 번**
+> 시도하게 하고, Firestore `rate_limits` 컬렉션에서 문서 ID 를 본다:
+>
+> - `ghapp:write:{uid}:{projectId}` 문서가 새로 생겼다 → ★**분리가 배포됐다.**
+> - `ghapp:read:{uid}:{projectId}` 만 늘었다 → 분리가 **배포되지 않았다.**
+>   권한을 올리지 마라.
+> - `ghapp:{uid}:{projectId}` (접근 수준 없는 v1 키) 가 늘었다 → 프로덕션이
+>   **아직 v1 코드**다. 배포부터 다시 한다.
+>
+> 이 한 번의 push 는 §10-1 의 3번(회귀 0 확인)과 같은 조작이므로, 따로 시킬
+> 필요 없이 그때 `rate_limits` 를 함께 보면 된다.
+
 1. App 권한을 **아직 바꾸지 않은 상태**에서 v2 코드를 배포한다.
 2. 팀원이 clone → **성공**해야 한다(v1 그대로).
 3. 팀원이 push → App 경로가 `downgraded` 로 내려가 **device 경로**로 간다. v2 이전과 같은 결과.

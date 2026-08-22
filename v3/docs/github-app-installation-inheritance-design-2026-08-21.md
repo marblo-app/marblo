@@ -147,7 +147,17 @@ callable(context.auth 필수)
 검증 순서 (하나라도 실패하면 즉시 거부, 이유는 뭉뚱그려 반환):
 
 1. `context.auth` 없으면 `unauthenticated`.
-2. `rateLimit.enforce()` — uid+projectId 당 예: 20회/시간. 계정이 털렸을 때 토큰 양산을 막는다. (`functions/src/rateLimit.ts` 이미 있음)
+2. `rateLimit.enforce()` — uid+projectId 당. 계정이 털렸을 때 토큰 양산을 막는다. (`functions/src/rateLimit.ts` 이미 있음)
+
+   > ★**갱신(티켓 `qpDZQ0wS7PWLDSAncIDK`)** — 이 예산은 원래 `20회/시간, 6회/분` 하나였다. 지금은 **read 와 write 로 나뉜다**: read `20/시간, 6/분`(v1 그대로), write `60/시간, 12/분`.
+   >
+   > **왜 나눴나.** 이 항목의 목적("토큰 양산 방지")에 대해 read 와 write 는 성격이 다른 위험이다. **read** 는 털린 계정이 토큰 **1개**만 받아도 저장소를 통째로 읽으므로 상한이 20이든 60이든 피해가 같다 — 횟수 상한이 폭발 반경을 줄이지 못하고, 남는 역할은 비용/DoS 방어뿐이다. **write** 는 발급 횟수가 곧 "탐지 전까지 망칠 수 있는 양"이고, 발급마다 `github_app_access_logs` 에 한 행이 남으므로 상한이 남용의 템포를 원장에서 눈에 띄는 속도까지 떨어뜨린다. ★한 숫자로 관리하면 둘 중 하나는 반드시 틀린다.
+   >
+   > **왜 지금.** v1 은 이 예산을 clone 만 썼다(프로젝트당 사실상 1회). v2 부터 **push 가 같은 예산을 쓰고**, 토큰 캐시가 없으므로 **push 1회 = 발급 1회**다. 20회/시간이면 에이전트 워크플로가 넘겨 `resource-exhausted` → device 폴백 → **콜라보레이터가 아닌 팀원은 push 실패** → §6 의 "팀원은 GitHub 초대가 필요 없다" 는 전제가 그 시점에 깨진다.
+   >
+   > ★**순서**: ①이 분리 → ②App 권한 `read`→`write` (등록값 문서 §8-1) → ③첫 실사용 팀. 뒤집으면 첫 실사용 팀이 그 절벽에 부딪히고, 약속이 깨진 채로 사용자가 겪는다.
+   >
+   > 숫자의 근거(추정치 그대로)와 `github_app_access_logs` 기반 재조정 계획은 `functions/src/githubApp.ts` 의 `INSTALLATION_TOKEN_RULES_READ` 위 주석에 있다. 실사용자 0 시점이라 관측으로 정하지 못했다.
 3. Admin SDK 로 `projects/{projectId}` 읽기 → `uid ∈ members || uid == ownerId` 아니면 `permission-denied`.
 4. 팀 협업 엔타이틀먼트 확인 (`grantPlan` 의 `hasTeamCollab`) — 팀 기능이 유료 게이트를 우회하지 않게.
 5. `project.githubInstallationId` 없으면 `failed-precondition` → 클라는 device 경로로 간다(§6).

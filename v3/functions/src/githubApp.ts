@@ -828,14 +828,166 @@ export function buildAuditEntry(input: {
   };
 }
 
-/** 발급 한도(설계 §3.2 2번) — uid+projectId 당 20회/시간. */
-export const INSTALLATION_TOKEN_RULES: ReadonlyArray<{
+// ── 발급 한도 (설계 §3.2 2번) ───────────────────────────────────────────────
+//
+// ★read 와 write 를 **다른 예산**으로 나눈다. 느슨하게 만드는 게 아니라
+// 분리하는 것이다 — 아래가 그 근거다.
+//
+// 레이트리밋의 목적은 "계정이 털렸을 때 토큰 양산을 막는다" 였다(§3.2 2번).
+// 그런데 그 목적에 대해 read 와 write 는 **성격이 다른 위험**이고, v1 은 그
+// 둘을 한 숫자로 관리하고 있었다:
+//
+//  - **read** — 털린 계정이 토큰을 **1개**만 받아도 그 저장소를 통째로 읽는다.
+//    상한이 20이든 60이든 **피해가 같다.** 여기서 횟수 상한은 폭발 반경을
+//    줄이지 못한다. 남는 역할은 GitHub API 호출·Firestore 쓰기의 비용/DoS
+//    방어뿐이고, 그건 20/시간으로 이미 충분하다. ★그래서 read 는 **안 건드린다.**
+//  - **write** — 발급 횟수가 곧 "탐지 전까지 망칠 수 있는 양"이다. 토큰 하나의
+//    수명은 60분이지만 그 창이 지나면 다음 변조에는 새 발급이 필요하고, 발급은
+//    전부 `github_app_access_logs` 에 한 행씩 남는다. 즉 상한은 **자동화된 남용의
+//    템포를 원장에서 눈에 띄는 속도까지 떨어뜨린다.** 여기선 상한이 실제로
+//    의미가 있다.
+//
+// ★이 주석을 지우지 마라. 없으면 다음 사람이 "write 만 왜 느슨하지 = 보안을
+// 풀었네" 로 읽고 되돌린다. 되돌리면 아래의 UX 절벽이 그대로 돌아온다.
+//
+// ── 왜 지금 나누나 — v2 가 만든 UX 절벽 ─────────────────────────────────────
+//
+// v1 은 이 예산을 **clone 만** 썼다(프로젝트당 사실상 1회). v2 부터 **push 가
+// 같은 예산을 쓴다.** 우리는 토큰을 캐시하지 않으므로 **push 1회 = 발급 1회**다.
+// ★그 "캐시 없음" 은 결함이 아니라 **역할 회수가 T+0 에 먹히는 이유**이므로,
+// 캐시로 푸는 건 답이 아니다. 예산을 나누는 게 답이다.
+//
+// 20회/시간이면 에이전트 주도 워크플로가 넘긴다 → `resource-exhausted` →
+// device 경로 폴백 → **콜라보레이터가 아닌 팀원은 push 실패** → "팀원은 GitHub
+// 초대가 필요 없다" 는 전제가 그 시점에 깨진다.
+//
+// ── 숫자의 근거 (★관측이 아니라 추정이다) ───────────────────────────────────
+//
+// 실사용자가 0이라 관측으로 정할 수 없다. 추정을 그대로 적어 둔다:
+//
+//  - 티켓 1건당 push ≈ **6회** — 최초 1 + 리베이스 재시도 ~2 + 리뷰 반영 ~3.
+//  - 한 프로젝트에 에이전트 2~3대가 붙어 시간당 진행 티켓 ~4건 → **~24회/시간**.
+//  - 실패 재시도·사람의 수동 push 여유 2배 → ~50 → **60회/시간**으로 잡는다.
+//  - 분당: 리베이스 재시도 루프가 1분 안에 3~4회 몰리고 동시 에이전트 2~3대 →
+//    ~10 → **12회/분**.
+//
+// ★분당 상한을 같이 올리지 않으면 시간당만 올려도 **버스트에서 여전히 막힌다** —
+// 에이전트는 연속으로 민다. 12×60=720 ≫ 60 이므로 실제 구속은 시간당 상한이고,
+// 분당 상한은 병리적 루프만 끊는 안전핀이다.
+//
+// ★**재조정 계획** — 이 숫자는 굳은 게 아니다. `github_app_access_logs` 에서
+// `outcome:"issued"` 를 `uid+projectId` × 시간 으로 묶어 발급 횟수의 p95/p99 를
+// 본다. (a) `resource-exhausted` 거부가 실제로 관측되면 즉시 올리고,
+// (b) p99 가 상한의 50% 를 넘으면 올리고, (c) p99 가 상한의 10% 도 안 되면
+// 내린다. 첫 실사용 팀이 한 주를 돌린 뒤 한 번 본다.
+
+/**
+ * 발급 한도가 구분하는 접근 수준. clone/fetch = read, push = write.
+ *
+ * ★`RepoAccess` 의 별칭이다 — 같은 축이므로 갈라 두면 반드시 어긋난다.
+ * 예산을 고르는 값과 권한을 협상하는 값이 **같은 타입**이어야, 호출부에서
+ * `decision.access` 를 그대로 넘기는 것이 타입으로 보장된다.
+ */
+export type TokenRateAccess = RepoAccess;
+
+export interface InstallationTokenRule {
   windowSeconds: number;
   max: number;
-}> = [
-  { windowSeconds: 3600, max: 20 },
-  { windowSeconds: 60, max: 6 },
-];
+}
+
+/**
+ * read 예산 — ★v1 값 그대로다(20회/시간, 6회/분). 이 티켓은 read 를 **느슨하게
+ * 하지 않는다.** 위 근거대로 read 는 횟수로 폭발 반경이 줄지 않으므로 올릴
+ * 이유가 없고, 비용/DoS 방어로는 이 값으로 충분하다.
+ */
+export const INSTALLATION_TOKEN_RULES_READ: ReadonlyArray<InstallationTokenRule> =
+  Object.freeze([
+    { windowSeconds: 3600, max: 20 },
+    { windowSeconds: 60, max: 6 },
+  ]);
+
+/** write 예산 — 근거는 위 "숫자의 근거". 60회/시간, 12회/분. */
+export const INSTALLATION_TOKEN_RULES_WRITE: ReadonlyArray<InstallationTokenRule> =
+  Object.freeze([
+    { windowSeconds: 3600, max: 60 },
+    { windowSeconds: 60, max: 12 },
+  ]);
+
+/** 이 요청에 적용할 예산. */
+export function installationTokenRules(
+  access: TokenRateAccess
+): ReadonlyArray<InstallationTokenRule> {
+  return access === "write"
+    ? INSTALLATION_TOKEN_RULES_WRITE
+    : INSTALLATION_TOKEN_RULES_READ;
+}
+
+/**
+ * 예산 버킷의 키. ★read/write 가 **서로 다른 문서**를 써야 한다 —
+ * `rateLimit.enforce()` 는 키 하나에 시도 타임스탬프 배열 하나를 두므로, 같은
+ * 키에 다른 룰을 주면 두 예산이 같은 배열을 갉아먹어 분리가 무의미해진다.
+ *
+ * ★키를 잡는 기준은 **이 요청이 무엇을 발급받으려 하는가**이되, 클라이언트의
+ * 주장이 아니라 **서버가 인가한 수준**이다 — `issueRepoInstallationToken` 은
+ * `evaluateInstallationTokenRequest` 의 판정(`decision.access`)을 넘긴다.
+ * 그래서 다음 불변식이 성립한다:
+ *
+ *   ★**read 예산으로는 write 토큰을 얻을 수 없다.** — 지켜야 하는 건 이쪽이다.
+ *   ★**write 버킷은 마블로 역할 게이트를 통과한 요청만 고를 수 있다.** viewer 가
+ *     `access:"write"` 를 실어 60회/시간 버킷을 스스로 고르는 길은 없다 —
+ *     그 요청은 키를 잡기 전에 `role-cannot-write` 로 죽는다.
+ *
+ * 반대 방향은 열려 있다: write 를 요청했다가 설치 권한 미승인으로 read 로
+ * 깎여 발급되면(v2 의 `negotiateInstallationAccess`, #1119) 그 요청은
+ * write 슬롯을 먹고 read 토큰을 받는다 — 즉 read 상한을 우회하는 셈이다.
+ * **알고 받아들인다.** 위 근거대로 read 는 횟수가 폭발 반경을 줄이지 않으므로
+ * 잃는 게 없고, 대신 "write 를 시도했다" 는 사실이 write 예산에 정확히 기록된다.
+ *
+ * ★v1 키(`ghapp:{uid}:{projectId}`)와 다르다. 기존 버킷 문서는 그냥 만료돼
+ * 사라진다(가장 긴 창이 1시간). 실사용자 0 시점이라 이관할 상태가 없다.
+ */
+export function installationTokenRateKey(
+  uid: string,
+  projectId: string,
+  access: TokenRateAccess
+): string {
+  return `ghapp:${access}:${uid}:${projectId}`;
+}
+
+/** 인가된 발급 판정 — `evaluateInstallationTokenRequest` 의 ok 분기. */
+export type AuthorizedIssueDecision = Extract<IssueDecision, { ok: true }>;
+
+/** 이 요청에 적용할 예산 — 버킷 키와 룰은 항상 같은 접근 수준에서 나온다. */
+export interface InstallationTokenBudget {
+  key: string;
+  rules: ReadonlyArray<InstallationTokenRule>;
+}
+
+/**
+ * 인가 판정 → 발급 예산.
+ *
+ * ★이 함수가 존재하는 이유는 **타입으로 사고를 막기 위해서**다. 예산 선택을
+ * 호출부에 맡기면 `const access = "read"` 같은 한 줄이 남고, 그건 컴파일도 되고
+ * 테스트도 통과하면서 **효과만 0**이다(v2 write push 가 read 예산 20회/시간을
+ * 쓰게 된다 — 이 티켓이 고치려던 바로 그 결함). 그래서 접근 수준을 문자열로
+ * 받지 않고 **판정 객체**로 받는다: 리터럴을 넘기려면 가짜 판정을 지어내야 하고,
+ * 그건 리뷰에서 보인다.
+ *
+ * ★`decision.access` 는 클라이언트의 주장이 아니라 마블로 역할 게이트를 통과한
+ * 값이다(viewer 의 write 요청은 `role-cannot-write` 로 죽는다). 그래서 write
+ * 버킷은 실제로 밀 수 있는 역할만 고를 수 있다.
+ */
+export function installationTokenBudgetFor(
+  uid: string,
+  projectId: string,
+  decision: AuthorizedIssueDecision
+): InstallationTokenBudget {
+  const access: TokenRateAccess = decision.access;
+  return {
+    key: installationTokenRateKey(uid, projectId, access),
+    rules: installationTokenRules(access),
+  };
+}
 
 // ── 접근 차단 경로 (설계 §7) ────────────────────────────────────────────────
 //
