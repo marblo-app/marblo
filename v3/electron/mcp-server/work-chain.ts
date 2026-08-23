@@ -54,6 +54,14 @@ import {
   type WorkChainItem,
   type WorkChainTaskStatus,
 } from "./work-chain-core.js";
+import {
+  addFallbackEntry,
+  enqueueWorkChainFallback,
+  replaceWorkChainFallbacks,
+  takeWorkChainFallbacks,
+  updateFallbackEntry,
+  type WorkChainSpoolEntry,
+} from "./work-chain-spool.js";
 
 export interface WorkChainSnapshot {
   projectId: string;
@@ -219,18 +227,37 @@ export async function addWorkChainItem(
   input: NewWorkChainItemInput,
   position?: number,
   now: number = Date.now(),
+  persistFailure = true,
 ): Promise<AddWorkChainItemResult> {
+  // A later successful tool call is a recovery opportunity even without an
+  // MCP restart (for example immediately after rules are deployed).
+  if (persistFailure) await restoreWorkChainFallbacks(db).catch(() => 0);
   const invalid = validateNewItem(input);
   if (invalid) return { error: invalid };
   const item = buildWorkChainItem(input, { id: newWorkChainItemId(), now, by });
-  const res = await mutateChain(db, projectId, by, (items) => {
+  let res: Awaited<ReturnType<typeof mutateChain>>;
+  try {
+    res = await mutateChain(db, projectId, by, (items) => {
     // 선행 항목 id 는 실제로 있어야 한다 — 없는 id 를 걸면 영원히 waiting 이다.
     const known = new Set(items.map((i) => i.id));
     const unknown = item.afterItemIds.filter((id) => !known.has(id));
     if (unknown.length)
       return `after_item_ids 에 없는 항목 id: ${unknown.join(", ")} — get_work_chain 으로 id 를 확인해라.`;
     return insertItem(items, item, position);
-  });
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (persistFailure) {
+      try {
+        await enqueueWorkChainFallback(addFallbackEntry(projectId, by, item, position));
+        return { error: `워크체인에 기록하지 못했습니다: ${detail}. 항목은 로컬 복구 대기열에 보존됐으며 권한 복구 뒤 자동 재시도됩니다.` };
+      } catch (spoolError) {
+        const spoolDetail = spoolError instanceof Error ? spoolError.message : String(spoolError);
+        return { error: `워크체인에 기록하지 못했습니다: ${detail}. 로컬 복구 대기열 저장도 실패했습니다: ${spoolDetail}` };
+      }
+    }
+    return { error: `워크체인 복구 재시도 실패: ${detail}` };
+  }
   if ("error" in res) return { error: res.error };
   return { item, items: res.items, rev: res.rev };
 }
@@ -269,11 +296,15 @@ export async function updateWorkChainItem(
   itemId: string,
   input: UpdateWorkChainItemInput,
   now: number = Date.now(),
+  persistFailure = true,
 ): Promise<UpdateWorkChainItemResult> {
+  if (persistFailure) await restoreWorkChainFallbacks(db).catch(() => 0);
   if (input.close && input.reopen)
     return { error: "close 와 reopen 을 함께 줄 수 없다." };
   let updated: WorkChainItem | undefined;
-  const res = await mutateChain(db, projectId, by, (items) => {
+  let res: Awaited<ReturnType<typeof mutateChain>>;
+  try {
+    res = await mutateChain(db, projectId, by, (items) => {
     const idx = items.findIndex((i) => i.id === itemId);
     if (idx < 0)
       return `체인에 항목 ${itemId} 가 없다 — get_work_chain 으로 id 를 확인해라.`;
@@ -339,9 +370,42 @@ export async function updateWorkChainItem(
       next,
       input.position !== undefined ? input.position : idx,
     );
-  });
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (persistFailure) {
+      try {
+        await enqueueWorkChainFallback(updateFallbackEntry(projectId, by, itemId, input as Record<string, unknown>));
+        return { error: `워크체인 항목을 갱신하지 못했습니다: ${detail}. 변경은 로컬 복구 대기열에 보존됐으며 권한 복구 뒤 자동 재시도됩니다.` };
+      } catch (spoolError) {
+        const spoolDetail = spoolError instanceof Error ? spoolError.message : String(spoolError);
+        return { error: `워크체인 항목을 갱신하지 못했습니다: ${detail}. 로컬 복구 대기열 저장도 실패했습니다: ${spoolDetail}` };
+      }
+    }
+    return { error: `워크체인 복구 재시도 실패: ${detail}` };
+  }
   if ("error" in res) return { error: res.error };
   return { item: updated, items: res.items, rev: res.rev };
+}
+
+/** Replay durable failures in FIFO order. Stop at the first failure to retain ordering. */
+export async function restoreWorkChainFallbacks(db: Firestore): Promise<number> {
+  const entries = await takeWorkChainFallbacks();
+  let restored = 0;
+  const remaining: WorkChainSpoolEntry[] = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    const result = entry.kind === "add"
+      ? await addWorkChainItem(db, entry.projectId, entry.by, entry.item, entry.position, entry.item.createdAt, false)
+      : await updateWorkChainItem(db, entry.projectId, entry.by, entry.itemId, entry.input as UpdateWorkChainItemInput, Date.now(), false);
+    if (result.error) {
+      remaining.push(...entries.slice(index));
+      break;
+    }
+    restored += 1;
+  }
+  if (remaining.length !== entries.length || entries.length === 0) await replaceWorkChainFallbacks(remaining);
+  return restored;
 }
 
 /**
@@ -498,7 +562,9 @@ export async function captureWorkChainPromises(
       if (res.item) written.push({ id: res.item.id, what: res.item.what });
     }
     return {
-      note: buildCaptureNote(written, error),
+      // 실패한 후보의 원문을 반드시 결과에 남긴다. 대기열 복구가 있어도 오케가
+      // "이미 적혔다"고 오해하지 않고 즉시 확인/재지시할 수 있어야 한다.
+      note: error ? captureFailureNote(fresh, error) : buildCaptureNote(written),
       written,
       detected: candidates.length,
       skippedDuplicate: candidates.length - fresh.length,
@@ -526,7 +592,7 @@ function buildCaptureNote(
   const base = formatCaptureNote(written);
   if (!error) return base;
   const warn =
-    `⚠️ 워크체인 자동 기록이 도중에 실패했다: ${error}\n` +
+    `⚠️ 워크체인 자동 기록 실패: ${error}\n` +
     `  남은 약속은 add_work_chain_item(what, why) 로 직접 적어라.`;
   return base ? `${base}\n${warn}` : warn;
 }
@@ -596,7 +662,9 @@ export async function captureMergeHoldFollowUp(
       return {
         ...EMPTY_CAPTURE,
         detected: 1,
-        note: `⚠️ 워크체인 자동 기록 실패 — ${res.error}`,
+        note:
+          `⚠️ 워크체인 자동 기록 실패 — ${res.error}\n` +
+          `  "${what}" (티켓 ${taskId})는 아직 체인에 없습니다.`,
         error: res.error,
       };
     }

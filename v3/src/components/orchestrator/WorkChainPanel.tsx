@@ -54,7 +54,7 @@ export interface WorkChainPanelProps {
 type ChainLoad =
   | { kind: "loading"; since: number }
   | { kind: "ready"; items: WorkChainItem[]; exists: boolean }
-  | { kind: "failed"; detail: string };
+  | { kind: "failed"; detail: string; reason: "permission" | "load" };
 
 // This is intentionally global rather than project-scoped: it is a display
 // preference for the orchestrator surface, and making every project relearn it
@@ -213,7 +213,7 @@ export default memo(function WorkChainPanel({
     setLoad({ kind: "loading", since: Date.now() });
     const unsub = subscribeWorkChain(projectId, (res) => {
       if (res.kind === "error") {
-        setLoad({ kind: "failed", detail: res.error.message });
+        setLoad({ kind: "failed", detail: res.error.message, reason: res.reason });
         return;
       }
       setLoad({
@@ -284,7 +284,7 @@ export default memo(function WorkChainPanel({
       : load.kind === "failed"
         ? {
             kind: "failed",
-            reasonCode: "orchestrator.chain.failed.reason",
+            reasonCode: load.reason === "permission" ? "orchestrator.chain.failed.permission" : "orchestrator.chain.failed.reason",
             detail: load.detail,
             retry: () => setRetryToken((n) => n + 1),
           }

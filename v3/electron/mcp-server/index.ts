@@ -10,6 +10,8 @@ import {
   restoreLedgerSpool,
 } from "./tools.js";
 import { registerPrompts } from "./prompts.js";
+import { restoreWorkChainFallbacks } from "./work-chain.js";
+import { db } from "./firebase.js";
 import { bakedBuildStamp, entryPath, formatBootBanner } from "./build-info.js";
 
 // ── 전역 안전망 ──────────────────────────────────────────────────────────────
@@ -163,6 +165,11 @@ async function main() {
   // 인증 뒤에 돌리되 await 하지 않는다 — 재적재가 서버 기동을 막으면 안 된다.
   // 실패해도 스풀은 그대로 남고 백오프 재시도가 이어진다.
   void restoreLedgerSpool();
+  // A rule deployment can make a previously denied work-chain write possible.
+  // Replay only after auth, and never delay MCP availability for it.
+  void restoreWorkChainFallbacks(db).catch((err) =>
+    console.error("[work-chain] fallback replay failed:", err),
+  );
 }
 
 main().catch((err) => {

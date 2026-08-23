@@ -18,6 +18,7 @@ import {
 // 문장을 베끼지 않고 사전에서 꺼낸다).
 import { en } from "../../src/locales/en";
 import type { WorkChainItem } from "../../src/lib/workChain";
+import { DEFAULT_PANEL_HEIGHT, panelHeightForPointer } from "../../src/components/orchestrator/workChainPanelResize";
 
 const state = vi.hoisted(() => ({
   listener: null as
@@ -33,7 +34,7 @@ const state = vi.hoisted(() => ({
                 exists: boolean;
               };
             }
-          | { kind: "error"; error: Error },
+          | { kind: "error"; error: Error; reason: "permission" | "load" },
       ) => void),
   added: [] as Array<{ what: string; why: string }>,
 }));
@@ -216,11 +217,12 @@ describe("WorkChainPanel", () => {
       state.listener?.({
         kind: "error",
         error: new Error("permission-denied"),
+        reason: "permission",
       });
     });
     fireEvent.click(screen.getByTestId("work-chain-toggle"));
     expect(
-      screen.getByText(en["orchestrator.chain.failed.reason"]),
+      screen.getByText(en["orchestrator.chain.failed.permission"]),
     ).toBeTruthy();
     expect(screen.getByText(en["common.state.action.retry"])).toBeTruthy();
   });
@@ -244,7 +246,7 @@ describe("WorkChainPanel", () => {
     fireEvent.click(screen.getByTestId("work-chain-toggle"));
 
     const panel = screen.getByTestId("work-chain-panel");
-    expect(panel.style.height).toBe("160px");
+    expect(panel.style.height).toBe(`${DEFAULT_PANEL_HEIGHT}px`);
     expect(panel.style.maxHeight).toBe("320px");
     expect(
       panel.querySelector(".overflow-y-auto"),
@@ -255,15 +257,16 @@ describe("WorkChainPanel", () => {
     fireEvent(handle, pointerEvent("pointerdown", 200));
     fireEvent(document, pointerEvent("pointermove", 140));
     fireEvent(document, pointerEvent("pointerup", 140));
-    expect(panel.style.height).toBe("220px");
-    expect(storage.get(PANEL_HEIGHT_STORAGE_KEY)).toBe("220");
+    const resizedHeight = panelHeightForPointer(DEFAULT_PANEL_HEIGHT, 200, 140);
+    expect(panel.style.height).toBe(`${resizedHeight}px`);
+    expect(storage.get(PANEL_HEIGHT_STORAGE_KEY)).toBe(String(resizedHeight));
 
     unmount();
     render(createElement(WorkChainPanel, { projectId: "p1" }));
     push([chainItem({ id: "a", what: "첫 항목" })]);
     fireEvent.click(screen.getByTestId("work-chain-toggle"));
     expect(screen.getByTestId("work-chain-panel").style.height).toBe(
-      "220px",
+      `${resizedHeight}px`,
     );
   });
 });

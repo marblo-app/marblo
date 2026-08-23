@@ -14,7 +14,9 @@
  *      지나가고, 그건 안 적은 것보다 나쁘다.
  *   ④ **merge_and_close 의 HOLD_REVIEW 는 무조건 적고, 멱등이다.**
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 // Firestore 를 얇게 가짜로 세운다. 트랜잭션은 "읽고 → 콜백 → 쓰기" 한 번이면
 // 충분하다(동시성은 실제 SDK 의 책임이고 여기서 검증할 대상이 아니다).
@@ -68,6 +70,8 @@ const {
   captureMergeHoldFollowUp,
   captureWorkChainPromises,
   readWorkChain,
+  addWorkChainItem,
+  restoreWorkChainFallbacks,
 } = await import("../../electron/mcp-server/work-chain");
 
 const db = {} as never;
@@ -83,6 +87,16 @@ beforeEach(() => {
   store.clear();
   failWrites = null;
   getDocCalls = 0;
+  process.env.MARBLO_WORK_CHAIN_SPOOL_PATH = path.join(
+    process.cwd(),
+    `.work-chain-spool-test-${Date.now()}-${Math.random()}.json`,
+  );
+});
+
+afterEach(async () => {
+  const spool = process.env.MARBLO_WORK_CHAIN_SPOOL_PATH;
+  if (spool) await fs.rm(spool, { force: true });
+  delete process.env.MARBLO_WORK_CHAIN_SPOOL_PATH;
 });
 
 describe("① ★재현 시나리오 — 세션을 갈아도 B 가 체인에 남는다", () => {
@@ -175,6 +189,22 @@ describe("② 약속 없는 호출 — Firestore 를 건드리지도 않는다",
 });
 
 describe("③ ★쓰기 실패를 삼키지 않는다", () => {
+  it("권한 거부 add는 성공처럼 보이지 않고 로컬 폴백에서 권한 복구 뒤 재생된다", async () => {
+    failWrites = "PERMISSION_DENIED: Missing or insufficient permissions.";
+    const failed = await addWorkChainItem(db, PROJECT, "orchestrator-proj1", {
+      what: "규칙 배포 확인",
+      why: "권한이 막힌 동안에도 다음 일을 잃지 않는다",
+    });
+    expect(failed.item).toBeUndefined();
+    expect(failed.error).toContain("기록하지 못했습니다");
+    expect(failed.error).toContain("로컬 복구 대기열");
+    expect((await readWorkChain(db, PROJECT)).items).toHaveLength(0);
+
+    failWrites = null;
+    expect(await restoreWorkChainFallbacks(db)).toBe(1);
+    expect((await readWorkChain(db, PROJECT)).items.map((item) => item.what)).toContain("규칙 배포 확인");
+  });
+
   it("permission-denied 면 잡은 문장을 그대로 돌려주고 실패를 명시한다", async () => {
     failWrites = "PERMISSION_DENIED: Missing or insufficient permissions.";
     const res = await captureWorkChainPromises(db, {

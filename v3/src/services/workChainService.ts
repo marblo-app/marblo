@@ -38,7 +38,14 @@ export interface WorkChainSnapshot {
 
 export type WorkChainSubscribeResult =
   | { kind: "data"; snapshot: WorkChainSnapshot }
-  | { kind: "error"; error: Error };
+  | { kind: "error"; error: Error; reason: "permission" | "load" };
+
+function subscriptionFailureReason(error: Error): "permission" | "load" {
+  const code = (error as Error & { code?: unknown }).code;
+  return code === "permission-denied" || code === "unauthenticated" || /permission|insufficient permissions/i.test(error.message)
+    ? "permission"
+    : "load";
+}
 
 /** 실시간 구독. 에러는 콜백으로 전달한다(화면이 failed 상태를 그려야 하므로 삼키지 않는다). */
 export function subscribeWorkChain(
@@ -69,7 +76,7 @@ export function subscribeWorkChain(
     },
     (error) => {
       console.error("[workChainService] subscribe error:", error);
-      callback({ kind: "error", error });
+      callback({ kind: "error", error, reason: subscriptionFailureReason(error) });
     },
   );
 }
