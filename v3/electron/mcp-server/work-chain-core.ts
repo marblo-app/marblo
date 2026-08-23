@@ -44,6 +44,10 @@
  *   taskIds        이 항목의 실체 티켓 — 전부 `doneWhen` 에 닿으면 done (보드 근거)
  *   doneWhen       exists(티켓이 생기면) | review(REVIEW 이상) | done(DONE)
  *   closed         오케/사용자의 명시적 종료 — dropped(사유) | self_reported(근거)
+ *   source         manual(오케가 직접 add_work_chain_item) | auto(도구 층이 오케가
+ *                  이미 쓴 문장에서 포착 — work-chain-capture.ts). ★쓰는 쪽의 자발성을
+ *                  없앤 축이라 끝까지 구분돼 보여야 한다(자기보고 evidence 와 같은 규율).
+ *   sourceTool     auto 일 때 어느 도구가 적었나 — 오탐이 어느 표면에서 나오는지 진단.
  */
 
 export type WorkChainTaskStatus =
@@ -58,6 +62,15 @@ export type WorkChainTaskStatus =
 export type WorkChainDoneWhen = "exists" | "review" | "done";
 
 export type WorkChainClosedKind = "dropped" | "self_reported";
+
+/**
+ * 항목이 **어떻게 생겼나**. `manual` 은 오케가 add_work_chain_item 을 부르기로
+ * 결심한 것이고, `auto` 는 도구 층이 오케가 이미 쓴 문장에서 포착한 것이다
+ * (work-chain-capture.ts). 이 축을 저장하는 이유는 두 가지다 —
+ *   ① 오탐 진단: 자동 포착이 어느 표면에서 헛것을 잡는지 사후에 셀 수 있어야 한다.
+ *   ② 신뢰 표시: 사장님·오케 모두 "이건 기계가 적은 것" 을 알고 봐야 한다.
+ */
+export type WorkChainSource = "manual" | "auto";
 
 export interface WorkChainClosed {
   kind: WorkChainClosedKind;
@@ -80,6 +93,10 @@ export interface WorkChainItem {
   closed?: WorkChainClosed;
   /** 진행 메모(선택). 상태가 아니라 맥락이다. */
   note?: string;
+  /** 어떻게 생겼나. 없으면 manual(구버전 항목 호환). */
+  source?: WorkChainSource;
+  /** source === "auto" 일 때 적은 도구 이름(예: "merge_and_close"). */
+  sourceTool?: string;
   /** epoch ms — 배열 안의 값이라 Timestamp 대신 숫자(렌더러/MCP 양쪽에서 같은 타입). */
   createdAt: number;
   updatedAt: number;
@@ -193,6 +210,11 @@ export function normalizeWorkChainItem(raw: unknown): WorkChainItem | null {
   };
   if (closed) item.closed = closed;
   if (typeof r.note === "string" && r.note.trim()) item.note = r.note;
+  // 구버전 문서에는 source 가 없다 — 없으면 manual 로 본다(자동 포착 이전의 항목은
+  // 전부 오케가 손으로 적은 것이므로 사실과 맞다).
+  if (r.source === "auto" || r.source === "manual") item.source = r.source;
+  if (typeof r.sourceTool === "string" && r.sourceTool.trim())
+    item.sourceTool = r.sourceTool.trim();
   return item;
 }
 
@@ -314,6 +336,10 @@ export interface NewWorkChainItemInput {
   afterItemIds?: string[];
   doneWhen?: WorkChainDoneWhen;
   note?: string;
+  /** 기본 manual. 자동 포착 경로만 "auto" 를 준다. */
+  source?: WorkChainSource;
+  /** source === "auto" 일 때 필수 취급 — 어느 도구가 적었는지 없으면 진단이 안 된다. */
+  sourceTool?: string;
 }
 
 /** 입력 검증 — 실패 사유 문자열 또는 null. 순수. */
@@ -351,6 +377,11 @@ export function buildWorkChainItem(
   };
   const note = (input.note ?? "").trim();
   if (note) item.note = note;
+  if (input.source === "auto") {
+    item.source = "auto";
+    const tool = (input.sourceTool ?? "").trim();
+    if (tool) item.sourceTool = tool;
+  }
   return item;
 }
 
@@ -436,6 +467,12 @@ export function formatDerivedItem(
       : ""
   }] ${item.what} (id=${item.id})`;
   const lines = [head, `   why: ${item.why || "(없음)"}`];
+  // 기계가 적은 항목은 그렇게 보여야 한다 — 오케가 "내가 적었나?" 를 되짚지 않도록.
+  if (item.source === "auto") {
+    lines.push(
+      `   source: auto${item.sourceTool ? `(${item.sourceTool})` : ""} — 네 문장에서 자동 포착됨. 틀렸으면 close="dropped".`,
+    );
+  }
   if (item.taskIds.length) {
     const facts = item.taskIds
       .map((id) => {

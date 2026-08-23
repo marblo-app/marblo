@@ -9,6 +9,15 @@
  * ★모든 읽기 경로는 fail-open 이다 — 체인 부기가 깨져도 상태 전이(update_task_status
  * 등)는 절대 막지 않는다(projection.ts 의 seed 블록과 같은 규율). 그래서 푸터
  * 계산은 전부 try/catch 로 감싸고 실패하면 "" 를 돌려준다.
+ *
+ * ## 자동 포착 (티켓 lW9iiLGWlO0lVoy4khSM)
+ * `captureWorkChainPromises` / `captureMergeHoldFollowUp` 는 **쓰는 쪽의 자발성을
+ * 없앤 경로**다. 감지 규칙은 `work-chain-capture.ts`(순수), 여기는 그걸 체인에
+ * 실제로 넣는 I/O 다. 쓰기 경로지만 **읽기와 같은 fail-open** 이다 — 자동 기록이
+ * 실패해도 원래 도구(머지 마감·사장님 보고·답변)는 그대로 성공해야 한다. 다만
+ * ★실패를 삼키지는 않는다: 실패 사실은 결과 문장으로 돌려준다. 삼키면 오케는
+ * "적혔다" 고 믿고 지나가고, 그건 안 적은 것보다 나쁘다(현재 프로덕션에
+ * workChains 규칙이 미배포라 permission-denied 가 실제로 난다).
  */
 import {
   doc,
@@ -18,6 +27,13 @@ import {
   type Firestore,
   type Transaction,
 } from "firebase/firestore";
+import {
+  dedupeAgainstChain,
+  detectFollowUpPromises,
+  formatCaptureNote,
+  type CaptureSurface,
+  type CapturedPromise,
+} from "./work-chain-capture.js";
 import {
   WORK_CHAIN_COLLECTION,
   WORK_CHAIN_ITEMS_MAX,
@@ -361,5 +377,247 @@ export async function workChainNudgeAfterTransition(
   } catch (err) {
     console.error("[work-chain] nudge skipped:", err);
     return "";
+  }
+}
+
+// ── 자동 포착 (티켓 lW9iiLGWlO0lVoy4khSM) ─────────────────────────────────
+//
+// ★순환을 끊는 지점. 지금까지 체인에 "적는" 행위는 오케가 add_work_chain_item 을
+// 부르기로 결심해야 일어났다 — 즉 "잊는 걸 고치는 장치가 안 잊어야 작동" 했다.
+// 여기서는 오케가 **이미 도구 인자로 넘긴 문장**을 도구 층이 읽고 대신 적는다.
+// 오케가 잊을 게 남지 않는다.
+
+export interface CaptureWorkChainInput {
+  projectId: string;
+  /** 적은 주체(agentId). 항목의 createdBy 가 된다. */
+  by: string;
+  /** 어느 도구가 호출했나 — 항목에 sourceTool 로 남고 오탐 진단 축이 된다. */
+  tool: string;
+  surface: CaptureSurface;
+  /** 오케가 실제로 쓴 텍스트(인자 원문). */
+  text: string;
+  /**
+   * 이 호출이 다루고 있는 티켓. "A 가 끝나면 B" 처럼 선행 힌트가 있는데 문장에
+   * 티켓 id 가 안 적혀 있으면 이 id 를 선행으로 건다 — dispatch 중에 말한
+   * "이거 끝나면" 의 '이거' 가 바로 이 티켓이다.
+   */
+  contextTaskId?: string;
+}
+
+export interface CaptureWorkChainResult {
+  /** 도구 결과에 덧붙일 문장. 아무것도 안 적었으면 "". */
+  note: string;
+  /** 실제로 적힌 항목들. */
+  written: Array<{ id: string; what: string }>;
+  /** 감지된 후보 수(중복 제거 전) — ★소음 실측 축. */
+  detected: number;
+  /** 중복이라 버린 수. */
+  skippedDuplicate: number;
+  /** 쓰기 실패 사유. 있으면 note 에도 경고가 들어간다. */
+  error?: string;
+}
+
+const EMPTY_CAPTURE: CaptureWorkChainResult = {
+  note: "",
+  written: [],
+  detected: 0,
+  skippedDuplicate: 0,
+};
+
+/** 문장에서 뽑은 티켓 id 후보 중 **보드에 실제로 있는 것**만 남긴다. */
+async function verifyTaskIds(
+  db: Firestore,
+  ids: readonly string[],
+): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const facts = await loadTaskFacts(db, ids);
+  return ids.filter((id) => facts.statuses[id] != null);
+}
+
+/**
+ * 오케가 쓴 텍스트에서 약속을 포착해 체인에 적는다.
+ *
+ * ★절대 throw 하지 않는다. 감지가 0건이면 Firestore 를 **읽지도 않는다** —
+ * 약속이 없는 호출에는 비용도 소음도 0이어야 한다(그게 이 설계의 전제다).
+ */
+export async function captureWorkChainPromises(
+  db: Firestore,
+  input: CaptureWorkChainInput,
+): Promise<CaptureWorkChainResult> {
+  const { projectId, by, tool, surface, text, contextTaskId } = input;
+  if (!projectId) return EMPTY_CAPTURE;
+  let candidates: CapturedPromise[];
+  try {
+    candidates = detectFollowUpPromises(text, surface);
+  } catch (err) {
+    console.error("[work-chain] capture detection failed:", err);
+    return EMPTY_CAPTURE;
+  }
+  if (candidates.length === 0) return EMPTY_CAPTURE;
+
+  try {
+    const snap = await readWorkChain(db, projectId);
+    const fresh = dedupeAgainstChain(candidates, snap.items);
+    if (fresh.length === 0) {
+      return {
+        ...EMPTY_CAPTURE,
+        detected: candidates.length,
+        skippedDuplicate: candidates.length,
+      };
+    }
+    const written: Array<{ id: string; what: string }> = [];
+    let error: string | undefined;
+    for (const c of fresh) {
+      // 선행은 **검증된 티켓만** 건다. 없는 id 를 걸면 항목이 영원히 waiting 이고,
+      // 그건 체인이 조용히 죽는 방식이다.
+      const afterTaskIds = c.hasDependencyHint
+        ? await verifyTaskIds(
+            db,
+            c.taskIdHints.length > 0
+              ? c.taskIdHints
+              : contextTaskId
+                ? [contextTaskId]
+                : [],
+          )
+        : [];
+      const res = await addWorkChainItem(db, projectId, by, {
+        what: c.what,
+        why: c.why,
+        afterTaskIds,
+        // ★티켓은 붙이지 않는다. 자동 포착은 "할 일" 을 잡은 것이지 "그 일의 티켓"
+        // 을 아는 게 아니다. 티켓이 생기면 오케가 add_task_ids 로 붙이고, 그때부터
+        // 보드가 완료를 판정한다(§7 설계 불변).
+        doneWhen: "done",
+        source: "auto",
+        sourceTool: tool,
+      });
+      if (res.error) {
+        error = res.error;
+        break;
+      }
+      if (res.item) written.push({ id: res.item.id, what: res.item.what });
+    }
+    return {
+      note: buildCaptureNote(written, error),
+      written,
+      detected: candidates.length,
+      skippedDuplicate: candidates.length - fresh.length,
+      ...(error ? { error } : {}),
+    };
+  } catch (err) {
+    // ★삼키지 않는다. 지금 프로덕션은 workChains 규칙 미배포라 여기서
+    // permission-denied 가 난다 — "적혔다" 고 믿게 두면 안 적은 것보다 나쁘다.
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[work-chain] capture write failed:", err);
+    return {
+      note: captureFailureNote(candidates, message),
+      written: [],
+      detected: candidates.length,
+      skippedDuplicate: 0,
+      error: message,
+    };
+  }
+}
+
+function buildCaptureNote(
+  written: ReadonlyArray<{ id: string; what: string }>,
+  error?: string,
+): string {
+  const base = formatCaptureNote(written);
+  if (!error) return base;
+  const warn =
+    `⚠️ 워크체인 자동 기록이 도중에 실패했다: ${error}\n` +
+    `  남은 약속은 add_work_chain_item(what, why) 로 직접 적어라.`;
+  return base ? `${base}\n${warn}` : warn;
+}
+
+function captureFailureNote(
+  candidates: readonly CapturedPromise[],
+  message: string,
+): string {
+  const quoted = candidates.map((c) => `  · ${c.what}`).join("\n");
+  return (
+    `⚠️ 워크체인 자동 기록 실패 — ${message}\n` +
+    `아래를 잡았지만 **적지 못했다.** 그대로 두면 사라진다:\n${quoted}\n` +
+    `  add_work_chain_item(what, why) 로 직접 적거나, 규칙 배포 후 다시 말해라.`
+  );
+}
+
+/**
+ * ★merge_and_close 가 HOLD_REVIEW 를 낼 때의 무조건 포착.
+ *
+ * 텍스트 감지가 아니다 — `evaluateMergeCloseout` 이 **이미 판정한 사실**
+ * ("PR 은 머지됐는데 후속이 남아 있다")을 그대로 항목으로 옮긴다. 그래서
+ *   · 오탐률 = 기존 detectFollowupSignals 의 오탐률(이미 프로덕션 판정),
+ *   · 추가 감지 비용 0,
+ *   · 그리고 **빠져나갈 인자가 없다** — 후속 때문에 티켓을 REVIEW 에 붙잡아
+ *     놓으면서 그 후속을 체인에 안 남기는 경로가 존재하지 않게 된다.
+ * 이게 이 티켓에서 유일하게 "무조건" 걸리는 자리다(그 근거는 위 세 줄이 전부다).
+ *
+ * 항목에는 그 티켓을 taskIds 로 붙인다 — 후속이 실제로 끝나 누군가 티켓을 DONE
+ * 으로 넘기면 항목은 **보드 근거로** 자동으로 닫힌다. 오케 자기보고가 낄 자리가 없다.
+ */
+export async function captureMergeHoldFollowUp(
+  db: Firestore,
+  input: {
+    projectId: string;
+    by: string;
+    taskId: string;
+    taskTitle: string;
+    signals: readonly string[];
+    reason: string;
+  },
+): Promise<CaptureWorkChainResult> {
+  const { projectId, by, taskId, taskTitle, signals, reason } = input;
+  if (!projectId || !taskId) return EMPTY_CAPTURE;
+  const what = `후속 마무리: ${taskTitle}`.slice(0, 200);
+  try {
+    const snap = await readWorkChain(db, projectId);
+    // 같은 티켓을 이미 물고 있는 **열린** 항목이 있으면 다시 적지 않는다.
+    // merge_and_close 는 재호출이 흔하다(멱등이어야 한다).
+    const already = snap.items.some(
+      (i) => !i.closed && i.taskIds.includes(taskId),
+    );
+    if (already) {
+      return { ...EMPTY_CAPTURE, detected: 1, skippedDuplicate: 1 };
+    }
+    const res = await addWorkChainItem(db, projectId, by, {
+      what,
+      why:
+        `merge_and_close 가 PR 머지를 확인하고도 DONE 으로 넘기지 않았다 — ` +
+        `${reason} (감지 신호: ${signals.join(", ") || "없음"}). ` +
+        `코드 머지 ≠ 작업 완료. 티켓 ${taskId} 가 실제로 DONE 이 되면 이 항목은 보드 근거로 닫힌다.`,
+      taskIds: [taskId],
+      doneWhen: "done",
+      source: "auto",
+      sourceTool: "merge_and_close",
+    });
+    if (res.error) {
+      return {
+        ...EMPTY_CAPTURE,
+        detected: 1,
+        note: `⚠️ 워크체인 자동 기록 실패 — ${res.error}`,
+        error: res.error,
+      };
+    }
+    const written = res.item ? [{ id: res.item.id, what: res.item.what }] : [];
+    return {
+      note: formatCaptureNote(written),
+      written,
+      detected: 1,
+      skippedDuplicate: 0,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[work-chain] merge-hold capture failed:", err);
+    return {
+      note:
+        `⚠️ 워크체인 자동 기록 실패 — ${message}\n` +
+        `  "${what}" 를 add_work_chain_item(what, why, task_ids=["${taskId}"]) 로 직접 적어라.`,
+      written: [],
+      detected: 1,
+      skippedDuplicate: 0,
+      error: message,
+    };
   }
 }

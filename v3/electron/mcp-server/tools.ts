@@ -75,10 +75,13 @@ import {
 import { evaluateDeleteGuards, type DeleteMode } from "./task-delete.js";
 import {
   addWorkChainItem,
+  captureMergeHoldFollowUp,
+  captureWorkChainPromises,
   loadWorkChain,
   updateWorkChainItem,
   workChainNudgeAfterTransition,
 } from "./work-chain.js";
+import type { CaptureSurface } from "./work-chain-capture.js";
 import {
   WORK_CHAIN_DONE_WHEN_VALUES,
   formatWorkChain,
@@ -2978,6 +2981,55 @@ interface PendingInstructionDoc {
   [key: string]: unknown;
 }
 
+/**
+ * ★워크체인 자동 포착 훅 (티켓 lW9iiLGWlO0lVoy4khSM).
+ *
+ * 오케가 도구 인자로 이미 쓴 문장에서 "다음에 할 일" 을 집어 체인에 적고, 적었다는
+ * 사실을 한 줄로 돌려준다. 왜 이 층인가 — 체인의 **읽는 쪽**은 이미 자동인데
+ * (도구 결과 푸터 4곳) **쓰는 쪽**만 오케의 자발적 `add_work_chain_item` 호출이라
+ * "잊는 걸 고치는 장치가 안 잊어야 작동한다" 는 순환에 걸려 있었다. 2026-08-22 에
+ * 실제로 터졌다(§work-chain-capture.ts 머리말). 그래서 오케에게 한 번 더 부르라고
+ * 조르는 대신, **말하는 행위 자체를 적는 행위로** 만든다.
+ *
+ * 규율 셋:
+ *   · 오케 세션에서만 돈다. 워커가 쓴 문장은 오케의 다음 할 일이 아니다.
+ *   · 감지 0건이면 Firestore 를 읽지도 않는다 — 약속 없는 호출의 비용·소음은 0.
+ *   · ★절대 원래 도구를 실패시키지 않는다(fail-open). 다만 쓰기 실패는 삼키지
+ *     않고 문장으로 돌려준다 — "적혔다" 고 믿게 두는 게 안 적은 것보다 나쁘다.
+ */
+async function captureChainPromiseNote(
+  surface: CaptureSurface,
+  tool: string,
+  body: string | null | undefined,
+  opts: { projectId?: string | null; contextTaskId?: string | null } = {}
+): Promise<string> {
+  if (!isOrchestratorAgentId(MARBLO_AGENT_ID)) return "";
+  if (!body || !body.trim()) return "";
+  const projectId = (opts.projectId || DEFAULT_PROJECT || "").trim();
+  if (!projectId) return "";
+  try {
+    const res = await captureWorkChainPromises(db, {
+      projectId,
+      by: MARBLO_AGENT_ID,
+      tool,
+      surface,
+      text: body,
+      ...(opts.contextTaskId ? { contextTaskId: opts.contextTaskId } : {}),
+    });
+    return res.note;
+  } catch (err) {
+    // 여기까지 새는 예외는 없어야 하지만(captureWorkChainPromises 가 이미
+    // fail-open), 훅이 도구를 죽이는 경로는 구조적으로 없어야 한다.
+    console.error(`[work-chain] capture hook (${tool}) skipped:`, err);
+    return "";
+  }
+}
+
+/** 결과 문장 뒤에 포착 알림을 붙인다. 빈 문자열이면 원문 그대로. */
+function withCaptureNote(body: string, note: string): string {
+  return note ? `${body}\n\n${note}` : body;
+}
+
 export function registerTools(server: McpServer): void {
   // Wrap server.tool to add automatic audit logging
   const originalTool = server.tool.bind(server);
@@ -4246,7 +4298,19 @@ export function registerTools(server: McpServer): void {
       const activityOverrideNote = activityOverriddenClaimBy
         ? ` (⚠️ ${activityOverriddenClaimBy} 의 claim 을 넘어 기록했습니다 — ${activityAuthority.decision.grant})`
         : "";
-      return text(`Activity logged: ${message}${activityOverrideNote}`);
+      // ★자동 포착 — 오케가 자기 진행 메모에 적은 "다음에 ~하겠다" 를 집는다.
+      const activityCapture = await captureChainPromiseNote(
+        "activity",
+        "add_activity",
+        message,
+        { projectId: task.projectId, contextTaskId: task_id }
+      );
+      return text(
+        withCaptureNote(
+          `Activity logged: ${message}${activityOverrideNote}`,
+          activityCapture
+        )
+      );
     }
   );
 
@@ -5799,7 +5863,20 @@ export function registerTools(server: McpServer): void {
           );
         }
 
-        return text(lines.join("\n"));
+        // ★자동 포착 — 재현 시나리오("티켓 A 를 dispatch 하고, A 가 끝나면 B 를
+        // 해야 한다")가 걸리는 자리. 다만 지시문은 **수신자에게 주는 명령문**이라
+        // 가장 오탐이 쉬운 표면이다. 그래서 이 표면만 정책이 더 좁다
+        // (SURFACE_POLICY.dispatch_instruction): 명령형 어미는 1인칭 주어가 없으면
+        // 탈락하고, 약속 어미는 선행 힌트("~끝나면","머지되면")를 동반해야 한다.
+        // contextTaskId 로 방금 디스패치한 티켓을 넘겨, 문장에 id 가 없어도
+        // "이거 끝나면" 의 '이거' 가 선행으로 걸린다.
+        const dispatchCapture = await captureChainPromiseNote(
+          "dispatch_instruction",
+          "dispatch_task",
+          instruction,
+          { contextTaskId: boundTaskId }
+        );
+        return text(withCaptureNote(lines.join("\n"), dispatchCapture));
       } catch (err: unknown) {
         return text(
           `Error: Failed to reach bridge server — ${(err as Error).message}`
@@ -7161,8 +7238,19 @@ export function registerTools(server: McpServer): void {
       const truncNote = clamped.truncated
         ? `\n⚠️ 답변이 ${clamped.originalLength}자라 ${MAX_QUESTION_CHARS}자에서 잘렸습니다.`
         : "";
+      // ★자동 포착 — 답변 안의 "A 끝나면 B 는 내가 한다" 는 오케 자신의 다음 할
+      // 일이다. 답을 보내면 그 약속은 워커의 PTY 로 사라진다.
+      const answerCapture = await captureChainPromiseNote(
+        "answer",
+        "answer_question",
+        body,
+        { projectId: task.projectId, contextTaskId: taskId }
+      );
       return text(
-        `Question ${question_id} answered. ${deliveryNote}${truncNote}`
+        withCaptureNote(
+          `Question ${question_id} answered. ${deliveryNote}${truncNote}`,
+          answerCapture
+        )
       );
     }
   );
@@ -7346,13 +7434,29 @@ export function registerTools(server: McpServer): void {
             `질문은 티켓에 open 으로 남아 있습니다. 텔레그램 채널이 없으면 사장님께 직접 여쭙고, 받은 답을 answer_question 으로 넣어 주세요(그래야 에이전트 PTY 로 전달됩니다).`
         );
       }
+      // ★자동 포착 — **2026-08-22 실패가 정확히 이 자리다.** 오케가 사장님께
+      // "규칙을 한 번 더 배포해야 합니다 … 지금 그건 제 머릿속에만 있는 다음 할
+      // 일입니다" 라고 보고해 놓고 add_work_chain_item 을 부르지 않았다. 그 문장은
+      // 이미 이 도구의 note 인자로 들어왔었다 — 우리가 안 읽었을 뿐이다.
+      // question 본문(=워커가 쓴 것)은 스캔하지 않는다. 오케 자신의 note 만이다.
+      const escalationCapture = await captureChainPromiseNote(
+        "owner_report",
+        "escalate_to_owner",
+        note,
+        { projectId: task.projectId, contextTaskId: taskId }
+      );
       return text(
-        `사장님께 전달됨(chat ${
-          sent.chatId ?? "default"
-        }, question_id=${question_id})${
-          body.truncated ? " ⚠️ 텔레그램 4096자 한도로 뒷부분이 잘렸습니다" : ""
-        }.\n` +
-          `사장님 답장은 '[Telegram inbound ...]' 로 도착합니다. 그 답을 answer_question(question_id="${question_id}", answer="...") 로 넣으면 질문한 에이전트 PTY 로 자동 전달됩니다.`
+        withCaptureNote(
+          `사장님께 전달됨(chat ${
+            sent.chatId ?? "default"
+          }, question_id=${question_id})${
+            body.truncated
+              ? " ⚠️ 텔레그램 4096자 한도로 뒷부분이 잘렸습니다"
+              : ""
+          }.\n` +
+            `사장님 답장은 '[Telegram inbound ...]' 로 도착합니다. 그 답을 answer_question(question_id="${question_id}", answer="...") 로 넣으면 질문한 에이전트 PTY 로 자동 전달됩니다.`,
+          escalationCapture
+        )
       );
     }
   );
@@ -7928,8 +8032,19 @@ export function registerTools(server: McpServer): void {
           `Failed to send Telegram message: ${result.error || "unknown error"}`
         );
       }
+      // ★자동 포착 — escalate_to_owner 와 같은 표면(사장님 보고). 실패 사례의
+      // 문장은 이 두 경로 중 하나로 나갔다.
+      const telegramCapture = await captureChainPromiseNote(
+        "owner_report",
+        "send_telegram_message",
+        messageText,
+        { projectId: targetProject }
+      );
       return text(
-        `Sent Telegram message to chat ${result.chatId ?? "(default)"}.`
+        withCaptureNote(
+          `Sent Telegram message to chat ${result.chatId ?? "(default)"}.`,
+          telegramCapture
+        )
       );
     }
   );
@@ -9800,7 +9915,24 @@ export function registerTools(server: McpServer): void {
       // The hold reason is the whole value of a HOLD_REVIEW — without it the
       // ticket just looks ignored. Written even when there was no status hop
       // (the common case: the ticket is already at REVIEW).
+      // ★이 티켓에서 유일하게 **무조건** 걸리는 자리다(빠져나갈 인자가 없다).
+      // 근거: ①`evaluateMergeCloseout` 이 이미 "PR 은 머지됐는데 후속이 남았다"
+      // 를 판정했으므로 새 감지도, 새 오탐도 만들지 않는다. ②머지 마감은 "코드는
+      // 끝났는데 일은 안 끝났다" 가 확정되는 유일한 순간이고, 여기서 안 적으면 그
+      // 사실은 티켓 comment 에만 남고 오케 머릿속에서 사라진다(2026-08-22 세 번째
+      // 실측 사례가 정확히 이것 — 머지한 티켓 둘을 REVIEW 로 방치했다).
+      // 항목에는 그 티켓을 taskIds 로 붙이므로 완료 판정은 여전히 **보드**가 한다.
+      let holdCaptureNote = "";
       if (verdict.action === "HOLD_REVIEW") {
+        const holdCapture = await captureMergeHoldFollowUp(db, {
+          projectId: task.projectId || DEFAULT_PROJECT,
+          by: MARBLO_AGENT_ID,
+          taskId: task_id,
+          taskTitle: task.title,
+          signals: verdict.followupSignals,
+          reason: verdict.reason,
+        });
+        holdCaptureNote = holdCapture.note;
         try {
           await applyProjection(db, task_id, {
             lastAgentId: WORKER_AGENT_ID,
@@ -9876,7 +10008,7 @@ export function registerTools(server: McpServer): void {
         }
       }
 
-      return text(lines.join("\n"));
+      return text(withCaptureNote(lines.join("\n"), holdCaptureNote));
     }
   );
 
