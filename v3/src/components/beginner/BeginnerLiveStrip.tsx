@@ -62,18 +62,18 @@ export function BeginnerLiveStrip({
     [sentAt, now, tasks, agents],
   );
 
-  if (view.phase === "idle") return null;
-
   const headline =
-    view.phase === "thinking"
-      ? t("beginner.live.thinking")
-      : view.phase === "stalled"
-        ? t("beginner.live.stalled")
-        : view.phase === "working"
-          ? t("beginner.live.working", { count: view.workingAgents })
-          : view.phase === "completed"
-            ? t("beginner.live.completed", { count: view.completedTasks })
-            : t("beginner.live.planned", { count: view.totalTasks });
+    view.phase === "idle"
+      ? t("beginner.live.idle")
+      : view.phase === "thinking"
+        ? t("beginner.live.thinking")
+        : view.phase === "stalled"
+          ? t("beginner.live.stalled")
+          : view.phase === "working"
+            ? t("beginner.live.working", { count: view.workingAgents })
+            : view.phase === "completed"
+              ? t("beginner.live.completed", { count: view.completedTasks })
+              : t("beginner.live.planned", { count: view.totalTasks });
 
   return (
     <section
@@ -143,11 +143,13 @@ export function BeginnerLiveStrip({
 
 function Pulse({ phase }: { phase: BeginnerProgressView["phase"] }) {
   const color =
-    phase === "completed"
-      ? "bg-[#a6e3a1]"
-      : phase === "stalled"
-        ? "bg-[#f9e2af]"
-        : "bg-[#89b4fa]";
+    phase === "idle"
+      ? "bg-[#585b70]"
+      : phase === "completed"
+        ? "bg-[#a6e3a1]"
+        : phase === "stalled"
+          ? "bg-[#f9e2af]"
+          : "bg-[#89b4fa]";
   const animate =
     phase === "thinking" || phase === "working" ? "animate-pulse" : "";
   return (

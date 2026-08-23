@@ -297,9 +297,11 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       await expect(cr.page.getByTestId("beginner-agents-pane")).toBeVisible();
       expect(await cr.page.getByTestId("beginner-folder-gate").count()).toBe(0);
 
-      // ★아직 아무것도 안 보냈다 — 스트립은 그리지 않는다(idle). 빈 진행줄을
-      //   미리 띄우면 "아무 일도 안 일어난다" 는 인상을 오히려 강화한다.
-      expect(await livePhase(cr.page)).toBeNull();
+      // ★설계 변경: 아직 아무것도 안 보낸 idle도 빈 상태 스트립과 5단계 보드를
+      //   보여 준다. 첫 화면에서 작업 흐름을 숨기면 새 사용자가 보드를 못 본다.
+      expect(await livePhase(cr.page)).toBe("idle");
+      await expect(cr.page.getByTestId("beginner-marblo-board")).toBeVisible();
+      await expect(cr.page.getByTestId("kanban-column")).toHaveCount(5);
       await cr.shot("G3-orchestrator-chat");
     } finally {
       await cr.close();

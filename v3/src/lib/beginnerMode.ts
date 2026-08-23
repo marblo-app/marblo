@@ -299,7 +299,7 @@ export function shouldPromote(
 export const STALL_THRESHOLD_MS = 90_000;
 
 export type BeginnerPhase =
-  /** 아직 아무 요청도 보내지 않음 — 스트립을 그리지 않는다. */
+  /** 아직 아무 요청도 보내지 않음 — 빈 상태 스트립과 보드를 그린다. */
   | "idle"
   /** 보냈고, 오케가 읽는 중(티켓 아직 없음). */
   | "thinking"

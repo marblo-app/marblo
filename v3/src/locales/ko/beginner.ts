@@ -186,6 +186,7 @@ export const beginner = {
 
   // ── ④ 인라인 라이브 (★S4) ───────────────────────────────────────────────
   "beginner.live.thinking": "요구사항을 읽고 있어요… (보통 1~3분)",
+  "beginner.live.idle": "아직 할 일이 없어요 — 아래에 하고 싶은 걸 적어 보세요",
   "beginner.live.stalled": "아직 티켓이 안 보여요",
   "beginner.live.stalledHelp":
     "오케스트레이터가 못 받았을 수 있어요. 다시 보내거나, 아래 대화창에 직접 적어 주세요.",

@@ -313,10 +313,20 @@ describe("비기너 상단 — 마블로 5단계 칸반", () => {
     expect(screen.getAllByTestId("kanban-column")).toHaveLength(5);
   });
 
-  it("idle 이면 스트립·보드 모두 숨긴다", () => {
+  it("티켓 0개 첫 화면(idle)에도 빈 5단계 보드를 보여 준다", () => {
     mount({ sentAt: 0 });
-    expect(screen.queryByTestId("beginner-live-strip")).toBeNull();
-    expect(screen.queryByTestId("beginner-marblo-board")).toBeNull();
+    expect(screen.getByTestId("beginner-live-strip")).toBeTruthy();
+    expect(screen.getByTestId("beginner-live-strip").dataset.phase).toBe("idle");
+    expect(screen.getByTestId("beginner-marblo-board")).toBeTruthy();
+    const columns = screen.getAllByTestId("kanban-column");
+    expect(columns).toHaveLength(5);
+    expect(columns.map((column) => column.querySelector("span")?.textContent)).toEqual([
+      "TODO",
+      "CLAIMED",
+      "IN PROGRESS",
+      "REVIEW",
+      "DONE",
+    ]);
   });
 
   it("★막힌 티켓은 정체 레인에 남는다 (사라지지 않음)", () => {

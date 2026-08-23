@@ -180,6 +180,7 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
 
   // ── ④ Inline live (★S4) ─────────────────────────────────────────────────
   "beginner.live.thinking": "Reading your request… (usually 1–3 min)",
+  "beginner.live.idle": "Nothing to do yet — tell us what you'd like to make below",
   "beginner.live.stalled": "Still no tickets",
   "beginner.live.stalledHelp":
     "The orchestrator may not have received it. Send again, or type it straight into the chat below.",
