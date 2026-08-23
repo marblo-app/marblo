@@ -11,11 +11,14 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_STALL_POLICY,
+  STALL_FIRST_ACTIVITY_QUIET_MS,
   STALL_QUIET_NORMAL_MS,
   STALL_QUIET_URGENT_MS,
   classifyPtyLiveness,
   evaluateBoardQuiet,
   evaluateBoundAgent,
+  evaluateExitQuiet,
+  evaluateFirstActivityQuiet,
   isOtherLiveWorkerForTask,
   quietThresholdMs,
   resolveStallPolicy,
@@ -51,6 +54,102 @@ describe("stall policy — thresholds", () => {
     expect(p.repeatMs).toBe(DEFAULT_STALL_POLICY.repeatMs);
     expect(p.urgentPriorityMin).toBe(3);
     expect(stallTier(3, p)).toBe("urgent");
+  });
+
+  it("first-activity axis defaults to 5m and is env-overridable", () => {
+    expect(STALL_FIRST_ACTIVITY_QUIET_MS).toBe(5 * MIN);
+    expect(DEFAULT_STALL_POLICY.firstActivityQuietMs).toBe(5 * MIN);
+    const p = resolveStallPolicy({ MARBLO_STALL_FIRST_ACTIVITY_MS: "180000" });
+    expect(p.firstActivityQuietMs).toBe(180_000);
+    const garbage = resolveStallPolicy({
+      MARBLO_STALL_FIRST_ACTIVITY_MS: "not-a-number",
+    });
+    expect(garbage.firstActivityQuietMs).toBe(
+      DEFAULT_STALL_POLICY.firstActivityQuietMs,
+    );
+  });
+});
+
+describe("evaluateFirstActivityQuiet — 'never reported once, ever' only", () => {
+  it("★스폰 후 6분간 활동 0건(임계 5분) → 신호, 20/45분 임계와 무관", () => {
+    const v = evaluateFirstActivityQuiet({
+      now: NOW,
+      lastBoardActivityMs: null,
+      activeSinceMs: NOW - 6 * MIN,
+    });
+    expect(v.quiet).toBe(true);
+    expect(v.ageMs).toBe(6 * MIN);
+    expect(v.thresholdMs).toBe(5 * MIN);
+  });
+
+  it("임계 전(4분)이면 아직 신호 없음", () => {
+    expect(
+      evaluateFirstActivityQuiet({
+        now: NOW,
+        lastBoardActivityMs: null,
+        activeSinceMs: NOW - 4 * MIN,
+      }).quiet,
+    ).toBe(false);
+  });
+
+  it("이미 활동 기록이 있으면(재무활동) 이 축은 절대 quiet 로 보지 않는다 — evaluateBoardQuiet 의 몫", () => {
+    // Even a VERY old single report keeps this axis silent — it is not the
+    // "how long since the last report" axis.
+    expect(
+      evaluateFirstActivityQuiet({
+        now: NOW,
+        lastBoardActivityMs: NOW - 999 * MIN,
+        activeSinceMs: NOW - 999 * MIN,
+      }).quiet,
+    ).toBe(false);
+  });
+
+  it("기준(activeSinceMs)이 없으면 판정 불가 → quiet 아님 (오판 비용이 더 크다)", () => {
+    expect(
+      evaluateFirstActivityQuiet({
+        now: NOW,
+        lastBoardActivityMs: null,
+        activeSinceMs: null,
+      }).quiet,
+    ).toBe(false);
+  });
+});
+
+describe("evaluateExitQuiet — 사망은 즉시, 추론이 아니라 사실", () => {
+  it("★terminalLocal 이면 무활동 나이와 무관하게 즉시 quiet=true, exitCode 를 싣는다", () => {
+    const v = evaluateExitQuiet({
+      now: NOW,
+      terminalLocal: true,
+      terminalSinceMs: NOW - 1000,
+      lastBoardActivityMs: NOW - 2 * MIN,
+      exitCode: 1,
+    });
+    expect(v).not.toBeNull();
+    expect(v?.quiet).toBe(true);
+    expect(v?.exitCode).toBe(1);
+    expect(v?.ageMs).toBe(1000);
+  });
+
+  it("terminalLocal 이 아니면 null — 이 축의 소관이 아니다", () => {
+    expect(
+      evaluateExitQuiet({
+        now: NOW,
+        terminalLocal: false,
+        lastBoardActivityMs: NOW - 2 * MIN,
+      }),
+    ).toBeNull();
+  });
+
+  it("terminalSinceMs 를 모르면 마지막 보드 활동 시각으로 대체한다", () => {
+    const v = evaluateExitQuiet({
+      now: NOW,
+      terminalLocal: true,
+      terminalSinceMs: null,
+      lastBoardActivityMs: NOW - 5 * MIN,
+      exitCode: null,
+    });
+    expect(v?.ageMs).toBe(5 * MIN);
+    expect(v?.exitCode).toBeNull();
   });
 });
 

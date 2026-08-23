@@ -276,20 +276,12 @@ describe("W8 quiet signal — alive but not progressing", () => {
     expect(h3.signals[0].signal.pty).toBe("silent");
   });
 
-  it("이 인스턴스에 없는(missing) 에이전트 / 죽은 에이전트에는 quiet 신호를 올리지 않는다", async () => {
+  it("이 인스턴스에 없는(missing) 에이전트에는 quiet 신호를 올리지 않는다 — 다른 호스트 소관", async () => {
     const h = makeHarness();
     h.health.set(AGENT, null);
     h.tickets[0].lastActivityAtMs = h.clock.ms - 80 * MIN;
     await h.wd.tickOnce();
     expect(h.signals).toHaveLength(0);
-
-    const h2 = makeHarness();
-    h2.health.set(AGENT, busyHealth(h2.clock.ms, { status: "stopped" }));
-    h2.tickets[0].lastActivityAtMs = h2.clock.ms - 80 * MIN;
-    await h2.wd.tickOnce();
-    expect(h2.signals).toHaveLength(0);
-    // …the dead one goes down the existing recovery ladder instead.
-    expect(h2.respawn).toHaveBeenCalled();
   });
 
   it("티켓이 활성 집합을 떠나면(REVIEW/DONE) 마커를 걷는다", async () => {
@@ -324,6 +316,151 @@ describe("W8 quiet signal — alive but not progressing", () => {
     h.tickets[0].lastActivityAtMs = h.clock.ms - 80 * MIN;
     await wd.tickOnce();
     expect(h.records.some((r) => r.phase === "quiet")).toBe(false);
+    expect(h.nudge).not.toHaveBeenCalled();
+    expect(h.respawn).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * W8 보강(2026-08-23, 티켓 O1OQKukSSCmMaJCoGHGP) — "스폰 직후 무산출" 을 못 잡던
+ * 구멍. 2026-08-23 실사례: CEO리뷰 티켓(P5)에 스폰한 MiniMax-M3 에이전트가
+ * activity 0건으로 멈췄는데, get_agents 는 죽일 때까지 [working]이었고 워치독은
+ * 20분 임계 전이라 아무 신호도 안 올렸다.
+ */
+describe("W8 quiet signal — exit axis (사망은 즉시, 무활동 임계 대기 없음)", () => {
+  it("★프로세스 종료가 로컬에서 확정되면 무활동 10분이어도(20분 임계 전) 즉시 exit 신호 — exitCode·경과분 포함, 사다리(respawn)는 그대로 동작", async () => {
+    const h = makeHarness();
+    h.tickets[0].lastActivityAtMs = h.clock.ms - 10 * MIN;
+    h.health.set(
+      AGENT,
+      busyHealth(h.clock.ms, {
+        status: "stopped",
+        lastExitCode: 1,
+        terminalSinceMs: h.clock.ms,
+      }),
+    );
+    await h.wd.tickOnce();
+
+    expect(h.signals).toHaveLength(1);
+    const { signal, detail } = h.signals[0];
+    expect(signal).toMatchObject({
+      taskId: TASK,
+      axis: "exit",
+      thresholdMs: 0,
+      exitCode: 1,
+      quietMs: 0, // just confirmed dead
+      boardIdleMs: 10 * MIN,
+    });
+    expect(detail).toContain("exit 1");
+    expect(detail).toContain("즉시");
+    // The signal changes nothing about the pre-existing ladder: a locally
+    // confirmed-dead agent past graceMs still gets respawned, same as before
+    // this ticket.
+    expect(h.respawn).toHaveBeenCalled();
+  });
+
+  it("exitCode 를 모르면 '?' 로 표시하되 그래도 즉시 신호한다", async () => {
+    const h = makeHarness();
+    h.tickets[0].lastActivityAtMs = h.clock.ms;
+    h.health.set(
+      AGENT,
+      busyHealth(h.clock.ms, {
+        status: "error",
+        lastExitCode: null,
+        terminalSinceMs: h.clock.ms,
+      }),
+    );
+    await h.wd.tickOnce();
+    expect(h.signals).toHaveLength(1);
+    expect(h.signals[0].signal.exitCode).toBeNull();
+    expect(h.signals[0].detail).toContain("exit ?");
+  });
+
+  it("같은 사망은 repeatMs(30분) 마다만 재알림", async () => {
+    const h = makeHarness();
+    h.tickets[0].lastActivityAtMs = h.clock.ms - 10 * MIN; // never moves — the agent is dead
+    h.health.set(
+      AGENT,
+      busyHealth(h.clock.ms, {
+        status: "stopped",
+        lastExitCode: 137,
+        terminalSinceMs: h.clock.ms,
+      }),
+    );
+    await h.wd.tickOnce();
+    expect(h.signals).toHaveLength(1);
+
+    h.clock.ms += MIN;
+    h.health.set(
+      AGENT,
+      busyHealth(h.clock.ms, {
+        status: "stopped",
+        lastExitCode: 137,
+        terminalSinceMs: h.clock.ms - MIN,
+      }),
+    );
+    await h.wd.tickOnce();
+    expect(h.signals).toHaveLength(1); // still within repeatMs
+
+    h.clock.ms += 30 * MIN;
+    h.health.set(
+      AGENT,
+      busyHealth(h.clock.ms, {
+        status: "stopped",
+        lastExitCode: 137,
+        terminalSinceMs: h.clock.ms - 31 * MIN,
+      }),
+    );
+    await h.wd.tickOnce();
+    expect(h.signals).toHaveLength(2);
+    expect(h.signals[1].signal.repeat).toBe(2);
+  });
+});
+
+describe("W8 quiet signal — first-activity axis (스폰 직후 무산출)", () => {
+  it("★스폰 이후 첫 활동이 아예 없으면(5분 임계) 20/45분 무활동 임계를 기다리지 않고 신호, nudge/respawn 0회", async () => {
+    const h = makeHarness();
+    h.tickets[0] = ticket({
+      lastActivityAtMs: null,
+      activeSinceMs: 100 * MIN - 6 * MIN,
+    });
+    h.health.set(AGENT, busyHealth(h.clock.ms));
+    await h.wd.tickOnce();
+
+    expect(h.signals).toHaveLength(1);
+    const { signal, detail } = h.signals[0];
+    expect(signal).toMatchObject({
+      taskId: TASK,
+      axis: "first-activity",
+      thresholdMs: 5 * MIN,
+      exitCode: null,
+    });
+    expect(signal.quietMs).toBe(6 * MIN);
+    expect(detail).toContain("첫 활동 임계 5분");
+    expect(h.nudge).not.toHaveBeenCalled();
+    expect(h.respawn).not.toHaveBeenCalled();
+  });
+
+  it("첫 활동 임계 전(4분)이면 아직 신호 없음 — 정상 스폰 초기 구간을 오판하지 않는다", async () => {
+    const h = makeHarness();
+    h.tickets[0] = ticket({
+      lastActivityAtMs: null,
+      activeSinceMs: 100 * MIN - 4 * MIN,
+    });
+    h.health.set(AGENT, busyHealth(h.clock.ms));
+    await h.wd.tickOnce();
+    expect(h.signals).toHaveLength(0);
+  });
+
+  it("★대조군 — 정상적으로 첫 보고를 마친 에이전트(스폰 4분 뒤 활동)는 first-activity 신호도 board-quiet 신호도 없다", async () => {
+    const h = makeHarness();
+    h.tickets[0] = ticket({
+      lastActivityAtMs: 100 * MIN - 4 * MIN,
+      activeSinceMs: 100 * MIN - 4 * MIN,
+    });
+    h.health.set(AGENT, busyHealth(h.clock.ms));
+    await h.wd.tickOnce();
+    expect(h.signals).toHaveLength(0);
     expect(h.nudge).not.toHaveBeenCalled();
     expect(h.respawn).not.toHaveBeenCalled();
   });

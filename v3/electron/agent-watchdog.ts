@@ -47,7 +47,10 @@ import {
   classifyPtyLiveness,
   describePtyLiveness,
   evaluateBoardQuiet,
+  evaluateExitQuiet,
+  evaluateFirstActivityQuiet,
   resolveStallPolicy,
+  stallTier,
   type StallPolicy,
   type StallSignal,
 } from "./agent-stall-policy";
@@ -55,7 +58,7 @@ import {
 export type WatchdogTicketStatus = "CLAIMED" | "IN_PROGRESS";
 
 export function isRecoverableWatchdogStatus(
-  status: unknown,
+  status: unknown
 ): status is WatchdogTicketStatus {
   return status === "CLAIMED" || status === "IN_PROGRESS";
 }
@@ -137,6 +140,15 @@ export interface WatchdogAgentHealth {
   /** agent-input-wait.ts InputWaitReason — a human is being waited on. Only
    * used to DESCRIBE the PTY state on the quiet signal. */
   inputWaitReason?: string | null;
+  /** W8 보강: epoch-ms when this instance's PTY onExit confirmed the process
+   * terminal (agent-manager's `terminalSince`), or null if never set / not
+   * carried by this host. Used only to time the exit-axis quiet signal — NOT
+   * a liveness input for the recovery ladder (unchanged). */
+  terminalSinceMs?: number | null;
+  /** W8 보강: the PTY's last exit code (agent-manager's `lastExitCode`), or
+   * null when unknown / never exited. Carried on the exit-axis signal so the
+   * message can say WHY it died, not just THAT it's quiet. */
+  lastExitCode?: number | null;
 }
 
 export type RecoveryPhase =
@@ -169,7 +181,7 @@ export interface WatchdogDeps {
   recordRecovery?: (
     ticket: WatchdogTicket,
     phase: RecoveryPhase,
-    detail: string,
+    detail: string
   ) => void;
 
   // ── W3: false-positive-respawn guards (all optional; absent → legacy behavior)
@@ -183,7 +195,7 @@ export interface WatchdogDeps {
    * the watchdog_falsepositive_check_mtimes lesson as an actual gate. null when
    * it can't be determined (→ no opinion). */
   probeFreshness?: (
-    ticket: WatchdogTicket,
+    ticket: WatchdogTicket
   ) => Promise<{ fresh: boolean; reason: string } | null>;
   /** True when SOME live agent is already bound to this task (currentTaskId or
    * isolated worktree) — even under a different name than the ticket's recorded
@@ -204,7 +216,7 @@ export interface WatchdogDeps {
    * BLOCKED(force) request). Called when probeScopeHost says redispatch/block. */
   redispatchToOriginHost?: (
     ticket: WatchdogTicket,
-    reason: string,
+    reason: string
   ) => Promise<void>;
 
   // ── W4: real escalation before dead-end (optional) ──────────
@@ -219,7 +231,7 @@ export interface WatchdogDeps {
    * stale / absent. */
   resetStalledInProgress?: (
     ticket: WatchdogTicket,
-    detail: string,
+    detail: string
   ) => Promise<boolean>;
   /** Surface an orphaned IN_PROGRESS stall when reset is not wired or fails. */
   escalateStalledInProgress?: (ticket: WatchdogTicket, detail: string) => void;
@@ -254,7 +266,7 @@ export interface WatchdogDeps {
   signalQuiet?: (
     ticket: WatchdogTicket,
     signal: StallSignal,
-    detail: string,
+    detail: string
   ) => void;
   /** Board activity resumed after a quiet signal — retract the marker. */
   clearQuiet?: (ticket: WatchdogTicket, agentId: string) => void;
@@ -382,25 +394,25 @@ function intEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
 
 /** Resolve the watchdog config from environment overrides (all optional). */
 export function resolveWatchdogConfig(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = process.env
 ): WatchdogConfig {
   const d = DEFAULT_WATCHDOG_CONFIG;
   return {
     // Default ON; only the literal "false" / "0" disables it.
     enabled: !["false", "0", "off"].includes(
-      (env.MARBLO_WATCHDOG_ENABLED ?? "").trim().toLowerCase(),
+      (env.MARBLO_WATCHDOG_ENABLED ?? "").trim().toLowerCase()
     ),
     intervalMs: intEnv(env, "MARBLO_WATCHDOG_INTERVAL_MS", d.intervalMs),
     graceMs: intEnv(env, "MARBLO_WATCHDOG_GRACE_MS", d.graceMs),
     promptIdleGraceMs: intEnv(
       env,
       "MARBLO_WATCHDOG_PROMPT_IDLE_MS",
-      d.promptIdleGraceMs,
+      d.promptIdleGraceMs
     ),
     firstActivityGraceMs: intEnv(
       env,
       "MARBLO_WATCHDOG_FIRST_ACTIVITY_MS",
-      d.firstActivityGraceMs,
+      d.firstActivityGraceMs
     ),
     nudgeIntervalMs: intEnv(env, "MARBLO_WATCHDOG_NUDGE_MS", d.nudgeIntervalMs),
     maxNudges: intEnv(env, "MARBLO_WATCHDOG_MAX_NUDGES", d.maxNudges),
@@ -408,28 +420,28 @@ export function resolveWatchdogConfig(
     backoffBaseMs: intEnv(
       env,
       "MARBLO_WATCHDOG_BACKOFF_BASE_MS",
-      d.backoffBaseMs,
+      d.backoffBaseMs
     ),
     backoffMaxMs: intEnv(env, "MARBLO_WATCHDOG_BACKOFF_MAX_MS", d.backoffMaxMs),
     freshnessGraceMs: intEnv(
       env,
       "MARBLO_WATCHDOG_FRESHNESS_MS",
-      d.freshnessGraceMs,
+      d.freshnessGraceMs
     ),
     reviewStaleMs: intEnv(
       env,
       "MARBLO_WATCHDOG_REVIEW_STALE_MS",
-      d.reviewStaleMs,
+      d.reviewStaleMs
     ),
     pendingFallbackMs: intEnv(
       env,
       "MARBLO_WATCHDOG_PENDING_FALLBACK_MS",
-      d.pendingFallbackMs,
+      d.pendingFallbackMs
     ),
     inProgressOrphanResetMs: intEnv(
       env,
       "MARBLO_WATCHDOG_IN_PROGRESS_ORPHAN_RESET_MS",
-      d.inProgressOrphanResetMs,
+      d.inProgressOrphanResetMs
     ),
     stall: resolveStallPolicy(env),
   };
@@ -536,7 +548,9 @@ export function evaluateRespawnGuard(input: {
   if (input.fresh === true && input.promptIdleProven !== true) {
     return {
       standDown: true,
-      reason: `original worker is fresh (${input.freshReason ?? "recent activity"}) — stand down`,
+      reason: `original worker is fresh (${
+        input.freshReason ?? "recent activity"
+      }) — stand down`,
     };
   }
   return { standDown: false, reason: "" };
@@ -544,7 +558,7 @@ export function evaluateRespawnGuard(input: {
 
 /** W6 — interpret the scope/host probe. Pure. */
 export function interpretScopeHostProbe(
-  probe: { action: "proceed" | "redispatch" | "block"; reason: string } | null,
+  probe: { action: "proceed" | "redispatch" | "block"; reason: string } | null
 ): {
   blockSpawn: boolean;
   action: "proceed" | "redispatch" | "block";
@@ -567,7 +581,7 @@ export function interpretScopeHostProbe(
 export function selectStaleReviews(
   candidates: StaleReviewTicket[],
   now: number,
-  thresholdMs: number,
+  thresholdMs: number
 ): StaleReviewTicket[] {
   return candidates.filter((c) => {
     if (c.awaitingHumanApproval !== false) return false;
@@ -582,7 +596,7 @@ export function selectStaleReviews(
 export function selectStalePendingForFallback(
   list: PendingInstruction[],
   now: number,
-  thresholdMs: number,
+  thresholdMs: number
 ): PendingInstruction[] {
   return list.filter((p) => now - p.createdAtMs >= thresholdMs);
 }
@@ -593,7 +607,7 @@ export function detectOrphanedInProgressStall(
     ownerMissing: boolean;
     now: number;
     thresholdMs: number;
-  },
+  }
 ): { stalled: boolean; detail: string } {
   if (ticket.status !== "IN_PROGRESS" || !input.ownerMissing) {
     return { stalled: false, detail: "" };
@@ -680,7 +694,7 @@ export interface RespawnDispatchParams {
  */
 export function buildRespawnDispatch(
   ticket: WatchdogTicket,
-  fallback?: { cwd?: string; model?: ModelType } | null,
+  fallback?: { cwd?: string; model?: ModelType } | null
 ): RespawnDispatchParams {
   // ticket.model is a free string (Firestore dispatchMeta); dispatch re-folds it
   // through normalizeModel, so the union cast here only satisfies the request
@@ -741,7 +755,7 @@ export class AgentWatchdog {
 
   constructor(
     deps: WatchdogDeps,
-    cfg: WatchdogConfig = resolveWatchdogConfig(),
+    cfg: WatchdogConfig = resolveWatchdogConfig()
   ) {
     this.deps = deps;
     this.cfg = cfg;
@@ -867,7 +881,7 @@ export class AgentWatchdog {
     const stale = selectStalePendingForFallback(
       list,
       now,
-      this.cfg.pendingFallbackMs,
+      this.cfg.pendingFallbackMs
     );
     for (const p of stale) {
       if (this.pendingAttempted.has(p.docId)) continue;
@@ -875,7 +889,7 @@ export class AgentWatchdog {
       try {
         delivered = this.deps.deliverInstructionDirect(
           p.targetAgentId,
-          p.message,
+          p.message
         );
       } catch (err) {
         this.log("deliverInstructionDirect threw (best-effort)", {
@@ -938,7 +952,7 @@ export class AgentWatchdog {
       if (last !== undefined && now - last < this.cfg.reviewStaleMs) continue;
       this.reviewEscalatedAt.set(rev.taskId, now);
       const ageH = Math.round(
-        (now - (rev.lastActivityAtMs ?? now)) / 3_600_000,
+        (now - (rev.lastActivityAtMs ?? now)) / 3_600_000
       );
       const detail =
         `REVIEW ${rev.taskId} "${rev.title ?? ""}" assignee ` +
@@ -956,7 +970,7 @@ export class AgentWatchdog {
           title: rev.title,
         },
         "review-stale",
-        detail,
+        detail
       );
       this.log("review-stale surfaced", { taskId: rev.taskId, ageH });
     }
@@ -965,11 +979,27 @@ export class AgentWatchdog {
   /**
    * W8 — raise / repeat / clear the board-quiet signal for one ticket.
    *
-   * Fires only for a LOCALLY-hosted, non-terminal bound agent: a missing agent
-   * belongs to another instance (which runs its own sweep — two instances
-   * raising the same signal would double-ping the orchestrator), and a dead one
-   * is the recovery ladder's business. Rate-limited per ticket to one signal
-   * per `stall.repeatMs`; any board activity after a signal clears it.
+   * Three axes, checked in order (2026-08-23 보강, 티켓 O1OQKukSSCmMaJCoGHGP):
+   *   1. exit           — this instance's PTY confirmed the process terminal
+   *                        (status stopped/error). Immediate — no threshold
+   *                        wait, because death isn't inferred, it's known.
+   *   2. first-activity  — the ticket has NEVER recorded any board activity
+   *                        (lastActivityAtMs is still null). Much shorter
+   *                        threshold than board-quiet: a worker with zero
+   *                        reports ever is a different failure than one that
+   *                        reported for a while and then stopped.
+   *   3. board-quiet     — the original W8 axis: reported before, then quiet
+   *                        past the priority-tiered threshold.
+   * A ticket is judged by exactly one axis per raise — once exit or
+   * first-activity claims it, board-quiet is not also evaluated for the same
+   * stretch (same underlying "nothing has been reported" fact; two signals
+   * for one fact would just be noise).
+   *
+   * Fires only for a LOCALLY-hosted bound agent: a missing agent belongs to
+   * another instance (which runs its own sweep — two instances raising the
+   * same signal would double-ping the orchestrator). Rate-limited per ticket
+   * to one signal per `stall.repeatMs`; any board activity after a signal
+   * clears it.
    */
   private sweepQuiet(
     ticket: WatchdogTicket,
@@ -977,7 +1007,7 @@ export class AgentWatchdog {
     lastBoardMs: number,
     now: number,
     missing: boolean,
-    terminalLocal: boolean,
+    terminalLocal: boolean
   ): void {
     if (!this.deps.signalQuiet || !ticket.agentId) return;
     const prior = this.quietRaised.get(ticket.taskId);
@@ -995,24 +1025,14 @@ export class AgentWatchdog {
       this.deps.recordRecovery?.(
         ticket,
         "quiet-cleared",
-        `board activity resumed after ${prior.repeat} quiet signal(s)`,
+        `board activity resumed after ${prior.repeat} quiet signal(s)`
       );
       this.log("quiet cleared", { taskId: ticket.taskId });
       return;
     }
-    if (missing || terminalLocal) return;
+    if (missing) return;
 
-    const verdict = evaluateBoardQuiet({
-      now,
-      lastBoardActivityMs: ticket.lastActivityAtMs,
-      activeSinceMs: ticket.activeSinceMs,
-      priority: ticket.priority,
-      policy: this.cfg.stall,
-    });
-    if (!verdict.quiet) return;
-    if (prior && now - prior.lastRaisedAtMs < this.cfg.stall.repeatMs) return;
-
-    const repeat = (prior?.repeat ?? 0) + 1;
+    const boardIdleMs = Math.max(0, now - lastBoardMs);
     const lastWork = health?.lastWorkOutputMs ?? health?.lastPtyActivityMs;
     const pty = classifyPtyLiveness({
       now,
@@ -1021,48 +1041,137 @@ export class AgentWatchdog {
       promptIdleSinceMs: health?.promptIdleSinceMs,
       inputWaitReason: health?.inputWaitReason,
     });
-    const signal: StallSignal = {
-      taskId: ticket.taskId,
-      tier: verdict.tier,
-      quietMs: verdict.quietMs,
-      thresholdMs: verdict.thresholdMs,
-      pty,
-      model: health?.concreteModel ?? ticket.model ?? null,
-      raisedAtMs: now,
-      repeat,
+    const model = health?.concreteModel ?? ticket.model ?? null;
+    const tier = stallTier(ticket.priority, this.cfg.stall);
+
+    const raise = (
+      axis: StallSignal["axis"],
+      quietMs: number,
+      thresholdMs: number,
+      exitCode: number | null,
+      detail: string
+    ): void => {
+      const repeat = (prior?.repeat ?? 0) + 1;
+      const signal: StallSignal = {
+        taskId: ticket.taskId,
+        tier,
+        axis,
+        quietMs,
+        thresholdMs,
+        boardIdleMs,
+        exitCode,
+        pty,
+        model,
+        raisedAtMs: now,
+        repeat,
+      };
+      const fullDetail =
+        detail +
+        (repeat > 1 ? ` · ${repeat}회째 알림` : "") +
+        ` — 워치독은 판정하지 않습니다. 오케/사람이 확인 후 결정하세요.`;
+      this.quietRaised.set(ticket.taskId, {
+        lastRaisedAtMs: now,
+        baselineBoardMs: lastBoardMs,
+        repeat,
+        ticket,
+      });
+      try {
+        this.deps.signalQuiet!(ticket, signal, fullDetail);
+      } catch (err) {
+        this.log("signalQuiet threw (best-effort)", {
+          taskId: ticket.taskId,
+          err: String(err),
+        });
+      }
+      this.deps.recordRecovery?.(ticket, "quiet", fullDetail);
+      this.log("quiet signal", {
+        taskId: ticket.taskId,
+        agentId: ticket.agentId,
+        axis,
+        tier,
+        quietMs,
+        pty,
+        model,
+        exitCode,
+        repeat,
+      });
     };
+
+    const rateLimited =
+      !!prior && now - prior.lastRaisedAtMs < this.cfg.stall.repeatMs;
+
+    // ── axis 1: exit — locally-confirmed dead process, immediate ──────────
+    const exitVerdict = evaluateExitQuiet({
+      now,
+      terminalLocal,
+      terminalSinceMs: health?.terminalSinceMs,
+      lastBoardActivityMs: ticket.lastActivityAtMs,
+      exitCode: health?.lastExitCode,
+    });
+    if (exitVerdict) {
+      if (rateLimited) return;
+      const detail =
+        `프로세스 종료 확인(exit ${exitVerdict.exitCode ?? "?"}) — 사망, ` +
+        `무활동 임계 대기 없이 즉시 신호 · 종료 후 ${Math.round(
+          exitVerdict.ageMs / 60_000
+        )}분 경과 · 마지막 보드 활동은 ${Math.round(
+          boardIdleMs / 60_000
+        )}분 전 · 모델 ${model ?? "?"}`;
+      raise("exit", exitVerdict.ageMs, 0, exitVerdict.exitCode, detail);
+      return;
+    }
+    // exitVerdict is null exactly when !terminalLocal, so this cannot in
+    // practice be true here — kept as an explicit guard for clarity/safety.
+    if (terminalLocal) return;
+
+    // ── axis 2: first-activity — never reported once, ever ────────────────
+    const faVerdict = evaluateFirstActivityQuiet({
+      now,
+      lastBoardActivityMs: ticket.lastActivityAtMs,
+      activeSinceMs: ticket.activeSinceMs,
+      policy: this.cfg.stall,
+    });
+    if (ticket.lastActivityAtMs === null) {
+      if (faVerdict.quiet && !rateLimited) {
+        const detail = `스폰(또는 재배정) 이후 ${Math.round(
+          faVerdict.ageMs / 60_000
+        )}분간 보드 활동 0건(첫 활동 임계 ${Math.round(
+          faVerdict.thresholdMs / 60_000
+        )}분) · ${describePtyLiveness(pty, {
+          now,
+          lastWorkOutputMs: lastWork,
+        })} · 모델 ${model ?? "?"}`;
+        raise(
+          "first-activity",
+          faVerdict.ageMs,
+          faVerdict.thresholdMs,
+          null,
+          detail
+        );
+      }
+      // Whether raised or still within grace, a never-activated ticket is
+      // entirely this axis's business — never also fall through to
+      // board-quiet for the same underlying fact.
+      return;
+    }
+
+    // ── axis 3: board-quiet — reported before, then went quiet ───────────
+    const verdict = evaluateBoardQuiet({
+      now,
+      lastBoardActivityMs: ticket.lastActivityAtMs,
+      activeSinceMs: ticket.activeSinceMs,
+      priority: ticket.priority,
+      policy: this.cfg.stall,
+    });
+    if (!verdict.quiet) return;
+    if (rateLimited) return;
     const detail =
       `보드 활동 없음 ${Math.round(verdict.quietMs / 60_000)}분 ` +
       `(임계 ${Math.round(verdict.thresholdMs / 60_000)}분 · ` +
       `${verdict.tier === "urgent" ? "긴급 P4+" : "일반"}) · ` +
       `${describePtyLiveness(pty, { now, lastWorkOutputMs: lastWork })} · ` +
-      `모델 ${signal.model ?? "?"}` +
-      (repeat > 1 ? ` · ${repeat}회째 알림` : "") +
-      ` — 워치독은 판정하지 않습니다. 오케/사람이 확인 후 결정하세요.`;
-    this.quietRaised.set(ticket.taskId, {
-      lastRaisedAtMs: now,
-      baselineBoardMs: lastBoardMs,
-      repeat,
-      ticket,
-    });
-    try {
-      this.deps.signalQuiet(ticket, signal, detail);
-    } catch (err) {
-      this.log("signalQuiet threw (best-effort)", {
-        taskId: ticket.taskId,
-        err: String(err),
-      });
-    }
-    this.deps.recordRecovery?.(ticket, "quiet", detail);
-    this.log("quiet signal", {
-      taskId: ticket.taskId,
-      agentId: ticket.agentId,
-      tier: verdict.tier,
-      quietMs: verdict.quietMs,
-      pty,
-      model: signal.model,
-      repeat,
-    });
+      `모델 ${model ?? "?"}`;
+    raise("board-quiet", verdict.quietMs, verdict.thresholdMs, null, detail);
   }
 
   /** Inspect one ticket and, if stuck, take the next recovery step. */
@@ -1180,7 +1289,7 @@ export class AgentWatchdog {
           ticket,
           "recovered",
           `agent ${ticket.agentId} resumed activity after ` +
-            `${state.nudges} nudge(s), ${state.respawns} respawn(s)`,
+            `${state.nudges} nudge(s), ${state.respawns} respawn(s)`
         );
         this.log("recovered", {
           taskId: ticket.taskId,
@@ -1271,7 +1380,7 @@ export class AgentWatchdog {
         try {
           reset = await this.deps.resetStalledInProgress(
             ticket,
-            orphanedInProgress.detail,
+            orphanedInProgress.detail
           );
         } catch (err) {
           this.log("resetStalledInProgress threw (best-effort)", {
@@ -1286,7 +1395,7 @@ export class AgentWatchdog {
         this.deps.recordRecovery?.(
           ticket,
           "in-progress-reset",
-          `${orphanedInProgress.detail} → reset to TODO for re-claim`,
+          `${orphanedInProgress.detail} → reset to TODO for re-claim`
         );
         this.log("in-progress orphan reset", {
           taskId: ticket.taskId,
@@ -1296,12 +1405,12 @@ export class AgentWatchdog {
       }
       this.deps.escalateStalledInProgress?.(
         ticket,
-        `${orphanedInProgress.detail} — reset unavailable`,
+        `${orphanedInProgress.detail} — reset unavailable`
       );
       this.deps.recordRecovery?.(
         ticket,
         "in-progress-stall",
-        `${orphanedInProgress.detail} — orchestrator notified`,
+        `${orphanedInProgress.detail} — orchestrator notified`
       );
       this.log("in-progress orphan surfaced", {
         taskId: ticket.taskId,
@@ -1351,7 +1460,7 @@ export class AgentWatchdog {
               ticket,
               "reroute",
               `respawn budget spent — re-routed to an alternate model/host once ` +
-                `before escalating`,
+                `before escalating`
             );
             this.log("reroute", { taskId: ticket.taskId });
             return;
@@ -1370,7 +1479,7 @@ export class AgentWatchdog {
           this.deps.recordRecovery?.(
             ticket,
             "escalated",
-            "orchestrator + Telegram notified",
+            "orchestrator + Telegram notified"
           );
         }
         this.log("exhausted — giving up", {
@@ -1414,7 +1523,7 @@ export class AgentWatchdog {
             ticket,
             "misroute",
             `${verdict.action}: ${verdict.reason} — handed back to origin host, ` +
-              `no spawn on this host (orphan-code guard)`,
+              `no spawn on this host (orphan-code guard)`
           );
           this.log("misroute — spawn blocked", {
             taskId: ticket.taskId,
@@ -1427,12 +1536,12 @@ export class AgentWatchdog {
       const reason = dead
         ? "dead"
         : noFirstActivity
-          ? `no activity since spawn (${Math.round(
-              (now - (seenAt?.atMs ?? now)) / 1000,
-            )}s)`
-          : promptIdle.stalled
-            ? "idle at prompt, unresponsive to nudges"
-            : "silent (nudges spent)";
+        ? `no activity since spawn (${Math.round(
+            (now - (seenAt?.atMs ?? now)) / 1000
+          )}s)`
+        : promptIdle.stalled
+        ? "idle at prompt, unresponsive to nudges"
+        : "silent (nudges spent)";
       let ok = false;
       try {
         ok = await this.deps.respawnForTicket(ticket);
@@ -1445,7 +1554,7 @@ export class AgentWatchdog {
       st.respawns += 1;
       const backoff = Math.min(
         this.cfg.backoffBaseMs * 2 ** (st.respawns - 1),
-        this.cfg.backoffMaxMs,
+        this.cfg.backoffMaxMs
       );
       st.cooldownUntilMs = now + backoff;
       st.stuckAtActivityMs = lastActiveMs;
@@ -1461,7 +1570,7 @@ export class AgentWatchdog {
         ticket,
         "respawn",
         `${reason} → respawn ${st.respawns}/${this.cfg.maxRespawns} ` +
-          `(${ok ? "dispatched" : "dispatch failed"})`,
+          `(${ok ? "dispatched" : "dispatch failed"})`
       );
       this.log("respawn", {
         taskId: ticket.taskId,
@@ -1487,7 +1596,7 @@ export class AgentWatchdog {
       ticket,
       "nudge",
       `${stallReason} → nudge ` +
-        `${st.nudges}/${this.cfg.maxNudges} (${sent ? "sent" : "no PTY"})`,
+        `${st.nudges}/${this.cfg.maxNudges} (${sent ? "sent" : "no PTY"})`
     );
     this.log("nudge", {
       taskId: ticket.taskId,

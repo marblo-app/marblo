@@ -2310,6 +2310,11 @@ const agentWatchdog = new AgentWatchdog(
           formatModelAtEffort(agentManager.resolveConcreteModel(a.id)) ??
           a.model,
         inputWaitReason: a.inputWaitReason,
+        // W8 보강: 이미 agent-manager 가 PTY onExit 에서 확정해 둔 값을 그대로
+        // 넘긴다 — quiet 판정이 이걸 안 보고 무활동 임계를 기다리던 게 이번
+        // 티켓의 문제였다.
+        terminalSinceMs: a.terminalSince,
+        lastExitCode: a.lastExitCode,
       };
     },
     nudgeAgent: (agentId, message) => {
@@ -2591,14 +2596,30 @@ const agentWatchdog = new AgentWatchdog(
         ? `${agent.name} (${signal.model ?? agent.model})`
         : `${ticket.agentId ?? "(unknown)"} (${signal.model ?? "?"})`;
       const quietMin = Math.round(signal.quietMs / 60_000);
+      const boardIdleMin = Math.round(signal.boardIdleMs / 60_000);
+      // W8 보강(2026-08-23): 축마다 헤드라인을 다르게 — 죽음(exit)과 침묵
+      // (first-activity/board-quiet)이 같은 "N분째 보드 활동 없음" 문구로
+      // 오면 오케가 구분할 수 없다. exit 축은 quietMs 가 "종료 확정 후 경과"
+      // 라 0에 가까울 수 있으므로 boardIdleMs(마지막 실보고 이후 경과)를
+      // 따로 싣는다.
+      const headline =
+        signal.axis === "exit"
+          ? `프로세스 종료 확인(exit ${signal.exitCode ?? "?"}) — 사망, ` +
+            `무활동 임계 대기 없이 즉시 신호 (마지막 보드 활동 ${boardIdleMin}분 전)`
+          : signal.axis === "first-activity"
+            ? `스폰(또는 재배정) 이후 ${quietMin}분간 첫 활동 없음 ` +
+              `(첫 활동 임계 ${Math.round(signal.thresholdMs / 60_000)}분)`
+            : `${quietMin}분째 보드 활동 없음`;
       const msg =
         `🕵️ [Watchdog] 티켓 ${ticket.taskId} "${ticket.title ?? ""}" ` +
-        `(P${ticket.priority ?? "?"}) — ${quietMin}분째 보드 활동 없음. ` +
+        `(P${ticket.priority ?? "?"}) — ${headline}. ` +
         `담당 ${agentLabel}. ${detail}\n` +
         `   판단 재료: get_task_activities(${ticket.taskId}) · get_agents 의 ⚠ 표시. ` +
         `선택지: 기다리기(정상 장시간 작업일 수 있음) / reuse_agent 로 진행 보고 요청 / ` +
-        `kill_agent 후 dispatch_task 재배정 — 이제 dispatch_task 는 ${quietMin}분 조용한 ` +
-        `담당에게 되돌려보내지 않습니다.`;
+        `kill_agent 후 dispatch_task 재배정` +
+        (signal.axis === "board-quiet"
+          ? ` — 이제 dispatch_task 는 ${quietMin}분 조용한 담당에게 되돌려보내지 않습니다.`
+          : ".");
       try {
         orchestrators.get(ticket.projectId)?.injectMessage(msg);
       } catch (err) {
@@ -2617,8 +2638,11 @@ const agentWatchdog = new AgentWatchdog(
         errorMessage: detail,
         metadata: {
           tier: signal.tier,
+          axis: signal.axis,
           quietMs: signal.quietMs,
           thresholdMs: signal.thresholdMs,
+          boardIdleMs: signal.boardIdleMs,
+          exitCode: signal.exitCode,
           pty: signal.pty,
           repeat: signal.repeat,
           priority: ticket.priority ?? null,
