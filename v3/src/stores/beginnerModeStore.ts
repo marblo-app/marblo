@@ -6,7 +6,6 @@ import {
   EMPTY_BEGINNER_RECORD,
   parseBeginnerRecord,
   resolveBeginnerModeForAccount,
-  resolveInitialBeginnerMode,
   serializeBeginnerRecord,
   type BeginnerAccountOutcome,
   type BeginnerModeRecord,
@@ -132,30 +131,26 @@ function markMachineClaimed(uid: string): void {
 const bootMarkers = readMarkers();
 
 /**
- * 모듈 평가 시점의 **잠정** 판정. 첫 렌더 전에 값이 있어야 셸이 깜빡이지 않지만
- * (splitWorkspaceStore 가 초기 탭을 읽는 방식과 동형), 이 시점엔 uid 가 없다.
+ * 모듈 평가 시점의 **중립** 판정. 이 시점엔 uid 가 없으므로 어떤 localStorage
+ * 레코드도 읽어 모드를 결정하지 않는다.
  *
- * ★그래서 여기서는 **아무것도 영속하지 않는다.** 종전에는 이 자리에서 판정을
- * 굳혀 버렸고, 그게 곧 "기기에 한 번 굳으면 어느 계정으로 로그인하든 그 판정"
- * 이라는 이 티켓의 증상이었다. 진짜 판정과 영속은 신원이 정해질 때
- * ({@link BeginnerModeStoreState.adoptAccount}) 일어난다. 로그인 전에는 비기너
- * 셸이 그려지지 않으므로(App 은 `!user` 면 LoginPage) 이 잠정값은 화면에 닿지
- * 않는다.
+ * ★인증 준비 전에는 `advanced` 를 안전한 중립값으로 둔다. 계정 레코드를 아직
+ * 모르는 상태에서 `beginner` 를 고르면, 인증 채택보다 먼저 셸이 그려지는 경로가
+ * 하나라도 생겼을 때 승격한 사용자를 비기너로 되돌리는 회귀가 된다. 진짜 판정과
+ * 영속은 신원이 정해질 때({@link BeginnerModeStoreState.adoptAccount})만 일어난다.
+ * 신규 사용자는 그 직후 계정별 레코드가 없어 `beginner` 로 채택되므로 첫 화면의
+ * 의도된 동작은 그대로다.
  */
 function initialRecord(): {
   record: BeginnerModeRecord;
   entryReason: BeginnerEntryReason;
 } {
-  const stored = readRecordAt(BEGINNER_MODE_KEY);
-  const state = resolveInitialBeginnerMode(stored, bootMarkers);
-  if (stored) return { record: stored, entryReason: "restart" };
   return {
     record: {
       ...EMPTY_BEGINNER_RECORD,
-      state,
-      enteredAt: state === "beginner" ? Date.now() : 0,
+      state: "advanced",
     },
-    entryReason: "fresh_install",
+    entryReason: "restart",
   };
 }
 

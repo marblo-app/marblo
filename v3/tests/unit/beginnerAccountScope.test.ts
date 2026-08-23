@@ -293,6 +293,34 @@ describe("beginnerModeStore.adoptAccount — localStorage 배선", () => {
     expect(map.get(BEGINNER_MODE_KEY)).toBeUndefined();
     expect(map.get(BEGINNER_MODE_CLAIM_KEY)).toBeUndefined();
   });
+
+  it("★콜드 스타트는 인증 전 레거시 키로 비기너를 고르지 않고, uid 채택 뒤 계정 레코드를 복원한다", async () => {
+    const first = await boot();
+    expect(first.beginner.getState().state).toBe("advanced");
+
+    // 첫 실행에서 마블로 모드로 승격한다. 이 쓰기는 계정 키에만 남는다.
+    expect(first.beginner.getState().adoptAccount("A")).toBe("claimed");
+    first.beginner.getState().promote("manual");
+    const persisted = Object.fromEntries(first.map);
+    expect(JSON.parse(persisted[beginnerModeAccountKey("A")]).state).toBe(
+      "advanced",
+    );
+    expect(persisted[BEGINNER_MODE_KEY]).toBeUndefined();
+
+    // 새 renderer 모듈 = 앱 재시작. 이 시점에는 uid 가 아직 없으므로 계정
+    // 레코드를 섣불리 못 읽는다. 인증이 준비되면 같은 계정 레코드가 이긴다.
+    const restarted = await boot(persisted);
+    expect(restarted.beginner.getState().state).toBe("advanced");
+    expect(restarted.beginner.getState().adoptAccount("A")).toBe("kept");
+    expect(restarted.beginner.getState().state).toBe("advanced");
+  });
+
+  it("콜드 스타트 뒤 새 계정을 채택하면 여전히 비기너로 시작한다", async () => {
+    const { beginner } = await boot();
+    expect(beginner.getState().state).toBe("advanced");
+    expect(beginner.getState().adoptAccount("new-account")).toBe("claimed");
+    expect(beginner.getState().state).toBe("beginner");
+  });
 });
 
 // ── 계정 전환 초크포인트 ────────────────────────────────────────────────────
