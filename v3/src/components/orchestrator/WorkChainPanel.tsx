@@ -13,7 +13,15 @@
  * 빈/실패/로딩은 `StateBlock` 이 그린다 — 빈 상태엔 "항목 적기" 가, 실패엔 "다시
  * 시도" 가 붙는다(`loadState.ts` 의 규칙: 다음 행동 없는 상태는 타입이 거부).
  */
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useTranslation } from "../../lib/i18n";
 import { useTaskStore } from "../../stores/taskStore";
 import {
@@ -41,6 +49,40 @@ type ChainLoad =
   | { kind: "loading"; since: number }
   | { kind: "ready"; items: WorkChainItem[]; exists: boolean }
   | { kind: "failed"; detail: string };
+
+// This is intentionally global rather than project-scoped: it is a display
+// preference for the orchestrator surface, and making every project relearn it
+// would be surprising. localStorage also keeps this renderer-only change out
+// of the Electron main process.
+const PANEL_HEIGHT_STORAGE_KEY = "marblo.workChainPanel.height.v1";
+const DEFAULT_PANEL_HEIGHT = 160;
+const MIN_PANEL_HEIGHT = 96;
+const MAX_PANEL_HEIGHT = 320;
+
+function clampPanelHeight(height: number): number {
+  return Math.min(MAX_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, height));
+}
+
+function readPanelHeight(): number {
+  try {
+    const stored = window.localStorage.getItem(PANEL_HEIGHT_STORAGE_KEY);
+    if (!stored) return DEFAULT_PANEL_HEIGHT;
+    const value = Number(stored);
+    return Number.isFinite(value) ? clampPanelHeight(value) : DEFAULT_PANEL_HEIGHT;
+  } catch {
+    // Storage may be unavailable in private/test renderer contexts. Resizing
+    // still works for this session in that case.
+    return DEFAULT_PANEL_HEIGHT;
+  }
+}
+
+function persistPanelHeight(height: number): void {
+  try {
+    window.localStorage.setItem(PANEL_HEIGHT_STORAGE_KEY, String(height));
+  } catch {
+    // Persistence is best-effort; never make the resize handle unusable.
+  }
+}
 
 const STATE_CHIP: Record<
   DerivedWorkChainItem["state"] | "doneSelf",
@@ -90,6 +132,81 @@ export default memo(function WorkChainPanel({
   const [why, setWhy] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [panelHeight, setPanelHeight] = useState(readPanelHeight);
+  const [isResizing, setIsResizing] = useState(false);
+  const panelHeightRef = useRef(panelHeight);
+  const resizeFrameRef = useRef<number | null>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    panelHeightRef.current = panelHeight;
+  }, [panelHeight]);
+
+  useEffect(
+    () => () => {
+      if (resizeFrameRef.current !== null) {
+        cancelAnimationFrame(resizeFrameRef.current);
+      }
+      resizeCleanupRef.current?.();
+    },
+    [],
+  );
+
+  const handleResizeStart = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const startY = event.clientY;
+      const startHeight = panelHeightRef.current;
+      const previousCursor = document.body.style.cursor;
+      const previousUserSelect = document.body.style.userSelect;
+      setIsResizing(true);
+      document.body.style.cursor = "row-resize";
+      document.body.style.userSelect = "none";
+
+      const applyHeight = () => {
+        resizeFrameRef.current = null;
+        setPanelHeight(panelHeightRef.current);
+      };
+      const onMove = (moveEvent: PointerEvent) => {
+        // The panel's lower edge moves with the pointer: up increases its
+        // height; down decreases it. rAF limits layout/ResizeObserver churn,
+        // which in turn throttles the xterm re-fit below this panel.
+        panelHeightRef.current = clampPanelHeight(
+          startHeight + startY - moveEvent.clientY,
+        );
+        if (resizeFrameRef.current === null) {
+          resizeFrameRef.current = requestAnimationFrame(applyHeight);
+        }
+        if (moveEvent.cancelable) moveEvent.preventDefault();
+      };
+      const onEnd = () => {
+        if (resizeFrameRef.current !== null) {
+          cancelAnimationFrame(resizeFrameRef.current);
+          resizeFrameRef.current = null;
+        }
+        // Commit synchronously on release. TerminalView's ResizeObserver then
+        // performs its settled rAF fit, including its final xterm refresh.
+        setPanelHeight(panelHeightRef.current);
+        persistPanelHeight(panelHeightRef.current);
+        setIsResizing(false);
+        document.body.style.cursor = previousCursor;
+        document.body.style.userSelect = previousUserSelect;
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onEnd);
+        document.removeEventListener("pointercancel", onEnd);
+        resizeCleanupRef.current = null;
+      };
+
+      resizeCleanupRef.current?.();
+      resizeCleanupRef.current = onEnd;
+
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onEnd);
+      document.addEventListener("pointercancel", onEnd);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!projectId) return;
@@ -192,7 +309,15 @@ export default memo(function WorkChainPanel({
   return (
     <div
       data-testid="work-chain-panel"
-      className="mx-3 mb-2 rounded border border-[#313244] bg-[#1e1e2e] text-[11px] text-[#cdd6f4]"
+      data-resizing={isResizing ? "true" : undefined}
+      className={`mx-3 mb-2 rounded border border-[#313244] bg-[#1e1e2e] text-[11px] text-[#cdd6f4] ${
+        expanded ? "flex flex-col overflow-hidden" : ""
+      }`}
+      style={
+        expanded
+          ? { height: panelHeight, maxHeight: MAX_PANEL_HEIGHT }
+          : undefined
+      }
       onClick={(e) => e.stopPropagation()}
     >
       {/* 요약 줄 — 항상 보인다. 오케가 다음에 뭘 할 작정인지가 여기 한 줄이다. */}
@@ -246,7 +371,7 @@ export default memo(function WorkChainPanel({
       </div>
 
       {expanded && (
-        <div className="border-t border-[#313244] px-2 py-1.5">
+        <div className="min-h-0 flex-1 overflow-y-auto border-t border-[#313244] px-2 py-1.5">
           <div className="mb-1 text-[10px] text-[#6c7086]">
             {t("orchestrator.chain.subtitle")}
           </div>
@@ -419,6 +544,17 @@ export default memo(function WorkChainPanel({
             </button>
           )}
         </div>
+      )}
+      {expanded && (
+        <div
+          data-testid="work-chain-resize-handle"
+          onPointerDown={handleResizeStart}
+          className="h-2 shrink-0 cursor-row-resize touch-none border-t border-[#313244] bg-[#181825] hover:bg-[#89b4fa]/30"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize work chain panel"
+          title="Drag to resize work chain panel"
+        />
       )}
     </div>
   );

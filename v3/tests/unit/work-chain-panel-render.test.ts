@@ -38,6 +38,41 @@ const state = vi.hoisted(() => ({
   added: [] as Array<{ what: string; why: string }>,
 }));
 
+const PANEL_HEIGHT_STORAGE_KEY = "marblo.workChainPanel.height.v1";
+
+function installMemoryStorage(): Map<string, string> {
+  const map = new Map<string, string>();
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => map.get(key) ?? null,
+      setItem: (key: string, value: string) => map.set(key, value),
+      removeItem: (key: string) => map.delete(key),
+    },
+  });
+  return map;
+}
+
+let storage: Map<string, string>;
+
+/** jsdom has no PointerEvent constructor, so use a mouse event with pointer fields. */
+function pointerEvent(
+  type: "pointerdown" | "pointermove" | "pointerup",
+  clientY: number,
+): MouseEvent {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientY,
+    button: 0,
+    buttons: type === "pointerup" ? 0 : 1,
+  });
+  Object.defineProperty(event, "pointerId", { value: 1 });
+  Object.defineProperty(event, "isPrimary", { value: true });
+  Object.defineProperty(event, "pointerType", { value: "mouse" });
+  return event;
+}
+
 // 실제 zustand 스토어 — 보드 status 가 바뀌면 패널이 **스스로** 다시 그리는지를
 // 보려면 selector 목이 아니라 구독이 있어야 한다(memo 컴포넌트라 props 만으론 안 바뀐다).
 vi.mock("../../src/stores/taskStore", async () => {
@@ -97,6 +132,7 @@ function push(items: WorkChainItem[], exists = true) {
 }
 
 beforeEach(() => {
+  storage = installMemoryStorage();
   setTasks([]);
   state.added = [];
   state.listener = null;
@@ -194,5 +230,40 @@ describe("WorkChainPanel", () => {
       createElement(WorkChainPanel, { projectId: null }),
     );
     expect(container.firstChild).toBeNull();
+  });
+
+  it("펼친 목록은 상한 안에서 스크롤되고, 하단 핸들 높이를 재시작 뒤에도 기억한다", () => {
+    const { unmount } = render(
+      createElement(WorkChainPanel, { projectId: "p1" }),
+    );
+    push(
+      Array.from({ length: 20 }, (_, index) =>
+        chainItem({ id: `item-${index}`, what: `항목 ${index + 1}` }),
+      ),
+    );
+    fireEvent.click(screen.getByTestId("work-chain-toggle"));
+
+    const panel = screen.getByTestId("work-chain-panel");
+    expect(panel.style.height).toBe("160px");
+    expect(panel.style.maxHeight).toBe("320px");
+    expect(
+      panel.querySelector(".overflow-y-auto"),
+    ).toBeTruthy();
+    expect(screen.getAllByTestId("work-chain-item")).toHaveLength(20);
+
+    const handle = screen.getByTestId("work-chain-resize-handle");
+    fireEvent(handle, pointerEvent("pointerdown", 200));
+    fireEvent(document, pointerEvent("pointermove", 140));
+    fireEvent(document, pointerEvent("pointerup", 140));
+    expect(panel.style.height).toBe("220px");
+    expect(storage.get(PANEL_HEIGHT_STORAGE_KEY)).toBe("220");
+
+    unmount();
+    render(createElement(WorkChainPanel, { projectId: "p1" }));
+    push([chainItem({ id: "a", what: "첫 항목" })]);
+    fireEvent.click(screen.getByTestId("work-chain-toggle"));
+    expect(screen.getByTestId("work-chain-panel").style.height).toBe(
+      "220px",
+    );
   });
 });
