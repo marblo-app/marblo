@@ -40,6 +40,12 @@ import {
 } from "../../services/workChainService";
 import { StateBlock } from "../common/StateBlock";
 import type { LoadState } from "../common/loadState";
+import {
+  DEFAULT_PANEL_HEIGHT,
+  MAX_PANEL_HEIGHT,
+  clampPanelHeight,
+  panelHeightForPointer,
+} from "./workChainPanelResize";
 
 export interface WorkChainPanelProps {
   projectId: string | null;
@@ -55,14 +61,6 @@ type ChainLoad =
 // would be surprising. localStorage also keeps this renderer-only change out
 // of the Electron main process.
 const PANEL_HEIGHT_STORAGE_KEY = "marblo.workChainPanel.height.v1";
-const DEFAULT_PANEL_HEIGHT = 160;
-const MIN_PANEL_HEIGHT = 96;
-const MAX_PANEL_HEIGHT = 320;
-
-function clampPanelHeight(height: number): number {
-  return Math.min(MAX_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, height));
-}
-
 function readPanelHeight(): number {
   try {
     const stored = window.localStorage.getItem(PANEL_HEIGHT_STORAGE_KEY);
@@ -169,11 +167,13 @@ export default memo(function WorkChainPanel({
         setPanelHeight(panelHeightRef.current);
       };
       const onMove = (moveEvent: PointerEvent) => {
-        // The panel's lower edge moves with the pointer: up increases its
-        // height; down decreases it. rAF limits layout/ResizeObserver churn,
+        // The panel's lower edge moves with the pointer: down increases its
+        // height; up decreases it. rAF limits layout/ResizeObserver churn,
         // which in turn throttles the xterm re-fit below this panel.
-        panelHeightRef.current = clampPanelHeight(
-          startHeight + startY - moveEvent.clientY,
+        panelHeightRef.current = panelHeightForPointer(
+          startHeight,
+          startY,
+          moveEvent.clientY,
         );
         if (resizeFrameRef.current === null) {
           resizeFrameRef.current = requestAnimationFrame(applyHeight);
@@ -321,7 +321,7 @@ export default memo(function WorkChainPanel({
       onClick={(e) => e.stopPropagation()}
     >
       {/* 요약 줄 — 항상 보인다. 오케가 다음에 뭘 할 작정인지가 여기 한 줄이다. */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-0.5">
         <span className="font-medium text-[#cba6f7]">
           {t("orchestrator.chain.title")}
         </span>
@@ -545,17 +545,15 @@ export default memo(function WorkChainPanel({
           )}
         </div>
       )}
-      {expanded && (
-        <div
-          data-testid="work-chain-resize-handle"
-          onPointerDown={handleResizeStart}
-          className="h-2 shrink-0 cursor-row-resize touch-none border-t border-[#313244] bg-[#181825] hover:bg-[#89b4fa]/30"
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="Resize work chain panel"
-          title="Drag to resize work chain panel"
-        />
-      )}
+      <div
+        data-testid="work-chain-resize-handle"
+        onPointerDown={handleResizeStart}
+        className="h-2 shrink-0 cursor-row-resize touch-none border-t border-[#313244] bg-[#181825] hover:bg-[#89b4fa]/30"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize work chain panel"
+        title="Drag to resize work chain panel"
+      />
     </div>
   );
 });
