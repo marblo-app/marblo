@@ -15,10 +15,13 @@ import {
   type SlackSocket,
 } from "../../electron/slack-poller";
 import { SlackHttpError } from "../../electron/slack-health";
+import { slackAppToken, slackBotToken } from "../fixtures/slack-tokens";
 
 const PROJECT = "proj1";
-const BOT_TOKEN = "xoxb-1111111111-2222222222-abcdefghijklmnop";
-const APP_TOKEN = "xapp-1-A01234567-1234567890-abcdefghijklmnopqrstuvwxyz";
+const BOT_TOKEN = slackBotToken("1111111111-2222222222-abcdefghijklmnop");
+const APP_TOKEN = slackAppToken(
+  "1-A01234567-1234567890-abcdefghijklmnopqrstuvwxyz",
+);
 const CHANNEL = "C0123ABCDEF";
 const BOT_USER = "U0BOTBOT";
 const HUMAN = "U0ALICE";

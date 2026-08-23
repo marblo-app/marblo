@@ -8,11 +8,12 @@ import {
   preflightSlackChannel,
 } from "../../electron/slack-channels";
 import * as slackChannels from "../../electron/slack-channels";
+import { slackAppToken, slackBotToken } from "../fixtures/slack-tokens";
 
-const BOT = "xoxb-1111111111-2222222222-abcdefghijklmnop";
-const BOT2 = "xoxb-9999999999-8888888888-ponmlkjihgfedcba";
-const APP = "xapp-1-A01234567-1234567890-abcdefghijklmnopqrstuvwxyz";
-const APP2 = "xapp-1-B76543210-0987654321-zyxwvutsrqponmlkjihgfedc";
+const BOT = slackBotToken("1111111111-2222222222-abcdefghijklmnop");
+const BOT2 = slackBotToken("9999999999-8888888888-ponmlkjihgfedcba");
+const APP = slackAppToken("1-A01234567-1234567890-abcdefghijklmnopqrstuvwxyz");
+const APP2 = slackAppToken("1-B76543210-0987654321-zyxwvutsrqponmlkjihgfedc");
 const CHANNEL = "C0123ABCDEF";
 const OTHER_CHANNEL = "C0456GHIJKL";
 

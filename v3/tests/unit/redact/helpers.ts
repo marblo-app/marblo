@@ -3,6 +3,7 @@
  * 미탐 0 증명이 목표: 시크릿의 "한 조각"도 최종 payload 에 남으면 실패한다.
  */
 import { expect } from "vitest";
+import { slackBotToken, slackUserToken } from "../../fixtures/slack-tokens";
 
 export function b64(s: string): string {
   return Buffer.from(s, "utf8").toString("base64");
@@ -80,8 +81,14 @@ export const SECRET_CORPUS: ReadonlyArray<{ name: string; value: string }> = [
   { name: "github-ghu", value: "ghu_46F0h75I525f9245H0043f161670Dh401E7d" },
   { name: "gitlab-pat", value: "glpat-xY9zW8vU7tS6rQ5pO4nM3lK2jI" },
   { name: "grafana-cloud", value: "glc_eyJvIjoiMTIzNDU2IiwibiI6InRva2VuIn0=" },
-  { name: "slack-bot", value: "xoxb-1234567890-AbCdEfGhIjKlMnOpQrStUv" },
-  { name: "slack-user", value: "xoxp-9876543210-ZyXwVuTsRqPoNmLkJiHgFe" },
+  {
+    name: "slack-bot",
+    value: slackBotToken("1234567890-AbCdEfGhIjKlMnOpQrStUv"),
+  },
+  {
+    name: "slack-user",
+    value: slackUserToken("9876543210-ZyXwVuTsRqPoNmLkJiHgFe"),
+  },
   {
     name: "slack-webhook",
     value:
