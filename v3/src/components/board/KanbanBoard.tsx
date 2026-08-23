@@ -279,7 +279,11 @@ export function KanbanBoard({
   // 카드·버튼 위에서 시작한 포인터는 손대지 않는다. hooks/useBoardPan.ts 참조.
   const { isPanning, containerProps: panProps } = useBoardPan();
 
-  if (!currentProject) {
+  // 비기너 첫 실행은 아직 폴더를 고르기 전일 수 있다. simplified 보드는 이
+  // 시점에도 "앞으로 여기에 일이 보인다"는 빈 5열을 보여 주는 표면이라
+  // project가 없어도 렌더할 수 있다(구독/새 티켓/새로고침은 모두 no-op).
+  // 일반 보드는 프로젝트 이름·생성 액션을 쓰므로 종전의 선택-폴더 안내를 유지한다.
+  if (!currentProject && !simplified) {
     // Distinguish "still loading on cold start" from "genuinely no project".
     // Until the projects store has hydrated (or while it's actively loading),
     // show a spinner rather than a false "No Projects" empty state.
@@ -391,9 +395,9 @@ export function KanbanBoard({
       {!simplified && (
         <div className="px-4 pt-3">
           <FirstShareNudge
-            projectId={currentProject.id}
+            projectId={currentProject!.id}
             surface="board"
-            enabled={currentProject.ownerId === user?.uid}
+            enabled={currentProject!.ownerId === user?.uid}
           />
         </div>
       )}
@@ -407,7 +411,7 @@ export function KanbanBoard({
         {!simplified && (
           <>
             <span className="text-sm font-medium text-gray-300">
-              {currentProject.name}
+              {currentProject!.name}
             </span>
 
             <div className="flex items-center gap-2">

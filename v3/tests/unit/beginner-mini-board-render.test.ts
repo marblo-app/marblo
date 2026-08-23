@@ -21,6 +21,20 @@ const stores = vi.hoisted(() => ({
   tasks: [] as unknown[],
   agents: [] as unknown[],
   agentsHydrated: true,
+  // 신규 유저는 폴더 선택 전에도 프로젝트 스토어가 비어 있다. 이 상태에서
+  // KanbanBoard가 일반 모드의 "프로젝트를 선택하세요" 조기 return으로 빠지면
+  // LiveStrip DOM은 있어도 보드가 보이지 않는다.
+  currentProject: {
+    id: "p1",
+    name: "Demo",
+    ownerId: "u1",
+    folderPath: "/tmp/demo",
+  } as {
+    id: string;
+    name: string;
+    ownerId: string;
+    folderPath: string;
+  } | null,
 }));
 
 vi.mock("../../src/stores/taskStore", () => ({
@@ -43,12 +57,7 @@ vi.mock("../../src/stores/agentStore", () => ({
 vi.mock("../../src/stores/projectStore", () => ({
   useProjectStore: vi.fn((selector: (s: unknown) => unknown) =>
     selector({
-      currentProject: {
-        id: "p1",
-        name: "Demo",
-        ownerId: "u1",
-        folderPath: "/tmp/demo",
-      },
+      currentProject: stores.currentProject,
       loading: false,
       projectsHydrated: true,
     }),
@@ -247,6 +256,12 @@ beforeEach(() => {
   stores.tasks = [];
   stores.agents = [];
   stores.agentsHydrated = true;
+  stores.currentProject = {
+    id: "p1",
+    name: "Demo",
+    ownerId: "u1",
+    folderPath: "/tmp/demo",
+  };
   ensureFreshSpy.mockClear();
   viewWorktreeSpy.mockClear();
   vi.useFakeTimers();
@@ -327,6 +342,16 @@ describe("비기너 상단 — 마블로 5단계 칸반", () => {
       "REVIEW",
       "DONE",
     ]);
+  });
+
+  it("★신규 유저 첫 실행(프로젝트/폴더 없음)에도 빈 5단계 보드를 그린다", () => {
+    stores.currentProject = null;
+
+    mount({ sentAt: 0 });
+
+    expect(screen.getByTestId("beginner-live-strip")).toBeTruthy();
+    expect(screen.getByTestId("beginner-marblo-board")).toBeTruthy();
+    expect(screen.getAllByTestId("kanban-column")).toHaveLength(5);
   });
 
   it("★막힌 티켓은 정체 레인에 남는다 (사라지지 않음)", () => {

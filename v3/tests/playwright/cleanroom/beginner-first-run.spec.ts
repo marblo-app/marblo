@@ -144,7 +144,7 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
       );
       await expect(
         cr.page.getByTestId("beginner-firstscreen-demo-watch"),
-      ).toContainText(/90초 영상 데모|90s video demo/);
+      ).toContainText(/60초 영상 데모|60s video demo/);
       const demoBox = await cr.page
         .getByTestId("beginner-firstscreen-demo")
         .boundingBox();
@@ -198,7 +198,13 @@ test.describe("@cleanroom 비기너 모드 첫실행", () => {
         ).toBe(0);
       }
       expect(await cr.page.getByTestId("cli-setup-banner").count()).toBe(0);
-      expect(await cr.page.getByTestId("beginner-mini-board").count()).toBe(0);
+      // ★빈 신규 프로필도 상단 보드가 첫 화면에 있어야 한다. #1141은 strip
+      // 내부 idle 게이트만 열었고, 종전 셸의 CLI/폴더 게이트가 이 DOM 전체를
+      // 언마운트해서 실화면에서는 여전히 보이지 않았다.
+      await expect(cr.page.getByTestId("beginner-live-strip")).toBeVisible();
+      await expect(cr.page.getByTestId("beginner-mini-board")).toBeVisible();
+      await expect(cr.page.getByTestId("beginner-marblo-board")).toBeVisible();
+      await expect(cr.page.getByTestId("kanban-column")).toHaveCount(5);
       // 연결 전에는 오케 대화창도 없다 — 인증 없이 오케를 태울 수 없어서다.
       expect(await cr.page.getByTestId("beginner-first-ask").count()).toBe(0);
 

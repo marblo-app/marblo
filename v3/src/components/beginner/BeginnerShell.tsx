@@ -586,6 +586,27 @@ export function BeginnerShell() {
           상한 자체는 남긴다 — 27" 에서 카드가 끝까지 벌어지면 다시 성겨진다. */}
             <main className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
               <div className="flex min-h-0 w-full flex-1 flex-col gap-2.5 overflow-hidden">
+                {/*
+                  첫 실행에도 보드는 첫 화면의 일부다. #1141은 LiveStrip 내부의
+                  idle 게이트만 열었지만, 이 상위 setup/folder 분기가 strip을 아예
+                  마운트하지 않아 신규 프로필에서는 DOM에 존재하지 않았다.
+                  설정 안내는 보드 아래에 남긴다. 따라서 아직 CLI/폴더가 없어도
+                  빈 5단계 보드는 같은 높이를 받아 실제로 보인다.
+                */}
+                <div
+                  className="flex min-h-[14rem] max-h-[48%] flex-[2_1_auto] flex-col overflow-hidden"
+                  data-coach="beginner-live"
+                >
+                  <BeginnerLiveStrip
+                    sentAt={ask.deliveredAt}
+                    onResend={() => void ask.resend()}
+                    resending={ask.sending}
+                    onTaskClick={openTaskDetail}
+                    showWorktreeDiff
+                    onAgentClick={openAgentTerminal}
+                  />
+                </div>
+
                 {!cliReady ? (
                   <div className="min-h-0 flex-1 overflow-auto">
                     <BeginnerConnectStep
@@ -643,24 +664,6 @@ export function BeginnerShell() {
                   </div>
                 ) : (
                   <>
-                    {/* 상단: 마블로 Board(5단계 칸반+그래프) 그대로. 옛 3열 미니보드
-                  제거. 오케 입력은 아래 실 PTY 패널 하나로 일원화. */}
-                    <div
-                      className="flex max-h-[48%] min-h-0 flex-[2_1_auto] flex-col overflow-hidden empty:hidden"
-                      data-coach="beginner-live"
-                    >
-                      {/* ★카드 클릭 → TaskDetailModal(#971). compact 카드의
-                        "바뀐 코드"·에이전트 칩도 셸이 목적지를 갖고 있을 때만. */}
-                      <BeginnerLiveStrip
-                        sentAt={ask.deliveredAt}
-                        onResend={() => void ask.resend()}
-                        resending={ask.sending}
-                        onTaskClick={openTaskDetail}
-                        showWorktreeDiff
-                        onAgentClick={openAgentTerminal}
-                      />
-                    </div>
-
                     {/* ── ★하단 2분할: 오케 대화창 | 에이전트 ──────────────────────
                   좁은 창(<1024px)에서는 세로로 쌓는다 — 두 열을 억지로 유지하면
                   오케 터미널이 40컬럼 아래로 눌려 TUI 가 접힌다. */}
