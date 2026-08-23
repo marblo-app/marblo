@@ -1,7 +1,6 @@
 import { useCallback, useRef } from "react";
 import OrchestratorPanel from "../orchestrator/OrchestratorPanel";
 import { AgentListPanel } from "../agents/list-panel/AgentListPanel";
-import { FirstSpawnGuide } from "../onboarding/FirstSpawnGuide";
 import { t } from "../../lib/i18n";
 import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { verticalRatioFromPointer } from "../../lib/splitWorkspaceLayout";
@@ -123,15 +122,6 @@ export function TerminalColumn({
             />
           </svg>
         </button>
-      </div>
-
-      {/* The rail owns a fixed single-line slot. Its expanded guide is an
-          upward absolute overlay, so this split keeps the same dimensions. */}
-      <div
-        data-testid="terminal-first-spawn-guide-anchor"
-        className="relative shrink-0 px-2 pt-2"
-      >
-        <FirstSpawnGuide />
       </div>
 
       {/* Vertical split: orchestrator (top) · draggable divider · agents
