@@ -321,32 +321,37 @@ export default memo(function WorkChainPanel({
       onClick={(e) => e.stopPropagation()}
     >
       {/* 요약 줄 — 항상 보인다. 오케가 다음에 뭘 할 작정인지가 여기 한 줄이다. */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-0.5">
-        <span className="font-medium text-[#cba6f7]">
+      <div className="flex min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap px-2 py-0.5">
+        <span className="shrink-0 font-medium text-[#cba6f7]">
           {t("orchestrator.chain.title")}
         </span>
         {derived && derived.items.length > 0 && (
           <>
-            <span className="text-[#a6adc8]">
+            <span className="shrink-0 text-[#a6adc8]">
               {t("orchestrator.chain.countOpen", { open: openCount })} ·{" "}
               {t("orchestrator.chain.countReady", { ready: readyCount })}
             </span>
             {next ? (
               <span
                 data-testid="work-chain-next"
-                className="truncate text-[#a6e3a1]"
+                className="min-w-0 flex-1 truncate text-[#a6e3a1]"
                 title={next.item.why}
               >
                 ▶ {next.item.what}
               </span>
             ) : openCount > 0 ? (
-              <span className="text-[#f9e2af]">
+              <span className="min-w-0 flex-1 truncate text-[#f9e2af]">
                 ▶ {t("orchestrator.chain.state.waiting")}
               </span>
-            ) : null}
+            ) : (
+              <span className="min-w-0 flex-1" aria-hidden="true" />
+            )}
           </>
         )}
-        <span className="ml-auto flex items-center gap-1">
+        {(!derived || derived.items.length === 0) && (
+          <span className="min-w-0 flex-1" aria-hidden="true" />
+        )}
+        <span className="ml-auto flex shrink-0 items-center gap-1">
           {load.kind === "ready" && (
             <button
               type="button"
@@ -545,15 +550,17 @@ export default memo(function WorkChainPanel({
           )}
         </div>
       )}
-      <div
-        data-testid="work-chain-resize-handle"
-        onPointerDown={handleResizeStart}
-        className="h-2 shrink-0 cursor-row-resize touch-none border-t border-[#313244] bg-[#181825] hover:bg-[#89b4fa]/30"
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="Resize work chain panel"
-        title="Drag to resize work chain panel"
-      />
+      {expanded && (
+        <div
+          data-testid="work-chain-resize-handle"
+          onPointerDown={handleResizeStart}
+          className="h-2 shrink-0 cursor-row-resize touch-none border-t border-[#313244] bg-[#181825] hover:bg-[#89b4fa]/30"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize work chain panel"
+          title="Drag to resize work chain panel"
+        />
+      )}
     </div>
   );
 });
