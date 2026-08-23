@@ -44,6 +44,7 @@ import { doc, runTransaction, serverTimestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../lib/firebase";
 import type { Task } from "../types/task";
+import type { OutcomeMode } from "../types/routingOutcome";
 import { getClientId, isTelemetryEnabled } from "./telemetryService";
 import { noteTaskCompletionForMultiAgentKpi } from "./multiAgentKpi";
 import { getDocument } from "./firestore";
@@ -59,6 +60,7 @@ const logTaskOutcomeFn = httpsCallable(functions, "logTaskOutcome");
 
 /** Last status we observed per taskId, so we only act on real transitions. */
 const observedStatus = new Map<string, string>();
+const observedOutcomeEvent = new Map<string, string>();
 /** Guards against re-entrancy while an async report is in flight. */
 const inFlight = new Set<string>();
 
@@ -80,17 +82,17 @@ interface TaskRollupFields {
  */
 async function claimOutcomeReport(
   taskId: string,
-  status: TerminalTaskStatus,
+  reportKey: string,
 ): Promise<boolean> {
   const ref = doc(db, "tasks", taskId);
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists()) return false;
-    if ((snap.data() as TaskRollupFields).outcomeReportedStatus === status) {
+    if ((snap.data() as TaskRollupFields).outcomeReportedStatus === reportKey) {
       return false;
     }
     tx.update(ref, {
-      outcomeReportedStatus: status,
+      outcomeReportedStatus: reportKey,
       outcomeReportedAt: serverTimestamp(),
     });
     return true;
@@ -104,6 +106,7 @@ async function claimOutcomeReport(
 export async function reportTaskOutcome(
   task: Task,
   status: TerminalTaskStatus,
+  outcomeMode?: OutcomeMode,
 ): Promise<void> {
   // Same gate as every other first-party sink — opted-out installs send
   // nothing. Checked before the Firestore claim so an opted-out client
@@ -117,7 +120,7 @@ export async function reportTaskOutcome(
     // instead of everything up to the last 15s flush.
     await flushTaskRollups(task.id);
 
-    if (!(await claimOutcomeReport(task.id, status))) return;
+    if (!(await claimOutcomeReport(task.id, `${status}:${outcomeMode ?? "status"}`))) return;
 
     // Re-read after the flush + claim so the rollups are the post-flush values.
     const fresh = await getDocument<TaskRollupFields>("tasks", task.id);
@@ -138,6 +141,7 @@ export async function reportTaskOutcome(
       task,
       rollups: fresh,
       agent,
+      outcomeMode,
     });
 
     await logTaskOutcomeFn({ outcome });
@@ -163,8 +167,13 @@ export function observeTaskSnapshot(tasks: Task[]): void {
     const previous = observedStatus.get(task.id);
     observedStatus.set(task.id, task.status);
 
+    const eventId = task.outcomeModeEvent?.id;
+    const previousEventId = observedOutcomeEvent.get(task.id);
+    if (eventId) observedOutcomeEvent.set(task.id, eventId);
     if (previous === undefined) continue; // first sighting — seed only
-    if (previous === task.status) continue;
+    const statusChanged = previous !== task.status;
+    const eventChanged = !!eventId && eventId !== previousEventId;
+    if (!statusChanged && !eventChanged) continue;
 
     // ★핵심 KPI("10분 안에 첫 multi-agent 성공") 의 완료측 트리거(티켓 pWSnJeQN).
     // 여기가 유일하게 **모든 작성 경로**(사람 UI·오케 MCP·워치독)의 DONE 전이를
@@ -177,9 +186,11 @@ export function observeTaskSnapshot(tasks: Task[]): void {
       task.id,
     );
 
-    if (!isTerminalTaskStatus(task.status)) continue;
-
-    void reportTaskOutcome(task, task.status);
+    if (isTerminalTaskStatus(task.status)) {
+      void reportTaskOutcome(task, task.status, task.outcomeModeEvent?.mode);
+    } else if (eventChanged && task.outcomeModeEvent) {
+      void reportTaskOutcome(task, "FAILED", task.outcomeModeEvent.mode);
+    }
   }
 }
 
@@ -189,6 +200,7 @@ export function observeTaskSnapshot(tasks: Task[]): void {
  * project's existing terminal tasks as fresh completions.
  */
 export function resetTaskOutcomeObserver(): void {
+  observedOutcomeEvent.clear();
   observedStatus.clear();
   inFlight.clear();
 }

@@ -61,33 +61,15 @@ import * as path from "path";
 // Detailed, not the coarse stale/BLOCKED lump. Each mode carries an attribution
 // bucket (model-fault vs host vs excluded) and a decay half-life bucket.
 export type OutcomeMode =
-  | "spawn_failed" // 1  host — CLI didn't come up on this machine
-  | "auth_failed" // 2  host — spawned but not authed
-  | "tool_zero" // 3  host — alive but 0 MCP tools
-  | "crash_loop" // 4  model — repeated crashes (restartCount ≥ MAX)
-  | "crashed" // 5  model — single crash then recover/give-up
-  | "no_activity_stale" // 6  model — alive but no progress (★antigravity case)
-  | "dependency_stuck" // 7  EXCLUDED — orchestrator bug, model-agnostic
-  | "blocked" // 8  weak — explicit BLOCKED (≈neutral)
-  | "failed" // 9  model/task — explicit FAILED
-  | "review_rejected" // 10 model quality — REVIEW bounce (needs CT3prjl4 ext)
-  | "completed" // 11 success — submit_for_review / DONE
-  | "merged"; // 12 success — task:merged (top accepted label)
+  | "spawn_failed" | "auth_failed" | "tool_zero" | "crash_loop"
+  | "crashed" | "no_activity_stale" | "dependency_stuck" | "blocked"
+  | "failed" | "review_rejected" | "completed" | "merged";
 
-/** All modes, for tests + iteration. */
+/** All modes, for tests + iteration. Kept byte-for-byte aligned with task outcome labels. */
 export const OUTCOME_MODES: readonly OutcomeMode[] = [
-  "spawn_failed",
-  "auth_failed",
-  "tool_zero",
-  "crash_loop",
-  "crashed",
-  "no_activity_stale",
-  "dependency_stuck",
-  "blocked",
-  "failed",
-  "review_rejected",
-  "completed",
-  "merged",
+  "spawn_failed", "auth_failed", "tool_zero", "crash_loop", "crashed",
+  "no_activity_stale", "dependency_stuck", "blocked", "failed",
+  "review_rejected", "completed", "merged",
 ] as const;
 
 /** Decay half-life bucket for each mode (spec §8.1). */

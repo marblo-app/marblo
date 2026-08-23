@@ -3591,6 +3591,22 @@ function collectWorktreeProjectRoots(): WorktreeProjectRoot[] {
 // model) from the task's dispatchMeta. Every call is best-effort + fire-and-
 // forget — a graph write can never break recovery, telemetry, or a merge.
 const graphUpdater = new GraphUpdater({
+  onRecorded: ({ taskId, agentId, mode, atMs }) => {
+    void (async () => {
+      try {
+        const { app, authReady } = getMissionFirebaseApp();
+        await authReady;
+        const db = getFirestore(app);
+        // The event is intentionally taskId-scoped: it is the only bridge to
+        // cost_logs/task_outcomes. It carries no user or audit-ledger identity.
+        await fbSetDoc(fbDoc(db, "tasks", taskId), {
+          outcomeModeEvent: { id: `${taskId}:${agentId ?? "-"}:${mode}`, mode, atMs },
+        }, { merge: true });
+      } catch (err) {
+        console.warn("[GraphUpdater] task outcome event write failed:", err);
+      }
+    })();
+  },
   fetchMeta: async (taskId) => {
     try {
       const { app, authReady } = getMissionFirebaseApp();

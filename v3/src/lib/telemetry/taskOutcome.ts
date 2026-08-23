@@ -27,14 +27,16 @@
  */
 
 import { classifyTaskType, type TaskType } from "./taskType";
+import type { OutcomeMode } from "../../types/routingOutcome";
 
 /** Statuses that produce an outcome row. */
-export type TerminalTaskStatus = "DONE" | "FAILED" | "BLOCKED";
+export type TerminalTaskStatus = "DONE" | "FAILED" | "BLOCKED" | "REVIEW";
 
 export const TERMINAL_TASK_STATUSES: readonly TerminalTaskStatus[] = [
   "DONE",
   "FAILED",
   "BLOCKED",
+  "REVIEW",
 ] as const;
 
 export function isTerminalTaskStatus(
@@ -173,6 +175,8 @@ export function classifyErrorCategory(
 ): ErrorCategory | null {
   const { status } = input;
   if (status === "DONE") return null;
+  // REVIEW is a self-reported handoff, not a failure attribution.
+  if (status === "REVIEW") return null;
 
   const fromText = input.comment ? categoryFromReasonText(input.comment) : null;
   if (fromText) return fromText;
@@ -187,6 +191,18 @@ export function classifyErrorCategory(
   if (!producedArtifact && (agentSaysEmpty || zeroTokens)) return "NO_OUTPUT";
 
   return status === "FAILED" ? "MODEL_FAIL" : "BLOCKED_DEP";
+}
+
+/** Status-originated labels use the routing graph's exact vocabulary. */
+function modeForStatus(
+  status: TerminalTaskStatus,
+  task: BuildTaskOutcomeInput["task"],
+): OutcomeMode {
+  if (status === "DONE" || status === "REVIEW") return "completed";
+  if (status === "FAILED") return "failed";
+  return (task.dependsOn?.length ?? 0) > 0 && task.dependsOnCompleted !== true
+    ? "dependency_stuck"
+    : "blocked";
 }
 
 export interface BuildTaskOutcomeInput {
@@ -211,6 +227,8 @@ export interface BuildTaskOutcomeInput {
   };
   rollups?: TaskRollups | null;
   agent?: AgentModelSnapshot | null;
+  /** Graph vocabulary, never translated before it reaches the ledger. */
+  outcomeMode?: OutcomeMode | null;
   /** Injected for determinism in tests. */
   now?: Date;
 }
@@ -225,13 +243,15 @@ export interface TaskOutcomeRow {
   model: string | null;
   promptLength: number | null;
   scopeFileCount: number;
-  success: boolean;
+  /** true=accepted, false=failed, null=observed but not yet verified. */
+  success: boolean | null;
   durationMs: number | null;
   totalInputTokens: number | null;
   totalOutputTokens: number | null;
   totalCost: number | null;
   retriesCount: number;
   errorCategory: string | null;
+  outcomeMode: OutcomeMode | null;
   createdAt: string;
   completedAt: string;
 }
@@ -268,7 +288,7 @@ export function buildTaskOutcome(input: BuildTaskOutcomeInput): TaskOutcomeRow {
   // class that did not exist before. `errorCategory` keeps the *reason*
   // distinguishable so an analyst can drop BLOCKED (often recoverable) while
   // keeping FAILED, without needing a new column.
-  const success = status === "DONE";
+  const success = status === "DONE" ? true : status === "REVIEW" ? null : false;
 
   // ── durationMs — claimed → terminal ────────────────────────────────────
   // NOTE: this is ticket lead time, NOT agent working time. The research doc
@@ -355,6 +375,7 @@ export function buildTaskOutcome(input: BuildTaskOutcomeInput): TaskOutcomeRow {
       totalOutputTokens,
       agent,
     }),
+    outcomeMode: input.outcomeMode ?? modeForStatus(status, task),
     createdAt:
       task.createdAt instanceof Date
         ? task.createdAt.toISOString()

@@ -161,6 +161,7 @@ export interface GraphUpdaterOptions {
    * graph learned ONLY positives); this makes every drop observable, and lets
    * tests assert the reason. */
   onDrop?: (info: OutcomeDropInfo) => void;
+  onRecorded?: (input: { taskId: string; agentId: string | null; mode: OutcomeMode; atMs: number }) => void;
 }
 
 export class GraphUpdater {
@@ -170,6 +171,7 @@ export class GraphUpdater {
     taskId: string,
   ) => Promise<DispatchMetaLike | null>;
   private readonly onDrop: (info: OutcomeDropInfo) => void;
+  private readonly onRecorded?: GraphUpdaterOptions["onRecorded"];
   /** Serializes read→mutate→write so concurrent outcomes never clobber. */
   private writeChain: Promise<void> = Promise.resolve();
 
@@ -184,6 +186,7 @@ export class GraphUpdater {
           `[GraphUpdater] dropped ${info.mode} outcome — ${info.reason}`,
           { taskId: info.taskId ?? null, agentId: info.agentId ?? null },
         ));
+    this.onRecorded = opts.onRecorded;
   }
 
   /**
@@ -255,6 +258,7 @@ export class GraphUpdater {
     // ★P2-2 — 셀 키의 모델 축. 실스폰 관측 키가 있으면 model@effort 해상도로,
     // 없으면 종전 프로바이더 키로 적는다(관측 없는 구체 키를 지어내지 않는다).
     await this.enqueueWrite(modelKey ?? model, mode, ctx, input, atMs);
+    if (input.taskId) this.onRecorded?.({ taskId: input.taskId, agentId: input.agentId ?? null, mode, atMs });
     return mode;
   }
 

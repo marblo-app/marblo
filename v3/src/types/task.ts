@@ -1,3 +1,5 @@
+import type { OutcomeMode } from "./routingOutcome";
+
 export type TaskStatus =
   | "TODO"
   | "CLAIMED"
@@ -95,4 +97,6 @@ export interface Task {
   // double-report. See services/taskOutcomeReporter.ts.
   outcomeReportedStatus?: TaskStatus;
   outcomeReportedAt?: Date;
+  /** Latest main-process lifecycle label; reporter consumes it once by id. */
+  outcomeModeEvent?: { id: string; mode: OutcomeMode; atMs: number };
 }

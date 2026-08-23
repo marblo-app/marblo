@@ -8882,8 +8882,10 @@ export const getAdminUsageSummary = functions.https.onCall(
         COUNT(*) AS total,
         COUNTIF(success = true) AS succeeded,
         AVG(durationMs) AS avgDurationMs
-      FROM ${outcomesTable}
-      WHERE ${completedAtTs} >= ${since}
+      FROM (SELECT * FROM ${outcomesTable}
+            WHERE ${completedAtTs} >= ${since}
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY taskId ORDER BY ${completedAtTs} DESC) = 1)
+      WHERE success IS NOT NULL
     `;
 
     const params = { days: rangeDays, ...ex.params };
@@ -10950,8 +10952,10 @@ export const getAdminModelSummary = functions.https.onCall(
         COUNTIF(success = true) AS succeeded,
         AVG(durationMs) AS avgDurationMs,
         AVG(totalCost) AS avgCost
-      FROM ${outcomesTable}
-      WHERE ${completedAtTs} >= ${sinceTs}${clientEx.clause}
+      FROM (SELECT * FROM ${outcomesTable}
+            WHERE ${completedAtTs} >= ${sinceTs}${clientEx.clause}
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY taskId ORDER BY ${completedAtTs} DESC) = 1)
+      WHERE success IS NOT NULL
       GROUP BY model, role
       ORDER BY total DESC
     `;
@@ -10964,8 +10968,10 @@ export const getAdminModelSummary = functions.https.onCall(
         AVG(totalCost) AS avgCost,
         SUM(COALESCE(retriesCount, 0)) AS reworkCount,
         COUNTIF(COALESCE(retriesCount, 0) > 0) AS retriedTasks
-      FROM ${outcomesTable}
-      WHERE ${completedAtTs} >= ${sinceTs}${clientEx.clause}
+      FROM (SELECT * FROM ${outcomesTable}
+            WHERE ${completedAtTs} >= ${sinceTs}${clientEx.clause}
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY taskId ORDER BY ${completedAtTs} DESC) = 1)
+      WHERE success IS NOT NULL
       GROUP BY model
       ORDER BY total DESC
     `;
@@ -11810,8 +11816,10 @@ export const getAdminDrilldown = functions.https.onCall(
       const outcomesQuery = `
         SELECT COUNT(*) AS total, COUNTIF(success = true) AS succeeded,
                AVG(durationMs) AS avgDurationMs
-        FROM ${outcomesTable}
-        WHERE role = @key AND completedAt >= ${sinceTs}${clientEx.clause}
+        FROM (SELECT * FROM ${outcomesTable}
+              WHERE role = @key AND completedAt >= ${sinceTs}${clientEx.clause}
+              QUALIFY ROW_NUMBER() OVER (PARTITION BY taskId ORDER BY completedAt DESC) = 1)
+        WHERE success IS NOT NULL
       `;
 
       const [totals, trendRows, byModel, byVersion, bySecond, outcomeRows] =
@@ -11923,8 +11931,10 @@ export const getAdminDrilldown = functions.https.onCall(
     const modelOutcomesQuery = `
       SELECT COUNT(*) AS total, COUNTIF(success = true) AS succeeded,
              AVG(durationMs) AS avgDurationMs
-      FROM ${outcomesTable}
-      WHERE model = @key AND completedAt >= ${sinceTs}${clientEx.clause}
+      FROM (SELECT * FROM ${outcomesTable}
+            WHERE model = @key AND completedAt >= ${sinceTs}${clientEx.clause}
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY taskId ORDER BY completedAt DESC) = 1)
+      WHERE success IS NOT NULL
     `;
     const outcomesByRoleQuery = `
       SELECT COALESCE(role, '(none)') AS key, COUNT(*) AS n
@@ -13219,9 +13229,11 @@ SELECT
   FORMAT_DATE('%Y-%m-%d', DATE(TIMESTAMP(completedAt))) AS day,
   COUNTIF(success IS TRUE) AS tasksCompleted,
   COUNTIF(success IS FALSE) AS tasksFailed
-FROM \`${ANALYTICS_DATASET}.task_outcomes\`
-WHERE TIMESTAMP(completedAt) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
-  AND userId IS NOT NULL AND userId != '' AND userId != 'anon'
+FROM (SELECT * FROM \`${ANALYTICS_DATASET}.task_outcomes\`
+      WHERE TIMESTAMP(completedAt) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+        AND userId IS NOT NULL AND userId != '' AND userId != 'anon'
+      QUALIFY ROW_NUMBER() OVER (PARTITION BY taskId ORDER BY TIMESTAMP(completedAt) DESC) = 1)
+WHERE success IS NOT NULL
 GROUP BY installKey, day
 LIMIT @rowLimit`;
 

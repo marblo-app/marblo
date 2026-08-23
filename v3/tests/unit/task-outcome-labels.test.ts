@@ -41,6 +41,8 @@ vi.mock("firebase/functions", () => ({
 }));
 
 import { classifyTaskType } from "../../src/lib/telemetry/taskType";
+import { OUTCOME_MODES as TASK_OUTCOME_MODES } from "../../src/types/routingOutcome";
+import { OUTCOME_MODES as GRAPH_OUTCOME_MODES } from "../../electron/routing-graph";
 import {
   buildTaskOutcome,
   classifyErrorCategory,
@@ -104,6 +106,10 @@ beforeEach(() => {
   __resetStore();
   __resetTaskRollupsForTest();
   resetTaskOutcomeObserver();
+});
+
+it("uses exactly the graph-updater vocabulary for the ledger", () => {
+  expect(TASK_OUTCOME_MODES).toEqual(GRAPH_OUTCOME_MODES);
 });
 
 // ── Defect ④ — taskType was hardcoded null ────────────────────────────────
@@ -171,6 +177,12 @@ describe("buildTaskOutcome (defect ①: success was constant TRUE)", () => {
     expect(buildTaskOutcome({ ...base, status: "BLOCKED" }).success).toBe(
       false,
     );
+  });
+
+  it("keeps the routing graph vocabulary as a separate outcomeMode axis", () => {
+    expect(buildTaskOutcome({ ...base, status: "FAILED" }).outcomeMode).toBe("failed");
+    expect(buildTaskOutcome({ ...base, status: "BLOCKED" }).outcomeMode).toBe("blocked");
+    expect(buildTaskOutcome({ ...base, status: "REVIEW" }).outcomeMode).toBe("completed");
   });
 
   // ★#890 F-6 — 종전엔 여기가 터미널 상태 문자열이었다("FAILED"/"BLOCKED").
@@ -344,14 +356,27 @@ describe("observeTaskSnapshot (the MCP-path gap)", () => {
     });
   });
 
-  it("ignores non-terminal transitions", async () => {
+  it("records a watchdog stale event even when reassignment is not terminal", async () => {
+    await seedTaskDoc("task-1");
+    observeTaskSnapshot([makeTask({ status: "IN_PROGRESS" })]);
+    observeTaskSnapshot([makeTask({
+      status: "IN_PROGRESS",
+      outcomeModeEvent: { id: "task-1:agent-1:no_activity_stale", mode: "no_activity_stale", atMs: NOW.getTime() },
+    })]);
+    await settle();
+    expect(sentOutcomes).toHaveLength(1);
+    expect(sentOutcomes[0]).toMatchObject({ success: false, outcomeMode: "no_activity_stale" });
+  });
+
+  it("records REVIEW as an unaccepted completed handoff", async () => {
     await seedTaskDoc("task-1");
     observeTaskSnapshot([makeTask({ status: "TODO" })]);
     observeTaskSnapshot([makeTask({ status: "CLAIMED" })]);
     observeTaskSnapshot([makeTask({ status: "IN_PROGRESS" })]);
-    observeTaskSnapshot([makeTask({ status: "REVIEW" })]);
+    observeTaskSnapshot([makeTask({ status: "REVIEW", prUrl: "" })]);
     await settle();
-    expect(sentOutcomes).toHaveLength(0);
+    expect(sentOutcomes).toHaveLength(1);
+    expect(sentOutcomes[0]).toMatchObject({ success: null, outcomeMode: "completed" });
   });
 
   it("emits once when the same terminal status is re-observed", async () => {
