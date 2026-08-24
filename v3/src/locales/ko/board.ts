@@ -21,6 +21,11 @@ export const board = {
   "board.column.noTasks": "태스크 없음",
   "board.column.dropHere": "여기에 놓기",
   "board.column.todoHint": "+ 새 태스크로 시작",
+  // 이 컬럼에서 정체 레인으로 빠져나간 티켓의 흔적. 판정이 카드를 조용히
+  // 지우면 사용자는 "일이 없다" 로 읽는다 — 옮겨졌다는 사실을 남긴다.
+  "board.column.stuckAway": "{count}건 정체 레인",
+  "board.column.stuckAwayTip":
+    "이 단계의 티켓이 정체로 판정돼 오른쪽 정체 레인에 있습니다. 눌러서 펼칩니다. 티켓 상태(status)는 그대로입니다.",
 
   // KanbanBoard — 칸반↔그래프 뷰 토글, TaskGraphView
   "board.view.kanban": "칸반",

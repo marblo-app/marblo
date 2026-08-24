@@ -64,6 +64,17 @@ interface KanbanColumnProps {
    * 레이아웃은 마블로 컬럼 그대로, 카드 UI 만 단순화한다(비기너 상단 보드).
    */
   cardCompact?: boolean;
+  /**
+   * 이 컬럼에서 정체 레인으로 **빠져나간** 건수.
+   *
+   * ★정체 판정은 카드를 컬럼에서 조용히 지운다. 컬럼이 0건이 되면 사용자는
+   * "일이 없다" 로 읽지 "옮겨졌다" 로 읽지 않는다 — 외부 리포트가 "일하는
+   * 티켓이 보드에서 사라졌다" 로 올라온 이유가 이것이다. 0 이면 아무것도
+   * 그리지 않는다.
+   */
+  stuckAwayCount?: number;
+  /** 흔적을 눌렀을 때 — 정체 레인을 펴서 그 카드로 데려간다. */
+  onRevealStuck?: () => void;
 }
 
 export function KanbanColumn({
@@ -78,6 +89,8 @@ export function KanbanColumn({
   showWorktreeDiff,
   onAgentClick,
   cardCompact,
+  stuckAwayCount = 0,
+  onRevealStuck,
 }: KanbanColumnProps) {
   const { t } = useTranslation();
   const config = STATUS_CONFIG[status];
@@ -208,6 +221,24 @@ export function KanbanColumn({
           </div>
         )}
       </div>
+      {/* ★정체 레인으로 빠져나간 티켓의 흔적. 컬럼 바닥에 붙여 카드 0건일
+          때도 반드시 보이게 한다 — 이 줄이 없으면 "사라짐" 이 된다. */}
+      {stuckAwayCount > 0 && (
+        <button
+          type="button"
+          data-testid="column-stuck-away"
+          data-column-status={status}
+          onClick={onRevealStuck}
+          disabled={!onRevealStuck}
+          title={t("board.column.stuckAwayTip")}
+          className="flex items-center justify-center gap-1 border-t border-amber-500/20 px-2 py-1.5 text-[11px] font-medium text-amber-400/90 hover:bg-amber-500/10 disabled:cursor-default disabled:hover:bg-transparent"
+        >
+          <span aria-hidden>⏳</span>
+          <span className="truncate">
+            {t("board.column.stuckAway", { count: stuckAwayCount })}
+          </span>
+        </button>
+      )}
     </div>
   );
 }

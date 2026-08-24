@@ -17,7 +17,11 @@ import { useSubscriptionStore } from "../../stores/subscriptionStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { useAuth } from "../../hooks/useAuth";
 import { KanbanColumn } from "./KanbanColumn";
-import { StuckLane } from "./StuckLane";
+import {
+  StuckLane,
+  loadStuckLaneExpanded,
+  persistStuckLaneExpanded,
+} from "./StuckLane";
 import { TaskGraphView } from "./TaskGraphView";
 import { TaskCard } from "./TaskCard";
 import { TaskCreateModal } from "./TaskCreateModal";
@@ -101,6 +105,13 @@ export function KanbanBoard({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showOrchestrator, setShowOrchestrator] = useState(false);
   const [viewMode, setViewMode] = useState<BoardViewMode>(readViewMode);
+  // 정체 레인의 펼침 상태는 보드가 쥔다 — 활성 컬럼의 "n건 정체" 흔적을 눌러
+  // 레인을 펼 수 있어야 하는데, 상태가 레인 안에 갇혀 있으면 그 경로가 없다.
+  const [stuckExpanded, setStuckExpanded] = useState(loadStuckLaneExpanded);
+  useEffect(() => {
+    persistStuckLaneExpanded(stuckExpanded);
+  }, [stuckExpanded]);
+  const revealStuck = useCallback(() => setStuckExpanded(true), []);
 
   const handleTaskClick = useCallback(
     (task: Task) => {
@@ -246,7 +257,12 @@ export function KanbanBoard({
   // BLOCKED/FAILED 는 예전엔 IN_PROGRESS 컬럼에 폴백으로 얹혀 있었다 — 진행
   // 중인 일과 멈춘 일이 한 칸에 섞여 "지금 굴러가는 게 몇 개인가" 를 셀 수
   // 없었다. 이제 둘 다 정체 레인으로 빠지고 활성 4컬럼은 정말 활성만 센다.
-  const { active: activeTasks, stuck, hidden } = useStuckLane(filteredTasks);
+  const {
+    active: activeTasks,
+    stuck,
+    hidden,
+    stuckByStatus,
+  } = useStuckLane(filteredTasks);
 
   const visibleCount = activeTasks.length + stuck.total;
 
@@ -372,6 +388,8 @@ export function KanbanBoard({
             cardCompact={useCompactCards}
             showWorktreeDiff={showWorktreeDiff}
             onAgentClick={onAgentClick}
+            stuckAwayCount={stuckByStatus.get(status) ?? 0}
+            onRevealStuck={revealStuck}
           />
         ))}
         {/* DONE 우측 — 드롭 타깃이 아니다. 정체는 사용자가 끌어다 놓는
@@ -381,6 +399,8 @@ export function KanbanBoard({
           groups={stuck}
           hidden={hidden}
           onTaskClick={columnTaskClick ?? (() => {})}
+          expanded={stuckExpanded}
+          onToggleExpanded={() => setStuckExpanded((v) => !v)}
         />
       </div>
     </div>

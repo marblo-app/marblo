@@ -290,6 +290,219 @@ describe("STALE — 무진척 시계", () => {
   });
 });
 
+describe("★일하는 티켓은 사라지지 않는다 — 에이전트 진척 관측 축 (회귀: AYJyHabfdG1DqeUvun9H)", () => {
+  // 리포트의 본체: 한 시간짜리 일을 성실히 하는 에이전트가 그동안 add_activity
+  // 를 안 남기면 임계(P4+ 20분)에서 no-progress 로 찍혀 활성 컬럼에서 빠졌다.
+  // 열심히 일할수록 보드에서 사라지는 구조. 진척 관측(lib/agentProgress)이
+  // 그 구멍을 막는다.
+  const WORKER = "agent-working";
+  const live = [agent({ id: WORKER, status: "working" })];
+
+  /** P5(20분 임계) 티켓 — 보드 write 는 60분째 없음. */
+  function quietTicket(): Task {
+    return task({
+      id: "t-quiet",
+      status: "IN_PROGRESS",
+      priority: 5,
+      claimedBy: WORKER,
+      claimedAt: new Date(NOW - 60 * MINUTE),
+      updatedAt: new Date(NOW - 60 * MINUTE),
+    });
+  }
+
+  it("★관측이 없으면 종전대로 STALE — 이 축은 없어도 동작이 나빠지지 않는다", () => {
+    expect(classifyStuck(quietTicket(), ctx({ agents: live }))).toMatchObject({
+      kind: "STALE",
+      staleReason: "no-progress",
+    });
+  });
+
+  it("★담당 에이전트가 5분 전까지 실제로 일한 게 관측되면 20분이 지나도 정체가 아니다", () => {
+    expect(
+      classifyStuck(
+        quietTicket(),
+        ctx({
+          agents: live,
+          agentActivityAt: new Map([[WORKER, NOW - 5 * MINUTE]]),
+        }),
+      ),
+    ).toBe(null);
+  });
+
+  it("관측도 임계를 넘겨 낡았으면 정체가 맞다 — 무한 면제가 아니다", () => {
+    expect(
+      classifyStuck(
+        quietTicket(),
+        ctx({
+          agents: live,
+          agentActivityAt: new Map([[WORKER, NOW - 40 * MINUTE]]),
+        }),
+      ),
+    ).toMatchObject({ kind: "STALE", staleReason: "no-progress" });
+  });
+
+  it("★다른 에이전트의 활동으로는 면제되지 않는다 — 바인딩된 담당의 관측만 본다", () => {
+    expect(
+      classifyStuck(
+        quietTicket(),
+        ctx({
+          agents: live,
+          agentActivityAt: new Map([["someone-else", NOW]]),
+        }),
+      ),
+    ).toMatchObject({ kind: "STALE", staleReason: "no-progress" });
+  });
+
+  it("담당을 못 찾은 티켓(agent-missing)은 관측 축이 구해주지 않는다", () => {
+    // 관측은 agentId 로 걸린다 — 바인딩이 없으면 조회할 키 자체가 없다.
+    const orphan = task({
+      id: "t-orphan",
+      status: "IN_PROGRESS",
+      claimedBy: "ghost",
+      updatedAt: new Date(NOW - 60 * MINUTE),
+    });
+    expect(
+      classifyStuck(
+        orphan,
+        ctx({ agents: live, agentActivityAt: new Map([[WORKER, NOW]]) }),
+      ),
+    ).toMatchObject({ kind: "STALE", staleReason: "agent-missing" });
+  });
+
+  it("lastProgressAt 은 인자를 안 주면 종전과 완전히 동일하다", () => {
+    const ticket = quietTicket();
+    expect(lastProgressAt(ticket)).toBe(NOW - 60 * MINUTE);
+    expect(lastProgressAt(ticket, new Map([[WORKER, NOW]]), WORKER)).toBe(NOW);
+    // 키가 없으면 후보가 안 늘어난다.
+    expect(lastProgressAt(ticket, new Map([[WORKER, NOW]]), "other")).toBe(
+      NOW - 60 * MINUTE,
+    );
+  });
+});
+
+describe("★상태별 가시성 표 — 일곱 status 가 전부 어딘가에 보인다 (회귀)", () => {
+  // 외부 리포트의 O/X 표: TODO O · CLAIMED X · IN_PROGRESS X · REVIEW O ·
+  // BLOCKED O · DONE O · FAILED 미관측. X 두 칸의 정체가 "살아 일하는 담당"
+  // 이었다는 것이 이 티켓의 사실관계다. 수정 후 전부 O 가 되어야 한다.
+  const WORKER = "a-live";
+
+  function boardOfEveryStatus(): Task[] {
+    const statuses: TaskStatus[] = [
+      "TODO",
+      "CLAIMED",
+      "IN_PROGRESS",
+      "REVIEW",
+      "BLOCKED",
+      "FAILED",
+      "DONE",
+    ];
+    return statuses.map((status) =>
+      task({
+        id: status,
+        status,
+        priority: 5, // 가장 빡빡한 20분 임계로 검증한다.
+        claimedBy: status === "TODO" ? null : WORKER,
+        claimedAt: new Date(NOW - 60 * MINUTE),
+        updatedAt: new Date(NOW - 60 * MINUTE),
+      }),
+    );
+  }
+
+  it("살아 일하는 담당이 붙은 CLAIMED/IN_PROGRESS 는 활성 컬럼에 남는다", () => {
+    const result = partitionBoardTasks(
+      boardOfEveryStatus(),
+      ctx({
+        agents: [agent({ id: WORKER, status: "working" })],
+        agentActivityAt: new Map([[WORKER, NOW - MINUTE]]),
+      }),
+    );
+
+    expect(result.active.map((t) => t.id).sort()).toEqual([
+      "CLAIMED",
+      "DONE",
+      "IN_PROGRESS",
+      "REVIEW",
+      "TODO",
+    ]);
+    // 나머지 둘은 사라진 게 아니라 정체 레인에서 **보인다**.
+    expect(result.stuck.blocked.map((t) => t.id)).toEqual(["BLOCKED"]);
+    expect(result.stuck.failed.map((t) => t.id)).toEqual(["FAILED"]);
+    expect(result.stuck.total).toBe(2);
+    // 일곱 개 전부 어딘가에 있고, 어디에도 중복되지 않는다.
+    const seen = [
+      ...result.active,
+      ...result.stuck.blocked,
+      ...result.stuck.failed,
+      ...result.stuck.stale,
+    ].map((t) => t.id);
+    expect(seen).toHaveLength(7);
+    expect(new Set(seen).size).toBe(7);
+  });
+
+  it("★정체로 빠진 티켓은 원래 컬럼에 건수 흔적을 남긴다 (stuckByStatus)", () => {
+    const result = partitionBoardTasks(
+      [
+        task({ id: "todo", status: "TODO" }),
+        task({
+          id: "claimed-stale",
+          status: "CLAIMED",
+          claimedBy: "ghost",
+          updatedAt: new Date(NOW - 90 * MINUTE),
+        }),
+        task({
+          id: "running-stale-1",
+          status: "IN_PROGRESS",
+          claimedBy: "ghost",
+          updatedAt: new Date(NOW - 90 * MINUTE),
+        }),
+        task({
+          id: "running-stale-2",
+          status: "IN_PROGRESS",
+          claimedBy: "ghost",
+          updatedAt: new Date(NOW - 90 * MINUTE),
+        }),
+        task({ id: "blocked", status: "BLOCKED" }),
+        task({ id: "failed", status: "FAILED" }),
+      ],
+      ctx(),
+    );
+
+    expect(result.stuckByStatus.get("CLAIMED")).toBe(1);
+    expect(result.stuckByStatus.get("IN_PROGRESS")).toBe(2);
+    // 활성 컬럼이 아닌 status 도 세어 두지만 컬럼은 자기 키만 본다.
+    expect(result.stuckByStatus.get("BLOCKED")).toBe(1);
+    expect(result.stuckByStatus.get("FAILED")).toBe(1);
+    // 정체가 하나도 없는 컬럼은 키 자체가 없다 → 흔적을 안 그린다.
+    expect(result.stuckByStatus.get("TODO")).toBeUndefined();
+    expect(result.stuckByStatus.get("REVIEW")).toBeUndefined();
+    expect(result.stuckByStatus.get("DONE")).toBeUndefined();
+
+    // 합은 언제나 정체 총계와 같다 — 흔적의 합이 레인 배지와 어긋나면 사람이
+    // 티켓을 세다 잃어버린다.
+    const traced = [...result.stuckByStatus.values()].reduce(
+      (a, b) => a + b,
+      0,
+    );
+    expect(traced).toBe(result.stuck.total);
+  });
+
+  it("감춘(보관·삭제) 티켓은 흔적에도 안 잡힌다 — 복구 서랍이 따로 담당한다", () => {
+    const result = partitionBoardTasks(
+      [
+        task({
+          id: "archived",
+          status: "IN_PROGRESS",
+          claimedBy: "ghost",
+          archived: true,
+        }),
+      ],
+      ctx(),
+    );
+    expect(result.stuckByStatus.size).toBe(0);
+    expect(result.hidden.map((t) => t.id)).toEqual(["archived"]);
+  });
+});
+
 describe("콜드 부팅 오탐 가드", () => {
   it("에이전트 스냅샷 도착 전(agentsLoaded=false)에는 '에이전트 없음' 을 정체로 치지 않는다", () => {
     const ticket = task({

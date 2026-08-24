@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Archive, ChevronDown, ChevronRight, RotateCw, X } from "lucide-react";
 import type { Task } from "../../types/task";
 import type { StuckGroups, StuckKind, StuckVerdict } from "../../lib/stuckLane";
@@ -10,8 +10,15 @@ import type { FailedState } from "../common/loadState";
 
 const EXPANDED_STORAGE_KEY = "marblo.board.stuckLane.expanded";
 
-/** 기본은 접힘. 사용자가 편 상태는 세션을 넘어 유지된다. */
-function loadExpanded(): boolean {
+/**
+ * 기본은 접힘. 사용자가 편 상태는 세션을 넘어 유지된다.
+ *
+ * ★펼침 상태의 주인은 이 컴포넌트가 아니라 보드(KanbanBoard)다: 활성 컬럼의
+ * "n건이 정체 레인에 있습니다" 흔적을 누르면 레인이 펴져야 하는데, 상태가
+ * 레인 안에 갇혀 있으면 그 경로가 존재할 수 없다. 그래서 로드·저장만 여기서
+ * 내보내고 상태 자체는 보드가 쥔다.
+ */
+export function loadStuckLaneExpanded(): boolean {
   try {
     if (typeof localStorage === "undefined") return false;
     return localStorage.getItem(EXPANDED_STORAGE_KEY) === "1";
@@ -20,7 +27,7 @@ function loadExpanded(): boolean {
   }
 }
 
-function persistExpanded(expanded: boolean): void {
+export function persistStuckLaneExpanded(expanded: boolean): void {
   try {
     if (typeof localStorage === "undefined") return;
     localStorage.setItem(EXPANDED_STORAGE_KEY, expanded ? "1" : "0");
@@ -43,7 +50,13 @@ interface StuckLaneProps {
   /** 보관·삭제로 감춘 티켓 — 복구 서랍에만 쓰인다. */
   hidden: Task[];
   onTaskClick: (task: Task) => void;
+  /** 펼침 여부. 상태의 주인은 보드다({@link loadStuckLaneExpanded} 주석 참조). */
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }
+
+/** 접힌 레인에 세울 그룹 순서 — 펼친 뒤 서브그룹 순서와 같아야 한다. */
+const SUBGROUP_ORDER: StuckKind[] = ["BLOCKED", "FAILED", "STALE"];
 
 /**
  * DONE 우측의 **가상** 정체 레인.
@@ -53,17 +66,31 @@ interface StuckLaneProps {
  * 3그룹으로 갈려 보이고, 정체가 풀리면(에이전트 재기동·활동 재개) 카드는
  * 아무 write 없이 원래 컬럼으로 돌아간다.
  */
-export function StuckLane({ groups, hidden, onTaskClick }: StuckLaneProps) {
+export function StuckLane({
+  groups,
+  hidden,
+  onTaskClick,
+  expanded,
+  onToggleExpanded,
+}: StuckLaneProps) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(loadExpanded);
   const [showHidden, setShowHidden] = useState(false);
   const actions = useStuckTaskActions();
 
-  useEffect(() => {
-    persistExpanded(expanded);
-  }, [expanded]);
-
   const { blocked, failed, stale, total } = groups;
+
+  // 접힌 채로도 **무엇이** 몇 건인지 보여야 한다. 총계 하나만 보이면
+  // "실패한 작업이 조용히 사라진" 상태와 "정체 몇 건" 이 같은 배지로 뭉개진다.
+  const counts: Record<StuckKind, number> = {
+    BLOCKED: blocked.length,
+    FAILED: failed.length,
+    STALE: stale.length,
+  };
+  const nonEmpty = SUBGROUP_ORDER.filter((kind) => counts[kind] > 0);
+  // 스크린리더도 같은 사실을 듣는다 — 배지는 시각 전용이 아니다.
+  const breakdown = nonEmpty
+    .map((kind) => `${t(`board.stuck.group.${kind}`)} ${counts[kind]}`)
+    .join(", ");
 
   return (
     <div
@@ -76,9 +103,13 @@ export function StuckLane({ groups, hidden, onTaskClick }: StuckLaneProps) {
     >
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={onToggleExpanded}
         aria-expanded={expanded}
-        aria-label={`${t("board.stuck.title")} (${total})`}
+        aria-label={
+          breakdown
+            ? `${t("board.stuck.title")} (${total}) — ${breakdown}`
+            : `${t("board.stuck.title")} (${total})`
+        }
         title={t("board.stuck.tooltip")}
         className={`flex items-center gap-1.5 px-2 py-2 text-left hover:bg-gray-800/50 ${
           expanded
@@ -114,6 +145,31 @@ export function StuckLane({ groups, hidden, onTaskClick }: StuckLaneProps) {
             style={{ writingMode: "vertical-rl" }}
           >
             {t("board.stuck.title")}
+          </span>
+        )}
+        {/* ★접힌 레인의 그룹별 건수. 세 그룹 중 무엇이 몇 건인지 펴지 않고도
+            보인다 — BLOCKED 는 사람을 기다리는 것이고 FAILED 는 이미 실패한
+            것이라, 둘이 같은 총계 배지 뒤에 숨으면 "조용히 사라진 실패" 가
+            된다. 0건 그룹은 그리지 않는다(없는 것을 세는 배지는 소음이다). */}
+        {!expanded && nonEmpty.length > 0 && (
+          <span className="mt-2 flex flex-col items-center gap-1">
+            {nonEmpty.map((kind) => (
+              <span
+                key={kind}
+                data-testid={`stuck-collapsed-count-${kind}`}
+                title={`${t(`board.stuck.group.${kind}`)} ${counts[kind]}`}
+                className="flex flex-col items-center leading-none"
+              >
+                <span aria-hidden className="text-[10px]">
+                  {SUBGROUP_STYLE[kind].icon}
+                </span>
+                <span
+                  className={`text-[10px] font-semibold tabular-nums ${SUBGROUP_STYLE[kind].color}`}
+                >
+                  {counts[kind]}
+                </span>
+              </span>
+            ))}
           </span>
         )}
       </button>

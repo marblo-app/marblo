@@ -114,6 +114,19 @@ export interface StuckContext {
   now: number;
   /** taskId → 워크트리 idleDays (worktreeStore 스냅샷에서 1패스로 만든다). */
   worktreeIdleDays?: ReadonlyMap<string, number>;
+  /**
+   * agentId → 이 에이전트가 **실제로 일하는 것을 마지막으로 관측한** 시각.
+   *
+   * 보드 write 가 아니라 과금 토큰 카운터의 증가에서 온다(lib/agentProgress).
+   * 근거와 한계는 그 파일에 있다 — 요약하면 PTY 바이트 파생이 아니고, 없으면
+   * 그냥 종전 동작이며, 티켓을 정체에서 **구해내기만** 하고 몰지는 않는다.
+   *
+   * ★이 축이 필요한 이유: 위 세 후보(lastActivityAt/updatedAt/claimedAt)는
+   * 전부 "보드에 뭔가 적힌 시각" 이다. 한 시간짜리 일을 성실히 하는 중이라도
+   * 그동안 add_activity 를 안 남기면 임계에서 no-progress 로 찍혀 카드가 활성
+   * 컬럼에서 사라졌다. 열심히 일할수록 사라지는 구조였다.
+   */
+  agentActivityAt?: ReadonlyMap<string, number>;
   /** 무진척 임계 override (기본은 티켓 우선순위별 {@link staleThresholdFor}). */
   thresholdMs?: number;
 }
@@ -175,14 +188,24 @@ export function findBoundAgent<T extends StuckAgentSnapshot>(
  *  - `updatedAt` — 모든 write 가 올린다(구 문서엔 projection 자체가 없다).
  *  - `claimedAt` — 배정 직후 아직 아무 활동도 없는 티켓의 시작점. 이게 없으면
  *    갓 배정된 티켓이 즉시 무진척으로 보인다.
+ *  - ★담당 에이전트의 마지막 **일한 관측**(agentActivityAt) — 위 셋이 전부
+ *    "보드에 적힌 시각" 이라 보고를 안 남기고 일하는 구간을 통째로 놓친다.
+ *    근거는 lib/agentProgress 참조. 인자가 없으면 종전과 완전히 동일하다.
  */
-export function lastProgressAt(task: Task): number | null {
+export function lastProgressAt(
+  task: Task,
+  agentActivityAt?: ReadonlyMap<string, number>,
+  agentId?: string,
+): number | null {
   const projection = (task as { projection?: { lastActivityAt?: unknown } })
     .projection;
   const candidates = [
     toMillis(projection?.lastActivityAt),
     toMillis(task.updatedAt),
     toMillis(task.claimedAt),
+    agentId === undefined
+      ? null
+      : toMillis(agentActivityAt?.get(agentId) ?? null),
   ].filter((ms): ms is number => ms !== null);
   if (candidates.length === 0) return null;
   return Math.max(...candidates);
@@ -232,11 +255,15 @@ export function classifyStuck(
 
 function classifyStale(task: Task, ctx: StuckContext): StuckVerdict | null {
   const threshold = ctx.thresholdMs ?? staleThresholdFor(task);
-  const progressAt = lastProgressAt(task);
+  const agent = findBoundAgent(ctx.agents, task);
+  const progressAt = lastProgressAt(
+    task,
+    agent ? ctx.agentActivityAt : undefined,
+    agent?.id,
+  );
   const idleMs =
     progressAt === null ? undefined : Math.max(0, ctx.now - progressAt);
 
-  const agent = findBoundAgent(ctx.agents, task);
   if (!agent) {
     // 에이전트 구독이 아직 스냅샷을 못 받았으면 "없음" 을 신뢰하지 않는다.
     if (ctx.agentsLoaded) {
@@ -278,6 +305,19 @@ export interface BoardPartition {
    * 함정이다. 정체 레인이 이 목록으로 복구 서랍을 그린다.
    */
   hidden: Task[];
+  /**
+   * status → 그 컬럼에서 정체 레인으로 **빠져나간** 건수.
+   *
+   * ★이 버그의 본체는 오판 자체가 아니라 "사람이 티켓을 못 찾는다" 였다.
+   * 정체 판정은 카드를 컬럼에서 조용히 지운다 — 컬럼이 0건이 되면 사용자는
+   * "일이 없다" 로 읽지, "다른 데로 옮겨졌다" 로 읽지 않는다. 컬럼이 자기
+   * 자리에 흔적을 남길 수 있도록 판정과 **같은 한 패스**에서 세어 둔다
+   * (컬럼이 각자 다시 세면 판정과 어긋날 수 있다).
+   *
+   * 키는 티켓의 **원래 status** 다. 그래서 BLOCKED/FAILED 키도 생기지만 활성
+   * 5컬럼은 자기 status 만 조회하므로 자연히 무시된다.
+   */
+  stuckByStatus: ReadonlyMap<TaskStatus, number>;
 }
 
 /**
@@ -296,6 +336,7 @@ export function partitionBoardTasks(
   const stale: Task[] = [];
   const verdicts = new Map<string, StuckVerdict>();
   const hidden: Task[] = [];
+  const stuckByStatus = new Map<TaskStatus, number>();
 
   for (const task of tasks) {
     if (isHiddenTask(task)) {
@@ -308,6 +349,7 @@ export function partitionBoardTasks(
       continue;
     }
     verdicts.set(task.id, verdict);
+    stuckByStatus.set(task.status, (stuckByStatus.get(task.status) ?? 0) + 1);
     if (verdict.kind === "BLOCKED") blocked.push(task);
     else if (verdict.kind === "FAILED") failed.push(task);
     else stale.push(task);
@@ -323,5 +365,6 @@ export function partitionBoardTasks(
       total: blocked.length + failed.length + stale.length,
     },
     hidden,
+    stuckByStatus,
   };
 }

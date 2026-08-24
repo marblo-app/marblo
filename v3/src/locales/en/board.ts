@@ -23,6 +23,10 @@ export const board: Record<keyof typeof koBoard, string> = {
   "board.column.noTasks": "No tasks",
   "board.column.dropHere": "Drop here",
   "board.column.todoHint": "+ Start with New Task",
+  // Trace left behind when this column's tickets moved to the Stuck lane.
+  "board.column.stuckAway": "{count} in Stuck",
+  "board.column.stuckAwayTip":
+    "Tickets from this stage were judged stuck and sit in the Stuck lane on the right. Click to open it. Their status is unchanged.",
 
   // KanbanBoard — kanban↔graph view toggle, TaskGraphView
   "board.view.kanban": "Kanban",

@@ -50,6 +50,24 @@ interface AgentState {
    * 로드 완료를 모두 false 로 뭉개서 이 구분을 못 한다.
    */
   hydrated: boolean;
+  /**
+   * `agents` 스냅샷이 **어느 프로젝트의 것인가**. 구독 시작 시 즉시 찍고,
+   * 프로젝트 없이 구독하면 null 이다.
+   *
+   * ★이 필드가 없으면 "에이전트 목록" 이 어느 프로젝트 것인지 아무도 모른다.
+   * 이 스토어는 단일 슬롯인데 구독자는 여럿이고(AgentsTab · TeamDashboard ·
+   * AgentListPanel · UsagePage · MacroView · **MissionDetail**), 그중
+   * MissionDetail 은 `mission.projectId` 로 구독한다 — 다른 프로젝트 미션을
+   * 한 번 열면 목록이 통째로 그 프로젝트 것으로 바뀐 채 `hydrated` 는 true 로
+   * 남는다. 그 상태에서 보드의 정체 판정이 "담당 에이전트가 목록에 없다" 를
+   * 곧이곧대로 믿으면, **멀쩡히 굴러가는 진행 중 티켓 전부**가 STALE 로 찍혀
+   * 접힌 정체 레인으로 빨려 들어간다(외부 리포트 AYJyHabfdG1DqeUvun9H 의
+   * 증상 그대로다 — 데이터는 정상, 화면에서만 사라짐).
+   *
+   * 읽는 쪽은 반드시 자기 프로젝트와 대조하고, 다르면 "아직 안 왔다" 로
+   * 취급해야 한다(hooks/useStuckLane.ts).
+   */
+  agentsProjectId: string | null;
   error: string | null;
 
   subscribeToAgents: (projectId: string) => () => void;
@@ -69,14 +87,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   ownedAgents: [],
   loading: false,
   hydrated: false,
+  agentsProjectId: null,
   error: null,
 
   subscribeToAgents: (projectId: string) => {
     if (!projectId) {
-      set({ agents: [], loading: false, hydrated: false });
+      set({
+        agents: [],
+        loading: false,
+        hydrated: false,
+        agentsProjectId: null,
+      });
       return () => {};
     }
-    set({ loading: true, hydrated: false });
+    // 소유 프로젝트를 **구독 시작 시점에** 찍는다. 스냅샷이 도착할 때가 아니라
+    // 지금이어야, 이전 프로젝트의 목록이 hydrated=true 인 채로 남아 있는 창을
+    // 읽는 쪽이 곧바로 알아챈다.
+    set({ loading: true, hydrated: false, agentsProjectId: projectId });
     return subscribeToCollection<Record<string, unknown>>(
       COLLECTION,
       [where("projectId", "==", projectId)],
@@ -85,6 +112,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           agents: dedupeAgentsById(docs.map(toAgent)),
           loading: false,
           hydrated: true,
+          agentsProjectId: projectId,
         });
       },
     );
