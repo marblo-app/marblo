@@ -109,7 +109,7 @@ export default function ActivityFeed({ projectId, agents }: ActivityFeedProps) {
             return (
               <div
                 key={activity.id}
-                className="flex items-start gap-2 rounded px-2 py-1.5 hover:bg-gray-750"
+                className="flex items-start gap-2 rounded px-2 py-1.5 hover:bg-gray-700"
               >
                 {/* Agent icon */}
                 <div className="mt-0.5 shrink-0">

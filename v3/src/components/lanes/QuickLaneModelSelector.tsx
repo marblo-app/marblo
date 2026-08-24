@@ -107,7 +107,7 @@ export function QuickLaneModelSelector({
                 className={`rounded border px-2.5 py-1 text-xs transition-colors ${
                   isActive
                     ? "border-blue-500 bg-blue-500/15 text-gray-100"
-                    : "border-gray-700 bg-gray-750 text-gray-400 hover:bg-gray-700"
+                    : "border-gray-700 bg-gray-700/50 text-gray-400 hover:bg-gray-700"
                 } disabled:cursor-not-allowed disabled:opacity-40`}
               >
                 {group.label}
@@ -160,7 +160,7 @@ export function QuickLaneModelSelector({
                   className={`flex w-full items-center gap-2 rounded border px-2.5 py-1.5 text-xs transition-colors ${
                     isActive
                       ? "border-blue-500 bg-blue-500/15 text-gray-100"
-                      : "border-gray-700 bg-gray-750 text-gray-400 hover:bg-gray-700"
+                      : "border-gray-700 bg-gray-700/50 text-gray-400 hover:bg-gray-700"
                   } disabled:cursor-not-allowed disabled:opacity-50`}
                 >
                   <span className="flex-1 text-left font-mono">
@@ -205,7 +205,7 @@ export function QuickLaneModelSelector({
                   className={`rounded border px-2.5 py-1 text-xs transition-colors ${
                     isActive
                       ? "border-blue-500 bg-blue-500/15 text-gray-100"
-                      : "border-gray-700 bg-gray-750 text-gray-400 hover:bg-gray-700"
+                      : "border-gray-700 bg-gray-700/50 text-gray-400 hover:bg-gray-700"
                   } disabled:cursor-not-allowed disabled:opacity-50`}
                 >
                   {effort ||

@@ -245,7 +245,7 @@ export default function AgentAddModal({
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded text-sm text-left transition-colors ${
                     model === opt.value
                       ? "bg-gray-600 border border-gray-500 text-gray-100"
-                      : "bg-gray-750 border border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-gray-300"
+                      : "bg-gray-700/50 border border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-gray-300"
                   }`}
                   style={
                     model === opt.value

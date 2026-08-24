@@ -422,7 +422,7 @@ function TaskCardContent({
 
   return (
     <div
-      className={`relative cursor-pointer rounded-lg bg-gray-800 p-3 shadow hover:bg-gray-750 transition-colors border border-gray-700/50 hover:border-gray-600 ${statusHighlight} ${
+      className={`relative cursor-pointer rounded-lg bg-gray-800 p-3 shadow hover:bg-gray-700 transition-colors border border-gray-700/50 hover:border-gray-600 ${statusHighlight} ${
         isDragging ? "ring-2 ring-blue-500" : ""
       } ${isLaneTask(task.contextId) ? "border-l-2 border-l-amber-500" : ""} ${
         isMissionTask(task.contextId) ? "border-l-2 border-l-violet-500" : ""

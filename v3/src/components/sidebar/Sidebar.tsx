@@ -87,7 +87,7 @@ export function Sidebar({
     return (
       <button
         onClick={onToggle}
-        className="flex h-full w-10 flex-col items-center border-r border-gray-700 bg-gray-800 pt-2 hover:bg-gray-750"
+        className="flex h-full w-10 flex-col items-center border-r border-gray-700 bg-gray-800 pt-2 hover:bg-gray-700"
         title={t("sidebar.open")}
       >
         <svg

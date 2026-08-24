@@ -181,8 +181,7 @@ export default function UnifiedActivityFeed({
             return (
               <div
                 key={activity.id}
-                className={`rounded border-l-2 ${memberColors[colorIdx]} bg-gray-750 px-3 py-2`}
-                style={{ backgroundColor: "rgb(38, 42, 51)" }}
+                className={`rounded border-l-2 ${memberColors[colorIdx]} bg-gray-700/50 px-3 py-2`}
               >
                 <div className="flex items-center gap-2 mb-0.5">
                   {agent && (

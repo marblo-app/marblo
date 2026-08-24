@@ -94,7 +94,7 @@ export function PaneGroup({
                 className={`group flex cursor-pointer items-center gap-1.5 border-r border-gray-700 px-3 py-1.5 text-[13px] ${
                   isActive
                     ? "border-b-2 border-b-blue-500 bg-gray-700 text-white"
-                    : "text-gray-400 hover:bg-gray-750 hover:text-gray-200"
+                    : "text-gray-400 hover:bg-gray-700/50 hover:text-gray-200"
                 }`}
                 title={PANE_TITLES[pane.kind]}
               >
