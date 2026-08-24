@@ -6,6 +6,7 @@ export * from "./flow";
 export * from "./mission";
 export * from "./subscription";
 export * from "./invitation";
+export * from "./organization";
 export * from "./user";
 export * from "./collaboration";
 export * from "./chat";
