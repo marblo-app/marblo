@@ -233,11 +233,13 @@ const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
 /**
  * Relative node_modules locations to provision into a fresh worktree, in the
  * order they are linked. Monorepo-aware: node_modules can live at the repo root
- * and/or under the `v3/` package, so we link whichever sources actually exist.
+ * and/or under packages with their own dependency trees that agents commonly
+ * test from isolated worktrees, so we link whichever sources actually exist.
  */
 const NODE_MODULES_CANDIDATES = [
   "node_modules",
   path.join("v3", "node_modules"),
+  path.join("v3", "functions", "node_modules"),
 ];
 
 /**
@@ -245,8 +247,8 @@ const NODE_MODULES_CANDIDATES = [
  * isolated agent can run npm typecheck/test/build without a fresh install.
  * node_modules is `.gitignore`d, so it never exists in a fresh checkout.
  *
- * For each candidate (repo root + the v3 monorepo package), if the source
- * exists under `repoRoot` it is linked to the matching path under
+ * For each candidate (repo root + selected v3 package dependency dirs), if the
+ * source exists under `repoRoot` it is linked to the matching path under
  * `worktreePath` with an ABSOLUTE symlink (no copy → instant, zero disk).
  *
  * - Idempotent: any existing entry at the target — including a symlink, even a

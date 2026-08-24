@@ -252,6 +252,33 @@ describe("WorktreeManager — node_modules provisioning", () => {
     );
   });
 
+  it("symlinks v3/functions node_modules into a new worktree", async () => {
+    const functionsNodeModules = path.join(
+      repoRoot,
+      "v3",
+      "functions",
+      "node_modules",
+    );
+    fs.mkdirSync(functionsNodeModules, { recursive: true });
+    fs.writeFileSync(path.join(functionsNodeModules, ".marker"), "functions\n");
+
+    const info = await mgr.create({
+      repoRoot,
+      projectId: "p",
+      taskId: "funcmods0001",
+      slug: "functions deps",
+    });
+
+    const link = path.join(info.path, "v3", "functions", "node_modules");
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    const target = fs.readlinkSync(link);
+    expect(path.isAbsolute(target)).toBe(true);
+    expect(fs.realpathSync(link)).toBe(fs.realpathSync(functionsNodeModules));
+    expect(fs.readFileSync(path.join(link, ".marker"), "utf8")).toBe(
+      "functions\n",
+    );
+  });
+
   it("is idempotent — a second provision is a no-op and never throws", () => {
     fs.mkdirSync(path.join(repoRoot, "node_modules"));
     // Stand-in worktree dir (real create() would produce this).
