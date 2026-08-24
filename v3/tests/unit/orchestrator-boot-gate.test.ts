@@ -24,6 +24,8 @@ import {
   QUIET_AFTER_ECHO_MS,
   SILENT_OPEN_MS,
   SILENT_OPEN_BOOTED_MS,
+  POST_BOOT_GRACE_MS,
+  parsePtySpawnedAt,
   forgetPtyBootSeen,
   hasPtyBootSeen,
 } from "../../src/lib/orchestratorBootGate";
@@ -93,11 +95,19 @@ interface Harness {
   output: () => string;
 }
 
-function makeGate(opts: { sink?: boolean; sessionId?: string } = {}): Harness {
+function makeGate(
+  opts: {
+    sink?: boolean;
+    sessionId?: string;
+    /** PTY 가 이만큼 전에 떴다고 본다 — 닫힌 상태 예산의 기준점(스폰 나이). */
+    ptyAgeMs?: number;
+  } = {},
+): Harness {
   let now = 1_000_000;
   const timers: Array<{ at: number; fn: () => void; cancelled: boolean }> = [];
   const gate = new OrchestratorBootGate({
     sessionId: opts.sessionId,
+    ptySpawnedAt: opts.ptyAgeMs === undefined ? null : now - opts.ptyAgeMs,
     now: () => now,
     setTimer: (fn, ms) => {
       const entry = { at: now + ms, fn, cancelled: false };
@@ -466,5 +476,235 @@ describe("OrchestratorBootGate — 비기너 첫 화면", () => {
       h.gate.feed(chunk);
     h.gate.feed(historyChunk(GREETING_LINES));
     expect(seen).toEqual(["armed", "open"]);
+  });
+});
+
+// ── 부트 예산은 PTY 스폰 시각부터(티켓 04mJqRvSi0QDCboyxzKF) ────────────────
+// 종전엔 `maxArmedMs` 가 **이 마운트가 배너를 본 순간**부터 돌았다. 그래서 몇
+// 분째 일하고 있는 오케로 화면이 다시 뜨면(마블로 → 비기너 전환) 재생 링의
+// 지나간 배너를 지금 일어나는 부팅으로 오인해 60초를 처음부터 다시 셌다.
+// 아래가 그 구멍의 계약이다. ★문은 그대로다 — 갓 뜬 PTY 의 예산은 종전과 같다.
+describe("OrchestratorBootGate — 닫힌 상태의 예산은 PTY 스폰부터 잰다", () => {
+  it("sid 에서 스폰 시각을 읽는다 — 형식은 orch-<sess>-<Date.now()>", () => {
+    expect(parsePtySpawnedAt("orch-orchestrator-proj-1700000000000")).toBe(
+      1_700_000_000_000,
+    );
+    // 프로젝트 id 가 숫자로 끝나도 마지막 13자리 이상 그룹만 시각이다.
+    expect(parsePtySpawnedAt("orch-orchestrator-proj-42-1700000000000")).toBe(
+      1_700_000_000_000,
+    );
+    // 못 읽는 형식은 null — 그 경우 예산은 종전대로 마운트 기준이다.
+    expect(parsePtySpawnedAt("orch-bootgate-nope")).toBeNull();
+    expect(parsePtySpawnedAt("orch-sess-12345")).toBeNull();
+    expect(parsePtySpawnedAt(null)).toBeNull();
+  });
+
+  it("★몇 분째 일하고 있는 오케로 리마운트하면 armed 가 60초를 다시 세지 않는다", () => {
+    // 재생 링에 부트가 가득하고 어시스턴트 발화는 아직 없다 = 사장님 화면.
+    const h = makeGate({ ptyAgeMs: 5 * 60_000 });
+    for (const chunk of fixtureChunks("codex-ready-composer"))
+      h.gate.feed(chunk);
+    expect(h.gate.state).toBe("armed");
+
+    // 유예 안에는 아직 닫혀 있다 — 링 직후 도착하는 라이브 인사말을 받는 창.
+    h.advance(POST_BOOT_GRACE_MS - 1);
+    expect(h.gate.state).toBe("armed");
+    h.advance(2);
+    expect(h.gate.state).toBe("open");
+    expect(h.gate.openReason).toBe("max-armed");
+    // 버린 채로 연다 — 지나간 부트는 여전히 안 보여준다.
+    expect(h.output()).toBe("");
+    for (const s of FORBIDDEN) expect(h.output()).not.toContain(s);
+  });
+
+  it("★유예 안에 인사말이 오면 그 줄부터 통과한다 — 리마운트라고 인사말을 잃지 않는다", () => {
+    const h = makeGate({ ptyAgeMs: 5 * 60_000 });
+    for (const chunk of fixtureChunks("codex-ready-composer"))
+      h.gate.feed(chunk);
+    h.advance(POST_BOOT_GRACE_MS - 500);
+    h.gate.feed(historyChunk(GREETING_LINES));
+    expect(h.gate.state).toBe("open");
+    expect(h.gate.openReason).toBe("assistant-line");
+    expect(h.output()).toContain(GREETING_LINES[0]);
+    for (const s of FORBIDDEN) expect(h.output()).not.toContain(s);
+  });
+
+  it("★갓 뜬 PTY(진짜 부팅 중)의 문은 그대로다 — 예산을 깎지 않는다", () => {
+    const h = makeGate({ ptyAgeMs: 1_000 });
+    for (const chunk of fixtureChunks("codex-ready-composer"))
+      h.gate.feed(chunk);
+    expect(h.gate.state).toBe("armed");
+    // 유예(2.5초)를 훌쩍 넘겨도 닫혀 있다 — 부팅은 아직 안 끝났다.
+    h.advance(POST_BOOT_GRACE_MS * 4);
+    expect(h.gate.state).toBe("armed");
+    // 종전 상한까지는 종전대로 기다린다(스폰 나이 1초만 깎인다).
+    h.advance(MAX_ARMED_MS - 1_000 - POST_BOOT_GRACE_MS * 4 - 1);
+    expect(h.gate.state).toBe("armed");
+    h.advance(2);
+    expect(h.gate.state).toBe("open");
+    expect(h.gate.openReason).toBe("max-armed");
+    expect(h.output()).toBe("");
+  });
+
+  it("★오래 산 PTY 가 0바이트여도 침묵 시한이 60초를 다 쓰지 않는다", () => {
+    const h = makeGate({ ptyAgeMs: 5 * 60_000 });
+    h.advance(POST_BOOT_GRACE_MS - 1);
+    expect(h.gate.state).toBe("probing");
+    h.advance(2);
+    expect(h.gate.state).toBe("open");
+    expect(h.gate.openReason).toBe("silent");
+    expect(h.output()).toBe("");
+  });
+
+  it("스폰 시각을 모르면 종전 그대로 — 이 규칙은 시한을 만들지도 늘리지도 않는다", () => {
+    const h = makeGate();
+    for (const chunk of fixtureChunks("codex-ready-composer"))
+      h.gate.feed(chunk);
+    h.advance(MAX_ARMED_MS - 1);
+    expect(h.gate.state).toBe("armed");
+    h.advance(2);
+    expect(h.gate.state).toBe("open");
+    expect(h.gate.openReason).toBe("max-armed");
+  });
+});
+
+// ── 리마운트가 반복되면 어떤 마감도 안 터진다 (티켓 04mJqRvSi0QDCboyxzKF) ──
+// 사장님 실화면의 모순: "골격 + 준비하고 있어요 + 계속 시도 중" 이 **끝까지** 남는다.
+// 게이트의 마감은 셋 다 있는데(침묵/probeMaxMs/maxArmedMs) 어느 것도 안 터진 것처럼
+// 보인다. 그 모순의 답이 여기 있다 — 마감을 **마운트 기준**으로 재면 리마운트가
+// 마감보다 잦을 때 타이머가 매번 처음부터 다시 감긴다. 그러면 마감이 "있는데도"
+// 영원히 도달하지 않는다.
+//
+// ★사장님은 vite dev 서버로 돌리신다. 오늘처럼 에이전트들이 계속 머지하면 Vite 가
+//   전체 페이지 리로드를 걸고, 그때마다 렌더러가 통째로 다시 뜬다(=리마운트).
+//   `bootSeenSids` 도 그때 비므로 #1159 의 sid 레지스트리로는 못 막는다.
+//   PTY 스폰 기준 예산은 리로드에 영향받지 않는다 — 그게 이 규칙을 고른 이유다.
+describe("OrchestratorBootGate — 리마운트가 잦아도 마감은 도달한다", () => {
+  /** 한 PTY 를 여러 번 마운트한다. 매번 새 게이트 + 재생 링(배너)이 다시 온다. */
+  function remountCycles(opts: {
+    /** 스폰 기준 예산을 쓰는가(수정 후) — false 면 종전(마운트 기준) 재현. */
+    spawnBudget: boolean;
+    /** 리마운트 간격. */
+    everyMs: number;
+    /** 몇 번까지 볼 것인가. */
+    cycles: number;
+  }): { openedAtCycle: number | null; openedAfterMs: number } {
+    // 하나의 가상 시계를 모든 마운트가 공유한다 — PTY 는 계속 살아 있다.
+    let now = 2_000_000_000_000;
+    const spawnedAt = now;
+    let timers: Array<{ at: number; fn: () => void; cancelled: boolean }> = [];
+    const setTimer = (fn: () => void, ms: number) => {
+      const entry = { at: now + ms, fn, cancelled: false };
+      timers.push(entry);
+      return () => {
+        entry.cancelled = true;
+      };
+    };
+    const advance = (ms: number) => {
+      const target = now + ms;
+      for (;;) {
+        const due = timers
+          .filter((t) => !t.cancelled && t.at <= target)
+          .sort((a, b) => a.at - b.at)[0];
+        if (!due) break;
+        now = due.at;
+        due.cancelled = true;
+        due.fn();
+      }
+      now = target;
+    };
+
+    for (let cycle = 1; cycle <= opts.cycles; cycle++) {
+      // 이전 마운트의 게이트는 언마운트에서 dispose 된다 — 타이머도 같이 죽는다.
+      timers = [];
+      const gate = new OrchestratorBootGate({
+        now: () => now,
+        setTimer,
+        // 수정 후에만 스폰 시각을 안다. null 이면 종전 동작(마운트 기준).
+        ptySpawnedAt: opts.spawnBudget ? spawnedAt : null,
+      });
+      // 재생 링이 **지나간 배너**를 다시 준다 → armed.
+      for (const chunk of fixtureChunks("codex-ready-composer"))
+        gate.feed(chunk);
+      // 오케는 일하는 중이라 상태줄만 다시 그린다 — 어시스턴트 줄도, 조용함도 없다.
+      const step = 250;
+      for (let waited = 0; waited < opts.everyMs; waited += step) {
+        gate.feed(BUSY_FRAME);
+        advance(step);
+        if (gate.state === "open") {
+          return { openedAtCycle: cycle, openedAfterMs: now - spawnedAt };
+        }
+      }
+      gate.dispose();
+    }
+    return { openedAtCycle: null, openedAfterMs: now - spawnedAt };
+  }
+
+  it("★종전(마운트 기준): 30초마다 리마운트되면 60초 상한에 영원히 도달하지 않는다", () => {
+    const r = remountCycles({
+      spawnBudget: false,
+      everyMs: 30_000,
+      cycles: 20,
+    });
+    // 10분을 돌려도 한 번도 안 열린다 = 사장님이 보시는 "끝까지 골격".
+    expect(r.openedAtCycle).toBeNull();
+    expect(r.openedAfterMs).toBeGreaterThanOrEqual(10 * 60_000);
+  });
+
+  it("★수정 후(스폰 기준): 같은 리마운트 주기에서도 예산이 소진돼 열린다", () => {
+    const r = remountCycles({ spawnBudget: true, everyMs: 30_000, cycles: 20 });
+    expect(r.openedAtCycle).not.toBeNull();
+    // 예산(60초)이 스폰부터 소진되므로 세 번째 마운트에서 유예만 남는다.
+    expect(r.openedAtCycle!).toBeLessThanOrEqual(3);
+    expect(r.openedAfterMs).toBeLessThan(MAX_ARMED_MS + POST_BOOT_GRACE_MS * 2);
+  });
+
+  it("★리마운트가 더 잦아도(5초) 스폰 기준 예산은 결국 도달한다 — 종전은 못 한다", () => {
+    const legacy = remountCycles({
+      spawnBudget: false,
+      everyMs: 5_000,
+      cycles: 60,
+    });
+    expect(legacy.openedAtCycle).toBeNull();
+
+    const fixed = remountCycles({
+      spawnBudget: true,
+      everyMs: 5_000,
+      cycles: 60,
+    });
+    expect(fixed.openedAtCycle).not.toBeNull();
+  });
+});
+
+// ── dispose 된 게이트는 바이트를 영구히 버린다 ─────────────────────────────
+// 오케가 짚은 가설 (b) 의 **결과**를 못으로 박아 둔다: 화면이 읽는 게이트와 먹이를
+// 받는 게이트가 갈라지면, 먹이 받던 쪽이 dispose 되는 순간 그 뒤의 모든 바이트가
+// 사라지고 되살리는 길은 `reset()` 뿐이다. `TerminalView` 의 init 이펙트만
+// `reset()` 을 부르고 그 deps 는 `[sessionId]` 다 — 즉 sid 가 안 바뀌면 복구가 없다.
+describe("OrchestratorBootGate — dispose 뒤의 계약", () => {
+  it("dispose 된 게이트에 먹인 바이트는 조용히 사라진다", () => {
+    const h = makeGate();
+    for (const chunk of fixtureChunks("codex-ready-composer"))
+      h.gate.feed(chunk);
+    h.gate.feed(historyChunk(GREETING_LINES));
+    expect(h.gate.state).toBe("open");
+
+    h.gate.dispose();
+    h.gate.feed("dispose 뒤에 온 줄\n");
+    expect(h.output()).not.toContain("dispose 뒤에 온 줄");
+    // 상태도 안 움직인다 — 시한도 없다(타이머는 dispose 가 전부 껐다).
+    h.advance(MAX_ARMED_MS * 2);
+    expect(h.gate.state).toBe("open");
+  });
+
+  it("reset() 만이 dispose 된 게이트를 되살린다 — 그리고 다시 닫아 시한을 건다", () => {
+    const h = makeGate();
+    h.gate.dispose();
+    h.gate.reset();
+    expect(h.gate.state).toBe("probing");
+    h.gate.setSink((text) => h.out.push(text));
+    h.advance(SILENT_OPEN_MS + 1);
+    expect(h.gate.state).toBe("open");
+    expect(h.gate.openReason).toBe("silent");
   });
 });

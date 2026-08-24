@@ -31,6 +31,12 @@
  * 닫힌 상태가 시한을 가진다: 가시 문자 전 = 침묵 시한, 가시 문자 후 = `probeMaxMs`,
  * armed = `maxArmedMs`.
  *
+ * ★★ 그리고 그 시한은 **PTY 가 뜬 시각부터** 잰다 — 이 마운트가 아니라
+ * (티켓 04mJqRvSi0QDCboyxzKF). 마운트 기준으로 재면 몇 분째 일하고 있는 오케로
+ * 화면이 다시 뜰 때(마블로 → 비기너 전환) 재생 링의 지나간 배너를 지금 일어나는
+ * 부팅으로 오인해 `armed` 60초를 처음부터 다시 센다. 실측으로 60.2초를 꽉 채운 뒤
+ * 빈 터미널이 열렸다. 자세한 근거는 `POST_BOOT_GRACE_MS` 주석.
+ *
  * - `probing`: 스트림이 부트(배너)로 시작하는지 본다. 오케 PTY 의 replay 링은 4M
  *   자를 보관하므로 리마운트에도 부트가 다시 온다 — 그러면 armed. 링이 중간부터
  *   오는 경우(배너 없음)는 이미 지나간 대화이므로 **전부 통과**한다(과도한 거름 금지).
@@ -108,6 +114,51 @@ export const SILENT_OPEN_MS = 60_000;
  * 60초가 아니라 2.5초에 풀린다.
  */
 export const SILENT_OPEN_BOOTED_MS = 2_500;
+/**
+ * ★부트 예산은 **PTY 가 뜬 시각**부터 잰다 — 마운트 시각이 아니다
+ * (티켓 04mJqRvSi0QDCboyxzKF).
+ *
+ * 종전엔 `maxArmedMs` 가 `arm()` 에서, 즉 **이 마운트가 배너를 본 순간**부터
+ * 돌았다. 그래서 몇 분째 일하고 있는 오케로 화면이 다시 뜨면(마블로 → 비기너
+ * 전환) 재생 링의 **지나간 배너**를 지금 일어나는 부팅으로 오인해 armed 로
+ * 들어가고, 거기서 나가는 길 셋이 전부 막힌다:
+ *   - 어시스턴트 줄 — 오케가 아직 사람에게 말한 적이 없으면 링에 없다
+ *   - quiet-after-echo(2.5초) — 일하는 TUI 는 상태줄(`esc to interrupt`)을
+ *     0.5초마다 다시 그려서 이 타이머를 매번 되감는다
+ *   - `maxArmedMs` — **60초**
+ * 실측(`tests/playwright/unit/beginner-boot-gate-remount.spec.ts`): 전환 후
+ * `data-gate-state="armed"` 로 60.2초를 꽉 채운 뒤 빈 터미널로 열렸다.
+ *
+ * 고치는 자리는 "얼마나 기다리나" 가 아니라 "언제부터 재나" 다. 이 게이트의
+ * 계약이 이미 답을 갖고 있다 — **부팅은 `MAX_ARMED_MS` 안에 끝난다**(그게 저
+ * 상한의 뜻이다). 그러면 그보다 오래 산 PTY 는 정의상 부팅을 지난 것이고,
+ * 그 배너는 역사다. 그래서 닫힌 상태의 시한을 `PTY 스폰 + 예산` 으로 잡는다:
+ *   - 스폰 직후의 첫 마운트 → 예산이 통째로 남아 있다. 종전과 같다(문 그대로).
+ *   - 몇 분 뒤의 리마운트  → 예산은 이미 지났다. 아래 유예만 주고 연다.
+ * 임의의 상수를 새로 고르지 않는다는 것이 이 규칙의 값이다.
+ *
+ * 유예를 두는 이유: 리마운트의 재생 링은 **한 덩이**로 오므로(`pty:replay` 가
+ * join 해서 준다) 어시스턴트 줄 탐색은 이 타이머가 돌기 전에 이미 끝난다.
+ * 유예는 그 직후 도착하는 **라이브** 첫 청크에 인사말이 실려 오는 경우만 받는다.
+ */
+export const POST_BOOT_GRACE_MS = 2_500;
+/** 이보다 이른 값은 PTY 스폰 시각일 수 없다(2020-01-01). sid 파싱 위생. */
+const MIN_PLAUSIBLE_SPAWN_MS = 1_577_836_800_000;
+
+/**
+ * sid 에서 PTY 스폰 시각을 읽는다. 형식은 `orchestrator-manager` 가 정한
+ * `orch-<sessionId>-<Date.now()>` 이고, 이 파일 헤더가 이미 그 1:1 성질에
+ * 기대고 있다. 못 읽으면 `null` — 그 경우 예산은 종전대로 마운트 기준이다
+ * (즉 이 규칙은 **추가 안전망**이지 기존 시한을 대체하지 않는다).
+ */
+export function parsePtySpawnedAt(sessionId: string | null): number | null {
+  if (!sessionId) return null;
+  const m = /-(\d{13,})$/.exec(sessionId);
+  if (!m) return null;
+  const at = Number(m[1]);
+  if (!Number.isFinite(at) || at < MIN_PLAUSIBLE_SPAWN_MS) return null;
+  return at;
+}
 /** 줄바꿈 없이 쌓이는 뷰포트 리드로우 꼬리의 상한(문자). 분류엔 마지막 부분만 필요하다. */
 const PENDING_TAIL_MAX_CHARS = 16_384;
 
@@ -289,6 +340,12 @@ export interface BootGateOptions {
   maxArmedMs?: number;
   silentOpenMs?: number;
   silentOpenBootedMs?: number;
+  postBootGraceMs?: number;
+  /**
+   * PTY 스폰 시각(epoch ms). 기본값은 `sessionId` 에서 읽는다
+   * (`parsePtySpawnedAt`). 테스트는 sid 를 꾸미지 않고 이걸로 나이를 준다.
+   */
+  ptySpawnedAt?: number | null;
 }
 
 export interface PtyOutputGate {
@@ -323,6 +380,9 @@ export class OrchestratorBootGate implements PtyOutputGate {
   private readonly sessionId: string | null;
   private readonly silentOpenMs: number;
   private readonly silentOpenBootedMs: number;
+  private readonly postBootGraceMs: number;
+  /** PTY 프로세스가 뜬 시각. 닫힌 상태의 시한을 여기서부터 잰다(위 상수 주석). */
+  private readonly ptySpawnedAt: number | null;
 
   private _state: BootGateState = "probing";
   private _openReason: BootGateOpenReason | null = null;
@@ -356,6 +416,11 @@ export class OrchestratorBootGate implements PtyOutputGate {
     this.silentOpenMs = options.silentOpenMs ?? SILENT_OPEN_MS;
     this.silentOpenBootedMs =
       options.silentOpenBootedMs ?? SILENT_OPEN_BOOTED_MS;
+    this.postBootGraceMs = options.postBootGraceMs ?? POST_BOOT_GRACE_MS;
+    this.ptySpawnedAt =
+      options.ptySpawnedAt !== undefined
+        ? options.ptySpawnedAt
+        : parsePtySpawnedAt(this.sessionId);
     // ★생성 시점부터 돈다 — 이 게이트의 유일한 "출력과 무관한" 시한이다.
     this.armSilentTimer();
   }
@@ -410,6 +475,23 @@ export class OrchestratorBootGate implements PtyOutputGate {
   }
 
   /**
+   * 닫힌 상태의 남은 시한. 예산(`budgetMs`)은 **PTY 스폰 시각**부터 소진된다
+   * (`POST_BOOT_GRACE_MS` 주석). 스폰 시각을 모르면 종전대로 예산 전액을 이
+   * 마운트 기준으로 준다 — 이 규칙은 시한을 **줄이기만** 하고, 없던 시한을
+   * 만들거나 기존 시한을 늘리지 않는다.
+   *
+   * 바닥은 `postBootGraceMs` 다: 예산이 이미 다 지난 PTY 라도 재생 링을 다
+   * 먹고 그 직후의 라이브 첫 청크까지는 받아야 인사말을 놓치지 않는다.
+   */
+  private remainingClosedBudget(budgetMs: number): number {
+    if (this.ptySpawnedAt === null) return budgetMs;
+    const spent = this.now() - this.ptySpawnedAt;
+    // 시계가 뒤로 갔거나 sid 가 미래면(있을 수 없지만) 예산을 깎지 않는다.
+    if (!Number.isFinite(spent) || spent <= 0) return budgetMs;
+    return Math.max(this.postBootGraceMs, budgetMs - spent);
+  }
+
+  /**
    * 침묵 시한 — `probing` 이면서 **가시 문자를 한 번도 못 본** 동안만 유효하다.
    * 가시 문자가 하나라도 오면 `probeMaxMs` 가, armed 로 가면 `maxArmedMs` 가
    * 이어받는다(둘 다 `clearTimers` 로 이걸 끈다). 그래서 닫힌 상태에 시한이
@@ -419,7 +501,7 @@ export class OrchestratorBootGate implements PtyOutputGate {
     const ms =
       this.sessionId && hasPtyBootSeen(this.sessionId)
         ? this.silentOpenBootedMs
-        : this.silentOpenMs;
+        : this.remainingClosedBudget(this.silentOpenMs);
     this.cancelSilentTimer = this.setTimer(() => {
       if (this.disposed) return;
       if (this._state !== "probing" || this.firstVisibleAt !== null) return;
@@ -489,10 +571,15 @@ export class OrchestratorBootGate implements PtyOutputGate {
     this._state = "armed";
     this._armedAt = this.now();
     this.probeBuffer = [];
-    this.cancelMaxTimer = this.setTimer(() => {
-      if (this.disposed || this._state !== "armed") return;
-      this.transitionOpen("max-armed", "");
-    }, this.maxArmedMs);
+    this.cancelMaxTimer = this.setTimer(
+      () => {
+        if (this.disposed || this._state !== "armed") return;
+        this.transitionOpen("max-armed", "");
+      },
+      // ★마운트 기준이 아니라 PTY 스폰 기준. 몇 분째 일하고 있는 오케로
+      //   전환했을 때 지나간 배너 때문에 60초를 다시 세지 않는다.
+      this.remainingClosedBudget(this.maxArmedMs),
+    );
     this.notify();
   }
 
