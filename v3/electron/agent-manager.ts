@@ -4,6 +4,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { PtyManager } from "./pty-manager";
+import { advanceMcpClock } from "./agent-stall-policy";
 import type { StallSignal } from "./agent-stall-policy";
 import {
   AgentConfigGenerator,
@@ -447,6 +448,25 @@ export interface AgentInstance {
    * also cleared by every turn start (noteTurnStart) and terminal transition.
    */
   stallSignal: StallSignal | null;
+  /**
+   * ★능동 프로브 (b) 풀형 관측(티켓 DQYoyas3ESx33zXJOCOa) — epoch-ms of the
+   * last marblo MCP tool call this agent made, or null if never observed.
+   *
+   * Written by the bridge's POST /agent-mcp-heartbeat, which the MCP server
+   * fires (fire-and-forget) from its single tool gateway. NOT a push: nothing
+   * is sent to the agent to produce this — the agent's own tool-call loop
+   * reaches the server on its own schedule and we merely note when. There is
+   * no channel into these CLIs outside their PTY (even an MCP-delivered
+   * question ends up as text+CR via writeAndSubmit), so the probe never asks;
+   * it only listens.
+   *
+   * Why it is a better liveness clock than board activity: read-only tool
+   * calls (check_feedback / get_task / …) never bump projection.lastActivityAt,
+   * so a healthy agent deep in a long reproduction looks board-silent while
+   * its tool loop is provably round-tripping to us. See agent-stall-policy.ts
+   * evaluateProbe.
+   */
+  lastMcpCall: number | null;
 }
 
 /**
@@ -1625,6 +1645,9 @@ export class AgentManager {
       turnCompletedAt: null,
       terminalSince: null,
       stallSignal: null,
+      // 프로브 (b) 시계. 이 에이전트의 MCP 툴 호출을 한 번도 못 봤다는 뜻이고,
+      // 그 상태에서 프로브는 "프로브 불가"(no-baseline)로 판정을 보류한다.
+      lastMcpCall: null,
       topClaudeModel,
       claudeModelOverride: params.claudeModelOverride,
       codexModelOverride: params.codexModelOverride,
@@ -2179,6 +2202,25 @@ export class AgentManager {
     return this.agents.get(agentId) ?? null;
   }
 
+  /**
+   * ★능동 프로브 (b) — record that this agent's MCP tool-call loop just reached
+   * the server. Called from the bridge's /agent-mcp-heartbeat. Returns false
+   * when the agent is not hosted here (the caller then simply drops it).
+   *
+   * Deliberately does NOTHING else: it does not touch `status`, `currentTaskId`,
+   * `lastPtyActivity`, or the recovery ladder. An MCP call is evidence about
+   * liveness for the watchdog's probe axis and nothing more — promoting an
+   * agent to `working` off a read-only tool call would resurrect exactly the
+   * status-drift bugs agent-status-reconcile.ts exists to prevent.
+   */
+  noteMcpCall(agentId: string, atMs: number = Date.now()): boolean {
+    const agent = this.agents.get(agentId);
+    if (!agent) return false;
+    // 시계 역행 방어 — 규칙은 agent-stall-policy 에 순수 함수로 있다(테스트 대상).
+    agent.lastMcpCall = advanceMcpClock(agent.lastMcpCall, atMs);
+    return true;
+  }
+
   getMCPConfig(agentId: string): LaunchConfig | null {
     const agent = this.agents.get(agentId);
     return agent?.launchConfig ?? null;
@@ -2580,6 +2622,9 @@ export class AgentManager {
       turnCompletedAt: null,
       terminalSince: null,
       stallSignal: null,
+      // 프로브 (b) 시계. 이 에이전트의 MCP 툴 호출을 한 번도 못 봤다는 뜻이고,
+      // 그 상태에서 프로브는 "프로브 불가"(no-baseline)로 판정을 보류한다.
+      lastMcpCall: null,
     };
     this.agents.set(agent.id, instance);
     // Same PTY-activity hook as launch() — reconnected agents need

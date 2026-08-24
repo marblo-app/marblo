@@ -13,12 +13,15 @@ import {
   DEFAULT_STALL_POLICY,
   STALL_FIRST_ACTIVITY_QUIET_MS,
   STALL_QUIET_NORMAL_MS,
+  STALL_PROBE_GRACE_MS,
   STALL_QUIET_URGENT_MS,
   classifyPtyLiveness,
   evaluateBoardQuiet,
   evaluateBoundAgent,
   evaluateExitQuiet,
   evaluateFirstActivityQuiet,
+  evaluateProbe,
+  advanceMcpClock,
   isOtherLiveWorkerForTask,
   quietThresholdMs,
   resolveStallPolicy,
@@ -355,5 +358,195 @@ describe("isOtherLiveWorkerForTask — W3 stand-down guard predicate", () => {
         ticket,
       ),
     ).toBe(false);
+  });
+});
+
+// ── 능동 프로브 축(티켓 DQYoyas3ESx33zXJOCOa) ────────────────────────────
+//
+// 이 축이 고정해야 하는 것은 "언제 우는가" 보다 **"언제 울지 않는가"** 다.
+// 3분기 중 세 번째(프로브 불가)를 '멈춤' 으로 뚝치는 순간 이 축은 소음이 되고,
+// 소음이 되는 순간 오케가 무시하기 시작한다.
+
+describe("evaluateProbe — 3분기(응답/무응답/프로브 불가)", () => {
+  const base = {
+    now: NOW,
+    boardIdleMs: 30 * MIN,
+    pty: "silent" as const,
+    lastMcpCallMs: null as number | null,
+  };
+
+  it("유예는 12분이고 env(MARBLO_STALL_PROBE_MS)로 덮어쓸 수 있다", () => {
+    expect(STALL_PROBE_GRACE_MS).toBe(12 * MIN);
+    expect(DEFAULT_STALL_POLICY.probeGraceMs).toBe(12 * MIN);
+    const p = resolveStallPolicy({ MARBLO_STALL_PROBE_MS: "420000" });
+    expect(p.probeGraceMs).toBe(7 * MIN);
+    // 쓰레기 값은 기본값으로 폴백 — 오타 하나로 축이 상시 발동하면 안 된다.
+    expect(
+      resolveStallPolicy({ MARBLO_STALL_PROBE_MS: "-1" }).probeGraceMs,
+    ).toBe(12 * MIN);
+  });
+
+  it("12분은 실측 보고 천장(11분)보다 위다 — 정상 주기 에이전트를 못 건드린다", () => {
+    // 11분 주기로 보고하는 건강한 에이전트: 보드도 MCP 도 11분 전이 최악.
+    const v = evaluateProbe({
+      ...base,
+      boardIdleMs: 11 * MIN,
+      lastMcpCallMs: NOW - 11 * MIN,
+    });
+    expect(v.outcome).toBe("responsive");
+  });
+
+  it("★대조군: 보드는 30분째 조용해도 MCP 호출이 유예 안에 오면 '응답함' — 신호 없음", () => {
+    // 벤치/버그재현 중인 멀쩡한 에이전트. 읽기전용 MCP 호출(check_feedback 등)은
+    // projection.lastActivityAt 을 안 올리므로 board-quiet 은 이 구간을 못 가른다.
+    const v = evaluateProbe({
+      ...base,
+      boardIdleMs: 30 * MIN,
+      lastMcpCallMs: NOW - 2 * MIN,
+    });
+    expect(v.outcome).toBe("responsive");
+    expect(v.evidence).toBe("mcp-call");
+    expect(v.mcpQuietMs).toBe(2 * MIN);
+  });
+
+  it("보드가 유예 안에 움직였으면 찌를 이유가 없다(board-active)", () => {
+    const v = evaluateProbe({ ...base, boardIdleMs: 3 * MIN });
+    expect(v.outcome).toBe("responsive");
+    expect(v.evidence).toBe("board-active");
+  });
+
+  it("PTY 가 busy/awaiting-input/dead/missing 이면 의견을 내지 않는다", () => {
+    for (const pty of ["busy", "awaiting-input", "dead", "missing"] as const) {
+      const v = evaluateProbe({ ...base, pty, lastMcpCallMs: NOW - 60 * MIN });
+      expect(v.outcome).toBe("indeterminate");
+      expect(v.evidence).toBe("not-applicable");
+    }
+  });
+
+  it("★MCP 호출을 한 번도 못 봤으면 '프로브 불가' — 절대 '멈춤' 이 아니다", () => {
+    const v = evaluateProbe({ ...base, lastMcpCallMs: null });
+    expect(v.outcome).toBe("indeterminate");
+    expect(v.evidence).toBe("no-baseline");
+  });
+
+  it("보드·MCP 둘 다 유예를 넘고 PTY silent/parked → '무응답'", () => {
+    for (const pty of ["silent", "parked"] as const) {
+      const v = evaluateProbe({
+        ...base,
+        pty,
+        boardIdleMs: 25 * MIN,
+        lastMcpCallMs: NOW - 20 * MIN,
+      });
+      expect(v.outcome).toBe("unresponsive");
+      expect(v.evidence).toBe("mcp-silent");
+    }
+  });
+
+  it("pid 가 확정적으로 없으면 즉시 '무응답'(process-gone)", () => {
+    const v = evaluateProbe({
+      ...base,
+      lastMcpCallMs: NOW - MIN, // MCP 시계는 아직 멀쩡한데도
+      process: { alive: false, cpuMs: null },
+    });
+    expect(v.outcome).toBe("unresponsive");
+    expect(v.evidence).toBe("process-gone");
+  });
+
+  it("alive=null(EPERM/pid 미상)은 죽음으로 기울지 않는다", () => {
+    const v = evaluateProbe({
+      ...base,
+      lastMcpCallMs: NOW - 2 * MIN,
+      process: { alive: null, cpuMs: null },
+    });
+    expect(v.outcome).toBe("responsive"); // MCP 시계가 살아 있으므로
+  });
+
+  it("★CPU 진행은 '응답함' 으로 승격시키지 않고 '판정 불가' 로 강등만 시킨다", () => {
+    const v = evaluateProbe({
+      ...base,
+      boardIdleMs: 25 * MIN,
+      lastMcpCallMs: NOW - 20 * MIN,
+      process: { alive: true, cpuMs: 10_000, prevCpuMs: 9_000 },
+    });
+    // 무한루프도 CPU 를 쓴다 — 실행 증거이지 진행 증거가 아니다.
+    expect(v.outcome).toBe("indeterminate");
+    expect(v.evidence).toBe("cpu-advance");
+    expect(v.outcome).not.toBe("responsive");
+  });
+
+  it("CPU 가 사실상 안 늘었으면 강등도 없다 — 그대로 '무응답'", () => {
+    const v = evaluateProbe({
+      ...base,
+      boardIdleMs: 25 * MIN,
+      lastMcpCallMs: NOW - 20 * MIN,
+      process: { alive: true, cpuMs: 9_010, prevCpuMs: 9_000 },
+    });
+    expect(v.outcome).toBe("unresponsive");
+  });
+
+  it("첫 CPU 표본(prevCpuMs 없음)은 델타를 못 내므로 판정에 관여하지 않는다", () => {
+    const v = evaluateProbe({
+      ...base,
+      boardIdleMs: 25 * MIN,
+      lastMcpCallMs: NOW - 20 * MIN,
+      process: { alive: true, cpuMs: 10_000, prevCpuMs: null },
+    });
+    expect(v.outcome).toBe("unresponsive");
+  });
+
+  it("모든 분기가 사람이 읽는 근거(reason)를 채운다", () => {
+    const cases = [
+      { ...base, boardIdleMs: MIN },
+      { ...base, pty: "busy" as const },
+      { ...base },
+      { ...base, lastMcpCallMs: NOW - MIN },
+      { ...base, lastMcpCallMs: NOW - 20 * MIN },
+    ];
+    for (const c of cases) {
+      const v = evaluateProbe(c);
+      expect(v.reason.length).toBeGreaterThan(10);
+      expect(v.thresholdMs).toBe(12 * MIN);
+    }
+  });
+});
+
+describe("advanceMcpClock — (b) 하트비트 시계는 뒤로 가지 않는다", () => {
+  it("첫 관측은 그대로 채택된다", () => {
+    expect(advanceMcpClock(null, 1_000)).toBe(1_000);
+  });
+
+  it("더 최신 관측은 시계를 전진시킨다", () => {
+    expect(advanceMcpClock(1_000, 2_000)).toBe(2_000);
+  });
+
+  it("★늦게 도착한 오래된 관측은 시계를 되돌리지 않는다", () => {
+    // 되돌아가면 살아있는 에이전트의 mcpQuietMs 가 갑자기 늘어 없는 정지를
+    // 만들어낸다 — 이 축이 절대 내면 안 되는 오탐.
+    expect(advanceMcpClock(5_000, 1_000)).toBe(5_000);
+    expect(advanceMcpClock(5_000, 5_000)).toBe(5_000);
+  });
+
+  it("유한하지 않은 값은 무시한다", () => {
+    expect(advanceMcpClock(5_000, NaN)).toBe(5_000);
+    expect(advanceMcpClock(5_000, Infinity)).toBe(5_000);
+    expect(advanceMcpClock(null, NaN)).toBeNull();
+  });
+
+  it("★시계가 되돌아갔다면 프로브 판정이 뒤집힌다 — 그래서 단조성이 안전 속성이다", () => {
+    const withMonotonic = evaluateProbe({
+      now: NOW,
+      boardIdleMs: 30 * MIN,
+      pty: "silent",
+      lastMcpCallMs: advanceMcpClock(NOW - MIN, NOW - 40 * MIN),
+    });
+    expect(withMonotonic.outcome).toBe("responsive");
+
+    const ifItHadRewound = evaluateProbe({
+      now: NOW,
+      boardIdleMs: 30 * MIN,
+      pty: "silent",
+      lastMcpCallMs: NOW - 40 * MIN,
+    });
+    expect(ifItHadRewound.outcome).toBe("unresponsive"); // 바로 이 오탐을 막는다
   });
 });

@@ -60,6 +60,8 @@ interface Harness {
   }>;
   cleared: string[];
   records: Array<{ taskId: string; phase: RecoveryPhase; detail: string }>;
+  /** 프로브 축 테스트가 optional 포트(probeProcess)를 런타임에 꽂기 위해 노출. */
+  deps: WatchdogDeps;
 }
 
 function makeHarness(
@@ -104,6 +106,7 @@ function makeHarness(
   };
   return {
     wd: new AgentWatchdog(deps, cfg),
+    deps,
     clock,
     tickets,
     health,
@@ -463,5 +466,343 @@ describe("W8 quiet signal — first-activity axis (스폰 직후 무산출)", ()
     expect(h.signals).toHaveLength(0);
     expect(h.nudge).not.toHaveBeenCalled();
     expect(h.respawn).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * ★능동 프로브 축(2026-08-23, 티켓 DQYoyas3ESx33zXJOCOa).
+ *
+ * 사장님 요구: "워치독이 **찔러봐서** 실제 죽은 건지 작업 중인지 판단". 위 세 축은
+ * 전부 관측이 도착하기를 기다린다. 이 축은 가서 확인한다 — 단 **PTY 에 단 1바이트도
+ * 쓰지 않고**.
+ *
+ * 이 describe 가 고정하는 것(완료 기준 그대로):
+ *   1. ★방해 안 함 — 프로브가 도는 어떤 경로에서도 nudgeAgent(=PTY write) 0회.
+ *   2. ★3분기 — 응답함 / 무응답 / 프로브 불가가 서로 다른 결과를 낸다.
+ *   3. ★오탐 1건 — 보드는 30분째 조용하지만 MCP 로 왕복 중인 멀쩡한 에이전트를
+ *      '멈춤' 으로 신고하지 않는다(그리고 board-quiet 안전망은 그대로 산다).
+ *   4. ★프로브 불가를 '멈춤' 으로 뚝치지 않는다 — 신호 0건, board-quiet 이 받는다.
+ *   5. ★워치독은 여전히 죽이지 않는다 — probe 축에서 kill/respawn 0회.
+ */
+describe("★능동 프로브 축 — 찔러보되 방해하지 않는다", () => {
+  /** PTY 는 조용하고(긴 추론/서브프로세스) 프로세스는 살아 있는 에이전트. */
+  function silentHealth(
+    now: number,
+    over: Partial<WatchdogAgentHealth> = {},
+  ): WatchdogAgentHealth {
+    return busyHealth(now, {
+      status: "working",
+      // work-output 이 STALL_PTY_BUSY_RECENT_MS(2분)보다 오래됐다 → silent.
+      lastPtyActivityMs: now - 20 * MIN,
+      lastWorkOutputMs: now - 20 * MIN,
+      promptIdleSinceMs: null,
+      ptyPid: 4242,
+      ...over,
+    });
+  }
+
+  it("★오탐 사례: 보드 30분 무활동이어도 MCP 호출이 2분 전이면 신호 0건 (일하는 에이전트를 죽은 걸로 판정하지 않는다)", async () => {
+    const h = makeHarness();
+    // 일반 티어(P2) — board-quiet 임계는 45분이라 아직 멀었다.
+    h.tickets[0] = ticket({
+      priority: 2,
+      lastActivityAtMs: h.clock.ms - 30 * MIN,
+    });
+    h.health.set(
+      AGENT,
+      // 벤치를 돌리는 중: PTY 는 조용하고 보드도 조용하지만 read-only MCP 호출
+      // (check_feedback/get_task)은 계속 서버까지 왕복하고 있다.
+      silentHealth(h.clock.ms, { lastMcpCallMs: h.clock.ms - 2 * MIN }),
+    );
+    await h.wd.tickOnce();
+
+    expect(h.signals).toHaveLength(0);
+    const probe = h.wd.getLastProbe(TASK);
+    expect(probe?.outcome).toBe("responsive");
+    expect(probe?.evidence).toBe("mcp-call");
+  });
+
+  it("★그 에이전트가 진짜로 멈추면(MCP 도 12분 침묵) probe 축이 board-quiet(45분)보다 훨씬 먼저 잡는다", async () => {
+    const h = makeHarness();
+    h.tickets[0] = ticket({
+      priority: 2,
+      lastActivityAtMs: h.clock.ms - 30 * MIN,
+    });
+    h.health.set(
+      AGENT,
+      silentHealth(h.clock.ms, { lastMcpCallMs: h.clock.ms - 13 * MIN }),
+    );
+    await h.wd.tickOnce();
+
+    expect(h.signals).toHaveLength(1);
+    const { signal, detail } = h.signals[0];
+    expect(signal).toMatchObject({
+      taskId: TASK,
+      axis: "probe",
+      thresholdMs: 12 * MIN,
+      exitCode: null,
+      boardIdleMs: 30 * MIN,
+    });
+    expect(signal.probe?.outcome).toBe("unresponsive");
+    expect(signal.probe?.evidence).toBe("mcp-silent");
+    expect(detail).toContain("능동 프로브 무응답");
+    // ★방해 안 함이 신호 문구에 명시돼야 오케가 "찔렀다=건드렸다" 로 오독하지 않는다.
+    expect(detail).toContain("PTY 에 아무것도 쓰지 않은");
+    // ★워치독은 여전히 죽이지 않는다 — probe 는 respawn 을 파생시키지 않는다.
+    expect(h.respawn).not.toHaveBeenCalled();
+  });
+
+  it("★프로브 불가(MCP 호출 이력 없음) → 신호 0건. board-quiet 안전망이 그대로 20분에 받는다", async () => {
+    const h = makeHarness();
+    // 긴급(P5) 티켓, 보드 15분 무활동 — probe 유예(12분)는 넘겼지만
+    // board-quiet 임계(20분)는 아직.
+    h.tickets[0].lastActivityAtMs = h.clock.ms - 15 * MIN;
+    h.health.set(AGENT, silentHealth(h.clock.ms, { lastMcpCallMs: null }));
+    await h.wd.tickOnce();
+
+    // ★"관측할 수 없다" 를 "멈췄다" 로 뚝치지 않는다.
+    expect(h.signals).toHaveLength(0);
+    expect(h.wd.getLastProbe(TASK)?.outcome).toBe("indeterminate");
+    expect(h.wd.getLastProbe(TASK)?.evidence).toBe("no-baseline");
+
+    // 그리고 기존 안전망은 그대로 살아 있다 — 20분을 넘기면 board-quiet 이 운다.
+    h.clock.ms += 6 * MIN;
+    h.health.set(AGENT, silentHealth(h.clock.ms, { lastMcpCallMs: null }));
+    await h.wd.tickOnce();
+    expect(h.signals).toHaveLength(1);
+    expect(h.signals[0].signal.axis).toBe("board-quiet");
+  });
+
+  it("PTY 가 busy(스피너/스트리밍)면 probe 는 의견을 내지 않는다 — 그 구간은 board-quiet 의 몫", async () => {
+    const h = makeHarness();
+    h.tickets[0] = ticket({
+      priority: 2,
+      lastActivityAtMs: h.clock.ms - 30 * MIN,
+    });
+    // 2026-08-22 케이스: 행(hang)에 빠진 CLI 가 스피너를 계속 그린다.
+    h.health.set(
+      AGENT,
+      busyHealth(h.clock.ms, { lastMcpCallMs: h.clock.ms - 30 * MIN }),
+    );
+    await h.wd.tickOnce();
+    expect(h.signals).toHaveLength(0);
+    expect(h.wd.getLastProbe(TASK)?.evidence).toBe("not-applicable");
+  });
+
+  it("사람 확인 다이얼로그에 서 있으면 probe 신호 없음 — 막고 있는 건 에이전트가 아니라 사람", async () => {
+    const h = makeHarness();
+    h.tickets[0] = ticket({
+      priority: 2,
+      lastActivityAtMs: h.clock.ms - 30 * MIN,
+    });
+    h.health.set(
+      AGENT,
+      silentHealth(h.clock.ms, {
+        inputWaitReason: "confirm",
+        lastMcpCallMs: h.clock.ms - 30 * MIN,
+      }),
+    );
+    await h.wd.tickOnce();
+    expect(h.signals).toHaveLength(0);
+  });
+
+  it("★(a) OS 프로브: pid 가 사라졌으면 종료 이벤트가 안 왔어도 무응답으로 잡는다", async () => {
+    const h = makeHarness();
+    h.tickets[0] = ticket({
+      priority: 2,
+      lastActivityAtMs: h.clock.ms - 30 * MIN,
+    });
+    h.health.set(
+      AGENT,
+      silentHealth(h.clock.ms, { lastMcpCallMs: h.clock.ms - 20 * MIN }),
+    );
+    const probed: Array<number | null> = [];
+    h.deps.probeProcess = async (_id, pid) => {
+      probed.push(pid);
+      return { alive: false, cpuMs: null, prevCpuMs: null };
+    };
+    await h.wd.tickOnce();
+
+    expect(probed).toEqual([4242]); // getAgentHealth 의 ptyPid 가 그대로 흘렀다
+    expect(h.signals).toHaveLength(1);
+    expect(h.signals[0].signal.probe?.evidence).toBe("process-gone");
+    // ★pid 가 사라졌다는 발견조차 신호일 뿐이다 — kill/respawn 을 안 만든다.
+    expect(h.respawn).not.toHaveBeenCalled();
+  });
+
+  it("★(a) CPU 진행은 무응답을 '판정 불가' 로 강등만 시킨다 — 신호가 사라진다", async () => {
+    const h = makeHarness();
+    h.tickets[0] = ticket({
+      priority: 2,
+      lastActivityAtMs: h.clock.ms - 30 * MIN,
+    });
+    h.health.set(
+      AGENT,
+      silentHealth(h.clock.ms, { lastMcpCallMs: h.clock.ms - 20 * MIN }),
+    );
+    h.deps.probeProcess = async () => ({
+      alive: true,
+      cpuMs: 60_000,
+      prevCpuMs: 30_000,
+    });
+    await h.wd.tickOnce();
+
+    expect(h.signals).toHaveLength(0);
+    expect(h.wd.getLastProbe(TASK)?.outcome).toBe("indeterminate");
+    expect(h.wd.getLastProbe(TASK)?.evidence).toBe("cpu-advance");
+  });
+
+  it("★(a) 배선이 아예 없어도(신규 의존성 불허/비-macOS) (b) 만으로 정상 동작한다", async () => {
+    const h = makeHarness(); // probeProcess 미배선
+    h.tickets[0] = ticket({
+      priority: 2,
+      lastActivityAtMs: h.clock.ms - 30 * MIN,
+    });
+    h.health.set(
+      AGENT,
+      silentHealth(h.clock.ms, { lastMcpCallMs: h.clock.ms - 20 * MIN }),
+    );
+    await h.wd.tickOnce();
+    expect(h.signals).toHaveLength(1);
+    expect(h.signals[0].signal.axis).toBe("probe");
+  });
+
+  it("probeProcess 가 던져도 '멈춤' 이 되지 않는다 — 관측 실패는 그냥 (b) 결과로 간다", async () => {
+    const h = makeHarness();
+    h.tickets[0] = ticket({
+      priority: 2,
+      lastActivityAtMs: h.clock.ms - 5 * MIN, // 유예 안 → 원래 responsive
+    });
+    h.health.set(
+      AGENT,
+      silentHealth(h.clock.ms, { lastMcpCallMs: h.clock.ms - MIN }),
+    );
+    h.deps.probeProcess = async () => {
+      throw new Error("ps exploded");
+    };
+    await h.wd.tickOnce();
+    expect(h.signals).toHaveLength(0);
+  });
+
+  it("★상시 폴링 금지: 보드가 조용하지 않으면 OS 프로브를 아예 부르지 않는다", async () => {
+    const h = makeHarness();
+    h.tickets[0] = ticket({
+      priority: 2,
+      lastActivityAtMs: h.clock.ms - MIN,
+    });
+    h.health.set(
+      AGENT,
+      silentHealth(h.clock.ms, { lastMcpCallMs: h.clock.ms - MIN }),
+    );
+    const probeProcess = vi.fn(async () => null);
+    h.deps.probeProcess = probeProcess;
+    await h.wd.tickOnce();
+    expect(probeProcess).not.toHaveBeenCalled();
+    expect(h.signals).toHaveLength(0);
+  });
+
+  it("★불변식(대조군 행동 횟수 동일): probe 축을 켠 실행과 끈 실행의 nudge/respawn 횟수가 완전히 같다", async () => {
+    // 이 티켓이 지켜야 할 핵심 불변식은 "probe 가 행동을 하나도 파생시키지
+    // 않는다" 이다. 절대 횟수를 0 으로 못 박으면 안 된다 — 기존 사다리는 PTY
+    // 침묵(graceMs)만으로도 정당하게 nudge 를 한 번 보내고, 그건 이 티켓 이전
+    // 부터의 동작이다. 그래서 **같은 시나리오를 probe 켜고/끄고 두 번 돌려**
+    // 행동 횟수가 동일한지를 본다. 다르면 probe 가 무언가를 파생시킨 것이다.
+    async function run(probeOn: boolean): Promise<{
+      nudges: number;
+      respawns: number;
+      phases: RecoveryPhase[];
+      axes: string[];
+    }> {
+      const h = makeHarness(
+        probeOn
+          ? {}
+          : {
+              // 유예를 무한대로 두면 probe 는 절대 발동하지 않는다 = 이 티켓
+              // 이전의 3축 워치독과 정확히 같은 상태.
+              stall: {
+                ...DEFAULT_STALL_POLICY,
+                probeGraceMs: Number.MAX_SAFE_INTEGER,
+              },
+            },
+      );
+      h.tickets[0] = ticket({
+        priority: 2,
+        lastActivityAtMs: h.clock.ms - 30 * MIN,
+      });
+      if (probeOn) {
+        h.deps.probeProcess = async () => ({
+          alive: true,
+          cpuMs: 0,
+          prevCpuMs: 0,
+        });
+      }
+      for (let i = 0; i < 10; i++) {
+        h.health.set(
+          AGENT,
+          silentHealth(h.clock.ms, { lastMcpCallMs: h.clock.ms - 30 * MIN }),
+        );
+        await h.wd.tickOnce();
+        h.clock.ms += 5 * MIN;
+      }
+      return {
+        nudges: h.nudge.mock.calls.length,
+        respawns: h.respawn.mock.calls.length,
+        phases: h.records.map((r) => r.phase),
+        axes: h.signals.map((s) => s.signal.axis),
+      };
+    }
+
+    const on = await run(true);
+    const off = await run(false);
+
+    // ★대조군 동일 — probe 는 PTY 에도, 사다리에도 손대지 않는다.
+    expect(on.nudges).toBe(off.nudges);
+    expect(on.respawns).toBe(off.respawns);
+    expect(on.phases.filter((p) => p !== "quiet")).toEqual(
+      off.phases.filter((p) => p !== "quiet"),
+    );
+    // 달라지는 것은 **신호뿐**이고, 그것도 probe 축이 board-quiet 을 대체한 것.
+    expect(on.axes).toContain("probe");
+    expect(off.axes).not.toContain("probe");
+    expect(off.axes).toContain("board-quiet");
+  });
+
+  it("MCP 호출이 다시 도착하면 유예가 재시작된다(응답함으로 되돌아감)", async () => {
+    const h = makeHarness();
+    h.tickets[0] = ticket({
+      priority: 2,
+      lastActivityAtMs: h.clock.ms - 30 * MIN,
+    });
+    h.health.set(
+      AGENT,
+      silentHealth(h.clock.ms, { lastMcpCallMs: h.clock.ms - 20 * MIN }),
+    );
+    await h.wd.tickOnce();
+    expect(h.signals).toHaveLength(1);
+
+    // 에이전트가 스스로 다음 MCP 호출을 했다 = 응답.
+    h.clock.ms += MIN;
+    h.health.set(
+      AGENT,
+      silentHealth(h.clock.ms, { lastMcpCallMs: h.clock.ms - 1_000 }),
+    );
+    await h.wd.tickOnce();
+    expect(h.signals).toHaveLength(1); // 새 신호 없음
+    expect(h.wd.getLastProbe(TASK)?.outcome).toBe("responsive");
+  });
+
+  it("다른 축(board-quiet)의 신호에도 프로브 결과가 함께 실린다", async () => {
+    const h = makeHarness();
+    // PTY busy → probe 는 not-applicable, board-quiet 이 25분에 운다.
+    h.tickets[0].lastActivityAtMs = h.clock.ms - 25 * MIN;
+    h.health.set(
+      AGENT,
+      busyHealth(h.clock.ms, { lastMcpCallMs: h.clock.ms - 25 * MIN }),
+    );
+    await h.wd.tickOnce();
+    expect(h.signals).toHaveLength(1);
+    expect(h.signals[0].signal.axis).toBe("board-quiet");
+    expect(h.signals[0].signal.probe?.evidence).toBe("not-applicable");
+    expect(h.signals[0].detail).toContain("프로브:");
   });
 });

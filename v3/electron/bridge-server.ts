@@ -908,6 +908,8 @@ export interface BypassedStaleAgent {
  *   POST /kill-agent           — stop and remove an agent
  *   POST /notify-orchestrator  — send a message to the orchestrator PTY
  *   POST /inject-message       — inject a PM instruction into an agent/orch PTY
+ *   POST /agent-mcp-heartbeat  — note that an agent's MCP tool call arrived
+ *                                (watchdog active-probe liveness clock)
  *   GET  /health               — health check
  *
  * ── Threat model (P3-3) — ACCEPTED residual risk, documented, not a hole ──
@@ -1426,6 +1428,11 @@ export class BridgeServer {
 
         if (req.method === "POST" && req.url === "/set-agent-status") {
           this.handleSetAgentStatus(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/agent-mcp-heartbeat") {
+          this.handleAgentMcpHeartbeat(req, res);
           return;
         }
 
@@ -4408,6 +4415,56 @@ export class BridgeServer {
 
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ success: true }));
+    });
+  }
+
+  // ── POST /agent-mcp-heartbeat ───────────────────────────────
+  //
+  // ★능동 프로브 (b) 풀형 관측(티켓 DQYoyas3ESx33zXJOCOa).
+  //
+  // 마블로 MCP 서버는 **별도 프로세스**라 Electron 메모리를 직접 못 본다. 그래서
+  // 툴 호출이 도착했다는 사실을 이 초경량 엔드포인트로 넘긴다: MCP 쪽은
+  // fire-and-forget 으로 쏘고 응답을 기다리지 않으며, 여기서는 타임스탬프 하나만
+  // 찍는다. Firestore 도 렌더러 IPC 도 건드리지 않는다 — 이건 감사 로그가 아니라
+  // **생존 시계**다(기존 auditLog 는 ledgerSpool 로 최대 30분까지 지연 재적재될
+  // 수 있어 생존 시계로 못 쓴다).
+  //
+  // ★이것은 push 가 아니다. 에이전트에게 아무것도 보내지 않는다 — 에이전트가
+  //   제 스케줄로 하는 툴 호출이 서버에 닿았을 때 그 시각만 적는다. 이 CLI 들에
+  //   "터미널 밖 채널" 은 존재하지 않으므로(MCP 로 질문을 밀어넣는 것조차 결국
+  //   writeAndSubmit 으로 PTY stdin 에 text+CR 을 쓴다) 프로브는 묻지 않고 듣기만
+  //   한다. 자세한 근거는 agent-stall-policy.ts evaluateProbe 주석.
+  private handleAgentMcpHeartbeat(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      let params: { agentId?: string; agentName?: string; tool?: string };
+      try {
+        params = JSON.parse(body || "{}");
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: false, error: "Invalid JSON" }));
+        return;
+      }
+      const agent = params.agentId
+        ? this.agentManager.getAgent(params.agentId)
+        : params.agentName
+          ? this.agentManager.getAgentByName(params.agentName)
+          : null;
+      // ★모르는 에이전트는 조용히 무시한다(200). 오케·CLI 폴백·다른 인스턴스가
+      //   호스팅하는 워커도 이 엔드포인트를 때리는데, 그때마다 404 를 돌려주면
+      //   MCP 쪽 로그가 의미 없는 실패로 도배된다. "여기 없는 에이전트" 는
+      //   프로브 축에서 그냥 no-baseline(프로브 불가)으로 떨어지면 된다.
+      const recorded = agent
+        ? this.agentManager.noteMcpCall(agent.id, Date.now())
+        : false;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: true, recorded }));
     });
   }
 

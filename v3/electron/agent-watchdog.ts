@@ -49,8 +49,11 @@ import {
   evaluateBoardQuiet,
   evaluateExitQuiet,
   evaluateFirstActivityQuiet,
+  evaluateProbe,
   resolveStallPolicy,
   stallTier,
+  type ProbeVerdict,
+  type ProcessProbeSample,
   type StallPolicy,
   type StallSignal,
 } from "./agent-stall-policy";
@@ -149,6 +152,30 @@ export interface WatchdogAgentHealth {
    * null when unknown / never exited. Carried on the exit-axis signal so the
    * message can say WHY it died, not just THAT it's quiet. */
   lastExitCode?: number | null;
+  /**
+   * ★능동 프로브 (b) 풀형 관측(티켓 DQYoyas3ESx33zXJOCOa) — epoch-ms of the
+   * last marblo MCP tool call this agent made, as recorded by the bridge's
+   * /agent-mcp-heartbeat. `undefined`/`null` = never observed (an older MCP
+   * build, a foreign harness, or an agent that genuinely never calls us) →
+   * the probe axis returns "프로브 불가" and stays silent.
+   *
+   * ★This is a PULL, not a push. Nothing is written to the agent's stdin to
+   * obtain it: the agent's own tool-call loop reaches the server on its own
+   * schedule and we merely note when it last did. There is no "channel outside
+   * the terminal" in this architecture — even an MCP-delivered question ends
+   * up as text+CR on the PTY via writeAndSubmit — so the probe never asks.
+   *
+   * Why it beats board activity as a liveness clock: read-only tool calls
+   * (check_feedback / get_task / get_available_tasks) do NOT bump
+   * projection.lastActivityAt, so an agent deep in a long reproduction can be
+   * board-silent while its tool loop is demonstrably round-tripping. That gap
+   * is exactly the false positive this axis exists to prevent.
+   */
+  lastMcpCallMs?: number | null;
+  /** The PTY child's OS pid, when this host knows it. Used only by the
+   * optional (a) branch of the probe (process.kill(pid,0) + `ps` CPU time).
+   * Absent → that branch is simply not observed. */
+  ptyPid?: number | null;
 }
 
 export type RecoveryPhase =
@@ -270,6 +297,25 @@ export interface WatchdogDeps {
   ) => void;
   /** Board activity resumed after a quiet signal — retract the marker. */
   clearQuiet?: (ticket: WatchdogTicket, agentId: string) => void;
+
+  // ── 능동 프로브 (a) — optional OS 관측 (티켓 DQYoyas3ESx33zXJOCOa) ──
+  /**
+   * Actively poke the OS about an agent's process: does the pid still exist,
+   * and how much CPU time has it accumulated? Wired by the host to
+   * process-cpu-probe.sampleProcessProbe. **Entirely optional** — when absent
+   * (or when it resolves to all-nulls, e.g. off macOS) the probe axis simply
+   * runs on the (b) MCP clock alone, and an unobservable case falls to
+   * "프로브 불가", never to "멈춤".
+   *
+   * ★Called ONLY from inside the probe branch — i.e. after every other axis
+   * has declined the ticket AND both the board and the MCP clock have crossed
+   * the grace. Never polled. Writes nothing to any PTY.
+   */
+  probeProcess?: (
+    agentId: string,
+    pid: number | null,
+    prevCpuMs: number | null
+  ) => Promise<ProcessProbeSample | null>;
 
   /** Injectable clock (epoch-ms) for deterministic tests. */
   now?: () => number;
@@ -750,6 +796,15 @@ export class AgentWatchdog {
       ticket: WatchdogTicket;
     }
   >();
+  /**
+   * 능동 프로브 (a): 에이전트별 직전 CPU 표본. CPU 는 **델타로만** 의미가 있고
+   * 절대값은 아무것도 말해주지 않는다 — 그래서 첫 표본이 찍히는 라운드는 CPU
+   * 축 없이(=MCP 시계만으로) 판정된다. agentId 키인 이유는 이 값이 티켓이
+   * 아니라 프로세스의 성질이기 때문이다(재배정돼도 같은 프로세스면 이어진다).
+   */
+  private cpuSamples = new Map<string, { atMs: number; cpuMs: number }>();
+  /** 티켓별 가장 최근 프로브 판정. 신호를 만들지 않은 라운드의 결과도 남는다. */
+  private lastProbe = new Map<string, ProbeVerdict>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private sweeping = false;
 
@@ -795,6 +850,8 @@ export class AgentWatchdog {
     this.reviewEscalatedAt.clear();
     this.pendingAttempted.clear();
     this.quietRaised.clear();
+    this.cpuSamples.clear();
+    this.lastProbe.clear();
     this.log("stopped");
   }
 
@@ -825,6 +882,17 @@ export class AgentWatchdog {
       }
       for (const taskId of [...this.firstSeen.keys()]) {
         if (!seen.has(taskId)) this.firstSeen.delete(taskId);
+      }
+      // 프로브 판정 캐시도 같이 정리한다. CPU 표본(cpuSamples)은 agentId 키라
+      // 여기서 지우지 않고, 아래 활성 에이전트 집합 기준으로 따로 턴다.
+      for (const taskId of [...this.lastProbe.keys()]) {
+        if (!seen.has(taskId)) this.lastProbe.delete(taskId);
+      }
+      const liveAgents = new Set(
+        tickets.map((t) => t.agentId).filter((id): id is string => !!id)
+      );
+      for (const agentId of [...this.cpuSamples.keys()]) {
+        if (!liveAgents.has(agentId)) this.cpuSamples.delete(agentId);
       }
       // W8: a ticket that left the active set (submitted / closed / reassigned)
       // takes its quiet marker with it — retract it from the agent.
@@ -979,7 +1047,8 @@ export class AgentWatchdog {
   /**
    * W8 — raise / repeat / clear the board-quiet signal for one ticket.
    *
-   * Three axes, checked in order (2026-08-23 보강, 티켓 O1OQKukSSCmMaJCoGHGP):
+   * Four axes, checked in order (2026-08-23 보강, 티켓 O1OQKukSSCmMaJCoGHGP +
+   * DQYoyas3ESx33zXJOCOa):
    *   1. exit           — this instance's PTY confirmed the process terminal
    *                        (status stopped/error). Immediate — no threshold
    *                        wait, because death isn't inferred, it's known.
@@ -988,12 +1057,25 @@ export class AgentWatchdog {
    *                        threshold than board-quiet: a worker with zero
    *                        reports ever is a different failure than one that
    *                        reported for a while and then stopped.
-   *   3. board-quiet     — the original W8 axis: reported before, then quiet
+   *   3. probe           — ★the ACTIVE axis. Everything above waits for an
+   *                        observation to arrive; this one goes and checks —
+   *                        without writing a single byte to the PTY. Fires at
+   *                        12 min (earlier than board-quiet's 20/45) but only
+   *                        with positive corroboration: the board AND the
+   *                        agent's own MCP tool-call clock are BOTH past the
+   *                        grace and the PTY is silent/parked. Any MCP call
+   *                        inside the window is itself the answer ("응답함")
+   *                        and suppresses the signal. "프로브 불가" raises
+   *                        nothing at all — board-quiet keeps waiting.
+   *   4. board-quiet     — the original W8 axis: reported before, then quiet
    *                        past the priority-tiered threshold.
-   * A ticket is judged by exactly one axis per raise — once exit or
-   * first-activity claims it, board-quiet is not also evaluated for the same
-   * stretch (same underlying "nothing has been reported" fact; two signals
-   * for one fact would just be noise).
+   * A ticket is judged by exactly one axis per raise — once exit,
+   * first-activity or probe claims it, board-quiet is not also evaluated for
+   * the same stretch (same underlying "nothing has been reported" fact; two
+   * signals for one fact would just be noise). Concretely: a stall normally
+   * surfaces as `probe` at 12 min and the repeat limiter then holds
+   * board-quiet's 20-min raise until repeatMs — deliberate, the orchestrator
+   * has already been told, with strictly more evidence than board-quiet had.
    *
    * Fires only for a LOCALLY-hosted bound agent: a missing agent belongs to
    * another instance (which runs its own sweep — two instances raising the
@@ -1001,14 +1083,14 @@ export class AgentWatchdog {
    * to one signal per `stall.repeatMs`; any board activity after a signal
    * clears it.
    */
-  private sweepQuiet(
+  private async sweepQuiet(
     ticket: WatchdogTicket,
     health: WatchdogAgentHealth | null,
     lastBoardMs: number,
     now: number,
     missing: boolean,
     terminalLocal: boolean
-  ): void {
+  ): Promise<void> {
     if (!this.deps.signalQuiet || !ticket.agentId) return;
     const prior = this.quietRaised.get(ticket.taskId);
     if (prior && lastBoardMs > prior.baselineBoardMs) {
@@ -1049,7 +1131,8 @@ export class AgentWatchdog {
       quietMs: number,
       thresholdMs: number,
       exitCode: number | null,
-      detail: string
+      detail: string,
+      probe: ProbeVerdict | null = null
     ): void => {
       const repeat = (prior?.repeat ?? 0) + 1;
       const signal: StallSignal = {
@@ -1060,6 +1143,7 @@ export class AgentWatchdog {
         thresholdMs,
         boardIdleMs,
         exitCode,
+        probe,
         pty,
         model,
         raisedAtMs: now,
@@ -1155,7 +1239,52 @@ export class AgentWatchdog {
       return;
     }
 
-    // ── axis 3: board-quiet — reported before, then went quiet ───────────
+    // ── axis 3: probe — ★능동. 기다리지 않고 확인한다 ─────────────────────
+    //
+    // (b) 풀형 MCP 관측이 주 증거, (a) OS 관측이 보조. PTY 에는 0바이트.
+    // evaluateProbe 가 board/MCP/PTY 전제를 전부 들고 있으므로 여기서는
+    // "OS 를 실제로 찔러볼 가치가 있는가" 만 판단한다 — 값싼 (b) 만으로 이미
+    // responsive/not-applicable 이 나오면 `ps` 를 부르지 않는다(상시 폴링 금지).
+    const probeInput = {
+      now,
+      boardIdleMs,
+      pty,
+      lastMcpCallMs: health?.lastMcpCallMs ?? null,
+      policy: this.cfg.stall,
+    };
+    let probe = evaluateProbe(probeInput);
+    if (probe.outcome === "unresponsive" || probe.evidence === "no-baseline") {
+      // 값싼 경로가 "무응답" 또는 "관측 수단 없음" 을 냈을 때만 OS 를 찌른다.
+      // 전자는 (a) 로 사실 확인(pid 실종)/반증(CPU 진행)을 받을 값어치가 있고,
+      // 후자는 MCP 시계가 없는 에이전트에 남은 유일한 관측 수단이 (a) 다.
+      const sample = await this.runProcessProbe(ticket, health, now);
+      if (sample) probe = evaluateProbe({ ...probeInput, process: sample });
+    }
+    // 신호를 만들든 안 만들든 이번 라운드 판정을 남긴다 — 다른 축의 신호에
+    // 붙여 보내고, "왜 안 울렸나" 를 나중에 확인할 수 있어야 한다.
+    this.lastProbe.set(ticket.taskId, probe);
+    if (probe.outcome === "unresponsive") {
+      if (rateLimited) return;
+      const detail =
+        `★능동 프로브 무응답 — ${probe.reason} · ` +
+        `${describePtyLiveness(pty, { now, lastWorkOutputMs: lastWork })} · ` +
+        `모델 ${model ?? "?"} · ` +
+        `(PTY 에 아무것도 쓰지 않은 관측 결과입니다 — 이 축은 죽이지 않습니다)`;
+      raise(
+        "probe",
+        probe.mcpQuietMs ?? boardIdleMs,
+        probe.thresholdMs,
+        null,
+        detail,
+        probe
+      );
+      return;
+    }
+    // ★responsive / indeterminate 는 신호를 만들지 않는다. 특히 indeterminate
+    // ("프로브 불가")를 '멈춤' 으로 뚝치지 않는 것이 이 축의 설계 전부다 —
+    // 아래 board-quiet 의 20/45분 타임라인이 그대로 살아 있어 안전망이 된다.
+
+    // ── axis 4: board-quiet — reported before, then went quiet ───────────
     const verdict = evaluateBoardQuiet({
       now,
       lastBoardActivityMs: ticket.lastActivityAtMs,
@@ -1170,8 +1299,60 @@ export class AgentWatchdog {
       `(임계 ${Math.round(verdict.thresholdMs / 60_000)}분 · ` +
       `${verdict.tier === "urgent" ? "긴급 P4+" : "일반"}) · ` +
       `${describePtyLiveness(pty, { now, lastWorkOutputMs: lastWork })} · ` +
-      `모델 ${model ?? "?"}`;
-    raise("board-quiet", verdict.quietMs, verdict.thresholdMs, null, detail);
+      `모델 ${model ?? "?"} · 프로브: ${probe.reason}`;
+    // ★프로브 결과를 board-quiet 신호에도 싣는다. "20분째 조용한데 찔러봤을 때
+    // 살아 있었나" 는 오케가 '긴 추론' 과 '행(hang)' 을 가르는 데 필요한 재료다.
+    raise(
+      "board-quiet",
+      verdict.quietMs,
+      verdict.thresholdMs,
+      null,
+      detail,
+      probe
+    );
+  }
+
+  /**
+   * 능동 프로브 (a) — OS 를 실제로 찔러본다. 배선이 없거나 관측 불가면 null.
+   *
+   * ★부작용은 CPU 표본 저장 하나뿐이다. PTY 에 쓰지 않고, 시그널 0(전달 검사)
+   *   외에는 대상 프로세스에 어떤 시그널도 보내지 않는다.
+   * ★한 에이전트당 sweep 마다 최대 1회, 그것도 (b) 가 이미 의심 판정을 낸
+   *   뒤에만 불린다 — 상시 폴링 금지 요구사항이 여기서 지켜진다.
+   */
+  private async runProcessProbe(
+    ticket: WatchdogTicket,
+    health: WatchdogAgentHealth | null,
+    now: number
+  ): Promise<ProcessProbeSample | null> {
+    if (!this.deps.probeProcess || !ticket.agentId) return null;
+    const prev = this.cpuSamples.get(ticket.agentId) ?? null;
+    try {
+      const sample = await this.deps.probeProcess(
+        ticket.agentId,
+        health?.ptyPid ?? null,
+        prev?.cpuMs ?? null
+      );
+      if (sample && typeof sample.cpuMs === "number") {
+        this.cpuSamples.set(ticket.agentId, { atMs: now, cpuMs: sample.cpuMs });
+      }
+      return sample;
+    } catch (err) {
+      // 관측 실패는 '멈춤' 이 아니라 '모름' 이다. 그대로 삼키고 null.
+      this.log("probeProcess threw (best-effort → 프로브 불가)", {
+        taskId: ticket.taskId,
+        err: String(err),
+      });
+      return null;
+    }
+  }
+
+  /**
+   * 가장 최근 프로브 판정(신호를 만들지 않은 것 포함). 다른 축의 신호에
+   * 붙여 보내고, 진단/테스트가 "왜 안 울렸나" 를 확인하는 데 쓴다.
+   */
+  getLastProbe(taskId: string): ProbeVerdict | null {
+    return this.lastProbe.get(taskId) ?? null;
   }
 
   /** Inspect one ticket and, if stuck, take the next recovery step. */
@@ -1210,7 +1391,14 @@ export class AgentWatchdog {
     // as work. The quiet signal asks a different question — "has anyone been
     // TOLD anything?" — and only tells the orchestrator. No nudge, no respawn,
     // no kill hangs off it; the decision belongs to whoever knows the context.
-    this.sweepQuiet(ticket, health, lastBoardMs, now, missing, terminalLocal);
+    await this.sweepQuiet(
+      ticket,
+      health,
+      lastBoardMs,
+      now,
+      missing,
+      terminalLocal
+    );
 
     // Freshest overall signal of life: board activity OR local PTY WORK output.
     // ★Work output, not raw bytes: a CLI parked at its input prompt repaints its

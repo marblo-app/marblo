@@ -777,6 +777,27 @@ export class PtyManager {
     return this.sessions.has(id);
   }
 
+  /**
+   * This session's PTY child pid, or null when there is no such session.
+   *
+   * Exposed for the watchdog's ACTIVE PROBE (티켓 DQYoyas3ESx33zXJOCOa): the
+   * probe asks the OS whether the pid still exists (`process.kill(pid, 0)`) and
+   * how much CPU it has burned, instead of typing anything into the terminal.
+   *
+   * ★Why the probe reads a pid instead of writing a keystroke: writeAndSubmit
+   * below sends the text and then fires CR up to three times **without first
+   * checking what is already sitting in the CLI's input buffer**. So a
+   * "harmless empty Enter" does not exist — it can submit a half-typed draft or
+   * resolve a [y/n] dialog the user never answered. A pid read is the same
+   * question ("are you alive?") asked of the kernel instead of the agent, and
+   * it cannot perturb the session at all. See agent-stall-policy.ts for the
+   * full rejection rationale of the keystroke-probe design.
+   */
+  getPid(id: string): number | null {
+    const pid = this.sessions.get(id)?.process.pid;
+    return typeof pid === "number" && Number.isInteger(pid) ? pid : null;
+  }
+
   onData(id: string, callback: (data: string) => void): void {
     const session = this.sessions.get(id);
     if (session) {

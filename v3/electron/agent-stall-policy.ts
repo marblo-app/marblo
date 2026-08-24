@@ -72,6 +72,62 @@ export const STALL_PTY_BUSY_RECENT_MS = 2 * 60_000;
 // 함께 확인할 여지가 생긴다. env 로 덮어쓸 수 있다.
 export const STALL_FIRST_ACTIVITY_QUIET_MS = 5 * 60_000;
 
+// ── 능동 프로브 축(2026-08-23, 티켓 DQYoyas3ESx33zXJOCOa) ─────────────────
+//
+// 사장님 요구는 "워치독이 **찔러봐서** 실제 죽은 건지 작업 중인지 판단" 이었다.
+// 위 세 축은 전부 수동 관측(무활동 나이)이다 — 기다릴 뿐 확인하지 않는다.
+// 이 축은 확인한다. 단 **PTY 에 단 1바이트도 쓰지 않고**.
+//
+// ★후보 (c) "PTY 에 제어문자/빈 줄을 넣어 반응을 본다" 는 **기각됐다**(오케 승인
+//   2026-08-23). 근거는 취향이 아니라 코드다 — pty-manager.ts performWriteAndSubmit
+//   은 text 를 쓴 뒤 **입력 버퍼에 뭐가 들어 있는지 확인하지 않고** CR 을 최대
+//   3회까지 보낸다. 그래서 "무해한 엔터 한 번" 같은 건 존재하지 않는다: 컴포저에
+//   물려 있던 초안이 조기 제출되거나, [y/n] 다이얼로그가 사람이 의도하지 않은
+//   쪽으로 확정된다. 게다가 반응이 없을 때 그게 '죽음' 인지 '우리 파싱 실패' 인지
+//   구별할 방법이 없어 오판이 오히려 늘어난다.
+//   ★다음 사람에게: "그냥 엔터 한 번이면 되지 않나" 는 이미 검토돼 기각됐다.
+//   되살리려면 performWriteAndSubmit 에 입력버퍼 사전확인이 먼저 생겨야 한다.
+//
+// 채택된 것은 (a)+(b) 다. 둘 다 관측형이다:
+//   (a) 프로세스 레벨 생존확인 — process.kill(pid, 0). optional 보조 축.
+//   (b) ★풀형(pull) MCP 관측 — "에이전트가 **스스로** 하는 다음 MCP 툴 호출이
+//       서버에 도착하면 그것을 응답으로 인정한다". 질문을 push 하는 게 아니다:
+//       MCP 로 질문을 밀어넣는 것조차 결국 bridge → agent-manager →
+//       writeAndSubmit 으로 PTY stdin 에 text+CR 을 쓴다. **"터미널 밖 채널" 은
+//       이 구조에 존재하지 않는다.** 그래서 (b) 는 보내지 않고 받기만 한다.
+//
+// ★(b)가 board-quiet 보다 정확한 이유(이 축의 존재 이유 전부):
+//   읽기전용 MCP 호출(check_feedback/get_task/get_available_tasks 등)은
+//   projection.lastActivityAt 을 **올리지 않는다**. 즉 "보드는 조용한데 MCP 는
+//   왕복 중" 인 구간이 실재한다 — 벤치를 돌리거나 버그를 재현 중인 멀쩡한
+//   에이전트가 정확히 여기다. board-quiet 은 이 구간을 침묵으로만 본다. 이 축은
+//   구분한다. 그래서 이 축은 board-quiet 을 **대체하지 않고**, 더 이른 시점에
+//   더 나은 증거로 조기경보만 얹는다.
+
+/**
+ * 프로브 유예. 보드도 조용하고 MCP 호출도 없는 상태가 이만큼 지속되면 신호.
+ *
+ * ★12분의 근거(오케 확정, 2026-08-23):
+ *   1. #1140 실측에서 **살아서 일하는 에이전트의 최대 보고 간격이 11분**이었다.
+ *      그 아래로 잡으면 건강한 에이전트가 반드시 오탐된다. 12분은 그 천장 바로
+ *      위이면서 board-quiet(20/45분)보다 의미 있게 이르다.
+ *   2. ★그리고 이 축에서는 11분이 상한이지 하한이 아니다 — 이 시계는 보드 활동이
+ *      아니라 **MCP 호출** 을 잰다. add_activity 자체가 MCP 호출이고 그 위에
+ *      읽기 호출이 더 얹히므로, MCP 호출 간격 ≤ 보드 활동 간격이 **구조적으로**
+ *      성립한다. 같은 12분을 MCP 시계에 거는 것은 보드 시계에 거는 것보다 엄격히
+ *      더 안전하다. (그래서 실측 천장이 나중에 올라가도 이 축이 먼저 깨지지 않는다 —
+ *      깨진다면 board-quiet 이 먼저 깨진다.)
+ * 값이 소음이 되면 env(MARBLO_STALL_PROBE_MS)로 배포 없이 올린다.
+ */
+export const STALL_PROBE_GRACE_MS = 12 * 60_000;
+
+/**
+ * (a) 보조 축의 CPU 델타 유의 기준. 두 표본 사이 누적 CPU 시간이 이만큼도 늘지
+ * 않았으면 "CPU 를 안 쓰는 중" 으로 본다. 값 자체는 판정을 만들지 않는다 —
+ * evaluateProbe 에서 CPU 는 무응답을 **판정 불가로 강등만** 시킨다(아래 참조).
+ */
+export const STALL_PROBE_CPU_DELTA_MS = 250;
+
 export type StallTier = "urgent" | "normal";
 
 export interface StallPolicy {
@@ -84,6 +140,12 @@ export interface StallPolicy {
    * 비용이라, 급한 일이든 아니든 "아예 시작을 못 했다" 는 똑같이 이르게 알
    * 가치가 있다. */
   firstActivityQuietMs: number;
+  /** 능동 프로브 유예. 보드 무활동과 MCP 무호출이 **둘 다** 이 값을 넘어야
+   * 발동한다 — 우선순위로 가르지 않는다(보드 시계가 아니라 툴콜 루프의 왕복
+   * 주기를 재는 값이라 티켓 급함과 무관하다). */
+  probeGraceMs: number;
+  /** (a) 보조 축: 두 CPU 표본 사이 이만큼도 안 늘면 "CPU 유휴" 로 본다. */
+  probeCpuDeltaMs: number;
 }
 
 export const DEFAULT_STALL_POLICY: StallPolicy = {
@@ -92,6 +154,8 @@ export const DEFAULT_STALL_POLICY: StallPolicy = {
   quietNormalMs: STALL_QUIET_NORMAL_MS,
   repeatMs: STALL_SIGNAL_REPEAT_MS,
   firstActivityQuietMs: STALL_FIRST_ACTIVITY_QUIET_MS,
+  probeGraceMs: STALL_PROBE_GRACE_MS,
+  probeCpuDeltaMs: STALL_PROBE_CPU_DELTA_MS,
 };
 
 function intEnv(
@@ -106,7 +170,7 @@ function intEnv(
 }
 
 /** env 덮어쓰기: MARBLO_STALL_QUIET_URGENT_MS / _NORMAL_MS / _REPEAT_MS /
- * _URGENT_PRIORITY_MIN / _FIRST_ACTIVITY_MS. */
+ * _URGENT_PRIORITY_MIN / _FIRST_ACTIVITY_MS / _PROBE_MS / _PROBE_CPU_DELTA_MS. */
 export function resolveStallPolicy(
   env: Record<string, string | undefined> = typeof process !== "undefined"
     ? process.env
@@ -126,6 +190,12 @@ export function resolveStallPolicy(
       env,
       "MARBLO_STALL_FIRST_ACTIVITY_MS",
       d.firstActivityQuietMs
+    ),
+    probeGraceMs: intEnv(env, "MARBLO_STALL_PROBE_MS", d.probeGraceMs),
+    probeCpuDeltaMs: intEnv(
+      env,
+      "MARBLO_STALL_PROBE_CPU_DELTA_MS",
+      d.probeCpuDeltaMs
     ),
   };
 }
@@ -330,6 +400,221 @@ export function describePtyLiveness(
   }
 }
 
+// ── 능동 프로브 판정 ──────────────────────────────────────────────────────
+
+/**
+ * 프로브 결과 3분기. ★세 번째(indeterminate)를 '멈춤' 으로 뚝치지 않는 것이
+ * 이 축의 설계 전부다 — 모르면 모른다고 하고, board-quiet(20/45분) 안전망이
+ * 그대로 계속 기다린다.
+ *
+ *   responsive    — 응답함. 살아서 무언가 하고 있다는 **양성** 증거가 있다.
+ *   unresponsive  — 무응답. 있어야 할 증거가 유예 안에 하나도 안 왔다.
+ *   indeterminate — 프로브 불가. 관측 수단 자체가 없거나 증거가 상충한다.
+ */
+export type ProbeOutcome = "responsive" | "unresponsive" | "indeterminate";
+
+/**
+ * 어떤 관측이 이 판정을 만들었는가. 오케에게 "왜" 를 보여주기 위한 값 —
+ * 판정 단어가 아니라 관측 사실을 담는다.
+ *
+ *   board-active   — (응답) 보드 활동이 유예 안에 있다. 찌를 이유가 없다.
+ *   mcp-call       — (응답) 이 에이전트의 MCP 툴 호출이 유예 안에 도착했다.
+ *                    ★툴콜 루프가 서버까지 왕복했다는 뜻이라 PTY 스피너보다
+ *                    훨씬 강한 증거다(스피너는 행(hang)에도 계속 돈다).
+ *   process-gone   — (무응답) pid 가 OS 에 없다. 추론이 아니라 사실.
+ *   mcp-silent     — (무응답) MCP 호출 이력은 있는데(=관측 가능하다는 증거)
+ *                    유예 내내 한 건도 안 왔다.
+ *   not-applicable — (불가) PTY 가 silent/parked 가 아니다. 이 축의 소관이 아님.
+ *   no-baseline    — (불가) 이 에이전트의 MCP 호출을 **한 번도** 본 적이 없다.
+ *                    "MCP 를 안 쓰는 에이전트" 와 "죽은 에이전트" 를 구별할
+ *                    수단이 없다 → 판정하지 않는다.
+ *   cpu-advance    — (불가) MCP 는 조용한데 CPU 는 돌고 있다. ★아래 참조.
+ */
+export type ProbeEvidence =
+  | "board-active"
+  | "mcp-call"
+  | "process-gone"
+  | "mcp-silent"
+  | "not-applicable"
+  | "no-baseline"
+  | "cpu-advance";
+
+export interface ProbeVerdict {
+  outcome: ProbeOutcome;
+  evidence: ProbeEvidence;
+  /** 마지막 MCP 호출 이후 경과(ms). 호출 이력이 없으면 null. */
+  mcpQuietMs: number | null;
+  thresholdMs: number;
+  /** 오케에게 보여줄 한 줄 근거(한국어). */
+  reason: string;
+}
+
+/**
+ * (a) 프로세스 레벨 관측 표본. **전부 optional 이고, 모르면 null 이어야 한다.**
+ *
+ * ★호출자 계약: `alive` 는 확신할 때만 boolean 을 넣는다. process.kill(pid, 0)
+ *   이 ESRCH 를 던졌을 때만 false — EPERM(권한 없음)이나 pid 미상은 반드시
+ *   null 이다. "모른다" 를 "죽었다" 로 기울이면 이 파일 헤더의 설계 원칙과
+ *   정면으로 충돌한다.
+ */
+export interface ProcessProbeSample {
+  /** pid 가 OS 에 존재하는가. 확신 없으면 null. */
+  alive: boolean | null;
+  /** 누적 CPU 시간(ms). 관측 불가 플랫폼이면 null. */
+  cpuMs: number | null;
+  /** 직전 표본의 누적 CPU 시간(ms). 첫 표본이면 null(델타를 못 냄). */
+  prevCpuMs?: number | null;
+}
+
+/**
+ * (b) 하트비트 시계의 전진 규칙. 새 관측이 더 최신일 때만 시계를 옮긴다.
+ *
+ * ★단조성이 안전 속성이다. 하트비트는 여러 MCP 프로세스에서 비동기로 날아오고
+ *   (에이전트 하나가 여러 MCP 세션을 가질 수 있다) 늦게 도착한 오래된
+ *   타임스탬프가 시계를 **뒤로** 돌리면, 살아 있는 에이전트의 mcpQuietMs 가
+ *   갑자기 늘어나 없는 정지를 만들어낸다 — 정확히 이 축이 피해야 할 오탐이다.
+ *   유한하지 않은 값(NaN/Infinity)도 같은 이유로 무시한다.
+ */
+export function advanceMcpClock(
+  prev: number | null,
+  incoming: number
+): number | null {
+  if (!Number.isFinite(incoming)) return prev;
+  if (prev === null || !Number.isFinite(prev)) return incoming;
+  return incoming > prev ? incoming : prev;
+}
+
+/**
+ * 능동 프로브 — "찔러봐서" 죽은 건지 일하는 건지 본다. PTY 에 0바이트.
+ *
+ * 판정 순서(위에서 아래로, 먼저 걸리는 것이 결론):
+ *   1. 보드가 유예 안에 움직였다              → responsive / board-active
+ *   2. PTY 가 silent/parked 가 아니다          → indeterminate / not-applicable
+ *   3. pid 가 없다(확정)                       → unresponsive / process-gone
+ *   4. MCP 호출을 한 번도 본 적 없다           → indeterminate / no-baseline
+ *   5. MCP 호출이 유예 안에 도착했다           → responsive / mcp-call
+ *   6. CPU 가 유의미하게 늘었다                → indeterminate / cpu-advance
+ *   7. 그 외                                   → unresponsive / mcp-silent
+ *
+ * ★2번을 먼저 거르는 이유: PTY 가 busy(스트리밍/스피너)면 이 축은 의견을 내지
+ *   않는다. 스피너는 행(hang)에도 도니까 생존 증거로는 못 쓰지만, 반대로 이
+ *   축이 "무응답" 을 주장할 근거도 되지 못한다 — 그 구간은 board-quiet 이
+ *   원래대로 20/45분에 잡는다. awaiting-input(사람 대기)도 같은 이유로 제외:
+ *   막고 있는 건 에이전트가 아니라 사람이다.
+ *
+ * ★6번이 이 함수에서 가장 중요한 한 줄이다. CPU 가 도는 것은 **실행 증거이지
+ *   진행 증거가 아니다** — 무한루프도 CPU 를 쓴다. 그래서 CPU 는 무응답을
+ *   '응답함' 으로 승격시키지 않고 '판정 불가' 로 **강등만** 시킨다. 승격시키면
+ *   행(hang)에 빠진 프로세스를 건강하다고 선언하게 되고(미탐), 무시하면 CPU 를
+ *   태우며 뭔가 하는 중인 프로세스를 멈췄다고 신고하게 된다(오탐). 강등은 둘
+ *   다 피하면서 기존 안전망에 판단을 넘긴다. 오케 표현으로 "CPU 는 보조 증거".
+ */
+export function evaluateProbe(input: {
+  now: number;
+  /** 마지막 보드 활동 이후 경과(ms). */
+  boardIdleMs: number;
+  pty: PtyLiveness;
+  /** 이 에이전트가 마지막으로 MCP 툴을 호출한 시각(epoch ms). 없으면 null. */
+  lastMcpCallMs: number | null;
+  /** (a) optional. 관측 자체를 안 했으면 null/undefined. */
+  process?: ProcessProbeSample | null;
+  policy?: StallPolicy;
+}): ProbeVerdict {
+  const policy = input.policy ?? DEFAULT_STALL_POLICY;
+  const thresholdMs = policy.probeGraceMs;
+  const mins = (ms: number): number => Math.round(ms / 60_000);
+  const mcpQuietMs =
+    input.lastMcpCallMs !== null && Number.isFinite(input.lastMcpCallMs)
+      ? Math.max(0, input.now - input.lastMcpCallMs)
+      : null;
+  const done = (
+    outcome: ProbeOutcome,
+    evidence: ProbeEvidence,
+    reason: string
+  ): ProbeVerdict => ({ outcome, evidence, mcpQuietMs, thresholdMs, reason });
+
+  // 1. 보드가 최근에 움직였으면 찌를 이유가 없다.
+  if (input.boardIdleMs < thresholdMs) {
+    return done(
+      "responsive",
+      "board-active",
+      `보드 활동이 ${mins(input.boardIdleMs)}분 전(프로브 유예 ${mins(
+        thresholdMs
+      )}분 이내) — 프로브 불필요`
+    );
+  }
+
+  // 2. PTY 가 busy/awaiting-input/dead/missing 이면 이 축의 소관이 아니다.
+  if (input.pty !== "silent" && input.pty !== "parked") {
+    return done(
+      "indeterminate",
+      "not-applicable",
+      `PTY 상태가 ${input.pty} — 이 축은 silent/parked 만 판정한다(나머지는 ` +
+        `기존 축의 몫)`
+    );
+  }
+
+  // 3. pid 가 확정적으로 없다. 사실이므로 유예를 더 기다리지 않는다.
+  if (input.process?.alive === false) {
+    return done(
+      "unresponsive",
+      "process-gone",
+      `프로세스 pid 가 OS 에 없음(process.kill(pid,0) → ESRCH) — 종료 이벤트가 ` +
+        `아직 안 왔을 뿐 이미 죽은 것`
+    );
+  }
+
+  // 4. 관측 수단 자체가 없다 → 판정하지 않는다.
+  if (mcpQuietMs === null) {
+    return done(
+      "indeterminate",
+      "no-baseline",
+      `이 에이전트의 MCP 툴 호출을 한 번도 관측한 적 없음 — 'MCP 를 안 쓰는 ` +
+        `에이전트' 와 '멈춘 에이전트' 를 구별할 수 없어 판정 보류(board-quiet ` +
+        `안전망이 그대로 기다린다)`
+    );
+  }
+
+  // 5. 에이전트가 스스로 한 MCP 호출이 유예 안에 도착했다 = 응답함.
+  if (mcpQuietMs < thresholdMs) {
+    return done(
+      "responsive",
+      "mcp-call",
+      `보드는 ${mins(input.boardIdleMs)}분째 조용하지만 이 에이전트의 MCP 툴 ` +
+        `호출이 ${mins(mcpQuietMs)}분 전에 도착함 — 툴콜 루프가 서버까지 ` +
+        `왕복 중(살아서 작업)`
+    );
+  }
+
+  // 6. CPU 는 승격시키지 않고 강등만 시킨다(위 주석 참조).
+  const prev = input.process?.prevCpuMs;
+  const cur = input.process?.cpuMs;
+  if (
+    typeof prev === "number" &&
+    Number.isFinite(prev) &&
+    typeof cur === "number" &&
+    Number.isFinite(cur) &&
+    cur - prev >= policy.probeCpuDeltaMs
+  ) {
+    return done(
+      "indeterminate",
+      "cpu-advance",
+      `MCP 호출은 ${mins(mcpQuietMs)}분째 없지만 누적 CPU 가 ${Math.round(
+        cur - prev
+      )}ms 늘었음 — 실행 중인 것은 맞으나 '진행' 증거는 아니라 판정 보류`
+    );
+  }
+
+  // 7. 관측 가능했고, 유예 내내 아무것도 오지 않았다.
+  return done(
+    "unresponsive",
+    "mcp-silent",
+    `보드 무활동 ${mins(input.boardIdleMs)}분 · MCP 툴 호출 무 ${mins(
+      mcpQuietMs
+    )}분 · PTY ${input.pty} — 유예 ${mins(thresholdMs)}분 동안 생존 증거 0건`
+  );
+}
+
 // ── 바운드 에이전트 stale 판정(dispatch 용) ─────────────────────────────
 
 export interface BoundAgentEvidence {
@@ -453,10 +738,12 @@ export interface StallSignal {
    *   board-quiet     — 종전 W8. 한동안 보고하다 멈춤(무활동 나이 ≥ 20/45분).
    *   first-activity  — 스폰 이후 첫 활동이 아예 없음(무활동 나이 ≥ 5분).
    *   exit            — 프로세스가 로컬에서 종료(stopped/error)로 확정됨. 즉시.
-   * 죽음(exit)과 침묵(board-quiet/first-activity)이 같은 문구로 오면 오케가
-   * 구분할 수 없다 — 이 필드 + exitCode 가 그 구분이다.
+   *   probe           — 능동 프로브가 '무응답' 을 냈다(보드·MCP 둘 다 12분 침묵,
+   *                     PTY silent/parked). board-quiet 보다 이른 조기경보.
+   * 죽음(exit)과 침묵(board-quiet/first-activity/probe)이 같은 문구로 오면
+   * 오케가 구분할 수 없다 — 이 필드 + exitCode + probe 가 그 구분이다.
    */
-  axis: "board-quiet" | "first-activity" | "exit";
+  axis: "board-quiet" | "first-activity" | "exit" | "probe";
   quietMs: number;
   thresholdMs: number;
   /** 이 티켓의 마지막 실제 보드 활동 이후 경과(ms) — 축과 무관하게 항상 채운다.
@@ -465,6 +752,13 @@ export interface StallSignal {
   boardIdleMs: number;
   /** 로컬에서 관측한 PTY exit code. axis 가 "exit" 가 아니면 null. */
   exitCode: number | null;
+  /**
+   * 이번 sweep 의 능동 프로브 결과. **축과 무관하게 실을 수 있을 때는 항상
+   * 싣는다** — 다른 축이 올린 신호에도 "그래서 찔러봤을 때 살아 있었나" 가
+   * 붙어 있어야 오케가 "긴 추론 중" 과 "행(hang)" 을 가른다. 프로브를 아예
+   * 돌리지 않았으면 null.
+   */
+  probe: ProbeVerdict | null;
   pty: PtyLiveness;
   /** 구체 모델(model@effort) 또는 벤더. 모르면 null. */
   model: string | null;

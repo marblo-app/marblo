@@ -466,6 +466,46 @@ function notifyOrchestrator(message: string, contextId?: string): void {
   });
 }
 
+// ── 능동 프로브 (b) 풀형 관측 하트비트 (티켓 DQYoyas3ESx33zXJOCOa) ────────
+//
+// 워치독의 프로브 축은 "에이전트가 **스스로** 하는 다음 MCP 호출을 응답으로
+// 인정" 한다. 그 도착 사실을 메인 프로세스에 알리는 게 이 함수다.
+//
+// ★왜 기존 auditLog 를 재사용하지 않나: 감사 원장은 ledgerSpool 로 비동기
+//   배치되고 실패 시 최대 30분 뒤 재적재된다(§7). 그건 감사에는 맞지만 **생존
+//   시계로는 못 쓴다** — 30분 늦게 도착한 타임스탬프로는 12분 유예를 못 잰다.
+// ★왜 fire-and-forget 인가: 이 호출이 실패해도 툴 호출은 정상이어야 한다.
+//   하트비트가 못 가면 프로브는 그 에이전트를 no-baseline / mcp-silent 로 보고,
+//   신호를 올리더라도 그건 신호일 뿐 아무도 죽이지 않는다.
+//
+// 스로틀: 하트비트는 분 단위 해상도만 있으면 된다(유예 12분). 툴 호출마다
+// POST 를 쏘면 브리지에 의미 없는 잡음이 쌓이므로 15초로 묶는다 — 유예 대비
+// 1/48 이라 판정에 영향이 없다.
+const MCP_HEARTBEAT_THROTTLE_MS = 15_000;
+let lastHeartbeatSentAtMs = 0;
+
+function noteMcpCallToBridge(toolName: string): void {
+  const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+  if (!bridgePort) return;
+  const agentId = process.env.MARBLO_AGENT_ID || "";
+  if (!agentId || agentId === "unknown") return;
+  // ★오케스트레이터는 워커가 아니다 — AgentManager 에 그런 인스턴스가 없어
+  //   하트비트가 반드시 recorded:false 로 버려진다. 워치독의 프로브 축도 오케를
+  //   보지 않는다(활성 티켓의 바운드 에이전트만 훑는다). 그러니 아예 쏘지 않아
+  //   불필요한 브리지 왕복을 만들지 않는다.
+  if (isOrchestratorAgentId(agentId)) return;
+  const now = Date.now();
+  if (now - lastHeartbeatSentAtMs < MCP_HEARTBEAT_THROTTLE_MS) return;
+  lastHeartbeatSentAtMs = now;
+  fetch(`http://127.0.0.1:${bridgePort}/agent-mcp-heartbeat`, {
+    method: "POST",
+    headers: bridgeHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ agentId, agentName: agentId, tool: toolName }),
+  }).catch(() => {
+    /* best-effort — 실패는 '프로브 불가'로 떨어질 뿐 툴 호출을 막지 않는다 */
+  });
+}
+
 /**
  * `notifyOrchestrator` 의 결과 확인형 변종 — 주입 성공 여부를 실제로 기다린다.
  *
@@ -3082,6 +3122,13 @@ export function registerTools(server: McpServer): void {
       // 사용자 액티비티 스트림에 노출하지 않는 read-only 조회 툴.
       // 감사 로그 자체를 쓰지 않는다 — 시스템 페이로드(스킬 본문 등) 노이즈 방지.
       const gatedHandler = (async (...args: unknown[]) => {
+        // ★프로브 (b): 인증·실행보다 **먼저** 찍는다. 이 시점에 이미 "에이전트의
+        // 툴콜 루프가 서버까지 왕복했다" 는 사실이 성립하고, 그게 프로브가 재는
+        // 전부다 — 툴이 그 뒤에 실패하든 행(hang)이 걸리든 생존 증거는 유효하다.
+        // ★읽기전용(비-userFacing) 툴에서 특히 중요하다: 이쪽은 감사 로그도
+        // 안 남기고 projection.lastActivityAt 도 안 올린다. board-quiet 이 볼 수
+        // 없는 바로 그 구간을 프로브가 보는 근거가 여기서 만들어진다.
+        noteMcpCallToBridge(name);
         await ensureAuthenticated();
         try {
           const result = await (
@@ -3104,6 +3151,8 @@ export function registerTools(server: McpServer): void {
       ...args: unknown[]
     ) => Promise<{ content?: Array<{ text?: string }> }>;
     const wrapped = (async (...args: unknown[]) => {
+      // ★프로브 (b) 하트비트 — 위 gatedHandler 와 같은 이유로 인증보다 먼저.
+      noteMcpCallToBridge(name);
       // Firestore 접근 전 인증 게이트 (discovery 는 인증 무관, 실행은 인증 보장).
       await ensureAuthenticated();
       const start = Date.now();

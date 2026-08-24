@@ -62,6 +62,7 @@ import {
   type StaleReviewTicket,
   type PendingInstruction,
 } from "./agent-watchdog";
+import { sampleProcessProbe } from "./process-cpu-probe";
 import { isOtherLiveWorkerForTask } from "./agent-stall-policy";
 import { OrchestratorManager } from "./orchestrator-manager";
 import type { OrchestratorCostSession } from "./session-kind";
@@ -2315,8 +2316,21 @@ const agentWatchdog = new AgentWatchdog(
         // 티켓의 문제였다.
         terminalSinceMs: a.terminalSince,
         lastExitCode: a.lastExitCode,
+        // ★능동 프로브 축(티켓 DQYoyas3ESx33zXJOCOa). (b) 는 이 에이전트가
+        // 스스로 한 마지막 MCP 툴 호출 시각(bridge /agent-mcp-heartbeat 가
+        // 찍는다), (a) 는 그 PTY 자식의 pid — 워치독이 OS 에 직접 물어보는
+        // 대상이다. 둘 다 읽기 전용이고 PTY 에는 아무것도 쓰지 않는다.
+        lastMcpCallMs: a.lastMcpCall,
+        ptyPid: ptyManager.getPid(a.ptySessionId),
       };
     },
+    // ★능동 프로브 (a) — OS 에게만 묻는다. process.kill(pid, 0) 은 시그널을
+    // 실제로 보내지 않는 존재 검사이고, `ps` 는 대상 프로세스를 건드리지 않는다.
+    // 신규 의존성 0(오케 확정): pidusage 류를 붙이지 않고 macOS 에서만 `ps` 를
+    // 파싱하며, 다른 플랫폼에서는 전부 null → 프로브는 "프로브 불가" 로 떨어지고
+    // 기존 board-quiet(20/45분) 안전망이 그대로 받는다.
+    probeProcess: (_agentId, pid, prevCpuMs) =>
+      sampleProcessProbe(pid, prevCpuMs),
     nudgeAgent: (agentId, message) => {
       const a = agentManager.getAgent(agentId);
       if (!a) return false;
