@@ -162,6 +162,19 @@ describe("① ★재현 시나리오 — 세션을 갈아도 B 가 체인에 남
 });
 
 describe("② 약속 없는 호출 — Firestore 를 건드리지도 않는다", () => {
+  it("2026-08-24 오포착 문장(보고드리겠습니다)은 체인을 쓰지 않는다", async () => {
+    const res = await captureWorkChainPromises(db, {
+      projectId: PROJECT,
+      by: "orchestrator-proj1",
+      tool: "send_telegram_message",
+      surface: "owner_report",
+      text: "끝나면 diff 와 함께 바로 보고드리겠습니다.",
+    });
+    expect(res).toMatchObject({ note: "", written: [], detected: 0 });
+    expect(getDocCalls).toBe(0);
+    expect(store.has(CHAIN)).toBe(false);
+  });
+
   it("감지 0건이면 읽기조차 하지 않는다", async () => {
     const res = await captureWorkChainPromises(db, {
       projectId: PROJECT,

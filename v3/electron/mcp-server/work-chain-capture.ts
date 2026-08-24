@@ -40,6 +40,10 @@
  *     약속 어미(겠다/해야 합니다/할 예정)만 약속으로 친다.
  *   · **부정** — "재배포 필요 없음 / no need" 는 약속의 반대다.
  *   · **질문** — "이거 해야 하나요?" 는 결정이 아직 없다.
+ *   · **청자 지향 발화 / 보고 행위** (티켓 tPNWTYM9k5BGMqfjQHZm, 2026-08-24
+ *     오포착 7건) — "보고드리겠습니다 / 확인하겠습니다 / 답장 주시면 ~드리겠습니다"
+ *     는 사람·에이전트에게 하는 말이지 오케 자기 큐의 다음 할 일이 아니다.
+ *     해법 후보와 기각 근거는 `isSpeechActNotWorkItem` 주석.
  *
  * 순수 모듈이다. Firestore 도 tools.ts 도 import 하지 않는다(work-chain-core 와
  * 같은 규율 — 렌더러가 그대로 가져다 쓸 수 있어야 한다).
@@ -317,6 +321,83 @@ const NEGATIONS = [
  */
 const NEGATION_AFTER = 20;
 
+/**
+ * 청자 지향 발화 / 보고 행위 — 약속 어미가 있어도 워크체인 항목이 아니다.
+ *
+ * ## 왜 이 필터인가 (티켓 tPNWTYM9k5BGMqfjQHZm)
+ * 2026-08-24 하루에 오포착 7건. 전부 오케가 `send_telegram_message` 또는
+ * `answer_question` 본문의 한 문장이 항목이 된 것이다. 후보 세 가지:
+ *
+ *   (가) 포착 표면을 좁혀 telegram/answer 본문을 안 읽기 — **기각**.
+ *       이 모듈이 생긴 자리(2026-08-22 "규칙을 한 번 더 배포해야 합니다")가
+ *       정확히 owner_report 다. 끄면 그 실패가 되살아나고, "마지막에 티켓
+ *       열겠다" 처럼 사장님께 말한 진짜 약속도 놓친다. 미포착 비용이 더 크다.
+ *   (나) 휴리스틱을 좁혀 **보고·제안·메일초안 발화**만 거절 — **채택**.
+ *       7건의 공통점은 어미가 아니라 화행이다: 지금 이 턴의 보고/재배정 고지/
+ *       청자 조건 제안/공손 제공. 그걸 거절하면 7건이 떨어지고, 작업 사건
+ *       조건("배포 끝나면")·자기 큐 약속("열겠다")은 그대로 남는다.
+ *   (다) 포착을 제안 상태로 두고 오케가 승인 — **기각**.
+ *       자동 포착의 가치가 "오케가 잊을 것을 잡아준다" 인데, 승인을 또 사람이
+ *       해야 하면 2026-08-22 순환이 되돌아온다. 오포착 비용은 (나)로 줄이고
+ *       남은 미포착은 기존 수동 경로(`add_work_chain_item`)가 받친다.
+ *
+ * merge_and_close 후속 포착은 이 파일의 텍스트 감지가 아니다
+ * (`captureMergeHoldFollowUp`). 여기 필터는 그 경로를 건드리지 않는다.
+ *
+ * 청자 조건("주시면","고 하시면")과 보고 어미("보고하겠","드리겠")를 가른다.
+ * 작업 사건 조건("끝나면","머지되면")은 DEPENDENCY_HINTS 로 남기고 거절하지
+ * 않는다 — 그게 좋은 포착과 나쁜 포착의 경계다.
+ */
+const LISTENER_GATES = [
+  "주시면",
+  "고 하시면",
+  "라고 하시면",
+  "다고 하시면",
+  "아시면",
+  "모르시면",
+  "알려주시",
+] as const;
+
+/** 보고·고지·공손 제공의 의지 어미. 당위("보고해야 합니다")는 의도적으로 안 넣는다. */
+const COMMUNICATIVE_VOLITIVE_STEMS = [
+  "보고하겠",
+  "보고드리겠",
+  "알려드리겠",
+  "말씀드리겠",
+  "안내하겠",
+  "전달하겠",
+  "회신하겠",
+  "답장하겠",
+  "배정하겠",
+  "드리겠",
+] as const;
+
+function isSpeechActNotWorkItem(
+  hay: string,
+  opts: { hasObject: boolean; hasDependencyHint: boolean },
+): boolean {
+  if (LISTENER_GATES.some((g) => hay.includes(g))) return true;
+  if (COMMUNICATIVE_VOLITIVE_STEMS.some((s) => hay.includes(s))) return true;
+  // "확인하겠습니다" 단독은 이 턴의 호응("제가 확인하겠습니다")이다. 목적어나
+  // 선행이 있으면 "로그를 확인하겠다" / "배포 끝나면 설정을 확인하겠다" 처럼
+  // 실제 다음 일로 남긴다.
+  if (hay.includes("확인하겠") && !opts.hasObject && !opts.hasDependencyHint) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 당위가 "보려면/하려면 … 해야 한다" 형태면 사용자·제품 절차이지 오케의 다음
+ * 할 일이 아니다. 실측: "데모를 보려면 매번 Cmd 를 눌러야 한다"(오포착) vs
+ * "규칙을 한 번 더 배포해야 합니다"(2026-08-22 실패 사례, 려면 없음).
+ *
+ * 1인칭이 있으면 "고치려면 제가 규칙을 배포해야 합니다" 처럼 자기 일로 본다.
+ */
+function isGenericProcedureModal(hay: string, selfSubject: boolean): boolean {
+  return !selfSubject && hay.includes("려면");
+}
+
 /** 너무 짧으면 항목이 되지 못하고, 너무 길면 문장이 아니라 문단이다. */
 const MIN_UNIT_LEN = 8;
 const MAX_UNIT_LEN = 400;
@@ -481,15 +562,23 @@ export function evaluateUnit(
   // 회고문으로 덮인다. 그래서 "누구의 일인지(1인칭)" 나 "언제인지(선행 힌트)" 나
   // "하겠다는 건지(약속 어미)" 중 하나가 함께 있어야 통과시킨다.
   const hasObject = OBJECT_MARKER_RE.test(body);
+  const speechAct = isSpeechActNotWorkItem(hay, {
+    hasObject,
+    hasDependencyHint,
+  });
+  const procedureModal = isGenericProcedureModal(hay, selfSubject);
   const commitmentHits = [
     // 의지 어미 — 인용·관형 꼬리("열겠다던")만 제외한다.
-    ...hits(hay, COMMITMENT_VOLITIVE).filter((m) =>
-      m.startsWith("i") || m.startsWith("w") || m.startsWith("s")
-        ? true
-        : hasLiveVolitive(hay, m),
-    ),
+    ...(speechAct
+      ? []
+      : hits(hay, COMMITMENT_VOLITIVE).filter((m) =>
+          m.startsWith("i") || m.startsWith("w") || m.startsWith("s")
+            ? true
+            : hasLiveVolitive(hay, m),
+        )),
     // 당위 어미 — 종결 위치 + 목적어 동반. 둘 다 위 주석에 실측 근거가 있다.
-    ...(hasObject
+    // "보려면 ~해야 한다" 는 사용자 절차라 당위 히트만 버린다(의지 어미는 남김).
+    ...(hasObject && !procedureModal
       ? hits(hay, COMMITMENT_MODAL).filter((m) => isSentenceFinal(hay, m))
       : []),
   ].filter((m) => !isNegated(hay, m));

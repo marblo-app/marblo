@@ -105,6 +105,60 @@ describe("재현 시나리오 — 'A 를 dispatch 하고, A 가 끝나면 B 를 
   });
 });
 
+// ── 2026-08-24 오포착 (티켓 tPNWTYM9k5BGMqfjQHZm) ────────────────────────
+//
+// 오늘 send_telegram_message / answer_question 본문에서 한 문장이 잘려 체인
+// 항목이 됐다. 공통점: 오케가 사람·에이전트에게 하는 말(보고·제안·메일 초안)이지
+// 자기 큐에 적는 메모가 아니다. 자동 포착을 끄지 않고, 이 문장들만 거절한다.
+
+const FALSE_POSITIVES_2026_08_24 = [
+  "그런데 (ㄱ)은 사장님 요구를 반만 만족한다 — 데모를 보려면 매번 Cmd 를 눌러야 한다.",
+  "다시 배정하겠습니다.",
+  "끝나면 diff 와 함께 바로 보고드리겠습니다.",
+  "아시면 알려주시고, 모르시면 제가 확인하겠습니다.",
+  "답장 주시면 지금 남아 있는 기간에 이어서 Pro 3개월을 무료로 얹어 드리겠습니다.",
+  '"좋다"고 하시면 grant 앵커 수정하고 발송하겠습니다.',
+  '오늘 gen1 env 를 빈 문자열로 읽고 "키 없음" 이라고 한 것과 똑같은 실수다 — …',
+] as const;
+
+/** 오포착이 난 두 표면. 끄지 않고 휴리스틱만 좁힌다. */
+const SPEECH_SURFACES = ["owner_report", "answer"] as const;
+
+describe("2026-08-24 오포착 7문장 — 보고·제안·메일초안은 항목이 아니다", () => {
+  for (const sentence of FALSE_POSITIVES_2026_08_24) {
+    it(`잡지 않는다: ${sentence.slice(0, 28)}…`, () => {
+      for (const surface of SPEECH_SURFACES) {
+        expect(detectFollowUpPromises(sentence, surface)).toEqual([]);
+      }
+    });
+  }
+});
+
+describe("★진짜 약속은 여전히 잡힌다 — 오포착을 줄이려 재현율을 죽이지 않는다", () => {
+  const REAL_PROMISES = [
+    "마지막에 X 티켓 열겠다",
+    "배포 끝나면 디자인 3/8 을 재개하겠다",
+    "규칙을 한 번 더 배포해야 합니다.",
+  ];
+
+  it("사장님 보고·답변 표면에서 진짜 약속 3건을 놓치지 않는다", () => {
+    for (const surface of SPEECH_SURFACES) {
+      for (const sentence of REAL_PROMISES) {
+        expect(
+          detectFollowUpPromises(sentence, surface),
+          `${surface}: ${sentence}`,
+        ).not.toHaveLength(0);
+      }
+    }
+  });
+
+  it("목적어 있는 '확인하겠다' 는 보고 행위가 아니라 다음 일이다", () => {
+    expect(
+      detectFollowUpPromises("배포 후 로그를 확인하겠다", "owner_report"),
+    ).toHaveLength(1);
+  });
+});
+
 // ── ② 안 잡아야 할 것 ────────────────────────────────────────────────────
 
 describe("명령형 게이트 — 수신자의 할 일은 오케의 다음 할 일이 아니다", () => {
