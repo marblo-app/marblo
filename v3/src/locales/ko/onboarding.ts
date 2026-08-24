@@ -474,11 +474,11 @@ export const onboarding = {
   "onboarding.startHere.reenableLanding": "앱을 켤 때 이 탭으로 시작하기",
   "onboarding.startHere.dontLandHint":
     "어느 쪽이든 남은 단계는 이 탭에 그대로 남아 있습니다.",
-  "onboarding.startHere.value.kicker": "인증 전 · 90초 영상 데모",
+  "onboarding.startHere.value.kicker": "인증 전 · {seconds}초 영상 데모",
   "onboarding.startHere.value.title":
     "대화 한 줄이 티켓으로 갈라지고 에이전트가 맡는 흐름",
   "onboarding.startHere.value.body":
-    "요청→티켓 분해→배정→병렬 작업 흐름을 90초 영상으로 먼저 확인하세요. CLI·계정 연결 후엔 같은 흐름이 내 프로젝트의 실제 터미널·워크트리에서 돌아갑니다.",
+    "요청→티켓 분해→배정→병렬 작업 흐름을 {seconds}초 영상으로 먼저 확인하세요. CLI·계정 연결 후엔 같은 흐름이 내 프로젝트의 실제 터미널·워크트리에서 돌아갑니다.",
   "onboarding.startHere.value.playVideo": "{seconds}초 데모 보기",
   "onboarding.startHere.value.zeroCost":
     "CLI 실행·AI 호출·과금 없이 · 오케스트레이션 흐름 먼저 확인",

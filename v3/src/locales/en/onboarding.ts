@@ -298,11 +298,11 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.startHere.reenableLanding": "Open this tab on launch",
   "onboarding.startHere.dontLandHint":
     "Either way, your remaining steps stay right here.",
-  "onboarding.startHere.value.kicker": "Before sign-in · 90s video demo",
+  "onboarding.startHere.value.kicker": "Before sign-in · {seconds}s video demo",
   "onboarding.startHere.value.title":
     "Watch a chat turn into tickets agents actually pick up",
   "onboarding.startHere.value.body":
-    "Watch request → ticket split → assignment → parallel work in a 90-second video. After you connect the CLI and your account, the same flow runs on your project with real terminals and worktrees.",
+    "Watch request → ticket split → assignment → parallel work in a {seconds}-second video. After you connect the CLI and your account, the same flow runs on your project with real terminals and worktrees.",
   "onboarding.startHere.value.playVideo": "Watch {seconds}s demo",
   "onboarding.startHere.value.zeroCost":
     "No CLI runs, AI calls, or billing — just the orchestration flow first",

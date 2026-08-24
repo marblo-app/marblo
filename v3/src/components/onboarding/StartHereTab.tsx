@@ -509,13 +509,17 @@ function ValuePreview({ onWatchDemo }: { onWatchDemo: () => void }) {
       <div className="flex flex-col justify-between gap-4 border-t border-[#313244] p-4 md:border-l md:border-t-0">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-[#89b4fa]">
-            {t("onboarding.startHere.value.kicker")}
+            {t("onboarding.startHere.value.kicker", {
+              seconds: ORCHESTRATION_DEMO_DISPLAY_SECONDS,
+            })}
           </p>
           <h2 className="mt-2 text-lg font-semibold text-[#cdd6f4]">
             {t("onboarding.startHere.value.title")}
           </h2>
           <p className="mt-2 text-sm leading-6 text-[#a6adc8]">
-            {t("onboarding.startHere.value.body")}
+            {t("onboarding.startHere.value.body", {
+              seconds: ORCHESTRATION_DEMO_DISPLAY_SECONDS,
+            })}
           </p>
         </div>
         <div className="flex flex-col gap-2">
