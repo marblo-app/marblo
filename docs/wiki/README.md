@@ -23,19 +23,37 @@ links: [[empty-query-first]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVEN
 | 그거 전에 해봤나? | [[do-not-retry]] |
 | 쿼리/표가 비다 | [[empty-query-first]] |
 | 화면으로 확인하고 싶다 | [[no-live-gui-verify]] |
+| 강의·마케팅 노트를 어디에 두나 | 아래 **어디에 두나** |
 | 노트를 어떻게 쓰나 | `/wiki-note` · [CONVENTION](_meta/CONVENTION.md) |
 | 커밋 전에 뭐 돌리나 | `/wiki-ingest` · [LINT](_meta/LINT.md) |
+
+## 어디에 두나 — 강의·마케팅·개발
+
+이 위키는 엔지니어링 전용이 **아니다.** 사장님 요청이 "마케팅이나 강의나 개발이나 다양한 용도로" 다. 6슬롯 역할(사양서 §1.2)은 그대로 두고, 1판에서 `10-control-plane` 이라고 부르던 주력 슬롯만 **이름을 다듬었다.** 그 이름이 제품 내부 지식처럼 들려 강의·마케팅이 들어갈 자리가 안 보였기 때문이다.
+
+원본 파일(`docs/lectures/`, `marblo-web/docs/`)은 폴더가 아니다. Evidence 링크의 대상이다. **노트가 사는 슬롯은 아래다.**
+
+| 쓰려는 것 | 슬롯 | 왜 |
+| --- | --- | --- |
+| 지금 제공하는 제품·커리큘럼·살아 있는 GTM | [10-offerings](10-offerings/README.md) | 주력 = 지금 운영·제공되는 실물 (§1.2). 강의 모듈의 한 줄 주장, SEO 클러스터의 한 줄 판정이 여기 |
+| 한 회차가 어떻게 돌아갔나, 캠페인이 얼마가 나왔나 | [50-operations](50-operations/README.md) | 운영 = 바깥과 부딪힌 기록. 배포·CI만이 아니라 강의 운영 로그·캠페인 결과·고객 이슈 |
+| 강의·마케팅·개발이 같이 전제하는 용어·포지셔닝 | [00-foundations](00-foundations/README.md) | 기반. CONTROL-PLANE 포지셔닝도 여기로 요약 |
+| 가설을 검정한 시도 (강의 A/B, 카피 실험 포함) | [30-investigations](30-investigations/README.md) | 탐구. 판정이 남으면 여기, 제공 중인 실물 설명은 10 |
+| "이렇게 믿기로 했다" (검증 절차, 인용 규율) | [40-methodology](40-methodology/README.md) | 방법론. 개발만이 아님 |
+| 하면 안 되는 것 (제품 가드 + 인용 금지 카피) | [20-constraints](20-constraints/README.md) | 제약 |
+
+폴더를 7개로 늘리지 않는다. 사양서 슬롯 역할은 고정이고 이름만 프로젝트 언어다. `10-control-plane` 은 그 언어가 엔지니어링에 기울어 잘못된 이름이었다.
 
 ## 트리
 
 | 슬롯 | 폴더 | 1판 |
 | --- | --- | --- |
 | 00 기반 | [00-foundations](00-foundations/README.md) | 스텁 |
-| 10 주력 | [10-control-plane](10-control-plane/README.md) | 스텁 |
+| 10 주력 | [10-offerings](10-offerings/README.md) | 스텁 (제품·강의·마케팅 실물) |
 | 20 제약 | [20-constraints](20-constraints/README.md) | [[no-live-gui-verify]] |
 | 30 탐구 | [30-investigations](30-investigations/README.md) | 스텁 (노트 3건 전엔 하위폴더 없음) |
 | 40 방법론 | [40-methodology](40-methodology/README.md) | [[empty-query-first]] ★첫 축 |
-| 50 운영 | [50-operations](50-operations/README.md) | 스텁 |
+| 50 운영 | [50-operations](50-operations/README.md) | 스텁 (배포·강의 운영·캠페인 결과) |
 | meta | [_meta](_meta/CONVENTION.md) | 규약 · 사전 · 원장 · 린트 |
 
 ## 판정 분포

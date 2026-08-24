@@ -19,7 +19,7 @@ description: >
 | 항목 | 필수 | 마블로 기본 |
 | --- | --- | --- |
 | 위키 루트 | ✅ | `docs/wiki` (리포 루트 금지) |
-| 도메인 슬롯 6개 | ✅ | foundations · control-plane · constraints · investigations · methodology · operations |
+| 도메인 슬롯 6개 | ✅ | foundations · offerings · constraints · investigations · methodology · operations |
 | 원장 | ⬜ | 번호 조항 원장 없음. CONTROL-PLANE.md 는 포지셔닝 SSoT, 읽기 전용 |
 | Evidence | ⬜ | `v3/docs/`, `docs/`, `docs/lectures/` |
 

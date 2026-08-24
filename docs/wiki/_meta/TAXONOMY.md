@@ -15,7 +15,7 @@ links: [[CONVENTION]], [[do-not-retry]], [[empty-query-first]]
 폴더와 1:1. 콘텐츠 노트는 정확히 1개.
 
 - `domain/foundations`
-- `domain/control-plane`
+- `domain/offerings`
 - `domain/constraints`
 - `domain/investigations`
 - `domain/methodology`
@@ -35,6 +35,8 @@ links: [[CONVENTION]], [[do-not-retry]], [[empty-query-first]]
 - `topic/discovery`
 - `topic/wiki`
 - `topic/agents`
+- `topic/lectures`
+- `topic/marketing`
 
 ## verdict/
 

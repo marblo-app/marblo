@@ -1,0 +1,21 @@
+---
+title: 10 주력 — 지금 제공하는 실물
+tags: [domain/offerings, meta/index]
+status: stub
+date: 2026-08-24
+links: [[CONVENTION]]
+---
+
+# 10-offerings
+
+사양서 §1.2 의 **주력**: 지금 운영·제공되는 실물. 제품만이 아니다.
+
+| 들어가는 것 | 원본(옮기지 않음) |
+| --- | --- |
+| 제품 — 오케스트레이터, 보드, 비기너, 워크트리, 결제 | `v3/docs/` |
+| 강의 — 커리큘럼·모듈의 한 줄 판정 | `docs/lectures/` |
+| 마케팅 — 살아 있는 GTM·포지셔닝·SEO 클러스터 | `marblo-web/docs/` |
+
+한 회차 강의가 어떻게 돌아갔나, 캠페인이 얼마가 나왔나는 여기가 아니라 [50-operations](../50-operations/README.md) 다.
+
+1판은 노트가 없다. 시드는 방법론 축에서 시작했다.
