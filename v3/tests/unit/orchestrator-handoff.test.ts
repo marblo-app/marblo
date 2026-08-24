@@ -8,7 +8,13 @@ import {
   resolveRestartResumeSessionId,
   resolveSwitchHandoffResumeSessionId,
   sanitizeHandoffValue,
+  summarizeHandoff,
 } from "../../electron/orchestrator-handoff";
+import {
+  dedupeAgainstChain,
+  detectFollowUpPromises,
+} from "../../electron/mcp-server/work-chain-capture";
+import type { WorkChainItem } from "../../electron/mcp-server/work-chain-core";
 
 describe("orchestrator handoff snapshot", () => {
   it("redacts sensitive values and limits mission timeline", () => {
@@ -455,5 +461,250 @@ describe("classifyOrchestratorSelectionSource", () => {
       classifyOrchestratorSelectionSource({ autoFallback: "claude" }),
     ).toBe("auto");
     expect(classifyOrchestratorSelectionSource({})).toBe("auto");
+  });
+});
+
+// ── 워크체인이 세션 경계를 넘는가 (티켓 itSrsErpvtwUEcI4Deif) ──────────────
+//
+// 인수인계 스냅샷은 보드(missions/tasks)는 실었는데 오케의 "다음에 할 일"
+// (`workChains/{projectId}`)은 통째로 빠져 있었다 — 새 오케는 체인을 모른 채
+// 시작했다. 여기서 못 박는 것:
+//   ① 체인이 스냅샷에 실린다.
+//   ② 실리는 건 **항목**이지 ready/waiting/done 판정이 아니다. 상태는 새 세션이
+//      보드에서 다시 파생한다(`deriveWorkChain` 단일 소스).
+//   ③ 인수인계 텍스트가 자동 포착 필터를 다시 지나가도 **자기 자신을 항목으로
+//      포착하지 않는다**(#1176, 2026-08-24 오포착 12건).
+
+function chainItem(
+  over: Partial<WorkChainItem> & { id: string; what: string },
+): WorkChainItem {
+  return {
+    why: "세션이 갈려도 남아야 하는 이유",
+    afterTaskIds: [],
+    afterItemIds: [],
+    taskIds: [],
+    doneWhen: "done",
+    createdAt: 1,
+    updatedAt: 1,
+    createdBy: "orchestrator-p1",
+    ...over,
+  };
+}
+
+function taskDoc(
+  id: string,
+  data: Record<string, unknown>,
+): { id: string; data: Record<string, unknown> } {
+  return { id, data: { projectId: "project-1", title: id, ...data } };
+}
+
+const CAPTURE_SURFACES = [
+  "owner_report",
+  "answer",
+  "activity",
+  "dispatch_instruction",
+] as const;
+
+describe("handoff snapshot work chain", () => {
+  it("체인을 스냅샷에 싣되 보드가 끝냈다고 말하는 항목은 빼고 남은 일만 넘긴다", () => {
+    const snapshot = buildOrchestratorHandoffSnapshot({
+      projectId: "project-1",
+      rootPath: "/repo",
+      from: { ptySessionId: "pty-old" },
+      targetModel: "claude",
+      resumeSessionId: "new",
+      missions: [],
+      tasks: [
+        taskDoc("t-merged", { status: "DONE" }),
+        taskDoc("t-live", { status: "IN_PROGRESS" }),
+      ],
+      workChain: {
+        rev: 12,
+        items: [
+          chainItem({
+            id: "closed-by-board",
+            what: "머지한 티켓 둘 마감",
+            taskIds: ["t-merged"],
+          }),
+          chainItem({
+            id: "waiting",
+            what: "v3.0.36 재컷",
+            afterTaskIds: ["t-live"],
+          }),
+          chainItem({ id: "ready", what: "GitHub App 등록" }),
+        ],
+      },
+    });
+    expect(snapshot.workChain?.items.map((i) => i.id)).toEqual([
+      "waiting",
+      "ready",
+    ]);
+    expect(snapshot.workChain?.rev).toBe(12);
+    expect(summarizeHandoff(snapshot).openWorkChainCount).toBe(2);
+  });
+
+  it("암묵 미션 라벨을 함께 싣고, 그 미션 티켓으로 완료를 판정한다 (#1168)", () => {
+    const missions = [
+      {
+        id: "m-open",
+        data: {
+          projectId: "project-1",
+          missionKind: "implicit",
+          implicitLabel: "이탈자 메일",
+          status: "active",
+        },
+      },
+      {
+        id: "m-done",
+        data: {
+          projectId: "project-1",
+          missionKind: "implicit",
+          implicitLabel: "온보딩 정리",
+          status: "completed",
+        },
+      },
+    ];
+    const snapshot = buildOrchestratorHandoffSnapshot({
+      projectId: "project-1",
+      rootPath: "/repo",
+      from: { ptySessionId: "pty-old" },
+      targetModel: "claude",
+      resumeSessionId: "new",
+      missions,
+      tasks: [
+        taskDoc("t-mail-1", { status: "DONE", contextId: "m-open" }),
+        taskDoc("t-mail-2", { status: "REVIEW", contextId: "m-open" }),
+        taskDoc("t-onb", { status: "DONE", contextId: "m-done" }),
+      ],
+      workChain: {
+        rev: 3,
+        items: [
+          chainItem({
+            id: "mail",
+            what: "이탈 사유 청취 메일 발송",
+            missionLabel: "이탈자 메일",
+          }),
+          chainItem({
+            id: "onboarding",
+            what: "온보딩 배치 마무리",
+            missionLabel: "온보딩 정리",
+          }),
+        ],
+      },
+    });
+    // 라벨 조인이 살아 있다: 미션 티켓이 전부 DONE 인 항목은 안 실린다.
+    expect(snapshot.workChain?.items.map((i) => i.id)).toEqual(["mail"]);
+    // ★라벨 자체는 반드시 따라간다 — 없으면 새 세션이 진행률을 파생할 수 없다.
+    expect(snapshot.workChain?.items[0].missionLabel).toBe("이탈자 메일");
+  });
+
+  it("체인을 못 읽었으면 필드 자체가 없고, 프롬프트가 그 사실을 말한다", () => {
+    const snapshot = buildOrchestratorHandoffSnapshot({
+      projectId: "project-1",
+      rootPath: "/repo",
+      from: { ptySessionId: "pty-old" },
+      targetModel: "claude",
+      resumeSessionId: "new",
+      missions: [],
+      tasks: [],
+    });
+    expect(snapshot.workChain).toBeUndefined();
+    expect(summarizeHandoff(snapshot).openWorkChainCount).toBe(0);
+    const prompt = formatHandoffPrompt(snapshot, "wait");
+    expect(prompt).toContain("could not be read");
+    expect(prompt).toContain("get_work_chain");
+  });
+
+  it("프롬프트가 '항목만 실렸다 · 상태는 다시 파생해라 · 완료는 적지 마라' 를 못 박고 잘린 수를 밝힌다", () => {
+    const items = Array.from({ length: 20 }, (_, i) =>
+      chainItem({ id: `i${i}`, what: `남은 일 ${i}` }),
+    );
+    const snapshot = buildOrchestratorHandoffSnapshot({
+      projectId: "project-1",
+      rootPath: "/repo",
+      from: { ptySessionId: "pty-old" },
+      targetModel: "claude",
+      resumeSessionId: "new",
+      missions: [],
+      tasks: [],
+      workChain: { rev: 1, items },
+    });
+    const prompt = formatHandoffPrompt(snapshot, "takeover");
+    expect(prompt).toContain("stored items ONLY");
+    expect(prompt).toContain("get_work_chain to re-derive live state");
+    expect(prompt).toContain("Do not record chain completion yourself");
+    expect(prompt).toContain("8 of 20 open item(s) were left out");
+    expect(prompt).toContain("20 open work chain item(s)");
+  });
+
+  it("★인수인계 텍스트가 자동 포착 필터를 다시 지나가도 새 항목을 만들지 않는다", () => {
+    // 항목 본문은 오케가 실제로 쓴 문장이라 포착 마커가 그대로 들어 있다 —
+    // 자동 포착이 적은 항목이 바로 이런 모양이다.
+    const items = [
+      chainItem({
+        id: "a",
+        what: "보안규칙을 한 번 더 배포해야 합니다",
+        why: "escalate_to_owner(note) 에서 포착: 미배포면 조용히 안 된다",
+        source: "auto",
+        sourceTool: "escalate_to_owner",
+      }),
+      chainItem({
+        id: "b",
+        what: "후속: v3.0.36 을 다시 컷하겠다",
+        why: "재컷 전엔 배포가 막힌다",
+        source: "auto",
+        sourceTool: "add_activity",
+      }),
+      chainItem({
+        id: "c",
+        what: "다음 할 일: GitHub App 등록을 사장님께 요청",
+        why: "사장님 대기 항목",
+      }),
+    ];
+    const snapshot = buildOrchestratorHandoffSnapshot({
+      projectId: "project-1",
+      rootPath: "/repo",
+      from: { ptySessionId: "pty-old" },
+      targetModel: "claude",
+      resumeSessionId: "new",
+      missions: [],
+      tasks: [],
+      workChain: { rev: 1, items },
+    });
+    let totalDetected = 0;
+    for (const mode of ["wait", "takeover"] as const) {
+      const prompt = formatHandoffPrompt(snapshot, mode);
+      for (const surface of CAPTURE_SURFACES) {
+        const detected = detectFollowUpPromises(prompt, surface);
+        totalDetected += detected.length;
+        // 잡히더라도 전부 이미 체인에 있는 항목이라 새로 적히지 않는다.
+        expect(dedupeAgainstChain(detected, items)).toEqual([]);
+      }
+    }
+    // ★위 단언이 "감지기가 아무것도 못 잡아서" 통과한 게 아님을 못 박는다.
+    // 인수인계 텍스트는 **실제로** 필터에 걸린다(오케가 쓴 문장을 그대로 싣기
+    // 때문이다). 그걸 막는 건 `dedupeAgainstChain` 이고, 그게 작동하는 유일한
+    // 이유는 `what` 을 자르지 않고 원문 그대로 실었기 때문이다 —
+    // `toHandoffItem` 이 what 만 clip 하지 않는 규율이 여기서 값을 한다.
+    expect(totalDetected).toBeGreaterThan(0);
+  });
+
+  it("★체인이 비어 있으면 인수인계 문구 자체가 아무것도 포착시키지 않는다", () => {
+    const snapshot = buildOrchestratorHandoffSnapshot({
+      projectId: "project-1",
+      rootPath: "/repo",
+      from: { ptySessionId: "pty-old" },
+      targetModel: "claude",
+      resumeSessionId: "new",
+      missions: [],
+      tasks: [],
+      workChain: { rev: 0, items: [] },
+    });
+    for (const mode of ["wait", "takeover"] as const) {
+      const prompt = formatHandoffPrompt(snapshot, mode);
+      for (const surface of CAPTURE_SURFACES) {
+        expect(detectFollowUpPromises(prompt, surface)).toEqual([]);
+      }
+    }
   });
 });

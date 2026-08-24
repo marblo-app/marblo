@@ -4162,6 +4162,7 @@ import {
   isWorktreeSweepEligibleTaskStatus,
 } from "./agent-lifecycle-reclaim";
 import { applyProjection } from "./mcp-server/projection";
+import { readWorkChain } from "./mcp-server/work-chain";
 
 function getFlowDb() {
   const config = {
@@ -9174,7 +9175,7 @@ async function buildSwitchHandoffSnapshot(
     resolvePreviousNonGptSession: () =>
       getAnyOrchestrator().resolveOrchestratorResumeId(resolvedRootPath),
   });
-  const [missionSnap, taskSnap] = await Promise.all([
+  const [missionSnap, taskSnap, workChain] = await Promise.all([
     fbGetDocs(
       fbQuery(
         fbCollection(db, "missions"),
@@ -9187,6 +9188,18 @@ async function buildSwitchHandoffSnapshot(
         fbWhere("projectId", "==", args.projectId)
       )
     ),
+    // 워크체인은 세션이 갈릴 때 유일하게 보드 밖에 있는 상태다 — 안 실으면 새
+    // 오케는 "다음에 할 일" 만 물려받지 못한다(티켓 itSrsErpvtwUEcI4Deif).
+    // ★fail-open: 체인 읽기가 실패해도 스위치를 죽이지 않는다. 대신 undefined 로
+    // 넘겨서 스냅샷에 workChain 필드가 아예 빠지게 하고, 프롬프트가 "못 읽었으니
+    // get_work_chain 을 먼저 불러라" 를 말한다 — 조용히 빈 체인으로 위장하지 않는다.
+    readWorkChain(db, args.projectId).catch((err) => {
+      console.warn(
+        `[orchestratorSession:switch] work chain read failed project=${args.projectId}:`,
+        err
+      );
+      return undefined;
+    }),
   ]);
 
   return buildOrchestratorHandoffSnapshot({
@@ -9201,6 +9214,9 @@ async function buildSwitchHandoffSnapshot(
     resumeSessionId,
     missions: firestoreDocsToRaw(missionSnap),
     tasks: firestoreDocsToRaw(taskSnap),
+    ...(workChain
+      ? { workChain: { items: workChain.items, rev: workChain.rev } }
+      : {}),
   });
 }
 

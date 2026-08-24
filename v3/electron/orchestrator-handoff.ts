@@ -1,3 +1,15 @@
+import {
+  buildMissionMembership,
+  buildWorkChainHandoff,
+  deriveWorkChain,
+  type MissionMembershipSource,
+  type MissionMemberTask,
+  type TaskStatusLookup,
+  type WorkChainHandoffCarry,
+  type WorkChainItem,
+  type WorkChainTaskStatus,
+} from "./mcp-server/work-chain-core";
+
 export type OrchestratorSwitchMode = "wait" | "takeover";
 export type OrchestratorSwitchResumeMode = "fresh" | "previous";
 
@@ -66,12 +78,24 @@ export interface OrchestratorHandoffSnapshot {
       prUrl?: string;
     }>;
   };
+  /**
+   * 오케의 "다음에 할 일" 목록(`workChains/{projectId}`) — 세션이 갈려도 따라가야
+   * 하는 유일한 비-보드 상태(티켓 itSrsErpvtwUEcI4Deif).
+   *
+   * ★**항목만** 담는다. ready/waiting/done 은 담지 않는다 — 새 세션이
+   * `get_work_chain` 으로 보드에서 다시 파생한다(`deriveWorkChain` 단일 소스).
+   * 체인 문서를 못 읽었으면 필드 자체가 없다(fail-open — 체인 때문에 스위치가
+   * 죽지 않는다). "없음" 과 "빈 체인"(items=[], openCount=0)은 다른 사실이다.
+   */
+  workChain?: WorkChainHandoffCarry;
 }
 
 export interface HandoffSummary {
   activeMissionCount: number;
   inFlightTaskCount: number;
   unresolvedDecisionCount: number;
+  /** 스냅샷 시점의 열린 체인 항목 수. 체인을 못 읽었으면 0. */
+  openWorkChainCount: number;
 }
 
 export interface BuildHandoffInput {
@@ -82,6 +106,11 @@ export interface BuildHandoffInput {
   resumeSessionId: "new" | string;
   missions: RawHandoffDoc[];
   tasks: RawHandoffDoc[];
+  /**
+   * 체인 문서 원본(`readWorkChain` 결과). 못 읽었으면 넘기지 않는다 —
+   * 스냅샷의 `workChain` 이 통째로 빠져 "체인을 확인 못 했다" 가 드러난다.
+   */
+  workChain?: { items: WorkChainItem[]; rev: number };
   now?: number;
 }
 
@@ -509,7 +538,61 @@ export function summarizeHandoff(
       (sum, mission) => sum + mission.unresolvedDecisions.length,
       0,
     ),
+    openWorkChainCount: snapshot.workChain?.openCount ?? 0,
   };
+}
+
+const WORK_CHAIN_TASK_STATUSES = new Set<string>([
+  "TODO",
+  "CLAIMED",
+  "IN_PROGRESS",
+  "REVIEW",
+  "BLOCKED",
+  "FAILED",
+  "DONE",
+]);
+
+/**
+ * 스냅샷이 이미 손에 든 보드 문서로 체인을 파생한다 — 티켓을 다시 읽지 않는다.
+ * 판정 로직은 `deriveWorkChain` 하나뿐이다(MCP `get_work_chain` 과 패널이 쓰는 그것).
+ * 여기서 파생하는 이유는 **무엇을 실을지 고르기 위해서**이고, 파생 결과 자체는
+ * 스냅샷에 안 실린다(`buildWorkChainHandoff` 머리말).
+ */
+function carryWorkChain(
+  chain: { items: WorkChainItem[]; rev: number },
+  missions: RawHandoffDoc[],
+  tasks: RawHandoffDoc[],
+): WorkChainHandoffCarry {
+  const statuses: TaskStatusLookup = {};
+  const memberTasks: MissionMemberTask[] = [];
+  for (const doc of tasks) {
+    const deleted = doc.data.deleted === true;
+    // 지워진 티켓은 "없는 것" 으로 둔다 — 근거가 사라진 항목이 조용히 done 으로
+    // 넘어가지 않게, `deriveWorkChain` 이 MISSING 으로 보게 한다.
+    if (!deleted) {
+      const status = asString(doc.data.status);
+      statuses[doc.id] = WORK_CHAIN_TASK_STATUSES.has(status)
+        ? (status as WorkChainTaskStatus)
+        : null;
+    }
+    memberTasks.push({
+      id: doc.id,
+      contextId: asString(doc.data.contextId) || null,
+      missionId: asString(doc.data.missionId) || null,
+      deleted,
+    });
+  }
+  const missionSources: MissionMembershipSource[] = missions.map((doc) => ({
+    id: doc.id,
+    missionKind: asString(doc.data.missionKind) || null,
+    implicitLabel: asString(doc.data.implicitLabel) || null,
+    status: asString(doc.data.status) || null,
+  }));
+  const membership = buildMissionMembership(missionSources, memberTasks);
+  return buildWorkChainHandoff(
+    deriveWorkChain(chain.items, statuses, membership),
+    { rev: chain.rev },
+  );
 }
 
 export function buildOrchestratorHandoffSnapshot({
@@ -520,6 +603,7 @@ export function buildOrchestratorHandoffSnapshot({
   resumeSessionId,
   missions,
   tasks,
+  workChain,
   now = Date.now(),
 }: BuildHandoffInput): OrchestratorHandoffSnapshot {
   const activeMissions = missions
@@ -599,6 +683,9 @@ export function buildOrchestratorHandoffSnapshot({
       blockedTasks,
       reviewTasks,
     },
+    ...(workChain
+      ? { workChain: carryWorkChain(workChain, missions, tasks) }
+      : {}),
   };
 }
 
@@ -617,8 +704,42 @@ export function formatHandoffPrompt(
     mode === "wait"
       ? "Summarize what you inherited and wait for the user."
       : "Inspect current state first, then continue only the next safe action.",
-    `Summary: ${summary.activeMissionCount} active mission(s), ${summary.inFlightTaskCount} in-flight task(s), ${summary.unresolvedDecisionCount} unresolved decision(s).`,
+    ...workChainPromptLines(snapshot.workChain),
+    `Summary: ${summary.activeMissionCount} active mission(s), ${summary.inFlightTaskCount} in-flight task(s), ${summary.unresolvedDecisionCount} unresolved decision(s), ${summary.openWorkChainCount} open work chain item(s).`,
     "Handoff snapshot:",
     compact,
   ].join("\n");
+}
+
+/**
+ * 프롬프트의 체인 문단.
+ *
+ * ★영어로 쓴다 — 프롬프트의 나머지와 같은 언어라는 이유가 첫째지만, 두 번째
+ * 이유가 더 중요하다: 자동 포착(`work-chain-capture.ts`)이 보는 건 한국어 약속
+ * 어미("~하겠습니다")와 큐 명사("다음 할 일", "후속:")다. 인수인계 텍스트가 새
+ * 오케의 보고를 거쳐 그 필터를 다시 지나가면서 **자기 자신을 항목으로 포착**하는
+ * 일이 없어야 한다(2026-08-24 오포착 12건, #1176). 그래서 이 문단은 그 마커를
+ * 하나도 쓰지 않는다. 항목 본문은 오케가 원래 쓴 문장이라 마커가 들어 있을 수
+ * 있는데, 그건 `dedupeAgainstChain` 이 원문 그대로 잡는다 — 그래서
+ * `toHandoffItem` 이 `what` 을 절대 자르지 않는 것이다.
+ */
+function workChainPromptLines(
+  carry: WorkChainHandoffCarry | undefined,
+): string[] {
+  if (!carry) {
+    return [
+      "The work chain could not be read while building this snapshot. Call get_work_chain before acting.",
+    ];
+  }
+  const lines = [
+    "workChains/<projectId> holds the orchestrator's own queue of pending work, which does not live on the board. It is carried here so it survives this session change.",
+    "It carries the stored items ONLY, with no ready/waiting/done verdict. Call get_work_chain to re-derive live state from the board before acting on any item.",
+    "Do not record chain completion yourself: an item linked to tickets closes only when those tickets reach its done_when.",
+  ];
+  if (carry.omittedCount > 0) {
+    lines.push(
+      `${carry.omittedCount} of ${carry.openCount} open item(s) were left out for length; get_work_chain returns all of them.`,
+    );
+  }
+  return lines;
 }

@@ -10,6 +10,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildMissionMembership,
+  buildWorkChainHandoff,
   buildWorkChainItem,
   deriveWorkChain,
   evidenceTaskIds,
@@ -23,6 +24,7 @@ import {
   validateNewItem,
   workChainFooter,
   workChainNudgeForTaskChange,
+  WORK_CHAIN_HANDOFF_WHY_MAX,
   type TaskStatusLookup,
   type WorkChainItem,
 } from "../../electron/mcp-server/work-chain-core";
@@ -599,5 +601,145 @@ describe("텍스트 렌더 — 오케가 읽는 형태", () => {
     expect(n).toMatch(/'A' 완료/);
     expect(n).not.toMatch(/'B'/);
     expect(workChainNudgeForTaskChange(before, before, "t1")).toBe("");
+  });
+});
+
+// ── 세션 인수인계 적재 (티켓 itSrsErpvtwUEcI4Deif) ────────────────────────
+//
+// 못 박는 것: ① 실리는 건 **항목**이지 파생 상태가 아니다, ② 열린 것만 실린다,
+// ③ 분량이 잘려도 "다음 할 일" 은 절대 안 떨어진다, ④ missionLabel 은 반드시
+// 따라간다(없으면 새 세션이 미션 진행률을 아예 파생 못 한다 — #1168).
+
+describe("buildWorkChainHandoff", () => {
+  it("열린 항목만 싣고 닫힌 항목(보드 done · dropped)은 뺀다", () => {
+    const items = [
+      item({ id: "a", what: "머지된 티켓 마감", taskIds: ["t-done"] }),
+      item({
+        id: "b",
+        what: "GitHub App 등록",
+        why: "사장님 대기",
+        afterTaskIds: ["t-open"],
+      }),
+      item({
+        id: "c",
+        what: "접었던 실험",
+        closed: { kind: "dropped", reason: "우선순위 밀림", at: 1, by: "o" },
+      }),
+      item({ id: "d", what: "v3.0.36 재컷" }),
+    ];
+    const tasks: TaskStatusLookup = { "t-done": "DONE", "t-open": "REVIEW" };
+    const carry = buildWorkChainHandoff(deriveWorkChain(items, tasks), {
+      rev: 7,
+    });
+    expect(carry.items.map((i) => i.id)).toEqual(["b", "d"]);
+    expect(carry.rev).toBe(7);
+    expect(carry.openCount).toBe(2);
+    expect(carry.omittedCount).toBe(0);
+  });
+
+  it("★파생 상태를 싣지 않는다 — 저장 필드만, 상태·진행률 키는 없다", () => {
+    const items = [
+      item({
+        id: "a",
+        what: "이탈자 메일 발송",
+        why: "08-29 시한",
+        missionLabel: "이탈자 메일",
+        taskIds: ["t1"],
+        afterTaskIds: ["t0"],
+        note: "발송 직전 상태 확인",
+        source: "auto",
+        sourceTool: "escalate_to_owner",
+      }),
+    ];
+    const tasks: TaskStatusLookup = { t0: "IN_PROGRESS", t1: "TODO" };
+    const membership = { [missionLabelKey("이탈자 메일")]: bucket(["t1"], 2) };
+    const carry = buildWorkChainHandoff(
+      deriveWorkChain(items, tasks, membership),
+    );
+    const carried = carry.items[0];
+    // 실린 것: 항목 그 자체.
+    expect(carried).toEqual({
+      id: "a",
+      what: "이탈자 메일 발송",
+      why: "08-29 시한",
+      doneWhen: "done",
+      afterTaskIds: ["t0"],
+      taskIds: ["t1"],
+      missionLabel: "이탈자 메일",
+      note: "발송 직전 상태 확인",
+      source: "auto",
+      sourceTool: "escalate_to_owner",
+    });
+    // 안 실린 것: 새 세션이 보드에서 다시 파생해야 하는 모든 판정.
+    const serialized = JSON.stringify(carry);
+    for (const derivedKey of [
+      "state",
+      "evidence",
+      "pendingTaskIds",
+      "evidenceTaskIds",
+      "reachedCount",
+      "totalCount",
+      "unsplit",
+      "missionCount",
+    ]) {
+      expect(serialized).not.toContain(`"${derivedKey}"`);
+    }
+  });
+
+  it("항목 상한을 넘으면 자르고 남은 수를 밝힌다", () => {
+    const items = Array.from({ length: 20 }, (_, i) =>
+      item({ id: `i${i}`, what: `할 일 ${i}` }),
+    );
+    const carry = buildWorkChainHandoff(deriveWorkChain(items, {}), {
+      itemLimit: 5,
+      charBudget: 100000,
+    });
+    expect(carry.items).toHaveLength(5);
+    expect(carry.openCount).toBe(20);
+    expect(carry.omittedCount).toBe(15);
+  });
+
+  it("문자 예산을 넘으면 거기서 멈춘다 — 첫 항목은 예산을 넘어도 싣는다", () => {
+    const long = (i: number) =>
+      item({ id: `i${i}`, what: "가".repeat(200), why: "나".repeat(500) });
+    const carry = buildWorkChainHandoff(
+      deriveWorkChain([long(0), long(1), long(2)], {}),
+      { charBudget: 300 },
+    );
+    expect(carry.items).toHaveLength(1);
+    expect(carry.omittedCount).toBe(2);
+    // what 은 절대 안 자른다 — 항목의 신원이자 자동 포착 중복 판정의 키다.
+    expect(carry.items[0].what).toHaveLength(200);
+    // why 는 자른다 — 전문은 새 세션이 get_work_chain 으로 본다.
+    expect(carry.items[0].why.length).toBeLessThanOrEqual(
+      WORK_CHAIN_HANDOFF_WHY_MAX + 1,
+    );
+  });
+
+  it("★잘려도 ▶ 다음(첫 ready)은 반드시 따라간다", () => {
+    const items = [
+      ...Array.from({ length: 4 }, (_, i) =>
+        item({
+          id: `w${i}`,
+          what: `대기 ${i}`,
+          afterTaskIds: ["blocker"],
+        }),
+      ),
+      item({ id: "next", what: "GitHub App 등록" }),
+    ];
+    const tasks: TaskStatusLookup = { blocker: "IN_PROGRESS" };
+    const derived = deriveWorkChain(items, tasks);
+    expect(derived.next?.item.id).toBe("next");
+    const carry = buildWorkChainHandoff(derived, { itemLimit: 2 });
+    expect(carry.items.map((i) => i.id)).toEqual(["w0", "w1", "next"]);
+    expect(carry.omittedCount).toBe(2);
+  });
+
+  it("미션 라벨만 있고 티켓이 0개인 항목(unsplit)도 열린 것으로 따라간다", () => {
+    const items = [item({ id: "a", what: "배치 쪼개기", missionLabel: "온보딩" })];
+    const membership = { [missionLabelKey("온보딩")]: bucket([], 1) };
+    const carry = buildWorkChainHandoff(deriveWorkChain(items, {}, membership));
+    expect(carry.items).toHaveLength(1);
+    expect(carry.items[0].missionLabel).toBe("온보딩");
   });
 });

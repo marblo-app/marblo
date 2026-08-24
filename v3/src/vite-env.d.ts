@@ -385,6 +385,8 @@ interface OrchestratorSessionAPI {
       activeMissionCount: number;
       inFlightTaskCount: number;
       unresolvedDecisionCount: number;
+      /** 인수인계에 따라간 워크체인의 열린 항목 수(스냅샷 시점). */
+      openWorkChainCount: number;
     };
     /** launch 와 같은 봉투·같은 분류 규칙(위 주석 참조). */
     needsAuth?: {

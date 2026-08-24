@@ -777,6 +777,149 @@ export function workChainFooter(derived: DerivedWorkChain): string {
   return `🔗 워크체인 open=${derived.open.length} — ${nextPart}. get_work_chain 으로 본다.`;
 }
 
+// ── 세션 인수인계 적재 (티켓 itSrsErpvtwUEcI4Deif) ────────────────────────
+//
+// 세션이 갈릴 때(모델 스위치 = `orchestrator-handoff.ts` 의 스냅샷) 체인이 통째로
+// 빠져 있었다. 새 오케는 보드는 물려받고 "다음에 할 일" 만 못 물려받는다 — 그건
+// 이 기능이 없애려던 실패 그 자체다(사장님 대기 항목이 거기 살아 있었다).
+//
+// ## ★파생 상태가 아니라 항목을 싣는다
+// 실리는 건 `WorkChainItem` 의 **저장 필드**뿐이다. ready/waiting/done 은
+// 안 싣는다 — 굳혀 보내면 스냅샷을 만든 순간의 판정이 새 세션까지 따라가고,
+// 그 사이 티켓이 움직이면 새 오케는 낡은 판정을 사실로 읽는다. 상태는 새
+// 세션이 `get_work_chain` 으로 **보드에서 다시 파생**한다(`deriveWorkChain`
+// 단일 소스 유지). 여기서 `derived` 를 쓰는 건 오직 **무엇을 실을지 고르는**
+// 용도다 — 고르기는 스냅샷 시점 사실이어도 되고, 실리는 값에는 안 들어간다.
+//
+// `missionLabel` 은 반드시 함께 싣는다(#1168). 라벨이 빠지면 새 세션은 그 항목의
+// 미션 진행률(`missionCount`/`evidenceTaskIds`)을 아예 파생할 수 없다 —
+// 진행률은 라벨 → 보드 조인으로만 나온다.
+
+/**
+ * 인수인계에 실리는 항목 — `WorkChainItem` 에서 **저장 필드만** 남긴 모양.
+ * 파생 상태(state/evidence/진행률)는 의도적으로 없다(위 머리말).
+ * 빈 배열·빈 값은 키 자체를 뺀다 — 항목당 키 오버헤드가 분량의 큰 몫이다.
+ */
+export interface WorkChainHandoffItem {
+  id: string;
+  what: string;
+  why: string;
+  doneWhen: WorkChainDoneWhen;
+  afterTaskIds?: string[];
+  afterItemIds?: string[];
+  taskIds?: string[];
+  missionLabel?: string;
+  note?: string;
+  source?: WorkChainSource;
+  sourceTool?: string;
+}
+
+export interface WorkChainHandoffCarry {
+  /** 체인 문서의 rev — 새 오케가 "내가 물려받은 버전" 을 말할 수 있게. */
+  rev: number;
+  /** 스냅샷을 만든 시점의 열린 항목 수. 판정이 아니라 **얼마를 잘랐나의 분모**다. */
+  openCount: number;
+  /** 실제로 실린 항목(체인 배열 순서 = 우선순위 그대로). */
+  items: WorkChainHandoffItem[];
+  /** 열려 있었지만 분량 때문에 못 실은 수. >0 이면 get_work_chain 이 필수다. */
+  omittedCount: number;
+}
+
+/**
+ * 항목 개수 상한. 실측 근거(2026-08-24, `formatHandoffPrompt` 바이트):
+ * 빈 스냅샷 프롬프트 702B, 현실적 길이 항목 1개 ≈ 1.1KB, 30개면 34KB 다 —
+ * 체인 하나가 인수인계 프롬프트 전체를 40배로 밀어낸다. 그래서 상한을 둔다.
+ */
+export const WORK_CHAIN_HANDOFF_ITEM_LIMIT = 12;
+
+/**
+ * 실린 항목 JSON 의 문자 예산.
+ *
+ * ★근거는 **대칭**이다: 이미 스냅샷에 실리는 활성 미션 1개가 타임라인
+ * 12줄 × 220자(`TIMELINE_LIMIT`·`SUMMARY_LIMIT`) + 출력 꼬리 1000자 ≈ 3.6K 문자를
+ * 쓴다. 체인은 "다음에 할 일" 목록 하나이므로 **미션 한 개 몫**을 준다.
+ * 개수 상한만 두면 항목 길이가 최대(what 200 + why 500)일 때 12개가 1만 자를
+ * 넘어 미션·보드를 밀어내므로, 개수와 분량 둘 다 건다.
+ */
+export const WORK_CHAIN_HANDOFF_CHAR_BUDGET = 4000;
+
+/** 인수인계용 `why` 길이 상한 — 전문은 새 세션이 get_work_chain 으로 본다. */
+export const WORK_CHAIN_HANDOFF_WHY_MAX = 160;
+
+/** 인수인계용 `note` 길이 상한. */
+export const WORK_CHAIN_HANDOFF_NOTE_MAX = 100;
+
+function clip(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+/**
+ * 파생 항목 → 인수인계 항목. ★`what` 은 절대 자르지 않는다 — 항목의 신원이자
+ * 자동 포착 중복 판정(`dedupeAgainstChain`)의 키다. 잘라 보내면 새 세션이 같은
+ * 약속을 다시 말했을 때 중복으로 안 잡히고 항목이 둘로 늘어난다.
+ */
+function toHandoffItem(item: WorkChainItem): WorkChainHandoffItem {
+  const out: WorkChainHandoffItem = {
+    id: item.id,
+    what: item.what,
+    why: clip(item.why, WORK_CHAIN_HANDOFF_WHY_MAX),
+    doneWhen: item.doneWhen,
+  };
+  if (item.afterTaskIds.length) out.afterTaskIds = [...item.afterTaskIds];
+  if (item.afterItemIds.length) out.afterItemIds = [...item.afterItemIds];
+  if (item.taskIds.length) out.taskIds = [...item.taskIds];
+  if (item.missionLabel) out.missionLabel = item.missionLabel;
+  if (item.note) out.note = clip(item.note, WORK_CHAIN_HANDOFF_NOTE_MAX);
+  if (item.source) out.source = item.source;
+  if (item.sourceTool) out.sourceTool = item.sourceTool;
+  return out;
+}
+
+/**
+ * 열린 항목만 인수인계용으로 고른다. 닫힌 항목(done/dropped)은 안 싣는다 —
+ * 새 세션이 물려받아야 하는 건 **남은 일**이고, 끝난 일의 근거는 보드에 있다.
+ *
+ * ★`▶ 다음`(첫 ready)은 상한·예산을 넘겨서라도 반드시 싣는다. 이 기능의 존재
+ * 이유가 "다음 할 일을 안 잊는다" 인데, 앞자리가 전부 대기 항목이면 잘림에
+ * 그것부터 떨어져 나간다. 다만 **어느 것이 다음인지는 표시하지 않는다** —
+ * 그게 곧 굳은 파생 상태이므로, 새 세션이 보드에서 다시 판정한다.
+ */
+export function buildWorkChainHandoff(
+  derived: DerivedWorkChain,
+  opts: {
+    rev?: number;
+    itemLimit?: number;
+    charBudget?: number;
+  } = {},
+): WorkChainHandoffCarry {
+  const itemLimit = opts.itemLimit ?? WORK_CHAIN_HANDOFF_ITEM_LIMIT;
+  const charBudget = opts.charBudget ?? WORK_CHAIN_HANDOFF_CHAR_BUDGET;
+  const items: WorkChainHandoffItem[] = [];
+  const taken = new Set<string>();
+  let used = 0;
+  for (const d of derived.open) {
+    if (items.length >= itemLimit) break;
+    const carried = toHandoffItem(d.item);
+    const cost = JSON.stringify(carried).length;
+    // 첫 항목은 예산을 넘겨도 싣는다 — 빈 체인으로 넘기는 것이 더 나쁘다.
+    if (items.length > 0 && used + cost > charBudget) break;
+    used += cost;
+    items.push(carried);
+    taken.add(d.item.id);
+  }
+  const next = derived.next;
+  if (next && !taken.has(next.item.id)) {
+    items.push(toHandoffItem(next.item));
+    taken.add(next.item.id);
+  }
+  return {
+    rev: opts.rev ?? 0,
+    openCount: derived.open.length,
+    items,
+    omittedCount: Math.max(0, derived.open.length - items.length),
+  };
+}
+
 /** 짧은 랜덤 id — 문서 안 배열 요소라 Firestore 자동 id 가 없다. 순수 PRNG 주입 가능. */
 export function newWorkChainItemId(random: () => number = Math.random): string {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
