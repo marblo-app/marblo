@@ -213,10 +213,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       id: string,
       data: string,
       bracketedPaste?: boolean
-    ): Promise<void> => {
-      ipcRenderer.send("pty:writeAndSubmit", { id, data, bracketedPaste });
-      return Promise.resolve();
-    },
+    ) => ipcRenderer.invoke("pty:writeAndSubmit", { id, data, bracketedPaste }),
     resize: (id: string, cols: number, rows: number) =>
       ipcRenderer.invoke("pty:resize", { id, cols, rows }),
     kill: (id: string) => ipcRenderer.invoke("pty:kill", { id }),

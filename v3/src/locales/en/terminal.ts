@@ -12,6 +12,11 @@ export const terminal: Record<keyof typeof koTerminal, string> = {
   "terminal.feedback.historyTitle": "Feedback history",
   "terminal.feedback.placeholder": "Send PM feedback to the agent",
   "terminal.feedback.send": "Send",
+  "terminal.feedback.refused.composerOccupied":
+    "Not sent because the other composer has an unsubmitted draft — try again after it is cleared",
+  "terminal.feedback.refused.awaitingChoice":
+    "Not sent because the other side is stopped at a confirmation dialog",
+  "terminal.feedback.refused.generic": "Not sent — please try again shortly",
   "terminal.session.expired": "Session expired.",
   "terminal.session.expiredReason":
     "The PTY session ended when the app restarted.",

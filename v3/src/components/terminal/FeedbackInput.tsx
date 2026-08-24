@@ -6,6 +6,10 @@ import {
   resolveClipboardImagePaths,
 } from "../../utils/clipboardImage";
 import { useTranslation } from "../../lib/i18n";
+import {
+  refusalMessageKey,
+  writeAndSubmitAccepted,
+} from "../../utils/ptyWriteAndSubmit";
 
 interface FeedbackEntry {
   text: string;
@@ -26,6 +30,7 @@ export default function FeedbackInput({
   const [history, setHistory] = useState<FeedbackEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sendNotice, setSendNotice] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -41,7 +46,19 @@ export default function FeedbackInput({
       // PTY stdin에 메시지 주입 + 제출(Enter). plain write+'\n'는 claude
       // 제출키(\r)가 아니라 composer에 줄바꿈만 남아 제출이 안 됨 →
       // writeAndSubmit(verify-and-retry CR)로 보낸다.
-      await window.electronAPI.pty.writeAndSubmit(sessionId, trimmed);
+      const result = await window.electronAPI.pty.writeAndSubmit(
+        sessionId,
+        trimmed,
+      );
+      const refusedKey = refusalMessageKey(result);
+      if (refusedKey) {
+        setSendNotice(t(refusedKey));
+        return;
+      }
+      if (!writeAndSubmitAccepted(result)) {
+        setSendNotice(t("terminal.feedback.refused.generic"));
+        return;
+      }
 
       // 히스토리에 추가
       const entry: FeedbackEntry = { text: trimmed, sentAt: new Date() };
@@ -53,8 +70,10 @@ export default function FeedbackInput({
       }
 
       setText("");
+      setSendNotice(null);
     } catch (err) {
       console.error("피드백 전송 실패:", err);
+      setSendNotice(t("terminal.feedback.refused.generic"));
     } finally {
       setSending(false);
     }
@@ -154,6 +173,14 @@ export default function FeedbackInput({
           {sending ? "..." : t("terminal.feedback.send")}
         </button>
       </div>
+      {sendNotice && (
+        <div
+          role="status"
+          className="px-3 pb-2 text-xs leading-5 text-[#f9e2af]"
+        >
+          {sendNotice}
+        </div>
+      )}
     </div>
   );
 }

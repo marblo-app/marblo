@@ -7,6 +7,10 @@ import {
 import { useOrchestratorStore } from "../../stores/orchestratorStore";
 import { useSubscriptionStore } from "../../stores/subscriptionStore";
 import { useTranslation } from "../../lib/i18n";
+import {
+  refusalMessageKey,
+  writeAndSubmitAccepted,
+} from "../../utils/ptyWriteAndSubmit";
 
 interface CommandPanelProps {
   onOpenOrchestrator?: () => void;
@@ -22,6 +26,7 @@ export function CommandPanel({
   const status = useOrchestratorStore((s) => s.status);
   const canUse = useSubscriptionStore((s) => s.canUse);
   const [sending, setSending] = useState<string | null>(null);
+  const [sendNotice, setSendNotice] = useState<string | null>(null);
 
   const isRunning = status === "running";
 
@@ -35,12 +40,23 @@ export function CommandPanel({
         // 주입 메시지는 writeAndSubmit(verify-and-retry CR)로 보낸다. plain
         // write + '\r'는 메인 루프 혼잡 시 CR이 paste 버퍼에 흡수돼 composer에
         // 텍스트만 남고 제출이 안 되는 경합이 있다(FeedbackInput과 동일 버그).
-        await window.electronAPI.pty.writeAndSubmit(ptySessionId, prompt);
+        const result = await window.electronAPI.pty.writeAndSubmit(
+          ptySessionId,
+          prompt,
+        );
+        const refusedKey = refusalMessageKey(result);
+        if (refusedKey) {
+          setSendNotice(t(refusedKey));
+        } else if (!writeAndSubmitAccepted(result)) {
+          setSendNotice(t("terminal.feedback.refused.generic"));
+        } else {
+          setSendNotice(null);
+        }
       } finally {
         setTimeout(() => setSending(null), 500);
       }
     },
-    [ptySessionId],
+    [ptySessionId, t],
   );
 
   // Group commands by category
@@ -85,6 +101,11 @@ export function CommandPanel({
         {!isRunning && (
           <p className="mt-1 text-[11px] text-gray-500">
             {t("orchestrator.notRunning")}
+          </p>
+        )}
+        {sendNotice && (
+          <p role="status" className="mt-1 text-[11px] text-amber-300">
+            {sendNotice}
           </p>
         )}
       </div>

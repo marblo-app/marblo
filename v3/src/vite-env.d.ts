@@ -97,6 +97,14 @@ interface FsAPI {
   }) => Promise<{ success: boolean; imported: string[] }>;
 }
 
+type PtyWriteAndSubmitRefusal = "composer-occupied" | "awaiting-choice";
+
+interface PtyWriteAndSubmitResult {
+  ok: boolean;
+  refusal: PtyWriteAndSubmitRefusal | null;
+  reason: string | null;
+}
+
 interface PtyAPI {
   create: (opts: {
     id: string;
@@ -110,7 +118,7 @@ interface PtyAPI {
     id: string,
     data: string,
     bracketedPaste?: boolean
-  ) => Promise<void>;
+  ) => Promise<PtyWriteAndSubmitResult>;
   resize: (id: string, cols: number, rows: number) => Promise<void>;
   kill: (id: string) => Promise<void>;
   list: () => Promise<{ id: string; name: string }[]>;

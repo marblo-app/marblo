@@ -12,6 +12,10 @@ import { useTranslation } from "../../lib/i18n";
 import { placeAnchoredPopup } from "../../lib/anchoredPopup";
 import type { MessageKey } from "../../locales/ko";
 import { useOrchestratorStore } from "../../stores/orchestratorStore";
+import {
+  refusalMessageKey,
+  writeAndSubmitAccepted,
+} from "../../utils/ptyWriteAndSubmit";
 import { SLASH_COMMANDS } from "../orchestrator/SlashCommandPopup";
 
 /**
@@ -264,8 +268,21 @@ export function FirstSpawnGuide() {
         try {
           // Insert the exact command displayed on the chip. A natural-language
           // expansion would make the "what should I type?" guide misleading.
-          await window.electronAPI.pty.writeAndSubmit(ptySessionId, command);
-          setFeedback(`${command}:sent`);
+          const result = await window.electronAPI.pty.writeAndSubmit(
+            ptySessionId,
+            command,
+          );
+          if (writeAndSubmitAccepted(result)) {
+            setFeedback(`${command}:sent`);
+          } else {
+            const refusedKey = refusalMessageKey(result);
+            if (refusedKey && result?.refusal) {
+              setFeedback(`${command}:blocked:${result.refusal}`);
+            } else {
+              await navigator.clipboard.writeText(command);
+              setFeedback(`${command}:copied`);
+            }
+          }
         } catch {
           try {
             await navigator.clipboard.writeText(command);
@@ -291,12 +308,17 @@ export function FirstSpawnGuide() {
     ? t("onboarding.firstSpawn.send")
     : t("onboarding.cliGate.copy");
 
-  const feedbackFor = (command: GuideCommand): "sent" | "copied" | null =>
-    feedback === `${command}:sent`
-      ? "sent"
-      : feedback === `${command}:copied`
-      ? "copied"
-      : null;
+  const feedbackFor = (command: GuideCommand) => {
+    if (feedback === `${command}:sent`) return "sent";
+    if (feedback === `${command}:copied`) return "copied";
+    if (feedback === `${command}:blocked:composer-occupied`) {
+      return "blocked-composer-occupied";
+    }
+    if (feedback === `${command}:blocked:awaiting-choice`) {
+      return "blocked-awaiting-choice";
+    }
+    return null;
+  };
 
   const placement = anchor
     ? placeAnchoredPopup(
@@ -368,6 +390,10 @@ export function FirstSpawnGuide() {
                     <span className="shrink-0 text-[10px] leading-4 text-[#585b70]">
                       {state === "sent"
                         ? t("onboarding.firstSpawn.sent")
+                        : state === "blocked-composer-occupied"
+                        ? t("terminal.feedback.refused.composerOccupied")
+                        : state === "blocked-awaiting-choice"
+                        ? t("terminal.feedback.refused.awaitingChoice")
                         : state === "copied"
                         ? t("onboarding.cliGate.copied")
                         : actionLabel}
@@ -483,6 +509,10 @@ export function FirstSpawnGuide() {
                       <span className="ml-1 text-[10px]">
                         {state === "sent"
                           ? t("onboarding.firstSpawn.sent")
+                          : state === "blocked-composer-occupied"
+                          ? t("terminal.feedback.refused.composerOccupied")
+                          : state === "blocked-awaiting-choice"
+                          ? t("terminal.feedback.refused.awaitingChoice")
                           : t("onboarding.cliGate.copied")}
                       </span>
                     )}

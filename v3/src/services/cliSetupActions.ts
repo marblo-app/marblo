@@ -103,7 +103,7 @@ export async function launchLogin(
     // Let the shell print its prompt before typing, so the command isn't
     // swallowed by a not-yet-interactive shell.
     setTimeout(() => {
-      window.electronAPI.pty.writeAndSubmit(id, command).catch(() => {
+      void window.electronAPI.pty.writeAndSubmit(id, command).catch(() => {
         /* PTY closed — user can still type it themselves */
       });
     }, 700);

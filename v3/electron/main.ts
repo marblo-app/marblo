@@ -19,6 +19,7 @@ import crypto from "node:crypto";
 import { execFile, execSync, spawn } from "node:child_process";
 import dotenv from "dotenv";
 import { PtyManager, isBusySignal } from "./pty-manager";
+import type { ComposerRefusal } from "./composer-gate";
 import {
   startMcpOrphanReaper,
   stopMcpOrphanReaper,
@@ -5458,44 +5459,66 @@ ipcMain.on("pty:write", (event, { id, data }) => {
   ptyManager.write(id, data);
 });
 
+type PtyWriteAndSubmitResult = {
+  ok: boolean;
+  refusal: ComposerRefusal | null;
+  reason: string | null;
+};
+
 // pty:writeAndSubmit — inject a message and submit it as a discrete Enter.
 // Used by programmatic senders (e.g. FeedbackInput) that aren't raw keystroke
 // passthrough: routes through the same verify-and-retry submit logic as
 // orchestrator/agent message injection so the CR actually registers.
-ipcMain.on(
+//
+// This is request/response, not fire-and-forget: composer-gate refusals mean
+// nothing was written, so renderer senders must keep the user's draft intact.
+ipcMain.handle(
   "pty:writeAndSubmit",
-  (
+  async (
     event,
     {
       id,
       data,
       bracketedPaste,
     }: { id: string; data: string; bracketedPaste?: boolean }
-  ) => {
-    if (!isPtyCallerOwner(event.sender.id, id)) return;
-    // FeedbackInput / CommandPanel 처럼 한 번에 통째로 제출하는 경로 — 여기서는
-    // 길이를 알 수 있어 구간으로 접어 남긴다(내용은 넘기지 않는다).
-    noteOrchestratorSubmit(
+  ): Promise<PtyWriteAndSubmitResult> => {
+    if (!isPtyCallerOwner(event.sender.id, id)) {
+      return {
+        ok: false,
+        refusal: null,
+        reason: "PTY write rejected: caller does not own this session",
+      };
+    }
+
+    const ok = await ptyManager.writeAndSubmit(
       id,
-      "inject",
-      typeof data === "string" ? data.length : -1
+      data,
+      undefined,
+      bracketedPaste
     );
-    // ★거절되면 조용히 넘기지 않는다(티켓 RtyOMpOArfI7a5JNSzsg). 이 경로는
-    // `ipcMain.on` 이라 렌더러가 결과를 못 받는다 — FeedbackInput 은 입력칸을
-    // 비우고 "보냈다" 로 보인다. 상대 컴포저에 초안이 물려 있으면 지금은 **안
-    // 보낸 것**이므로, 최소한 로그에는 사유와 원문 길이가 남아야 한다.
-    // (사용자에게 그 사실을 화면으로 알리는 것은 렌더러 몫 — 별도 티켓.)
-    void ptyManager
-      .writeAndSubmit(id, data, undefined, bracketedPaste)
-      .then((ok) => {
-        if (ok) return;
-        const gate = ptyManager.composerVerdict(id);
-        console.error(
-          `[pty:writeAndSubmit] NOT SENT to ${id} (${
-            typeof data === "string" ? data.length : -1
-          } chars) — ${gate.refusal ?? "write rejected"}: ${gate.reason}`
-        );
-      });
+    if (ok) {
+      // FeedbackInput / CommandPanel 처럼 한 번에 통째로 제출하는 경로 — 여기서는
+      // 길이를 알 수 있어 구간으로 접어 남긴다(내용은 넘기지 않는다). 실제로
+      // 제출된 뒤에만 기록한다. 컴포저 게이트가 막은 것은 사용자 첫 대화가 아니다.
+      noteOrchestratorSubmit(
+        id,
+        "inject",
+        typeof data === "string" ? data.length : -1
+      );
+      return { ok: true, refusal: null, reason: null };
+    }
+
+    const gate = ptyManager.composerVerdict(id);
+    console.error(
+      `[pty:writeAndSubmit] NOT SENT to ${id} (${
+        typeof data === "string" ? data.length : -1
+      } chars) — ${gate.refusal ?? "write rejected"}: ${gate.reason}`
+    );
+    return {
+      ok: false,
+      refusal: gate.refusal,
+      reason: gate.reason,
+    };
   }
 );
 

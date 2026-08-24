@@ -16,6 +16,12 @@ export const terminal = {
   "terminal.feedback.historyTitle": "피드백 히스토리",
   "terminal.feedback.placeholder": "PM 피드백을 에이전트에게 전달합니다",
   "terminal.feedback.send": "전송",
+  "terminal.feedback.refused.composerOccupied":
+    "상대 컴포저에 미제출 초안이 있어 보내지 않았습니다 — 정리되면 다시 시도하세요",
+  "terminal.feedback.refused.awaitingChoice":
+    "상대가 확인 다이얼로그에 멈춰 있어 보내지 않았습니다",
+  "terminal.feedback.refused.generic":
+    "보내지 않았습니다 — 잠시 후 다시 시도하세요",
   // Session-expired notice written into the xterm buffer (after app restart).
   // ★이 문구는 "내 기기가 띄운 세션이 끝났다" 일 때만 쓴다 — 판정은
   // lib/terminalSessionOwnership. 남의 기기 것/에이전트 없음은 아래 별도 문구다.
