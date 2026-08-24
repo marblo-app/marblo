@@ -650,7 +650,8 @@ function buildOpenGateSql(
     `  DATE(${sqlString(effectiveFrom)}) AS effective_from,`,
     "  CAST(NULL AS STRING) AS disabled_reason",
     `FROM ${daily} d`,
-    "JOIN link l ON l.install_key = d.install_key",
+    "JOIN link l ON l.install_key = d.install_key_hmac",
+    "-- ★install_key_hmac 이 NULL 인 과거 daily 행은 자연히 제외된다.",
     "-- ★상한: 개정 발효일 이전 구간은 두 뷰 모두에서 제외한다(설계 §5.4).",
     `WHERE d.day >= DATE(${sqlString(effectiveFrom)})`,
     ...sinceLinkFilter,
@@ -693,7 +694,10 @@ export function buildPersonAxisViewDdl(
 
 /** 익명축 일별 행(analytics_user_daily 한 줄). ★user_key 컬럼이 없다. */
 export type PersonAxisDailyRow = {
+  /** 원시 설치 id. 보존용이며 링크표 조인에는 쓰지 않는다. */
   install_key: string;
+  /** 링크표/identity 와 같은 HMAC 설치 키. 과거 행은 null 일 수 있다. */
+  install_key_hmac?: string | null;
   /** 'YYYY-MM-DD' */
   day: string;
   active?: boolean;
@@ -781,7 +785,8 @@ export function attributePersonRows(
   let unlinkedRows = 0;
 
   for (const d of dailyRows) {
-    if (shared.has(d.install_key)) {
+    const joinKey = d.install_key_hmac ?? "";
+    if (shared.has(joinKey)) {
       droppedSharedRows += 1;
       continue;
     }
@@ -792,7 +797,7 @@ export function attributePersonRows(
       droppedBeforeEffectiveFrom += 1;
       continue;
     }
-    const link = byInstall.get(d.install_key);
+    const link = byInstall.get(joinKey);
     if (link === undefined) {
       unlinkedRows += 1;
       continue;
@@ -891,16 +896,10 @@ export type PersonAxisCoverageInput = {
 };
 
 /**
- * ★현재 지표는 잠정 `identity_linked_ratio` 다. `analytics_user_daily.install_key`
- * 는 원시 설치 ID 이고 링크표/`analytics_identity.install_key` 는 HMAC 이라서
- * daily active 축과 사람 링크 축이 아직 직접 조인되지 않는다. 그래서 complete 는
- * "analytics_identity 의 HMAC 설치 중 링크된 수" 로만 판정한다.
- *
- * ★진짜 답은 키 단위 통일이다(후속 티켓 iQNi0PHs0J9FY6HQnb1P). 승인된 방향은
- * `analytics_user_daily` 에
- * nullable `install_key_hmac` 을 추가하고 새 행부터 채우는 것: 기존 raw
- * `install_key` 는 유지하고, 소급 재작성 없이 HMAC 컬럼으로 daily↔identity 를
- * 조인한다. 그 전까지 이 함수는 숫자 이름에 identity 분모를 드러내야 한다.
+ * ★`analytics_user_daily.install_key_hmac` 이 들어온 뒤 daily active 축과
+ * 링크/identity 축은 같은 HMAC 공간에서 조인된다. 단 소급 재작성은 하지 않으므로,
+ * NULL 인 과거 daily 행은 사람 축에서 빠진다. 그래서 화면은 `dailyJoinNote` 로
+ * "언제부터의 daily 행인가" 를 말해야 한다.
  *
  * ★`identityTotalInstalls === 0` 이면 complete 로 올리지 않는다. 분모가 0 인 완전성은
  * 공허참이고, 그걸 100% 로 그리면 "이 구간은 다 봤다" 는 거짓말이 된다. 그때는
@@ -916,10 +915,10 @@ export function computePersonAxisCoverage(
   const dailyActiveInstalls = input.dailyActiveInstalls ?? input.activeInstalls;
   const dailyLinkedActiveInstalls =
     input.dailyLinkedActiveInstalls ?? input.linkedActiveInstalls;
-  const dailyJoinable = input.dailyJoinable ?? false;
+  const dailyJoinable = input.dailyJoinable ?? true;
   const dailyJoinNote =
     input.dailyJoinNote ??
-    "analytics_user_daily.install_key 는 원시 설치 ID 이고 analytics_identity/link install_key 는 HMAC 이라 아직 직접 조인할 수 없습니다.";
+    "analytics_user_daily.install_key_hmac 이 채워진 신규 daily 행만 사람 축 링크표와 조인됩니다. install_key_hmac 이 NULL 인 과거 행은 소급 재작성하지 않아 제외됩니다.";
   const base = {
     metric,
     disabledReason: null as string | null,
@@ -1276,15 +1275,9 @@ export function buildUserInstallMergeParams(
 /**
  * identity_linked_ratio 한 벌을 세는 SQL.
  *
- * ★잠정 조치다. `analytics_user_daily.install_key` 는 아직 raw 설치 ID 이고
- * `analytics_identity`/링크표는 HMAC install_key 다. daily 를 분모로 삼으면
- * 분자와 키 공간이 달라 0% 에 고착된다. 그래서 읽기 쿼리만 가역적으로 바꿔
- * 분모를 `analytics_identity` 의 HMAC install_key 집합으로 둔다.
- *
- * ★진짜 답은 키 단위 통일이다(후속 티켓 iQNi0PHs0J9FY6HQnb1P).
- * `analytics_user_daily.install_key_hmac` 을 nullable 로 추가해 새 행부터 채우면
- * daily activity 와 identity/link 축을 같은 키로 조인할 수 있다. 소급 재작성은
- * 하지 않는다.
+ * ★`analytics_user_daily.install_key` 는 raw 설치 ID 로 보존하고,
+ * `install_key_hmac` 으로만 링크/identity 축과 조인한다. 소급 재작성은 하지
+ * 않으므로 NULL 인 과거 행은 daily 사람 축 숫자에서 빠진다.
  *
  * ★공용 기기 설치는 `linked` 에서 빼고 `excluded_shared_installs` 로 **센다.**
  * 뷰(`buildOpenGateSql`)와 같은 규칙이어야 화면의 분모와 표의 행 수가 맞는다.
@@ -1308,10 +1301,16 @@ export function buildPersonAxisCoverageSql(projectId: string): string {
     `  SELECT DISTINCT install_key FROM ${identity}`,
     "  WHERE install_key IS NOT NULL AND install_key != ''",
     "),",
+    "daily_active_rows AS (",
+    "  -- ★daily.install_key_hmac 이 채워진 행만 링크/identity 와 같은 키 공간이다.",
+    `  SELECT install_key_hmac AS install_key, day FROM ${daily}`,
+    "  WHERE day >= GREATEST(DATE(@since), DATE(@effective_from))",
+    "    AND active",
+    "    AND install_key_hmac IS NOT NULL",
+    "    AND install_key_hmac != ''",
+    "),",
     "daily_active AS (",
-    "  -- ★별도 참고 숫자. daily 는 raw install_key 라 link/identity 와 아직 조인 불가.",
-    `  SELECT DISTINCT install_key FROM ${daily}`,
-    "  WHERE day >= GREATEST(DATE(@since), DATE(@effective_from)) AND active",
+    "  SELECT DISTINCT install_key FROM daily_active_rows",
     "),",
     "SELECT",
     "  (SELECT COUNT(*) FROM identity i JOIN linked l USING (install_key))",
@@ -1320,6 +1319,7 @@ export function buildPersonAxisCoverageSql(projectId: string): string {
     "  (SELECT COUNT(*) FROM daily_active a JOIN linked l USING (install_key))",
     "    AS linked_active_installs,",
     "  (SELECT COUNT(*) FROM daily_active) AS active_installs,",
+    "  (SELECT CAST(MIN(day) AS STRING) FROM daily_active_rows) AS daily_hmac_first_day,",
     "  (SELECT COUNT(*) FROM shared) AS excluded_shared_installs,",
     `  (SELECT CAST(MAX(first_linked_at) AS STRING) FROM ${link})`,
     "    AS last_linked_at",

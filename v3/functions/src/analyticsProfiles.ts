@@ -70,6 +70,7 @@ import {
   LINK_AXIS_TABLES,
   TABLE_USER_INSTALL,
 } from "./personAxis";
+import { pseudonymizeAnalyticsId } from "./analyticsPseudonym";
 import {
   VIEW_TEAM_USAGE_DAILY,
   VIEW_TEAM_USAGE_UNATTRIBUTED,
@@ -330,7 +331,12 @@ export type DailyModelUse = { model: string; calls: number };
 export type DailyErrorCount = { category: string; count: number };
 
 export type UserDailyRow = {
+  /** 원시 설치 축 키. 기존 컬럼은 보존한다. */
   install_key: string;
+  /**
+   * 링크표/identity 와 같은 HMAC 설치 키. 신규 행부터 채우며 과거 행은 null 이다.
+   */
+  install_key_hmac: string | null;
   day: string;
   /** ★active = working 하트비트 ≥1 **또는** 이벤트 ≥1. 하트비트 존재가 아니다. */
   active: boolean;
@@ -404,7 +410,8 @@ function parseStringList(v: unknown): string[] {
  * 쪼개져 오기 때문이다(events / heartbeats / task_outcomes 각각 한 줄).
  */
 export function buildUserDailyRows(
-  rows: ReadonlyArray<DailySourceRow>
+  rows: ReadonlyArray<DailySourceRow>,
+  analyticsIdSalt: string | null = null
 ): UserDailyRow[] {
   type Acc = {
     installKey: string;
@@ -481,8 +488,17 @@ export function buildUserDailyRows(
     const active = a.workingBeats >= 1 || a.eventCount >= 1;
     // ★좀비: 하트비트는 왔는데 working 0 · 이벤트 0. active 와 배타적이다.
     const presentOnly = !active && a.presenceBeats >= 1;
+    const installKeyHmac = pseudonymizeAnalyticsId(
+      "install",
+      a.installKey,
+      analyticsIdSalt
+    );
     out.push({
       install_key: a.installKey,
+      install_key_hmac:
+        typeof installKeyHmac === "string" && installKeyHmac.length > 0
+          ? installKeyHmac
+          : null,
       day: a.day,
       active,
       present_only: presentOnly,
@@ -1362,6 +1378,15 @@ export const USER_DAILY_SCHEMA: ReadonlyArray<BqField> = [
     type: "STRING",
     mode: "NULLABLE",
     description: ID_SCHEME_NOTE,
+  },
+  {
+    name: "install_key_hmac",
+    type: "STRING",
+    mode: "NULLABLE",
+    description:
+      "in_ + HMAC(salt, 'install:' + raw install_key). ★기존 install_key(raw)는 " +
+      "보존하고, 사람 축 링크표/identity 와 조인할 때만 이 컬럼을 쓴다. " +
+      "소급 재작성은 하지 않으므로 과거 행은 NULL 일 수 있다.",
   },
   { name: "built_at", type: "TIMESTAMP", mode: "NULLABLE" },
 ];

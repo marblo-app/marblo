@@ -52,17 +52,47 @@ const OPEN_GATE = resolvePersonAxisGate({
   [PERSON_AXIS_EFFECTIVE_FROM_ENV]: EFFECTIVE_FROM,
 });
 const CLOSED_GATE = resolvePersonAxisGate({});
+const RAW_A = "aaaaaaaa-1111-2222-3333-444444444444";
+const RAW_Z = "zzzzzzzz-1111-2222-3333-444444444444";
+const RAW_B = "bbbbbbbb-1111-2222-3333-444444444444";
+const RAW_OLD = "oldoldold-1111-2222-3333-444444444444";
+const RAW_SHARED = "shared00-1111-2222-3333-444444444444";
+const RAW_SOLO = "solo0000-1111-2222-3333-444444444444";
 
 /** 익명축 일별 행 — ★user_key 컬럼이 없다. 그게 이 설계의 전제다. */
 const DAILY: ReadonlyArray<PersonAxisDailyRow> = [
   // 발효일 이전 — 상한에 걸린다.
-  { install_key: "in_aaa", day: "2026-08-20", active: true, event_count: 3 },
+  {
+    install_key: RAW_A,
+    install_key_hmac: "in_aaa",
+    day: "2026-08-20",
+    active: true,
+    event_count: 3,
+  },
   // 링크 이전 — since_link 에서만 걸린다.
-  { install_key: "in_aaa", day: "2026-09-02", active: true, event_count: 5 },
+  {
+    install_key: RAW_A,
+    install_key_hmac: "in_aaa",
+    day: "2026-09-02",
+    active: true,
+    event_count: 5,
+  },
   // 링크 이후 — 두 뷰 모두 통과.
-  { install_key: "in_aaa", day: "2026-09-10", active: true, event_count: 7 },
+  {
+    install_key: RAW_A,
+    install_key_hmac: "in_aaa",
+    day: "2026-09-10",
+    active: true,
+    event_count: 7,
+  },
   // 링크가 없는 설치 — 버리지 않고 센다.
-  { install_key: "in_zzz", day: "2026-09-10", active: true, event_count: 1 },
+  {
+    install_key: RAW_Z,
+    install_key_hmac: "in_zzz",
+    day: "2026-09-10",
+    active: true,
+    event_count: 1,
+  },
 ];
 
 const LINKS: ReadonlyArray<UserInstallLink> = [
@@ -188,7 +218,13 @@ test("★한 사람만 지워도 그 사람의 과거 귀속만 풀린다 (PIPA 
   ];
   const daily: PersonAxisDailyRow[] = [
     ...DAILY,
-    { install_key: "in_bbb", day: "2026-09-10", active: true, event_count: 2 },
+    {
+      install_key: RAW_B,
+      install_key_hmac: "in_bbb",
+      day: "2026-09-10",
+      active: true,
+      event_count: 2,
+    },
   ];
   const all = attributePersonRows(daily, twoPeople, "all_time", OPEN_GATE);
   assert.ok(all.rows.some((r) => r.user_key === "us_person1"));
@@ -277,7 +313,12 @@ test("★uid28 구간 링크는 상한에 걸려 기본적으로 안 쓰인다 (
     },
   ];
   const old: PersonAxisDailyRow[] = [
-    { install_key: "in_old", day: "2026-05-02", active: true },
+    {
+      install_key: RAW_OLD,
+      install_key_hmac: "in_old",
+      day: "2026-05-02",
+      active: true,
+    },
   ];
   const out = attributePersonRows(old, uid28Link, "all_time", OPEN_GATE);
   assert.equal(out.rows.length, 0);
@@ -290,6 +331,8 @@ test("열린 뷰 SQL 에 상한과 공용기기 제외가 둘 다 들어 있다"
   for (const sql of [since, all]) {
     assert.match(sql, /COUNT\(DISTINCT user_key\) > 1/);
     assert.match(sql, /install_key NOT IN \(SELECT install_key FROM shared\)/);
+    assert.match(sql, /l\.install_key = d\.install_key_hmac/);
+    assert.match(sql, /install_key_hmac 이 NULL 인 과거 daily 행/);
     assert.ok(sql.includes(`DATE("${EFFECTIVE_FROM}")`));
   }
   // ★기본 뷰에만 링크 경계가 있다.
@@ -335,12 +378,19 @@ test("findSharedInstalls — 계정 2개 이상 붙은 설치만 골라낸다", 
 test("★공용 기기는 두 뷰 모두에서 제외되고, 제외 수가 화면에 올라간다", () => {
   const daily: PersonAxisDailyRow[] = [
     {
-      install_key: "in_shared",
+      install_key: RAW_SHARED,
+      install_key_hmac: "in_shared",
       day: "2026-09-10",
       active: true,
       event_count: 9,
     },
-    { install_key: "in_solo", day: "2026-09-10", active: true, event_count: 1 },
+    {
+      install_key: RAW_SOLO,
+      install_key_hmac: "in_solo",
+      day: "2026-09-10",
+      active: true,
+      event_count: 1,
+    },
   ];
   for (const basis of ["since_link", "all_time"] as const) {
     const out = attributePersonRows(daily, SHARED_LINKS, basis, OPEN_GATE);
@@ -535,8 +585,9 @@ test("일부만 붙었으면 ingesting — 이 구간에 퍼센트 헤드라인�
   assert.equal(cov.dailyLinkedActiveInstalls, 0);
   assert.equal(cov.activeInstalls, 14);
   assert.equal(cov.dailyActiveInstalls, 14);
-  assert.equal(cov.dailyJoinable, false);
-  assert.match(cov.dailyJoinNote, /직접 조인할 수 없습니다/);
+  assert.equal(cov.dailyJoinable, true);
+  assert.match(cov.dailyJoinNote, /install_key_hmac/);
+  assert.match(cov.dailyJoinNote, /소급 재작성하지 않아 제외/);
 });
 
 test("★complete 판정은 identity_linked_ratio 기준이다 — daily active 는 별도 숫자다", () => {
@@ -816,7 +867,8 @@ test("★identity_linked_ratio SQL 은 링크표와 analytics_identity 를 읽�
   assert.ok(sql.includes(`${PROJECT}.marblo_telemetry.analytics_identity`));
   assert.ok(sql.includes(`${PROJECT}.marblo_telemetry.analytics_user_daily`));
   assert.match(sql, /SELECT COUNT\(\*\) FROM identity i JOIN linked l/);
-  assert.match(sql, /daily 는 raw install_key/);
+  assert.match(sql, /install_key_hmac/);
+  assert.match(sql, /install_key_hmac IS NOT NULL/);
   // ★읽기만 한다 — 커버리지가 원본을 고치면 그건 커버리지가 아니다.
   assert.ok(!/\b(INSERT|UPDATE|DELETE|MERGE|CREATE|DROP|ALTER)\b/.test(sql));
 });

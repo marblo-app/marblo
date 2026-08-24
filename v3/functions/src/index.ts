@@ -13441,11 +13441,15 @@ export async function buildAnalyticsProfileTablesInternal(
       runAnalyticsQuery("milestones", ANALYTICS_MILESTONES_SQL, {}, notes),
     ]);
 
-  const daily = buildUserDailyRows([
-    ...(eventRows as DailySourceRow[]),
-    ...(beatRows as DailySourceRow[]),
-    ...(outcomeRows as DailySourceRow[]),
-  ]);
+  const analyticsIdSalt = readAnalyticsIdSalt();
+  const daily = buildUserDailyRows(
+    [
+      ...(eventRows as DailySourceRow[]),
+      ...(beatRows as DailySourceRow[]),
+      ...(outcomeRows as DailySourceRow[]),
+    ],
+    analyticsIdSalt
+  );
   const installProfiles = buildInstallProfileRows({
     today,
     daily,
@@ -13634,6 +13638,10 @@ async function loadPersonAxisCoverage(
     });
     const row = (rows as Record<string, unknown>[])[0];
     if (!row) return null;
+    const dailyHmacFirstDay =
+      typeof row.daily_hmac_first_day === "string"
+        ? row.daily_hmac_first_day
+        : null;
     return computePersonAxisCoverage({
       gate,
       basis,
@@ -13641,6 +13649,11 @@ async function loadPersonAxisCoverage(
       totalInstalls: personAxisCount(row, "total_installs"),
       linkedActiveInstalls: personAxisCount(row, "linked_active_installs"),
       activeInstalls: personAxisCount(row, "active_installs"),
+      dailyJoinable: true,
+      dailyJoinNote:
+        dailyHmacFirstDay === null
+          ? "analytics_user_daily.install_key_hmac 이 채워진 active daily 행이 아직 없습니다. 소급 재작성하지 않으므로 과거 NULL 행은 사람 축에서 제외됩니다."
+          : `analytics_user_daily.install_key_hmac 기준 사람 축입니다. 이 응답의 daily active 구간은 ${dailyHmacFirstDay} 이후 HMAC 이 채워진 행만 포함하며, 과거 NULL 행은 소급 재작성하지 않아 제외됩니다.`,
       excludedSharedInstalls: personAxisCount(row, "excluded_shared_installs"),
       lastLinkedAt:
         typeof row.last_linked_at === "string" ? row.last_linked_at : null,

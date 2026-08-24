@@ -36,6 +36,7 @@ import {
   type DailySourceRow,
   type UserDailyRow,
 } from "./analyticsProfiles";
+import { pseudonymizeAnalyticsId } from "./analyticsPseudonym";
 import { USER_INSTALL_SCHEMA } from "./personAxis";
 import {
   TEAM_USAGE_DAILY_SCHEMA,
@@ -356,6 +357,28 @@ test('clientId 미제공 폴백("anon")과 잘못된 날짜는 버린다', () =>
   ]);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].install_key, INSTALL_A);
+});
+
+test("★daily 는 raw install_key 를 보존하고 HMAC 보조 컬럼을 새로 채운다", () => {
+  const salt = "test-salt-not-a-real-secret";
+  const [row] = buildUserDailyRows(
+    [{ installKey: INSTALL_A, day: "2026-08-01", eventCount: 1 }],
+    salt
+  );
+  assert.equal(row.install_key, INSTALL_A);
+  assert.equal(
+    row.install_key_hmac,
+    pseudonymizeAnalyticsId("install", INSTALL_A, salt)
+  );
+  assert.match(String(row.install_key_hmac), /^in_[0-9a-f]{24}$/);
+});
+
+test("★salt 가 없으면 raw fallback 하지 않고 install_key_hmac 은 null 이다", () => {
+  const [row] = buildUserDailyRows([
+    { installKey: INSTALL_A, day: "2026-08-01", eventCount: 1 },
+  ]);
+  assert.equal(row.install_key, INSTALL_A);
+  assert.equal(row.install_key_hmac, null);
 });
 
 test("★daily 행에 비용 필드가 없다(계정축 개념)", () => {
