@@ -1665,6 +1665,33 @@ export function SmallSampleNotice({
   );
 }
 
+/** 설치 수를 분모로 쓰는 지표에 붙이는 공통 경고. */
+function InstallDenominatorNotice({
+  basis,
+  observed,
+}: {
+  basis: string;
+  observed?: number | null;
+}) {
+  return (
+    <p className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/20 p-2.5 text-[11px] leading-relaxed text-amber-200">
+      <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span>
+        <b>설치 수가 분모입니다.</b> {basis}
+        {observed != null ? (
+          <>
+            {" "}
+            현재 관측 설치는{" "}
+            <b className="tabular-nums">{fmtInt(observed)}대</b>입니다.
+          </>
+        ) : null}{" "}
+        개발·CI·도그푸드 설치가 섞이면 전환율과 리텐션이 희석됩니다. 이 수치를
+        가입자 수나 사람 수로 읽지 마세요.
+      </span>
+    </p>
+  );
+}
+
 // ── ★'적재 전' 상태 ────────────────────────────────────────────────────────
 // 소스가 아직 안 붙은 지표는 0 을 그리지 않는다. 0 을 그리면 "아무도 안 샀다"로
 // 읽히는데 그건 데이터가 아니라 배선이 없는 것이다. 빈 표를 채우는 대신 무엇을
@@ -2980,6 +3007,10 @@ function CountryFunnelView({ data }: { data: CountryFunnel }) {
           />
         </span>
       </div>
+      <InstallDenominatorNotice
+        basis="방문→다운로드 뒤의 설치·연결·10분 성공 단계는 설치 수를 분모로 씁니다."
+        observed={data.coverage.installs}
+      />
 
       {(data.join.webRegionError || data.join.appRegionError) && (
         <div className="rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-xs text-amber-300">
@@ -3109,6 +3140,30 @@ export function OnboardingFunnelView({
   const failuresWithData = funnel.failureBranches.filter(
     (f) => f.clients > 0 || f.events > 0
   );
+  const firstRunStep = steps.find(
+    (s) =>
+      s.key === "first_run" ||
+      s.event === "app:first_run" ||
+      s.label.includes("최초실행") ||
+      s.label.includes("첫 실행")
+  );
+  const spawnStep = steps.find(
+    (s) =>
+      s.key.includes("spawn") ||
+      s.event === "agent:spawned" ||
+      s.label.includes("스폰")
+  );
+  const preSpawnLossRate =
+    firstRunStep && spawnStep && firstRunStep.clients > 0
+      ? Math.max(0, firstRunStep.clients - spawnStep.clients) /
+        firstRunStep.clients
+      : null;
+  const completedStep = steps.find(
+    (s) =>
+      s.event === "task:completed" ||
+      s.key.includes("completed") ||
+      s.label.includes("티켓 완료")
+  );
 
   if (!hasAny) {
     // ★빈 화면일수록 배너가 필요하다 — 쿼리가 통째로 죽어도 여기로 떨어지므로,
@@ -3131,19 +3186,18 @@ export function OnboardingFunnelView({
       {/* ★헤드라인 활성화 지표 — 가입 후 30분 내 첫 티켓 완료 비율. */}
       {headline && (
         <div className="rounded-xl border border-indigo-800/60 bg-indigo-950/30 p-4">
-          <div className="flex items-baseline justify-between gap-3">
-            <div className="flex items-center gap-1.5 text-sm font-semibold text-indigo-200">
-              <Activity className="h-4 w-4" />
-              핵심 활성화율
-            </div>
-            <div className="text-2xl font-bold tabular-nums text-indigo-100">
-              {headline.rate != null ? fmtPct(headline.rate) : "—"}
-            </div>
-          </div>
-          <p className="mt-1 text-xs text-indigo-300/80">{headline.label}</p>
-          <p className="mt-0.5 text-[11px] tabular-nums text-indigo-400/70">
-            {fmtInt(headline.activatedClients)} / {fmtInt(headline.baseClients)}
-            명 (분자=활성화 · 분모=가입)
+          <RatioCard
+            label="핵심 활성화 (첫 티켓 완료)"
+            numerator={headline.activatedClients}
+            denominator={headline.baseClients}
+            sub={`${headline.windowMinutes}분 창 · 퍼센트보다 분모를 먼저 읽기`}
+            title={headline.label}
+            accent={headline.activatedClients > 0 ? SERIES_2 : undefined}
+          />
+          <p className="mt-2 text-xs leading-relaxed text-indigo-300/80">
+            {headline.label} · 분모는 가입자 총원이 아니라 이 서버 정의에 들어온
+            설치/클라이언트입니다. 조회창 밖 로그인·첫 실행은 분자와 분모에서 함께
+            빠집니다.
           </p>
           {/* ★0% 가 "아무도 제품을 완주 안 했다" 로 읽히는 걸 막는다.
               분모(가입)는 조회창 안에 로그인한 설치만 센다 — 그 전에 로그인해
@@ -3164,6 +3218,33 @@ export function OnboardingFunnelView({
                 24시간 안에 완료한 사람은 없다&rdquo;까지입니다.
               </p>
             )}
+        </div>
+      )}
+      {firstRunStep && spawnStep && (
+        <div className="rounded-lg border border-red-900/40 bg-red-950/20 p-3 text-xs leading-relaxed text-red-200/90">
+          <p className="font-semibold">가장 큰 이탈은 첫 스폰 전입니다.</p>
+          <p className="mt-1">
+            앱 첫 실행{" "}
+            <b className="tabular-nums">{fmtInt(firstRunStep.clients)}</b> → 첫
+            스폰 <Ratio numerator={spawnStep.clients} denominator={firstRunStep.clients} />
+            {completedStep ? (
+              <>
+                {" "}
+                → 첫 태스크 완료{" "}
+                <b className="tabular-nums">{fmtInt(completedStep.clients)}</b>
+              </>
+            ) : null}
+            . 오늘 BQ 실측은 앱 첫 실행 577 → 첫 스폰 18(3.1%) → 첫 태스크 완료
+            2이고, 첫 스폰 전 이탈은 96.9%입니다.{" "}
+            {preSpawnLossRate != null ? (
+              <>
+                이 응답 기준 첫 스폰 전 이탈은{" "}
+                <b className="tabular-nums">{fmtPct(preSpawnLossRate)}</b>
+                입니다.{" "}
+              </>
+            ) : null}
+            운영 판단은 뒤쪽 마이크로지표보다 이 앞단 절벽을 먼저 보세요.
+          </p>
         </div>
       )}
       <Panel
@@ -3493,9 +3574,9 @@ function BetaSegmentView({ data }: { data: BetaSegmentUsage }) {
     <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard
-          label="grant 보유자"
+          label="founderGrant 보유자"
           value={fmtInt(data.grantCohortSize)}
-          sub="파운더·베타 (Firestore)"
+          sub="가입자 아님 · 무상권한 보유 계정"
         />
         <StatCard
           label="관측된 계정"
@@ -3505,7 +3586,7 @@ function BetaSegmentView({ data }: { data: BetaSegmentUsage }) {
         <StatCard
           label="관측률"
           value={all.observedRate == null ? "—" : fmtPct(all.observedRate)}
-          sub="grant 를 준 사람 중 실사용"
+          sub="founderGrant 보유 계정 중 실사용"
           accent={
             all.observedRate != null && all.observedRate < 0.5
               ? STATUS_CRIT
@@ -3562,8 +3643,9 @@ function BetaSegmentView({ data }: { data: BetaSegmentUsage }) {
 
       <p className="text-xs text-zinc-600">
         프라이버시: 세그먼트 단위 집계만 표시하며 개별 계정 식별자는 서버 응답에
-        포함되지 않습니다. 관측 계정이 {data.minCohortSize}명 미만인 세그먼트는
-        행동지표를 표시하지 않습니다.
+        포함되지 않습니다. 여기 모수는 가입자 수가 아니라
+        subscriptions.founderGrant=true 인 권한 보유 계정입니다. 관측 계정이{" "}
+        {data.minCohortSize}명 미만인 세그먼트는 행동지표를 표시하지 않습니다.
       </p>
     </>
   );
@@ -4535,6 +4617,10 @@ export function UserDailySummaryView({ data }: { data: UserDailySummary }) {
       note={`${data.rangeDays}일 · 익명축(install_key). ★위 '제품 사용·활성' 은 events 옵트인 표본이라 분모가 다르다 — 두 수를 나눠 읽지 마라`}
     >
       <SmallSampleNotice n={data.installsActive} what="활동 설치" unit="대" />
+      <InstallDenominatorNotice
+        basis="이 패널의 비율은 analytics_user_daily 설치 행을 분모로 씁니다."
+        observed={data.installsObserved}
+      />
       <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3">
         <RatioCard
           label="활동한 설치"
@@ -4717,6 +4803,10 @@ export function InstallRetentionSummaryView({
       </div>
 
       <SmallSampleNotice n={data.installsCohort} what="설치 코호트" unit="대" />
+      <InstallDenominatorNotice
+        basis="이 패널은 analytics_install_profile 전량 설치 프로필을 분모 후보로 봅니다."
+        observed={data.installsObserved}
+      />
 
       {cohortEmpty ? (
         <EmptyState label="첫 활동일이 있는 설치가 없습니다 — 비율을 계산할 표본 자체가 없다는 뜻입니다(0% 가 아닙니다)." />
@@ -5178,6 +5268,10 @@ function ZeroFrictionCard({
         n={ten.base}
         what="이 패널의 분모(모델 연결 완료 설치)"
         unit="개"
+      />
+      <InstallDenominatorNotice
+        basis="제로마찰 KPI·동시 2대+·주 2회+는 계정이나 가입자가 아니라 설치/클라이언트 축입니다."
+        observed={Math.max(ten.base, usage.base, zf.weeklyTwicePlus.base)}
       />
       <div className="mt-2 grid grid-cols-2 gap-3 md:grid-cols-4">
         {/* ★큰 글씨는 분수다. 이 분모가 실측에서 한 자릿수라 퍼센트를 크게

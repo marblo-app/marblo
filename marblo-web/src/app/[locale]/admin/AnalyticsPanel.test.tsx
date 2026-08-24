@@ -741,6 +741,9 @@ test("설치축 요약의 모든 칸은 분자/분모를 남기고 미도달은 
   assert.match(html, /퍼센트/);
   // ★익명축이라 운영자 제외가 불가능하다는 서버 note 를 화면이 그대로 싣는다.
   assert.match(html, /is_admin/);
+  // ★설치 수 분모는 dev/CI/도그푸드 설치로 희석될 수 있음을 화면이 먼저 말한다.
+  assert.match(html, /설치 수가 분모입니다/);
+  assert.match(html, /개발·CI·도그푸드 설치/);
 });
 
 test("코호트가 비면 0% 가 아니라 '표본이 없다' 고 말한다", () => {
@@ -892,6 +895,9 @@ test("★설치 × 날짜 뷰는 좀비를 활동에 섞지 않고 익명축 한
   assert.match(html, /익명축 note/);
   // 5대짜리 표본이면 경고가 함께 뜬다.
   assert.match(html, /퍼센트/);
+  // 설치 × 날짜 축도 설치 수 분모 경고를 단다.
+  assert.match(html, /설치 수가 분모입니다/);
+  assert.match(html, /analytics_user_daily 설치 행/);
 });
 
 test("★계정 프로필 뷰는 null 을 0 으로 접지 않는다", () => {
@@ -1174,6 +1180,9 @@ test("★활성화율 0% 옆에는 '같은 기간 실제 완료 설치 수' 가 
       )}
     />
   );
+  assert.match(html, /핵심 활성화 \(첫 티켓 완료\)/);
+  assert.match(html, /0\/5/);
+  assert.ok(html.indexOf("0/5") < html.indexOf("0.0%"));
   assert.match(html, /0\.0%/);
   assert.match(html, /2개 설치/);
   // 0% 를 "아무도 못 썼다" 로 읽지 말라는 문장이 실제로 있어야 한다.
@@ -1207,6 +1216,41 @@ test("★활성화율 0% 라도 창 안 실측이 0 이면 군더더기를 붙�
     />
   );
   assert.doesNotMatch(html, /끝까지 못 썼다/);
+});
+
+test("★활성화 퍼널은 첫 스폰 전 이탈 절벽을 먼저 말한다", () => {
+  const html = renderToStaticMarkup(
+    <P.OnboardingFunnelView
+      funnel={funnelFixture([
+        funnelStep({
+          key: "first_run",
+          event: "app:first_run",
+          label: "앱 첫 실행",
+          clients: 577,
+          coverage: "ok",
+        }),
+        funnelStep({
+          key: "agent_spawned",
+          event: "agent:spawned",
+          label: "첫 스폰",
+          clients: 18,
+          coverage: "ok",
+        }),
+        funnelStep({
+          key: "task_completed",
+          event: "task:completed",
+          label: "첫 태스크 완료",
+          clients: 2,
+          coverage: "ok",
+        }),
+      ])}
+    />
+  );
+  assert.match(html, /가장 큰 이탈은 첫 스폰 전/);
+  assert.match(html, /577/);
+  assert.match(html, /18\/577/);
+  assert.match(html, /첫 태스크 완료/);
+  assert.match(html, /96\.9%/);
 });
 
 // ── ★운영자 제외 표기 ──────────────────────────────────────────────────────
