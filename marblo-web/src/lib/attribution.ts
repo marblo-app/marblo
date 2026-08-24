@@ -11,6 +11,10 @@
 //   - Firebase uid / email / 이름 / 전화 / IP 를 **저장하지도 전송하지도 않는다.**
 //   - referrer 는 **호스트명만** 남긴다(경로·쿼리에 PII 가 실릴 수 있다).
 //   - landing 은 **경로만** 남긴다(쿼리스트링 전체 저장 금지 — utm 만 골라 뽑는다).
+//     ★골라 뽑는 utm 은 5개다: source / medium / campaign / **content** / **term**.
+//     content·term 은 사장님이 요구한 **소재 단위 분석**의 유일한 축이고,
+//     광고를 켠 뒤에 수집을 시작하면 그 전 구간은 복구되지 않는다
+//     (ticket OqSGPuyOTR8t6Bgl0WI5).
 //   - 국가는 여기서 만들지 않는다. 국가의 정답은 GA4 geo 이고(#901 §7-4),
 //     조인 시점에 BigQuery 에서 붙는다. 클라가 보낸 국가는 위조 가능하다.
 
@@ -19,6 +23,17 @@ export interface FirstTouch {
   utmSource: string;
   utmMedium: string;
   utmCampaign: string;
+  /**
+   * `utm_content` — **소재(크리에이티브) 축**. 같은 캠페인 안에서 어떤 배너·
+   * 카피가 설치를 만들었는지는 이 값 없이는 알 수 없다.
+   *
+   * ★유료 광고 전이라 지금은 거의 항상 빈 문자열이다. 그래도 **지금** 파싱해
+   *   두는 이유: 광고를 켠 뒤에 수집을 시작하면 그 전 구간은 영영 복구되지
+   *   않는다(ticket OqSGPuyOTR8t6Bgl0WI5).
+   */
+  utmContent: string;
+  /** `utm_term` — 검색 키워드 축. utmContent 와 같은 이유로 지금부터 받는다. */
+  utmTerm: string;
   /** referrer 의 **호스트명만**. 경로/쿼리는 버린다. */
   referrerHost: string;
   /** 최초 랜딩 **경로만**(쿼리 제외). */
@@ -112,6 +127,8 @@ export function deriveFirstTouch(
     utmSource: sanitizeField(params.get("utm_source")),
     utmMedium: sanitizeField(params.get("utm_medium")),
     utmCampaign: sanitizeField(params.get("utm_campaign")),
+    utmContent: sanitizeField(params.get("utm_content")),
+    utmTerm: sanitizeField(params.get("utm_term")),
     referrerHost: sanitizeField(referrerHost),
     landingPath: sanitizeField(landingPath) || "/",
     capturedAt: now,
@@ -133,10 +150,20 @@ export function isLinkbackPath(pathname: string): boolean {
   return p === "/link" || p.endsWith("/link");
 }
 
-/** utm 또는 referrer 호스트가 있으면 유입 채널이 있는 것이다. */
+/**
+ * utm 또는 referrer 호스트가 있으면 유입 채널이 있는 것이다.
+ *
+ * ★소재 축(`utm_content`/`utm_term`)도 utm 이다 — 여기 빠뜨리면 소재만 붙은
+ *   링크가 "채널 없음(direct)" 으로 읽혀 다음 방문에 덮인다.
+ */
 export function hasAttributionChannel(ft: FirstTouch): boolean {
   return Boolean(
-    ft.utmSource || ft.utmMedium || ft.utmCampaign || ft.referrerHost
+    ft.utmSource ||
+      ft.utmMedium ||
+      ft.utmCampaign ||
+      ft.utmContent ||
+      ft.utmTerm ||
+      ft.referrerHost
   );
 }
 
@@ -196,6 +223,10 @@ export function parseFirstTouch(raw: string): FirstTouch | null {
       utmSource: sanitizeField(o.utmSource),
       utmMedium: sanitizeField(o.utmMedium),
       utmCampaign: sanitizeField(o.utmCampaign),
+      // ★이 필드가 생기기 전에 저장된 first-touch 에는 키가 없다 →
+      //   sanitizeField(undefined) = "". 옛 값을 버리지 않는다.
+      utmContent: sanitizeField(o.utmContent),
+      utmTerm: sanitizeField(o.utmTerm),
       referrerHost: sanitizeField(o.referrerHost),
       landingPath: sanitizeField(o.landingPath) || "/",
       capturedAt,
@@ -271,6 +302,8 @@ export interface LinkInstallPayload {
   utmSource: string;
   utmMedium: string;
   utmCampaign: string;
+  utmContent: string;
+  utmTerm: string;
   referrerHost: string;
   landingPath: string;
   platform: string;
@@ -299,6 +332,8 @@ export function buildLinkInstallPayload(args: {
     utmSource: ft?.utmSource ?? "",
     utmMedium: ft?.utmMedium ?? "",
     utmCampaign: ft?.utmCampaign ?? "",
+    utmContent: ft?.utmContent ?? "",
+    utmTerm: ft?.utmTerm ?? "",
     referrerHost: ft?.referrerHost ?? "",
     landingPath: ft?.landingPath ?? "",
     platform: sanitizeField(args.platform),

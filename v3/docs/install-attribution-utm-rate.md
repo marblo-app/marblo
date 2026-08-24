@@ -4,7 +4,9 @@
 
 ## 광고 URL 규약
 
-광고 랜딩은 `https://marblo.app/?utm_source=…&utm_medium=…`(필요하면 `utm_campaign`) 이어야 한다. GitHub 릴리즈 직링을 광고에 쓰면 어떤 방법으로도 못 잡는다.
+광고 랜딩은 `https://marblo.app/?utm_source=…&utm_medium=…&utm_campaign=…&utm_content=…&utm_term=…` 이어야 한다. GitHub 릴리즈 직링을 광고에 쓰면 어떤 방법으로도 못 잡는다.
+
+★`utm_content`(소재) · `utm_term`(키워드) 는 2026-08-24 부터 포착된다 — 그 전에는 파싱 자체가 없었다(티켓 `OqSGPuyOTR8t6Bgl0WI5`). **소재별로 값을 다르게** 넣어야 소재 단위 분석이 성립한다. 앱 원장 ↔ GA4 조인은 원시 `gaClientId` 가 아니라 **`gaKeyHmac`** 으로 한다 — 근거·검증 쿼리·소급 백필 계획은 [`install-attribution-ga-key-join-2026-08-24.md`](./install-attribution-ga-key-join-2026-08-24.md).
 
 ## 귀속률 쿼리
 

@@ -14690,7 +14690,14 @@ export const linkInstallAttribution = functions.https.onCall(
       );
     }
 
-    const parsed = parseLinkInstallRequest(data, new Date());
+    // ★가명 조인키(gaKeyHmac)는 적재 직전에 붙인다 — 솔트는 런타임 env 에만
+    //   있고 순수 모듈은 env 를 읽지 않는다. 솔트가 없으면 원시값 폴백 없이
+    //   null 이 적힌다(가명화 모듈의 fail-safe 규약).
+    const parsed = parseLinkInstallRequest(
+      data,
+      new Date(),
+      getAnalyticsIdSalt()
+    );
     if (!parsed.ok) {
       // 사유는 코드로만 남긴다 — 입력값 원문을 로그에 남기지 않는다.
       functions.logger.warn("[installAttribution] rejected", {
@@ -14722,11 +14729,16 @@ export const linkInstallAttribution = functions.https.onCall(
 
     try {
       await ensureAttributionTable();
-      // ★적재 직전에만 가명을 붙인다 — 솔트는 런타임 env 에만 있다. 이 컬럼이
-      //   `ga_key` 는 여기서 만들지 않는다 — analytics_identity 백필
-      //   (scripts/backfill-analytics-identity.ts)이 `gaClientId` 에서
-      //   pseudonymizeAnalyticsId("ga", ...) 로 직접 파생한다. 두 벌을 만들면
-      //   익명축 조인이 조용히 갈라진다.
+      // ★행에는 원시 `gaClientId` 와 가명 `gaKeyHmac` 이 **둘 다** 실린다
+      //   (ticket OqSGPuyOTR8t6Bgl0WI5). 원시 컬럼만 있던 동안
+      //   `install_attribution.gaClientId = ga4_first_touch_current.gaKey` 는
+      //   키 공간이 갈려 항상 0행이었다 — 실측 632건 중 0건.
+      //
+      //   ★가명은 `deriveGaKey()`(= `pseudonymizeAnalyticsId("ga", ...)`) **한
+      //   벌**만 쓴다. analytics_identity 백필
+      //   (scripts/backfill-analytics-identity.ts)과 GA4 브리지 동기화
+      //   (syncGa4FirstTouchInternal)가 같은 kind·같은 솔트를 쓰므로 세 자리가
+      //   한 공간에 있다. 여기서 새 kind 를 파면 조인이 다시 조용히 갈라진다.
       await bigquery
         .dataset(BQ_DATASET)
         .table(BQ_ATTRIBUTION_TABLE)

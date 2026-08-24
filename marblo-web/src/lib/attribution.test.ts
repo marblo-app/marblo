@@ -77,9 +77,65 @@ test("deriveFirstTouch: utm + referrer 호스트 + 랜딩 경로만 남긴다", 
   assert.equal(ft.capturedAt, 1000);
 });
 
+test("★deriveFirstTouch: utm_content / utm_term 도 뽑는다 — 소재 축", () => {
+  // 사장님 요구인 "매체·캠페인명·소재 단위 분석" 에서 **소재**가 이 두 값이다.
+  // 광고를 켠 뒤에 파싱을 시작하면 그 전 구간은 영영 복구되지 않는다
+  // (ticket OqSGPuyOTR8t6Bgl0WI5).
+  const ft = deriveFirstTouch(
+    "https://marblo.app/ko/download?utm_source=google&utm_medium=cpc" +
+      "&utm_campaign=launch&utm_content=video_15s_b&utm_term=ai%20coding%20agent",
+    "",
+    1000
+  );
+  assert.equal(ft.utmCampaign, "launch");
+  assert.equal(ft.utmContent, "video_15s_b");
+  assert.equal(ft.utmTerm, "ai coding agent");
+});
+
+test("deriveFirstTouch: 소재 값도 제어문자 제거 + 100자 절단", () => {
+  const long = "x".repeat(200);
+  const ft = deriveFirstTouch(
+    `https://marblo.app/?utm_content=${long}&utm_term=${encodeURIComponent("a\u0000b")}`,
+    "",
+    1
+  );
+  assert.equal(ft.utmContent.length, 100);
+  assert.equal(ft.utmTerm, "ab");
+});
+
+test("★parseFirstTouch: 소재 필드가 없던 옛 저장값도 버리지 않는다", () => {
+  // 이 필드가 생기기 전에 localStorage 에 잠긴 first-touch 가 이미 있다.
+  const ft = parseFirstTouch(
+    JSON.stringify({
+      utmSource: "youtube",
+      utmMedium: "video",
+      utmCampaign: "ep12",
+      referrerHost: "www.youtube.com",
+      landingPath: "/ko",
+      capturedAt: 7,
+    })
+  );
+  assert.ok(ft);
+  assert.equal(ft?.utmSource, "youtube");
+  assert.equal(ft?.utmContent, "");
+  assert.equal(ft?.utmTerm, "");
+});
+
+test("★parseFirstTouch: 저장 → 복원 왕복에서 소재가 살아남는다", () => {
+  const fresh = deriveFirstTouch(
+    "https://marblo.app/?utm_source=google&utm_content=banner_a&utm_term=kw",
+    "",
+    3
+  );
+  const back = parseFirstTouch(JSON.stringify(fresh));
+  assert.deepEqual(back, fresh);
+});
+
 test("deriveFirstTouch: utm/referrer 가 없으면 빈 문자열 (direct 유입)", () => {
   const ft = deriveFirstTouch("https://marblo.app/", "", 5);
   assert.equal(ft.utmSource, "");
+  assert.equal(ft.utmContent, "");
+  assert.equal(ft.utmTerm, "");
   assert.equal(ft.referrerHost, "");
   assert.equal(ft.landingPath, "/");
 });
@@ -99,6 +155,8 @@ test("hasAttributionChannel: utm 또는 referrer 호스트가 있어야 한다",
       utmSource: "",
       utmMedium: "",
       utmCampaign: "",
+      utmContent: "",
+      utmTerm: "",
       referrerHost: "",
       landingPath: "/ko",
       capturedAt: 1,
@@ -110,6 +168,8 @@ test("hasAttributionChannel: utm 또는 referrer 호스트가 있어야 한다",
       utmSource: "google",
       utmMedium: "",
       utmCampaign: "",
+      utmContent: "",
+      utmTerm: "",
       referrerHost: "",
       landingPath: "/ko",
       capturedAt: 1,
@@ -121,12 +181,39 @@ test("hasAttributionChannel: utm 또는 referrer 호스트가 있어야 한다",
       utmSource: "",
       utmMedium: "",
       utmCampaign: "",
+      utmContent: "",
+      utmTerm: "",
       referrerHost: "github.com",
       landingPath: "/en",
       capturedAt: 1,
     }),
     true
   );
+});
+
+test("★hasAttributionChannel: 소재만 붙은 링크도 채널로 센다", () => {
+  // utm_content 만 달린 링크가 direct 로 읽히면 다음 방문의 값에 덮인다 —
+  // 그 순간 소재 축이 사라진다(ticket OqSGPuyOTR8t6Bgl0WI5).
+  for (const [k, v] of [
+    ["utmContent", "banner_a"],
+    ["utmTerm", "ai agent"],
+  ] as const) {
+    assert.equal(
+      hasAttributionChannel({
+        utmSource: "",
+        utmMedium: "",
+        utmCampaign: "",
+        utmContent: "",
+        utmTerm: "",
+        referrerHost: "",
+        landingPath: "/ko",
+        capturedAt: 1,
+        [k]: v,
+      }),
+      true,
+      `${k} 만 있어도 채널이다`
+    );
+  }
 });
 
 test("captureFirstTouchInto: 첫 방문만 저장하고 이후 방문은 덮어쓰지 않는다", () => {
@@ -309,6 +396,8 @@ test("buildLinkInstallPayload: 유효 installId 면 first-touch 를 실어 만�
       utmSource: "youtube",
       utmMedium: "video",
       utmCampaign: "ep12",
+      utmContent: "banner_a",
+      utmTerm: "ai agent",
       referrerHost: "www.youtube.com",
       landingPath: "/ko",
       capturedAt: 1,
@@ -323,6 +412,8 @@ test("buildLinkInstallPayload: 유효 installId 면 first-touch 를 실어 만�
     utmSource: "youtube",
     utmMedium: "video",
     utmCampaign: "ep12",
+    utmContent: "banner_a",
+    utmTerm: "ai agent",
     referrerHost: "www.youtube.com",
     landingPath: "/ko",
     platform: "darwin",
