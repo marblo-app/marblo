@@ -1,0 +1,84 @@
+/* =============================================================================
+ * Chart tokens — the ONE place chart color lives
+ * -----------------------------------------------------------------------------
+ * ★두 바탕에서 같은 차트 컴포넌트가 살아야 한다 (티켓 MSyaEqPIBsg14YkKf6VZ):
+ *   · 어드민 분석 화면      → 어두운 바탕 (zinc-950 #09090b)
+ *   · 조직 대시보드(고객)   → 화이트 + 블루 (#ffffff)
+ *
+ * 그래서 차트는 색을 **하드코딩으로 받지 않는다.** 마크는 전부 `var(--viz-*)`
+ * 를 쓰고, 바탕은 `.viz-root[data-viz-surface]` 가 고른다. 컴포넌트 코드에는
+ * 헥사값이 한 개도 없다 — 그게 이 파일이 존재하는 이유다.
+ *
+ * 값 출처: dataviz 스킬 references/palette.md 의 light/dark 열(같은 8색을 각
+ * 바탕에 맞게 스텝만 다르게 잡은 것이지 다른 팔레트가 아니다).
+ *
+ * ★검증 (validate_palette.js, 우리 실제 바탕으로 재실행):
+ *   dark  / #09090b : 명도대·채도·CVD·정상시야·대비 5개 ALL PASS
+ *   light / #ffffff : 4개 PASS + 대비 WARN — aqua(2.82) / yellow(2.17) /
+ *                     magenta(2.69) 가 3:1 미만이다. 이건 무시 가능한 경고가
+ *                     아니라 **relief 의무**다: 이 세 슬롯을 쓰는 밝은 화면의
+ *                     차트는 직접 값 라벨이나 표 보기를 반드시 함께 낸다.
+ *                     (TimeSeriesChart 는 직접 라벨을 기본으로 낸다.)
+ *
+ * ★슬롯은 순환하지 않는다. 계열이 슬롯보다 많으면 색을 만들어내지 말고
+ *   '그 외'로 접어라. 색은 순위가 아니라 엔티티를 따라간다.
+ * ========================================================================== */
+
+.viz-root {
+  color-scheme: light;
+
+  /* --- surface & ink ---------------------------------------------------- */
+  --viz-surface: #ffffff;
+  --viz-ink: #0b0b0b;
+  --viz-ink-secondary: #52514e;
+  --viz-ink-muted: #6b6a66;
+  --viz-grid: #e7e6e2;
+  --viz-axis: #c9c8c3;
+
+  /* --- categorical slots (fixed order, never cycled) -------------------- */
+  --viz-series-1: #2a78d6; /* blue */
+  --viz-series-2: #eb6834; /* orange */
+  --viz-series-3: #1baf7a; /* aqua */
+  --viz-series-4: #eda100; /* yellow */
+  --viz-series-5: #e87ba4; /* magenta */
+  --viz-series-6: #008300; /* green */
+  --viz-series-7: #4a3aa7; /* violet */
+
+  /* --- marker / annotation ---------------------------------------------- */
+  --viz-marker: #1c5cab;
+}
+
+/* 어두운 바탕. 명시적 opt-in 이다 — 어드민은 OS 설정과 무관하게 항상 어둡고,
+ * 조직 대시보드는 항상 밝다. 그래서 prefers-color-scheme 이 아니라 속성으로
+ * 고른다. 부모 어디에 붙여도 되도록 자기 자신과 하위 둘 다 잡는다. */
+.viz-root[data-viz-surface="dark"],
+[data-viz-surface="dark"] .viz-root {
+  color-scheme: dark;
+
+  --viz-surface: #09090b;
+  --viz-ink: #ffffff;
+  --viz-ink-secondary: #c3c2b7;
+  --viz-ink-muted: #898781;
+  --viz-grid: #2c2c2a;
+  --viz-axis: #3f3f46;
+
+  --viz-series-1: #3987e5;
+  --viz-series-2: #d95926;
+  --viz-series-3: #199e70;
+  --viz-series-4: #c98500;
+  --viz-series-5: #d55181;
+  --viz-series-6: #008300;
+  --viz-series-7: #9085e9;
+
+  --viz-marker: #7dd3fc;
+}
+
+/* 상태색은 **테마를 타지 않는다.** 두 바탕 모두에서 같은 네 값이고, 계열
+ * 슬롯으로 재사용하지 않는다. 색만으로 뜻을 지지 않도록 아이콘·라벨과 함께
+ * 쓴다 — 밝은 바탕에서 warning/serious 는 3:1 미만이라 특히 그렇다. */
+.viz-root {
+  --viz-status-good: #0ca30c;
+  --viz-status-warn: #fab219;
+  --viz-status-serious: #ec835a;
+  --viz-status-critical: #d03b3b;
+}

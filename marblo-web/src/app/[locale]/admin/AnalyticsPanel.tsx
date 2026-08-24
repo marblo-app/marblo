@@ -40,6 +40,7 @@ import {
   describeGa4BridgeFreshness,
   type Ga4BridgeFreshness,
 } from "./ga4BridgeFreshness";
+import { TimeSeriesChart } from "@/components/charts";
 
 // ── 콜러블 응답 타입 (docs/analytics-admin-callables-api.md 미러) ───────────────
 type KeyCount = { key: string; count: number };
@@ -6423,14 +6424,30 @@ export default function AnalyticsPanel({
                     title="DAU 추이"
                     note="일별 고유 활성 clientId (옵트인 표본)"
                   >
-                    <LineChart
+                    {/* ★대표 차트 — 손 SVG LineChart 에서 visx 기반 공용
+                        TimeSeriesChart 로 옮긴 첫 자리다(티켓
+                        MSyaEqPIBsg14YkKf6VZ). 어드민 차트를 한 번에 갈아엎지
+                        않는다 — 이 앱은 매일 배포되므로 하나를 먼저 옮겨
+                        **같은 숫자가 나오는지** 대조로 증명하고(테스트
+                        TimeSeriesChart.parity.test.tsx) 나머지는 별도 PR 로
+                        미룬다. 아래 나머지 LineChart 호출부는 그대로 손 SVG 다.
+
+                        surface="dark" 하나로 이 화면의 어두운 바탕을 고른다 —
+                        조직 대시보드는 같은 컴포넌트를 surface="light" 로 쓴다.
+                        어두운 바탕의 --viz-series-1 은 이 화면이 쓰던 SERIES
+                        (#3987e5) 와 같은 값이라 색이 바뀌지 않는다. */}
+                    <TimeSeriesChart
                       data={u.activeByDay.map((d) => ({
                         date: d.date,
                         value: d.dau,
                       }))}
+                      title="DAU 추이"
+                      description="일별 고유 활성 clientId (옵트인 표본)"
+                      surface="dark"
+                      format={fmtInt}
                       emptyLabel="활성 데이터가 없습니다 (텔레메트리 공백)."
                       marker={ID_SCHEME_MARKER}
-                      onDrill={(date) =>
+                      onPointClick={(date) =>
                         openDrill({ scope: "usage:day", date, days })
                       }
                     />

@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Chart tokens (see src/components/charts/tokens.css). Imported here so both
+ * the dark admin console and the light org dashboard resolve `--viz-*` from a
+ * single definition — charts never hardcode a hex. */
+@import "../components/charts/tokens.css";
+
 /* =============================================================================
  * Marblo design tokens (Tailwind v4 @theme)
  * -----------------------------------------------------------------------------
