@@ -15,7 +15,7 @@ function git(args: string[], cwd: string): string {
   return (r.stdout || "").trim();
 }
 
-/** Fresh, isolated git repo on branch `main` with one commit. No remote (offline). */
+/** Fresh, isolated git repo on branch `main` with no remote. */
 function makeRepo(): {
   repoRoot: string;
   wtRoot: string;
@@ -39,6 +39,13 @@ function makeRepo(): {
     wtRoot,
     mgr: new WorktreeManager({ worktreesRoot: wtRoot }),
   };
+}
+
+function addBareOrigin(repoRoot: string): string {
+  const originPath = path.join(path.dirname(repoRoot), "origin.git");
+  spawnSync("git", ["init", "--bare", originPath], { encoding: "utf8" });
+  git(["remote", "add", "origin", originPath], repoRoot);
+  return originPath;
 }
 
 describe("WorktreeManager.resolveBaseRef", () => {
@@ -91,6 +98,108 @@ describe("WorktreeManager.create", () => {
         slug: "x",
       }),
     ).rejects.toThrow(/invalid taskId/);
+  });
+
+  it("creates a worktree for a repository with no remotes", async () => {
+    const info = await mgr.create({
+      repoRoot,
+      projectId: "p",
+      taskId: "noremotes001",
+      slug: "local",
+    });
+    expect(fs.existsSync(info.path)).toBe(true);
+    expect(
+      spawnSync("git", ["config", "--get", `branch.${info.branch}.remote`], {
+        cwd: repoRoot,
+      }).status,
+    ).not.toBe(0);
+  });
+
+  it("refuses when origin is unavailable instead of choosing another remote", async () => {
+    git(
+      [
+        "remote",
+        "add",
+        "marblo-app",
+        path.join(path.dirname(repoRoot), "mirror.git"),
+      ],
+      repoRoot,
+    );
+
+    await expect(
+      mgr.create({
+        repoRoot,
+        projectId: "p",
+        taskId: "noorigin0001",
+        slug: "x",
+      }),
+    ).rejects.toThrow(/requires an explicit origin remote/);
+  });
+
+  it("pins a new branch to origin when a public-mirror remote also exists", async () => {
+    const originPath = addBareOrigin(repoRoot);
+    const mirrorPath = path.join(path.dirname(repoRoot), "marblo-app.git");
+    spawnSync("git", ["init", "--bare", mirrorPath], { encoding: "utf8" });
+    git(["remote", "add", "marblo-app", mirrorPath], repoRoot);
+
+    const info = await mgr.create({
+      repoRoot,
+      projectId: "p",
+      taskId: "pinnedorigin01",
+      slug: "pinned",
+    });
+
+    expect(
+      git(["config", "--get", `branch.${info.branch}.remote`], repoRoot),
+    ).toBe("origin");
+    expect(
+      git(["config", "--get", `branch.${info.branch}.merge`], repoRoot),
+    ).toBe(`refs/heads/${info.branch}`);
+    expect(
+      spawnSync("git", ["config", "--get", "remote.pushDefault"], {
+        cwd: repoRoot,
+      }).status,
+    ).not.toBe(0);
+    expect(
+      spawnSync("git", ["config", "--get", "push.default"], { cwd: repoRoot })
+        .status,
+    ).not.toBe(0);
+
+    fs.writeFileSync(path.join(info.path, "pinned.txt"), "origin only\n");
+    git(["add", "."], info.path);
+    git(["commit", "-m", "pin origin"], info.path);
+    git(["-c", "push.default=simple", "push"], info.path);
+
+    const ref = `refs/heads/${info.branch}`;
+    expect(
+      spawnSync("git", ["show-ref", "--verify", ref], {
+        cwd: originPath,
+      }).status,
+    ).toBe(0);
+    expect(
+      spawnSync("git", ["show-ref", "--verify", ref], { cwd: mirrorPath })
+        .status,
+    ).not.toBe(0);
+  });
+
+  it("leaves a branch without tracking noisy on a plain push", () => {
+    git(["checkout", "-b", "untracked"], repoRoot);
+    fs.writeFileSync(path.join(repoRoot, "untracked.txt"), "change\n");
+    git(["add", "."], repoRoot);
+    git(["commit", "-m", "untracked"], repoRoot);
+
+    // git localizes its errors: on a Korean-locale machine this stderr comes
+    // back as "푸시 대상을 설정하지 않았습니다". Force the C locale so the
+    // assertion tests git's behaviour rather than the developer's LANG.
+    const result = spawnSync("git", ["-c", "push.default=simple", "push"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: { ...process.env, LC_ALL: "C", LANG: "C" },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(
+      /no configured push destination|no upstream branch/i,
+    );
   });
 
   it("throws when the branch already exists", async () => {
@@ -422,8 +531,7 @@ describe("WorktreeManager.create — origin fetch (FU3)", () => {
 
   it("runs `git fetch origin` before adding the worktree (fresh base)", async () => {
     const { repoRoot, mgr } = makeRepo();
-    // Silence the expected offline-fetch warning (makeRepo has no remote).
-    vi.spyOn(console, "warn").mockImplementation(() => {});
+    addBareOrigin(repoRoot);
     // Spy without replacing — observe the git calls create() makes.
     const spy = vi.spyOn(mgr as unknown as { runGit: () => unknown }, "runGit");
 
@@ -444,9 +552,19 @@ describe("WorktreeManager.create — origin fetch (FU3)", () => {
   });
 
   it("falls back to the local base and still creates when fetch fails (offline)", async () => {
-    // makeRepo() has no `origin` remote → `git fetch origin` exits non-zero.
+    // Keep origin configured (the creation invariant), but make it unreachable.
     // create() must warn and fall back to the local ref, never throw.
     const { repoRoot, mgr } = makeRepo();
+    addBareOrigin(repoRoot);
+    git(
+      [
+        "remote",
+        "set-url",
+        "origin",
+        path.join(path.dirname(repoRoot), "missing-origin.git"),
+      ],
+      repoRoot,
+    );
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const info = await mgr.create({
