@@ -33,6 +33,7 @@ beforeAll(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-skill-registry-"));
   // claude 사용자 스킬
   const claudeSkills = path.join(home, ".claude", "skills");
+  writeSkill(claudeSkills, "browse");
   writeSkill(claudeSkills, "seo-geo-full");
   writeSkill(claudeSkills, "ga4-full-tagging");
   // 매니페스트 없는 디렉토리는 스킬이 아니다
@@ -84,6 +85,7 @@ describe("vendorForModel", () => {
 describe("listInstalledSkills", () => {
   it("claude: 사용자 스킬 + 플러그인 스킬(plugin:skill)을 발견하고, SKILL.md 없는 디렉토리는 제외", () => {
     const names = listInstalledSkills("claude", opts()).map((s) => s.name);
+    expect(names).toContain("browse");
     expect(names).toContain("seo-geo-full");
     expect(names).toContain("ga4-full-tagging");
     expect(names).toContain("superpowers:brainstorming");
@@ -247,6 +249,32 @@ describe("resolveSkillRouting — dispatch 게이트", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.allowedVendors).toEqual(["codex"]);
+  });
+
+  it("/browse 는 Claude 스킬로만 설치된 경우 gpt/codex/grok 라우팅에서 실패한다", () => {
+    const claude = resolveSkillRouting({
+      skills: ["/browse"],
+      explicitModel: "claude",
+      homeDir: home,
+      env: {},
+    });
+    expect(claude.ok).toBe(true);
+    if (claude.ok) expect(claude.allowedVendors).toEqual(["claude"]);
+
+    for (const [explicitModel, expectedVendor] of [
+      ["gpt", "codex"],
+      ["codex", "codex"],
+      ["grok", "grok"],
+    ] as const) {
+      const r = resolveSkillRouting({
+        skills: ["/browse"],
+        explicitModel,
+        homeDir: home,
+        env: {},
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toContain(expectedVendor);
+    }
   });
 
   it("네이티브 스킬이 없는 벤더(antigravity)로 지정하면 조용무효 대신 차단", () => {
