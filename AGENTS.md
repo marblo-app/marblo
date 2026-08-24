@@ -35,3 +35,13 @@
 2. 병렬로 작업 가능한 것은 병렬로 진행
 3. 각 단계마다 `add_activity`로 진행 상황을 티켓에 기록
 4. 작업 완료 시 `update_task_status`로 상태 변경
+
+## 지식위키 (공유 · `docs/wiki` 하나)
+
+위키는 이 저장소의 `docs/wiki` 뿐이다. 형제 프로젝트에 위키를 만들지 말 것.
+홈: `docs/wiki/README.md`. 노트 작성 `/wiki-note`, 커밋 전 `/wiki-ingest`.
+조회는 `root_path` 를 반드시 `docs/wiki` 로 넘긴다 — 리포 루트로 ingest 하면 원본 문서가 위키로 빨려들어간다.
+
+```
+wiki_query({ root_path: "<MARBLO_CLONE>/docs/wiki", query: "..." })
+```
