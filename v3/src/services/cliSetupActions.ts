@@ -115,6 +115,32 @@ export async function launchLogin(
 }
 
 /**
+ * git step: never mutate a user's folder silently. The UI shows the exact
+ * command first; this only runs after the user presses the explicit confirm
+ * button, and the command itself runs in a visible terminal session.
+ */
+export async function launchGitInit(
+  cwd: string,
+  onLaunched?: (sessionId: string) => void,
+): Promise<ActionResult> {
+  try {
+    const term = useTerminalStore.getState();
+    const id = await term.createSession("git init", "git", ["init"], cwd);
+    term.openTerminalForSession(id, "git init");
+    onLaunched?.(id);
+    return {
+      ok: true,
+      text: t("onboarding.cliGate.git.started"),
+    };
+  } catch {
+    return {
+      ok: false,
+      text: t("onboarding.cliGate.git.startFailed"),
+    };
+  }
+}
+
+/**
  * 고른 CLI **하나**의 로그인 터미널을 띄운다. 아직 안 깔렸으면 먼저 깐다.
  *
  * 구독 선택(티켓 LLHMclpKaIAJbsiHzGoG)이 생기면서 필요해진 자리다: 사용자가 고를

@@ -61,7 +61,7 @@ describe("splitWorkspaceStore", () => {
     it("opens the board once onboarding is finished", async () => {
       const { store } = await loadStore({
         "marblo.onboarding.progress": JSON.stringify({
-          done: ["install", "auth", "prd", "firstTicket"],
+          done: ["install", "auth", "prd", "git", "firstTicket"],
         }),
       });
       expect(store.getState().activeTab).toBe("board");
@@ -88,7 +88,7 @@ describe("splitWorkspaceStore", () => {
       const { store } = await loadStore({
         "marblo.workspaceSplit.activeTab": "startHere",
         "marblo.onboarding.progress": JSON.stringify({
-          done: ["install", "auth", "prd", "firstTicket"],
+          done: ["install", "auth", "prd", "git", "firstTicket"],
         }),
       });
       expect(store.getState().activeTab).toBe("board");
@@ -125,7 +125,7 @@ describe("splitWorkspaceStore", () => {
       // Onboarding already finished, so the garbage tab falls back to board
       // rather than the first-run landing.
       "marblo.onboarding.progress": JSON.stringify({
-        done: ["install", "auth", "prd", "firstTicket"],
+        done: ["install", "auth", "prd", "git", "firstTicket"],
       }),
     });
     const s = store.getState();

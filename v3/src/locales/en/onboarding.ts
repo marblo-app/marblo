@@ -338,6 +338,8 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
     "This connects the AI account you already pay for. Without it, spawns fail silently.",
   "onboarding.startHere.why.prd":
     "Project connection is for work you want to delegate. Plain local-folder browsing stays in the file tree.",
+  "onboarding.startHere.why.git":
+    "Worktrees need a git repository. Nothing changes until you confirm.",
   "onboarding.startHere.why.firstTicket":
     "Creating one ticket is what makes it obvious what Marblo actually does for you.",
   // One line per step: what to do when you're stuck
@@ -347,6 +349,8 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
     "You only need ONE of Claude Code or Codex. If the browser flow is blocked, copy the command and run it in a terminal.",
   "onboarding.startHere.alt.prd":
     "An empty folder is fine. For a non-worktree folder you only want to inspect, use Open folder options in the file tree and choose Browse.",
+  "onboarding.startHere.alt.git":
+    "If it fails, check the terminal output, keep the folder connected, and run git init again.",
   "onboarding.startHere.alt.firstTicket":
     "If sending fails, check that the orchestrator terminal is running and try again.",
   // Inline banner (the modal's replacement) — onboarding still has work left.
@@ -356,6 +360,7 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.startHere.banner.title.install": "Install the orchestrator CLI",
   "onboarding.startHere.banner.title.auth": "CLI sign-in required",
   "onboarding.startHere.banner.title.prd": "Connect a folder to work in",
+  "onboarding.startHere.banner.title.git": "Prepare this folder for git",
   "onboarding.startHere.banner.title.firstTicket":
     "One first ticket and you're done",
   "onboarding.startHere.banner.cta": "Open Start here",
@@ -365,7 +370,7 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.startHere.worktreeRecommend.title":
     "Connect a git repo for automatic independent worktrees",
   "onboarding.startHere.worktreeRecommend.body":
-    "When you connect a git repo on the Harness tab, agents automatically work in an independent worktree per ticket (parallel, without collisions).",
+    "For development work, connect a git repo on the Harness tab. For general work, Marblo splits work by ticket into separate worktrees.",
 
   // — Start Here tab: connecting other vendors (XHXSIdPN) —
   // No vendor name or model id lives here: the list is derived from the model
@@ -546,6 +551,7 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.cliGate.step.install": "Install",
   "onboarding.cliGate.step.auth": "Sign in",
   "onboarding.cliGate.step.prd": "PRD",
+  "onboarding.cliGate.step.git": "Git",
   "onboarding.cliGate.step.firstTicket": "First ticket",
   // ① Install
   "onboarding.cliGate.install.title": "① Install the CLI",
@@ -566,8 +572,27 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.cliGate.prd.title": "③ Sample PRD",
   "onboarding.cliGate.prd.body":
     "Connect the folder you want the orchestrator to work on as a project, then start from a sample PRD.",
-  // ④ First ticket (the aha moment)
-  "onboarding.cliGate.firstTicket.title": "④ Create your first ticket",
+  // ④ Git
+  "onboarding.cliGate.git.title": "④ Prepare the git repository",
+  "onboarding.cliGate.git.body":
+    "Check that the connected folder is a git repository so Marblo can create per-ticket worktrees.",
+  "onboarding.cliGate.git.confirm":
+    "We'll open a terminal and run git init. Please confirm.",
+  "onboarding.cliGate.git.run": "Run git init in terminal",
+  "onboarding.cliGate.git.started":
+    "Started git init in a terminal. Re-check when it finishes.",
+  "onboarding.cliGate.git.startFailed":
+    "Could not open a terminal. Run git init in your terminal, then re-check.",
+  "onboarding.cliGate.git.alreadyInitialized":
+    "This is already a git repository. git init will not run again.",
+  "onboarding.cliGate.git.terminalOpened":
+    "Opened the git init terminal. If it fails, check the terminal output and run it again.",
+  "onboarding.cliGate.git.devGuide":
+    "For development work, connect a git repo on the Harness tab.",
+  "onboarding.cliGate.git.generalGuide":
+    "For general work, Marblo splits work by ticket into separate worktrees.",
+  // ⑤ First ticket (the aha moment)
+  "onboarding.cliGate.firstTicket.title": "⑤ Create your first ticket",
   "onboarding.cliGate.firstTicket.body":
     "Ask the orchestrator to create your first ticket from this PRD and propose spawning an agent. The button hands it your first prompt — then watch the orchestrator get to work.",
   "onboarding.cliGate.firstTicket.create":

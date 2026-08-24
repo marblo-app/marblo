@@ -170,6 +170,7 @@ export function effectiveDone(
   if (installSatisfied(live) || authSatisfied(live)) done.add("install");
   if (authSatisfied(live)) done.add("auth");
   if (live.hasProject) done.add("prd");
+  if (live.hasProject && live.gitInitialized !== false) done.add("git");
   return done;
 }
 

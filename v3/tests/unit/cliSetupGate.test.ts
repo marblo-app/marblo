@@ -172,7 +172,13 @@ describe("shouldShowPostAuthStep (ticket bRABKQX7)", () => {
 
 describe("linear wizard step transitions (ticket ir94m9C6)", () => {
   it("WIZARD_STEPS is the ordered activation funnel", () => {
-    expect(WIZARD_STEPS).toEqual(["install", "auth", "prd", "firstTicket"]);
+    expect(WIZARD_STEPS).toEqual([
+      "install",
+      "auth",
+      "prd",
+      "git",
+      "firstTicket",
+    ]);
   });
 
   describe("initialWizardStep — opens at the earliest incomplete step", () => {
@@ -214,6 +220,17 @@ describe("linear wizard step transitions (ticket ir94m9C6)", () => {
           hasProject: true,
         }),
       ).toBe("prd");
+    });
+
+    it("authed with a non-git project → git", () => {
+      expect(
+        initialWizardStep({
+          requiredInstalled: true,
+          requiredReady: true,
+          hasProject: true,
+          gitInitialized: false,
+        }),
+      ).toBe("git");
     });
   });
 
@@ -257,6 +274,32 @@ describe("linear wizard step transitions (ticket ir94m9C6)", () => {
       ).toBe(true);
     });
 
+    it("git advances only once the connected folder is a git repository", () => {
+      expect(
+        canAdvanceWizard("git", {
+          ...base,
+          requiredReady: true,
+          hasProject: true,
+          gitInitialized: false,
+        }),
+      ).toBe(false);
+      expect(
+        canAdvanceWizard("git", {
+          ...base,
+          requiredReady: true,
+          hasProject: true,
+          gitInitialized: true,
+        }),
+      ).toBe(true);
+      expect(
+        canAdvanceWizard("git", {
+          ...base,
+          requiredReady: true,
+          hasProject: true,
+        }),
+      ).toBe(true);
+    });
+
     it("firstTicket is terminal — never advances", () => {
       expect(
         canAdvanceWizard("firstTicket", {
@@ -269,10 +312,11 @@ describe("linear wizard step transitions (ticket ir94m9C6)", () => {
   });
 
   describe("nextWizardStep — linear order, terminal at firstTicket", () => {
-    it("walks install → auth → prd → firstTicket → null", () => {
+    it("walks install → auth → prd → git → firstTicket → null", () => {
       expect(nextWizardStep("install")).toBe("auth");
       expect(nextWizardStep("auth")).toBe("prd");
-      expect(nextWizardStep("prd")).toBe("firstTicket");
+      expect(nextWizardStep("prd")).toBe("git");
+      expect(nextWizardStep("git")).toBe("firstTicket");
       expect(nextWizardStep("firstTicket")).toBeNull();
     });
   });

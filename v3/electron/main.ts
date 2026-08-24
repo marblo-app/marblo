@@ -5832,6 +5832,28 @@ ipcMain.handle("fs:gitRemoteUrl", async (_event, rootPath: string) => {
   return fsManager.getGitRemoteUrl(rootPath);
 });
 
+ipcMain.handle("fs:isGitRepository", async (_event, rootPath: string) => {
+  if (typeof rootPath !== "string" || !rootPath) return false;
+  return new Promise<boolean>((resolve) => {
+    try {
+      const proc = spawn("git", ["rev-parse", "--is-inside-work-tree"], {
+        cwd: rootPath,
+        env: gitSpawnEnv(),
+      });
+      let out = "";
+      proc.stdout.on("data", (data) => {
+        out += data.toString();
+      });
+      proc.on("close", (code) => {
+        resolve(code === 0 && out.trim() === "true");
+      });
+      proc.on("error", () => resolve(false));
+    } catch {
+      resolve(false);
+    }
+  });
+});
+
 /**
  * 연결된 own 폴더가 실제 코드 탭을 쓸 수 있는 상태인지 검사 (티켓
  * r8vg9pMWCRtdnUzR3KyX, own-but-empty 보강).

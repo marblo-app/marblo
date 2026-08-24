@@ -138,6 +138,7 @@ vi.mock("../../src/lib/onboardingProgress", () => ({
     { id: "install", status: "current", skipped: false },
     { id: "auth", status: "remaining", skipped: false },
     { id: "prd", status: "remaining", skipped: false },
+    { id: "git", status: "remaining", skipped: false },
     { id: "firstTicket", status: "remaining", skipped: false },
   ],
 }));

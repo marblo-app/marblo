@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
 import { useProjectStore } from "../../stores/projectStore";
@@ -21,6 +21,7 @@ import {
 import {
   connectFolder,
   createFirstTicket,
+  launchGitInit,
   seedSamplePrd,
   type ActionResult,
   type FirstTicketResult,
@@ -63,6 +64,10 @@ export function CliSetupGate() {
   const [step, setStep] = useState<WizardStep>("install");
   const [seeding, setSeeding] = useState(false); // sample-PRD write in flight
   const [seedMsg, setSeedMsg] = useState<ActionResult | null>(null);
+  const [gitChecking, setGitChecking] = useState(false);
+  const [gitInitialized, setGitInitialized] = useState<boolean | undefined>();
+  const [gitMsg, setGitMsg] = useState<ActionResult | null>(null);
+  const [gitSessionId, setGitSessionId] = useState<string | null>(null);
   const [sendingTicket, setSendingTicket] = useState(false);
   const [ticketMsg, setTicketMsg] = useState<FirstTicketResult | null>(null);
 
@@ -72,6 +77,7 @@ export function CliSetupGate() {
   const refreshVersions = useCliSetupStore((s) => s.refreshVersions);
   const requiredInstalled = useCliSetupStore((s) => s.requiredInstalled());
   const hasProject = useProjectStore((s) => !!s.currentProject?.folderPath);
+  const projectPath = useProjectStore((s) => s.currentProject?.folderPath);
 
   // Open at `s` and log its entry. Centralizes the transition so every path
   // lands on a consistent, instrumented step.
@@ -139,6 +145,37 @@ export function CliSetupGate() {
     }
   }, []);
 
+  const probeGitInitialized = useCallback(async () => {
+    if (!projectPath) {
+      setGitInitialized(undefined);
+      setGitMsg(null);
+      setGitSessionId(null);
+      return;
+    }
+    setGitChecking(true);
+    try {
+      setGitInitialized(
+        await window.electronAPI.fs.isGitRepository(projectPath),
+      );
+    } catch {
+      setGitInitialized(false);
+    } finally {
+      setGitChecking(false);
+    }
+  }, [projectPath]);
+
+  useEffect(() => {
+    void probeGitInitialized();
+  }, [probeGitInitialized]);
+
+  const handleGitInit = useCallback(async () => {
+    if (!projectPath) return;
+    setGitMsg(null);
+    const res = await launchGitInit(projectPath, setGitSessionId);
+    setGitMsg(res);
+    window.setTimeout(() => void probeGitInitialized(), 1200);
+  }, [probeGitInitialized, projectPath]);
+
   const handleFirstTicket = useCallback(async () => {
     setSendingTicket(true);
     setTicketMsg(null);
@@ -169,10 +206,18 @@ export function CliSetupGate() {
       requiredInstalled,
       requiredReady: ready,
       hasProject,
+      gitInitialized,
       byomInstalled: byom.installed,
       byomReady: byom.ready,
     }),
-    [requiredInstalled, ready, hasProject, byom.installed, byom.ready],
+    [
+      requiredInstalled,
+      ready,
+      hasProject,
+      gitInitialized,
+      byom.installed,
+      byom.ready,
+    ],
   );
 
   if (!visible) return null;
@@ -309,6 +354,66 @@ export function CliSetupGate() {
                   </p>
                 )}
               </>
+            )}
+          </div>
+        )}
+
+        {/* ── Step ④: make the connected folder worktree-ready ─────────── */}
+        {step === "git" && (
+          <div className="max-h-[60vh] space-y-3 overflow-auto px-6 py-5">
+            <p className="text-xs text-[#a6adc8]">
+              {t("onboarding.cliGate.git.body")}
+            </p>
+            {gitInitialized ? (
+              <div className="flex items-center gap-2 rounded-md border border-[#a6e3a1]/30 bg-[#a6e3a1]/10 px-3 py-2.5 text-sm text-[#a6e3a1]">
+                <span>✓ {t("onboarding.cliGate.git.alreadyInitialized")}</span>
+              </div>
+            ) : (
+              <>
+                <div className="rounded-md border border-[#45475a] bg-[#11111b] px-3 py-2.5">
+                  <p className="text-xs text-[#a6adc8]">
+                    {t("onboarding.cliGate.git.confirm")}
+                  </p>
+                  <code className="mt-2 block rounded bg-black/35 px-2 py-1.5 font-mono text-xs text-[#a6e3a1]">
+                    git init
+                  </code>
+                </div>
+                <button
+                  onClick={() => void handleGitInit()}
+                  disabled={!hasProject || gitChecking}
+                  className="w-full rounded-md bg-[#89b4fa] px-3 py-2 text-sm font-semibold text-[#1e1e2e] transition-colors hover:bg-[#74c7ec] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t("onboarding.cliGate.git.run")}
+                </button>
+              </>
+            )}
+            <div className="rounded-md border border-[#45475a] bg-[#11111b]/35 px-3 py-2 text-xs leading-5 text-[#a6adc8]">
+              <p>{t("onboarding.cliGate.git.devGuide")}</p>
+              <p>{t("onboarding.cliGate.git.generalGuide")}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void probeGitInitialized()}
+              disabled={!hasProject || gitChecking}
+              className="rounded-md border border-[#45475a] px-3 py-1.5 text-xs text-[#cdd6f4] transition-colors hover:bg-[#313244] disabled:opacity-60"
+            >
+              {gitChecking
+                ? t("onboarding.cliGate.checking")
+                : t("onboarding.cliGate.recheck")}
+            </button>
+            {gitSessionId && (
+              <p className="text-xs text-[#89b4fa]">
+                {t("onboarding.cliGate.git.terminalOpened")}
+              </p>
+            )}
+            {gitMsg && (
+              <p
+                className={`text-xs ${
+                  gitMsg.ok ? "text-[#a6e3a1]" : "text-[#f38ba8]"
+                }`}
+              >
+                {gitMsg.text}
+              </p>
             )}
           </div>
         )}

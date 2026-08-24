@@ -32,13 +32,15 @@ export const AUTO_INSTALL_KEY = "marblo.cliAutoInstallDone";
  * Linear onboarding wizard steps (ticket ir94m9C6) — the activation funnel that
  * carries a fresh signup straight to the "first ticket" finish line:
  *
- *   install → auth → prd → firstTicket
+ *   install → auth → prd → git → firstTicket
  *
  * ① install     — install the orchestrator CLI (auto `npm i -g`, official
  *                  fallback on failure).
  * ② auth        — sign in to Claude OR Codex (at least one; `requiredReady`).
  * ③ prd         — connect a folder + seed a starter PRD.md.
- * ④ firstTicket — hand the PRD to the orchestrator as the very first prompt,
+ * ④ git         — make sure the connected folder can create worktrees. This is
+ *                  a user-confirmed `git init`, never a silent disk change.
+ * ⑤ firstTicket — hand the PRD to the orchestrator as the very first prompt,
  *                  the aha-moment (routeInstructionToOrchestrator).
  *
  * The old notice/connect/project steps collapse into this: the cost notice is
@@ -47,13 +49,14 @@ export const AUTO_INSTALL_KEY = "marblo.cliAutoInstallDone";
  * project splits into prd + firstTicket so onboarding no longer ends at "folder
  * connected" but at "first ticket handed off".
  */
-export type WizardStep = "install" | "auth" | "prd" | "firstTicket";
+export type WizardStep = "install" | "auth" | "prd" | "git" | "firstTicket";
 
 /** Ordered steps, source of truth for the progress indicator + transitions. */
 export const WIZARD_STEPS: WizardStep[] = [
   "install",
   "auth",
   "prd",
+  "git",
   "firstTicket",
 ];
 
@@ -64,6 +67,11 @@ export interface WizardGateState {
   requiredReady: boolean;
   /** A project folder is connected (orchestrator can be launched/messaged). */
   hasProject: boolean;
+  /**
+   * Whether the connected project folder is already inside a git work tree.
+   * Unknown preserves legacy callers: only a live false should stop the flow.
+   */
+  gitInitialized?: boolean;
   /**
    * ★BYOM 축(F4) — 벤더 키/CLI 만으로 ①②단계를 만족했는가.
    *
@@ -101,6 +109,7 @@ export function authSatisfied(state: WizardGateState): boolean {
 export function initialWizardStep(state: WizardGateState): WizardStep {
   if (!installSatisfied(state)) return "install";
   if (!authSatisfied(state)) return "auth";
+  if (state.hasProject && state.gitInitialized === false) return "git";
   return "prd";
 }
 
@@ -110,6 +119,7 @@ export function initialWizardStep(state: WizardGateState): WizardStep {
  *   install → requires an installed orchestrator candidate (OR a BYOM path)
  *   auth    → requires an authenticated one (Claude OR Codex OR a BYOM path)
  *   prd     → requires a connected folder (the PRD itself is optional)
+ *   git     → requires that folder to be a git repository (unknown = legacy pass)
  *   firstTicket → terminal; nothing to advance to
  */
 export function canAdvanceWizard(
@@ -123,6 +133,8 @@ export function canAdvanceWizard(
       return authSatisfied(state);
     case "prd":
       return state.hasProject;
+    case "git":
+      return state.gitInitialized !== false;
     case "firstTicket":
       return false;
   }

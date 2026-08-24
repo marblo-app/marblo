@@ -887,9 +887,9 @@ export const telemetry = {
   },
 
   /** 연결 마법사(CliSetupGate)의 한 단계 이벤트.
-   *  ★활성화 퍼널(ticket ir94m9C6): 선형 4스텝으로 확장 —
+   *  ★활성화 퍼널(ticket ir94m9C6): 선형 5스텝으로 확장 —
    *  step = install(CLI 설치) | auth(인증, claude/codex 하나) | prd(폴더연결·샘플 PRD) |
-   *         firstTicket(첫 티켓 프롬프트 전송, 아하 모먼트).
+   *         git(워크트리 준비) | firstTicket(첫 티켓 프롬프트 전송, 아하 모먼트).
    *  하위호환: 구 3스텝(notice/connect/project) 값도 그대로 받는다 —
    *  BQ 퍼널 스키마(event/metadata.step)를 깨지 않고 install/auth/prd/firstTicket 로
    *  세분화만 한 것이라 과거 이벤트와 한 축에서 조인된다.
@@ -902,6 +902,7 @@ export const telemetry = {
       | "install"
       | "auth"
       | "prd"
+      | "git"
       | "firstTicket"
       // 하위호환용 구 3스텝 값 (재배치 전 이벤트와 스키마 호환)
       | "notice"

@@ -966,6 +966,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("fs:gitDiff", filePath, baseSha),
     gitRemoteUrl: (rootPath: string) =>
       ipcRenderer.invoke("fs:gitRemoteUrl", rootPath),
+    isGitRepository: (rootPath: string) =>
+      ipcRenderer.invoke("fs:isGitRepository", rootPath),
     // 연결된 own 폴더가 실제 코드 탭을 쓸 수 있는 상태인지 한 번에 검사
     // (티켓 r8vg9pMWCRtdnUzR3KyX, own-but-empty 보강). 빈 폴더·origin
     // 불일치를 가른다.

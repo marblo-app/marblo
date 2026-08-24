@@ -34,6 +34,10 @@ const PROJECT: WizardGateState = {
   requiredReady: true,
   hasProject: true,
 };
+const NON_GIT_PROJECT: WizardGateState = {
+  ...PROJECT,
+  gitInitialized: false,
+};
 
 function progress(p: Partial<OnboardingProgress> = {}): OnboardingProgress {
   return { ...EMPTY_PROGRESS, ...p };
@@ -136,6 +140,14 @@ describe("effectiveDone — persisted ∪ live probe truth", () => {
     expect(effectiveDone(EMPTY_PROGRESS, live).has("install")).toBe(true);
   });
 
+  it("credits git from a connected project unless the live probe says it is not a repo", () => {
+    expect(effectiveDone(EMPTY_PROGRESS, PROJECT).has("git")).toBe(true);
+    expect(effectiveDone(EMPTY_PROGRESS, NON_GIT_PROJECT).has("git")).toBe(
+      false,
+    );
+    expect(effectiveDone(EMPTY_PROGRESS, NOTHING).has("git")).toBe(false);
+  });
+
   it("takes firstTicket only from the persisted record (no live signal)", () => {
     expect(effectiveDone(EMPTY_PROGRESS, PROJECT).has("firstTicket")).toBe(
       false,
@@ -182,12 +194,14 @@ describe("stepViews", () => {
       "done", // install
       "done", // auth
       "current", // prd
+      "remaining", // git
       "remaining", // firstTicket
     ]);
     expect(views.map((v) => v.id)).toEqual([
       "install",
       "auth",
       "prd",
+      "git",
       "firstTicket",
     ]);
   });
@@ -199,7 +213,7 @@ describe("stepViews", () => {
     const install = views.find((v) => v.id === "install")!;
     expect(install.status).toBe("remaining");
     expect(install.skipped).toBe(true);
-    expect(views).toHaveLength(4);
+    expect(views).toHaveLength(5);
   });
 
   it("clears the skipped flag once the step is actually satisfied", () => {
@@ -230,7 +244,7 @@ describe("shouldLandOnStartHere", () => {
   it("stops once every step is persisted done", () => {
     expect(
       shouldLandOnStartHere(
-        progress({ done: ["install", "auth", "prd", "firstTicket"] }),
+        progress({ done: ["install", "auth", "prd", "git", "firstTicket"] }),
       ),
     ).toBe(false);
   });
@@ -246,7 +260,7 @@ describe("isPersistedComplete", () => {
     expect(isPersistedComplete(EMPTY_PROGRESS)).toBe(false);
     expect(
       isPersistedComplete(
-        progress({ done: ["install", "auth", "prd", "firstTicket"] }),
+        progress({ done: ["install", "auth", "prd", "git", "firstTicket"] }),
       ),
     ).toBe(true);
   });

@@ -29,6 +29,7 @@ import telemetry from "../../services/telemetryService";
 import {
   connectFolder,
   createFirstTicket,
+  launchGitInit,
   seedSamplePrd,
   type ActionResult,
   type FirstTicketResult,
@@ -80,6 +81,7 @@ const STEP_ICON: Record<WizardStep, string> = {
   install: "⬇",
   auth: "🔑",
   prd: "📄",
+  git: "🌿",
   firstTicket: "🎫",
 };
 
@@ -107,8 +109,13 @@ export function StartHereTab() {
   const refreshVersions = useCliSetupStore((s) => s.refreshVersions);
   const requiredInstalled = useCliSetupStore((s) => s.requiredInstalled());
   const hasProject = useProjectStore((s) => !!s.currentProject?.folderPath);
+  const projectPath = useProjectStore((s) => s.currentProject?.folderPath);
   const [seeding, setSeeding] = useState(false);
   const [seedMsg, setSeedMsg] = useState<ActionResult | null>(null);
+  const [gitChecking, setGitChecking] = useState(false);
+  const [gitInitialized, setGitInitialized] = useState<boolean | undefined>();
+  const [gitMsg, setGitMsg] = useState<ActionResult | null>(null);
+  const [gitSessionId, setGitSessionId] = useState<string | null>(null);
   const [sendingTicket, setSendingTicket] = useState(false);
   const [ticketMsg, setTicketMsg] = useState<FirstTicketResult | null>(null);
   const [showDemo, setShowDemo] = useState(false);
@@ -122,10 +129,18 @@ export function StartHereTab() {
       requiredInstalled,
       requiredReady: ready,
       hasProject,
+      gitInitialized,
       byomInstalled: byom.installed,
       byomReady: byom.ready,
     }),
-    [requiredInstalled, ready, hasProject, byom.installed, byom.ready],
+    [
+      requiredInstalled,
+      ready,
+      hasProject,
+      gitInitialized,
+      byom.installed,
+      byom.ready,
+    ],
   );
 
   const views = useMemo(() => stepViews(progress, live), [progress, live]);
@@ -153,7 +168,31 @@ export function StartHereTab() {
     if (installSatisfied(live)) markDone("install");
     if (authSatisfied(live)) markDone("auth");
     if (live.hasProject) markDone("prd");
+    if (live.hasProject && live.gitInitialized !== false) markDone("git");
   }, [live, markDone]);
+
+  const probeGitInitialized = useCallback(async () => {
+    if (!projectPath) {
+      setGitInitialized(undefined);
+      setGitMsg(null);
+      setGitSessionId(null);
+      return;
+    }
+    setGitChecking(true);
+    try {
+      setGitInitialized(
+        await window.electronAPI.fs.isGitRepository(projectPath),
+      );
+    } catch {
+      setGitInitialized(false);
+    } finally {
+      setGitChecking(false);
+    }
+  }, [projectPath]);
+
+  useEffect(() => {
+    void probeGitInitialized();
+  }, [probeGitInitialized]);
 
   useStepPrdSuccess(openStep === "prd", hasProject);
 
@@ -192,6 +231,14 @@ export function StartHereTab() {
       setSeeding(false);
     }
   }, []);
+
+  const handleGitInit = useCallback(async () => {
+    if (!projectPath) return;
+    setGitMsg(null);
+    const res = await launchGitInit(projectPath, setGitSessionId);
+    setGitMsg(res);
+    window.setTimeout(() => void probeGitInitialized(), 1200);
+  }, [probeGitInitialized, projectPath]);
 
   const handleFirstTicket = useCallback(async () => {
     setSendingTicket(true);
@@ -370,6 +417,12 @@ export function StartHereTab() {
                         seeding={seeding}
                         seedMsg={seedMsg}
                         onSeed={() => void handleSeed()}
+                        gitInitialized={gitInitialized}
+                        gitChecking={gitChecking}
+                        gitMsg={gitMsg}
+                        gitSessionId={gitSessionId}
+                        onGitInit={() => void handleGitInit()}
+                        onGitRecheck={() => void probeGitInitialized()}
                         sendingTicket={sendingTicket}
                         ticketMsg={ticketMsg}
                         onFirstTicket={() => void handleFirstTicket()}
@@ -671,6 +724,12 @@ interface StepBodyProps {
   seeding: boolean;
   seedMsg: ActionResult | null;
   onSeed: () => void;
+  gitInitialized: boolean | undefined;
+  gitChecking: boolean;
+  gitMsg: ActionResult | null;
+  gitSessionId: string | null;
+  onGitInit: () => void;
+  onGitRecheck: () => void;
   sendingTicket: boolean;
   ticketMsg: FirstTicketResult | null;
   onFirstTicket: () => void;
@@ -683,6 +742,12 @@ function StepBody({
   seeding,
   seedMsg,
   onSeed,
+  gitInitialized,
+  gitChecking,
+  gitMsg,
+  gitSessionId,
+  onGitInit,
+  onGitRecheck,
   sendingTicket,
   ticketMsg,
   onFirstTicket,
@@ -774,6 +839,67 @@ function StepBody({
               </p>
             )}
           </>
+        )}
+      </>
+    );
+  }
+
+  if (step === "git") {
+    return (
+      <>
+        <p className="text-xs text-[#a6adc8]">
+          {t("onboarding.cliGate.git.body")}
+        </p>
+        {gitInitialized ? (
+          <div className="flex items-center gap-2 rounded-md border border-[#a6e3a1]/30 bg-[#a6e3a1]/10 px-3 py-2.5 text-sm text-[#a6e3a1]">
+            <span>✓ {t("onboarding.cliGate.git.alreadyInitialized")}</span>
+          </div>
+        ) : (
+          <>
+            <div className="rounded-md border border-[#45475a] bg-[#11111b] px-3 py-2.5">
+              <p className="text-xs text-[#a6adc8]">
+                {t("onboarding.cliGate.git.confirm")}
+              </p>
+              <code className="mt-2 block rounded bg-black/35 px-2 py-1.5 font-mono text-xs text-[#a6e3a1]">
+                git init
+              </code>
+            </div>
+            <button
+              onClick={onGitInit}
+              disabled={!hasProject || gitChecking}
+              className="w-full rounded-md bg-[#89b4fa] px-3 py-2 text-sm font-semibold text-[#1e1e2e] transition-colors hover:bg-[#74c7ec] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {t("onboarding.cliGate.git.run")}
+            </button>
+          </>
+        )}
+        <div className="rounded-md border border-[#45475a] bg-[#11111b]/35 px-3 py-2 text-xs leading-5 text-[#a6adc8]">
+          <p>{t("onboarding.cliGate.git.devGuide")}</p>
+          <p>{t("onboarding.cliGate.git.generalGuide")}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onGitRecheck}
+          disabled={!hasProject || gitChecking}
+          className="rounded-md border border-[#45475a] px-3 py-1.5 text-xs text-[#cdd6f4] transition-colors hover:bg-[#313244] disabled:opacity-60"
+        >
+          {gitChecking
+            ? t("onboarding.cliGate.checking")
+            : t("onboarding.cliGate.recheck")}
+        </button>
+        {gitSessionId && (
+          <p className="text-xs text-[#89b4fa]">
+            {t("onboarding.cliGate.git.terminalOpened")}
+          </p>
+        )}
+        {gitMsg && (
+          <p
+            className={`text-xs ${
+              gitMsg.ok ? "text-[#a6e3a1]" : "text-[#f38ba8]"
+            }`}
+          >
+            {gitMsg.text}
+          </p>
         )}
       </>
     );

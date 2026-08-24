@@ -44,6 +44,7 @@ interface FsAPI {
     baseSha?: string
   ) => Promise<{ original: string; modified: string }>;
   gitRemoteUrl: (rootPath: string) => Promise<string | null>;
+  isGitRepository: (rootPath: string) => Promise<boolean>;
   /**
    * 연결된 own 폴더가 실제 코드 탭을 쓸 수 있는 상태인지 한 번에 검사
    * (티켓 r8vg9pMWCRtdnUzR3KyX, own-but-empty 보강). 빈 폴더·origin

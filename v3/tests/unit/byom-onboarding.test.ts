@@ -441,11 +441,11 @@ describe("게이트 통합 — BYOM 축이 ①②단계를 연다", () => {
       hasProject: true,
     };
     const done = effectiveDone(EMPTY_PROGRESS, live);
-    expect([...done].sort()).toEqual(["auth", "install", "prd"]);
+    expect([...done].sort()).toEqual(["auth", "git", "install", "prd"]);
     expect(resumeStep(EMPTY_PROGRESS, live)).toBe("firstTicket");
     expect(isOnboardingComplete(EMPTY_PROGRESS, live)).toBe(false);
     expect(
-      isOnboardingComplete({ ...EMPTY_PROGRESS, done: ["firstTicket"] }, live)
+      isOnboardingComplete({ ...EMPTY_PROGRESS, done: ["firstTicket"] }, live),
     ).toBe(true);
   });
 });

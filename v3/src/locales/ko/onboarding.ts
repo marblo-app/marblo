@@ -391,6 +391,7 @@ export const onboarding = {
   "onboarding.cliGate.step.install": "설치",
   "onboarding.cliGate.step.auth": "인증",
   "onboarding.cliGate.step.prd": "PRD",
+  "onboarding.cliGate.step.git": "Git",
   "onboarding.cliGate.step.firstTicket": "첫 티켓",
   // ① 설치
   "onboarding.cliGate.install.title": "① CLI 설치",
@@ -411,8 +412,27 @@ export const onboarding = {
   "onboarding.cliGate.prd.title": "③ 샘플 PRD",
   "onboarding.cliGate.prd.body":
     "오케스트레이터에게 맡길 폴더를 프로젝트로 연결하고 샘플 PRD로 시작하세요.",
-  // ④ 첫 티켓 (아하 모먼트)
-  "onboarding.cliGate.firstTicket.title": "④ 첫 티켓 만들기",
+  // ④ Git 준비
+  "onboarding.cliGate.git.title": "④ Git 저장소 준비",
+  "onboarding.cliGate.git.body":
+    "워크트리별 작업을 만들 수 있도록 연결한 폴더가 Git 저장소인지 확인합니다.",
+  "onboarding.cliGate.git.confirm":
+    "터미널 열고 git init 을 진행하겠습니다. 확인해주세요.",
+  "onboarding.cliGate.git.run": "터미널에서 git init 실행",
+  "onboarding.cliGate.git.started":
+    "터미널에서 git init 을 시작했습니다. 끝나면 다시 확인해 주세요.",
+  "onboarding.cliGate.git.startFailed":
+    "터미널을 열지 못했습니다. 직접 터미널에서 git init 을 실행한 뒤 다시 확인해 주세요.",
+  "onboarding.cliGate.git.alreadyInitialized":
+    "이미 Git 저장소입니다. git init 을 다시 실행하지 않습니다.",
+  "onboarding.cliGate.git.terminalOpened":
+    "git init 터미널을 열었습니다. 실패하면 터미널 출력의 원인을 확인하고 다시 실행하세요.",
+  "onboarding.cliGate.git.devGuide":
+    "개발 작업은 하네스탭에서 깃 리포 연결을 권장드립니다.",
+  "onboarding.cliGate.git.generalGuide":
+    "일반 작업은 티켓별로 워크트리가 나뉘어 진행됩니다.",
+  // ⑤ 첫 티켓 (아하 모먼트)
+  "onboarding.cliGate.firstTicket.title": "⑤ 첫 티켓 만들기",
   "onboarding.cliGate.firstTicket.body":
     "오케스트레이터에게 이 PRD로 첫 티켓을 만들고 에이전트 스폰을 제안하도록 요청합니다. 버튼을 누르면 첫 프롬프트가 전달되고, 오케스트레이터가 작업을 시작하는 것을 지켜보세요.",
   "onboarding.cliGate.firstTicket.create": "이 PRD로 첫 티켓 만들기",
@@ -514,6 +534,8 @@ export const onboarding = {
     "이미 쓰고 계신 AI 계정을 연결하는 단계입니다. 인증이 없으면 스폰이 조용히 실패합니다.",
   "onboarding.startHere.why.prd":
     "작업을 맡길 때는 프로젝트 연결이 필요합니다. 단순히 로컬 폴더를 열어 보는 길은 파일 트리에 따로 있습니다.",
+  "onboarding.startHere.why.git":
+    "워크트리 생성에는 Git 저장소가 필요합니다. 확인 전에는 폴더를 바꾸지 않습니다.",
   "onboarding.startHere.why.firstTicket":
     "첫 티켓을 만들어 봐야 마블로가 실제로 무엇을 해주는지 보입니다.",
   // 막혔을 때의 대안 — 단계마다 한 줄
@@ -523,6 +545,8 @@ export const onboarding = {
     "Claude Code 와 Codex 중 하나만 로그인하면 됩니다. 브라우저 인증이 막히면 명령을 복사해 터미널에서 직접 실행하세요.",
   "onboarding.startHere.alt.prd":
     "빈 폴더로 시작해도 됩니다. 비워크트리 폴더를 보기만 하려면 파일 트리의 ‘폴더 열기 옵션’에서 둘러보기를 쓰세요.",
+  "onboarding.startHere.alt.git":
+    "실패하면 터미널 출력의 원인을 확인하고, 폴더 연결은 유지한 채 git init 을 다시 실행하세요.",
   "onboarding.startHere.alt.firstTicket":
     "전달이 실패하면 오케스트레이터 터미널이 떠 있는지 확인한 뒤 다시 눌러 주세요.",
   // 인라인 배너(모달 대체) — 온보딩이 아직 남아 있는 순간.
@@ -533,6 +557,7 @@ export const onboarding = {
     "오케스트레이터 CLI 설치가 필요합니다",
   "onboarding.startHere.banner.title.auth": "CLI 인증이 필요합니다",
   "onboarding.startHere.banner.title.prd": "작업할 폴더를 연결해 주세요",
+  "onboarding.startHere.banner.title.git": "Git 저장소 준비가 필요합니다",
   "onboarding.startHere.banner.title.firstTicket": "첫 티켓만 만들면 끝납니다",
   "onboarding.startHere.banner.cta": "시작하기 열기",
   "onboarding.startHere.banner.dismiss": "이 안내 닫기(다시 띄우지 않기)",
@@ -541,7 +566,7 @@ export const onboarding = {
   "onboarding.startHere.worktreeRecommend.title":
     "깃 리포를 연결하면 독립 워크트리가 자동입니다",
   "onboarding.startHere.worktreeRecommend.body":
-    "하네스 탭에서 깃 리포를 연결하면 에이전트가 티켓별로 독립 워크트리에서 자동으로 작업합니다(충돌 없이 병렬).",
+    "개발 작업은 하네스탭에서 깃 리포 연결을 권장드립니다. 일반 작업은 티켓별로 워크트리가 나뉘어 진행됩니다.",
 
   // — 시작하기 탭: 다른 벤더 모델 붙이기 (XHXSIdPN) —
   // ★벤더 이름·모델 id 가 이 표에 하나도 없다. 목록은 model-registry 파생이고
