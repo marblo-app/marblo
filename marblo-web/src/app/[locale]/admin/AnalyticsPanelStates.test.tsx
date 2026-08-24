@@ -128,9 +128,17 @@ function assertDrawsNoNumber(label: string, html: string) {
 function coverage(over: Partial<PersonAxisCoverage> = {}): PersonAxisCoverage {
   return {
     state: "pending",
+    metric: "identity_linked_ratio",
     disabledReason: null,
     linkedInstalls: 0,
     totalInstalls: 40,
+    identityLinkedInstalls: 0,
+    identityTotalInstalls: 40,
+    dailyActiveInstalls: 12,
+    dailyLinkedActiveInstalls: 0,
+    dailyJoinable: false,
+    dailyJoinNote:
+      "analytics_user_daily.install_key 는 원시 설치 ID 이고 analytics_identity/link install_key 는 HMAC 이라 아직 직접 조인할 수 없습니다.",
     linkedActiveInstalls: 0,
     activeInstalls: 12,
     excludedSharedInstalls: 0,

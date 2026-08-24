@@ -499,7 +499,7 @@ const COV_BASE = {
   basis: "since_link" as const,
   linkedInstalls: 6,
   totalInstalls: 20,
-  linkedActiveInstalls: 6,
+  linkedActiveInstalls: 0,
   activeInstalls: 14,
   excludedSharedInstalls: 0,
   lastLinkedAt: "2026-09-10T00:00:00Z",
@@ -528,32 +528,39 @@ test("링크 0 이면 pending — 새 상태를 만들지 않고 기존 '적재 
 test("일부만 붙었으면 ingesting — 이 구간에 퍼센트 헤드라인을 그리면 안 된다", () => {
   const cov = computePersonAxisCoverage({ ...COV_BASE, gate: OPEN_GATE });
   assert.equal(cov.state, "ingesting");
-  assert.equal(cov.linkedActiveInstalls, 6);
+  assert.equal(cov.metric, "identity_linked_ratio");
+  assert.equal(cov.identityLinkedInstalls, 6);
+  assert.equal(cov.identityTotalInstalls, 20);
+  assert.equal(cov.linkedActiveInstalls, 0);
+  assert.equal(cov.dailyLinkedActiveInstalls, 0);
   assert.equal(cov.activeInstalls, 14);
+  assert.equal(cov.dailyActiveInstalls, 14);
+  assert.equal(cov.dailyJoinable, false);
+  assert.match(cov.dailyJoinNote, /직접 조인할 수 없습니다/);
 });
 
-test("★complete 판정은 '전체 설치' 가 아니라 '활동한 설치' 기준이다", () => {
-  // 잠자는 설치(20대 중 14대만 활동)를 기다리면 영원히 complete 가 안 되고,
-  // 그러면 이 장치가 늑대소년이 된다.
+test("★complete 판정은 identity_linked_ratio 기준이다 — daily active 는 별도 숫자다", () => {
   const cov = computePersonAxisCoverage({
     ...COV_BASE,
     gate: OPEN_GATE,
-    linkedActiveInstalls: 14,
+    linkedInstalls: 20,
+    totalInstalls: 20,
+    linkedActiveInstalls: 0,
     activeInstalls: 14,
   });
   assert.equal(cov.state, "complete");
-  assert.ok(
-    cov.linkedInstalls < cov.totalInstalls,
-    "전제: 전체는 아직 안 붙었다"
-  );
+  assert.equal(cov.identityLinkedInstalls, 20);
+  assert.equal(cov.identityTotalInstalls, 20);
+  assert.equal(cov.dailyLinkedActiveInstalls, 0);
+  assert.equal(cov.dailyActiveInstalls, 14);
 });
 
-test("★활동 설치가 0 이면 complete 로 올리지 않는다 (분모 0 의 완전성은 공허참)", () => {
+test("★identity 분모가 0 이면 complete 로 올리지 않는다 (분모 0 의 완전성은 공허참)", () => {
   const cov = computePersonAxisCoverage({
     ...COV_BASE,
     gate: OPEN_GATE,
-    linkedActiveInstalls: 0,
-    activeInstalls: 0,
+    linkedInstalls: 0,
+    totalInstalls: 0,
   });
   assert.equal(cov.state, "pending");
 });
@@ -706,7 +713,7 @@ test("★forward-only 문장은 프론트 미러와 **글자까지** 같다", ()
     PERSON_AXIS_FORWARD_ONLY_NOTE,
     "사람 축 링크는 forward-only 입니다 — 각 설치는 '다음에 인증할 때' 부터 " +
       "붙습니다. 그래서 켠 직후에 연결된 설치가 거의 없는 것이 정상이고, 여기 " +
-      "낮은 커버리지는 '사람이 없다' 가 아니라 '아직 안 붙었다' 입니다. 잠자는 " +
+      "낮은 identity linked ratio 는 '사람이 없다' 가 아니라 '아직 안 붙었다' 입니다. 잠자는 " +
       "설치는 며칠에서 영원히 안 붙을 수 있습니다."
   );
 });
@@ -718,7 +725,14 @@ test("★커버리지 봉투의 모양은 프론트 미러와 **한 글자도** 
   //   나지 않는 종류의 고장이라 테스트로 못 박는다.
   const CONTRACT_FIELDS = [
     "state",
+    "metric",
     "disabledReason",
+    "identityLinkedInstalls",
+    "identityTotalInstalls",
+    "dailyActiveInstalls",
+    "dailyLinkedActiveInstalls",
+    "dailyJoinable",
+    "dailyJoinNote",
     "linkedInstalls",
     "totalInstalls",
     "linkedActiveInstalls",
@@ -783,7 +797,7 @@ test("★complete 분모(active)는 조회 구간과 **상한**을 둘 다 탄�
   const sql = buildPersonAxisCoverageSql(PROJECT);
   assert.ok(
     sql.includes("GREATEST(DATE(@since), DATE(@effective_from))"),
-    "상한을 빼먹으면 커버리지가 영원히 100% 가 안 된다"
+    "daily 참고 숫자에서 상한을 빼먹으면 화면이 다른 기간을 나란히 놓는다"
   );
 });
 
@@ -796,10 +810,13 @@ test("★커버리지 SQL 에 원시 uid·솔트가 들어갈 자리가 없다",
   }
 });
 
-test("★커버리지 SQL 은 링크표를 익명축과 **다른 데이터셋**에서 읽는다", () => {
+test("★identity_linked_ratio SQL 은 링크표와 analytics_identity 를 읽는다", () => {
   const sql = buildPersonAxisCoverageSql(PROJECT);
   assert.ok(sql.includes(`${PROJECT}.marblo_identity.${TABLE_USER_INSTALL}`));
+  assert.ok(sql.includes(`${PROJECT}.marblo_telemetry.analytics_identity`));
   assert.ok(sql.includes(`${PROJECT}.marblo_telemetry.analytics_user_daily`));
+  assert.match(sql, /SELECT COUNT\(\*\) FROM identity i JOIN linked l/);
+  assert.match(sql, /daily 는 raw install_key/);
   // ★읽기만 한다 — 커버리지가 원본을 고치면 그건 커버리지가 아니다.
   assert.ok(!/\b(INSERT|UPDATE|DELETE|MERGE|CREATE|DROP|ALTER)\b/.test(sql));
 });

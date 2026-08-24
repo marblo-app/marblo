@@ -1887,12 +1887,20 @@ export const PERSON_AXIS_BASIS_LABEL: Readonly<
  */
 export type PersonAxisCoverage = {
   state: "disabled" | "pending" | "ingesting" | "complete";
+  metric: "identity_linked_ratio";
   /** disabled 일 때만 채워진다. 화면이 이 문장을 그대로 그린다. */
   disabledReason: string | null;
+  identityLinkedInstalls: number;
+  identityTotalInstalls: number;
+  dailyActiveInstalls: number;
+  dailyLinkedActiveInstalls: number;
+  dailyJoinable: boolean;
+  dailyJoinNote: string;
   linkedInstalls: number;
   totalInstalls: number;
-  /** ★조회 구간에 활동한 설치 중 링크된 수 — complete 판정은 이쪽으로 한다. */
+  /** legacy: dailyLinkedActiveInstalls */
   linkedActiveInstalls: number;
+  /** legacy: dailyActiveInstalls */
   activeInstalls: number;
   /** 공용 기기로 판정돼 제외된 설치 수(설계 §5.5). 값을 만들지 않고 센다. */
   excludedSharedInstalls: number;
@@ -1910,7 +1918,7 @@ export type PersonAxisCoverage = {
 export const PERSON_AXIS_FORWARD_ONLY_NOTE =
   "사람 축 링크는 forward-only 입니다 — 각 설치는 '다음에 인증할 때' 부터 " +
   "붙습니다. 그래서 켠 직후에 연결된 설치가 거의 없는 것이 정상이고, 여기 " +
-  "낮은 커버리지는 '사람이 없다' 가 아니라 '아직 안 붙었다' 입니다. 잠자는 " +
+  "낮은 identity linked ratio 는 '사람이 없다' 가 아니라 '아직 안 붙었다' 입니다. 잠자는 " +
   "설치는 며칠에서 영원히 안 붙을 수 있습니다.";
 
 /**
@@ -1927,14 +1935,19 @@ export const PERSON_AXIS_FORWARD_ONLY_NOTE =
 export const PERSON_AXIS_NO_BACKFILL_NOTE =
   "소급 백필로 앞당길 방법이 없습니다 — 인증하지 않은 설치를 사람에 붙일 근거 " +
   "자체가 없기 때문입니다. 그래서 '적재 전' 처럼 시간이 해결해 주는 칸이 아닙니다: " +
-  "커버리지가 영영 낮은 채로 남을 수 있고, 여기 분수는 '아직 적은 값' 이 아니라 " +
+  "identity linked ratio 가 영영 낮은 채로 남을 수 있고, 여기 분수는 '아직 적은 값' 이 아니라 " +
   "'이게 최종일 수도 있는 값' 으로 읽어야 합니다.";
 
-/** 사람 축 지표의 분모는 '전체 설치' 가 아니라 '링크된 설치' 다(§10.4-2). */
+/** 사람 축 지표의 분모는 현재 analytics_identity 의 HMAC 설치 집합이다. */
 export const PERSON_AXIS_DENOMINATOR_NOTE =
-  "사람 축 지표의 분모는 전체 설치가 아니라 '링크된 설치' 입니다. 분모가 " +
-  "커버리지와 함께 자라기 때문에, 분모를 '전체 설치' 로 읽으면 커버리지 상승이 " +
-  "지표 개선으로 보입니다.";
+  "이 지표 이름은 identity_linked_ratio 입니다. 분모는 활동 설치가 아니라 " +
+  "analytics_identity 에 이미 식별된 HMAC install_key 집합입니다. daily 활동축은 " +
+  "아직 raw install_key 라서 이 분수에 섞지 않습니다.";
+
+export const PERSON_AXIS_DAILY_JOIN_NOTE =
+  "daily 기준 활성 설치는 별도 숫자입니다. analytics_user_daily.install_key 는 원시 " +
+  "설치 ID 이고 identity/link install_key 는 HMAC 이라, install_key_hmac 컬럼이 " +
+  "추가되기 전까지 두 축은 직접 조인할 수 없습니다.";
 
 /** 링크 MERGE 배선 전(서버가 커버리지를 아직 안 싣는 상태)에 기다리는 것. */
 export const PERSON_AXIS_WAITING_ON =
@@ -1945,7 +1958,8 @@ export const PERSON_AXIS_WAITING_ON =
 export const PERSON_AXIS_WILL_SHOW = [
   "사람 단위 리텐션(설치가 아니라 사람 — 한 사람이 설치 여러 대를 쓴다)",
   "설치 전체 이력 기준(소급) 캠페인 귀속 — 라벨과 함께",
-  "커버리지: 활동한 설치 중 몇 대가 사람에 연결됐나 (분자/분모)",
+  "identity_linked_ratio: analytics_identity 설치 중 몇 대가 사람 링크에 연결됐나",
+  "daily 기준 활성 설치 수 — raw/HMAC 키 통일 전까지 사람 링크와 별도 표시",
 ];
 
 /**
@@ -2092,7 +2106,7 @@ export function IngestionProgress({
   coverage: PersonAxisCoverage;
 }) {
   const remaining = Math.max(
-    coverage.activeInstalls - coverage.linkedActiveInstalls,
+    coverage.identityTotalInstalls - coverage.identityLinkedInstalls,
     0
   );
   return (
@@ -2100,7 +2114,7 @@ export function IngestionProgress({
       <div className="flex flex-wrap items-center gap-2">
         <Database className="h-4 w-4 text-sky-500" />
         <h4 className="text-sm font-semibold text-zinc-200">
-          사람 축 커버리지
+          사람 축 identity linked ratio
         </h4>
         <span className="rounded-full border border-sky-800 bg-sky-950 px-2 py-0.5 text-[11px] text-sky-200">
           적재 중
@@ -2114,12 +2128,12 @@ export function IngestionProgress({
       {/* ★분수만. 커버리지를 퍼센트 헤드라인으로 그리면 그 자체가 지표처럼
           읽힌다 — 이건 지표가 아니라 "지금 몇 %만 보고 있다" 는 경고다. */}
       <p className="mt-2.5 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-zinc-400">
-        <span>활동한 설치</span>
+        <span>analytics_identity 설치</span>
         <Ratio
-          numerator={coverage.linkedActiveInstalls}
-          denominator={coverage.activeInstalls}
+          numerator={coverage.identityLinkedInstalls}
+          denominator={coverage.identityTotalInstalls}
           size="lg"
-          title="분자=조회 구간에 활동하면서 사람에 연결된 설치 · 분모=조회 구간에 활동한 설치"
+          title="분자=analytics_identity HMAC 설치 중 사람 링크에 붙은 설치 · 분모=analytics_identity HMAC 설치"
         />
         <span>연결됨</span>
       </p>
@@ -2130,9 +2144,18 @@ export function IngestionProgress({
           <b className="tabular-nums text-zinc-200">{fmtInt(remaining)}대</b>는
           다음에 인증할 때 붙습니다 · 지금 표는{" "}
           <b className="tabular-nums text-zinc-200">
-            {fmtInt(coverage.linkedActiveInstalls)}대 기준
+            {fmtInt(coverage.identityLinkedInstalls)}대 기준
           </b>
           입니다
+        </li>
+        <li>
+          · daily 기준 활성 설치:{" "}
+          <b className="tabular-nums text-zinc-200">
+            {fmtInt(coverage.dailyActiveInstalls)}대
+          </b>{" "}
+          <span className="text-zinc-600">
+            (조인된 활성 {fmtInt(coverage.dailyLinkedActiveInstalls)}대 · 아직 raw/HMAC 키 불일치)
+          </span>
         </li>
         <li>
           · 공용 기기로 판정돼 제외:{" "}
@@ -2144,11 +2167,11 @@ export function IngestionProgress({
           </span>
         </li>
         <li>
-          · 전체 설치 기준 연결:{" "}
+          · identity 전체 기준 연결:{" "}
           <Ratio
-            numerator={coverage.linkedInstalls}
-            denominator={coverage.totalInstalls}
-            title="잠자는 설치를 포함한 전체 기준. complete 판정은 이 분수가 아니라 '활동한 설치' 쪽으로 합니다."
+            numerator={coverage.identityLinkedInstalls}
+            denominator={coverage.identityTotalInstalls}
+            title="분모는 analytics_identity HMAC install_key 집합입니다."
           />
           {coverage.lastLinkedAt ? (
             <span className="text-zinc-600">
@@ -2164,13 +2187,16 @@ export function IngestionProgress({
         <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>
           <b>이 수치는 아직 커집니다.</b> 같은 기간을 내일 다시 조회하면 값이
-          올라갑니다 — 커버리지가 오르는 중이기 때문입니다. 지금 화면을 캡처해
+          올라갑니다 — identity_linked_ratio 가 오르는 중이기 때문입니다. 지금 화면을 캡처해
           나중 값과 비교하지 마세요. 그 비교는 개선이 아니라 분모의 증가입니다.
         </span>
       </p>
 
       <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
         {PERSON_AXIS_DENOMINATOR_NOTE}
+      </p>
+      <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+        {coverage.dailyJoinNote || PERSON_AXIS_DAILY_JOIN_NOTE}
       </p>
     </div>
   );
@@ -2217,14 +2243,14 @@ export function PersonAxisUnmapped({
         <b className="text-zinc-200">측정은 됐습니다.</b> 없는 것은 소스가 아니라{" "}
         <b className="text-zinc-200">사람 링크</b>입니다 — 활동한 설치{" "}
         <b className="tabular-nums text-zinc-200">
-          {`${fmtInt(coverage.activeInstalls)}대`}
+          {`${fmtInt(coverage.dailyActiveInstalls)}대`}
         </b>{" "}
-        중 사람에 연결된 설치가{" "}
+        는 별도 daily raw 축이고, identity 에서 사람 링크에 연결된 설치는{" "}
         <b className="tabular-nums text-zinc-200">
-          {`${fmtInt(coverage.linkedActiveInstalls)}대`}
+          {`${fmtInt(coverage.identityLinkedInstalls)}대`}
         </b>
-        입니다. 그래서 사람 축 비율(퍼센트)은 내지 않습니다 — 사람에 못 붙은
-        설치를 사람 축 분모로 쓰면 없는 비율을 지어내는 것입니다.
+        입니다. 그래서 daily 활동 설치를 사람 축 분모로 쓰지 않습니다 — raw/HMAC
+        키 불일치를 숨기면 없는 비율을 지어내는 것입니다.
       </p>
 
       {/* ★"곧 채워지겠지" 로 읽히면 안 되는 자리. 그 말을 화면이 직접 막는다. */}
@@ -2251,6 +2277,9 @@ export function PersonAxisUnmapped({
 
       <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
         {PERSON_AXIS_FORWARD_ONLY_NOTE}
+      </p>
+      <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+        {coverage.dailyJoinNote || PERSON_AXIS_DAILY_JOIN_NOTE}
       </p>
     </div>
   );
@@ -2290,7 +2319,7 @@ export function PersonAxisDisabled({
 }
 
 /**
- * 사람 축 커버리지 한 자리. **네 상태 + 미배선**을 여기 한 곳에서 가른다 —
+ * 사람 축 identity linked ratio 한 자리. **네 상태 + 미배선**을 여기 한 곳에서 가른다 —
  * 호출부마다 분기하면 어느 자리에서 규약 하나가 조용히 빠진다.
  *
  * ★`coverage` 가 없는 것은 상태가 아니라 **배선 전**이다. 선행 티켓이 응답에
@@ -2331,17 +2360,17 @@ export function PersonAxisCoverageNote({
   if (coverage.state === "ingesting")
     return <IngestionProgress coverage={coverage} />;
 
-  // complete — 여기서만 커버리지가 접힌 한 줄이 된다. 그래도 기준 라벨은 남는다.
+  // complete — 여기서만 identity linked ratio 가 접힌 한 줄이 된다. 그래도 기준 라벨은 남는다.
   return (
     <p className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
       <Info className="h-3.5 w-3.5 shrink-0" />
-      <span>사람 축 커버리지 완료 — 활동한 설치</span>
+      <span>사람 축 identity linked ratio 완료</span>
       <Ratio
-        numerator={coverage.linkedActiveInstalls}
-        denominator={coverage.activeInstalls}
+        numerator={coverage.identityLinkedInstalls}
+        denominator={coverage.identityTotalInstalls}
       />
       <span>
-        연결됨 · 공용 기기 제외 {fmtInt(coverage.excludedSharedInstalls)}대
+        연결됨 · daily 활성 {fmtInt(coverage.dailyActiveInstalls)}대는 별도 raw 축 · 공용 기기 제외 {fmtInt(coverage.excludedSharedInstalls)}대
       </span>
       <PersonAxisBasisBadge
         basis={coverage.basis}
@@ -6545,11 +6574,12 @@ export default function AnalyticsPanel({
               ★설치 ≠ 사람이다. 한 사람이 설치를 여러 대 쓴다(실측에서 계정 1개가
               설치 9대). 위 두 표를 사람 수로 읽으면 인원이 부풀려진다.
               ★링크가 forward-only 라 켠 직후엔 거의 비어 있는 것이 정상이고,
-              화면이 그걸 커버리지로 말한다(설계 §10.4). ── */}
+              화면이 그걸 identity_linked_ratio 로 말한다. daily 활성축은 아직 raw/HMAC
+              키 불일치로 별도 표시한다(후속 iQNi0PHs0J9FY6HQnb1P). ── */}
           <div className="space-y-4">
             <SectionHeader
               icon={Link2}
-              title="사람 축 커버리지 (설치가 아니라 사람 단위)"
+              title="사람 축 identity_linked_ratio (설치가 아니라 사람 단위)"
               trust={personAxis?.state === "complete" ? "yellow" : "red"}
             />
             <PersonAxisCoverageNote coverage={personAxis} />

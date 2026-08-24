@@ -162,6 +162,9 @@ export const TABLE_USER_INSTALL = "analytics_user_install";
 /** 사람 축 뷰가 읽는 익명축 원천(파생표, #1079). ★원본 이벤트는 안 건드린다. */
 export const SOURCE_TABLE_USER_DAILY = "analytics_user_daily";
 
+/** HMAC 익명 설치 정본. 사람 축 커버리지의 임시 분모로만 읽는다. */
+export const SOURCE_TABLE_ANALYTICS_IDENTITY = "analytics_identity";
+
 /** 기본 뷰 — 연결 이후 구간만. 리텐션·코호트·활성화 전부 이쪽을 쓴다. */
 export const VIEW_PERSON_SINCE_LINK = "v_person_since_link";
 
@@ -834,12 +837,31 @@ export function attributePersonRows(
  */
 export interface PersonAxisCoverage {
   state: "disabled" | "pending" | "ingesting" | "complete";
+  /**
+   * ★이 봉투가 말하는 지표의 이름. 예전 "coverage" 는 활동 설치 분모로 읽혀
+   * 거짓말이 됐다. 지금 분모는 analytics_identity 의 HMAC install_key 집합이다.
+   */
+  metric: "identity_linked_ratio";
   /** disabled 일 때만 채워진다. 화면이 이 문장을 그대로 그린다. */
   disabledReason: string | null;
+  /** analytics_identity 의 HMAC install_key 중 링크표에 붙은 설치 수. */
+  identityLinkedInstalls: number;
+  /** analytics_identity 의 HMAC install_key 전체 수. */
+  identityTotalInstalls: number;
+  /** daily 원시 install_key 축에서 조회 구간에 활동한 설치 수. */
+  dailyActiveInstalls: number;
+  /** 현재 raw/HMAC 불일치 때문에 0 으로 남는 교집합. */
+  dailyLinkedActiveInstalls: number;
+  /** daily raw install_key 와 identity/link HMAC install_key 는 아직 직접 조인 불가다. */
+  dailyJoinable: boolean;
+  dailyJoinNote: string;
+  /** @deprecated identityLinkedInstalls 와 같다. 기존 프론트 호환용. */
   linkedInstalls: number;
+  /** @deprecated identityTotalInstalls 와 같다. 기존 프론트 호환용. */
   totalInstalls: number;
-  /** ★조회 구간에 활동한 설치 중 링크된 수 — complete 판정은 이쪽으로 한다. */
+  /** @deprecated dailyLinkedActiveInstalls 와 같다. identity 지표 판정에는 쓰지 않는다. */
   linkedActiveInstalls: number;
+  /** @deprecated dailyActiveInstalls 와 같다. identity 지표 판정에는 쓰지 않는다. */
   activeInstalls: number;
   /** 공용 기기로 판정돼 제외된 설치 수(설계 §5.5). */
   excludedSharedInstalls: number;
@@ -853,6 +875,13 @@ export interface PersonAxisCoverage {
 export type PersonAxisCoverageInput = {
   gate: PersonAxisGate;
   basis: PersonAxisBasis;
+  metric?: "identity_linked_ratio";
+  identityLinkedInstalls?: number;
+  identityTotalInstalls?: number;
+  dailyActiveInstalls?: number;
+  dailyLinkedActiveInstalls?: number;
+  dailyJoinable?: boolean;
+  dailyJoinNote?: string;
   linkedInstalls: number;
   totalInstalls: number;
   linkedActiveInstalls: number;
@@ -862,23 +891,48 @@ export type PersonAxisCoverageInput = {
 };
 
 /**
- * ★`complete` 판정은 `linkedInstalls === totalInstalls` 가 **아니다.**
- * `linkedActiveInstalls === activeInstalls` 다 — 잠자는 설치를 기다리면 영원히
- * complete 가 안 되고, 그러면 이 장치가 늑대소년이 된다(설계 §10.3).
+ * ★현재 지표는 잠정 `identity_linked_ratio` 다. `analytics_user_daily.install_key`
+ * 는 원시 설치 ID 이고 링크표/`analytics_identity.install_key` 는 HMAC 이라서
+ * daily active 축과 사람 링크 축이 아직 직접 조인되지 않는다. 그래서 complete 는
+ * "analytics_identity 의 HMAC 설치 중 링크된 수" 로만 판정한다.
  *
- * ★`activeInstalls === 0` 이면 complete 로 올리지 않는다. 분모가 0 인 완전성은
+ * ★진짜 답은 키 단위 통일이다(후속 티켓 iQNi0PHs0J9FY6HQnb1P). 승인된 방향은
+ * `analytics_user_daily` 에
+ * nullable `install_key_hmac` 을 추가하고 새 행부터 채우는 것: 기존 raw
+ * `install_key` 는 유지하고, 소급 재작성 없이 HMAC 컬럼으로 daily↔identity 를
+ * 조인한다. 그 전까지 이 함수는 숫자 이름에 identity 분모를 드러내야 한다.
+ *
+ * ★`identityTotalInstalls === 0` 이면 complete 로 올리지 않는다. 분모가 0 인 완전성은
  * 공허참이고, 그걸 100% 로 그리면 "이 구간은 다 봤다" 는 거짓말이 된다. 그때는
  * 기존 `PendingIngestion`("0 이 아니라 소스가 없습니다") 규약으로 접는다.
  */
 export function computePersonAxisCoverage(
   input: PersonAxisCoverageInput
 ): PersonAxisCoverage {
+  const metric = input.metric ?? "identity_linked_ratio";
+  const identityLinkedInstalls =
+    input.identityLinkedInstalls ?? input.linkedInstalls;
+  const identityTotalInstalls = input.identityTotalInstalls ?? input.totalInstalls;
+  const dailyActiveInstalls = input.dailyActiveInstalls ?? input.activeInstalls;
+  const dailyLinkedActiveInstalls =
+    input.dailyLinkedActiveInstalls ?? input.linkedActiveInstalls;
+  const dailyJoinable = input.dailyJoinable ?? false;
+  const dailyJoinNote =
+    input.dailyJoinNote ??
+    "analytics_user_daily.install_key 는 원시 설치 ID 이고 analytics_identity/link install_key 는 HMAC 이라 아직 직접 조인할 수 없습니다.";
   const base = {
+    metric,
     disabledReason: null as string | null,
-    linkedInstalls: input.linkedInstalls,
-    totalInstalls: input.totalInstalls,
-    linkedActiveInstalls: input.linkedActiveInstalls,
-    activeInstalls: input.activeInstalls,
+    identityLinkedInstalls,
+    identityTotalInstalls,
+    dailyActiveInstalls,
+    dailyLinkedActiveInstalls,
+    dailyJoinable,
+    dailyJoinNote,
+    linkedInstalls: identityLinkedInstalls,
+    totalInstalls: identityTotalInstalls,
+    linkedActiveInstalls: dailyLinkedActiveInstalls,
+    activeInstalls: dailyActiveInstalls,
     excludedSharedInstalls: input.excludedSharedInstalls,
     effectiveFrom: input.gate.effectiveFrom,
     basis: input.basis,
@@ -892,9 +946,20 @@ export function computePersonAxisCoverage(
       disabledReason: input.gate.reason,
       // 닫혀 있으면 어떤 수치도 신뢰할 근거가 없다 — 0 으로 접는다.
       linkedInstalls: 0,
+      identityLinkedInstalls: 0,
       linkedActiveInstalls: 0,
+      dailyLinkedActiveInstalls: 0,
       lastLinkedAt: null,
     };
+  }
+  if (metric === "identity_linked_ratio") {
+    if (identityLinkedInstalls <= 0 || identityTotalInstalls <= 0) {
+      return { ...base, state: "pending" };
+    }
+    if (identityLinkedInstalls >= identityTotalInstalls) {
+      return { ...base, state: "complete" };
+    }
+    return { ...base, state: "ingesting" };
   }
   if (input.linkedInstalls <= 0 || input.activeInstalls <= 0) {
     return { ...base, state: "pending" };
@@ -1127,7 +1192,7 @@ export const PERSON_AXIS_LINK_POLICY_VERSION = "2026-08-21";
 export const PERSON_AXIS_FORWARD_ONLY_NOTE =
   "사람 축 링크는 forward-only 입니다 — 각 설치는 '다음에 인증할 때' 부터 " +
   "붙습니다. 그래서 켠 직후에 연결된 설치가 거의 없는 것이 정상이고, 여기 " +
-  "낮은 커버리지는 '사람이 없다' 가 아니라 '아직 안 붙었다' 입니다. 잠자는 " +
+  "낮은 identity linked ratio 는 '사람이 없다' 가 아니라 '아직 안 붙었다' 입니다. 잠자는 " +
   "설치는 며칠에서 영원히 안 붙을 수 있습니다.";
 
 /** MERGE 파라미터 이름. SQL 과 params 가 갈라지지 않게 한 곳에서 센다. */
@@ -1209,11 +1274,17 @@ export function buildUserInstallMergeParams(
 //   @effective_from) — BQ 가 쿼리 본문을 job 히스토리에 수개월 보관한다.
 
 /**
- * 커버리지 한 벌을 세는 SQL (설계 §10.3).
+ * identity_linked_ratio 한 벌을 세는 SQL.
  *
- * ★`complete` 판정의 분모인 `active_installs` 는 **조회 구간 ∩ 상한** 안에서
- * 센다. 상한을 빼먹으면 발효일 이전 설치까지 분모에 들어가 커버리지가 영원히
- * 100% 가 안 되고, 그러면 이 장치가 늑대소년이 된다.
+ * ★잠정 조치다. `analytics_user_daily.install_key` 는 아직 raw 설치 ID 이고
+ * `analytics_identity`/링크표는 HMAC install_key 다. daily 를 분모로 삼으면
+ * 분자와 키 공간이 달라 0% 에 고착된다. 그래서 읽기 쿼리만 가역적으로 바꿔
+ * 분모를 `analytics_identity` 의 HMAC install_key 집합으로 둔다.
+ *
+ * ★진짜 답은 키 단위 통일이다(후속 티켓 iQNi0PHs0J9FY6HQnb1P).
+ * `analytics_user_daily.install_key_hmac` 을 nullable 로 추가해 새 행부터 채우면
+ * daily activity 와 identity/link 축을 같은 키로 조인할 수 있다. 소급 재작성은
+ * 하지 않는다.
  *
  * ★공용 기기 설치는 `linked` 에서 빼고 `excluded_shared_installs` 로 **센다.**
  * 뷰(`buildOpenGateSql`)와 같은 규칙이어야 화면의 분모와 표의 행 수가 맞는다.
@@ -1221,6 +1292,7 @@ export function buildUserInstallMergeParams(
 export function buildPersonAxisCoverageSql(projectId: string): string {
   const link = `\`${projectId}.${IDENTITY_DATASET}.${TABLE_USER_INSTALL}\``;
   const daily = `\`${projectId}.${TELEMETRY_DATASET}.${SOURCE_TABLE_USER_DAILY}\``;
+  const identity = `\`${projectId}.${TELEMETRY_DATASET}.${SOURCE_TABLE_ANALYTICS_IDENTITY}\``;
   return [
     "WITH shared AS (",
     "  -- 공용 기기: 한 설치에 계정이 둘 이상(설계 §5.5). 값을 만들지 않고 센다.",
@@ -1231,22 +1303,23 @@ export function buildPersonAxisCoverageSql(projectId: string): string {
     `  SELECT DISTINCT install_key FROM ${link}`,
     "  WHERE install_key NOT IN (SELECT install_key FROM shared)",
     "),",
-    "active AS (",
-    "  -- ★조회 구간 ∩ 상한. complete 판정의 분모라 여기가 틀리면 화면이",
-    "  --   완전성을 거짓말한다.",
+    "identity AS (",
+    "  -- ★HMAC install_key 정본. 이 집합이 identity_linked_ratio 의 분모다.",
+    `  SELECT DISTINCT install_key FROM ${identity}`,
+    "  WHERE install_key IS NOT NULL AND install_key != ''",
+    "),",
+    "daily_active AS (",
+    "  -- ★별도 참고 숫자. daily 는 raw install_key 라 link/identity 와 아직 조인 불가.",
     `  SELECT DISTINCT install_key FROM ${daily}`,
     "  WHERE day >= GREATEST(DATE(@since), DATE(@effective_from)) AND active",
     "),",
-    "total AS (",
-    `  SELECT DISTINCT install_key FROM ${daily}`,
-    "  WHERE day >= DATE(@effective_from)",
-    ")",
     "SELECT",
-    "  (SELECT COUNT(*) FROM linked) AS linked_installs,",
-    "  (SELECT COUNT(*) FROM total) AS total_installs,",
-    "  (SELECT COUNT(*) FROM active a JOIN linked l USING (install_key))",
+    "  (SELECT COUNT(*) FROM identity i JOIN linked l USING (install_key))",
+    "    AS linked_installs,",
+    "  (SELECT COUNT(*) FROM identity) AS total_installs,",
+    "  (SELECT COUNT(*) FROM daily_active a JOIN linked l USING (install_key))",
     "    AS linked_active_installs,",
-    "  (SELECT COUNT(*) FROM active) AS active_installs,",
+    "  (SELECT COUNT(*) FROM daily_active) AS active_installs,",
     "  (SELECT COUNT(*) FROM shared) AS excluded_shared_installs,",
     `  (SELECT CAST(MAX(first_linked_at) AS STRING) FROM ${link})`,
     "    AS last_linked_at",

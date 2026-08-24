@@ -461,10 +461,18 @@ function coverageFixture(
 ): import("./AnalyticsPanel").PersonAxisCoverage {
   return {
     state: "ingesting",
+    metric: "identity_linked_ratio",
     disabledReason: null,
     linkedInstalls: 6,
     totalInstalls: 43,
-    linkedActiveInstalls: 6,
+    identityLinkedInstalls: 6,
+    identityTotalInstalls: 43,
+    dailyActiveInstalls: 14,
+    dailyLinkedActiveInstalls: 0,
+    dailyJoinable: false,
+    dailyJoinNote:
+      "analytics_user_daily.install_key 는 원시 설치 ID 이고 analytics_identity/link install_key 는 HMAC 이라 아직 직접 조인할 수 없습니다.",
+    linkedActiveInstalls: 0,
     activeInstalls: 14,
     excludedSharedInstalls: 0,
     effectiveFrom: "2026-04-01",
@@ -493,27 +501,30 @@ test("★소급 뷰를 쓰는 카드엔 '설치 전체 이력 기준(소급)' �
   );
 });
 
-test("★적재 중 화면은 커버리지를 분수로 그리고 라벨 없이 숫자를 내놓지 않는다", () => {
+test("★적재 중 화면은 identity_linked_ratio 를 분수로 그리고 daily 조인 불가를 말한다", () => {
   const html = renderToStaticMarkup(
     <P.IngestionProgress
       coverage={coverageFixture({ excludedSharedInstalls: 2 })}
     />
   );
-  // §10.4-3 — "활동한 설치 14대 중 6대 연결됨" 이 분자/분모로 남는다.
-  assert.match(html, /6\/14/);
+  // §10.4-3 — "identity 43대 중 6대 연결됨" 이 분자/분모로 남는다.
+  assert.match(html, /6\/43/);
   assert.match(html, /남은/);
-  assert.match(html, /8대/); // 14 - 6
+  assert.match(html, /37대/); // 43 - 6
   assert.match(html, /지금 표는/);
   // §10.4-1 — complete 가 아니면 퍼센트가 헤드라인이 아니다. 분수가 먼저 온다.
-  assert.ok(html.indexOf("6/14") < html.indexOf("42.9%"));
+  assert.ok(html.indexOf("6/43") < html.indexOf("14.0%"));
   // §5.5 — 공용 기기 제외는 값을 만들지 않고 센다. 0 이어도 화면에 적는다.
   assert.match(html, /공용 기기로 판정돼 제외/);
   assert.match(html, /2대/);
   // §10.4-4 — "이 수치는 아직 커집니다" 를 먼저 말한다.
   assert.match(html, /아직 커집니다/);
   assert.match(html, /캡처해/);
-  // §10.4-2 — 분모는 '전체 설치' 가 아니라 '링크된 설치' 다.
-  assert.match(html, /링크된 설치/);
+  // §10.4-2 — 분모가 identity 라는 사실과 daily 별도 축을 말한다.
+  assert.match(html, /identity_linked_ratio/);
+  assert.match(html, /analytics_identity/);
+  assert.match(html, /daily 기준 활성 설치/);
+  assert.match(html, /raw\/HMAC 키 불일치/);
   // §10.4-5 — 기준 배지가 항상 붙는다.
   assert.match(html, /연결 이후 기준/);
 });
@@ -595,11 +606,13 @@ test("완료 상태에서도 기준 라벨과 공용기기 제외 수는 남는�
       coverage={coverageFixture({
         state: "complete",
         basis: "all_time",
-        linkedActiveInstalls: 14,
+        linkedInstalls: 43,
+        identityLinkedInstalls: 43,
       })}
     />
   );
-  assert.match(html, /14\/14/);
+  assert.match(html, /43\/43/);
+  assert.match(html, /daily 활성 14대는 별도 raw 축/);
   assert.match(html, /설치 전체 이력 기준\(소급\)/);
   assert.match(html, /공용 기기 제외/);
 });
@@ -771,7 +784,7 @@ test("★리텐션 탭은 익명축에 운영자 토글이 닿지 않는다고 �
   assert.match(html, /토글이 동작하지 않습니다/);
   assert.match(html, /is_admin 이 없어/);
   // 사람 축 칸이 서 있고, 배선 전이라 '적재 전' 으로 접힌다.
-  assert.match(html, /사람 축 커버리지/);
+  assert.match(html, /사람 축 identity_linked_ratio/);
   assert.match(html, /적재 전/);
 });
 
