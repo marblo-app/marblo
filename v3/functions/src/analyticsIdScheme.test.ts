@@ -97,6 +97,30 @@ test("★resolveLinkConfidence — 못 붙은 것은 버리지 않고 unmapped �
   assert.equal(resolveLinkConfidence(false), "unmapped");
 });
 
+test("★ga_key 만으로는 joined 가 아니다 — 백필 술어는 제품사용 AND 유입", () => {
+  // ★층 분리 (IbKZ9pB4, 오케 A 승인 2026-08-24):
+  // - analytics_identity.link_confidence 는 어트리뷰션↔텔레메트리 쌍 축이지
+  //   사람 축이 아니다. 사람 축은 analytics_user_install.
+  // - 술어는 backfill-analytics-identity.ts 의
+  //   resolveLinkConfidence(tel !== null && att !== null). ga_key 는
+  //   att.gaClientId 에서만 파생되므로, ga_key 있는 550행이 unmapped 인 것은
+  //   설계대로 정직하다(B 기각: ga_key 만으로 joined 치지 않음).
+  // - 관측(지금은 고치지 않음): analytics_identity 는 2026-08-21 스냅샷이고
+  //   라이브 writer 가 없다. 방치하면 영구히 낡는다. D(증분 업서트)는 보류.
+  const telOnly = { tel: true, att: false };
+  const attOnlyHasGaKey = { tel: false, att: true };
+  const both = { tel: true, att: true };
+  assert.equal(
+    resolveLinkConfidence(telOnly.tel && telOnly.att),
+    "unmapped"
+  );
+  assert.equal(
+    resolveLinkConfidence(attOnlyHasGaKey.tel && attOnlyHasGaKey.att),
+    "unmapped"
+  );
+  assert.equal(resolveLinkConfidence(both.tel && both.att), "joined");
+});
+
 test("ID_SCHEME_SWITCH_DATE — 경계일 상수가 실측값과 일치", () => {
   // BQ: 28자 마지막 2026-06-13, 36자 최초 2026-06-13.
   assert.equal(ID_SCHEME_SWITCH_DATE, "2026-06-13");

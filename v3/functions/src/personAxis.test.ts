@@ -340,6 +340,28 @@ test("열린 뷰 SQL 에 상한과 공용기기 제외가 둘 다 들어 있다"
   assert.ok(!all.includes("d.day >= DATE(l.first_linked_at)"));
 });
 
+test("★사람 축 뷰는 link_confidence 를 안 쓴다 — 사람 축은 analytics_user_install", () => {
+  // ★층 분리 (IbKZ9pB4, 오케 A 승인 2026-08-24):
+  // - 사람 축은 analytics_user_install 이다. identity.link_confidence 가 아니다.
+  //   2026-08-24 실측: 사람 3 / 설치 4 가 이미 붙어 있다. recordPersonAxisLink 는
+  //   멀쩡하다.
+  // - 화면이 0이던 유일한 원인은 daily.install_key(raw) ↔ link.install_key(HMAC)
+  //   키 공간 불일치였다. 형제 티켓이 install_key_hmac 을 추가했고(PR #1171,
+  //   배포 완료). 이 테스트는 뷰가 hmac 으로 잇고, link_confidence /
+  //   analytics_identity 를 읽지 않음을 고정한다.
+  // - 관측(지금은 고치지 않음): logHeartbeat 는 recordPersonAxisLink 를 안
+  //   부른다. 하트비트만 있는 세션은 영영 링크가 안 된다.
+  const since = buildPersonAxisViewSql("since_link", OPEN_GATE, PROJECT);
+  const all = buildPersonAxisViewSql("all_time", OPEN_GATE, PROJECT);
+  for (const sql of [since, all]) {
+    assert.match(sql, /JOIN link l ON l\.install_key = d\.install_key_hmac/);
+    assert.ok(sql.includes("analytics_user_daily"));
+    assert.ok(sql.includes("analytics_user_install"));
+    assert.ok(!sql.includes("link_confidence"));
+    assert.ok(!sql.includes("analytics_identity"));
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 4) 공용 기기 — 값을 만들지 않고 센다
 // ═══════════════════════════════════════════════════════════════════════════
