@@ -7,7 +7,7 @@ import { httpsCallable, getFunctions } from "firebase/functions";
 import app from "@/lib/firebase";
 import {
   buildLinkInstallPayload,
-  readFirstTouch,
+  captureFirstTouch,
   readGaClientId,
   type LinkInstallPayload,
 } from "@/lib/attribution";
@@ -53,7 +53,10 @@ export default function LinkClient() {
       const payload: LinkInstallPayload | null = buildLinkInstallPayload({
         installId: params.get("i"),
         gaClientId: readGaClientId(),
-        firstTouch: readFirstTouch(),
+        // 레이아웃 AttributionCapture 와 effect 순서가 경합하면 빈 값을
+        // 보낸 뒤에야 first-touch 가 저장된다. 이 페이지가 직접 캡처한다.
+        // 빈 /link 랜딩은 저장하지 않는다(captureFirstTouchInto 규약).
+        firstTouch: captureFirstTouch(),
         platform: params.get("p") ?? "",
         appVersion: params.get("v") ?? "",
         // `c` = 앱의 빌드 채널(dev/prod). 개발 재실행을 실유입과 나누는 표식이다.

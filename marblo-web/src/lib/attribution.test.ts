@@ -5,6 +5,8 @@ import {
   buildLinkInstallPayload,
   captureFirstTouchInto,
   deriveFirstTouch,
+  hasAttributionChannel,
+  isLinkbackPath,
   parseFirstTouch,
   parseGaClientId,
   sanitizeBuildChannel,
@@ -82,6 +84,51 @@ test("deriveFirstTouch: utm/referrer 가 없으면 빈 문자열 (direct 유입)
   assert.equal(ft.landingPath, "/");
 });
 
+test("isLinkbackPath: /link 와 /{locale}/link 만 맞춘다", () => {
+  assert.equal(isLinkbackPath("/link"), true);
+  assert.equal(isLinkbackPath("/ko/link"), true);
+  assert.equal(isLinkbackPath("/en/link/"), true);
+  assert.equal(isLinkbackPath("/ko/download"), false);
+  assert.equal(isLinkbackPath("/en"), false);
+  assert.equal(isLinkbackPath("/linking"), false);
+});
+
+test("hasAttributionChannel: utm 또는 referrer 호스트가 있어야 한다", () => {
+  assert.equal(
+    hasAttributionChannel({
+      utmSource: "",
+      utmMedium: "",
+      utmCampaign: "",
+      referrerHost: "",
+      landingPath: "/ko",
+      capturedAt: 1,
+    }),
+    false
+  );
+  assert.equal(
+    hasAttributionChannel({
+      utmSource: "google",
+      utmMedium: "",
+      utmCampaign: "",
+      referrerHost: "",
+      landingPath: "/ko",
+      capturedAt: 1,
+    }),
+    true
+  );
+  assert.equal(
+    hasAttributionChannel({
+      utmSource: "",
+      utmMedium: "",
+      utmCampaign: "",
+      referrerHost: "github.com",
+      landingPath: "/en",
+      capturedAt: 1,
+    }),
+    true
+  );
+});
+
 test("captureFirstTouchInto: 첫 방문만 저장하고 이후 방문은 덮어쓰지 않는다", () => {
   const storage = memoryStorage();
   const first = captureFirstTouchInto(
@@ -105,6 +152,111 @@ test("captureFirstTouchInto: 첫 방문만 저장하고 이후 방문은 덮어�
     JSON.parse(storage.dump()[FIRST_TOUCH_STORAGE_KEY]).utmSource,
     "youtube"
   );
+});
+
+test("captureFirstTouchInto: /link 자기 페이지의 빈 유입은 first-touch 로 잠그지 않는다", () => {
+  // 앱이 기본 브라우저로 여는 환영 페이지는 마케팅 랜딩이 아니다.
+  // 여기 빈 utm/referrer 를 저장하면 이후 진짜 채널이 영원히 덮인다
+  // (실측 548/608 행의 landingPath 가 /en/link|/ko/link 인 이유).
+  const storage = memoryStorage();
+  const ft = captureFirstTouchInto(
+    storage,
+    "https://marblo.app/ko/link?i=3f2504e0-4f89-41d3-9a0c-0305e82c3301&c=prod",
+    "",
+    1
+  );
+  assert.equal(ft, null);
+  assert.equal(storage.dump()[FIRST_TOUCH_STORAGE_KEY], undefined);
+});
+
+test("captureFirstTouchInto: 빈 first-touch(direct) 는 나중에 온 utm/referrer 로 업그레이드한다", () => {
+  const storage = memoryStorage();
+  const first = captureFirstTouchInto(storage, "https://marblo.app/ko", "", 1);
+  assert.equal(first?.utmSource, "");
+  assert.equal(first?.landingPath, "/ko");
+
+  const second = captureFirstTouchInto(
+    storage,
+    "https://marblo.app/ko/download?utm_source=google&utm_medium=cpc&utm_campaign=launch",
+    "https://www.google.com/",
+    2
+  );
+  assert.equal(second?.utmSource, "google");
+  assert.equal(second?.utmMedium, "cpc");
+  assert.equal(second?.utmCampaign, "launch");
+  assert.equal(second?.referrerHost, "www.google.com");
+  assert.equal(second?.landingPath, "/ko/download");
+  assert.equal(second?.capturedAt, 2);
+});
+
+test("captureFirstTouchInto: 빈 방문이 또 빈 방문이면 첫 값을 유지한다", () => {
+  const storage = memoryStorage();
+  captureFirstTouchInto(storage, "https://marblo.app/ko", "", 1);
+  const second = captureFirstTouchInto(
+    storage,
+    "https://marblo.app/ko/download",
+    "",
+    2
+  );
+  assert.equal(second?.landingPath, "/ko");
+  assert.equal(second?.capturedAt, 1);
+});
+
+test("captureFirstTouchInto: referrer 가 있는 first-touch 는 이후 utm 으로 덮지 않는다", () => {
+  const storage = memoryStorage();
+  captureFirstTouchInto(
+    storage,
+    "https://marblo.app/en",
+    "https://github.com/melocream/marblo",
+    1
+  );
+  const second = captureFirstTouchInto(
+    storage,
+    "https://marblo.app/en?utm_source=google",
+    "",
+    2
+  );
+  assert.equal(second?.referrerHost, "github.com");
+  assert.equal(second?.utmSource, "");
+  assert.equal(second?.capturedAt, 1);
+});
+
+test("captureFirstTouchInto: /link URL 에 utm 이 있으면 그 채널은 저장한다", () => {
+  // /link 쿼리에 utm 이 실리는 경우(수동·향후 핸드오프). 클립보드 안은 이 티켓에서 하지 않는다.
+  const storage = memoryStorage();
+  const ft = captureFirstTouchInto(
+    storage,
+    "https://marblo.app/en/link?i=3f2504e0-4f89-41d3-9a0c-0305e82c3301&utm_source=google&utm_medium=cpc&utm_campaign=launch",
+    "",
+    1
+  );
+  assert.equal(ft?.utmSource, "google");
+  assert.equal(ft?.utmMedium, "cpc");
+  assert.equal(ft?.utmCampaign, "launch");
+  assert.equal(ft?.landingPath, "/en/link");
+});
+
+test("captureFirstTouchInto: 이미 잠긴 빈 /link first-touch 는 의미 있는 방문이 덮는다", () => {
+  const storage = memoryStorage({
+    [FIRST_TOUCH_STORAGE_KEY]: JSON.stringify({
+      utmSource: "",
+      utmMedium: "",
+      utmCampaign: "",
+      referrerHost: "",
+      landingPath: "/en/link",
+      capturedAt: 1,
+    }),
+  });
+  const ft = captureFirstTouchInto(
+    storage,
+    "https://marblo.app/ko/download?utm_source=google",
+    "https://www.google.com/",
+    2
+  );
+  assert.equal(ft?.utmSource, "google");
+  assert.equal(ft?.referrerHost, "www.google.com");
+  assert.equal(ft?.landingPath, "/ko/download");
+  assert.equal(ft?.capturedAt, 2);
 });
 
 test("captureFirstTouchInto: 스토리지가 던지면 null 로 조용히 포기한다", () => {

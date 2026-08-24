@@ -125,10 +125,36 @@ export interface AttributionStorage {
 }
 
 /**
- * first-touch 를 **한 번만** 저장한다. 이미 있으면 덮어쓰지 않는다(#901 §5-3).
+ * 앱이 여는 환영 페이지(`/{locale}/link`). 마케팅 랜딩이 아니다.
+ * 여기 빈 utm/referrer 를 first-touch 로 잠그면 이후 진짜 채널이 영원히 덮인다.
+ */
+export function isLinkbackPath(pathname: string): boolean {
+  const p = pathname.replace(/\/+$/, "") || "/";
+  return p === "/link" || p.endsWith("/link");
+}
+
+/** utm 또는 referrer 호스트가 있으면 유입 채널이 있는 것이다. */
+export function hasAttributionChannel(ft: FirstTouch): boolean {
+  return Boolean(
+    ft.utmSource || ft.utmMedium || ft.utmCampaign || ft.referrerHost
+  );
+}
+
+function isLockedEmptyLinkback(ft: FirstTouch): boolean {
+  return isLinkbackPath(ft.landingPath) && !hasAttributionChannel(ft);
+}
+
+/**
+ * first-touch 를 **한 번만** 저장한다. 채널이 있는 값은 덮어쓰지 않는다(#901 §5-3).
  * 두 번째 방문의 utm 으로 첫 유입 채널을 덮으면 귀속이 통째로 틀어진다.
  *
- * @returns 저장돼 있는(또는 방금 저장한) first-touch. 스토리지 불가 시 null.
+ * 예외 두 가지:
+ *   1) `/{locale}/link` 자기 페이지의 빈 유입은 마케팅 랜딩이 아니므로 저장하지
+ *      않는다(실측 548/608 행이 이 잘못된 잠금이었다).
+ *   2) 저장된 값이 채널 없는 direct 이면, 이후 utm/referrer 가 오면 업그레이드
+ *      한다(first non-direct). 광고 클릭 전에 홈을 한 번 연 사람을 잃지 않기 위함.
+ *
+ * @returns 저장돼 있는(또는 방금 저장한) first-touch. 스토리지 불가·빈 링크백이면 null.
  */
 export function captureFirstTouchInto(
   storage: AttributionStorage,
@@ -138,11 +164,17 @@ export function captureFirstTouchInto(
 ): FirstTouch | null {
   try {
     const existing = storage.getItem(FIRST_TOUCH_STORAGE_KEY);
-    if (existing) {
-      const parsed = parseFirstTouch(existing);
-      if (parsed) return parsed;
-    }
+    const parsed = existing ? parseFirstTouch(existing) : null;
+    // 채널이 있는 first-touch 는 잠근다. 빈 값(direct)은 아래서 업그레이드할 수 있다.
+    if (parsed && hasAttributionChannel(parsed)) return parsed;
+
     const fresh = deriveFirstTouch(href, referrer, now);
+    if (isLockedEmptyLinkback(fresh)) {
+      // 빈 /link 로 덮지 않는다. 홈을 먼저 연 빈 값이 있으면 그걸 유지.
+      return parsed && !isLinkbackPath(parsed.landingPath) ? parsed : null;
+    }
+    if (parsed && !hasAttributionChannel(fresh)) return parsed;
+
     storage.setItem(FIRST_TOUCH_STORAGE_KEY, JSON.stringify(fresh));
     return fresh;
   } catch {

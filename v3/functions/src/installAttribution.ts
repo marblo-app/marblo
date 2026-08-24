@@ -11,6 +11,9 @@
 //   IP 는 레이트리밋 키로만 쓰고 행에 남기지 않는다(개인정보).
 // ★국가를 여기서 만들지 않는 이유: 국가의 정본은 GA4 geo 다(#901 §7-4).
 //   조인 시점에 GA4 쪽에서 붙으므로 클라가 보낸(=위조 가능한) 국가는 받지 않는다.
+//
+// 귀속률 조회·광고 URL 규약: v3/docs/install-attribution-utm-rate.md
+// (`ANALYTICS_ID_SALT` 무변경, 원시 식별자 미생성, IP 지문 금지).
 
 /** 콜러블이 받아 BigQuery 로 적재하는 한 행. */
 export interface InstallAttributionRow {
