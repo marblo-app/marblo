@@ -7414,6 +7414,7 @@ export const logTaskOutcome = functions.https.onCall(async (data, context) => {
       totalCost: d.totalCost ?? null,
       retriesCount: d.retriesCount ?? 0,
       errorCategory: d.errorCategory || null,
+      outcomeMode: d.outcomeMode || null,
       createdAt: d.createdAt || now,
       completedAt: d.completedAt || now,
     },
