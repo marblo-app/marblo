@@ -194,6 +194,80 @@ export const PRESENT_ONLY_DEFINITION =
   "분모에 절대 들어가지 않는다 — 실측에서 어떤 설치가 14일 중 13일 '활동' 으로 " +
   "잡혔는데 하트비트 35,170건 중 working 0건·이벤트 0건이었다.";
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ★활성화 분자·분모의 모집단 규약 (ticket sx56j9XA26yEXka8QIhr)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 2026-08-24 에 "첫 실행 → 첫 스폰 3.1%(18/577)" 가 제품 판단의 기준선으로
+// 인용됐는데, 그 비율은 **분자와 분모가 서로 다른 모집단**이었다. 실측으로
+// analytics_install_profile 606행을 출처별로 가르면:
+//
+//   어트리뷰션만 있고 이벤트 0  : 564행 — first_run 564 · first_spawn 0 · 활동일 0
+//   이벤트만 있고 어트리뷰션 0  :  43행 — first_run  12 · first_spawn 17 · 활동일 184
+//   둘 다                       :   1행
+//
+// 왜 갈리나 — **분모는 미인증 경로에서, 분자는 인증 경로에서 온다.**
+//   · `linkInstallAttribution`(#906, 2026-08-10 배포)은 **미인증** 콜러블이다.
+//     로그인하지 않은 설치도 install_attribution 에 한 줄을 남긴다.
+//   · 반면 telemetryService 의 `flushTelemetry`/`flushHeartbeats` 는
+//     `if (!auth.currentUser) return;` 로 **로그인 전 텔레메트리를 전량 폐기**한다.
+//     그래서 로그인하지 않은 설치는 events 에 단 한 줄도 남기지 않는다.
+//   → first_spawn_at 은 events 에서만 오므로, 어트리뷰션만 있는 행은 **분자를
+//     가질 수 있는 자격 자체가 없다.** 그 행들을 분모에 넣으면 비율은 설계상
+//     0 으로 수렴한다. 실제로 first_run_at 주차 기준 08-10 199건/스폰 0,
+//     08-17 368건/스폰 1 이 그 결과다 — 전환율이 떨어진 게 아니다.
+//
+// 그래서 이 파일은 비율을 고르지 않고 **모집단을 라벨링한다**:
+//   · `first_run_source`      — first_run_at 이 어느 출처에서 왔나.
+//   · `activation_observable` — 이 설치가 first_spawn_at 을 가질 **수** 있나.
+//   · `cohort_day`            — 주차 코호트 진입일(단일 정의).
+//   · `ft_browser_installs` / `install_class` — 분모 중복·개발 재실행 축.
+//
+// ★비율을 여기서 계산해 저장하지 않는다. `summarizeFirstSpawnActivation()` 이
+//   분자·분모를 **둘 다** 돌려주고, 화면은 "1/3 (33.3%)" 를 그린다.
+
+export const ACTIVATION_OBSERVABLE_DEFINITION =
+  "activation_observable = 이 설치가 인증 텔레메트리(events/heartbeats/" +
+  "task_outcomes)를 한 줄이라도 남겼는가(observed_days > 0). ★false 면 " +
+  "first_spawn_at 이 null 인 것은 '스폰을 안 했다' 가 아니라 '관측 자체가 " +
+  "불가능하다' 다 — 활성화 비율의 분모에 넣지 마라.";
+
+export const FIRST_RUN_SOURCE_DEFINITION =
+  "first_run_source = first_run_at 의 출처. " +
+  "'event'(app:first_run 이벤트) / " +
+  "'attribution'(install_attribution.linkedAt — ★미인증 경로라 분자 자격이 " +
+  "없을 수 있다) / " +
+  "'activity'(이벤트도 어트리뷰션도 없어 첫 활동일로 대체 — 시각은 그 날 " +
+  "00:00Z 가 아니라 null 이고 cohort_day 만 채운다) / null(셋 다 없음).";
+
+export const COHORT_DAY_DEFINITION =
+  "cohort_day = 주차 코호트 진입일. DATE(first_run_at) 이 있으면 그것, 없으면 " +
+  "first_active_day. ★없는 시각을 지어내지 않으려고 날짜 컬럼을 따로 둔다 — " +
+  "이게 없던 동안 이벤트만 있는 설치 43개 중 31개가 주차 표에서 통째로 빠졌다.";
+
+/**
+ * 한 브라우저(ga_key)가 이 수 이상의 '설치' 를 만들었으면 사람이 아니라
+ * **재설치 루프**로 본다.
+ *
+ * 근거(2026-08-24 실측): install_attribution 631행의 고유 gaClientId 는 **5개**다
+ * (539행 / 69행 / 16행 / 6행 / 1행). GA4 client_id 는 브라우저 프로필당 하나이므로
+ * 539명이 각자 설치했다면 브라우저도 539개여야 한다. 한 브라우저가 2주 만에
+ * 539번 '최초 실행' 을 했다는 건 localStorage 가 매 실행 초기화되는 개발 루프다.
+ * 채널 태그가 붙은 유일한 버전(3.0.35)은 80건이 **전부 dev** 였다.
+ */
+export const REINSTALL_LOOP_MIN_INSTALLS = 5;
+
+export const INSTALL_CLASS_DEFINITION =
+  "install_class = 분모 위생 등급. " +
+  "'dev_tagged'(ft_build_channel='dev' — #1071 이후 앱이 직접 표시) / " +
+  "'reinstall_loop'(같은 ga_key 가 " +
+  `${REINSTALL_LOOP_MIN_INSTALLS}개 이상의 설치를 만들었다) / ` +
+  "'distinct'(ga_key 가 있고 재설치 루프도 아니다) / " +
+  "'unknown'(ga_key 가 없어 판단 불가 — 조용히 distinct 로 치지 않는다). " +
+  "★ft_build_channel NULL 은 '알 수 없음' 이 아니라 '#1071(2026-08-21) 이전 " +
+  "앱이라 채널 파라미터가 존재하지 않았다' 다. 그 과거분은 앱을 고쳐도 채워지지 " +
+  "않으므로 ga_key 축으로 가른다.";
+
 export type ProfileHorizonKey = "d1" | "d3" | "d7" | "d14" | "d30";
 
 /** 저장하는 지평. 지시 스펙: d1/d3/d7/d14/d30. */
@@ -595,6 +669,16 @@ export type ModelMixEntry = {
   share: number | null;
 };
 
+/** first_run_at 의 출처. FIRST_RUN_SOURCE_DEFINITION. */
+export type FirstRunSource = "event" | "attribution" | "activity" | null;
+
+/** 분모 위생 등급. INSTALL_CLASS_DEFINITION. */
+export type InstallClass =
+  | "dev_tagged"
+  | "reinstall_loop"
+  | "distinct"
+  | "unknown";
+
 export type InstallProfileRow = {
   install_key: string;
   id_scheme: IdScheme;
@@ -613,10 +697,22 @@ export type InstallProfileRow = {
   // ── 이정표 ──
   first_visit_at: string | null;
   first_run_at: string | null;
+  /** ★first_run_at 이 어디서 왔나. FIRST_RUN_SOURCE_DEFINITION. */
+  first_run_source: FirstRunSource;
   first_spawn_at: string | null;
   first_completed_at: string | null;
   first_active_day: string | null;
   last_active_day: string | null;
+  /** ★주차 코호트 진입일. COHORT_DAY_DEFINITION. */
+  cohort_day: string | null;
+
+  // ── ★분자 자격·분모 위생 (ticket sx56j9XA26yEXka8QIhr) ──
+  /** ACTIVATION_OBSERVABLE_DEFINITION. false 면 활성화 분모에서 뺀다. */
+  activation_observable: boolean;
+  /** 같은 ga_key 를 공유하는 설치 수. ga_key 가 없으면 null. */
+  ft_browser_installs: number | null;
+  /** INSTALL_CLASS_DEFINITION. */
+  install_class: InstallClass;
 
   // ── 활동 ──
   observed_days: number;
@@ -721,6 +817,14 @@ export function buildInstallProfileRows(
   const topErrorLimit = Math.max(1, Math.floor(input.topErrorLimit ?? 5));
   const firstTouch = foldFirstTouch(input.firstTouch ?? []);
   const milestones = foldMilestones(input.milestones ?? []);
+  // ★분모 위생 축. foldFirstTouch 는 설치당 1행이므로 ga_key 별 엔트리 수가
+  //   곧 "그 브라우저가 만든 설치 수" 다. 실측 631행 → 브라우저 5개.
+  const browserInstalls = new Map<string, number>();
+  for (const row of firstTouch.values()) {
+    const ga = nullableStr(row.gaKey);
+    if (ga == null) continue;
+    browserInstalls.set(ga, (browserInstalls.get(ga) ?? 0) + 1);
+  }
 
   type Acc = {
     key: string;
@@ -876,16 +980,45 @@ export function buildInstallProfileRows(
     const ft = firstTouch.get(a.key);
     const ms = milestones.get(a.key);
     // 첫 실행: 이정표 이벤트가 우선, 없으면 어트리뷰션 링크 시각.
-    const firstRunAt = earliest(
-      ms?.run ?? null,
-      ft == null ? null : nullableStr(ft.linkedAt)
-    );
+    const msRun = ms?.run ?? null;
+    const ftLinked = ft == null ? null : nullableStr(ft.linkedAt);
+    const firstRunAt = earliest(msRun, ftLinked);
+    // ★출처를 남긴다. 같은 컬럼에 인증 경로(event)와 미인증 경로(attribution)의
+    //   값이 섞여 들어오는데, 그 둘은 분자 자격이 다르다.
+    const firstActiveDay = firstNum == null ? null : dayString(firstNum);
+    const firstRunSource: FirstRunSource =
+      firstRunAt == null
+        ? firstActiveDay == null
+          ? null
+          : "activity"
+        : msRun != null && (ftLinked == null || msRun <= ftLinked)
+          ? "event"
+          : "attribution";
+    // ★cohort_day 는 시각을 지어내지 않는다 — 시각이 없으면 첫 활동일을 쓴다.
+    const cohortDay =
+      firstRunAt != null ? firstRunAt.slice(0, 10) : firstActiveDay;
+
+    // ★분자 자격. 인증 텔레메트리가 한 줄이라도 있어야 first_spawn_at 이
+    //   존재할 수 있다(ACTIVATION_OBSERVABLE_DEFINITION).
+    const activationObservable = a.observedDays > 0;
+
+    const gaKey = ft == null ? null : nullableStr(ft.gaKey);
+    const browserCount = gaKey == null ? null : (browserInstalls.get(gaKey) ?? 1);
+    const buildChannel = ft == null ? null : nullableStr(ft.buildChannel);
+    const installClass: InstallClass =
+      buildChannel === "dev"
+        ? "dev_tagged"
+        : browserCount != null && browserCount >= REINSTALL_LOOP_MIN_INSTALLS
+          ? "reinstall_loop"
+          : gaKey != null
+            ? "distinct"
+            : "unknown";
 
     out.push({
       install_key: a.key,
       id_scheme: a.idScheme,
 
-      ga_key: ft == null ? null : nullableStr(ft.gaKey),
+      ga_key: gaKey,
       ft_utm_source: ft == null ? null : nullableStr(ft.utmSource),
       ft_utm_medium: ft == null ? null : nullableStr(ft.utmMedium),
       ft_utm_campaign: ft == null ? null : nullableStr(ft.utmCampaign),
@@ -893,14 +1026,20 @@ export function buildInstallProfileRows(
       ft_landing_path: ft == null ? null : nullableStr(ft.landingPath),
       ft_link_source: ft == null ? null : nullableStr(ft.linkSource),
       ft_platform: ft == null ? null : nullableStr(ft.platform),
-      ft_build_channel: ft == null ? null : nullableStr(ft.buildChannel),
+      ft_build_channel: buildChannel,
 
       first_visit_at: ft == null ? null : nullableStr(ft.firstVisitAt),
       first_run_at: firstRunAt,
+      first_run_source: firstRunSource,
       first_spawn_at: ms?.spawn ?? null,
       first_completed_at: ms?.done ?? null,
-      first_active_day: firstNum == null ? null : dayString(firstNum),
+      first_active_day: firstActiveDay,
       last_active_day: lastNum == null ? null : dayString(lastNum),
+      cohort_day: cohortDay,
+
+      activation_observable: activationObservable,
+      ft_browser_installs: browserCount,
+      install_class: installClass,
 
       observed_days: a.observedDays,
       active_days: activeDays.length,
@@ -1079,6 +1218,187 @@ export function summarizeInstallRetention(
         "불가능하다. 그만큼 운영자 도그푸드 쪽으로 낙관 편향될 수 있다.",
     ],
   };
+}
+
+// ── ★활성화(첫 실행 → 첫 스폰) 분자·분모 ─────────────────────────────────
+// 이 비율을 화면마다 각자 SQL 로 세면 정의가 갈라지고, 실제로 갈라졌다.
+// 여기 한 곳에서 센다 — 그리고 **비율만 돌려주지 않는다.** 분모에서 무엇을
+// 왜 뺐는지까지 같이 돌려준다(뺀 사실을 숨기면 그게 다음 3.1% 다).
+
+export type FirstSpawnActivationSummary = {
+  /** 코호트 창에 들어온 프로필 행 수(아무것도 안 뺀 값). */
+  installsRaw: number;
+  /** 그 중 인증 텔레메트리가 있어 분자를 가질 **수 있는** 행 수. */
+  installsObservable: number;
+  /** 분모에서 뺀 사유별 건수. 합이 installsRaw - installsObservable 이다. */
+  excludedNoTelemetry: number;
+  /** 참고용 — dev 로 태깅된 행(분모에서 별도로 뺀다). */
+  excludedDevTagged: number;
+  /** 참고용 — 같은 브라우저가 만든 재설치 루프 행. */
+  excludedReinstallLoop: number;
+  /** 고유 브라우저 수(ga_key). ga_key 가 없는 행은 각자 1로 센다. */
+  distinctBrowsers: number;
+  /** 분자 — first_spawn_at 이 있는 행 수(분모와 같은 모집단에서만 센다). */
+  spawned: number;
+  /** spawned / installsObservable. 분모 0 이면 null(0% 가 아니다). */
+  rate: number | null;
+  /** "1/3 (33.3%)" 꼴. 분모 0 이면 "—". */
+  display: string;
+  notes: string[];
+};
+
+export type FirstSpawnActivationOptions = {
+  /** cohort_day >= 이 날(포함). 없으면 하한 없음. */
+  cohortFrom?: string | null;
+  /** cohort_day <= 이 날(포함). 없으면 상한 없음. */
+  cohortTo?: string | null;
+  /** dev 태깅 행을 분모에서 뺀다(기본 true). */
+  excludeDevTagged?: boolean;
+  /** 재설치 루프 행을 분모에서 뺀다(기본 true). */
+  excludeReinstallLoop?: boolean;
+};
+
+/**
+ * 첫 실행 → 첫 스폰 활성화율. ★분모는 `activation_observable` 인 행만이다.
+ *
+ * 왜 그래야 하나는 파일 상단 "활성화 분자·분모의 모집단 규약" 에 있다. 요지는
+ * 하나다 — 어트리뷰션만 있는 행은 first_spawn_at 을 가질 자격이 없으므로,
+ * 분모에 넣으면 비율이 설계상 0 으로 수렴한다.
+ */
+export function summarizeFirstSpawnActivation(
+  profiles: ReadonlyArray<InstallProfileRow>,
+  options: FirstSpawnActivationOptions = {}
+): FirstSpawnActivationSummary {
+  const from = options.cohortFrom ?? null;
+  const to = options.cohortTo ?? null;
+  const excludeDev = options.excludeDevTagged !== false;
+  const excludeLoop = options.excludeReinstallLoop !== false;
+
+  const inWindow = profiles.filter((p) => {
+    if (p.cohort_day == null) return false;
+    if (from != null && p.cohort_day < from) return false;
+    if (to != null && p.cohort_day > to) return false;
+    return true;
+  });
+
+  const devTagged = inWindow.filter((p) => p.install_class === "dev_tagged");
+  const loop = inWindow.filter((p) => p.install_class === "reinstall_loop");
+  const denom = inWindow.filter((p) => {
+    if (!p.activation_observable) return false;
+    if (excludeDev && p.install_class === "dev_tagged") return false;
+    if (excludeLoop && p.install_class === "reinstall_loop") return false;
+    return true;
+  });
+  const spawned = denom.filter((p) => p.first_spawn_at != null).length;
+  const counted = countedRate(spawned, denom.length);
+
+  const browsers = new Set<string>();
+  for (const p of inWindow) browsers.add(p.ga_key ?? `install:${p.install_key}`);
+
+  const notes: string[] = [
+    ACTIVATION_OBSERVABLE_DEFINITION,
+    COHORT_DAY_DEFINITION,
+  ];
+  const unobservable = inWindow.filter((p) => !p.activation_observable).length;
+  if (unobservable > 0) {
+    notes.push(
+      `★분모에서 ${unobservable}행을 뺐다 — 인증 텔레메트리가 0이라 ` +
+        "first_spawn_at 이 존재할 수 없는 행이다. 이 행들을 분모에 넣으면 " +
+        "비율이 '사람이 안 썼다' 가 아니라 '측정이 안 된다' 를 뜻하게 된다."
+    );
+  }
+  if (inWindow.length > 0 && browsers.size * REINSTALL_LOOP_MIN_INSTALLS <= inWindow.length) {
+    notes.push(
+      `★분모 위생 경보 — 설치 ${inWindow.length}행이 브라우저 ${browsers.size}개에서 ` +
+        "나왔다. 사람 수가 아니라 재설치 루프를 세고 있을 가능성이 높다."
+    );
+  }
+  if (denom.length > 0 && denom.length < 10) {
+    notes.push(
+      `★모수 ${denom.length}. 퍼센트로 인용하지 마라 — 한 건이 비율을 ` +
+        `${(100 / denom.length).toFixed(0)}%p 움직인다.`
+    );
+  }
+
+  return {
+    installsRaw: inWindow.length,
+    installsObservable: inWindow.filter((p) => p.activation_observable).length,
+    excludedNoTelemetry: unobservable,
+    excludedDevTagged: devTagged.length,
+    excludedReinstallLoop: loop.length,
+    distinctBrowsers: browsers.size,
+    spawned,
+    rate: counted.rate,
+    display: counted.display,
+    notes,
+  };
+}
+
+// ── ★주차 커버리지 접기 (analyticsCoverageGuard 의 입력) ────────────────────
+
+/**
+ * 'YYYY-MM-DD' → 그 주의 월요일 'YYYY-MM-DD'.
+ *
+ * ★날짜를 **달력 날짜 그대로** 다룬다(시간대 변환 없음). cohort_day 는 이미
+ *   날짜이고, 여기서 다시 시간대를 태우면 경계 하루가 소리 없이 움직인다.
+ */
+export function weekStartMonday(day: string): string | null {
+  const n = dayNumber(day);
+  if (n == null) return null;
+  // dayNumber 는 1970-01-01 기준 일련번호이고 1970-01-01 은 목요일이다.
+  // (n + 3) % 7 이 0 이면 월요일.
+  const offset = ((n + 3) % 7 + 7) % 7;
+  return dayString(n - offset);
+}
+
+/** 커버리지 검사에 넣을 주차별 파생측 실측(원천측 eventKeys 는 호출측이 채운다). */
+export type WeeklyProfileCoverage = {
+  week: string;
+  cohortInstalls: number;
+  observableInstalls: number;
+  filledInstalls: number;
+  distinctBrowsers: number;
+};
+
+/**
+ * 프로필 행 → 주차별 (코호트 / 관측가능 / 채워짐 / 고유 브라우저).
+ *
+ * `pick` 은 검사 대상 컬럼을 고르는 함수다 — first_spawn_at 뿐 아니라
+ * first_completed_at 같은 다른 이정표에도 같은 검사를 걸 수 있게 열어 둔다.
+ */
+export function foldWeeklyProfileCoverage(
+  profiles: ReadonlyArray<InstallProfileRow>,
+  pick: (row: InstallProfileRow) => string | null
+): WeeklyProfileCoverage[] {
+  const acc = new Map<
+    string,
+    { cohort: number; observable: number; filled: number; browsers: Set<string> }
+  >();
+  for (const p of profiles) {
+    if (p.cohort_day == null) continue;
+    const week = weekStartMonday(p.cohort_day);
+    if (week == null) continue;
+    let a = acc.get(week);
+    if (!a) {
+      a = { cohort: 0, observable: 0, filled: 0, browsers: new Set() };
+      acc.set(week, a);
+    }
+    a.cohort += 1;
+    if (p.activation_observable) a.observable += 1;
+    if (pick(p) != null) a.filled += 1;
+    // ga_key 가 없는 행은 브라우저를 모르는 것이지 같은 브라우저가 아니다 —
+    // 각자 1로 센다(모르는 것을 중복으로 접으면 부풀림을 은폐한다).
+    a.browsers.add(p.ga_key ?? `install:${p.install_key}`);
+  }
+  return Array.from(acc.entries())
+    .map(([week, a]) => ({
+      week,
+      cohortInstalls: a.cohort,
+      observableInstalls: a.observable,
+      filledInstalls: a.filled,
+      distinctBrowsers: a.browsers.size,
+    }))
+    .sort((x, y) => x.week.localeCompare(y.week));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1444,7 +1764,20 @@ export const INSTALL_PROFILE_SCHEMA: ReadonlyArray<BqField> = [
   { name: "ft_platform", type: "STRING", mode: "NULLABLE" },
   { name: "ft_build_channel", type: "STRING", mode: "NULLABLE" },
   { name: "first_visit_at", type: "TIMESTAMP", mode: "NULLABLE" },
-  { name: "first_run_at", type: "TIMESTAMP", mode: "NULLABLE" },
+  {
+    name: "first_run_at",
+    type: "TIMESTAMP",
+    mode: "NULLABLE",
+    description:
+      "★출처가 두 개다(이벤트 · 어트리뷰션) — first_run_source 를 같이 읽어라. " +
+      "출처를 무시하고 세면 미인증 설치가 분모에 섞인다.",
+  },
+  {
+    name: "first_run_source",
+    type: "STRING",
+    mode: "NULLABLE",
+    description: FIRST_RUN_SOURCE_DEFINITION,
+  },
   { name: "first_spawn_at", type: "TIMESTAMP", mode: "NULLABLE" },
   { name: "first_completed_at", type: "TIMESTAMP", mode: "NULLABLE" },
   {
@@ -1455,6 +1788,32 @@ export const INSTALL_PROFILE_SCHEMA: ReadonlyArray<BqField> = [
       "★리텐션 day 0. 가입일도 첫 하트비트일도 아니라 활동 정의를 충족한 첫 날이다.",
   },
   { name: "last_active_day", type: "DATE", mode: "NULLABLE" },
+  {
+    name: "cohort_day",
+    type: "DATE",
+    mode: "NULLABLE",
+    description: COHORT_DAY_DEFINITION,
+  },
+  {
+    name: "activation_observable",
+    type: "BOOL",
+    mode: "NULLABLE",
+    description: ACTIVATION_OBSERVABLE_DEFINITION,
+  },
+  {
+    name: "ft_browser_installs",
+    type: "INT64",
+    mode: "NULLABLE",
+    description:
+      "같은 ga_key(브라우저)를 공유하는 설치 수. ★분모 중복 축이다 — " +
+      "2026-08-24 실측에서 631 '설치' 의 고유 브라우저는 5개였다.",
+  },
+  {
+    name: "install_class",
+    type: "STRING",
+    mode: "NULLABLE",
+    description: INSTALL_CLASS_DEFINITION,
+  },
   { name: "observed_days", type: "INT64", mode: "NULLABLE" },
   {
     name: "active_days",

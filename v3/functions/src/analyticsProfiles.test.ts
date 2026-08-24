@@ -24,6 +24,10 @@ import {
   buildUserDailyRows,
   classifyIdScheme,
   summarizeInstallRetention,
+  summarizeFirstSpawnActivation,
+  foldWeeklyProfileCoverage,
+  weekStartMonday,
+  REINSTALL_LOOP_MIN_INSTALLS,
   HORIZON_DEFINITION_EXACT,
   HORIZON_DEFINITION_WINDOW,
   HORIZON_DEFINITION_PENDING,
@@ -1015,4 +1019,213 @@ test("빌드 결과의 모든 컬럼이 스키마에 선언돼 있다(적재 시
   for (const k of Object.keys(account)) {
     assert.ok(accountFields.has(k), `ACCOUNT_PROFILE_SCHEMA 에 ${k} 가 없다`);
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ★활성화 분자·분모의 모집단 (ticket sx56j9XA26yEXka8QIhr)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 2026-08-24 실측 재현: analytics_install_profile 606행을 출처별로 가르면
+//   어트리뷰션만(이벤트 0) 564행 — first_run 564 · first_spawn 0 · 활동일 0
+//   이벤트만(어트리뷰션 0)  43행 — first_run  12 · first_spawn 17 · 활동일 184
+//   둘 다                    1행
+// 아래 테스트들이 못박는 건 하나다 — **분자 자격이 없는 행을 분모에 넣지 않는다.**
+
+const INSTALL_ATTR_ONLY = "bbbbbbbb-1111-2222-3333-444444444444";
+const INSTALL_EVENT_ONLY = "cccccccc-1111-2222-3333-444444444444";
+
+test("★어트리뷰션만 있고 이벤트가 0 인 설치는 활성화 분모에서 빠진다", () => {
+  // 실측 모양: 링크는 왔지만(미인증 경로) events 는 한 줄도 없다.
+  const rows = buildInstallProfileRows({
+    today: "2026-08-24",
+    daily: dailyFor(INSTALL_EVENT_ONLY, ["2026-08-18"]),
+    firstTouch: [
+      {
+        installKey: INSTALL_ATTR_ONLY,
+        gaKey: "1111111111.1111111111",
+        linkedAt: "2026-08-18T02:00:00.000Z",
+      },
+    ],
+    milestones: [
+      {
+        installKey: INSTALL_EVENT_ONLY,
+        firstSpawnAt: "2026-08-18T05:00:00.000Z",
+      },
+    ],
+  });
+  const attr = rows.find((r) => r.install_key === INSTALL_ATTR_ONLY)!;
+  const ev = rows.find((r) => r.install_key === INSTALL_EVENT_ONLY)!;
+
+  assert.equal(attr.first_run_at, "2026-08-18T02:00:00.000Z");
+  assert.equal(attr.first_run_source, "attribution");
+  assert.equal(
+    attr.activation_observable,
+    false,
+    "인증 텔레메트리가 0인데 분자 자격이 있는 것으로 잡혔다"
+  );
+  assert.equal(attr.first_spawn_at, null);
+
+  // 이벤트만 있는 설치는 app:first_run 이 없어도 코호트에 들어가야 한다.
+  assert.equal(ev.first_run_at, null);
+  assert.equal(ev.first_run_source, "activity");
+  assert.equal(ev.cohort_day, "2026-08-18");
+  assert.equal(ev.activation_observable, true);
+  assert.equal(ev.first_spawn_at, "2026-08-18T05:00:00.000Z");
+
+  const sum = summarizeFirstSpawnActivation(rows);
+  assert.equal(sum.installsRaw, 2);
+  assert.equal(sum.installsObservable, 1);
+  assert.equal(sum.excludedNoTelemetry, 1);
+  assert.equal(sum.spawned, 1);
+  assert.equal(sum.display, "1/1 (100.0%)", "분모에 미관측 행이 섞였다");
+});
+
+test("★고친 것: 종전 정의였다면 같은 데이터가 1/2 (50.0%) 로 보였다", () => {
+  // 종전 정의(분모 = first_run_at 이 있는 모든 행)를 손으로 재현해 대조한다.
+  const rows = buildInstallProfileRows({
+    today: "2026-08-24",
+    daily: dailyFor(INSTALL_EVENT_ONLY, ["2026-08-18"]),
+    firstTouch: [
+      { installKey: INSTALL_ATTR_ONLY, linkedAt: "2026-08-18T02:00:00.000Z" },
+    ],
+    milestones: [
+      {
+        installKey: INSTALL_EVENT_ONLY,
+        firstRunAt: "2026-08-18T04:00:00.000Z",
+        firstSpawnAt: "2026-08-18T05:00:00.000Z",
+      },
+    ],
+  });
+  const legacyDen = rows.filter((r) => r.first_run_at != null).length;
+  const legacyNum = rows.filter((r) => r.first_spawn_at != null).length;
+  assert.equal(legacyDen, 2);
+  assert.equal(legacyNum, 1);
+
+  const fixed = summarizeFirstSpawnActivation(rows);
+  assert.equal(fixed.installsObservable, 1);
+  assert.equal(fixed.spawned, 1);
+  assert.notEqual(
+    fixed.rate,
+    legacyNum / legacyDen,
+    "모집단을 갈랐는데도 종전과 같은 비율이 나온다"
+  );
+});
+
+test("★한 브라우저가 만든 재설치 루프는 install_class 로 갈리고 분모에서 빠진다", () => {
+  // 실측: 631 '설치' 의 고유 gaClientId 는 5개였다(539/69/16/6/1).
+  const ga = "2222222222.2222222222";
+  const loopKeys = Array.from(
+    { length: REINSTALL_LOOP_MIN_INSTALLS },
+    (_, i) => `dddddddd-1111-2222-3333-44444444440${i}`
+  );
+  const rows = buildInstallProfileRows({
+    today: "2026-08-24",
+    daily: [],
+    firstTouch: loopKeys.map((installKey) => ({
+      installKey,
+      gaKey: ga,
+      linkedAt: "2026-08-18T02:00:00.000Z",
+    })),
+  });
+  for (const r of rows) {
+    assert.equal(r.ft_browser_installs, REINSTALL_LOOP_MIN_INSTALLS);
+    assert.equal(r.install_class, "reinstall_loop");
+  }
+  const sum = summarizeFirstSpawnActivation(rows);
+  assert.equal(sum.installsRaw, REINSTALL_LOOP_MIN_INSTALLS);
+  assert.equal(sum.distinctBrowsers, 1, "한 브라우저인데 여러 개로 셌다");
+  assert.equal(sum.excludedReinstallLoop, REINSTALL_LOOP_MIN_INSTALLS);
+  assert.equal(sum.rate, null, "분모 0 인데 0% 로 잡혔다");
+});
+
+test("dev 로 태깅된 설치는 dev_tagged 로 갈린다 — ft_build_channel NULL 은 미태깅이지 prod 가 아니다", () => {
+  const rows = buildInstallProfileRows({
+    today: "2026-08-24",
+    daily: [],
+    firstTouch: [
+      {
+        installKey: INSTALL_ATTR_ONLY,
+        gaKey: "3333333333.3333333333",
+        buildChannel: "dev",
+        linkedAt: "2026-08-22T02:00:00.000Z",
+      },
+      {
+        installKey: INSTALL_EVENT_ONLY,
+        gaKey: "4444444444.4444444444",
+        linkedAt: "2026-08-22T02:00:00.000Z",
+      },
+    ],
+  });
+  const byKey = new Map(rows.map((r) => [r.install_key, r]));
+  assert.equal(byKey.get(INSTALL_ATTR_ONLY)!.install_class, "dev_tagged");
+  assert.equal(byKey.get(INSTALL_EVENT_ONLY)!.ft_build_channel, null);
+  assert.equal(
+    byKey.get(INSTALL_EVENT_ONLY)!.install_class,
+    "distinct",
+    "채널 미태깅을 dev 로도 unknown 으로도 접으면 안 된다(ga_key 는 있다)"
+  );
+});
+
+test("ga_key 가 없으면 install_class 는 unknown — 조용히 distinct 로 치지 않는다", () => {
+  const [row] = buildInstallProfileRows({
+    today: "2026-08-24",
+    daily: [],
+    firstTouch: [
+      { installKey: INSTALL_ATTR_ONLY, linkedAt: "2026-08-22T02:00:00.000Z" },
+    ],
+  });
+  assert.equal(row.ga_key, null);
+  assert.equal(row.ft_browser_installs, null);
+  assert.equal(row.install_class, "unknown");
+});
+
+test("weekStartMonday — 주 경계는 월요일이고 시간대 변환을 태우지 않는다", () => {
+  assert.equal(weekStartMonday("2026-08-24"), "2026-08-24"); // 월요일
+  assert.equal(weekStartMonday("2026-08-23"), "2026-08-17"); // 일요일
+  assert.equal(weekStartMonday("2026-08-18"), "2026-08-17");
+  assert.equal(weekStartMonday("nope"), null);
+});
+
+test("foldWeeklyProfileCoverage — 주차별로 코호트·관측가능·채워짐·브라우저를 센다", () => {
+  const rows = buildInstallProfileRows({
+    today: "2026-08-24",
+    daily: dailyFor(INSTALL_EVENT_ONLY, ["2026-08-18"]),
+    firstTouch: [
+      {
+        installKey: INSTALL_ATTR_ONLY,
+        gaKey: "5555555555.5555555555",
+        linkedAt: "2026-08-19T02:00:00.000Z",
+      },
+    ],
+    milestones: [
+      {
+        installKey: INSTALL_EVENT_ONLY,
+        firstSpawnAt: "2026-08-18T05:00:00.000Z",
+      },
+    ],
+  });
+  const weeks = foldWeeklyProfileCoverage(rows, (r) => r.first_spawn_at);
+  assert.equal(weeks.length, 1);
+  assert.deepEqual(weeks[0], {
+    week: "2026-08-17",
+    cohortInstalls: 2,
+    observableInstalls: 1,
+    filledInstalls: 1,
+    distinctBrowsers: 2,
+  });
+});
+
+test("★스키마에 모집단 컬럼이 있고 축 순수성은 그대로다", () => {
+  const names = new Set(INSTALL_PROFILE_SCHEMA.map((f) => f.name));
+  for (const col of [
+    "first_run_source",
+    "cohort_day",
+    "activation_observable",
+    "ft_browser_installs",
+    "install_class",
+  ]) {
+    assert.equal(names.has(col), true, `${col} 이 스키마에 없다`);
+  }
+  // 새 컬럼이 계정축 키를 끌고 들어오지 않았는지 다시 확인한다.
+  assertAxisPurity(TABLE_INSTALL_PROFILE, INSTALL_PROFILE_SCHEMA);
 });

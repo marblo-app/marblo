@@ -115,6 +115,11 @@ import {
   type ThirtyDayRetentionSourceRow,
 } from "./adminAnalytics";
 import {
+  auditProfileCoverage,
+  type CoverageReport,
+  type WeeklyMilestoneCoverage,
+} from "./analyticsCoverageGuard";
+import {
   buildBetaSegmentUsage,
   type GrantHolderRow,
   type SegmentActivityRow,
@@ -131,6 +136,7 @@ import {
   buildAccountProfileRows,
   buildInstallProfileRows,
   buildUserDailyRows,
+  foldWeeklyProfileCoverage,
   summarizeInstallRetention,
   type AccountBillingRow,
   type AccountCostRow,
@@ -13275,6 +13281,11 @@ type ProfileBuildResult = {
   /** 조용한 부분 실패를 막는다 — 비어서 건너뛴 테이블을 이름으로 남긴다. */
   skipped: string[];
   notes: string[];
+  /**
+   * ★"이벤트는 오는데 프로필 필드가 0" 검사 결과(ticket sx56j9XA26yEXka8QIhr).
+   * red 면 빌드는 성공하지만 이 결과의 비율을 인용하면 안 된다.
+   */
+  coverage: CoverageReport;
 };
 
 /**
@@ -13524,6 +13535,26 @@ FROM \`${ANALYTICS_DATASET}.${BQ_EVENTS_TABLE}\`
 WHERE userId IS NOT NULL AND userId != '' AND userId != 'anon'
 GROUP BY installKey`;
 
+/**
+ * ★커버리지 검사의 **원천측** 절반(ticket sx56j9XA26yEXka8QIhr).
+ *
+ * 이정표 컬럼이 비었을 때 "아무도 안 했다" 인지 "분자가 못 닿는다" 인지는
+ * 파생 테이블만 봐서는 영원히 못 가린다. 그래서 원천 events 에서 **그 주에
+ * 그 이벤트를 낸 고유 설치 수**를 따로 세어 파생측과 나란히 놓는다.
+ *
+ * 주 경계는 KST 월요일이다 — 사장님·오케가 주차를 그렇게 갈라 본다.
+ */
+const ANALYTICS_MILESTONE_SOURCE_WEEKS_SQL = `
+SELECT
+  event,
+  FORMAT_DATE('%Y-%m-%d', DATE_TRUNC(DATE(TIMESTAMP(timestamp), 'Asia/Seoul'), WEEK(MONDAY))) AS week,
+  COUNT(DISTINCT userId) AS eventKeys
+FROM \`${ANALYTICS_DATASET}.${BQ_EVENTS_TABLE}\`
+WHERE TIMESTAMP(timestamp) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+  AND userId IS NOT NULL AND userId != '' AND userId != 'anon'
+  AND event IN ('app:first_run', 'agent:spawned', 'task:completed')
+GROUP BY event, week`;
+
 // ── 계정축 소스 쿼리 ────────────────────────────────────────────────────────
 // ★cost_logs 만 본다. 익명 테이블은 이 쿼리에 등장하지 않는다 — 등장하는 순간
 //   두 축을 잇는 다리가 된다.
@@ -13620,6 +13651,60 @@ async function loadAccountBillingRows(
   return Array.from(byUser.values());
 }
 
+/**
+ * 파생측(프로필)과 원천측(events)의 주차 실측을 나란히 놓고 검사한다.
+ *
+ * ★원천측이 빈 이정표는 검사에서 빼지 않는다 — 빼면 "원천도 0" 과 "조인이
+ *   끊겼다" 가 같은 침묵이 된다. 대신 guard 가 '판단 근거 없음' 으로 적는다.
+ */
+function evaluateProfileCoverage(
+  installProfiles: ReadonlyArray<InstallProfileRow>,
+  sourceWeekRows: ReadonlyArray<Record<string, unknown>>
+): CoverageReport {
+  const byEventWeek = new Map<string, number>();
+  for (const row of sourceWeekRows) {
+    const event = typeof row.event === "string" ? row.event : "";
+    const week = typeof row.week === "string" ? row.week : "";
+    if (event === "" || week === "") continue;
+    const keys = Number(row.eventKeys ?? 0);
+    byEventWeek.set(`${event}|${week}`, Number.isFinite(keys) ? keys : 0);
+  }
+
+  const specs: Array<{
+    field: string;
+    sourceEvent: string;
+    pick: (r: InstallProfileRow) => string | null;
+  }> = [
+    {
+      field: "first_spawn_at",
+      sourceEvent: "agent:spawned",
+      pick: (r) => r.first_spawn_at,
+    },
+    {
+      field: "first_completed_at",
+      sourceEvent: "task:completed",
+      pick: (r) => r.first_completed_at,
+    },
+  ];
+
+  return auditProfileCoverage(
+    specs.map((spec) => ({
+      field: spec.field,
+      sourceEvent: spec.sourceEvent,
+      weeks: foldWeeklyProfileCoverage(installProfiles, spec.pick).map(
+        (w): WeeklyMilestoneCoverage => ({
+          week: w.week,
+          cohortInstalls: w.cohortInstalls,
+          observableInstalls: w.observableInstalls,
+          filledInstalls: w.filledInstalls,
+          eventKeys: byEventWeek.get(`${spec.sourceEvent}|${w.week}`) ?? 0,
+          distinctBrowsers: w.distinctBrowsers,
+        })
+      ),
+    }))
+  );
+}
+
 export async function buildAnalyticsProfileTablesInternal(
   windowDays = ANALYTICS_PROFILE_WINDOW_DAYS
 ): Promise<ProfileBuildResult> {
@@ -13632,8 +13717,14 @@ export async function buildAnalyticsProfileTablesInternal(
   const qp = { days, rowLimit: ANALYTICS_PROFILE_ROW_LIMIT };
 
   // ── 익명축 ────────────────────────────────────────────────────────────────
-  const [eventRows, beatRows, outcomeRows, firstTouchRows, milestoneRows] =
-    await Promise.all([
+  const [
+    eventRows,
+    beatRows,
+    outcomeRows,
+    firstTouchRows,
+    milestoneRows,
+    milestoneSourceWeeks,
+  ] = await Promise.all([
       runAnalyticsQuery("events", ANALYTICS_DAILY_EVENTS_SQL, qp, notes),
       runAnalyticsQuery(
         "heartbeats",
@@ -13654,6 +13745,14 @@ export async function buildAnalyticsProfileTablesInternal(
         notes
       ),
       runAnalyticsQuery("milestones", ANALYTICS_MILESTONES_SQL, {}, notes),
+      // ★커버리지 검사의 원천측. 파생측과 **같은 빌드 안에서** 읽어야 두 쪽의
+      //   시점이 어긋나 없는 단절이 보이는 일을 막는다.
+      runAnalyticsQuery(
+        "milestone_source_weeks",
+        ANALYTICS_MILESTONE_SOURCE_WEEKS_SQL,
+        { days },
+        notes
+      ),
     ]);
 
   const analyticsIdSalt = readAnalyticsIdSalt();
@@ -13684,6 +13783,25 @@ export async function buildAnalyticsProfileTablesInternal(
     billing: await loadAccountBillingRows(notes),
     adminUid: process.env.ADMIN_UID?.trim() ?? null,
   });
+
+  // ── ★커버리지 검사 (ticket sx56j9XA26yEXka8QIhr) ──────────────────────────
+  // "이벤트는 오는데 프로필 필드가 0" 을 사람이 주차별로 갈라 보기 **전에**
+  // 잡는다. 오늘 하루에만 같은 모양의 조용한 단절이 세 번 나왔다
+  // (#1171 person axis · #1195 GA4 조인 · 이 티켓의 첫스폰 분자).
+  const coverage = evaluateProfileCoverage(installProfiles, milestoneSourceWeeks);
+  if (coverage.status === "red") {
+    // ★던지지 않는다. 테이블은 적재해야 다음 사람이 원인을 볼 수 있다.
+    //   대신 시끄럽게 남기고, 결과 notes 에 박아 화면이 그 비율을 그냥 못 쓰게 한다.
+    functions.logger.error("[analyticsProfiles] ★커버리지 RED", {
+      findings: coverage.findings.map((f) => ({
+        rule: f.rule,
+        week: f.week,
+        field: f.field,
+        observed: f.observed,
+      })),
+    });
+  }
+  notes.push(...coverage.lines);
 
   // ── 적재 ─────────────────────────────────────────────────────────────────
   await ensureAnalyticsProfileTable(TABLE_USER_DAILY, USER_DAILY_SCHEMA, "day");
@@ -13747,6 +13865,7 @@ export async function buildAnalyticsProfileTablesInternal(
     accountProfiles: accountProfiles.length,
     skipped,
     notes,
+    coverage,
   };
   functions.logger.info("[analyticsProfiles] build done", result);
   return result;
