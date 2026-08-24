@@ -12,6 +12,7 @@
  * `~/.marblo/routing-graph.json` 에 `gpt-5.6-terra@medium` 류 키가 실제로 생기는지는
  * 앱 재시작(dist-electron/dist-mcp 재로드) 뒤 육안 확인 항목이다.
  */
+import { verdictFor } from "../../electron/composer-gate";
 import {
   describe,
   it,
@@ -188,6 +189,11 @@ class FakeAgentManager {
 
 class FakePty {
   writeAndSubmit(): void {}
+  // 티켓 RtyOMpOArfI7a5JNSzsg — 쓰기 전 컴포저 판정. 화면 없는 페이크는
+  // indeterminate(= 종전대로 쓴다)를 준다.
+  composerVerdict(): ReturnType<typeof verdictFor> {
+    return verdictFor("indeterminate");
+  }
   onData(): void {}
   onExit(): void {}
 }

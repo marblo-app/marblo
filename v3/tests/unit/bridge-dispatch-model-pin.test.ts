@@ -15,6 +15,7 @@
  * 코드**를 탄다 — 그러지 않으면 fake 를 테스트하게 된다.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { verdictFor } from "../../electron/composer-gate";
 import os from "os";
 import fs from "fs";
 import path from "path";
@@ -226,6 +227,11 @@ function amSpawnedModelFromArgs(
 
 class FakePty {
   writeAndSubmit(): void {}
+  // 티켓 RtyOMpOArfI7a5JNSzsg — 쓰기 전 컴포저 판정. 화면 없는 페이크는
+  // indeterminate(= 종전대로 쓴다)를 준다.
+  composerVerdict(): ReturnType<typeof verdictFor> {
+    return verdictFor("indeterminate");
+  }
   onData(): void {}
   onExit(): void {}
 }

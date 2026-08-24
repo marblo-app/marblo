@@ -1344,7 +1344,12 @@ const pendingListener = new PendingInstructionListener(ptyManager, {
   // 끝내 PTY 에 못 들어가면 — 오케가 보낸 "답변"이 여기 해당한다 — 그 사실을
   // 오케 PTY 로 되돌려 준다. 오케가 다시 보내거나 사장님께 올릴 수 있게.
   onDeliveryFailure: (failure) => {
-    if (!failure.permanent) return; // 재시도 여지가 남은 실패는 시끄럽게 알리지 않는다.
+    // ★보류(deferred)는 permanent 가 아니어도 **반드시** 알린다
+    // (티켓 RtyOMpOArfI7a5JNSzsg). 컴포저에 남의 초안이 있어 일부러 쓰지 않은
+    // 경우인데, 이걸 조용히 큐에만 넣으면 오케 입장에서는 "답을 보냈는데 반응이
+    // 없다" 와 구별되지 않는다 — #1160 이 55분 공백을 오독했던 바로 그 모양이다.
+    // 나머지 재시도 여지가 남은 실패는 종전대로 조용히 지나간다.
+    if (!failure.permanent && !failure.deferred) return;
     const projectId = failure.agentId.startsWith("orch-")
       ? failure.agentId.slice("orch-".length)
       : projectIdForAgent(failure.agentId) ?? "";
@@ -1354,9 +1359,17 @@ const pendingListener = new PendingInstructionListener(ptyManager, {
     // 같은 이유로 실패한다 — 콘솔 기록(큐가 이미 남김)으로만 끝낸다.
     if (!orch || failure.agentId === `orch-${projectId}`) return;
     void orch.injectMessage(
-      `[전달 실패] 에이전트 ${failure.agentId} 의 PTY 주입이 ${failure.attempts}회 시도 후 실패했습니다 ` +
-        `(사유: ${failure.reason}). 아래 내용은 전달되지 않았습니다 — 필요하면 다시 보내세요.\n` +
-        `--- 미전달 원문 (doc=${failure.docId}) ---\n${failure.message}`
+      failure.deferred
+        ? `[전달 보류] 에이전트 ${failure.agentId} 에게 아직 보내지 않았습니다 ` +
+            `(사유: ${failure.deferred} — ${failure.reason}). ` +
+            `상대 컴포저에 남의 초안이 물려 있거나 확인 다이얼로그 앞이라 지금 쓰면 ` +
+            `내용이 섞이거나 선택이 눌립니다. 지우지도 대신 제출하지도 않았고, ` +
+            `컴포저가 비는 즉시 자동으로 재전송합니다 — 이 메시지는 "안 갔다" 는 ` +
+            `사실을 알리는 것이지 다시 보내 달라는 뜻이 아닙니다.\n` +
+            `--- 보류된 원문 (doc=${failure.docId}) ---\n${failure.message}`
+        : `[전달 실패] 에이전트 ${failure.agentId} 의 PTY 주입이 ${failure.attempts}회 시도 후 실패했습니다 ` +
+            `(사유: ${failure.reason}). 아래 내용은 전달되지 않았습니다 — 필요하면 다시 보내세요.\n` +
+            `--- 미전달 원문 (doc=${failure.docId}) ---\n${failure.message}`
     );
   },
 });
@@ -5467,7 +5480,22 @@ ipcMain.on(
       "inject",
       typeof data === "string" ? data.length : -1
     );
-    ptyManager.writeAndSubmit(id, data, undefined, bracketedPaste);
+    // ★거절되면 조용히 넘기지 않는다(티켓 RtyOMpOArfI7a5JNSzsg). 이 경로는
+    // `ipcMain.on` 이라 렌더러가 결과를 못 받는다 — FeedbackInput 은 입력칸을
+    // 비우고 "보냈다" 로 보인다. 상대 컴포저에 초안이 물려 있으면 지금은 **안
+    // 보낸 것**이므로, 최소한 로그에는 사유와 원문 길이가 남아야 한다.
+    // (사용자에게 그 사실을 화면으로 알리는 것은 렌더러 몫 — 별도 티켓.)
+    void ptyManager
+      .writeAndSubmit(id, data, undefined, bracketedPaste)
+      .then((ok) => {
+        if (ok) return;
+        const gate = ptyManager.composerVerdict(id);
+        console.error(
+          `[pty:writeAndSubmit] NOT SENT to ${id} (${
+            typeof data === "string" ? data.length : -1
+          } chars) — ${gate.refusal ?? "write rejected"}: ${gate.reason}`
+        );
+      });
   }
 );
 

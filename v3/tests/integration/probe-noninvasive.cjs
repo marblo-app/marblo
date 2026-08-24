@@ -233,20 +233,56 @@ async function scenarioDraftInComposer(pty) {
   });
 
   // ── 대조군: 기각된 후보 (c) 를 실제로 걸어본다 ──────────────────────────
-  // writeAndSubmit 은 입력버퍼 확인 없이 CR 을 보낸다. 그 결과를 실측한다.
-  pty.writeAndSubmit(id, "");
-  await settle(buf, 600, 6000);
-  const afterKeystrokeProbe = buf.text;
+  //
+  // ★티켓 RtyOMpOArfI7a5JNSzsg 이후 이 대조군은 **두 겹**이다.
+  //
+  //   (1) 우리 전달 경로(`writeAndSubmit`)로는 (c) 를 더 이상 걸 수 없다.
+  //       주입 직전 컴포저 판정이 초안을 보고 거절한다 — 남의 초안을 대신
+  //       제출하는 일이 코드에서 사라졌다. ★이 셸 fixture 는 컴포저 화살표를
+  //       그리지 않는다. 그런데도 판정이 걸리는 것은 **입력측 증거**(우리가
+  //       아는 미제출 키 입력) 덕이다 — 화면을 못 읽는 하네스에서도 산다.
+  //   (2) 그 아래 원시 계층에서는 위험이 그대로다 — 생 CR 하나가 초안을
+  //       제출한다. (1) 이 왜 필요한지가 여기 있다. 그래서 기각 근거는
+  //       추억이 아니라 지금도 도는 실측으로 남는다.
+  const gated = await pty.writeAndSubmit(id, "");
+  await settle(buf, 400, 4000);
+  const afterGated = buf.text;
 
   check(
-    "S2-대조군: ★(c) PTY 문자 주입은 실제로 초안을 제출해 버린다 — 기각이 옳았다",
+    "S2-대조군(1): ★(c) 는 이제 전달 경로에서 막힌다 — 초안이 그대로 살아 있다",
+    () => {
+      assert.strictEqual(gated, false, "writeAndSubmit 이 거절하지 않았다");
+      assert.strictEqual(
+        pty.composerState(id),
+        "occupied",
+        "컴포저 판정이 occupied 가 아니다",
+      );
+      assert.strictEqual(
+        afterGated,
+        afterProbe,
+        "거절했는데 화면이 바뀌었다 — 뭔가 PTY 로 나갔다",
+      );
+      assert.ok(
+        !/(^|[^\'])DRAFT_RAN/m.test(afterGated),
+        "초안이 실행됐다 — 대신 제출해 버렸다",
+      );
+    },
+  );
+
+  // (2) 원시 계층: 게이트를 거치지 않는 생 CR.
+  pty.write(id, "\r");
+  await settle(buf, 600, 6000);
+  const afterRawCr = buf.text;
+
+  check(
+    "S2-대조군(2): ★생 CR 은 여전히 초안을 제출한다 — (c) 기각이 옳았다",
     () => {
       assert.ok(
-        afterKeystrokeProbe.length > afterProbe.length,
+        afterRawCr.length > afterGated.length,
         "CR 을 넣었는데 화면이 그대로다 — 대조군이 성립하지 않았다(하네스 문제)",
       );
       assert.ok(
-        /(^|[^'])DRAFT_RAN/m.test(afterKeystrokeProbe),
+        /(^|[^\'])DRAFT_RAN/m.test(afterRawCr),
         "CR 주입 후에도 초안이 실행되지 않았다 — 대조군이 성립하지 않았다(하네스 문제)",
       );
     },

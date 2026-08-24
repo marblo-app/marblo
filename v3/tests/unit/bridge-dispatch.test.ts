@@ -14,6 +14,7 @@
  * Electron / node-pty / git.
  */
 import { beforeAll, describe, it, expect, vi } from "vitest";
+import { verdictFor } from "../../electron/composer-gate";
 import * as path from "node:path";
 
 /**
@@ -209,6 +210,11 @@ class FakePtyManager {
   writes: { sid: string; text: string }[] = [];
   writeAndSubmit(sid: string, text: string): void {
     this.writes.push({ sid, text });
+  }
+  // 티켓 RtyOMpOArfI7a5JNSzsg — 디스패치도 쓰기 전에 컴포저를 본다. 이 페이크는
+  // 화면이 없으므로 실제 PtyManager 와 같은 답: indeterminate = 종전대로 쓴다.
+  composerVerdict(): ReturnType<typeof verdictFor> {
+    return verdictFor("indeterminate");
   }
   onData(): void {}
   onExit(): void {}

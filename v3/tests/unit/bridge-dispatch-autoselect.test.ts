@@ -28,6 +28,7 @@
  * 다양성 발동 조건을 못 만든 것이었다. 그래서 아래 두 mock 이 쿼터·그래프를
  * **테스트가 지정하는 값**으로 고정하고, 다양성은 그 조건을 세팅해 검증한다.
  */
+import { verdictFor } from "../../electron/composer-gate";
 import {
   describe,
   it,
@@ -249,6 +250,11 @@ class RealishAgentManager {
 
 class FakePty {
   writeAndSubmit(): void {}
+  // 티켓 RtyOMpOArfI7a5JNSzsg — 쓰기 전 컴포저 판정. 화면 없는 페이크는
+  // indeterminate(= 종전대로 쓴다)를 준다.
+  composerVerdict(): ReturnType<typeof verdictFor> {
+    return verdictFor("indeterminate");
+  }
   onData(): void {}
   onExit(): void {}
 }

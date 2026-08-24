@@ -3,6 +3,12 @@ import fs from "fs";
 import os from "os";
 import { detectDangerousCommand, type DangerMatch } from "./danger-command";
 import { collectDescendants, readProcTree } from "./proc-tree";
+import {
+  ComposerTracker,
+  type ComposerRefusal,
+  type ComposerState,
+  type ComposerVerdict,
+} from "./composer-gate";
 
 /**
  * A pseudo-terminal MASTER fd that node-pty opens at spawn but neither exposes
@@ -78,7 +84,17 @@ export function isBusySignal(data: string): boolean {
  *   났다 — 754ms(정상 전달)와 752ms(완전 유실)가 반환값·소요시간·로그 어느 것으로도
  *   구별되지 않았다. 그 구간을 confirmed 라고 부르는 것이 유실을 은폐해 왔다.
  */
-export type SubmitOutcome = "confirmed" | "unconfirmed" | "indeterminate";
+export type SubmitOutcome =
+  | "confirmed"
+  | "unconfirmed"
+  | "indeterminate"
+  /**
+   * ★쓰지 않았다 (티켓 RtyOMpOArfI7a5JNSzsg). 위 셋은 "썼는데 제출됐나" 를 재는
+   * 축이고, 이건 그 앞이다 — 컴포저가 오염돼 있어 **아예 쓰지 않기로** 했다.
+   * `delivered=false` 로 돌아가므로 호출부(InstructionDeliveryQueue)가 재시도·
+   * 보류를 판단하고, `refusal` 이 발신자에게 돌려줄 기계 판독 사유다.
+   */
+  | "refused";
 
 /** 제출 1건의 관측 결과. 판정 단어가 아니라 관측 사실을 담는다. */
 export interface SubmitObservation {
@@ -92,6 +108,10 @@ export interface SubmitObservation {
   textLength: number;
   /** 오케/사람에게 보여줄 한 줄 근거(한국어). */
   reason: string;
+  /** 쓰기 직전에 읽은 컴포저 상태(티켓 RtyOMpOArfI7a5JNSzsg). */
+  composer?: ComposerState;
+  /** `outcome === "refused"` 일 때의 기계 판독 사유. */
+  refusal?: ComposerRefusal;
 }
 
 export class PtyManager {
@@ -108,6 +128,13 @@ export class PtyManager {
   private lastBusySignalAt: Map<string, number> = new Map();
   /** 제출 관측 구독자 — onSubmitOutcome(). */
   private submitOutcomeListeners: Array<(o: SubmitObservation) => void> = [];
+  /**
+   * ★주입 직전 컴포저 판정기(티켓 RtyOMpOArfI7a5JNSzsg). 세션의 출력(화면)과
+   * 입력(사람이 친 키·우리가 붙여넣은 본문)을 둘 다 먹고, "지금 써도 되는가" 에
+   * 답한다. 오염돼 있으면 `writeAndSubmit` 이 **쓰지 않고** false 로 돌아간다 —
+   * 지우지도, 남의 초안을 대신 제출하지도 않는다.
+   */
+  private composer = new ComposerTracker();
 
   // --- PTY master-fd leak guard ---
   // node-pty (1.1.0) opens TWO /dev/ptmx master devices per spawn on macOS: the
@@ -327,8 +354,11 @@ export class PtyManager {
     // submitWithRetry 가 CR 직전 베이스라인("이미 뜨거운 스트림인가")을 여기서
     // 읽는다 — 별도 대기창을 두지 않으므로 제출 지연이 0이다.
     this.lastBusySignalAt.delete(id);
+    this.composer.forget(id);
     proc.onData((chunk: string) => {
       if (SUBMIT_SIGNAL.test(chunk)) this.lastBusySignalAt.set(id, Date.now());
+      // 컴포저 판정의 출력측 증거. 같은 리스너에 얹어 청크당 순회를 늘리지 않는다.
+      this.composer.observe(id, chunk);
     });
     return session;
   }
@@ -345,6 +375,49 @@ export class PtyManager {
         (l) => l !== listener,
       );
     };
+  }
+
+  /**
+   * 지금 이 세션에 써도 되는가 (티켓 RtyOMpOArfI7a5JNSzsg).
+   *
+   * `writeAndSubmit` 이 내부적으로 이미 보지만, 호출부가 **쓰기 전에** 사유를
+   * 알아야 하는 경우가 있다 — `InstructionDeliveryQueue` 는 이 판정으로 "시도
+   * 예산을 태우지 않고 보류" 를 고른다(안 쓴 것은 실패한 시도가 아니다).
+   */
+  composerVerdict(id: string): ComposerVerdict {
+    return this.composer.verdict(id);
+  }
+
+  /** 판정 단어만. */
+  composerState(id: string): ComposerState {
+    return this.composer.state(id);
+  }
+
+  /**
+   * 컴포저가 **막힘 → 풀림** 으로 바뀌는 순간. 재시도 정책의 심장이다 —
+   * 초안 작성자가 자기 손으로 제출하거나 다이얼로그를 닫으면 그때 알려 주므로,
+   * 보류된 전달이 폴링 없이 되살아난다.
+   */
+  onComposerFree(listener: (sessionId: string) => void): () => void {
+    return this.composer.onFree(listener);
+  }
+
+  /** 쓰지 않기로 한 사실을 관측 채널로 내보낸다. 조용한 거절은 없다. */
+  private emitRefusal(
+    id: string,
+    text: string,
+    gate: ComposerVerdict,
+  ): void {
+    this.emitSubmitOutcome({
+      sessionId: id,
+      outcome: "refused",
+      attempts: 0,
+      streamHotBeforeCr: false,
+      textLength: text.length,
+      composer: gate.state,
+      refusal: gate.refusal ?? undefined,
+      reason: gate.reason,
+    });
   }
 
   private emitSubmitOutcome(o: SubmitObservation): void {
@@ -404,6 +477,10 @@ export class PtyManager {
     const session = this.sessions.get(id);
     if (session) {
       session.process.write(data);
+      // ★컴포저 판정의 입력측 증거. 사람이 터미널 탭에 친 키가 전부 이 경로로
+      // 지나가므로, "쳤는데 아직 엔터를 안 눌렀다"(=초안이 물려 있다)를 화면을
+      // 못 읽는 하네스에서도 안다.
+      this.composer.noteInput(id, data);
       // Raw keystroke path (human typing in the terminal tab). Only a CR/LF
       // means the composed line was actually submitted — bare characters,
       // arrow keys and the like are still mid-composition, not a new turn.
@@ -456,6 +533,23 @@ export class PtyManager {
       if (blocked) return Promise.resolve(false);
     }
 
+    // ★주입 직전 컴포저 판정 (티켓 RtyOMpOArfI7a5JNSzsg). 오염돼 있으면 쓰지
+    // 않는다 — 초안 뒤에 이어붙으면 한 덩어리로 제출돼 원문이 영영 도착하지 않고
+    // ([y/n] 앞이면 첫 글자가 선택으로 소비되고), 그 사실은 반환값에도 로그에도
+    // 안 남는다(#1160 S2·S5 실측).
+    //
+    // 큐가 비어 있을 때만 여기서 본다. 큐가 있으면 지금 화면은 앞 메시지가 쓰이기
+    // **전**이라 지금 판정이 뒤 메시지의 처지를 말해 주지 않는다 — 그 경우는 아래
+    // performWriteAndSubmit 이 자기 차례에 다시 본다. 여기서 먼저 걸러 두는 이유는
+    // 오직 하나, 쓰지도 않을 턴을 emitSubmit 으로 선언하지 않기 위해서다.
+    if (!this.writeAndSubmitQueues.has(id)) {
+      const gate = this.composer.verdict(id);
+      if (!gate.writable) {
+        this.emitRefusal(id, text, gate);
+        return Promise.resolve(false);
+      }
+    }
+
     // Every accepted writeAndSubmit IS a submitted turn (dispatch / reuse /
     // nudge / Telegram forward / pending instruction). Announce it SYNCHRONOUSLY
     // here rather than at flush time: submits queue behind one another, and a
@@ -503,11 +597,22 @@ export class PtyManager {
   ): Promise<boolean> {
     if (this.sessions.get(id) !== session) return false;
 
+    // ★자기 차례가 온 지금 다시 본다. 큐에서 기다리는 동안 앞 메시지가 컴포저에
+    // 남았을 수도, 사람이 타이핑을 시작했을 수도, 다이얼로그가 떴을 수도 있다.
+    const gate = this.composer.verdict(id);
+    if (!gate.writable) {
+      this.emitRefusal(id, text, gate);
+      return false;
+    }
+
     if (bracketedPaste) {
       session.process.write(`\x1b[200~${text}\x1b[201~`);
     } else {
       session.process.write(text);
     }
+    // 우리가 넣은 본문도 입력측 증거다 — CR 이 끝내 안 먹히면 이 텍스트가 그대로
+    // 컴포저에 남고, 그때 다음 주입을 막는 것이 바로 이 표시다.
+    this.composer.noteInput(id, text);
 
     // The trailing CR must register as a DISCRETE submit keystroke. A single
     // fixed gap is a timing race: under load (busy Electron main loop, many
@@ -599,6 +704,9 @@ export class PtyManager {
       });
 
       session.process.write("\r");
+      // CR = 제출 시도. 입력측 표시를 지운다(composer-gate 헤더의 "★CR 을 쓰면
+      // 입력측 표시를 지운다" 참조 — 이후의 진실은 화면이 말한다).
+      this.composer.noteInput(id, "\r");
       const attempts = attempt + 1;
 
       setTimeout(() => {
@@ -689,6 +797,7 @@ export class PtyManager {
       this.blockDangerousSessions.delete(id);
       this.submitListeners.delete(id);
       this.lastBusySignalAt.delete(id);
+      this.composer.forget(id);
     }
   }
 
@@ -968,6 +1077,7 @@ export class PtyManager {
           this.sessions.delete(id);
           this.submitListeners.delete(id);
           this.lastBusySignalAt.delete(id);
+          this.composer.forget(id);
         }
         // The child is gone. node-pty MAY release the master fd via its own
         // exit→socket-destroy timeout, but that path is best-effort on macOS
@@ -1035,6 +1145,7 @@ export class PtyManager {
         );
         this.destroyProcess(session.process, session.orphanFds);
         this.sessions.delete(id);
+        this.composer.forget(id);
       }
     }
   }

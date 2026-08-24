@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { verdictFor } from "../../electron/composer-gate";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -51,6 +52,8 @@ function makeHarness() {
     onData: vi.fn(),
     onExit: vi.fn(),
     writeAndSubmit: vi.fn(async () => true),
+    // 티켓 RtyOMpOArfI7a5JNSzsg — 부트 프롬프트도 컴포저 판정을 거친다.
+    composerVerdict: vi.fn(() => verdictFor("indeterminate")),
     liveSessions,
   };
 

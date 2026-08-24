@@ -13,6 +13,11 @@
 // #1157 의 probe-noninvasive.cjs 와 같은 계보다: 기각/채택이 취향이 아니라
 // 실측 결과였음을 코드로 남긴다.
 //
+// ★티켓 RtyOMpOArfI7a5JNSzsg 이후: S2·S5 는 **고쳐졌다**. 그래서 이 두 시나리오는
+//   이제 "오염을 실증" 하는 것이 아니라 "오염이 일어나지 않음 + 사유가 돌아옴 +
+//   ★남의 초안이 바이트 단위로 살아 있음" 을 잠근다. 나머지(S1·S3·S4·S6)는 회귀
+//   가드로 그대로 있다 — 빈 컴포저 경로의 행동이 하나도 안 바뀌었음을 증명한다.
+//
 //   빌드 먼저:  npx tsc -p electron/tsconfig.json
 //   실행:       ~/.nvm/versions/node/v22.13.0/bin/node \
 //                 tests/integration/answer-delivery-composer.cjs
@@ -69,7 +74,15 @@ const ANSWER = [
 
 /** 세션의 stdout 을 모으면서 관측 마커를 파싱한다. */
 function observe(pty, id) {
-  const o = { text: "", submits: [], emptySubmits: 0, dialogs: [] };
+  const o = {
+    text: "",
+    submits: [],
+    emptySubmits: 0,
+    dialogs: [],
+    // fixture 가 리페인트마다 흘리는 컴포저 전문. 마지막 값이 지금 버퍼다 —
+    // 초안 보존을 화면 스크레이핑이 아니라 이 값으로 잰다.
+    composers: [],
+  };
   pty.onData(id, (chunk) => {
     o.text += chunk;
     for (const m of chunk.matchAll(/<<<SUBMIT:(.*?)>>>/gs)) {
@@ -84,6 +97,13 @@ function observe(pty, id) {
         o.dialogs.push(JSON.parse(m[1]));
       } catch {
         o.dialogs.push(m[1]);
+      }
+    }
+    for (const m of chunk.matchAll(/<<<COMPOSER:(.*?)>>>/gs)) {
+      try {
+        o.composers.push(JSON.parse(m[1]));
+      } catch {
+        o.composers.push(m[1]);
       }
     }
     o.emptySubmits += (chunk.match(/<<<EMPTYSUBMIT>>>/g) || []).length;
@@ -164,8 +184,16 @@ async function s1EmptyComposer(pty) {
 }
 
 // ── S2 — ★본론: 컴포저에 초안이 물려 있다 ────────────────────────────────
-// #1157 S2-대조군은 "빈 텍스트 + CR 이 초안을 제출한다" 까지 보였다. 여기서는
-// 한 걸음 더 간다: **답 본문을 주입하면 어떻게 되는가**.
+//
+// #1160 이 여기서 실측한 것: 답이 초안 뒤에 이어붙어 `"아직 쓰는 중인 초안입니다
+// [답변 도착] question_id=…"` 한 덩어리로 제출됐고, 답 원문은 영영 도착하지 않았다.
+// 그런데도 writeAndSubmit 은 true 였다.
+//
+// 티켓 RtyOMpOArfI7a5JNSzsg 의 채택안(D) 이후 계약이 바뀐다 — **쓰지 않는다.**
+//   · 제출 0건 (섞인 덩어리가 아예 안 생긴다)
+//   · writeAndSubmit=false (발신자가 실패를 안다)
+//   · 판정 refused / 사유 composer-occupied (발신자가 **왜**인지도 안다)
+//   · ★초안은 바이트 단위로 그대로 살아 있다 — 지우지도, 대신 제출하지도 않았다
 async function s2DraftInComposer(pty) {
   const id = "ans-draft";
   const o = await spawnTui(pty, id);
@@ -179,54 +207,96 @@ async function s2DraftInComposer(pty) {
     assert.strictEqual(o.submits.length, 0);
   });
 
+  const state = pty.composerState(id);
+  const ok = await pty.writeAndSubmit(id, ANSWER);
+  await sleep(400);
+
+  const obs = lastOutcome(id);
+  fact(
+    `S2 초안 물림: 판정=${state}, writeAndSubmit=${ok}, ` +
+      `제출 ${o.submits.length}건, 사유=${obs && obs.refusal}`,
+  );
+
+  check("S2: ★컴포저 판정 = occupied (주입 전에 읽어 낸다)", () => {
+    assert.strictEqual(state, "occupied");
+  });
+
+  check("S2: ★아무것도 제출되지 않았다 — 초안+답 덩어리가 생기지 않는다", () => {
+    assert.strictEqual(o.submits.length, 0, `제출 ${o.submits.length}건`);
+  });
+
+  check("S2: ★writeAndSubmit 이 false — 발신자가 실패를 안다", () => {
+    assert.strictEqual(ok, false);
+  });
+
+  check("S2: ★사유가 발신자에게 돌아간다 (refused / composer-occupied)", () => {
+    assert.ok(obs, "판정이 관측되지 않았다");
+    assert.strictEqual(obs.outcome, "refused");
+    assert.strictEqual(obs.refusal, "composer-occupied");
+    assert.strictEqual(obs.composer, "occupied");
+    assert.ok(obs.reason && obs.reason.length > 0, "사람이 읽을 근거가 비었다");
+  });
+
+  check("S2: ★남의 초안이 바이트 단위로 살아 있다 (지우지 않았다)", () => {
+    const now = o.composers[o.composers.length - 1];
+    assert.strictEqual(now, DRAFT, `컴포저=${JSON.stringify(now)}`);
+  });
+
+  check("S2: ★답 본문이 컴포저에 단 한 글자도 들어가지 않았다", () => {
+    const now = o.composers[o.composers.length - 1] || "";
+    assert.ok(!now.includes(ANSWER.slice(0, 12)), "답이 섞여 들어갔다");
+  });
+
+  check("S2: ★대신 제출하지도 않았다 (CR 만 보내는 안의 회귀 가드)", () => {
+    assert.strictEqual(o.submits.length + o.emptySubmits, 0);
+  });
+
+  pty.kill(id);
+}
+
+// ── S2b — ★풀림: 초안 작성자가 자기 손으로 제출하면 다시 쓸 수 있다 ────────
+//
+// (D) 안이 "영영 안 보냄" 이 되지 않으려면 **풀리는 순간**이 있어야 한다. 그
+// 순간은 우리가 만들지 않는다 — 초안의 주인이 엔터를 치는 그때다. 재시도 정책은
+// 폴링이 아니라 이 전이(`PtyManager.onComposerFree`)에 걸려 있다.
+async function s2bFreesAfterOwnerSubmits(pty) {
+  const id = "ans-draft-free";
+  const o = await spawnTui(pty, id);
+
+  const freed = [];
+  const off = pty.onComposerFree((sid) => freed.push(sid));
+
+  pty.write(id, "제 초안입니다");
+  await sleep(200);
+  const blocked = await pty.writeAndSubmit(id, ANSWER);
+
+  check("S2b: 초안이 물린 동안에는 거절된다", () => {
+    assert.strictEqual(blocked, false);
+  });
+
+  // 초안의 **주인**이 엔터를 친다. 우리가 아니다.
+  pty.write(id, "\r");
+  await sleep(250);
+
+  check("S2b: ★컴포저가 풀렸다고 알려 온다 (재시도 정책의 트리거)", () => {
+    assert.ok(freed.includes(id), `onComposerFree 미발화 (${freed.join(",")})`);
+  });
+
   const ok = await pty.writeAndSubmit(id, ANSWER);
   await sleep(400);
 
   fact(
-    `S2 초안 물림: writeAndSubmit=${ok}, 제출 ${o.submits.length}건, ` +
-      `첫 제출 접두 ${JSON.stringify((o.submits[0] || "").slice(0, 24))}`,
+    `S2b 풀림: 주인 제출 후 writeAndSubmit=${ok}, 제출 ${o.submits.length}건`,
   );
 
-  check("S2: 제출은 여전히 1회다 — 답이 따로 도착하지 않는다", () => {
-    assert.strictEqual(o.submits.length, 1, `제출 ${o.submits.length}건`);
-  });
-
-  check(
-    "S2: ★답이 초안과 **한 덩어리로 섞여** 제출된다 (전달 오염 실증)",
-    () => {
-      assert.strictEqual(
-        o.submits[0],
-        DRAFT + ANSWER,
-        "초안+답 결합이 아니다 — 모형 가정이 깨졌다",
-      );
-    },
-  );
-
-  check(
-    "S2: ★에이전트가 받은 것은 답 원문이 아니다 (원문 그대로는 절대 안 온다)",
-    () => {
-      assert.ok(
-        !o.submits.includes(ANSWER),
-        "답 원문이 온전히 도착했다 — 오염이 없다",
-      );
-    },
-  );
-
-  check("S2: 그런데도 writeAndSubmit 은 성공(true)을 보고한다", () => {
+  check("S2b: ★풀린 뒤에는 답이 온전히 전달된다", () => {
     assert.strictEqual(ok, true);
+    assert.strictEqual(o.submits.length, 2, `제출 ${o.submits.length}건`);
+    assert.strictEqual(o.submits[0], "제 초안입니다");
+    assert.strictEqual(o.submits[1], ANSWER);
   });
 
-  check(
-    "S2: ★판정은 confirmed 다 — '제출됐다'는 '올바로 전달됐다'가 아니다",
-    () => {
-      // 턴은 실제로 시작됐으므로 confirmed 가 맞다. 이 축이 잡는 것은 제출
-      // 여부이지 페이로드 무결성이 아니다 — 오염은 별개 문제로 남는다.
-      const o2 = lastOutcome(id);
-      assert.ok(o2);
-      assert.strictEqual(o2.outcome, "confirmed");
-    },
-  );
-
+  off();
   pty.kill(id);
 }
 
@@ -325,30 +395,91 @@ async function s4SilentExhaustsRetries(pty) {
 }
 
 // ── S5 — 확인 다이얼로그에 서 있는 에이전트 ──────────────────────────────
-// PtyLiveness 로는 awaiting-input. 답의 첫 글자가 선택으로 소비된다.
+//
+// #1160 이 여기서 실측한 것: 답의 **첫 글자가 선택으로 소비**되고 나머지만
+// 제출됐다. 훼손도 훼손이지만, 그 선택은 되돌릴 수 없다 — 답의 첫 글자가 "네" 든
+// "y" 든, 그 키가 무엇을 승인했는지 우리는 모른다.
+//
+// (D) 안 이후: 쓰지 않는다. 다이얼로그는 손대지 않은 채 그대로 남는다.
 async function s5AwaitingInputDialog(pty) {
   const id = "ans-dialog";
   const o = await spawnTui(pty, id, ["--dialog"]);
+
+  const state = pty.composerState(id);
+  const ok = await pty.writeAndSubmit(id, ANSWER);
+  await sleep(400);
+
+  const obs = lastOutcome(id);
+  fact(
+    `S5 다이얼로그: 판정=${state}, writeAndSubmit=${ok}, ` +
+      `다이얼로그 확정 ${o.dialogs.length}건, 제출 ${o.submits.length}건, ` +
+      `사유=${obs && obs.refusal}`,
+  );
+
+  check("S5: ★컴포저 판정 = awaiting-choice", () => {
+    assert.strictEqual(state, "awaiting-choice");
+  });
+
+  check("S5: ★다이얼로그가 확정되지 않았다 — 첫 글자가 소비되지 않는다", () => {
+    assert.strictEqual(o.dialogs.length, 0, `확정 ${o.dialogs.length}건`);
+  });
+
+  check("S5: ★훼손된 본문이 제출되지도 않았다", () => {
+    assert.strictEqual(o.submits.length, 0, `제출 ${o.submits.length}건`);
+  });
+
+  check("S5: ★writeAndSubmit=false + 사유 awaiting-choice", () => {
+    assert.strictEqual(ok, false);
+    assert.ok(obs, "판정이 관측되지 않았다");
+    assert.strictEqual(obs.outcome, "refused");
+    assert.strictEqual(obs.refusal, "awaiting-choice");
+    assert.strictEqual(obs.composer, "awaiting-choice");
+  });
+
+  pty.kill(id);
+}
+
+// ── S5b — 다이얼로그가 닫히면 풀린다 ─────────────────────────────────────
+// 다이얼로그에 답하는 것은 사람(또는 그 에이전트)이지 우리가 아니다. 닫히면
+// 컴포저가 돌아오고, 그때 보류된 답이 나간다.
+async function s5bFreesAfterDialogClosed(pty) {
+  const id = "ans-dialog-free";
+  const o = await spawnTui(pty, id, ["--dialog"]);
+
+  const freed = [];
+  const off = pty.onComposerFree((sid) => freed.push(sid));
+
+  const stateBefore = pty.composerState(id);
+  const blocked = await pty.writeAndSubmit(id, ANSWER);
+  check("S5b: 다이얼로그 앞에서는 거절된다", () => {
+    assert.strictEqual(stateBefore, "awaiting-choice");
+    assert.strictEqual(blocked, false);
+  });
+
+  // 사람이 다이얼로그에 답한다(키 하나).
+  pty.write(id, "y");
+  await sleep(250);
 
   const ok = await pty.writeAndSubmit(id, ANSWER);
   await sleep(400);
 
   fact(
-    `S5 다이얼로그: writeAndSubmit=${ok}, 다이얼로그 확정 ${o.dialogs.length}건` +
-      `(${JSON.stringify(o.dialogs[0] ?? null)}), 제출 ${o.submits.length}건`,
+    `S5b 다이얼로그 닫힘: 거절=${blocked === false}, 재시도 writeAndSubmit=${ok}, ` +
+      `제출 ${o.submits.length}건`,
   );
 
-  check("S5: ★답의 첫 글자가 다이얼로그 선택으로 소비됐다", () => {
-    assert.strictEqual(o.dialogs.length, 1, `다이얼로그 ${o.dialogs.length}건`);
-    assert.strictEqual(o.dialogs[0], ANSWER[0]);
+  check("S5b: ★다이얼로그가 닫히면 풀렸다고 알려 온다", () => {
+    assert.ok(freed.includes(id), `onComposerFree 미발화 (${freed.join(",")})`);
   });
 
-  check("S5: ★제출된 본문에서 첫 글자가 사라졌다 (답이 훼손됨)", () => {
-    assert.strictEqual(o.submits.length, 1);
-    assert.strictEqual(o.submits[0], ANSWER.slice(1));
-    assert.notStrictEqual(o.submits[0], ANSWER);
+  check("S5b: ★그 뒤 답이 온전히 전달된다", () => {
+    assert.strictEqual(blocked, false);
+    assert.strictEqual(ok, true);
+    assert.strictEqual(o.submits.length, 1, `제출 ${o.submits.length}건`);
+    assert.strictEqual(o.submits[0], ANSWER);
   });
 
+  off();
   pty.kill(id);
 }
 
@@ -404,12 +535,16 @@ async function s6BusyNoDuplicate(pty) {
     await s1EmptyComposer(pty);
     console.log("\n[S2] ★컴포저에 초안이 물려 있음");
     await s2DraftInComposer(pty);
+    console.log("\n[S2b] ★초안 주인이 제출하면 풀린다");
+    await s2bFreesAfterOwnerSubmits(pty);
     console.log("\n[S3] ★턴 중(busy) + CR 미등록 — SUBMIT_SIGNAL 오탐");
     await s3BusyFalsePositive(pty);
     console.log("\n[S4] silent + CR 미등록 — S3 대조군");
     await s4SilentExhaustsRetries(pty);
     console.log("\n[S5] 확인 다이얼로그에 서 있음");
     await s5AwaitingInputDialog(pty);
+    console.log("\n[S5b] ★다이얼로그가 닫히면 풀린다");
+    await s5bFreesAfterDialogClosed(pty);
     console.log("\n[S6] ★회귀 가드 — busy + CR 정상: 중복 제출이 없는가");
     await s6BusyNoDuplicate(pty);
   } finally {

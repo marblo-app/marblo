@@ -22,12 +22,36 @@
  *   4. 총 시도 예산을 소진하면 **명시적으로 실패를 보고**한다(onFailure).
  *      조용히 사라지는 경로는 남기지 않는다.
  *
+ * ── 보류(deferral) — 티켓 RtyOMpOArfI7a5JNSzsg ─────────────────────────────
+ * 위 4단계는 전부 "썼는데 실패했다" 를 다룬다. 그런데 **일부러 쓰지 않는** 경우가
+ * 생겼다: 대상 컴포저에 남의 초안이 물려 있거나([y/n]) 확인 다이얼로그 앞이면,
+ * 지금 쓰는 것은 전달이 아니라 오염이다(#1160 S2·S5). 그때는 **보류**한다.
+ *
+ * 보류는 실패한 시도가 **아니다.** 그래서 시도 예산(`maxTotalAttempts`)을 태우지
+ * 않는다 — 태우면 남의 초안이 조금 오래 남아 있다는 이유만으로 답이 영구 폐기된다.
+ * 대신 별도 예산(`maxDeferrals`)을 쓰고, 다음 두 가지가 보장된다.
+ *
+ *   · **사유가 즉시 발신자에게 돌아간다** — 첫 보류에서 `onFailure` 를 부른다
+ *     (`deferred` 필드로 구분). 조용히 큐에만 넣고 끝내지 않는다.
+ *   · **컴포저가 비면 자동으로 되살아난다** — `PendingInstructionListener` 가
+ *     `PtyManager.onComposerFree` 에 걸어 그 순간 `flush` 한다. 폴링 없음, 사람의
+ *     개입 없음. 초안의 주인이 자기 손으로 엔터를 치는 그때가 재시도 시각이다.
+ *
  * Firestore/Electron 의존이 없어 유닛 테스트로 실패 경로를 직접 재현할 수 있다.
  */
+
+import type { ComposerRefusal, ComposerVerdict } from "./composer-gate";
 
 /** PTY 로 한 턴을 제출하는 최소 계약 — `PtyManager.writeAndSubmit` 의 부분집합. */
 export interface InstructionPtyWriter {
   writeAndSubmit(sessionId: string, text: string): Promise<boolean> | boolean;
+  /**
+   * 지금 이 세션에 써도 되는가(`PtyManager.composerVerdict`). 선택 항목이다 —
+   * 안 주면 종전과 똑같이 그냥 쓴다(`writeAndSubmit` 안에도 같은 게이트가 있으므로
+   * 오염이 새지는 않는다. 다만 사유가 `writeAndSubmit rejected` 로 뭉개지고 시도
+   * 예산을 태운다). 주면 **쓰기 전에** 판정해 보류로 갈라낸다.
+   */
+  composerVerdict?(sessionId: string): ComposerVerdict;
 }
 
 /** 전달을 포기(또는 한 라운드 실패)했을 때 보고되는 내역. */
@@ -48,6 +72,13 @@ export interface InstructionDeliveryFailure {
    * 재시도한다.
    */
   permanent: boolean;
+  /**
+   * ★쓰지 못한 게 아니라 **일부러 쓰지 않았다**(티켓 RtyOMpOArfI7a5JNSzsg).
+   * 컴포저에 남의 초안이 있거나 확인 다이얼로그 앞이라 보류했다는 뜻이고,
+   * 컴포저가 비는 순간 자동으로 재시도된다. 발신자에게 "실패했다" 가 아니라
+   * "아직 안 보냈다, 왜냐하면 …" 으로 전해야 하는 경우다.
+   */
+  deferred?: ComposerRefusal;
 }
 
 export interface InstructionDeliverySuccess {
@@ -77,6 +108,12 @@ export interface InstructionDeliveryQueueOptions {
   retryDelayMs?: number;
   /** 에이전트당 보관 가능한 미전달 메시지 수. 넘으면 가장 오래된 것부터 permanent 실패. 기본 50. */
   maxBufferedPerAgent?: number;
+  /**
+   * 보류 예산(티켓 RtyOMpOArfI7a5JNSzsg). 컴포저가 계속 오염돼 있어 이 횟수만큼
+   * 쓰지 못하면 permanent 로 보고하고 버린다 — 무한히 조용히 들고 있지 않는다.
+   * 시도 예산과 **따로** 두는 이유는 위 헤더 "보류" 절 참조. 기본 30.
+   */
+  maxDeferrals?: number;
   /** 테스트에서 시간을 건너뛰기 위한 주입점. */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -87,6 +124,12 @@ interface BufferedInstruction {
   message: string;
   attempts: number;
   lastReason: string;
+  /** 컴포저 오염으로 **쓰지 않은** 횟수. 시도 횟수와 섞지 않는다. */
+  deferrals: number;
+  /** 마지막 보류 사유. 보고에 실어 발신자가 왜 안 갔는지 알게 한다. */
+  lastDeferral?: ComposerRefusal;
+  /** 이 엔트리의 보류를 이미 한 번 알렸는가(같은 사유로 도배하지 않는다). */
+  deferralReported: boolean;
 }
 
 const DEFAULTS = {
@@ -94,6 +137,7 @@ const DEFAULTS = {
   maxTotalAttempts: 9,
   retryDelayMs: 500,
   maxBufferedPerAgent: 50,
+  maxDeferrals: 30,
 };
 
 export class InstructionDeliveryQueue {
@@ -105,6 +149,7 @@ export class InstructionDeliveryQueue {
   private readonly maxTotalAttempts: number;
   private readonly retryDelayMs: number;
   private readonly maxBufferedPerAgent: number;
+  private readonly maxDeferrals: number;
   private readonly sleep: (ms: number) => Promise<void>;
 
   /** agentId → 아직 PTY 에 못 넣은 지시들(FIFO). */
@@ -122,6 +167,7 @@ export class InstructionDeliveryQueue {
     this.retryDelayMs = opts.retryDelayMs ?? DEFAULTS.retryDelayMs;
     this.maxBufferedPerAgent =
       opts.maxBufferedPerAgent ?? DEFAULTS.maxBufferedPerAgent;
+    this.maxDeferrals = opts.maxDeferrals ?? DEFAULTS.maxDeferrals;
     this.sleep =
       opts.sleep ??
       ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -142,6 +188,8 @@ export class InstructionDeliveryQueue {
       message,
       attempts: 0,
       lastReason: "",
+      deferrals: 0,
+      deferralReported: false,
     };
     const ok = await this.runRound(entry, false);
     if (!ok) this.bufferEntry(entry);
@@ -168,6 +216,14 @@ export class InstructionDeliveryQueue {
         if (!ok) {
           if (entry.attempts >= this.maxTotalAttempts) {
             queue.shift();
+            this.reportFailure(entry, true);
+            continue;
+          }
+          // 보류 예산도 여기서 본다 — flush 는 컴포저가 풀릴 때마다 도는데,
+          // 매번 또 막히면(다른 초안이 바로 들어왔다) 무한히 들고 있게 된다.
+          if (entry.deferrals >= this.maxDeferrals) {
+            queue.shift();
+            entry.lastReason = `${entry.lastReason} (보류 ${entry.deferrals}회 — 컴포저가 끝내 비지 않았다)`;
             this.reportFailure(entry, true);
             continue;
           }
@@ -203,6 +259,7 @@ export class InstructionDeliveryQueue {
           attempts: e.attempts,
           reason: e.lastReason,
           permanent: false,
+          ...(e.lastDeferral ? { deferred: e.lastDeferral } : {}),
         });
       }
     }
@@ -226,6 +283,11 @@ export class InstructionDeliveryQueue {
       const ptySessionId = this.resolvePty(entry.agentId);
       if (!ptySessionId) {
         entry.lastReason = "no PTY attached for agent";
+      } else if (!this.writable(ptySessionId, entry)) {
+        // ★일부러 쓰지 않았다. 시도로 세지 않으므로 되돌린다 — 남의 초안이
+        // 오래 남았다는 이유로 답이 폐기되면 안 된다(헤더 "보류" 절).
+        entry.attempts--;
+        return false;
       } else {
         try {
           const ok = await this.writer.writeAndSubmit(
@@ -261,9 +323,35 @@ export class InstructionDeliveryQueue {
     return false;
   }
 
+  /**
+   * 지금 이 PTY 에 써도 되는가. 안 되면 보류로 기록하고 false.
+   *
+   * 판정기가 없으면(선택 계약) 항상 true — 종전 동작 그대로다.
+   * `indeterminate`(모르는 하네스)도 true 다: 모른다고 멈추면 이 게이트가
+   * 유실의 새 원인이 된다(#1157·#1160 의 3분기 규율).
+   */
+  private writable(
+    ptySessionId: string,
+    entry: BufferedInstruction,
+  ): boolean {
+    const verdict = this.writer.composerVerdict?.(ptySessionId);
+    if (!verdict || verdict.writable) return true;
+    entry.deferrals++;
+    entry.lastDeferral = verdict.refusal ?? undefined;
+    entry.lastReason = `${verdict.refusal ?? "composer-blocked"}: ${verdict.reason}`;
+    return false;
+  }
+
   /** 라운드 실패분을 버퍼에 넣는다. 예산/용량을 넘기면 permanent 로 보고. */
   private bufferEntry(entry: BufferedInstruction): void {
     if (entry.attempts >= this.maxTotalAttempts) {
+      this.reportFailure(entry, true);
+      return;
+    }
+    // 보류 예산까지 소진했으면 더는 조용히 들고 있지 않는다.
+    if (entry.deferrals >= this.maxDeferrals) {
+      entry.lastReason =
+        `${entry.lastReason} (보류 ${entry.deferrals}회 — 컴포저가 끝내 비지 않았다)`;
       this.reportFailure(entry, true);
       return;
     }
@@ -282,6 +370,13 @@ export class InstructionDeliveryQueue {
   }
 
   private reportFailure(entry: BufferedInstruction, permanent: boolean): void {
+    // 보류는 **일부러 안 쓴 것**이라 실패와 구분해 싣는다. 다만 같은 사유를
+    // 라운드마다 도배하지 않는다 — 영구 실패가 아닌 보류는 엔트리당 1회만.
+    const deferred = entry.lastDeferral;
+    if (deferred && !permanent) {
+      if (entry.deferralReported) return;
+      entry.deferralReported = true;
+    }
     const failure: InstructionDeliveryFailure = {
       docId: entry.docId,
       agentId: entry.agentId,
@@ -289,10 +384,15 @@ export class InstructionDeliveryQueue {
       attempts: entry.attempts,
       reason: entry.lastReason || "unknown",
       permanent,
+      ...(deferred ? { deferred } : {}),
     };
     console.error(
       `[InstructionDeliveryQueue] PTY inject ${
-        permanent ? "FAILED (giving up)" : "failed (will retry on re-attach)"
+        permanent
+          ? "FAILED (giving up)"
+          : deferred
+            ? "DEFERRED (컴포저가 비면 자동 재시도)"
+            : "failed (will retry on re-attach)"
       } doc=${entry.docId} agent=${entry.agentId} attempts=${
         entry.attempts
       } reason=${failure.reason}`,

@@ -118,6 +118,8 @@ export class PendingInstructionListener {
   // sid 가 아니라 이 맵을 다시 읽는다(전달 대기 중 PTY 가 바뀌어도 따라가게).
   private ptyByAgent: Map<string, string> = new Map();
   private queue: InstructionDeliveryQueue;
+  /** `PtyManager.onComposerFree` 구독 해제. */
+  private unsubscribeComposerFree: () => void;
 
   constructor(
     ptyManager: PtyManager,
@@ -129,11 +131,35 @@ export class PendingInstructionListener {
       writer: {
         writeAndSubmit: (sessionId, text) =>
           this.ptyManager.writeAndSubmit(sessionId, text),
+        // ★쓰기 전에 컴포저를 본다(티켓 RtyOMpOArfI7a5JNSzsg). writeAndSubmit
+        // 안에도 같은 게이트가 있지만, 여기서 먼저 물어야 "실패" 와 "일부러 안
+        // 씀(보류)" 을 갈라 사유를 발신자에게 정확히 돌려줄 수 있다.
+        composerVerdict: (sessionId) =>
+          this.ptyManager.composerVerdict(sessionId),
       },
       resolvePty: (agentId) => this.ptyByAgent.get(agentId),
       onDelivered: hooks.onDelivered,
       onFailure: hooks.onDeliveryFailure,
     });
+
+    // ★재시도 정책의 심장: 컴포저가 **풀리는 순간** 보류분을 흘려보낸다.
+    // 폴링도, 타이머도, 사람의 개입도 없다 — 초안의 주인이 자기 손으로 엔터를
+    // 치거나 다이얼로그를 닫는 그때가 재시도 시각이다.
+    this.unsubscribeComposerFree = this.ptyManager.onComposerFree(
+      (sessionId) => {
+        for (const [agentId, sid] of this.ptyByAgent) {
+          if (sid !== sessionId) continue;
+          if (this.queue.pendingCount(agentId) === 0) continue;
+          void this.queue.flush(agentId).catch((err) => {
+            console.error(
+              `[PendingInstructionListener] composer-free flush failed for ${agentId}: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          });
+        }
+      },
+    );
   }
 
   /** 미전달로 남아 있는 지시 수 — 진단/테스트용. */
@@ -221,6 +247,7 @@ export class PendingInstructionListener {
     }
     this.unsubscribers.clear();
     this.ptyByAgent.clear();
+    this.unsubscribeComposerFree();
     // 앱 종료 시점에 남은 미전달분은 프로세스와 함께 사라진다 — 조용히 지나가지
     // 않도록 마지막으로 원문째 남긴다(수동 복구 근거).
     const stranded = this.queue.pendingSummary();

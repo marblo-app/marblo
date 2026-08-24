@@ -1145,6 +1145,12 @@ export class AgentManager {
         // Readiness matching cannot prevent this — a dialog can arrive between the
         // match and the write — and neither can a longer fallback, which only moves
         // the same blind write later. Only re-reading can.
+        // ★컴포저 판정도 같은 보류 사슬에 넣는다(티켓 RtyOMpOArfI7a5JNSzsg).
+        // `PtyManager.writeAndSubmit` 이 오염된 컴포저에 쓰기를 거절하는데, 그
+        // 거절을 여기서 안 보면 아래 `sent = true` 가 먼저 찍혀 지시가 **한 번
+        // 거절당하고 영영 사라진다**. 이 게이트는 이미 보류·1초 재시도·60초
+        // 포기·보드 error 를 갖고 있으므로, 새 사슬을 만들지 않고 여기에 건다.
+        const composerHold = this.ptyManager.composerVerdict(ptySessionId);
         const holdReason = looksLikeFirstRunDialog(dialogBuffer)
           ? "a first-run dialog is on screen"
           : // The backstop's contract is "stop typing unless clear". Only its
@@ -1153,7 +1159,9 @@ export class AgentManager {
             // the same hole the orchestrator had.
             loginBackstop.state() !== "clear"
             ? "a login screen may be on screen"
-            : null;
+            : !composerHold.writable
+              ? `the composer is not writable (${composerHold.refusal})`
+              : null;
         if (holdReason) {
           if (!deferredByDialog) {
             deferredByDialog = true;

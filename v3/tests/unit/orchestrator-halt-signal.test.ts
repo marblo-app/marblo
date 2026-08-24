@@ -18,6 +18,7 @@
  *   ③ ★사유 페이로드에 PTY 원문이 없다.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { verdictFor } from "../../electron/composer-gate";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -69,6 +70,9 @@ function makeHarness(): Harness {
     writeAndSubmit: (_id: string, text: string) => {
       writes.push(text);
     },
+    // 티켓 RtyOMpOArfI7a5JNSzsg — 부트 프롬프트도 컴포저 판정을 거친다. 이 스텁은
+    // 화면을 그리지 않으니 실제와 같은 답을 준다: indeterminate = 종전대로 쓴다.
+    composerVerdict: () => verdictFor("indeterminate"),
   };
 
   const configGenerator = {

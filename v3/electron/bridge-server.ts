@@ -3694,6 +3694,26 @@ export class BridgeServer {
     instruction: string,
     taskId: string,
   ): DispatchTaskResponse {
+    // ★쓰기 전에 컴포저를 본다(티켓 RtyOMpOArfI7a5JNSzsg). 이 경로는 반환값을
+    // 안 보고 곧장 `success: true` + 상태 `working` 을 찍는다 — 거절당하면
+    // "지시는 안 갔는데 보드는 일하는 중" 이라는, #1160 이 55분 헤맨 바로 그
+    // 모양이 된다. 그래서 판정이 막으면 **성공이라고 하지 않고** 사유를 돌려준다.
+    const gate = this.ptyManager.composerVerdict(agent.ptySessionId);
+    if (!gate.writable) {
+      console.warn(
+        `[BridgeServer] Dispatch HELD: '${agent.name}' composer ${gate.state} (task=${taskId})`,
+      );
+      return {
+        success: false,
+        agentId: agent.id,
+        agentName: agent.name,
+        taskId,
+        error: `composer-${gate.state}`,
+        reason:
+          `${agent.name} 의 컴포저에 지금 쓸 수 없다 — ${gate.reason} ` +
+          `지시를 보내지 않았으니(섞이면 원문이 사라진다) 상대가 정리된 뒤 다시 배정하라.`,
+      };
+    }
     this.ptyManager.writeAndSubmit(agent.ptySessionId, instruction);
     if (agent.status === "idle") {
       this.agentManager.setStatus(agent.id, "working");

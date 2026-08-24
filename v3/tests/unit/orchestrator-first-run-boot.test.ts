@@ -18,6 +18,7 @@
  *     readiness" cannot work, and only re-reading the screen at write time can.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { verdictFor } from "../../electron/composer-gate";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -425,6 +426,10 @@ describe("OrchestratorManager wires the consent auto-accept to its own PTY", () 
       onExit: vi.fn(),
       write: vi.fn(),
       writeAndSubmit: vi.fn(async () => true),
+      // 티켓 RtyOMpOArfI7a5JNSzsg — 부트 프롬프트도 컴포저 판정을 거친다.
+      // 이 스텁의 PTY 는 화면을 그리지 않으므로 실제 PtyManager 와 같은 답을
+      // 준다: indeterminate = "모르니 종전대로 쓴다".
+      composerVerdict: vi.fn(() => verdictFor("indeterminate")),
     };
     const configGenerator = {
       getLaunchConfig: vi.fn(

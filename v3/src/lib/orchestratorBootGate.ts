@@ -72,6 +72,7 @@
  * PTY 녹화(`tests/fixtures/pty`)를 그대로 먹여 검증한다.
  */
 import { normalizeLine } from "./ansi";
+import { classifyTranscriptRaw } from "../../electron/transcript-lines";
 
 export type BootGateState = "probing" | "armed" | "open";
 
@@ -82,16 +83,6 @@ export type BootGateOpenReason =
   | "max-armed"
   | "silent"
   | "forced";
-
-export type TranscriptLineKind =
-  | "blank"
-  | "busy"
-  | "banner"
-  | "chrome"
-  | "user"
-  | "tool"
-  | "assistant"
-  | "other";
 
 /** 배너 없이 이만큼의 가시 문자가 지나면 부트가 아니다 — 전부 통과. */
 export const PROBE_MAX_CHARS = 4_000;
@@ -163,128 +154,17 @@ export function parsePtySpawnedAt(sessionId: string | null): number | null {
 const PENDING_TAIL_MAX_CHARS = 16_384;
 
 // ── 줄 분류 ───────────────────────────────────────────────────────────────
-// 스트립된 한 줄(ANSI 제거·CR 덮어쓰기 반영)을 받는다. 순서가 곧 우선순위다.
+// ★구현은 `electron/transcript-lines.ts` 로 옮겼다(티켓 RtyOMpOArfI7a5JNSzsg).
+// 답 주입 직전의 컴포저 판정이 **메인 프로세스**에서 같은 규칙으로 돌아야 하는데,
+// 메인은 `src/` 를 import 할 수 없다(electron/tsconfig 의 rootDir). 복제하는 대신
+// 공유 위치로 옮기고 여기서 재수출한다 — 화면을 읽는 규칙은 하나여야 한다.
+export {
+  classifyTranscriptLine,
+  classifyTranscriptRaw,
+  EMPTY_PROMPT_RE,
+  type TranscriptLineKind,
+} from "../../electron/transcript-lines";
 
-/** 진행 중 상태줄 — Claude/Codex `esc to interrupt`, Gemini `esc to cancel`. */
-const BUSY_RE = /esc\s*to\s*(interrupt|cancel)/i;
-
-/**
- * CLI 부트 배너. 실측 바이트 기준(`tests/fixtures/pty`):
- *  - codex 0.149.0: `│ >_ OpenAI Codex (v0.149.0) │`, `model:`, `directory:`,
- *    `permissions: YOLO mode`, `Tip: …`
- *  - claude 2.1.238: `╭───Claude Codev2.1.238───╮`(커서 이동으로 칠해 공백이 없다),
- *    `Welcome back!`, `Tips for getting started`, `WARNING: Claude Code running in
- *    Bypass Permissions mode`, `⏵⏵ bypass permissions on`
- *  - gemini: ASCII 아트 + `Tips for getting started`
- * ★공백은 전부 `\s*` — 클로드는 커서 이동으로 칠해 공백이 사라진다(fixture README).
- */
-const BANNER_RES: RegExp[] = [
-  /OpenAI\s*Codex\s*\(v/i,
-  /Claude\s*Code\s*v\d/i,
-  /Welcome\s*back!/i,
-  /Tips\s*for\s*getting\s*started/i,
-  /What's\s*new/i,
-  /Bypass\s*Permissions\s*mode/i,
-  /bypass\s*permissions\s*on/i,
-  /YOLO\s*mode/i,
-  /^\s*│?\s*(model|directory|permissions):\s/i,
-  /^\s*Tip:\s/i,
-  /Transcript\s*saving\s*is\s*off/i,
-];
-
-/** 컴포저·상태바·상자 테두리 — 사람의 말도 모델의 말도 아니다. */
-const CHROME_RES: RegExp[] = [
-  /Ask\s*Codex\s*to\s*do\s*anything/i,
-  /\?\s*for\s*shortcuts/i,
-  /tab\s*to\s*queue/i,
-  /context\s*left/i,
-  /shift\+tab\s*to\s*cycle/i,
-  /Not\s*logged\s*in/i,
-  /Worked\s*for\s*\d/i,
-  /^\s*[─│╭╮╰╯┃━┌┐└┘├┤═║╔╗╚╝╠╣\s]*$/, // 상자 선만 있는 줄
-  /^\s*[❯›]\s*$/, // 빈 프롬프트 화살표
-];
-
-/**
- * 사용자 셀 — Claude `> text`, Codex `› text`(또는 `▌ text`). 우리가 주입한 부트
- * 프롬프트의 에코가 여기로 분류된다(`You are the Marblo Orchestrator Agent…`).
- */
-const USER_RE = /^\s*[›>▌]\s+\S/;
-
-/**
- * tool call 셀과 그 출력.
- *  - Claude: `⏺ Bash(cmd)`, `⏺ Read(file)`, `⏺ marblo - get_agent_skill (MCP)(…)`,
- *    결과 `⎿ …`
- *  - Codex: `• Called marblo.get_agent_skill({…})`, `• Ran …`, `• Explored`,
- *    `• Updated Plan`, 결과 `└ …`
- * 동사 목록은 닫힌 집합이 아니다 — 모르는 동사는 어시스턴트로 오인될 수 있지만
- * (그 툴 출력 한 덩이가 보일 뿐), 배너·프롬프트 에코는 그보다 앞이라 새지 않는다.
- */
-const CODEX_TOOL_VERBS =
-  "Called|Ran|Running|Explored|Exploring|Read|Reading|Searched|Searching|Listed|Listing|Edited|Editing|Added|Adding|Updated|Updating|Proposed|Working|Worked|Thinking|Booting|Viewed|Viewing|Wrote|Writing|Created|Creating|Deleted|Deleting|Moved|Moving|Renamed|Renaming|Executed|Executing|Interacted|Waited|Waiting|Resumed|Sent|Loading|Reasoning|Opened|Opening|Fetched|Fetching|Checked|Checking|Applied|Applying|Reverted|Reverting|Plan|Change";
-const TOOL_RES: RegExp[] = [
-  new RegExp(`^\\s*•\\s+(?:${CODEX_TOOL_VERBS})\\b`, "i"),
-  /^\s*⏺\s+[A-Za-z_][\w.-]*\s*\(/, // ⏺ Bash(…)
-  /^\s*⏺\s+[\w.-]+\s+-\s+[\w.-]+\s+\(MCP\)/i, // ⏺ marblo - tool (MCP)(…)
-  /^\s*[⎿└├]\s/, // 결과 블록
-];
-
-/** 어시스턴트 발화 셀 — Claude `⏺ `, Codex `• `, Gemini `✦ `. 열 0 에서만 인정. */
-const ASSISTANT_RE = /^[⏺•✦]\s+\S/;
-
-export function classifyTranscriptLine(stripped: string): TranscriptLineKind {
-  const line = stripped.replace(/\s+$/, "");
-  if (line.trim().length === 0) return "blank";
-  if (BANNER_RES.some((re) => re.test(line))) return "banner";
-  if (BUSY_RE.test(line)) return "busy";
-  if (CHROME_RES.some((re) => re.test(line))) return "chrome";
-  if (USER_RE.test(line)) return "user";
-  if (TOOL_RES.some((re) => re.test(line))) return "tool";
-  if (ASSISTANT_RE.test(line)) return "assistant";
-  return "other";
-}
-
-/**
- * ★원시 줄 하나에 TUI 가 **여러 조각**을 싣는다. 인라인 TUI(codex/ratatui)는
- * 히스토리 줄을 `\n` + 텍스트로 끼워 넣은 뒤, 줄바꿈 없이 커서를 절대좌표로
- * 옮겨(`CSI r`, `CSI 21;1H`) 컴포저·상태줄을 다시 그린다. `\n` 으로만 자르면
- * "• 안녕하세요 …  › Ask Codex to do anything" 이 한 줄이 되어 인사말이 컴포저
- * 크롬으로 오인된다(실측: 한 줄짜리 인사말이 게이트를 못 열었다).
- *
- * 그래서 **세로·절대 커서 이동**(`H`/`f`/`d`/`A`/`B`/`E`/`F`, 화면 지움 `J`, 스크롤
- * 영역 `r`, 역인덱스 `ESC M`, alt-screen 전환)을 조각 경계로 삼아 조각마다 분류하고
- * 가장 높은 우선순위를 줄의 종류로 삼는다. 가로 이동(`CSI G`/`C`/`D`)은 경계가
- * 아니다 — 클로드는 단어 사이를 `CSI 6G` 로 칠해서(`bypass\x1b[6Gpermissions`)
- * 거기서 자르면 배너 마커가 쪼개진다(fixture README).
- */
-/* eslint-disable no-control-regex -- 커서 이동 시퀀스를 경계로 삼는다 */
-const SEGMENT_BOUNDARY_RE =
-  /\x1b\[[0-9;]*[HfJrABEFd]|\x1bM|\x1b\[\?1049[hl]|\x1b\[\?2026[hl]/g;
-/* eslint-enable no-control-regex */
-
-/** 조각이 여럿일 때 줄의 종류 — 높은 것이 이긴다. */
-const KIND_PRIORITY: Record<TranscriptLineKind, number> = {
-  banner: 7,
-  assistant: 6,
-  user: 5,
-  tool: 4,
-  busy: 3,
-  chrome: 2,
-  other: 1,
-  blank: 0,
-};
-
-/** 원시(ANSI 포함) 줄 하나 → 종류. 조각별 `classifyTranscriptLine` 의 최대값. */
-export function classifyTranscriptRaw(raw: string): TranscriptLineKind {
-  let best: TranscriptLineKind = "blank";
-  for (const segment of raw.split(SEGMENT_BOUNDARY_RE)) {
-    if (!segment) continue;
-    const kind = classifyTranscriptLine(normalizeLine(segment));
-    if (KIND_PRIORITY[kind] > KIND_PRIORITY[best]) best = kind;
-    if (best === "banner") break;
-  }
-  return best;
-}
 
 // ── "이 sid 는 부트를 지났다" 기록 ─────────────────────────────────────────
 // 렌더러 프로세스 수명 동안의 메모리. sid 는 PTY 프로세스와 1:1 이라(위 헤더 주석)

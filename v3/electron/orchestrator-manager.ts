@@ -1614,13 +1614,26 @@ export class OrchestratorManager {
             loginBackstop.state() !== "clear"
             ? "needsAuth"
             : null;
+        // ★컴포저 판정도 같은 보류 사슬에 넣는다(티켓 RtyOMpOArfI7a5JNSzsg).
+        // `writeAndSubmit` 이 오염된 컴포저에 쓰기를 거절하는데, 여기서 안 보면
+        // 아래 `sent = true` 가 먼저 찍혀 부트 프롬프트가 한 번 거절당하고 영영
+        // 사라진다. 오케 PTY 면 사장님이 직접 타이핑하시던 중일 수 있으므로
+        // 실제로 걸리는 경로다.
+        //
+        // ★`holdKind`(화면으로 가는 분류값)에는 넣지 않는다. 이 유니온은 렌더러의
+        // 문구 표와 1:1 이고, 여기에 항목을 늘리면 구/신 버전이 섞인 패키지 앱에서
+        // 화면이 무엇을 그릴지 보장이 깨진다. 사유는 로그로 정확히 남고, 화면은
+        // `unknown` 접기("멈췄다 · 다시 시작하세요")로 참인 최소 정보만 말한다.
+        const composerHold = this.ptyManager.composerVerdict(ptySessionId);
         const holdReason =
           holdKind === "firstRunDialog"
             ? "a first-run dialog is on screen"
             : holdKind === "needsAuth"
               ? "a login screen may be on screen"
-              : null;
-        if (holdReason && holdKind) {
+              : !composerHold.writable
+                ? `the composer is not writable (${composerHold.refusal})`
+                : null;
+        if (holdReason) {
           if (!deferredByDialog) {
             deferredByDialog = true;
             deferredSince = Date.now();
@@ -1647,7 +1660,7 @@ export class OrchestratorManager {
             // ★사유를 실어 보낸다. 여기가 사장님이 오늘 아침 겪으신 화면이다 —
             // 폴더 신뢰 다이얼로그가 떠 있는데 패널은 초록 running 이었다.
             this.setStatus("error", {
-              reason: holdKind,
+              reason: holdKind ?? undefined,
               model: orchCliAuthModel ?? undefined,
             });
           }

@@ -52,13 +52,18 @@ export interface QuestionEntry {
    *
    * ★"queued" 를 "전달 완료" 로 읽지 마라. 이 값은 pendingInstructions 문서를
    *   만든 시점에 찍히며, 그 뒤의 PTY 주입 결과는 여기로 돌아오지 않는다.
-   *   그리고 주입 자체도 성공을 보장하지 못한다 — 실측(tests/integration/
-   *   answer-delivery-composer.cjs)에서 (a) 컴포저에 초안이 물려 있으면 답이
-   *   초안과 한 덩어리로 섞여 제출되고, (b) 턴 중이면 제출이 0건인데도
-   *   writeAndSubmit 이 true 를 돌려주며, (c) 확인 다이얼로그에 서 있으면 답의
-   *   첫 글자가 선택으로 소비된다. 즉 queued 는 **'큐에 넣었다'** 그 이상도
-   *   이하도 아니다. 답 이후의 침묵을 에이전트 탓으로 읽기 전에 이 사실을 먼저
-   *   떠올려야 한다(agent-stall-policy.ts evaluateAnswerQuiet).
+   *   그리고 주입 자체도 성공을 보장하지 못한다. 실측(tests/integration/
+   *   answer-delivery-composer.cjs)이 잰 세 갈래 중 둘은 **고쳐졌다**:
+   *     (a) 컴포저에 초안이 물려 있으면 → 이제 **쓰지 않는다**. 초안은 바이트
+   *         단위로 보존되고, 사유 `composer-occupied` 가 오케 PTY 로 돌아가며,
+   *         컴포저가 비는 순간 자동 재전송된다(티켓 RtyOMpOArfI7a5JNSzsg).
+   *     (c) 확인 다이얼로그 앞이면 → 마찬가지로 쓰지 않는다(`awaiting-choice`).
+   *   남은 하나는 그대로다:
+   *     (b) 턴 중(busy)이면 제출이 0건인데도 writeAndSubmit 이 true 를 돌려준다.
+   *         관측 판정은 `indeterminate` 로 정직하게 남지만 반환값은 못 가른다.
+   *   즉 queued 는 여전히 **'큐에 넣었다'** 그 이상도 이하도 아니다. 답 이후의
+   *   침묵을 에이전트 탓으로 읽기 전에 이 사실을 먼저 떠올려야 한다
+   *   (agent-stall-policy.ts evaluateAnswerQuiet).
    */
   answerDelivery?: "queued" | "failed";
   /**

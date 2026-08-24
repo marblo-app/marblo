@@ -10,6 +10,10 @@ import {
   type InstructionDeliveryFailure,
   type InstructionDeliverySuccess,
 } from "../../electron/instruction-delivery-queue";
+import {
+  verdictFor,
+  type ComposerState,
+} from "../../electron/composer-gate";
 
 const noSleep = async (): Promise<void> => {};
 
@@ -19,6 +23,7 @@ interface Harness {
   failures: InstructionDeliveryFailure[];
   delivered: InstructionDeliverySuccess[];
   setPty: (agentId: string, sid: string | undefined) => void;
+  setComposer: (sessionId: string, state: ComposerState) => void;
 }
 
 function harness(opts: {
@@ -28,11 +33,15 @@ function harness(opts: {
   attemptsPerRound?: number;
   maxTotalAttempts?: number;
   maxBufferedPerAgent?: number;
+  maxDeferrals?: number;
+  /** 세션별 컴포저 상태. 안 주면 판정기 자체를 안 붙인다(종전 동작). */
+  composer?: Record<string, ComposerState>;
 }): Harness {
   const writes: Array<{ sessionId: string; text: string }> = [];
   const failures: InstructionDeliveryFailure[] = [];
   const delivered: InstructionDeliverySuccess[] = [];
   const ptys: Record<string, string | undefined> = { ...(opts.pty ?? {}) };
+  const composer: Record<string, ComposerState> = { ...(opts.composer ?? {}) };
   let call = 0;
 
   const queue = new InstructionDeliveryQueue({
@@ -44,6 +53,12 @@ function harness(opts: {
         if (r === "throw") throw new Error("pty write exploded");
         return r;
       },
+      ...(opts.composer
+        ? {
+            composerVerdict: (sessionId: string) =>
+              verdictFor(composer[sessionId] ?? "indeterminate"),
+          }
+        : {}),
     },
     resolvePty: (agentId) => ptys[agentId],
     onFailure: (f) => failures.push(f),
@@ -51,6 +66,7 @@ function harness(opts: {
     attemptsPerRound: opts.attemptsPerRound ?? 3,
     maxTotalAttempts: opts.maxTotalAttempts ?? 9,
     maxBufferedPerAgent: opts.maxBufferedPerAgent ?? 50,
+    maxDeferrals: opts.maxDeferrals ?? 30,
     retryDelayMs: 0,
     sleep: noSleep,
   });
@@ -58,6 +74,9 @@ function harness(opts: {
   return {
     queue,
     writes,
+    setComposer: (sessionId: string, state: ComposerState) => {
+      composer[sessionId] = state;
+    },
     failures,
     delivered,
     setPty: (agentId, sid) => {
@@ -215,5 +234,137 @@ describe("InstructionDeliveryQueue — 주입 실패 관측", () => {
 
     expect(a + b).toBe(1);
     expect(h.writes).toHaveLength(1);
+  });
+
+  // ── 보류(deferral) — 티켓 RtyOMpOArfI7a5JNSzsg ────────────────────────────
+  describe("컴포저가 오염돼 있으면 쓰지 않고 보류한다", () => {
+    it("★초안이 물려 있으면 PTY 에 한 바이트도 안 쓴다", async () => {
+      const h = harness({
+        results: [true],
+        pty: { a1: "pty-1" },
+        composer: { "pty-1": "occupied" },
+      });
+      const ok = await h.queue.deliver("a1", "d1", "답변 본문");
+
+      expect(ok).toBe(false);
+      expect(h.writes).toEqual([]); // ★섞일 것이 애초에 안 나갔다
+      expect(h.queue.pendingCount("a1")).toBe(1); // 버려지지 않았다
+    });
+
+    it("★사유가 즉시 발신자에게 돌아간다 — 조용히 큐에만 넣지 않는다", async () => {
+      const h = harness({
+        results: [true],
+        pty: { a1: "pty-1" },
+        composer: { "pty-1": "occupied" },
+      });
+      await h.queue.deliver("a1", "d1", "답변 본문");
+
+      expect(h.failures).toHaveLength(1);
+      expect(h.failures[0]).toMatchObject({
+        docId: "d1",
+        deferred: "composer-occupied",
+        permanent: false,
+        message: "답변 본문", // 수동 복구용 원문이 실려 있다
+      });
+    });
+
+    it("확인 다이얼로그 앞이면 사유가 awaiting-choice 다", async () => {
+      const h = harness({
+        results: [true],
+        pty: { a1: "pty-1" },
+        composer: { "pty-1": "awaiting-choice" },
+      });
+      await h.queue.deliver("a1", "d1", "답변 본문");
+
+      expect(h.writes).toEqual([]);
+      expect(h.failures[0].deferred).toBe("awaiting-choice");
+    });
+
+    it("★보류는 시도 예산을 태우지 않는다 (남의 초안 때문에 답이 폐기되면 안 된다)", async () => {
+      const h = harness({
+        results: [true],
+        pty: { a1: "pty-1" },
+        composer: { "pty-1": "occupied" },
+        maxTotalAttempts: 2, // 아주 빡빡하게
+      });
+      await h.queue.deliver("a1", "d1", "답변 본문");
+      // 라운드를 여러 번 돌려도 예산이 닳지 않는다.
+      await h.queue.flush("a1");
+      await h.queue.flush("a1");
+
+      expect(h.queue.pendingCount("a1")).toBe(1);
+      expect(
+        h.failures.some((f) => f.permanent),
+        "보류가 permanent 실패로 승격됐다",
+      ).toBe(false);
+    });
+
+    it("★컴포저가 비면 그 다음 flush 에서 온전히 전달된다", async () => {
+      const h = harness({
+        results: [true],
+        pty: { a1: "pty-1" },
+        composer: { "pty-1": "occupied" },
+      });
+      await h.queue.deliver("a1", "d1", "답변 본문");
+      expect(h.writes).toEqual([]);
+
+      h.setComposer("pty-1", "empty"); // 초안 주인이 제출했다
+      const n = await h.queue.flush("a1");
+
+      expect(n).toBe(1);
+      expect(h.writes).toEqual([{ sessionId: "pty-1", text: "답변 본문" }]);
+      expect(h.queue.pendingCount()).toBe(0);
+      expect(h.delivered[0]).toMatchObject({ recovered: true, attempts: 1 });
+    });
+
+    it("★같은 사유로 도배하지 않는다 — 보류 보고는 엔트리당 1회", async () => {
+      const h = harness({
+        results: [true],
+        pty: { a1: "pty-1" },
+        composer: { "pty-1": "occupied" },
+      });
+      await h.queue.deliver("a1", "d1", "답변 본문");
+      await h.queue.flush("a1");
+      await h.queue.flush("a1");
+
+      expect(h.failures).toHaveLength(1);
+    });
+
+    it("★보류 예산을 소진하면 permanent 로 보고하고 버린다 (무한 보관 금지)", async () => {
+      const h = harness({
+        results: [true],
+        pty: { a1: "pty-1" },
+        composer: { "pty-1": "occupied" },
+        maxDeferrals: 2,
+      });
+      await h.queue.deliver("a1", "d1", "답변 본문"); // 보류 1
+      await h.queue.flush("a1"); // 보류 2 → 예산 소진
+
+      const permanent = h.failures.filter((f) => f.permanent);
+      expect(permanent).toHaveLength(1);
+      expect(permanent[0].reason).toContain("보류");
+      expect(permanent[0].message).toBe("답변 본문"); // 원문은 끝까지 실린다
+      expect(h.queue.pendingCount()).toBe(0);
+    });
+
+    it("indeterminate(모르는 하네스)는 막지 않는다 — 3분기 규율", async () => {
+      const h = harness({
+        results: [true],
+        pty: { a1: "pty-1" },
+        composer: { "pty-1": "indeterminate" },
+      });
+      const ok = await h.queue.deliver("a1", "d1", "답변 본문");
+
+      expect(ok).toBe(true);
+      expect(h.writes).toEqual([{ sessionId: "pty-1", text: "답변 본문" }]);
+    });
+
+    it("판정기를 안 주면 종전 동작 그대로다", async () => {
+      const h = harness({ results: [true], pty: { a1: "pty-1" } });
+      const ok = await h.queue.deliver("a1", "d1", "답변 본문");
+
+      expect(ok).toBe(true);
+      expect(h.writes).toHaveLength(1);
+    });
   });
 });
