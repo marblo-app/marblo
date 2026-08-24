@@ -253,6 +253,17 @@ import {
   readPurchaseSources,
 } from "./analyticsPurchaseSource";
 import {
+  ANALYTICS_AD_SPEND_COLLECTION,
+  ANALYTICS_AD_SPEND_SCHEMA,
+  ANALYTICS_AD_SPEND_TABLE,
+  buildCacSummary,
+  parseManualAdSpendInput,
+  toAdSpendLedgerRow,
+  type AdSpendLedgerRow,
+  type AdSpendSummaryRow,
+  type FirstTouchCampaignRow,
+} from "./analyticsAdSpend";
+import {
   ANALYTICS_USER_KEY_BLOCKER,
   resolveAnalyticsUserKeyFn,
 } from "./analyticsUserKey";
@@ -15987,6 +15998,230 @@ FROM \`${BQ_DATASET}.${ANALYTICS_PURCHASE_TABLE}\``;
     return out;
   }
 );
+
+// ── CAC 광고비 원장 — 수동 입력 우선, 미매칭 비용 표시 ───────────────────────
+
+type AdSpendSchemaField = { name: string; type: string; mode: string };
+const AD_SPEND_SCHEMA_FIELDS =
+  ANALYTICS_AD_SPEND_SCHEMA as unknown as AdSpendSchemaField[];
+
+async function ensureAnalyticsAdSpendTable(): Promise<void> {
+  const table = bigquery.dataset(BQ_DATASET).table(ANALYTICS_AD_SPEND_TABLE);
+  const [exists] = await table.exists();
+  if (!exists) {
+    await table.create({
+      schema: AD_SPEND_SCHEMA_FIELDS,
+      timePartitioning: { type: "DAY", field: "spendDate" },
+      clustering: { fields: ["campaignKey", "platform"] },
+    });
+    functions.logger.info("[analytics_ad_spend] created table", {
+      table: ANALYTICS_AD_SPEND_TABLE,
+    });
+    return;
+  }
+
+  const [metadata] = await table.getMetadata();
+  const live = (metadata?.schema?.fields ?? []) as { name: string }[];
+  const liveNames = new Set(live.map((f) => f.name));
+  const additive = AD_SPEND_SCHEMA_FIELDS.filter(
+    (f) => !liveNames.has(f.name) && f.mode === "NULLABLE"
+  );
+  if (additive.length > 0) {
+    await table.setMetadata({ schema: { fields: [...live, ...additive] } });
+    functions.logger.info("[analytics_ad_spend] schema columns added", {
+      added: additive.map((f) => f.name),
+    });
+  }
+}
+
+async function mergeAnalyticsAdSpendRow(row: AdSpendLedgerRow): Promise<void> {
+  const query = `
+MERGE \`${BQ_PROJECT}.${BQ_DATASET}.${ANALYTICS_AD_SPEND_TABLE}\` T
+USING (
+  SELECT
+    @rowId AS rowId,
+    CAST(@spendDate AS DATE) AS spendDate,
+    @platform AS platform,
+    @campaignName AS campaignName,
+    @campaignKey AS campaignKey,
+    @source AS source,
+    @medium AS medium,
+    CAST(@amountKrw AS NUMERIC) AS amountKrw,
+    @currency AS currency,
+    @enteredByKey AS enteredByKey,
+    @sourceDocId AS sourceDocId,
+    TIMESTAMP(@createdAt) AS createdAt,
+    TIMESTAMP(@ingestedAt) AS ingestedAt
+) S
+ON T.rowId = S.rowId
+WHEN NOT MATCHED THEN
+  INSERT (
+    rowId, spendDate, platform, campaignName, campaignKey, source, medium,
+    amountKrw, currency, enteredByKey, sourceDocId, createdAt, ingestedAt
+  )
+  VALUES (
+    S.rowId, S.spendDate, S.platform, S.campaignName, S.campaignKey, S.source,
+    S.medium, S.amountKrw, S.currency, S.enteredByKey, S.sourceDocId,
+    S.createdAt, S.ingestedAt
+  )`;
+  const [job] = await bigquery.createQueryJob({
+    query,
+    params: {
+      rowId: row.rowId,
+      spendDate: row.spendDate,
+      platform: row.platform,
+      campaignName: row.campaignName,
+      campaignKey: row.campaignKey,
+      source: row.source,
+      medium: row.medium,
+      amountKrw: row.amountKrw,
+      currency: row.currency,
+      enteredByKey: row.enteredByKey,
+      sourceDocId: row.sourceDocId,
+      createdAt: row.createdAt,
+      ingestedAt: row.ingestedAt,
+    },
+    location: BQ_LOCATION,
+  });
+  await job.getQueryResults();
+}
+
+export const addManualAnalyticsAdSpend = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const parsed = parseManualAdSpendInput(data as Record<string, unknown>);
+    if (!parsed.ok) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        `Invalid ad spend input: ${parsed.reason}`
+      );
+    }
+    const ref = await db.collection(ANALYTICS_AD_SPEND_COLLECTION).add({
+      ...parsed.entry,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      enteredBy: context.auth?.uid ?? null,
+      entrySource: "manual_admin",
+    });
+    return {
+      ok: true,
+      id: ref.id,
+      campaignKey: parsed.entry.campaignKey,
+      amountKrw: parsed.entry.amountKrw,
+      note:
+        "수동 광고비 원장에 append-only 로 추가했다. 수정/삭제 대신 반대 부호가 아닌 새 정정 행을 별도 입력해야 한다.",
+    };
+  }
+);
+
+export const loadAnalyticsAdSpend = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .https.onCall(async (_data, context) => {
+    requireAdmin(context);
+    const salt = readAnalyticsIdSalt();
+    if (!salt) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        `${ANALYTICS_ID_SALT_ENV} is not configured`
+      );
+    }
+    const snap = await db.collection(ANALYTICS_AD_SPEND_COLLECTION).get();
+    const ingestedAt = new Date().toISOString();
+    const rows: AdSpendLedgerRow[] = [];
+    let skipped = 0;
+    for (const doc of snap.docs) {
+      const data = doc.data() as Record<string, unknown>;
+      const parsed = parseManualAdSpendInput(data);
+      const enteredBy = typeof data.enteredBy === "string" ? data.enteredBy : null;
+      if (!parsed.ok || !enteredBy) {
+        skipped += 1;
+        continue;
+      }
+      const createdAtMs = toMillis(data.createdAt);
+      const createdAt =
+        createdAtMs === null
+          ? ingestedAt
+          : new Date(createdAtMs).toISOString();
+      const row = toAdSpendLedgerRow({
+        sourceDocId: `${ANALYTICS_AD_SPEND_COLLECTION}/${doc.id}`,
+        entry: parsed.entry,
+        enteredByUid: enteredBy,
+        salt,
+        createdAt,
+        ingestedAt,
+      });
+      if (!row) {
+        skipped += 1;
+        continue;
+      }
+      rows.push(row);
+    }
+
+    await ensureAnalyticsAdSpendTable();
+    for (const row of rows) await mergeAnalyticsAdSpendRow(row);
+    return {
+      ok: true,
+      scanned: snap.size,
+      merged: rows.length,
+      skipped,
+      table: ANALYTICS_AD_SPEND_TABLE,
+      note:
+        "BQ 적재는 rowId MERGE 라 재실행해도 같은 수동 원장 문서를 중복 집계하지 않는다.",
+    };
+  });
+
+export const getAdminCacSummary = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .https.onCall(async (_data, context) => {
+    requireAdmin(context);
+    try {
+      const [spendRows, firstTouchRows] = await Promise.all([
+        bigquery.query({
+          query: `
+SELECT
+  spendDate,
+  platform,
+  campaignName,
+  campaignKey,
+  amountKrw
+FROM \`${BQ_PROJECT}.${BQ_DATASET}.${ANALYTICS_AD_SPEND_TABLE}\``,
+          location: BQ_LOCATION,
+        }),
+        bigquery.query({
+          query: `
+SELECT campaign, COUNT(*) AS acquired
+FROM \`${BQ_PROJECT}.${BQ_DATASET}.${GA4_BRIDGE_CURRENT_VIEW}\`
+GROUP BY campaign`,
+          location: BQ_LOCATION,
+        }),
+      ]);
+      return {
+        generatedAt: new Date().toISOString(),
+        state: "ingested",
+        basis:
+          `${ANALYTICS_AD_SPEND_TABLE}.campaignKey ↔ ` +
+          `${GA4_BRIDGE_CURRENT_VIEW}.campaign normalized campaign key`,
+        summary: buildCacSummary(
+          spendRows[0] as AdSpendSummaryRow[],
+          firstTouchRows[0] as FirstTouchCampaignRow[]
+        ),
+      };
+    } catch (err) {
+      functions.logger.info("[analytics_ad_spend] CAC summary unavailable", {
+        message: safeAnalyticsErrorMessage(err),
+      });
+      return {
+        generatedAt: new Date().toISOString(),
+        state: "not_ingested",
+        reason:
+          `${ANALYTICS_AD_SPEND_TABLE} 테이블 또는 ${GA4_BRIDGE_CURRENT_VIEW} 뷰가 ` +
+          "아직 준비되지 않았다. 광고비/CAC 에 0 을 그리면 안 된다.",
+        basis:
+          `${ANALYTICS_AD_SPEND_TABLE}.campaignKey ↔ ` +
+          `${GA4_BRIDGE_CURRENT_VIEW}.campaign normalized campaign key`,
+        summary: null,
+      };
+    }
+  });
 
 // ════════════════════════════════════════════════════════════════════════════
 // GA4 리전 브리지 — asia-northeast3 → US 사용자당 1행 (티켓 Th9VRMvm2HkyWSjwF12X)
