@@ -62,6 +62,7 @@ import {
   listSlackChannelIdSharers,
 } from "./slack-channels";
 import { getTelegramProjectLabel } from "./telegram-channel-sync";
+import { recordOwnerInbound } from "./mcp-server/owner-inbound";
 
 // ─── inbound target (structurally identical to telegram-poller's) ─────────
 //
@@ -746,6 +747,23 @@ export class SlackPoller {
       return false;
     }
 
+    // ★Owner-inbound journal — the Telegram mirror (ticket wx9c4NeVtZ1SGcbEISpg).
+    // Written only after a confirmed delivery, and never able to affect it.
+    try {
+      await recordOwnerInbound({
+        key: `slack:${projectId}:${inbound.key}`,
+        projectId,
+        channel: "slack",
+        from: inbound.user ? `<@${inbound.user}>` : "unknown",
+        text: inbound.text,
+        at: Date.now(),
+      });
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      this.log.warn(
+        `[SlackPoller] project=${projectId} owner-inbound journal write failed: ${raw}`,
+      );
+    }
     // Only remember the channel/thread once we actually delivered — these
     // become the default outbound reply target.
     this.lastChannel.set(projectId, inbound.channel);

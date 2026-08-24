@@ -19,11 +19,13 @@ import {
   newWorkChainItemId,
   normalizeWorkChainItems,
   referencedTaskIds,
+  rejectDropReason,
   rejectSelfReportReason,
   statusSatisfiesDoneWhen,
   validateNewItem,
   workChainFooter,
   workChainNudgeForTaskChange,
+  OWNER_DROP_REASON_MIN,
   WORK_CHAIN_HANDOFF_WHY_MAX,
   type TaskStatusLookup,
   type WorkChainItem,
@@ -323,11 +325,7 @@ describe("deriveWorkChain — 미션 라벨 묶음", () => {
       { a: "DONE", b: "REVIEW" },
       membership,
     );
-    const after = deriveWorkChain(
-      items,
-      { a: "DONE", b: "DONE" },
-      membership,
-    );
+    const after = deriveWorkChain(items, { a: "DONE", b: "DONE" }, membership);
     const n = workChainNudgeForTaskChange(before, after, "b");
     expect(n).toMatch(/리플레이 배선/);
     expect(n).toMatch(/완료/);
@@ -451,6 +449,90 @@ describe("rejectSelfReportReason — 자기보고 종료 거부 규칙", () => {
     );
     expect(r).toMatch(/보드 상태/);
     expect(r).toMatch(/Replay Wiring/);
+  });
+});
+
+// ── ★사장님 항목의 닫는 규칙 (티켓 wx9c4NeVtZ1SGcbEISpg) ─────────────────
+//
+// 사장님 항목은 오케 약속보다 기준이 높아야 한다. 근거는 표시가 아니라 **권한**
+// 이다 — 내 약속은 내가 물릴 수 있지만 사장님이 시킨 일은 내가 못 물린다.
+
+describe("★source=owner — 사장님 항목은 오케 약속보다 닫기 어렵다", () => {
+  const ownerItem = (over: Partial<WorkChainItem> = {}) =>
+    item({
+      id: "o1",
+      what: "사장님 미션: 광고 집행",
+      source: "owner",
+      ...over,
+    });
+
+  it("티켓이 없어도 self_reported 를 거부한다 — 오케 항목에 있는 예외가 없다", () => {
+    // 오케 항목은 티켓만 없으면 근거를 달아 자기보고로 닫을 수 있다(위 describe).
+    expect(
+      rejectSelfReportReason(item({ id: "a", what: "x" }), "확인함"),
+    ).toBeNull();
+    // 같은 조건에서 사장님 항목은 거부다.
+    const r = rejectSelfReportReason(ownerItem(), "다 했습니다");
+    expect(r).toMatch(/사장님/);
+    expect(r).toMatch(/자기보고로 닫을 수 없다/);
+    // 대신 무엇을 해야 하는지 알려준다 — 막기만 하면 오케가 우회할 길을 찾는다.
+    expect(r).toMatch(/add_task_ids/);
+  });
+
+  it("티켓이 붙어 있으면 기존 규율이 먼저 걸린다 — source 와 무관하게 보드가 판정", () => {
+    const r = rejectSelfReportReason(ownerItem({ taskIds: ["t1"] }), "했음");
+    expect(r).toMatch(/보드 상태/);
+    expect(r).toMatch(/t1/);
+  });
+
+  it("dropped 는 막지 않는다 — 다만 사유의 바닥이 높다", () => {
+    // 막아 버리면 죽은 항목이 체인에 영원히 남고, 그게 체인을 다시 쓰레기로 만든다.
+    expect(rejectDropReason(ownerItem(), "취소")).toMatch(/사장님/);
+    expect(rejectDropReason(ownerItem(), "n/a")).toMatch(
+      new RegExp(`${OWNER_DROP_REASON_MIN}자`),
+    );
+    expect(
+      rejectDropReason(
+        ownerItem(),
+        "사장님이 광고는 다음 분기로 미루자고 하셨다",
+      ),
+    ).toBeNull();
+  });
+
+  it("사장님 항목이 아니면 dropped 규칙은 아무것도 바꾸지 않는다(기존 동작 무변경)", () => {
+    expect(rejectDropReason(item({ id: "a", what: "x" }), "취소")).toBeNull();
+    expect(
+      rejectDropReason(item({ id: "a", what: "x", source: "auto" }), "n/a"),
+    ).toBeNull();
+  });
+
+  it("source=owner 는 저장·복원된다 — 구버전 문서는 여전히 manual 로 읽힌다", () => {
+    const built = buildWorkChainItem(
+      {
+        what: "사장님 미션: 광고 집행",
+        why: "행동 증거",
+        source: "owner",
+        sourceTool: "create_task",
+      },
+      { id: "o1", now: 5, by: "orchestrator-p1" },
+    );
+    expect(built.source).toBe("owner");
+    expect(built.sourceTool).toBe("create_task");
+    expect(normalizeWorkChainItems([built])[0].source).toBe("owner");
+    // 구버전 항목엔 source 가 없다 — 없으면 manual(자동 포착 이전 항목은 전부 수기).
+    expect(
+      normalizeWorkChainItems([{ ...built, source: undefined }])[0].source,
+    ).toBeUndefined();
+  });
+
+  it("★렌더에서 눈으로도 갈린다 — 닫는 권한이 다르기 때문이다", () => {
+    const derived = deriveWorkChain(
+      [ownerItem({ taskIds: ["t1"], sourceTool: "create_task" })],
+      { t1: "IN_PROGRESS" },
+    );
+    const out = formatWorkChain(derived);
+    expect(out).toContain("source: owner(create_task)");
+    expect(out).toContain("자기보고로 못 닫는다");
   });
 });
 
@@ -736,7 +818,9 @@ describe("buildWorkChainHandoff", () => {
   });
 
   it("미션 라벨만 있고 티켓이 0개인 항목(unsplit)도 열린 것으로 따라간다", () => {
-    const items = [item({ id: "a", what: "배치 쪼개기", missionLabel: "온보딩" })];
+    const items = [
+      item({ id: "a", what: "배치 쪼개기", missionLabel: "온보딩" }),
+    ];
     const membership = { [missionLabelKey("온보딩")]: bucket([], 1) };
     const carry = buildWorkChainHandoff(deriveWorkChain(items, {}, membership));
     expect(carry.items).toHaveLength(1);

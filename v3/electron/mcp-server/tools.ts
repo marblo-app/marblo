@@ -76,12 +76,16 @@ import { evaluateDeleteGuards, type DeleteMode } from "./task-delete.js";
 import {
   addWorkChainItem,
   captureMergeHoldFollowUp,
+  captureOwnerMission,
   captureWorkChainPromises,
   loadWorkChain,
   updateWorkChainItem,
   workChainNudgeAfterTransition,
 } from "./work-chain.js";
-import type { CaptureSurface } from "./work-chain-capture.js";
+import type {
+  CaptureSurface,
+  CreatedTaskFact,
+} from "./work-chain-capture.js";
 import {
   WORK_CHAIN_DONE_WHEN_VALUES,
   formatWorkChain,
@@ -3194,6 +3198,38 @@ async function captureChainPromiseNote(
   }
 }
 
+/**
+ * ★사장님 미션 포착 훅 (티켓 wx9c4NeVtZ1SGcbEISpg).
+ *
+ * 위 훅은 **오케가 쓴 문장**을 읽는다. 이건 정반대로 **오케가 한 행동**을 읽는다:
+ * 사장님 인바운드(텔레그램/Slack) 직후에 티켓이 생기면 그 티켓이 사장님 미션이다.
+ * 사장님 한국어를 분류하지 않는 게 요점이다 — 근거·기각 사유 전문은
+ * `work-chain-capture.ts` 의 "사장님 미션 포착" 절.
+ *
+ * 규율은 위 훅과 같다: 오케 세션에서만, 인바운드가 없으면 Firestore 를 읽지도
+ * 않고, ★절대 create_task 를 실패시키지 않는다.
+ */
+async function captureOwnerMissionNote(
+  projectId: string,
+  tool: string,
+  tasks: readonly CreatedTaskFact[],
+): Promise<string> {
+  if (!isOrchestratorAgentId(MARBLO_AGENT_ID)) return "";
+  if (!projectId || tasks.length === 0) return "";
+  try {
+    const res = await captureOwnerMission(db, {
+      projectId,
+      by: MARBLO_AGENT_ID,
+      tool,
+      tasks,
+    });
+    return res.note;
+  } catch (err) {
+    console.error(`[work-chain] owner mission hook (${tool}) skipped:`, err);
+    return "";
+  }
+}
+
 /** 결과 문장 뒤에 포착 알림을 붙인다. 빈 문자열이면 원문 그대로. */
 function withCaptureNote(body: string, note: string): string {
   return note ? `${body}\n\n${note}` : body;
@@ -3758,13 +3794,24 @@ export function registerTools(server: McpServer): void {
         resolvedProject.warning,
         implicit.note || undefined,
       ].filter(Boolean);
+      // ★사장님이 방금 준 지시가 이 티켓이면 체인에 남긴다(행동=증거).
+      const ownerNote = await captureOwnerMissionNote(projectId, "create_task", [
+        {
+          id: ref.id,
+          title,
+          ...(mission_label ? { missionLabel: mission_label } : {}),
+        },
+      ]);
       return text(
-        `Task created successfully!\nID: ${
-          ref.id
-        }\nTitle: ${title}\nRole: ${role}\nPriority: ${
-          priority ?? 0
-        }\nProject: ${projectId}` +
-          (notes2.length ? `\n⚠️ ${notes2.join("\n⚠️ ")}` : "")
+        withCaptureNote(
+          `Task created successfully!\nID: ${
+            ref.id
+          }\nTitle: ${title}\nRole: ${role}\nPriority: ${
+            priority ?? 0
+          }\nProject: ${projectId}` +
+            (notes2.length ? `\n⚠️ ${notes2.join("\n⚠️ ")}` : ""),
+          ownerNote
+        )
       );
     }
   );
@@ -3837,6 +3884,8 @@ export function registerTools(server: McpServer): void {
       const implicitByProject = new Map<string, string | null>();
       const implicitTaskIds = new Map<string, string[]>();
       const implicitNotes: string[] = [];
+      // ★사장님 미션 포착용 — projectId → 이 호출에서 실제로 생긴 티켓들.
+      const createdByProject = new Map<string, CreatedTaskFact[]>();
 
       const indexedTasks = taskList.map((task, index) => ({ task, index }));
       for (const chunk of chunkBulkTasks(indexedTasks)) {
@@ -4031,6 +4080,15 @@ export function registerTools(server: McpServer): void {
             data.projection = seedProjectionForCreate(ref.id, now);
             await setDoc(ref, data);
             indexToId[i] = ref.id;
+            // ★사장님 미션 포착의 행동 증거 — 어느 프로젝트에 무엇이 생겼나.
+            // 항목별 project_id 오버라이드가 가능하므로 프로젝트별로 모은다.
+            const createdBucket = createdByProject.get(itemProjectId) ?? [];
+            createdBucket.push({
+              id: ref.id,
+              title: String(data.title ?? ""),
+              ...(mission_label ? { missionLabel: mission_label } : {}),
+            });
+            createdByProject.set(itemProjectId, createdBucket);
             const joinedMissionId = data.missionId;
             if (typeof joinedMissionId === "string" && joinedMissionId) {
               const bucket = implicitTaskIds.get(joinedMissionId) ?? [];
@@ -4067,6 +4125,17 @@ export function registerTools(server: McpServer): void {
       if (depMappings.length > 0)
         output += `\n\nDependency ID mappings:\n${depMappings.join("\n")}`;
       if (implicitNotes.length > 0) output += `\n\n${implicitNotes.join("\n")}`;
+      // ★사장님이 방금 준 지시를 이 배치가 옮긴 것이면 체인에 남긴다.
+      for (const [ownerProjectId, created] of createdByProject.entries()) {
+        output = withCaptureNote(
+          output,
+          await captureOwnerMissionNote(
+            ownerProjectId,
+            "create_tasks_bulk",
+            created
+          )
+        );
+      }
       return text(output);
     }
   );

@@ -51,6 +51,7 @@ import {
   listTelegramChatIdSharers,
 } from "./telegram-channels";
 import { getTelegramProjectLabel } from "./telegram-channel-sync";
+import { recordOwnerInbound } from "./mcp-server/owner-inbound";
 
 // ─── Telegram update shapes (only the fields we read) ─────────────────────
 
@@ -624,6 +625,29 @@ export class TelegramPoller {
         `[TelegramPoller] project=${projectId} injectMessage failed: ${raw}`,
       );
       return false; // hold offset — retry delivery
+    }
+    // ★Owner-inbound journal (ticket wx9c4NeVtZ1SGcbEISpg). The MCP server has
+    // NO other way to see what the owner said — the four work-chain capture
+    // surfaces are all orchestrator-authored text, which is exactly why owner
+    // missions never landed in the chain. Recorded ONLY after a confirmed
+    // delivery, and never in a way that can affect delivery: the write is
+    // awaited but its failure is logged and dropped, and the offset advance
+    // below does not depend on it.
+    try {
+      await recordOwnerInbound({
+        key: `telegram:${projectId}:${update.update_id}`,
+        projectId,
+        channel: "telegram",
+        from,
+        text,
+        at: Date.now(),
+      });
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      this.log.warn(
+        // fs 오류라 토큰이 낄 자리가 없다(같은 함수의 injectMessage catch 와 동일).
+        `[TelegramPoller] project=${projectId} owner-inbound journal write failed: ${raw}`,
+      );
     }
     // Only remember the chat once we actually delivered — this becomes the
     // default outbound reply target.

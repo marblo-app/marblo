@@ -424,9 +424,7 @@ describe("needsOrchestratorAutoProbe", () => {
   });
 
   it("does not probe when env or this-launch explicit is set", () => {
-    expect(
-      needsOrchestratorAutoProbe({ envOverride: "claude" }),
-    ).toBe(false);
+    expect(needsOrchestratorAutoProbe({ envOverride: "claude" })).toBe(false);
     expect(
       needsOrchestratorAutoProbe({ explicit: "codex", perProject: "grok" }),
     ).toBe(false);
@@ -435,9 +433,9 @@ describe("needsOrchestratorAutoProbe", () => {
 
 describe("classifyOrchestratorSelectionSource", () => {
   it("tags explicit / user-per-project / global as user", () => {
-    expect(
-      classifyOrchestratorSelectionSource({ explicit: "claude" }),
-    ).toBe("user");
+    expect(classifyOrchestratorSelectionSource({ explicit: "claude" })).toBe(
+      "user",
+    );
     expect(
       classifyOrchestratorSelectionSource({
         perProject: "grok",
@@ -681,12 +679,19 @@ describe("handoff snapshot work chain", () => {
         expect(dedupeAgainstChain(detected, items)).toEqual([]);
       }
     }
-    // ★위 단언이 "감지기가 아무것도 못 잡아서" 통과한 게 아님을 못 박는다.
-    // 인수인계 텍스트는 **실제로** 필터에 걸린다(오케가 쓴 문장을 그대로 싣기
-    // 때문이다). 그걸 막는 건 `dedupeAgainstChain` 이고, 그게 작동하는 유일한
-    // 이유는 `what` 을 자르지 않고 원문 그대로 실었기 때문이다 —
-    // `toHandoffItem` 이 what 만 clip 하지 않는 규율이 여기서 값을 한다.
-    expect(totalDetected).toBeGreaterThan(0);
+    // ★방어가 두 겹이고, 바깥 겹이 더 세다(티켓 wx9c4NeVtZ1SGcbEISpg).
+    //   ① 인수인계 스냅샷은 `JSON.stringify` 로 실린다 = 항목 본문이 전부
+    //      큰따옴표 안이다. 인용부 제외가 그걸 통째로 지운다 — 그래서 지금
+    //      감지 자체가 0건이다. 직렬화된 데이터는 오케가 지금 하는 말이 아니다.
+    //   ② 그래도 뭔가 새면 `dedupeAgainstChain` 이 원문 그대로 잡는다(위 루프).
+    //      그게 작동하는 유일한 이유는 `toHandoffItem` 이 `what` 을 자르지 않기
+    //      때문이고, 그 규율은 여전히 값을 한다.
+    expect(totalDetected).toBe(0);
+    // ★①이 "감지기가 원래 이 문장을 못 잡아서" 0건인 게 아님을 못 박는다 —
+    // 따옴표를 벗기면 같은 문장이 실제로 걸린다.
+    expect(
+      detectFollowUpPromises(items[0].what, "owner_report"),
+    ).not.toHaveLength(0);
   });
 
   it("★체인이 비어 있으면 인수인계 문구 자체가 아무것도 포착시키지 않는다", () => {

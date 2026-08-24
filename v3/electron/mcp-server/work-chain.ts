@@ -32,12 +32,21 @@ import {
   type Transaction,
 } from "firebase/firestore";
 import {
+  buildOwnerMissions,
   dedupeAgainstChain,
   detectFollowUpPromises,
   formatCaptureNote,
+  formatOwnerMissionNote,
+  ownerMissionVeto,
   type CaptureSurface,
   type CapturedPromise,
+  type CreatedTaskFact,
+  type OwnerMissionVeto,
 } from "./work-chain-capture.js";
+import {
+  markOwnerInboundConsumed,
+  readOwnerInbound,
+} from "./owner-inbound.js";
 import {
   isImplicitMissionDoc,
   missionLabelKey,
@@ -54,6 +63,7 @@ import {
   newWorkChainItemId,
   normalizeWorkChainItems,
   referencedTaskIds,
+  rejectDropReason,
   rejectSelfReportReason,
   validateNewItem,
   workChainNudgeForTaskChange,
@@ -464,6 +474,9 @@ export async function updateWorkChainItem(
       if (input.close === "dropped") {
         if (!reason)
           return "dropped 로 닫으려면 reason(왜 더 이상 유효하지 않은지)을 적어라.";
+        // ★사장님 항목은 사유의 바닥이 더 높다(work-chain-core §rejectDropReason).
+        const rejectedDrop = rejectDropReason(next, reason);
+        if (rejectedDrop) return rejectedDrop;
       } else {
         const rejected = rejectSelfReportReason(next, reason);
         if (rejected) return rejected;
@@ -720,6 +733,188 @@ function captureFailureNote(
     `아래를 잡았지만 **적지 못했다.** 그대로 두면 사라진다:\n${quoted}\n` +
     `  add_work_chain_item(what, why) 로 직접 적거나, 규칙 배포 후 다시 말해라.`
   );
+}
+
+// ══ ★사장님 미션 포착 — 행동이 증거다 (티켓 wx9c4NeVtZ1SGcbEISpg) ══════════
+//
+// 감지 규칙과 훅 A/B/C 비교 근거는 `work-chain-capture.ts` 의 같은 이름 절에 있다.
+// 여기는 그 판정을 체인에 실제로 넣는 I/O 다. 위의 자동 포착과 같은 규율:
+// ★절대 throw 하지 않고, 원래 도구(create_task)를 절대 실패시키지 않는다.
+
+/**
+ * 사장님 메시지와 티켓 생성 사이의 창. 이 창을 벗어난 티켓은 사장님 지시가
+ * 아니라 오케 자기 일로 본다.
+ *
+ * ★30분인 근거: 사장님 지시 한 통은 오케가 읽고 → 답하고 → 티켓 여러 개를
+ * 만드는 데 실제로 수 분에서 십수 분이 걸린다(2026-08-24 미션 5건이 그랬다).
+ * 너무 짧으면 그 실측을 못 덮고, 너무 길면 무관한 티켓이 사장님 항목으로
+ * 오분류된다. 오분류의 비용은 **소비 1회 규칙**이 묶어 준다 — 한 메시지의 한
+ * 묶음은 항목 하나만 만들고, 그 뒤 티켓은 새 항목이 아니라 근거로 붙는다.
+ */
+export const OWNER_MISSION_WINDOW_MS = 30 * 60 * 1000;
+
+function ownerMissionWindowMs(): number {
+  const raw = Number(process.env.MARBLO_OWNER_MISSION_WINDOW_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : OWNER_MISSION_WINDOW_MS;
+}
+
+export interface CaptureOwnerMissionInput {
+  projectId: string;
+  /** 적은 주체(agentId) — 항목의 createdBy. */
+  by: string;
+  /** 어느 도구가 티켓을 만들었나(create_task / create_tasks_bulk). */
+  tool: string;
+  /** 방금 생긴 티켓들 — ★행동 증거. */
+  tasks: readonly CreatedTaskFact[];
+  now?: number;
+}
+
+export interface CaptureOwnerMissionResult {
+  note: string;
+  /** 새로 적힌 사장님 미션 항목. */
+  written: Array<{ id: string; what: string; taskIds: string[] }>;
+  /** 이미 있던 항목에 근거 티켓만 붙인 것. */
+  attached: Array<{ id: string; what: string; taskIds: string[] }>;
+  /** 왜 안 잡았는가(진단). 잡았으면 undefined. */
+  skipped?:
+    | "no_inbound"
+    | "out_of_window"
+    | OwnerMissionVeto
+    | "no_tasks"
+    | "error";
+  error?: string;
+}
+
+const EMPTY_OWNER_MISSION: CaptureOwnerMissionResult = {
+  note: "",
+  written: [],
+  attached: [],
+};
+
+/**
+ * ★사장님이 준 미션을 체인에 남긴다.
+ *
+ * 판정은 **행동**이다 — 사장님 메시지가 창 안에 있고 그 뒤 티켓이 생겼으면
+ * 그게 미션이다. 사장님 한국어를 분류하지 않는다(거부권만 본다).
+ *
+ * 소비 1회: 같은 메시지의 같은 묶음(미션 라벨 키)은 항목을 하나만 만들고,
+ * 그 뒤에 오는 같은 묶음의 티켓은 **그 항목의 근거 티켓으로 붙는다.** 항목이
+ * 티켓 수만큼 늘어나면 체인이 보드의 사본이 되는데, 그건 §7 설계 위반이다.
+ */
+export async function captureOwnerMission(
+  db: Firestore,
+  input: CaptureOwnerMissionInput,
+): Promise<CaptureOwnerMissionResult> {
+  const { projectId, by, tool, tasks } = input;
+  if (!projectId) return EMPTY_OWNER_MISSION;
+  const usable = tasks.filter((t) => t.id);
+  if (usable.length === 0)
+    return { ...EMPTY_OWNER_MISSION, skipped: "no_tasks" };
+  const now = input.now ?? Date.now();
+  try {
+    const entries = await readOwnerInbound(projectId);
+    if (entries.length === 0)
+      return { ...EMPTY_OWNER_MISSION, skipped: "no_inbound" };
+    // 최신 인바운드 하나만 본다 — 그 앞의 메시지는 이미 자기 차례에 판정됐다.
+    const entry = entries[0];
+    if (now - entry.at > ownerMissionWindowMs())
+      return { ...EMPTY_OWNER_MISSION, skipped: "out_of_window" };
+    const veto = ownerMissionVeto(entry.text);
+    if (veto) return { ...EMPTY_OWNER_MISSION, skipped: veto };
+
+    const missions = buildOwnerMissions(
+      {
+        channel: entry.channel,
+        from: entry.from,
+        text: entry.text,
+        at: entry.at,
+      },
+      usable,
+    );
+    if (missions.length === 0) return EMPTY_OWNER_MISSION;
+
+    const snap = await readWorkChain(db, projectId);
+    const written: Array<{ id: string; what: string; taskIds: string[] }> = [];
+    const attached: Array<{ id: string; what: string; taskIds: string[] }> = [];
+    let error: string | undefined;
+
+    for (const mission of missions) {
+      const existingId = entry.consumed?.[mission.groupKey];
+      const existing = existingId
+        ? snap.items.find((i) => i.id === existingId && !i.closed)
+        : undefined;
+      if (existing) {
+        // 이미 이 묶음의 항목이 있다 — 새 티켓은 근거로 붙인다.
+        const fresh = mission.taskIds.filter(
+          (id) => !existing.taskIds.includes(id),
+        );
+        if (fresh.length === 0) continue;
+        const res = await updateWorkChainItem(db, projectId, by, existing.id, {
+          addTaskIds: fresh,
+        });
+        if (res.error) {
+          error = res.error;
+          break;
+        }
+        attached.push({
+          id: existing.id,
+          what: existing.what,
+          taskIds: fresh,
+        });
+        continue;
+      }
+      const res = await addWorkChainItem(db, projectId, by, {
+        what: mission.what,
+        why: mission.why,
+        taskIds: mission.taskIds,
+        ...(mission.missionLabel ? { missionLabel: mission.missionLabel } : {}),
+        doneWhen: "done",
+        source: "owner",
+        sourceTool: tool,
+      });
+      if (res.error) {
+        error = res.error;
+        break;
+      }
+      if (res.item) {
+        written.push({
+          id: res.item.id,
+          what: res.item.what,
+          taskIds: res.item.taskIds,
+        });
+        await markOwnerInboundConsumed(
+          entry.key,
+          mission.groupKey,
+          res.item.id,
+        );
+      }
+    }
+
+    const note = error
+      ? `⚠️ 사장님 미션을 워크체인에 적지 못했다 — ${error}\n` +
+        `  사장님이 방금 주신 지시가 체인에 **없다.** add_work_chain_item 으로 직접 적어라.`
+      : formatOwnerMissionNote(written, attached);
+    return {
+      note,
+      written,
+      attached,
+      ...(error ? { error, skipped: "error" as const } : {}),
+    };
+  } catch (err) {
+    // ★삼키지 않는다 — 사장님 지시가 조용히 사라지는 건 이 티켓이 고치려는
+    // 실패 그 자체다.
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[work-chain] owner mission capture failed:", err);
+    return {
+      note:
+        `⚠️ 사장님 미션 자동 기록 실패 — ${message}\n` +
+        `  방금 만든 티켓이 사장님 지시라면 add_work_chain_item 으로 직접 적어라.`,
+      written: [],
+      attached: [],
+      skipped: "error",
+      error: message,
+    };
+  }
 }
 
 /**

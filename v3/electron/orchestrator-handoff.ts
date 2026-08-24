@@ -241,7 +241,7 @@ export interface EffectiveOrchestratorModelInput {
 
 /** True when the stored per-project model must not be auto-overridden. */
 export function isUserSelectedOrchestratorSource(
-  source: OrchestratorModelSelectionSource | null | undefined
+  source: OrchestratorModelSelectionSource | null | undefined,
 ): boolean {
   return source === "user";
 }
@@ -280,7 +280,7 @@ export function needsOrchestratorAutoProbe(input: {
  * Explicit / user-memory / global → `user`; auto re-eval / first auto → `auto`.
  */
 export function classifyOrchestratorSelectionSource(
-  input: EffectiveOrchestratorModelInput
+  input: EffectiveOrchestratorModelInput,
 ): OrchestratorModelSelectionSource {
   if (input.envOverride) return "user";
   if (input.explicit) return "user";
@@ -722,6 +722,11 @@ export function formatHandoffPrompt(
  * 하나도 쓰지 않는다. 항목 본문은 오케가 원래 쓴 문장이라 마커가 들어 있을 수
  * 있는데, 그건 `dedupeAgainstChain` 이 원문 그대로 잡는다 — 그래서
  * `toHandoffItem` 이 `what` 을 절대 자르지 않는 것이다.
+ *
+ * ★티켓 wx9c4NeVtZ1SGcbEISpg 이후로 겹이 하나 더 생겼다: 스냅샷은
+ * `JSON.stringify` 로 실려 항목 본문이 전부 큰따옴표 안이고, 감지기의 인용부
+ * 제외(`redactQuotedSpans`)가 그걸 통째로 지운다. 직렬화된 데이터는 오케가 지금
+ * 하는 말이 아니기 때문이다. dedupe 는 그 뒤의 안전망으로 그대로 남는다.
  */
 function workChainPromptLines(
   carry: WorkChainHandoffCarry | undefined,

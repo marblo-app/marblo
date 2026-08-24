@@ -53,10 +53,20 @@ import {
   WORK_CHAIN_WHY_MAX,
   type WorkChainItem,
 } from "./work-chain-core.js";
+// 미션 라벨 정규화·매칭은 새로 만들지 않는다 — work-chain-core 와 같은 규율로
+// implicit-mission.ts 의 것을 그대로 쓴다(라벨 키 공간이 갈리면 보드 조인이 깨진다).
+import { missionLabelKey, normalizeMissionLabel } from "./implicit-mission.js";
 
 /**
  * 어느 도구의 어느 인자를 읽었는가. 표면마다 오탐 위험이 달라서 정책이 갈린다
  * (`SURFACE_POLICY`).
+ */
+/**
+ * ★넷 다 **오케가 쓴 글**이다 — 그리고 그게 이 모듈의 가장 큰 구멍이었다
+ * (티켓 wx9c4NeVtZ1SGcbEISpg): 사장님이 준 미션은 한 건도 안 잡혔다.
+ * 사장님 인바운드는 electron 메인이 받아 오케 PTY 로 넣으므로 이 프로세스에
+ * 도달할 경로 자체가 없었다. 그 구멍은 **표면을 늘려서가 아니라** 파일 아래쪽
+ * "사장님 미션 포착" 절이 메운다 — 문장이 아니라 **행동**을 읽는다.
  */
 export type CaptureSurface =
   /** escalate_to_owner(note) / send_telegram_message(text) — 사장님 보고. ★실패 사례의 자리. */
@@ -388,6 +398,108 @@ function isSpeechActNotWorkItem(
 }
 
 /**
+ * ★입장표명 — "더 말리지 않겠습니다" 류. 2026-08-24 오포착 16건의 한 유형이다
+ * (티켓 wx9c4NeVtZ1SGcbEISpg).
+ *
+ * 의지 어미의 **부정형**은 "안 하겠다" 는 태도 표명이지 할 일이 아니다. 할 일
+ * 목록에 "말리지 않기" 를 적을 수는 없다 — 끝났는지 판정할 보드 사실이 없고,
+ * 그래서 영원히 열린 채로 남는다. 부정형은 예외 없이 이 성질을 가진다.
+ *
+ * `NEGATIONS`(마커 뒤 20자 창)로는 이게 안 잡힌다. 부정이 마커 **앞**에
+ * 붙기 때문이다("말리**지 않**겠습니다") — 앞쪽 창은 살아 있는 약속을 죽여서
+ * 일부러 뺐고(§NEGATION_AFTER), 그 결정은 유효하다. 그래서 창이 아니라
+ * **어미의 형태**로 가른다.
+ */
+const NEGATIVE_VOLITIVE_RE =
+  /(?:지\s*않|안\s*하|않으)겠|지\s*않을\s*(?:것|예정)|(?:won't|will not|will never)\s/u;
+
+/**
+ * 긍정형 입장표명. ★여기엔 **깨끗한 문법 축이 없다** — 정직하게 밝힌다.
+ *
+ * 실측 원문(2026-08-24):
+ *   · "결정으로 받고 잘 돌게 만드는 쪽으로 **붙겠**습니다."  ← 오포착
+ *   · "오늘 세 번 틀렸으니 단정은 **피하겠**습니다."          ← 오포착
+ * 그런데 같은 날 **유지된**(=진짜 다음 할 일) 문장도 같은 모양이다:
+ *   · "앞서 드린 조언은 **보류하겠**습니다."                   ← 양성
+ *   · "계기판이 고쳐진 뒤에 따로 **여쭙겠**습니다."             ← 양성
+ * 어미도 같고 목적어 유무도 갈리지 않는다(양성 둘 다 을/를 이 없다).
+ * 그래서 목적어를 요구하는 축은 못 쓴다 — 쓰면 양성 둘이 같이 죽고,
+ * 기존 회귀("마지막에 X 티켓 열겠다")도 함께 죽는다.
+ *
+ * 남는 건 **태도 동사의 닫힌 목록**이다. 일반 규칙이 아니라 실측 목록이라는
+ * 사실을 여기 적어 둔다 — 새 오포착이 나오면 유형을 보고 늘리되, 이 목록이
+ * 길어지기 시작하면 그건 축을 잘못 잡았다는 신호다.
+ */
+const STANCE_VOLITIVE_STEMS = [
+  "말리겠",
+  "피하겠",
+  "붙겠",
+  "따르겠",
+  "받아들이겠",
+] as const;
+
+/**
+ * ★즉시성 — "지금 이 턴에 하는 일" 은 **다음** 할 일이 아니다.
+ *
+ * 실측 원문: "이어서 보고 머지하겠습니다." · "UTM 규약은 사장님이 바로 쓰실
+ * 거라 먼저 보겠습니다." 둘 다 그 턴 안에서 하고 있는 일이라 체인에 적으면
+ * 적자마자 끝나 있다(그리고 아무도 안 닫는다).
+ *
+ * ★선행 힌트가 있으면 거절하지 않는다 — "머지되면 바로 티켓을 열겠습니다" 의
+ * '바로' 는 즉시성이 아니라 **사건 뒤의 즉시**이고, 그건 진짜 다음 할 일이다.
+ */
+const IMMEDIACY_ADVERBS = ["이어서", "먼저", "바로", "곧바로"] as const;
+
+/**
+ * ★이미 보드에 넣은 지시를 사장님께 **설명한** 문장 (오포착 유형 c).
+ *
+ * 실측 원문: "그 문서에 경고 하나를 꼭 넣**으라고 했습니다** — 광고는 …
+ * utm 을 실어야 합니다." 뒤 절의 당위만 보면 약속처럼 읽히지만, 앞 절이
+ * **이미 지시했다**고 말하고 있다. 그 일은 이미 티켓 안에 있다.
+ */
+const REPORTED_INSTRUCTION_RE = /(?:라고|다고|으라고)\s*(?:했|시켰|적었)/u;
+
+/**
+ * ★금지 + 당위가 한 문장에 있으면 그건 **규범 서술**이지 약속이 아니다.
+ *
+ * 실측 원문: "'설치 수' 를 그냥 세**면 안 됩니다** — 브라우저·사람당 설치
+ * 수를 옆에 봬**야 합니다**." 제품이 어떠해야 하는지를 말한 문장이다.
+ * 이미 문서화된 당위 어미의 중의성(§COMMITMENT_MODAL)과 같은 축이고,
+ * 종결 위치·목적어로는 안 갈리는 나머지를 여기서 가른다.
+ */
+const PROHIBITION_RE = /(?:면|하면|으면)\s*안\s*(?:됩니다|된다|돼|되는)/u;
+
+/**
+ * ★단위를 통째로 버리는 판정 — **의지 어미든 당위 어미든** 상관없이 항목이
+ * 아니다. 유형 c 의 두 문장이 여기서 걸린다(둘 다 당위 어미로 걸렸으므로
+ * 의지 어미만 거르는 아래 함수로는 못 막는다).
+ *
+ * ★명시 마커(`[다음]`)보다는 **뒤**에 놓인다 — 오케가 직접 찍었으면 이긴다.
+ */
+function isBoardFactNotWorkItem(hay: string): boolean {
+  return REPORTED_INSTRUCTION_RE.test(hay) || PROHIBITION_RE.test(hay);
+}
+
+/**
+ * 의지 어미에만 거는 판정 — 태도 표명과 즉시성. 당위 어미는 건드리지 않는다
+ * (당위는 이미 종결 위치·목적어·려면 세 축으로 좁혀져 있다).
+ */
+function isStanceNotWorkItem(
+  hay: string,
+  opts: { hasDependencyHint: boolean },
+): boolean {
+  if (NEGATIVE_VOLITIVE_RE.test(hay)) return true;
+  if (STANCE_VOLITIVE_STEMS.some((s) => hay.includes(s))) return true;
+  if (
+    !opts.hasDependencyHint &&
+    IMMEDIACY_ADVERBS.some((a) => hay.includes(a))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * 당위가 "보려면/하려면 … 해야 한다" 형태면 사용자·제품 절차이지 오케의 다음
  * 할 일이 아니다. 실측: "데모를 보려면 매번 Cmd 를 눌러야 한다"(오포착) vs
  * "규칙을 한 번 더 배포해야 합니다"(2026-08-22 실패 사례, 려면 없음).
@@ -476,6 +588,68 @@ function isNegated(hay: string, marker: string): boolean {
   return sawOccurrence;
 }
 
+// ── ★인용부·코드블록 제외 (티켓 wx9c4NeVtZ1SGcbEISpg) ────────────────────
+//
+// 2026-08-24 오포착 16건 중 한 유형이 **따옴표 안 제품 문구**였다: 오케가
+// 사장님께 UI 카피를 인용한 문장("터미널 열고 git init 을 진행하겠습니다")이
+// 통째로 체인 항목이 됐다. #1176 이 화행으로 좁혔지만 인용부는 그대로 샜다 —
+// 화행 필터는 *오케가 한 말*의 종류를 가르는 축이라 *오케가 한 말이 아닌 것*을
+// 못 가른다.
+//
+// ★규칙은 하나다: **따옴표·코드블록 안은 오케가 지금 하는 약속이 아니다.**
+// 제품 카피든, 사장님 말씀 재인용이든, 남의 로그든, 인용 안의 "~하겠습니다" 는
+// 인용된 화자의 것이지 오케의 다음 할 일이 아니다.
+//
+// 인용 **내용만** 지우고 문장의 나머지는 남긴다 — 문장을 통째로 버리면
+// `"좋다"고 하시면 … 발송하겠습니다` 처럼 인용을 품은 **진짜** 문장의 판정
+// 근거(여기선 청자 조건 "고 하시면")까지 사라진다.
+
+/** 코드 펜스(```) — 닫히지 않은 펜스는 끝까지 코드로 본다. */
+const CODE_FENCE_RE = /```[\s\S]*?(?:```|$)/g;
+/** 인라인 코드(`…`) — 줄을 넘지 않는다. */
+const INLINE_CODE_RE = /`[^`\n]*`/g;
+/** 곧은/둥근 큰따옴표, 한국어 인용부호. 줄을 넘는 쌍은 인용이 아니라 오식이다. */
+const DOUBLE_QUOTE_RE = /"[^"\n]*"|“[^”\n]*”|「[^」\n]*」|『[^』\n]*』/g;
+/**
+ * 작은따옴표는 **한글을 담은 쌍만** 인용으로 본다. 영어 아포스트로피
+ * (don't / it's / i'll)가 짝을 이뤄 문장 중간을 삼키는 사고를 막는 축이다.
+ * 이 보수성 때문에 한글 없는 인용은 안 지워지지만, 그 실패 방향은 **포착을
+ * 놓치는 쪽이 아니라 남기는 쪽**이라 기존 필터가 다시 받는다.
+ */
+const SINGLE_QUOTE_RE = /'[^'\n]*'/g;
+
+/**
+ * ★닫히지 않은 여는 따옴표는 **줄 끝까지** 인용으로 본다.
+ *
+ * 실측 근거(2026-08-24 오포착 원문 5번): `"터미널 열고 git init 을 진행하겠습니다.`
+ * — 오케가 붙여넣다가 닫는 따옴표를 빠뜨렸다. 짝만 지우면 이 한 건이 그대로
+ * 샌다. 코드 펜스에서 이미 쓰는 규율(닫히지 않은 펜스는 끝까지 코드)과 같다.
+ *
+ * 대가: 인치 기호 같은 홀따옴표가 줄 나머지를 삼켜 포착을 **놓칠** 수 있다.
+ * 방향이 안전한 쪽이라 감수한다(놓친 건 add_work_chain_item 이 받는다).
+ */
+const DANGLING_QUOTE_RE = /["“][^\n]*$/gm;
+
+/**
+ * 인용·코드 구간을 지운다. 지운 자리는 공백 한 칸 — 지운 흔적이 낱말을 붙여
+ * 없던 마커를 만들지 않게 한다.
+ *
+ * ★`detectFollowUpPromises` 가 **쪼개기 전에** 부른다(코드 펜스는 여러 줄이라
+ * 줄 단위로는 못 지운다). `evaluateUnit` 을 직접 부르는 쪽은 이미 지워진
+ * 텍스트를 준다고 가정한다.
+ */
+export function redactQuotedSpans(text: string): string {
+  return (
+    text
+      .replace(CODE_FENCE_RE, " ")
+      .replace(INLINE_CODE_RE, " ")
+      .replace(DOUBLE_QUOTE_RE, " ")
+      .replace(SINGLE_QUOTE_RE, (m) => (HANGUL_RE.test(m) ? " " : m))
+      // 짝을 먼저 지웠으므로 여기 남은 따옴표는 짝이 없는 것뿐이다.
+      .replace(DANGLING_QUOTE_RE, " ")
+  );
+}
+
 /**
  * 텍스트를 판정 단위로 쪼갠다. 줄 → 문장. 한국어 종결부호가 없는 줄이 흔해서
  * 줄바꿈을 1차 경계로 쓴다(오케 보고문은 사실상 줄 단위다).
@@ -561,11 +735,16 @@ export function evaluateUnit(
   // 하는 문장이 실제 커밋 제목에 있었고(테스트 코퍼스), 그게 걸리면 체인이
   // 회고문으로 덮인다. 그래서 "누구의 일인지(1인칭)" 나 "언제인지(선행 힌트)" 나
   // "하겠다는 건지(약속 어미)" 중 하나가 함께 있어야 통과시킨다.
+  // ★이미 보드에 있는 일을 설명한 문장 / 규범 서술은 어미 종류와 무관하게
+  //   항목이 아니다. 명시 마커 뒤이므로 오케가 직접 찍은 것은 이미 통과했다.
+  if (isBoardFactNotWorkItem(hay)) return null;
+
   const hasObject = OBJECT_MARKER_RE.test(body);
-  const speechAct = isSpeechActNotWorkItem(hay, {
-    hasObject,
-    hasDependencyHint,
-  });
+  const speechAct =
+    isSpeechActNotWorkItem(hay, {
+      hasObject,
+      hasDependencyHint,
+    }) || isStanceNotWorkItem(hay, { hasDependencyHint });
   const procedureModal = isGenericProcedureModal(hay, selfSubject);
   const commitmentHits = [
     // 의지 어미 — 인용·관형 꼬리("열겠다던")만 제외한다.
@@ -650,7 +829,8 @@ export function detectFollowUpPromises(
   const policy = SURFACE_POLICY[surface];
   const out: CapturedPromise[] = [];
   const seen = new Set<string>();
-  for (const unit of splitUnits(text)) {
+  // ★인용부·코드블록을 먼저 지운다 — 인용 안의 약속 어미는 인용된 화자의 것이다.
+  for (const unit of splitUnits(redactQuotedSpans(text))) {
     if (out.length >= policy.maxPerCall) break;
     const hit = evaluateUnit(unit, policy);
     if (!hit) continue;
@@ -737,5 +917,274 @@ export function formatCaptureNote(
     `${lines.join("\n")}\n` +
     `  (아니면 update_work_chain_item(item_id, close="dropped", reason="...") 로 닫아라. ` +
     `티켓이 생기면 add_task_ids 로 붙여야 보드가 완료를 판정한다.)`
+  );
+}
+
+// ══ ★사장님 미션 포착 (티켓 wx9c4NeVtZ1SGcbEISpg) ═══════════════════════════
+//
+// ## 문제
+// 위의 감지기는 **오케가 쓴 문장**만 읽는다(표면 넷이 전부 오케 글이다).
+// 사장님이 던진 미션은 체인에 한 건도 안 남는다 — 2026-08-24 실측: 사장님이 준
+// 미션 5건(광고 집행 · 통합뷰 · 어드민 재설계 · 기업 AX · 마블로비서) 자동 포착
+// **0건**, 전부 오케가 손으로 넣었다. 같은 날 오케 자기 문장에서는 오포착 16건.
+//
+// ## ★왜 문법 분류로 가지 않는가 (훅 A/B/C 비교)
+//   (A) 새 표면 `owner_directive` — 인바운드 본문을 위 감지기로 분류. **기각.**
+//       같은 날 오케 문장 16건 오포착을 낸 바로 그 장치를, 훨씬 자유로운 텍스트
+//       (사장님 구어체, 한 통에 여러 가닥, 질문과 지시가 섞임)에 겨누는 일이다.
+//       질의 실패가 재현될 뿐 아니라 **더 나쁘다**: 오케 약속은 오케가 닫을 수
+//       있지만 잘못 잡은 사장님 항목은 임의로 못 닫는다(아래 닫기 규칙).
+//   (B) ★**행동 = 증거.** 사장님 메시지 직후 오케가 티켓을 만들면 그 티켓이
+//       미션이다. **채택.** 근거는 실측이다 — 그날 사장님이 준 미션은 예외 없이
+//       전부 `create_task` 로 이어졌고, 질문("봇은 거를 수 있나?")은 티켓을
+//       만들지 않았다. 즉 **행동은 문장보다 정확한 신호이고, 이미 존재한다.**
+//       결정적으로 이 훅은 사장님 한국어를 **한 글자도 분류하지 않는다** —
+//       항목 제목은 오케가 이미 쓴 `mission_label` 또는 티켓 제목에서 온다.
+//       16건 오포착을 낸 실패 양식이 구조적으로 재현될 수 없다.
+//   (C) 섞기 — 행동이 있으면 확정, 문장만 있으면 **후보**. **기각.**
+//       후보 항목은 곧 소음이고, 소음이 쌓이면 오케가 체인을 무시한다(이 모듈
+//       전체의 전제). "질문을 미션으로 쌓으면 체인이 다시 쓰레기가 된다."
+//
+// ★단, (C)의 절반만 가져온다 — **거부권**이다. 행동이 있어도 사장님 메시지가
+// 통째로 질문이면 잡지 않는다. 이건 "미션인가?" 를 맞히는 분류가 아니라
+// "이건 확실히 미션이 아니다" 만 거르는 **뺄셈**이라 방향이 안전하다(틀리면
+// 포착을 놓칠 뿐이고, 놓친 건 add_work_chain_item 이 받는다).
+//
+// ## ★(B)의 약점과, 그래도 (C)로 안 가는 이유
+// (B)는 **티켓이 안 생기는 미션을 못 잡는다.** 사장님이 "이건 나중에 생각해
+// 보자" 라고만 하시면 행동이 없다. 이건 진짜 한계다 — 숨기지 않는다.
+// 그런데도 문장 분류 후보(C)를 안 붙이는 근거는 셋이다:
+//   ① 실측이 5/5 다. 2026-08-24 사장님 미션 5건 전부 create_task 로 갔다.
+//      (C)가 벌어야 할 몫이 아직 관측된 적이 없다.
+//   ② ★사장님 원문은 모바일 음성입력이라 오타·비문이 많다("짐행/규성/븜석/
+//      늨김"). **어휘·어미 매칭에 기대는 규칙은 여기서 구조적으로 깨진다.**
+//      같은 날 훨씬 정제된 오케 문장에서도 16건이 오포착됐다.
+//   ③ 오포착 비용이 비대칭이다. 오케 약속은 오케가 닫을 수 있지만, 잘못 잡힌
+//      사장님 항목은 아래 닫기 규칙 때문에 **임의로 못 닫는다.**
+// 그래서 (B)+거부권으로 간다. 놓친 미션은 수동 경로가 받고, 관측이 쌓여
+// "티켓 없는 미션" 이 실제로 반복되면 그때 (C)를 근거와 함께 붙인다.
+//
+// ## ★판정축은 create_task 다 — mission_label 이 아니다
+// 실측(2026-08-24): 미션 5건 중 **2건(기업 AX·마블로비서)이 mission_label
+// 없이 티켓만** 생겼다. 라벨은 오케가 "묶을 만하다" 고 느낄 때만 붙었고 그
+// 느낌은 미션의 크기와 무관했다 — 그날 가장 큰 미션(기업 AX)에 라벨이 없다.
+// 라벨을 판정축으로 잡았으면 5건 중 2건을 놓쳤다. 라벨은 **있으면 묶는
+// 보조**로만 쓴다(아래 groupKey).
+//
+// ## 한 통에 여러 가닥이면 어떻게 갈리나
+// ★실측 정정: 티켓 본문은 "광고 돌리자 + 봇 거르자 + 어드민 재설계가 한 통에
+// 왔다" 고 적었으나 **사실이 아니다** — 별개 메시지였다. 한 통에 여러 가닥인
+// 진짜 사례는 기업 AX(감사로그 + 코스트 + 조직관리자)와 마블로비서(위키 가이드
+// + 채널 연결 가이드 + 역할별 서브에이전트 + 탭)다.
+// 갈라진다 — 다만 **우리가 문장을 쪼개서**가 아니라 오케가 이미 쪼갠 결과를
+// 따라서다. "광고 돌리자 + 봇 거르자 + 어드민 재설계" 한 통은 오케가 세 묶음의
+// 티켓으로 만든다. 여기서는 그 티켓들을 `mission_label` 로 묶어 **라벨당 항목
+// 하나**를 만든다. 라벨이 없는 티켓들은 그 메시지의 무라벨 묶음 하나가 된다.
+// ★사장님 한 줄을 그대로 항목으로 밭지 않는다는 규칙이 이 자리에서 지켜진다.
+
+/** 사장님 인바운드 한 건 — `owner-inbound.ts` 저널의 판정에 필요한 부분만. */
+export interface OwnerInboundEvidence {
+  channel: string;
+  from: string;
+  /** 인바운드 본문 원문. ★분류하지 않는다 — 거부권 판정과 why 인용에만 쓴다. */
+  text: string;
+  /** 오케 PTY 로 전달된 시각(epoch ms). */
+  at: number;
+}
+
+/** 방금 생긴 티켓 — 행동 증거. */
+export interface CreatedTaskFact {
+  id: string;
+  title: string;
+  /** 암묵 미션 라벨(있으면). 같은 라벨의 티켓들은 한 미션이다. */
+  missionLabel?: string;
+}
+
+export interface CapturedOwnerMission {
+  /** 이 메시지 안에서의 묶음 키 — 미션 라벨 키, 라벨이 없으면 "". */
+  groupKey: string;
+  what: string;
+  why: string;
+  missionLabel?: string;
+  /** 이 묶음의 근거 티켓. ★보드가 완료를 판정하게 하는 축이다. */
+  taskIds: string[];
+}
+
+/** 포착하지 않는 이유. null 이면 포착한다. 진단·로그용으로 문자열을 돌려준다. */
+export type OwnerMissionVeto =
+  /** 본문에 판정할 글자가 없다(이모지·구두점뿐). */
+  | "empty"
+  /** 슬래시 명령(/start 등) — 봇 조작이지 지시가 아니다. */
+  | "command"
+  /** 순수 수긍·인사("ㅇㅋ", "고마워") — 뒤에 생긴 티켓은 오케 자기 일이다. */
+  | "acknowledgement"
+  /** ★전부 질문 — 지시가 아니라 물음이다. */
+  | "all_questions";
+
+/**
+ * 수긍·인사만으로 된 메시지. **정확히 이 토큰들일 때만** 걸린다(부분 일치가
+ * 아니다) — "고마워, 그리고 광고 돌리자" 는 미션이다.
+ */
+const ACKNOWLEDGEMENTS = new Set([
+  "ㅇㅋ",
+  "ㅇㅇ",
+  "ㅎㅇ",
+  "ㄱㅅ",
+  "오케",
+  "오케이",
+  "ok",
+  "okay",
+  "네",
+  "넵",
+  "응",
+  "굿",
+  "good",
+  "고마워",
+  "고맙습니다",
+  "감사",
+  "감사해",
+  "감사합니다",
+  "수고",
+  "수고했어",
+  "수고했습니다",
+  "알겠어",
+  "알겠습니다",
+  "확인",
+  "확인했어",
+  "thanks",
+  "thx",
+  "nice",
+]);
+
+/**
+ * 물음표 없는 의문문은 서술문과 구별이 안 된다. 그래서 **오해의 여지가 없는
+ * 공손 의문 어미만** 넣는다. 나머지는 물음표에 의존한다 — 거부권은 놓치는
+ * 쪽으로 기울어야 안전하다(놓치면 포착될 뿐이고, 과하면 미션을 잃는다).
+ */
+const INTERROGATIVE_TAILS = [
+  "나요",
+  "까요",
+  "가요",
+  "습니까",
+  "ㅂ니까",
+] as const;
+
+function isInterrogativeUnit(unit: string): boolean {
+  const s = stripOrnament(unit);
+  if (!s) return true; // 판정할 게 없는 단위는 질문 여부를 뒤집지 않는다
+  if (/[?？]\s*$/.test(s)) return true;
+  return INTERROGATIVE_TAILS.some((t) => s.endsWith(t));
+}
+
+/** 글자만 남긴 비교용 정규화 — 수긍 토큰 대조에 쓴다. */
+function acknowledgementKey(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}\p{Emoji_Presentation}]+/gu, "")
+    .trim();
+}
+
+/**
+ * ★거부권. "미션인가" 를 맞히지 않는다 — "확실히 미션이 아닌 것" 만 거른다.
+ * null 이면 통과(행동 증거가 판정한다).
+ */
+export function ownerMissionVeto(text: string): OwnerMissionVeto | null {
+  const trimmed = (text ?? "").trim();
+  if (!trimmed) return "empty";
+  if (trimmed.startsWith("/")) return "command";
+  const key = acknowledgementKey(trimmed);
+  if (!key) return "empty";
+  if (ACKNOWLEDGEMENTS.has(key)) return "acknowledgement";
+  const units = splitUnits(redactQuotedSpans(trimmed));
+  if (units.length === 0) return "empty";
+  if (units.every(isInterrogativeUnit)) return "all_questions";
+  return null;
+}
+
+/** why 에 싣는 사장님 원문 인용 길이. 전문은 텔레그램에 남아 있다. */
+const OWNER_QUOTE_MAX = 220;
+
+/**
+ * 사장님 메시지 + 그 직후 생긴 티켓 → 미션 항목들. **순수**다 — 창(window)
+ * 판정과 중복 소비는 호출자(work-chain.ts)의 몫이다.
+ *
+ * ★항목 제목은 사장님 문장이 아니라 오케가 쓴 `mission_label`/티켓 제목에서
+ * 온다. 사장님 한국어를 파싱하는 코드는 이 함수 안에 한 줄도 없다.
+ */
+export function buildOwnerMissions(
+  evidence: OwnerInboundEvidence,
+  tasks: readonly CreatedTaskFact[],
+): CapturedOwnerMission[] {
+  if (tasks.length === 0) return [];
+  if (ownerMissionVeto(evidence.text)) return [];
+
+  const groups = new Map<
+    string,
+    { label?: string; ids: string[]; titles: string[] }
+  >();
+  for (const task of tasks) {
+    if (!task.id) continue;
+    const label = normalizeMissionLabel(task.missionLabel ?? null);
+    const groupKey = label ? missionLabelKey(label) : "";
+    const bucket = groups.get(groupKey) ?? {
+      ...(label ? { label } : {}),
+      ids: [],
+      titles: [],
+    };
+    if (!bucket.ids.includes(task.id)) bucket.ids.push(task.id);
+    if (task.title?.trim()) bucket.titles.push(task.title.trim());
+    groups.set(groupKey, bucket);
+  }
+
+  const quote = clamp(
+    evidence.text.trim().replace(/\s+/g, " "),
+    OWNER_QUOTE_MAX,
+  );
+  const out: CapturedOwnerMission[] = [];
+  for (const [groupKey, bucket] of groups) {
+    const head = bucket.label
+      ? `사장님 미션: ${bucket.label}`
+      : `사장님 지시: ${bucket.titles[0] ?? bucket.ids[0]}`;
+    const extra =
+      !bucket.label && bucket.titles.length > 1
+        ? ` 외 ${bucket.titles.length - 1}건`
+        : "";
+    out.push({
+      groupKey,
+      what: clamp(`${head}${extra}`, WORK_CHAIN_WHAT_MAX),
+      why: clamp(
+        `사장님이 ${evidence.channel} 로 지시했고 오케가 곧바로 티켓 ${bucket.ids.length}건으로 옮겼다 — ` +
+          `그 **행동**이 근거다(문장 분류가 아니다). 원문: "${quote}". ` +
+          `완료는 티켓의 보드 상태가 판정한다. 사장님 항목이라 자기보고로 닫을 수 없다 — ` +
+          `물리셨으면 close="dropped" 에 사장님 말씀을 근거로 적어라.`,
+        WORK_CHAIN_WHY_MAX,
+      ),
+      ...(bucket.label ? { missionLabel: bucket.label } : {}),
+      taskIds: bucket.ids,
+    });
+  }
+  return out;
+}
+
+/** 사장님 미션이 적혔다는 도구 결과 한 줄. */
+export function formatOwnerMissionNote(
+  written: ReadonlyArray<{ id: string; what: string; taskIds: string[] }>,
+  attached: ReadonlyArray<{ id: string; what: string; taskIds: string[] }> = [],
+): string {
+  const lines: string[] = [];
+  for (const w of written) {
+    lines.push(`  · ${w.what} (id=${w.id}, 근거 티켓 ${w.taskIds.join(", ")})`);
+  }
+  for (const a of attached) {
+    lines.push(
+      `  · ${a.what} (id=${a.id}) ← 근거 티켓 추가: ${a.taskIds.join(", ")}`,
+    );
+  }
+  if (lines.length === 0) return "";
+  return (
+    `📌 사장님 미션을 워크체인에 기록했다 — 방금 온 사장님 메시지 직후 티켓이 생겼다(행동=증거).\n` +
+    `${lines.join("\n")}\n` +
+    `  (사장님 항목은 자기보고로 닫히지 않는다. 티켓이 보드에서 DONE 이 되면 닫힌다. ` +
+    `사장님이 물리셨으면 update_work_chain_item(item_id, close="dropped", reason="사장님 말씀 ...") 로 닫아라.)`
   );
 }

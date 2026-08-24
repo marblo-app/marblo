@@ -15,11 +15,15 @@ import { describe, expect, it } from "vitest";
 import {
   DUPLICATE_SIMILARITY,
   SURFACE_POLICY,
+  buildOwnerMissions,
   dedupeAgainstChain,
   detectFollowUpPromises,
   evaluateUnit,
   formatCaptureNote,
+  formatOwnerMissionNote,
   normalizeForCompare,
+  ownerMissionVeto,
+  redactQuotedSpans,
   splitUnits,
   type CaptureSurface,
 } from "../../electron/mcp-server/work-chain-capture";
@@ -159,6 +163,218 @@ describe("★진짜 약속은 여전히 잡힌다 — 오포착을 줄이려 재
   });
 });
 
+// ══ 2026-08-24 오포착 (티켓 wx9c4NeVtZ1SGcbEISpg) ═══════════════════════════
+//
+// 같은 날 오케 자기 문장에서 **16건**이 더 걸렸다. 아래는 그중 오케가 원문을
+// 복원해 준 **11건**이고 — 나머지 5건은 세션 컨텍스트에서 밀려나 원문이 없다.
+// ★지어내지 않았다. 11건으로 못 박고 "16건 중 11건 확보" 라고 적어 둔다.
+// 유형은 셋 다 덮인다(오히려 티켓에 없던 유형 d 가 하나 더 나왔다).
+//
+// ★실측 하나: **11건 전부 owner_report(send_telegram_message) 한 표면에서 났다.**
+// 오포착은 표면마다 고르게 나는 게 아니라 사장님 보고 표면에 몰린다 —
+// 오케가 가장 길고 자유롭게 쓰는 자리이기 때문이다.
+
+/** ★2026-08-24 오포착 원문. 전부 owner_report 표면. */
+const FALSE_POSITIVES_16 = {
+  /** (a) 입장표명 — 태도를 말한 것이지 할 일이 아니다. */
+  stance: [
+    "결정으로 받고 잘 돌게 만드는 쪽으로 붙겠습니다.",
+    "더 말리지 않겠습니다.",
+    "(오늘 세 번 틀렸으니 단정은 피하겠습니다 — 에이전트가 코드로 확정합니다.",
+  ],
+  /** (b) ★따옴표 안 제품 문구 — 오케가 사장님께 인용한 UI 카피. */
+  quoted: [
+    // ★닫는 따옴표가 없다(오케가 붙여넣다 빠뜨렸다). 짝만 지우면 이게 샌다.
+    '"터미널 열고 git init 을 진행하겠습니다.',
+    // ★대표 케이스 — **인용부 제외가 필요하다고 설명한 문장이, 그 안에 든
+    //   인용문 때문에 잡혔다.** 버그를 설명하는 문장이 그 버그에 걸렸다.
+    "따옴표 안 제외 — 오포착 16건 중 상당수가 제가 사장님께 인용한 제품 문구였습니다" +
+      '("터미널 열고 git init 을 진행하겠습니다" 같은 UI 카피).',
+  ],
+  /** (c) 이미 티켓으로 넣은 지시를 사장님께 **설명한** 문장. */
+  boardFact: [
+    "그 문서에 경고 하나를 꼭 넣으라고 했습니다 — 광고는 marblo.app 으로 보내고 utm 을 실어야 합니다.",
+    '"설치 수" 를 그냥 세면 안 됩니다 — 브라우저·사람당 설치 수를 옆에 봬야 합니다',
+  ],
+  /** (d) ★티켓에 없던 유형 — 그 턴에 **지금 하고 있는** 일. */
+  immediate: [
+    "이어서 보고 머지하겠습니다.",
+    "UTM 규약(#1197)은 사장님이 바로 쓰실 거라 먼저 보겠습니다.",
+  ],
+} as const;
+
+/**
+ * ★같은 날 **유지된** 두 건 — 음성 코퍼스가 아니라 **양성 대조군**이다.
+ * 둘 다 실제로 나중에 할 일이고 티켓이 없다. 오포착을 줄이는 규칙이 이 둘을
+ * 같이 죽이면 그건 좁힌 게 아니라 기능을 끈 것이다.
+ */
+const TRUE_POSITIVES_2026_08_24 = [
+  // ★따옴표를 품고도 양성이다 — "따옴표가 있으면 버린다" 로 만들면 안 되는 근거.
+  '앞서 "3.1% 라 규모 실으면 돈이 샙니다" 라고 드린 조언은 보류하겠습니다. 근거가 흔들립니다.',
+  "이건 지표 수리와는 별개 문제라, 계기판이 고쳐진 뒤에 따로 여쭙겠습니다 — " +
+    "익명 신호를 어디까지 남길지는 프라이버시 방침과 걸려 있어서 사장님 판단이 필요합니다.",
+] as const;
+
+describe("★2026-08-24 오포착 원문 9건 — 전부 잡히지 않는다", () => {
+  const all = [
+    ...FALSE_POSITIVES_16.stance,
+    ...FALSE_POSITIVES_16.quoted,
+    ...FALSE_POSITIVES_16.boardFact,
+    ...FALSE_POSITIVES_16.immediate,
+  ];
+  for (const sentence of all) {
+    it(`잡지 않는다: ${sentence.slice(0, 30)}…`, () => {
+      // 원문이 난 표면(owner_report)이 본선이고, 이웃 표면도 같이 막는다.
+      for (const surface of SPEECH_SURFACES) {
+        expect(detectFollowUpPromises(sentence, surface)).toEqual([]);
+      }
+    });
+  }
+
+  it("★발화율 0% — 9건 중 0건", () => {
+    const fired = all.filter(
+      (t) => detectFollowUpPromises(t, "owner_report").length > 0,
+    );
+    expect(fired).toEqual([]);
+  });
+});
+
+describe("★같은 날 유지된 2건은 계속 잡힌다 — 좁힌 것이지 끈 게 아니다", () => {
+  for (const sentence of TRUE_POSITIVES_2026_08_24) {
+    it(`잡는다: ${sentence.slice(0, 30)}…`, () => {
+      expect(detectFollowUpPromises(sentence, "owner_report")).toHaveLength(1);
+    });
+  }
+
+  it("★따옴표를 품은 양성 — 인용 **내용만** 빼고 바깥 문장은 남는다", () => {
+    const [hit] = detectFollowUpPromises(
+      TRUE_POSITIVES_2026_08_24[0],
+      "owner_report",
+    );
+    expect(hit.what).toContain("보류하겠습니다");
+  });
+});
+
+describe("(a) 입장표명 — 왜 마커 창으로는 못 잡았나", () => {
+  it("부정이 어미 **앞**에 붙어서 뒤쪽 부정 창에 안 걸린다", () => {
+    // NEGATIONS 는 마커 뒤 20자만 본다(앞 창은 살아 있는 약속을 죽여서 뺐다).
+    // "말리**지 않**겠습니다" 는 부정이 어미 앞이라 그 창에 안 걸린다. 그래서
+    // 창이 아니라 **어미의 형태**로 가른다.
+    expect(
+      detectFollowUpPromises("더 말리지 않겠습니다.", "owner_report"),
+    ).toEqual([]);
+    // 같은 어미의 긍정형은 그대로 약속이다 — 재현율을 죽이지 않았다.
+    expect(
+      detectFollowUpPromises("제가 규칙을 다시 올리겠습니다.", "owner_report"),
+    ).toHaveLength(1);
+  });
+
+  it("★긍정형 태도 동사는 **깨끗한 축이 없어** 닫힌 목록으로 막았다", () => {
+    // "붙겠/피하겠"(오포착) 과 "보류하겠/여쭙겠"(양성)은 어미도 같고 목적어
+    // 유무도 안 갈린다. 실측 목록이 지금의 정직한 도구다 — 목록이 길어지기
+    // 시작하면 축을 잘못 잡았다는 신호다(모듈 주석에 그대로 적어 뒀다).
+    expect(detectFollowUpPromises("쪽으로 붙겠습니다.", "owner_report")).toEqual(
+      [],
+    );
+    expect(
+      detectFollowUpPromises("조언은 보류하겠습니다.", "owner_report"),
+    ).toHaveLength(1);
+  });
+});
+
+describe("★(b) 따옴표 안 제품 문구 — 인용은 오케의 약속이 아니다", () => {
+  it("코드블록 안의 약속 어미는 코드다 — 여러 줄 펜스", () => {
+    expect(
+      detectFollowUpPromises(
+        "복사해서 보내드린 문구입니다.\n```\n규칙을 한 번 더 배포해야 합니다\n```",
+        "owner_report",
+      ),
+    ).toEqual([]);
+  });
+
+  it("인라인 코드도 같다", () => {
+    expect(
+      detectFollowUpPromises(
+        "버튼 라벨은 `설정을 저장하겠습니다` 입니다.",
+        "owner_report",
+      ),
+    ).toEqual([]);
+  });
+
+  it("한국어 인용부호(「」)도 인용이다", () => {
+    expect(
+      detectFollowUpPromises(
+        "안내문에 「규칙을 다시 배포해야 합니다」 라고 적혀 있습니다.",
+        "owner_report",
+      ),
+    ).toEqual([]);
+  });
+
+  it("★닫히지 않은 따옴표는 줄 끝까지 인용이다 — 원문 5번이 그 모양이다", () => {
+    expect(redactQuotedSpans('앞 문장. "여는 따옴표만 있다 배포하겠습니다')).toBe(
+      "앞 문장.  ",
+    );
+  });
+
+  it("★인용을 품은 문장의 **나머지**는 살아 있다 — 통째로 버리지 않는다", () => {
+    const hits = detectFollowUpPromises(
+      '사장님이 "지금 하자" 고 하셔서, 제가 규칙을 한 번 더 배포해야 합니다.',
+      "owner_report",
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0].what).toContain("배포해야 합니다");
+  });
+
+  it("★#1176 이 살린 판정 근거를 인용 제거가 지우지 않는다", () => {
+    // 이 문장의 거절 근거는 청자 조건 "고 하시면" 이고, 그건 따옴표 **밖**에
+    // 있다. 인용만 지우므로 근거가 그대로 남아 계속 거절된다.
+    expect(
+      detectFollowUpPromises(
+        '"좋다"고 하시면 grant 앵커 수정하고 발송하겠습니다.',
+        "owner_report",
+      ),
+    ).toEqual([]);
+  });
+
+  it("영어 아포스트로피는 인용으로 보지 않는다 — 한글을 담은 작은따옴표만", () => {
+    // "don't … it's" 가 짝을 이뤄 문장 중간을 삼키면 판정 근거가 사라진다.
+    expect(redactQuotedSpans("don't worry, it's fine")).toBe(
+      "don't worry, it's fine",
+    );
+    expect(redactQuotedSpans("'적재 전' 에서 가른다")).toBe("  에서 가른다");
+  });
+});
+
+describe("(c)(d) 이미 보드에 있는 일 / 지금 하고 있는 일", () => {
+  it("'…라고 했습니다' 는 이미 지시한 일을 사장님께 설명한 문장이다", () => {
+    expect(
+      detectFollowUpPromises(FALSE_POSITIVES_16.boardFact[0], "owner_report"),
+    ).toEqual([]);
+    // 같은 당위 어미라도 보고 표지가 없으면 그대로 약속이다.
+    expect(
+      detectFollowUpPromises("광고에 utm 규약을 실어야 합니다.", "owner_report"),
+    ).toHaveLength(1);
+  });
+
+  it("금지 + 당위가 한 문장에 있으면 규범 서술이지 약속이 아니다", () => {
+    expect(
+      detectFollowUpPromises(FALSE_POSITIVES_16.boardFact[1], "owner_report"),
+    ).toEqual([]);
+  });
+
+  it("★'이어서/먼저/바로' 는 지금 하는 일 — 다음 할 일이 아니다", () => {
+    for (const s of FALSE_POSITIVES_16.immediate) {
+      expect(detectFollowUpPromises(s, "owner_report")).toEqual([]);
+    }
+  });
+
+  it("★단, 선행 힌트가 있으면 '바로' 는 사건 뒤의 즉시라 살린다", () => {
+    expect(
+      detectFollowUpPromises("머지되면 바로 티켓을 열겠습니다.", "owner_report"),
+    ).toHaveLength(1);
+  });
+});
+
 // ── ② 안 잡아야 할 것 ────────────────────────────────────────────────────
 
 describe("명령형 게이트 — 수신자의 할 일은 오케의 다음 할 일이 아니다", () => {
@@ -279,7 +495,10 @@ describe("★당위 어미의 중의성 — '해야 한다' 는 약속일 수도
 
   it("목적어가 있으면 같은 어미라도 약속이다", () => {
     expect(
-      detectFollowUpPromises("규칙을 한 번 더 배포해야 합니다.", "owner_report"),
+      detectFollowUpPromises(
+        "규칙을 한 번 더 배포해야 합니다.",
+        "owner_report",
+      ),
     ).toHaveLength(1);
   });
 
@@ -408,6 +627,311 @@ describe("상한과 형태 — 문단 하나가 체인을 덮지 못한다", () 
     expect(note).toContain("wc_a1");
     expect(note).toContain("dropped");
     expect(formatCaptureNote([])).toBe("");
+  });
+});
+
+// ══ ★사장님 미션 포착 (티켓 wx9c4NeVtZ1SGcbEISpg) ═══════════════════════════
+//
+// 여기서 못 박는 것은 이 티켓의 완료 기준 그대로다:
+//   ① 사장님이 새 미션을 주면 체인에 남는다 (2026-08-24 미션 5건 원문 재현)
+//   ② 질문은 안 잡힌다 (같은 날 질문 5건 원문)
+//   ③ 한 메시지에 미션이 여럿이면 갈라진다
+//   ④ ★사장님 한 줄을 그대로 밭지 않는다 — 항목 제목의 **출처**를 못 박는다
+//
+// ★코퍼스는 전부 **인바운드 원문**이다(오케가 세션에서 복원해 줬다).
+//
+// ★★티켓 본문 정정 둘 — 여기 남긴다:
+//   (1) 티켓은 "광고 돌리자 + 봇 거르자 + 어드민 재설계가 한 통에 왔다" 고
+//       적었지만 **사실이 아니다.** 실제로는 별개 메시지였다(M1 → 봇 질문 → M3).
+//       한 통에 여러 가닥인 진짜 사례는 **M4(기업 AX)와 M5(마블로비서)** 다.
+//   (2) 티켓은 미션이 "create_task + dispatch 로 이어졌다" 고만 적었는데,
+//       실측은 **5건 중 2건(M4·M5)이 mission_label 없이 티켓만** 생겼다.
+//       → ★판정축은 `create_task` 여야 하고 `mission_label` 은 **있으면 묶는
+//         보조**다. 라벨을 판정축으로 잡았으면 오늘 가장 큰 미션(기업 AX)을
+//         놓쳤다. 아래 M4·M5 테스트가 그 회귀를 못 박는다.
+//
+// ★설계 제약 하나 더: 사장님 원문은 모바일 음성입력이라 오타·비문이 많다
+// ("짐행/규성/븜석/늨김"). **어휘 매칭에 기대는 규칙은 여기서 깨진다** —
+// 그게 (B) 행동=증거 훅이 유리한 또 하나의 실측 근거다.
+
+const OWNER = { channel: "telegram", from: "사장님", at: 1_700_000_000_000 };
+
+/** ★2026-08-24 사장님 인바운드 원문 5건 + 실제로 이어진 행동. */
+const OWNER_MISSIONS_2026_08_24 = [
+  {
+    name: "M1 광고 집행",
+    text:
+      "1일만쓰고 끝이 이미 결론이야. 우린 개선을 했으니 이제 광고로 모수를 늘려보자는거야. " +
+      "어쨌든 활성사용자가 3명정도 있다는건 제품의 가치를 보는 사람들이 있는거니까",
+    tasks: [
+      {
+        id: "LngjrQAiCL8YlWCW8TWi",
+        title: "광고비 배포·어드민 입력",
+        missionLabel: "ads-launch",
+      },
+      {
+        id: "P8jS1Ot3d6m6yjLeHUNR",
+        title: "UTM 규약",
+        missionLabel: "ads-launch",
+      },
+    ],
+    expectWhat: "사장님 미션: ads-launch",
+  },
+  {
+    name: "M2 통합뷰",
+    text:
+      "응 조인키 맞추고 ga4랑 텔레메트리 결합 통합빅쿼리 텐이블 만들어달라고 했는데 " +
+      "누락됐나보다 계획짝ㅎ 제대로 짐행해줘 스키마랑 계획대로 정의해서",
+    tasks: [
+      {
+        id: "L8RvsReu6Vch5eNYYCJR",
+        title: "GA4×텔레메트리 통합 뷰",
+        missionLabel: "ads-readiness",
+      },
+    ],
+    expectWhat: "사장님 미션: ads-readiness",
+  },
+  {
+    name: "M3 어드민 재설계",
+    text:
+      "응 그리고 지금 어드민 븜석페이지도 개편했는대도 좀 지자분해 데이터도 안맞는게 많았고 " +
+      "이제 통핮테이블 뷰로 다시 좀 지금의 4개에 탲은 좋은데 각 차크랑 테이블 필요한 규성으로 " +
+      "좀 먼저 계획 짜고 다시 수정가볼래? 계획문서부터 짜지",
+    tasks: [
+      {
+        id: "X2piUBsQT6yPV4BHeBRP",
+        title: "어드민 통합 테이블 뷰 계획",
+        missionLabel: "ads-launch",
+      },
+    ],
+    expectWhat: "사장님 미션: ads-launch",
+  },
+  {
+    // ★라벨 없음 — 오늘 가장 큰 미션인데 mission_label 이 안 붙었다.
+    name: "M4 기업 AX (mission_label 없음)",
+    text:
+      "별개로 기업 ax시장도 빠르게 나가야될거같아 우리 마블로와 함께 감사로그 + 어제 해자로 " +
+      "말해준 코스트 결과로그까지 마블로웹 아래에 클라이언트별 하위 대시보드 페이지를 만들어 " +
+      "시용자와 로그 코스트 다양한데이터를 보여주는 대시보드를 만들까바 어때? " +
+      "진짜 기업용 b2b 사스 늨김으로 조직관리자 있고 데이터들 볼수있게",
+    tasks: [
+      { id: "12S93hQxd4LhBmzsh36n", title: "기업 AX 클라이언트 대시보드" },
+    ],
+    expectWhat: "사장님 지시: 기업 AX 클라이언트 대시보드",
+  },
+  {
+    // ★라벨 없음.
+    name: "M5 마블로비서 (mission_label 없음)",
+    text:
+      "B로 가려고해 왜냐면 헤르메스에이전트나 그록봇처럼 개발자가 아니더라도 마블로를 " +
+      "비서형 에이전트로 쓸 수 있게 만들려는 것도 하나의 계획이거든. 그래서 나는 탭하나를 " +
+      "뒀으면 하는게 거기에 위키 (개인의 지식이나 회사의지식 프로젝트 지식 보관하는 방법 " +
+      "가이드가 필요) 그리고 슬랙이나 텔레그램 연결 별도 가이드 또 한번 더, 그리고 이후 " +
+      "오케를 비서로 두고 다양한 서브 에이전트를 역할별로 생성해서 (마케터 등등) 작업을 " +
+      "요청하면 오케비서가 진행하면서 보고하는 방식까지가려고해. 이걸 마블로봇 혹은 " +
+      "마블로비서 같은 개념의 탭으로 가고싶거든",
+    tasks: [{ id: "Xxqyj8TSLA4OFFlS0A0S", title: "마블로비서 탭" }],
+    expectWhat: "사장님 지시: 마블로비서 탭",
+  },
+] as const;
+
+/** ★같은 날 사장님이 준 **질문** 원문. 미션이 아니다. */
+const OWNER_QUESTIONS_2026_08_24 = [
+  "봇은 거를수있나?",
+  "이거 잘하면 사용자 더 많은거 아냐?",
+  "위키는 기본 가이드가 가이드탭에 들어가는거야?",
+  "3명한테 보내는건가?",
+  // ★어려운 케이스 — 의문형이지만 실질은 제안에 가깝다. 아래 별도 테스트에서
+  //   "지금은 일부러 질문으로 본다" 는 판단과 그 근거를 못 박는다.
+  "감사로그는 프러젝트 구현한 범위에서 보여주면 안더ㅣ나?",
+] as const;
+
+describe("① ★사장님이 준 미션 5건 — 원문 그대로 전부 체인에 남는다", () => {
+  for (const m of OWNER_MISSIONS_2026_08_24) {
+    it(`잡힌다: ${m.name}`, () => {
+      const missions = buildOwnerMissions({ ...OWNER, text: m.text }, m.tasks);
+      expect(missions).toHaveLength(1);
+      expect(missions[0].what).toBe(m.expectWhat);
+      expect(missions[0].taskIds).toEqual(m.tasks.map((t) => t.id));
+    });
+  }
+
+  it("★5건 전부 — 포착률 100%", () => {
+    const missed = OWNER_MISSIONS_2026_08_24.filter(
+      (m) => buildOwnerMissions({ ...OWNER, text: m.text }, m.tasks).length === 0,
+    ).map((m) => m.name);
+    expect(missed).toEqual([]);
+  });
+
+  it("★mission_label 이 없어도 잡힌다 — 라벨을 판정축으로 잡았으면 2/5 를 놓쳤다", () => {
+    // M4(기업 AX)·M5(마블로비서)는 라벨 없이 티켓만 생겼다. 라벨은 오케가
+    // "묶을 만하다" 고 느낄 때만 붙었고, 그 느낌은 미션의 크기와 무관했다.
+    const unlabeled = OWNER_MISSIONS_2026_08_24.filter((m) =>
+      m.tasks.every((t) => !("missionLabel" in t)),
+    );
+    expect(unlabeled).toHaveLength(2);
+    for (const m of unlabeled) {
+      const [mission] = buildOwnerMissions({ ...OWNER, text: m.text }, m.tasks);
+      expect(mission).toBeDefined();
+      expect(mission.missionLabel).toBeUndefined();
+      expect(mission.groupKey).toBe("");
+    }
+  });
+
+  it("★오타·비문에 견딘다 — 어휘 매칭이 아니라 행동을 보기 때문이다", () => {
+    // "짐행/규성/븜석/늨김" 같은 모바일 음성입력 오타가 판정에 전혀 안 쓰인다.
+    for (const m of OWNER_MISSIONS_2026_08_24) {
+      expect(ownerMissionVeto(m.text), m.name).toBeNull();
+    }
+  });
+
+  it("★티켓이 근거로 붙는다 — 완료 판정이 보드 몫으로 남는다", () => {
+    const [mission] = buildOwnerMissions(
+      { ...OWNER, text: OWNER_MISSIONS_2026_08_24[0].text },
+      OWNER_MISSIONS_2026_08_24[0].tasks,
+    );
+    // 자동 포착(오케 약속)은 일부러 티켓을 안 붙인다. 사장님 미션은 반대다 —
+    // 티켓이 곧 그 미션의 실체이고, 붙어 있어야 rejectSelfReportReason 이
+    // 자기보고 종료를 막는다.
+    expect(mission.taskIds).toEqual([
+      "LngjrQAiCL8YlWCW8TWi",
+      "P8jS1Ot3d6m6yjLeHUNR",
+    ]);
+  });
+
+  it("행동이 없으면(티켓 0건) 아무것도 안 잡는다 — 문장만으로는 후보도 안 만든다", () => {
+    expect(
+      buildOwnerMissions(
+        { ...OWNER, text: OWNER_MISSIONS_2026_08_24[3].text },
+        [],
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("② ★질문은 미션이 아니다 — 같은 날 질문 5건 원문", () => {
+  for (const q of OWNER_QUESTIONS_2026_08_24) {
+    it(`거부권이 걸린다: ${q.slice(0, 26)}…`, () => {
+      expect(ownerMissionVeto(q)).toBe("all_questions");
+      // ★행동(티켓)이 있어도 안 잡는다 — 질문 뒤에 우연히 생긴 티켓은 오케 일이다.
+      expect(
+        buildOwnerMissions({ ...OWNER, text: q }, [
+          { id: "t1", title: "무관한 티켓" },
+        ]),
+      ).toEqual([]);
+    });
+  }
+
+  it("★알려진 경계 — 수사의문(제안)도 지금은 질문으로 본다", () => {
+    // "…아냐?" 는 제안일 수도 질문일 수도 있다. 실측이 양쪽 다 준다:
+    //   · "이거 잘하면 사용자 더 많은거 아냐?"                → 질문(미션 아님)
+    //   · "…보여주면 안되나? 조직은 …넣어야하는 작업 아냐?"   → 실질은 제안
+    // 어미로는 안 갈린다. 그래서 **물음표를 기준으로 삼고 둘 다 질문으로 본다.**
+    // 근거: 이 티켓이 못 박은 우선순위 — "질문을 미션으로 쌓으면 체인이 다시
+    // 쓰레기가 된다." 놓친 제안은 add_work_chain_item 이 여전히 받는다.
+    expect(ownerMissionVeto("이거 잘하면 사용자 더 많은거 아냐?")).toBe(
+      "all_questions",
+    );
+    expect(
+      ownerMissionVeto("조직은 결국 언젠가는 넣어야하는 작업 아냐?"),
+    ).toBe("all_questions");
+  });
+
+  it("질문이 섞였어도 지시가 하나라도 있으면 잡는다 — 거부권은 전칭일 때만", () => {
+    // 거부권은 "확실히 미션이 아닌 것" 만 거른다. 한 문장이라도 서술/지시면
+    // 행동 증거가 이긴다(놓치는 쪽이 아니라 잡는 쪽으로 기운다).
+    // ★M3·M4 가 실제로 이 모양이다 — 중간에 "?" 가 있는데 미션이다.
+    expect(ownerMissionVeto("봇은 거를수있나? 그리고 광고 돌리자.")).toBeNull();
+    expect(ownerMissionVeto(OWNER_MISSIONS_2026_08_24[2].text)).toBeNull();
+  });
+
+  it("공손 의문 어미는 물음표가 없어도 질문이다", () => {
+    expect(ownerMissionVeto("이거 지금 되나요")).toBe("all_questions");
+    expect(ownerMissionVeto("언제쯤 끝날까요")).toBe("all_questions");
+  });
+
+  it("순수 수긍·인사는 미션이 아니다 — 뒤에 생긴 티켓은 오케 자기 일이다", () => {
+    for (const ack of ["ㅇㅋ", "고마워", "수고했습니다", "네"]) {
+      expect(ownerMissionVeto(ack)).toBe("acknowledgement");
+    }
+    // ★부분 일치가 아니다 — 수긍 뒤에 지시가 붙으면 미션이다.
+    expect(ownerMissionVeto("고마워, 그리고 광고 돌리자.")).toBeNull();
+  });
+
+  it("슬래시 명령은 봇 조작이지 지시가 아니다", () => {
+    expect(ownerMissionVeto("/start")).toBe("command");
+  });
+});
+
+describe("③ ★한 통에 미션이 여럿이면 갈라진다 — 우리가 아니라 오케가 쪼갠다", () => {
+  // ★티켓 본문의 "광고+봇+어드민 한 통" 은 사실이 아니었다(위 정정 (1)).
+  // 진짜 다가닥 사례는 M4(감사로그 대시보드 + 코스트 대시보드 + 조직관리자)와
+  // M5(위키 가이드 + 채널 연결 가이드 + 역할별 서브에이전트 + 탭)다.
+  const M5 = OWNER_MISSIONS_2026_08_24[4];
+
+  it("mission_label 단위로 갈린다 — 라벨당 항목 하나", () => {
+    const missions = buildOwnerMissions({ ...OWNER, text: M5.text }, [
+      { id: "t1", title: "위키 탭", missionLabel: "marblo-secretary" },
+      { id: "t2", title: "채널 연결 가이드", missionLabel: "marblo-secretary" },
+      { id: "t3", title: "역할별 서브에이전트", missionLabel: "sub-agents" },
+    ]);
+    expect(missions).toHaveLength(2);
+    expect(missions.map((m) => m.missionLabel)).toEqual([
+      "marblo-secretary",
+      "sub-agents",
+    ]);
+    // 같은 라벨의 티켓 둘은 한 항목의 근거로 모인다 — 체인이 보드의 사본이
+    // 되면 안 된다(§7).
+    expect(missions[0].taskIds).toEqual(["t1", "t2"]);
+  });
+
+  it("★라벨이 없으면 그 메시지의 무라벨 묶음 하나가 된다 — M4·M5 의 실제 모양", () => {
+    const missions = buildOwnerMissions({ ...OWNER, text: M5.text }, [
+      { id: "t1", title: "마블로비서 탭" },
+      { id: "t2", title: "위키 가이드" },
+    ]);
+    expect(missions).toHaveLength(1);
+    expect(missions[0].groupKey).toBe("");
+    expect(missions[0].what).toBe("사장님 지시: 마블로비서 탭 외 1건");
+    expect(missions[0].taskIds).toEqual(["t1", "t2"]);
+  });
+});
+
+describe("④ ★사장님 한 줄을 그대로 밭지 않는다 — 제목의 출처를 못 박는다", () => {
+  const M1 = OWNER_MISSIONS_2026_08_24[0];
+
+  it("항목 제목은 사장님 문장이 아니라 mission_label 에서 온다", () => {
+    const [mission] = buildOwnerMissions({ ...OWNER, text: M1.text }, M1.tasks);
+    expect(mission.what).toBe("사장님 미션: ads-launch");
+    // 사장님 구어체가 제목으로 새 나가지 않는다.
+    expect(mission.what).not.toContain("1일만쓰고");
+    expect(mission.what).not.toContain("어쨌든");
+  });
+
+  it("라벨이 없으면 오케가 쓴 **티켓 제목**에서 온다 — 여전히 사장님 문장이 아니다", () => {
+    const M4 = OWNER_MISSIONS_2026_08_24[3];
+    const [mission] = buildOwnerMissions({ ...OWNER, text: M4.text }, M4.tasks);
+    expect(mission.what).toBe("사장님 지시: 기업 AX 클라이언트 대시보드");
+    expect(mission.what).not.toContain("만들까바");
+    expect(mission.what).not.toContain("늨김");
+  });
+
+  it("원문은 why 에 근거로만 남는다 — 판정에는 안 쓴다", () => {
+    const [mission] = buildOwnerMissions({ ...OWNER, text: M1.text }, M1.tasks);
+    expect(mission.why).toContain("1일만쓰고");
+    expect(mission.why).toContain("행동");
+    // 닫는 규칙이 항목 안에 들어 있어야 나중에 오케가 되짚지 않는다.
+    expect(mission.why).toContain("자기보고로 닫을 수 없다");
+  });
+
+  it("포착 알림은 근거 티켓과 닫는 규칙을 같이 준다", () => {
+    const note = formatOwnerMissionNote([
+      { id: "wc_1", what: "사장님 미션: ads-launch", taskIds: ["t1"] },
+    ]);
+    expect(note).toContain("wc_1");
+    expect(note).toContain("t1");
+    expect(note).toContain("자기보고로 닫히지 않는다");
+    expect(formatOwnerMissionNote([], [])).toBe("");
   });
 });
 

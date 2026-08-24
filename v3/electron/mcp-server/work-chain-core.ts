@@ -81,8 +81,14 @@ export type WorkChainClosedKind = "dropped" | "self_reported";
  * (work-chain-capture.ts). 이 축을 저장하는 이유는 두 가지다 —
  *   ① 오탐 진단: 자동 포착이 어느 표면에서 헛것을 잡는지 사후에 셀 수 있어야 한다.
  *   ② 신뢰 표시: 사장님·오케 모두 "이건 기계가 적은 것" 을 알고 봐야 한다.
+ *
+ * ★`owner` 는 셋째 축이다(티켓 wx9c4NeVtZ1SGcbEISpg) — **사장님이 준 미션**을
+ * 사장님 메시지 직후의 티켓 생성이라는 행동 증거로 잡은 것이다. auto 와 굳이
+ * 가르는 이유는 표시가 아니라 **권한**이다: 오케가 한 약속은 오케가 닫을 수
+ * 있지만 사장님 지시는 임의로 못 닫는다(`rejectSelfReportReason` ·
+ * `rejectDropReason`). 축을 안 가르면 그 규칙을 걸 자리가 없다.
  */
-export type WorkChainSource = "manual" | "auto";
+export type WorkChainSource = "manual" | "auto" | "owner";
 
 export interface WorkChainClosed {
   kind: WorkChainClosedKind;
@@ -347,7 +353,8 @@ export function normalizeWorkChainItem(raw: unknown): WorkChainItem | null {
   if (typeof r.note === "string" && r.note.trim()) item.note = r.note;
   // 구버전 문서에는 source 가 없다 — 없으면 manual 로 본다(자동 포착 이전의 항목은
   // 전부 오케가 손으로 적은 것이므로 사실과 맞다).
-  if (r.source === "auto" || r.source === "manual") item.source = r.source;
+  if (r.source === "auto" || r.source === "manual" || r.source === "owner")
+    item.source = r.source;
   if (typeof r.sourceTool === "string" && r.sourceTool.trim())
     item.sourceTool = r.sourceTool.trim();
   const missionLabel = normalizeMissionLabel(
@@ -543,12 +550,54 @@ export function buildWorkChainItem(
   if (note) item.note = note;
   const missionLabel = normalizeMissionLabel(input.missionLabel);
   if (missionLabel) item.missionLabel = missionLabel;
-  if (input.source === "auto") {
-    item.source = "auto";
+  if (input.source === "auto" || input.source === "owner") {
+    item.source = input.source;
     const tool = (input.sourceTool ?? "").trim();
     if (tool) item.sourceTool = tool;
   }
   return item;
+}
+
+/**
+ * ★사장님 항목의 닫는 규칙 (티켓 wx9c4NeVtZ1SGcbEISpg).
+ *
+ * 사장님 항목은 오케 약속보다 기준이 높아야 한다. 근거는 권한이다 —
+ * **내 약속은 내가 물릴 수 있지만, 사장님이 시킨 일은 내가 물릴 수 없다.**
+ * 그래서 두 축을 건다:
+ *
+ *   ① `self_reported` 는 **무조건 거부**한다. 티켓이 안 붙어 있어도 거부다
+ *      (오케 항목은 티켓만 없으면 근거를 달아 자기보고로 닫을 수 있다 —
+ *      그 예외가 사장님 항목엔 없다). 닫으려면 티켓을 붙여 보드가 판정하게
+ *      하거나, 사장님이 물리셨다는 근거로 dropped 해야 한다.
+ *   ② `dropped` 는 막지 않는다 — 사장님이 실제로 물리시는 일은 늘 있고,
+ *      그 길을 막으면 죽은 항목이 체인에 영원히 남아 체인이 다시 쓰레기가
+ *      된다. 대신 **사유의 바닥**을 올린다: 사장님 항목의 dropped 사유는
+ *      "n/a" · "취소" 같은 한 낱말로는 안 되고, 무엇 때문에 유효하지 않게
+ *      됐는지 문장으로 적어야 한다. 나중에 이 항목이 왜 사라졌는지 사장님께
+ *      답할 수 있어야 하기 때문이다.
+ *
+ * ★기존 규율은 그대로다 — 티켓이 붙은 항목의 self_reported 거부는 source 와
+ * 무관하게 먼저 걸린다(아래 `rejectSelfReportReason` 의 첫 분기).
+ */
+export const OWNER_DROP_REASON_MIN = 12;
+
+/**
+ * dropped 종료 거부 규칙. 사장님 항목이 아니면 **항상 null**(기존 동작 무변경) —
+ * 빈 사유 검사는 호출자(updateWorkChainItem)가 이미 한다.
+ */
+export function rejectDropReason(
+  item: WorkChainItem,
+  reason: string | undefined,
+): string | null {
+  if (item.source !== "owner") return null;
+  const trimmed = (reason ?? "").trim();
+  if (trimmed.length >= OWNER_DROP_REASON_MIN) return null;
+  return (
+    `항목 '${item.what}' 은 사장님이 주신 미션이다(source=owner) — ` +
+    `네가 임의로 접는 게 아니라 왜 더 이상 유효하지 않은지 사장님께 답할 수 있어야 한다. ` +
+    `reason 에 근거를 문장으로 적어라(최소 ${OWNER_DROP_REASON_MIN}자: 사장님이 물리셨다면 그 말씀을, ` +
+    `상황이 바뀌었다면 무엇이 바뀌었는지). 아직 살아 있는 일이면 닫지 말고 티켓을 붙여라(add_task_ids).`
+  );
 }
 
 /**
@@ -568,6 +617,16 @@ export function rejectSelfReportReason(
       `완료 판정은 그 티켓의 보드 상태(doneWhen=${item.doneWhen})가 한다. ` +
       `자기보고로 닫을 수 없다. 티켓을 실제로 ${item.doneWhen === "done" ? "DONE" : item.doneWhen === "review" ? "REVIEW" : "생성"} 으로 만들어라 ` +
       `(머지했으면 merge_and_close). 티켓과 무관해졌다면 close=dropped 로 사유를 적어라.`
+    );
+  }
+  // ★사장님 항목은 티켓이 없어도 자기보고로 닫히지 않는다(위 머리말 ①).
+  if (item.source === "owner") {
+    return (
+      `항목 '${item.what}' 은 사장님이 주신 미션이다(source=owner) — ` +
+      `자기보고로 닫을 수 없다. 네 약속은 네가 닫을 수 있지만 사장님 지시는 아니다. ` +
+      `끝냈다면 그 일의 티켓을 붙여라(update_work_chain_item(item_id, add_task_ids=[...])) — ` +
+      `보드가 DONE 을 확인하면 항목이 자동으로 닫힌다. ` +
+      `사장님이 물리셨다면 close="dropped" 에 그 근거를 적어라.`
     );
   }
   if (!(reason ?? "").trim()) {
@@ -640,6 +699,12 @@ export function formatDerivedItem(
   if (item.source === "auto") {
     lines.push(
       `   source: auto${item.sourceTool ? `(${item.sourceTool})` : ""} — 네 문장에서 자동 포착됨. 틀렸으면 close="dropped".`,
+    );
+  } else if (item.source === "owner") {
+    // ★사장님 항목은 눈으로도 갈려야 한다 — 닫는 권한이 다르기 때문이다.
+    lines.push(
+      `   source: owner${item.sourceTool ? `(${item.sourceTool})` : ""} — ★사장님이 주신 미션이다. ` +
+        `자기보고로 못 닫는다(보드 근거 또는 사장님이 물리신 근거로만).`,
     );
   }
   if (item.missionLabel) {
