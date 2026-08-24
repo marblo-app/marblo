@@ -346,6 +346,45 @@ test("captureFirstTouchInto: 이미 잠긴 빈 /link first-touch 는 의미 있�
   assert.equal(ft?.capturedAt, 2);
 });
 
+test("captureFirstTouchInto: UTM 랜딩 뒤 앱 /link 가 열리면 UTM first-touch 를 payload 에 싣는다", () => {
+  const uuid = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+  const storage = memoryStorage();
+  const landing = captureFirstTouchInto(
+    storage,
+    "https://marblo.app/en?utm_source=codex_q7kwgbw2&utm_medium=zero_cost&utm_campaign=utm_live_verify_q7kw_20260824",
+    "",
+    1
+  );
+  assert.equal(landing?.utmSource, "codex_q7kwgbw2");
+  assert.equal(landing?.landingPath, "/en");
+
+  const linkback = captureFirstTouchInto(
+    storage,
+    `https://marblo.app/en/link?i=${uuid}&c=prod`,
+    "",
+    2
+  );
+  assert.equal(linkback?.utmSource, "codex_q7kwgbw2");
+  assert.equal(linkback?.utmMedium, "zero_cost");
+  assert.equal(linkback?.utmCampaign, "utm_live_verify_q7kw_20260824");
+  assert.equal(linkback?.landingPath, "/en");
+  assert.equal(linkback?.capturedAt, 1);
+
+  const payload = buildLinkInstallPayload({
+    installId: uuid,
+    gaClientId: null,
+    firstTouch: linkback,
+    platform: "codex-rest-no-gui",
+    appVersion: "live-verify-q7",
+    buildChannel: "prod",
+  });
+  assert.equal(payload?.utmSource, "codex_q7kwgbw2");
+  assert.equal(payload?.utmMedium, "zero_cost");
+  assert.equal(payload?.utmCampaign, "utm_live_verify_q7kw_20260824");
+  assert.equal(payload?.landingPath, "/en");
+  assert.equal(payload?.buildChannel, "prod");
+});
+
 test("captureFirstTouchInto: 스토리지가 던지면 null 로 조용히 포기한다", () => {
   const broken: AttributionStorage = {
     getItem() {
