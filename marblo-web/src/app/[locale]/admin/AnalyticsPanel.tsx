@@ -590,6 +590,73 @@ type BusinessSummary = {
   };
 };
 
+type AdSpendPlatform =
+  | "google_ads"
+  | "meta"
+  | "youtube"
+  | "instagram"
+  | "facebook"
+  | "threads"
+  | "manual";
+
+type ManualAdSpendForm = {
+  spendDate: string;
+  platform: AdSpendPlatform;
+  campaignName: string;
+  currency: "KRW";
+  amountKrw: string;
+};
+
+type CacCampaignSummary = {
+  campaignKey: string;
+  campaignName: string;
+  spendKrw: number;
+  acquired: number;
+  cacKrw: number | null;
+};
+
+type CacSummary = {
+  matchedSpendKrw: number;
+  unmatchedSpendKrw: number;
+  acquiredFromMatchedCampaigns: number;
+  overallCacKrw: number | null;
+  campaigns: CacCampaignSummary[];
+  unmatched: CacCampaignSummary[];
+  notes: string[];
+};
+
+type AdminCacSummary = {
+  generatedAt: string;
+  state: "ingested" | "not_ingested";
+  reason?: string;
+  basis: string;
+  summary: CacSummary | null;
+};
+
+type AddManualAdSpendResult = {
+  ok: boolean;
+  id: string;
+  campaignKey: string | null;
+  amountKrw: number;
+  note: string;
+};
+
+type LoadAdSpendResult = {
+  ok: boolean;
+  scanned: number;
+  merged: number;
+  skipped: number;
+  table: string;
+  note: string;
+};
+
+type AdSpendMatchStatus =
+  | { kind: "idle"; message: string }
+  | { kind: "matched"; message: string }
+  | { kind: "unmatched"; message: string }
+  | { kind: "saved"; message: string }
+  | { kind: "error"; message: string };
+
 // 분포 렌즈 — 'events'(발생 총량, 기본) vs 'clients'(고유 사용자 수).
 type MetricMode = "events" | "clients";
 
@@ -902,6 +969,10 @@ function fmtInt(n: number | undefined | null): string {
   if (n == null || !isFinite(n)) return "0";
   return Math.round(n).toLocaleString("ko-KR");
 }
+function fmtKrw(n: number | undefined | null): string {
+  if (n == null || !isFinite(n)) return "—";
+  return `₩${fmtInt(n)}`;
+}
 function fmtPct(n: number | undefined | null): string {
   if (n == null || !isFinite(n)) return "0.0%";
   return `${(n * 100).toFixed(1)}%`;
@@ -933,6 +1004,50 @@ function fmtDay(d: string): string {
   const dt = new Date(d);
   if (!isNaN(dt.getTime())) return `${dt.getMonth() + 1}/${dt.getDate()}`;
   return d;
+}
+
+export const AD_SPEND_PLATFORM_OPTIONS: {
+  value: AdSpendPlatform;
+  label: string;
+}[] = [
+  { value: "google_ads", label: "Google Ads" },
+  { value: "meta", label: "Meta" },
+  { value: "youtube", label: "YouTube" },
+  { value: "instagram", label: "Instagram" },
+  { value: "facebook", label: "Facebook" },
+  { value: "threads", label: "Threads" },
+  { value: "manual", label: "Manual" },
+];
+
+function todayKstDate(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+export function normalizeCampaignKeyForAdmin(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized === "" ? null : normalized;
+}
+
+function findCampaignMatch(summary: CacSummary | null, campaignName: string) {
+  const campaignKey = normalizeCampaignKeyForAdmin(campaignName);
+  if (!summary || !campaignKey) return null;
+  const matched =
+    summary.campaigns.find((c) => c.campaignKey === campaignKey) ?? null;
+  const unmatched =
+    summary.unmatched.find((c) => c.campaignKey === campaignKey) ?? null;
+  return { campaignKey, matched, unmatched };
 }
 
 // ── 재사용 차트 프리미티브 ──────────────────────────────────────────────────
@@ -1793,6 +1908,244 @@ export function PendingIngestion({
         </div>
       </dl>
     </div>
+  );
+}
+
+function AdSpendStatusBadge({ status }: { status: AdSpendMatchStatus }) {
+  const tone =
+    status.kind === "matched"
+      ? "border-emerald-900/50 bg-emerald-950/25 text-emerald-200"
+      : status.kind === "unmatched"
+      ? "border-amber-900/50 bg-amber-950/25 text-amber-100"
+      : status.kind === "error"
+      ? "border-red-900/50 bg-red-950/25 text-red-200"
+      : "border-zinc-800 bg-zinc-950/50 text-zinc-400";
+  return (
+    <p className={`rounded-lg border px-3 py-2 text-xs leading-relaxed ${tone}`}>
+      {status.message}
+    </p>
+  );
+}
+
+export function CacSummaryView({ data }: { data: AdminCacSummary | null }) {
+  const summary = data?.summary ?? null;
+  if (!data) {
+    return (
+      <PendingIngestionFallback
+        waitingOn="getAdminCacSummary — CAC 요약을 읽는 어드민 콜러블"
+      />
+    );
+  }
+  if (data.state !== "ingested" || !summary) {
+    return (
+      <PendingIngestionFallback
+        waitingOn={
+          data.reason ??
+          "analytics_ad_spend 테이블 또는 ga4_first_touch_current 뷰 준비"
+        }
+      />
+    );
+  }
+  const topMatched = summary.campaigns.slice(0, 5);
+  const topUnmatched = summary.unmatched.slice(0, 5);
+  return (
+    <Panel
+      title="캠페인·소스별 유입과 CAC"
+      note="analytics_ad_spend.campaignKey 와 ga4_first_touch_current.campaign 정규화 키 기준"
+    >
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard
+          label="매칭 광고비"
+          value={fmtKrw(summary.matchedSpendKrw)}
+          sub={`획득 ${fmtInt(summary.acquiredFromMatchedCampaigns)} 설치`}
+        />
+        <StatCard
+          label="미매칭 광고비"
+          value={fmtKrw(summary.unmatchedSpendKrw)}
+          sub={
+            summary.unmatchedSpendKrw > 0
+              ? "캠페인명 확인 필요"
+              : "미매칭 없음"
+          }
+        />
+        <StatCard
+          label="전체 CAC"
+          value={fmtKrw(summary.overallCacKrw)}
+          sub="매칭 캠페인 기준"
+        />
+        <StatCard
+          label="매칭 캠페인"
+          value={fmtInt(summary.campaigns.length)}
+          sub={`미매칭 ${fmtInt(summary.unmatched.length)}개`}
+        />
+      </div>
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div>
+          <h5 className="text-xs font-semibold text-zinc-300">매칭됨</h5>
+          {topMatched.length === 0 ? (
+            <EmptyState label="아직 GA4 캠페인과 매칭된 광고비가 없습니다." />
+          ) : (
+            <ul className="mt-2 space-y-2">
+              {topMatched.map((c) => (
+                <li
+                  key={c.campaignKey}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs"
+                >
+                  <span className="min-w-0 truncate text-zinc-300">
+                    {c.campaignName}
+                  </span>
+                  <span className="shrink-0 tabular-nums text-zinc-400">
+                    {fmtKrw(c.spendKrw)} · {fmtInt(c.acquired)}설치
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div>
+          <h5 className="text-xs font-semibold text-zinc-300">미매칭</h5>
+          {topUnmatched.length === 0 ? (
+            <EmptyState label="미매칭 광고비가 없습니다." />
+          ) : (
+            <ul className="mt-2 space-y-2">
+              {topUnmatched.map((c) => (
+                <li
+                  key={c.campaignKey}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-amber-900/40 bg-amber-950/10 px-3 py-2 text-xs"
+                >
+                  <span className="min-w-0 truncate text-amber-100">
+                    {c.campaignName}
+                  </span>
+                  <span className="shrink-0 tabular-nums text-amber-200">
+                    {fmtKrw(c.spendKrw)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function PendingIngestionFallback({ waitingOn }: { waitingOn: string }) {
+  return (
+    <PendingIngestion
+      title="캠페인·소스별 유입과 CAC"
+      waitingOn={waitingOn}
+      willShow={[
+        "캠페인별 광고비와 획득 설치수",
+        "미매칭 광고비 — 캠페인명 확인 필요",
+        "채널별 CAC = 광고비 / 획득 설치수",
+      ]}
+    />
+  );
+}
+
+export function ManualAdSpendInputPanel({
+  form,
+  status,
+  saving,
+  onChange,
+  onSubmit,
+}: {
+  form: ManualAdSpendForm;
+  status: AdSpendMatchStatus;
+  saving: boolean;
+  onChange: (patch: Partial<ManualAdSpendForm>) => void;
+  onSubmit: () => void;
+}) {
+  const amount = Number(form.amountKrw);
+  const canSubmit =
+    form.spendDate.trim() !== "" &&
+    form.campaignName.trim() !== "" &&
+    Number.isFinite(amount) &&
+    amount > 0 &&
+    !saving;
+  return (
+    <Panel
+      title="광고비 수동 입력"
+      note="append-only 원장입니다. 수정은 새 정정 행으로 남깁니다."
+    >
+      <form
+        className="grid grid-cols-1 gap-2 lg:grid-cols-[150px_150px_minmax(220px,1fr)_100px_140px_auto]"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (canSubmit) onSubmit();
+        }}
+      >
+        <label className="space-y-1 text-xs text-zinc-500">
+          <span>날짜</span>
+          <input
+            type="date"
+            value={form.spendDate}
+            onChange={(e) => onChange({ spendDate: e.target.value })}
+            className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-indigo-500"
+          />
+        </label>
+        <label className="space-y-1 text-xs text-zinc-500">
+          <span>채널</span>
+          <select
+            value={form.platform}
+            onChange={(e) =>
+              onChange({ platform: e.target.value as AdSpendPlatform })
+            }
+            className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-indigo-500"
+          >
+            {AD_SPEND_PLATFORM_OPTIONS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1 text-xs text-zinc-500">
+          <span>캠페인</span>
+          <input
+            type="text"
+            value={form.campaignName}
+            onChange={(e) => onChange({ campaignName: e.target.value })}
+            placeholder="GA4 campaign 값과 같은 이름"
+            className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-indigo-500"
+          />
+        </label>
+        <label className="space-y-1 text-xs text-zinc-500">
+          <span>통화</span>
+          <select
+            value={form.currency}
+            disabled
+            className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-400 outline-none"
+          >
+            <option value="KRW">KRW</option>
+          </select>
+        </label>
+        <label className="space-y-1 text-xs text-zinc-500">
+          <span>금액</span>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            inputMode="numeric"
+            value={form.amountKrw}
+            onChange={(e) => onChange({ amountKrw: e.target.value })}
+            placeholder="100000"
+            className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm tabular-nums text-zinc-200 outline-none focus:border-indigo-500"
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={!canSubmit}
+          className="mt-5 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500 lg:mt-[22px]"
+        >
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          저장
+        </button>
+      </form>
+      <div className="mt-3">
+        <AdSpendStatusBadge status={status} />
+      </div>
+    </Panel>
   );
 }
 
@@ -5705,6 +6058,23 @@ export default function AnalyticsPanel({
     loading: true,
     error: null,
   });
+  const [cac, setCac] = useState<Loaded<AdminCacSummary>>({
+    data: null,
+    loading: true,
+    error: null,
+  });
+  const [adSpendForm, setAdSpendForm] = useState<ManualAdSpendForm>(() => ({
+    spendDate: todayKstDate(),
+    platform: "google_ads",
+    campaignName: "",
+    currency: "KRW",
+    amountKrw: "",
+  }));
+  const [adSpendSaving, setAdSpendSaving] = useState(false);
+  const [adSpendStatus, setAdSpendStatus] = useState<AdSpendMatchStatus>({
+    kind: "idle",
+    message: "저장하면 GA4 캠페인 매칭을 바로 확인합니다.",
+  });
   const [modelView, setModelView] = useState<"overview" | "routing">(
     "overview"
   );
@@ -5755,6 +6125,81 @@ export default function AnalyticsPanel({
     setDrill(null);
     setDrillState({ data: null, loading: false, error: null });
   }, []);
+
+  const refreshCacSummary = useCallback(async () => {
+    const fns = getFunctions(app, "us-central1");
+    const callCac = httpsCallable<Record<string, never>, AdminCacSummary>(
+      fns,
+      "getAdminCacSummary"
+    );
+    const result = await callCac({});
+    setCac({ data: result.data, loading: false, error: null });
+    return result.data;
+  }, []);
+
+  const saveManualAdSpend = useCallback(async () => {
+    const campaignName = adSpendForm.campaignName.trim();
+    const amountKrw = Number(adSpendForm.amountKrw);
+    if (!campaignName || !Number.isFinite(amountKrw) || amountKrw <= 0) return;
+
+    setAdSpendSaving(true);
+    setAdSpendStatus({
+      kind: "saved",
+      message: "저장 중 — 원장 저장 후 GA4 매칭을 확인합니다.",
+    });
+    try {
+      const fns = getFunctions(app, "us-central1");
+      const addManual = httpsCallable<
+        {
+          spendDate: string;
+          platform: AdSpendPlatform;
+          campaignName: string;
+          amountKrw: number;
+        },
+        AddManualAdSpendResult
+      >(fns, "addManualAnalyticsAdSpend");
+      const loadSpend = httpsCallable<Record<string, never>, LoadAdSpendResult>(
+        fns,
+        "loadAnalyticsAdSpend"
+      );
+
+      await addManual({
+        spendDate: adSpendForm.spendDate,
+        platform: adSpendForm.platform,
+        campaignName,
+        amountKrw,
+      });
+      await loadSpend({});
+      const nextCac = await refreshCacSummary();
+      const match = findCampaignMatch(nextCac.summary, campaignName);
+      if (match?.matched) {
+        setAdSpendStatus({
+          kind: "matched",
+          message: `매칭됨 — GA4 캠페인 ${fmtInt(
+            match.matched.acquired
+          )}개 설치와 연결됐습니다.`,
+        });
+      } else if (match?.unmatched) {
+        setAdSpendStatus({
+          kind: "unmatched",
+          message: "미매칭 — 캠페인명 확인 필요. 저장은 완료됐습니다.",
+        });
+      } else {
+        setAdSpendStatus({
+          kind: "unmatched",
+          message: "미매칭 — 캠페인명 확인 필요. 저장은 완료됐습니다.",
+        });
+      }
+      setAdSpendForm((f) => ({ ...f, campaignName: "", amountKrw: "" }));
+    } catch (e) {
+      setAdSpendStatus({
+        kind: "error",
+        message: `저장 또는 매칭 확인 실패 — ${mapErr(e as CallableError)}`,
+      });
+    } finally {
+      setAdSpendSaving(false);
+    }
+  }, [adSpendForm, refreshCacSummary]);
 
   const load = useCallback(
     async (d: number, inc: boolean, mode: MetricMode) => {
@@ -5848,6 +6293,7 @@ export default function AnalyticsPanel({
         error: null,
         notDeployed: false,
       }));
+      setCac((s) => ({ ...s, loading: true, error: null }));
       setAcctProfile((s) => ({
         ...s,
         loading: true,
@@ -5965,6 +6411,9 @@ export default function AnalyticsPanel({
             error: mapErr(e as CallableError),
           })
         );
+      void refreshCacSummary().catch((e) =>
+        setCac({ data: null, loading: false, error: mapErr(e as CallableError) })
+      );
       // ── ★선택 콜러블(아직 서버에 없을 수 있는 것들) ────────────────────
       // 매니페스트에 이름이 없으면 **호출하지 않고** 곧장 '연결 전' 으로 접는다.
       // 없는 함수를 부르면 브라우저에서는 CORS 에 막혀 `functions/internal` 이
@@ -6017,7 +6466,7 @@ export default function AnalyticsPanel({
         setPurchase(v)
       );
     },
-    []
+    [refreshCacSummary]
   );
 
   useEffect(() => {
@@ -6292,25 +6741,34 @@ export default function AnalyticsPanel({
             ) : null}
           </div>
 
-          {/* ── 소스·캠페인·CAC — GA4 브리지 적재 전 (🔴) ─────────────
-              ★가짜 0 을 그리지 않는다. 여기에 빈 표나 0 을 그리면 "광고가 하나도
-              안 먹었다" 로 읽히는데, 사실은 배선이 아직 없는 것이다. ── */}
+          {/* ── 소스·캠페인·CAC — GA4 브리지 + 수동 광고비 원장 ───────────── */}
           <div className="space-y-4">
-            <SectionHeader icon={Globe} title="소스·캠페인·CAC" trust="red" />
+            <SectionHeader icon={Globe} title="소스·캠페인·CAC" trust="yellow" />
             <Ga4BridgeFreshnessNote data={countryFunnel.data?.ga4Bridge} />
+            <ManualAdSpendInputPanel
+              form={adSpendForm}
+              saving={adSpendSaving}
+              status={adSpendStatus}
+              onChange={(patch) =>
+                setAdSpendForm((f) => ({
+                  ...f,
+                  ...patch,
+                  currency: "KRW",
+                }))
+              }
+              onSubmit={saveManualAdSpend}
+            />
+            {cac.loading ? (
+              <LoadingBox />
+            ) : cac.error ? (
+              <ErrorBox msg={cac.error} />
+            ) : (
+              <CacSummaryView data={cac.data} />
+            )}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <PendingIngestion
-                title="캠페인·소스별 유입과 CAC"
-                waitingOn="GA4 얇은 브리지 적재 — ga4_first_touch_current(캠페인·소스 first touch) + analytics_identity.ga_key(익명 조인키). 광고비 축은 아직 소스 자체가 없다 · 선행 티켓 진행 중"
-                willShow={[
-                  "캠페인/소스/매체별 방문 → 다운로드 → 설치 (분자/분모 동반)",
-                  "채널별 CAC = 광고비 / 획득 설치수",
-                  "유입 품질: 채널별 10분 활성화 도달률",
-                ]}
-              />
-              <PendingIngestion
                 title="획득 비용 회수 (채널별)"
-                waitingOn="ga4_first_touch_current(획득 채널) + analytics_purchase(결제 금액 이벤트) 적재 · 둘 다 선행 티켓"
+                waitingOn="ga4_first_touch_current(획득 채널) + analytics_purchase(결제 금액 이벤트) 적재"
                 willShow={["채널별 CAC 대비 회수 기간", "채널 × 코호트 LTV"]}
               />
             </div>
@@ -7289,7 +7747,7 @@ export default function AnalyticsPanel({
               />
               <PendingIngestion
                 title="코호트별 회수"
-                waitingOn="analytics_purchase(매출) + ga4_first_touch_current(획득 채널) · 광고비 축은 소스 자체가 아직 없다"
+                waitingOn="analytics_purchase(매출) + ga4_first_touch_current(획득 채널) + analytics_ad_spend(수동 광고비 원장) 조인"
                 willShow={[
                   "가입 코호트별 누적 매출 곡선",
                   "CAC 회수 시점(개월)",

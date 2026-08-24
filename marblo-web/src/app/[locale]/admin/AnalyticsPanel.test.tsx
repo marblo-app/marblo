@@ -86,6 +86,83 @@ test("적재 전 칸은 0 을 그리지 않고 무엇을 기다리는지 말한�
   assert.doesNotMatch(html, /0%/);
 });
 
+test("광고비 입력은 날짜·채널·캠페인·통화·금액 한 줄과 매칭 상태를 그린다", () => {
+  const html = renderToStaticMarkup(
+    <P.ManualAdSpendInputPanel
+      form={{
+        spendDate: "2026-08-24",
+        platform: "google_ads",
+        campaignName: "Launch Campaign",
+        currency: "KRW",
+        amountKrw: "100000",
+      }}
+      status={{
+        kind: "unmatched",
+        message: "미매칭 — 캠페인명 확인 필요. 저장은 완료됐습니다.",
+      }}
+      saving={false}
+      onChange={() => {}}
+      onSubmit={() => {}}
+    />
+  );
+  assert.match(html, /날짜/);
+  assert.match(html, /채널/);
+  assert.match(html, /캠페인/);
+  assert.match(html, /통화/);
+  assert.match(html, /금액/);
+  assert.match(html, /KRW/);
+  assert.match(html, /미매칭 — 캠페인명 확인 필요/);
+});
+
+test("CAC 요약은 미매칭 광고비를 별도로 보여준다", () => {
+  const html = renderToStaticMarkup(
+    <P.CacSummaryView
+      data={{
+        generatedAt: "2026-08-24T00:00:00.000Z",
+        state: "ingested",
+        basis: "analytics_ad_spend.campaignKey ↔ ga4_first_touch_current.campaign",
+        summary: {
+          matchedSpendKrw: 100000,
+          unmatchedSpendKrw: 70000,
+          acquiredFromMatchedCampaigns: 4,
+          overallCacKrw: 25000,
+          campaigns: [
+            {
+              campaignKey: "launch-campaign",
+              campaignName: "Launch Campaign",
+              spendKrw: 100000,
+              acquired: 4,
+              cacKrw: 25000,
+            },
+          ],
+          unmatched: [
+            {
+              campaignKey: "typo-campaign",
+              campaignName: "Typo Campaign",
+              spendKrw: 70000,
+              acquired: 0,
+              cacKrw: null,
+            },
+          ],
+          notes: [],
+        },
+      }}
+    />
+  );
+  assert.match(html, /매칭 광고비/);
+  assert.match(html, /미매칭 광고비/);
+  assert.match(html, /캠페인명 확인 필요/);
+  assert.match(html, /Typo Campaign/);
+});
+
+test("어드민 캠페인 키 정규화는 서버 규칙과 같은 모양을 만든다", () => {
+  assert.equal(
+    P.normalizeCampaignKeyForAdmin("  Launch / Campaign 2026  "),
+    "launch-campaign-2026"
+  );
+  assert.equal(P.normalizeCampaignKeyForAdmin("   "), null);
+});
+
 test("축 한계 고지는 events 계정축의 NULL 구간을 그대로 싣는다", () => {
   const html = renderToStaticMarkup(
     <P.AxisLimitNote
@@ -819,8 +896,9 @@ test("★수익 탭은 null 을 0 으로 그리지 않는다 (mrr_usd · ltv_usd
 test("★획득 탭은 기다리는 표 이름을 실제 이름으로 적는다", () => {
   const html = renderToStaticMarkup(<P.default initialTab="acquisition" />);
   assert.match(html, /ga4_first_touch_current/);
-  assert.match(html, /analytics_identity/);
+  assert.match(html, /광고비 수동 입력/);
   assert.match(html, /적재 전/);
+  assert.doesNotMatch(html, /광고비 축은 소스 자체가 아직 없다/);
 });
 
 test("★브리지 미적재 배너는 유입 0 이라고 말하지 않는다", () => {
