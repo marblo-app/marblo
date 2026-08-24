@@ -896,12 +896,58 @@ const PROVIDER_COLOR: Record<string, string> = {
 // 조인키는 익명 GA4 client_id 하나이고 Firebase uid 는 쓰지 않는다(티켓
 // rPVkmOKG + woXp2c70). 서버가 GA4(서울)와 앱 텔레메트리(US)에 각각 쿼리를
 // 던져 **메모리에서** 조인한다 — BigQuery 는 리전이 다르면 한 쿼리로 못 잇는다.
+/**
+ * 봇 판정문(getAdminCountryFunnel.suspectedTraffic). 서버 botTraffic.ts 의
+ * 출력이며 **국가 차단 목록이 아니다** — 코호트의 device×browser×os 집중도와
+ * 다운로드 0 이라는 행동 축으로만 판정한다.
+ */
+type SuspectCohort = {
+  cohort: string;
+  visitors: number;
+  downloads: number;
+  downloaders: number;
+  judgedVisitors: number;
+  unresolvedVisitors: number;
+  distinctFingerprints: number;
+  topFingerprint: string | null;
+  topFingerprintVisitors: number;
+  topFingerprintShare: number | null;
+  suspected: boolean;
+  suspectedVisitors: number;
+  reason: string;
+};
+type SuspectedTraffic = {
+  rule: {
+    cohortAxis: string;
+    minCohortVisitors: number;
+    signatureShare: number;
+    fingerprintAxes: string[];
+    derived: boolean;
+  };
+  cohorts: SuspectCohort[];
+  suspectedCohorts: SuspectCohort[];
+  totals: {
+    visitors: number;
+    suspectedVisitors: number;
+    qualifiedVisitors: number;
+    downloads: number;
+    downloaders: number;
+    suspectedCohorts: number;
+  };
+  notes: string[];
+};
+
 type CountryFunnelRow = {
   key: string;
   label: string;
   source?: string;
   medium?: string;
+  /** ★의심을 **뺀** 방문. 뺀 값은 버려지지 않고 suspectedVisitors 로 남는다. */
   visitors: number;
+  /** 단일지문 집중 유입 — 구버전 함수면 undefined(0 이라고 단정하지 않는다). */
+  suspectedVisitors?: number;
+  /** visitors + suspectedVisitors. GA4 원본과 대조할 때 쓰는 값. */
+  observedVisitors?: number;
   downloads: number;
   installs: number;
   connected: number;
@@ -927,6 +973,13 @@ type CountryFunnel = {
   };
   /** 없으면 구버전 함수 — 미적재라고 단정하지 않는다. */
   ga4Bridge?: Ga4BridgeFreshness;
+  /** 표의 기본 분모. 방문이 아니라 다운로드다(ticket IU1KDbYAv7FEewPkwHPU). */
+  primaryDenominator?: string;
+  /**
+   * ★봇 판정문 — **파생**이다. 서버가 매 조회마다 다시 계산하며 원장에는
+   * bot 플래그가 없다. 없으면 구버전 함수이므로 "봇 0" 이라고 단정하지 않는다.
+   */
+  suspectedTraffic?: SuspectedTraffic;
   byCountry: CountryFunnelRow[];
   byChannel: CountryFunnelRow[];
   totals: CountryFunnelRow;
@@ -3300,6 +3353,11 @@ function CountryFunnelTable({
           <tr className="border-b border-zinc-800">
             <th className="py-2 pr-3 font-medium">{keyLabel}</th>
             <th className="py-2 pr-3 text-right font-medium">방문</th>
+            {/* ★거른 것을 버리지 않고 옆 칸에 남긴다 — 조용히 뺀 숫자는 이
+                프로젝트가 이미 세 번 밟은 함정이다(#1193 과 같은 원칙). */}
+            <th className="py-2 pr-3 text-right font-medium">
+              <span className="text-amber-400/80">의심 유입</span>
+            </th>
             {/* ★단계별 전환은 언제나 분자/분모다. "23%" 만 있으면 그게 4명 중
                 1명인지 4천명 중 900명인지 화면에서 구분이 안 된다. */}
             <th className="py-2 pr-3 text-right font-medium">
@@ -3337,6 +3395,16 @@ function CountryFunnelTable({
                 {fmtInt(r.visitors)}
               </td>
               <td
+                className="py-2 pr-3 text-right tabular-nums text-amber-400/90"
+                title={
+                  r.suspectedVisitors
+                    ? "단일지문 집중 + 다운로드 0 으로 판정된 방문. 삭제하지 않고 따로 센다 — 판정은 파생이라 규칙을 바꾸면 과거도 다시 읽힌다."
+                    : undefined
+                }
+              >
+                {r.suspectedVisitors ? fmtInt(r.suspectedVisitors) : "—"}
+              </td>
+              <td
                 className={`py-2 pr-3 text-right ${
                   r.visitors > 0 && r.downloads === 0 ? "text-amber-400" : ""
                 }`}
@@ -3360,6 +3428,62 @@ function CountryFunnelTable({
   );
 }
 
+/**
+ * ★의심 유입 요약. 이 카드가 있는 이유는 하나다 — **거른 것을 버리지 않고
+ * 보이게 하려고**. 조용히 뺀 숫자는 다음 사람이 반드시 다르게 읽는다(#1193 이
+ * 미매칭 광고비를 보이게 한 것과 같은 원칙).
+ *
+ * ★국가 이름이 카드에 뜨지만 판정은 국적이 아니다. 국가는 집계 단위일 뿐이고
+ *   판정 축은 (a) 그 코호트의 device×browser×os 조합 가짓수와 (b) 다운로드 0
+ *   두 행동값이다. 그래서 이란에 진짜 사용자가 생겨 앱을 내려받으면 그 사람은
+ *   이 카드에 들어가지 않는다.
+ */
+function SuspectedTrafficNotice({
+  data,
+}: {
+  data: SuspectedTraffic | null | undefined;
+}) {
+  if (!data) return null;
+  const { totals, rule } = data;
+  if (totals.suspectedVisitors === 0) return null;
+  const share =
+    totals.visitors > 0 ? totals.suspectedVisitors / totals.visitors : null;
+
+  return (
+    <div
+      data-testid="suspected-traffic"
+      className="rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-xs leading-relaxed text-amber-100"
+    >
+      <p className="font-medium">
+        ★ 의심 유입 {fmtInt(totals.suspectedVisitors)}방문
+        {share !== null && ` (${fmtPct(share)})`} · 코호트{" "}
+        {totals.suspectedCohorts}개 — 버리지 않고 따로 셉니다.
+      </p>
+      <p className="mt-1 opacity-90">
+        판정 축은 국적이 아니라 행동입니다: 한 코호트의 device×browser×os 조합이{" "}
+        {Math.round(rule.signatureShare * 100)}% 이상 한 가지에 몰려 있고
+        다운로드가 0인 경우만(최소 {rule.minCohortVisitors}방문). 다운로드한
+        방문자는 어느 코호트에 있든 의심에 들어가지 않습니다.
+      </p>
+      <ul className="mt-2 space-y-1">
+        {data.suspectedCohorts.slice(0, 8).map((c) => (
+          <li key={c.cohort} className="flex flex-wrap gap-x-2">
+            <span className="font-medium">{c.cohort}</span>
+            <span className="tabular-nums">
+              {fmtInt(c.suspectedVisitors)}방문
+            </span>
+            <span className="opacity-70">{c.reason}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 opacity-70">
+        판정은 <b>파생</b>입니다 — 원장(BigQuery)에 bot 플래그를 굽지 않으므로
+        규칙을 바꾸면 과거 데이터가 즉시 새 규칙으로 다시 읽힙니다.
+      </p>
+    </div>
+  );
+}
+
 function CountryFunnelView({ data }: { data: CountryFunnel }) {
   // 방문은 있는데 다운로드가 0 인 국가 — "해외 23% 다운로드 0" 이 여기서 뜬다.
   const zeroDownloadCountries = data.byCountry.filter(
@@ -3377,6 +3501,7 @@ function CountryFunnelView({ data }: { data: CountryFunnel }) {
   return (
     <div className="space-y-4">
       <Ga4BridgeFreshnessNote data={data.ga4Bridge} />
+      <SuspectedTrafficNotice data={data.suspectedTraffic} />
       {/* 조인이 어디서 어떻게 일어났는지 숨기지 않는다. */}
       <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
         <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5">
@@ -3384,6 +3509,9 @@ function CountryFunnelView({ data }: { data: CountryFunnel }) {
         </span>
         <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5">
           {data.join.webRegion} ⋈ {data.join.appRegion} · 메모리 조인
+        </span>
+        <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5">
+          기본 분모 = 다운로드·설치 (방문 아님)
         </span>
         <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5">
           링크백 매칭{" "}

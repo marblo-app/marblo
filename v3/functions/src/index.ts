@@ -278,11 +278,13 @@ import {
   ANALYTICS_AD_SPEND_COLLECTION,
   ANALYTICS_AD_SPEND_SCHEMA,
   ANALYTICS_AD_SPEND_TABLE,
+  CAC_ACQUISITION_BASIS,
   buildCacSummary,
   parseManualAdSpendInput,
   toAdSpendLedgerRow,
   type AdSpendLedgerRow,
   type AdSpendSummaryRow,
+  type CampaignInstallRow,
   type FirstTouchCampaignRow,
 } from "./analyticsAdSpend";
 import {
@@ -14935,6 +14937,12 @@ export const getAdminCountryFunnel = functions
           event_name,
           event_timestamp,
           geo.country            AS country,
+          -- ★봇 지문 3축(ticket IU1KDbYAv7FEewPkwHPU). 개별 값이 아니라 **조합의
+          -- 집중도**가 판정 축이라 셋을 함께 가져온다 — 하나라도 빠지면 그
+          -- 방문자는 판정 불능 = 무죄로 남는다(botTraffic.trafficFingerprint).
+          device.category          AS deviceCategory,
+          device.web_info.browser  AS browser,
+          device.operating_system  AS operatingSystem,
           traffic_source.source  AS source,
           traffic_source.medium  AS medium,
           traffic_source.name    AS campaign
@@ -14951,6 +14959,12 @@ export const getAdminCountryFunnel = functions
         ANY_VALUE(source)   AS source,
         ANY_VALUE(medium)   AS medium,
         ANY_VALUE(campaign) AS campaign,
+        ARRAY_AGG(deviceCategory IGNORE NULLS ORDER BY event_timestamp LIMIT 1)
+          [SAFE_OFFSET(0)] AS deviceCategory,
+        ARRAY_AGG(browser IGNORE NULLS ORDER BY event_timestamp LIMIT 1)
+          [SAFE_OFFSET(0)] AS browser,
+        ARRAY_AGG(operatingSystem IGNORE NULLS ORDER BY event_timestamp LIMIT 1)
+          [SAFE_OFFSET(0)] AS operatingSystem,
         COUNTIF(event_name = 'download') AS downloads
       FROM ev
       GROUP BY gaClientId
@@ -15113,6 +15127,12 @@ export const getAdminCountryFunnel = functions
         appRegionError,
       },
       ga4Bridge,
+      // ★표의 기본 분모는 방문이 아니라 다운로드다. 화면이 그 사실을 스스로
+      //   말할 수 있게 응답에 싣는다.
+      primaryDenominator: funnel.primaryDenominator,
+      // ★봇 판정은 **파생**이다 — 원장에 굽지 않고 매 조회마다 다시 계산된다.
+      //   규칙을 바꾸면 과거 데이터가 즉시 새 규칙으로 다시 읽힌다.
+      suspectedTraffic: funnel.suspectedTraffic,
       byCountry: funnel.byCountry,
       byChannel: funnel.byChannel,
       totals: funnel.totals,
@@ -16330,7 +16350,7 @@ export const getAdminCacSummary = functions
   .https.onCall(async (_data, context) => {
     requireAdmin(context);
     try {
-      const [spendRows, firstTouchRows] = await Promise.all([
+      const [spendRows, firstTouchRows, installRows] = await Promise.all([
         bigquery.query({
           query: `
 SELECT
@@ -16342,10 +16362,27 @@ SELECT
 FROM \`${BQ_PROJECT}.${BQ_DATASET}.${ANALYTICS_AD_SPEND_TABLE}\``,
           location: BQ_LOCATION,
         }),
+        // ★CAC 분모는 방문이 아니라 **다운로드한 사람 수**다
+        //   (ticket IU1KDbYAv7FEewPkwHPU). COUNT(*) 는 방문 수라 봇 유입을
+        //   그대로 삼켜 CAC 를 부풀렸다. `visitors` 는 대조용으로만 남긴다.
         bigquery.query({
           query: `
-SELECT campaign, COUNT(*) AS acquired
+SELECT
+  campaign,
+  COUNT(*)                            AS visitors,
+  COUNTIF(IFNULL(downloads, 0) > 0)   AS downloaders,
+  SUM(IFNULL(downloads, 0))           AS downloadEvents
 FROM \`${BQ_PROJECT}.${BQ_DATASET}.${GA4_BRIDGE_CURRENT_VIEW}\`
+GROUP BY campaign`,
+          location: BQ_LOCATION,
+        }),
+        // 보조 분모(설치). 링크백이 도달한 설치만 세므로 다운로드보다 작거나
+        // 같다 — 기본 분모로 쓰지 않는 이유가 그것이다(buildCacSummary 주석).
+        bigquery.query({
+          query: `
+SELECT utmCampaign AS campaign, COUNT(DISTINCT installId) AS installs
+FROM \`${BQ_PROJECT}.${BQ_DATASET}.${BQ_ATTRIBUTION_TABLE}\`
+WHERE utmCampaign IS NOT NULL
 GROUP BY campaign`,
           location: BQ_LOCATION,
         }),
@@ -16356,9 +16393,11 @@ GROUP BY campaign`,
         basis:
           `${ANALYTICS_AD_SPEND_TABLE}.campaignKey ↔ ` +
           `${GA4_BRIDGE_CURRENT_VIEW}.campaign normalized campaign key`,
+        acquisitionBasis: CAC_ACQUISITION_BASIS,
         summary: buildCacSummary(
           spendRows[0] as AdSpendSummaryRow[],
-          firstTouchRows[0] as FirstTouchCampaignRow[]
+          firstTouchRows[0] as FirstTouchCampaignRow[],
+          installRows[0] as CampaignInstallRow[]
         ),
       };
     } catch (err) {

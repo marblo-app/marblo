@@ -16,6 +16,13 @@
 // ★비식별: 이 모듈이 다루는 식별자는 GA4 client_id(user_pseudo_id)와 앱 설치
 //   ID 둘 다 **익명 수도아이디**다. 이메일·uid·IP 는 입력에도 출력에도 없다.
 
+import {
+  classifyBotTraffic,
+  suspectedVisitorLookup,
+  type BotTrafficVerdict,
+  type FingerprintVisitorRow,
+} from "./botTraffic";
+
 // ── 입력 행 ──────────────────────────────────────────────────────────────────
 
 /** GA4(서울) 한 방문자(=user_pseudo_id) 요약. */
@@ -28,6 +35,16 @@ export interface WebVisitorRow {
   campaign: unknown;
   /** 이 방문자의 `download` 이벤트 수. */
   downloads: unknown;
+  /**
+   * ★봇 지문 3축 — GA4 `device.category` / `device.web_info.browser` /
+   * `device.operating_system`. 없으면 그 방문자는 **판정 불능 = 무죄**다
+   * (botTraffic.trafficFingerprint). 옵셔널인 이유는 구버전 호출부(이 컬럼을
+   * 아직 안 셀렉트하는 쿼리)가 컴파일은 되게 하되 봇 판정만 조용히 비활성화
+   * 되도록 하기 위해서다 — 그 상태는 `suspectedTraffic.totals` 가 0 으로 드러난다.
+   */
+  deviceCategory?: unknown;
+  browser?: unknown;
+  operatingSystem?: unknown;
 }
 
 /** 앱(US) 한 설치 요약 — 어트리뷰션 링크백 + 활성화 마일스톤. */
@@ -114,7 +131,15 @@ export interface FunnelRow {
   /** 채널 행에만 채워진다. */
   source?: string;
   medium?: string;
+  /**
+   * ★의심을 **뺀** 방문. 뺀 값은 버려지지 않고 `suspectedVisitors` 로 옆에
+   * 남는다(botTraffic 머리말 ③). 원본 방문은 `observedVisitors`.
+   */
   visitors: number;
+  /** 단일지문 집중 유입으로 판정된 방문 — 삭제하지 않고 따로 센다. */
+  suspectedVisitors: number;
+  /** `visitors + suspectedVisitors`. GA4 원본과 대조할 때 쓰는 값. */
+  observedVisitors: number;
   downloads: number;
   installs: number;
   connected: number;
@@ -133,6 +158,13 @@ export interface FunnelRow {
 }
 
 export interface CountryFunnelResult {
+  /** 표의 기본 분모가 방문이 아니라는 사실을 응답에 실어 둔다. */
+  primaryDenominator: typeof FUNNEL_PRIMARY_DENOMINATOR;
+  /**
+   * ★봇 판정문. **파생**이다 — 원장에 굽지 않고 매 조회마다 다시 계산된다.
+   * 규칙 임계값(`rule`)도 같이 실려 화면이 "왜 의심인지"를 말할 수 있다.
+   */
+  suspectedTraffic: BotTrafficVerdict;
   byCountry: FunnelRow[];
   byChannel: FunnelRow[];
   totals: FunnelRow;
@@ -154,6 +186,8 @@ function emptyRow(key: string, label: string): FunnelRow {
     key,
     label,
     visitors: 0,
+    suspectedVisitors: 0,
+    observedVisitors: 0,
     downloads: 0,
     installs: 0,
     connected: 0,
@@ -171,6 +205,9 @@ function ratio(numerator: number, denominator: number): number | null {
 }
 
 function finalize(row: FunnelRow): FunnelRow {
+  row.observedVisitors = row.visitors + row.suspectedVisitors;
+  // 방문 분모는 **의심을 뺀** 방문이다. 의심을 넣으면 다운로드율이 봇 수만큼
+  // 희석돼 해외 채널이 실제보다 나쁘게 읽힌다 — 그게 이 티켓의 출발점이었다.
   row.downloadRate = ratio(row.downloads, row.visitors);
   row.installRate = ratio(row.installs, row.downloads);
   row.connectRate = ratio(row.connected, row.installs);
@@ -179,15 +216,28 @@ function finalize(row: FunnelRow): FunnelRow {
   return row;
 }
 
-// 방문자 많은 순 → 다운로드 → 설치. 라벨 사전순은 마지막 타이브레이커(안정 정렬).
+/**
+ * ★정렬(=표의 기본 축)은 **설치 → 다운로드 → 방문** 순이다. 방문을 먼저 두면
+ * 봇 코호트가 표 맨 위에 앉아 눈에 가장 먼저 들어온다 — 실측에서 Iran 106명이
+ * 전체 2위였다. 라벨 사전순은 마지막 타이브레이커(안정 정렬).
+ */
 function compareRows(a: FunnelRow, b: FunnelRow): number {
   return (
-    b.visitors - a.visitors ||
-    b.downloads - a.downloads ||
     b.installs - a.installs ||
+    b.downloads - a.downloads ||
+    b.visitors - a.visitors ||
     a.key.localeCompare(b.key)
   );
 }
+
+/**
+ * ★채널·CAC 표의 기본 분모. 방문이 아니라 다운로드다.
+ *
+ * 봇은 Electron 데스크톱을 내려받아 설치하고 실행하지 않는다. 그래서 이 분모를
+ * 쓰는 순간 아래 지문 규칙이 하나도 없어도 봇은 이미 0으로 센다 — 공짜이고
+ * 규칙이 필요 없는 가장 강한 필터다(botTraffic 머리말 ①).
+ */
+export const FUNNEL_PRIMARY_DENOMINATOR = "downloads" as const;
 
 /**
  * 두 리전의 결과를 메모리에서 조인해 국가·채널 퍼널을 만든다.
@@ -200,6 +250,14 @@ export function buildCountryFunnel(
   webVisitors: readonly WebVisitorRow[],
   installs: readonly InstallRow[]
 ): CountryFunnelResult {
+  // ── 0) 봇 판정 — 집계보다 **먼저** 돌린다. 판정 자체는 파생이고 입력을
+  //    변형하지 않는다(botTraffic.ts). 지문 컬럼이 없는 구버전 쿼리에서는
+  //    판정풀이 비어 아무도 의심이 되지 않는다 — 조용한 오탐이 아니라 0이다.
+  const suspectedTraffic = classifyBotTraffic(
+    webVisitors as readonly FingerprintVisitorRow[]
+  );
+  const isSuspected = suspectedVisitorLookup(suspectedTraffic);
+
   const byGaId = new Map<string, WebVisitorRow>();
   for (const w of webVisitors) {
     const id = str(w.gaClientId);
@@ -238,11 +296,20 @@ export function buildCountryFunnel(
     const ch = channel(
       normalizeChannel({ source: w.source, medium: w.medium })
     );
-    c.visitors += 1;
+    // ★의심은 **다른 칸으로 옮길 뿐 버리지 않는다**. 다운로드는 어느 쪽이든
+    //   그대로 더한다 — 의심 방문자의 다운로드는 정의상 0 이라 값이 변하지
+    //   않지만, 만약 0 이 아니게 되면 그건 판정이 틀렸다는 신호여야 한다.
+    if (isSuspected(w)) {
+      c.suspectedVisitors += 1;
+      ch.suspectedVisitors += 1;
+      totals.suspectedVisitors += 1;
+    } else {
+      c.visitors += 1;
+      ch.visitors += 1;
+      totals.visitors += 1;
+    }
     c.downloads += downloads;
-    ch.visitors += 1;
     ch.downloads += downloads;
-    totals.visitors += 1;
     totals.downloads += downloads;
   }
 
@@ -276,7 +343,7 @@ export function buildCountryFunnel(
     totals.activated10m += activated;
   }
 
-  const notes: string[] = [];
+  const notes: string[] = [...suspectedTraffic.notes];
   if (webVisitors.length === 0) {
     notes.push(
       "GA4(서울) 방문 데이터가 비어 있다 — 방문·다운로드 칸은 0 이고 설치 이후 칸만 유효하다."
@@ -289,6 +356,8 @@ export function buildCountryFunnel(
   }
 
   return {
+    primaryDenominator: FUNNEL_PRIMARY_DENOMINATOR,
+    suspectedTraffic,
     byCountry: Array.from(countries.values()).map(finalize).sort(compareRows),
     byChannel: Array.from(channels.values()).map(finalize).sort(compareRows),
     totals: finalize(totals),

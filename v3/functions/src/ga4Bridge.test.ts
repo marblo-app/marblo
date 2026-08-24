@@ -62,6 +62,8 @@ function sourceRow(over: Partial<Ga4BridgeSourceRow> = {}): Ga4BridgeSourceRow {
     term: null,
     firstVisitDate: "2026-08-01",
     deviceCategory: "desktop",
+    browser: "Chrome",
+    operatingSystem: "Macintosh",
     landingPage: "https://marblo.app/ko",
     downloads: 0,
     ...over,
@@ -527,4 +529,57 @@ test("신선도 SQL 은 camelCase 컬럼을 읽고 동기 로그 표를 가리�
   const logCols = GA4_BRIDGE_SYNC_LOG_SCHEMA.map((f) => f.name);
   assert.ok(logCols.includes("ok"));
   assert.ok(logCols.includes("inserted"));
+});
+
+// ── ★봇 지문 3축 (ticket IU1KDbYAv7FEewPkwHPU) ──────────────────────────────
+
+test("★지문 3축이 US 브리지로 함께 넘어간다 — 조합이 판정 축이라 하나라도 빠지면 안 된다", () => {
+  const r = toBridgeRow(
+    sourceRow({
+      deviceCategory: "desktop",
+      browser: "Chrome",
+      operatingSystem: "Macintosh",
+    }),
+    "ga_x",
+    "2026-08-24T00:00:00.000Z"
+  );
+  assert.equal(r.deviceCategory, "desktop");
+  assert.equal(r.browser, "Chrome");
+  assert.equal(r.operatingSystem, "Macintosh");
+
+  const names: string[] = GA4_BRIDGE_SCHEMA.map((f) => f.name);
+  for (const axis of ["deviceCategory", "browser", "operatingSystem"]) {
+    assert.ok(names.includes(axis), `${axis} 컬럼이 스키마에 있어야 한다`);
+  }
+});
+
+test("★지문 컬럼은 NULLABLE 이다 — 기존 표에 덧붙여야 적재가 막히지 않는다", () => {
+  for (const axis of ["browser", "operatingSystem"]) {
+    const field = GA4_BRIDGE_SCHEMA.find((f) => f.name === axis);
+    assert.ok(field);
+    assert.equal(field.mode, "NULLABLE");
+  }
+});
+
+test("지문 축이 비면 null 로 남는다 — 지어내지 않는다(판정 불능 = 무죄)", () => {
+  const r = toBridgeRow(
+    sourceRow({ browser: null, operatingSystem: "  " }),
+    "ga_x",
+    "2026-08-24T00:00:00.000Z"
+  );
+  assert.equal(r.browser, null);
+  assert.equal(r.operatingSystem, null);
+});
+
+test("★GA4 집계 쿼리가 지문 3축을 first-touch 로 뽑는다", () => {
+  const sql = buildGa4FirstTouchQuery({
+    project: "marblo-2253d",
+    dataset: "analytics_543991508",
+    includeCollectedTrafficSource: true,
+  });
+  assert.match(sql, /device\.category\s+AS device_category/);
+  assert.match(sql, /device\.web_info\.browser\s+AS browser/);
+  assert.match(sql, /device\.operating_system\s+AS operating_system/);
+  assert.match(sql, /AS browser,/);
+  assert.match(sql, /AS operatingSystem,/);
 });

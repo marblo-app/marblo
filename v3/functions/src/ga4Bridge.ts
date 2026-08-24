@@ -130,6 +130,8 @@ export interface Ga4BridgeSourceRow {
   term: unknown;
   firstVisitDate: unknown;
   deviceCategory: unknown;
+  browser: unknown;
+  operatingSystem: unknown;
   landingPage: unknown;
   downloads: unknown;
 }
@@ -148,7 +150,16 @@ export interface Ga4BridgeRow {
   term: string | null;
   /** `YYYY-MM-DD`. GA4 event_date 의 최솟값. */
   firstVisitDate: string | null;
+  /**
+   * ★봇 지문 3축 — `device.category` / `device.web_info.browser` /
+   * `device.operating_system`. 셋을 **함께** 옮기는 이유는 개별 값이 아니라
+   * 조합의 집중도가 판정 축이기 때문이다(botTraffic.ts). 실측에서 Iran 106명이
+   * 전부 desktop/Chrome/Macintosh 하나였고, 대조군 South Korea 201명은 15가지로
+   * 흩어졌다. 개별 축만 옮기면 그 조합을 US 리전에서 다시 만들 수 없다.
+   */
   deviceCategory: string | null;
+  browser: string | null;
+  operatingSystem: string | null;
   /**
    * 쿼리스트링을 **버린** host+path. utm 은 이미 컬럼으로 실리고, 랜딩 URL 의
    * 쿼리에는 개인을 가리킬 수 있는 토큰이 섞여 들어온다.
@@ -274,6 +285,8 @@ export function toBridgeRow(
     term: cleanBridgeField(raw.term),
     firstVisitDate: normalizeFirstVisitDate(raw.firstVisitDate),
     deviceCategory: cleanBridgeField(raw.deviceCategory),
+    browser: cleanBridgeField(raw.browser),
+    operatingSystem: cleanBridgeField(raw.operatingSystem),
     landingPage: sanitizeLandingPage(raw.landingPage),
     downloads: bridgeCount(raw.downloads),
     attributionSource,
@@ -385,7 +398,9 @@ export function buildGa4FirstTouchQuery(opts: {
         event_name,
         geo.country           AS country,
         geo.region            AS region,
-        device.category       AS device_category,
+        device.category            AS device_category,
+        device.web_info.browser    AS browser,
+        device.operating_system    AS operating_system,
         traffic_source.source AS ts_source,
         traffic_source.medium AS ts_medium,
         traffic_source.name   AS ts_campaign,${collected}
@@ -413,6 +428,8 @@ export function buildGa4FirstTouchQuery(opts: {
       FORMAT_DATE('%Y-%m-%d', MIN(PARSE_DATE('%Y%m%d', event_date)))
                                                     AS firstVisitDate,
       ${firstOf("device_category")}                 AS deviceCategory,
+      ${firstOf("browser")}                         AS browser,
+      ${firstOf("operating_system")}                AS operatingSystem,
       ${firstOf("page_location")}                   AS landingPage,
       COUNTIF(event_name = 'download')              AS downloads
     FROM ev
@@ -530,6 +547,10 @@ export const GA4_BRIDGE_SCHEMA = [
   { name: "term", type: "STRING", mode: "NULLABLE" },
   { name: "firstVisitDate", type: "DATE", mode: "NULLABLE" },
   { name: "deviceCategory", type: "STRING", mode: "NULLABLE" },
+  // ★봇 지문 축. 기존 표에는 NULLABLE 로 덧붙는다(ensureGa4BridgeTable 의
+  //   additive 마이그레이션) — 추가 이전 행은 null 이라 판정 불능 = 무죄다.
+  { name: "browser", type: "STRING", mode: "NULLABLE" },
+  { name: "operatingSystem", type: "STRING", mode: "NULLABLE" },
   { name: "landingPage", type: "STRING", mode: "NULLABLE" },
   { name: "downloads", type: "INT64", mode: "NULLABLE" },
   { name: "attributionSource", type: "STRING", mode: "NULLABLE" },

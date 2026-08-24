@@ -217,3 +217,115 @@ test("buildCountryFunnel: BQ 가 int64 를 문자열로 줘도 숫자로 센다"
   );
   assert.equal(r.totals.downloads, 3);
 });
+
+// ── ★봇 트래픽 (ticket IU1KDbYAv7FEewPkwHPU) ────────────────────────────────
+
+function botWeb(
+  country: string,
+  fp: [string, string, string] | null,
+  downloads = 0
+): WebVisitorRow {
+  return {
+    gaClientId: "g-" + Math.random().toString(36).slice(2),
+    country,
+    source: "google",
+    medium: "organic",
+    campaign: null,
+    downloads,
+    deviceCategory: fp?.[0] ?? null,
+    browser: fp?.[1] ?? null,
+    operatingSystem: fp?.[2] ?? null,
+  };
+}
+
+const BOT_FP: [string, string, string] = ["desktop", "Chrome", "Macintosh"];
+
+function botCohort(country: string, n: number): WebVisitorRow[] {
+  return Array.from({ length: n }, () => botWeb(country, BOT_FP));
+}
+
+/** 지문이 흩어지는 대조군. */
+function humanCohort(country: string, n: number): WebVisitorRow[] {
+  const fps: Array<[string, string, string]> = [
+    ["desktop", "Chrome", "Windows"],
+    ["desktop", "Chrome", "Macintosh"],
+    ["mobile", "Safari", "iOS"],
+    ["mobile", "Android Webview", "Android"],
+    ["desktop", "Edge", "Windows"],
+    ["mobile", "Chrome", "Android"],
+    ["mobile", "Chrome", "iOS"],
+  ];
+  return Array.from({ length: n }, (_, i) => botWeb(country, fps[i % fps.length]));
+}
+
+test("★단일지문 집중 유입은 '의심' 으로 분리되어 보인다 — 삭제되지 않는다", () => {
+  const r = buildCountryFunnel(
+    [...botCohort("Iran", 129), ...humanCohort("South Korea", 201)],
+    []
+  );
+  const iran = r.byCountry.find((x) => x.key === "Iran");
+  const kr = r.byCountry.find((x) => x.key === "South Korea");
+  assert.ok(iran && kr);
+
+  assert.equal(iran.suspectedVisitors, 129);
+  assert.equal(iran.visitors, 0, "의심을 뺀 방문은 0");
+  assert.equal(iran.observedVisitors, 129, "★원본 방문은 그대로 남는다");
+
+  assert.equal(kr.suspectedVisitors, 0);
+  assert.equal(kr.visitors, 201);
+
+  assert.equal(r.totals.observedVisitors, 330);
+  assert.equal(r.totals.suspectedVisitors, 129);
+  assert.equal(r.totals.visitors, 201);
+  assert.ok(r.notes.some((n) => n.includes("의심 유입 129방문")));
+});
+
+test("★국가로 차단하지 않는다 — 다운로드한 이란 사용자는 의심으로 안 빠진다", () => {
+  const realIranian = botWeb("Iran", BOT_FP, 1);
+  const r = buildCountryFunnel([...botCohort("Iran", 129), realIranian], []);
+  const iran = r.byCountry.find((x) => x.key === "Iran");
+  assert.ok(iran);
+  assert.equal(iran.suspectedVisitors, 129);
+  assert.equal(iran.visitors, 1, "★진짜 이란 사용자는 방문에 남는다");
+  assert.equal(iran.downloads, 1);
+  assert.equal(iran.downloadRate, 1, "분모는 의심을 뺀 방문 1명");
+});
+
+test("★판정은 파생이다 — 입력 행에 bot 플래그가 굽히지 않는다", () => {
+  const rows = botCohort("Iran", 129);
+  const snapshot = JSON.stringify(rows);
+  const r = buildCountryFunnel(rows, []);
+  assert.equal(r.suspectedTraffic.totals.suspectedVisitors, 129);
+  assert.equal(r.suspectedTraffic.rule.derived, true);
+  assert.equal(JSON.stringify(rows), snapshot);
+  assert.ok(!snapshot.includes("bot"), "원본 행에 판정 결과가 남지 않는다");
+});
+
+test("지문 컬럼이 없는 구버전 쿼리에서는 아무도 의심이 되지 않는다(오탐 0)", () => {
+  const legacy: WebVisitorRow[] = Array.from({ length: 129 }, () =>
+    web("g" + Math.random(), "Iran", "google", "organic", 0)
+  );
+  const r = buildCountryFunnel(legacy, []);
+  assert.equal(r.totals.suspectedVisitors, 0);
+  assert.equal(r.byCountry[0].visitors, 129);
+});
+
+test("★표의 기본 분모는 방문이 아니라 다운로드다 — 정렬도 설치·다운로드가 먼저", () => {
+  const r = buildCountryFunnel(
+    [
+      // 방문은 압도적으로 많지만 다운로드 0.
+      ...humanCohort("Bigland", 500),
+      // 방문은 적지만 실제로 내려받았다.
+      botWeb("Smalland", ["desktop", "Chrome", "Windows"], 3),
+      botWeb("Smalland", ["mobile", "Safari", "iOS"], 2),
+    ],
+    []
+  );
+  assert.equal(r.primaryDenominator, "downloads");
+  assert.equal(
+    r.byCountry[0].key,
+    "Smalland",
+    "★방문이 아니라 다운로드가 표의 머리에 온다"
+  );
+  assert.equal(r.byCountry[0].downloads, 5);
+});
