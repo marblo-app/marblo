@@ -93,7 +93,9 @@ export async function launchMarblo(
   };
 
   const app = await electron.launch({
-    args: [DIST_MAIN, ...(opts.args ?? [])],
+    // Chromium consumes profile flags only before the app entry point. Keep
+    // user-data-dir first so isolated specs can never open a developer profile.
+    args: [...(opts.args ?? []), DIST_MAIN],
     cwd: REPO_ROOT,
     env,
     // 헤드리스가 기본. 디버그는 PWDEBUG=1 / --headed.

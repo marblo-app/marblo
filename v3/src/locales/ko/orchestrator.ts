@@ -69,8 +69,7 @@ export const orchestrator = {
     "이 프로젝트가 가리키던 폴더가 지워졌거나 옮겨졌습니다(워크트리를 정리하면 흔히 생깁니다). 사이드바에서 프로젝트 폴더를 지금 있는 경로로 다시 지정한 뒤 시작하세요.",
 
   "orchestrator.halt.spawnFailedLabel": "실행 실패",
-  "orchestrator.halt.spawnFailedTitle":
-    "오케스트레이터를 실행하지 못했습니다",
+  "orchestrator.halt.spawnFailedTitle": "오케스트레이터를 실행하지 못했습니다",
   "orchestrator.halt.spawnFailedHint":
     "터미널 프로세스를 만들지 못했습니다. 프로젝트 폴더가 실제로 있는지 확인한 뒤 [다시 시작] 을 눌러 주세요. 계속 같은 자리에서 멈추면 [설정] → CLI 연결에서 이 하네스가 정상인지 확인하세요.",
 
@@ -163,9 +162,9 @@ export const orchestrator = {
   "orchestrator.preview.creating": "생성 중...",
   "orchestrator.preview.createOnBoard": "칸반에 생성",
   // ── 워크체인 (티켓 fQtXQ2NzyYs0MRpqByTS) — 오케가 다음에 할 일 ──
-  "orchestrator.chain.title": "다음 할 일",
+  "orchestrator.chain.title": "오케브레인",
   "orchestrator.chain.subtitle":
-    "오케가 적어 둔 작업 체인 — 완료는 보드 티켓 상태로 판정합니다",
+    "오케가 다음에 할 작정인 것 — 완료는 보드가 판정합니다",
   "orchestrator.chain.toggleShow": "펼치기",
   "orchestrator.chain.toggleHide": "접기",
   "orchestrator.chain.countOpen": "열림 {open}",
@@ -191,11 +190,16 @@ export const orchestrator = {
   "orchestrator.chain.form.what": "무엇을",
   "orchestrator.chain.form.whatPlaceholder": "예: 디자인 3/8 재개",
   "orchestrator.chain.form.why": "왜",
-  "orchestrator.chain.form.whyPlaceholder": "예: 배포가 급해서 잠시 보류 — 배포 끝나면 바로",
+  "orchestrator.chain.form.whyPlaceholder":
+    "예: 배포가 급해서 잠시 보류 — 배포 끝나면 바로",
   "orchestrator.chain.form.submit": "추가",
   "orchestrator.chain.form.cancel": "취소",
   "orchestrator.chain.form.required": "무엇·왜 둘 다 적어야 합니다",
   "orchestrator.chain.drop": "내리기",
+  "orchestrator.chain.start": "지금 시작",
+  "orchestrator.chain.started": "보냄",
+  "orchestrator.chain.startFailed": "오케에게 지시를 보내지 못했습니다",
+  "orchestrator.chain.removeEvidence": "이 근거 링크 떼기",
   "orchestrator.chain.dropPrompt": "왜 더 이상 유효하지 않은지 한 줄:",
   "orchestrator.chain.dropReasonRequired": "사유가 없으면 내릴 수 없습니다",
   "orchestrator.chain.failed.reason": "작업 체인을 불러오지 못했습니다",

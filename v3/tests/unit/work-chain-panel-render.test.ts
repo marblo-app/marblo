@@ -18,7 +18,10 @@ import {
 // 문장을 베끼지 않고 사전에서 꺼낸다).
 import { en } from "../../src/locales/en";
 import type { WorkChainItem } from "../../src/lib/workChain";
-import { DEFAULT_PANEL_HEIGHT, panelHeightForPointer } from "../../src/components/orchestrator/workChainPanelResize";
+import {
+  DEFAULT_PANEL_HEIGHT,
+  panelHeightForPointer,
+} from "../../src/components/orchestrator/workChainPanelResize";
 
 const state = vi.hoisted(() => ({
   listener: null as
@@ -37,6 +40,8 @@ const state = vi.hoisted(() => ({
           | { kind: "error"; error: Error; reason: "permission" | "load" },
       ) => void),
   added: [] as Array<{ what: string; why: string }>,
+  subscribeTasks: vi.fn(() => () => {}),
+  routeInstruction: vi.fn(async () => "local" as const),
 }));
 
 const PANEL_HEIGHT_STORAGE_KEY = "marblo.workChainPanel.height.v1";
@@ -78,7 +83,13 @@ function pointerEvent(
 // 보려면 selector 목이 아니라 구독이 있어야 한다(memo 컴포넌트라 props 만으론 안 바뀐다).
 vi.mock("../../src/stores/taskStore", async () => {
   const { create } = await import("zustand");
-  const useTaskStore = create<{ tasks: unknown[] }>(() => ({ tasks: [] }));
+  const useTaskStore = create<{
+    tasks: unknown[];
+    subscribeToTasks: (projectId: string) => () => void;
+  }>(() => ({
+    tasks: [],
+    subscribeToTasks: state.subscribeTasks,
+  }));
   return { useTaskStore };
 });
 
@@ -96,6 +107,11 @@ vi.mock("../../src/services/workChainService", () => ({
     },
   ),
   dropWorkChainItemFromUi: vi.fn(async () => ({ ok: true })),
+  removeWorkChainEvidenceTaskFromUi: vi.fn(async () => ({ ok: true })),
+}));
+
+vi.mock("../../src/services/orchestratorInstructionService", () => ({
+  routeInstructionToOrchestrator: state.routeInstruction,
 }));
 
 import WorkChainPanel from "../../src/components/orchestrator/WorkChainPanel";
@@ -137,10 +153,17 @@ beforeEach(() => {
   setTasks([]);
   state.added = [];
   state.listener = null;
+  state.subscribeTasks.mockClear();
+  state.routeInstruction.mockClear();
 });
 afterEach(() => cleanup());
 
 describe("WorkChainPanel", () => {
+  it("다른 탭을 열지 않아도 자신의 프로젝트 티켓을 구독한다", () => {
+    render(createElement(WorkChainPanel, { projectId: "p1" }));
+    expect(state.subscribeTasks).toHaveBeenCalledWith("p1");
+  });
+
   it("완료/준비는 보드 티켓 status 로 파생된다 — 같은 문서, 다른 보드", () => {
     setTasks([{ id: "t1", status: "REVIEW", title: "센트리" }]);
     const { rerender } = render(
@@ -211,6 +234,35 @@ describe("WorkChainPanel", () => {
     ]);
   });
 
+  it("지금 시작은 기존 오케 지시 경로로 한 번만 보낸다", async () => {
+    setTasks([{ id: "t1", status: "REVIEW", title: "센트리" }]);
+    render(createElement(WorkChainPanel, { projectId: "p1" }));
+    push([
+      chainItem({ id: "a", what: "센트리 마감", why: "검증", taskIds: ["t1"] }),
+    ]);
+    fireEvent.click(screen.getByTestId("work-chain-toggle"));
+    await act(async () =>
+      fireEvent.click(screen.getByTestId("work-chain-start")),
+    );
+    expect(state.routeInstruction).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByTestId("work-chain-start").hasAttribute("disabled"),
+    ).toBe(true);
+  });
+
+  it("펼친 본문은 터미널 공간을 밀지 않는 오버레이이며 Esc로 닫힌다", () => {
+    render(createElement(WorkChainPanel, { projectId: "p1" }));
+    push([chainItem({ id: "a", what: "첫 항목" })]);
+    const panel = screen.getByTestId("work-chain-panel");
+    fireEvent.click(screen.getByTestId("work-chain-toggle"));
+    expect(screen.getByTestId("work-chain-overlay").className).toContain(
+      "absolute",
+    );
+    expect(panel.style.height).toBe("");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByTestId("work-chain-overlay")).toBeNull();
+  });
+
   it("구독 실패는 0개가 아니라 실패로 그리고 '다시 시도' 가 있다", () => {
     render(createElement(WorkChainPanel, { projectId: "p1" }));
     act(() => {
@@ -246,11 +298,10 @@ describe("WorkChainPanel", () => {
     fireEvent.click(screen.getByTestId("work-chain-toggle"));
 
     const panel = screen.getByTestId("work-chain-panel");
-    expect(panel.style.height).toBe(`${DEFAULT_PANEL_HEIGHT}px`);
-    expect(panel.style.maxHeight).toBe("320px");
-    expect(
-      panel.querySelector(".overflow-y-auto"),
-    ).toBeTruthy();
+    const overlay = screen.getByTestId("work-chain-overlay");
+    expect(overlay.style.height).toBe(`${DEFAULT_PANEL_HEIGHT}px`);
+    expect(overlay.style.maxHeight).toBe("320px");
+    expect(panel.querySelector(".overflow-y-auto")).toBeTruthy();
     expect(screen.getAllByTestId("work-chain-item")).toHaveLength(20);
 
     const handle = screen.getByTestId("work-chain-resize-handle");
@@ -258,14 +309,14 @@ describe("WorkChainPanel", () => {
     fireEvent(document, pointerEvent("pointermove", 140));
     fireEvent(document, pointerEvent("pointerup", 140));
     const resizedHeight = panelHeightForPointer(DEFAULT_PANEL_HEIGHT, 200, 140);
-    expect(panel.style.height).toBe(`${resizedHeight}px`);
+    expect(overlay.style.height).toBe(`${resizedHeight}px`);
     expect(storage.get(PANEL_HEIGHT_STORAGE_KEY)).toBe(String(resizedHeight));
 
     unmount();
     render(createElement(WorkChainPanel, { projectId: "p1" }));
     push([chainItem({ id: "a", what: "첫 항목" })]);
     fireEvent.click(screen.getByTestId("work-chain-toggle"));
-    expect(screen.getByTestId("work-chain-panel").style.height).toBe(
+    expect(screen.getByTestId("work-chain-overlay").style.height).toBe(
       `${resizedHeight}px`,
     );
   });

@@ -1,8 +1,8 @@
-import { create } from 'zustand';
-import type { Task, TaskStatus } from '../types/task';
-import { subscribeToTasks as subscribeToTasksService } from '../services/taskService';
-import * as taskService from '../services/taskService';
-import telemetry from '../services/telemetryService';
+import { create } from "zustand";
+import type { Task, TaskStatus } from "../types/task";
+import { subscribeToTasks as subscribeToTasksService } from "../services/taskService";
+import * as taskService from "../services/taskService";
+import telemetry from "../services/telemetryService";
 
 interface TaskFilter {
   status: TaskStatus | null;
@@ -17,7 +17,9 @@ interface TaskState {
   fetchTasks: (projectId: string) => Promise<void>;
   subscribeToTasks: (projectId: string) => () => void;
   refreshTasks: (projectId: string) => Promise<void>;
-  createTask: (data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) => Promise<string>;
+  createTask: (
+    data: Omit<Task, "id" | "createdAt" | "updatedAt">,
+  ) => Promise<string>;
   updateTask: (id: string, data: Partial<Task>) => Promise<void>;
   updateTaskStatus: (id: string, status: TaskStatus) => Promise<void>;
   setFilter: (filter: Partial<TaskFilter>) => void;
@@ -27,6 +29,7 @@ interface TaskState {
 interface ActiveTaskSubscription {
   projectId: string;
   unsubscribe: () => void;
+  consumers: number;
 }
 
 let activeTaskSubscription: ActiveTaskSubscription | null = null;
@@ -54,6 +57,19 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   subscribeToTasks: (projectId: string) => {
+    // Renderer surfaces share one listener for the same project's board data.
+    if (activeTaskSubscription?.projectId === projectId) {
+      activeTaskSubscription.consumers += 1;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        const active = activeTaskSubscription;
+        if (!active || active.projectId !== projectId) return;
+        active.consumers -= 1;
+        if (active.consumers === 0) active.unsubscribe();
+      };
+    }
     unsubscribeActiveTaskSubscription();
     set({ loading: true });
     let isActive = true;
@@ -76,13 +92,15 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       }
     };
 
-    activeTaskSubscription = { projectId, unsubscribe };
+    activeTaskSubscription = { projectId, unsubscribe, consumers: 1 };
+    let released = false;
     return () => {
-      if (activeTaskSubscription?.projectId === projectId) {
-        activeTaskSubscription.unsubscribe();
-        return;
-      }
-      unsubscribe();
+      if (released) return;
+      released = true;
+      const active = activeTaskSubscription;
+      if (!active || active.projectId !== projectId) return;
+      active.consumers -= 1;
+      if (active.consumers === 0) active.unsubscribe();
     };
   },
 

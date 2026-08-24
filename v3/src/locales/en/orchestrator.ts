@@ -152,9 +152,9 @@ export const orchestrator: Record<keyof typeof koOrchestrator, string> = {
   "orchestrator.preview.creating": "Creating...",
   "orchestrator.preview.createOnBoard": "Create on board",
   // ── Work chain (ticket fQtXQ2NzyYs0MRpqByTS) — what the orchestrator does next ──
-  "orchestrator.chain.title": "Up next",
+  "orchestrator.chain.title": "Orchestrator Brain",
   "orchestrator.chain.subtitle":
-    "The orchestrator's work chain — completion is judged by board ticket status",
+    "What the orchestrator intends to do next — the board judges completion",
   "orchestrator.chain.toggleShow": "Show",
   "orchestrator.chain.toggleHide": "Hide",
   "orchestrator.chain.countOpen": "open {open}",
@@ -180,15 +180,22 @@ export const orchestrator: Record<keyof typeof koOrchestrator, string> = {
   "orchestrator.chain.form.what": "What",
   "orchestrator.chain.form.whatPlaceholder": "e.g. Resume design 3/8",
   "orchestrator.chain.form.why": "Why",
-  "orchestrator.chain.form.whyPlaceholder": "e.g. Paused for the urgent deploy — resume right after",
+  "orchestrator.chain.form.whyPlaceholder":
+    "e.g. Paused for the urgent deploy — resume right after",
   "orchestrator.chain.form.submit": "Add",
   "orchestrator.chain.form.cancel": "Cancel",
   "orchestrator.chain.form.required": "Both what and why are required",
   "orchestrator.chain.drop": "Drop",
+  "orchestrator.chain.start": "Start now",
+  "orchestrator.chain.started": "Sent",
+  "orchestrator.chain.startFailed":
+    "Could not send the instruction to the orchestrator",
+  "orchestrator.chain.removeEvidence": "Remove this evidence link",
   "orchestrator.chain.dropPrompt": "Why is this no longer valid?",
   "orchestrator.chain.dropReasonRequired": "A reason is required to drop",
   "orchestrator.chain.failed.reason": "Could not load the work chain",
-  "orchestrator.chain.failed.permission": "You don't have permission to read the work chain",
+  "orchestrator.chain.failed.permission":
+    "You don't have permission to read the work chain",
   "orchestrator.chain.writeFailed": "Could not save: {error}",
   "orchestrator.chain.noProject": "Open a project to see the chain",
 };

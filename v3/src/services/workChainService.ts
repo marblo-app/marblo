@@ -40,9 +40,29 @@ export type WorkChainSubscribeResult =
   | { kind: "data"; snapshot: WorkChainSnapshot }
   | { kind: "error"; error: Error; reason: "permission" | "load" };
 
+type WorkChainTestHarness = {
+  subscribe: (
+    projectId: string,
+    callback: (result: WorkChainSubscribeResult) => void,
+  ) => Unsubscribe;
+};
+
+function testHarness(): WorkChainTestHarness | null {
+  if (!window.electronAPI?.testMode?.bypassAuth) return null;
+  const value = (
+    window as unknown as { __marbloTest?: { workChain?: unknown } }
+  ).__marbloTest?.workChain;
+  return value &&
+    typeof (value as WorkChainTestHarness).subscribe === "function"
+    ? (value as WorkChainTestHarness)
+    : null;
+}
+
 function subscriptionFailureReason(error: Error): "permission" | "load" {
   const code = (error as Error & { code?: unknown }).code;
-  return code === "permission-denied" || code === "unauthenticated" || /permission|insufficient permissions/i.test(error.message)
+  return code === "permission-denied" ||
+    code === "unauthenticated" ||
+    /permission|insufficient permissions/i.test(error.message)
     ? "permission"
     : "load";
 }
@@ -52,6 +72,10 @@ export function subscribeWorkChain(
   projectId: string,
   callback: (result: WorkChainSubscribeResult) => void,
 ): Unsubscribe {
+  // Tier-2 Electron tests seed a deterministic snapshot before the panel mounts.
+  // Production and non-test launches always take the Firestore listener below.
+  const harness = testHarness();
+  if (harness) return harness.subscribe(projectId, callback);
   const ref = doc(db, WORK_CHAIN_COLLECTION, projectId);
   return onSnapshot(
     ref,
@@ -76,7 +100,11 @@ export function subscribeWorkChain(
     },
     (error) => {
       console.error("[workChainService] subscribe error:", error);
-      callback({ kind: "error", error, reason: subscriptionFailureReason(error) });
+      callback({
+        kind: "error",
+        error,
+        reason: subscriptionFailureReason(error),
+      });
     },
   );
 }
@@ -156,5 +184,28 @@ export async function dropWorkChainItemFromUi(
       },
     };
     return items.map((it, i) => (i === idx ? next : it));
+  });
+}
+
+/** Remove a genuinely missing board ticket from an item's evidence in place.
+ * This never marks the item complete; completion remains board-derived. */
+export async function removeWorkChainEvidenceTaskFromUi(
+  projectId: string,
+  itemId: string,
+  taskId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return mutateItems(projectId, (items) => {
+    const index = items.findIndex((item) => item.id === itemId);
+    if (index < 0) return `item ${itemId} not found`;
+    const item = items[index];
+    if (!item.taskIds.includes(taskId)) return `ticket ${taskId} not found`;
+    const next: WorkChainItem = {
+      ...item,
+      taskIds: item.taskIds.filter((id) => id !== taskId),
+      updatedAt: Date.now(),
+    };
+    return items.map((candidate, candidateIndex) =>
+      candidateIndex === index ? next : candidate,
+    );
   });
 }

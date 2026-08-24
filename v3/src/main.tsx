@@ -8,6 +8,7 @@ import { useTaskStore } from "./stores/taskStore";
 import { usePaneStore } from "./stores/paneStore";
 import { useSplitWorkspaceStore } from "./stores/splitWorkspaceStore";
 import { useEditorStore } from "./stores/editorStore";
+import { useBeginnerModeStore } from "./stores/beginnerModeStore";
 
 // Test hatch — Playwright e2e fixture 가 zustand store 를 직접 manipulate 할
 // 수 있도록 window.__marbloTest 에 노출. main process 가
@@ -26,6 +27,7 @@ if (window.electronAPI?.testMode?.bypassAuth) {
       pane: usePaneStore,
       splitWorkspace: useSplitWorkspaceStore,
       editor: useEditorStore,
+      beginnerMode: useBeginnerModeStore,
     },
   };
   console.debug("[TestHatch] window.__marbloTest exposed (bypassAuth mode)");

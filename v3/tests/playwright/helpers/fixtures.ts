@@ -190,7 +190,7 @@ export const test = base.extend<Fixtures>({
  * zustand orchestratorStore 를 직접 manipulate 한다. window.__marbloTest hatch 가
  * bypassAuth 모드에서만 노출되므로 production 영향 0.
  */
-async function openMockOrchestrator(page: Page): Promise<string> {
+export async function openMockOrchestrator(page: Page): Promise<string> {
   // 0) session id 만 먼저 정한다. TerminalView 는 PTY 가 아직 없어도 mount 할 수
   //    있고, onData listener 도 session id 기준으로 먼저 붙는다. 실제 sh spawn 은
   //    xterm 이 열린 뒤 실행해 mount 전 IPC/replay 경합과 macOS pty fd teardown
@@ -209,6 +209,7 @@ async function openMockOrchestrator(page: Page): Promise<string> {
               getState: () => {
                 setCurrentProject: (p: unknown) => void;
               };
+              setState: (partial: Record<string, unknown>) => void;
             };
           };
         };
@@ -218,7 +219,7 @@ async function openMockOrchestrator(page: Page): Promise<string> {
       throw new Error(
         "__marbloTest hatch 가 노출되지 않음 (bypassAuth 모드 확인)",
       );
-    tw.stores.project.getState().setCurrentProject({
+    const project = {
       id: "test-mock-project",
       name: "Mock Project",
       ownerId: "test-user-bypass",
@@ -226,6 +227,16 @@ async function openMockOrchestrator(page: Page): Promise<string> {
       enabledModels: ["claude"],
       createdAt: new Date(),
       updatedAt: new Date(),
+    };
+    // A live projects snapshot from the developer profile must never replace
+    // the deterministic fixture after it mounts. Deliberately change the
+    // subscription owner stamp so any in-flight callback is ignored.
+    tw.stores.project.setState({
+      currentProject: project,
+      projects: [project],
+      subscribedUserId: "test-user-bypass",
+      projectsHydrated: true,
+      loading: false,
     });
   });
   await page.waitForTimeout(100);
