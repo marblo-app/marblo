@@ -47,7 +47,19 @@ export interface QuestionEntry {
   answer?: string;
   answeredBy?: string;
   answeredAt?: number;
-  /** 답변을 질문자 PTY 로 보낸 결과 — queued(전달 큐 등록) / failed(전달 불가). */
+  /**
+   * 답변을 질문자 PTY 로 보낸 결과 — queued(전달 큐 등록) / failed(전달 불가).
+   *
+   * ★"queued" 를 "전달 완료" 로 읽지 마라. 이 값은 pendingInstructions 문서를
+   *   만든 시점에 찍히며, 그 뒤의 PTY 주입 결과는 여기로 돌아오지 않는다.
+   *   그리고 주입 자체도 성공을 보장하지 못한다 — 실측(tests/integration/
+   *   answer-delivery-composer.cjs)에서 (a) 컴포저에 초안이 물려 있으면 답이
+   *   초안과 한 덩어리로 섞여 제출되고, (b) 턴 중이면 제출이 0건인데도
+   *   writeAndSubmit 이 true 를 돌려주며, (c) 확인 다이얼로그에 서 있으면 답의
+   *   첫 글자가 선택으로 소비된다. 즉 queued 는 **'큐에 넣었다'** 그 이상도
+   *   이하도 아니다. 답 이후의 침묵을 에이전트 탓으로 읽기 전에 이 사실을 먼저
+   *   떠올려야 한다(agent-stall-policy.ts evaluateAnswerQuiet).
+   */
   answerDelivery?: "queued" | "failed";
   /**
    * P5-3 판정: 이 질문을 누가 답해야 하나(`escalation-policy` 의 규칙기반 힌트).
@@ -324,4 +336,72 @@ export function formatQuestionLine(
     return `${head}\n  Q: ${entry.question}\n  A: ${entry.answer ?? ""}`;
   }
   return `${head}\n  Q: ${entry.question}`;
+}
+
+/** post-answer-quiet 축이 보는 최소 사실. agent-stall-policy 의 AnsweredQuestionRef
+ * 와 같은 모양이되, 이 모듈은 순수하게 유지하려고 타입을 가져오지 않는다. */
+export interface LatestAnswer {
+  questionId: string;
+  answeredAt: number;
+  delivery: "queued" | "failed" | null;
+  blocking: boolean;
+}
+
+/**
+ * 가장 최근에 **답변된** 질문 1건. 없으면 null.
+ *
+ * ★왜 "가장 최근" 하나만인가: 이 축이 재는 것은 "우리가 마지막으로 밀어넣은
+ *   것에 대한 반응" 이다. 오래된 답변까지 각각 재면 같은 침묵이 여러 번 신호로
+ *   올라가 오케를 지치게 한다(워치독 repeatMs 규율과 같은 이유).
+ * ★answeredAt 이 없거나 숫자가 아닌 항목은 기준점이 될 수 없으므로 건너뛴다 —
+ *   "시각을 모르니 방금이다" 로 기울지 않는다.
+ */
+export function latestAnsweredQuestion(
+  entries: QuestionEntry[],
+): LatestAnswer | null {
+  let best: LatestAnswer | null = null;
+  for (const q of entries) {
+    if (q.status !== "answered") continue;
+    const at = q.answeredAt;
+    if (typeof at !== "number" || !Number.isFinite(at)) continue;
+    if (best !== null && at <= best.answeredAt) continue;
+    best = {
+      questionId: q.id,
+      answeredAt: at,
+      delivery: q.answerDelivery ?? null,
+      blocking: q.blocking === true,
+    };
+  }
+  return best;
+}
+
+/**
+ * ★오케가 **자기 손으로** 티켓에 남기는 활동의 요약 접두사들.
+ *
+ * 왜 이게 필요한가(티켓 igGI6QpXkEfrkkKN3rU0 에서 발견): answer_question 과
+ * resolve_model_escalation 은 답을 기록하면서 applyProjection 을 부르고,
+ * computeTaskProjection 은 `lastActivityAt: now` 를 **무조건** 찍는다
+ * (projection.ts). 즉 **오케가 답을 다는 행위 자체가 보드 활동 시계를 지금으로
+ * 되돌린다.**
+ *
+ * 그대로 두면 두 가지가 깨진다:
+ *   1. post-answer-quiet 축이 죽는다 — "답변 이후 보드 활동이 있다" 가 답변
+ *      직후 항상 참이 되어 영원히 acted 로 빠진다.
+ *   2. board-quiet(20/45분) 의 시계도 답변 시점에서 다시 시작한다 — 에이전트의
+ *      침묵이 그만큼 늦게 보인다.
+ *
+ * 그래서 "마지막 보드 활동이 **에이전트의 흔적인가, 우리 자신의 기록인가**" 를
+ * 갈라야 한다. 시간 여유(guard window)로 어림하지 않는 이유는 답 기록이
+ * Firestore 왕복 3회를 거쳐 지연이 들쭉날쭉하기 때문이다 — 대신 그 활동이 남긴
+ * **요약 접두사**로 정확히 식별한다.
+ *
+ * ★새 오케측 활동 종류를 추가한다면 여기에도 접두사를 더해야 한다.
+ */
+export const ORCHESTRATOR_ACTIVITY_PREFIXES = ["[답변]", "[승인결정]"] as const;
+
+/** projection.lastActivitySummary 가 오케 자신의 기록인가. */
+export function isOrchestratorActivitySummary(summary: unknown): boolean {
+  if (typeof summary !== "string") return false;
+  const trimmed = summary.trimStart();
+  return ORCHESTRATOR_ACTIVITY_PREFIXES.some((p) => trimmed.startsWith(p));
 }

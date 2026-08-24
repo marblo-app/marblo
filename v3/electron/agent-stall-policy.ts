@@ -128,6 +128,55 @@ export const STALL_PROBE_GRACE_MS = 12 * 60_000;
  */
 export const STALL_PROBE_CPU_DELTA_MS = 250;
 
+// ── post-answer-quiet 축(2026-08-24, 티켓 igGI6QpXkEfrkkKN3rU0) ───────────
+//
+// 위 네 축은 전부 "스폰/클레임" 이나 "마지막 활동" 을 기준점으로 삼는다. 그런데
+// 오케가 answer_question 으로 답을 전달한 순간은 그 어느 것도 아니다 — 우리가
+// **능동적으로 무언가를 밀어넣은 시각**이고, 그 뒤에 반응이 없으면 그건 다른
+// 종류의 침묵이다. 실사례 2건(2026-08-23 규칙배포 승인 55분 공백, 2026-08-22
+// 함수배포 승인 후 미착수)이 정확히 여기였고, 프로세스도 살아 있고 보드도
+// 움직였기 때문에 exit/first-activity/board-quiet/probe 어디에도 안 걸렸다.
+//
+// ★그런데 이 축을 붙이기 전에 먼저 확인했어야 할 것이 있었고, 확인했다:
+//   **답이 애초에 도착하기는 했는가.** 실측 결과(tests/integration/
+//   answer-delivery-composer.cjs, 24/24) 전달 쪽에 유실 경로가 셋 있다 —
+//     · 컴포저에 초안이 물려 있으면 답이 초안과 **한 덩어리로 섞여** 제출된다.
+//     · 턴 중(busy)이면 스피너가 SUBMIT_SIGNAL 에 걸려 **제출 0건인데도**
+//       delivered=true 로 기록된다(754ms 정상전달 vs 752ms 완전유실이 반환값·
+//       소요시간·로그 어느 것으로도 구별되지 않았다).
+//     · 확인 다이얼로그에 서 있으면 답의 첫 글자가 선택으로 소비된다.
+//   그래서 이 축의 신호 문구는 **에이전트를 먼저 탓하지 않는다**. 침묵의 원인이
+//   우리 전달일 수 있다는 사실을 신호에 싣는 것이 이 축의 절반이다.
+//
+// ★이 축이 증명하는 것과 증명하지 못하는 것(오케에게 정직하게):
+//   증명한다   — 답변 시각 이후 이 에이전트가 관측 가능한 흔적을 남겼는가.
+//   증명 못 한다 — 그 흔적이 **답을 반영한** 것인가. 보드 활동은 답과 무관한
+//                 잔여 작업일 수 있다(역할스킬이 "질문했다고 멈추지 마라" 고
+//                 요구하므로 오히려 정상이다). 그래서 이 축은 "답을 무시했다"
+//                 를 판정하지 않는다 — "답을 보낸 뒤 완전히 조용하다" 만 잰다.
+
+/**
+ * post-answer 유예. 답변 시각 이후 이만큼 아무 흔적이 없으면 신호.
+ *
+ * ★근거 — 감으로 정한 숫자가 아니라 probeGraceMs(12분)에서 **파생**한다:
+ *   1. 이 축이 재는 양은 프로브 축과 같다: "에이전트가 스스로 남기는 다음
+ *      관측 가능한 흔적까지의 시간"(보드 활동 또는 MCP 호출). 시계의 내용이
+ *      같으므로 천장도 같다 — #1140 실측의 **최대 보고 간격 11분**이고,
+ *      12분은 그 바로 위다(위 STALL_PROBE_GRACE_MS 주석 참조).
+ *   2. 이 축에만 있는 추가항은 **전달 파이프라인 지연**이다. 상한은 상수에서
+ *      바로 계산된다: InstructionDeliveryQueue 가 라운드당 3회 시도하고
+ *      (attemptsPerRound=3, retryDelayMs=500), 시도 1회는 writeAndSubmit 의
+ *      delayMs(150ms) + SUBMIT_VERIFY_MS(600ms) × SUBMIT_MAX_ATTEMPTS(3)
+ *      = 1,950ms 다. 3 × 1,950 + 2 × 500 = **6.85초**. 여기에 Firestore
+ *      onSnapshot 전파(실무상 수 초)를 더해도 10초대다.
+ *   3. 11분 천장과 12분 임계 사이 여유가 60초이므로, 6.85초짜리 추가항은
+ *      그 여유의 1/8 이다 — 같은 12분을 이 축에 걸어도 천장을 깨지 않는다.
+ * 별도 env 를 새로 만들지 않는다: 숫자가 갈라지면 "보드는 정체라는데 오케는
+ * 못 듣는" 이 파일 헤더의 그 사고가 다시 난다. MARBLO_STALL_PROBE_MS 하나로
+ * 두 축이 함께 움직인다.
+ */
+export const STALL_ANSWER_QUIET_MS = STALL_PROBE_GRACE_MS;
+
 export type StallTier = "urgent" | "normal";
 
 export interface StallPolicy {
@@ -146,6 +195,11 @@ export interface StallPolicy {
   probeGraceMs: number;
   /** (a) 보조 축: 두 CPU 표본 사이 이만큼도 안 늘면 "CPU 유휴" 로 본다. */
   probeCpuDeltaMs: number;
+  /** 답변 전달 후 이 안에 에이전트의 흔적(보드 활동·MCP 호출)이 없으면 신호.
+   * 우선순위로 가르지 않는다 — 재는 것이 티켓의 급함이 아니라 "우리가 밀어넣은
+   * 것에 대한 반응 시간" 이기 때문이다. 기본값은 probeGraceMs 와 같은 시계를
+   * 쓴다(STALL_ANSWER_QUIET_MS 주석의 파생 근거 참조). */
+  answerQuietMs: number;
 }
 
 export const DEFAULT_STALL_POLICY: StallPolicy = {
@@ -156,6 +210,7 @@ export const DEFAULT_STALL_POLICY: StallPolicy = {
   firstActivityQuietMs: STALL_FIRST_ACTIVITY_QUIET_MS,
   probeGraceMs: STALL_PROBE_GRACE_MS,
   probeCpuDeltaMs: STALL_PROBE_CPU_DELTA_MS,
+  answerQuietMs: STALL_ANSWER_QUIET_MS,
 };
 
 function intEnv(
@@ -170,7 +225,8 @@ function intEnv(
 }
 
 /** env 덮어쓰기: MARBLO_STALL_QUIET_URGENT_MS / _NORMAL_MS / _REPEAT_MS /
- * _URGENT_PRIORITY_MIN / _FIRST_ACTIVITY_MS / _PROBE_MS / _PROBE_CPU_DELTA_MS. */
+ * _URGENT_PRIORITY_MIN / _FIRST_ACTIVITY_MS / _PROBE_MS / _PROBE_CPU_DELTA_MS /
+ * _ANSWER_QUIET_MS(미지정 시 _PROBE_MS 를 따라간다). */
 export function resolveStallPolicy(
   env: Record<string, string | undefined> = typeof process !== "undefined"
     ? process.env
@@ -196,6 +252,13 @@ export function resolveStallPolicy(
       env,
       "MARBLO_STALL_PROBE_CPU_DELTA_MS",
       d.probeCpuDeltaMs
+    ),
+    // ★기본값은 probeGraceMs 를 따라간다: 전용 env 를 안 주면
+    // MARBLO_STALL_PROBE_MS 하나로 두 축이 함께 움직여 숫자가 갈라지지 않는다.
+    answerQuietMs: intEnv(
+      env,
+      "MARBLO_STALL_ANSWER_QUIET_MS",
+      intEnv(env, "MARBLO_STALL_PROBE_MS", d.answerQuietMs)
     ),
   };
 }
@@ -615,6 +678,253 @@ export function evaluateProbe(input: {
   );
 }
 
+// ── post-answer-quiet 판정 ────────────────────────────────────────────────
+
+/**
+ * 답변 후 3분기. ★프로브 축(ProbeOutcome)과 **같은 규율**이다 — 판정 불가를
+ * 멈춤으로 뚝치지 않는다.
+ *
+ *   acted         — 답변 시각 이후 이 에이전트의 흔적이 있다(양성 증거).
+ *   quiet         — 유예가 지나도록 흔적이 하나도 없다.
+ *   indeterminate — 판정할 수 없다(아직 유예 안 / 사람 대기 / 관측 수단 없음).
+ */
+export type AnswerQuietOutcome = "acted" | "quiet" | "indeterminate";
+
+/**
+ * 어떤 관측이 판정을 만들었는가.
+ *
+ *   board-activity      — (acted) 답변 이후 보드 활동이 있었다.
+ *   mcp-call            — (acted) 답변 이후 이 에이전트의 MCP 툴 호출이 도착했다.
+ *   within-grace        — (불가) 아직 유예 안. 조용한 게 아니라 이른 것이다.
+ *   awaiting-input      — (불가) 사람 확인 다이얼로그 대기. ★막고 있는 건
+ *                         에이전트가 아니라 사람이다. 게다가 실측 S5 에 따르면
+ *                         그 상태에 답을 밀어넣으면 첫 글자가 선택으로 먹힌다.
+ *   pty-not-applicable  — (불가) PTY 가 dead/missing. exit 축의 몫이다.
+ *   no-observation      — (불가) 보드 활동 이력도 MCP 호출 이력도 없다.
+ *   delivery-failed     — (quiet) ★원장에 전달 실패가 남아 있다. 침묵은
+ *                         에이전트 탓이 아니라 **우리 탓**이다.
+ *   silent-after-answer — (quiet) 전달은 정상으로 기록됐는데 흔적이 0건.
+ */
+export type AnswerQuietEvidence =
+  | "board-activity"
+  | "mcp-call"
+  | "within-grace"
+  | "awaiting-input"
+  | "pty-not-applicable"
+  | "no-observation"
+  | "delivery-failed"
+  | "silent-after-answer";
+
+/** 판정 대상이 되는 "가장 최근에 답변된 질문" 한 건. */
+export interface AnsweredQuestionRef {
+  questionId: string;
+  /** epoch ms. */
+  answeredAt: number;
+  /** 원장(QuestionEntry.answerDelivery)에 남은 전달 결과. 모르면 null. */
+  delivery: "queued" | "failed" | null;
+  /** 질문자가 "진짜 진행 불가" 로 표시했는가. */
+  blocking: boolean;
+}
+
+export interface AnswerQuietVerdict {
+  outcome: AnswerQuietOutcome;
+  evidence: AnswerQuietEvidence;
+  /** 답변 시각 이후 경과(ms). */
+  sinceAnswerMs: number;
+  thresholdMs: number;
+  questionId: string;
+  /** 오케에게 보여줄 한 줄 근거(한국어). */
+  reason: string;
+}
+
+/**
+ * ★"queued" 가 무슨 뜻인지 한 곳에서만 말한다. 이 문구가 이 축의 존재 이유다 —
+ * 원장의 answerDelivery=queued 는 **큐에 넣었다**이지 에이전트가 봤다가 아니다.
+ */
+function describeDelivery(delivery: "queued" | "failed" | null): string {
+  if (delivery === "failed") {
+    return "원장에 전달 실패(answerDelivery=failed)가 기록돼 있음 — 답이 에이전트에 도달하지 못했다";
+  }
+  if (delivery === "queued") {
+    return (
+      "원장은 answerDelivery=queued — 이는 '전달 큐에 등록했다' 이지 " +
+      "'에이전트가 봤다' 가 아니다"
+    );
+  }
+  return "원장에 전달 결과 기록이 없음";
+}
+
+/**
+ * 답을 전달한 뒤 에이전트가 흔적을 남겼는가.
+ *
+ * 판정 순서(먼저 걸리는 것이 결론):
+ *   1. 답변된 질문이 없다                       → null (이 축의 소관 아님)
+ *   2. 답변 시각 이후 보드 활동이 있다          → acted / board-activity
+ *   3. 답변 시각 이후 MCP 호출이 있다           → acted / mcp-call
+ *   4. 아직 유예 안                             → indeterminate / within-grace
+ *   5. PTY 가 사람 확인 대기                    → indeterminate / awaiting-input
+ *   6. PTY 가 dead/missing                      → indeterminate / pty-not-applicable
+ *   7. 두 시계가 다 없다                        → indeterminate / no-observation
+ *   8. 원장에 전달 실패가 있다                  → quiet / delivery-failed
+ *   9. 그 외                                    → quiet / silent-after-answer
+ *
+ * ★2·3 을 4 보다 먼저 보는 이유: 양성 증거가 유예보다 강하다. 답변 직후 정상적으로
+ *   일하는 에이전트는 여기서 acted 로 빠져나가고 절대 신호되지 않는다(오탐 금지).
+ * ★PTY busy 를 제외하지 않는 것이 프로브 축과의 유일한 차이다. 프로브 축은
+ *   busy 를 "이 축의 소관 아님" 으로 넘기지만, 여기서는 우리가 **방금 무언가를
+ *   밀어넣었고** 그 주입이 하필 turn 중 컴포저에 떨어졌을 때가 실측된 오염
+ *   경로(S2)다 — busy 하면서 보드·MCP 가 12분간 완전히 조용한 구간은 정확히
+ *   그 오염을 의심해야 할 구간이므로 침묵시키지 않는다.
+ */
+export function evaluateAnswerQuiet(input: {
+  now: number;
+  answer: AnsweredQuestionRef | null;
+  lastBoardActivityMs: number | null;
+  lastMcpCallMs: number | null;
+  pty: PtyLiveness;
+  /**
+   * ★마지막 보드 활동이 **오케 자신의 기록**인가(question-channel 의
+   * isOrchestratorActivitySummary). true 면 그 활동은 에이전트의 흔적이 아니므로
+   * 반응 증거로 인정하지 않는다.
+   *
+   * 이 플래그가 없으면 이 축은 **죽은 코드**다: answer_question 이 답을 기록하며
+   * applyProjection 을 부르고 computeTaskProjection 이 lastActivityAt 을 무조건
+   * 지금으로 찍기 때문에, 답변 직후 "답변 이후 보드 활동" 은 항상 참이 된다.
+   * 호스트가 안 넘기면(undefined) 종전처럼 모든 활동을 증거로 본다 — 보수 쪽.
+   */
+  lastBoardActivityByOrchestrator?: boolean;
+  policy?: StallPolicy;
+}): AnswerQuietVerdict | null {
+  const answer = input.answer;
+  if (!answer || !Number.isFinite(answer.answeredAt)) return null;
+
+  const policy = input.policy ?? DEFAULT_STALL_POLICY;
+  const thresholdMs = policy.answerQuietMs;
+  const sinceAnswerMs = Math.max(0, input.now - answer.answeredAt);
+  const mins = (ms: number): number => Math.round(ms / 60_000);
+  const done = (
+    outcome: AnswerQuietOutcome,
+    evidence: AnswerQuietEvidence,
+    reason: string
+  ): AnswerQuietVerdict => ({
+    outcome,
+    evidence,
+    sinceAnswerMs,
+    thresholdMs,
+    questionId: answer.questionId,
+    reason,
+  });
+
+  const board = input.lastBoardActivityMs;
+  const mcp = input.lastMcpCallMs;
+  const orchWrote = input.lastBoardActivityByOrchestrator === true;
+  // ★오케 자신이 남긴 기록은 에이전트의 반응이 아니다(위 필드 주석 참조).
+  const boardAfter =
+    !orchWrote &&
+    typeof board === "number" &&
+    Number.isFinite(board) &&
+    board > answer.answeredAt;
+  const mcpAfter =
+    typeof mcp === "number" && Number.isFinite(mcp) && mcp > answer.answeredAt;
+
+  // 2. 답변 이후 보드가 움직였다 = 살아서 무언가 하고 있다.
+  if (boardAfter) {
+    return done(
+      "acted",
+      "board-activity",
+      `답변(${answer.questionId}) ${mins(sinceAnswerMs)}분 전 이후 보드 활동이 ` +
+        `${mins(Math.max(0, input.now - (board as number)))}분 전에 있었음 — 반응 있음`
+    );
+  }
+
+  // 3. 보드는 안 움직였지만 MCP 툴 호출이 도착했다(읽기 호출은 보드를 안 올린다).
+  if (mcpAfter) {
+    return done(
+      "acted",
+      "mcp-call",
+      `답변(${answer.questionId}) 이후 보드는 조용하지만 이 에이전트의 MCP 툴 ` +
+        `호출이 ${mins(Math.max(0, input.now - (mcp as number)))}분 전에 도착함 — ` +
+        `툴콜 루프가 왕복 중(살아서 작업)`
+    );
+  }
+
+  // 4. 아직 이르다. 조용한 것과 이른 것은 다르다.
+  if (sinceAnswerMs < thresholdMs) {
+    return done(
+      "indeterminate",
+      "within-grace",
+      `답변 후 ${mins(sinceAnswerMs)}분 경과(유예 ${mins(thresholdMs)}분) — ` +
+        `아직 판정 시점이 아님`
+    );
+  }
+
+  // 5. 사람이 막고 있다. 에이전트를 탓할 구간이 아니다.
+  if (input.pty === "awaiting-input") {
+    return done(
+      "indeterminate",
+      "awaiting-input",
+      `PTY 가 사람 확인 다이얼로그에 서 있음 — 막고 있는 건 에이전트가 아니라 ` +
+        `사람이다. ★게다가 이 상태에 밀어넣은 답은 첫 글자가 선택으로 소비된다` +
+        `(실측 S5) — 답이 훼손됐을 수 있으니 답변 원문을 다시 확인하라`
+    );
+  }
+
+  // 6. 죽음은 exit 축의 몫이다. 여기서 중복으로 올리지 않는다.
+  if (input.pty === "dead" || input.pty === "missing") {
+    return done(
+      "indeterminate",
+      "pty-not-applicable",
+      `PTY 상태가 ${input.pty} — exit 축의 몫이라 이 축은 판정하지 않는다`
+    );
+  }
+
+  // 7. 관측 수단 자체가 없다.
+  if (
+    (board === null || !Number.isFinite(board as number)) &&
+    (mcp === null || !Number.isFinite(mcp as number))
+  ) {
+    return done(
+      "indeterminate",
+      "no-observation",
+      `이 에이전트의 보드 활동 이력도 MCP 호출 이력도 없음 — 반응 유무를 잴 ` +
+        `기준이 없어 판정 보류`
+    );
+  }
+
+  const orchNote = orchWrote
+    ? ` ★보드의 마지막 활동은 오케 자신의 답변 기록이라 에이전트의 흔적이 ` +
+      `아니다(그 기록이 보드 무활동 시계도 함께 되돌려 놓는다 — board-quiet 이 ` +
+      `늦게 우는 이유).`
+    : "";
+  const tail =
+    `${orchNote} ★결론을 '에이전트가 답을 무시했다' 로 먼저 몰지 마라. 전달 경로에 실측된 ` +
+    `유실 경로가 있다: 컴포저에 초안이 물려 있으면 답이 초안과 섞여 제출되고, ` +
+    `턴 중이면 제출 0건인데도 전달됨으로 기록된다(tests/integration/` +
+    `answer-delivery-composer.cjs). 답변 원문이 실제로 그 에이전트 화면에 ` +
+    `온전히 들어갔는지부터 확인하라.`;
+
+  // 8. 전달 실패가 원장에 남아 있다 = 침묵은 우리 탓이다(추측이 아니라 기록).
+  if (answer.delivery === "failed") {
+    return done(
+      "quiet",
+      "delivery-failed",
+      `답변(${answer.questionId}) 후 ${mins(sinceAnswerMs)}분간 보드 활동·MCP ` +
+        `호출 0건 · ${describeDelivery(answer.delivery)}. ` +
+        `★침묵의 원인은 에이전트가 아니라 전달이다 — 답을 다시 보내야 한다`
+    );
+  }
+
+  // 9. 전달은 정상으로 기록됐는데 흔적이 없다.
+  return done(
+    "quiet",
+    "silent-after-answer",
+    `답변(${answer.questionId}) 후 ${mins(sinceAnswerMs)}분간 보드 활동·MCP ` +
+      `호출 0건(유예 ${mins(thresholdMs)}분)` +
+      `${answer.blocking ? " · 질문자가 blocking 으로 표시한 질문" : ""} · ` +
+      `${describeDelivery(answer.delivery)}. ${tail}`
+  );
+}
+
 // ── 바운드 에이전트 stale 판정(dispatch 용) ─────────────────────────────
 
 export interface BoundAgentEvidence {
@@ -740,10 +1050,20 @@ export interface StallSignal {
    *   exit            — 프로세스가 로컬에서 종료(stopped/error)로 확정됨. 즉시.
    *   probe           — 능동 프로브가 '무응답' 을 냈다(보드·MCP 둘 다 12분 침묵,
    *                     PTY silent/parked). board-quiet 보다 이른 조기경보.
-   * 죽음(exit)과 침묵(board-quiet/first-activity/probe)이 같은 문구로 오면
-   * 오케가 구분할 수 없다 — 이 필드 + exitCode + probe 가 그 구분이다.
+   *   post-answer-quiet — 오케가 답을 전달한 뒤(answeredAt) 12분간 보드 활동도
+   *                     MCP 호출도 0건. ★다른 축과 기준점이 다르다: 여기서만
+   *                     우리가 **능동적으로 밀어넣은 것**에 대한 반응을 잰다.
+   *                     그래서 이 축의 신호는 에이전트를 탓하기 전에 전달
+   *                     자체를 의심하라고 말한다(evaluateAnswerQuiet 참조).
+   * 죽음(exit)과 침묵(board-quiet/first-activity/probe/post-answer-quiet)이 같은
+   * 문구로 오면 오케가 구분할 수 없다 — 이 필드 + exitCode + probe 가 그 구분이다.
    */
-  axis: "board-quiet" | "first-activity" | "exit" | "probe";
+  axis:
+    | "board-quiet"
+    | "first-activity"
+    | "exit"
+    | "probe"
+    | "post-answer-quiet";
   quietMs: number;
   thresholdMs: number;
   /** 이 티켓의 마지막 실제 보드 활동 이후 경과(ms) — 축과 무관하게 항상 채운다.
@@ -765,6 +1085,12 @@ export interface StallSignal {
   raisedAtMs: number;
   /** 같은 조용함 구간에서 몇 번째 신호인가(1부터). */
   repeat: number;
+  /**
+   * post-answer-quiet 축의 판정. 그 축이 신호를 올렸을 때 채워진다. 다른 축이
+   * 올린 신호에도 답변 대기 맥락이 있으면 함께 실어, "이 침묵이 답을 전달한
+   * 뒤의 침묵인가" 를 오케가 한눈에 본다. 해당 없으면 null.
+   */
+  answerQuiet?: AnswerQuietVerdict | null;
 }
 
 // ── 판단 보류 — 모델 실적(n) 기반 임계 단축은 안 한다 ──────────────────────

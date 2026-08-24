@@ -61,11 +61,53 @@ export function isBusySignal(data: string): boolean {
   return SUBMIT_SIGNAL.test(data);
 }
 
+/**
+ * 제출 확인 3분기 (티켓 igGI6QpXkEfrkkKN3rU0). #1157 의 ProbeOutcome 과 **같은
+ * 규율**이다: 모르면 모른다고 하고, 판정 불가를 성공으로도 실패로도 뚝치지 않는다.
+ *
+ *   confirmed     — CR 직전에는 busy 신호가 없었고 CR 직후에 나타났다. 우리 CR 이
+ *                   턴을 시작시켰다는 **양성** 증거.
+ *   unconfirmed   — CR 을 예산껏 보냈는데 busy 신호가 끝내 안 나왔다. 메시지가
+ *                   컴포저에 그대로 남아 있을 가능성이 높다.
+ *   indeterminate — ★CR 을 보내기 **전부터** busy 신호가 흐르고 있었다. 그 신호가
+ *                   우리 CR 의 반응인지 남의 턴의 스피너인지 구별할 방법이 없다.
+ *
+ * ★indeterminate 가 이 타입의 존재 이유다. 실측(tests/integration/
+ *   answer-delivery-composer.cjs S3)에서, 턴 중인 에이전트에 답을 주입하면
+ *   **제출이 0건인데도** 스피너가 SUBMIT_SIGNAL 에 걸려 첫 시도에 '성공' 판정이
+ *   났다 — 754ms(정상 전달)와 752ms(완전 유실)가 반환값·소요시간·로그 어느 것으로도
+ *   구별되지 않았다. 그 구간을 confirmed 라고 부르는 것이 유실을 은폐해 왔다.
+ */
+export type SubmitOutcome = "confirmed" | "unconfirmed" | "indeterminate";
+
+/** 제출 1건의 관측 결과. 판정 단어가 아니라 관측 사실을 담는다. */
+export interface SubmitObservation {
+  sessionId: string;
+  outcome: SubmitOutcome;
+  /** 실제로 보낸 CR 개수. */
+  attempts: number;
+  /** ★CR 을 처음 보내기 직전 SUBMIT_VERIFY_MS 안에 이미 busy 신호가 있었는가. */
+  streamHotBeforeCr: boolean;
+  /** 주입한 본문의 길이. 본문 자체는 싣지 않는다(비밀 유출 방지). */
+  textLength: number;
+  /** 오케/사람에게 보여줄 한 줄 근거(한국어). */
+  reason: string;
+}
+
 export class PtyManager {
   private sessions: Map<string, PtySession> = new Map();
   private writeAndSubmitQueues: Map<string, Promise<boolean>> = new Map();
   /** Per-session "a new turn was submitted" listeners — see onSubmit(). */
   private submitListeners: Map<string, Array<() => void>> = new Map();
+  /**
+   * 세션별 마지막 busy 신호(SUBMIT_SIGNAL) 관측 시각. submitWithRetry 가 CR 을
+   * 보내기 **직전**에 "이 스트림이 이미 뜨거운가" 를 묻는 데 쓴다 — 이미 뜨겁다면
+   * CR 직후에 보이는 신호는 우리 것이 아닐 수 있다(SubmitOutcome 참조).
+   * create() 에서 세션 수명 동안 붙는 리스너가 갱신한다.
+   */
+  private lastBusySignalAt: Map<string, number> = new Map();
+  /** 제출 관측 구독자 — onSubmitOutcome(). */
+  private submitOutcomeListeners: Array<(o: SubmitObservation) => void> = [];
 
   // --- PTY master-fd leak guard ---
   // node-pty (1.1.0) opens TWO /dev/ptmx master devices per spawn on macOS: the
@@ -281,7 +323,47 @@ export class PtyManager {
       orphanFds: this.captureOrphanMasterFds(beforeFds, proc),
     };
     this.sessions.set(id, session);
+    // 세션 수명 동안 busy 신호 시계를 굴린다. 부작용은 Map 하나 갱신뿐이고,
+    // submitWithRetry 가 CR 직전 베이스라인("이미 뜨거운 스트림인가")을 여기서
+    // 읽는다 — 별도 대기창을 두지 않으므로 제출 지연이 0이다.
+    this.lastBusySignalAt.delete(id);
+    proc.onData((chunk: string) => {
+      if (SUBMIT_SIGNAL.test(chunk)) this.lastBusySignalAt.set(id, Date.now());
+    });
     return session;
+  }
+
+  /**
+   * 제출 관측 구독. writeAndSubmit 1건이 끝날 때마다 3분기 판정이 흐른다.
+   * ★반환값(boolean)은 바꾸지 않는다 — 이 훅은 **관측**이지 동작이 아니다.
+   * 미제출 종결의 카운터/텔레메트리 노출은 티켓 s7NGFa8Ln82adxEggWBj 소관.
+   */
+  onSubmitOutcome(listener: (o: SubmitObservation) => void): () => void {
+    this.submitOutcomeListeners.push(listener);
+    return () => {
+      this.submitOutcomeListeners = this.submitOutcomeListeners.filter(
+        (l) => l !== listener,
+      );
+    };
+  }
+
+  private emitSubmitOutcome(o: SubmitObservation): void {
+    if (o.outcome !== "confirmed") {
+      console.warn(
+        `[PtyManager] submit ${o.outcome} for ${o.sessionId} (attempts=${o.attempts}, len=${o.textLength}) — ${o.reason}`,
+      );
+    }
+    for (const l of this.submitOutcomeListeners) {
+      try {
+        l(o);
+      } catch (err) {
+        console.error(
+          `[PtyManager] onSubmitOutcome listener threw for ${o.sessionId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
   }
 
   /**
@@ -435,7 +517,49 @@ export class PtyManager {
     // trusting one gap, send the CR, watch the PTY for a submit signal, and
     // resend the CR if the agent didn't react.
     await this.sleep(delayMs);
-    return this.submitWithRetry(id, session, 0);
+
+    // ★CR 을 보내기 **직전**의 베이스라인. 이 스트림이 이미 busy 신호를 뱉고
+    // 있었다면, CR 직후에 보이는 신호는 우리 CR 의 반응이 아닐 수 있다 —
+    // 그 구간을 '확인됨' 으로 부르면 유실이 은폐된다(SubmitOutcome 참조).
+    const hotAt = this.lastBusySignalAt.get(id);
+    const streamHotBeforeCr =
+      typeof hotAt === "number" &&
+      Date.now() - hotAt <= PtyManager.SUBMIT_VERIFY_MS;
+
+    const res = await this.submitWithRetry(
+      id,
+      session,
+      0,
+      // 신호를 신뢰할 수 없으면 조기 종료하지 않는다: CR 예산을 끝까지 쓴다.
+      // 이미 제출됐거나 빈 컴포저에 떨어지는 CR 은 우리가 모는 TUI 에서 no-op
+      // 이므로(아래 submitWithRetry 주석) 더 보내는 쪽이 안전하다 — 실제로
+      // 첫 CR 이 paste 버퍼에 접혀 들어간 경우 이 추가 CR 이 유일한 구제책이다.
+      !streamHotBeforeCr,
+    );
+
+    const outcome: SubmitOutcome = streamHotBeforeCr
+      ? "indeterminate"
+      : res.sawSignal
+        ? "confirmed"
+        : "unconfirmed";
+    this.emitSubmitOutcome({
+      sessionId: id,
+      outcome,
+      attempts: res.attempts,
+      streamHotBeforeCr,
+      textLength: text.length,
+      reason: streamHotBeforeCr
+        ? `CR 직전 ${PtyManager.SUBMIT_VERIFY_MS}ms 안에 이미 busy 신호가 흐르고 ` +
+          `있었다 — CR 이후의 신호를 우리 제출의 반응으로 귀속시킬 수 없다. ` +
+          `CR 을 ${res.attempts}회 보냈으나 제출 여부는 미확인(전달됐을 수도, ` +
+          `컴포저에 남았을 수도 있다)`
+        : res.sawSignal
+          ? `CR 직전에는 조용했고 ${res.attempts}회째 CR 직후 busy 신호가 ` +
+            `나타났다 — 우리 CR 이 턴을 시작시켰다`
+          : `CR 을 ${res.attempts}회 보냈으나 busy 신호가 끝내 없었다 — ` +
+            `메시지가 컴포저에 미제출로 남아 있을 가능성이 높다`,
+    });
+    return res.delivered;
   }
 
   // Max number of CR (Enter) keystrokes to send before giving up.
@@ -448,13 +572,25 @@ export class PtyManager {
    * Resends (up to SUBMIT_MAX_ATTEMPTS) if no submit signal is observed.
    * A redundant CR landing on an already-submitted/empty composer is a
    * no-op for the TUIs we drive, so over-sending is safe.
+   *
+   * `trustSignal` — false 면 CR 직후에 본 busy 신호를 **제출의 증거로 인정하지
+   * 않는다**(스트림이 이미 뜨거웠다는 뜻). 관측은 그대로 기록하되 조기 종료를
+   * 막아 CR 예산을 끝까지 쓴다. 종전 동작은 trustSignal=true 와 동일하다.
    */
   private submitWithRetry(
     id: string,
     session: PtySession,
     attempt: number,
-  ): Promise<boolean> {
-    if (this.sessions.get(id) !== session) return Promise.resolve(false);
+    trustSignal: boolean,
+    sawSignalSoFar = false,
+  ): Promise<{ delivered: boolean; attempts: number; sawSignal: boolean }> {
+    if (this.sessions.get(id) !== session) {
+      return Promise.resolve({
+        delivered: false,
+        attempts: attempt,
+        sawSignal: sawSignalSoFar,
+      });
+    }
 
     return new Promise((resolve) => {
       let reacted = false;
@@ -463,10 +599,12 @@ export class PtyManager {
       });
 
       session.process.write("\r");
+      const attempts = attempt + 1;
 
       setTimeout(() => {
         disposable.dispose();
-        if (reacted) {
+        const sawSignal = sawSignalSoFar || reacted;
+        if (reacted && trustSignal) {
           if (attempt > 0) {
             console.log(
               `[PtyManager] submit confirmed for ${id} after ${attempt} retr${
@@ -474,30 +612,40 @@ export class PtyManager {
               }`,
             );
           }
-          resolve(true);
+          resolve({ delivered: true, attempts, sawSignal });
           return;
         }
         if (this.sessions.get(id) !== session) {
-          resolve(false);
+          resolve({ delivered: false, attempts, sawSignal });
           return;
         }
-        if (attempt + 1 < PtyManager.SUBMIT_MAX_ATTEMPTS) {
-          console.warn(
-            `[PtyManager] Enter not registered for ${id} (attempt ${
-              attempt + 1
-            }/${PtyManager.SUBMIT_MAX_ATTEMPTS}) — resending CR`,
-          );
-          void this.submitWithRetry(id, session, attempt + 1).then(resolve);
+        if (attempts < PtyManager.SUBMIT_MAX_ATTEMPTS) {
+          if (trustSignal) {
+            console.warn(
+              `[PtyManager] Enter not registered for ${id} (attempt ${attempts}/${PtyManager.SUBMIT_MAX_ATTEMPTS}) — resending CR`,
+            );
+          }
+          void this.submitWithRetry(
+            id,
+            session,
+            attempts,
+            trustSignal,
+            sawSignal,
+          ).then(resolve);
         } else {
-          console.error(
-            `[PtyManager] Enter still not registered for ${id} after ${PtyManager.SUBMIT_MAX_ATTEMPTS} attempts — message may be sitting unsubmitted in the composer`,
-          );
+          if (trustSignal) {
+            console.error(
+              `[PtyManager] Enter still not registered for ${id} after ${PtyManager.SUBMIT_MAX_ATTEMPTS} attempts — message may be sitting unsubmitted in the composer`,
+            );
+          }
           // The text payload was already written to the PTY. Reporting false
           // here would make at-least-once callers redeliver the same text into
           // the composer, creating duplicate inbound messages. Treat this as a
           // write delivery and let TelegramPoller's unanswered-reply nudge flag
           // a stuck orchestrator turn if no send_telegram_message follows.
-          resolve(true);
+          // ★이 트레이드오프는 그대로 유지한다 — 다만 이제 조용하지 않다:
+          // 위 emitSubmitOutcome 이 unconfirmed/indeterminate 를 밖으로 알린다.
+          resolve({ delivered: true, attempts, sawSignal });
         }
       }, PtyManager.SUBMIT_VERIFY_MS);
     });
@@ -540,6 +688,7 @@ export class PtyManager {
       this.sessions.delete(id);
       this.blockDangerousSessions.delete(id);
       this.submitListeners.delete(id);
+      this.lastBusySignalAt.delete(id);
     }
   }
 
@@ -818,6 +967,7 @@ export class PtyManager {
         if (this.sessions.get(id) === session) {
           this.sessions.delete(id);
           this.submitListeners.delete(id);
+          this.lastBusySignalAt.delete(id);
         }
         // The child is gone. node-pty MAY release the master fd via its own
         // exit→socket-destroy timeout, but that path is best-effort on macOS

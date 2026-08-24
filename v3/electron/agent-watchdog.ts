@@ -48,6 +48,7 @@ import {
   describePtyLiveness,
   evaluateBoardQuiet,
   evaluateExitQuiet,
+  evaluateAnswerQuiet,
   evaluateFirstActivityQuiet,
   evaluateProbe,
   resolveStallPolicy,
@@ -55,13 +56,15 @@ import {
   type ProbeVerdict,
   type ProcessProbeSample,
   type StallPolicy,
+  type AnsweredQuestionRef,
+  type AnswerQuietVerdict,
   type StallSignal,
 } from "./agent-stall-policy";
 
 export type WatchdogTicketStatus = "CLAIMED" | "IN_PROGRESS";
 
 export function isRecoverableWatchdogStatus(
-  status: unknown
+  status: unknown,
 ): status is WatchdogTicketStatus {
   return status === "CLAIMED" || status === "IN_PROGRESS";
 }
@@ -106,6 +109,20 @@ export interface WatchdogTicket {
   /** Board priority (1~5, 5 highest). Picks the quiet-signal tier — see
    * agent-stall-policy.ts. Missing ⇒ normal tier (the conservative one). */
   priority?: number | null;
+  /**
+   * 이 티켓에서 **가장 최근에 답변된** 질문(tasks/{id}.questions 의
+   * latestAnsweredQuestion). post-answer-quiet 축의 기준점이다.
+   * 없거나 호스트가 안 실어주면 undefined/null → 그 축은 조용히 비활성.
+   */
+  lastAnswer?: AnsweredQuestionRef | null;
+  /**
+   * ★마지막 보드 활동(projection.lastActivityAt)이 **오케 자신의 기록**인가.
+   * answer_question / resolve_model_escalation 은 답을 남기며 projection 을
+   * 갱신해 활동 시계를 지금으로 되돌린다 — 그 활동을 에이전트의 반응으로 세면
+   * post-answer-quiet 축이 영원히 안 운다. 호스트가 projection.
+   * lastActivitySummary 로 판별해 실어준다(isOrchestratorActivitySummary).
+   */
+  lastActivityByOrchestrator?: boolean;
 }
 
 export type WatchdogAgentLiveStatus = "idle" | "working" | "error" | "stopped";
@@ -208,7 +225,7 @@ export interface WatchdogDeps {
   recordRecovery?: (
     ticket: WatchdogTicket,
     phase: RecoveryPhase,
-    detail: string
+    detail: string,
   ) => void;
 
   // ── W3: false-positive-respawn guards (all optional; absent → legacy behavior)
@@ -222,7 +239,7 @@ export interface WatchdogDeps {
    * the watchdog_falsepositive_check_mtimes lesson as an actual gate. null when
    * it can't be determined (→ no opinion). */
   probeFreshness?: (
-    ticket: WatchdogTicket
+    ticket: WatchdogTicket,
   ) => Promise<{ fresh: boolean; reason: string } | null>;
   /** True when SOME live agent is already bound to this task (currentTaskId or
    * isolated worktree) — even under a different name than the ticket's recorded
@@ -243,7 +260,7 @@ export interface WatchdogDeps {
    * BLOCKED(force) request). Called when probeScopeHost says redispatch/block. */
   redispatchToOriginHost?: (
     ticket: WatchdogTicket,
-    reason: string
+    reason: string,
   ) => Promise<void>;
 
   // ── W4: real escalation before dead-end (optional) ──────────
@@ -258,7 +275,7 @@ export interface WatchdogDeps {
    * stale / absent. */
   resetStalledInProgress?: (
     ticket: WatchdogTicket,
-    detail: string
+    detail: string,
   ) => Promise<boolean>;
   /** Surface an orphaned IN_PROGRESS stall when reset is not wired or fails. */
   escalateStalledInProgress?: (ticket: WatchdogTicket, detail: string) => void;
@@ -293,7 +310,7 @@ export interface WatchdogDeps {
   signalQuiet?: (
     ticket: WatchdogTicket,
     signal: StallSignal,
-    detail: string
+    detail: string,
   ) => void;
   /** Board activity resumed after a quiet signal — retract the marker. */
   clearQuiet?: (ticket: WatchdogTicket, agentId: string) => void;
@@ -314,7 +331,7 @@ export interface WatchdogDeps {
   probeProcess?: (
     agentId: string,
     pid: number | null,
-    prevCpuMs: number | null
+    prevCpuMs: number | null,
   ) => Promise<ProcessProbeSample | null>;
 
   /** Injectable clock (epoch-ms) for deterministic tests. */
@@ -440,25 +457,25 @@ function intEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
 
 /** Resolve the watchdog config from environment overrides (all optional). */
 export function resolveWatchdogConfig(
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
 ): WatchdogConfig {
   const d = DEFAULT_WATCHDOG_CONFIG;
   return {
     // Default ON; only the literal "false" / "0" disables it.
     enabled: !["false", "0", "off"].includes(
-      (env.MARBLO_WATCHDOG_ENABLED ?? "").trim().toLowerCase()
+      (env.MARBLO_WATCHDOG_ENABLED ?? "").trim().toLowerCase(),
     ),
     intervalMs: intEnv(env, "MARBLO_WATCHDOG_INTERVAL_MS", d.intervalMs),
     graceMs: intEnv(env, "MARBLO_WATCHDOG_GRACE_MS", d.graceMs),
     promptIdleGraceMs: intEnv(
       env,
       "MARBLO_WATCHDOG_PROMPT_IDLE_MS",
-      d.promptIdleGraceMs
+      d.promptIdleGraceMs,
     ),
     firstActivityGraceMs: intEnv(
       env,
       "MARBLO_WATCHDOG_FIRST_ACTIVITY_MS",
-      d.firstActivityGraceMs
+      d.firstActivityGraceMs,
     ),
     nudgeIntervalMs: intEnv(env, "MARBLO_WATCHDOG_NUDGE_MS", d.nudgeIntervalMs),
     maxNudges: intEnv(env, "MARBLO_WATCHDOG_MAX_NUDGES", d.maxNudges),
@@ -466,28 +483,28 @@ export function resolveWatchdogConfig(
     backoffBaseMs: intEnv(
       env,
       "MARBLO_WATCHDOG_BACKOFF_BASE_MS",
-      d.backoffBaseMs
+      d.backoffBaseMs,
     ),
     backoffMaxMs: intEnv(env, "MARBLO_WATCHDOG_BACKOFF_MAX_MS", d.backoffMaxMs),
     freshnessGraceMs: intEnv(
       env,
       "MARBLO_WATCHDOG_FRESHNESS_MS",
-      d.freshnessGraceMs
+      d.freshnessGraceMs,
     ),
     reviewStaleMs: intEnv(
       env,
       "MARBLO_WATCHDOG_REVIEW_STALE_MS",
-      d.reviewStaleMs
+      d.reviewStaleMs,
     ),
     pendingFallbackMs: intEnv(
       env,
       "MARBLO_WATCHDOG_PENDING_FALLBACK_MS",
-      d.pendingFallbackMs
+      d.pendingFallbackMs,
     ),
     inProgressOrphanResetMs: intEnv(
       env,
       "MARBLO_WATCHDOG_IN_PROGRESS_ORPHAN_RESET_MS",
-      d.inProgressOrphanResetMs
+      d.inProgressOrphanResetMs,
     ),
     stall: resolveStallPolicy(env),
   };
@@ -604,7 +621,7 @@ export function evaluateRespawnGuard(input: {
 
 /** W6 — interpret the scope/host probe. Pure. */
 export function interpretScopeHostProbe(
-  probe: { action: "proceed" | "redispatch" | "block"; reason: string } | null
+  probe: { action: "proceed" | "redispatch" | "block"; reason: string } | null,
 ): {
   blockSpawn: boolean;
   action: "proceed" | "redispatch" | "block";
@@ -627,7 +644,7 @@ export function interpretScopeHostProbe(
 export function selectStaleReviews(
   candidates: StaleReviewTicket[],
   now: number,
-  thresholdMs: number
+  thresholdMs: number,
 ): StaleReviewTicket[] {
   return candidates.filter((c) => {
     if (c.awaitingHumanApproval !== false) return false;
@@ -642,7 +659,7 @@ export function selectStaleReviews(
 export function selectStalePendingForFallback(
   list: PendingInstruction[],
   now: number,
-  thresholdMs: number
+  thresholdMs: number,
 ): PendingInstruction[] {
   return list.filter((p) => now - p.createdAtMs >= thresholdMs);
 }
@@ -653,7 +670,7 @@ export function detectOrphanedInProgressStall(
     ownerMissing: boolean;
     now: number;
     thresholdMs: number;
-  }
+  },
 ): { stalled: boolean; detail: string } {
   if (ticket.status !== "IN_PROGRESS" || !input.ownerMissing) {
     return { stalled: false, detail: "" };
@@ -740,7 +757,7 @@ export interface RespawnDispatchParams {
  */
 export function buildRespawnDispatch(
   ticket: WatchdogTicket,
-  fallback?: { cwd?: string; model?: ModelType } | null
+  fallback?: { cwd?: string; model?: ModelType } | null,
 ): RespawnDispatchParams {
   // ticket.model is a free string (Firestore dispatchMeta); dispatch re-folds it
   // through normalizeModel, so the union cast here only satisfies the request
@@ -810,7 +827,7 @@ export class AgentWatchdog {
 
   constructor(
     deps: WatchdogDeps,
-    cfg: WatchdogConfig = resolveWatchdogConfig()
+    cfg: WatchdogConfig = resolveWatchdogConfig(),
   ) {
     this.deps = deps;
     this.cfg = cfg;
@@ -889,7 +906,7 @@ export class AgentWatchdog {
         if (!seen.has(taskId)) this.lastProbe.delete(taskId);
       }
       const liveAgents = new Set(
-        tickets.map((t) => t.agentId).filter((id): id is string => !!id)
+        tickets.map((t) => t.agentId).filter((id): id is string => !!id),
       );
       for (const agentId of [...this.cpuSamples.keys()]) {
         if (!liveAgents.has(agentId)) this.cpuSamples.delete(agentId);
@@ -949,7 +966,7 @@ export class AgentWatchdog {
     const stale = selectStalePendingForFallback(
       list,
       now,
-      this.cfg.pendingFallbackMs
+      this.cfg.pendingFallbackMs,
     );
     for (const p of stale) {
       if (this.pendingAttempted.has(p.docId)) continue;
@@ -957,7 +974,7 @@ export class AgentWatchdog {
       try {
         delivered = this.deps.deliverInstructionDirect(
           p.targetAgentId,
-          p.message
+          p.message,
         );
       } catch (err) {
         this.log("deliverInstructionDirect threw (best-effort)", {
@@ -1020,7 +1037,7 @@ export class AgentWatchdog {
       if (last !== undefined && now - last < this.cfg.reviewStaleMs) continue;
       this.reviewEscalatedAt.set(rev.taskId, now);
       const ageH = Math.round(
-        (now - (rev.lastActivityAtMs ?? now)) / 3_600_000
+        (now - (rev.lastActivityAtMs ?? now)) / 3_600_000,
       );
       const detail =
         `REVIEW ${rev.taskId} "${rev.title ?? ""}" assignee ` +
@@ -1038,7 +1055,7 @@ export class AgentWatchdog {
           title: rev.title,
         },
         "review-stale",
-        detail
+        detail,
       );
       this.log("review-stale surfaced", { taskId: rev.taskId, ageH });
     }
@@ -1089,7 +1106,7 @@ export class AgentWatchdog {
     lastBoardMs: number,
     now: number,
     missing: boolean,
-    terminalLocal: boolean
+    terminalLocal: boolean,
   ): Promise<void> {
     if (!this.deps.signalQuiet || !ticket.agentId) return;
     const prior = this.quietRaised.get(ticket.taskId);
@@ -1107,7 +1124,7 @@ export class AgentWatchdog {
       this.deps.recordRecovery?.(
         ticket,
         "quiet-cleared",
-        `board activity resumed after ${prior.repeat} quiet signal(s)`
+        `board activity resumed after ${prior.repeat} quiet signal(s)`,
       );
       this.log("quiet cleared", { taskId: ticket.taskId });
       return;
@@ -1132,7 +1149,8 @@ export class AgentWatchdog {
       thresholdMs: number,
       exitCode: number | null,
       detail: string,
-      probe: ProbeVerdict | null = null
+      probe: ProbeVerdict | null = null,
+      answerQuiet: AnswerQuietVerdict | null = null,
     ): void => {
       const repeat = (prior?.repeat ?? 0) + 1;
       const signal: StallSignal = {
@@ -1148,6 +1166,7 @@ export class AgentWatchdog {
         model,
         raisedAtMs: now,
         repeat,
+        answerQuiet,
       };
       const fullDetail =
         detail +
@@ -1184,6 +1203,19 @@ export class AgentWatchdog {
     const rateLimited =
       !!prior && now - prior.lastRaisedAtMs < this.cfg.stall.repeatMs;
 
+    // post-answer-quiet 판정은 **한 번만** 내고 축과 무관하게 재사용한다.
+    // 자기 축이 신호를 올릴 때뿐 아니라 다른 축의 신호에도 실어, "이 침묵이
+    // 답을 전달한 뒤의 침묵인가" 를 오케가 한눈에 보게 한다.
+    const answerVerdict = evaluateAnswerQuiet({
+      now,
+      answer: ticket.lastAnswer ?? null,
+      lastBoardActivityMs: ticket.lastActivityAtMs,
+      lastMcpCallMs: health?.lastMcpCallMs ?? null,
+      pty,
+      lastBoardActivityByOrchestrator: ticket.lastActivityByOrchestrator,
+      policy: this.cfg.stall,
+    });
+
     // ── axis 1: exit — locally-confirmed dead process, immediate ──────────
     const exitVerdict = evaluateExitQuiet({
       now,
@@ -1197,9 +1229,9 @@ export class AgentWatchdog {
       const detail =
         `프로세스 종료 확인(exit ${exitVerdict.exitCode ?? "?"}) — 사망, ` +
         `무활동 임계 대기 없이 즉시 신호 · 종료 후 ${Math.round(
-          exitVerdict.ageMs / 60_000
+          exitVerdict.ageMs / 60_000,
         )}분 경과 · 마지막 보드 활동은 ${Math.round(
-          boardIdleMs / 60_000
+          boardIdleMs / 60_000,
         )}분 전 · 모델 ${model ?? "?"}`;
       raise("exit", exitVerdict.ageMs, 0, exitVerdict.exitCode, detail);
       return;
@@ -1218,9 +1250,9 @@ export class AgentWatchdog {
     if (ticket.lastActivityAtMs === null) {
       if (faVerdict.quiet && !rateLimited) {
         const detail = `스폰(또는 재배정) 이후 ${Math.round(
-          faVerdict.ageMs / 60_000
+          faVerdict.ageMs / 60_000,
         )}분간 보드 활동 0건(첫 활동 임계 ${Math.round(
-          faVerdict.thresholdMs / 60_000
+          faVerdict.thresholdMs / 60_000,
         )}분) · ${describePtyLiveness(pty, {
           now,
           lastWorkOutputMs: lastWork,
@@ -1230,7 +1262,7 @@ export class AgentWatchdog {
           faVerdict.ageMs,
           faVerdict.thresholdMs,
           null,
-          detail
+          detail,
         );
       }
       // Whether raised or still within grace, a never-activated ticket is
@@ -1239,7 +1271,43 @@ export class AgentWatchdog {
       return;
     }
 
-    // ── axis 3: probe — ★능동. 기다리지 않고 확인한다 ─────────────────────
+    // ── axis 3: post-answer-quiet — 우리가 밀어넣은 것에 대한 반응 ────────
+    //
+    // ★다른 축과 기준점이 다르다. 여기서만 시계가 "스폰"이나 "마지막 활동"이
+    // 아니라 **오케가 답을 전달한 시각**에서 출발한다. 실사례 2건(55분 공백 /
+    // 승인 후 미착수)이 정확히 이 구간이었고, 프로세스도 살아 있고 보드도
+    // 움직여서 다른 어느 축에도 안 걸렸다.
+    //
+    // ★acted / indeterminate 는 신호를 만들지 않는다 — 프로브 축과 같은 규율로
+    // 판정 불가를 멈춤으로 뚝치지 않는다. 특히 답변 직후 정상적으로 일하는
+    // 에이전트는 board-activity / mcp-call 로 acted 에서 빠져나가 절대 신호되지
+    // 않는다(오탐 금지 요구사항).
+    if (answerVerdict?.outcome === "quiet") {
+      if (rateLimited) return;
+      // ★문구 주의 — 이 신호를 "에이전트가 게으르다" 로 읽으면 안 된다. 답 전달도
+      // writeAndSubmit 으로 PTY stdin 에 쓰이고, 주입 순간 컴포저에 초안이 물려
+      // 있으면 답이 초안 뒤에 이어붙어 한 덩어리로 제출된다(실측 페이로드:
+      // "아직 쓰는 중인 초안입니다[답변 도착] question_id=…"). 즉 침묵의 첫 번째
+      // 용의자는 에이전트가 아니라 **우리 전달 경로**다. 사유를 그렇게 적는다.
+      const detail =
+        `★답이 전달됐다는 근거가 없다 — ${answerVerdict.reason} · ` +
+        `${describePtyLiveness(pty, { now, lastWorkOutputMs: lastWork })} · ` +
+        `모델 ${model ?? "?"} · ` +
+        `먼저 전달을 의심할 것(컴포저 오염 시 답이 초안과 합쳐져 제출된다) · ` +
+        `(이 축도 죽이지 않습니다 — 신호만 올립니다)`;
+      raise(
+        "post-answer-quiet",
+        answerVerdict.sinceAnswerMs,
+        answerVerdict.thresholdMs,
+        null,
+        detail,
+        null,
+        answerVerdict,
+      );
+      return;
+    }
+
+    // ── axis 4: probe — ★능동. 기다리지 않고 확인한다 ─────────────────────
     //
     // (b) 풀형 MCP 관측이 주 증거, (a) OS 관측이 보조. PTY 에는 0바이트.
     // evaluateProbe 가 board/MCP/PTY 전제를 전부 들고 있으므로 여기서는
@@ -1276,7 +1344,8 @@ export class AgentWatchdog {
         probe.thresholdMs,
         null,
         detail,
-        probe
+        probe,
+        answerVerdict,
       );
       return;
     }
@@ -1284,7 +1353,7 @@ export class AgentWatchdog {
     // ("프로브 불가")를 '멈춤' 으로 뚝치지 않는 것이 이 축의 설계 전부다 —
     // 아래 board-quiet 의 20/45분 타임라인이 그대로 살아 있어 안전망이 된다.
 
-    // ── axis 4: board-quiet — reported before, then went quiet ───────────
+    // ── axis 5: board-quiet — reported before, then went quiet ───────────
     const verdict = evaluateBoardQuiet({
       now,
       lastBoardActivityMs: ticket.lastActivityAtMs,
@@ -1308,7 +1377,8 @@ export class AgentWatchdog {
       verdict.thresholdMs,
       null,
       detail,
-      probe
+      probe,
+      answerVerdict,
     );
   }
 
@@ -1323,7 +1393,7 @@ export class AgentWatchdog {
   private async runProcessProbe(
     ticket: WatchdogTicket,
     health: WatchdogAgentHealth | null,
-    now: number
+    now: number,
   ): Promise<ProcessProbeSample | null> {
     if (!this.deps.probeProcess || !ticket.agentId) return null;
     const prev = this.cpuSamples.get(ticket.agentId) ?? null;
@@ -1331,7 +1401,7 @@ export class AgentWatchdog {
       const sample = await this.deps.probeProcess(
         ticket.agentId,
         health?.ptyPid ?? null,
-        prev?.cpuMs ?? null
+        prev?.cpuMs ?? null,
       );
       if (sample && typeof sample.cpuMs === "number") {
         this.cpuSamples.set(ticket.agentId, { atMs: now, cpuMs: sample.cpuMs });
@@ -1397,7 +1467,7 @@ export class AgentWatchdog {
       lastBoardMs,
       now,
       missing,
-      terminalLocal
+      terminalLocal,
     );
 
     // Freshest overall signal of life: board activity OR local PTY WORK output.
@@ -1477,7 +1547,7 @@ export class AgentWatchdog {
           ticket,
           "recovered",
           `agent ${ticket.agentId} resumed activity after ` +
-            `${state.nudges} nudge(s), ${state.respawns} respawn(s)`
+            `${state.nudges} nudge(s), ${state.respawns} respawn(s)`,
         );
         this.log("recovered", {
           taskId: ticket.taskId,
@@ -1568,7 +1638,7 @@ export class AgentWatchdog {
         try {
           reset = await this.deps.resetStalledInProgress(
             ticket,
-            orphanedInProgress.detail
+            orphanedInProgress.detail,
           );
         } catch (err) {
           this.log("resetStalledInProgress threw (best-effort)", {
@@ -1583,7 +1653,7 @@ export class AgentWatchdog {
         this.deps.recordRecovery?.(
           ticket,
           "in-progress-reset",
-          `${orphanedInProgress.detail} → reset to TODO for re-claim`
+          `${orphanedInProgress.detail} → reset to TODO for re-claim`,
         );
         this.log("in-progress orphan reset", {
           taskId: ticket.taskId,
@@ -1593,12 +1663,12 @@ export class AgentWatchdog {
       }
       this.deps.escalateStalledInProgress?.(
         ticket,
-        `${orphanedInProgress.detail} — reset unavailable`
+        `${orphanedInProgress.detail} — reset unavailable`,
       );
       this.deps.recordRecovery?.(
         ticket,
         "in-progress-stall",
-        `${orphanedInProgress.detail} — orchestrator notified`
+        `${orphanedInProgress.detail} — orchestrator notified`,
       );
       this.log("in-progress orphan surfaced", {
         taskId: ticket.taskId,
@@ -1648,7 +1718,7 @@ export class AgentWatchdog {
               ticket,
               "reroute",
               `respawn budget spent — re-routed to an alternate model/host once ` +
-                `before escalating`
+                `before escalating`,
             );
             this.log("reroute", { taskId: ticket.taskId });
             return;
@@ -1667,7 +1737,7 @@ export class AgentWatchdog {
           this.deps.recordRecovery?.(
             ticket,
             "escalated",
-            "orchestrator + Telegram notified"
+            "orchestrator + Telegram notified",
           );
         }
         this.log("exhausted — giving up", {
@@ -1711,7 +1781,7 @@ export class AgentWatchdog {
             ticket,
             "misroute",
             `${verdict.action}: ${verdict.reason} — handed back to origin host, ` +
-              `no spawn on this host (orphan-code guard)`
+              `no spawn on this host (orphan-code guard)`,
           );
           this.log("misroute — spawn blocked", {
             taskId: ticket.taskId,
@@ -1724,12 +1794,12 @@ export class AgentWatchdog {
       const reason = dead
         ? "dead"
         : noFirstActivity
-        ? `no activity since spawn (${Math.round(
-            (now - (seenAt?.atMs ?? now)) / 1000
-          )}s)`
-        : promptIdle.stalled
-        ? "idle at prompt, unresponsive to nudges"
-        : "silent (nudges spent)";
+          ? `no activity since spawn (${Math.round(
+              (now - (seenAt?.atMs ?? now)) / 1000,
+            )}s)`
+          : promptIdle.stalled
+            ? "idle at prompt, unresponsive to nudges"
+            : "silent (nudges spent)";
       let ok = false;
       try {
         ok = await this.deps.respawnForTicket(ticket);
@@ -1742,7 +1812,7 @@ export class AgentWatchdog {
       st.respawns += 1;
       const backoff = Math.min(
         this.cfg.backoffBaseMs * 2 ** (st.respawns - 1),
-        this.cfg.backoffMaxMs
+        this.cfg.backoffMaxMs,
       );
       st.cooldownUntilMs = now + backoff;
       st.stuckAtActivityMs = lastActiveMs;
@@ -1758,7 +1828,7 @@ export class AgentWatchdog {
         ticket,
         "respawn",
         `${reason} → respawn ${st.respawns}/${this.cfg.maxRespawns} ` +
-          `(${ok ? "dispatched" : "dispatch failed"})`
+          `(${ok ? "dispatched" : "dispatch failed"})`,
       );
       this.log("respawn", {
         taskId: ticket.taskId,
@@ -1784,7 +1854,7 @@ export class AgentWatchdog {
       ticket,
       "nudge",
       `${stallReason} → nudge ` +
-        `${st.nudges}/${this.cfg.maxNudges} (${sent ? "sent" : "no PTY"})`
+        `${st.nudges}/${this.cfg.maxNudges} (${sent ? "sent" : "no PTY"})`,
     );
     this.log("nudge", {
       taskId: ticket.taskId,

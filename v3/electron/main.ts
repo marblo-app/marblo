@@ -25,6 +25,11 @@ import {
   reapOrphanedMcpChildren,
 } from "./mcp-orphan-reaper";
 import { PendingInstructionListener } from "./pending-instruction-listener";
+import {
+  isOrchestratorActivitySummary,
+  latestAnsweredQuestion,
+  readQuestions,
+} from "./mcp-server/question-channel";
 import { FsManager } from "./fs-manager";
 import { gitSpawnEnv } from "./git-path";
 import {
@@ -2230,7 +2235,11 @@ const agentWatchdog = new AgentWatchdog(
         // Mission tickets are recovered by the conductor's report-watchdog.
         if (data.missionId) return;
         const projection = data.projection as
-          | { lastAgentId?: unknown; lastActivityAt?: unknown }
+          | {
+              lastAgentId?: unknown;
+              lastActivityAt?: unknown;
+              lastActivitySummary?: unknown;
+            }
           | undefined;
         const agentId =
           (typeof projection?.lastAgentId === "string" &&
@@ -2286,6 +2295,14 @@ const agentWatchdog = new AgentWatchdog(
             typeof data.priority === "number" && Number.isFinite(data.priority)
               ? data.priority
               : null,
+          // post-answer-quiet 축(티켓 igGI6QpXkEfrkkKN3rU0)의 기준점. 티켓
+          // 문서에 이미 실려 오는 questions 배열에서 뽑으므로 추가 읽기가 없다.
+          lastAnswer: latestAnsweredQuestion(readQuestions(data.questions)),
+          // ★마지막 활동이 오케 자신의 답변/승인 기록이면 에이전트의 반응이
+          // 아니다 — 그걸 반응으로 세면 post-answer-quiet 축이 안 운다.
+          lastActivityByOrchestrator: isOrchestratorActivitySummary(
+            projection?.lastActivitySummary
+          ),
         });
       });
       return out;
