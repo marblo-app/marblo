@@ -93,6 +93,20 @@ export default tseslint.config(
           message:
             "한글 UI 속성 문자열은 t()로 번역하세요. 예외는 src/locales/README.md 참고.",
         },
+        {
+          // D6: warn, not error, because ~2,000 existing hand-written colors would
+          // make CI fail immediately. The goal is gradual shrinkage: new arbitrary
+          // Tailwind hex values should use common/ui.tsx or index.css tokens.
+          selector: "Literal[value=/\\[#[0-9a-fA-F]{6}\\]/]",
+          message:
+            "새 Tailwind 임의 hex 색상([#rrggbb])을 추가하지 마세요. src/components/common/ui.tsx 공통 UI 상수 또는 src/index.css 의미 토큰을 사용하세요.",
+        },
+        {
+          // Same D6 guard for template literals such as `bg-[#89b4fa]`.
+          selector: "TemplateElement[value.raw=/\\[#[0-9a-fA-F]{6}\\]/]",
+          message:
+            "새 Tailwind 임의 hex 색상([#rrggbb])을 추가하지 마세요. src/components/common/ui.tsx 공통 UI 상수 또는 src/index.css 의미 토큰을 사용하세요.",
+        },
       ],
     },
   },
