@@ -1,10 +1,20 @@
-import { useState } from "react";
-import type { ComponentPropsWithoutRef } from "react";
+import { createContext, useContext, useMemo, useRef, useState } from "react";
+import type {
+  ComponentPropsWithoutRef,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+  RefObject,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { CodeEditor } from "./CodeEditor";
+import {
+  resolveMarkdownLinkTarget,
+  slugifyHeading,
+} from "../../lib/markdownLinks";
+import { useEditorStore } from "../../stores/editorStore";
 // Syntax-highlight colours for fenced code blocks. Bundled from highlight.js
 // (a transitive dep of rehype-highlight) — no external CDN. Defines only `.hljs`
 // scoped classes, so importing it here has no effect outside rendered markdown.
@@ -19,6 +29,118 @@ interface MarkdownPreviewProps {
   readOnly?: boolean;
 }
 
+/**
+ * Which document the rendered markdown belongs to, so a relative link
+ * (`./other.md`) can be resolved against it — and where to scroll for an
+ * anchor. Defaults to "no document": NotebookView renders markdown cells with
+ * the same component map and has no single owning file, so its relative links
+ * resolve to `ignore` (do nothing) rather than opening a blank window.
+ */
+interface MarkdownDocContextValue {
+  filePath: string | null;
+  containerRef: RefObject<HTMLDivElement | null> | null;
+}
+
+const MarkdownDocContext = createContext<MarkdownDocContextValue>({
+  filePath: null,
+  containerRef: null,
+});
+
+/** Flatten a heading's React children to plain text for the anchor slug. */
+function nodeText(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") {
+    return "";
+  }
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join("");
+  if (typeof node === "object" && "props" in node) {
+    return nodeText((node.props as { children?: ReactNode }).children);
+  }
+  return "";
+}
+
+/**
+ * The one place a markdown link decides what to do. Everything except external
+ * http(s) has its default click cancelled — that default is exactly what used
+ * to reach the main process' setWindowOpenHandler and open an empty
+ * BrowserWindow (ticket 9XXzjqJzWVmTc6ASnETU).
+ */
+function MarkdownLink({
+  href,
+  children,
+  ...props
+}: ComponentPropsWithoutRef<"a">) {
+  const { filePath, containerRef } = useContext(MarkdownDocContext);
+  const rootPath = useEditorStore((s) => s.rootPath);
+  const openFile = useEditorStore((s) => s.openFile);
+
+  const target = useMemo(
+    () => resolveMarkdownLinkTarget(href, { rootPath, filePath }),
+    [href, rootPath, filePath],
+  );
+
+  const isExternal = target.kind === "external";
+
+  const handleClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    // External http(s) keeps the pre-existing path: target="_blank" → the main
+    // process denies the window and hands the URL to the OS browser.
+    if (isExternal) return;
+
+    event.preventDefault();
+
+    if (target.kind === "file") {
+      void openFile(target.path);
+      return;
+    }
+
+    if (target.kind === "anchor") {
+      const root: ParentNode | Document =
+        containerRef?.current ?? event.currentTarget.ownerDocument;
+      const escaped =
+        typeof CSS !== "undefined" && typeof CSS.escape === "function"
+          ? CSS.escape(target.anchor)
+          : target.anchor.replace(/["\\]/g, "\\$&");
+      const el = root.querySelector(`#${escaped}`);
+      el?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    // kind === "ignore" — unsupported scheme, path escaping the repo, or no
+    // document context. Do nothing at all; never open a window.
+  };
+
+  return (
+    <a
+      href={href}
+      target={isExternal ? "_blank" : undefined}
+      rel="noreferrer noopener"
+      onClick={handleClick}
+      className="text-blue-400 underline decoration-blue-400/40 underline-offset-2 hover:text-blue-300"
+      {...props}
+    >
+      {children}
+    </a>
+  );
+}
+
+/** h1–h6 share slug ids so `#anchor` links have something to scroll to. */
+function heading(
+  Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6",
+  className: string,
+) {
+  return function Heading({
+    children,
+    ...props
+  }: ComponentPropsWithoutRef<"h1">) {
+    const id = slugifyHeading(nodeText(children));
+    return (
+      <Tag id={id || undefined} className={className} {...props}>
+        {children}
+      </Tag>
+    );
+  };
+}
+
 // Element → styled-element map. react-markdown emits bare HTML tags, so every
 // visible element is themed here (Tailwind, dark tones matching the app shell)
 // rather than relying on a global stylesheet. Kept module-level so the object
@@ -27,57 +149,28 @@ interface MarkdownPreviewProps {
 // Exported so NotebookView renders .ipynb markdown cells and code-cell sources
 // with the exact same typography as a standalone .md file.
 export const markdownComponents: Components = {
-  h1: (props) => (
-    <h1
-      className="mt-6 mb-4 border-b border-gray-700 pb-2 text-2xl font-bold text-gray-100 first:mt-0"
-      {...props}
-    />
+  h1: heading(
+    "h1",
+    "mt-6 mb-4 border-b border-gray-700 pb-2 text-2xl font-bold text-gray-100 first:mt-0",
   ),
-  h2: (props) => (
-    <h2
-      className="mt-6 mb-3 border-b border-gray-700 pb-1.5 text-xl font-bold text-gray-100 first:mt-0"
-      {...props}
-    />
+  h2: heading(
+    "h2",
+    "mt-6 mb-3 border-b border-gray-700 pb-1.5 text-xl font-bold text-gray-100 first:mt-0",
   ),
-  h3: (props) => (
-    <h3
-      className="mt-5 mb-2 text-lg font-semibold text-gray-100 first:mt-0"
-      {...props}
-    />
+  h3: heading("h3", "mt-5 mb-2 text-lg font-semibold text-gray-100 first:mt-0"),
+  h4: heading(
+    "h4",
+    "mt-4 mb-2 text-base font-semibold text-gray-200 first:mt-0",
   ),
-  h4: (props) => (
-    <h4
-      className="mt-4 mb-2 text-base font-semibold text-gray-200 first:mt-0"
-      {...props}
-    />
-  ),
-  h5: (props) => (
-    <h5
-      className="mt-4 mb-1 text-sm font-semibold text-gray-200 first:mt-0"
-      {...props}
-    />
-  ),
-  h6: (props) => (
-    <h6
-      className="mt-4 mb-1 text-sm font-semibold text-gray-400 first:mt-0"
-      {...props}
-    />
-  ),
+  h5: heading("h5", "mt-4 mb-1 text-sm font-semibold text-gray-200 first:mt-0"),
+  h6: heading("h6", "mt-4 mb-1 text-sm font-semibold text-gray-400 first:mt-0"),
   p: (props) => (
     <p className="my-3 leading-7 text-gray-300 first:mt-0" {...props} />
   ),
-  a: ({ href, ...props }) => (
-    // http(s) links open in the OS browser via the main-process
-    // setWindowOpenHandler (target=_blank → deny + shell.openExternal), so the
-    // Electron window is never navigated away from the app.
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer noopener"
-      className="text-blue-400 underline decoration-blue-400/40 underline-offset-2 hover:text-blue-300"
-      {...props}
-    />
-  ),
+  // Every link goes through MarkdownLink: repo-relative paths open in-app,
+  // anchors scroll, external http(s) keeps the OS-browser path, and anything
+  // else does nothing. See ticket 9XXzjqJzWVmTc6ASnETU (blank-window bug).
+  a: MarkdownLink,
   ul: (props) => (
     <ul className="my-3 list-disc space-y-1 pl-6 text-gray-300" {...props} />
   ),
@@ -168,6 +261,13 @@ export function MarkdownPreview({
   readOnly = false,
 }: MarkdownPreviewProps) {
   const [view, setView] = useState<"preview" | "edit">("preview");
+  // Anchor links scroll inside this document's own scroll container, so a
+  // second markdown view mounted elsewhere can never steal the scroll.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const docContext = useMemo(
+    () => ({ filePath, containerRef: scrollRef }),
+    [filePath],
+  );
 
   const toolbar = (
     <div className="flex items-center gap-3 border-b border-gray-700 bg-gray-800 px-3 py-1.5 text-xs text-gray-400">
@@ -219,15 +319,17 @@ export function MarkdownPreview({
   return (
     <div className="flex h-full flex-col">
       {toolbar}
-      <div className="min-h-0 flex-1 overflow-auto bg-gray-900">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto bg-gray-900">
         <div className="mx-auto max-w-3xl px-6 py-5 text-[15px]">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeHighlight]}
-            components={markdownComponents}
-          >
-            {content}
-          </ReactMarkdown>
+          <MarkdownDocContext.Provider value={docContext}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeHighlight]}
+              components={markdownComponents}
+            >
+              {content}
+            </ReactMarkdown>
+          </MarkdownDocContext.Provider>
         </div>
       </div>
     </div>
