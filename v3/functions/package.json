@@ -65,6 +65,9 @@
     "backfill:analytics-identity": "npm run backfill:analytics-identity:build && node .script-out/analytics-identity/scripts/backfill-analytics-identity.js",
     "provision:team-usage:build": "tsc src/analyticsPseudonym.ts src/teamUsage.ts src/analyticsProfiles.ts src/personAxis.ts src/adminAnalytics.ts scripts/provision-team-usage.ts --outDir .script-out/team-usage-provision --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck",
     "provision:team-usage": "npm run provision:team-usage:build && node .script-out/team-usage-provision/scripts/provision-team-usage.js",
+    "test:install-unified": "tsc src/analyticsPseudonym.ts src/personAxis.ts src/installUnified.ts src/installUnified.test.ts --outDir .test-out/install-unified --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/install-unified/installUnified.test.js",
+    "provision:install-unified:build": "tsc src/analyticsPseudonym.ts src/personAxis.ts src/installUnified.ts scripts/provision-install-unified.ts --outDir .script-out/install-unified-provision --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node",
+    "provision:install-unified": "npm run provision:install-unified:build && node .script-out/install-unified-provision/scripts/provision-install-unified.js",
     "provision:person-axis:build": "tsc src/personAxis.ts src/analyticsProfiles.ts src/adminAnalytics.ts scripts/provision-person-axis.ts --outDir .script-out/person-axis-provision --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck",
     "provision:person-axis": "npm run provision:person-axis:build && node .script-out/person-axis-provision/scripts/provision-person-axis.js"
   },
