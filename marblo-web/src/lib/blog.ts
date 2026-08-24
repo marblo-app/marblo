@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
 import { routing } from "@/i18n/routing";
+import { selectRelatedPosts } from "@/lib/relatedPosts";
 
 /**
  * MDX blog content layer.
@@ -152,4 +153,19 @@ export function getAllPostParams(): { locale: string; slug: string }[] {
     }
   }
   return params;
+}
+
+/**
+ * `slug` 과 함께 보여줄 관련 글.
+ *
+ * 글끼리 서로 링크가 하나도 없던 상태를 메운다(2026-08-21 실측). 선정 규칙은
+ * `@/lib/relatedPosts` 의 순수 함수에 있다 — 이 파일은 `server-only` 라 단위
+ * 테스트에서 못 불러서, 검증해야 할 규칙만 떼어놨다.
+ */
+export function getRelatedPosts(
+  locale: string,
+  slug: string,
+  limit = 3
+): BlogPostMeta[] {
+  return selectRelatedPosts(getAllPosts(locale), slug, limit);
 }

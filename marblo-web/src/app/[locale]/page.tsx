@@ -16,6 +16,7 @@ import {
 import FeatureSection from "@/components/FeatureSection";
 import FeatureVideoSection from "@/components/FeatureVideoSection";
 import BetaTester50Section from "@/components/BetaTester50Section";
+import FeaturedPostsSection from "@/components/FeaturedPostsSection";
 import {
   buildSoftwareApplicationSchema,
   buildFAQPageSchema,
@@ -560,6 +561,11 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Featured posts — 홈에서 블로그로 나가는 내부 링크.
+          2026-08-21 실측 기준 홈의 블로그 링크가 0개였다. 근거·선정
+          기준은 src/data/featuredPosts.ts 주석 참조. */}
+      <FeaturedPostsSection locale={locale} />
 
       {/* Social Proof */}
       <section className="py-24 px-4">

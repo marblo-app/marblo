@@ -4,13 +4,25 @@ import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
 import { comingSoonLabel } from "@/data/lectures";
 import { localeHref } from "@/i18n/routing";
+import { featuredPostsFor, featuredLabel } from "@/data/featuredPosts";
 
 export default function Footer() {
   const t = useTranslations("footer");
   const locale = useLocale();
 
+  // 추천 글은 푸터를 통해 **모든 페이지**에서 링크된다. 이게 이 PR 의 링크
+  // 구조 변경 중 가장 큰 한 방이다: 이미 색인·크롤되고 있는 페이지들에서
+  // 링크가 나가야 구글이 그 URL 을 읽으러 올 이유가 생긴다. 블로그 인덱스
+  // 하나에서만 링크되던 글이 사이트 전역 링크를 받는다.
+  // 선정 근거·개수 제한은 src/data/featuredPosts.ts 주석 참조.
+  const featured = featuredPostsFor(locale);
+
   const productLabel =
     locale === "ko" ? "제품" : locale === "ja" ? "プロダクト" : "Product";
+  const blogLabel =
+    locale === "ko" ? "블로그" : locale === "ja" ? "ブログ" : "Blog";
+  const allPostsLabel =
+    locale === "ko" ? "전체 글" : locale === "ja" ? "記事一覧" : "All posts";
   const lecturesLabel =
     locale === "ko" ? "강의" : locale === "ja" ? "講座" : "Lectures";
   const legalLabel =
@@ -30,7 +42,7 @@ export default function Footer() {
   return (
     <footer className="border-t border-zinc-800/50 bg-zinc-950 py-16">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-8 mb-12">
           {/* Brand */}
           <div>
             <h3 className="text-lg font-bold text-white mb-2">Marblo</h3>
@@ -113,6 +125,34 @@ export default function Footer() {
                   {t("github")}
                 </a>
               </li>
+            </ul>
+          </div>
+
+          {/* Blog — 사이트 전역에서 나가는 블로그 링크. 이전에는 푸터에
+              블로그 링크가 단 하나도 없었다(2026-08-21 실측). */}
+          <div>
+            <h4 className="text-sm font-semibold text-zinc-300 mb-3">
+              {blogLabel}
+            </h4>
+            <ul>
+              <li>
+                <Link
+                  href={localeHref(locale, "/blog")}
+                  className="text-zinc-400 hover:text-white text-sm block mb-2"
+                >
+                  {allPostsLabel}
+                </Link>
+              </li>
+              {featured.map((post) => (
+                <li key={post.slug}>
+                  <Link
+                    href={localeHref(locale, `/blog/${post.slug}`)}
+                    className="text-zinc-400 hover:text-white text-sm block mb-2"
+                  >
+                    {featuredLabel(post, locale)}
+                  </Link>
+                </li>
+              ))}
             </ul>
           </div>
 

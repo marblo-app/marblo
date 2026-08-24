@@ -4,7 +4,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MDXRemote } from "next-mdx-remote/rsc";
 import { getTranslations } from "next-intl/server";
-import { getPost, getPostLocales, getAllPostParams } from "@/lib/blog";
+import {
+  getPost,
+  getPostLocales,
+  getAllPostParams,
+  getRelatedPosts,
+} from "@/lib/blog";
 import { buildBlogAlternates, localeUrl } from "@/lib/seo";
 import {
   buildBlogPostingSchema,
@@ -217,6 +222,12 @@ export default async function BlogPostPage({
     inLanguage: locale,
   });
 
+  // 관련 글 — 글끼리 서로 링크가 하나도 없던 상태를 메운다(2026-08-21 실측).
+  // 크롤러 입장에서 글 상세는 막다른 골목이었다: 나가는 링크가 홈·목록뿐이라
+  // 한 편을 읽어도 다음 글로 이어질 길이 없었다. 세 칸 중 최소 한 칸은 추천
+  // 글에 배정된다(@/lib/blog getRelatedPosts 참조).
+  const related = getRelatedPosts(locale, slug);
+
   const breadcrumbSchema = buildBreadcrumbSchema([
     { name: t("home"), url: localeUrl(locale) },
     { name: t("title"), url: localeUrl(locale, "/blog") },
@@ -241,7 +252,10 @@ export default async function BlogPostPage({
         <span className="mx-2" aria-hidden>
           /
         </span>
-        <Link href={localeHref(locale, "/blog")} className="hover:text-zinc-300">
+        <Link
+          href={localeHref(locale, "/blog")}
+          className="hover:text-zinc-300"
+        >
           {t("title")}
         </Link>
       </nav>
@@ -272,7 +286,42 @@ export default async function BlogPostPage({
         />
       </div>
 
-      <footer className="mt-14 border-t border-zinc-800 pt-8">
+      {related.length > 0 && (
+        <section
+          className="mt-14 border-t border-zinc-800 pt-8"
+          aria-labelledby="related-posts"
+        >
+          <h2
+            id="related-posts"
+            className="text-lg font-semibold text-white mb-5"
+          >
+            {t("related")}
+          </h2>
+          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {related.map((p) => (
+              <li key={p.slug}>
+                <Link
+                  href={localeHref(locale, `/blog/${p.slug}`)}
+                  className="block h-full rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 transition hover:border-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+                >
+                  <span className="block text-xs text-indigo-400 mb-1">
+                    {(() => {
+                      const key = `categories.${p.category}`;
+                      const label = t(key);
+                      return label === key ? p.category : label;
+                    })()}
+                  </span>
+                  <span className="block font-medium text-white leading-snug">
+                    {p.title}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <footer className="mt-10 border-t border-zinc-800 pt-8">
         <Link
           href={localeHref(locale, "/blog")}
           className="text-indigo-400 hover:text-indigo-300"

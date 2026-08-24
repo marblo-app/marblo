@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
+    "check:lastmod": "tsx scripts/check-blog-lastmod.ts",
     "smoke:waitlist": "tsx scripts/waitlist-public-smoke.ts",
     "lectures:diff": "tsx scripts/diff-lectures.ts",
     "lectures:seed": "tsx scripts/seed-lectures.ts"

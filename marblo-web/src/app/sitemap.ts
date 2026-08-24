@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 import { getAllPosts, getPostLocales } from "@/lib/blog";
 import { isSearchLocale, searchLocales, xDefaultLocale } from "@/i18n/routing";
 import { localeUrl } from "@/lib/seo";
+import { FEATURED_SLUGS } from "@/data/featuredPosts";
 
 /**
  * ⚠️ INVARIANT: every URL emitted here must return 200 on the apex.
@@ -129,6 +130,16 @@ export default function sitemap(): MetadataRoute.Sitemap {
   // Blog posts — added per locale, with hreflang limited to the locales in which
   // each post actually exists (never link a missing translation) AND that we
   // advertise to search engines.
+  //
+  // ★정직하게 적어둔다: `priority` 와 `changeFrequency` 는 구글이 공개적으로
+  // "쓰지 않는다" 고 밝힌 필드다. 아래 0.7/0.5 구분은 **우리 의도의 기록**이지
+  // 크롤 예산을 움직이는 장치가 아니다. 실제로 크롤 순서를 바꾸는 건 내부 링크
+  // 구조이고, 그건 이 PR 의 Footer/홈/관련 글 변경이 담당한다.
+  //
+  // `lastmod` 는 다르다 — 이건 구글이 실제로 쓰고, 신뢰할 수 없다고 판단하면
+  // 사이트 전체에서 무시한다. 그래서 값이 정확해야 한다. frontmatter 의
+  // `updated ?? date` 가 본문 최종 수정일과 일치하는지는
+  // `npm run check:lastmod` 가 git 이력으로 검증한다.
   for (const locale of locales) {
     for (const post of getAllPosts(locale)) {
       const available = getPostLocales(post.slug, post.locales).filter(
@@ -151,7 +162,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
         url: localeUrl(locale, `/blog/${post.slug}`),
         lastModified: new Date(post.updated ?? post.date),
         changeFrequency: "monthly",
-        priority: 0.7,
+        // 추천 글(내부 링크를 몰아준 4편)만 블로그 상단 티어로 둔다. 나머지를
+        // 0.5 로 내리는 건 순위 강등이 아니라 "우리가 어디에 집중했는지" 의
+        // 자기기록이다. 위 주석대로 구글은 이 값을 읽지 않는다.
+        priority: FEATURED_SLUGS.has(post.slug) ? 0.7 : 0.5,
         alternates: { languages },
       });
     }
