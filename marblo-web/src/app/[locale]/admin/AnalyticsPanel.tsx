@@ -36,6 +36,10 @@ import {
   Link2,
   Unlink,
 } from "lucide-react";
+import {
+  describeGa4BridgeFreshness,
+  type Ga4BridgeFreshness,
+} from "./ga4BridgeFreshness";
 
 // ── 콜러블 응답 타입 (docs/analytics-admin-callables-api.md 미러) ───────────────
 type KeyCount = { key: string; count: number };
@@ -853,6 +857,8 @@ type CountryFunnel = {
     webRegionError: string | null;
     appRegionError: string | null;
   };
+  /** 없으면 구버전 함수 — 미적재라고 단정하지 않는다. */
+  ga4Bridge?: Ga4BridgeFreshness;
   byCountry: CountryFunnelRow[];
   byChannel: CountryFunnelRow[];
   totals: CountryFunnelRow;
@@ -864,6 +870,31 @@ type CountryFunnel = {
   };
   notes: string[];
 };
+
+/**
+ * 브리지 마지막 동기 시각. 빈 표가 '유입 0' 인지 '미적재' 인지 가른다.
+ */
+export function Ga4BridgeFreshnessNote({
+  data,
+}: {
+  data: Ga4BridgeFreshness | null | undefined;
+}) {
+  const copy = describeGa4BridgeFreshness(data);
+  if (!copy) return null;
+  const tone =
+    copy.tone === "ok"
+      ? "border-zinc-800 bg-zinc-900/40 text-zinc-300"
+      : "border-amber-900/50 bg-amber-950/20 text-amber-100";
+  return (
+    <div
+      data-testid="ga4-bridge-freshness"
+      className={`rounded-lg border p-3 text-xs leading-relaxed ${tone}`}
+    >
+      <p className="font-medium">{copy.headline}</p>
+      <p className="mt-1 opacity-90">{copy.detail}</p>
+    </div>
+  );
+}
 
 // ── 포맷 헬퍼 ──────────────────────────────────────────────────────────────
 function fmtInt(n: number | undefined | null): string {
@@ -2991,6 +3022,7 @@ function CountryFunnelView({ data }: { data: CountryFunnel }) {
 
   return (
     <div className="space-y-4">
+      <Ga4BridgeFreshnessNote data={data.ga4Bridge} />
       {/* 조인이 어디서 어떻게 일어났는지 숨기지 않는다. */}
       <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
         <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5">
@@ -6264,6 +6296,7 @@ export default function AnalyticsPanel({
               안 먹었다" 로 읽히는데, 사실은 배선이 아직 없는 것이다. ── */}
           <div className="space-y-4">
             <SectionHeader icon={Globe} title="소스·캠페인·CAC" trust="red" />
+            <Ga4BridgeFreshnessNote data={countryFunnel.data?.ga4Bridge} />
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <PendingIngestion
                 title="캠페인·소스별 유입과 CAC"

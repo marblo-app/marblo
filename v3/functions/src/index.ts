@@ -16,19 +16,35 @@ import {
   GA4_BRIDGE_TABLE,
   GA4_BRIDGE_CURRENT_VIEW,
   GA4_BRIDGE_SCHEMA,
+  GA4_BRIDGE_SYNC_LOG_TABLE,
+  GA4_BRIDGE_SYNC_LOG_SCHEMA,
   GA4_SYNC_ROW_LIMIT,
-  GA4_SYNC_DEFAULT_DAYS,
+  GA4_SYNC_SCHEDULE_CRON,
+  GA4_SYNC_SCHEDULE_TZ,
+  assembleGa4BridgeFreshness,
   buildGa4FirstTouchQuery,
   buildExistingKeysQuery,
   buildBridgeCurrentViewSql,
+  buildBridgeStatsQuery,
+  buildLatestSyncLogQuery,
+  chooseSyncDays,
+  emptyGa4BridgeStats,
+  parseBridgeStatsRow,
+  parseSyncLogRow,
+  seoulDateString,
   toBridgeRow,
   selectNewBridgeRows,
   chunkRows,
   parseSyncDays,
   isGaClientId,
   isSafeBqIdentifier,
+  type Ga4BridgeFreshness,
   type Ga4BridgeRow,
   type Ga4BridgeSourceRow,
+  type Ga4BridgeStats,
+  type Ga4BridgeSyncLogRow,
+  type Ga4BridgeSyncLogWrite,
+  type Ga4BridgeSyncReason,
 } from "./ga4Bridge";
 import {
   buildCountryFunnel,
@@ -14893,13 +14909,14 @@ export const getAdminCountryFunnel = functions
 
     const params: Record<string, unknown> = { days: rangeDays };
 
-    const [webRes, appRes] = await Promise.allSettled([
+    const [webRes, appRes, freshnessRes] = await Promise.allSettled([
       bigquery.query({
         query: webQuery,
         params: { days: rangeDays },
         location: GA4_BQ_LOCATION,
       }),
       bigquery.query({ query: appQuery, params, location: BQ_LOCATION }),
+      loadGa4BridgeFreshness(),
     ]);
 
     const webRows =
@@ -14944,6 +14961,25 @@ export const getAdminCountryFunnel = functions
       "GA4 일별 export 는 D+1 이다 — 오늘·어제 다운로드는 아직 반영되지 않았을 수 있다."
     );
 
+    const ga4Bridge: Ga4BridgeFreshness =
+      freshnessRes.status === "fulfilled"
+        ? freshnessRes.value
+        : assembleGa4BridgeFreshness({
+            todaySeoul: seoulDateString(new Date()),
+            stats: emptyGa4BridgeStats(),
+            log: null,
+            statsError: true,
+          });
+    if (ga4Bridge.status === "not_ingested") {
+      notes.push(
+        "GA4 브리지 미적재 — 표가 비어 있는 것은 유입 0이 아니라 아직 안 실렸습니다."
+      );
+    } else if (ga4Bridge.lastSyncedAt) {
+      notes.push(
+        `GA4 브리지 마지막 동기 ${ga4Bridge.lastSyncedAt} · 적재 ${ga4Bridge.rowCount}명 · 최신 방문일 ${ga4Bridge.maxFirstVisitDate ?? "없음"}`
+      );
+    }
+
     return {
       rangeDays,
       includeAdmin,
@@ -14957,6 +14993,7 @@ export const getAdminCountryFunnel = functions
         webRegionError,
         appRegionError,
       },
+      ga4Bridge,
       byCountry: funnel.byCountry,
       byChannel: funnel.byChannel,
       totals: funnel.totals,
@@ -16249,6 +16286,7 @@ const GA4_BRIDGE_INSERT_CHUNK = 500;
 const GA4_BRIDGE_KEY_LOOKUP_CHUNK = 5000;
 
 let ga4BridgeTableReady = false;
+let ga4BridgeSyncLogReady = false;
 
 /** 동기화 1회 결과. 콜러블 응답 겸 스케줄 로그. */
 interface Ga4BridgeSyncResult {
@@ -16359,6 +16397,132 @@ async function ensureGa4BridgeViews(): Promise<void> {
     GA4_BRIDGE_CURRENT_VIEW,
     buildBridgeCurrentViewSql({ project: BQ_PROJECT, dataset: BQ_DATASET })
   );
+}
+
+async function ensureGa4BridgeSyncLogTable(): Promise<void> {
+  if (ga4BridgeSyncLogReady) return;
+  const dataset = bigquery.dataset(BQ_DATASET);
+  const table = dataset.table(GA4_BRIDGE_SYNC_LOG_TABLE);
+  const [exists] = await table.exists();
+  if (!exists) {
+    await table.create({
+      schema: GA4_BRIDGE_SYNC_LOG_SCHEMA as unknown as {
+        name: string;
+        type: string;
+      }[],
+    });
+    functions.logger.info("[ga4Bridge] created sync log table", {
+      table: GA4_BRIDGE_SYNC_LOG_TABLE,
+    });
+  }
+  ga4BridgeSyncLogReady = true;
+}
+
+function isBqNotFound(e: unknown): boolean {
+  const msg = safeAnalyticsErrorMessage(e).toLowerCase();
+  return (
+    msg.includes("not found") ||
+    msg.includes("notfound") ||
+    /\b404\b/.test(msg)
+  );
+}
+
+async function readGa4BridgeStats(): Promise<{
+  stats: Ga4BridgeStats;
+  error: boolean;
+}> {
+  try {
+    const [rows] = await bigquery.query({
+      query: buildBridgeStatsQuery({
+        project: BQ_PROJECT,
+        dataset: BQ_DATASET,
+      }),
+      location: BQ_LOCATION,
+    });
+    const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : undefined;
+    return { stats: parseBridgeStatsRow(row), error: false };
+  } catch (e) {
+    if (isBqNotFound(e)) {
+      return { stats: emptyGa4BridgeStats(), error: false };
+    }
+    functions.logger.warn("[ga4Bridge] stats query failed", {
+      message: safeAnalyticsErrorMessage(e),
+    });
+    return { stats: emptyGa4BridgeStats(), error: true };
+  }
+}
+
+async function readLatestSyncLog(): Promise<Ga4BridgeSyncLogRow | null> {
+  try {
+    const [rows] = await bigquery.query({
+      query: buildLatestSyncLogQuery({
+        project: BQ_PROJECT,
+        dataset: BQ_DATASET,
+      }),
+      location: BQ_LOCATION,
+    });
+    const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : undefined;
+    return parseSyncLogRow(row);
+  } catch (e) {
+    if (isBqNotFound(e)) return null;
+    functions.logger.warn("[ga4Bridge] sync log query failed", {
+      message: safeAnalyticsErrorMessage(e),
+    });
+    return null;
+  }
+}
+
+async function writeGa4BridgeSyncLog(
+  row: Ga4BridgeSyncLogWrite
+): Promise<void> {
+  await ensureGa4BridgeSyncLogTable();
+  const errorMessage =
+    row.errorMessage && row.errorMessage.length > 200
+      ? row.errorMessage.slice(0, 200)
+      : row.errorMessage;
+  await bigquery
+    .dataset(BQ_DATASET)
+    .table(GA4_BRIDGE_SYNC_LOG_TABLE)
+    .insert([{ ...row, errorMessage }]);
+}
+
+async function loadGa4BridgeFreshness(): Promise<Ga4BridgeFreshness> {
+  const todaySeoul = seoulDateString(new Date());
+  const [statsRes, log] = await Promise.all([
+    readGa4BridgeStats(),
+    readLatestSyncLog(),
+  ]);
+  return assembleGa4BridgeFreshness({
+    todaySeoul,
+    stats: statsRes.stats,
+    log,
+    statsError: statsRes.error,
+  });
+}
+
+async function recordGa4BridgeSyncLog(opts: {
+  rangeDays: number;
+  reason: Ga4BridgeSyncReason;
+  result: Ga4BridgeSyncResult | null;
+  errorMessage: string | null;
+}): Promise<void> {
+  try {
+    await writeGa4BridgeSyncLog({
+      syncedAt: new Date().toISOString(),
+      rangeDays: opts.rangeDays,
+      scanned: opts.result?.scanned ?? null,
+      eligible: opts.result?.eligible ?? null,
+      inserted: opts.result?.inserted ?? null,
+      skippedExisting: opts.result?.skippedExisting ?? null,
+      reason: opts.reason,
+      ok: opts.errorMessage == null,
+      errorMessage: opts.errorMessage,
+    });
+  } catch (e) {
+    functions.logger.error("[ga4Bridge] sync log write failed", {
+      message: safeAnalyticsErrorMessage(e),
+    });
+  }
 }
 
 /** 후보 ga_key 중 이미 브리지에 있는 것을 돌려준다(청크로 나눠 조회). */
@@ -16499,27 +16663,51 @@ async function syncGa4BridgeInternal(
   };
 }
 
+const GA4_BRIDGE_SYNC_RUNTIME: functions.RuntimeOptions = {
+  timeoutSeconds: 300,
+  memory: "512MB",
+};
+
 /**
- * 일 1회 동기화. GA4 일별 export 는 D+1 이라 새벽에 돈다(어제치가 확정된 뒤).
- * 실패해도 던지지 않는다 — 다음 날 창이 겹치므로 자동으로 따라잡는다.
+ * 일 1회 15:00 KST. 05:30 은 GA4 D-1 export 착지 전이라 최신 방문일이 D+2 였다.
+ * 분 단위로 올리지 않는다. 실패해도 던지지 않는다 — 다음 날 창이 겹친다.
+ * 표의 firstVisit 폭이 짧으면 이 실행이 400일 백필을 한 번 고른다.
  */
-export const scheduledSyncGa4Bridge = functions.pubsub
-  .schedule("30 5 * * *")
-  .timeZone("Asia/Seoul")
+export const scheduledSyncGa4Bridge = functions
+  .runWith(GA4_BRIDGE_SYNC_RUNTIME)
+  .pubsub.schedule(GA4_SYNC_SCHEDULE_CRON)
+  .timeZone(GA4_SYNC_SCHEDULE_TZ)
   .onRun(async () => {
+    const todaySeoul = seoulDateString(new Date());
+    const { stats } = await readGa4BridgeStats();
+    const choice = chooseSyncDays({
+      rowCount: stats.rowCount,
+      minFirstVisitDate: stats.minFirstVisitDate,
+      todaySeoul,
+    });
+    let result: Ga4BridgeSyncResult | null = null;
+    let errorMessage: string | null = null;
     try {
-      const result = await syncGa4BridgeInternal(GA4_SYNC_DEFAULT_DAYS);
+      result = await syncGa4BridgeInternal(choice.days);
       functions.logger.info("[ga4Bridge] sync ok", {
         scanned: result.scanned,
         inserted: result.inserted,
         skippedExisting: result.skippedExisting,
+        reason: choice.reason,
+        rangeDays: choice.days,
       });
     } catch (e) {
-      // 값은 남기지 않는다 — 사유만.
+      errorMessage = safeAnalyticsErrorMessage(e);
       functions.logger.error("[ga4Bridge] sync failed", {
-        message: safeAnalyticsErrorMessage(e),
+        message: errorMessage,
       });
     }
+    await recordGa4BridgeSyncLog({
+      rangeDays: choice.days,
+      reason: choice.reason,
+      result,
+      errorMessage,
+    });
     return null;
   });
 
@@ -16528,11 +16716,28 @@ export const scheduledSyncGa4Bridge = functions.pubsub
  * 배포 직후 1회 `{ days: 400 }` 으로 돌려 전 구간을 덮어야 한다.
  */
 export const syncGa4Bridge = functions
-  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .runWith(GA4_BRIDGE_SYNC_RUNTIME)
   .https.onCall(async (data, context) => {
     requireAdmin(context);
     const rangeDays = parseSyncDays((data as { days?: unknown })?.days);
-    return syncGa4BridgeInternal(rangeDays);
+    try {
+      const result = await syncGa4BridgeInternal(rangeDays);
+      await recordGa4BridgeSyncLog({
+        rangeDays,
+        reason: "manual",
+        result,
+        errorMessage: null,
+      });
+      return result;
+    } catch (e) {
+      await recordGa4BridgeSyncLog({
+        rangeDays,
+        reason: "manual",
+        result: null,
+        errorMessage: safeAnalyticsErrorMessage(e),
+      });
+      throw e;
+    }
   });
 
 // ═══════════════════════════════════════════════════════════════════

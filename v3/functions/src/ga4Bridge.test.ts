@@ -7,21 +7,36 @@ import {
   GA4_BRIDGE_SCHEMA,
   GA4_BRIDGE_TABLE,
   GA4_BRIDGE_CURRENT_VIEW,
+  GA4_BRIDGE_SYNC_LOG_TABLE,
+  GA4_BRIDGE_SYNC_LOG_SCHEMA,
   GA4_SYNC_DEFAULT_DAYS,
   GA4_SYNC_MAX_DAYS,
+  GA4_SYNC_SCHEDULE_CRON,
+  GA4_SYNC_SCHEDULE_TZ,
   ANALYTICS_IDENTITY_TABLE,
+  assembleGa4BridgeFreshness,
   buildBridgeCurrentViewSql,
+  buildBridgeStatsQuery,
   buildExistingKeysQuery,
   buildGa4FirstTouchQuery,
+  buildLatestSyncLogQuery,
   bridgeCount,
+  calendarDaysBetween,
+  chooseSyncDays,
   chunkRows,
+  classifyGa4BridgeFreshness,
   cleanBridgeField,
+  emptyGa4BridgeStats,
+  isDailyCron,
   isGaClientId,
   isSafeBqIdentifier,
   normalizeFirstVisitDate,
+  parseBridgeStatsRow,
   parseSyncDays,
+  parseSyncLogRow,
   sanitizeLandingPage,
   selectNewBridgeRows,
+  seoulDateString,
   toBridgeRow,
   type Ga4BridgeSourceRow,
 } from "./ga4Bridge";
@@ -343,4 +358,173 @@ test("★ga_key 는 다른 가명 공간(agent/task)과 값이 겹치지 않는�
   assert.notEqual(ga, pseudonymizeAnalyticsId("task", "abc", "salt"));
   // 솔트가 다르면 값도 다르다 — 솔트를 모르면 되짚을 수 없다.
   assert.notEqual(ga, deriveGaKey("abc", "other-salt"));
+});
+
+// ── 신선도·스케줄 (티켓 Tscd3JzH) ───────────────────────────────────────────
+
+test("스케줄은 일 1회이고 GA4 export 이후(12시 이후 KST)다 — 분 단위 금지", () => {
+  assert.equal(isDailyCron(GA4_SYNC_SCHEDULE_CRON), true);
+  assert.equal(isDailyCron("*/5 * * * *"), false);
+  assert.equal(isDailyCron("0 * * * *"), false);
+  assert.equal(isDailyCron("0 */2 * * *"), false);
+  const hour = Number(GA4_SYNC_SCHEDULE_CRON.split(/\s+/)[1]);
+  assert.ok(
+    hour >= 12,
+    "05:30 KST 는 D-1 export 착지 전이라 D+2 가 됐다"
+  );
+  assert.equal(GA4_SYNC_SCHEDULE_TZ, "Asia/Seoul");
+});
+
+test("seoulDateString: UTC 20:30 은 다음 날 KST 이다", () => {
+  assert.equal(seoulDateString(new Date("2026-08-23T20:30:08Z")), "2026-08-24");
+  assert.equal(seoulDateString(new Date("2026-08-24T06:00:00Z")), "2026-08-24");
+});
+
+test("calendarDaysBetween: 날짜만 센다", () => {
+  assert.equal(calendarDaysBetween("2026-08-19", "2026-08-24"), 5);
+  assert.equal(calendarDaysBetween("2026-08-24", "2026-08-24"), 0);
+  assert.equal(calendarDaysBetween("bad", "2026-08-24"), null);
+});
+
+test("chooseSyncDays: 표가 비었거나 폭이 짧으면 400일 백필 한 번", () => {
+  assert.deepEqual(
+    chooseSyncDays({
+      rowCount: 0,
+      minFirstVisitDate: null,
+      todaySeoul: "2026-08-24",
+    }),
+    { days: GA4_SYNC_MAX_DAYS, reason: "historical-backfill" }
+  );
+  // 라이브 실측: min 08-19, 오늘 08-24, 100행 — 3일창만 돌아 백필이 안 된 상태.
+  assert.deepEqual(
+    chooseSyncDays({
+      rowCount: 100,
+      minFirstVisitDate: "2026-08-19",
+      todaySeoul: "2026-08-24",
+    }),
+    { days: GA4_SYNC_MAX_DAYS, reason: "historical-backfill" }
+  );
+  assert.deepEqual(
+    chooseSyncDays({
+      rowCount: 776,
+      minFirstVisitDate: "2026-07-08",
+      todaySeoul: "2026-08-24",
+    }),
+    { days: GA4_SYNC_DEFAULT_DAYS, reason: "incremental" }
+  );
+});
+
+test("classify: 동기 기록 없음 = 미적재 (유입 0 이 아님)", () => {
+  assert.equal(
+    classifyGa4BridgeFreshness({
+      lastSyncedAt: null,
+      todaySeoul: "2026-08-24",
+    }),
+    "not_ingested"
+  );
+  assert.equal(
+    classifyGa4BridgeFreshness({
+      lastSyncedAt: "2026-08-23T20:30:08.000Z",
+      todaySeoul: "2026-08-24",
+    }),
+    "loaded"
+  );
+  assert.equal(
+    classifyGa4BridgeFreshness({
+      lastSyncedAt: "2026-08-21T20:30:00.000Z",
+      todaySeoul: "2026-08-24",
+    }),
+    "stale"
+  );
+  assert.equal(
+    classifyGa4BridgeFreshness({
+      lastSyncedAt: null,
+      todaySeoul: "2026-08-24",
+      statsError: true,
+    }),
+    "unknown"
+  );
+});
+
+test("assemble: 워터마크가 표 MAX(syncedAt) 보다 우선이다 (0-insert 날)", () => {
+  const f = assembleGa4BridgeFreshness({
+    todaySeoul: "2026-08-24",
+    stats: {
+      rowCount: 100,
+      distinctGaKeys: 100,
+      minFirstVisitDate: "2026-08-19",
+      maxFirstVisitDate: "2026-08-22",
+      lastSyncedAt: "2026-08-23T20:30:08.000Z",
+    },
+    log: {
+      lastSyncedAt: "2026-08-24T06:00:00.000Z",
+      rangeDays: 3,
+      scanned: 58,
+      eligible: 58,
+      inserted: 0,
+      skippedExisting: 58,
+      reason: "incremental",
+      ok: true,
+      errorMessage: null,
+    },
+  });
+  assert.equal(f.lastSyncedAt, "2026-08-24T06:00:00.000Z");
+  assert.equal(f.status, "loaded");
+  assert.equal(f.inserted, 0);
+  assert.equal(f.rowCount, 100);
+  assert.equal(f.visitLagDays, 2);
+});
+
+test("assemble: 행 0 + 동기 없음 = not_ingested (빈 표 ≠ 유입 0)", () => {
+  const f = assembleGa4BridgeFreshness({
+    todaySeoul: "2026-08-24",
+    stats: emptyGa4BridgeStats(),
+    log: null,
+  });
+  assert.equal(f.status, "not_ingested");
+  assert.equal(f.rowCount, 0);
+  assert.equal(f.lastSyncedAt, null);
+});
+
+test("parseBridgeStatsRow: BQ {value} 래퍼와 문자열 INT64", () => {
+  const s = parseBridgeStatsRow({
+    rowCount: { value: "100" },
+    distinctGaKeys: "100",
+    minFirstVisitDate: { value: "2026-08-19" },
+    maxFirstVisitDate: "2026-08-22",
+    lastSyncedAt: { value: "2026-08-23T20:30:08.000Z" },
+  });
+  assert.equal(s.rowCount, 100);
+  assert.equal(s.minFirstVisitDate, "2026-08-19");
+  assert.equal(s.lastSyncedAt, "2026-08-23T20:30:08.000Z");
+});
+
+test("parseSyncLogRow: ok 불리언과 문자열", () => {
+  const a = parseSyncLogRow({
+    lastSyncedAt: "2026-08-24T06:00:00.000Z",
+    rangeDays: 400,
+    scanned: 776,
+    inserted: 676,
+    ok: true,
+    reason: "historical-backfill",
+  });
+  assert.equal(a?.ok, true);
+  assert.equal(a?.reason, "historical-backfill");
+  const b = parseSyncLogRow({ ok: "false", errorMessage: "failed-precondition" });
+  assert.equal(b?.ok, false);
+  assert.equal(b?.errorMessage, "failed-precondition");
+});
+
+test("신선도 SQL 은 camelCase 컬럼을 읽고 동기 로그 표를 가리킨다", () => {
+  const stats = buildBridgeStatsQuery({ project: "p", dataset: "d" });
+  assert.match(stats, /COUNT\(DISTINCT gaKey\)/);
+  assert.match(stats, /MIN\(firstVisitDate\)/);
+  assert.match(stats, /MAX\(syncedAt\)/);
+  assert.match(stats, new RegExp(`p\\.d\\.${GA4_BRIDGE_TABLE}`));
+  const log = buildLatestSyncLogQuery({ project: "p", dataset: "d" });
+  assert.match(log, new RegExp(`p\\.d\\.${GA4_BRIDGE_SYNC_LOG_TABLE}`));
+  assert.match(log, /ORDER BY syncedAt DESC/);
+  const logCols = GA4_BRIDGE_SYNC_LOG_SCHEMA.map((f) => f.name);
+  assert.ok(logCols.includes("ok"));
+  assert.ok(logCols.includes("inserted"));
 });

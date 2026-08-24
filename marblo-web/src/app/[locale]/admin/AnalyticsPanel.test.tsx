@@ -823,6 +823,61 @@ test("★획득 탭은 기다리는 표 이름을 실제 이름으로 적는다"
   assert.match(html, /적재 전/);
 });
 
+test("★브리지 미적재 배너는 유입 0 이라고 말하지 않는다", () => {
+  const html = renderToStaticMarkup(
+    <P.Ga4BridgeFreshnessNote
+      data={{
+        lastSyncedAt: null,
+        rowCount: 0,
+        distinctGaKeys: 0,
+        minFirstVisitDate: null,
+        maxFirstVisitDate: null,
+        visitLagDays: null,
+        lastSyncLagDays: null,
+        status: "not_ingested",
+        rangeDays: null,
+        scanned: null,
+        inserted: null,
+        skippedExisting: null,
+        reason: null,
+        ok: null,
+        errorMessage: null,
+      }}
+    />
+  );
+  assert.match(html, /data-testid="ga4-bridge-freshness"/);
+  assert.match(html, /미적재/);
+  assert.match(html, /유입 0이 아니라/);
+});
+
+test("★브리지 적재 배너는 마지막 동기 시각을 보인다", () => {
+  const html = renderToStaticMarkup(
+    <P.Ga4BridgeFreshnessNote
+      data={{
+        lastSyncedAt: "2026-08-23T20:30:08.000Z",
+        rowCount: 100,
+        distinctGaKeys: 100,
+        minFirstVisitDate: "2026-08-19",
+        maxFirstVisitDate: "2026-08-22",
+        visitLagDays: 2,
+        lastSyncLagDays: 0,
+        status: "loaded",
+        rangeDays: 3,
+        scanned: 58,
+        inserted: 30,
+        skippedExisting: 28,
+        reason: "incremental",
+        ok: true,
+        errorMessage: null,
+      }}
+    />
+  );
+  assert.match(html, /마지막 동기/);
+  assert.match(html, /2026-08-24 05:30 KST/);
+  assert.match(html, /적재 100명/);
+  assert.doesNotMatch(html, />브리지 미적재</);
+});
+
 test("initialTab 은 선택된 탭만 렌더한다는 기존 규약을 깨지 않는다", () => {
   const html = renderToStaticMarkup(<P.default initialTab="revenue" />);
   assert.doesNotMatch(html, /id="analytics-panel-acquisition"/);

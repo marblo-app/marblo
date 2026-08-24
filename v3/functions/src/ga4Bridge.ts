@@ -87,6 +87,27 @@ export const GA4_SYNC_DEFAULT_DAYS = 3;
 /** 백필 최대 조회창(일). */
 export const GA4_SYNC_MAX_DAYS = 400;
 
+/**
+ * 일 1회 15:00 KST. GA4 일별 export 는 D-1 표가 보통 10:00–12:00 KST 에
+ * 생긴다(실측 2026-08-24: events_20260823 생성 ~11:28 KST). 05:30 은 그 전에
+ * 돌아 D+2 가 됐다. 분·시간 단위로 올리지 않는다 — 일 단위 신선도가 목표다.
+ */
+export const GA4_SYNC_SCHEDULE_CRON = "0 15 * * *";
+export const GA4_SYNC_SCHEDULE_TZ = "Asia/Seoul";
+
+/**
+ * 브리지 표의 firstVisitDate 폭이 이 값 이하면 **400일 백필을 한 번** 돌린다.
+ * 설계 문서의 713행은 days=400 소스 쿼리였고, 라이브 표는 스케줄 3일창만
+ * 받아 100행이다. 폭이 짧으면 백필이 한 번도 안 돈 것이다.
+ */
+export const GA4_HISTORY_BACKFILL_IF_SPAN_DAYS = 14;
+
+/** 마지막 동기 서울 날짜가 오늘보다 이 일수 이상 뒤면 stale. */
+export const GA4_FRESHNESS_STALE_AFTER_DAYS = 2;
+
+/** 매 실행(0행 insert 포함)을 남기는 워터마크. MAX(bridge.syncedAt) 는 마지막 INSERT 라 0-insert 날이 '멈춤'으로 보인다. */
+export const GA4_BRIDGE_SYNC_LOG_TABLE = "ga4_bridge_sync_log";
+
 /** 귀속 소스 표기 — 행마다 어디서 온 값인지 남긴다. */
 export const ATTRIBUTION_SOURCE_FIRST_TOUCH = "traffic_source";
 export const ATTRIBUTION_SOURCE_COLLECTED = "collected_traffic_source";
@@ -444,6 +465,48 @@ export function buildBridgeCurrentViewSql(opts: {
   `;
 }
 
+/** 브리지 표 한 줄 요약 — 어드민 신선도 + 스케줄 백필 판정용. */
+export function buildBridgeStatsQuery(opts: {
+  project: string;
+  dataset: string;
+}): string {
+  assertIdent("project", opts.project);
+  assertIdent("dataset", opts.dataset);
+  return `
+    SELECT
+      COUNT(*) AS rowCount,
+      COUNT(DISTINCT gaKey) AS distinctGaKeys,
+      CAST(MIN(firstVisitDate) AS STRING) AS minFirstVisitDate,
+      CAST(MAX(firstVisitDate) AS STRING) AS maxFirstVisitDate,
+      FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%SZ', MAX(syncedAt)) AS lastSyncedAt
+    FROM \`${opts.project}.${opts.dataset}.${GA4_BRIDGE_TABLE}\`
+  `;
+}
+
+/** 마지막 실행 한 줄. 0-insert 날도 행이 남는다. */
+export function buildLatestSyncLogQuery(opts: {
+  project: string;
+  dataset: string;
+}): string {
+  assertIdent("project", opts.project);
+  assertIdent("dataset", opts.dataset);
+  return `
+    SELECT
+      FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%SZ', syncedAt) AS lastSyncedAt,
+      rangeDays,
+      scanned,
+      eligible,
+      inserted,
+      skippedExisting,
+      reason,
+      ok,
+      errorMessage
+    FROM \`${opts.project}.${opts.dataset}.${GA4_BRIDGE_SYNC_LOG_TABLE}\`
+    ORDER BY syncedAt DESC
+    LIMIT 1
+  `;
+}
+
 
 // ── 스키마 ───────────────────────────────────────────────────────────────────
 
@@ -472,3 +535,279 @@ export const GA4_BRIDGE_SCHEMA = [
   { name: "attributionSource", type: "STRING", mode: "NULLABLE" },
   { name: "syncedAt", type: "TIMESTAMP", mode: "REQUIRED" },
 ] as const;
+
+export const GA4_BRIDGE_SYNC_LOG_SCHEMA = [
+  { name: "syncedAt", type: "TIMESTAMP", mode: "REQUIRED" },
+  { name: "rangeDays", type: "INT64", mode: "REQUIRED" },
+  { name: "scanned", type: "INT64", mode: "NULLABLE" },
+  { name: "eligible", type: "INT64", mode: "NULLABLE" },
+  { name: "inserted", type: "INT64", mode: "NULLABLE" },
+  { name: "skippedExisting", type: "INT64", mode: "NULLABLE" },
+  { name: "reason", type: "STRING", mode: "NULLABLE" },
+  { name: "ok", type: "BOOL", mode: "REQUIRED" },
+  { name: "errorMessage", type: "STRING", mode: "NULLABLE" },
+] as const;
+
+export type Ga4BridgeSyncReason =
+  | "incremental"
+  | "historical-backfill"
+  | "manual";
+
+export type Ga4BridgeFreshnessStatus =
+  | "not_ingested"
+  | "loaded"
+  | "stale"
+  | "unknown";
+
+export interface Ga4BridgeStats {
+  rowCount: number;
+  distinctGaKeys: number;
+  minFirstVisitDate: string | null;
+  maxFirstVisitDate: string | null;
+  lastSyncedAt: string | null;
+}
+
+export interface Ga4BridgeSyncLogRow {
+  lastSyncedAt: string | null;
+  rangeDays: number | null;
+  scanned: number | null;
+  eligible: number | null;
+  inserted: number | null;
+  skippedExisting: number | null;
+  reason: string | null;
+  ok: boolean | null;
+  errorMessage: string | null;
+}
+
+export interface Ga4BridgeFreshness {
+  lastSyncedAt: string | null;
+  rowCount: number;
+  distinctGaKeys: number;
+  minFirstVisitDate: string | null;
+  maxFirstVisitDate: string | null;
+  visitLagDays: number | null;
+  lastSyncLagDays: number | null;
+  status: Ga4BridgeFreshnessStatus;
+  rangeDays: number | null;
+  scanned: number | null;
+  inserted: number | null;
+  skippedExisting: number | null;
+  reason: string | null;
+  ok: boolean | null;
+  errorMessage: string | null;
+}
+
+export interface Ga4BridgeSyncLogWrite {
+  syncedAt: string;
+  rangeDays: number;
+  scanned: number | null;
+  eligible: number | null;
+  inserted: number | null;
+  skippedExisting: number | null;
+  reason: Ga4BridgeSyncReason;
+  ok: boolean;
+  errorMessage: string | null;
+}
+
+/** BQ 가 `{ value }` 로 감싸 주는 스칼라를 벗긴다. */
+export function unwrapBqValue(raw: unknown): unknown {
+  let cur: unknown = raw;
+  for (let i = 0; i < 4; i++) {
+    if (cur && typeof cur === "object" && "value" in cur) {
+      cur = (cur as { value: unknown }).value;
+      continue;
+    }
+    break;
+  }
+  return cur;
+}
+
+export function seoulDateString(now: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const year = parts.find((p) => p.type === "year")?.value;
+  const month = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  if (!year || !month || !day) {
+    throw new Error("failed to format Asia/Seoul date");
+  }
+  return `${year}-${month}-${day}`;
+}
+
+export function calendarDaysBetween(
+  from: string,
+  to: string
+): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    return null;
+  }
+  const a = Date.UTC(
+    Number(from.slice(0, 4)),
+    Number(from.slice(5, 7)) - 1,
+    Number(from.slice(8, 10))
+  );
+  const b = Date.UTC(
+    Number(to.slice(0, 4)),
+    Number(to.slice(5, 7)) - 1,
+    Number(to.slice(8, 10))
+  );
+  return Math.round((b - a) / 86_400_000);
+}
+
+export function timestampToSeoulDate(raw: string): string | null {
+  const d = new Date(raw);
+  if (!Number.isFinite(d.getTime())) return null;
+  return seoulDateString(d);
+}
+
+export function emptyGa4BridgeStats(): Ga4BridgeStats {
+  return {
+    rowCount: 0,
+    distinctGaKeys: 0,
+    minFirstVisitDate: null,
+    maxFirstVisitDate: null,
+    lastSyncedAt: null,
+  };
+}
+
+export function parseBridgeStatsRow(raw: unknown): Ga4BridgeStats {
+  if (!raw || typeof raw !== "object") return emptyGa4BridgeStats();
+  const row = raw as Record<string, unknown>;
+  return {
+    rowCount: bridgeCount(unwrapBqValue(row.rowCount)),
+    distinctGaKeys: bridgeCount(unwrapBqValue(row.distinctGaKeys)),
+    minFirstVisitDate: normalizeFirstVisitDate(
+      unwrapBqValue(row.minFirstVisitDate)
+    ),
+    maxFirstVisitDate: normalizeFirstVisitDate(
+      unwrapBqValue(row.maxFirstVisitDate)
+    ),
+    lastSyncedAt: asTimestampIso(unwrapBqValue(row.lastSyncedAt)),
+  };
+}
+
+export function parseSyncLogRow(raw: unknown): Ga4BridgeSyncLogRow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const okRaw = unwrapBqValue(row.ok);
+  let ok: boolean | null = null;
+  if (typeof okRaw === "boolean") ok = okRaw;
+  else if (okRaw === "true") ok = true;
+  else if (okRaw === "false") ok = false;
+  const reasonRaw = cleanBridgeField(unwrapBqValue(row.reason));
+  const errRaw = unwrapBqValue(row.errorMessage);
+  return {
+    lastSyncedAt: asTimestampIso(unwrapBqValue(row.lastSyncedAt)),
+    rangeDays: nullableCount(unwrapBqValue(row.rangeDays)),
+    scanned: nullableCount(unwrapBqValue(row.scanned)),
+    eligible: nullableCount(unwrapBqValue(row.eligible)),
+    inserted: nullableCount(unwrapBqValue(row.inserted)),
+    skippedExisting: nullableCount(unwrapBqValue(row.skippedExisting)),
+    reason: reasonRaw,
+    ok,
+    errorMessage: typeof errRaw === "string" && errRaw.trim() ? errRaw.trim() : null,
+  };
+}
+
+function nullableCount(raw: unknown): number | null {
+  if (raw == null || raw === "") return null;
+  return bridgeCount(raw);
+}
+
+export function asTimestampIso(raw: unknown): string | null {
+  if (raw instanceof Date) {
+    return Number.isFinite(raw.getTime()) ? raw.toISOString() : null;
+  }
+  if (typeof raw !== "string") return null;
+  const v = raw.trim();
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
+
+/**
+ * 스케줄 조회창. 표가 없거나 firstVisit 폭이 3일창(+여유) 수준이면
+ * 400일 백필을 **한 번** 고른다. 매일 400일을 도는 게 아니다.
+ */
+export function chooseSyncDays(opts: {
+  rowCount: number;
+  minFirstVisitDate: string | null;
+  todaySeoul: string;
+}): { days: number; reason: Ga4BridgeSyncReason } {
+  if (opts.rowCount < 1 || !opts.minFirstVisitDate) {
+    return { days: GA4_SYNC_MAX_DAYS, reason: "historical-backfill" };
+  }
+  const span = calendarDaysBetween(opts.minFirstVisitDate, opts.todaySeoul);
+  if (span == null || span <= GA4_HISTORY_BACKFILL_IF_SPAN_DAYS) {
+    return { days: GA4_SYNC_MAX_DAYS, reason: "historical-backfill" };
+  }
+  return { days: GA4_SYNC_DEFAULT_DAYS, reason: "incremental" };
+}
+
+export function classifyGa4BridgeFreshness(opts: {
+  lastSyncedAt: string | null;
+  todaySeoul: string;
+  statsError?: boolean;
+}): Ga4BridgeFreshnessStatus {
+  if (opts.statsError && !opts.lastSyncedAt) return "unknown";
+  if (!opts.lastSyncedAt) return "not_ingested";
+  const syncDay = timestampToSeoulDate(opts.lastSyncedAt);
+  if (!syncDay) return "unknown";
+  const lag = calendarDaysBetween(syncDay, opts.todaySeoul);
+  if (lag == null) return "unknown";
+  if (lag >= GA4_FRESHNESS_STALE_AFTER_DAYS) return "stale";
+  return "loaded";
+}
+
+export function assembleGa4BridgeFreshness(opts: {
+  todaySeoul: string;
+  stats: Ga4BridgeStats;
+  log: Ga4BridgeSyncLogRow | null;
+  statsError?: boolean;
+}): Ga4BridgeFreshness {
+  const lastSyncedAt = opts.log?.lastSyncedAt ?? opts.stats.lastSyncedAt;
+  const visitLagDays = opts.stats.maxFirstVisitDate
+    ? calendarDaysBetween(opts.stats.maxFirstVisitDate, opts.todaySeoul)
+    : null;
+  const syncDay = lastSyncedAt ? timestampToSeoulDate(lastSyncedAt) : null;
+  const lastSyncLagDays = syncDay
+    ? calendarDaysBetween(syncDay, opts.todaySeoul)
+    : null;
+  return {
+    lastSyncedAt,
+    rowCount: opts.stats.rowCount,
+    distinctGaKeys: opts.stats.distinctGaKeys,
+    minFirstVisitDate: opts.stats.minFirstVisitDate,
+    maxFirstVisitDate: opts.stats.maxFirstVisitDate,
+    visitLagDays,
+    lastSyncLagDays,
+    status: classifyGa4BridgeFreshness({
+      lastSyncedAt,
+      todaySeoul: opts.todaySeoul,
+      statsError: opts.statsError,
+    }),
+    rangeDays: opts.log?.rangeDays ?? null,
+    scanned: opts.log?.scanned ?? null,
+    inserted: opts.log?.inserted ?? null,
+    skippedExisting: opts.log?.skippedExisting ?? null,
+    reason: opts.log?.reason ?? null,
+    ok: opts.log?.ok ?? null,
+    errorMessage: opts.log?.errorMessage ?? null,
+  };
+}
+
+/** 일 단위 cron 만 허용 — 분 단위로 올리면 비용만 는다. */
+export function isDailyCron(cron: string): boolean {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return false;
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+  if (minute !== "0" && minute !== "00") return false;
+  if (!/^\d{1,2}$/.test(hour)) return false;
+  const h = Number(hour);
+  if (h < 0 || h > 23) return false;
+  return dayOfMonth === "*" && month === "*" && dayOfWeek === "*";
+}
