@@ -26,6 +26,7 @@ import { useTranslation } from "../../lib/i18n";
 import { useTaskStore } from "../../stores/taskStore";
 import { routeInstructionToOrchestrator } from "../../services/orchestratorInstructionService";
 import {
+  buildMissionMembership,
   deriveWorkChain,
   referencedTaskIds,
   taskStatusLookupFrom,
@@ -34,11 +35,13 @@ import {
   type DerivedWorkChainItem,
   type WorkChainItem,
 } from "../../lib/workChain";
+import type { Mission } from "../../types/mission";
 import {
   addWorkChainItemFromUi,
   dropWorkChainItemFromUi,
   removeWorkChainEvidenceTaskFromUi,
   subscribeWorkChain,
+  subscribeWorkChainMissions,
 } from "../../services/workChainService";
 import { StateBlock } from "../common/StateBlock";
 import type { LoadState } from "../common/loadState";
@@ -87,7 +90,7 @@ function persistPanelHeight(height: number): void {
 }
 
 const STATE_CHIP: Record<
-  DerivedWorkChainItem["state"] | "doneSelf",
+  DerivedWorkChainItem["state"] | "doneSelf" | "unsplit",
   { cls: string; key: string }
 > = {
   ready: {
@@ -110,9 +113,14 @@ const STATE_CHIP: Record<
     cls: "bg-[#6c7086]/20 text-[#a6adc8]",
     key: "orchestrator.chain.state.dropped",
   },
+  unsplit: {
+    cls: "bg-[#f9e2af]/15 text-[#f9e2af]",
+    key: "orchestrator.chain.state.unsplit",
+  },
 };
 
 function chipFor(d: DerivedWorkChainItem): keyof typeof STATE_CHIP {
+  if (d.unsplit && d.state === "ready") return "unsplit";
   if (d.state === "done" && d.evidence === "self") return "doneSelf";
   return d.state;
 }
@@ -138,6 +146,7 @@ export default memo(function WorkChainPanel({
   const [startedItemIds, setStartedItemIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [missions, setMissions] = useState<Mission[]>([]);
   const [panelHeight, setPanelHeight] = useState(readPanelHeight);
   const [isResizing, setIsResizing] = useState(false);
   const panelHeightRef = useRef(panelHeight);
@@ -151,6 +160,13 @@ export default memo(function WorkChainPanel({
     if (!projectId) return;
     return subscribeToTasks(projectId);
   }, [projectId, subscribeToTasks]);
+
+  // Read-only implicit-mission labels for chain membership. Does not start
+  // the mission engine (MISSION_DRIVER stays off).
+  useEffect(() => {
+    if (!projectId) return;
+    return subscribeWorkChainMissions(projectId, setMissions);
+  }, [projectId]);
 
   useEffect(() => {
     panelHeightRef.current = panelHeight;
@@ -261,16 +277,25 @@ export default memo(function WorkChainPanel({
     };
   }, [expanded]);
 
+  const membership = useMemo(
+    () => buildMissionMembership(missions, tasks),
+    [missions, tasks],
+  );
+
   const derived: DerivedWorkChain | null = useMemo(() => {
     if (load.kind !== "ready") return null;
-    const ids = referencedTaskIds(load.items);
-    return deriveWorkChain(load.items, taskStatusLookupFrom(tasks, ids));
-  }, [load, tasks]);
+    const ids = referencedTaskIds(load.items, membership);
+    return deriveWorkChain(
+      load.items,
+      taskStatusLookupFrom(tasks, ids),
+      membership,
+    );
+  }, [load, tasks, membership]);
 
   const titles = useMemo(() => {
     if (load.kind !== "ready") return {};
-    return taskTitlesFrom(tasks, referencedTaskIds(load.items));
-  }, [load, tasks]);
+    return taskTitlesFrom(tasks, referencedTaskIds(load.items, membership));
+  }, [load, tasks, membership]);
 
   const openForm = useCallback(() => {
     setExpanded(true);
@@ -387,8 +412,12 @@ export default memo(function WorkChainPanel({
       className="relative z-20 mx-3 mb-2 rounded border border-[#313244] bg-[#1e1e2e] text-[11px] text-[#cdd6f4]"
       onClick={(e) => e.stopPropagation()}
     >
-      {/* 요약 줄 — 항상 보인다. 오케가 다음에 뭘 할 작정인지가 여기 한 줄이다. */}
-      <div className="flex min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap px-2 py-0.5">
+      {/* 요약 줄 — 항상 보인다. 오케가 다음에 뭘 할 작정인지가 여기 한 줄이다.
+          ★진행률·unsplit 은 접힘 줄에 넣지 않는다(#1147→#1150→#1152). */}
+      <div
+        data-testid="work-chain-summary"
+        className="flex min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap px-2 py-0.5"
+      >
         <span className="shrink-0 font-medium text-[#cba6f7]">
           {t("orchestrator.chain.title")}
         </span>
@@ -523,6 +552,7 @@ export default memo(function WorkChainPanel({
                         data-testid="work-chain-item"
                         data-state={d.state}
                         data-evidence={d.evidence ?? ""}
+                        data-unsplit={d.unsplit ? "true" : undefined}
                         className={`rounded border px-2 py-1 ${
                           isNext
                             ? "border-[#a6e3a1]/50 bg-[#a6e3a1]/5"
@@ -572,13 +602,37 @@ export default memo(function WorkChainPanel({
                           </span>{" "}
                           {d.item.why}
                         </div>
-                        {d.item.taskIds.length > 0 && (
+                        {d.item.missionLabel && (
+                          <div
+                            data-testid="work-chain-mission-progress"
+                            className="mt-0.5 text-[10px] text-[#a6adc8]"
+                          >
+                            {d.unsplit
+                              ? t("orchestrator.chain.unsplitHint")
+                              : t("orchestrator.chain.missionProgress", {
+                                  label: d.item.missionLabel,
+                                  reached: d.reachedCount,
+                                  total: d.totalCount,
+                                })}
+                            {d.missionCount >= 2 ? (
+                              <span
+                                data-testid="work-chain-mission-combined"
+                                className="ml-1 text-[#f9e2af]"
+                              >
+                                {t("orchestrator.chain.missionCombined", {
+                                  count: d.missionCount,
+                                })}
+                              </span>
+                            ) : null}
+                          </div>
+                        )}
+                        {d.evidenceTaskIds.length > 0 && (
                           <div className="mt-0.5 text-[10px] text-[#a6adc8]">
                             <span className="text-[#6c7086]">
                               {t("orchestrator.chain.evidence")}
                               {` (${d.item.doneWhen})`}:
                             </span>{" "}
-                            {d.item.taskIds.map((id) => {
+                            {d.evidenceTaskIds.map((id) => {
                               const st = tasks.find((x) => x.id === id)?.status;
                               return (
                                 <span key={id} className="mr-2">

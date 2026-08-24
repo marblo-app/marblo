@@ -164,6 +164,11 @@ export const orchestrator: Record<keyof typeof koOrchestrator, string> = {
   "orchestrator.chain.state.done": "Done",
   "orchestrator.chain.state.doneSelf": "Done (self-reported)",
   "orchestrator.chain.state.dropped": "Dropped",
+  "orchestrator.chain.state.unsplit": "Not split yet",
+  "orchestrator.chain.missionProgress": "{label}: {reached}/{total} done",
+  "orchestrator.chain.missionCombined": "{count} missions combined",
+  "orchestrator.chain.unsplitHint":
+    "No tickets in this mission yet. Split it before the board can judge completion.",
   "orchestrator.chain.next": "Next",
   "orchestrator.chain.why": "Why",
   "orchestrator.chain.evidence": "Evidence tickets",

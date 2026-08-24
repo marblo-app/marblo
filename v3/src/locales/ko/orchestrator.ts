@@ -174,6 +174,11 @@ export const orchestrator = {
   "orchestrator.chain.state.done": "완료",
   "orchestrator.chain.state.doneSelf": "완료(자기보고)",
   "orchestrator.chain.state.dropped": "내림",
+  "orchestrator.chain.state.unsplit": "아직 안 쪼개짐",
+  "orchestrator.chain.missionProgress": "{label}: {reached}/{total} 완료",
+  "orchestrator.chain.missionCombined": "미션 {count}개 합산",
+  "orchestrator.chain.unsplitHint":
+    "이 미션에 티켓이 없습니다. 쪼개져야 보드가 완료를 판정합니다.",
   "orchestrator.chain.next": "다음",
   "orchestrator.chain.why": "왜",
   "orchestrator.chain.evidence": "근거 티켓",

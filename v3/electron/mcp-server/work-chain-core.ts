@@ -11,6 +11,9 @@
  * src/ 도 import 하지 않는다. MCP 서버 tsconfig 는 rootDir 격리라 src/ 를 못 보지만
  * 반대 방향(src → electron/mcp-server)은 이미 `model-tier` 가 쓰는 경로다).
  *
+ * 암묵 미션 라벨 매칭은 `implicit-mission.ts` 의 `missionLabelKey` 를 그대로
+ * 쓴다 — 새 정규화 규칙을 만들지 않는다. 미션 엔진(MISSION_DRIVER)과는 무관.
+ *
  * ## 왜 새 문서인가 — missions / flows / pendingInstructions 를 안 쓴 근거
  *   · missions: 수명주기가 mission-engine 지휘자에 용접돼 있다. `planning` 이면
  *     wire.ts 가 집어 실행하고, `implicit` 이면 MissionsTab 이 숨긴다. step.type 은
@@ -42,6 +45,9 @@
  *   afterTaskIds   선행 티켓 — 전부 DONE 이어야 ready
  *   afterItemIds   선행 체인 항목 — 전부 done/dropped 여야 ready
  *   taskIds        이 항목의 실체 티켓 — 전부 `doneWhen` 에 닿으면 done (보드 근거)
+ *   missionLabel   암묵 미션 라벨 — 보드에서 그 라벨의 티켓을 모아 taskIds 와
+ *                  합집합으로 판정한다. 매칭은 `missionLabelKey`(implicit-mission.ts)
+ *                  그대로. 라벨만 있고 티켓 0개면 done 이 아니다(unsplit).
  *   doneWhen       exists(티켓이 생기면) | review(REVIEW 이상) | done(DONE)
  *   closed         오케/사용자의 명시적 종료 — dropped(사유) | self_reported(근거)
  *   source         manual(오케가 직접 add_work_chain_item) | auto(도구 층이 오케가
@@ -49,6 +55,12 @@
  *                  없앤 축이라 끝까지 구분돼 보여야 한다(자기보고 evidence 와 같은 규율).
  *   sourceTool     auto 일 때 어느 도구가 적었나 — 오탐이 어느 표면에서 나오는지 진단.
  */
+
+import {
+  isImplicitMissionDoc,
+  missionLabelKey,
+  normalizeMissionLabel,
+} from "./implicit-mission.js";
 
 export type WorkChainTaskStatus =
   | "TODO"
@@ -89,6 +101,11 @@ export interface WorkChainItem {
   afterTaskIds: string[];
   afterItemIds: string[];
   taskIds: string[];
+  /**
+   * 암묵 미션 라벨(표시용 원문, normalizeMissionLabel 적용). 매칭은
+   * `missionLabelKey`. 없으면 미션 묶음 없음(기존 항목).
+   */
+  missionLabel?: string;
   doneWhen: WorkChainDoneWhen;
   closed?: WorkChainClosed;
   /** 진행 메모(선택). 상태가 아니라 맥락이다. */
@@ -129,6 +146,25 @@ export interface DerivedWorkChainItem {
   pendingItemIds: string[];
   /** 연결 티켓 중 보드에 없는 것(삭제됐거나 id 오타). 근거가 사라진 항목이다. */
   missingTaskIds: string[];
+  /**
+   * 이 항목의 완료 근거 티켓(명시 taskIds ∪ 미션 소속). 패널 진행률·MCP
+   * evidence 줄의 단일 목록.
+   */
+  evidenceTaskIds: string[];
+  /** evidenceTaskIds 중 doneWhen 에 닿은 수. */
+  reachedCount: number;
+  totalCount: number;
+  /**
+   * 미션 라벨은 있는데 보드에 그 미션 티켓이 0개(명시 taskIds 도 없음).
+   * ★done 이 아니다 — 빈 집합을 전칭으로 두면 걸자마자 완료로 보인다.
+   * state 는 after* 가 없으면 ready (다음 할 일 = 쪼개기).
+   */
+  unsplit: boolean;
+  /**
+   * 이 라벨에 매칭된 implicit 미션 문서 수. 2 이상이면 진행률은 여러 배치의
+   * 합집합이다 — 펼침/MCP 에 그 사실을 밝혀야 한다(조용한 합산 금지).
+   */
+  missionCount: number;
 }
 
 export interface DerivedWorkChain {
@@ -143,6 +179,40 @@ export interface DerivedWorkChain {
 
 /** 티켓 id → 라이브 status. 없는 티켓은 null (undefined 는 "아직 못 읽음" 이 아니라 "없음" 으로 취급). */
 export type TaskStatusLookup = Record<string, WorkChainTaskStatus | null>;
+
+/**
+ * 한 라벨 키에 대한 보드 소속. I/O 가 채우고 `deriveWorkChain` 이 읽는다.
+ *
+ * ★같은 라벨로 배치를 두 번 돌리면 implicit 미션이 두 개 생긴다(끝난 미션에는
+ * 합류하지 않음). 합산은 유지한다 — 라벨은 집합 키이고, 최근 1개만 고르면
+ * 과거 배치가 조용히 빠진다. 대신 `missionCount` 를 실어 2개 이상이면
+ * 펼침/MCP 가 "미션 N개 합산" 을 말한다. 조용한 12/40 은 오늘
+ * `identity_linked_ratio` 와 같은 실패(숫자는 맞는데 물은 것과 다른 답).
+ */
+export interface MissionMembershipBucket {
+  taskIds: readonly string[];
+  missionCount: number;
+}
+
+export type MissionMembershipLookup = Readonly<
+  Record<string, MissionMembershipBucket>
+>;
+
+/** `buildMissionMembership` 에 넘기는 미션 문서 최소 모양. */
+export interface MissionMembershipSource {
+  id: string;
+  missionKind?: string | null;
+  implicitLabel?: string | null;
+  status?: string | null;
+}
+
+/** `buildMissionMembership` 에 넘기는 보드 티켓 최소 모양. */
+export interface MissionMemberTask {
+  id: string;
+  contextId?: string | null;
+  missionId?: string | null;
+  deleted?: boolean;
+}
 
 export const WORK_CHAIN_COLLECTION = "workChains";
 
@@ -170,6 +240,71 @@ function uniqStrings(values: readonly string[] | undefined): string[] {
     if (s && !out.includes(s)) out.push(s);
   }
   return out;
+}
+
+/**
+ * 암묵 미션 문서 + 보드 티켓 → 라벨 키별 티켓 id + 매칭 미션 수.
+ *
+ * 조인은 Replay 와 같다: `task.contextId === missionId`(missionId 필드가 있으면
+ * 그것도). abandoned 는 제외, completed 는 포함(방금 끝난 미션이 unsplit 으로
+ * 뒤집히면 안 된다). 엔진을 켜지 않는다 — 문서 읽기만.
+ *
+ * 같은 키의 미션이 여럿이면 티켓을 합집합으로 모은다(가). 개수는
+ * `missionCount` 로 드러난다 — 조용히 합산만 하지 않는다.
+ */
+export function buildMissionMembership(
+  missions: readonly MissionMembershipSource[],
+  tasks: readonly MissionMemberTask[],
+): Record<string, MissionMembershipBucket> {
+  const missionIdToKeys = new Map<string, string[]>();
+  const keyToMissionIds = new Map<string, string[]>();
+  for (const mission of missions) {
+    if (!isImplicitMissionDoc(mission)) continue;
+    if (mission.status === "abandoned") continue;
+    const label = normalizeMissionLabel(mission.implicitLabel ?? null);
+    if (!label) continue;
+    const key = missionLabelKey(label);
+    const prev = missionIdToKeys.get(mission.id) ?? [];
+    if (!prev.includes(key)) prev.push(key);
+    missionIdToKeys.set(mission.id, prev);
+    const ids = keyToMissionIds.get(key) ?? [];
+    if (!ids.includes(mission.id)) ids.push(mission.id);
+    keyToMissionIds.set(key, ids);
+  }
+  const taskIdsByKey: Record<string, string[]> = {};
+  for (const task of tasks) {
+    if (!task.id || task.deleted) continue;
+    const refs = uniqStrings([task.contextId ?? "", task.missionId ?? ""]);
+    for (const ref of refs) {
+      if (ref === "board") continue;
+      const keys = missionIdToKeys.get(ref);
+      if (!keys) continue;
+      for (const key of keys) {
+        const list = taskIdsByKey[key] ?? [];
+        if (!list.includes(task.id)) list.push(task.id);
+        taskIdsByKey[key] = list;
+      }
+    }
+  }
+  const out: Record<string, MissionMembershipBucket> = {};
+  for (const [key, missionIds] of keyToMissionIds) {
+    out[key] = {
+      taskIds: taskIdsByKey[key] ?? [],
+      missionCount: missionIds.length,
+    };
+  }
+  return out;
+}
+
+/** 명시 taskIds ∪ 미션 소속. 완료 판정·진행률의 단일 집합. */
+export function evidenceTaskIds(
+  item: WorkChainItem,
+  membership: MissionMembershipLookup = {},
+): string[] {
+  const fromMission = item.missionLabel
+    ? (membership[missionLabelKey(item.missionLabel)]?.taskIds ?? [])
+    : [];
+  return uniqStrings([...item.taskIds, ...fromMission]);
 }
 
 /** 저장 문서 → 타입 보정. 손상/구버전 필드는 조용히 기본값으로(읽기 경로를 절대 안 죽인다). */
@@ -215,6 +350,10 @@ export function normalizeWorkChainItem(raw: unknown): WorkChainItem | null {
   if (r.source === "auto" || r.source === "manual") item.source = r.source;
   if (typeof r.sourceTool === "string" && r.sourceTool.trim())
     item.sourceTool = r.sourceTool.trim();
+  const missionLabel = normalizeMissionLabel(
+    typeof r.missionLabel === "string" ? r.missionLabel : null,
+  );
+  if (missionLabel) item.missionLabel = missionLabel;
   return item;
 }
 
@@ -228,11 +367,17 @@ export function normalizeWorkChainItems(raw: unknown): WorkChainItem[] {
   return out;
 }
 
-/** 체인 항목이 참조하는 모든 티켓 id(선행 + 실체). 라이브 상태를 읽어야 할 집합. */
-export function referencedTaskIds(items: readonly WorkChainItem[]): string[] {
+/** 체인 항목이 참조하는 모든 티켓 id(선행 + 실체 + 미션 소속). 라이브 상태를 읽어야 할 집합. */
+export function referencedTaskIds(
+  items: readonly WorkChainItem[],
+  membership: MissionMembershipLookup = {},
+): string[] {
   const ids: string[] = [];
   for (const it of items) {
-    for (const id of [...it.afterTaskIds, ...it.taskIds]) {
+    for (const id of [
+      ...it.afterTaskIds,
+      ...evidenceTaskIds(it, membership),
+    ]) {
       if (!ids.includes(id)) ids.push(id);
     }
   }
@@ -248,42 +393,58 @@ export function deriveItemState(
   item: WorkChainItem,
   tasks: TaskStatusLookup,
   itemStateById: ReadonlyMap<string, WorkChainItemState>,
+  membership: MissionMembershipLookup = {},
 ): DerivedWorkChainItem {
-  const missingTaskIds = [...item.afterTaskIds, ...item.taskIds].filter(
+  const evidenceIds = evidenceTaskIds(item, membership);
+  const unsplit = Boolean(item.missionLabel) && evidenceIds.length === 0;
+  const reachedCount = evidenceIds.filter((id) =>
+    statusSatisfiesDoneWhen(tasks[id], item.doneWhen),
+  ).length;
+  const totalCount = evidenceIds.length;
+  const missingTaskIds = [...item.afterTaskIds, ...evidenceIds].filter(
     (id) => tasks[id] === null || tasks[id] === undefined,
   );
+  const missionCount = item.missionLabel
+    ? (membership[missionLabelKey(item.missionLabel)]?.missionCount ?? 0)
+    : 0;
+  const progress = {
+    evidenceTaskIds: evidenceIds,
+    reachedCount,
+    totalCount,
+    unsplit,
+    missingTaskIds,
+    missionCount,
+  };
   if (item.closed?.kind === "dropped") {
     return {
       item,
       state: "dropped",
       pendingTaskIds: [],
       pendingItemIds: [],
-      missingTaskIds,
+      ...progress,
     };
   }
   // ★보드 근거가 자기보고보다 먼저다. 티켓이 연결돼 있으면 그 상태가 답이다.
-  if (item.taskIds.length > 0) {
-    const allReached = item.taskIds.every((id) =>
-      statusSatisfiesDoneWhen(tasks[id], item.doneWhen),
-    );
-    if (allReached) {
+  // 미션 라벨만 있고 티켓 0개(unsplit)는 빈 전칭이 아니다 — done 이 될 수 없다.
+  if (evidenceIds.length > 0) {
+    if (reachedCount === totalCount) {
       return {
         item,
         state: "done",
         evidence: "board",
         pendingTaskIds: [],
         pendingItemIds: [],
-        missingTaskIds,
+        ...progress,
       };
     }
-  } else if (item.closed?.kind === "self_reported") {
+  } else if (!unsplit && item.closed?.kind === "self_reported") {
     return {
       item,
       state: "done",
       evidence: "self",
       pendingTaskIds: [],
       pendingItemIds: [],
-      missingTaskIds,
+      ...progress,
     };
   }
   const pendingTaskIds = item.afterTaskIds.filter((id) => tasks[id] !== "DONE");
@@ -297,7 +458,7 @@ export function deriveItemState(
     state: waiting ? "waiting" : "ready",
     pendingTaskIds,
     pendingItemIds,
-    missingTaskIds,
+    ...progress,
   };
 }
 
@@ -305,11 +466,12 @@ export function deriveItemState(
 export function deriveWorkChain(
   items: readonly WorkChainItem[],
   tasks: TaskStatusLookup,
+  membership: MissionMembershipLookup = {},
 ): DerivedWorkChain {
   const stateById = new Map<string, WorkChainItemState>();
   const derived: DerivedWorkChainItem[] = [];
   for (const item of items) {
-    const d = deriveItemState(item, tasks, stateById);
+    const d = deriveItemState(item, tasks, stateById, membership);
     stateById.set(item.id, d.state);
     derived.push(d);
   }
@@ -334,6 +496,8 @@ export interface NewWorkChainItemInput {
   taskIds?: string[];
   afterTaskIds?: string[];
   afterItemIds?: string[];
+  /** 암묵 미션 라벨. 정규화해 저장. 빈 값/공백은 없는 것과 같다. */
+  missionLabel?: string;
   doneWhen?: WorkChainDoneWhen;
   note?: string;
   /** 기본 manual. 자동 포착 경로만 "auto" 를 준다. */
@@ -377,6 +541,8 @@ export function buildWorkChainItem(
   };
   const note = (input.note ?? "").trim();
   if (note) item.note = note;
+  const missionLabel = normalizeMissionLabel(input.missionLabel);
+  if (missionLabel) item.missionLabel = missionLabel;
   if (input.source === "auto") {
     item.source = "auto";
     const tool = (input.sourceTool ?? "").trim();
@@ -393,9 +559,12 @@ export function rejectSelfReportReason(
   item: WorkChainItem,
   reason: string | undefined,
 ): string | null {
-  if (item.taskIds.length > 0) {
+  if (item.taskIds.length > 0 || item.missionLabel) {
+    const bound = item.missionLabel
+      ? `미션 '${item.missionLabel}'${item.taskIds.length ? ` / 티켓 ${item.taskIds.join(", ")}` : ""}`
+      : `티켓 ${item.taskIds.join(", ")}`;
     return (
-      `항목 '${item.what}' 은 티켓 ${item.taskIds.join(", ")} 에 연결돼 있다 — ` +
+      `항목 '${item.what}' 은 ${bound} 에 연결돼 있다 — ` +
       `완료 판정은 그 티켓의 보드 상태(doneWhen=${item.doneWhen})가 한다. ` +
       `자기보고로 닫을 수 없다. 티켓을 실제로 ${item.doneWhen === "done" ? "DONE" : item.doneWhen === "review" ? "REVIEW" : "생성"} 으로 만들어라 ` +
       `(머지했으면 merge_and_close). 티켓과 무관해졌다면 close=dropped 로 사유를 적어라.`
@@ -473,8 +642,21 @@ export function formatDerivedItem(
       `   source: auto${item.sourceTool ? `(${item.sourceTool})` : ""} — 네 문장에서 자동 포착됨. 틀렸으면 close="dropped".`,
     );
   }
-  if (item.taskIds.length) {
-    const facts = item.taskIds
+  if (item.missionLabel) {
+    const combined =
+      d.missionCount >= 2 ? ` — 미션 ${d.missionCount}개 합산` : "";
+    if (d.unsplit) {
+      lines.push(
+        `   mission: '${item.missionLabel}' — unsplit (티켓 0개, 아직 안 쪼개짐. done 아님)${combined}`,
+      );
+    } else {
+      lines.push(
+        `   mission: '${item.missionLabel}' ${d.reachedCount}/${d.totalCount} reached (doneWhen=${item.doneWhen})${combined}`,
+      );
+    }
+  }
+  if (d.evidenceTaskIds.length) {
+    const facts = d.evidenceTaskIds
       .map((id) => {
         const st = opts.taskStatuses?.[id];
         const title = opts.taskTitles?.[id];
@@ -564,7 +746,8 @@ export function workChainNudgeForTaskChange(
     const prev = beforeById.get(d.item.id);
     if (!prev || prev.state === d.state) continue;
     const touches =
-      d.item.taskIds.includes(taskId) || d.item.afterTaskIds.includes(taskId);
+      d.evidenceTaskIds.includes(taskId) ||
+      d.item.afterTaskIds.includes(taskId);
     if (!touches) continue;
     if (d.state === "done") {
       notes.push(`✔ 체인 항목 '${d.item.what}' 완료 — 보드 근거(${taskId}).`);

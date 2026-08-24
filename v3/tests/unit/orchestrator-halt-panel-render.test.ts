@@ -70,6 +70,7 @@ vi.mock("../../src/services/orchestratorAgentDoc", () => ({
 // 이 테스트가 보는 건 패널 자체가 아니라 오케 헤더/배너이므로 서비스만 비운다.
 vi.mock("../../src/services/workChainService", () => ({
   subscribeWorkChain: vi.fn(() => () => {}),
+  subscribeWorkChainMissions: vi.fn(() => () => {}),
   addWorkChainItemFromUi: vi.fn(async () => ({ ok: true, itemId: "wc_x" })),
   dropWorkChainItemFromUi: vi.fn(async () => ({ ok: true })),
 }));

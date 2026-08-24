@@ -9,8 +9,10 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  buildMissionMembership,
   buildWorkChainItem,
   deriveWorkChain,
+  evidenceTaskIds,
   formatWorkChain,
   insertItem,
   newWorkChainItemId,
@@ -24,6 +26,7 @@ import {
   type TaskStatusLookup,
   type WorkChainItem,
 } from "../../electron/mcp-server/work-chain-core";
+import { missionLabelKey } from "../../electron/mcp-server/implicit-mission";
 
 function item(
   over: Partial<WorkChainItem> & { id: string; what: string },
@@ -39,6 +42,10 @@ function item(
     createdBy: "orchestrator-p1",
     ...over,
   };
+}
+
+function bucket(taskIds: readonly string[], missionCount = 1) {
+  return { taskIds, missionCount };
 }
 
 describe("statusSatisfiesDoneWhen", () => {
@@ -189,6 +196,235 @@ describe("deriveWorkChain — 완료는 보드 사실로", () => {
   });
 });
 
+describe("deriveWorkChain — 미션 라벨 묶음", () => {
+  const replayKey = missionLabelKey("Replay Wiring");
+
+  it("미션 티켓을 모아 doneWhen 으로 판정하고 진행률이 움직인다", () => {
+    const items = [
+      item({ id: "m", what: "리플레이 배선", missionLabel: "Replay Wiring" }),
+    ];
+    const membership = { [replayKey]: bucket(["a", "b", "c"]) };
+    const d1 = deriveWorkChain(
+      items,
+      { a: "DONE", b: "REVIEW", c: "TODO" },
+      membership,
+    );
+    expect(d1.items[0].state).toBe("ready");
+    expect(d1.items[0].unsplit).toBe(false);
+    expect(d1.items[0].reachedCount).toBe(1);
+    expect(d1.items[0].totalCount).toBe(3);
+    expect(d1.items[0].evidenceTaskIds).toEqual(["a", "b", "c"]);
+
+    const d2 = deriveWorkChain(
+      items,
+      { a: "DONE", b: "DONE", c: "DONE" },
+      membership,
+    );
+    expect(d2.items[0].state).toBe("done");
+    expect(d2.items[0].evidence).toBe("board");
+    expect(d2.items[0].reachedCount).toBe(3);
+    expect(d2.open).toHaveLength(0);
+  });
+
+  it("★티켓 0개 미션은 done 이 아니다 — unsplit", () => {
+    const items = [
+      item({ id: "m", what: "큰 덩어리", missionLabel: "아직 안 쪼갬" }),
+    ];
+    const d = deriveWorkChain(items, {}, {});
+    expect(d.items[0].state).toBe("ready");
+    expect(d.items[0].unsplit).toBe(true);
+    expect(d.items[0].totalCount).toBe(0);
+    expect(d.items[0].evidence).toBeUndefined();
+    expect(d.next?.item.id).toBe("m");
+  });
+
+  it("명시 taskIds 와 미션 소속은 합집합", () => {
+    const items = [
+      item({
+        id: "m",
+        what: "묶음",
+        missionLabel: "Replay Wiring",
+        taskIds: ["extra"],
+      }),
+    ];
+    const membership = { [replayKey]: bucket(["a", "b"]) };
+    const half = deriveWorkChain(
+      items,
+      { extra: "DONE", a: "DONE", b: "TODO" },
+      membership,
+    );
+    expect(half.items[0].state).toBe("ready");
+    expect(half.items[0].totalCount).toBe(3);
+    expect(half.items[0].reachedCount).toBe(2);
+    const all = deriveWorkChain(
+      items,
+      { extra: "DONE", a: "DONE", b: "DONE" },
+      membership,
+    );
+    expect(all.items[0].state).toBe("done");
+  });
+
+  it("개별 taskIds 만 걸린 기존 항목은 membership 과 무관하게 그대로다", () => {
+    const items = [item({ id: "a", what: "센트리 마감", taskIds: ["t1"] })];
+    const membership = { [replayKey]: bucket(["x", "y"]) };
+    expect(
+      deriveWorkChain(items, { t1: "REVIEW" }, membership).items[0].state,
+    ).toBe("ready");
+    expect(
+      deriveWorkChain(items, { t1: "DONE" }, membership).items[0].state,
+    ).toBe("done");
+  });
+
+  it("매칭은 missionLabelKey 그대로 — 대소문자만 다른 라벨은 한 묶음", () => {
+    const items = [
+      item({ id: "m", what: "묶음", missionLabel: "Replay Wiring" }),
+    ];
+    const membership = {
+      [missionLabelKey("replay wiring")]: bucket(["t1"]),
+    };
+    expect(evidenceTaskIds(items[0], membership)).toEqual(["t1"]);
+    expect(
+      deriveWorkChain(items, { t1: "DONE" }, membership).items[0].state,
+    ).toBe("done");
+  });
+
+  it("format 은 펼친 근거에 3/7·unsplit 을 쓰고, 요약 푸터는 한 줄이다", () => {
+    const labeled = item({
+      id: "m",
+      what: "큰 일",
+      missionLabel: "Replay Wiring",
+    });
+    const unsplit = formatWorkChain(deriveWorkChain([labeled], {}, {}));
+    expect(unsplit).toMatch(/unsplit/);
+    expect(unsplit).toMatch(/아직 안 쪼개짐/);
+    const progress = formatWorkChain(
+      deriveWorkChain(
+        [labeled],
+        { a: "DONE", b: "TODO", c: "TODO" },
+        { [replayKey]: bucket(["a", "b", "c"]) },
+      ),
+      { taskStatuses: { a: "DONE", b: "TODO", c: "TODO" } },
+    );
+    expect(progress).toMatch(/1\/3 reached/);
+    expect(workChainFooter(deriveWorkChain([labeled], {}, {}))).not.toMatch(
+      /\d+\/\d+/,
+    );
+  });
+
+  it("nudge 는 미션 소속 티켓이 항목을 done 으로 바꾸면 말한다", () => {
+    const items = [
+      item({ id: "m", what: "리플레이 배선", missionLabel: "Replay Wiring" }),
+    ];
+    const membership = { [replayKey]: bucket(["a", "b"]) };
+    const before = deriveWorkChain(
+      items,
+      { a: "DONE", b: "REVIEW" },
+      membership,
+    );
+    const after = deriveWorkChain(
+      items,
+      { a: "DONE", b: "DONE" },
+      membership,
+    );
+    const n = workChainNudgeForTaskChange(before, after, "b");
+    expect(n).toMatch(/리플레이 배선/);
+    expect(n).toMatch(/완료/);
+  });
+});
+
+describe("buildMissionMembership", () => {
+  it("implicit + contextId 조인, completed 포함, abandoned 제외", () => {
+    const replayKey = missionLabelKey("Replay Wiring");
+    const membership = buildMissionMembership(
+      [
+        {
+          id: "m1",
+          missionKind: "implicit",
+          implicitLabel: "Replay Wiring",
+          status: "completed",
+        },
+        {
+          id: "m2",
+          missionKind: "implicit",
+          implicitLabel: "Replay Wiring",
+          status: "abandoned",
+        },
+        {
+          id: "m3",
+          missionKind: "explicit",
+          implicitLabel: "Replay Wiring",
+          status: "active",
+        },
+      ],
+      [
+        { id: "t-done", contextId: "m1" },
+        { id: "t-abandoned", contextId: "m2" },
+        { id: "t-explicit", contextId: "m3" },
+        { id: "t-board", contextId: "board" },
+        { id: "t-deleted", contextId: "m1", deleted: true },
+      ],
+    );
+    expect(membership[replayKey]?.taskIds).toEqual(["t-done"]);
+    expect(membership[replayKey]?.missionCount).toBe(1);
+  });
+
+  it("같은 라벨 미션 2개는 합산하되 개수를 드러낸다 — 조용히 합산하지 않는다", () => {
+    const replayKey = missionLabelKey("Replay Wiring");
+    const membership = buildMissionMembership(
+      [
+        {
+          id: "m-old",
+          missionKind: "implicit",
+          implicitLabel: "Replay Wiring",
+          status: "completed",
+        },
+        {
+          id: "m-new",
+          missionKind: "implicit",
+          implicitLabel: "replay wiring",
+          status: "active",
+        },
+      ],
+      [
+        { id: "old-1", contextId: "m-old" },
+        { id: "old-2", contextId: "m-old" },
+        { id: "new-1", contextId: "m-new" },
+        { id: "new-2", contextId: "m-new" },
+        { id: "new-3", contextId: "m-new" },
+      ],
+    );
+    expect(membership[replayKey]?.missionCount).toBe(2);
+    expect(membership[replayKey]?.taskIds).toEqual([
+      "old-1",
+      "old-2",
+      "new-1",
+      "new-2",
+      "new-3",
+    ]);
+
+    const items = [
+      item({ id: "wc", what: "리플레이 배선", missionLabel: "Replay Wiring" }),
+    ];
+    const statuses = {
+      "old-1": "DONE" as const,
+      "old-2": "DONE" as const,
+      "new-1": "DONE" as const,
+      "new-2": "TODO" as const,
+      "new-3": "TODO" as const,
+    };
+    const d = deriveWorkChain(items, statuses, membership);
+    expect(d.items[0].state).toBe("ready");
+    expect(d.items[0].missionCount).toBe(2);
+    expect(d.items[0].reachedCount).toBe(3);
+    expect(d.items[0].totalCount).toBe(5);
+    const text = formatWorkChain(d, { taskStatuses: statuses });
+    expect(text).toMatch(/3\/5 reached/);
+    expect(text).toMatch(/미션 2개 합산/);
+    expect(workChainFooter(d)).not.toMatch(/합산/);
+    expect(workChainFooter(d)).not.toMatch(/3\/5/);
+  });
+});
+
 describe("rejectSelfReportReason — 자기보고 종료 거부 규칙", () => {
   it("티켓이 연결돼 있으면 reason 이 있어도 거부한다", () => {
     const r = rejectSelfReportReason(
@@ -205,6 +441,14 @@ describe("rejectSelfReportReason — 자기보고 종료 거부 규칙", () => {
     expect(
       rejectSelfReportReason(item({ id: "a", what: "x" }), "전달 완료"),
     ).toBeNull();
+  });
+  it("미션 라벨만 있어도 자기보고를 거부한다 — 보드가 판정한다", () => {
+    const r = rejectSelfReportReason(
+      item({ id: "a", what: "큰 일", missionLabel: "Replay Wiring" }),
+      "다 했다",
+    );
+    expect(r).toMatch(/보드 상태/);
+    expect(r).toMatch(/Replay Wiring/);
   });
 });
 
@@ -229,6 +473,18 @@ describe("validateNewItem / buildWorkChainItem", () => {
     expect(b.doneWhen).toBe("done");
     expect(b.createdAt).toBe(5);
   });
+  it("missionLabel 은 정규화해 저장하고 공백은 버린다", () => {
+    const b = buildWorkChainItem(
+      { what: "x", why: "y", missionLabel: "  Replay   Wiring  " },
+      { id: "wc_1", now: 5, by: "orch" },
+    );
+    expect(b.missionLabel).toBe("Replay Wiring");
+    const empty = buildWorkChainItem(
+      { what: "x", why: "y", missionLabel: "   " },
+      { id: "wc_2", now: 5, by: "orch" },
+    );
+    expect(empty.missionLabel).toBeUndefined();
+  });
 });
 
 describe("normalizeWorkChainItems — 손상/구버전 문서에 관대", () => {
@@ -249,6 +505,14 @@ describe("normalizeWorkChainItems — 손상/구버전 문서에 관대", () => 
     expect(out[1].doneWhen).toBe("done");
     expect(out[1].closed).toBeUndefined();
     expect(out[0].afterTaskIds).toEqual([]);
+  });
+  it("missionLabel 을 정규화해 살리고 구버전은 필드가 없다", () => {
+    const out = normalizeWorkChainItems([
+      { id: "ok", what: "fine", missionLabel: "  Replay   Wiring " },
+      { id: "old", what: "legacy" },
+    ]);
+    expect(out[0].missionLabel).toBe("Replay Wiring");
+    expect(out[1].missionLabel).toBeUndefined();
   });
   it("배열이 아니면 빈 배열", () => {
     expect(normalizeWorkChainItems(undefined)).toEqual([]);
@@ -277,6 +541,14 @@ describe("insertItem / referencedTaskIds / id", () => {
         item({ id: "b", what: "B", taskIds: ["t3"] }),
       ]),
     ).toEqual(["t1", "t2", "t3"]);
+  });
+  it("referencedTaskIds 는 미션 소속 티켓도 포함한다", () => {
+    expect(
+      referencedTaskIds(
+        [item({ id: "m", what: "M", missionLabel: "Replay Wiring" })],
+        { [missionLabelKey("Replay Wiring")]: bucket(["a", "b"]) },
+      ),
+    ).toEqual(["a", "b"]);
   });
   it("id 는 wc_ 접두 + 10자", () => {
     expect(newWorkChainItemId(() => 0)).toBe("wc_aaaaaaaaaa");

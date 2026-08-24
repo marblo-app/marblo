@@ -6523,7 +6523,7 @@ export function registerTools(server: McpServer): void {
   // (tool-surface.ts 의 워커 화이트리스트에 없으므로 오케/전체 표면에만 보인다).
   auditedTool(
     "get_work_chain",
-    "Read the orchestrator's work chain — the persistent 'what I do next' list for this project (what / why / prerequisites / live state). Item state is DERIVED from the linked tickets' real board status, never from self-report: an item linked to tickets is done only when they reach done_when. Call this right after finishing any unit of work (merge, close-out, dispatch) and at session start, then do the item marked ▶ 다음.",
+    "Read the orchestrator's work chain — the persistent 'what I do next' list for this project (what / why / prerequisites / live state). Item state is DERIVED from the linked tickets' real board status, never from self-report: an item linked to tickets is done only when they reach done_when. A mission_label item collects that implicit-mission's board tickets (same missionLabelKey matching as dispatch) and unions them with task_ids; 0 tickets is unsplit, not done. Call this right after finishing any unit of work (merge, close-out, dispatch) and at session start, then do the item marked ▶ 다음.",
     {
       include_closed: z
         .boolean()
@@ -6559,7 +6559,7 @@ export function registerTools(server: McpServer): void {
 
   auditedTool(
     "add_work_chain_item",
-    "Append an item to the orchestrator's work chain: WHAT you will do next and WHY (both required — 'why' is what lets a future you judge whether the item is still valid, e.g. '배포가 급해서 보류'). Link real tickets: task_ids = the tickets whose board status PROVES this item done (done_when: exists|review|done); after_task_ids = prerequisite tickets that must be DONE before this item is ready. Promised-to-do-later things ('I'll open a web ticket for X', 'resume design 3/8 after deploy', 'close out NTQY after merge') belong here the moment you say them.",
+    "Append an item to the orchestrator's work chain: WHAT you will do next and WHY (both required — 'why' is what lets a future you judge whether the item is still valid, e.g. '배포가 급해서 보류'). Link real tickets: task_ids = the tickets whose board status PROVES this item done (done_when: exists|review|done); mission_label = hang an implicit-mission bundle (same label as dispatch mission_label; matching uses missionLabelKey). Both may be set — evidence is the union. A label with 0 tickets is unsplit, not done. after_task_ids = prerequisite tickets that must be DONE before this item is ready. Promised-to-do-later things ('I'll open a web ticket for X', 'resume design 3/8 after deploy', 'close out NTQY after merge') belong here the moment you say them.",
     {
       what: z.string().describe("What to do — one line (≤200 chars)"),
       why: z
@@ -6579,6 +6579,12 @@ export function registerTools(server: McpServer): void {
         .array(z.string())
         .optional()
         .describe("Prerequisite chain items (ids from get_work_chain)"),
+      mission_label: z
+        .string()
+        .optional()
+        .describe(
+          "Implicit-mission label to hang this item on. Matching uses missionLabelKey (same as dispatch mission_label). Board tickets in that bundle prove completion together with task_ids. 0 tickets = unsplit, not done. Does not start the mission engine."
+        ),
       done_when: z
         .enum(["exists", "review", "done"])
         .optional()
@@ -6604,6 +6610,7 @@ export function registerTools(server: McpServer): void {
       task_ids,
       after_task_ids,
       after_item_ids,
+      mission_label,
       done_when,
       note,
       position,
@@ -6634,6 +6641,7 @@ export function registerTools(server: McpServer): void {
           ...(task_ids ? { taskIds: task_ids } : {}),
           ...(after_task_ids ? { afterTaskIds: after_task_ids } : {}),
           ...(after_item_ids ? { afterItemIds: after_item_ids } : {}),
+          ...(mission_label ? { missionLabel: mission_label } : {}),
           ...(doneWhen ? { doneWhen } : {}),
           ...(note ? { note } : {}),
         },
@@ -6642,7 +6650,9 @@ export function registerTools(server: McpServer): void {
       if (res.error || !res.item) return text(`Error: ${res.error ?? "unknown"}`);
       const chain = await loadWorkChain(db, projectId);
       const evidenceNote =
-        res.item.taskIds.length === 0
+        res.item.missionLabel && res.item.taskIds.length === 0
+          ? `\n미션 '${res.item.missionLabel}' — 보드에 이 라벨 티켓이 아직 없다(unsplit). 같은 mission_label 로 dispatch 하면 진행률이 움직인다. 티켓 0개는 done 이 아니다.`
+          : res.item.taskIds.length === 0
           ? "\n⚠️ 연결 티켓이 없다 — 이 항목은 보드가 완료를 판정할 수 없다. 티켓이 생기면 update_work_chain_item(item_id, add_task_ids=[...]) 로 붙여라. 티켓 없이 닫을 땐 close=self_reported + reason(근거) 이 필요하고 그 사실은 SELF-REPORTED 로 표시된다."
           : "";
       return text(
@@ -6654,7 +6664,7 @@ export function registerTools(server: McpServer): void {
 
   auditedTool(
     "update_work_chain_item",
-    "Edit a work chain item: reword what/why, attach tickets (add_task_ids) so the board can judge completion, change prerequisites or done_when, move it (position), or close it. close=dropped needs reason (why it is no longer valid). close=self_reported is REFUSED for items linked to tickets — the board decides those; it is allowed only for ticket-less items and needs reason (what you verified), and stays visibly marked SELF-REPORTED.",
+    "Edit a work chain item: reword what/why, attach tickets (add_task_ids) so the board can judge completion, hang or clear a mission_label (same matching as dispatch), change prerequisites or done_when, move it (position), or close it. close=dropped needs reason (why it is no longer valid). close=self_reported is REFUSED for items linked to tickets or a mission_label — the board decides those; it is allowed only for ticket-less unlabeled items and needs reason (what you verified), and stays visibly marked SELF-REPORTED.",
     {
       item_id: z.string().describe("Chain item id (from get_work_chain)"),
       what: z.string().optional(),
@@ -6670,6 +6680,12 @@ export function registerTools(server: McpServer): void {
         .describe("Add linked tickets (e.g. the ticket you just created for this item)"),
       after_task_ids: z.array(z.string()).optional(),
       after_item_ids: z.array(z.string()).optional(),
+      mission_label: z
+        .string()
+        .optional()
+        .describe(
+          "Set or replace the implicit-mission label. Empty string clears it. Matching uses missionLabelKey."
+        ),
       done_when: z.enum(["exists", "review", "done"]).optional(),
       close: z
         .enum(["dropped", "self_reported"])
@@ -6697,6 +6713,7 @@ export function registerTools(server: McpServer): void {
       add_task_ids,
       after_task_ids,
       after_item_ids,
+      mission_label,
       done_when,
       close,
       reason,
@@ -6731,6 +6748,9 @@ export function registerTools(server: McpServer): void {
             : {}),
           ...(after_item_ids !== undefined
             ? { afterItemIds: after_item_ids }
+            : {}),
+          ...(mission_label !== undefined
+            ? { missionLabel: mission_label }
             : {}),
           ...(done_when !== undefined ? { doneWhen: done_when } : {}),
           ...(close !== undefined ? { close } : {}),

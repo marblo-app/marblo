@@ -42,6 +42,7 @@ const state = vi.hoisted(() => ({
   added: [] as Array<{ what: string; why: string }>,
   subscribeTasks: vi.fn(() => () => {}),
   routeInstruction: vi.fn(async () => "local" as const),
+  missionListener: null as null | ((missions: unknown[]) => void),
 }));
 
 const PANEL_HEIGHT_STORAGE_KEY = "marblo.workChainPanel.height.v1";
@@ -100,6 +101,15 @@ vi.mock("../../src/services/workChainService", () => ({
       state.listener = null;
     };
   }),
+  subscribeWorkChainMissions: vi.fn(
+    (_pid: string, cb: (m: unknown[]) => void) => {
+      state.missionListener = cb;
+      cb([]);
+      return () => {
+        state.missionListener = null;
+      };
+    },
+  ),
   addWorkChainItemFromUi: vi.fn(
     async (_pid: string, input: { what: string; why: string }) => {
       state.added.push(input);
@@ -117,7 +127,15 @@ vi.mock("../../src/services/orchestratorInstructionService", () => ({
 import WorkChainPanel from "../../src/components/orchestrator/WorkChainPanel";
 import { useTaskStore } from "../../src/stores/taskStore";
 
-function setTasks(tasks: Array<{ id: string; status: string; title: string }>) {
+function setTasks(
+  tasks: Array<{
+    id: string;
+    status: string;
+    title: string;
+    contextId?: string;
+    deleted?: boolean;
+  }>,
+) {
   act(() => {
     useTaskStore.setState({ tasks: tasks as never });
   });
@@ -155,6 +173,7 @@ beforeEach(() => {
   state.listener = null;
   state.subscribeTasks.mockClear();
   state.routeInstruction.mockClear();
+  state.missionListener = null;
 });
 afterEach(() => cleanup());
 
@@ -318,6 +337,115 @@ describe("WorkChainPanel", () => {
     fireEvent.click(screen.getByTestId("work-chain-toggle"));
     expect(screen.getByTestId("work-chain-overlay").style.height).toBe(
       `${resizedHeight}px`,
+    );
+  });
+
+  it("미션 진행률은 펼침 안에만 있고 접힘 한 줄은 그대로다", () => {
+    setTasks([
+      { id: "t1", status: "DONE", title: "하나", contextId: "m1" },
+      { id: "t2", status: "TODO", title: "둘", contextId: "m1" },
+      { id: "t3", status: "TODO", title: "셋", contextId: "m1" },
+    ]);
+    render(createElement(WorkChainPanel, { projectId: "p1" }));
+    act(() => {
+      state.missionListener?.([
+        {
+          id: "m1",
+          missionKind: "implicit",
+          implicitLabel: "Replay Wiring",
+          status: "active",
+        },
+      ]);
+    });
+    push([
+      chainItem({
+        id: "a",
+        what: "리플레이 배선",
+        missionLabel: "Replay Wiring",
+      }),
+    ]);
+    const summary = screen.getByTestId("work-chain-summary");
+    expect(summary.textContent).toContain("리플레이 배선");
+    expect(summary.textContent).not.toMatch(/1\/3/);
+    expect(screen.queryByTestId("work-chain-mission-progress")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("work-chain-toggle"));
+    const progress = screen.getByTestId("work-chain-mission-progress");
+    expect(progress.textContent).toContain("1/3");
+    expect(screen.getByTestId("work-chain-item").getAttribute("data-state")).toBe(
+      "ready",
+    );
+  });
+
+  it("티켓 0개 미션은 펼침에서 아직 안 쪼개짐이고 완료가 아니다", () => {
+    render(createElement(WorkChainPanel, { projectId: "p1" }));
+    push([
+      chainItem({
+        id: "a",
+        what: "큰 덩어리",
+        missionLabel: "아직 없음",
+      }),
+    ]);
+    expect(screen.getByTestId("work-chain-next").textContent).toContain(
+      "큰 덩어리",
+    );
+    fireEvent.click(screen.getByTestId("work-chain-toggle"));
+    expect(
+      screen.getByTestId("work-chain-item").getAttribute("data-unsplit"),
+    ).toBe("true");
+    expect(
+      screen.getByTestId("work-chain-item").getAttribute("data-state"),
+    ).toBe("ready");
+    expect(screen.getByTestId("work-chain-mission-progress").textContent).toBe(
+      en["orchestrator.chain.unsplitHint"],
+    );
+  });
+
+  it("같은 라벨 미션 2개는 펼침에서 합산을 말하고 접힘 줄에는 안 넣는다", () => {
+    setTasks([
+      { id: "old-1", status: "DONE", title: "지난 배치", contextId: "m-old" },
+      { id: "old-2", status: "DONE", title: "지난 배치 2", contextId: "m-old" },
+      { id: "new-1", status: "DONE", title: "이번 1", contextId: "m-new" },
+      { id: "new-2", status: "TODO", title: "이번 2", contextId: "m-new" },
+      { id: "new-3", status: "TODO", title: "이번 3", contextId: "m-new" },
+    ]);
+    render(createElement(WorkChainPanel, { projectId: "p1" }));
+    act(() => {
+      state.missionListener?.([
+        {
+          id: "m-old",
+          missionKind: "implicit",
+          implicitLabel: "Replay Wiring",
+          status: "completed",
+        },
+        {
+          id: "m-new",
+          missionKind: "implicit",
+          implicitLabel: "Replay Wiring",
+          status: "active",
+        },
+      ]);
+    });
+    push([
+      chainItem({
+        id: "a",
+        what: "리플레이 배선",
+        missionLabel: "Replay Wiring",
+      }),
+    ]);
+    const summary = screen.getByTestId("work-chain-summary");
+    expect(summary.textContent).not.toMatch(/2/);
+    expect(summary.textContent).not.toContain(
+      en["orchestrator.chain.missionCombined"].replace("{count}", "2"),
+    );
+    expect(screen.queryByTestId("work-chain-mission-combined")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("work-chain-toggle"));
+    expect(screen.getByTestId("work-chain-mission-progress").textContent).toContain(
+      "3/5",
+    );
+    expect(screen.getByTestId("work-chain-mission-combined").textContent).toBe(
+      en["orchestrator.chain.missionCombined"].replace("{count}", "2"),
     );
   });
 });

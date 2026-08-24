@@ -20,10 +20,14 @@
  * workChains 규칙이 미배포라 permission-denied 가 실제로 난다).
  */
 import {
+  collection,
   doc,
   getDoc,
+  getDocs,
+  query,
   runTransaction,
   Timestamp,
+  where,
   type Firestore,
   type Transaction,
 } from "firebase/firestore";
@@ -35,10 +39,17 @@ import {
   type CapturedPromise,
 } from "./work-chain-capture.js";
 import {
+  isImplicitMissionDoc,
+  missionLabelKey,
+  normalizeMissionLabel,
+} from "./implicit-mission.js";
+import {
   WORK_CHAIN_COLLECTION,
   WORK_CHAIN_ITEMS_MAX,
+  buildMissionMembership,
   buildWorkChainItem,
   deriveWorkChain,
+  evidenceTaskIds,
   insertItem,
   newWorkChainItemId,
   normalizeWorkChainItems,
@@ -47,6 +58,9 @@ import {
   validateNewItem,
   workChainNudgeForTaskChange,
   type DerivedWorkChain,
+  type MissionMemberTask,
+  type MissionMembershipLookup,
+  type MissionMembershipSource,
   type NewWorkChainItemInput,
   type TaskStatusLookup,
   type WorkChainClosedKind,
@@ -78,7 +92,11 @@ export interface WorkChainTaskFacts {
 export interface LoadedWorkChain extends WorkChainSnapshot {
   derived: DerivedWorkChain;
   facts: WorkChainTaskFacts;
+  membership: MissionMembershipLookup;
 }
+
+const MISSIONS_COLLECTION = "missions";
+const TASKS_COLLECTION = "tasks";
 
 function chainRef(db: Firestore, projectId: string) {
   return doc(db, WORK_CHAIN_COLLECTION, projectId);
@@ -160,6 +178,82 @@ export async function loadTaskFacts(
   return { statuses, titles };
 }
 
+/**
+ * 체인 항목의 미션 라벨 → 보드 티켓 소속. 실패하면 {} (파생은 unsplit 로 보인다).
+ * 미션 엔진을 켜지 않는다 — implicit 문서·contextId 조인만 읽는다.
+ */
+export async function loadMissionMembership(
+  db: Firestore,
+  projectId: string,
+  items: readonly WorkChainItem[],
+): Promise<MissionMembershipLookup> {
+  const labeled = items.filter((item) => item.missionLabel);
+  if (labeled.length === 0) return {};
+  try {
+    const missionsSnap = await getDocs(
+      query(
+        collection(db, MISSIONS_COLLECTION),
+        where("projectId", "==", projectId),
+      ),
+    );
+    const missions: MissionMembershipSource[] = missionsSnap.docs.map((d) => {
+      const data = d.data() as Record<string, unknown>;
+      return {
+        id: d.id,
+        missionKind:
+          typeof data.missionKind === "string" ? data.missionKind : undefined,
+        implicitLabel:
+          typeof data.implicitLabel === "string"
+            ? data.implicitLabel
+            : undefined,
+        status: typeof data.status === "string" ? data.status : undefined,
+      };
+    });
+    const wantedKeys = new Set(
+      labeled.map((item) => missionLabelKey(item.missionLabel as string)),
+    );
+    // ★같은 키의 미션을 전부 모은다(가). 최근 1개만 고르면(나) 과거 배치가
+    // 빠지고, 사장님이 건 덩어리의 3/7 대신 다른 숫자를 답하게 된다.
+    // 합산 자체는 맞다 — 조용한 합산이 틀리다. missionCount 가 2+ 이면
+    // derive 가 "미션 N개 합산" 을 펼침/MCP 에 싣는다.
+    const wantedMissionIds: string[] = [];
+    for (const mission of missions) {
+      if (!isImplicitMissionDoc(mission)) continue;
+      const label = normalizeMissionLabel(mission.implicitLabel ?? null);
+      if (!label) continue;
+      if (!wantedKeys.has(missionLabelKey(label))) continue;
+      wantedMissionIds.push(mission.id);
+    }
+    if (wantedMissionIds.length === 0) {
+      return buildMissionMembership(missions, []);
+    }
+    const tasks: MissionMemberTask[] = [];
+    await Promise.all(
+      wantedMissionIds.map(async (missionId) => {
+        const snap = await getDocs(
+          query(
+            collection(db, TASKS_COLLECTION),
+            where("projectId", "==", projectId),
+            where("contextId", "==", missionId),
+          ),
+        );
+        for (const d of snap.docs) {
+          const data = d.data() as { deleted?: boolean };
+          tasks.push({
+            id: d.id,
+            contextId: missionId,
+            deleted: !!data.deleted,
+          });
+        }
+      }),
+    );
+    return buildMissionMembership(missions, tasks);
+  } catch (err) {
+    console.error("[work-chain] mission membership skipped:", err);
+    return {};
+  }
+}
+
 /** 체인 + 연결 티켓 사실 + 파생 상태 한 번에. */
 export async function loadWorkChain(
   db: Firestore,
@@ -167,11 +261,17 @@ export async function loadWorkChain(
   known?: ReadonlyMap<string, { status: string; title?: string }>,
 ): Promise<LoadedWorkChain> {
   const snap = await readWorkChain(db, projectId);
-  const facts = await loadTaskFacts(db, referencedTaskIds(snap.items), known);
+  const membership = await loadMissionMembership(db, projectId, snap.items);
+  const facts = await loadTaskFacts(
+    db,
+    referencedTaskIds(snap.items, membership),
+    known,
+  );
   return {
     ...snap,
     facts,
-    derived: deriveWorkChain(snap.items, facts.statuses),
+    membership,
+    derived: deriveWorkChain(snap.items, facts.statuses, membership),
   };
 }
 
@@ -272,6 +372,8 @@ export interface UpdateWorkChainItemInput {
   addTaskIds?: string[];
   afterTaskIds?: string[];
   afterItemIds?: string[];
+  /** 암묵 미션 라벨. 빈 문자열이면 제거. */
+  missionLabel?: string;
   doneWhen?: WorkChainDoneWhen;
   /** 명시적 종료. dropped 는 사유, self_reported 는 근거(reason)가 필요. */
   close?: WorkChainClosedKind;
@@ -351,6 +453,11 @@ export async function updateWorkChainItem(
       next.afterItemIds = ids;
     }
     if (input.doneWhen !== undefined) next.doneWhen = input.doneWhen;
+    if (input.missionLabel !== undefined) {
+      const label = normalizeMissionLabel(input.missionLabel);
+      if (label) next.missionLabel = label;
+      else delete next.missionLabel;
+    }
     if (input.reopen) delete next.closed;
     if (input.close) {
       const reason = (input.reason ?? "").trim();
@@ -424,18 +531,24 @@ export async function workChainNudgeAfterTransition(
   try {
     const snap = await readWorkChain(db, projectId);
     if (snap.items.length === 0) return "";
+    const membership = await loadMissionMembership(db, projectId, snap.items);
     const touches = snap.items.some(
-      (i) => i.taskIds.includes(taskId) || i.afterTaskIds.includes(taskId),
+      (i) =>
+        evidenceTaskIds(i, membership).includes(taskId) ||
+        i.afterTaskIds.includes(taskId),
     );
     if (!touches) return "";
-    const facts = await loadTaskFacts(db, referencedTaskIds(snap.items));
+    const facts = await loadTaskFacts(
+      db,
+      referencedTaskIds(snap.items, membership),
+    );
     // 방금 쓴 전이는 자기 자신이 읽을 때 이미 반영돼 있다(같은 클라이언트). 그래도
     // before/after 를 명시적으로 만들어 "이 전이가 바꾼 것" 만 말한다.
     const after = { ...facts.statuses, [taskId]: newStatus };
     const before = { ...facts.statuses, [taskId]: oldStatus };
     return workChainNudgeForTaskChange(
-      deriveWorkChain(snap.items, before),
-      deriveWorkChain(snap.items, after),
+      deriveWorkChain(snap.items, before, membership),
+      deriveWorkChain(snap.items, after, membership),
       taskId,
     );
   } catch (err) {
