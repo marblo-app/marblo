@@ -46,11 +46,52 @@ type ParityCase = {
 
 function readRootTokens(): Record<CssTokenName, `#${string}`> {
   const css = fs.readFileSync(indexCssPath, "utf8");
-  const entries = Array.from(
-    css.matchAll(/^\s+(--[\w-]+):\s*(#[0-9a-f]{6});$/gim),
-  ).map(([, name, hex]) => [name, hex.toLowerCase()]);
+  const entries = tokenNames.map((token) => {
+    const aliasRe = new RegExp(
+      `^\\s+${escapeRe(token)}:\\s*rgb\\(var\\(${escapeRe(
+        `${token}-rgb`,
+      )}\\)\\);$`,
+      "m",
+    );
+    const channelRe = new RegExp(
+      `^\\s+${escapeRe(`${token}-rgb`)}:\\s*([0-9]+ [0-9]+ [0-9]+);$`,
+      "m",
+    );
+    const channel = css.match(channelRe)?.[1];
+
+    expect(css.match(aliasRe), `${token} alias`).not.toBeNull();
+    expect(channel, `${token}-rgb channel`).toBeTruthy();
+
+    return [token, rgbChannelsToHex(channel ?? "")];
+  });
 
   return Object.fromEntries(entries) as Record<CssTokenName, `#${string}`>;
+}
+
+const tokenNames: CssTokenName[] = [
+  "--surface-panel",
+  "--surface-raised",
+  "--surface-hover",
+  "--border-subtle",
+  "--border-default",
+  "--border-strong",
+  "--text-primary",
+  "--text-on-accent",
+  "--accent",
+  "--accent-hover",
+];
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function rgbChannelsToHex(channels: string): `#${string}` {
+  const parts = channels.split(" ").map((part) => Number(part));
+  if (parts.length !== 3 || parts.some((part) => !Number.isInteger(part))) {
+    throw new Error(`Invalid rgb channel token: ${channels}`);
+  }
+
+  return `#${parts.map((part) => part.toString(16).padStart(2, "0")).join("")}`;
 }
 
 function readEmphasizeStrongClassName(): string {

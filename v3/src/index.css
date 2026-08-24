@@ -3,22 +3,39 @@
 @tailwind utilities;
 
 :root {
-  --surface-app: #11111b;
-  --surface-panel: #181825;
-  --surface-raised: #1e1e2e;
-  --surface-hover: #313244;
-  --border-subtle: #313244;
-  --border-default: #45475a;
-  --border-strong: #585b70;
-  --text-primary: #cdd6f4;
-  --text-secondary: #a6adc8;
-  --text-muted: #6c7086;
-  --text-on-accent: #1e1e2e;
-  --accent: #89b4fa;
-  --accent-hover: #74c7ec;
-  --success: #a6e3a1;
-  --warning: #f9e2af;
-  --danger: #f38ba8;
+  --surface-app: rgb(var(--surface-app-rgb));
+  --surface-panel: rgb(var(--surface-panel-rgb));
+  --surface-raised: rgb(var(--surface-raised-rgb));
+  --surface-hover: rgb(var(--surface-hover-rgb));
+  --border-subtle: rgb(var(--border-subtle-rgb));
+  --border-default: rgb(var(--border-default-rgb));
+  --border-strong: rgb(var(--border-strong-rgb));
+  --text-primary: rgb(var(--text-primary-rgb));
+  --text-secondary: rgb(var(--text-secondary-rgb));
+  --text-muted: rgb(var(--text-muted-rgb));
+  --text-on-accent: rgb(var(--text-on-accent-rgb));
+  --accent: rgb(var(--accent-rgb));
+  --accent-hover: rgb(var(--accent-hover-rgb));
+  --success: rgb(var(--success-rgb));
+  --warning: rgb(var(--warning-rgb));
+  --danger: rgb(var(--danger-rgb));
+
+  --surface-app-rgb: 17 17 27;
+  --surface-panel-rgb: 24 24 37;
+  --surface-raised-rgb: 30 30 46;
+  --surface-hover-rgb: 49 50 68;
+  --border-subtle-rgb: 49 50 68;
+  --border-default-rgb: 69 71 90;
+  --border-strong-rgb: 88 91 112;
+  --text-primary-rgb: 205 214 244;
+  --text-secondary-rgb: 166 173 200;
+  --text-muted-rgb: 108 112 134;
+  --text-on-accent-rgb: 30 30 46;
+  --accent-rgb: 137 180 250;
+  --accent-hover-rgb: 116 199 236;
+  --success-rgb: 166 227 161;
+  --warning-rgb: 249 226 175;
+  --danger-rgb: 243 139 168;
 }
 
 @font-face {
@@ -53,7 +70,8 @@
 body {
   margin: 0;
   padding: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 /* Flow execution node status styles */
@@ -138,7 +156,9 @@ body {
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  box-shadow: 0 0 0 2px rgb(59, 130, 246), 0 0 16px 2px rgba(59, 130, 246, 0.45);
+  box-shadow:
+    0 0 0 2px rgb(59, 130, 246),
+    0 0 16px 2px rgba(59, 130, 246, 0.45);
   animation: mb-card-pulse 1.4s ease-out forwards;
   will-change: opacity;
   z-index: 1;
