@@ -34,6 +34,8 @@
     "test:ga4-bridge": "tsc src/ga4Bridge.ts src/ga4Bridge.test.ts --outDir .test-out/ga4-bridge --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/ga4-bridge/ga4Bridge.test.js",
     "test:country-funnel": "tsc src/countryFunnel.ts src/countryFunnel.test.ts --outDir .test-out/country-funnel --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node --test .test-out/country-funnel/countryFunnel.test.js",
     "test:beta-segments": "tsc src/adminAnalytics.ts src/betaSegments.ts src/betaSegments.test.ts --outDir .test-out/beta-segments --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node --test .test-out/beta-segments/betaSegments.test.js",
+    "outreach:churn:build": "tsc src/churnOutreach.ts src/marketingContacts.ts scripts/send-churn-interview-emails.ts --outDir .script-out/churn-outreach --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node",
+    "outreach:churn": "npm run outreach:churn:build && node .script-out/churn-outreach/scripts/send-churn-interview-emails.js",
     "test:churn-outreach": "tsc src/churnOutreach.ts src/churnOutreach.test.ts --outDir .test-out/churn-outreach --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/churn-outreach/churnOutreach.test.js",
     "test:grant-plan": "tsc src/grantPlan.ts src/grantPlan.test.ts --outDir .test-out/grant-plan --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node --test .test-out/grant-plan/grantPlan.test.js",
     "test:migrate-grants": "node --test tests/migrateGrantsToTeam.test.mjs",

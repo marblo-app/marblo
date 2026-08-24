@@ -52,8 +52,27 @@ export type ChurnBlockReason =
   | "still_active"
   /** 토큰을 쓴 적이 없다 — 이 캠페인의 질문 대상이 아니다(미활성 팔로업 소관). */
   | "never_activated"
+  /**
+   * 마케팅 수신동의가 `granted` 가 아니다(pending/없음). 철회(revoked)와 구분한다 —
+   * 철회는 어떤 근거로도 못 넘지만, pending 은 발송 근거를 무엇으로 잡느냐의 문제다.
+   * consentBasis="relationship" 을 명시적으로 고르면 이 사유는 나오지 않는다.
+   */
+  | "consent_not_granted"
   /** 연락 가능한 이메일이 없다. */
   | "no_email";
+
+/**
+ * 무엇을 발송 근거로 삼는가. ★기본값은 항상 좁은 쪽이다.
+ *
+ *  - "granted_only"  — `emailMarketingConsent.status === "granted"` 인 사람에게만.
+ *                      기존 마케팅 발송(`isEmailable`)과 같은 기준. **기본값.**
+ *  - "relationship"  — 거래관계(무료 grant 이용) 기반 의견 청취로 보고 `pending`
+ *                      까지 포함한다. 철회자는 여전히 제외된다.
+ *
+ * ★이건 코드가 정할 문제가 아니라 사람이 정할 문제다. 그래서 기본을 좁게 두고,
+ * 넓히려면 호출부가 값을 **명시**하게 만들었다. 조용히 넓어지는 경로는 없다.
+ */
+export type ConsentBasis = "granted_only" | "relationship";
 
 /** 적격 판정에 필요한 사실들. 전부 호출부가 조회해서 넣는다(이 모듈은 IO 금지). */
 export interface ChurnOutreachFacts {
@@ -97,13 +116,20 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  */
 export function churnBlockReasons(
   facts: ChurnOutreachFacts,
-  nowMs: number
+  nowMs: number,
+  consentBasis: ConsentBasis = "granted_only"
 ): ChurnBlockReason[] {
   const reasons: ChurnBlockReason[] = [];
 
   if (!facts.hasEmail) reasons.push("no_email");
+  // 철회는 근거와 무관하게 절대 못 넘는다.
   if (facts.marketingConsentStatus === "revoked") {
     reasons.push("marketing_consent_revoked");
+  } else if (
+    consentBasis === "granted_only" &&
+    facts.marketingConsentStatus !== "granted"
+  ) {
+    reasons.push("consent_not_granted");
   }
   if (facts.unsubscribeStatus === "unsubscribed") reasons.push("unsubscribed");
 
@@ -128,9 +154,10 @@ export function churnBlockReasons(
 
 export function isChurnOutreachEligible(
   facts: ChurnOutreachFacts,
-  nowMs: number
+  nowMs: number,
+  consentBasis: ConsentBasis = "granted_only"
 ): boolean {
-  return churnBlockReasons(facts, nowMs).length === 0;
+  return churnBlockReasons(facts, nowMs, consentBasis).length === 0;
 }
 
 /**
@@ -248,6 +275,12 @@ interface Copy {
   question: string;
   howToReply: string;
   offer: string;
+  /**
+   * 감사 인사(사장님 지시 2026-08-24, 원문: "무엇보다 베타사용자로써 마블로를
+   * 사용해주셔서 감사합니다"). 서명 직전에 둔다 — 첫머리에 두면 질문이 인사에
+   * 묻히고, 제안 앞에 두면 대가처럼 읽힌다. 평서문이라 질문 1개 제약을 깨지 않는다.
+   */
+  thanks: string;
   signoff: string;
 }
 
@@ -264,6 +297,8 @@ function copyFor(locale: ChurnOutreachLocale, segment: ChurnSegment): Copy {
         "One line is enough — just reply to this email. No form, no survey.",
       offer:
         "Reply and we'll add 3 months of Pro on top of whatever time you have left. No strings.",
+      thanks:
+        "Above all — thank you for being a beta user and giving Marblo a try.",
       signoff: "Thank you,\nThe Marblo team",
     };
   }
@@ -278,6 +313,8 @@ function copyFor(locale: ChurnOutreachLocale, segment: ChurnSegment): Copy {
       "한 줄이면 충분합니다. 이 메일에 그대로 답장만 주세요. 설문도, 양식도 없습니다.",
     offer:
       "답장 주시면 지금 남아 있는 기간에 이어서 Pro 3개월을 무료로 얹어 드리겠습니다. 다른 조건은 없습니다.",
+    thanks:
+      "무엇보다, 베타 사용자로서 마블로를 사용해 주셔서 감사합니다.",
     signoff: "감사합니다.\n마블로 팀 드림",
   };
 }
@@ -297,6 +334,7 @@ export function buildChurnInterviewEmail(
       `<p style="margin:0 0 14px;font-size:17px;font-weight:700">${c.question}</p>`,
       p(c.howToReply),
       p(`<span style="color:#555">${c.offer}</span>`),
+      p(c.thanks),
       p(c.signoff.replace("\n", "<br>")),
     ].join("\n")
   );
@@ -309,9 +347,142 @@ export function buildChurnInterviewEmail(
     "",
     c.offer,
     "",
+    c.thanks,
+    "",
     c.signoff,
     "",
     `Marblo · ${SUPPORT_EMAIL}`,
   ].join("\n");
   return { subject: c.subject, html, text };
+}
+
+// ── 캠페인 상수 ─────────────────────────────────────────────────────────────
+//
+// releaseAnnouncement.ts 규약과 같다: founders 문서에 발송 스탬프를 찍어
+// 재실행 시 중복 발송을 막고, 실발송은 확인 문구를 요구한다.
+
+/** founders 문서에 찍는 발송 스탬프(쿨다운·멱등의 근거). */
+export const CHURN_INTERVIEW_SENT_AT_FIELD = "churnInterviewEmailSentAt";
+
+/** 발송 여부 boolean 스탬프(수동 조회용). */
+export const CHURN_INTERVIEW_SENT_FIELD = "churnInterviewEmailSent";
+
+/** 그랜트 부여 스탬프. 답장 1건에 두 번 부여하는 사고를 막는다. */
+export const CHURN_INTERVIEW_GRANTED_AT_FIELD = "churnInterviewProGrantedAt";
+
+/** grantFounderProTotalInternal 에 넘길 reason. 회계·감사에서 이 캠페인을 식별한다. */
+export const CHURN_INTERVIEW_GRANT_REASON = "churn_interview";
+
+/** 실발송 2차 게이트 확인 문구. --send 만으로는 부족하다. */
+export const CHURN_INTERVIEW_CONFIRM = "SEND-CHURN-INTERVIEW-2026-08";
+
+/** 기본 쿨다운(일). 1회성 캠페인이라 넉넉히 잡는다 — 리마인더를 보내지 않는다. */
+export const CHURN_INTERVIEW_COOLDOWN_DAYS = 365;
+
+// ── 대상 선정 ───────────────────────────────────────────────────────────────
+
+/** 발송 스크립트가 조회해 채우는 후보 1건. */
+export interface ChurnAudienceCandidate {
+  /** founders 컬렉션의 실제 doc id — 스탬프는 반드시 이 경로에 쓴다. */
+  docId: string;
+  /** uid sha256 앞 8자리. 로그·리포트는 이 값으로만 사람을 지칭한다. */
+  uidHash: string;
+  /** 정규화된 이메일. ★로그에 절대 그대로 찍지 않는다(마스킹은 호출부 책임). */
+  email: string;
+  /** 수신자 로케일. */
+  locale: ChurnOutreachLocale;
+  /** 적격 판정 입력. */
+  facts: ChurnOutreachFacts;
+  /** 이 캠페인의 마지막 발송 시각(ms). 미발송이면 null. */
+  lastSentAtMs: number | null;
+}
+
+/** 선정 결과 1건 — 실제로 보낼 사람. */
+export interface ChurnAudienceEntry {
+  docId: string;
+  uidHash: string;
+  email: string;
+  locale: ChurnOutreachLocale;
+  segment: ChurnSegment;
+  /** 부여 예정 기간(발송 전에 "약속이 빈 껍데기인지" 확인하는 근거). */
+  grant: GrantProjection;
+}
+
+export interface ChurnAudienceResult {
+  eligible: ChurnAudienceEntry[];
+  /** 제외된 사람 — uidHash 와 사유만. 이메일은 담지 않는다. */
+  excluded: Array<{ uidHash: string; reasons: ChurnBlockReason[] }>;
+  /** 사유별 제외 건수(리포트용). */
+  reasonCounts: Record<string, number>;
+  /** 쿨다운으로 제외된 수. */
+  cooledDown: number;
+  /** 적격이지만 실효 연장이 0일이라 뺀 수 — 약속을 못 지킬 사람은 안 보낸다. */
+  zeroValueGrant: number;
+}
+
+/**
+ * 후보 목록에서 실제 발송 대상을 고른다. 순수 함수 — 조회·발송은 호출부.
+ *
+ * ★`addedDays === 0` 이면 적격이어도 제외한다. "Pro 3개월"이라 써놓고 0일을
+ * 주는 건 안 보내느니만 못하다는 게 이 캠페인의 출발점이다.
+ */
+export function selectChurnAudience(
+  candidates: ChurnAudienceCandidate[],
+  opts: {
+    nowMs: number;
+    cooldownMs: number;
+    consentBasis?: ConsentBasis;
+    months?: number;
+  }
+): ChurnAudienceResult {
+  const { nowMs, cooldownMs } = opts;
+  const consentBasis = opts.consentBasis ?? "granted_only";
+  const months = opts.months ?? CHURN_OFFER_MONTHS;
+
+  const eligible: ChurnAudienceEntry[] = [];
+  const excluded: Array<{ uidHash: string; reasons: ChurnBlockReason[] }> = [];
+  const reasonCounts: Record<string, number> = {};
+  let cooledDown = 0;
+  let zeroValueGrant = 0;
+
+  const bump = (key: string): void => {
+    reasonCounts[key] = (reasonCounts[key] ?? 0) + 1;
+  };
+
+  for (const c of candidates) {
+    if (
+      typeof c.lastSentAtMs === "number" &&
+      nowMs - c.lastSentAtMs < cooldownMs
+    ) {
+      cooledDown++;
+      bump("cooldown");
+      continue;
+    }
+
+    const reasons = churnBlockReasons(c.facts, nowMs, consentBasis);
+    if (reasons.length > 0) {
+      excluded.push({ uidHash: c.uidHash, reasons });
+      for (const r of reasons) bump(r);
+      continue;
+    }
+
+    const grant = projectGrant(c.facts.currentPeriodEndMs, nowMs, months);
+    if (grant.addedDays <= 0) {
+      zeroValueGrant++;
+      bump("zero_value_grant");
+      excluded.push({ uidHash: c.uidHash, reasons: [] });
+      continue;
+    }
+
+    eligible.push({
+      docId: c.docId,
+      uidHash: c.uidHash,
+      email: c.email,
+      locale: c.locale,
+      segment: churnSegmentOf(c.facts),
+      grant,
+    });
+  }
+
+  return { eligible, excluded, reasonCounts, cooledDown, zeroValueGrant };
 }

@@ -181,6 +181,11 @@ import {
 } from "./analyticsPseudonym";
 import { classifyIdScheme } from "./analyticsIdScheme";
 import { resolveGrantPlanType } from "./grantPlan";
+import {
+  CHURN_INTERVIEW_GRANT_REASON,
+  CHURN_OFFER_MONTHS,
+  resolveGrantAnchorMs,
+} from "./churnOutreach";
 import { buildProjectAudit, toMillis } from "./projectAudit";
 import {
   DEFAULT_TEAM_AUDIT_LIMIT,
@@ -3833,7 +3838,11 @@ async function upsertProSubscription(
   userId: string,
   targetEnd: Date,
   reason: string,
-  grantStartedAt: Date
+  grantStartedAt: Date,
+  // ★"채우기"가 아니라 "이어붙이기"로 부여할 개월 수. 주면 targetEnd 를 무시하고
+  // 트랜잭션 안에서 max(기존 만료일, now) + extendMonths 로 다시 계산한다.
+  // 미지정(기존 호출부 전부)이면 동작이 한 톨도 바뀌지 않는다.
+  extendMonths?: number
 ): Promise<ProGrantOutcome> {
   const now = new Date();
   const subRef = db.collection("subscriptions").doc(userId);
@@ -3845,8 +3854,29 @@ async function upsertProSubscription(
       typeof data.currentPeriodEnd.toDate === "function"
         ? data.currentPeriodEnd.toDate()
         : null;
+    // ── 왜 앵커를 트랜잭션 안에서 다시 잡는가 ────────────────────────────
+    // periodEnd 는 아래에서 max(기존, target) 을 취한다. 그래서 target 을
+    // now+3개월로 잡으면 이미 Pro 가 남은 사람에게는 **아무것도 더해지지 않는다**
+    // (남은 기간이 3개월보다 길면 0일). "3개월 무료"라고 약속하고 0일을 주는 건
+    // 안 하느니 못하므로, 이어붙이기 부여는 앵커를 max(기존 만료일, now) 로 잡는다.
+    // ★호출부가 미리 계산해 넘기면 조회~부여 사이에 갱신이 끼어들 때 어긋난다.
+    // 트랜잭션 안에서 읽은 existingEnd 로 계산해야 그 창이 사라진다.
+    const effectiveTarget =
+      typeof extendMonths === "number"
+        ? addMonths(
+            new Date(
+              resolveGrantAnchorMs(
+                existingEnd ? existingEnd.getTime() : null,
+                now.getTime()
+              )
+            ),
+            extendMonths
+          )
+        : targetEnd;
     const periodEnd =
-      existingEnd && existingEnd > targetEnd ? existingEnd : targetEnd;
+      existingEnd && existingEnd > effectiveTarget
+        ? existingEnd
+        : effectiveTarget;
 
     // ★ 현역 유료 구독은 결제 정체성을 절대 덮어쓰지 않는다.
     //
@@ -3911,6 +3941,163 @@ async function grantFounderProTotalInternal(
   );
   return outcome.periodEnd;
 }
+
+// ─── 이탈 사유 청취 답장 보상 (티켓 qcwgC4h3XPm2IZQrhntq) ──────────────
+//
+// 사장님 지시: "이탈 사용자에게 물어보고, 피드백 주시면 Pro 3개월 무료."
+// 메일 문면이 **"지금 남아 있는 기간에 이어서 Pro 3개월"** 이므로 부여도 그래야
+// 한다 — grantFounderProTotalInternal("총 N개월까지 채움")로는 문면을 못 지킨다.
+// 그래서 같은 트랜잭션 경로(upsertProSubscription)를 extendMonths 로 재사용한다.
+// 새 부여 로직을 만들지 않는 이유: 현역 유료 보호·강등 금지·멱등이 전부 거기 있다.
+//
+// ★기존 파운더 설문 경로(reviewFounderFeedback)는 건드리지 않았다. 그쪽 문면은
+// 의도적으로 "총 3개월까지"이고, 두 캠페인의 약속이 서로 다르다.
+async function grantChurnInterviewProInternal(
+  userId: string,
+  months: number
+): Promise<ProGrantOutcome> {
+  const now = new Date();
+  return upsertProSubscription(
+    userId,
+    // extendMonths 를 주므로 이 값은 쓰이지 않는다. 계약상 자리만 채운다.
+    addMonths(now, months),
+    CHURN_INTERVIEW_GRANT_REASON,
+    now,
+    months
+  );
+}
+
+// portone 결제 흔적. ★hasPaymentEvidence 는 toss/paddle 만 본다 — portone 로
+// 결제한 사람은 그 함수로는 "결제 흔적 없음"이 된다(실측 사례 있음: portone
+// billingKey 를 가진 현역 결제자). 그 판정을 여기서 넓히면 billing 전반의
+// 부여·보존 판정이 함께 바뀌므로 이 캠페인 안에서만 별도로 본다.
+// (근본 수정은 별도 티켓 — docs/churn-interview-outreach-2026-08-24.md 7절)
+function hasPortonePaymentEvidence(
+  sub: Record<string, unknown> | undefined
+): boolean {
+  if (!sub) return false;
+  if (typeof sub.portoneBillingKey === "string" && sub.portoneBillingKey) {
+    return true;
+  }
+  if (typeof sub.portonePaymentId === "string" && sub.portonePaymentId) {
+    return true;
+  }
+  return sub.paymentProvider === "portone";
+}
+
+/**
+ * 이탈 사유 답장에 대한 Pro 부여(운영자 전용).
+ *
+ * 답장은 이메일로 오므로 founder_feedback 문서가 없다 — 기존 부여 진입점
+ * (reviewFounderFeedback / markFounderInterviewed / 텔레그램)은 전부 그 문서를
+ * 전제하므로 쓸 수 없다. 그렇다고 운영자가 가짜 설문 문서를 만들게 하면
+ * 설문 타임라인이 오염되고 createdAt 을 앵커로 악용하는 절차가 관례가 된다.
+ *
+ * 안전장치:
+ *  - requireAdmin (ADMIN_UID 단일 대조)
+ *  - 결제 흔적(toss/paddle/portone)이 있으면 **거부**. grant 가 결제 정체성을
+ *    덮어쓰는 사고를 막는다. founderGrant 플래그 잔재로 isLivePaidSubscription
+ *    가드가 우회되는 경로가 실재하므로 여기서 한 번 더 본다.
+ *  - founders/{email} 의 부여 스탬프로 멱등. 같은 답장에 두 번 주지 않는다.
+ *  - 응답에 이메일·uid 를 담지 않는다.
+ */
+export const grantChurnInterviewPro = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+
+    const email =
+      typeof data?.email === "string" ? normalizeEmail(data.email) : "";
+    if (!email) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "email is required"
+      );
+    }
+    const months =
+      typeof data?.months === "number" && Number.isInteger(data.months)
+        ? data.months
+        : CHURN_OFFER_MONTHS;
+    if (months <= 0 || months > 12) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "months must be an integer from 1 to 12"
+      );
+    }
+
+    const founderRef = db.collection(FOUNDERS_COLLECTION).doc(email);
+    const founderSnap = await founderRef.get();
+    if (!founderSnap.exists) {
+      throw new functions.https.HttpsError("not-found", "founder not found");
+    }
+    const founder = founderSnap.data() ?? {};
+
+    // 멱등: 이미 이 캠페인으로 부여했으면 다시 주지 않는다.
+    if (founder.churnInterviewProGrantedAt) {
+      return {
+        ok: true,
+        granted: false,
+        alreadyGranted: true,
+        addedDays: 0,
+      };
+    }
+
+    const uid =
+      typeof founder.proSubscriptionUid === "string"
+        ? founder.proSubscriptionUid
+        : typeof founder.userId === "string"
+        ? founder.userId
+        : "";
+    if (!uid) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "founder has no linked account"
+      );
+    }
+
+    const subSnap = await db.collection("subscriptions").doc(uid).get();
+    const sub = subSnap.data();
+    if (hasPaymentEvidence(sub) || hasPortonePaymentEvidence(sub)) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "결제 흔적이 있는 구독이다 — grant 로 덮어쓰지 않는다. 운영자 확인 필요."
+      );
+    }
+
+    const beforeEnd =
+      sub?.currentPeriodEnd && typeof sub.currentPeriodEnd.toDate === "function"
+        ? (sub.currentPeriodEnd.toDate() as Date)
+        : null;
+
+    const outcome = await grantChurnInterviewProInternal(uid, months);
+
+    const base = Math.max(beforeEnd?.getTime() ?? 0, Date.now());
+    const addedDays = Math.max(
+      0,
+      Math.round((outcome.periodEnd.getTime() - base) / (24 * 60 * 60 * 1000))
+    );
+
+    await founderRef.set(
+      {
+        churnInterviewProGrantedAt:
+          admin.firestore.FieldValue.serverTimestamp(),
+        churnInterviewProMonths: months,
+        proExpiresAt: admin.firestore.Timestamp.fromDate(outcome.periodEnd),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return {
+      ok: true,
+      granted: outcome.granted,
+      alreadyGranted: false,
+      skippedReason: outcome.skippedReason,
+      planType: outcome.planType,
+      proExpiresAt: outcome.periodEnd.toISOString(),
+      addedDays,
+    };
+  }
+);
 
 export const submitExperienceShareSurvey = functions.https.onCall(
   async (data, context) => {

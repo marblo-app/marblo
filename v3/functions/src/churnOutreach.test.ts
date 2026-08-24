@@ -16,10 +16,13 @@ import {
   projectGrant,
   naiveAddedDays,
   buildChurnInterviewEmail,
+  selectChurnAudience,
   ChurnOutreachFacts,
+  ChurnAudienceCandidate,
   CHURN_OFFER_MONTHS,
   STILL_ACTIVE_WINDOW_DAYS,
   DEEP_CHURN_MIN_TOKENS,
+  CHURN_INTERVIEW_COOLDOWN_DAYS,
 } from "./churnOutreach";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -32,7 +35,7 @@ const baseFacts = (): ChurnOutreachFacts => ({
   totalTokens: 57_406_548,
   lastUsageAtMs: daysAgo(24),
   lastSeenAtMs: daysAgo(24),
-  marketingConsentStatus: "pending",
+  marketingConsentStatus: "granted",
   unsubscribeStatus: "subscribed",
   currentPeriodEndMs: Date.UTC(2026, 7, 29),
   subscriptionStatus: "active",
@@ -44,6 +47,37 @@ const baseFacts = (): ChurnOutreachFacts => ({
 test("이탈한 진성 사용자는 적격", () => {
   assert.deepEqual(churnBlockReasons(baseFacts(), NOW), []);
   assert.equal(isChurnOutreachEligible(baseFacts(), NOW), true);
+});
+
+test("동의 pending 은 기본(granted_only)에서 차단된다", () => {
+  const f = { ...baseFacts(), marketingConsentStatus: "pending" as const };
+  assert.ok(churnBlockReasons(f, NOW).includes("consent_not_granted"));
+  assert.equal(isChurnOutreachEligible(f, NOW), false);
+});
+
+test("consentBasis=relationship 을 명시하면 pending 은 통과한다", () => {
+  const f = { ...baseFacts(), marketingConsentStatus: "pending" as const };
+  assert.deepEqual(churnBlockReasons(f, NOW, "relationship"), []);
+  assert.equal(isChurnOutreachEligible(f, NOW, "relationship"), true);
+});
+
+test("★relationship 근거로도 철회자는 절대 통과하지 못한다", () => {
+  const f = { ...baseFacts(), marketingConsentStatus: "revoked" as const };
+  assert.ok(
+    churnBlockReasons(f, NOW, "relationship").includes(
+      "marketing_consent_revoked"
+    )
+  );
+  // 철회는 consent_not_granted 로 갈아타지 않는다 — 사유가 흐려지면 안 된다.
+  assert.equal(
+    churnBlockReasons(f, NOW, "relationship").includes("consent_not_granted"),
+    false
+  );
+});
+
+test("동의 레코드 자체가 없으면(null) 기본에서 차단", () => {
+  const f = { ...baseFacts(), marketingConsentStatus: null };
+  assert.ok(churnBlockReasons(f, NOW).includes("consent_not_granted"));
 });
 
 test("마케팅 수신동의 철회자는 문면과 무관하게 차단", () => {
@@ -123,6 +157,7 @@ test("차단 사유는 하나만 보고 끊지 않고 전부 모은다", () => {
     lastSeenAtMs: daysAgo(0),
   };
   const reasons = churnBlockReasons(f, NOW);
+  assert.equal(reasons.includes("consent_not_granted"), false);
   assert.ok(reasons.includes("no_email"));
   assert.ok(reasons.includes("marketing_consent_revoked"));
   assert.ok(reasons.includes("unsubscribed"));
@@ -314,4 +349,158 @@ test("HTML 은 수신거부 푸터를 붙일 수 있게 </body> 를 가진다", 
   // index.ts withUnsubscribeFooter 가 </body> 직전 삽입을 시도한다.
   const mail = buildChurnInterviewEmail("ko", "deep_churn");
   assert.ok(mail.html.includes("</body>"));
+});
+
+// ── 감사 인사 (사장님 지시 2026-08-24) ──────────────────────────────────────
+
+test("서명 직전에 감사 인사가 들어간다", () => {
+  const ko = buildChurnInterviewEmail("ko", "deep_churn");
+  assert.ok(
+    ko.text.includes("무엇보다, 베타 사용자로서 마블로를 사용해 주셔서 감사합니다.")
+  );
+  const en = buildChurnInterviewEmail("en", "deep_churn");
+  assert.ok(
+    en.text.includes("thank you for being a beta user and giving Marblo a try")
+  );
+});
+
+test("감사 인사는 제안 뒤·서명 앞에 온다", () => {
+  for (const locale of ["ko", "en"] as const) {
+    const mail = buildChurnInterviewEmail(locale, "light_trial");
+    const lines = mail.text.split("\n").filter((l) => l.trim());
+    const offerIdx = lines.findIndex((l) => /Pro 3개월|3 months of Pro/.test(l));
+    const thanksIdx = lines.findIndex((l) =>
+      /무엇보다|Above all/.test(l)
+    );
+    const signIdx = lines.findIndex((l) =>
+      /마블로 팀 드림|The Marblo team/.test(l)
+    );
+    assert.ok(offerIdx >= 0 && thanksIdx >= 0 && signIdx >= 0);
+    assert.ok(offerIdx < thanksIdx, `${locale}: 감사가 제안보다 앞에 있다`);
+    assert.ok(thanksIdx < signIdx, `${locale}: 감사가 서명보다 뒤에 있다`);
+  }
+});
+
+test("★감사 인사를 넣어도 기존 제약이 깨지지 않는다", () => {
+  for (const locale of ["ko", "en"] as const) {
+    for (const segment of ["deep_churn", "light_trial"] as const) {
+      const mail = buildChurnInterviewEmail(locale, segment);
+      // 질문은 여전히 하나 — 감사 인사는 평서문이다.
+      assert.equal((mail.text.match(/[?？]/g) || []).length, 1);
+      assert.ok(mail.text.length <= 500, `${locale}/${segment} ${mail.text.length}자`);
+      // 감사 인사가 제품 자랑으로 번지지 않았는지.
+      assert.equal(/기능|feature/i.test(mail.text), false);
+    }
+  }
+});
+
+// ── 대상 선정 ───────────────────────────────────────────────────────────────
+
+const COOLDOWN_MS = CHURN_INTERVIEW_COOLDOWN_DAYS * DAY;
+
+const candidate = (
+  uidHash: string,
+  facts: Partial<ChurnOutreachFacts>,
+  lastSentAtMs: number | null = null
+): ChurnAudienceCandidate => ({
+  docId: `doc-${uidHash}`,
+  uidHash,
+  email: `${uidHash}@example.test`,
+  locale: "ko",
+  facts: { ...baseFacts(), ...facts },
+  lastSentAtMs,
+});
+
+test("적격자만 고르고 제외 사유는 집계된다", () => {
+  const result = selectChurnAudience(
+    [
+      candidate("aaaaaaaa", {}),
+      candidate("bbbbbbbb", { marketingConsentStatus: "revoked" }),
+      candidate("cccccccc", { hasPaymentEvidence: true }),
+      candidate("dddddddd", { lastSeenAtMs: daysAgo(0) }),
+    ],
+    { nowMs: NOW, cooldownMs: COOLDOWN_MS }
+  );
+  assert.deepEqual(
+    result.eligible.map((e) => e.uidHash),
+    ["aaaaaaaa"]
+  );
+  assert.equal(result.reasonCounts.marketing_consent_revoked, 1);
+  assert.equal(result.reasonCounts.live_paid_subscriber, 1);
+  assert.equal(result.reasonCounts.still_active, 1);
+});
+
+test("쿨다운 안에 이미 보냈으면 제외한다 — 리마인더를 보내지 않는다", () => {
+  const result = selectChurnAudience(
+    [candidate("aaaaaaaa", {}, NOW - 10 * DAY)],
+    { nowMs: NOW, cooldownMs: COOLDOWN_MS }
+  );
+  assert.equal(result.eligible.length, 0);
+  assert.equal(result.cooledDown, 1);
+});
+
+test("★실효 연장이 0일이면 적격이어도 보내지 않는다", () => {
+  // 이미 Pro 가 3개월 넘게 남았는데 now 앵커로 부여하면 0일 — 그런데 이 캠페인은
+  // 만료일 앵커를 쓰므로 실제로는 항상 3개월이 붙는다. 0일 케이스는 months=0
+  // 같은 잘못된 설정에서만 나오고, 그때는 발송 자체를 막아야 한다.
+  const result = selectChurnAudience([candidate("aaaaaaaa", {})], {
+    nowMs: NOW,
+    cooldownMs: COOLDOWN_MS,
+    months: 0,
+  });
+  assert.equal(result.eligible.length, 0);
+  assert.equal(result.zeroValueGrant, 1);
+});
+
+test("선정 결과의 grant 는 만료일 앵커로 계산된 진짜 3개월이다", () => {
+  const farEnd = Date.UTC(2026, 11, 24);
+  const result = selectChurnAudience(
+    [candidate("aaaaaaaa", { currentPeriodEndMs: farEnd })],
+    { nowMs: NOW, cooldownMs: COOLDOWN_MS }
+  );
+  assert.equal(result.eligible.length, 1);
+  const g = result.eligible[0].grant;
+  assert.equal(g.anchorMs, farEnd);
+  assert.ok(g.addedDays >= 89, `addedDays=${g.addedDays}`);
+});
+
+test("세그먼트가 선정 결과에 실려 문면 선택으로 이어진다", () => {
+  const result = selectChurnAudience(
+    [
+      candidate("aaaaaaaa", { totalTokens: 57_406_548 }),
+      candidate("dddddddd", { totalTokens: 112_709 }),
+    ],
+    { nowMs: NOW, cooldownMs: COOLDOWN_MS }
+  );
+  assert.deepEqual(
+    result.eligible.map((e) => e.segment),
+    ["deep_churn", "light_trial"]
+  );
+});
+
+test("제외 목록에는 이메일이 담기지 않는다 — uidHash 와 사유만", () => {
+  const result = selectChurnAudience(
+    [candidate("bbbbbbbb", { marketingConsentStatus: "revoked" })],
+    { nowMs: NOW, cooldownMs: COOLDOWN_MS }
+  );
+  const serialized = JSON.stringify(result.excluded);
+  assert.equal(serialized.includes("@example.test"), false);
+  assert.ok(serialized.includes("bbbbbbbb"));
+});
+
+test("consentBasis 는 선정에도 그대로 흐른다", () => {
+  const pending = [candidate("aaaaaaaa", { marketingConsentStatus: "pending" })];
+  assert.equal(
+    selectChurnAudience(pending, { nowMs: NOW, cooldownMs: COOLDOWN_MS })
+      .eligible.length,
+    0
+  );
+  assert.equal(
+    selectChurnAudience(pending, {
+      nowMs: NOW,
+      cooldownMs: COOLDOWN_MS,
+      consentBasis: "relationship",
+    }).eligible.length,
+    1
+  );
 });
