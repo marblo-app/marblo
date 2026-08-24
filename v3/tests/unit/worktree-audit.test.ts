@@ -19,6 +19,7 @@ import {
   describeProcessLiveness,
   describeSafeToDelete,
   describeActivityAtDecisionTime,
+  evaluateSubmitForReviewGate,
   type WorktreeAuditEvent,
   type MergeInfo,
 } from "../../electron/mcp-server/worktree-audit";
@@ -175,6 +176,82 @@ describe("buildWorktreeAuditRows", () => {
         mergedAtMs: null,
       },
     ]);
+  });
+});
+
+describe("evaluateSubmitForReviewGate", () => {
+  it("워크트리를 못 찾으면 fail-open 한다", () => {
+    expect(
+      evaluateSubmitForReviewGate({
+        worktreeExists: false,
+        commitsSinceBase: null,
+        hasUncommittedChanges: null,
+        pushedToOrigin: null,
+        prUrl: null,
+      }),
+    ).toEqual({ allowed: true, rejection: null, message: null });
+  });
+
+  it("커밋 0건 + 미커밋 변경은 작업했는데 안 커밋함으로 거절한다", () => {
+    const r = evaluateSubmitForReviewGate({
+      worktreeExists: true,
+      commitsSinceBase: 0,
+      hasUncommittedChanges: true,
+      pushedToOrigin: true,
+      prUrl: null,
+    });
+    expect(r.allowed).toBe(false);
+    expect(r.rejection).toBe("uncommitted-work");
+    expect(r.message).toContain("git commit");
+  });
+
+  it("미커밋 변경 판정은 push 근거가 없어도 거절한다", () => {
+    const r = evaluateSubmitForReviewGate({
+      worktreeExists: true,
+      commitsSinceBase: 0,
+      hasUncommittedChanges: true,
+      pushedToOrigin: null,
+      prUrl: null,
+    });
+    expect(r.rejection).toBe("uncommitted-work");
+  });
+
+  it("커밋은 있지만 origin 에 없으면 push 명령과 함께 거절한다", () => {
+    const r = evaluateSubmitForReviewGate({
+      worktreeExists: true,
+      commitsSinceBase: 2,
+      hasUncommittedChanges: false,
+      pushedToOrigin: false,
+      prUrl: null,
+    });
+    expect(r.allowed).toBe(false);
+    expect(r.rejection).toBe("unpushed-commits");
+    expect(r.message).toContain("git push origin HEAD");
+  });
+
+  it("커밋과 push 는 있지만 PR 이 없으면 gh pr create 로 안내한다", () => {
+    const r = evaluateSubmitForReviewGate({
+      worktreeExists: true,
+      commitsSinceBase: 1,
+      hasUncommittedChanges: false,
+      pushedToOrigin: true,
+      prUrl: null,
+    });
+    expect(r.allowed).toBe(false);
+    expect(r.rejection).toBe("missing-pr");
+    expect(r.message).toContain("gh pr create");
+  });
+
+  it("커밋 + push + PR 이 있으면 통과한다", () => {
+    expect(
+      evaluateSubmitForReviewGate({
+        worktreeExists: true,
+        commitsSinceBase: 1,
+        hasUncommittedChanges: false,
+        pushedToOrigin: true,
+        prUrl: "https://github.com/acme/repo/pull/1",
+      }),
+    ).toEqual({ allowed: true, rejection: null, message: null });
   });
 });
 

@@ -179,6 +179,7 @@ import {
   describeProcessLiveness,
   describeSafeToDelete,
   describeActivityAtDecisionTime,
+  evaluateSubmitForReviewGate,
   type WorktreeAuditEvent,
   type MergeHistoryRow,
   type MergeInfo,
@@ -2769,6 +2770,133 @@ function runGit(
   });
 }
 
+interface SubmitForReviewGitEvidence {
+  worktreeExists: boolean;
+  commitsSinceBase: number | null;
+  hasUncommittedChanges: boolean | null;
+  pushedToOrigin: boolean | null;
+  branch: string | null;
+}
+
+interface SubmitForReviewGhPr {
+  url?: string;
+}
+
+async function countCommitsSinceOriginHead(
+  worktreePath: string
+): Promise<number | null> {
+  const base = await runGit(["merge-base", "HEAD", "origin/HEAD"], worktreePath);
+  const baseSha = base.stdout.trim();
+  if (base.code !== 0 || !baseSha) return null;
+
+  const count = await runGit(
+    ["rev-list", "--count", `${baseSha}..HEAD`],
+    worktreePath
+  );
+  const raw = count.stdout.trim();
+  if (count.code !== 0 || !/^\d+$/.test(raw)) return null;
+  return parseInt(raw, 10);
+}
+
+async function collectSubmitForReviewGitEvidence(
+  worktreePath: string
+): Promise<SubmitForReviewGitEvidence> {
+  if (!fs.existsSync(worktreePath)) {
+    return {
+      worktreeExists: false,
+      commitsSinceBase: null,
+      hasUncommittedChanges: null,
+      pushedToOrigin: null,
+      branch: null,
+    };
+  }
+
+  const status = await runGit(["status", "--porcelain"], worktreePath);
+  const hasUncommittedChanges =
+    status.code === 0 ? status.stdout.trim().length > 0 : null;
+
+  const commitsSinceBase = await countCommitsSinceOriginHead(worktreePath);
+
+  const branchRes = await runGit(["branch", "--show-current"], worktreePath);
+  const branch =
+    branchRes.code === 0 && branchRes.stdout.trim()
+      ? branchRes.stdout.trim()
+      : null;
+
+  const originUrl = await runGit(["remote", "get-url", "origin"], worktreePath);
+  let pushedToOrigin: boolean | null = null;
+  if (originUrl.code === 0) {
+    const contains = await runGit(
+      ["branch", "-r", "--contains", "HEAD"],
+      worktreePath
+    );
+    if (contains.code === 0) {
+      pushedToOrigin = contains.stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .some((line) => line.startsWith("origin/"));
+    }
+  }
+
+  return {
+    worktreeExists: true,
+    commitsSinceBase,
+    hasUncommittedChanges,
+    pushedToOrigin,
+    branch,
+  };
+}
+
+function parseGhPrUrl(raw: string): string | null {
+  try {
+    const row = JSON.parse(raw) as SubmitForReviewGhPr;
+    return typeof row.url === "string" && row.url ? row.url : null;
+  } catch {
+    return null;
+  }
+}
+
+async function findSubmitForReviewPrUrl(
+  worktreePath: string,
+  branch: string | null
+): Promise<string | null> {
+  const direct = await runGh(
+    ["pr", "view", "--json", "url"],
+    worktreePath,
+    10_000
+  );
+  if (direct.code === 0) {
+    const url = parseGhPrUrl(direct.stdout);
+    if (url) return url;
+  }
+
+  if (!branch) return null;
+  const listed = await runGh(
+    [
+      "pr",
+      "list",
+      "--head",
+      branch,
+      "--state",
+      "all",
+      "--limit",
+      "1",
+      "--json",
+      "url",
+    ],
+    worktreePath,
+    10_000
+  );
+  if (listed.code !== 0) return null;
+  try {
+    const rows = JSON.parse(listed.stdout) as SubmitForReviewGhPr[];
+    const url = rows[0]?.url;
+    return typeof url === "string" && url ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 /** dirty/unpushed 를 읽기 전용으로 관측한다. 삭제 정책 자체는 여기서 판단하지
  *  않는다(worktree-manager.ts `reapSafety()` 담당, 설계 §2 재구현 금지). */
 async function gitWorktreeSafetyEvidence(
@@ -4381,13 +4509,38 @@ export function registerTools(server: McpServer): void {
         return text(`Task '${task.title}' is already DONE.`);
       }
 
+      const worktreeId = `${task.projectId || DEFAULT_PROJECT}/${task_id}`;
+      const reviewWorktreePath = worktreeDiskPath(worktreeId);
+      const gitEvidence =
+        await collectSubmitForReviewGitEvidence(reviewWorktreePath);
+      const recordedPrUrl =
+        typeof task.prUrl === "string" && task.prUrl ? task.prUrl : null;
+      const discoveredPrUrl =
+        !pr_url && !recordedPrUrl && gitEvidence.worktreeExists
+          ? await findSubmitForReviewPrUrl(
+              reviewWorktreePath,
+              gitEvidence.branch
+            )
+          : null;
+      const effectivePrUrl = pr_url ?? recordedPrUrl ?? discoveredPrUrl;
+      const gate = evaluateSubmitForReviewGate({
+        worktreeExists: gitEvidence.worktreeExists,
+        commitsSinceBase: gitEvidence.commitsSinceBase,
+        hasUncommittedChanges: gitEvidence.hasUncommittedChanges,
+        pushedToOrigin: gitEvidence.pushedToOrigin,
+        prUrl: effectivePrUrl,
+      });
+      if (!gate.allowed && gate.message) {
+        return text(gate.message);
+      }
+
       // Status → REVIEW + milestone + Firestore projection in one transaction.
       // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
       const projMut: ApplyProjectionInput = {
         newStatus: "REVIEW",
         lastAgentId: WORKER_AGENT_ID,
-        lastActivitySummary: pr_url
-          ? `submitted for review — ${pr_url}`
+        lastActivitySummary: effectivePrUrl
+          ? `submitted for review — ${effectivePrUrl}`
           : "submitted for review",
         appendMilestone: true,
         // submit auto-claims from any non-terminal state (incl. TODO), so the
@@ -4396,7 +4549,9 @@ export function registerTools(server: McpServer): void {
         validateFrom: (s) => s !== "DONE",
       };
       const extra: Record<string, unknown> = {};
-      if (pr_url) extra.prUrl = pr_url;
+      if (effectivePrUrl && effectivePrUrl !== task.prUrl) {
+        extra.prUrl = effectivePrUrl;
+      }
       // Auto-claim if the task was never claimed — but never to the
       // orchestrator's shared id (WORKER_AGENT_ID is "" for orchestrator),
       // else the board shows the orch as assignee for every task it submits
@@ -4426,7 +4581,7 @@ export function registerTools(server: McpServer): void {
       // bridge routes lane(contextId=lane:*) and board here to the BOARD orch
       // (resolveNotifyTarget); missions go to the mission orch. Do NOT add a
       // lane gate here — that would silence the lane review gate entirely.
-      const prNote = pr_url ? ` PR: ${pr_url}` : "";
+      const prNote = effectivePrUrl ? ` PR: ${effectivePrUrl}` : "";
       const roleLabel = formatAgentTaskRoleLabel(
         task.role,
         await fetchAgentRole(MARBLO_AGENT_ID)
@@ -4451,7 +4606,7 @@ export function registerTools(server: McpServer): void {
       // nudge 를 잠재우면 규약의 취지가 무너지므로). 보고 누락 시 soft nudge 만
       // 돌려주고 REVIEW 전이는 그대로 유지(절대 블록 안 함).
       const reportSummary: CompletionSummary | undefined = summary
-        ? { ...summary, pr: summary.pr ?? pr_url }
+        ? { ...summary, pr: summary.pr ?? effectivePrUrl ?? undefined }
         : undefined;
       const completionNudge = await applyCompletionReport(
         task_id,

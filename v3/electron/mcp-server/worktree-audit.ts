@@ -256,6 +256,84 @@ export interface LivenessVerdict {
   detail: string;
 }
 
+export type SubmitForReviewGateRejection =
+  | "uncommitted-work"
+  | "unpushed-commits"
+  | "missing-pr";
+
+export interface SubmitForReviewGateInput {
+  worktreeExists: boolean;
+  commitsSinceBase: number | null;
+  hasUncommittedChanges: boolean | null;
+  pushedToOrigin: boolean | null;
+  prUrl: string | null;
+}
+
+export interface SubmitForReviewGateVerdict {
+  allowed: boolean;
+  rejection: SubmitForReviewGateRejection | null;
+  message: string | null;
+}
+
+/**
+ * submit_for_review 위생 게이트. 이 게이트는 보안 경계가 아니므로 근거가 없으면
+ * fail-open 한다. 확실히 구분 가능한 세 경우만 에이전트가 바로 실행할 명령과
+ * 함께 거절한다.
+ */
+export function evaluateSubmitForReviewGate(
+  input: SubmitForReviewGateInput,
+): SubmitForReviewGateVerdict {
+  const allow = (): SubmitForReviewGateVerdict => ({
+    allowed: true,
+    rejection: null,
+    message: null,
+  });
+
+  if (!input.worktreeExists) return allow();
+  if (input.commitsSinceBase === null) return allow();
+
+  if (input.commitsSinceBase === 0 && input.hasUncommittedChanges) {
+    return {
+      allowed: false,
+      rejection: "uncommitted-work",
+      message:
+        "Error: 작업 변경이 있지만 아직 커밋이 없습니다.\n" +
+        "다음 명령으로 변경을 커밋한 뒤 다시 submit_for_review 를 호출하세요:\n" +
+        "git status --short\n" +
+        "git add <files>\n" +
+        'git commit -m "<summary>"',
+    };
+  }
+
+  if (input.commitsSinceBase > 0 && input.pushedToOrigin === false) {
+    return {
+      allowed: false,
+      rejection: "unpushed-commits",
+      message:
+        "Error: 커밋은 있지만 origin 에 푸시되지 않았습니다.\n" +
+        "다음 명령을 실행한 뒤 다시 submit_for_review 를 호출하세요:\n" +
+        "git push origin HEAD",
+    };
+  }
+
+  if (
+    input.commitsSinceBase > 0 &&
+    input.pushedToOrigin === true &&
+    !input.prUrl
+  ) {
+    return {
+      allowed: false,
+      rejection: "missing-pr",
+      message:
+        "Error: 커밋과 푸시는 확인됐지만 PR 이 없습니다.\n" +
+        "다음 명령으로 PR 을 만든 뒤 다시 submit_for_review 를 호출하세요:\n" +
+        "gh pr create",
+    };
+  }
+
+  return allow();
+}
+
 /**
  * "이 티켓의 수정이 지금 도는 프로세스에 실제 들어있나" 에 답한다.
  *
