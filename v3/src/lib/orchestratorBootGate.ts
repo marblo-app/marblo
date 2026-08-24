@@ -19,7 +19,17 @@
  *
  *   probing ─(배너 보임)─▶ armed ─(첫 어시스턴트 줄)─▶ open(그 줄부터 통과)
  *      │                     ├─(부트 에코 뒤 조용함)─▶ open(이후만 통과)
- *      └─(배너 없이 한도)──▶ open(버퍼 전부 통과)      └─(상한 시간)─▶ open
+ *      ├─(배너 없이 한도)──▶ open(버퍼 전부 통과)      └─(상한 시간)─▶ open
+ *      └─(한 바이트도 안 옴)▶ open(통과분 없음)
+ *
+ * ★★ **닫힌 상태에는 반드시 마감 시한이 있어야 한다**(티켓 vnJWQrrfdLoXPR13rx1B).
+ * 종전엔 안전망 3개(`probeMaxChars`/`probeMaxMs`/`maxArmedMs`)가 전부 **출력이 온
+ * 뒤에야** 무장됐다 — 셋 다 `feed()` 안에서만 켜진다. 그래서 PTY 가 0바이트를 주면
+ * (이미 대화 중인 세션으로 리마운트돼 replay 링이 비어 오는 경우) 타이머가 **하나도**
+ * 돌지 않아 `probing` 에 영원히 갇혔고, `BootGateOverlay` 가 터미널을 영구히 덮었다.
+ * 그래서 `probing` 에는 **생성/`reset()` 시점부터** 도는 침묵 시한을 둔다. 이제 모든
+ * 닫힌 상태가 시한을 가진다: 가시 문자 전 = 침묵 시한, 가시 문자 후 = `probeMaxMs`,
+ * armed = `maxArmedMs`.
  *
  * - `probing`: 스트림이 부트(배너)로 시작하는지 본다. 오케 PTY 의 replay 링은 4M
  *   자를 보관하므로 리마운트에도 부트가 다시 온다 — 그러면 armed. 링이 중간부터
@@ -32,6 +42,18 @@
  *   스트림이 `QUIET_MS` 조용하면 턴이 끝난 것으로 보고 연다. 이때 인사말은 잃지만
  *   배너·프롬프트·툴 출력은 이미 지나간 뒤라 새지 않는다. 마지막 안전망은
  *   `MAX_ARMED_MS` 상한 — 어떤 경우에도 골격 뒤에 영영 갇히지 않는다.
+ * - 침묵 시한: 한 바이트도 안 온 채 시간이 다하면 연다. 온 게 없으니 **샐 것도 없다**
+ *   — 통과분이 빈 문자열이라 부트 출력이 새는 경로가 아니다. 위험은 "그 뒤에 올
+ *   배너" 뿐이고, 그래서 시한을 **세션 상태로 가른다**(아래).
+ * - ★타이머보다 나은 신호 — `sessionId`(= `orch-<sess>-<spawn ms>`)는 PTY **프로세스**
+ *   와 1:1 이다(`orchestrator-manager`: 새 스폰마다 `Date.now()` 로 새 sid, 살아 있는
+ *   세션에 붙을 땐 `reused: true` 로 **같은** sid). 그러니 "이 sid 의 게이트가 한 번
+ *   부트를 지나 열린 적 있다" = "이 PTY 는 다시 부팅하지 않는다" 이고, 그때의 침묵은
+ *   부팅 중이 아니라 **그냥 조용한 대화**다. 그 sid 는 짧은 시한
+ *   (`SILENT_OPEN_BOOTED_MS`)으로 곧장 풀고, 처음 보는 sid 는 느리게 뜨는 CLI 의
+ *   배너를 앞지르지 않도록 넉넉한 시한(`SILENT_OPEN_MS`)만 백스톱으로 둔다.
+ *   기록은 부트를 **본** 개방(assistant-line/no-banner/quiet-after-echo/max-armed)
+ *   에만 남긴다 — `forced`·`silent` 는 부트를 본 적이 없어 근거가 못 된다.
  * - `open()`: 패널이 강제로 연다(로그인·첫 실행 다이얼로그로 멈춰 사용자가 원시
  *   화면에 답해야 할 때 — `orchestratorHaltKeepsTerminal`).
  *
@@ -52,6 +74,7 @@ export type BootGateOpenReason =
   | "no-banner"
   | "quiet-after-echo"
   | "max-armed"
+  | "silent"
   | "forced";
 
 export type TranscriptLineKind =
@@ -72,6 +95,19 @@ export const PROBE_MAX_MS = 2_500;
 export const QUIET_AFTER_ECHO_MS = 2_500;
 /** armed 상한. 문법도 폴백도 안 걸리면 이 뒤엔 무조건 연다(이후 출력만 통과). */
 export const MAX_ARMED_MS = 60_000;
+/**
+ * probing 상한 — **한 바이트도 안 온 채** 이만큼 지나면 연다(처음 보는 sid).
+ * `MAX_ARMED_MS` 와 같은 크기다: 둘 다 "어떤 경우에도 골격 뒤에 영영 갇히지 않는다"
+ * 는 같은 약속의 다른 상태 버전이고, 여기서 짧게 잡으면 느리게 뜨는 CLI(콜드 스타트·
+ * 바이너리 해석)의 배너를 앞질러 열어 부트가 샌다.
+ */
+export const SILENT_OPEN_MS = 60_000;
+/**
+ * 같은 상한 — 단 **이 sid 가 이미 부트를 지난 것으로 기록된** 경우. 그 PTY 는 다시
+ * 부팅하지 않으므로 앞지를 배너가 없다. 사장님이 겪은 리마운트 고착이 이 경로로
+ * 60초가 아니라 2.5초에 풀린다.
+ */
+export const SILENT_OPEN_BOOTED_MS = 2_500;
 /** 줄바꿈 없이 쌓이는 뷰포트 리드로우 꼬리의 상한(문자). 분류엔 마지막 부분만 필요하다. */
 const PENDING_TAIL_MAX_CHARS = 16_384;
 
@@ -199,9 +235,50 @@ export function classifyTranscriptRaw(raw: string): TranscriptLineKind {
   return best;
 }
 
+// ── "이 sid 는 부트를 지났다" 기록 ─────────────────────────────────────────
+// 렌더러 프로세스 수명 동안의 메모리. sid 는 PTY 프로세스와 1:1 이라(위 헤더 주석)
+// 한 번 부트를 지난 sid 가 다시 부팅하는 경로는 없다. 프로세스가 죽고 다시 뜨면
+// `orch-<sess>-<Date.now()>` 로 **다른** sid 가 되므로 이 기록에 걸리지 않는다 —
+// 즉 이 기록이 남아 있다고 새 부트를 잘못 통과시키는 경우는 없다.
+//
+// 창을 새로고침하면 이 기억은 사라진다. 그때는 `SILENT_OPEN_MS` 백스톱이 받는다 —
+// 늦게 풀릴 뿐 갇히지는 않는다.
+const BOOT_SEEN_MAX = 64;
+const bootSeenSids: string[] = [];
+
+export function hasPtyBootSeen(sessionId: string): boolean {
+  return bootSeenSids.includes(sessionId);
+}
+
+function rememberPtyBootSeen(sessionId: string): void {
+  if (bootSeenSids.includes(sessionId)) return;
+  bootSeenSids.push(sessionId);
+  // 창당 오케 PTY 는 하나지만 재시작마다 sid 가 늘어난다 — 오래된 것부터 버린다.
+  while (bootSeenSids.length > BOOT_SEEN_MAX) bootSeenSids.shift();
+}
+
+/** 테스트 전용 — 기록을 지운다. */
+export function forgetPtyBootSeen(sessionId: string): void {
+  const at = bootSeenSids.indexOf(sessionId);
+  if (at >= 0) bootSeenSids.splice(at, 1);
+}
+
+/** 부트를 **본** 개방만 근거가 된다. `forced`/`silent` 는 본 적이 없다. */
+const REASONS_PROVING_BOOT: ReadonlySet<BootGateOpenReason> = new Set([
+  "assistant-line",
+  "no-banner",
+  "quiet-after-echo",
+  "max-armed",
+]);
+
 // ── 게이트 ────────────────────────────────────────────────────────────────
 
 export interface BootGateOptions {
+  /**
+   * 이 게이트가 지키는 PTY sid(`orch-…`). 주면 "이 sid 는 부트를 지났다" 기록을
+   * 읽고 쓴다 — 리마운트의 침묵을 60초가 아니라 2.5초에 푼다.
+   */
+  sessionId?: string;
   /** epoch ms. 기본 `Date.now`. */
   now?: () => number;
   /** 타이머. 기본 `setTimeout`; 반환값은 취소 함수. */
@@ -210,6 +287,8 @@ export interface BootGateOptions {
   probeMaxMs?: number;
   quietAfterEchoMs?: number;
   maxArmedMs?: number;
+  silentOpenMs?: number;
+  silentOpenBootedMs?: number;
 }
 
 export interface PtyOutputGate {
@@ -241,6 +320,9 @@ export class OrchestratorBootGate implements PtyOutputGate {
   private readonly probeMaxMs: number;
   private readonly quietAfterEchoMs: number;
   private readonly maxArmedMs: number;
+  private readonly sessionId: string | null;
+  private readonly silentOpenMs: number;
+  private readonly silentOpenBootedMs: number;
 
   private _state: BootGateState = "probing";
   private _openReason: BootGateOpenReason | null = null;
@@ -260,6 +342,7 @@ export class OrchestratorBootGate implements PtyOutputGate {
   private cancelProbeTimer: (() => void) | null = null;
   private cancelQuietTimer: (() => void) | null = null;
   private cancelMaxTimer: (() => void) | null = null;
+  private cancelSilentTimer: (() => void) | null = null;
   private disposed = false;
 
   constructor(options: BootGateOptions = {}) {
@@ -269,6 +352,12 @@ export class OrchestratorBootGate implements PtyOutputGate {
     this.probeMaxMs = options.probeMaxMs ?? PROBE_MAX_MS;
     this.quietAfterEchoMs = options.quietAfterEchoMs ?? QUIET_AFTER_ECHO_MS;
     this.maxArmedMs = options.maxArmedMs ?? MAX_ARMED_MS;
+    this.sessionId = options.sessionId ?? null;
+    this.silentOpenMs = options.silentOpenMs ?? SILENT_OPEN_MS;
+    this.silentOpenBootedMs =
+      options.silentOpenBootedMs ?? SILENT_OPEN_BOOTED_MS;
+    // ★생성 시점부터 돈다 — 이 게이트의 유일한 "출력과 무관한" 시한이다.
+    this.armSilentTimer();
   }
 
   get state(): BootGateState {
@@ -313,9 +402,30 @@ export class OrchestratorBootGate implements PtyOutputGate {
     this.cancelProbeTimer?.();
     this.cancelQuietTimer?.();
     this.cancelMaxTimer?.();
+    this.cancelSilentTimer?.();
     this.cancelProbeTimer = null;
     this.cancelQuietTimer = null;
     this.cancelMaxTimer = null;
+    this.cancelSilentTimer = null;
+  }
+
+  /**
+   * 침묵 시한 — `probing` 이면서 **가시 문자를 한 번도 못 본** 동안만 유효하다.
+   * 가시 문자가 하나라도 오면 `probeMaxMs` 가, armed 로 가면 `maxArmedMs` 가
+   * 이어받는다(둘 다 `clearTimers` 로 이걸 끈다). 그래서 닫힌 상태에 시한이
+   * 없는 구간이 남지 않는다.
+   */
+  private armSilentTimer(): void {
+    const ms =
+      this.sessionId && hasPtyBootSeen(this.sessionId)
+        ? this.silentOpenBootedMs
+        : this.silentOpenMs;
+    this.cancelSilentTimer = this.setTimer(() => {
+      if (this.disposed) return;
+      if (this._state !== "probing" || this.firstVisibleAt !== null) return;
+      // 온 게 없으니 통과분도 없다 — 부트가 새는 경로가 아니다.
+      this.transitionOpen("silent", "");
+    }, ms);
   }
 
   reset(): void {
@@ -332,6 +442,8 @@ export class OrchestratorBootGate implements PtyOutputGate {
     this.firstVisibleAt = null;
     this.pendingRaw = "";
     this.sawUserLine = false;
+    // 새 마운트도 닫힌 채로 시작한다 — 시한 없이 두면 이 티켓의 고착이 그대로 재현된다.
+    this.armSilentTimer();
     this.notify();
   }
 
@@ -363,6 +475,9 @@ export class OrchestratorBootGate implements PtyOutputGate {
     this.clearTimers();
     this._state = "open";
     this._openReason = reason;
+    if (this.sessionId && REASONS_PROVING_BOOT.has(reason)) {
+      rememberPtyBootSeen(this.sessionId);
+    }
     this.probeBuffer = [];
     this.pendingRaw = "";
     this.notify();
@@ -408,6 +523,9 @@ export class OrchestratorBootGate implements PtyOutputGate {
         const visible = normalizeLine(forClassify).trim().length;
         if (visible > 0 && this.firstVisibleAt === null) {
           this.firstVisibleAt = this.now();
+          // 여기서부터는 `probeMaxMs` 가 소유한다.
+          this.cancelSilentTimer?.();
+          this.cancelSilentTimer = null;
           this.cancelProbeTimer = this.setTimer(() => {
             if (this.disposed || this._state !== "probing") return;
             this.transitionOpen("no-banner", this.probeBuffer.join(""));

@@ -88,8 +88,12 @@ export default memo(function OrchestratorTerminal({
   // 돌리므로 게이트도 같은 키로 만든다 — 리마운트(모드 전환)마다 replay 가 처음부터
   // 다시 오고, 그때 TerminalView 가 `reset()` 으로 판정을 처음부터 다시 한다.
   const gate = useMemo<PtyOutputGate | undefined>(
-    () => (gateBootOutput ? new OrchestratorBootGate() : undefined),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- sessionId 가 키다
+    () =>
+      gateBootOutput
+        ? // sid 를 넘겨야 게이트가 "이 PTY 는 이미 부트를 지났다" 를 알아본다
+          // (티켓 vnJWQrrfdLoXPR13rx1B) — 리마운트가 0바이트여도 갇히지 않는다.
+          new OrchestratorBootGate({ sessionId })
+        : undefined,
     [sessionId, gateBootOutput],
   );
   useEffect(() => () => gate?.dispose(), [gate]);

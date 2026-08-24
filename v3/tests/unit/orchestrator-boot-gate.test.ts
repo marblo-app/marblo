@@ -22,6 +22,10 @@ import {
   MAX_ARMED_MS,
   PROBE_MAX_MS,
   QUIET_AFTER_ECHO_MS,
+  SILENT_OPEN_MS,
+  SILENT_OPEN_BOOTED_MS,
+  forgetPtyBootSeen,
+  hasPtyBootSeen,
 } from "../../src/lib/orchestratorBootGate";
 import { stripAnsi } from "../../src/lib/ansi";
 
@@ -89,10 +93,11 @@ interface Harness {
   output: () => string;
 }
 
-function makeGate(opts: { sink?: boolean } = {}): Harness {
+function makeGate(opts: { sink?: boolean; sessionId?: string } = {}): Harness {
   let now = 1_000_000;
   const timers: Array<{ at: number; fn: () => void; cancelled: boolean }> = [];
   const gate = new OrchestratorBootGate({
+    sessionId: opts.sessionId,
     now: () => now,
     setTimer: (fn, ms) => {
       const entry = { at: now + ms, fn, cancelled: false };
@@ -356,6 +361,101 @@ describe("OrchestratorBootGate — 비기너 첫 화면", () => {
       h.gate.feed(chunk);
     expect(h.gate.state).toBe("armed");
     expect(h.output()).toBe("");
+  });
+
+  // ── 침묵 안전망(티켓 vnJWQrrfdLoXPR13rx1B) ────────────────────────────────
+  // 종전 안전망 3개(probeMaxChars/probeMaxMs/maxArmedMs)는 **전부 출력이 온 뒤에야**
+  // 무장됐다. 0바이트면 타이머가 하나도 안 돌아 probing 에 영원히 갇혔고, 화면엔
+  // 로딩 골격이 영구히 남았다. 아래가 그 구멍의 계약이다.
+
+  it("★출력이 한 바이트도 안 와도 probing 에 영원히 갇히지 않는다", () => {
+    const h = makeGate();
+    h.advance(SILENT_OPEN_MS - 1);
+    expect(h.gate.state).toBe("probing");
+    h.advance(2);
+    expect(h.gate.state).toBe("open");
+    expect(h.gate.openReason).toBe("silent");
+    // 온 게 없으니 샐 것도 없다.
+    expect(h.output()).toBe("");
+  });
+
+  it("★이미 부트를 지난 세션(같은 sid)으로 리마운트되면 0바이트여도 곧 풀린다", () => {
+    const sessionId = "orch-sess-1-1700000000000";
+    forgetPtyBootSeen(sessionId);
+
+    // 1차 마운트: 부트를 걸러내고 인사말에서 열렸다 = 이 sid 는 부트를 지났다.
+    const first = makeGate({ sessionId });
+    for (const chunk of fixtureChunks("codex-ready-composer"))
+      first.gate.feed(chunk);
+    first.gate.feed(historyChunk(GREETING_LINES));
+    expect(first.gate.state).toBe("open");
+    expect(hasPtyBootSeen(sessionId)).toBe(true);
+
+    // 2차 마운트(모드 전환): replay 가 0바이트다.
+    const second = makeGate({ sessionId });
+    second.advance(SILENT_OPEN_BOOTED_MS - 1);
+    expect(second.gate.state).toBe("probing");
+    second.advance(2);
+    expect(second.gate.state).toBe("open");
+    expect(second.gate.openReason).toBe("silent");
+    expect(second.output()).toBe("");
+  });
+
+  it("★처음 보는 세션은 짧은 침묵으로 열리지 않는다 — 느린 스폰의 배너가 새면 안 된다", () => {
+    const sessionId = "orch-sess-2-1700000000000";
+    forgetPtyBootSeen(sessionId);
+    const h = makeGate({ sessionId });
+    // 부트를 본 적 없는 sid 는 짧은 한도로 열지 않는다.
+    h.advance(SILENT_OPEN_BOOTED_MS * 4);
+    expect(h.gate.state).toBe("probing");
+    // 느리게 뜬 CLI 의 배너가 이제야 온다 — 종전대로 무장하고 거른다.
+    for (const chunk of fixtureChunks("codex-ready-composer"))
+      h.gate.feed(chunk);
+    expect(h.gate.state).toBe("armed");
+    h.gate.feed(historyChunk(GREETING_LINES));
+    expect(h.gate.state).toBe("open");
+    expect(h.gate.openReason).toBe("assistant-line");
+    for (const s of FORBIDDEN) expect(h.output()).not.toContain(s);
+    expect(h.output()).toContain(GREETING_LINES[0]);
+  });
+
+  it("★침묵 한도 전에 바이트가 오면 종전 경로가 그대로 소유한다", () => {
+    const h = makeGate();
+    for (const chunk of fixtureChunks("codex-ready-composer"))
+      h.gate.feed(chunk);
+    expect(h.gate.state).toBe("armed");
+    // 침묵 한도를 넘겨도 armed 는 maxArmedMs 가 소유한다 — "silent" 로 열리지 않는다.
+    h.advance(SILENT_OPEN_MS + 1);
+    expect(h.gate.openReason).toBe("max-armed");
+  });
+
+  it("★reset(새 마운트)도 침묵 안전망을 다시 무장한다", () => {
+    const h = makeGate();
+    for (const chunk of fixtureChunks("codex-ready-composer"))
+      h.gate.feed(chunk);
+    h.gate.feed(historyChunk(GREETING_LINES));
+    expect(h.gate.state).toBe("open");
+    h.gate.reset();
+    expect(h.gate.state).toBe("probing");
+    h.advance(SILENT_OPEN_MS + 1);
+    expect(h.gate.state).toBe("open");
+    expect(h.gate.openReason).toBe("silent");
+  });
+
+  it("강제 개방·침묵 개방은 '부트를 지났다' 로 기록하지 않는다 — 부트를 본 적이 없다", () => {
+    const forced = "orch-sess-3-1700000000000";
+    const silent = "orch-sess-4-1700000000000";
+    forgetPtyBootSeen(forced);
+    forgetPtyBootSeen(silent);
+
+    const f = makeGate({ sessionId: forced });
+    f.gate.open("forced");
+    expect(hasPtyBootSeen(forced)).toBe(false);
+
+    const s = makeGate({ sessionId: silent });
+    s.advance(SILENT_OPEN_MS + 1);
+    expect(s.gate.openReason).toBe("silent");
+    expect(hasPtyBootSeen(silent)).toBe(false);
   });
 
   it("구독자는 상태 전이마다 한 번씩 불린다", () => {
