@@ -189,6 +189,7 @@ import {
   MAX_SKILLS_PER_DISPATCH,
   resolveSkillRouting,
 } from "./skill-registry.js";
+import { preflightDispatchScopeInHead } from "./dispatch-scope-preflight.js";
 import {
   formatCompletionReport,
   resolveCompletionReport,
@@ -5683,6 +5684,7 @@ export function registerTools(server: McpServer): void {
 
       const missionContextId = resolveMissionContextForWrite();
       let dispatchTaskId = task_id;
+      let scopePreflightNote = "";
 
       if (missionContextId && !dispatchTaskId) {
         const projectId = DEFAULT_PROJECT;
@@ -5743,6 +5745,11 @@ export function registerTools(server: McpServer): void {
             );
           }
           dispatchTaskType = classifyTaskType(task) ?? undefined;
+          const scopePreflight = await preflightDispatchScopeInHead({
+            cwd: cwd || process.env.MARBLO_PROJECT_ROOT,
+            scope: task.scope,
+          });
+          scopePreflightNote = scopePreflight.warning;
           const missionContextError = await ensureTaskMissionContext(
             dispatchTaskId,
             task,
@@ -6025,6 +6032,7 @@ export function registerTools(server: McpServer): void {
           // 못 보고 지나가면 그게 곧 "조용한 무시" 다.
           ...(gateNote ? [gateNote.trimEnd()] : []),
           ...(implicitNote ? [implicitNote] : []),
+          ...(scopePreflightNote ? [scopePreflightNote] : []),
           `Dispatch: ${result.action}`,
           `  Reason: ${result.reason}`,
         ];
