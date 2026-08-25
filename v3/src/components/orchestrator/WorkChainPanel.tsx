@@ -51,6 +51,7 @@ import {
   clampPanelHeight,
   panelHeightForPointer,
 } from "./workChainPanelResize";
+import { INSET } from "../common/ui";
 
 export interface WorkChainPanelProps {
   projectId: string | null;
@@ -94,27 +95,27 @@ const STATE_CHIP: Record<
   { cls: string; key: string }
 > = {
   ready: {
-    cls: "bg-[#a6e3a1]/15 text-[#a6e3a1]",
+    cls: "bg-success/15 text-success",
     key: "orchestrator.chain.state.ready",
   },
   waiting: {
-    cls: "bg-[#f9e2af]/15 text-[#f9e2af]",
+    cls: "bg-warning/15 text-warning",
     key: "orchestrator.chain.state.waiting",
   },
   done: {
-    cls: "bg-[#89b4fa]/15 text-[#89b4fa]",
+    cls: "bg-accent/15 text-accent",
     key: "orchestrator.chain.state.done",
   },
   doneSelf: {
-    cls: "bg-[#fab387]/15 text-[#fab387]",
+    cls: "bg-warning/15 text-warning",
     key: "orchestrator.chain.state.doneSelf",
   },
   dropped: {
-    cls: "bg-[#6c7086]/20 text-[#a6adc8]",
+    cls: "bg-surface-hover/20 text-secondary",
     key: "orchestrator.chain.state.dropped",
   },
   unsplit: {
-    cls: "bg-[#f9e2af]/15 text-[#f9e2af]",
+    cls: "bg-warning/15 text-warning",
     key: "orchestrator.chain.state.unsplit",
   },
 };
@@ -377,15 +378,18 @@ export default memo(function WorkChainPanel({
     load.kind === "loading"
       ? { kind: "loading", since: load.since }
       : load.kind === "failed"
-        ? {
-            kind: "failed",
-            reasonCode:
-              load.reason === "permission"
-                ? "orchestrator.chain.failed.permission"
-                : "orchestrator.chain.failed.reason",
-            detail: load.detail,
-            retry: () => setRetryToken((n) => n + 1),
-          }
+        ? load.reason === "permission"
+          ? {
+              kind: "denied",
+              reasonCode: "orchestrator.chain.failed.permission",
+              askWhom: t("orchestrator.chain.failed.permissionOwner"),
+            }
+          : {
+              kind: "failed",
+              reasonCode: "orchestrator.chain.failed.reason",
+              detail: load.detail,
+              retry: () => setRetryToken((n) => n + 1),
+            }
         : load.items.length === 0
           ? {
               kind: "empty",
@@ -409,34 +413,34 @@ export default memo(function WorkChainPanel({
       ref={panelRef}
       data-testid="work-chain-panel"
       data-resizing={isResizing ? "true" : undefined}
-      className="relative z-20 mx-3 mb-2 rounded border border-[#313244] bg-[#1e1e2e] text-[11px] text-[#cdd6f4]"
+      className="relative z-20 mx-3 mb-2 rounded border border-subtle bg-surface-raised text-[11px] text-primary"
       onClick={(e) => e.stopPropagation()}
     >
       {/* 요약 줄 — 항상 보인다. 오케가 다음에 뭘 할 작정인지가 여기 한 줄이다.
-          ★진행률·unsplit 은 접힘 줄에 넣지 않는다(#1147→#1150→#1152). */}
+          ★진행률·unsplit 은 접힘 줄에 넣지 않는다(기존 접힘 높이 규칙). */}
       <div
         data-testid="work-chain-summary"
         className="flex min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap px-2 py-0.5"
       >
-        <span className="shrink-0 font-medium text-[#cba6f7]">
+        <span className="shrink-0 font-medium text-accent">
           {t("orchestrator.chain.title")}
         </span>
         {derived && derived.items.length > 0 && (
           <>
-            <span className="shrink-0 text-[#a6adc8]">
+            <span className="shrink-0 text-secondary">
               {t("orchestrator.chain.countOpen", { open: openCount })} ·{" "}
               {t("orchestrator.chain.countReady", { ready: readyCount })}
             </span>
             {next ? (
               <span
                 data-testid="work-chain-next"
-                className="min-w-0 flex-1 truncate text-[#a6e3a1]"
+                className="min-w-0 flex-[2_1_0] truncate text-success"
                 title={next.item.why}
               >
                 ▶ {next.item.what}
               </span>
             ) : openCount > 0 ? (
-              <span className="min-w-0 flex-1 truncate text-[#f9e2af]">
+              <span className="min-w-0 flex-[2_1_0] truncate text-warning">
                 ▶ {t("orchestrator.chain.state.waiting")}
               </span>
             ) : (
@@ -452,7 +456,7 @@ export default memo(function WorkChainPanel({
             <button
               type="button"
               onClick={openForm}
-              className="rounded border border-[#45475a] px-1.5 py-0.5 text-[10px] text-[#a6adc8] hover:bg-[#313244]"
+              className="rounded border border-default px-1.5 py-0.5 text-[10px] text-secondary hover:bg-surface-hover"
             >
               + {t("orchestrator.chain.add")}
             </button>
@@ -461,7 +465,7 @@ export default memo(function WorkChainPanel({
             type="button"
             data-testid="work-chain-toggle"
             onClick={() => setExpanded((v) => !v)}
-            className="rounded border border-[#45475a] px-1.5 py-0.5 text-[10px] text-[#a6adc8] hover:bg-[#313244]"
+            className="rounded border border-default px-1.5 py-0.5 text-[10px] text-secondary hover:bg-surface-hover"
             aria-expanded={expanded}
           >
             {expanded
@@ -474,41 +478,41 @@ export default memo(function WorkChainPanel({
       {expanded && (
         <div
           data-testid="work-chain-overlay"
-          className="absolute left-0 right-0 top-full flex flex-col overflow-hidden rounded-b border border-t-0 border-[#313244] bg-[#1e1e2e] shadow-2xl"
+          className="absolute left-0 right-0 top-full flex flex-col overflow-hidden rounded-b border border-t-0 border-subtle bg-surface-raised shadow-2xl"
           style={{ height: panelHeight, maxHeight: MAX_PANEL_HEIGHT }}
         >
           <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1.5">
-            <div className="mb-1 text-[10px] text-[#6c7086]">
+            <div className="mb-1 text-[10px] text-muted">
               {t("orchestrator.chain.subtitle")}
             </div>
             {formError && (
-              <div className="mb-1 rounded bg-[#f38ba8]/10 px-2 py-1 text-[10px] text-[#f38ba8]">
+              <div className="mb-1 rounded bg-danger/10 px-2 py-1 text-[10px] text-danger">
                 {formError}
               </div>
             )}
             {adding && (
               <div
                 data-testid="work-chain-form"
-                className="mb-2 flex flex-col gap-1 rounded border border-[#45475a] p-2"
+                className={`mb-2 flex flex-col gap-1 p-2 ${INSET}`}
               >
-                <label className="flex flex-col gap-0.5 text-[10px] text-[#a6adc8]">
+                <label className="flex flex-col gap-0.5 text-[10px] text-secondary">
                   {t("orchestrator.chain.form.what")}
                   <input
                     value={what}
                     onChange={(e) => setWhat(e.target.value)}
                     placeholder={t("orchestrator.chain.form.whatPlaceholder")}
                     maxLength={200}
-                    className="rounded border border-[#313244] bg-[#181825] px-1.5 py-1 text-[11px] text-[#cdd6f4] outline-none focus:border-[#89b4fa]"
+                    className="rounded border border-subtle bg-surface-panel px-1.5 py-1 text-[11px] text-primary outline-none focus:border-accent"
                   />
                 </label>
-                <label className="flex flex-col gap-0.5 text-[10px] text-[#a6adc8]">
+                <label className="flex flex-col gap-0.5 text-[10px] text-secondary">
                   {t("orchestrator.chain.form.why")}
                   <input
                     value={why}
                     onChange={(e) => setWhy(e.target.value)}
                     placeholder={t("orchestrator.chain.form.whyPlaceholder")}
                     maxLength={500}
-                    className="rounded border border-[#313244] bg-[#181825] px-1.5 py-1 text-[11px] text-[#cdd6f4] outline-none focus:border-[#89b4fa]"
+                    className="rounded border border-subtle bg-surface-panel px-1.5 py-1 text-[11px] text-primary outline-none focus:border-accent"
                   />
                 </label>
                 <div className="flex justify-end gap-1">
@@ -518,7 +522,7 @@ export default memo(function WorkChainPanel({
                       setAdding(false);
                       setFormError(null);
                     }}
-                    className="rounded border border-[#45475a] px-2 py-0.5 text-[10px] text-[#a6adc8] hover:bg-[#313244]"
+                    className="rounded border border-default px-2 py-0.5 text-[10px] text-secondary hover:bg-surface-hover"
                   >
                     {t("orchestrator.chain.form.cancel")}
                   </button>
@@ -527,7 +531,7 @@ export default memo(function WorkChainPanel({
                     data-testid="work-chain-submit"
                     disabled={busy}
                     onClick={() => void submit()}
-                    className="rounded bg-[#89b4fa]/20 px-2 py-0.5 text-[10px] font-medium text-[#89b4fa] hover:bg-[#89b4fa]/30 disabled:opacity-50"
+                    className="rounded bg-accent/20 px-2 py-0.5 text-[10px] font-medium text-accent hover:bg-accent/30 disabled:opacity-50"
                   >
                     {t("orchestrator.chain.form.submit")}
                   </button>
@@ -555,8 +559,8 @@ export default memo(function WorkChainPanel({
                         data-unsplit={d.unsplit ? "true" : undefined}
                         className={`rounded border px-2 py-1 ${
                           isNext
-                            ? "border-[#a6e3a1]/50 bg-[#a6e3a1]/5"
-                            : "border-[#313244]"
+                            ? "border-success/50 bg-success/5"
+                            : "border-subtle"
                         } ${d.state === "done" || d.state === "dropped" ? "opacity-70" : ""}`}
                       >
                         <div className="flex items-center gap-2">
@@ -566,7 +570,7 @@ export default memo(function WorkChainPanel({
                             {t(chip.key as Parameters<typeof t>[0])}
                           </span>
                           {isNext && (
-                            <span className="text-[10px] text-[#a6e3a1]">
+                            <span className="text-[10px] text-success">
                               ▶ {t("orchestrator.chain.next")}
                             </span>
                           )}
@@ -580,7 +584,7 @@ export default memo(function WorkChainPanel({
                                 data-testid="work-chain-start"
                                 disabled={startedItemIds.has(d.item.id)}
                                 onClick={() => void startNow(d.item)}
-                                className="rounded border border-[#a6e3a1]/50 px-1.5 py-0.5 text-[10px] text-[#a6e3a1] hover:bg-[#a6e3a1]/10 disabled:opacity-60"
+                                className="rounded border border-success/50 px-1.5 py-0.5 text-[10px] text-success hover:bg-success/10 disabled:opacity-60"
                               >
                                 {startedItemIds.has(d.item.id)
                                   ? t("orchestrator.chain.started")
@@ -589,15 +593,15 @@ export default memo(function WorkChainPanel({
                               <button
                                 type="button"
                                 onClick={() => void drop(d.item.id)}
-                                className="rounded border border-[#45475a] px-1.5 py-0.5 text-[10px] text-[#a6adc8] hover:bg-[#313244]"
+                                className="rounded border border-default px-1.5 py-0.5 text-[10px] text-secondary hover:bg-surface-hover"
                               >
                                 {t("orchestrator.chain.drop")}
                               </button>
                             </span>
                           )}
                         </div>
-                        <div className="mt-0.5 text-[10px] text-[#a6adc8]">
-                          <span className="text-[#6c7086]">
+                        <div className="mt-0.5 text-[10px] text-secondary">
+                          <span className="text-muted">
                             {t("orchestrator.chain.why")}:
                           </span>{" "}
                           {d.item.why}
@@ -605,7 +609,7 @@ export default memo(function WorkChainPanel({
                         {d.item.missionLabel && (
                           <div
                             data-testid="work-chain-mission-progress"
-                            className="mt-0.5 text-[10px] text-[#a6adc8]"
+                            className="mt-0.5 text-[10px] text-secondary"
                           >
                             {d.unsplit
                               ? t("orchestrator.chain.unsplitHint")
@@ -617,7 +621,7 @@ export default memo(function WorkChainPanel({
                             {d.missionCount >= 2 ? (
                               <span
                                 data-testid="work-chain-mission-combined"
-                                className="ml-1 text-[#f9e2af]"
+                                className="ml-1 text-warning"
                               >
                                 {t("orchestrator.chain.missionCombined", {
                                   count: d.missionCount,
@@ -627,8 +631,8 @@ export default memo(function WorkChainPanel({
                           </div>
                         )}
                         {d.evidenceTaskIds.length > 0 && (
-                          <div className="mt-0.5 text-[10px] text-[#a6adc8]">
-                            <span className="text-[#6c7086]">
+                          <div className="mt-0.5 text-[10px] text-secondary">
+                            <span className="text-muted">
                               {t("orchestrator.chain.evidence")}
                               {` (${d.item.doneWhen})`}:
                             </span>{" "}
@@ -637,7 +641,7 @@ export default memo(function WorkChainPanel({
                               return (
                                 <span key={id} className="mr-2">
                                   {titles[id] ?? id}
-                                  <span className="text-[#6c7086]">
+                                  <span className="text-muted">
                                     {" "}
                                     = {st ?? "—"}
                                   </span>
@@ -647,8 +651,8 @@ export default memo(function WorkChainPanel({
                           </div>
                         )}
                         {d.state === "waiting" && (
-                          <div className="mt-0.5 text-[10px] text-[#f9e2af]">
-                            <span className="text-[#6c7086]">
+                          <div className="mt-0.5 text-[10px] text-warning">
+                            <span className="text-muted">
                               {t("orchestrator.chain.waitingOn")}:
                             </span>{" "}
                             {[
@@ -658,7 +662,7 @@ export default memo(function WorkChainPanel({
                           </div>
                         )}
                         {d.missingTaskIds.length > 0 && (
-                          <div className="mt-0.5 text-[10px] text-[#f38ba8]">
+                          <div className="mt-0.5 text-[10px] text-danger">
                             ⚠ {t("orchestrator.chain.missingTask")}:{" "}
                             {d.missingTaskIds.map((id) => (
                               <button
@@ -667,7 +671,7 @@ export default memo(function WorkChainPanel({
                                 onClick={() =>
                                   void removeMissingEvidence(d.item.id, id)
                                 }
-                                className="mr-1 underline decoration-dotted hover:text-[#f9e2af]"
+                                className="mr-1 underline decoration-dotted hover:text-warning"
                                 title={t("orchestrator.chain.removeEvidence")}
                               >
                                 {id}
@@ -676,7 +680,7 @@ export default memo(function WorkChainPanel({
                           </div>
                         )}
                         {d.item.closed && (
-                          <div className="mt-0.5 text-[10px] text-[#6c7086]">
+                          <div className="mt-0.5 text-[10px] text-muted">
                             {t("orchestrator.chain.closedReason")}:{" "}
                             {d.item.closed.reason}
                           </div>
@@ -692,7 +696,7 @@ export default memo(function WorkChainPanel({
               <button
                 type="button"
                 onClick={() => setShowClosed((v) => !v)}
-                className="mt-1 text-[10px] text-[#6c7086] hover:text-[#a6adc8]"
+                className="mt-1 text-[10px] text-muted hover:text-secondary"
               >
                 {showClosed
                   ? t("orchestrator.chain.hideClosed")
@@ -703,7 +707,7 @@ export default memo(function WorkChainPanel({
           <div
             data-testid="work-chain-resize-handle"
             onPointerDown={handleResizeStart}
-            className="h-2 shrink-0 cursor-row-resize touch-none border-t border-[#313244] bg-[#181825] hover:bg-[#89b4fa]/30"
+            className="h-2 shrink-0 cursor-row-resize touch-none border-t border-subtle bg-surface-panel hover:bg-accent/30"
             role="separator"
             aria-orientation="horizontal"
             aria-label="Resize work chain panel"

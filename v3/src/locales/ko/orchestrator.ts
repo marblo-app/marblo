@@ -209,6 +209,7 @@ export const orchestrator = {
   "orchestrator.chain.dropReasonRequired": "사유가 없으면 내릴 수 없습니다",
   "orchestrator.chain.failed.reason": "작업 체인을 불러오지 못했습니다",
   "orchestrator.chain.failed.permission": "작업 체인을 읽을 권한이 없습니다",
+  "orchestrator.chain.failed.permissionOwner": "프로젝트 소유자",
   "orchestrator.chain.writeFailed": "저장하지 못했습니다: {error}",
   "orchestrator.chain.noProject": "프로젝트를 열면 체인이 보입니다",
 };

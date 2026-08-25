@@ -201,6 +201,7 @@ export const orchestrator: Record<keyof typeof koOrchestrator, string> = {
   "orchestrator.chain.failed.reason": "Could not load the work chain",
   "orchestrator.chain.failed.permission":
     "You don't have permission to read the work chain",
+  "orchestrator.chain.failed.permissionOwner": "the project owner",
   "orchestrator.chain.writeFailed": "Could not save: {error}",
   "orchestrator.chain.noProject": "Open a project to see the chain",
 };

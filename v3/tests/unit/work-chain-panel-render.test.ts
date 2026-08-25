@@ -282,7 +282,7 @@ describe("WorkChainPanel", () => {
     expect(screen.queryByTestId("work-chain-overlay")).toBeNull();
   });
 
-  it("구독 실패는 0개가 아니라 실패로 그리고 '다시 시도' 가 있다", () => {
+  it("권한 없는 구독 실패는 denied 로 그리고 '다시 시도' 를 붙이지 않는다", () => {
     render(createElement(WorkChainPanel, { projectId: "p1" }));
     act(() => {
       state.listener?.({
@@ -292,8 +292,31 @@ describe("WorkChainPanel", () => {
       });
     });
     fireEvent.click(screen.getByTestId("work-chain-toggle"));
+    const denied = screen
+      .getByTestId("work-chain-overlay")
+      .querySelector('[data-state-kind="denied"]');
+    expect(denied).toBeTruthy();
+    expect(denied?.textContent).toContain(
+      en["orchestrator.chain.failed.permission"],
+    );
+    expect(screen.queryByText(en["common.state.action.retry"])).toBeNull();
+  });
+
+  it("로드 실패는 failed 로 그리고 '다시 시도' 가 있다", () => {
+    render(createElement(WorkChainPanel, { projectId: "p1" }));
+    act(() => {
+      state.listener?.({
+        kind: "error",
+        error: new Error("network"),
+        reason: "load",
+      });
+    });
+    fireEvent.click(screen.getByTestId("work-chain-toggle"));
+    expect(screen.getByText(en["orchestrator.chain.failed.reason"])).toBeTruthy();
     expect(
-      screen.getByText(en["orchestrator.chain.failed.permission"]),
+      screen
+        .getByTestId("work-chain-overlay")
+        .querySelector('[data-state-kind="failed"]'),
     ).toBeTruthy();
     expect(screen.getByText(en["common.state.action.retry"])).toBeTruthy();
   });
@@ -374,6 +397,18 @@ describe("WorkChainPanel", () => {
     expect(progress.textContent).toContain("1/3");
     expect(screen.getByTestId("work-chain-item").getAttribute("data-state")).toBe(
       "ready",
+    );
+  });
+
+  it("접힘 줄 높이 클래스는 유지하고 다음 항목은 더 넓은 flex 폭을 가진다", () => {
+    render(createElement(WorkChainPanel, { projectId: "p1" }));
+    push([chainItem({ id: "a", what: "폭 확인 항목" })]);
+    const summary = screen.getByTestId("work-chain-summary");
+    expect(summary.className).toBe(
+      "flex min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap px-2 py-0.5",
+    );
+    expect(screen.getByTestId("work-chain-next").className).toContain(
+      "flex-[2_1_0]",
     );
   });
 
