@@ -1,0 +1,2823 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>marblo.app/audit-dashboard — 시안</title>
+    <!--
+  기업용 감사 대시보드 시안 · 티켓 BtdC0fQJ916L1Gr5Uh8Z · 2026-08-25
+  기획 정본: v3/docs/audit-dashboard-plan-2026-08-25.md
+
+  ★이 파일은 외부 요청이 0 이다 — 폰트·스크립트·이미지·CSS 를 한 건도 불러오지 않는다.
+    더블클릭으로 열리고, 오프라인에서도 똑같이 그려진다.
+  ★색은 하나도 새로 만들지 않았다. 전부 marblo-web/src/app/globals.css 의
+    `.marblo-console` 스코프(PR #1206)와 src/components/charts/tokens.css 의 값 그대로다.
+  ★데이터는 전부 가상이다(가상 고객사 "노바테크"). 실제 원장이 아니다.
+-->
+    <style>
+      /* =============================================================================
+   토큰 — globals.css `.marblo-console` 와 charts/tokens.css `.viz-root` 의 값 그대로.
+   여기서 새로 고른 색은 하나도 없다.
+   ========================================================================== */
+      :root {
+        /* 브랜드 램프 (globals.css) */
+        --brand-50: #eef2ff;
+        --brand-100: #e0e7ff;
+        --brand-400: #818cf8;
+        --brand-500: #6366f1;
+        --brand-600: #4f46e5;
+        --brand-950: #1e1b4b;
+
+        /* 표면 */
+        --surface: #ffffff;
+        --surface-raised: #ffffff;
+        --surface-sunken: #f8fafc;
+        /* 잉크 — 17.72 / 7.73 / 4.83 : 1 on white */
+        --ink: #18181b;
+        --ink-muted: #52525b;
+        --ink-faint: #71717a;
+        /* 선 */
+        --line: #e4e4e7;
+        --line-strong: #d4d4d8;
+        /* 강조 = 브랜드 인디고 한 칸 아래 (6.29:1) */
+        --accent: var(--brand-600);
+        --accent-soft: var(--brand-50);
+        --accent-ink: #ffffff;
+        /* 상태 */
+        --warn: #b45309;
+        --warn-soft: #fffbeb;
+        --warn-ink: #78350f;
+        --critical: #b91c1c;
+        --critical-soft: #fef2f2;
+        --critical-ink: #7f1d1d;
+        --ok: #15803d;
+        --ok-soft: #f0fdf4;
+
+        /* 차트 (charts/tokens.css · .viz-root light) */
+        --viz-series-1: #2a78d6;
+        --viz-series-2: #eb6834;
+        --viz-series-3: #1baf7a;
+        --viz-series-4: #eda100;
+        --viz-series-5: #e87ba4;
+        --viz-series-6: #008300;
+        --viz-series-7: #4a3aa7;
+        --viz-grid: #e7e6e2;
+        --viz-axis: #c9c8c3;
+        --viz-marker: #1c5cab;
+        --viz-ink-muted: #6b6a66;
+
+        /* ★여백은 8px 배수 하나다. 다른 값을 쓰지 않는다. */
+        --s1: 8px;
+        --s2: 16px;
+        --s3: 24px;
+        --s4: 32px;
+        --r: 8px;
+        /* ★전이는 150ms 안쪽 */
+        --t: 120ms;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        :root {
+          --t: 0ms;
+        }
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: #f1f2f4;
+        color: var(--ink);
+        /* ★외부 폰트를 안 부른다 — 시스템 스택. 한글은 Apple SD Gothic Neo / Noto Sans KR */
+        font-family: system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo",
+          "Noto Sans KR", "Malgun Gothic", Roboto, sans-serif;
+        /* ★크기는 두 단뿐: 13px 본문 / 11px 라벨 */
+        font-size: 13px;
+        line-height: 1.55;
+        font-variant-numeric: tabular-nums; /* ★tabular-nums 는 전역이다 */
+        -webkit-font-smoothing: antialiased;
+      }
+      h1,
+      h2,
+      h3,
+      h4,
+      p,
+      ul,
+      ol,
+      figure {
+        margin: 0;
+      }
+      ul {
+        padding: 0;
+        list-style: none;
+      }
+      a {
+        color: var(--accent);
+      }
+
+      /* ── 문서 껍데기(설명용). 제품 화면이 아니다 ─────────────────────────────── */
+      .doc {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: var(--s4) var(--s3) 96px;
+      }
+      .doc-head {
+        margin-bottom: var(--s4);
+      }
+      .doc-kicker {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      .doc-title {
+        font-size: 26px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        margin-top: 6px;
+      }
+      .doc-sub {
+        color: var(--ink-muted);
+        margin-top: 6px;
+        max-width: 74ch;
+      }
+      .doc-meta {
+        margin-top: var(--s2);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .pill {
+        font-size: 11px;
+        padding: 3px 9px;
+        border-radius: 99px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--ink-muted);
+      }
+      .pill-accent {
+        background: var(--accent-soft);
+        border-color: #c7d2fe;
+        color: #3730a3;
+        font-weight: 500;
+      }
+
+      .sec {
+        margin-top: var(--s4);
+      }
+      .sec-head {
+        display: flex;
+        align-items: baseline;
+        gap: var(--s1);
+        margin-bottom: var(--s2);
+      }
+      .sec-no {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--accent);
+        background: var(--accent-soft);
+        border-radius: 4px;
+        padding: 2px 6px;
+      }
+      .sec-title {
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .sec-note {
+        font-size: 12px;
+        color: var(--ink-muted);
+        margin-bottom: var(--s2);
+        max-width: 82ch;
+      }
+
+      /* 註 — 시안 위에 붙는 설명. 제품에는 없다 */
+      .notes {
+        margin-top: var(--s2);
+        display: grid;
+        gap: 6px;
+      }
+      .note {
+        display: grid;
+        grid-template-columns: 20px 1fr;
+        gap: var(--s1);
+        font-size: 12px;
+        color: var(--ink-muted);
+        line-height: 1.5;
+      }
+      .note b {
+        color: var(--ink);
+        font-weight: 600;
+      }
+      .note-n {
+        font-size: 10px;
+        font-weight: 600;
+        color: #fff;
+        background: var(--ink-faint);
+        border-radius: 99px;
+        width: 18px;
+        height: 18px;
+        display: grid;
+        place-items: center;
+        margin-top: 2px;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11.5px;
+        background: var(--surface-sunken);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 1px 4px;
+        color: var(--ink);
+      }
+
+      /* 화면 프레임 — 시안임을 알리는 얇은 껍데기 */
+      .frame {
+        border: 1px solid var(--line-strong);
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--surface);
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+      }
+      .frame-bar {
+        display: flex;
+        align-items: center;
+        gap: var(--s1);
+        padding: 7px var(--s2);
+        background: var(--surface-sunken);
+        border-bottom: 1px solid var(--line);
+      }
+      .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 99px;
+        background: var(--line-strong);
+      }
+      .frame-url {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px;
+        color: var(--ink-faint);
+        margin-left: 6px;
+      }
+
+      /* =============================================================================
+   ★.marblo-console — 제품 화면. 이 아래만 화이트·블루다.
+   ========================================================================== */
+      .marblo-console {
+        color-scheme: light;
+        background: var(--surface);
+        color: var(--ink);
+      }
+
+      /* 상단바 */
+      .topbar {
+        display: flex;
+        align-items: center;
+        gap: var(--s2);
+        padding: 0 var(--s2);
+        height: 52px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+      }
+      .logo {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .logo-mark {
+        width: 18px;
+        height: 18px;
+        border-radius: 5px;
+        background: linear-gradient(140deg, var(--brand-500), var(--brand-600));
+      }
+      .logo-sub {
+        color: var(--ink-faint);
+        font-weight: 400;
+      }
+      .select {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--line-strong);
+        border-radius: 6px;
+        background: var(--surface);
+        padding: 5px 9px;
+        font-size: 12px;
+        color: var(--ink);
+        cursor: default;
+        transition: border-color var(--t) ease, background var(--t) ease;
+      }
+      .select:hover {
+        border-color: var(--ink-faint);
+      }
+      .caret {
+        color: var(--ink-faint);
+        font-size: 10px;
+      }
+      .spacer {
+        margin-left: auto;
+      }
+
+      .seg {
+        display: inline-flex;
+        border: 1px solid var(--line-strong);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .seg button {
+        font: inherit;
+        font-size: 12px;
+        padding: 5px 11px;
+        border: 0;
+        background: var(--surface);
+        color: var(--ink-muted);
+        cursor: pointer;
+        border-left: 1px solid var(--line);
+        transition: background var(--t) ease, color var(--t) ease;
+      }
+      .seg button:first-child {
+        border-left: 0;
+      }
+      .seg button:hover {
+        background: var(--surface-sunken);
+      }
+      .seg button[aria-pressed="true"] {
+        background: var(--accent-soft);
+        color: #3730a3;
+        font-weight: 600;
+      }
+
+      .btn {
+        font: inherit;
+        font-size: 12px;
+        padding: 5px 11px;
+        border-radius: 6px;
+        cursor: pointer;
+        border: 1px solid var(--line-strong);
+        background: var(--surface);
+        color: var(--ink);
+        transition: background var(--t) ease, border-color var(--t) ease;
+      }
+      .btn:hover {
+        background: var(--surface-sunken);
+      }
+      .btn-primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-ink);
+        font-weight: 500;
+      }
+      .btn-primary:hover {
+        background: #4338ca;
+        border-color: #4338ca;
+      }
+      :where(button, .select):focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      /* 본문 */
+      .console-body {
+        padding: var(--s3) var(--s2) var(--s4);
+        background: var(--surface);
+      }
+      .stack {
+        display: grid;
+        gap: var(--s3);
+      }
+
+      /* 배너 — 미수집 고지. ★접히지 않는다 */
+      .banner {
+        display: grid;
+        grid-template-columns: 18px 1fr auto;
+        gap: var(--s1);
+        align-items: start;
+        background: var(--warn-soft);
+        border: 1px solid #fde68a;
+        border-radius: var(--r);
+        padding: 10px var(--s2);
+      }
+      .banner-ico {
+        color: var(--warn);
+        font-size: 13px;
+        line-height: 1.4;
+      }
+      .banner p {
+        font-size: 12px;
+        color: var(--warn-ink);
+      }
+      .banner b {
+        font-weight: 600;
+      }
+
+      /* 요약 타일 */
+      .tiles {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+      }
+      .tile {
+        border: 1px solid var(--line);
+        border-radius: var(--r);
+        padding: var(--s2);
+        background: var(--surface-raised);
+        min-height: 104px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .tile-label {
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--ink-faint);
+        letter-spacing: 0.01em;
+      }
+      /* ★값 크기는 24px 하나. 위계는 무게와 색으로만 만든다 */
+      .tile-value {
+        font-size: 24px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        line-height: 1.15;
+        margin-top: 10px;
+      }
+      .tile-foot {
+        font-size: 11px;
+        color: var(--ink-faint);
+        margin-top: 8px;
+      }
+      .tile-foot b {
+        color: var(--ink-muted);
+        font-weight: 500;
+      }
+
+      /* ★미수집 타일 — 밝은 바탕에서 '빈칸' 은 그냥 흰색이라 아무것도 없는 것처럼 보인다.
+     그래서 빗금 + 바탕색 + 아이콘으로 **적극적으로** 그린다. */
+      .tile-gap {
+        border-color: #fde68a;
+        background: repeating-linear-gradient(
+            135deg,
+            rgba(180, 83, 9, 0.1) 0 5px,
+            rgba(180, 83, 9, 0) 5px 11px
+          ),
+          var(--warn-soft);
+      }
+      .tile-gap .tile-label {
+        color: var(--warn-ink);
+      }
+      .tile-gap .tile-value {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--warn-ink);
+      }
+      .tile-gap .tile-foot {
+        color: var(--warn-ink);
+        opacity: 0.85;
+      }
+
+      /* 카드 */
+      .card {
+        border: 1px solid var(--line);
+        border-radius: var(--r);
+        background: var(--surface-raised);
+      }
+      .card-head {
+        display: flex;
+        align-items: center;
+        gap: var(--s1);
+        padding: 12px var(--s2);
+        border-bottom: 1px solid var(--line);
+      }
+      .card-title {
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .card-hint {
+        font-size: 11px;
+        color: var(--ink-faint);
+      }
+      .card-body {
+        padding: var(--s2);
+      }
+
+      /* 범례 */
+      .legend {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        font-size: 11px;
+        color: var(--ink-muted);
+      }
+      .legend i {
+        width: 9px;
+        height: 9px;
+        border-radius: 2px;
+        display: inline-block;
+        margin-right: 5px;
+      }
+      .legend .hatch {
+        background: repeating-linear-gradient(
+            135deg,
+            var(--warn) 0 2px,
+            transparent 2px 5px
+          ),
+          var(--warn-soft);
+        border: 1px solid #fde68a;
+      }
+
+      /* 차트 */
+      .chart-wrap {
+        display: grid;
+        grid-template-columns: 1fr 232px;
+        gap: var(--s2);
+        align-items: start;
+      }
+      svg.chart {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .grid line {
+        stroke: var(--viz-grid);
+        stroke-width: 1;
+      } /* ★격자는 가로만, 거의 안 보이게 */
+      .grid text {
+        fill: var(--viz-ink-muted);
+        font-size: 10px;
+        text-anchor: end;
+      }
+      .xlab {
+        fill: var(--viz-ink-muted);
+        font-size: 10px;
+      }
+      .marker line {
+        stroke: var(--viz-marker);
+        stroke-width: 1.5;
+        stroke-dasharray: 3 3;
+      }
+      .marker text {
+        fill: var(--viz-marker);
+        font-size: 10px;
+        font-weight: 600;
+      }
+
+      /* 기간 비교 — 컨설팅 전후 */
+      .compare {
+        border: 1px solid var(--line);
+        border-radius: var(--r);
+        background: var(--surface-sunken);
+        padding: 12px;
+      }
+      .compare h4 {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--ink-faint);
+        letter-spacing: 0.02em;
+      }
+      .cmp-row {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .cmp-row:last-child {
+        border-bottom: 0;
+        padding-bottom: 0;
+      }
+      .cmp-k {
+        font-size: 11px;
+        color: var(--ink-muted);
+      }
+      .cmp-v {
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .cmp-d {
+        font-size: 11px;
+        font-weight: 600;
+        margin-left: 6px;
+      }
+      .up {
+        color: var(--ok);
+      }
+      .down {
+        color: var(--ok);
+      }
+      .neutral {
+        color: var(--ink-faint);
+      }
+      .cmp-foot {
+        font-size: 10.5px;
+        color: var(--ink-faint);
+        margin-top: 10px;
+        line-height: 1.45;
+      }
+
+      /* 탭 */
+      .tabs {
+        display: flex;
+        gap: 2px;
+        border-bottom: 1px solid var(--line);
+      }
+      .tabs button {
+        font: inherit;
+        font-size: 12.5px;
+        padding: 9px 13px;
+        border: 0;
+        background: transparent;
+        color: var(--ink-muted);
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+        transition: color var(--t) ease, border-color var(--t) ease;
+      }
+      .tabs button:hover {
+        color: var(--ink);
+      }
+      .tabs button[aria-selected="true"] {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+        font-weight: 600;
+      }
+      .panel {
+        padding-top: var(--s2);
+      }
+      .panel[hidden] {
+        display: none;
+      }
+
+      /* 표 — ★세로선이 없다. 가로선 1px 만 */
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12.5px;
+      }
+      thead th {
+        text-align: left;
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--ink-faint);
+        padding: 8px var(--s1);
+        background: var(--surface-sunken);
+        border-bottom: 1px solid var(--line);
+        white-space: nowrap;
+      }
+      tbody td {
+        padding: 9px var(--s1);
+        border-bottom: 1px solid var(--line);
+        vertical-align: middle;
+      }
+      tbody tr {
+        transition: background var(--t) ease;
+      }
+      tbody tr:hover {
+        background: var(--surface-sunken);
+      }
+      .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11.5px;
+      }
+      .dim {
+        color: var(--ink-faint);
+      }
+      .tnum {
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* 배지 */
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        font-weight: 500;
+        padding: 2px 7px;
+        border-radius: 99px;
+        border: 1px solid transparent;
+        white-space: nowrap;
+      }
+      .b-ok {
+        background: var(--ok-soft);
+        color: #166534;
+        border-color: #bbf7d0;
+      }
+      .b-fail {
+        background: var(--critical-soft);
+        color: var(--critical-ink);
+        border-color: #fecaca;
+      }
+      .b-unknown {
+        background: var(--surface-sunken);
+        color: var(--ink-faint);
+        border-color: var(--line);
+      }
+      .b-warn {
+        background: var(--warn-soft);
+        color: var(--warn-ink);
+        border-color: #fde68a;
+      }
+      .b-accent {
+        background: var(--accent-soft);
+        color: #3730a3;
+        border-color: #c7d2fe;
+      }
+
+      /* 칩 필터 */
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      .chip {
+        font: inherit;
+        font-size: 11.5px;
+        padding: 4px 10px;
+        border-radius: 99px;
+        cursor: pointer;
+        border: 1px solid var(--line-strong);
+        background: var(--surface);
+        color: var(--ink-muted);
+        transition: background var(--t) ease, color var(--t) ease,
+          border-color var(--t) ease;
+      }
+      .chip:hover {
+        background: var(--surface-sunken);
+      }
+      .chip[aria-pressed="true"] {
+        background: var(--accent-soft);
+        border-color: #c7d2fe;
+        color: #3730a3;
+        font-weight: 600;
+      }
+      .chip-sep {
+        width: 1px;
+        background: var(--line);
+        margin: 2px 4px;
+      }
+
+      /* 진척 막대 */
+      .bar {
+        height: 6px;
+        border-radius: 99px;
+        background: var(--line);
+        overflow: hidden;
+        min-width: 120px;
+      }
+      .bar > i {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+        border-radius: 99px;
+      }
+      .stackbar {
+        display: flex;
+        height: 8px;
+        border-radius: 3px;
+        overflow: hidden;
+        background: var(--line);
+      }
+      .stackbar > i {
+        display: block;
+        height: 100%;
+      }
+
+      /* withheld — ★접지 않는다 */
+      .withheld {
+        border: 1px solid var(--line);
+        border-radius: var(--r);
+        background: var(--surface-sunken);
+        padding: var(--s2);
+      }
+      .withheld h4 {
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .withheld p.lead {
+        font-size: 11.5px;
+        color: var(--ink-muted);
+        margin-bottom: 10px;
+      }
+      .withheld ul {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px 20px;
+      }
+      .withheld li {
+        font-size: 11.5px;
+        color: var(--ink-muted);
+        display: grid;
+        grid-template-columns: 14px 1fr;
+        gap: 6px;
+        line-height: 1.45;
+      }
+      .withheld li span {
+        color: var(--critical);
+        font-weight: 600;
+      }
+
+      /* 상태 화면 */
+      .states {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+      .state {
+        border: 1px solid var(--line);
+        border-radius: var(--r);
+        background: var(--surface-raised);
+        padding: var(--s2);
+        min-height: 132px;
+      }
+      .state-tag {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 10.5px;
+        color: var(--ink-faint);
+      }
+      .state h5 {
+        font-size: 12.5px;
+        font-weight: 600;
+        margin: 6px 0 4px;
+      }
+      .state p {
+        font-size: 11.5px;
+        color: var(--ink-muted);
+        line-height: 1.5;
+      }
+      .state .why {
+        font-size: 10.5px;
+        color: var(--ink-faint);
+        margin-top: 8px;
+        border-top: 1px dashed var(--line);
+        padding-top: 8px;
+      }
+
+      /* 스켈레톤 — ★실제 차트 실루엣 */
+      .sk {
+        background: var(--line);
+        border-radius: 4px;
+        animation: pulse 1.4s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 0.55;
+        }
+        50% {
+          opacity: 0.9;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .sk {
+          animation: none;
+          opacity: 0.7;
+        }
+      }
+
+      /* 로그인 게이트 */
+      .gate {
+        min-height: 340px;
+        display: grid;
+        place-items: center;
+        padding: var(--s4) var(--s2);
+      }
+      .gate-card {
+        width: 100%;
+        max-width: 392px;
+        text-align: left;
+      }
+      .gate h2 {
+        font-size: 19px;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+        margin-top: var(--s2);
+      }
+      .gate p {
+        font-size: 12.5px;
+        color: var(--ink-muted);
+        margin-top: 6px;
+      }
+      .gate .btn-primary {
+        margin-top: var(--s2);
+        width: 100%;
+        padding: 9px;
+        font-size: 13px;
+      }
+      .gate hr {
+        border: 0;
+        border-top: 1px solid var(--line);
+        margin: var(--s3) 0 12px;
+      }
+      .gate .fine {
+        font-size: 11px;
+        color: var(--ink-faint);
+        line-height: 1.5;
+      }
+
+      /* 팔레트 */
+      .swatches {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+        gap: 10px;
+      }
+      .sw {
+        border: 1px solid var(--line);
+        border-radius: var(--r);
+        overflow: hidden;
+        background: #fff;
+      }
+      .sw-chip {
+        height: 44px;
+      }
+      .sw-meta {
+        padding: 8px 10px;
+        font-size: 11px;
+      }
+      .sw-meta b {
+        display: block;
+        font-weight: 600;
+        font-size: 11.5px;
+      }
+      .sw-meta span {
+        color: var(--ink-faint);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      @media (max-width: 900px) {
+        .tiles {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .chart-wrap {
+          grid-template-columns: 1fr;
+        }
+        .states {
+          grid-template-columns: 1fr;
+        }
+        .withheld ul {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="doc">
+      <header class="doc-head">
+        <div class="doc-kicker">시안 · 기업 AX</div>
+        <h1 class="doc-title">marblo.app/audit-dashboard</h1>
+        <p class="doc-sub">
+          고객사가 보는 감사·비용 대시보드. 사장님 내부용
+          어드민(<code>/admin</code>)과는
+          <b>다른 층</b>이다 — 리텐션·코호트·획득·수익은 여기 없다. 이 화면이
+          답하는 질문은 하나다: <b>“우리 조직이 무엇을 시켰고 얼마 썼나.”</b>
+        </p>
+        <div class="doc-meta">
+          <span class="pill pill-accent"
+            >화이트 · 블루 (브랜드 인디고 <code>#4f46e5</code>)</span
+          >
+          <span class="pill">외부 요청 0</span>
+          <span class="pill">데이터는 전부 가상</span>
+          <span class="pill">티켓 BtdC0fQJ916L1Gr5Uh8Z · 2026-08-25</span>
+        </div>
+      </header>
+
+      <!-- ════════════════════════════════════════════════════════════ A. 로그인 게이트 -->
+      <section class="sec">
+        <div class="sec-head">
+          <span class="sec-no">A</span>
+          <h2 class="sec-title">사별 로그인 게이트</h2>
+        </div>
+        <p class="sec-note">
+          게이트도 <b>흰 바탕 안에</b> 있다. 로그인 전엔 검고 후엔 흰 화면은
+          “다른 사이트로 갔나”로 읽힌다. 그리고 이 경로에서는 마케팅 크롬(상단
+          헤더·프로모바·푸터)을 끈다 — 프로모바가 붙은 화면은 SaaS 콘솔로 안
+          읽힌다.
+        </p>
+
+        <div class="frame">
+          <div class="frame-bar">
+            <span class="dot"></span><span class="dot"></span
+            ><span class="dot"></span>
+            <span class="frame-url">marblo.app/audit-dashboard</span>
+          </div>
+          <div class="marblo-console">
+            <div class="topbar">
+              <div class="logo">
+                <span class="logo-mark"></span>Marblo
+                <span class="logo-sub">콘솔</span>
+              </div>
+            </div>
+            <div class="gate">
+              <div class="gate-card">
+                <span class="pill pill-accent">조직 관리자용</span>
+                <h2>감사 대시보드</h2>
+                <p>
+                  로그인하면 조직이 무엇을 시켰고 얼마를 썼는지 — 감사 기록과
+                  사용량을 볼 수 있습니다.
+                </p>
+                <button class="btn btn-primary" type="button">로그인</button>
+                <hr />
+                <p class="fine">
+                  역할에 따라 보이는 범위가 다릅니다. 조직 관리자는 전체를,
+                  프로젝트 관리자는 자기 프로젝트를 봅니다.<br />
+                  이 화면은 기록을 <b>읽기만</b> 합니다 — 여기서는 아무것도
+                  바꾸거나 지우지 않습니다.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="notes">
+          <div class="note">
+            <span class="note-n">1</span>
+            <div>
+              게이트가 <b>말하지 않는 것</b> — 조직·프로젝트의 존재 여부, 초대된
+              이메일. 후자는 우리가 조심해서가 아니라
+              <code>firestore.rules</code> 가 다른 계정에게 초대 문서 read 를
+              아예 거부하기 때문에 <b>데이터가 안 온다</b>.
+            </div>
+          </div>
+          <div class="note">
+            <span class="note-n">2</span>
+            <div>
+              “역할에 따라 범위가 다르다”를 <b>로그인 전에 미리</b> 고지한다.
+              로그인 후 값이 적게 보이는 것을 버그로 읽고 지원 티켓을 넣는
+              경로를 여기서 끊는다.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ════════════════════════════════════════════════════════════ B. 첫 화면 -->
+      <section class="sec">
+        <div class="sec-head">
+          <span class="sec-no">B</span>
+          <h2 class="sec-title">로그인 후 첫 화면</h2>
+        </div>
+        <p class="sec-note">
+          <b>도입 첫날부터 값이 차는 축으로만</b> 1·2층을 짰다 — 감사 원장과
+          비용이 그것이다. 신규 고객사에서 첫 화면이 비면 영업 자산이 아니라
+          반대 증거가 된다. 태스크 분해·프로젝트별은 비어 있을 수 있고, 그건
+          <b>탭 안에서</b> 빈다. 탭은 실제로 눌러 볼 수 있다.
+        </p>
+
+        <div class="frame">
+          <div class="frame-bar">
+            <span class="dot"></span><span class="dot"></span
+            ><span class="dot"></span>
+            <span class="frame-url">marblo.app/audit-dashboard</span>
+          </div>
+
+          <div class="marblo-console">
+            <!-- 상단바 -->
+            <div class="topbar">
+              <div class="logo">
+                <span class="logo-mark"></span>Marblo
+                <span class="logo-sub">콘솔</span>
+              </div>
+              <span class="select"
+                >노바테크 · 프로젝트 전체 <span class="caret">▾</span></span
+              >
+              <span class="spacer"></span>
+              <div class="seg" role="group" aria-label="기간">
+                <button type="button" aria-pressed="false">7일</button>
+                <button type="button" aria-pressed="true">30일</button>
+                <button type="button" aria-pressed="false">90일</button>
+                <button type="button" aria-pressed="false">맞춤</button>
+              </div>
+              <button class="btn" type="button">내보내기</button>
+              <button class="btn" type="button">새로고침</button>
+            </div>
+
+            <div class="console-body">
+              <div class="stack">
+                <!-- 배너 -->
+                <div class="banner" role="status">
+                  <span class="banner-ico" aria-hidden="true">▨</span>
+                  <p>
+                    <b
+                      >오케스트레이터 사용량은 아직 수집되지 않았습니다 —
+                      <u>0 이 아니라 미수집</u>입니다.</b
+                    >
+                    아래 숫자는 조직 지출의 전부가 아닙니다.
+                  </p>
+                  <button class="btn" type="button">자세히</button>
+                </div>
+
+                <!-- 요약 타일 -->
+                <div class="tiles">
+                  <div class="tile">
+                    <div class="tile-label">감사 사건</div>
+                    <div class="tile-value">
+                      960<span
+                        style="
+                          font-size: 13px;
+                          font-weight: 500;
+                          color: var(--ink-faint);
+                        "
+                        >건</span
+                      >
+                    </div>
+                    <div class="tile-foot">최근 30일 · <b>기록 완전</b></div>
+                  </div>
+                  <div class="tile">
+                    <div class="tile-label">사용량 환산 비용(추정)</div>
+                    <div class="tile-value">$3,525.60</div>
+                    <div class="tile-foot">
+                      청구액이 아닙니다 · <b>list price 환산</b>
+                    </div>
+                  </div>
+                  <div class="tile">
+                    <div class="tile-label">성공률</div>
+                    <div class="tile-value">95.7%</div>
+                    <div class="tile-foot">
+                      성공 <b>806</b> · 실패 <b>36</b> · 판정 없음 <b>118</b>
+                    </div>
+                  </div>
+                  <div class="tile tile-gap">
+                    <div class="tile-label">오케스트레이터 축</div>
+                    <div class="tile-value">▨ 미수집</div>
+                    <div class="tile-foot">
+                      2026-06-22 이후 수집되는 행이 없습니다 · 사유 →
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 차트 + 기간 비교 -->
+                <div class="card">
+                  <div class="card-head">
+                    <span class="card-title">일별 감사 사건</span>
+                    <span class="card-hint">최근 30일</span>
+                    <span class="spacer"></span>
+                    <div class="legend">
+                      <span
+                        ><i style="background: var(--viz-series-1)"></i>기록된
+                        사건</span
+                      >
+                      <span><i class="hatch"></i>오케 축 미수집</span>
+                    </div>
+                  </div>
+                  <div class="card-body">
+                    <div class="chart-wrap">
+                      <div>
+                        <svg
+                          class="chart"
+                          viewBox="0 0 880 208"
+                          role="img"
+                          aria-label="일별 감사 사건 수. 8월 6일에 컨설팅을 도입한 이후 일평균이 18.0건에서 41.3건으로 늘었습니다."
+                        >
+                          <defs>
+                            <pattern
+                              id="hatch"
+                              width="6"
+                              height="6"
+                              patternUnits="userSpaceOnUse"
+                              patternTransform="rotate(135)"
+                            >
+                              <rect width="6" height="6" fill="#fffbeb" />
+                              <line
+                                x1="0"
+                                y1="0"
+                                x2="0"
+                                y2="6"
+                                stroke="#b45309"
+                                stroke-width="1.6"
+                                opacity=".35"
+                              />
+                            </pattern>
+                          </defs>
+
+                          <!-- ★격자는 가로만. 세로 격자가 없다 -->
+                          <g class="grid">
+                            <line x1="48" y1="178" x2="864" y2="178" />
+                            <text x="40" y="181.5">0</text>
+                            <line x1="48" y1="137" x2="864" y2="137" />
+                            <text x="40" y="140.5">15</text>
+                            <line x1="48" y1="96" x2="864" y2="96" />
+                            <text x="40" y="99.5">30</text>
+                            <line x1="48" y1="55" x2="864" y2="55" />
+                            <text x="40" y="58.5">45</text>
+                            <line x1="48" y1="14" x2="864" y2="14" />
+                            <text x="40" y="17.5">60</text>
+                          </g>
+
+                          <!-- ★GapBand — 오케 축은 수집되지 않는다. 계열을 0 으로 그리지 않고
+                               "여기 있어야 할 계열이 없다" 는 띠로 그린다. -->
+                          <rect
+                            x="48"
+                            y="14"
+                            width="816"
+                            height="18"
+                            fill="url(#hatch)"
+                          />
+                          <rect
+                            x="48"
+                            y="14"
+                            width="816"
+                            height="18"
+                            fill="none"
+                            stroke="#fde68a"
+                          />
+                          <text
+                            x="54"
+                            y="26.5"
+                            font-size="10"
+                            fill="#78350f"
+                            font-weight="600"
+                          >
+                            오케스트레이터 계열 · 미수집 (0 이 아닙니다)
+                          </text>
+
+                          <g>
+                            <rect
+                              x="53.2"
+                              y="128.8"
+                              width="16.9"
+                              height="49.2"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="80.4"
+                              y="117.9"
+                              width="16.9"
+                              height="60.1"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="107.6"
+                              y="137.0"
+                              width="16.9"
+                              height="41.0"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="134.8"
+                              y="123.3"
+                              width="16.9"
+                              height="54.7"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="162.0"
+                              y="131.5"
+                              width="16.9"
+                              height="46.5"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="189.2"
+                              y="112.4"
+                              width="16.9"
+                              height="65.6"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="216.4"
+                              y="153.4"
+                              width="16.9"
+                              height="24.6"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="243.6"
+                              y="145.2"
+                              width="16.9"
+                              height="32.8"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="270.8"
+                              y="120.6"
+                              width="16.9"
+                              height="57.4"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="298.0"
+                              y="126.1"
+                              width="16.9"
+                              height="51.9"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="325.2"
+                              y="115.1"
+                              width="16.9"
+                              height="62.9"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="352.4"
+                              y="134.3"
+                              width="16.9"
+                              height="43.7"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="379.6"
+                              y="101.5"
+                              width="16.9"
+                              height="76.5"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="406.8"
+                              y="85.1"
+                              width="16.9"
+                              height="92.9"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="434.0"
+                              y="93.3"
+                              width="16.9"
+                              height="84.7"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="461.2"
+                              y="68.7"
+                              width="16.9"
+                              height="109.3"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="488.4"
+                              y="76.9"
+                              width="16.9"
+                              height="101.1"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="515.6"
+                              y="98.7"
+                              width="16.9"
+                              height="79.3"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="542.8"
+                              y="57.7"
+                              width="16.9"
+                              height="120.3"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="570.0"
+                              y="52.3"
+                              width="16.9"
+                              height="125.7"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="597.2"
+                              y="74.1"
+                              width="16.9"
+                              height="103.9"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="624.4"
+                              y="63.2"
+                              width="16.9"
+                              height="114.8"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="651.6"
+                              y="44.1"
+                              width="16.9"
+                              height="133.9"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="678.8"
+                              y="55.0"
+                              width="16.9"
+                              height="123.0"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="706.0"
+                              y="35.9"
+                              width="16.9"
+                              height="142.1"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="733.2"
+                              y="65.9"
+                              width="16.9"
+                              height="112.1"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="760.4"
+                              y="49.5"
+                              width="16.9"
+                              height="128.5"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="787.6"
+                              y="41.3"
+                              width="16.9"
+                              height="136.7"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="814.8"
+                              y="60.5"
+                              width="16.9"
+                              height="117.5"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                            <rect
+                              x="842.0"
+                              y="46.8"
+                              width="16.9"
+                              height="131.2"
+                              rx="1.5"
+                              fill="var(--viz-series-1)"
+                            />
+                          </g>
+
+                          <!-- ★'여기서 도입' 세로선 — charts/types.ts 의 ChartMarkerSpec 이 그대로 이것이다 -->
+                          <g class="marker">
+                            <line x1="374.4" y1="36" x2="374.4" y2="178" />
+                            <text x="380" y="46">여기서 도입 · 8/6</text>
+                          </g>
+
+                          <line
+                            x1="48"
+                            y1="178"
+                            x2="864"
+                            y2="178"
+                            stroke="var(--viz-axis)"
+                            stroke-width="1"
+                          />
+                          <text class="xlab" x="48" y="196">7/26</text>
+                          <text class="xlab" x="430" y="196">8/6</text>
+                          <text class="xlab" x="828" y="196">8/24</text>
+                        </svg>
+                      </div>
+
+                      <div class="compare">
+                        <h4>도입 표시 기준 · 전 12일 / 후 18일</h4>
+                        <div class="cmp-row">
+                          <span class="cmp-k">일평균 사건</span>
+                          <span
+                            ><span class="cmp-v">41.3</span
+                            ><span class="cmp-d up">↑ 129%</span></span
+                          >
+                        </div>
+                        <div class="cmp-row">
+                          <span class="cmp-k">일평균 비용</span>
+                          <span
+                            ><span class="cmp-v">$128.40</span
+                            ><span class="cmp-d neutral">↑ 26.9%</span></span
+                          >
+                        </div>
+                        <div class="cmp-row">
+                          <span class="cmp-k">사건당 비용</span>
+                          <span
+                            ><span class="cmp-v">$3.11</span
+                            ><span class="cmp-d down">↓ 44.7%</span></span
+                          >
+                        </div>
+                        <p class="cmp-foot">
+                          비교 구간의 두 창은 <b>각자 게이트를 통과</b>합니다.
+                          앞 창이 집계 전이면 증감 대신 “이전 기간은 집계
+                          전입니다”를 표시합니다.<br />
+                          이 화면은 <b>기간의 사실만</b> 적습니다 — 원인은
+                          말하지 않습니다.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 탭 -->
+                <div>
+                  <div class="tabs" role="tablist" aria-label="상세">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected="true"
+                      data-tab="ledger"
+                    >
+                      감사 원장
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected="false"
+                      data-tab="cost"
+                    >
+                      비용
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected="false"
+                      data-tab="decomp"
+                    >
+                      태스크 분해
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected="false"
+                      data-tab="proj"
+                    >
+                      프로젝트별
+                    </button>
+                  </div>
+
+                  <!-- ── 탭 1 · 감사 원장 ─────────────────────────────────────── -->
+                  <div class="panel" role="tabpanel" data-panel="ledger">
+                    <div class="chips">
+                      <button class="chip" type="button" aria-pressed="true">
+                        전체 960
+                      </button>
+                      <button class="chip" type="button" aria-pressed="false">
+                        티켓 생성 214
+                      </button>
+                      <button class="chip" type="button" aria-pressed="false">
+                        상태 전이 512
+                      </button>
+                      <button class="chip" type="button" aria-pressed="false">
+                        머지 118
+                      </button>
+                      <button class="chip" type="button" aria-pressed="false">
+                        에이전트 배치 96
+                      </button>
+                      <button class="chip" type="button" aria-pressed="false">
+                        플로우 변경 20
+                      </button>
+                      <span class="chip-sep" aria-hidden="true"></span>
+                      <button class="chip" type="button" aria-pressed="false">
+                        성공 806
+                      </button>
+                      <button class="chip" type="button" aria-pressed="false">
+                        실패 36
+                      </button>
+                      <button class="chip" type="button" aria-pressed="false">
+                        판정 없음 118
+                      </button>
+                    </div>
+
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style="width: 132px">시각</th>
+                          <th style="width: 104px">행위자</th>
+                          <th style="width: 104px">종류</th>
+                          <th>티켓</th>
+                          <th style="width: 150px">사실</th>
+                          <th style="width: 92px">결과</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td class="mono dim">08-25 14:22</td>
+                          <td class="mono">tm_9f3c…</td>
+                          <td>상태 전이</td>
+                          <td>결제 검증 로직 정리</td>
+                          <td class="dim">REVIEW → DONE</td>
+                          <td><span class="badge b-ok">성공</span></td>
+                        </tr>
+                        <tr>
+                          <td class="mono dim">08-25 14:18</td>
+                          <td class="dim">알 수 없음</td>
+                          <td>머지</td>
+                          <td>PR #482 · 결제 재시도 큐</td>
+                          <td class="dim tnum">9 파일 · +312 / −84</td>
+                          <td>
+                            <span class="badge b-unknown">판정 없음</span>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td class="mono dim">08-25 14:05</td>
+                          <td class="mono">tm_1b77…</td>
+                          <td>에이전트 배치</td>
+                          <td>포털 권한 매트릭스</td>
+                          <td class="dim">backend</td>
+                          <td><span class="badge b-ok">성공</span></td>
+                        </tr>
+                        <tr>
+                          <td class="mono dim">08-25 13:51</td>
+                          <td class="mono">tm_9f3c…</td>
+                          <td>티켓 생성</td>
+                          <td>결제 실패 재시도 큐</td>
+                          <td class="dim">우선순위 4</td>
+                          <td><span class="badge b-ok">성공</span></td>
+                        </tr>
+                        <tr>
+                          <td class="mono dim">08-25 13:44</td>
+                          <td class="mono">tm_4de0…</td>
+                          <td>플로우 변경</td>
+                          <td>데이터 파이프라인 이관</td>
+                          <td class="dim">단계 3 → 4</td>
+                          <td><span class="badge b-fail">실패</span></td>
+                        </tr>
+                        <tr>
+                          <td class="mono dim">08-25 13:30</td>
+                          <td class="mono">tm_1b77…</td>
+                          <td>상태 전이</td>
+                          <td>포털 SSO 사전조사</td>
+                          <td class="dim">TODO → CLAIMED</td>
+                          <td><span class="badge b-ok">성공</span></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <div
+                      style="
+                        display: flex;
+                        align-items: center;
+                        gap: 12px;
+                        padding: 12px 0;
+                      "
+                    >
+                      <button class="btn" type="button">더 보기</button>
+                      <span class="dim" style="font-size: 11.5px"
+                        >50건 표시 · 이 창에 960건</span
+                      >
+                    </div>
+
+                    <!-- ★withheld — 접지 않는다. 면책 문구가 아니라 제품 기능이다 -->
+                    <div class="withheld">
+                      <h4>이 화면이 <u>일부러 빼는 것</u> (10)</h4>
+                      <p class="lead">
+                        고객사가 자기 직원에게 이 화면을 설명할 때 필요한
+                        목록입니다. 서버가 아예 보내지 않으므로, 화면이 조심하는
+                        것이 아니라 <b>봉투에 자리가 없습니다.</b>
+                      </p>
+                      <ul>
+                        <li>
+                          <span>✕</span>에이전트가 도구에 넘긴 입력값 — 비밀
+                          키가 섞여 들어올 수 있습니다
+                        </li>
+                        <li>
+                          <span>✕</span>에이전트에게 준 지시문 — 가린 형태라도
+                          싣지 않습니다
+                        </li>
+                        <li>
+                          <span>✕</span>도구 실행 결과 — 코드·파일 내용이 그대로
+                          들어옵니다
+                        </li>
+                        <li>
+                          <span>✕</span>진행 기록의 본문 — 코드·경로·오류가
+                          그대로 들어옵니다
+                        </li>
+                        <li>
+                          <span>✕</span>명령 실행·파일 접근·열람·검색 기록 —
+                          개인의 작업 방식입니다
+                        </li>
+                        <li>
+                          <span>✕</span>더 큰 모델 요청·승인 기록 — 개인의 업무
+                          평가에 해당합니다
+                        </li>
+                        <li>
+                          <span>✕</span>미션에 적은 목표 문장 — 사람이 직접 쓴
+                          지시문입니다
+                        </li>
+                        <li><span>✕</span>저장소가 놓인 기기의 폴더 경로</li>
+                        <li>
+                          <span>✕</span>금액·토큰 수치 전부 —
+                          <b>비용 탭에서만</b> 볼 수 있습니다
+                        </li>
+                        <li>
+                          <span>✕</span>계정 식별자·이메일·표시 이름 — 팀 전용
+                          가명으로만 표시됩니다
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <!-- ── 탭 2 · 비용 ──────────────────────────────────────────── -->
+                  <div class="panel" role="tabpanel" data-panel="cost" hidden>
+                    <div
+                      style="
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 12px;
+                      "
+                    >
+                      <div class="card">
+                        <div class="card-head">
+                          <span class="card-title">구성원별</span>
+                          <span class="spacer"></span
+                          ><span class="card-hint">가명 표시</span>
+                        </div>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>구성원</th>
+                              <th class="num">비용</th>
+                              <th class="num">토큰</th>
+                              <th class="num">비중</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td class="mono">tm_9f3c…</td>
+                              <td class="num">$1,412.80</td>
+                              <td class="num">9.6M</td>
+                              <td class="num dim" style="font-size: 11px">
+                                표본 부족
+                              </td>
+                            </tr>
+                            <tr>
+                              <td class="mono">tm_1b77…</td>
+                              <td class="num">$1,105.20</td>
+                              <td class="num">7.4M</td>
+                              <td class="num dim" style="font-size: 11px">
+                                표본 부족
+                              </td>
+                            </tr>
+                            <tr>
+                              <td class="mono">tm_4de0…</td>
+                              <td class="num">$702.40</td>
+                              <td class="num">4.8M</td>
+                              <td class="num dim" style="font-size: 11px">
+                                표본 부족
+                              </td>
+                            </tr>
+                            <tr>
+                              <td class="mono">tm_c2a1…</td>
+                              <td class="num">$305.20</td>
+                              <td class="num">2.3M</td>
+                              <td class="num dim" style="font-size: 11px">
+                                표본 부족
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                        <div
+                          class="card-body"
+                          style="
+                            border-top: 1px solid var(--line);
+                            padding-top: 10px;
+                          "
+                        >
+                          <p
+                            style="
+                              font-size: 11px;
+                              color: var(--ink-faint);
+                              line-height: 1.5;
+                            "
+                          >
+                            <b style="color: var(--ink-muted)"
+                              >표본 부족 (n=4).</b
+                            >
+                            표본이 5 미만이면 비중(%)을 그리지 않습니다 — 네
+                            명의 비율은 사실상 개인 값과 같습니다. 0 이 아니라
+                            <b>판단할 표본이 없다</b>는 뜻입니다.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div class="card">
+                        <div class="card-head">
+                          <span class="card-title">모델별</span>
+                          <span class="spacer"></span
+                          ><span class="card-hint">캐시 단가는 파생 근사</span>
+                        </div>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>모델</th>
+                              <th class="num">비용</th>
+                              <th class="num">토큰</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td class="mono">claude-opus-5</td>
+                              <td class="num">$2,208.40</td>
+                              <td class="num">13.1M</td>
+                            </tr>
+                            <tr>
+                              <td class="mono">claude-sonnet-5</td>
+                              <td class="num">$978.60</td>
+                              <td class="num">8.2M</td>
+                            </tr>
+                            <tr>
+                              <td class="mono">claude-haiku-4-5</td>
+                              <td class="num">$338.60</td>
+                              <td class="num">2.8M</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                        <div
+                          class="card-body"
+                          style="
+                            border-top: 1px solid var(--line);
+                            padding-top: 10px;
+                          "
+                        >
+                          <p
+                            style="
+                              font-size: 11px;
+                              color: var(--ink-faint);
+                              line-height: 1.5;
+                            "
+                          >
+                            <b style="color: var(--ink-muted)"
+                              >이 금액은 청구액이 아닙니다.</b
+                            >
+                            같은 작업을 API 로 돌렸을 때의
+                            <b>사용량 환산 비용(추정)</b>입니다. 캐시 읽기가
+                            토큰의 대부분이고, 캐시 단가는 파생 근사입니다.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="card" style="margin-top: 12px">
+                      <div class="card-head">
+                        <span class="card-title">이 기간이 덮지 못하는 것</span>
+                      </div>
+                      <div
+                        class="card-body"
+                        style="
+                          display: grid;
+                          grid-template-columns: 1fr 1fr 1fr;
+                          gap: 12px;
+                        "
+                      >
+                        <div>
+                          <div class="tile-label">오케스트레이터 지출</div>
+                          <div style="margin-top: 6px">
+                            <span class="badge b-warn">▨ 미수집</span>
+                          </div>
+                          <p
+                            style="
+                              font-size: 11px;
+                              color: var(--ink-faint);
+                              margin-top: 6px;
+                            "
+                          >
+                            2026-06-22 이후 한 행도 수집되지 않습니다.
+                            <b>0 이 아닙니다.</b>
+                          </p>
+                        </div>
+                        <div>
+                          <div class="tile-label">프로젝트 귀속 불명 행</div>
+                          <div style="margin-top: 6px">
+                            <span class="badge b-unknown">14건</span>
+                          </div>
+                          <p
+                            style="
+                              font-size: 11px;
+                              color: var(--ink-faint);
+                              margin-top: 6px;
+                            "
+                          >
+                            건수만 밝히고 <b>금액은 세지 않습니다.</b>
+                          </p>
+                        </div>
+                        <div>
+                          <div class="tile-label">기록 여부 미확인 구성원</div>
+                          <div style="margin-top: 6px">
+                            <span class="badge b-unknown">1명</span>
+                          </div>
+                          <p
+                            style="
+                              font-size: 11px;
+                              color: var(--ink-faint);
+                              margin-top: 6px;
+                            "
+                          >
+                            0 은 “안 썼다”가 아니라 <b>“안 보냈다”</b>일 수
+                            있습니다.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- ── 탭 3 · 태스크 분해 ───────────────────────────────────── -->
+                  <div class="panel" role="tabpanel" data-panel="decomp" hidden>
+                    <div class="card">
+                      <div class="card-head">
+                        <span class="card-title">미션별 분해와 진척</span>
+                        <span class="spacer"></span
+                        ><span class="card-hint"
+                          >미션에 적은 목표 문장은 표시하지 않습니다</span
+                        >
+                      </div>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th style="width: 132px">미션</th>
+                            <th style="width: 180px">진척</th>
+                            <th class="num" style="width: 88px">분해</th>
+                            <th class="num" style="width: 72px">완료</th>
+                            <th>상태 분포</th>
+                            <th style="width: 96px">갱신</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td class="mono">MISSION-2201</td>
+                            <td>
+                              <div class="bar"><i style="width: 79%"></i></div>
+                              <span class="dim" style="font-size: 11px"
+                                >79%</span
+                              >
+                            </td>
+                            <td class="num">24</td>
+                            <td class="num">19</td>
+                            <td>
+                              <div
+                                class="stackbar"
+                                title="DONE 19 · IN_PROGRESS 2 · REVIEW 1 · BLOCKED 1 · TODO 1"
+                              >
+                                <i
+                                  style="
+                                    width: 79.2%;
+                                    background: var(--viz-series-6);
+                                  "
+                                ></i>
+                                <i
+                                  style="
+                                    width: 8.3%;
+                                    background: var(--viz-series-1);
+                                  "
+                                ></i>
+                                <i
+                                  style="
+                                    width: 4.2%;
+                                    background: var(--viz-series-7);
+                                  "
+                                ></i>
+                                <i
+                                  style="width: 4.2%; background: var(--warn)"
+                                ></i>
+                                <i
+                                  style="
+                                    width: 4.1%;
+                                    background: var(--line-strong);
+                                  "
+                                ></i>
+                              </div>
+                              <span class="dim" style="font-size: 10.5px"
+                                >완료 19 · 진행 2 · 리뷰 1 · 차단 1 · 대기
+                                1</span
+                              >
+                            </td>
+                            <td class="dim mono">08-25 13:20</td>
+                          </tr>
+                          <tr>
+                            <td class="mono">MISSION-2214</td>
+                            <td>
+                              <div class="bar"><i style="width: 56%"></i></div>
+                              <span class="dim" style="font-size: 11px"
+                                >56%</span
+                              >
+                            </td>
+                            <td class="num">16</td>
+                            <td class="num">9</td>
+                            <td>
+                              <div
+                                class="stackbar"
+                                title="DONE 9 · IN_PROGRESS 3 · REVIEW 2 · FAILED 1 · TODO 1"
+                              >
+                                <i
+                                  style="
+                                    width: 56.3%;
+                                    background: var(--viz-series-6);
+                                  "
+                                ></i>
+                                <i
+                                  style="
+                                    width: 18.7%;
+                                    background: var(--viz-series-1);
+                                  "
+                                ></i>
+                                <i
+                                  style="
+                                    width: 12.5%;
+                                    background: var(--viz-series-7);
+                                  "
+                                ></i>
+                                <i
+                                  style="
+                                    width: 6.3%;
+                                    background: var(--critical);
+                                  "
+                                ></i>
+                                <i
+                                  style="
+                                    width: 6.2%;
+                                    background: var(--line-strong);
+                                  "
+                                ></i>
+                              </div>
+                              <span class="dim" style="font-size: 10.5px"
+                                >완료 9 · 진행 3 · 리뷰 2 · 실패 1 · 대기
+                                1</span
+                              >
+                            </td>
+                            <td class="dim mono">08-25 11:04</td>
+                          </tr>
+                          <tr>
+                            <td class="mono">MISSION-2230</td>
+                            <td>
+                              <div class="bar"><i style="width: 23%"></i></div>
+                              <span class="dim" style="font-size: 11px"
+                                >23%</span
+                              >
+                            </td>
+                            <td class="num">31</td>
+                            <td class="num">7</td>
+                            <td>
+                              <div
+                                class="stackbar"
+                                title="DONE 7 · IN_PROGRESS 4 · TODO 18 · BLOCKED 2"
+                              >
+                                <i
+                                  style="
+                                    width: 22.6%;
+                                    background: var(--viz-series-6);
+                                  "
+                                ></i>
+                                <i
+                                  style="
+                                    width: 12.9%;
+                                    background: var(--viz-series-1);
+                                  "
+                                ></i>
+                                <i
+                                  style="
+                                    width: 58.1%;
+                                    background: var(--line-strong);
+                                  "
+                                ></i>
+                                <i
+                                  style="width: 6.4%; background: var(--warn)"
+                                ></i>
+                              </div>
+                              <span class="dim" style="font-size: 10.5px"
+                                >완료 7 · 진행 4 · 대기 18 · 차단 2</span
+                              >
+                            </td>
+                            <td class="dim mono">08-24 18:47</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div
+                      style="
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 12px;
+                        margin-top: 12px;
+                      "
+                    >
+                      <div class="card">
+                        <div class="card-head">
+                          <span class="card-title">역할별 분해</span>
+                          <span class="spacer"></span
+                          ><span class="card-hint">티켓 71건</span>
+                        </div>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>역할</th>
+                              <th class="num">티켓</th>
+                              <th>분포</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td>backend</td>
+                              <td class="num">26</td>
+                              <td>
+                                <div class="bar">
+                                  <i style="width: 100%"></i>
+                                </div>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td>frontend</td>
+                              <td class="num">24</td>
+                              <td>
+                                <div class="bar">
+                                  <i style="width: 92%"></i>
+                                </div>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td>test</td>
+                              <td class="num">13</td>
+                              <td>
+                                <div class="bar">
+                                  <i style="width: 50%"></i>
+                                </div>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td>devops</td>
+                              <td class="num">8</td>
+                              <td>
+                                <div class="bar">
+                                  <i style="width: 31%"></i>
+                                </div>
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div class="card">
+                        <div class="card-head">
+                          <span class="card-title">주의가 필요한 티켓</span>
+                          <span class="spacer"></span
+                          ><span class="card-hint">정체 기준 6시간</span>
+                        </div>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>티켓</th>
+                              <th style="width: 104px">사유</th>
+                              <th style="width: 100px">판정</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td>데이터 파이프라인 이관 · 스키마 검증</td>
+                              <td>
+                                <span class="badge b-fail">실패 3회</span>
+                              </td>
+                              <td><span class="badge b-ok">판정됨</span></td>
+                            </tr>
+                            <tr>
+                              <td>포털 SSO 사전조사</td>
+                              <td>
+                                <span class="badge b-warn">정체 9시간</span>
+                              </td>
+                              <td><span class="badge b-ok">판정됨</span></td>
+                            </tr>
+                            <tr>
+                              <td>결제 웹훅 재처리</td>
+                              <td class="dim">—</td>
+                              <td>
+                                <span class="badge b-unknown">판정 유보</span>
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                        <div
+                          class="card-body"
+                          style="
+                            border-top: 1px solid var(--line);
+                            padding-top: 10px;
+                          "
+                        >
+                          <p
+                            style="
+                              font-size: 11px;
+                              color: var(--ink-faint);
+                              line-height: 1.5;
+                            "
+                          >
+                            <b style="color: var(--ink-muted)"
+                              >판정 유보는 “정체가 아니다”가 아닙니다.</b
+                            >
+                            그 티켓의 활동 기록을 다 읽지 못해 판정을 미룬
+                            상태입니다 — 목록에서 빠진 것과 같은 모양이 되지
+                            않도록 <b>따로 표시</b>합니다.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- ── 탭 4 · 프로젝트별 ────────────────────────────────────── -->
+                  <div class="panel" role="tabpanel" data-panel="proj" hidden>
+                    <div class="card">
+                      <div class="card-head">
+                        <span class="card-title">프로젝트별</span>
+                        <span class="spacer"></span
+                        ><span class="card-hint"
+                          >행을 열면 그 프로젝트의 원장으로 들어갑니다</span
+                        >
+                      </div>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>프로젝트</th>
+                            <th style="width: 88px">내 역할</th>
+                            <th class="num" style="width: 112px">비용</th>
+                            <th class="num" style="width: 88px">토큰</th>
+                            <th class="num" style="width: 88px">감사 사건</th>
+                            <th style="width: 132px">기간 대비</th>
+                            <th style="width: 64px"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td>결제 리뉴얼</td>
+                            <td><span class="badge b-accent">owner</span></td>
+                            <td class="num">$1,842.60</td>
+                            <td class="num">12.4M</td>
+                            <td class="num">468</td>
+                            <td>
+                              <span class="cmp-d up" style="margin: 0"
+                                >↑ 112%</span
+                              >
+                              <span class="dim" style="font-size: 10.5px"
+                                >도입 후</span
+                              >
+                            </td>
+                            <td>
+                              <button class="btn" type="button">열기</button>
+                            </td>
+                          </tr>
+                          <tr>
+                            <td>사내 포털</td>
+                            <td><span class="badge b-accent">admin</span></td>
+                            <td class="num">$986.40</td>
+                            <td class="num">6.8M</td>
+                            <td class="num">291</td>
+                            <td>
+                              <span class="cmp-d up" style="margin: 0"
+                                >↑ 84%</span
+                              >
+                              <span class="dim" style="font-size: 10.5px"
+                                >도입 후</span
+                              >
+                            </td>
+                            <td>
+                              <button class="btn" type="button">열기</button>
+                            </td>
+                          </tr>
+                          <tr>
+                            <td>데이터 파이프라인</td>
+                            <td><span class="badge b-unknown">member</span></td>
+                            <td class="num">$696.60</td>
+                            <td class="num">4.9M</td>
+                            <td class="num dim" style="font-size: 11px">
+                              권한 필요
+                            </td>
+                            <td class="dim">—</td>
+                            <td>
+                              <button class="btn" type="button">열기</button>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <div
+                        class="card-body"
+                        style="
+                          border-top: 1px solid var(--line);
+                          padding-top: 10px;
+                        "
+                      >
+                        <p
+                          style="
+                            font-size: 11px;
+                            color: var(--ink-faint);
+                            line-height: 1.5;
+                          "
+                        >
+                          <b style="color: var(--ink-muted)"
+                            >‘권한 필요’ 는 0 이 아닙니다.</b
+                          >
+                          이 프로젝트의 원장은 <b>프로젝트 관리자만</b> 볼 수
+                          있습니다 — 조직 관리자 권한으로는 열리지 않습니다.
+                          이건 제약이 아니라 이 제품이 파는 성질입니다.<br />
+                          목록에 <b>없는</b> 프로젝트는 존재하지 않는 것이
+                          아니라 <b>범위 밖</b>입니다 — 개수도 말하지 않습니다.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <!-- /탭 -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="notes">
+          <div class="note">
+            <span class="note-n">1</span>
+            <div>
+              <b>요약 타일 1번이 ‘감사 사건’이다 — 비용이 아니다.</b> 비용
+              게이트가 닫힌 고객사에서는 비용 타일이 사유 문장이 되고, 그때 1번
+              자리가 비면 첫 화면이 그 순간 반대 증거가 된다. 감사 원장은 게이트
+              밖이라 <b>첫 태스크 1건에서 즉시</b> 찬다.
+            </div>
+          </div>
+          <div class="note">
+            <span class="note-n">2</span>
+            <div>
+              <b>성공률이 세 값이다 — 성공 806 · 실패 36 · 판정 없음 118.</b>
+              <code>success</code> 는 <code>boolean | null</code> 이고 머지
+              기록은 항상 <code>null</code> 이다. 두 칸으로 접으면
+              <code>null</code> 이 실패로 굴러떨어지고, 화면이 “머지할 때마다
+              실패”라고 말한다.
+            </div>
+          </div>
+          <div class="note">
+            <span class="note-n">3</span>
+            <div>
+              <b>4번 타일은 숫자가 아니라 빗금이다.</b> 밝은 바탕에서 ‘빈칸’ 은
+              그냥 흰색이라 아무것도 없는 것처럼 보인다 — 어두운 화면보다 훨씬
+              위험하다. 그래서 바탕색 + 빗금 + 아이콘으로 적극적으로 그린다.
+            </div>
+          </div>
+          <div class="note">
+            <span class="note-n">4</span>
+            <div>
+              <b>‘여기서 도입’ 세로선은 새 부품이 아니다.</b>
+              <code>charts/types.ts</code> 의
+              <code>ChartMarkerSpec {date, label, hint}</code> +
+              <code>markerIndexOf()</code> 가 이미 그 모양이다 (어드민이 “단위가
+              바뀐 날”을 그으려고 만든 것이고, “컨설팅을 도입한 날”은 같은
+              모양의 경계선이다).
+            </div>
+          </div>
+          <div class="note">
+            <span class="note-n">5</span>
+            <div>
+              <b>비중 열이 ‘표본 부족’ 이다.</b> 구성원이 4명이라 퍼센트를
+              그리지 않는다. 지금 우리 최대 다중 멤버 프로젝트가 2인이므로
+              <b>이 상태가 정상이고, 그렇게 보여야 한다.</b>
+            </div>
+          </div>
+          <div class="note">
+            <span class="note-n">6</span>
+            <div>
+              <b>감사 원장 탭에 금액 칸이 하나도 없다.</b> 감사 탭은 사용량
+              게이트 <b>밖</b>이라, 돈을 실으면 게이트가 감사 탭을 경유해 통째로
+              우회된다. 밝은 화면에서 “요약에 비용도 넣자”는 제안이 나올 자리가
+              정확히 여기다.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ════════════════════════════════════════════════════════════ C. 상태 화면 -->
+      <section class="sec">
+        <div class="sec-head">
+          <span class="sec-no">C</span>
+          <h2 class="sec-title">빈 화면을 만들지 않는다 — 상태 전량</h2>
+        </div>
+        <p class="sec-note">
+          이 화면은 <b>데이터가 있는 상태보다 없는 상태가 훨씬 흔하다.</b> 전부
+          그린다. 그리고 <b>무엇도 <code>0</code> 으로 그리지 않는다</b> — 0 은
+          “없다”가 아니라 “안 보냈다”·“못 본다”· “아직 안 쌓였다”일 수 있고, 이
+          넷은 보는 사람이 할 일이 전부 다르다.
+        </p>
+        <div class="states">
+          <div class="state">
+            <span class="state-tag">disabled</span>
+            <h5>팀 전체 사용량이 아직 열리지 않았습니다</h5>
+            <p>서버가 준 사유 문장을 <b>그대로</b> 그린다.</p>
+            <p class="why">
+              화면이 사유를 지어내지 않는다. 지어내는 순간 서버와 화면이 다른
+              말을 하기 시작한다.
+            </p>
+          </div>
+          <div class="state">
+            <span class="state-tag">not_provisioned</span>
+            <h5>아직 집계가 준비되지 않았습니다</h5>
+            <p>파이프라인이 이 조직의 데이터를 아직 적재하지 않았습니다.</p>
+            <p class="why">★<code>0</code> 이 아니다. 기다리면 채워진다.</p>
+          </div>
+          <div class="state">
+            <span class="state-tag">empty</span>
+            <h5>이 기간에 기록이 없습니다</h5>
+            <p>측정은 됐고, 이 구간에 정말 아무 일도 없었습니다.</p>
+            <p class="why">
+              ★<code>not_provisioned</code> 와 구별해 그린다. 이건 기다려도 안
+              채워진다.
+            </p>
+          </div>
+          <div class="state">
+            <span class="state-tag">partial</span>
+            <h5>기록 일부를 불러오지 못했습니다</h5>
+            <p>
+              아래 목록이 전부가 아닙니다. 비어 있는 항목은 ‘없음’ 이 아니라
+              <b>‘확인되지 않음’</b> 입니다.
+            </p>
+            <p class="why">
+              차트에는 그 구간을 빗금으로 덮는다. 선을 0 으로 떨어뜨리지 않는다.
+            </p>
+          </div>
+          <div
+            class="state"
+            style="border-color: #c7d2fe; background: var(--accent-soft)"
+          >
+            <span class="state-tag" style="color: #4338ca">restricted</span>
+            <h5>조직 전체 사용량은 조직 관리자만 볼 수 있습니다</h5>
+            <p>조직 관리자에게 요청하세요.</p>
+            <p class="why" style="border-color: #c7d2fe">
+              ★“왜 없는지”가 아니라 <b>“무엇이 필요한지”</b>를 말한다. 권한이
+              없습니다는 막다른 길이고, 이건 길이다.
+            </p>
+          </div>
+          <div class="state">
+            <span class="state-tag">error</span>
+            <h5>기록을 불러오지 못했습니다</h5>
+            <p>
+              사유 + <b>다시 시도</b>. ★이미 그린 감사 목록은 지우지 않는다.
+            </p>
+            <p class="why">
+              지우면 사용자는 “기록이 사라졌다”로 읽는다. 감사 화면에서 그건
+              최악의 오독이다.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ════════════════════════════════════════════════════════════ D. 스켈레톤 -->
+      <section class="sec">
+        <div class="sec-head">
+          <span class="sec-no">D</span>
+          <h2 class="sec-title">스켈레톤은 실제 차트 실루엣이다</h2>
+        </div>
+        <p class="sec-note">
+          회색 사각형 하나가 아니라 <b>그 차트의 실제 모양</b> — 축 자리·막대
+          자리·라벨 자리가 실물과 같은 좌표에 있다. 로드가 끝났을 때 화면이
+          <b>한 픽셀도 튀지 않는 것</b>이 목적이다. 아래 왼쪽이 로딩, 오른쪽이
+          로드 완료이고 두 그림의 좌표가 같다.
+        </p>
+        <div class="frame">
+          <div class="marblo-console">
+            <div class="console-body">
+              <div
+                style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px"
+              >
+                <div class="card">
+                  <div class="card-head">
+                    <span
+                      class="sk"
+                      style="display: inline-block; width: 88px; height: 12px"
+                    ></span>
+                    <span class="spacer"></span>
+                    <span
+                      class="sk"
+                      style="display: inline-block; width: 56px; height: 10px"
+                    ></span>
+                  </div>
+                  <div class="card-body">
+                    <svg
+                      viewBox="0 0 420 150"
+                      style="width: 100%; height: auto"
+                      aria-hidden="true"
+                    >
+                      <g class="grid">
+                        <line x1="34" y1="128" x2="410" y2="128" />
+                        <line x1="34" y1="96" x2="410" y2="96" />
+                        <line x1="34" y1="64" x2="410" y2="64" />
+                        <line x1="34" y1="32" x2="410" y2="32" />
+                      </g>
+                      <g fill="var(--line)" class="sk">
+                        <rect x="40" y="86" width="20" height="42" rx="1.5" />
+                        <rect x="70" y="72" width="20" height="56" rx="1.5" />
+                        <rect x="100" y="94" width="20" height="34" rx="1.5" />
+                        <rect x="130" y="60" width="20" height="68" rx="1.5" />
+                        <rect x="160" y="78" width="20" height="50" rx="1.5" />
+                        <rect x="190" y="48" width="20" height="80" rx="1.5" />
+                        <rect x="220" y="66" width="20" height="62" rx="1.5" />
+                        <rect x="250" y="40" width="20" height="88" rx="1.5" />
+                        <rect x="280" y="56" width="20" height="72" rx="1.5" />
+                        <rect x="310" y="34" width="20" height="94" rx="1.5" />
+                        <rect x="340" y="50" width="20" height="78" rx="1.5" />
+                        <rect x="370" y="44" width="20" height="84" rx="1.5" />
+                      </g>
+                      <line
+                        x1="34"
+                        y1="128"
+                        x2="410"
+                        y2="128"
+                        stroke="var(--viz-axis)"
+                      />
+                    </svg>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card-head">
+                    <span class="card-title">일별 감사 사건</span>
+                    <span class="spacer"></span
+                    ><span class="card-hint">최근 12일</span>
+                  </div>
+                  <div class="card-body">
+                    <svg
+                      viewBox="0 0 420 150"
+                      style="width: 100%; height: auto"
+                      role="img"
+                      aria-label="로드 완료 상태의 같은 차트"
+                    >
+                      <g class="grid">
+                        <line x1="34" y1="128" x2="410" y2="128" />
+                        <text x="26" y="131.5">0</text>
+                        <line x1="34" y1="96" x2="410" y2="96" />
+                        <text x="26" y="99.5">20</text>
+                        <line x1="34" y1="64" x2="410" y2="64" />
+                        <text x="26" y="67.5">40</text>
+                        <line x1="34" y1="32" x2="410" y2="32" />
+                        <text x="26" y="35.5">60</text>
+                      </g>
+                      <g fill="var(--viz-series-1)">
+                        <rect x="40" y="86" width="20" height="42" rx="1.5" />
+                        <rect x="70" y="72" width="20" height="56" rx="1.5" />
+                        <rect x="100" y="94" width="20" height="34" rx="1.5" />
+                        <rect x="130" y="60" width="20" height="68" rx="1.5" />
+                        <rect x="160" y="78" width="20" height="50" rx="1.5" />
+                        <rect x="190" y="48" width="20" height="80" rx="1.5" />
+                        <rect x="220" y="66" width="20" height="62" rx="1.5" />
+                        <rect x="250" y="40" width="20" height="88" rx="1.5" />
+                        <rect x="280" y="56" width="20" height="72" rx="1.5" />
+                        <rect x="310" y="34" width="20" height="94" rx="1.5" />
+                        <rect x="340" y="50" width="20" height="78" rx="1.5" />
+                        <rect x="370" y="44" width="20" height="84" rx="1.5" />
+                      </g>
+                      <line
+                        x1="34"
+                        y1="128"
+                        x2="410"
+                        y2="128"
+                        stroke="var(--viz-axis)"
+                      />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ════════════════════════════════════════════════════════════ E. 색 근거 -->
+      <section class="sec">
+        <div class="sec-head">
+          <span class="sec-no">E</span>
+          <h2 class="sec-title">화이트·블루 — 새 색을 하나도 만들지 않았다</h2>
+        </div>
+        <p class="sec-note">
+          강조색이 <code>brand-500</code> 이 아니라 <code>brand-600</code> 인
+          것은 취향이 아니라 계산이다. <code>#6366f1</code> 은 흰 바탕에서
+          <b>4.47:1</b> 로 AA 본문 기준(4.5:1)에 아슬하게 미달하고,
+          <code>#4f46e5</code> 는 <b>6.29:1</b> 로 통과한다. 램프에 이미 두 값이
+          다 있었다 —
+          <b>색을 만든 게 아니라 한 칸 내려온 것이다.</b>
+        </p>
+        <div class="swatches">
+          <div class="sw">
+            <div class="sw-chip" style="background: #eef2ff"></div>
+            <div class="sw-meta">
+              <b>accent-soft</b><span>brand-50 · #eef2ff</span>
+            </div>
+          </div>
+          <div class="sw">
+            <div class="sw-chip" style="background: #6366f1"></div>
+            <div class="sw-meta">
+              <b>brand-500</b><span>#6366f1 · 4.47:1 ✕</span>
+            </div>
+          </div>
+          <div class="sw">
+            <div class="sw-chip" style="background: #4f46e5"></div>
+            <div class="sw-meta">
+              <b>accent ★</b><span>brand-600 · 6.29:1 ✓</span>
+            </div>
+          </div>
+          <div class="sw">
+            <div
+              class="sw-chip"
+              style="background: #ffffff; border-bottom: 1px solid var(--line)"
+            ></div>
+            <div class="sw-meta"><b>surface</b><span>#ffffff</span></div>
+          </div>
+          <div class="sw">
+            <div class="sw-chip" style="background: #f8fafc"></div>
+            <div class="sw-meta"><b>surface-sunken</b><span>#f8fafc</span></div>
+          </div>
+          <div class="sw">
+            <div class="sw-chip" style="background: #18181b"></div>
+            <div class="sw-meta"><b>ink</b><span>zinc-900 · 17.72:1</span></div>
+          </div>
+          <div class="sw">
+            <div class="sw-chip" style="background: #52525b"></div>
+            <div class="sw-meta">
+              <b>ink-muted</b><span>zinc-600 · 7.73:1</span>
+            </div>
+          </div>
+          <div class="sw">
+            <div class="sw-chip" style="background: #e4e4e7"></div>
+            <div class="sw-meta"><b>line</b><span>zinc-200</span></div>
+          </div>
+          <div class="sw">
+            <div class="sw-chip" style="background: #b45309"></div>
+            <div class="sw-meta">
+              <b>warn</b><span>amber-700 · 5.02:1</span>
+            </div>
+          </div>
+          <div class="sw">
+            <div class="sw-chip" style="background: #b91c1c"></div>
+            <div class="sw-meta">
+              <b>critical</b><span>red-700 · 6.47:1</span>
+            </div>
+          </div>
+          <div class="sw">
+            <div class="sw-chip" style="background: #2a78d6"></div>
+            <div class="sw-meta">
+              <b>viz-series-1</b><span>차트 · tokens.css</span>
+            </div>
+          </div>
+          <div class="sw">
+            <div class="sw-chip" style="background: #1c5cab"></div>
+            <div class="sw-meta"><b>viz-marker</b><span>도입 세로선</span></div>
+          </div>
+        </div>
+
+        <div class="notes">
+          <div class="note">
+            <span class="note-n">1</span>
+            <div>
+              이 밝은 값들은 <b>이 경로에만</b> 적용된다.
+              <code>marblo-web</code> 의 나머지는 블랙 그대로다 —
+              <code>.marblo-console</code> 래퍼 아래에서 CSS 변수만 다시
+              정의하는 방식이고, 그 규칙은 일부러 <code>@layer</code> 밖에
+              둔다(레이어 밖 CSS 가 레이어 안을 특이도와 무관하게 이긴다).
+            </div>
+          </div>
+          <div class="note">
+            <span class="note-n">2</span>
+            <div>
+              브랜드 스케일 <code>--color-brand-*</code> 자체는
+              <b>재정의하지 않는다.</b> 브랜드는 한 벌이고, 바뀌는 것은 그
+              브랜드를 어디에 쓰느냐(<code>--color-accent</code>)뿐이다.
+            </div>
+          </div>
+          <div class="note">
+            <span class="note-n">3</span>
+            <div>
+              ★함정 둘 — 의미 토큰을 <code>@theme inline</code> 안에 두면 스코프
+              재정의가 <b>죽은 규칙</b>이 되고, 토큰에 알파
+              수식자(<code>bg-surface/60</code>)를 붙이면 폴백 가지에 어두운
+              값이 리터럴로 구워진다. 둘 다 오류도 경고도 없이
+              <b>조용히</b> 실패한다.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ════════════════════════════════════════════════════════════ F. 이것은 아니다 -->
+      <section class="sec">
+        <div class="sec-head">
+          <span class="sec-no">F</span>
+          <h2 class="sec-title">이 화면에 들어오지 않는 것</h2>
+        </div>
+        <p class="sec-note">
+          아래는 전부 <b>어드민(<code>/admin</code>, 사장님 내부용)</b>의
+          것이다. 이름이 비슷해 보여도 들어오면 축이 섞이고,
+          <b>한번 섞으면 두 번 다시 못 푼다.</b> 판정 규칙 한 줄 — 그 숫자의
+          주어가 <b>“우리 사업”</b> 이면 어드민, <b>“우리 조직”</b> 이면 여기다.
+        </p>
+        <div class="withheld">
+          <ul>
+            <li><span>✕</span>리텐션 · 코호트</li>
+            <li><span>✕</span>활성화(activation) · 획득(acquisition) · CAC</li>
+            <li><span>✕</span>수익 · MRR · 결제 전환</li>
+            <li><span>✕</span>설치 수 · 봇 트래픽 · UTM · GA4</li>
+            <li><span>✕</span>DAU / WAU / MAU · 퍼널</li>
+            <li><span>✕</span>다른 고객사의 존재 — 개수조차 말하지 않는다</li>
+          </ul>
+        </div>
+      </section>
+
+      <footer
+        style="
+          margin-top: 56px;
+          padding-top: var(--s2);
+          border-top: 1px solid var(--line);
+          font-size: 11px;
+          color: var(--ink-faint);
+          line-height: 1.6;
+        "
+      >
+        시안 · 티켓 <b>BtdC0fQJ916L1Gr5Uh8Z</b> · 2026-08-25 · 기획 정본
+        <code>v3/docs/audit-dashboard-plan-2026-08-25.md</code><br />
+        선행 정본 —
+        <code>enterprise-ax-client-dashboard-design-2026-08-24.md</code>(무엇을)
+        · <code>org-access-and-login-flow-2026-08-24.md</code>(누가 무엇을) · PR
+        #1206(어떻게 보일지)<br />
+        이 파일은 외부 요청을 한 건도 하지 않습니다. 데이터는 전부 가상이며 실제
+        고객 원장이 아닙니다.
+      </footer>
+    </div>
+
+    <script>
+      // 탭 전환. ★외부 스크립트 0 — 이 파일 안에 있는 것이 전부다.
+      (function () {
+        var tablist = document.querySelector('[role="tablist"]');
+        if (!tablist) return;
+        var tabs = Array.prototype.slice.call(
+          tablist.querySelectorAll('[role="tab"]')
+        );
+        var panels = Array.prototype.slice.call(
+          document.querySelectorAll("[data-panel]")
+        );
+
+        function show(name) {
+          tabs.forEach(function (t) {
+            t.setAttribute("aria-selected", String(t.dataset.tab === name));
+          });
+          panels.forEach(function (p) {
+            p.hidden = p.dataset.panel !== name;
+          });
+        }
+        tabs.forEach(function (t) {
+          t.addEventListener("click", function () {
+            show(t.dataset.tab);
+          });
+          t.addEventListener("keydown", function (e) {
+            var i = tabs.indexOf(t);
+            if (e.key === "ArrowRight") {
+              tabs[(i + 1) % tabs.length].focus();
+              tabs[(i + 1) % tabs.length].click();
+            }
+            if (e.key === "ArrowLeft") {
+              tabs[(i - 1 + tabs.length) % tabs.length].focus();
+              tabs[(i - 1 + tabs.length) % tabs.length].click();
+            }
+          });
+        });
+
+        // 기간 선택기·필터 칩은 시안이므로 표시만 바꾼다(데이터는 고정).
+        document.querySelectorAll(".seg").forEach(function (g) {
+          g.querySelectorAll("button").forEach(function (b) {
+            b.addEventListener("click", function () {
+              g.querySelectorAll("button").forEach(function (x) {
+                x.setAttribute("aria-pressed", "false");
+              });
+              b.setAttribute("aria-pressed", "true");
+            });
+          });
+        });
+        document.querySelectorAll(".chips").forEach(function (g) {
+          g.querySelectorAll(".chip").forEach(function (b) {
+            b.addEventListener("click", function () {
+              g.querySelectorAll(".chip").forEach(function (x) {
+                x.setAttribute("aria-pressed", "false");
+              });
+              b.setAttribute("aria-pressed", "true");
+            });
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>
