@@ -288,6 +288,31 @@ import {
   type FirstTouchCampaignRow,
 } from "./analyticsAdSpend";
 import {
+  PENDING_VIEW_COLUMNS,
+  SMALL_SAMPLE_MIN_DENOMINATOR,
+  buildChannelRows,
+  buildChannelSql,
+  buildCountryRows,
+  buildCountrySql,
+  buildHygiene,
+  buildHygieneSql,
+  buildInstallClassSql,
+  buildInstallsByDay,
+  buildInstallsByDaySql,
+  buildMissingReasonRows,
+  buildMissingReasonSql,
+  buildNotes,
+  normalizeRangeDays,
+  ratio,
+  unavailable as unifiedUnavailable,
+  type AcquisitionUnified,
+  type BqRow,
+} from "./adminInstallUnified";
+import {
+  TELEMETRY_DATASET as UNIFIED_TELEMETRY_DATASET,
+  VIEW_INSTALL_UNIFIED,
+} from "./installUnified";
+import {
   ANALYTICS_USER_KEY_BLOCKER,
   resolveAnalyticsUserKeyFn,
 } from "./analyticsUserKey";
@@ -16416,6 +16441,125 @@ GROUP BY campaign`,
         summary: null,
       };
     }
+  });
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★통합 뷰 읽기 경로 — getAdminInstallUnified (계획 §5 PR 2)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// 설계 정본: v3/docs/admin-analytics-replan-2026-08-24.md §3·§4-1.
+// 순수 로직(SQL 조립·행 조립·n<5 마스킹)은 전부 adminInstallUnified.ts 에 있고,
+// 여기서는 **BigQuery I/O 와 실패 격리만** 한다 — 다른 어드민 콜러블과 같은 규약이다.
+//
+// ★왜 콜러블을 하나 더 만드나 (16개를 줄이는 티켓인데):
+//   이 하나가 8개를 대체한다(계획 §3-4). 지금 화면은 같은 "사용자 수" 를 세는
+//   코드를 세 벌 갖고 있고 세 벌의 알갱이가 다르다. 그걸 뷰 하나 위의 GROUP BY 로
+//   접는 것이 이 콜러블의 전부이고, **여기서 새 지표를 만들면 안 된다.**
+//
+// ★뷰가 아직 없을 수 있다.
+//   `v_install_unified` 는 `npm run provision:install-unified -- --apply` 를 돌려야
+//   서고, 그 선행은 #1195 배포다(install-unified 문서 §9). 그래서 실패를 장애로
+//   던지지 않고 `state:"unavailable"` + 사유로 접는다 — 0 을 그리면 화면이
+//   "유입이 없다" 로 읽히고, 그게 이 재설계가 막으려는 실패 그 자체다.
+
+/** 뷰가 없을 때 다음 사람이 무엇을 돌려야 하는지 화면에 그대로 적는다. */
+const INSTALL_UNIFIED_PROVISION_HINT =
+  "v3/functions 에서 `npm run provision:install-unified -- --apply` (선행: #1195 배포). " +
+  "install-unified 문서 §7-4·§9 참조.";
+
+export const getAdminInstallUnified = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .https.onCall(async (data, context): Promise<AcquisitionUnified> => {
+    requireAdmin(context);
+    const rangeDays = normalizeRangeDays(
+      (data as { days?: unknown } | undefined)?.days
+    );
+    const generatedAt = new Date().toISOString();
+    const viewName = `${BQ_PROJECT}.${UNIFIED_TELEMETRY_DATASET}.${VIEW_INSTALL_UNIFIED}`;
+
+    const run = (query: string, params?: Record<string, unknown>) =>
+      bigquery.query({ query, params, location: BQ_LOCATION });
+
+    let head: BqRow[];
+    let channel: BqRow[];
+    let missing: BqRow[];
+    let country: BqRow[];
+    let byDay: BqRow[];
+    try {
+      const [headRows, channelRows, missingRows, countryRows, dayRows] =
+        await Promise.all([
+          run(buildHygieneSql(BQ_PROJECT)),
+          run(buildChannelSql(BQ_PROJECT)),
+          run(buildMissingReasonSql(BQ_PROJECT)),
+          run(buildCountrySql(BQ_PROJECT)),
+          run(buildInstallsByDaySql(BQ_PROJECT), { days: rangeDays }),
+        ]);
+      head = headRows[0] as BqRow[];
+      channel = channelRows[0] as BqRow[];
+      missing = missingRows[0] as BqRow[];
+      country = countryRows[0] as BqRow[];
+      byDay = dayRows[0] as BqRow[];
+    } catch (err) {
+      // ★사유를 그대로 화면에 보낸다. "알 수 없는 오류" 는 다음 사람이 원인을
+      //   못 찾게 만들고, 그 상태가 며칠 가면 아무도 이 탭을 안 믿게 된다.
+      functions.logger.info("[install_unified] acquisition read unavailable", {
+        message: safeAnalyticsErrorMessage(err),
+      });
+      return unifiedUnavailable(
+        BQ_PROJECT,
+        rangeDays,
+        `${viewName} 를 읽지 못했다: ${safeAnalyticsErrorMessage(err)} — ` +
+          INSTALL_UNIFIED_PROVISION_HINT,
+        generatedAt
+      );
+    }
+
+    // ★분모 위생 등급(#1198)은 **보조**다. 이 쿼리만 실패해도 나머지를 죽이지
+    //   않는다 — 대신 사람 추정치 옆에 "왜 없나" 가 붙는다(buildHygiene).
+    let classRows: BqRow[] | null = null;
+    try {
+      const [rows] = await run(buildInstallClassSql(BQ_PROJECT));
+      classRows = rows as BqRow[];
+    } catch (err) {
+      functions.logger.info("[install_unified] install_class unavailable", {
+        message: safeAnalyticsErrorMessage(err),
+      });
+    }
+
+    const hygiene = buildHygiene(head[0], classRows);
+    const channelBuilt = buildChannelRows(channel);
+    const countryBuilt = buildCountryRows(country);
+    const installsByDay = buildInstallsByDay(byDay);
+    const headRow = head[0] ?? {};
+
+    return {
+      generatedAt,
+      state: "ready",
+      reason: null,
+      source: viewName,
+      rangeDays,
+      smallSampleMinDenominator: SMALL_SAMPLE_MIN_DENOMINATOR,
+      headline: {
+        hygiene,
+        // ★"유입 0" 과 "모름" 을 가르는 한 칸. 분모는 외부 설치다.
+        channelKnown: ratio(
+          Number(headRow.channelKnownInstalls ?? 0),
+          hygiene.installsExternal
+        ),
+        spawned: ratio(
+          Number(headRow.spawnedExternal ?? 0),
+          hygiene.installsExternal
+        ),
+      },
+      channelRows: channelBuilt.rows,
+      channelRowsTruncated: channelBuilt.truncated,
+      missingReasonRows: buildMissingReasonRows(missing),
+      countryRows: countryBuilt.rows,
+      countryRowsTruncated: countryBuilt.truncated,
+      installsByDay,
+      pendingColumns: PENDING_VIEW_COLUMNS,
+      notes: buildNotes(hygiene, byDay.length, installsByDay.length),
+    };
   });
 
 // ════════════════════════════════════════════════════════════════════════════

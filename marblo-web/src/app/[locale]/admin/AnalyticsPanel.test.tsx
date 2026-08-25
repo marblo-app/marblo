@@ -517,9 +517,13 @@ test("패널은 4탭 tablist 를 세우고 선택된 탭만 렌더한다", () =>
   assert.doesNotMatch(html, /id="analytics-panel-activation"/);
   assert.doesNotMatch(html, /id="analytics-panel-retention"/);
   assert.doesNotMatch(html, /id="analytics-panel-revenue"/);
-  // 획득 탭은 GA4 브리지 적재 전 칸을 '적재 전' 으로 말한다.
-  assert.match(html, /적재 전/);
+  // ★획득 탭은 자기 데이터가 어느 표에서 나오는지 화면에 적는다. 근거를 숨기면
+  //   숫자가 틀렸을 때 어디를 봐야 하는지 아무도 모른다.
+  assert.match(html, /v_install_unified/);
+  assert.match(html, /getAdminInstallUnified/);
   assert.match(html, /CAC/);
+  // ★삭제 대상(계획 §2-1 A11 "획득 비용 회수" 플레이스홀더)이 실제로 사라졌다.
+  assert.doesNotMatch(html, /획득 비용 회수/);
 });
 
 test("운영자 제외가 기본값이다 (체크박스 off)", () => {
@@ -893,11 +897,30 @@ test("★수익 탭은 null 을 0 으로 그리지 않는다 (mrr_usd · ltv_usd
   assert.match(html, /null 은 0 이 아니라 미기입/);
 });
 
-test("★획득 탭은 기다리는 표 이름을 실제 이름으로 적는다", () => {
+test("★획득 탭은 표 순서 = 결정 순서로 선다 (계획 §4-1)", () => {
   const html = renderToStaticMarkup(<P.default initialTab="acquisition" />);
-  assert.match(html, /ga4_first_touch_current/);
+  // 위에서부터 읽으면 "무엇을 고칠까" 가 나와야 한다.
+  const order = [
+    "설치 · 채널 커버리지 · CAC",
+    "채널별 획득",
+    "채널 미상 사유",
+    "국가별 획득",
+    "광고비 원장",
+    "대기자 · 파운더 원장",
+  ];
+  let cursor = -1;
+  for (const label of order) {
+    const at = html.indexOf(label);
+    assert.ok(at >= 0, `획득 탭에 '${label}' 섹션이 없다`);
+    assert.ok(at > cursor, `'${label}' 이 표 순서에서 앞으로 새어 나왔다`);
+    cursor = at;
+  }
   assert.match(html, /광고비 수동 입력/);
-  assert.match(html, /적재 전/);
+  // ★대기자·파운더 원장은 초록이지만 광고 성과와 **다른 축**이라 맨 아래다.
+  assert.ok(
+    html.indexOf("대기자 · 파운더 원장") > html.indexOf("채널 미상 사유"),
+    "다른 축인 Firestore 원장이 채널 표 위로 올라오면 섞여 읽힌다"
+  );
   assert.doesNotMatch(html, /광고비 축은 소스 자체가 아직 없다/);
 });
 
@@ -1434,4 +1457,209 @@ test("★미배포 판정은 에러 코드가 아니라 서버 매니페스트�
   // 미배포 콜러블의 404 는 CORS 에 막혀 브라우저에서 functions/internal 로
   // 도착한다 — 그래서 not-found 가드만 믿으면 영원히 빨간 오류가 뜬다.
   assert.equal(P.CALLABLE_MANIFEST, "getAdminCallableManifest");
+});
+
+// ── ★① 획득 탭 — 통합 뷰 위의 표들 (계획 §4-1) ─────────────────────────────
+//
+// 이 탭의 실패 모드는 버그가 아니라 **오독**이다. 그래서 아래 테스트는 "값이
+// 맞나" 가 아니라 이걸 본다:
+//   · 뷰가 없을 때 0 을 그리지 않나
+//   · '모른다' 와 '안다, 캠페인이 없었다' 가 화면에서 갈리나
+//   · 설치 수 옆에 사람 추정치가 같이 있나
+//   · 분모가 5 미만인 칸에 퍼센트를 안 만드나
+
+function unifiedFixture(
+  over: Partial<import("./AnalyticsPanel").AcquisitionUnified> = {}
+): import("./AnalyticsPanel").AcquisitionUnified {
+  return {
+    generatedAt: "2026-08-25T00:00:00.000Z",
+    state: "ready",
+    reason: null,
+    source: "marblo-2253d.marblo_telemetry.v_install_unified",
+    rangeDays: 30,
+    smallSampleMinDenominator: 5,
+    headline: {
+      hygiene: {
+        installsTotal: 608,
+        installsExternal: 577,
+        installsDev: 31,
+        humanEstimateMin: 5,
+        humanEstimateMax: 47,
+        unknownBrowserInstalls: 42,
+        byInstallClass: [
+          { installClass: "reinstall_loop", installs: 539 },
+          { installClass: "dev_tagged", installs: 31 },
+          { installClass: "distinct", installs: 4 },
+          { installClass: "unknown", installs: 34 },
+        ],
+        maxInstallsPerBrowser: 539,
+        hygieneMissingReason: null,
+      },
+      channelKnown: {
+        numerator: 481,
+        denominator: 577,
+        rate: 481 / 577,
+        smallSample: false,
+      },
+      spawned: { numerator: 18, denominator: 577, rate: 18 / 577, smallSample: false },
+    },
+    channelRows: [],
+    channelRowsTruncated: false,
+    missingReasonRows: [
+      {
+        reason: "key_mismatch",
+        kind: "unknown",
+        label: "모름 — 가명 조인키(gaKeyHmac)가 없다",
+        action: "#1195 배포 전 원장 행이다. 소급 백필을 돌리면 채워진다.",
+        hasGa4Row: false,
+        installs: 565,
+      },
+      {
+        reason: "no_utm",
+        kind: "true_zero",
+        label: "★안다 — 캠페인이 없었다(자연·직접 유입)",
+        action: "진짜 0 이다. 백필할 것이 없다.",
+        hasGa4Row: true,
+        installs: 12,
+      },
+    ],
+    countryRows: [
+      {
+        country: "KR",
+        installs: 12,
+        channelKnown: { numerator: 9, denominator: 12, rate: 0.75, smallSample: false },
+        spawned: { numerator: 2, denominator: 12, rate: 2 / 12, smallSample: false },
+      },
+      {
+        country: null,
+        installs: 3,
+        channelKnown: { numerator: 0, denominator: 3, rate: null, smallSample: true },
+        spawned: { numerator: 1, denominator: 3, rate: null, smallSample: true },
+      },
+    ],
+    countryRowsTruncated: false,
+    installsByDay: [{ date: "2026-08-01", installs: 5, channelKnown: 3 }],
+    pendingColumns: [
+      { column: "retainedD7 / retainedD14 / retainedD30", blocks: "채널별 D7·D30 잔존" },
+    ],
+    notes: ["★분모 위생 경보 — 한 브라우저가 만든 설치가 최대 539건이다."],
+    ...over,
+  };
+}
+
+test("★뷰가 없으면 0 을 그리지 않고 사유를 적는다 (설치 0 이 아니다)", () => {
+  const html = renderToStaticMarkup(
+    <P.AcquisitionHeadlineView
+      unified={unifiedFixture({
+        state: "unavailable",
+        headline: null,
+        reason: "v_install_unified 를 읽지 못했다: Not found — provision 필요",
+      })}
+      cac={null}
+    />
+  );
+  assert.match(html, /적재 전/);
+  assert.match(html, /수치가 0 인 게 아니라 소스가 없습니다/);
+  // ★사유를 그대로 적는다 — "알 수 없는 오류" 면 다음 사람이 원인을 못 찾는다.
+  assert.match(html, /provision 필요/);
+  // ★숫자를 한 개도 그리지 않는다. 0 도, 픽스처의 608·577 도 없다.
+  assert.doesNotMatch(html, /608|577|사람 추정/);
+});
+
+test("★상단 3줄은 설치 수 옆에 사람 추정치를 같이 낸다 (재설치 루프 분리)", () => {
+  const html = renderToStaticMarkup(
+    <P.AcquisitionHeadlineView unified={unifiedFixture()} cac={null} />
+  );
+  // 전체와 외부가 둘 다 남는다 — 분모를 화면 맨 위에 못 박는다.
+  assert.match(html, /577 \/ 608/);
+  // ★사람 추정치는 범위다. 폭 자체가 "아직 못 센다" 는 정보다.
+  assert.match(html, /사람 추정 5~47명/);
+  // 위생 경보가 주석이 아니라 화면에 있다.
+  assert.match(html, /분모 위생 경보/);
+  assert.match(html, /재설치 루프 539/);
+});
+
+test("★CAC 는 지출 0 일 때 0원이 아니라 '산출 불가' 다", () => {
+  assert.equal(
+    P.acquisitionCac({ spendKrw: 0, installsExternal: 577 }).cacKrw,
+    null
+  );
+  assert.match(
+    P.acquisitionCac({ spendKrw: 0, installsExternal: 577 }).reason ?? "",
+    /산출 불가/
+  );
+  assert.equal(
+    P.acquisitionCac({ spendKrw: 100000, installsExternal: 0 }).cacKrw,
+    null
+  );
+  assert.equal(
+    P.acquisitionCac({ spendKrw: 100000, installsExternal: 10 }).cacKrw,
+    10000
+  );
+  const html = renderToStaticMarkup(
+    <P.AcquisitionHeadlineView unified={unifiedFixture()} cac={null} />
+  );
+  assert.match(html, /지출 0 — 산출 불가/);
+  assert.doesNotMatch(html, /₩0<\/p>/);
+});
+
+test("★채널표가 0행이면 '유입 0' 이 아니라 '광고를 켠 적이 없다' 라고 쓴다", () => {
+  const html = renderToStaticMarkup(
+    <P.AcquisitionChannelTable data={unifiedFixture()} />
+  );
+  assert.match(html, /유료 광고를 켠 적이 없습니다/);
+  assert.match(html, /channelMissingReason IS NULL/);
+  // ★없는 열을 0 이나 퍼센트로 그리지 않고 없다고 적는다(계획 §3-3).
+  assert.match(html, /retainedD7/);
+  assert.match(html, /횟수가 아니라 복귀 여부/);
+});
+
+test("★★미상 사유표는 '모른다' 와 '안다, 캠페인이 없었다' 를 갈라 그린다", () => {
+  const html = renderToStaticMarkup(
+    <P.ChannelMissingReasonTable data={unifiedFixture()} />
+  );
+  // 두 요약 칸이 서로 다른 상자로 나온다 — 합계 한 줄로 뭉개면 판단이 뒤집힌다.
+  assert.match(html, /data-testid="channel-reason-unknown"/);
+  assert.match(html, /data-testid="channel-reason-true-zero"/);
+  assert.match(html, /565건/);
+  assert.match(html, /12건/);
+  assert.match(html, /결측이 아니라 진짜 0/);
+  // 사유 키가 화면에 그대로 남아야 백필 대상을 짚을 수 있다.
+  assert.match(html, /key_mismatch/);
+  assert.match(html, /no_utm/);
+  // ★"이 값이 크면 우리가 하는 일" — 결정 문장이 표 안에 있다(계획 §2-5).
+  assert.match(html, /소급 백필을 돌리면 채워진다/);
+});
+
+test("★분모가 5 미만인 칸은 퍼센트 대신 '표본 부족' 이고 분수는 남는다", () => {
+  const html = renderToStaticMarkup(
+    <P.UnifiedRatioCell
+      value={{ numerator: 2, denominator: 3, rate: null, smallSample: true }}
+    />
+  );
+  assert.match(html, /2\/3/, "원자료까지 가리면 그것도 거짓말이다");
+  assert.match(html, /표본 부족/);
+  assert.doesNotMatch(html, /66\.7%/);
+});
+
+test("국가 미상은 '해외' 가 아니라 '미상' 이다", () => {
+  const html = renderToStaticMarkup(
+    <P.AcquisitionCountryTable data={unifiedFixture()} />
+  );
+  assert.match(html, /미상/);
+  assert.match(html, /표본 부족/);
+  assert.match(html, />KR</);
+});
+
+test("★잘라낸 행이 있으면 숨기지 않고 말한다", () => {
+  const html = renderToStaticMarkup(
+    <P.AcquisitionCountryTable
+      data={unifiedFixture({ countryRowsTruncated: true })}
+    />
+  );
+  assert.match(html, /잘렸다는 사실을/);
+});
+
+test("★콜러블 이름 계약 — 통합 뷰 읽기 경로", () => {
+  assert.equal(P.CALLABLE_INSTALL_UNIFIED, "getAdminInstallUnified");
 });

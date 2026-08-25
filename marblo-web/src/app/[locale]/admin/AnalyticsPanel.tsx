@@ -992,6 +992,96 @@ type CountryFunnel = {
   notes: string[];
 };
 
+// ── ★통합 뷰 위의 획득 축 (getAdminInstallUnified) ─────────────────────────
+//
+// 계약 정본은 서버의 `v3/functions/src/adminInstallUnified.ts` 다. 이 타입들은
+// 그것의 거울이고, **여기서 숫자를 만들지 않는다** — 화면은 GROUP BY 된 결과를
+// 그리기만 한다. 화면이 다시 세는 순간 계획 §0 의 병(집계가 16곳에서 따로 돎)이
+// 그대로 재발한다.
+//
+// ★이름을 새로 짓지 않았다. 컬럼명 정본은
+//   v3/docs/install-unified-view-2026-08-24.md(#1196) 다.
+
+/** ★분자·분모를 **둘 다** 싣는다. 퍼센트만 오면 분모를 화면에서 복원할 수 없다. */
+export type UnifiedRatio = {
+  numerator: number;
+  denominator: number;
+  /** 분모가 0 이거나 표본 하한 미만이면 null. ★0 이 아니다. */
+  rate: number | null;
+  /** 서버가 판정한 표본 부족. 화면은 퍼센트 대신 '표본 부족' 을 쓴다. */
+  smallSample: boolean;
+};
+
+/** 사유가 "모른다" 인가 "안다, 없었다" 인가. 이 구분이 채널 판단을 뒤집는다. */
+export type UnifiedReasonKind = "unknown" | "true_zero" | "known";
+
+export type InstallHygiene = {
+  installsTotal: number;
+  /** ★분모의 정본 — 개발·dev 태깅을 뺀 설치. */
+  installsExternal: number;
+  installsDev: number;
+  /** 사람 추정치 하한 = 고유 브라우저(gaKey) 수. */
+  humanEstimateMin: number;
+  /** 상한 = 하한 + 브라우저를 모르는 설치. ★폭 자체가 "아직 못 센다" 는 정보다. */
+  humanEstimateMax: number;
+  unknownBrowserInstalls: number;
+  byInstallClass: Array<{ installClass: string; installs: number }>;
+  /** 한 브라우저가 만든 최대 설치 수(#1198 ft_browser_installs). */
+  maxInstallsPerBrowser: number | null;
+  hygieneMissingReason: string | null;
+};
+
+export type AcquisitionChannelRow = {
+  source: string | null;
+  medium: string | null;
+  campaign: string | null;
+  content: string | null;
+  installs: number;
+  spawned: UnifiedRatio;
+  completed: UnifiedRatio;
+};
+
+export type AcquisitionMissingReasonRow = {
+  reason: string;
+  kind: UnifiedReasonKind;
+  label: string;
+  /** ★이 사유가 많으면 **우리가 무엇을 하나**. */
+  action: string;
+  hasGa4Row: boolean;
+  installs: number;
+};
+
+export type AcquisitionCountryRow = {
+  country: string | null;
+  installs: number;
+  channelKnown: UnifiedRatio;
+  spawned: UnifiedRatio;
+};
+
+export type AcquisitionUnified = {
+  generatedAt: string;
+  /** ★`unavailable` 일 때 0 을 그리지 않는다. */
+  state: "ready" | "unavailable";
+  reason: string | null;
+  source: string;
+  rangeDays: number;
+  smallSampleMinDenominator: number;
+  headline: {
+    hygiene: InstallHygiene;
+    channelKnown: UnifiedRatio;
+    spawned: UnifiedRatio;
+  } | null;
+  channelRows: AcquisitionChannelRow[];
+  channelRowsTruncated: boolean;
+  missingReasonRows: AcquisitionMissingReasonRow[];
+  countryRows: AcquisitionCountryRow[];
+  countryRowsTruncated: boolean;
+  installsByDay: Array<{ date: string; installs: number; channelKnown: number }>;
+  /** 뷰에 아직 없어 **화면이 대신 계산하지 않는** 파생 컬럼들(계획 §3-3). */
+  pendingColumns: Array<{ column: string; blocks: string }>;
+  notes: string[];
+};
+
 /**
  * 브리지 마지막 동기 시각. 빈 표가 '유입 0' 인지 '미적재' 인지 가른다.
  */
@@ -3363,15 +3453,11 @@ function CountryFunnelTable({
             <th className="py-2 pr-3 text-right font-medium">
               다운로드 <span className="text-zinc-600">/방문</span>
             </th>
-            <th className="py-2 pr-3 text-right font-medium">
-              설치 <span className="text-zinc-600">/다운로드</span>
-            </th>
-            <th className="py-2 pr-3 text-right font-medium">
-              연결 <span className="text-zinc-600">/설치</span>
-            </th>
-            <th className="py-2 pr-3 text-right font-medium">
-              10분 성공 <span className="text-zinc-600">/연결</span>
-            </th>
+            {/* ★설치·연결·10분 열은 여기서 내렸다(계획 §3-4 "유지(축소)").
+                그 단계들은 **설치 축**이고 이 표는 **방문 축**이라, 한 표에 두면
+                분모가 다른 숫자를 사람 눈이 자동으로 퍼널로 읽는다 — 계획 §0 이
+                진단한 병이 정확히 그것이다. 설치 이후 단계는 위 통합 뷰 표가
+                가져갔다. */}
           </tr>
         </thead>
         <tbody>
@@ -3410,15 +3496,6 @@ function CountryFunnelTable({
                 }`}
               >
                 <Ratio numerator={r.downloads} denominator={r.visitors} />
-              </td>
-              <td className="py-2 pr-3 text-right">
-                <Ratio numerator={r.installs} denominator={r.downloads} />
-              </td>
-              <td className="py-2 pr-3 text-right">
-                <Ratio numerator={r.connected} denominator={r.installs} />
-              </td>
-              <td className="py-2 pr-3 text-right">
-                <Ratio numerator={r.activated10m} denominator={r.connected} />
               </td>
             </tr>
           ))}
@@ -3510,8 +3587,11 @@ function CountryFunnelView({ data }: { data: CountryFunnel }) {
         <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5">
           {data.join.webRegion} ⋈ {data.join.appRegion} · 메모리 조인
         </span>
-        <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5">
-          기본 분모 = 다운로드·설치 (방문 아님)
+        <span
+          className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5"
+          title="봇은 데스크톱 앱을 내려받아 설치하고 실행하지 않는다. 그래서 채널·CAC 판단의 분모는 방문이 아니라 다운로드·설치다(#1200). 이 표는 그 앞 단계(방문→다운로드)만 본다."
+        >
+          ★이 표는 방문 축 — 판단 분모는 다운로드·설치
         </span>
         <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5">
           링크백 매칭{" "}
@@ -3521,10 +3601,16 @@ function CountryFunnelView({ data }: { data: CountryFunnel }) {
           />
         </span>
       </div>
-      <InstallDenominatorNotice
-        basis="방문→다운로드 뒤의 설치·연결·10분 성공 단계는 설치 수를 분모로 씁니다."
-        observed={data.coverage.installs}
-      />
+      {/* ★축이 갈렸다는 사실을 표 위에 적는다 — 주석은 안 읽힌다. */}
+      <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-[11px] leading-relaxed text-zinc-400">
+        <b className="text-zinc-200">이 표의 알갱이는 브라우저(방문자) 1대</b>
+        입니다. 설치 이후 단계(첫 스폰·첫 완주·잔존)는 알갱이가{" "}
+        <b className="text-zinc-200">설치 1건</b>이라 이 표에 접히지 않고, 위{" "}
+        <b className="text-zinc-200">국가별 획득(설치 축)</b> 표가 가져갔습니다.
+        분모가 다른 두 표를 위아래로 놓고 곱해 읽지 마세요 — 그렇게 읽히도록
+        그려 두었던 것이 이 화면의 오래된 오류였습니다. 링크백이 도달한 설치는{" "}
+        <b className="tabular-nums">{fmtInt(data.coverage.installs)}대</b>입니다.
+      </p>
 
       {(data.join.webRegionError || data.join.appRegionError) && (
         <div className="rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-xs text-amber-300">
@@ -3583,6 +3669,508 @@ function CountryFunnelView({ data }: { data: CountryFunnel }) {
             <li key={i}>· {n}</li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★① 획득 탭 — 통합 뷰 위의 표들 (계획 §4-1)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// 표 순서 = 결정하는 순서다. 위에서부터 읽으면 "무엇을 고칠까" 가 나와야 한다:
+//   상단 3줄(분모를 못 박는다) → 채널별 → ★미상 사유 → 국가 → 광고비 → 원장.
+//
+// ★이 섹션의 컴포넌트들은 **아무것도 세지 않는다.** 서버(adminInstallUnified.ts)가
+//   GROUP BY 해서 준 것을 그린다. 화면에서 다시 세면 계획 §0 의 병이 재발한다.
+
+/** #1198 `install_class` 어휘. 영문 키를 화면에 그대로 흘리지 않는다. */
+const INSTALL_CLASS_LABEL: Record<string, string> = {
+  distinct: "고유",
+  reinstall_loop: "재설치 루프",
+  dev_tagged: "dev 태깅",
+  unknown: "판정 불가(ga_key 없음)",
+};
+
+/** 뷰를 못 읽었을 때. ★0 을 그리지 않고 무엇을 기다리는지 적는다. */
+export function AcquisitionUnavailable({
+  data,
+  title,
+  willShow,
+}: {
+  data: AcquisitionUnified | null;
+  title: string;
+  willShow: string[];
+}) {
+  return (
+    <PendingIngestion
+      title={title}
+      waitingOn={
+        data?.reason ??
+        `${CALLABLE_INSTALL_UNIFIED} — 통합 뷰(v_install_unified) 위의 읽기 경로`
+      }
+      willShow={willShow}
+      missing={data ? "source" : "read-path"}
+    />
+  );
+}
+
+/**
+ * 분수 한 칸. ★서버가 `smallSample` 이라고 하면 퍼센트를 안 그린다 — 분모가 4
+ * 이하인 표에서 퍼센트는 정보가 아니라 거짓말이다(계획 §4 공통 규칙).
+ * 대신 분수는 그대로 남긴다. 원자료까지 가리는 건 또 다른 종류의 거짓말이다.
+ */
+export function UnifiedRatioCell({
+  value,
+  title,
+}: {
+  value: UnifiedRatio | null | undefined;
+  title?: string;
+}) {
+  if (!value) return <span className="text-zinc-600">—</span>;
+  if (value.smallSample) {
+    return (
+      <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap">
+        <span className="text-sm font-semibold tabular-nums text-zinc-100">
+          {fmtInt(value.numerator)}/{fmtInt(value.denominator)}
+        </span>
+        <span
+          className="text-[11px] text-amber-400/90"
+          title={`분모 ${value.denominator} — 한 건이 ${(
+            100 / Math.max(1, value.denominator)
+          ).toFixed(0)}%p 를 움직인다. 퍼센트를 쓰지 않는다.`}
+        >
+          표본 부족
+        </span>
+      </span>
+    );
+  }
+  return (
+    <Ratio
+      numerator={value.numerator}
+      denominator={value.denominator}
+      title={title}
+    />
+  );
+}
+
+/**
+ * ★획득 CAC — 광고비 ÷ 외부 설치(계획 §4-1 상단 3줄 ③).
+ *
+ * 두 서버 값의 나눗셈일 뿐 새 집계가 아니다. 지출이 0 이면 0원 CAC 가 아니라
+ * **산출 불가**다 — 0 을 그리면 "공짜로 획득했다" 로 읽힌다.
+ */
+export function acquisitionCac(input: {
+  spendKrw: number | null;
+  installsExternal: number | null;
+}): { cacKrw: number | null; reason: string | null } {
+  const spend = input.spendKrw ?? 0;
+  const installs = input.installsExternal ?? 0;
+  if (!(spend > 0)) {
+    return {
+      cacKrw: null,
+      reason: "지출 0 — 산출 불가 (아직 유료 광고를 켠 적이 없습니다)",
+    };
+  }
+  if (!(installs > 0)) {
+    return { cacKrw: null, reason: "외부 설치 0 — 분모가 없어 산출 불가" };
+  }
+  return { cacKrw: spend / installs, reason: null };
+}
+
+/**
+ * ★상단 3줄 — 분모를 화면 맨 위에 못 박는다.
+ *
+ * 3.1% 사고(분자와 분모가 서로 다른 모집단)의 재발 방지 장치가 이 자리다.
+ * 넷째 숫자부터는 표로 내려간다.
+ */
+export function AcquisitionHeadlineView({
+  unified,
+  cac,
+}: {
+  unified: AcquisitionUnified | null;
+  cac: AdminCacSummary | null;
+}) {
+  if (!unified || unified.state !== "ready" || !unified.headline) {
+    return (
+      <AcquisitionUnavailable
+        data={unified}
+        title="설치 · 채널 커버리지 · CAC"
+        willShow={[
+          "설치 (외부) — 개발·dev 태깅을 뺀 분모의 정본",
+          "채널을 아는 설치 — '유입 0' 과 '모름' 을 가르는 한 칸",
+          "획득 CAC — 광고비 ÷ 외부 설치",
+        ]}
+      />
+    );
+  }
+  const h = unified.headline.hygiene;
+  const spend =
+    cac?.state === "ingested" && cac.summary
+      ? cac.summary.matchedSpendKrw + cac.summary.unmatchedSpendKrw
+      : null;
+  const cacResult = acquisitionCac({
+    spendKrw: spend,
+    installsExternal: h.installsExternal,
+  });
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        {/* ① 분모의 정본. ★전체와 사람 추정치를 같이 낸다 — 하나만 내면
+            반드시 오독된다(실측: 설치 631행이 브라우저 5개, #1198). */}
+        <StatCard
+          label="설치 (외부)"
+          value={`${fmtInt(h.installsExternal)} / ${fmtInt(h.installsTotal)}`}
+          sub={`사람 추정 ${fmtInt(h.humanEstimateMin)}~${fmtInt(
+            h.humanEstimateMax
+          )}명 · dev ${fmtInt(h.installsDev)} 제외`}
+        />
+        {/* ② "유입 0" 과 "모름" 을 가르는 한 칸. */}
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+          <p className="text-xs text-zinc-500">채널을 아는 설치</p>
+          <div className="mt-1.5">
+            <UnifiedRatioCell
+              value={unified.headline.channelKnown}
+              title="COUNTIF(hasGa4Row) / 외부 설치. 낮으면 '유입이 없다' 가 아니라 '조인이 안 됐다' 다."
+            />
+          </div>
+          <p className="mt-1 text-[11px] text-zinc-600">
+            나머지의 사유는 아래 <b className="text-zinc-500">채널 미상 사유표</b>
+            에 전부 있습니다
+          </p>
+        </div>
+        {/* ③ CAC — 지출 0 이면 0원이 아니라 산출 불가. */}
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+          <p className="text-xs text-zinc-500">획득 CAC</p>
+          {cacResult.cacKrw == null ? (
+            <p className="mt-1.5 text-sm leading-relaxed text-amber-300/90">
+              {cacResult.reason}
+            </p>
+          ) : (
+            <>
+              <p className="mt-1.5 text-lg font-semibold tabular-nums text-zinc-100">
+                {fmtKrw(Math.round(cacResult.cacKrw))}
+              </p>
+              <p className="mt-1 text-[11px] tabular-nums text-zinc-600">
+                {fmtKrw(spend ?? 0)} ÷ {fmtInt(h.installsExternal)} 설치
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+      {/* ★위생 경보는 주석이 아니라 화면에 있다 — 주석은 안 읽힌다. */}
+      {unified.notes.length > 0 && (
+        <ul className="space-y-1 text-[11px] leading-relaxed text-amber-200/80">
+          {unified.notes.map((n) => (
+            <li key={n}>· {n}</li>
+          ))}
+        </ul>
+      )}
+      {h.hygieneMissingReason && (
+        <p className="text-[11px] text-zinc-500">· {h.hygieneMissingReason}</p>
+      )}
+      {h.byInstallClass.length > 0 && (
+        <p className="text-[11px] text-zinc-500">
+          분모 위생 등급(#1198):{" "}
+          {h.byInstallClass
+            .map(
+              (c) =>
+                `${INSTALL_CLASS_LABEL[c.installClass] ?? c.installClass} ${fmtInt(
+                  c.installs
+                )}`
+            )
+            .join(" · ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ★뷰에 아직 없는 파생 컬럼. 화면이 대신 계산하면 계획 §0 이 재발하므로
+ * 계산하지 않고 **없다고 적는다.**
+ */
+export function PendingColumnsNote({
+  columns,
+}: {
+  columns: Array<{ column: string; blocks: string }>;
+}) {
+  if (!columns || columns.length === 0) return null;
+  return (
+    <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+      아직 <b className="text-zinc-400">열이 없는 것</b>:{" "}
+      {columns.map((c) => `${c.blocks}(${c.column})`).join(" · ")}. 잔존은{" "}
+      <b>횟수가 아니라 복귀 여부</b>고 창이 안 닫힌 설치는 NULL 이어야 하는데, 그
+      규칙을 화면 네 군데가 각자 구현하면 지금과 똑같아집니다 — 그래서 0 으로도
+      퍼센트로도 그리지 않고 뷰가 컬럼으로 줄 때까지 비워 둡니다(계획 §3-3).
+    </p>
+  );
+}
+
+/**
+ * 채널별 통합표. ★`channelMissingReason IS NULL` — 캠페인이 실재하는 행만.
+ *
+ * 광고 전인 지금 이 표는 0행이다. 그 자리에 "유료 광고를 켠 적이 없습니다" 라고
+ * 쓴다 — 빈 표를 '유입 0' 으로 속이지 않는다.
+ */
+export function AcquisitionChannelTable({
+  data,
+}: {
+  data: AcquisitionUnified | null;
+}) {
+  if (!data || data.state !== "ready") {
+    return (
+      <AcquisitionUnavailable
+        data={data}
+        title="채널별 획득 (소스 · 매체 · 캠페인 · 소재)"
+        willShow={[
+          "캠페인이 실재하는 행만 — 소스 × 매체 × 캠페인 × 소재",
+          "설치 · 첫 스폰 · 첫 완주",
+        ]}
+      />
+    );
+  }
+  if (data.channelRows.length === 0) {
+    return (
+      <div className="space-y-2">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-5 text-xs leading-relaxed text-zinc-400">
+          <b className="text-zinc-200">유료 광고를 켠 적이 없습니다.</b> 이 표는
+          캠페인이 <b>실재하는</b> 설치만 셉니다(
+          <span className="font-mono">channelMissingReason IS NULL</span>). 지금
+          0행인 것은 유입이 0 이라는 뜻이 아니라 캠페인 태그가 붙은 유입이 아직
+          없다는 뜻이고, 나머지 설치가 어디로 갔는지는 바로 아래{" "}
+          <b className="text-zinc-200">채널 미상 사유표</b>가 전부 말합니다.
+        </div>
+        <PendingColumnsNote columns={data.pendingColumns} />
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-xs">
+        <thead className="text-zinc-500">
+          <tr className="border-b border-zinc-800">
+            <th className="py-2 pr-3 font-medium">소스 / 매체</th>
+            <th className="py-2 pr-3 font-medium">캠페인</th>
+            <th className="py-2 pr-3 font-medium">소재</th>
+            <th className="py-2 pr-3 text-right font-medium">설치</th>
+            <th className="py-2 pr-3 text-right font-medium">
+              첫 스폰 <span className="text-zinc-600">/설치</span>
+            </th>
+            <th className="py-2 pr-3 text-right font-medium">
+              첫 완주 <span className="text-zinc-600">/설치</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.channelRows.map((r, i) => (
+            <tr
+              key={`${r.source}|${r.medium}|${r.campaign}|${r.content}|${i}`}
+              className="border-b border-zinc-900/60 text-zinc-300"
+            >
+              <td className="py-2 pr-3 text-zinc-100">
+                {r.source ?? "—"} / {r.medium ?? "—"}
+              </td>
+              <td className="py-2 pr-3">{r.campaign ?? "—"}</td>
+              <td className="py-2 pr-3">{r.content ?? "—"}</td>
+              <td className="py-2 pr-3 text-right tabular-nums">
+                {fmtInt(r.installs)}
+              </td>
+              <td className="py-2 pr-3 text-right">
+                <UnifiedRatioCell value={r.spawned} />
+              </td>
+              <td className="py-2 pr-3 text-right">
+                <UnifiedRatioCell value={r.completed} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {data.channelRowsTruncated && (
+        <p className="mt-2 text-[11px] text-amber-300/80">
+          ★상위 {data.channelRows.length}행만 보여 줍니다 — 잘렸다는 사실을
+          숨기지 않습니다.
+        </p>
+      )}
+      <PendingColumnsNote columns={data.pendingColumns} />
+    </div>
+  );
+}
+
+/**
+ * ★★채널 미상 사유표 — 이 페이지에서 가장 중요한 신설물(계획 §4-1 표2).
+ *
+ * 위의 채널표가 비었을 때 그게 "광고를 안 켰다" 인지 "조인이 깨졌다" 인지는
+ * 여기서만 알 수 있다. 두 답은 우리가 할 일이 정반대다 — 전자는 아무것도 안 해도
+ * 되고, 후자는 오늘 백필을 돌려야 한다.
+ *
+ * ★`no_utm`(안다 — 자연유입)과 `no_ga4_row`(모른다 — 조인 실패)를 같은 칸에
+ *   두지 않는다. 자연 유입을 결측으로 오독하면 채널 판단이 통째로 뒤집힌다.
+ */
+export function ChannelMissingReasonTable({
+  data,
+}: {
+  data: AcquisitionUnified | null;
+}) {
+  if (!data || data.state !== "ready") {
+    return (
+      <AcquisitionUnavailable
+        data={data}
+        title="채널 미상 사유"
+        willShow={[
+          "no_ledger_row / no_ga_client_id / key_mismatch / no_ga4_row / no_utm 분포",
+          "★'모른다' 와 '안다, 캠페인이 없었다' 의 구분",
+        ]}
+      />
+    );
+  }
+  const rows = data.missingReasonRows;
+  if (rows.length === 0) return <EmptyState label="설치가 한 건도 없습니다." />;
+  const unknown = rows
+    .filter((r) => r.kind === "unknown")
+    .reduce((a, r) => a + r.installs, 0);
+  const trueZero = rows
+    .filter((r) => r.kind === "true_zero")
+    .reduce((a, r) => a + r.installs, 0);
+  return (
+    <div className="space-y-3">
+      {/* ★한 줄 요약이 이 표의 요점이다 — 모름과 진짜 0 은 다른 물건이다. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div
+          data-testid="channel-reason-unknown"
+          className="rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-xs leading-relaxed text-amber-100"
+        >
+          <b className="tabular-nums">{fmtInt(unknown)}건</b> — <b>모른다.</b>{" "}
+          조인이 깨졌거나 키가 없습니다. 백필·배포로 채워질 수 있는 쪽입니다.
+        </div>
+        <div
+          data-testid="channel-reason-true-zero"
+          className="rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-3 text-xs leading-relaxed text-emerald-100"
+        >
+          <b className="tabular-nums">{fmtInt(trueZero)}건</b> —{" "}
+          <b>안다, 캠페인이 없었다.</b> 자연·직접 유입입니다.{" "}
+          <b>결측이 아니라 진짜 0</b> 이라 백필할 것이 없습니다.
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead className="text-zinc-500">
+            <tr className="border-b border-zinc-800">
+              <th className="py-2 pr-3 font-medium">사유</th>
+              <th className="py-2 pr-3 font-medium">뜻</th>
+              <th className="py-2 pr-3 text-center font-medium">GA4 행</th>
+              <th className="py-2 pr-3 text-right font-medium">설치</th>
+              <th className="py-2 pr-3 font-medium">
+                이 값이 크면 우리가 하는 일
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr
+                key={`${r.reason}|${String(r.hasGa4Row)}`}
+                className="border-b border-zinc-900/60 text-zinc-300"
+              >
+                <td className="py-2 pr-3 font-mono text-[11px] text-zinc-100">
+                  {r.reason}
+                </td>
+                <td
+                  className={`py-2 pr-3 ${
+                    r.kind === "true_zero"
+                      ? "text-emerald-300"
+                      : r.kind === "known"
+                      ? "text-zinc-300"
+                      : "text-amber-300"
+                  }`}
+                >
+                  {r.label}
+                </td>
+                <td className="py-2 pr-3 text-center text-zinc-500">
+                  {r.hasGa4Row ? "있음" : "없음"}
+                </td>
+                <td className="py-2 pr-3 text-right tabular-nums text-zinc-100">
+                  {fmtInt(r.installs)}
+                </td>
+                <td className="py-2 pr-3 text-zinc-500">{r.action}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 국가별 — ★설치 축이다. 위의 방문 축(GA4 브라우저) 표와 분모가 다르므로 두
+ * 표를 곱해서 읽으면 안 된다. 그 사실을 섹션 머리에 적는다.
+ */
+export function AcquisitionCountryTable({
+  data,
+}: {
+  data: AcquisitionUnified | null;
+}) {
+  if (!data || data.state !== "ready") {
+    return (
+      <AcquisitionUnavailable
+        data={data}
+        title="국가별 획득 (설치 축)"
+        willShow={["국가 × 설치 · 채널 커버리지 · 첫 스폰"]}
+      />
+    );
+  }
+  if (data.countryRows.length === 0) {
+    return <EmptyState label="설치가 한 건도 없습니다." />;
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-xs">
+        <thead className="text-zinc-500">
+          <tr className="border-b border-zinc-800">
+            <th className="py-2 pr-3 font-medium">국가</th>
+            <th className="py-2 pr-3 text-right font-medium">설치</th>
+            <th className="py-2 pr-3 text-right font-medium">
+              채널 앎 <span className="text-zinc-600">/설치</span>
+            </th>
+            <th className="py-2 pr-3 text-right font-medium">
+              첫 스폰 <span className="text-zinc-600">/설치</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.countryRows.map((r, i) => (
+            <tr
+              key={`${r.country ?? "null"}|${i}`}
+              className="border-b border-zinc-900/60 text-zinc-300"
+            >
+              <td className="py-2 pr-3 text-zinc-100">
+                {r.country ?? (
+                  <span
+                    className="text-zinc-500"
+                    title="GA4 행이 안 붙어 국가를 모른다. '해외' 가 아니라 '미상' 이다."
+                  >
+                    미상
+                  </span>
+                )}
+              </td>
+              <td className="py-2 pr-3 text-right tabular-nums">
+                {fmtInt(r.installs)}
+              </td>
+              <td className="py-2 pr-3 text-right">
+                <UnifiedRatioCell value={r.channelKnown} />
+              </td>
+              <td className="py-2 pr-3 text-right">
+                <UnifiedRatioCell value={r.spawned} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {data.countryRowsTruncated && (
+        <p className="mt-2 text-[11px] text-amber-300/80">
+          ★상위 {data.countryRows.length}개국만 보여 줍니다 — 잘렸다는 사실을
+          숨기지 않습니다.
+        </p>
       )}
     </div>
   );
@@ -5029,6 +5617,13 @@ function StreakRetentionView({ data }: { data: StreakRetention }) {
 export const CALLABLE_USER_DAILY = "getAdminUserDailySummary";
 export const CALLABLE_ACCOUNT_PROFILE = "getAdminAccountProfileSummary";
 export const CALLABLE_PURCHASE_SUMMARY = "getAdminPurchaseSummary";
+/**
+ * ★획득 탭의 유일한 읽기 경로(계획 §5 PR 2). 이 하나가 콜러블 8개를 대체한다.
+ *
+ * 서버가 아직 이 이름을 안 내보내면 **장애가 아니라 '연결 전'** 이다 — 매니페스트가
+ * 먼저 걸러 주고, 그동안 화면은 0 이 아니라 사유를 그린다.
+ */
+export const CALLABLE_INSTALL_UNIFIED = "getAdminInstallUnified";
 
 /**
  * analytics_purchase 요약 — ★"실매출 0" 과 "적재 전" 을 가르는 응답.
@@ -6191,6 +6786,13 @@ export default function AnalyticsPanel({
     loading: true,
     error: null,
   });
+  // ★① 획득 탭의 유일한 읽기 경로(계획 §5 PR 2). 이 하나가 콜러블 8개를
+  //   대체한다 — 화면이 GROUP BY 를 다시 하지 않게 하려고 서버에 둔 자리다.
+  const [unified, setUnified] = useState<Loaded<AcquisitionUnified>>({
+    data: null,
+    loading: true,
+    error: null,
+  });
   const [adSpendForm, setAdSpendForm] = useState<ManualAdSpendForm>(() => ({
     spendDate: todayKstDate(),
     platform: "google_ads",
@@ -6397,6 +6999,12 @@ export default function AnalyticsPanel({
         Record<string, never>,
         PurchaseSummary
       >(fns, CALLABLE_PURCHASE_SUMMARY);
+      // ★통합 뷰 읽기 경로. 뷰가 아직 안 섰거나 함수가 미배포면 **0 이 아니라
+      //   사유**가 온다(서버 state:"unavailable") — 화면은 그걸 그대로 그린다.
+      const callUnified = httpsCallable<
+        { days: number },
+        AcquisitionUnified
+      >(fns, CALLABLE_INSTALL_UNIFIED);
 
       setBiz((s) => ({ ...s, loading: true, error: null }));
       setUsage((s) => ({ ...s, loading: true, error: null }));
@@ -6422,6 +7030,12 @@ export default function AnalyticsPanel({
         notDeployed: false,
       }));
       setCac((s) => ({ ...s, loading: true, error: null }));
+      setUnified((s) => ({
+        ...s,
+        loading: true,
+        error: null,
+        notDeployed: false,
+      }));
       setAcctProfile((s) => ({
         ...s,
         loading: true,
@@ -6592,6 +7206,11 @@ export default function AnalyticsPanel({
       );
       runOptional(CALLABLE_PURCHASE_SUMMARY, () => callPurchase({}), (v) =>
         setPurchase(v)
+      );
+      runOptional(
+        CALLABLE_INSTALL_UNIFIED,
+        () => callUnified({ days: d }),
+        (v) => setUnified(v)
       );
     },
     [refreshCacSummary]
@@ -6792,7 +7411,12 @@ export default function AnalyticsPanel({
 
       <AnalyticsTabBar tab={tab} onChange={setTab} />
 
-      {/* ── ① 획득 — "어디서 오고, 얼마 쓰면 몇 명 오나" ────────────────── */}
+      {/* ── ① 획득 — "어디서 오고, 얼마 쓰면 몇 명 오나" ────────────────────
+          ★계획 v3/docs/admin-analytics-replan-2026-08-24.md §4-1 을 그대로
+            집행한다. 표 순서 = 결정하는 순서다.
+          ★모든 수치의 알갱이는 **설치 1행**(marblo_telemetry.v_install_unified)
+            이다. 화면은 GROUP BY 결과를 그리기만 하고 다시 세지 않는다 — 세는
+            코드가 여러 벌이 된 것이 계획 §0 이 진단한 병 그 자체다. */}
       {tab === "acquisition" && (
         <div
           id="analytics-panel-acquisition"
@@ -6802,13 +7426,184 @@ export default function AnalyticsPanel({
         >
           <AxisLimitNote
             notes={[
-              "소스·캠페인·광고비 축은 GA4 브리지가 붙어야 채워집니다. 아래 표에 없는 채널은 유입이 0 인 게 아니라 아직 적재되지 않은 것입니다 — 그래서 이 탭은 빈 표를 채우지 않고 '적재 전' 이라고 적습니다.",
-              "국가·채널 조인은 익명 GA4 client_id 링크백으로만 이뤄집니다. 조인이 안 된 설치는 (unknown) 으로 모이므로, 특정 국가 칸의 0 은 '유입이 없다' 가 아니라 '조인이 안 됐다' 일 수 있습니다.",
+              "★분모는 방문이 아니라 다운로드·설치입니다(#1200). 봇은 Electron 데스크톱을 내려받아 설치하고 실행하지 않으므로, 설치를 분모로 쓰는 순간 봇은 규칙 없이도 0 으로 셉니다. 방문 축에서 거른 '의심 유입' 은 삭제하지 않고 아래 방문 축 표에 따로 남깁니다.",
+              "★이 탭에는 축이 둘 있습니다 — 설치 축(통합 뷰)과 방문 축(GA4 브라우저). 두 표의 분모가 다르므로 위아래로 놓고 곱해서 읽지 마세요. 어느 표가 어느 축인지는 섹션 제목에 적혀 있습니다.",
+              "★설치 수는 사람 수가 아닙니다. 실측(2026-08-24)으로 설치 631행이 브라우저 5대에서 나왔습니다(재설치 루프). 그래서 상단에 전체 설치와 사람 추정치를 같이 둡니다(#1198 install_class).",
+              "설치 축의 모든 수치는 marblo_telemetry.v_install_unified 한 표에서 나옵니다 — 화면은 GROUP BY 만 하고 다시 세지 않습니다. 콜러블 이름은 getAdminInstallUnified 이고, 그게 아직 없으면 0 대신 '적재 전' 이라고 적습니다.",
             ]}
           />
 
+          {/* ── ★상단 3줄 — 분모를 화면 맨 위에 못 박는다 (계획 §4-1) ─── */}
           <div className="space-y-4">
-            <SectionHeader icon={Users} title="가입 유입" trust="green" />
+            <SectionHeader
+              icon={Database}
+              title="설치 · 채널 커버리지 · CAC (설치 축)"
+              trust={unified.data?.state === "ready" ? "yellow" : "unwired"}
+            >
+              {unified.data?.source && (
+                <span
+                  className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 text-[11px] text-zinc-500"
+                  title="이 탭의 모든 설치 축 수치가 나오는 단 하나의 표. 화면은 여기서 GROUP BY 만 합니다."
+                >
+                  {unified.data.source}
+                </span>
+              )}
+            </SectionHeader>
+            {unified.loading ? (
+              <LoadingBox />
+            ) : unified.error ? (
+              <ErrorBox msg={unified.error} />
+            ) : (
+              <AcquisitionHeadlineView unified={unified.data} cac={cac.data} />
+            )}
+            {/* ★차트를 새로 만들지 않았다 — #1211 이 넣은 공용
+                MultiSeriesChart(recharts) 를 그대로 쓴다. 라이브러리는
+                ChartFrame 뒤에 갇혀 있어 이 호출부는 계약(NamedSeries)만 안다.
+                ★state 를 **부르는 쪽이 정해서 준다**: 뷰가 없으면 'pending'
+                이라 0 선을 긋지 않는다(charts/types.ts 의 규약). */}
+            <Panel
+              title="일별 설치 추이 (외부 설치)"
+              note="firstRunAt 기준 · 채널을 아는 설치를 같은 축에 얹는다"
+            >
+              <MultiSeriesChart
+                title="일별 설치 추이"
+                description="외부 설치와, 그중 채널을 아는 설치"
+                surface="dark"
+                state={
+                  unified.data?.state === "ready"
+                    ? unified.data.installsByDay.length > 0
+                      ? "ready"
+                      : "empty"
+                    : "pending"
+                }
+                pendingLabel="통합 뷰(v_install_unified)가 아직 없습니다 — 0 을 그리지 않습니다."
+                emptyLabel="이 구간에 설치가 없습니다."
+                series={[
+                  {
+                    key: "installs",
+                    label: "설치(외부)",
+                    slot: 1,
+                    points: (unified.data?.installsByDay ?? []).map((d) => ({
+                      date: d.date,
+                      value: d.installs,
+                    })),
+                  },
+                  {
+                    key: "channelKnown",
+                    label: "채널을 아는 설치",
+                    slot: 3,
+                    points: (unified.data?.installsByDay ?? []).map((d) => ({
+                      date: d.date,
+                      value: d.channelKnown,
+                    })),
+                  },
+                ]}
+                format={fmtInt}
+                animationKey={days}
+              />
+            </Panel>
+          </div>
+
+          {/* ── 1. 채널별 통합표 — 캠페인이 실재하는 행만 ─────────────── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Globe}
+              title="채널별 획득 (소스 · 매체 · 캠페인 · 소재)"
+              trust={unified.data?.state === "ready" ? "yellow" : "unwired"}
+            />
+            {unified.loading ? (
+              <LoadingBox />
+            ) : unified.error ? (
+              // ★조회 실패는 '연결 전' 이 아니다. 두 말을 섞으면 고칠 사람이
+              //   기다리기만 한다.
+              <ErrorBox msg={unified.error} />
+            ) : (
+              <AcquisitionChannelTable data={unified.data} />
+            )}
+          </div>
+
+          {/* ── 2. ★채널 미상 사유표 — 이 페이지에서 가장 중요한 표 ────
+              1번 표가 비었을 때 "광고를 안 켰다" 인지 "조인이 깨졌다" 인지를
+              가르는 곳이 여기뿐이다. 두 답은 우리가 할 일이 정반대다. */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Unlink}
+              title="★채널 미상 사유 — '모른다' 와 '안다, 캠페인이 없었다'"
+              trust={unified.data?.state === "ready" ? "yellow" : "unwired"}
+            />
+            {unified.loading ? (
+              <LoadingBox />
+            ) : unified.error ? (
+              <ErrorBox msg={unified.error} />
+            ) : (
+              <ChannelMissingReasonTable data={unified.data} />
+            )}
+          </div>
+
+          {/* ── 3. 국가별 — 설치 축(통합 뷰) + 방문 축(GA4) 대조 ──────── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Globe}
+              title="국가별 획득 (설치 축)"
+              trust={unified.data?.state === "ready" ? "yellow" : "unwired"}
+            />
+            {unified.loading ? (
+              <LoadingBox />
+            ) : unified.error ? (
+              <ErrorBox msg={unified.error} />
+            ) : (
+              <AcquisitionCountryTable data={unified.data} />
+            )}
+
+            <SectionHeader
+              icon={Users}
+              title="방문 → 다운로드 (방문 축 · 설치 이전 단계)"
+              trust="yellow"
+            />
+            {/* ★방문·다운로드는 설치 **이전**이라 설치 알갱이로 접히지 않는다
+                (계획 §3-4). 그래서 이 표만 방문 축으로 남기고, 설치 이후 단계는
+                위 통합 뷰가 가져갔다 — 한 표에 두 축을 섞어 퍼널로 그리던 것이
+                이 화면의 오래된 병이었다. */}
+            {countryFunnel.loading ? (
+              <LoadingBox />
+            ) : countryFunnel.error ? (
+              <ErrorBox msg={countryFunnel.error} />
+            ) : countryFunnel.data ? (
+              <CountryFunnelView data={countryFunnel.data} />
+            ) : null}
+          </div>
+
+          {/* ── 4. 광고비 원장 × 채널 (#1193 수동 원장) ────────────────── */}
+          <div className="space-y-4">
+            <SectionHeader icon={Tag} title="광고비 원장 × 채널" trust="yellow" />
+            <Ga4BridgeFreshnessNote data={countryFunnel.data?.ga4Bridge} />
+            <ManualAdSpendInputPanel
+              form={adSpendForm}
+              saving={adSpendSaving}
+              status={adSpendStatus}
+              onChange={(patch) =>
+                setAdSpendForm((f) => ({
+                  ...f,
+                  ...patch,
+                  currency: "KRW",
+                }))
+              }
+              onSubmit={saveManualAdSpend}
+            />
+            {cac.loading ? (
+              <LoadingBox />
+            ) : cac.error ? (
+              <ErrorBox msg={cac.error} />
+            ) : (
+              <CacSummaryView data={cac.data} />
+            )}
+          </div>
+
+          {/* ── 5. 대기자·파운더 원장 (🟢 Firestore) ────────────────────
+              ★맨 아래다. 초록이라 믿을 만하지만 **광고 성과와 다른 축**이라
+                위에 두면 섞여 읽힌다(계획 §4-1 표5). */}
+          <div className="space-y-4">
+            <SectionHeader icon={UserCheck} title="대기자 · 파운더 원장" trust="green" />
             {biz.loading ? (
               <LoadingBox />
             ) : biz.error ? (
@@ -6851,55 +7646,6 @@ export default function AnalyticsPanel({
                 </div>
               </>
             ) : null}
-          </div>
-
-          {/* ── 유입국가·채널 퍼널 (🟡, 익명 GA4 client_id 축) ─────────────── */}
-          <div className="space-y-4">
-            <SectionHeader
-              icon={Globe}
-              title="유입국가·채널 퍼널 (방문→다운로드→설치→10분)"
-              trust="yellow"
-            />
-            {countryFunnel.loading ? (
-              <LoadingBox />
-            ) : countryFunnel.error ? (
-              <ErrorBox msg={countryFunnel.error} />
-            ) : countryFunnel.data ? (
-              <CountryFunnelView data={countryFunnel.data} />
-            ) : null}
-          </div>
-
-          {/* ── 소스·캠페인·CAC — GA4 브리지 + 수동 광고비 원장 ───────────── */}
-          <div className="space-y-4">
-            <SectionHeader icon={Globe} title="소스·캠페인·CAC" trust="yellow" />
-            <Ga4BridgeFreshnessNote data={countryFunnel.data?.ga4Bridge} />
-            <ManualAdSpendInputPanel
-              form={adSpendForm}
-              saving={adSpendSaving}
-              status={adSpendStatus}
-              onChange={(patch) =>
-                setAdSpendForm((f) => ({
-                  ...f,
-                  ...patch,
-                  currency: "KRW",
-                }))
-              }
-              onSubmit={saveManualAdSpend}
-            />
-            {cac.loading ? (
-              <LoadingBox />
-            ) : cac.error ? (
-              <ErrorBox msg={cac.error} />
-            ) : (
-              <CacSummaryView data={cac.data} />
-            )}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <PendingIngestion
-                title="획득 비용 회수 (채널별)"
-                waitingOn="ga4_first_touch_current(획득 채널) + analytics_purchase(결제 금액 이벤트) 적재"
-                willShow={["채널별 CAC 대비 회수 기간", "채널 × 코호트 LTV"]}
-              />
-            </div>
           </div>
         </div>
       )}
