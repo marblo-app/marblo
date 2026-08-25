@@ -525,10 +525,16 @@ test("100% 이하에서는 지금대로 퍼센트를 낸다 (과잉 방어 금�
   assert.match(half, /50\.0%/);
 });
 
-test("★네 탭 어디에도 100% 를 넘는 퍼센트가 없다 (화면 전체 방어선)", () => {
+test("★다섯 탭 어디에도 100% 를 넘는 퍼센트가 없다 (화면 전체 방어선)", () => {
   // 컴포넌트 단위 방어가 뚫려도 여기서 잡힌다. SSR 이라 콜러블 값은 없지만
   // 상수·기본값에서 만들어지는 퍼센트는 전부 지나간다.
-  for (const tab of ["acquisition", "activation", "retention", "revenue"] as const) {
+  for (const tab of [
+    "acquisition",
+    "activation",
+    "retention",
+    "revenue",
+    "operations",
+  ] as const) {
     const html = renderToStaticMarkup(<P.default initialTab={tab} />);
     assert.deepEqual(
       impossiblePercents(html),
@@ -664,8 +670,11 @@ test("기준선: 수익 탭은 Paddle 원장 공백의 0 을 '연속 결제 없�
   // ★그 칸의 0 은 '연속 결제가 없다' 가 아니라 '이 원장에 없다' 다.
   assert.match(html, /이 원장에 없다/);
   assert.match(html, /Toss billingCharges/);
-  // MRR·LTV 는 계산 소스가 없으므로 0 이 아니라 '적재 전' 이다.
-  assert.match(html, />적재 전</);
+  assert.match(html, /적재 전/);
+  assert.match(html, /진짜 0/);
+  assert.match(html, /미상/);
+  assert.match(html, /install_key_hmac/);
+  assert.doesNotMatch(html, /MRR · LTV · 코호트별 회수/);
 });
 
 test("기준선: 표가 없으면 ₩0 을 그리지 않고 '적재 전' 으로 둔다", () => {

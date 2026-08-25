@@ -1,5 +1,5 @@
 /**
- * ★어드민 분석 4탭의 정직성 규약을 **렌더된 HTML 바이트로** 확인한다.
+ * ★어드민 분석 5탭의 정직성 규약을 **렌더된 HTML 바이트로** 확인한다.
  *
  * 이 화면의 실패 모드는 버그가 아니라 오독이다 — 2명짜리 표본을 "50%" 로 크게
  * 띄우고, 소스가 없어서 비어 있는 칸에 0 을 그리는 것. 그래서 테스트도 "함수가
@@ -200,21 +200,22 @@ test("식별자 교체 경계는 구간 안에 있을 때만 선이 된다", () 
 
 // ── 탭 = 질문 ───────────────────────────────────────────────────────────────
 
-test("4탭이 각각 한 질문에 대응하고 tablist 로 노출된다", () => {
+test("5탭이 각각 한 질문에 대응하고 tablist 로 노출된다", () => {
   assert.deepEqual(
     P.ANALYTICS_TABS.map((t) => t.id),
-    ["acquisition", "activation", "retention", "revenue"]
+    ["acquisition", "activation", "retention", "revenue", "operations"]
   );
   const html = renderToStaticMarkup(
     <P.AnalyticsTabBar tab="retention" onChange={() => {}} />
   );
   assert.match(html, /role="tablist"/);
-  assert.equal((html.match(/role="tab"/g) ?? []).length, 4);
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 5);
   assert.match(
     html,
     /aria-selected="true"[^>]*aria-controls="analytics-panel-retention"/
   );
   assert.match(html, /남아서 계속 쓰나/);
+  assert.match(html, /배포·라우팅이 건강한가/);
 });
 
 // ── 리텐션/활성화 뷰 ────────────────────────────────────────────────────────
@@ -504,19 +505,20 @@ test("★아래 표의 최근 14일 스파크라인은 그대로다 (이미 좋�
   assert.match(html, /text-emerald-400/);
 });
 
-// ── 패널 전체가 실제로 서는가 (4탭 재배치 스모크) ──────────────────────────
+// ── 패널 전체가 실제로 서는가 (5탭 재배치 스모크) ──────────────────────────
 // 흉내낸 트리가 아니라 화면이 쓰는 그 컴포넌트를 SSR 로 세운다. useEffect 는
 // 서버 렌더에서 돌지 않으므로 콜러블은 나가지 않고, 초기 탭의 골격만 나온다.
 
-test("패널은 4탭 tablist 를 세우고 선택된 탭만 렌더한다", () => {
+test("패널은 5탭 tablist 를 세우고 선택된 탭만 렌더한다", () => {
   const html = renderToStaticMarkup(<P.default />);
   assert.match(html, /role="tablist"/);
-  assert.equal((html.match(/role="tab"/g) ?? []).length, 4);
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 5);
   // 기본 탭 = ① 획득. 나머지 탭 패널은 DOM 에 없다(숨김이 아니라 미렌더).
   assert.match(html, /id="analytics-panel-acquisition"/);
   assert.doesNotMatch(html, /id="analytics-panel-activation"/);
   assert.doesNotMatch(html, /id="analytics-panel-retention"/);
   assert.doesNotMatch(html, /id="analytics-panel-revenue"/);
+  assert.doesNotMatch(html, /id="analytics-panel-operations"/);
   // ★획득 탭은 자기 데이터가 어느 표에서 나오는지 화면에 적는다. 근거를 숨기면
   //   숫자가 틀렸을 때 어디를 봐야 하는지 아무도 모른다.
   assert.match(html, /v_install_unified/);
@@ -915,16 +917,20 @@ test("★활성화 탭은 통합 뷰 상단 3줄과 결정 순서만 렌더한�
 test("★콜러블 이름은 상수 한 곳에서만 나온다 (계약 이름 고정)", () => {
   // 백엔드가 다른 이름으로 내보내면 조용히 not-found 가 되고 화면은 영원히
   // '연결 전' 을 띄운다. 이름이 바뀌면 이 테스트가 먼저 빨개진다.
-  assert.equal(P.CALLABLE_USER_DAILY, "getAdminUserDailySummary");
-  assert.equal(P.CALLABLE_ACCOUNT_PROFILE, "getAdminAccountProfileSummary");
+  assert.equal(P.CALLABLE_INSTALL_UNIFIED, "getAdminInstallUnified");
 });
 
-test("★수익 탭은 null 을 0 으로 그리지 않는다 (mrr_usd · ltv_usd 미기입)", () => {
+test("★수익 탭은 적재 전·진짜 0·미상을 세로로 가른다", () => {
   const html = renderToStaticMarkup(<P.default initialTab="revenue" />);
   assert.match(html, /id="analytics-panel-revenue"/);
-  assert.match(html, /analytics_purchase/);
+  assert.match(html, /getAdminInstallUnified/);
+  assert.match(html, /원장은 정본/);
   assert.match(html, /적재 전/);
-  assert.match(html, /null 은 0 이 아니라 미기입/);
+  assert.match(html, /진짜 0/);
+  assert.match(html, /미상/);
+  assert.match(html, /install_key_hmac/);
+  assert.match(html, /founder_grant 33/);
+  assert.doesNotMatch(html, /MRR · LTV · 코호트별 회수/);
 });
 
 test("★획득 탭은 표 순서 = 결정 순서로 선다 (계획 §4-1)", () => {
@@ -1014,7 +1020,8 @@ test("initialTab 은 선택된 탭만 렌더한다는 기존 규약을 깨지 �
   assert.doesNotMatch(html, /id="analytics-panel-acquisition"/);
   assert.doesNotMatch(html, /id="analytics-panel-activation"/);
   assert.doesNotMatch(html, /id="analytics-panel-retention"/);
-  assert.equal((html.match(/role="tab"/g) ?? []).length, 4);
+  assert.doesNotMatch(html, /id="analytics-panel-operations"/);
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 5);
   assert.match(
     html,
     /aria-selected="true"[^>]*aria-controls="analytics-panel-revenue"/
@@ -1819,4 +1826,77 @@ test("★사람 축 대조는 설치 단일값 대신 사람 추정 범위를 �
 
 test("★콜러블 이름 계약 — 통합 뷰 읽기 경로", () => {
   assert.equal(P.CALLABLE_INSTALL_UNIFIED, "getAdminInstallUnified");
+});
+
+test("★수익 분류는 외부 1건과 grant/internal 을 섞지 않는다", () => {
+  const revenue: import("./AnalyticsPanel").UnifiedRevenueSummary = {
+    ledger: {
+      externalKrw: 19000,
+      externalRows: 1,
+      currency: "KRW",
+      missingReason: null,
+    },
+    ga4: {
+      revenueKrw: 19000,
+      purchaseEvents: 1,
+      currency: "KRW",
+      missingReason: null,
+    },
+    classification: {
+      totalRows: 35,
+      externalPaidRows: 1,
+      externalPaidKrw: 19000,
+      externalProvider: "portone",
+      internalPaidRows: 1,
+      grantRows: 33,
+      unclassifiedRows: 0,
+      amountUnknownRows: 0,
+    },
+    installToPurchase: null,
+    missingReasonRows: [
+      {
+        reason: "no_install_key_hmac",
+        kind: "unknown",
+        label: "미상 — install_key_hmac 없음",
+        action: "analytics_user_daily.install_key_hmac 백필",
+        installs: 608,
+      },
+      {
+        reason: null,
+        kind: "true_zero",
+        label: "진짜 0 — 결제 없음",
+        action: "결제 축을 알고 결제가 없는 설치",
+        installs: 3,
+      },
+      {
+        reason: "not_deployed",
+        kind: "pre_ingestion",
+        label: "적재 전 — 배선 대기",
+        action: "getAdminInstallUnified revenue 응답 확장",
+        installs: 2,
+      },
+    ],
+    channelRows: [],
+    channelRowsTruncated: false,
+    revenueDivergenceReason: null,
+    notes: [],
+  };
+  const data = unifiedFixture({ revenue });
+  const classification = renderToStaticMarkup(
+    <P.UnifiedRevenueClassificationView data={data} />
+  );
+  assert.match(classification, /외부 결제/);
+  assert.match(classification, /₩19,000/);
+  assert.match(classification, /1건 · portone/);
+  assert.match(classification, /founder_grant/);
+  assert.match(classification, />33</);
+  assert.match(classification, /내부테스트/);
+
+  const reasons = renderToStaticMarkup(
+    <P.UnifiedRevenueMissingReasonTable data={data} />
+  );
+  assert.match(reasons, /적재 전/);
+  assert.match(reasons, /진짜 0/);
+  assert.match(reasons, /미상/);
+  assert.match(reasons, /install_key_hmac/);
 });

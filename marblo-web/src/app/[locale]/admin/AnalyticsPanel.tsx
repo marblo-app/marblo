@@ -1014,6 +1014,11 @@ export type UnifiedRatio = {
 
 /** 사유가 "모른다" 인가 "안다, 없었다" 인가. 이 구분이 채널 판단을 뒤집는다. */
 export type UnifiedReasonKind = "unknown" | "true_zero" | "known";
+export type UnifiedRevenueReasonKind =
+  | "pre_ingestion"
+  | "unknown"
+  | "true_zero"
+  | "known";
 
 export type InstallHygiene = {
   installsTotal: number;
@@ -1128,6 +1133,56 @@ export type UnifiedRetentionSummary = {
   zombie: UnifiedRetentionZombieSummary | null;
 };
 
+export type UnifiedRevenueMissingReasonRow = {
+  reason: string | null;
+  kind: UnifiedRevenueReasonKind;
+  label: string;
+  action: string;
+  installs: number;
+};
+
+export type UnifiedRevenueChannelRow = {
+  source: string | null;
+  medium: string | null;
+  campaign: string | null;
+  installs: number;
+  purchasers: number;
+  ledgerRevenueKrw: number | null;
+  ga4RevenueKrw: number | null;
+  revenueDivergenceReason: string | null;
+};
+
+export type UnifiedRevenueSummary = {
+  ledger: {
+    externalKrw: number | null;
+    externalRows: number;
+    currency: string | null;
+    missingReason: string | null;
+  };
+  ga4: {
+    revenueKrw: number | null;
+    purchaseEvents: number;
+    currency: string | null;
+    missingReason: string | null;
+  };
+  classification: {
+    totalRows: number;
+    externalPaidRows: number;
+    externalPaidKrw: number | null;
+    externalProvider: string | null;
+    internalPaidRows: number;
+    grantRows: number;
+    unclassifiedRows: number;
+    amountUnknownRows: number;
+  };
+  installToPurchase: UnifiedRatio | null;
+  missingReasonRows: UnifiedRevenueMissingReasonRow[];
+  channelRows: UnifiedRevenueChannelRow[];
+  channelRowsTruncated: boolean;
+  revenueDivergenceReason: string | null;
+  notes: string[];
+};
+
 export type AcquisitionUnified = {
   generatedAt: string;
   /** ★`unavailable` 일 때 0 을 그리지 않는다. */
@@ -1149,6 +1204,7 @@ export type AcquisitionUnified = {
   installsByDay: Array<{ date: string; installs: number; channelKnown: number }>;
   activation?: UnifiedActivationSummary;
   retention?: UnifiedRetentionSummary;
+  revenue?: UnifiedRevenueSummary;
   /** 뷰에 아직 없어 **화면이 대신 계산하지 않는** 파생 컬럼들(계획 §3-3). */
   pendingColumns: Array<{ column: string; blocks: string }>;
   notes: string[];
@@ -3007,14 +3063,15 @@ export function PersonAxisCoverageNote({
   );
 }
 
-// ── ★4탭 구조 ──────────────────────────────────────────────────────────────
+// ── ★5탭 구조 ──────────────────────────────────────────────────────────────
 // 지금까지 이 화면은 지표가 시간순으로 쌓여 있어 "무엇부터 봐야 하나" 가 없었다.
 // 탭 하나 = 질문 하나로 세운다. 탭은 새 페이지가 아니라 기존 섹션의 재배치다.
 export type AnalyticsTab =
   | "acquisition"
   | "activation"
   | "retention"
-  | "revenue";
+  | "revenue"
+  | "operations";
 
 export const ANALYTICS_TABS: {
   id: AnalyticsTab;
@@ -3045,6 +3102,12 @@ export const ANALYTICS_TABS: {
     label: "④ 수익",
     question: "쓰는 사람이 돈을 내나",
     icon: CreditCard,
+  },
+  {
+    id: "operations",
+    label: "⑤ 운영",
+    question: "배포·라우팅이 건강한가",
+    icon: Cpu,
   },
 ];
 
@@ -4786,6 +4849,397 @@ export function UnifiedPersonAxisComparison({
         </span>
         .
       </p>
+    </div>
+  );
+}
+
+export function UnifiedRevenueHeadlineView({
+  data,
+  business,
+}: {
+  data: AcquisitionUnified | null;
+  business: BusinessSummary | null;
+}) {
+  const revenue = data?.state === "ready" ? data.revenue ?? null : null;
+  if (!data || data.state !== "ready" || !revenue) {
+    return (
+      <AcquisitionUnavailable
+        data={data}
+        title="수익 헤드라인"
+        willShow={[
+          "외부 매출(누적) — 원장 정본",
+          "GA4 purchase 매출 — 채널 귀속 보조",
+          "설치→결제 전환 — 결제 축을 아는 설치만 분모",
+        ]}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <StatCard
+          label="외부 매출 (원장)"
+          value={
+            revenue.ledger.externalKrw == null
+              ? "—"
+              : fmtKrw(revenue.ledger.externalKrw)
+          }
+          sub={
+            revenue.ledger.missingReason
+              ? `미상: ${revenue.ledger.missingReason}`
+              : `${fmtInt(revenue.ledger.externalRows)}건 · ${
+                  revenue.ledger.currency ?? "통화 미상"
+                }`
+          }
+          accent={
+            revenue.ledger.externalKrw == null
+              ? undefined
+              : revenue.ledger.externalKrw > 0
+              ? STATUS_GOOD
+              : undefined
+          }
+        />
+        <StatCard
+          label="GA4 매출 (보조)"
+          value={
+            revenue.ga4.revenueKrw == null
+              ? "—"
+              : fmtKrw(revenue.ga4.revenueKrw)
+          }
+          sub={
+            revenue.ga4.missingReason
+              ? `미상: ${revenue.ga4.missingReason}`
+              : `${fmtInt(revenue.ga4.purchaseEvents)} purchase · ${
+                  revenue.ga4.currency ?? "통화 미상"
+                }`
+          }
+          accent={
+            revenue.revenueDivergenceReason ? STATUS_WARN : undefined
+          }
+        />
+        {revenue.installToPurchase ? (
+          <RatioCard
+            label="설치 → 결제 전환"
+            numerator={revenue.installToPurchase.numerator}
+            denominator={revenue.installToPurchase.denominator}
+            sub="분모 = 결제 축을 아는 설치"
+          />
+        ) : (
+          <StatCard
+            label="설치 → 결제 전환"
+            value="—"
+            sub="설치↔사람 다리 미상 · 0 으로 그리지 않음"
+          />
+        )}
+      </div>
+
+      {business ? (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <StatCard
+            label="유료 구독자"
+            value={fmtInt(business.subscriptions.paidProActive)}
+            sub={`Firestore 원장 · active ${fmtInt(
+              business.subscriptions.activeCurrent
+            )}`}
+            accent={SERIES}
+          />
+          <StatCard
+            label="무료 부여"
+            value={fmtInt(business.subscriptions.founderGrantActive)}
+            sub="founderGrant · 매출 아님"
+          />
+          <StatCard
+            label="연체·이탈"
+            value={`${fmtInt(business.subscriptions.pastDue)} / ${fmtInt(
+              business.subscriptions.churnedInWindow
+            )}`}
+            sub={`past_due / churn · ${business.rangeDays}일`}
+            accent={
+              business.subscriptions.pastDue +
+                business.subscriptions.churnedInWindow >
+              0
+                ? STATUS_WARN
+                : undefined
+            }
+          />
+        </div>
+      ) : null}
+
+      {revenue.revenueDivergenceReason ? (
+        <p className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-xs leading-relaxed text-amber-200">
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            원장과 GA4 매출이 갈립니다: {revenue.revenueDivergenceReason}. 원장은
+            정본이고 GA4 는 광고차단·쿠키거부로 샐 수 있는 보조 경로입니다.
+          </span>
+        </p>
+      ) : (
+        <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-500">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            원장 매출과 GA4 이커머스를 둘 다 표시합니다. 값이 갈리면 화면에서
+            하나를 고르지 않고 대조 사유를 함께 둡니다.
+          </span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function UnifiedRevenueClassificationView({
+  data,
+}: {
+  data: AcquisitionUnified | null;
+}) {
+  const revenue = data?.state === "ready" ? data.revenue ?? null : null;
+  if (!data || data.state !== "ready" || !revenue) {
+    return (
+      <AcquisitionUnavailable
+        data={data}
+        title="실매출 · 결제 분류"
+        willShow={[
+          "외부 결제 1건(19,000원, portone)",
+          "founder_grant 33건 · 내부테스트 1건",
+          "금액 미상 행 — 0 으로 접지 않음",
+        ]}
+      />
+    );
+  }
+  const c = revenue.classification;
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+        <StatCard
+          label="외부 결제"
+          value={
+            c.externalPaidKrw == null ? "—" : fmtKrw(c.externalPaidKrw)
+          }
+          sub={`${fmtInt(c.externalPaidRows)}건 · ${
+            c.externalProvider ?? "provider 미상"
+          }`}
+          accent={c.externalPaidRows > 0 ? STATUS_GOOD : undefined}
+        />
+        <StatCard
+          label="founder_grant"
+          value={fmtInt(c.grantRows)}
+          sub="무상 부여 · 매출 아님"
+        />
+        <StatCard
+          label="내부테스트"
+          value={fmtInt(c.internalPaidRows)}
+          sub="내부·운영자 결제 · 매출 제외"
+        />
+        <StatCard
+          label="미분류"
+          value={fmtInt(c.unclassifiedRows)}
+          sub="account_class 판정 전"
+          accent={c.unclassifiedRows > 0 ? STATUS_WARN : undefined}
+        />
+        <StatCard
+          label="금액 미상"
+          value={fmtInt(c.amountUnknownRows)}
+          sub={`원장 총 ${fmtInt(c.totalRows)}행 · 0 아님`}
+          accent={c.amountUnknownRows > 0 ? STATUS_WARN : undefined}
+        />
+      </div>
+      <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-500">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          원장 35행은 founder_grant 33 · 내부테스트 1 · 외부 1로 갈라 읽습니다.
+          외부 1건은 실제 매출이고, founder_grant 와 내부 결제는 매출 합계에서
+          제외하되 숨기지 않습니다.
+        </span>
+      </p>
+    </div>
+  );
+}
+
+export function UnifiedRevenueMissingReasonTable({
+  data,
+}: {
+  data: AcquisitionUnified | null;
+}) {
+  const revenue = data?.state === "ready" ? data.revenue ?? null : null;
+  if (!data || data.state !== "ready" || !revenue) {
+    return (
+      <AcquisitionUnavailable
+        data={data}
+        title="결제 축 미상 사유"
+        willShow={[
+          "적재 전 — 배선이 아직 없음",
+          "진짜 0 — 결제 축을 알고 결제가 없음",
+          "미상 — analytics_user_daily.install_key_hmac 다리 없음",
+        ]}
+      />
+    );
+  }
+
+  const totals = revenue.missingReasonRows.reduce(
+    (acc, row) => {
+      acc[row.kind] += row.installs;
+      return acc;
+    },
+    { pre_ingestion: 0, unknown: 0, true_zero: 0, known: 0 }
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <StatCard
+          label="적재 전"
+          value={fmtInt(totals.pre_ingestion)}
+          sub="배선이 아직 안 됨"
+          accent={totals.pre_ingestion > 0 ? STATUS_WARN : undefined}
+        />
+        <StatCard
+          label="진짜 0"
+          value={fmtInt(totals.true_zero)}
+          sub="결제 축을 알고 결제가 없음"
+          accent={totals.true_zero > 0 ? STATUS_GOOD : undefined}
+        />
+        <StatCard
+          label="미상"
+          value={fmtInt(totals.unknown)}
+          sub="설치↔사람 다리 없음 · 0 아님"
+          accent={totals.unknown > 0 ? STATUS_WARN : undefined}
+        />
+      </div>
+
+      {revenue.missingReasonRows.length === 0 ? (
+        <EmptyState label="결제 축 사유 행이 없습니다 — 비었다고 0 으로 그리지 않습니다." />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="text-zinc-500">
+              <tr className="border-b border-zinc-800">
+                <th className="py-2 pr-3 font-medium">구분</th>
+                <th className="py-2 pr-3 font-medium">사유</th>
+                <th className="py-2 pr-3 text-right font-medium">설치</th>
+                <th className="py-2 font-medium">다음 행동</th>
+              </tr>
+            </thead>
+            <tbody>
+              {revenue.missingReasonRows.map((row, i) => (
+                <tr
+                  key={`${row.kind}-${row.reason ?? "null"}-${i}`}
+                  className="border-b border-zinc-900/60 text-zinc-300"
+                >
+                  <td className="py-2 pr-3">
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                        row.kind === "true_zero"
+                          ? "bg-emerald-950/40 text-emerald-300"
+                          : row.kind === "known"
+                          ? "bg-zinc-800 text-zinc-300"
+                          : "bg-amber-950/40 text-amber-200"
+                      }`}
+                    >
+                      {row.kind === "pre_ingestion"
+                        ? "적재 전"
+                        : row.kind === "true_zero"
+                        ? "진짜 0"
+                        : row.kind === "known"
+                        ? "알려짐"
+                        : "미상"}
+                    </span>
+                  </td>
+                  <td className="py-2 pr-3 text-zinc-100">{row.label}</td>
+                  <td className="py-2 pr-3 text-right tabular-nums text-zinc-100">
+                    {fmtInt(row.installs)}
+                  </td>
+                  <td className="py-2 text-zinc-500">{row.action}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-xs leading-relaxed text-amber-200">
+        <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          `analytics_user_daily.install_key_hmac` 가 NULL 인 행은 매출 0이 아니라
+          설치에 결제를 붙일 수 없는 미상입니다. 이 칸을 0으로 그리면 “매출이
+          없다”로 읽힙니다.
+        </span>
+      </p>
+    </div>
+  );
+}
+
+export function UnifiedRevenueChannelTable({
+  data,
+}: {
+  data: AcquisitionUnified | null;
+}) {
+  const revenue = data?.state === "ready" ? data.revenue ?? null : null;
+  if (!data || data.state !== "ready" || !revenue) {
+    return (
+      <AcquisitionUnavailable
+        data={data}
+        title="채널별 매출"
+        willShow={[
+          "채널 × 결제자 × 원장 매출",
+          "채널 × GA4 purchase 매출",
+          "원장↔GA4 대조 사유",
+        ]}
+      />
+    );
+  }
+  if (revenue.channelRows.length === 0) {
+    return (
+      <EmptyState label="채널에 귀속된 매출 행이 없습니다 — 결제 축 미상 사유표를 먼저 보세요." />
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-xs">
+        <thead className="text-zinc-500">
+          <tr className="border-b border-zinc-800">
+            <th className="py-2 pr-3 font-medium">소스 / 매체</th>
+            <th className="py-2 pr-3 font-medium">캠페인</th>
+            <th className="py-2 pr-3 text-right font-medium">설치</th>
+            <th className="py-2 pr-3 text-right font-medium">결제자</th>
+            <th className="py-2 pr-3 text-right font-medium">원장 매출</th>
+            <th className="py-2 pr-3 text-right font-medium">GA4 매출</th>
+            <th className="py-2 font-medium">대조</th>
+          </tr>
+        </thead>
+        <tbody>
+          {revenue.channelRows.map((row, i) => (
+            <tr
+              key={`${row.source}|${row.medium}|${row.campaign}|${i}`}
+              className="border-b border-zinc-900/60 text-zinc-300"
+            >
+              <td className="py-2 pr-3 text-zinc-100">
+                {row.source ?? "—"} / {row.medium ?? "—"}
+              </td>
+              <td className="py-2 pr-3">{row.campaign ?? "—"}</td>
+              <td className="py-2 pr-3 text-right tabular-nums">
+                {fmtInt(row.installs)}
+              </td>
+              <td className="py-2 pr-3 text-right tabular-nums">
+                {fmtInt(row.purchasers)}
+              </td>
+              <td className="py-2 pr-3 text-right tabular-nums text-zinc-100">
+                {row.ledgerRevenueKrw == null ? "—" : fmtKrw(row.ledgerRevenueKrw)}
+              </td>
+              <td className="py-2 pr-3 text-right tabular-nums text-zinc-100">
+                {row.ga4RevenueKrw == null ? "—" : fmtKrw(row.ga4RevenueKrw)}
+              </td>
+              <td className="py-2 text-zinc-500">
+                {row.revenueDivergenceReason ?? "일치 또는 대조 불필요"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {revenue.channelRowsTruncated && (
+        <p className="mt-2 text-[11px] text-amber-300/80">
+          상위 {revenue.channelRows.length}행만 표시합니다.
+        </p>
+      )}
     </div>
   );
 }
@@ -7299,6 +7753,359 @@ function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
   );
 }
 
+function OperationsUsageView({
+  usage,
+  kpi,
+  days,
+  onDrill,
+}: {
+  usage: UsageSummary;
+  kpi: KpiCockpit | null;
+  days: number;
+  onDrill: (req: DrilldownRequest) => void;
+}) {
+  const reuse = kpi?.reuse ?? null;
+  const spawn = kpi?.spawnHealth ?? null;
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard
+          label="옵트인 표본"
+          value={fmtInt(usage.sampleClientCount)}
+          sub={`clientId · ${usage.rangeDays}일`}
+        />
+        <StatCard
+          label="WAU"
+          value={fmtInt(usage.wau)}
+          sub="events 옵트인 표본"
+        />
+        <StatCard
+          label="태스크 성공률"
+          value={fmtPct(usage.tasks.successRate)}
+          sub={`${fmtInt(usage.tasks.succeeded)} / ${fmtInt(
+            usage.tasks.total
+          )}`}
+          accent={
+            usage.tasks.successRate >= 0.7
+              ? STATUS_GOOD
+              : usage.tasks.successRate >= 0.4
+              ? STATUS_WARN
+              : STATUS_CRIT
+          }
+        />
+        <StatCard
+          label="평균 태스크 시간"
+          value={fmtDuration(usage.tasks.avgDurationMs)}
+          sub="task_outcomes · clientId 축"
+        />
+      </div>
+
+      <Panel
+        title="DAU · 스폰 추이"
+        note="events 옵트인 clientId 축. 사업 판단이 아니라 이상 감지용입니다."
+      >
+        <MultiSeriesChart
+          title="DAU · 스폰 추이"
+          description="일별 고유 클라이언트와 스폰 수"
+          surface="dark"
+          series={[
+            {
+              key: "dau",
+              label: "DAU",
+              slot: 1,
+              drillScopeKey: "usage:day",
+              points: usage.activeByDay.map((d) => ({
+                date: d.date,
+                value: d.dau,
+              })),
+            },
+            {
+              key: "spawns",
+              label: "스폰",
+              slot: 3,
+              drillScopeKey: "spawn:day",
+              points: usage.spawnsByDay.map((d) => ({
+                date: d.date,
+                value: d.count,
+              })),
+            },
+          ]}
+          format={fmtInt}
+          animationKey={days}
+          emptyLabel="이 구간에 옵트인 사용 이벤트가 없습니다."
+          onDrill={(t) => {
+            const scope =
+              t.scopeKey === "spawn:day" ? "spawn:day" : "usage:day";
+            onDrill({ scope, date: t.date, days });
+          }}
+        />
+      </Panel>
+
+      {reuse || spawn ? (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {reuse ? (
+            <>
+              <StatCard
+                label="주간 활성 프로젝트"
+                value={fmtInt(reuse.weeklyActiveProjects)}
+                sub="최근 7일 distinct projectId"
+              />
+              <StatCard
+                label="주간 완료 티켓"
+                value={fmtInt(reuse.weeklyCompletedTasks)}
+                sub="최근 7일 task:completed"
+              />
+              <StatCard
+                label="2번째 세션"
+                value={
+                  reuse.secondSessionRate == null
+                    ? "—"
+                    : fmtPct(reuse.secondSessionRate)
+                }
+                sub={`${fmtInt(reuse.secondSessionClients)} / ${fmtInt(
+                  reuse.signupBase
+                )}`}
+              />
+              <StatCard
+                label="DAU/WAU 끈적임"
+                value={
+                  reuse.stickiness == null ? "—" : fmtPct(reuse.stickiness)
+                }
+                sub={`평균 DAU ${fmtInt(reuse.avgDau)} · WAU ${fmtInt(
+                  reuse.wau
+                )}`}
+              />
+            </>
+          ) : null}
+          {spawn ? (
+            <>
+              <StatCard
+                label="스폰 성공률"
+                value={
+                  spawn.successRate == null ? "—" : fmtPct(spawn.successRate)
+                }
+                sub={`완료 ${fmtInt(spawn.completed)} vs 크래시 ${fmtInt(
+                  spawn.crashed
+                )}`}
+              />
+              <StatCard
+                label="크래시율"
+                value={spawn.crashRate == null ? "—" : fmtPct(spawn.crashRate)}
+                sub={`크래시 ${fmtInt(spawn.crashed)} / 스폰 ${fmtInt(
+                  spawn.spawned
+                )}`}
+                accent={
+                  spawn.crashRate != null && spawn.crashRate > 0
+                    ? STATUS_CRIT
+                    : undefined
+                }
+              />
+            </>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Panel
+          title="상위 이벤트"
+          note={`분포 렌즈: ${usage.metricMode === "clients" ? "고유 사용자" : "이벤트 수"}`}
+        >
+          <BarList
+            data={usage.topEvents.map((r) => ({ key: r.key, value: r.count }))}
+            maxRows={10}
+            emptyLabel="이벤트 데이터가 없습니다."
+            onDrill={(key) => onDrill({ scope: "segment:event", key, days })}
+          />
+        </Panel>
+        <Panel title="스폰 — 역할별" note="agent:spawned · role">
+          <BarList
+            data={usage.spawnsByRole.map((r) => ({
+              key: r.key,
+              value: r.count,
+            }))}
+            color={SERIES_2}
+            maxRows={10}
+            emptyLabel="역할별 스폰 데이터가 없습니다."
+            onDrill={(key) => onDrill({ scope: "segment:role", key, days })}
+          />
+        </Panel>
+        <Panel title="스폰 — 모델별" note="agent:spawned · model">
+          <BarList
+            data={usage.spawnsByModel.map((r) => ({
+              key: r.key,
+              value: r.count,
+            }))}
+            color={SERIES}
+            maxRows={10}
+            emptyLabel="모델별 스폰 데이터가 없습니다."
+            onDrill={(key) => onDrill({ scope: "segment:model", key, days })}
+          />
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function OperationsModelView({
+  model,
+  modelView,
+  setModelView,
+  days,
+  onDrill,
+}: {
+  model: ModelSummary;
+  modelView: "overview" | "routing";
+  setModelView: (view: "overview" | "routing") => void;
+  days: number;
+  onDrill: (req: DrilldownRequest) => void;
+}) {
+  const costByModel = model.costByModel.map((r) => ({
+    key: r.model,
+    value: r.cost,
+  }));
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs leading-relaxed text-zinc-500">
+          비용은 cost_logs 의 Firebase 계정 축(28자)이고, 성공률·라우팅은
+          events/task_outcomes 의 익명 clientId 축(36자)입니다. 서로 나눠서
+          ARPU나 ROI를 만들지 않습니다.
+        </p>
+        <div className="inline-flex overflow-hidden rounded-lg border border-zinc-700">
+          {(
+            [
+              ["overview", "비용·성공"],
+              ["routing", "라우팅"],
+            ] as const
+          ).map(([view, label]) => (
+            <button
+              key={view}
+              type="button"
+              onClick={() => setModelView(view)}
+              aria-pressed={modelView === view}
+              className={`px-3 py-1.5 text-xs transition ${
+                modelView === view
+                  ? "bg-indigo-600 text-white"
+                  : "bg-zinc-950 text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {modelView === "overview" ? (
+        <>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Panel title="모델별 비용" note="cost_logs 계정 축">
+              <BarList
+                data={costByModel}
+                color={SERIES}
+                maxRows={12}
+                emptyLabel="모델별 비용 데이터가 없습니다."
+                onDrill={(key) => onDrill({ scope: "segment:model", key, days })}
+              />
+            </Panel>
+            <Panel title="일별 비용" note="cost_logs · USD">
+              <LineChart
+                data={model.costByDay.map((d) => ({
+                  date: d.date,
+                  value: d.cost,
+                }))}
+                color={SERIES_2}
+                format={fmtCost}
+                emptyLabel="일별 비용 데이터가 없습니다."
+                onDrill={(date) => onDrill({ scope: "cost:day", date, days })}
+              />
+            </Panel>
+          </div>
+
+          {model.costByDayModel ? (
+            <Panel
+              title="일별 × 모델 비용"
+              note={`상위 ${model.costByDayModel.models.length}개 모델 · 기타 ${fmtInt(
+                model.costByDayModel.truncatedModels
+              )}개 절단`}
+            >
+              <StackedBarChart
+                dates={model.costByDayModel.dates}
+                series={model.costByDayModel.models.map((m, i) => ({
+                  key: m.model,
+                  values: model.costByDayModel?.matrix[i] ?? [],
+                }))}
+                format={fmtCost}
+                emptyLabel="일별 × 모델 비용 데이터가 없습니다."
+                onDrill={(date) => onDrill({ scope: "cost:day", date, days })}
+              />
+            </Panel>
+          ) : null}
+
+          <Panel
+            title="모델 × 역할 성공률·효율"
+            note="성공률은 task_outcomes/events 축, 비용은 cost_logs 축 — 같은 userId 문자열이어도 공간이 다릅니다."
+          >
+            <ModelRoleTable
+              rows={model.modelRoleStats}
+              onDrill={(scope, key) => onDrill({ scope, key, days })}
+            />
+          </Panel>
+
+          <Panel title="모델별 Outcome" note="task_outcomes · 운영 진단용">
+            <OutcomeByModelTable rows={model.outcomeByModel} />
+          </Panel>
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <Panel title="선택 모델" note="dispatch:decision selectedModel">
+              <BarList
+                data={model.routing.bySelectedModel.map((r) => ({
+                  key: r.key,
+                  value: r.count,
+                }))}
+                emptyLabel="선택 모델 데이터가 없습니다."
+              />
+            </Panel>
+            <Panel title="결정 사유" note="dispatch:decision reason">
+              <BarList
+                data={model.routing.byDecisionReason.map((r) => ({
+                  key: r.key,
+                  value: r.count,
+                }))}
+                color={SERIES_2}
+                emptyLabel="결정 사유 데이터가 없습니다."
+              />
+            </Panel>
+            <Panel title="재사용 vs 스폰" note="라우터 경로">
+              <BarList
+                data={model.routing.byReuseVsSpawn.map((r) => ({
+                  key: r.key,
+                  value: r.count,
+                }))}
+                color={STATUS_WARN}
+                emptyLabel="라우터 경로 데이터가 없습니다."
+              />
+            </Panel>
+          </div>
+          <Panel title="모델 선정 모드" note="수동/자동/기본값 분포">
+            <BarList
+              data={model.routing.byModelSelectionMode.map((r) => ({
+                key: r.key,
+                value: r.count,
+              }))}
+              emptyLabel="모델 선정 모드 데이터가 없습니다."
+            />
+          </Panel>
+          <Panel title="매칭점수 분포" note="내부 라우팅 디버그">
+            <RoutingScoreTable rows={model.routing.scoreBuckets} />
+          </Panel>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function AnalyticsPanel({
   /**
    * 처음 열릴 탭. 기본은 ① 획득이고 화면에는 이 prop 을 주는 자리가 없다 —
@@ -7351,46 +8158,7 @@ export default function AnalyticsPanel({
     loading: true,
     error: null,
   });
-  const [retention, setRetention] = useState<Loaded<RetentionCohorts>>({
-    data: null,
-    loading: true,
-    error: null,
-  });
-  const [streak, setStreak] = useState<Loaded<StreakRetention>>({
-    data: null,
-    loading: true,
-    error: null,
-  });
   const [countryFunnel, setCountryFunnel] = useState<Loaded<CountryFunnel>>({
-    data: null,
-    loading: true,
-    error: null,
-  });
-  // ★설치축 리텐션 요약. 콜러블은 이미 서버에 있었는데(getAdminInstallRetentionSummary)
-  //   화면이 한 번도 부르지 않아 파생표가 매일 채워지기만 하고 아무도 안 봤다.
-  const [installRet, setInstallRet] = useState<Loaded<InstallRetentionSummary>>(
-    {
-      data: null,
-      loading: true,
-      error: null,
-    }
-  );
-  // ★아직 서버에 없는 콜러블 둘. 지금 호출까지 걸어 두면 백엔드가 배포되는
-  //   순간 프론트 변경 없이 값이 들어온다 — 그때까지는 not-found 를 장애가
-  //   아니라 '연결 전' 으로 접는다.
-  const [userDaily, setUserDaily] = useState<Loaded<UserDailySummary>>({
-    data: null,
-    loading: true,
-    error: null,
-  });
-  const [acctProfile, setAcctProfile] = useState<Loaded<AccountProfileSummary>>(
-    {
-      data: null,
-      loading: true,
-      error: null,
-    }
-  );
-  const [purchase, setPurchase] = useState<Loaded<PurchaseSummary>>({
     data: null,
     loading: true,
     error: null,
@@ -7578,41 +8346,10 @@ export default function AnalyticsPanel({
         { days: number; includeAdmin: boolean },
         BetaSegmentUsage
       >(fns, "getAdminBetaSegmentUsage");
-      const callRetention = httpsCallable<
-        { days: number; includeAdmin: boolean },
-        RetentionCohorts
-      >(fns, "getAdminRetentionCohorts");
-      const callStreak = httpsCallable<
-        { days: number; includeAdmin: boolean },
-        StreakRetention
-      >(fns, "getAdminStreakRetention");
       const callCountry = httpsCallable<
         { days: number; includeAdmin: boolean },
         CountryFunnel
       >(fns, "getAdminCountryFunnel");
-      // ★인자가 없다. 이 축에는 is_admin 이 없어 운영자 제외가 구조적으로
-      //   불가능하고, 기간도 안 받는다(프로필 전량 기준). 없는 인자를 넣어
-      //   보내면 화면이 "걸러진다" 고 착각하게 된다 — 안 보낸다.
-      const callInstallRet = httpsCallable<
-        Record<string, never>,
-        InstallRetentionSummary
-      >(fns, "getAdminInstallRetentionSummary");
-      // ★이름은 상수로 둔다. 백엔드가 다른 이름으로 내보내면 조용히 not-found 가
-      //   되고 화면은 영원히 '연결 전' 을 띄운다 — 계약은 문서에 박혀 있다.
-      const callUserDaily = httpsCallable<{ days: number }, UserDailySummary>(
-        fns,
-        CALLABLE_USER_DAILY
-      );
-      const callAcctProfile = httpsCallable<
-        Record<string, never>,
-        AccountProfileSummary
-      >(fns, CALLABLE_ACCOUNT_PROFILE);
-      // ★인자가 없다. 실매출은 **전 기간** 합계로 본다 — 기간을 걸면 "이 기간엔
-      //   0" 인지 "아예 0" 인지 화면에서 구분이 안 되고, 지금 필요한 건 후자다.
-      const callPurchase = httpsCallable<
-        Record<string, never>,
-        PurchaseSummary
-      >(fns, CALLABLE_PURCHASE_SUMMARY);
       // ★통합 뷰 읽기 경로. 뷰가 아직 안 섰거나 함수가 미배포면 **0 이 아니라
       //   사유**가 온다(서버 state:"unavailable") — 화면은 그걸 그대로 그린다.
       const callUnified = httpsCallable<
@@ -7627,30 +8364,9 @@ export default function AnalyticsPanel({
       setKpi((s) => ({ ...s, loading: true, error: null }));
       setRelease((s) => ({ ...s, loading: true, error: null }));
       setBetaSeg((s) => ({ ...s, loading: true, error: null }));
-      setRetention((s) => ({ ...s, loading: true, error: null }));
-      setStreak((s) => ({ ...s, loading: true, error: null }));
       setCountryFunnel((s) => ({ ...s, loading: true, error: null }));
-      setInstallRet((s) => ({ ...s, loading: true, error: null }));
-      setUserDaily((s) => ({
-        ...s,
-        loading: true,
-        error: null,
-        notDeployed: false,
-      }));
-      setPurchase((s) => ({
-        ...s,
-        loading: true,
-        error: null,
-        notDeployed: false,
-      }));
       setCac((s) => ({ ...s, loading: true, error: null }));
       setUnified((s) => ({
-        ...s,
-        loading: true,
-        error: null,
-        notDeployed: false,
-      }));
-      setAcctProfile((s) => ({
         ...s,
         loading: true,
         error: null,
@@ -7725,43 +8441,12 @@ export default function AnalyticsPanel({
             error: mapErr(e as CallableError),
           })
         );
-      callRetention({ days: d, includeAdmin: inc })
-        .then((r) =>
-          setRetention({ data: r.data, loading: false, error: null })
-        )
-        .catch((e) =>
-          setRetention({
-            data: null,
-            loading: false,
-            error: mapErr(e as CallableError),
-          })
-        );
-      callStreak({ days: d, includeAdmin: inc })
-        .then((r) => setStreak({ data: r.data, loading: false, error: null }))
-        .catch((e) =>
-          setStreak({
-            data: null,
-            loading: false,
-            error: mapErr(e as CallableError),
-          })
-        );
       callCountry({ days: d, includeAdmin: inc })
         .then((r) =>
           setCountryFunnel({ data: r.data, loading: false, error: null })
         )
         .catch((e) =>
           setCountryFunnel({
-            data: null,
-            loading: false,
-            error: mapErr(e as CallableError),
-          })
-        );
-      callInstallRet({})
-        .then((r) =>
-          setInstallRet({ data: r.data, loading: false, error: null })
-        )
-        .catch((e) =>
-          setInstallRet({
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
@@ -7812,15 +8497,6 @@ export default function AnalyticsPanel({
         });
       };
 
-      runOptional(CALLABLE_USER_DAILY, () => callUserDaily({ days: d }), (v) =>
-        setUserDaily(v)
-      );
-      runOptional(CALLABLE_ACCOUNT_PROFILE, () => callAcctProfile({}), (v) =>
-        setAcctProfile(v)
-      );
-      runOptional(CALLABLE_PURCHASE_SUMMARY, () => callPurchase({}), (v) =>
-        setPurchase(v)
-      );
       runOptional(
         CALLABLE_INSTALL_UNIFIED,
         () => callUnified({ days: d }),
@@ -7855,23 +8531,6 @@ export default function AnalyticsPanel({
     byCycleCount: {},
     paddleGap: "",
   };
-
-  // ★사람 축 커버리지는 사람 축을 쓰는 **모든** 응답에 실려 온다(설계 §10.3).
-  //   어느 콜러블이 먼저 배포되든 화면이 같게 동작하도록 여기 한 자리에서 고른다 —
-  //   호출부마다 분기하면 어느 자리에서 기준 라벨이 조용히 빠진다.
-  const personAxis =
-    installRet.data?.personAxis ??
-    streak.data?.personAxis ??
-    retention.data?.personAxis ??
-    null;
-  // §10.4-7 — 조회 구간이 발효일 왼쪽까지 뻗는지. 서버 시각 기준으로 센다.
-  const personAxisNote = personAxisRangeNote(
-    personAxis,
-    analyticsRangeStart(
-      streak.data?.generatedAt ?? retention.data?.generatedAt,
-      streak.data?.rangeDays ?? retention.data?.rangeDays ?? days
-    )
-  );
 
   const tierRows = useMemo(
     () =>
@@ -7913,29 +8572,6 @@ export default function AnalyticsPanel({
     () => b?.subscriptions.trendByDay || [],
     [b]
   );
-
-  // 퍼널: 신청 → 선정 → 활성(옵트인) → Pro. 활성은 익명 표본이라 라벨 구분.
-  const funnel = useMemo(() => {
-    if (!b) return [];
-    return [
-      { key: "신청(대기자)", value: b.waitlist.total, trust: "green" as const },
-      {
-        key: "선정(파운더)",
-        value: b.founders.accessGranted,
-        trust: "green" as const,
-      },
-      {
-        key: "활성(옵트인 표본)",
-        value: u?.sampleClientCount ?? 0,
-        trust: "yellow" as const,
-      },
-      {
-        key: "유료 Pro",
-        value: b.subscriptions.paidProActive,
-        trust: "green" as const,
-      },
-    ];
-  }, [b, u]);
 
   return (
     <section className="space-y-8">
@@ -8503,14 +9139,36 @@ export default function AnalyticsPanel({
         >
           <AxisLimitNote
             notes={[
-              "구독·결제 상태는 Firestore 원장이라 항상 켜져 있습니다(🟢). MRR·LTV·코호트별 회수는 아직 계산 소스가 없어 그 칸에 0 을 그리지 않고 '적재 전' 으로 둡니다.",
-              "★아래 '구독·전환' 숫자는 건수이고 매출이 아닙니다. 실제로 들어온 돈은 '실매출' 칸에서만 봅니다 — 그 칸은 내부·운영자 계정 결제와 무상 부여(founder_grant)를 매출에서 빼고, 뺀 건수를 옆에 그대로 표시합니다(지운 게 아니라 가른 것입니다).",
+              "수익 탭의 설치·채널 매출 축은 getAdminInstallUnified 한 경로에서 읽습니다. 원장은 정본이고 GA4 이커머스는 채널 귀속 보조 경로입니다.",
+              "★적재 전 · 진짜 0 · 미상을 세로로 가릅니다. 특히 analytics_user_daily.install_key_hmac 다리가 NULL 이면 매출 0 이 아니라 설치에 결제를 붙일 수 없는 미상입니다.",
+              "외부 결제 1건(19,000원, portone)은 founder_grant 33건·내부테스트 1건과 섞지 않습니다. 구독 건수와 실매출도 서로 다른 숫자입니다.",
               "연속 청구 사이클은 Toss billingCharges 원장만 채웁니다. Paddle 구독은 원장 공백이라 그 칸의 0 은 '연속 결제가 없다' 가 아니라 '이 원장에 없다' 입니다.",
             ]}
           />
 
           <div className="space-y-4">
-            <SectionHeader icon={CreditCard} title="구독·전환" trust="green" />
+            <SectionHeader
+              icon={Database}
+              title="외부 매출 · GA4 대조 · 설치→결제"
+              trust={unified.data?.revenue ? "yellow" : "unwired"}
+            >
+              {unified.data?.source && (
+                <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 text-[11px] text-zinc-500">
+                  {unified.data.source}
+                </span>
+              )}
+            </SectionHeader>
+            {unified.loading ? (
+              <LoadingBox />
+            ) : unified.error ? (
+              <ErrorBox msg={unified.error} />
+            ) : (
+              <UnifiedRevenueHeadlineView data={unified.data} business={b} />
+            )}
+          </div>
+
+          <div className="space-y-4">
+            <SectionHeader icon={CreditCard} title="구독 원장" trust="green" />
             {biz.loading ? (
               <LoadingBox />
             ) : biz.error ? (
@@ -8552,20 +9210,15 @@ export default function AnalyticsPanel({
                         : undefined
                     }
                   />
-                  {/* ★유료 전환율은 카드에서도 분수를 크게. 분모가 대기자냐
-                      구독자냐에 따라 완전히 다른 수인데, 퍼센트만 띄우면
-                      어느 쪽인지 화면에 안 남는다. */}
-                  <RatioCard
-                    label="유료 전환 (vs 대기자)"
-                    numerator={b.subscriptions.paidProActive}
-                    denominator={b.waitlist.total}
-                    sub="누적"
+                  <StatCard
+                    label="파운더 무료부여"
+                    value={fmtInt(b.subscriptions.founderGrantActive)}
+                    sub="매출 아님 · 구독 권한"
                   />
-                  <RatioCard
-                    label="유료 전환 (vs 전체 구독)"
-                    numerator={b.subscriptions.paidProActive}
-                    denominator={b.subscriptions.total}
-                    sub="무료 부여 포함 분모"
+                  <StatCard
+                    label="Paddle 활성"
+                    value={fmtInt(b.subscriptions.paddleActiveCurrent)}
+                    sub="연속 청구 원장 공백"
                   />
                 </div>
 
@@ -8711,154 +9364,143 @@ export default function AnalyticsPanel({
                     />
                   </Panel>
                 </div>
-
-                <Panel
-                  title="가입 → 활성 → Pro 퍼널"
-                  note="양끝(가입·Pro)은 식별 데이터(🟢), 가운데 활성은 옵트인 표본(🟡)."
-                >
-                  {funnel.every((f) => f.value === 0) ? (
-                    <EmptyState label="퍼널 데이터가 없습니다." />
-                  ) : (
-                    <ul className="space-y-2.5">
-                      {(() => {
-                        const fmax = Math.max(...funnel.map((f) => f.value), 1);
-                        return funnel.map((f, i) => {
-                          const pct = Math.max(
-                            (f.value / fmax) * 100,
-                            f.value > 0 ? 3 : 0
-                          );
-                          const color =
-                            f.trust === "yellow" ? STATUS_WARN : SERIES;
-                          // ★단계 전환은 전 단계를 분모로 함께 적는다. 여기 가운데
-                          //   칸은 옵트인 표본이라 분모가 서로 다른 축이 섞인다 —
-                          //   그래서 퍼센트만 남기면 곱해서 읽는 오독이 생긴다.
-                          const prev = i > 0 ? funnel[i - 1].value : null;
-                          return (
-                            <li key={f.key}>
-                              <div className="mb-0.5 flex flex-wrap items-baseline justify-between gap-2">
-                                <span className="text-xs text-zinc-300">
-                                  {f.key}
-                                </span>
-                                <span className="inline-flex items-baseline gap-2 text-xs font-medium tabular-nums text-zinc-400">
-                                  {prev != null && (
-                                    <span className="text-[11px] text-zinc-500">
-                                      전 단계 대비{" "}
-                                      <Ratio
-                                        numerator={f.value}
-                                        denominator={prev}
-                                      />
-                                    </span>
-                                  )}
-                                  <span>{fmtInt(f.value)}</span>
-                                </span>
-                              </div>
-                              <div className="h-3 w-full overflow-hidden rounded bg-zinc-900">
-                                <div
-                                  className="h-full rounded"
-                                  style={{
-                                    width: `${pct}%`,
-                                    backgroundColor: color,
-                                  }}
-                                />
-                              </div>
-                            </li>
-                          );
-                        });
-                      })()}
-                    </ul>
-                  )}
-                </Panel>
               </>
             ) : null}
           </div>
 
-          {/* ── 계정 프로필 (🟡, analytics_account_profile) ─────────────
-              ★이 표도 매일 채워진다. 없는 건 읽어 오는 콜러블이라 '적재 전' 이
-              아니라 '연결 전' 이다. 다만 그 표의 mrr_usd · ltv_usd 는 지금 전부
-              null 이고, 그건 **적재 전**이다 — 두 사실을 한 칸에 섞지 않는다. ── */}
           <div className="space-y-4">
             <SectionHeader
-              icon={Database}
-              title="계정 프로필 (지출·매출 기입 현황)"
-              trust={acctProfile.data ? "yellow" : "red"}
+              icon={CreditCard}
+              title="실매출 · 결제 분류"
+              trust={unified.data?.revenue ? "yellow" : "unwired"}
             />
-            {acctProfile.loading ? (
+            {unified.loading ? (
               <LoadingBox />
-            ) : acctProfile.data ? (
-              <AccountProfileSummaryView data={acctProfile.data} />
-            ) : acctProfile.error ? (
-              <ErrorBox msg={acctProfile.error} />
+            ) : unified.error ? (
+              <ErrorBox msg={unified.error} />
             ) : (
-              <PendingIngestion
-                missing="read-path"
-                title="계정별 지출·매출 기입 현황"
-                waitingOn={`${CALLABLE_ACCOUNT_PROFILE} — analytics_account_profile 을 읽는 어드민 콜러블. 표는 매일 채워지고 있고 없는 것은 조회 경로다`}
-                willShow={[
-                  "지출이 있는 계정 / 전체 계정 (분자/분모 동반)",
-                  "mrr_usd 가 기입된 계정 수 — 지금 0/N 이 정상이다(analytics_purchase 적재 전)",
-                  "지출 합계 · MRR 합계 (null 은 0 이 아니라 '—')",
-                ]}
-              />
+              <UnifiedRevenueClassificationView data={unified.data} />
             )}
           </div>
 
-          {/* ── ★실매출 — 내부·테스트 결제를 갈라낸 뒤의 숫자 ─────────────
-              ★수익 탭에서 **가장 먼저 읽혀야 하는 칸**이다. 위 '구독·전환' 은
-              구독 건수고, 돈이 실제로 들어왔는지는 여기서만 보인다. 그리고 그
-              숫자는 내부·테스트 결제를 뺀 값이며, 뺀 건수를 옆 칸에 그대로
-              띄운다 — 빼놓고 말 안 하면 그것도 거짓말이다. ── */}
           <div className="space-y-4">
             <SectionHeader
               icon={CreditCard}
-              title="실매출 (내부·테스트 제외)"
-              trust={purchase.data?.state === "ingested" ? "green" : "red"}
+              title="채널별 매출"
+              trust={unified.data?.revenue ? "yellow" : "unwired"}
             />
-            {purchase.loading ? (
+            {unified.loading ? (
               <LoadingBox />
-            ) : purchase.notDeployed ? (
-              <PendingIngestion
-                missing="read-path"
-                title="실매출 (analytics_purchase)"
-                waitingOn={`${CALLABLE_PURCHASE_SUMMARY} — analytics_purchase 를 읽는 어드민 콜러블. 표는 적재 경로가 돌고 있고 없는 것은 조회 경로다`}
-                willShow={[
-                  "실매출(외부 고객) 합계 — 기준 라벨과 함께",
-                  "매출에서 뺀 내부(운영자) 결제 건수",
-                  "무상 부여(founder_grant) 건수",
-                ]}
+            ) : unified.error ? (
+              <ErrorBox msg={unified.error} />
+            ) : (
+              <UnifiedRevenueChannelTable data={unified.data} />
+            )}
+          </div>
+
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Unlink}
+              title="★결제 축 미상 사유 — 적재 전 · 진짜 0 · 미상"
+              trust={unified.data?.revenue ? "yellow" : "unwired"}
+            />
+            {unified.loading ? (
+              <LoadingBox />
+            ) : unified.error ? (
+              <ErrorBox msg={unified.error} />
+            ) : (
+              <UnifiedRevenueMissingReasonTable data={unified.data} />
+            )}
+          </div>
+
+          <div className="space-y-4">
+            <SectionHeader icon={Info} title="운영 지표 이동 안내" trust="yellow" />
+            <Panel
+              title="여기 있던 운영용 지표는 ⑤ 운영으로 갔다"
+              note="모델 비용·라우팅·릴리스 헬스·옵트인 사용 표본은 매출 판단과 분모가 다릅니다."
+            >
+              <p className="text-sm leading-relaxed text-zinc-400">
+                MRR/LTV처럼 원천이 전량 null 이던 카드와 코호트 회수 플레이스홀더는
+                삭제했습니다. 실제 배포·라우팅 상태를 볼 때는 ⑤ 운영 탭을 엽니다.
+              </p>
+            </Panel>
+          </div>
+        </div>
+      )}
+
+      {/* ── ⑤ 운영 — "배포·라우팅이 건강한가" ───────────────────────────── */}
+      {tab === "operations" && (
+        <div
+          id="analytics-panel-operations"
+          role="tabpanel"
+          aria-labelledby="analytics-tab-operations"
+          className="space-y-8"
+        >
+          <AxisLimitNote
+            notes={[
+              "옵트인 표본 · 운영용. 사업 판단에 쓰지 마세요.",
+              "cost_logs 는 Firebase 계정 축(28자)이고 task_outcomes·events 는 익명 clientId(36자) 축입니다. 같은 userId 컬럼명이어도 표를 가로질러 나누지 않습니다.",
+              "활성화·리텐션·수익 탭에서 빠진 모델·라우팅·릴리스 헬스·베타세그먼트 지표를 이 탭으로 옮겼습니다.",
+            ]}
+          />
+
+          <div className="space-y-4">
+            <SectionHeader icon={Activity} title="제품 사용 표본" trust="yellow" />
+            {usage.loading ? (
+              <LoadingBox />
+            ) : usage.error ? (
+              <ErrorBox msg={usage.error} />
+            ) : usage.data ? (
+              <OperationsUsageView
+                usage={usage.data}
+                kpi={kpi.data}
+                days={days}
+                onDrill={openDrill}
               />
-            ) : purchase.data ? (
-              <PurchaseSplitView data={purchase.data} />
-            ) : purchase.error ? (
-              <ErrorBox msg={purchase.error} />
             ) : null}
           </div>
 
-          {/* ── MRR·LTV·회수 — 구매 적재 전 (🔴) ──────────────────────── */}
           <div className="space-y-4">
             <SectionHeader
-              icon={CreditCard}
-              title="MRR · LTV · 코호트별 회수"
-              trust="red"
+              icon={Cpu}
+              title="모델 비용 · 성공률 · 라우팅"
+              trust="yellow"
             />
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <PendingIngestion
-                title="MRR · ARPU · LTV"
-                waitingOn="analytics_purchase(결제 금액 이벤트) 적재 — analytics_account_profile 은 매일 채워지지만 그 표의 mrr_usd · ltv_usd 는 지금 전부 null 이다. null 은 0 이 아니라 미기입이다 · 선행 티켓 진행 중"
-                willShow={[
-                  "월 반복 매출(MRR)과 증감 분해(신규/확장/이탈)",
-                  "ARPU · 코호트별 LTV",
-                  "구독 시작 → 첫 결제까지 걸린 일수 분포",
-                ]}
+            {model.loading ? (
+              <LoadingBox />
+            ) : model.error ? (
+              <ErrorBox msg={model.error} />
+            ) : model.data ? (
+              <OperationsModelView
+                model={model.data}
+                modelView={modelView}
+                setModelView={setModelView}
+                days={days}
+                onDrill={openDrill}
               />
-              <PendingIngestion
-                title="코호트별 회수"
-                waitingOn="analytics_purchase(매출) + ga4_first_touch_current(획득 채널) + analytics_ad_spend(수동 광고비 원장) 조인"
-                willShow={[
-                  "가입 코호트별 누적 매출 곡선",
-                  "CAC 회수 시점(개월)",
-                ]}
-              />
-            </div>
+            ) : null}
+          </div>
+
+          <div className="space-y-4">
+            <SectionHeader icon={Repeat} title="릴리스·버전 헬스" trust="yellow" />
+            {release.loading ? (
+              <LoadingBox />
+            ) : release.error ? (
+              <ErrorBox msg={release.error} />
+            ) : release.data ? (
+              <ReleaseHealthView data={release.data} />
+            ) : null}
+          </div>
+
+          <div className="space-y-4">
+            <SectionHeader icon={UserCheck} title="베타 세그먼트" trust="yellow" />
+            {betaSeg.loading ? (
+              <LoadingBox />
+            ) : betaSeg.error ? (
+              <ErrorBox msg={betaSeg.error} />
+            ) : betaSeg.data ? (
+              <BetaSegmentView data={betaSeg.data} />
+            ) : null}
           </div>
         </div>
       )}
