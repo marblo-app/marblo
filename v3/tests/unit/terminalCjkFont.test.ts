@@ -69,6 +69,80 @@ function installFontSet(check: boolean) {
   return fonts;
 }
 
+function tableOffset(font: Buffer, tag: string): number {
+  const tableCount = font.readUInt16BE(4);
+  for (let i = 0; i < tableCount; i += 1) {
+    const record = 12 + i * 16;
+    if (font.toString("ascii", record, record + 4) === tag) {
+      return font.readUInt32BE(record + 8);
+    }
+  }
+  throw new Error(`Missing TrueType table: ${tag}`);
+}
+
+function glyphIdForCodePoint(font: Buffer, codePoint: number): number {
+  const cmap = tableOffset(font, "cmap");
+  const subtableCount = font.readUInt16BE(cmap + 2);
+  const candidates: number[] = [];
+  for (let i = 0; i < subtableCount; i += 1) {
+    const record = cmap + 4 + i * 8;
+    const platformId = font.readUInt16BE(record);
+    const encodingId = font.readUInt16BE(record + 2);
+    if (
+      platformId === 0 ||
+      (platformId === 3 && [1, 10].includes(encodingId))
+    ) {
+      candidates.push(cmap + font.readUInt32BE(record + 4));
+    }
+  }
+
+  for (const offset of candidates) {
+    const format = font.readUInt16BE(offset);
+    if (format === 4) {
+      const segCount = font.readUInt16BE(offset + 6) / 2;
+      const endCount = offset + 14;
+      const startCount = endCount + segCount * 2 + 2;
+      const idDelta = startCount + segCount * 2;
+      const idRangeOffset = idDelta + segCount * 2;
+      for (let i = 0; i < segCount; i += 1) {
+        const end = font.readUInt16BE(endCount + i * 2);
+        const start = font.readUInt16BE(startCount + i * 2);
+        if (codePoint < start || codePoint > end) continue;
+        const delta = font.readInt16BE(idDelta + i * 2);
+        const rangeOffsetAt = idRangeOffset + i * 2;
+        const rangeOffset = font.readUInt16BE(rangeOffsetAt);
+        if (rangeOffset === 0) return (codePoint + delta) & 0xffff;
+        const glyphAt = rangeOffsetAt + rangeOffset + (codePoint - start) * 2;
+        const glyphId = font.readUInt16BE(glyphAt);
+        return glyphId === 0 ? 0 : (glyphId + delta) & 0xffff;
+      }
+    }
+    if (format === 12) {
+      const groupCount = font.readUInt32BE(offset + 12);
+      for (let i = 0; i < groupCount; i += 1) {
+        const group = offset + 16 + i * 12;
+        const start = font.readUInt32BE(group);
+        const end = font.readUInt32BE(group + 4);
+        if (codePoint < start || codePoint > end) continue;
+        return font.readUInt32BE(group + 8) + codePoint - start;
+      }
+    }
+  }
+
+  throw new Error(
+    `Missing glyph for U+${codePoint.toString(16).toUpperCase()}`,
+  );
+}
+
+function advanceWidthForCodePoint(font: Buffer, codePoint: number): number {
+  const glyphId = glyphIdForCodePoint(font, codePoint);
+  const hhea = tableOffset(font, "hhea");
+  const hmtx = tableOffset(font, "hmtx");
+  const metricCount = font.readUInt16BE(hhea + 34);
+  const metricIndex = Math.min(glyphId, metricCount - 1);
+  return font.readUInt16BE(hmtx + metricIndex * 4);
+}
+
 afterEach(() => {
   delete (globalThis as { document?: unknown }).document;
   resetCjkFontLoadForTests();
@@ -112,6 +186,27 @@ describe("bundled CJK font asset", () => {
 
   it("is reachable from the shared monospace stack", () => {
     expect(MONO_FONT_FAMILY).toContain(`"${CJK_FONT_FAMILY}"`);
+  });
+
+  it("has TrueType metrics where one Hangul syllable is exactly two ASCII cells", () => {
+    const font = readFileSync(path.join(publicDir, fontRelPath));
+    const zero = advanceWidthForCodePoint(font, "0".codePointAt(0)!);
+    const latinW = advanceWidthForCodePoint(font, "W".codePointAt(0)!);
+    const hangul = advanceWidthForCodePoint(font, "한".codePointAt(0)!);
+    const hangulGa = advanceWidthForCodePoint(font, "가".codePointAt(0)!);
+
+    expect(zero).toBeGreaterThan(0);
+    expect(latinW).toBe(zero);
+    expect(hangul).toBe(zero * 2);
+    expect(hangulGa).toBe(hangul);
+  });
+
+  it("forces xterm DOM renderer letter-spacing to zero inside Marblo terminals", () => {
+    const css = readFileSync(path.join(V3, "src/index.css"), "utf-8");
+
+    expect(css).toMatch(
+      /\.marblo-terminal\s+\.xterm-rows[\s\S]*\.marblo-terminal\s+\.xterm-rows\s+span\s*{[\s\S]*letter-spacing:\s*0\s*!important;/,
+    );
   });
 });
 

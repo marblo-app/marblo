@@ -11,9 +11,15 @@ import {
   TERMINAL_FONT_FAMILY,
   XTERM_CJK_RENDER_OPTIONS,
   bindTerminalCjkFont,
+  cjkFontSpec,
   repairTerminalCjkFontCachesIfLoaded,
   waitForTerminalCjkFontBeforeOpen,
 } from "../../lib/monoFont";
+import {
+  evaluateTerminalCjkMetrics,
+  type TerminalCjkMetricHealth,
+  type TerminalCjkMetricSample,
+} from "../../lib/terminalCjkHealth";
 import { t } from "../../lib/i18n";
 import {
   classifyTerminalSessionOwnership,
@@ -53,6 +59,8 @@ interface TerminalDebugSnapshot {
   activeBufferType: string;
   fontFamily: string;
   fontSize: number;
+  cjkMetricSample?: TerminalCjkMetricSample;
+  cjkMetricHealth?: TerminalCjkMetricHealth;
   ptyRepaintNudgeCount?: number;
   activitySettleTestCallCount?: number;
   resetPtyRepaintNudgeCountForTest?: () => void;
@@ -65,6 +73,48 @@ declare global {
   interface Window {
     __marbloTerminalDebug?: TerminalDebugRegistry;
   }
+}
+
+function parseCssPx(value: string | null): number | null {
+  if (!value || value === "normal") return 0;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readTerminalCjkMetricSample(
+  container: HTMLElement | null,
+  fontSize: number,
+  cols: number,
+): TerminalCjkMetricSample | undefined {
+  if (typeof document === "undefined" || !container) return undefined;
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx) return undefined;
+
+  const rows = container.querySelector<HTMLElement>(".xterm-rows");
+  const screen = container.querySelector<HTMLElement>(".xterm-screen");
+  ctx.font = `${fontSize}px ${TERMINAL_FONT_FAMILY}`;
+  const asciiWidth = ctx.measureText("0").width;
+  const hangulWidth = ctx.measureText("한").width;
+  const screenWidth = screen?.getBoundingClientRect().width ?? 0;
+  const rowsLetterSpacingPx = rows
+    ? parseCssPx(getComputedStyle(rows).letterSpacing)
+    : null;
+  const spanLetterSpacings = rows
+    ? Array.from(rows.querySelectorAll("span"), (span) =>
+        parseCssPx(getComputedStyle(span).letterSpacing),
+      ).filter((value): value is number => value !== null)
+    : [];
+
+  return {
+    fontLoaded: document.fonts?.check(cjkFontSpec(fontSize), "가") ?? undefined,
+    asciiWidth,
+    hangulWidth,
+    screenCellWidth: cols > 0 && screenWidth > 0 ? screenWidth / cols : null,
+    rowsLetterSpacingPx,
+    maxAbsSpanLetterSpacingPx: spanLetterSpacings.length
+      ? Math.max(...spanLetterSpacings.map((value) => Math.abs(value)))
+      : null,
+  };
 }
 
 /**
@@ -196,24 +246,36 @@ export default memo(function TerminalView({
 
     if (window.electronAPI?.testMode?.bypassAuth) {
       window.__marbloTerminalDebug ??= {};
-      window.__marbloTerminalDebug[sessionId] = () => ({
-        sessionId,
-        cols: terminal.cols,
-        rows: terminal.rows,
-        activeBufferType: terminal.buffer.active.type,
-        fontFamily: terminal.options.fontFamily ?? "",
-        fontSize: terminal.options.fontSize ?? 13,
-        ptyRepaintNudgeCount,
-        activitySettleTestCallCount,
-        resetPtyRepaintNudgeCountForTest: () => {
-          ptyRepaintNudgeCount = 0;
-          activitySettleTestCallCount = 0;
-        },
-        scheduleActivitySettleForTest: (reason = "test activity settle") => {
-          activitySettleTestCallCount += 1;
-          settleActivityRenderRef.current(reason);
-        },
-      });
+      window.__marbloTerminalDebug[sessionId] = () => {
+        const fontSize = terminal.options.fontSize ?? 13;
+        const cjkMetricSample = readTerminalCjkMetricSample(
+          containerRef.current,
+          fontSize,
+          terminal.cols,
+        );
+        return {
+          sessionId,
+          cols: terminal.cols,
+          rows: terminal.rows,
+          activeBufferType: terminal.buffer.active.type,
+          fontFamily: terminal.options.fontFamily ?? "",
+          fontSize,
+          cjkMetricSample,
+          cjkMetricHealth: cjkMetricSample
+            ? evaluateTerminalCjkMetrics(cjkMetricSample)
+            : undefined,
+          ptyRepaintNudgeCount,
+          activitySettleTestCallCount,
+          resetPtyRepaintNudgeCountForTest: () => {
+            ptyRepaintNudgeCount = 0;
+            activitySettleTestCallCount = 0;
+          },
+          scheduleActivitySettleForTest: (reason = "test activity settle") => {
+            activitySettleTestCallCount += 1;
+            settleActivityRenderRef.current(reason);
+          },
+        };
+      };
     }
 
     const fitTerminalIfGridChanged = () => {
