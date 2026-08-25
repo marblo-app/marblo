@@ -162,6 +162,47 @@ test("★값이 없는 날은 표에서도 0 이 아니라 '—' 다", async () 
   cleanup();
 });
 
+test("★어드민 이관 다계열도 없는 값을 0 으로 만들지 않는다", async () => {
+  const { MultiSeriesChart } = await import("./MultiSeriesChart");
+  const { host, cleanup } = await mount(
+    <MultiSeriesChart
+      title="어드민 이관"
+      animate={false}
+      series={[
+        {
+          key: "known-zero",
+          label: "진짜 0",
+          slot: 1,
+          points: [
+            { date: "2026-08-01", value: 0 },
+            { date: "2026-08-02", value: 5 },
+          ],
+        },
+        {
+          key: "unknown",
+          label: "미상",
+          slot: 2,
+          points: [
+            { date: "2026-08-01", value: Number.NaN },
+            { date: "2026-08-02", value: 7 },
+          ],
+        },
+      ]}
+    />
+  );
+  const rows = [...host.querySelectorAll("details table tbody tr")];
+  const first = rows.find(
+    (r) => r.querySelector("th")?.textContent === "2026-08-01"
+  );
+  assert.ok(first, "첫 날짜 행이 사라졌다");
+  const cells = [...first!.querySelectorAll("td")].map(
+    (td) => td.textContent ?? ""
+  );
+  assert.ok(cells.includes("0"), "진짜 0 이 표에서 사라졌다");
+  assert.ok(cells.includes("—"), "미상이 0 이 아니라 결측으로 남아야 한다");
+  cleanup();
+});
+
 test("★`toRows` 가 결측을 null 로 남긴다 — 0 으로 채우면 이 한 줄이 거짓말이 된다", () => {
   const rows = toRows(
     [{ key: "a", label: "가", slot: 1, points: [{ date: "d1", value: 5 }] }],
@@ -259,6 +300,31 @@ test("★축 눈금에 도메인을 넘는 숫자가 안 찍힌다 — 축만 �
     //   조용히 무시되는 것이라, 축만 보고 새는 경로가 그대로 열려 있었다.
     assert.ok(t <= 100, `못박은 상한(100)을 넘는 눈금이 찍혔다: ${t}`);
   }
+  cleanup();
+});
+
+test("★단일 계열도 fixed domain 이 조용히 무시되지 않는다", async () => {
+  const { TimeSeriesChart } = await import("./TimeSeriesChart");
+  const { host, cleanup } = await mount(
+    <TimeSeriesChart
+      data={[
+        { date: "2026-08-01", value: 10 },
+        { date: "2026-08-02", value: 900 },
+      ]}
+      title="축"
+      yDomain={{ kind: "fixed", max: 100 }}
+      animate={false}
+    />
+  );
+  const pts = subpaths(curveD(host)).flat();
+  const grid = [
+    ...host.querySelectorAll(".recharts-cartesian-grid-horizontal line"),
+  ];
+  const topY = Math.min(...grid.map((l) => Number(l.getAttribute("y1"))));
+  assert.ok(
+    pts.some(([, y]) => y < topY),
+    "못박은 상한(100)을 넘는 값이 차트 내부로 재스케일됐다"
+  );
   cleanup();
 });
 

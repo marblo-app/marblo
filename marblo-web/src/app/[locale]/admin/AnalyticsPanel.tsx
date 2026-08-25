@@ -40,7 +40,13 @@ import {
   describeGa4BridgeFreshness,
   type Ga4BridgeFreshness,
 } from "./ga4BridgeFreshness";
-import { MultiSeriesChart, TimeSeriesChart } from "@/components/charts";
+import {
+  MultiSeriesChart,
+  TimeSeriesChart,
+  type ChartDataState,
+  type NamedSeries,
+  type SeriesSlot,
+} from "@/components/charts";
 
 // ── 콜러블 응답 타입 (docs/analytics-admin-callables-api.md 미러) ───────────────
 type KeyCount = { key: string; count: number };
@@ -878,23 +884,42 @@ const STATUS_WARN = "#fab219";
 const STATUS_CRIT = "#d03b3b";
 const INK_MUTED = "#898781";
 
-// 다계열(누적막대) 카테고리 슬롯 — palette.md dark 열의 고정 순서.
-// ★순환 금지: 슬롯이 모자라면 색을 만들어내지 않고 '그 외'로 접는다(서버의
-// buildCostByDayModel 이 topN 으로 이미 접어 보낸다). 인접쌍 기준 CVD/명도 게이트를
-// validate_palette.js 로 통과 확인함(dark, 7슬롯 ALL PASS).
-const CATEGORICAL = [
-  "#3987e5", // blue
-  "#d95926", // orange
-  "#199e70", // aqua
-  "#c98500", // yellow
-  "#d55181", // magenta
-  "#008300", // green
-  "#9085e9", // violet
-] as const;
-// 계열 인덱스 → 색. 엔티티 순서 고정 배정이라 필터로 계열 수가 바뀌어도
-// 남은 계열의 색이 다시 칠해지지 않는다(색은 순위가 아니라 엔티티를 따른다).
-function seriesColor(i: number): string {
-  return CATEGORICAL[i] ?? INK_MUTED;
+// 계열 인덱스 → 공용 차트 슬롯. 엔티티 순서 고정 배정이라 필터로 계열 수가
+// 바뀌어도 남은 계열의 색이 다시 칠해지지 않는다.
+const CHART_SLOTS: SeriesSlot[] = [1, 2, 3, 4, 5, 6, 7];
+
+function slotForSeries(i: number): SeriesSlot {
+  return CHART_SLOTS[i] ?? 7;
+}
+
+function toIndexedMultiSeries(
+  dates: string[],
+  series: { key: string; values: number[] }[],
+  drillScopeKey?: string
+): NamedSeries[] {
+  return series.map((ser, i) => ({
+    key: ser.key,
+    label: ser.key,
+    slot: slotForSeries(i),
+    drillScopeKey,
+    points: dates.map((date, dateIndex) => {
+      const value = ser.values[dateIndex];
+      return {
+        date,
+        value: typeof value === "number" && isFinite(value) ? value : Number.NaN,
+      };
+    }),
+  }));
+}
+
+function stackedSeriesState(
+  dates: string[],
+  series: { values: number[] }[]
+): ChartDataState {
+  if (dates.length === 0 || series.length === 0) return "empty";
+  return series.some((ser) => ser.values.some((v) => isFinite(v) && v > 0))
+    ? "ready"
+    : "empty";
 }
 
 // 구독 티어 — key 로 고정 배정(순위 아님).
@@ -1495,381 +1520,6 @@ function BarList({
         );
       })}
     </ul>
-  );
-}
-
-// 시계열에서 값 라벨을 붙일 인덱스를 고른다.
-// 포인트가 적으면 전부, 많으면 겹치지 않게 최대/최소/끝점만 — 라벨이 서로
-// 밟으면 안 붙이느니만 못하다.
-function pickLabelIndices(values: number[]): Set<number> {
-  const n = values.length;
-  if (n === 0) return new Set();
-  if (n <= 12) return new Set(values.map((_, i) => i));
-  let maxI = 0;
-  let minI = 0;
-  for (let i = 1; i < n; i++) {
-    if (values[i] > values[maxI]) maxI = i;
-    if (values[i] < values[minI]) minI = i;
-  }
-  const picked = new Set([maxI, n - 1]);
-  // 최소점은 최대/끝점과 충분히 떨어져 있을 때만(라벨 충돌 방지).
-  const gap = Math.max(2, Math.floor(n / 12));
-  if (Math.abs(minI - maxI) > gap && Math.abs(minI - (n - 1)) > gap) {
-    picked.add(minI);
-  }
-  return picked;
-}
-
-// 시계열 라인/영역 차트 — 단일 시리즈, 인라인 SVG. 빈/단일점 안전.
-// onDrill 이 있으면 각 데이터 포인트가 클릭 가능한 히트 타깃이 된다.
-// ★시계열 위의 경계선. 06-13 식별자 교체처럼 "선 왼쪽과 오른쪽이 같은 단위가
-// 아니다" 를 말하는 자리다 — 색·툴팁에만 의존하지 않도록 라벨을 선 옆에 박는다.
-function ChartMarkerLine({
-  cx,
-  top,
-  bottom,
-  marker,
-}: {
-  cx: number;
-  top: number;
-  bottom: number;
-  marker: ChartMarker;
-}) {
-  return (
-    <g>
-      <line
-        x1={cx}
-        x2={cx}
-        y1={top}
-        y2={bottom}
-        stroke="#7dd3fc"
-        strokeWidth={1}
-        strokeDasharray="4 3"
-      />
-      <text x={cx + 4} y={top + 9} fontSize={9} fontWeight={600} fill="#7dd3fc">
-        {marker.label}
-      </text>
-      <title>{marker.hint ?? marker.label}</title>
-    </g>
-  );
-}
-
-function LineChart({
-  data,
-  color = SERIES,
-  format = fmtInt,
-  emptyLabel,
-  onDrill,
-  marker,
-}: {
-  data: { date: string; value: number }[];
-  color?: string;
-  format?: (n: number) => string;
-  emptyLabel?: string;
-  onDrill?: (date: string) => void;
-  marker?: ChartMarker;
-}) {
-  const clean = data.filter((d) => d && isFinite(d.value));
-  const allZero = clean.every((d) => d.value === 0);
-  if (clean.length === 0 || allZero) return <EmptyState label={emptyLabel} />;
-
-  const W = 640;
-  const H = 180;
-  const padL = 8;
-  const padR = 8;
-  const padT = 20; // 값 라벨이 상단으로 나가지 않도록 여유.
-  const padB = 22;
-  const innerW = W - padL - padR;
-  const innerH = H - padT - padB;
-  const max = Math.max(...clean.map((d) => d.value), 1);
-  const n = clean.length;
-  const x = (i: number) =>
-    padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
-  const y = (v: number) => padT + innerH - (v / max) * innerH;
-  const labelIndices = pickLabelIndices(clean.map((d) => d.value));
-
-  const linePts = clean.map((d, i) => `${x(i)},${y(d.value)}`).join(" ");
-  const areaPts =
-    `${x(0)},${padT + innerH} ` +
-    clean.map((d, i) => `${x(i)},${y(d.value)}`).join(" ") +
-    ` ${x(n - 1)},${padT + innerH}`;
-
-  // x축 라벨: 처음/중간/끝만.
-  const labelIdx = n === 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
-  const gid = `area-${color.replace("#", "")}`;
-  const mIdx = markerIndex(
-    clean.map((d) => d.date),
-    marker
-  );
-
-  return (
-    <div className="w-full">
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="w-full"
-        role="img"
-        preserveAspectRatio="xMidYMid meet"
-        style={{ height: 180 }}
-      >
-        <defs>
-          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.28" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        {/* 가로 그리드라인 (0 / 50% / 100%) */}
-        {[0, 0.5, 1].map((g) => (
-          <line
-            key={g}
-            x1={padL}
-            x2={W - padR}
-            y1={padT + innerH - g * innerH}
-            y2={padT + innerH - g * innerH}
-            stroke="#2c2c2a"
-            strokeWidth={1}
-          />
-        ))}
-        {mIdx != null && marker && (
-          <ChartMarkerLine
-            cx={x(mIdx)}
-            top={padT}
-            bottom={padT + innerH}
-            marker={marker}
-          />
-        )}
-        <polygon points={areaPts} fill={`url(#${gid})`} />
-        <polyline
-          points={linePts}
-          fill="none"
-          stroke={color}
-          strokeWidth={2}
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-        {clean.map((d, i) => (
-          <g key={i}>
-            {n <= 45 && (
-              <circle cx={x(i)} cy={y(d.value)} r={2.5} fill={color} />
-            )}
-            {/* 값 라벨 — 색·툴팁에만 의존하지 않고 수치를 직접 노출 */}
-            {labelIndices.has(i) && (
-              <text
-                x={x(i)}
-                y={y(d.value) - 7}
-                fontSize={10}
-                fontWeight={600}
-                fill="#d4d4d8"
-                textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"}
-              >
-                {format(d.value)}
-              </text>
-            )}
-            {/* hover hit target + 네이티브 툴팁 (+ 클릭 시 드릴다운) */}
-            <rect
-              x={x(i) - innerW / (2 * Math.max(n, 1))}
-              y={padT}
-              width={innerW / Math.max(n, 1)}
-              height={innerH}
-              fill="transparent"
-              onClick={onDrill ? () => onDrill(d.date) : undefined}
-              style={onDrill ? { cursor: "pointer" } : undefined}
-            >
-              <title>{`${fmtDay(d.date)} · ${format(d.value)}${
-                onDrill ? " (클릭: 상세 분해)" : ""
-              }`}</title>
-            </rect>
-          </g>
-        ))}
-        {labelIdx.map((i) => (
-          <text
-            key={i}
-            x={x(i)}
-            y={H - 6}
-            fontSize={11}
-            fill={INK_MUTED}
-            textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"}
-          >
-            {fmtDay(clean[i].date)}
-          </text>
-        ))}
-      </svg>
-      <div className="mt-1 flex justify-between text-xs text-zinc-600">
-        <span>범위 최대 {format(max)}</span>
-        <span>{n}일</span>
-      </div>
-    </div>
-  );
-}
-
-function TwoLineChart({
-  data,
-  first,
-  second,
-  emptyLabel,
-  onDrill,
-  marker,
-}: {
-  data: { date: string; first: number; second: number }[];
-  first: { label: string; color: string; format?: (n: number) => string };
-  second: { label: string; color: string; format?: (n: number) => string };
-  emptyLabel?: string;
-  onDrill?: (date: string) => void;
-  marker?: ChartMarker;
-}) {
-  const clean = data.filter(
-    (d) => d && isFinite(d.first) && isFinite(d.second)
-  );
-  const allZero = clean.every((d) => d.first === 0 && d.second === 0);
-  if (clean.length === 0 || allZero) return <EmptyState label={emptyLabel} />;
-
-  const W = 640;
-  const H = 180;
-  const padL = 8;
-  const padR = 8;
-  const padT = 20; // 값 라벨 여유.
-  const padB = 22;
-  const innerW = W - padL - padR;
-  const innerH = H - padT - padB;
-  const max = Math.max(...clean.flatMap((d) => [d.first, d.second]), 1);
-  const n = clean.length;
-  const x = (i: number) =>
-    padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
-  const y = (v: number) => padT + innerH - (v / max) * innerH;
-  const points = (key: "first" | "second") =>
-    clean.map((d, i) => `${x(i)},${y(d[key])}`).join(" ");
-  const labelIdx = n === 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
-  const fmtFirst = first.format || fmtInt;
-  const fmtSecond = second.format || fmtInt;
-  // 두 시리즈가 겹치므로 값 라벨은 각 시리즈의 피크 하나씩만 — 그 이상은
-  // 서로 밟는다.
-  const peak = (key: "first" | "second") => {
-    let best = 0;
-    for (let i = 1; i < n; i++) if (clean[i][key] > clean[best][key]) best = i;
-    return clean[best][key] > 0 ? best : -1;
-  };
-  const firstPeak = peak("first");
-  const secondPeak = peak("second");
-  const mIdx = markerIndex(
-    clean.map((d) => d.date),
-    marker
-  );
-
-  return (
-    <div className="w-full">
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="w-full"
-        role="img"
-        preserveAspectRatio="xMidYMid meet"
-        style={{ height: 180 }}
-      >
-        {[0, 0.5, 1].map((g) => (
-          <line
-            key={g}
-            x1={padL}
-            x2={W - padR}
-            y1={padT + innerH - g * innerH}
-            y2={padT + innerH - g * innerH}
-            stroke="#2c2c2a"
-            strokeWidth={1}
-          />
-        ))}
-        {mIdx != null && marker && (
-          <ChartMarkerLine
-            cx={x(mIdx)}
-            top={padT}
-            bottom={padT + innerH}
-            marker={marker}
-          />
-        )}
-        <polyline
-          points={points("first")}
-          fill="none"
-          stroke={first.color}
-          strokeWidth={2}
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-        <polyline
-          points={points("second")}
-          fill="none"
-          stroke={second.color}
-          strokeWidth={2}
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-        {/* 값 라벨 — 시리즈별 피크만 직접 노출 */}
-        {[
-          { i: firstPeak, key: "first" as const, s: first, f: fmtFirst },
-          { i: secondPeak, key: "second" as const, s: second, f: fmtSecond },
-        ]
-          .filter((p) => p.i >= 0)
-          .map((p) => (
-            <text
-              key={p.key}
-              x={x(p.i)}
-              y={y(clean[p.i][p.key]) - 7}
-              fontSize={10}
-              fontWeight={600}
-              fill={p.s.color}
-              textAnchor={
-                p.i === 0 ? "start" : p.i === n - 1 ? "end" : "middle"
-              }
-            >
-              {p.f(clean[p.i][p.key])}
-            </text>
-          ))}
-        {clean.map((d, i) => (
-          <rect
-            key={i}
-            x={x(i) - innerW / (2 * Math.max(n, 1))}
-            y={padT}
-            width={innerW / Math.max(n, 1)}
-            height={innerH}
-            fill="transparent"
-            onClick={onDrill ? () => onDrill(d.date) : undefined}
-            style={onDrill ? { cursor: "pointer" } : undefined}
-          >
-            <title>{`${fmtDay(d.date)} · ${first.label} ${fmtFirst(
-              d.first
-            )} · ${second.label} ${fmtSecond(d.second)}${
-              onDrill ? " (클릭: 상세 분해)" : ""
-            }`}</title>
-          </rect>
-        ))}
-        {labelIdx.map((i) => (
-          <text
-            key={i}
-            x={x(i)}
-            y={H - 6}
-            fontSize={11}
-            fill={INK_MUTED}
-            textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"}
-          >
-            {fmtDay(clean[i].date)}
-          </text>
-        ))}
-      </svg>
-      <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
-        <span>범위 최대 {fmtInt(max)}</span>
-        <span className="inline-flex items-center gap-3">
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              className="h-2 w-2 rounded-full"
-              style={{ backgroundColor: first.color }}
-            />
-            {first.label}
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              className="h-2 w-2 rounded-full"
-              style={{ backgroundColor: second.color }}
-            />
-            {second.label}
-          </span>
-        </span>
-      </div>
-    </div>
   );
 }
 
@@ -3423,8 +3073,10 @@ function DrilldownModal({
 
               {d.trend && d.trend.length > 0 && (
                 <Panel title={d.trendLabel || "추이"}>
-                  <LineChart
+                  <TimeSeriesChart
                     data={d.trend}
+                    title={d.trendLabel || "추이"}
+                    surface="dark"
                     format={formatterFor(d.trendFormat)}
                     color={d.trendFormat === "cost" ? SERIES_2 : SERIES}
                     emptyLabel="추이 데이터가 없습니다."
@@ -6923,14 +6575,32 @@ export function UserDailySummaryView({ data }: { data: UserDailySummary }) {
           title="일별 활동 설치 vs 좀비"
           note="★두 계열을 겹쳐 읽지 마라 — 좀비는 활동이 아니다"
         >
-          <TwoLineChart
-            data={data.byDay.map((d) => ({
-              date: d.day,
-              first: d.activeInstalls,
-              second: d.presentOnlyInstalls,
-            }))}
-            first={{ label: "활동", color: SERIES_2 }}
-            second={{ label: "좀비(하트비트만)", color: STATUS_WARN }}
+          <MultiSeriesChart
+            title="일별 활동 설치 vs 좀비"
+            description="활동 설치와 하트비트만 있는 설치를 같은 축에서 본다"
+            surface="dark"
+            series={[
+              {
+                key: "active",
+                label: "활동",
+                slot: 3,
+                points: data.byDay.map((d) => ({
+                  date: d.day,
+                  value: d.activeInstalls,
+                })),
+              },
+              {
+                key: "presentOnly",
+                label: "좀비(하트비트만)",
+                slot: 4,
+                tone: "warn",
+                points: data.byDay.map((d) => ({
+                  date: d.day,
+                  value: d.presentOnlyInstalls,
+                })),
+              },
+            ]}
+            format={fmtInt}
             emptyLabel="이 구간에 설치 × 날짜 행이 없습니다."
             marker={ID_SCHEME_MARKER}
           />
@@ -8111,15 +7781,19 @@ function OperationsModelView({
               />
             </Panel>
             <Panel title="일별 비용" note="cost_logs · USD">
-              <LineChart
+              <TimeSeriesChart
                 data={model.costByDay.map((d) => ({
                   date: d.date,
                   value: d.cost,
                 }))}
+                title="일별 비용"
+                surface="dark"
                 color={SERIES_2}
                 format={fmtCost}
                 emptyLabel="일별 비용 데이터가 없습니다."
-                onDrill={(date) => onDrill({ scope: "cost:day", date, days })}
+                onPointClick={(date) =>
+                  onDrill({ scope: "cost:day", date, days })
+                }
               />
             </Panel>
           </div>
@@ -8131,15 +7805,30 @@ function OperationsModelView({
                 model.costByDayModel.truncatedModels
               )}개 절단`}
             >
-              <StackedBarChart
-                dates={model.costByDayModel.dates}
-                series={model.costByDayModel.models.map((m, i) => ({
-                  key: m.model,
-                  values: model.costByDayModel?.matrix[i] ?? [],
-                }))}
+              <MultiSeriesChart
+                title="일별 × 모델 비용"
+                description="일자별 비용을 모델 계열로 나눠 본다"
+                surface="dark"
+                state={stackedSeriesState(
+                  model.costByDayModel.dates,
+                  model.costByDayModel.models.map((_, i) => ({
+                    values: model.costByDayModel?.matrix[i] ?? [],
+                  }))
+                )}
+                series={toIndexedMultiSeries(
+                  model.costByDayModel.dates,
+                  model.costByDayModel.models.map((m, i) => ({
+                    key: m.model,
+                    values: model.costByDayModel?.matrix[i] ?? [],
+                  })),
+                  "cost:day"
+                )}
                 format={fmtCost}
+                animationKey={days}
                 emptyLabel="일별 × 모델 비용 데이터가 없습니다."
-                onDrill={(date) => onDrill({ scope: "cost:day", date, days })}
+                onDrill={(t) =>
+                  onDrill({ scope: "cost:day", date: t.date, days })
+                }
               />
             </Panel>
           ) : null}
@@ -9392,14 +9081,16 @@ export default function AnalyticsPanel({
                     title="활성 구독자 추이"
                     note="status=active · currentPeriodEnd 미래"
                   >
-                    <LineChart
+                    <TimeSeriesChart
                       data={subscriptionTrend.map((d) => ({
                         date: d.date,
                         value: d.active,
                       }))}
+                      title="활성 구독자 추이"
+                      surface="dark"
                       color={STATUS_GOOD}
                       emptyLabel="활성 구독자 추이 데이터가 없습니다."
-                      onDrill={(date) =>
+                      onPointClick={(date) =>
                         openDrill({ scope: "subscription:day", date, days })
                       }
                     />
@@ -9633,156 +9324,6 @@ export default function AnalyticsPanel({
   );
 }
 
-// 누적 막대 — 하나의 총량을 카테고리(모델/버전)로 쪼개 일자별로 본다.
-// 단일 y축(이중축 금지). 계열 색은 CATEGORICAL 고정 배정이고, 범례가 항상 있어
-// 식별이 색에만 의존하지 않는다. 세그먼트 사이에는 2px 서피스 간격을 둔다.
-function StackedBarChart({
-  dates,
-  series,
-  format = fmtInt,
-  emptyLabel,
-  onDrill,
-}: {
-  dates: string[];
-  series: { key: string; values: number[] }[];
-  format?: (n: number) => string;
-  emptyLabel?: string;
-  onDrill?: (date: string) => void;
-}) {
-  const n = dates.length;
-  // 일자별 총합 — y 스케일과 빈 상태 판정의 기준.
-  const totals = dates.map((_, i) =>
-    series.reduce((s, ser) => s + (ser.values[i] ?? 0), 0)
-  );
-  const max = Math.max(...totals, 0);
-  if (n === 0 || series.length === 0 || max <= 0) {
-    return <EmptyState label={emptyLabel} />;
-  }
-
-  const W = 720;
-  const H = 220;
-  const padL = 56;
-  const padR = 12;
-  const padT = 12;
-  const padB = 30;
-  const innerW = W - padL - padR;
-  const innerH = H - padT - padB;
-  const slot = innerW / n;
-  const barW = Math.max(2, Math.min(28, slot * 0.7));
-  const x = (i: number) => padL + slot * i + slot / 2;
-  const yOf = (v: number) => padT + innerH - (v / max) * innerH;
-  // x축 라벨은 처음/중간/끝만(라벨 충돌 방지).
-  const labelIdx = n === 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
-
-  return (
-    <div>
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="h-auto w-full"
-        role="img"
-        aria-label="일자별 누적 분해 차트"
-      >
-        {/* 눈금선 — 배경으로 물러나게(recessive) */}
-        {[0, 0.5, 1].map((t) => (
-          <line
-            key={t}
-            x1={padL}
-            x2={W - padR}
-            y1={padT + innerH * t}
-            y2={padT + innerH * t}
-            stroke="#27272a"
-            strokeWidth={1}
-          />
-        ))}
-        {[1, 0.5, 0].map((t) => (
-          <text
-            key={t}
-            x={padL - 8}
-            y={padT + innerH * (1 - t) + 4}
-            textAnchor="end"
-            className="fill-zinc-600"
-            fontSize={10}
-          >
-            {format(max * t)}
-          </text>
-        ))}
-
-        {dates.map((d, i) => {
-          // 아래에서 위로 쌓는다. 세그먼트 사이 2px 간격은 높이에서 빼서 만든다.
-          let acc = 0;
-          return (
-            <g key={d}>
-              {series.map((ser, si) => {
-                const v = ser.values[i] ?? 0;
-                if (v <= 0) return null;
-                const y0 = yOf(acc);
-                const y1 = yOf(acc + v);
-                acc += v;
-                const h = Math.max(1, y0 - y1 - 2); // 2px 서피스 간격
-                return (
-                  <rect
-                    key={ser.key}
-                    x={x(i) - barW / 2}
-                    y={y1}
-                    width={barW}
-                    height={h}
-                    rx={2}
-                    fill={seriesColor(si)}
-                  >
-                    <title>{`${fmtDay(d)} · ${ser.key} ${format(v)}`}</title>
-                  </rect>
-                );
-              })}
-              {/* 컬럼 전체 히트 타깃 — 막대보다 크게 잡아 총합 툴팁/드릴다운 제공 */}
-              <rect
-                x={padL + slot * i}
-                y={padT}
-                width={slot}
-                height={innerH}
-                fill="transparent"
-                className={onDrill ? "cursor-pointer" : undefined}
-                onClick={onDrill ? () => onDrill(d) : undefined}
-              >
-                <title>{`${fmtDay(d)} · 합계 ${format(totals[i])}`}</title>
-              </rect>
-            </g>
-          );
-        })}
-
-        {labelIdx.map((i) => (
-          <text
-            key={i}
-            x={x(i)}
-            y={H - 10}
-            textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"}
-            className="fill-zinc-600"
-            fontSize={10}
-          >
-            {fmtDay(dates[i])}
-          </text>
-        ))}
-      </svg>
-
-      {/* 범례 — 2계열 이상이면 항상 표시(색 단독 식별 금지) */}
-      <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
-        {series.map((ser, si) => (
-          <li key={ser.key} className="flex items-center gap-1.5 text-xs">
-            <span
-              className="h-2.5 w-2.5 shrink-0 rounded-sm"
-              style={{ backgroundColor: seriesColor(si) }}
-              aria-hidden
-            />
-            <span className="text-zinc-400">{ser.key}</span>
-            <span className="tabular-nums text-zinc-500">
-              {format(ser.values.reduce((a, b) => a + b, 0))}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 // 하위모델 분해표 — 하네스(스폰축) 행 아래에 구체 모델(비용축) 행을 들여쓴다.
 // ★서버에서 은퇴한 표다(adminAnalytics.MODEL_BREAKDOWN_RETIRED): 이 분해를
 // 만들던 events↔cost_logs 의 agentId 조인이 곧 익명 텔레메트리를 계정으로
@@ -9941,12 +9482,18 @@ function ReleaseHealthView({ data }: { data: ReleaseHealth }) {
         title="버전별 채택 추이"
         note="일자별 고유 클라이언트 수 (events.appVersion 컬럼 파생)"
       >
-        <StackedBarChart
-          dates={adoption.dates}
-          series={adoption.series.map((s) => ({
-            key: s.version,
-            values: s.values,
-          }))}
+        <MultiSeriesChart
+          title="버전별 채택 추이"
+          description="일자별 고유 클라이언트 수를 버전 계열로 나눠 본다"
+          surface="dark"
+          state={stackedSeriesState(adoption.dates, adoption.series)}
+          series={toIndexedMultiSeries(
+            adoption.dates,
+            adoption.series.map((s) => ({
+              key: s.version,
+              values: s.values,
+            }))
+          )}
           format={fmtInt}
           emptyLabel="이 구간에 버전 관측이 없습니다."
         />
