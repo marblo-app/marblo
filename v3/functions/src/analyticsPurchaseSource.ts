@@ -120,6 +120,7 @@ export async function readPurchaseSources(
           provider: d.provider,
           orderId: d.orderId,
           paymentId: d.paymentId,
+          pgEnv: d.pgEnv,
           createdAtMs: tsToMillis(d.createdAt),
           updatedAtMs: tsToMillis(d.updatedAt),
         });
@@ -138,6 +139,7 @@ export async function readPurchaseSources(
           amount: d.amount,
           orderId: d.orderId,
           provider: d.provider,
+          pgEnv: d.pgEnv,
           purchasedAtMs: tsToMillis(d.purchasedAt),
         });
       },

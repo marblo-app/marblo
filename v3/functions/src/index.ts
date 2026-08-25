@@ -877,6 +877,20 @@ const PORTONE_EASYPAY_BILLING_CHANNEL_KEY =
   process.env.PORTONE_EASYPAY_BILLING_CHANNEL_KEY || "";
 const PORTONE_API_BASE = "https://api.portone.io";
 
+type PaymentPgEnv = "test" | "live";
+
+function parsePaymentPgEnv(raw: string | undefined): PaymentPgEnv | null {
+  const v = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return v === "test" || v === "live" ? v : null;
+}
+
+// 결제 분석용 파생 enum. storeId/channelKey/secret 원값은 크레덴셜이라 저장하지 않는다.
+const DEFAULT_PAYMENT_PG_ENV = parsePaymentPgEnv(process.env.PAYMENT_PG_ENV);
+const TOSS_PG_ENV =
+  parsePaymentPgEnv(process.env.TOSS_PG_ENV) ?? DEFAULT_PAYMENT_PG_ENV;
+const PORTONE_PG_ENV =
+  parsePaymentPgEnv(process.env.PORTONE_PG_ENV) ?? DEFAULT_PAYMENT_PG_ENV;
+
 // ─── SendGrid (파운더 접근 안내 이메일) ──────────────────────────────
 // 전부 선택값 — 미설정 시 발송만 스킵하고 배포·선정은 정상 동작한다.
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
@@ -1580,6 +1594,7 @@ export const completePortOnePayment = functions.https.onCall(
           userId: context.auth!.uid,
           provider: "portone",
           paymentId,
+          pgEnv: PORTONE_PG_ENV,
           amount,
           planType,
           reason: "one_time",
@@ -1657,6 +1672,7 @@ export const completePortOnePayment = functions.https.onCall(
           orderId: paymentId,
           amount,
           provider: "portone",
+          pgEnv: PORTONE_PG_ENV,
         });
         await issueLectureCouponInternal(uid);
       }
@@ -1855,6 +1871,7 @@ async function chargeSubscriptionIdempotent(params: {
       {
         userId,
         orderId,
+        pgEnv: TOSS_PG_ENV,
         amount,
         planType,
         reason: params.reason,
@@ -2009,6 +2026,7 @@ async function chargePortOneSubscriptionIdempotent(params: {
         userId,
         provider: "portone",
         paymentId,
+        pgEnv: PORTONE_PG_ENV,
         amount,
         planType,
         reason: params.reason,
@@ -3468,6 +3486,7 @@ export const confirmLecturePayment = functions.https.onCall(
       purchasedAt: new Date(),
       orderId,
       amount: order.amount,
+      pgEnv: TOSS_PG_ENV,
     });
 
     // Delete pending order

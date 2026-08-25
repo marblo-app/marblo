@@ -17,8 +17,10 @@ import {
   ANALYTICS_PURCHASE_COLUMNS,
   ANALYTICS_PURCHASE_SCHEMA,
   CANCEL_BILLING_FAILURE_THRESHOLD,
+  PG_ENVS,
   REJECTED_FIELDS,
   REVENUE_ACCOUNT_CLASS,
+  REVENUE_PG_ENV,
   REVENUE_KINDS,
   classifyAccount,
   classifyCharge,
@@ -29,6 +31,7 @@ import {
   mapLecturePurchase,
   mapSubscriptionEvent,
   isFounderGrant,
+  parsePgEnv,
   pseudonymizeOrderId,
   purchaseRowId,
   tallyPurchaseRows,
@@ -77,6 +80,7 @@ const CHARGE: BillingChargeSource = {
   provider: undefined,
   orderId: RAW_ORDER,
   paymentId: undefined,
+  pgEnv: "live",
   createdAtMs: Date.parse("2026-07-01T04:30:00.000Z"),
   updatedAtMs: Date.parse("2026-07-01T04:30:05.000Z"),
 };
@@ -353,6 +357,7 @@ const LECTURE: LecturePurchaseSource = {
   amount: 49000,
   orderId: "order_lecture_1",
   provider: undefined,
+  pgEnv: "live",
   purchasedAtMs: Date.parse("2026-06-02T09:00:00.000Z"),
 };
 
@@ -570,6 +575,7 @@ test("일반 고객 결제는 external — 실매출로 센다", () => {
   const row = okRow(mapBillingCharge(CHARGE, CTX));
   assert.equal(row.account_class, "external");
   assert.equal(row.account_class, REVENUE_ACCOUNT_CLASS);
+  assert.equal(row.pg_env, REVENUE_PG_ENV);
 });
 
 test("★운영자 축을 못 구하면 external 로 접지 않고 null(미분류) 로 남긴다", () => {
@@ -619,6 +625,46 @@ test("★account_class 컬럼은 NULLABLE 이다 — REQUIRED 면 기존 표에 
   assert.equal(f?.mode, "NULLABLE");
   assert.equal(f?.type, "STRING");
   assert.ok(ANALYTICS_PURCHASE_COLUMNS.includes("account_class"));
+});
+
+test("★pg_env 컬럼은 NULLABLE 이다 — 표식 이전 구간은 소급 추정하지 않는다", () => {
+  assert.deepEqual([...PG_ENVS], ["test", "live"]);
+  const f = ANALYTICS_PURCHASE_SCHEMA.find((x) => x.name === "pg_env");
+  assert.ok(f, "pg_env 컬럼이 스키마에 없다");
+  assert.equal(f?.mode, "NULLABLE");
+  assert.equal(f?.type, "STRING");
+  assert.ok(ANALYTICS_PURCHASE_COLUMNS.includes("pg_env"));
+  assert.equal(parsePgEnv("test"), "test");
+  assert.equal(parsePgEnv("live"), "live");
+  assert.equal(parsePgEnv("sandbox"), null);
+  assert.equal(parsePgEnv(null), null);
+});
+
+test("★테스트 PG 결제는 매출에서 빼고 테스트 결제 건수로 따로 보인다", () => {
+  const testPayment = okRow(mapBillingCharge({ ...CHARGE, pgEnv: "test" }, CTX));
+  assert.equal(testPayment.account_class, "external");
+  assert.equal(testPayment.pg_env, "test");
+  const t = tallyPurchaseRows([testPayment]);
+  assert.equal(t.externalRevenue, 0, "테스트 PG 결제가 실매출에 들어갔다");
+  assert.equal(t.externalRevenueRows, 0);
+  assert.equal(t.testPaymentRows, 1);
+  assert.equal(t.unknownPgEnvRows, 0);
+});
+
+test("★pg_env=NULL 은 미상이다 — test 도 live 도 아니며 매출로 세지 않는다", () => {
+  const unknown = okRow(mapBillingCharge({ ...CHARGE, pgEnv: undefined }, CTX));
+  assert.equal(unknown.pg_env, null);
+  const t = tallyPurchaseRows([unknown]);
+  assert.equal(t.externalRevenue, 0);
+  assert.equal(t.externalRevenueRows, 0);
+  assert.equal(t.testPaymentRows, 0);
+  assert.equal(t.unknownPgEnvRows, 1);
+});
+
+test("토스 강의 단건도 pg_env 를 analytics_purchase 로 전달한다", () => {
+  const row = okRow(mapLecturePurchase({ ...LECTURE, pgEnv: "test" }, CTX));
+  assert.equal(row.provider, "toss");
+  assert.equal(row.pg_env, "test");
 });
 
 test("★무상 부여(founder_grant)는 버려지지 않고 kind=grant 행이 된다", () => {
@@ -718,6 +764,8 @@ test("★실매출 0 은 미상이 아니라 정확한 0 이다", () => {
   assert.equal(t.externalRevenue, 0);
   assert.equal(t.externalRevenueRows, 0);
   assert.equal(t.internalRows, 1);
+  assert.equal(t.testPaymentRows, 0);
+  assert.equal(t.unknownPgEnvRows, 0);
   assert.equal(t.grantRows, 1);
   assert.equal(t.unclassifiedRows, 0);
 });

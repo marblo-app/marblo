@@ -316,9 +316,10 @@ test("★grant 는 매출·accountClass·amount_unknown 계산에 들어가지 �
   const sql = buildRevenueViewSql(PROJECT, OPEN_GATE);
   const paidCte = sql.slice(sql.indexOf("paid AS ("), sql.indexOf("grant AS ("));
   const grantCte = sql.slice(sql.indexOf("grant AS ("), sql.indexOf("joined AS ("));
-  assert.match(paidCte, /SUM\(IF\(amount_known, amount, NULL\)\)/);
-  assert.match(paidCte, /COUNTIF\(NOT amount_known\)/);
+  assert.match(paidCte, /SUM\(IF\(pg_env = 'live' AND amount_known, amount, NULL\)\)/);
+  assert.match(paidCte, /COUNTIF\(pg_env = 'live' AND NOT amount_known\)/);
   assert.match(paidCte, /account_class = 'external'/);
+  assert.match(paidCte, /pg_env = 'live'/);
   assert.ok(!/kind = 'grant'/.test(paidCte));
   assert.ok(!/SUM\(IF\(amount_known/.test(grantCte));
   assert.ok(!/COUNTIF\(NOT amount_known\)/.test(grantCte));
@@ -482,6 +483,8 @@ test("결제 뷰의 약속 컬럼", () => {
     "purchaseCount",
     "paidCount",
     "grantCount",
+    "testPaymentCount",
+    "unknownPgEnvPaymentCount",
     // ★revenueTotal 이 아니다 — 매출 축이 둘이라 어느 쪽인지 이름이 말해야 한다.
     "revenueLedger",
     "revenueCurrency",
@@ -544,6 +547,21 @@ test("★account_class 규약을 재사용한다 — 새 판정을 만들지 않
       "IF(j.accountClass IS NULL, NULL, j.accountClass = 'internal')",
     ),
   );
+});
+
+test("★원장 매출은 pg_env='live' 만 센다 — test/null 은 별도 건수로 드러낸다", () => {
+  const sql = buildRevenueViewSql(PROJECT, OPEN_GATE);
+  const paidCte = sql.slice(sql.indexOf("paid AS ("), sql.indexOf("grant AS ("));
+  assert.match(paidCte, /COUNTIF\(pg_env = 'live'\) AS purchaseCount/);
+  assert.match(paidCte, /COUNTIF\(kind = 'paid' AND pg_env = 'live'\) AS paidCount/);
+  assert.match(paidCte, /COUNTIF\(pg_env = 'test'\) AS testPaymentCount/);
+  assert.match(paidCte, /COUNTIF\(pg_env IS NULL\) AS unknownPgEnvPaymentCount/);
+  assert.match(
+    paidCte,
+    /SUM\(IF\(pg_env = 'live' AND amount_known, amount, NULL\)\) AS revenueKnownAmount/,
+  );
+  assert.ok(sql.includes("AS testPaymentCount"));
+  assert.ok(sql.includes("AS unknownPgEnvPaymentCount"));
 });
 
 // ── 10. DDL ─────────────────────────────────────────────────────────────────
@@ -615,6 +633,11 @@ test("★사람 단위 수익 뷰가 SUM(revenueLedger) 금지의 안전한 경�
   assert.match(sql, /ANY_VALUE\(revenueLedger\) AS revenueLedger/);
   assert.match(sql, /ANY_VALUE\(paidCount\) AS paidCount/);
   assert.match(sql, /ANY_VALUE\(grantCount\) AS grantCount/);
+  assert.match(sql, /ANY_VALUE\(testPaymentCount\) AS testPaymentCount/);
+  assert.match(
+    sql,
+    /ANY_VALUE\(unknownPgEnvPaymentCount\) AS unknownPgEnvPaymentCount/,
+  );
   assert.match(sql, /COUNT\(\*\) AS installRowsRepresented/);
   const selectBody = sql.slice(sql.indexOf("SELECT"), sql.indexOf("FROM "));
   assert.ok(!/SUM\s*\(\s*revenueLedger\s*\)/i.test(selectBody));
@@ -629,6 +652,8 @@ test("사람 단위 수익 뷰의 약속 컬럼", () => {
     "purchaseCount",
     "paidCount",
     "grantCount",
+    "testPaymentCount",
+    "unknownPgEnvPaymentCount",
     "revenueLedger",
     "revenueCurrency",
     "revenueAmountUnknownCount",

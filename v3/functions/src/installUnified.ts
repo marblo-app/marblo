@@ -747,6 +747,8 @@ SELECT
   CAST(NULL AS INT64)     AS purchaseCount,
   CAST(NULL AS INT64)     AS paidCount,
   CAST(NULL AS INT64)     AS grantCount,
+  CAST(NULL AS INT64)     AS testPaymentCount,
+  CAST(NULL AS INT64)     AS unknownPgEnvPaymentCount,
   CAST(NULL AS NUMERIC)   AS revenueLedger,
   CAST(NULL AS STRING)    AS revenueCurrency,
   CAST(NULL AS INT64)     AS revenueAmountUnknownCount,
@@ -808,17 +810,19 @@ paid AS (
   SELECT
     user_key,
     MIN(event_at) AS firstPurchaseAt,
-    COUNT(*) AS purchaseCount,
-    COUNTIF(kind = 'paid') AS paidCount,
-    SUM(IF(amount_known, amount, NULL)) AS revenueKnownAmount,
-    COUNTIF(NOT amount_known) AS revenueAmountUnknownCount,
-    COUNT(DISTINCT IF(amount_known, currency, NULL)) AS currencyCount,
-    ANY_VALUE(IF(amount_known, currency, NULL)) AS revenueCurrency,
+    COUNTIF(pg_env = 'live') AS purchaseCount,
+    COUNTIF(kind = 'paid' AND pg_env = 'live') AS paidCount,
+    COUNTIF(pg_env = 'test') AS testPaymentCount,
+    COUNTIF(pg_env IS NULL) AS unknownPgEnvPaymentCount,
+    SUM(IF(pg_env = 'live' AND amount_known, amount, NULL)) AS revenueKnownAmount,
+    COUNTIF(pg_env = 'live' AND NOT amount_known) AS revenueAmountUnknownCount,
+    COUNT(DISTINCT IF(pg_env = 'live' AND amount_known, currency, NULL)) AS currencyCount,
+    ANY_VALUE(IF(pg_env = 'live' AND amount_known, currency, NULL)) AS revenueCurrency,
     -- ★판정 불가(NULL)를 external 로 승격하지 않는다 — analyticsPurchase.ts 규약.
     --   internal 이 하나라도 섞이면 보수적으로 internal 로 본다(매출로 세지 않게).
     CASE
-      WHEN COUNTIF(account_class = 'internal') > 0 THEN 'internal'
-      WHEN COUNTIF(account_class = 'external') > 0 THEN 'external'
+      WHEN COUNTIF(pg_env = 'live' AND account_class = 'internal') > 0 THEN 'internal'
+      WHEN COUNTIF(pg_env = 'live' AND account_class = 'external') > 0 THEN 'external'
       ELSE NULL
     END AS accountClass
   FROM ${purchase}
@@ -854,6 +858,8 @@ joined AS (
     pu.purchaseCount AS purchaseCount,
     pu.paidCount AS paidCount,
     gr.grantCount AS grantCount,
+    pu.testPaymentCount AS testPaymentCount,
+    pu.unknownPgEnvPaymentCount AS unknownPgEnvPaymentCount,
     pu.revenueKnownAmount AS revenueKnownAmount,
     pu.revenueAmountUnknownCount AS revenueAmountUnknownCount,
     pu.revenueCurrency AS revenueCurrency,
@@ -892,6 +898,8 @@ SELECT
     purchaseCount,
     paidCount,
     grantCount,
+    testPaymentCount,
+    unknownPgEnvPaymentCount,
     accountClass,
     personKey,
     personLinkCount,
@@ -910,6 +918,8 @@ SELECT
   IF(j.revenueMissingReason IS NULL, IFNULL(j.purchaseCount, 0), NULL) AS purchaseCount,
   IF(j.revenueMissingReason IS NULL, IFNULL(j.paidCount, 0), NULL) AS paidCount,
   IF(j.revenueMissingReason IS NULL, IFNULL(j.grantCount, 0), NULL) AS grantCount,
+  IF(j.revenueMissingReason IS NULL, IFNULL(j.testPaymentCount, 0), NULL) AS testPaymentCount,
+  IF(j.revenueMissingReason IS NULL, IFNULL(j.unknownPgEnvPaymentCount, 0), NULL) AS unknownPgEnvPaymentCount,
   -- ★이름이 revenueTotal 이 아니라 revenueLedger 다. 이 뷰에는 이제 **매출 축이
   --   둘**이고(원장·GA4), 'Total' 은 그중 어느 쪽인지 말하지 않는다. 정본이
   --   원장이라는 사실을 컬럼 이름이 직접 말하게 한다.
@@ -973,6 +983,8 @@ SELECT
   ANY_VALUE(purchaseCount) AS purchaseCount,
   ANY_VALUE(paidCount) AS paidCount,
   ANY_VALUE(grantCount) AS grantCount,
+  ANY_VALUE(testPaymentCount) AS testPaymentCount,
+  ANY_VALUE(unknownPgEnvPaymentCount) AS unknownPgEnvPaymentCount,
   ANY_VALUE(revenueLedger) AS revenueLedger,
   ANY_VALUE(revenueCurrency) AS revenueCurrency,
   ANY_VALUE(revenueAmountUnknownCount) AS revenueAmountUnknownCount,

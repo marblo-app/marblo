@@ -50,11 +50,10 @@
  *   판정은 계속 동작한다. 게다가 그 축은 **가명키 집합으로 주입**되므로 이
  *   모듈은 원시 uid 를 비교하지도 않는다.
  *
- * ★"PG 테스트키로 결제됐나" 는 **판정할 수 없다.** billingCharges 문서에
- *   남는 필드에 채널/스토어 정보가 없고(index.ts 의 PortOne storeId·channelKey
- *   는 전부 env 이며 문서에 저장되지 않는다), 토스도 마찬가지다. 없는 표식을
- *   있다고 가정하지 않는다 — 그래서 이 컬럼이 뜻하는 것은 "테스트 채널"이
- *   아니라 **"내부(운영자) 계정"** 이고, 이름도 그렇게 붙였다.
+ * ★`account_class` 는 "PG 테스트키로 결제됐나" 를 뜻하지 않는다. 그건 계정 축이다.
+ *   테스트/실거래 축은 결제 시점에 원장에 남긴 파생 enum(`pgEnv`)만 믿고,
+ *   없던 과거 구간은 `pg_env=NULL` 로 둔다. storeId/channelKey/env 원값은
+ *   크레덴셜이라 웨어하우스에 싣지 않는다.
  *
  * ── ★로그·컬럼에 남기지 않는 것 ────────────────────────────────────────────
  *  - 원시 uid: `user_key` 는 사람 축(PR #1084)이 넣은 **공용 HMAC 함수**
@@ -99,6 +98,14 @@ export const REVENUE_ACCOUNT_CLASS: AccountClass = "external";
  * 없으므로 파서를 두면 절대 안 도는 코드가 된다. 값을 만드는 곳은
  * `classifyAccount()` 하나뿐이고, 그래서 화이트리스트 밖의 값이 나올 수 없다.
  */
+
+/**
+ * PG 환경. 결제 시점의 서버 env 에서 만든 파생 enum 만 저장한다.
+ * `null` 은 표식 이전 행이거나 서버 설정 미비로 판정 불가였던 행이다.
+ */
+export const PG_ENVS = ["test", "live"] as const;
+export type PgEnv = (typeof PG_ENVS)[number];
+export const REVENUE_PG_ENV: PgEnv = "live";
 
 /**
  * 구매 이벤트 종류.
@@ -179,6 +186,11 @@ export interface PurchaseRow {
    * external 로 접지 않는다(접으면 내부 결제가 조용히 매출이 된다).
    */
   account_class: AccountClass | null;
+  /**
+   * ★`test` | `live` | null. 매출 집계는 `live` 만 센다.
+   * null 은 표식 이전/판정 불가이며 test 도 live 도 아니다.
+   */
+  pg_env: PgEnv | null;
   /** billingCharges | lecturePurchases | subscriptions. 대조·감사용. */
   source: string;
   ingested_at: string;
@@ -226,6 +238,8 @@ export const ANALYTICS_PURCHASE_SCHEMA = [
   // ★NULLABLE 이어야 한다. 기존 테이블에 REQUIRED 를 붙이면 BigQuery 가
   // 거부하고, 그러면 이 컬럼이 영영 안 생겨 갈라내기가 조용히 죽는다.
   { name: "account_class", type: "STRING", mode: "NULLABLE" },
+  // ★NULLABLE. 기존 행은 소급 추정하지 않고 NULL 로 둔다.
+  { name: "pg_env", type: "STRING", mode: "NULLABLE" },
   { name: "source", type: "STRING", mode: "REQUIRED" },
   { name: "ingested_at", type: "TIMESTAMP", mode: "REQUIRED" },
 ] as const;
@@ -289,6 +303,8 @@ export interface BillingChargeSource {
   orderId: unknown;
   /** PortOne 경로의 결제 id. */
   paymentId: unknown;
+  /** 결제 시점 서버 env 에서 파생한 test/live enum. 없으면 표식 이전/판정 불가. */
+  pgEnv: unknown;
   createdAtMs: number | null;
   /** 상태가 확정된 시각 — 성공 시각의 최선 근사. */
   updatedAtMs: number | null;
@@ -303,6 +319,8 @@ export interface LecturePurchaseSource {
   orderId: unknown;
   /** "portone" 이면 billingCharges 쪽에 이미 잡혀 있으므로 버린다. */
   provider: unknown;
+  /** 토스 강의 단건 결제 시점 서버 env 에서 파생한 test/live enum. */
+  pgEnv: unknown;
   purchasedAtMs: number | null;
 }
 
@@ -339,6 +357,12 @@ function parseAmount(raw: unknown): number | null {
 /** 비어 있지 않은 문자열만 통과. 그 외는 null. */
 function str(raw: unknown): string | null {
   return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
+}
+
+/** 원장에 남은 PG 환경 enum 검증. 화이트리스트 밖은 없는 값으로 취급한다. */
+export function parsePgEnv(raw: unknown): PgEnv | null {
+  const v = str(raw);
+  return v === "test" || v === "live" ? v : null;
 }
 
 /**
@@ -559,6 +583,7 @@ export function mapBillingCharge(
     provider,
     order_id: pseudonymizeOrderId(rawOrder, ctx.salt),
     reason: cls.reason,
+    pg_env: parsePgEnv(doc.pgEnv),
     source: "billingCharges",
   });
 }
@@ -592,6 +617,7 @@ export function mapLecturePurchase(
     provider: "toss",
     order_id: pseudonymizeOrderId(doc.orderId, ctx.salt),
     reason: "one_time",
+    pg_env: parsePgEnv(doc.pgEnv),
     source: "lecturePurchases",
   });
 }
@@ -632,6 +658,7 @@ export function mapSubscriptionEvent(
     provider: str(doc.paymentProvider),
     order_id: null,
     reason: cls.reason,
+    pg_env: null,
     source: "subscriptions",
   });
 }
@@ -648,8 +675,8 @@ export const REVENUE_KINDS: readonly PurchaseKind[] = ["paid", "renew"];
  * 한 배치의 행 → 성격별 건수·금액. 적재 로그와 어드민 콜러블이 **같은 정의**를
  * 쓰게 하려고 순수 함수로 둔다(정의가 두 벌이면 화면과 로그가 다른 말을 한다).
  *
- * ★금액은 `external` + `amount_known` + 매출 종류일 때만 더한다. 나머지는
- *   건수로만 남는다 — 지우는 게 아니라 가르는 것이다.
+ * ★금액은 `external` + `live` + `amount_known` + 매출 종류일 때만 더한다.
+ *   테스트와 미상은 건수로만 남는다 — 지우는 게 아니라 가르는 것이다.
  */
 export interface PurchaseTally {
   /** 실매출(외부 고객) 합계. 원 단위 정수. 행이 없으면 **0**(미상이 아니다). */
@@ -658,6 +685,10 @@ export interface PurchaseTally {
   externalRevenueRows: number;
   /** 내부(운영자) 계정 결제 건수 — 매출에서 뺐지만 화면에 보여야 하는 수. */
   internalRows: number;
+  /** PG 테스트 환경 결제 건수 — 숨기지 않고 별도 표시한다. */
+  testPaymentRows: number;
+  /** PG 환경 표식이 없는 결제 건수 — 0 이 아니라 미상이다. */
+  unknownPgEnvRows: number;
   /** 무상 부여(founder_grant) 건수. */
   grantRows: number;
   /** 계정 성격을 판정하지 못한 행 수(표식 이전 적재분 / 운영자 축 미설정). */
@@ -674,6 +705,8 @@ export function tallyPurchaseRows(
     externalRevenue: 0,
     externalRevenueRows: 0,
     internalRows: 0,
+    testPaymentRows: 0,
+    unknownPgEnvRows: 0,
     grantRows: 0,
     unclassifiedRows: 0,
     amountUnknownRows: 0,
@@ -682,10 +715,15 @@ export function tallyPurchaseRows(
   for (const r of rows) {
     if (r.account_class === null) t.unclassifiedRows++;
     else if (r.account_class === "internal") t.internalRows++;
+    if (REVENUE_KINDS.includes(r.kind)) {
+      if (r.pg_env === "test") t.testPaymentRows++;
+      else if (r.pg_env === null) t.unknownPgEnvRows++;
+    }
     if (r.kind === "grant") t.grantRows++;
     if (!r.amount_known) t.amountUnknownRows++;
     if (
       r.account_class === REVENUE_ACCOUNT_CLASS &&
+      r.pg_env === REVENUE_PG_ENV &&
       r.amount_known &&
       typeof r.amount === "number" &&
       REVENUE_KINDS.includes(r.kind)
