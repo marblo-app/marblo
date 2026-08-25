@@ -206,10 +206,14 @@ test("재설치 루프는 주석이 아니라 표 밑 한 줄로 나온다", () 
   assert.ok(notes.some((n) => /숨기지 않았다/.test(n)), "dev 설치를 조용히 뺐다");
 });
 
-test("install_class·ft_browser_installs 는 뷰가 아니라 프로필 표에서 1:1 로 읽는다", () => {
+test("헤드라인은 뷰 단독으로 읽고 프로필 보조 컬럼이 없어도 죽지 않는다", () => {
   const sql = buildHygieneSql(PROJECT);
-  assert.match(sql, /LEFT JOIN .*analytics_install_profile.* ON u\.installKey = p\.install_key/);
-  assert.match(sql, /ft_browser_installs/);
+  assert.doesNotMatch(sql, /analytics_install_profile/);
+  assert.doesNotMatch(sql, /ft_browser_installs/);
+  assert.match(sql, /gaKeyInstallCount/);
+});
+
+test("install_class 보조 표는 별도 쿼리로만 읽고 실패하면 사유로 접는다", () => {
   assert.match(buildInstallClassSql(PROJECT), /install_class/);
 });
 

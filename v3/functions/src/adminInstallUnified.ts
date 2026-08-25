@@ -326,14 +326,9 @@ function profileRef(projectId: string): string {
 }
 
 /**
- * ★뷰 ⋈ 프로필 은 **1:1 이다.** 뷰의 알갱이가 곧 `analytics_install_profile` 의
- * 알갱이(install_key)이기 때문이다(install-unified 문서 §2). 행이 부풀 수 없다.
- *
- * 왜 뷰에 컬럼을 더하지 않고 조인하나: `installUnified.ts` 머리말이 "다르게 갈
- * 이유를 찾으면 여기서 고치지 말고 문서를 고치는 티켓을 내라" 라고 못 박았고,
- * 뷰가 이미 배포된 상태에서 컬럼을 더하면 재프로비저닝 전까지 이 탭 전체가
- * `no such field` 로 죽는다 — 그러면 화면은 '유입 0' 으로 읽힌다.
- * 뷰가 `installClass` 를 노출하는 날 이 조인은 지운다.
+ * ★헤드라인은 뷰 하나만 읽는다. 보조 프로필 컬럼(`install_class`)이 아직 없거나
+ * 덜 배포돼도 설치 분모 화면 전체를 죽이면 안 된다. 재설치 루프 최대값은
+ * `v_install_unified.gaKeyInstallCount` 로 이미 노출된다.
  */
 export function buildHygieneSql(projectId: string): string {
   return `SELECT
@@ -346,9 +341,8 @@ export function buildHygieneSql(projectId: string): string {
   COUNT(DISTINCT IF(NOT u.isDevInstall, u.gaKeyHmac, NULL)) AS distinctBrowsers,
   -- ★상한을 만드는 항. 브라우저를 모르는 설치는 조용히 1명으로도 0명으로도 치지 않는다.
   COUNTIF(NOT u.isDevInstall AND u.gaKeyHmac IS NULL)   AS unknownBrowserInstalls,
-  MAX(p.ft_browser_installs)                            AS maxInstallsPerBrowser
-FROM ${viewRef(projectId)} u
-LEFT JOIN ${profileRef(projectId)} p ON u.installKey = p.install_key`;
+  MAX(u.gaKeyInstallCount)                              AS maxInstallsPerBrowser
+FROM ${viewRef(projectId)} u`;
 }
 
 /** #1198 분모 위생 등급 분해. 합이 installsTotal 이다 — 어느 등급도 삼키지 않는다. */
