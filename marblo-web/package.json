@@ -16,11 +16,6 @@
   },
   "dependencies": {
     "@tosspayments/tosspayments-sdk": "^2.6.0",
-    "@visx/axis": "^4.0.0",
-    "@visx/grid": "^4.0.0",
-    "@visx/group": "^4.0.0",
-    "@visx/scale": "^4.0.0",
-    "@visx/shape": "^4.0.0",
     "firebase": "^12.11.0",
     "gray-matter": "^4.0.3",
     "lucide-react": "^1.7.0",
@@ -28,16 +23,19 @@
     "next-intl": "^4.9.0",
     "next-mdx-remote": "^6.0.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "recharts": "^3.10.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
     "firebase-admin": "^13.7.0",
+    "jsdom": "^30.0.1",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5"

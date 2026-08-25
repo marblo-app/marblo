@@ -40,7 +40,7 @@ import {
   describeGa4BridgeFreshness,
   type Ga4BridgeFreshness,
 } from "./ga4BridgeFreshness";
-import { TimeSeriesChart } from "@/components/charts";
+import { MultiSeriesChart, TimeSeriesChart } from "@/components/charts";
 
 // ── 콜러블 응답 타입 (docs/analytics-admin-callables-api.md 미러) ───────────────
 type KeyCount = { key: string; count: number };
@@ -7010,9 +7010,13 @@ export default function AnalyticsPanel({
                     title="DAU 추이"
                     note="일별 고유 활성 clientId (옵트인 표본)"
                   >
-                    {/* ★대표 차트 — 손 SVG LineChart 에서 visx 기반 공용
+                    {/* ★대표 차트 1 — 손 SVG LineChart 에서 공용
                         TimeSeriesChart 로 옮긴 첫 자리다(티켓
-                        MSyaEqPIBsg14YkKf6VZ). 어드민 차트를 한 번에 갈아엎지
+                        MSyaEqPIBsg14YkKf6VZ). ★그 안의 라이브러리는 visx →
+                        recharts 로 바뀌었다(사장님 결정 2026-08-25, 티켓
+                        cUsZBatAgMXGeUObwFmV) — 이 호출부는 **한 줄도 안 바꿨다.**
+                        `ChartFrame` 뒤에 라이브러리를 가둬 둔 값이 여기서 나온다.
+                        어드민 차트를 한 번에 갈아엎지
                         않는다 — 이 앱은 매일 배포되므로 하나를 먼저 옮겨
                         **같은 숫자가 나오는지** 대조로 증명하고(테스트
                         TimeSeriesChart.parity.test.tsx) 나머지는 별도 PR 로
@@ -7700,17 +7704,56 @@ export default function AnalyticsPanel({
                     title="성장/이탈 추이"
                     note="신규 구독 doc · canceled/past_due"
                   >
-                    <TwoLineChart
-                      data={subscriptionTrend.map((d) => ({
-                        date: d.date,
-                        first: d.new,
-                        second: d.churned,
-                      }))}
-                      first={{ label: "성장", color: SERIES_2 }}
-                      second={{ label: "이탈", color: STATUS_CRIT }}
+                    {/* ★대표 차트 2 — 다계열. 손 SVG TwoLineChart 에서 공용
+                        MultiSeriesChart(recharts) 로 옮긴 자리다(티켓
+                        cUsZBatAgMXGeUObwFmV). 여기서 실제로 보이는 것:
+                        · 호버가 한 점이 아니라 **그날의 두 계열 단면**을 낸다
+                        · 범례를 눌러 계열을 끄면 **축도 같이 줄어든다**
+                        · 클릭하면 그날 상세로 들어간다(기존 onDrill 그대로)
+                        · 하이드레이션 전에는 같은 높이의 스켈레톤이 선다
+
+                        색은 그대로다 — '성장'은 슬롯3(#199e70, 기존 SERIES_2 와
+                        같은 값), '이탈'은 상태색 critical(#d03b3b, 기존
+                        STATUS_CRIT). ★이탈에 상태색을 쓰는 건 색이 모자라서가
+                        아니라 그 계열이 '나쁜 쪽'을 뜻하기 때문이고, 색만으로
+                        말하지 않도록 범례 라벨이 항상 함께 나간다.
+
+                        drillScopeKey: 어드민은 전수를 보는 화면이라
+                        visibleScopes 게이트가 없다. 조직 대시보드에서 같은
+                        컴포넌트를 쓸 때는 **반드시 visibleScopes 를 넘긴다**
+                        (org-access §3.4). */}
+                    <MultiSeriesChart
+                      title="성장/이탈 추이"
+                      description="신규 구독과 이탈을 같은 축에서 본다"
+                      surface="dark"
+                      series={[
+                        {
+                          key: "new",
+                          label: "성장",
+                          slot: 3,
+                          drillScopeKey: "subscription:all",
+                          points: subscriptionTrend.map((d) => ({
+                            date: d.date,
+                            value: d.new,
+                          })),
+                        },
+                        {
+                          key: "churned",
+                          label: "이탈",
+                          slot: 3,
+                          tone: "critical",
+                          drillScopeKey: "subscription:all",
+                          points: subscriptionTrend.map((d) => ({
+                            date: d.date,
+                            value: d.churned,
+                          })),
+                        },
+                      ]}
+                      format={fmtInt}
+                      animationKey={days}
                       emptyLabel="성장/이탈 이벤트가 없습니다."
-                      onDrill={(date) =>
-                        openDrill({ scope: "subscription:day", date, days })
+                      onDrill={(t) =>
+                        openDrill({ scope: "subscription:day", date: t.date, days })
                       }
                     />
                   </Panel>

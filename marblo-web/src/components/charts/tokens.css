@@ -46,6 +46,11 @@
 
   /* --- marker / annotation ---------------------------------------------- */
   --viz-marker: #1c5cab;
+
+  /* --- skeleton --------------------------------------------------------- */
+  /* ★중립 회색이다. 계열색을 쓰면 스켈레톤이 가짜 데이터가 된다. 잉크가 아니라
+   * 바탕 쪽에 붙은 값이라 그리드보다 한 단계만 진하다. */
+  --viz-skeleton: #dedcd6;
 }
 
 /* 어두운 바탕. 명시적 opt-in 이다 — 어드민은 OS 설정과 무관하게 항상 어둡고,
@@ -71,6 +76,8 @@
   --viz-series-7: #9085e9;
 
   --viz-marker: #7dd3fc;
+
+  --viz-skeleton: #232326;
 }
 
 /* 상태색은 **테마를 타지 않는다.** 두 바탕 모두에서 같은 네 값이고, 계열
@@ -81,4 +88,26 @@
   --viz-status-warn: #fab219;
   --viz-status-serious: #ec835a;
   --viz-status-critical: #d03b3b;
+}
+
+/* 스켈레톤 숨쉬기. ★모션 민감 사용자에게는 안 움직인다 — 로딩 표시가
+ * 어지럼증의 원인이 되면 안 된다. */
+@keyframes viz-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.viz-skeleton {
+  animation: viz-skeleton-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viz-skeleton {
+    animation: none;
+  }
 }
