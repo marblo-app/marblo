@@ -3,6 +3,7 @@ import { auth, functions } from "../lib/firebase";
 import { scrubValue } from "../lib/telemetry/scrub";
 import { firstPartyTelemetryDefaultEnabled } from "../lib/telemetry/firstPartyGate";
 import { recordTaskRetry } from "./taskRollups";
+import { bindTelemetryLifecycleFlush } from "./telemetryLifecycle";
 
 export type TelemetryEvent =
   | "agent:spawned"
@@ -1396,5 +1397,9 @@ export const telemetry = {
 
   flush: flushTelemetry,
 };
+
+if (typeof window !== "undefined") {
+  bindTelemetryLifecycleFlush(flushTelemetry, window);
+}
 
 export default telemetry;

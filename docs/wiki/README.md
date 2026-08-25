@@ -48,10 +48,10 @@ links: [[empty-query-first]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVEN
 
 | 슬롯 | 폴더 | 1판 |
 | --- | --- | --- |
-| 00 기반 | [00-foundations](00-foundations/README.md) | 스텁 |
+| 00 기반 | [00-foundations](00-foundations/README.md) | [[telemetry-identity-axes]] |
 | 10 주력 | [10-offerings](10-offerings/README.md) | 스텁 (제품·강의·마케팅 실물) |
 | 20 제약 | [20-constraints](20-constraints/README.md) | [[no-live-gui-verify]] |
-| 30 탐구 | [30-investigations](30-investigations/README.md) | 스텁 (노트 3건 전엔 하위폴더 없음) |
+| 30 탐구 | [30-investigations](30-investigations/README.md) | [[post-spawn-telemetry-gap]] |
 | 40 방법론 | [40-methodology](40-methodology/README.md) | [[empty-query-first]] ★첫 축 |
 | 50 운영 | [50-operations](50-operations/README.md) | 스텁 (배포·강의 운영·캠페인 결과) |
 | meta | [_meta](_meta/CONVENTION.md) | 규약 · 사전 · 원장 · 린트 |
@@ -60,7 +60,7 @@ links: [[empty-query-first]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVEN
 
 | adopt | no-go | observe | undecidable |
 | ---: | ---: | ---: | ---: |
-| 2 | 7 | 0 | 0 |
+| 3 | 7 | 0 | 0 |
 
 기각이 채택보다 많은 것이 정상이다. 표가 뒤집히면 정직성 규약이 죽은 것이다.
 

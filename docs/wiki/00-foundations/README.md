@@ -1,9 +1,9 @@
 ---
 title: 00 기반
 tags: [domain/foundations, meta/index]
-status: stub
-date: 2026-08-24
-links: [[CONVENTION]]
+status: active
+date: 2026-08-25
+links: [[CONVENTION]], [[telemetry-identity-axes]]
 ---
 
 # 00-foundations
@@ -13,4 +13,6 @@ links: [[CONVENTION]]
 - Electron 메인, Firestore, MCP, 식별자 축
 - "마블로가 무엇인가" 포지셔닝 어휘. 원본은 [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) (읽기만)
 
-1판은 노트가 없다.
+| 노트 | 한 줄 |
+| --- | --- |
+| [[telemetry-identity-axes]] | `userId` 는 표마다 다른 사람 — 설치 clientId 와 Firebase uid 를 가른다 |

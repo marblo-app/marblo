@@ -3,7 +3,7 @@ title: 조회가 비면 대상이 아니라 조회를 먼저 의심하라
 tags: [domain/methodology, topic/observability, topic/bigquery, topic/identity, verdict/adopt, method/query-audit]
 status: verified
 date: 2026-08-24
-links: [[do-not-retry]], [[no-live-gui-verify]]
+links: [[do-not-retry]], [[no-live-gui-verify]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]]
 ---
 
 # 조회가 비면 대상이 아니라 조회를 먼저 의심하라
@@ -60,4 +60,4 @@ links: [[do-not-retry]], [[no-live-gui-verify]]
 
 ## Backlinks
 
-- [[do-not-retry]] · [[no-live-gui-verify]]
+- [[do-not-retry]] · [[no-live-gui-verify]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]]

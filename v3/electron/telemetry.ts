@@ -2,15 +2,45 @@ import { BrowserWindow } from "electron";
 
 import { normalizeSpawnBlockReason } from "./spawn-block-reason";
 
+/**
+ * IPC 대상 창. 테스트가 electron.BrowserWindow 없이 같은 판정을 돌리려고
+ * isDestroyed + send 만 요구한다.
+ */
+export interface TelemetryIpcWindow {
+  isDestroyed: () => boolean;
+  webContents: { send: (channel: string, payload: unknown) => void };
+}
+
+/**
+ * 텔레메트리 IPC 창을 고른다.
+ *
+ * 종전: `if (!win || win.isDestroyed()) return` — 첫 창이 닫히거나 종료 중에
+ * 파괴되면 agent:stopped 가 조용히 사라졌다. 살아 있는 다른 창이 있으면 그쪽으로
+ * 보낸다. 전부 죽었으면 그때만 버린다.
+ */
+export function resolveTelemetryWindow<T extends TelemetryIpcWindow>(
+  preferred: T | null,
+  liveWindows: readonly T[] = [],
+): T | null {
+  if (preferred && !preferred.isDestroyed()) return preferred;
+  return liveWindows.find((w) => !w.isDestroyed()) ?? null;
+}
+
+function liveBrowserWindows(): BrowserWindow[] {
+  if (typeof BrowserWindow.getAllWindows !== "function") return [];
+  return BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
+}
+
 // Send telemetry events to the renderer process for Firestore persistence
 export function sendTelemetry(
   win: BrowserWindow | null,
   event: string,
   payload: Record<string, unknown>
 ) {
-  if (!win || win.isDestroyed()) return;
+  const target = resolveTelemetryWindow(win, liveBrowserWindows());
+  if (!target) return;
   try {
-    win.webContents.send("telemetry:event", { event, ...payload });
+    target.webContents.send("telemetry:event", { event, ...payload });
   } catch {
     // Silently fail
   }
