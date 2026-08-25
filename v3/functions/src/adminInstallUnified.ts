@@ -277,6 +277,25 @@ export interface InstallDayPoint {
   channelKnown: number;
 }
 
+export interface InstallUnifiedParitySql {
+  /**
+   * 설치 1행 보존 대조.
+   *
+   * 세는 단위: 설치 1행(`analytics_install_profile.install_key` /
+   * `v_install_unified.installKey`). 이 값이 갈리면 화면 연결을 멈추고 뷰
+   * 프로비저닝을 되돌린다.
+   */
+  installRows: string;
+  /**
+   * first_run 이벤트 표본과 통합 설치축 대조.
+   *
+   * 세는 단위가 일부러 다르다: 왼쪽은 옵트인 이벤트를 보낸 clientId 1개,
+   * 오른쪽은 설치 1행. 이 쿼리는 "같아야 한다" 가 아니라 이벤트 표본을 설치
+   * 분모로 쓰지 못하게 잠그는 경고 장치다.
+   */
+  firstRunAxisWarning: string;
+}
+
 /**
  * ★계획 §3-3 이 요청한 파생 컬럼 중 **아직 뷰에 없는 것**.
  *
@@ -419,6 +438,24 @@ WHERE NOT isDevInstall
   AND DATE(firstRunAt) >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)
 GROUP BY day
 ORDER BY day`;
+}
+
+export function buildInstallUnifiedParitySql(
+  projectId: string
+): InstallUnifiedParitySql {
+  return {
+    installRows: `SELECT
+  (SELECT COUNT(*) FROM ${profileRef(projectId)})                    AS sourceInstallRows,
+  (SELECT COUNT(*) FROM ${viewRef(projectId)})                       AS unifiedInstallRows,
+  (SELECT COUNT(DISTINCT installKey) FROM ${viewRef(projectId)})     AS unifiedDistinctInstalls`,
+    firstRunAxisWarning: `SELECT
+  (SELECT COUNT(DISTINCT userId)
+   FROM \`${projectId}.${TELEMETRY_DATASET}.events\`
+   WHERE event = 'app:first_run')                                    AS eventClientIds,
+  (SELECT COUNT(*)
+   FROM ${viewRef(projectId)}
+   WHERE firstRunAt IS NOT NULL)                                     AS unifiedInstallRowsWithFirstRun`,
+  };
 }
 
 // ════════════════════════════════════════════════════════════════════════════

@@ -23,6 +23,7 @@ import {
   buildHygiene,
   buildHygieneSql,
   buildInstallClassSql,
+  buildInstallUnifiedParitySql,
   buildInstallsByDay,
   buildInstallsByDaySql,
   buildMissingReasonRows,
@@ -151,6 +152,23 @@ test("이 모듈은 재집계하지 않는다 — 뷰의 컬럼만 GROUP BY 한�
     // 원천 표를 직접 읽으면 §0 의 병(집계 16곳)이 재발한다.
     assert.doesNotMatch(sql, /analytics_user_daily|install_attribution|ga4_first_touch_current/);
   }
+});
+
+test("★이관 전/후 설치 행수 대조 쿼리를 제공한다 — 세는 단위는 설치 1행이다", () => {
+  const sql = buildInstallUnifiedParitySql(PROJECT).installRows;
+  assert.match(sql, /analytics_install_profile/);
+  assert.match(sql, /v_install_unified/);
+  assert.match(sql, /COUNT\(DISTINCT installKey\)/);
+  assert.doesNotMatch(sql, /events|user_pseudo_id|analytics_purchase/);
+});
+
+test("★first_run 이벤트 표본은 설치 분모와 같다고 잠그지 않는다", () => {
+  const sql = buildInstallUnifiedParitySql(PROJECT).firstRunAxisWarning;
+  assert.match(sql, /event = 'app:first_run'/);
+  assert.match(sql, /COUNT\(DISTINCT userId\)/);
+  assert.match(sql, /firstRunAt IS NOT NULL/);
+  assert.match(sql, /eventClientIds/);
+  assert.match(sql, /unifiedInstallRowsWithFirstRun/);
 });
 
 // ── ★규율 4: 설치 수를 사람 수로 읽지 않는다 ────────────────────────────────

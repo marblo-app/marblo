@@ -11,6 +11,8 @@
  */
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import type {
   RetentionCohorts,
@@ -22,6 +24,22 @@ import type {
 
 type PanelModule = typeof import("./AnalyticsPanel");
 let P: PanelModule;
+
+const ADMIN_CALLABLE_CLASSIFICATION_DOC = path.join(
+  process.cwd(),
+  "..",
+  "v3",
+  "docs",
+  "admin-analytics-callable-migration-classification-2026-08-25.md"
+);
+const ANALYTICS_PANEL_SOURCE = path.join(
+  process.cwd(),
+  "src",
+  "app",
+  "[locale]",
+  "admin",
+  "AnalyticsPanel.tsx"
+);
 
 before(async () => {
   process.env.NEXT_PUBLIC_FIREBASE_API_KEY ??= "test-api-key";
@@ -918,6 +936,38 @@ test("★콜러블 이름은 상수 한 곳에서만 나온다 (계약 이름 �
   // 백엔드가 다른 이름으로 내보내면 조용히 not-found 가 되고 화면은 영원히
   // '연결 전' 을 띄운다. 이름이 바뀌면 이 테스트가 먼저 빨개진다.
   assert.equal(P.CALLABLE_INSTALL_UNIFIED, "getAdminInstallUnified");
+});
+
+test("★화면이 실제 호출하는 getAdmin 콜러블 집합과 이관 분류표가 일치한다", () => {
+  const source = fs.readFileSync(ANALYTICS_PANEL_SOURCE, "utf8");
+  const doc = fs.readFileSync(ADMIN_CALLABLE_CLASSIFICATION_DOC, "utf8");
+  const constantNames = new Map(
+    [
+      ...source.matchAll(
+        /export const (CALLABLE_[A-Z_]+) = "(getAdmin[^"]+)"/g
+      ),
+    ].map((m) => [m[1], m[2]] as const)
+  );
+  const called = new Set<string>();
+  for (const m of source.matchAll(
+    /httpsCallable[\s\S]{0,400}?\(\s*fns\s*,\s*([^,)\n]+|"[^"]+")/g
+  )) {
+    const arg = m[1].trim();
+    const literal = arg.match(/^"(getAdmin[^"]+)"$/)?.[1];
+    const fromConstant = constantNames.get(arg);
+    const name = literal ?? fromConstant;
+    if (name && name !== "getAdminCallableManifest") called.add(name);
+  }
+
+  const table = doc.match(
+    /## 화면 호출 분류표\n\n([\s\S]*?)\n\n`getAdminCallableManifest`/
+  )?.[1];
+  assert.ok(table, "화면 호출 분류표를 찾지 못했다");
+  const classified = new Set(
+    [...table.matchAll(/\| `(getAdmin[^`]+)` \|/g)].map((m) => m[1])
+  );
+
+  assert.deepEqual([...classified].sort(), [...called].sort());
 });
 
 test("★수익 탭은 적재 전·진짜 0·미상을 세로로 가른다", () => {
