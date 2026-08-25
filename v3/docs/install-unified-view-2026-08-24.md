@@ -352,6 +352,14 @@ analytics_purchase                 → firstPurchaseAt / revenueTotal / accountC
 ★이건 이 티켓에서 고칠 것이 아니다. 뷰는 그 사실을 `no_install_key_hmac` 으로
 **말한다.** 다리가 놓이면 뷰는 그대로 두고 값만 채워진다.
 
+> ★후속(`VV733VRpsfGvijYuPWCl`): 그 다리를 **우회하는 두 번째 경로**가 붙었다.
+> GA4 는 같은 세션에 채널과 결제가 같이 실려 있어 `gaKey` 하나로 채널→결제가
+> 이어진다. 원장이 여전히 정본이고 GA4 는 보조축이며, 두 값이 갈리면
+> `revenueDivergenceReason` 이 **둘 다 보이게** 한다.
+> 정의: `ga4-ecommerce-unified-2026-08-24.md`.
+> ★그 문서에서 `revenueTotal` 이 **`revenueLedger`** 로 개명됐다(매출 축이 둘이
+> 됐으므로 이름이 어느 쪽인지 말해야 한다).
+
 ### 6-3. ★붙은 GA4 행도 그대로 믿으면 안 되는 부분
 
 - `channelFirstVisitDate` 가 **진짜 최초 방문이 아니다.** 브리지는 동기화 창(3일)
@@ -362,6 +370,13 @@ analytics_purchase                 → firstPurchaseAt / revenueTotal / accountC
   페이지**지 사용자가 처음 도착한 랜딩이 아니다. 랜딩 축을 광고 성과로 읽지 마라.
 - 붙는 행이 전부 `(direct)/(none)/(direct)` 다. 유료 광고 전이라 정상이다.
   `no_utm` 으로 분류되고 캠페인은 NULL 이다 — **`(direct)` 를 캠페인명으로 세지 않는다.**
+
+  > ★2026-08-24 보정(`VV733VRpsfGvijYuPWCl`): 이 관찰은 **틀린 게 아니라 좁다.**
+  > 원장에 실린 `gaClientId` 가 5개뿐이라 그 5명만 본 결과다. GA4 export 전체
+  > 방문자 축에서는 채널이 실제로 갈린다 — `github.com/referral` ·
+  > `youtube.com/referral` · `l.threads.com/referral` · `threads/social` ·
+  > `naver/organic` 이 실측된다. 자세한 것은
+  > `ga4-ecommerce-unified-2026-08-24.md` §1-3(b).
 
 ---
 

@@ -3,6 +3,7 @@
 // node --test 로 단위검증한다.
 //
 // 설계 정본: v3/docs/install-unified-view-2026-08-24.md (ticket L8RvsReu6Vch5eNYYCJR).
+//   + GA4 이커머스 축: v3/docs/ga4-ecommerce-unified-2026-08-24.md (VV733VRpsfGvijYuPWCl).
 // ★이 파일은 그 문서를 구현한다. 다르게 가야 할 이유를 찾으면 여기서 고치지 말고
 //   문서를 고치는 티켓을 내라 — 코드와 문서가 갈리면 다음 사람이 코드를 믿는다.
 //
@@ -54,6 +55,20 @@ export const SOURCE_USER_DAILY = "analytics_user_daily";
 /** 결제 원장. 알갱이는 **사람**(`user_key`)이라 설치로 접으려면 링크표를 거친다. */
 export const SOURCE_PURCHASE = "analytics_purchase";
 
+/**
+ * GA4 이커머스 정본 읽기 뷰 — `gaKey` 당 퍼널·결제 1행 (ga4Bridge.ts).
+ *
+ * ★이게 이 티켓이 여는 **두 번째 경로**다. 원장 수익 축은
+ *   `analytics_purchase → user_key → 링크표 → analytics_user_daily.install_key_hmac`
+ *   로 가는데 그 마지막 다리가 **전량 NULL** 이라(§6-2) 오늘 수익이 미상이다.
+ *   GA4 는 같은 세션에 채널과 결제가 같이 실려 있어 `gaKey` **하나로** 채널→결제가
+ *   이어진다 — 끊어진 다리를 안 거친다.
+ * ★단 GA4 를 매출의 **정본으로 쓰지 않는다.** 광고차단·쿠키거부로 샌다. 정본은
+ *   원장이고 GA4 는 채널 귀속용 보조축이다. 두 값이 갈리면 하나를 고르지 않고
+ *   `revenueDivergenceReason` 으로 **둘 다 보이게** 한다.
+ */
+export const SOURCE_GA4_ECOMMERCE_CURRENT = "ga4_ecommerce_current";
+
 /** 결제 없는 축약본 — 텔레메트리 데이터셋. */
 export const VIEW_INSTALL_UNIFIED = "v_install_unified";
 
@@ -74,23 +89,79 @@ export interface ReasonRung<F> {
   readonly sql: string;
   /** 같은 조건의 TS 표현 — 단위 테스트가 SQL 과 함께 잠근다. */
   readonly test: (facts: F) => boolean;
-  /** 이 사유가 "모른다" 인가 "없다(진짜 0)" 인가. 문서 §4 의 표와 같다. */
-  readonly kind: "unknown" | "true_zero";
+  /**
+   * 이 사유가 "모른다" 인가 "없다(진짜 0)" 인가. 문서 §4 의 표와 같다.
+   *
+   * ★`divergent` 는 세 번째 부류다 — **양쪽 다 아는데 서로 다르다.** 원장↔GA4
+   *   대조에만 나온다(VV733VRp). `unknown` 으로 뭉치면 "못 봤다" 와 "봤는데
+   *   안 맞는다" 가 같은 칸에 들어가 대조 자체가 무의미해진다.
+   */
+  readonly kind: "unknown" | "true_zero" | "divergent";
 }
 
-/** 채널 사유 판정에 필요한 사실. 전부 조인 결과에서 읽히는 값이다. */
-export interface ChannelFacts {
+/**
+ * ★설치 → GA4 로 가는 **다리 자체**의 사실. 채널 축과 이커머스 축이 이 다리를
+ *   공유한다(둘 다 `install_attribution.gaKeyHmac = gaKey` 로 붙는다).
+ *
+ * 그래서 두 사다리의 앞 세 칸을 **같은 배열에서 만든다** — 손으로 두 벌 적으면
+ * 반드시 갈리고, 갈리면 "채널은 key_mismatch 인데 이커머스는 no_ledger_row" 같은
+ * 설명 불가능한 조합이 표에 나온다.
+ */
+export interface Ga4JoinFacts {
   /** `install_attribution` 에 이 설치의 행이 있나. */
   readonly hasLedgerRow: boolean;
   /** 원시 GA4 client_id(원장). ★조인키가 아니다 — 존재 여부만 쓴다. */
   readonly hasGaClientId: boolean;
-  /** 가명 조인키(원장). 없으면 채널 조인 자체가 불가능하다. */
+  /** 가명 조인키(원장). 없으면 GA4 조인 자체가 불가능하다. */
   readonly hasGaKeyHmac: boolean;
+}
+
+/** 채널 사유 판정에 필요한 사실. 전부 조인 결과에서 읽히는 값이다. */
+export interface ChannelFacts extends Ga4JoinFacts {
   /** 브리지에 그 `gaKey` 행이 있나. */
   readonly hasGa4Row: boolean;
   /** GA4 캠페인 원문. 센티널(`(direct)` 등)도 그대로 들어온다. */
   readonly campaign: string | null;
 }
+
+/** GA4 이커머스 사유 판정에 필요한 사실. */
+export interface Ga4EcommerceFacts extends Ga4JoinFacts {
+  /** 이커머스 롤업 뷰에 그 `gaKey` 행이 있나. */
+  readonly hasEcommerceRow: boolean;
+  /** 그 방문자 결제의 distinct 통화 수. 2 이상이면 금액을 못 더한다. */
+  readonly currencyCount: number;
+}
+
+/**
+ * ★채널·이커머스가 **공유하는** 다리 사유 세 칸. 두 사다리의 앞머리가 여기서 나온다.
+ *
+ * **별칭 규약**: `a` = 원장(dedup 후).
+ *
+ * ★`key_mismatch` 와 뒤따르는 `no_*_row` 를 반드시 가른다. 전자는 "우리가 키를 안
+ *   들고 있어서" 못 붙은 것이고(#1195 배포 전 행의 정상값), 후자는 "GA4 쪽에 그
+ *   방문자가 없어서" 못 붙은 것이다. 합치면 배포·백필이 필요한지 GA4 동기화가
+ *   필요한지 구분할 수 없다.
+ */
+export const GA4_JOIN_REASONS: ReadonlyArray<ReasonRung<Ga4JoinFacts>> = [
+  {
+    reason: "no_ledger_row",
+    sql: "a.installId IS NULL",
+    test: (f) => !f.hasLedgerRow,
+    kind: "unknown",
+  },
+  {
+    reason: "no_ga_client_id",
+    sql: "a.gaClientId IS NULL",
+    test: (f) => !f.hasGaClientId,
+    kind: "unknown",
+  },
+  {
+    reason: "key_mismatch",
+    sql: "a.gaKeyHmac IS NULL",
+    test: (f) => !f.hasGaKeyHmac,
+    kind: "unknown",
+  },
+];
 
 /**
  * ★GA4 가 "캠페인이 없다" 를 말할 때 쓰는 자기 센티널.
@@ -117,31 +188,11 @@ function isCampaignSentinel(v: string | null): boolean {
 /**
  * 채널 사유 사다리. **별칭 규약**: `a` = 원장(dedup 후), `g` = GA4 브리지.
  *
- * ★`key_mismatch` 와 `no_ga4_row` 를 반드시 가른다. 전자는 "우리가 키를 안 들고
- *   있어서" 못 붙은 것이고(#1195 배포 전 행의 정상값), 후자는 "브리지에 그
- *   방문자가 없어서" 못 붙은 것이다. 합치면 배포·백필이 필요한지 브리지 동기화가
- *   필요한지 구분할 수 없다.
+ * ★앞 세 칸은 손으로 안 적는다 — `GA4_JOIN_REASONS` 를 그대로 편다.
  * ★`no_utm` 만 "진짜 0" 이다 — 유입을 **안다**, 캠페인이 없었을 뿐이다.
  */
 export const CHANNEL_REASONS: ReadonlyArray<ReasonRung<ChannelFacts>> = [
-  {
-    reason: "no_ledger_row",
-    sql: "a.installId IS NULL",
-    test: (f) => !f.hasLedgerRow,
-    kind: "unknown",
-  },
-  {
-    reason: "no_ga_client_id",
-    sql: "a.gaClientId IS NULL",
-    test: (f) => !f.hasGaClientId,
-    kind: "unknown",
-  },
-  {
-    reason: "key_mismatch",
-    sql: "a.gaKeyHmac IS NULL",
-    test: (f) => !f.hasGaKeyHmac,
-    kind: "unknown",
-  },
+  ...GA4_JOIN_REASONS,
   {
     reason: "no_ga4_row",
     sql: "g.gaKey IS NULL",
@@ -157,6 +208,48 @@ export const CHANNEL_REASONS: ReadonlyArray<ReasonRung<ChannelFacts>> = [
     kind: "true_zero",
   },
 ];
+
+/**
+ * GA4 이커머스 **퍼널 카운트**의 사유 사다리. **별칭 규약**: `a` = 원장, `e` = 이커머스.
+ *
+ * ★채널 사다리와 다리를 공유하되 마지막 칸이 다르다. `no_ga4_row`(유입 브리지에
+ *   없다)와 `no_ga4_ecommerce_row`(이커머스 표에 없다)는 **다른 사실**이다 —
+ *   유입은 잡혔는데 이커머스 페이지를 한 번도 안 본 방문자가 정확히 후자다.
+ * ★사다리를 다 통과하면 카운트는 **실수**다 — 0 이면 "그 단계를 안 밟았다" 이지
+ *   "모른다" 가 아니다. 그게 이 프로젝트가 세 번 틀린 자리다.
+ * ★`add_to_cart`/`view_cart` 사유는 **없다.** 장바구니 없는 구독 상품이라 그
+ *   단계 자체가 존재하지 않는다. 없는 단계를 표에 만들지 않는다.
+ */
+export const GA4_ECOMMERCE_REASONS: ReadonlyArray<
+  ReasonRung<Ga4EcommerceFacts>
+> = [
+  ...GA4_JOIN_REASONS,
+  {
+    reason: "no_ga4_ecommerce_row",
+    sql: "e.gaKey IS NULL",
+    test: (f) => !f.hasEcommerceRow,
+    kind: "unknown",
+  },
+];
+
+/**
+ * GA4 **금액**의 사유 사다리 — 퍼널 사다리 + 통화 한 칸.
+ *
+ * ★왜 사다리를 둘로 나눴나: 통화가 섞이면 **금액만** 못 더한다. 퍼널 카운트는
+ *   멀쩡한데 그것까지 NULL 로 지우면 멀쩡한 사실을 통화 때문에 버리는 것이다.
+ *   그래서 카운트는 `ga4EcommerceMissingReason`, 금액은 `ga4RevenueMissingReason`
+ *   으로 각자 답한다. 두 배열은 앞부분을 **공유**하므로 갈릴 수 없다.
+ */
+export const GA4_REVENUE_REASONS: ReadonlyArray<ReasonRung<Ga4EcommerceFacts>> =
+  [
+    ...GA4_ECOMMERCE_REASONS,
+    {
+      reason: "ga4_mixed_currency",
+      sql: "e.currencyCount > 1",
+      test: (f) => f.currencyCount > 1,
+      kind: "unknown",
+    },
+  ];
 
 /** 결제 사유 판정에 필요한 사실. */
 export interface RevenueFacts {
@@ -210,6 +303,89 @@ export const REVENUE_REASONS: ReadonlyArray<ReasonRung<RevenueFacts>> = [
   },
 ];
 
+/** 원장 축과 GA4 축을 견주는 데 필요한 사실. 둘 다 이미 계산된 값이다. */
+export interface RevenueDivergenceFacts {
+  /** 원장 수익 사유. NULL 이 아니면 원장 쪽을 모른다. */
+  readonly ledgerReason: string | null;
+  /** GA4 금액 사유. NULL 이 아니면 GA4 쪽을 모른다. */
+  readonly ga4Reason: string | null;
+  /** 원장 수익 합(사유가 NULL 일 때만 의미가 있다). */
+  readonly ledgerAmount: number | null;
+  /** GA4 수익 합(사유가 NULL 일 때만 의미가 있다). */
+  readonly ga4Amount: number | null;
+  readonly ledgerCurrency: string | null;
+  readonly ga4Currency: string | null;
+}
+
+/**
+ * ★원장 ↔ GA4 **차이 사유** 사다리. **별칭 규약**: `j` = 조인 결과.
+ *
+ * ── 이 컬럼이 무엇이고 무엇이 아닌가 ────────────────────────────────────────
+ *   정본은 **원장**이다. GA4 는 광고차단·쿠키거부·ITP 로 샌다. 그래서 이 사다리는
+ *   "어느 쪽이 맞나" 를 고르지 **않는다.** 두 숫자를 나란히 두고 왜 다른지만 적는다.
+ *   `revenueLedger` 와 `revenueGa4` 는 각자 자기 컬럼에 그대로 남는다.
+ *
+ * ── ★팬아웃을 사유에 넣지 않은 이유 (판단을 남긴다) ─────────────────────────
+ *   한 사람이 기기 여러 대면 원장 금액이 여러 행에 반복되고(`personInstallCount`),
+ *   한 브라우저에 설치가 480건이면 GA4 금액이 480행에 반복된다(`gaKeyInstallCount`).
+ *   그래서 **SUM 은 틀린다.** 하지만 팬아웃은 *합산*을 깨는 것이지 *한 행의 비교*를
+ *   깨지 않는다 — 한 행에서 `revenueLedger` 는 그 사람의 총액, `revenueGa4` 는 그
+ *   브라우저의 총액으로 각각 잘 정의돼 있고, 반복돼도 값은 같다. 팬아웃을 사유에
+ *   넣으면 실측상 거의 모든 행이 `axis_fanout` 으로 덮여 이 컬럼이 상수가 된다 —
+ *   즉 아무것도 못 말하게 된다. 그래서 팬아웃은 사유가 아니라 **이미 있는 두 카운트
+ *   컬럼**으로 드러낸다(설계 문서 §9-4 에 합산 규칙을 적었다).
+ *
+ * ★`currency_mismatch` 에서 환산하지 않는다. 환율을 여기서 고르면 그 환율이 어디에도
+ *   안 적힌 채 매출 숫자가 된다. 통화가 다르면 다르다고만 말한다.
+ */
+export const REVENUE_DIVERGENCE_REASONS: ReadonlyArray<
+  ReasonRung<RevenueDivergenceFacts>
+> = [
+  {
+    reason: "ledger_unknown",
+    sql: "j.revenueMissingReason IS NOT NULL",
+    test: (f) => f.ledgerReason !== null,
+    kind: "unknown",
+  },
+  {
+    reason: "ga4_unknown",
+    sql: "j.ga4RevenueMissingReason IS NOT NULL",
+    test: (f) => f.ga4Reason !== null,
+    kind: "unknown",
+  },
+  {
+    reason: "currency_mismatch",
+    sql:
+      "j.revenueCurrency IS NOT NULL AND j.ga4RevenueCurrency IS NOT NULL " +
+      "AND j.revenueCurrency != j.ga4RevenueCurrency",
+    test: (f) =>
+      f.ledgerCurrency !== null &&
+      f.ga4Currency !== null &&
+      f.ledgerCurrency !== f.ga4Currency,
+    kind: "unknown",
+  },
+  {
+    // 원장에는 있는데 GA4 가 못 봤다 — 광고차단·쿠키거부의 정상적인 모습이다.
+    reason: "ga4_missed",
+    sql: "j.revenueLedgerAmount > 0 AND j.ga4RevenueAmount = 0",
+    test: (f) => (f.ledgerAmount ?? 0) > 0 && (f.ga4Amount ?? 0) === 0,
+    kind: "divergent",
+  },
+  {
+    // GA4 에는 있는데 원장에 없다 — 원장 적재 지연이거나 귀속이 다른 사람에게 갔다.
+    reason: "ledger_missed",
+    sql: "j.ga4RevenueAmount > 0 AND j.revenueLedgerAmount = 0",
+    test: (f) => (f.ga4Amount ?? 0) > 0 && (f.ledgerAmount ?? 0) === 0,
+    kind: "divergent",
+  },
+  {
+    reason: "amount_differs",
+    sql: "j.revenueLedgerAmount != j.ga4RevenueAmount",
+    test: (f) => (f.ledgerAmount ?? 0) !== (f.ga4Amount ?? 0),
+    kind: "divergent",
+  },
+];
+
 /** 활성화 사유 — 경과일을 못 세는 경우만이다. "안 썼다" 는 사유가 아니라 0 이다. */
 export const ACTIVATION_REASON_NO_FIRST_RUN = "no_first_run";
 
@@ -219,7 +395,7 @@ export const RETENTION_REASON_NO_DAILY_ROWS = "no_daily_rows";
 /** 사다리를 걸어 첫 번째 해당 사유를 돌려준다. 다 통과하면 `null`(=안다). */
 export function resolveReason<F>(
   rungs: ReadonlyArray<ReasonRung<F>>,
-  facts: F
+  facts: F,
 ): string | null {
   for (const rung of rungs) {
     if (rung.test(facts)) return rung.reason;
@@ -238,6 +414,31 @@ export function resolveRevenueMissingReason(f: RevenueFacts): string | null {
   return resolveReason(REVENUE_REASONS, f);
 }
 
+/** GA4 이커머스 퍼널 사유. `null` 이면 카운트가 실수다(0 일 수 있다). */
+export function resolveGa4EcommerceMissingReason(
+  f: Ga4EcommerceFacts,
+): string | null {
+  return resolveReason(GA4_ECOMMERCE_REASONS, f);
+}
+
+/** GA4 금액 사유. `null` 이면 금액이 실수다(0 일 수 있다). */
+export function resolveGa4RevenueMissingReason(
+  f: Ga4EcommerceFacts,
+): string | null {
+  return resolveReason(GA4_REVENUE_REASONS, f);
+}
+
+/**
+ * 원장↔GA4 차이 사유. `null` 이면 **두 축이 같다**(둘 다 0 이어도 같은 것이다).
+ *
+ * ★어느 쪽도 정답으로 고르지 않는다. 이 함수는 판정이 아니라 라벨이다.
+ */
+export function resolveRevenueDivergenceReason(
+  f: RevenueDivergenceFacts,
+): string | null {
+  return resolveReason(REVENUE_DIVERGENCE_REASONS, f);
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // 3. SQL 조각
 // ════════════════════════════════════════════════════════════════════════════
@@ -254,7 +455,7 @@ function table(projectId: string, dataset: string, name: string): string {
 /** 사다리 → `CASE WHEN … END`. ★SQL 과 TS 가 같은 배열에서 나온다. */
 export function buildReasonCase<F>(
   rungs: ReadonlyArray<ReasonRung<F>>,
-  indent = "    "
+  indent = "    ",
 ): string {
   const lines = ["CASE"];
   for (const r of rungs) {
@@ -292,9 +493,14 @@ export function buildUnifiedViewSql(projectId: string): string {
   const attribution = table(
     projectId,
     TELEMETRY_DATASET,
-    SOURCE_INSTALL_ATTRIBUTION
+    SOURCE_INSTALL_ATTRIBUTION,
   );
   const ga4 = table(projectId, TELEMETRY_DATASET, SOURCE_GA4_CURRENT);
+  const ecom = table(
+    projectId,
+    TELEMETRY_DATASET,
+    SOURCE_GA4_ECOMMERCE_CURRENT,
+  );
   const daily = table(projectId, TELEMETRY_DATASET, SOURCE_USER_DAILY);
 
   return `-- ★생성물이다. 손으로 고치지 마라 — v3/functions/src/installUnified.ts 가 정본이다.
@@ -327,6 +533,16 @@ ga4 AS (
   WHERE TRUE
   QUALIFY ROW_NUMBER() OVER (
     PARTITION BY gaKey ORDER BY firstVisitDate ASC, syncedAt ASC
+  ) = 1
+),
+ecom AS (
+  -- ★GA4 이커머스 롤업. 원천 뷰가 이미 gaKey 당 1행이지만, 그 성질이 깨져도
+  --   설치 행이 부풀지 않게 접는다(ga4 CTE 와 같은 방어).
+  SELECT *
+  FROM ${ecom}
+  WHERE TRUE
+  QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY gaKey ORDER BY lastEcommerceDate DESC NULLS LAST
   ) = 1
 ),
 daily_first AS (
@@ -393,6 +609,38 @@ SELECT
   ${buildReasonCase(CHANNEL_REASONS, "  ")}
                                       AS channelMissingReason,
 
+  -- ── GA4 이커머스 (익명 gaKey 축 · ★보조축이다) ──────────────────────────
+  --   ★이 칸들이 여는 것: 채널과 결제가 **같은 GA4 세션**에 실려 있어 gaKey 하나로
+  --     채널→퍼널→결제가 이어진다. 원장 수익 축이 거쳐야 하는
+  --     analytics_user_daily.install_key_hmac 다리(오늘 전량 NULL)를 **안 거친다**.
+  --   ★그러나 매출의 정본은 아니다 — GA4 는 광고차단·쿠키거부로 샌다. 정본은
+  --     원장(analytics_purchase)이고, 두 축의 대조는 결제 뷰의
+  --     revenueDivergenceReason 이 한다.
+  --   ★★합산 경고: 이 값들은 **브라우저(gaKey) 단위**다. 같은 gaKey 를 공유하는
+  --     설치가 여러 건이면 같은 숫자가 그 행 수만큼 반복된다(실측: 한 브라우저에
+  --     설치 480건). 그래서 SUM(ga4RevenueTotal) 은 틀린다 — 옆의
+  --     gaKeyInstallCount 가 그 배수이고, 접으려면 gaKey 로 GROUP BY 해라.
+  e.viewItemListEvents                AS ga4ViewItemListEvents,
+  e.viewItemEvents                    AS ga4ViewItemEvents,
+  e.beginCheckoutEvents               AS ga4BeginCheckoutEvents,
+  e.addPaymentInfoEvents              AS ga4AddPaymentInfoEvents,
+  e.purchaseEvents                    AS ga4PurchaseEvents,
+  e.firstEcommerceDate                AS ga4FirstEcommerceDate,
+  e.lastEcommerceDate                 AS ga4LastEcommerceDate,
+  e.firstPurchaseDate                 AS ga4FirstPurchaseDate,
+  -- ★조인 실패(모른다)와 "이커머스 페이지를 안 봤다"(안다, 0)를 가르는 한 칸.
+  e.gaKey IS NOT NULL                 AS hasGa4EcommerceRow,
+  ${buildReasonCase(GA4_ECOMMERCE_REASONS, "  ")}
+                                      AS ga4EcommerceMissingReason,
+  -- ★금액은 사다리가 한 칸 더 길다 — 통화가 섞이면 금액만 못 더한다(카운트는 멀쩡).
+  e.purchaseRevenue                   AS ga4RevenueTotal,
+  e.purchaseCurrency                  AS ga4RevenueCurrency,
+  -- ★GA4 가 자기 환율로 환산한 값이다. 통화가 섞여도 합산은 되지만 **근사치**다.
+  e.purchaseRevenueUsd                AS ga4RevenueUsdApprox,
+  e.currencyCount                     AS ga4RevenueCurrencyCount,
+  ${buildReasonCase(GA4_REVENUE_REASONS, "  ")}
+                                      AS ga4RevenueMissingReason,
+
   -- ── 앱 원장 UTM — GA4 와 **다른 축**이다. 섞지 마라 ──────────────────────
   a.utmSource                         AS ledgerUtmSource,
   a.utmMedium                         AS ledgerUtmMedium,
@@ -454,15 +702,18 @@ FROM ${profile} p
 LEFT JOIN ledger_scoped a ON p.install_key = a.installId
 -- ★가명 = 가명. 원시 gaClientId 로 조인하면 에러 없이 영원히 0행이다(#1195).
 LEFT JOIN ga4 g ON a.gaKeyHmac = g.gaKey
+-- ★이커머스도 같은 다리다 — 같은 gaKeyHmac. 다른 키를 쓰면 두 GA4 축이 갈린다.
+LEFT JOIN ecom e ON a.gaKeyHmac = e.gaKey
 LEFT JOIN daily d ON p.install_key = d.install_key`;
 }
 
 /** `CREATE OR REPLACE VIEW` DDL. ★원본 표는 만들지도 고치지도 않는다. */
 export function buildUnifiedViewDdl(projectId: string): string {
   const name = table(projectId, TELEMETRY_DATASET, VIEW_INSTALL_UNIFIED);
-  return [`CREATE OR REPLACE VIEW ${name} AS`, buildUnifiedViewSql(projectId)].join(
-    "\n"
-  );
+  return [
+    `CREATE OR REPLACE VIEW ${name} AS`,
+    buildUnifiedViewSql(projectId),
+  ].join("\n");
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -489,12 +740,16 @@ SELECT
   CAST(NULL AS INT64)     AS purchaseCount,
   CAST(NULL AS INT64)     AS paidCount,
   CAST(NULL AS INT64)     AS grantCount,
-  CAST(NULL AS NUMERIC)   AS revenueTotal,
+  CAST(NULL AS NUMERIC)   AS revenueLedger,
   CAST(NULL AS STRING)    AS revenueCurrency,
   CAST(NULL AS INT64)     AS revenueAmountUnknownCount,
   CAST(NULL AS STRING)    AS accountClass,
   CAST(NULL AS BOOL)      AS isInternal,
   ${sqlString(reason)}    AS revenueMissingReason,
+  -- ★GA4 축은 사람 축 게이트와 무관하게 살아 있다(b.* 로 그대로 통과한다).
+  --   대조만 불가능하다 — 원장 쪽을 모르니까. 그래서 사유는 ledger_unknown 이다.
+  ${sqlString(REVENUE_DIVERGENCE_REASONS[0].reason)}
+                          AS revenueDivergenceReason,
   CAST(NULL AS DATE)      AS personAxisEffectiveFrom
 FROM ${base} b`;
 }
@@ -589,6 +844,22 @@ joined AS (
   LEFT JOIN link l ON h.installKeyHmac = l.installKeyHmac
   -- ★공용 기기(personKey IS NULL)는 여기서 자연히 안 붙는다 — 귀속을 고르지 않는다.
   LEFT JOIN purchase pu ON l.personKey = pu.user_key
+),
+resolved AS (
+  -- ★대조하기 **전에** 두 축의 금액을 각자의 규약대로 확정한다. 사유가 있으면
+  --   미상(NULL), 없으면 실수(0 일 수 있다). 이 한 층이 없으면 차이 사유가
+  --   "미상 vs 0" 을 "값이 다르다" 로 잘못 읽는다.
+  SELECT
+    j.*,
+    IF(
+      j.revenueMissingReason IS NULL,
+      IFNULL(j.revenueKnownAmount, NUMERIC '0'),
+      NULL
+    ) AS revenueLedgerAmount,
+    -- ga4RevenueTotal 은 이미 규약을 지키고 있다(사유가 있는 자리는 전부 NULL) —
+    -- 결제 0건이면 0원이지 NULL 이 아니다(ga4_ecommerce_current 가 그렇게 만든다).
+    j.ga4RevenueTotal AS ga4RevenueAmount
+  FROM joined j
 )
 SELECT
   j.* EXCEPT (
@@ -603,7 +874,9 @@ SELECT
     personKey,
     personLinkCount,
     personInstallCount,
-    revenueMissingReason
+    revenueMissingReason,
+    revenueLedgerAmount,
+    ga4RevenueAmount
   ),
   -- ★사유가 있으면 값은 전부 NULL 이다. 사유가 없으면 값은 **실수**이고 0 일 수
   --   있다 — 그게 "0 과 미적재를 가른다" 의 실물이다.
@@ -615,21 +888,31 @@ SELECT
   IF(j.revenueMissingReason IS NULL, IFNULL(j.purchaseCount, 0), NULL) AS purchaseCount,
   IF(j.revenueMissingReason IS NULL, IFNULL(j.paidCount, 0), NULL) AS paidCount,
   IF(j.revenueMissingReason IS NULL, IFNULL(j.grantCount, 0), NULL) AS grantCount,
-  IF(j.revenueMissingReason IS NULL, IFNULL(j.revenueKnownAmount, NUMERIC '0'), NULL) AS revenueTotal,
+  -- ★이름이 revenueTotal 이 아니라 revenueLedger 다. 이 뷰에는 이제 **매출 축이
+  --   둘**이고(원장·GA4), 'Total' 은 그중 어느 쪽인지 말하지 않는다. 정본이
+  --   원장이라는 사실을 컬럼 이름이 직접 말하게 한다.
+  j.revenueLedgerAmount AS revenueLedger,
   IF(j.revenueMissingReason IS NULL, j.revenueCurrency, NULL) AS revenueCurrency,
   IF(j.revenueMissingReason IS NULL, IFNULL(j.revenueAmountUnknownCount, 0), NULL) AS revenueAmountUnknownCount,
   j.accountClass AS accountClass,
   -- ★판정 불가는 NULL 로 남긴다. 빈 집합으로 접으면 전부 external(=실매출)로 승격된다.
   IF(j.accountClass IS NULL, NULL, j.accountClass = 'internal') AS isInternal,
   j.revenueMissingReason AS revenueMissingReason,
+  -- ── ★원장 ↔ GA4 대조 ────────────────────────────────────────────────────
+  --   숫자를 고르지 않는다. revenueLedger 와 ga4RevenueTotal 은 각자 자기 칸에
+  --   그대로 남고, 이 칸은 **왜 다른지**만 말한다. NULL = 두 축이 같다.
+  --   ★SUM 하기 전에 personInstallCount / gaKeyInstallCount 를 봐라 — 두 축 모두
+  --     설치 알갱이에서 값이 반복된다(설계 문서 §9-4).
+  ${buildReasonCase(REVENUE_DIVERGENCE_REASONS, "  ")}
+    AS revenueDivergenceReason,
   DATE ${sqlString(effectiveFrom)} AS personAxisEffectiveFrom
-FROM joined j`;
+FROM resolved j`;
 }
 
 /** 결제 뷰 본문. 게이트가 닫혀 있으면 결제 컬럼만 미상인 SQL 이 나온다. */
 export function buildRevenueViewSql(
   projectId: string,
-  gate: PersonAxisGate
+  gate: PersonAxisGate,
 ): string {
   return gate.open
     ? buildRevenueOpenSql(projectId, gate.effectiveFrom)
@@ -639,13 +922,9 @@ export function buildRevenueViewSql(
 /** `CREATE OR REPLACE VIEW` DDL(결제 뷰). */
 export function buildRevenueViewDdl(
   projectId: string,
-  gate: PersonAxisGate
+  gate: PersonAxisGate,
 ): string {
-  const name = table(
-    projectId,
-    IDENTITY_DATASET,
-    VIEW_INSTALL_UNIFIED_REVENUE
-  );
+  const name = table(projectId, IDENTITY_DATASET, VIEW_INSTALL_UNIFIED_REVENUE);
   return [
     `CREATE OR REPLACE VIEW ${name} AS`,
     buildRevenueViewSql(projectId, gate),

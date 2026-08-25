@@ -18,6 +18,9 @@ import {
   GA4_BRIDGE_SCHEMA,
   GA4_BRIDGE_SYNC_LOG_TABLE,
   GA4_BRIDGE_SYNC_LOG_SCHEMA,
+  GA4_ECOMMERCE_TABLE,
+  GA4_ECOMMERCE_CURRENT_VIEW,
+  GA4_ECOMMERCE_SCHEMA,
   GA4_SYNC_ROW_LIMIT,
   GA4_SYNC_SCHEDULE_CRON,
   GA4_SYNC_SCHEDULE_TZ,
@@ -26,6 +29,10 @@ import {
   buildExistingKeysQuery,
   buildBridgeCurrentViewSql,
   buildBridgeStatsQuery,
+  buildEcommerceCurrentViewSql,
+  buildGa4EcommerceQuery,
+  dedupeEcommerceRows,
+  toEcommerceRow,
   buildLatestSyncLogQuery,
   chooseSyncDays,
   emptyGa4BridgeStats,
@@ -45,6 +52,8 @@ import {
   type Ga4BridgeSyncLogRow,
   type Ga4BridgeSyncLogWrite,
   type Ga4BridgeSyncReason,
+  type Ga4EcommerceRow,
+  type Ga4EcommerceSourceRow,
 } from "./ga4Bridge";
 import {
   buildCountryFunnel,
@@ -16589,6 +16598,7 @@ const GA4_BRIDGE_KEY_LOOKUP_CHUNK = 5000;
 
 let ga4BridgeTableReady = false;
 let ga4BridgeSyncLogReady = false;
+let ga4EcommerceTableReady = false;
 
 /** 동기화 1회 결과. 콜러블 응답 겸 스케줄 로그. */
 interface Ga4BridgeSyncResult {
@@ -16603,6 +16613,10 @@ interface Ga4BridgeSyncResult {
   skippedExisting: number;
   /** collected_traffic_source 를 못 읽어 content/term 이 null 로 간 경우. */
   collectedTrafficSourceAvailable: boolean;
+  /** GA4 이커머스에서 읽은 (방문자×날짜) 행 수. null 이면 이커머스 단계가 실패했다. */
+  ecommerceScanned: number | null;
+  /** 이커머스 표에 적재된 행 수. ★유입과 달리 이미 있는 날도 다시 적재한다. */
+  ecommerceInserted: number | null;
   notes: string[];
 }
 
@@ -16852,6 +16866,114 @@ async function readExistingBridgeKeys(
 }
 
 /**
+ * 이커머스 표 보장. `ensureGa4BridgeTable` 과 같은 규약 — 없으면 만들고, 있으면
+ * **NULLABLE 컬럼만 덧붙인다**.
+ *
+ * 파티션은 `eventDate`(분석이 실제로 거는 조건이자 알갱이의 절반),
+ * 클러스터는 `gaKey`(조인 축).
+ */
+async function ensureGa4EcommerceTable(): Promise<void> {
+  if (ga4EcommerceTableReady) return;
+  const dataset = bigquery.dataset(BQ_DATASET);
+  const table = dataset.table(GA4_ECOMMERCE_TABLE);
+  const [exists] = await table.exists();
+  if (!exists) {
+    await table.create({
+      schema: GA4_ECOMMERCE_SCHEMA as unknown as {
+        name: string;
+        type: string;
+      }[],
+      timePartitioning: { type: "DAY", field: "eventDate" },
+      clustering: { fields: ["gaKey"] },
+    });
+    functions.logger.info("[ga4Ecommerce] created table", {
+      table: GA4_ECOMMERCE_TABLE,
+    });
+    ga4EcommerceTableReady = true;
+    return;
+  }
+
+  const [metadata] = await table.getMetadata();
+  const live: { name: string }[] = metadata?.schema?.fields ?? [];
+  const liveNames = new Set(live.map((f) => f.name));
+  const additive = GA4_ECOMMERCE_SCHEMA.filter(
+    (f) => !liveNames.has(f.name) && f.mode === "NULLABLE"
+  );
+  if (additive.length > 0) {
+    await table.setMetadata({ schema: { fields: [...live, ...additive] } });
+    functions.logger.info("[ga4Ecommerce] schema columns added", {
+      added: additive.map((f) => f.name),
+    });
+  }
+  ga4EcommerceTableReady = true;
+}
+
+/**
+ * GA4(서울) 이커머스 집계 → US 적재. 한 번 돌 때 하는 일 전부.
+ *
+ * ★유입 브리지와 **다른 규칙**으로 쓴다: 이미 적재된 (gaKey, eventDate) 도 다시
+ *   넣는다. 퍼널 카운트는 누적이고 GA4 는 지각 이벤트로 과거 일자를 교정하므로,
+ *   "이미 있으면 건너뛴다" 로 막으면 그 교정이 영영 반영되지 않는다. 중복은
+ *   `ga4_ecommerce_current` 가 가장 최근 `syncedAt` 을 골라 읽기에서 접는다.
+ *
+ * ★이 함수는 **던지지 않는다.** 이커머스가 실패해도 유입 브리지 동기화는 이미
+ *   끝나 있고, 그걸 같이 되돌리면 회귀 원인을 가린다. 실패는 note 로 드러낸다.
+ */
+async function syncGa4EcommerceInternal(
+  rangeDays: number,
+  salt: string,
+  syncedAt: string,
+  notes: string[]
+): Promise<{ scanned: number | null; inserted: number | null }> {
+  let sourceRows: Ga4EcommerceSourceRow[];
+  try {
+    const [rows] = await bigquery.query({
+      query: buildGa4EcommerceQuery({
+        project: BQ_PROJECT,
+        dataset: GA4_BQ_DATASET,
+      }),
+      params: { days: rangeDays },
+      location: GA4_BQ_LOCATION,
+    });
+    sourceRows = rows as Ga4EcommerceSourceRow[];
+  } catch (e) {
+    const message = safeAnalyticsErrorMessage(e);
+    functions.logger.error("[ga4Ecommerce] source query failed", { message });
+    notes.push(
+      "GA4 이커머스 집계에 실패했다 — 퍼널·결제 칸은 '0' 이 아니라 **미상**이다. 유입 브리지는 정상 적재됐다."
+    );
+    return { scanned: null, inserted: null };
+  }
+
+  const candidates: Ga4EcommerceRow[] = [];
+  for (const raw of sourceRows) {
+    // 형식이 틀린 client_id 는 조인키가 될 수 없다(유입 브리지와 같은 규약).
+    if (!isGaClientId(raw.gaClientId)) continue;
+    const gaKey = deriveGaKey(raw.gaClientId, salt);
+    if (!gaKey) continue;
+    const row = toEcommerceRow(raw, gaKey, syncedAt);
+    if (row) candidates.push(row);
+  }
+  const fresh = dedupeEcommerceRows(candidates);
+
+  await ensureGa4EcommerceTable();
+  for (const chunk of chunkRows(fresh, GA4_BRIDGE_INSERT_CHUNK)) {
+    await bigquery.dataset(BQ_DATASET).table(GA4_ECOMMERCE_TABLE).insert(chunk);
+  }
+  await ensureView(
+    GA4_ECOMMERCE_CURRENT_VIEW,
+    buildEcommerceCurrentViewSql({ project: BQ_PROJECT, dataset: BQ_DATASET })
+  );
+
+  if (sourceRows.length === 0) {
+    notes.push(
+      "이번 창에 이커머스 이벤트가 없다 — 0 이 아니라 그 기간에 아무도 요금제·결제 화면을 안 봤다는 뜻이다."
+    );
+  }
+  return { scanned: sourceRows.length, inserted: fresh.length };
+}
+
+/**
  * GA4(서울) 집계 → US 브리지 적재. 한 번 돌 때 하는 일 전부.
  *
  * ★조회창(`days`)은 스케줄에서 짧다(기본 3일). 그래서 **최초 1회는 반드시
@@ -16948,6 +17070,16 @@ async function syncGa4BridgeInternal(
   // 뷰는 적재 뒤에 보장한다 — 테이블이 먼저 있어야 뷰가 컴파일된다.
   await ensureGa4BridgeViews();
 
+  // ★이커머스는 **같은 조회창**으로 같이 돈다. 스케줄을 두 벌 두면 두 축의
+  //   신선도가 갈리고, 갈린 채로 조인하면 아무도 그 사실을 모른다.
+  //   실패해도 여기까지의 유입 적재는 되돌리지 않는다(함수가 던지지 않는다).
+  const ecommerce = await syncGa4EcommerceInternal(
+    rangeDays,
+    salt,
+    syncedAt,
+    notes
+  );
+
   if (fresh.length === 0 && candidates.length > 0) {
     notes.push(
       "새로 적재된 방문자가 없다 — 이번 창의 방문자는 전부 이미 브리지에 있다(first-touch 는 덮지 않는다)."
@@ -16961,6 +17093,8 @@ async function syncGa4BridgeInternal(
     inserted: fresh.length,
     skippedExisting: candidates.length - fresh.length,
     collectedTrafficSourceAvailable: collectedAvailable,
+    ecommerceScanned: ecommerce.scanned,
+    ecommerceInserted: ecommerce.inserted,
     notes,
   };
 }
@@ -16995,6 +17129,8 @@ export const scheduledSyncGa4Bridge = functions
         scanned: result.scanned,
         inserted: result.inserted,
         skippedExisting: result.skippedExisting,
+        ecommerceScanned: result.ecommerceScanned,
+        ecommerceInserted: result.ecommerceInserted,
         reason: choice.reason,
         rangeDays: choice.days,
       });

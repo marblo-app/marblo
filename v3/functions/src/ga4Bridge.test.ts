@@ -14,6 +14,21 @@ import {
   GA4_SYNC_SCHEDULE_CRON,
   GA4_SYNC_SCHEDULE_TZ,
   ANALYTICS_IDENTITY_TABLE,
+  GA4_ECOMMERCE_TABLE,
+  GA4_ECOMMERCE_CURRENT_VIEW,
+  GA4_ECOMMERCE_EVENTS,
+  GA4_ECOMMERCE_SCHEMA,
+  GA4_NOT_SET_SENTINEL,
+  bridgeAmount,
+  buildEcommerceCurrentViewSql,
+  buildGa4EcommerceQuery,
+  dedupeEcommerceRows,
+  emptyGa4EcommerceStats,
+  normalizeCurrency,
+  parseEcommerceStatsRow,
+  toEcommerceRow,
+  type Ga4EcommerceRow,
+  type Ga4EcommerceSourceRow,
   assembleGa4BridgeFreshness,
   buildBridgeCurrentViewSql,
   buildBridgeStatsQuery,
@@ -582,4 +597,232 @@ test("★GA4 집계 쿼리가 지문 3축을 first-touch 로 뽑는다", () => {
   assert.match(sql, /device\.operating_system\s+AS operating_system/);
   assert.match(sql, /AS browser,/);
   assert.match(sql, /AS operatingSystem,/);
+});
+
+// ── GA4 이커머스 브리지 (ticket VV733VRpsfGvijYuPWCl) ────────────────────────
+
+function ecomSource(
+  patch: Partial<Ga4EcommerceSourceRow> = {}
+): Ga4EcommerceSourceRow {
+  return {
+    gaClientId: "907527541.1783036649",
+    eventDate: "2026-08-07",
+    viewItemListEvents: 6,
+    viewItemEvents: 2,
+    beginCheckoutEvents: 4,
+    addPaymentInfoEvents: 1,
+    purchaseEvents: 1,
+    purchaseRevenue: 19000,
+    purchaseRevenueUsd: 13.356367,
+    purchaseCurrency: "KRW",
+    currencyCount: 1,
+    ...patch,
+  };
+}
+
+test("이커머스 행 정규화 — 실측 모양 그대로 통과한다", () => {
+  const row = toEcommerceRow(ecomSource(), "ga_abc", "2026-08-24T06:00:00Z");
+  assert.ok(row);
+  assert.equal(row.gaKey, "ga_abc");
+  assert.equal(row.eventDate, "2026-08-07");
+  assert.equal(row.purchaseEvents, 1);
+  assert.equal(row.purchaseRevenue, 19000);
+  assert.equal(row.purchaseCurrency, "KRW");
+  // ★소수를 버리지 않는다 — USD 환산값은 애초에 소수다.
+  assert.equal(row.purchaseRevenueUsd, 13.356367);
+});
+
+test("★날짜가 없으면 행을 만들지 않는다 — 알갱이가 (gaKey, eventDate) 다", () => {
+  assert.equal(
+    toEcommerceRow(ecomSource({ eventDate: null }), "ga_abc", "2026-08-24T06:00:00Z"),
+    null
+  );
+  assert.equal(
+    toEcommerceRow(ecomSource({ eventDate: "not-a-date" }), "ga_abc", "2026-08-24T06:00:00Z"),
+    null
+  );
+});
+
+test("★통화가 섞인 날은 금액을 NULL 로 떨어뜨린다 — 더한 숫자는 0 보다 나쁘다", () => {
+  const row = toEcommerceRow(
+    ecomSource({ currencyCount: 2, purchaseRevenue: 33000, purchaseCurrency: "KRW" }),
+    "ga_abc",
+    "2026-08-24T06:00:00Z"
+  );
+  assert.ok(row);
+  assert.equal(row.purchaseRevenue, null);
+  assert.equal(row.purchaseCurrency, null);
+  assert.equal(row.currencyCount, 2);
+  // ★USD 는 GA4 가 이미 환산해 둔 값이라 그때도 남는다.
+  assert.equal(row.purchaseRevenueUsd, 13.356367);
+  // 퍼널 카운트는 통화와 무관하게 멀쩡하다.
+  assert.equal(row.beginCheckoutEvents, 4);
+});
+
+test("★결제가 없는 날도 행이 남는다 — 카운트 0 은 사실이고 금액은 그때 미상이다", () => {
+  const row = toEcommerceRow(
+    ecomSource({
+      purchaseEvents: 0,
+      purchaseRevenue: null,
+      purchaseRevenueUsd: null,
+      purchaseCurrency: null,
+      currencyCount: 0,
+    }),
+    "ga_abc",
+    "2026-08-24T06:00:00Z"
+  );
+  assert.ok(row);
+  assert.equal(row.purchaseEvents, 0);
+  assert.equal(row.viewItemListEvents, 6);
+  assert.equal(row.currencyCount, 0);
+  // 일별 행에서는 null 이고, 롤업 뷰가 "결제 0건 → 0원" 으로 확정한다.
+  assert.equal(row.purchaseRevenue, null);
+});
+
+test("★'(not set)' 은 통화가 아니다 — GA4 자기 센티널이다", () => {
+  assert.equal(normalizeCurrency(GA4_NOT_SET_SENTINEL), null);
+  assert.equal(normalizeCurrency("(direct)"), null);
+  assert.equal(normalizeCurrency(""), null);
+  assert.equal(normalizeCurrency("krw"), "KRW");
+  assert.equal(normalizeCurrency("KRW"), "KRW");
+  // 세 글자가 아니면 통화 코드가 아니다.
+  assert.equal(normalizeCurrency("KOREAN_WON"), null);
+});
+
+test("bridgeAmount 는 숫자가 아니면 0 이 아니라 null 이다", () => {
+  assert.equal(bridgeAmount(19000), 19000);
+  assert.equal(bridgeAmount("19000"), 19000);
+  assert.equal(bridgeAmount("13.356367"), 13.356367);
+  assert.equal(bridgeAmount(null), null);
+  assert.equal(bridgeAmount("보통"), null);
+  assert.equal(bridgeAmount(Number.NaN), null);
+  // ★0 은 진짜 0 이다 — null 로 접지 않는다.
+  assert.equal(bridgeAmount(0), 0);
+});
+
+test("배치 안의 (gaKey, eventDate) 중복만 접는다", () => {
+  const mk = (gaKey: string, eventDate: string): Ga4EcommerceRow => ({
+    gaKey,
+    eventDate,
+    viewItemListEvents: 1,
+    viewItemEvents: 0,
+    beginCheckoutEvents: 0,
+    addPaymentInfoEvents: 0,
+    purchaseEvents: 0,
+    purchaseRevenue: null,
+    purchaseRevenueUsd: null,
+    purchaseCurrency: null,
+    currencyCount: 0,
+    syncedAt: "2026-08-24T06:00:00Z",
+  });
+  const out = dedupeEcommerceRows([
+    mk("ga_a", "2026-08-07"),
+    mk("ga_a", "2026-08-07"),
+    mk("ga_a", "2026-08-08"),
+    mk("ga_b", "2026-08-07"),
+  ]);
+  assert.equal(out.length, 3);
+});
+
+test("★이미 있는 날도 다시 적재한다 — first-touch 와 다른 규칙이다", () => {
+  // selectNewBridgeRows 는 존재하는 키를 버린다(first-touch 는 안 덮는다).
+  // 이커머스는 그런 함수가 없다 — 지각 이벤트 교정과 백필이 이겨야 하기 때문이다.
+  // 읽기 뷰가 (gaKey, eventDate) 당 가장 최근 syncedAt 을 고른다.
+  const sql = buildEcommerceCurrentViewSql({ project: "p", dataset: "d" });
+  assert.match(sql, /PARTITION BY gaKey, eventDate\s*\n?\s*ORDER BY syncedAt DESC/);
+});
+
+test("★금액은 purchase 이벤트로 잠긴다 — 다른 이벤트의 value 를 매출로 세지 않는다", () => {
+  const sql = buildGa4EcommerceQuery({ project: "marblo-2253d", dataset: "analytics_543991508" });
+  assert.match(sql, /SUM\(IF\(event_name = 'purchase', purchase_revenue, NULL\)\)/);
+  assert.match(sql, /SUM\(IF\(event_name = 'purchase', purchase_revenue_usd, NULL\)\)/);
+  // begin_checkout 등의 event_params.value 를 금액으로 읽는 자리가 없어야 한다.
+  assert.ok(!/key = 'value'/.test(sql));
+});
+
+test("★원시 transaction_id 를 US 로 넘기지 않는다", () => {
+  const sql = buildGa4EcommerceQuery({ project: "p", dataset: "d" });
+  assert.ok(!/transaction_id/.test(sql));
+  assert.ok(!GA4_ECOMMERCE_SCHEMA.some((f) => /transaction/i.test(f.name)));
+});
+
+test("★장바구니 이벤트를 만들지 않는다 — 마블로는 장바구니 없는 구독이다", () => {
+  assert.ok(!GA4_ECOMMERCE_EVENTS.includes("add_to_cart"));
+  assert.ok(!GA4_ECOMMERCE_EVENTS.includes("view_cart"));
+  assert.deepEqual([...GA4_ECOMMERCE_EVENTS], [
+    "view_item_list",
+    "view_item",
+    "begin_checkout",
+    "add_payment_info",
+    "purchase",
+  ]);
+});
+
+test("이커머스 쿼리는 서울 날짜창과 @days 를 쓴다 (first-touch 쿼리와 같은 규약)", () => {
+  const sql = buildGa4EcommerceQuery({ project: "marblo-2253d", dataset: "analytics_543991508" });
+  assert.match(sql, /CURRENT_DATE\('Asia\/Seoul'\)/);
+  assert.match(sql, /INTERVAL @days DAY/);
+  assert.match(sql, /marblo-2253d\.analytics_543991508\.events_\*/);
+  // ★알갱이는 (방문자, 날짜) 다.
+  assert.match(sql, /GROUP BY gaClientId, event_day/);
+});
+
+test("이커머스 쿼리도 식별자 화이트리스트를 강제한다", () => {
+  assert.throws(() =>
+    buildGa4EcommerceQuery({ project: "p`; DROP", dataset: "d" })
+  );
+  assert.throws(() => buildGa4EcommerceQuery({ project: "p", dataset: "d;--" }));
+  assert.throws(() =>
+    buildGa4EcommerceQuery({ project: "p", dataset: "d", limit: 0 })
+  );
+});
+
+test("★롤업 뷰에서 '결제 0건' 은 0원이고 '통화가 섞였다' 만 NULL 이다", () => {
+  const sql = buildEcommerceCurrentViewSql({ project: "p", dataset: "d" });
+  assert.match(
+    sql,
+    /IF\(currencyCount > 1, NULL, IFNULL\(purchaseRevenueRaw, NUMERIC '0'\)\)/
+  );
+  // 카운트도 0 으로 확정된다(행이 있으면 카운트는 실수다).
+  assert.match(sql, /IFNULL\(viewItemListEvents, 0\)/);
+  assert.match(sql, /IFNULL\(purchaseEvents, 0\)/);
+});
+
+test("★하루 안에서 섞인 통화도, 날짜를 건너뛰며 섞인 통화도 잡는다", () => {
+  const sql = buildEcommerceCurrentViewSql({ project: "p", dataset: "d" });
+  assert.match(sql, /GREATEST\(\s*\n?\s*IFNULL\(MAX\(currencyCount\), 0\),\s*\n?\s*COUNT\(DISTINCT purchaseCurrency\)\s*\n?\s*\)/);
+});
+
+test("이커머스 스키마 — 금액은 NUMERIC, 덧붙일 컬럼은 NULLABLE", () => {
+  const byName = new Map(GA4_ECOMMERCE_SCHEMA.map((f) => [f.name, f]));
+  assert.equal(byName.get("purchaseRevenue")?.type, "NUMERIC");
+  assert.equal(byName.get("purchaseRevenueUsd")?.type, "NUMERIC");
+  // 알갱이를 이루는 두 컬럼만 REQUIRED 다(+ syncedAt).
+  const required = GA4_ECOMMERCE_SCHEMA.filter((f) => f.mode === "REQUIRED").map(
+    (f) => f.name
+  );
+  assert.deepEqual(required, ["gaKey", "eventDate", "syncedAt"]);
+});
+
+test("이커머스 표·뷰 이름이 first-touch 와 겹치지 않는다", () => {
+  assert.notEqual(GA4_ECOMMERCE_TABLE, GA4_BRIDGE_TABLE);
+  assert.notEqual(GA4_ECOMMERCE_CURRENT_VIEW, GA4_BRIDGE_CURRENT_VIEW);
+  assert.equal(GA4_ECOMMERCE_TABLE, "ga4_ecommerce_daily");
+  assert.equal(GA4_ECOMMERCE_CURRENT_VIEW, "ga4_ecommerce_current");
+});
+
+test("이커머스 통계 행 파싱", () => {
+  const stats = parseEcommerceStatsRow({
+    rowCount: "42",
+    distinctGaKeys: "31",
+    minEventDate: "2026-07-10",
+    maxEventDate: "2026-08-22",
+    purchaseEvents: "1",
+    lastSyncedAt: "2026-08-24T06:00:00Z",
+  });
+  assert.equal(stats.rowCount, 42);
+  assert.equal(stats.distinctGaKeys, 31);
+  assert.equal(stats.purchaseEvents, 1);
+  assert.equal(stats.minEventDate, "2026-07-10");
+  assert.deepEqual(parseEcommerceStatsRow(null), emptyGa4EcommerceStats());
 });

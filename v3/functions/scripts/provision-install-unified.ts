@@ -25,6 +25,7 @@ import { resolvePersonAxisGate } from "../src/personAxis";
 import {
   IDENTITY_DATASET,
   SOURCE_GA4_CURRENT,
+  SOURCE_GA4_ECOMMERCE_CURRENT,
   SOURCE_INSTALL_ATTRIBUTION,
   SOURCE_INSTALL_PROFILE,
   SOURCE_PURCHASE,
@@ -202,6 +203,22 @@ async function main(): Promise<void> {
     SOURCE_GA4_CURRENT,
     ["gaKey", "source", "medium", "campaign", "content", "term"],
     "ga4_first_touch_current 는 GA4 브리지가 만든다(#1111).",
+  );
+  await requireSource(
+    TELEMETRY_DATASET,
+    SOURCE_GA4_ECOMMERCE_CURRENT,
+    [
+      "gaKey",
+      "viewItemListEvents",
+      "beginCheckoutEvents",
+      "purchaseEvents",
+      "purchaseRevenue",
+      "purchaseCurrency",
+      "currencyCount",
+    ],
+    "ga4_ecommerce_current 는 GA4 이커머스 동기화가 만든다(VV733VRp). " +
+      "★배포 후 syncGa4Bridge 를 한 번 돌려야 표와 뷰가 생긴다 — 그전에는 " +
+      "이 뷰를 만들 수 없다(없는 표를 참조하면 CREATE VIEW 가 실패한다).",
   );
   await requireSource(
     TELEMETRY_DATASET,
