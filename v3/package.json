@@ -49,6 +49,7 @@
     "test:answer-delivery": "tsc -p electron/tsconfig.json && node tests/integration/answer-delivery-composer.cjs",
     "smoke:packaged:mac": "node scripts/smoke-packaged-app.mjs",
     "test:rules": "firebase emulators:exec --only firestore \"vitest run --config vitest.rules.config.mjs\"",
+    "cost:axis-check": "tsc -p electron/tsconfig.json && node dist-electron/scripts/check-cost-axis-continuity.js",
     "worktree:reap": "tsc -p electron/tsconfig.json && node dist-electron/scripts/reap-worktrees.js",
     "graph:seed": "tsc -p electron/tsconfig.json && node dist-electron/scripts/seed-routing-graph.js",
     "verify:models": "tsc -p electron/tsconfig.json && node dist-electron/scripts/verify-models.js",
