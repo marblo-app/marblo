@@ -75,6 +75,13 @@ export const VIEW_INSTALL_UNIFIED = "v_install_unified";
 /** 결제가 붙은 완전체 — ★링크표가 사는 데이터셋(IAM 경계). */
 export const VIEW_INSTALL_UNIFIED_REVENUE = "v_install_unified_revenue";
 
+/** 사람 단위로 접은 결제 읽기 뷰 — ★SUM(revenueLedger) 금지의 안전한 경로. */
+export const VIEW_INSTALL_UNIFIED_REVENUE_PERSON =
+  "v_install_unified_revenue_person";
+
+/** 원장 매출로 볼 수 있는 결제 종류. ★grant 는 여기에 절대 들어오지 않는다. */
+export const REVENUE_LEDGER_KINDS: ReadonlyArray<string> = ["paid", "renew"];
+
 // ════════════════════════════════════════════════════════════════════════════
 // 2. ★사유 사다리 — 0 과 미적재를 가르는 자리
 // ════════════════════════════════════════════════════════════════════════════
@@ -794,14 +801,15 @@ link AS (
   FROM ${link}
   GROUP BY install_key
 ),
-purchase AS (
+paid AS (
   -- ★사람 축 소급 상한을 여기서 건다(설계 §5.4 와 같은 경계).
+  -- ★grant 는 이 CTE 에 절대 들어오지 않는다. 무상 부여는 매출·accountClass·
+  --   amount_unknown 을 만들 수 없고, 아래 grant CTE 에서 별도 카운트로만 붙는다.
   SELECT
     user_key,
     MIN(event_at) AS firstPurchaseAt,
     COUNT(*) AS purchaseCount,
     COUNTIF(kind = 'paid') AS paidCount,
-    COUNTIF(kind = 'grant') AS grantCount,
     SUM(IF(amount_known, amount, NULL)) AS revenueKnownAmount,
     COUNTIF(NOT amount_known) AS revenueAmountUnknownCount,
     COUNT(DISTINCT IF(amount_known, currency, NULL)) AS currencyCount,
@@ -815,6 +823,18 @@ purchase AS (
     END AS accountClass
   FROM ${purchase}
   WHERE event_at >= TIMESTAMP(DATE ${sqlString(effectiveFrom)})
+    AND kind IN (${REVENUE_LEDGER_KINDS.map(sqlString).join(", ")})
+  GROUP BY user_key
+),
+grant AS (
+  -- ★무상 부여는 경영 정보지만 매출이 아니다. paid 와 같은 사람이어도 여기서
+  --   따로 접고, revenue/accountClass/amount_unknown 계산에는 절대 섞지 않는다.
+  SELECT
+    user_key,
+    COUNT(*) AS grantCount
+  FROM ${purchase}
+  WHERE event_at >= TIMESTAMP(DATE ${sqlString(effectiveFrom)})
+    AND kind = 'grant'
   GROUP BY user_key
 ),
 joined AS (
@@ -833,7 +853,7 @@ joined AS (
     pu.firstPurchaseAt AS firstPurchaseAt,
     pu.purchaseCount AS purchaseCount,
     pu.paidCount AS paidCount,
-    pu.grantCount AS grantCount,
+    gr.grantCount AS grantCount,
     pu.revenueKnownAmount AS revenueKnownAmount,
     pu.revenueAmountUnknownCount AS revenueAmountUnknownCount,
     pu.revenueCurrency AS revenueCurrency,
@@ -843,7 +863,9 @@ joined AS (
   LEFT JOIN hmac h ON b.installKey = h.install_key
   LEFT JOIN link l ON h.installKeyHmac = l.installKeyHmac
   -- ★공용 기기(personKey IS NULL)는 여기서 자연히 안 붙는다 — 귀속을 고르지 않는다.
-  LEFT JOIN purchase pu ON l.personKey = pu.user_key
+  LEFT JOIN paid pu ON l.personKey = pu.user_key
+  -- ★grant 는 paid 와 별도 축으로만 붙는다. 매출 계산에 섞지 않는다.
+  LEFT JOIN grant gr ON l.personKey = gr.user_key
 ),
 resolved AS (
   -- ★대조하기 **전에** 두 축의 금액을 각자의 규약대로 확정한다. 사유가 있으면
@@ -928,6 +950,52 @@ export function buildRevenueViewDdl(
   return [
     `CREATE OR REPLACE VIEW ${name} AS`,
     buildRevenueViewSql(projectId, gate),
+  ].join("\n");
+}
+
+/**
+ * 사람 단위 결제 읽기 뷰.
+ *
+ * ★설치 뷰에서 `SUM(revenueLedger)` 를 직접 하면 한 사람의 결제가 설치 수만큼
+ *   반복된다. 이 뷰는 `personKey` 로 먼저 접은 뒤 읽는 공식 경로다.
+ * ★값은 고르지 않는다. 설치 행마다 반복되는 사람 단위 값은 `ANY_VALUE` 로 접고,
+ *   반복 배수는 `installRowsRepresented` 로 남긴다.
+ */
+export function buildRevenuePersonViewSql(projectId: string): string {
+  const revenue = table(projectId, IDENTITY_DATASET, VIEW_INSTALL_UNIFIED_REVENUE);
+  return `-- ★생성물이다. 손으로 고치지 마라 — v3/functions/src/installUnified.ts 가 정본이다.
+-- ★사람 단위 안전 경로. 설치 뷰에서 SUM(revenueLedger) 하지 말고 이 뷰를 읽어라.
+SELECT
+  personKey AS personKey,
+  COUNT(*) AS installRowsRepresented,
+  ANY_VALUE(personInstallCount) AS personInstallCount,
+  ANY_VALUE(firstPurchaseAt) AS firstPurchaseAt,
+  ANY_VALUE(purchaseCount) AS purchaseCount,
+  ANY_VALUE(paidCount) AS paidCount,
+  ANY_VALUE(grantCount) AS grantCount,
+  ANY_VALUE(revenueLedger) AS revenueLedger,
+  ANY_VALUE(revenueCurrency) AS revenueCurrency,
+  ANY_VALUE(revenueAmountUnknownCount) AS revenueAmountUnknownCount,
+  ANY_VALUE(accountClass) AS accountClass,
+  ANY_VALUE(isInternal) AS isInternal,
+  ANY_VALUE(revenueMissingReason) AS revenueMissingReason,
+  ANY_VALUE(revenueDivergenceReason) AS revenueDivergenceReason,
+  ANY_VALUE(personAxisEffectiveFrom) AS personAxisEffectiveFrom
+FROM ${revenue}
+WHERE personKey IS NOT NULL
+GROUP BY personKey`;
+}
+
+/** `CREATE OR REPLACE VIEW` DDL(사람 단위 결제 읽기 뷰). */
+export function buildRevenuePersonViewDdl(projectId: string): string {
+  const name = table(
+    projectId,
+    IDENTITY_DATASET,
+    VIEW_INSTALL_UNIFIED_REVENUE_PERSON,
+  );
+  return [
+    `CREATE OR REPLACE VIEW ${name} AS`,
+    buildRevenuePersonViewSql(projectId),
   ].join("\n");
 }
 

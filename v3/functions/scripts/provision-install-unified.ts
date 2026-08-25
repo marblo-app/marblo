@@ -33,6 +33,9 @@ import {
   TELEMETRY_DATASET,
   VIEW_INSTALL_UNIFIED,
   VIEW_INSTALL_UNIFIED_REVENUE,
+  VIEW_INSTALL_UNIFIED_REVENUE_PERSON,
+  buildRevenuePersonViewDdl,
+  buildRevenuePersonViewSql,
   buildRevenueViewDdl,
   buildRevenueViewSql,
   buildUnifiedViewDdl,
@@ -172,11 +175,13 @@ async function main(): Promise<void> {
 
   const unifiedBody = buildUnifiedViewSql(PROJECT_ID);
   const revenueBody = buildRevenueViewSql(PROJECT_ID, gate);
+  const revenuePersonBody = buildRevenuePersonViewSql(PROJECT_ID);
 
   // ★SQL 위생 — 만들기 전에 본다. 뷰 본문은 BQ 에 영구히 남는다.
   for (const [label, sql] of [
     [VIEW_INSTALL_UNIFIED, unifiedBody],
     [VIEW_INSTALL_UNIFIED_REVENUE, revenueBody],
+    [VIEW_INSTALL_UNIFIED_REVENUE_PERSON, revenuePersonBody],
   ] as ReadonlyArray<readonly [string, string]>) {
     const hits = findForbiddenTokens(sql);
     if (hits.length > 0) {
@@ -247,6 +252,12 @@ async function main(): Promise<void> {
       VIEW_INSTALL_UNIFIED_REVENUE,
       buildRevenueViewDdl(PROJECT_ID, gate),
       revenueBody
+    );
+    await ensureView(
+      IDENTITY_DATASET,
+      VIEW_INSTALL_UNIFIED_REVENUE_PERSON,
+      buildRevenuePersonViewDdl(PROJECT_ID),
+      revenuePersonBody
     );
   } else {
     note("");

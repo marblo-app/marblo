@@ -20,10 +20,14 @@ import {
   REVENUE_REASONS,
   REVENUE_REASON_GATE_CLOSED,
   RETENTION_REASON_NO_DAILY_ROWS,
+  REVENUE_LEDGER_KINDS,
   TELEMETRY_DATASET,
   VIEW_INSTALL_UNIFIED,
   VIEW_INSTALL_UNIFIED_REVENUE,
+  VIEW_INSTALL_UNIFIED_REVENUE_PERSON,
   buildReasonCase,
+  buildRevenuePersonViewDdl,
+  buildRevenuePersonViewSql,
   buildRevenueViewDdl,
   buildRevenueViewSql,
   buildUnifiedViewDdl,
@@ -294,6 +298,34 @@ test("★결제 조인은 gaKey 를 거치지 않는다 — 한 브라우저의 
   assert.ok(sql.includes("ON l.personKey = pu.user_key"));
 });
 
+test("★grant 와 paid 는 원장 CTE 부터 절대 합치지 않는다", () => {
+  const sql = buildRevenueViewSql(PROJECT, OPEN_GATE);
+  assert.deepEqual(REVENUE_LEDGER_KINDS, ["paid", "renew"]);
+  assert.match(sql, /paid AS \(/);
+  assert.match(sql, /grant AS \(/);
+  assert.match(sql, /AND kind IN \('paid', 'renew'\)/);
+  assert.match(sql, /AND kind = 'grant'/);
+  assert.match(sql, /LEFT JOIN paid pu ON l\.personKey = pu\.user_key/);
+  assert.match(sql, /LEFT JOIN grant gr ON l\.personKey = gr\.user_key/);
+  assert.match(sql, /gr\.grantCount AS grantCount/);
+  assert.match(sql, /pu\.accountClass AS accountClass/);
+  assert.ok(!/COUNTIF\(kind = 'grant'\)/.test(sql));
+});
+
+test("★grant 는 매출·accountClass·amount_unknown 계산에 들어가지 않는다", () => {
+  const sql = buildRevenueViewSql(PROJECT, OPEN_GATE);
+  const paidCte = sql.slice(sql.indexOf("paid AS ("), sql.indexOf("grant AS ("));
+  const grantCte = sql.slice(sql.indexOf("grant AS ("), sql.indexOf("joined AS ("));
+  assert.match(paidCte, /SUM\(IF\(amount_known, amount, NULL\)\)/);
+  assert.match(paidCte, /COUNTIF\(NOT amount_known\)/);
+  assert.match(paidCte, /account_class = 'external'/);
+  assert.ok(!/kind = 'grant'/.test(paidCte));
+  assert.ok(!/SUM\(IF\(amount_known/.test(grantCte));
+  assert.ok(!/COUNTIF\(NOT amount_known\)/.test(grantCte));
+  assert.ok(!/account_class =/.test(grantCte));
+  assert.ok(!/currencyCount|revenueCurrency/.test(grantCte));
+});
+
 // ── 5. 행수 보존 ────────────────────────────────────────────────────────────
 
 test("★붙는 쪽은 전부 사전 집계이거나 유일키로 접혀 있다", () => {
@@ -332,7 +364,7 @@ test("★결제 뷰도 사전 집계 뒤에 LEFT JOIN 한다", () => {
   assert.match(sql, /GROUP BY user_key/);
   const tail = sql.slice(sql.indexOf("FROM ${BASE}".replace("${BASE}", "")));
   assert.ok(!/\bINNER JOIN\b/.test(tail));
-  assert.equal((sql.match(/LEFT JOIN/g) ?? []).length, 3);
+  assert.equal((sql.match(/LEFT JOIN/g) ?? []).length, 4);
 });
 
 // ── 6. PII·자리표시자 금지 ──────────────────────────────────────────────────
@@ -520,6 +552,7 @@ test("DDL 은 뷰만 만든다 — DROP/ALTER/DELETE 를 내보내지 않는다"
   for (const ddl of [
     buildUnifiedViewDdl(PROJECT),
     buildRevenueViewDdl(PROJECT, OPEN_GATE),
+    buildRevenuePersonViewDdl(PROJECT),
     buildRevenueViewDdl(PROJECT, CLOSED_GATE),
   ]) {
     assert.match(ddl, /^CREATE OR REPLACE VIEW /);
@@ -547,6 +580,11 @@ test("뷰가 각자 맞는 데이터셋에 만들어진다 — 결제는 링크�
       `CREATE OR REPLACE VIEW \`${PROJECT}.${IDENTITY_DATASET}.${VIEW_INSTALL_UNIFIED_REVENUE}\``,
     ),
   );
+  assert.ok(
+    buildRevenuePersonViewDdl(PROJECT).startsWith(
+      `CREATE OR REPLACE VIEW \`${PROJECT}.${IDENTITY_DATASET}.${VIEW_INSTALL_UNIFIED_REVENUE_PERSON}\``,
+    ),
+  );
 });
 
 test("★결제 뷰는 marblo_telemetry 에 만들어지지 않는다 (IAM 경계)", () => {
@@ -567,6 +605,41 @@ test("★한 사람의 결제가 여러 설치 행에 반복된다는 사실이 
   assert.ok(
     buildRevenueViewSql(PROJECT, CLOSED_GATE).includes("AS personInstallCount"),
   );
+});
+
+test("★사람 단위 수익 뷰가 SUM(revenueLedger) 금지의 안전한 경로다", () => {
+  const sql = buildRevenuePersonViewSql(PROJECT);
+  assert.match(sql, /FROM `marblo-2253d\.marblo_identity\.v_install_unified_revenue`/);
+  assert.match(sql, /WHERE personKey IS NOT NULL/);
+  assert.match(sql, /GROUP BY personKey/);
+  assert.match(sql, /ANY_VALUE\(revenueLedger\) AS revenueLedger/);
+  assert.match(sql, /ANY_VALUE\(paidCount\) AS paidCount/);
+  assert.match(sql, /ANY_VALUE\(grantCount\) AS grantCount/);
+  assert.match(sql, /COUNT\(\*\) AS installRowsRepresented/);
+  const selectBody = sql.slice(sql.indexOf("SELECT"), sql.indexOf("FROM "));
+  assert.ok(!/SUM\s*\(\s*revenueLedger\s*\)/i.test(selectBody));
+});
+
+test("사람 단위 수익 뷰의 약속 컬럼", () => {
+  const promised = [
+    "personKey",
+    "installRowsRepresented",
+    "personInstallCount",
+    "firstPurchaseAt",
+    "purchaseCount",
+    "paidCount",
+    "grantCount",
+    "revenueLedger",
+    "revenueCurrency",
+    "revenueAmountUnknownCount",
+    "accountClass",
+    "isInternal",
+    "revenueMissingReason",
+    "revenueDivergenceReason",
+    "personAxisEffectiveFrom",
+  ];
+  const found = new Set(aliases(buildRevenuePersonViewSql(PROJECT)));
+  for (const col of promised) assert.ok(found.has(col), `누락: ${col}`);
 });
 
 test("★게이트 열림·닫힘의 컬럼 집합이 정확히 같다 — 스키마가 설정으로 바뀌면 안 된다", () => {
