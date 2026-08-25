@@ -53,4 +53,4 @@ writer 가 다르다. 익명 설치 여정은 clientId 를 `userId` 칸에 넣�
 
 ## Backlinks
 
-- [[do-not-retry]] · [[empty-query-first]] · [[post-spawn-telemetry-gap]]
+- [[do-not-retry]] · [[empty-query-first]] · [[post-spawn-telemetry-gap]] · [[verify-result-row]] · [[counting-unit-first]]

@@ -6,10 +6,10 @@ name: Lint
 on:
   push:
     branches: [main]
-    paths: ["v3/**"]
+    paths: ["v3/**", "docs/wiki/**"]
   pull_request:
     branches: [main]
-    paths: ["v3/**"]
+    paths: ["v3/**", "docs/wiki/**"]
 
 jobs:
   lint:
@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,3 +42,17 @@ jobs:
       - name: Lint
         working-directory: v3
         run: npm run lint
+
+      - name: Wiki convention lint
+        run: python3 docs/wiki/_meta/lint_wiki.py docs/wiki
+
+      - name: Wiki freshness tests
+        run: python3 -m unittest docs/wiki/_meta/test_check_wiki_freshness.py
+
+      - name: Wiki freshness check
+        if: github.event_name == 'pull_request'
+        run: python3 docs/wiki/_meta/check_wiki_freshness.py origin/${{ github.base_ref }}...HEAD
+
+      - name: Wiki freshness check
+        if: github.event_name == 'push'
+        run: python3 docs/wiki/_meta/check_wiki_freshness.py ${{ github.event.before }} ${{ github.sha }}

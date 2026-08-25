@@ -36,3 +36,18 @@ python3 docs/wiki/_meta/lint_wiki.py docs/wiki
 Marblo MCP `wiki_ingest` → `wiki_lint` → `wiki_query`. `root_path` 는 `docs/wiki`.
 
 도구 소유 파일만 쓴다: `index.md` `log.md` `MEMORY.md`.
+
+## L3 위키 적재 누락 감지
+
+```
+python3 docs/wiki/_meta/check_wiki_freshness.py
+python3 docs/wiki/_meta/check_wiki_freshness.py origin/main...HEAD
+```
+
+읽기 전용. 전자동 요약을 만들지 않는다. 변경 세트에 `v3/docs/**/*.md` 신규 문서가 있는데 `docs/wiki/**/*.md` 변경이 없으면 실패한다.
+
+탈출구는 결정 기록이다. 위키 감이 아니면 [WIKI-SKIP](WIKI-SKIP.md)에 아래 형식으로 사유를 남긴다.
+
+| 원본 | 사유 |
+| --- | --- |
+| `v3/docs/example.md` | 일회성 배포 기록이라 재사용 규칙이 없다 |

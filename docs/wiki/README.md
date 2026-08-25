@@ -2,8 +2,8 @@
 title: 마블로 지식위키
 tags: [meta/index, status/normative]
 status: active
-date: 2026-08-24
-links: [[empty-query-first]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVENTION]], [[TAXONOMY]], [[LINK-MAP]], [[LINT]]
+date: 2026-08-25
+links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVENTION]], [[TAXONOMY]], [[LINK-MAP]], [[LINT]]
 ---
 
 # 마블로 지식위키
@@ -14,7 +14,9 @@ links: [[empty-query-first]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVEN
 
 1. 원본 문서는 옮기거나 복사하지 않는다. 노트가 가리키고, 갈리면 원본이 옳다.
 2. 조회가 비면 대상이 아니라 조회를 먼저 의심한다 — [[empty-query-first]].
-3. 새 아이디어는 [[do-not-retry]] 를 먼저 본다.
+3. 조회가 있어도 그 행이 네가 생각한 행인지 확인한다 — [[verify-result-row]].
+4. 세는 단위를 먼저 적는다 — [[counting-unit-first]].
+5. 새 아이디어는 [[do-not-retry]] 를 먼저 본다.
 
 ## 여기서 시작하세요
 
@@ -22,6 +24,8 @@ links: [[empty-query-first]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVEN
 | --- | --- |
 | 그거 전에 해봤나? | [[do-not-retry]] |
 | 쿼리/표가 비다 | [[empty-query-first]] |
+| 쿼리/표에 결과가 있다 | [[verify-result-row]] |
+| 비율·합계를 말해야 한다 | [[counting-unit-first]] |
 | 화면으로 확인하고 싶다 | [[no-live-gui-verify]] |
 | 강의·마케팅 노트를 어디에 두나 | 아래 **어디에 두나** |
 | 노트를 어떻게 쓰나 | `/wiki-note` · [CONVENTION](_meta/CONVENTION.md) |
@@ -52,7 +56,7 @@ links: [[empty-query-first]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVEN
 | 10 주력 | [10-offerings](10-offerings/README.md) | 스텁 (제품·강의·마케팅 실물) |
 | 20 제약 | [20-constraints](20-constraints/README.md) | [[no-live-gui-verify]] |
 | 30 탐구 | [30-investigations](30-investigations/README.md) | [[post-spawn-telemetry-gap]] |
-| 40 방법론 | [40-methodology](40-methodology/README.md) | [[empty-query-first]] ★첫 축 |
+| 40 방법론 | [40-methodology](40-methodology/README.md) | [[empty-query-first]] · [[verify-result-row]] · [[counting-unit-first]] |
 | 50 운영 | [50-operations](50-operations/README.md) | 스텁 (배포·강의 운영·캠페인 결과) |
 | meta | [_meta](_meta/CONVENTION.md) | 규약 · 사전 · 원장 · 린트 |
 
