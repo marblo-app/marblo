@@ -657,8 +657,38 @@ type AdSpendMatchStatus =
   | { kind: "saved"; message: string }
   | { kind: "error"; message: string };
 
-// 분포 렌즈 — 'events'(발생 총량, 기본) vs 'clients'(고유 사용자 수).
+// 분포 렌즈 — 'events'(발생 총량, 기본) vs 'clients'(고유 설치 수).
+// ★clientId 1개 = 설치 기록 1건이지 사람 1명이 아니다. 한 사람이 설치를 2번 하면 2(#1222).
 type MetricMode = "events" | "clients";
+
+/**
+ * 설치 축 숫자의 화면 단위. 사람/사용자로 적으면 다음 사람이 분모를 또 섞는다.
+ *
+ * ★"대" 가 아니다. "설치 대수"는 한국어 표준 용어지만 그 말은
+ *   "설치 1건 = 기기 1대"를 전제한다. 우리 데이터는 그 전제를 위반한다 —
+ *   install_attribution 631행의 고유 gaClientId 는 5개다(재설치 루프,
+ *   v3/docs/activation-metric-repair-2026-08-24.md:73). "631대"라고 쓰면
+ *   631기기라고 말하는 건데 실제로는 브라우저 5개다. 사람으로 읽히던 걸
+ *   기기로 읽히게 바꿨을 뿐, 3.1% 를 만든 오류(설치 행을 사람/기기로 읽음)가
+ *   그대로다. "건"은 설치 기록 1행이지 기기·사람이 아니다.
+ */
+export const INSTALL_COUNT_UNIT = "건";
+export const ACTIVE_INSTALLS_LABEL = "활성 설치";
+export const UNIQUE_INSTALLS_LABEL = "고유 설치";
+export const DAU_INSTALLS_LABEL = "일 활성 설치";
+export const WAU_INSTALLS_LABEL = "주 활성 설치";
+/** events WHERE event='app:first_run' — 옵트인·계측 시점 표본. 설치 분모 아님. */
+export const FIRST_RUN_OPS_SAMPLE_LABEL = "운영 표본";
+export const FIRST_RUN_OPS_SAMPLE_HINT =
+  "app:first_run 이벤트는 옵트인·계측 시점 영향을 받는 표본이라 설치 분모가 아닙니다. " +
+  "설치·활성화 헤드라인 분모는 v_install_unified(firstRunAt) 또는 analytics_install_profile 만 씁니다.";
+
+export function isAppFirstRunOpsSampleStep(step: {
+  key: string;
+  event: string;
+}): boolean {
+  return step.key === "first_run" || step.event === "app:first_run";
+}
 
 type UsageSummary = {
   rangeDays: number;
@@ -1843,12 +1873,13 @@ function TwoLineChart({
   );
 }
 
-// 옵트인 표본 배지.
-function SampleBadge({ n }: { n: number }) {
+// 옵트인 표본 배지. ★n 은 clientId(설치) 수이지 사람 수가 아니다(#1222).
+export function SampleBadge({ n }: { n: number }) {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-900/50 bg-amber-950/30 px-2.5 py-1 text-xs text-amber-300">
       <Info className="h-3.5 w-3.5" />
-      옵트인 {fmtInt(n)}명 기준 · 익명 집계
+      {ACTIVE_INSTALLS_LABEL} {fmtInt(n)}
+      {INSTALL_COUNT_UNIT} · 옵트인 표본 · 익명 집계
     </span>
   );
 }
@@ -1906,7 +1937,7 @@ const SMALL_SAMPLE_MAX = 10;
 //   · 분자 `connectedClients`(= d_model_connected) 는 정본 앵커 + 하위호환 두
 //     신호의 **합집합**이라, 이 조회 구간 밖에서 이미 연결을 끝낸 설치까지 센다.
 //   · 분모 `firstRunBase`(= d_first_run_base) 는 이 구간에 `app:first_run` 을
-//     찍은 설치만 센다.
+//     찍은 clientId 만 센다 — 설치 분모가 아니라 운영 표본이다(#1222).
 // 그래서 분자가 분모를 넘는 것은 고장이 아니라 **정상적으로 일어나는 일**이다.
 // 서버(buildZeroFrictionKpis)는 이미 앞단 이탈을 `Math.max(0, ...)` 로 자르며
 // 그 사실을 인정하고 있는데, **비율은 안 잘랐다** — 그 구멍으로 128.6% 가 화면까지
@@ -5295,10 +5326,24 @@ export function FunnelAdminExclusionNote({
   );
 }
 
+/** 설치 축 헤드라인 분모. events 의 app:first_run 이 아니라 v_install_unified. */
+export type InstallHeadlineSpawn = {
+  spawned: UnifiedRatio;
+  completed?: UnifiedRatio | null;
+  source: string;
+};
+
 export function OnboardingFunnelView({
   funnel,
+  installHeadline,
 }: {
   funnel: OnboardingFunnel;
+  /**
+   * ★설치·활성화 헤드라인 분모. v_install_unified(또는 analytics_install_profile)
+   * 에서 온 spawned 비율만 받는다. 없으면 events first_run 을 설치 분모로
+   * 쓰지 않고 운영 표본으로만 표기한다(#1222).
+   */
+  installHeadline?: InstallHeadlineSpawn;
 }) {
   const steps = funnel.steps;
   const maxClients = Math.max(1, ...steps.map((s) => s.clients));
@@ -5323,7 +5368,7 @@ export function OnboardingFunnelView({
       s.event === "agent:spawned" ||
       s.label.includes("스폰")
   );
-  const preSpawnLossRate =
+  const opsSampleLossRate =
     firstRunStep && spawnStep && firstRunStep.clients > 0
       ? Math.max(0, firstRunStep.clients - spawnStep.clients) /
         firstRunStep.clients
@@ -5384,36 +5429,74 @@ export function OnboardingFunnelView({
                 </b>
                 가 실제로 첫 티켓을 완료했습니다 — 그 설치들은 로그인이 조회창
                 밖이라 분모(가입)에 없어서 분자에서도 빠집니다. 참인 명제는
-                &ldquo;이 기간에 새로 가입한 {fmtInt(headline.baseClients)}명 중
-                24시간 안에 완료한 사람은 없다&rdquo;까지입니다.
+                &ldquo;이 기간에 새로 들어온{" "}
+                {fmtInt(headline.baseClients)}
+                {INSTALL_COUNT_UNIT} 설치 중 24시간 안에 완료한 설치는
+                없다&rdquo;까지입니다.
               </p>
             )}
         </div>
       )}
-      {firstRunStep && spawnStep && (
+      {installHeadline && (
         <div className="rounded-lg border border-red-900/40 bg-red-950/20 p-3 text-xs leading-relaxed text-red-200/90">
           <p className="font-semibold">가장 큰 이탈은 첫 스폰 전입니다.</p>
           <p className="mt-1">
-            앱 첫 실행{" "}
-            <b className="tabular-nums">{fmtInt(firstRunStep.clients)}</b> → 첫
-            스폰 <Ratio numerator={spawnStep.clients} denominator={firstRunStep.clients} />
+            설치 축(<span className="font-mono">{installHeadline.source}</span>)
+            첫 스폰{" "}
+            <Ratio
+              numerator={installHeadline.spawned.numerator}
+              denominator={installHeadline.spawned.denominator}
+            />
+            {installHeadline.completed ? (
+              <>
+                {" "}
+                → 첫 완주{" "}
+                <Ratio
+                  numerator={installHeadline.completed.numerator}
+                  denominator={installHeadline.completed.denominator}
+                />
+              </>
+            ) : null}
+            . 분모는 firstRunAt 이 있는 설치 1행입니다. events 의 app:first_run
+            이 아닙니다.
+          </p>
+        </div>
+      )}
+      {firstRunStep && spawnStep && (
+        <div className="rounded-lg border border-amber-900/40 bg-amber-950/20 p-3 text-xs leading-relaxed text-amber-100/90">
+          <p className="font-semibold">
+            {FIRST_RUN_OPS_SAMPLE_LABEL} (app:first_run 이벤트)
+          </p>
+          <p className="mt-1">
+            이벤트 보낸 clientId{" "}
+            <b className="tabular-nums">
+              {fmtInt(firstRunStep.clients)}
+              {INSTALL_COUNT_UNIT}
+            </b>{" "}
+            → 첫 스폰{" "}
+            <Ratio
+              numerator={spawnStep.clients}
+              denominator={firstRunStep.clients}
+            />
             {completedStep ? (
               <>
                 {" "}
                 → 첫 태스크 완료{" "}
-                <b className="tabular-nums">{fmtInt(completedStep.clients)}</b>
+                <b className="tabular-nums">
+                  {fmtInt(completedStep.clients)}
+                  {INSTALL_COUNT_UNIT}
+                </b>
               </>
             ) : null}
-            . 오늘 BQ 실측은 앱 첫 실행 577 → 첫 스폰 18(3.1%) → 첫 태스크 완료
-            2이고, 첫 스폰 전 이탈은 96.9%입니다.{" "}
-            {preSpawnLossRate != null ? (
+            . {FIRST_RUN_OPS_SAMPLE_HINT}
+            {opsSampleLossRate != null ? (
               <>
-                이 응답 기준 첫 스폰 전 이탈은{" "}
-                <b className="tabular-nums">{fmtPct(preSpawnLossRate)}</b>
-                입니다.{" "}
+                {" "}
+                이 표본의 첫 스폰 전 이탈은{" "}
+                <b className="tabular-nums">{fmtPct(opsSampleLossRate)}</b>
+                입니다.
               </>
             ) : null}
-            운영 판단은 뒤쪽 마이크로지표보다 이 앞단 절벽을 먼저 보세요.
           </p>
         </div>
       )}
@@ -5461,6 +5544,14 @@ export function OnboardingFunnelView({
                 <div className="flex items-center gap-3">
                   <div className="flex w-40 shrink-0 items-center gap-1 text-xs text-zinc-400">
                     <span>{s.label}</span>
+                    {isAppFirstRunOpsSampleStep(s) && (
+                      <span
+                        className="rounded bg-amber-900/40 px-1 text-[9px] font-medium text-amber-300"
+                        title={FIRST_RUN_OPS_SAMPLE_HINT}
+                      >
+                        {FIRST_RUN_OPS_SAMPLE_LABEL}
+                      </span>
+                    )}
                     {s.kind === "activation" && (
                       <span className="rounded bg-emerald-900/50 px-1 text-[9px] font-medium text-emerald-300">
                         활성화
@@ -5471,7 +5562,7 @@ export function OnboardingFunnelView({
                         시간창이 다르다). 서버 note 와 같은 이야기. */}
                     {/* ★계측 상태를 먼저 말한다. '참고' 는 "왜 믿기 어려운지"를
                         안 알려줘서 결국 0 이 그대로 읽혔다 — 사장님 화면의
-                        "첫 대화 0명 / 스폰 2명" 이 그렇게 나왔다. */}
+                        "첫 대화 0건 / 스폰 2건" 이 그렇게 나왔다. */}
                     {isMissing ? (
                       <span
                         className="rounded bg-zinc-800 px-1 text-[9px] font-medium text-zinc-400"
@@ -5500,7 +5591,7 @@ export function OnboardingFunnelView({
                     )}
                   </div>
                   {/* ★계측이 전기간 0건인 칸은 막대를 그리지 않는다. 길이 0 짜리
-                      막대 + "0명" 은 화면에서 "아무도 안 했다" 와 구분이 안 된다 —
+                      막대 + "0건" 은 화면에서 "아무도 안 했다" 와 구분이 안 된다 —
                       이 화면의 규약(0 / 미수집 / 적재 전)이 바로 그걸 막으려고
                       있는 것이다. */}
                   {isMissing ? (
@@ -5528,7 +5619,8 @@ export function OnboardingFunnelView({
                     />
                     <div className="absolute inset-0 flex items-center gap-2 px-2">
                       <span className="text-xs font-semibold tabular-nums text-zinc-100">
-                        {fmtInt(s.clients)}명
+                        {fmtInt(s.clients)}
+                        {INSTALL_COUNT_UNIT}
                       </span>
                       {s.events > 0 && (
                         <span
@@ -5558,12 +5650,13 @@ export function OnboardingFunnelView({
                   </div>
                   )}
                 </div>
-                {/* ★순차 0 인데 창 안 실측은 N — 이 한 줄이 "첫 대화 0명인데
-                    스폰 2명" 이라는 자기모순의 정체다. 값을 고치지 않고(소급
+                {/* ★순차 0 인데 창 안 실측은 N — 이 한 줄이 "첫 대화 0건인데
+                    스폰 2건" 이라는 자기모순의 정체다. 값을 고치지 않고(소급
                     보정 금지) 두 수를 나란히 보여 준다. */}
                 {undercounted && (
                   <p className="mt-0.5 pl-[10.75rem] text-[11px] leading-relaxed text-amber-300/80">
-                    ↳ 순차 정의로는 {fmtInt(s.clients)}명이지만, 같은 기간에 이
+                    ↳ 순차 정의로는 {fmtInt(s.clients)}
+                    {INSTALL_COUNT_UNIT}이지만, 같은 기간에 이
                     이벤트를 실제로 낸 설치는{" "}
                     <b className="tabular-nums">{fmtInt(s.everInWindow ?? 0)}개</b>
                     입니다
@@ -6168,12 +6261,15 @@ function HorizonRateCell({
   selected,
   onSelect,
   ariaLabel,
+  unitNoun,
 }: {
   rate: RetentionCountedRate;
   membership: HorizonMembership | null;
   selected: boolean;
   onSelect: () => void;
   ariaLabel: string;
+  /** 설치 축이면 '설치', 계정 축이면 '계정'. 사용자/사람이 아니다. */
+  unitNoun: "설치" | "계정";
 }) {
   const linkable = membership != null && rate.denominator > 0;
   if (!linkable) {
@@ -6199,7 +6295,7 @@ function HorizonRateCell({
       title={
         selected
           ? "선택 해제 — 아래 표를 전체로 되돌린다"
-          : "이 셀의 분모를 아래 사용자별 표에서 보기"
+          : `이 셀의 분모를 아래 ${unitNoun}별 표에서 보기`
       }
       className={`group inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors ${
         selected
@@ -6221,6 +6317,7 @@ function HorizonRateCell({
 
 export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
   const isInstall = axis.axis === "install";
+  const unitNoun: "설치" | "계정" = isInstall ? "설치" : "계정";
   const title = isInstall
     ? "설치 축 (익명 설치 ID)"
     : "계정 축 (cost_logs 계정 uid)";
@@ -6391,7 +6488,8 @@ export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
                             activeCell?.kind === "window"
                           }
                           onSelect={() => toggleCell(h.key, "window")}
-                          ariaLabel={`${key} window ${h.window.numerator}/${h.window.denominator} — 아래 사용자별 표를 이 셀의 분모로 좁히기`}
+                          unitNoun={unitNoun}
+                          ariaLabel={`${key} window ${h.window.numerator}/${h.window.denominator} — 아래 ${unitNoun}별 표를 이 셀의 분모로 좁히기`}
                         />
                       </td>
                       {showExact && (
@@ -6406,7 +6504,8 @@ export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
                               activeCell?.kind === "exact"
                             }
                             onSelect={() => toggleCell(h.key, "exact")}
-                            ariaLabel={`${key} exact ${h.exact.numerator}/${h.exact.denominator} — 아래 사용자별 표를 이 셀의 분모로 좁히기`}
+                            unitNoun={unitNoun}
+                            ariaLabel={`${key} exact ${h.exact.numerator}/${h.exact.denominator} — 아래 ${unitNoun}별 표를 이 셀의 분모로 좁히기`}
                           />
                         </td>
                       )}
@@ -6422,11 +6521,11 @@ export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
         </>
       )}
 
-      {/* ── 사용자별 연속사용 격자 ── */}
+      {/* ── 설치/계정별 연속사용 격자. 세는 단위가 사람이 아니다. ── */}
       <div className="mt-4">
         <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
           <h5 className="text-xs font-semibold text-zinc-300">
-            사용자별 연속사용 (전 구간 기준)
+            {unitNoun}별 연속사용 (전 구간 기준)
           </h5>
           <span className="text-[11px] text-zinc-500">{axis.gridLegend}</span>
         </div>
@@ -7417,7 +7516,7 @@ function OnboardingStallCard({
 //     같은 축으로 착각한다.
 //  2) 분모 0 은 0% 가 아니라 '데이터 대기'다.
 //  3) 계측이 새로 생겼다는 사실과 web 경계(방문→다운로드) 밖이라는 사실을 적는다.
-function ZeroFrictionCard({
+export function ZeroFrictionCard({
   zf,
 }: {
   zf: NonNullable<KpiCockpit["zeroFriction"]>;
@@ -7470,18 +7569,19 @@ function ZeroFrictionCard({
             이탈이다 — 두 수를 나란히 두는 것이 이 카드의 요점이다. */}
         {connect == null ? (
           <StatCard
-            label="모델 연결 도달 (앞단)"
+            label={`모델 연결 도달 (${FIRST_RUN_OPS_SAMPLE_LABEL})`}
             value="—"
             sub="구버전 functions — 재배포 후 표시"
           />
         ) : (
           <RatioCard
-            label="모델 연결 도달 (앞단)"
+            label={`모델 연결 도달 (${FIRST_RUN_OPS_SAMPLE_LABEL})`}
             numerator={connect.connectedClients}
             denominator={connect.firstRunBase}
-            sub={`최초 실행 기준 · 미연결 ${fmtInt(
+            sub={`${FIRST_RUN_OPS_SAMPLE_LABEL}(app:first_run) · 설치 분모 아님 · 미연결 ${fmtInt(
               connect.notConnectedClients
-            )}명은 10분 분모 밖`}
+            )}${INSTALL_COUNT_UNIT}은 10분 KPI 분모 밖`}
+            title={FIRST_RUN_OPS_SAMPLE_HINT}
           />
         )}
         <RatioCard
@@ -7494,7 +7594,7 @@ function ZeroFrictionCard({
           label="무료 → 유료 전환"
           numerator={zf.freeToPaid.paidClients}
           denominator={zf.freeToPaid.base}
-          sub={`최초 실행 기준 · 가입 대비 ${
+          sub={`${FIRST_RUN_OPS_SAMPLE_LABEL}(app:first_run) · 설치 분모 아님 · 가입 대비 ${
             zf.freeToPaid.rateOfSignups == null
               ? "—"
               : fmtPct(zf.freeToPaid.rateOfSignups)
@@ -7529,16 +7629,17 @@ function ZeroFrictionCard({
             구간이 KPI 를 얼마나 눌렀는지다. */}
         {fromFirstRun == null ? (
           <StatCard
-            label="참고: 최초 실행 기준"
+            label={`${FIRST_RUN_OPS_SAMPLE_LABEL}: app:first_run 기준`}
             value="—"
             sub="구버전 functions — 재배포 후 표시"
           />
         ) : (
           <RatioCard
-            label="참고: 최초 실행 기준"
+            label={`${FIRST_RUN_OPS_SAMPLE_LABEL}: app:first_run 기준`}
             numerator={fromFirstRun.withinClients}
             denominator={fromFirstRun.base}
-            sub={`중앙값 ${fmtDuration(fromFirstRun.medianMs)}`}
+            sub={`중앙값 ${fmtDuration(fromFirstRun.medianMs)} · 설치 분모 아님`}
+            title={FIRST_RUN_OPS_SAMPLE_HINT}
           />
         )}
         <StatCard
@@ -7603,12 +7704,12 @@ function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
           }
           sub={`${fmtInt(reuse.secondSessionClients)} / ${fmtInt(
             reuse.signupBase
-          )}명`}
+          )}${INSTALL_COUNT_UNIT}`}
         />
         <StatCard
-          label="DAU/WAU 끈적임"
+          label="DAU/WAU 끈적임 (설치)"
           value={reuse.stickiness == null ? "—" : fmtPct(reuse.stickiness)}
-          sub={`평균 DAU ${fmtInt(reuse.avgDau)} · WAU ${fmtInt(reuse.wau)}`}
+          sub={`평균 ${DAU_INSTALLS_LABEL} ${fmtInt(reuse.avgDau)} · ${WAU_INSTALLS_LABEL} ${fmtInt(reuse.wau)}`}
         />
       </div>
 
@@ -7691,7 +7792,8 @@ function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
                   <div className="mb-0.5 flex items-baseline justify-between gap-2">
                     <span className="text-xs text-zinc-300">{label}</span>
                     <span className="text-xs tabular-nums text-zinc-400">
-                      {fmtInt(value)}명
+                      {fmtInt(value)}
+                      {INSTALL_COUNT_UNIT}
                     </span>
                   </div>
                   <div className="h-2.5 w-full overflow-hidden rounded bg-zinc-900">
@@ -7724,7 +7826,8 @@ function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
               </div>
               <p className="text-xs tabular-nums text-zinc-500">
                 {fmtInt(consent.grantedClients)} /{" "}
-                {fmtInt(consent.shownClients)}명
+                {fmtInt(consent.shownClients)}
+                {INSTALL_COUNT_UNIT}
               </p>
             </div>
           </div>
@@ -7753,7 +7856,7 @@ function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
   );
 }
 
-function OperationsUsageView({
+export function OperationsUsageView({
   usage,
   kpi,
   days,
@@ -7772,12 +7875,12 @@ function OperationsUsageView({
         <StatCard
           label="옵트인 표본"
           value={fmtInt(usage.sampleClientCount)}
-          sub={`clientId · ${usage.rangeDays}일`}
+          sub={`${ACTIVE_INSTALLS_LABEL}(clientId) · ${usage.rangeDays}일`}
         />
         <StatCard
-          label="WAU"
+          label={WAU_INSTALLS_LABEL}
           value={fmtInt(usage.wau)}
-          sub="events 옵트인 표본"
+          sub="events 옵트인 표본 · 사람 수 아님"
         />
         <StatCard
           label="태스크 성공률"
@@ -7801,17 +7904,17 @@ function OperationsUsageView({
       </div>
 
       <Panel
-        title="DAU · 스폰 추이"
-        note="events 옵트인 clientId 축. 사업 판단이 아니라 이상 감지용입니다."
+        title={`${DAU_INSTALLS_LABEL} · 스폰 추이`}
+        note="events 옵트인 clientId(설치) 축. 사업 판단이 아니라 이상 감지용입니다."
       >
         <MultiSeriesChart
-          title="DAU · 스폰 추이"
-          description="일별 고유 클라이언트와 스폰 수"
+          title={`${DAU_INSTALLS_LABEL} · 스폰 추이`}
+          description="일별 활성 설치와 스폰 수. 세는 단위는 사람이 아니라 clientId 입니다."
           surface="dark"
           series={[
             {
               key: "dau",
-              label: "DAU",
+              label: DAU_INSTALLS_LABEL,
               slot: 1,
               drillScopeKey: "usage:day",
               points: usage.activeByDay.map((d) => ({
@@ -7867,11 +7970,11 @@ function OperationsUsageView({
                 )}`}
               />
               <StatCard
-                label="DAU/WAU 끈적임"
+                label="DAU/WAU 끈적임 (설치)"
                 value={
                   reuse.stickiness == null ? "—" : fmtPct(reuse.stickiness)
                 }
-                sub={`평균 DAU ${fmtInt(reuse.avgDau)} · WAU ${fmtInt(
+                sub={`평균 ${DAU_INSTALLS_LABEL} ${fmtInt(reuse.avgDau)} · ${WAU_INSTALLS_LABEL} ${fmtInt(
                   reuse.wau
                 )}`}
               />
@@ -7908,7 +8011,7 @@ function OperationsUsageView({
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Panel
           title="상위 이벤트"
-          note={`분포 렌즈: ${usage.metricMode === "clients" ? "고유 사용자" : "이벤트 수"}`}
+          note={`분포 렌즈: ${usage.metricMode === "clients" ? UNIQUE_INSTALLS_LABEL : "이벤트 수"}`}
         >
           <BarList
             data={usage.topEvents.map((r) => ({ key: r.key, value: r.count }))}
@@ -8121,7 +8224,7 @@ export default function AnalyticsPanel({
   // 무토큰/dev/크래시 세션은 존킴이라도 '외부'로 샌다(툴팁에 명시, 오분해 방지).
   const [includeAdmin, setIncludeAdmin] = useState(false);
   // 분포 렌즈 토글(상위이벤트·스폰별). 기본 'events'(발생 총량, 하위호환).
-  // 'clients' = 고유 사용자 수(COUNT(DISTINCT clientId)) — "몇 명이 했나".
+  // 'clients' = 고유 설치 수(COUNT(DISTINCT clientId)) — "몇 건이 했나". 사람·기기 수가 아니다.
   const [metricMode, setMetricMode] = useState<MetricMode>("events");
   const [biz, setBiz] = useState<Loaded<BusinessSummary>>({
     data: null,
@@ -8583,20 +8686,20 @@ export default function AnalyticsPanel({
           {u && <SampleBadge n={u.sampleClientCount} />}
         </div>
         <div className="flex items-center gap-2">
-          {/* 분포 렌즈 세그먼트 — 이벤트 수 vs 고유 사용자 수(상위이벤트·스폰별). */}
+          {/* 분포 렌즈 세그먼트 — 이벤트 수 vs 고유 설치 수(상위이벤트·스폰별). */}
           <div
             className="flex overflow-hidden rounded-lg border border-zinc-700"
             title={
               "상위이벤트·스폰(역할/모델)별 분포를 세는 기준.\n" +
-              "이벤트 = 발생 총량(COUNT(*)) · 고유 사용자 = 몇 명이 했나" +
-              "(COUNT(DISTINCT clientId)).\n" +
-              "DAU·스폰 추이·태스크 지표는 이 토글과 무관합니다."
+              "이벤트 = 발생 총량(COUNT(*)) · 고유 설치 = 몇 건이 했나" +
+              "(COUNT(DISTINCT clientId)). 사람·기기 수가 아닙니다.\n" +
+              `${DAU_INSTALLS_LABEL}·스폰 추이·태스크 지표는 이 토글과 무관합니다.`
             }
           >
             {(
               [
                 ["events", "이벤트", Hash],
-                ["clients", "고유 사용자", Users],
+                ["clients", UNIQUE_INSTALLS_LABEL, Users],
               ] as const
             ).map(([mode, label, Icon]) => (
               <button
@@ -8950,7 +9053,21 @@ export default function AnalyticsPanel({
             ) : onbFunnel.error ? (
               <ErrorBox msg={onbFunnel.error} />
             ) : onbFunnel.data ? (
-              <OnboardingFunnelView funnel={onbFunnel.data} />
+              <OnboardingFunnelView
+                funnel={onbFunnel.data}
+                installHeadline={
+                  unified.data?.state === "ready" && unified.data.headline
+                    ? {
+                        spawned:
+                          unified.data.activation?.spawned ??
+                          unified.data.headline.spawned,
+                        completed:
+                          unified.data.activation?.completed ?? null,
+                        source: unified.data.source,
+                      }
+                    : undefined
+                }
+              />
             ) : null}
           </div>
 

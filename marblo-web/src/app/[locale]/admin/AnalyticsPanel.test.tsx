@@ -430,7 +430,7 @@ test("★왜 두 숫자가 다른지 화면이 한 줄로 말한다", () => {
   assert.match(html, /6일째·8일째/);
 });
 
-test("★셀 → 아래 사용자별 표. 어느 유닛이 그 셀에 들어갔는지 되찾는다", () => {
+test("★셀 → 아래 설치별 표. 어느 유닛이 그 셀에 들어갔는지 되찾는다", () => {
   const axis = streakAxisFixture();
   const m = P.deriveHorizonMembership(axis, axis.horizons[0], "window");
   assert.ok(m, "서버 수와 일치하면 링크가 열려야 한다");
@@ -490,7 +490,7 @@ test("★링크 가능한 셀은 키보드로 누를 수 있는 버튼이다", (
     <P.StreakAxisView axis={streakAxisFixture()} />
   );
   assert.match(html, /<button[^>]*aria-pressed="false"/);
-  assert.match(html, /아래 사용자별 표를 이 셀의 분모로 좁히기/);
+  assert.match(html, /아래 설치별 표를 이 셀의 분모로 좁히기/);
 });
 
 test("★아래 표의 최근 14일 스파크라인은 그대로다 (이미 좋다 — 유지)", () => {
@@ -1276,7 +1276,7 @@ function funnelFixture(
   };
 }
 
-test("★계측이 전기간 0건인 칸은 '0명' 이 아니라 '미수집' 으로 그린다", () => {
+test("★계측이 전기간 0건인 칸은 숫자 막대가 아니라 '미수집' 으로 그린다", () => {
   const html = renderToStaticMarkup(
     <P.OnboardingFunnelView
       funnel={funnelFixture([
@@ -1303,8 +1303,8 @@ test("★계측이 전기간 0건인 칸은 '0명' 이 아니라 '미수집' 으
   assert.match(html, /미수집/);
   // 이벤트 이름을 적어 다음 사람이 "무엇이 없는지" 를 알게 한다.
   assert.match(html, /app:installed/);
-  // ★계측 공백 칸에 "0명" 막대를 그리면 안 된다 — 그게 오독의 출발점이다.
-  assert.doesNotMatch(html, /설치\(최초 실행 대체 신호\)[\s\S]{0,300}0명/);
+  // ★계측 공백 칸에 "0건" 막대를 그리면 안 된다 — 그게 오독의 출발점이다.
+  assert.doesNotMatch(html, /설치\(최초 실행 대체 신호\)[\s\S]{0,300}0건/);
 });
 
 test("★순차 0 인데 창 안 실측이 있으면 두 수를 나란히 보여 준다", () => {
@@ -1344,7 +1344,7 @@ test("★순차 0 인데 창 안 실측이 있으면 두 수를 나란히 보여
   assert.match(html, /4개/);
   assert.match(html, /2026-08-10/);
   // ★값 자체는 고치지 않는다(소급 보정 금지) — 0 도 그대로 남아 있다.
-  assert.match(html, /0명/);
+  assert.match(html, /0건/);
 });
 
 test("★활성화율 0% 옆에는 '같은 기간 실제 완료 설치 수' 가 붙는다", () => {
@@ -1411,7 +1411,7 @@ test("★활성화율 0% 라도 창 안 실측이 0 이면 군더더기를 붙�
   assert.doesNotMatch(html, /끝까지 못 썼다/);
 });
 
-test("★활성화 퍼널은 첫 스폰 전 이탈 절벽을 먼저 말한다", () => {
+test("★활성화 퍼널의 events first_run 은 설치 분모가 아니라 운영 표본이다", () => {
   const html = renderToStaticMarkup(
     <P.OnboardingFunnelView
       funnel={funnelFixture([
@@ -1419,7 +1419,45 @@ test("★활성화 퍼널은 첫 스폰 전 이탈 절벽을 먼저 말한다", 
           key: "first_run",
           event: "app:first_run",
           label: "앱 첫 실행",
-          clients: 577,
+          clients: 13,
+          coverage: "ok",
+        }),
+        funnelStep({
+          key: "agent_spawned",
+          event: "agent:spawned",
+          label: "첫 스폰",
+          clients: 2,
+          coverage: "ok",
+        }),
+        funnelStep({
+          key: "task_completed",
+          event: "task:completed",
+          label: "첫 태스크 완료",
+          clients: 1,
+          coverage: "ok",
+        }),
+      ])}
+    />
+  );
+  assert.match(html, /운영 표본/);
+  assert.match(html, /app:first_run/);
+  assert.match(html, /13건/);
+  assert.match(html, /2\/13/);
+  assert.match(html, /설치 분모가 아닙니다/);
+  // events 표본을 설치 헤드라인 분모처럼 말하지 않는다.
+  assert.doesNotMatch(html, /가장 큰 이탈은 첫 스폰 전/);
+  assert.doesNotMatch(html, /오늘 BQ 실측은 앱 첫 실행 577/);
+});
+
+test("★설치 축 헤드라인이 있으면 first_run 이벤트 대신 v_install_unified 분모를 쓴다", () => {
+  const html = renderToStaticMarkup(
+    <P.OnboardingFunnelView
+      funnel={funnelFixture([
+        funnelStep({
+          key: "first_run",
+          event: "app:first_run",
+          label: "앱 첫 실행",
+          clients: 13,
           coverage: "ok",
         }),
         funnelStep({
@@ -1429,21 +1467,32 @@ test("★활성화 퍼널은 첫 스폰 전 이탈 절벽을 먼저 말한다", 
           clients: 18,
           coverage: "ok",
         }),
-        funnelStep({
-          key: "task_completed",
-          event: "task:completed",
-          label: "첫 태스크 완료",
-          clients: 2,
-          coverage: "ok",
-        }),
       ])}
+      installHeadline={{
+        spawned: {
+          numerator: 18,
+          denominator: 644,
+          rate: 18 / 644,
+          smallSample: false,
+        },
+        completed: {
+          numerator: 2,
+          denominator: 644,
+          rate: 2 / 644,
+          smallSample: false,
+        },
+        source: "marblo-2253d.marblo_telemetry.v_install_unified",
+      }}
     />
   );
   assert.match(html, /가장 큰 이탈은 첫 스폰 전/);
-  assert.match(html, /577/);
-  assert.match(html, /18\/577/);
-  assert.match(html, /첫 태스크 완료/);
-  assert.match(html, /96\.9%/);
+  assert.match(html, /v_install_unified/);
+  assert.match(html, /18\/644/);
+  assert.match(html, /firstRunAt/);
+  // events 표본은 따로, 운영 표본이라고 적힌다.
+  assert.match(html, /운영 표본/);
+  assert.match(html, /13건/);
+  assert.doesNotMatch(html, /오늘 BQ 실측은 앱 첫 실행 577/);
 });
 
 // ── ★운영자 제외 표기 ──────────────────────────────────────────────────────
@@ -1899,4 +1948,131 @@ test("★수익 분류는 외부 1건과 grant/internal 을 섞지 않는다", (
   assert.match(reasons, /진짜 0/);
   assert.match(reasons, /미상/);
   assert.match(reasons, /install_key_hmac/);
+});
+
+// ── ★라벨-단위 대응 (#1222) ────────────────────────────────────────────────
+// 숫자는 맞는데 이름이 틀리면 다음 사람이 분모를 또 섞는다. 설치(clientId)를
+// "사용자/사람"으로 부르지 못하게 화면 바이트로 잠근다.
+
+test("★활성 설치 배지는 사람 수가 아니라 설치 건수로 말한다", () => {
+  const html = renderToStaticMarkup(<P.SampleBadge n={11} />);
+  assert.match(html, /활성 설치 11건/);
+  assert.doesNotMatch(html, /11대/);
+  assert.doesNotMatch(html, /활성 사용자/);
+  assert.doesNotMatch(html, /11명/);
+  assert.match(html, /옵트인 표본/);
+});
+
+test("★설치 축 스트릭 표는 사용자별이 아니라 설치별이다", () => {
+  const html = renderToStaticMarkup(
+    <P.StreakAxisView axis={streakAxisFixture()} />
+  );
+  assert.match(html, /설치별 연속사용/);
+  assert.doesNotMatch(html, /사용자별/);
+  assert.doesNotMatch(html, /활성 사용자/);
+  const account = renderToStaticMarkup(
+    <P.StreakAxisView axis={streakAxisFixture({ axis: "account" })} />
+  );
+  assert.match(account, /계정별 연속사용/);
+  assert.doesNotMatch(account, /사용자별/);
+});
+
+test("★운영 사용 표본의 WAU/DAU 는 활성 설치로 라벨된다", () => {
+  const usage: Parameters<typeof P.OperationsUsageView>[0]["usage"] = {
+    rangeDays: 30,
+    generatedAt: "2026-08-25T00:00:00.000Z",
+    metricMode: "clients",
+    sampleClientCount: 11,
+    wau: 11,
+    activeByDay: [{ date: "2026-08-24", dau: 3, events: 14578 }],
+    topEvents: [{ key: "session:started", count: 11 }],
+    spawnsByDay: [],
+    spawnsByRole: [],
+    spawnsByModel: [],
+    tasks: { total: 0, succeeded: 0, successRate: 0, avgDurationMs: 0 },
+  };
+  const html = renderToStaticMarkup(
+    <P.OperationsUsageView
+      usage={usage}
+      kpi={null}
+      days={30}
+      onDrill={() => undefined}
+    />
+  );
+  assert.match(html, /주 활성 설치/);
+  assert.match(html, /일 활성 설치/);
+  assert.match(html, /고유 설치/);
+  assert.match(html, /사람 수 아님/);
+  assert.doesNotMatch(html, /활성 사용자/);
+  assert.doesNotMatch(html, /고유 사용자/);
+});
+
+test("★제로마찰 앞단 분모는 app:first_run 운영 표본이라고 적는다", () => {
+  const zf: Parameters<typeof P.ZeroFrictionCard>[0]["zf"] = {
+    tenMinuteMultiAgent: {
+      windowMinutes: 10,
+      withinClients: 0,
+      successClients: 0,
+      noClockClients: 0,
+      base: 9,
+      rate: 0,
+      successRate: 0,
+      medianMs: null,
+      label: "연결 후 10분",
+    },
+    connectFunnel: {
+      firstRunBase: 13,
+      connectedClients: 9,
+      connectRate: 9 / 13,
+      notConnectedClients: 4,
+      label: "앞단",
+    },
+    fromFirstRunReference: {
+      base: 13,
+      withinClients: 0,
+      noClockClients: 0,
+      rate: 0,
+      medianMs: null,
+    },
+    multiAgentUsage: {
+      activeClients: 0,
+      activeEvents: 0,
+      successClients: 0,
+      successEvents: 0,
+      base: 9,
+      activeRate: 0,
+      successRate: 0,
+    },
+    weeklyTwicePlus: { clients: 0, base: 9, rate: 0 },
+    freeToPaid: {
+      paidClients: 0,
+      base: 13,
+      signupBase: 5,
+      rate: 0,
+      rateOfSignups: 0,
+    },
+    note: "테스트 픽스처",
+  };
+  const html = renderToStaticMarkup(<P.ZeroFrictionCard zf={zf} />);
+  assert.match(html, /운영 표본/);
+  assert.match(html, /app:first_run/);
+  assert.match(html, /설치 분모 아님/);
+  assert.match(html, /4건은 10분 KPI 분모 밖/);
+  assert.doesNotMatch(html, /4명은/);
+  assert.doesNotMatch(html, /4대는/);
+});
+
+test("★설치 단위 라벨 상수는 사용자/사람을 쓰지 않는다", () => {
+  assert.equal(P.ACTIVE_INSTALLS_LABEL, "활성 설치");
+  assert.equal(P.UNIQUE_INSTALLS_LABEL, "고유 설치");
+  assert.equal(P.DAU_INSTALLS_LABEL, "일 활성 설치");
+  assert.equal(P.WAU_INSTALLS_LABEL, "주 활성 설치");
+  assert.equal(P.INSTALL_COUNT_UNIT, "건");
+  // ★"대" 는 기기 1대를 함의한다. 631행 = 브라우저 5개(재설치 루프)라 되돌리면 안 된다.
+  assert.notEqual(P.INSTALL_COUNT_UNIT, "대");
+  assert.equal(P.FIRST_RUN_OPS_SAMPLE_LABEL, "운영 표본");
+  assert.match(P.FIRST_RUN_OPS_SAMPLE_HINT, /v_install_unified/);
+  assert.match(P.FIRST_RUN_OPS_SAMPLE_HINT, /설치 분모가 아닙니다/);
+  assert.equal(P.isAppFirstRunOpsSampleStep({ key: "first_run", event: "app:first_run" }), true);
+  assert.equal(P.isAppFirstRunOpsSampleStep({ key: "spawn", event: "agent:spawned" }), false);
 });
