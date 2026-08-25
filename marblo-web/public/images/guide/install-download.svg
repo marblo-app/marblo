@@ -68,5 +68,5 @@
   <path d="M812 510 v14 m0 0 l-6 -6 m6 6 l6 -6 M802 528 h20" stroke="#e4e4e7" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
   <text x="840" y="524" fill="#e4e4e7" font-size="15" font-weight="700">.exe 다운로드</text>
 
-  <text x="600" y="636" fill="#71717a" font-size="13" text-anchor="middle">첫 실행 시 필요한 에이전트 CLI가 자동으로 설치됩니다</text>
+  <text x="600" y="636" fill="#71717a" font-size="13" text-anchor="middle">첫 실행 후 설치 버튼으로 필요한 에이전트 CLI를 한 번에 설치합니다</text>
 </svg>

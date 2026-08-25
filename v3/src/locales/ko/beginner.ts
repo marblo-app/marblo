@@ -61,7 +61,7 @@ export const beginner = {
   "beginner.oneClick.status.awaitingAuth":
     "브라우저에서 승인만 하시면 됩니다. 끝나면 자동으로 넘어가요.",
   "beginner.oneClick.status.blocked":
-    "자동 설치가 막혔어요. 아래 명령을 터미널에 직접 붙여 넣으면 됩니다.",
+    "원클릭 설치가 막혔어요. 아래 명령을 터미널에 직접 붙여 넣으면 됩니다.",
   "beginner.oneClick.status.done": "연결됐어요. 바로 시작할 수 있습니다.",
   "beginner.oneClick.installProgress": "{done}/{total} 설치됨",
   "beginner.oneClick.cliProgress.pending": "대기",
@@ -74,7 +74,7 @@ export const beginner = {
     "{cli} 로그인 창이에요. 브라우저가 열리면 승인해 주세요 — 아래 창은 그대로 두시면 됩니다.",
   "beginner.oneClick.stuck":
     "브라우저가 안 열리면, 아래 창에 나온 주소를 복사해 직접 열어도 됩니다.",
-  "beginner.oneClick.blocked.title": "자동 설치가 실패했어요",
+  "beginner.oneClick.blocked.title": "원클릭 설치가 실패했어요",
   "beginner.oneClick.blocked.body":
     "아래 명령을 터미널에 붙여 넣어 직접 설치한 뒤 '다시 시도' 를 눌러 주세요.",
   "beginner.oneClick.blocked.docs": "공식 설치 안내 보기",
@@ -85,7 +85,7 @@ export const beginner = {
   "beginner.oneClick.footerHint": "언제든 닫고 직접 진행해도 됩니다.",
 
   // ── ①-a-2 구독 선택 + CLI 별 로그인 유도 (티켓 LLHMclpKaIAJbsiHzGoG) ──────
-  // ★신규 유저가 실제로 멈추던 자리다. 자동설치는 끝나는데 "그래서 무엇으로
+  // ★신규 유저가 실제로 멈추던 자리다. 원클릭 설치는 끝나는데 "그래서 무엇으로
   // 로그인하나" 를 아무도 묻지 않아서, 가진 구독과 다른 CLI 의 로그인 창만 뜨고
   // 끝났다. 그래서 문구가 전부 **가진 것을 묻는** 말투다("필요한 것" 이 아니라).
   "beginner.oneClick.step.subscription": "구독",

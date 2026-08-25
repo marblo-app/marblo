@@ -312,7 +312,7 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.startHere.activation.title":
     "After install, sign in from the bottom Agents terminal",
   "onboarding.startHere.activation.body":
-    "Once auto-install finishes, Marblo creates an agent terminal. Complete claude login or codex login there; Marblo detects the session and moves you toward your first spawn.",
+    "Click the install button to install the required CLIs in one pass. If sign-in is needed, complete claude login or codex login in the Agents terminal; Marblo detects the session and moves you toward your first spawn.",
   "onboarding.startHere.activation.terminalTitle": "Bottom Agents terminal",
   "onboarding.startHere.activation.autoCreated": "Auto-created",
   "onboarding.startHere.activation.browserAuth":
@@ -321,7 +321,7 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
     "Sign-in detected — you can create the first ticket now.",
   "onboarding.startHere.activation.step.install.title": "Install",
   "onboarding.startHere.activation.step.install.body":
-    "Use the install button to auto-install the required CLI and check versions.",
+    "Use the install button to install the required CLI in one click and check versions.",
   "onboarding.startHere.activation.step.terminal.title": "Terminal appears",
   "onboarding.startHere.activation.step.terminal.body":
     "When sign-in is needed, a login terminal opens in the bottom Agents tab.",
@@ -344,7 +344,7 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
     "Creating one ticket is what makes it obvious what Marblo actually does for you.",
   // One line per step: what to do when you're stuck
   "onboarding.startHere.alt.install":
-    "If auto-install fails (EACCES / npm prefix permissions), run the command shown above in a terminal yourself, or follow the official install docs.",
+    "If one-click install fails (EACCES / npm prefix permissions), run the command shown above in a terminal yourself, or follow the official install docs.",
   "onboarding.startHere.alt.auth":
     "You only need ONE of Claude Code or Codex. If the browser flow is blocked, copy the command and run it in a terminal.",
   "onboarding.startHere.alt.prd":
@@ -456,7 +456,7 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
     "Optional: install, then sign in through the browser to use Grok (xAI) agents.",
   "onboarding.cliGate.installFail": "Install failed",
   "onboarding.cliGate.manualHint":
-    "Auto-install failed. Run this in a terminal instead:",
+    "One-click install failed. Run this in a terminal instead:",
   "onboarding.cliGate.checking": "Checking…",
   "onboarding.cliGate.ready": "Ready",
   "onboarding.cliGate.notInstalled": "Not installed",
@@ -525,8 +525,8 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.cliGate.notice.b2":
     "AI token usage is billed to each CLI account — separate from your Marblo plan.",
   "onboarding.cliGate.notice.b3":
-    "We auto-detect and install the CLIs you need below, and sign-in runs in a built-in terminal.",
-  "onboarding.cliGate.notice.continue": "Start install & connect",
+    "Use the button below to install the CLIs you need in one pass, then continue sign-in in the built-in terminal.",
+  "onboarding.cliGate.notice.continue": "Start one-click install & connect",
   "onboarding.cliGate.back": "Back",
   "onboarding.cliGate.next": "Next",
   // Project / launch step
@@ -556,11 +556,11 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   // ① Install
   "onboarding.cliGate.install.title": "① Install the CLI",
   "onboarding.cliGate.install.body":
-    "Install the AI CLI that runs the orchestrator. We try to install it automatically, and show the official install method if that fails.",
+    "Install the AI CLI that runs the orchestrator. Click the install button to run it in one pass; if that fails, we show the official install method.",
   "onboarding.cliGate.install.costNote":
     "AI usage is not part of your Marblo plan — it's billed to the Claude Code / Codex accounts you already use.",
   "onboarding.cliGate.install.officialHint":
-    "If auto-install is blocked (e.g. EACCES / npm prefix permission issues), run the command below in a terminal yourself, or follow the official install docs.",
+    "If one-click install is blocked (e.g. EACCES / npm prefix permission issues), run the command below in a terminal yourself, or follow the official install docs.",
   "onboarding.cliGate.install.official": "Open official install docs",
   // ② Auth
   "onboarding.cliGate.auth.title": "② Sign in",

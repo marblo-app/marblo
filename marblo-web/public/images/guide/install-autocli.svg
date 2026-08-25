@@ -28,7 +28,7 @@
   <!-- header -->
   <rect x="336" y="188" width="34" height="34" rx="9" fill="url(#ac-brand)"/>
   <path d="M346 205 l5 5 l9 -10" stroke="#0a0a0b" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="386" y="204" fill="#fafafa" font-size="19" font-weight="700">필수 도구 자동 설치</text>
+  <text x="386" y="204" fill="#fafafa" font-size="19" font-weight="700">필수 도구 원클릭 설치</text>
   <text x="386" y="224" fill="#71717a" font-size="13">에이전트 CLI와 Marblo MCP를 준비하고 있어요</text>
 
   <line x1="336" y1="248" x2="864" y2="248" stroke="#27272a"/>

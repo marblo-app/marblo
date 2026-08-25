@@ -940,7 +940,7 @@
   "guide": {
     "meta": {
       "title": "Marblo Getting Started Guide — From Install to Your First Mission",
-      "description": "A step-by-step guide to installing the Marblo desktop app and running your first mission with AI agents. On first launch the required CLIs install automatically — then just authenticate, pick a folder to auto-register your project and auto-start the orchestrator, run your first mission, and set up billing.",
+      "description": "A step-by-step guide to installing the Marblo desktop app and running your first mission with AI agents. One-click CLI install, CLI authentication, folder selection to auto-register your project and auto-start the orchestrator, your first mission, and billing are covered in order.",
       "breadcrumbHome": "Home",
       "breadcrumbGuide": "Getting Started",
       "eyebrow": "Getting Started",
@@ -957,7 +957,7 @@
     },
     "install": {
       "title": "Download, install & first launch",
-      "intro": "First, download and install the Marblo desktop app. macOS and Windows are supported, and the agent CLIs you need install automatically on first launch.",
+      "intro": "First, download and install the Marblo desktop app. macOS and Windows are supported; after first launch, click the install button to install the agent CLIs you need in one pass.",
       "download": {
         "title": "Get the app from the download page",
         "body": "On the download page, grab the latest build for your operating system (macOS or Windows). Apple Silicon and Intel Macs, and Windows 10/11, are supported.",
@@ -971,15 +971,15 @@
         "alt": "The Marblo welcome screen shown on first launch"
       },
       "autocli": {
-        "title": "Required CLIs & Marblo MCP install automatically",
-        "body": "On first launch, Marblo automatically installs the required agent CLIs (Claude Code · Codex · Antigravity) and the Marblo MCP. There's no need to install anything from a Harness tab — just wait a moment for the install to finish.",
-        "note": "There's nothing to install yourself. In the next step you only need to log in (authenticate) to each CLI, and you're ready to go.",
-        "alt": "Marblo automatically installing the required CLIs and MCP on first launch"
+        "title": "One-click install for required CLIs & Marblo MCP",
+        "body": "After first launch, click the install button and Marblo installs the required agent CLIs (Claude Code · Codex · Antigravity) and the Marblo MCP in one pass. When installation finishes, log in to the CLIs in the next step.",
+        "note": "After one-click install, the next step is to log in (authenticate) to each CLI, and you're ready to go.",
+        "alt": "Marblo installing the required CLIs and MCP with one click"
       }
     },
     "auth": {
       "title": "Authenticate the CLIs (log in)",
-      "intro": "Because the required CLIs install automatically, your only setup task is to log in (authenticate) to each CLI.",
+      "intro": "After one-click install, your setup task is to log in (authenticate) to each CLI.",
       "claude": {
         "title": "Log in to Claude Code",
         "body": "Run the command below in a terminal and follow the prompt to sign in with your Anthropic account in the browser."

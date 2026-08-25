@@ -132,10 +132,9 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
       let requiredReady = first.requiredReady;
       // Latest per-row probe results — the source for the re-prompt checks.
       let latest = first.results;
-      // Do not auto-install on first entry. The setup surface now asks which AI
-      // account the user has, then installs only that selected set. The old
-      // background pass was the first-run auto-advance that jumped users into
-      // Claude install before they had chosen an account.
+      // Do not auto-install on first entry. Keep writing the legacy guard key so
+      // existing profiles retain their setup state; the setup surface now routes
+      // install/sign-in from the user's one-click choice.
       if (!readFlag(AUTO_INSTALL_KEY)) {
         try {
           localStorage.setItem(AUTO_INSTALL_KEY, "1");

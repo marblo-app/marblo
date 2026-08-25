@@ -80,7 +80,7 @@ export const harness = {
   "harness.mcp.empty": "사용 가능한 MCP가 없습니다.",
   // --- Harness store (package catalog) ---
   "harness.store.cat.all": "전체",
-  "harness.store.cat.required": "필수 (자동 설치)",
+  "harness.store.cat.required": "필수 (원클릭 설치)",
   "harness.store.cat.recommended": "추천 스킬",
   "harness.store.cat.mcp": "유용한 MCP",
   "harness.store.cat.cli": "CLI",
@@ -136,7 +136,7 @@ export const harness = {
     "설치 후 터미널에서 `grok login` 또는 `grok`를 실행해 브라우저 인증을 완료하세요. 인증 후 Marblo 재시작.",
   "harness.store.pkg.marbloTfCommands.name": "TaskForce 슬래시 커맨드",
   "harness.store.pkg.marbloTfCommands.desc":
-    "Marblo 워크플로우용 /tf-* 슬래시 커맨드 18종. 앱 설치 시 자동 설치됨.",
+    "Marblo 워크플로우용 /tf-* 슬래시 커맨드 18종. 설치 버튼으로 한 번에 설치됩니다.",
   "harness.store.pkg.marbloMcp.name": "Marblo MCP 서버",
   "harness.store.pkg.marbloMcp.desc":
     "TaskForce / 칸반 / 에이전트 관리 MCP 도구 모음. Marblo 대시보드 내부에서 spawn 된 에이전트(Claude / Codex / Gemini)는 per-agent isolated config 로 자동 연결됩니다. 외부 터미널 CLI 세션에는 등록하지 않습니다 — 그쪽은 사용자의 taskforce MCP 등 별도 설정으로 관리하세요.",
@@ -145,7 +145,7 @@ export const harness = {
   "harness.store.pkg.cliGemini.postInstall":
     "⚠️ Gemini CLI 개인 티어는 2026-06-18 종료됩니다. 신규 설치 대신 Antigravity (agy) CLI 를 사용하세요. 기존 사용자는 엔터프라이즈 Code Assist 또는 유료 API 키로만 계속 동작합니다.",
   "harness.store.pkg.cliAntigravity.desc":
-    "Antigravity 2.0 (Google I/O 2026 발표) 의 agy CLI. Marblo 의 4번째 1st-class 에이전트 모델. curl shell 인스톨러로 자동 설치. 첫 실행 시 OAuth 브라우저 인증.",
+    "Antigravity 2.0 (Google I/O 2026 발표) 의 agy CLI. Marblo 의 4번째 1st-class 에이전트 모델. 설치 버튼으로 curl shell 인스톨러를 실행합니다. 첫 실행 시 OAuth 브라우저 인증.",
   "harness.store.pkg.cliAntigravity.postInstall":
     "설치 후 터미널에서 `agy` 한 번 실행해서 OAuth 브라우저 인증을 완료하세요. 바이너리는 `~/.local/bin/agy` 에 설치되고 shell rc 의 PATH 가 업데이트됩니다. 인증 후 Marblo 재시작. 첫 agy 워커 스폰 시 `~/.gemini/antigravity-cli/mcp_config.json` 에 Marblo MCP 항목이 자동 머지됩니다 (기존 MCP 항목 보존).",
   "harness.store.pkg.superpowers.desc":
@@ -168,7 +168,7 @@ export const harness = {
     "에이전트가 헤드리스 Chromium으로 페이지 열기 / 클릭 / 폼 입력 / 스크린샷 / 콘솔 로그 캡처를 직접 수행. 자체 IDE 임베드 브라우저(P2-10) 미루는 동안 90% 대체.",
   "harness.store.installing": "설치 중...",
   "harness.store.viewGuide": "안내 보기",
-  "harness.store.bundled": "자동 설치됨",
+  "harness.store.bundled": "원클릭 설치",
   "harness.store.requiredInstall": "필수 — 설치",
   "harness.store.processing": "처리 중...",
   "harness.store.uninstall": "제거",
@@ -499,7 +499,7 @@ export const harness = {
     "{name} 을(를) 제거할까요? 설치 시 원장에 기록된 파일만 삭제됩니다.",
   "harness.store.registry.installed": "설치됨",
   "harness.store.registry.outdated": "업데이트 있음",
-  "harness.store.registry.notInstallable": "자동 설치 불가",
+  "harness.store.registry.notInstallable": "원클릭 설치 불가",
   "harness.store.registry.revoked": "회수됨",
   "harness.store.registry.installDone": "{name} 설치 완료.",
   "harness.store.registry.installFail": "설치에 실패했습니다.",

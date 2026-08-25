@@ -96,7 +96,7 @@ export const CATALOG: HarnessPackage[] = [
     id: "marblo-tf-commands",
     name: "TaskForce 슬래시 커맨드",
     description:
-      "Marblo 워크플로우용 /tf-* 슬래시 커맨드 18종. 앱 설치 시 자동 설치됨.",
+      "Marblo 워크플로우용 /tf-* 슬래시 커맨드 18종. 설치 버튼으로 한 번에 설치됩니다.",
     type: "skill",
     category: "required",
     install: { kind: "bundled" },
@@ -210,7 +210,7 @@ export const CATALOG: HarnessPackage[] = [
     id: "cli-antigravity",
     name: "Google Antigravity (agy) CLI",
     description:
-      "Antigravity 2.0 (Google I/O 2026 발표) 의 agy CLI. Marblo 의 4번째 1st-class 에이전트 모델. curl shell 인스톨러로 자동 설치. 첫 실행 시 OAuth 브라우저 인증.",
+      "Antigravity 2.0 (Google I/O 2026 발표) 의 agy CLI. Marblo 의 4번째 1st-class 에이전트 모델. 설치 버튼으로 curl shell 인스톨러를 실행합니다. 첫 실행 시 OAuth 브라우저 인증.",
     type: "cli",
     category: "required",
     install: {

@@ -25,7 +25,10 @@ export interface CliProbe {
  * un-dismissable — only the legacy modal ever wrote it (activation barrier F2).
  */
 export const DISMISSED_KEY = "marblo.cliSetupGateDismissed";
-/** One-shot guard for the background auto-install pass (FT-8). */
+/**
+ * Legacy one-shot storage key. Keep the localStorage name stable so existing
+ * profiles do not lose their setup state while the UI says "one-click install".
+ */
 export const AUTO_INSTALL_KEY = "marblo.cliAutoInstallDone";
 
 /**

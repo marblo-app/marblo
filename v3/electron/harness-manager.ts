@@ -764,7 +764,7 @@ async function runInstallPackage(
       return {};
     case "manual":
       throw new Error(
-        "이 패키지는 자동 설치를 지원하지 않습니다. instructions 참고."
+        "이 패키지는 원클릭 설치를 지원하지 않습니다. instructions 참고."
       );
     case "git":
       await installGit(pkg.install);

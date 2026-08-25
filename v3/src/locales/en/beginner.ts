@@ -60,7 +60,7 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
   "beginner.oneClick.status.awaitingAuth":
     "Just approve it in your browser — we'll move on automatically.",
   "beginner.oneClick.status.blocked":
-    "Auto-install is blocked. Paste the command below into a terminal instead.",
+    "One-click install is blocked. Paste the command below into a terminal instead.",
   "beginner.oneClick.status.done": "Connected. You're ready to start.",
   "beginner.oneClick.installProgress": "{done}/{total} installed",
   "beginner.oneClick.cliProgress.pending": "Pending",
@@ -73,7 +73,7 @@ export const beginner: Record<keyof typeof koBeginner, string> = {
     "This is the {cli} sign-in. Approve it when the browser opens — you can leave this window as it is.",
   "beginner.oneClick.stuck":
     "If the browser doesn't open, copy the URL printed below and open it yourself.",
-  "beginner.oneClick.blocked.title": "Auto-install failed",
+  "beginner.oneClick.blocked.title": "One-click install failed",
   "beginner.oneClick.blocked.body":
     "Paste the command below into a terminal to install it yourself, then hit Try again.",
   "beginner.oneClick.blocked.docs": "Open the official install guide",

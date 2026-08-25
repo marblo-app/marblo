@@ -84,7 +84,7 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.mcp.empty": "No MCPs available.",
   // --- Harness store (package catalog) ---
   "harness.store.cat.all": "All",
-  "harness.store.cat.required": "Required (auto-installed)",
+  "harness.store.cat.required": "Required (one-click install)",
   "harness.store.cat.recommended": "Recommended skills",
   "harness.store.cat.mcp": "Useful MCPs",
   "harness.store.cat.cli": "CLI",
@@ -140,7 +140,7 @@ export const harness: Record<keyof typeof koHarness, string> = {
     "After installing, run `grok login` or `grok` in a terminal to complete browser authentication. Restart Marblo after authenticating.",
   "harness.store.pkg.marbloTfCommands.name": "TaskForce Slash Commands",
   "harness.store.pkg.marbloTfCommands.desc":
-    "18 /tf-* slash commands for the Marblo workflow. Auto-installed with the app.",
+    "18 /tf-* slash commands for the Marblo workflow. Install them in one pass with the install button.",
   "harness.store.pkg.marbloMcp.name": "Marblo MCP Server",
   "harness.store.pkg.marbloMcp.desc":
     "MCP tool set for TaskForce / Kanban / agent management. Agents spawned inside the Marblo dashboard (Claude / Codex / Gemini) connect automatically with a per-agent isolated config. Not registered for external terminal CLI sessions — manage those separately with your own taskforce MCP setup.",
@@ -149,7 +149,7 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.pkg.cliGemini.postInstall":
     "⚠️ The Gemini CLI personal tier ends 2026-06-18. Use the Antigravity (agy) CLI instead of a new install. Existing users keep working only with Enterprise Code Assist or a paid API key.",
   "harness.store.pkg.cliAntigravity.desc":
-    "The agy CLI for Antigravity 2.0 (announced at Google I/O 2026). Marblo's 4th 1st-class agent model. Auto-installed via curl shell installer. OAuth browser authentication on first launch.",
+    "The agy CLI for Antigravity 2.0 (announced at Google I/O 2026). Marblo's 4th 1st-class agent model. The install button runs the curl shell installer. OAuth browser authentication on first launch.",
   "harness.store.pkg.cliAntigravity.postInstall":
     "After installing, run `agy` once in a terminal to complete OAuth browser authentication. The binary installs to `~/.local/bin/agy` and your shell rc's PATH is updated. Restart Marblo after authenticating. On the first agy worker spawn, a Marblo MCP entry is auto-merged into `~/.gemini/antigravity-cli/mcp_config.json` (existing MCP entries are preserved).",
   "harness.store.pkg.superpowers.desc":
@@ -172,7 +172,7 @@ export const harness: Record<keyof typeof koHarness, string> = {
     "Lets agents open pages, click, fill forms, screenshot, and capture console logs directly via headless Chromium. Covers ~90% of the need while the native IDE-embedded browser (P2-10) is deferred.",
   "harness.store.installing": "Installing...",
   "harness.store.viewGuide": "View guide",
-  "harness.store.bundled": "Auto-installed",
+  "harness.store.bundled": "One-click install",
   "harness.store.requiredInstall": "Required — install",
   "harness.store.processing": "Processing...",
   "harness.store.uninstall": "Uninstall",
@@ -500,7 +500,7 @@ export const harness: Record<keyof typeof koHarness, string> = {
     "Uninstall {name}? Only the files recorded in the install ledger will be removed.",
   "harness.store.registry.installed": "Installed",
   "harness.store.registry.outdated": "Update available",
-  "harness.store.registry.notInstallable": "Not auto-installable",
+  "harness.store.registry.notInstallable": "No one-click install",
   "harness.store.registry.revoked": "Revoked",
   "harness.store.registry.installDone": "{name} installed.",
   "harness.store.registry.installFail": "Install failed.",

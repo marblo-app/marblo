@@ -295,7 +295,7 @@ export const onboarding = {
     "선택: Grok(xAI) 에이전트를 쓰려면 설치 후 브라우저로 로그인하세요.",
   "onboarding.cliGate.installFail": "설치 실패",
   "onboarding.cliGate.manualHint":
-    "자동 설치가 실패했습니다. 터미널에서 아래 명령을 직접 실행하세요:",
+    "원클릭 설치가 실패했습니다. 터미널에서 아래 명령을 직접 실행하세요:",
   "onboarding.cliGate.checking": "확인 중…",
   "onboarding.cliGate.ready": "준비 완료",
   "onboarding.cliGate.notInstalled": "미설치",
@@ -364,8 +364,8 @@ export const onboarding = {
   "onboarding.cliGate.notice.b2":
     "AI 토큰 사용료는 각 CLI 계정으로 청구됩니다 — 마블로 요금과 별개입니다.",
   "onboarding.cliGate.notice.b3":
-    "필요한 CLI는 아래에서 자동으로 감지·설치하고, 로그인은 내장 터미널에서 한 번에 진행합니다.",
-  "onboarding.cliGate.notice.continue": "설치·연결 시작",
+    "필요한 CLI는 아래 버튼으로 한 번에 설치하고, 로그인은 내장 터미널에서 이어서 진행합니다.",
+  "onboarding.cliGate.notice.continue": "원클릭 설치·연결 시작",
   "onboarding.cliGate.back": "이전",
   "onboarding.cliGate.next": "다음",
   // 프로젝트/실행 스텝
@@ -396,11 +396,11 @@ export const onboarding = {
   // ① 설치
   "onboarding.cliGate.install.title": "① CLI 설치",
   "onboarding.cliGate.install.body":
-    "오케스트레이터를 실행할 AI CLI를 설치합니다. 자동으로 설치를 시도하고, 실패하면 공식 설치 방법을 안내합니다.",
+    "오케스트레이터를 실행할 AI CLI를 설치합니다. 설치 버튼을 누르면 한 번에 진행하고, 실패하면 공식 설치 방법을 안내합니다.",
   "onboarding.cliGate.install.costNote":
     "AI 사용료는 마블로 요금에 포함되지 않습니다 — 이미 쓰고 계신 Claude Code·Codex 계정으로 청구됩니다.",
   "onboarding.cliGate.install.officialHint":
-    "자동 설치가 막히면(예: EACCES·npm prefix 권한 문제) 아래 명령을 터미널에서 직접 실행하거나 공식 설치 문서를 참고하세요.",
+    "원클릭 설치가 막히면(예: EACCES·npm prefix 권한 문제) 아래 명령을 터미널에서 직접 실행하거나 공식 설치 문서를 참고하세요.",
   "onboarding.cliGate.install.official": "공식 설치 문서 열기",
   // ② 인증
   "onboarding.cliGate.auth.title": "② 로그인(인증)",
@@ -508,7 +508,7 @@ export const onboarding = {
   "onboarding.startHere.activation.title":
     "설치가 끝나면 하단 에이전트 탭에서 인증합니다",
   "onboarding.startHere.activation.body":
-    "자동 설치 뒤에는 에이전트 터미널이 생성됩니다. 거기서 claude login 또는 codex login을 완료하면 마블로가 인증 상태를 감지하고 첫 스폰으로 이어갑니다.",
+    "설치 버튼을 누르면 필요한 CLI가 한 번에 깔립니다. 인증이 필요하면 에이전트 터미널에서 claude login 또는 codex login을 완료하고, 마블로가 인증 상태를 감지하면 첫 스폰으로 이어갑니다.",
   "onboarding.startHere.activation.terminalTitle": "하단 에이전트 터미널",
   "onboarding.startHere.activation.autoCreated": "자동 생성",
   "onboarding.startHere.activation.browserAuth":
@@ -517,7 +517,7 @@ export const onboarding = {
     "인증 감지됨 — 이제 첫 티켓을 만들 수 있습니다.",
   "onboarding.startHere.activation.step.install.title": "설치",
   "onboarding.startHere.activation.step.install.body":
-    "설치 버튼을 누르면 필요한 CLI를 자동 설치하고 버전을 확인합니다.",
+    "설치 버튼을 누르면 필요한 CLI를 한 번에 설치하고 버전을 확인합니다.",
   "onboarding.startHere.activation.step.terminal.title": "터미널 자동 생성",
   "onboarding.startHere.activation.step.terminal.body":
     "인증이 필요하면 하단 에이전트 탭에 로그인용 터미널이 열립니다.",
@@ -540,7 +540,7 @@ export const onboarding = {
     "첫 티켓을 만들어 봐야 마블로가 실제로 무엇을 해주는지 보입니다.",
   // 막혔을 때의 대안 — 단계마다 한 줄
   "onboarding.startHere.alt.install":
-    "자동 설치가 실패하면(EACCES·npm prefix 권한 등) 위에 뜨는 명령을 터미널에서 직접 실행하거나 공식 설치 문서를 따라가세요.",
+    "원클릭 설치가 실패하면(EACCES·npm prefix 권한 등) 위에 뜨는 명령을 터미널에서 직접 실행하거나 공식 설치 문서를 따라가세요.",
   "onboarding.startHere.alt.auth":
     "Claude Code 와 Codex 중 하나만 로그인하면 됩니다. 브라우저 인증이 막히면 명령을 복사해 터미널에서 직접 실행하세요.",
   "onboarding.startHere.alt.prd":
