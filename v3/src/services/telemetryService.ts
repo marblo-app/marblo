@@ -112,12 +112,18 @@ export type TelemetryEvent =
   // electron/spawn-block-reason.ts 한 곳). 이 축이 생기기 전에는 "구독이 없어서
   // 멈춘 사람" 을 셀 수 없었다: 플랜 캡 차단이 아예 무음이었기 때문이다.
   | "onboarding:spawn_blocked"
+  // 후보 자동선택 probe. 사용자 차단/연결 이벤트가 아니므로 spawn_blocked 와
+  // model_connected 기본 모집단에 섞지 않는다.
+  | "onboarding:orchestrator_candidate_probe"
   | "onboarding:agent_needs_auth"
   // ★needs_auth 는 철회될 수 있다(readiness 도달 = 오탐). 이 짝 이벤트를 빼지
   // 않고 세면 인증 팝업 오탐이 스톨 수치를 부풀린다.
   | "onboarding:agent_auth_resolved"
   // 렌더러 발화(#884 의 funding 감지 지점):
   | "onboarding:funding_probe"
+  | "onboarding:cli_auth_readiness"
+  | "onboarding:cli_install_attempt"
+  | "onboarding:cli_install_result"
   | "onboarding:funding_guide_shown"
   // ── 로그인 유도 (ticket LLHMclpKaIAJbsiHzGoG) ────────────────────────────
   // ★위 `spawn_blocked reason=needs_auth` 의 **짝**이다. 그 축은 "CLI 는 깔렸는데
@@ -909,7 +915,8 @@ export const telemetry = {
       | "connect"
       | "project",
     phase: "enter" | "success" | "fail",
-    reason?: string
+    reason?: string,
+    metadata?: Record<string, unknown>
   ) {
     // ★10분 시계의 앵커 지점 하나(pWSnJeQN → 헤드라인 승격 Tw6m14gR). 인증 단계
     // 성공 = 이 설치가 비로소 진짜 에이전트를 돌릴 수 있게 된 순간이다(무료
@@ -918,8 +925,23 @@ export const telemetry = {
     logTelemetry({
       event: "onboarding:cli_setup_step",
       success: phase !== "fail",
-      metadata: { step, phase },
+      metadata: { step, phase, ...(metadata ?? {}) },
       ...(reason ? { errorCategory: reason } : {}),
+    });
+  },
+
+  cliAuthReadiness(
+    source:
+      | "cold_start_probe"
+      | "manual_recheck"
+      | "one_click_login"
+      | "install_flow",
+    ready: boolean
+  ) {
+    logTelemetry({
+      event: "onboarding:cli_auth_readiness",
+      success: ready,
+      metadata: { source, ready, userFacing: false },
     });
   },
 

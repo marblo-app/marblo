@@ -1096,7 +1096,15 @@ interface CliAuthResult {
 interface HarnessAPI {
   list: () => Promise<HarnessPackage[]>;
   versions: () => Promise<Record<string, HarnessVersionInfo>>;
-  install: (id: string) => Promise<{ success: boolean; error?: string }>;
+  install: (
+    id: string,
+    startedBy?: "row_button" | "one_click_install" | "harness_store"
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    failureClassification?: string;
+    postProbeInstalled?: boolean;
+  }>;
   uninstall: (id: string) => Promise<{ success: boolean; error?: string }>;
   cliAuthCheck: (
     model: "claude" | "codex" | "grok" | "antigravity"

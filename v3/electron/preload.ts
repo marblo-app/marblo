@@ -209,11 +209,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     },
     // Inject a message and submit it as a discrete Enter (verify-and-retry
     // CR). Use for programmatic sends (not raw keystroke passthrough).
-    writeAndSubmit: (
-      id: string,
-      data: string,
-      bracketedPaste?: boolean
-    ) => ipcRenderer.invoke("pty:writeAndSubmit", { id, data, bracketedPaste }),
+    writeAndSubmit: (id: string, data: string, bracketedPaste?: boolean) =>
+      ipcRenderer.invoke("pty:writeAndSubmit", { id, data, bracketedPaste }),
     resize: (id: string, cols: number, rows: number) =>
       ipcRenderer.invoke("pty:resize", { id, cols, rows }),
     kill: (id: string) => ipcRenderer.invoke("pty:kill", { id }),
@@ -703,8 +700,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
      * 칸에는 아예 안 붙는다 — 그 칸들 때문에 벤더 API 가 호출되는 일은 없다.
      * ★내려오는 것은 금액·통화·상태·키 **이름**뿐이다(시크릿 값 금지).
      */
-    orchestratorCatalog: () =>
-      ipcRenderer.invoke("models:orchestratorCatalog"),
+    orchestratorCatalog: () => ipcRenderer.invoke("models:orchestratorCatalog"),
     /**
      * 사용량 탭 상단 정보표(단가·개략 SWE-bench·컨텍스트). `model-registry` +
      * 컨텍스트/벤치 참조표의 조인이고, env·시크릿은 지나가지 않는다.
@@ -816,10 +812,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
           }
         >
       >,
-    install: (id: string) =>
-      ipcRenderer.invoke("harness:install", id) as Promise<{
+    install: (
+      id: string,
+      startedBy?: "row_button" | "one_click_install" | "harness_store"
+    ) =>
+      ipcRenderer.invoke("harness:install", id, startedBy) as Promise<{
         success: boolean;
         error?: string;
+        failureClassification?: string;
+        postProbeInstalled?: boolean;
       }>,
     uninstall: (id: string) =>
       ipcRenderer.invoke("harness:uninstall", id) as Promise<{
@@ -1089,9 +1090,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       writeGranted: boolean;
     }> => ipcRenderer.invoke("github:appStatus", projectId),
     // 오너만 성공한다(서버가 판정). 시스템 브라우저로 설치 화면을 연다.
-    appInstall: (
-      projectId: string
-    ): Promise<{ ok: boolean; error?: string }> =>
+    appInstall: (projectId: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke("github:appInstall", projectId),
   },
   // Google Drive 읽기 전용 커넥터 (티켓 zqNxS9904aeeBEug1uAD + MCTHALmNAWPpilTFwe8o).

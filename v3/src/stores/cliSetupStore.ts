@@ -132,10 +132,10 @@ export function cliLabel(model: CliModel): string {
   return model === "claude"
     ? "Claude Code"
     : model === "codex"
-      ? "Codex (GPT)"
-      : model === "grok"
-        ? "Grok Build"
-        : "Antigravity (agy)";
+    ? "Codex (GPT)"
+    : model === "grok"
+    ? "Grok Build"
+    : "Antigravity (agy)";
 }
 
 function testCliAuthOverride(model: CliModel): CliAuthResult | null {
@@ -153,8 +153,8 @@ function testCliAuthOverride(model: CliModel): CliAuthResult | null {
         typeof override.action === "string"
           ? override.action
           : model === "codex"
-            ? "codex login"
-            : `${model} login`,
+          ? "codex login"
+          : `${model} login`,
     };
   } catch {
     return null;
@@ -213,7 +213,10 @@ interface CliSetupState {
     results: Record<string, CliAuthResult>;
     requiredReady: boolean;
   }>;
-  runInstall: (row: CliRow) => Promise<void>;
+  runInstall: (
+    row: CliRow,
+    startedBy?: "row_button" | "one_click_install"
+  ) => Promise<void>;
   /** One-click: install every not-yet-installed row of `rows`, in order. */
   runInstallAll: (rows: CliRow[]) => Promise<void>;
   refreshVersions: () => void;
@@ -278,20 +281,23 @@ export const useCliSetupStore = create<CliSetupState>((set, get) => ({
     await Promise.all(
       ROWS.map(async (r) => {
         results[r.id] = await probe(r.model, r.id);
-      }),
+      })
     );
     const requiredReady = computeRequiredReady(ORCHESTRATOR_CLI_IDS, results);
     set({ ready: requiredReady });
     return { results, requiredReady };
   },
 
-  runInstall: async (row) => {
+  runInstall: async (row, startedBy = "row_button") => {
     set((s) => ({
       installing: row.id,
       installErrors: { ...s.installErrors, [row.id]: "" },
     }));
     try {
-      const result = await window.electronAPI.harness.install(row.id);
+      const result = await window.electronAPI.harness.install(
+        row.id,
+        startedBy
+      );
       if (!result.success) {
         set((s) => ({
           installErrors: {
@@ -352,7 +358,7 @@ export const useCliSetupStore = create<CliSetupState>((set, get) => ({
       return;
     }
     for (const row of targets) {
-      await get().runInstall(row);
+      await get().runInstall(row, "one_click_install");
       // runInstall re-probes the row, so `results` is the truth about whether
       // the install actually took — not just whether the IPC resolved.
       const installed = get().results[row.id]?.installed === true;
@@ -405,7 +411,7 @@ export const useCliSetupStore = create<CliSetupState>((set, get) => ({
     const target = fundingProbeTarget(
       ROWS,
       get().results,
-      ORCHESTRATOR_CLI_IDS,
+      ORCHESTRATOR_CLI_IDS
     );
     if (!target) return null;
     set({ fundingChecking: true });

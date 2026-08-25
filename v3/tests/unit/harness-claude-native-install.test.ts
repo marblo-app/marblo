@@ -13,7 +13,15 @@ import { EventEmitter } from "node:events";
 
 type SpawnCall = { command: string; args: string[] };
 
-async function loadHarnessWithSpawnMock(spawnCalls: SpawnCall[]) {
+interface SpawnMockOptions {
+  code?: number;
+  stderr?: string;
+}
+
+async function loadHarnessWithSpawnMock(
+  spawnCalls: SpawnCall[],
+  options: SpawnMockOptions = {}
+) {
   vi.resetModules();
   vi.doMock("child_process", async () => {
     const spawn = vi.fn((command: string, args: string[]) => {
@@ -24,7 +32,10 @@ async function loadHarnessWithSpawnMock(spawnCalls: SpawnCall[]) {
       child.stdout = new EventEmitter() as typeof child.stdout;
       child.stderr = new EventEmitter() as typeof child.stderr;
       child.kill = vi.fn() as typeof child.kill;
-      queueMicrotask(() => child.emit("close", 0));
+      queueMicrotask(() => {
+        if (options.stderr) child.stderr.emit("data", options.stderr);
+        child.emit("close", options.code ?? 0);
+      });
       return child;
     });
     return { spawn };
@@ -86,7 +97,7 @@ describe("Claude Code native (curl|bash) installer", () => {
     claudeEntry.install.source = "https://evil.example.com/install.sh";
     try {
       await expect(installPackage("cli-claude-code")).rejects.toThrow(
-        /not whitelisted/,
+        /not whitelisted/
       );
     } finally {
       claudeEntry.install.source = originalSource;
@@ -100,12 +111,32 @@ describe("Claude Code native (curl|bash) installer", () => {
     expect(codex!.install.source).toBe("https://chatgpt.com/codex/install.sh");
   });
 
+  it("classifies shell installer network/proxy failures without shipping stderr", async () => {
+    const spawnCalls: SpawnCall[] = [];
+    const { installPackageWithTelemetry } = await loadHarnessWithSpawnMock(
+      spawnCalls,
+      {
+        code: 7,
+        stderr: "curl: (7) Failed to connect to chatgpt.com port 443",
+      }
+    );
+
+    const result = await installPackageWithTelemetry("cli-codex");
+
+    expect(result.success).toBe(false);
+    expect(result.failureClassification).toBe("network_or_proxy");
+    expect(result.exitCode).toBe(7);
+    expect(result.tailHash).toMatch(/^[0-9a-f]{16}$/);
+    expect(result).not.toHaveProperty("stderr");
+    expect(spawnCalls[0].command).toBe("bash");
+  });
+
   it("probeCliAuth reports the native curl|bash command when claude isn't on PATH", async () => {
     const { probeCliAuth } = await loadHarnessWithSpawnMock([]);
     const result = await probeCliAuth("claude");
     if (!result.installed) {
       expect(result.action).toBe(
-        "curl -fsSL https://claude.ai/install.sh | bash",
+        "curl -fsSL https://claude.ai/install.sh | bash"
       );
       expect(result.action).not.toMatch(/npm/);
     }

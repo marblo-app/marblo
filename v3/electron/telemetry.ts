@@ -6,7 +6,7 @@ import { normalizeSpawnBlockReason } from "./spawn-block-reason";
 export function sendTelemetry(
   win: BrowserWindow | null,
   event: string,
-  payload: Record<string, unknown>,
+  payload: Record<string, unknown>
 ) {
   if (!win || win.isDestroyed()) return;
   try {
@@ -76,7 +76,7 @@ export const mainTelemetry = {
     projectId?: string,
     promptHash?: string,
     promptLength?: number,
-    context?: AgentSpawnedContext,
+    context?: AgentSpawnedContext
   ) {
     sendTelemetry(win, "agent:spawned", {
       agentId,
@@ -99,7 +99,7 @@ export const mainTelemetry = {
     win: BrowserWindow | null,
     agentId: string,
     exitCode?: number,
-    context?: AgentStoppedContext,
+    context?: AgentStoppedContext
   ) {
     sendTelemetry(win, "agent:stopped", {
       agentId,
@@ -146,7 +146,7 @@ export const mainTelemetry = {
     model?: string | null,
     dispatchReason?: string | null,
     errorCategory?: string,
-    errorMessage?: string,
+    errorMessage?: string
   ) {
     sendTelemetry(win, "agent:crashed", {
       agentId,
@@ -171,7 +171,7 @@ export const mainTelemetry = {
     // 재시도가 설정 문제(fast_fail_config)인지 런타임 크래시인지 구분이 안 됐다.
     // 어휘는 agentCrashed 와 동일하게 유지 — 두 신호가 조인 가능해야 한다.
     errorCategory?: string,
-    exitCode?: number,
+    exitCode?: number
   ) {
     sendTelemetry(win, "agent:restarted", {
       agentId,
@@ -187,7 +187,7 @@ export const mainTelemetry = {
 
   agentSpawnFailed(
     win: BrowserWindow | null,
-    payload: AgentLifecycleOutcomePayload,
+    payload: AgentLifecycleOutcomePayload
   ) {
     sendTelemetry(win, "agent:spawn_failed", {
       agentId: payload.agentId,
@@ -211,7 +211,7 @@ export const mainTelemetry = {
    */
   agentQuietSignal(
     win: BrowserWindow | null,
-    payload: AgentLifecycleOutcomePayload,
+    payload: AgentLifecycleOutcomePayload
   ) {
     sendTelemetry(win, "agent:quiet_signal", {
       agentId: payload.agentId,
@@ -228,7 +228,7 @@ export const mainTelemetry = {
 
   agentWentStale(
     win: BrowserWindow | null,
-    payload: AgentLifecycleOutcomePayload,
+    payload: AgentLifecycleOutcomePayload
   ) {
     sendTelemetry(win, "agent:went_stale", {
       agentId: payload.agentId,
@@ -251,7 +251,7 @@ export const mainTelemetry = {
     tokensInput: number,
     tokensOutput: number,
     cost: number,
-    projectId?: string,
+    projectId?: string
   ) {
     sendTelemetry(win, "token:usage", {
       agentId,
@@ -286,7 +286,7 @@ export const mainTelemetry = {
     win: BrowserWindow | null,
     model: string,
     count: number,
-    firstSeen: boolean,
+    firstSeen: boolean
   ) {
     sendTelemetry(win, "cost:pricing_unmatched", {
       model,
@@ -337,7 +337,7 @@ export const mainTelemetry = {
       installed: boolean;
       vendor?: string;
       missingEnvKeyCount?: number;
-    },
+    }
   ) {
     sendTelemetry(win, "onboarding:spawn_blocked", {
       model: payload.model,
@@ -353,6 +353,47 @@ export const mainTelemetry = {
         ...(payload.missingEnvKeyCount !== undefined
           ? { missingEnvKeyCount: payload.missingEnvKeyCount }
           : {}),
+      },
+    });
+  },
+
+  /**
+   * 오케 후보 자동선택의 후보별 프로브. 이것은 사용자 차단이 아니다.
+   * `spawn_blocked`/`model_connected` 기본 모집단에 섞이면 후보 하나가
+   * 미설치였을 뿐인데 "사용자가 막혔다" 로 읽힌다.
+   */
+  orchestratorCandidateProbe(
+    win: BrowserWindow | null,
+    payload: {
+      model: string;
+      outcome: "ready" | "blocked";
+      reason?: string;
+      installed?: boolean;
+      vendor?: string;
+      missingEnvKeyCount?: number;
+      noAuthAxis?: boolean;
+    }
+  ) {
+    sendTelemetry(win, "onboarding:orchestrator_candidate_probe", {
+      model: payload.model,
+      success: payload.outcome === "ready",
+      outcome: payload.outcome,
+      errorCategory: payload.reason,
+      metadata: {
+        surface: "orchestrator_auto_select",
+        userFacing: false,
+        outcome: payload.outcome,
+        ...(payload.reason
+          ? { reason: normalizeSpawnBlockReason(payload.reason) }
+          : {}),
+        ...(payload.installed !== undefined
+          ? { installed: payload.installed }
+          : {}),
+        ...(payload.vendor ? { vendor: payload.vendor } : {}),
+        ...(payload.missingEnvKeyCount !== undefined
+          ? { missingEnvKeyCount: payload.missingEnvKeyCount }
+          : {}),
+        ...(payload.noAuthAxis ? { noAuthAxis: true } : {}),
       },
     });
   },
@@ -374,7 +415,7 @@ export const mainTelemetry = {
       model: string;
       vendor?: string;
       noAuthAxis?: boolean;
-    },
+    }
   ) {
     sendTelemetry(win, "onboarding:model_connected", {
       model: payload.model,
@@ -384,6 +425,76 @@ export const mainTelemetry = {
         surface: payload.surface,
         ...(payload.vendor ? { vendor: payload.vendor } : {}),
         ...(payload.noAuthAxis ? { noAuthAxis: true } : {}),
+      },
+    });
+  },
+
+  cliInstallAttempt(
+    win: BrowserWindow | null,
+    payload: {
+      rowId: string;
+      model?: string | null;
+      strategy: string;
+      platform: NodeJS.Platform;
+      startedBy: string;
+      sourceHost?: string;
+    }
+  ) {
+    sendTelemetry(win, "onboarding:cli_install_attempt", {
+      model: payload.model ?? payload.rowId,
+      success: true,
+      metadata: {
+        rowId: payload.rowId,
+        strategy: payload.strategy,
+        platform: payload.platform,
+        startedBy: payload.startedBy,
+        ...(payload.sourceHost ? { sourceHost: payload.sourceHost } : {}),
+      },
+    });
+  },
+
+  cliInstallResult(
+    win: BrowserWindow | null,
+    payload: {
+      rowId: string;
+      model?: string | null;
+      strategy: string;
+      platform: NodeJS.Platform;
+      startedBy: string;
+      success: boolean;
+      durationMs: number;
+      postProbeInstalled: boolean;
+      sourceHost?: string;
+      exitCode?: number | null;
+      failureClassification?: string;
+      tailHash?: string;
+      npmPrefixFallback?: boolean;
+      postInstallExecFailed?: boolean;
+    }
+  ) {
+    sendTelemetry(win, "onboarding:cli_install_result", {
+      model: payload.model ?? payload.rowId,
+      success: payload.success,
+      exitCode: payload.exitCode ?? undefined,
+      durationMs: payload.durationMs,
+      errorCategory: payload.failureClassification,
+      metadata: {
+        rowId: payload.rowId,
+        strategy: payload.strategy,
+        platform: payload.platform,
+        startedBy: payload.startedBy,
+        postProbeInstalled: payload.postProbeInstalled,
+        ...(payload.failureClassification
+          ? { failureClassification: payload.failureClassification }
+          : {}),
+        ...(payload.sourceHost ? { sourceHost: payload.sourceHost } : {}),
+        ...(payload.tailHash ? { tailHash: payload.tailHash } : {}),
+        ...(payload.npmPrefixFallback !== undefined
+          ? { npmPrefixFallback: payload.npmPrefixFallback }
+          : {}),
+        ...(payload.postInstallExecFailed !== undefined
+          ? { postInstallExecFailed: payload.postInstallExecFailed }
+          : {}),
       },
     });
   },
@@ -400,7 +511,7 @@ export const mainTelemetry = {
     win: BrowserWindow | null,
     agentId: string,
     model: string,
-    reason: string,
+    reason: string
   ) {
     sendTelemetry(win, "onboarding:agent_needs_auth", {
       agentId,
@@ -438,7 +549,7 @@ export const mainTelemetry = {
   orchestratorMessage(
     win: BrowserWindow | null,
     surface: string,
-    length: number,
+    length: number
   ) {
     sendTelemetry(win, "onboarding:first_conversation", {
       metadata: { surface, lengthBucket: bucketMessageLength(length) },
@@ -464,7 +575,7 @@ export const mainTelemetry = {
   multiAgentActive(
     win: BrowserWindow | null,
     concurrent: number,
-    working: number,
+    working: number
   ) {
     sendTelemetry(win, "onboarding:multi_agent_active", {
       success: true,
@@ -486,7 +597,7 @@ export const mainTelemetry = {
       working: number;
       taskId?: string | null;
       projectId?: string;
-    },
+    }
   ) {
     sendTelemetry(win, "onboarding:multi_agent_success", {
       success: true,
@@ -506,7 +617,7 @@ export const mainTelemetry = {
     projectId: string,
     status: string,
     tokensAccumulated: number,
-    costAccumulated: number,
+    costAccumulated: number
   ) {
     sendTelemetry(win, "agent:heartbeat", {
       agentId,
@@ -525,7 +636,7 @@ export const mainTelemetry = {
     model: string,
     complexity: string,
     resolvedClaudeModel: string,
-    agentId?: string,
+    agentId?: string
   ) {
     sendTelemetry(win, "model:tier_resolved", {
       model,
@@ -543,7 +654,7 @@ export const mainTelemetry = {
     installed: string,
     fallbackTo: string,
     agentId?: string,
-    taskId?: string,
+    taskId?: string
   ) {
     sendTelemetry(win, "model:top_fallback", {
       reason,
@@ -559,7 +670,7 @@ export const mainTelemetry = {
   modelMixDispatched(
     win: BrowserWindow | null,
     mode: string,
-    taskId: string | null,
+    taskId: string | null
   ) {
     sendTelemetry(win, "model:mix_dispatched", { mode, taskId });
   },
@@ -569,7 +680,7 @@ export const mainTelemetry = {
     win: BrowserWindow | null,
     stageCount: number,
     perStageComplexity: string[],
-    taskId: string | null,
+    taskId: string | null
   ) {
     sendTelemetry(win, "model:complex_stages_dispatched", {
       stageCount,
@@ -627,7 +738,7 @@ export const mainTelemetry = {
 
   dispatchDecision(
     win: BrowserWindow | null,
-    payload: DispatchDecisionPayload,
+    payload: DispatchDecisionPayload
   ) {
     sendTelemetry(win, "dispatch:decision", {
       agentId: payload.agentId,
@@ -674,7 +785,7 @@ export const mainTelemetry = {
    */
   routingShadowRequest(
     win: BrowserWindow | null,
-    payload: RoutingShadowRequestPayload,
+    payload: RoutingShadowRequestPayload
   ) {
     sendTelemetry(win, "routing:shadow_request", {
       taskId: payload.taskId ?? null,

@@ -14,6 +14,7 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { createHash } from "crypto";
 import { spawn } from "child_process";
 import {
   CATALOG,
@@ -41,6 +42,135 @@ export type InstallStatus =
 
 export interface PackageStatus extends HarnessPackage {
   status: InstallStatus;
+}
+
+export type InstallFailureClassification =
+  | "missing_prereq:bash"
+  | "missing_prereq:curl"
+  | "missing_prereq:powershell"
+  | "network_or_proxy"
+  | "installer_exit"
+  | "path_not_detected_after_success"
+  | "npm_missing"
+  | "npm_prefix_fallback"
+  | "npm_exit"
+  | "post_install_exec_failed";
+
+export interface HarnessInstallTelemetryResult {
+  id: string;
+  model: string | null;
+  strategy: InstallStrategy["kind"];
+  platform: NodeJS.Platform;
+  sourceHost?: string;
+  success: boolean;
+  exitCode?: number | null;
+  postProbeInstalled: boolean;
+  durationMs: number;
+  failureClassification?: InstallFailureClassification;
+  tailHash?: string;
+  npmPrefixFallback?: boolean;
+  postInstallExecFailed?: boolean;
+  error?: string;
+}
+
+export interface HarnessInstallTelemetryDescriptor {
+  id: string;
+  model: string | null;
+  strategy: InstallStrategy["kind"];
+  platform: NodeJS.Platform;
+  sourceHost?: string;
+}
+
+interface InstallExecutionDetails {
+  exitCode?: number | null;
+  npmPrefixFallback?: boolean;
+  postInstallExecFailed?: boolean;
+}
+
+class HarnessInstallError extends Error {
+  readonly classification: InstallFailureClassification;
+  readonly exitCode?: number | null;
+  readonly tailHash?: string;
+  readonly npmPrefixFallback?: boolean;
+  readonly postInstallExecFailed?: boolean;
+
+  constructor(
+    message: string,
+    classification: InstallFailureClassification,
+    options?: {
+      exitCode?: number | null;
+      tail?: string;
+      npmPrefixFallback?: boolean;
+      postInstallExecFailed?: boolean;
+    }
+  ) {
+    super(message);
+    this.name = "HarnessInstallError";
+    this.classification = classification;
+    this.exitCode = options?.exitCode;
+    this.tailHash = options?.tail ? hashTail(options.tail) : undefined;
+    this.npmPrefixFallback = options?.npmPrefixFallback;
+    this.postInstallExecFailed = options?.postInstallExecFailed;
+  }
+}
+
+function hashTail(tail: string): string {
+  return createHash("sha256").update(tail).digest("hex").slice(0, 16);
+}
+
+function classifyInstallerTail(tail: string): InstallFailureClassification {
+  if (
+    /could not resolve|failed to connect|connection refused|timed? out|proxy|ssl|tls|certificate|network/i.test(
+      tail
+    )
+  ) {
+    return "network_or_proxy";
+  }
+  return "installer_exit";
+}
+
+function packageModel(id: string): string | null {
+  switch (id) {
+    case "cli-claude-code":
+      return "claude";
+    case "cli-codex":
+      return "codex";
+    case "cli-grok":
+      return "grok";
+    case "cli-antigravity":
+      return "antigravity";
+    case "cli-gemini":
+      return "gemini";
+    default:
+      return null;
+  }
+}
+
+function installSourceHost(strategy: InstallStrategy): string | undefined {
+  if (strategy.kind === "npm-global") return "npm";
+  const raw =
+    process.platform === "win32" && strategy.winSource
+      ? strategy.winSource
+      : strategy.source;
+  if (!raw) return undefined;
+  try {
+    return new URL(raw).host;
+  } catch {
+    return undefined;
+  }
+}
+
+export function describeInstallPackageForTelemetry(
+  id: string
+): HarnessInstallTelemetryDescriptor {
+  const pkg = CATALOG.find((p) => p.id === id);
+  return {
+    id,
+    model: packageModel(id),
+    strategy: pkg?.install.kind ?? "manual",
+    platform: process.platform,
+    sourceHost: pkg ? installSourceHost(pkg.install) : undefined,
+  };
 }
 
 function fileExists(p: string): boolean {
@@ -77,7 +207,7 @@ function getEnrichedPathForDetection(): string {
           path.join(HOME, ".local", "bin"),
           path.join(
             process.env.APPDATA || path.join(HOME, "AppData", "Roaming"),
-            "npm",
+            "npm"
           ),
         ]
       : [
@@ -97,7 +227,7 @@ function getEnrichedPathForDetection(): string {
           path.join(HOME, ".volta/bin"),
         ];
   return [...new Set([...basePath.split(path.delimiter), ...extras])].join(
-    path.delimiter,
+    path.delimiter
   );
 }
 
@@ -117,7 +247,7 @@ function candidateBinaryNames(binary: string): string[] {
 
 function commandForSpawn(
   command: string,
-  args: string[],
+  args: string[]
 ): { command: string; args: string[] } {
   if (process.platform === "win32" && /\.(cmd|bat)$/i.test(command)) {
     return { command: "cmd.exe", args: ["/c", command, ...args] };
@@ -166,7 +296,7 @@ function runCommand(
   cmd: string,
   args: string[],
   cwd?: string,
-  timeoutMs?: number,
+  timeoutMs?: number
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     let stdout = "";
@@ -228,11 +358,12 @@ async function installGit(strategy: InstallStrategy): Promise<void> {
  */
 async function runPostInstallExec(
   strategy: InstallStrategy,
-  enrichedPath: string,
-): Promise<void> {
+  enrichedPath: string
+): Promise<boolean> {
   if (!strategy.postInstallExec || strategy.postInstallExec.length === 0) {
-    return;
+    return false;
   }
+  let failed = false;
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: enrichedPath };
   for (const step of strategy.postInstallExec) {
     try {
@@ -249,26 +380,29 @@ async function runPostInstallExec(
         child.stdout.on("data", (d) => (stdout += d.toString()));
         child.stderr.on("data", (d) => (stderr += d.toString()));
         child.on("close", (code) =>
-          resolve({ code: code ?? -1, stdout, stderr }),
+          resolve({ code: code ?? -1, stdout, stderr })
         );
         child.on("error", (err) =>
-          resolve({ code: -1, stdout, stderr: stderr + err.message }),
+          resolve({ code: -1, stdout, stderr: stderr + err.message })
         );
       });
       if (result.code !== 0) {
+        failed = true;
         console.warn(
           `[harness] postInstallExec ${step.command} ${step.args.join(
-            " ",
-          )} exit ${result.code}: ${(result.stderr || result.stdout).trim()}`,
+            " "
+          )} exit ${result.code}: ${(result.stderr || result.stdout).trim()}`
         );
       }
     } catch (err) {
+      failed = true;
       console.warn(
         `[harness] postInstallExec ${step.command} threw:`,
-        err instanceof Error ? err.message : err,
+        err instanceof Error ? err.message : err
       );
     }
   }
+  return failed;
 }
 
 // Hosts whose curl-pipe-bash installer scripts are trusted to run. Each
@@ -290,13 +424,13 @@ function assertTrustedInstallerUrl(rawUrl: string): URL {
   }
   if (url.protocol !== "https:") {
     throw new Error(
-      `Shell installer URL must be HTTPS (got ${url.protocol}): ${rawUrl}`,
+      `Shell installer URL must be HTTPS (got ${url.protocol}): ${rawUrl}`
     );
   }
   if (!TRUSTED_SHELL_INSTALLER_HOSTS.has(url.host)) {
     throw new Error(
       `Shell installer host not whitelisted: ${url.host}. ` +
-        `Allowed: ${[...TRUSTED_SHELL_INSTALLER_HOSTS].join(", ")}`,
+        `Allowed: ${[...TRUSTED_SHELL_INSTALLER_HOSTS].join(", ")}`
     );
   }
   return url;
@@ -312,7 +446,7 @@ function assertTrustedInstallerUrl(rawUrl: string): URL {
  */
 export function resolveShellInstallerSpawn(
   strategy: InstallStrategy,
-  platform: NodeJS.Platform,
+  platform: NodeJS.Platform
 ): { url: string; command: string; args: string[] } {
   if (!strategy.source) {
     throw new Error("shell install requires installer URL in source");
@@ -322,7 +456,7 @@ export function resolveShellInstallerSpawn(
       const host = assertTrustedInstallerUrl(strategy.source).host;
       throw new Error(
         `이 CLI(${host})는 Windows용 공식 인스톨러를 제공하지 않습니다. ` +
-          "해당 CLI의 공식 설치 안내에 따라 수동 설치 후 다시 시도하세요.",
+          "해당 CLI의 공식 설치 안내에 따라 수동 설치 후 다시 시도하세요."
       );
     }
     assertTrustedInstallerUrl(strategy.winSource);
@@ -351,7 +485,9 @@ export function resolveShellInstallerSpawn(
   };
 }
 
-async function installShell(strategy: InstallStrategy): Promise<void> {
+async function installShell(
+  strategy: InstallStrategy
+): Promise<InstallExecutionDetails> {
   const spawnPlan = resolveShellInstallerSpawn(strategy, process.platform);
 
   const enrichedPath = getEnrichedPathForDetection();
@@ -364,8 +500,9 @@ async function installShell(strategy: InstallStrategy): Promise<void> {
     // powershell.exe lives in System32 which is always on PATH; check anyway
     // for a clean error instead of a cryptic ENOENT on spawn.
     if (!hasBin("powershell.exe")) {
-      throw new Error(
+      throw new HarnessInstallError(
         "PowerShell 을 찾을 수 없습니다. shell 인스톨러를 실행할 수 없습니다.",
+        "missing_prereq:powershell"
       );
     }
   } else {
@@ -373,19 +510,21 @@ async function installShell(strategy: InstallStrategy): Promise<void> {
     // but we still check to give a clean error message rather than a cryptic
     // ENOENT on spawn.
     if (!hasBin("bash")) {
-      throw new Error(
+      throw new HarnessInstallError(
         "bash 를 찾을 수 없습니다. shell 인스톨러를 실행할 수 없습니다.",
+        "missing_prereq:bash"
       );
     }
     if (!hasBin("curl")) {
-      throw new Error(
+      throw new HarnessInstallError(
         "curl 을 찾을 수 없습니다. shell 인스톨러를 실행할 수 없습니다.",
+        "missing_prereq:curl"
       );
     }
   }
 
   console.log(
-    `[harness] installShell: ${spawnPlan.command} ${spawnPlan.args.join(" ")}`,
+    `[harness] installShell: ${spawnPlan.command} ${spawnPlan.args.join(" ")}`
   );
 
   const result = await new Promise<{
@@ -400,7 +539,7 @@ async function installShell(strategy: InstallStrategy): Promise<void> {
     child.stderr.on("data", (d) => (stderr += d.toString()));
     child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
     child.on("error", (err) =>
-      resolve({ code: -1, stdout, stderr: stderr + err.message }),
+      resolve({ code: -1, stdout, stderr: stderr + err.message })
     );
   });
   if (result.code !== 0) {
@@ -409,14 +548,20 @@ async function installShell(strategy: InstallStrategy): Promise<void> {
       .split("\n")
       .slice(-10)
       .join("\n");
-    throw new Error(
+    throw new HarnessInstallError(
       `Shell installer 실패 (${spawnPlan.url}, exit ${result.code})\n${tail}`,
+      classifyInstallerTail(tail),
+      { exitCode: result.code, tail }
     );
   }
   // Best-effort post-install hooks (e.g. environment setup). Most shell
   // installers handle their own post-install, so this is rarely populated
   // but kept consistent with npm-global for parity.
-  await runPostInstallExec(strategy, enrichedPath);
+  const postInstallExecFailed = await runPostInstallExec(
+    strategy,
+    enrichedPath
+  );
+  return { exitCode: result.code, postInstallExecFailed };
 }
 
 /**
@@ -431,7 +576,7 @@ async function installShell(strategy: InstallStrategy): Promise<void> {
  */
 export function isPathUnderNpmPrefix(
   binaryRealPath: string,
-  npmGlobalPrefix: string,
+  npmGlobalPrefix: string
 ): boolean {
   if (!binaryRealPath || !npmGlobalPrefix) return false;
   const strip = (p: string) => p.replace(/[/\\]+$/, "");
@@ -506,7 +651,9 @@ export function userNpmPrefixFallback(): string {
   return path.join(HOME, ".npm-global");
 }
 
-async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
+async function installNpmGlobal(
+  strategy: InstallStrategy
+): Promise<InstallExecutionDetails> {
   if (!strategy.source) {
     throw new Error("npm-global install requires a package name in source");
   }
@@ -517,8 +664,9 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
   // Pre-flight: does npm exist at all?
   const npmPath = findBinaryPath("npm");
   if (!npmPath) {
-    throw new Error(
+    throw new HarnessInstallError(
       "npm을 찾을 수 없습니다. Node.js / npm 설치 후 다시 시도하세요. (https://nodejs.org)",
+      "npm_missing"
     );
   }
   // EACCES 회피: 시스템 전역 prefix(/usr/local 등)가 사용자 쓰기 불가면
@@ -532,7 +680,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
   if (prefixArgs.length) {
     console.log(
       `[harness] npm global prefix not writable (${globalPrefix}) — ` +
-        `falling back to --prefix ${userNpmPrefixFallback()}`,
+        `falling back to --prefix ${userNpmPrefixFallback()}`
     );
   }
   const result = await new Promise<{
@@ -553,7 +701,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
     child.stderr.on("data", (d) => (stderr += d.toString()));
     child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
     child.on("error", (err) =>
-      resolve({ code: -1, stdout, stderr: stderr + err.message }),
+      resolve({ code: -1, stdout, stderr: stderr + err.message })
     );
   });
   if (result.code !== 0) {
@@ -562,17 +710,31 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
       .split("\n")
       .slice(-5)
       .join("\n");
-    throw new Error(
+    throw new HarnessInstallError(
       `npm install -g ${strategy.source} 실패 (exit ${result.code})\n${tail}`,
+      "npm_exit",
+      {
+        exitCode: result.code,
+        tail,
+        npmPrefixFallback: prefixArgs.length > 0,
+      }
     );
   }
   // npm install 성공 — feature-flag 같은 후속 작업 (best-effort)
-  await runPostInstallExec(strategy, enrichedPath);
+  const postInstallExecFailed = await runPostInstallExec(
+    strategy,
+    enrichedPath
+  );
+  return {
+    exitCode: result.code,
+    npmPrefixFallback: prefixArgs.length > 0,
+    postInstallExecFailed,
+  };
 }
 
 async function installMcp(
   pkg: HarnessPackage,
-  strategy: InstallStrategy,
+  strategy: InstallStrategy
 ): Promise<void> {
   if (!strategy.source) {
     throw new Error("mcp install requires source command");
@@ -586,36 +748,119 @@ async function installMcp(
     command: strategy.source,
     args: (strategy.args ?? []).map(expandEnv),
     env: Object.fromEntries(
-      Object.entries(strategy.env ?? {}).map(([k, v]) => [k, expandEnv(v)]),
+      Object.entries(strategy.env ?? {}).map(([k, v]) => [k, expandEnv(v)])
     ),
   };
   cfg.mcpServers = servers;
   writeClaudeJsonAtomic(cfg);
 }
 
-export async function installPackage(id: string): Promise<void> {
-  const pkg = CATALOG.find((p) => p.id === id);
-  if (!pkg) throw new Error(`Unknown package: ${id}`);
+async function runInstallPackage(
+  pkg: HarnessPackage
+): Promise<InstallExecutionDetails> {
   switch (pkg.install.kind) {
     case "bundled":
       // Bundle-installer handles these. No-op (already installed).
-      return;
+      return {};
     case "manual":
       throw new Error(
-        "이 패키지는 자동 설치를 지원하지 않습니다. instructions 참고.",
+        "이 패키지는 자동 설치를 지원하지 않습니다. instructions 참고."
       );
     case "git":
       await installGit(pkg.install);
-      return;
+      return {};
     case "mcp":
       await installMcp(pkg, pkg.install);
-      return;
+      return {};
     case "npm-global":
-      await installNpmGlobal(pkg.install);
-      return;
+      return await installNpmGlobal(pkg.install);
     case "shell":
-      await installShell(pkg.install);
-      return;
+      return await installShell(pkg.install);
+  }
+}
+
+export async function installPackage(id: string): Promise<void> {
+  const pkg = CATALOG.find((p) => p.id === id);
+  if (!pkg) throw new Error(`Unknown package: ${id}`);
+  await runInstallPackage(pkg);
+}
+
+export async function installPackageWithTelemetry(
+  id: string
+): Promise<HarnessInstallTelemetryResult> {
+  const startedAt = Date.now();
+  const pkg = CATALOG.find((p) => p.id === id);
+  if (!pkg) {
+    return {
+      id,
+      model: packageModel(id),
+      strategy: "manual",
+      platform: process.platform,
+      success: false,
+      postProbeInstalled: false,
+      durationMs: Date.now() - startedAt,
+      failureClassification: "installer_exit",
+      error: `Unknown package: ${id}`,
+    };
+  }
+  const base = {
+    id,
+    model: packageModel(id),
+    strategy: pkg.install.kind,
+    platform: process.platform,
+    sourceHost: installSourceHost(pkg.install),
+  };
+  try {
+    const details = await runInstallPackage(pkg);
+    const postProbeInstalled = detectStatus(pkg) === "installed";
+    const durationMs = Date.now() - startedAt;
+    if (!postProbeInstalled) {
+      return {
+        ...base,
+        success: false,
+        exitCode: details.exitCode,
+        postProbeInstalled,
+        durationMs,
+        failureClassification: "path_not_detected_after_success",
+        npmPrefixFallback: details.npmPrefixFallback,
+        postInstallExecFailed: details.postInstallExecFailed,
+        error:
+          "설치는 완료됐지만 PATH에서 CLI를 찾지 못했습니다. 터미널 재시작 또는 PATH 설정을 확인하세요.",
+      };
+    }
+    return {
+      ...base,
+      success: true,
+      exitCode: details.exitCode,
+      postProbeInstalled,
+      durationMs,
+      npmPrefixFallback: details.npmPrefixFallback,
+      postInstallExecFailed: details.postInstallExecFailed,
+    };
+  } catch (err) {
+    const durationMs = Date.now() - startedAt;
+    if (err instanceof HarnessInstallError) {
+      return {
+        ...base,
+        success: false,
+        exitCode: err.exitCode,
+        postProbeInstalled: detectStatus(pkg) === "installed",
+        durationMs,
+        failureClassification: err.classification,
+        tailHash: err.tailHash,
+        npmPrefixFallback: err.npmPrefixFallback,
+        postInstallExecFailed: err.postInstallExecFailed,
+        error: err.message,
+      };
+    }
+    return {
+      ...base,
+      success: false,
+      postProbeInstalled: detectStatus(pkg) === "installed",
+      durationMs,
+      failureClassification: "installer_exit",
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
@@ -707,7 +952,7 @@ async function getLatestNpmVersion(pkg: string): Promise<string | null> {
     npmPath,
     ["view", pkg, "version"],
     undefined,
-    VERSION_LOOKUP_TIMEOUT_MS,
+    VERSION_LOOKUP_TIMEOUT_MS
   );
   if (r.code !== 0) return null;
   const v = r.stdout.trim();
@@ -752,7 +997,7 @@ export async function getCatalogVersions(): Promise<
           localVersion === latestVersion ? "up-to-date" : "outdated";
       }
       out[pkg.id] = { localVersion, latestVersion, updateState };
-    }),
+    })
   );
   return out;
 }
@@ -780,7 +1025,7 @@ export async function checkAndUpdateHarness(): Promise<UpdateOutcome[]> {
       if (pkg.install.kind === "shell") {
         const local = await getLocalVersion(pkg.detect.binary);
         console.log(
-          `[harness] Refreshing shell CLI ${pkg.id} via ${pkg.install.source}`,
+          `[harness] Refreshing shell CLI ${pkg.id} via ${pkg.install.source}`
         );
         try {
           await installShell(pkg.install);
@@ -810,7 +1055,7 @@ export async function checkAndUpdateHarness(): Promise<UpdateOutcome[]> {
       if (!(await isNpmGlobalManaged(pkg.detect.binary))) {
         const local = await getLocalVersion(pkg.detect.binary);
         console.log(
-          `[harness] ${pkg.id} is externally managed (native/self-updating) — skipping npm update`,
+          `[harness] ${pkg.id} is externally managed (native/self-updating) — skipping npm update`
         );
         outcomes.push({
           id: pkg.id,
@@ -849,7 +1094,7 @@ export async function checkAndUpdateHarness(): Promise<UpdateOutcome[]> {
         continue;
       }
       console.log(
-        `[harness] Updating ${pkg.install.source}: ${local} → ${latest}`,
+        `[harness] Updating ${pkg.install.source}: ${local} → ${latest}`
       );
       try {
         await installNpmGlobal(pkg.install);
@@ -884,7 +1129,7 @@ export async function checkAndUpdateHarness(): Promise<UpdateOutcome[]> {
  * toast notification.
  */
 export function scheduleHarnessUpdates(
-  onResult?: (outcomes: UpdateOutcome[]) => void,
+  onResult?: (outcomes: UpdateOutcome[]) => void
 ): void {
   if (updateSweepTimer) return;
   const run = async () => {
@@ -896,7 +1141,7 @@ export function scheduleHarnessUpdates(
         console.log(
           `[harness] Auto-update: ${updated
             .map((u) => `${u.source} ${u.from}→${u.to}`)
-            .join(", ")}`,
+            .join(", ")}`
         );
       }
     } catch (err) {
@@ -949,7 +1194,7 @@ async function macKeychainHasClaudeCreds(): Promise<boolean> {
     security,
     ["find-generic-password", "-s", "Claude Code-credentials"],
     undefined,
-    2_000,
+    2_000
   );
   return r.code === 0;
 }
@@ -1064,7 +1309,7 @@ export function officialInstallCommand(catalogId: string): string {
  * keychain existence check on macOS for Claude. Never spawns the CLI itself.
  */
 export async function probeCliAuth(
-  model: CliAuthModel,
+  model: CliAuthModel
 ): Promise<CliAuthResult> {
   if (model === "claude") {
     if (!isBinaryOnPath("claude")) {
@@ -1199,7 +1444,7 @@ let spawnGateObserver: ((e: SpawnGateBlockedEvent) => void) | null = null;
 
 /** 차단 관측자를 꽂는다(main 부팅 1회). null 로 해제. */
 export function setSpawnGateObserver(
-  fn: ((e: SpawnGateBlockedEvent) => void) | null,
+  fn: ((e: SpawnGateBlockedEvent) => void) | null
 ): void {
   spawnGateObserver = fn;
 }
@@ -1239,7 +1484,7 @@ let spawnGatePassedObserver: ((e: SpawnGatePassedEvent) => void) | null = null;
 
 /** 통과 관측자를 꽂는다(main 부팅 1회). null 로 해제. */
 export function setSpawnGatePassedObserver(
-  fn: ((e: SpawnGatePassedEvent) => void) | null,
+  fn: ((e: SpawnGatePassedEvent) => void) | null
 ): void {
   spawnGatePassedObserver = fn;
 }
@@ -1274,7 +1519,7 @@ interface EnvSwapSpawn {
  */
 function envSwapSpawn(
   harness: string,
-  pinnedModelId?: string,
+  pinnedModelId?: string
 ): EnvSwapSpawn | null {
   if (!pinnedModelId) return null;
   const readiness = vendorEnvReadiness(pinnedModelId);
@@ -1289,7 +1534,7 @@ function envSwapSpawn(
     console.warn(
       `[spawn-gate] 모델 핀 "${pinnedModelId}"(harness=${
         pinHarness ?? "미지"
-      })이 스폰 하네스 "${spawnHarness}" 와 어긋나 벤더 판정에서 제외합니다`,
+      })이 스폰 하네스 "${spawnHarness}" 와 어긋나 벤더 판정에서 제외합니다`
     );
     return null;
   }
@@ -1323,7 +1568,7 @@ export async function checkSpawnAuthGate(
   model: string,
   pinnedModelId?: string,
   /** 관측용 표면 라벨(텔레메트리에만 쓰인다 — 판정에는 영향 없음). */
-  surface = "unknown",
+  surface = "unknown"
 ): Promise<SpawnAuthGate> {
   const cliModel = modelToCliAuth(model);
   if (!cliModel) {
@@ -1602,7 +1847,7 @@ export interface LoginScreenBackstop {
 }
 
 export function createLoginScreenBackstop(
-  opts: LoginScreenBackstopOptions,
+  opts: LoginScreenBackstopOptions
 ): LoginScreenBackstop {
   const graceMs = opts.graceMs ?? LOGIN_BACKSTOP_GRACE_MS;
   let preProbe: boolean | null = opts.preProbeAuthenticated ?? null;

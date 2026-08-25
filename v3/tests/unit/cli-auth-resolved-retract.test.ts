@@ -16,7 +16,7 @@ import { createElement } from "react";
 import { cleanup, render } from "@testing-library/react";
 
 vi.mock("../../src/services/telemetryService", () => ({
-  default: { cliSetupStep: vi.fn() },
+  default: { cliSetupStep: vi.fn(), cliAuthReadiness: vi.fn() },
 }));
 
 // 엔진의 첫-실행 프로브/자동설치 경로는 이 테스트의 관심사가 아니다 — 아무것도
@@ -43,7 +43,7 @@ vi.mock("../../src/stores/cliSetupStore", () => ({
   // 스냅샷이 아니라 지금 값을 봐야 한다) — 스텁도 둘 다 제공해야 한다.
   useCliSetupStore: Object.assign(
     (sel: (s: typeof storeState) => unknown) => sel(storeState as never),
-    { getState: () => storeState },
+    { getState: () => storeState }
   ),
 }));
 
@@ -58,6 +58,9 @@ vi.mock("../../src/stores/onboardingProgressStore", () => ({
 }));
 
 const { useCliSetupEngine } = await import("../../src/hooks/useCliSetupEngine");
+const { default: telemetry } = await import(
+  "../../src/services/telemetryService"
+);
 
 function Harness(props: {
   close: () => void;
@@ -76,6 +79,23 @@ afterEach(() => {
 });
 
 describe("marblo:cli-auth-resolved — 오탐 철회", () => {
+  it("cold start ready edge는 auth success가 아니라 readiness probe로만 남긴다", () => {
+    const close = vi.fn();
+    const openAt = vi.fn();
+    render(createElement(Harness, { close, openAt }));
+
+    expect(telemetry.cliAuthReadiness).toHaveBeenCalledWith(
+      "cold_start_probe",
+      true
+    );
+    expect(telemetry.cliSetupStep).not.toHaveBeenCalledWith(
+      "auth",
+      "success",
+      expect.anything(),
+      expect.anything()
+    );
+  });
+
   it("이벤트를 받으면 인증 표면을 close 한다", () => {
     const close = vi.fn();
     const openAt = vi.fn();
@@ -109,7 +129,7 @@ describe("Layout — agent:authResolved → marblo:cli-auth-resolved 브리지",
     const path = await import("node:path");
     const src = fs.readFileSync(
       path.join(process.cwd(), "src/components/Layout.tsx"),
-      "utf-8",
+      "utf-8"
     );
     expect(src).toContain('window.electronAPI.on("agent:authResolved"');
     expect(src).toContain('new CustomEvent("marblo:cli-auth-resolved")');

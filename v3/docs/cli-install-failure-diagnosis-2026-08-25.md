@@ -300,3 +300,29 @@ ORDER BY step;
 - 설치 stderr/stdout 원문은 BQ에 없고, 있어도 원문을 문서에 싣지 않는 것이 맞다.
 - 지금 BQ로는 자동설치 실패 원인을 원인별 인원으로 분해할 수 없다.
 - 따라서 이 문서의 고칠 것 목록은 "실패 원인 1위 수정"이 아니라 "먼저 잘못 세는 계측을 고치고, 설치 결과 원인 계측을 추가하라"가 핵심이다.
+
+## 9. P0 계측 수정 후 읽는 법
+
+2026-08-25 P0 수정 뒤 새 이벤트는 기본값이 안전하도록 나뉜다.
+
+- `onboarding:spawn_blocked`는 실제 launch/switch/agent launch 같은 user-facing 차단만 의미한다. `orchestrator_auto_select` 후보 프로브는 이 이벤트로 보내지 않는다.
+- `orchestrator_auto_select` 후보별 결과는 `onboarding:orchestrator_candidate_probe`로 읽는다. 이 이벤트는 `metadata.userFacing=false`이고, 사용자가 막힌 수로 세면 안 된다.
+- `onboarding:model_connected`도 후보 probe 통과로는 찍지 않는다. 실제 launch 게이트 통과나 funding probe처럼 "지금 돌릴 수 있다"는 사용자-facing 근거만 연결 앵커로 읽는다.
+- 이미 쌓인 74건은 버리지 않는다. 과거 행은 `onboarding:spawn_blocked` 안의 `metadata.surface`로 갈라 읽는다. `surface=orchestrator_auto_select` 66건 3명은 후보 프로브, `surface=orchestrator_launch` 8건 1명은 실제 launch 게이트 차단으로 해석한다.
+- `onboarding:cli_setup_step`의 `auth/success`는 사용자 단계 완료로만 읽는다. cold start에서 이미 인증돼 ready가 된 경우는 `onboarding:cli_auth_readiness`의 `metadata.source=cold_start_probe`로 분리된다.
+- 설치 시도/결과는 `onboarding:cli_install_attempt`와 `onboarding:cli_install_result`로 읽는다. `metadata.rowId`, `model`, `metadata.strategy`, `metadata.platform`, `metadata.sourceHost`, `metadata.startedBy`, `durationMs`, `exitCode`, `metadata.postProbeInstalled`, `errorCategory`가 원인 분해 축이다. stderr/stdout 원문은 싣지 않고, 필요할 때만 `metadata.tailHash`로 같은 실패 꼬리인지 묶는다.
+
+실패 분류 정규 어휘:
+
+- `missing_prereq:bash`
+- `missing_prereq:curl`
+- `missing_prereq:powershell`
+- `network_or_proxy`
+- `installer_exit`
+- `path_not_detected_after_success`
+- `npm_missing`
+- `npm_prefix_fallback`
+- `npm_exit`
+- `post_install_exec_failed`
+
+P1 확인: `v3/src/hooks/useCliSetupEngine.ts`의 첫 진입 경로는 실제 배경 설치를 시작하지 않고 `AUTO_INSTALL_KEY`만 저장한다. 현 제품 동작은 "자동설치"가 아니라 사용자가 버튼을 누르는 "원클릭 설치"에 가깝다. 이 용어 정리는 제품 결정이 필요하므로 이번 P0 수정에는 포함하지 않았다.

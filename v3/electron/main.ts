@@ -105,7 +105,8 @@ import {
 import { shouldReleaseClaimForStoppedAgent } from "./mcp-server/task-ownership";
 import {
   listCatalog,
-  installPackage,
+  installPackageWithTelemetry,
+  describeInstallPackageForTelemetry,
   uninstallPackage,
   scheduleHarnessUpdates,
   getCatalogVersions,
@@ -266,11 +267,7 @@ import {
   type ProjectConnectionInput,
   type AccessMode,
 } from "./connection-store";
-import {
-  cloneRepo,
-  defaultCloneParentDir,
-  realGitRunner,
-} from "./repo-clone";
+import { cloneRepo, defaultCloneParentDir, realGitRunner } from "./repo-clone";
 import { pushBranch, normalizeBranchName } from "./repo-push";
 import {
   applyCommitIdentity,
@@ -2652,9 +2649,9 @@ const agentWatchdog = new AgentWatchdog(
           ? `프로세스 종료 확인(exit ${signal.exitCode ?? "?"}) — 사망, ` +
             `무활동 임계 대기 없이 즉시 신호 (마지막 보드 활동 ${boardIdleMin}분 전)`
           : signal.axis === "first-activity"
-            ? `스폰(또는 재배정) 이후 ${quietMin}분간 첫 활동 없음 ` +
-              `(첫 활동 임계 ${Math.round(signal.thresholdMs / 60_000)}분)`
-            : `${quietMin}분째 보드 활동 없음`;
+          ? `스폰(또는 재배정) 이후 ${quietMin}분간 첫 활동 없음 ` +
+            `(첫 활동 임계 ${Math.round(signal.thresholdMs / 60_000)}분)`
+          : `${quietMin}분째 보드 활동 없음`;
       const msg =
         `🕵️ [Watchdog] 티켓 ${ticket.taskId} "${ticket.title ?? ""}" ` +
         `(P${ticket.priority ?? "?"}) — ${headline}. ` +
@@ -3353,8 +3350,9 @@ async function ensureAssistantTriggerOrchestrator(
   // 3번째 관문(벤더 잔액). ★이 경로는 **사용자가 화면 앞에 없을 때** 오케를
   // 깨우므로 배너를 띄울 상대가 없다 — 그래서 조용히 안 띄우는 대신 사유를 로그로
   // 남기고 멈춘다. 여기서 통과시키면 무인 기동이 매번 400 을 뱉는 오케를 세운다.
-  const orchVendorGate =
-    await checkOrchestratorVendorGate(effectiveModelSetting);
+  const orchVendorGate = await checkOrchestratorVendorGate(
+    effectiveModelSetting
+  );
   if (!orchVendorGate.ok) {
     console.warn(
       `[AssistantTriggers] orchestrator vendor gate blocked project=${projectId} status=${orchVendorGate.status} — ${orchVendorGate.action}`
@@ -3644,9 +3642,17 @@ const graphUpdater = new GraphUpdater({
         const db = getFirestore(app);
         // The event is intentionally taskId-scoped: it is the only bridge to
         // cost_logs/task_outcomes. It carries no user or audit-ledger identity.
-        await fbSetDoc(fbDoc(db, "tasks", taskId), {
-          outcomeModeEvent: { id: `${taskId}:${agentId ?? "-"}:${mode}`, mode, atMs },
-        }, { merge: true });
+        await fbSetDoc(
+          fbDoc(db, "tasks", taskId),
+          {
+            outcomeModeEvent: {
+              id: `${taskId}:${agentId ?? "-"}:${mode}`,
+              mode,
+              atMs,
+            },
+          },
+          { merge: true }
+        );
       } catch (err) {
         console.warn("[GraphUpdater] task outcome event write failed:", err);
       }
@@ -4371,6 +4377,19 @@ costTracker.setSessionLinesSink(
 // 두고 여기서 창을 붙인다 — 호출부마다 emit 을 흩뿌리면 새 호출부가 생길 때
 // 조용히 빠지고, 그게 지금 이 이벤트가 BigQuery 에 0건인 이유이기도 하다.
 setSpawnGateObserver((e) => {
+  if (e.surface === "orchestrator_auto_select") {
+    mainTelemetry.orchestratorCandidateProbe(mainWindow, {
+      model: e.model,
+      outcome: "blocked",
+      reason: e.reason,
+      installed: e.installed,
+      ...(e.vendor ? { vendor: e.vendor } : {}),
+      ...(e.missingEnvKeyCount !== undefined
+        ? { missingEnvKeyCount: e.missingEnvKeyCount }
+        : {}),
+    });
+    return;
+  }
   mainTelemetry.spawnBlocked(mainWindow, e);
 });
 
@@ -4378,6 +4397,15 @@ setSpawnGateObserver((e) => {
 // 실제로 에이전트를 돌릴 수 있게 된" 순간이고, 사장님 결정으로 핵심 KPI 의
 // 시계가 여기서 시작한다. 차단 관측과 같은 이유로 게이트 안에 두고 창만 붙인다.
 setSpawnGatePassedObserver((e) => {
+  if (e.surface === "orchestrator_auto_select") {
+    mainTelemetry.orchestratorCandidateProbe(mainWindow, {
+      model: e.model,
+      outcome: "ready",
+      ...(e.vendor ? { vendor: e.vendor } : {}),
+      ...(e.noAuthAxis ? { noAuthAxis: true } : {}),
+    });
+    return;
+  }
   mainTelemetry.modelConnected(mainWindow, e);
 });
 
@@ -7098,14 +7126,14 @@ ipcMain.handle(
  */
 async function applyCommitIdentityForRepo(
   repoPath: string,
-  userId?: string,
+  userId?: string
 ): Promise<{ ok: boolean; identity?: CommitIdentity }> {
   const deviceToken = validGitHubOAuthUserId(userId)
     ? getGitHubToken(safeStorage, userId)
     : null;
   if (!deviceToken) {
     console.info(
-      "[commitIdentity] GitHub 계정 미연결 — 커밋 귀속을 설정하지 않았다",
+      "[commitIdentity] GitHub 계정 미연결 — 커밋 귀속을 설정하지 않았다"
     );
     return { ok: false };
   }
@@ -7113,7 +7141,7 @@ async function applyCommitIdentityForRepo(
   if (!identity) return { ok: false };
 
   const applied = await applyCommitIdentity(repoPath, identity, (args, opts) =>
-    realGitRunner(args, { cwd: opts.cwd, timeoutMs: 15_000 }),
+    realGitRunner(args, { cwd: opts.cwd, timeoutMs: 15_000 })
   );
   if (!applied) {
     console.warn("[commitIdentity] git config 쓰기 실패 — 귀속이 안 붙었다");
@@ -7123,7 +7151,7 @@ async function applyCommitIdentityForRepo(
   console.info(
     `[commitIdentity] ${identity.login} 로 커밋 귀속 설정${
       identity.usesNoreply ? " (noreply 주소)" : ""
-    }`,
+    }`
   );
   return { ok: true, identity };
 }
@@ -7154,7 +7182,7 @@ ipcMain.handle(
       repoUrl: string;
       branch: string;
       userId?: string;
-    },
+    }
   ) => {
     const safeBranch = normalizeBranchName(branch);
     if (!safeBranch) {
@@ -7186,7 +7214,7 @@ ipcMain.handle(
           validGitHubOAuthUserId(userId)
             ? getGitHubToken(safeStorage, userId)
             : null,
-      },
+      }
     );
 
     if (credential.kind === "denied") {
@@ -7194,15 +7222,14 @@ ipcMain.handle(
       return { ok: false, errorKind: "denied", message: credential.message };
     }
 
-    const githubToken =
-      credential.kind === "none" ? null : credential.token;
+    const githubToken = credential.kind === "none" ? null : credential.token;
     return pushBranch({
       repoPath,
       remoteUrl: repoUrl,
       branch: safeBranch,
       githubToken,
     });
-  },
+  }
 );
 
 /**
@@ -7214,16 +7241,20 @@ ipcMain.handle(
   "repo:setCommitIdentity",
   async (
     _event,
-    { repoPath, userId }: { repoPath: string; userId?: string },
+    { repoPath, userId }: { repoPath: string; userId?: string }
   ) => {
     if (typeof repoPath !== "string" || !repoPath.trim()) {
       return { ok: false };
     }
     const r = await applyCommitIdentityForRepo(repoPath, userId);
     return r.ok && r.identity
-      ? { ok: true, login: r.identity.login, usesNoreply: r.identity.usesNoreply }
+      ? {
+          ok: true,
+          login: r.identity.login,
+          usesNoreply: r.identity.usesNoreply,
+        }
       : { ok: false };
-  },
+  }
 );
 
 // 이 기기의 안정적 식별자를 렌더러에 넘긴다. 프로젝트 폴더 경로를 기기별로
@@ -9326,8 +9357,9 @@ ipcMain.handle(
         // ★스위치는 **항상 현재 오케를 stop 한 뒤** 새로 띄우므로, 여기서 막지
         // 않으면 사용자는 멀쩡히 돌던 오케를 잃고 그 자리에 400 만 뱉는 껍데기를
         // 받는다(MCP 관문을 여기 둔 것과 정확히 같은 이유).
-        const vendorGate =
-          await checkOrchestratorVendorGate(targetModelSetting);
+        const vendorGate = await checkOrchestratorVendorGate(
+          targetModelSetting
+        );
         switchVendorBootNotice = vendorGate.bootNotice;
         if (!vendorGate.ok) {
           return {
@@ -9529,8 +9561,9 @@ ipcMain.handle(
     // 그대로 뜨는데, 막지 않으면 codex 가 우리 ChatGPT 로그인으로 벤더 slug 를
     // 물어보고 HTTP 400 을 받거나(키 있음/잔액 없음) 조용히 기본 백엔드로 샌다.
     // 그 조용한 샘이 `orchestratorSelectorEligible` 주석이 원래 두려워한 그것이다.
-    const orchVendorGate =
-      await checkOrchestratorVendorGate(effectiveModelSetting);
+    const orchVendorGate = await checkOrchestratorVendorGate(
+      effectiveModelSetting
+    );
     if (!orchVendorGate.ok) {
       return {
         sessionId: "",
@@ -10262,17 +10295,58 @@ ipcMain.handle("harness:versions", async () => {
   return getCatalogVersions();
 });
 
-ipcMain.handle("harness:install", async (_event, id: string) => {
-  try {
-    await installPackage(id);
-    return { success: true };
-  } catch (err) {
+function normalizeHarnessInstallStartedBy(value: unknown): string {
+  return value === "row_button" ||
+    value === "one_click_install" ||
+    value === "harness_store"
+    ? value
+    : "unknown";
+}
+
+ipcMain.handle(
+  "harness:install",
+  async (_event, id: string, startedBy?: unknown) => {
+    const normalizedStartedBy = normalizeHarnessInstallStartedBy(startedBy);
+    const descriptor = describeInstallPackageForTelemetry(id);
+    mainTelemetry.cliInstallAttempt(mainWindow, {
+      rowId: descriptor.id,
+      model: descriptor.model,
+      strategy: descriptor.strategy,
+      platform: descriptor.platform,
+      startedBy: normalizedStartedBy,
+      ...(descriptor.sourceHost ? { sourceHost: descriptor.sourceHost } : {}),
+    });
+    const attempt = await installPackageWithTelemetry(id);
+    mainTelemetry.cliInstallResult(mainWindow, {
+      rowId: attempt.id,
+      model: attempt.model,
+      strategy: attempt.strategy,
+      platform: attempt.platform,
+      startedBy: normalizedStartedBy,
+      success: attempt.success,
+      durationMs: attempt.durationMs,
+      postProbeInstalled: attempt.postProbeInstalled,
+      ...(attempt.sourceHost ? { sourceHost: attempt.sourceHost } : {}),
+      ...(attempt.exitCode !== undefined ? { exitCode: attempt.exitCode } : {}),
+      ...(attempt.failureClassification
+        ? { failureClassification: attempt.failureClassification }
+        : {}),
+      ...(attempt.tailHash ? { tailHash: attempt.tailHash } : {}),
+      ...(attempt.npmPrefixFallback !== undefined
+        ? { npmPrefixFallback: attempt.npmPrefixFallback }
+        : {}),
+      ...(attempt.postInstallExecFailed !== undefined
+        ? { postInstallExecFailed: attempt.postInstallExecFailed }
+        : {}),
+    });
     return {
-      success: false,
-      error: err instanceof Error ? err.message : "Unknown error",
+      success: attempt.success,
+      error: attempt.error,
+      failureClassification: attempt.failureClassification,
+      postProbeInstalled: attempt.postProbeInstalled,
     };
   }
-});
+);
 
 ipcMain.handle("harness:uninstall", async (_event, id: string) => {
   try {
@@ -10570,10 +10644,15 @@ app.whenReady().then(async () => {
         `[Main] Registered ${detection.installedIds.length} installed Ollama model(s)`
       );
     } else if (detection.installed && !detection.daemonRunning) {
-      console.log("[Main] Ollama daemon is not running; local model scan skipped");
+      console.log(
+        "[Main] Ollama daemon is not running; local model scan skipped"
+      );
     }
   } catch (err) {
-    console.warn("[Main] Ollama local model boot scan failed (non-fatal):", err);
+    console.warn(
+      "[Main] Ollama local model boot scan failed (non-fatal):",
+      err
+    );
   }
 
   // 학습데이터 캡처 부트스트랩. 여기서는 타이머만 세우고 게이트를 서버에

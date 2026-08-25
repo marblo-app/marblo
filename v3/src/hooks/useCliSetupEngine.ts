@@ -70,7 +70,7 @@ function readFlag(key: string): boolean {
  */
 export function useStepPrdSuccess(
   onPrdStep: boolean,
-  hasProject: boolean,
+  hasProject: boolean
 ): void {
   const prev = useRef(hasProject);
   useEffect(() => {
@@ -110,11 +110,11 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
       initialWizardStep({
         requiredInstalled: computeRequiredInstalled(
           ORCHESTRATOR_CLI_IDS,
-          results,
+          results
         ),
         requiredReady: useCliSetupStore.getState().ready,
         hasProject: hasProjectRef.current,
-      }),
+      })
     );
   };
 
@@ -154,7 +154,7 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
         requiredReady,
         requiredInstalled: computeRequiredInstalled(
           ORCHESTRATOR_CLI_IDS,
-          latest,
+          latest
         ),
         dismissed: isOnboardingDismissed(),
       });
@@ -234,7 +234,19 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
   const prevReadyRef = useRef(false);
   useEffect(() => {
     if (ready && !prevReadyRef.current) {
-      telemetry.cliSetupStep("auth", "success");
+      const state = useCliSetupStore.getState();
+      const source = state.setupInitiated
+        ? loginRunning
+          ? "one_click_login"
+          : "install_flow"
+        : "cold_start_probe";
+      telemetry.cliAuthReadiness(source, true);
+      if (state.setupInitiated) {
+        telemetry.cliSetupStep("auth", "success", undefined, {
+          source,
+          userFacing: true,
+        });
+      }
       window.dispatchEvent(new CustomEvent("marblo:cli-auth-ready"));
       // ★인증 다음 칸: 로그인이 성립했다고 그 계정이 **돌아간다**는 뜻은 아니다.
       // 구독/크레딧이 없으면 CLI 는 한 턴도 못 도는데 여기까지의 모든 신호는
@@ -247,7 +259,7 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
       // 원클릭 버튼을 눌러 방금 인증을 끝낸 사람에게만 돈다 — 그게 이 안내가
       // 실제로 필요한 순간이기도 하다. 그 밖의 경우는 가이드 모달의 "다시 확인"
       // 이 수동 경로로 남는다.
-      if (useCliSetupStore.getState().setupInitiated) {
+      if (state.setupInitiated) {
         void useCliSetupStore
           .getState()
           .runFundingProbe()
@@ -261,7 +273,7 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
                 outcome.verdict,
                 outcome.model,
                 "auto",
-                outcome.blockedReason,
+                outcome.blockedReason
               );
             }
             // 인증 성공(위 `auth/success`)과 별개로, 그 계정이 실제로 못 돈
@@ -274,7 +286,7 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
               "fail",
               outcome.verdict === "unfunded"
                 ? "unfunded"
-                : `blocked:${outcome.blockedReason ?? "unknown"}`,
+                : `blocked:${outcome.blockedReason ?? "unknown"}`
             );
           });
       }
