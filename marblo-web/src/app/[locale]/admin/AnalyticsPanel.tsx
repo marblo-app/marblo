@@ -1058,6 +1058,76 @@ export type AcquisitionCountryRow = {
   spawned: UnifiedRatio;
 };
 
+export type UnifiedActivationSummary = {
+  spawned: UnifiedRatio;
+  completed: UnifiedRatio;
+  medianMinutesToFirstSpawn: number | null;
+  medianMinutesToFirstSpawnReason: string | null;
+  channelRows: Array<{
+    source: string | null;
+    medium: string | null;
+    campaign: string | null;
+    installs: number;
+    spawned: UnifiedRatio;
+    completed: UnifiedRatio;
+  }>;
+  channelRowsTruncated: boolean;
+};
+
+export type UnifiedRetentionHorizonKey = "d1" | "d7" | "d14" | "d30";
+
+export type UnifiedRetentionHorizon = {
+  key: UnifiedRetentionHorizonKey;
+  retained: UnifiedRatio | null;
+  pending: number;
+};
+
+export type UnifiedRetentionCohortRow = {
+  cohortWeek: string;
+  installs: number;
+  horizons: UnifiedRetentionHorizon[];
+};
+
+export type UnifiedRetentionChannelRow = {
+  source: string | null;
+  medium: string | null;
+  campaign: string | null;
+  installs: number;
+  d7: UnifiedRatio | null;
+  d30: UnifiedRatio | null;
+  pendingD7: number;
+  pendingD30: number;
+};
+
+export type UnifiedRetentionPersonAxis = {
+  installs: number;
+  humanEstimateMin: number;
+  humanEstimateMax: number;
+  identityLinked: UnifiedRatio | null;
+  multiInstallPeople: number;
+  maxInstallsPerBrowser: number | null;
+};
+
+export type UnifiedRetentionZombieSummary = {
+  activeInstalls: number;
+  observedInstalls: number;
+  zombieInstalls: number;
+  neverRanInstalls: number;
+};
+
+export type UnifiedRetentionSummary = {
+  d7: UnifiedRatio | null;
+  d30: UnifiedRatio | null;
+  pendingD7: number;
+  pendingD30: number;
+  cohortRows: UnifiedRetentionCohortRow[];
+  cohortRowsTruncated: boolean;
+  channelRows: UnifiedRetentionChannelRow[];
+  channelRowsTruncated: boolean;
+  personAxis: UnifiedRetentionPersonAxis | null;
+  zombie: UnifiedRetentionZombieSummary | null;
+};
+
 export type AcquisitionUnified = {
   generatedAt: string;
   /** ★`unavailable` 일 때 0 을 그리지 않는다. */
@@ -1077,6 +1147,8 @@ export type AcquisitionUnified = {
   countryRows: AcquisitionCountryRow[];
   countryRowsTruncated: boolean;
   installsByDay: Array<{ date: string; installs: number; channelKnown: number }>;
+  activation?: UnifiedActivationSummary;
+  retention?: UnifiedRetentionSummary;
   /** 뷰에 아직 없어 **화면이 대신 계산하지 않는** 파생 컬럼들(계획 §3-3). */
   pendingColumns: Array<{ column: string; blocks: string }>;
   notes: string[];
@@ -4172,6 +4244,548 @@ export function AcquisitionCountryTable({
           숨기지 않습니다.
         </p>
       )}
+    </div>
+  );
+}
+
+function PendingMetricCard({
+  label,
+  waitingOn,
+  sub,
+}: {
+  label: string;
+  waitingOn: string;
+  sub?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-4">
+      <p className="text-xs text-zinc-500">{label}</p>
+      <p className="mt-1.5 text-sm font-semibold text-amber-300">판단 대기</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+        {waitingOn}
+        {sub ? ` · ${sub}` : ""}
+      </p>
+    </div>
+  );
+}
+
+function unifiedHumanRange(data: AcquisitionUnified | null): string | null {
+  const h = data?.headline?.hygiene;
+  if (!h) return null;
+  return `사람 추정 ${fmtInt(h.humanEstimateMin)}~${fmtInt(
+    h.humanEstimateMax
+  )}명 · 폭 자체가 분모 불확실성`;
+}
+
+export function UnifiedActivationHeadlineView({
+  data,
+}: {
+  data: AcquisitionUnified | null;
+}) {
+  if (!data || data.state !== "ready" || !data.headline) {
+    return (
+      <AcquisitionUnavailable
+        data={data}
+        title="첫 스폰 · 첫 완주 · 첫 스폰까지 중앙 소요"
+        willShow={[
+          "첫 스폰 도달 — COUNTIF(hasSpawned) / 외부 설치",
+          "첫 완주 도달 — firstCompletedAt IS NOT NULL / 외부 설치",
+          "첫 스폰까지 중앙 소요 — minutesToFirstSpawn 중앙값",
+        ]}
+      />
+    );
+  }
+  const activation = data.activation;
+  const spawn = activation?.spawned ?? data.headline.spawned;
+  const completed = activation?.completed ?? null;
+  const humanRange = unifiedHumanRange(data);
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+          <p className="text-xs text-zinc-500">첫 스폰 도달</p>
+          <div className="mt-1.5">
+            <UnifiedRatioCell
+              value={spawn}
+              title="COUNTIF(hasSpawned) / 외부 설치. 분자와 분모가 같은 설치 축입니다."
+            />
+          </div>
+          <p className="mt-1 text-[11px] text-zinc-600">{humanRange}</p>
+        </div>
+        {completed ? (
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+            <p className="text-xs text-zinc-500">첫 완주 도달</p>
+            <div className="mt-1.5">
+              <UnifiedRatioCell
+                value={completed}
+                title="COUNTIF(firstCompletedAt IS NOT NULL) / 외부 설치"
+              />
+            </div>
+            <p className="mt-1 text-[11px] text-zinc-600">{humanRange}</p>
+          </div>
+        ) : (
+          <PendingMetricCard
+            label="첫 완주 도달"
+            waitingOn="통합 읽기 경로가 firstCompletedAt 전체 분자/분모를 싣기 전까지 0 으로 그리지 않습니다."
+            sub={humanRange ?? undefined}
+          />
+        )}
+        {activation?.medianMinutesToFirstSpawn != null ? (
+          <StatCard
+            label="첫 스폰까지 중앙 소요"
+            value={`${fmtInt(activation.medianMinutesToFirstSpawn)}분`}
+            sub="minutesToFirstSpawn 중앙값 · B6 10분 임계 대신 실제 분포"
+          />
+        ) : (
+          <PendingMetricCard
+            label="첫 스폰까지 중앙 소요"
+            waitingOn={
+              activation?.medianMinutesToFirstSpawnReason ??
+              "minutesToFirstSpawn 열 대기 — daysToFirstSpawn 으로 분 단위를 지어내지 않습니다."
+            }
+          />
+        )}
+      </div>
+      <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-500">
+        근거: <span className="font-mono">{data.source}</span>. 설치 축은{" "}
+        <span className="tabular-nums">
+          {fmtInt(data.headline.hygiene.installsExternal)} /{" "}
+          {fmtInt(data.headline.hygiene.installsTotal)}
+        </span>
+        이고, 사람 수는 단일값이 아니라 {humanRange} 입니다.
+      </p>
+    </div>
+  );
+}
+
+export function UnifiedActivationChannelTable({
+  data,
+}: {
+  data: AcquisitionUnified | null;
+}) {
+  if (!data || data.state !== "ready") {
+    return (
+      <AcquisitionUnavailable
+        data={data}
+        title="채널별 활성화"
+        willShow={["채널 × 첫스폰률 × 첫완주률", "표본 부족이면 분수만 표시"]}
+      />
+    );
+  }
+  const rows =
+    data.activation?.channelRows ??
+    data.channelRows.map((r) => ({
+      source: r.source,
+      medium: r.medium,
+      campaign: r.campaign,
+      installs: r.installs,
+      spawned: r.spawned,
+      completed: r.completed,
+    }));
+  if (rows.length === 0) {
+    return (
+      <EmptyState label="캠페인이 실재하는 채널 행이 없습니다 — 채널 품질을 0% 로 그리지 않습니다. 채널 미상 사유는 획득 탭 표를 보세요." />
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-xs">
+        <thead className="text-zinc-500">
+          <tr className="border-b border-zinc-800">
+            <th className="py-2 pr-3 font-medium">소스 / 매체</th>
+            <th className="py-2 pr-3 font-medium">캠페인</th>
+            <th className="py-2 pr-3 text-right font-medium">설치</th>
+            <th className="py-2 pr-3 text-right font-medium">첫 스폰</th>
+            <th className="py-2 pr-3 text-right font-medium">첫 완주</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr
+              key={`${r.source}|${r.medium}|${r.campaign}|${i}`}
+              className="border-b border-zinc-900/60 text-zinc-300"
+            >
+              <td className="py-2 pr-3 text-zinc-100">
+                {r.source ?? "—"} / {r.medium ?? "—"}
+              </td>
+              <td className="py-2 pr-3">{r.campaign ?? "—"}</td>
+              <td className="py-2 pr-3 text-right tabular-nums">
+                {fmtInt(r.installs)}
+              </td>
+              <td className="py-2 pr-3 text-right">
+                <UnifiedRatioCell value={r.spawned} />
+              </td>
+              <td className="py-2 pr-3 text-right">
+                <UnifiedRatioCell value={r.completed} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {(data.activation?.channelRowsTruncated ?? data.channelRowsTruncated) && (
+        <p className="mt-2 text-[11px] text-amber-300/80">
+          상위 {rows.length}행만 표시합니다 — 잘렸다는 사실을 숨기지 않습니다.
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function UnifiedZombieSeparationView({
+  data,
+}: {
+  data: AcquisitionUnified | null;
+}) {
+  const zombie = data?.state === "ready" ? data.retention?.zombie ?? null : null;
+  if (!zombie) {
+    return (
+      <AcquisitionUnavailable
+        data={data}
+        title="좀비 분리"
+        willShow={[
+          "activeDaysTotal vs observedDays",
+          "하트비트만 있는 설치와 실제 활동 설치 분리",
+        ]}
+      />
+    );
+  }
+  return (
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <RatioCard
+        label="활동 설치"
+        numerator={zombie.activeInstalls}
+        denominator={zombie.observedInstalls}
+        sub="activeDaysTotal 기준"
+      />
+      <StatCard
+        label="좀비 설치"
+        value={fmtInt(zombie.zombieInstalls)}
+        sub="하트비트만 · 활동 아님"
+        accent={zombie.zombieInstalls > 0 ? STATUS_WARN : undefined}
+      />
+      <StatCard
+        label="한 번도 안 켬"
+        value={fmtInt(zombie.neverRanInstalls)}
+        sub="좀비와 원인이 달라 합치지 않음"
+      />
+      <StatCard
+        label="관측 설치"
+        value={fmtInt(zombie.observedInstalls)}
+        sub="분모 후보"
+      />
+    </div>
+  );
+}
+
+export function FoldedActivationSmallSamples() {
+  const rows = [
+    ["베타종료 게이지", "각 게이지 분모 n≥30"],
+    ["CLI 셋업 위저드", "3.0.19+ 설치 n≥30"],
+    ["첫프로젝트 만족도", "응답 ≥10"],
+    ["샘플 데모 퍼널", "n≥30"],
+    ["마케팅 수신 동의", "n≥30"],
+    ["CLI 실패 마이크로설문", "응답 ≥10"],
+  ] as const;
+  return (
+    <Panel
+      title="표본 찰 때까지 접힘"
+      note="열면 오해하는 지표는 기본 화면에서 내린다"
+    >
+      <table className="w-full text-left text-xs">
+        <tbody>
+          {rows.map(([label, threshold]) => (
+            <tr key={label} className="border-b border-zinc-900/60">
+              <td className="py-2 pr-3 text-zinc-300">{label}</td>
+              <td className="py-2 pr-3 text-zinc-500">{threshold}</td>
+              <td className="py-2 pr-3 text-right text-amber-300">표본 대기</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Panel>
+  );
+}
+
+export function UnifiedRetentionHeadlineView({
+  data,
+}: {
+  data: AcquisitionUnified | null;
+}) {
+  const retention = data?.state === "ready" ? data.retention ?? null : null;
+  if (!data || data.state !== "ready" || !retention) {
+    return (
+      <AcquisitionUnavailable
+        data={data}
+        title="D7 · D30 잔존 · 아직 판단 불가"
+        willShow={[
+          "D7 잔존 — retainedD7 IS NOT NULL 인 설치만 분모",
+          "D30 잔존 — retainedD30 IS NOT NULL 인 설치만 분모",
+          "아직 판단 불가 — d7_pending/d30_pending",
+        ]}
+      />
+    );
+  }
+  return (
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+        <p className="text-xs text-zinc-500">D7 잔존</p>
+        <div className="mt-1.5">
+          <UnifiedRatioCell
+            value={retention.d7}
+            title="COUNTIF(retainedD7) / COUNTIF(retainedD7 IS NOT NULL)"
+          />
+        </div>
+        <p className="mt-1 text-[11px] text-zinc-600">
+          판단 전 {fmtInt(retention.pendingD7)}건은 분모에서 제외
+        </p>
+      </div>
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+        <p className="text-xs text-zinc-500">D30 잔존</p>
+        <div className="mt-1.5">
+          <UnifiedRatioCell
+            value={retention.d30}
+            title="COUNTIF(retainedD30) / COUNTIF(retainedD30 IS NOT NULL)"
+          />
+        </div>
+        <p className="mt-1 text-[11px] text-zinc-600">
+          판단 전 {fmtInt(retention.pendingD30)}건은 분모에서 제외
+        </p>
+      </div>
+      <StatCard
+        label="아직 판단 불가"
+        value={fmtInt(retention.pendingD7)}
+        sub="D7 창 미도달 · 0% 로 그리지 않음"
+        accent={retention.pendingD7 > 0 ? STATUS_WARN : undefined}
+      />
+    </div>
+  );
+}
+
+function retentionHorizonLabel(key: UnifiedRetentionHorizonKey): string {
+  return key.toUpperCase();
+}
+
+export function UnifiedRetentionCohortTable({
+  data,
+}: {
+  data: AcquisitionUnified | null;
+}) {
+  const retention = data?.state === "ready" ? data.retention ?? null : null;
+  if (!data || data.state !== "ready" || !retention) {
+    return (
+      <AcquisitionUnavailable
+        data={data}
+        title="주간 코호트"
+        willShow={[
+          "cohortWeek × D1/D7/D14/D30",
+          "창이 안 닫힌 칸은 d*_pending 으로 분모에서 제외",
+        ]}
+      />
+    );
+  }
+  if (retention.cohortRows.length === 0) {
+    return <EmptyState label="코호트 행이 없습니다 — 0% 가 아니라 표본 공백입니다." />;
+  }
+  const horizonKeys: UnifiedRetentionHorizonKey[] = ["d1", "d7", "d14", "d30"];
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[620px] text-xs">
+        <thead className="text-zinc-500">
+          <tr className="border-b border-zinc-800">
+            <th className="py-2 pr-3 text-left font-medium">코호트 주</th>
+            <th className="py-2 pr-3 text-right font-medium">설치</th>
+            {horizonKeys.map((key) => (
+              <th key={key} className="py-2 pr-3 text-right font-medium">
+                {retentionHorizonLabel(key)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {retention.cohortRows.map((row) => {
+            const byKey = new Map(row.horizons.map((h) => [h.key, h]));
+            return (
+              <tr key={row.cohortWeek} className="border-b border-zinc-900/60">
+                <td className="py-2 pr-3 tabular-nums text-zinc-100">
+                  {row.cohortWeek}
+                </td>
+                <td className="py-2 pr-3 text-right tabular-nums text-zinc-300">
+                  {fmtInt(row.installs)}
+                </td>
+                {horizonKeys.map((key) => {
+                  const h = byKey.get(key);
+                  return (
+                    <td key={key} className="py-2 pr-3 text-right">
+                      {h?.retained ? (
+                        <span className="inline-flex flex-col items-end gap-0.5">
+                          <UnifiedRatioCell value={h.retained} />
+                          {h.pending > 0 && (
+                            <span className="text-[10px] tabular-nums text-zinc-600">
+                              판단 전 {fmtInt(h.pending)}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span title="관측창 미도달 또는 분모 없음 — 0% 가 아니라 판단 불가입니다.">
+                          —
+                        </span>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {retention.cohortRowsTruncated && (
+        <p className="mt-2 text-[11px] text-amber-300/80">
+          상위 {retention.cohortRows.length}개 코호트만 표시합니다.
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function UnifiedRetentionChannelTable({
+  data,
+}: {
+  data: AcquisitionUnified | null;
+}) {
+  const retention = data?.state === "ready" ? data.retention ?? null : null;
+  if (!data || data.state !== "ready" || !retention) {
+    return (
+      <AcquisitionUnavailable
+        data={data}
+        title="채널별 리텐션"
+        willShow={["채널 × D7 · D30", "채널×주차로 과분해하지 않음"]}
+      />
+    );
+  }
+  if (retention.channelRows.length === 0) {
+    return (
+      <EmptyState label="캠페인이 실재하는 채널 행이 없습니다 — 채널 리텐션을 0% 로 그리지 않습니다." />
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-xs">
+        <thead className="text-zinc-500">
+          <tr className="border-b border-zinc-800">
+            <th className="py-2 pr-3 font-medium">소스 / 매체</th>
+            <th className="py-2 pr-3 font-medium">캠페인</th>
+            <th className="py-2 pr-3 text-right font-medium">설치</th>
+            <th className="py-2 pr-3 text-right font-medium">D7</th>
+            <th className="py-2 pr-3 text-right font-medium">D30</th>
+          </tr>
+        </thead>
+        <tbody>
+          {retention.channelRows.map((r, i) => (
+            <tr
+              key={`${r.source}|${r.medium}|${r.campaign}|${i}`}
+              className="border-b border-zinc-900/60 text-zinc-300"
+            >
+              <td className="py-2 pr-3 text-zinc-100">
+                {r.source ?? "—"} / {r.medium ?? "—"}
+              </td>
+              <td className="py-2 pr-3">{r.campaign ?? "—"}</td>
+              <td className="py-2 pr-3 text-right tabular-nums">
+                {fmtInt(r.installs)}
+              </td>
+              <td className="py-2 pr-3 text-right">
+                <UnifiedRatioCell value={r.d7} />
+                {r.pendingD7 > 0 && (
+                  <span className="ml-1 text-[10px] text-zinc-600">
+                    판단 전 {fmtInt(r.pendingD7)}
+                  </span>
+                )}
+              </td>
+              <td className="py-2 pr-3 text-right">
+                <UnifiedRatioCell value={r.d30} />
+                {r.pendingD30 > 0 && (
+                  <span className="ml-1 text-[10px] text-zinc-600">
+                    판단 전 {fmtInt(r.pendingD30)}
+                  </span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {retention.channelRowsTruncated && (
+        <p className="mt-2 text-[11px] text-amber-300/80">
+          상위 {retention.channelRows.length}행만 표시합니다.
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function UnifiedPersonAxisComparison({
+  data,
+}: {
+  data: AcquisitionUnified | null;
+}) {
+  if (!data || data.state !== "ready" || !data.headline) {
+    return (
+      <AcquisitionUnavailable
+        data={data}
+        title="사람 축 대조"
+        willShow={[
+          "설치 수 · 사람 추정 범위",
+          "identity_linked_ratio",
+          "personInstallCount ≥ 2 인 사람 수",
+        ]}
+      />
+    );
+  }
+  const hygiene = data.headline.hygiene;
+  const person = data.retention?.personAxis;
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <StatCard
+          label="설치"
+          value={fmtInt(hygiene.installsExternal)}
+          sub={`전체 ${fmtInt(hygiene.installsTotal)} · dev ${fmtInt(
+            hygiene.installsDev
+          )} 제외`}
+        />
+        <StatCard
+          label="사람 추정"
+          value={`${fmtInt(hygiene.humanEstimateMin)}~${fmtInt(
+            hygiene.humanEstimateMax
+          )}명`}
+          sub="범위의 폭이 정보"
+        />
+        {person?.identityLinked ? (
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+            <p className="text-xs text-zinc-500">identity_linked_ratio</p>
+            <div className="mt-1.5">
+              <UnifiedRatioCell value={person.identityLinked} />
+            </div>
+            <p className="mt-1 text-[11px] text-zinc-600">설치↔사람 다리</p>
+          </div>
+        ) : (
+          <PendingMetricCard
+            label="identity_linked_ratio"
+            waitingOn={`${CALLABLE_INSTALL_UNIFIED} / v_install_unified 의 personKey/personLinkCount 집계 대기 — 사람 없음으로 읽지 않습니다.`}
+          />
+        )}
+        <StatCard
+          label="다중 설치 사람"
+          value={person ? fmtInt(person.multiInstallPeople) : "—"}
+          sub="personInstallCount ≥ 2"
+        />
+      </div>
+      <p className="rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-xs leading-relaxed text-amber-100">
+        설치 ≠ 사람입니다. 실측상 배포 전 재설치 루프가 크므로 설치 단일값만
+        보면 사람이 부풀어 보입니다. 한 브라우저 최대 설치 수:{" "}
+        <span className="tabular-nums">
+          {fmtInt(person?.maxInstallsPerBrowser ?? hygiene.maxInstallsPerBrowser)}
+        </span>
+        .
+      </p>
     </div>
   );
 }
@@ -7660,32 +8274,39 @@ export default function AnalyticsPanel({
         >
           <AxisLimitNote
             notes={[
-              EVENTS_ACCOUNT_AXIS_LIMIT,
-              retention.data?.activationGate.note,
+              "활성화 탭의 헤드라인은 getAdminInstallUnified 한 경로에서 읽습니다. 설치 1행이 알갱이이고, 사람 수는 단일값이 아니라 범위로 표시합니다.",
+              unifiedHumanRange(unified.data),
+              "제품 사용·릴리스·라우팅·비용 같은 운영용 표본 지표는 이 사업 탭에서 내렸습니다. 이 탭은 들어온 설치가 첫 스폰·첫 완주까지 갔는지만 봅니다.",
             ]}
           />
 
-          {/* ── ★KPI 코크핏: 베타종료 게이지·재사용·스폰·신규 온보딩 이벤트 (🟡) ── */}
+          {/* ── ★상단 3줄 — 계획 §4-2 ─────────────────────────────── */}
           <div className="space-y-4">
             <SectionHeader
-              icon={Gauge}
-              title="지표기반 베타종료 · 활성화 코크핏"
-              trust="yellow"
-            />
-            {kpi.loading ? (
+              icon={Database}
+              title="첫 스폰 · 첫 완주 · 첫 스폰까지 중앙 소요 (설치 축)"
+              trust={unified.data?.state === "ready" ? "yellow" : "unwired"}
+            >
+              {unified.data?.source && (
+                <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 text-[11px] text-zinc-500">
+                  {unified.data.source}
+                </span>
+              )}
+            </SectionHeader>
+            {unified.loading ? (
               <LoadingBox />
-            ) : kpi.error ? (
-              <ErrorBox msg={kpi.error} />
-            ) : kpi.data ? (
-              <KpiCockpitView kpi={kpi.data} />
-            ) : null}
+            ) : unified.error ? (
+              <ErrorBox msg={unified.error} />
+            ) : (
+              <UnifiedActivationHeadlineView data={unified.data} />
+            )}
           </div>
 
-          {/* ── 온보딩 첫10분 퍼널 (🟡) ───────────────────────────────── */}
+          {/* ── 1. 단계별 도달 퍼널 — 유지 ─────────────────────────── */}
           <div className="space-y-4">
             <SectionHeader
               icon={Activity}
-              title="온보딩 첫 10분 퍼널 (활성화)"
+              title="단계별 도달 퍼널"
               trust="yellow"
             />
             {onbFunnel.loading ? (
@@ -7697,280 +8318,77 @@ export default function AnalyticsPanel({
             ) : null}
           </div>
 
-          {/* ── 활성화 게이트 (🟡, 계정 identity 축) ────────────────────
-              리텐션 코호트 표와 한 컴포넌트였던 것을 여기서 갈랐다 — 게이트는
-              "가치를 보나", 코호트는 "남아 있나" 로 서로 다른 질문이다. ── */}
+          {/* ── 2. 온보딩 스톨 · 차단 사유 — 유지 ─────────────────── */}
           <div className="space-y-4">
             <SectionHeader
-              icon={Activity}
-              title="순차 활성화 게이트"
+              icon={Gauge}
+              title="온보딩 스톨 · 차단 사유"
               trust="yellow"
             />
-            {retention.loading ? (
+            {kpi.loading ? (
               <LoadingBox />
-            ) : retention.error ? (
-              <ErrorBox msg={retention.error} />
-            ) : retention.data ? (
-              <ActivationGateView data={retention.data} />
-            ) : null}
-          </div>
-
-          {/* ── 제품 사용 (🟡) ────────────────────────────────────────── */}
-          <div className="space-y-4">
-            <SectionHeader
-              icon={Activity}
-              title="제품 사용·활성"
-              trust="yellow"
-            >
-              {u && <SampleBadge n={u.sampleClientCount} />}
-            </SectionHeader>
-            {usage.loading ? (
-              <LoadingBox />
-            ) : usage.error ? (
-              <ErrorBox msg={usage.error} />
-            ) : u ? (
+            ) : kpi.error ? (
+              <ErrorBox msg={kpi.error} />
+            ) : kpi.data?.onboardingStall ? (
               <>
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                  <StatCard label="WAU (7일 고유)" value={fmtInt(u.wau)} />
-                  <StatCard
-                    label="옵트인 표본"
-                    value={fmtInt(u.sampleClientCount)}
-                    sub={`고유 clientId / ${days}일`}
-                  />
-                  <StatCard
-                    label="태스크 성공률"
-                    value={fmtPct(u.tasks.successRate)}
-                    sub={`${fmtInt(u.tasks.succeeded)}/${fmtInt(
-                      u.tasks.total
-                    )}`}
-                    accent={u.tasks.total > 0 ? STATUS_GOOD : undefined}
-                  />
-                  <StatCard
-                    label="평균 완료시간"
-                    value={fmtDuration(u.tasks.avgDurationMs)}
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <Panel
-                    title="DAU 추이"
-                    note="일별 고유 활성 clientId (옵트인 표본)"
-                  >
-                    {/* ★대표 차트 1 — 손 SVG LineChart 에서 공용
-                        TimeSeriesChart 로 옮긴 첫 자리다(티켓
-                        MSyaEqPIBsg14YkKf6VZ). ★그 안의 라이브러리는 visx →
-                        recharts 로 바뀌었다(사장님 결정 2026-08-25, 티켓
-                        cUsZBatAgMXGeUObwFmV) — 이 호출부는 **한 줄도 안 바꿨다.**
-                        `ChartFrame` 뒤에 라이브러리를 가둬 둔 값이 여기서 나온다.
-                        어드민 차트를 한 번에 갈아엎지
-                        않는다 — 이 앱은 매일 배포되므로 하나를 먼저 옮겨
-                        **같은 숫자가 나오는지** 대조로 증명하고(테스트
-                        TimeSeriesChart.parity.test.tsx) 나머지는 별도 PR 로
-                        미룬다. 아래 나머지 LineChart 호출부는 그대로 손 SVG 다.
-
-                        surface="dark" 하나로 이 화면의 어두운 바탕을 고른다 —
-                        조직 대시보드는 같은 컴포넌트를 surface="light" 로 쓴다.
-                        어두운 바탕의 --viz-series-1 은 이 화면이 쓰던 SERIES
-                        (#3987e5) 와 같은 값이라 색이 바뀌지 않는다. */}
-                    <TimeSeriesChart
-                      data={u.activeByDay.map((d) => ({
-                        date: d.date,
-                        value: d.dau,
-                      }))}
-                      title="DAU 추이"
-                      description="일별 고유 활성 clientId (옵트인 표본)"
-                      surface="dark"
-                      format={fmtInt}
-                      emptyLabel="활성 데이터가 없습니다 (텔레메트리 공백)."
-                      marker={ID_SCHEME_MARKER}
-                      onPointClick={(date) =>
-                        openDrill({ scope: "usage:day", date, days })
-                      }
-                    />
-                  </Panel>
-                  <Panel title="에이전트 스폰 추이" note="agent:spawned 일별">
-                    <LineChart
-                      data={u.spawnsByDay.map((d) => ({
-                        date: d.date,
-                        value: d.count,
-                      }))}
-                      color={SERIES_2}
-                      emptyLabel="스폰 이벤트가 없습니다."
-                      marker={ID_SCHEME_MARKER}
-                      onDrill={(date) =>
-                        openDrill({ scope: "spawn:day", date, days })
-                      }
-                    />
-                  </Panel>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                  <Panel
-                    title="상위 이벤트"
-                    note={
-                      (u.metricMode ?? "events") === "clients"
-                        ? "단위: 고유 사용자 수(clientId)"
-                        : "단위: 이벤트 발생 수"
-                    }
-                  >
-                    <BarList
-                      data={u.topEvents.map((e) => ({
-                        key: e.key,
-                        value: e.count,
-                      }))}
-                      showShare
-                      emptyLabel="이벤트 데이터가 없습니다."
-                      onDrill={(key) =>
-                        openDrill({ scope: "segment:event", key, days })
-                      }
-                    />
-                  </Panel>
-                  <Panel
-                    title="스폰 — 역할별"
-                    note={
-                      (u.metricMode ?? "events") === "clients"
-                        ? "단위: 고유 사용자 수(clientId)"
-                        : "단위: 스폰 발생 수"
-                    }
-                  >
-                    <BarList
-                      data={u.spawnsByRole.map((e) => ({
-                        key: e.key,
-                        value: e.count,
-                      }))}
-                      color={SERIES_2}
-                      showShare
-                      emptyLabel="스폰 데이터가 없습니다."
-                      onDrill={(key) =>
-                        openDrill({ scope: "segment:role", key, days })
-                      }
-                    />
-                  </Panel>
-                  <Panel
-                    title="스폰 — 모델별"
-                    note={
-                      (u.metricMode ?? "events") === "clients"
-                        ? "단위: 고유 사용자 수(clientId)"
-                        : "단위: 스폰 발생 수"
-                    }
-                  >
-                    <BarList
-                      data={u.spawnsByModel.map((e) => ({
-                        key: e.key,
-                        value: e.count,
-                      }))}
-                      color={SERIES_2}
-                      showShare
-                      emptyLabel="스폰 데이터가 없습니다."
-                      onDrill={(key) =>
-                        openDrill({ scope: "segment:model", key, days })
-                      }
-                    />
-                  </Panel>
-                </div>
+                <QueryStatusBanner status={kpi.data.queryStatus} />
+                <OnboardingStallCard stall={kpi.data.onboardingStall} />
               </>
-            ) : null}
-          </div>
-
-          {/* ── 설치 단위 활성 (🔴, analytics_user_daily) ─────────────────
-              ★위 '제품 사용·활성' 은 events 옵트인 표본을 센다. 이 칸은 파생표
-              analytics_user_daily(설치 × 날짜)를 센다 — 좀비(present_only)를
-              활동에서 갈라내고 설치 단위로 활동일을 세는 축이라 같은 수가
-              아니다. 두 수를 나눠 읽지 마라.
-              ★그리고 이 표는 **이미 매일 채워지고 있다.** 없는 것은 소스가
-              아니라 이 화면이 읽어 오는 경로다 — 그래서 '적재 전' 이 아니라
-              '연결 전' 이라고 적는다. ── */}
-          <div className="space-y-4">
-            <SectionHeader
-              icon={Database}
-              title="설치 단위 활성 (설치 × 날짜)"
-              // ★'소스 없음' 이 아니다 — 표는 매일 채워지고 있고 조회 경로만 없다.
-              //   값이 붙으면 그 표가 events(옵트인 표본)의 파생표이므로 🟡 이다.
-              trust={userDaily.data ? "yellow" : "unwired"}
-            />
-            {userDaily.loading ? (
-              <LoadingBox />
-            ) : userDaily.data ? (
-              <UserDailySummaryView data={userDaily.data} />
-            ) : userDaily.error ? (
-              <ErrorBox msg={userDaily.error} />
             ) : (
               <PendingIngestion
-                missing="read-path"
-                title="설치 단위 활동일 · 좀비 분리"
-                waitingOn={`${CALLABLE_USER_DAILY} — analytics_user_daily 를 읽는 어드민 콜러블. 표는 매일 05:30 KST 스케줄(scheduledBuildAnalyticsProfiles)로 이미 채워지고 있고, 없는 것은 조회 경로다`}
+                title="온보딩 스톨 · 차단 사유"
+                waitingOn="getAdminKpiCockpit.onboardingStall — 정규 차단 사유와 가이드 모달 노출"
                 willShow={[
-                  "설치 × 날짜 활동일 (active 와 present_only 를 갈라서)",
-                  "좀비 격리 후의 설치 단위 DAU — 위 옵트인 표본 DAU 와 분모가 다르다",
-                  "설치별 이벤트·토큰 총량 분포 (분자/분모 동반)",
+                  "온보딩 스톨",
+                  "차단 사유 (정규 어휘 / errorCategory)",
+                  "가이드 모달 노출",
                 ]}
               />
             )}
           </div>
 
-          {/* ── 베타 세그먼트 사용패턴 (🟡 grant 모수는 🟢) ──────────────
-              "grant 를 준 사람들이 실제로 쓰는가". 모수(grant 명단)와 관측 카운트는
-              Firestore/cost_logs 라 항상 정확하고, 기능사용·세션·채택만 텔레메트리에
-              걸린다 — 그래서 섹션 신뢰도는 🟡 로 두되 카드가 둘을 구분해 말한다. */}
+          {/* ── 3. 채널별 활성화 — 통합표 ──────────────────────────── */}
           <div className="space-y-4">
             <SectionHeader
-              icon={UserCheck}
-              title="베타 세그먼트 사용패턴"
-              trust="yellow"
-            >
-              {betaSeg.data && (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950/40 px-2.5 py-1 text-xs text-zinc-400">
-                  <Lock className="h-3.5 w-3.5" />
-                  최소 코호트 {fmtInt(betaSeg.data.minCohortSize)}명 가드
-                </span>
-              )}
-            </SectionHeader>
-            {betaSeg.loading ? (
-              <LoadingBox />
-            ) : betaSeg.error ? (
-              <ErrorBox msg={betaSeg.error} />
-            ) : betaSeg.data ? (
-              <BetaSegmentView data={betaSeg.data} />
-            ) : null}
-          </div>
-
-          {/* ── 릴리스·버전 헬스 (🟡 BQ events.appVersion) ─────────────── */}
-          <div className="space-y-4">
-            <SectionHeader icon={Tag} title="릴리스·버전 헬스" trust="yellow" />
-            {release.loading ? (
-              <LoadingBox />
-            ) : release.error ? (
-              <ErrorBox msg={release.error} />
-            ) : release.data ? (
-              <ReleaseHealthView data={release.data} />
-            ) : null}
-          </div>
-
-          {/* ── 안정성 상세 (🔴 Sentry 선행) ──────────────────────────── */}
-          {/* 위 릴리스 섹션이 채우는 것은 **에이전트 크래시 이벤트**(agent:crashed)
-              기반 버전별 안정성이다. 앱 자체의 예외/스택트레이스 집계는 Sentry
-              연동이 선행이라 여전히 비어 있다 — 두 개를 한 칸으로 합치지 않는다. */}
-          <div className="space-y-4">
-            <SectionHeader
-              icon={ShieldOff}
-              title="앱 예외·스택트레이스"
-              trust="red"
+              icon={Globe}
+              title="채널별 활성화"
+              trust={unified.data?.state === "ready" ? "yellow" : "unwired"}
             />
-            <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 py-10 text-center">
-              <ShieldOff className="h-6 w-6 text-zinc-600" />
-              <p className="text-sm font-medium text-zinc-400">
-                어드민 대시보드 연동 대기
-              </p>
-              <p className="max-w-md text-xs text-zinc-600">
-                앱의 Sentry 크래시 리포팅은 DSN 이 설정되어 있고 사용자 동의 시
-                동작합니다. 다만 이 패널이 Sentry API 에서 지표를 읽어오는
-                연동은 아직 구현되지 않아 표시할 수치가 없습니다.
-                예외/스택트레이스 단위 지표는 sentry.io 프로젝트에서 확인하세요.
-                (버전별 에이전트 크래시율은 위 &ldquo;릴리스·버전 헬스&rdquo;
-                섹션이 텔레메트리로 이미 보여줍니다.)
-              </p>
-            </div>
+            {unified.loading ? (
+              <LoadingBox />
+            ) : unified.error ? (
+              <ErrorBox msg={unified.error} />
+            ) : (
+              <UnifiedActivationChannelTable data={unified.data} />
+            )}
           </div>
+
+          {/* ── 4. 좀비 분리 — 리텐션 신뢰 전제 ───────────────────── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Database}
+              title="좀비 분리"
+              trust={unified.data?.retention?.zombie ? "yellow" : "unwired"}
+            />
+            {unified.loading ? (
+              <LoadingBox />
+            ) : unified.error ? (
+              <ErrorBox msg={unified.error} />
+            ) : (
+              <UnifiedZombieSeparationView data={unified.data} />
+            )}
+          </div>
+
+          {/* ── 5. 작은 표본 지표 — 기본 접힘 ─────────────────────── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Lock}
+              title="표본 찰 때까지 접음"
+              trust="yellow"
+            />
+            <FoldedActivationSmallSamples />
+          </div>
+
         </div>
       )}
 
@@ -7984,324 +8402,94 @@ export default function AnalyticsPanel({
         >
           <AxisLimitNote
             notes={[
-              EVENTS_ACCOUNT_AXIS_LIMIT,
-              ID_SCHEME_MARKER.hint,
-              retention.data?.cohorts.note,
-              streak.data?.account.identityScheme.note,
-              // ★익명축에는 운영자 제외가 구조적으로 불가능하다. 토글은 화면에
-              //   떠 있는데 이 표에는 닿지 않는다 — 그 사실을 숫자보다 먼저 적는다.
-              ANON_AXIS_ADMIN_TOGGLE_INERT,
-              // 사람 축을 쓰는 카드가 화면에 있을 때만 forward-only 를 적는다.
-              personAxis ? PERSON_AXIS_FORWARD_ONLY_NOTE : null,
-              personAxisNote,
+              "리텐션 탭은 관측창이 닫힌 설치만 분모로 씁니다. d*_pending 으로 빠진 설치는 이탈 0% 가 아니라 아직 판단 불가입니다.",
+              unifiedHumanRange(unified.data),
+              "모델 비용·라우팅 진단은 운영용이라 이 탭에서 내렸습니다. 수익 탭과 운영 탭은 별도 티켓이 같은 파일에서 다룹니다.",
             ]}
           />
 
-          {/* ── 리텐션 코호트 (🟡, 계정 identity 축) ─────────────────── */}
+          {/* ── ★상단 3줄 — 계획 §4-3 ─────────────────────────────── */}
           <div className="space-y-4">
             <SectionHeader
               icon={Repeat}
-              title="리텐션 코호트 (주간)"
-              trust="yellow"
+              title="D7 · D30 잔존 · 아직 판단 불가"
+              trust={unified.data?.retention ? "yellow" : "unwired"}
             />
-            {retention.loading ? (
+            {unified.loading ? (
               <LoadingBox />
-            ) : retention.error ? (
-              <ErrorBox msg={retention.error} />
-            ) : retention.data ? (
-              <RetentionCohortTableView data={retention.data} />
-            ) : null}
+            ) : unified.error ? (
+              <ErrorBox msg={unified.error} />
+            ) : (
+              <UnifiedRetentionHeadlineView data={unified.data} />
+            )}
           </div>
 
-          {/* ── D7·D14 리텐션 · 연속사용 스트릭 (🟡) ─────────────────────
-              사장님이 "매우 중요한 지표" 로 지목한 축. 위 코호트와 달리 설치/계정
-              두 축을 분리하고, 활동을 status="working" 또는 이벤트로 정의해
-              좀비 프로세스를 코호트에서 뺀다. 모든 비율은 분자/분모와 함께. */}
+          {/* ── 1. 주간 코호트표 — 통합표 ─────────────────────────── */}
           <div className="space-y-4">
             <SectionHeader
-              icon={Activity}
-              title="D7 · D14 리텐션 · 연속사용 스트릭"
-              trust="yellow"
+              icon={Repeat}
+              title="주간 코호트"
+              trust={unified.data?.retention ? "yellow" : "unwired"}
             />
-            {streak.loading ? (
+            {unified.loading ? (
               <LoadingBox />
-            ) : streak.error ? (
-              <ErrorBox msg={streak.error} />
-            ) : streak.data ? (
-              <StreakRetentionView data={streak.data} />
-            ) : null}
+            ) : unified.error ? (
+              <ErrorBox msg={unified.error} />
+            ) : (
+              <UnifiedRetentionCohortTable data={unified.data} />
+            )}
           </div>
 
-          {/* ── 설치축 리텐션 요약 (🟡, analytics_install_profile 전량) ──
-              파생표는 매일 05:30 KST 스케줄로 채워지는데(scheduledBuildAnalyticsProfiles)
-              화면이 한 번도 안 불러서 아무도 안 봤다. 여기서 붙인다. ── */}
+          {/* ── 2. 채널별 리텐션 — 통합표 ─────────────────────────── */}
           <div className="space-y-4">
             <SectionHeader
-              icon={Database}
-              title="설치축 리텐션 (프로필 전량)"
-              trust="yellow"
+              icon={Globe}
+              title="채널별 리텐션"
+              trust={unified.data?.retention ? "yellow" : "unwired"}
             />
-            {installRet.loading ? (
+            {unified.loading ? (
               <LoadingBox />
-            ) : installRet.error ? (
-              <ErrorBox msg={installRet.error} />
-            ) : installRet.data ? (
-              <InstallRetentionSummaryView data={installRet.data} />
-            ) : null}
+            ) : unified.error ? (
+              <ErrorBox msg={unified.error} />
+            ) : (
+              <UnifiedRetentionChannelTable data={unified.data} />
+            )}
           </div>
 
-          {/* ── 사람 축 (🔴/🟡, v_person_since_link · v_person_all_time) ──
-              ★설치 ≠ 사람이다. 한 사람이 설치를 여러 대 쓴다(실측에서 계정 1개가
-              설치 9대). 위 두 표를 사람 수로 읽으면 인원이 부풀려진다.
-              ★링크가 forward-only 라 켠 직후엔 거의 비어 있는 것이 정상이고,
-              화면이 그걸 identity_linked_ratio 로 말한다. daily 활성축은 아직 raw/HMAC
-              키 불일치로 별도 표시한다(후속 iQNi0PHs0J9FY6HQnb1P). ── */}
+          {/* ── 3. 사람 축 대조 — 설치 수를 사람으로 읽지 않기 ─────── */}
           <div className="space-y-4">
             <SectionHeader
               icon={Link2}
-              title="사람 축 identity_linked_ratio (설치가 아니라 사람 단위)"
-              trust={personAxis?.state === "complete" ? "yellow" : "red"}
+              title="사람 축 대조"
+              trust={unified.data?.state === "ready" ? "yellow" : "unwired"}
             />
-            <PersonAxisCoverageNote coverage={personAxis} />
-          </div>
-
-          {/* ── 모델 준비 (🟡) ────────────────────────────────────────── */}
-          <div className="space-y-4">
-            <SectionHeader icon={Cpu} title="모델 선정·라우팅" trust="yellow">
-              <div className="flex overflow-hidden rounded-lg border border-zinc-700">
-                {[
-                  ["overview", "비용/성과"],
-                  ["routing", "SLM/라우팅"],
-                ].map(([key, label]) => (
-                  <button
-                    key={key}
-                    onClick={() => setModelView(key as "overview" | "routing")}
-                    className={`px-3 py-1.5 text-xs font-medium transition ${
-                      modelView === key
-                        ? "bg-indigo-600 text-white"
-                        : "bg-zinc-950 text-zinc-400 hover:bg-zinc-800"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </SectionHeader>
-            {model.loading ? (
+            {unified.loading ? (
               <LoadingBox />
-            ) : model.error ? (
-              <ErrorBox msg={model.error} />
-            ) : m ? (
-              <>
-                <ThinLabelNotice />
-
-                {modelView === "overview" ? (
-                  <>
-                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                      <Panel
-                        title="모델별 비용"
-                        note={`${days}일 누적 (cost_logs)`}
-                      >
-                        <BarList
-                          data={m.costByModel.map((c) => ({
-                            key: c.model,
-                            value: c.cost,
-                          }))}
-                          format={fmtCost}
-                          showShare
-                          emptyLabel="비용 데이터가 없습니다."
-                          onDrill={(key) =>
-                            openDrill({ scope: "segment:model", key, days })
-                          }
-                        />
-                      </Panel>
-                      <Panel title="일별 비용 추이">
-                        <LineChart
-                          data={m.costByDay.map((d) => ({
-                            date: d.date,
-                            value: d.cost,
-                          }))}
-                          format={fmtCost}
-                          emptyLabel="비용 데이터가 없습니다."
-                          onDrill={(date) =>
-                            openDrill({ scope: "cost:day", date, days })
-                          }
-                        />
-                      </Panel>
-                    </div>
-
-                    {/* 기간별 모델 분해 — 위 '일별 비용 추이'는 총합이라 어느 모델이
-                        그날 비용을 만들었는지 못 본다. 구버전 functions 응답에는
-                        없는 필드라 optional 가드(배포순서 soft-fail). */}
-                    {m.costByDayModel && (
-                      <Panel
-                        title="일별 모델별 비용"
-                        note={
-                          m.costByDayModel.truncatedModels > 0
-                            ? `상위 ${
-                                m.costByDayModel.models.length - 1
-                              }종 + 그 외 ${
-                                m.costByDayModel.truncatedModels
-                              }종 (총합 보존)`
-                            : `모델 ${m.costByDayModel.models.length}종 (cost_logs)`
-                        }
-                      >
-                        <StackedBarChart
-                          dates={m.costByDayModel.dates}
-                          series={m.costByDayModel.models.map((mm, i) => ({
-                            key: mm.model,
-                            values: m.costByDayModel!.matrix[i] ?? [],
-                          }))}
-                          format={fmtCost}
-                          emptyLabel="비용 데이터가 없습니다."
-                          onDrill={(date) =>
-                            openDrill({ scope: "cost:day", date, days })
-                          }
-                        />
-                      </Panel>
-                    )}
-
-                    {/* ★하위모델 분해는 은퇴했다 — 이 표를 만들던 agentId 조인이 곧
-                        익명 텔레메트리를 계정으로 되짚는 경로였다(티켓
-                        U5OPOKf0D3I2TSRP8yUq). 패널을 조용히 지우지 않고 사유를
-                        서버 note 로 그대로 보여준다. */}
-                    {m.modelBreakdown && (
-                      <Panel
-                        title="하네스 → 하위모델 분해 (은퇴)"
-                        note="프라이버시 — 익명 텔레메트리와 cost_logs 의 조인을 끊으면서 함께 은퇴"
-                      >
-                        <SubModelBreakdownTable
-                          harnesses={m.modelBreakdown.harnesses}
-                          onDrill={(key) =>
-                            openDrill({ scope: "segment:model", key, days })
-                          }
-                        />
-                        <p className="mt-3 text-xs leading-relaxed text-zinc-600">
-                          {m.modelBreakdown.note}
-                        </p>
-                      </Panel>
-                    )}
-
-                    <Panel
-                      title="모델 × 역할 성공률·효율"
-                      note="성공률·평균비용·비용대비효율 (task_outcomes)"
-                    >
-                      {m.modelRoleStats.length === 0 ? (
-                        <EmptyState label="라벨 준비중입니다. 3.0.17 이후 task_outcomes가 축적되면 채워집니다." />
-                      ) : (
-                        <ModelRoleTable
-                          rows={m.modelRoleStats}
-                          onDrill={(scope, key) =>
-                            openDrill({ scope, key, days })
-                          }
-                        />
-                      )}
-                    </Panel>
-                  </>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                      <StatCard
-                        label="라우팅 결정"
-                        value={fmtInt(
-                          m.routing.byReuseVsSpawn.reduce(
-                            (sum, r) => sum + r.count,
-                            0
-                          )
-                        )}
-                        sub="dispatch:decision"
-                      />
-                      <StatCard
-                        label="선택 모델"
-                        value={fmtInt(m.routing.bySelectedModel.length)}
-                        sub="모델 종류"
-                      />
-                      <StatCard
-                        label="Outcome 모델"
-                        value={fmtInt(m.outcomeByModel.length)}
-                        sub="task_outcomes"
-                      />
-                      <StatCard
-                        label="재작업"
-                        value={fmtInt(
-                          m.outcomeByModel.reduce(
-                            (sum, r) => sum + r.reworkCount,
-                            0
-                          )
-                        )}
-                        sub="retriesCount 합계"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
-                      <Panel title="선택 모델">
-                        <BarList
-                          data={m.routing.bySelectedModel.map((e) => ({
-                            key: e.key,
-                            value: e.count,
-                          }))}
-                          showShare
-                          emptyLabel="라우팅 결정 데이터가 없습니다. 라벨 준비중/3.0.17 이후 축적 상태입니다."
-                          onDrill={(key) =>
-                            openDrill({ scope: "segment:model", key, days })
-                          }
-                        />
-                      </Panel>
-                      <Panel title="결정 사유">
-                        <BarList
-                          data={m.routing.byDecisionReason.map((e) => ({
-                            key: e.key,
-                            value: e.count,
-                          }))}
-                          showShare
-                          emptyLabel="결정 사유 데이터가 없습니다."
-                        />
-                      </Panel>
-                      <Panel title="재사용 vs 스폰">
-                        <BarList
-                          data={m.routing.byReuseVsSpawn.map((e) => ({
-                            key: e.key,
-                            value: e.count,
-                          }))}
-                          colorMap={{
-                            reuse: STATUS_GOOD,
-                            restart: STATUS_WARN,
-                            spawn: SERIES,
-                          }}
-                          showShare
-                          emptyLabel="데이터가 없습니다."
-                        />
-                      </Panel>
-                      <Panel title="선정 모드">
-                        <BarList
-                          data={m.routing.byModelSelectionMode.map((e) => ({
-                            key: e.key,
-                            value: e.count,
-                          }))}
-                          showShare
-                          emptyLabel="데이터가 없습니다."
-                        />
-                      </Panel>
-                    </div>
-
-                    <Panel
-                      title="매칭점수 분포"
-                      note="perModelScores[].total + reuse/restart agentScore 버킷"
-                    >
-                      <RoutingScoreTable rows={m.routing.scoreBuckets} />
-                    </Panel>
-
-                    <Panel
-                      title="모델별 Outcome"
-                      note="성공·비용·재작업 라벨은 준비중이며 3.0.17 이후 축적분부터 해석 가능"
-                    >
-                      <OutcomeByModelTable rows={m.outcomeByModel} />
-                    </Panel>
-                  </>
-                )}
-              </>
-            ) : null}
+            ) : unified.error ? (
+              <ErrorBox msg={unified.error} />
+            ) : (
+              <UnifiedPersonAxisComparison data={unified.data} />
+            )}
           </div>
+
+          {/* ── 4. 스트릭 단위표/격자 — 유지하되 통합 경로 대기 ─────── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Activity}
+              title="스트릭 단위표/격자"
+              trust="unwired"
+            />
+            <PendingIngestion
+              title="스트릭 단위표/격자"
+              waitingOn={`${CALLABLE_INSTALL_UNIFIED} — 통합 뷰에서 스트릭 단위표를 내려주는 응답 확장`}
+              willShow={[
+                "어느 설치/사람이 D7 값을 만들었는지",
+                "최근 활동 격자",
+                "스트릭 정확 리텐션은 기본 접힘",
+              ]}
+            />
+          </div>
+
         </div>
       )}
 

@@ -859,27 +859,57 @@ test("★이미 쌓이는 표에는 '적재 전' 이 아니라 '연결 전' 이�
 // ── 네 탭 각각을 SSR 로 세워 규약이 살아 있는지 본다 ────────────────────────
 // 한 탭에서만 확인하면 나머지 셋에서 조용히 빠져도 아무도 모른다.
 
-test("★리텐션 탭은 익명축에 운영자 토글이 닿지 않는다고 적는다", () => {
+test("★리텐션 탭은 통합 뷰 순서로 서고 오래된 운영 섹션을 렌더하지 않는다", () => {
   const html = renderToStaticMarkup(<P.default initialTab="retention" />);
   assert.match(html, /id="analytics-panel-retention"/);
-  // 토글은 화면에 떠 있다 — 그런데 이 축에는 닿지 않는다. 그 사실을 적는다.
   assert.match(html, /<input type="checkbox"/);
   assert.match(html, /운영자 포함/);
-  assert.match(html, /토글이 동작하지 않습니다/);
-  assert.match(html, /is_admin 이 없어/);
-  // 사람 축 칸이 서 있고, 배선 전이라 '적재 전' 으로 접힌다.
-  assert.match(html, /사람 축 identity_linked_ratio/);
-  assert.match(html, /적재 전/);
+  const order = [
+    "D7 · D30 잔존 · 아직 판단 불가",
+    "주간 코호트",
+    "채널별 리텐션",
+    "사람 축 대조",
+    "스트릭 단위표/격자",
+  ];
+  let cursor = -1;
+  for (const label of order) {
+    const at = html.indexOf(label);
+    assert.ok(at >= 0, `리텐션 탭에 '${label}' 섹션이 없다`);
+    assert.ok(at > cursor, `'${label}' 이 표 순서에서 앞으로 새어 나왔다`);
+    cursor = at;
+  }
+  assert.match(html, /d\*_pending/);
+  assert.match(html, /getAdminInstallUnified/);
+  assert.doesNotMatch(html, /모델 선정·라우팅/);
+  assert.doesNotMatch(html, /D7 · D14 리텐션 · 연속사용 스트릭/);
 });
 
-test("★활성화 탭은 설치 단위 활성 자리를 세운다 (콜러블 응답 대기)", () => {
+test("★활성화 탭은 통합 뷰 상단 3줄과 결정 순서만 렌더한다", () => {
   const html = renderToStaticMarkup(<P.default initialTab="activation" />);
   assert.match(html, /id="analytics-panel-activation"/);
-  // SSR 에서는 useEffect 가 안 돌아 콜러블이 아직 loading 이다. 자리(섹션)가
-  // 서 있는지만 본다 — '연결 전' 문구 자체는 컴포넌트 테스트가 고정한다.
-  assert.match(html, /설치 단위 활성/);
+  const order = [
+    "첫 스폰 · 첫 완주 · 첫 스폰까지 중앙 소요",
+    "단계별 도달 퍼널",
+    "온보딩 스톨 · 차단 사유",
+    "채널별 활성화",
+    "좀비 분리",
+    "표본 찰 때까지 접음",
+  ];
+  let cursor = -1;
+  for (const label of order) {
+    const at = html.indexOf(label);
+    assert.ok(at >= 0, `활성화 탭에 '${label}' 섹션이 없다`);
+    assert.ok(at > cursor, `'${label}' 이 표 순서에서 앞으로 새어 나왔다`);
+    cursor = at;
+  }
+  assert.match(html, /getAdminInstallUnified/);
+  assert.match(html, /표본 대기/);
+  assert.doesNotMatch(html, /제품 사용·활성/);
+  assert.doesNotMatch(html, /릴리스·버전 헬스/);
+  assert.doesNotMatch(html, /앱 예외·스택트레이스/);
+  assert.doesNotMatch(html, /설치 단위 활성/);
   // ★가짜 0 금지는 로딩 중에도 같다.
-  assert.doesNotMatch(html, /설치 단위 활성[\s\S]{0,400}0%/);
+  assert.doesNotMatch(html, /첫 스폰 · 첫 완주[\s\S]{0,400}0%/);
 });
 
 test("★콜러블 이름은 상수 한 곳에서만 나온다 (계약 이름 고정)", () => {
@@ -1658,6 +1688,133 @@ test("★잘라낸 행이 있으면 숨기지 않고 말한다", () => {
     />
   );
   assert.match(html, /잘렸다는 사실을/);
+});
+
+test("★활성화 상단 3줄은 통합 뷰 설치축과 사람 추정 범위를 같이 쓴다", () => {
+  const html = renderToStaticMarkup(
+    <P.UnifiedActivationHeadlineView
+      data={unifiedFixture({
+        activation: {
+          spawned: {
+            numerator: 18,
+            denominator: 577,
+            rate: 18 / 577,
+            smallSample: false,
+          },
+          completed: {
+            numerator: 2,
+            denominator: 577,
+            rate: 2 / 577,
+            smallSample: false,
+          },
+          medianMinutesToFirstSpawn: 11,
+          medianMinutesToFirstSpawnReason: null,
+          channelRows: [],
+          channelRowsTruncated: false,
+        },
+      })}
+    />
+  );
+  assert.match(html, /첫 스폰 도달/);
+  assert.match(html, /18\/577/);
+  assert.match(html, /첫 완주 도달/);
+  assert.match(html, /2\/577/);
+  assert.match(html, /11분/);
+  assert.match(html, /사람 추정 5~47명/);
+});
+
+test("★활성화 분 단위 열이 없으면 daysToFirstSpawn 으로 지어내지 않는다", () => {
+  const html = renderToStaticMarkup(
+    <P.UnifiedActivationHeadlineView data={unifiedFixture()} />
+  );
+  assert.match(html, /첫 스폰 도달/);
+  assert.match(html, /18\/577/);
+  assert.match(html, /판단 대기/);
+  assert.match(html, /minutesToFirstSpawn/);
+  assert.doesNotMatch(html, />0분</);
+});
+
+test("★리텐션 상단은 pending 을 이탈 0% 로 그리지 않는다", () => {
+  const html = renderToStaticMarkup(
+    <P.UnifiedRetentionHeadlineView
+      data={unifiedFixture({
+        retention: {
+          d7: { numerator: 1, denominator: 4, rate: null, smallSample: true },
+          d30: { numerator: 0, denominator: 0, rate: null, smallSample: false },
+          pendingD7: 631,
+          pendingD30: 675,
+          cohortRows: [],
+          cohortRowsTruncated: false,
+          channelRows: [],
+          channelRowsTruncated: false,
+          personAxis: null,
+          zombie: null,
+        },
+      })}
+    />
+  );
+  assert.match(html, /D7 잔존/);
+  assert.match(html, /1\/4/);
+  assert.match(html, /표본 부족/);
+  assert.match(html, /판단 전 631건/);
+  assert.match(html, /아직 판단 불가/);
+  assert.doesNotMatch(html, /0\.0%/);
+});
+
+test("★리텐션 코호트는 창이 안 닫힌 칸을 — 로 두고 분수만 남긴다", () => {
+  const html = renderToStaticMarkup(
+    <P.UnifiedRetentionCohortTable
+      data={unifiedFixture({
+        retention: {
+          d7: { numerator: 1, denominator: 6, rate: 1 / 6, smallSample: false },
+          d30: null,
+          pendingD7: 2,
+          pendingD30: 6,
+          cohortRows: [
+            {
+              cohortWeek: "2026-08-17",
+              installs: 6,
+              horizons: [
+                {
+                  key: "d7",
+                  retained: {
+                    numerator: 1,
+                    denominator: 4,
+                    rate: null,
+                    smallSample: true,
+                  },
+                  pending: 2,
+                },
+                { key: "d30", retained: null, pending: 6 },
+              ],
+            },
+          ],
+          cohortRowsTruncated: false,
+          channelRows: [],
+          channelRowsTruncated: false,
+          personAxis: null,
+          zombie: null,
+        },
+      })}
+    />
+  );
+  assert.match(html, /2026-08-17/);
+  assert.match(html, /1\/4/);
+  assert.match(html, /표본 부족/);
+  assert.match(html, /판단 전 2/);
+  assert.match(html, /판단 불가/);
+  assert.doesNotMatch(html, /25\.0%/);
+});
+
+test("★사람 축 대조는 설치 단일값 대신 사람 추정 범위를 주인공으로 둔다", () => {
+  const html = renderToStaticMarkup(
+    <P.UnifiedPersonAxisComparison data={unifiedFixture()} />
+  );
+  assert.match(html, /577/);
+  assert.match(html, /5~47명/);
+  assert.match(html, /범위의 폭이 정보/);
+  assert.match(html, /identity_linked_ratio/);
+  assert.match(html, /사람 없음으로 읽지 않습니다/);
 });
 
 test("★콜러블 이름 계약 — 통합 뷰 읽기 경로", () => {
