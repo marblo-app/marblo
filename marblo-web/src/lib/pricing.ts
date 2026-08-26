@@ -24,7 +24,7 @@ export const PRICE_MATRIX: PriceMatrix = {
     annual: { KRW: 0, USD: 0, JPY: 0 },
   },
   pro: {
-    monthly: { KRW: 19_000, USD: 19, JPY: null },
+    monthly: { KRW: 19_000, USD: 19, JPY: 2_900 },
     annual: { KRW: 190_000, USD: 190, JPY: null },
   },
   team: {
