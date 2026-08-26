@@ -99,3 +99,18 @@ export const ATTRIBUTION_RULES_IP: RateRule[] = [
   { windowSeconds: 60, max: 10 },
   { windowSeconds: 600, max: 40 },
 ];
+
+/**
+ * 로그인 전 익명 텔레메트리 한도. 정상 첫 실행/데모/로그인 실패 퍼널은 설치당
+ * 한 자릿수 이벤트라 낮게 잡는다. IP 는 공유 NAT 를 감안하고, clientId 는
+ * 재시도 루프/스크립트 남용을 좁게 막는다.
+ */
+export const ANONYMOUS_TELEMETRY_RULES_IP: RateRule[] = [
+  { windowSeconds: 60, max: 30 },
+  { windowSeconds: 600, max: 120 },
+];
+
+export const ANONYMOUS_TELEMETRY_RULES_CLIENT: RateRule[] = [
+  { windowSeconds: 60, max: 12 },
+  { windowSeconds: 600, max: 40 },
+];

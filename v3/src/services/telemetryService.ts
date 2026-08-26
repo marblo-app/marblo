@@ -70,9 +70,9 @@ export type TelemetryEvent =
   // 티켓을 분해→에이전트를 배정하는 장면'을 스크립티드 재생으로 보여주고(실제
   // CLI 스폰·LLM·과금 0), 종료 시 연결 마법사(CliSetupGate)로 유도한다. 아래
   // 3 이벤트가 데모 퍼널(진입→완주→CTA클릭)을 채운다. ★전송 한계: 이 이벤트는
-  // 로그인 이전에 큐잉되고 flushTelemetry 는 auth.currentUser 가 있을 때만
-  // 전송하므로(anti-abuse), app:first_run 과 동일하게 "다음 성공 로그인" 시점에
-  // 함께 flush 된다 — 끝내 로그인 안 한 방문자의 데모 이탈은 전송되지 않는다.
+  // 로그인 이전에 큐잉되지만, 광고 측정에 필요한 이 세 이벤트만 익명 전용
+  // endpoint(허용목록 + clientId/IP 레이트리밋 + clientEventId 멱등성)를 통과해
+  // 먼저 flush 된다. 전체 텔레메트리를 익명으로 열지 않는다.
   | "onboarding:demo_started"
   | "onboarding:demo_completed"
   | "onboarding:demo_cta_click"
@@ -212,6 +212,10 @@ export type TelemetryEvent =
 
 interface TelemetryPayload {
   event: TelemetryEvent;
+  /** Per-event idempotency key. Generated centrally when the event enters the
+   * queue; the server uses it to avoid counting a pre-login anonymous event
+   * again after login. */
+  clientEventId?: string;
   projectId?: string;
   agentId?: string;
   taskId?: string;
@@ -300,13 +304,22 @@ function readPersistedTelemetryEnabled(): boolean | null {
 // user has opted out. See lib/telemetry/firstPartyGate.ts for the policy.
 let telemetryEnabled =
   readPersistedTelemetryEnabled() ?? firstPartyTelemetryDefaultEnabled();
-const eventQueue: TelemetryPayload[] = [];
+
+interface QueuedTelemetryPayload extends TelemetryPayload {
+  clientEventId: string;
+}
+
+const eventQueue: QueuedTelemetryPayload[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 const FLUSH_INTERVAL = 10_000;
 const MAX_QUEUE_SIZE = 50;
 
 const logTelemetryBatch = httpsCallable(functions, "logTelemetryBatch");
+const logAnonymousTelemetryBatch = httpsCallable(
+  functions,
+  "logAnonymousTelemetryBatch"
+);
 const logHeartbeatFn = httpsCallable(functions, "logHeartbeat");
 
 export function setTelemetryEnabled(
@@ -330,6 +343,16 @@ export function isTelemetryEnabled(): boolean {
 
 const CLIENT_ID_KEY = "marblo.telemetry.clientId";
 
+const ANONYMOUS_TELEMETRY_EVENT_ALLOWLIST: ReadonlySet<TelemetryEvent> =
+  new Set([
+    "app:first_run",
+    "auth:login_attempt",
+    "auth:login_failed",
+    "onboarding:demo_started",
+    "onboarding:demo_completed",
+    "onboarding:demo_cta_click",
+  ]);
+
 /**
  * Stable, anonymous per-install identifier. Random UUID persisted in
  * localStorage. BigQuery rows keep this as their de-identified row key — and as
@@ -351,6 +374,48 @@ export function getClientId(): string {
   } catch {
     return "anon";
   }
+}
+
+function newUuid(): string {
+  try {
+    if (typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0"));
+    return (
+      hex.slice(0, 4).join("") +
+      "-" +
+      hex.slice(4, 6).join("") +
+      "-" +
+      hex.slice(6, 8).join("") +
+      "-" +
+      hex.slice(8, 10).join("") +
+      "-" +
+      hex.slice(10, 16).join("")
+    );
+  } catch {
+    const fallback = `${Date.now()}${Math.random()}`.replace(/\D/g, "");
+    const padded = fallback.padEnd(32, "0").slice(0, 32);
+    return (
+      padded.slice(0, 8) +
+      "-" +
+      padded.slice(8, 12) +
+      "-4" +
+      padded.slice(13, 16) +
+      "-8" +
+      padded.slice(17, 20) +
+      "-" +
+      padded.slice(20, 32)
+    );
+  }
+}
+
+function canFlushAnonymously(event: QueuedTelemetryPayload): boolean {
+  return ANONYMOUS_TELEMETRY_EVENT_ALLOWLIST.has(event.event);
 }
 
 /**
@@ -542,7 +607,7 @@ export function logTelemetry(payload: TelemetryPayload) {
     return;
   }
 
-  eventQueue.push(clean);
+  eventQueue.push({ ...clean, clientEventId: newUuid() });
 
   if (eventQueue.length >= MAX_QUEUE_SIZE) {
     flushTelemetry();
@@ -585,10 +650,14 @@ async function flushTelemetry() {
   }
 
   if (eventQueue.length === 0) return;
-  if (!auth.currentUser) return;
 
   const clientId = getClientId();
   const appVersion = getAppVersion();
+  if (!auth.currentUser) {
+    await flushAnonymousTelemetry(clientId, appVersion);
+    return;
+  }
+
   const batch = eventQueue
     .splice(0, MAX_QUEUE_SIZE)
     .map((e) => ({ ...e, clientId, appVersion }));
@@ -601,6 +670,45 @@ async function flushTelemetry() {
       eventQueue.unshift(...batch);
     } else {
       console.warn("[Telemetry] Dropping failed telemetry batch:", {
+        dropped: batch.length,
+        queueLength: eventQueue.length,
+        maxBuffered: MAX_QUEUE_SIZE * 2,
+      });
+    }
+  }
+}
+
+function takeAnonymousTelemetryBatch(): QueuedTelemetryPayload[] {
+  const batch: QueuedTelemetryPayload[] = [];
+  for (let i = 0; i < eventQueue.length && batch.length < MAX_QUEUE_SIZE; ) {
+    const event = eventQueue[i];
+    if (!canFlushAnonymously(event)) {
+      i += 1;
+      continue;
+    }
+    batch.push(event);
+    eventQueue.splice(i, 1);
+  }
+  return batch;
+}
+
+async function flushAnonymousTelemetry(
+  clientId: string,
+  appVersion: string | undefined
+) {
+  const batch = takeAnonymousTelemetryBatch();
+  if (batch.length === 0) return;
+
+  try {
+    await logAnonymousTelemetryBatch({
+      events: batch.map((e) => ({ ...e, clientId, appVersion })),
+    });
+  } catch (error) {
+    console.warn("[Telemetry] Anonymous flush failed:", error);
+    if (eventQueue.length < MAX_QUEUE_SIZE * 2) {
+      eventQueue.unshift(...batch);
+    } else {
+      console.warn("[Telemetry] Dropping failed anonymous telemetry batch:", {
         dropped: batch.length,
         queueLength: eventQueue.length,
         maxBuffered: MAX_QUEUE_SIZE * 2,
@@ -804,13 +912,11 @@ export const telemetry = {
 
   // ── "첫 10분" 활성화 퍼널 헬퍼 (ticket ixQUBdhx) ──────────────────
   //
-  // ★전송 한계(정직성): logTelemetry 는 flushTelemetry 에서 auth.currentUser
-  // 가 있을 때만 서버로 나간다(anti-abuse). 그래서 아래 로그인-이전 이벤트
-  // (app:first_run / login_attempt / login_failed)는 큐에 쌓였다가 "다음
-  // 성공적 로그인" 시점에 함께 flush 된다. 즉 로그인을 한 번이라도 성공시킨
-  // 유저의 초기 마찰(실패 후 재시도 성공)은 잡히지만, 끝내 로그인에 성공
-  // 못 한 유저의 실패는 전송되지 않는다 — 이건 auth-gated 싱크의 구조적
-  // 한계이며 §5-2 맹점을 완전히는 못 메운다(보고서에 명시).
+  // ★로그인 전 전송(광고 측정): 아래 로그인-이전 이벤트는 익명 전용 endpoint 로
+  // 먼저 flush 된다. auth-gated 전체 endpoint 를 열지 않고, 서버 허용목록·좁은
+  // metadata 스키마·IP/clientId 레이트리밋·clientEventId 영수증 멱등성으로 기존
+  // anti-abuse 게이트를 대체한다. 익명 행에는 계정 식별자나 작업 조인키를 싣지
+  // 않고 설치 clientId 축만 남긴다.
 
   /** 이 설치에서 앱이 처음 실행된 시점(1회). GA4 다운로드 수와 규모(magnitude)
    *  대사(reconcile)용 — 개인 조인은 clientId≠user_pseudo_id 라 불가, 집계만. */

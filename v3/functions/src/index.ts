@@ -7,6 +7,8 @@ import {
   COUPON_RULES_UID,
   COUPON_RULES_IP,
   ATTRIBUTION_RULES_IP,
+  ANONYMOUS_TELEMETRY_RULES_CLIENT,
+  ANONYMOUS_TELEMETRY_RULES_IP,
 } from "./rateLimit";
 import {
   parseLinkInstallRequest,
@@ -197,6 +199,13 @@ import {
   type TeamUsageDailyRow,
 } from "./teamUsage";
 import { buildMetadata } from "./telemetryMetadata";
+import {
+  ANONYMOUS_TELEMETRY_RECEIPTS_COLLECTION,
+  anonymousTelemetryReceiptDocId,
+  filterAlreadyLoggedAnonymousEvents,
+  parseAnonymousTelemetryBatch,
+  type AnonymousTelemetryRow,
+} from "./anonymousTelemetry";
 import {
   ROUTING_SHADOW_SCHEMA_VERSION,
   compareShadowRouting,
@@ -7042,6 +7051,9 @@ interface TelemetryRow {
   /** Anonymous per-install id (see telemetryService.getClientId). Stored in
    *  place of the Firebase uid so the events table stays 비식별(익명). */
   clientId?: string;
+  /** Client-generated idempotency key. Not stored in BigQuery; used only to
+   * skip events that were already accepted by the anonymous pre-login path. */
+  clientEventId?: string;
   appVersion: string;
   projectId?: string;
   agentId?: string;
@@ -7242,6 +7254,152 @@ async function recordPersonAxisLink(
   return "merged";
 }
 
+interface TelemetryInsertSource {
+  event: string;
+  clientId?: string | null;
+  appVersion?: string | null;
+  projectId?: string | null;
+  agentId?: string | null;
+  taskId?: string | null;
+  flowId?: string | null;
+  model?: string | null;
+  role?: string | null;
+  status?: string | null;
+  fromStatus?: string | null;
+  toStatus?: string | null;
+  durationMs?: number | null;
+  tokensInput?: number | null;
+  tokensOutput?: number | null;
+  cost?: number | null;
+  success?: boolean | null;
+  exitCode?: number | null;
+  nodeType?: string | null;
+  nodeCount?: number | null;
+  metadata?: unknown;
+  taskType?: string | null;
+  taskComplexity?: number | null;
+  filesChanged?: number | null;
+  linesChanged?: number | null;
+  errorCategory?: string | null;
+  errorMessage?: string | null;
+  promptHash?: string | null;
+  promptLength?: number | null;
+  parentAgentId?: string | null;
+  retryOf?: string | null;
+}
+
+function toTelemetryBigQueryRow(
+  e: TelemetryInsertSource,
+  nowIso: string,
+  idSalt: string | null
+): BigQueryRow {
+  return pseudonymizeAnalyticsRow(
+    {
+      event: e.event,
+      userId: e.clientId || "anon",
+      // Record the client-supplied version verbatim, or null when absent. The
+      // old "3.0.0" fallback masked every event as a single stale version and
+      // made per-release analysis impossible; null honestly means "unknown".
+      appVersion: e.appVersion || null,
+      projectId: e.projectId || null,
+      agentId: e.agentId || null,
+      taskId: e.taskId || null,
+      flowId: e.flowId || null,
+      model: e.model || null,
+      role: e.role || null,
+      status: e.status || null,
+      fromStatus: e.fromStatus || null,
+      toStatus: e.toStatus || null,
+      durationMs: e.durationMs ?? null,
+      tokensInput: e.tokensInput ?? null,
+      tokensOutput: e.tokensOutput ?? null,
+      cost: e.cost ?? null,
+      success: e.success ?? null,
+      exitCode: e.exitCode ?? null,
+      nodeType: e.nodeType || null,
+      nodeCount: e.nodeCount ?? null,
+      metadata: buildMetadata(e),
+      // ML-ready columns
+      taskType: e.taskType || null,
+      taskComplexity: e.taskComplexity ?? null,
+      filesChanged: e.filesChanged ?? null,
+      linesChanged: e.linesChanged ?? null,
+      errorCategory: e.errorCategory || null,
+      errorMessage: e.errorMessage ? String(e.errorMessage).slice(0, 500) : null,
+      promptHash: e.promptHash || null,
+      promptLength: e.promptLength ?? null,
+      parentAgentId: e.parentAgentId || null,
+      retryOf: e.retryOf || null,
+      timestamp: nowIso,
+    },
+    idSalt
+  );
+}
+
+async function findAnonymousTelemetryReceipts(
+  events: readonly TelemetryRow[]
+): Promise<Set<string>> {
+  const receiptIds: string[] = [];
+  for (const event of events) {
+    if (
+      typeof event.clientId === "string" &&
+      typeof event.clientEventId === "string"
+    ) {
+      receiptIds.push(
+        anonymousTelemetryReceiptDocId(event.clientId, event.clientEventId)
+      );
+    }
+  }
+  if (receiptIds.length === 0) return new Set();
+
+  const refs = receiptIds.map((id) =>
+    db.collection(ANONYMOUS_TELEMETRY_RECEIPTS_COLLECTION).doc(id)
+  );
+  const snapshots = await db.getAll(...refs);
+  const existing = new Set<string>();
+  for (let i = 0; i < snapshots.length; i += 1) {
+    if (snapshots[i]?.exists) existing.add(receiptIds[i]);
+  }
+  return existing;
+}
+
+async function reserveAnonymousTelemetryRows(
+  rows: readonly AnonymousTelemetryRow[]
+): Promise<{
+  acceptedRows: AnonymousTelemetryRow[];
+  acceptedRefs: admin.firestore.DocumentReference[];
+  duplicateCount: number;
+}> {
+  const acceptedRows: AnonymousTelemetryRow[] = [];
+  const acceptedRefs: admin.firestore.DocumentReference[] = [];
+  let duplicateCount = 0;
+
+  for (const row of rows) {
+    const docRef = db
+      .collection(ANONYMOUS_TELEMETRY_RECEIPTS_COLLECTION)
+      .doc(anonymousTelemetryReceiptDocId(row.clientId, row.clientEventId));
+    try {
+      await docRef.create({
+        clientId: row.clientId,
+        clientEventId: row.clientEventId,
+        event: row.event,
+        receivedAt: admin.firestore.Timestamp.fromDate(new Date(row.timestamp)),
+      });
+      acceptedRows.push(row);
+      acceptedRefs.push(docRef);
+    } catch (err) {
+      const code = (err as { code?: number | string }).code;
+      if (code === 6 || code === "already-exists") {
+        duplicateCount += 1;
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  return { acceptedRows, acceptedRefs, duplicateCount };
+}
+
 export const logTelemetryBatch = functions.https.onCall(
   async (data, context) => {
     if (!context.auth) {
@@ -7284,54 +7442,19 @@ export const logTelemetryBatch = functions.https.onCall(
     // salt lives in the function env, never in BigQuery.
     const now = new Date().toISOString();
     const idSalt = getAnalyticsIdSalt();
-
-    const rows = events.map((e) =>
-      pseudonymizeAnalyticsRow(
-        {
-          event: e.event,
-          userId: e.clientId || "anon",
-          // Record the client-supplied version verbatim, or null when absent. The
-          // old "3.0.0" fallback masked every event as a single stale version and
-          // made per-release analysis impossible; null honestly means "unknown".
-          appVersion: e.appVersion || null,
-          projectId: e.projectId || null,
-          agentId: e.agentId || null,
-          taskId: e.taskId || null,
-          flowId: e.flowId || null,
-          model: e.model || null,
-          role: e.role || null,
-          status: e.status || null,
-          fromStatus: e.fromStatus || null,
-          toStatus: e.toStatus || null,
-          durationMs: e.durationMs ?? null,
-          tokensInput: e.tokensInput ?? null,
-          tokensOutput: e.tokensOutput ?? null,
-          cost: e.cost ?? null,
-          success: e.success ?? null,
-          exitCode: e.exitCode ?? null,
-          nodeType: e.nodeType || null,
-          nodeCount: e.nodeCount ?? null,
-          metadata: buildMetadata(e),
-          // ML-ready columns
-          taskType: e.taskType || null,
-          taskComplexity: e.taskComplexity ?? null,
-          filesChanged: e.filesChanged ?? null,
-          linesChanged: e.linesChanged ?? null,
-          errorCategory: e.errorCategory || null,
-          errorMessage: e.errorMessage
-            ? String(e.errorMessage).slice(0, 500)
-            : null,
-          promptHash: e.promptHash || null,
-          promptLength: e.promptLength ?? null,
-          parentAgentId: e.parentAgentId || null,
-          retryOf: e.retryOf || null,
-          timestamp: now,
-        },
-        idSalt
-      )
+    const anonymousReceiptIds = await findAnonymousTelemetryReceipts(events);
+    const deduped = filterAlreadyLoggedAnonymousEvents(
+      events,
+      anonymousReceiptIds
     );
 
-    await bigquery.dataset(BQ_DATASET).table(BQ_EVENTS_TABLE).insert(rows);
+    const rows = deduped.fresh.map((e) =>
+      toTelemetryBigQueryRow(e, now, idSalt)
+    );
+
+    if (rows.length > 0) {
+      await bigquery.dataset(BQ_DATASET).table(BQ_EVENTS_TABLE).insert(rows);
+    }
 
     // ── 사람 축 링크 (설계 §5.1) ─────────────────────────────────────────
     // ★events 적재가 끝난 **뒤에** 한다. 링크는 분석 편의고 텔레메트리는 제품
@@ -7357,7 +7480,82 @@ export const logTelemetryBatch = functions.https.onCall(
       });
     }
 
-    return { inserted: rows.length, personAxisLink };
+    return {
+      inserted: rows.length,
+      skippedAnonymousDuplicates: deduped.skipped,
+      personAxisLink,
+    };
+  }
+);
+
+export const logAnonymousTelemetryBatch = functions.https.onCall(
+  async (data, context) => {
+    const ip = extractIp(context.rawRequest);
+    const ipCheck = await enforceRateLimit(
+      `telemetry_anon:ip:${ip}`,
+      ANONYMOUS_TELEMETRY_RULES_IP
+    );
+    if (!ipCheck.allowed) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        `Too many attempts. Try again in ${ipCheck.retryAfter}s.`
+      );
+    }
+
+    const now = new Date().toISOString();
+    const parsed = parseAnonymousTelemetryBatch(data, now);
+    if (!parsed.ok) {
+      functions.logger.warn("[anonymousTelemetry] rejected", {
+        reason: parsed.reason,
+      });
+      throw new functions.https.HttpsError("invalid-argument", parsed.reason);
+    }
+
+    const clientCheck = await enforceRateLimit(
+      `telemetry_anon:client:${parsed.clientId}`,
+      ANONYMOUS_TELEMETRY_RULES_CLIENT
+    );
+    if (!clientCheck.allowed) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        `Too many attempts. Try again in ${clientCheck.retryAfter}s.`
+      );
+    }
+
+    const { acceptedRows, acceptedRefs, duplicateCount } =
+      await reserveAnonymousTelemetryRows(parsed.rows);
+    if (acceptedRows.length === 0) {
+      return { inserted: 0, duplicates: duplicateCount };
+    }
+
+    const idSalt = getAnalyticsIdSalt();
+    const rows = acceptedRows.map((event) => ({
+      insertId: anonymousTelemetryReceiptDocId(
+        event.clientId,
+        event.clientEventId
+      ),
+      json: toTelemetryBigQueryRow(event, now, idSalt),
+    }));
+
+    try {
+      // Firestore receipt is the durable idempotency guard. BigQuery insertId is
+      // still useful as a best-effort shield for partial retries/response loss.
+      await bigquery
+        .dataset(BQ_DATASET)
+        .table(BQ_EVENTS_TABLE)
+        .insert(rows, { raw: true });
+    } catch (err) {
+      await Promise.all(acceptedRefs.map((ref) => ref.delete().catch(() => {})));
+      functions.logger.error("[anonymousTelemetry] bigquery insert failed", {
+        message: safeAnalyticsErrorMessage(err),
+      });
+      throw new functions.https.HttpsError(
+        "internal",
+        "anonymous_telemetry_failed"
+      );
+    }
+
+    return { inserted: rows.length, duplicates: duplicateCount };
   }
 );
 
