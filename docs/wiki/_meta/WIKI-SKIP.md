@@ -151,6 +151,7 @@ links: [[LINT]], [[CONVENTION]], [[routing-label-coverage]], [[decision-sentence
 | `v3/docs/strategy-roundtable-local-vs-cloud-2026-08-08.md` | 전략 라운드테이블 원본이다. 포지셔닝 근거로만 두고 위키에는 안정 규칙만 별도 추출한다. |
 | `v3/docs/superpowers/plans/2026-06-06-mission-kanban-badge.md` | 오래된 기능 계획이다. 특정 UI 맥락이라 위키 노트로 복제하지 않는다. |
 | `v3/docs/task-outcomes-outcome-mode-schema.md` | 스키마 기록이다. 라벨 규칙은 [[routing-label-coverage]]에 통합했고 세부 스키마는 원본에 둔다. |
+| `v3/docs/taskid-bridge-recovery-measurement-2026-08-26.md` | 특정 시점의 복구 가능성 실측이다. 축·조인 방법론은 [[telemetry-identity-axes]]와 [[verify-result-row]]에 이미 있다. |
 | `v3/docs/telemetry-build-profiles.md` | 텔레메트리 빌드 프로파일 원본이다. 폐기된 모델 포함이라 위키에 단독 사실로 승격하지 않는다. |
 | `v3/docs/tf-slash_reference.md` | 명령 레퍼런스다. 위키 운영 규칙과 역할이 달라 복제하지 않는다. |
 | `v3/docs/token-efficiency-levers-2026-08-09.md` | 토큰 효율화 기록이다. 특정 시점 튜닝이라 위키 노트로 복제하지 않는다. |
