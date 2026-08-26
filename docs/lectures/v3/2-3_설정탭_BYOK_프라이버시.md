@@ -14,7 +14,7 @@ aliases: [설정 탭 BYOK 프라이버시]
 ## 이 레슨의 4요소
 
 - **학습목표:** 설정 탭을 한 바퀴 돌며 모델 프리셋을 고르고, 내 API 키(BYOK)를 안전하게 넣고, 프라이버시·언어를 처음에 한 번 맞춘다.
-- **시연할 마블로 화면·기능:** 설정 탭(SettingsPage) — Profile / Models / Billing / Team / Privacy / Language / API Keys 7개 섹션. 특히 BYOK(Anthropic·OpenAI·Google AI) 키 저장과 프라이버시 동의.
+- **시연할 마블로 화면·기능:** 설정 탭(SettingsPage) — 프로필 / 에이전트 모델 / 결제 / 팀 / Privacy / 언어 / API Keys 7개 섹션. 특히 BYOK(Anthropic·OpenAI·Google AI) 키 저장과 프라이버시 동의.
 - **진행할 프로젝트 단계:** 셋업.
 - **핵심 메시지:** "키는 내 것을(BYOK), 동의·언어는 처음에 한 번."
 
@@ -24,10 +24,10 @@ aliases: [설정 탭 BYOK 프라이버시]
 
 CLI까지 인증했으면 이제 마블로 안에서 "내 환경"을 한 번 맞춥니다. 설정 탭은 처음에 5분 투자해두면 이후 내내 편한 곳이에요.
 
-상단 탭바에서 **설정(Settings)** 탭을 엽니다. 왼쪽에 7개 섹션이 있습니다.
+상단 탭바에서 **설정** 탭을 엽니다. 왼쪽에 7개 섹션이 있습니다.
 
 ```
-Profile · Models · Billing · Team · Privacy · Language · API Keys 🔒
+프로필 · 에이전트 모델 · 결제 · 팀 · Privacy · 언어 · API Keys
 ```
 
 하나씩 빠르게 돌아봅니다.
@@ -36,15 +36,15 @@ Profile · Models · Billing · Team · Privacy · Language · API Keys 🔒
 
 ## 본문
 
-### 1. Profile — 내 계정 (1분)
+### 1. 프로필 — 내 계정 (1분)
 
-화면: 설정 탭 → Profile
+화면: 설정 탭 → 프로필
 
 이름·이메일·UID 같은 계정 정보가 보입니다. 2-1에서 로그인한 계정이 그대로 묶여 있어요. 확인만 하고 지나갑니다.
 
-### 2. Models — 에이전트 모델 프리셋 (3분)
+### 2. 에이전트 모델 — 프리셋 (3분)
 
-화면: 설정 탭 → Models
+화면: 설정 탭 → 에이전트 모델
 
 에이전트를 스폰할 때 어떤 모델을 쓸지의 **기본 프리셋**을 고르는 곳입니다. 다섯 가지예요.
 
@@ -58,12 +58,12 @@ Profile · Models · Billing · Team · Privacy · Language · API Keys 🔒
 
 처음에는 **Marblo Recommended**를 그대로 두면 됩니다. 품질·비용 균형이 기본값이에요. 멀티모델 배합의 원리는 모듈 5에서 깊게 다룹니다. (여기서도 Gemini는 빠져 있고 Antigravity가 그 자리를 차지한 걸 확인할 수 있어요.)
 
-### 3. Billing · Team (1분)
+### 3. 결제 · 팀 (1분)
 
-화면: 설정 탭 → Billing / Team
+화면: 설정 탭 → 결제 / 팀
 
-- **Billing** — 구독·결제 정보.
-- **Team** — 팀원 관리(플랜에 따라 열림).
+- **결제** — 구독·결제 정보.
+- **팀** — 팀원 관리(플랜에 따라 열림). 구성원별 작업량은 **프로젝트** 탭.
 
 지금 단계에서는 넘어가도 됩니다. 혼자 셋업 중이니까요.
 
@@ -127,7 +127,7 @@ Profile · Models · Billing · Team · Privacy · Language · API Keys 🔒
 
 설정 체크리스트:
 
-- [ ] Models 프리셋 = **Marblo Recommended**(기본) 확인
+- [ ] 에이전트 모델 프리셋 = **Auto (Marblo Recommended)**(기본) 확인
 - [ ] API Keys에 내 키 입력 → **Configured**(최소 Anthropic 또는 OpenAI)
 - [ ] `~/.marblo/` 폴더는 공유 금지(평문 저장) 인지
 - [ ] Privacy(크래시 리포트) 동의 여부 결정
