@@ -35,6 +35,7 @@ import {
   TriangleAlert,
   Link2,
   Unlink,
+  Copy,
 } from "lucide-react";
 import {
   describeGa4BridgeFreshness,
@@ -1898,11 +1899,30 @@ export function CacSummaryView({ data }: { data: AdminCacSummary | null }) {
       />
     );
   }
+  const hasEnteredSpend =
+    summary.matchedSpendKrw > 0 ||
+    summary.unmatchedSpendKrw > 0 ||
+    summary.campaigns.length > 0 ||
+    summary.unmatched.length > 0;
+  if (!hasEnteredSpend) {
+    return (
+      <Panel
+        title="캠페인별 성과"
+        note="광고비 원장과 획득 설치가 모두 들어온 뒤 CAC 를 계산합니다."
+      >
+        <EmptyState label="아직 입력된 광고비가 없습니다." />
+        <p className="mt-3 text-xs leading-relaxed text-zinc-500">
+          광고비를 입력하면 캠페인별 광고비 ÷ 획득 설치, 그리고 캠페인명 규약을
+          벗어난 미매칭 광고비가 이 자리에 나란히 표시됩니다.
+        </p>
+      </Panel>
+    );
+  }
   const topMatched = summary.campaigns.slice(0, 5);
   const topUnmatched = summary.unmatched.slice(0, 5);
   return (
     <Panel
-      title="캠페인·소스별 유입과 CAC"
+      title="캠페인별 성과"
       note="analytics_ad_spend.campaignKey 와 ga4_first_touch_current.campaign 정규화 키 기준"
     >
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -1947,7 +1967,8 @@ export function CacSummaryView({ data }: { data: AdminCacSummary | null }) {
                     {c.campaignName}
                   </span>
                   <span className="shrink-0 tabular-nums text-zinc-400">
-                    {fmtKrw(c.spendKrw)} · {fmtInt(c.acquired)}설치
+                    {fmtKrw(c.spendKrw)} ÷ {fmtInt(c.acquired)}설치 ={" "}
+                    {fmtKrw(c.cacKrw)}
                   </span>
                 </li>
               ))}
@@ -1992,6 +2013,69 @@ function PendingIngestionFallback({ waitingOn }: { waitingOn: string }) {
         "채널별 CAC = 광고비 / 획득 설치수",
       ]}
     />
+  );
+}
+
+export const UTM_CONVENTION_DOC_PATH =
+  "v3/docs/utm-tagging-convention-2026-08-24.md";
+
+export const UTM_CONVENTION_DOC_URL = `https://github.com/marblo-app/marblo/blob/main/${UTM_CONVENTION_DOC_PATH}`;
+
+export const UTM_EXAMPLE_URL =
+  "https://marblo.app/?utm_source=instagram&utm_medium=social-paid&utm_campaign=202608-launch-marblo&utm_content=reels-workspace-a";
+
+export function UtmConventionGuide() {
+  return (
+    <Panel
+      title="UTM 규약 가이드"
+      note="광고 링크를 만들 때 필요한 최소 규칙만 옮겼습니다."
+    >
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,1.2fr)]">
+        <div className="space-y-3">
+          <ul className="space-y-2 text-sm leading-relaxed text-zinc-300">
+            <li>· 광고 링크는 marblo.app 랜딩에 UTM 을 붙입니다.</li>
+            <li>· GitHub 릴리즈 직링크로 광고를 돌리지 않습니다.</li>
+            <li>· 값은 전부 소문자·하이픈으로 쓰고 공백·언더스코어·슬래시를 피합니다.</li>
+            <li>· 광고 URL 의 utm_campaign 과 광고비 입력 캠페인명을 같은 문자열로 맞춥니다.</li>
+            <li>· X 는 utm_source=x 로 고정합니다.</li>
+          </ul>
+          <a
+            href={UTM_CONVENTION_DOC_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 text-xs font-medium text-indigo-300 hover:text-indigo-200"
+          >
+            <Link2 className="h-3.5 w-3.5" />
+            원문 문서 열기: {UTM_CONVENTION_DOC_PATH}
+          </a>
+        </div>
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="text-xs font-semibold text-zinc-300">복사 가능한 예시 URL</p>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+              onClick={() => {
+                void navigator.clipboard?.writeText(UTM_EXAMPLE_URL);
+              }}
+            >
+              <Copy className="h-3.5 w-3.5" />
+              복사
+            </button>
+          </div>
+          <input
+            readOnly
+            value={UTM_EXAMPLE_URL}
+            className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-200 outline-none"
+            onFocus={(e) => e.currentTarget.select()}
+          />
+          <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+            소재만 바꾸면 utm_content 만 바꿉니다. 캠페인명은 광고비 입력의
+            캠페인 값과 그대로 맞춥니다.
+          </p>
+        </div>
+      </div>
+    </Panel>
   );
 }
 
@@ -2744,11 +2828,12 @@ export function PersonAxisCoverageNote({
   );
 }
 
-// ── ★5탭 구조 ──────────────────────────────────────────────────────────────
+// ── ★6탭 구조 ──────────────────────────────────────────────────────────────
 // 지금까지 이 화면은 지표가 시간순으로 쌓여 있어 "무엇부터 봐야 하나" 가 없었다.
 // 탭 하나 = 질문 하나로 세운다. 탭은 새 페이지가 아니라 기존 섹션의 재배치다.
 export type AnalyticsTab =
   | "acquisition"
+  | "ads"
   | "activation"
   | "retention"
   | "revenue"
@@ -2763,30 +2848,36 @@ export const ANALYTICS_TABS: {
   {
     id: "acquisition",
     label: "① 획득",
-    question: "어디서 오고, 얼마 쓰면 몇 명 오나",
+    question: "어디서 오나",
     icon: Globe,
   },
   {
+    id: "ads",
+    label: "② 광고",
+    question: "UTM 을 어떻게 붙이고, 광고비가 설치로 이어지나",
+    icon: Tag,
+  },
+  {
     id: "activation",
-    label: "② 활성화",
+    label: "③ 활성화",
     question: "들어온 사람이 가치를 보나",
     icon: Activity,
   },
   {
     id: "retention",
-    label: "③ 리텐션",
+    label: "④ 리텐션",
     question: "남아서 계속 쓰나",
     icon: Repeat,
   },
   {
     id: "revenue",
-    label: "④ 수익",
+    label: "⑤ 수익",
     question: "쓰는 사람이 돈을 내나",
     icon: CreditCard,
   },
   {
     id: "operations",
-    label: "⑤ 운영",
+    label: "⑥ 운영",
     question: "배포·라우팅이 건강한가",
     icon: Cpu,
   },
@@ -8453,7 +8544,7 @@ export default function AnalyticsPanel({
 
       <AnalyticsTabBar tab={tab} onChange={setTab} />
 
-      {/* ── ① 획득 — "어디서 오고, 얼마 쓰면 몇 명 오나" ────────────────────
+      {/* ── ① 획득 — "어디서 오나" ─────────────────────────────────────────
           ★계획 v3/docs/admin-analytics-replan-2026-08-24.md §4-1 을 그대로
             집행한다. 표 순서 = 결정하는 순서다.
           ★모든 수치의 알갱이는 **설치 1행**(marblo_telemetry.v_install_unified)
@@ -8469,7 +8560,7 @@ export default function AnalyticsPanel({
           <AxisLimitNote
             notes={[
               "★분모는 방문이 아니라 다운로드·설치입니다(#1200). 봇은 Electron 데스크톱을 내려받아 설치하고 실행하지 않으므로, 설치를 분모로 쓰는 순간 봇은 규칙 없이도 0 으로 셉니다. 방문 축에서 거른 '의심 유입' 은 삭제하지 않고 아래 방문 축 표에 따로 남깁니다.",
-              "★이 탭에는 축이 둘 있습니다 — 설치 축(통합 뷰)과 방문 축(GA4 브라우저). 두 표의 분모가 다르므로 위아래로 놓고 곱해서 읽지 마세요. 어느 표가 어느 축인지는 섹션 제목에 적혀 있습니다.",
+              "★이 탭에는 축이 둘 있습니다 — 설치 축(통합 뷰)과 방문 축(GA4 브라우저). 두 표의 분모가 다르므로 위아래로 놓고 곱해서 읽지 마세요. 광고비와 CAC 는 광고 탭에서 봅니다.",
               "★설치 수는 사람 수가 아닙니다. 실측(2026-08-24)으로 설치 631행이 브라우저 5대에서 나왔습니다(재설치 루프). 그래서 상단에 전체 설치와 사람 추정치를 같이 둡니다(#1198 install_class).",
               "설치 축의 모든 수치는 marblo_telemetry.v_install_unified 한 표에서 나옵니다 — 화면은 GROUP BY 만 하고 다시 세지 않습니다. 콜러블 이름은 getAdminInstallUnified 이고, 그게 아직 없으면 0 대신 '적재 전' 이라고 적습니다.",
             ]}
@@ -8479,7 +8570,7 @@ export default function AnalyticsPanel({
           <div className="space-y-4">
             <SectionHeader
               icon={Database}
-              title="설치 · 채널 커버리지 · CAC (설치 축)"
+              title="설치 · 채널 커버리지 (설치 축)"
               trust={unified.data?.state === "ready" ? "yellow" : "unwired"}
             >
               {unified.data?.source && (
@@ -8615,33 +8706,7 @@ export default function AnalyticsPanel({
             ) : null}
           </div>
 
-          {/* ── 4. 광고비 원장 × 채널 (#1193 수동 원장) ────────────────── */}
-          <div className="space-y-4">
-            <SectionHeader icon={Tag} title="광고비 원장 × 채널" trust="yellow" />
-            <Ga4BridgeFreshnessNote data={countryFunnel.data?.ga4Bridge} />
-            <ManualAdSpendInputPanel
-              form={adSpendForm}
-              saving={adSpendSaving}
-              status={adSpendStatus}
-              onChange={(patch) =>
-                setAdSpendForm((f) => ({
-                  ...f,
-                  ...patch,
-                  currency: "KRW",
-                }))
-              }
-              onSubmit={saveManualAdSpend}
-            />
-            {cac.loading ? (
-              <LoadingBox />
-            ) : cac.error ? (
-              <ErrorBox msg={cac.error} />
-            ) : (
-              <CacSummaryView data={cac.data} />
-            )}
-          </div>
-
-          {/* ── 5. 대기자·파운더 원장 (🟢 Firestore) ────────────────────
+          {/* ── 4. 대기자·파운더 원장 (🟢 Firestore) ────────────────────
               ★맨 아래다. 초록이라 믿을 만하지만 **광고 성과와 다른 축**이라
                 위에 두면 섞여 읽힌다(계획 §4-1 표5). */}
           <div className="space-y-4">
@@ -8692,7 +8757,54 @@ export default function AnalyticsPanel({
         </div>
       )}
 
-      {/* ── ② 활성화 — "들어온 사람이 가치를 보나" ──────────────────────── */}
+      {/* ── ② 광고 — "UTM 을 어떻게 붙이고, 광고비가 설치로 이어지나" ───── */}
+      {tab === "ads" && (
+        <div
+          id="analytics-panel-ads"
+          role="tabpanel"
+          aria-labelledby="analytics-tab-ads"
+          className="space-y-8"
+        >
+          <AxisLimitNote
+            notes={[
+              "★광고 탭은 광고비 원장과 설치 축이 만나는 자리입니다. 광고비가 없으면 0원 CAC 가 아니라 '아직 입력된 광고비가 없습니다' 로 둡니다.",
+              "★미매칭 광고비는 캠페인명이 UTM 규약과 어긋났다는 신호입니다. 광고비 입력 캠페인명과 utm_campaign 을 같은 문자열로 맞춥니다.",
+            ]}
+          />
+
+          <div className="space-y-4">
+            <SectionHeader icon={Link2} title="UTM 규약" trust="yellow" />
+            <UtmConventionGuide />
+          </div>
+
+          <div className="space-y-4">
+            <SectionHeader icon={Tag} title="광고비 입력 · 캠페인별 성과" trust="yellow" />
+            <Ga4BridgeFreshnessNote data={countryFunnel.data?.ga4Bridge} />
+            <ManualAdSpendInputPanel
+              form={adSpendForm}
+              saving={adSpendSaving}
+              status={adSpendStatus}
+              onChange={(patch) =>
+                setAdSpendForm((f) => ({
+                  ...f,
+                  ...patch,
+                  currency: "KRW",
+                }))
+              }
+              onSubmit={saveManualAdSpend}
+            />
+            {cac.loading ? (
+              <LoadingBox />
+            ) : cac.error ? (
+              <ErrorBox msg={cac.error} />
+            ) : (
+              <CacSummaryView data={cac.data} />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── ③ 활성화 — "들어온 사람이 가치를 보나" ──────────────────────── */}
       {tab === "activation" && (
         <div
           id="analytics-panel-activation"
@@ -8834,7 +8946,7 @@ export default function AnalyticsPanel({
         </div>
       )}
 
-      {/* ── ③ 리텐션 — "남아서 계속 쓰나" ──────────────────────────────── */}
+      {/* ── ④ 리텐션 — "남아서 계속 쓰나" ──────────────────────────────── */}
       {tab === "retention" && (
         <div
           id="analytics-panel-retention"
@@ -8935,7 +9047,7 @@ export default function AnalyticsPanel({
         </div>
       )}
 
-      {/* ── ④ 수익 — "쓰는 사람이 돈을 내나" ───────────────────────────── */}
+      {/* ── ⑤ 수익 — "쓰는 사람이 돈을 내나" ───────────────────────────── */}
       {tab === "revenue" && (
         <div
           id="analytics-panel-revenue"
@@ -9224,19 +9336,19 @@ export default function AnalyticsPanel({
           <div className="space-y-4">
             <SectionHeader icon={Info} title="운영 지표 이동 안내" trust="yellow" />
             <Panel
-              title="여기 있던 운영용 지표는 ⑤ 운영으로 갔다"
+              title="여기 있던 운영용 지표는 ⑥ 운영으로 갔다"
               note="모델 비용·라우팅·릴리스 헬스·옵트인 사용 표본은 매출 판단과 분모가 다릅니다."
             >
               <p className="text-sm leading-relaxed text-zinc-400">
                 MRR/LTV처럼 원천이 전량 null 이던 카드와 코호트 회수 플레이스홀더는
-                삭제했습니다. 실제 배포·라우팅 상태를 볼 때는 ⑤ 운영 탭을 엽니다.
+                삭제했습니다. 실제 배포·라우팅 상태를 볼 때는 ⑥ 운영 탭을 엽니다.
               </p>
             </Panel>
           </div>
         </div>
       )}
 
-      {/* ── ⑤ 운영 — "배포·라우팅이 건강한가" ───────────────────────────── */}
+      {/* ── ⑥ 운영 — "배포·라우팅이 건강한가" ───────────────────────────── */}
       {tab === "operations" && (
         <div
           id="analytics-panel-operations"

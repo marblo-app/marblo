@@ -1,5 +1,5 @@
 /**
- * ★어드민 분석 5탭의 정직성 규약을 **렌더된 HTML 바이트로** 확인한다.
+ * ★어드민 분석 6탭의 정직성 규약을 **렌더된 HTML 바이트로** 확인한다.
  *
  * 이 화면의 실패 모드는 버그가 아니라 오독이다 — 2명짜리 표본을 "50%" 로 크게
  * 띄우고, 소스가 없어서 비어 있는 칸에 0 을 그리는 것. 그래서 테스트도 "함수가
@@ -173,6 +173,40 @@ test("CAC 요약은 미매칭 광고비를 별도로 보여준다", () => {
   assert.match(html, /Typo Campaign/);
 });
 
+test("CAC 요약은 광고비 원장이 비어 있으면 0원이 아니라 미입력 상태를 말한다", () => {
+  const html = renderToStaticMarkup(
+    <P.CacSummaryView
+      data={{
+        generatedAt: "2026-08-24T00:00:00.000Z",
+        state: "ingested",
+        basis: "analytics_ad_spend.campaignKey ↔ ga4_first_touch_current.campaign",
+        summary: {
+          matchedSpendKrw: 0,
+          unmatchedSpendKrw: 0,
+          acquiredFromMatchedCampaigns: 0,
+          overallCacKrw: null,
+          campaigns: [],
+          unmatched: [],
+          notes: [],
+        },
+      }}
+    />
+  );
+  assert.match(html, /아직 입력된 광고비가 없습니다/);
+  assert.doesNotMatch(html, /₩0/);
+});
+
+test("UTM 규약 가이드는 전문 대신 규칙·복사용 URL·원문 링크만 둔다", () => {
+  const html = renderToStaticMarkup(<P.UtmConventionGuide />);
+  assert.match(html, /UTM 규약 가이드/);
+  assert.match(html, /https:\/\/marblo\.app\/\?utm_source=instagram/);
+  assert.match(html, /utm_campaign=202608-launch-marblo/);
+  assert.match(html, /원문 문서 열기/);
+  assert.match(html, /utm-tagging-convention-2026-08-24\.md/);
+  assert.doesNotMatch(html, /첫 광고 다음날 확인 쿼리/);
+  assert.doesNotMatch(html, /DECLARE start_ts/);
+});
+
 test("어드민 캠페인 키 정규화는 서버 규칙과 같은 모양을 만든다", () => {
   assert.equal(
     P.normalizeCampaignKeyForAdmin("  Launch / Campaign 2026  "),
@@ -218,20 +252,21 @@ test("식별자 교체 경계는 구간 안에 있을 때만 선이 된다", () 
 
 // ── 탭 = 질문 ───────────────────────────────────────────────────────────────
 
-test("5탭이 각각 한 질문에 대응하고 tablist 로 노출된다", () => {
+test("6탭이 각각 한 질문에 대응하고 tablist 로 노출된다", () => {
   assert.deepEqual(
     P.ANALYTICS_TABS.map((t) => t.id),
-    ["acquisition", "activation", "retention", "revenue", "operations"]
+    ["acquisition", "ads", "activation", "retention", "revenue", "operations"]
   );
   const html = renderToStaticMarkup(
     <P.AnalyticsTabBar tab="retention" onChange={() => {}} />
   );
   assert.match(html, /role="tablist"/);
-  assert.equal((html.match(/role="tab"/g) ?? []).length, 5);
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 6);
   assert.match(
     html,
     /aria-selected="true"[^>]*aria-controls="analytics-panel-retention"/
   );
+  assert.match(html, /UTM 을 어떻게 붙이고/);
   assert.match(html, /남아서 계속 쓰나/);
   assert.match(html, /배포·라우팅이 건강한가/);
 });
@@ -523,16 +558,17 @@ test("★아래 표의 최근 14일 스파크라인은 그대로다 (이미 좋�
   assert.match(html, /text-emerald-400/);
 });
 
-// ── 패널 전체가 실제로 서는가 (5탭 재배치 스모크) ──────────────────────────
+// ── 패널 전체가 실제로 서는가 (6탭 재배치 스모크) ──────────────────────────
 // 흉내낸 트리가 아니라 화면이 쓰는 그 컴포넌트를 SSR 로 세운다. useEffect 는
 // 서버 렌더에서 돌지 않으므로 콜러블은 나가지 않고, 초기 탭의 골격만 나온다.
 
-test("패널은 5탭 tablist 를 세우고 선택된 탭만 렌더한다", () => {
+test("패널은 6탭 tablist 를 세우고 선택된 탭만 렌더한다", () => {
   const html = renderToStaticMarkup(<P.default />);
   assert.match(html, /role="tablist"/);
-  assert.equal((html.match(/role="tab"/g) ?? []).length, 5);
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 6);
   // 기본 탭 = ① 획득. 나머지 탭 패널은 DOM 에 없다(숨김이 아니라 미렌더).
   assert.match(html, /id="analytics-panel-acquisition"/);
+  assert.doesNotMatch(html, /id="analytics-panel-ads"/);
   assert.doesNotMatch(html, /id="analytics-panel-activation"/);
   assert.doesNotMatch(html, /id="analytics-panel-retention"/);
   assert.doesNotMatch(html, /id="analytics-panel-revenue"/);
@@ -541,7 +577,7 @@ test("패널은 5탭 tablist 를 세우고 선택된 탭만 렌더한다", () =>
   //   숫자가 틀렸을 때 어디를 봐야 하는지 아무도 모른다.
   assert.match(html, /v_install_unified/);
   assert.match(html, /getAdminInstallUnified/);
-  assert.match(html, /CAC/);
+  assert.match(html, /광고 탭/);
   // ★삭제 대상(계획 §2-1 A11 "획득 비용 회수" 플레이스홀더)이 실제로 사라졌다.
   assert.doesNotMatch(html, /획득 비용 회수/);
 });
@@ -987,11 +1023,10 @@ test("★획득 탭은 표 순서 = 결정 순서로 선다 (계획 §4-1)", () 
   const html = renderToStaticMarkup(<P.default initialTab="acquisition" />);
   // 위에서부터 읽으면 "무엇을 고칠까" 가 나와야 한다.
   const order = [
-    "설치 · 채널 커버리지 · CAC",
+    "설치 · 채널 커버리지",
     "채널별 획득",
     "채널 미상 사유",
     "국가별 획득",
-    "광고비 원장",
     "대기자 · 파운더 원장",
   ];
   let cursor = -1;
@@ -1001,13 +1036,24 @@ test("★획득 탭은 표 순서 = 결정 순서로 선다 (계획 §4-1)", () 
     assert.ok(at > cursor, `'${label}' 이 표 순서에서 앞으로 새어 나왔다`);
     cursor = at;
   }
-  assert.match(html, /광고비 수동 입력/);
+  assert.doesNotMatch(html, /광고비 수동 입력/);
   // ★대기자·파운더 원장은 초록이지만 광고 성과와 **다른 축**이라 맨 아래다.
   assert.ok(
     html.indexOf("대기자 · 파운더 원장") > html.indexOf("채널 미상 사유"),
     "다른 축인 Firestore 원장이 채널 표 위로 올라오면 섞여 읽힌다"
   );
   assert.doesNotMatch(html, /광고비 축은 소스 자체가 아직 없다/);
+});
+
+test("★광고 탭은 UTM 규약과 광고비 입력과 캠페인별 성과를 한 화면에 둔다", () => {
+  const html = renderToStaticMarkup(<P.default initialTab="ads" />);
+  assert.match(html, /id="analytics-panel-ads"/);
+  assert.match(html, /UTM 규약 가이드/);
+  assert.match(html, /https:\/\/marblo\.app\/\?utm_source=instagram/);
+  assert.match(html, /광고비 수동 입력/);
+  assert.match(html, /캠페인별 성과/);
+  assert.match(html, /아직 입력된 광고비가 없습니다|적재 전/);
+  assert.doesNotMatch(html, /id="analytics-panel-acquisition"/);
 });
 
 test("★브리지 미적재 배너는 유입 0 이라고 말하지 않는다", () => {
@@ -1068,10 +1114,11 @@ test("★브리지 적재 배너는 마지막 동기 시각을 보인다", () =>
 test("initialTab 은 선택된 탭만 렌더한다는 기존 규약을 깨지 않는다", () => {
   const html = renderToStaticMarkup(<P.default initialTab="revenue" />);
   assert.doesNotMatch(html, /id="analytics-panel-acquisition"/);
+  assert.doesNotMatch(html, /id="analytics-panel-ads"/);
   assert.doesNotMatch(html, /id="analytics-panel-activation"/);
   assert.doesNotMatch(html, /id="analytics-panel-retention"/);
   assert.doesNotMatch(html, /id="analytics-panel-operations"/);
-  assert.equal((html.match(/role="tab"/g) ?? []).length, 5);
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 6);
   assert.match(
     html,
     /aria-selected="true"[^>]*aria-controls="analytics-panel-revenue"/
