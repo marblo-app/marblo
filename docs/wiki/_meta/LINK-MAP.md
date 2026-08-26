@@ -2,8 +2,8 @@
 title: 링크 맵
 tags: [meta/linkmap, status/living]
 status: active
-date: 2026-08-25
-links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[marblo-bot-messaging]]
+date: 2026-08-26
+links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]]
 ---
 
 # 링크 맵
@@ -35,6 +35,10 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 | `routing-label-coverage` | `40-methodology/routing-label-coverage.md` | methodology | verified | adopt |
 | `no-live-gui-verify` | `20-constraints/no-live-gui-verify.md` | constraints | verified | adopt |
 | `telemetry-identity-axes` | `00-foundations/telemetry-identity-axes.md` | foundations | verified | — |
+| `overview` | `00-foundations/overview.md` | foundations | active | — |
+| `architecture` | `00-foundations/architecture.md` | foundations | active | — |
+| `glossary` | `00-foundations/glossary.md` | foundations | active | — |
+| `progress` | `00-foundations/progress.md` | foundations | active | snapshot |
 | `post-spawn-telemetry-gap` | `30-investigations/post-spawn-telemetry-gap.md` | investigations | verified | adopt |
 | `marblo-bot-messaging` | `10-offerings/marblo-bot-messaging.md` | offerings | draft | — |
 
@@ -69,6 +73,32 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 | `telemetry-identity-axes` | `do-not-retry` |
 | `telemetry-identity-axes` | `empty-query-first` |
 | `telemetry-identity-axes` | `post-spawn-telemetry-gap` |
+| `telemetry-identity-axes` | `glossary` |
+| `telemetry-identity-axes` | `overview` |
+| `overview` | `glossary` |
+| `overview` | `architecture` |
+| `overview` | `progress` |
+| `overview` | `telemetry-identity-axes` |
+| `overview` | `do-not-retry` |
+| `overview` | `empty-query-first` |
+| `overview` | `verify-result-row` |
+| `overview` | `counting-unit-first` |
+| `overview` | `no-live-gui-verify` |
+| `architecture` | `overview` |
+| `architecture` | `glossary` |
+| `architecture` | `progress` |
+| `architecture` | `telemetry-identity-axes` |
+| `glossary` | `overview` |
+| `glossary` | `architecture` |
+| `glossary` | `progress` |
+| `glossary` | `telemetry-identity-axes` |
+| `glossary` | `counting-unit-first` |
+| `glossary` | `do-not-retry` |
+| `progress` | `overview` |
+| `progress` | `architecture` |
+| `progress` | `glossary` |
+| `progress` | `do-not-retry` |
+| `progress` | `no-live-gui-verify` |
 | `post-spawn-telemetry-gap` | `telemetry-identity-axes` |
 | `post-spawn-telemetry-gap` | `empty-query-first` |
 | `post-spawn-telemetry-gap` | `do-not-retry` |
@@ -76,7 +106,7 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 
 ## 허브
 
-1판 기대: `do-not-retry` 와 `empty-query-first` 가 인바운드 상위. 허브가 기능 목록이면 구조가 틀린 것이다 — 이 위키의 첫 값은 **재시도하지 말 것과 조회를 의심하는 규칙**이다.
+1판 기대: `do-not-retry` 와 `empty-query-first` 가 인바운드 상위. 2026-08-26 입구 4장(`overview` · `architecture` · `glossary` · `progress`)이 기반 허브로 추가됐다. 허브가 기능 목록이면 구조가 틀린 것이다 — 이 위키의 첫 값은 **재시도하지 말 것, 조회를 의심하는 규칙, 같은 말을 가르는 글로서리**다.
 
 ## 외부 앵커
 
@@ -90,5 +120,9 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 | `no-live-gui-verify` | [AGENTS.md](../../../AGENTS.md) |
 | `do-not-retry` | [v3/docs/web-app-join-attribution-design-2026-08-09.md](../../../v3/docs/web-app-join-attribution-design-2026-08-09.md) · [v3/docs/pseudonym-retro-measurement-2026-08-21.md](../../../v3/docs/pseudonym-retro-measurement-2026-08-21.md) · [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) |
 | `telemetry-identity-axes` | [v3/docs/post-spawn-telemetry-gap-2026-08-25.md](../../../v3/docs/post-spawn-telemetry-gap-2026-08-25.md) · [v3/functions/src/telemetryIdentityAxis.ts](../../../v3/functions/src/telemetryIdentityAxis.ts) |
+| `overview` | [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) · [v3/docs/COMMUNICATION-ARCHITECTURE.md](../../../v3/docs/COMMUNICATION-ARCHITECTURE.md) |
+| `architecture` | [v3/docs/COMMUNICATION-ARCHITECTURE.md](../../../v3/docs/COMMUNICATION-ARCHITECTURE.md) · [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) · [docs/supported-harnesses-and-architecture.md](../../supported-harnesses-and-architecture.md) |
+| `glossary` | [docs/payment/toss-teardown-prerequisites.md](../../payment/toss-teardown-prerequisites.md) · [v3/functions/src/telemetryIdentityAxis.ts](../../../v3/functions/src/telemetryIdentityAxis.ts) · [v3/electron/model-registry.ts](../../../v3/electron/model-registry.ts) |
+| `progress` | [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) · [marblo-web/src/lib/paymentProvider.ts](../../../marblo-web/src/lib/paymentProvider.ts) |
 | `post-spawn-telemetry-gap` | [v3/docs/post-spawn-telemetry-gap-2026-08-25.md](../../../v3/docs/post-spawn-telemetry-gap-2026-08-25.md) · [v3/functions/src/postSpawnTelemetryGuard.ts](../../../v3/functions/src/postSpawnTelemetryGuard.ts) |
 | `marblo-bot-messaging` | [v3/src/lib/botDefinition.ts](../../../v3/src/lib/botDefinition.ts) · [v3/src/services/botDefinitionService.ts](../../../v3/src/services/botDefinitionService.ts) · [v3/src/components/agents/MarbloBotGallery.tsx](../../../v3/src/components/agents/MarbloBotGallery.tsx) · [v3/electron/assistant-triggers.ts](../../../v3/electron/assistant-triggers.ts) · [v3/docs/assistant-tab-design-2026-08-24.md](../../../v3/docs/assistant-tab-design-2026-08-24.md) · [marblo-web/docs/beta-launch/YOUTUBE-SCRIPT.md](../../../marblo-web/docs/beta-launch/YOUTUBE-SCRIPT.md) |

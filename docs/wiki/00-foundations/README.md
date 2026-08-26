@@ -2,17 +2,22 @@
 title: 00 기반
 tags: [domain/foundations, meta/index]
 status: active
-date: 2026-08-25
-links: [[CONVENTION]], [[telemetry-identity-axes]]
+date: 2026-08-26
+links: [[CONVENTION]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[telemetry-identity-axes]]
 ---
 
 # 00-foundations
 
 나머지가 전제하는 것. 엔지니어링 스택만이 아니다 — 강의·마케팅이 쓰는 용어와 포지셔닝도 여기 산다.
 
-- Electron 메인, Firestore, MCP, 식별자 축
-- "마블로가 무엇인가" 포지셔닝 어휘. 원본은 [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) (읽기만)
+**위키 입구는 이 넷이다.** 보드·칸반은 진행 정본이 아니다.
 
 | 노트 | 한 줄 |
 | --- | --- |
-| [[telemetry-identity-axes]] | `userId` 는 표마다 다른 사람 — 설치 clientId 와 Firebase uid 를 가른다 |
+| [[overview]] | 마블로는 실행기가 아니라 control plane |
+| [[architecture]] | 데스크톱 루프와 클라우드 루프는 다르다 |
+| [[glossary]] | 같은 말이 다른 객체를 가리킨다 — ★먼저 |
+| [[progress]] | 보드는 정본, 여기는 큰 축만 |
+| [[telemetry-identity-axes]] | `userId` 는 표마다 다른 사람 |
+
+원본 포지셔닝은 [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) (읽기만).

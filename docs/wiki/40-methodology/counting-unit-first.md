@@ -58,4 +58,4 @@ links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]]
 
 ## Backlinks
 
-- [[verify-result-row]] · [[empty-query-first]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]] · [[decision-sentence-first]] · [[routing-label-coverage]]
+- [[verify-result-row]] · [[empty-query-first]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]] · [[decision-sentence-first]] · [[routing-label-coverage]] · [[glossary]] · [[overview]]

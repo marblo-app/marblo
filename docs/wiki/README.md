@@ -2,8 +2,8 @@
 title: 마블로 지식위키
 tags: [meta/index, status/normative]
 status: active
-date: 2026-08-25
-links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVENTION]], [[TAXONOMY]], [[LINK-MAP]], [[LINT]]
+date: 2026-08-26
+links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVENTION]], [[TAXONOMY]], [[LINK-MAP]], [[LINT]]
 ---
 
 # 마블로 지식위키
@@ -24,6 +24,11 @@ links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[
 
 | 질문 | 가는 곳 |
 | --- | --- |
+| 마블로가 무엇인가 | [[overview]] |
+| 구성 요소가 어떻게 닿나 | [[architecture]] |
+| 같은 말이 다른 것을 가리키나 | [[glossary]] |
+| 지금 무엇이 돌고 막혔나 | [[progress]] |
+| 마블로봇 메시지는 뭔가 | [[marblo-bot-messaging]] |
 | 그거 전에 해봤나? | [[do-not-retry]] |
 | 쿼리/표가 비다 | [[empty-query-first]] |
 | 쿼리/표에 결과가 있다 | [[verify-result-row]] |
@@ -56,8 +61,8 @@ links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[
 
 | 슬롯 | 폴더 | 1판 |
 | --- | --- | --- |
-| 00 기반 | [00-foundations](00-foundations/README.md) | [[telemetry-identity-axes]] |
-| 10 주력 | [10-offerings](10-offerings/README.md) | 스텁 (제품·강의·마케팅 실물) |
+| 00 기반 | [00-foundations](00-foundations/README.md) | [[overview]] · [[architecture]] · [[glossary]] · [[progress]] · [[telemetry-identity-axes]] |
+| 10 주력 | [10-offerings](10-offerings/README.md) | [[marblo-bot-messaging]] |
 | 20 제약 | [20-constraints](20-constraints/README.md) | [[no-live-gui-verify]] |
 | 30 탐구 | [30-investigations](30-investigations/README.md) | [[post-spawn-telemetry-gap]] |
 | 40 방법론 | [40-methodology](40-methodology/README.md) | [[empty-query-first]] · [[verify-result-row]] · [[counting-unit-first]] · [[decision-sentence-first]] · [[routing-label-coverage]] |
