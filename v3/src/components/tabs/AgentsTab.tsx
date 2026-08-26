@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import AgentDashboard from "../agents/AgentDashboard";
 import AgentAddModal from "../agents/AgentAddModal";
+import { MarbloBotGallery } from "../agents/MarbloBotGallery";
 import { useAgentStore } from "../../stores/agentStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useTaskStore } from "../../stores/taskStore";
@@ -28,6 +29,9 @@ export function AgentsTab() {
   const tasks = useTaskStore((s) => s.tasks);
   const subscribeToTasks = useTaskStore((s) => s.subscribeToTasks);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [activeSection, setActiveSection] = useState<
+    "bots" | "agents" | "triggers"
+  >("bots");
 
   const projectId = currentProject?.id || "";
 
@@ -149,13 +153,19 @@ export function AgentsTab() {
   const planForBadge = useSubscriptionStore((s) => s.getPlan());
   const throttle = checkAgentSpawn(planForBadge, agents);
   const atLimit = !throttle.allowed;
+  const selectedProject = currentProject;
+  const sectionTabs = [
+    ["bots", t("agents.marbloBots.section.bots")],
+    ["agents", t("agents.marbloBots.section.agents")],
+    ["triggers", t("agents.marbloBots.section.triggers")],
+  ] as const;
 
   // No project selected → "Add agent" (header, empty-state, and the terminal
   // panel's "+ Spawn agent" that routes here) would open a modal gated on
   // `user && projectId` and silently no-op. Show a dedicated CTA that opens a
   // project first (same folder-pick flow as the sidebar), so there's no
   // dead-end. Placed after all hooks to keep hook order stable.
-  if (!projectId) {
+  if (!projectId || !selectedProject) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-center text-gray-400">
         <div>
@@ -200,23 +210,72 @@ export function AgentsTab() {
           )}
         </div>
       )}
+      <div
+        role="tablist"
+        aria-label={t("agents.marbloBots.tabAria")}
+        className="flex flex-shrink-0 items-center gap-1 border-b border-gray-700 bg-gray-900 px-4"
+      >
+        {sectionTabs.map(([id, label]) => {
+          const selected = activeSection === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() =>
+                setActiveSection(id as "bots" | "agents" | "triggers")
+              }
+              className={`border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
+                selected
+                  ? "border-blue-500 text-gray-100"
+                  : "border-transparent text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="flex-1 min-h-0">
-        <AgentDashboard
-          agents={agents}
-          tasks={tasks}
-          projectId={projectId}
-          loading={loading}
-          onAddAgent={() => {
-            if (atLimit) {
-              useUiStore.getState().showUpgrade("agents", "pro");
-              return;
-            }
-            setShowAddModal(true);
-          }}
-          onStop={stopAgent}
-          onRestart={restartAgent}
-          onDelete={deleteAgent}
-        />
+        {activeSection === "bots" ? (
+          user ? (
+            <MarbloBotGallery project={selectedProject} ownerId={user.uid} />
+          ) : (
+            <div className="flex h-full items-center justify-center p-6 text-sm text-gray-500">
+              {t("agents.marbloBots.loginRequired")}
+            </div>
+          )
+        ) : activeSection === "triggers" ? (
+          <div className="flex h-full items-center justify-center p-6 text-center">
+            <div>
+              <p className="text-sm font-medium text-gray-300">
+                {t("agents.marbloBots.triggersTitle")}
+              </p>
+              <p className="mt-1 max-w-sm text-sm text-gray-500">
+                {t("agents.marbloBots.triggersBody")}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <AgentDashboard
+            agents={agents}
+            tasks={tasks}
+            projectId={projectId}
+            loading={loading}
+            onAddAgent={() => {
+              if (atLimit) {
+                useUiStore.getState().showUpgrade("agents", "pro");
+                return;
+              }
+              setShowAddModal(true);
+            }}
+            onStop={stopAgent}
+            onRestart={restartAgent}
+            onDelete={deleteAgent}
+          />
+        )}
       </div>
 
       {showAddModal && user && projectId && (

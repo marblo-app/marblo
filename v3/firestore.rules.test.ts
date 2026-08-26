@@ -197,6 +197,21 @@ beforeEach(async () => {
       createdAt: new Date(),
     });
 
+    // 봇 정의 — agents(실행 인스턴스)와 별도인 프로젝트 스코프 템플릿.
+    await setDoc(doc(db, "botDefinitions", "bot-1"), {
+      projectId: PROJECT_ID,
+      ownerId: OWNER_ID,
+      name: "Knowledge Assistant",
+      persona: "Grounded assistant",
+      mission: "Answer from the wiki",
+      model: "claude",
+      role: "backend",
+      tools: ["wiki_query"],
+      knowledge: { enabled: true, rootPath: "/repo/docs/wiki" },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
     // 플로우
     await setDoc(doc(db, "flows", "flow-1"), {
       projectId: PROJECT_ID,
@@ -1628,6 +1643,66 @@ describe("agents collection", () => {
   });
 });
 
+// ===== Bot Definitions =====
+
+describe("botDefinitions collection", () => {
+  it("프로젝트 멤버는 봇 정의를 읽을 수 있다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "botDefinitions", "bot-1")));
+  });
+
+  it("외부인은 봇 정의를 읽을 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "botDefinitions", "bot-1")));
+  });
+
+  it("프로젝트 멤버는 projectId가 있는 봇 정의를 생성할 수 있다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      addDoc(collection(db, "botDefinitions"), {
+        projectId: PROJECT_ID,
+        ownerId: MEMBER_ID,
+        name: "Saved Bot",
+        persona: "Assistant",
+        mission: "Do project work",
+        model: "codex",
+        role: "frontend",
+        tools: ["marblo_mcp"],
+        knowledge: { enabled: false, rootPath: "" },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("projectId 없는 고아 봇 정의 생성은 거부한다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      addDoc(collection(db, "botDefinitions"), {
+        ownerId: MEMBER_ID,
+        name: "Orphan Bot",
+        persona: "Assistant",
+        mission: "Do project work",
+        model: "claude",
+        role: "backend",
+        tools: [],
+        knowledge: { enabled: false, rootPath: "" },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("수정할 때 projectId를 바꿀 수 없다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "botDefinitions", "bot-1"), {
+        projectId: OTHER_PROJECT_ID,
+      }),
+    );
+  });
+});
+
 // ===== Flows =====
 
 describe("flows collection", () => {
@@ -1669,10 +1744,22 @@ describe("workChains — 멤버 read/write", () => {
 
   it("owner/admin 도 읽는다", async () => {
     await assertSucceeds(
-      getDoc(doc(getContext(OWNER_ID, OWNER_EMAIL).firestore(), "workChains", PROJECT_ID)),
+      getDoc(
+        doc(
+          getContext(OWNER_ID, OWNER_EMAIL).firestore(),
+          "workChains",
+          PROJECT_ID,
+        ),
+      ),
     );
     await assertSucceeds(
-      getDoc(doc(getContext(ADMIN_ID, ADMIN_EMAIL).firestore(), "workChains", PROJECT_ID)),
+      getDoc(
+        doc(
+          getContext(ADMIN_ID, ADMIN_EMAIL).firestore(),
+          "workChains",
+          PROJECT_ID,
+        ),
+      ),
     );
   });
 
@@ -1708,7 +1795,13 @@ describe("workChains — 멤버 read/write", () => {
 
   it("삭제는 누구도 못 한다 — 체인은 비우는 것이지 지우는 게 아니다", async () => {
     await assertFails(
-      deleteDoc(doc(getContext(OWNER_ID, OWNER_EMAIL).firestore(), "workChains", PROJECT_ID)),
+      deleteDoc(
+        doc(
+          getContext(OWNER_ID, OWNER_EMAIL).firestore(),
+          "workChains",
+          PROJECT_ID,
+        ),
+      ),
     );
   });
 });
@@ -1781,9 +1874,7 @@ describe("workChains — 크로스테넌트 격리", () => {
   it("미인증은 읽지도 쓰지도 못한다", async () => {
     const db = unauthContext().firestore();
     await assertFails(getDoc(doc(db, "workChains", PROJECT_ID)));
-    await assertFails(
-      updateDoc(doc(db, "workChains", PROJECT_ID), { rev: 2 }),
-    );
+    await assertFails(updateDoc(doc(db, "workChains", PROJECT_ID), { rev: 2 }));
   });
 });
 
@@ -2844,9 +2935,13 @@ describe("missions — 크로스테넌트 read 격리", () => {
     // 이라 플랫폼 admin 에게 열어야 했지만, 미션엔 그런 요구가 없다. 귀속할
     // 테넌트가 없는 문서는 그냥 아무도 못 읽는 게 맞다.
     const member = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
-    await assertFails(getDoc(doc(member, "missions", "mission-legacy-no-project")));
+    await assertFails(
+      getDoc(doc(member, "missions", "mission-legacy-no-project")),
+    );
     const admin = adminContext().firestore();
-    await assertFails(getDoc(doc(admin, "missions", "mission-legacy-no-project")));
+    await assertFails(
+      getDoc(doc(admin, "missions", "mission-legacy-no-project")),
+    );
   });
 
   // ── 정당한 읽기 경로가 살아 있는지 (회귀 0 증명) ──────────────────────────
@@ -2914,21 +3009,35 @@ describe("missions — in-스코프 쿼리 계약 (mission-engine 이 의존)", 
   it("★where(projectId,in,[내프로젝트]) 는 통과한다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
-      getDocs(query(collection(db, "missions"), where("projectId", "in", [PROJECT_ID]))),
+      getDocs(
+        query(
+          collection(db, "missions"),
+          where("projectId", "in", [PROJECT_ID]),
+        ),
+      ),
     );
   });
   it("★in-스코프 + status 동등조건 조합도 통과한다 — 엔진이 실제로 쏘는 모양", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
-      getDocs(query(collection(db, "missions"),
-        where("projectId", "in", [PROJECT_ID]), where("status", "==", "active"))),
+      getDocs(
+        query(
+          collection(db, "missions"),
+          where("projectId", "in", [PROJECT_ID]),
+          where("status", "==", "active"),
+        ),
+      ),
     );
   });
   it("★in 목록에 남의 프로젝트가 섞이면 통째로 거부된다 (경계가 실재한다)", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(
-      getDocs(query(collection(db, "missions"),
-        where("projectId", "in", [PROJECT_ID, OTHER_PROJECT_ID]))),
+      getDocs(
+        query(
+          collection(db, "missions"),
+          where("projectId", "in", [PROJECT_ID, OTHER_PROJECT_ID]),
+        ),
+      ),
     );
   });
 });
@@ -3196,16 +3305,23 @@ describe("cost_logs — 크로스테넌트 read 격리", () => {
 
   it("★projectId 없는 구 비용로그는 아무도 못 읽는다 (fail-closed)", async () => {
     const member = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
-    await assertFails(getDoc(doc(member, "cost_logs", "cost-legacy-no-project")));
+    await assertFails(
+      getDoc(doc(member, "cost_logs", "cost-legacy-no-project")),
+    );
     const admin = adminContext().firestore();
-    await assertFails(getDoc(doc(admin, "cost_logs", "cost-legacy-no-project")));
+    await assertFails(
+      getDoc(doc(admin, "cost_logs", "cost-legacy-no-project")),
+    );
   });
 
   it("★projectId 스코프 쿼리는 통과한다 (인덱스가 전제하는 모양)", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
       getDocs(
-        query(collection(db, "cost_logs"), where("projectId", "==", PROJECT_ID)),
+        query(
+          collection(db, "cost_logs"),
+          where("projectId", "==", PROJECT_ID),
+        ),
       ),
     );
   });
@@ -4111,7 +4227,10 @@ describe("workChains — 오케 쓰기/읽기 왕복 (work-chain.ts 실제 경�
   it("외부인은 같은 함수로도 쓸 수 없다(룰이 막는다)", async () => {
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore() as never;
     await expect(
-      addWorkChainItem(db, PROJECT_ID, "orchestrator-evil", { what: "x", why: "y" }),
+      addWorkChainItem(db, PROJECT_ID, "orchestrator-evil", {
+        what: "x",
+        why: "y",
+      }),
     ).rejects.toThrow();
   });
 });

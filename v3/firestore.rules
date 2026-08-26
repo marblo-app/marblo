@@ -335,6 +335,24 @@ service cloud.firestore {
         && isProjectMember(resource.data.projectId);
     }
 
+    // ===== Bot Definitions =====
+    // 봇은 정의/템플릿이고 agents 는 그 정의로 뜬 실행 인스턴스다. 둘을 같은
+    // 컬렉션에 섞지 않는다. projectId 는 생성·수정 모두에서 필수로 고정해
+    // agents 컬렉션의 고아 문서 사고를 반복하지 않는다.
+    match /botDefinitions/{botId} {
+      allow read: if canReadProjectScopedDoc();
+      allow create: if isAuthenticated()
+        && request.resource.data.get('projectId', '') != ''
+        && isProjectMember(request.resource.data.projectId);
+      allow update: if isAuthenticated()
+        && resource.data.get('projectId', '') != ''
+        && isProjectMember(resource.data.projectId)
+        && request.resource.data.get('projectId', '') == resource.data.projectId;
+      allow delete: if isAuthenticated()
+        && resource.data.get('projectId', '') != ''
+        && isProjectMember(resource.data.projectId);
+    }
+
     // ===== Activities =====
     match /activities/{activityId} {
       allow read: if isAuthenticated()

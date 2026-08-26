@@ -259,6 +259,37 @@ export const agents = {
   "agents.tab.plan": "플랜",
   "agents.tab.atLimitHint":
     "한도 도달 — 업그레이드 또는 기존 에이전트 정지 필요",
+  "agents.marbloBots.title": "마블로봇",
+  "agents.marbloBots.subtitle":
+    "Persona, Mission, Model, Tools, Knowledge를 저장하고 보드 dispatch 경로로 실행합니다.",
+  "agents.marbloBots.knowledgeRoot": "Knowledge root_path",
+  "agents.marbloBots.rootMissing": "프로젝트 폴더 연결 필요",
+  "agents.marbloBots.runMission": "이번에 맡길 임무",
+  "agents.marbloBots.runPlaceholder":
+    "비워두면 봇의 기본 Mission으로 실행합니다.",
+  "agents.marbloBots.runnableSeeds": "실행 가능한 시드",
+  "agents.marbloBots.storageScope": "저장 범위: 프로젝트별 botDefinitions",
+  "agents.marbloBots.saveAgain": "다시 저장",
+  "agents.marbloBots.saveToProject": "프로젝트에 저장",
+  "agents.marbloBots.saveAndRun": "저장 후 실행",
+  "agents.marbloBots.savedBots": "저장된 봇",
+  "agents.marbloBots.savedEmpty": "아직 저장된 봇이 없습니다.",
+  "agents.marbloBots.runSaved": "이 봇에게 맡기기",
+  "agents.marbloBots.newBot": "새 봇 저장",
+  "agents.marbloBots.name": "이름",
+  "agents.marbloBots.model": "모델",
+  "agents.marbloBots.role": "역할",
+  "agents.marbloBots.knowledgeUse": "Knowledge 사용",
+  "agents.marbloBots.save": "저장",
+  "agents.marbloBots.omitted": "이번 단계에서 뺀 봇",
+  "agents.marbloBots.section.bots": "봇 갤러리",
+  "agents.marbloBots.section.agents": "실행 중",
+  "agents.marbloBots.section.triggers": "트리거",
+  "agents.marbloBots.tabAria": "마블로봇 탭",
+  "agents.marbloBots.loginRequired": "로그인 후 봇 정의를 저장할 수 있습니다.",
+  "agents.marbloBots.triggersTitle": "스케줄러·조건 트리거",
+  "agents.marbloBots.triggersBody":
+    "실행 엔진은 준비되어 있고, 이 화면은 후속 티켓에서 켭니다.",
 
   // ── No-project empty state (agents tab reached with no project selected) ──
   "agents.noProject.title": "선택된 프로젝트가 없습니다",

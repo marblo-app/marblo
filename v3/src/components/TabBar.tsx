@@ -120,7 +120,7 @@ const tabs: Tab[] = [
   },
   {
     id: "agents",
-    label: "Agents",
+    label: "Marblo Bots",
     icon: (
       <svg
         className="h-4 w-4"

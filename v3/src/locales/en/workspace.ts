@@ -21,7 +21,7 @@ export const workspace: Record<keyof typeof koWorkspace, string> = {
   "workspace.activity": "Activity",
   "workspace.tab.startHere": "Start here",
   "workspace.tab.board": "Board",
-  "workspace.tab.agents": "Agents",
+  "workspace.tab.agents": "Marblo Bots",
   "workspace.tab.project": "Project",
   "workspace.tab.settings": "Settings",
   "workspace.tab.code": "Code",
