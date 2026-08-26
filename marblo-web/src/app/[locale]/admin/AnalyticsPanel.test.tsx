@@ -1970,6 +1970,69 @@ test("★사람 축 대조는 설치 단일값 대신 사람 추정 범위를 �
   assert.match(html, /사람 없음으로 읽지 않습니다/);
 });
 
+test("★리텐션 축 스위치는 사람축 커버리지를 34명 중 3명으로 고정 고지한다", () => {
+  const html = renderToStaticMarkup(
+    <P.AnalyticsAxisSwitch
+      axis="person"
+      onChange={() => undefined}
+    />
+  );
+  assert.match(html, /이벤트·설치 축/);
+  assert.match(html, /사람 축/);
+
+  const banner = renderToStaticMarkup(
+    <P.PersonAxisCoverageBanner identityLinked={null} />
+  );
+  assert.match(banner, /구매 원장 34명 중 3명만 링크됨/);
+  assert.match(banner, /나머지 31명은 0명이 아니라 미상/);
+  assert.doesNotMatch(banner, /0\/34/);
+});
+
+test("★사람 축 리텐션은 다리가 못 닿는 칸을 0 이 아니라 미상으로 그린다", () => {
+  const data = unifiedFixture({
+    retention: {
+      d7: { numerator: 2, denominator: 10, rate: 0.2, smallSample: false },
+      d30: null,
+      pendingD7: 1,
+      pendingD30: 3,
+      cohortRows: [],
+      cohortRowsTruncated: false,
+      channelRows: [],
+      channelRowsTruncated: false,
+      personAxis: {
+        installs: 34,
+        humanEstimateMin: 3,
+        humanEstimateMax: 34,
+        identityLinked: {
+          numerator: 3,
+          denominator: 34,
+          rate: 3 / 34,
+          smallSample: false,
+        },
+        multiInstallPeople: 1,
+        maxInstallsPerBrowser: 9,
+      },
+      zombie: null,
+    },
+  });
+  const headline = renderToStaticMarkup(
+    <P.UnifiedRetentionHeadlineView data={data} axis="person" />
+  );
+  assert.match(headline, /D7 사람 잔존/);
+  assert.match(headline, /미상/);
+  assert.match(headline, /구매 원장 34명 중 3명만 링크됨/);
+  assert.match(headline, /31명은 설치↔사람 다리가 닿지 않아/);
+  assert.doesNotMatch(headline, /0\/34/);
+  assert.doesNotMatch(headline, /0\.0%/);
+
+  const cohort = renderToStaticMarkup(
+    <P.UnifiedRetentionCohortTable data={data} axis="person" />
+  );
+  assert.match(cohort, /사람 코호트 D7/);
+  assert.match(cohort, /미상/);
+  assert.doesNotMatch(cohort, /0\/34/);
+});
+
 test("★콜러블 이름 계약 — 통합 뷰 읽기 경로", () => {
   assert.equal(P.CALLABLE_INSTALL_UNIFIED, "getAdminInstallUnified");
 });

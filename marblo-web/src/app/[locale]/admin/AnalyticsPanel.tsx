@@ -667,6 +667,18 @@ type AdSpendMatchStatus =
 // 분포 렌즈 — 'events'(발생 총량, 기본) vs 'clients'(고유 설치 수).
 // ★clientId 1개 = 설치 기록 1건이지 사람 1명이 아니다. 한 사람이 설치를 2번 하면 2(#1222).
 type MetricMode = "events" | "clients";
+export type AnalysisAxis = "event" | "person";
+
+export const ANALYSIS_AXIS_LABEL: Readonly<Record<AnalysisAxis, string>> = {
+  event: "이벤트·설치 축",
+  person: "사람 축",
+};
+
+export const PERSON_AXIS_PURCHASE_LEDGER_COVERAGE = {
+  measuredAt: "2026-08-24",
+  linkedPeople: 3,
+  totalPeople: 34,
+} as const;
 
 /**
  * 설치 축 숫자의 화면 단위. 사람/사용자로 적으면 다음 사람이 분모를 또 섞는다.
@@ -2828,6 +2840,114 @@ export function PersonAxisCoverageNote({
   );
 }
 
+export function personAxisPurchaseCoverageRate(): number | null {
+  const total = PERSON_AXIS_PURCHASE_LEDGER_COVERAGE.totalPeople;
+  if (total <= 0) return null;
+  return PERSON_AXIS_PURCHASE_LEDGER_COVERAGE.linkedPeople / total;
+}
+
+export function PersonAxisCoverageBanner({
+  identityLinked,
+}: {
+  identityLinked?: UnifiedRatio | null;
+}) {
+  const coverage = PERSON_AXIS_PURCHASE_LEDGER_COVERAGE;
+  const unknownPeople = Math.max(coverage.totalPeople - coverage.linkedPeople, 0);
+  return (
+    <div
+      data-testid="person-axis-coverage-banner"
+      className="rounded-xl border border-amber-900/50 bg-amber-950/20 p-3 text-xs leading-relaxed text-amber-100"
+    >
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-medium">
+        <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+        <span>
+          사람 축 커버리지: 구매 원장 {fmtInt(coverage.totalPeople)}명 중{" "}
+          {fmtInt(coverage.linkedPeople)}명만 링크됨
+        </span>
+        <span className="tabular-nums text-amber-200/80">
+          ({fmtRate(personAxisPurchaseCoverageRate())})
+        </span>
+      </p>
+      <p className="mt-1">
+        나머지 {fmtInt(unknownPeople)}명은 0명이 아니라 미상입니다. 사람 축으로
+        바꿨을 때 빈칸이 커지는 것은 버그가 아니라 다리가 닿지 않는 현재 상태입니다.
+      </p>
+      {identityLinked ? (
+        <p className="mt-1 text-amber-200/75">
+          설치↔사람 다리 자체도{" "}
+          <Ratio
+            numerator={identityLinked.numerator}
+            denominator={identityLinked.denominator}
+            title="identity_linked_ratio — 설치를 사람에 붙일 수 있는 커버리지"
+          />{" "}
+          범위만 읽습니다.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+export function AnalyticsAxisSwitch({
+  axis,
+  onChange,
+  disabled,
+}: {
+  axis: AnalysisAxis;
+  onChange: (axis: AnalysisAxis) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      className="inline-flex overflow-hidden rounded-lg border border-zinc-700"
+      title="리텐션에서만 전환합니다. 수익·광고·운영처럼 두 축이 같은 뜻이 아닌 지표에는 스위치를 주지 않습니다."
+    >
+      {(
+        [
+          ["event", ANALYSIS_AXIS_LABEL.event, Hash],
+          ["person", ANALYSIS_AXIS_LABEL.person, UserCheck],
+        ] as const
+      ).map(([value, label, Icon]) => (
+        <button
+          key={value}
+          type="button"
+          onClick={() => onChange(value)}
+          disabled={disabled}
+          aria-pressed={axis === value}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs transition disabled:opacity-50 ${
+            axis === value
+              ? "bg-indigo-600 text-white"
+              : "bg-zinc-950 text-zinc-400 hover:text-zinc-200"
+          }`}
+        >
+          <Icon className="h-3.5 w-3.5" />
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PersonAxisUnknownMetricCard({
+  label,
+  reason,
+}: {
+  label: string;
+  reason: string;
+}) {
+  return (
+    <div
+      data-testid="person-axis-unknown-metric"
+      className="rounded-xl border border-dashed border-amber-900/50 bg-zinc-950/40 p-4"
+    >
+      <p className="text-xs text-zinc-500">{label}</p>
+      <p className="mt-1.5 text-lg font-semibold text-amber-300">미상</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+        {reason} 0 으로 그리지 않습니다.
+      </p>
+    </div>
+  );
+}
+
 // ── ★6탭 구조 ──────────────────────────────────────────────────────────────
 // 지금까지 이 화면은 지표가 시간순으로 쌓여 있어 "무엇부터 봐야 하나" 가 없었다.
 // 탭 하나 = 질문 하나로 세운다. 탭은 새 페이지가 아니라 기존 섹션의 재배치다.
@@ -4345,10 +4465,34 @@ export function FoldedActivationSmallSamples() {
 
 export function UnifiedRetentionHeadlineView({
   data,
+  axis = "event",
 }: {
   data: AcquisitionUnified | null;
+  axis?: AnalysisAxis;
 }) {
   const retention = data?.state === "ready" ? data.retention ?? null : null;
+  if (axis === "person") {
+    const identityLinked = retention?.personAxis?.identityLinked ?? null;
+    return (
+      <div className="space-y-3">
+        <PersonAxisCoverageBanner identityLinked={identityLinked} />
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <PersonAxisUnknownMetricCard
+            label="D7 사람 잔존"
+            reason="구매 원장 34명 중 31명은 설치↔사람 다리가 닿지 않아 분모에 넣을 수 없습니다."
+          />
+          <PersonAxisUnknownMetricCard
+            label="D30 사람 잔존"
+            reason="링크된 3명만 전체처럼 그리면 사람 축 리텐션이 과대해집니다."
+          />
+          <PersonAxisUnknownMetricCard
+            label="아직 판단 불가"
+            reason="설치축 pending 과 사람축 미상은 다른 상태라 같은 숫자로 합치지 않습니다."
+          />
+        </div>
+      </div>
+    );
+  }
   if (!data || data.state !== "ready" || !retention) {
     return (
       <AcquisitionUnavailable
@@ -4404,10 +4548,36 @@ function retentionHorizonLabel(key: UnifiedRetentionHorizonKey): string {
 
 export function UnifiedRetentionCohortTable({
   data,
+  axis = "event",
 }: {
   data: AcquisitionUnified | null;
+  axis?: AnalysisAxis;
 }) {
   const retention = data?.state === "ready" ? data.retention ?? null : null;
+  if (axis === "person") {
+    return (
+      <div className="space-y-3">
+        <PersonAxisCoverageBanner
+          identityLinked={retention?.personAxis?.identityLinked ?? null}
+        />
+        <div>
+          <p className="mb-2 text-xs font-semibold text-zinc-200">
+            사람별 주간 코호트
+          </p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <PersonAxisUnknownMetricCard
+              label="사람 코호트 D7"
+              reason="현재 링크된 사람 3명만으로 전체 구매자 34명의 D7을 대표할 수 없습니다."
+            />
+            <PersonAxisUnknownMetricCard
+              label="사람 코호트 D30"
+              reason="과거 31명은 소급 복구 불가라 코호트 행을 만들 수 없습니다."
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (!data || data.state !== "ready" || !retention) {
     return (
       <AcquisitionUnavailable
@@ -4486,10 +4656,40 @@ export function UnifiedRetentionCohortTable({
 
 export function UnifiedRetentionChannelTable({
   data,
+  axis = "event",
 }: {
   data: AcquisitionUnified | null;
+  axis?: AnalysisAxis;
 }) {
   const retention = data?.state === "ready" ? data.retention ?? null : null;
+  if (axis === "person") {
+    return (
+      <div className="space-y-3">
+        <PersonAxisCoverageBanner
+          identityLinked={retention?.personAxis?.identityLinked ?? null}
+        />
+        <div>
+          <p className="mb-2 text-xs font-semibold text-zinc-200">
+            사람별 채널 리텐션
+          </p>
+          <p className="mb-3 text-[11px] leading-relaxed text-zinc-500">
+            채널은 설치 first touch 에서 오고 사람 링크 커버리지가 낮아 전체
+            사람표로 바꾸지 않습니다.
+          </p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <PersonAxisUnknownMetricCard
+              label="채널별 사람 D7"
+              reason="설치 first touch 를 구매 원장 사람 34명에 안정적으로 붙이는 다리가 아직 부족합니다."
+            />
+            <PersonAxisUnknownMetricCard
+              label="채널별 사람 D30"
+              reason="링크되지 않은 31명을 자연유입 또는 이탈로 세면 없는 사실을 만드는 것입니다."
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (!data || data.state !== "ready" || !retention) {
     return (
       <AcquisitionUnavailable
@@ -8006,6 +8206,9 @@ export default function AnalyticsPanel({
   // 분포 렌즈 토글(상위이벤트·스폰별). 기본 'events'(발생 총량, 하위호환).
   // 'clients' = 고유 설치 수(COUNT(DISTINCT clientId)) — "몇 건이 했나". 사람·기기 수가 아니다.
   const [metricMode, setMetricMode] = useState<MetricMode>("events");
+  // 리텐션 분석 축. 사람축은 현재 구매 원장 34명 중 링크 3명만 닿으므로
+  // 설치축 숫자를 사람축 0 으로 접지 않고 미상 상태를 보여 준다.
+  const [retentionAxis, setRetentionAxis] = useState<AnalysisAxis>("event");
   const [biz, setBiz] = useState<Loaded<BusinessSummary>>({
     data: null,
     loading: true,
@@ -8544,6 +8747,30 @@ export default function AnalyticsPanel({
 
       <AnalyticsTabBar tab={tab} onChange={setTab} />
 
+      {tab === "retention" && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+            <div>
+              <p className="text-xs font-semibold text-zinc-200">리텐션 분석 축</p>
+              <p className="mt-0.5 text-[11px] text-zinc-500">
+                기간은 위 필터의 최근 {fmtInt(days)}일 그대로입니다. 사람 축은
+                닿지 않는 칸을 0 이 아니라 미상으로 둡니다.
+              </p>
+            </div>
+            <AnalyticsAxisSwitch
+              axis={retentionAxis}
+              onChange={setRetentionAxis}
+              disabled={anyLoading}
+            />
+          </div>
+          {retentionAxis === "person" && (
+            <PersonAxisCoverageBanner
+              identityLinked={unified.data?.retention?.personAxis?.identityLinked}
+            />
+          )}
+        </div>
+      )}
+
       {/* ── ① 획득 — "어디서 오나" ─────────────────────────────────────────
           ★계획 v3/docs/admin-analytics-replan-2026-08-24.md §4-1 을 그대로
             집행한다. 표 순서 = 결정하는 순서다.
@@ -8562,6 +8789,7 @@ export default function AnalyticsPanel({
               "★분모는 방문이 아니라 다운로드·설치입니다(#1200). 봇은 Electron 데스크톱을 내려받아 설치하고 실행하지 않으므로, 설치를 분모로 쓰는 순간 봇은 규칙 없이도 0 으로 셉니다. 방문 축에서 거른 '의심 유입' 은 삭제하지 않고 아래 방문 축 표에 따로 남깁니다.",
               "★이 탭에는 축이 둘 있습니다 — 설치 축(통합 뷰)과 방문 축(GA4 브라우저). 두 표의 분모가 다르므로 위아래로 놓고 곱해서 읽지 마세요. 광고비와 CAC 는 광고 탭에서 봅니다.",
               "★설치 수는 사람 수가 아닙니다. 실측(2026-08-24)으로 설치 631행이 브라우저 5대에서 나왔습니다(재설치 루프). 그래서 상단에 전체 설치와 사람 추정치를 같이 둡니다(#1198 install_class).",
+              "사람 축 스위치 없음 — 획득은 설치 first touch 와 방문 브라우저 축입니다. 구매 원장 사람 34명 중 링크 3명 상태로 채널별 사람 획득을 만들면 나머지 31명이 0으로 오독됩니다.",
               "설치 축의 모든 수치는 marblo_telemetry.v_install_unified 한 표에서 나옵니다 — 화면은 GROUP BY 만 하고 다시 세지 않습니다. 콜러블 이름은 getAdminInstallUnified 이고, 그게 아직 없으면 0 대신 '적재 전' 이라고 적습니다.",
             ]}
           />
@@ -8769,6 +8997,7 @@ export default function AnalyticsPanel({
             notes={[
               "★광고 탭은 광고비 원장과 설치 축이 만나는 자리입니다. 광고비가 없으면 0원 CAC 가 아니라 '아직 입력된 광고비가 없습니다' 로 둡니다.",
               "★미매칭 광고비는 캠페인명이 UTM 규약과 어긋났다는 신호입니다. 광고비 입력 캠페인명과 utm_campaign 을 같은 문자열로 맞춥니다.",
+              "사람 축 스위치 없음 — 광고비는 캠페인 원장 1행이고 성과 분모는 설치입니다. 사람 링크 커버리지가 낮아 사람별 CAC 를 만들 수 없습니다.",
             ]}
           />
 
@@ -8816,6 +9045,7 @@ export default function AnalyticsPanel({
             notes={[
               "활성화 탭의 헤드라인은 getAdminInstallUnified 한 경로에서 읽습니다. 설치 1행이 알갱이이고, 사람 수는 단일값이 아니라 범위로 표시합니다.",
               unifiedHumanRange(unified.data),
+              "사람 축 스위치 없음 — 첫 스폰·첫 완주 도달은 현재 설치 firstRunAt 기준입니다. 사람 링크가 닿지 않는 과거 구매자를 실패 0명으로 바꾸지 않습니다.",
               "제품 사용·릴리스·라우팅·비용 같은 운영용 표본 지표는 이 사업 탭에서 내렸습니다. 이 탭은 들어온 설치가 첫 스폰·첫 완주까지 갔는지만 봅니다.",
             ]}
           />
@@ -8957,6 +9187,9 @@ export default function AnalyticsPanel({
           <AxisLimitNote
             notes={[
               "리텐션 탭은 관측창이 닫힌 설치만 분모로 씁니다. d*_pending 으로 빠진 설치는 이탈 0% 가 아니라 아직 판단 불가입니다.",
+              retentionAxis === "person"
+                ? "사람 축 커버리지는 구매 원장 34명 중 링크 3명뿐입니다. 링크되지 않은 31명은 이탈 0명이 아니라 미상입니다."
+                : null,
               unifiedHumanRange(unified.data),
               "모델 비용·라우팅 진단은 운영용이라 이 탭에서 내렸습니다. 수익 탭과 운영 탭은 별도 티켓이 같은 파일에서 다룹니다.",
             ]}
@@ -8974,7 +9207,10 @@ export default function AnalyticsPanel({
             ) : unified.error ? (
               <ErrorBox msg={unified.error} />
             ) : (
-              <UnifiedRetentionHeadlineView data={unified.data} />
+              <UnifiedRetentionHeadlineView
+                data={unified.data}
+                axis={retentionAxis}
+              />
             )}
           </div>
 
@@ -8990,7 +9226,10 @@ export default function AnalyticsPanel({
             ) : unified.error ? (
               <ErrorBox msg={unified.error} />
             ) : (
-              <UnifiedRetentionCohortTable data={unified.data} />
+              <UnifiedRetentionCohortTable
+                data={unified.data}
+                axis={retentionAxis}
+              />
             )}
           </div>
 
@@ -9006,7 +9245,10 @@ export default function AnalyticsPanel({
             ) : unified.error ? (
               <ErrorBox msg={unified.error} />
             ) : (
-              <UnifiedRetentionChannelTable data={unified.data} />
+              <UnifiedRetentionChannelTable
+                data={unified.data}
+                axis={retentionAxis}
+              />
             )}
           </div>
 
@@ -9059,6 +9301,7 @@ export default function AnalyticsPanel({
             notes={[
               "수익 탭의 설치·채널 매출 축은 getAdminInstallUnified 한 경로에서 읽습니다. 원장은 정본이고 GA4 이커머스는 채널 귀속 보조 경로입니다.",
               "★적재 전 · 진짜 0 · 미상을 세로로 가릅니다. 특히 analytics_user_daily.install_key_hmac 다리가 NULL 이면 매출 0 이 아니라 설치에 결제를 붙일 수 없는 미상입니다.",
+              "사람 축 스위치 없음 — 원장 매출은 결제 원장 행이 정본이고, 채널 매출은 설치↔사람 다리 커버리지 때문에 아직 미상입니다.",
               "외부 결제 1건(19,000원, portone)은 founder_grant 33건·내부테스트 1건과 섞지 않습니다. 구독 건수와 실매출도 서로 다른 숫자입니다.",
               "연속 청구 사이클은 Toss billingCharges 원장만 채웁니다. Paddle 구독은 원장 공백이라 그 칸의 0 은 '연속 결제가 없다' 가 아니라 '이 원장에 없다' 입니다.",
             ]}
@@ -9360,6 +9603,7 @@ export default function AnalyticsPanel({
             notes={[
               "옵트인 표본 · 운영용. 사업 판단에 쓰지 마세요.",
               "cost_logs 는 Firebase 계정 축(28자)이고 task_outcomes·events 는 익명 clientId(36자) 축입니다. 같은 userId 컬럼명이어도 표를 가로질러 나누지 않습니다.",
+              "사람 축 스위치 없음 — 비용은 cost_logs 원장 행, 사용·라우팅은 이벤트/태스크 결과 축입니다. taskId 외 조인으로 사람 수를 만들지 않습니다.",
               "활성화·리텐션·수익 탭에서 빠진 모델·라우팅·릴리스 헬스·베타세그먼트 지표를 이 탭으로 옮겼습니다.",
             ]}
           />
