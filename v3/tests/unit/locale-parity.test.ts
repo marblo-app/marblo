@@ -146,4 +146,15 @@ describe("locale namespace parity", () => {
 
     expect(leaked).toEqual([]);
   });
+
+  it("keeps English locale values free of internal Oke transliteration", () => {
+    const internalOkeTerms = /\bOke\b|오케/u;
+    const leaked = NAMESPACES.flatMap(({ name, en }) =>
+      Object.entries(en)
+        .filter(([, value]) => internalOkeTerms.test(value))
+        .map(([key, value]) => ({ namespace: name, key, value })),
+    );
+
+    expect(leaked).toEqual([]);
+  });
 });

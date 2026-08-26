@@ -269,13 +269,13 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.tab.atLimitHint": "Limit reached — upgrade or stop an existing agent",
   "agents.marbloBots.title": "Marblo Bots",
   "agents.marbloBots.subtitle":
-    "Bots are specialist workers that Oke calls when needed. You can run one directly, but the default flow is to talk to Oke.",
-  "agents.marbloBots.primer.line1": "Talk to Oke",
-  "agents.marbloBots.primer.line2": "→ Oke calls a bot when needed",
+    "Bots are specialist workers that the Orchestrator calls when needed. You can run one directly, but the default flow is to talk to the Orchestrator.",
+  "agents.marbloBots.primer.line1": "Talk to the Orchestrator",
+  "agents.marbloBots.primer.line2": "→ The Orchestrator calls a bot when needed",
   "agents.marbloBots.primer.line3": "→ The bot works in an isolated worktree",
   "agents.marbloBots.primer.details": "Details",
   "agents.marbloBots.primer.detail1":
-    "You can save and run a bot directly, but the primary flow is to tell Oke the goal; Oke picks the right bot, creates a board ticket, and dispatches a physical agent.",
+    "You can save and run a bot directly, but the primary flow is to tell the Orchestrator the goal; the Orchestrator picks the right bot, creates a board ticket, and dispatches a physical agent.",
   "agents.marbloBots.primer.detail2":
     "Bot runs use the existing create_task / dispatch_task path and leave a source marker on the linked ticket.",
   "agents.marbloBots.knowledgeRoot": "Knowledge root_path",
@@ -341,14 +341,14 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.marbloBots.wiki.ready": "docs/wiki found",
   "agents.marbloBots.wiki.needsSetup": "Setup needed",
   "agents.marbloBots.wiki.body":
-    "Project knowledge is the differentiator. Ask Oke to use the existing wiki_ingest, wiki_query, wiki_lint MCP tools and wiki-init/wiki-note/wiki-ingest skills.",
+    "Project knowledge is the differentiator. Ask the Orchestrator to use the existing wiki_ingest, wiki_query, wiki_lint MCP tools and wiki-init/wiki-note/wiki-ingest skills.",
   "agents.marbloBots.wiki.root": "Root",
   "agents.marbloBots.wiki.mcpTools":
     "MCP: wiki_ingest / wiki_query / wiki_lint",
   "agents.marbloBots.wiki.singleRoot": "Use one shared docs/wiki",
-  "agents.marbloBots.wiki.copyTitle": "Request to copy to Oke",
+  "agents.marbloBots.wiki.copyTitle": "Request to copy to the Orchestrator",
   "agents.marbloBots.wiki.request1":
-    "Oke, set up the Marblo knowledge wiki for this project.",
+    "Set up the Marblo knowledge wiki for this project.",
   "agents.marbloBots.wiki.request2":
     "Use exactly one shared wiki root at docs/wiki, and use .claude/skills/wiki-init, wiki-note, wiki-ingest plus MCP wiki_ingest/wiki_query/wiki_lint.",
   "agents.marbloBots.wiki.request3":
@@ -401,7 +401,7 @@ export const agents: Record<keyof typeof koAgents, string> = {
     "wiki_query, create_task, dispatch_task, and add_activity are registered, and Codex frontend agents perform React UI work.",
   "agents.marbloBots.seed.jarvis.name": "Jarvis",
   "agents.marbloBots.seed.jarvis.persona":
-    "Oke's general aide, combining wiki, mail, calendar, board, and output channels into concrete next actions.",
+    "The Orchestrator's general aide, combining wiki, mail, calendar, board, and output channels into concrete next actions.",
   "agents.marbloBots.seed.jarvis.mission":
     "Classify the request and use only the needed mix of wiki, Gmail, Calendar, board tickets, and Slack/Telegram reporting.",
   "agents.marbloBots.seed.jarvis.evidence":
