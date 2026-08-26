@@ -1,4 +1,4 @@
-// 포트원 간편결제(EASY_PAY / 토스페이) 빌링키 축 단위테스트.
+// 포트원 간편결제(EASY_PAY / 카카오페이/토스페이) 빌링키 축 단위테스트.
 //
 // 실행:
 //   cd v3/functions && npm run test:portone-easypay
@@ -6,7 +6,7 @@
 // 커버:
 //  - 발급수단 정규화(레거시 구독 문서 = 카드)
 //  - easyPayProvider allowlist (배선 안 된 간편결제사 차단)
-//  - 채널키 선택: 간편결제 빌링키는 발급 채널에 묶인다(첫청구·갱신 동일)
+//  - 채널키 선택: 간편결제 빌링키는 provider 별 발급 채널에 묶인다
 //  - 수동 승인('NEEDS_CONFIRMATION' + billingIssueToken) 판정 — 카드에 없는 단계
 //  - 갱신 크론 스킵 가드: 간편결제는 name/phone 없이도 청구 가능해야 한다
 //    (소스 미러: v3/functions/src/index.ts scheduledChargePortOneSubscriptions)
@@ -14,7 +14,9 @@
 import {
   normalizePortOneBillingKeyMethod,
   normalizeEasyPayProvider,
-  resolvePortOneBillingChannelKey,
+  enabledPortOneEasyPayProviders,
+  portOneEasyPayChannelKeysForPurpose,
+  resolvePortOneChannelKey,
   needsBillingKeyConfirmation,
   resolveIssuedBillingKey,
   PORTONE_BILLING_KEY_NEEDS_CONFIRMATION,
@@ -64,78 +66,247 @@ eq(
 
 // ─── easyPayProvider allowlist ──────────────────────────────────────
 eq(
-  normalizeEasyPayProvider("TOSSPAY"),
-  "TOSSPAY",
-  "TOSSPAY is the wired provider",
+  normalizeEasyPayProvider("KAKAOPAY"),
+  "KAKAOPAY",
+  "KAKAOPAY is the first wired provider",
 );
 eq(
-  normalizeEasyPayProvider("tosspay"),
-  "TOSSPAY",
+  normalizeEasyPayProvider("kakaopay"),
+  "KAKAOPAY",
   "provider is case-insensitive",
 );
 eq(
-  normalizeEasyPayProvider("KAKAOPAY"),
+  normalizeEasyPayProvider("TOSSPAY"),
+  "TOSSPAY",
+  "TOSSPAY stays allowlisted for future env-only reactivation",
+);
+eq(
+  normalizeEasyPayProvider("PAYCO"),
   null,
-  "unwired provider is rejected (no channel behind it)",
+  "unwired provider is rejected",
 );
 eq(normalizeEasyPayProvider(""), null, "empty provider is rejected");
 eq(normalizeEasyPayProvider(undefined), null, "missing provider is rejected");
 assert(
+  SUPPORTED_EASY_PAY_PROVIDERS.includes("KAKAOPAY"),
+  "KAKAOPAY is in the supported list",
+);
+assert(
   SUPPORTED_EASY_PAY_PROVIDERS.includes("TOSSPAY"),
-  "TOSSPAY is in the supported list",
+  "TOSSPAY is in the supported list for future env-only reactivation",
 );
 
 // ─── 채널키 선택 ────────────────────────────────────────────────────
 eq(
-  resolvePortOneBillingChannelKey({
+  resolvePortOneChannelKey({
+    purpose: "billing",
     method: "EASY_PAY",
     cardChannelKey: "ch_card",
-    easyPayChannelKey: "ch_easypay",
+    easyPayProvider: "KAKAOPAY",
+    easyPayChannelKeys: {
+      billing: { KAKAOPAY: "ch_kakao_billing", TOSSPAY: "ch_toss_billing" },
+      onetime: { KAKAOPAY: "ch_kakao_onetime" },
+    },
   }),
-  "ch_easypay",
-  "EASY_PAY uses the easy-pay channel when configured",
+  "ch_kakao_billing",
+  "KAKAOPAY billing uses the KAKAOPAY channel",
 );
 eq(
-  resolvePortOneBillingChannelKey({
+  resolvePortOneChannelKey({
+    purpose: "billing",
     method: "EASY_PAY",
     cardChannelKey: "ch_card",
-    easyPayChannelKey: "",
+    easyPayProvider: "TOSSPAY",
+    easyPayChannelKeys: {
+      billing: { KAKAOPAY: "ch_kakao_billing", TOSSPAY: "ch_toss_billing" },
+      onetime: { KAKAOPAY: "ch_kakao_onetime" },
+    },
   }),
-  "ch_card",
-  "EASY_PAY falls back to the card billing channel (KG이니시스 supports TOSSPAY)",
+  "ch_toss_billing",
+  "TOSSPAY billing uses the TOSSPAY channel when env is later added",
 );
 eq(
-  resolvePortOneBillingChannelKey({
+  resolvePortOneChannelKey({
+    purpose: "billing",
     method: "EASY_PAY",
     cardChannelKey: "ch_card",
-    easyPayChannelKey: null,
+    easyPayProvider: "TOSSPAY",
+    easyPayChannelKeys: {
+      billing: { KAKAOPAY: "ch_kakao_billing" },
+      onetime: { TOSSPAY: "ch_toss_onetime" },
+    },
+  }),
+  "",
+  "configured EASY_PAY provider without a channel does not borrow the card channel",
+);
+eq(
+  resolvePortOneChannelKey({
+    purpose: "billing",
+    method: "EASY_PAY",
+    cardChannelKey: "ch_card",
+    easyPayProvider: null,
+    easyPayChannelKeys: {
+      billing: { KAKAOPAY: "ch_kakao_billing" },
+      onetime: { KAKAOPAY: "ch_kakao_onetime" },
+    },
   }),
   "ch_card",
-  "null easy-pay channel falls back",
+  "legacy EASY_PAY without provider falls back to the card billing channel",
 );
 // ★카드 빌링키가 간편결제 채널로 새면 PG 가 거절한다.
 eq(
-  resolvePortOneBillingChannelKey({
+  resolvePortOneChannelKey({
+    purpose: "billing",
     method: "CARD",
     cardChannelKey: "ch_card",
-    easyPayChannelKey: "ch_easypay",
+    easyPayProvider: "KAKAOPAY",
+    easyPayChannelKeys: {
+      billing: { KAKAOPAY: "ch_kakao_billing" },
+      onetime: { KAKAOPAY: "ch_kakao_onetime" },
+    },
   }),
   "ch_card",
   "CARD never borrows the easy-pay channel",
 );
-// ★같은 발급수단이면 첫청구와 갱신이 같은 채널을 골라야 한다(빌링키는 채널에 묶임).
+// ★같은 provider 면 첫청구와 갱신이 같은 채널을 골라야 한다(빌링키는 채널에 묶임).
 eq(
-  resolvePortOneBillingChannelKey({
+  resolvePortOneChannelKey({
+    purpose: "billing",
     method: "EASY_PAY",
     cardChannelKey: "ch_card",
-    easyPayChannelKey: "ch_easypay",
+    easyPayProvider: "KAKAOPAY",
+    easyPayChannelKeys: {
+      billing: { KAKAOPAY: "ch_kakao_billing", TOSSPAY: "ch_toss_billing" },
+      onetime: { KAKAOPAY: "ch_kakao_onetime" },
+    },
   }),
-  resolvePortOneBillingChannelKey({
+  resolvePortOneChannelKey({
+    purpose: "billing",
     method: normalizePortOneBillingKeyMethod("EASY_PAY"),
     cardChannelKey: "ch_card",
-    easyPayChannelKey: "ch_easypay",
+    easyPayProvider: normalizeEasyPayProvider("KAKAOPAY"),
+    easyPayChannelKeys: {
+      billing: { KAKAOPAY: "ch_kakao_billing", TOSSPAY: "ch_toss_billing" },
+      onetime: { KAKAOPAY: "ch_kakao_onetime" },
+    },
   }),
   "first charge and renewal resolve to the same channel",
+);
+
+eq(
+  resolvePortOneChannelKey({
+    purpose: "onetime",
+    method: "EASY_PAY",
+    cardChannelKey: "ch_card_onetime",
+    easyPayProvider: "KAKAOPAY",
+    easyPayChannelKeys: {
+      billing: { KAKAOPAY: "ch_kakao_billing" },
+      onetime: { KAKAOPAY: "ch_kakao_onetime" },
+    },
+  }),
+  "ch_kakao_onetime",
+  "KAKAOPAY one-time uses the KAKAOPAY one-time channel",
+);
+eq(
+  resolvePortOneChannelKey({
+    purpose: "onetime",
+    method: "EASY_PAY",
+    cardChannelKey: "ch_card_onetime",
+    easyPayProvider: "TOSSPAY",
+    easyPayChannelKeys: {
+      billing: { TOSSPAY: "ch_toss_billing" },
+      onetime: { KAKAOPAY: "ch_kakao_onetime" },
+    },
+  }),
+  "ch_card_onetime",
+  "one-time EASY_PAY without that provider's channel falls back to Inicis card",
+);
+eq(
+  resolvePortOneChannelKey({
+    purpose: "onetime",
+    method: "EASY_PAY",
+    cardChannelKey: "ch_card_onetime",
+    easyPayProvider: null,
+    easyPayChannelKeys: {
+      billing: { KAKAOPAY: "ch_kakao_billing" },
+      onetime: { KAKAOPAY: "ch_kakao_onetime" },
+    },
+  }),
+  "ch_card_onetime",
+  "one-time provider missing stays on card",
+);
+eq(
+  resolvePortOneChannelKey({
+    purpose: "billing",
+    method: "EASY_PAY",
+    cardChannelKey: "ch_card_billing",
+    easyPayProvider: "KAKAOPAY",
+    easyPayChannelKeys: {
+      billing: { KAKAOPAY: "ch_kakao_billing" },
+      onetime: { KAKAOPAY: "ch_kakao_onetime" },
+    },
+  }),
+  "ch_kakao_billing",
+  "billing does not borrow the one-time KakaoPay channel",
+);
+eq(
+  resolvePortOneChannelKey({
+    purpose: "onetime",
+    method: "EASY_PAY",
+    cardChannelKey: "ch_card_onetime",
+    easyPayProvider: "KAKAOPAY",
+    easyPayChannelKeys: {
+      billing: { KAKAOPAY: "ch_kakao_billing" },
+      onetime: { KAKAOPAY: "ch_kakao_onetime" },
+    },
+  }),
+  "ch_kakao_onetime",
+  "one-time does not borrow the billing KakaoPay channel",
+);
+
+const configChannels = {
+  billing: { KAKAOPAY: "channel-key-test-kakao-billing" },
+  onetime: { KAKAOPAY: "channel-key-test-kakao-onetime" },
+};
+eq(
+  JSON.stringify(
+    enabledPortOneEasyPayProviders({
+      purpose: "billing",
+      easyPayChannelKeys: configChannels,
+    }),
+  ),
+  JSON.stringify(["KAKAOPAY"]),
+  "checkout config exposes only configured billing providers",
+);
+eq(
+  JSON.stringify(
+    enabledPortOneEasyPayProviders({
+      purpose: "onetime",
+      easyPayChannelKeys: configChannels,
+    }),
+  ),
+  JSON.stringify(["KAKAOPAY"]),
+  "checkout config exposes only configured one-time providers",
+);
+eq(
+  JSON.stringify(
+    portOneEasyPayChannelKeysForPurpose({
+      purpose: "billing",
+      easyPayChannelKeys: configChannels,
+    }),
+  ),
+  JSON.stringify({ KAKAOPAY: "channel-key-test-kakao-billing" }),
+  "checkout config returns billing channel map for billing kind",
+);
+eq(
+  JSON.stringify(
+    portOneEasyPayChannelKeysForPurpose({
+      purpose: "onetime",
+      easyPayChannelKeys: configChannels,
+    }),
+  ),
+  JSON.stringify({ KAKAOPAY: "channel-key-test-kakao-onetime" }),
+  "checkout config returns one-time channel map for one-time kind",
 );
 
 // ─── 수동 승인(간편결제 정기결제 승인 차이) ─────────────────────────
@@ -152,6 +323,13 @@ assert(
   "sentinel + token needs the confirm API",
 );
 assert(
+  needsBillingKeyConfirmation({
+    billingKey: "NEEDS_CONFIRMATION",
+    billingIssueToken: "kakao-token-1",
+  }),
+  "KAKAOPAY billing can use the manual-confirmation token path",
+);
+assert(
   needsBillingKeyConfirmation({ billingKey: null, billingIssueToken: "tok_1" }),
   "missing billingKey + token needs the confirm API",
 );
@@ -162,6 +340,13 @@ assert(
     billingIssueToken: "tok_1",
   }),
   "real billing key is used as-is even if a token tags along",
+);
+assert(
+  !needsBillingKeyConfirmation({
+    billingKey: "kakao-billing-key-abc",
+    billingIssueToken: null,
+  }),
+  "KAKAOPAY billing can use an immediately issued billing key",
 );
 assert(
   !needsBillingKeyConfirmation({

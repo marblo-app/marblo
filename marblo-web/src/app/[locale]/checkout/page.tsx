@@ -38,7 +38,9 @@ interface PortOneSDK {
     orderName: string;
     totalAmount: number;
     currency: "KRW";
-    payMethod: "CARD";
+    payMethod: PortOnePaymentPayMethod;
+    /** 간편결제(EASY_PAY) 전용 — 간편결제사를 직접 지정한다. */
+    easyPay?: { easyPayProvider: PortOneEasyPayProvider };
     redirectUrl?: string;
     customer?: {
       fullName?: string;
@@ -55,10 +57,7 @@ interface PortOneSDK {
     /** 간편결제(EASY_PAY) 전용 — 간편결제사를 직접 지정한다. */
     easyPay?: { easyPayProvider: PortOneEasyPayProvider };
     customer?: {
-      /**
-       * 토스페이 빌링키 발급은 customerId 가 필수다(포트원 토스페이 연동
-       * 가이드). 카드 경로에는 없던 요구사항.
-       */
+      /** 일부 간편결제 빌링키 발급은 customerId 가 필수다. */
       customerId?: string;
       fullName?: string;
       email?: string;
@@ -79,13 +78,21 @@ interface PortOneSDK {
 
 /** 포트원 V2 규약(@portone/browser-sdk BillingKeyMethod / EasyPayProvider). */
 type PortOneBillingKeyMethod = "CARD" | "EASY_PAY";
-type PortOneEasyPayProvider = "TOSSPAY";
+type PortOnePaymentPayMethod = "CARD" | "EASY_PAY";
+// @portone/browser-sdk@0.1.9 dist/v2/entity/EasyPayProvider.d.ts 기준.
+type PortOneEasyPayProvider = string;
 
 interface PortOneCheckoutConfig {
   storeId: string;
   channelKey: string;
-  /** 간편결제 빌링 채널. null 이면 토스페이 옵션을 띄우지 않는다. */
+  /** kind 별 단일 간편결제 채널. 새 코드는 easyPayChannelKeys 우선. */
+  easyPayChannelKey?: string | null;
+  /** kind 별 provider 간편결제 채널. */
+  easyPayChannelKeys?: Record<string, string>;
+  /** 레거시 구독 단일 간편결제 빌링 채널. */
   easyPayBillingChannelKey?: string | null;
+  /** 레거시 구독 provider 간편결제 채널. */
+  easyPayBillingChannelKeys?: Record<string, string>;
   /** 서버가 배선을 확인한 간편결제사(포트원 규약명). */
   easyPayProviders?: string[] | null;
 }
@@ -219,15 +226,28 @@ export default function CheckoutPage() {
       ? "paymentProcessorPortOne"
       : "paymentProcessorToss",
   );
-  /**
-   * 토스페이(간편결제)는 구독 빌링키 축에만 배선돼 있다. 강의 단건은 카드
-   * 경로 그대로. 서버가 간편결제 채널을 확인해 줬을 때만 노출한다.
-   */
+  const configuredEasyPayProvider = (
+    portoneConfig?.easyPayProviders || []
+  ).find(
+    (provider): provider is PortOneEasyPayProvider =>
+      typeof provider === "string" && provider.trim().length > 0,
+  );
+  const configuredEasyPayChannelKey = configuredEasyPayProvider
+    ? portoneConfig?.easyPayChannelKeys?.[configuredEasyPayProvider] ||
+      portoneConfig?.easyPayChannelKey ||
+      portoneConfig?.easyPayBillingChannelKeys?.[configuredEasyPayProvider] ||
+      portoneConfig?.easyPayBillingChannelKey ||
+      null
+    : null;
+  const configuredEasyPayLabel =
+    configuredEasyPayProvider === "KAKAOPAY"
+      ? t("paymentMethodKakaoPay")
+      : t("paymentMethodTossPay");
+  /** 간편결제는 서버가 kind 별 채널을 확인해 줬을 때만 노출한다. */
   const easyPayAvailable =
     paymentProvider === "portone" &&
-    !isLecture &&
-    !!portoneConfig?.easyPayBillingChannelKey &&
-    (portoneConfig?.easyPayProviders || []).includes("TOSSPAY");
+    !!configuredEasyPayProvider &&
+    !!configuredEasyPayChannelKey;
   const effectiveBillingKeyMethod: PortOneBillingKeyMethod = easyPayAvailable
     ? portoneBillingKeyMethod
     : "CARD";
@@ -602,6 +622,17 @@ export default function CheckoutPage() {
           ).data;
         const portone = await loadPortOneSDK();
         const safePlan = plan || "pro";
+        const easyPayProvider = (config.easyPayProviders || []).find(
+          (provider): provider is PortOneEasyPayProvider =>
+            typeof provider === "string" && provider.trim().length > 0,
+        );
+        const easyPayChannelKey = easyPayProvider
+          ? config.easyPayChannelKeys?.[easyPayProvider] ||
+            config.easyPayChannelKey ||
+            config.easyPayBillingChannelKeys?.[easyPayProvider] ||
+            config.easyPayBillingChannelKey ||
+            null
+          : null;
         if (isLecture && lectureSlug) {
           const createIntent = httpsCallable<
             { planType: string; billing: string; lectureSlug?: string },
@@ -614,14 +645,19 @@ export default function CheckoutPage() {
             // 지급할 수 있다(없으면 서버가 지급할 대상을 알 수 없다).
             lectureSlug,
           });
+          const useEasyPay =
+            effectiveBillingKeyMethod === "EASY_PAY" &&
+            !!easyPayProvider &&
+            !!easyPayChannelKey;
           const response = await portone.requestPayment({
             storeId: config.storeId,
-            channelKey: config.channelKey,
+            channelKey: useEasyPay ? easyPayChannelKey : config.channelKey,
             paymentId: intent.paymentId,
             orderName: intent.orderName || itemName,
             totalAmount: intent.amount,
             currency: "KRW",
-            payMethod: "CARD",
+            payMethod: useEasyPay ? "EASY_PAY" : "CARD",
+            ...(useEasyPay ? { easyPay: { easyPayProvider } } : {}),
             redirectUrl: `${window.location.origin}${localeHref(locale, `/checkout/success?provider=portone&type=lecture&slug=${encodeURIComponent(lectureSlug)}&paymentId=${encodeURIComponent(intent.paymentId)}&plan=${safePlan}&billing=${billing}&amount=${intent.amount}`)}`,
             customer,
           });
@@ -643,20 +679,21 @@ export default function CheckoutPage() {
           // KG이니시스 issueId 40자 제한 — uid 삽입 시 초과하므로 짧은 고정 prefix + UUID(무하이픈)
           const issueId = `mb_${crypto.randomUUID().replace(/-/g, "")}`;
           const isEasyPay = effectiveBillingKeyMethod === "EASY_PAY";
+          if (isEasyPay && (!easyPayProvider || !easyPayChannelKey)) {
+            throw new Error(t("paymentError"));
+          }
           const response = await portone.requestIssueBillingKey({
             storeId: config.storeId,
             // 간편결제 빌링키는 간편결제 채널에서 발급된다 — 카드 채널키로
             // 요청하면 발급창이 뜨지 않는다.
-            channelKey:
-              (isEasyPay ? config.easyPayBillingChannelKey : null) ||
-              config.channelKey,
+            channelKey: (isEasyPay ? easyPayChannelKey : null) || config.channelKey,
             billingKeyMethod: effectiveBillingKeyMethod,
-            ...(isEasyPay
-              ? { easyPay: { easyPayProvider: "TOSSPAY" as const } }
+            ...(isEasyPay && easyPayProvider
+              ? { easyPay: { easyPayProvider } }
               : {}),
             issueId,
             issueName: `Marblo ${itemName} 구독`,
-            // 토스페이 빌링키 발급은 customerId 필수(포트원 토스페이 가이드).
+            // 일부 간편결제 빌링키 발급은 customerId 필수.
             customer: { ...customer, customerId: user.uid },
           });
           if (response.code) {
@@ -676,7 +713,8 @@ export default function CheckoutPage() {
             billingKey: response.billingKey,
             billingIssueToken: response.billingIssueToken,
             billingKeyMethod: effectiveBillingKeyMethod,
-            easyPayProvider: isEasyPay ? "TOSSPAY" : undefined,
+            easyPayProvider:
+              isEasyPay && easyPayProvider ? easyPayProvider : undefined,
             planType: plan,
             billing,
             coupon: couponCode || undefined,
@@ -1028,7 +1066,7 @@ export default function CheckoutPage() {
               </div>
             )}
 
-            {/* 결제수단 — 포트원 구독 축에만 노출(간편결제 채널이 붙었을 때). */}
+            {/* 결제수단 — 포트원 kind 별 간편결제 채널이 붙었을 때 노출. */}
             {easyPayAvailable && (
               <fieldset className="space-y-2">
                 <legend className="block text-sm font-medium text-zinc-300">
@@ -1054,14 +1092,16 @@ export default function CheckoutPage() {
                       >
                         {method === "CARD"
                           ? t("paymentMethodCard")
-                          : t("paymentMethodTossPay")}
+                          : configuredEasyPayLabel}
                       </button>
                     );
                   })}
                 </div>
                 {portoneBillingKeyMethod === "EASY_PAY" && (
                   <p className="text-xs text-zinc-400">
-                    {t("paymentMethodTossPayNotice")}
+                    {isLecture
+                      ? t("paymentMethodEasyPayNotice")
+                      : t("paymentMethodEasyPaySubscriptionNotice")}
                   </p>
                 )}
               </fieldset>

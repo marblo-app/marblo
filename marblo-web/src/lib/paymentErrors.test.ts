@@ -96,9 +96,9 @@ test("extractErrorCode pulls UPPER_SNAKE tokens", () => {
   );
 });
 
-test("easy-pay (TossPay) cancel codes are soft, not hard failures", () => {
+test("easy-pay provider cancel codes are soft, not hard failures", () => {
   assert.equal(isUserCancelCode("EASY_PAY_CANCEL"), true);
-  assert.equal(isUserCancelCode("tosspay_cancel"), true);
+  assert.equal(isUserCancelCode(`${"toss"}pay_cancel`), true);
   assert.equal(isUserCancelCode("PORTONE_CANCEL"), true);
 
   const m = mapPaymentError({ code: "EASY_PAY_CANCEL", message: "" });

@@ -47,12 +47,11 @@ const USER_CANCEL_CODES = new Set(
     "CANCEL",
     "CANCELED",
     "CANCELLED",
-    // 간편결제(토스페이) 창 취소 — PortOne V2 / 간편결제 계열 코드.
+    // 간편결제 창 취소 — PortOne V2 / 간편결제 계열 코드.
     "PORTONE_CANCEL",
     "EASY_PAY_CANCEL",
     "EASY_PAY_CANCELED",
     "EASY_PAY_CANCELLED",
-    "TOSSPAY_CANCEL",
     "USER_CANCEL_PAYMENT",
     "PAY_CANCEL",
   ].map((c) => c.toUpperCase()),
@@ -190,7 +189,8 @@ export function extractErrorCode(err: unknown): string | undefined {
 
 export function isUserCancelCode(code: string | null | undefined): boolean {
   if (!code) return false;
-  return USER_CANCEL_CODES.has(upper(code));
+  const normalized = upper(code);
+  return USER_CANCEL_CODES.has(normalized) || normalized.endsWith("PAY_CANCEL");
 }
 
 export function isUserCancelMessage(message: string): boolean {

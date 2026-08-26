@@ -358,10 +358,14 @@ import {
   needsBillingKeyConfirmation,
   normalizeEasyPayProvider,
   normalizePortOneBillingKeyMethod,
+  enabledPortOneEasyPayProviders,
+  portOneEasyPayChannelKeysForPurpose,
   resolveIssuedBillingKey,
-  resolvePortOneBillingChannelKey,
-  SUPPORTED_EASY_PAY_PROVIDERS,
+  resolvePortOneChannelKey,
   type PortOneBillingKeyMethod,
+  type PortOneEasyPayPurposeChannelKeyMap,
+  type PortOneEasyPayProvider,
+  type PortOnePaymentPurpose,
   type PortOnePaymentLike,
 } from "./portone";
 import { resolveEntitledPlan } from "./entitlement";
@@ -871,10 +875,22 @@ const PORTONE_INICIS_ONETIME_CHANNEL_KEY =
   process.env.PORTONE_INICIS_ONETIME_CHANNEL_KEY || "";
 const PORTONE_INICIS_BILLING_CHANNEL_KEY =
   process.env.PORTONE_INICIS_BILLING_CHANNEL_KEY || "";
-// 간편결제(토스페이) 전용 빌링 채널. 미설정이면 카드 빌링 채널로 폴백한다
-// (KG이니시스 채널이 EasyPayProvider.TOSSPAY 를 지원).
-const PORTONE_EASYPAY_BILLING_CHANNEL_KEY =
-  process.env.PORTONE_EASYPAY_BILLING_CHANNEL_KEY || "";
+// 간편결제 전용 채널. provider/purpose 별 env 만 추가하면 checkout/첫청구/갱신이
+// 같은 맵을 쓴다. 포트원 규약명은 @portone/browser-sdk@0.1.9
+// dist/v2/entity/EasyPayProvider.d.ts 의 KAKAOPAY / TOSSPAY 선언 기준.
+const PORTONE_EASY_PAY_CHANNEL_KEYS: PortOneEasyPayPurposeChannelKeyMap = {
+  billing: {
+    KAKAOPAY: process.env.PORTONE_KAKAOPAY_BILLING_CHANNEL_KEY || "",
+    TOSSPAY:
+      process.env.PORTONE_TOSSPAY_BILLING_CHANNEL_KEY ||
+      process.env.PORTONE_EASYPAY_BILLING_CHANNEL_KEY ||
+      "",
+  },
+  onetime: {
+    KAKAOPAY: process.env.PORTONE_KAKAOPAY_ONETIME_CHANNEL_KEY || "",
+    TOSSPAY: process.env.PORTONE_TOSSPAY_ONETIME_CHANNEL_KEY || "",
+  },
+};
 const PORTONE_API_BASE = "https://api.portone.io";
 
 type PaymentPgEnv = "test" | "live";
@@ -1287,25 +1303,35 @@ function assertPortOneServerConfig(): void {
   }
 }
 
+function portOnePurpose(kind: "one_time" | "subscription"): PortOnePaymentPurpose {
+  return kind === "one_time" ? "onetime" : "billing";
+}
+
+function portOneCardChannelKey(kind: "one_time" | "subscription"): string {
+  return kind === "one_time"
+    ? PORTONE_INICIS_ONETIME_CHANNEL_KEY
+    : PORTONE_INICIS_BILLING_CHANNEL_KEY;
+}
+
 /**
  * 결제 종류 + 빌링키 발급수단에 맞는 채널키.
  * ★간편결제 빌링키는 발급된 채널에 묶인다 — 첫청구도 갱신도 같은 채널키를
- * 써야 하므로, 호출부는 구독 문서에 저장된 발급수단(portoneBillingKeyMethod)을
+ * 써야 하므로, 호출부는 구독 문서에 저장된 provider(portoneEasyPayProvider)를
  * 그대로 넘긴다.
  */
 function assertPortOneCheckoutConfig(
   kind: "one_time" | "subscription",
-  method: PortOneBillingKeyMethod = "CARD"
+  method: PortOneBillingKeyMethod = "CARD",
+  easyPayProvider: PortOneEasyPayProvider | null = null
 ): string {
   assertPortOneServerConfig();
-  const channelKey =
-    kind === "subscription"
-      ? resolvePortOneBillingChannelKey({
-          method,
-          cardChannelKey: PORTONE_INICIS_BILLING_CHANNEL_KEY,
-          easyPayChannelKey: PORTONE_EASYPAY_BILLING_CHANNEL_KEY,
-        })
-      : PORTONE_INICIS_ONETIME_CHANNEL_KEY;
+  const channelKey = resolvePortOneChannelKey({
+    purpose: portOnePurpose(kind),
+    method,
+    cardChannelKey: portOneCardChannelKey(kind),
+    easyPayProvider,
+    easyPayChannelKeys: PORTONE_EASY_PAY_CHANNEL_KEYS,
+  });
   if (!channelKey) {
     throw new functions.https.HttpsError(
       "failed-precondition",
@@ -1452,13 +1478,19 @@ export const getPortOneCheckoutConfig = functions.https.onCall(
     const kind =
       stringField(data, "kind") === "one_time" ? "one_time" : "subscription";
     const channelKey = assertPortOneCheckoutConfig(kind);
-    // 간편결제 채널이 실제로 붙어 있을 때만 체크아웃에 토스페이 옵션을 띄운다.
-    // 전용 채널이 없으면 카드 빌링 채널로 폴백(KG이니시스가 TOSSPAY 지원).
-    const easyPayBillingChannelKey =
-      kind === "subscription"
-        ? PORTONE_EASYPAY_BILLING_CHANNEL_KEY ||
-          PORTONE_INICIS_BILLING_CHANNEL_KEY ||
-          null
+    const purpose = portOnePurpose(kind);
+    // 간편결제 채널이 실제로 붙어 있을 때만 체크아웃에 옵션을 띄운다.
+    const easyPayProviders = enabledPortOneEasyPayProviders({
+      purpose,
+      easyPayChannelKeys: PORTONE_EASY_PAY_CHANNEL_KEYS,
+    });
+    const easyPayChannelKeys = portOneEasyPayChannelKeysForPurpose({
+      purpose,
+      easyPayChannelKeys: PORTONE_EASY_PAY_CHANNEL_KEYS,
+    });
+    const easyPayChannelKey =
+      easyPayProviders.length > 0
+        ? PORTONE_EASY_PAY_CHANNEL_KEYS[purpose][easyPayProviders[0]] || null
         : null;
     return {
       storeId: PORTONE_STORE_ID,
@@ -1466,10 +1498,13 @@ export const getPortOneCheckoutConfig = functions.https.onCall(
       oneTimeChannelKey: PORTONE_INICIS_ONETIME_CHANNEL_KEY || null,
       billingChannelKey: PORTONE_INICIS_BILLING_CHANNEL_KEY || null,
       // ★응답 스키마 추가(재배포 필요) — 클라가 간편결제 지원 여부·채널을 안다.
-      easyPayBillingChannelKey,
-      easyPayProviders: easyPayBillingChannelKey
-        ? [...SUPPORTED_EASY_PAY_PROVIDERS]
-        : [],
+      easyPayChannelKey,
+      easyPayChannelKeys,
+      easyPayBillingChannelKey:
+        kind === "subscription" ? easyPayChannelKey : null,
+      easyPayBillingChannelKeys:
+        kind === "subscription" ? easyPayChannelKeys : {},
+      easyPayProviders,
     };
   }
 );
@@ -1983,6 +2018,11 @@ async function chargePortOneSubscriptionIdempotent(params: {
    * 쓴다. 미지정(레거시 구독 문서)은 카드.
    */
   billingKeyMethod?: PortOneBillingKeyMethod;
+  /**
+   * 간편결제 provider. 빌링키는 provider 별 채널에 묶이므로 구독 문서의
+   * portoneEasyPayProvider 를 첫청구 재시도와 갱신까지 그대로 넘긴다.
+   */
+  easyPayProvider?: PortOneEasyPayProvider | null;
   /** 첫청구 결정적 paymentId (기본: cycleAnchorMs 기반). */
   paymentIdOverride?: string;
   /** 첫청구 결정적 billingCharges doc id (기본: portone_{paymentId}). */
@@ -2064,7 +2104,8 @@ async function chargePortOneSubscriptionIdempotent(params: {
   try {
     const channelKey = assertPortOneCheckoutConfig(
       "subscription",
-      params.billingKeyMethod || "CARD"
+      params.billingKeyMethod || "CARD",
+      params.easyPayProvider || null
     );
     const payment = await payPortOneBillingKey({
       paymentId,
@@ -2384,7 +2425,7 @@ export const completePortOneBillingKey = functions.https.onCall(
       );
     }
 
-    assertPortOneCheckoutConfig("subscription", billingKeyMethod);
+    assertPortOneCheckoutConfig("subscription", billingKeyMethod, easyPayProvider);
     const expected = portoneExpectedAmount(
       planType,
       stringField(data, "billing")
@@ -2496,6 +2537,7 @@ export const completePortOneBillingKey = functions.https.onCall(
       customerName,
       customerPhone,
       billingKeyMethod,
+      easyPayProvider,
       paymentIdOverride: paymentId,
       chargeDocIdOverride: chargeDocId,
       couponCode: appliedCoupon?.code ?? null,
@@ -3024,6 +3066,7 @@ export const retryFirstCharge = functions.https.onCall(
         billingKeyMethod: normalizePortOneBillingKeyMethod(
           sub.portoneBillingKeyMethod
         ),
+        easyPayProvider: normalizeEasyPayProvider(sub.portoneEasyPayProvider),
         paymentIdOverride: paymentId,
         chargeDocIdOverride: chargeDocId,
       });
@@ -8057,8 +8100,9 @@ export const scheduledChargePortOneSubscriptions = functions.pubsub
         customerName,
         customerPhone,
         // ★간편결제(EASY_PAY) 빌링키도 같은 경로로 청구하되, 발급 채널이
-        // 다르므로 발급수단을 넘겨 채널키를 맞춘다. 필드 없는 레거시=카드.
+        // 다르므로 provider 를 넘겨 채널키를 맞춘다. 필드 없는 레거시=카드.
         billingKeyMethod: subBillingKeyMethod,
+        easyPayProvider: normalizeEasyPayProvider(sub.portoneEasyPayProvider),
       });
 
       if (charge.status === "failed") {

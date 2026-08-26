@@ -110,17 +110,26 @@ export function extractPortOneBillingKey(payment: PortOnePaymentLike): string | 
 //    빌링키가 나온다 — 카드 경로에는 없는 단계다.
 
 export type PortOneBillingKeyMethod = "CARD" | "EASY_PAY";
+export type PortOnePaymentPurpose = "billing" | "onetime";
 
 /** 브라우저 SDK 가 수동 승인 대기 시 billingKey 자리에 넣는 센티넬. */
 export const PORTONE_BILLING_KEY_NEEDS_CONFIRMATION = "NEEDS_CONFIRMATION";
 
 /**
- * 우리가 배선한 간편결제사(포트원 규약명). 토스페이만 우선 지원한다 —
+ * 우리가 배선한 간편결제사(포트원 규약명). @portone/browser-sdk@0.1.9
+ * dist/v2/entity/EasyPayProvider.d.ts 에 KAKAOPAY / TOSSPAY 로 선언돼 있다.
  * 채널이 붙지 않은 provider 를 통과시키면 발급창에서 죽으므로 allowlist.
  */
-export const SUPPORTED_EASY_PAY_PROVIDERS = ["TOSSPAY"] as const;
+export const SUPPORTED_EASY_PAY_PROVIDERS = ["KAKAOPAY", "TOSSPAY"] as const;
 export type PortOneEasyPayProvider =
   (typeof SUPPORTED_EASY_PAY_PROVIDERS)[number];
+export type PortOneEasyPayChannelKeyMap = Partial<
+  Record<PortOneEasyPayProvider, string>
+>;
+export type PortOneEasyPayPurposeChannelKeyMap = Record<
+  PortOnePaymentPurpose,
+  PortOneEasyPayChannelKeyMap
+>;
 
 /** 알 수 없는 값은 카드로 폴백 — 레거시 구독 문서(필드 없음)가 카드다. */
 export function normalizePortOneBillingKeyMethod(
@@ -143,23 +152,55 @@ export function normalizeEasyPayProvider(
 }
 
 /**
- * 빌링키 결제에 쓸 채널키. 간편결제 전용 채널이 설정돼 있으면 그것을,
- * 없으면 카드 빌링 채널로 폴백한다(KG이니시스 채널이 EasyPayProvider.TOSSPAY 를
- * 지원 — @portone/browser-sdk EasyPayProvider.TOSSPAY 주석 기준).
+ * PortOne 결제에 쓸 채널키. 간편결제는 purpose + provider 별 채널키 맵에서
+ * 고른다. 단건은 전용 간편결제 채널이 없으면 단건 카드 채널로 폴백하고,
+ * 빌링은 provider 가 명시됐는데 채널이 없으면 빈 값으로 실패시킨다.
  *
  * ★빌링키는 발급된 채널에 묶인다. 갱신 청구가 다른 채널키를 보내면 PG 가
  * 거절하므로, 구독 문서에 저장한 발급수단으로 매 사이클 같은 채널을 고른다.
  */
-export function resolvePortOneBillingChannelKey(params: {
+export function resolvePortOneChannelKey(params: {
+  purpose: PortOnePaymentPurpose;
   method: PortOneBillingKeyMethod;
   cardChannelKey: string;
-  easyPayChannelKey?: string | null;
+  easyPayProvider?: PortOneEasyPayProvider | null;
+  easyPayChannelKeys?: PortOneEasyPayPurposeChannelKeyMap | null;
 }): string {
   if (params.method === "EASY_PAY") {
-    const easyPay = (params.easyPayChannelKey || "").trim();
+    if (!params.easyPayProvider) return params.cardChannelKey;
+    const easyPay = (
+      params.easyPayChannelKeys?.[params.purpose]?.[params.easyPayProvider] ||
+      ""
+    ).trim();
     if (easyPay) return easyPay;
+    return params.purpose === "onetime" ? params.cardChannelKey : "";
   }
   return params.cardChannelKey;
+}
+
+export const resolvePortOneBillingChannelKey = resolvePortOneChannelKey;
+
+export function enabledPortOneEasyPayProviders(params: {
+  purpose: PortOnePaymentPurpose;
+  easyPayChannelKeys: PortOneEasyPayPurposeChannelKeyMap;
+}): PortOneEasyPayProvider[] {
+  return SUPPORTED_EASY_PAY_PROVIDERS.filter((provider) =>
+    Boolean(
+      (params.easyPayChannelKeys[params.purpose][provider] || "").trim()
+    )
+  );
+}
+
+export function portOneEasyPayChannelKeysForPurpose(params: {
+  purpose: PortOnePaymentPurpose;
+  easyPayChannelKeys: PortOneEasyPayPurposeChannelKeyMap;
+}): PortOneEasyPayChannelKeyMap {
+  return Object.fromEntries(
+    enabledPortOneEasyPayProviders(params).map((provider) => [
+      provider,
+      params.easyPayChannelKeys[params.purpose][provider],
+    ])
+  ) as PortOneEasyPayChannelKeyMap;
 }
 
 /**
