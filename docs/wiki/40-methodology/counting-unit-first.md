@@ -3,7 +3,7 @@ title: 세는 단위를 먼저 적어라
 tags: [domain/methodology, topic/observability, topic/identity, topic/attribution, verdict/adopt, method/query-audit]
 status: verified
 date: 2026-08-25
-links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]]
+links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[decision-sentence-first]], [[routing-label-coverage]]
 ---
 
 # 세는 단위를 먼저 적어라
@@ -32,6 +32,10 @@ links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]]
 
 "설치 첫스폰 비율", "사람-설치 다리", "매출 링크", "CAC 콜러블" 같은 말은 모두 단위가 다르다. 같은 표에서 나왔다는 이유로 서로의 분모를 빌려 쓰지 않는다.
 
+2026-08-26 정정: `first run 577 → first spawn 18 = 3.1%` 는 신뢰할 수 있는 활성화율이 아니다. 분자는 인증 게이트에서 끊기고, 분모는 재설치를 거르지 않는다. 위키에서는 이 값을 단독 사실로 인용하지 않는다.
+
+2026-08-26 정정: 외부 실매출로 보였던 결제 1건은 운영자 포트원 이니시스 테스트 결제였다. 외부 실매출은 없는 것으로 본다. 이 행을 외부 수요 증거로 쓰지 않는다.
+
 ## 왜
 
 재설치 루프나 여러 브라우저는 설치 행을 늘린다. 사람 축은 그 행들을 접는다. 결제 축은 다시 운영자/외부, 테스트/실거래, grant/paid 성격을 나눈다. 단위를 먼저 쓰지 않으면 [[verify-result-row]] 를 통과한 행도 집계 단계에서 다른 의미가 된다.
@@ -54,4 +58,4 @@ links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]]
 
 ## Backlinks
 
-- [[verify-result-row]] · [[empty-query-first]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]]
+- [[verify-result-row]] · [[empty-query-first]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]] · [[decision-sentence-first]] · [[routing-label-coverage]]

@@ -3,7 +3,7 @@ title: 마블로 지식위키
 tags: [meta/index, status/normative]
 status: active
 date: 2026-08-25
-links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVENTION]], [[TAXONOMY]], [[LINK-MAP]], [[LINT]]
+links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVENTION]], [[TAXONOMY]], [[LINK-MAP]], [[LINT]]
 ---
 
 # 마블로 지식위키
@@ -16,7 +16,9 @@ links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[
 2. 조회가 비면 대상이 아니라 조회를 먼저 의심한다 — [[empty-query-first]].
 3. 조회가 있어도 그 행이 네가 생각한 행인지 확인한다 — [[verify-result-row]].
 4. 세는 단위를 먼저 적는다 — [[counting-unit-first]].
-5. 새 아이디어는 [[do-not-retry]] 를 먼저 본다.
+5. 지표는 결정 문장이 있어야 남긴다 — [[decision-sentence-first]].
+6. 라우팅·모델 성과는 액션축과 결과축을 분리한다 — [[routing-label-coverage]].
+7. 새 아이디어는 [[do-not-retry]] 를 먼저 본다.
 
 ## 여기서 시작하세요
 
@@ -26,6 +28,8 @@ links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[
 | 쿼리/표가 비다 | [[empty-query-first]] |
 | 쿼리/표에 결과가 있다 | [[verify-result-row]] |
 | 비율·합계를 말해야 한다 | [[counting-unit-first]] |
+| 대시보드 지표를 남길지 버릴지 판단한다 | [[decision-sentence-first]] |
+| 모델·라우팅 성과를 학습셋으로 보려 한다 | [[routing-label-coverage]] |
 | 화면으로 확인하고 싶다 | [[no-live-gui-verify]] |
 | 강의·마케팅 노트를 어디에 두나 | 아래 **어디에 두나** |
 | 노트를 어떻게 쓰나 | `/wiki-note` · [CONVENTION](_meta/CONVENTION.md) |
@@ -56,7 +60,7 @@ links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[
 | 10 주력 | [10-offerings](10-offerings/README.md) | 스텁 (제품·강의·마케팅 실물) |
 | 20 제약 | [20-constraints](20-constraints/README.md) | [[no-live-gui-verify]] |
 | 30 탐구 | [30-investigations](30-investigations/README.md) | [[post-spawn-telemetry-gap]] |
-| 40 방법론 | [40-methodology](40-methodology/README.md) | [[empty-query-first]] · [[verify-result-row]] · [[counting-unit-first]] |
+| 40 방법론 | [40-methodology](40-methodology/README.md) | [[empty-query-first]] · [[verify-result-row]] · [[counting-unit-first]] · [[decision-sentence-first]] · [[routing-label-coverage]] |
 | 50 운영 | [50-operations](50-operations/README.md) | 스텁 (배포·강의 운영·캠페인 결과) |
 | meta | [_meta](_meta/CONVENTION.md) | 규약 · 사전 · 원장 · 린트 |
 
@@ -64,7 +68,7 @@ links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[
 
 | adopt | no-go | observe | undecidable |
 | ---: | ---: | ---: | ---: |
-| 3 | 7 | 0 | 0 |
+| 5 | 7 | 0 | 0 |
 
 기각이 채택보다 많은 것이 정상이다. 표가 뒤집히면 정직성 규약이 죽은 것이다.
 

@@ -42,7 +42,7 @@ links: [[empty-query-first]], [[no-live-gui-verify]], [[telemetry-identity-axes]
 | DNR-06 | 다운로드 프록시 (우리 서버 경유 → GitHub 리다이렉트) | GitHub 직링크·서명·공증 토폴로지와 충돌. 토큰은 바이너리 밖에 남아 **앱이 어떻게 받느냐**가 미해결. 월 26건에 A′ 보다 비싸다. 재검토: 월 300건 또는 유료 광고 또는 A′ 커버리지 <30%. | [web-app-join-attribution-design §6-2(b)](../../../v3/docs/web-app-join-attribution-design-2026-08-09.md) | `C3` |
 | DNR-07 | IP 지문 | 원시 식별자를 만들지 않는다. `ANALYTICS_ID_SALT` 를 바꾸지 않는다. IP 지문은 그 두 금지를 우회하는 세 번째 길이다. | [install-attribution-utm-rate.md](../../../v3/docs/install-attribution-utm-rate.md) · [installAttribution.ts](../../../v3/functions/src/installAttribution.ts) | `M2` |
 
-판정 분포: no-go **7** / adopt **3** / observe 0 / undecidable 0. 기각이 채택보다 많은 것이 정상이다.
+판정 분포: no-go **7** / adopt **5** / observe 0 / undecidable 0. 기각이 채택보다 많은 것이 정상이다.
 
 ## Backlinks
 

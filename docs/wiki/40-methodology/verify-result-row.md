@@ -3,7 +3,7 @@ title: 조회 결과가 있어도 그게 네가 생각한 그 행인지 확인�
 tags: [domain/methodology, topic/observability, topic/verification, topic/bigquery, verdict/adopt, method/query-audit, method/source-link]
 status: verified
 date: 2026-08-25
-links: [[empty-query-first]], [[counting-unit-first]], [[telemetry-identity-axes]], [[do-not-retry]]
+links: [[empty-query-first]], [[counting-unit-first]], [[telemetry-identity-axes]], [[do-not-retry]], [[decision-sentence-first]], [[routing-label-coverage]]
 ---
 
 # 조회 결과가 있어도 그게 네가 생각한 그 행인지 확인하라
@@ -32,6 +32,8 @@ links: [[empty-query-first]], [[counting-unit-first]], [[telemetry-identity-axes
 
 특히 `account_class` 같은 이름은 결제 채널 판정처럼 보일 수 있다. 하지만 결제 테스트/실거래 축은 결제 시점 원장에 남긴 파생 enum만 믿어야 한다. 운영자 계정 축을 PG 테스트키 축으로 읽지 않는다.
 
+2026-08-26 정정: 외부 실매출로 보였던 결제 1건은 운영자 포트원 이니시스 테스트 결제였다. 행이 존재해도 운영자/외부, 테스트/실거래 성격을 확인하지 않으면 매출 증거가 아니다.
+
 ## 왜
 
 빈 결과는 [[empty-query-first]] 로 잡힌다. 반대로 결과가 있으면 사람은 안심하고 해석부터 한다. 이때 한 행만 열어보면 끝나는 착각이 집계, 차트, 광고 의사결정으로 증폭된다.
@@ -54,4 +56,4 @@ links: [[empty-query-first]], [[counting-unit-first]], [[telemetry-identity-axes
 
 ## Backlinks
 
-- [[empty-query-first]] · [[counting-unit-first]] · [[telemetry-identity-axes]] · [[do-not-retry]]
+- [[empty-query-first]] · [[counting-unit-first]] · [[telemetry-identity-axes]] · [[do-not-retry]] · [[decision-sentence-first]] · [[routing-label-coverage]]

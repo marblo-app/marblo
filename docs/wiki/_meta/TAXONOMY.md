@@ -32,6 +32,7 @@ links: [[CONVENTION]], [[do-not-retry]], [[empty-query-first]]
 - `topic/privacy`
 - `topic/electron`
 - `topic/bigquery`
+- `topic/routing`
 - `topic/discovery`
 - `topic/wiki`
 - `topic/agents`
