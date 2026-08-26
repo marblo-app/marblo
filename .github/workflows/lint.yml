@@ -6,10 +6,10 @@ name: Lint
 on:
   push:
     branches: [main]
-    paths: ["v3/**", "docs/wiki/**"]
+    paths: ["v3/**", "docs/**", "marblo-web/docs/**"]
   pull_request:
     branches: [main]
-    paths: ["v3/**", "docs/wiki/**"]
+    paths: ["v3/**", "docs/**", "marblo-web/docs/**"]
 
 jobs:
   lint:
