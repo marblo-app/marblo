@@ -11,13 +11,24 @@ import app from "@/lib/firebase";
 import CouponInput from "@/components/CouponInput";
 import { couponDiscountAmount } from "@/lib/coupon";
 import { lectures } from "@/data/lectures";
-import { trackBeginCheckout, trackViewItem, trackAddPaymentInfo } from "@/lib/gtag";
+import {
+  trackBeginCheckout,
+  trackViewItem,
+  trackAddPaymentInfo,
+} from "@/lib/gtag";
 import {
   mapPaymentError,
   shouldShowTestCardHint,
   type PaymentErrorTone,
 } from "@/lib/paymentErrors";
-import { ArrowLeft, Loader2, AlertCircle, ShoppingCart, RotateCcw, Info } from "lucide-react";
+import {
+  ArrowLeft,
+  Loader2,
+  AlertCircle,
+  ShoppingCart,
+  RotateCcw,
+  Info,
+} from "lucide-react";
 import { localeHref } from "@/i18n/routing";
 import {
   resolveCheckoutProvider,
@@ -29,6 +40,7 @@ import {
   verifyAccountHint,
   type AccountHintVerdict,
 } from "@/lib/checkoutAccountHint";
+import { getPlanAmount } from "@/lib/pricing";
 
 interface PortOneSDK {
   requestPayment(params: {
@@ -107,16 +119,24 @@ const PLAN_PRICES: Record<
   string,
   { name: string; monthly: number; annual: number }
 > = {
-  pro: { name: "Pro", monthly: 19000, annual: 19000 * 10 },
+  pro: {
+    name: "Pro",
+    monthly: getPlanAmount("pro", "monthly", "KRW") ?? 0,
+    annual: getPlanAmount("pro", "annual", "KRW") ?? 0,
+  },
   // Team bills per seat (₩29,000); checkout currently charges 1 seat (seat
   // quantity selector is a follow-up).
-  team: { name: "Team", monthly: 29000, annual: 29000 * 10 },
+  team: {
+    name: "Team",
+    monthly: getPlanAmount("team", "monthly", "KRW") ?? 0,
+    annual: getPlanAmount("team", "annual", "KRW") ?? 0,
+  },
   // Team Plus is a per-team floor: ₩290,000 = 5 seats included.
   // Extra seats (+₩59,000/seat) handled post-purchase (follow-up).
   team_plus: {
     name: "Team Plus",
-    monthly: 290000,
-    annual: 290000 * 10,
+    monthly: getPlanAmount("team_plus", "monthly", "KRW") ?? 0,
+    annual: getPlanAmount("team_plus", "annual", "KRW") ?? 0,
   },
 };
 
@@ -191,10 +211,10 @@ export default function CheckoutPage() {
   const baseAmount = isLecture
     ? lectureInfo?.price || 0
     : planInfo
-      ? billing === "annual"
-        ? planInfo.annual
-        : planInfo.monthly
-      : 0;
+    ? billing === "annual"
+      ? planInfo.annual
+      : planInfo.monthly
+    : 0;
   const finalAmount = Math.max(0, baseAmount - discount);
   const baseAmountLabel = `\u20A9${baseAmount.toLocaleString()}`;
   const autoRenewNotice =
@@ -207,8 +227,7 @@ export default function CheckoutPage() {
   const showPhoneNumberError =
     requiresPhoneNumber && phoneNumberTouched && !isPhoneNumberValid;
   // PortOne(KG이니시스) 결제 시 email 필수. auth email 있으면 그대로, 없으면 입력 필드.
-  const requiresCheckoutEmail =
-    paymentProvider === "portone" && !user?.email;
+  const requiresCheckoutEmail = paymentProvider === "portone" && !user?.email;
   const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const resolvedCheckoutEmail = (
     user?.email ||
@@ -218,19 +237,17 @@ export default function CheckoutPage() {
   const isCheckoutEmailValid =
     !requiresCheckoutEmail || EMAIL_RE.test(resolvedCheckoutEmail);
   const showCheckoutEmailError =
-    requiresCheckoutEmail &&
-    checkoutEmailTouched &&
-    !isCheckoutEmailValid;
+    requiresCheckoutEmail && checkoutEmailTouched && !isCheckoutEmailValid;
   const paymentProcessorName = t(
     paymentProvider === "portone"
       ? "paymentProcessorPortOne"
-      : "paymentProcessorToss",
+      : "paymentProcessorToss"
   );
   const configuredEasyPayProvider = (
     portoneConfig?.easyPayProviders || []
   ).find(
     (provider): provider is PortOneEasyPayProvider =>
-      typeof provider === "string" && provider.trim().length > 0,
+      typeof provider === "string" && provider.trim().length > 0
   );
   const configuredEasyPayChannelKey = configuredEasyPayProvider
     ? portoneConfig?.easyPayChannelKeys?.[configuredEasyPayProvider] ||
@@ -263,7 +280,7 @@ export default function CheckoutPage() {
       router.replace(
         lectureSlug
           ? localeHref(locale, `/lectures/${lectureSlug}`)
-          : localeHref(locale, "/lectures"),
+          : localeHref(locale, "/lectures")
       );
     }
   }, [type, lectureSlug, locale, router]);
@@ -280,10 +297,13 @@ export default function CheckoutPage() {
             // 로그인 한 번에 떨어졌고, 앱의 계정 힌트(acct)도 같이 사라졌을 경로다.
             localeHref(
               locale,
-              `/checkout?${subscriptionQuery || `plan=${plan}`}`,
+              `/checkout?${subscriptionQuery || `plan=${plan}`}`
             );
         router.push(
-          localeHref(locale, `/auth/login?redirect=${encodeURIComponent(redirectPath)}`),
+          localeHref(
+            locale,
+            `/auth/login?redirect=${encodeURIComponent(redirectPath)}`
+          )
         );
       } else {
         setUser(u);
@@ -325,13 +345,17 @@ export default function CheckoutPage() {
     if (window.PortOne) return window.PortOne;
     await new Promise<void>((resolve, reject) => {
       const existing = document.querySelector<HTMLScriptElement>(
-        'script[src="https://cdn.portone.io/v2/browser-sdk.js"]',
+        'script[src="https://cdn.portone.io/v2/browser-sdk.js"]'
       );
       if (existing) {
         existing.addEventListener("load", () => resolve(), { once: true });
-        existing.addEventListener("error", () => reject(new Error(t("sdkLoadError"))), {
-          once: true,
-        });
+        existing.addEventListener(
+          "error",
+          () => reject(new Error(t("sdkLoadError"))),
+          {
+            once: true,
+          }
+        );
         return;
       }
       const script = document.createElement("script");
@@ -355,14 +379,15 @@ export default function CheckoutPage() {
         if (!window.PortOne) {
           document
             .querySelectorAll(
-              'script[src="https://cdn.portone.io/v2/browser-sdk.js"]',
+              'script[src="https://cdn.portone.io/v2/browser-sdk.js"]'
             )
             .forEach((el) => el.remove());
         }
         await loadPortOneSDK();
       } else {
-        const { loadTossPayments } =
-          await import("@tosspayments/tosspayments-sdk");
+        const { loadTossPayments } = await import(
+          "@tosspayments/tosspayments-sdk"
+        );
         await loadTossPayments(process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || "");
       }
       setSdkReady(true);
@@ -385,8 +410,9 @@ export default function CheckoutPage() {
         if (paymentProvider === "portone") {
           await loadPortOneSDK();
         } else {
-          const { loadTossPayments } =
-            await import("@tosspayments/tosspayments-sdk");
+          const { loadTossPayments } = await import(
+            "@tosspayments/tosspayments-sdk"
+          );
           await loadTossPayments(process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || "");
         }
         if (!cancelled) {
@@ -440,7 +466,7 @@ export default function CheckoutPage() {
       setDiscount(couponDiscountAmount(baseAmount, result));
       setCouponCode(result.code);
     },
-    [baseAmount],
+    [baseAmount]
   );
 
   // GA4 view_item — checkout 페이지 마운트 시 구독/강의 상세 보기.
@@ -513,7 +539,12 @@ export default function CheckoutPage() {
       setCanRetryFirstCharge(false);
       releasePaymentLock();
       router.push(
-        localeHref(locale, `/checkout/success?plan=${plan || "pro"}&billing=${billing}&amount=${finalAmount}&retry=1`),
+        localeHref(
+          locale,
+          `/checkout/success?plan=${
+            plan || "pro"
+          }&billing=${billing}&amount=${finalAmount}&retry=1`
+        )
       );
     } catch (err: unknown) {
       console.error("retryFirstCharge error:", err);
@@ -537,9 +568,7 @@ export default function CheckoutPage() {
     }
     if (!isCheckoutEmailValid) {
       setCheckoutEmailTouched(true);
-      setError(
-        resolvedCheckoutEmail ? t("emailInvalid") : t("emailRequired"),
-      );
+      setError(resolvedCheckoutEmail ? t("emailInvalid") : t("emailRequired"));
       return;
     }
     if (!acquirePaymentLock()) {
@@ -624,7 +653,7 @@ export default function CheckoutPage() {
         const safePlan = plan || "pro";
         const easyPayProvider = (config.easyPayProviders || []).find(
           (provider): provider is PortOneEasyPayProvider =>
-            typeof provider === "string" && provider.trim().length > 0,
+            typeof provider === "string" && provider.trim().length > 0
         );
         const easyPayChannelKey = easyPayProvider
           ? config.easyPayChannelKeys?.[easyPayProvider] ||
@@ -658,14 +687,20 @@ export default function CheckoutPage() {
             currency: "KRW",
             payMethod: useEasyPay ? "EASY_PAY" : "CARD",
             ...(useEasyPay ? { easyPay: { easyPayProvider } } : {}),
-            redirectUrl: `${window.location.origin}${localeHref(locale, `/checkout/success?provider=portone&type=lecture&slug=${encodeURIComponent(lectureSlug)}&paymentId=${encodeURIComponent(intent.paymentId)}&plan=${safePlan}&billing=${billing}&amount=${intent.amount}`)}`,
+            redirectUrl: `${window.location.origin}${localeHref(
+              locale,
+              `/checkout/success?provider=portone&type=lecture&slug=${encodeURIComponent(
+                lectureSlug
+              )}&paymentId=${encodeURIComponent(
+                intent.paymentId
+              )}&plan=${safePlan}&billing=${billing}&amount=${intent.amount}`
+            )}`,
             customer,
           });
           if (response.code) {
-            throw Object.assign(
-              new Error(response.message || response.code),
-              { code: response.code },
-            );
+            throw Object.assign(new Error(response.message || response.code), {
+              code: response.code,
+            });
           }
           const complete = httpsCallable(functions, "completePortOnePayment");
           await complete({
@@ -673,7 +708,14 @@ export default function CheckoutPage() {
           });
           // amount/paymentId 로 success 페이지가 GA4 purchase 발화(멱등 complete + dedupe).
           router.push(
-            localeHref(locale, `/checkout/success?provider=portone&type=lecture&slug=${encodeURIComponent(lectureSlug)}&paymentId=${encodeURIComponent(intent.paymentId)}&plan=${safePlan}&amount=${intent.amount}`),
+            localeHref(
+              locale,
+              `/checkout/success?provider=portone&type=lecture&slug=${encodeURIComponent(
+                lectureSlug
+              )}&paymentId=${encodeURIComponent(
+                intent.paymentId
+              )}&plan=${safePlan}&amount=${intent.amount}`
+            )
           );
         } else if (plan) {
           // KG이니시스 issueId 40자 제한 — uid 삽입 시 초과하므로 짧은 고정 prefix + UUID(무하이픈)
@@ -686,7 +728,8 @@ export default function CheckoutPage() {
             storeId: config.storeId,
             // 간편결제 빌링키는 간편결제 채널에서 발급된다 — 카드 채널키로
             // 요청하면 발급창이 뜨지 않는다.
-            channelKey: (isEasyPay ? easyPayChannelKey : null) || config.channelKey,
+            channelKey:
+              (isEasyPay ? easyPayChannelKey : null) || config.channelKey,
             billingKeyMethod: effectiveBillingKeyMethod,
             ...(isEasyPay && easyPayProvider
               ? { easyPay: { easyPayProvider } }
@@ -697,10 +740,9 @@ export default function CheckoutPage() {
             customer: { ...customer, customerId: user.uid },
           });
           if (response.code) {
-            throw Object.assign(
-              new Error(response.message || response.code),
-              { code: response.code },
-            );
+            throw Object.assign(new Error(response.message || response.code), {
+              code: response.code,
+            });
           }
           // ★간편결제 승인 차이: 수동 승인 채널은 billingKey 대신
           // 'NEEDS_CONFIRMATION' + billingIssueToken 을 준다. 둘 다 없을 때만
@@ -708,7 +750,10 @@ export default function CheckoutPage() {
           if (!response.billingKey && !response.billingIssueToken) {
             throw new Error(t("paymentError"));
           }
-          const complete = httpsCallable(functions, "completePortOneBillingKey");
+          const complete = httpsCallable(
+            functions,
+            "completePortOneBillingKey"
+          );
           await complete({
             billingKey: response.billingKey,
             billingIssueToken: response.billingIssueToken,
@@ -726,7 +771,12 @@ export default function CheckoutPage() {
           releasePaymentLock();
           // tx=issueId → success 페이지 GA4 purchase transaction_id (중복 가드 키)
           router.push(
-            localeHref(locale, `/checkout/success?provider=portone&plan=${plan}&billing=${billing}&amount=${finalAmount}&tx=${encodeURIComponent(issueId)}`),
+            localeHref(
+              locale,
+              `/checkout/success?provider=portone&plan=${plan}&billing=${billing}&amount=${finalAmount}&tx=${encodeURIComponent(
+                issueId
+              )}`
+            )
           );
         }
       } else if (isLecture && lectureSlug) {
@@ -736,10 +786,11 @@ export default function CheckoutPage() {
           lectureSlug,
           userId: user.uid,
         })) as { data: { amount: number; orderId: string; orderName: string } };
-        const { loadTossPayments } =
-          await import("@tosspayments/tosspayments-sdk");
+        const { loadTossPayments } = await import(
+          "@tosspayments/tosspayments-sdk"
+        );
         const toss = await loadTossPayments(
-          process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || "",
+          process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || ""
         );
         const payment = toss.payment({ customerKey: user.uid });
         await payment.requestPayment({
@@ -747,22 +798,37 @@ export default function CheckoutPage() {
           amount: { currency: "KRW", value: data.amount },
           orderId: data.orderId,
           orderName: data.orderName,
-          successUrl: `${window.location.origin}${localeHref(locale, `/checkout/success?type=lecture&slug=${lectureSlug}`)}`,
-          failUrl: `${window.location.origin}${localeHref(locale, "/checkout/fail")}`,
+          successUrl: `${window.location.origin}${localeHref(
+            locale,
+            `/checkout/success?type=lecture&slug=${lectureSlug}`
+          )}`,
+          failUrl: `${window.location.origin}${localeHref(
+            locale,
+            "/checkout/fail"
+          )}`,
         });
       } else if (plan) {
-        const { loadTossPayments } =
-          await import("@tosspayments/tosspayments-sdk");
+        const { loadTossPayments } = await import(
+          "@tosspayments/tosspayments-sdk"
+        );
         const toss = await loadTossPayments(
-          process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || "",
+          process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || ""
         );
         const payment = toss.payment({ customerKey: user.uid });
         // amount 를 successUrl 에 실어 success 페이지 GA4 purchase value 로 사용.
         // Toss 가 authKey/customerKey 등을 쿼리에 추가한다.
         await payment.requestBillingAuth({
           method: "CARD",
-          successUrl: `${window.location.origin}${localeHref(locale, `/checkout/success?plan=${plan}&billing=${billing}&coupon=${encodeURIComponent(couponCode || "")}&amount=${finalAmount}`)}`,
-          failUrl: `${window.location.origin}${localeHref(locale, "/checkout/fail")}`,
+          successUrl: `${window.location.origin}${localeHref(
+            locale,
+            `/checkout/success?plan=${plan}&billing=${billing}&coupon=${encodeURIComponent(
+              couponCode || ""
+            )}&amount=${finalAmount}`
+          )}`,
+          failUrl: `${window.location.origin}${localeHref(
+            locale,
+            "/checkout/fail"
+          )}`,
         });
       }
     } catch (err: unknown) {
@@ -810,7 +876,9 @@ export default function CheckoutPage() {
           <button
             onClick={() =>
               router.push(
-                isLecture ? localeHref(locale, "/lectures") : localeHref(locale, "/pricing"),
+                isLecture
+                  ? localeHref(locale, "/lectures")
+                  : localeHref(locale, "/pricing")
               )
             }
             className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg transition"
@@ -908,7 +976,9 @@ export default function CheckoutPage() {
             >
               <AlertCircle className="w-5 h-5 mt-0.5 shrink-0 text-amber-400" />
               <p className="text-sm leading-relaxed">
-                {t("accountMismatchAcknowledged", { email: browserAccountLabel })}
+                {t("accountMismatchAcknowledged", {
+                  email: browserAccountLabel,
+                })}
               </p>
             </div>
           )}
@@ -943,8 +1013,8 @@ export default function CheckoutPage() {
                 errorTone === "soft"
                   ? "flex flex-col gap-3 text-zinc-200 mb-6 p-4 bg-zinc-800/60 border border-zinc-600/50 rounded-lg"
                   : errorTone === "network"
-                    ? "flex flex-col gap-3 text-amber-200 mb-6 p-4 bg-amber-950/30 border border-amber-900/40 rounded-lg"
-                    : "flex flex-col gap-3 text-red-400 mb-6 p-4 bg-red-950/30 border border-red-900/50 rounded-lg"
+                  ? "flex flex-col gap-3 text-amber-200 mb-6 p-4 bg-amber-950/30 border border-amber-900/40 rounded-lg"
+                  : "flex flex-col gap-3 text-red-400 mb-6 p-4 bg-red-950/30 border border-red-900/50 rounded-lg"
               }
               role="alert"
             >
@@ -1040,9 +1110,7 @@ export default function CheckoutPage() {
 
             {!isLecture && (
               <div className="rounded-lg bg-zinc-800/40 border border-zinc-700/60 px-3 py-3 text-sm text-zinc-300 leading-relaxed">
-                <p className="font-medium text-zinc-100">
-                  {autoRenewNotice}
-                </p>
+                <p className="font-medium text-zinc-100">{autoRenewNotice}</p>
                 {/* 토스 계약과정 FAQ §3(무형재화) — 최대 서비스 제공기간 명시.
                     근거: billing.ts 의 nextPeriodEnd() = 월간 +1개월 / 연간
                     +12개월, selectDueForCharge 가 만료 전 선청구를 막아
@@ -1129,17 +1197,12 @@ export default function CheckoutPage() {
                   placeholder={t("emailPlaceholder")}
                   aria-invalid={showCheckoutEmailError}
                   aria-describedby={
-                    showCheckoutEmailError
-                      ? "checkout-email-error"
-                      : undefined
+                    showCheckoutEmailError ? "checkout-email-error" : undefined
                   }
                   className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-3 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
                 />
                 {showCheckoutEmailError && (
-                  <p
-                    id="checkout-email-error"
-                    className="text-sm text-red-400"
-                  >
+                  <p id="checkout-email-error" className="text-sm text-red-400">
                     {checkoutEmail.trim()
                       ? t("emailInvalid")
                       : t("emailRequired")}
@@ -1226,7 +1289,7 @@ export default function CheckoutPage() {
                   {t(
                     paymentProvider === "portone"
                       ? "thirdPartyItemsPortOne"
-                      : "thirdPartyItemsToss",
+                      : "thirdPartyItemsToss"
                   )}
                 </li>
                 <li>{t("thirdPartyPurpose")}</li>

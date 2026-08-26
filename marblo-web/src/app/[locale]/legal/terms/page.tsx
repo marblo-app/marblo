@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import LegalPageLayout from "@/components/LegalPageLayout";
 import { localeHref } from "@/i18n/routing";
+import { formatPlanPrice } from "@/lib/pricing";
 
 // The body of these terms is Korean law text that cites the Korean policy
 // pages by name, so the two cross-references below are deliberately pinned to
@@ -14,6 +15,8 @@ const KO = "ko";
 
 const LAST_UPDATED = "2026-08-21";
 const EFFECTIVE_DATE = "2026년 7월 14일";
+const PRO_PRICE_KRW = formatPlanPrice("pro", "monthly", "KRW");
+const TEAM_PRICE_KRW = formatPlanPrice("team", "monthly", "KRW");
 
 export default function TermsOfServicePage() {
   const t = useTranslations("footer");
@@ -147,12 +150,12 @@ export default function TermsOfServicePage() {
               <strong>Free 플랜</strong>: 기본 기능 무료 제공
             </li>
             <li>
-              <strong>Pro 플랜</strong>: 월 ₩19,000 또는 그에 상당하는 외화 금액
-              (베타 종료 후)
+              <strong>Pro 플랜</strong>: 월 {PRO_PRICE_KRW} 또는 회사가 별도로
+              정한 외화 금액 (베타 종료 후)
             </li>
             <li>
-              <strong>Team 플랜</strong>: 월 ₩29,000 또는 그에 상당하는 외화
-              금액
+              <strong>Team 플랜</strong>: 월 {TEAM_PRICE_KRW} 또는 회사가 별도로
+              정한 외화 금액
             </li>
             <li>
               <strong>강의 + 멤버 패키지</strong>: 별도 가격
@@ -374,7 +377,8 @@ export default function TermsOfServicePage() {
       <p>
         회사는 이용자의 개인정보를 보호하기 위해 노력하며, 이용자의 개인정보
         보호에 관한 사항은 회사가 별도로 정하는{" "}
-        <Link href={localeHref(KO, "/legal/privacy")}>개인정보처리방침</Link> 에 따릅니다.
+        <Link href={localeHref(KO, "/legal/privacy")}>개인정보처리방침</Link> 에
+        따릅니다.
       </p>
 
       <h2>제14조 (서비스의 변경 및 중단)</h2>
@@ -433,7 +437,8 @@ export default function TermsOfServicePage() {
       <h2>제16조 (환불)</h2>
       <p>
         유료 서비스의 환불에 관한 사항은 회사가 별도로 정하는{" "}
-        <Link href={localeHref(KO, "/legal/refund")}>환불정책</Link> 에 따릅니다.
+        <Link href={localeHref(KO, "/legal/refund")}>환불정책</Link> 에
+        따릅니다.
       </p>
       <p>
         회사의 시스템 오류, 서비스 또는 콘텐츠의 하자, 약정한 서비스·콘텐츠의

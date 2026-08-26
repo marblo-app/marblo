@@ -251,8 +251,8 @@
     },
     "pro": {
       "name": "Pro",
-      "price": "$15",
-      "price_usd": "$15",
+      "price": "$19",
+      "price_usd": "$19",
       "period": "/mo",
       "description": "Developers coordinating multiple coding agents",
       "features": [
@@ -328,6 +328,7 @@
     "free_cta": "Download free",
     "current": "Current Plan",
     "most_popular": "Most Popular",
+    "pricePending": "Price pending",
     "faq": {
       "title": "Frequently Asked Questions",
       "items": [
@@ -337,7 +338,7 @@
         },
         {
           "q": "How much is Pro and what is different?",
-          "a": "The Pro plan is ₩19,000/month (about $15). It includes unlimited projects, unlimited agents (fair use · connect your own AI accounts), and the orchestrator, plus everything in Free. Priority support is available from Team Plus and up."
+          "a": "The Pro plan uses the current monthly price from the pricing module. It includes unlimited projects, unlimited agents (fair use · connect your own AI accounts), and the orchestrator, plus everything in Free. Priority support is available from Team Plus and up."
         },
         {
           "q": "Are there separate AI usage fees?",
@@ -920,7 +921,7 @@
       },
       {
         "q": "How much does it cost?",
-        "a": "The Free plan is ₩0/month with core features; the Pro plan is ₩19,000/month (about $15) with unlimited projects and agents (fair use). Priority support starts at Team Plus; Team and Enterprise plans are also available."
+        "a": "The Free plan includes core features; the Pro plan uses the current monthly price from the pricing module and includes unlimited projects and agents (fair use). Priority support starts at Team Plus; Team and Enterprise plans are also available."
       },
       {
         "q": "Are there separate AI usage fees?",

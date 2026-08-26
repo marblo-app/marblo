@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { trackViewItemList } from "@/lib/gtag";
+import { getPlanAmount } from "@/lib/pricing";
 
 /**
  * Fires GA4 view_item_list once on pricing page mount.
@@ -22,7 +23,7 @@ export default function PricingGA4Tracker() {
         item_id: "pro",
         item_name: "Pro",
         item_category: "subscription",
-        price: 19000,
+        price: getPlanAmount("pro", "monthly", "KRW") ?? 0,
         quantity: 1,
         item_variant: "monthly",
       },
@@ -30,7 +31,7 @@ export default function PricingGA4Tracker() {
         item_id: "pro",
         item_name: "Pro",
         item_category: "subscription",
-        price: 19000 * 10,
+        price: getPlanAmount("pro", "annual", "KRW") ?? 0,
         quantity: 1,
         item_variant: "annual",
       },
@@ -39,7 +40,7 @@ export default function PricingGA4Tracker() {
         item_id: "team",
         item_name: "Team",
         item_category: "subscription",
-        price: 29000,
+        price: getPlanAmount("team", "monthly", "KRW") ?? 0,
         quantity: 1,
         item_variant: "monthly",
       },
@@ -47,7 +48,7 @@ export default function PricingGA4Tracker() {
         item_id: "team",
         item_name: "Team",
         item_category: "subscription",
-        price: 29000 * 10,
+        price: getPlanAmount("team", "annual", "KRW") ?? 0,
         quantity: 1,
         item_variant: "annual",
       },
@@ -56,7 +57,7 @@ export default function PricingGA4Tracker() {
         item_id: "team_plus",
         item_name: "Team Plus",
         item_category: "subscription",
-        price: 290000,
+        price: getPlanAmount("team_plus", "monthly", "KRW") ?? 0,
         quantity: 1,
         item_variant: "monthly",
       },
@@ -64,7 +65,7 @@ export default function PricingGA4Tracker() {
         item_id: "team_plus",
         item_name: "Team Plus",
         item_category: "subscription",
-        price: 290000 * 10,
+        price: getPlanAmount("team_plus", "annual", "KRW") ?? 0,
         quantity: 1,
         item_variant: "annual",
       },

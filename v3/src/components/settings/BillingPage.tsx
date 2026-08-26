@@ -43,14 +43,17 @@ import {
   cancelSubscription,
   PLAN_PRICES_KRW,
 } from "../../services/billingService";
+import {
+  formatPlanPrice,
+  type PricePlan,
+} from "../../../../marblo-web/src/lib/pricing";
 
 interface PlanCard {
   type: PlanType;
   name: string;
   // Currency amount only; the locale-specific unit suffix (/mo, /seat/mo)
   // is appended at render via priceUnitKey so it localizes.
-  priceUSD: string;
-  priceKRW: string;
+  plan: PricePlan;
   priceUnitKey?: MessageKey;
   // i18n keys (billing.feature.*) — translated at render with t().
   featureKeys: MessageKey[];
@@ -60,8 +63,7 @@ const PLANS: PlanCard[] = [
   {
     type: "free",
     name: "Free",
-    priceUSD: "$0",
-    priceKRW: "₩0",
+    plan: "free",
     featureKeys: [
       "billing.feature.projects1",
       "billing.feature.agents2",
@@ -71,8 +73,7 @@ const PLANS: PlanCard[] = [
   {
     type: "pro",
     name: "Pro",
-    priceUSD: "$15",
-    priceKRW: "₩19,000",
+    plan: "pro",
     priceUnitKey: "billing.data.unit.perMonth",
     featureKeys: [
       "billing.feature.projects3",
@@ -84,8 +85,7 @@ const PLANS: PlanCard[] = [
   {
     type: "team",
     name: "Team",
-    priceUSD: "$25",
-    priceKRW: "₩29,000",
+    plan: "team",
     priceUnitKey: "billing.data.unit.perSeatMonth",
     featureKeys: [
       "billing.feature.projectsUnlimited",
@@ -98,8 +98,7 @@ const PLANS: PlanCard[] = [
   {
     type: "team_plus",
     name: "Team Plus",
-    priceUSD: "$245",
-    priceKRW: "₩290,000",
+    plan: "team_plus",
     priceUnitKey: "billing.data.unit.perMonth",
     featureKeys: [
       "billing.feature.sso",
@@ -399,7 +398,7 @@ export function BillingPage() {
       // currentPeriodEnd 로 폴백한다.
       const accessUntil = result.accessUntil
         ? new Date(result.accessUntil)
-        : subscription.currentPeriodEnd ?? null;
+        : (subscription.currentPeriodEnd ?? null);
       setCancelResult({
         alreadyCanceled: result.alreadyCanceled === true,
         accessUntil:
@@ -426,7 +425,7 @@ export function BillingPage() {
         year: "numeric",
         month: "long",
         day: "numeric",
-      }
+      },
     );
   };
 
@@ -474,8 +473,8 @@ export function BillingPage() {
                 {subscription.status === "canceled"
                   ? t("billing.accessUntil")
                   : subscription.status === "past_due"
-                  ? t("billing.periodEndPastDue")
-                  : t("billing.nextBillingDate")}
+                    ? t("billing.periodEndPastDue")
+                    : t("billing.nextBillingDate")}
               </p>
               <p className="text-sm text-white">
                 {formatDate(subscription.currentPeriodEnd)}
@@ -542,7 +541,10 @@ export function BillingPage() {
                 </button>
                 <button
                   onClick={() =>
-                    setPendingCheckout({ ...pendingCheckout, unresolved: false })
+                    setPendingCheckout({
+                      ...pendingCheckout,
+                      unresolved: false,
+                    })
                   }
                   className="rounded px-3 py-1.5 text-xs text-amber-200/80 transition-colors hover:text-amber-100"
                 >
@@ -597,11 +599,11 @@ export function BillingPage() {
             >
               <h3 className="text-lg font-semibold text-white">{plan.name}</h3>
               <p className="mt-1 text-2xl font-bold text-white">
-                {plan.priceKRW}
+                {formatPlanPrice(plan.plan, "monthly", "KRW")}
                 {plan.priceUnitKey ? t(plan.priceUnitKey) : ""}
               </p>
               <p className="text-xs text-gray-500">
-                {plan.priceUSD}
+                {formatPlanPrice(plan.plan, "monthly", "USD")}
                 {plan.priceUnitKey ? t(plan.priceUnitKey) : ""}
               </p>
 

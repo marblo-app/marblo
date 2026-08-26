@@ -54,7 +54,7 @@ interface SubscriptionReceipt {
 }
 
 async function readSubscriptionReceipt(
-  uid: string,
+  uid: string
 ): Promise<SubscriptionReceipt | null> {
   const snap = await getDoc(doc(db, "subscriptions", uid));
   if (!snap.exists()) return null;
@@ -302,8 +302,8 @@ export default function CheckoutSuccessPage() {
           const coupon = searchParams.get("coupon") || undefined;
           // ★결제 주기도 함께 전달한다. checkout 페이지가 successUrl 에
           // &billing= 로 이미 실어 보내고 있었는데 여기서 흘리고 있었다 — 그래서
-          // 연간을 고른 사용자에게 ₩190,000 을 보여주고 서버는 주기를 모른 채
-          // ₩19,000·1개월을 청구했다. 서버가 최종 정규화하므로
+          // 연간을 고른 사용자에게 연간 금액을 보여주고 서버는 주기를 모른 채
+          // 월간 금액·1개월을 청구했다. 서버가 최종 정규화하므로
           // (normalizeBillingCycle) 값이 없거나 이상해도 월간으로 안전하게 떨어진다.
           const billing = searchParams.get("billing") || undefined;
           const issue = httpsCallable<
@@ -533,24 +533,30 @@ export default function CheckoutSuccessPage() {
             <Link
               href={
                 errorMsg === t("loginRequired")
-                  ? localeHref(locale, `/auth/login?redirect=${encodeURIComponent(
-                      localeHref(locale, "/my/subscription"),
-                    )}`)
+                  ? localeHref(
+                      locale,
+                      `/auth/login?redirect=${encodeURIComponent(
+                        localeHref(locale, "/my/subscription")
+                      )}`
+                    )
                   : errorMsg === t("firstChargeFailed") && plan
-                    ? localeHref(locale, `/checkout?plan=${encodeURIComponent(
-                        plan,
+                  ? localeHref(
+                      locale,
+                      `/checkout?plan=${encodeURIComponent(
+                        plan
                       )}&billing=${encodeURIComponent(
-                        searchParams.get("billing") || "monthly",
-                      )}`)
-                    : localeHref(locale, "/pricing")
+                        searchParams.get("billing") || "monthly"
+                      )}`
+                    )
+                  : localeHref(locale, "/pricing")
               }
               className="inline-block bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg transition"
             >
               {errorMsg === t("loginRequired")
                 ? t("goToLogin")
                 : errorMsg === t("firstChargeFailed")
-                  ? t("retryFirstCharge")
-                  : t("tryAgain")}
+                ? t("retryFirstCharge")
+                : t("tryAgain")}
             </Link>
           </div>
         )}

@@ -1,4 +1,5 @@
 import { SITE_URL, localeUrl } from "@/lib/seo";
+import { getSchemaOfferPrice } from "@/lib/pricing";
 
 /**
  * Schema.org JSON-LD builders for SEO + GEO (generative-engine optimization).
@@ -117,11 +118,14 @@ export function buildWebSiteSchema(locale?: string) {
 }
 
 /**
- * SoftwareApplication node for the Marblo desktop app. Offers reflect the
- * live pricing tiers (Free ₩0, Pro ₩19,000/mo). No aggregateRating is emitted
- * because there is no real review data to back it.
+ * SoftwareApplication node for the Marblo desktop app. Offers reflect the live
+ * pricing tiers from the pricing module. No aggregateRating is emitted because
+ * there is no real review data to back it.
  */
 export function buildSoftwareApplicationSchema(locale: string) {
+  const freeOffer = getSchemaOfferPrice("free", locale);
+  const proOffer = getSchemaOfferPrice("pro", locale);
+
   return {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
@@ -134,20 +138,26 @@ export function buildSoftwareApplicationSchema(locale: string) {
     description: pick(locale, APP_DESCRIPTION),
     publisher: { "@id": ORG_ID },
     offers: [
-      {
-        "@type": "Offer",
-        name: "Free",
-        price: "0",
-        priceCurrency: "KRW",
-        category: "free",
-      },
-      {
-        "@type": "Offer",
-        name: "Pro",
-        price: "19000",
-        priceCurrency: "KRW",
-        category: "subscription",
-      },
+      ...(freeOffer
+        ? [
+            {
+              "@type": "Offer",
+              name: "Free",
+              ...freeOffer,
+              category: "free",
+            },
+          ]
+        : []),
+      ...(proOffer
+        ? [
+            {
+              "@type": "Offer",
+              name: "Pro",
+              ...proOffer,
+              category: "subscription",
+            },
+          ]
+        : []),
     ],
   };
 }

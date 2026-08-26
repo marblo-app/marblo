@@ -23,6 +23,10 @@ import {
   stringifyJsonLd,
 } from "@/lib/schema";
 import { localeHref } from "@/i18n/routing";
+import { formatPlanPrice } from "@/lib/pricing";
+
+const PRO_PRICE_KRW = formatPlanPrice("pro", "monthly", "KRW");
+const PRO_PRICE_USD = formatPlanPrice("pro", "monthly", "USD");
 
 // Answer-first FAQ for GEO (generative-engine optimization). Each answer opens
 // with the direct, citable claim so LLM crawlers can lift a self-contained
@@ -44,8 +48,11 @@ const HOME_FAQS: Record<
     },
     {
       question: "마블로 가격은 얼마인가요?",
-      answer:
-        "마블로 Free 플랜은 월 ₩0이고 Pro 플랜은 월 ₩19,000(약 $15)입니다. AI 사용료는 별도이며, 각 에이전트는 사용자의 기존 Claude Code·Codex 등 AI 계정(또는 API 키)을 연결해 운영합니다.",
+      answer: `마블로 Free 플랜은 월 ${formatPlanPrice(
+        "free",
+        "monthly",
+        "KRW"
+      )}이고 Pro 플랜은 월 ${PRO_PRICE_KRW}입니다. AI 사용료는 별도이며, 각 에이전트는 사용자의 기존 Claude Code·Codex 등 AI 계정(또는 API 키)을 연결해 운영합니다.`,
     },
     {
       question: "마블로는 맥과 윈도우에서 모두 작동하나요?",
@@ -72,8 +79,11 @@ const HOME_FAQS: Record<
     },
     {
       question: "How much does Marblo cost?",
-      answer:
-        "Marblo's Free plan is ₩0/month and the Pro plan is ₩19,000/month (about $15). AI usage is billed separately — each agent runs on your own existing AI accounts (Claude Code, Codex, etc.) that you connect, or an API key.",
+      answer: `Marblo's Free plan is ${formatPlanPrice(
+        "free",
+        "monthly",
+        "USD"
+      )}/month and the Pro plan is ${PRO_PRICE_USD}/month. AI usage is billed separately — each agent runs on your own existing AI accounts (Claude Code, Codex, etc.) that you connect, or an API key.`,
     },
     {
       question: "Does Marblo work on both Mac and Windows?",
@@ -101,7 +111,7 @@ const HOME_FAQS: Record<
     {
       question: "Marbloの料金はいくらですか?",
       answer:
-        "MarbloのFreeプランは月額₩0、Proプランは月額₩19,000(約$15)です。AIの利用料金は別途で、各エージェントはユーザーが連携する既存のAIアカウント（Claude Code・Codexなど）またはAPIキーで動作します。",
+        "MarbloのFreeプランは無料です。Proプランの日本円価格は未定です。AIの利用料金は別途で、各エージェントはユーザーが連携する既存のAIアカウント（Claude Code・Codexなど）またはAPIキーで動作します。",
     },
     {
       question: "MarbloはMacとWindowsの両方で動作しますか?",
@@ -177,7 +187,7 @@ export default function HomePage() {
   };
 
   const prices: Record<string, string> = {
-    marblo: "$19/mo",
+    marblo: `${PRO_PRICE_USD}/mo`,
     claudeCode: "BYO",
     codexCli: "BYO",
     orca: "OSS",
@@ -460,17 +470,19 @@ export default function HomePage() {
                     <td className="py-4 px-4 text-zinc-300">
                       {t(`comparison.rows.${row}`)}
                     </td>
-                    {["marblo", "claudeCode", "codexCli", "orca"].map((tool) => (
-                      <td key={tool} className="text-center py-4 px-4">
-                        {comparisonData[row][tool] === true ? (
-                          <Check className="w-5 h-5 text-green-400 mx-auto" />
-                        ) : comparisonData[row][tool] === "partial" ? (
-                          <Minus className="w-5 h-5 text-yellow-400 mx-auto" />
-                        ) : (
-                          <X className="w-5 h-5 text-zinc-600 mx-auto" />
-                        )}
-                      </td>
-                    ))}
+                    {["marblo", "claudeCode", "codexCli", "orca"].map(
+                      (tool) => (
+                        <td key={tool} className="text-center py-4 px-4">
+                          {comparisonData[row][tool] === true ? (
+                            <Check className="w-5 h-5 text-green-400 mx-auto" />
+                          ) : comparisonData[row][tool] === "partial" ? (
+                            <Minus className="w-5 h-5 text-yellow-400 mx-auto" />
+                          ) : (
+                            <X className="w-5 h-5 text-zinc-600 mx-auto" />
+                          )}
+                        </td>
+                      )
+                    )}
                   </tr>
                 ))}
                 <tr className="border-b border-zinc-800/50">

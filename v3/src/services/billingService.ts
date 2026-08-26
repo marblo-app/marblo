@@ -8,6 +8,7 @@ import {
 } from "./firestore";
 import { getPlanLimits } from "../lib/planLimits";
 import { t } from "../lib/i18n";
+import { getPlanAmount } from "../../../marblo-web/src/lib/pricing";
 
 const COLLECTION = "subscriptions";
 const DATE_FIELDS = ["currentPeriodStart", "currentPeriodEnd", "createdAt"];
@@ -48,10 +49,10 @@ export function canUseFeature(
 // Team Plus는 팀 플로어(₩290,000 = 5시트 포함, 추가 시트당 ₩59,000).
 // Enterprise는 별도 협의 (0 = "Contact Sales" sentinel).
 export const PLAN_PRICES_KRW: Record<Exclude<PlanType, "free">, number> = {
-  pro: 19000,
-  team: 29000,
-  team_plus: 290000,
-  enterprise: 0,
+  pro: getPlanAmount("pro", "monthly", "KRW") ?? 0,
+  team: getPlanAmount("team", "monthly", "KRW") ?? 0,
+  team_plus: getPlanAmount("team_plus", "monthly", "KRW") ?? 0,
+  enterprise: getPlanAmount("enterprise", "monthly", "KRW") ?? 0,
 };
 
 // ─── Subscription CRUD ───────────────────────────────────────────

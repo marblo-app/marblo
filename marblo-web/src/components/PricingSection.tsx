@@ -5,65 +5,33 @@ import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
 import { Check } from "lucide-react";
 import { localeHref } from "@/i18n/routing";
+import {
+  PRICE_PLANS,
+  currencyForLocale,
+  formatPlanPrice,
+  getPlanAmount,
+  type BillingCycle,
+  type PricePlan,
+} from "@/lib/pricing";
 
-const plans = ["free", "pro", "team", "team_plus", "enterprise"] as const;
-type Plan = typeof plans[number];
-
-// Monthly prices (KRW, source of truth: v3.1 launch master plan §2.1)
-// team       — per-seat (₩29,000/seat)
-// team_plus  — per-team floor: ₩290,000 = 5 seats incl., +₩59,000 per extra seat
-const MONTHLY_PRICES: Record<Plan, number> = {
-  free: 0,
-  pro: 19000,
-  team: 29000,
-  team_plus: 290000,
-  enterprise: 0,
-};
+const plans = PRICE_PLANS;
 
 export default function PricingSection() {
   const t = useTranslations("pricing");
   const locale = useLocale();
   const [isAnnual, setIsAnnual] = useState(false);
+  const billing: BillingCycle = isAnnual ? "annual" : "monthly";
+  const currency = currencyForLocale(locale);
 
-  const getPrice = (plan: Plan) => {
-    const monthly = MONTHLY_PRICES[plan];
-    if (plan === "free" || plan === "enterprise") return monthly;
-    return isAnnual ? monthly * 10 : monthly; // annual = ×10 (2 months free)
-  };
-
-  const getDisplayPrice = (plan: Plan) => {
-    const price = getPrice(plan);
-    if (plan === "free")
-      return locale === "ko" ? "\u20A90" : locale === "ja" ? "\u00A50" : "$0";
+  const getDisplayPrice = (plan: PricePlan) => {
     if (plan === "enterprise") return null;
-
-    if (locale === "ko") return `\u20A9${price.toLocaleString()}`;
-    if (locale === "ja") {
-      // JPY pricing per master plan \u00A72.1
-      const jpyMonthly: Partial<Record<Plan, number>> = {
-        pro: 2200,
-        team: 3700,
-        team_plus: 36500, // per-team floor (5 seats × ¥7,300)
-      };
-      const monthly = jpyMonthly[plan] ?? 0;
-      const jpy = isAnnual ? monthly * 10 : monthly;
-      return `\u00A5${jpy.toLocaleString()}`;
-    }
-    // USD pricing per master plan \u00A72.1
-    const usdMonthly: Partial<Record<Plan, number>> = {
-      pro: 15,
-      team: 25,
-      team_plus: 245, // per-team floor (5 seats × $49)
-    };
-    const monthly = usdMonthly[plan] ?? 0;
-    const usd = isAnnual ? monthly * 10 : monthly;
-    return `$${usd}`;
+    return formatPlanPrice(plan, billing, currency) ?? t("pricePending");
   };
 
   // Team is billed per-seat; Team Plus is a per-team floor (5 seats incl.).
-  const isPerSeat = (plan: Plan) => plan === "team";
+  const isPerSeat = (plan: PricePlan) => plan === "team";
 
-  const getPeriod = (plan: Plan) => {
+  const getPeriod = (plan: PricePlan) => {
     if (plan === "free")
       return locale === "ko"
         ? "\uC601\uAD6C \uBB34\uB8CC"
@@ -185,29 +153,30 @@ export default function PricingSection() {
                       {t("team_plus.note")}
                     </p>
                   )}
-                  {plan !== "free" && (
-                    <div className="text-xs text-zinc-300 mt-3 rounded-lg border border-zinc-700/70 bg-zinc-800/40 px-3 py-2 leading-relaxed">
-                      <p>
-                        {isAnnual
-                          ? t("autoRenew.annual")
-                          : t("autoRenew.monthly")}
-                      </p>
-                      {/* 토스 계약과정 FAQ §3(무형재화): 서비스 제공기간이 상품
+                  {plan !== "free" &&
+                    getPlanAmount(plan, billing, currency) != null && (
+                      <div className="text-xs text-zinc-300 mt-3 rounded-lg border border-zinc-700/70 bg-zinc-800/40 px-3 py-2 leading-relaxed">
+                        <p>
+                          {isAnnual
+                            ? t("autoRenew.annual")
+                            : t("autoRenew.monthly")}
+                        </p>
+                        {/* 토스 계약과정 FAQ §3(무형재화): 서비스 제공기간이 상품
                           설명에서 명확히 확인되어야 한다. 근거는
                           v3/functions/src/billing.ts 의 nextPeriodEnd() =
                           월간 +1개월 / 연간 +12개월, 그리고
                           selectDueForCharge 가 만료 전 선청구를 막으므로
                           사전결제 예약기간은 0 이다. */}
-                      <p className="mt-1 text-zinc-400">
-                        {isAnnual
-                          ? t("servicePeriod.annual")
-                          : t("servicePeriod.monthly")}
-                      </p>
-                      <p className="mt-1 text-zinc-400">
-                        {t("serviceDelivery")}
-                      </p>
-                    </div>
-                  )}
+                        <p className="mt-1 text-zinc-400">
+                          {isAnnual
+                            ? t("servicePeriod.annual")
+                            : t("servicePeriod.monthly")}
+                        </p>
+                        <p className="mt-1 text-zinc-400">
+                          {t("serviceDelivery")}
+                        </p>
+                      </div>
+                    )}
                 </div>
               )}
 
@@ -240,9 +209,12 @@ export default function PricingSection() {
                   </Link>
                 ) : (
                   <Link
-                    href={localeHref(locale, `/checkout?plan=${plan}${
-                      isAnnual ? "&billing=annual" : ""
-                    }`)}
+                    href={localeHref(
+                      locale,
+                      `/checkout?plan=${plan}${
+                        isAnnual ? "&billing=annual" : ""
+                      }`
+                    )}
                     className={`block w-full text-center py-3 rounded-lg transition font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 ${
                       highlighted
                         ? "bg-indigo-600 hover:bg-indigo-500 text-white"
