@@ -60,4 +60,4 @@ links: [[do-not-retry]], [[no-live-gui-verify]], [[telemetry-identity-axes]], [[
 
 ## Backlinks
 
-- [[do-not-retry]] · [[no-live-gui-verify]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]] · [[verify-result-row]] · [[counting-unit-first]] · [[decision-sentence-first]] · [[overview]]
+- [[do-not-retry]] · [[no-live-gui-verify]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]] · [[verify-result-row]] · [[counting-unit-first]] · [[decision-sentence-first]] · [[overview]] · [[functions-deploy-env-and-bq-views]] · [[ci-empty-steps-is-billing]] · [[verify-without-gui]]

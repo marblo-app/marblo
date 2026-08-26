@@ -52,4 +52,4 @@ UI를 바꿨으면 브라우저로 확인해야 하는가. 예외는 언제인�
 
 ## Backlinks
 
-- [[empty-query-first]] · [[do-not-retry]] · [[overview]] · [[progress]]
+- [[empty-query-first]] · [[do-not-retry]] · [[overview]] · [[progress]] · [[verify-without-gui]] · [[human-only-ops-backlog]] · [[functions-deploy-env-and-bq-views]]

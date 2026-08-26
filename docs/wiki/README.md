@@ -3,7 +3,7 @@ title: 마블로 지식위키
 tags: [meta/index, status/normative]
 status: active
 date: 2026-08-26
-links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVENTION]], [[TAXONOMY]], [[LINK-MAP]], [[LINT]]
+links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVENTION]], [[TAXONOMY]], [[LINK-MAP]], [[LINT]], [[functions-deploy-env-and-bq-views]], [[verify-without-gui]], [[human-only-ops-backlog]]
 ---
 
 # 마블로 지식위키
@@ -35,7 +35,8 @@ links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-
 | 비율·합계를 말해야 한다 | [[counting-unit-first]] |
 | 대시보드 지표를 남길지 버릴지 판단한다 | [[decision-sentence-first]] |
 | 모델·라우팅 성과를 학습셋으로 보려 한다 | [[routing-label-coverage]] |
-| 화면으로 확인하고 싶다 | [[no-live-gui-verify]] |
+| 화면으로 확인하고 싶다 | [[no-live-gui-verify]] · [[verify-without-gui]] |
+| 배포·릴리스·CI 가 이상하다 | [[functions-deploy-env-and-bq-views]] · [[ci-empty-steps-is-billing]] · [[human-only-ops-backlog]] |
 | 강의·마케팅 노트를 어디에 두나 | 아래 **어디에 두나** |
 | 노트를 어떻게 쓰나 | `/wiki-note` · [CONVENTION](_meta/CONVENTION.md) |
 | 커밋 전에 뭐 돌리나 | `/wiki-ingest` · [LINT](_meta/LINT.md) |
@@ -66,7 +67,7 @@ links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-
 | 20 제약 | [20-constraints](20-constraints/README.md) | [[no-live-gui-verify]] |
 | 30 탐구 | [30-investigations](30-investigations/README.md) | [[post-spawn-telemetry-gap]] |
 | 40 방법론 | [40-methodology](40-methodology/README.md) | [[empty-query-first]] · [[verify-result-row]] · [[counting-unit-first]] · [[decision-sentence-first]] · [[routing-label-coverage]] |
-| 50 운영 | [50-operations](50-operations/README.md) | 스텁 (배포·강의 운영·캠페인 결과) |
+| 50 운영 | [50-operations](50-operations/README.md) | [[functions-deploy-env-and-bq-views]] · [[release-cut-at-build]] · [[github-app-install-after-deploy]] · [[payment-live-key-pg-env-bundle]] · [[ci-empty-steps-is-billing]] · [[verify-without-gui]] · [[human-only-ops-backlog]] |
 | meta | [_meta](_meta/CONVENTION.md) | 규약 · 사전 · 원장 · 린트 |
 
 ## 판정 분포

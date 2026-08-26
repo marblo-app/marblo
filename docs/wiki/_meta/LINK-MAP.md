@@ -3,7 +3,7 @@ title: 링크 맵
 tags: [meta/linkmap, status/living]
 status: active
 date: 2026-08-26
-links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]]
+links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[human-only-ops-backlog]]
 ---
 
 # 링크 맵
@@ -41,6 +41,13 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 | `progress` | `00-foundations/progress.md` | foundations | active | snapshot |
 | `post-spawn-telemetry-gap` | `30-investigations/post-spawn-telemetry-gap.md` | investigations | verified | adopt |
 | `marblo-bot-messaging` | `10-offerings/marblo-bot-messaging.md` | offerings | draft | — |
+| `functions-deploy-env-and-bq-views` | `50-operations/functions-deploy-env-and-bq-views.md` | operations | verified | — |
+| `release-cut-at-build` | `50-operations/release-cut-at-build.md` | operations | verified | — |
+| `github-app-install-after-deploy` | `50-operations/github-app-install-after-deploy.md` | operations | verified | — |
+| `payment-live-key-pg-env-bundle` | `50-operations/payment-live-key-pg-env-bundle.md` | operations | verified | — |
+| `ci-empty-steps-is-billing` | `50-operations/ci-empty-steps-is-billing.md` | operations | verified | — |
+| `verify-without-gui` | `50-operations/verify-without-gui.md` | operations | verified | — |
+| `human-only-ops-backlog` | `50-operations/human-only-ops-backlog.md` | operations | active | — |
 
 ## 간선
 
@@ -103,6 +110,35 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 | `post-spawn-telemetry-gap` | `empty-query-first` |
 | `post-spawn-telemetry-gap` | `do-not-retry` |
 | `marblo-bot-messaging` | `CONVENTION` |
+| `functions-deploy-env-and-bq-views` | `empty-query-first` |
+| `functions-deploy-env-and-bq-views` | `no-live-gui-verify` |
+| `functions-deploy-env-and-bq-views` | `verify-without-gui` |
+| `functions-deploy-env-and-bq-views` | `ci-empty-steps-is-billing` |
+| `functions-deploy-env-and-bq-views` | `human-only-ops-backlog` |
+| `release-cut-at-build` | `human-only-ops-backlog` |
+| `release-cut-at-build` | `ci-empty-steps-is-billing` |
+| `release-cut-at-build` | `verify-without-gui` |
+| `github-app-install-after-deploy` | `functions-deploy-env-and-bq-views` |
+| `github-app-install-after-deploy` | `human-only-ops-backlog` |
+| `github-app-install-after-deploy` | `verify-without-gui` |
+| `payment-live-key-pg-env-bundle` | `functions-deploy-env-and-bq-views` |
+| `payment-live-key-pg-env-bundle` | `human-only-ops-backlog` |
+| `payment-live-key-pg-env-bundle` | `verify-without-gui` |
+| `ci-empty-steps-is-billing` | `verify-without-gui` |
+| `ci-empty-steps-is-billing` | `release-cut-at-build` |
+| `ci-empty-steps-is-billing` | `empty-query-first` |
+| `ci-empty-steps-is-billing` | `human-only-ops-backlog` |
+| `verify-without-gui` | `no-live-gui-verify` |
+| `verify-without-gui` | `empty-query-first` |
+| `verify-without-gui` | `ci-empty-steps-is-billing` |
+| `verify-without-gui` | `functions-deploy-env-and-bq-views` |
+| `human-only-ops-backlog` | `github-app-install-after-deploy` |
+| `human-only-ops-backlog` | `release-cut-at-build` |
+| `human-only-ops-backlog` | `payment-live-key-pg-env-bundle` |
+| `human-only-ops-backlog` | `ci-empty-steps-is-billing` |
+| `human-only-ops-backlog` | `verify-without-gui` |
+| `human-only-ops-backlog` | `functions-deploy-env-and-bq-views` |
+| `human-only-ops-backlog` | `no-live-gui-verify` |
 
 ## 허브
 
@@ -126,3 +162,10 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 | `progress` | [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) · [marblo-web/src/lib/paymentProvider.ts](../../../marblo-web/src/lib/paymentProvider.ts) |
 | `post-spawn-telemetry-gap` | [v3/docs/post-spawn-telemetry-gap-2026-08-25.md](../../../v3/docs/post-spawn-telemetry-gap-2026-08-25.md) · [v3/functions/src/postSpawnTelemetryGuard.ts](../../../v3/functions/src/postSpawnTelemetryGuard.ts) |
 | `marblo-bot-messaging` | [v3/src/lib/botDefinition.ts](../../../v3/src/lib/botDefinition.ts) · [v3/src/services/botDefinitionService.ts](../../../v3/src/services/botDefinitionService.ts) · [v3/src/components/agents/MarbloBotGallery.tsx](../../../v3/src/components/agents/MarbloBotGallery.tsx) · [v3/electron/assistant-triggers.ts](../../../v3/electron/assistant-triggers.ts) · [v3/docs/assistant-tab-design-2026-08-24.md](../../../v3/docs/assistant-tab-design-2026-08-24.md) · [marblo-web/docs/beta-launch/YOUTUBE-SCRIPT.md](../../../marblo-web/docs/beta-launch/YOUTUBE-SCRIPT.md) |
+| `functions-deploy-env-and-bq-views` | [v3/functions/scripts/check-deploy-env.mjs](../../../v3/functions/scripts/check-deploy-env.mjs) · [v3/docs/install-unified-view-2026-08-24.md](../../../v3/docs/install-unified-view-2026-08-24.md) |
+| `release-cut-at-build` | [v3/docs/electron_updater_runbook.md](../../../v3/docs/electron_updater_runbook.md) · [v3/docs/signing_runbook.md](../../../v3/docs/signing_runbook.md) |
+| `github-app-install-after-deploy` | [v3/docs/github-app-registration-values-2026-08-21.md](../../../v3/docs/github-app-registration-values-2026-08-21.md) |
+| `payment-live-key-pg-env-bundle` | [docs/payment/portone-v2-phase1-checklist.md](../../payment/portone-v2-phase1-checklist.md) · [v3/functions/src/billing.ts](../../../v3/functions/src/billing.ts) |
+| `ci-empty-steps-is-billing` | [v3/docs/github-org-migration-plan.md](../../../v3/docs/github-org-migration-plan.md) |
+| `verify-without-gui` | [AGENTS.md](../../../AGENTS.md) · [v3/functions/package.json](../../../v3/functions/package.json) · [marblo-web/package.json](../../../marblo-web/package.json) |
+| `human-only-ops-backlog` | [v3/docs/github-app-registration-values-2026-08-21.md](../../../v3/docs/github-app-registration-values-2026-08-21.md) · [AGENTS.md](../../../AGENTS.md) |

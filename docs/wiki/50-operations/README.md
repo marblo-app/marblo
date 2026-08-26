@@ -1,9 +1,9 @@
 ---
 title: 50 운영 — 바깥과 부딪힌 기록
 tags: [domain/operations, meta/index]
-status: stub
-date: 2026-08-24
-links: [[CONVENTION]]
+status: active
+date: 2026-08-26
+links: [[CONVENTION]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[human-only-ops-backlog]], [[no-live-gui-verify]]
 ---
 
 # 50-operations
@@ -17,4 +17,16 @@ links: [[CONVENTION]]
 | 캠페인 **결과** (CAC, 유입, 기각된 채널) | 살아 있는 GTM 전략 → 10 |
 | 고객 이슈, 공지 | |
 
-1판은 노트가 없다.
+## 런북 (2026-08-26)
+
+오늘 실제로 밟은 순서 함정이다. 추상 설명이 아니라 명령·경로가 노트 안에 있다.
+
+| 노트 | 한 줄 |
+| --- | --- |
+| [[functions-deploy-env-and-bq-views]] | 분석 변경은 함수 배포 + BigQuery 뷰 재생성이 한 세트다 |
+| [[release-cut-at-build]] | 릴리스 브랜치는 빌드 직전에 컷한다. 미리 컷하면 낡는다 |
+| [[github-app-install-after-deploy]] | GitHub App 은 등록 → 키 → 함수 배포 → 그다음 설치 |
+| [[payment-live-key-pg-env-bundle]] | 포트원 실거래 키와 `PORTONE_PG_ENV` 를 한 묶음으로 바꾼다 |
+| [[ci-empty-steps-is-billing]] | job `steps` 가 0 이면 코드가 아니라 GitHub 결제 차단 |
+| [[verify-without-gui]] | 창 없이 검증. functions 는 node:test, marblo-web 은 `npm test` |
+| [[human-only-ops-backlog]] | 사람만 남은 일 6건 (릴리스 컷·GitHub App·어드민 확인·가격·포트원 승인·Paddle 신청) |

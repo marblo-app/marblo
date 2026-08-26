@@ -38,6 +38,10 @@ links: [[CONVENTION]], [[do-not-retry]], [[empty-query-first]]
 - `topic/agents`
 - `topic/lectures`
 - `topic/marketing`
+- `topic/deploy`
+- `topic/ci`
+- `topic/payments`
+- `topic/github`
 
 ## verdict/
 
