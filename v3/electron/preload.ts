@@ -45,6 +45,34 @@ if (typeof __SENTRY_PRELOAD_ENABLED__ === "undefined") {
 }
 
 const isNewWindow = process.argv.includes("--marblo-new-window=1");
+const LOCALE_STORAGE_KEY = "marblo:locale";
+
+interface RendererLocaleGlobals {
+  localStorage?: {
+    getItem: (key: string) => string | null;
+  };
+  navigator?: {
+    language?: string;
+  };
+}
+
+function readRendererLocaleForMain(): string | undefined {
+  const rendererGlobal = globalThis as typeof globalThis &
+    RendererLocaleGlobals;
+  try {
+    const saved = rendererGlobal.localStorage?.getItem(LOCALE_STORAGE_KEY);
+    if (saved === "ko" || saved === "en") return saved;
+  } catch {
+    // Locale is optional for orchestrator launch; main falls back to English.
+  }
+
+  try {
+    const nav = rendererGlobal.navigator?.language?.toLowerCase() ?? "";
+    return nav.startsWith("ko") ? "ko" : "en";
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * env-swap 벤더 크레덴셜의 **값 없는** 스냅샷(main 의 `vendorSecretsSnapshot` 과
@@ -504,6 +532,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         rootPath,
         resumeSessionId,
         model,
+        locale: readRendererLocaleForMain(),
       }),
     switch: (args: {
       projectId: string;

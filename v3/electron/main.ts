@@ -9482,7 +9482,7 @@ ipcMain.handle(
   "orchestratorSession:launch",
   async (
     event,
-    { projectId, rootPath, resumeSessionId, enabledModels, model }
+    { projectId, rootPath, resumeSessionId, enabledModels, model, locale }
   ) => {
     const port = bridgeServer.getPort();
     // Resolve '~' to actual home directory
@@ -9630,6 +9630,7 @@ ipcMain.handle(
         codexModelOverride: orchestratorPins.codexModel,
         codexEffortOverride: orchestratorPins.codexEffort,
         nativeModelOverride: orchestratorPins.nativeModel,
+        locale: typeof locale === "string" ? locale : undefined,
         // 임계 이하 잔액 경고 — 사장님이 말한 "내부 터미널 충전 알림" 이 여기서
         // 나간다. 차단이 아니므로 스폰은 그대로 진행된다.
         ...(orchVendorGate.bootNotice

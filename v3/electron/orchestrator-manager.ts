@@ -150,6 +150,7 @@ interface OrchResumeLock {
 }
 
 type OrchestratorMcpEnv = Record<string, string>;
+type BoardOrchestratorOpeningLocale = "ko" | "en";
 
 export interface CodexMarbloSurfaceReport {
   codexHome: string;
@@ -164,8 +165,30 @@ export interface CodexMarbloSurfaceReport {
 const SECRET_OUTPUT_GUARDRAIL =
   "Security guardrail: never cat/print/log raw `.env`, `.mcp.json`, firebase-config, service account JSON, OAuth/Toss/Paddle/API key files. When checking config, report only existence, paths, or masked values.";
 
-const BOARD_ORCHESTRATOR_ONBOARDING =
-  "Opening reply for a new board orchestrator session: greet the user first in a friendly way, mention tf skill examples such as /tf-add, /tf-start, and /tf-status, and say: 작업 요청하시면 보드에 티켓 생성하고 에이전트 스폰해드릴게요. Do not show boot diagnostics or internal startup logs as the opening reply.";
+const BOARD_ORCHESTRATOR_OPENING_LINES: Record<
+  BoardOrchestratorOpeningLocale,
+  string
+> = {
+  ko: "작업 요청하시면 보드에 티켓 생성하고 에이전트 스폰해드릴게요.",
+  en: "When you request work, I'll create tickets on the board and spawn agents for you.",
+};
+
+export function selectBoardOrchestratorOpeningLine(
+  locale: string | null | undefined,
+): string {
+  return locale === "ko" || locale === "en"
+    ? BOARD_ORCHESTRATOR_OPENING_LINES[locale]
+    : BOARD_ORCHESTRATOR_OPENING_LINES.en;
+}
+
+export function buildBoardOrchestratorOnboarding(
+  locale: string | null | undefined,
+): string {
+  const openingLine = selectBoardOrchestratorOpeningLine(locale);
+  return `Opening reply for a new board orchestrator session: greet the user first in the same language as this localized opening message, mention tf skill examples such as /tf-add, /tf-start, and /tf-status, and say this localized opening message verbatim: ${JSON.stringify(
+    openingLine,
+  )}. Do not show boot diagnostics or internal startup logs as the opening reply.`;
+}
 
 const BOARD_ORCHESTRATOR_ROUTING_GATE =
   "Routing gate for every user turn: A) work, artifacts, code changes, execution, or multi-step requests => create_task or create_tasks_bulk, then dispatch_task to a physical Marblo agent and leave a board ticket. Do not solve these inline. B) questions, status checks, approvals, or clarifications => answer directly with no ticket. If ambiguous, prefer A. Never use Claude Code's native Task tool or logical subagents for A; route through physical dispatch_task. Codex orchestrators must also avoid inline execution for A. Only trivial read-only checks may stay in the orchestrator session.";
@@ -309,6 +332,7 @@ export function buildCodexBootHealthSummary(input: {
 
 export function buildCodexBootInstructions(input: {
   surface: CodexMarbloSurfaceReport | null;
+  locale?: string | null;
 }): string {
   const fallbackLine =
     input.surface?.fallbackCliPresent && input.surface.fallbackCliPath
@@ -317,7 +341,7 @@ export function buildCodexBootInstructions(input: {
   return [
     "Codex orchestrator startup:",
     'First call get_agent_skill("orchestrator") and follow that skill.',
-    BOARD_ORCHESTRATOR_ONBOARDING,
+    buildBoardOrchestratorOnboarding(input.locale),
     BOARD_ORCHESTRATOR_ROUTING_GATE,
     `Required Marblo tools: ${CODEX_ORCH_REQUIRED_MCP_TOOLS.join(", ")}.`,
     "For /tf-add use create_task; for /tf-start use create_tasks_bulk then dispatch_task; for /tf-status use get_all_tasks.",
@@ -377,6 +401,11 @@ export interface OrchestratorSession {
 
 export interface OrchestratorLaunchOptions {
   modelOverride?: ModelType;
+  /**
+   * Renderer locale at spawn time. Optional by design: if the renderer cannot
+   * provide it, onboarding still boots and falls back to English.
+   */
+  locale?: string;
   /**
    * claude 오케를 띄울 **구체 모델 id**(`--model` 값). 모델 셀렉터가 Claude 변형
    * (Fable 5 / Opus 4.8 …)을 고르면 채워진다. undefined 면 종전대로 플래그 없이
@@ -1457,7 +1486,10 @@ export class OrchestratorManager {
       }
       const codexOrchestratorInstructions =
         launchConfig.model === "gpt"
-          ? buildCodexBootInstructions({ surface: codexSurface })
+          ? buildCodexBootInstructions({
+              surface: codexSurface,
+              locale: launchOptions?.locale,
+            })
           : "";
       const baseInitialPrompt =
         this.kind === "mission"
@@ -1467,7 +1499,7 @@ export class OrchestratorManager {
               SECRET_OUTPUT_GUARDRAIL,
               codexOrchestratorInstructions,
               "You drive exactly ONE mission. Do NOT start anything on your own.",
-              "Wait for the conductor (지휘자) to grant the first step via a system message, then execute that step with run_skill and report with mission_step_done.",
+              "Wait for the conductor to grant the first step via a system message, then execute that step with run_skill and report with mission_step_done.",
             ]
               .filter(Boolean)
               .join(" ")
@@ -1475,7 +1507,9 @@ export class OrchestratorManager {
               "You are the Marblo Orchestrator Agent.",
               `Read the orchestrator skill file: use get_agent_skill("orchestrator")`,
               SECRET_OUTPUT_GUARDRAIL,
-              launchConfig.model === "gpt" ? "" : BOARD_ORCHESTRATOR_ONBOARDING,
+              launchConfig.model === "gpt"
+                ? ""
+                : buildBoardOrchestratorOnboarding(launchOptions?.locale),
               launchConfig.model === "gpt"
                 ? ""
                 : BOARD_ORCHESTRATOR_ROUTING_GATE,
