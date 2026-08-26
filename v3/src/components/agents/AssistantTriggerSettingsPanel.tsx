@@ -19,6 +19,8 @@ import {
 } from "../../lib/assistantTriggerSettings";
 import { useProjectStore } from "../../stores/projectStore";
 import type { Project } from "../../types/project";
+import { SlackChannelPanel } from "../harness/SlackChannelPanel";
+import { TelegramChannelPanel } from "../harness/TelegramChannelPanel";
 
 interface AssistantTriggerSettingsPanelProps {
   project: Project;
@@ -36,6 +38,8 @@ interface SlackChannelStatusAPI {
 interface TelegramChannelStatusAPI {
   status: (projectId: string) => Promise<ChannelStatus>;
 }
+
+type TriggerTab = "schedule" | "conditions" | "outputs";
 
 const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
@@ -119,8 +123,14 @@ export function AssistantTriggerSettingsPanel({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<TriggerTab>("schedule");
 
   const isAssistantProject = project.kind === "assistant";
+  const tabs: Array<{ id: TriggerTab; label: string }> = [
+    { id: "schedule", label: "스케줄" },
+    { id: "conditions", label: "조건" },
+    { id: "outputs", label: "출력채널" },
+  ];
 
   useEffect(() => {
     setSettings(normalizeAssistantTriggerSettings(project.assistantTriggers));
@@ -225,15 +235,26 @@ export function AssistantTriggerSettingsPanel({
         </button>
       </div>
 
-      {!isAssistantProject && (
-        <div className="mb-4 flex items-start gap-2 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+      <div
+        className={`mb-4 flex items-start gap-2 rounded border px-3 py-2 text-sm ${
+          isAssistantProject
+            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+            : "border-amber-500/40 bg-amber-500/10 text-amber-100"
+        }`}
+      >
+        {isAssistantProject ? (
+          <CheckCircle2 size={16} className="mt-0.5 flex-shrink-0" />
+        ) : (
           <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
-          <span>
-            이 프로젝트는 assistant 프로젝트가 아닙니다. 설정은 볼 수 있지만,
-            엔진은 assistant 프로젝트에서만 활성화됩니다.
-          </span>
-        </div>
-      )}
+        )}
+        <span>
+          엔진은 <code>kind === "assistant"</code> 프로젝트만 폴링합니다. 현재
+          프로젝트 종류: <code>{project.kind ?? "unknown"}</code>
+          {isAssistantProject
+            ? " — 저장 후 활성화 대상입니다."
+            : " — 설정은 저장할 수 있어도 실제 폴링은 돌지 않습니다."}
+        </span>
+      </div>
 
       {(message || error) && (
         <div
@@ -283,7 +304,33 @@ export function AssistantTriggerSettingsPanel({
         </label>
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div
+        role="tablist"
+        aria-label="트리거 설정 분류"
+        className="mb-4 flex flex-wrap gap-1 border-b border-gray-700"
+      >
+        {tabs.map((tab) => {
+          const selected = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => setActiveTab(tab.id)}
+              className={`border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
+                selected
+                  ? "border-blue-500 text-gray-100"
+                  : "border-transparent text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeTab === "schedule" && (
         <section className="rounded border border-gray-700 bg-gray-900 p-4">
           <div className="mb-3 flex items-center gap-2">
             <CalendarClock size={17} className="text-blue-300" />
@@ -339,173 +386,195 @@ export function AssistantTriggerSettingsPanel({
             />
           </label>
         </section>
+      )}
 
-        <section className="rounded border border-gray-700 bg-gray-900 p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <CalendarClock size={17} className="text-emerald-300" />
-            <h3 className="text-sm font-semibold">Calendar 조건</h3>
-          </div>
-          <label className="mb-3 flex items-center gap-2 text-sm text-gray-300">
-            <input
-              type="checkbox"
-              checked={settings.calendar?.enabled ?? false}
-              onChange={(event) =>
-                setSettings((prev) => ({
-                  ...prev,
-                  calendar: {
-                    ...(prev.calendar ?? {
-                      upcomingMinutes: 15,
-                      pollMinutes: 5,
-                    }),
-                    enabled: event.target.checked,
-                  },
-                }))
-              }
-              className="h-4 w-4 rounded border-gray-600 bg-gray-950"
-            />
-            임박 일정 감지
-          </label>
-          <label className="mb-3 block">
-            <span className="mb-1 block text-xs text-gray-400">
-              upcomingMinutes
-            </span>
-            <input
-              type="number"
-              min={1}
-              max={1440}
-              value={settings.calendar?.upcomingMinutes ?? 15}
-              onChange={(event) =>
-                setSettings((prev) => ({
-                  ...prev,
-                  calendar: {
-                    ...(prev.calendar ?? { enabled: false, pollMinutes: 5 }),
-                    upcomingMinutes: Number(event.target.value),
-                  },
-                }))
-              }
-              className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs text-gray-400">
-              pollMinutes
-            </span>
-            <input
-              type="number"
-              min={1}
-              max={60}
-              value={settings.calendar?.pollMinutes ?? 5}
-              onChange={(event) =>
-                setSettings((prev) => ({
-                  ...prev,
-                  calendar: {
-                    ...(prev.calendar ?? {
-                      enabled: false,
-                      upcomingMinutes: 15,
-                    }),
-                    pollMinutes: Number(event.target.value),
-                  },
-                }))
-              }
-              className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
-            />
-          </label>
-        </section>
-
-        <section className="rounded border border-gray-700 bg-gray-900 p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <Mail size={17} className="text-purple-300" />
-            <h3 className="text-sm font-semibold">Gmail 조건</h3>
-          </div>
-          <label className="mb-3 flex items-center gap-2 text-sm text-gray-300">
-            <input
-              type="checkbox"
-              checked={settings.gmail?.enabled ?? false}
-              onChange={(event) =>
-                setSettings((prev) => ({
-                  ...prev,
-                  gmail: {
-                    ...(prev.gmail ?? {
-                      query: "in:inbox newer_than:1d",
-                      pollMinutes: 5,
-                    }),
-                    enabled: event.target.checked,
-                  },
-                }))
-              }
-              className="h-4 w-4 rounded border-gray-600 bg-gray-950"
-            />
-            메일 조건 감지
-          </label>
-          <label className="mb-3 block">
-            <span className="mb-1 block text-xs text-gray-400">query</span>
-            <input
-              value={settings.gmail?.query ?? ""}
-              onChange={(event) =>
-                setSettings((prev) => ({
-                  ...prev,
-                  gmail: {
-                    ...(prev.gmail ?? { enabled: false, pollMinutes: 5 }),
-                    query: event.target.value,
-                  },
-                }))
-              }
-              className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs text-gray-400">
-              pollMinutes
-            </span>
-            <input
-              type="number"
-              min={1}
-              max={60}
-              value={settings.gmail?.pollMinutes ?? 5}
-              onChange={(event) =>
-                setSettings((prev) => ({
-                  ...prev,
-                  gmail: {
-                    ...(prev.gmail ?? {
-                      enabled: false,
-                      query: "in:inbox newer_than:1d",
-                    }),
-                    pollMinutes: Number(event.target.value),
-                  },
-                }))
-              }
-              className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
-            />
-          </label>
-        </section>
-      </div>
-
-      <section className="mt-4 rounded border border-gray-700 bg-gray-900 p-4">
-        <div className="mb-3 flex items-center gap-2">
-          <Send size={17} className="text-blue-300" />
-          <h3 className="text-sm font-semibold">출력 채널</h3>
-        </div>
-        <div className="mb-3 flex flex-wrap gap-3">
-          {(["slack", "telegram"] as const).map((output) => (
-            <label
-              key={output}
-              className="flex items-center gap-2 rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-300"
-            >
+      {activeTab === "conditions" && (
+        <div className="grid gap-4 xl:grid-cols-2">
+          <section className="rounded border border-gray-700 bg-gray-900 p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <CalendarClock size={17} className="text-emerald-300" />
+              <h3 className="text-sm font-semibold">Calendar 조건</h3>
+            </div>
+            <label className="mb-3 flex items-center gap-2 text-sm text-gray-300">
               <input
                 type="checkbox"
-                checked={settings.outputs.includes(output)}
-                onChange={(event) => setOutput(output, event.target.checked)}
+                checked={settings.calendar?.enabled ?? false}
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    calendar: {
+                      ...(prev.calendar ?? {
+                        upcomingMinutes: 15,
+                        pollMinutes: 5,
+                      }),
+                      enabled: event.target.checked,
+                    },
+                  }))
+                }
                 className="h-4 w-4 rounded border-gray-600 bg-gray-950"
               />
-              {outputLabel(output)}
+              임박 일정 감지
             </label>
-          ))}
+            <label className="mb-3 block">
+              <span className="mb-1 block text-xs text-gray-400">
+                upcomingMinutes
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={1440}
+                value={settings.calendar?.upcomingMinutes ?? 15}
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    calendar: {
+                      ...(prev.calendar ?? { enabled: false, pollMinutes: 5 }),
+                      upcomingMinutes: Number(event.target.value),
+                    },
+                  }))
+                }
+                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-400">
+                pollMinutes
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={60}
+                value={settings.calendar?.pollMinutes ?? 5}
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    calendar: {
+                      ...(prev.calendar ?? {
+                        enabled: false,
+                        upcomingMinutes: 15,
+                      }),
+                      pollMinutes: Number(event.target.value),
+                    },
+                  }))
+                }
+                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+              />
+            </label>
+          </section>
+
+          <section className="rounded border border-gray-700 bg-gray-900 p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <Mail size={17} className="text-purple-300" />
+              <h3 className="text-sm font-semibold">Gmail 조건</h3>
+            </div>
+            <label className="mb-3 flex items-center gap-2 text-sm text-gray-300">
+              <input
+                type="checkbox"
+                checked={settings.gmail?.enabled ?? false}
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    gmail: {
+                      ...(prev.gmail ?? {
+                        query: "in:inbox newer_than:1d",
+                        pollMinutes: 5,
+                      }),
+                      enabled: event.target.checked,
+                    },
+                  }))
+                }
+                className="h-4 w-4 rounded border-gray-600 bg-gray-950"
+              />
+              메일 조건 감지
+            </label>
+            <label className="mb-3 block">
+              <span className="mb-1 block text-xs text-gray-400">query</span>
+              <input
+                value={settings.gmail?.query ?? ""}
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    gmail: {
+                      ...(prev.gmail ?? { enabled: false, pollMinutes: 5 }),
+                      query: event.target.value,
+                    },
+                  }))
+                }
+                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-400">
+                pollMinutes
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={60}
+                value={settings.gmail?.pollMinutes ?? 5}
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    gmail: {
+                      ...(prev.gmail ?? {
+                        enabled: false,
+                        query: "in:inbox newer_than:1d",
+                      }),
+                      pollMinutes: Number(event.target.value),
+                    },
+                  }))
+                }
+                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+              />
+            </label>
+          </section>
         </div>
-        <p className="text-xs text-gray-500">
-          엔진은 선택된 채널에 대해 {outputTools(settings.outputs)} MCP 도구를
-          호출하도록 오케스트레이터에 지시합니다.
-        </p>
-      </section>
+      )}
+
+      {activeTab === "outputs" && (
+        <section className="rounded border border-gray-700 bg-gray-900 p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Send size={17} className="text-blue-300" />
+            <h3 className="text-sm font-semibold">출력 채널</h3>
+          </div>
+          <div className="mb-3 flex flex-wrap gap-3">
+            {(["slack", "telegram"] as const).map((output) => (
+              <label
+                key={output}
+                className="flex items-center gap-2 rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-300"
+              >
+                <input
+                  type="checkbox"
+                  checked={settings.outputs.includes(output)}
+                  onChange={(event) => setOutput(output, event.target.checked)}
+                  className="h-4 w-4 rounded border-gray-600 bg-gray-950"
+                />
+                {outputLabel(output)}
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500">
+            엔진은 선택된 채널에 대해 {outputTools(settings.outputs)} MCP 도구를
+            호출하도록 오케스트레이터에 지시합니다.
+          </p>
+          <details className="mt-4 rounded border border-gray-700 bg-gray-950/40">
+            <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-200">
+              Slack 연결 상태와 가이드
+            </summary>
+            <div className="border-t border-gray-700">
+              <SlackChannelPanel />
+            </div>
+          </details>
+          <details className="mt-3 rounded border border-gray-700 bg-gray-950/40">
+            <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-200">
+              Telegram 연결 상태와 가이드
+            </summary>
+            <div className="border-t border-gray-700">
+              <TelegramChannelPanel />
+            </div>
+          </details>
+        </section>
+      )}
 
       {!validation.ok && settings.enabled && (
         <div className="mt-4 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">

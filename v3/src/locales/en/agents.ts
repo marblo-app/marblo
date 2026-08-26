@@ -269,7 +269,15 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.tab.atLimitHint": "Limit reached — upgrade or stop an existing agent",
   "agents.marbloBots.title": "Marblo Bots",
   "agents.marbloBots.subtitle":
-    "Save Persona, Mission, Model, Tools, and Knowledge, then run through the board dispatch path.",
+    "Bots are specialist workers that Oke calls when needed. You can run one directly, but the default flow is to talk to Oke.",
+  "agents.marbloBots.primer.line1": "Talk to Oke",
+  "agents.marbloBots.primer.line2": "→ Oke calls a bot when needed",
+  "agents.marbloBots.primer.line3": "→ The bot works in an isolated worktree",
+  "agents.marbloBots.primer.details": "Details",
+  "agents.marbloBots.primer.detail1":
+    "You can save and run a bot directly, but the primary flow is to tell Oke the goal; Oke picks the right bot, creates a board ticket, and dispatches a physical agent.",
+  "agents.marbloBots.primer.detail2":
+    "Bot runs use the existing create_task / dispatch_task path and leave a source marker on the linked ticket.",
   "agents.marbloBots.knowledgeRoot": "Knowledge root_path",
   "agents.marbloBots.rootMissing": "Connect a project folder first",
   "agents.marbloBots.runMission": "Mission for this run",
@@ -290,14 +298,120 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.marbloBots.knowledgeUse": "Use Knowledge",
   "agents.marbloBots.save": "Save",
   "agents.marbloBots.omitted": "Bots omitted in this phase",
+  "agents.marbloBots.copy": "Copy",
+  "agents.marbloBots.copied": "Copied",
+  "agents.marbloBots.required": "Required",
+  "agents.marbloBots.evidence": "MCP evidence",
+  "agents.marbloBots.persona": "Persona",
+  "agents.marbloBots.mission": "Mission",
+  "agents.marbloBots.knowledgeBadge": "Knowledge",
+  "agents.marbloBots.wikiQueryRoot": "wiki_query root_path",
   "agents.marbloBots.section.bots": "Bot gallery",
-  "agents.marbloBots.section.agents": "Running",
+  "agents.marbloBots.section.agents": "Bot runs",
   "agents.marbloBots.section.triggers": "Triggers",
   "agents.marbloBots.tabAria": "Marblo Bots tab",
   "agents.marbloBots.loginRequired": "Sign in to save bot definitions.",
   "agents.marbloBots.triggersTitle": "Schedules and condition triggers",
   "agents.marbloBots.triggersBody":
     "The execution engine already exists; this screen will enable it in a follow-up ticket.",
+  "agents.marbloBots.savedSeed": "Seed bot saved to this project.",
+  "agents.marbloBots.savedCustom": "Bot definition saved to this project.",
+  "agents.marbloBots.saveFailed": "Save failed",
+  "agents.marbloBots.runFailed": "Run failed",
+  "agents.marbloBots.dispatchFailed":
+    "Failed to send the run instruction to the orchestrator.",
+  "agents.marbloBots.dispatchLocal":
+    "Sent to the orchestrator. It will create a board ticket and start a physical agent via dispatch_task.",
+  "agents.marbloBots.dispatchQueued":
+    "The orchestrator is stopped, so the run instruction was queued.",
+  "agents.marbloBots.runningEmpty":
+    "Only bot agents saved and run from the bot gallery appear here.",
+  "agents.marbloBots.validation.missingProject": "Project binding is missing.",
+  "agents.marbloBots.validation.missingOwner": "Owner is missing.",
+  "agents.marbloBots.validation.missingName": "Bot name is empty.",
+  "agents.marbloBots.validation.missingPersona": "Persona is empty.",
+  "agents.marbloBots.validation.emptyMission": "Mission is empty.",
+  "agents.marbloBots.validation.unknownModel": "Unknown model.",
+  "agents.marbloBots.validation.knowledgeRootRequired":
+    "Knowledge requires a wiki root_path.",
+  "agents.marbloBots.validation.default":
+    "This bot definition cannot be saved.",
+  "agents.marbloBots.wiki.title":
+    "Enable Knowledge first: Marblo wiki setup guide",
+  "agents.marbloBots.wiki.ready": "docs/wiki found",
+  "agents.marbloBots.wiki.needsSetup": "Setup needed",
+  "agents.marbloBots.wiki.body":
+    "Project knowledge is the differentiator. Ask Oke to use the existing wiki_ingest, wiki_query, wiki_lint MCP tools and wiki-init/wiki-note/wiki-ingest skills.",
+  "agents.marbloBots.wiki.root": "Root",
+  "agents.marbloBots.wiki.mcpTools":
+    "MCP: wiki_ingest / wiki_query / wiki_lint",
+  "agents.marbloBots.wiki.singleRoot": "Use one shared docs/wiki",
+  "agents.marbloBots.wiki.copyTitle": "Request to copy to Oke",
+  "agents.marbloBots.wiki.request1":
+    "Oke, set up the Marblo knowledge wiki for this project.",
+  "agents.marbloBots.wiki.request2":
+    "Use exactly one shared wiki root at docs/wiki, and use .claude/skills/wiki-init, wiki-note, wiki-ingest plus MCP wiki_ingest/wiki_query/wiki_lint.",
+  "agents.marbloBots.wiki.request3":
+    "Create the README and base taxonomy first, summarize the project docs/decisions bots will reuse with wiki-note, then run wiki-ingest and wiki-lint.",
+  "agents.marbloBots.wiki.request4":
+    'When another project queries it, document the form wiki_query({ root_path: "<absolute project path>/docs/wiki", query: "..." }).',
+  "agents.marbloBots.require.google": "Google Calendar/Gmail connection",
+  "agents.marbloBots.require.outputChannel": "Slack or Telegram channel",
+  "agents.marbloBots.seed.knowledge.name": "Knowledge Assistant",
+  "agents.marbloBots.seed.knowledge.persona":
+    "A practical assistant that checks the project wiki first and separates evidence from limits.",
+  "agents.marbloBots.seed.knowledge.mission":
+    "Answer user questions from the project knowledge wiki and list anything that needs follow-up.",
+  "agents.marbloBots.seed.knowledge.evidence":
+    "wiki_query is registered in the MCP server, and wiki-init/wiki-note/wiki-ingest skills exist.",
+  "agents.marbloBots.seed.fullstack.name": "Full-stack Developer",
+  "agents.marbloBots.seed.fullstack.persona":
+    "A product development agent that reads existing patterns and ships focused, verified PRs.",
+  "agents.marbloBots.seed.fullstack.mission":
+    "Turn requirements into board tickets, dispatch workers through the existing path, and carry implementation through verification.",
+  "agents.marbloBots.seed.fullstack.evidence":
+    "create_task, dispatch_task, add_activity, and submit_for_review are registered in the MCP server.",
+  "agents.marbloBots.seed.dailyBriefing.name": "Daily Briefing",
+  "agents.marbloBots.seed.dailyBriefing.persona":
+    "A scheduled assistant that checks calendar, mail, and open work, then pushes a short Slack/Telegram brief.",
+  "agents.marbloBots.seed.dailyBriefing.mission":
+    "Review today's calendar, new mail, and active tasks, then send a one-screen briefing to the selected channel.",
+  "agents.marbloBots.seed.dailyBriefing.evidence":
+    "calendar_list, gmail_search, send_slack_message, and send_telegram_message are registered in the MCP server.",
+  "agents.marbloBots.seed.mailCalendar.name": "Mail/Calendar Follow-up",
+  "agents.marbloBots.seed.mailCalendar.persona":
+    "A conditional assistant that reacts to new mail or upcoming calendar events and extracts priority plus next action.",
+  "agents.marbloBots.seed.mailCalendar.mission":
+    "Check recent mail and upcoming events, then summarize reply needs, prep items, and candidate follow-up tasks.",
+  "agents.marbloBots.seed.mailCalendar.evidence":
+    "The assistant-triggers engine polls Gmail/Calendar conditions and uses the same outbound MCP tools.",
+  "agents.marbloBots.seed.marketer.name": "Marketer",
+  "agents.marbloBots.seed.marketer.persona":
+    "A growth assistant that uses project knowledge and board context to split campaigns, copy, and experiments into tasks.",
+  "agents.marbloBots.seed.marketer.mission":
+    "Check product, customer, and channel context in the wiki, then draft messaging, execution tickets, and channel reports.",
+  "agents.marbloBots.seed.marketer.evidence":
+    "wiki_query, create_task, dispatch_task, send_slack_message, and send_telegram_message are registered in the MCP server.",
+  "agents.marbloBots.seed.designer.name": "Designer",
+  "agents.marbloBots.seed.designer.persona":
+    "A product designer that reads existing UI patterns and tightens copy, layout, and states through small frontend changes.",
+  "agents.marbloBots.seed.designer.mission":
+    "Clarify the screen problem, improve components/copy/state within existing React UI patterns, and leave verification criteria.",
+  "agents.marbloBots.seed.designer.evidence":
+    "wiki_query, create_task, dispatch_task, and add_activity are registered, and Codex frontend agents perform React UI work.",
+  "agents.marbloBots.seed.jarvis.name": "Jarvis",
+  "agents.marbloBots.seed.jarvis.persona":
+    "Oke's general aide, combining wiki, mail, calendar, board, and output channels into concrete next actions.",
+  "agents.marbloBots.seed.jarvis.mission":
+    "Classify the request and use only the needed mix of wiki, Gmail, Calendar, board tickets, and Slack/Telegram reporting.",
+  "agents.marbloBots.seed.jarvis.evidence":
+    "wiki_query, create_task, dispatch_task, gmail_search, calendar_list, send_slack_message, and send_telegram_message are registered in the MCP server.",
+  "agents.marbloBots.omitted.youtube.name": "YouTube Research",
+  "agents.marbloBots.omitted.youtube.reason":
+    "A YouTube-specific connector or verified browser/search MCP is not available in the current seed materials, so it would reduce first-screen run reliability.",
+  "agents.marbloBots.omitted.web.name": "Web Research",
+  "agents.marbloBots.omitted.web.reason":
+    "A browser/search MCP is not confirmed on the current Marblo MCP surface.",
 
   // ── No-project empty state (agents tab reached with no project selected) ──
   "agents.noProject.title": "No project selected",

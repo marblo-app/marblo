@@ -256,6 +256,7 @@ export function AgentsTab() {
             tasks={tasks}
             projectId={projectId}
             loading={loading}
+            scope="bot"
             onAddAgent={() => {
               if (atLimit) {
                 useUiStore.getState().showUpgrade("agents", "pro");

@@ -261,7 +261,15 @@ export const agents = {
     "한도 도달 — 업그레이드 또는 기존 에이전트 정지 필요",
   "agents.marbloBots.title": "마블로봇",
   "agents.marbloBots.subtitle":
-    "Persona, Mission, Model, Tools, Knowledge를 저장하고 보드 dispatch 경로로 실행합니다.",
+    "봇은 오케가 필요할 때 호출하는 전문 작업자입니다. 직접 실행도 가능하지만 기본 사용법은 오케와 대화하는 것입니다.",
+  "agents.marbloBots.primer.line1": "오케와 대화한다",
+  "agents.marbloBots.primer.line2": "→ 오케가 필요할 때 봇을 호출한다",
+  "agents.marbloBots.primer.line3": "→ 봇이 격리된 워크트리에서 일한다",
+  "agents.marbloBots.primer.details": "자세히",
+  "agents.marbloBots.primer.detail1":
+    "봇을 직접 저장 후 실행할 수는 있지만, 기본 흐름은 오케에게 목표를 말하고 오케가 맞는 봇을 골라 보드 티켓과 물리 에이전트를 띄우는 것입니다.",
+  "agents.marbloBots.primer.detail2":
+    "실행된 봇은 기존 create_task / dispatch_task 경로를 타며, 연결된 티켓에 봇 출처 표식을 남깁니다.",
   "agents.marbloBots.knowledgeRoot": "Knowledge root_path",
   "agents.marbloBots.rootMissing": "프로젝트 폴더 연결 필요",
   "agents.marbloBots.runMission": "이번에 맡길 임무",
@@ -282,14 +290,119 @@ export const agents = {
   "agents.marbloBots.knowledgeUse": "Knowledge 사용",
   "agents.marbloBots.save": "저장",
   "agents.marbloBots.omitted": "이번 단계에서 뺀 봇",
+  "agents.marbloBots.copy": "복사",
+  "agents.marbloBots.copied": "복사됨",
+  "agents.marbloBots.required": "필요",
+  "agents.marbloBots.evidence": "MCP 근거",
+  "agents.marbloBots.persona": "Persona",
+  "agents.marbloBots.mission": "Mission",
+  "agents.marbloBots.knowledgeBadge": "Knowledge",
+  "agents.marbloBots.wikiQueryRoot": "wiki_query root_path",
   "agents.marbloBots.section.bots": "봇 갤러리",
-  "agents.marbloBots.section.agents": "실행 중",
+  "agents.marbloBots.section.agents": "봇 실행 중",
   "agents.marbloBots.section.triggers": "트리거",
   "agents.marbloBots.tabAria": "마블로봇 탭",
   "agents.marbloBots.loginRequired": "로그인 후 봇 정의를 저장할 수 있습니다.",
   "agents.marbloBots.triggersTitle": "스케줄러·조건 트리거",
   "agents.marbloBots.triggersBody":
     "실행 엔진은 준비되어 있고, 이 화면은 후속 티켓에서 켭니다.",
+  "agents.marbloBots.savedSeed": "시드 봇을 프로젝트에 저장했습니다.",
+  "agents.marbloBots.savedCustom": "봇 정의를 프로젝트에 저장했습니다.",
+  "agents.marbloBots.saveFailed": "저장 실패",
+  "agents.marbloBots.runFailed": "실행 실패",
+  "agents.marbloBots.dispatchFailed":
+    "오케스트레이터에 실행 지시를 보내지 못했습니다.",
+  "agents.marbloBots.dispatchLocal":
+    "오케스트레이터에 보냈습니다. 보드 티켓 생성 후 dispatch_task로 물리 에이전트가 뜹니다.",
+  "agents.marbloBots.dispatchQueued":
+    "오케스트레이터가 꺼져 있어 실행 지시를 대기열에 넣었습니다.",
+  "agents.marbloBots.runningEmpty":
+    "봇 갤러리에서 저장 후 실행한 봇 에이전트만 여기에 표시됩니다.",
+  "agents.marbloBots.validation.missingProject": "프로젝트 귀속이 없습니다.",
+  "agents.marbloBots.validation.missingOwner": "소유자 정보가 없습니다.",
+  "agents.marbloBots.validation.missingName": "봇 이름이 비어 있습니다.",
+  "agents.marbloBots.validation.missingPersona": "Persona가 비어 있습니다.",
+  "agents.marbloBots.validation.emptyMission": "Mission이 비어 있습니다.",
+  "agents.marbloBots.validation.unknownModel": "알 수 없는 모델입니다.",
+  "agents.marbloBots.validation.knowledgeRootRequired":
+    "Knowledge를 켜려면 wiki root_path가 필요합니다.",
+  "agents.marbloBots.validation.default": "봇 정의를 저장할 수 없습니다.",
+  "agents.marbloBots.wiki.title":
+    "먼저 Knowledge 축 켜기: 마블로 위키 구성 가이드",
+  "agents.marbloBots.wiki.ready": "docs/wiki 확인됨",
+  "agents.marbloBots.wiki.needsSetup": "구성 필요",
+  "agents.marbloBots.wiki.body":
+    "봇의 차별점은 프로젝트 지식입니다. 새 엔진이 아니라 이미 등록된 wiki_ingest, wiki_query, wiki_lint와 wiki-init/wiki-note/wiki-ingest 스킬을 쓰게 오케에게 요청하세요.",
+  "agents.marbloBots.wiki.root": "루트",
+  "agents.marbloBots.wiki.mcpTools":
+    "MCP: wiki_ingest / wiki_query / wiki_lint",
+  "agents.marbloBots.wiki.singleRoot": "공유 위키는 docs/wiki 하나",
+  "agents.marbloBots.wiki.copyTitle": "오케에게 복사해서 보낼 요청",
+  "agents.marbloBots.wiki.request1":
+    "오케, 이 프로젝트에 마블로 지식위키를 구성해줘.",
+  "agents.marbloBots.wiki.request2":
+    "공유 위키 루트는 docs/wiki 하나만 쓰고, .claude/skills/wiki-init · wiki-note · wiki-ingest 스킬과 MCP wiki_ingest/wiki_query/wiki_lint를 사용해.",
+  "agents.marbloBots.wiki.request3":
+    "먼저 README와 기본 분류를 만들고, 현재 프로젝트 문서/결정사항 중 봇이 자주 참조할 내용을 wiki-note로 정리한 뒤 wiki-ingest와 wiki-lint까지 돌려줘.",
+  "agents.marbloBots.wiki.request4":
+    '다른 프로젝트에서 참조할 때는 wiki_query({ root_path: "<프로젝트 절대경로>/docs/wiki", query: "..." }) 형태로 쓰게 안내해줘.',
+  "agents.marbloBots.require.google": "Google Calendar/Gmail 연결",
+  "agents.marbloBots.require.outputChannel": "Slack 또는 Telegram 채널",
+  "agents.marbloBots.seed.knowledge.name": "지식 비서",
+  "agents.marbloBots.seed.knowledge.persona":
+    "프로젝트 위키를 먼저 확인하고, 근거와 한계를 짧게 분리해 말하는 실무 비서",
+  "agents.marbloBots.seed.knowledge.mission":
+    "사용자의 질문을 프로젝트 지식위키에 근거해 답하고, 모호한 부분은 추가 확인 항목으로 정리한다.",
+  "agents.marbloBots.seed.knowledge.evidence":
+    "MCP 서버에 wiki_query가 등록되어 있고, .claude/skills/wiki-init·wiki-note·wiki-ingest가 있다.",
+  "agents.marbloBots.seed.fullstack.name": "풀스택 개발",
+  "agents.marbloBots.seed.fullstack.persona":
+    "기존 코드 패턴을 읽고 작은 PR 단위로 구현·검증하는 제품 개발 에이전트",
+  "agents.marbloBots.seed.fullstack.mission":
+    "요구사항을 보드 티켓으로 만들고, 기존 dispatch 경로로 작업 에이전트를 띄워 구현과 검증을 진행한다.",
+  "agents.marbloBots.seed.fullstack.evidence":
+    "MCP 서버에 create_task, dispatch_task, add_activity, submit_for_review가 등록되어 있다.",
+  "agents.marbloBots.seed.dailyBriefing.name": "일일 브리핑",
+  "agents.marbloBots.seed.dailyBriefing.persona":
+    "정해진 시간에 일정·메일·열린 할일만 짧게 확인하고 Slack/Telegram으로 밀어주는 비서",
+  "agents.marbloBots.seed.dailyBriefing.mission":
+    "오늘 일정, 새 메일, 진행 중인 할일을 확인해 한 화면 분량의 브리핑으로 정리하고 선택된 채널로 보낸다.",
+  "agents.marbloBots.seed.dailyBriefing.evidence":
+    "MCP 서버에 calendar_list, gmail_search, send_slack_message, send_telegram_message가 등록되어 있다.",
+  "agents.marbloBots.seed.mailCalendar.name": "메일·일정 팔로업",
+  "agents.marbloBots.seed.mailCalendar.persona":
+    "새 메일이나 임박 일정이 들어오면 중요도와 다음 행동만 추려 알려주는 조건 반응 비서",
+  "agents.marbloBots.seed.mailCalendar.mission":
+    "최근 메일과 임박 일정을 확인하고, 답장 필요 여부·준비물·후속 태스크 후보를 짧게 정리한다.",
+  "agents.marbloBots.seed.mailCalendar.evidence":
+    "assistant-triggers 엔진이 Gmail/Calendar 조건을 폴링하고 같은 전송 MCP 도구로 푸시하도록 배선되어 있다.",
+  "agents.marbloBots.seed.marketer.name": "마케터",
+  "agents.marbloBots.seed.marketer.persona":
+    "프로젝트 지식과 현재 보드 맥락을 바탕으로 캠페인·카피·실험안을 작업 티켓으로 쪼개는 성장 비서",
+  "agents.marbloBots.seed.marketer.mission":
+    "제품/고객/채널 맥락을 위키에서 확인하고, 메시지 초안과 실행 티켓, 공유 채널 보고문을 만든다.",
+  "agents.marbloBots.seed.marketer.evidence":
+    "MCP 서버에 wiki_query, create_task, dispatch_task, send_slack_message, send_telegram_message가 등록되어 있다.",
+  "agents.marbloBots.seed.designer.name": "디자이너",
+  "agents.marbloBots.seed.designer.persona":
+    "기존 UI 패턴을 읽고 화면 문구·레이아웃·상태를 작은 프론트엔드 변경으로 정리하는 제품 디자이너",
+  "agents.marbloBots.seed.designer.mission":
+    "요구 화면의 문제를 정리하고, 기존 React UI 패턴 안에서 컴포넌트/문구/상태를 개선한 뒤 검증 기준을 남긴다.",
+  "agents.marbloBots.seed.designer.evidence":
+    "MCP 서버에 wiki_query, create_task, dispatch_task, add_activity가 있고 Codex 프론트엔드 에이전트가 React UI 작업을 수행한다.",
+  "agents.marbloBots.seed.jarvis.name": "자비스",
+  "agents.marbloBots.seed.jarvis.persona":
+    "오케의 범용 보좌역으로 위키·메일·일정·보드·출력 채널을 묶어 다음 행동을 정리하는 비서",
+  "agents.marbloBots.seed.jarvis.mission":
+    "요청의 성격을 판단해 위키, Gmail, Calendar, 보드 티켓, Slack/Telegram 보고 중 필요한 조합만 사용해 실행 계획과 결과를 정리한다.",
+  "agents.marbloBots.seed.jarvis.evidence":
+    "MCP 서버에 wiki_query, create_task, dispatch_task, gmail_search, calendar_list, send_slack_message, send_telegram_message가 등록되어 있다.",
+  "agents.marbloBots.omitted.youtube.name": "유튜브 리서치",
+  "agents.marbloBots.omitted.youtube.reason":
+    "유튜브 전용 커넥터나 검증된 브라우저/검색 MCP가 현재 시드 재료로 확인되지 않아 첫 화면 실행 신뢰도를 해친다.",
+  "agents.marbloBots.omitted.web.name": "웹 리서치",
+  "agents.marbloBots.omitted.web.reason":
+    "브라우저/검색 MCP가 현재 Marblo MCP 표면에 등록된 실행 재료로 확인되지 않았다.",
 
   // ── No-project empty state (agents tab reached with no project selected) ──
   "agents.noProject.title": "선택된 프로젝트가 없습니다",

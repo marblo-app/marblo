@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  BOT_DISPATCH_SOURCE,
+  BOT_TASK_SCOPE_PREFIX,
   buildBotDispatchInstruction,
+  localizeSeedBots,
   seedToDraft,
   validateBotDefinition,
   type BotDefinition,
   type BotDefinitionDraft,
+  type LocalizedSeedBotDefinition,
 } from "../src/lib/botDefinition";
 
 const validDraft: BotDefinitionDraft = {
@@ -74,18 +78,19 @@ describe("validateBotDefinition", () => {
 
 describe("seedToDraft", () => {
   it("시드의 Knowledge 축을 프로젝트 wiki root_path로 구체화한다", () => {
+    const seed: LocalizedSeedBotDefinition = {
+      seedId: "knowledge-assistant",
+      name: "지식 비서",
+      persona: "비서",
+      mission: "답한다",
+      model: "claude",
+      role: "backend",
+      tools: ["wiki_query"],
+      evidence: "wiki_query registered",
+      knowledgeEnabled: true,
+    };
     const draft = seedToDraft({
-      seed: {
-        seedId: "knowledge-assistant",
-        name: "지식 비서",
-        persona: "비서",
-        mission: "답한다",
-        model: "claude",
-        role: "backend",
-        tools: ["wiki_query"],
-        evidence: "wiki_query registered",
-        knowledgeEnabled: true,
-      },
+      seed,
       projectId: "project-1",
       ownerId: "user-1",
       wikiRootPath: "/repo/docs/wiki",
@@ -116,8 +121,21 @@ describe("buildBotDispatchInstruction", () => {
 
     expect(instruction).toContain("create_task");
     expect(instruction).toContain("dispatch_task");
+    expect(instruction).toContain(`source: ${BOT_DISPATCH_SOURCE}`);
+    expect(instruction).toContain(`${BOT_TASK_SCOPE_PREFIX}bot-1`);
     expect(instruction).toContain("wiki_query");
     expect(instruction).toContain("root_path: /repo/docs/wiki");
     expect(instruction).toContain("이번 분기 가격 전략 정리");
+  });
+});
+
+describe("localizeSeedBots", () => {
+  it("시드 정의의 화면 문자열을 로케일 함수로 만든다", () => {
+    const seeds = localizeSeedBots((key) => `ko:${key}`);
+
+    expect(seeds[0].name).toBe("ko:agents.marbloBots.seed.knowledge.name");
+    expect(seeds.some((seed) => seed.seedId === "marketer")).toBe(true);
+    expect(seeds.some((seed) => seed.seedId === "designer")).toBe(true);
+    expect(seeds.some((seed) => seed.seedId === "jarvis")).toBe(true);
   });
 });

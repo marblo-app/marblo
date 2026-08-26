@@ -8,22 +8,25 @@ import {
   Code2,
   Copy,
   Loader2,
+  Megaphone,
+  Palette,
   Play,
   Save,
   Search,
+  Sparkles,
   Video,
 } from "lucide-react";
 import {
   buildBotDispatchInstruction,
   defaultWikiRootPath,
+  localizeSeedBots,
   OMITTED_SEED_BOTS,
-  SEED_BOTS,
   seedToDraft,
   validateBotDefinition,
   type BotDefinition,
   type BotDefinitionDraft,
   type BotModel,
-  type SeedBotDefinition,
+  type LocalizedSeedBotDefinition,
 } from "../../lib/botDefinition";
 import {
   createBotDefinition,
@@ -42,39 +45,51 @@ interface MarbloBotGalleryProps {
 
 type BusyState = { key: string; action: "save" | "run" } | null;
 
-const OmittedIcon = [Video, CalendarClock, Search] as const;
+const OmittedIcon = [Video, Search] as const;
 
 const ROLE_OPTIONS: AgentRole[] = ["frontend", "backend", "test", "devops"];
+const MODEL_OPTIONS: Array<{ value: BotModel; label: string }> = [
+  { value: "claude", label: "Claude" },
+  { value: "codex", label: "Codex" },
+  { value: "grok", label: "Grok" },
+  { value: "deepseek", label: "DeepSeek" },
+  { value: "solar", label: "Solar" },
+  { value: "local", label: "Local" },
+];
 
 function seedIcon(seedId: string) {
   if (seedId === "knowledge-assistant") return BookOpen;
   if (seedId === "fullstack-developer") return Code2;
+  if (seedId === "daily-briefing") return CalendarClock;
+  if (seedId === "marketer") return Megaphone;
+  if (seedId === "designer") return Palette;
+  if (seedId === "jarvis") return Sparkles;
   return Bot;
 }
 
-function issueText(issue: string): string {
+function issueText(issue: string, t: ReturnType<typeof useTranslation>["t"]) {
   switch (issue) {
     case "missing_project":
-      return "프로젝트 귀속이 없습니다.";
+      return t("agents.marbloBots.validation.missingProject");
     case "missing_owner":
-      return "소유자 정보가 없습니다.";
+      return t("agents.marbloBots.validation.missingOwner");
     case "missing_name":
-      return "봇 이름이 비어 있습니다.";
+      return t("agents.marbloBots.validation.missingName");
     case "missing_persona":
-      return "Persona가 비어 있습니다.";
+      return t("agents.marbloBots.validation.missingPersona");
     case "empty_mission":
-      return "Mission이 비어 있습니다.";
+      return t("agents.marbloBots.validation.emptyMission");
     case "unknown_model":
-      return "알 수 없는 모델입니다.";
+      return t("agents.marbloBots.validation.unknownModel");
     case "knowledge_root_required":
-      return "Knowledge를 켜려면 wiki root_path가 필요합니다.";
+      return t("agents.marbloBots.validation.knowledgeRootRequired");
     default:
-      return "봇 정의를 저장할 수 없습니다.";
+      return t("agents.marbloBots.validation.default");
   }
 }
 
 function draftFromSeed(
-  seed: SeedBotDefinition,
+  seed: LocalizedSeedBotDefinition,
   project: Project,
   ownerId: string,
 ): BotDefinitionDraft {
@@ -95,6 +110,26 @@ function asRunnableBot(id: string, draft: BotDefinitionDraft): BotDefinition {
   };
 }
 
+function TruncatedPathLine({
+  label,
+  path,
+  fallback,
+}: {
+  label: string;
+  path: string;
+  fallback: string;
+}) {
+  const displayPath = path || fallback;
+  return (
+    <span className="flex min-w-0 items-center gap-1">
+      <span className="flex-shrink-0">{label}:</span>
+      <span className="min-w-0 truncate" title={displayPath}>
+        {displayPath}
+      </span>
+    </span>
+  );
+}
+
 function WikiSetupGuide({
   wikiRootPath,
   wikiExists,
@@ -102,13 +137,14 @@ function WikiSetupGuide({
   wikiRootPath: string;
   wikiExists: boolean | null;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(wikiExists !== true);
   const [copied, setCopied] = useState(false);
   const requestText = [
-    "오케, 이 프로젝트에 마블로 지식위키를 구성해줘.",
-    "공유 위키 루트는 docs/wiki 하나만 쓰고, .claude/skills/wiki-init · wiki-note · wiki-ingest 스킬과 MCP wiki_ingest/wiki_query/wiki_lint를 사용해.",
-    "먼저 README와 기본 분류를 만들고, 현재 프로젝트 문서/결정사항 중 봇이 자주 참조할 내용을 wiki-note로 정리한 뒤 wiki-ingest와 wiki-lint까지 돌려줘.",
-    "다른 프로젝트에서 참조할 때는 wiki_query({ root_path: \"<프로젝트 절대경로>/docs/wiki\", query: \"...\" }) 형태로 쓰게 안내해줘.",
+    t("agents.marbloBots.wiki.request1"),
+    t("agents.marbloBots.wiki.request2"),
+    t("agents.marbloBots.wiki.request3"),
+    t("agents.marbloBots.wiki.request4"),
   ].join("\n");
 
   useEffect(() => {
@@ -137,16 +173,16 @@ function WikiSetupGuide({
           <span className="flex flex-wrap items-center gap-2">
             <BookOpen size={18} className="text-emerald-200" />
             <span className="text-sm font-semibold text-emerald-100">
-              먼저 Knowledge 축 켜기: 마블로 위키 구성 가이드
+              {t("agents.marbloBots.wiki.title")}
             </span>
             <span className="rounded border border-emerald-500/40 px-2 py-0.5 text-[11px] text-emerald-100">
-              {wikiExists ? "docs/wiki 확인됨" : "구성 필요"}
+              {wikiExists
+                ? t("agents.marbloBots.wiki.ready")
+                : t("agents.marbloBots.wiki.needsSetup")}
             </span>
           </span>
           <span className="mt-1 block max-w-4xl text-sm text-emerald-100/80">
-            봇의 차별점은 프로젝트 지식입니다. 새 엔진이 아니라 이미 등록된
-            wiki_ingest, wiki_query, wiki_lint와 wiki-init/wiki-note/wiki-ingest
-            스킬을 쓰게 오케에게 요청하세요.
+            {t("agents.marbloBots.wiki.body")}
           </span>
         </span>
         <ChevronDown
@@ -159,20 +195,27 @@ function WikiSetupGuide({
       {open && (
         <div className="border-t border-emerald-500/20 px-4 py-3">
           <div className="mb-3 grid gap-2 text-xs text-emerald-100/80 md:grid-cols-3">
-            <div className="rounded border border-emerald-500/20 bg-gray-950/40 p-2">
-              루트: {wikiRootPath || "프로젝트 폴더 연결 필요"}
+            <div className="min-w-0 rounded border border-emerald-500/20 bg-gray-950/40 p-2">
+              <TruncatedPathLine
+                label={t("agents.marbloBots.wiki.root")}
+                path={wikiRootPath}
+                fallback={t("agents.marbloBots.rootMissing")}
+              />
             </div>
-            <div className="rounded border border-emerald-500/20 bg-gray-950/40 p-2">
-              MCP: wiki_ingest / wiki_query / wiki_lint
+            <div
+              className="min-w-0 truncate rounded border border-emerald-500/20 bg-gray-950/40 p-2"
+              title={t("agents.marbloBots.wiki.mcpTools")}
+            >
+              {t("agents.marbloBots.wiki.mcpTools")}
             </div>
-            <div className="rounded border border-emerald-500/20 bg-gray-950/40 p-2">
-              공유 위키는 docs/wiki 하나
+            <div className="min-w-0 truncate rounded border border-emerald-500/20 bg-gray-950/40 p-2">
+              {t("agents.marbloBots.wiki.singleRoot")}
             </div>
           </div>
           <div className="rounded border border-gray-700 bg-gray-950 p-3">
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="text-xs font-medium text-gray-300">
-                오케에게 복사해서 보낼 요청
+                {t("agents.marbloBots.wiki.copyTitle")}
               </span>
               <button
                 type="button"
@@ -180,7 +223,9 @@ function WikiSetupGuide({
                 className="inline-flex items-center gap-1.5 rounded border border-gray-700 px-2 py-1 text-xs text-gray-200 transition-colors hover:bg-gray-800"
               >
                 {copied ? <CheckCircle2 size={13} /> : <Copy size={13} />}
-                {copied ? "복사됨" : "복사"}
+                {copied
+                  ? t("agents.marbloBots.copied")
+                  : t("agents.marbloBots.copy")}
               </button>
             </div>
             <pre className="whitespace-pre-wrap text-xs leading-5 text-gray-300">
@@ -193,8 +238,48 @@ function WikiSetupGuide({
   );
 }
 
+function BotUsePrimer() {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <section className="mb-4 rounded border border-blue-500/30 bg-blue-500/10">
+      <div className="px-4 py-3">
+        <p className="text-sm font-semibold text-blue-100">
+          {t("agents.marbloBots.primer.line1")}
+        </p>
+        <p className="mt-1 text-sm text-blue-100/90">
+          {t("agents.marbloBots.primer.line2")}
+        </p>
+        <p className="mt-1 text-sm text-blue-100/80">
+          {t("agents.marbloBots.primer.line3")}
+        </p>
+        <button
+          type="button"
+          onClick={() => setOpen((prev) => !prev)}
+          aria-expanded={open}
+          className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-blue-100 hover:text-white"
+        >
+          <ChevronDown
+            size={14}
+            className={`transition-transform ${open ? "rotate-180" : ""}`}
+          />
+          {t("agents.marbloBots.primer.details")}
+        </button>
+      </div>
+      {open && (
+        <div className="border-t border-blue-500/20 px-4 py-3 text-sm leading-6 text-blue-100/80">
+          <p>{t("agents.marbloBots.primer.detail1")}</p>
+          <p>{t("agents.marbloBots.primer.detail2")}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
   const { t } = useTranslation();
+  const seedBots = useMemo(() => localizeSeedBots(t), [t]);
   const [savedBots, setSavedBots] = useState<BotDefinition[]>([]);
   const [runMission, setRunMission] = useState("");
   const [busy, setBusy] = useState<BusyState>(null);
@@ -243,7 +328,7 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
     const mission = runMission.trim() || bot.mission;
     const validation = validateBotDefinition(bot);
     if (!validation.ok) {
-      setError(validation.issues.map(issueText).join(" "));
+      setError(validation.issues.map((issue) => issueText(issue, t)).join(" "));
       return;
     }
     setBusy({ key, action: "run" });
@@ -261,12 +346,12 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
         taskId: null,
       });
       if (result === "failed") {
-        setError("오케스트레이터에 실행 지시를 보내지 못했습니다.");
+        setError(t("agents.marbloBots.dispatchFailed"));
       } else {
         setMessage(
           result === "local"
-            ? "오케스트레이터에 보냈습니다. 보드 티켓 생성 후 dispatch_task로 물리 에이전트가 뜹니다."
-            : "오케스트레이터가 꺼져 있어 실행 지시를 대기열에 넣었습니다.",
+            ? t("agents.marbloBots.dispatchLocal")
+            : t("agents.marbloBots.dispatchQueued"),
         );
       }
     } finally {
@@ -274,11 +359,15 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
     }
   };
 
-  const saveSeed = async (seed: SeedBotDefinition): Promise<BotDefinition> => {
+  const saveSeed = async (
+    seed: LocalizedSeedBotDefinition,
+  ): Promise<BotDefinition> => {
     const draft = draftFromSeed(seed, project, ownerId);
     const validation = validateBotDefinition(draft);
     if (!validation.ok) {
-      throw new Error(validation.issues.map(issueText).join(" "));
+      throw new Error(
+        validation.issues.map((issue) => issueText(issue, t)).join(" "),
+      );
     }
     const id = await upsertSeedBotDefinition({
       ...draft,
@@ -304,7 +393,7 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
     };
     const validation = validateBotDefinition(draft);
     if (!validation.ok) {
-      setError(validation.issues.map(issueText).join(" "));
+      setError(validation.issues.map((issue) => issueText(issue, t)).join(" "));
       return;
     }
     setBusy({ key: "custom", action: "save" });
@@ -319,7 +408,7 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
         role: "backend",
         knowledgeEnabled: true,
       });
-      setMessage("봇 정의를 프로젝트에 저장했습니다.");
+      setMessage(t("agents.marbloBots.savedCustom"));
     } finally {
       setBusy(null);
     }
@@ -327,6 +416,7 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
 
   return (
     <div className="h-full overflow-y-auto p-4 text-gray-100">
+      <BotUsePrimer />
       <WikiSetupGuide wikiRootPath={wikiRootPath} wikiExists={wikiExists} />
 
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -338,9 +428,12 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
             {t("agents.marbloBots.subtitle")}
           </p>
         </div>
-        <div className="rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
-          {t("agents.marbloBots.knowledgeRoot")}:{" "}
-          {wikiRootPath || t("agents.marbloBots.rootMissing")}
+        <div className="min-w-0 max-w-full rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200 md:max-w-sm">
+          <TruncatedPathLine
+            label={t("agents.marbloBots.knowledgeRoot")}
+            path={wikiRootPath}
+            fallback={t("agents.marbloBots.rootMissing")}
+          />
         </div>
       </div>
 
@@ -379,7 +472,7 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
           </span>
         </div>
         <div className="grid gap-3 xl:grid-cols-2">
-          {SEED_BOTS.map((seed) => {
+          {seedBots.map((seed) => {
             const Icon = seedIcon(seed.seedId);
             const key = `seed:${seed.seedId}`;
             const draft = draftFromSeed(seed, project, ownerId);
@@ -403,7 +496,7 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
                       </span>
                       {seed.knowledgeEnabled && (
                         <span className="rounded border border-emerald-500/40 px-2 py-0.5 text-[11px] text-emerald-200">
-                          Knowledge
+                          {t("agents.marbloBots.knowledgeBadge")}
                         </span>
                       )}
                     </div>
@@ -428,17 +521,19 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
                         key={item}
                         className="rounded border border-amber-500/30 px-2 py-1 text-[11px] text-amber-200"
                       >
-                        필요: {item}
+                        {t("agents.marbloBots.required")}: {item}
                       </span>
                     ))}
                   </div>
                 )}
                 <p className="mb-3 text-xs text-gray-500">
-                  MCP 근거: {seed.evidence}
+                  {t("agents.marbloBots.evidence")}: {seed.evidence}
                 </p>
                 {!validation.ok && (
                   <p className="mb-3 text-xs text-red-300">
-                    {validation.issues.map(issueText).join(" ")}
+                    {validation.issues
+                      .map((issue) => issueText(issue, t))
+                      .join(" ")}
                   </p>
                 )}
                 <div className="flex flex-wrap gap-2">
@@ -450,10 +545,12 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
                       setError(null);
                       try {
                         await saveSeed(seed);
-                        setMessage("시드 봇을 프로젝트에 저장했습니다.");
+                        setMessage(t("agents.marbloBots.savedSeed"));
                       } catch (err) {
                         setError(
-                          err instanceof Error ? err.message : "저장 실패",
+                          err instanceof Error
+                            ? err.message
+                            : t("agents.marbloBots.saveFailed"),
                         );
                       } finally {
                         setBusy(null);
@@ -480,7 +577,9 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
                       } catch (err) {
                         setBusy(null);
                         setError(
-                          err instanceof Error ? err.message : "실행 실패",
+                          err instanceof Error
+                            ? err.message
+                            : t("agents.marbloBots.runFailed"),
                         );
                       }
                     }}
@@ -525,15 +624,19 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
                     </span>
                     {bot.knowledge.enabled && (
                       <span className="rounded border border-emerald-500/40 px-2 py-0.5 text-[11px] text-emerald-200">
-                        Knowledge
+                        {t("agents.marbloBots.knowledgeBadge")}
                       </span>
                     )}
                   </div>
                   <p className="text-sm text-gray-300">{bot.persona}</p>
                   <p className="mt-2 text-sm text-gray-400">{bot.mission}</p>
                   {bot.knowledge.enabled && (
-                    <p className="mt-2 truncate text-xs text-emerald-200">
-                      wiki_query root_path: {bot.knowledge.rootPath}
+                    <p className="mt-2 min-w-0 truncate text-xs text-emerald-200">
+                      <TruncatedPathLine
+                        label={t("agents.marbloBots.wikiQueryRoot")}
+                        path={bot.knowledge.rootPath}
+                        fallback={t("agents.marbloBots.rootMissing")}
+                      />
                     </p>
                   )}
                   <button
@@ -587,12 +690,11 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
               }
               className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
             >
-              <option value="claude">Claude</option>
-              <option value="codex">Codex</option>
-              <option value="grok">Grok</option>
-              <option value="deepseek">DeepSeek</option>
-              <option value="solar">Solar</option>
-              <option value="local">Local</option>
+              {MODEL_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </label>
           <label className="block">
@@ -631,7 +733,9 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
             <span className="pb-2">{t("agents.marbloBots.knowledgeUse")}</span>
           </label>
           <label className="block lg:col-span-2">
-            <span className="mb-1 block text-xs text-gray-400">Persona</span>
+            <span className="mb-1 block text-xs text-gray-400">
+              {t("agents.marbloBots.persona")}
+            </span>
             <input
               value={custom.persona}
               onChange={(event) =>
@@ -641,7 +745,9 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
             />
           </label>
           <label className="block lg:col-span-2">
-            <span className="mb-1 block text-xs text-gray-400">Mission</span>
+            <span className="mb-1 block text-xs text-gray-400">
+              {t("agents.marbloBots.mission")}
+            </span>
             <textarea
               value={custom.mission}
               onChange={(event) =>
@@ -683,9 +789,9 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
               >
                 <div className="mb-2 flex items-center gap-2 text-gray-300">
                   <Icon size={16} aria-hidden="true" />
-                  <span className="font-medium">{item.name}</span>
+                  <span className="font-medium">{t(item.name)}</span>
                 </div>
-                <p className="text-gray-500">{item.reason}</p>
+                <p className="text-gray-500">{t(item.reason)}</p>
               </div>
             );
           })}

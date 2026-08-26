@@ -1,4 +1,5 @@
 import type { AgentRole } from "../types/task";
+import type { MessageKey } from "../locales/ko";
 
 export const BOT_MODELS = [
   "claude",
@@ -89,6 +90,19 @@ export function assertValidBotDefinition(
 
 export interface SeedBotDefinition {
   seedId: string;
+  nameKey: MessageKey;
+  personaKey: MessageKey;
+  missionKey: MessageKey;
+  model: BotModel;
+  role: AgentRole;
+  tools: string[];
+  evidenceKey: MessageKey;
+  requiresKeys?: MessageKey[];
+  knowledgeEnabled: boolean;
+}
+
+export interface LocalizedSeedBotDefinition {
+  seedId: string;
   name: string;
   persona: string;
   mission: string;
@@ -103,39 +117,36 @@ export interface SeedBotDefinition {
 export const SEED_BOTS: SeedBotDefinition[] = [
   {
     seedId: "knowledge-assistant",
-    name: "지식 비서",
-    persona:
-      "프로젝트 위키를 먼저 확인하고, 근거와 한계를 짧게 분리해 말하는 실무 비서",
-    mission:
-      "사용자의 질문을 프로젝트 지식위키에 근거해 답하고, 모호한 부분은 추가 확인 항목으로 정리한다.",
+    nameKey: "agents.marbloBots.seed.knowledge.name",
+    personaKey: "agents.marbloBots.seed.knowledge.persona",
+    missionKey: "agents.marbloBots.seed.knowledge.mission",
     model: "claude",
     role: "backend",
     tools: ["wiki_query"],
-    evidence:
-      "MCP 서버에 wiki_query가 등록되어 있고, .claude/skills/wiki-init·wiki-note·wiki-ingest가 있다.",
+    evidenceKey: "agents.marbloBots.seed.knowledge.evidence",
     knowledgeEnabled: true,
   },
   {
     seedId: "fullstack-developer",
-    name: "풀스택 개발",
-    persona:
-      "기존 코드 패턴을 읽고 작은 PR 단위로 구현·검증하는 제품 개발 에이전트",
-    mission:
-      "요구사항을 보드 티켓으로 만들고, 기존 dispatch 경로로 작업 에이전트를 띄워 구현과 검증을 진행한다.",
+    nameKey: "agents.marbloBots.seed.fullstack.name",
+    personaKey: "agents.marbloBots.seed.fullstack.persona",
+    missionKey: "agents.marbloBots.seed.fullstack.mission",
     model: "codex",
     role: "frontend",
-    tools: ["create_task", "dispatch_task", "add_activity", "submit_for_review"],
-    evidence:
-      "MCP 서버에 create_task, dispatch_task, add_activity, submit_for_review가 등록되어 있다.",
+    tools: [
+      "create_task",
+      "dispatch_task",
+      "add_activity",
+      "submit_for_review",
+    ],
+    evidenceKey: "agents.marbloBots.seed.fullstack.evidence",
     knowledgeEnabled: false,
   },
   {
     seedId: "daily-briefing",
-    name: "일일 브리핑",
-    persona:
-      "정해진 시간에 일정·메일·열린 할일만 짧게 확인하고 Slack/Telegram으로 밀어주는 비서",
-    mission:
-      "오늘 일정, 새 메일, 진행 중인 할일을 확인해 한 화면 분량의 브리핑으로 정리하고 선택된 채널로 보낸다.",
+    nameKey: "agents.marbloBots.seed.dailyBriefing.name",
+    personaKey: "agents.marbloBots.seed.dailyBriefing.persona",
+    missionKey: "agents.marbloBots.seed.dailyBriefing.mission",
     model: "claude",
     role: "backend",
     tools: [
@@ -144,18 +155,18 @@ export const SEED_BOTS: SeedBotDefinition[] = [
       "send_slack_message",
       "send_telegram_message",
     ],
-    evidence:
-      "트리거 엔진 프롬프트와 MCP 서버에 calendar_list, gmail_search, send_slack_message, send_telegram_message가 등록되어 있다.",
-    requires: ["Google Calendar/Gmail 연결", "Slack 또는 Telegram 채널"],
+    evidenceKey: "agents.marbloBots.seed.dailyBriefing.evidence",
+    requiresKeys: [
+      "agents.marbloBots.require.google",
+      "agents.marbloBots.require.outputChannel",
+    ],
     knowledgeEnabled: true,
   },
   {
     seedId: "mail-calendar-followup",
-    name: "메일·일정 팔로업",
-    persona:
-      "새 메일이나 임박 일정이 들어오면 중요도와 다음 행동만 추려 알려주는 조건 반응 비서",
-    mission:
-      "최근 메일과 임박 일정을 확인하고, 답장 필요 여부·준비물·후속 태스크 후보를 짧게 정리한다.",
+    nameKey: "agents.marbloBots.seed.mailCalendar.name",
+    personaKey: "agents.marbloBots.seed.mailCalendar.persona",
+    missionKey: "agents.marbloBots.seed.mailCalendar.mission",
     model: "claude",
     role: "backend",
     tools: [
@@ -164,30 +175,106 @@ export const SEED_BOTS: SeedBotDefinition[] = [
       "send_slack_message",
       "send_telegram_message",
     ],
-    evidence:
-      "assistant-triggers 엔진이 Gmail/Calendar 조건을 폴링하고 같은 전송 MCP 도구로 푸시하도록 main.ts에 배선되어 있다.",
-    requires: ["Google Calendar/Gmail 연결", "Slack 또는 Telegram 채널"],
+    evidenceKey: "agents.marbloBots.seed.mailCalendar.evidence",
+    requiresKeys: [
+      "agents.marbloBots.require.google",
+      "agents.marbloBots.require.outputChannel",
+    ],
+    knowledgeEnabled: true,
+  },
+  {
+    seedId: "marketer",
+    nameKey: "agents.marbloBots.seed.marketer.name",
+    personaKey: "agents.marbloBots.seed.marketer.persona",
+    missionKey: "agents.marbloBots.seed.marketer.mission",
+    model: "claude",
+    role: "backend",
+    tools: [
+      "wiki_query",
+      "create_task",
+      "dispatch_task",
+      "send_slack_message",
+      "send_telegram_message",
+    ],
+    evidenceKey: "agents.marbloBots.seed.marketer.evidence",
+    requiresKeys: ["agents.marbloBots.require.outputChannel"],
+    knowledgeEnabled: true,
+  },
+  {
+    seedId: "designer",
+    nameKey: "agents.marbloBots.seed.designer.name",
+    personaKey: "agents.marbloBots.seed.designer.persona",
+    missionKey: "agents.marbloBots.seed.designer.mission",
+    model: "codex",
+    role: "frontend",
+    tools: ["wiki_query", "create_task", "dispatch_task", "add_activity"],
+    evidenceKey: "agents.marbloBots.seed.designer.evidence",
+    knowledgeEnabled: true,
+  },
+  {
+    seedId: "jarvis",
+    nameKey: "agents.marbloBots.seed.jarvis.name",
+    personaKey: "agents.marbloBots.seed.jarvis.persona",
+    missionKey: "agents.marbloBots.seed.jarvis.mission",
+    model: "claude",
+    role: "backend",
+    tools: [
+      "wiki_query",
+      "create_task",
+      "dispatch_task",
+      "gmail_search",
+      "calendar_list",
+      "send_slack_message",
+      "send_telegram_message",
+    ],
+    evidenceKey: "agents.marbloBots.seed.jarvis.evidence",
+    requiresKeys: [
+      "agents.marbloBots.require.google",
+      "agents.marbloBots.require.outputChannel",
+    ],
     knowledgeEnabled: true,
   },
 ];
 
 export interface OmittedSeedBot {
-  name: string;
-  reason: string;
+  name: MessageKey;
+  reason: MessageKey;
 }
 
 export const OMITTED_SEED_BOTS: OmittedSeedBot[] = [
   {
-    name: "유튜브 리서치",
-    reason:
-      "유튜브 전용 커넥터나 검증된 브라우저/검색 MCP가 현재 시드 재료로 확인되지 않아 첫 화면 실행 신뢰도를 해친다.",
+    name: "agents.marbloBots.omitted.youtube.name",
+    reason: "agents.marbloBots.omitted.youtube.reason",
   },
   {
-    name: "웹 리서치",
-    reason:
-      "브라우저/검색 MCP가 현재 Marblo MCP 표면에 등록된 실행 재료로 확인되지 않았다.",
+    name: "agents.marbloBots.omitted.web.name",
+    reason: "agents.marbloBots.omitted.web.reason",
   },
 ];
+
+export function localizeSeedBot(
+  seed: SeedBotDefinition,
+  translate: (key: MessageKey) => string,
+): LocalizedSeedBotDefinition {
+  return {
+    seedId: seed.seedId,
+    name: translate(seed.nameKey),
+    persona: translate(seed.personaKey),
+    mission: translate(seed.missionKey),
+    model: seed.model,
+    role: seed.role,
+    tools: seed.tools,
+    evidence: translate(seed.evidenceKey),
+    requires: seed.requiresKeys?.map(translate),
+    knowledgeEnabled: seed.knowledgeEnabled,
+  };
+}
+
+export function localizeSeedBots(
+  translate: (key: MessageKey) => string,
+): LocalizedSeedBotDefinition[] {
+  return SEED_BOTS.map((seed) => localizeSeedBot(seed, translate));
+}
 
 export function defaultWikiRootPath(projectFolderPath?: string): string {
   return projectFolderPath
@@ -196,7 +283,7 @@ export function defaultWikiRootPath(projectFolderPath?: string): string {
 }
 
 export function seedToDraft(input: {
-  seed: SeedBotDefinition;
+  seed: LocalizedSeedBotDefinition;
   projectId: string;
   ownerId: string;
   wikiRootPath: string;
@@ -225,6 +312,13 @@ export interface BuildBotDispatchInstructionInput {
   projectRootPath?: string;
 }
 
+export const BOT_DISPATCH_SOURCE = "marblo_bot_gallery";
+export const BOT_TASK_SCOPE_PREFIX = "marblo-bot:";
+
+export function botTaskScopeTag(bot: Pick<BotDefinition, "id" | "seedId">) {
+  return `${BOT_TASK_SCOPE_PREFIX}${bot.seedId || bot.id}`;
+}
+
 export function buildBotDispatchInstruction({
   bot,
   userMission,
@@ -232,6 +326,7 @@ export function buildBotDispatchInstruction({
 }: BuildBotDispatchInstructionInput): string {
   const mission = userMission.trim();
   const tools = bot.tools.length > 0 ? bot.tools.join(", ") : "기본 Marblo MCP";
+  const scopeTag = botTaskScopeTag(bot);
   const cwdLine = projectRootPath?.trim()
     ? `- cwd: ${projectRootPath.trim()}`
     : "- cwd: 프로젝트 기본 경로";
@@ -249,6 +344,10 @@ export function buildBotDispatchInstruction({
     "Create a board ticket first, then dispatch that ticket to a physical agent.",
     "",
     "Bot definition",
+    `- source: ${BOT_DISPATCH_SOURCE}`,
+    `- bot_id: ${bot.id}`,
+    `- bot_seed_id: ${bot.seedId ?? ""}`,
+    `- task scope tag: ${scopeTag}`,
     `- name: ${bot.name}`,
     `- persona: ${bot.persona}`,
     `- reusable mission: ${bot.mission}`,
@@ -262,8 +361,8 @@ export function buildBotDispatchInstruction({
     mission,
     "",
     "Required MCP sequence",
-    "1. create_task with the title, description, role, priority, and project scope for this run.",
-    "2. dispatch_task with the created task_id, role, instruction, model, cwd, and name from this bot definition.",
+    `1. create_task with the title, description, role, priority, and project scope for this run. The task scope MUST include "${scopeTag}" and the task description MUST keep source=${BOT_DISPATCH_SOURCE}.`,
+    `2. dispatch_task with the created task_id, role, instruction, model, cwd, and name from this bot definition. If passing tags, include "${scopeTag}".`,
     "3. The dispatched worker must use wiki_query(root_path) when Knowledge is enabled.",
   ].join("\n");
 }

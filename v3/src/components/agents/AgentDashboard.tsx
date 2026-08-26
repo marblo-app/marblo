@@ -10,8 +10,10 @@ import AuditTimeline from "./AuditTimeline";
 import { useCostStore } from "../../stores/costStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useTranslation } from "../../lib/i18n";
+import { classifyBotAgentSource } from "../../lib/botAgentSource";
 
 type ViewMode = "list" | "grid";
+type AgentDashboardScope = "all" | "bot";
 const VIEW_MODE_KEY = "agentsViewMode";
 
 function readViewMode(): ViewMode {
@@ -33,6 +35,7 @@ interface AgentDashboardProps {
   onStop: (agentId: string) => void;
   onRestart: (agentId: string) => void;
   onDelete: (agentId: string) => void;
+  scope?: AgentDashboardScope;
 }
 
 export default function AgentDashboard({
@@ -44,6 +47,7 @@ export default function AgentDashboard({
   onStop,
   onRestart,
   onDelete,
+  scope = "all",
 }: AgentDashboardProps) {
   const { t } = useTranslation();
   const [viewMode, setViewMode] = useState<ViewMode>(readViewMode);
@@ -61,7 +65,18 @@ export default function AgentDashboard({
   // Agents tab card grid / summary / cleanup. ActivityFeed still receives
   // the full list so its `agentId in agents` filter passes orchestrator
   // events.
-  const visibleAgents = agents.filter((a) => a.role !== "orchestrator");
+  const visibleAgents = useMemo(
+    () =>
+      agents
+        .filter((a) => a.role !== "orchestrator")
+        .filter((agent) =>
+          scope === "bot"
+            ? classifyBotAgentSource(agent, tasks).status === "present"
+            : true,
+        ),
+    [agents, scope, tasks],
+  );
+  const activityAgents = scope === "bot" ? visibleAgents : agents;
 
   // 사용자 spawn 셸 터미널 (isAgent !== true) — 그리드에 에이전트와 함께
   // 표시. useTerminalRestore 가 프로젝트 단위로 재spawn 해 재시작 후에도
@@ -124,44 +139,47 @@ export default function AgentDashboard({
               ▦ Grid
             </button>
           </div>
-          {visibleAgents.filter((a) => a.status !== "working").length > 0 && (
+          {scope === "all" &&
+            visibleAgents.filter((a) => a.status !== "working").length > 0 && (
+              <button
+                className="flex items-center gap-1.5 rounded border border-red-600/30 bg-red-600/10 px-3 py-1.5 text-sm font-medium text-red-400 transition-colors hover:bg-red-600/20"
+                onClick={() => {
+                  const inactive = visibleAgents.filter(
+                    (a) => a.status !== "working",
+                  );
+                  if (
+                    confirm(
+                      t("agents.dashboard.cleanupConfirm", {
+                        count: inactive.length,
+                      }),
+                    )
+                  ) {
+                    inactive.forEach((a) => onDelete(a.id));
+                  }
+                }}
+              >
+                {t("agents.dashboard.cleanup")} (
+                {visibleAgents.filter((a) => a.status !== "working").length})
+              </button>
+            )}
+          {scope === "all" && (
             <button
-              className="flex items-center gap-1.5 rounded border border-red-600/30 bg-red-600/10 px-3 py-1.5 text-sm font-medium text-red-400 transition-colors hover:bg-red-600/20"
-              onClick={() => {
-                const inactive = visibleAgents.filter(
-                  (a) => a.status !== "working",
-                );
-                if (
-                  confirm(
-                    t("agents.dashboard.cleanupConfirm", {
-                      count: inactive.length,
-                    }),
-                  )
-                ) {
-                  inactive.forEach((a) => onDelete(a.id));
-                }
-              }}
+              className="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+              onClick={onAddAgent}
             >
-              {t("agents.dashboard.cleanup")} (
-              {visibleAgents.filter((a) => a.status !== "working").length})
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M7 2v10M2 7h10" />
+              </svg>
+              {t("agents.dashboard.addAgent")}
             </button>
           )}
-          <button
-            className="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-500"
-            onClick={onAddAgent}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 14 14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M7 2v10M2 7h10" />
-            </svg>
-            {t("agents.dashboard.addAgent")}
-          </button>
         </div>
       </div>
 
@@ -172,9 +190,16 @@ export default function AgentDashboard({
           the FleetView grid. Empty state is shared. Orchestrator filtered
           out of both views (it has its own bottom panel). */}
       {visibleAgents.length === 0 ? (
-        <AgentSetupGuide onAddAgent={onAddAgent} />
+        scope === "bot" ? (
+          <BotAgentEmptyState />
+        ) : (
+          <AgentSetupGuide onAddAgent={onAddAgent} />
+        )
       ) : viewMode === "grid" ? (
-        <AgentFleetGrid agents={visibleAgents} terminals={shellTerminals} />
+        <AgentFleetGrid
+          agents={visibleAgents}
+          terminals={scope === "bot" ? [] : shellTerminals}
+        />
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {visibleAgents.map((agent) => (
@@ -193,7 +218,16 @@ export default function AgentDashboard({
       {/* Activity & Audit Tabs — ActivityFeed receives the full list so the
           orchestrator agent doc keeps its events visible.
           Usage/cost moved out to the top-level "Usage" tab. */}
-      <ActivityAuditTabs projectId={projectId} agents={agents} />
+      <ActivityAuditTabs projectId={projectId} agents={activityAgents} />
+    </div>
+  );
+}
+
+function BotAgentEmptyState() {
+  const { t } = useTranslation();
+  return (
+    <div className="rounded border border-dashed border-gray-700 px-4 py-8 text-center text-sm text-gray-500">
+      {t("agents.marbloBots.runningEmpty")}
     </div>
   );
 }
