@@ -14,7 +14,7 @@ export const lanes: Record<keyof typeof koLanes, string> = {
   "lanes.terminal.connectBadge": "(connect)",
 
   // Header
-  "lanes.header.title": "Quick Lanes",
+  "lanes.header.title": "Parallel Work",
   "lanes.header.subtitle":
     "Parallel to your main work — knock out improvements fast in an isolated worktree",
   "lanes.header.runningCount": "{count} running in parallel",
@@ -32,6 +32,8 @@ export const lanes: Record<keyof typeof koLanes, string> = {
   "lanes.missions.openDetail": "Open mission details for {title}",
   "lanes.missions.model.orchestrator": "Orchestrator",
   "lanes.missions.taskCount": "{count} tasks",
+  "lanes.done.expand": "Show done",
+  "lanes.done.collapse": "Hide done",
 
   // Optimistic (pending) cards — stages before the task/agent docs come back
   "lanes.pending.creating": "Creating ticket…",
@@ -75,6 +77,7 @@ export const lanes: Record<keyof typeof koLanes, string> = {
 
   // Row
   "lanes.row.worktreePreparing": "Preparing worktree…",
+  "lanes.row.worktreeCompleted": "Worktree reclaimed after completion",
   "lanes.row.openDetail": "Open details for {title}",
   "lanes.row.openDetailTip":
     "Click to see the ticket, agent, worktree and history",

@@ -21,6 +21,7 @@ import {
   parseStoredVerticalRatio,
   verticalRatioFromPointer,
   visibleRightTabs,
+  shouldShowLanesMissionSection,
   BOARD_MIN_WIDTH,
   BOARD_COLUMN_COUNT,
   BOARD_COLUMN_MIN_WIDTH,
@@ -281,6 +282,17 @@ describe("visibleRightTabs", () => {
     // the production filter too — the bar users actually see.
     const visible = visibleRightTabs([]);
     expect(visible[visible.indexOf("code") + 1]).toBe("lanes");
+  });
+});
+
+describe("shouldShowLanesMissionSection", () => {
+  it("hides the LanesTab mission summary when the missions tab is hidden", () => {
+    expect(shouldShowLanesMissionSection([])).toBe(false);
+    expect(shouldShowLanesMissionSection(["flows", "deploy"])).toBe(false);
+  });
+
+  it("shows the LanesTab mission summary only with the missions feature flag", () => {
+    expect(shouldShowLanesMissionSection(["missions"])).toBe(true);
   });
 });
 

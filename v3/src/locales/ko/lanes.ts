@@ -13,7 +13,7 @@ export const lanes = {
   "lanes.terminal.connectBadge": "(연결)",
 
   // Header
-  "lanes.header.title": "퀵레인",
+  "lanes.header.title": "병렬 작업",
   "lanes.header.subtitle":
     "메인 작업과 병렬로 — 떠오른 개선점을 독립 워크트리에서 빠르게",
   "lanes.header.runningCount": "{count}개 병렬 실행 중",
@@ -31,6 +31,8 @@ export const lanes = {
   "lanes.missions.openDetail": "{title} 미션 상세 열기",
   "lanes.missions.model.orchestrator": "Orchestrator",
   "lanes.missions.taskCount": "task {count}개",
+  "lanes.done.expand": "완료 펼치기",
+  "lanes.done.collapse": "완료 접기",
 
   // 낙관적(pending) 카드 — 티켓/에이전트 doc 이 돌아오기 전 단계 표시
   "lanes.pending.creating": "티켓 생성 중…",
@@ -74,6 +76,7 @@ export const lanes = {
 
   // Row
   "lanes.row.worktreePreparing": "워크트리 준비 중…",
+  "lanes.row.worktreeCompleted": "완료되어 워크트리 회수됨",
   "lanes.row.openDetail": "{title} 상세 열기",
   "lanes.row.openDetailTip":
     "클릭하면 티켓·에이전트·워크트리·히스토리를 봅니다",

@@ -25,7 +25,7 @@ export const workspace = {
   "workspace.tab.code": "코드",
   "workspace.tab.worktrees": "워크트리",
   "workspace.tab.history": "완료 이력",
-  "workspace.tab.lanes": "퀵레인",
+  "workspace.tab.lanes": "병렬 작업",
   "workspace.tab.guide": "가이드",
   "workspace.tab.usage": "사용량",
   "workspace.tab.store": "스토어",

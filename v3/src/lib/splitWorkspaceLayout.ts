@@ -98,6 +98,14 @@ export function visibleRightTabs(devFeatures: string[]): RightTabId[] {
   );
 }
 
+/**
+ * LanesTab's mission summary shares the exact Missions tab gate. This prevents
+ * a dev-only feature from leaking into production through a secondary surface.
+ */
+export function shouldShowLanesMissionSection(devFeatures: string[]): boolean {
+  return visibleRightTabs(devFeatures).includes("missions");
+}
+
 /** Left (terminal) pane width as a fraction of the split container. */
 export const MIN_RATIO = 0.2;
 export const MAX_RATIO = 0.7;

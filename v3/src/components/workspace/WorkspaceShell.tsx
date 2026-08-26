@@ -17,11 +17,17 @@ import {
   ratioWithActivityOpen,
   storedRatioFromDrag,
   NARROW_BREAKPOINT,
+  visibleRightTabs,
 } from "../../lib/splitWorkspaceLayout";
 import { TerminalColumn } from "./TerminalColumn";
 import { WorkTabs } from "./WorkTabs";
 import { Sidebar } from "../sidebar/Sidebar";
 import { ActivityStreamPanel } from "../activity/ActivityStreamPanel";
+
+const devFeatures = (import.meta.env.VITE_DEV_FEATURES || "")
+  .split(",")
+  .map((s: string) => s.trim());
+const canOpenMissionsTab = visibleRightTabs(devFeatures).includes("missions");
 
 /**
  * Observe an element's width via a callback ref. Returns the ref callback to
@@ -157,7 +163,9 @@ export function WorkspaceShell() {
   }, [pendingSettingsSection, setActiveTab]);
 
   useEffect(() => {
-    const onOpenMissions = () => setActiveTab("missions");
+    const onOpenMissions = () => {
+      if (canOpenMissionsTab) setActiveTab("missions");
+    };
     window.addEventListener("marblo:open-missions", onOpenMissions);
     return () =>
       window.removeEventListener("marblo:open-missions", onOpenMissions);
@@ -174,8 +182,11 @@ export function WorkspaceShell() {
       setActiveTab("board");
       consumeJump();
     } else if (pendingJump.type === "mission") {
-      setActiveTab("missions");
-      addPane("missions");
+      if (canOpenMissionsTab) {
+        setActiveTab("missions");
+        addPane("missions");
+      }
+      consumeJump();
     } else if (pendingJump.type === "code") {
       setActiveTab("code");
       consumeJump();

@@ -17,8 +17,10 @@ import { checkAgentSpawn } from "../../lib/planLimits";
 import { buildLaneContextId, isLaneContext } from "../../lib/laneContext";
 import { laneStatusPill } from "../../lib/laneStatus";
 import { groupLaneRows, laneGroupDef } from "../../lib/laneGroups";
+import { laneWorktreeLabel } from "../../lib/laneWorktreeLabel";
 import { harnessIcon, laneToneColor } from "../../lib/laneVisuals";
 import { findTaskWorktree } from "../../lib/taskWorktree";
+import { shouldShowLanesMissionSection } from "../../lib/splitWorkspaceLayout";
 import {
   buildModelPin,
   describeSelection,
@@ -42,6 +44,11 @@ import type { LaneRow } from "../../types/lane";
 import type { Worktree } from "../../types/worktree";
 import { useTranslation } from "../../lib/i18n";
 import { reportOnrampExecBlocked } from "../../services/onrampBlockSignal";
+
+const devFeatures = (import.meta.env.VITE_DEV_FEATURES || "")
+  .split(",")
+  .map((s: string) => s.trim());
+const showMissionSection = shouldShowLanesMissionSection(devFeatures);
 
 // 빠른 작업 task 는 규약대로 contextId="lane:<laneId>" 로 태깅된다(lib/laneContext).
 // 보드 카드 마킹(좌측 amber 바)은 lib/laneContext.isLaneTask 가, 여기 Lanes 탭
@@ -202,6 +209,8 @@ export function LanesTab() {
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingLane[]>([]);
   const [missions, setMissions] = useState<Mission[]>([]);
+  const [showDoneLanes, setShowDoneLanes] = useState(false);
+  const [showDoneMissions, setShowDoneMissions] = useState(false);
   const [busy, setBusy] = useState<{
     taskId: string;
     action: LaneRowAction;
@@ -219,14 +228,23 @@ export function LanesTab() {
     }
     const u1 = subscribeTasks(projectId);
     const u2 = subscribeAgents(projectId);
-    const u3 = missionService.subscribeToMissions(projectId, setMissions);
+    const u3 = showMissionSection
+      ? missionService.subscribeToMissions(projectId, setMissions)
+      : undefined;
+    if (!showMissionSection) setMissions([]);
     refreshWorktrees().catch(() => {});
     return () => {
       u1?.();
       u2?.();
       u3?.();
     };
-  }, [projectId, subscribeTasks, subscribeAgents, refreshWorktrees]);
+  }, [
+    projectId,
+    subscribeTasks,
+    subscribeAgents,
+    refreshWorktrees,
+    showMissionSection,
+  ]);
 
   const laneRows: LaneRow[] = useMemo(() => {
     const lanes = tasks.filter((task) => isLaneRow(task.contextId));
@@ -293,6 +311,20 @@ export function LanesTab() {
     if (laneGroups.some((g) => g.def.id === "active")) return laneGroups;
     return [{ def: laneGroupDef("active"), rows: [] }, ...laneGroups];
   }, [laneGroups, activePending]);
+
+  const missionBuckets = useMemo(() => {
+    const active: Mission[] = [];
+    const done: Mission[] = [];
+    for (const mission of visibleMissions) {
+      const progress = missionProgress(mission);
+      if (mission.status === "completed" || progress.percent >= 100) {
+        done.push(mission);
+      } else {
+        active.push(mission);
+      }
+    }
+    return { active, done };
+  }, [visibleMissions]);
 
   // 행이 나타난 진행중 카드는 상태에서도 걷어낸다 — 안 걷으면 배열이 세션 내내
   // 자라고, activePending 이 매번 그 전부를 다시 훑는다.
@@ -370,7 +402,7 @@ export function LanesTab() {
     const plan = useSubscriptionStore.getState().getPlan();
     const spawnCheck = checkAgentSpawn(plan, [
       ...agents,
-      ...Array.from({ length: inFlight }, () => ({ status: "idle" }) as Agent),
+      ...Array.from({ length: inFlight }, () => ({ status: "idle" } as Agent)),
     ]);
     if (!spawnCheck.allowed) {
       // Free hit the fair-use agent cap → also open the upgrade modal
@@ -682,338 +714,357 @@ export function LanesTab() {
           {laneRows.length === 0 && activePending.length === 0 ? (
             <div className="flex min-h-[160px] items-center justify-center rounded-lg border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
               <div>
-                <p className="text-sm text-gray-300">{t("lanes.empty.title")}</p>
+                <p className="text-sm text-gray-300">
+                  {t("lanes.empty.title")}
+                </p>
                 <p className="mt-1 text-xs text-gray-500">
                   {t("lanes.empty.hint")}
                 </p>
               </div>
             </div>
           ) : (
-        // ★라인(상태 레인)별로 접어 둔다. 라인 안에서는 여전히 **카드 그리드**다:
-        // 병렬로 도는 레인들이 세로로 한 줄씩 쌓이면 "큐" 처럼 읽히고, 나란히
-        // 서면 "동시에 도는 것들" 로 읽힌다(그 판단은 그대로 유지). 라인이 바꾸는
-        // 것은 카드의 배치가 아니라 묶음 — "지금 굴러가는 것"과 "치우면 되는 것"을
-        // 카드마다 pill 을 읽어 가려내지 않아도 되게 한다.
-        <div className="space-y-4">
-          {renderGroups.map(({ def, rows }) => {
-            const pendingHere = def.id === "active" ? activePending : [];
-            const count = rows.length + pendingHere.length;
-            return (
-              <section key={def.id}>
-                <div className="mb-1.5 flex items-center gap-2">
-                  <span
-                    aria-hidden
-                    className="h-1.5 w-1.5 rounded-full"
-                    style={{ backgroundColor: def.dotColor }}
-                  />
-                  <h3 className="text-xs font-semibold text-gray-300">
-                    {t(def.labelKey)}
-                  </h3>
-                  <span className="text-[11px] text-gray-500">{count}</span>
-                  <span className="h-px flex-1 bg-gray-800" />
-                </div>
-                <div className="grid auto-rows-min grid-cols-1 gap-2 md:grid-cols-2 2xl:grid-cols-3">
-                  {/* 낙관적 카드: 누른 즉시 여기 선다(티켓 doc 이 돌아오기 전).
-                      아직 티켓이 없어 열어 볼 상세도 없으므로 클릭 대상이 아니다. */}
-                  {pendingHere.map((p) => (
-                    <div
-                      key={p.id}
-                      className="animate-pulse rounded-lg border border-blue-500/40 bg-gray-800 p-3"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm">
-                          {harnessIcon(p.selection.harness)}
-                        </span>
-                        <span className="truncate text-sm font-medium text-gray-200">
-                          {p.title}
-                        </span>
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-gray-400">
-                        <span className="font-mono text-gray-500">
-                          {describeSelection(p.selection)}
-                        </span>
-                        <span className="text-blue-300">
-                          {p.phase === "creating"
-                            ? t("lanes.pending.creating")
-                            : t("lanes.pending.spawning")}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                  {rows.map((row) => {
-                    const { task, agent, worktree } = row;
-                    // 레인 상태 pill 의 단일 진실의 원천. worktree git 상태만 보던
-                    // 과거 statusPill 과 달리, 연결된 task 의 터미널 상태를 반영해
-                    // 완료된 레인이 "작업중"으로 남아 멈춘 것처럼 보이는 오탐을 없앤다.
-                    const pill = laneStatusPill(task, worktree);
-                    const st = worktree?.status;
-                    const busyAction =
-                      busy?.taskId === task.id ? busy.action : null;
-                    const showRestart = canRestartLane(row);
-                    const showDelete = canDeleteLane(row);
-                    const selected = detailTaskId === task.id;
-                    return (
-                      // ★카드 전체가 클릭 타깃이다. 종전엔 카드 컨테이너에 아예
-                      // onClick 이 없어서(pointer-events 문제가 아니라 핸들러 부재)
-                      // 안쪽 버튼 말고는 어디를 눌러도 아무 일이 없었다.
-                      // <button> 이 아니라 role="button" 인 이유: 카드 안에 이미
-                      // 버튼(터미널/재시작/삭제)이 들어 있어 버튼 중첩은 무효
-                      // 마크업이 된다. 키보드 접근은 tabIndex + Enter/Space 로 연다.
-                      <div
-                        key={task.id}
-                        role="button"
-                        tabIndex={0}
-                        aria-label={t("lanes.row.openDetail", {
-                          title: task.title,
-                        })}
-                        title={t("lanes.row.openDetailTip")}
-                        onClick={() => setDetailTaskId(task.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            setDetailTaskId(task.id);
-                          }
-                        }}
-                        className={`cursor-pointer rounded-lg border bg-gray-800 p-3 text-left transition hover:border-gray-500 hover:bg-gray-800/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${
-                          selected
-                            ? "border-blue-500/60 ring-1 ring-blue-500/30"
-                            : "border-gray-700/50"
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm">
-                                {harnessIcon(agent?.model)}
-                              </span>
-                              <span className="truncate text-sm font-medium text-gray-200">
-                                {task.title}
-                              </span>
-                            </div>
-                            {/* #605 구체 모델 배지 — 스탬프가 있을 때만. 없으면(핀 없는
-                                스폰·구 doc) 왼쪽 하네스 아이콘만 남는 종전 표시로
-                                자연스럽게 되돌아간다. 값은 요청이 아니라 argv 를 되읽은
-                                **서빙된 모델**이라, 버전가드 폴백도 여기서 드러난다. */}
-                            {agent && spawnedModelLabel(agent.spawnedModel) && (
-                              <div className="mt-1">
-                                <span
-                                  className="inline-block max-w-full truncate rounded border border-[#45475a] bg-[#181825] px-1.5 py-0.5 font-mono text-[10px] text-[#a6adc8]"
-                                  title={spawnedModelTitle(
-                                    spawnedModelLabel(
-                                      agent.spawnedModel,
-                                    ) as string,
-                                    agent.model,
-                                  )}
-                                >
-                                  {spawnedModelLabel(agent.spawnedModel)}
-                                </span>
-                              </div>
-                            )}
-                            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-gray-400">
-                              {worktree ? (
-                                <span className="font-mono text-gray-500">
-                                  {worktree.branch}
-                                </span>
-                              ) : (
-                                <span className="text-gray-600">
-                                  {t("lanes.row.worktreePreparing")}
-                                </span>
-                              )}
-                              {st && (
-                                <span>
-                                  ▲{st.ahead} ▼{st.behind} · +{st.insertions}/−
-                                  {st.deletions}
-                                </span>
-                              )}
-                              <span className="text-gray-500">
-                                {task.status}
-                              </span>
-                            </div>
-                          </div>
-                          {pill && (
-                            <span
-                              className="flex flex-shrink-0 items-center gap-1 text-xs font-medium"
-                              style={{ color: laneToneColor(pill.tone) }}
-                            >
-                              <span aria-hidden>{pill.icon}</span>
-                              {pill.label}
-                            </span>
-                          )}
-                        </div>
-                        {(agent || showRestart || showDelete) && (
-                          // ★액션 줄은 카드 클릭에서 떼어 낸다. 안 떼면 "터미널"을
-                          // 누를 때 상세 드로우까지 같이 열린다(버블링).
-                          <div
-                            className="mt-2 flex flex-wrap items-center gap-1.5"
-                            onClick={(e) => e.stopPropagation()}
-                            onKeyDown={(e) => e.stopPropagation()}
-                            role="presentation"
-                          >
-                            {agent && <LaneTerminalButton agent={agent} />}
-                            {showRestart && (
-                              <button
-                                type="button"
-                                disabled={busyAction !== null}
-                                title={t("lanes.row.restartTip")}
-                                onClick={() => restartLane(row)}
-                                className="rounded border border-amber-500/40 px-2 py-0.5 text-[11px] text-amber-300 transition hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {busyAction === "restart"
-                                  ? t("lanes.row.restarting")
-                                  : t("lanes.row.restart")}
-                              </button>
-                            )}
-                            {showDelete && (
-                              <button
-                                type="button"
-                                disabled={busyAction !== null}
-                                title={t("lanes.row.deleteTip")}
-                                onClick={() => setDeleteTarget(row)}
-                                className="rounded border border-red-500/40 px-2 py-0.5 text-[11px] text-red-300 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {busyAction === "delete"
-                                  ? t("lanes.row.deleting")
-                                  : t("lanes.row.delete")}
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            );
-          })}
-        </div>
-          )}
-        </section>
-
-        <section data-testid="lanes-missions-section">
-          <div className="mb-2 flex items-center gap-2">
-            <span className="rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-sky-300">
-              {t("lanes.kind.mission")}
-            </span>
-            <h3 className="text-xs font-semibold text-gray-300">
-              {t("lanes.section.missions")}
-            </h3>
-            <span className="text-[11px] text-gray-500">
-              {visibleMissions.length}
-            </span>
-            <span className="h-px flex-1 bg-gray-800" />
-          </div>
-
-          {visibleMissions.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-sky-500/25 bg-sky-500/5 p-5">
-              <p className="text-sm font-medium text-gray-200">
-                {t("lanes.missions.empty.title")}
-              </p>
-              <p className="mt-1 max-w-2xl text-xs text-gray-500">
-                {t("lanes.missions.empty.hint")}
-              </p>
-              <button
-                type="button"
-                onClick={() =>
-                  window.dispatchEvent(new CustomEvent("marblo:open-missions"))
-                }
-                className="mt-3 rounded border border-sky-500/40 px-3 py-1.5 text-xs font-medium text-sky-300 transition hover:bg-sky-500/10"
-              >
-                {t("lanes.missions.empty.cta")}
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {visibleMissions.map((mission) => {
-                const progress = missionProgress(mission);
-                const modelLabels = missionTaskModelLabels(mission, agents);
-                const taskCount = mission.taskIds?.length ?? 0;
+            <div className="space-y-4">
+              {renderGroups.map(({ def, rows }) => {
+                const pendingHere = def.id === "active" ? activePending : [];
+                const count = rows.length + pendingHere.length;
+                const isDoneGroup = def.id === "done";
+                const collapsed = isDoneGroup && !showDoneLanes;
                 return (
-                  <div
-                    key={mission.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() =>
-                      requestJump({ type: "mission", missionId: mission.id })
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        requestJump({
-                          type: "mission",
-                          missionId: mission.id,
-                        });
-                      }
-                    }}
-                    className="cursor-pointer rounded-lg border border-gray-700/60 bg-gray-800/40 p-3 transition hover:border-sky-500/50 hover:bg-gray-800/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60"
-                    aria-label={t("lanes.missions.openDetail", {
-                      title: mission.goal,
-                    })}
-                  >
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="truncate text-sm font-medium text-gray-100">
-                            {missionTitle(mission)}
-                          </span>
-                          <MissionStatusBadge status={mission.status} compact />
-                        </div>
-                        <p className="mt-1 text-xs text-gray-500">
-                          {mission.goal}
-                        </p>
-                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                          {modelLabels.length > 0 ? (
-                            modelLabels.map((label) => (
-                              <span
-                                key={label}
-                                className="rounded border border-[#45475a] bg-[#181825] px-1.5 py-0.5 font-mono text-[10px] text-[#a6adc8]"
-                              >
-                                {label}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="rounded border border-gray-700 bg-gray-900/60 px-1.5 py-0.5 text-[10px] text-gray-500">
-                              {t("lanes.missions.model.orchestrator")}
-                            </span>
-                          )}
-                          <span className="text-[11px] text-gray-500">
-                            {t("lanes.missions.taskCount", {
-                              count: String(taskCount),
-                            })}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="w-full shrink-0 lg:w-72">
-                        <div className="mb-1 flex items-center justify-between text-[11px] text-gray-500">
-                          <span>{progress.label}</span>
-                          <span>{progress.percent}%</span>
-                        </div>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-gray-900">
-                          <div
-                            className="h-full rounded-full bg-sky-400"
-                            style={{ width: `${progress.percent}%` }}
-                          />
-                        </div>
-                        {progress.statusCounts.length > 0 && (
-                          <div className="mt-1.5 flex flex-wrap gap-1">
-                            {progress.statusCounts.map((item) => (
-                              <span
-                                key={item.status}
-                                className="rounded bg-gray-900/70 px-1.5 py-0.5 text-[10px] text-gray-400"
-                              >
-                                {item.status} {item.count}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                  <section key={def.id}>
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <span
+                        aria-hidden
+                        className="h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: def.dotColor }}
+                      />
+                      <h3 className="text-xs font-semibold text-gray-300">
+                        {t(def.labelKey)}
+                      </h3>
+                      <span className="text-[11px] text-gray-500">{count}</span>
+                      <span className="h-px flex-1 bg-gray-800" />
+                      {isDoneGroup && count > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowDoneLanes((v) => !v)}
+                          className="rounded border border-gray-700 px-2 py-0.5 text-[11px] text-gray-400 transition hover:border-gray-600 hover:text-gray-200"
+                        >
+                          {showDoneLanes
+                            ? t("lanes.done.collapse")
+                            : t("lanes.done.expand")}
+                        </button>
+                      )}
                     </div>
-                  </div>
+                    {collapsed ? null : (
+                      <div className="space-y-1">
+                        {pendingHere.map((p) => (
+                          <div
+                            key={p.id}
+                            className="grid animate-pulse grid-cols-1 items-center gap-1 rounded border border-blue-500/40 bg-gray-800 px-3 py-2 text-xs sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:gap-3"
+                          >
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span>{harnessIcon(p.selection.harness)}</span>
+                              <span className="truncate font-medium text-gray-200">
+                                {p.title}
+                              </span>
+                            </div>
+                            <span className="font-mono text-gray-500">
+                              {describeSelection(p.selection)}
+                            </span>
+                            <span className="text-blue-300">
+                              {p.phase === "creating"
+                                ? t("lanes.pending.creating")
+                                : t("lanes.pending.spawning")}
+                            </span>
+                          </div>
+                        ))}
+                        {rows.map((row) => {
+                          const { task, agent, worktree } = row;
+                          // 레인 상태 pill 의 단일 진실의 원천. worktree git 상태만 보던
+                          // 과거 statusPill 과 달리, 연결된 task 의 터미널 상태를 반영해
+                          // 완료된 레인이 "작업중"으로 남아 멈춘 것처럼 보이는 오탐을 없앤다.
+                          const pill = laneStatusPill(task, worktree);
+                          const st = worktree?.status;
+                          const busyAction =
+                            busy?.taskId === task.id ? busy.action : null;
+                          const showRestart = canRestartLane(row);
+                          const showDelete = canDeleteLane(row);
+                          const selected = detailTaskId === task.id;
+                          const worktreeLabel = laneWorktreeLabel(
+                            task,
+                            worktree,
+                          );
+                          return (
+                            <div
+                              key={task.id}
+                              role="button"
+                              tabIndex={0}
+                              aria-label={t("lanes.row.openDetail", {
+                                title: task.title,
+                              })}
+                              title={t("lanes.row.openDetailTip")}
+                              onClick={() => setDetailTaskId(task.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  setDetailTaskId(task.id);
+                                }
+                              }}
+                              className={`grid cursor-pointer grid-cols-1 items-center gap-1 rounded border bg-gray-800 px-3 py-2 text-left text-xs transition hover:border-gray-500 hover:bg-gray-800/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 sm:grid-cols-[minmax(0,1.4fr)_auto_minmax(9rem,0.7fr)_auto] sm:gap-3 ${
+                                selected
+                                  ? "border-blue-500/60 ring-1 ring-blue-500/30"
+                                  : "border-gray-700/50"
+                              }`}
+                            >
+                              <div className="flex min-w-0 items-center gap-2">
+                                <span>{harnessIcon(agent?.model)}</span>
+                                <span className="truncate font-medium text-gray-200">
+                                  {task.title}
+                                </span>
+                                {agent &&
+                                  spawnedModelLabel(agent.spawnedModel) && (
+                                    <span
+                                      className="hidden max-w-[10rem] truncate rounded border border-[#45475a] bg-[#181825] px-1.5 py-0.5 font-mono text-[10px] text-[#a6adc8] xl:inline-block"
+                                      title={spawnedModelTitle(
+                                        spawnedModelLabel(
+                                          agent.spawnedModel,
+                                        ) as string,
+                                        agent.model,
+                                      )}
+                                    >
+                                      {spawnedModelLabel(agent.spawnedModel)}
+                                    </span>
+                                  )}
+                              </div>
+                              {pill && (
+                                <span
+                                  className="flex flex-shrink-0 items-center gap-1 font-medium"
+                                  style={{ color: laneToneColor(pill.tone) }}
+                                >
+                                  <span aria-hidden>{pill.icon}</span>
+                                  {pill.label}
+                                </span>
+                              )}
+                              <div className="min-w-0 font-mono text-[11px] text-gray-500">
+                                {worktreeLabel.kind === "branch" ? (
+                                  <span className="block truncate">
+                                    {worktreeLabel.branch}
+                                  </span>
+                                ) : (
+                                  <span
+                                    className={
+                                      worktreeLabel.tone === "complete"
+                                        ? "text-emerald-400/70"
+                                        : "text-gray-600"
+                                    }
+                                  >
+                                    {t(worktreeLabel.labelKey)}
+                                  </span>
+                                )}
+                                {st && (
+                                  <span className="block truncate text-gray-600">
+                                    ▲{st.ahead} ▼{st.behind} · +{st.insertions}
+                                    /−
+                                    {st.deletions}
+                                  </span>
+                                )}
+                              </div>
+                              {(agent || showRestart || showDelete) && (
+                                // ★액션 줄은 카드 클릭에서 떼어 낸다. 안 떼면 "터미널"을
+                                // 누를 때 상세 드로우까지 같이 열린다(버블링).
+                                <div
+                                  className="flex justify-start gap-1.5 sm:justify-end"
+                                  onClick={(e) => e.stopPropagation()}
+                                  onKeyDown={(e) => e.stopPropagation()}
+                                  role="presentation"
+                                >
+                                  {agent && (
+                                    <LaneTerminalButton agent={agent} />
+                                  )}
+                                  {showRestart && (
+                                    <button
+                                      type="button"
+                                      disabled={busyAction !== null}
+                                      title={t("lanes.row.restartTip")}
+                                      onClick={() => restartLane(row)}
+                                      className="rounded border border-amber-500/40 px-2 py-0.5 text-[11px] text-amber-300 transition hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {busyAction === "restart"
+                                        ? t("lanes.row.restarting")
+                                        : t("lanes.row.restart")}
+                                    </button>
+                                  )}
+                                  {showDelete && (
+                                    <button
+                                      type="button"
+                                      disabled={busyAction !== null}
+                                      title={t("lanes.row.deleteTip")}
+                                      onClick={() => setDeleteTarget(row)}
+                                      className="rounded border border-red-500/40 px-2 py-0.5 text-[11px] text-red-300 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {busyAction === "delete"
+                                        ? t("lanes.row.deleting")
+                                        : t("lanes.row.delete")}
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </section>
                 );
               })}
             </div>
           )}
         </section>
+
+        {showMissionSection && (
+          <section data-testid="lanes-missions-section">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-sky-300">
+                {t("lanes.kind.mission")}
+              </span>
+              <h3 className="text-xs font-semibold text-gray-300">
+                {t("lanes.section.missions")}
+              </h3>
+              <span className="text-[11px] text-gray-500">
+                {missionBuckets.active.length + missionBuckets.done.length}
+              </span>
+              <span className="h-px flex-1 bg-gray-800" />
+              {missionBuckets.done.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowDoneMissions((v) => !v)}
+                  className="rounded border border-gray-700 px-2 py-0.5 text-[11px] text-gray-400 transition hover:border-gray-600 hover:text-gray-200"
+                >
+                  {showDoneMissions
+                    ? t("lanes.done.collapse")
+                    : t("lanes.done.expand")}
+                </button>
+              )}
+            </div>
+            {visibleMissions.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-sky-500/25 bg-sky-500/5 p-5">
+                <p className="text-sm font-medium text-gray-200">
+                  {t("lanes.missions.empty.title")}
+                </p>
+                <p className="mt-1 max-w-2xl text-xs text-gray-500">
+                  {t("lanes.missions.empty.hint")}
+                </p>
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent("marblo:open-missions"),
+                    )
+                  }
+                  className="mt-3 rounded border border-sky-500/40 px-3 py-1.5 text-xs font-medium text-sky-300 transition hover:bg-sky-500/10"
+                >
+                  {t("lanes.missions.empty.cta")}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {[
+                  ...missionBuckets.active,
+                  ...(showDoneMissions ? missionBuckets.done : []),
+                ].map((mission) => {
+                  const progress = missionProgress(mission);
+                  const modelLabels = missionTaskModelLabels(mission, agents);
+                  const taskCount = mission.taskIds?.length ?? 0;
+                  return (
+                    <div
+                      key={mission.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() =>
+                        requestJump({ type: "mission", missionId: mission.id })
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          requestJump({
+                            type: "mission",
+                            missionId: mission.id,
+                          });
+                        }
+                      }}
+                      className="cursor-pointer rounded-lg border border-gray-700/60 bg-gray-800/40 p-3 transition hover:border-sky-500/50 hover:bg-gray-800/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60"
+                      aria-label={t("lanes.missions.openDetail", {
+                        title: mission.goal,
+                      })}
+                    >
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="truncate text-sm font-medium text-gray-100">
+                              {missionTitle(mission)}
+                            </span>
+                            <MissionStatusBadge
+                              status={mission.status}
+                              compact
+                            />
+                          </div>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {mission.goal}
+                          </p>
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                            {modelLabels.length > 0 ? (
+                              modelLabels.map((label) => (
+                                <span
+                                  key={label}
+                                  className="rounded border border-[#45475a] bg-[#181825] px-1.5 py-0.5 font-mono text-[10px] text-[#a6adc8]"
+                                >
+                                  {label}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="rounded border border-gray-700 bg-gray-900/60 px-1.5 py-0.5 text-[10px] text-gray-500">
+                                {t("lanes.missions.model.orchestrator")}
+                              </span>
+                            )}
+                            <span className="text-[11px] text-gray-500">
+                              {t("lanes.missions.taskCount", {
+                                count: String(taskCount),
+                              })}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="w-full shrink-0 lg:w-72">
+                          <div className="mb-1 flex items-center justify-between text-[11px] text-gray-500">
+                            <span>{progress.label}</span>
+                            <span>{progress.percent}%</span>
+                          </div>
+                          <div className="h-1.5 overflow-hidden rounded-full bg-gray-900">
+                            <div
+                              className="h-full rounded-full bg-sky-400"
+                              style={{ width: `${progress.percent}%` }}
+                            />
+                          </div>
+                          {progress.statusCounts.length > 0 && (
+                            <div className="mt-1.5 flex flex-wrap gap-1">
+                              {progress.statusCounts.map((item) => (
+                                <span
+                                  key={item.status}
+                                  className="rounded bg-gray-900/70 px-1.5 py-0.5 text-[10px] text-gray-400"
+                                >
+                                  {item.status} {item.count}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
       </div>
 
       {detailRow && (
