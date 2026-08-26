@@ -3,7 +3,7 @@ title: 링크 맵
 tags: [meta/linkmap, status/living]
 status: active
 date: 2026-08-26
-links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[human-only-ops-backlog]]
+links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[human-only-ops-backlog]]
 ---
 
 # 링크 맵
@@ -33,6 +33,7 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 | `counting-unit-first` | `40-methodology/counting-unit-first.md` | methodology | verified | adopt |
 | `decision-sentence-first` | `40-methodology/decision-sentence-first.md` | methodology | verified | adopt |
 | `routing-label-coverage` | `40-methodology/routing-label-coverage.md` | methodology | verified | adopt |
+| `wiki-write-at-merge` | `40-methodology/wiki-write-at-merge.md` | methodology | active | adopt |
 | `no-live-gui-verify` | `20-constraints/no-live-gui-verify.md` | constraints | verified | adopt |
 | `telemetry-identity-axes` | `00-foundations/telemetry-identity-axes.md` | foundations | verified | — |
 | `overview` | `00-foundations/overview.md` | foundations | active | — |
@@ -73,6 +74,12 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 | `routing-label-coverage` | `counting-unit-first` |
 | `routing-label-coverage` | `verify-result-row` |
 | `routing-label-coverage` | `telemetry-identity-axes` |
+| `wiki-write-at-merge` | `CONVENTION` |
+| `wiki-write-at-merge` | `LINT` |
+| `wiki-write-at-merge` | `WIKI-SKIP` |
+| `wiki-write-at-merge` | `marblo-bot-messaging` |
+| `wiki-write-at-merge` | `decision-sentence-first` |
+| `wiki-write-at-merge` | `empty-query-first` |
 | `no-live-gui-verify` | `empty-query-first` |
 | `no-live-gui-verify` | `do-not-retry` |
 | `do-not-retry` | `empty-query-first` |
@@ -153,6 +160,7 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 | `counting-unit-first` | [v3/docs/post-spawn-telemetry-gap-2026-08-25.md](../../../v3/docs/post-spawn-telemetry-gap-2026-08-25.md) · [v3/functions/src/telemetryIdentityAxis.ts](../../../v3/functions/src/telemetryIdentityAxis.ts) · [v3/docs/install-unified-view-2026-08-24.md](../../../v3/docs/install-unified-view-2026-08-24.md) |
 | `decision-sentence-first` | [v3/docs/admin-analytics-callable-migration-classification-2026-08-25.md](../../../v3/docs/admin-analytics-callable-migration-classification-2026-08-25.md) · [v3/docs/chart-data-integrity-2026-08-25.md](../../../v3/docs/chart-data-integrity-2026-08-25.md) · [v3/docs/admin-analytics-replan-2026-08-24.md](../../../v3/docs/admin-analytics-replan-2026-08-24.md) |
 | `routing-label-coverage` | [v3/docs/routing/label-capture-audit-2026-08-10.md](../../../v3/docs/routing/label-capture-audit-2026-08-10.md) · [v3/docs/routing/shadow-serving-stub.md](../../../v3/docs/routing/shadow-serving-stub.md) · [v3/docs/live-orchestration-moat-review-2026-08-23.md](../../../v3/docs/live-orchestration-moat-review-2026-08-23.md) |
+| `wiki-write-at-merge` | [docs/wiki/_meta/check_wiki_freshness.py](check_wiki_freshness.py) · [docs/wiki/_meta/lint_wiki.py](lint_wiki.py) · [docs/WIKI_system/WIKI-SKills.md](../../WIKI_system/WIKI-SKills.md) · [v3/electron/mcp-server/wiki-maintenance.ts](../../../v3/electron/mcp-server/wiki-maintenance.ts) · [v3/src/lib/botDefinition.ts](../../../v3/src/lib/botDefinition.ts) |
 | `no-live-gui-verify` | [AGENTS.md](../../../AGENTS.md) |
 | `do-not-retry` | [v3/docs/web-app-join-attribution-design-2026-08-09.md](../../../v3/docs/web-app-join-attribution-design-2026-08-09.md) · [v3/docs/pseudonym-retro-measurement-2026-08-21.md](../../../v3/docs/pseudonym-retro-measurement-2026-08-21.md) · [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) |
 | `telemetry-identity-axes` | [v3/docs/post-spawn-telemetry-gap-2026-08-25.md](../../../v3/docs/post-spawn-telemetry-gap-2026-08-25.md) · [v3/functions/src/telemetryIdentityAxis.ts](../../../v3/functions/src/telemetryIdentityAxis.ts) |
