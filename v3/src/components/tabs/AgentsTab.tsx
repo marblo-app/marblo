@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import AgentDashboard from "../agents/AgentDashboard";
 import AgentAddModal from "../agents/AgentAddModal";
+import { AssistantTriggerSettingsPanel } from "../agents/AssistantTriggerSettingsPanel";
 import { MarbloBotGallery } from "../agents/MarbloBotGallery";
 import { useAgentStore } from "../../stores/agentStore";
 import { useProjectStore } from "../../stores/projectStore";
@@ -248,16 +249,7 @@ export function AgentsTab() {
             </div>
           )
         ) : activeSection === "triggers" ? (
-          <div className="flex h-full items-center justify-center p-6 text-center">
-            <div>
-              <p className="text-sm font-medium text-gray-300">
-                {t("agents.marbloBots.triggersTitle")}
-              </p>
-              <p className="mt-1 max-w-sm text-sm text-gray-500">
-                {t("agents.marbloBots.triggersBody")}
-              </p>
-            </div>
-          </div>
+          <AssistantTriggerSettingsPanel project={selectedProject} />
         ) : (
           <AgentDashboard
             agents={agents}

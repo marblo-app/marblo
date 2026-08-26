@@ -95,6 +95,8 @@ export interface SeedBotDefinition {
   model: BotModel;
   role: AgentRole;
   tools: string[];
+  evidence: string;
+  requires?: string[];
   knowledgeEnabled: boolean;
 }
 
@@ -108,7 +110,9 @@ export const SEED_BOTS: SeedBotDefinition[] = [
       "사용자의 질문을 프로젝트 지식위키에 근거해 답하고, 모호한 부분은 추가 확인 항목으로 정리한다.",
     model: "claude",
     role: "backend",
-    tools: ["wiki_query", "filesystem", "marblo_mcp"],
+    tools: ["wiki_query"],
+    evidence:
+      "MCP 서버에 wiki_query가 등록되어 있고, .claude/skills/wiki-init·wiki-note·wiki-ingest가 있다.",
     knowledgeEnabled: true,
   },
   {
@@ -120,8 +124,50 @@ export const SEED_BOTS: SeedBotDefinition[] = [
       "요구사항을 보드 티켓으로 만들고, 기존 dispatch 경로로 작업 에이전트를 띄워 구현과 검증을 진행한다.",
     model: "codex",
     role: "frontend",
-    tools: ["filesystem", "git", "marblo_mcp"],
+    tools: ["create_task", "dispatch_task", "add_activity", "submit_for_review"],
+    evidence:
+      "MCP 서버에 create_task, dispatch_task, add_activity, submit_for_review가 등록되어 있다.",
     knowledgeEnabled: false,
+  },
+  {
+    seedId: "daily-briefing",
+    name: "일일 브리핑",
+    persona:
+      "정해진 시간에 일정·메일·열린 할일만 짧게 확인하고 Slack/Telegram으로 밀어주는 비서",
+    mission:
+      "오늘 일정, 새 메일, 진행 중인 할일을 확인해 한 화면 분량의 브리핑으로 정리하고 선택된 채널로 보낸다.",
+    model: "claude",
+    role: "backend",
+    tools: [
+      "calendar_list",
+      "gmail_search",
+      "send_slack_message",
+      "send_telegram_message",
+    ],
+    evidence:
+      "트리거 엔진 프롬프트와 MCP 서버에 calendar_list, gmail_search, send_slack_message, send_telegram_message가 등록되어 있다.",
+    requires: ["Google Calendar/Gmail 연결", "Slack 또는 Telegram 채널"],
+    knowledgeEnabled: true,
+  },
+  {
+    seedId: "mail-calendar-followup",
+    name: "메일·일정 팔로업",
+    persona:
+      "새 메일이나 임박 일정이 들어오면 중요도와 다음 행동만 추려 알려주는 조건 반응 비서",
+    mission:
+      "최근 메일과 임박 일정을 확인하고, 답장 필요 여부·준비물·후속 태스크 후보를 짧게 정리한다.",
+    model: "claude",
+    role: "backend",
+    tools: [
+      "gmail_search",
+      "calendar_list",
+      "send_slack_message",
+      "send_telegram_message",
+    ],
+    evidence:
+      "assistant-triggers 엔진이 Gmail/Calendar 조건을 폴링하고 같은 전송 MCP 도구로 푸시하도록 main.ts에 배선되어 있다.",
+    requires: ["Google Calendar/Gmail 연결", "Slack 또는 Telegram 채널"],
+    knowledgeEnabled: true,
   },
 ];
 
@@ -135,11 +181,6 @@ export const OMITTED_SEED_BOTS: OmittedSeedBot[] = [
     name: "유튜브 리서치",
     reason:
       "유튜브 전용 커넥터나 검증된 브라우저/검색 MCP가 현재 시드 재료로 확인되지 않아 첫 화면 실행 신뢰도를 해친다.",
-  },
-  {
-    name: "일일 브리핑",
-    reason:
-      "스케줄러·조건 트리거 화면은 후속 티켓 범위다. 실행 엔진은 있으나 이번 탭에서는 켜는 UI를 만들지 않는다.",
   },
   {
     name: "웹 리서치",

@@ -3,7 +3,10 @@ import {
   Bot,
   BookOpen,
   CalendarClock,
+  CheckCircle2,
+  ChevronDown,
   Code2,
+  Copy,
   Loader2,
   Play,
   Save,
@@ -92,6 +95,104 @@ function asRunnableBot(id: string, draft: BotDefinitionDraft): BotDefinition {
   };
 }
 
+function WikiSetupGuide({
+  wikiRootPath,
+  wikiExists,
+}: {
+  wikiRootPath: string;
+  wikiExists: boolean | null;
+}) {
+  const [open, setOpen] = useState(wikiExists !== true);
+  const [copied, setCopied] = useState(false);
+  const requestText = [
+    "오케, 이 프로젝트에 마블로 지식위키를 구성해줘.",
+    "공유 위키 루트는 docs/wiki 하나만 쓰고, .claude/skills/wiki-init · wiki-note · wiki-ingest 스킬과 MCP wiki_ingest/wiki_query/wiki_lint를 사용해.",
+    "먼저 README와 기본 분류를 만들고, 현재 프로젝트 문서/결정사항 중 봇이 자주 참조할 내용을 wiki-note로 정리한 뒤 wiki-ingest와 wiki-lint까지 돌려줘.",
+    "다른 프로젝트에서 참조할 때는 wiki_query({ root_path: \"<프로젝트 절대경로>/docs/wiki\", query: \"...\" }) 형태로 쓰게 안내해줘.",
+  ].join("\n");
+
+  useEffect(() => {
+    if (wikiExists === true) setOpen(false);
+  }, [wikiExists]);
+
+  const copyRequest = async () => {
+    try {
+      await navigator.clipboard.writeText(requestText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <section className="mb-4 rounded border border-emerald-500/30 bg-emerald-500/10">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-expanded={open}
+        className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left"
+      >
+        <span>
+          <span className="flex flex-wrap items-center gap-2">
+            <BookOpen size={18} className="text-emerald-200" />
+            <span className="text-sm font-semibold text-emerald-100">
+              먼저 Knowledge 축 켜기: 마블로 위키 구성 가이드
+            </span>
+            <span className="rounded border border-emerald-500/40 px-2 py-0.5 text-[11px] text-emerald-100">
+              {wikiExists ? "docs/wiki 확인됨" : "구성 필요"}
+            </span>
+          </span>
+          <span className="mt-1 block max-w-4xl text-sm text-emerald-100/80">
+            봇의 차별점은 프로젝트 지식입니다. 새 엔진이 아니라 이미 등록된
+            wiki_ingest, wiki_query, wiki_lint와 wiki-init/wiki-note/wiki-ingest
+            스킬을 쓰게 오케에게 요청하세요.
+          </span>
+        </span>
+        <ChevronDown
+          size={18}
+          className={`mt-0.5 flex-shrink-0 text-emerald-100 transition-transform ${
+            open ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+      {open && (
+        <div className="border-t border-emerald-500/20 px-4 py-3">
+          <div className="mb-3 grid gap-2 text-xs text-emerald-100/80 md:grid-cols-3">
+            <div className="rounded border border-emerald-500/20 bg-gray-950/40 p-2">
+              루트: {wikiRootPath || "프로젝트 폴더 연결 필요"}
+            </div>
+            <div className="rounded border border-emerald-500/20 bg-gray-950/40 p-2">
+              MCP: wiki_ingest / wiki_query / wiki_lint
+            </div>
+            <div className="rounded border border-emerald-500/20 bg-gray-950/40 p-2">
+              공유 위키는 docs/wiki 하나
+            </div>
+          </div>
+          <div className="rounded border border-gray-700 bg-gray-950 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-gray-300">
+                오케에게 복사해서 보낼 요청
+              </span>
+              <button
+                type="button"
+                onClick={() => void copyRequest()}
+                className="inline-flex items-center gap-1.5 rounded border border-gray-700 px-2 py-1 text-xs text-gray-200 transition-colors hover:bg-gray-800"
+              >
+                {copied ? <CheckCircle2 size={13} /> : <Copy size={13} />}
+                {copied ? "복사됨" : "복사"}
+              </button>
+            </div>
+            <pre className="whitespace-pre-wrap text-xs leading-5 text-gray-300">
+              {requestText}
+            </pre>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
   const { t } = useTranslation();
   const [savedBots, setSavedBots] = useState<BotDefinition[]>([]);
@@ -99,6 +200,7 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
   const [busy, setBusy] = useState<BusyState>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [wikiExists, setWikiExists] = useState<boolean | null>(null);
   const [custom, setCustom] = useState({
     name: "",
     persona: "",
@@ -117,6 +219,25 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
   useEffect(() => {
     return subscribeToBotDefinitions(project.id, setSavedBots);
   }, [project.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!wikiRootPath) {
+      setWikiExists(false);
+      return;
+    }
+    void window.electronAPI?.fs
+      ?.pathExists?.(wikiRootPath)
+      .then((exists) => {
+        if (!cancelled) setWikiExists(exists === true);
+      })
+      .catch(() => {
+        if (!cancelled) setWikiExists(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [wikiRootPath]);
 
   const dispatchBot = async (bot: BotDefinition, key: string) => {
     const mission = runMission.trim() || bot.mission;
@@ -206,6 +327,8 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
 
   return (
     <div className="h-full overflow-y-auto p-4 text-gray-100">
+      <WikiSetupGuide wikiRootPath={wikiRootPath} wikiExists={wikiExists} />
+
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">
@@ -298,6 +421,21 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
                     </span>
                   ))}
                 </div>
+                {seed.requires && seed.requires.length > 0 && (
+                  <div className="mb-3 flex flex-wrap gap-1.5">
+                    {seed.requires.map((item) => (
+                      <span
+                        key={item}
+                        className="rounded border border-amber-500/30 px-2 py-1 text-[11px] text-amber-200"
+                      >
+                        필요: {item}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <p className="mb-3 text-xs text-gray-500">
+                  MCP 근거: {seed.evidence}
+                </p>
                 {!validation.ok && (
                   <p className="mb-3 text-xs text-red-300">
                     {validation.issues.map(issueText).join(" ")}

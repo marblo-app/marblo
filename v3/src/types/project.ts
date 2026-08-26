@@ -3,6 +3,7 @@ import type {
   ProjectFolderPaths,
   ProjectPathResolution,
 } from "../lib/projectPaths";
+import type { AssistantTriggerSettings } from "../lib/assistantTriggerSettings";
 
 /**
  * 프로젝트 용도.
@@ -52,6 +53,11 @@ export interface Project {
   folderPathResolution?: ProjectPathResolution;
   gitRemoteUrl?: string;
   enabledModels?: ModelType[]; // Active models for dispatch (default: ['claude'])
+  /**
+   * 프로젝트별 비서 트리거 설정. Electron 엔진은 projects 컬렉션의
+   * `assistantTriggers` 를 읽고, kind === "assistant" 프로젝트만 활성화한다.
+   */
+  assistantTriggers?: AssistantTriggerSettings;
   createdAt: Date;
   updatedAt: Date;
 }

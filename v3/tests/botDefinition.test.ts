@@ -83,6 +83,7 @@ describe("seedToDraft", () => {
         model: "claude",
         role: "backend",
         tools: ["wiki_query"],
+        evidence: "wiki_query registered",
         knowledgeEnabled: true,
       },
       projectId: "project-1",
