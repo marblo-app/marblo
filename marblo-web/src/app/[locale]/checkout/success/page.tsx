@@ -12,6 +12,11 @@ import { lectures } from "@/data/lectures";
 import { trackPurchase } from "@/lib/gtag";
 import { mapPaymentError } from "@/lib/paymentErrors";
 import {
+  currencyForLocale,
+  formatCurrencyAmount,
+  type PriceCurrency,
+} from "@/lib/pricing";
+import {
   Check,
   Loader2,
   BookOpen,
@@ -48,6 +53,7 @@ interface SubscriptionReceipt {
   status: string | null;
   /** 서버가 실제로 청구한 금액(원). 구버전 문서면 null. */
   lastChargeAmount: number | null;
+  priceCurrency: PriceCurrency;
   /** 쿠폰을 넣었으나 서버가 정가로 폴백했는가. */
   couponRejected: boolean;
   activatedAtMs: number | null;
@@ -63,6 +69,10 @@ async function readSubscriptionReceipt(
     status: typeof d.status === "string" ? d.status : null,
     lastChargeAmount:
       typeof d.lastChargeAmount === "number" ? d.lastChargeAmount : null,
+    priceCurrency:
+      d.priceCurrency === "USD" || d.priceCurrency === "JPY"
+        ? d.priceCurrency
+        : "KRW",
     couponRejected: d.couponRejected === true,
     activatedAtMs: toMillis(d.currentPeriodStart),
   };
@@ -71,11 +81,14 @@ async function readSubscriptionReceipt(
 export default function CheckoutSuccessPage() {
   const t = useTranslations("checkout");
   const locale = useLocale();
+  const fallbackCurrency = currencyForLocale(locale);
   const searchParams = useSearchParams();
   const [state, setState] = useState<ViewState>("processing");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   /** ★화면에 그리는 금액은 서버가 청구한 값만 쓴다(쿼리 amount 아님). */
   const [chargedAmount, setChargedAmount] = useState<number | null>(null);
+  const [chargedCurrency, setChargedCurrency] =
+    useState<PriceCurrency>(fallbackCurrency);
   const [couponRejected, setCouponRejected] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -95,6 +108,7 @@ export default function CheckoutSuccessPage() {
   const firePurchase = (args: {
     transactionId: string;
     value: number;
+    currency: PriceCurrency;
     itemId: string;
     itemName?: string;
     itemCategory: "lecture" | "subscription" | "one_time";
@@ -103,6 +117,7 @@ export default function CheckoutSuccessPage() {
     const {
       transactionId,
       value,
+      currency,
       itemId,
       itemName,
       itemCategory,
@@ -134,7 +149,7 @@ export default function CheckoutSuccessPage() {
     trackPurchase({
       transactionId,
       value,
-      currency: "KRW",
+      currency,
       items: [
         {
           item_id: itemId,
@@ -208,6 +223,7 @@ export default function CheckoutSuccessPage() {
       }
       const amount = args.serverAmount ?? sub.lastChargeAmount;
       setChargedAmount(amount);
+      setChargedCurrency(sub.priceCurrency);
       setCouponRejected(sub.couponRejected);
 
       // 방금 활성화된 결제가 아니면(직접 URL 진입·재방문) 성공 축하도 GA4 도
@@ -226,6 +242,7 @@ export default function CheckoutSuccessPage() {
         firePurchase({
           transactionId: args.transactionId,
           value: amount,
+          currency: sub.priceCurrency,
           itemId: subItem.itemId,
           itemName: subItem.itemName,
           itemCategory: "subscription",
@@ -270,6 +287,7 @@ export default function CheckoutSuccessPage() {
             firePurchase({
               transactionId: paymentId,
               value: serverAmount,
+              currency: "KRW",
               itemId: isLecture ? lectureItem.itemId : plan,
               itemName: isLecture
                 ? lectureItem.itemName
@@ -290,6 +308,7 @@ export default function CheckoutSuccessPage() {
           firePurchase({
             transactionId: orderId,
             value: Number(amountParam),
+            currency: "KRW",
             itemId: lectureItem.itemId,
             itemName: lectureItem.itemName,
             itemCategory: "lecture",
@@ -369,6 +388,27 @@ export default function CheckoutSuccessPage() {
             transactionId:
               txParam ||
               `portone_${plan}_${searchParams.get("billing") || "monthly"}`,
+          });
+        } else if (provider === "paddle" && plan) {
+          const complete = httpsCallable<
+            Record<string, never>,
+            {
+              success: boolean;
+              active: boolean;
+              planType?: string | null;
+            }
+          >(functions, "completePaddleCheckout");
+          const { data: completed } = await complete({});
+          if (!completed.active || completed.planType !== plan) {
+            setErrorMsg(t("notActivated"));
+            setState("error");
+            return;
+          }
+          await finishSubscription({
+            planId: plan,
+            transactionId: `paddle_${uid}_${plan}_${
+              searchParams.get("billing") || "monthly"
+            }`,
           });
         } else {
           // 확정할 결제 정보가 없는 진입 — 성공으로 그리지 않는다.
@@ -471,7 +511,7 @@ export default function CheckoutSuccessPage() {
                   <span className="font-semibold">
                     {chargedAmount <= 0
                       ? t("freeFirstCharge")
-                      : `₩${chargedAmount.toLocaleString()}`}
+                      : formatCurrencyAmount(chargedAmount, chargedCurrency)}
                   </span>
                 </div>
               )}

@@ -40,7 +40,31 @@ import {
   verifyAccountHint,
   type AccountHintVerdict,
 } from "@/lib/checkoutAccountHint";
-import { getPlanAmount } from "@/lib/pricing";
+import {
+  currencyForLocale,
+  formatCurrencyAmount,
+  getPlanAmount,
+  type BillingCycle,
+  type PricePlan,
+} from "@/lib/pricing";
+import {
+  isPaddleCheckoutPlan,
+  resolvePaddleCheckoutPrice,
+} from "@/lib/paddleCheckout";
+
+interface PaddleSDK {
+  Initialize(options: { token: string; environment?: string }): void;
+  Checkout: {
+    open(options: {
+      items: { priceId: string; quantity: number }[];
+      customData?: Record<string, unknown>;
+      customer?: { email: string };
+      settings?: { theme?: string; locale?: string; successUrl?: string };
+      success?: () => void;
+      closed?: () => void;
+    }): void;
+  };
+}
 
 interface PortOneSDK {
   requestPayment(params: {
@@ -112,43 +136,41 @@ interface PortOneCheckoutConfig {
 declare global {
   interface Window {
     PortOne?: PortOneSDK;
+    Paddle?: PaddleSDK;
   }
 }
 
-const PLAN_PRICES: Record<
-  string,
-  { name: string; monthly: number; annual: number }
-> = {
-  pro: {
-    name: "Pro",
-    monthly: getPlanAmount("pro", "monthly", "KRW") ?? 0,
-    annual: getPlanAmount("pro", "annual", "KRW") ?? 0,
-  },
-  // Team bills per seat (₩29,000); checkout currently charges 1 seat (seat
-  // quantity selector is a follow-up).
-  team: {
-    name: "Team",
-    monthly: getPlanAmount("team", "monthly", "KRW") ?? 0,
-    annual: getPlanAmount("team", "annual", "KRW") ?? 0,
-  },
-  // Team Plus is a per-team floor: ₩290,000 = 5 seats included.
-  // Extra seats (+₩59,000/seat) handled post-purchase (follow-up).
-  team_plus: {
-    name: "Team Plus",
-    monthly: getPlanAmount("team_plus", "monthly", "KRW") ?? 0,
-    annual: getPlanAmount("team_plus", "annual", "KRW") ?? 0,
-  },
+type SubscriptionCheckoutPlan = Extract<
+  PricePlan,
+  "pro" | "team" | "team_plus"
+>;
+
+const PLAN_LABELS: Record<SubscriptionCheckoutPlan, string> = {
+  pro: "Pro",
+  team: "Team",
+  team_plus: "Team Plus",
 };
+
+function normalizeCheckoutBilling(raw: string | null): BillingCycle {
+  return raw === "annual" ? "annual" : "monthly";
+}
+
+function isSubscriptionCheckoutPlan(
+  plan: string | null,
+): plan is SubscriptionCheckoutPlan {
+  return plan === "pro" || plan === "team" || plan === "team_plus";
+}
 
 export default function CheckoutPage() {
   const t = useTranslations("checkout");
   const locale = useLocale();
+  const priceCurrency = currencyForLocale(locale);
   const router = useRouter();
   const searchParams = useSearchParams();
   const plan = searchParams.get("plan");
   const lectureSlug = searchParams.get("slug");
   const type = searchParams.get("type") || "subscription";
-  const billing = searchParams.get("billing") || "monthly";
+  const billing = normalizeCheckoutBilling(searchParams.get("billing"));
   // ★데스크톱 앱이 실어 보낸 계정 핸드오프 힌트(티켓 3Notu54M, lib/checkoutAccountHint).
   // 앱 세션(A)과 이 브라우저 세션(B)이 다른 계정이면 결제 전에 멈추고 사람에게
   // 보여준다 — 안 그러면 서버는 B 에 쓰고 앱은 A 를 들어 앱이 영원히 Free 다.
@@ -161,6 +183,7 @@ export default function CheckoutPage() {
   // 닫았다(서버 게이트: TOSS_ENTRY_ENABLED). 상세는 lib/paymentProvider.ts.
   const paymentProvider: PaymentProvider = resolveCheckoutProvider({
     envProvider: process.env.NEXT_PUBLIC_PAYMENT_PROVIDER,
+    locale,
   });
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -198,7 +221,10 @@ export default function CheckoutPage() {
     useState<PortOneCheckoutConfig | null>(null);
 
   // Resolve plan or lecture info
-  const planInfo = plan ? PLAN_PRICES[plan] : null;
+  const subscriptionPlan = isSubscriptionCheckoutPlan(plan) ? plan : null;
+  const planInfo = subscriptionPlan
+    ? { name: PLAN_LABELS[subscriptionPlan] }
+    : null;
   const lectureInfo = lectureSlug
     ? lectures.find((l) => l.slug === lectureSlug)
     : null;
@@ -209,14 +235,29 @@ export default function CheckoutPage() {
       lectureSlug
     : planInfo?.name || "";
   const baseAmount = isLecture
-    ? lectureInfo?.price || 0
-    : planInfo
-    ? billing === "annual"
-      ? planInfo.annual
-      : planInfo.monthly
-    : 0;
-  const finalAmount = Math.max(0, baseAmount - discount);
-  const baseAmountLabel = `\u20A9${baseAmount.toLocaleString()}`;
+    ? lectureInfo?.price ?? 0
+    : subscriptionPlan
+    ? getPlanAmount(subscriptionPlan, billing, priceCurrency)
+    : null;
+  const finalAmount =
+    baseAmount == null ? 0 : Math.max(0, baseAmount - discount);
+  const baseAmountLabel =
+    baseAmount == null
+      ? t("pricePending")
+      : formatCurrencyAmount(baseAmount, priceCurrency);
+  const paddleCheckoutPrice =
+    paymentProvider === "paddle" && isPaddleCheckoutPlan(subscriptionPlan)
+      ? resolvePaddleCheckoutPrice({
+          plan: subscriptionPlan,
+          billing,
+          currency: priceCurrency,
+        })
+      : null;
+  const paddleClientToken = process.env.NEXT_PUBLIC_PADDLE_CLIENT_TOKEN || "";
+  const paddlePriceId = paddleCheckoutPrice?.priceId ?? "";
+  const paddleCheckoutUnavailable =
+    paymentProvider === "paddle" &&
+    (!paddleClientToken || !paddlePriceId || baseAmount == null);
   const autoRenewNotice =
     billing === "annual"
       ? t("annualAutoRenewNotice", { amount: baseAmountLabel })
@@ -227,7 +268,9 @@ export default function CheckoutPage() {
   const showPhoneNumberError =
     requiresPhoneNumber && phoneNumberTouched && !isPhoneNumberValid;
   // PortOne(KG이니시스) 결제 시 email 필수. auth email 있으면 그대로, 없으면 입력 필드.
-  const requiresCheckoutEmail = paymentProvider === "portone" && !user?.email;
+  const requiresCheckoutEmail =
+    (paymentProvider === "portone" || paymentProvider === "paddle") &&
+    !user?.email;
   const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const resolvedCheckoutEmail = (
     user?.email ||
@@ -241,6 +284,8 @@ export default function CheckoutPage() {
   const paymentProcessorName = t(
     paymentProvider === "portone"
       ? "paymentProcessorPortOne"
+      : paymentProvider === "paddle"
+      ? "paymentProcessorPaddle"
       : "paymentProcessorToss"
   );
   const configuredEasyPayProvider = (
@@ -369,10 +414,42 @@ export default function CheckoutPage() {
     return window.PortOne;
   }, [t]);
 
+  const loadPaddleSDK = useCallback(async (): Promise<PaddleSDK> => {
+    if (window.Paddle) return window.Paddle;
+    await new Promise<void>((resolve, reject) => {
+      const existing = document.querySelector<HTMLScriptElement>(
+        'script[src="https://cdn.paddle.com/paddle/v2/paddle.js"]'
+      );
+      if (existing) {
+        existing.addEventListener("load", () => resolve(), { once: true });
+        existing.addEventListener(
+          "error",
+          () => reject(new Error(t("sdkLoadError"))),
+          { once: true },
+        );
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://cdn.paddle.com/paddle/v2/paddle.js";
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error(t("sdkLoadError")));
+      document.head.appendChild(script);
+    });
+    const paddle = (window as unknown as { Paddle?: PaddleSDK }).Paddle;
+    if (!paddle) throw new Error(t("sdkLoadError"));
+    paddle.Initialize({
+      token: paddleClientToken,
+      environment: process.env.NEXT_PUBLIC_PADDLE_ENVIRONMENT || "sandbox",
+    });
+    return paddle;
+  }, [paddleClientToken, t]);
+
   const preloadPaymentSDK = useCallback(async () => {
     setSdkLoadFailed(false);
     setSdkReady(false);
     setError(null);
+    if (paddleCheckoutUnavailable) return;
     try {
       if (paymentProvider === "portone") {
         // Drop a broken script tag so retry can re-insert a fresh one.
@@ -384,6 +461,8 @@ export default function CheckoutPage() {
             .forEach((el) => el.remove());
         }
         await loadPortOneSDK();
+      } else if (paymentProvider === "paddle") {
+        await loadPaddleSDK();
       } else {
         const { loadTossPayments } = await import(
           "@tosspayments/tosspayments-sdk"
@@ -399,16 +478,30 @@ export default function CheckoutPage() {
       setErrorTone("network");
       setError(t("sdkLoadError"));
     }
-  }, [paymentProvider, loadPortOneSDK, t]);
+  }, [
+    paymentProvider,
+    loadPortOneSDK,
+    loadPaddleSDK,
+    paddleCheckoutUnavailable,
+    t,
+  ]);
 
   // Pre-load selected payment SDK
   useEffect(() => {
     if (!user || !isValid) return;
+    if (paddleCheckoutUnavailable) {
+      setSdkReady(false);
+      setSdkLoadFailed(false);
+      setError(null);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
         if (paymentProvider === "portone") {
           await loadPortOneSDK();
+        } else if (paymentProvider === "paddle") {
+          await loadPaddleSDK();
         } else {
           const { loadTossPayments } = await import(
             "@tosspayments/tosspayments-sdk"
@@ -432,7 +525,15 @@ export default function CheckoutPage() {
     return () => {
       cancelled = true;
     };
-  }, [user, isValid, t, paymentProvider, loadPortOneSDK]);
+  }, [
+    user,
+    isValid,
+    t,
+    paymentProvider,
+    loadPortOneSDK,
+    loadPaddleSDK,
+    paddleCheckoutUnavailable,
+  ]);
 
   // PortOne 채널 설정 prefetch — 간편결제(토스페이) 옵션 노출 판단용.
   // 실패는 조용히 무시한다(카드 경로는 결제 시점 재조회로 계속 동작).
@@ -463,6 +564,7 @@ export default function CheckoutPage() {
   // free_trial / plan_upgrade 쿠폰이 화면에 반영되지 않아 정가가 그대로 보였다.
   const handleCouponApply = useCallback(
     (result: { discountPercent?: number; type?: string; code: string }) => {
+      if (baseAmount == null) return;
       setDiscount(couponDiscountAmount(baseAmount, result));
       setCouponCode(result.code);
     },
@@ -471,10 +573,10 @@ export default function CheckoutPage() {
 
   // GA4 view_item — checkout 페이지 마운트 시 구독/강의 상세 보기.
   useEffect(() => {
-    if (!isValid) return;
+    if (!isValid || baseAmount == null) return;
     trackViewItem({
       value: baseAmount,
-      currency: "KRW",
+      currency: priceCurrency,
       items: [
         {
           item_id: isLecture ? lectureSlug || "lecture" : plan || "plan",
@@ -486,7 +588,16 @@ export default function CheckoutPage() {
         },
       ],
     });
-  }, [isValid, baseAmount, isLecture, lectureSlug, plan, itemName, billing]);
+  }, [
+    isValid,
+    baseAmount,
+    priceCurrency,
+    isLecture,
+    lectureSlug,
+    plan,
+    itemName,
+    billing,
+  ]);
 
   const PAYMENT_LOCK_KEY = "payment_in_progress";
   const PAYMENT_LOCK_STALE_MS = 15 * 60 * 1000;
@@ -556,6 +667,14 @@ export default function CheckoutPage() {
 
   const handlePayment = async () => {
     if (!user) return;
+    if (baseAmount == null) {
+      setError(t("pricePending"));
+      return;
+    }
+    if (paddleCheckoutUnavailable) {
+      setError(t("paddleCheckoutPending"));
+      return;
+    }
     // 결제 전 필수 동의 게이팅 — 결제대행사(토스) 제3자 제공 동의 없이 결제 불가.
     if (!paymentConsent) {
       setError(t("consentRequired"));
@@ -581,7 +700,7 @@ export default function CheckoutPage() {
     // GA4 begin_checkout — 결제 요청 직전 발화(값/상품만, PII 없음).
     trackBeginCheckout({
       value: finalAmount,
-      currency: "KRW",
+      currency: priceCurrency,
       checkoutType: isLecture ? "lecture" : "subscription",
       items: [
         {
@@ -595,10 +714,10 @@ export default function CheckoutPage() {
       ],
     });
     // GA4 add_payment_info — 결제 수단 입력 완료 후 결제 버튼 직전 발화.
-    // payment_type = "toss" | "portone"
+    // payment_type = "toss" | "portone" | "paddle"
     trackAddPaymentInfo({
       value: finalAmount,
-      currency: "KRW",
+      currency: priceCurrency,
       payment_type: paymentProvider,
       items: [
         {
@@ -779,6 +898,60 @@ export default function CheckoutPage() {
             )
           );
         }
+      } else if (paymentProvider === "paddle" && subscriptionPlan) {
+        const functions = getFunctions(app, "us-central1");
+        const createCheckout = httpsCallable<
+          { planType: string; billing: BillingCycle; currency: string },
+          {
+            priceId: string;
+            planType: string;
+            billingCycle: BillingCycle;
+            currency: string;
+          }
+        >(functions, "createPaddleCheckout");
+        const { data: checkout } = await createCheckout({
+          planType: subscriptionPlan,
+          billing,
+          currency: priceCurrency,
+        });
+        const priceId =
+          typeof checkout?.priceId === "string" ? checkout.priceId : "";
+        if (!priceId) {
+          throw new Error(t("paddleCheckoutPending"));
+        }
+        const paddle = await loadPaddleSDK();
+        await new Promise<void>((resolve, reject) => {
+          paddle.Checkout.open({
+            items: [{ priceId, quantity: 1 }],
+            customData: { userId: user.uid },
+            customer: resolvedCheckoutEmail
+              ? { email: resolvedCheckoutEmail }
+              : undefined,
+            settings: {
+              theme: "dark",
+              locale,
+              successUrl: `${window.location.origin}${localeHref(
+                locale,
+                `/checkout/success?provider=paddle&plan=${encodeURIComponent(
+                  subscriptionPlan,
+                )}&billing=${billing}`,
+              )}`,
+            },
+            success: () => {
+              releasePaymentLock();
+              router.push(
+                localeHref(
+                  locale,
+                  `/checkout/success?provider=paddle&plan=${encodeURIComponent(
+                    subscriptionPlan,
+                  )}&billing=${billing}`,
+                ),
+              );
+              resolve();
+            },
+            closed: () => reject(new Error(t("paymentCancelled"))),
+          });
+        });
       } else if (isLecture && lectureSlug) {
         const functions = getFunctions(app, "us-central1");
         const createOrder = httpsCallable(functions, "createLectureOrder");
@@ -984,15 +1157,27 @@ export default function CheckoutPage() {
           )}
 
           {/* SDK loading indicator */}
-          {!sdkReady && !error && !sdkLoadFailed && (
+          {!sdkReady && !error && !sdkLoadFailed && !paddleCheckoutUnavailable && (
             <div className="flex items-center gap-3 text-zinc-400 mb-6 p-3 bg-zinc-800/50 rounded-lg">
               <Loader2 className="w-4 h-4 animate-spin" />
               <span className="text-sm">{t("loading")}</span>
             </div>
           )}
 
+          {paddleCheckoutUnavailable && (
+            <div
+              role="status"
+              className="flex items-start gap-3 text-amber-200/90 mb-6 p-4 bg-amber-950/25 border border-amber-800/40 rounded-lg"
+            >
+              <Info className="w-5 h-5 mt-0.5 shrink-0 text-amber-400" />
+              <p className="text-sm leading-relaxed">
+                {t("paddleCheckoutPending")}
+              </p>
+            </div>
+          )}
+
           {/* Dev/staging: test card / unsupported issuer hint */}
-          {shouldShowTestCardHint() && (
+          {paymentProvider === "portone" && shouldShowTestCardHint() && (
             <div className="flex items-start gap-3 text-amber-200/90 mb-6 p-4 bg-amber-950/25 border border-amber-800/40 rounded-lg">
               <Info className="w-5 h-5 mt-0.5 shrink-0 text-amber-400" />
               <div className="text-sm space-y-1">
@@ -1063,15 +1248,20 @@ export default function CheckoutPage() {
             <div className="flex justify-between">
               <span className="text-zinc-400">{t("amount")}</span>
               <span>
-                {"\u20A9"}
-                {baseAmount.toLocaleString()}
-                {!isLecture &&
+                {baseAmount == null
+                  ? t("pricePending")
+                  : formatCurrencyAmount(baseAmount, priceCurrency)}
+                {baseAmount != null &&
+                  !isLecture &&
                   (billing === "annual" ? t("annual") : t("monthly"))}
               </span>
             </div>
 
             {/* Coupon (subscriptions only) */}
-            {!isLecture && user && (
+            {!isLecture &&
+              user &&
+              paymentProvider === "portone" &&
+              baseAmount != null && (
               <CouponInput
                 onApply={handleCouponApply}
                 userId={user.uid}
@@ -1084,8 +1274,7 @@ export default function CheckoutPage() {
               <div className="flex justify-between text-green-400">
                 <span>{t("discount")}</span>
                 <span>
-                  -{"\u20A9"}
-                  {discount.toLocaleString()}
+                  -{formatCurrencyAmount(discount, priceCurrency)}
                 </span>
               </div>
             )}
@@ -1095,12 +1284,13 @@ export default function CheckoutPage() {
             <div className="border-t border-zinc-700 pt-4 flex justify-between text-lg font-bold">
               <span>{t("total")}</span>
               <span>
-                {finalAmount <= 0 ? (
+                {baseAmount == null ? (
+                  t("pricePending")
+                ) : finalAmount <= 0 ? (
                   t("freeFirstCharge")
                 ) : (
                   <>
-                    {"\u20A9"}
-                    {finalAmount.toLocaleString()}
+                    {formatCurrencyAmount(finalAmount, priceCurrency)}
                     {!isLecture &&
                       (billing === "annual" ? t("annual") : t("monthly"))}
                   </>
@@ -1289,6 +1479,8 @@ export default function CheckoutPage() {
                   {t(
                     paymentProvider === "portone"
                       ? "thirdPartyItemsPortOne"
+                      : paymentProvider === "paddle"
+                      ? "thirdPartyItemsPaddle"
                       : "thirdPartyItemsToss"
                   )}
                 </li>
@@ -1327,6 +1519,7 @@ export default function CheckoutPage() {
               disabled={
                 loading ||
                 !sdkReady ||
+                paddleCheckoutUnavailable ||
                 !paymentConsent ||
                 !isPhoneNumberValid ||
                 !isCheckoutEmailValid

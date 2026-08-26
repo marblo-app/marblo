@@ -368,6 +368,12 @@ import {
   type PortOnePaymentPurpose,
   type PortOnePaymentLike,
 } from "./portone";
+import {
+  buildPaddlePriceCatalog,
+  paddlePriceCatalogByPriceId,
+  resolvePaddlePriceEntry,
+  type PaddlePriceEntry,
+} from "./paddle";
 import { resolveEntitledPlan } from "./entitlement";
 import { MAX_COST_LOGS_LIMIT, normalizeCostLogsLimit } from "./costLogsLimit";
 import {
@@ -938,15 +944,106 @@ const FOUNDER_COURSE_COUPON = "FOUNDER50"; // 강의 50% 할인 쿠폰 코드
 
 // PLAN_PRICES_KRW 는 ./billing 로 이관(단일소스). import 참조.
 
-// Map Paddle Price IDs to plan types (set in Firebase environment config)
-const PADDLE_PRICE_TO_PLAN: Record<string, string> = {
-  [process.env.PADDLE_PRO_PRICE_ID || ""]: "pro",
-  [process.env.PADDLE_TEAM_PRICE_ID || ""]: "team",
-};
+// Paddle price ids are keyed by plan × billing cycle × currency:
+// PADDLE_PRICE_ID_<PLAN>_<MONTHLY|ANNUAL>_<USD|JPY>.
+// Legacy app keys remain readable as monthly USD so existing app-side checkout
+// does not lose webhook mapping while web moves to the explicit matrix.
+const PADDLE_PRICE_BY_ID: Record<string, PaddlePriceEntry> =
+  paddlePriceCatalogByPriceId(
+    // process.env is only read into names/ids here; never log the values.
+    buildPaddlePriceCatalog(
+      Object.fromEntries(
+        Object.entries(process.env).map(([key, value]) => [
+          key,
+          typeof value === "string" ? value : undefined,
+        ])
+      )
+    )
+  );
 
 // ═══════════════════════════════════════════════════════════════════
 // Paddle Integration (해외 결제)
 // ═══════════════════════════════════════════════════════════════════
+
+export const createPaddleCheckout = functions.https.onCall(
+  async (data, context) => {
+    const userId = context.auth?.uid;
+    if (!userId) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다."
+      );
+    }
+
+    const planType = stringField(data, "planType") || "pro";
+    const billingCycle = normalizeBillingCycle(stringField(data, "billing"));
+    const currency = stringField(data, "currency");
+    const price = resolvePaddlePriceEntry(
+      Object.fromEntries(
+        Object.entries(process.env).map(([key, value]) => [
+          key,
+          typeof value === "string" ? value : undefined,
+        ])
+      ),
+      { planType, billingCycle, currency }
+    );
+
+    if (!price) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "paddle_price_pending"
+      );
+    }
+
+    const existingSub = await loadSubscriptionGuard(userId);
+    assertNotAlreadySubscribed(existingSub, Date.now());
+
+    return {
+      priceId: price.priceId,
+      planType: price.planType,
+      billingCycle: price.billingCycle,
+      currency: price.currency,
+    };
+  }
+);
+
+export const completePaddleCheckout = functions.https.onCall(
+  async (_data, context) => {
+    const userId = context.auth?.uid;
+    if (!userId) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다."
+      );
+    }
+    const snap = await db.collection("subscriptions").doc(userId).get();
+    const sub = snap.data() || {};
+    const currentPeriodStart = sub.currentPeriodStart as
+      | admin.firestore.Timestamp
+      | Date
+      | undefined;
+    const activatedAtMs =
+      currentPeriodStart instanceof admin.firestore.Timestamp
+        ? currentPeriodStart.toMillis()
+        : currentPeriodStart instanceof Date
+        ? currentPeriodStart.getTime()
+        : null;
+    const active =
+      snap.exists &&
+      sub.status === "active" &&
+      sub.paymentProvider === "paddle";
+    return {
+      success: true,
+      active,
+      planType: typeof sub.planType === "string" ? sub.planType : null,
+      billingCycle:
+        typeof sub.billingCycle === "string" ? sub.billingCycle : null,
+      priceCurrency:
+        typeof sub.priceCurrency === "string" ? sub.priceCurrency : null,
+      activatedAtMs,
+    };
+  }
+);
 
 // ─── Cancel Paddle Subscription ──────────────────────────────────
 export const cancelPaddleSubscription = functions.https.onCall(
@@ -1028,7 +1125,8 @@ export const paddleWebhook = functions.https.onRequest(async (req, res) => {
 
       // Determine plan type from price ID
       const priceId = data.items?.[0]?.price?.id || "";
-      const planType = PADDLE_PRICE_TO_PLAN[priceId] || "pro";
+      const priceEntry = PADDLE_PRICE_BY_ID[priceId];
+      const planType = priceEntry?.planType || "pro";
 
       const currentPeriodStart = data.current_billing_period?.starts_at
         ? new Date(data.current_billing_period.starts_at)
@@ -1043,6 +1141,12 @@ export const paddleWebhook = functions.https.onRequest(async (req, res) => {
         .set({
           userId,
           planType,
+          ...(priceEntry
+            ? {
+                billingCycle: priceEntry.billingCycle,
+                priceCurrency: priceEntry.currency,
+              }
+            : {}),
           status: "active",
           paymentProvider: "paddle",
           paddleCustomerId: data.customer_id || null,
@@ -1090,8 +1194,12 @@ export const paddleWebhook = functions.https.onRequest(async (req, res) => {
 
         // Check if plan changed
         const priceId = data.items?.[0]?.price?.id || "";
-        const newPlan = PADDLE_PRICE_TO_PLAN[priceId];
-        if (newPlan) update.planType = newPlan;
+        const priceEntry = PADDLE_PRICE_BY_ID[priceId];
+        if (priceEntry) {
+          update.planType = priceEntry.planType;
+          update.billingCycle = priceEntry.billingCycle;
+          update.priceCurrency = priceEntry.currency;
+        }
 
         await docRef.update(update);
       }
