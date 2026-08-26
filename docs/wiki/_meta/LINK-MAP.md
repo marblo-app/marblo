@@ -3,7 +3,7 @@ title: 링크 맵
 tags: [meta/linkmap, status/living]
 status: active
 date: 2026-08-25
-links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]]
+links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[marblo-bot-messaging]]
 ---
 
 # 링크 맵
@@ -36,6 +36,7 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 | `no-live-gui-verify` | `20-constraints/no-live-gui-verify.md` | constraints | verified | adopt |
 | `telemetry-identity-axes` | `00-foundations/telemetry-identity-axes.md` | foundations | verified | — |
 | `post-spawn-telemetry-gap` | `30-investigations/post-spawn-telemetry-gap.md` | investigations | verified | adopt |
+| `marblo-bot-messaging` | `10-offerings/marblo-bot-messaging.md` | offerings | draft | — |
 
 ## 간선
 
@@ -71,6 +72,7 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 | `post-spawn-telemetry-gap` | `telemetry-identity-axes` |
 | `post-spawn-telemetry-gap` | `empty-query-first` |
 | `post-spawn-telemetry-gap` | `do-not-retry` |
+| `marblo-bot-messaging` | `CONVENTION` |
 
 ## 허브
 
@@ -89,3 +91,4 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 | `do-not-retry` | [v3/docs/web-app-join-attribution-design-2026-08-09.md](../../../v3/docs/web-app-join-attribution-design-2026-08-09.md) · [v3/docs/pseudonym-retro-measurement-2026-08-21.md](../../../v3/docs/pseudonym-retro-measurement-2026-08-21.md) · [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) |
 | `telemetry-identity-axes` | [v3/docs/post-spawn-telemetry-gap-2026-08-25.md](../../../v3/docs/post-spawn-telemetry-gap-2026-08-25.md) · [v3/functions/src/telemetryIdentityAxis.ts](../../../v3/functions/src/telemetryIdentityAxis.ts) |
 | `post-spawn-telemetry-gap` | [v3/docs/post-spawn-telemetry-gap-2026-08-25.md](../../../v3/docs/post-spawn-telemetry-gap-2026-08-25.md) · [v3/functions/src/postSpawnTelemetryGuard.ts](../../../v3/functions/src/postSpawnTelemetryGuard.ts) |
+| `marblo-bot-messaging` | [v3/src/lib/botDefinition.ts](../../../v3/src/lib/botDefinition.ts) · [v3/src/services/botDefinitionService.ts](../../../v3/src/services/botDefinitionService.ts) · [v3/src/components/agents/MarbloBotGallery.tsx](../../../v3/src/components/agents/MarbloBotGallery.tsx) · [v3/electron/assistant-triggers.ts](../../../v3/electron/assistant-triggers.ts) · [v3/docs/assistant-tab-design-2026-08-24.md](../../../v3/docs/assistant-tab-design-2026-08-24.md) · [marblo-web/docs/beta-launch/YOUTUBE-SCRIPT.md](../../../marblo-web/docs/beta-launch/YOUTUBE-SCRIPT.md) |

@@ -18,4 +18,6 @@ links: [[CONVENTION]]
 
 한 회차 강의가 어떻게 돌아갔나, 캠페인이 얼마가 나왔나는 여기가 아니라 [50-operations](../50-operations/README.md) 다.
 
-1판은 노트가 없다. 시드는 방법론 축에서 시작했다.
+## 노트
+
+- [[marblo-bot-messaging]] — 마블로봇 홍보 메시지 후보, 그록봇 대조, 무료 문구 기준, 파생물 체크리스트.
