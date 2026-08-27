@@ -7,23 +7,52 @@ import { currencyForLocale, formatPlanPrice, getPlanAmount } from "./pricing";
 test("pricing matrix pins KRW, USD, and Japan Pro monthly pricing", () => {
   assert.equal(getPlanAmount("pro", "monthly", "KRW"), 19_000);
   assert.equal(getPlanAmount("pro", "monthly", "USD"), 19);
-  assert.equal(getPlanAmount("pro", "monthly", "JPY"), 2_900);
-  assert.equal(getPlanAmount("pro", "annual", "JPY"), null);
+  assert.equal(getPlanAmount("pro", "monthly", "JPY"), 2_980);
+  assert.equal(getPlanAmount("pro", "annual", "JPY"), 29_800);
   assert.equal(currencyForLocale("ko"), "KRW");
   assert.equal(currencyForLocale("en"), "USD");
   assert.equal(currencyForLocale("ja"), "JPY");
   assert.equal(currencyForLocale("fr"), "USD");
   assert.equal(formatPlanPrice("pro", "monthly", "USD"), "$19");
-  assert.equal(formatPlanPrice("pro", "monthly", "JPY"), "￥2,900");
+  assert.equal(formatPlanPrice("pro", "monthly", "JPY"), "￥2,980");
 });
 
-test("Japan team plan pricing remains pending", () => {
-  assert.equal(getPlanAmount("team", "monthly", "JPY"), null);
-  assert.equal(getPlanAmount("team", "annual", "JPY"), null);
-  assert.equal(getPlanAmount("team_plus", "monthly", "JPY"), null);
-  assert.equal(getPlanAmount("team_plus", "annual", "JPY"), null);
-  assert.equal(formatPlanPrice("team", "monthly", "JPY"), null);
-  assert.equal(formatPlanPrice("team_plus", "monthly", "JPY"), null);
+test("paid pricing is present for public locales and JPY annual remains monthly times ten", () => {
+  const localeCurrencyCases = [
+    ["ko", "KRW"],
+    ["en", "USD"],
+    ["ja", "JPY"],
+  ] as const;
+  const paidPlans = ["pro", "team", "team_plus"] as const;
+  const billings = ["monthly", "annual"] as const;
+
+  for (const [locale, currency] of localeCurrencyCases) {
+    assert.equal(currencyForLocale(locale), currency);
+    for (const plan of paidPlans) {
+      for (const billing of billings) {
+        const amount = getPlanAmount(plan, billing, currency);
+        const formatted = formatPlanPrice(plan, billing, currency);
+        assert.equal(
+          typeof amount,
+          "number",
+          `${locale}.${plan}.${billing}.${currency} must be numeric`
+        );
+        assert.notEqual(
+          formatted,
+          null,
+          `${locale}.${plan}.${billing}.${currency} must not be pricePending`
+        );
+      }
+    }
+  }
+
+  for (const plan of paidPlans) {
+    assert.equal(
+      getPlanAmount(plan, "annual", "JPY"),
+      Number(getPlanAmount(plan, "monthly", "JPY")) * 10,
+      `${plan}.annual.JPY must be monthly times ten`
+    );
+  }
 });
 
 test("pricing literals do not drift outside the pricing source", () => {

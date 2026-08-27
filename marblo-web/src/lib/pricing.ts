@@ -24,16 +24,16 @@ export const PRICE_MATRIX: PriceMatrix = {
     annual: { KRW: 0, USD: 0, JPY: 0 },
   },
   pro: {
-    monthly: { KRW: 19_000, USD: 19, JPY: 2_900 },
-    annual: { KRW: 190_000, USD: 190, JPY: null },
+    monthly: { KRW: 19_000, USD: 19, JPY: 2_980 },
+    annual: { KRW: 190_000, USD: 190, JPY: 29_800 },
   },
   team: {
-    monthly: { KRW: 29_000, USD: 25, JPY: null },
-    annual: { KRW: 290_000, USD: 250, JPY: null },
+    monthly: { KRW: 29_000, USD: 25, JPY: 3_980 },
+    annual: { KRW: 290_000, USD: 250, JPY: 39_800 },
   },
   team_plus: {
-    monthly: { KRW: 290_000, USD: 245, JPY: null },
-    annual: { KRW: 2_900_000, USD: 2_450, JPY: null },
+    monthly: { KRW: 290_000, USD: 245, JPY: 39_800 },
+    annual: { KRW: 2_900_000, USD: 2_450, JPY: 398_000 },
   },
   enterprise: {
     monthly: { KRW: 0, USD: 0, JPY: null },
