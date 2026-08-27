@@ -20,6 +20,8 @@ vi.mock("electron", () => ({
 import {
   DRIVE_AUTH_SCOPE,
   CALENDAR_READONLY_SCOPE,
+  GOOGLE_CONNECTOR_REQUIRED_SCOPES,
+  SHEETS_READONLY_SCOPE,
   CALENDAR_EVENTS_SCOPE,
   DRIVE_FILE_SCOPE,
   DRIVE_READONLY_SCOPE,
@@ -66,6 +68,35 @@ describe("스코프", () => {
     expect(DRIVE_AUTH_SCOPE).toContain(CALENDAR_EVENTS_SCOPE);
     // drive(전체 쓰기) 는 여전히 요청하지 않는다.
     expect(DRIVE_AUTH_SCOPE).not.toMatch(/auth\/drive(\s|$)/);
+  });
+
+  it("시트는 readonly 만 요청한다 (티켓 qxDMhv5bgZA2nRe7AdPC)", () => {
+    expect(SHEETS_READONLY_SCOPE).toBe(
+      "https://www.googleapis.com/auth/spreadsheets.readonly",
+    );
+    expect(DRIVE_AUTH_SCOPE).toContain(SHEETS_READONLY_SCOPE);
+    // 시트 **쓰기** 스코프는 요청하지 않는다 — 트리거는 읽기만 하면 된다.
+    expect(DRIVE_AUTH_SCOPE).not.toMatch(/auth\/spreadsheets(\s|$)/);
+  });
+
+  it("★시트 스코프는 연결 필수 검증 목록에 넣지 않는다", () => {
+    // 넣으면 이미 연결해 둔 기존 사용자가 재연결할 때 시트 동의를 빼는 순간
+    // 연결 자체가 실패한다. 시트를 안 쓰는 사용자의 연결을 깨뜨리지 않는다.
+    // 대신 설정 패널이 스코프 부재를 읽어 시트 조건 저장을 막는다.
+    expect(GOOGLE_CONNECTOR_REQUIRED_SCOPES).not.toContain(
+      SHEETS_READONLY_SCOPE,
+    );
+    for (const scope of [
+      DRIVE_READONLY_SCOPE,
+      GMAIL_READONLY_SCOPE,
+      CALENDAR_READONLY_SCOPE,
+      DRIVE_FILE_SCOPE,
+      GMAIL_COMPOSE_SCOPE,
+      GMAIL_SEND_SCOPE,
+      CALENDAR_EVENTS_SCOPE,
+    ]) {
+      expect(GOOGLE_CONNECTOR_REQUIRED_SCOPES).toContain(scope);
+    }
   });
 });
 

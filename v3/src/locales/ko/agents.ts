@@ -471,6 +471,17 @@ export const agents = {
   "agents.triggers.calendar.enable": "임박 일정 감지",
   "agents.triggers.gmail.title": "Gmail 조건",
   "agents.triggers.gmail.enable": "메일 조건 감지",
+  "agents.triggers.sheets.title": "구글 시트 조건",
+  "agents.triggers.sheets.enable": "새 행이 추가되면 감지",
+  "agents.triggers.sheets.spreadsheet": "스프레드시트 ID 또는 URL",
+  "agents.triggers.sheets.spreadsheetHint":
+    "시트 주소창의 URL을 그대로 붙여넣어도 됩니다. 저장할 때 ID로 정리됩니다.",
+  "agents.triggers.sheets.range": "시트·범위",
+  "agents.triggers.sheets.rangeHint":
+    "비워두면 첫 번째 시트의 A:Z를 봅니다. 시트를 지정하려면 '설문지 응답 시트1!A:Z'처럼 씁니다.",
+  "agents.triggers.sheets.pollMinutes": "pollMinutes",
+  "agents.triggers.sheets.detectionHint":
+    "첫 폴링은 현재 상태를 기준선으로 잡기만 하고 알리지 않습니다. 이후 행 수가 늘어난 폴링에서 새로 나타난 행만 알립니다. 셀을 고치거나 행을 지우는 것은 알림 대상이 아닙니다.",
   "agents.triggers.outputs.title": "출력 채널",
   "agents.triggers.outputs.description":
     "엔진은 선택된 채널에 대해 {tools} MCP 도구를 호출하도록 오케스트레이터에 지시합니다.",
@@ -478,7 +489,7 @@ export const agents = {
   "agents.triggers.outputs.slackGuide": "Slack 연결 상태와 가이드",
   "agents.triggers.outputs.telegramGuide": "Telegram 연결 상태와 가이드",
   "agents.triggers.engineFields":
-    "기존 엔진 필드: schedule, calendar, gmail, webhook, outputs",
+    "기존 엔진 필드: schedule, calendar, gmail, webhook, sheets, outputs",
   "agents.triggers.save": "저장",
   "agents.triggers.saved": "프로젝트 트리거 설정을 저장했습니다.",
   "agents.triggers.saveFailed": "저장 실패",
@@ -503,6 +514,12 @@ export const agents = {
     "Calendar poll 간격은 1~60분이어야 합니다.",
   "agents.triggers.validation.gmailPollOutOfRange":
     "Gmail poll 간격은 1~60분이어야 합니다.",
+  "agents.triggers.validation.sheetsConnectorRequired":
+    "시트 조건을 켜려면 Google Sheets readonly scope가 필요합니다. Harness 탭에서 Google 계정을 다시 연결해 주세요.",
+  "agents.triggers.validation.sheetsSpreadsheetRequired":
+    "스프레드시트 ID 또는 URL을 입력해야 합니다.",
+  "agents.triggers.validation.sheetsPollOutOfRange":
+    "시트 poll 간격은 1~60분이어야 합니다.",
   "agents.triggers.validation.calendarUpcomingOutOfRange":
     "임박 일정 범위는 1~1440분이어야 합니다.",
   "agents.triggers.validation.default": "트리거 설정을 저장할 수 없습니다.",

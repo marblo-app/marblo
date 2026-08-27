@@ -9,11 +9,13 @@ import {
   RefreshCw,
   Save,
   Send,
+  Sheet,
   Webhook,
 } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
 import {
   normalizeAssistantTriggerSettings,
+  normalizeAssistantTriggerSettingsForSave,
   validateAssistantTriggerSettings,
   type AssistantTriggerConnectorState,
   type AssistantTriggerOutput,
@@ -48,6 +50,7 @@ type TriggerTab = "schedule" | "conditions" | "outputs";
 
 const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly";
 
 function issueKey(issue: AssistantTriggerValidationIssue): MessageKey {
   switch (issue) {
@@ -71,6 +74,12 @@ function issueKey(issue: AssistantTriggerValidationIssue): MessageKey {
       return "agents.triggers.validation.gmailPollOutOfRange";
     case "webhook_poll_out_of_range":
       return "agents.triggers.webhook.pollOutOfRange";
+    case "sheets_connector_required":
+      return "agents.triggers.validation.sheetsConnectorRequired";
+    case "sheets_spreadsheet_required":
+      return "agents.triggers.validation.sheetsSpreadsheetRequired";
+    case "sheets_poll_out_of_range":
+      return "agents.triggers.validation.sheetsPollOutOfRange";
     case "calendar_upcoming_out_of_range":
       return "agents.triggers.validation.calendarUpcomingOutOfRange";
     default:
@@ -109,6 +118,7 @@ function connectorRows(connectors: AssistantTriggerConnectorState): Array<{
     { label: "Telegram", ready: connectors.telegramReady },
     { label: "Calendar", ready: connectors.calendarConnected },
     { label: "Gmail", ready: connectors.gmailConnected },
+    { label: "Sheets", ready: connectors.sheetsConnected },
   ];
 }
 
@@ -125,6 +135,7 @@ export function AssistantTriggerSettingsPanel({
     telegramReady: false,
     calendarConnected: false,
     gmailConnected: false,
+    sheetsConnected: false,
   });
   const [loadingConnectors, setLoadingConnectors] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -167,6 +178,9 @@ export function AssistantTriggerSettingsPanel({
         telegramReady: telegramStatus.active || telegramStatus.canEnable,
         calendarConnected: scopes.includes(CALENDAR_SCOPE),
         gmailConnected: scopes.includes(GMAIL_SCOPE),
+        // ★기존 사용자는 이 스코프 없이 이미 연결돼 있다. 그 사실을 숨기지 않고
+        // "연결 필요" 배지 + 저장 차단으로 드러낸다(켜놓고 안 도는 상태 방지).
+        sheetsConnected: scopes.includes(SHEETS_SCOPE),
       });
     } catch (err) {
       setError(
@@ -210,7 +224,9 @@ export function AssistantTriggerSettingsPanel({
     }
     setSaving(true);
     try {
-      await updateProject(project.id, { assistantTriggers: settings });
+      const normalized = normalizeAssistantTriggerSettingsForSave(settings);
+      setSettings(normalized);
+      await updateProject(project.id, { assistantTriggers: normalized });
       setMessage(t("agents.triggers.saved"));
     } catch (err) {
       setError(
@@ -324,7 +340,7 @@ export function AssistantTriggerSettingsPanel({
         </div>
       )}
 
-      <div className="mb-4 grid gap-2 md:grid-cols-4">
+      <div className="mb-4 grid gap-2 md:grid-cols-3 xl:grid-cols-5">
         {connectorRows(connectors).map(({ label, ready }) => (
           <div
             key={label}
@@ -725,6 +741,114 @@ export function AssistantTriggerSettingsPanel({
                 {t("agents.triggers.webhook.signatureHint")}
               </p>
             </div>
+          </section>
+
+          <section className="rounded border border-gray-700 bg-gray-900 p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <Sheet size={17} className="text-lime-300" />
+              <h3 className="text-sm font-semibold">
+                {t("agents.triggers.sheets.title")}
+              </h3>
+            </div>
+            <label className="mb-3 flex items-center gap-2 text-sm text-gray-300">
+              <input
+                type="checkbox"
+                checked={settings.sheets?.enabled ?? false}
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    sheets: {
+                      ...(prev.sheets ?? {
+                        spreadsheetId: "",
+                        range: "A:Z",
+                        pollMinutes: 5,
+                      }),
+                      enabled: event.target.checked,
+                    },
+                  }))
+                }
+                className="h-4 w-4 rounded border-gray-600 bg-gray-950"
+              />
+              {t("agents.triggers.sheets.enable")}
+            </label>
+            <label className="mb-3 block">
+              <span className="mb-1 block text-xs text-gray-400">
+                {t("agents.triggers.sheets.spreadsheet")}
+              </span>
+              <input
+                value={settings.sheets?.spreadsheetId ?? ""}
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    sheets: {
+                      ...(prev.sheets ?? {
+                        enabled: false,
+                        range: "A:Z",
+                        pollMinutes: 5,
+                      }),
+                      spreadsheetId: event.target.value,
+                    },
+                  }))
+                }
+                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+              />
+              <span className="mt-1 block text-xs text-gray-500">
+                {t("agents.triggers.sheets.spreadsheetHint")}
+              </span>
+            </label>
+            <label className="mb-3 block">
+              <span className="mb-1 block text-xs text-gray-400">
+                {t("agents.triggers.sheets.range")}
+              </span>
+              <input
+                value={settings.sheets?.range ?? ""}
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    sheets: {
+                      ...(prev.sheets ?? {
+                        enabled: false,
+                        spreadsheetId: "",
+                        pollMinutes: 5,
+                      }),
+                      range: event.target.value,
+                    },
+                  }))
+                }
+                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+              />
+              <span className="mt-1 block text-xs text-gray-500">
+                {t("agents.triggers.sheets.rangeHint")}
+              </span>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-400">
+                {t("agents.triggers.sheets.pollMinutes")}
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={60}
+                value={settings.sheets?.pollMinutes ?? 5}
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    sheets: {
+                      ...(prev.sheets ?? {
+                        enabled: false,
+                        spreadsheetId: "",
+                        range: "A:Z",
+                      }),
+                      pollMinutes: Number(event.target.value),
+                    },
+                  }))
+                }
+                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+              />
+            </label>
+            <p className="mt-3 text-xs text-gray-500">
+              {t("agents.triggers.sheets.detectionHint")}
+            </p>
           </section>
         </div>
       )}

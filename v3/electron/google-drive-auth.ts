@@ -73,6 +73,11 @@ import {
   type ContactsConnector,
   type ContactsFetchLike,
 } from "./contacts-connector";
+import {
+  createSheetsConnector,
+  type SheetsConnector,
+  type SheetsFetchLike,
+} from "./sheets-connector";
 import { extractOfficeText } from "./office-text-extract";
 import { extractPdfText } from "./pdf-text-extract";
 
@@ -91,12 +96,23 @@ export const CALENDAR_EVENTS_SCOPE =
   "https://www.googleapis.com/auth/calendar.events";
 export const CONTACTS_READONLY_SCOPE =
   "https://www.googleapis.com/auth/contacts.readonly";
+/**
+ * 시트 **읽기 전용**. 티켓 qxDMhv5bgZA2nRe7AdPC.
+ *
+ * ★쓰기 스코프(`spreadsheets`)를 요구하지 않는다 — "새 행이 추가되면" 트리거는
+ * 읽기만 하면 되고, 쓰기까지 묶으면 동의 화면이 무거워질 뿐이다.
+ * Google 분류상 sensitive scope 이지만 `drive.readonly` 와 달리 restricted 는
+ * 아니라 CASA 보안평가 대상이 아니다.
+ */
+export const SHEETS_READONLY_SCOPE =
+  "https://www.googleapis.com/auth/spreadsheets.readonly";
 
 export const GOOGLE_CONNECTOR_READONLY_SCOPES = [
   DRIVE_READONLY_SCOPE,
   GMAIL_READONLY_SCOPE,
   CALENDAR_READONLY_SCOPE,
   CONTACTS_READONLY_SCOPE,
+  SHEETS_READONLY_SCOPE,
 ] as const;
 
 export const GOOGLE_CONNECTOR_WRITE_SCOPES = [
@@ -106,9 +122,23 @@ export const GOOGLE_CONNECTOR_WRITE_SCOPES = [
   CALENDAR_EVENTS_SCOPE,
 ] as const;
 
+/**
+ * 연결 성립 시점에 **전량 부여되었는지 검증**하는 목록.
+ *
+ * ★SHEETS_READONLY_SCOPE 는 여기 없다. 요청(DRIVE_AUTH_SCOPE)에는 넣지만 필수
+ * 검증에서는 뺀다 — 이 목록에 넣는 순간, 이미 연결해 둔 기존 사용자가 재연결할
+ * 때 시트 동의를 빼면 **연결 자체가 실패**한다. 시트 조건을 쓰지 않는 사용자의
+ * 연결을 깨뜨리지 않는 쪽을 택했다. 대신 조용히 두지도 않는다: 설정 패널이
+ * drive.status().scopes 에서 이 스코프의 부재를 읽어 "시트 조건을 켜려면 Google
+ * 을 다시 연결해야 한다" 고 말하고, 저장 자체를 막는다(assistantTriggerSettings
+ * 의 sheets_connector_required).
+ */
 export const GOOGLE_CONNECTOR_REQUIRED_SCOPES = [
-  ...GOOGLE_CONNECTOR_READONLY_SCOPES,
   ...GOOGLE_CONNECTOR_WRITE_SCOPES,
+  DRIVE_READONLY_SCOPE,
+  GMAIL_READONLY_SCOPE,
+  CALENDAR_READONLY_SCOPE,
+  CONTACTS_READONLY_SCOPE,
 ] as const;
 
 /** authorize 에 실제로 보내는 스코프 문자열(위 주석 ③ 참고). */
@@ -127,7 +157,7 @@ const REFRESH_SKEW_MS = 2 * 60 * 1000;
 const DRIVE_LABELS = {
   okTitle: "Google 커넥터 연결 완료",
   okBody:
-    "Marblo 가 Google Drive, Gmail, Calendar, Contacts 를 읽을 수 있게 되었습니다. 이 창을 닫고 앱으로 돌아가세요.",
+    "Marblo 가 Google Drive, Gmail, Calendar, Contacts, Sheets 를 읽을 수 있게 되었습니다. 이 창을 닫고 앱으로 돌아가세요.",
   failTitle: "Google 커넥터 연결 실패",
   failBody: "연결에 실패했습니다. 이 창을 닫고 앱에서 다시 시도해 주세요.",
 };
@@ -459,6 +489,17 @@ export function createUserContactsConnector(
   fetchImpl?: ContactsFetchLike
 ): ContactsConnector {
   return createContactsConnector({
+    getAccessToken: () => getDriveAccessToken(storage, userId),
+    ...(fetchImpl ? { fetchImpl } : {}),
+  });
+}
+
+export function createUserSheetsConnector(
+  storage: SafeStorage,
+  userId: string,
+  fetchImpl?: SheetsFetchLike
+): SheetsConnector {
+  return createSheetsConnector({
     getAccessToken: () => getDriveAccessToken(storage, userId),
     ...(fetchImpl ? { fetchImpl } : {}),
   });

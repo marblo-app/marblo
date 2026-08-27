@@ -826,6 +826,42 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
         updatedAt: new Date(),
       }),
     );
+    // 시트 조건(티켓 qxDMhv5bgZA2nRe7AdPC). assistantTriggers 는 **맵 통째로**
+    // allowlist 에 있으므로 하위 필드를 더해도 규칙 변경이 필요 없다 — 그 사실을
+    // 여기서 잠근다. PR #1243 이 이 확인을 건너뛰어 하루 종일 permission-denied
+    // 로 저장이 안 됐다.
+    await assertSucceeds(
+      updateDoc(doc(adminDb, "projects", PROJECT_ID), {
+        assistantTriggers: {
+          enabled: true,
+          sheets: {
+            enabled: true,
+            spreadsheetId: "1BxiMVs0XRA5nFMdKvBd",
+            range: "설문지 응답 시트1!A:Z",
+            pollMinutes: 5,
+          },
+        },
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("★ 멤버는 assistantTriggers.sheets 도 쓸 수 없다 (하위 필드 우회 차단)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        assistantTriggers: {
+          enabled: true,
+          sheets: {
+            enabled: true,
+            spreadsheetId: "1BxiMVs0XRA5nFMdKvBd",
+            range: "A:Z",
+            pollMinutes: 5,
+          },
+        },
+        updatedAt: new Date(),
+      }),
+    );
   });
 
   // ── 관리자 티어: name / kind / members ────────────────────────────────

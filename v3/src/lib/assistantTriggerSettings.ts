@@ -1,3 +1,8 @@
+import {
+  normalizeSheetsRange,
+  normalizeSpreadsheetId,
+} from "../../electron/sheets-connector";
+
 export type AssistantTriggerOutput = "slack" | "telegram";
 
 export interface AssistantTriggerSettings {
@@ -25,6 +30,13 @@ export interface AssistantTriggerSettings {
     secretMasked?: string;
     pollMinutes: number;
   };
+  sheets?: {
+    enabled: boolean;
+    /** 사용자가 붙여넣은 원문(ID 또는 URL). 저장 직전에 ID 로 정규화된다. */
+    spreadsheetId: string;
+    range: string;
+    pollMinutes: number;
+  };
 }
 
 export interface AssistantTriggerConnectorState {
@@ -32,6 +44,7 @@ export interface AssistantTriggerConnectorState {
   telegramReady: boolean;
   calendarConnected: boolean;
   gmailConnected: boolean;
+  sheetsConnected: boolean;
 }
 
 export type AssistantTriggerValidationIssue =
@@ -45,6 +58,9 @@ export type AssistantTriggerValidationIssue =
   | "calendar_poll_out_of_range"
   | "gmail_poll_out_of_range"
   | "webhook_poll_out_of_range"
+  | "sheets_connector_required"
+  | "sheets_spreadsheet_required"
+  | "sheets_poll_out_of_range"
   | "calendar_upcoming_out_of_range";
 
 export interface AssistantTriggerValidationResult {
@@ -73,6 +89,12 @@ export const DEFAULT_ASSISTANT_TRIGGER_SETTINGS: AssistantTriggerSettings = {
   webhook: {
     enabled: false,
     pollMinutes: 1,
+  },
+  sheets: {
+    enabled: false,
+    spreadsheetId: "",
+    range: "A:Z",
+    pollMinutes: 5,
   },
 };
 
@@ -117,6 +139,7 @@ export function normalizeAssistantTriggerSettings(
   const calendar = isRecord(record.calendar) ? record.calendar : {};
   const gmail = isRecord(record.gmail) ? record.gmail : {};
   const webhook = isRecord(record.webhook) ? record.webhook : {};
+  const sheets = isRecord(record.sheets) ? record.sheets : {};
   return {
     enabled: booleanValue(
       record.enabled,
@@ -182,6 +205,43 @@ export function normalizeAssistantTriggerSettings(
         DEFAULT_ASSISTANT_TRIGGER_SETTINGS.webhook?.pollMinutes ?? 1,
       ),
     },
+    sheets: {
+      enabled: booleanValue(
+        sheets.enabled,
+        DEFAULT_ASSISTANT_TRIGGER_SETTINGS.sheets?.enabled ?? false,
+      ),
+      spreadsheetId: stringValue(
+        sheets.spreadsheetId,
+        DEFAULT_ASSISTANT_TRIGGER_SETTINGS.sheets?.spreadsheetId ?? "",
+      ),
+      range: stringValue(
+        sheets.range,
+        DEFAULT_ASSISTANT_TRIGGER_SETTINGS.sheets?.range ?? "A:Z",
+      ),
+      pollMinutes: numberValue(
+        sheets.pollMinutes,
+        DEFAULT_ASSISTANT_TRIGGER_SETTINGS.sheets?.pollMinutes ?? 5,
+      ),
+    },
+  };
+}
+
+/**
+ * 저장 직전 정규화. 사용자가 붙여넣은 스프레드시트 **URL 을 ID 로** 바꾸고 범위
+ * 기본값을 채운다. 엔진(`parseAssistantTriggerSettings`)도 같은 정규화를 하지만,
+ * 화면에서 먼저 해 두면 사용자가 저장된 값이 무엇인지 눈으로 확인할 수 있다.
+ */
+export function normalizeAssistantTriggerSettingsForSave(
+  settings: AssistantTriggerSettings,
+): AssistantTriggerSettings {
+  if (!settings.sheets) return settings;
+  return {
+    ...settings,
+    sheets: {
+      ...settings.sheets,
+      spreadsheetId: normalizeSpreadsheetId(settings.sheets.spreadsheetId),
+      range: normalizeSheetsRange(settings.sheets.range),
+    },
   };
 }
 
@@ -234,7 +294,14 @@ export function validateAssistantTriggerSettings(
   const calendarEnabled = settings.calendar?.enabled === true;
   const gmailEnabled = settings.gmail?.enabled === true;
   const webhookEnabled = settings.webhook?.enabled === true;
-  if (!scheduleEnabled && !calendarEnabled && !gmailEnabled && !webhookEnabled) {
+  const sheetsEnabled = settings.sheets?.enabled === true;
+  if (
+    !scheduleEnabled &&
+    !calendarEnabled &&
+    !gmailEnabled &&
+    !webhookEnabled &&
+    !sheetsEnabled
+  ) {
     issues.push("no_trigger_enabled");
   }
 
@@ -295,6 +362,24 @@ export function validateAssistantTriggerSettings(
     )
   ) {
     issues.push("webhook_poll_out_of_range");
+  }
+
+  if (sheetsEnabled) {
+    // ★스코프가 없으면 저장을 막는다. 켜놓고 안 도는 상태를 만들지 않는다 —
+    // 기존 사용자는 Google 커넥터를 한 번 다시 연결해야 이 스코프가 붙는다.
+    if (!connectors.sheetsConnected) issues.push("sheets_connector_required");
+    if (!normalizeSpreadsheetId(settings.sheets?.spreadsheetId)) {
+      issues.push("sheets_spreadsheet_required");
+    }
+    if (
+      !inIntegerRange(
+        settings.sheets?.pollMinutes ?? 0,
+        MIN_POLL_MINUTES,
+        MAX_POLL_MINUTES,
+      )
+    ) {
+      issues.push("sheets_poll_out_of_range");
+    }
   }
 
   return { ok: issues.length === 0, issues };

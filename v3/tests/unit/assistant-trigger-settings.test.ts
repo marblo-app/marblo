@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   normalizeAssistantTriggerSettings,
+  normalizeAssistantTriggerSettingsForSave,
   validateAssistantTriggerSettings,
   type AssistantTriggerConnectorState,
   type AssistantTriggerSettings,
@@ -11,6 +12,7 @@ const connectorsReady: AssistantTriggerConnectorState = {
   telegramReady: true,
   calendarConnected: true,
   gmailConnected: true,
+  sheetsConnected: true,
 };
 
 const validSettings: AssistantTriggerSettings = {
@@ -19,7 +21,27 @@ const validSettings: AssistantTriggerSettings = {
   schedule: { enabled: true, cron: "0 9 * * 1-5", timezone: "Asia/Seoul" },
   calendar: { enabled: false, upcomingMinutes: 15, pollMinutes: 5 },
   gmail: { enabled: false, query: "in:inbox", pollMinutes: 5 },
+  sheets: {
+    enabled: false,
+    spreadsheetId: "",
+    range: "A:Z",
+    pollMinutes: 5,
+  },
 };
+
+const sheetsOnly = (
+  overrides: Partial<NonNullable<AssistantTriggerSettings["sheets"]>>,
+): AssistantTriggerSettings => ({
+  ...validSettings,
+  schedule: { enabled: false, cron: "0 9 * * 1-5" },
+  sheets: {
+    enabled: true,
+    spreadsheetId: "1BxiMVs0XRA5nFMdKvBd",
+    range: "A:Z",
+    pollMinutes: 5,
+    ...overrides,
+  },
+});
 
 describe("validateAssistantTriggerSettings", () => {
   it("불법 cron 형식을 거부한다", () => {
@@ -108,6 +130,78 @@ describe("validateAssistantTriggerSettings", () => {
     );
   });
 
+  it("시트 조건은 스코프가 없으면 저장을 막는다 — 켜놓고 안 도는 상태를 만들지 않는다", () => {
+    const result = validateAssistantTriggerSettings(sheetsOnly({}), {
+      ...connectorsReady,
+      sheetsConnected: false,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toContain("sheets_connector_required");
+  });
+
+  it("시트 조건은 스프레드시트 지정을 요구한다", () => {
+    const blank = validateAssistantTriggerSettings(
+      sheetsOnly({ spreadsheetId: "   " }),
+      connectorsReady,
+    );
+    expect(blank.issues).toContain("sheets_spreadsheet_required");
+
+    // 시트가 아닌 구글 문서 URL 은 통과시키지 않는다.
+    const wrongDoc = validateAssistantTriggerSettings(
+      sheetsOnly({
+        spreadsheetId: "https://docs.google.com/document/d/AAA/edit",
+      }),
+      connectorsReady,
+    );
+    expect(wrongDoc.issues).toContain("sheets_spreadsheet_required");
+
+    // URL 을 붙여넣어도 유효하다.
+    const fromUrl = validateAssistantTriggerSettings(
+      sheetsOnly({
+        spreadsheetId:
+          "https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBd/edit#gid=0",
+      }),
+      connectorsReady,
+    );
+    expect(fromUrl.ok).toBe(true);
+  });
+
+  it("시트 폴링 간격은 기존 gmail/calendar 와 같은 1~60분 규칙을 따른다", () => {
+    expect(
+      validateAssistantTriggerSettings(
+        sheetsOnly({ pollMinutes: 0 }),
+        connectorsReady,
+      ).issues,
+    ).toContain("sheets_poll_out_of_range");
+    expect(
+      validateAssistantTriggerSettings(
+        sheetsOnly({ pollMinutes: 61 }),
+        connectorsReady,
+      ).issues,
+    ).toContain("sheets_poll_out_of_range");
+    expect(
+      validateAssistantTriggerSettings(
+        sheetsOnly({ pollMinutes: 1 }),
+        connectorsReady,
+      ).ok,
+    ).toBe(true);
+    expect(
+      validateAssistantTriggerSettings(
+        sheetsOnly({ pollMinutes: 60 }),
+        connectorsReady,
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("시트 조건만 켜도 트리거가 하나 켜진 것으로 센다", () => {
+    const result = validateAssistantTriggerSettings(
+      sheetsOnly({}),
+      connectorsReady,
+    );
+    expect(result.issues).not.toContain("no_trigger_enabled");
+  });
+
   it("꺼진 설정은 fail-closed 저장을 허용한다", () => {
     expect(
       validateAssistantTriggerSettings(
@@ -122,6 +216,7 @@ describe("validateAssistantTriggerSettings", () => {
           telegramReady: false,
           calendarConnected: false,
           gmailConnected: false,
+          sheetsConnected: false,
         },
       ),
     ).toEqual({ ok: true, issues: [] });
@@ -142,5 +237,23 @@ describe("normalizeAssistantTriggerSettings", () => {
     expect(normalized.gmail?.pollMinutes).toBe(3);
     expect(normalized.webhook?.pollMinutes).toBe(1);
     expect(normalized.schedule?.cron).toBe("0 9 * * 1-5");
+    // 시트 기본값도 폼이 그릴 수 있게 채워진다.
+    expect(normalized.sheets?.enabled).toBe(false);
+    expect(normalized.sheets?.range).toBe("A:Z");
+  });
+});
+
+describe("normalizeAssistantTriggerSettingsForSave", () => {
+  it("저장 직전 스프레드시트 URL 을 ID 로 줄이고 빈 범위를 채운다", () => {
+    const saved = normalizeAssistantTriggerSettingsForSave(
+      sheetsOnly({
+        spreadsheetId:
+          "https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBd/edit#gid=7",
+        range: "  ",
+      }),
+    );
+
+    expect(saved.sheets?.spreadsheetId).toBe("1BxiMVs0XRA5nFMdKvBd");
+    expect(saved.sheets?.range).toBe("A:Z");
   });
 });

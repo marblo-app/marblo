@@ -481,6 +481,17 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.triggers.calendar.enable": "Detect upcoming events",
   "agents.triggers.gmail.title": "Gmail Condition",
   "agents.triggers.gmail.enable": "Detect mail conditions",
+  "agents.triggers.sheets.title": "Google Sheets Condition",
+  "agents.triggers.sheets.enable": "Detect newly added rows",
+  "agents.triggers.sheets.spreadsheet": "Spreadsheet ID or URL",
+  "agents.triggers.sheets.spreadsheetHint":
+    "Paste the URL from the sheet's address bar; it is reduced to the ID on save.",
+  "agents.triggers.sheets.range": "Sheet and range",
+  "agents.triggers.sheets.rangeHint":
+    "Leave empty to watch A:Z of the first sheet. To target one sheet, write it like 'Form Responses 1!A:Z'.",
+  "agents.triggers.sheets.pollMinutes": "pollMinutes",
+  "agents.triggers.sheets.detectionHint":
+    "The first poll only records the current state as a baseline and notifies nothing. After that, only rows that appear in a poll where the row count grew are reported. Editing cells or deleting rows does not notify.",
   "agents.triggers.outputs.title": "Output Channels",
   "agents.triggers.outputs.description":
     "The engine instructs the Orchestrator to call these MCP tools for the selected channels: {tools}.",
@@ -489,7 +500,7 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.triggers.outputs.telegramGuide":
     "Telegram connection status and guide",
   "agents.triggers.engineFields":
-    "Existing engine fields: schedule, calendar, gmail, webhook, outputs",
+    "Existing engine fields: schedule, calendar, gmail, webhook, sheets, outputs",
   "agents.triggers.save": "Save",
   "agents.triggers.saved": "Project trigger settings saved.",
   "agents.triggers.saveFailed": "Save failed",
@@ -514,6 +525,12 @@ export const agents: Record<keyof typeof koAgents, string> = {
     "Calendar poll interval must be 1-60 minutes.",
   "agents.triggers.validation.gmailPollOutOfRange":
     "Gmail poll interval must be 1-60 minutes.",
+  "agents.triggers.validation.sheetsConnectorRequired":
+    "Google Sheets readonly scope is required to enable the Sheets trigger. Reconnect your Google account from the Harness tab.",
+  "agents.triggers.validation.sheetsSpreadsheetRequired":
+    "Enter a spreadsheet ID or URL.",
+  "agents.triggers.validation.sheetsPollOutOfRange":
+    "Sheets poll interval must be 1-60 minutes.",
   "agents.triggers.validation.calendarUpcomingOutOfRange":
     "Upcoming event window must be 1-1440 minutes.",
   "agents.triggers.validation.default": "Trigger settings cannot be saved.",

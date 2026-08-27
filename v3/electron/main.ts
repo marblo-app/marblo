@@ -306,6 +306,7 @@ import {
 import {
   connectGoogleDrive,
   createUserCalendarConnector,
+  createUserSheetsConnector,
   createUserContactsConnector,
   createUserDriveConnector,
   createUserGmailConnector,
@@ -334,6 +335,10 @@ import type {
   CalendarListResult,
   CalendarPatchInput,
 } from "./calendar-connector";
+import type {
+  SheetsValuesParams,
+  SheetsValuesResult,
+} from "./sheets-connector";
 import type {
   ContactsSearchParams,
   ContactsSearchResult,
@@ -6601,6 +6606,32 @@ async function calendarListFor(
   }
 }
 
+/**
+ * 시트 값 조회. 트리거 엔진 전용 경로다 — 브리지(MCP)에는 아직 노출하지 않는다.
+ * 티켓 qxDMhv5bgZA2nRe7AdPC.
+ */
+async function sheetsValuesFor(
+  userId: string | null,
+  params: SheetsValuesParams
+): Promise<
+  { ok: true; result: SheetsValuesResult } | { ok: false; error: string }
+> {
+  if (!userId) return DRIVE_NOT_CONNECTED;
+  try {
+    return {
+      ok: true,
+      result: await createUserSheetsConnector(safeStorage, userId).getValues(
+        params
+      ),
+    };
+  } catch (e) {
+    return googleConnectorFailure(
+      e,
+      "스프레드시트 조회에 실패했습니다. 잠시 후 다시 시도해 주세요."
+    );
+  }
+}
+
 async function calendarCreateFor(
   userId: string | null,
   params: CalendarEventInput
@@ -10871,6 +10902,8 @@ app.whenReady().then(async () => {
         calendarListFor(currentRealUserUid(), params),
       listWebhookEvents: listAssistantWebhookEvents,
       claimWebhookEvent: claimAssistantWebhookEvent,
+      sheetsValues: (_projectId, params) =>
+        sheetsValuesFor(currentRealUserUid(), params),
     },
     resolveOrchestrator: ensureAssistantTriggerOrchestrator,
     log: (message) => console.log(message),
