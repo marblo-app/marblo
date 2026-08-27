@@ -3,7 +3,7 @@ title: 위키는 머지 때 쓰고, 작업 전 읽는다
 tags: [domain/methodology, topic/wiki, topic/agents, verdict/adopt, method/source-link]
 status: active
 date: 2026-08-26
-links: [[CONVENTION]], [[LINT]], [[WIKI-SKIP]], [[marblo-bot-messaging]], [[decision-sentence-first]], [[empty-query-first]]
+links: [[CONVENTION]], [[LINT]], [[WIKI-SKIP]], [[marblo-bot-messaging]], [[decision-sentence-first]], [[empty-query-first]], [[artifact-scope-boundary]]
 ---
 
 # 위키는 머지 때 쓰고, 작업 전 읽는다
@@ -38,7 +38,7 @@ links: [[CONVENTION]], [[LINT]], [[WIKI-SKIP]], [[marblo-bot-messaging]], [[deci
 | 판정 기준 | 어떤 조건이면 채택, 보류, 기각, 정정인지 |
 | 근거 링크 | `## Evidence`에 상대경로 마크다운 링크. 그래야 freshness가 근거 변경을 읽는다 |
 
-노트 본문은 [[CONVENTION]]의 R1~R6을 따른다. 수치와 세부 표는 원본에 둔다. 수치가 갈리면 원본이 옳다.
+노트 본문은 [[CONVENTION]]의 R1~R6을 따른다. 단, [[artifact-scope-boundary]]가 가른 제작물에는 이 판정 노트 형식을 적용하지 않는다. 수치와 세부 표는 원본에 둔다. 수치가 갈리면 원본이 옳다.
 
 ## 무엇을 안 쓰는가
 
@@ -110,4 +110,4 @@ links: [[CONVENTION]], [[LINT]], [[WIKI-SKIP]], [[marblo-bot-messaging]], [[deci
 
 ## Backlinks
 
-- [[marblo-bot-messaging]] · [[decision-sentence-first]] · [[empty-query-first]]
+- [[marblo-bot-messaging]] · [[decision-sentence-first]] · [[empty-query-first]] · [[artifact-scope-boundary]]

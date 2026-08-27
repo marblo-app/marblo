@@ -3,7 +3,7 @@ title: 40 방법론
 tags: [domain/methodology, meta/index]
 status: active
 date: 2026-08-25
-links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[do-not-retry]]
+links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-retry]]
 ---
 
 # 40-methodology
@@ -18,3 +18,4 @@ links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[
 | [[decision-sentence-first]] | 행동으로 이어지지 않는 지표는 대시보드·콜러블 정본으로 승격하지 않는다 |
 | [[routing-label-coverage]] | 라우팅 라벨은 액션축, 결과축, 비용 커버리지를 분리한다 |
 | [[wiki-write-at-merge]] | 위키는 머지 때 반복 규칙만 쓰고, 작업 전 프로젝트 지식이 결과를 바꿀 수 있으면 먼저 읽는다 |
+| [[artifact-scope-boundary]] | 판정 노트 형식은 위키에 두고 제작물 본문에는 적용하지 않는다 |
