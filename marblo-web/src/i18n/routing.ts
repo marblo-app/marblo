@@ -51,6 +51,9 @@ export const routing = defineRouting({
 /** A locale this app actually serves. */
 export type Locale = (typeof routing.locales)[number];
 
+/** next-intl's default locale cookie name. Keep the toggle in sync with proxy negotiation. */
+export const LOCALE_COOKIE_NAME = "NEXT_LOCALE";
+
 /**
  * The locales advertised to search engines — sitemap entries and hreflang
  * `alternates`. Deliberately a SUBSET of `routing.locales`.
@@ -121,4 +124,13 @@ export function localeHref(locale: string, path: string = ""): string {
   const suffix = path === "/" ? "" : path;
   const prefix = localeHasPrefix(locale) ? `/${locale}` : "";
   return `${prefix}${suffix}` || "/";
+}
+
+/**
+ * Cookie write used by the language toggle before navigating to an `as-needed`
+ * default-locale URL. This mirrors next-intl's default cookie settings for this
+ * app: session cookie, path=/, SameSite=Lax.
+ */
+export function localeCookieAssignment(locale: Locale): string {
+  return `${LOCALE_COOKIE_NAME}=${encodeURIComponent(locale)}; path=/; SameSite=Lax`;
 }
