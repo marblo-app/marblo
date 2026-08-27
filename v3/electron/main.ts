@@ -251,6 +251,7 @@ import {
 import { SlackPoller } from "./slack-poller";
 import {
   AssistantTriggerManager,
+  type AssistantTriggerWebhookEvent,
   type AssistantTriggerOrchestrator,
   type AssistantTriggerProject,
 } from "./assistant-triggers";
@@ -3430,6 +3431,116 @@ async function listAssistantTriggerProjects(): Promise<
   return projects;
 }
 
+function assistantWebhookEventFromDoc(
+  docId: string,
+  data: Record<string, unknown>
+): AssistantTriggerWebhookEvent | null {
+  const payload =
+    data.payload && typeof data.payload === "object" && !Array.isArray(data.payload)
+      ? (data.payload as Record<string, unknown>)
+      : {};
+  const cleanPayload: Record<string, string | number | boolean | null> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (
+      value === null ||
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      cleanPayload[key] = value;
+    }
+  }
+  const event = typeof data.event === "string" ? data.event : "";
+  if (!event) return null;
+  const receivedAt =
+    data.receivedAt instanceof fbTimestamp
+      ? data.receivedAt.toDate().toISOString()
+      : undefined;
+  return {
+    id: docId,
+    event,
+    source: typeof data.source === "string" ? data.source : undefined,
+    payload: cleanPayload,
+    receivedAt,
+  };
+}
+
+async function listAssistantWebhookEvents(
+  projectId: string,
+  limit: number
+): Promise<
+  | { ok: true; events: AssistantTriggerWebhookEvent[] }
+  | { ok: false; error: string }
+> {
+  const uid = currentRealUserUid();
+  if (!uid) return { ok: true, events: [] };
+  try {
+    const { app: fbApp, authReady } = getMissionFirebaseApp();
+    await authReady;
+    const db = getFirestore(fbApp);
+    const snap = await fbGetDocs(
+      fbQuery(
+        fbCollection(db, "projects", projectId, "assistantWebhookEvents"),
+        fbWhere("status", "==", "pending"),
+        fbLimit(Math.max(1, Math.min(20, Math.trunc(limit))))
+      )
+    );
+    const events: AssistantTriggerWebhookEvent[] = [];
+    snap.forEach((docSnap) => {
+      const parsed = assistantWebhookEventFromDoc(
+        docSnap.id,
+        docSnap.data() as Record<string, unknown>
+      );
+      if (parsed) events.push(parsed);
+    });
+    events.sort((a, b) => (a.receivedAt ?? "").localeCompare(b.receivedAt ?? ""));
+    return { ok: true, events };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+async function claimAssistantWebhookEvent(
+  projectId: string,
+  eventId: string
+): Promise<{ ok: true; claimed: boolean } | { ok: false; error: string }> {
+  const uid = currentRealUserUid();
+  if (!uid) return { ok: true, claimed: false };
+  try {
+    const { app: fbApp, authReady } = getMissionFirebaseApp();
+    await authReady;
+    const db = getFirestore(fbApp);
+    const ref = fbDoc(
+      db,
+      "projects",
+      projectId,
+      "assistantWebhookEvents",
+      eventId
+    );
+    const claimed = await fbRunTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return false;
+      const data = snap.data() as Record<string, unknown>;
+      if (data.status !== "pending") return false;
+      tx.update(ref, {
+        status: "consumed",
+        consumedAt: fbServerTimestamp(),
+        consumedBy: uid,
+      });
+      return true;
+    });
+    return { ok: true, claimed };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 /**
  * 이 사용자가 멤버인 프로젝트 id 들 — 미션 엔진의 Firestore 구독 스코프.
  *
@@ -4147,9 +4258,11 @@ import {
   where as fbWhere,
   getDocs as fbGetDocs,
   getCountFromServer as fbGetCountFromServer,
+  runTransaction as fbRunTransaction,
   orderBy as fbOrderBy,
   limit as fbLimit,
   Timestamp as fbTimestamp,
+  serverTimestamp as fbServerTimestamp,
 } from "firebase/firestore";
 import {
   CHECKPOINT_INTERVAL_MS,
@@ -10756,6 +10869,8 @@ app.whenReady().then(async () => {
         gmailFetchFor(currentRealUserUid(), messageId),
       calendarList: (_projectId, params) =>
         calendarListFor(currentRealUserUid(), params),
+      listWebhookEvents: listAssistantWebhookEvents,
+      claimWebhookEvent: claimAssistantWebhookEvent,
     },
     resolveOrchestrator: ensureAssistantTriggerOrchestrator,
     log: (message) => console.log(message),

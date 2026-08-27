@@ -306,6 +306,27 @@ export const agents = {
   "agents.marbloBots.triggersTitle": "스케줄러·조건 트리거",
   "agents.marbloBots.triggersBody":
     "실행 엔진은 준비되어 있고, 이 화면은 후속 티켓에서 켭니다.",
+  "agents.triggers.copy": "복사",
+  "agents.triggers.copyFailed": "복사하지 못했습니다.",
+  "agents.triggers.webhook.title": "Webhook 조건",
+  "agents.triggers.webhook.enable": "외부 웹훅 이벤트 감지",
+  "agents.triggers.webhook.pollMinutes": "pollMinutes",
+  "agents.triggers.webhook.pollOutOfRange":
+    "Webhook poll 간격은 1~60분이어야 합니다.",
+  "agents.triggers.webhook.url": "수신 URL",
+  "agents.triggers.webhook.notIssued": "아직 발급되지 않았습니다.",
+  "agents.triggers.webhook.issue": "URL 발급",
+  "agents.triggers.webhook.rotate": "URL·시크릿 재발급",
+  "agents.triggers.webhook.issued":
+    "웹훅 URL과 서명 시크릿을 발급했습니다.",
+  "agents.triggers.webhook.rotated":
+    "웹훅 URL과 서명 시크릿을 재발급했습니다.",
+  "agents.triggers.webhook.issueFailed": "웹훅 URL 발급에 실패했습니다.",
+  "agents.triggers.webhook.urlCopied": "웹훅 URL을 복사했습니다.",
+  "agents.triggers.webhook.secretCopied": "웹훅 시크릿을 복사했습니다.",
+  "agents.triggers.webhook.secretMasked": "저장된 시크릿: {secret}",
+  "agents.triggers.webhook.signatureHint":
+    "요청은 POST JSON이고, x-marblo-signature 헤더는 ts=<unix>;h1=<HMAC-SHA256(secret, ts + ':' + rawBody)> 형식입니다. 시크릿 원문은 발급·재발급 직후에만 표시됩니다.",
   "agents.marbloBots.savedSeed": "시드 봇을 프로젝트에 저장했습니다.",
   "agents.marbloBots.savedCustom": "봇 정의를 프로젝트에 저장했습니다.",
   "agents.marbloBots.saveFailed": "저장 실패",

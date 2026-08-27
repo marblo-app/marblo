@@ -3,12 +3,15 @@ import {
   AlertTriangle,
   CalendarClock,
   CheckCircle2,
+  Clipboard,
   Loader2,
   Mail,
   RefreshCw,
   Save,
   Send,
+  Webhook,
 } from "lucide-react";
+import { useTranslation, type TFunction } from "../../lib/i18n";
 import {
   normalizeAssistantTriggerSettings,
   validateAssistantTriggerSettings,
@@ -17,6 +20,7 @@ import {
   type AssistantTriggerSettings,
   type AssistantTriggerValidationIssue,
 } from "../../lib/assistantTriggerSettings";
+import { provisionAssistantWebhook } from "../../services/assistantWebhookService";
 import { useProjectStore } from "../../stores/projectStore";
 import type { Project } from "../../types/project";
 import { SlackChannelPanel } from "../harness/SlackChannelPanel";
@@ -44,7 +48,10 @@ type TriggerTab = "schedule" | "conditions" | "outputs";
 const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 
-function issueText(issue: AssistantTriggerValidationIssue): string {
+function issueText(
+  issue: AssistantTriggerValidationIssue,
+  t: TFunction,
+): string {
   switch (issue) {
     case "no_trigger_enabled":
       return "켜진 트리거가 없습니다.";
@@ -64,6 +71,8 @@ function issueText(issue: AssistantTriggerValidationIssue): string {
       return "Calendar poll 간격은 1~60분이어야 합니다.";
     case "gmail_poll_out_of_range":
       return "Gmail poll 간격은 1~60분이어야 합니다.";
+    case "webhook_poll_out_of_range":
+      return t("agents.triggers.webhook.pollOutOfRange");
     case "calendar_upcoming_out_of_range":
       return "임박 일정 범위는 1~1440분이어야 합니다.";
     default:
@@ -109,6 +118,7 @@ function connectorRows(connectors: AssistantTriggerConnectorState): Array<{
 export function AssistantTriggerSettingsPanel({
   project,
 }: AssistantTriggerSettingsPanelProps) {
+  const { t } = useTranslation();
   const updateProject = useProjectStore((s) => s.updateProject);
   const [settings, setSettings] = useState<AssistantTriggerSettings>(() =>
     normalizeAssistantTriggerSettings(project.assistantTriggers),
@@ -121,6 +131,10 @@ export function AssistantTriggerSettingsPanel({
   });
   const [loadingConnectors, setLoadingConnectors] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [provisioningWebhook, setProvisioningWebhook] = useState(false);
+  const [revealedWebhookSecret, setRevealedWebhookSecret] = useState<
+    string | null
+  >(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TriggerTab>("schedule");
@@ -196,7 +210,7 @@ export function AssistantTriggerSettingsPanel({
       return;
     }
     if (!validation.ok) {
-      setError(validation.issues.map(issueText).join(" "));
+      setError(validation.issues.map((issue) => issueText(issue, t)).join(" "));
       return;
     }
     setSaving(true);
@@ -207,6 +221,47 @@ export function AssistantTriggerSettingsPanel({
       setError(err instanceof Error ? err.message : "저장 실패");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const issueWebhook = async (rotate: boolean) => {
+    setMessage(null);
+    setError(null);
+    setProvisioningWebhook(true);
+    try {
+      const result = await provisionAssistantWebhook(project.id, rotate);
+      setSettings((prev) => ({
+        ...prev,
+        webhook: {
+          ...(prev.webhook ?? { enabled: false, pollMinutes: 1 }),
+          webhookId: result.webhookId,
+          url: result.url,
+          secretMasked: result.secretMasked,
+        },
+      }));
+      setRevealedWebhookSecret(result.secret);
+      setMessage(
+        rotate
+          ? t("agents.triggers.webhook.rotated")
+          : t("agents.triggers.webhook.issued"),
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : t("agents.triggers.webhook.issueFailed"),
+      );
+    } finally {
+      setProvisioningWebhook(false);
+    }
+  };
+
+  const copyText = async (value: string, copiedMessage: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setMessage(copiedMessage);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("agents.triggers.copyFailed"));
     }
   };
 
@@ -528,6 +583,136 @@ export function AssistantTriggerSettingsPanel({
               />
             </label>
           </section>
+
+          <section className="rounded border border-gray-700 bg-gray-900 p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <Webhook size={17} className="text-cyan-300" />
+              <h3 className="text-sm font-semibold">
+                {t("agents.triggers.webhook.title")}
+              </h3>
+            </div>
+            <label className="mb-3 flex items-center gap-2 text-sm text-gray-300">
+              <input
+                type="checkbox"
+                checked={settings.webhook?.enabled ?? false}
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    webhook: {
+                      ...(prev.webhook ?? { pollMinutes: 1 }),
+                      enabled: event.target.checked,
+                    },
+                  }))
+                }
+                className="h-4 w-4 rounded border-gray-600 bg-gray-950"
+              />
+              {t("agents.triggers.webhook.enable")}
+            </label>
+            <label className="mb-3 block">
+              <span className="mb-1 block text-xs text-gray-400">
+                {t("agents.triggers.webhook.pollMinutes")}
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={60}
+                value={settings.webhook?.pollMinutes ?? 1}
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    webhook: {
+                      ...(prev.webhook ?? { enabled: false }),
+                      pollMinutes: Number(event.target.value),
+                    },
+                  }))
+                }
+                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+              />
+            </label>
+            <div className="mb-3 rounded border border-gray-700 bg-gray-950/60 p-3">
+              <div className="mb-2 text-xs font-medium text-gray-300">
+                {t("agents.triggers.webhook.url")}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  readOnly
+                  value={settings.webhook?.url ?? ""}
+                  placeholder={t("agents.triggers.webhook.notIssued")}
+                  className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-950 px-3 py-2 text-xs text-gray-300 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    void copyText(
+                      settings.webhook?.url ?? "",
+                      t("agents.triggers.webhook.urlCopied"),
+                    )
+                  }
+                  disabled={!settings.webhook?.url}
+                  className="inline-flex items-center gap-1 rounded border border-gray-700 px-2.5 py-2 text-xs text-gray-200 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Clipboard size={14} />
+                  {t("agents.triggers.copy")}
+                </button>
+              </div>
+            </div>
+            <div className="mb-3 grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => void issueWebhook(false)}
+                disabled={provisioningWebhook}
+                className="inline-flex items-center justify-center gap-1.5 rounded border border-gray-700 px-3 py-2 text-sm text-gray-200 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {provisioningWebhook ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Webhook size={14} />
+                )}
+                {t("agents.triggers.webhook.issue")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void issueWebhook(true)}
+                disabled={provisioningWebhook || !settings.webhook?.webhookId}
+                className="inline-flex items-center justify-center gap-1.5 rounded border border-amber-500/40 px-3 py-2 text-sm text-amber-100 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RefreshCw size={14} />
+                {t("agents.triggers.webhook.rotate")}
+              </button>
+            </div>
+            <div className="rounded border border-gray-700 bg-gray-950/40 p-3 text-xs text-gray-400">
+              <div>
+                {t("agents.triggers.webhook.secretMasked", {
+                  secret: settings.webhook?.secretMasked ?? "-",
+                })}
+              </div>
+              {revealedWebhookSecret && (
+                <div className="mt-2 flex gap-2">
+                  <input
+                    readOnly
+                    value={revealedWebhookSecret}
+                    className="min-w-0 flex-1 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100 outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void copyText(
+                        revealedWebhookSecret,
+                        t("agents.triggers.webhook.secretCopied"),
+                      )
+                    }
+                    className="inline-flex items-center gap-1 rounded border border-amber-500/40 px-2.5 py-2 text-xs text-amber-100 hover:bg-amber-500/10"
+                  >
+                    <Clipboard size={14} />
+                    {t("agents.triggers.copy")}
+                  </button>
+                </div>
+              )}
+              <p className="mt-2">
+                {t("agents.triggers.webhook.signatureHint")}
+              </p>
+            </div>
+          </section>
         </div>
       )}
 
@@ -578,7 +763,7 @@ export function AssistantTriggerSettingsPanel({
 
       {!validation.ok && settings.enabled && (
         <div className="mt-4 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-          {validation.issues.map(issueText).join(" ")}
+          {validation.issues.map((issue) => issueText(issue, t)).join(" ")}
         </div>
       )}
 
@@ -589,7 +774,7 @@ export function AssistantTriggerSettingsPanel({
           ) : (
             <AlertTriangle size={14} className="text-amber-300" />
           )}
-          기존 엔진 필드: schedule, calendar, gmail, outputs
+          기존 엔진 필드: schedule, calendar, gmail, webhook, outputs
         </div>
         <button
           type="button"

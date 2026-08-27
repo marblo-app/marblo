@@ -18,6 +18,13 @@ export interface AssistantTriggerSettings {
     query?: string;
     pollMinutes: number;
   };
+  webhook?: {
+    enabled: boolean;
+    webhookId?: string;
+    url?: string;
+    secretMasked?: string;
+    pollMinutes: number;
+  };
 }
 
 export interface AssistantTriggerConnectorState {
@@ -37,6 +44,7 @@ export type AssistantTriggerValidationIssue =
   | "gmail_connector_required"
   | "calendar_poll_out_of_range"
   | "gmail_poll_out_of_range"
+  | "webhook_poll_out_of_range"
   | "calendar_upcoming_out_of_range";
 
 export interface AssistantTriggerValidationResult {
@@ -61,6 +69,10 @@ export const DEFAULT_ASSISTANT_TRIGGER_SETTINGS: AssistantTriggerSettings = {
     enabled: false,
     query: "in:inbox newer_than:1d",
     pollMinutes: 5,
+  },
+  webhook: {
+    enabled: false,
+    pollMinutes: 1,
   },
 };
 
@@ -104,6 +116,7 @@ export function normalizeAssistantTriggerSettings(
   const schedule = isRecord(record.schedule) ? record.schedule : {};
   const calendar = isRecord(record.calendar) ? record.calendar : {};
   const gmail = isRecord(record.gmail) ? record.gmail : {};
+  const webhook = isRecord(record.webhook) ? record.webhook : {};
   return {
     enabled: booleanValue(
       record.enabled,
@@ -150,6 +163,23 @@ export function normalizeAssistantTriggerSettings(
       pollMinutes: numberValue(
         gmail.pollMinutes,
         DEFAULT_ASSISTANT_TRIGGER_SETTINGS.gmail?.pollMinutes ?? 5,
+      ),
+    },
+    webhook: {
+      enabled: booleanValue(
+        webhook.enabled,
+        DEFAULT_ASSISTANT_TRIGGER_SETTINGS.webhook?.enabled ?? false,
+      ),
+      webhookId:
+        typeof webhook.webhookId === "string" ? webhook.webhookId : undefined,
+      url: typeof webhook.url === "string" ? webhook.url : undefined,
+      secretMasked:
+        typeof webhook.secretMasked === "string"
+          ? webhook.secretMasked
+          : undefined,
+      pollMinutes: numberValue(
+        webhook.pollMinutes,
+        DEFAULT_ASSISTANT_TRIGGER_SETTINGS.webhook?.pollMinutes ?? 1,
       ),
     },
   };
@@ -203,7 +233,8 @@ export function validateAssistantTriggerSettings(
   const scheduleEnabled = settings.schedule?.enabled === true;
   const calendarEnabled = settings.calendar?.enabled === true;
   const gmailEnabled = settings.gmail?.enabled === true;
-  if (!scheduleEnabled && !calendarEnabled && !gmailEnabled) {
+  const webhookEnabled = settings.webhook?.enabled === true;
+  if (!scheduleEnabled && !calendarEnabled && !gmailEnabled && !webhookEnabled) {
     issues.push("no_trigger_enabled");
   }
 
@@ -254,6 +285,16 @@ export function validateAssistantTriggerSettings(
     ) {
       issues.push("gmail_poll_out_of_range");
     }
+  }
+  if (
+    webhookEnabled &&
+    !inIntegerRange(
+      settings.webhook?.pollMinutes ?? 0,
+      MIN_POLL_MINUTES,
+      MAX_POLL_MINUTES,
+    )
+  ) {
+    issues.push("webhook_poll_out_of_range");
   }
 
   return { ok: issues.length === 0, issues };

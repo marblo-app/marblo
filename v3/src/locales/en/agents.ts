@@ -314,6 +314,27 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.marbloBots.triggersTitle": "Schedules and condition triggers",
   "agents.marbloBots.triggersBody":
     "The execution engine already exists; this screen will enable it in a follow-up ticket.",
+  "agents.triggers.copy": "Copy",
+  "agents.triggers.copyFailed": "Could not copy.",
+  "agents.triggers.webhook.title": "Webhook condition",
+  "agents.triggers.webhook.enable": "Detect external webhook events",
+  "agents.triggers.webhook.pollMinutes": "pollMinutes",
+  "agents.triggers.webhook.pollOutOfRange":
+    "Webhook poll interval must be between 1 and 60 minutes.",
+  "agents.triggers.webhook.url": "Receiver URL",
+  "agents.triggers.webhook.notIssued": "Not issued yet.",
+  "agents.triggers.webhook.issue": "Issue URL",
+  "agents.triggers.webhook.rotate": "Rotate URL and secret",
+  "agents.triggers.webhook.issued":
+    "Issued the webhook URL and signing secret.",
+  "agents.triggers.webhook.rotated":
+    "Rotated the webhook URL and signing secret.",
+  "agents.triggers.webhook.issueFailed": "Failed to issue webhook URL.",
+  "agents.triggers.webhook.urlCopied": "Webhook URL copied.",
+  "agents.triggers.webhook.secretCopied": "Webhook secret copied.",
+  "agents.triggers.webhook.secretMasked": "Stored secret: {secret}",
+  "agents.triggers.webhook.signatureHint":
+    "Requests use POST JSON, and the x-marblo-signature header is ts=<unix>;h1=<HMAC-SHA256(secret, ts + ':' + rawBody)>. The raw secret is shown only immediately after issue or rotation. The Orchestrator receives only the sanitized event.",
   "agents.marbloBots.savedSeed": "Seed bot saved to this project.",
   "agents.marbloBots.savedCustom": "Bot definition saved to this project.",
   "agents.marbloBots.saveFailed": "Save failed",

@@ -40,7 +40,7 @@ import {
   where,
   orderBy,
 } from "firebase/firestore";
-import { readFileSync } from "fs";
+import { readFileSync, rmSync } from "fs";
 import { describe, it, beforeAll, afterAll, beforeEach, expect } from "vitest";
 import { applyProjection } from "./electron/mcp-server/projection";
 import {
@@ -67,6 +67,7 @@ const OTHER_PROJECT_ID = "other-project";
 // 플랫폼 admin — projectId="" 유실 마커를 읽을 수 있는 유일한 주체.
 const PLATFORM_ADMIN_ID = "platform-admin-user";
 const PLATFORM_ADMIN_EMAIL = "padmin@test.com";
+const WORK_CHAIN_TEST_SPOOL_PATH = ".test-out/work-chain-rules-spool.json";
 
 function getContext(uid: string, email: string): RulesTestContext {
   return testEnv.authenticatedContext(uid, { email });
@@ -133,6 +134,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await testEnv.clearFirestore();
+  process.env.MARBLO_WORK_CHAIN_SPOOL_PATH = WORK_CHAIN_TEST_SPOOL_PATH;
+  rmSync(WORK_CHAIN_TEST_SPOOL_PATH, { force: true });
 
   // 시드 데이터 설정
   await testEnv.withSecurityRulesDisabled(async (context) => {
@@ -786,10 +789,10 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
     );
   });
 
-  it("★ 멤버는 assistantTriggers 를 쓸 수 없다 (서버 전용)", async () => {
-    // census 결과 이 앱에는 쓰기 경로가 아예 없다(읽기만 존재). 이 값은
-    // 오케스트레이터를 깨우는 실행 스위치라 멤버가 임의로 켜면 남의 기기에서
-    // 에이전트가 돈다. 콘솔·서버는 Admin SDK 라 규칙을 우회해 그대로 설정한다.
+  it("★ 멤버는 assistantTriggers 를 쓸 수 없다 (오케스트레이터 실행 스위치)", async () => {
+    // PR #1243 이후 AssistantTriggerSettingsPanel 이 이 필드를 쓴다. 하지만
+    // 오케스트레이터를 깨우는 실행 스위치라 일반 멤버에게 열면 남의 기기에서
+    // 에이전트가 돈다. 그래서 owner/admin 전용이다.
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(
       updateDoc(doc(db, "projects", PROJECT_ID), {
@@ -799,18 +802,27 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
     );
   });
 
-  it("★ owner/admin 도 assistantTriggers 를 쓸 수 없다 (서버 전용)", async () => {
+  it("★ owner/admin 은 assistantTriggers 를 쓸 수 있다 (트리거 설정 패널 저장)", async () => {
     const ownerDb = getContext(OWNER_ID, OWNER_EMAIL).firestore();
-    await assertFails(
+    await assertSucceeds(
       updateDoc(doc(ownerDb, "projects", PROJECT_ID), {
         assistantTriggers: { enabled: true },
         updatedAt: new Date(),
       }),
     );
     const adminDb = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
-    await assertFails(
+    await assertSucceeds(
       updateDoc(doc(adminDb, "projects", PROJECT_ID), {
-        assistantTriggers: { enabled: true },
+        assistantTriggers: {
+          enabled: true,
+          webhook: {
+            enabled: true,
+            webhookId: "awh_test",
+            url: "https://example.test/assistantWebhook?webhookId=awh_test",
+            secretMasked: "abcd...wxyz",
+            pollMinutes: 1,
+          },
+        },
         updatedAt: new Date(),
       }),
     );
@@ -936,6 +948,91 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
         }),
       );
     }
+  });
+
+  it("★ assistant_webhook_secrets 는 클라이언트가 읽지도 쓰지도 못한다", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), "assistant_webhook_secrets", "awh_1"), {
+        projectId: PROJECT_ID,
+        secret: "server-only-secret",
+      });
+    });
+    for (const ctx of [
+      getContext(OWNER_ID, OWNER_EMAIL),
+      getContext(ADMIN_ID, ADMIN_EMAIL),
+      getContext(MEMBER_ID, MEMBER_EMAIL),
+      getContext(OUTSIDER_ID, OUTSIDER_EMAIL),
+    ]) {
+      const db = ctx.firestore();
+      await assertFails(getDoc(doc(db, "assistant_webhook_secrets", "awh_1")));
+      await assertFails(
+        setDoc(doc(db, "assistant_webhook_secrets", "awh_2"), {
+          projectId: PROJECT_ID,
+          secret: "client-secret",
+        }),
+      );
+    }
+  });
+
+  it("프로젝트 멤버는 웹훅 이벤트를 읽고 pending→consumed 클레임만 할 수 있다", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(
+          context.firestore(),
+          "projects",
+          PROJECT_ID,
+          "assistantWebhookEvents",
+          "evt-1",
+        ),
+        {
+          projectId: PROJECT_ID,
+          webhookId: "awh_1",
+          status: "pending",
+          event: "sheet.row.created",
+          source: "sheets",
+          payload: { rowId: "R1" },
+          rawBodyBytes: 80,
+          receivedAt: new Date(),
+          expiresAt: new Date(Date.now() + 60_000),
+          consumedAt: null,
+        },
+      );
+    });
+
+    const memberDb = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    const eventRef = doc(
+      memberDb,
+      "projects",
+      PROJECT_ID,
+      "assistantWebhookEvents",
+      "evt-1",
+    );
+    await assertSucceeds(getDoc(eventRef));
+    await assertSucceeds(
+      updateDoc(eventRef, {
+        status: "consumed",
+        consumedAt: new Date(),
+        consumedBy: MEMBER_ID,
+      }),
+    );
+    await assertFails(
+      updateDoc(eventRef, {
+        event: "tampered",
+      }),
+    );
+
+    const outsiderDb = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      getDoc(
+        doc(
+          outsiderDb,
+          "projects",
+          PROJECT_ID,
+          "assistantWebhookEvents",
+          "evt-1",
+        ),
+      ),
+    );
   });
 
   it("★ github_app_access_logs 는 클라이언트가 쓸 수 없다 (감사 원장 위조 차단)", async () => {
@@ -4226,12 +4323,11 @@ describe("workChains — 오케 쓰기/읽기 왕복 (work-chain.ts 실제 경�
 
   it("외부인은 같은 함수로도 쓸 수 없다(룰이 막는다)", async () => {
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore() as never;
-    await expect(
-      addWorkChainItem(db, PROJECT_ID, "orchestrator-evil", {
-        what: "x",
-        why: "y",
-      }),
-    ).rejects.toThrow();
+    const result = await addWorkChainItem(db, PROJECT_ID, "orchestrator-evil", {
+      what: "x",
+      why: "y",
+    }, undefined, Date.now(), false);
+    expect(result.error).toMatch(/PERMISSION_DENIED/);
   });
 });
 

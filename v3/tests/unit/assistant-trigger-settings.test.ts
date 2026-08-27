@@ -65,6 +65,25 @@ describe("validateAssistantTriggerSettings", () => {
     );
   });
 
+  it("웹훅 조건은 커넥터 없이 켤 수 있지만 poll 범위는 검증한다", () => {
+    const result = validateAssistantTriggerSettings(
+      {
+        ...validSettings,
+        schedule: { enabled: false, cron: "0 9 * * 1-5" },
+        webhook: { enabled: true, webhookId: "awh_test", pollMinutes: 0 },
+      },
+      {
+        slackReady: true,
+        telegramReady: false,
+        calendarConnected: false,
+        gmailConnected: false,
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(["webhook_poll_out_of_range"]);
+  });
+
   it("캘린더와 지메일 조건이 커넥터 없이 켜진 경우 거부한다", () => {
     const result = validateAssistantTriggerSettings(
       {
@@ -121,6 +140,7 @@ describe("normalizeAssistantTriggerSettings", () => {
     expect(normalized.outputs).toEqual(["telegram"]);
     expect(normalized.gmail?.enabled).toBe(true);
     expect(normalized.gmail?.pollMinutes).toBe(3);
+    expect(normalized.webhook?.pollMinutes).toBe(1);
     expect(normalized.schedule?.cron).toBe("0 9 * * 1-5");
   });
 });

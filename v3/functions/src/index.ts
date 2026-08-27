@@ -11,6 +11,18 @@ import {
   ANONYMOUS_TELEMETRY_RULES_IP,
 } from "./rateLimit";
 import {
+  ASSISTANT_WEBHOOK_EVENT_TTL_MS,
+  ASSISTANT_WEBHOOK_RATE_RULES_IP,
+  ASSISTANT_WEBHOOK_RATE_RULES_WEBHOOK,
+  assistantWebhookUrl,
+  generateAssistantWebhookId,
+  generateAssistantWebhookSecret,
+  maskAssistantWebhookSecret,
+  shouldAcceptAssistantWebhookRateLimit,
+  validateAssistantWebhookPayload,
+  verifyAssistantWebhookSignature,
+} from "./assistantWebhook";
+import {
   parseLinkInstallRequest,
   INSTALL_ATTRIBUTION_SCHEMA,
 } from "./installAttribution";
@@ -950,6 +962,296 @@ const FUNCTIONS_BASE_URL =
     : "");
 const SITE_BASE = "https://marblo.app";
 const FOUNDER_COURSE_COUPON = "FOUNDER50"; // 강의 50% 할인 쿠폰 코드
+
+const ASSISTANT_WEBHOOK_SECRETS_COLLECTION = "assistant_webhook_secrets";
+const ASSISTANT_WEBHOOK_EVENTS_COLLECTION = "assistantWebhookEvents";
+
+interface AssistantWebhookProvisionResponse {
+  webhookId: string;
+  url: string;
+  secret: string | null;
+  secretMasked: string;
+  rotated: boolean;
+}
+
+interface AssistantWebhookSecretDoc {
+  projectId: string;
+  secret: string;
+  createdBy?: string;
+  createdAt?: FirebaseFirestore.Timestamp;
+  rotatedAt?: FirebaseFirestore.Timestamp;
+  disabled?: boolean;
+}
+
+function callableString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function readWebhookIdFromRequest(req: functions.https.Request): string | null {
+  const queryValue = req.query.webhookId;
+  const raw = Array.isArray(queryValue) ? queryValue[0] : queryValue;
+  return callableString(raw);
+}
+
+function readAssistantWebhookSettings(
+  projectData: Record<string, unknown>,
+): { enabled: boolean; webhookId: string | null } {
+  const triggers =
+    projectData.assistantTriggers &&
+    typeof projectData.assistantTriggers === "object" &&
+    !Array.isArray(projectData.assistantTriggers)
+      ? (projectData.assistantTriggers as Record<string, unknown>)
+      : {};
+  const webhook =
+    triggers.webhook &&
+    typeof triggers.webhook === "object" &&
+    !Array.isArray(triggers.webhook)
+      ? (triggers.webhook as Record<string, unknown>)
+      : {};
+  return {
+    enabled: webhook.enabled === true,
+    webhookId: callableString(webhook.webhookId),
+  };
+}
+
+async function requireAssistantWebhookAdminProject(
+  context: functions.https.CallableContext,
+  projectId: string,
+): Promise<FirebaseFirestore.DocumentSnapshot> {
+  const uid = context.auth?.uid;
+  if (!uid) {
+    throw new functions.https.HttpsError("unauthenticated", "Login required");
+  }
+  const projectRef = db.collection("projects").doc(projectId);
+  const projectSnap = await projectRef.get();
+  if (!projectSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "Project not found");
+  }
+  const project = (projectSnap.data() ?? {}) as Record<string, unknown>;
+  if (project.ownerId === uid) return projectSnap;
+  const members = Array.isArray(project.members) ? project.members : [];
+  if (!members.includes(uid)) {
+    throw new functions.https.HttpsError("permission-denied", "Admin only");
+  }
+  const roleSnap = await db
+    .collection("memberRoles")
+    .doc(`${projectId}_${uid}`)
+    .get();
+  if (roleSnap.exists) {
+    const role = callableString(roleSnap.data()?.role);
+    if (role === "admin") return projectSnap;
+  }
+  throw new functions.https.HttpsError("permission-denied", "Admin only");
+}
+
+export const provisionAssistantWebhook = functions.https.onCall(
+  async (data, context): Promise<AssistantWebhookProvisionResponse> => {
+    const projectId = callableString(data?.projectId);
+    if (!projectId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "projectId required"
+      );
+    }
+    const rotate = data?.rotate === true;
+    const projectSnap = await requireAssistantWebhookAdminProject(
+      context,
+      projectId
+    );
+    const project = (projectSnap.data() ?? {}) as Record<string, unknown>;
+    const current = readAssistantWebhookSettings(project);
+
+    let webhookId = current.webhookId;
+    let existing: AssistantWebhookSecretDoc | null = null;
+    if (webhookId) {
+      const secretSnap = await db
+        .collection(ASSISTANT_WEBHOOK_SECRETS_COLLECTION)
+        .doc(webhookId)
+        .get();
+      if (secretSnap.exists) {
+        const secretData = secretSnap.data() as AssistantWebhookSecretDoc;
+        if (secretData.projectId === projectId && !secretData.disabled) {
+          existing = secretData;
+        }
+      }
+    }
+
+    const shouldMint = rotate || !webhookId || !existing;
+    const finalWebhookId = shouldMint
+      ? generateAssistantWebhookId()
+      : webhookId ?? generateAssistantWebhookId();
+    const secret = shouldMint ? generateAssistantWebhookSecret() : existing!.secret;
+    const url = assistantWebhookUrl(FUNCTIONS_BASE_URL, finalWebhookId);
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const secretRef = db
+      .collection(ASSISTANT_WEBHOOK_SECRETS_COLLECTION)
+      .doc(finalWebhookId);
+
+    if (shouldMint) {
+      await secretRef.set({
+        projectId,
+        secret,
+        createdBy: context.auth?.uid ?? null,
+        createdAt: now,
+        rotatedAt: rotate ? now : null,
+        disabled: false,
+      });
+      if (
+        rotate &&
+        current.webhookId &&
+        current.webhookId !== finalWebhookId
+      ) {
+        await db
+          .collection(ASSISTANT_WEBHOOK_SECRETS_COLLECTION)
+          .doc(current.webhookId)
+          .set({ disabled: true, rotatedAt: now }, { merge: true });
+      }
+    }
+
+    const projectUpdate: Record<string, unknown> = {
+      "assistantTriggers.webhook.webhookId": finalWebhookId,
+      "assistantTriggers.webhook.url": url,
+      "assistantTriggers.webhook.secretMasked": maskAssistantWebhookSecret(secret),
+      updatedAt: now,
+    };
+    if (shouldMint) projectUpdate["assistantTriggers.webhook.createdAt"] = now;
+    if (rotate) projectUpdate["assistantTriggers.webhook.rotatedAt"] = now;
+    await db.collection("projects").doc(projectId).update(projectUpdate);
+
+    return {
+      webhookId: finalWebhookId,
+      url,
+      secret: shouldMint ? secret : null,
+      secretMasked: maskAssistantWebhookSecret(secret),
+      rotated: rotate,
+    };
+  }
+);
+
+export const assistantWebhook = functions.https.onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
+
+  const rawBody = req.rawBody;
+  if (!rawBody || rawBody.length > 32 * 1024) {
+    res.status(413).send("Payload too large");
+    return;
+  }
+
+  const ip = extractIp(req);
+  const ipCheck = await enforceRateLimit(
+    `assistant_webhook:ip:${ip}`,
+    ASSISTANT_WEBHOOK_RATE_RULES_IP
+  );
+  if (!ipCheck.allowed) {
+    res.status(429).send(`Too many requests. Retry in ${ipCheck.retryAfter}s.`);
+    return;
+  }
+
+  const webhookId = readWebhookIdFromRequest(req);
+  if (!webhookId) {
+    res.status(400).send("Missing webhookId");
+    return;
+  }
+
+  const webhookCheck = await enforceRateLimit(
+    `assistant_webhook:id:${webhookId}`,
+    ASSISTANT_WEBHOOK_RATE_RULES_WEBHOOK
+  );
+  if (!shouldAcceptAssistantWebhookRateLimit([webhookCheck])) {
+    res
+      .status(429)
+      .send(`Too many requests. Retry in ${webhookCheck.retryAfter}s.`);
+    return;
+  }
+
+  const secretSnap = await db
+    .collection(ASSISTANT_WEBHOOK_SECRETS_COLLECTION)
+    .doc(webhookId)
+    .get();
+  if (!secretSnap.exists) {
+    res.status(401).send("Invalid webhook signature");
+    return;
+  }
+  const secretDoc = secretSnap.data() as AssistantWebhookSecretDoc;
+  if (secretDoc.disabled || !secretDoc.projectId || !secretDoc.secret) {
+    res.status(401).send("Invalid webhook signature");
+    return;
+  }
+
+  const signatureHeader = req.headers["x-marblo-signature"];
+  const signature = Array.isArray(signatureHeader)
+    ? signatureHeader[0]
+    : signatureHeader;
+  if (
+    !verifyAssistantWebhookSignature(signature, rawBody, secretDoc.secret)
+  ) {
+    res.status(401).send("Invalid webhook signature");
+    return;
+  }
+
+  let parsedBody: unknown;
+  try {
+    parsedBody = JSON.parse(rawBody.toString("utf8"));
+  } catch {
+    res.status(400).send("Invalid JSON");
+    return;
+  }
+
+  const payloadResult = validateAssistantWebhookPayload(
+    parsedBody,
+    rawBody.length
+  );
+  if (!payloadResult.ok || !payloadResult.value) {
+    res.status(payloadResult.reason === "payload_too_large" ? 413 : 400).send(
+      payloadResult.reason ?? "Invalid payload"
+    );
+    return;
+  }
+
+  const projectRef = db.collection("projects").doc(secretDoc.projectId);
+  const projectSnap = await projectRef.get();
+  if (!projectSnap.exists) {
+    res.status(404).send("Project not found");
+    return;
+  }
+  const projectData = (projectSnap.data() ?? {}) as Record<string, unknown>;
+  const settings = readAssistantWebhookSettings(projectData);
+  if (
+    projectData.kind !== "assistant" ||
+    !settings.enabled ||
+    settings.webhookId !== webhookId
+  ) {
+    res.status(403).send("Webhook trigger disabled");
+    return;
+  }
+
+  const receivedAt = admin.firestore.Timestamp.now();
+  const expiresAt = admin.firestore.Timestamp.fromMillis(
+    receivedAt.toMillis() + ASSISTANT_WEBHOOK_EVENT_TTL_MS
+  );
+  const eventRef = await projectRef
+    .collection(ASSISTANT_WEBHOOK_EVENTS_COLLECTION)
+    .add({
+      projectId: secretDoc.projectId,
+      webhookId,
+      status: "pending",
+      event: payloadResult.value.event,
+      source: payloadResult.value.source ?? null,
+      payload: payloadResult.value.payload,
+      rawBodyBytes: payloadResult.value.rawBodyBytes,
+      receivedAt,
+      expiresAt,
+      consumedAt: null,
+    });
+  await secretSnap.ref.set({ lastUsedAt: receivedAt }, { merge: true });
+
+  res.status(202).json({ ok: true, eventId: eventRef.id });
+});
 
 // PLAN_PRICES_KRW 는 ./billing 로 이관(단일소스). import 참조.
 
