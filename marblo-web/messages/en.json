@@ -237,8 +237,6 @@
     "subtitle": "Marblo pricing covers the orchestration layer. Your coding agents run on the AI accounts you already use.",
     "free": {
       "name": "Free",
-      "price": "$0",
-      "price_usd": "$0",
       "period": "forever free",
       "description": "Individual developers trying Marblo for the first time",
       "features": [
@@ -251,8 +249,6 @@
     },
     "pro": {
       "name": "Pro",
-      "price": "$19",
-      "price_usd": "$19",
       "period": "/mo",
       "description": "Developers coordinating multiple coding agents",
       "features": [
@@ -265,8 +261,6 @@
     },
     "team": {
       "name": "Team",
-      "price": "$25",
-      "price_usd": "$25",
       "period": "/seat/mo",
       "description": "Teams that develop together with shared workspaces",
       "features": [
@@ -280,10 +274,8 @@
     },
     "team_plus": {
       "name": "Team Plus",
-      "price": "$245",
-      "price_usd": "$245",
       "period": "/mo",
-      "note": "Per team · 5 seats included, +$49 per extra seat",
+      "note": "Per team · 5 seats included, extra seats billed separately",
       "description": "B2B-ready: SSO, audit logs, and priority support",
       "features": [
         "SSO (Auth0/Clerk)",

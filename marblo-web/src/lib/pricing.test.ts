@@ -91,3 +91,35 @@ test("pricing literals do not drift outside the pricing source", () => {
     }
   }
 });
+
+test("locale messages do not contain currency-formatted price strings", () => {
+  const messageFiles = ["messages/ko.json", "messages/en.json", "messages/ja.json"];
+  const currencyPricePattern = /[$₩¥￥]\s*\d[\d,]*(?:\.\d+)?/;
+
+  function visit(value: unknown, path: string): void {
+    if (typeof value === "string") {
+      assert.equal(
+        currencyPricePattern.test(value),
+        false,
+        `${path} must read currency-formatted prices from src/lib/pricing.ts`
+      );
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visit(item, `${path}[${index}]`));
+      return;
+    }
+
+    if (value && typeof value === "object") {
+      for (const [key, child] of Object.entries(value)) {
+        visit(child, `${path}.${key}`);
+      }
+    }
+  }
+
+  for (const file of messageFiles) {
+    const messages = JSON.parse(readFileSync(resolve(process.cwd(), file), "utf8")) as unknown;
+    visit(messages, file);
+  }
+});

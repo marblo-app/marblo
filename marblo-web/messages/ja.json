@@ -237,8 +237,6 @@
     "subtitle": "Marbloの料金はオーケストレーションレイヤーの費用です。コーディングエージェントは既存のAIアカウントで実行されます。",
     "free": {
       "name": "Free",
-      "price": "¥0",
-      "price_usd": "$0",
       "period": "永久無料",
       "description": "Marbloを初めて体験する個人開発者",
       "features": [
@@ -251,8 +249,6 @@
     },
     "pro": {
       "name": "Pro",
-      "price": "価格未定",
-      "price_usd": "$19",
       "period": "/月",
       "description": "複数のコーディングエージェントを調整する開発者",
       "features": [
@@ -265,8 +261,6 @@
     },
     "team": {
       "name": "Team",
-      "price": "価格未定",
-      "price_usd": "$25",
       "period": "/人/月",
       "description": "チームワークスペースで一緒に開発する組織",
       "features": [
@@ -280,8 +274,6 @@
     },
     "team_plus": {
       "name": "Team Plus",
-      "price": "価格未定",
-      "price_usd": "$245",
       "period": "/月",
       "note": "チーム単位 · 5席含む、追加席の日本円価格は未定",
       "description": "SSO・監査ログ・優先サポートが必要なB2B導入段階",

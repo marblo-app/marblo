@@ -237,8 +237,6 @@
     "subtitle": "마블로 요금은 오케스트레이션 계층에 대한 비용입니다. 코딩 에이전트는 이미 쓰는 AI 계정으로 실행됩니다.",
     "free": {
       "name": "Free",
-      "price": "₩0",
-      "price_usd": "$0",
       "period": "영구 무료",
       "description": "마블로를 처음 경험하는 개인 개발자",
       "features": [
@@ -251,8 +249,6 @@
     },
     "pro": {
       "name": "Pro",
-      "price": "가격 모듈 참조",
-      "price_usd": "$19",
       "period": "/월",
       "description": "여러 코딩 에이전트를 조율하는 개발자",
       "features": [
@@ -265,8 +261,6 @@
     },
     "team": {
       "name": "Team",
-      "price": "₩29,000",
-      "price_usd": "$25",
       "period": "/인/월",
       "description": "팀 워크스페이스로 함께 개발하는 조직",
       "features": [
@@ -280,10 +274,8 @@
     },
     "team_plus": {
       "name": "Team Plus",
-      "price": "₩290,000",
-      "price_usd": "$245",
       "period": "/월",
-      "note": "팀당 · 5시트 포함, 추가 시트당 ₩59,000",
+      "note": "팀당 · 5시트 포함, 추가 시트는 별도 과금",
       "description": "SSO·감사 로그·우선 지원이 필요한 B2B 도입 단계",
       "features": [
         "SSO (Auth0/Clerk)",
