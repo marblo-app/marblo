@@ -1,0 +1,212 @@
+/**
+ * google-restricted-scopes — **요청하지 않기로 한 restricted 스코프**와, 그
+ * 결정 때문에 지금 쓸 수 없게 된 기능들의 단일 진실원. 티켓 v5Phjv1WxndUpgFJyrIn.
+ *
+ * ── 왜 이 파일이 생겼나 ──────────────────────────────────────────────────
+ * Google 은 OAuth 스코프를 non-sensitive / sensitive / **restricted** 셋으로
+ * 나눈다. restricted 가 하나라도 섞이면 앱을 외부 공개로 올릴 때 **CASA 보안평가**
+ * (유료 · 연 1회 갱신)가 따라붙는다. 일본 런칭 일정을 그 심사에 걸 수 없다는
+ * 판단으로, 우리는 restricted 를 **전부 빼고** sensitive 만 요청한다.
+ *
+ * 빠지는 셋(공식 분류 재확인 결과 셋 다 restricted 다):
+ *   · `drive.readonly`   — Drive 는 `drive.file` 만 sensitive 고 readonly/metadata
+ *                          계열은 전부 restricted 다.
+ *   · `gmail.readonly`
+ *   · `gmail.compose`    — ★sensitive 가 아니다. Gmail 에서 sensitive 인 것은
+ *                          `gmail.send` 와 addons 계열뿐이고, readonly · compose ·
+ *                          metadata · modify · insert 는 restricted 다.
+ *
+ * ── ★삭제가 아니라 보류다 ────────────────────────────────────────────────
+ * 런칭 후 CASA 를 별도 트랙으로 밟아 되살릴 것이다. 그래서 스코프 상수도,
+ * 이 스코프에 의존하던 코드(Drive 폴더 바인딩·스코프 해석기·커넥터)도 **지우지
+ * 않는다.** 되살릴 때 필요한 것은 이 파일의 목록에서 스코프를 옮기고 게이트를
+ * 걷어내는 일뿐이어야 한다.
+ *
+ * ── ★게이트는 토큰이 아니라 앱에 건다 ────────────────────────────────────
+ * 콘솔에서 스코프를 지워도 **이미 저장된 refresh_token 은 넓은 스코프를 그대로
+ * 갖고 있다.** 구글은 소급 철회를 하지 않는다. 그러니 "토큰에 스코프가 있으면
+ * 쓴다" 로 두면, 기존 사용자에 한해 우리는 여전히 restricted 데이터를 다루는
+ * 앱이 된다 — CASA 가 규율하려는 바로 그 행위다. 그래서 이 게이트는 토큰이
+ * 무엇을 부여받았는지 **묻지 않고** 무조건 막는다. 기존 토큰의 넓이는 그냥
+ * 무해하게 잠든다.
+ *
+ * ── 규율 ────────────────────────────────────────────────────────────────
+ * 조용히 401 을 내지 않는다. 막힌 기능은 (a) 무엇을 못 하는지 (b) 왜 못 하는지
+ * (c) 대신 무엇을 쓰면 되는지를 **한 문장 안에서** 말한다. 기능이 사라진 게
+ * 아니라 "지금은 못 쓴다" 는 것이 사용자에게 전달돼야 한다.
+ */
+
+/** Drive — restricted. `drive.file` 만 sensitive 다. */
+export const DRIVE_READONLY_SCOPE =
+  "https://www.googleapis.com/auth/drive.readonly";
+/** Gmail — restricted. */
+export const GMAIL_READONLY_SCOPE =
+  "https://www.googleapis.com/auth/gmail.readonly";
+/** Gmail — ★restricted. sensitive 가 아니다(공식 분류 확인). */
+export const GMAIL_COMPOSE_SCOPE =
+  "https://www.googleapis.com/auth/gmail.compose";
+
+/**
+ * 동의 화면에서 **요청하지 않는** restricted 스코프.
+ *
+ * 이 배열은 두 곳에서 읽힌다: (1) `DRIVE_AUTH_SCOPE` 를 만들 때 "여기 있는 것은
+ * 절대 넣지 않는다" 는 회귀 테스트의 기준, (2) 저장된 토큰이 아직 넓은지
+ * 진단할 때의 조회 목록. 콘솔에서 지운 목록과 이 배열이 같아야 한다.
+ */
+export const WITHHELD_RESTRICTED_SCOPES = [
+  DRIVE_READONLY_SCOPE,
+  GMAIL_READONLY_SCOPE,
+  GMAIL_COMPOSE_SCOPE,
+] as const;
+
+/**
+ * restricted 스코프가 빠지면서 지금 쓸 수 없게 된 기능들.
+ *
+ * 티켓이 넷을 지목했고(`drive_read` · `drive_binding` · `gmail_read` ·
+ * `gmail_draft`), 코드를 따라가며 둘을 더 찾았다:
+ *   · `drive_write` — 스코프는 `drive.file` 로 살아 있지만, 목적지인 **프로젝트
+ *     위키 폴더**가 사용자 소유 폴더다. `drive.file` 로는 앱이 만들지 않은 폴더의
+ *     메타데이터조차 못 읽어(404) 바인딩 검증이 성립하지 않는다. 즉 바인딩이
+ *     비활성인 동안 이 도구도 같이 잠긴다.
+ *   · `gmail_trigger` — 비서 트리거 엔진의 Gmail 폴링이 `gmail.readonly` 를 쓴다.
+ *     지금까지는 실패해도 console.error 로만 남아 사용자에게 보이지 않았다.
+ */
+export type WithheldGoogleCapability =
+  | "drive_read"
+  | "drive_write"
+  | "drive_binding"
+  | "gmail_read"
+  | "gmail_draft"
+  | "gmail_trigger";
+
+/** 어느 스코프가 빠져서 막혔는지 — 진단·로그용(사용자 문구에는 넣지 않는다). */
+export const WITHHELD_CAPABILITY_SCOPE: Readonly<
+  Record<WithheldGoogleCapability, string>
+> = {
+  drive_read: DRIVE_READONLY_SCOPE,
+  drive_write: DRIVE_READONLY_SCOPE,
+  drive_binding: DRIVE_READONLY_SCOPE,
+  gmail_read: GMAIL_READONLY_SCOPE,
+  gmail_draft: GMAIL_COMPOSE_SCOPE,
+  gmail_trigger: GMAIL_READONLY_SCOPE,
+};
+
+/**
+ * 사용자·에이전트에게 그대로 보여줄 문장.
+ *
+ * 전부 같은 뼈대다 — **무엇이 / 왜 / 대신 무엇을**. "권한이 없습니다" 로 끝나면
+ * 사용자는 자기가 뭘 잘못했는지 찾다가 시간을 버린다. 여기서 막은 것은 사용자의
+ * 실수가 아니라 우리의 결정이므로, 그 사실을 문장이 지고 있어야 한다.
+ */
+const WITHHELD_CAPABILITY_MESSAGE: Readonly<
+  Record<WithheldGoogleCapability, string>
+> = {
+  drive_read:
+    "Google Drive 문서 읽기는 지금 사용할 수 없습니다. " +
+    "Drive 전체 읽기 권한(drive.readonly)은 Google 이 restricted 로 분류해 " +
+    "별도 보안평가(CASA)를 통과해야 요청할 수 있어, 이번 출시에서는 요청하지 않습니다. " +
+    "프로젝트 지식은 로컬 위키 폴더로 사용해 주세요 — wiki_query 에 프로젝트의 " +
+    "docs/wiki 경로를 root_path 로 넘기면 같은 지식을 그대로 읽습니다.",
+  drive_write:
+    "Google Drive 문서 생성은 지금 사용할 수 없습니다. " +
+    "만들 위치인 프로젝트 위키 폴더를 확인하려면 Drive 읽기 권한(drive.readonly)이 " +
+    "필요한데, 이 권한은 restricted 로 분류돼 이번 출시에서는 요청하지 않습니다. " +
+    "문서는 로컬 위키 폴더(docs/wiki)에 파일로 남겨 주세요.",
+  drive_binding:
+    "이 프로젝트의 Google Drive 위키 폴더 지정은 지금 사용할 수 없습니다. " +
+    "폴더를 찾고 그 하위를 읽으려면 Drive 읽기 권한(drive.readonly)이 필요한데, " +
+    "이 권한은 restricted 로 분류돼 별도 보안평가(CASA)를 통과해야 요청할 수 있어 " +
+    "이번 출시에서는 요청하지 않습니다. 지식위키는 로컬 폴더(프로젝트의 docs/wiki)로 " +
+    "그대로 쓸 수 있습니다. 이미 지정해 둔 폴더 정보는 지우지 않고 보관합니다.",
+  gmail_read:
+    "Gmail 메일 읽기는 지금 사용할 수 없습니다. " +
+    "메일 본문 읽기 권한(gmail.readonly)은 Google 이 restricted 로 분류해 " +
+    "별도 보안평가(CASA)를 통과해야 요청할 수 있어, 이번 출시에서는 요청하지 않습니다. " +
+    "메일 발송(gmail_send)과 Calendar·Contacts 조회는 그대로 사용할 수 있습니다.",
+  gmail_draft:
+    "Gmail 초안함에 초안을 만드는 기능은 지금 사용할 수 없습니다. " +
+    "초안 작성 권한(gmail.compose)은 Google 이 restricted 로 분류해 이번 출시에서는 " +
+    "요청하지 않습니다. 대신 초안을 Marblo 안에서 보여 드리고, 확인하시면 " +
+    "gmail_send 로 그대로 발송합니다 — 검토 단계가 Gmail 이 아니라 앱에서 일어날 뿐입니다.",
+  gmail_trigger:
+    "새 메일 감지 트리거는 지금 사용할 수 없습니다. " +
+    "받은 메일을 읽으려면 gmail.readonly 권한이 필요한데, 이 권한은 restricted 로 " +
+    "분류돼 이번 출시에서는 요청하지 않습니다. 일정 트리거(Calendar), 시간 트리거, " +
+    "스프레드시트 새 행 트리거는 그대로 동작합니다.",
+};
+
+/**
+ * ★지금 잠겨 있는 기능들 — **되살리는 스위치가 이 집합이다.**
+ *
+ * 기능 코드는 지우지 않았다(티켓 지시). CASA 를 통과해 스코프를 되찾는 날,
+ * 해당 스코프를 `DRIVE_AUTH_SCOPE` 요청 목록에 넣고 여기서 이름을 빼면 경로가
+ * 그대로 살아난다. 게이트를 `if (…) return` 형태로 남겨 둔 것도 같은 이유다 —
+ * 무조건 return 으로 막으면 그 아래 구현이 죽은 코드가 되어 컴파일러의 감시
+ * 밖으로 나가고, 되살릴 때 조용히 썩어 있는 것을 발견하게 된다.
+ *
+ * 집합으로 둔 이유: 여섯을 한꺼번에 되살릴 이유가 없다. `drive.file` 만으로
+ * 되는 경로가 나중에 갈라져 나올 수 있고, 그때 한 줄씩 빼는 게 맞다.
+ */
+export const WITHHELD_CAPABILITIES: ReadonlySet<WithheldGoogleCapability> =
+  new Set<WithheldGoogleCapability>([
+    "drive_read",
+    "drive_write",
+    "drive_binding",
+    "gmail_read",
+    "gmail_draft",
+    "gmail_trigger",
+  ]);
+
+export function isCapabilityWithheld(
+  capability: WithheldGoogleCapability,
+): boolean {
+  return WITHHELD_CAPABILITIES.has(capability);
+}
+
+/**
+ * 막힌 기능의 표준 실패값 — 잠겨 있지 않으면 `null` 이고 호출자는 그대로 진행한다.
+ *
+ * 이 코드베이스의 커넥터 경로는 전부 `{ ok:false, error }` 로 실패를 접는다
+ * (예외를 던지지 않는다) — MCP 도구가 그 문장을 에이전트에게 그대로 보여주기
+ * 때문이다. 그 계약을 그대로 따른다.
+ */
+export function withheldCapabilityError(
+  capability: WithheldGoogleCapability,
+): { ok: false; error: string } | null {
+  if (!WITHHELD_CAPABILITIES.has(capability)) return null;
+  return { ok: false, error: WITHHELD_CAPABILITY_MESSAGE[capability] };
+}
+
+/** 문구만 필요한 호출자(로그·UI)를 위한 접근자. */
+export function withheldCapabilityMessage(
+  capability: WithheldGoogleCapability,
+): string {
+  return WITHHELD_CAPABILITY_MESSAGE[capability];
+}
+
+/**
+ * 스코프 문자열(동의 화면에 보낼 것)에 restricted 가 섞였는가.
+ *
+ * ★이 함수는 편의가 아니라 안전장치다. 콘솔에서 지운 스코프를 코드가 계속
+ * 요청하면 동의 화면 자체가 에러로 뜨고, 사용자는 연결을 아예 못 한다. 그래서
+ * 회귀 테스트가 `DRIVE_AUTH_SCOPE` 를 이 함수로 검사한다.
+ */
+export function restrictedScopesIn(scopeString: string): string[] {
+  const requested = new Set(scopeString.split(/\s+/).filter(Boolean));
+  return WITHHELD_RESTRICTED_SCOPES.filter((scope) => requested.has(scope));
+}
+
+/**
+ * 저장된 토큰이 아직 restricted 스코프를 들고 있는가(진단용).
+ *
+ * ★있다고 해서 재연결을 강제하지 않는다. 근거는 이 파일 머리주석의 "게이트는
+ * 토큰이 아니라 앱에 건다" 항목이다 — 넓은 토큰은 그대로 두되 앱이 쓰지 않는다.
+ * 강제 재연결은 아직 잘 도는 Calendar·Contacts·Sheets·발송까지 한 번에 끊고,
+ * 얻는 것은 없다.
+ */
+export function legacyRestrictedScopes(
+  grantedScopes: readonly string[],
+): string[] {
+  const granted = new Set(grantedScopes);
+  return WITHHELD_RESTRICTED_SCOPES.filter((scope) => granted.has(scope));
+}

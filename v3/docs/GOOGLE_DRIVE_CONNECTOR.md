@@ -40,18 +40,35 @@ navigate 하지 않으므로 터미널·에이전트 상태가 보존된다.
 추출해 로그인과 Drive 가 **같은 코드**를 쓴다. 로그인 쪽 동작(스코프·prompt·반환
 형태)은 그대로다.
 
-## 3. 스코프 — `drive.readonly`
+## 3. 스코프 — ★`drive.readonly` 는 더 이상 요청하지 않는다
+
+> **2026-08 갱신 (티켓 `v5Phjv1WxndUpgFJyrIn`) — 이 절의 결론이 뒤집혔다.**
+>
+> `drive.readonly` · `gmail.readonly` · `gmail.compose` 셋을 **요청 목록에서
+> 뺐다.** 셋 다 Google 분류상 restricted 이고, 하나라도 요청하면 외부 공개 시
+> **CASA 보안평가**(유료 · 연 1회 갱신)가 따라붙는다. 일본 출시 일정을 그 심사에
+> 걸 수 없다는 판단이다. 아래 원래 논증(§3 본문)은 **여전히 기술적으로 맞다** —
+> 바뀐 것은 가격표이고, 그래서 기능 쪽에서 대가를 치른다.
+>
+> · 지금 요청하는 것: `openid` `email` + sensitive 여섯
+>   (`drive.file` · `gmail.send` · `calendar.readonly` · `calendar.events` ·
+>   `contacts.readonly` · `spreadsheets.readonly`)
+> · 그래서 잠긴 것: `drive_search` · `drive_fetch` · `drive_write` ·
+>   Drive 위키 폴더 바인딩 · `gmail_search` · `gmail_fetch` · `gmail_draft` ·
+>   비서의 새 메일 트리거
+> · 대체 경로: 지식위키는 **로컬 폴더**(`wiki_query(root_path=…/docs/wiki)`),
+>   메일 초안은 **앱 안에서 확인 후 `gmail.send`**
+>   (→ `GMAIL_DRAFT_REPLACEMENT.md`)
+> · ★코드는 지우지 않았다. `google-restricted-scopes.ts` 의
+>   `WITHHELD_CAPABILITIES` 에서 이름을 빼면 되살아난다.
+> · 기존 사용자: **재연결을 강제하지 않는다.** 저장된 토큰은 여전히 넓지만,
+>   게이트가 토큰을 묻지 않고 앱 쪽에서 막으므로 그 넓이는 잠들어 있다.
+
+### 원래 논증 (기록용)
 
 `drive.file` 은 "앱이 만들었거나 피커로 연 파일" 만 보인다. 지식위키는 **사용자가
 이미 갖고 있는** 문서를 읽어야 하므로 목적을 달성할 수 없다. 그래서
-`drive.readonly` 로 시작한다. 쓰기 스코프는 이 앱 어디에도 없다.
-
-> ### ⚠️ 운영 리스크 — restricted scope
->
-> `drive.readonly` 는 Google 분류상 **restricted scope** 다. 앱을 프로덕션(외부
-> 공개)으로 올리려면 OAuth 검증 + **CASA 보안평가**가 필요하다. OAuth consent
-> screen 이 `Testing` 상태인 동안(테스트 사용자 100명)에는 그대로 동작하므로
-> MVP·도그푸딩에는 문제가 없다. **외부 출시 전 별도 트랙으로 반드시 다룰 것.**
+`drive.readonly` 로 시작했다. 쓰기 스코프는 이 앱 어디에도 없다.
 
 `openid email` 을 함께 요청한다 — 연결된 계정을 UI 에 보여주고 재동의 때
 `login_hint` 로 쓰기 위해서다. 둘 다 로그인에서 이미 부여된 non-sensitive

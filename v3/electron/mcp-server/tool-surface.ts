@@ -109,16 +109,20 @@ export const LOCAL_TOOL_USE_MCP_TOOLS = [
 export const ROLE_EXTRA_MCP_TOOLS: Readonly<Record<string, readonly string[]>> =
   {
     // backend: 로컬 지식 위키 MCP 도구 구현/검증 경로.
+    //
+    // ★`gmail_draft` 와 `drive_write` 는 여기서 뺐다(티켓 v5Phjv1WxndUpgFJyrIn).
+    //   restricted 스코프를 빼면서 둘 다 호출해도 "지금은 못 쓴다" 만 돌려주는
+    //   상태가 됐다. 도구 등록 자체는 남겨 뒀지만(되살리기 비용), 스코프된
+    //   워커의 프리픽스는 **매 요청 재전송**되므로 못 쓰는 스키마를 거기 실어
+    //   두는 것은 순손실이다. 되살릴 때는 이 배열에 두 줄을 다시 넣으면 된다.
     backend: [
       "wiki_ingest",
       "wiki_query",
       "wiki_lint",
       "calendar_create",
       "calendar_patch",
-      "gmail_draft",
       "gmail_send",
       "notion_write",
-      "drive_write",
     ],
     // 랜딩 역할: PR 머지 + 티켓/워크트리 클로즈아웃이 본업이다.
     merge: ["merge_and_close", "get_worktree_audit", "list_worktree_audit"],

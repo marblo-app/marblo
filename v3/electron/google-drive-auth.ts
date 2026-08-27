@@ -22,17 +22,45 @@
  * 머리주석의 실측 이력). 그래서 Drive 동의도 **시스템 브라우저 + 127.0.0.1
  * 루프백 + PKCE**(RFC 8252) 하나로만 간다. 앱 창은 절대 navigate 하지 않는다.
  *
- * ── 설계 결정 ③: 스코프 ─────────────────────────────────────────────────
- * `drive.readonly` 로 시작한다(쓰기 없음). 지식위키는 **사용자가 이미 갖고 있는**
- * 문서를 읽어야 하므로 `drive.file`(앱이 만들거나 피커로 연 파일만)로는 목적을
- * 달성할 수 없다.
- * ★운영 주의: `drive.readonly` 는 Google 분류상 **restricted scope** 라, 앱을
- * 프로덕션(외부 공개)으로 올리려면 OAuth 검증 + CASA 보안평가가 필요하다.
- * Testing 상태(테스트 사용자 100명)에서는 그대로 동작하므로 MVP·도그푸딩엔
- * 문제가 없다. 외부 출시 전에 반드시 별도 트랙으로 다룰 것.
+ * ── 설계 결정 ③: 스코프 — ★restricted 를 전부 뺐다 (티켓 v5Phjv1WxndUpgFJyrIn)
+ * 원래 이 커넥터는 `drive.readonly` 로 시작했다. 지식위키가 **사용자가 이미 갖고
+ * 있는** 문서를 읽어야 해서 `drive.file`(앱이 만들거나 피커로 연 파일만)로는
+ * 목적을 달성할 수 없었기 때문이다. 그 판단 자체는 여전히 맞다 — 바뀐 것은
+ * 가격표다.
+ *
+ * `drive.readonly` · `gmail.readonly` · `gmail.compose` 는 셋 다 Google 분류상
+ * **restricted** 이고, 하나라도 요청하면 외부 공개 시 **CASA 보안평가**(유료 ·
+ * 연 1회 갱신)가 따라붙는다. 일본 출시 일정을 그 심사에 걸 수 없다는 판단으로
+ * 셋을 모두 뺐다. 남는 것은 sensitive 여섯 + non-sensitive 둘이다:
+ *
+ *   sensitive     drive.file · gmail.send · calendar.readonly · calendar.events ·
+ *                 contacts.readonly · spreadsheets.readonly
+ *   non-sensitive openid · email
+ *
+ * ★`gmail.compose` 가 sensitive 라는 통념은 틀렸다. Gmail 에서 sensitive 인 것은
+ * `gmail.send` 와 addons 계열뿐이고, readonly · compose · metadata · modify ·
+ * insert 는 전부 restricted 다. Drive 도 마찬가지로 `drive.file` 만 sensitive 고
+ * readonly/metadata 계열은 전부 restricted 다.
+ *
+ * 빠진 스코프와 그 때문에 잠긴 기능, 사용자에게 보일 문구는 전부
+ * `google-restricted-scopes.ts` 한 곳에 모여 있다. ★삭제가 아니라 **보류**다 —
+ * 런칭 후 CASA 를 별도 트랙으로 밟아 되살린다.
+ *
  * `openid email` 을 함께 요청하는 이유는 (a) 어떤 구글 계정으로 연결됐는지
  * UI 에 보여주고 (b) 재동의 때 `login_hint` 로 계정 선택을 건너뛰기 위해서다.
  * 둘 다 이미 로그인에서 부여된 non-sensitive 스코프라 동의 화면이 늘지 않는다.
+ *
+ * ── ★기존 사용자: 재연결을 강제하지 않는다 ───────────────────────────────
+ * 콘솔에서 스코프를 지워도 이미 발급된 refresh_token 은 넓은 스코프를 그대로
+ * 유지한다(구글은 소급 철회를 하지 않는다). 그래도 강제 재연결은 하지 않는다:
+ *   · 강제하면 아직 잘 도는 Calendar · Contacts · Sheets · 메일 발송까지 한 번에
+ *     끊기고, 얻는 것은 없다.
+ *   · restricted 기능을 막는 일은 토큰이 아니라 **앱 쪽 게이트**가 한다
+ *     (`withheldCapabilityError`). 토큰이 무엇을 부여받았는지 묻지 않고 막으므로,
+ *     기존 토큰의 넓이는 그냥 무해하게 잠든다.
+ *   · 반대로 `GOOGLE_CONNECTOR_REQUIRED_SCOPES` 에서는 셋을 **반드시** 빼야 한다.
+ *     남겨두면 콘솔 변경 이후의 **새 연결이 전부** "필수 스코프 미부여" 로 실패한다.
+ *     기존 사용자의 넓은 토큰은 상위집합이라 그대로 통과한다.
  *
  * ── 보안 ────────────────────────────────────────────────────────────────
  * 토큰 값은 이 모듈 밖으로 나가지 않는다. 저장은 safeStorage 암호화
@@ -81,14 +109,26 @@ import {
 import { extractOfficeText } from "./office-text-extract";
 import { extractPdfText } from "./pdf-text-extract";
 
-/** Google Workspace 커넥터 스코프. 쓰기는 비파괴 생성 + 명시 확인 발송에 한정한다. */
-export const DRIVE_READONLY_SCOPE =
-  "https://www.googleapis.com/auth/drive.readonly";
+/**
+ * 보류한 restricted 스코프. **요청하지 않지만 상수는 남긴다** — 되살릴 때
+ * 필요하고, 기존 토큰이 아직 들고 있는 값을 진단할 때도 필요하다.
+ * 정의는 `google-restricted-scopes.ts` 한 곳이고 여기서는 다시 내보내기만 한다.
+ */
+export {
+  DRIVE_READONLY_SCOPE,
+  GMAIL_READONLY_SCOPE,
+  GMAIL_COMPOSE_SCOPE,
+  WITHHELD_RESTRICTED_SCOPES,
+} from "./google-restricted-scopes";
+
+/**
+ * Google Workspace 커넥터 스코프 — ★여기 있는 것은 **전부 sensitive** 다.
+ * 쓰기는 비파괴 생성 + 명시 확인 발송에 한정한다.
+ *
+ * restricted 셋(`drive.readonly` · `gmail.readonly` · `gmail.compose`)은 이
+ * 파일에 없다. 위에서 `google-restricted-scopes.ts` 의 것을 다시 내보내기만 한다.
+ */
 export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
-export const GMAIL_READONLY_SCOPE =
-  "https://www.googleapis.com/auth/gmail.readonly";
-export const GMAIL_COMPOSE_SCOPE =
-  "https://www.googleapis.com/auth/gmail.compose";
 export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 export const CALENDAR_READONLY_SCOPE =
   "https://www.googleapis.com/auth/calendar.readonly";
@@ -101,23 +141,29 @@ export const CONTACTS_READONLY_SCOPE =
  *
  * ★쓰기 스코프(`spreadsheets`)를 요구하지 않는다 — "새 행이 추가되면" 트리거는
  * 읽기만 하면 되고, 쓰기까지 묶으면 동의 화면이 무거워질 뿐이다.
- * Google 분류상 sensitive scope 이지만 `drive.readonly` 와 달리 restricted 는
- * 아니라 CASA 보안평가 대상이 아니다.
+ * Google 분류상 sensitive scope 이지만 readonly 계열 restricted 스코프와 달리
+ * CASA 보안평가 대상이 아니다 — 그래서 이번 정리에서도 그대로 남는다.
  */
 export const SHEETS_READONLY_SCOPE =
   "https://www.googleapis.com/auth/spreadsheets.readonly";
 
+/**
+ * 요청하는 **읽기** 스코프. Drive · Gmail 읽기는 restricted 라 여기 없다 —
+ * 남은 셋은 전부 sensitive 다.
+ */
 export const GOOGLE_CONNECTOR_READONLY_SCOPES = [
-  DRIVE_READONLY_SCOPE,
-  GMAIL_READONLY_SCOPE,
   CALENDAR_READONLY_SCOPE,
   CONTACTS_READONLY_SCOPE,
   SHEETS_READONLY_SCOPE,
 ] as const;
 
+/**
+ * 요청하는 **쓰기** 스코프. `gmail.compose` 는 restricted 라 빠졌다 —
+ * 초안은 이제 Gmail 초안함이 아니라 Marblo 화면에서 만들고, 사용자가 확인하면
+ * `gmail.send` 로 나간다(docs/GMAIL_DRAFT_REPLACEMENT.md).
+ */
 export const GOOGLE_CONNECTOR_WRITE_SCOPES = [
   DRIVE_FILE_SCOPE,
-  GMAIL_COMPOSE_SCOPE,
   GMAIL_SEND_SCOPE,
   CALENDAR_EVENTS_SCOPE,
 ] as const;
@@ -132,16 +178,30 @@ export const GOOGLE_CONNECTOR_WRITE_SCOPES = [
  * drive.status().scopes 에서 이 스코프의 부재를 읽어 "시트 조건을 켜려면 Google
  * 을 다시 연결해야 한다" 고 말하고, 저장 자체를 막는다(assistantTriggerSettings
  * 의 sheets_connector_required).
+ *
+ * ★restricted 셋도 반드시 여기 없어야 한다. 남겨두면 콘솔에서 스코프를 지운
+ * 뒤의 **새 연결이 전부** "필수 스코프 미부여" 로 실패한다. 기존 사용자의 넓은
+ * 토큰은 상위집합이라 어느 쪽이든 통과하므로, 이 목록은 새 사용자를 기준으로
+ * 잡는 게 맞다.
  */
 export const GOOGLE_CONNECTOR_REQUIRED_SCOPES = [
   ...GOOGLE_CONNECTOR_WRITE_SCOPES,
-  DRIVE_READONLY_SCOPE,
-  GMAIL_READONLY_SCOPE,
   CALENDAR_READONLY_SCOPE,
   CONTACTS_READONLY_SCOPE,
 ] as const;
 
-/** authorize 에 실제로 보내는 스코프 문자열(위 주석 ③ 참고). */
+/**
+ * authorize 에 실제로 보내는 스코프 문자열(위 주석 ③ 참고).
+ *
+ * ★이름은 `DRIVE_AUTH_SCOPE` 그대로 두었다. 내용은 이미 Drive 를 넘어선 Google
+ * Workspace 커넥터 전체의 동의 문자열이지만, 이 상수명은 검증 기준·회귀 테스트·
+ * 운영 런북에서 고유명사처럼 참조되고 있다. 지금 개명하면 얻는 것은 이름의
+ * 정확도 하나이고 잃는 것은 그 참조들의 연결이라, 정확도는 이 주석이 대신 진다.
+ *
+ * ★이 문자열에 restricted 스코프가 섞이면 동의 화면 자체가 에러로 뜬다(콘솔에서
+ * 지운 스코프를 요청하는 셈이라). `restrictedScopesIn()` 으로 검사하는 회귀
+ * 테스트가 tests/unit/google-drive-auth.test.ts 에 있다.
+ */
 export const DRIVE_AUTH_SCOPE = `openid email ${GOOGLE_CONNECTOR_READONLY_SCOPES.join(
   " "
 )} ${GOOGLE_CONNECTOR_WRITE_SCOPES.join(
@@ -156,8 +216,10 @@ const REFRESH_SKEW_MS = 2 * 60 * 1000;
 
 const DRIVE_LABELS = {
   okTitle: "Google 커넥터 연결 완료",
+  // ★약속한 것만 적는다. Drive 문서 읽기와 Gmail 메일 읽기는 이번 출시에서
+  //   요청하지 않는 권한이므로 여기서도 말하지 않는다(CONVENTION 정직성 조항).
   okBody:
-    "Marblo 가 Google Drive, Gmail, Calendar, Contacts, Sheets 를 읽을 수 있게 되었습니다. 이 창을 닫고 앱으로 돌아가세요.",
+    "Marblo 가 Calendar 와 Contacts, 스프레드시트를 조회하고, 확인하신 메일을 발송할 수 있게 되었습니다. 이 창을 닫고 앱으로 돌아가세요.",
   failTitle: "Google 커넥터 연결 실패",
   failBody: "연결에 실패했습니다. 이 창을 닫고 앱에서 다시 시도해 주세요.",
 };

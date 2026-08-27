@@ -8,6 +8,7 @@ import type {
   GmailSearchParams,
   GmailSearchResult,
 } from "./gmail-connector";
+import { withheldCapabilityError } from "./google-restricted-scopes";
 import {
   detectNewSheetRows,
   normalizeSheetsRange,
@@ -405,8 +406,10 @@ export function formatDailyBriefingPrompt(input: {
     .join(" 또는 ");
   return [
     `[Assistant scheduled briefing: project=${input.projectName} at ${input.now.toISOString()}]`,
-    "오늘 일정, 진행 중 할일, 새 메일을 짧게 브리핑하세요.",
-    "필요한 조회만 수행하세요: calendar_list 는 오늘 범위, gmail_search 는 최근 새 메일, task 도구는 이 프로젝트의 열린 할일만 확인합니다.",
+    "오늘 일정과 진행 중 할일을 짧게 브리핑하세요.",
+    // ★새 메일은 더 이상 브리핑 재료가 아니다(티켓 v5Phjv1WxndUpgFJyrIn).
+    //   gmail_search 를 시키면 에이전트가 "지금은 못 쓴다" 를 받고 한 턴을 버린다.
+    "필요한 조회만 수행하세요: calendar_list 는 오늘 범위, task 도구는 이 프로젝트의 열린 할일만 확인합니다. 메일 읽기(gmail_search)는 이번 출시에서 제공하지 않으니 호출하지 마세요.",
     "headless 실행은 구독 차감 대상입니다. mission_billing_quota 를 의식해 LLM 호출을 최소화하고 작은 모델/간결한 요약을 우선하세요.",
     `사용자에게 푸시하려면 기존 MCP 전송 도구 ${outputTools} 를 호출하세요. 일반 텍스트만 쓰면 외부 채널로 전달되지 않습니다.`,
   ].join("\n\n");
@@ -730,9 +733,35 @@ export class AssistantTriggerManager {
     );
   }
 
+  /**
+   * Gmail 새 메일 트리거.
+   *
+   * ★`gmail.readonly` 를 뺀 뒤로 이 폴링은 성립하지 않는다(티켓
+   * v5Phjv1WxndUpgFJyrIn). 그런데 **켜 둔 설정은 사용자 디스크에 그대로 남아
+   * 있으므로**, 아무 말 없이 타이머만 안 걸면 사용자는 "켜 뒀는데 반응이 없다"
+   * 를 원인 없이 겪는다. 그래서 타이머 대신 **이유 한 번**을 보낸다.
+   *
+   * 한 번인 이유: `startRuntime` 은 설정 키가 바뀔 때만 다시 불린다. 즉 이
+   * 안내는 설정을 저장할 때마다 한 번씩이고, 폴링 주기마다 반복되지 않는다.
+   */
   private startGmailPoll(item: ActiveProject, runtime: ProjectRuntime): void {
     const gmail = item.settings.gmail;
     if (!gmail) return;
+
+    const withheld = withheldCapabilityError("gmail_trigger");
+    if (withheld) {
+      this.options.warn?.(
+        `[AssistantTriggers] gmail trigger withheld project=${item.project.id}: ${withheld.error}`
+      );
+      void this.inject(
+        item,
+        `[Marblo 알림] ${withheld.error}\n` +
+          "이 프로젝트의 비서 설정에 Gmail 조건이 켜져 있지만 지금은 동작하지 않습니다. " +
+          "설정은 지우지 않았으니, 권한이 복구되면 그대로 다시 동작합니다."
+      );
+      return;
+    }
+
     let warmed = false;
     const poll = async (): Promise<void> => {
       if (this.stopped) return;

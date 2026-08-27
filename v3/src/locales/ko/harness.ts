@@ -339,8 +339,10 @@ export const harness = {
   // --- Google Drive 위키 폴더 패널 (MCTHALmNAWPpilTFwe8o) ---
   // ★두 축이 한 패널에 있다: 계정 연결은 유저 단위(1회), 위키 폴더는 프로젝트 단위.
   "harness.drive.title": "Google Workspace",
+  // ★약속은 실제 요청 스코프와 같아야 한다(티켓 v5Phjv1WxndUpgFJyrIn).
+  // Drive 문서 읽기·Gmail 메일 읽기는 restricted 스코프라 이번 출시에서 요청하지 않는다.
   "harness.drive.subtitle":
-    "Drive 위키, Gmail, Calendar, Contacts 읽기 권한을 Google 계정 1회 연결로 사용합니다.",
+    "Calendar·Contacts·스프레드시트 조회와 메일 발송을 Google 계정 1회 연결로 사용합니다. Drive 문서 읽기와 Gmail 메일 읽기는 이번 출시에서 제공하지 않습니다.",
   "harness.drive.status.disconnected": "미연결",
   "harness.drive.status.needsFolder": "폴더 필요",
   "harness.drive.status.bound": "연결",
@@ -353,18 +355,18 @@ export const harness = {
   "harness.drive.connectFailed": "Google Workspace 연결에 실패했습니다.",
   "harness.drive.disconnect": "계정 연결 해제",
   "harness.drive.disconnectConfirm":
-    "이 기기에서 Google 연결을 해제하시겠습니까? 저장된 인증 정보가 삭제되고 모든 프로젝트의 Drive, Gmail, Calendar, Contacts 조회가 멈춥니다.",
+    "이 기기에서 Google 연결을 해제하시겠습니까? 저장된 인증 정보가 삭제되고 모든 프로젝트의 Calendar·Contacts·스프레드시트 조회와 메일 발송이 멈춥니다.",
   "harness.drive.disconnected": "Google Workspace 연결을 해제했습니다.",
   "harness.drive.disconnectFailed": "연결 해제에 실패했습니다.",
-  "harness.drive.gmail": "Gmail 읽기",
+  "harness.drive.gmail": "Gmail 읽기 (이번 출시 미제공)",
   "harness.drive.calendar": "Calendar 읽기",
   "harness.drive.contacts": "Contacts 읽기",
   "harness.drive.scopeReady": "준비됨",
   "harness.drive.scopeNeedsReconnect": "재연결 필요",
-  "harness.drive.folderSection": "이 프로젝트의 위키 폴더",
+  "harness.drive.folderSection": "이 프로젝트의 Drive 위키 폴더 (이번 출시 미제공)",
   "harness.drive.folderNone": "폴더가 지정되지 않았습니다",
   "harness.drive.folderHint":
-    "이 프로젝트의 에이전트는 여기서 고른 폴더(하위 폴더 포함)만 읽습니다.",
+    "Drive 폴더 지정은 이번 출시에서 제공하지 않습니다. 프로젝트 지식위키는 로컬 폴더(프로젝트의 docs/wiki)로 그대로 동작합니다. 이미 지정해 둔 폴더 정보는 지우지 않고 보관합니다.",
   "harness.drive.searchPlaceholder": "폴더 이름으로 검색 (비우면 최근 폴더)",
   "harness.drive.searchFolders": "폴더 찾기",
   "harness.drive.searching": "폴더 검색 중",

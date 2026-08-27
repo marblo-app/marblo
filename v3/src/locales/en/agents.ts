@@ -397,7 +397,9 @@ export const agents: Record<keyof typeof koAgents, string> = {
     "Create the README and base taxonomy first, summarize the project docs/decisions bots will reuse with wiki-note, then run wiki-ingest and wiki-lint.",
   "agents.marbloBots.wiki.request4":
     'When another project queries it, document the form wiki_query({ root_path: "<absolute project path>/docs/wiki", query: "..." }).',
-  "agents.marbloBots.require.google": "Google Calendar/Gmail connection",
+  // Gmail is send-only now, not read (ticket v5Phjv1WxndUpgFJyrIn).
+  "agents.marbloBots.require.google":
+    "Google account connected (Calendar lookups, sending mail)",
   "agents.marbloBots.require.outputChannel": "Slack or Telegram channel",
   "agents.marbloBots.seed.knowledge.name": "Knowledge Assistant",
   "agents.marbloBots.seed.knowledge.persona":
@@ -415,18 +417,18 @@ export const agents: Record<keyof typeof koAgents, string> = {
     "create_task, dispatch_task, add_activity, and submit_for_review are registered in the MCP server.",
   "agents.marbloBots.seed.dailyBriefing.name": "Daily Briefing",
   "agents.marbloBots.seed.dailyBriefing.persona":
-    "A scheduled assistant that checks calendar, mail, and open work, then pushes a short Slack/Telegram brief.",
+    "A scheduled assistant that checks the calendar and open work, then pushes a short Slack/Telegram brief.",
   "agents.marbloBots.seed.dailyBriefing.mission":
-    "Review today's calendar, new mail, and active tasks, then send a one-screen briefing to the selected channel.",
+    "Review today's calendar and active tasks, then send a one-screen briefing to the selected channel.",
   "agents.marbloBots.seed.dailyBriefing.evidence":
-    "calendar_list, gmail_search, send_slack_message, and send_telegram_message are registered in the MCP server.",
-  "agents.marbloBots.seed.mailCalendar.name": "Mail/Calendar Follow-up",
+    "calendar_list, send_slack_message, and send_telegram_message are registered in the MCP server. Summarizing new mail is not offered in this release — reading mail (gmail.readonly) is a restricted scope we do not request.",
+  "agents.marbloBots.seed.mailCalendar.name": "Calendar Follow-up",
   "agents.marbloBots.seed.mailCalendar.persona":
-    "A conditional assistant that reacts to new mail or upcoming calendar events and extracts priority plus next action.",
+    "A conditional assistant that reacts to upcoming calendar events and extracts priority plus next action.",
   "agents.marbloBots.seed.mailCalendar.mission":
-    "Check recent mail and upcoming events, then summarize reply needs, prep items, and candidate follow-up tasks.",
+    "Check upcoming events, then summarize prep items and candidate follow-up tasks.",
   "agents.marbloBots.seed.mailCalendar.evidence":
-    "The assistant-triggers engine polls Gmail/Calendar conditions and uses the same outbound MCP tools.",
+    "The assistant-triggers engine polls Calendar conditions and uses the same outbound MCP tools. New-mail conditions are not offered in this release.",
   "agents.marbloBots.seed.marketer.name": "Marketer",
   "agents.marbloBots.seed.marketer.persona":
     "A growth assistant that uses project knowledge and board context to split campaigns, copy, and experiments into tasks.",
@@ -443,11 +445,11 @@ export const agents: Record<keyof typeof koAgents, string> = {
     "wiki_query, create_task, dispatch_task, and add_activity are registered, and Codex frontend agents perform React UI work.",
   "agents.marbloBots.seed.jarvis.name": "Jarvis",
   "agents.marbloBots.seed.jarvis.persona":
-    "The Orchestrator's general aide, combining wiki, mail, calendar, board, and output channels into concrete next actions.",
+    "The Orchestrator's general aide, combining wiki, calendar, board, and output channels into concrete next actions.",
   "agents.marbloBots.seed.jarvis.mission":
-    "Classify the request and use only the needed mix of wiki, Gmail, Calendar, board tickets, and Slack/Telegram reporting.",
+    "Classify the request and use only the needed mix of wiki, Calendar, board tickets, and Slack/Telegram reporting. It never reads your mail; it shows you a draft and sends it once you confirm.",
   "agents.marbloBots.seed.jarvis.evidence":
-    "wiki_query, create_task, dispatch_task, gmail_search, calendar_list, send_slack_message, and send_telegram_message are registered in the MCP server.",
+    "wiki_query, create_task, dispatch_task, calendar_list, gmail_send, send_slack_message, and send_telegram_message are registered in the MCP server. Reading mail (gmail_search) is not offered in this release.",
   "agents.marbloBots.omitted.youtube.name": "YouTube Research",
   "agents.marbloBots.omitted.youtube.reason":
     "A YouTube-specific connector or verified browser/search MCP is not available in the current seed materials, so it would reduce first-screen run reliability.",
@@ -479,7 +481,7 @@ export const agents: Record<keyof typeof koAgents, string> = {
     "Run the daily briefing on matching minutes",
   "agents.triggers.calendar.title": "Calendar Condition",
   "agents.triggers.calendar.enable": "Detect upcoming events",
-  "agents.triggers.gmail.title": "Gmail Condition",
+  "agents.triggers.gmail.title": "Gmail Condition (not in this release)",
   "agents.triggers.gmail.enable": "Detect mail conditions",
   "agents.triggers.sheets.title": "Google Sheets Condition",
   "agents.triggers.sheets.enable": "Detect newly added rows",
@@ -520,7 +522,7 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.triggers.validation.calendarConnectorRequired":
     "Google Calendar scope is required to enable the Calendar trigger.",
   "agents.triggers.validation.gmailConnectorRequired":
-    "Gmail readonly scope is required to enable the Gmail trigger.",
+    "The new-mail trigger is not offered in this release. Reading mail (gmail.readonly) is a restricted scope that would require a separate security assessment. Schedule, calendar, and spreadsheet conditions still work.",
   "agents.triggers.validation.calendarPollOutOfRange":
     "Calendar poll interval must be 1-60 minutes.",
   "agents.triggers.validation.gmailPollOutOfRange":

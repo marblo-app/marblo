@@ -342,8 +342,11 @@ export const harness: Record<keyof typeof koHarness, string> = {
   // Two axes in one panel: the account is connected once per user, the wiki
   // folder is chosen per project.
   "harness.drive.title": "Google Workspace",
+  // The promise here must match the scopes we actually request (ticket
+  // v5Phjv1WxndUpgFJyrIn). Drive document reads and Gmail message reads are
+  // restricted scopes and are not requested in this release.
   "harness.drive.subtitle":
-    "Connect once for Drive wiki, Gmail, Calendar, and Contacts read-only context.",
+    "Connect once for Calendar, Contacts, and Sheets lookups plus sending mail. Reading Drive documents and Gmail messages is not offered in this release.",
   "harness.drive.status.disconnected": "Disconnected",
   "harness.drive.status.needsFolder": "Folder needed",
   "harness.drive.status.bound": "Connected",
@@ -356,18 +359,18 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.drive.connectFailed": "Failed to connect Google Workspace.",
   "harness.drive.disconnect": "Disconnect account",
   "harness.drive.disconnectConfirm":
-    "Disconnect Google on this machine? Stored credentials are deleted and every project stops reading Drive, Gmail, Calendar, and Contacts.",
+    "Disconnect Google on this machine? Stored credentials are deleted and every project stops reading Calendar, Contacts, and Sheets and stops sending mail.",
   "harness.drive.disconnected": "Google Workspace disconnected.",
   "harness.drive.disconnectFailed": "Failed to disconnect.",
-  "harness.drive.gmail": "Gmail read-only",
+  "harness.drive.gmail": "Gmail read (not in this release)",
   "harness.drive.calendar": "Calendar read-only",
   "harness.drive.contacts": "Contacts read-only",
   "harness.drive.scopeReady": "Ready",
   "harness.drive.scopeNeedsReconnect": "Reconnect",
-  "harness.drive.folderSection": "This project's wiki folder",
+  "harness.drive.folderSection": "This project's Drive wiki folder (not in this release)",
   "harness.drive.folderNone": "No folder selected",
   "harness.drive.folderHint":
-    "This project's agents read only the folder you pick here, including its subfolders.",
+    "Picking a Drive folder is not offered in this release. The project knowledge wiki runs from a local folder (the project's docs/wiki) instead. Any folder you already picked is kept, not deleted.",
   "harness.drive.searchPlaceholder": "Search folders by name (empty = recent)",
   "harness.drive.searchFolders": "Find folders",
   "harness.drive.searching": "Searching folders",

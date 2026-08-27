@@ -64,7 +64,9 @@ describe("assistant triggers", () => {
       now: new Date("2026-08-13T00:00:00.000Z"),
     });
     expect(prompt).toContain("calendar_list");
-    expect(prompt).toContain("gmail_search");
+    // ★메일 읽기를 시키지 않는다 — 시키면 에이전트가 "지금은 못 쓴다" 를 받고
+    //   한 턴을 버린다(티켓 v5Phjv1WxndUpgFJyrIn).
+    expect(prompt).toContain("호출하지 마세요");
     expect(prompt).toContain("send_slack_message");
     expect(prompt).toContain("send_telegram_message");
     expect(prompt).toContain("mission_billing_quota");

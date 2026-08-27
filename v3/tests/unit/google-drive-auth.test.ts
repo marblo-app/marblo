@@ -20,6 +20,7 @@ vi.mock("electron", () => ({
 import {
   DRIVE_AUTH_SCOPE,
   CALENDAR_READONLY_SCOPE,
+  CONTACTS_READONLY_SCOPE,
   GOOGLE_CONNECTOR_REQUIRED_SCOPES,
   SHEETS_READONLY_SCOPE,
   CALENDAR_EVENTS_SCOPE,
@@ -32,6 +33,12 @@ import {
   parseRefreshResponse,
   refreshAccessToken,
 } from "../../electron/google-drive-auth";
+import {
+  WITHHELD_RESTRICTED_SCOPES,
+  legacyRestrictedScopes,
+  restrictedScopesIn,
+  withheldCapabilityError,
+} from "../../electron/google-restricted-scopes";
 
 /** 서명 없는 테스트용 JWT(우리는 payload 만 읽는다). */
 function fakeIdToken(payload: Record<string, unknown>): string {
@@ -41,7 +48,7 @@ function fakeIdToken(payload: Record<string, unknown>): string {
 }
 
 describe("스코프", () => {
-  it("읽기 스코프와 필요한 쓰기 스코프만 요청한다", () => {
+  it("스코프 상수의 문자열 값이 고정돼 있다", () => {
     expect(DRIVE_READONLY_SCOPE).toBe(
       "https://www.googleapis.com/auth/drive.readonly",
     );
@@ -59,23 +66,38 @@ describe("스코프", () => {
     expect(CALENDAR_EVENTS_SCOPE).toBe(
       "https://www.googleapis.com/auth/calendar.events",
     );
-    expect(DRIVE_AUTH_SCOPE).toContain(DRIVE_READONLY_SCOPE);
-    expect(DRIVE_AUTH_SCOPE).toContain(DRIVE_FILE_SCOPE);
-    expect(DRIVE_AUTH_SCOPE).toContain(GMAIL_READONLY_SCOPE);
-    expect(DRIVE_AUTH_SCOPE).toContain(GMAIL_COMPOSE_SCOPE);
-    expect(DRIVE_AUTH_SCOPE).toContain(GMAIL_SEND_SCOPE);
-    expect(DRIVE_AUTH_SCOPE).toContain(CALENDAR_READONLY_SCOPE);
-    expect(DRIVE_AUTH_SCOPE).toContain(CALENDAR_EVENTS_SCOPE);
-    // drive(전체 쓰기) 는 여전히 요청하지 않는다.
-    expect(DRIVE_AUTH_SCOPE).not.toMatch(/auth\/drive(\s|$)/);
+    expect(CONTACTS_READONLY_SCOPE).toBe(
+      "https://www.googleapis.com/auth/contacts.readonly",
+    );
   });
 
-  it("시트는 readonly 만 요청한다 (티켓 qxDMhv5bgZA2nRe7AdPC)", () => {
-    expect(SHEETS_READONLY_SCOPE).toBe(
-      "https://www.googleapis.com/auth/spreadsheets.readonly",
-    );
-    expect(DRIVE_AUTH_SCOPE).toContain(SHEETS_READONLY_SCOPE);
-    // 시트 **쓰기** 스코프는 요청하지 않는다 — 트리거는 읽기만 하면 된다.
+  it("★restricted 스코프 셋은 동의 화면에 보내지 않는다 (티켓 v5Phjv1WxndUpgFJyrIn)", () => {
+    // 콘솔에서도 같은 셋을 지웠다. 코드가 계속 요청하면 동의 화면 자체가
+    // 에러로 뜨고 사용자는 연결을 아예 못 한다 — 이 테스트가 그 회귀를 막는다.
+    expect(WITHHELD_RESTRICTED_SCOPES).toEqual([
+      DRIVE_READONLY_SCOPE,
+      GMAIL_READONLY_SCOPE,
+      GMAIL_COMPOSE_SCOPE,
+    ]);
+    expect(restrictedScopesIn(DRIVE_AUTH_SCOPE)).toEqual([]);
+    for (const scope of WITHHELD_RESTRICTED_SCOPES) {
+      expect(DRIVE_AUTH_SCOPE).not.toContain(scope);
+    }
+  });
+
+  it("남긴 것은 openid·email + 민감 스코프 여섯뿐이다", () => {
+    expect(DRIVE_AUTH_SCOPE.split(/\s+/).filter(Boolean)).toEqual([
+      "openid",
+      "email",
+      CALENDAR_READONLY_SCOPE,
+      CONTACTS_READONLY_SCOPE,
+      SHEETS_READONLY_SCOPE,
+      DRIVE_FILE_SCOPE,
+      GMAIL_SEND_SCOPE,
+      CALENDAR_EVENTS_SCOPE,
+    ]);
+    // drive(전체 쓰기) 와 시트 쓰기는 예전부터 요청하지 않는다.
+    expect(DRIVE_AUTH_SCOPE).not.toMatch(/auth\/drive(\s|$)/);
     expect(DRIVE_AUTH_SCOPE).not.toMatch(/auth\/spreadsheets(\s|$)/);
   });
 
@@ -87,15 +109,82 @@ describe("스코프", () => {
       SHEETS_READONLY_SCOPE,
     );
     for (const scope of [
-      DRIVE_READONLY_SCOPE,
-      GMAIL_READONLY_SCOPE,
-      CALENDAR_READONLY_SCOPE,
       DRIVE_FILE_SCOPE,
-      GMAIL_COMPOSE_SCOPE,
       GMAIL_SEND_SCOPE,
       CALENDAR_EVENTS_SCOPE,
+      CALENDAR_READONLY_SCOPE,
+      CONTACTS_READONLY_SCOPE,
     ]) {
       expect(GOOGLE_CONNECTOR_REQUIRED_SCOPES).toContain(scope);
+    }
+  });
+
+  it("★필수 검증 목록에도 restricted 가 남으면 안 된다", () => {
+    // 남겨두면 콘솔 변경 이후의 **새 연결이 전부** "필수 스코프 미부여" 로
+    // 실패한다. 기존 사용자의 넓은 토큰은 상위집합이라 어느 쪽이든 통과한다.
+    for (const scope of WITHHELD_RESTRICTED_SCOPES) {
+      expect(GOOGLE_CONNECTOR_REQUIRED_SCOPES).not.toContain(scope);
+    }
+  });
+});
+
+describe("보류된 기능 — 조용히 실패하지 않는다", () => {
+  const capabilities = [
+    "drive_read",
+    "drive_write",
+    "drive_binding",
+    "gmail_read",
+    "gmail_draft",
+    "gmail_trigger",
+  ] as const;
+
+  it("여섯 기능 모두 사용자가 읽을 수 있는 이유를 돌려준다", () => {
+    for (const capability of capabilities) {
+      const result = withheldCapabilityError(capability);
+      expect(result).not.toBeNull();
+      expect(result?.ok).toBe(false);
+      // 문구 규율: 무엇이 / 왜 / 대신 무엇을. 최소한 "왜" 가 들어 있어야 한다.
+      expect(result?.error).toContain("restricted");
+      expect(result?.error).toContain("사용할 수 없습니다");
+      expect((result?.error ?? "").length).toBeGreaterThan(60);
+    }
+  });
+
+  it("Drive 읽기의 대안으로 로컬 위키를 가리킨다", () => {
+    const error = withheldCapabilityError("drive_read")?.error ?? "";
+    expect(error).toContain("wiki_query");
+    expect(error).toContain("docs/wiki");
+  });
+
+  it("gmail_draft 는 앱 안에서 확인 후 발송하는 경로를 가리킨다", () => {
+    const error = withheldCapabilityError("gmail_draft")?.error ?? "";
+    expect(error).toContain("gmail_send");
+  });
+});
+
+describe("기존 사용자 — 넓은 토큰은 두되 쓰지 않는다", () => {
+  it("저장된 토큰이 아직 restricted 를 들고 있으면 진단으로 드러난다", () => {
+    expect(
+      legacyRestrictedScopes([
+        "openid",
+        DRIVE_READONLY_SCOPE,
+        GMAIL_SEND_SCOPE,
+        GMAIL_READONLY_SCOPE,
+      ]),
+    ).toEqual([DRIVE_READONLY_SCOPE, GMAIL_READONLY_SCOPE]);
+  });
+
+  it("★그래도 게이트는 토큰을 묻지 않는다 — 넓은 토큰이어도 막힌다", () => {
+    // 재연결을 강제하지 않는 대신, restricted 데이터를 다루는 행위 자체를
+    // 앱에서 막는다. 이 테스트가 "토큰에 있으면 쓴다" 로의 회귀를 막는다.
+    expect(withheldCapabilityError("gmail_read")).not.toBeNull();
+    expect(withheldCapabilityError("drive_read")).not.toBeNull();
+  });
+
+  it("새로 연결한 사용자의 스코프 집합은 필수 검증을 통과한다", () => {
+    const granted = new Set(DRIVE_AUTH_SCOPE.split(/\s+/).filter(Boolean));
+    for (const scope of GOOGLE_CONNECTOR_REQUIRED_SCOPES) {
+      expect(granted.has(scope)).toBe(true);
     }
   });
 });

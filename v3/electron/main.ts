@@ -313,6 +313,9 @@ import {
   disconnectGoogleDrive,
   driveConnectionStatus,
 } from "./google-drive-auth";
+// restricted 스코프를 뺀 결과 잠긴 기능들 — 조용히 401 을 내지 않고 이유를
+// 말하기 위한 단일 진실원(티켓 v5Phjv1WxndUpgFJyrIn).
+import { withheldCapabilityError } from "./google-restricted-scopes";
 import type {
   DriveDocument,
   DriveListParams,
@@ -6335,6 +6338,11 @@ async function driveSearchFor(
   | { ok: true; result: DriveSearchResult; scope?: DriveScopeInfo }
   | { ok: false; error: string }
 > {
+  // ★게이트가 로그인 검사보다 **앞**에 온다. 이 기능은 "연결하면 되는" 상태가
+  //   아니라 "이번 출시에는 없는" 상태다. 순서를 바꾸면 로그아웃 사용자가
+  //   "연결하세요" 를 보고 연결한 뒤에야 진짜 이유를 알게 된다.
+  const withheld = withheldCapabilityError("drive_read");
+  if (withheld) return withheld;
   if (!userId) return DRIVE_NOT_CONNECTED;
   try {
     const connector = createUserDriveConnector(safeStorage, userId);
@@ -6367,6 +6375,8 @@ async function driveFetchFor(
 ): Promise<
   { ok: true; document: DriveDocument } | { ok: false; error: string }
 > {
+  const withheld = withheldCapabilityError("drive_read");
+  if (withheld) return withheld;
   if (!userId) return DRIVE_NOT_CONNECTED;
   if (typeof fileId !== "string" || !fileId.trim()) {
     return { ok: false, error: "파일 id 가 필요합니다." };
@@ -6396,6 +6406,12 @@ async function driveWriteFor(
 ): Promise<
   { ok: true; result: DriveWriteResult } | { ok: false; error: string }
 > {
+  // ★스코프(`drive.file`)는 살아 있는데 기능은 잠긴, 이 티켓에서 유일하게
+  //   간접적인 경우다. 만들 위치인 프로젝트 위키 폴더가 **사용자 소유 폴더**라
+  //   `drive.file` 로는 메타데이터조차 못 읽어(404) 바인딩 검증이 성립하지 않는다.
+  //   바인딩이 되살아나면 이 기능도 같이 살아난다.
+  const withheld = withheldCapabilityError("drive_write");
+  if (withheld) return withheld;
   if (!userId) return DRIVE_NOT_CONNECTED;
   if (!projectId) return { ok: false, error: "프로젝트 id 가 필요합니다." };
   try {
@@ -6502,6 +6518,8 @@ async function gmailSearchFor(
 ): Promise<
   { ok: true; result: GmailSearchResult } | { ok: false; error: string }
 > {
+  const withheld = withheldCapabilityError("gmail_read");
+  if (withheld) return withheld;
   if (!userId) return DRIVE_NOT_CONNECTED;
   try {
     return {
@@ -6522,6 +6540,8 @@ async function gmailFetchFor(
   userId: string | null,
   messageId: string
 ): Promise<{ ok: true; message: GmailMessage } | { ok: false; error: string }> {
+  const withheld = withheldCapabilityError("gmail_read");
+  if (withheld) return withheld;
   if (!userId) return DRIVE_NOT_CONNECTED;
   const trimmed = messageId.trim();
   if (!trimmed) return { ok: false, error: "Gmail 메시지 id 가 필요합니다." };
@@ -6546,6 +6566,10 @@ async function gmailDraftFor(
 ): Promise<
   { ok: true; draft: GmailDraftResult } | { ok: false; error: string }
 > {
+  // 초안 자체가 사라진 게 아니다 — 만드는 **장소**가 Gmail 초안함에서 Marblo
+  // 화면으로 옮겨갔다. 대체 경로의 도구 계약은 docs/GMAIL_DRAFT_REPLACEMENT.md.
+  const withheld = withheldCapabilityError("gmail_draft");
+  if (withheld) return withheld;
   if (!userId) return DRIVE_NOT_CONNECTED;
   try {
     return {
@@ -6828,7 +6852,17 @@ ipcMain.handle("drive:binding:get", (_event, input: unknown) => {
   return getDriveProjectBinding(projectId);
 });
 
+// ★바인딩은 **비활성**이지 삭제가 아니다(티켓 v5Phjv1WxndUpgFJyrIn).
+//
+//   · set    — 막는다. 새 폴더를 고를 방법(폴더 검색)이 drive.readonly 를 쓰므로
+//              애초에 성립하지 않고, 성립하는 척 저장해두면 나중에 "지정했는데
+//              에이전트가 못 읽는다" 는 더 나쁜 상태가 된다.
+//   · get    — 그대로 둔다. 기존 바인딩 정보를 지우지 않는 것이 되살리기 비용을
+//              낮추는 핵심이고, folderId/폴더명은 시크릿도 아니다.
+//   · clear  — 그대로 둔다. 낡은 지정을 걷어낼 길까지 막을 이유는 없다.
 ipcMain.handle("drive:binding:set", (_event, input: unknown) => {
+  const withheld = withheldCapabilityError("drive_binding");
+  if (withheld) return withheld;
   const raw =
     input && typeof input === "object"
       ? (input as Record<string, unknown>)

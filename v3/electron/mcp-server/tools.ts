@@ -8601,15 +8601,12 @@ export function registerTools(server: McpServer): void {
 
   auditedTool(
     "drive_search",
-    "Search THIS PROJECT'S Google Drive wiki folder (READ-ONLY). The search is " +
-      "always scoped to the Drive folder bound to this project (and its subfolders) " +
-      "— other projects' folders and the user's unrelated personal files are never " +
-      "visible. Returns matching files as id / title / mimeType / modifiedTime — " +
-      "pass an id to drive_fetch to get the body text. Combine filters: `text` does " +
-      "a full-text search inside documents, `name_contains` matches filenames, " +
-      "`folder_id` narrows to one subfolder's direct children (it must be inside " +
-      "the project's wiki folder). Requires the user to have connected Google Drive " +
-      "AND picked this project's wiki folder in Marblo's Harness tab.",
+    "UNAVAILABLE IN THIS RELEASE — do not call. Reading the user's Google Drive " +
+      "needs the drive.readonly scope, which Google classes as restricted and which " +
+      "Marblo does not request in this release (it would require a paid CASA security " +
+      "assessment). Use the project's LOCAL wiki instead: call wiki_query with " +
+      "root_path set to the project's docs/wiki directory — the same knowledge lives " +
+      "there. Kept registered, not deleted, so it can be restored once CASA is passed.",
     {
       text: z
         .string()
@@ -8738,14 +8735,12 @@ export function registerTools(server: McpServer): void {
 
   auditedTool(
     "drive_fetch",
-    "Fetch one Google Drive file's body as text (READ-ONLY). Google Docs/Slides " +
-      "are exported as plain text, Sheets as CSV, plain-text/CSV files are downloaded " +
-      "as-is, PDFs have their text layer extracted, and Office/Hangul uploads " +
-      "(.docx/.pptx/.xlsx/.hwpx/.hwp) are parsed for their body text. Files with no " +
-      "text at all (scanned PDFs, image-only documents) say so instead of returning " +
-      "silence. Get file ids from drive_search. " +
-      "The file must live inside this project's bound Drive wiki folder; ids from " +
-      "outside it are refused even if the user's account can read them.",
+    "UNAVAILABLE IN THIS RELEASE — do not call. Reading a Google Drive file's body " +
+      "needs the drive.readonly scope, which Google classes as restricted and which " +
+      "Marblo does not request in this release (it would require a paid CASA security " +
+      "assessment). Read the project's LOCAL wiki files instead (wiki_query with " +
+      "root_path, or the ordinary file-reading tools on docs/wiki). Kept registered, " +
+      "not deleted, so it can be restored once CASA is passed.",
     {
       file_id: z.string().describe("Drive file id (from drive_search)."),
     },
@@ -8813,10 +8808,12 @@ export function registerTools(server: McpServer): void {
 
   auditedTool(
     "drive_write",
-    "Create a Google Docs document inside THIS PROJECT'S bound Drive wiki folder. " +
-      "This is a non-destructive create action and runs immediately. The target " +
-      "folder defaults to the project's bound wiki folder; a folder_id may narrow " +
-      "creation to a subfolder inside that binding. OAuth tokens never leave Marblo.",
+    "UNAVAILABLE IN THIS RELEASE — do not call. The target is the project's bound " +
+      "Drive wiki folder, and reaching a user-owned folder needs the drive.readonly " +
+      "scope, which Google classes as restricted and which Marblo does not request in " +
+      "this release (drive.file alone cannot see a folder the app did not create). " +
+      "Write to the project's LOCAL wiki (docs/wiki) instead. Kept registered, not " +
+      "deleted, so it can be restored once CASA is passed.",
     {
       title: z.string().describe("New document title."),
       content: z
@@ -9046,11 +9043,12 @@ export function registerTools(server: McpServer): void {
 
   auditedTool(
     "gmail_search",
-    "Search the connected user's Gmail messages for THIS PROJECT context (READ-ONLY). " +
-      "Supports Gmail query syntax via `query` and label filtering via `label_ids`. " +
-      "Returns message ids/thread ids/snippets; call gmail_fetch with a returned id " +
-      "to read subject, sender, date, labels, and body. Requires the user to connect " +
-      "Google in Marblo's Harness tab with Gmail read-only consent.",
+    "UNAVAILABLE IN THIS RELEASE — do not call. Reading the user's mail needs the " +
+      "gmail.readonly scope, which Google classes as restricted and which Marblo does " +
+      "not request in this release (it would require a paid CASA security assessment). " +
+      "Sending mail (gmail_send) and Calendar/Contacts lookups still work; ask the user " +
+      "to paste any mail content you need. Kept registered, not deleted, so it can be " +
+      "restored once CASA is passed.",
     {
       query: z
         .string()
@@ -9114,9 +9112,11 @@ export function registerTools(server: McpServer): void {
 
   auditedTool(
     "gmail_fetch",
-    "Fetch one Gmail message as normalized text (READ-ONLY). Returns subject, " +
-      "from, date, labels, snippet, and message body. Get message ids from " +
-      "gmail_search. OAuth tokens never leave Marblo main process.",
+    "UNAVAILABLE IN THIS RELEASE — do not call. Reading a mail body needs the " +
+      "gmail.readonly scope, which Google classes as restricted and which Marblo does " +
+      "not request in this release (it would require a paid CASA security assessment). " +
+      "Ask the user to paste the message instead. Kept registered, not deleted, so it " +
+      "can be restored once CASA is passed.",
     {
       message_id: z.string().describe("Gmail message id from gmail_search."),
     },
@@ -9179,9 +9179,12 @@ export function registerTools(server: McpServer): void {
 
   auditedTool(
     "gmail_draft",
-    "Create a Gmail draft for the connected user. This is a reversible compose " +
-      "action and runs immediately. It does NOT send mail. Call gmail_send only " +
-      "after explicit user confirmation.",
+    "UNAVAILABLE IN THIS RELEASE — do not call. Writing to the user's Gmail drafts " +
+      "folder needs the gmail.compose scope, which Google classes as restricted (it is " +
+      "NOT sensitive) and which Marblo does not request in this release. The review " +
+      "step moved into the app: show the draft to the user in your reply, and once they " +
+      "confirm, send it with gmail_send(confirm=true). See docs/GMAIL_DRAFT_REPLACEMENT.md. " +
+      "Kept registered, not deleted, so it can be restored once CASA is passed.",
     gmailComposeSchema,
     async ({ to, subject, body, cc, bcc, thread_id }) => {
       const result = await driveViaBridge("/gmail-draft", {
