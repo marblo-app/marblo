@@ -1193,11 +1193,11 @@ function AgentSetupGuide({ onAddAgent }: { onAddAgent: () => void }) {
               <p className="text-xs text-gray-400 mb-2">
                 {t("agents.setupGuide.mcp.desc")}
               </p>
-              <code className="block rounded bg-gray-800 px-2 py-1 text-xs text-gray-300 font-mono whitespace-pre">{`# Claude Code MCP 설정 (~/.claude.json)
+              <code className="block rounded bg-gray-800 px-2 py-1 text-xs text-gray-300 font-mono whitespace-pre">{`# ${t("agents.setupGuide.mcp.codeComment")}
 "mcpServers": {
   "marblo-v3": {
     "command": "node",
-    "args": ["${"{v3 경로}"}/dist-mcp/index.js"]
+    "args": ["${t("agents.setupGuide.mcp.pathPlaceholder")}/dist-mcp/index.js"]
   }
 }`}</code>
             </div>

@@ -115,6 +115,8 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.setupGuide.mcp.title": "MCP Connection (Optional)",
   "agents.setupGuide.mcp.desc":
     "Connect the CLI directly to MCP from your terminal to manage tickets without an agent.",
+  "agents.setupGuide.mcp.codeComment": "Claude Code MCP setup (~/.claude.json)",
+  "agents.setupGuide.mcp.pathPlaceholder": "{v3 path}",
 
   // ── Add Agent modal ─────────────────────────────────────────
   "agents.addModal.model.local": "Local Model (Ollama, etc.)",
@@ -221,6 +223,7 @@ export const agents: Record<keyof typeof koAgents, string> = {
     "{name} — single click = select, Enter/double-click = details below",
   "agents.fleetCell.startTitle": "Start session (cold restart — new PTY)",
   "agents.fleetCell.startAria": "Start {name} session",
+  "agents.fleetCell.start": "▶ Start",
   "agents.fleetCell.deleteTitle":
     "Delete agent (stop PTY + remove Firestore doc)",
   "agents.fleetCell.deleteAria": "Delete {name} agent",
@@ -237,11 +240,28 @@ export const agents: Record<keyof typeof koAgents, string> = {
     "Kill the existing PTY and start a new CLI session (no resume)",
   "agents.listPanel.cliHint":
     "If no session appears, check whether the CLI is installed in your console (claude / codex / gemini).",
+  "agents.listPanel.focusedAgent": "Focused Agent",
+  "agents.listPanel.activeAgents": "Active Agents",
+  "agents.listPanel.killAll": "Kill all",
+  "agents.listPanel.killAllTitle": "Kill all active agents",
+  "agents.listPanel.cleanupStopped": "Clean stopped",
+  "agents.listPanel.cleanupStoppedTitle": "Remove stopped agents from the list",
+  "agents.listPanel.spawnTerminal": "+ Terminal",
+  "agents.listPanel.spawnTerminalTitle":
+    "Spawn a shell terminal in the project folder",
+  "agents.listPanel.confirmRemoveStopped": 'Remove stopped agent "{name}"?',
+  "agents.listPanel.confirmKill": 'Kill agent "{name}"?',
+  "agents.listPanel.confirmKillAll": "Kill {count} active agents?",
+  "agents.listPanel.confirmCleanupStopped": "Remove {count} stopped agents?",
 
   // ── Agent row ───────────────────────────────────────────────
   "agents.row.agentTitle":
     "↑/↓: move · Enter / → / click: focus · double-click: Agents tab",
   "agents.row.terminalTitle": "↑/↓: move · Enter: focus terminal",
+  "agents.row.removeStoppedTitle": "Remove this stopped agent",
+  "agents.row.killSessionTitle": "Kill this agent session",
+  "agents.row.cleanup": "Clean",
+  "agents.row.kill": "Kill",
 
   // ── Close (X) — row / focus header ──────────────────────────
   "agents.close.rowAria": "Close {name}",
@@ -271,7 +291,8 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.marbloBots.subtitle":
     "Bots are specialist workers that the Orchestrator calls when needed. You can run one directly, but the default flow is to talk to the Orchestrator.",
   "agents.marbloBots.primer.line1": "Talk to the Orchestrator",
-  "agents.marbloBots.primer.line2": "→ The Orchestrator calls a bot when needed",
+  "agents.marbloBots.primer.line2":
+    "→ The Orchestrator calls a bot when needed",
   "agents.marbloBots.primer.line3": "→ The bot works in an isolated worktree",
   "agents.marbloBots.primer.details": "Details",
   "agents.marbloBots.primer.detail1":
@@ -433,6 +454,69 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.marbloBots.omitted.web.name": "Web Research",
   "agents.marbloBots.omitted.web.reason":
     "A browser/search MCP is not confirmed on the current Marblo MCP surface.",
+
+  // ── Assistant trigger settings panel ──────────────────────────
+  "agents.triggers.title": "Schedule and Condition Triggers",
+  "agents.triggers.description":
+    "Settings are saved per project. The existing engine reads assistantTriggers from the projects document and injects scheduled or conditional messages into the assistant project's Orchestrator.",
+  "agents.triggers.refreshConnectors": "Refresh connection status",
+  "agents.triggers.connectorReady": "Ready",
+  "agents.triggers.connectorNeedsConnection": "Connection required",
+  "agents.triggers.enableLabel": "Use trigger engine",
+  "agents.triggers.enableHint":
+    "When off, assistantTriggers.enabled=false is saved.",
+  "agents.triggers.tabsAria": "Trigger setting categories",
+  "agents.triggers.tabs.schedule": "Schedule",
+  "agents.triggers.tabs.conditions": "Conditions",
+  "agents.triggers.tabs.outputs": "Output channels",
+  "agents.triggers.engineNoticePrefix": "The engine polls only",
+  "agents.triggers.engineNoticeSuffix": "projects. Current project kind:",
+  "agents.triggers.engineNoticeEnabled": " — eligible after saving.",
+  "agents.triggers.engineNoticeDisabled":
+    " — settings can be saved, but polling will not run.",
+  "agents.triggers.schedule.title": "Fixed Schedule",
+  "agents.triggers.schedule.enable":
+    "Run the daily briefing on matching minutes",
+  "agents.triggers.calendar.title": "Calendar Condition",
+  "agents.triggers.calendar.enable": "Detect upcoming events",
+  "agents.triggers.gmail.title": "Gmail Condition",
+  "agents.triggers.gmail.enable": "Detect mail conditions",
+  "agents.triggers.outputs.title": "Output Channels",
+  "agents.triggers.outputs.description":
+    "The engine instructs the Orchestrator to call these MCP tools for the selected channels: {tools}.",
+  "agents.triggers.outputs.none": "none selected",
+  "agents.triggers.outputs.slackGuide": "Slack connection status and guide",
+  "agents.triggers.outputs.telegramGuide":
+    "Telegram connection status and guide",
+  "agents.triggers.engineFields":
+    "Existing engine fields: schedule, calendar, gmail, webhook, outputs",
+  "agents.triggers.save": "Save",
+  "agents.triggers.saved": "Project trigger settings saved.",
+  "agents.triggers.saveFailed": "Save failed",
+  "agents.triggers.errors.loadConnectorsFailed":
+    "Could not load connector status.",
+  "agents.triggers.errors.assistantProjectRequired":
+    "The current engine polls only kind=assistant projects. Enable this from an assistant project.",
+  "agents.triggers.validation.noTriggerEnabled": "No trigger is enabled.",
+  "agents.triggers.validation.outputsRequired":
+    "Select at least one output channel.",
+  "agents.triggers.validation.slackOutputUnavailable":
+    "The Slack channel connection is not ready.",
+  "agents.triggers.validation.telegramOutputUnavailable":
+    "The Telegram channel connection is not ready.",
+  "agents.triggers.validation.invalidCron":
+    "cron must use the 5-field format. Example: 0 9 * * 1-5",
+  "agents.triggers.validation.calendarConnectorRequired":
+    "Google Calendar scope is required to enable the Calendar trigger.",
+  "agents.triggers.validation.gmailConnectorRequired":
+    "Gmail readonly scope is required to enable the Gmail trigger.",
+  "agents.triggers.validation.calendarPollOutOfRange":
+    "Calendar poll interval must be 1-60 minutes.",
+  "agents.triggers.validation.gmailPollOutOfRange":
+    "Gmail poll interval must be 1-60 minutes.",
+  "agents.triggers.validation.calendarUpcomingOutOfRange":
+    "Upcoming event window must be 1-1440 minutes.",
+  "agents.triggers.validation.default": "Trigger settings cannot be saved.",
 
   // ── No-project empty state (agents tab reached with no project selected) ──
   "agents.noProject.title": "No project selected",

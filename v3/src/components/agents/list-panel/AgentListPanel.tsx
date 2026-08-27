@@ -25,8 +25,6 @@ const DEFAULT_HEIGHT = 320;
 const MIN_HEIGHT = 180;
 const MAX_HEIGHT = 800;
 const HEIGHT_STORAGE_KEY = "marblo:v3:agentListPanel:height";
-const KILL_ALL_LABEL = "전체 삭제";
-const CLEANUP_STOPPED_LABEL = "stopped 정리";
 
 function formatAge(date?: Date): string {
   // Defensive: Firestore docs occasionally arrive with a Timestamp instead
@@ -279,8 +277,10 @@ export function AgentListPanel({
       const actionLabel = row.status === "stopped" ? "remove" : "kill";
       const confirmed = window.confirm(
         row.status === "stopped"
-          ? `Remove stopped agent "${row.displayName}"?`
-          : `Kill agent "${row.displayName}"?`
+          ? t("agents.listPanel.confirmRemoveStopped", {
+              name: row.displayName,
+            })
+          : t("agents.listPanel.confirmKill", { name: row.displayName })
       );
       if (!confirmed) return;
 
@@ -300,7 +300,7 @@ export function AgentListPanel({
         setDeleting([row.id], false);
       }
     },
-    [deleteAgent, focusedId, setDeleting, setFocusedId, stopAgent]
+    [deleteAgent, focusedId, setDeleting, setFocusedId, stopAgent, t]
   );
 
   const setClosing = useCallback((id: string, isClosing: boolean) => {
@@ -396,9 +396,7 @@ export function AgentListPanel({
   const handleKillAllAgents = useCallback(async () => {
     if (activeAgents.length === 0) return;
     const confirmed = window.confirm(
-      `Kill ${activeAgents.length} active agent${
-        activeAgents.length === 1 ? "" : "s"
-      }?`
+      t("agents.listPanel.confirmKillAll", { count: activeAgents.length })
     );
     if (!confirmed) return;
 
@@ -414,14 +412,14 @@ export function AgentListPanel({
     } finally {
       setDeleting(ids, false);
     }
-  }, [activeAgents, focusedId, setDeleting, setFocusedId, stopAgent]);
+  }, [activeAgents, focusedId, setDeleting, setFocusedId, stopAgent, t]);
 
   const handleCleanupStoppedAgents = useCallback(async () => {
     if (stoppedAgents.length === 0) return;
     const confirmed = window.confirm(
-      `Remove ${stoppedAgents.length} stopped agent${
-        stoppedAgents.length === 1 ? "" : "s"
-      }?`
+      t("agents.listPanel.confirmCleanupStopped", {
+        count: stoppedAgents.length,
+      })
     );
     if (!confirmed) return;
 
@@ -437,7 +435,7 @@ export function AgentListPanel({
     } finally {
       setDeleting(ids, false);
     }
-  }, [deleteAgent, focusedId, setDeleting, setFocusedId, stoppedAgents]);
+  }, [deleteAgent, focusedId, setDeleting, setFocusedId, stoppedAgents, t]);
 
   // When the focused row disappears (agent deleted, terminal closed, etc.)
   // bounce back to the list rather than rendering a stale empty FocusView.
@@ -610,10 +608,10 @@ export function AgentListPanel({
             <path d="M12 8V4M9 13.5h.01M15 13.5h.01" />
           </svg>
           {focusedRow ? (
-            <>Focused Agent</>
+            <>{t("agents.listPanel.focusedAgent")}</>
           ) : (
             <>
-              Active Agents{" "}
+              {t("agents.listPanel.activeAgents")}{" "}
               <span className="text-[#cdd6f4] font-medium">
                 ({rows.length})
               </span>
@@ -625,24 +623,24 @@ export function AgentListPanel({
             onClick={handleKillAllAgents}
             disabled={activeAgents.length === 0}
             className="rounded px-2 py-0.5 text-[10px] text-[#f38ba8] hover:text-[#fab387] hover:bg-[#313244] disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
-            title="Kill all active agents"
+            title={t("agents.listPanel.killAllTitle")}
           >
-            {KILL_ALL_LABEL}
+            {t("agents.listPanel.killAll")}
           </button>
           <button
             onClick={handleCleanupStoppedAgents}
             disabled={stoppedAgents.length === 0}
             className="rounded px-2 py-0.5 text-[10px] text-[#6c7086] hover:text-[#cdd6f4] hover:bg-[#313244] disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
-            title="Remove stopped agents from the list"
+            title={t("agents.listPanel.cleanupStoppedTitle")}
           >
-            {CLEANUP_STOPPED_LABEL}
+            {t("agents.listPanel.cleanupStopped")}
           </button>
           <button
             onClick={handleSpawnTerminal}
             className="rounded px-2 py-0.5 text-[10px] text-[#6c7086] hover:text-[#cdd6f4] hover:bg-[#313244] transition-colors"
-            title="Spawn a shell terminal in the project folder"
+            title={t("agents.listPanel.spawnTerminalTitle")}
           >
-            + Terminal
+            {t("agents.listPanel.spawnTerminal")}
           </button>
           <button
             onClick={onSpawnClick}

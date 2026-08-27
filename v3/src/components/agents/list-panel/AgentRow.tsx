@@ -137,11 +137,15 @@ function AgentRowImpl({
           className="rounded border border-[#f38ba8]/30 bg-[#f38ba8]/10 px-2 py-0.5 text-[10px] font-medium text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/20 disabled:cursor-not-allowed disabled:opacity-50"
           title={
             row.status === "stopped"
-              ? "Remove this stopped agent"
-              : "Kill this agent session"
+              ? t("agents.row.removeStoppedTitle")
+              : t("agents.row.killSessionTitle")
           }
         >
-          {isDeleting ? "…" : row.status === "stopped" ? "정리" : "Kill"}
+          {isDeleting
+            ? "…"
+            : row.status === "stopped"
+              ? t("agents.row.cleanup")
+              : t("agents.row.kill")}
         </button>
       )}
 

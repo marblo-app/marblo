@@ -209,7 +209,7 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
               aria-label={t("agents.fleetCell.startAria", { name: agent.name })}
               className="rounded border border-[#a6e3a1]/40 bg-[#11111b]/90 px-1.5 py-0.5 text-[10px] text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/15 disabled:opacity-40"
             >
-              {pending === "start" ? "…" : "▶ Start"}
+              {pending === "start" ? "…" : t("agents.fleetCell.start")}
             </button>
           )}
           <button

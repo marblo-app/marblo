@@ -109,6 +109,8 @@ export const agents = {
   "agents.setupGuide.mcp.title": "MCP 연결 (선택)",
   "agents.setupGuide.mcp.desc":
     "터미널에서 직접 CLI를 MCP와 연결하면 에이전트 없이도 티켓을 관리할 수 있습니다.",
+  "agents.setupGuide.mcp.codeComment": "Claude Code MCP 설정 (~/.claude.json)",
+  "agents.setupGuide.mcp.pathPlaceholder": "{v3 경로}",
 
   // ── Add Agent modal ─────────────────────────────────────────
   "agents.addModal.model.local": "로컬 모델 (Ollama 등)",
@@ -213,6 +215,7 @@ export const agents = {
     "{name} — 단일 클릭=선택, Enter/더블클릭=하단 상세보기",
   "agents.fleetCell.startTitle": "세션 시작 (cold restart — 새 PTY 생성)",
   "agents.fleetCell.startAria": "{name} 세션 시작",
+  "agents.fleetCell.start": "▶ 시작",
   "agents.fleetCell.deleteTitle":
     "에이전트 삭제 (PTY 종료 + Firestore 문서 제거)",
   "agents.fleetCell.deleteAria": "{name} 에이전트 삭제",
@@ -229,11 +232,30 @@ export const agents = {
     "기존 PTY를 죽이고 새 CLI 세션 시작 (resume 안 함)",
   "agents.listPanel.cliHint":
     "세션이 안 뜨면 콘솔에서 CLI 설치 여부를 확인하세요 (claude / codex / gemini).",
+  "agents.listPanel.focusedAgent": "포커스된 에이전트",
+  "agents.listPanel.activeAgents": "활성 에이전트",
+  "agents.listPanel.killAll": "전체 종료",
+  "agents.listPanel.killAllTitle": "활성 에이전트 전체 종료",
+  "agents.listPanel.cleanupStopped": "stopped 정리",
+  "agents.listPanel.cleanupStoppedTitle": "stopped 에이전트를 목록에서 제거",
+  "agents.listPanel.spawnTerminal": "+ 터미널",
+  "agents.listPanel.spawnTerminalTitle": "프로젝트 폴더에서 셸 터미널 시작",
+  "agents.listPanel.confirmRemoveStopped":
+    'stopped 에이전트 "{name}" 을 제거할까요?',
+  "agents.listPanel.confirmKill": '에이전트 "{name}" 세션을 종료할까요?',
+  "agents.listPanel.confirmKillAll":
+    "활성 에이전트 {count}개를 모두 종료할까요?",
+  "agents.listPanel.confirmCleanupStopped":
+    "stopped 에이전트 {count}개를 제거할까요?",
 
   // ── Agent row ───────────────────────────────────────────────
   "agents.row.agentTitle":
     "↑/↓: 이동 · Enter / → / 클릭: 포커스 · 더블클릭: Agents 탭",
   "agents.row.terminalTitle": "↑/↓: 이동 · Enter: 터미널 포커스",
+  "agents.row.removeStoppedTitle": "이 stopped 에이전트 제거",
+  "agents.row.killSessionTitle": "이 에이전트 세션 종료",
+  "agents.row.cleanup": "정리",
+  "agents.row.kill": "종료",
 
   // ── Close (X) — row / focus header ──────────────────────────
   "agents.close.rowAria": "{name} 닫기",
@@ -317,10 +339,8 @@ export const agents = {
   "agents.triggers.webhook.notIssued": "아직 발급되지 않았습니다.",
   "agents.triggers.webhook.issue": "URL 발급",
   "agents.triggers.webhook.rotate": "URL·시크릿 재발급",
-  "agents.triggers.webhook.issued":
-    "웹훅 URL과 서명 시크릿을 발급했습니다.",
-  "agents.triggers.webhook.rotated":
-    "웹훅 URL과 서명 시크릿을 재발급했습니다.",
+  "agents.triggers.webhook.issued": "웹훅 URL과 서명 시크릿을 발급했습니다.",
+  "agents.triggers.webhook.rotated": "웹훅 URL과 서명 시크릿을 재발급했습니다.",
   "agents.triggers.webhook.issueFailed": "웹훅 URL 발급에 실패했습니다.",
   "agents.triggers.webhook.urlCopied": "웹훅 URL을 복사했습니다.",
   "agents.triggers.webhook.secretCopied": "웹훅 시크릿을 복사했습니다.",
@@ -424,6 +444,68 @@ export const agents = {
   "agents.marbloBots.omitted.web.name": "웹 리서치",
   "agents.marbloBots.omitted.web.reason":
     "브라우저/검색 MCP가 현재 Marblo MCP 표면에 등록된 실행 재료로 확인되지 않았다.",
+
+  // ── Assistant trigger settings panel ──────────────────────────
+  "agents.triggers.title": "스케줄·조건 트리거",
+  "agents.triggers.description":
+    "저장 범위는 프로젝트입니다. 기존 엔진은 projects 문서의 assistantTriggers를 읽고, assistant 프로젝트의 오케스트레이터에 주기·조건 메시지를 주입합니다.",
+  "agents.triggers.refreshConnectors": "연결 상태 새로고침",
+  "agents.triggers.connectorReady": "준비됨",
+  "agents.triggers.connectorNeedsConnection": "연결 필요",
+  "agents.triggers.enableLabel": "트리거 엔진 사용",
+  "agents.triggers.enableHint":
+    "꺼두면 assistantTriggers.enabled=false로 저장됩니다.",
+  "agents.triggers.tabsAria": "트리거 설정 분류",
+  "agents.triggers.tabs.schedule": "스케줄",
+  "agents.triggers.tabs.conditions": "조건",
+  "agents.triggers.tabs.outputs": "출력채널",
+  "agents.triggers.engineNoticePrefix": "엔진은",
+  "agents.triggers.engineNoticeSuffix":
+    "프로젝트만 폴링합니다. 현재 프로젝트 종류:",
+  "agents.triggers.engineNoticeEnabled": " — 저장 후 활성화 대상입니다.",
+  "agents.triggers.engineNoticeDisabled":
+    " — 설정은 저장할 수 있어도 실제 폴링은 돌지 않습니다.",
+  "agents.triggers.schedule.title": "정시 스케줄",
+  "agents.triggers.schedule.enable": "매칭되는 분마다 일일 브리핑 실행",
+  "agents.triggers.calendar.title": "Calendar 조건",
+  "agents.triggers.calendar.enable": "임박 일정 감지",
+  "agents.triggers.gmail.title": "Gmail 조건",
+  "agents.triggers.gmail.enable": "메일 조건 감지",
+  "agents.triggers.outputs.title": "출력 채널",
+  "agents.triggers.outputs.description":
+    "엔진은 선택된 채널에 대해 {tools} MCP 도구를 호출하도록 오케스트레이터에 지시합니다.",
+  "agents.triggers.outputs.none": "선택 안 됨",
+  "agents.triggers.outputs.slackGuide": "Slack 연결 상태와 가이드",
+  "agents.triggers.outputs.telegramGuide": "Telegram 연결 상태와 가이드",
+  "agents.triggers.engineFields":
+    "기존 엔진 필드: schedule, calendar, gmail, webhook, outputs",
+  "agents.triggers.save": "저장",
+  "agents.triggers.saved": "프로젝트 트리거 설정을 저장했습니다.",
+  "agents.triggers.saveFailed": "저장 실패",
+  "agents.triggers.errors.loadConnectorsFailed":
+    "커넥터 상태를 불러오지 못했습니다.",
+  "agents.triggers.errors.assistantProjectRequired":
+    "현재 엔진은 kind=assistant 프로젝트만 폴링합니다. 비서 프로젝트에서 켜 주세요.",
+  "agents.triggers.validation.noTriggerEnabled": "켜진 트리거가 없습니다.",
+  "agents.triggers.validation.outputsRequired":
+    "출력 채널을 하나 이상 선택해야 합니다.",
+  "agents.triggers.validation.slackOutputUnavailable":
+    "Slack 채널 연결이 준비되지 않았습니다.",
+  "agents.triggers.validation.telegramOutputUnavailable":
+    "Telegram 채널 연결이 준비되지 않았습니다.",
+  "agents.triggers.validation.invalidCron":
+    "cron은 5필드 형식이어야 합니다. 예: 0 9 * * 1-5",
+  "agents.triggers.validation.calendarConnectorRequired":
+    "Calendar 트리거를 켜려면 Google Calendar scope가 필요합니다.",
+  "agents.triggers.validation.gmailConnectorRequired":
+    "Gmail 트리거를 켜려면 Gmail readonly scope가 필요합니다.",
+  "agents.triggers.validation.calendarPollOutOfRange":
+    "Calendar poll 간격은 1~60분이어야 합니다.",
+  "agents.triggers.validation.gmailPollOutOfRange":
+    "Gmail poll 간격은 1~60분이어야 합니다.",
+  "agents.triggers.validation.calendarUpcomingOutOfRange":
+    "임박 일정 범위는 1~1440분이어야 합니다.",
+  "agents.triggers.validation.default": "트리거 설정을 저장할 수 없습니다.",
 
   // ── No-project empty state (agents tab reached with no project selected) ──
   "agents.noProject.title": "선택된 프로젝트가 없습니다",

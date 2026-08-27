@@ -130,7 +130,7 @@ export default function TeamSummary({
                   : "text-[10px] text-gray-500"
               }
             >
-              {compact ? t("agents.summary.unit") : "agents"}
+              {t("agents.summary.unit")}
             </span>
           </div>
         </div>

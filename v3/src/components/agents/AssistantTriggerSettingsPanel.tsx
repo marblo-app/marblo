@@ -11,7 +11,7 @@ import {
   Send,
   Webhook,
 } from "lucide-react";
-import { useTranslation, type TFunction } from "../../lib/i18n";
+import { useTranslation } from "../../lib/i18n";
 import {
   normalizeAssistantTriggerSettings,
   validateAssistantTriggerSettings,
@@ -20,6 +20,7 @@ import {
   type AssistantTriggerSettings,
   type AssistantTriggerValidationIssue,
 } from "../../lib/assistantTriggerSettings";
+import type { MessageKey } from "../../locales/ko";
 import { provisionAssistantWebhook } from "../../services/assistantWebhookService";
 import { useProjectStore } from "../../stores/projectStore";
 import type { Project } from "../../types/project";
@@ -48,35 +49,32 @@ type TriggerTab = "schedule" | "conditions" | "outputs";
 const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 
-function issueText(
-  issue: AssistantTriggerValidationIssue,
-  t: TFunction,
-): string {
+function issueKey(issue: AssistantTriggerValidationIssue): MessageKey {
   switch (issue) {
     case "no_trigger_enabled":
-      return "켜진 트리거가 없습니다.";
+      return "agents.triggers.validation.noTriggerEnabled";
     case "outputs_required":
-      return "출력 채널을 하나 이상 선택해야 합니다.";
+      return "agents.triggers.validation.outputsRequired";
     case "slack_output_unavailable":
-      return "Slack 채널 연결이 준비되지 않았습니다.";
+      return "agents.triggers.validation.slackOutputUnavailable";
     case "telegram_output_unavailable":
-      return "Telegram 채널 연결이 준비되지 않았습니다.";
+      return "agents.triggers.validation.telegramOutputUnavailable";
     case "invalid_cron":
-      return "cron은 5필드 형식이어야 합니다. 예: 0 9 * * 1-5";
+      return "agents.triggers.validation.invalidCron";
     case "calendar_connector_required":
-      return "Calendar 트리거를 켜려면 Google Calendar scope가 필요합니다.";
+      return "agents.triggers.validation.calendarConnectorRequired";
     case "gmail_connector_required":
-      return "Gmail 트리거를 켜려면 Gmail readonly scope가 필요합니다.";
+      return "agents.triggers.validation.gmailConnectorRequired";
     case "calendar_poll_out_of_range":
-      return "Calendar poll 간격은 1~60분이어야 합니다.";
+      return "agents.triggers.validation.calendarPollOutOfRange";
     case "gmail_poll_out_of_range":
-      return "Gmail poll 간격은 1~60분이어야 합니다.";
+      return "agents.triggers.validation.gmailPollOutOfRange";
     case "webhook_poll_out_of_range":
-      return t("agents.triggers.webhook.pollOutOfRange");
+      return "agents.triggers.webhook.pollOutOfRange";
     case "calendar_upcoming_out_of_range":
-      return "임박 일정 범위는 1~1440분이어야 합니다.";
+      return "agents.triggers.validation.calendarUpcomingOutOfRange";
     default:
-      return "트리거 설정을 저장할 수 없습니다.";
+      return "agents.triggers.validation.default";
   }
 }
 
@@ -84,17 +82,16 @@ function outputLabel(output: AssistantTriggerOutput): string {
   return output === "slack" ? "Slack" : "Telegram";
 }
 
-function outputTools(outputs: AssistantTriggerOutput[]): string {
-  if (outputs.length === 0) return "선택 안 됨";
+function outputTools(
+  outputs: AssistantTriggerOutput[],
+  fallback: string,
+): string {
+  if (outputs.length === 0) return fallback;
   return outputs
     .map((output) =>
       output === "slack" ? "send_slack_message" : "send_telegram_message",
     )
     .join(" / ");
-}
-
-function connectorBadge(ready: boolean): string {
-  return ready ? "준비됨" : "연결 필요";
 }
 
 function connectorBadgeClass(ready: boolean): string {
@@ -141,9 +138,9 @@ export function AssistantTriggerSettingsPanel({
 
   const isAssistantProject = project.kind === "assistant";
   const tabs: Array<{ id: TriggerTab; label: string }> = [
-    { id: "schedule", label: "스케줄" },
-    { id: "conditions", label: "조건" },
-    { id: "outputs", label: "출력채널" },
+    { id: "schedule", label: t("agents.triggers.tabs.schedule") },
+    { id: "conditions", label: t("agents.triggers.tabs.conditions") },
+    { id: "outputs", label: t("agents.triggers.tabs.outputs") },
   ];
 
   useEffect(() => {
@@ -175,7 +172,7 @@ export function AssistantTriggerSettingsPanel({
       setError(
         err instanceof Error
           ? err.message
-          : "커넥터 상태를 불러오지 못했습니다.",
+          : t("agents.triggers.errors.loadConnectorsFailed"),
       );
     } finally {
       setLoadingConnectors(false);
@@ -204,21 +201,21 @@ export function AssistantTriggerSettingsPanel({
     setMessage(null);
     setError(null);
     if (settings.enabled && !isAssistantProject) {
-      setError(
-        "현재 엔진은 kind=assistant 프로젝트만 폴링합니다. 비서 프로젝트에서 켜 주세요.",
-      );
+      setError(t("agents.triggers.errors.assistantProjectRequired"));
       return;
     }
     if (!validation.ok) {
-      setError(validation.issues.map((issue) => issueText(issue, t)).join(" "));
+      setError(validation.issues.map((issue) => t(issueKey(issue))).join(" "));
       return;
     }
     setSaving(true);
     try {
       await updateProject(project.id, { assistantTriggers: settings });
-      setMessage("프로젝트 트리거 설정을 저장했습니다.");
+      setMessage(t("agents.triggers.saved"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "저장 실패");
+      setError(
+        err instanceof Error ? err.message : t("agents.triggers.saveFailed"),
+      );
     } finally {
       setSaving(false);
     }
@@ -261,7 +258,9 @@ export function AssistantTriggerSettingsPanel({
       await navigator.clipboard.writeText(value);
       setMessage(copiedMessage);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("agents.triggers.copyFailed"));
+      setError(
+        err instanceof Error ? err.message : t("agents.triggers.copyFailed"),
+      );
     }
   };
 
@@ -269,11 +268,11 @@ export function AssistantTriggerSettingsPanel({
     <div className="h-full overflow-y-auto p-4 text-gray-100">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">스케줄·조건 트리거</h2>
+          <h2 className="text-lg font-semibold">
+            {t("agents.triggers.title")}
+          </h2>
           <p className="mt-1 max-w-3xl text-sm text-gray-400">
-            저장 범위는 프로젝트입니다. 기존 엔진은 projects 문서의
-            assistantTriggers를 읽고, assistant 프로젝트의 오케스트레이터에
-            주기·조건 메시지를 주입합니다.
+            {t("agents.triggers.description")}
           </p>
         </div>
         <button
@@ -286,7 +285,7 @@ export function AssistantTriggerSettingsPanel({
             size={14}
             className={loadingConnectors ? "animate-spin" : ""}
           />
-          연결 상태 새로고침
+          {t("agents.triggers.refreshConnectors")}
         </button>
       </div>
 
@@ -303,11 +302,13 @@ export function AssistantTriggerSettingsPanel({
           <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
         )}
         <span>
-          엔진은 <code>kind === "assistant"</code> 프로젝트만 폴링합니다. 현재
-          프로젝트 종류: <code>{project.kind ?? "unknown"}</code>
+          {t("agents.triggers.engineNoticePrefix")}{" "}
+          <code>kind === "assistant"</code>{" "}
+          {t("agents.triggers.engineNoticeSuffix")}{" "}
+          <code>{project.kind ?? "unknown"}</code>
           {isAssistantProject
-            ? " — 저장 후 활성화 대상입니다."
-            : " — 설정은 저장할 수 있어도 실제 폴링은 돌지 않습니다."}
+            ? t("agents.triggers.engineNoticeEnabled")
+            : t("agents.triggers.engineNoticeDisabled")}
         </span>
       </div>
 
@@ -330,7 +331,13 @@ export function AssistantTriggerSettingsPanel({
             className={`rounded border px-3 py-2 text-xs ${connectorBadgeClass(ready)}`}
           >
             <div className="font-medium">{label}</div>
-            <div className="mt-0.5">{connectorBadge(ready)}</div>
+            <div className="mt-0.5">
+              {t(
+                ready
+                  ? "agents.triggers.connectorReady"
+                  : "agents.triggers.connectorNeedsConnection",
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -339,10 +346,10 @@ export function AssistantTriggerSettingsPanel({
         <label className="flex items-center justify-between gap-3">
           <span>
             <span className="block text-sm font-semibold">
-              트리거 엔진 사용
+              {t("agents.triggers.enableLabel")}
             </span>
             <span className="mt-0.5 block text-xs text-gray-500">
-              꺼두면 assistantTriggers.enabled=false로 저장됩니다.
+              {t("agents.triggers.enableHint")}
             </span>
           </span>
           <input
@@ -361,7 +368,7 @@ export function AssistantTriggerSettingsPanel({
 
       <div
         role="tablist"
-        aria-label="트리거 설정 분류"
+        aria-label={t("agents.triggers.tabsAria")}
         className="mb-4 flex flex-wrap gap-1 border-b border-gray-700"
       >
         {tabs.map((tab) => {
@@ -389,7 +396,9 @@ export function AssistantTriggerSettingsPanel({
         <section className="rounded border border-gray-700 bg-gray-900 p-4">
           <div className="mb-3 flex items-center gap-2">
             <CalendarClock size={17} className="text-blue-300" />
-            <h3 className="text-sm font-semibold">정시 스케줄</h3>
+            <h3 className="text-sm font-semibold">
+              {t("agents.triggers.schedule.title")}
+            </h3>
           </div>
           <label className="mb-3 flex items-center gap-2 text-sm text-gray-300">
             <input
@@ -406,7 +415,7 @@ export function AssistantTriggerSettingsPanel({
               }
               className="h-4 w-4 rounded border-gray-600 bg-gray-950"
             />
-            매칭되는 분마다 일일 브리핑 실행
+            {t("agents.triggers.schedule.enable")}
           </label>
           <label className="mb-3 block">
             <span className="mb-1 block text-xs text-gray-400">cron</span>
@@ -448,7 +457,9 @@ export function AssistantTriggerSettingsPanel({
           <section className="rounded border border-gray-700 bg-gray-900 p-4">
             <div className="mb-3 flex items-center gap-2">
               <CalendarClock size={17} className="text-emerald-300" />
-              <h3 className="text-sm font-semibold">Calendar 조건</h3>
+              <h3 className="text-sm font-semibold">
+                {t("agents.triggers.calendar.title")}
+              </h3>
             </div>
             <label className="mb-3 flex items-center gap-2 text-sm text-gray-300">
               <input
@@ -468,7 +479,7 @@ export function AssistantTriggerSettingsPanel({
                 }
                 className="h-4 w-4 rounded border-gray-600 bg-gray-950"
               />
-              임박 일정 감지
+              {t("agents.triggers.calendar.enable")}
             </label>
             <label className="mb-3 block">
               <span className="mb-1 block text-xs text-gray-400">
@@ -520,7 +531,9 @@ export function AssistantTriggerSettingsPanel({
           <section className="rounded border border-gray-700 bg-gray-900 p-4">
             <div className="mb-3 flex items-center gap-2">
               <Mail size={17} className="text-purple-300" />
-              <h3 className="text-sm font-semibold">Gmail 조건</h3>
+              <h3 className="text-sm font-semibold">
+                {t("agents.triggers.gmail.title")}
+              </h3>
             </div>
             <label className="mb-3 flex items-center gap-2 text-sm text-gray-300">
               <input
@@ -540,7 +553,7 @@ export function AssistantTriggerSettingsPanel({
                 }
                 className="h-4 w-4 rounded border-gray-600 bg-gray-950"
               />
-              메일 조건 감지
+              {t("agents.triggers.gmail.enable")}
             </label>
             <label className="mb-3 block">
               <span className="mb-1 block text-xs text-gray-400">query</span>
@@ -720,7 +733,9 @@ export function AssistantTriggerSettingsPanel({
         <section className="rounded border border-gray-700 bg-gray-900 p-4">
           <div className="mb-3 flex items-center gap-2">
             <Send size={17} className="text-blue-300" />
-            <h3 className="text-sm font-semibold">출력 채널</h3>
+            <h3 className="text-sm font-semibold">
+              {t("agents.triggers.outputs.title")}
+            </h3>
           </div>
           <div className="mb-3 flex flex-wrap gap-3">
             {(["slack", "telegram"] as const).map((output) => (
@@ -739,12 +754,16 @@ export function AssistantTriggerSettingsPanel({
             ))}
           </div>
           <p className="text-xs text-gray-500">
-            엔진은 선택된 채널에 대해 {outputTools(settings.outputs)} MCP 도구를
-            호출하도록 오케스트레이터에 지시합니다.
+            {t("agents.triggers.outputs.description", {
+              tools: outputTools(
+                settings.outputs,
+                t("agents.triggers.outputs.none"),
+              ),
+            })}
           </p>
           <details className="mt-4 rounded border border-gray-700 bg-gray-950/40">
             <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-200">
-              Slack 연결 상태와 가이드
+              {t("agents.triggers.outputs.slackGuide")}
             </summary>
             <div className="border-t border-gray-700">
               <SlackChannelPanel />
@@ -752,7 +771,7 @@ export function AssistantTriggerSettingsPanel({
           </details>
           <details className="mt-3 rounded border border-gray-700 bg-gray-950/40">
             <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-200">
-              Telegram 연결 상태와 가이드
+              {t("agents.triggers.outputs.telegramGuide")}
             </summary>
             <div className="border-t border-gray-700">
               <TelegramChannelPanel />
@@ -763,7 +782,7 @@ export function AssistantTriggerSettingsPanel({
 
       {!validation.ok && settings.enabled && (
         <div className="mt-4 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-          {validation.issues.map((issue) => issueText(issue, t)).join(" ")}
+          {validation.issues.map((issue) => t(issueKey(issue))).join(" ")}
         </div>
       )}
 
@@ -774,7 +793,7 @@ export function AssistantTriggerSettingsPanel({
           ) : (
             <AlertTriangle size={14} className="text-amber-300" />
           )}
-          기존 엔진 필드: schedule, calendar, gmail, webhook, outputs
+          {t("agents.triggers.engineFields")}
         </div>
         <button
           type="button"
@@ -787,7 +806,7 @@ export function AssistantTriggerSettingsPanel({
           ) : (
             <Save size={14} />
           )}
-          저장
+          {t("agents.triggers.save")}
         </button>
       </div>
     </div>
