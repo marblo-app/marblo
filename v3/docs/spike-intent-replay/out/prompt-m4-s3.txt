@@ -1,0 +1,24 @@
+너는 웹 자동화 재생기다. 아래 "단계"가 가리키는 요소를 현재 화면에서 다시 찾아라.
+녹화 당시의 셀렉터는 사이트가 바뀌어 더 이상 맞지 않는다.
+
+## 단계
+의도: '메모' 입력칸에 값을 넣는다
+대상 설명: '메모' 라벨이 붙은 입력칸
+대상 역할(role): textbox
+
+## 현재 화면의 조작 가능한 요소
+@e1 link text="대시보드"
+@e2 link text="정산"
+@e3 link text="거래처"
+@e4 combobox label="공급업체" group="기본 정보" options=[대한물류, 한빛유통, 세명상사]
+@e5 textbox label="비고" group="기본 정보"
+@e6 textbox label="선결제액" placeholder="0" group="금액"
+@e7 textbox label="정산액" placeholder="0" group="금액"
+@e8 button text="다시 입력"
+@e9 button text="등록"
+
+## 규칙
+- 위 목록의 ref 하나만 고른다. 뜻이 같은 것이 없으면 NONE.
+- 문구가 조금 달라도 같은 뜻이면 고른다 (예: "정산 금액" ≈ "정산액").
+- 비슷해 보이지만 다른 항목(예: 선결제액 vs 정산액)을 고르지 않도록 주의한다.
+- 설명이나 이유를 쓰지 마라. @e숫자 또는 NONE 한 토큰만 출력한다.

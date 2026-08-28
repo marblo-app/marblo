@@ -1,0 +1,88 @@
+<!doctype html>
+<!--
+  M4 — FULL CHURN. M3 plus the two things that kill the last deterministic
+  fallback:
+    (a) form `name` and `placeholder` attributes were renamed
+        (budget → amt_krw_2, "금액을 입력하세요" → "0")
+    (b) a DECOY money field, "선결제액", was added directly above the real one.
+
+  Nothing recorded from V0 — no id, class, xpath, label text, name, or
+  placeholder — still points at the right element. A replayer can only get this
+  right by *reading the page and understanding what the step is for*, and it has
+  to not fall for the decoy. This is the mutation that decides the ticket.
+-->
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>정산 등록 · 파트너 어드민</title>
+  <script src="./_app.js"></script>
+</head>
+<body>
+  <div class="shell">
+   <div class="shell__inner">
+    <header class="hdr_c40">
+      <h1 class="hdr_c40__t">파트너 정산 어드민</h1>
+      <nav class="hdr_c40__n">
+        <a href="#" class="lnk_z8">대시보드</a>
+        <a href="#" class="lnk_z8">정산</a>
+        <a href="#" class="lnk_z8">거래처</a>
+      </nav>
+    </header>
+
+    <main class="pg_08bd">
+     <div class="pg_08bd__col">
+      <div class="cardx">
+       <div class="cardx__hd"><h2 class="pg_08bd__h">정산 등록</h2></div>
+       <div class="cardx__bd">
+        <form id="q_31fa" class="frm_31fa">
+          <fieldset class="grpx">
+            <legend class="grpx__lg">기본 정보</legend>
+            <div class="rw_5"><div class="rw_5__w">
+              <label class="rw_5__l" for="q_a1">공급업체</label>
+              <select id="q_a1" name="partner_code" class="rw_5__c ctl_77" data-behavior="vendor">
+                <option value="">선택하세요</option>
+                <option value="대한물류">대한물류</option>
+                <option value="한빛유통">한빛유통</option>
+                <option value="세명상사">세명상사</option>
+              </select>
+            </div></div>
+            <div class="rw_5"><div class="rw_5__w">
+              <label class="rw_5__l" for="q_a3">비고</label>
+              <input id="q_a3" name="note_txt" type="text" class="rw_5__c ctl_77"
+                     placeholder="" data-behavior="memo" />
+            </div></div>
+          </fieldset>
+          <fieldset class="grpx">
+            <legend class="grpx__lg">금액</legend>
+            <div class="rw_5"><div class="rw_5__w">
+              <label class="rw_5__l" for="q_a9">선결제액</label>
+              <input id="q_a9" name="amt_krw_1" type="text" class="rw_5__c ctl_77" placeholder="0" />
+              <span class="rw_5__s">원</span>
+            </div></div>
+            <div class="rw_5"><div class="rw_5__w">
+              <label class="rw_5__l" for="q_a2">정산액</label>
+              <input id="q_a2" name="amt_krw_2" type="text" class="rw_5__c ctl_77"
+                     placeholder="0" data-behavior="amount" />
+              <span class="rw_5__s">원</span>
+            </div></div>
+          </fieldset>
+          <div class="cardx__ft"><div class="rw_row">
+            <button type="button" id="q_b0" class="bx_9 bx_9--g">다시 입력</button>
+            <button type="submit" id="q_b1" class="bx_9 bx_9--p">등록</button>
+          </div></div>
+        </form>
+       </div>
+      </div>
+
+      <div class="cardx">
+       <div class="cardx__bd"><section class="rz_7">
+        <h3 class="rz_7__t">처리 결과</h3>
+        <p id="z_4" class="rz_7__b" data-behavior="result">아직 등록된 정산이 없습니다</p>
+       </section></div>
+      </div>
+     </div>
+    </main>
+   </div>
+  </div>
+</body>
+</html>

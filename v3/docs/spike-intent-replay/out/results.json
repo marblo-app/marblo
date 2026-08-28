@@ -1,0 +1,852 @@
+{
+  "rows": [
+    {
+      "arm": "selector-only",
+      "variant": "V0 baseline",
+      "verdict": "PASS",
+      "tiers": "s1:hint:css s2:hint:css s3:hint:css s4:hint:css",
+      "detail": "등록 완료 · 한빛유통 · 30,000원"
+    },
+    {
+      "arm": "selector-only",
+      "variant": "M1 selector churn (id/class hashed)",
+      "verdict": "PASS",
+      "tiers": "s1:hint:xpath s2:hint:xpath s3:hint:xpath s4:hint:xpath",
+      "detail": "등록 완료 · 한빛유통 · 30,000원"
+    },
+    {
+      "arm": "selector-only",
+      "variant": "M2 + copy churn (labels/button reworded)",
+      "verdict": "PASS",
+      "tiers": "s1:hint:xpath s2:hint:xpath s3:hint:xpath s4:hint:xpath",
+      "detail": "등록 완료 · 한빛유통 · 30,000원"
+    },
+    {
+      "arm": "selector-only",
+      "variant": "M3 + structural churn (wrappers, reorder)",
+      "verdict": "FAIL-CLEAN",
+      "tiers": "s1:—",
+      "detail": "stopped at s1"
+    },
+    {
+      "arm": "selector-only",
+      "variant": "M4 + field renames + decoy field",
+      "verdict": "FAIL-CLEAN",
+      "tiers": "s1:—",
+      "detail": "stopped at s1"
+    },
+    {
+      "arm": "selector-only",
+      "variant": "M5 id reuse (old #budget = prepayment box)",
+      "verdict": "FAIL-DIRTY",
+      "tiers": "s1:hint:css s2:hint:css s3:hint:css s4:hint:css",
+      "detail": "wrote into wrong field [{\"name\":\"prepay\",\"value\":\"30000\"}], then stopped"
+    },
+    {
+      "arm": "intent-deterministic",
+      "variant": "V0 baseline",
+      "verdict": "PASS",
+      "tiers": "s1:hint:css s2:hint:css s3:hint:css s4:hint:css",
+      "detail": "등록 완료 · 한빛유통 · 30,000원"
+    },
+    {
+      "arm": "intent-deterministic",
+      "variant": "M1 selector churn (id/class hashed)",
+      "verdict": "PASS",
+      "tiers": "s1:hint:xpath s2:hint:xpath s3:hint:xpath s4:hint:xpath",
+      "detail": "등록 완료 · 한빛유통 · 30,000원"
+    },
+    {
+      "arm": "intent-deterministic",
+      "variant": "M2 + copy churn (labels/button reworded)",
+      "verdict": "FAIL-CLEAN",
+      "tiers": "s1:hint:xpath s2:hint:xpath s3:hint:xpath s4:—",
+      "detail": "stopped at s4"
+    },
+    {
+      "arm": "intent-deterministic",
+      "variant": "M3 + structural churn (wrappers, reorder)",
+      "verdict": "FAIL-CLEAN",
+      "tiers": "s1:hint:attrs s2:hint:attrs s3:hint:attrs s4:—",
+      "detail": "stopped at s4"
+    },
+    {
+      "arm": "intent-deterministic",
+      "variant": "M4 + field renames + decoy field",
+      "verdict": "FAIL-CLEAN",
+      "tiers": "s1:—",
+      "detail": "stopped at s1"
+    },
+    {
+      "arm": "intent-deterministic",
+      "variant": "M5 id reuse (old #budget = prepayment box)",
+      "verdict": "PASS",
+      "tiers": "s1:hint:css s2:hint:role s3:hint:css s4:hint:css",
+      "detail": "등록 완료 · 한빛유통 · 30,000원"
+    },
+    {
+      "arm": "intent-full",
+      "variant": "V0 baseline",
+      "verdict": "PASS",
+      "tiers": "s1:hint:css s2:hint:css s3:hint:css s4:hint:css",
+      "detail": "등록 완료 · 한빛유통 · 30,000원"
+    },
+    {
+      "arm": "intent-full",
+      "variant": "M1 selector churn (id/class hashed)",
+      "verdict": "PASS",
+      "tiers": "s1:hint:xpath s2:hint:xpath s3:hint:xpath s4:hint:xpath",
+      "detail": "등록 완료 · 한빛유통 · 30,000원"
+    },
+    {
+      "arm": "intent-full",
+      "variant": "M2 + copy churn (labels/button reworded)",
+      "verdict": "PASS",
+      "tiers": "s1:hint:xpath s2:hint:xpath s3:hint:xpath s4:model",
+      "detail": "등록 완료 · 한빛유통 · 30,000원"
+    },
+    {
+      "arm": "intent-full",
+      "variant": "M3 + structural churn (wrappers, reorder)",
+      "verdict": "PASS",
+      "tiers": "s1:hint:attrs s2:hint:attrs s3:hint:attrs s4:model",
+      "detail": "등록 완료 · 한빛유통 · 30,000원"
+    },
+    {
+      "arm": "intent-full",
+      "variant": "M4 + field renames + decoy field",
+      "verdict": "PASS",
+      "tiers": "s1:model s2:model s3:model s4:model",
+      "detail": "등록 완료 · 한빛유통 · 30,000원"
+    },
+    {
+      "arm": "intent-full",
+      "variant": "M5 id reuse (old #budget = prepayment box)",
+      "verdict": "PASS",
+      "tiers": "s1:hint:css s2:hint:role s3:hint:css s4:hint:css",
+      "detail": "등록 완료 · 한빛유통 · 30,000원"
+    }
+  ],
+  "traces": {
+    "selector-only | V0 baseline": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s2",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s3",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s4",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": null
+        }
+      ],
+      "model": [],
+      "rejected": [],
+      "oracle": {
+        "resultState": "ok",
+        "resultText": "등록 완료 · 한빛유통 · 30,000원",
+        "amountFieldValue": "30000",
+        "vendorFieldValue": "한빛유통",
+        "amountLandedInRightField": true,
+        "strayFilledFields": []
+      }
+    },
+    "selector-only | M1 selector churn (id/class hashed)": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s2",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s3",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s4",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": null
+        }
+      ],
+      "model": [],
+      "rejected": [],
+      "oracle": {
+        "resultState": "ok",
+        "resultText": "등록 완료 · 한빛유통 · 30,000원",
+        "amountFieldValue": "30000",
+        "vendorFieldValue": "한빛유통",
+        "amountLandedInRightField": true,
+        "strayFilledFields": []
+      }
+    },
+    "selector-only | M2 + copy churn (labels/button reworded)": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s2",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s3",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s4",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": null
+        }
+      ],
+      "model": [],
+      "rejected": [],
+      "oracle": {
+        "resultState": "ok",
+        "resultText": "등록 완료 · 한빛유통 · 30,000원",
+        "amountFieldValue": "30000",
+        "vendorFieldValue": "한빛유통",
+        "amountLandedInRightField": true,
+        "strayFilledFields": []
+      }
+    },
+    "selector-only | M3 + structural churn (wrappers, reorder)": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": null,
+          "status": "unresolved"
+        }
+      ],
+      "model": [],
+      "rejected": [],
+      "stoppedAt": "s1",
+      "oracle": {
+        "resultState": "none",
+        "resultText": "아직 등록된 정산이 없습니다",
+        "amountFieldValue": "",
+        "vendorFieldValue": "",
+        "amountLandedInRightField": false,
+        "strayFilledFields": []
+      }
+    },
+    "selector-only | M4 + field renames + decoy field": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": null,
+          "status": "unresolved"
+        }
+      ],
+      "model": [],
+      "rejected": [],
+      "stoppedAt": "s1",
+      "oracle": {
+        "resultState": "none",
+        "resultText": "아직 등록된 정산이 없습니다",
+        "amountFieldValue": "",
+        "vendorFieldValue": "",
+        "amountLandedInRightField": false,
+        "strayFilledFields": []
+      }
+    },
+    "selector-only | M5 id reuse (old #budget = prepayment box)": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s2",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s3",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s4",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": null
+        }
+      ],
+      "model": [],
+      "rejected": [],
+      "oracle": {
+        "resultState": "error",
+        "resultText": "금액을 입력하세요",
+        "amountFieldValue": "",
+        "vendorFieldValue": "한빛유통",
+        "amountLandedInRightField": false,
+        "strayFilledFields": [
+          {
+            "name": "prepay",
+            "value": "30000"
+          }
+        ]
+      }
+    },
+    "intent-deterministic | V0 baseline": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s2",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s3",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s4",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": null
+        }
+      ],
+      "model": [],
+      "rejected": [],
+      "oracle": {
+        "resultState": "ok",
+        "resultText": "등록 완료 · 한빛유통 · 30,000원",
+        "amountFieldValue": "30000",
+        "vendorFieldValue": "한빛유통",
+        "amountLandedInRightField": true,
+        "strayFilledFields": []
+      }
+    },
+    "intent-deterministic | M1 selector churn (id/class hashed)": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s2",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s3",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s4",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": null
+        }
+      ],
+      "model": [],
+      "rejected": [],
+      "oracle": {
+        "resultState": "ok",
+        "resultText": "등록 완료 · 한빛유통 · 30,000원",
+        "amountFieldValue": "30000",
+        "vendorFieldValue": "한빛유통",
+        "amountLandedInRightField": true,
+        "strayFilledFields": []
+      }
+    },
+    "intent-deterministic | M2 + copy churn (labels/button reworded)": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s2",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s3",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s4",
+          "tier": null,
+          "status": "unresolved"
+        }
+      ],
+      "model": [],
+      "rejected": [
+        {
+          "step": "s4",
+          "tier": "hint:xpath",
+          "reason": "hint still matched, but element no longer looks like the recorded target (now label=\"\" name=\"\")"
+        }
+      ],
+      "stoppedAt": "s4",
+      "oracle": {
+        "resultState": "none",
+        "resultText": "아직 등록된 정산이 없습니다",
+        "amountFieldValue": "30000",
+        "vendorFieldValue": "한빛유통",
+        "amountLandedInRightField": true,
+        "strayFilledFields": []
+      }
+    },
+    "intent-deterministic | M3 + structural churn (wrappers, reorder)": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": "hint:attrs",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s2",
+          "tier": "hint:attrs",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s3",
+          "tier": "hint:attrs",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s4",
+          "tier": null,
+          "status": "unresolved"
+        }
+      ],
+      "model": [],
+      "rejected": [],
+      "stoppedAt": "s4",
+      "oracle": {
+        "resultState": "none",
+        "resultText": "아직 등록된 정산이 없습니다",
+        "amountFieldValue": "30000",
+        "vendorFieldValue": "한빛유통",
+        "amountLandedInRightField": true,
+        "strayFilledFields": []
+      }
+    },
+    "intent-deterministic | M4 + field renames + decoy field": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": null,
+          "status": "unresolved"
+        }
+      ],
+      "model": [],
+      "rejected": [],
+      "stoppedAt": "s1",
+      "oracle": {
+        "resultState": "none",
+        "resultText": "아직 등록된 정산이 없습니다",
+        "amountFieldValue": "",
+        "vendorFieldValue": "",
+        "amountLandedInRightField": false,
+        "strayFilledFields": []
+      }
+    },
+    "intent-deterministic | M5 id reuse (old #budget = prepayment box)": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s2",
+          "tier": "hint:role",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s3",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s4",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": null
+        }
+      ],
+      "model": [],
+      "rejected": [
+        {
+          "step": "s2",
+          "tier": "hint:css",
+          "reason": "hint still matched, but element no longer looks like the recorded target (now label=\"선결제액\" name=\"prepay\")"
+        },
+        {
+          "step": "s2",
+          "tier": "hint:xpath",
+          "reason": "hint still matched, but element no longer looks like the recorded target (now label=\"선결제액\" name=\"prepay\")"
+        }
+      ],
+      "oracle": {
+        "resultState": "ok",
+        "resultText": "등록 완료 · 한빛유통 · 30,000원",
+        "amountFieldValue": "30000",
+        "vendorFieldValue": "한빛유통",
+        "amountLandedInRightField": true,
+        "strayFilledFields": []
+      }
+    },
+    "intent-full | V0 baseline": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s2",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s3",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s4",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": null
+        }
+      ],
+      "model": [],
+      "rejected": [],
+      "oracle": {
+        "resultState": "ok",
+        "resultText": "등록 완료 · 한빛유통 · 30,000원",
+        "amountFieldValue": "30000",
+        "vendorFieldValue": "한빛유통",
+        "amountLandedInRightField": true,
+        "strayFilledFields": []
+      }
+    },
+    "intent-full | M1 selector churn (id/class hashed)": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s2",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s3",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s4",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": null
+        }
+      ],
+      "model": [],
+      "rejected": [],
+      "oracle": {
+        "resultState": "ok",
+        "resultText": "등록 완료 · 한빛유통 · 30,000원",
+        "amountFieldValue": "30000",
+        "vendorFieldValue": "한빛유통",
+        "amountLandedInRightField": true,
+        "strayFilledFields": []
+      }
+    },
+    "intent-full | M2 + copy churn (labels/button reworded)": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s2",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s3",
+          "tier": "hint:xpath",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s4",
+          "tier": "model",
+          "status": "ok",
+          "verified": null
+        }
+      ],
+      "model": [
+        {
+          "step": "s4",
+          "ref": "@e8",
+          "raw": "@e8",
+          "ms": 11740,
+          "attempts": 1,
+          "prompt": "너는 웹 자동화 재생기다. 아래 \"단계\"가 가리키는 요소를 현재 화면에서 다시 찾아라.\n녹화 당시의 셀렉터는 사이트가 바뀌어 더 이상 맞지 않는다.\n\n## 단계\n의도: '정산 등록' 버튼을 누른다\n대상 설명: '정산 등록' 라고 적힌, 폼을 제출하는 기본 버튼\n대상 역할(role): button\n\n## 현재 화면의 조작 가능한 요소\n@e1 link text=\"대시보드\"\n@e2 link text=\"정산\"\n@e3 link text=\"거래처\"\n@e4 combobox label=\"공급업체\" options=[대한물류, 한빛유통, 세명상사] value=\"한빛유통\"\n@e5 textbox label=\"정산액\" placeholder=\"금액을 입력하세요\" value=\"30000\"\n@e6 textbox label=\"비고\" placeholder=\"선택 입력\" value=\"8월 정산\"\n@e7 button text=\"다시 입력\"\n@e8 button text=\"등록\"\n\n## 규칙\n- 위 목록의 ref 하나만 고른다. 뜻이 같은 것이 없으면 NONE.\n- 문구가 조금 달라도 같은 뜻이면 고른다 (예: \"정산 금액\" ≈ \"정산액\").\n- 비슷해 보이지만 다른 항목(예: 선결제액 vs 정산액)을 고르지 않도록 주의한다.\n- 설명이나 이유를 쓰지 마라. @e숫자 또는 NONE 한 토큰만 출력한다."
+        }
+      ],
+      "rejected": [
+        {
+          "step": "s4",
+          "tier": "hint:xpath",
+          "reason": "hint still matched, but element no longer looks like the recorded target (now label=\"\" name=\"\")"
+        }
+      ],
+      "oracle": {
+        "resultState": "ok",
+        "resultText": "등록 완료 · 한빛유통 · 30,000원",
+        "amountFieldValue": "30000",
+        "vendorFieldValue": "한빛유통",
+        "amountLandedInRightField": true,
+        "strayFilledFields": []
+      }
+    },
+    "intent-full | M3 + structural churn (wrappers, reorder)": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": "hint:attrs",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s2",
+          "tier": "hint:attrs",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s3",
+          "tier": "hint:attrs",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s4",
+          "tier": "model",
+          "status": "ok",
+          "verified": null
+        }
+      ],
+      "model": [
+        {
+          "step": "s4",
+          "ref": "@e8",
+          "raw": "@e8",
+          "ms": 12512,
+          "attempts": 1,
+          "prompt": "너는 웹 자동화 재생기다. 아래 \"단계\"가 가리키는 요소를 현재 화면에서 다시 찾아라.\n녹화 당시의 셀렉터는 사이트가 바뀌어 더 이상 맞지 않는다.\n\n## 단계\n의도: '정산 등록' 버튼을 누른다\n대상 설명: '정산 등록' 라고 적힌, 폼을 제출하는 기본 버튼\n대상 역할(role): button\n\n## 현재 화면의 조작 가능한 요소\n@e1 link text=\"대시보드\"\n@e2 link text=\"정산\"\n@e3 link text=\"거래처\"\n@e4 combobox label=\"공급업체\" group=\"기본 정보\" options=[대한물류, 한빛유통, 세명상사] value=\"한빛유통\"\n@e5 textbox label=\"비고\" placeholder=\"선택 입력\" group=\"기본 정보\" value=\"8월 정산\"\n@e6 textbox label=\"정산액\" placeholder=\"금액을 입력하세요\" group=\"금액\" value=\"30000\"\n@e7 button text=\"다시 입력\"\n@e8 button text=\"등록\"\n\n## 규칙\n- 위 목록의 ref 하나만 고른다. 뜻이 같은 것이 없으면 NONE.\n- 문구가 조금 달라도 같은 뜻이면 고른다 (예: \"정산 금액\" ≈ \"정산액\").\n- 비슷해 보이지만 다른 항목(예: 선결제액 vs 정산액)을 고르지 않도록 주의한다.\n- 설명이나 이유를 쓰지 마라. @e숫자 또는 NONE 한 토큰만 출력한다."
+        }
+      ],
+      "rejected": [],
+      "oracle": {
+        "resultState": "ok",
+        "resultText": "등록 완료 · 한빛유통 · 30,000원",
+        "amountFieldValue": "30000",
+        "vendorFieldValue": "한빛유통",
+        "amountLandedInRightField": true,
+        "strayFilledFields": []
+      }
+    },
+    "intent-full | M4 + field renames + decoy field": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": "model",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s2",
+          "tier": "model",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s3",
+          "tier": "model",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s4",
+          "tier": "model",
+          "status": "ok",
+          "verified": null
+        }
+      ],
+      "model": [
+        {
+          "step": "s1",
+          "ref": "@e4",
+          "raw": "@e4",
+          "ms": 12553,
+          "attempts": 1,
+          "prompt": "너는 웹 자동화 재생기다. 아래 \"단계\"가 가리키는 요소를 현재 화면에서 다시 찾아라.\n녹화 당시의 셀렉터는 사이트가 바뀌어 더 이상 맞지 않는다.\n\n## 단계\n의도: '거래처' 선택칸에서 거래처를 고른다\n대상 설명: '거래처' 라벨이 붙은 선택칸\n대상 역할(role): combobox\n\n## 현재 화면의 조작 가능한 요소\n@e1 link text=\"대시보드\"\n@e2 link text=\"정산\"\n@e3 link text=\"거래처\"\n@e4 combobox label=\"공급업체\" group=\"기본 정보\" options=[대한물류, 한빛유통, 세명상사]\n@e5 textbox label=\"비고\" group=\"기본 정보\"\n@e6 textbox label=\"선결제액\" placeholder=\"0\" group=\"금액\"\n@e7 textbox label=\"정산액\" placeholder=\"0\" group=\"금액\"\n@e8 button text=\"다시 입력\"\n@e9 button text=\"등록\"\n\n## 규칙\n- 위 목록의 ref 하나만 고른다. 뜻이 같은 것이 없으면 NONE.\n- 문구가 조금 달라도 같은 뜻이면 고른다 (예: \"정산 금액\" ≈ \"정산액\").\n- 비슷해 보이지만 다른 항목(예: 선결제액 vs 정산액)을 고르지 않도록 주의한다.\n- 설명이나 이유를 쓰지 마라. @e숫자 또는 NONE 한 토큰만 출력한다."
+        },
+        {
+          "step": "s2",
+          "ref": "@e7",
+          "raw": "@e7",
+          "ms": 11737,
+          "attempts": 1,
+          "prompt": "너는 웹 자동화 재생기다. 아래 \"단계\"가 가리키는 요소를 현재 화면에서 다시 찾아라.\n녹화 당시의 셀렉터는 사이트가 바뀌어 더 이상 맞지 않는다.\n\n## 단계\n의도: '정산 금액' 입력칸에 값을 넣는다\n대상 설명: '정산 금액' 라벨이 붙은 입력칸\n대상 역할(role): textbox\n\n## 현재 화면의 조작 가능한 요소\n@e1 link text=\"대시보드\"\n@e2 link text=\"정산\"\n@e3 link text=\"거래처\"\n@e4 combobox label=\"공급업체\" group=\"기본 정보\" options=[대한물류, 한빛유통, 세명상사] value=\"한빛유통\"\n@e5 textbox label=\"비고\" group=\"기본 정보\"\n@e6 textbox label=\"선결제액\" placeholder=\"0\" group=\"금액\"\n@e7 textbox label=\"정산액\" placeholder=\"0\" group=\"금액\"\n@e8 button text=\"다시 입력\"\n@e9 button text=\"등록\"\n\n## 규칙\n- 위 목록의 ref 하나만 고른다. 뜻이 같은 것이 없으면 NONE.\n- 문구가 조금 달라도 같은 뜻이면 고른다 (예: \"정산 금액\" ≈ \"정산액\").\n- 비슷해 보이지만 다른 항목(예: 선결제액 vs 정산액)을 고르지 않도록 주의한다.\n- 설명이나 이유를 쓰지 마라. @e숫자 또는 NONE 한 토큰만 출력한다."
+        },
+        {
+          "step": "s3",
+          "ref": "@e5",
+          "raw": "@e5",
+          "ms": 11612,
+          "attempts": 1,
+          "prompt": "너는 웹 자동화 재생기다. 아래 \"단계\"가 가리키는 요소를 현재 화면에서 다시 찾아라.\n녹화 당시의 셀렉터는 사이트가 바뀌어 더 이상 맞지 않는다.\n\n## 단계\n의도: '메모' 입력칸에 값을 넣는다\n대상 설명: '메모' 라벨이 붙은 입력칸\n대상 역할(role): textbox\n\n## 현재 화면의 조작 가능한 요소\n@e1 link text=\"대시보드\"\n@e2 link text=\"정산\"\n@e3 link text=\"거래처\"\n@e4 combobox label=\"공급업체\" group=\"기본 정보\" options=[대한물류, 한빛유통, 세명상사] value=\"한빛유통\"\n@e5 textbox label=\"비고\" group=\"기본 정보\"\n@e6 textbox label=\"선결제액\" placeholder=\"0\" group=\"금액\"\n@e7 textbox label=\"정산액\" placeholder=\"0\" group=\"금액\" value=\"30000\"\n@e8 button text=\"다시 입력\"\n@e9 button text=\"등록\"\n\n## 규칙\n- 위 목록의 ref 하나만 고른다. 뜻이 같은 것이 없으면 NONE.\n- 문구가 조금 달라도 같은 뜻이면 고른다 (예: \"정산 금액\" ≈ \"정산액\").\n- 비슷해 보이지만 다른 항목(예: 선결제액 vs 정산액)을 고르지 않도록 주의한다.\n- 설명이나 이유를 쓰지 마라. @e숫자 또는 NONE 한 토큰만 출력한다."
+        },
+        {
+          "step": "s4",
+          "ref": "@e9",
+          "raw": "@e9",
+          "ms": 13888,
+          "attempts": 1,
+          "prompt": "너는 웹 자동화 재생기다. 아래 \"단계\"가 가리키는 요소를 현재 화면에서 다시 찾아라.\n녹화 당시의 셀렉터는 사이트가 바뀌어 더 이상 맞지 않는다.\n\n## 단계\n의도: '정산 등록' 버튼을 누른다\n대상 설명: '정산 등록' 라고 적힌, 폼을 제출하는 기본 버튼\n대상 역할(role): button\n\n## 현재 화면의 조작 가능한 요소\n@e1 link text=\"대시보드\"\n@e2 link text=\"정산\"\n@e3 link text=\"거래처\"\n@e4 combobox label=\"공급업체\" group=\"기본 정보\" options=[대한물류, 한빛유통, 세명상사] value=\"한빛유통\"\n@e5 textbox label=\"비고\" group=\"기본 정보\" value=\"8월 정산\"\n@e6 textbox label=\"선결제액\" placeholder=\"0\" group=\"금액\"\n@e7 textbox label=\"정산액\" placeholder=\"0\" group=\"금액\" value=\"30000\"\n@e8 button text=\"다시 입력\"\n@e9 button text=\"등록\"\n\n## 규칙\n- 위 목록의 ref 하나만 고른다. 뜻이 같은 것이 없으면 NONE.\n- 문구가 조금 달라도 같은 뜻이면 고른다 (예: \"정산 금액\" ≈ \"정산액\").\n- 비슷해 보이지만 다른 항목(예: 선결제액 vs 정산액)을 고르지 않도록 주의한다.\n- 설명이나 이유를 쓰지 마라. @e숫자 또는 NONE 한 토큰만 출력한다."
+        }
+      ],
+      "rejected": [],
+      "oracle": {
+        "resultState": "ok",
+        "resultText": "등록 완료 · 한빛유통 · 30,000원",
+        "amountFieldValue": "30000",
+        "vendorFieldValue": "한빛유통",
+        "amountLandedInRightField": true,
+        "strayFilledFields": []
+      }
+    },
+    "intent-full | M5 id reuse (old #budget = prepayment box)": {
+      "steps": [
+        {
+          "id": "s1",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s2",
+          "tier": "hint:role",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s3",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": true
+        },
+        {
+          "id": "s4",
+          "tier": "hint:css",
+          "status": "ok",
+          "verified": null
+        }
+      ],
+      "model": [],
+      "rejected": [
+        {
+          "step": "s2",
+          "tier": "hint:css",
+          "reason": "hint still matched, but element no longer looks like the recorded target (now label=\"선결제액\" name=\"prepay\")"
+        },
+        {
+          "step": "s2",
+          "tier": "hint:xpath",
+          "reason": "hint still matched, but element no longer looks like the recorded target (now label=\"선결제액\" name=\"prepay\")"
+        }
+      ],
+      "oracle": {
+        "resultState": "ok",
+        "resultText": "등록 완료 · 한빛유통 · 30,000원",
+        "amountFieldValue": "30000",
+        "vendorFieldValue": "한빛유통",
+        "amountLandedInRightField": true,
+        "strayFilledFields": []
+      }
+    }
+  }
+}

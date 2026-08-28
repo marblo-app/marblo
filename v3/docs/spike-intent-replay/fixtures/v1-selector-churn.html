@@ -1,0 +1,62 @@
+<!doctype html>
+<!--
+  M1 — SELECTOR CHURN. What a CSS-in-JS rebuild or a design-system bump does:
+  every id and class is a fresh hash. Visible text, label association, and
+  form field names are untouched.
+  Expected to kill: recorded CSS/DOM-path hints.
+-->
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>정산 등록 · 파트너 어드민</title>
+  <script src="./_app.js"></script>
+</head>
+<body>
+  <header class="hdr_9f21">
+    <h1 class="hdr_9f21__t">파트너 정산 어드민</h1>
+    <nav class="hdr_9f21__n">
+      <a href="#" class="lnk_b3">대시보드</a>
+      <a href="#" class="lnk_b3">정산</a>
+      <a href="#" class="lnk_b3">거래처</a>
+    </nav>
+  </header>
+
+  <main class="pg_44ac">
+    <h2 class="pg_44ac__h">정산 등록</h2>
+    <form id="f_7d1e" class="frm_7d1e">
+      <div class="cx_1a">
+        <label class="cx_1a__l" for="c_v20">거래처</label>
+        <select id="c_v20" name="vendor" class="cx_1a__c ctl_e81" data-behavior="vendor">
+          <option value="">선택하세요</option>
+          <option value="대한물류">대한물류</option>
+          <option value="한빛유통">한빛유통</option>
+          <option value="세명상사">세명상사</option>
+        </select>
+      </div>
+
+      <div class="cx_1a">
+        <label class="cx_1a__l" for="c_v21">정산 금액</label>
+        <input id="c_v21" name="budget" type="text" class="cx_1a__c ctl_e81"
+               placeholder="금액을 입력하세요" data-behavior="amount" />
+        <span class="cx_1a__s">원</span>
+      </div>
+
+      <div class="cx_1a">
+        <label class="cx_1a__l" for="c_v22">메모</label>
+        <input id="c_v22" name="memo" type="text" class="cx_1a__c ctl_e81"
+               placeholder="선택 입력" data-behavior="memo" />
+      </div>
+
+      <div class="cx_row">
+        <button type="button" id="b_0" class="bt_5c bt_5c--g">초기화</button>
+        <button type="submit" id="b_1" class="bt_5c bt_5c--p">정산 등록</button>
+      </div>
+    </form>
+
+    <section class="rs_3b">
+      <h3 class="rs_3b__t">처리 결과</h3>
+      <p id="r_9" class="rs_3b__b" data-behavior="result">아직 등록된 정산이 없습니다</p>
+    </section>
+  </main>
+</body>
+</html>

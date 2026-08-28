@@ -1,0 +1,160 @@
+{
+  "schemaVersion": "1.0",
+  "id": "flow_settlement_filing",
+  "name": "정산 등록",
+  "recordedAt": "2026-08-27T23:24:37.594Z",
+  "origin": "http://127.0.0.1:54418",
+  "startUrl": "http://127.0.0.1:54418/v0-baseline.html",
+  "inputs": [
+    {
+      "name": "vendor",
+      "type": "string",
+      "example": "한빛유통",
+      "required": true
+    },
+    {
+      "name": "amount",
+      "type": "string",
+      "example": "30000",
+      "required": true
+    }
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "kind": "select",
+      "intent": "'거래처' 선택칸에서 거래처를 고른다",
+      "target": {
+        "description": "'거래처' 라벨이 붙은 선택칸",
+        "role": "combobox",
+        "name": "거래처",
+        "hints": {
+          "css": "#vendor",
+          "xpath": "/html/body[1]/main[1]/form[1]/div[1]/select[1]",
+          "attrs": {
+            "name": "vendor",
+            "placeholder": "",
+            "type": ""
+          },
+          "text": "",
+          "nearbyText": [
+            "거래처",
+            "선택하세요",
+            "대한물류",
+            "한빛유통",
+            "세명상사"
+          ]
+        }
+      },
+      "onResolveFail": "escalate",
+      "value": {
+        "from": "input",
+        "ref": "vendor"
+      },
+      "verify": {
+        "kind": "valueEquals",
+        "expect": "{{vendor}}"
+      }
+    },
+    {
+      "id": "s2",
+      "kind": "fill",
+      "intent": "'정산 금액' 입력칸에 값을 넣는다",
+      "target": {
+        "description": "'정산 금액' 라벨이 붙은 입력칸",
+        "role": "textbox",
+        "name": "정산 금액",
+        "hints": {
+          "css": "#budget",
+          "xpath": "/html/body[1]/main[1]/form[1]/div[2]/input[1]",
+          "attrs": {
+            "name": "budget",
+            "placeholder": "금액을 입력하세요",
+            "type": "text"
+          },
+          "text": "",
+          "nearbyText": [
+            "정산",
+            "금액",
+            "원"
+          ]
+        }
+      },
+      "onResolveFail": "escalate",
+      "value": {
+        "from": "input",
+        "ref": "amount"
+      },
+      "verify": {
+        "kind": "valueEquals",
+        "expect": "{{amount}}"
+      }
+    },
+    {
+      "id": "s3",
+      "kind": "fill",
+      "intent": "'메모' 입력칸에 값을 넣는다",
+      "target": {
+        "description": "'메모' 라벨이 붙은 입력칸",
+        "role": "textbox",
+        "name": "메모",
+        "hints": {
+          "css": "#memo",
+          "xpath": "/html/body[1]/main[1]/form[1]/div[3]/input[1]",
+          "attrs": {
+            "name": "memo",
+            "placeholder": "선택 입력",
+            "type": "text"
+          },
+          "text": "",
+          "nearbyText": [
+            "메모"
+          ]
+        }
+      },
+      "onResolveFail": "escalate",
+      "value": {
+        "from": "literal",
+        "text": "8월 정산"
+      },
+      "verify": {
+        "kind": "valueEquals",
+        "expect": "8월 정산"
+      }
+    },
+    {
+      "id": "s4",
+      "kind": "click",
+      "intent": "'정산 등록' 버튼을 누른다",
+      "target": {
+        "description": "'정산 등록' 라고 적힌, 폼을 제출하는 기본 버튼",
+        "role": "button",
+        "name": "정산 등록",
+        "hints": {
+          "css": "#submit-btn",
+          "xpath": "/html/body[1]/main[1]/form[1]/div[4]/button[2]",
+          "attrs": {
+            "name": "",
+            "placeholder": "",
+            "type": "submit"
+          },
+          "text": "정산 등록",
+          "nearbyText": [
+            "초기화",
+            "정산",
+            "등록"
+          ]
+        }
+      },
+      "onResolveFail": "escalate"
+    }
+  ],
+  "outcome": {
+    "kind": "textContains",
+    "description": "'처리 결과' 영역의 본문",
+    "hints": {
+      "css": "#result"
+    },
+    "expect": "등록 완료"
+  }
+}

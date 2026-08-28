@@ -1,0 +1,51 @@
+{
+  "model": "haiku (via local claude -p)",
+  "fixture": "M4 full-churn",
+  "expected": {
+    "s1": "@e4",
+    "s2": "@e7",
+    "s3": "@e5",
+    "s4": "@e9"
+  },
+  "rows": [
+    {
+      "step": "s1",
+      "n": 10,
+      "correct": 9,
+      "none": 1,
+      "wrongElement": 0,
+      "pickedDecoy": 0
+    },
+    {
+      "step": "s2",
+      "n": 10,
+      "correct": 10,
+      "none": 0,
+      "wrongElement": 0,
+      "pickedDecoy": 0
+    },
+    {
+      "step": "s3",
+      "n": 10,
+      "correct": 10,
+      "none": 0,
+      "wrongElement": 0,
+      "pickedDecoy": 0
+    },
+    {
+      "step": "s4",
+      "n": 10,
+      "correct": 10,
+      "none": 0,
+      "wrongElement": 0,
+      "pickedDecoy": 0
+    }
+  ],
+  "total": {
+    "n": 40,
+    "correct": 39,
+    "none": 1,
+    "wrongElement": 0
+  },
+  "note": "Failures were all NONE (fail-safe -> handoff). Zero wrong-element picks; the 선결제액 decoy was never selected."
+}

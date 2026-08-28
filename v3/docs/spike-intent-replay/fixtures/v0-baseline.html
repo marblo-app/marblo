@@ -1,0 +1,65 @@
+<!doctype html>
+<!--
+  V0 — baseline. This is the page as it looked when the human recorded the task.
+  Stands in for an API-less domestic settlement/vendor admin page.
+
+  NOTE FOR REVIEWERS: `data-behavior` exists only so one shared _app.js can drive
+  every mutated variant. It is stripped from snapshots and banned from hints
+  (see lib/snapshot.mjs + the guard in run-poc.mjs) so no resolver can cheat by
+  reading it. Nothing in a real target site would have it.
+-->
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>정산 등록 · 파트너 어드민</title>
+  <script src="./_app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="topbar__title">파트너 정산 어드민</h1>
+    <nav class="topbar__nav">
+      <a href="#" class="nav-link">대시보드</a>
+      <a href="#" class="nav-link">정산</a>
+      <a href="#" class="nav-link">거래처</a>
+    </nav>
+  </header>
+
+  <main class="page">
+    <h2 class="page__heading">정산 등록</h2>
+    <form id="settle-form" class="settle-form">
+      <div class="field">
+        <label class="field__label" for="vendor">거래처</label>
+        <select id="vendor" name="vendor" class="field__control fld-vendor" data-behavior="vendor">
+          <option value="">선택하세요</option>
+          <option value="대한물류">대한물류</option>
+          <option value="한빛유통">한빛유통</option>
+          <option value="세명상사">세명상사</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="budget">정산 금액</label>
+        <input id="budget" name="budget" type="text" class="field__control fld-amount"
+               placeholder="금액을 입력하세요" data-behavior="amount" />
+        <span class="field__suffix">원</span>
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="memo">메모</label>
+        <input id="memo" name="memo" type="text" class="field__control fld-memo"
+               placeholder="선택 입력" data-behavior="memo" />
+      </div>
+
+      <div class="actions">
+        <button type="button" id="reset-btn" class="btn btn-ghost">초기화</button>
+        <button type="submit" id="submit-btn" class="btn btn-primary">정산 등록</button>
+      </div>
+    </form>
+
+    <section class="result-box">
+      <h3 class="result-box__title">처리 결과</h3>
+      <p id="result" class="result-box__body" data-behavior="result">아직 등록된 정산이 없습니다</p>
+    </section>
+  </main>
+</body>
+</html>
