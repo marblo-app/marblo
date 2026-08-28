@@ -95,6 +95,34 @@ describe("initMainSentry", () => {
     expect(out.server_name).toBeUndefined();
   });
 
+  it("scrubs browser automation session fields before crash upload", async () => {
+    const { initMainSentry } = await import("../../electron/sentry-main");
+    await initMainSentry(OPTS);
+    const { beforeSend } = h.init.mock.calls[0][0] as {
+      beforeSend: (e: unknown) => Record<string, unknown>;
+    };
+
+    const out = beforeSend({
+      extra: {
+        storageState: { cookies: [{ value: "raw-session-cookie" }] },
+        requestHeaders: { authorization: "Bearer raw-token" },
+        visibleStatus: "NEEDS_HUMAN_AUTH",
+      },
+    }) as {
+      extra: {
+        storageState: string;
+        requestHeaders: string;
+        visibleStatus: string;
+      };
+    };
+
+    expect(out.extra.storageState).toBe("<REDACTED>");
+    expect(out.extra.requestHeaders).toBe("<REDACTED>");
+    expect(out.extra.visibleStatus).toBe("NEEDS_HUMAN_AUTH");
+    expect(JSON.stringify(out)).not.toContain("raw-session-cookie");
+    expect(JSON.stringify(out)).not.toContain("raw-token");
+  });
+
   it("★ an omitted environment defaults to `development`, never production", async () => {
     // Sentry's SERVER files an event with no environment under `production`.
     // The only callers that omit it are ad-hoc ones — headless probes, E2E

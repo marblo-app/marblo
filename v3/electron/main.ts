@@ -313,6 +313,12 @@ import {
   disconnectGoogleDrive,
   driveConnectionStatus,
 } from "./google-drive-auth";
+import {
+  browserSessionStore,
+  normalizeSiteKey,
+} from "./web-automation/browser-session-store";
+import { chromeBrowserSessionManager } from "./web-automation/browser-session-manager";
+import { BROWSER_SESSION_LEAKAGE_GUARDS } from "./web-automation/leakage-guards";
 // restricted 스코프를 뺀 결과 잠긴 기능들 — 조용히 401 을 내지 않고 이유를
 // 말하기 위한 단일 진실원(티켓 v5Phjv1WxndUpgFJyrIn).
 import { withheldCapabilityError } from "./google-restricted-scopes";
@@ -6282,6 +6288,19 @@ function resolveDriveUserId(value: unknown): string | null {
   return currentRealUserUid();
 }
 
+function resolveBrowserAutomationUserId(value: unknown): string | null {
+  return resolveDriveUserId(value);
+}
+
+function browserAutomationSiteKey(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    return normalizeSiteKey(value);
+  } catch {
+    return null;
+  }
+}
+
 /** Drive 호출 실패 → 사용자 문구. 예외 종류에 관계없이 토큰은 새지 않는다. */
 function driveFailure(e: unknown): { ok: false; error: string } {
   return {
@@ -6762,6 +6781,86 @@ ipcMain.handle("drive:disconnect", (_event, input: unknown) => {
   invalidateDriveScopeCaches();
   return disconnectGoogleDrive(safeStorage, userId);
 });
+
+// ── 웹 자동화 브라우저 런타임 + 세션 보관 (녹화재생 R3) ─────────────────────
+//
+// ★Chrome stable 만 쓴다: Playwright `channel:"chrome"` 고정. Edge/Brave
+// 자동 폴백은 하지 않는다. Chrome 이 없으면 NEEDS_BROWSER_INSTALL 로 멈추고
+// 사람이 Chrome 설치/확인을 해야 한다.
+//
+// ★세션 평문은 IPC 로 노출하지 않는다. Renderer 가 볼 수 있는 것은 어떤
+// siteKey/origin 세션이 있는지, 언제 캡처/검증/만료되는지, 삭제할 수 있는
+// 경로뿐이다. 복호화된 storageState 는 자동화 매니저 내부에서만 Playwright
+// context 에 메모리로 전달된다.
+
+ipcMain.handle("webAutomation:chromeProbe", async () => {
+  return chromeBrowserSessionManager.probeChrome();
+});
+
+ipcMain.handle("webAutomation:sessions:list", (_event, input: unknown) => {
+  const userId = resolveBrowserAutomationUserId(
+    input && typeof input === "object"
+      ? (input as { userId?: unknown }).userId
+      : input
+  );
+  if (!userId) return [];
+  return browserSessionStore.listSessions(safeStorage, userId);
+});
+
+ipcMain.handle("webAutomation:sessions:delete", (_event, input: unknown) => {
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  const userId = resolveBrowserAutomationUserId(raw.userId);
+  const siteKey = browserAutomationSiteKey(raw.siteKey);
+  if (!userId || !siteKey) {
+    return { ok: false, error: "브라우저 세션 삭제 대상이 올바르지 않습니다." };
+  }
+  browserSessionStore.deleteSession(safeStorage, userId, siteKey);
+  return { ok: true };
+});
+
+ipcMain.handle(
+  "webAutomation:sessions:launchStored",
+  async (_event, input: unknown) => {
+    const raw =
+      input && typeof input === "object"
+        ? (input as Record<string, unknown>)
+        : {};
+    const userId = resolveBrowserAutomationUserId(raw.userId);
+    const siteKey = browserAutomationSiteKey(raw.siteKey);
+    if (!userId || !siteKey) {
+      return {
+        ok: false,
+        status: "NEEDS_HUMAN_AUTH",
+        humanActionReason: "NO_STORED_SESSION",
+        message:
+          "저장된 사이트 로그인 세션을 찾을 수 없어 사람이 로그인해야 합니다.",
+      };
+    }
+    return chromeBrowserSessionManager.launchStoredSession(safeStorage, {
+      userId,
+      siteKey,
+      headless: raw.headless === false ? false : true,
+    });
+  }
+);
+
+ipcMain.handle("webAutomation:sessions:close", async (_event, input: unknown) => {
+  const sessionId =
+    input && typeof input === "object"
+      ? (input as { sessionId?: unknown }).sessionId
+      : input;
+  if (typeof sessionId !== "string" || !sessionId) {
+    return { ok: false, error: "브라우저 세션 id 가 올바르지 않습니다." };
+  }
+  return { ok: await chromeBrowserSessionManager.closeSession(sessionId) };
+});
+
+ipcMain.handle("webAutomation:sessions:leakageGuards", () =>
+  BROWSER_SESSION_LEAKAGE_GUARDS
+);
 
 ipcMain.handle("drive:search", async (_event, input: unknown) => {
   const raw =

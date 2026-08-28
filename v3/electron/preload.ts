@@ -1122,6 +1122,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
     appInstall: (projectId: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke("github:appInstall", projectId),
   },
+  webAutomation: {
+    chromeProbe: () => ipcRenderer.invoke("webAutomation:chromeProbe"),
+    listSessions: (userId?: string) =>
+      ipcRenderer.invoke("webAutomation:sessions:list", { userId }),
+    deleteSession: (input: { userId?: string; siteKey: string }) =>
+      ipcRenderer.invoke("webAutomation:sessions:delete", input),
+    launchStoredSession: (input: {
+      userId?: string;
+      siteKey: string;
+      headless?: boolean;
+    }) => ipcRenderer.invoke("webAutomation:sessions:launchStored", input),
+    closeSession: (sessionId: string) =>
+      ipcRenderer.invoke("webAutomation:sessions:close", { sessionId }),
+    leakageGuards: () =>
+      ipcRenderer.invoke("webAutomation:sessions:leakageGuards"),
+  },
   // Google Drive 읽기 전용 커넥터 (티켓 zqNxS9904aeeBEug1uAD + MCTHALmNAWPpilTFwe8o).
   // ★connect 는 시스템 브라우저를 열어 동의를 받는다(앱 창은 navigate 안 함).
   // ★어떤 응답에도 OAuth 토큰은 실리지 않는다(status 는 이메일·스코프만).

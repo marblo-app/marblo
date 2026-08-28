@@ -76,6 +76,8 @@ function scrubString(input: string): string {
 
 const SECRET_KEY_NAME =
   /(_KEY|_TOKEN|_SECRET|^MARBLO_|^ANTHROPIC_|^OPENAI_|^GOOGLE_)/i;
+const BROWSER_SESSION_KEY_NAME =
+  /(cookie|cookies|storageState|localStorage|sessionStorage|authorization|authHeader|setCookie|headers?|responseBody|requestBody|hiddenDom)/i;
 const USER_INPUT_KEY =
   /^(prompt|initialPrompt|message|userInput|content|raw_input)$/i;
 const MAX_DEPTH = 8;
@@ -90,7 +92,7 @@ function scrubValue(value: unknown, depth = 0): unknown {
     const out: Record<string, unknown> = {};
     for (const [key, v] of Object.entries(value)) {
       if (USER_INPUT_KEY.test(key)) continue; // drop free-form prose entirely
-      if (SECRET_KEY_NAME.test(key)) {
+      if (SECRET_KEY_NAME.test(key) || BROWSER_SESSION_KEY_NAME.test(key)) {
         out[key] = "<REDACTED>";
         continue;
       }
