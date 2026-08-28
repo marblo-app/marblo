@@ -286,3 +286,79 @@ describe("시트 조건 보류 — 엔진이 이유를 말한다", () => {
     expect(injected[0]).not.toContain("다시 연결");
   });
 });
+
+/**
+ * ★Calendar 조건도 토큰 scope 가 아니라 앱 게이트로 막는다(스코프0 T2).
+ *
+ * 기존 refresh_token 이 calendar.readonly 를 들고 있을 수 있어도 엔진은 Google
+ * Calendar API 를 호출하지 않는다. Apple Calendar 대체 경로가 붙기 전까지는
+ * 사용자에게 "지금은 쓸 수 없다" 는 이유를 한 번 말한다.
+ */
+describe("Calendar 조건 보류 — 엔진이 이유를 말한다", () => {
+  function makeManager(): {
+    manager: AssistantTriggerManager;
+    injected: string[];
+    calendarCalls: number[];
+  } {
+    const injected: string[] = [];
+    const calendarCalls: number[] = [];
+    const orchestrator: AssistantTriggerOrchestrator = {
+      isRunning: () => true,
+      injectMessage: async (message: string) => {
+        injected.push(message);
+        return true;
+      },
+    };
+    const options: AssistantTriggerManagerOptions = {
+      listProjects: async () => [
+        {
+          id: "assistant-1",
+          name: "비서",
+          kind: "assistant",
+          assistantTriggers: {
+            enabled: true,
+            outputs: ["slack"],
+            calendar: {
+              enabled: true,
+              upcomingMinutes: 30,
+              pollMinutes: 5,
+            },
+          },
+        },
+      ],
+      workspace: {
+        gmailSearch: async () => ({ ok: false, error: "unused" }),
+        gmailFetch: async () => ({ ok: false, error: "unused" }),
+        calendarList: async () => {
+          calendarCalls.push(Date.now());
+          return { ok: false, error: "should never be called" };
+        },
+        listWebhookEvents: async () => ({ ok: false, error: "unused" }),
+        sheetsValues: async () => ({ ok: false, error: "unused" }),
+      } as unknown as AssistantTriggerManagerOptions["workspace"],
+      resolveOrchestrator: async () => orchestrator,
+      setTimer: (() => 0 as unknown as NodeJS.Timeout) as never,
+      clearTimer: () => undefined,
+    };
+    return {
+      manager: new AssistantTriggerManager(options),
+      injected,
+      calendarCalls,
+    };
+  }
+
+  it("Calendar 를 읽지 않고, 아직 대체가 없어 지금 쓸 수 없다고 안내한다", async () => {
+    const { manager, injected, calendarCalls } = makeManager();
+    manager.start();
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    manager.stop();
+
+    expect(calendarCalls).toHaveLength(0);
+    expect(injected).toHaveLength(1);
+    expect(injected[0]).toContain("일정 트리거");
+    expect(injected[0]).toContain("지금은 쓸 수 없습니다");
+    expect(injected[0]).toContain("Apple Calendar");
+    expect(injected[0]).toContain("설정은 지우지 않았");
+  });
+});

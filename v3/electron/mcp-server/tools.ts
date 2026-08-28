@@ -9244,8 +9244,8 @@ export function registerTools(server: McpServer): void {
     "UNAVAILABLE IN THIS RELEASE — do not call. Reading the user's mail needs the " +
       "gmail.readonly scope, which Google classes as restricted and which Marblo does " +
       "not request in this release (it would require a paid CASA security assessment). " +
-      "Sending mail (gmail_send) and Calendar/Contacts lookups still work; ask the user " +
-      "to paste any mail content you need. Kept registered, not deleted, so it can be " +
+      "Sending mail now uses mail_send, and Calendar/Contacts lookups are not available " +
+      "until their non-Google replacements land. Ask the user to paste any mail content you need. Kept registered, not deleted, so it can be " +
       "restored once CASA is passed.",
     {
       query: z
@@ -9381,7 +9381,7 @@ export function registerTools(server: McpServer): void {
       "folder needs the gmail.compose scope, which Google classes as restricted (it is " +
       "NOT sensitive) and which Marblo does not request in this release. The review " +
       "step moved into the app: show the draft to the user in your reply, and once they " +
-      "confirm, send it with gmail_send(confirm=true). See docs/GMAIL_DRAFT_REPLACEMENT.md. " +
+      "confirm, send it with mail_send(confirm=true). See docs/GMAIL_DRAFT_REPLACEMENT.md. " +
       "Kept registered, not deleted, so it can be restored once CASA is passed.",
     gmailComposeSchema,
     async ({ to, subject, body, cc, bcc, thread_id }) => {
@@ -9422,9 +9422,11 @@ export function registerTools(server: McpServer): void {
 
   auditedTool(
     "gmail_send",
-    "Send a Gmail message for the connected user. DESTRUCTIVE/IRREVERSIBLE: " +
-      "you must have explicit user confirmation before calling this. The tool " +
-      "will refuse unless confirm=true is provided.",
+    "UNAVAILABLE IN THIS RELEASE — do not call. Gmail API sending needs the " +
+      "gmail.send scope, which Google classes as sensitive and which Marblo no longer " +
+      "requests because any sensitive scope triggers publishing verification. Send mail " +
+      "with mail_send instead; that Resend sendAssistantEmail path is the current " +
+      "cross-platform replacement. Kept registered, not deleted, so it can be restored later.",
     {
       ...gmailComposeSchema,
       confirm: z
@@ -9547,10 +9549,11 @@ export function registerTools(server: McpServer): void {
 
   auditedTool(
     "calendar_list",
-    "List events from the connected user's primary Google Calendar for THIS " +
-      "PROJECT context (READ-ONLY). Use `time_min` and `time_max` ISO timestamps " +
-      "to bound the period. Returns title, start/end time, attendees, location, " +
-      "and link. Requires Calendar read-only consent in Marblo's Harness tab.",
+    "UNAVAILABLE IN THIS RELEASE — do not call. Google Calendar reading needs the " +
+      "calendar.readonly scope, which Google classes as sensitive and which Marblo no " +
+      "longer requests because any sensitive scope triggers publishing verification. " +
+      "There is no replacement available yet; Apple Calendar support is a follow-up. " +
+      "Kept registered, not deleted, so it can be restored later.",
     {
       time_min: z
         .string()
@@ -9655,9 +9658,11 @@ export function registerTools(server: McpServer): void {
 
   auditedTool(
     "calendar_create",
-    "Create an event in the connected user's primary Google Calendar. This is a " +
-      "non-destructive create action and runs immediately. Use send_updates only " +
-      "when attendees should be notified.",
+    "UNAVAILABLE IN THIS RELEASE — do not call. Google Calendar writes need the " +
+      "calendar.events scope, which Google classes as sensitive and which Marblo no " +
+      "longer requests because any sensitive scope triggers publishing verification. " +
+      "There is no replacement available yet; Apple Calendar support is a follow-up. " +
+      "Kept registered, not deleted, so it can be restored later.",
     calendarEventSchema,
     async ({
       title,
@@ -9710,9 +9715,11 @@ export function registerTools(server: McpServer): void {
 
   auditedTool(
     "calendar_patch",
-    "Patch an existing event in the connected user's primary Google Calendar. " +
-      "Only provided fields are updated. Use send_updates only when attendees " +
-      "should be notified.",
+    "UNAVAILABLE IN THIS RELEASE — do not call. Google Calendar writes need the " +
+      "calendar.events scope, which Google classes as sensitive and which Marblo no " +
+      "longer requests because any sensitive scope triggers publishing verification. " +
+      "There is no replacement available yet; Apple Calendar support is a follow-up. " +
+      "Kept registered, not deleted, so it can be restored later.",
     {
       event_id: z.string().describe("Calendar event id."),
       title: z.string().optional().describe("Event title."),
@@ -9777,10 +9784,11 @@ export function registerTools(server: McpServer): void {
 
   auditedTool(
     "contacts_search",
-    "Search the connected user's Google Contacts by name or email (READ-ONLY). " +
-      "Uses People API connections.list and returns names, email addresses, phone " +
-      "numbers, and organizations. Requires Google Contacts read-only consent in " +
-      "Marblo's Harness tab. OAuth tokens never leave Marblo main process.",
+    "UNAVAILABLE IN THIS RELEASE — do not call. Google Contacts search needs the " +
+      "contacts.readonly scope, which Google classes as sensitive and which Marblo no " +
+      "longer requests because any sensitive scope triggers publishing verification. " +
+      "There is no replacement available yet; ask the user for the email address directly. " +
+      "Kept registered, not deleted, so it can be restored later.",
     {
       query: z
         .string()

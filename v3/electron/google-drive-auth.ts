@@ -34,12 +34,11 @@
  * 셋을 모두 뺐다. 이어서 T1 에서 `drive.file` 도 요청 목록에서 뺐다. 이 스코프는
  * non-sensitive 라 검증 심사 제거에 기여하지 않는다. 빼는 이유는 유일한 소비자
  * `drive_write` 가 이미 WITHHELD_CAPABILITIES 로 잠겨 있어, 아무 능력도 사주지
- * 않는 스코프를 동의 화면에 남기지 않는 최소권한 정리다. 남는 것은 sensitive
- * 다섯 + non-sensitive 둘이다:
+ * 않는 스코프를 동의 화면에 남기지 않는 최소권한 정리다.
  *
- *   sensitive     gmail.send · calendar.readonly · calendar.events ·
- *                 contacts.readonly · spreadsheets.readonly
- *   non-sensitive openid · email
+ * T2 에서 남은 sensitive 다섯(`gmail.send` · `calendar.readonly` ·
+ * `calendar.events` · `contacts.readonly` · `spreadsheets.readonly`)도 요청
+ * 목록에서 뺐다. 이제 남는 요청은 non-sensitive `openid email` 뿐이다.
  *
  * ★`gmail.compose` 가 sensitive 라는 통념은 틀렸다. Gmail 에서 sensitive 인 것은
  * `gmail.send` 와 addons 계열뿐이고, readonly · compose · metadata · modify ·
@@ -57,9 +56,8 @@
  * ── ★기존 사용자: 재연결을 강제하지 않는다 ───────────────────────────────
  * 콘솔에서 스코프를 지워도 이미 발급된 refresh_token 은 넓은 스코프를 그대로
  * 유지한다(구글은 소급 철회를 하지 않는다). 그래도 강제 재연결은 하지 않는다:
- *   · 강제하면 아직 잘 도는 Calendar · Contacts · Sheets · 메일 발송까지 한 번에
- *     끊기고, 얻는 것은 없다.
- *   · restricted 기능을 막는 일은 토큰이 아니라 **앱 쪽 게이트**가 한다
+ *   · 강제하면 아직 도는 non-sensitive 로그인 연결까지 끊기고, 얻는 것은 없다.
+ *   · 보류 기능을 막는 일은 토큰이 아니라 **앱 쪽 게이트**가 한다
  *     (`withheldCapabilityError`). 토큰이 무엇을 부여받았는지 묻지 않고 막으므로,
  *     기존 토큰의 넓이는 그냥 무해하게 잠든다.
  *   · 반대로 `GOOGLE_CONNECTOR_REQUIRED_SCOPES` 에서는 셋을 **반드시** 빼야 한다.
@@ -122,7 +120,14 @@ export {
   DRIVE_READONLY_SCOPE,
   GMAIL_READONLY_SCOPE,
   GMAIL_COMPOSE_SCOPE,
+  GMAIL_SEND_SCOPE,
+  CALENDAR_READONLY_SCOPE,
+  CALENDAR_EVENTS_SCOPE,
+  CONTACTS_READONLY_SCOPE,
+  SPREADSHEETS_READONLY_SCOPE,
+  SPREADSHEETS_READONLY_SCOPE as SHEETS_READONLY_SCOPE,
   WITHHELD_RESTRICTED_SCOPES,
+  WITHHELD_SENSITIVE_SCOPES,
 } from "./google-restricted-scopes";
 
 /**
@@ -134,33 +139,13 @@ export {
  * `drive.file` 도 지금은 요청하지 않지만, 삭제가 아니라 보류라 상수는 유지한다.
  */
 export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
-export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
-export const CALENDAR_READONLY_SCOPE =
-  "https://www.googleapis.com/auth/calendar.readonly";
-export const CALENDAR_EVENTS_SCOPE =
-  "https://www.googleapis.com/auth/calendar.events";
-export const CONTACTS_READONLY_SCOPE =
-  "https://www.googleapis.com/auth/contacts.readonly";
 /**
- * 시트 **읽기 전용**. 티켓 qxDMhv5bgZA2nRe7AdPC.
+ * 요청하는 **읽기** 스코프.
  *
- * ★쓰기 스코프(`spreadsheets`)를 요구하지 않는다 — "새 행이 추가되면" 트리거는
- * 읽기만 하면 되고, 쓰기까지 묶으면 동의 화면이 무거워질 뿐이다.
- * Google 분류상 sensitive scope 이지만 readonly 계열 restricted 스코프와 달리
- * CASA 보안평가 대상이 아니다 — 그래서 이번 정리에서도 그대로 남는다.
+ * T2 에서 Calendar · Contacts · Sheets 읽기 스코프를 전부 보류했다. 배열은
+ * 되살릴 때 한 줄씩 다시 옮기기 위해 남긴다.
  */
-export const SHEETS_READONLY_SCOPE =
-  "https://www.googleapis.com/auth/spreadsheets.readonly";
-
-/**
- * 요청하는 **읽기** 스코프. Drive · Gmail 읽기는 restricted 라 여기 없다 —
- * 남은 셋은 전부 sensitive 다.
- */
-export const GOOGLE_CONNECTOR_READONLY_SCOPES = [
-  CALENDAR_READONLY_SCOPE,
-  CONTACTS_READONLY_SCOPE,
-  SHEETS_READONLY_SCOPE,
-] as const;
+export const GOOGLE_CONNECTOR_READONLY_SCOPES = [] as const;
 
 /**
  * 요청하는 **쓰기** 스코프. `gmail.compose` 는 restricted 라 빠졌다 —
@@ -170,33 +155,22 @@ export const GOOGLE_CONNECTOR_READONLY_SCOPES = [
  * `drive.file` 은 non-sensitive 라 검증 심사 제거에는 기여하지 않지만, 유일한
  * 소비자 `drive_write` 가 이미 앱에서 무조건 잠겨 있다. 아무 능력도 사주지 않는
  * 스코프를 동의 화면에 남기지 않는 최소권한 원칙으로 요청 목록에서 보류한다.
+ * `gmail.send` 와 `calendar.events` 도 T2 에서 보류했다.
  */
-export const GOOGLE_CONNECTOR_WRITE_SCOPES = [
-  GMAIL_SEND_SCOPE,
-  CALENDAR_EVENTS_SCOPE,
-] as const;
+export const GOOGLE_CONNECTOR_WRITE_SCOPES = [] as const;
 
 /**
  * 연결 성립 시점에 **전량 부여되었는지 검증**하는 목록.
  *
- * ★SHEETS_READONLY_SCOPE 는 여기 없다. 요청(DRIVE_AUTH_SCOPE)에는 넣지만 필수
- * 검증에서는 뺀다 — 이 목록에 넣는 순간, 이미 연결해 둔 기존 사용자가 재연결할
- * 때 시트 동의를 빼면 **연결 자체가 실패**한다. 시트 조건을 쓰지 않는 사용자의
- * 연결을 깨뜨리지 않는 쪽을 택했다. 대신 조용히 두지도 않는다: 설정 패널이
- * drive.status().scopes 에서 이 스코프의 부재를 읽어 "시트 조건을 켜려면 Google
- * 을 다시 연결해야 한다" 고 말하고, 저장 자체를 막는다(assistantTriggerSettings
- * 의 sheets_connector_required).
+ * T2 이후 필수 검증 목록은 비어 있다. `DRIVE_AUTH_SCOPE` 에는 `openid email` 만
+ * 남고, 민감 기능은 연결 성공 여부나 토큰 스코프가 아니라 앱 게이트가 막는다.
  *
  * ★restricted 셋도 반드시 여기 없어야 한다. 남겨두면 콘솔에서 스코프를 지운
  * 뒤의 **새 연결이 전부** "필수 스코프 미부여" 로 실패한다. 기존 사용자의 넓은
  * 토큰은 상위집합이라 어느 쪽이든 통과하므로, 이 목록은 새 사용자를 기준으로
  * 잡는 게 맞다.
  */
-export const GOOGLE_CONNECTOR_REQUIRED_SCOPES = [
-  ...GOOGLE_CONNECTOR_WRITE_SCOPES,
-  CALENDAR_READONLY_SCOPE,
-  CONTACTS_READONLY_SCOPE,
-] as const;
+export const GOOGLE_CONNECTOR_REQUIRED_SCOPES = [] as const;
 
 /**
  * authorize 에 실제로 보내는 스코프 문자열(위 주석 ③ 참고).
@@ -210,11 +184,7 @@ export const GOOGLE_CONNECTOR_REQUIRED_SCOPES = [
  * 지운 스코프를 요청하는 셈이라). `restrictedScopesIn()` 으로 검사하는 회귀
  * 테스트가 tests/unit/google-drive-auth.test.ts 에 있다.
  */
-export const DRIVE_AUTH_SCOPE = `openid email ${GOOGLE_CONNECTOR_READONLY_SCOPES.join(
-  " "
-)} ${GOOGLE_CONNECTOR_WRITE_SCOPES.join(
-  " "
-)}`;
+export const DRIVE_AUTH_SCOPE = "openid email";
 
 /**
  * access_token 을 만료 몇 ms 전에 미리 갱신할지. 네트워크 왕복 + 시계 오차를
@@ -224,10 +194,10 @@ const REFRESH_SKEW_MS = 2 * 60 * 1000;
 
 const DRIVE_LABELS = {
   okTitle: "Google 커넥터 연결 완료",
-  // ★약속한 것만 적는다. Drive 문서 읽기와 Gmail 메일 읽기는 이번 출시에서
-  //   요청하지 않는 권한이므로 여기서도 말하지 않는다(CONVENTION 정직성 조항).
+  // ★약속한 것만 적는다. Google Workspace 민감 기능은 이번 출시에서 요청하지
+  //   않는 권한이므로 여기서도 말하지 않는다(CONVENTION 정직성 조항).
   okBody:
-    "Marblo 가 Calendar 와 Contacts, 스프레드시트를 조회하고, 확인하신 메일을 발송할 수 있게 되었습니다. 이 창을 닫고 앱으로 돌아가세요.",
+    "Marblo 가 Google 계정 정보를 확인했습니다. Calendar·Contacts·Sheets·Gmail 권한은 이번 출시에서 요청하지 않습니다. 이 창을 닫고 앱으로 돌아가세요.",
   failTitle: "Google 커넥터 연결 실패",
   failBody: "연결에 실패했습니다. 이 창을 닫고 앱에서 다시 시도해 주세요.",
 };
@@ -399,8 +369,8 @@ export async function connectGoogleDrive(
         "구글 계정의 '보안 → 타사 앱' 에서 Marblo 접근을 제거한 뒤 다시 시도해 주세요.",
     };
   }
-  // 사용자가 동의 화면에서 Drive 체크를 해제할 수 있다. 그 경우 토큰은 오지만
-  // Drive 는 못 읽는다 — 여기서 잡지 않으면 나중에 알 수 없는 403 으로 나온다.
+  // 사용자가 동의 화면에서 일부 체크를 해제할 수 있다. 지금은 필수 Workspace
+  // 스코프가 없지만, 이 검증 목록은 되살릴 때 그대로 쓰는 자리라 남긴다.
   const grantedScopes = scope ? scope.split(/\s+/) : [];
   const missingScopes = GOOGLE_CONNECTOR_REQUIRED_SCOPES.filter(
     (requiredScope) => !grantedScopes.includes(requiredScope)
@@ -409,7 +379,7 @@ export async function connectGoogleDrive(
     return {
       ok: false,
       error:
-        "Google 커넥터 권한이 모두 부여되지 않았습니다. 동의 화면에서 Drive, Gmail, Calendar, Contacts 항목을 허용해 주세요.",
+        "Google 커넥터 권한이 모두 부여되지 않았습니다. 동의 화면에서 요청된 항목을 허용해 주세요.",
     };
   }
 

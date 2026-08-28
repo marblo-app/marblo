@@ -6611,6 +6611,8 @@ async function gmailSendFor(
 ): Promise<
   { ok: true; message: GmailSendResult } | { ok: false; error: string }
 > {
+  const withheld = withheldCapabilityError("gmail_send");
+  if (withheld) return withheld;
   if (!userId) return DRIVE_NOT_CONNECTED;
   try {
     return {
@@ -6633,6 +6635,8 @@ async function calendarListFor(
 ): Promise<
   { ok: true; result: CalendarListResult } | { ok: false; error: string }
 > {
+  const withheld = withheldCapabilityError("calendar_read");
+  if (withheld) return withheld;
   if (!userId) return DRIVE_NOT_CONNECTED;
   try {
     return {
@@ -6659,6 +6663,8 @@ async function sheetsValuesFor(
 ): Promise<
   { ok: true; result: SheetsValuesResult } | { ok: false; error: string }
 > {
+  const withheld = withheldCapabilityError("sheets_trigger");
+  if (withheld) return withheld;
   if (!userId) return DRIVE_NOT_CONNECTED;
   try {
     return {
@@ -6679,6 +6685,8 @@ async function calendarCreateFor(
   userId: string | null,
   params: CalendarEventInput
 ): Promise<{ ok: true; event: CalendarEvent } | { ok: false; error: string }> {
+  const withheld = withheldCapabilityError("calendar_write");
+  if (withheld) return withheld;
   if (!userId) return DRIVE_NOT_CONNECTED;
   try {
     return {
@@ -6699,6 +6707,8 @@ async function calendarPatchFor(
   userId: string | null,
   params: CalendarPatchInput
 ): Promise<{ ok: true; event: CalendarEvent } | { ok: false; error: string }> {
+  const withheld = withheldCapabilityError("calendar_write");
+  if (withheld) return withheld;
   if (!userId) return DRIVE_NOT_CONNECTED;
   try {
     return {
@@ -6721,6 +6731,8 @@ async function contactsSearchFor(
 ): Promise<
   { ok: true; result: ContactsSearchResult } | { ok: false; error: string }
 > {
+  const withheld = withheldCapabilityError("contacts_search");
+  if (withheld) return withheld;
   if (!userId) return DRIVE_NOT_CONNECTED;
   try {
     return {

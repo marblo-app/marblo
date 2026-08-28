@@ -435,8 +435,8 @@ export const agents = {
     "먼저 README와 기본 분류를 만들고, 현재 프로젝트 문서/결정사항 중 봇이 자주 참조할 내용을 wiki-note로 정리한 뒤 wiki-ingest와 wiki-lint까지 돌려줘.",
   "agents.marbloBots.wiki.request4":
     '다른 프로젝트에서 참조할 때는 wiki_query({ root_path: "<프로젝트 절대경로>/docs/wiki", query: "..." }) 형태로 쓰게 안내해줘.',
-  // ★Gmail 은 "읽기" 가 아니라 "발송" 만 남았다(티켓 v5Phjv1WxndUpgFJyrIn).
-  "agents.marbloBots.require.google": "Google 계정 연결 (Calendar 조회·메일 발송)",
+  // ★Google Workspace 스코프는 더 이상 요청하지 않는다(스코프0 T2).
+  "agents.marbloBots.require.google": "Google 계정 연결 (식별만)",
   "agents.marbloBots.require.outputChannel": "Slack 또는 Telegram 채널",
   "agents.marbloBots.seed.knowledge.name": "지식 비서",
   "agents.marbloBots.seed.knowledge.persona":
@@ -456,16 +456,16 @@ export const agents = {
   "agents.marbloBots.seed.dailyBriefing.persona":
     "정해진 시간에 일정과 열린 할일만 짧게 확인하고 Slack/Telegram으로 밀어주는 비서",
   "agents.marbloBots.seed.dailyBriefing.mission":
-    "오늘 일정과 진행 중인 할일을 확인해 한 화면 분량의 브리핑으로 정리하고 선택된 채널로 보낸다.",
+    "진행 중인 할일을 확인해 한 화면 분량의 브리핑으로 정리하고 선택된 채널로 보낸다.",
   "agents.marbloBots.seed.dailyBriefing.evidence":
-    "MCP 서버에 calendar_list, send_slack_message, send_telegram_message가 등록되어 있다. 새 메일 요약은 이번 출시에서 제공하지 않는다 — 메일 읽기(gmail.readonly)는 restricted 스코프라 요청하지 않는다.",
+    "MCP 서버에 send_slack_message, send_telegram_message가 등록되어 있다. Calendar와 메일 읽기는 Google 데이터 스코프를 요청하지 않기 때문에 이번 출시에서 제공하지 않는다.",
   "agents.marbloBots.seed.mailCalendar.name": "일정 팔로업",
   "agents.marbloBots.seed.mailCalendar.persona":
-    "임박 일정이 들어오면 중요도와 다음 행동만 추려 알려주는 조건 반응 비서",
+    "후속 Apple Calendar 경로를 위해 보류해 둔 조건 반응 비서",
   "agents.marbloBots.seed.mailCalendar.mission":
-    "임박 일정을 확인하고, 준비물·후속 태스크 후보를 짧게 정리한다.",
+    "Calendar 지원이 돌아오면 임박 일정에서 준비물·후속 태스크 후보를 짧게 정리한다.",
   "agents.marbloBots.seed.mailCalendar.evidence":
-    "assistant-triggers 엔진이 Calendar 조건을 폴링하고 같은 전송 MCP 도구로 푸시하도록 배선되어 있다. 새 메일 조건은 이번 출시에서 제공하지 않는다.",
+    "Google Calendar 조건은 이번 출시에서 보류되어 있다. 설정은 지우지 않았으므로 후속 Apple Calendar 경로가 붙으면 되살릴 수 있다.",
   "agents.marbloBots.seed.marketer.name": "마케터",
   "agents.marbloBots.seed.marketer.persona":
     "프로젝트 지식과 현재 보드 맥락을 바탕으로 캠페인·카피·실험안을 작업 티켓으로 쪼개는 성장 비서",
@@ -484,9 +484,9 @@ export const agents = {
   "agents.marbloBots.seed.jarvis.persona":
     "오케의 범용 보좌역으로 위키·일정·보드·출력 채널을 묶어 다음 행동을 정리하는 비서",
   "agents.marbloBots.seed.jarvis.mission":
-    "요청의 성격을 판단해 위키, Calendar, 보드 티켓, Slack/Telegram 보고 중 필요한 조합만 사용해 실행 계획과 결과를 정리한다. 메일은 읽지 않고, 초안을 보여 드린 뒤 확인을 받아 발송한다.",
+    "요청의 성격을 판단해 위키, 보드 티켓, mail_send, Slack/Telegram 보고 중 필요한 조합만 사용해 실행 계획과 결과를 정리한다. 이번 출시에서는 메일이나 Calendar를 읽지 않는다.",
   "agents.marbloBots.seed.jarvis.evidence":
-    "MCP 서버에 wiki_query, create_task, dispatch_task, calendar_list, gmail_send, send_slack_message, send_telegram_message가 등록되어 있다. 메일 읽기(gmail_search)는 이번 출시에서 제공하지 않는다.",
+    "MCP 서버에 wiki_query, create_task, dispatch_task, mail_send, send_slack_message, send_telegram_message가 등록되어 있다. Google Calendar, Gmail API 발송, 메일 읽기는 이번 출시에서 제공하지 않는다.",
   "agents.marbloBots.omitted.youtube.name": "유튜브 리서치",
   "agents.marbloBots.omitted.youtube.reason":
     "유튜브 전용 커넥터나 검증된 브라우저/검색 MCP가 현재 시드 재료로 확인되지 않아 첫 화면 실행 신뢰도를 해친다.",
@@ -559,9 +559,9 @@ export const agents = {
   "agents.triggers.validation.invalidCron":
     "cron은 5필드 형식이어야 합니다. 예: 0 9 * * 1-5",
   "agents.triggers.validation.calendarConnectorRequired":
-    "Calendar 트리거를 켜려면 Google Calendar scope가 필요합니다.",
+    "Calendar 트리거는 지금 사용할 수 없습니다. Google Calendar scope는 더 이상 요청하지 않으며, Apple Calendar 지원은 후속 작업입니다.",
   "agents.triggers.validation.gmailConnectorRequired":
-    "새 메일 감지 트리거는 이번 출시에서 제공하지 않습니다. 메일 읽기 권한(gmail.readonly)은 Google 이 restricted 로 분류해 별도 보안평가를 통과해야 요청할 수 있습니다. 일정·시간·스프레드시트 조건은 그대로 쓸 수 있습니다.",
+    "새 메일 감지 트리거는 이번 출시에서 제공하지 않습니다. 메일 읽기 권한(gmail.readonly)은 Google 이 restricted 로 분류해 별도 보안평가를 통과해야 요청할 수 있습니다. 시간 트리거는 그대로 동작하고, 스프레드시트 새 행 감지는 Webhook 조건의 Apps Script 로 합니다.",
   "agents.triggers.validation.calendarPollOutOfRange":
     "Calendar poll 간격은 1~60분이어야 합니다.",
   "agents.triggers.validation.gmailPollOutOfRange":

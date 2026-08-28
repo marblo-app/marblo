@@ -444,9 +444,9 @@ export const agents: Record<keyof typeof koAgents, string> = {
     "Create the README and base taxonomy first, summarize the project docs/decisions bots will reuse with wiki-note, then run wiki-ingest and wiki-lint.",
   "agents.marbloBots.wiki.request4":
     'When another project queries it, document the form wiki_query({ root_path: "<absolute project path>/docs/wiki", query: "..." }).',
-  // Gmail is send-only now, not read (ticket v5Phjv1WxndUpgFJyrIn).
+  // Google Workspace scopes are no longer requested (scope-zero T2).
   "agents.marbloBots.require.google":
-    "Google account connected (Calendar lookups, sending mail)",
+    "Google account connected (identity only)",
   "agents.marbloBots.require.outputChannel": "Slack or Telegram channel",
   "agents.marbloBots.seed.knowledge.name": "Knowledge Assistant",
   "agents.marbloBots.seed.knowledge.persona":
@@ -466,16 +466,16 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.marbloBots.seed.dailyBriefing.persona":
     "A scheduled assistant that checks the calendar and open work, then pushes a short Slack/Telegram brief.",
   "agents.marbloBots.seed.dailyBriefing.mission":
-    "Review today's calendar and active tasks, then send a one-screen briefing to the selected channel.",
+    "Review active tasks, then send a one-screen briefing to the selected channel.",
   "agents.marbloBots.seed.dailyBriefing.evidence":
-    "calendar_list, send_slack_message, and send_telegram_message are registered in the MCP server. Summarizing new mail is not offered in this release — reading mail (gmail.readonly) is a restricted scope we do not request.",
+    "send_slack_message and send_telegram_message are registered in the MCP server. Calendar and mail reading are not offered in this release because Google data scopes are not requested.",
   "agents.marbloBots.seed.mailCalendar.name": "Calendar Follow-up",
   "agents.marbloBots.seed.mailCalendar.persona":
-    "A conditional assistant that reacts to upcoming calendar events and extracts priority plus next action.",
+    "A conditional assistant template kept for the future Apple Calendar path.",
   "agents.marbloBots.seed.mailCalendar.mission":
-    "Check upcoming events, then summarize prep items and candidate follow-up tasks.",
+    "When Calendar support returns, summarize prep items and candidate follow-up tasks from upcoming events.",
   "agents.marbloBots.seed.mailCalendar.evidence":
-    "The assistant-triggers engine polls Calendar conditions and uses the same outbound MCP tools. New-mail conditions are not offered in this release.",
+    "Google Calendar conditions are on hold in this release. The settings are kept, not deleted, so the Apple Calendar follow-up can restore the path.",
   "agents.marbloBots.seed.marketer.name": "Marketer",
   "agents.marbloBots.seed.marketer.persona":
     "A growth assistant that uses project knowledge and board context to split campaigns, copy, and experiments into tasks.",
@@ -494,9 +494,9 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.marbloBots.seed.jarvis.persona":
     "The Orchestrator's general aide, combining wiki, calendar, board, and output channels into concrete next actions.",
   "agents.marbloBots.seed.jarvis.mission":
-    "Classify the request and use only the needed mix of wiki, Calendar, board tickets, and Slack/Telegram reporting. It never reads your mail; it shows you a draft and sends it once you confirm.",
+    "Classify the request and use only the needed mix of wiki, board tickets, mail_send, and Slack/Telegram reporting. It never reads your mail or Calendar in this release.",
   "agents.marbloBots.seed.jarvis.evidence":
-    "wiki_query, create_task, dispatch_task, calendar_list, gmail_send, send_slack_message, and send_telegram_message are registered in the MCP server. Reading mail (gmail_search) is not offered in this release.",
+    "wiki_query, create_task, dispatch_task, mail_send, send_slack_message, and send_telegram_message are registered in the MCP server. Google Calendar, Gmail API send, and mail reading are not offered in this release.",
   "agents.marbloBots.omitted.youtube.name": "YouTube Research",
   "agents.marbloBots.omitted.youtube.reason":
     "A YouTube-specific connector or verified browser/search MCP is not available in the current seed materials, so it would reduce first-screen run reliability.",
@@ -570,9 +570,9 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.triggers.validation.invalidCron":
     "cron must use the 5-field format. Example: 0 9 * * 1-5",
   "agents.triggers.validation.calendarConnectorRequired":
-    "Google Calendar scope is required to enable the Calendar trigger.",
+    "The Calendar trigger is not available right now. Google Calendar scopes are no longer requested; Apple Calendar support is a follow-up.",
   "agents.triggers.validation.gmailConnectorRequired":
-    "The new-mail trigger is not offered in this release. Reading mail (gmail.readonly) is a restricted scope that would require a separate security assessment. Schedule, calendar, and spreadsheet conditions still work.",
+    "The new-mail trigger is not offered in this release. Reading mail (gmail.readonly) is a restricted scope that would require a separate security assessment. Schedule triggers still work, and spreadsheet new rows now use Apps Script under the Webhook condition.",
   "agents.triggers.validation.calendarPollOutOfRange":
     "Calendar poll interval must be 1-60 minutes.",
   "agents.triggers.validation.gmailPollOutOfRange":

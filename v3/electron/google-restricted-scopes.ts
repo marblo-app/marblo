@@ -6,9 +6,9 @@
  * Google 은 OAuth 스코프를 non-sensitive / sensitive / **restricted** 셋으로
  * 나눈다. restricted 가 하나라도 섞이면 앱을 외부 공개로 올릴 때 **CASA 보안평가**
  * (유료 · 연 1회 갱신)가 따라붙는다. 일본 런칭 일정을 그 심사에 걸 수 없다는
- * 판단으로, 우리는 restricted 를 **전부 빼고** sensitive 만 요청한다.
+ * 판단으로, 우리는 restricted 를 **전부 뺐다**. 이후 T2 에서 sensitive 도 전부 뺐다.
  *
- * 빠지는 셋(공식 분류 재확인 결과 셋 다 restricted 다):
+ * 먼저 빠진 셋(공식 분류 재확인 결과 셋 다 restricted 다):
  *   · `drive.readonly`   — Drive 는 `drive.file` 만 non-sensitive 고 readonly/metadata
  *                          계열은 전부 restricted 다.
  *   · `gmail.readonly`
@@ -35,13 +35,13 @@
  * (스코프마다 데모 영상 · 도메인 소유권 · 브랜드 검증 · 정책 개정)는 "sensitive
  * **또는** restricted 를 요청하는 경우" 에 발동한다. 6개를 1개로 줄여도 심사는
  * 통째로 그대로 붙는다 — **0 만이 심사를 없앤다.** 그래서 남은 sensitive 5개도
- * 뺀다. `drive.file` 은 non-sensitive 라 검증 심사 제거에는 기여하지 않지만,
+ * 뺐다. `drive.file` 은 non-sensitive 라 검증 심사 제거에는 기여하지 않지만,
  * 유일한 소비자 `drive_write` 가 이미 잠겨 있어 아무 능력도 사주지 않는 스코프를
- * 동의 화면에 남기지 않는 최소권한 정리로 먼저 보류한다. 로그인용 `openid` ·
- * `email` · `profile` 은 non-sensitive 라 남는다.
+ * 동의 화면에 남기지 않는 최소권한 정리로 먼저 보류했다. 이제 Google 커넥터에
+ * 남는 요청은 로그인용 `openid` · `email` 뿐이다.
  *
  * 판정과 대체 경로는 `docs/GOOGLE_SCOPE_ZERO_DESIGN.md` 가 원본이고, 이 파일은
- * 그 결론의 목록만 든다(아래 `PLANNED_SENSITIVE_WITHDRAWALS`).
+ * 그 결론의 목록만 든다(아래 `WITHHELD_SENSITIVE_SCOPES`).
  *
  * ★이 파일의 위 두 원칙은 sensitive 회수에도 그대로 간다. 삭제가 아니라 보류이고,
  * 게이트는 토큰이 아니라 앱에 무조건 건다.
@@ -62,15 +62,18 @@ export const GMAIL_READONLY_SCOPE =
 export const GMAIL_COMPOSE_SCOPE =
   "https://www.googleapis.com/auth/gmail.compose";
 /**
- * Sheets — ★**sensitive** 다. restricted 가 아니다.
- *
- * 그런데도 이 파일에 상수가 생긴 이유는 아래 `sheets_trigger` 가 **이 파일의
- * 첫 sensitive 발 잠금**이기 때문이다. `WITHHELD_RESTRICTED_SCOPES` 에는 넣지
- * 않는다 — 그 배열은 "동의 화면에서 요청하지 않는 것" 의 목록이고 회귀 테스트가
- * `DRIVE_AUTH_SCOPE` 를 그것으로 검사하는데, 이 스코프는 **T2 가 회수할 때까지
- * 아직 요청 중**이다. 넣으면 테스트가 옳게 실패한다(위 `PLANNED_SENSITIVE_
- * WITHDRAWALS` 주석과 같은 이유).
- */
+/** Gmail — sensitive. */
+export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+/** Calendar — sensitive. */
+export const CALENDAR_READONLY_SCOPE =
+  "https://www.googleapis.com/auth/calendar.readonly";
+/** Calendar — sensitive. */
+export const CALENDAR_EVENTS_SCOPE =
+  "https://www.googleapis.com/auth/calendar.events";
+/** Contacts — sensitive. */
+export const CONTACTS_READONLY_SCOPE =
+  "https://www.googleapis.com/auth/contacts.readonly";
+/** Sheets — sensitive. */
 export const SPREADSHEETS_READONLY_SCOPE =
   "https://www.googleapis.com/auth/spreadsheets.readonly";
 
@@ -88,26 +91,29 @@ export const WITHHELD_RESTRICTED_SCOPES = [
 ] as const;
 
 /**
- * ★회수 **예정**인 sensitive 스코프 — 아직 요청하고 있고, 아직 잘 돈다.
+ * 동의 화면에서 **요청하지 않는** sensitive 스코프.
+ *
+ * 이 배열은 T2 의 집행 결과다. 콘솔에서도 같은 다섯을 지우고, 요청 문자열과
+ * 필수 검증 목록에서도 빠져야 한다. 기존 refresh_token 이 이 스코프를 아직
+ * 들고 있어도 앱 게이트가 아래 capability 를 무조건 막으므로 사용하지 않는다.
+ */
+export const WITHHELD_SENSITIVE_SCOPES = [
+  CALENDAR_READONLY_SCOPE,
+  CALENDAR_EVENTS_SCOPE,
+  CONTACTS_READONLY_SCOPE,
+  SPREADSHEETS_READONLY_SCOPE,
+  GMAIL_SEND_SCOPE,
+] as const;
+
+/**
+ * ★회수한 sensitive 스코프.
  *
  * 설계 원본은 `docs/GOOGLE_SCOPE_ZERO_DESIGN.md` 다. 여기 있는 것은 그 문서의
- * 판정을 코드가 들고 있는 형태이고, **판정을 집행하지는 않는다** — 게이트도,
- * 요청 스코프(`DRIVE_AUTH_SCOPE`)도 이 목록을 읽지 않는다. 집행은 후속
- * 티켓(T1 · T2)의 일이다.
- *
- * ★`WITHHELD_RESTRICTED_SCOPES` 에 넣지 않은 것은 실수가 아니다. 그 배열은
- * "지금 요청하지 않는 것" 의 목록이고, 회귀 테스트가 `DRIVE_AUTH_SCOPE` 를 그
- * 배열로 검사한다(`restrictedScopesIn`). 아직 요청 중인 스코프를 거기 넣으면
- * 테스트가 **옳게** 실패한다. 회수하는 티켓이 이 목록에서 저 목록으로 한 줄씩
- * 옮기면 된다 — 그게 이 두 배열이 나뉘어 있는 이유다.
- *
- * 스코프 문자열이 `google-drive-auth.ts` 의 상수와 겹치는 것은 알고 둔 것이다.
- * 그쪽은 **지금 요청하는 값**의 정의이고 이쪽은 **회수 계획**의 기록이라, 지금
- * 여기서 그쪽을 import 하면 "요청 목록" 과 "회수 목록" 이 한 상수를 공유하게
- * 되어 T1·T2 가 옮길 때 무엇이 옮겨졌는지 안 보인다. 회수가 끝나면 정의가 이
- * 파일로 넘어오면서 중복은 그때 사라진다.
+ * 판정을 코드가 들고 있는 형태다. 삭제하지 않는 이유는 #1267 의 규율 때문이다:
+ * 되살릴 때 이 목록과 `WITHHELD_CAPABILITIES` 에서 빼고, 요청 목록에 다시 넣으면
+ * 된다. 구현 코드는 각 호출 지점 아래에 그대로 남아 컴파일러가 계속 본다.
  */
-export interface PlannedSensitiveWithdrawal {
+export interface WithheldSensitiveScope {
   /** 회수할 스코프. */
   readonly scope: string;
   /** 이 스코프가 지금 사주고 있는 것 — 빠지면 무엇이 멈추는지. */
@@ -125,7 +131,7 @@ export interface PlannedSensitiveWithdrawal {
   readonly availableOn: "all" | "darwin" | "none";
 }
 
-export const PLANNED_SENSITIVE_WITHDRAWALS: readonly PlannedSensitiveWithdrawal[] =
+export const WITHHELD_SENSITIVE_WITHDRAWAL_DETAILS: readonly WithheldSensitiveScope[] =
   [
     {
       // ★회수 비용 0. `drive.file` 은 non-sensitive 라 검증 심사 제거에는
@@ -138,13 +144,13 @@ export const PLANNED_SENSITIVE_WITHDRAWALS: readonly PlannedSensitiveWithdrawal[
       availableOn: "all",
     },
     {
-      scope: "https://www.googleapis.com/auth/calendar.readonly",
+      scope: CALENDAR_READONLY_SCOPE,
       buys: "calendar_list · 비서 일정 트리거",
       replacement: "애플 캘린더 (JXA → Calendar.app)",
       availableOn: "darwin",
     },
     {
-      scope: "https://www.googleapis.com/auth/calendar.events",
+      scope: CALENDAR_EVENTS_SCOPE,
       buys: "calendar_create · calendar_patch",
       replacement: "애플 캘린더 (JXA → Calendar.app)",
       availableOn: "darwin",
@@ -155,7 +161,7 @@ export const PLANNED_SENSITIVE_WITHDRAWALS: readonly PlannedSensitiveWithdrawal[
       // 나가고 ★메일 읽기까지 돌려준다(gmail.readonly 를 포기하며 잃은 것).
       // 그래서 availableOn 은 "발송은 어디서나 된다" 를 기준으로 "all" 이다 —
       // 읽기가 macOS 전용이라는 사실은 설계 문서 §6.1 의 능력표가 든다.
-      scope: "https://www.googleapis.com/auth/gmail.send",
+      scope: GMAIL_SEND_SCOPE,
       buys: "gmail_send (confirm=true 2단계 계약)",
       replacement:
         "애플 메일(macOS · 내 주소로 발송 + 메일 읽기 복원) / Resend(크로스플랫폼 · 우리 도메인)",
@@ -165,7 +171,7 @@ export const PLANNED_SENSITIVE_WITHDRAWALS: readonly PlannedSensitiveWithdrawal[
       // 내부 소비자가 0 이고(에이전트 도구뿐), 자동화 대상 앱이 늘 때마다 TCC
       // 승인 팝업이 하나씩 는다. 거의 안 쓰는 기능에 세 번째 팝업을 쓰면 정작
       // 중요한 Calendar·Mail 승인률이 떨어진다. 그래서 대체하지 않고 비워 둔다.
-      scope: "https://www.googleapis.com/auth/contacts.readonly",
+      scope: CONTACTS_READONLY_SCOPE,
       buys: "contacts_search — 내부 소비자 0",
       replacement: "없음. 이름 대신 이메일 주소를 직접 받는다(설계 문서 §3.4)",
       availableOn: "none",
@@ -174,7 +180,7 @@ export const PLANNED_SENSITIVE_WITHDRAWALS: readonly PlannedSensitiveWithdrawal[
       // ★플랫폼 무관한 유일한 대체다. Apps Script 는 사용자의 구글 계정 안에서
       // 구글이 돌리므로 우리 앱의 플랫폼과 무관하다. 웹훅은 이미 서버에 있다
       // (#1256) — 다시 만들지 않는다.
-      scope: "https://www.googleapis.com/auth/spreadsheets.readonly",
+      scope: SPREADSHEETS_READONLY_SCOPE,
       buys: "비서 시트 새 행 트리거",
       replacement: "Apps Script(시간 구동·배치) → 기존 assistantWebhook",
       availableOn: "all",
@@ -200,9 +206,14 @@ export type WithheldGoogleCapability =
   | "gmail_read"
   | "gmail_draft"
   | "gmail_trigger"
-  // ★sensitive 회수(설계 §3.5)의 첫 잠금. 위 다섯과 달리 **대체가 이미 있다** —
-  // 사용자가 자기 시트에 붙여넣는 Apps Script 가 우리 웹훅을 부른다. 그래서
-  // 문구가 "지금은 못 쓴다" 가 아니라 "방식이 바뀌었다" 로 끝난다.
+  // ★sensitive 회수(T2): 게이트는 토큰 scope 를 보지 않고 앱에 무조건 건다.
+  | "gmail_send"
+  | "calendar_read"
+  | "calendar_write"
+  | "calendar_trigger"
+  | "contacts_search"
+  // ★대체가 이미 있는 sensitive 회수. 문구가 "지금은 못 쓴다" 가 아니라
+  // "방식이 바뀌었다" 로 끝난다.
   | "sheets_trigger";
 
 /** 어느 스코프가 빠져서 막혔는지 — 진단·로그용(사용자 문구에는 넣지 않는다). */
@@ -215,6 +226,11 @@ export const WITHHELD_CAPABILITY_SCOPE: Readonly<
   gmail_read: GMAIL_READONLY_SCOPE,
   gmail_draft: GMAIL_COMPOSE_SCOPE,
   gmail_trigger: GMAIL_READONLY_SCOPE,
+  gmail_send: GMAIL_SEND_SCOPE,
+  calendar_read: CALENDAR_READONLY_SCOPE,
+  calendar_write: CALENDAR_EVENTS_SCOPE,
+  calendar_trigger: CALENDAR_READONLY_SCOPE,
+  contacts_search: CONTACTS_READONLY_SCOPE,
   sheets_trigger: SPREADSHEETS_READONLY_SCOPE,
 };
 
@@ -249,17 +265,43 @@ const WITHHELD_CAPABILITY_MESSAGE: Readonly<
     "Gmail 메일 읽기는 지금 사용할 수 없습니다. " +
     "메일 본문 읽기 권한(gmail.readonly)은 Google 이 restricted 로 분류해 " +
     "별도 보안평가(CASA)를 통과해야 요청할 수 있어, 이번 출시에서는 요청하지 않습니다. " +
-    "메일 발송(gmail_send)과 Calendar·Contacts 조회는 그대로 사용할 수 있습니다.",
+    "메일 발송은 이제 gmail_send 가 아니라 mail_send 로 합니다. 일정과 연락처 기능은 지금은 쓸 수 없습니다.",
   gmail_draft:
     "Gmail 초안함에 초안을 만드는 기능은 지금 사용할 수 없습니다. " +
     "초안 작성 권한(gmail.compose)은 Google 이 restricted 로 분류해 이번 출시에서는 " +
     "요청하지 않습니다. 대신 초안을 Marblo 안에서 보여 드리고, 확인하시면 " +
-    "gmail_send 로 그대로 발송합니다 — 검토 단계가 Gmail 이 아니라 앱에서 일어날 뿐입니다.",
+    "mail_send 로 발송합니다 — 검토 단계가 Gmail 이 아니라 앱에서 일어날 뿐입니다.",
   gmail_trigger:
     "새 메일 감지 트리거는 지금 사용할 수 없습니다. " +
     "받은 메일을 읽으려면 gmail.readonly 권한이 필요한데, 이 권한은 restricted 로 " +
-    "분류돼 이번 출시에서는 요청하지 않습니다. 일정 트리거(Calendar), 시간 트리거, " +
-    "스프레드시트 새 행 트리거는 그대로 동작합니다.",
+    "분류돼 이번 출시에서는 요청하지 않습니다. 시간 트리거는 그대로 동작하고, " +
+    "스프레드시트 새 행 감지는 이제 Webhook 조건의 Apps Script 로 합니다.",
+  gmail_send:
+    "Gmail API 발송은 지금 사용할 수 없습니다. " +
+    "메일 발송 권한(gmail.send)은 Google 이 sensitive 로 분류해, 하나라도 요청하면 " +
+    "게시 검증 심사가 통째로 붙습니다. 그래서 요청하지 않습니다. " +
+    "메일 발송은 이제 mail_send 로 합니다 — Resend sendAssistantEmail 경로가 확인 후 " +
+    "우리 도메인에서 발송하고, 수신자는 현재 서버 정책에 맞게 검증됩니다.",
+  calendar_read:
+    "Google Calendar 일정 조회는 지금 사용할 수 없습니다. " +
+    "캘린더 읽기 권한(calendar.readonly)은 Google 이 sensitive 로 분류해, 하나라도 요청하면 " +
+    "게시 검증 심사가 통째로 붙습니다. 그래서 요청하지 않습니다. " +
+    "Apple Calendar 대체 경로가 붙기 전까지는 지금은 쓸 수 없습니다.",
+  calendar_write:
+    "Google Calendar 일정 생성·수정은 지금 사용할 수 없습니다. " +
+    "캘린더 쓰기 권한(calendar.events)은 Google 이 sensitive 로 분류해, 하나라도 요청하면 " +
+    "게시 검증 심사가 통째로 붙습니다. 그래서 요청하지 않습니다. " +
+    "Apple Calendar 대체 경로가 붙기 전까지는 지금은 쓸 수 없습니다.",
+  calendar_trigger:
+    "일정 트리거는 지금 사용할 수 없습니다. " +
+    "임박 일정을 읽으려면 calendar.readonly 권한이 필요한데, 이 권한은 Google 이 sensitive 로 " +
+    "분류해 이번 출시에서는 요청하지 않습니다. Apple Calendar 대체 경로가 붙기 전까지는 " +
+    "지금은 쓸 수 없습니다. 설정은 지우지 않고 보관합니다.",
+  contacts_search:
+    "Google Contacts 검색은 지금 사용할 수 없습니다. " +
+    "연락처 읽기 권한(contacts.readonly)은 Google 이 sensitive 로 분류해, 하나라도 요청하면 " +
+    "게시 검증 심사가 통째로 붙습니다. 이 기능은 내부 소비자가 없어 이번 출시에서는 " +
+    "대체하지 않습니다. 지금은 쓸 수 없습니다 — 이름 대신 이메일 주소를 직접 받아 주세요.",
   // ★이 문구만 뼈대가 다르다. 위 다섯은 "지금은 못 쓴다" 로 끝나지만 여기는
   // 대체가 이미 배선돼 있으므로 **어디로 가면 되는지**로 끝난다. 사용자가
   // "연결이 끊겼나" 를 찾아다니게 두지 않는 것이 이 문구의 일이다.
@@ -292,6 +334,11 @@ export const WITHHELD_CAPABILITIES: ReadonlySet<WithheldGoogleCapability> =
     "gmail_read",
     "gmail_draft",
     "gmail_trigger",
+    "gmail_send",
+    "calendar_read",
+    "calendar_write",
+    "calendar_trigger",
+    "contacts_search",
     // ★T6 이 켠 잠금. 이 이름을 빼면 폴링 경로(sheets-connector · startSheetsPoll)가
     // 그대로 되살아난다 — 그래서 그 코드를 지우지 않았다.
     "sheets_trigger",
@@ -336,17 +383,33 @@ export function restrictedScopesIn(scopeString: string): string[] {
   return WITHHELD_RESTRICTED_SCOPES.filter((scope) => requested.has(scope));
 }
 
+/** 스코프 문자열(동의 화면에 보낼 것)에 sensitive 회수분이 섞였는가. */
+export function sensitiveScopesIn(scopeString: string): string[] {
+  const requested = new Set(scopeString.split(/\s+/).filter(Boolean));
+  return WITHHELD_SENSITIVE_SCOPES.filter((scope) => requested.has(scope));
+}
+
 /**
  * 저장된 토큰이 아직 restricted 스코프를 들고 있는가(진단용).
  *
  * ★있다고 해서 재연결을 강제하지 않는다. 근거는 이 파일 머리주석의 "게이트는
  * 토큰이 아니라 앱에 건다" 항목이다 — 넓은 토큰은 그대로 두되 앱이 쓰지 않는다.
- * 강제 재연결은 아직 잘 도는 Calendar·Contacts·Sheets·발송까지 한 번에 끊고,
- * 얻는 것은 없다.
+ * 강제 재연결은 아직 도는 non-sensitive 로그인 연결까지 끊고, 얻는 것은 없다.
  */
 export function legacyRestrictedScopes(
   grantedScopes: readonly string[],
 ): string[] {
   const granted = new Set(grantedScopes);
   return WITHHELD_RESTRICTED_SCOPES.filter((scope) => granted.has(scope));
+}
+
+/**
+ * 저장된 토큰이 아직 회수한 sensitive 스코프를 들고 있는가(진단용).
+ *
+ * 앱 게이트는 이 결과를 보지 않는다. 넓은 기존 토큰이 있어도 민감 API 호출은
+ * capability gate 에서 막힌다.
+ */
+export function legacySensitiveScopes(grantedScopes: readonly string[]): string[] {
+  const granted = new Set(grantedScopes);
+  return WITHHELD_SENSITIVE_SCOPES.filter((scope) => granted.has(scope));
 }

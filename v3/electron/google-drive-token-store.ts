@@ -23,6 +23,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { SafeStorage } from "electron";
+import {
+  WITHHELD_RESTRICTED_SCOPES,
+  WITHHELD_SENSITIVE_SCOPES,
+} from "./google-restricted-scopes";
 
 const STORE_DIRECTORY = path.join(os.homedir(), ".marblo");
 const STORE_FILE = path.join(STORE_DIRECTORY, "google-drive-oauth.enc.json");
@@ -172,10 +176,20 @@ export function googleDriveConnectionStatus(
 ): GoogleDriveConnectionStatus {
   const tokens = getGoogleDriveTokens(storage, userId);
   if (!tokens) return { connected: false };
+  const withheldScopes = new Set<string>([
+    ...WITHHELD_RESTRICTED_SCOPES,
+    ...WITHHELD_SENSITIVE_SCOPES,
+  ]);
   return {
     connected: true,
     email: tokens.email,
-    scopes: tokens.scope ? tokens.scope.split(/\s+/).filter(Boolean) : [],
+    // UI 도 토큰 scope 를 인가 판단으로 쓰지 못하게 보류 scope 를 숨긴다. 진단은
+    // legacyRestrictedScopes/legacySensitiveScopes 로만 한다.
+    scopes: tokens.scope
+      ? tokens.scope
+          .split(/\s+/)
+          .filter((scope) => scope && !withheldScopes.has(scope))
+      : [],
     connectedAt: tokens.connectedAt || undefined,
   };
 }

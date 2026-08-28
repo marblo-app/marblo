@@ -35,8 +35,11 @@ import {
 } from "../../electron/google-drive-auth";
 import {
   WITHHELD_RESTRICTED_SCOPES,
+  WITHHELD_SENSITIVE_SCOPES,
+  legacySensitiveScopes,
   legacyRestrictedScopes,
   restrictedScopesIn,
+  sensitiveScopesIn,
   withheldCapabilityError,
 } from "../../electron/google-restricted-scopes";
 
@@ -69,6 +72,9 @@ describe("스코프", () => {
     expect(CONTACTS_READONLY_SCOPE).toBe(
       "https://www.googleapis.com/auth/contacts.readonly",
     );
+    expect(SHEETS_READONLY_SCOPE).toBe(
+      "https://www.googleapis.com/auth/spreadsheets.readonly",
+    );
   });
 
   it("★restricted 스코프 셋은 동의 화면에 보내지 않는다 (티켓 v5Phjv1WxndUpgFJyrIn)", () => {
@@ -85,40 +91,27 @@ describe("스코프", () => {
     }
   });
 
-  it("남긴 것은 openid·email + 아직 회수 전인 민감 스코프 다섯뿐이다", () => {
+  it("★남긴 것은 openid·email 뿐이다 — 민감 0개", () => {
     expect(DRIVE_AUTH_SCOPE.split(/\s+/).filter(Boolean)).toEqual([
       "openid",
       "email",
-      CALENDAR_READONLY_SCOPE,
-      CONTACTS_READONLY_SCOPE,
-      SHEETS_READONLY_SCOPE,
-      GMAIL_SEND_SCOPE,
-      CALENDAR_EVENTS_SCOPE,
     ]);
     // drive.file 은 non-sensitive 라 검증 심사 제거에는 기여하지 않는다. 다만
     // 유일한 소비자 drive_write 가 이미 잠겨 있어 최소권한으로 동의 화면에서 뺀다.
     expect(DRIVE_AUTH_SCOPE).not.toContain(DRIVE_FILE_SCOPE);
     expect(GOOGLE_CONNECTOR_REQUIRED_SCOPES).not.toContain(DRIVE_FILE_SCOPE);
+    for (const scope of WITHHELD_SENSITIVE_SCOPES) {
+      expect(DRIVE_AUTH_SCOPE).not.toContain(scope);
+      expect(GOOGLE_CONNECTOR_REQUIRED_SCOPES).not.toContain(scope);
+    }
+    expect(sensitiveScopesIn(DRIVE_AUTH_SCOPE)).toEqual([]);
     // drive(전체 쓰기) 와 시트 쓰기는 예전부터 요청하지 않는다.
     expect(DRIVE_AUTH_SCOPE).not.toMatch(/auth\/drive(\s|$)/);
     expect(DRIVE_AUTH_SCOPE).not.toMatch(/auth\/spreadsheets(\s|$)/);
   });
 
-  it("★시트 스코프는 연결 필수 검증 목록에 넣지 않는다", () => {
-    // 넣으면 이미 연결해 둔 기존 사용자가 재연결할 때 시트 동의를 빼는 순간
-    // 연결 자체가 실패한다. 시트를 안 쓰는 사용자의 연결을 깨뜨리지 않는다.
-    // 대신 설정 패널이 스코프 부재를 읽어 시트 조건 저장을 막는다.
-    expect(GOOGLE_CONNECTOR_REQUIRED_SCOPES).not.toContain(
-      SHEETS_READONLY_SCOPE,
-    );
-    for (const scope of [
-      GMAIL_SEND_SCOPE,
-      CALENDAR_EVENTS_SCOPE,
-      CALENDAR_READONLY_SCOPE,
-      CONTACTS_READONLY_SCOPE,
-    ]) {
-      expect(GOOGLE_CONNECTOR_REQUIRED_SCOPES).toContain(scope);
-    }
+  it("★필수 검증 목록도 비워 새 연결을 민감 스코프 부재로 실패시키지 않는다", () => {
+    expect(GOOGLE_CONNECTOR_REQUIRED_SCOPES).toEqual([]);
   });
 
   it("★필수 검증 목록에도 restricted 가 남으면 안 된다", () => {
@@ -138,15 +131,20 @@ describe("보류된 기능 — 조용히 실패하지 않는다", () => {
     "gmail_read",
     "gmail_draft",
     "gmail_trigger",
+    "gmail_send",
+    "calendar_read",
+    "calendar_write",
+    "calendar_trigger",
+    "contacts_search",
   ] as const;
 
-  it("여섯 기능 모두 사용자가 읽을 수 있는 이유를 돌려준다", () => {
+  it("보류된 기능 모두 사용자가 읽을 수 있는 이유를 돌려준다", () => {
     for (const capability of capabilities) {
       const result = withheldCapabilityError(capability);
       expect(result).not.toBeNull();
       expect(result?.ok).toBe(false);
       // 문구 규율: 무엇이 / 왜 / 대신 무엇을. 최소한 "왜" 가 들어 있어야 한다.
-      expect(result?.error).toContain("restricted");
+      expect(result?.error).toMatch(/restricted|sensitive/);
       expect(result?.error).toContain("사용할 수 없습니다");
       expect((result?.error ?? "").length).toBeGreaterThan(60);
     }
@@ -160,7 +158,30 @@ describe("보류된 기능 — 조용히 실패하지 않는다", () => {
 
   it("gmail_draft 는 앱 안에서 확인 후 발송하는 경로를 가리킨다", () => {
     const error = withheldCapabilityError("gmail_draft")?.error ?? "";
-    expect(error).toContain("gmail_send");
+    expect(error).toContain("mail_send");
+  });
+
+  it("gmail_send 는 Resend mail_send 대체 경로를 가리킨다", () => {
+    const error = withheldCapabilityError("gmail_send")?.error ?? "";
+    expect(error).toContain("mail_send");
+    expect(error).toContain("Resend");
+    expect(error).toContain("sendAssistantEmail");
+    expect(error).not.toContain("다시 연결");
+  });
+
+  it("Calendar 와 Contacts 는 대체가 아직 없어 지금 쓸 수 없다고 말한다", () => {
+    for (const capability of [
+      "calendar_read",
+      "calendar_write",
+      "calendar_trigger",
+      "contacts_search",
+    ] as const) {
+      const error = withheldCapabilityError(capability)?.error ?? "";
+      expect(error).toContain("지금");
+      expect(error).toContain("쓸 수 없습니다");
+      expect(error).not.toContain("기능이 사라진 것은 아닙니다");
+      expect(error).not.toContain("mail_send");
+    }
   });
 
   /**
@@ -197,11 +218,26 @@ describe("기존 사용자 — 넓은 토큰은 두되 쓰지 않는다", () => 
     ).toEqual([DRIVE_READONLY_SCOPE, GMAIL_READONLY_SCOPE]);
   });
 
+  it("저장된 토큰이 아직 sensitive 를 들고 있으면 진단으로 드러난다", () => {
+    expect(
+      legacySensitiveScopes([
+        "openid",
+        GMAIL_SEND_SCOPE,
+        CALENDAR_READONLY_SCOPE,
+        CONTACTS_READONLY_SCOPE,
+      ]),
+    ).toEqual([CALENDAR_READONLY_SCOPE, CONTACTS_READONLY_SCOPE, GMAIL_SEND_SCOPE]);
+  });
+
   it("★그래도 게이트는 토큰을 묻지 않는다 — 넓은 토큰이어도 막힌다", () => {
-    // 재연결을 강제하지 않는 대신, restricted 데이터를 다루는 행위 자체를
+    // 재연결을 강제하지 않는 대신, restricted/sensitive 데이터를 다루는 행위 자체를
     // 앱에서 막는다. 이 테스트가 "토큰에 있으면 쓴다" 로의 회귀를 막는다.
     expect(withheldCapabilityError("gmail_read")).not.toBeNull();
     expect(withheldCapabilityError("drive_read")).not.toBeNull();
+    expect(withheldCapabilityError("gmail_send")).not.toBeNull();
+    expect(withheldCapabilityError("calendar_read")).not.toBeNull();
+    expect(withheldCapabilityError("calendar_write")).not.toBeNull();
+    expect(withheldCapabilityError("contacts_search")).not.toBeNull();
   });
 
   it("새로 연결한 사용자의 스코프 집합은 필수 검증을 통과한다", () => {
