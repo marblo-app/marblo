@@ -23,6 +23,18 @@ import {
   verifyAssistantWebhookSignature,
 } from "./assistantWebhook";
 import {
+  ASSISTANT_EMAIL_RATE_RULES_UID,
+  assistantEmailFromNotice,
+  assistantEmailRateKey,
+  assistantEmailRejectMessage,
+  assistantEmailRejectSummary,
+  assistantEmailSentSummary,
+  buildAssistantEmail,
+  normalizeAssistantEmailLocale,
+  validateAssistantEmailRequest,
+  type AssistantEmailSenderIdentity,
+} from "./assistantEmail";
+import {
   parseLinkInstallRequest,
   INSTALL_ATTRIBUTION_SCHEMA,
 } from "./installAttribution";
@@ -995,9 +1007,10 @@ function readWebhookIdFromRequest(req: functions.https.Request): string | null {
   return callableString(raw);
 }
 
-function readAssistantWebhookSettings(
-  projectData: Record<string, unknown>,
-): { enabled: boolean; webhookId: string | null } {
+function readAssistantWebhookSettings(projectData: Record<string, unknown>): {
+  enabled: boolean;
+  webhookId: string | null;
+} {
   const triggers =
     projectData.assistantTriggers &&
     typeof projectData.assistantTriggers === "object" &&
@@ -1018,7 +1031,7 @@ function readAssistantWebhookSettings(
 
 async function requireAssistantWebhookAdminProject(
   context: functions.https.CallableContext,
-  projectId: string,
+  projectId: string
 ): Promise<FirebaseFirestore.DocumentSnapshot> {
   const uid = context.auth?.uid;
   if (!uid) {
@@ -1082,7 +1095,9 @@ export const provisionAssistantWebhook = functions.https.onCall(
     const finalWebhookId = shouldMint
       ? generateAssistantWebhookId()
       : webhookId ?? generateAssistantWebhookId();
-    const secret = shouldMint ? generateAssistantWebhookSecret() : existing!.secret;
+    const secret = shouldMint
+      ? generateAssistantWebhookSecret()
+      : existing!.secret;
     const url = assistantWebhookUrl(FUNCTIONS_BASE_URL, finalWebhookId);
     const now = admin.firestore.FieldValue.serverTimestamp();
     const secretRef = db
@@ -1098,11 +1113,7 @@ export const provisionAssistantWebhook = functions.https.onCall(
         rotatedAt: rotate ? now : null,
         disabled: false,
       });
-      if (
-        rotate &&
-        current.webhookId &&
-        current.webhookId !== finalWebhookId
-      ) {
+      if (rotate && current.webhookId && current.webhookId !== finalWebhookId) {
         await db
           .collection(ASSISTANT_WEBHOOK_SECRETS_COLLECTION)
           .doc(current.webhookId)
@@ -1113,7 +1124,8 @@ export const provisionAssistantWebhook = functions.https.onCall(
     const projectUpdate: Record<string, unknown> = {
       "assistantTriggers.webhook.webhookId": finalWebhookId,
       "assistantTriggers.webhook.url": url,
-      "assistantTriggers.webhook.secretMasked": maskAssistantWebhookSecret(secret),
+      "assistantTriggers.webhook.secretMasked":
+        maskAssistantWebhookSecret(secret),
       updatedAt: now,
     };
     if (shouldMint) projectUpdate["assistantTriggers.webhook.createdAt"] = now;
@@ -1187,9 +1199,7 @@ export const assistantWebhook = functions.https.onRequest(async (req, res) => {
   const signature = Array.isArray(signatureHeader)
     ? signatureHeader[0]
     : signatureHeader;
-  if (
-    !verifyAssistantWebhookSignature(signature, rawBody, secretDoc.secret)
-  ) {
+  if (!verifyAssistantWebhookSignature(signature, rawBody, secretDoc.secret)) {
     res.status(401).send("Invalid webhook signature");
     return;
   }
@@ -1207,9 +1217,9 @@ export const assistantWebhook = functions.https.onRequest(async (req, res) => {
     rawBody.length
   );
   if (!payloadResult.ok || !payloadResult.value) {
-    res.status(payloadResult.reason === "payload_too_large" ? 413 : 400).send(
-      payloadResult.reason ?? "Invalid payload"
-    );
+    res
+      .status(payloadResult.reason === "payload_too_large" ? 413 : 400)
+      .send(payloadResult.reason ?? "Invalid payload");
     return;
   }
 
@@ -1722,7 +1732,9 @@ function assertPortOneServerConfig(): void {
   }
 }
 
-function portOnePurpose(kind: "one_time" | "subscription"): PortOnePaymentPurpose {
+function portOnePurpose(
+  kind: "one_time" | "subscription"
+): PortOnePaymentPurpose {
   return kind === "one_time" ? "onetime" : "billing";
 }
 
@@ -2844,7 +2856,11 @@ export const completePortOneBillingKey = functions.https.onCall(
       );
     }
 
-    assertPortOneCheckoutConfig("subscription", billingKeyMethod, easyPayProvider);
+    assertPortOneCheckoutConfig(
+      "subscription",
+      billingKeyMethod,
+      easyPayProvider
+    );
     const expected = portoneExpectedAmount(
       planType,
       stringField(data, "billing")
@@ -5207,6 +5223,180 @@ function maskEmailForLog(email: string): string {
   const maskPart = (s: string): string => (s.length <= 1 ? "*" : `${s[0]}***`);
   return `${maskPart(local)}@${maskPart(dname)}${tld}`;
 }
+
+// ─── 비서 메일 발송 (Resend) — sendAssistantEmail ──────────────────────────
+//
+// 티켓 QiqTTRP9hzsV7v1M8XUS (설계문서 v3/docs/GOOGLE_SCOPE_ZERO_DESIGN.md §3.3·§9 T5a).
+//
+// `gmail.send` 를 회수하면 비서가 메일을 못 보낸다. 이 콜러블이 그 자리를
+// 메우고, **macOS·Windows 양쪽에서 되는 유일한 발송 경로**다.
+//
+// ★위쪽 파운더 계열 발송과 이것은 성질이 다르다. 저쪽은 대상도 문면도 우리가
+// 정하는 관리자 발송이고, 이쪽은 **수신자를 LLM 이 정한다.** 그래서 세 겹을 건다:
+//   (1) 인증 — context.auth 없으면 즉시 거절.
+//   (2) 레이트리밋 — uid 축. 인증 직후, 검증보다 **먼저** 태운다(주소 탐침도 예산을 먹어야 한다).
+//   (3) 수신자 정책 — 본인의 인증된 로그인 이메일 1개. 판정은 assistantEmail.ts
+//       가 하고 테스트로 잠겨 있다.
+// 발송 자체는 기존 `postResendEmail` 을 그대로 쓴다 — 새 클라이언트를 만들지 않는다.
+export const sendAssistantEmail = functions.https.onCall(
+  async (
+    data,
+    context
+  ): Promise<{
+    ok: true;
+    to: string;
+    from: string;
+    subject: string;
+    route: "resend";
+    summary: string;
+    fromNotice: string;
+  }> => {
+    const uid = context.auth?.uid;
+    if (!uid) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다."
+      );
+    }
+
+    const locale = normalizeAssistantEmailLocale(data?.locale);
+
+    // (2) 레이트리밋 — 검증 실패도 예산을 먹는다. 임의 주소를 훑는 탐침이
+    // "거절이니까 공짜"가 되면 안 된다.
+    const rate = await enforceRateLimit(
+      assistantEmailRateKey(uid),
+      ASSISTANT_EMAIL_RATE_RULES_UID
+    );
+    if (!rate.allowed) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        locale === "en"
+          ? `Too many emails. Retry in ${rate.retryAfter}s.`
+          : `발송이 너무 잦습니다. ${rate.retryAfter}초 뒤에 다시 시도하세요.`
+      );
+    }
+
+    // (3) 발신 주체의 정체성은 **ID 토큰 클레임이 아니라 Auth 레코드**에서 읽는다.
+    // 이 경로를 부르는 것은 custom token 으로 로그인한 MCP 서버이고, 그 세션의
+    // 토큰에 email 클레임이 실릴지는 발급 방식에 달려 있다. 클레임이 비어서
+    // 정책이 조용히 느슨해지는 실패 모드를 아예 없앤다.
+    let sender: AssistantEmailSenderIdentity;
+    try {
+      const user = await admin.auth().getUser(uid);
+      sender = {
+        uid,
+        email: user.email ?? null,
+        emailVerified: user.emailVerified === true,
+      };
+    } catch (err) {
+      console.warn("[assistant-email] auth 사용자 조회 실패:", uid, err);
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        assistantEmailRejectMessage("no_verified_sender_identity", locale)
+      );
+    }
+
+    const validation = validateAssistantEmailRequest(
+      {
+        to: data?.to,
+        subject: data?.subject,
+        body: data?.body,
+        cc: data?.cc,
+        bcc: data?.bcc,
+        confirm: data?.confirm,
+      },
+      sender
+    );
+    if (!validation.ok || !validation.recipient) {
+      // ★거절 사유는 그대로 돌려준다. 에이전트가 "왜 막혔는지"를 읽고 사용자에게
+      // 옮길 수 있어야 한다 — 뭉뚱그린 permission-denied 는 사용자가 자기가 뭘
+      // 잘못했는지 찾다가 시간을 버리게 만든다.
+      const code = validation.reasons.includes("not_confirmed")
+        ? "failed-precondition"
+        : "permission-denied";
+      throw new functions.https.HttpsError(
+        code,
+        assistantEmailRejectSummary(validation.reasons, locale),
+        { reasons: validation.reasons }
+      );
+    }
+
+    if (!RESEND_API_KEY) {
+      console.warn("[assistant-email] 발송 설정 미완 — 스킵:", uid);
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        locale === "en"
+          ? "Email sending is not configured on the server."
+          : "서버에 메일 발송이 설정돼 있지 않습니다."
+      );
+    }
+
+    const content = buildAssistantEmail({
+      subject: validation.subject ?? "",
+      body: validation.body ?? "",
+      locale,
+      fromAddress: FOUNDER_FROM_EMAIL,
+    });
+
+    let sent = false;
+    try {
+      sent = await postResendEmail(
+        validation.recipient,
+        content,
+        "assistant-email"
+      );
+    } catch (err) {
+      console.warn(
+        "[assistant-email] 발송 실패:",
+        maskEmailForLog(validation.recipient),
+        err
+      );
+      sent = false;
+    }
+
+    // 감사 로그. ★이메일은 마스킹해서만 남긴다(PII 축적 금지).
+    try {
+      await db.collection("assistant_email_log").add({
+        uid,
+        projectId: callableString(data?.projectId),
+        toMasked: maskEmailForLog(validation.recipient),
+        from: FOUNDER_FROM_EMAIL,
+        subject: validation.subject ?? "",
+        bodyChars: (validation.body ?? "").length,
+        route: "resend",
+        ok: sent,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      console.warn("[assistant-email] 감사 로그 기록 실패:", uid, err);
+    }
+
+    if (!sent) {
+      throw new functions.https.HttpsError(
+        "internal",
+        locale === "en"
+          ? "The email provider rejected the message. Nothing was sent."
+          : "메일 제공자가 발송을 거절했습니다. 아무것도 나가지 않았습니다."
+      );
+    }
+
+    return {
+      ok: true,
+      to: validation.recipient,
+      from: FOUNDER_FROM_EMAIL,
+      subject: validation.subject ?? "",
+      route: "resend",
+      // ★발신 주소가 결과 문장에 반드시 들어간다(설계문서 §3.3).
+      summary: assistantEmailSentSummary({
+        recipient: validation.recipient,
+        subject: validation.subject ?? "",
+        locale,
+        fromAddress: FOUNDER_FROM_EMAIL,
+      }),
+      fromNotice: assistantEmailFromNotice(locale, FOUNDER_FROM_EMAIL),
+    };
+  }
+);
 
 // waitlist 에서 해당 이메일의 locale 을 조회(없으면 'ko').
 async function lookupFounderLocale(email: string): Promise<string> {
@@ -7627,7 +7817,9 @@ function toTelemetryBigQueryRow(
       filesChanged: e.filesChanged ?? null,
       linesChanged: e.linesChanged ?? null,
       errorCategory: e.errorCategory || null,
-      errorMessage: e.errorMessage ? String(e.errorMessage).slice(0, 500) : null,
+      errorMessage: e.errorMessage
+        ? String(e.errorMessage).slice(0, 500)
+        : null,
       promptHash: e.promptHash || null,
       promptLength: e.promptLength ?? null,
       parentAgentId: e.parentAgentId || null,
@@ -7847,7 +8039,9 @@ export const logAnonymousTelemetryBatch = functions.https.onCall(
         .table(BQ_EVENTS_TABLE)
         .insert(rows, { raw: true });
     } catch (err) {
-      await Promise.all(acceptedRefs.map((ref) => ref.delete().catch(() => {})));
+      await Promise.all(
+        acceptedRefs.map((ref) => ref.delete().catch(() => {}))
+      );
       functions.logger.error("[anonymousTelemetry] bigquery insert failed", {
         message: safeAnalyticsErrorMessage(err),
       });
@@ -10324,9 +10518,7 @@ export const getAdminOnboardingFunnel = functions
         : undefined;
     const windowStartDay =
       coverageRows != null
-        ? new Date(Date.now() - rangeDays * 86400000)
-            .toISOString()
-            .slice(0, 10)
+        ? new Date(Date.now() - rangeDays * 86400000).toISOString().slice(0, 10)
         : null;
 
     const funnel = buildOnboardingFunnel(
@@ -14432,35 +14624,20 @@ export async function buildAnalyticsProfileTablesInternal(
     milestoneRows,
     milestoneSourceWeeks,
   ] = await Promise.all([
-      runAnalyticsQuery("events", ANALYTICS_DAILY_EVENTS_SQL, qp, notes),
-      runAnalyticsQuery(
-        "heartbeats",
-        ANALYTICS_DAILY_HEARTBEATS_SQL,
-        qp,
-        notes
-      ),
-      runAnalyticsQuery(
-        "task_outcomes",
-        ANALYTICS_DAILY_OUTCOMES_SQL,
-        qp,
-        notes
-      ),
-      runAnalyticsQuery(
-        "first_touch",
-        await analyticsFirstTouchSql(),
-        {},
-        notes
-      ),
-      runAnalyticsQuery("milestones", ANALYTICS_MILESTONES_SQL, {}, notes),
-      // ★커버리지 검사의 원천측. 파생측과 **같은 빌드 안에서** 읽어야 두 쪽의
-      //   시점이 어긋나 없는 단절이 보이는 일을 막는다.
-      runAnalyticsQuery(
-        "milestone_source_weeks",
-        ANALYTICS_MILESTONE_SOURCE_WEEKS_SQL,
-        { days },
-        notes
-      ),
-    ]);
+    runAnalyticsQuery("events", ANALYTICS_DAILY_EVENTS_SQL, qp, notes),
+    runAnalyticsQuery("heartbeats", ANALYTICS_DAILY_HEARTBEATS_SQL, qp, notes),
+    runAnalyticsQuery("task_outcomes", ANALYTICS_DAILY_OUTCOMES_SQL, qp, notes),
+    runAnalyticsQuery("first_touch", await analyticsFirstTouchSql(), {}, notes),
+    runAnalyticsQuery("milestones", ANALYTICS_MILESTONES_SQL, {}, notes),
+    // ★커버리지 검사의 원천측. 파생측과 **같은 빌드 안에서** 읽어야 두 쪽의
+    //   시점이 어긋나 없는 단절이 보이는 일을 막는다.
+    runAnalyticsQuery(
+      "milestone_source_weeks",
+      ANALYTICS_MILESTONE_SOURCE_WEEKS_SQL,
+      { days },
+      notes
+    ),
+  ]);
 
   const analyticsIdSalt = readAnalyticsIdSalt();
   const daily = buildUserDailyRows(
@@ -14495,7 +14672,10 @@ export async function buildAnalyticsProfileTablesInternal(
   // "이벤트는 오는데 프로필 필드가 0" 을 사람이 주차별로 갈라 보기 **전에**
   // 잡는다. 오늘 하루에만 같은 모양의 조용한 단절이 세 번 나왔다
   // (#1171 person axis · #1195 GA4 조인 · 이 티켓의 첫스폰 분자).
-  const coverage = evaluateProfileCoverage(installProfiles, milestoneSourceWeeks);
+  const coverage = evaluateProfileCoverage(
+    installProfiles,
+    milestoneSourceWeeks
+  );
   if (coverage.status === "red") {
     // ★던지지 않는다. 테이블은 적재해야 다음 사람이 원인을 볼 수 있다.
     //   대신 시끄럽게 남기고, 결과 notes 에 박아 화면이 그 비율을 그냥 못 쓰게 한다.
@@ -15125,7 +15305,7 @@ async function resolveTeamProjectRefs(
         .where("members", "array-contains", uid)
         .limit(TEAM_AUDIT_PROJECT_SCAN_LIMIT)
         .get()
-    )
+    ),
   ]);
 
   // ★셀렉터의 role 은 **하한**이다. `memberRoles` 를 프로젝트마다 읽으면 한 호출에
@@ -15296,7 +15476,7 @@ export const getTeamProjectAudit = functions.https.onCall(
             .orderBy("mergedAt", "desc")
             .limit(TEAM_AUDIT_MERGE_SCAN_LIMIT)
             .get()
-        )
+        ),
       ]);
 
     // ★에이전트 목록이 상한에 닿았나. 아래 두 곳이 이 값을 쓴다 — 판정 생략과 고지.
@@ -15814,7 +15994,9 @@ export const getAdminCountryFunnel = functions
       );
     } else if (ga4Bridge.lastSyncedAt) {
       notes.push(
-        `GA4 브리지 마지막 동기 ${ga4Bridge.lastSyncedAt} · 적재 ${ga4Bridge.rowCount}명 · 최신 방문일 ${ga4Bridge.maxFirstVisitDate ?? "없음"}`
+        `GA4 브리지 마지막 동기 ${ga4Bridge.lastSyncedAt} · 적재 ${
+          ga4Bridge.rowCount
+        }명 · 최신 방문일 ${ga4Bridge.maxFirstVisitDate ?? "없음"}`
       );
     }
 
@@ -15845,7 +16027,6 @@ export const getAdminCountryFunnel = functions
       notes,
     };
   });
-
 
 // ════════════════════════════════════════════════════════════════════════════
 // analytics_purchase — Firestore 결제 원장 → BigQuery (ticket 6EnTiEzL7T2NpjOnTTSj)
@@ -16155,9 +16336,7 @@ async function resolveTeamProjects(uid: string): Promise<TeamProjectRef[]> {
   }
 
   const byId = new Map<string, TeamProjectRef>();
-  const add = (
-    doc: FirebaseFirestore.QueryDocumentSnapshot
-  ): void => {
+  const add = (doc: FirebaseFirestore.QueryDocumentSnapshot): void => {
     if (byId.has(doc.id)) return;
     const d = doc.data() as {
       name?: unknown;
@@ -16323,7 +16502,9 @@ async function loadTeamUsageRows(args: {
         | (TeamUsageCacheDoc & { manualRefreshAtMs?: unknown })
         | undefined;
       const lastManual =
-        typeof data?.manualRefreshAtMs === "number" ? data.manualRefreshAtMs : null;
+        typeof data?.manualRefreshAtMs === "number"
+          ? data.manualRefreshAtMs
+          : null;
       if (lastManual !== null) manualRefreshAtByProject.set(doc.id, lastManual);
       if (typeof data?.generatedAtMs === "number") {
         generatedAtById.set(doc.id, data.generatedAtMs);
@@ -16335,7 +16516,10 @@ async function loadTeamUsageRows(args: {
           nowMs,
         })
       ) {
-        hitById.set(doc.id, (data?.rows ?? []) as Array<Record<string, unknown>>);
+        hitById.set(
+          doc.id,
+          (data?.rows ?? []) as Array<Record<string, unknown>>
+        );
       }
     }
     for (const projectId of missing) {
@@ -16363,9 +16547,12 @@ async function loadTeamUsageRows(args: {
     }
   }
   if (refreshThrottled > 0) {
-    functions.logger.info("[teamUsage] 수동 새로고침 레이트리밋 — 캐시로 응답", {
-      projects: refreshThrottled,
-    });
+    functions.logger.info(
+      "[teamUsage] 수동 새로고침 레이트리밋 — 캐시로 응답",
+      {
+        projects: refreshThrottled,
+      }
+    );
   }
 
   if (stillMissing.length === 0) {
@@ -16404,7 +16591,12 @@ async function loadTeamUsageRows(args: {
           operatorReason: TEAM_USAGE_NOT_PROVISIONED_OPERATOR_NOTE,
         }
       );
-      return { ok: false, notProvisioned: true, cacheHits, oldestGeneratedAtMs };
+      return {
+        ok: false,
+        notProvisioned: true,
+        cacheHits,
+        oldestGeneratedAtMs,
+      };
     }
     throw err;
   }
@@ -16542,10 +16734,13 @@ export const getTeamUsageSummary = functions.https.onCall(
       )
     );
     if (projectsOmitted > 0) {
-      functions.logger.warn("[teamUsage] 프로젝트 상한 초과 — 합계가 전체가 아니다", {
-        omitted: projectsOmitted,
-        max: TEAM_USAGE_MAX_PROJECTS_IN_SCOPE,
-      });
+      functions.logger.warn(
+        "[teamUsage] 프로젝트 상한 초과 — 합계가 전체가 아니다",
+        {
+          omitted: projectsOmitted,
+          max: TEAM_USAGE_MAX_PROJECTS_IN_SCOPE,
+        }
+      );
     }
     const inScope = candidates.filter((p) => scopeIds.includes(p.projectId));
 
@@ -16570,7 +16765,11 @@ export const getTeamUsageSummary = functions.https.onCall(
         gate,
         projectsInScope: inScope.length,
         projectsOmitted,
-        cache: { hit: false, ageSeconds: 0, ttlSeconds: TEAM_USAGE_CACHE_TTL_SECONDS },
+        cache: {
+          hit: false,
+          ageSeconds: 0,
+          ttlSeconds: TEAM_USAGE_CACHE_TTL_SECONDS,
+        },
         folded: null,
       });
     }
@@ -16589,7 +16788,11 @@ export const getTeamUsageSummary = functions.https.onCall(
         generatedAtMs: nowMs,
         gate,
         projectsInScope: 0,
-        cache: { hit: false, ageSeconds: 0, ttlSeconds: TEAM_USAGE_CACHE_TTL_SECONDS },
+        cache: {
+          hit: false,
+          ageSeconds: 0,
+          ttlSeconds: TEAM_USAGE_CACHE_TTL_SECONDS,
+        },
         folded: null,
       });
     }
@@ -16600,7 +16803,9 @@ export const getTeamUsageSummary = functions.https.onCall(
       scope === "team"
         ? [
             ...new Set(
-              inScope.flatMap((p) => [p.ownerId, ...p.members]).filter((u) => u !== "")
+              inScope
+                .flatMap((p) => [p.ownerId, ...p.members])
+                .filter((u) => u !== "")
             ),
           ]
         : [uid];
@@ -16660,7 +16865,11 @@ export const getTeamUsageSummary = functions.https.onCall(
         gate,
         projectsInScope: inScope.length,
         projectsOmitted,
-        cache: { hit: false, ageSeconds: 0, ttlSeconds: TEAM_USAGE_CACHE_TTL_SECONDS },
+        cache: {
+          hit: false,
+          ageSeconds: 0,
+          ttlSeconds: TEAM_USAGE_CACHE_TTL_SECONDS,
+        },
         folded: null,
         notProvisioned: true,
       });
@@ -16988,8 +17197,7 @@ export const addManualAnalyticsAdSpend = functions.https.onCall(
       id: ref.id,
       campaignKey: parsed.entry.campaignKey,
       amountKrw: parsed.entry.amountKrw,
-      note:
-        "수동 광고비 원장에 append-only 로 추가했다. 수정/삭제 대신 반대 부호가 아닌 새 정정 행을 별도 입력해야 한다.",
+      note: "수동 광고비 원장에 append-only 로 추가했다. 수정/삭제 대신 반대 부호가 아닌 새 정정 행을 별도 입력해야 한다.",
     };
   }
 );
@@ -17012,16 +17220,15 @@ export const loadAnalyticsAdSpend = functions
     for (const doc of snap.docs) {
       const data = doc.data() as Record<string, unknown>;
       const parsed = parseManualAdSpendInput(data);
-      const enteredBy = typeof data.enteredBy === "string" ? data.enteredBy : null;
+      const enteredBy =
+        typeof data.enteredBy === "string" ? data.enteredBy : null;
       if (!parsed.ok || !enteredBy) {
         skipped += 1;
         continue;
       }
       const createdAtMs = toMillis(data.createdAt);
       const createdAt =
-        createdAtMs === null
-          ? ingestedAt
-          : new Date(createdAtMs).toISOString();
+        createdAtMs === null ? ingestedAt : new Date(createdAtMs).toISOString();
       const row = toAdSpendLedgerRow({
         sourceDocId: `${ANALYTICS_AD_SPEND_COLLECTION}/${doc.id}`,
         entry: parsed.entry,
@@ -17045,8 +17252,7 @@ export const loadAnalyticsAdSpend = functions
       merged: rows.length,
       skipped,
       table: ANALYTICS_AD_SPEND_TABLE,
-      note:
-        "BQ 적재는 rowId MERGE 라 재실행해도 같은 수동 원장 문서를 중복 집계하지 않는다.",
+      note: "BQ 적재는 rowId MERGE 라 재실행해도 같은 수동 원장 문서를 중복 집계하지 않는다.",
     };
   });
 
@@ -17408,9 +17614,7 @@ async function ensureGa4BridgeSyncLogTable(): Promise<void> {
 function isBqNotFound(e: unknown): boolean {
   const msg = safeAnalyticsErrorMessage(e).toLowerCase();
   return (
-    msg.includes("not found") ||
-    msg.includes("notfound") ||
-    /\b404\b/.test(msg)
+    msg.includes("not found") || msg.includes("notfound") || /\b404\b/.test(msg)
   );
 }
 

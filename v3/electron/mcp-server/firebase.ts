@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { initializeApp, getApps } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth, signInWithCustomToken } from "firebase/auth";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 type FirebaseWebConfig = {
   apiKey: string;
@@ -81,6 +82,29 @@ const firebaseConfig = resolveFirebaseConfig();
 const app =
   getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 export const db = getFirestore(app);
+
+// ── 콜러블(Cloud Functions) 호출 ─────────────────────────────────────────────
+//
+// MCP 서버가 직접 콜러블을 부를 수 있어야 하는 이유: `mail_send` 의 발송 판정
+// (인증·레이트리밋·수신자 정책)은 **서버에만** 살 수 있다. 클라이언트에 두면
+// LLM 이 그걸 그냥 건너뛴다. 브리지(main 프로세스)를 한 번 더 경유시키지 않는
+// 것은, 브리지가 하는 일이 "토큰을 붙여 전달"뿐이라 여기서 이미 로그인된
+// 사용자 세션으로 부르는 것과 결과가 같기 때문이다.
+//
+// ★리전은 `v3/src/lib/firebase.ts` 의 FIREBASE_FUNCTIONS_REGION 과 반드시 같아야
+// 한다. 다르면 콜러블이 not-found 로 조용히 죽는다.
+const FUNCTIONS_REGION = "us-central1";
+const functions = getFunctions(app, FUNCTIONS_REGION);
+
+/** 콜러블 호출. HttpsError 는 그대로 throw 된다(code/message 보존). */
+export async function callFunction<Req extends Record<string, unknown>, Res>(
+  name: string,
+  payload: Req,
+): Promise<Res> {
+  const fn = httpsCallable<Req, Res>(functions, name);
+  const result = await fn(payload);
+  return result.data;
+}
 
 // MCP 서버는 별도 프로세스로 실행되어 renderer Firebase Auth 컨텍스트가 없음.
 // main 이 전달한 custom token(MARBLO_FIREBASE_CUSTOM_TOKEN)으로 실제 사용자

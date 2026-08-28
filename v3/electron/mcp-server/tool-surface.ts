@@ -122,6 +122,9 @@ export const ROLE_EXTRA_MCP_TOOLS: Readonly<Record<string, readonly string[]>> =
       "calendar_create",
       "calendar_patch",
       "gmail_send",
+      // ★스코프0 T5a: gmail.send 회수 후에도 살아남는 크로스플랫폼 발송 경로.
+      //   수신자는 본인 인증 이메일로 잠겨 있고, From 은 team@marblo.app 이다.
+      "mail_send",
       "notion_write",
     ],
     // 랜딩 역할: PR 머지 + 티켓/워크트리 클로즈아웃이 본업이다.

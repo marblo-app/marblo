@@ -24,7 +24,12 @@ import {
   type QueryConstraint,
   type QuerySnapshot,
 } from "firebase/firestore";
-import { db, ensureAuthenticated, getCurrentAuthUid } from "./firebase.js";
+import {
+  callFunction,
+  db,
+  ensureAuthenticated,
+  getCurrentAuthUid,
+} from "./firebase.js";
 import {
   resolveContext,
   resolveContextForWrite,
@@ -9266,6 +9271,83 @@ export function registerTools(server: McpServer): void {
           .filter(Boolean)
           .join("\n"),
       );
+    },
+    { userFacing: false },
+  );
+
+  // ── mail_send — Resend 경유 크로스플랫폼 발송 ────────────────────────────
+  //
+  // 티켓 QiqTTRP9hzsV7v1M8XUS (설계문서 §3.3 · §9 T5a). `gmail.send` 스코프를
+  // 회수하면 `gmail_send` 는 죽는다. 이 도구가 그 자리를 메우고, macOS·Windows
+  // 양쪽에서 되는 유일한 발송 경로다.
+  //
+  // ★판정은 전부 서버(콜러블 sendAssistantEmail)에 있다. 인증·레이트리밋·수신자
+  // 정책을 여기(클라이언트)에 두면 LLM 이 그냥 건너뛴다. 여기서는 부르고,
+  // 서버가 돌려준 문장을 그대로 옮긴다.
+  //
+  // 설계문서 §3.3 은 macOS 에서 Apple Mail(사용자 본인 주소)로 분기하는 것을
+  // 후속 티켓(T5b)에 배정했다. 지금은 Resend 한 갈래뿐이고, 그 사실을 도구
+  // 설명이 숨기지 않는다.
+  auditedTool(
+    "mail_send",
+    "Send an email for the signed-in user. CROSS-PLATFORM (macOS + Windows) — " +
+      "this is the mail path that works without Google Gmail scopes. " +
+      "★FROM ADDRESS: the message goes out from team@marblo.app (Marblo), NOT from " +
+      "the user's own email address. Tell the user this before they confirm — they " +
+      "will assume it leaves as them, and it does not; replies come back to Marblo, " +
+      "not to them. " +
+      "★RECIPIENT POLICY: it can only send to the user's own verified sign-in email " +
+      "address. Any other recipient, and any cc/bcc, is refused by the server. Use " +
+      "it for briefings and reports the user sends to themselves — not for mail to " +
+      "third parties. " +
+      "DESTRUCTIVE/IRREVERSIBLE, two-step contract identical to gmail_send: first " +
+      "show the user the full recipient, subject and body in your reply and ask " +
+      "whether to send it; only after they explicitly approve, call again with " +
+      "confirm=true. The server refuses unless confirm=true.",
+    {
+      to: z
+        .array(z.string())
+        .describe(
+          "Recipient. Exactly one address, and it must be the user's own verified " +
+            "sign-in email — anything else is refused.",
+        ),
+      subject: z.string().describe("Email subject."),
+      body: z.string().describe("Plain text email body."),
+      confirm: z
+        .boolean()
+        .describe("Must be true only after explicit user confirmation."),
+      locale: z
+        .enum(["ko", "en"])
+        .optional()
+        .describe("Language for the footer and error messages (default ko)."),
+    },
+    async ({ to, subject, body, confirm, locale }) => {
+      try {
+        const result = await callFunction<
+          Record<string, unknown>,
+          {
+            ok: true;
+            to: string;
+            from: string;
+            subject: string;
+            route: string;
+            summary: string;
+            fromNotice: string;
+          }
+        >("sendAssistantEmail", {
+          projectId: process.env.MARBLO_PROJECT || "",
+          to,
+          subject,
+          body,
+          confirm,
+          locale,
+        });
+        // ★발신 주소가 결과 문장에 들어 있다(서버가 만든다). 그대로 옮긴다.
+        return text(result.summary);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return text(`메일 발송 실패: ${message}`);
+      }
     },
     { userFacing: false },
   );
