@@ -9,7 +9,7 @@
  * 판단으로, 우리는 restricted 를 **전부 빼고** sensitive 만 요청한다.
  *
  * 빠지는 셋(공식 분류 재확인 결과 셋 다 restricted 다):
- *   · `drive.readonly`   — Drive 는 `drive.file` 만 sensitive 고 readonly/metadata
+ *   · `drive.readonly`   — Drive 는 `drive.file` 만 non-sensitive 고 readonly/metadata
  *                          계열은 전부 restricted 다.
  *   · `gmail.readonly`
  *   · `gmail.compose`    — ★sensitive 가 아니다. Gmail 에서 sensitive 인 것은
@@ -34,8 +34,11 @@
  * restricted 를 뺐다고 심사가 끝난 게 아니다. 앱을 게시할 때 붙는 **검증 심사**
  * (스코프마다 데모 영상 · 도메인 소유권 · 브랜드 검증 · 정책 개정)는 "sensitive
  * **또는** restricted 를 요청하는 경우" 에 발동한다. 6개를 1개로 줄여도 심사는
- * 통째로 그대로 붙는다 — **0 만이 심사를 없앤다.** 그래서 남은 sensitive 6개도
- * 뺀다. 로그인용 `openid` · `email` · `profile` 은 non-sensitive 라 남는다.
+ * 통째로 그대로 붙는다 — **0 만이 심사를 없앤다.** 그래서 남은 sensitive 5개도
+ * 뺀다. `drive.file` 은 non-sensitive 라 검증 심사 제거에는 기여하지 않지만,
+ * 유일한 소비자 `drive_write` 가 이미 잠겨 있어 아무 능력도 사주지 않는 스코프를
+ * 동의 화면에 남기지 않는 최소권한 정리로 먼저 보류한다. 로그인용 `openid` ·
+ * `email` · `profile` 은 non-sensitive 라 남는다.
  *
  * 판정과 대체 경로는 `docs/GOOGLE_SCOPE_ZERO_DESIGN.md` 가 원본이고, 이 파일은
  * 그 결론의 목록만 든다(아래 `PLANNED_SENSITIVE_WITHDRAWALS`).
@@ -49,7 +52,7 @@
  * 아니라 "지금은 못 쓴다" 는 것이 사용자에게 전달돼야 한다.
  */
 
-/** Drive — restricted. `drive.file` 만 sensitive 다. */
+/** Drive — restricted. `drive.file` 만 non-sensitive 다. */
 export const DRIVE_READONLY_SCOPE =
   "https://www.googleapis.com/auth/drive.readonly";
 /** Gmail — restricted. */
@@ -113,9 +116,10 @@ export interface PlannedSensitiveWithdrawal {
 export const PLANNED_SENSITIVE_WITHDRAWALS: readonly PlannedSensitiveWithdrawal[] =
   [
     {
-      // ★6개 중 유일하게 공짜다. 유일한 소비자 `drive_write` 가 이미
-      // WITHHELD_CAPABILITIES 로 잠겨 있어(위 목록), 이 스코프는 지금 아무
-      // 능력도 사주지 않으면서 심사 트리거 역할만 하고 있다.
+      // ★회수 비용 0. `drive.file` 은 non-sensitive 라 검증 심사 제거에는
+      // 기여하지 않는다. 유일한 소비자 `drive_write` 가 이미 WITHHELD_CAPABILITIES
+      // 로 잠겨 있어, 아무 능력도 사주지 않는 스코프를 동의 화면에 남기지 않는
+      // 최소권한 정리다.
       scope: "https://www.googleapis.com/auth/drive.file",
       buys: "drive_write — 이미 잠김. 잃는 기능 0.",
       replacement: "로컬 위키(defaultWikiRootPath) · 노션 커넥터(자체 OAuth)",

@@ -85,17 +85,20 @@ describe("스코프", () => {
     }
   });
 
-  it("남긴 것은 openid·email + 민감 스코프 여섯뿐이다", () => {
+  it("남긴 것은 openid·email + 아직 회수 전인 민감 스코프 다섯뿐이다", () => {
     expect(DRIVE_AUTH_SCOPE.split(/\s+/).filter(Boolean)).toEqual([
       "openid",
       "email",
       CALENDAR_READONLY_SCOPE,
       CONTACTS_READONLY_SCOPE,
       SHEETS_READONLY_SCOPE,
-      DRIVE_FILE_SCOPE,
       GMAIL_SEND_SCOPE,
       CALENDAR_EVENTS_SCOPE,
     ]);
+    // drive.file 은 non-sensitive 라 검증 심사 제거에는 기여하지 않는다. 다만
+    // 유일한 소비자 drive_write 가 이미 잠겨 있어 최소권한으로 동의 화면에서 뺀다.
+    expect(DRIVE_AUTH_SCOPE).not.toContain(DRIVE_FILE_SCOPE);
+    expect(GOOGLE_CONNECTOR_REQUIRED_SCOPES).not.toContain(DRIVE_FILE_SCOPE);
     // drive(전체 쓰기) 와 시트 쓰기는 예전부터 요청하지 않는다.
     expect(DRIVE_AUTH_SCOPE).not.toMatch(/auth\/drive(\s|$)/);
     expect(DRIVE_AUTH_SCOPE).not.toMatch(/auth\/spreadsheets(\s|$)/);
@@ -109,7 +112,6 @@ describe("스코프", () => {
       SHEETS_READONLY_SCOPE,
     );
     for (const scope of [
-      DRIVE_FILE_SCOPE,
       GMAIL_SEND_SCOPE,
       CALENDAR_EVENTS_SCOPE,
       CALENDAR_READONLY_SCOPE,

@@ -31,15 +31,19 @@
  * `drive.readonly` · `gmail.readonly` · `gmail.compose` 는 셋 다 Google 분류상
  * **restricted** 이고, 하나라도 요청하면 외부 공개 시 **CASA 보안평가**(유료 ·
  * 연 1회 갱신)가 따라붙는다. 일본 출시 일정을 그 심사에 걸 수 없다는 판단으로
- * 셋을 모두 뺐다. 남는 것은 sensitive 여섯 + non-sensitive 둘이다:
+ * 셋을 모두 뺐다. 이어서 T1 에서 `drive.file` 도 요청 목록에서 뺐다. 이 스코프는
+ * non-sensitive 라 검증 심사 제거에 기여하지 않는다. 빼는 이유는 유일한 소비자
+ * `drive_write` 가 이미 WITHHELD_CAPABILITIES 로 잠겨 있어, 아무 능력도 사주지
+ * 않는 스코프를 동의 화면에 남기지 않는 최소권한 정리다. 남는 것은 sensitive
+ * 다섯 + non-sensitive 둘이다:
  *
- *   sensitive     drive.file · gmail.send · calendar.readonly · calendar.events ·
+ *   sensitive     gmail.send · calendar.readonly · calendar.events ·
  *                 contacts.readonly · spreadsheets.readonly
  *   non-sensitive openid · email
  *
  * ★`gmail.compose` 가 sensitive 라는 통념은 틀렸다. Gmail 에서 sensitive 인 것은
  * `gmail.send` 와 addons 계열뿐이고, readonly · compose · metadata · modify ·
- * insert 는 전부 restricted 다. Drive 도 마찬가지로 `drive.file` 만 sensitive 고
+ * insert 는 전부 restricted 다. Drive 는 `drive.file` 만 non-sensitive 고,
  * readonly/metadata 계열은 전부 restricted 다.
  *
  * 빠진 스코프와 그 때문에 잠긴 기능, 사용자에게 보일 문구는 전부
@@ -122,11 +126,12 @@ export {
 } from "./google-restricted-scopes";
 
 /**
- * Google Workspace 커넥터 스코프 — ★여기 있는 것은 **전부 sensitive** 다.
+ * Google Workspace 커넥터 스코프.
  * 쓰기는 비파괴 생성 + 명시 확인 발송에 한정한다.
  *
  * restricted 셋(`drive.readonly` · `gmail.readonly` · `gmail.compose`)은 이
  * 파일에 없다. 위에서 `google-restricted-scopes.ts` 의 것을 다시 내보내기만 한다.
+ * `drive.file` 도 지금은 요청하지 않지만, 삭제가 아니라 보류라 상수는 유지한다.
  */
 export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
@@ -161,9 +166,12 @@ export const GOOGLE_CONNECTOR_READONLY_SCOPES = [
  * 요청하는 **쓰기** 스코프. `gmail.compose` 는 restricted 라 빠졌다 —
  * 초안은 이제 Gmail 초안함이 아니라 Marblo 화면에서 만들고, 사용자가 확인하면
  * `gmail.send` 로 나간다(docs/GMAIL_DRAFT_REPLACEMENT.md).
+ *
+ * `drive.file` 은 non-sensitive 라 검증 심사 제거에는 기여하지 않지만, 유일한
+ * 소비자 `drive_write` 가 이미 앱에서 무조건 잠겨 있다. 아무 능력도 사주지 않는
+ * 스코프를 동의 화면에 남기지 않는 최소권한 원칙으로 요청 목록에서 보류한다.
  */
 export const GOOGLE_CONNECTOR_WRITE_SCOPES = [
-  DRIVE_FILE_SCOPE,
   GMAIL_SEND_SCOPE,
   CALENDAR_EVENTS_SCOPE,
 ] as const;
