@@ -4,6 +4,7 @@ import { initializeApp, getApps } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth, signInWithCustomToken } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
+import type { Functions } from "firebase/functions";
 
 type FirebaseWebConfig = {
   apiKey: string;
@@ -81,6 +82,10 @@ const firebaseConfig = resolveFirebaseConfig();
 
 const app =
   getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+// Firestore is intentionally kept eager: MCP handlers import and use db at module
+// scope, and the vitest firestore alias accepts this app without touching app
+// providers. The import-time crash fixed below was specific to functions, whose
+// real SDK getFunctions(app) dereferences the app provider during module import.
 export const db = getFirestore(app);
 
 // ── 콜러블(Cloud Functions) 호출 ─────────────────────────────────────────────
@@ -94,14 +99,26 @@ export const db = getFirestore(app);
 // ★리전은 `v3/src/lib/firebase.ts` 의 FIREBASE_FUNCTIONS_REGION 과 반드시 같아야
 // 한다. 다르면 콜러블이 not-found 로 조용히 죽는다.
 const FUNCTIONS_REGION = "us-central1";
-const functions = getFunctions(app, FUNCTIONS_REGION);
+let functions: Functions | null = null;
+
+function getMcpFunctions(): Functions {
+  // Do not create Functions at module import time. If a top-level Firebase call
+  // throws before MCP server startup, the whole server dies; we have hit this
+  // class before with Sentry ready-before-init (PR #583) and package MCP -32000.
+  // mail_send is the only callable path here, so initialize on first real use
+  // and cache the instance afterward.
+  if (!functions) {
+    functions = getFunctions(app, FUNCTIONS_REGION);
+  }
+  return functions;
+}
 
 /** 콜러블 호출. HttpsError 는 그대로 throw 된다(code/message 보존). */
 export async function callFunction<Req extends Record<string, unknown>, Res>(
   name: string,
   payload: Req,
 ): Promise<Res> {
-  const fn = httpsCallable<Req, Res>(functions, name);
+  const fn = httpsCallable<Req, Res>(getMcpFunctions(), name);
   const result = await fn(payload);
   return result.data;
 }
