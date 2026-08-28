@@ -227,8 +227,11 @@ import {
 } from "./ledger-chain.js";
 import {
   evaluateMergeCloseout,
+  formatMergeWikiDecisionPrompt,
+  isWikiDecisionResolvedMessage,
   parsePrNumber,
   branchMatchesTask,
+  WIKI_DECISION_PENDING_MARKER,
   type MergeState,
   type MergeVerdict,
 } from "./merge-closeout.js";
@@ -865,6 +868,13 @@ interface TaskDoc {
   comment: string;
   prUrl: string;
   hasPmFeedback: boolean;
+  wikiDecision?: {
+    status?: string;
+    sourceTool?: string;
+    promptedAt?: Timestamp;
+    prNumber?: number;
+    prUrl?: string;
+  };
   /** soft-delete 표식 — true 면 목록/조회에서 숨긴다. */
   deleted?: boolean;
   /**
@@ -3110,6 +3120,189 @@ async function fetchRecentActivityMessages(
     )
     .slice(0, window)
     .map((d) => d.message ?? "");
+}
+
+interface ActivityMessageRow {
+  message: string;
+  createdAtMs: number;
+}
+
+interface PendingWikiDecisionTask {
+  taskId: string;
+  title: string;
+  promptedAtMs: number;
+}
+
+interface PendingWikiDecisionSummary {
+  count: number;
+  examples: string[];
+}
+
+function timestampMillis(value: unknown): number {
+  if (
+    value &&
+    typeof value === "object" &&
+    "toMillis" in value &&
+    typeof value.toMillis === "function"
+  ) {
+    const millis = value.toMillis();
+    return Number.isFinite(millis) ? millis : 0;
+  }
+  return 0;
+}
+
+function pendingWikiDecisionFromTask(
+  id: string,
+  data: Record<string, unknown>
+): PendingWikiDecisionTask | null {
+  const decision =
+    data.wikiDecision &&
+    typeof data.wikiDecision === "object" &&
+    !Array.isArray(data.wikiDecision)
+      ? (data.wikiDecision as Record<string, unknown>)
+      : null;
+  if (!decision) return null;
+  if (decision.status !== "PENDING") return null;
+  if (decision.sourceTool !== "merge_and_close") return null;
+  const promptedAtMs = timestampMillis(decision.promptedAt);
+  const title = typeof data.title === "string" ? data.title : "(untitled)";
+  return { taskId: id, title, promptedAtMs };
+}
+
+async function fetchRecentActivityRows(
+  taskId: string,
+  window = 80
+): Promise<ActivityMessageRow[]> {
+  const snap = await boundedGetDocs(
+    "activities",
+    undefined,
+    [where("taskId", "==", taskId)],
+    [orderBy("createdAt", "desc"), fsLimit(window)],
+    "fetchRecentActivityRows"
+  );
+  return snap.docs
+    .map((d) => {
+      const data = d.data() as { message?: unknown; createdAt?: unknown };
+      return {
+        message: typeof data.message === "string" ? data.message : "",
+        createdAtMs: timestampMillis(data.createdAt),
+      };
+    })
+    .sort((a, b) => b.createdAtMs - a.createdAtMs);
+}
+
+async function hasResolvedWikiDecision(
+  task: PendingWikiDecisionTask
+): Promise<boolean> {
+  const rows = await fetchRecentActivityRows(task.taskId);
+  return rows.some(
+    (row) =>
+      row.createdAtMs >= task.promptedAtMs &&
+      isWikiDecisionResolvedMessage(row.message)
+  );
+}
+
+async function fetchPendingWikiDecisionSummary(
+  projectId: string,
+  currentTaskId: string
+): Promise<PendingWikiDecisionSummary> {
+  // Keep this to the existing projectId scope query; adding
+  // where("wikiDecision.status", "==", "PENDING") would need a new deployed index
+  // on the merge path, and wiki reminders must never make closeout brittle.
+  const snap = await boundedGetDocs(
+    "tasks",
+    projectId,
+    [],
+    [],
+    "fetchPendingWikiDecisionSummary"
+  );
+  const candidates = snap.docs
+    .map((d) => pendingWikiDecisionFromTask(d.id, d.data()))
+    .filter((row): row is PendingWikiDecisionTask => row !== null);
+
+  const unresolved: PendingWikiDecisionTask[] = [];
+  for (const task of candidates) {
+    if (!(await hasResolvedWikiDecision(task))) unresolved.push(task);
+  }
+
+  unresolved.sort((a, b) => {
+    if (a.taskId === currentTaskId) return -1;
+    if (b.taskId === currentTaskId) return 1;
+    return b.promptedAtMs - a.promptedAtMs;
+  });
+  return {
+    count: unresolved.length,
+    examples: unresolved
+      .slice(0, 3)
+      .map((task) => `${task.taskId} ${task.title}`),
+  };
+}
+
+async function recordMergeWikiDecisionPrompt(
+  task: TaskDoc,
+  merge: MergeVerdict,
+  prLabel: string
+): Promise<string | null> {
+  const existing = task.wikiDecision;
+  if (
+    existing?.status === "PENDING" &&
+    existing.sourceTool === "merge_and_close"
+  ) {
+    return null;
+  }
+
+  const prUrl = merge.url || task.prUrl || undefined;
+  const wikiDecision: Record<string, unknown> = {
+    status: "PENDING",
+    sourceTool: "merge_and_close",
+    promptedAt: Timestamp.now(),
+  };
+  if (merge.prNumber) wikiDecision.prNumber = merge.prNumber;
+  if (prUrl) wikiDecision.prUrl = prUrl;
+
+  try {
+    await applyProjection(db, task.id, {
+      lastAgentId: WORKER_AGENT_ID,
+      lastActivitySummary: `merge_and_close: wiki decision pending ${prLabel}`,
+      extraTaskFields: { wikiDecision },
+      activityPayload: {
+        agentId: MARBLO_AGENT_ID,
+        message:
+          `${WIKI_DECISION_PENDING_MARKER} merge_and_close asked whether ` +
+          `${prLabel} should update docs/wiki or WIKI-SKIP.`,
+      },
+    });
+    return null;
+  } catch (err) {
+    console.error("[merge_and_close] wiki decision prompt record failed:", err);
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
+async function mergeWikiDecisionPromptForResponse(
+  task: TaskDoc,
+  merge: MergeVerdict,
+  prLabel: string
+): Promise<string> {
+  const recordError = await recordMergeWikiDecisionPrompt(task, merge, prLabel);
+  try {
+    const summary = await fetchPendingWikiDecisionSummary(
+      task.projectId || DEFAULT_PROJECT,
+      task.id
+    );
+    return formatMergeWikiDecisionPrompt({
+      taskId: task.id,
+      pendingUnresolvedCount: summary.count,
+      pendingExamples: summary.examples,
+      ...(recordError ? { recordError } : {}),
+    });
+  } catch (err) {
+    console.error("[merge_and_close] wiki decision pending count failed:", err);
+    return formatMergeWikiDecisionPrompt({
+      taskId: task.id,
+      ...(recordError ? { recordError } : {}),
+    });
+  }
 }
 
 /**
@@ -10392,6 +10585,10 @@ export function registerTools(server: McpServer): void {
             `  ⚠️ 커밋되지 않은 변경이 남아 있어 보존했다. 내용을 확인하고 직접 정리해라.`
           );
         }
+      }
+
+      if (merge.state === "MERGED" && verdict.reapWorktree) {
+        lines.push(await mergeWikiDecisionPromptForResponse(task, merge, prLabel));
       }
 
       return text(withCaptureNote(lines.join("\n"), holdCaptureNote));

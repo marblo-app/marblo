@@ -81,6 +81,53 @@ export interface CloseoutVerdict {
   reapWorktree: boolean;
 }
 
+export const WIKI_DECISION_PENDING_MARKER = "[wiki-decision:pending]";
+export const WIKI_DECISION_RESOLVED_MARKER = "[wiki-decision:resolved]";
+
+export interface MergeWikiDecisionPromptInput {
+  taskId: string;
+  pendingUnresolvedCount?: number;
+  pendingExamples?: readonly string[];
+  recordError?: string;
+}
+
+export function isWikiDecisionResolvedMessage(message: string): boolean {
+  const normalized = normalize(message);
+  if (normalized.includes(WIKI_DECISION_PENDING_MARKER)) return false;
+  return (
+    normalized.includes(WIKI_DECISION_RESOLVED_MARKER) ||
+    normalized.includes("wiki-skip") ||
+    normalized.includes("위키 스킵") ||
+    normalized.includes("/wiki-note") ||
+    normalized.includes("wiki_ingest")
+  );
+}
+
+export function formatMergeWikiDecisionPrompt(
+  input: MergeWikiDecisionPromptInput,
+): string {
+  const pending =
+    input.pendingUnresolvedCount === undefined
+      ? "미판정 누적: 확인 실패 — 이번 머지는 막지 않는다."
+      : `미판정 누적: ${input.pendingUnresolvedCount}건`;
+  const examples =
+    input.pendingExamples && input.pendingExamples.length > 0
+      ? `\n- 미판정 예: ${input.pendingExamples.join(", ")}`
+      : "";
+  const recordError = input.recordError
+    ? `\n- 기록 경고: ${input.recordError} — 이번 머지는 막지 않는다.`
+    : "";
+  return [
+    "",
+    "위키 판정:",
+    "- 질문: 이번 변경이 다음 작업에도 반복될 규칙인가?",
+    "- 예: docs/wiki 노트를 쓰거나 기존 노트를 고친다. 초안 제안은 가능하지만 사람 반영이 기준이다.",
+    "- 아니오: docs/wiki/_meta/WIKI-SKIP.md 에 한 줄 사유를 남긴다.",
+    `- 판정 뒤 기록: add_activity(task_id="${input.taskId}", message="${WIKI_DECISION_RESOLVED_MARKER} <노트 경로 또는 WIKI-SKIP 사유>")`,
+    `- ${pending}${examples}${recordError}`,
+  ].join("\n");
+}
+
 /**
  * Deliberate opt-in markers. Unambiguous enough to honor anywhere, including
  * the immutable ticket body — someone typed these on purpose.

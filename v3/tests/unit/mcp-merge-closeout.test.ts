@@ -14,6 +14,8 @@ import { describe, it, expect } from "vitest";
 import {
   evaluateMergeCloseout,
   detectFollowupSignals,
+  formatMergeWikiDecisionPrompt,
+  isWikiDecisionResolvedMessage,
   parsePrNumber,
   branchMatchesTask,
   type CloseoutInput,
@@ -184,6 +186,42 @@ describe("evaluateMergeCloseout — unmerged PR changes nothing", () => {
       input({ merge: { state: "OPEN" }, comment: "승인 대기" }),
     );
     expect(v.action).toBe("NO_CHANGE");
+  });
+});
+
+describe("merge-time wiki decision prompt", () => {
+  it("asks for a human decision without making wiki writing the default", () => {
+    const out = formatMergeWikiDecisionPrompt({
+      taskId: "task-123",
+      pendingUnresolvedCount: 2,
+      pendingExamples: ["task-123 현재 작업", "old-task 이전 작업"],
+    });
+
+    expect(out).toContain("이번 변경이 다음 작업에도 반복될 규칙인가");
+    expect(out).toContain("docs/wiki/_meta/WIKI-SKIP.md");
+    expect(out).toContain("[wiki-decision:resolved]");
+    expect(out).toContain("미판정 누적: 2건");
+    expect(out).not.toContain("자동으로");
+  });
+
+  it("recognizes either the explicit resolved marker or the skip/wiki-note paths", () => {
+    expect(
+      isWikiDecisionResolvedMessage(
+        "[wiki-decision:resolved] docs/wiki/40-methodology/example.md",
+      ),
+    ).toBe(true);
+    expect(
+      isWikiDecisionResolvedMessage(
+        "docs/wiki/_meta/WIKI-SKIP.md 에 사유를 남김",
+      ),
+    ).toBe(true);
+    expect(isWikiDecisionResolvedMessage("/wiki-note 로 노트 작성")).toBe(true);
+    expect(
+      isWikiDecisionResolvedMessage(
+        "[wiki-decision:pending] decide whether WIKI-SKIP is needed",
+      ),
+    ).toBe(false);
+    expect(isWikiDecisionResolvedMessage("일반 진행 로그")).toBe(false);
   });
 });
 
