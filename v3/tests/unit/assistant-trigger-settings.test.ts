@@ -130,68 +130,37 @@ describe("validateAssistantTriggerSettings", () => {
     );
   });
 
-  it("시트 조건은 스코프가 없으면 저장을 막는다 — 켜놓고 안 도는 상태를 만들지 않는다", () => {
-    const result = validateAssistantTriggerSettings(sheetsOnly({}), {
-      ...connectorsReady,
-      sheetsConnected: false,
-    });
-
-    expect(result.ok).toBe(false);
-    expect(result.issues).toContain("sheets_connector_required");
-  });
-
-  it("시트 조건은 스프레드시트 지정을 요구한다", () => {
-    const blank = validateAssistantTriggerSettings(
-      sheetsOnly({ spreadsheetId: "   " }),
-      connectorsReady,
-    );
-    expect(blank.issues).toContain("sheets_spreadsheet_required");
-
-    // 시트가 아닌 구글 문서 URL 은 통과시키지 않는다.
-    const wrongDoc = validateAssistantTriggerSettings(
-      sheetsOnly({
-        spreadsheetId: "https://docs.google.com/document/d/AAA/edit",
-      }),
-      connectorsReady,
-    );
-    expect(wrongDoc.issues).toContain("sheets_spreadsheet_required");
-
-    // URL 을 붙여넣어도 유효하다.
-    const fromUrl = validateAssistantTriggerSettings(
+  /**
+   * ★스코프 0 (설계 §3.5 · 티켓 kJbIsaRPjMnGQTvDbR1V) 이후의 시트 조건.
+   *
+   * 스코프가 붙어 있든 아니든 **폴링 경로는 보류**다. 그래서 여기서 확인하는
+   * 것은 "연결이 없다" 가 아니라 "방식이 바뀌었다" 쪽 이슈가 나오는지다 —
+   * 두 이슈를 나눠 둔 이유가 문구이므로, 어느 쪽이 나오는지가 곧 계약이다.
+   *
+   * 보류가 풀렸을 때의 옛 규칙(스코프·스프레드시트·주기)은 지우지 않고
+   * `assistant-trigger-settings-sheets-restored.test.ts` 가 그대로 지킨다.
+   */
+  it("시트 조건은 보류됐다 — 스코프가 있어도 '연결 필요' 가 아니라 '방식이 바뀜' 으로 막는다", () => {
+    const result = validateAssistantTriggerSettings(
       sheetsOnly({
         spreadsheetId:
           "https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBd/edit#gid=0",
       }),
       connectorsReady,
     );
-    expect(fromUrl.ok).toBe(true);
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toContain("sheets_trigger_withheld");
+    expect(result.issues).not.toContain("sheets_connector_required");
   });
 
-  it("시트 폴링 간격은 기존 gmail/calendar 와 같은 1~60분 규칙을 따른다", () => {
-    expect(
-      validateAssistantTriggerSettings(
-        sheetsOnly({ pollMinutes: 0 }),
-        connectorsReady,
-      ).issues,
-    ).toContain("sheets_poll_out_of_range");
-    expect(
-      validateAssistantTriggerSettings(
-        sheetsOnly({ pollMinutes: 61 }),
-        connectorsReady,
-      ).issues,
-    ).toContain("sheets_poll_out_of_range");
-    expect(
-      validateAssistantTriggerSettings(
-        sheetsOnly({ pollMinutes: 1 }),
-        connectorsReady,
-      ).ok,
-    ).toBe(true);
-    expect(
-      validateAssistantTriggerSettings(
-        sheetsOnly({ pollMinutes: 60 }),
-        connectorsReady,
-      ).ok,
-    ).toBe(true);
+  it("보류 중에는 형식 오류를 겹쳐 띄우지 않는다 — 할 일 한 문장이 잡음에 묻히지 않게", () => {
+    const result = validateAssistantTriggerSettings(
+      sheetsOnly({ spreadsheetId: "   ", pollMinutes: 0 }),
+      { ...connectorsReady, sheetsConnected: false },
+    );
+
+    expect(result.issues).toEqual(["sheets_trigger_withheld"]);
   });
 
   it("시트 조건만 켜도 트리거가 하나 켜진 것으로 센다", () => {

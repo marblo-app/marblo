@@ -347,6 +347,54 @@ export const agents = {
   "agents.triggers.webhook.secretMasked": "저장된 시크릿: {secret}",
   "agents.triggers.webhook.signatureHint":
     "요청은 POST JSON이고, x-marblo-signature 헤더는 ts=<unix>;h1=<HMAC-SHA256(secret, ts + ':' + rawBody)> 형식입니다. 시크릿 원문은 발급·재발급 직후에만 표시됩니다.",
+  // ── Apps Script (구글 시트 새 행 → 웹훅). 스코프 0 대체 경로. ───────────
+  // ★사용자가 자기 시트에 붙여넣는 스크립트를 만들어 주는 블록의 문구다.
+  // 마찰(붙여넣기)이 실재하므로 단계 수를 숨기지 않고 먼저 말한다.
+  "agents.triggers.appsScript.title": "구글 시트 새 행 감지 (Apps Script)",
+  "agents.triggers.appsScript.description":
+    "Marblo 는 시트를 읽지 않습니다. 대신 시트에 붙여넣는 아래 스크립트가 새 행을 감지해 위 웹훅 URL을 호출합니다. 구글 권한을 하나도 요구하지 않고, Windows 에서도 동일하게 동작합니다.",
+  "agents.triggers.appsScript.stepCount":
+    "앱에서 1단계, 구글 화면에서 5단계 — 모두 6단계입니다. 한 번만 하면 됩니다.",
+  "agents.triggers.appsScript.needsWebhook":
+    "먼저 위에서 [URL 발급]을 눌러 수신 URL과 시크릿을 만드세요.",
+  "agents.triggers.appsScript.needsSecret":
+    "시크릿 원문은 발급·재발급 직후에만 표시됩니다. 지금은 값이 없어 스크립트를 만들 수 없습니다. [URL·시크릿 재발급]을 누르면 새 시크릿으로 스크립트를 만들어 드립니다. ★재발급하면 이전에 붙여넣은 스크립트는 401 로 실패하므로 새 스크립트로 덮어써야 합니다.",
+  "agents.triggers.appsScript.sheetName": "시트 이름 (선택)",
+  "agents.triggers.appsScript.sheetNameHint":
+    "비워두면 첫 번째 시트를 봅니다. 예: 설문지 응답 시트1",
+  "agents.triggers.appsScript.interval": "시트를 확인하는 주기",
+  "agents.triggers.appsScript.intervalOption": "{minutes}분마다",
+  "agents.triggers.appsScript.intervalHint":
+    "Apps Script 시간 트리거가 받는 값만 고를 수 있습니다. ★이 주기는 Marblo 가 아니라 붙여넣은 스크립트가 들고 있습니다 — 나중에 바꾸려면 스크립트를 다시 만들어 붙여넣거나, Apps Script 편집기에서 MARBLO_INTERVAL_MINUTES 를 고치고 marbloInstall 을 다시 실행하세요. 행이 추가되면 onChange 가속기가 최대 1분 안에 먼저 알리므로, 5분을 권합니다.",
+  "agents.triggers.appsScript.script": "붙여넣을 스크립트",
+  "agents.triggers.appsScript.copy": "스크립트 복사",
+  "agents.triggers.appsScript.copied": "스크립트를 복사했습니다.",
+  "agents.triggers.appsScript.secretWarning":
+    "이 스크립트에는 웹훅 시크릿 원문이 들어 있습니다. 시트 공동 편집자는 이 스크립트를 볼 수 있으니, 편집 권한을 가진 사람만 있는 시트에 붙여넣으세요.",
+  "agents.triggers.appsScript.stepsTitle": "구글 화면에서 할 5단계",
+  "agents.triggers.appsScript.step1":
+    "시트 상단 메뉴에서 확장 프로그램 → Apps Script 를 엽니다.",
+  "agents.triggers.appsScript.step2":
+    "편집기에 있던 코드를 모두 지우고, 복사한 스크립트를 붙여넣습니다.",
+  "agents.triggers.appsScript.step3": "저장합니다 (Cmd/Ctrl + S).",
+  "agents.triggers.appsScript.step4":
+    "상단 함수 목록에서 marbloInstall 을 고르고 실행합니다.",
+  "agents.triggers.appsScript.step5":
+    "권한 승인 창에서 본인 구글 계정을 선택하고 허용합니다 (최초 1회).",
+  "agents.triggers.appsScript.frictionTitle": "여기서 막히기 쉽습니다",
+  "agents.triggers.appsScript.friction1":
+    "4단계에서 함수 목록에 marbloInstall 이 안 보이면 아직 저장하지 않은 것입니다. 3단계를 먼저 하세요.",
+  "agents.triggers.appsScript.friction2":
+    "5단계에서 '이 앱은 확인되지 않았습니다' 경고가 뜰 수 있습니다. 본인이 방금 붙여넣은 본인 스크립트이므로, 고급 → (프로젝트 이름)(으)로 이동을 눌러 진행하면 됩니다.",
+  "agents.triggers.appsScript.friction3":
+    "설치 직후에는 알림이 오지 않는 것이 정상입니다. 현재 상태를 기준선으로 잡고, 그 뒤에 늘어난 행부터 알립니다. 바로 확인하려면 행을 하나 추가한 뒤 marbloTestNow 를 실행하세요.",
+  "agents.triggers.appsScript.troubleshootTitle": "실패하면 (Apps Script 실행 기록)",
+  "agents.triggers.appsScript.troubleshoot401":
+    "401 — 서명이 맞지 않습니다. 시크릿을 재발급한 뒤 스크립트를 갱신하지 않은 경우가 대부분입니다. 여기서 새 스크립트를 복사해 다시 붙여넣으세요.",
+  "agents.triggers.appsScript.troubleshoot403":
+    "403 — 이 프로젝트의 Webhook 조건이 꺼져 있습니다. 위 체크박스를 켜고 저장하세요.",
+  "agents.triggers.appsScript.troubleshoot429":
+    "429 — 잠시 호출이 몰렸습니다. 스크립트가 다음 실행에서 같은 행을 다시 보내므로 놓치지 않습니다.",
   "agents.marbloBots.savedSeed": "시드 봇을 프로젝트에 저장했습니다.",
   "agents.marbloBots.savedCustom": "봇 정의를 프로젝트에 저장했습니다.",
   "agents.marbloBots.saveFailed": "저장 실패",
@@ -473,6 +521,9 @@ export const agents = {
   "agents.triggers.gmail.title": "Gmail 조건 (이번 출시 미제공)",
   "agents.triggers.gmail.enable": "메일 조건 감지",
   "agents.triggers.sheets.title": "구글 시트 조건",
+  "agents.triggers.sheets.heldBadge": "보류됨",
+  "agents.triggers.sheets.heldNotice":
+    "이 조건은 폴링으로 동작하지 않습니다. 연결이 끊긴 것이 아니라 방식이 바뀌었습니다 — 시트 읽기 권한(spreadsheets.readonly)을 요청하지 않기로 해서, 이제 위 Webhook 조건의 Apps Script 가 같은 일을 합니다. 아래 설정값은 지우지 않고 보관합니다.",
   "agents.triggers.sheets.enable": "새 행이 추가되면 감지",
   "agents.triggers.sheets.spreadsheet": "스프레드시트 ID 또는 URL",
   "agents.triggers.sheets.spreadsheetHint":
@@ -515,6 +566,8 @@ export const agents = {
     "Calendar poll 간격은 1~60분이어야 합니다.",
   "agents.triggers.validation.gmailPollOutOfRange":
     "Gmail poll 간격은 1~60분이어야 합니다.",
+  "agents.triggers.validation.sheetsTriggerWithheld":
+    "시트 조건을 켠 채로는 저장할 수 없습니다. 새 행 감지는 이제 위 Webhook 조건의 Apps Script 로 동작합니다 — 이 체크박스를 끄고, Webhook 조건에서 스크립트를 만들어 시트에 붙여넣어 주세요.",
   "agents.triggers.validation.sheetsConnectorRequired":
     "시트 조건을 켜려면 Google Sheets readonly scope가 필요합니다. Harness 탭에서 Google 계정을 다시 연결해 주세요.",
   "agents.triggers.validation.sheetsSpreadsheetRequired":

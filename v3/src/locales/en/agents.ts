@@ -356,6 +356,53 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.triggers.webhook.secretMasked": "Stored secret: {secret}",
   "agents.triggers.webhook.signatureHint":
     "Requests use POST JSON, and the x-marblo-signature header is ts=<unix>;h1=<HMAC-SHA256(secret, ts + ':' + rawBody)>. The raw secret is shown only immediately after issue or rotation. The Orchestrator receives only the sanitized event.",
+  // ── Apps Script (Google Sheets new rows -> webhook). Zero-scope path. ──
+  "agents.triggers.appsScript.title": "Google Sheets new rows (Apps Script)",
+  "agents.triggers.appsScript.description":
+    "Marblo does not read your sheet. Instead, the script below - pasted into your sheet - detects new rows and calls the webhook URL above. It needs no Google permission from us and works the same on Windows.",
+  "agents.triggers.appsScript.stepCount":
+    "One step here, five in Google - six in total. You only do this once.",
+  "agents.triggers.appsScript.needsWebhook":
+    "First press [Issue URL] above to create the receiver URL and secret.",
+  "agents.triggers.appsScript.needsSecret":
+    "The raw secret is shown only right after issue or rotation, so the script cannot be generated now. Press [Rotate URL and secret] to get a fresh secret and a script for it. Note: rotating makes a previously pasted script fail with 401, so you must replace it with the new one.",
+  "agents.triggers.appsScript.sheetName": "Sheet name (optional)",
+  "agents.triggers.appsScript.sheetNameHint":
+    "Leave empty to watch the first sheet. Example: Form Responses 1",
+  "agents.triggers.appsScript.interval": "How often the sheet is checked",
+  "agents.triggers.appsScript.intervalOption": "every {minutes} minutes",
+  "agents.triggers.appsScript.intervalHint":
+    "Only values Apps Script time triggers accept are offered. Note: this interval lives in the pasted script, not in Marblo - to change it later, regenerate and re-paste the script, or edit MARBLO_INTERVAL_MINUTES in the Apps Script editor and run marbloInstall again. An onChange accelerator reports added rows within about a minute anyway, so 5 minutes is a good default.",
+  "agents.triggers.appsScript.script": "Script to paste",
+  "agents.triggers.appsScript.copy": "Copy script",
+  "agents.triggers.appsScript.copied": "Script copied.",
+  "agents.triggers.appsScript.secretWarning":
+    "This script contains the raw webhook secret. Anyone who can edit the sheet can read it, so paste it only into a sheet whose editors you trust.",
+  "agents.triggers.appsScript.stepsTitle": "Five steps inside Google",
+  "agents.triggers.appsScript.step1":
+    "In the sheet menu, open Extensions -> Apps Script.",
+  "agents.triggers.appsScript.step2":
+    "Delete the code already in the editor and paste the copied script.",
+  "agents.triggers.appsScript.step3": "Save (Cmd/Ctrl + S).",
+  "agents.triggers.appsScript.step4":
+    "Pick marbloInstall in the function list at the top and press Run.",
+  "agents.triggers.appsScript.step5":
+    "In the authorization dialog, choose your Google account and allow (once).",
+  "agents.triggers.appsScript.frictionTitle": "Where people get stuck",
+  "agents.triggers.appsScript.friction1":
+    "If marbloInstall is missing from the function list in step 4, the file is not saved yet. Do step 3 first.",
+  "agents.triggers.appsScript.friction2":
+    "Step 5 may warn that the app is not verified. It is your own script that you just pasted, so choose Advanced -> Go to (project name) and continue.",
+  "agents.triggers.appsScript.friction3":
+    "Silence right after installing is normal. The install records the current state as a baseline and reports only rows added after it. To check immediately, add a row and run marbloTestNow.",
+  "agents.triggers.appsScript.troubleshootTitle":
+    "If it fails (Apps Script execution log)",
+  "agents.triggers.appsScript.troubleshoot401":
+    "401 - the signature does not match. Usually the secret was rotated and the script was not updated. Copy the script here again and re-paste it.",
+  "agents.triggers.appsScript.troubleshoot403":
+    "403 - the Webhook condition is off for this project. Tick the checkbox above and save.",
+  "agents.triggers.appsScript.troubleshoot429":
+    "429 - calls piled up briefly. The script resends the same rows on its next run, so nothing is lost.",
   "agents.marbloBots.savedSeed": "Seed bot saved to this project.",
   "agents.marbloBots.savedCustom": "Bot definition saved to this project.",
   "agents.marbloBots.saveFailed": "Save failed",
@@ -484,6 +531,9 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.triggers.gmail.title": "Gmail Condition (not in this release)",
   "agents.triggers.gmail.enable": "Detect mail conditions",
   "agents.triggers.sheets.title": "Google Sheets Condition",
+  "agents.triggers.sheets.heldBadge": "On hold",
+  "agents.triggers.sheets.heldNotice":
+    "This condition no longer runs by polling. Nothing is disconnected - the mechanism changed: we no longer request the sheet read scope (spreadsheets.readonly), so the Apps Script under the Webhook condition above does this job now. The values below are kept, not erased.",
   "agents.triggers.sheets.enable": "Detect newly added rows",
   "agents.triggers.sheets.spreadsheet": "Spreadsheet ID or URL",
   "agents.triggers.sheets.spreadsheetHint":
@@ -527,6 +577,8 @@ export const agents: Record<keyof typeof koAgents, string> = {
     "Calendar poll interval must be 1-60 minutes.",
   "agents.triggers.validation.gmailPollOutOfRange":
     "Gmail poll interval must be 1-60 minutes.",
+  "agents.triggers.validation.sheetsTriggerWithheld":
+    "Settings cannot be saved while the Sheets condition is on. New-row detection now runs through the Apps Script under the Webhook condition above - untick this box, generate the script there, and paste it into your sheet.",
   "agents.triggers.validation.sheetsConnectorRequired":
     "Google Sheets readonly scope is required to enable the Sheets trigger. Reconnect your Google account from the Harness tab.",
   "agents.triggers.validation.sheetsSpreadsheetRequired":

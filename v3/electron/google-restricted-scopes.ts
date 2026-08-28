@@ -61,6 +61,18 @@ export const GMAIL_READONLY_SCOPE =
 /** Gmail — ★restricted. sensitive 가 아니다(공식 분류 확인). */
 export const GMAIL_COMPOSE_SCOPE =
   "https://www.googleapis.com/auth/gmail.compose";
+/**
+ * Sheets — ★**sensitive** 다. restricted 가 아니다.
+ *
+ * 그런데도 이 파일에 상수가 생긴 이유는 아래 `sheets_trigger` 가 **이 파일의
+ * 첫 sensitive 발 잠금**이기 때문이다. `WITHHELD_RESTRICTED_SCOPES` 에는 넣지
+ * 않는다 — 그 배열은 "동의 화면에서 요청하지 않는 것" 의 목록이고 회귀 테스트가
+ * `DRIVE_AUTH_SCOPE` 를 그것으로 검사하는데, 이 스코프는 **T2 가 회수할 때까지
+ * 아직 요청 중**이다. 넣으면 테스트가 옳게 실패한다(위 `PLANNED_SENSITIVE_
+ * WITHDRAWALS` 주석과 같은 이유).
+ */
+export const SPREADSHEETS_READONLY_SCOPE =
+  "https://www.googleapis.com/auth/spreadsheets.readonly";
 
 /**
  * 동의 화면에서 **요청하지 않는** restricted 스코프.
@@ -187,7 +199,11 @@ export type WithheldGoogleCapability =
   | "drive_binding"
   | "gmail_read"
   | "gmail_draft"
-  | "gmail_trigger";
+  | "gmail_trigger"
+  // ★sensitive 회수(설계 §3.5)의 첫 잠금. 위 다섯과 달리 **대체가 이미 있다** —
+  // 사용자가 자기 시트에 붙여넣는 Apps Script 가 우리 웹훅을 부른다. 그래서
+  // 문구가 "지금은 못 쓴다" 가 아니라 "방식이 바뀌었다" 로 끝난다.
+  | "sheets_trigger";
 
 /** 어느 스코프가 빠져서 막혔는지 — 진단·로그용(사용자 문구에는 넣지 않는다). */
 export const WITHHELD_CAPABILITY_SCOPE: Readonly<
@@ -199,6 +215,7 @@ export const WITHHELD_CAPABILITY_SCOPE: Readonly<
   gmail_read: GMAIL_READONLY_SCOPE,
   gmail_draft: GMAIL_COMPOSE_SCOPE,
   gmail_trigger: GMAIL_READONLY_SCOPE,
+  sheets_trigger: SPREADSHEETS_READONLY_SCOPE,
 };
 
 /**
@@ -243,6 +260,16 @@ const WITHHELD_CAPABILITY_MESSAGE: Readonly<
     "받은 메일을 읽으려면 gmail.readonly 권한이 필요한데, 이 권한은 restricted 로 " +
     "분류돼 이번 출시에서는 요청하지 않습니다. 일정 트리거(Calendar), 시간 트리거, " +
     "스프레드시트 새 행 트리거는 그대로 동작합니다.",
+  // ★이 문구만 뼈대가 다르다. 위 다섯은 "지금은 못 쓴다" 로 끝나지만 여기는
+  // 대체가 이미 배선돼 있으므로 **어디로 가면 되는지**로 끝난다. 사용자가
+  // "연결이 끊겼나" 를 찾아다니게 두지 않는 것이 이 문구의 일이다.
+  sheets_trigger:
+    "스프레드시트 새 행 감지는 이제 Google Sheets 권한이 아니라 Apps Script 로 동작합니다. " +
+    "시트 읽기 권한(spreadsheets.readonly)은 Google 이 sensitive 로 분류해, 하나라도 요청하면 " +
+    "게시 검증 심사가 통째로 붙습니다. 그래서 요청하지 않습니다. " +
+    "기능이 사라진 것은 아닙니다 — 비서 트리거 설정의 Webhook 조건에서 수신 URL을 발급하면 " +
+    "시트에 붙여넣을 Apps Script 를 그대로 만들어 드리고, 그 스크립트가 새 행을 감지해 " +
+    "Marblo 를 호출합니다. 이 방식은 Windows 에서도 동작합니다.",
 };
 
 /**
@@ -265,6 +292,9 @@ export const WITHHELD_CAPABILITIES: ReadonlySet<WithheldGoogleCapability> =
     "gmail_read",
     "gmail_draft",
     "gmail_trigger",
+    // ★T6 이 켠 잠금. 이 이름을 빼면 폴링 경로(sheets-connector · startSheetsPoll)가
+    // 그대로 되살아난다 — 그래서 그 코드를 지우지 않았다.
+    "sheets_trigger",
   ]);
 
 export function isCapabilityWithheld(

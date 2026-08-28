@@ -12,6 +12,12 @@ import {
   Sheet,
   Webhook,
 } from "lucide-react";
+import {
+  APPS_SCRIPT_ALLOWED_INTERVAL_MINUTES,
+  buildSheetsAppsScript,
+  type AppsScriptIntervalMinutes,
+} from "../../../electron/apps-script-sheets-trigger";
+import { isCapabilityWithheld } from "../../../electron/google-restricted-scopes";
 import { useTranslation } from "../../lib/i18n";
 import {
   normalizeAssistantTriggerSettings,
@@ -52,6 +58,15 @@ const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly";
 
+/**
+ * ★시트 폴링 경로의 보류 여부(설계 §3.5 · 티켓 kJbIsaRPjMnGQTvDbR1V).
+ *
+ * 판정은 `google-restricted-scopes.ts` 단일 진실원이 들고, 화면은 읽기만 한다.
+ * 보류가 풀리면 이 화면의 분기 셋(배지 · 잠금 안내 · 입력 비활성)이 한 번에
+ * 원상 복귀한다.
+ */
+const SHEETS_TRIGGER_WITHHELD = isCapabilityWithheld("sheets_trigger");
+
 function issueKey(issue: AssistantTriggerValidationIssue): MessageKey {
   switch (issue) {
     case "no_trigger_enabled":
@@ -76,6 +91,8 @@ function issueKey(issue: AssistantTriggerValidationIssue): MessageKey {
       return "agents.triggers.webhook.pollOutOfRange";
     case "sheets_connector_required":
       return "agents.triggers.validation.sheetsConnectorRequired";
+    case "sheets_trigger_withheld":
+      return "agents.triggers.validation.sheetsTriggerWithheld";
     case "sheets_spreadsheet_required":
       return "agents.triggers.validation.sheetsSpreadsheetRequired";
     case "sheets_poll_out_of_range":
@@ -118,14 +135,19 @@ function connectorRows(connectors: AssistantTriggerConnectorState): Array<{
     { label: "Telegram", ready: connectors.telegramReady },
     { label: "Calendar", ready: connectors.calendarConnected },
     { label: "Gmail", ready: connectors.gmailConnected },
-    { label: "Sheets", ready: connectors.sheetsConnected },
+    // ★시트 폴링이 보류된 동안은 이 배지를 내린다. 앰버 "Sheets" 배지는 화면에서
+    // "연결이 필요하다" 로 읽히는데, 지금 필요한 것은 연결이 아니라 Apps Script 다.
+    // 스코프가 복구되면 이 배지도 그대로 돌아온다.
+    ...(SHEETS_TRIGGER_WITHHELD
+      ? []
+      : [{ label: "Sheets", ready: connectors.sheetsConnected }]),
   ];
 }
 
 export function AssistantTriggerSettingsPanel({
   project,
 }: AssistantTriggerSettingsPanelProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const updateProject = useProjectStore((s) => s.updateProject);
   const [settings, setSettings] = useState<AssistantTriggerSettings>(() =>
     normalizeAssistantTriggerSettings(project.assistantTriggers),
@@ -143,6 +165,15 @@ export function AssistantTriggerSettingsPanel({
   const [revealedWebhookSecret, setRevealedWebhookSecret] = useState<
     string | null
   >(null);
+  const [appsScriptSheetName, setAppsScriptSheetName] = useState("");
+  /**
+   * ★스크립트가 시트를 보는 주기는 **더 이상 우리 상태가 아니다.** 값이 실제로
+   * 사는 곳은 사용자가 붙여넣은 스크립트 안이고, 사용자가 거기서 직접 고칠 수도
+   * 있다. 우리 DB 에 저장해 두면 "우리가 이 주기를 통제한다" 는 거짓말이 된다.
+   * 그래서 저장하지 않고 생성 시점의 선택으로만 둔다.
+   */
+  const [appsScriptInterval, setAppsScriptInterval] =
+    useState<AppsScriptIntervalMinutes>(5);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TriggerTab>("schedule");
@@ -201,6 +232,36 @@ export function AssistantTriggerSettingsPanel({
     () => validateAssistantTriggerSettings(settings, connectors),
     [connectors, settings],
   );
+
+  /**
+   * 붙여넣을 Apps Script 전문.
+   *
+   * ★시크릿 **원문**이 필요하므로 발급·재발급 직후에만 만들어진다. 서버는
+   * `provisionAssistantWebhook` 응답에서만 원문을 주고 그 뒤로는 마스킹만
+   * 돌려준다 — 그래서 여기서 없는 값을 지어내지 않고, 없으면 "재발급하면 된다"
+   * 를 그대로 말한다(`needsSecret` 문구). 이것이 이 흐름에서 제일 큰 마찰이다.
+   *
+   * 주기는 아래 select 가 고른 값이다. `webhook.pollMinutes` 를 쓰지 않는 것이
+   * 요점 — 그것은 "우리가 받은 이벤트를 얼마나 자주 읽나" 이고, 여기서 필요한
+   * 것은 "시트가 자기를 얼마나 자주 보나" 라서 서로 다른 값이다.
+   */
+  const appsScriptSource = useMemo(() => {
+    const url = settings.webhook?.url;
+    if (!url || !revealedWebhookSecret) return null;
+    return buildSheetsAppsScript({
+      webhookUrl: url,
+      secret: revealedWebhookSecret,
+      sheetName: appsScriptSheetName,
+      pollMinutes: appsScriptInterval,
+      locale,
+    });
+  }, [
+    appsScriptInterval,
+    appsScriptSheetName,
+    locale,
+    revealedWebhookSecret,
+    settings.webhook?.url,
+  ]);
 
   const setOutput = (output: AssistantTriggerOutput, checked: boolean) => {
     setSettings((prev) => ({
@@ -741,6 +802,147 @@ export function AssistantTriggerSettingsPanel({
                 {t("agents.triggers.webhook.signatureHint")}
               </p>
             </div>
+
+            {/*
+              ★Apps Script 안내가 시트 섹션이 아니라 **웹훅 섹션 안**에 있는 이유:
+              이 스크립트가 부르는 것은 시트 커넥터가 아니라 위에서 방금 발급한
+              웹훅 URL 이고, 시크릿 원문도 바로 위 버튼에서만 나온다. 두 화면으로
+              쪼개면 사용자가 URL·시크릿을 들고 이동해야 한다.
+            */}
+            <div className="mt-4 rounded border border-lime-500/30 bg-lime-500/5 p-3">
+              <div className="mb-2 flex items-center gap-2">
+                <Sheet size={15} className="text-lime-300" />
+                <h4 className="text-sm font-semibold text-lime-100">
+                  {t("agents.triggers.appsScript.title")}
+                </h4>
+              </div>
+              <p className="text-xs text-gray-300">
+                {t("agents.triggers.appsScript.description")}
+              </p>
+              {/* 마찰을 숨기지 않는다 — 몇 단계인지 먼저 말한다. */}
+              <p className="mt-1 text-xs font-medium text-lime-200">
+                {t("agents.triggers.appsScript.stepCount")}
+              </p>
+
+              {!settings.webhook?.url ? (
+                <p className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                  {t("agents.triggers.appsScript.needsWebhook")}
+                </p>
+              ) : !appsScriptSource ? (
+                <p className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                  {t("agents.triggers.appsScript.needsSecret")}
+                </p>
+              ) : (
+                <>
+                  <label className="mt-3 block">
+                    <span className="mb-1 block text-xs text-gray-400">
+                      {t("agents.triggers.appsScript.sheetName")}
+                    </span>
+                    <input
+                      value={appsScriptSheetName}
+                      onChange={(event) =>
+                        setAppsScriptSheetName(event.target.value)
+                      }
+                      className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-lime-500"
+                    />
+                    <span className="mt-1 block text-xs text-gray-500">
+                      {t("agents.triggers.appsScript.sheetNameHint")}
+                    </span>
+                  </label>
+                  <label className="mt-3 block">
+                    <span className="mb-1 block text-xs text-gray-400">
+                      {t("agents.triggers.appsScript.interval")}
+                    </span>
+                    <select
+                      value={appsScriptInterval}
+                      onChange={(event) =>
+                        setAppsScriptInterval(
+                          Number(event.target.value) as AppsScriptIntervalMinutes,
+                        )
+                      }
+                      className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-lime-500"
+                    >
+                      {APPS_SCRIPT_ALLOWED_INTERVAL_MINUTES.map((minutes) => (
+                        <option key={minutes} value={minutes}>
+                          {t("agents.triggers.appsScript.intervalOption", {
+                            minutes: String(minutes),
+                          })}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="mt-1 block text-xs text-gray-500">
+                      {t("agents.triggers.appsScript.intervalHint")}
+                    </span>
+                  </label>
+                  <div className="mt-3">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="text-xs text-gray-400">
+                        {t("agents.triggers.appsScript.script")}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void copyText(
+                            appsScriptSource,
+                            t("agents.triggers.appsScript.copied"),
+                          )
+                        }
+                        className="inline-flex items-center gap-1 rounded border border-lime-500/40 px-2.5 py-1.5 text-xs text-lime-100 hover:bg-lime-500/10"
+                      >
+                        <Clipboard size={14} />
+                        {t("agents.triggers.appsScript.copy")}
+                      </button>
+                    </div>
+                    <textarea
+                      readOnly
+                      spellCheck={false}
+                      value={appsScriptSource}
+                      rows={10}
+                      className="w-full resize-y rounded border border-gray-700 bg-gray-950 px-3 py-2 font-mono text-[11px] leading-relaxed text-gray-300 outline-none"
+                    />
+                  </div>
+                  {/* 시크릿 원문이 이 텍스트 안에 있다는 사실을 말한다. */}
+                  <p className="mt-2 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                    {t("agents.triggers.appsScript.secretWarning")}
+                  </p>
+                </>
+              )}
+
+              <div className="mt-3 text-xs text-gray-300">
+                <div className="font-medium text-gray-200">
+                  {t("agents.triggers.appsScript.stepsTitle")}
+                </div>
+                <ol className="mt-1 list-decimal space-y-1 pl-5 text-gray-400">
+                  <li>{t("agents.triggers.appsScript.step1")}</li>
+                  <li>{t("agents.triggers.appsScript.step2")}</li>
+                  <li>{t("agents.triggers.appsScript.step3")}</li>
+                  <li>{t("agents.triggers.appsScript.step4")}</li>
+                  <li>{t("agents.triggers.appsScript.step5")}</li>
+                </ol>
+              </div>
+
+              <details className="mt-3 rounded border border-gray-700 bg-gray-950/40">
+                <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-gray-200">
+                  {t("agents.triggers.appsScript.frictionTitle")}
+                </summary>
+                <ul className="list-disc space-y-1 border-t border-gray-700 px-3 py-2 pl-7 text-xs text-gray-400">
+                  <li>{t("agents.triggers.appsScript.friction1")}</li>
+                  <li>{t("agents.triggers.appsScript.friction2")}</li>
+                  <li>{t("agents.triggers.appsScript.friction3")}</li>
+                </ul>
+              </details>
+
+              <details className="mt-2 rounded border border-gray-700 bg-gray-950/40">
+                <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-gray-200">
+                  {t("agents.triggers.appsScript.troubleshootTitle")}
+                </summary>
+                <ul className="list-disc space-y-1 border-t border-gray-700 px-3 py-2 pl-7 text-xs text-gray-400">
+                  <li>{t("agents.triggers.appsScript.troubleshoot401")}</li>
+                  <li>{t("agents.triggers.appsScript.troubleshoot403")}</li>
+                  <li>{t("agents.triggers.appsScript.troubleshoot429")}</li>
+                </ul>
+              </details>
+            </div>
           </section>
 
           <section className="rounded border border-gray-700 bg-gray-900 p-4">
@@ -749,7 +951,21 @@ export function AssistantTriggerSettingsPanel({
               <h3 className="text-sm font-semibold">
                 {t("agents.triggers.sheets.title")}
               </h3>
+              {SHEETS_TRIGGER_WITHHELD && (
+                <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-100">
+                  {t("agents.triggers.sheets.heldBadge")}
+                </span>
+              )}
             </div>
+            {/*
+              ★"연결 필요" 가 아니라 "방식이 바뀌었다" 로 말한다. 없는 연결을
+              찾아다니게 만드는 것이 이 경로의 가장 비싼 실패다(설계 §6.2).
+            */}
+            {SHEETS_TRIGGER_WITHHELD && (
+              <p className="mb-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                {t("agents.triggers.sheets.heldNotice")}
+              </p>
+            )}
             <label className="mb-3 flex items-center gap-2 text-sm text-gray-300">
               <input
                 type="checkbox"
@@ -790,7 +1006,8 @@ export function AssistantTriggerSettingsPanel({
                     },
                   }))
                 }
-                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                disabled={SHEETS_TRIGGER_WITHHELD}
+                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
               />
               <span className="mt-1 block text-xs text-gray-500">
                 {t("agents.triggers.sheets.spreadsheetHint")}
@@ -815,7 +1032,8 @@ export function AssistantTriggerSettingsPanel({
                     },
                   }))
                 }
-                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                disabled={SHEETS_TRIGGER_WITHHELD}
+                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
               />
               <span className="mt-1 block text-xs text-gray-500">
                 {t("agents.triggers.sheets.rangeHint")}
@@ -843,7 +1061,8 @@ export function AssistantTriggerSettingsPanel({
                     },
                   }))
                 }
-                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                disabled={SHEETS_TRIGGER_WITHHELD}
+                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
               />
             </label>
             <p className="mt-3 text-xs text-gray-500">

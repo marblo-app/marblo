@@ -162,6 +162,27 @@ describe("보류된 기능 — 조용히 실패하지 않는다", () => {
     const error = withheldCapabilityError("gmail_draft")?.error ?? "";
     expect(error).toContain("gmail_send");
   });
+
+  /**
+   * ★sheets_trigger 는 위 여섯과 문구 뼈대가 **일부러 다르다**.
+   *
+   * 여섯은 restricted 때문에 막혔고 대체가 없어서 "지금은 못 쓴다" 로 끝난다.
+   * 이건 sensitive 회수(설계 §3.5)이고 대체가 **이미 배선돼 있어서** "어디로
+   * 가면 된다" 로 끝나야 한다. "권한이 없다" 로 읽히면 사용자는 없는 연결을
+   * 찾아다닌다 — 이 테스트가 그 회귀를 막는다.
+   */
+  it("sheets_trigger 는 '권한 부족' 이 아니라 'Apps Script 로 바뀌었다' 로 안내한다", () => {
+    const error = withheldCapabilityError("sheets_trigger")?.error ?? "";
+    expect(error).toContain("Apps Script");
+    expect(error).toContain("Webhook");
+    expect(error).toContain("sensitive");
+    // 대체가 있다는 사실이 문장 안에 있어야 한다.
+    expect(error).toContain("기능이 사라진 것은 아닙니다");
+    // 플랫폼 무관하다는 것이 이 대체의 값이다(설계 §6.1).
+    expect(error).toContain("Windows");
+    // ★"다시 연결" 로 유도하지 않는다.
+    expect(error).not.toContain("다시 연결");
+  });
 });
 
 describe("기존 사용자 — 넓은 토큰은 두되 쓰지 않는다", () => {

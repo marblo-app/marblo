@@ -861,6 +861,35 @@ export class AssistantTriggerManager {
   private startSheetsPoll(item: ActiveProject, runtime: ProjectRuntime): void {
     const sheets = item.settings.sheets;
     if (!sheets) return;
+
+    // ★스코프 0 (설계 §3.5 · 티켓 kJbIsaRPjMnGQTvDbR1V). `spreadsheets.readonly`
+    // 는 sensitive 라 회수한다 — 우리는 더 이상 시트를 읽지 않는다. 대신
+    // 사용자의 Apps Script 가 우리 웹훅을 부른다.
+    //
+    // 아래 폴링 구현을 **지우지 않는 이유**는 gmail 게이트와 같다(#1267 규율):
+    // `if (…) return` 으로 막아 두면 그 아래가 컴파일러의 감시 안에 남아 있고,
+    // 되살릴 때 조용히 썩어 있는 것을 발견하지 않는다.
+    //
+    // ★그리고 여기서 조용히 return 하지 않는 이유는 더 중요하다. 켜 둔 설정은
+    // 사용자 디스크에 그대로 남아 있으므로, 아무 말 없이 타이머만 안 걸면
+    // 사용자는 "켜 뒀는데 반응이 없다" 를 원인 없이 겪는다. 문구도 "연결이
+    // 필요하다" 가 아니라 **"방식이 바뀌었다 · 어디로 가면 된다"** 여야 한다 —
+    // 없는 연결을 찾아다니게 만드는 것이 이 경로의 가장 비싼 실패다.
+    const withheld = withheldCapabilityError("sheets_trigger");
+    if (withheld) {
+      this.options.warn?.(
+        `[AssistantTriggers] sheets trigger withheld project=${item.project.id}: ${withheld.error}`,
+      );
+      void this.inject(
+        item,
+        `[Marblo 알림] ${withheld.error}\n` +
+          "이 프로젝트의 비서 설정에 시트 조건이 켜져 있지만, 이제 폴링으로 동작하지 않습니다. " +
+          "설정은 지우지 않았습니다 — 비서 트리거 설정의 Webhook 조건에서 안내하는 " +
+          "Apps Script 를 시트에 붙여넣으면 같은 알림이 그대로 돌아옵니다.",
+      );
+      return;
+    }
+
     let warnedWindowed = false;
     const poll = async (): Promise<void> => {
       if (this.stopped) return;

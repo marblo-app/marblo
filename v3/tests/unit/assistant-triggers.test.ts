@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AssistantTriggerManager,
   activeAssistantProjects,
   formatCalendarTriggerPrompt,
   formatDailyBriefingPrompt,
@@ -8,6 +9,10 @@ import {
   formatWebhookTriggerPrompt,
   parseAssistantTriggerSettings,
   parseCronExpression,
+} from "../../electron/assistant-triggers";
+import type {
+  AssistantTriggerManagerOptions,
+  AssistantTriggerOrchestrator,
 } from "../../electron/assistant-triggers";
 
 describe("assistant triggers", () => {
@@ -200,5 +205,84 @@ describe("assistant triggers", () => {
     expect(prompt).toContain("알림 상한");
     expect(prompt).toContain("send_slack_message");
     expect(prompt.length).toBeLessThan(1_600);
+  });
+});
+
+/**
+ * ★보류된 시트 조건이 **조용히 죽지 않는다** (설계 §3.5 · 티켓 kJbIsaRPjMnGQTvDbR1V).
+ *
+ * 스코프 0 으로 가면서 시트 폴링 경로가 잠겼다. 사용자가 켜 둔 설정은 디스크에
+ * 그대로 남아 있으므로, 아무 말 없이 타이머만 안 걸면 사용자는 "켜 뒀는데 반응이
+ * 없다" 를 원인 없이 겪는다. 그래서 엔진은 대신 **이유 한 번**을 넣는다.
+ *
+ * 여기서 보는 것 둘:
+ *   1. 시트를 실제로 읽지 않는다 (`sheetsValues` 호출 0 — 스코프를 안 쓴다).
+ *   2. 안내가 "다시 연결" 이 아니라 "Apps Script 로 바뀌었다" 로 끝난다.
+ */
+describe("시트 조건 보류 — 엔진이 이유를 말한다", () => {
+  function makeManager(): {
+    manager: AssistantTriggerManager;
+    injected: string[];
+    sheetsCalls: number[];
+  } {
+    const injected: string[] = [];
+    const sheetsCalls: number[] = [];
+    const orchestrator: AssistantTriggerOrchestrator = {
+      isRunning: () => true,
+      injectMessage: async (message: string) => {
+        injected.push(message);
+        return true;
+      },
+    };
+    const options: AssistantTriggerManagerOptions = {
+      listProjects: async () => [
+        {
+          id: "assistant-1",
+          name: "비서",
+          kind: "assistant",
+          assistantTriggers: {
+            enabled: true,
+            outputs: ["slack"],
+            sheets: {
+              enabled: true,
+              spreadsheetId: "1BxiMVs0XRA5nFMdKvBd",
+              range: "A:Z",
+              pollMinutes: 5,
+            },
+          },
+        },
+      ],
+      workspace: {
+        gmailSearch: async () => ({ ok: false, error: "unused" }),
+        gmailFetch: async () => ({ ok: false, error: "unused" }),
+        calendarList: async () => ({ ok: false, error: "unused" }),
+        listWebhookEvents: async () => ({ ok: false, error: "unused" }),
+        sheetsValues: async () => {
+          sheetsCalls.push(Date.now());
+          return { ok: false, error: "should never be called" };
+        },
+      } as unknown as AssistantTriggerManagerOptions["workspace"],
+      resolveOrchestrator: async () => orchestrator,
+      // 실타이머를 걸지 않는다 — 게이트가 타이머보다 앞에 있는지가 관심사다.
+      setTimer: (() => 0 as unknown as NodeJS.Timeout) as never,
+      clearTimer: () => undefined,
+    };
+    return { manager: new AssistantTriggerManager(options), injected, sheetsCalls };
+  }
+
+  it("시트를 읽지 않고, '다시 연결' 이 아니라 Apps Script 경로를 안내한다", async () => {
+    const { manager, injected, sheetsCalls } = makeManager();
+    manager.start();
+    // refreshProjects → startRuntime → inject 가 전부 마이크로태스크다.
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    manager.stop();
+
+    expect(sheetsCalls).toHaveLength(0);
+    expect(injected).toHaveLength(1);
+    expect(injected[0]).toContain("Apps Script");
+    expect(injected[0]).toContain("Webhook");
+    expect(injected[0]).toContain("설정은 지우지 않았습니다");
+    expect(injected[0]).not.toContain("다시 연결");
   });
 });

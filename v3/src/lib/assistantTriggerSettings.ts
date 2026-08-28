@@ -1,3 +1,4 @@
+import { isCapabilityWithheld } from "../../electron/google-restricted-scopes";
 import {
   normalizeSheetsRange,
   normalizeSpreadsheetId,
@@ -59,6 +60,13 @@ export type AssistantTriggerValidationIssue =
   | "gmail_poll_out_of_range"
   | "webhook_poll_out_of_range"
   | "sheets_connector_required"
+  /**
+   * ★스코프 0 (설계 §3.5). 시트 폴링 경로가 보류됐고 Apps Script 가 대신한다.
+   * `sheets_connector_required` 와 **다른 이슈로 둔 것이 요점**이다 — 문구가
+   * "연결이 필요하다" 면 사용자는 없는 연결을 찾아다닌다. 이건 연결 문제가
+   * 아니라 방식이 바뀐 것이고, 안내도 그렇게 끝나야 한다.
+   */
+  | "sheets_trigger_withheld"
   | "sheets_spreadsheet_required"
   | "sheets_poll_out_of_range"
   | "calendar_upcoming_out_of_range";
@@ -365,20 +373,28 @@ export function validateAssistantTriggerSettings(
   }
 
   if (sheetsEnabled) {
-    // ★스코프가 없으면 저장을 막는다. 켜놓고 안 도는 상태를 만들지 않는다 —
-    // 기존 사용자는 Google 커넥터를 한 번 다시 연결해야 이 스코프가 붙는다.
-    if (!connectors.sheetsConnected) issues.push("sheets_connector_required");
-    if (!normalizeSpreadsheetId(settings.sheets?.spreadsheetId)) {
-      issues.push("sheets_spreadsheet_required");
-    }
-    if (
-      !inIntegerRange(
-        settings.sheets?.pollMinutes ?? 0,
-        MIN_POLL_MINUTES,
-        MAX_POLL_MINUTES,
-      )
-    ) {
-      issues.push("sheets_poll_out_of_range");
+    if (isCapabilityWithheld("sheets_trigger")) {
+      // ★보류된 경로를 켠 채 저장하게 두지 않는다. 스프레드시트 ID·주기 검사를
+      // 같이 얹지 않는 것은 의도다 — 어차피 안 도는 경로의 형식 오류를 함께
+      // 띄우면 "무엇을 해야 하는가" 한 문장이 잡음에 묻힌다. 저장된 값 자체는
+      // 지우지 않는다(보류이지 삭제가 아니다).
+      issues.push("sheets_trigger_withheld");
+    } else {
+      // 아래는 스코프가 복구되면 그대로 되살아나는 경로다. `if/else` 로 남겨
+      // 두어야 컴파일러가 계속 지켜본다(#1267 규율).
+      if (!connectors.sheetsConnected) issues.push("sheets_connector_required");
+      if (!normalizeSpreadsheetId(settings.sheets?.spreadsheetId)) {
+        issues.push("sheets_spreadsheet_required");
+      }
+      if (
+        !inIntegerRange(
+          settings.sheets?.pollMinutes ?? 0,
+          MIN_POLL_MINUTES,
+          MAX_POLL_MINUTES,
+        )
+      ) {
+        issues.push("sheets_poll_out_of_range");
+      }
     }
   }
 
