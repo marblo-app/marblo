@@ -30,6 +30,19 @@
  * 무엇을 부여받았는지 **묻지 않고** 무조건 막는다. 기존 토큰의 넓이는 그냥
  * 무해하게 잠든다.
  *
+ * ── ★후속 결정: sensitive 도 0 으로 간다 (티켓 5UI2a7MsD75QqgRB8icV) ─────
+ * restricted 를 뺐다고 심사가 끝난 게 아니다. 앱을 게시할 때 붙는 **검증 심사**
+ * (스코프마다 데모 영상 · 도메인 소유권 · 브랜드 검증 · 정책 개정)는 "sensitive
+ * **또는** restricted 를 요청하는 경우" 에 발동한다. 6개를 1개로 줄여도 심사는
+ * 통째로 그대로 붙는다 — **0 만이 심사를 없앤다.** 그래서 남은 sensitive 6개도
+ * 뺀다. 로그인용 `openid` · `email` · `profile` 은 non-sensitive 라 남는다.
+ *
+ * 판정과 대체 경로는 `docs/GOOGLE_SCOPE_ZERO_DESIGN.md` 가 원본이고, 이 파일은
+ * 그 결론의 목록만 든다(아래 `PLANNED_SENSITIVE_WITHDRAWALS`).
+ *
+ * ★이 파일의 위 두 원칙은 sensitive 회수에도 그대로 간다. 삭제가 아니라 보류이고,
+ * 게이트는 토큰이 아니라 앱에 무조건 건다.
+ *
  * ── 규율 ────────────────────────────────────────────────────────────────
  * 조용히 401 을 내지 않는다. 막힌 기능은 (a) 무엇을 못 하는지 (b) 왜 못 하는지
  * (c) 대신 무엇을 쓰면 되는지를 **한 문장 안에서** 말한다. 기능이 사라진 게
@@ -58,6 +71,99 @@ export const WITHHELD_RESTRICTED_SCOPES = [
   GMAIL_READONLY_SCOPE,
   GMAIL_COMPOSE_SCOPE,
 ] as const;
+
+/**
+ * ★회수 **예정**인 sensitive 스코프 — 아직 요청하고 있고, 아직 잘 돈다.
+ *
+ * 설계 원본은 `docs/GOOGLE_SCOPE_ZERO_DESIGN.md` 다. 여기 있는 것은 그 문서의
+ * 판정을 코드가 들고 있는 형태이고, **판정을 집행하지는 않는다** — 게이트도,
+ * 요청 스코프(`DRIVE_AUTH_SCOPE`)도 이 목록을 읽지 않는다. 집행은 후속
+ * 티켓(T1 · T2)의 일이다.
+ *
+ * ★`WITHHELD_RESTRICTED_SCOPES` 에 넣지 않은 것은 실수가 아니다. 그 배열은
+ * "지금 요청하지 않는 것" 의 목록이고, 회귀 테스트가 `DRIVE_AUTH_SCOPE` 를 그
+ * 배열로 검사한다(`restrictedScopesIn`). 아직 요청 중인 스코프를 거기 넣으면
+ * 테스트가 **옳게** 실패한다. 회수하는 티켓이 이 목록에서 저 목록으로 한 줄씩
+ * 옮기면 된다 — 그게 이 두 배열이 나뉘어 있는 이유다.
+ *
+ * 스코프 문자열이 `google-drive-auth.ts` 의 상수와 겹치는 것은 알고 둔 것이다.
+ * 그쪽은 **지금 요청하는 값**의 정의이고 이쪽은 **회수 계획**의 기록이라, 지금
+ * 여기서 그쪽을 import 하면 "요청 목록" 과 "회수 목록" 이 한 상수를 공유하게
+ * 되어 T1·T2 가 옮길 때 무엇이 옮겨졌는지 안 보인다. 회수가 끝나면 정의가 이
+ * 파일로 넘어오면서 중복은 그때 사라진다.
+ */
+export interface PlannedSensitiveWithdrawal {
+  /** 회수할 스코프. */
+  readonly scope: string;
+  /** 이 스코프가 지금 사주고 있는 것 — 빠지면 무엇이 멈추는지. */
+  readonly buys: string;
+  /** 무엇으로 대신하나. */
+  readonly replacement: string;
+  /**
+   * 대체 경로가 도는 플랫폼.
+   *  · "all"     — 플랫폼 무관
+   *  · "darwin"  — macOS 전용. ★Windows/Linux 사용자는 능력을 잃는다.
+   *                조용히 없는 것처럼 보이면 안 된다(CONVENTION 정직성 조항) —
+   *                문구는 후속 티켓의 `platform-capabilities` 가 든다.
+   *  · "none"    — 대체하지 않는다. 그냥 잃는다.
+   */
+  readonly availableOn: "all" | "darwin" | "none";
+}
+
+export const PLANNED_SENSITIVE_WITHDRAWALS: readonly PlannedSensitiveWithdrawal[] =
+  [
+    {
+      // ★6개 중 유일하게 공짜다. 유일한 소비자 `drive_write` 가 이미
+      // WITHHELD_CAPABILITIES 로 잠겨 있어(위 목록), 이 스코프는 지금 아무
+      // 능력도 사주지 않으면서 심사 트리거 역할만 하고 있다.
+      scope: "https://www.googleapis.com/auth/drive.file",
+      buys: "drive_write — 이미 잠김. 잃는 기능 0.",
+      replacement: "로컬 위키(defaultWikiRootPath) · 노션 커넥터(자체 OAuth)",
+      availableOn: "all",
+    },
+    {
+      scope: "https://www.googleapis.com/auth/calendar.readonly",
+      buys: "calendar_list · 비서 일정 트리거",
+      replacement: "애플 캘린더 (JXA → Calendar.app)",
+      availableOn: "darwin",
+    },
+    {
+      scope: "https://www.googleapis.com/auth/calendar.events",
+      buys: "calendar_create · calendar_patch",
+      replacement: "애플 캘린더 (JXA → Calendar.app)",
+      availableOn: "darwin",
+    },
+    {
+      // 대체가 둘이라 한 줄로 못 적는다. Resend 는 크로스플랫폼이지만 우리
+      // 도메인에서 나가고, 애플 메일은 macOS 전용이지만 ★사용자 본인 주소로
+      // 나가고 ★메일 읽기까지 돌려준다(gmail.readonly 를 포기하며 잃은 것).
+      // 그래서 availableOn 은 "발송은 어디서나 된다" 를 기준으로 "all" 이다 —
+      // 읽기가 macOS 전용이라는 사실은 설계 문서 §6.1 의 능력표가 든다.
+      scope: "https://www.googleapis.com/auth/gmail.send",
+      buys: "gmail_send (confirm=true 2단계 계약)",
+      replacement:
+        "애플 메일(macOS · 내 주소로 발송 + 메일 읽기 복원) / Resend(크로스플랫폼 · 우리 도메인)",
+      availableOn: "all",
+    },
+    {
+      // 내부 소비자가 0 이고(에이전트 도구뿐), 자동화 대상 앱이 늘 때마다 TCC
+      // 승인 팝업이 하나씩 는다. 거의 안 쓰는 기능에 세 번째 팝업을 쓰면 정작
+      // 중요한 Calendar·Mail 승인률이 떨어진다. 그래서 대체하지 않고 비워 둔다.
+      scope: "https://www.googleapis.com/auth/contacts.readonly",
+      buys: "contacts_search — 내부 소비자 0",
+      replacement: "없음. 이름 대신 이메일 주소를 직접 받는다(설계 문서 §3.4)",
+      availableOn: "none",
+    },
+    {
+      // ★플랫폼 무관한 유일한 대체다. Apps Script 는 사용자의 구글 계정 안에서
+      // 구글이 돌리므로 우리 앱의 플랫폼과 무관하다. 웹훅은 이미 서버에 있다
+      // (#1256) — 다시 만들지 않는다.
+      scope: "https://www.googleapis.com/auth/spreadsheets.readonly",
+      buys: "비서 시트 새 행 트리거",
+      replacement: "Apps Script(시간 구동·배치) → 기존 assistantWebhook",
+      availableOn: "all",
+    },
+  ] as const;
 
 /**
  * restricted 스코프가 빠지면서 지금 쓸 수 없게 된 기능들.
