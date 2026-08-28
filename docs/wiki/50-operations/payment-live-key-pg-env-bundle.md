@@ -2,7 +2,7 @@
 title: 포트원 라이브는 실거래 키와 PORTONE_PG_ENV 를 한 묶음으로 바꾼다
 tags: [domain/operations, topic/payments, topic/deploy, method/source-link]
 status: verified
-date: 2026-08-26
+date: 2026-08-27
 links: [[functions-deploy-env-and-bq-views]], [[human-only-ops-backlog]], [[verify-without-gui]]
 ---
 
@@ -92,4 +92,4 @@ npm run test:toss-shutdown
 
 ## Backlinks
 
-- [[functions-deploy-env-and-bq-views]] · [[human-only-ops-backlog]] · [[verify-without-gui]]
+- [[functions-deploy-env-and-bq-views]] · [[human-only-ops-backlog]] · [[verify-without-gui]] · [[paddle-support-check-before-pg-screening]] · [[jpy-anchors-to-competitors-not-krw]]

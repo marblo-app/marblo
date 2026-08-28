@@ -1,9 +1,9 @@
 ---
 title: 10 주력 — 지금 제공하는 실물
 tags: [domain/offerings, meta/index]
-status: stub
-date: 2026-08-24
-links: [[CONVENTION]]
+status: active
+date: 2026-08-27
+links: [[CONVENTION]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]]
 ---
 
 # 10-offerings
@@ -21,3 +21,4 @@ links: [[CONVENTION]]
 ## 노트
 
 - [[marblo-bot-messaging]] — 마블로봇 홍보 메시지 후보, 그록봇 대조, 무료 문구 기준, 파생물 체크리스트.
+- [[jpy-anchors-to-competitors-not-krw]] — 확정 요금제의 규칙과 근거. 연간=월×10, 좌석 단위, KRW 홈마켓 폭, JPY 는 경쟁사 기준. 수치 원본은 `pricing.ts`.

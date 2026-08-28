@@ -2,7 +2,7 @@
 title: 태그 사전
 tags: [meta/taxonomy, status/normative]
 status: active
-date: 2026-08-24
+date: 2026-08-27
 links: [[CONVENTION]], [[do-not-retry]], [[empty-query-first]]
 ---
 
@@ -41,6 +41,7 @@ links: [[CONVENTION]], [[do-not-retry]], [[empty-query-first]]
 - `topic/deploy`
 - `topic/ci`
 - `topic/payments`
+- `topic/pricing`
 - `topic/github`
 
 ## verdict/
@@ -58,6 +59,7 @@ links: [[CONVENTION]], [[do-not-retry]], [[empty-query-first]]
 - `method/vitest`
 - `method/ledger`
 - `method/source-link`
+- `method/web-measure`
 
 ## status/
 
