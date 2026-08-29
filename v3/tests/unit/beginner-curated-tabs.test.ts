@@ -116,6 +116,11 @@ vi.mock("../../src/services/telemetryService", () => ({
     beginnerPromoted: vi.fn(),
     cliSetupStep: vi.fn(),
   },
+  // 심플 셸이 "왜 멈췄나" 문항(PauseReasonPrompt)을 함께 마운트한다. 이 테스트는
+  // 큐레이트 탭 배선을 보는 자리라 그 문항은 뜨지 않는 편이 맞다 — 동의 게이트를
+  // 꺼 두면 판정 단계에서 곧바로 물러선다(그 판정 자체는 pauseReasonPrompt 테스트).
+  isTelemetryEnabled: () => false,
+  telemetry: { pauseReasonPrompt: vi.fn() },
 }));
 vi.mock("../../src/services/cliSetupActions", () => ({
   connectFolder: vi.fn(),

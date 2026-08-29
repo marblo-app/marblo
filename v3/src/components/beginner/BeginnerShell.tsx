@@ -58,6 +58,7 @@ import { UsagePage } from "../usage/UsagePage";
 import { SettingsPage } from "../settings/SettingsPage";
 import { PrivacyConsentGate } from "../legal/PrivacyConsentGate";
 import { TrainingConsentCard } from "../legal/TrainingConsentCard";
+import { PauseReasonPrompt } from "../retention/PauseReasonPrompt";
 import { PrivacyClarificationNotice } from "../legal/PrivacyClarificationNotice";
 import { Sidebar } from "../sidebar/Sidebar";
 import {
@@ -886,6 +887,14 @@ export function BeginnerShell() {
           본다" 가 되고, 고지로서 결함이다. 동의를 받지 않는 배너라 위 모달들과
           경쟁하지 않는다(PIPA 모달이 떠 있는 동안은 스스로 렌더하지 않는다). */}
       <PrivacyClarificationNotice />
+
+      {/* ★"왜 멈췄나" 단일 문항 — 어드밴스드 셸(GlobalOverlays)과 **같은**
+          컴포넌트다. 심플 모드는 GlobalOverlays 를 마운트하지 않으므로 여기서
+          직접 건다. 한쪽 모드에만 있으면 "심플로 시작했다가 멈춘 사람" 은 영영
+          묻지 못하는데, #1310 이 관측한 즉시 소멸 설치 3건(E·F·G)이 정확히 그
+          모양이다 — 한쪽만 배선하는 것은 표본을 반으로 자르는 일이다.
+          자기 판정으로만 뜨는 비차단 코너 카드라 위 모달들과 경쟁하지 않는다. */}
+      <PauseReasonPrompt />
     </div>
   );
 }

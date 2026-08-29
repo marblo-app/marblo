@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import { UpdateBanner } from "./UpdateBanner";
 import { MarketingReconsentBanner } from "./legal/MarketingReconsentBanner";
 import { PrivacyClarificationNotice } from "./legal/PrivacyClarificationNotice";
@@ -5,6 +6,7 @@ import { ProjectSetupBanners } from "./onboarding/ProjectSetupBanners";
 import { RepoConnectModal } from "./collaboration/RepoConnectModal";
 import { FirstSharedProjectModal } from "./collaboration/FirstSharedProjectModal";
 import { FirstProjectSurvey } from "./onboarding/FirstProjectSurvey";
+import { PauseReasonPrompt } from "./retention/PauseReasonPrompt";
 import { OnboardingGraduationJourney } from "./onboarding/OnboardingGraduationJourney";
 import { FundingGuideHost } from "./onboarding/FundingGuideHost";
 import { OnrampGateHost } from "./onboarding/OnrampGateHost";
@@ -56,6 +58,14 @@ export function GlobalOverlays({ projectSetup }: GlobalOverlaysProps) {
   const activeGraduationMilestone = useOnboardingProgressStore(
     (s) => s.activeGraduationMilestone,
   );
+  // 두 카드가 같은 오른쪽 아래 모서리를 쓴다. 복귀 문항은 설치당 한 번뿐이라
+  // 양보할 여지가 없고, 경험 설문은 세션 2·5·10·15 에 다시 온다 — 그래서 이번
+  // 실행에서는 경험 설문이 물러선다.
+  const [pauseReasonVisible, setPauseReasonVisible] = useState(false);
+  const handlePauseReasonVisibility = useCallback(
+    (visible: boolean) => setPauseReasonVisible(visible),
+    [],
+  );
 
   return (
     <>
@@ -87,8 +97,22 @@ export function GlobalOverlays({ projectSetup }: GlobalOverlaysProps) {
       {/* Onboarding graduation chain — gates post-activation nudges one by one. */}
       <OnboardingGraduationJourney />
 
+      {/* ★"왜 멈췄나" 단일 문항 — 7일 이상 앱을 안 열었다가 돌아온 순간에 설치당
+          딱 한 번. 첫 성공·실패율이 이탈을 예고하지 못한다는 것이 실측으로
+          반증됐고(#1310 §5·§6), 이탈 사유는 앱 안에 신호가 아예 없어 BQ 를 더
+          봐도 나오지 않는다 — 그래서 묻는다. 근거·문면 규율은
+          lib/pauseReasonPrompt.ts 헤더. ★심플 셸(BeginnerShell)은 GlobalOverlays
+          를 마운트하지 않으므로 같은 컴포넌트를 자기 쪽에서 직접 건다(배선은
+          pauseReasonSurfaceParity 테스트가 지킨다). */}
+      <PauseReasonPrompt
+        blocked={activeGraduationMilestone !== null}
+        onVisibilityChange={handlePauseReasonVisibility}
+      />
+
       {/* First project completion micro-survey */}
-      <FirstProjectSurvey blocked={activeGraduationMilestone !== null} />
+      <FirstProjectSurvey
+        blocked={activeGraduationMilestone !== null || pauseReasonVisible}
+      />
 
       {/* ── 온램프 사다리의 두 문(門) (v3/docs/onramp-ladder-design-2026-08-09.md) ──
           ★둘 다 여기 있는 이유는 **모드 파리티**다. 종전에 FundingGuideHost 는

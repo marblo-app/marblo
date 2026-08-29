@@ -56,6 +56,12 @@ vi.mock("../../src/components/onboarding/FirstProjectSurvey", () => ({
   FirstProjectSurvey: () =>
     createElement("div", { "data-testid": "first-project-survey" }),
 }));
+// ★"왜 멈췄나" 문항 — 7일 이상 공백 뒤 복귀에만 뜨는 코너 카드(#1310 처방 3).
+// 여기서는 배선만 본다(노출 판정은 pauseReasonPrompt 테스트가 값으로 지킨다).
+vi.mock("../../src/components/retention/PauseReasonPrompt", () => ({
+  PauseReasonPrompt: () =>
+    createElement("div", { "data-testid": "pause-reason-prompt" }),
+}));
 vi.mock("../../src/components/onboarding/OnboardingGraduationJourney", () => ({
   OnboardingGraduationJourney: () =>
     createElement("div", { "data-testid": "onboarding-graduation-journey" }),
@@ -157,6 +163,7 @@ describe("GlobalOverlays DOM wiring", () => {
     expect(screen.getByTestId("repo-connect-modal")).toBeTruthy();
     expect(screen.getByTestId("first-shared-project-modal")).toBeTruthy();
     expect(screen.getByTestId("first-project-survey")).toBeTruthy();
+    expect(screen.getByTestId("pause-reason-prompt")).toBeTruthy();
     expect(screen.getByTestId("privacy-consent-gate")).toBeTruthy();
     expect(screen.getByTestId("training-consent-card")).toBeTruthy();
     expect(screen.getByTestId("privacy-clarification-notice")).toBeTruthy();

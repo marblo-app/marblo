@@ -1090,6 +1090,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ===== Pause Reasons ("왜 멈췄나" 문항의 자유서술) =====
+    // 제출은 submitPauseReason 콜러블(Admin SDK) 경유 — 서버가 uid/createdAt 을
+    // 각인하고 선택지 코드를 화이트리스트로 검증한다. 계정당 1건(문서 ID = uid).
+    // 클라이언트 직접 접근은 전면 차단: 본인 read 조차 열지 않는다 — 앱에 이 값을
+    // 되읽는 화면이 없고, 없는 필요를 위해 표면을 열지 않는다.
+    match /pauseReasons/{uid} {
+      allow read, write: if false;
+    }
+
     // ===== Marketing Contacts (이메일 마케팅 SoT) =====
     // 암호화 이메일·수신동의·unsubscribe 상태. 전적으로 Cloud Functions
     // (Admin SDK, 규칙 우회) 전용 — 클라이언트 직접 접근 전면 차단.

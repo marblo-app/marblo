@@ -76,6 +76,13 @@ export function FirstProjectSurvey({
     if (forceVisible) setVisible(true);
   }, [forceVisible]);
 
+  // `blocked` 는 "뜨지 마라" 가 아니라 "화면을 차지하지 마라" 다. 종전에는 마운트
+  // 시점에만 봤기 때문에, 뜬 **뒤에** 더 우선하는 카드가 같은 모서리를 잡으면 두
+  // 장이 겹쳐 남았다(둘 다 fixed bottom-6 right-6). 늦게 켜져도 물러선다.
+  useEffect(() => {
+    if (blocked && !forceVisible) setVisible(false);
+  }, [blocked, forceVisible]);
+
   if (!visible) return null;
 
   const trimmedLiked = liked.trim();

@@ -7625,6 +7625,99 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
 
 // 어드민 트리아지 — bugReports 최신순 조회. status 필터는 어드민 UI 에서 적용
 // (status+createdAt 복합 인덱스 회피를 위해 서버는 항상 최신순 전량 반환).
+// ── "왜 멈췄나" 문항의 자유서술 (티켓 CkVKKGI8wZZPGfyVvH6c · #1310 처방 3) ─────
+//
+// ★이 callable 이 존재하는 이유는 하나다: **산문을 텔레메트리로 보낼 수 없기
+// 때문**이다. src/lib/telemetry/scrub.ts 의 USER_INPUT_KEY 는 free-form note 를
+// 스펙상 전면 차단한다(부분 스크럽은 자연어에서 신뢰할 수 없다). 그래서
+// FirstProjectSurvey → submitExperienceShareSurvey 와 같은 분업을 그대로 쓴다:
+// 집계(선택지 코드·길이)는 BigQuery events, 산문은 여기.
+//
+// ★선택지만 고르고 한 줄을 안 쓰면 이 함수는 **호출되지 않는다.** 저장되는 건
+// 사람이 우리에게 주려고 직접 쓴 한 문장뿐이고, 그 사실은 입력칸 옆에 적혀 있다.
+//
+// ★계정당 1건. 잔존/이탈 분석의 표본이지 티켓 큐가 아니라 덮어쓰지도, 누적하지도
+// 않는다 — 첫 답이 남고 두 번째는 duplicate 로 조용히 지나간다.
+const PAUSE_REASON_NOTE_MAX = 200;
+const PAUSE_REASON_CODES: readonly string[] = [
+  "no_need",
+  "other_tool",
+  "setup_friction",
+  "output_quality",
+  "cost",
+  "other",
+];
+
+export const submitPauseReason = functions.https.onCall(
+  async (data, context) => {
+    const uid = context.auth?.uid;
+    if (!uid) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다."
+      );
+    }
+
+    const reason = typeof data?.reason === "string" ? data.reason : "";
+    if (!PAUSE_REASON_CODES.includes(reason)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "알 수 없는 응답입니다."
+      );
+    }
+
+    // 클라가 이미 자르고 오지만 신뢰 경계는 여기다. 시크릿 레닥션도 저장 직전에
+    // 서버가 한 번 더 한다(submitBugReport 와 같은 규율).
+    const note =
+      typeof data?.note === "string"
+        ? redactSecrets(
+            data.note
+              .replace(/\s+/g, " ")
+              .trim()
+              .slice(0, PAUSE_REASON_NOTE_MAX)
+          )
+        : "";
+    if (!note) {
+      // 빈 메모로 이 함수를 부를 이유가 없다 — 선택지는 텔레메트리로 이미 갔다.
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "내용이 비어 있습니다."
+      );
+    }
+
+    const gapDaysRaw = Number(data?.gapDays);
+    const gapDays =
+      Number.isFinite(gapDaysRaw) && gapDaysRaw >= 0
+        ? Math.min(Math.floor(gapDaysRaw), 3650)
+        : null;
+    const appVersion =
+      typeof data?.appVersion === "string"
+        ? data.appVersion.trim().slice(0, 100)
+        : "";
+
+    const ref = db.collection("pauseReasons").doc(uid);
+    try {
+      await ref.create({
+        uid,
+        reason,
+        note,
+        gapDays,
+        appVersion: appVersion || null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } catch (error) {
+      // create() 는 문서가 이미 있으면 ALREADY_EXISTS(6) 로 던진다. 그 경우만
+      // duplicate 로 접고, 나머지 실패는 그대로 올려보낸다.
+      const code = (error as { code?: number | string })?.code;
+      if (code === 6 || code === "already-exists") {
+        return { ok: true, duplicate: true };
+      }
+      throw error;
+    }
+    return { ok: true, duplicate: false };
+  }
+);
+
 export const listBugReports = functions.https.onCall(async (_data, context) => {
   requireAdmin(context);
   const snap = await db
@@ -10337,6 +10430,13 @@ export const getAdminUsageSummary = functions.https.onCall(
  * 스캔하는 이벤트 종류가 늘면 d_retained_7d 가 저절로 올라간다. 그건 잔존이
  * 좋아진 게 아니라 분모를 바꾼 것이라, 잔존 계산에서는 이 목록을 제외한다.
  */
+/**
+ * ★`retention:pause_reason`("왜 멈췄나" 문항, 티켓 CkVKKGI8wZZPGfyVvH6c)은 여기
+ * 추가하지 않는다 — 이 목록의 소비처인 raw CTE 가 `event IN (${inList})` 로 이미
+ * 닫혀 있어 그 이벤트는 스캔에 **들어오지도 않는다**. 없는 오염을 막는 항목을
+ * 넣으면 다음 사람이 "이 목록이 무엇을 막는지" 를 잘못 배운다. 전량 스캔을 하는
+ * 쪽은 코크핏 잔존이고, 거기에는 KPI_RETENTION_EXCLUDED_EVENTS 로 등록돼 있다.
+ */
 const FUNNEL_EVENTS_EXCLUDED_FROM_RETENTION: readonly string[] = [
   "app:installed",
   "onboarding:first_conversation",
@@ -11584,6 +11684,12 @@ const KPI_RETENTION_EXCLUDED_EVENTS: readonly string[] = [
   // 앵커 이벤트도 같은 규율(티켓 Tw6m14gR) — 계측을 늘렸다는 이유로 잔존
   // 게이지가 좋아져서는 안 된다.
   "onboarding:model_connected",
+  // ★"왜 멈췄나" 문항(티켓 CkVKKGI8wZZPGfyVvH6c). 여기 있는 다른 항목들과 이유가
+  // 한 단계 더 나쁘다: 위 넷은 "이벤트가 늘어 잔존이 덤으로 오른다" 는 인플레지만,
+  // 이 이벤트는 **정의상 사람이 멈췄다가 돌아온 날에만** 발화한다. 빼지 않으면
+  // "저는 멈췄었습니다" 라고 답한 바로 그 행동이 잔존 세션 한 칸으로 계상된다 —
+  // 부호가 뒤집힌 오염이고, 이탈을 물을수록 잔존이 좋아 보이게 된다.
+  "retention:pause_reason",
 ];
 
 export const getAdminKpiCockpit = functions
@@ -12382,6 +12488,20 @@ export const getAdminKpiCockpit = functions
       // ★제로마찰 KPI(티켓 pWSnJeQN · 앵커 수정 Tw6m14gR). 10분 판정의 분모는
       // **모델 연결 완료** 설치다 — 이유는 순수 빌더 buildZeroFrictionKpis 의
       // note 참조. 최초 실행 기준 값은 앞단 구간·참고치로 함께 넘긴다.
+      //
+      // ★2026-08-29 강등 (티켓 CkVKKGI8wZZPGfyVvH6c · #1310 §5·§6) —
+      // 아래 `firstSuccess*` 는 **진단값이지 activation·잔존의 예측 지표가
+      // 아니다.** 실측: task 에 도달한 설치 7개 중 6개가 첫 시도에 성공했고(0분)
+      // 그중 3개가 1~2일 만에 소멸했다. 실패율도 같다 — 173 task 를 하고 떠난
+      // 설치는 마지막 이틀 33/33 성공·크래시 0·errorCategory 전부 NULL 이었다.
+      // 이 표본에서 두 지표의 판별력은 0 이다.
+      //
+      // ★그런데 **내리지 않는다**, 이유가 둘이다: (1) n=7 에서의 관측이지 증명이
+      // 아니고, (2) #1310 처방 3의 반증조건 자체가 "다음 이탈자가 마지막 3
+      // 활동일에 errorCategory 상승 또는 agent:crashed 급증을 보이는가" 라 —
+      // 그 관측을 지우면 그 처방을 반증할 길이 함께 사라진다. 계속 재되,
+      // "첫 성공이 빨랐으니 정착한다" 로 읽지 마라. 이탈 사유는 이제 별도 축
+      // (`retention:pause_reason`)이 직접 묻는다.
       zeroFriction: {
         firstRunBase: zeroFrictionRow.d_first_run_base,
         modelConnectedClients: zeroFrictionRow.d_model_connected,

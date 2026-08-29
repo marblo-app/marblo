@@ -41,6 +41,7 @@ import { collaboration } from "./collaboration";
 import { project } from "./project";
 import { beginner } from "./beginner";
 import { githubGuide } from "./githubGuide";
+import { retention } from "./retention";
 
 export const en: Record<MessageKey, string> = {
   ...header,
@@ -76,4 +77,5 @@ export const en: Record<MessageKey, string> = {
   ...project,
   ...beginner,
   ...githubGuide,
+  ...retention,
 };

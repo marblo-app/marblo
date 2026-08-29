@@ -4,6 +4,7 @@ import { scrubValue } from "../lib/telemetry/scrub";
 import { firstPartyTelemetryDefaultEnabled } from "../lib/telemetry/firstPartyGate";
 import { recordTaskRetry } from "./taskRollups";
 import { bindTelemetryLifecycleFlush } from "./telemetryLifecycle";
+import type { PauseReasonCode } from "../lib/pauseReasonPrompt";
 
 export type TelemetryEvent =
   | "agent:spawned"
@@ -208,7 +209,33 @@ export type TelemetryEvent =
   // 새 테이블도 서버 스키마 변경도 없다: 다른 이벤트와 똑같이 이 파일의
   // logTelemetry choke point(비식별 scrub + firstParty 게이트) → logTelemetryBatch
   // → BigQuery `events` 로 가고, shadow 고유 필드는 전부 metadata JSON 이다.
-  | "routing:shadow";
+  | "routing:shadow"
+  // ── ★"왜 멈췄나" 단일 문항 (티켓 CkVKKGI8wZZPGfyVvH6c · #1310 처방 3) ─────
+  // 실측이 반증한 것부터: **떠나는 사람은 실패해서 떠나지 않는다.** 173 task 를
+  // 하고 떠난 설치는 마지막 이틀 33/33 성공·크래시 0·errorCategory 전부 NULL 로
+  // 사라졌고, task 도달 7개 중 6개가 첫 시도에 성공했는데 그중 3개가 1~2일 만에
+  // 소멸했다. 즉 성공률·첫 성공 시간에는 이탈 신호가 **없다**. 앱 안에 그 신호가
+  // 없으므로 BigQuery 를 더 봐도 나오지 않는다 — 그래서 사람에게 직접 묻는다.
+  //
+  // metadata.phase = shown(질문을 띄웠다) | answered(선택지를 골랐다)
+  //                | dismissed(안 고르고 닫았다) | note(한 줄 메모 전달 결과)
+  // ★집계는 `phase='answered'` 만 세면 되고, 그 행은 사람당 정확히 한 번 난다 —
+  // 메모를 보낸 사람이 두 번 세어지지 않도록 후속 결과를 다른 phase 로 뺐다.
+  // `onboarding:login_prompt` 의 phase 규약을 그대로 쓴다. ★shown 이 없으면
+  // "답이 0건" 이 미노출인지 무응답인지 갈리지 않는다 — 활성 설치가 한 자릿수인
+  // 지금 그 구분이 답 자체보다 중요하다.
+  //
+  // ★자유서술은 **여기로 보내지 않는다.** lib/telemetry/scrub.ts 의 USER_INPUT_KEY
+  // 가 free-form note 를 스펙상 전면 차단한다(부분 스크럽은 자연어에서 신뢰할 수
+  // 없다). FirstProjectSurvey 와 같은 분업이다 — 산문은 전용 callable
+  // (submitPauseReason), 여기로는 코드와 길이만 간다.
+  //
+  // ★잔존 계산 오염: 이 이벤트는 정의상 **돌아온 날**에만 발화한다. 코크핏 잔존
+  // CTE 는 (프로젝트×날짜) 조합 수로 세션을 근사하므로 빼지 않으면 "이탈했다고
+  // 답한 사람" 이 잔존으로 계상된다 — 부호가 뒤집힌 오염이다. 그래서
+  // functions/src/index.ts 의 KPI_RETENTION_EXCLUDED_EVENTS 에 등록돼 있고,
+  // pauseReasonSurfaceParity 테스트가 그 등록을 지킨다.
+  | "retention:pause_reason";
 
 interface TelemetryPayload {
   event: TelemetryEvent;
@@ -1063,6 +1090,25 @@ export const telemetry = {
     logTelemetry({
       event: "onboarding:survey_first_project",
       metadata: { rating, ...(feedback ? { feedback } : {}) },
+    });
+  },
+
+  /**
+   * "왜 멈췄나" 문항의 노출·응답·거부. ★자유서술은 절대 싣지 않는다 —
+   * 길이(noteLength)와 그 한 줄이 실제로 전달됐는지(noteDelivered)만 싣는다.
+   */
+  pauseReasonPrompt(
+    phase: "shown" | "answered" | "dismissed" | "note",
+    detail: {
+      gapDays: number;
+      reason?: PauseReasonCode;
+      noteLength?: number;
+      noteDelivered?: boolean;
+    }
+  ) {
+    logTelemetry({
+      event: "retention:pause_reason",
+      metadata: { phase, ...detail },
     });
   },
 

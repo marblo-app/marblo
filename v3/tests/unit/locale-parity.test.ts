@@ -24,6 +24,7 @@ import { onboarding as enOnboarding } from "../../src/locales/en/onboarding";
 import { orchestrator as enOrchestrator } from "../../src/locales/en/orchestrator";
 import { plan as enPlan } from "../../src/locales/en/plan";
 import { project as enProject } from "../../src/locales/en/project";
+import { retention as enRetention } from "../../src/locales/en/retention";
 import { settings as enSettings } from "../../src/locales/en/settings";
 import { sidebar as enSidebar } from "../../src/locales/en/sidebar";
 import { terminal as enTerminal } from "../../src/locales/en/terminal";
@@ -56,6 +57,7 @@ import { onboarding as koOnboarding } from "../../src/locales/ko/onboarding";
 import { orchestrator as koOrchestrator } from "../../src/locales/ko/orchestrator";
 import { plan as koPlan } from "../../src/locales/ko/plan";
 import { project as koProject } from "../../src/locales/ko/project";
+import { retention as koRetention } from "../../src/locales/ko/retention";
 import { settings as koSettings } from "../../src/locales/ko/settings";
 import { sidebar as koSidebar } from "../../src/locales/ko/sidebar";
 import { terminal as koTerminal } from "../../src/locales/ko/terminal";
@@ -96,6 +98,7 @@ const NAMESPACES: Array<{
   { name: "orchestrator", ko: koOrchestrator, en: enOrchestrator },
   { name: "plan", ko: koPlan, en: enPlan },
   { name: "project", ko: koProject, en: enProject },
+  { name: "retention", ko: koRetention, en: enRetention },
   { name: "settings", ko: koSettings, en: enSettings },
   { name: "sidebar", ko: koSidebar, en: enSidebar },
   { name: "terminal", ko: koTerminal, en: enTerminal },
