@@ -33,11 +33,21 @@ links: [[telemetry-identity-axes]], [[overview]], [[glossary]]
 
 | 지표                | 현재                | 목표    | 배수         |
 | ------------------- | ------------------- | ------- | ------------ |
-| Qualified Beta      | 신청 73 · **승인 8** | 500     | **62배**     |
+| Qualified Beta      | 신청 73 · **선정 65** | 500     | **7.7배**    |
 | Activated           | **7** (설치 축)      | 200     | **28배**     |
+| — 그중 구독 문서 있음 | **34**              | —       | ★31명 갭     |
+| — 그중 현재 유효     | **9**               | —       | ★26건 만료   |
 | Monthly Agent Tasks | **1,212**           | 10 K +  | **8배**      |
 
-★신청 73건 중 62건이 아직 미처리다(`status` 없음). **승인은 우리가 하는 일이므로 이 칸은 광고 없이도 오늘 올릴 수 있다** — 62건을 처리하면 승인이 70이 된다.
+★**정정(2026-08-29)**: 이 칸은 처음에 "승인 8 · 62배"로 적혀 있었다. 틀린 축을 읽은 것이다.
+
+선정은 `markFounderSelected` 가 **`founders` 컬렉션**에 쓰지 `betatester50_waitlist.status` 에 쓰지 않는다. `status` 가 찍힌 7건은 **자동승인 도입 이후**뿐이고, 나머지 62건은 미처리가 아니라 **수동 시절에 처리돼 `founders` 에만 기록된 것**이다(사장님 확인: "신청은 다 승인됐다. 처음엔 자동화가 아니다가 나중에 자동승인으로 바꿨다").
+
+실측: `founders` 65건 전부 `status=selected` + `accessGrantedAt` 보유.
+
+★**필드 부재를 "안 했다"로 읽은 것이 오류의 정체다.** 그리고 `waitlist` 의 8(=auto_selected 7 + duplicate 1)과 `subscriptions` 의 유효 8이 **우연히 같은 숫자**여서 더 쉽게 속았다.
+
+★**62배와 7.7배는 KPI 긴급도가 완전히 다르게 읽힌다.** 없는 위기를 8배로 부풀려 볼 뻔했다.
 
 ### 광고 퍼널 목표 (같은 날 확정)
 
@@ -69,7 +79,7 @@ Instagram / YouTube / X → 「AI 빌더 되기」 콘텐츠 → AI Builder Guid
 | D7/D14/D30          | ⚠️ **설치 축으로만**  | 사람 축 분모가 1 이라 비율을 못 그린다               |
 | Activated           | ✅ 잰다               | 첫 Task 스폰 = `task_outcomes` 첫 행 — 이미 계측된다 |
 | Power Users         | ⚠️ 재료는 있음        | `analytics_user_daily` 의 `day`·`tasks_completed`    |
-| Qualified Beta      | ✅ 잰다               | `betatester50_waitlist` — 신청 73 · **승인 8**       |
+| Qualified Beta      | ✅ 잰다               | ★`founders`(선정 65) — `waitlist.status` 아님        |
 | Paying Users        | ✅ 잰다               | Firestore `subscriptions`                            |
 | Design Partners     | ❌ 못 잰다            | 계약 사실 — 텔레메트리에 없다. 수동 입력             |
 | Paid PoC            | ❌ 못 잰다            | 같음                                                 |
