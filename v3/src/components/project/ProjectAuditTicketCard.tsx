@@ -11,6 +11,10 @@ import type { Worktree } from "../../types/worktree";
 import { ProjectAuditLinks } from "./ProjectAuditLinks";
 import { AuditTimelineRow, formatAuditTime } from "./ProjectAuditRow";
 
+const ROW_CHROME = "rounded-lg border px-3 py-2 transition-colors";
+const MODEL_CHIP =
+  "flex-shrink-0 rounded border border-purple-800/70 bg-purple-950/40 px-1.5 py-0.5 text-[10px] text-purple-300";
+
 /**
  * 티켓 하나의 카드 = 이 화면의 1차 단위.
  *
@@ -56,15 +60,15 @@ export function ProjectAuditTicketCard({
     <li
       data-testid="audit-ticket"
       data-task-id={group.taskId ?? "__none__"}
-      className={`rounded border px-3 py-2 transition-colors ${
+      className={`${ROW_CHROME} ${
         group.attention
           ? group.attention.severity === "critical"
             ? "border-red-900/60 bg-red-950/10"
             : "border-amber-900/50 bg-amber-950/10"
-          : "border-gray-800 bg-gray-900/40"
+          : "border-subtle bg-surface-panel/60"
       }`}
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+      <div className="flex min-w-0 items-center gap-3">
         <button
           type="button"
           onClick={onToggle}
@@ -72,7 +76,7 @@ export function ProjectAuditTicketCard({
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
           title={group.taskId ? `#${group.taskId}` : undefined}
         >
-          <span aria-hidden className="flex-shrink-0 text-gray-500">
+          <span aria-hidden className="flex-shrink-0 text-muted">
             {expanded ? "▾" : "▸"}
           </span>
 
@@ -84,22 +88,10 @@ export function ProjectAuditTicketCard({
             {group.status ?? t("project.audit.admin.statusUnknown")}
           </span>
 
-          <span className="min-w-0 flex-1 truncate text-sm text-gray-100">
+          <span className="min-w-0 flex-1 truncate text-sm text-primary">
             {title}
           </span>
         </button>
-
-        {/* 모델 칩 — 이 티켓에 실제로 등장한 모델 전부. 하나만 뽑아 대표로
-            보여주면 "이 모델이 다 했다"는 오귀속이 된다(예전 메모 묶음 요약이
-            집계를 안 올린 것과 같은 이유). */}
-        {group.models.map((model) => (
-          <span
-            key={model}
-            className="flex-shrink-0 rounded border border-purple-800/70 bg-purple-950/40 px-1.5 py-0.5 text-[10px] text-purple-300"
-          >
-            {`🤖 ${model}`}
-          </span>
-        ))}
 
         {group.attention && (
           <AttentionPill
@@ -109,30 +101,21 @@ export function ProjectAuditTicketCard({
           />
         )}
 
-        {missionLabel && (
-          <span
-            className="min-w-0 max-w-[14rem] flex-shrink truncate rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-400"
-            title={missionLabel}
-          >
-            {missionLabel}
-          </span>
-        )}
-
-        <span className="flex-shrink-0 text-[11px] text-gray-500">
+        <span className="flex-shrink-0 text-xs text-muted">
           {t("project.audit.admin.ticketSummary", {
             actions: group.actionCount,
             actors: group.actorCount,
           })}
         </span>
 
-        <span className="flex-shrink-0 text-xs tabular-nums text-gray-500">
+        <span className="flex-shrink-0 text-xs tabular-nums text-muted">
           {formatAuditTime(group.latestAt, locale)}
         </span>
       </div>
 
       {/* 링크 클러스터는 토글 버튼 **밖**에 둔다 — 안에 넣으면 버튼 중첩(무효
           HTML)이고, 링크를 누를 때마다 카드가 같이 펼쳐진다. */}
-      {group.taskId && (
+      {expanded && group.taskId && (
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-6">
           <ProjectAuditLinks
             taskId={group.taskId}
@@ -153,14 +136,35 @@ export function ProjectAuditTicketCard({
         </div>
       )}
 
-      {!group.taskId && (
-        <p className="mt-1 pl-6 text-[11px] text-gray-600">
+      {expanded && !group.taskId && (
+        <p className="mt-1 pl-6 text-[11px] text-muted">
           {t("project.audit.admin.noTicketNote")}
         </p>
       )}
 
       {expanded && (
         <div className="mt-2 ml-6 border-l border-gray-800 pl-3">
+          {(group.models.length > 0 || missionLabel) && (
+            <div className="mb-2 flex min-w-0 flex-wrap items-center gap-1.5">
+              {/* 모델 칩 — 이 티켓에 실제로 등장한 모델 전부. 하나만 뽑아 대표로
+                  보여주면 "이 모델이 다 했다"는 오귀속이 된다(예전 메모 묶음 요약이
+                  집계를 안 올린 것과 같은 이유). */}
+              {group.models.map((model) => (
+                <span key={model} className={MODEL_CHIP}>
+                  {`🤖 ${model}`}
+                </span>
+              ))}
+
+              {missionLabel && (
+                <span
+                  className="min-w-0 max-w-[14rem] flex-shrink truncate rounded border border-default bg-surface-raised px-1.5 py-0.5 text-[10px] text-secondary"
+                  title={missionLabel}
+                >
+                  {missionLabel}
+                </span>
+              )}
+            </div>
+          )}
           <TicketEvidenceSummary
             group={group}
             worktrees={worktrees}
