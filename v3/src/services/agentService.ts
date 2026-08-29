@@ -11,6 +11,7 @@ import {
 } from "./firestore";
 import { recordProjectAuditEvent } from "./projectAuditService";
 import { agentSpawnAuditMetadata } from "../lib/projectAudit";
+import { getRequiredAgentMachineId } from "./agentMachineId";
 
 const COLLECTION = "agents";
 const DATE_FIELDS = ["createdAt"];
@@ -35,8 +36,14 @@ export async function getAgent(agentId: string): Promise<Agent | null> {
 export async function createAgent(
   data: Omit<Agent, "id" | "createdAt">,
 ): Promise<string> {
+  if (!data.projectId.trim()) {
+    throw new Error("Cannot create agent without projectId.");
+  }
+  const machineId =
+    data.machineId?.trim() || (await getRequiredAgentMachineId());
   const agentId = await createDocument(COLLECTION, {
     ...data,
+    machineId,
     createdAt: toTimestamp(new Date()),
   });
 

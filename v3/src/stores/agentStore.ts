@@ -14,6 +14,11 @@ import { useSubscriptionStore } from "./subscriptionStore";
 import { useUiStore } from "./uiStore";
 import { checkAgentSpawn } from "../lib/planLimits";
 import { t } from "../lib/i18n";
+import {
+  type AgentVisibilityContext,
+  filterVisibleProjectAgents,
+  projectAgentQueryScope,
+} from "../services/agentVisibility";
 
 const COLLECTION = "agents";
 const DATE_FIELDS = ["createdAt", "costUpdatedAt"];
@@ -28,6 +33,20 @@ function dedupeAgentsById(agents: Agent[]): Agent[] {
     byId.set(agent.id, agent);
   }
   return Array.from(byId.values());
+}
+
+function agentVisibilityContext(projectId: string): AgentVisibilityContext {
+  const { currentProject, projects, subscribedUserId, machineId } =
+    useProjectStore.getState();
+  const project =
+    currentProject?.id === projectId
+      ? currentProject
+      : projects.find((candidate) => candidate.id === projectId);
+  return {
+    projectOwnerId: project?.ownerId ?? null,
+    viewerUserId: subscribedUserId,
+    localMachineId: machineId,
+  };
 }
 
 interface AgentState {
@@ -104,12 +123,33 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 지금이어야, 이전 프로젝트의 목록이 hydrated=true 인 채로 남아 있는 창을
     // 읽는 쪽이 곧바로 알아챈다.
     set({ loading: true, hydrated: false, agentsProjectId: projectId });
+    const context = agentVisibilityContext(projectId);
+    const scope = projectAgentQueryScope(context);
+    if (scope.kind === "none") {
+      set({
+        agents: [],
+        loading: false,
+        hydrated: true,
+        agentsProjectId: projectId,
+      });
+      return () => {};
+    }
+    const constraints = [
+      where("projectId", "==", projectId),
+      ...(scope.kind === "machine"
+        ? [where("machineId", "==", scope.machineId)]
+        : []),
+    ];
     return subscribeToCollection<Record<string, unknown>>(
       COLLECTION,
-      [where("projectId", "==", projectId)],
+      constraints,
       (docs) => {
+        const projectAgents = dedupeAgentsById(docs.map(toAgent));
         set({
-          agents: dedupeAgentsById(docs.map(toAgent)),
+          agents: filterVisibleProjectAgents(
+            projectAgents,
+            agentVisibilityContext(projectId),
+          ),
           loading: false,
           hydrated: true,
           agentsProjectId: projectId,

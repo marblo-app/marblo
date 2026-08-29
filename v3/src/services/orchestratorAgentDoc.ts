@@ -9,6 +9,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
+import { getRequiredAgentMachineId } from "./agentMachineId";
 
 const ORCH_DOC_ID = (projectId: string) => `orchestrator-${projectId}`;
 
@@ -19,9 +20,10 @@ const ORCH_DOC_ID = (projectId: string) => `orchestrator-${projectId}`;
  */
 export async function upsertOrchestratorAgentDoc(
   projectId: string,
-  status: "working" | "stopped" | "idle"
+  status: "working" | "stopped" | "idle",
 ): Promise<string> {
   const id = ORCH_DOC_ID(projectId);
+  const machineId = await getRequiredAgentMachineId();
   await setDoc(
     doc(db, "agents", id),
     {
@@ -34,9 +36,10 @@ export async function upsertOrchestratorAgentDoc(
       currentTaskId: null,
       command: "claude",
       skillFile: "",
+      machineId,
       createdAt: serverTimestamp(),
     },
-    { merge: true }
+    { merge: true },
   );
   return id;
 }
@@ -47,13 +50,13 @@ export async function upsertOrchestratorAgentDoc(
  * `orchestrator-${projectId}` doc is preserved.
  */
 export async function cleanupLegacyOrchestratorDocs(
-  projectId: string
+  projectId: string,
 ): Promise<number> {
   const keepId = ORCH_DOC_ID(projectId);
   const q = query(
     collection(db, "agents"),
     where("projectId", "==", projectId),
-    where("role", "==", "orchestrator")
+    where("role", "==", "orchestrator"),
   );
   const snap = await getDocs(q);
   const stale = snap.docs.filter((d) => d.id !== keepId);
