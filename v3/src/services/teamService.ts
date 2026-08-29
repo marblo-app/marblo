@@ -33,6 +33,16 @@ function toUser(raw: Record<string, unknown>): User {
   return convertTimestamps<User>(raw, USER_DATE_FIELDS);
 }
 
+function missingUserDocumentMember(userId: string): User {
+  return {
+    id: userId,
+    email: userId,
+    displayName: userId,
+    photoURL: "",
+    createdAt: new Date(0),
+  };
+}
+
 // --- 초대 ---
 
 export function normalizeInviteEmail(email: string): string {
@@ -355,9 +365,19 @@ export async function getProjectMembers(projectId: string): Promise<User[]> {
 
   const members: User[] = [];
   for (const memberId of project.members) {
-    const raw = await getDocument<Record<string, unknown>>(USERS, memberId);
+    let raw: Record<string, unknown> | null = null;
+    try {
+      raw = await getDocument<Record<string, unknown>>(USERS, memberId);
+    } catch (err) {
+      console.warn(
+        `[teamService] users/${memberId} read failed; keeping uid-visible member row:`,
+        err,
+      );
+    }
     if (raw) {
       members.push(toUser(raw));
+    } else {
+      members.push(missingUserDocumentMember(memberId));
     }
   }
   return members;

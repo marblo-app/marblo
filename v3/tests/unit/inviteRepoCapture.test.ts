@@ -22,9 +22,14 @@ const OWNER_PATH = "/Users/owner/app";
 const ORIGIN = "https://github.com/acme/app.git";
 
 const docs = vi.hoisted(() => new Map<string, Record<string, unknown>>());
+const readFailures = vi.hoisted(() => new Set<string>());
 
 vi.mock("../../src/services/firestore", () => ({
-  getDocument: async (path: string, id: string) => docs.get(`${path}/${id}`),
+  getDocument: async (path: string, id: string) => {
+    const key = `${path}/${id}`;
+    if (readFailures.has(key)) throw new Error(`read failed: ${key}`);
+    return docs.get(key) ?? null;
+  },
   queryDocuments: async () => [],
   setDocument: async (
     path: string,
@@ -111,6 +116,7 @@ function projectDoc(extra: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   docs.clear();
+  readFailures.clear();
   projectMock.project = projectDoc();
   projectMock.updates = [];
   projectMock.updateFails = false;
@@ -119,6 +125,60 @@ beforeEach(() => {
   electron.gitRemoteUrl = vi.fn(async () => ORIGIN);
   installElectronApi();
   vi.resetModules();
+});
+
+describe("getProjectMembers — missing users documents", () => {
+  it("keeps a project.members uid visible when users/{uid} is missing", async () => {
+    projectMock.project = projectDoc({ members: ["owner", "missing-user"] });
+    docs.set("users/owner", {
+      id: "owner",
+      email: "owner@example.com",
+      displayName: "Owner",
+      photoURL: "",
+      createdAt: new Date("2026-01-01"),
+    });
+    const teamService = await import("../../src/services/teamService");
+
+    const members = await teamService.getProjectMembers("p1");
+
+    expect(members.map((member) => member.id)).toEqual([
+      "owner",
+      "missing-user",
+    ]);
+    expect(members[1]).toMatchObject({
+      id: "missing-user",
+      email: "missing-user",
+      displayName: "missing-user",
+      photoURL: "",
+    });
+  });
+
+  it("keeps a project.members uid visible when users/{uid} cannot be read", async () => {
+    projectMock.project = projectDoc({ members: ["owner", "unreadable-user"] });
+    docs.set("users/owner", {
+      id: "owner",
+      email: "owner@example.com",
+      displayName: "Owner",
+      photoURL: "",
+      createdAt: new Date("2026-01-01"),
+    });
+    readFailures.add("users/unreadable-user");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const teamService = await import("../../src/services/teamService");
+
+    const members = await teamService.getProjectMembers("p1");
+
+    expect(members.map((member) => member.id)).toEqual([
+      "owner",
+      "unreadable-user",
+    ]);
+    expect(members[1].displayName).toBe("unreadable-user");
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("users/unreadable-user read failed"),
+      expect.any(Error),
+    );
+    warn.mockRestore();
+  });
 });
 
 describe("createInvitation — repo URL capture", () => {
