@@ -47,6 +47,7 @@
     "test:churn-outreach": "tsc src/churnOutreach.ts src/churnOutreach.test.ts --outDir .test-out/churn-outreach --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/churn-outreach/churnOutreach.test.js",
     "test:beta-retro-extend": "tsc src/betaRetroExtend.ts src/betaRetroExtend.test.ts --outDir .test-out/beta-retro-extend --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/beta-retro-extend/betaRetroExtend.test.js",
     "test:founder-ladder": "tsc src/founderLadder.ts src/founderLadder.test.ts --outDir .test-out/founder-ladder --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/founder-ladder/founderLadder.test.js",
+    "test:founder-grant-gap": "tsc src/founderLadder.ts src/grantPlan.ts src/founderGrantGap.ts src/founderGrantGap.test.ts --outDir .test-out/founder-grant-gap --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/founder-grant-gap/founderGrantGap.test.js",
     "test:grant-plan": "tsc src/grantPlan.ts src/grantPlan.test.ts --outDir .test-out/grant-plan --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node --test .test-out/grant-plan/grantPlan.test.js",
     "test:migrate-grants": "node --test tests/migrateGrantsToTeam.test.mjs",
     "migrate:grants-to-team": "node scripts/migrate-founder-grants-to-team.mjs",
@@ -84,7 +85,9 @@
     "provision:install-unified:build": "tsc src/analyticsPseudonym.ts src/personAxis.ts src/installUnified.ts scripts/provision-install-unified.ts --outDir .script-out/install-unified-provision --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node",
     "provision:install-unified": "npm run provision:install-unified:build && node .script-out/install-unified-provision/scripts/provision-install-unified.js",
     "provision:person-axis:build": "tsc src/personAxis.ts src/analyticsProfiles.ts src/adminAnalytics.ts scripts/provision-person-axis.ts --outDir .script-out/person-axis-provision --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck",
-    "provision:person-axis": "npm run provision:person-axis:build && node .script-out/person-axis-provision/scripts/provision-person-axis.js"
+    "provision:person-axis": "npm run provision:person-axis:build && node .script-out/person-axis-provision/scripts/provision-person-axis.js",
+    "dryrun:founder-grant-gap:build": "tsc src/founderLadder.ts src/grantPlan.ts src/founderGrantGap.ts scripts/dryrun-founder-grant-gap.ts --outDir .script-out/founder-grant-gap --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node",
+    "dryrun:founder-grant-gap": "npm run dryrun:founder-grant-gap:build && node .script-out/founder-grant-gap/scripts/dryrun-founder-grant-gap.js"
   },
   "engines": {
     "node": "20"

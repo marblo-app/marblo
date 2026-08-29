@@ -24,11 +24,17 @@
  * 플랜을 영구 부여하는 오버그랜트가 된다(#943 과 같은 계열의 사고).
  */
 
-/** 팀 기능(협업·멤버)까지 열어야 하는 grant reason. 베타/파운더 부여 3종. */
+/** 팀 기능(협업·멤버)까지 열어야 하는 grant reason. 베타/파운더 부여 4종. */
 export const TEAM_GRANT_REASONS: readonly string[] = [
   "beta_selected",
   "beta_signup",
   "founder_backfill",
+  // ★선정 65 vs grant 34 갭 백필(티켓 cw6lqyiFtspyx3LONt8y). 새 마커를 여기
+  // 등록하지 않으면 기본값이 pro 라, 이 코호트만 조용히 협업 기능 없이 부여된다
+  // — 같은 베타를 받았는데 사람마다 열리는 기능이 다른 상태가 된다.
+  // (상수 본체는 src/founderGrantGap.ts SELECTED_GAP_BACKFILL_REASON.
+  //  거기서 import 하면 순환이 되므로 문자열을 적고 테스트로 일치를 못 박는다.)
+  "grant_backfill_selected_gap_2026_08",
 ];
 
 /** 팀 grant 가 부여하는 플랜. */
