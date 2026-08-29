@@ -41,6 +41,14 @@ import {
   describeGa4BridgeFreshness,
   type Ga4BridgeFreshness,
 } from "./ga4BridgeFreshness";
+// ★사장님 광고→ACTIVATED 퍼널 (ticket O5JPlh4FSiCsNpZ4E9VJ). 조립은 전부 저기서
+//   하고 여기서는 그리기만 한다 — 화면이 다시 세면 집계가 또 갈라진다.
+import {
+  AD_FUNNEL_BASIS_LABEL,
+  buildAdAcquisitionFunnel,
+  type ActivatedLadderDto,
+  type AdFunnelRow,
+} from "./adFunnel";
 import {
   MultiSeriesChart,
   TimeSeriesChart,
@@ -199,6 +207,12 @@ export type OnboardingFunnel = {
   steps: OnboardingFunnelStep[];
   failureBranches: OnboardingFailureBranch[];
   headline?: ActivationHeadline;
+  /**
+   * ★사장님 광고 퍼널의 하단(설치→ACTIVATED) 사다리 + **ACTIVATED 정의문**.
+   * 계약 정본은 `v3/functions/src/adFunnel.ts`. 구버전 함수면 없다(undefined) —
+   * ★그때 0 을 그리면 "아무도 활성화 안 했다" 가 되므로 화면은 '미계측' 으로 둔다.
+   */
+  activatedLadder?: ActivatedLadderDto | null;
   note: string;
 };
 
@@ -2951,6 +2965,269 @@ function PersonAxisUnknownMetricCard({
 // ── ★6탭 구조 ──────────────────────────────────────────────────────────────
 // 지금까지 이 화면은 지표가 시간순으로 쌓여 있어 "무엇부터 봐야 하나" 가 없었다.
 // 탭 하나 = 질문 하나로 세운다. 탭은 새 페이지가 아니라 기존 섹션의 재배치다.
+// ════════════════════════════════════════════════════════════════════════════
+// ★사장님 광고→ACTIVATED 퍼널 (ticket O5JPlh4FSiCsNpZ4E9VJ)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// 사장님이 광고 최적화 KPI 를 **Beta Signup 이 아니라 Activated Beta** 로 잡으셨다.
+// 그래서 이 블록의 종점은 ACTIVATED 이고, CPA 도 설치당이 아니라 **활성화당**이다.
+//
+// ★이 컴포넌트는 숫자를 만들지 않는다. `buildAdAcquisitionFunnel`(adFunnel.ts)이
+//   나눗셈까지 끝낸 행을 그리기만 한다 — 화면이 다시 세면 집계가 또 갈라진다.
+// ★ACTIVATED 정의문도 지어내지 않는다. 서버(activatedDefinition.ts)가 임계값·
+//   조건·축 라벨을 실어 보내고 여기서는 렌더만 한다. 이게 어드민 두 화면(②광고 ·
+//   KPI)이 같은 ACTIVATED 를 쓰게 하는 유일한 장치다.
+
+/** 목표 달성 배지. ★null 은 '미달' 이 아니라 '판단 불가' 다. */
+function TargetVerdictBadge({ met }: { met: boolean | null }) {
+  const style =
+    met === true
+      ? {
+          c: "border-emerald-900/50 bg-emerald-950/20",
+          t: "달성",
+          ink: STATUS_GOOD,
+        }
+      : met === false
+      ? {
+          c: "border-amber-900/40 bg-amber-950/20",
+          t: "미달",
+          ink: STATUS_WARN,
+        }
+      : { c: "border-zinc-800 bg-zinc-900/60", t: "판단 불가", ink: INK_MUTED };
+  return (
+    <span
+      className={`rounded-full border px-2 py-0.5 text-[11px] ${style.c}`}
+      style={{ color: style.ink }}
+    >
+      {style.t}
+    </span>
+  );
+}
+
+/** 한 칸. 측정 불가면 숫자 자리에 사유를 쓴다 — ★0 을 그리지 않는다. */
+function AdFunnelRowView({ row }: { row: AdFunnelRow }) {
+  const conv = row.conversion;
+  return (
+    <li className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-zinc-200">{row.stage}</p>
+          <p className="mt-0.5 text-[11px] text-zinc-500">
+            {AD_FUNNEL_BASIS_LABEL[row.basis]}
+            {row.crossSource ? " · ★소스 경계(추정)" : ""}
+          </p>
+        </div>
+        <div className="text-right">
+          {row.unmeasured ? (
+            <p className="text-sm font-semibold text-zinc-500">미계측</p>
+          ) : (
+            <p className="text-xl font-bold tabular-nums text-zinc-100">
+              {fmtInt(row.reached)}
+              <span className="ml-1 text-xs font-normal text-zinc-500">
+                {row.unitLabel}
+              </span>
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
+        {/* ★비율에는 언제나 분모를 붙인다. 퍼센트만 쓰면 표본 2개가 50% 로 보인다. */}
+        {conv ? (
+          <span className="tabular-nums text-zinc-400">
+            전환 <b className="text-zinc-200">{fmtRate(conv.rate)}</b>{" "}
+            <span className="text-zinc-500">
+              ({fmtInt(conv.numerator)}/{fmtInt(conv.denominator)})
+            </span>
+          </span>
+        ) : row.conversionFromKey ? (
+          <span className="text-zinc-500">전환 — (분모 없음)</span>
+        ) : null}
+        {row.target && (
+          <span className="text-zinc-400">
+            목표 <b className="text-zinc-200">{row.target.label}</b>
+          </span>
+        )}
+        {row.target && <TargetVerdictBadge met={row.targetMet} />}
+        {conv?.exceedsDenominator && (
+          <span className="text-amber-300/80">
+            ★분자 &gt; 분모 — 조회창 밖 유닛. 100% 로 깎지 않았습니다
+          </span>
+        )}
+      </div>
+
+      {row.unmeasured && (
+        <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+          ★{row.unmeasured.reason}
+          <br />→ {row.unmeasured.whatWouldFixIt}
+        </p>
+      )}
+      {row.warning && (
+        <p className="mt-1.5 text-[11px] leading-relaxed text-amber-200/70">
+          {row.warning}
+        </p>
+      )}
+    </li>
+  );
+}
+
+export function CeoAdFunnelView({
+  funnel,
+  countryFunnel,
+  cac,
+  rangeDays,
+}: {
+  funnel: OnboardingFunnel | null;
+  countryFunnel: CountryFunnel | null;
+  cac: AdminCacSummary | null;
+  rangeDays: number;
+}) {
+  // 광고비 합계 — 매칭/미매칭을 합친다(둘 다 실제로 나간 돈이다).
+  // ★원장을 못 읽었으면 null 이다. 0 으로 접으면 "비용 미입력" 과 "0원 지출" 이
+  //   같은 화면이 되고, 그 순간 CPA 가 거짓말을 시작한다.
+  const spendKrw =
+    cac?.state === "ingested" && cac.summary
+      ? cac.summary.matchedSpendKrw + cac.summary.unmatchedSpendKrw
+      : null;
+
+  const result = useMemo(
+    () =>
+      buildAdAcquisitionFunnel({
+        ladder: funnel?.activatedLadder ?? null,
+        web: countryFunnel
+          ? {
+              visitors: countryFunnel.totals.visitors,
+              downloads: countryFunnel.totals.downloads,
+            }
+          : null,
+        spendKrw,
+        rangeDays,
+      }),
+    [funnel?.activatedLadder, countryFunnel, spendKrw, rangeDays]
+  );
+
+  const def = result.definition;
+  const cpa = result.cpa;
+
+  return (
+    <div className="space-y-4">
+      {/* ── ★ACTIVATED 정의 — 두 화면이 같은 문장을 쓰게 하는 자리 ───────── */}
+      <Panel
+        title="ACTIVATED 정의 (광고 최적화 KPI)"
+        note="정의 정본은 v3/functions/src/activatedDefinition.ts 한 곳입니다. 화면은 서버가 실어 보낸 문구를 그대로 그립니다."
+      >
+        {def ? (
+          <div className="space-y-2">
+            <p className="text-sm font-semibold text-zinc-200">{def.label}</p>
+            <ul className="flex flex-wrap gap-1.5">
+              {def.criteria.map((c) => (
+                <li
+                  key={c.key}
+                  className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 text-[11px] text-zinc-400"
+                >
+                  {c.label}
+                  <span className="ml-1 text-zinc-600">({c.signal})</span>
+                </li>
+              ))}
+            </ul>
+            <p className="text-[11px] text-zinc-500">
+              축: <b className="text-zinc-300">{def.axisLabel}</b> · 정의 ID{" "}
+              {def.id}
+            </p>
+          </div>
+        ) : (
+          <EmptyState label="ACTIVATED 정의를 읽지 못했습니다 — getAdminOnboardingFunnel 배포 후 표시됩니다." />
+        )}
+      </Panel>
+
+      {/* ── ★ACTIVATED 두 소스 — 한쪽이 조용히 이기지 않게 ────────────────
+          실측(2026-08-29 BQ): 같은 설치 축인데 Task 합계가 events 43 대 프로필
+          1,494 다. 렌더러 `task:completed` 가 구조적으로 과소계상이라 두 소스의
+          ACTIVATED 가 갈린다. ★한쪽을 골라 그리면 다른 어드민 화면과 숫자가
+          어긋나고, 그때 두 화면 다 못 믿게 된다. 그래서 둘 다 라벨과 함께 그린다. */}
+      {result.profile && (
+        <Panel
+          title="ACTIVATED — 소스별 값 (같은 정의, 같은 설치 축)"
+          note="두 값이 다르면 정의가 다른 게 아니라 Task 계측 커버리지가 다른 것입니다."
+        >
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <StatCard
+              label="events 축 (렌더러 task:completed)"
+              value={fmtInt(result.rows.find((r) => r.key === "activated")?.reached)}
+              sub="퍼널과 같은 단일 스캔 · 보수적(과소계상)"
+            />
+            <StatCard
+              label={result.profile.sourceLabel}
+              value={fmtInt(result.profile.activatedUnits)}
+              sub={`설치 ${fmtInt(result.profile.installUnits)} · 스폰 ${fmtInt(
+                result.profile.agentUnits
+              )} · Task 임계 이상 ${fmtInt(result.profile.taskMinUnits)}`}
+            />
+          </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-amber-200/80">
+            {result.profile.note}
+          </p>
+        </Panel>
+      )}
+
+      {/* ── ★Activated CPA — 없는 비용을 0 으로 그리지 않는다 ─────────────── */}
+      <Panel
+        title="Activated CPA — 광고비 ÷ ACTIVATED"
+        note="사장님 지시: 광고를 신청 수가 아니라 실제로 쓰기 시작한 수로 평가합니다."
+      >
+        {cpa.kind === "ok" ? (
+          <div className="space-y-2">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <StatCard
+                label="Activated CPA"
+                value={fmtKrw(cpa.cpaKrw)}
+                sub={`${fmtKrw(cpa.spendKrw)} ÷ ${fmtInt(
+                  cpa.activatedUnits
+                )} ACTIVATED`}
+                accent={cpa.targetMet ? STATUS_GOOD : STATUS_WARN}
+              />
+              <StatCard label="목표" value={cpa.targetLabel} />
+              <StatCard
+                label="달성 여부"
+                value={cpa.targetMet ? "달성" : "미달"}
+                accent={cpa.targetMet ? STATUS_GOOD : STATUS_WARN}
+              />
+            </div>
+            {cpa.periodMismatchNote && (
+              <p className="text-[11px] leading-relaxed text-amber-200/80">
+                {cpa.periodMismatchNote}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-zinc-800 p-4">
+            <p className="text-sm font-semibold text-zinc-400">
+              CPA 산출 불가 — {cpa.reason}
+            </p>
+            <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+              → {cpa.whatWouldFixIt}
+            </p>
+            <p className="mt-1.5 text-[11px] text-zinc-600">
+              ★0원 CPA 로 그리지 않습니다. 0원은 &ldquo;공짜로
+              활성화시켰다&rdquo; 로 읽힙니다.
+            </p>
+          </div>
+        )}
+      </Panel>
+
+      {/* ── 8단계 퍼널 ────────────────────────────────────────────────────── */}
+      <ol className="space-y-2">
+        {result.rows.map((r) => (
+          <AdFunnelRowView key={r.key} row={r} />
+        ))}
+      </ol>
+
+      <AxisLimitNote notes={result.notes} />
+    </div>
+  );
+}
+
+
 export type AnalyticsTab =
   | "acquisition"
   | "ads"
@@ -9000,6 +9277,30 @@ export default function AnalyticsPanel({
               "사람 축 스위치 없음 — 광고비는 캠페인 원장 1행이고 성과 분모는 설치입니다. 사람 링크 커버리지가 낮아 사람별 CAC 를 만들 수 없습니다.",
             ]}
           />
+
+          {/* ── ★사장님 광고→ACTIVATED 퍼널 (ticket O5JPlh4F) ─────────────
+              이 탭의 첫 블록이다. 사장님이 광고 최적화 KPI 를 Beta Signup 이
+              아니라 ACTIVATED 로 잡으셨으므로, 광고 평가의 기준선이 맨 위에
+              온다. 아래 UTM 규약·광고비 원장은 그대로 둔다(각자 쓰임이 있다). */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={TrendingUp}
+              title="광고 → ACTIVATED 퍼널 (목표치와 나란히)"
+              trust={onbFunnel.data?.activatedLadder ? "yellow" : "unwired"}
+            />
+            {onbFunnel.loading || countryFunnel.loading ? (
+              <LoadingBox />
+            ) : onbFunnel.error ? (
+              <ErrorBox msg={onbFunnel.error} />
+            ) : (
+              <CeoAdFunnelView
+                funnel={onbFunnel.data}
+                countryFunnel={countryFunnel.data}
+                cac={cac.data}
+                rangeDays={days}
+              />
+            )}
+          </div>
 
           <div className="space-y-4">
             <SectionHeader icon={Link2} title="UTM 규약" trust="yellow" />

@@ -149,6 +149,15 @@ import {
   type ActiveByDaySourceRow,
   type ThirtyDayRetentionSourceRow,
 } from "./adminAnalytics";
+// ★광고→ACTIVATED 사다리 + ACTIVATED 단일 정의 (ticket O5JPlh4FSiCsNpZ4E9VJ).
+//   정의는 activatedDefinition.ts 한 곳에만 있고 adFunnel 이 그것으로 SQL 과
+//   응답 정의문을 파생한다 — 어드민 두 화면이 같은 ACTIVATED 를 쓰게 하는 장치다.
+import {
+  ACTIVATED_PROFILE_TABLE,
+  activatedLadderSelectSql,
+  activatedProfileSelectSql,
+  buildActivatedLadder,
+} from "./adFunnel";
 import {
   auditProfileCoverage,
   type CoverageReport,
@@ -10378,7 +10387,13 @@ export const getAdminOnboardingFunnel = functions
             `SUM(n_${f.col}) AS n_${f.col}`
         ).join(",\n        ")},
         COUNTIF(reached_login_success) AS d_signup_base,
-        COUNTIF(reached_task_completed) AS d_activated_30m
+        COUNTIF(reached_task_completed) AS d_activated_30m,
+        -- ★광고→ACTIVATED 사다리 (ticket O5JPlh4FSiCsNpZ4E9VJ).
+        --   같은 marks CTE 에서 COUNTIF 만 더 뽑는다 — 새 이벤트 0개, 추가 스캔
+        --   0바이트. 그래서 FUNNEL_EVENTS_EXCLUDED_FROM_RETENTION 에 추가할
+        --   항목도 없다(잔존율이 계측 확대로 좋아질 여지가 원천적으로 없다).
+        --   위 순차 체인 컬럼은 한 줄도 바뀌지 않는다 = 기존 퍼널 회귀 0.
+        ${activatedLadderSelectSql()}
       FROM seq_ext
     `;
 
@@ -10459,6 +10474,23 @@ export const getAdminOnboardingFunnel = functions
         AND NULLIF(JSON_VALUE(metadata, '$.accountUserId'), '') IS NOT NULL
     `;
 
+    // ── ★ACTIVATED 교차 확인 소스 (ticket O5JPlh4FSiCsNpZ4E9VJ) ───────────
+    //   events 의 렌더러 `task:completed` 는 구조적으로 과소계상이다(실측
+    //   전기간 43건). 같은 설치 축의 일별 롤업은 1,494건을 안다 — install_key 와
+    //   events.userId 는 같은 ID 공간이다(실측 44/44 완전 일치)이므로 축을 섞는
+    //   게 아니라 같은 축의 더 나은 계측을 읽는 것이다.
+    //
+    //   ★한쪽이 조용히 이기지 않게 **둘 다** 싣는다. 어느 쪽을 믿을지는 라벨을
+    //     보고 사람이 정한다.
+    //   ★비용: 파생 테이블 690행 = 0.01 MiB. events 재스캔이 없어 이 탭의 BQ
+    //     비용이 사실상 늘지 않는다.
+    //   ★쿼리 실패는 격리된다 — 이 쿼리가 죽어도 기존 퍼널은 그대로 나온다.
+    const activatedProfileQuery = `
+      SELECT
+        ${activatedProfileSelectSql()}
+      FROM \`${BQ_PROJECT}.${BQ_DATASET}.${ACTIVATED_PROFILE_TABLE}\`
+    `;
+
     const queryResults = await runAdminAnalyticsQueriesWithStatus([
       {
         name: "onboarding.funnel",
@@ -10479,6 +10511,11 @@ export const getAdminOnboardingFunnel = functions
         name: "onboarding.adminMatchable",
         query: adminMatchableQuery,
         params: { days: rangeDays },
+      },
+      {
+        name: "onboarding.activatedProfile",
+        query: activatedProfileQuery,
+        params: {},
       },
     ]);
     const funnelResult = queryResults[0] ?? {
@@ -10508,6 +10545,18 @@ export const getAdminOnboardingFunnel = functions
       rows: [],
       error: "missing query result",
     };
+    // ★파생 테이블이 아직 없거나 쿼리가 실패하면 **undefined** 를 넘긴다.
+    //   빈 행을 넘기면 교차 확인이 전부 0 으로 그려지고, 그 0 은 "활성화가 없다"
+    //   가 아니라 "이 소스를 못 읽었다" 다.
+    const activatedProfileResult = queryResults[4] ?? {
+      name: "onboarding.activatedProfile",
+      rows: [],
+      error: "missing query result",
+    };
+    const activatedProfileRow =
+      activatedProfileResult.error == null
+        ? (activatedProfileResult.rows[0] as Record<string, unknown> | undefined)
+        : undefined;
 
     // ★커버리지 쿼리가 실패했으면 빈 배열이 아니라 undefined 를 넘긴다.
     //   빈 배열은 "전 이벤트 전기간 0건" 과 같은 뜻이 되어 화면이 통째로
@@ -10554,6 +10603,20 @@ export const getAdminOnboardingFunnel = functions
         ok: queryErrors.length === 0,
         errors: queryErrors,
       },
+      // ★ACTIVATED 사다리 + **정의문 자체**를 실어 보낸다 (ticket O5JPlh4F).
+      //   화면이 "3개 이상 Task" 를 하드코딩하면 두 어드민 화면(②광고 · KPI)의
+      //   정의가 언젠가 갈라진다. 정의는 activatedDefinition.ts 한 곳에만 두고
+      //   서버가 그 문구·임계값·축 라벨을 그대로 내려 준다.
+      //   ★쿼리가 실패했으면 사다리를 그리지 않는다 — 0 을 그리면 "아무도 활성화
+      //     안 했다" 로 읽히고, 그건 조회 실패를 제품 실패로 둔갑시키는 짓이다.
+      activatedLadder:
+        funnelResult.error == null
+          ? buildActivatedLadder(
+              funnelResult.rows[0] as Record<string, unknown> | undefined,
+              "install",
+              activatedProfileRow ?? null
+            )
+          : null,
       ...funnel,
     };
   });
