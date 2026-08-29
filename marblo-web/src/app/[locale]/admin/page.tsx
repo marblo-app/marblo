@@ -571,7 +571,7 @@ export default function AdminPage() {
     }
   }, []);
 
-  // 루브릭 채점 저장 → reviewFounderFeedback. 10점 이상이면 Pro 3개월 자동 확정.
+  // 루브릭 채점 저장 → reviewFounderFeedback. 10점 이상이면 Pro 총 5개월 자동 확정.
   const handleReview = useCallback(
     async (overrideGrantPro: boolean) => {
       if (!fbData) return;
@@ -639,7 +639,7 @@ export default function AdminPage() {
     [loadFounders]
   );
 
-  // 인터뷰 완료 마킹 → markFounderInterviewed. Pro 총 6개월로 연장.
+  // 인터뷰 완료 마킹 → markFounderInterviewed. Pro 총 9개월로 연장.
   const completeInterview = useCallback(
     async (feedbackId: string, fromModal: boolean) => {
       setIvBusy((s) => ({ ...s, [feedbackId]: true }));
@@ -871,9 +871,9 @@ export default function AdminPage() {
             <h1 className="text-2xl font-bold">파운더 어드민</h1>
           </div>
           <p className="text-sm text-zinc-400 leading-relaxed">
-            대기자를 선정하고 1개월 베타를 부여합니다. 제출된 성실 설문(7문항)을
-            21점 루브릭으로 채점해 Pro 3개월을 확정하고, 상위 응답자에게 화상
-            인터뷰를 요청·완료 처리하면 Pro 6개월로 연장됩니다.
+            대기자를 선정하고 3개월 베타를 부여합니다. 제출된 성실 설문(7문항)을
+            21점 루브릭으로 채점해 Pro 총 5개월을 확정하고, 상위 응답자에게 화상
+            인터뷰를 요청·완료 처리하면 Pro 총 9개월로 연장됩니다.
           </p>
           <div className="mt-3 flex items-start gap-2 text-xs text-amber-400 bg-amber-950/30 border border-amber-900/40 rounded-lg p-3">
             <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
@@ -1352,7 +1352,7 @@ export default function AdminPage() {
                               {t.interviewCompleted ? (
                                 <span className="inline-flex items-center gap-1 text-green-400 text-xs font-medium">
                                   <Check className="w-3.5 h-3.5" />
-                                  완료 (6개월)
+                                  완료 (총 9개월)
                                 </span>
                               ) : t.interviewRequested ? (
                                 <button
@@ -1363,7 +1363,7 @@ export default function AdminPage() {
                                   {ivBusy[t.id] && (
                                     <Loader2 className="w-3 h-3 animate-spin" />
                                   )}
-                                  완료 처리 (+6개월)
+                                  완료 처리 (총 9개월)
                                 </button>
                               ) : (
                                 <button
@@ -1820,7 +1820,7 @@ export default function AdminPage() {
                           draftTotal >= 10 ? "text-green-400" : "text-zinc-500"
                         }`}
                       >
-                        {draftTotal >= 10 ? "Pro 3개월 기준 통과" : "10점 미만"}
+                        {draftTotal >= 10 ? "Pro 총 5개월 기준 통과" : "10점 미만"}
                       </span>
                     </span>
                   </div>
@@ -1883,14 +1883,14 @@ export default function AdminPage() {
                         <Loader2 className="w-4 h-4 animate-spin" />
                       )}
                       <UserCheck className="w-4 h-4" />
-                      채점 저장 (10점↑ Pro 3개월)
+                      채점 저장 (10점↑ Pro 총 5개월)
                     </button>
                     <button
                       onClick={() => handleReview(true)}
                       disabled={reviewBusy}
                       className="inline-flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-100 px-4 py-2 rounded-lg text-sm font-medium transition"
                     >
-                      예외 승인 (Pro 3개월 강제)
+                      예외 승인 (Pro 총 5개월 강제)
                     </button>
                   </div>
 
@@ -1899,7 +1899,7 @@ export default function AdminPage() {
                     {fbData.interviewCompleted ? (
                       <span className="inline-flex items-center gap-1.5 text-green-400 text-sm font-medium">
                         <Check className="w-4 h-4" />
-                        인터뷰 완료 — Pro 6개월
+                        인터뷰 완료 — Pro 총 9개월
                       </span>
                     ) : (
                       <>
@@ -1924,7 +1924,7 @@ export default function AdminPage() {
                             {ivBusy[fbData.id] && (
                               <Loader2 className="w-4 h-4 animate-spin" />
                             )}
-                            인터뷰 완료 처리 (Pro 6개월)
+                            인터뷰 완료 처리 (Pro 총 9개월)
                           </button>
                         )}
                       </>

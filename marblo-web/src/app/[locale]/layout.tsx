@@ -260,7 +260,7 @@ export default async function LocaleLayout({
           {/* PIPA 동의 게이트 — 로그인했지만 필수 동의가 없으면 차단 모달 */}
           <PrivacyConsentGate />
           {/* 파운더 설문 넛지 — 선정 파운더 중 미회신자에게 "회신 시 Pro 최대
-              3개월" 안내(dismiss 가능). 기본 OFF, 플래그로만 노출. */}
+              총 5개월" 안내(dismiss 가능). 기본 OFF, 플래그로만 노출. */}
           <FounderSurveyGate />
         </NextIntlClientProvider>
       </body>

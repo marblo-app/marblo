@@ -431,6 +431,13 @@ import {
   toTrainingRows,
   type TrainingConsentDoc,
 } from "./trainingCapture";
+import {
+  FOUNDER_BETA_MONTHS,
+  FOUNDER_INTERVIEW_TOTAL_PRO_MONTHS,
+  FOUNDER_LEGACY_BETA_MONTHS,
+  FOUNDER_PRO_MONTHS,
+  addMonths,
+} from "./founderLadder";
 
 function getFirebaseProjectId(): string | undefined {
   if (process.env.GCLOUD_PROJECT) return process.env.GCLOUD_PROJECT;
@@ -4209,19 +4216,19 @@ export const issueLectureCoupon = functions.https.onCall(
 //
 // 흐름:
 //   1) 어드민이 betatester50_waitlist 검토 후 markFounderSelected({email}) 로 선정.
-//      founders/{normalizedEmail} 생성, betaExpiresAt = 선정/활성화 + 1개월.
+//      founders/{normalizedEmail} 생성, betaExpiresAt = 선정/활성화 + 3개월.
 //   2) 파운더가 같은 (이메일 인증된) 계정으로 로그인 → /beta-survey
 //      7문항 제출 → submitFounderFeedback(): 선정 여부 + 중복 제출 검증 후
 //      founder_feedback 저장. 제출만으로 보상은 확정하지 않는다.
-//   3) 운영자가 루브릭 채점(reviewFounderFeedback) → 기준 통과 시 Pro 총 3개월.
+//   3) 운영자가 루브릭 채점(reviewFounderFeedback) → 기준 통과 시 Pro 총 5개월.
 //   4) 운영자가 상위 응답자에게 인터뷰 요청(requestFounderInterview) 후 완료 처리
-//      (markFounderInterviewed) → Pro 총 6개월로 연장.
+//      (markFounderInterviewed) → Pro 총 9개월로 연장.
 //
 // 어드민 식별: triggerReconcile 과 동일하게 ADMIN_UID env 단일 체크.
 
-const FOUNDER_BETA_MONTHS = 1;
-const FOUNDER_PRO_MONTHS = 3;
-const FOUNDER_INTERVIEW_TOTAL_PRO_MONTHS = 6;
+// 계단 값(베타 3 · 설문 총 5 · 인터뷰 총 9)과 그 근거는 ./founderLadder 에 있다.
+// 값이 여기 없는 이유: 정책 상수는 유닛 테스트가 가능한 순수 모듈이 들고 있어야
+// 계단 불변식(뒤 단계일수록 증분이 크다)을 테스트로 못 박을 수 있다.
 const FOUNDER_PRO_RUBRIC_MIN_TOTAL = 10;
 const FOUNDER_INTERVIEW_MIN_TOTAL = 14;
 const FOUNDER_FIELD_MAX = 5000;
@@ -4321,12 +4328,6 @@ function normalizeHttpUrl(value: unknown): string | null {
   }
 }
 
-function addMonths(base: Date, months: number): Date {
-  const d = new Date(base);
-  d.setMonth(d.getMonth() + months);
-  return d;
-}
-
 function requireAdmin(context: functions.https.CallableContext): void {
   const adminUid = process.env.ADMIN_UID?.trim();
   if (!adminUid) {
@@ -4346,7 +4347,7 @@ function requireAdmin(context: functions.https.CallableContext): void {
 
 // 구독 doc 를 grant 플랜/active 로 upsert 한다. 기간(currentPeriodEnd)은 기존 값과
 // targetEnd 중 더 나중을 유지 — 멱등: 이미 더 긴 기간이 있으면 절대 줄이지 않는다.
-// 베타 선정(1개월)·예외승인(3개월)·인터뷰(6개월) 부여가 전부 이 경로로 수렴한다.
+// 베타 선정(3개월)·예외승인(총 5개월)·인터뷰(총 9개월) 부여가 전부 이 경로로 수렴한다.
 // ★부여 플랜은 reason 이 결정한다(grantPlan.resolveGrantPlanType) — 베타/파운더
 // reason 은 team(협업·멤버 기능이 team 부터 열린다), 그 외는 pro. 기간과 같은
 // 이유로 플랜도 강등하지 않는다.
@@ -4803,10 +4804,15 @@ function resolveFounderGrantWindowEnd(
   if (explicitWindowEnd) return explicitWindowEnd;
 
   // Legacy selected docs may have accessGrantedAt but no betaExpiresAt. The
-  // intended base grant is one month from access grant, so reconstruct it.
+  // grant they were promised at selection time was one month, so reconstruct
+  // *that* — not today's policy.
+  //
+  // ★FOUNDER_BETA_MONTHS 를 쓰면 안 된다. 베타를 1→3 으로 올리는 순간 이 한 줄이
+  // legacy 선정자 전원의 창을 accessGrantedAt+3개월로 늘려 **승인 없는 소급
+  // 연장**이 된다(이미 만료된 사람이 되살아난다). 소급은 별도 판단·별도 실행이다.
   const accessGrantedAt = timestampToDate(founder.accessGrantedAt);
   return accessGrantedAt
-    ? addMonths(accessGrantedAt, FOUNDER_BETA_MONTHS)
+    ? addMonths(accessGrantedAt, FOUNDER_LEGACY_BETA_MONTHS)
     : null;
 }
 
@@ -4922,9 +4928,9 @@ export function buildFounderAccessEmail(
         <p>You've been selected as one of our founding members. Founders shape Marblo from day one — thank you for joining us.</p>
         <h2 style="font-size:17px;margin:24px 0 8px">1. Get the beta</h2>
         <p>Download Marblo here: <a href="${downloadUrl}" style="color:#4f46e5">${downloadUrl}</a></p>
-        <h2 style="font-size:17px;margin:24px 0 8px">2. Survey after your 1-month beta</h2>
+        <h2 style="font-size:17px;margin:24px 0 8px">2. Survey after your 3-month beta</h2>
         <p>Please submit the beta survey here: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
-        Thoughtful survey responses that pass rubric review extend your beta to <strong>up to 3 months total, including your 1-month beta</strong>. A small set of top responses may be invited to a video interview; completing it extends Pro to <strong>6 months total</strong>.</p>
+        Thoughtful survey responses that pass rubric review extend your beta to <strong>up to 5 months total, including your 3-month beta</strong>. A small set of top responses may be invited to a video interview; completing it extends Pro to <strong>9 months total</strong>.</p>
         <h2 style="font-size:17px;margin:24px 0 8px">3. 50% off the course</h2>
         <p>The Marblo course is coming soon. When it launches, coupon code <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> gets you <strong>50% off</strong> — double the 25% early-bird discount. Hold on to the code until then.</p>
         <h2 style="font-size:17px;margin:24px 0 8px">4. Community</h2>
@@ -4938,8 +4944,8 @@ export function buildFounderAccessEmail(
         `1. Get the beta: ${downloadUrl}`,
         "",
         `2. Beta survey: ${feedbackUrl}`,
-        "   Thoughtful responses that pass rubric review extend your beta to up to 3 months total, including your 1-month beta.",
-        "   Top responses may be invited to a video interview; completion extends Pro to 6 months total.",
+        "   Thoughtful responses that pass rubric review extend your beta to up to 5 months total, including your 3-month beta.",
+        "   Top responses may be invited to a video interview; completion extends Pro to 9 months total.",
         "",
         `3. 50% off the course — the course is coming soon. At launch, coupon code: ${coupon} gets you 50% off (double the 25% early-bird discount).`,
         "",
@@ -4967,9 +4973,9 @@ export function buildFounderAccessEmail(
         <p>あなたは Marblo のファウンダーに選ばれました。ファウンダーは初日から Marblo を形づくる存在です。ご参加ありがとうございます。</p>
         <h2 style="font-size:17px;margin:24px 0 8px">1. ベータ版を入手</h2>
         <p>こちらからダウンロード: <a href="${downloadUrl}" style="color:#4f46e5">${downloadUrl}</a></p>
-        <h2 style="font-size:17px;margin:24px 0 8px">2. 1ヶ月ベータ後のアンケート</h2>
+        <h2 style="font-size:17px;margin:24px 0 8px">2. 3ヶ月ベータ後のアンケート</h2>
         <p>ベータアンケートはこちら: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
-        ルーブリック審査を通過した丁寧な回答は、<strong>ベータ1ヶ月を含む最大3ヶ月まで</strong> Pro を延長します。上位回答者の一部にはビデオインタビューを依頼し、完了すると Pro を <strong>合計6ヶ月</strong> に延長します。</p>
+        ルーブリック審査を通過した丁寧な回答は、<strong>ベータ3ヶ月を含む最大5ヶ月まで</strong> Pro を延長します。上位回答者の一部にはビデオインタビューを依頼し、完了すると Pro を <strong>合計9ヶ月</strong> に延長します。</p>
         <h2 style="font-size:17px;margin:24px 0 8px">3. 講座 50% 割引</h2>
         <p>講座は近日公開予定です。公開時にクーポンコード <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> をご利用いただくと <strong>50% OFF</strong> — アーリーバード 25% の2倍です。公開までコードを大切に保管してください。</p>
         <h2 style="font-size:17px;margin:24px 0 8px">4. コミュニティ</h2>
@@ -4983,8 +4989,8 @@ export function buildFounderAccessEmail(
         `1. ベータ版を入手: ${downloadUrl}`,
         "",
         `2. ベータアンケート: ${feedbackUrl}`,
-        "   ルーブリック審査を通過した丁寧な回答は、ベータ1ヶ月を含む最大3ヶ月まで Pro を延長します。",
-        "   上位回答者の一部にはビデオインタビューを依頼し、完了すると Pro を合計6ヶ月に延長します。",
+        "   ルーブリック審査を通過した丁寧な回答は、ベータ3ヶ月を含む最大5ヶ月まで Pro を延長します。",
+        "   上位回答者の一部にはビデオインタビューを依頼し、完了すると Pro を合計9ヶ月に延長します。",
         "",
         `3. 講座 50% 割引 — 講座は近日公開予定です。公開時にクーポンコード: ${coupon} で 50% OFF（アーリーバード 25% の2倍）。`,
         "",
@@ -5012,9 +5018,9 @@ export function buildFounderAccessEmail(
       <p>마블로의 파운더로 선정되신 것을 축하드립니다. 파운더는 첫날부터 마블로를 함께 만들어가는 분들입니다. 함께해 주셔서 감사합니다.</p>
       <h2 style="font-size:17px;margin:24px 0 8px">1. 베타 접근</h2>
       <p>여기에서 마블로를 다운로드하세요: <a href="${downloadUrl}" style="color:#4f46e5">${downloadUrl}</a></p>
-      <h2 style="font-size:17px;margin:24px 0 8px">2. 1개월 베타 후 설문</h2>
+      <h2 style="font-size:17px;margin:24px 0 8px">2. 3개월 베타 후 설문</h2>
       <p>베타 설문은 여기에서 제출해 주세요: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
-      루브릭 검토를 통과한 성실 응답은 <strong>베타 1개월을 최대 3개월까지</strong> 연장해 드립니다(기존 베타 1개월 포함, 총 3개월). 상위 응답자 일부에게는 화상 인터뷰를 별도로 요청하며, 완료 시 Pro를 <strong>총 6개월</strong>로 연장합니다.</p>
+      루브릭 검토를 통과한 성실 응답은 <strong>베타 3개월을 최대 5개월까지</strong> 연장해 드립니다(기존 베타 3개월 포함, 총 5개월). 상위 응답자 일부에게는 화상 인터뷰를 별도로 요청하며, 완료 시 Pro를 <strong>총 9개월</strong>로 연장합니다.</p>
       <h2 style="font-size:17px;margin:24px 0 8px">3. 강의 50% 할인 쿠폰</h2>
       <p>강의는 곧 공개 예정입니다. 출시되면 쿠폰 코드 <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> 로 <strong>50% 할인</strong>해 드립니다 — 얼리버드 25%의 2배 혜택입니다. 출시까지 코드를 잘 보관해 주세요.</p>
       <h2 style="font-size:17px;margin:24px 0 8px">4. 커뮤니티</h2>
@@ -5028,8 +5034,8 @@ export function buildFounderAccessEmail(
       `1. 베타 접근(다운로드): ${downloadUrl}`,
       "",
       `2. 베타 설문: ${feedbackUrl}`,
-      "   루브릭 검토를 통과한 성실 응답은 베타 1개월을 최대 3개월까지 연장해 드립니다(기존 베타 1개월 포함, 총 3개월).",
-      "   상위 응답자 일부에게는 화상 인터뷰를 별도로 요청하며, 완료 시 Pro를 총 6개월로 연장합니다.",
+      "   루브릭 검토를 통과한 성실 응답은 베타 3개월을 최대 5개월까지 연장해 드립니다(기존 베타 3개월 포함, 총 5개월).",
+      "   상위 응답자 일부에게는 화상 인터뷰를 별도로 요청하며, 완료 시 Pro를 총 9개월로 연장합니다.",
       "",
       `3. 강의 50% 할인 — 강의는 곧 공개 예정입니다. 출시 시 쿠폰 코드: ${coupon} 로 50% 할인(얼리버드 25%의 2배).`,
       "",
@@ -5041,8 +5047,8 @@ export function buildFounderAccessEmail(
 // ─── 설문 회신 유도 리마인더 이메일 (Resend) ────────────────────────
 //
 // 초기 접근 안내(buildFounderAccessEmail)와 별개로, "베타는 활성화했지만 아직
-// 설문 미회신"인 파운더에게 "성실 설문 회신 시 운영자 검토 후 기존 베타 1개월 포함
-// 총 3개월까지 연장"을 다시 안내하는 전용 리마인더. ★1차 채널은 이메일(사장님 채널 피벗): 인앱 팝업은
+// 설문 미회신"인 파운더에게 "성실 설문 회신 시 운영자 검토 후 기존 베타 3개월 포함
+// 총 5개월까지 연장"을 다시 안내하는 전용 리마인더. ★1차 채널은 이메일(사장님 채널 피벗): 인앱 팝업은
 // 앱을 여는 활성 사용자만 닿기 때문. 이 메일의 대상은 "활성화 O, 설문 X"이고,
 // 미활성 선정자 팔로업(별도 티켓 WjGoowu1rjLH4K2PNIXb)과 audience 가 겹치지 않게
 // feedbackSubmittedAt==null AND 활성 신호로 세그먼트한다(중복 발송 방지).
@@ -5055,63 +5061,63 @@ export function buildFounderSurveyOfferEmail(
 
   if (locale === "en") {
     return {
-      subject: "Your Marblo beta survey — extend beta to 3 months total",
+      subject: "Your Marblo beta survey — extend beta to 5 months total",
       html: founderHtmlShell(`
-        <h1 style="font-size:22px;margin:0 0 16px">Got 5 minutes? Extend your beta to up to 3 months total</h1>
+        <h1 style="font-size:22px;margin:0 0 16px">Got 5 minutes? Extend your beta to up to 5 months total</h1>
         <p>Thanks for trying the Marblo beta. When you're ready, please share a thoughtful 7-question survey about your experience.</p>
         <p><a href="${feedbackUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:8px;font-weight:600;text-decoration:none">Answer the survey →</a></p>
-        <p style="color:#666;font-size:13px">Responses that pass rubric review extend your beta to <strong>up to 3 months total, including your 1-month beta</strong>. Submitting alone isn't an automatic grant, and any active paid subscription you have is never affected.</p>
+        <p style="color:#666;font-size:13px">Responses that pass rubric review extend your beta to <strong>up to 5 months total, including your 3-month beta</strong>. Submitting alone isn't an automatic grant, and any active paid subscription you have is never affected.</p>
       `),
       text: [
-        "Got 5 minutes? Extend your beta to up to 3 months total",
+        "Got 5 minutes? Extend your beta to up to 5 months total",
         "",
         "Thanks for trying the Marblo beta. When you're ready, please share a thoughtful 7-question survey about your experience.",
         "",
         `Answer the survey: ${feedbackUrl}`,
         "",
-        "Responses that pass rubric review extend your beta to up to 3 months total, including your 1-month beta. Submitting alone isn't an automatic grant, and any active paid subscription you have is never affected.",
+        "Responses that pass rubric review extend your beta to up to 5 months total, including your 3-month beta. Submitting alone isn't an automatic grant, and any active paid subscription you have is never affected.",
       ].join("\n"),
     };
   }
 
   if (locale === "ja") {
     return {
-      subject: "Marblo ベータアンケート — ベータ最大3ヶ月まで",
+      subject: "Marblo ベータアンケート — ベータ最大5ヶ月まで",
       html: founderHtmlShell(`
-        <h1 style="font-size:22px;margin:0 0 16px">5分でベータ最大3ヶ月まで</h1>
+        <h1 style="font-size:22px;margin:0 0 16px">5分でベータ最大5ヶ月まで</h1>
         <p>Marblo ベータのお試しありがとうございます。よろしければ、7問の誠実なアンケートで体験をお聞かせください。</p>
         <p><a href="${feedbackUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:8px;font-weight:600;text-decoration:none">アンケートに回答する →</a></p>
-        <p style="color:#666;font-size:13px">ルーブリック審査を通過した回答は、<strong>ベータ1ヶ月を含む最大3ヶ月まで</strong> Pro を延長します。提出だけで自動付与されるわけではなく、現在お支払い中のサブスクリプションには影響しません。</p>
+        <p style="color:#666;font-size:13px">ルーブリック審査を通過した回答は、<strong>ベータ3ヶ月を含む最大5ヶ月まで</strong> Pro を延長します。提出だけで自動付与されるわけではなく、現在お支払い中のサブスクリプションには影響しません。</p>
       `),
       text: [
-        "5分でベータ最大3ヶ月まで",
+        "5分でベータ最大5ヶ月まで",
         "",
         "Marblo ベータのお試しありがとうございます。よろしければ、7問の誠実なアンケートで体験をお聞かせください。",
         "",
         `アンケートに回答する: ${feedbackUrl}`,
         "",
-        "ルーブリック審査を通過した回答は、ベータ1ヶ月を含む最大3ヶ月まで Pro を延長します。提出だけで自動付与されるわけではなく、現在お支払い中のサブスクリプションには影響しません。",
+        "ルーブリック審査を通過した回答は、ベータ3ヶ月を含む最大5ヶ月まで Pro を延長します。提出だけで自動付与されるわけではなく、現在お支払い中のサブスクリプションには影響しません。",
       ].join("\n"),
     };
   }
 
   // 기본: 한국어
   return {
-    subject: "마블로 베타 설문 — 베타 최대 3개월까지",
+    subject: "마블로 베타 설문 — 베타 최대 5개월까지",
     html: founderHtmlShell(`
-      <h1 style="font-size:22px;margin:0 0 16px">5분이면 베타를 최대 3개월까지</h1>
+      <h1 style="font-size:22px;margin:0 0 16px">5분이면 베타를 최대 5개월까지</h1>
       <p>마블로 베타를 사용해 주셔서 감사합니다. 준비되시면 7문항 성실 설문으로 사용 경험을 들려주세요.</p>
       <p><a href="${feedbackUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:8px;font-weight:600;text-decoration:none">설문 회신하기 →</a></p>
-      <p style="color:#666;font-size:13px">루브릭 검토를 통과한 응답은 <strong>베타 1개월을 최대 3개월까지</strong> 연장해 드립니다(기존 베타 1개월 포함, 총 3개월). 제출만으로 자동 지급되지는 않으며, 현재 결제 중인 구독은 절대 영향받지 않습니다.</p>
+      <p style="color:#666;font-size:13px">루브릭 검토를 통과한 응답은 <strong>베타 3개월을 최대 5개월까지</strong> 연장해 드립니다(기존 베타 3개월 포함, 총 5개월). 제출만으로 자동 지급되지는 않으며, 현재 결제 중인 구독은 절대 영향받지 않습니다.</p>
     `),
     text: [
-      "5분이면 베타를 최대 3개월까지",
+      "5분이면 베타를 최대 5개월까지",
       "",
       "마블로 베타를 사용해 주셔서 감사합니다. 준비되시면 7문항 성실 설문으로 사용 경험을 들려주세요.",
       "",
       `설문 회신하기: ${feedbackUrl}`,
       "",
-      "루브릭 검토를 통과한 응답은 베타 1개월을 최대 3개월까지 연장해 드립니다(기존 베타 1개월 포함, 총 3개월). 제출만으로 자동 지급되지는 않으며, 현재 결제 중인 구독은 절대 영향받지 않습니다.",
+      "루브릭 검토를 통과한 응답은 베타 3개월을 최대 5개월까지 연장해 드립니다(기존 베타 3개월 포함, 총 5개월). 제출만으로 자동 지급되지는 않으며, 현재 결제 중인 구독은 절대 영향받지 않습니다.",
     ].join("\n"),
   };
 }
@@ -5446,7 +5452,7 @@ async function findWaitlistDocsByEmail(
 }
 
 // 파운더 선정 핵심 로직 (내부) — waitlist 이메일을 founders 로 승격.
-// accessGrantedAt 이 1개월 베타 시작 기준. resetWindow=true 면 베타 기간 재시작.
+// accessGrantedAt 이 베타(FOUNDER_BETA_MONTHS) 시작 기준. resetWindow=true 면 베타 기간 재시작.
 // markFounderSelected onCall 과 Telegram 승인 웹훅 양쪽에서 재사용한다.
 async function markFounderSelectedInternal(
   rawEmail: string,
@@ -5741,8 +5747,8 @@ const FOUNDER_SURVEY_OFFER_COOLDOWN_DAYS = 14;
 
 // ─── 설문 회신 오퍼 이메일: audience 산출 + dry-run 발송 (관리자용) ────
 //
-// ★1차 채널=이메일(사장님 채널 피벗). 이 콜러블은 "설문 회신 시 기존 베타 1개월
-// 포함 총 3개월까지 연장" 리마인더를 보낼 대상을 산출하고, 기본 dry-run 으로 미리보기만 한다.
+// ★1차 채널=이메일(사장님 채널 피벗). 이 콜러블은 "설문 회신 시 기존 베타 3개월
+// 포함 총 5개월까지 연장" 리마인더를 보낼 대상을 산출하고, 기본 dry-run 으로 미리보기만 한다.
 //
 // 대상 세그먼트(중복 발송 방지):
 //   audience   = 선정(accessGrantedAt) · 미반려 · 계정연결(proSubscriptionUid) ·
@@ -6823,11 +6829,15 @@ export const submitFounderFeedback = functions.https.onCall(
           "접근 권한이 아직 부여되지 않았습니다."
         );
       }
+      // betaExpiresAt 이 없으면 legacy 문서다 — 선정 당시의 약속(1개월)을
+      // 복원한다. 오늘의 FOUNDER_BETA_MONTHS 를 쓰면 설문 제출이라는 무관한
+      // 행동이 만료일을 소급 연장시키는 부작용이 된다(resolveFounderGrantWindowEnd
+      // 와 같은 이유).
       betaExpiresAt =
         fd.betaExpiresAt && typeof fd.betaExpiresAt.toDate === "function"
           ? fd.betaExpiresAt
           : admin.firestore.Timestamp.fromDate(
-              addMonths(granted, FOUNDER_BETA_MONTHS)
+              addMonths(granted, FOUNDER_LEGACY_BETA_MONTHS)
             );
       tx.set(
         fRef,
@@ -6916,7 +6926,7 @@ export const getMyFounderAccess = functions.https.onCall(
   }
 );
 
-// 루브릭 채점 및 Pro 3개월 지급 확정 (관리자용).
+// 루브릭 채점 및 Pro 총 5개월 지급 확정 (관리자용).
 export const reviewFounderFeedback = functions.https.onCall(
   async (data, context) => {
     requireAdmin(context);
@@ -7109,7 +7119,7 @@ export const requestFounderInterview = functions.https.onCall(
   }
 );
 
-// 인터뷰 완료 마킹 (관리자용) — 요청받은 사용자의 Pro를 총 6개월로 연장.
+// 인터뷰 완료 마킹 (관리자용) — 요청받은 사용자의 Pro를 총 9개월로 연장.
 // 피드백 제출로 계정이 연결(userId)된 파운더만 대상.
 export const markFounderInterviewed = functions.https.onCall(
   async (data, context) => {
@@ -9099,7 +9109,7 @@ export const notifyAdminOnWaitlistApply = functions.firestore
     }
   });
 
-// ─── 트리거 2: 설문 제출 → 관리자 알림([예외 Pro3개월][/admin 정밀채점]) ──
+// ─── 트리거 2: 설문 제출 → 관리자 알림([예외 Pro 총 5개월][/admin 정밀채점]) ──
 export const notifyAdminOnFounderFeedback = functions.firestore
   .document("founder_feedback/{docId}")
   .onCreate(async (snap) => {
@@ -9120,7 +9130,12 @@ export const notifyAdminOnFounderFeedback = functions.firestore
         q1 ? `q1: ${q1}` : "",
       ].filter(Boolean);
       await tgSend(lines.join("\n"), [
-        [{ text: "⭐ 예외승인 Pro3개월", callback_data: `pro:${snap.id}` }],
+        [
+          {
+            text: `⭐ 예외승인 Pro 총 ${FOUNDER_PRO_MONTHS}개월`,
+            callback_data: `pro:${snap.id}`,
+          },
+        ],
         [{ text: "📝 /admin 정밀채점", url: `${SITE_BASE}/ko/admin` }],
       ]);
     } catch (err) {
@@ -9165,7 +9180,7 @@ async function handleTgSelect(
     await tgEditMessageText(
       chatId,
       messageId,
-      `✅ 선정 (1개월, ${proNote}, 접근이메일 ${
+      `✅ 선정 (${FOUNDER_BETA_MONTHS}개월, ${proNote}, 접근이메일 ${
         result.emailSent ? "발송" : "발송 스킵"
       }) — ${email}\n처리: ${new Date().toISOString()}`
     );
@@ -9206,7 +9221,7 @@ async function handleTgSkip(
   }
 }
 
-// ─── 웹훅 핸들러: 예외 Pro 3개월 부여(pro) ──────────────────────────
+// ─── 웹훅 핸들러: 예외 Pro 총 FOUNDER_PRO_MONTHS 개월 부여(pro) ────────
 async function handleTgProGrant(
   cqId: string,
   chatId: string,
@@ -9268,12 +9283,15 @@ async function handleTgProGrant(
       },
       { merge: true }
     );
-  await tgAnswerCallbackQuery(cqId, "Pro 3개월 부여 완료");
+  await tgAnswerCallbackQuery(
+    cqId,
+    `Pro 총 ${FOUNDER_PRO_MONTHS}개월 부여 완료`
+  );
   if (messageId) {
     await tgEditMessageText(
       chatId,
       messageId,
-      `⭐ Pro 3개월 부여 (예외승인) — ${email}\n처리: ${new Date().toISOString()}`
+      `⭐ Pro 총 ${FOUNDER_PRO_MONTHS}개월 부여 (예외승인) — ${email}\n처리: ${new Date().toISOString()}`
     );
   }
 }

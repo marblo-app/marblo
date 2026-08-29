@@ -43,6 +43,7 @@
     "outreach:churn:build": "tsc src/churnOutreach.ts src/marketingContacts.ts scripts/send-churn-interview-emails.ts --outDir .script-out/churn-outreach --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node",
     "outreach:churn": "npm run outreach:churn:build && node .script-out/churn-outreach/scripts/send-churn-interview-emails.js",
     "test:churn-outreach": "tsc src/churnOutreach.ts src/churnOutreach.test.ts --outDir .test-out/churn-outreach --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/churn-outreach/churnOutreach.test.js",
+    "test:founder-ladder": "tsc src/founderLadder.ts src/founderLadder.test.ts --outDir .test-out/founder-ladder --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/founder-ladder/founderLadder.test.js",
     "test:grant-plan": "tsc src/grantPlan.ts src/grantPlan.test.ts --outDir .test-out/grant-plan --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck && node --test .test-out/grant-plan/grantPlan.test.js",
     "test:migrate-grants": "node --test tests/migrateGrantsToTeam.test.mjs",
     "migrate:grants-to-team": "node scripts/migrate-founder-grants-to-team.mjs",

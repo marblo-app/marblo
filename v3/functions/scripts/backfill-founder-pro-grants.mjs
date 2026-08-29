@@ -25,6 +25,10 @@ const PROJECT_ID =
   "";
 const DATABASE_ID = process.env.FIRESTORE_DATABASE_ID || "(default)";
 const PAGE_SIZE = 300;
+// ★1 이 맞다 — 오늘의 정책 값(src/founderLadder.ts 의 FOUNDER_BETA_MONTHS = 3)이
+// 아니다. 이 스크립트는 betaExpiresAt 이 없는 legacy 문서의 창을 **선정 당시의
+// 약속대로 복원**한다. 3 으로 올리면 백필이 승인 없는 소급 연장으로 변한다.
+// (src/founderLadder.ts 의 FOUNDER_LEGACY_BETA_MONTHS 와 같은 값·같은 이유)
 const FOUNDER_BETA_MONTHS = 1;
 
 if (!PROJECT_ID) {

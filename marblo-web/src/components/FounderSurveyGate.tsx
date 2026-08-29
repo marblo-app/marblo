@@ -15,7 +15,7 @@ import FounderSurveyPromptModal from "./FounderSurveyPromptModal";
 /**
  * 앱 셸 최상단에 한 번 마운트되는 파운더 설문 넛지 게이트(PrivacyConsentGate 패턴).
  * 로그인한 "선정 파운더 중 아직 설문 미회신"인 사용자에게만 "설문 회신 시 Pro
- * 최대 3개월" 안내 팝업을 띄운다.
+ * 최대 총 5개월" 안내 팝업을 띄운다.
  *
  * 노출 판정은 getMyFounderAccess({hasAccess, feedbackSubmitted}) + 세션 단위
  * dismiss 정책(founderSurveyPrompt.ts)이 담당한다. 설문 완료(feedbackSubmitted)
