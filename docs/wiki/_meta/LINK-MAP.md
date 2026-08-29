@@ -3,7 +3,7 @@ title: 링크 맵
 tags: [meta/linkmap, status/living]
 status: active
 date: 2026-08-29
-links: [[CONVENTION]], [[2026-kpi-targets-pressure-test]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[human-only-ops-backlog]]
+links: [[CONVENTION]], [[2026-kpi-targets-pressure-test]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[human-only-ops-backlog]], [[sole-persistent-user-is-not-external]]
 ---
 
 # 링크 맵
@@ -44,6 +44,7 @@ links: [[CONVENTION]], [[2026-kpi-targets-pressure-test]], [[empty-query-first]]
 | `glossary` | `00-foundations/glossary.md` | foundations | active | — |
 | `progress` | `00-foundations/progress.md` | foundations | active | snapshot |
 | `post-spawn-telemetry-gap` | `30-investigations/post-spawn-telemetry-gap.md` | investigations | verified | adopt |
+| `sole-persistent-user-is-not-external` | `30-investigations/sole-persistent-user-is-not-external.md` | investigations | active | no-go |
 | `marblo-bot-messaging` | `10-offerings/marblo-bot-messaging.md` | offerings | draft | — |
 | `jpy-anchors-to-competitors-not-krw` | `10-offerings/jpy-anchors-to-competitors-not-krw.md` | offerings | verified | adopt |
 | `functions-deploy-env-and-bq-views` | `50-operations/functions-deploy-env-and-bq-views.md` | operations | verified | — |
@@ -126,6 +127,11 @@ links: [[CONVENTION]], [[2026-kpi-targets-pressure-test]], [[empty-query-first]]
 | `progress` | `glossary` |
 | `progress` | `do-not-retry` |
 | `progress` | `no-live-gui-verify` |
+| `sole-persistent-user-is-not-external` | `telemetry-identity-axes` |
+| `sole-persistent-user-is-not-external` | `2026-kpi-targets-pressure-test` |
+| `sole-persistent-user-is-not-external` | `post-spawn-telemetry-gap` |
+| `sole-persistent-user-is-not-external` | `counting-unit-first` |
+| `sole-persistent-user-is-not-external` | `do-not-silently-drop-missing-join-targets` |
 | `post-spawn-telemetry-gap` | `telemetry-identity-axes` |
 | `post-spawn-telemetry-gap` | `empty-query-first` |
 | `post-spawn-telemetry-gap` | `do-not-retry` |
@@ -199,6 +205,7 @@ links: [[CONVENTION]], [[2026-kpi-targets-pressure-test]], [[empty-query-first]]
 | `glossary` | [docs/payment/toss-teardown-prerequisites.md](../../payment/toss-teardown-prerequisites.md) · [v3/functions/src/telemetryIdentityAxis.ts](../../../v3/functions/src/telemetryIdentityAxis.ts) · [v3/electron/model-registry.ts](../../../v3/electron/model-registry.ts) |
 | `progress` | [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) · [marblo-web/src/lib/paymentProvider.ts](../../../marblo-web/src/lib/paymentProvider.ts) |
 | `post-spawn-telemetry-gap` | [v3/docs/post-spawn-telemetry-gap-2026-08-25.md](../../../v3/docs/post-spawn-telemetry-gap-2026-08-25.md) · [v3/functions/src/postSpawnTelemetryGuard.ts](../../../v3/functions/src/postSpawnTelemetryGuard.ts) |
+| `sole-persistent-user-is-not-external` | [docs/beta-churn-root-cause-analysis-2026-07-21.md](../../beta-churn-root-cause-analysis-2026-07-21.md) · [docs/analytics-profile-tables.md](../../analytics-profile-tables.md) · [v3/functions/src/analyticsProfiles.ts](../../../v3/functions/src/analyticsProfiles.ts) |
 | `marblo-bot-messaging` | [v3/src/lib/botDefinition.ts](../../../v3/src/lib/botDefinition.ts) · [v3/src/services/botDefinitionService.ts](../../../v3/src/services/botDefinitionService.ts) · [v3/src/components/agents/MarbloBotGallery.tsx](../../../v3/src/components/agents/MarbloBotGallery.tsx) · [v3/electron/assistant-triggers.ts](../../../v3/electron/assistant-triggers.ts) · [v3/docs/assistant-tab-design-2026-08-24.md](../../../v3/docs/assistant-tab-design-2026-08-24.md) · [marblo-web/docs/beta-launch/YOUTUBE-SCRIPT.md](../../../marblo-web/docs/beta-launch/YOUTUBE-SCRIPT.md) |
 | `functions-deploy-env-and-bq-views` | [v3/functions/scripts/check-deploy-env.mjs](../../../v3/functions/scripts/check-deploy-env.mjs) · [v3/docs/install-unified-view-2026-08-24.md](../../../v3/docs/install-unified-view-2026-08-24.md) |
 | `release-cut-at-build` | [v3/docs/electron_updater_runbook.md](../../../v3/docs/electron_updater_runbook.md) · [v3/docs/signing_runbook.md](../../../v3/docs/signing_runbook.md) |

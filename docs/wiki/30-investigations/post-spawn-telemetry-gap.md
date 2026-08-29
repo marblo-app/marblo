@@ -54,4 +54,4 @@ links: [[telemetry-identity-axes]], [[empty-query-first]], [[do-not-retry]]
 
 ## Backlinks
 
-- [[telemetry-identity-axes]] · [[empty-query-first]] · [[do-not-retry]] · [[counting-unit-first]] · [[2026-kpi-targets-pressure-test]]
+- [[telemetry-identity-axes]] · [[empty-query-first]] · [[do-not-retry]] · [[counting-unit-first]] · [[2026-kpi-targets-pressure-test]] · [[sole-persistent-user-is-not-external]]

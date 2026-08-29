@@ -54,4 +54,4 @@ writer 가 다르다. 익명 설치 여정은 clientId 를 `userId` 칸에 넣�
 ## Backlinks
 
 - [[2026-kpi-targets]] — 이 축 구분이 왜 중요한지, 목표 숫자 쪽에서 본 것
-- [[do-not-retry]] · [[empty-query-first]] · [[post-spawn-telemetry-gap]] · [[verify-result-row]] · [[counting-unit-first]] · [[routing-label-coverage]] · [[glossary]] · [[overview]] · [[architecture]] · [[2026-kpi-targets-pressure-test]]
+- [[do-not-retry]] · [[empty-query-first]] · [[post-spawn-telemetry-gap]] · [[verify-result-row]] · [[counting-unit-first]] · [[routing-label-coverage]] · [[glossary]] · [[overview]] · [[architecture]] · [[2026-kpi-targets-pressure-test]] · [[sole-persistent-user-is-not-external]]
