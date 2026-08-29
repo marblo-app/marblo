@@ -22,3 +22,5 @@ links: [[CONVENTION]], [[overview]], [[architecture]], [[glossary]], [[progress]
 | [[2026-kpi-targets-pressure-test]] | 2026 KPI 목표는 서로 모순되고 수익 변수가 0칸 |
 
 원본 포지셔닝은 [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) (읽기만).
+
+KPI 목표·현재값·화면을 한 화면에서 보려면 [docs/kpi/](../../kpi/README.md) (위키 밖 입구).
