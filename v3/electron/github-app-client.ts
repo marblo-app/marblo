@@ -159,7 +159,8 @@ export async function issueRepoInstallationWriteToken(
     );
     const { data } = await callable({ projectId, access: "write", ref });
     // ★서버가 read 로 깎아 보냈으면(오너 재승인 전) 그 토큰으로는 못 민다.
-    // 실패가 아니라 v1 상태다 — 호출부가 device 경로로 내려간다(회귀 0).
+    // 설치가 이미 바인딩된 상태이므로 호출부는 device 로 우회하지 않고
+    // 오너 재승인 필요 상태로 멈춘다.
     if (data?.downgraded === true || data?.access !== "write") {
       return { kind: "needs-owner-approval" };
     }

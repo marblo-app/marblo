@@ -293,9 +293,11 @@ import {
 // GitHub App 자동상속 (티켓 ddbN2KvxHZ08rakiVfL0). ★device OAuth 를 대체하지
 // 않는다 — 두 경로가 같은 타입을 만들어 **하나의 clone 구현**에 들어간다.
 import {
+  pushCredentialAuditFields,
   resolveCloneCredential,
   resolvePushCredential,
   type CloneCredential,
+  type PushCredential,
 } from "./github-clone-credential";
 import {
   getGitHubAppStatus,
@@ -7856,7 +7858,7 @@ ipcMain.handle(
     // 만들어진 커밋의 작성자는 어차피 여기서 못 고친다).
     await applyCommitIdentityForRepo(repoPath, userId);
 
-    const credential = await resolvePushCredential(
+    const credential: PushCredential = await resolvePushCredential(
       { projectId, repoUrl, ref: safeBranch },
       {
         getInstallationId: readProjectInstallationId,
@@ -7867,10 +7869,22 @@ ipcMain.handle(
             : null,
       }
     );
+    console.info(
+      `[repo:push] credential decision ${JSON.stringify(
+        pushCredentialAuditFields(
+          { projectId, repoUrl, ref: safeBranch },
+          credential
+        )
+      )}`
+    );
 
     if (credential.kind === "denied") {
       // ★역할 거부. 토큰을 만들지도, device 로 내려가지도 않는다.
       return { ok: false, errorKind: "denied", message: credential.message };
+    }
+    if (credential.kind === "unavailable") {
+      // ★설치가 있는데 서버 판정이 흔들린 경우다. device 로 우회하지 않고 재시도한다.
+      return { ok: false, errorKind: "network", message: credential.message };
     }
 
     const githubToken = credential.kind === "none" ? null : credential.token;

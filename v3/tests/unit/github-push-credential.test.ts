@@ -4,13 +4,14 @@
  * ★여기서 증명하는 것:
  *   1. **회귀 0** — App 설치가 없으면 push 경로도 서버를 부르지 않는다
  *   2. ★역할 거부는 **device 로 폴백하지 않는다** (게이트를 스스로 뚫지 않는다)
- *   3. 오너 재승인 전에는 device 경로 = v2 이전과 같은 상태
+ *   3. 오너 재승인 전·일시 장애는 device 로 우회하지 않는다
  *   4. ★커밋 귀속이 비공개 이메일 사용자에게도 깨지지 않는다
  *   5. 토큰이 argv·반환값·에러 메시지에 안 실린다
  */
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  pushCredentialAuditFields,
   resolveCloneCredential,
   resolvePushCredential,
   type PushCredentialDeps,
@@ -109,6 +110,7 @@ describe("resolvePushCredential — ★역할 게이트를 스스로 뚫지 않�
     expect(got).toEqual({
       kind: "denied",
       message: "기본 브랜치에 직접 밀 수 없습니다.",
+      reason: "role-denied",
     });
   });
 
@@ -126,24 +128,33 @@ describe("resolvePushCredential — ★역할 게이트를 스스로 뚫지 않�
   });
 });
 
-describe("resolvePushCredential — 재승인 대기·장애는 폴백한다", () => {
-  it("★오너 재승인 전이면 device 경로 — v2 이전과 같은 상태(회귀 아님)", async () => {
+describe("resolvePushCredential — 설치 후 재승인 대기·장애는 우회하지 않는다", () => {
+  it("★오너 재승인 전이면 device 로 우회하지 않는다", async () => {
     const got = await resolvePushCredential(
       { projectId: PROJECT, repoUrl: REPO_URL, ref: "feature/x" },
       deps({ issueWriteToken: async () => ({ kind: "needs-owner-approval" }) }),
     );
-    expect(got).toEqual({ kind: "device", token: DEVICE });
+    expect(got).toEqual({
+      kind: "denied",
+      message:
+        "GitHub App 쓰기 권한이 아직 승인되지 않았습니다. 프로젝트 오너에게 GitHub App 재승인을 요청하세요.",
+      reason: "needs-owner-approval",
+    });
   });
 
-  it("레이트리밋·네트워크 장애는 device 로 내려간다 (G2)", async () => {
+  it("설치가 있는데 레이트리밋·네트워크 장애면 device 로 우회하지 않고 재시도 대상이 된다", async () => {
     const got = await resolvePushCredential(
       { projectId: PROJECT, repoUrl: REPO_URL, ref: "feature/x" },
       deps({ issueWriteToken: async () => ({ kind: "unavailable" }) }),
     );
-    expect(got).toEqual({ kind: "device", token: DEVICE });
+    expect(got).toEqual({
+      kind: "unavailable",
+      message:
+        "GitHub App 권한 확인이 일시적으로 실패했습니다. 잠시 후 다시 시도하세요.",
+    });
   });
 
-  it("발급 함수가 던져도 흡수한다 — push 경로가 크래시하지 않는다", async () => {
+  it("발급 함수가 던져도 device 로 우회하지 않고 재시도 대상이 된다", async () => {
     const got = await resolvePushCredential(
       { projectId: PROJECT, repoUrl: REPO_URL, ref: "feature/x" },
       deps({
@@ -152,7 +163,11 @@ describe("resolvePushCredential — 재승인 대기·장애는 폴백한다", (
         },
       }),
     );
-    expect(got).toEqual({ kind: "device", token: DEVICE });
+    expect(got).toEqual({
+      kind: "unavailable",
+      message:
+        "GitHub App 권한 확인이 일시적으로 실패했습니다. 잠시 후 다시 시도하세요.",
+    });
   });
 
   it("성공하면 App write 토큰을 쓴다", async () => {
@@ -172,6 +187,41 @@ describe("resolvePushCredential — 재승인 대기·장애는 폴백한다", (
       deps({ issueWriteToken }),
     );
     expect(issueWriteToken).toHaveBeenCalledWith(PROJECT, "release/1.2");
+  });
+});
+
+describe("resolvePushCredential — 사후 감사용 credential path", () => {
+  it("최종 push credential kind 를 토큰 없이 남길 수 있다", async () => {
+    const got = await resolvePushCredential(
+      { projectId: PROJECT, repoUrl: REPO_URL, ref: "feature/x" },
+      deps(),
+    );
+    const audit = pushCredentialAuditFields(
+      { projectId: PROJECT, repoUrl: REPO_URL, ref: "feature/x" },
+      got,
+    );
+    expect(audit).toEqual({
+      credentialKind: "installation",
+      reason: null,
+      projectId: PROJECT,
+      repoHost: "github.com",
+      branch: "feature/x",
+    });
+    expect(JSON.stringify(audit)).not.toContain(INSTALL_WRITE);
+    expect(JSON.stringify(audit)).not.toContain(DEVICE);
+  });
+
+  it("설치 없음 device 경로도 사후 분간 가능한 kind 로 접힌다", async () => {
+    const got = await resolvePushCredential(
+      { projectId: PROJECT, repoUrl: REPO_URL, ref: "feature/x" },
+      deps({ getInstallationId: async () => null }),
+    );
+    const audit = pushCredentialAuditFields(
+      { projectId: PROJECT, repoUrl: REPO_URL, ref: "feature/x" },
+      got,
+    );
+    expect(audit.credentialKind).toBe("device");
+    expect(audit.reason).toBeNull();
   });
 });
 
@@ -195,7 +245,11 @@ describe("★clone 경로는 v2 가 건드리지 않았다", () => {
 
 describe("커밋 귀속 이메일 선택", () => {
   it("★비공개 이메일 사용자는 id 붙은 noreply 로 접힌다 (귀속 유지)", () => {
-    const id = parseCommitIdentity({ id: 583231, login: "octocat", email: null });
+    const id = parseCommitIdentity({
+      id: 583231,
+      login: "octocat",
+      email: null,
+    });
     expect(id).toEqual({
       name: "octocat",
       email: "583231+octocat@users.noreply.github.com",
@@ -297,7 +351,11 @@ describe("fetchCommitIdentity — fail-soft, 토큰 비노출", () => {
     ) => {
       seenUrl = url;
       seenAuth = init.headers.authorization;
-      return { ok: true, status: 200, json: async () => ({ id: 1, login: "a" }) };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 1, login: "a" }),
+      };
     }) as never);
     expect(seenUrl).toBe("https://api.github.com/user");
     expect(seenUrl).not.toContain("gho_secret");

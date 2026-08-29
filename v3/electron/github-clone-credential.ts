@@ -151,8 +151,8 @@ export type WriteTokenOutcome =
   | { kind: "granted"; token: string }
   /**
    * 설치가 아직 `contents: write` 를 승인하지 않아 서버가 read 로 깎았다.
-   * ★실패가 아니라 **v1 상태**다 — 오너 재승인 전까지 push 는 App 경로로 갈
-   * 수 없고, 그건 v2 이전과 똑같다(회귀 0).
+   * ★서버가 명확히 답한 "write 불가"다. 설치 바인딩이 있는 상태에서 이걸
+   * device 로 내려보내면 App 역할 게이트를 우회한다.
    */
   | { kind: "needs-owner-approval" }
   /**
@@ -160,11 +160,13 @@ export type WriteTokenOutcome =
    * 여기서 device 토큰으로 내려가면 화면의 Merge 게이트를 우리 손으로 뚫는다.
    */
   | { kind: "role-denied"; message: string }
-  /** 설치 없음·레이트리밋·네트워크 등. 폴백 허용(v1 과 같은 상태). */
+  /** 서버가 답하지 못했거나 일시 장애다. 설치 바인딩이 있으면 재시도 대상이다. */
   | { kind: "unavailable" };
 
-export interface PushCredentialDeps
-  extends Pick<CloneCredentialDeps, "getInstallationId" | "getDeviceToken"> {
+export interface PushCredentialDeps extends Pick<
+  CloneCredentialDeps,
+  "getInstallationId" | "getDeviceToken"
+> {
   /**
    * write 토큰 발급. **던지지 않는다** — 실패 종류를 outcome 으로 돌려준다.
    * `ref` 는 서버의 기본 브랜치 게이트 입력이다(밀려는 브랜치).
@@ -186,27 +188,46 @@ export type PushCredential =
   | { kind: "device"; token: string }
   | { kind: "none" }
   /** ★역할 거부 — 어떤 자격증명으로도 진행하지 않는다. */
-  | { kind: "denied"; message: string };
+  | {
+      kind: "denied";
+      message: string;
+      reason: "role-denied" | "needs-owner-approval";
+    }
+  /** ★설치 바인딩은 있지만 서버가 write 판정을 못 했다. device 로 우회하지 않는다. */
+  | { kind: "unavailable"; message: string };
+
+export interface PushCredentialAuditFields {
+  credentialKind: PushCredential["kind"];
+  reason: string | null;
+  projectId: string | null;
+  repoHost: string | null;
+  branch: string | null;
+}
+
+const OWNER_APPROVAL_MESSAGE =
+  "GitHub App 쓰기 권한이 아직 승인되지 않았습니다. 프로젝트 오너에게 GitHub App 재승인을 요청하세요.";
+
+const WRITE_TOKEN_UNAVAILABLE_MESSAGE =
+  "GitHub App 권한 확인이 일시적으로 실패했습니다. 잠시 후 다시 시도하세요.";
 
 /**
  * 어떤 자격증명으로 push 할지 고른다.
  *
  * ★clone 과 다른 점은 **폴백 규율 하나**다. clone 은 App 이 안 되면 무조건
- * device 로 내려간다(G2). push 는 그러면 안 된다 — 역할 거부를 device 토큰이
- * 덮어쓰면 "화면에서 머지를 막아놓고 GitHub 에서는 밀 수 있는" 상태가 되고,
+ * device 로 내려간다(G2). push 는 그러면 안 된다 — 설치가 있는데 App write
+ * 토큰을 못 받은 사실을 device 토큰이 덮어쓰면 "화면에서 머지를 막아놓고 GitHub 에서는 밀 수 있는" 상태가 되고,
  * 그건 게이트가 뚫린 것이다. 그래서:
  *
  *   role-denied         → denied. **폴백 없음.**
- *   needs-owner-approval→ device 폴백. v2 이전과 같은 상태이므로 회귀가 아니다.
- *   unavailable         → device 폴백(G2 그대로).
+ *   needs-owner-approval→ denied. 설치가 답했지만 write 를 주지 않은 상태다.
+ *   unavailable         → unavailable. 일시 장애로 보고 재시도하게 한다.
  *   granted             → App write 토큰.
  *
  * ★App 설치가 없는 프로젝트는 이 함수가 서버를 부르지도 않는다(G1) — 오늘의
  * 모든 프로젝트가 여기 해당하고, 그래서 push 경로도 회귀 0 이다.
  *
- * ★정직하게: 팀원이 그 저장소의 **GitHub 콜라보레이터이기도 하면** device
- * 토큰으로 밀 수 있다. 그건 GitHub 이 직접 준 권한이고 마블로가 만든 것도,
- * 회수할 수 있는 것도 아니다. 마블로 역할 게이트가 지배하는 것은 **App 경로**다.
+ * ★v1 호환: App 설치가 없는 프로젝트는 여전히 device 로 간다. 좁히는 것은
+ * "installationId 가 있는데 write 토큰을 못 받은" 경우뿐이다.
  */
 export async function resolvePushCredential(
   input: PushCredentialInput,
@@ -224,16 +245,56 @@ export async function resolvePushCredential(
   try {
     outcome = await deps.issueWriteToken(projectId, input.ref);
   } catch {
-    return device(); // G2
+    return { kind: "unavailable", message: WRITE_TOKEN_UNAVAILABLE_MESSAGE };
   }
 
   switch (outcome.kind) {
     case "granted":
       return { kind: "installation", token: outcome.token };
     case "role-denied":
-      return { kind: "denied", message: outcome.message };
+      return {
+        kind: "denied",
+        message: outcome.message,
+        reason: "role-denied",
+      };
     case "needs-owner-approval":
+      return {
+        kind: "denied",
+        message: OWNER_APPROVAL_MESSAGE,
+        reason: "needs-owner-approval",
+      };
     case "unavailable":
-      return device();
+      return { kind: "unavailable", message: WRITE_TOKEN_UNAVAILABLE_MESSAGE };
   }
+}
+
+export function pushCredentialAuditFields(
+  input: PushCredentialInput,
+  credential: PushCredential,
+): PushCredentialAuditFields {
+  const projectId =
+    typeof input.projectId === "string" && input.projectId.trim()
+      ? input.projectId.trim()
+      : null;
+  const branch =
+    typeof input.ref === "string" && input.ref.trim() ? input.ref.trim() : null;
+  let repoHost: string | null = null;
+  try {
+    repoHost = new URL(input.repoUrl).hostname.toLowerCase();
+  } catch {
+    repoHost = null;
+  }
+
+  return {
+    credentialKind: credential.kind,
+    reason:
+      credential.kind === "denied"
+        ? credential.reason
+        : credential.kind === "unavailable"
+          ? "write-token-unavailable"
+          : null,
+    projectId,
+    repoHost,
+    branch,
+  };
 }
