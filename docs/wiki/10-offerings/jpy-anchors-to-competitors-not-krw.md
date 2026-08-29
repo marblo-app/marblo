@@ -128,4 +128,4 @@ USD/KRW **1,384** 기준으로 KRW 가격을 달러 환산해 USD 정가와 비�
 
 ## Backlinks
 
-- [[paddle-support-check-before-pg-screening]] · [[payment-live-key-pg-env-bundle]] · [[human-only-ops-backlog]]
+- [[paddle-support-check-before-pg-screening]] · [[payment-live-key-pg-env-bundle]] · [[human-only-ops-backlog]] · [[2026-kpi-targets-pressure-test]]

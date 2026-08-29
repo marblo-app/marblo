@@ -3,7 +3,7 @@ title: 링크 맵
 tags: [meta/linkmap, status/living]
 status: active
 date: 2026-08-29
-links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[human-only-ops-backlog]]
+links: [[CONVENTION]], [[2026-kpi-targets-pressure-test]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[human-only-ops-backlog]]
 ---
 
 # 링크 맵
@@ -38,6 +38,7 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 | `do-not-silently-drop-missing-join-targets` | `40-methodology/do-not-silently-drop-missing-join-targets.md` | methodology | verified | adopt |
 | `no-live-gui-verify` | `20-constraints/no-live-gui-verify.md` | constraints | verified | adopt |
 | `telemetry-identity-axes` | `00-foundations/telemetry-identity-axes.md` | foundations | verified | — |
+| `2026-kpi-targets-pressure-test` | `00-foundations/2026-kpi-targets-pressure-test.md` | foundations | active | no-go |
 | `overview` | `00-foundations/overview.md` | foundations | active | — |
 | `architecture` | `00-foundations/architecture.md` | foundations | active | — |
 | `glossary` | `00-foundations/glossary.md` | foundations | active | — |
@@ -168,6 +169,10 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 | `human-only-ops-backlog` | `no-live-gui-verify` |
 | `human-only-ops-backlog` | `paddle-support-check-before-pg-screening` |
 | `human-only-ops-backlog` | `jpy-anchors-to-competitors-not-krw` |
+| `2026-kpi-targets-pressure-test` | `telemetry-identity-axes` |
+| `2026-kpi-targets-pressure-test` | `counting-unit-first` |
+| `2026-kpi-targets-pressure-test` | `post-spawn-telemetry-gap` |
+| `2026-kpi-targets-pressure-test` | `jpy-anchors-to-competitors-not-krw` |
 
 ## 허브
 
@@ -188,6 +193,7 @@ links: [[CONVENTION]], [[empty-query-first]], [[verify-result-row]], [[counting-
 | `no-live-gui-verify` | [AGENTS.md](../../../AGENTS.md) |
 | `do-not-retry` | [v3/docs/web-app-join-attribution-design-2026-08-09.md](../../../v3/docs/web-app-join-attribution-design-2026-08-09.md) · [v3/docs/pseudonym-retro-measurement-2026-08-21.md](../../../v3/docs/pseudonym-retro-measurement-2026-08-21.md) · [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) |
 | `telemetry-identity-axes` | [v3/docs/post-spawn-telemetry-gap-2026-08-25.md](../../../v3/docs/post-spawn-telemetry-gap-2026-08-25.md) · [v3/functions/src/telemetryIdentityAxis.ts](../../../v3/functions/src/telemetryIdentityAxis.ts) |
+| `2026-kpi-targets-pressure-test` | [docs/zero-friction-kpi-completion-2026-08-09.md](../../zero-friction-kpi-completion-2026-08-09.md) · [docs/beta-churn-root-cause-analysis-2026-07-21.md](../../beta-churn-root-cause-analysis-2026-07-21.md) · [docs/MVP/business-plan-3year.md](../../MVP/business-plan-3year.md) · [docs/MVP/PRICING_PLAN.md](../../MVP/PRICING_PLAN.md) |
 | `overview` | [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) · [v3/docs/COMMUNICATION-ARCHITECTURE.md](../../../v3/docs/COMMUNICATION-ARCHITECTURE.md) |
 | `architecture` | [v3/docs/COMMUNICATION-ARCHITECTURE.md](../../../v3/docs/COMMUNICATION-ARCHITECTURE.md) · [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) · [docs/supported-harnesses-and-architecture.md](../../supported-harnesses-and-architecture.md) |
 | `glossary` | [docs/payment/toss-teardown-prerequisites.md](../../payment/toss-teardown-prerequisites.md) · [v3/functions/src/telemetryIdentityAxis.ts](../../../v3/functions/src/telemetryIdentityAxis.ts) · [v3/electron/model-registry.ts](../../../v3/electron/model-registry.ts) |

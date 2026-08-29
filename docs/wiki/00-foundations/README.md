@@ -2,8 +2,8 @@
 title: 00 기반
 tags: [domain/foundations, meta/index]
 status: active
-date: 2026-08-26
-links: [[CONVENTION]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[telemetry-identity-axes]]
+date: 2026-08-29
+links: [[CONVENTION]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[telemetry-identity-axes]], [[2026-kpi-targets-pressure-test]]
 ---
 
 # 00-foundations
@@ -19,5 +19,6 @@ links: [[CONVENTION]], [[overview]], [[architecture]], [[glossary]], [[progress]
 | [[glossary]] | 같은 말이 다른 객체를 가리킨다 — ★먼저 |
 | [[progress]] | 보드는 정본, 여기는 큰 축만 |
 | [[telemetry-identity-axes]] | `userId` 는 표마다 다른 사람 |
+| [[2026-kpi-targets-pressure-test]] | 2026 KPI 목표는 서로 모순되고 수익 변수가 0칸 |
 
 원본 포지셔닝은 [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) (읽기만).
