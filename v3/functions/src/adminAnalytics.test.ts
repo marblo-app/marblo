@@ -28,6 +28,9 @@ import {
   buildSpawnHealth,
   foldKeyCounts,
   buildKpiCockpit,
+  buildBetaScorecard,
+  SCORECARD_HERO_KEY,
+  SCORECARD_SMALL_SAMPLE_MAX,
   buildRetentionCohorts,
   buildActiveUserMetrics,
   buildActivationGateFunnel,
@@ -2131,4 +2134,364 @@ test("coverage: note 가 '미수집/부분 계측' 규약을 실제로 말한다
   const f = buildOnboardingFunnel(undefined, []);
   assert.ok(f.note.includes("미수집"));
   assert.ok(f.note.includes("부분 구간"));
+});
+
+// ── buildBetaScorecard (베타 종료 KPI 스코어카드) ────────────────────────────
+//
+// ★이 블록이 지키는 것은 "틀린 숫자를 예쁘게 그리지 않는다" 하나다:
+//   분모 0 → 0% 가 아니라 null, 측정 불가 → 0 이 아니라 null + 사유,
+//   다른 봉투에서 오는 값 → 여기서 0 으로 채우지 않는다.
+
+const scorecardInput = (
+  over: Partial<{
+    install: Record<string, unknown>;
+    person: Record<string, unknown> | null;
+    personUnavailableReason: string | null;
+  }> = {}
+) => ({
+  install: {
+    activeInstalls: 44,
+    activatedInstalls: 5,
+    firstSpawnInstalls: 18,
+    monthlyTasks: 1088,
+    powerUsers: 3,
+    d7Cohort: 7,
+    d7Retained: 3,
+    d14Cohort: 7,
+    d14Retained: 4,
+    d30Cohort: 6,
+    d30Retained: 3,
+    d30Pending: 1,
+    ...(over.install ?? {}),
+  },
+  person:
+    over.person === undefined
+      ? { linkedPeople: 2, peopleWithTask: 1, activePeople: 2 }
+      : over.person,
+  personUnavailableReason: over.personUnavailableReason ?? null,
+}) as Parameters<typeof buildBetaScorecard>[0];
+
+const metricOf = (
+  r: ReturnType<typeof buildBetaScorecard>,
+  key: string
+) => {
+  const m = r.metrics.find((x) => x.key === key);
+  assert.ok(m, `metric ${key} 가 없다`);
+  return m;
+};
+
+test("buildBetaScorecard: 11개 지표가 전부 나온다", () => {
+  const r = buildBetaScorecard(scorecardInput());
+  assert.equal(r.metrics.length, 11);
+  assert.deepEqual(
+    r.metrics.map((m) => m.key),
+    [
+      "qualified_beta",
+      "activated",
+      "d7_retention",
+      "d14_retention",
+      "d30_retention",
+      "d30_retained_users",
+      "power_user",
+      "monthly_agent_tasks",
+      "paying_users",
+      "design_partners",
+      "paid_poc",
+    ]
+  );
+  // 사장님이 못 박으신 최중요 지표 — 화면이 이걸 가장 크게 그린다.
+  assert.equal(r.heroKey, SCORECARD_HERO_KEY);
+  assert.equal(r.heroKey, "d30_retention");
+});
+
+test("buildBetaScorecard: 모든 rate 지표가 분자·분모를 달고 다닌다", () => {
+  const r = buildBetaScorecard(scorecardInput());
+  for (const m of r.metrics) {
+    if (m.unit !== "rate") {
+      assert.equal(m.counted, null, `${m.key} 는 count 인데 counted 가 있다`);
+      continue;
+    }
+    assert.ok(m.counted, `${m.key} 에 분자·분모가 없다`);
+    // 화면이 그대로 찍을 수 있는 "3/7 (42.9%)" 문자열.
+    assert.match(m.counted.display, /^\d+\/\d+ \((\d+\.\d%|—)\)$/);
+  }
+  const d30 = metricOf(r, "d30_retention");
+  assert.equal(d30.counted?.numerator, 3);
+  assert.equal(d30.counted?.denominator, 6);
+  assert.equal(d30.value, 0.5);
+});
+
+test("buildBetaScorecard: 실측값을 그대로 재현한다(설치 축)", () => {
+  // 2026-08-29 프로덕션 BQ 실측. 이 값이 바뀌면 정의가 바뀐 것이다.
+  const r = buildBetaScorecard(scorecardInput());
+  assert.equal(metricOf(r, "d7_retention").counted?.display, "3/7 (42.9%)");
+  assert.equal(metricOf(r, "d14_retention").counted?.display, "4/7 (57.1%)");
+  assert.equal(metricOf(r, "d30_retention").counted?.display, "3/6 (50.0%)");
+  // D30 retained users 는 D30 비율의 분자 그 자체다(같은 수를 두 번 안 센다).
+  assert.equal(metricOf(r, "d30_retained_users").value, 3);
+});
+
+test("buildBetaScorecard: 분모 0 이면 0% 가 아니라 null 이다", () => {
+  const r = buildBetaScorecard(
+    scorecardInput({
+      install: {
+        d7Cohort: 0,
+        d7Retained: 0,
+        d14Cohort: 0,
+        d14Retained: 0,
+        d30Cohort: 0,
+        d30Retained: 0,
+      },
+    })
+  );
+  for (const key of ["d7_retention", "d14_retention", "d30_retention"]) {
+    const m = metricOf(r, key);
+    assert.equal(m.value, null, `${key} 가 0 으로 접혔다`);
+    assert.equal(m.counted?.rate, null);
+    // ★분모 0 이어도 분수는 남긴다 — 지우면 측정값을 숨기는 것이다.
+    assert.equal(m.counted?.display, "0/0 (—)");
+    assert.equal(m.attainment, null);
+    assert.equal(m.remaining, null);
+    // 분모가 없으면 달성이 아니라 미상이다.
+    assert.equal(m.met, false);
+  }
+});
+
+test("buildBetaScorecard: 빈 데이터에서도 던지지 않고 전부 0/미상이다", () => {
+  const r = buildBetaScorecard({
+    install: {
+      activeInstalls: undefined,
+      activatedInstalls: null,
+      firstSpawnInstalls: undefined,
+      monthlyTasks: "",
+      powerUsers: undefined,
+      d7Cohort: undefined,
+      d7Retained: undefined,
+      d14Cohort: undefined,
+      d14Retained: undefined,
+      d30Cohort: undefined,
+      d30Retained: undefined,
+      d30Pending: undefined,
+    },
+    person: null,
+    personUnavailableReason: "게이트 닫힘",
+  });
+  assert.equal(r.metrics.length, 11);
+  // ★Qualified Beta 는 계정 축이라 이 응답에서 값이 오지 않는다 — 0 이 아니라 null.
+  assert.equal(metricOf(r, "qualified_beta").value, null);
+  assert.equal(metricOf(r, "d30_retention").value, null);
+  assert.equal(r.personAxisCounts, null);
+  assert.equal(r.personUnavailableReason, "게이트 닫힘");
+  // 목표를 넘은 것이 하나도 없어야 한다(0 은 달성이 아니다).
+  assert.equal(
+    r.metrics.filter((m) => m.met).length,
+    0
+  );
+});
+
+test("buildBetaScorecard: 측정 불가 지표는 0 이 아니라 null + 사유다", () => {
+  const r = buildBetaScorecard(scorecardInput());
+  for (const key of ["design_partners", "paid_poc"]) {
+    const m = metricOf(r, key);
+    assert.equal(m.measurable, false);
+    assert.equal(m.axis, "manual");
+    // ★0 으로 그리면 "아직 한 곳도 없다"로 읽히는데, 우리는 그것조차 모른다.
+    assert.equal(m.value, null, `${key} 가 0 으로 그려진다`);
+    assert.equal(m.met, false);
+    assert.ok(
+      m.unmeasuredReason && m.unmeasuredReason.length > 0,
+      `${key} 에 사유가 없다`
+    );
+    // 목표치는 그대로 보인다 — 측정을 못 한다고 목표를 지우지는 않는다.
+    assert.ok(m.targetMin > 0);
+  }
+});
+
+test("buildBetaScorecard: Paying Users 는 다른 봉투에서 온다(여기서 0 으로 안 채운다)", () => {
+  const m = metricOf(buildBetaScorecard(scorecardInput()), "paying_users");
+  assert.equal(m.axis, "account");
+  assert.equal(m.value, null);
+  assert.equal(
+    m.externalSource,
+    "getAdminBusinessSummary.subscriptions.paidCurrent"
+  );
+  // 측정 가능한 지표다 — '측정 불가'와 구분된다(사유가 없어야 한다).
+  assert.equal(m.measurable, true);
+  assert.equal(m.unmeasuredReason, null);
+});
+
+test("buildBetaScorecard: 사람 축은 원수만 내고 비율을 만들지 않는다", () => {
+  const r = buildBetaScorecard(scorecardInput());
+  assert.deepEqual(r.personAxisCounts, {
+    linkedPeople: 2,
+    peopleWithTask: 1,
+    activePeople: 2,
+  });
+  assert.equal(r.personUnavailableReason, null);
+  // ★사람 축 값을 분모로 쓰는 비율 지표가 하나도 없어야 한다.
+  assert.equal(r.metrics.filter((m) => m.axis === "person").length, 0);
+});
+
+test("buildBetaScorecard: 달성률은 목표 하한 기준이고 1.0 을 넘을 수 있다", () => {
+  const r = buildBetaScorecard(scorecardInput());
+  const d30 = metricOf(r, "d30_retention");
+  // 0.5 / 0.20 = 2.5 — clamp 하지 않는다. 눕히면 수치를 고치는 것이다.
+  assert.ok(d30.attainment != null && Math.abs(d30.attainment - 2.5) < 1e-9);
+  assert.equal(d30.met, true);
+  assert.equal(d30.remaining, 0);
+
+  const activated = metricOf(r, "activated");
+  assert.equal(activated.value, 5);
+  assert.equal(activated.targetMin, 200);
+  assert.equal(activated.remaining, 195); // 목표까지 얼마나 남았나
+  assert.equal(activated.met, false);
+  assert.ok(
+    activated.attainment != null &&
+      Math.abs(activated.attainment - 0.025) < 1e-9
+  );
+});
+
+test("buildBetaScorecard: 축 경고와 작은표본 임계가 응답에 실려 있다", () => {
+  const r = buildBetaScorecard(scorecardInput());
+  assert.equal(r.smallSampleMax, SCORECARD_SMALL_SAMPLE_MAX);
+  // 화면이 축을 말하지 않으면 숫자가 거짓말이 된다 — 서버가 문장을 들려 보낸다.
+  assert.match(r.axisNote, /설치 축/);
+  assert.match(r.axisNote, /더하거나/);
+  // note 는 D30 > D7 역전이 왜 일어나는지를 화면이 설명할 수 있게 한다.
+  assert.match(r.note, /분모/);
+  // 모든 설치 축 지표가 자기 단위가 설치임을 스스로 말한다.
+  for (const m of r.metrics) {
+    if (m.axis !== "install" || m.key === "monthly_agent_tasks") continue;
+    assert.match(m.measuredAs, /설치/, `${m.key} 가 축을 말하지 않는다`);
+  }
+});
+
+test("buildBetaScorecard: 설치 축 조회가 실패하면 0 이 아니라 '미상'이다", () => {
+  // ★이게 이 빌더에서 가장 중요한 방어다. 쿼리 실패를 빈 행으로 흘리면 전부 0 이
+  //   되고, 화면은 그 0 을 "측정했더니 0" 으로 읽는다 — 조회 실패를 제품 실패로
+  //   그리는 것이라 D30 히어로가 "0% (0/0)" 으로 크게 뜨게 된다.
+  const r = buildBetaScorecard({
+    install: null,
+    installUnavailableReason: "kpi.scorecard 실패",
+    person: { linkedPeople: 2, peopleWithTask: 1, activePeople: 2 },
+  });
+  assert.equal(r.installUnavailableReason, "kpi.scorecard 실패");
+  const installMetrics = r.metrics.filter((m) => m.axis === "install");
+  assert.ok(installMetrics.length >= 7);
+  for (const m of installMetrics) {
+    assert.equal(m.measurable, false, `${m.key} 가 측정 가능으로 남았다`);
+    assert.equal(m.value, null, `${m.key} 가 0 으로 접혔다`);
+    assert.equal(m.met, false);
+    assert.equal(m.unmeasuredReason, "kpi.scorecard 실패");
+  }
+  // 사람 축은 살아 있다 — 한 쿼리 실패가 다른 축을 죽이지 않는다.
+  assert.deepEqual(r.personAxisCounts, {
+    linkedPeople: 2,
+    peopleWithTask: 1,
+    activePeople: 2,
+  });
+  // 지표 개수는 그대로다. 실패했다고 칸이 사라지면 화면이 짧아져 눈치채기 어렵다.
+  assert.equal(r.metrics.length, 11);
+});
+
+test("buildBetaScorecard: 사유를 안 주면 기본 사유가 붙는다(빈 사유 금지)", () => {
+  const r = buildBetaScorecard({ install: null, person: null });
+  assert.ok(
+    r.installUnavailableReason && r.installUnavailableReason.length > 0,
+    "사유 없이 '미상'만 그리면 화면이 고장으로 읽힌다"
+  );
+  assert.equal(r.metrics.find((m) => m.key === "d30_retention")?.value, null);
+});
+
+test("buildBetaScorecard: 정상 경로에서는 installUnavailableReason 이 null 이다", () => {
+  assert.equal(buildBetaScorecard(scorecardInput()).installUnavailableReason, null);
+});
+
+// ── 사장님 최종 확정 정의 (리뷰 반영) ────────────────────────────────────────
+
+test("★Activated 정본은 3 Task 이고 목표는 단일값 200 이다", () => {
+  const m = metricOf(buildBetaScorecard(scorecardInput()), "activated");
+  assert.equal(m.axis, "install");
+  assert.equal(m.value, 5); // 누적 완료 task ≥ 3 인 설치
+  assert.equal(m.targetMin, 200);
+  assert.equal(m.targetMax, 200, "목표가 범위면 초안이 남아 있는 것이다");
+  // 첫 스폰으로 잘못 바뀌지 않았는지 문구로도 못박는다.
+  assert.match(m.measuredAs, /누적 완료 task 가 3건 이상/);
+  assert.match(m.measuredAs, /최종\s*확정/);
+});
+
+test("★첫 스폰은 선행지표이지 Activated 가 아니다 (11개 격자 밖 · 목표 없음)", () => {
+  const r = buildBetaScorecard(scorecardInput());
+  // 11개 KPI 격자에는 없다.
+  assert.equal(r.metrics.length, 11);
+  assert.equal(
+    r.metrics.filter((m) => m.key === "first_spawn_leading").length,
+    0,
+    "선행지표가 KPI 격자에 섞였다"
+  );
+  assert.equal(r.leadingIndicators.length, 1);
+  const spawn = r.leadingIndicators[0];
+  assert.equal(spawn.key, "first_spawn_leading");
+  assert.equal(spawn.value, 18);
+  // ★이름에 Activated 가 들어가면 안 된다.
+  assert.doesNotMatch(spawn.label, /^Activated/);
+  assert.match(spawn.label, /선행지표/);
+  assert.match(spawn.label, /Activated 아님/);
+  // ★목표를 붙이면 12번째 KPI 가 된다 — 달성/미달 판정 자체가 없어야 한다.
+  assert.equal(spawn.targetMin, 0);
+  assert.equal(spawn.attainment, null);
+  assert.equal(spawn.met, false, "목표 없는 줄이 '달성'으로 떴다");
+  assert.equal(spawn.remaining, null, "도달할 목표가 없는데 '남은 양'이 생겼다");
+});
+
+test("★Qualified Beta 는 신청·승인(계정 축)이지 설치 수가 아니다", () => {
+  const m = metricOf(buildBetaScorecard(scorecardInput()), "qualified_beta");
+  assert.equal(m.axis, "account");
+  assert.equal(m.definition, "신청하고 우리가 승인한 사람");
+  // ★설치 수 44 가 이 자리에 새어 들어오면 안 된다.
+  assert.equal(m.value, null);
+  assert.equal(m.externalSource, "getAdminBusinessSummary.betaAccess.grantTotal");
+  assert.equal(m.targetMin, 500);
+  assert.equal(m.targetMax, 500);
+  assert.match(m.measuredAs, /설치 축의 '활동 설치 수'를 이 자리에 쓰면 안 됩니다/);
+});
+
+test("★목표치는 전부 사장님 최종 확정 단일값이다(범위형 초안 잔존 0)", () => {
+  const r = buildBetaScorecard(scorecardInput());
+  const t = (k: string) => {
+    const m = metricOf(r, k);
+    return [m.targetMin, m.targetMax];
+  };
+  assert.deepEqual(t("qualified_beta"), [500, 500]);
+  assert.deepEqual(t("activated"), [200, 200]);
+  assert.deepEqual(t("d14_retention"), [0.25, 0.25]);
+  assert.deepEqual(t("d30_retention"), [0.2, 0.2]);
+  assert.deepEqual(t("power_user"), [20, 20]);
+  assert.deepEqual(t("monthly_agent_tasks"), [10000, 10000]);
+  // ★사장님이 범위로 확정하신 셋은 범위 그대로 둔다(단일값 강제 아님).
+  assert.deepEqual(t("d30_retained_users"), [30, 40]);
+  assert.deepEqual(t("design_partners"), [3, 5]);
+  assert.deepEqual(t("paid_poc"), [1, 2]);
+});
+
+test("★D30 목표가 0.20 으로 올라가 met 판정이 그에 맞게 움직인다", () => {
+  // 3/6 = 50% → 여전히 달성. 다만 분모 6이라 화면이 경고를 같이 그린다.
+  const met = metricOf(buildBetaScorecard(scorecardInput()), "d30_retention");
+  assert.equal(met.targetMin, 0.2);
+  assert.equal(met.met, true);
+  // 18% 였다면 예전 목표(0.15)로는 달성, 새 목표(0.20)로는 미달이어야 한다.
+  const below = metricOf(
+    buildBetaScorecard(
+      scorecardInput({ install: { d30Cohort: 100, d30Retained: 18 } })
+    ),
+    "d30_retention"
+  );
+  assert.equal(below.value, 0.18);
+  assert.equal(below.met, false, "목표가 아직 0.15 로 남아 있다");
+});
+
+test("★설치 축 조회 실패는 선행지표도 '미상'으로 만든다", () => {
+  const r = buildBetaScorecard({ install: null, person: null });
+  assert.equal(r.leadingIndicators[0].value, null);
+  assert.equal(r.leadingIndicators[0].measurable, false);
 });

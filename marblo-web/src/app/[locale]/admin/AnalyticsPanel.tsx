@@ -33,6 +33,7 @@ import {
   CreditCard,
   Database,
   TriangleAlert,
+  Target,
   Link2,
   Unlink,
   Copy,
@@ -559,10 +560,134 @@ type KpiCockpit = {
     };
     note: string;
   } | null;
+  /**
+   * ★베타 종료 KPI 스코어카드(티켓 6jeXDBQ1xoH0FoXwjqAL) — 사장님 11개 지표를
+   * 목표치와 나란히. 서버 순수 빌더 buildBetaScorecard 의 응답 shape 미러.
+   * 구버전 functions 는 이 키를 안 준다 → 화면은 '배선 전' 으로 접는다.
+   */
+  betaScorecard?: BetaScorecard;
   note: string;
 };
 
-type BusinessSummary = {
+// ── ★베타 종료 KPI 스코어카드 ───────────────────────────────────────────────
+//
+// ★축이 둘이고 섞으면 안 된다. 이 화면 최대의 실패는 설치 수를 '명' 이라고 쓰는
+//   것이고, 그 다음이 분모 6짜리 50% 를 "목표 초과 달성" 으로 그리는 것이다.
+//   그래서 값은 전부 기존 Ratio/RatioCard/SmallSampleNotice 규약을 통과한다.
+
+/** 지표가 사는 축. 축이 다른 두 값을 더하거나 비교하면 안 된다. */
+export type ScorecardAxis = "install" | "person" | "account" | "manual";
+type ScorecardUnit = "count" | "rate";
+
+export type ScorecardMetric = {
+  key: string;
+  label: string;
+  /** 사장님이 말씀하신 정의 그대로. */
+  definition: string;
+  /** 우리가 실제로 무엇을 셌는가 — 정의와의 차이가 여기 드러난다. */
+  measuredAs: string;
+  axis: ScorecardAxis;
+  unit: ScorecardUnit;
+  /** count 면 원수, rate 면 0~1. 측정 불가/분모 0 이면 null. */
+  value: number | null;
+  /** rate 지표의 분자·분모. count 는 null. */
+  counted: {
+    numerator: number;
+    denominator: number;
+    rate: number | null;
+    display: string;
+  } | null;
+  targetMin: number;
+  targetMax: number;
+  seedMin: number | null;
+  attainment: number | null;
+  remaining: number | null;
+  met: boolean;
+  measurable: boolean;
+  unmeasuredReason: string | null;
+  /** 값이 다른 봉투에서 오는 지표의 좌표. */
+  externalSource: string | null;
+};
+
+export type BetaScorecard = {
+  metrics: ScorecardMetric[];
+  /** ★KPI 가 아닌 선행지표(첫 스폰). 11개 격자와 섞지 않는다. */
+  leadingIndicators: ScorecardMetric[];
+  heroKey: string;
+  /** 사람 축 원수(비율 없음). 게이트가 닫혔거나 조회 실패면 null. */
+  personAxisCounts: {
+    linkedPeople: number;
+    peopleWithTask: number;
+    activePeople: number;
+  } | null;
+  personUnavailableReason: string | null;
+  /** 설치 축 조회가 실패했을 때의 사유. 정상이면 null. */
+  installUnavailableReason: string | null;
+  smallSampleMax: number;
+  axisNote: string;
+  note: string;
+};
+
+/**
+ * ★운영자 제외가 이 축에서 **구조적으로 불가능**하다는 사실. 숨기지 않는다.
+ * (서버 adminAnalytics.SCORECARD_ADMIN_EXCLUSION_NOTE 와 같은 문장 — functions
+ *  패키지는 web 에서 import 할 수 없어 문자열을 한 벌 더 둔다.)
+ */
+export const SCORECARD_ADMIN_EXCLUSION_NOTE =
+  "★운영자 제외(includeAdmin) 토글이 이 표에는 적용되지 않습니다. 익명축 " +
+  "테이블(analytics_user_daily)에는 is_admin 컬럼이 없고, 계정축과의 조인은 축 " +
+  "분리 규약이 금지합니다(assertAxisPurity 가 스키마로 막습니다). 처리방침이 " +
+  "이미 고지한 대가입니다 — '운영자 본인 활동 제외는 포기했습니다'. 따라서 이 " +
+  "숫자는 내부 도그푸드 쪽으로 낙관 편향돼 있습니다. 실제 외부 고객 수는 여기 " +
+  "적힌 것보다 작습니다.";
+
+/** Paying Users 값이 오는 봉투의 좌표(서버 상수와 같은 문자열). */
+export const SCORECARD_PAYING_SOURCE =
+  "getAdminBusinessSummary.subscriptions.paidCurrent";
+
+/** Qualified Beta(신청·승인) 값이 오는 봉투의 좌표. */
+export const SCORECARD_QUALIFIED_SOURCE =
+  "getAdminBusinessSummary.betaAccess.grantTotal";
+
+/**
+ * ★다른 봉투에서 오는 값을 **한 곳에서만** 채운다.
+ *
+ * Paying Users 는 계정 축이라 KPI 콜러블이 세지 않는다 — 세면 '결제자' 정의가
+ * 두 벌이 되고 두 수가 조용히 갈라진다. 그래서 서버는 좌표(externalSource)만
+ * 선언하고, 이 함수가 이미 로드된 BusinessSummary 봉투에서 값을 옮긴다.
+ *
+ * ★값이 없으면(구버전 functions·로딩 중·조회 실패) 0 으로 채우지 않는다.
+ *   0 은 "아무도 결제 안 했다" 로 읽히는데 그건 데이터가 아니라 공백이다.
+ */
+export function resolveScorecardMetrics(
+  metrics: ScorecardMetric[],
+  external: {
+    payingUsers: number | null | undefined;
+    /** 베타 접근권이 부여된 계정 수 = Qualified Beta(신청·승인). */
+    qualifiedBeta?: number | null | undefined;
+  }
+): ScorecardMetric[] {
+  const bySource: Record<string, number | null | undefined> = {
+    [SCORECARD_PAYING_SOURCE]: external.payingUsers,
+    [SCORECARD_QUALIFIED_SOURCE]: external.qualifiedBeta,
+  };
+  return metrics.map((m) => {
+    if (m.externalSource == null) return m;
+    const v = bySource[m.externalSource];
+    if (typeof v !== "number" || !isFinite(v)) return m;
+    // ★목표가 없는 줄에는 달성 판정을 만들지 않는다(서버 규약과 같은 규칙).
+    const hasTarget = m.targetMin > 0;
+    return {
+      ...m,
+      value: v,
+      attainment: hasTarget ? v / m.targetMin : null,
+      remaining: hasTarget ? Math.max(0, m.targetMin - v) : null,
+      met: hasTarget && v >= m.targetMin,
+    };
+  });
+}
+
+export type BusinessSummary = {
   rangeDays: number;
   generatedAt: string;
   adminExcluded?: AdminExcludedFirestore;
@@ -603,6 +728,19 @@ type BusinessSummary = {
     feedbackSubmitted: number;
   };
   waitlist: { total: number; newInWindow: number };
+  /**
+   * ★베타 접근권 수명(티켓 6jeXDBQ1xoH0FoXwjqAL). 구버전 functions 는 안 준다.
+   *
+   * KPI 탭이 D30 옆에 이걸 그리는 이유: 부여 기간이 짧으면 D30 은 제품 리텐션이
+   * 아니라 **만료 신호**다. 실측(2026-08-29) 부여 34 중 26 만료.
+   */
+  betaAccess?: {
+    grantTotal: number;
+    grantActive: number;
+    grantExpired: number;
+    /** FOUNDER_BETA_MONTHS. 서버가 숫자를 준다 — web 에 복제하지 않는다. */
+    expiryMonths: number;
+  };
   agents: {
     liveCount: number;
     byStatus: Record<string, number>;
@@ -3229,6 +3367,9 @@ export function CeoAdFunnelView({
 
 
 export type AnalyticsTab =
+  // ★⓪ KPI — 베타 종료 판단용 단일 화면(티켓 6jeXDBQ1xoH0FoXwjqAL). 기존 6개
+  //   탭은 한 글자도 건드리지 않는다(각자 쓰임이 있다) — 앞에 하나를 더한다.
+  | "kpi"
   | "acquisition"
   | "ads"
   | "activation"
@@ -3242,6 +3383,12 @@ export const ANALYTICS_TABS: {
   question: string;
   icon: typeof Users;
 }[] = [
+  {
+    id: "kpi",
+    label: "⓪ KPI",
+    question: "베타를 끝내도 되나 — 11개 지표 vs 2026년 말 목표",
+    icon: Target,
+  },
   {
     id: "acquisition",
     label: "① 획득",
@@ -7894,6 +8041,689 @@ export function ZeroFrictionCard({
   );
 }
 
+// ── ★⓪ KPI 탭 — 베타 종료 판단용 단일 화면 (티켓 6jeXDBQ1xoH0FoXwjqAL) ──────
+//
+// 사장님 요구는 "11개 지표를 목표치와 나란히 한눈에" 이고, 그중 **D30 이 가장
+// 중요**하다고 못 박으셨다. 그래서 D30 하나만 히어로로 크게 올리고 나머지 10개는
+// 같은 크기의 격자에 둔다.
+//
+// ★이 화면이 반드시 말해야 하는 것 셋(안 말하면 숫자가 거짓말이 된다):
+//   1) 축이 **설치**다. '명' 이 아니다.
+//   2) 모든 비율에 **분모**가 붙어 있다. 분모 6에서 50% 는 달성이 아니라 미상이다.
+//   3) 측정 못 하는 지표는 0 이 아니라 '측정 안 함' 이다.
+// 셋 다 이미 이 파일에 있는 규약(Ratio / SmallSampleNotice / PendingIngestion)이
+// 하는 일이라, 새로 짜지 않고 그대로 쓴다.
+
+/** 달성률 막대. ★clamp 는 **막대 길이에만** 한다 — 숫자는 눕히지 않는다. */
+function AttainmentBar({
+  attainment,
+  met,
+  hasValue,
+}: {
+  attainment: number | null;
+  met: boolean;
+  hasValue: boolean;
+}) {
+  const fill =
+    attainment == null ? 0 : Math.max(0, Math.min(1, attainment));
+  const color = !hasValue ? INK_MUTED : met ? STATUS_GOOD : STATUS_WARN;
+  return (
+    <div
+      className="relative mt-2 h-1.5 w-full overflow-hidden rounded bg-zinc-900"
+      role="presentation"
+    >
+      <div
+        className="h-full rounded"
+        style={{ width: `${fill * 100}%`, backgroundColor: color }}
+      />
+    </div>
+  );
+}
+
+/** 목표 표기. 범위면 "15~20%", 단일이면 "35%". */
+function formatTarget(m: ScorecardMetric): string {
+  const one = (v: number) =>
+    m.unit === "rate" ? fmtPct(v) : fmtInt(v);
+  return m.targetMin === m.targetMax
+    ? one(m.targetMin)
+    : `${one(m.targetMin)}~${one(m.targetMax)}`;
+}
+
+/** "목표까지 얼마나 남았는지". 사장님이 요구하신 자리다. */
+function formatRemaining(m: ScorecardMetric): string {
+  if (m.value == null) return "측정값 없음";
+  if (m.remaining === 0) return "목표 하한 도달";
+  if (m.remaining == null) return "—";
+  return m.unit === "rate"
+    ? `목표까지 ${(m.remaining * 100).toFixed(1)}%p`
+    : `목표까지 ${fmtInt(m.remaining)}`;
+}
+
+const AXIS_LABEL: Record<ScorecardAxis, string> = {
+  install: "설치 축",
+  person: "사람 축",
+  account: "계정 축",
+  manual: "수동(측정 안 함)",
+};
+
+/** 축 배지 — 축이 다른 두 값을 나란히 두고 섞어 읽는 것을 막는 유일한 장치다. */
+function AxisBadge({ axis }: { axis: ScorecardAxis }) {
+  const tone =
+    axis === "manual"
+      ? "border-zinc-800 bg-zinc-900 text-zinc-500"
+      : axis === "install"
+        ? "border-sky-900/50 bg-sky-950/30 text-sky-300"
+        : axis === "person"
+          ? "border-violet-900/50 bg-violet-950/30 text-violet-300"
+          : "border-emerald-900/50 bg-emerald-950/30 text-emerald-300";
+  return (
+    <span
+      className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${tone}`}
+    >
+      {AXIS_LABEL[axis]}
+    </span>
+  );
+}
+
+/**
+ * 지표 한 칸.
+ *
+ * ★rate 는 `Ratio` 를 쓴다 — 분수가 크고 퍼센트가 작다. 그 순서를 뒤집는 순간
+ *   6명짜리 표본이 "목표의 세 배" 처럼 읽힌다.
+ */
+function ScorecardMetricCard({
+  metric: m,
+  hero = false,
+  smallSampleMax,
+}: {
+  metric: ScorecardMetric;
+  hero?: boolean;
+  smallSampleMax: number;
+}) {
+  const hasValue = m.value != null;
+  const status = !m.measurable
+    ? "측정 안 함"
+    : !hasValue
+      ? m.externalSource
+        ? "다른 봉투 대기"
+        : "표본 없음"
+      : m.met
+        ? "목표 도달"
+        : "미달";
+  const statusColor = !hasValue
+    ? INK_MUTED
+    : m.met
+      ? STATUS_GOOD
+      : STATUS_WARN;
+  const denominator = m.counted?.denominator ?? null;
+  const smallSample =
+    m.unit === "rate" && denominator != null && denominator > 0
+      ? denominator <= smallSampleMax
+      : false;
+
+  return (
+    <div
+      className={`rounded-xl border bg-zinc-950/40 ${
+        hero
+          ? "border-indigo-800/60 p-5 ring-1 ring-indigo-900/40"
+          : "border-zinc-800 p-4"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p
+            className={`font-semibold text-zinc-200 ${
+              hero ? "text-base" : "text-xs"
+            }`}
+          >
+            {m.label}
+          </p>
+          <p
+            className={`mt-0.5 text-zinc-500 ${
+              hero ? "text-xs" : "text-[11px]"
+            }`}
+          >
+            {m.definition}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <AxisBadge axis={m.axis} />
+          <span
+            className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+            style={{ color: statusColor, backgroundColor: `${statusColor}1f` }}
+          >
+            {status}
+          </span>
+        </div>
+      </div>
+
+      {/* ── 값 ── */}
+      <div className={hero ? "mt-4" : "mt-3"}>
+        {!m.measurable ? (
+          // ★0 으로 그리지 않는다. 0 은 "아직 한 곳도 없다" 로 읽히는데 우리는
+          //   그것조차 모른다.
+          <p className="text-lg font-semibold text-zinc-600">측정 안 함</p>
+        ) : m.unit === "rate" && m.counted ? (
+          <Ratio
+            numerator={m.counted.numerator}
+            denominator={m.counted.denominator}
+            size={hero ? "lg" : "sm"}
+            title={m.measuredAs}
+          />
+        ) : hasValue ? (
+          <p
+            className={`font-bold tabular-nums text-zinc-100 ${
+              hero ? "text-4xl" : "text-2xl"
+            }`}
+          >
+            {fmtInt(m.value)}
+          </p>
+        ) : (
+          <p className="text-lg font-semibold text-zinc-600">—</p>
+        )}
+        <p
+          className={`mt-1 text-zinc-500 ${hero ? "text-xs" : "text-[11px]"}`}
+        >
+          목표 {formatTarget(m)}
+          {m.seedMin != null && (
+            <>
+              {" · Seed "}
+              {m.unit === "rate" ? fmtPct(m.seedMin) : fmtInt(m.seedMin)}+
+            </>
+          )}
+          {" · "}
+          {formatRemaining(m)}
+        </p>
+      </div>
+
+      <AttainmentBar
+        attainment={m.attainment}
+        met={m.met}
+        hasValue={hasValue}
+      />
+
+      {/* ── 우리가 실제로 무엇을 셌나 ── */}
+      <p
+        className={`mt-2 leading-relaxed text-zinc-600 ${
+          hero ? "text-[11px]" : "text-[10px]"
+        }`}
+      >
+        {m.measurable ? m.measuredAs : m.unmeasuredReason}
+      </p>
+      {m.externalSource && !hasValue && (
+        <p className="mt-1 text-[10px] leading-relaxed text-zinc-600">
+          값은 <span className="font-mono">{m.externalSource}</span> 에서
+          옵니다. 이 콜러블이 같은 수를 다시 세면 &lsquo;결제자&rsquo; 정의가 두
+          벌이 되므로 0 으로 채우지 않습니다.
+        </p>
+      )}
+
+      {smallSample && denominator != null && (
+        <div className={hero ? "mt-3" : "mt-2"}>
+          <SmallSampleNotice n={denominator} what={m.label} unit="대" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ★D30 옆에 반드시 붙는 경고 — 제품 이탈과 **정책 만료**를 가른다.
+ *
+ * 베타 grant 가 `FOUNDER_BETA_MONTHS` 개월이라 부여 시점 + N개월에 접근권이
+ * 끊긴다. 실측(2026-08-29): 부여 34건 중 26건이 이미 만료였고, 그 26건은 전부
+ * 같은 한 달짜리 창(2026-07-14 → 08-14)이었다. 즉 **지금까지의 D30 은 제품
+ * 리텐션이 아니라 만료 신호일 수 있다.** 이 카드가 없으면 D30 히어로는
+ * 만료율을 리텐션이라고 부르는 셈이 된다.
+ *
+ * ★왜 D30 의 분모를 '그 시점에 접근권이 살아있던 사람'으로 보정하지 않았나 —
+ *   할 수 없다. D30 은 **설치 축**(analytics_user_daily)이고 접근권은 **계정
+ *   축**(Firestore subscriptions)이다. 두 축을 잇는 조인은 설계가 금지하고
+ *   (`assertAxisPurity`) 처리방침이 "두 기록이 공유하는 조인 키는 없습니다"
+ *   라고 이미 고지했다. 그래서 보정 대신 **나란히 놓고 사실을 적는다.**
+ */
+export function BetaAccessExpiryWarning({
+  betaAccess,
+}: {
+  betaAccess: BusinessSummary["betaAccess"] | undefined;
+}) {
+  if (!betaAccess || betaAccess.grantTotal <= 0) {
+    // ★0 을 그리지 않는다. 봉투가 없으면(구버전 functions) 무엇을 기다리는지만.
+    return (
+      <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-[11px] leading-relaxed text-zinc-500">
+        베타 접근권 수명을 아직 못 읽었습니다(
+        <span className="font-mono">getAdminBusinessSummary.betaAccess</span>).
+        ★이 값 없이는 위 D30 이 <b>제품 리텐션인지 접근권 만료인지 구분되지
+        않습니다.</b> functions 배포 후 이 자리에 부여/만료 수가 채워집니다.
+      </p>
+    );
+  }
+  const { grantTotal, grantActive, grantExpired, expiryMonths } = betaAccess;
+  const expiredMajority = grantExpired * 2 > grantTotal;
+  return (
+    <div
+      className={`rounded-xl border p-4 ${
+        expiredMajority
+          ? "border-red-900/60 bg-red-950/20"
+          : "border-amber-900/50 bg-amber-950/20"
+      }`}
+    >
+      <p
+        className={`flex items-center gap-1.5 text-xs font-semibold ${
+          expiredMajority ? "text-red-200" : "text-amber-200"
+        }`}
+      >
+        <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+        ★위 D30 은 제품 리텐션이 아니라 <b>접근권 만료</b>를 그리고 있을 수
+        있습니다
+      </p>
+      <div className="mt-3 grid grid-cols-3 gap-3">
+        <div>
+          <p className="text-[10px] font-medium text-zinc-500">접근권 부여</p>
+          <p className="mt-0.5 text-xl font-bold tabular-nums text-zinc-100">
+            {fmtInt(grantTotal)}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] font-medium text-zinc-500">현재 유효</p>
+          <p
+            className="mt-0.5 text-xl font-bold tabular-nums"
+            style={{ color: STATUS_GOOD }}
+          >
+            {fmtInt(grantActive)}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] font-medium text-zinc-500">
+            만료로 끊긴 인원
+          </p>
+          <p
+            className="mt-0.5 text-xl font-bold tabular-nums"
+            style={{ color: expiredMajority ? STATUS_CRIT : STATUS_WARN }}
+          >
+            {fmtInt(grantExpired)}
+          </p>
+        </div>
+      </div>
+      <p className="mt-3 text-[11px] leading-relaxed text-amber-200/90">
+        베타 접근권은 부여 시점부터{" "}
+        <b className="tabular-nums">{fmtInt(expiryMonths)}개월</b>입니다. 부여{" "}
+        <Ratio numerator={grantExpired} denominator={grantTotal} /> 이 이미
+        만료됐습니다 — <b>이들은 제품이 싫어서 떠난 것이 아니라 문이 닫힌
+        것입니다.</b> 30일 창은 이 만료 시점과 거의 겹치므로, 위 D30 의 &lsquo;이탈&rsquo;
+        에는 정책 만료가 섞여 있습니다.
+      </p>
+      <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+        ★D30 의 분모를 &lsquo;그 시점에 접근권이 살아있던 사람&rsquo;으로{" "}
+        <b>보정하지 않았습니다 — 할 수 없습니다.</b> D30 은 설치 축(
+        <span className="font-mono">analytics_user_daily</span>)이고 접근권은 계정
+        축(Firestore <span className="font-mono">subscriptions</span>)입니다. 두
+        축을 잇는 조인은 <span className="font-mono">assertAxisPurity</span> 가
+        막고, 처리방침이 &ldquo;두 기록이 공유하는 조인 키는 없습니다&rdquo; 라고 이미
+        고지했습니다. 그래서 보정 대신 나란히 놓고 사실을 적습니다.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * ★Qualified Beta 사다리 — 신청 → 선정 → 접근권 부여 → 현재 유효.
+ *
+ * 사장님 정의가 "신청하고 우리가 승인한 사람" 이라 계정 축 사실이고, 한 칸으로
+ * 접으면 어디서 새는지가 사라진다. 실측(2026-08-29): 신청 73 → 선정 65 →
+ * 접근권 35 → 유효 9. ★선정 65 와 접근권 35 사이의 30명은 선정됐지만 계정을
+ * 연결하지 않은 사람이다 — 그 구멍은 한 숫자로는 절대 안 보인다.
+ */
+export function QualifiedBetaLadder({
+  biz,
+}: {
+  biz: BusinessSummary | null;
+}) {
+  if (!biz) {
+    return (
+      <EmptyState label="신청·승인 사다리는 getAdminBusinessSummary 봉투를 기다립니다." />
+    );
+  }
+  const applied = biz.waitlist.total;
+  const selected = biz.founders.accessGranted;
+  const granted = biz.betaAccess?.grantTotal ?? null;
+  const live = biz.betaAccess?.grantActive ?? null;
+  const steps: { label: string; value: number | null; note: string }[] = [
+    { label: "신청", value: applied, note: "betatester50_waitlist" },
+    { label: "선정(승인)", value: selected, note: "founders.accessGrantedAt" },
+    {
+      label: "접근권 부여",
+      value: granted,
+      note: "subscriptions(founder_grant)",
+    },
+    { label: "현재 유효", value: live, note: "기간이 아직 안 끝난 부여" },
+  ];
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {steps.map((s) => (
+          <div
+            key={s.label}
+            className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3"
+          >
+            <p className="text-[10px] font-medium text-zinc-500">{s.label}</p>
+            {/* ★값이 없으면 0 이 아니라 '—'. 봉투가 안 온 것과 0명은 다르다. */}
+            <p className="mt-0.5 text-xl font-bold tabular-nums text-zinc-100">
+              {s.value == null ? "—" : fmtInt(s.value)}
+            </p>
+            <p className="mt-0.5 text-[10px] text-zinc-600">{s.note}</p>
+          </div>
+        ))}
+      </div>
+      {granted != null && selected > granted && (
+        <p className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/20 p-2.5 text-[11px] leading-relaxed text-amber-200">
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            선정 <b className="tabular-nums">{fmtInt(selected)}</b> 중{" "}
+            <b className="tabular-nums">{fmtInt(selected - granted)}명</b>은
+            접근권 문서가 없습니다 — 선정은 됐지만 계정을 연결하지 않은
+            사람입니다. Qualified Beta 를 한 숫자로만 보면 이 구멍이 안 보입니다.
+          </span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ⓪ KPI 탭 본체.
+ *
+ * `legacyRetained7d` 는 **기존 코크핏 게이지**의 D7 이다. 정의가 다르므로
+ * (프로젝트×날짜 조합으로 '2번째 세션'을 근사) 조용히 갈아치우지 않고 둘 다
+ * 보여 주면서 라벨로 가른다 — 티켓의 명시 요구다.
+ */
+export function BetaScorecardView({
+  scorecard,
+  biz,
+  legacyRetention,
+  rangeDays,
+}: {
+  scorecard: BetaScorecard;
+  /**
+   * ★계정 축 봉투. Qualified Beta·Paying Users 값과 베타 접근권 수명이 전부
+   * 여기서 온다 — 이 콜러블이 같은 사실을 다시 세면 정의가 두 벌이 된다.
+   */
+  biz: BusinessSummary | null;
+  /**
+   * ★기존 베타종료 게이지의 잔존 칸(D1/D7/D30). 정의가 달라 값도 다르므로
+   * 조용히 갈아치우지 않고 **둘 다** 보여 주고 라벨로 가른다(티켓 명시 요구).
+   */
+  legacyRetention: BetaExitGauge[];
+  rangeDays: number;
+}) {
+  const payingUsers =
+    biz?.subscriptions.paidCurrent ?? biz?.subscriptions.paidProActive;
+  const qualifiedBeta = biz?.betaAccess?.grantTotal;
+  const metrics = useMemo(
+    () =>
+      resolveScorecardMetrics(scorecard.metrics, {
+        payingUsers,
+        qualifiedBeta,
+      }),
+    [scorecard.metrics, payingUsers, qualifiedBeta]
+  );
+  const hero = metrics.find((m) => m.key === scorecard.heroKey);
+  const rest = metrics.filter((m) => m.key !== scorecard.heroKey);
+  const person = scorecard.personAxisCounts;
+
+  return (
+    <div className="space-y-6">
+      {/* ★설치 축 조회가 실패하면 화면이 먼저 그 사실을 말한다. 아래 칸들은
+          0 이 아니라 '미상' 으로 접혀 있다 — 배너가 없으면 그 '—' 가 표본 없음과
+          구분되지 않는다. */}
+      {scorecard.installUnavailableReason && (
+        <p className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-[11px] leading-relaxed text-amber-200">
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            <b>설치 축 지표를 못 읽었습니다.</b>{" "}
+            {scorecard.installUnavailableReason} 아래 칸의 &lsquo;—&rsquo; 는
+            &lsquo;0&rsquo; 이 아닙니다.
+          </span>
+        </p>
+      )}
+      {/* ★축 경고를 맨 위에. 표를 읽기 전에 단위를 알아야 한다. */}
+      <AxisLimitNote
+        notes={[
+          scorecard.axisNote,
+          SCORECARD_ADMIN_EXCLUSION_NOTE,
+          `기간 필터(최근 ${fmtInt(rangeDays)}일)는 Monthly Agent Tasks 와 사람 축 활동 인원에만 걸립니다. 리텐션·Qualified·Activated·Power User 는 코호트 전체를 봅니다 — 창을 좁히면 코호트가 잘려 비율이 조용히 흔들리기 때문입니다.`,
+        ]}
+      />
+
+      {/* ── ★D30 히어로. 사장님이 제일 중요하다고 명시하셨다 ── */}
+      {hero && (
+        <div className="space-y-3">
+          <SectionHeader
+            icon={Target}
+            title="★D30 Retention — 베타 종료 판단의 1순위"
+            trust="yellow"
+          >
+            <p className="text-[11px] leading-relaxed text-zinc-500">
+              사장님이 11개 중 이것이 가장 중요하다고 못 박으셨습니다. 아래
+              분수를 먼저 읽고 퍼센트는 참고만 하세요 — 지금 분모는 한 자릿수라,
+              한 대가 움직이면 비율이 수십 %p 흔들립니다.{" "}
+              <b className="text-amber-200">
+                목표를 넘긴 것처럼 보여도 그것은 &lsquo;달성&rsquo;이 아니라
+                &lsquo;아직 아무것도 모른다&rsquo;는 뜻입니다.
+              </b>
+            </p>
+          </SectionHeader>
+          <ScorecardMetricCard
+            metric={hero}
+            hero
+            smallSampleMax={scorecard.smallSampleMax}
+          />
+          {/* ★이 경고가 히어로 바로 밑에 있어야 한다. 아래로 밀면 D30 만 보고
+              창을 닫는 사람이 만료 사실을 영영 못 본다. */}
+          <BetaAccessExpiryWarning betaAccess={biz?.betaAccess} />
+        </div>
+      )}
+
+      {/* ── Qualified Beta 사다리 — 계정 축. 한 칸으로 접으면 구멍이 안 보인다 ── */}
+      <div className="space-y-3">
+        <SectionHeader
+          icon={UserCheck}
+          title="Qualified Beta — 신청 → 선정 → 접근권 → 현재 유효 (계정 축)"
+          trust="green"
+        >
+          <p className="text-[11px] leading-relaxed text-zinc-500">
+            사장님 정의는 &ldquo;신청하고 우리가 승인한 사람&rdquo; 입니다. 설치
+            수가 아니라 <b>계정 축</b>이고, 값은 Firestore 봉투에서 옵니다.
+          </p>
+        </SectionHeader>
+        <QualifiedBetaLadder biz={biz} />
+      </div>
+
+      {/* ── 나머지 10개 ── */}
+      <div className="space-y-3">
+        <SectionHeader
+          icon={Gauge}
+          title="11개 지표 — 현재값 vs 2026년 말 목표"
+          trust="yellow"
+        >
+          <p className="text-[11px] leading-relaxed text-zinc-500">
+            모든 비율에 분모가 함께 그려집니다. 측정 경로가 없는 지표는 0 이
+            아니라 &lsquo;측정 안 함&rsquo; 입니다.
+          </p>
+        </SectionHeader>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {rest.map((m) => (
+            <ScorecardMetricCard
+              key={m.key}
+              metric={m}
+              smallSampleMax={scorecard.smallSampleMax}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* ── ★선행지표 — KPI 격자와 **분리**한다 ─────────────────────────── */}
+      {scorecard.leadingIndicators.length > 0 && (
+        <div className="space-y-3">
+          <SectionHeader
+            icon={Activity}
+            title="광고 최적화용 선행지표 — KPI 가 아닙니다"
+            trust="yellow"
+          >
+            <p className="text-[11px] leading-relaxed text-zinc-500">
+              광고는 빠른 신호가 필요합니다 — 클릭에서 3 Task 까지 며칠 걸리면
+              캠페인을 못 돌립니다. 아래 수치는 그 용도이고{" "}
+              <b className="text-amber-200">
+                베타 종료·Seed 판단에는 쓰지 마세요.
+              </b>{" "}
+              목표치를 일부러 붙이지 않았습니다 — 목표가 붙는 순간 12번째 KPI 가
+              되고, 다음 사람이 Activated 대신 이 수를 읽습니다.
+            </p>
+          </SectionHeader>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {scorecard.leadingIndicators.map((m) => (
+              <ScorecardMetricCard
+                key={m.key}
+                metric={m}
+                smallSampleMax={scorecard.smallSampleMax}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── ★사람 축 — 원수만. 비율을 만들지 않는다 ── */}
+      <div className="space-y-3">
+        <SectionHeader
+          icon={UserCheck}
+          title="사람 축 (별도 축 — 위 표와 더하거나 비교하지 마세요)"
+          trust="yellow"
+        >
+          <p className="text-[11px] leading-relaxed text-zinc-500">
+            진짜 사람 축은 <span className="font-mono">marblo_identity</span> 의
+            링크표(<span className="font-mono">v_person_since_link</span>)입니다.
+            위 표는 설치 축이라 두 숫자는 서로 다른 것을 셉니다.
+          </p>
+        </SectionHeader>
+        {person ? (
+          <>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <StatCard
+                label="링크가 닿은 사람"
+                value={fmtInt(person.linkedPeople)}
+                sub="연결 이후 구간에 활동 기록이 있는 사람 수"
+              />
+              <StatCard
+                label="실제 Task 를 한 사람"
+                value={fmtInt(person.peopleWithTask)}
+                sub="완료 task ≥ 1"
+              />
+              <StatCard
+                label={`최근 ${fmtInt(rangeDays)}일 활동 인원`}
+                value={fmtInt(person.activePeople)}
+                sub="활동일 ≥ 1"
+              />
+            </div>
+            {/* ★여기서 비율을 그리지 않는 이유를 화면이 직접 말한다. */}
+            <p className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/20 p-2.5 text-[11px] leading-relaxed text-amber-200">
+              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                <b>이 축에서는 D7/D14/D30 비율을 그리지 않습니다.</b> 실제 Task
+                를 한 사람이{" "}
+                <b className="tabular-nums">{fmtInt(person.peopleWithTask)}명</b>{" "}
+                이라, 이 분모로 만든 퍼센트는 한 사람이 움직일 때마다 100%p 씩
+                뜁니다 — 그건 비율이 아니라 동전 던지기입니다. 커버리지는
+                forward-only 라(그 설치가 다시 인증해야 링크가 생깁니다) 시간이
+                지나며 채워집니다. 그때 이 블록이 비율을 갖습니다.
+              </span>
+            </p>
+          </>
+        ) : (
+          <PendingIngestion
+            title="사람 축"
+            waitingOn={
+              scorecard.personUnavailableReason ??
+              "사람 축 링크(analytics_user_install)"
+            }
+            willShow={[
+              "링크가 닿은 사람 수",
+              "실제 Task 를 한 사람 수",
+              "최근 창의 활동 인원",
+            ]}
+            missing="read-path"
+          />
+        )}
+      </div>
+
+      {/* ── ★리텐션 정의가 둘이다. 조용히 갈아치우지 않고 라벨로 가른다 ── */}
+      <div className="space-y-3">
+        <SectionHeader
+          icon={Repeat}
+          title="리텐션 정의가 둘입니다 — 어느 쪽을 보고 있는지 확인하세요"
+          trust="yellow"
+        >
+          <p className="text-[11px] leading-relaxed text-zinc-500">
+            사장님 정의는 &ldquo;실제 Task 수행&rdquo; 이고, 기존 베타종료
+            게이지는 &ldquo;2번째 세션 근사&rdquo; 입니다. 기존 게이지를 조용히
+            바꾸지 않았습니다 — 둘 다 그대로 두고 무엇이 무엇인지 적습니다.
+          </p>
+        </SectionHeader>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <Panel
+            title="① 신규 — 사장님 정의 (실제 Task 수행)"
+            note="analytics_user_daily.tasks_completed > 0. 이벤트 종류가 늘어도 움직이지 않습니다."
+          >
+            <div className="space-y-2">
+              {metrics
+                .filter((m) => m.key.endsWith("_retention"))
+                .map((m) => (
+                  <div
+                    key={m.key}
+                    className="flex items-center justify-between gap-3"
+                  >
+                    <span className="text-xs text-zinc-400">{m.label}</span>
+                    <Ratio
+                      numerator={m.counted?.numerator ?? 0}
+                      denominator={m.counted?.denominator ?? 0}
+                      title={m.measuredAs}
+                    />
+                  </div>
+                ))}
+            </div>
+          </Panel>
+          <Panel
+            title="② 기존 베타종료 게이지 (2번째 세션 근사)"
+            note="events 의 (프로젝트×날짜) 조합 수로 '2번째 세션'을 근사합니다. 정의가 달라 값도 다릅니다."
+          >
+            {legacyRetention.length > 0 ? (
+              <div className="space-y-2">
+                {legacyRetention.map((g) => (
+                  <div
+                    key={g.key}
+                    className="flex items-center justify-between gap-3"
+                  >
+                    <span className="text-xs text-zinc-400">{g.label}</span>
+                    <Ratio
+                      numerator={g.numerator}
+                      denominator={g.denominator}
+                      title="가입 후 N일 내 2번째 파생세션/프로젝트에 도달한 설치. 사장님 정의(실제 Task 수행)와 다른 축이다."
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState label="기존 게이지에 잔존 칸이 없습니다." />
+            )}
+          </Panel>
+        </div>
+        <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-500">
+          {scorecard.note}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── KPI 코크핏 뷰 (베타종료 게이지 + 온보딩 이벤트 + 재사용 + 스폰 헬스) ──────
 function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
   const { onboardingEvents: onb, reuse, spawnHealth: spawn } = kpi;
@@ -9054,6 +9884,55 @@ export default function AnalyticsPanel({
           ★모든 수치의 알갱이는 **설치 1행**(marblo_telemetry.v_install_unified)
             이다. 화면은 GROUP BY 결과를 그리기만 하고 다시 세지 않는다 — 세는
             코드가 여러 벌이 된 것이 계획 §0 이 진단한 병 그 자체다. */}
+      {/* ── ⓪ KPI — 베타 종료 판단용 단일 화면(티켓 6jeXDBQ1xoH0FoXwjqAL) ──
+          ★기존 6개 탭은 건드리지 않는다. 콜러블도 새로 안 판다 — 이미 mount 에서
+          부르고 있는 getAdminKpiCockpit 응답에 봉투가 하나 더 실려 온다. */}
+      {tab === "kpi" && (
+        <div
+          id="analytics-panel-kpi"
+          role="tabpanel"
+          aria-labelledby="analytics-tab-kpi"
+          className="space-y-8"
+        >
+          {kpi.loading ? (
+            <LoadingBox />
+          ) : kpi.error ? (
+            <ErrorBox msg={kpi.error} />
+          ) : kpi.data?.betaScorecard ? (
+            <>
+              {/* 부분 쿼리 실패를 탭 머리에서 먼저 말한다(기존 규약 재사용). */}
+              <QueryStatusBanner status={kpi.data.queryStatus} />
+              <BetaScorecardView
+              scorecard={kpi.data.betaScorecard}
+              biz={biz.data}
+              // ★키를 정확히 집는다. 부분매칭(includes)으로 고르면 나중에
+              //   게이지가 하나 늘 때 조용히 다른 칸을 그린다.
+              legacyRetention={kpi.data.betaExitGauges.filter(
+                (g) =>
+                  g.key === "retention_1d" ||
+                  g.key === "retention_7d" ||
+                  g.key === "retention_30d"
+              )}
+                rangeDays={kpi.data.rangeDays}
+              />
+            </>
+          ) : (
+            // ★없으면 상태가 아니라 **배선 전**이다(구버전 functions). 0 을
+            //   그리지 않고 무엇을 기다리는지 화면이 말한다.
+            <PendingIngestion
+              title="베타 종료 KPI 스코어카드"
+              waitingOn="getAdminKpiCockpit 의 betaScorecard 봉투 (functions 배포 필요)"
+              willShow={[
+                "11개 지표 vs 2026년 말 목표 · 달성률 · 남은 양",
+                "실제 Task 수행 기준 D7/D14/D30 (분모 포함)",
+                "사람 축 원수 (설치 축과 분리)",
+              ]}
+              missing="read-path"
+            />
+          )}
+        </div>
+      )}
+
       {tab === "acquisition" && (
         <div
           id="analytics-panel-acquisition"

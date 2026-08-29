@@ -28,6 +28,9 @@
 // 라벨 해시 전용. BQ/Firestore 무의존 규약은 그대로다 — node 표준 모듈만 쓴다
 // (analyticsPseudonym.ts 와 같은 선례).
 import { createHash } from "node:crypto";
+// ★Activated 임계값의 정본. 광고 퍼널 티켓(O5JPlh4FSiCsNpZ4E9VJ)이 세운 모듈이고,
+//   KPI 스코어카드도 같은 상수를 읽어야 두 화면이 같은 Activated 를 말한다.
+import { ACTIVATED_MIN_TASKS_COMPLETED } from "./activatedDefinition";
 
 export const EVENTS_ACCOUNT_AXIS_RETIRED_ON = "2026-08-10";
 
@@ -2905,5 +2908,572 @@ export function buildStreakRetention(
     identityScheme,
     mapping: mappingSummary,
     notes,
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★베타 종료 판단용 KPI 스코어카드 (티켓 6jeXDBQ1xoH0FoXwjqAL)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// 사장님이 요구하신 것은 "11개 지표를 목표치와 나란히 한눈에" 다. 이 모듈은 그
+// **그릇**을 만든다 — 지금 숫자가 한 자릿수인 것은 알고 계시고, 숫자가 작다는
+// 이유로 지표를 빼지 않는 것이 요구사항이다.
+//
+// ── ★이 파일에서 가장 중요한 사실: 축이 둘이고, 섞으면 안 된다 ──────────────
+//
+// 티켓 본문과 그 정정 지시가 **둘 다** "task_outcomes 는 사람 축" 이라고 적었다.
+// 프로덕션 BQ 실측 결과 그것은 사실이 아니다:
+//
+//   SELECT LENGTH(userId), COUNT(DISTINCT userId) FROM task_outcomes
+//     → {36, 7}                      ← 전부 uuid36 = 익명 **설치** ID
+//   analytics_account_profile.user_key → LENGTH 28   ← 계정 uid 는 28자다
+//
+// 코드도 같은 말을 한다(index.ts 익명축 소스 쿼리 주석):
+//   "★install_key = events/agent_heartbeats/task_outcomes 의 `userId` 다.
+//    이 컬럼은 계정 uid 가 **아니라** 클라이언트가 보낸 익명 설치 ID(clientId)다."
+//
+// 결정적 증거: `analytics_user_daily`(설치 축)로 같은 정의의 누적창 리텐션을
+// 돌리면 task_outcomes 로 뽑은 값이 **한 자리도 안 틀리고 재현된다**
+// (코호트 7 / D7 3 / D14 4 / D30 3, 분모 6). 같은 숫자가 나오는 이유는 같은
+// 축이기 때문이다. "42 vs 7" 은 두 축의 차이가 아니라 "이벤트를 보낸 설치 44대
+// 중 실제 task 를 한 설치가 7대" 라는 **같은 축 안의 부분집합**이다.
+//
+// ★그럼 사람 축은 없나 — 있다. `personAxis.ts` + `marblo_identity` 의
+//   `v_person_since_link` 가 그것이고, 게이트가 열려 있다. 다만 오늘 커버리지가
+//   **사람 2명**이고 그중 task 를 한 번이라도 한 사람이 **1명**이다. 분모 1에서
+//   D7/D14/D30 은 비율이 아니라 동전 던지기다.
+//
+// ── 그래서 이 스코어카드가 하는 일 ─────────────────────────────────────────
+//  1) 두 축을 **라벨로 갈라 병기**한다. 한 숫자로 합치지 않는다.
+//  2) 사람 축은 **원수만** 낸다(비율 금지). 설치 축만 곡선을 그린다.
+//  3) 모든 비율이 분자·분모를 달고 다닌다(countedRate 규약 계승).
+//  4) 측정 불가능한 지표를 0 으로 그리지 않는다 — 사유를 들고 다닌다.
+//
+// ★계측을 늘렸다고 게이지가 좋아지면 안 된다(KPI_RETENTION_EXCLUDED_EVENTS 와
+//   같은 규율). 이 스코어카드의 리텐션 분자는 `tasks_completed > 0` **하나**다 —
+//   이벤트 종류가 늘어도 움직이지 않는다. 그게 이 정의를 고른 이유이기도 하다
+//   (사장님 정의 "7일 후 다시 **실제 Task 수행**" 과도 이쪽이 맞는다).
+
+/** 스코어카드 지표가 사는 축. 축이 다른 두 값을 더하거나 비교하면 안 된다. */
+export type ScorecardAxis =
+  /** 익명 설치 축(analytics_user_daily). 한 사람이 두 기기면 2로 센다. */
+  | "install"
+  /** 사람 축(marblo_identity.v_person_since_link). 커버리지가 아직 얇다. */
+  | "person"
+  /** 계정 축(Firestore subscriptions). 값은 다른 봉투에서 온다. */
+  | "account"
+  /** 텔레메트리에 없는 사실(계약·영업). 자동 측정 불가. */
+  | "manual";
+
+/** 지표의 단위. rate 는 분모 없이 그리면 안 된다. */
+export type ScorecardUnit = "count" | "rate";
+
+/**
+ * 지표 한 칸.
+ *
+ * ★`value` 는 절대 홀로 나가지 않는다. rate 면 `counted` 가 분자·분모를 달고
+ * 오고, 측정 불가면 `value=null` + `unmeasuredReason` 이 온다. 0 은 "측정했는데
+ * 0" 일 때만 쓴다 — 측정 안 한 것을 0 으로 그리는 게 이 화면 최대의 실패다.
+ */
+export type ScorecardMetric = {
+  key: string;
+  label: string;
+  /** 사장님이 말씀하신 정의 그대로. 화면이 이 문장을 띄운다. */
+  definition: string;
+  /** 우리가 실제로 무엇을 셌는가 — 정의와 다르면 그 차이가 여기 드러난다. */
+  measuredAs: string;
+  axis: ScorecardAxis;
+  unit: ScorecardUnit;
+  /** count 면 원수, rate 면 0~1 비율. 측정 불가/분모 0 이면 null. */
+  value: number | null;
+  /** rate 지표의 분자·분모. count 지표는 null. */
+  counted: RetentionCountedRate | null;
+  /** 2026년 말 목표 하한. 달성률의 분모다. */
+  targetMin: number;
+  /** 2026년 말 목표 상한(범위가 아니면 targetMin 과 같다). */
+  targetMax: number;
+  /** Seed 기준(참고치). 없으면 null. */
+  seedMin: number | null;
+  /** 목표 하한 대비 달성률(0~1+). 측정 불가면 null. ★1.0 을 넘길 수 있다. */
+  attainment: number | null;
+  /** 목표 하한까지 남은 양. count 면 원수, rate 면 비율차. 넘었으면 0. */
+  remaining: number | null;
+  /** 목표 하한 도달 여부. 측정 불가면 false(달성이 아니라 미상이다). */
+  met: boolean;
+  /** 자동 측정이 되는 지표인가. false 면 value 는 반드시 null 이다. */
+  measurable: boolean;
+  /** measurable=false 인 이유. measurable=true 면 null. */
+  unmeasuredReason: string | null;
+  /**
+   * 값이 이 응답이 아니라 **다른 봉투**에서 오는 지표(축이 달라 여기서 세면
+   * 정의가 두 벌이 된다). 프론트가 이 좌표로 채운다.
+   */
+  externalSource: string | null;
+};
+
+/** 사장님이 못 박으신 최중요 지표. 화면이 이걸 가장 크게 그린다. */
+export const SCORECARD_HERO_KEY = "d30_retention";
+
+/**
+ * ★비율에 이 분모 이하면 곡선을 믿지 마라. 화면 상수(SMALL_SAMPLE_MAX)와 같은
+ * 값이고, 서버가 판정해 내려보내야 화면 두 곳이 갈라지지 않는다.
+ */
+export const SCORECARD_SMALL_SAMPLE_MAX = 10;
+
+export type BetaScorecardInput = {
+  /**
+   * ── 설치 축(analytics_user_daily) 스칼라 ──
+   *
+   * ★쿼리가 실패하면 **null 을 넣어라.** 빈 행을 넣으면 전부 0 이 되고, 화면은
+   * 그 0 을 "측정했더니 0" 으로 읽는다 — 조회 실패를 제품 실패로 그리는 것이라
+   * 이 화면 최대의 실패 모드다(사람 축 규약과 같다).
+   */
+  install: {
+    /**
+     * 활동일이 하루라도 있는 설치 수(전 기간).
+     * ★Qualified Beta 가 **아니다.** 사장님 정의는 '신청하고 우리가 승인한 사람'
+     * (계정 축)이라 이 수는 그 지표의 분자도 분모도 아니다 — 참고 맥락으로만 쓴다.
+     */
+    activeInstalls: unknown;
+    /** ★Activated 정본 — 누적 완료 task ≥ 3 인 설치 수(사장님 최종 확정). */
+    activatedInstalls: unknown;
+    /**
+     * ★첫 스폰을 한 설치 수 — **광고 최적화용 선행지표**.
+     * Activated 가 아니다. 역할이 다르다: 광고는 빠른 신호가 필요한데
+     * 클릭→3 Task 는 며칠 걸려 캠페인을 못 돌린다. 스폰은 설치 당일 찍힌다.
+     */
+    firstSpawnInstalls: unknown;
+    /** 조회 창의 완료 task 총량. */
+    monthlyTasks: unknown;
+    /** 최근 4주 안에 '주 3일+ 또는 주 10 task+' 를 한 번이라도 만족한 설치 수. */
+    powerUsers: unknown;
+    /** D7/D14/D30 코호트(= 판정 가능한 설치 수)와 재수행 설치 수. */
+    d7Cohort: unknown;
+    d7Retained: unknown;
+    d14Cohort: unknown;
+    d14Retained: unknown;
+    d30Cohort: unknown;
+    d30Retained: unknown;
+    /** 아직 D+30 이 오지 않아 분모에서 뺀 설치 수. 화면이 이걸 말한다. */
+    d30Pending: unknown;
+  } | null;
+  /** install 이 null 인 이유(쿼리 실패). null 이면 정상. */
+  installUnavailableReason?: string | null;
+  /** ── 사람 축(v_person_since_link) 원수. 비율로 접지 않는다 ── */
+  person: {
+    /** 링크가 닿은 사람 수. */
+    linkedPeople: unknown;
+    /** 그중 완료 task 가 1건 이상인 사람 수. */
+    peopleWithTask: unknown;
+    /** 그중 조회 창에 활동일이 있는 사람 수. */
+    activePeople: unknown;
+  } | null;
+  /** person 이 null 인 이유(게이트 닫힘/쿼리 실패). null 이면 정상. */
+  personUnavailableReason?: string | null;
+};
+
+export type BetaScorecardResult = {
+  metrics: ScorecardMetric[];
+  /**
+   * ★KPI 가 **아닌** 선행지표. 베타 종료·Seed 판단에 쓰지 않는다.
+   *
+   * 11개 지표와 한 격자에 섞지 않는 이유: 섞는 순간 누가 "Activated 가 18이네"
+   * 로 읽는다. 목표치도 붙이지 않는다 — 목표를 붙이는 순간 KPI 가 된다.
+   */
+  leadingIndicators: ScorecardMetric[];
+  /** 가장 크게 그릴 지표의 key. */
+  heroKey: string;
+  /** 사람 축 원수(비율 없음). 게이트가 닫혔거나 실패면 null. */
+  personAxisCounts: {
+    linkedPeople: number;
+    peopleWithTask: number;
+    activePeople: number;
+  } | null;
+  personUnavailableReason: string | null;
+  /** 설치 축 조회가 실패했을 때의 사유. 정상이면 null. */
+  installUnavailableReason: string | null;
+  smallSampleMax: number;
+  /** 화면 머리에 그대로 찍는 축 경고. */
+  axisNote: string;
+  note: string;
+};
+
+/** ★축 경고. 이 문장이 화면에 없으면 숫자가 거짓말이 된다. */
+export const SCORECARD_AXIS_NOTE =
+  "이 표의 지표는 **익명 설치 축**입니다(analytics_user_daily). 한 사람이 두 " +
+  "기기에 깔면 2로 세고, 한 기기를 두 계정이 쓰면 1로 합칩니다 — 사장님 지표의 " +
+  "단위인 '사람 수'가 아닙니다. 진짜 사람 축(marblo_identity.v_person_since_link)은 " +
+  "아래 별도 블록에 **원수만** 적었습니다: 커버리지가 아직 얇아 그 분모로 비율을 " +
+  "그리면 한 명이 움직일 때마다 수십 %p 가 흔들립니다. ★두 블록의 숫자를 더하거나 " +
+  "서로 비교하지 마세요. 축이 다릅니다.";
+
+/** ★운영자 제외가 이 축에서 구조적으로 불가능하다는 사실. 숨기지 않는다. */
+export const SCORECARD_ADMIN_EXCLUSION_NOTE =
+  "★운영자 제외(includeAdmin) 토글이 이 표에는 **적용되지 않습니다.** 익명축 " +
+  "테이블(analytics_user_daily / analytics_install_profile)에는 is_admin 컬럼이 " +
+  "없고, 계정축(analytics_account_profile)과의 조인은 축 분리 규약이 금지합니다" +
+  "(assertAxisPurity 가 스키마로 막습니다). 처리방침이 이미 고지한 대가입니다 — " +
+  "'운영자 본인 활동 제외는 포기했습니다'. 따라서 이 숫자는 내부 도그푸드 쪽으로 " +
+  "낙관 편향돼 있습니다. 실제 외부 고객 수는 여기 적힌 것보다 작습니다.";
+
+const MANUAL_REASON =
+  "계약·영업 사실이라 텔레메트리에 없습니다. 자동 측정 경로가 존재하지 않으므로 " +
+  "0 으로 그리지 않습니다 — 0 은 '아직 한 곳도 없다'로 읽히는데, 우리는 그것조차 " +
+  "모릅니다. 값이 필요하면 사람이 세어 적어야 합니다.";
+
+const PAYING_SOURCE = "getAdminBusinessSummary.subscriptions.paidCurrent";
+/**
+ * ★Qualified Beta 의 좌표. 사장님 정의가 '신청하고 우리가 승인한 사람' 이라
+ * 계정 축 사실이고, 설치 축 쿼리로는 셀 수 없다. 여기서 Firestore 를 또 읽으면
+ * '승인' 정의가 두 벌이 되므로 좌표만 선언하고 값은 기존 봉투에서 받는다.
+ */
+const QUALIFIED_SOURCE = "getAdminBusinessSummary.betaAccess.grantTotal";
+export { PAYING_SOURCE as SCORECARD_PAYING_SOURCE };
+export { QUALIFIED_SOURCE as SCORECARD_QUALIFIED_SOURCE };
+
+/**
+ * 지표 한 칸 조립. ★measurable=false 면 value 를 **강제로 null 로 만든다** —
+ * 호출부가 실수로 0 을 넣어도 화면까지 0 이 나가지 않게 하는 자리다.
+ */
+function scorecardMetric(spec: {
+  key: string;
+  label: string;
+  definition: string;
+  measuredAs: string;
+  axis: ScorecardAxis;
+  unit: ScorecardUnit;
+  counted?: RetentionCountedRate | null;
+  rawValue?: number | null;
+  targetMin: number;
+  targetMax: number;
+  seedMin: number | null;
+  measurable: boolean;
+  unmeasuredReason?: string | null;
+  externalSource?: string | null;
+}): ScorecardMetric {
+  const counted = spec.counted ?? null;
+  const value = !spec.measurable
+    ? null
+    : spec.unit === "rate"
+      ? (counted?.rate ?? null)
+      : (spec.rawValue ?? null);
+  // 달성률의 분모는 **목표 하한**이다. 목표가 0 이면 나누지 않는다(null).
+  const attainment =
+    value == null || spec.targetMin <= 0 ? null : value / spec.targetMin;
+  // ★목표가 없는 줄(targetMin ≤ 0 = 선행지표)은 '남은 양'도 없다. 0 으로 두면
+  //   화면이 "목표 하한 도달" 이라고 쓰는데, 도달할 목표 자체가 없다.
+  const hasTarget = spec.targetMin > 0;
+  const remaining =
+    !hasTarget || value == null
+      ? null
+      : Math.max(0, spec.targetMin - value);
+  return {
+    key: spec.key,
+    label: spec.label,
+    definition: spec.definition,
+    measuredAs: spec.measuredAs,
+    axis: spec.axis,
+    unit: spec.unit,
+    value,
+    counted: spec.unit === "rate" ? counted : null,
+    targetMin: spec.targetMin,
+    targetMax: spec.targetMax,
+    seedMin: spec.seedMin,
+    attainment,
+    remaining,
+    // ★측정 불가는 '미달'이 아니라 '미상'이다 — met 을 참으로 만들지 않는다.
+    // ★목표가 없는 줄도 마찬가지다: targetMin=0 이면 어떤 값이든 `value >= 0`
+    //   이라 전부 '달성'으로 뜬다. 선행지표가 늘 초록으로 보이면 그 줄이 곧
+    //   12번째 KPI 로 읽힌다 — 목표가 없으면 달성 판정도 없다.
+    met: hasTarget && value != null && value >= spec.targetMin,
+    measurable: spec.measurable,
+    unmeasuredReason: spec.measurable ? null : (spec.unmeasuredReason ?? null),
+    externalSource: spec.externalSource ?? null,
+  };
+}
+
+/**
+ * 11개 지표를 목표치와 나란히 조립한다. **순수 함수** — BQ 도 시계도 없다.
+ *
+ * ★분모가 0 이면 rate 는 null 이고(countedRate 규약) 그 자리에 0% 를 그리지
+ * 않는다. 분모 자체는 그대로 남는다 — `0/0` 을 지우면 측정값을 숨기는 것이다.
+ */
+export function buildBetaScorecard(
+  input: BetaScorecardInput,
+): BetaScorecardResult {
+  // ★조회 실패면 0 이 아니라 '미상'이다. install 이 null 이면 설치 축 지표
+  //   전체가 measurable=false 로 내려가고 value 는 강제로 null 이 된다
+  //   (scorecardMetric 이 그 자리를 지킨다) — 화면에 0 이 나갈 길이 없다.
+  const i = input.install;
+  const installOk = i != null;
+  const installReason = installOk
+    ? null
+    : (input.installUnavailableReason ??
+      "설치 축 조회가 실패했습니다. 0 으로 접지 않고 '미상'으로 둡니다.");
+  const num = (v: unknown): number => coerceNumber(v);
+  const d7 = countedRate(num(i?.d7Retained), num(i?.d7Cohort));
+  const d14 = countedRate(num(i?.d14Retained), num(i?.d14Cohort));
+  const d30 = countedRate(num(i?.d30Retained), num(i?.d30Cohort));
+
+  const installAxisSuffix =
+    " ★단위는 사람이 아니라 **설치**입니다(한 사람이 두 기기면 2).";
+  const retentionMeasured =
+    "첫 완료 task 가 있던 날을 코호트 기준일로 잡고, 그 다음날부터 +N일 안에 " +
+    "완료 task 를 **한 번이라도 더** 한 설치를 셉니다(analytics_user_daily." +
+    "tasks_completed > 0). 창은 누적이라 D7 ≤ D14 ≤ D30 이 정의상 보장됩니다. " +
+    "아직 D+N 일이 오지 않은 설치는 분모에서 뺍니다 — 넣으면 최근 코호트가 " +
+    "'이탈'로 잡혀 비율이 조용히 낮아집니다." + installAxisSuffix;
+
+  const metrics: ScorecardMetric[] = [
+    scorecardMetric({
+      key: "qualified_beta",
+      label: "Qualified Beta",
+      definition: "신청하고 우리가 승인한 사람",
+      measuredAs:
+        "베타 접근권이 부여된 계정 수(Firestore subscriptions 의 founder_grant). " +
+        "★값은 이 응답이 아니라 getAdminBusinessSummary 봉투에서 옵니다 — 계정 " +
+        "축 사실이라 설치 축 쿼리로는 셀 수 없습니다. 화면은 신청 → 선정 → " +
+        "접근권 부여 → 현재 유효 사다리를 함께 그려 어디서 새는지 보여 줍니다. " +
+        "★설치 축의 '활동 설치 수'를 이 자리에 쓰면 안 됩니다: 승인 없이 깔린 " +
+        "설치도 세고, 한 사람이 두 기기에 깔면 2로 셉니다.",
+      axis: "account",
+      unit: "count",
+      rawValue: null,
+      targetMin: 500,
+      targetMax: 500,
+      seedMin: 500,
+      measurable: true,
+      externalSource: QUALIFIED_SOURCE,
+    }),
+    scorecardMetric({
+      key: "activated",
+      label: "Activated",
+      definition: "설치 + Agent 연결 + 실제 프로젝트 + 3개 이상 Task",
+      measuredAs:
+        `누적 완료 task 가 ${ACTIVATED_MIN_TASKS_COMPLETED}건 이상인 설치 수. ` +
+        "★네 조건 중 'Task 3개 이상'만 " +
+        "셉니다 — task 를 3건 끝냈다면 앞의 세 조건은 이미 통과한 것이라 " +
+        "가장 좁은(= 가장 보수적인) 조건 하나로 대신합니다. ★사장님이 한때 " +
+        "'첫 스폰'으로 정하셨다가 3 Task 로 되돌리셨습니다 — 이것이 최종 " +
+        "확정입니다. 첫 스폰은 아래 선행지표 줄에 따로 있고 Activated 가 " +
+        "아닙니다." + installAxisSuffix,
+      axis: "install",
+      unit: "count",
+      rawValue: num(i?.activatedInstalls),
+      targetMin: 200,
+      targetMax: 200,
+      seedMin: 200,
+      measurable: installOk,
+      unmeasuredReason: installReason,
+    }),
+    scorecardMetric({
+      key: "d7_retention",
+      label: "D7 Retention",
+      definition: "7일 후 다시 실제 Task 수행",
+      measuredAs: retentionMeasured,
+      axis: "install",
+      unit: "rate",
+      counted: d7,
+      targetMin: 0.35,
+      targetMax: 0.35,
+      seedMin: 0.35,
+      measurable: installOk,
+      unmeasuredReason: installReason,
+    }),
+    scorecardMetric({
+      key: "d14_retention",
+      label: "D14 Retention",
+      definition: "14일 후 다시 실제 Task 수행",
+      measuredAs: retentionMeasured,
+      axis: "install",
+      unit: "rate",
+      counted: d14,
+      targetMin: 0.25,
+      targetMax: 0.25,
+      seedMin: 0.25,
+      measurable: installOk,
+      unmeasuredReason: installReason,
+    }),
+    scorecardMetric({
+      key: "d30_retention",
+      label: "D30 Retention",
+      definition: "30일 후에도 실제 사용",
+      measuredAs: retentionMeasured,
+      axis: "install",
+      unit: "rate",
+      counted: d30,
+      targetMin: 0.2,
+      targetMax: 0.2,
+      seedMin: 0.2,
+      measurable: installOk,
+      unmeasuredReason: installReason,
+    }),
+    scorecardMetric({
+      key: "d30_retained_users",
+      label: "D30 retained users",
+      definition: "실제 인원",
+      measuredAs:
+        "위 D30 비율의 **분자** 그 자체입니다(같은 수를 두 번 세지 않습니다). " +
+        "정의는 '실제 인원'인데 이 축이 세는 것은 설치 수라 단위가 어긋납니다 — " +
+        "사람 수는 아래 사람 축 블록을 보세요." + installAxisSuffix,
+      axis: "install",
+      unit: "count",
+      rawValue: d30.numerator,
+      targetMin: 30,
+      targetMax: 40,
+      seedMin: 40,
+      measurable: installOk,
+      unmeasuredReason: installReason,
+    }),
+    scorecardMetric({
+      key: "power_user",
+      label: "Power User",
+      definition: "주 3일+ 또는 주 10 Task+",
+      measuredAs:
+        "최근 4주 안의 어느 한 주에서 '완료 task 가 있던 날 3일 이상' 또는 " +
+        "'완료 task 10건 이상'을 만족한 설치 수. 주는 월요일 시작입니다." +
+        installAxisSuffix,
+      axis: "install",
+      unit: "count",
+      rawValue: num(i?.powerUsers),
+      targetMin: 20,
+      targetMax: 20,
+      seedMin: 30,
+      measurable: installOk,
+      unmeasuredReason: installReason,
+    }),
+    scorecardMetric({
+      key: "monthly_agent_tasks",
+      label: "Monthly Agent Tasks",
+      definition: "실사용 Task",
+      measuredAs:
+        "조회 창의 완료 task 총량(analytics_user_daily.tasks_completed 합). " +
+        "실패한 task 는 빼고 셉니다. 이 지표만 단위가 설치가 아니라 건수라 " +
+        "축 경고의 영향을 받지 않습니다.",
+      axis: "install",
+      unit: "count",
+      rawValue: num(i?.monthlyTasks),
+      targetMin: 10000,
+      targetMax: 10000,
+      seedMin: 30000,
+      measurable: installOk,
+      unmeasuredReason: installReason,
+    }),
+    scorecardMetric({
+      key: "paying_users",
+      label: "Paying Users",
+      definition: "개인/Team",
+      measuredAs:
+        "Firestore subscriptions 의 현재 유효 유료 구독자 수. ★이 값은 이 " +
+        "응답이 아니라 getAdminBusinessSummary 봉투에서 옵니다 — 같은 " +
+        "'결제자' 정의를 두 곳에서 세면 두 수가 갈라집니다. 축도 다릅니다" +
+        "(계정 축이라 위 설치 축 수치와 더하거나 나누면 안 됩니다).",
+      axis: "account",
+      unit: "count",
+      rawValue: null,
+      targetMin: 20,
+      targetMax: 50,
+      seedMin: 50,
+      measurable: true,
+      externalSource: PAYING_SOURCE,
+    }),
+    scorecardMetric({
+      key: "design_partners",
+      label: "Design Partners",
+      definition: "기업/팀",
+      measuredAs: "—",
+      axis: "manual",
+      unit: "count",
+      targetMin: 3,
+      targetMax: 5,
+      seedMin: 5,
+      measurable: false,
+      unmeasuredReason: MANUAL_REASON,
+    }),
+    scorecardMetric({
+      key: "paid_poc",
+      label: "Paid PoC",
+      definition: "돈 받고 실증",
+      measuredAs: "—",
+      axis: "manual",
+      unit: "count",
+      targetMin: 1,
+      targetMax: 2,
+      seedMin: 2,
+      measurable: false,
+      unmeasuredReason: MANUAL_REASON,
+    }),
+  ];
+
+  // ── ★선행지표 — KPI 가 아니다 ──────────────────────────────────────────
+  //
+  // 목표치를 붙이지 않는다(targetMin=0 → attainment/met 이 만들어지지 않는다).
+  // 목표가 붙는 순간 이 줄이 12번째 KPI 가 되고, 다음 사람이 Activated 대신
+  // 이 수를 읽는다 — 사장님이 정확히 그걸 경계하셨다.
+  const leadingIndicators: ScorecardMetric[] = [
+    scorecardMetric({
+      key: "first_spawn_leading",
+      label: "첫 스폰 (선행지표 · Activated 아님)",
+      definition:
+        "광고 최적화용 빠른 신호 — 클릭에서 3 Task 까지는 며칠 걸려 캠페인을 " +
+        "못 돌립니다. 스폰은 설치 당일 찍힙니다.",
+      measuredAs:
+        "analytics_install_profile.first_spawn_at 이 채워진 설치 수. events 의 " +
+        "agent:spawned 를 직접 세는 것과 값이 같고(실측 둘 다 동일) 스캔이 절반 " +
+        "이하라 파생표를 읽습니다. ★베타 종료·Seed 판단에는 쓰지 마세요 — " +
+        "스폰은 '가치를 봤다'가 아니라 '실행은 됐다'입니다." + installAxisSuffix,
+      axis: "install",
+      unit: "count",
+      rawValue: num(i?.firstSpawnInstalls),
+      // ★목표 0 = 목표 없음. scorecardMetric 이 attainment 를 null 로 만든다.
+      targetMin: 0,
+      targetMax: 0,
+      seedMin: null,
+      measurable: installOk,
+      unmeasuredReason: installReason,
+    }),
+  ];
+
+  const p = input.person;
+  return {
+    metrics,
+    leadingIndicators,
+    heroKey: SCORECARD_HERO_KEY,
+    personAxisCounts: p
+      ? {
+          linkedPeople: num(p.linkedPeople),
+          peopleWithTask: num(p.peopleWithTask),
+          activePeople: num(p.activePeople),
+        }
+      : null,
+    personUnavailableReason: p ? null : (input.personUnavailableReason ?? null),
+    installUnavailableReason: installReason,
+    smallSampleMax: SCORECARD_SMALL_SAMPLE_MAX,
+    axisNote: SCORECARD_AXIS_NOTE,
+    note:
+      "★티켓 본문과 그 정정 지시가 둘 다 'task_outcomes 는 사람 축'이라고 " +
+      "적었지만 실측은 다릅니다: task_outcomes.userId 는 전부 LENGTH 36(uuid36) " +
+      "= 익명 설치 ID 이고, 계정 uid 는 28자입니다. 같은 정의로 " +
+      "analytics_user_daily 에서 리텐션을 돌리면 task_outcomes 결과가 한 자리도 " +
+      "안 틀리고 재현됩니다 — 같은 축이기 때문입니다. 그래서 이 표는 설치 축임을 " +
+      "숨기지 않고 라벨로 밝히고, 사람 축은 원수만 따로 냅니다. " +
+      "★D30 이 D7 보다 높게 나올 수 있습니다. 창이 누적이라 정의상 " +
+      "D7 ≤ D14 ≤ D30 이고, 코호트가 지평마다 달라(늦게 들어온 설치는 D30 " +
+      "분모에서 빠짐) 비율의 대소가 뒤집힐 수 있습니다. 그것은 제품이 좋아졌다는 " +
+      "뜻이 아니라 **분모가 한 자릿수라 곡선이 의미를 못 가진다**는 뜻입니다. " +
+      "★목표 달성 여부(met)는 목표 하한 기준이며, 분모가 " +
+      `${SCORECARD_SMALL_SAMPLE_MAX} 이하인 비율의 met 은 신뢰하지 마세요. ` +
+      "★Design Partners·Paid PoC 는 자동 측정 경로가 없어 0 이 아니라 '측정 안 " +
+      "함'입니다. Paying Users 와 Qualified Beta 는 계정 축이라 값이 다른 봉투" +
+      "(getAdminBusinessSummary)에서 옵니다 — 같은 정의를 두 곳에서 세면 두 수가 " +
+      "조용히 갈라집니다. " +
+      "★Activated 정본은 '누적 완료 task ≥ 3' 입니다(사장님 최종 확정). '첫 " +
+      "스폰'은 광고 최적화용 선행지표로 leadingIndicators 에 따로 있고 목표치가 " +
+      "없습니다 — Activated 로 읽지 마세요. " +
+      "★D30 을 읽기 전에 베타 접근권 만료를 보세요: 부여 기간이 짧으면 D30 은 " +
+      "제품 리텐션이 아니라 **만료 신호**입니다. 그 수는 계정 축이라 이 응답에 " +
+      "없고 화면이 getAdminBusinessSummary.betaAccess 로 그립니다 — 설치 축인 " +
+      "D30 의 분모를 그 수로 보정할 수는 없습니다(축 분리 규약이 조인을 " +
+      "금지합니다).",
   };
 }

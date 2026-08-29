@@ -126,6 +126,7 @@ import {
   ONBOARDING_FAILURE_EVENTS,
   type FunnelCoverageRow,
   buildKpiCockpit,
+  buildBetaScorecard,
   buildCliSetupSummary,
   buildReleaseHealth,
   MODEL_BREAKDOWN_RETIRED,
@@ -190,9 +191,12 @@ import {
   type InstallMilestoneRow,
   type InstallProfileRow,
 } from "./analyticsProfiles";
+import { ACTIVATED_MIN_TASKS_COMPLETED } from "./activatedDefinition";
 import {
+  IDENTITY_DATASET,
   LINK_SOURCE_TELEMETRY_AUTH,
   PERSON_AXIS_LINK_POLICY_VERSION,
+  VIEW_PERSON_SINCE_LINK,
   buildPersonAxisCoverageSql,
   buildUserInstallInlineMergeSql,
   buildUserInstallMergeParams,
@@ -9687,6 +9691,7 @@ function computeConsecutiveBillingMetrics(
  *     pastDue, proConversionRateVsSubscribers, proConversionRateVsWaitlist },
  *   founders: { total, accessGranted, interviewCompleted, feedbackSubmitted },
  *   waitlist: { total, newInWindow },
+ *   betaAccess: { grantTotal, grantActive, grantExpired, expiryMonths },
  *   agents: { liveCount, byStatus, rollingTotalCost, rollingTotalTokens },
  * }
  */
@@ -9721,6 +9726,20 @@ export const getAdminBusinessSummary = functions.https.onCall(
     let activeCurrent = 0;
     let paidCurrent = 0;
     let paddleActiveCurrent = 0;
+    // ── ★베타 접근권 수명 (티켓 6jeXDBQ1xoH0FoXwjqAL) ───────────────────────
+    //
+    // 왜 여기서 세나 — 이 루프가 이미 subscriptions 전량을 한 번 읽고 있다.
+    // 따로 쿼리를 내면 **읽기가 두 배**가 되고, 범위 필터(currentPeriodEnd) 는
+    // 복합 인덱스까지 요구한다(실측: FAILED_PRECONDITION). 같은 루프에서 세면
+    // 추가 읽기 0 · 새 인덱스 0 이다.
+    //
+    // ★무엇에 쓰나 — KPI 화면의 D30 카드가 **제품 이탈과 정책 만료를 구분**하기
+    //   위해서다. FOUNDER_BETA_MONTHS = 1 이라 부여 한 달 뒤 접근권이 끊긴다.
+    //   실측(2026-08-29): 부여 34건 중 26건이 이미 만료. 그 사실을 안 그리면
+    //   D30 은 제품 리텐션이 아니라 만료율을 그리게 된다.
+    let betaGrantTotal = 0;
+    let betaGrantActive = 0;
+    let betaGrantExpired = 0;
 
     for (const doc of subSnap.docs) {
       // subscriptions doc id == uid → 운영자 본인 구독은 KPI 에서 제외한다.
@@ -9750,6 +9769,18 @@ export const getAdminBusinessSummary = functions.https.onCall(
         activeCurrent++;
         if (isPaidPlan(plan) && hasBillingPaymentEvidence(v)) paidCurrent++;
         if (provider === "paddle") paddleActiveCurrent++;
+      }
+      // ★베타 접근권은 founder_grant 만 센다. 유료 구독은 만료 개념이 달라
+      //   (갱신되면 이어진다) 같은 칸에 넣으면 '만료율' 이 희석된다.
+      if (provider === "founder_grant") {
+        betaGrantTotal++;
+        // 접근권이 아직 살아 있나 = 기간 끝이 미래인가. status 가 아니라 **기간**이
+        // 기준이다 — canceled 로 안 바뀐 채 기간만 지난 문서가 있을 수 있다.
+        if (currentPeriodEndMs != null && currentPeriodEndMs > nowMs) {
+          betaGrantActive++;
+        } else if (currentPeriodEndMs != null) {
+          betaGrantExpired++;
+        }
       }
 
       const createdMs = tsToMillis(v.createdAt);
@@ -9906,6 +9937,18 @@ export const getAdminBusinessSummary = functions.https.onCall(
       waitlist: {
         total: waitlistTotal,
         newInWindow: waitlistNewInWindow,
+      },
+      // ★베타 접근권 수명(티켓 6jeXDBQ1xoH0FoXwjqAL). KPI 탭의 D30 카드가
+      //   '제품 이탈' 과 '정책 만료' 를 가르는 데 쓴다. 구버전 web 은 이 키를
+      //   모르므로 그대로 동작한다(하위호환).
+      betaAccess: {
+        grantTotal: betaGrantTotal,
+        grantActive: betaGrantActive,
+        grantExpired: betaGrantExpired,
+        // ★부여 기간(개월). 이 값이 바뀌면 D30 의 의미가 통째로 바뀌므로
+        //   화면이 숫자를 그대로 읽어 문장에 넣는다 — 상수를 web 에 복제하면
+        //   별건 티켓이 기간을 늘렸을 때 화면만 옛말을 하게 된다.
+        expiryMonths: FOUNDER_BETA_MONTHS,
       },
       agents: {
         liveCount: agentTotal,
@@ -11851,6 +11894,128 @@ export const getAdminKpiCockpit = functions
       )
     `;
 
+    // ── (12) ★베타 종료 KPI 스코어카드 (티켓 6jeXDBQ1xoH0FoXwjqAL) ─────────
+    //
+    // 사장님 11개 지표를 목표치와 나란히 그리는 화면의 재료다. 위 (1)~(11) 과
+    // **원천이 다르다** — 저쪽은 `events` 원본이고 이쪽은 파생표
+    // `analytics_user_daily` 다. 파생표를 고른 이유가 셋 있다.
+    //
+    //  1) 사장님 정의가 "실제 Task 수행" 이다. events 의 'task:completed' 로 세면
+    //     같은 완료가 두 번 잡힌다(ANALYTICS_DAILY_OUTCOMES_SQL 주석: 완료·실패는
+    //     task_outcomes 단일 소스). 파생표는 이미 그 중복제거를 끝낸 값이다.
+    //  2) ★계측을 늘렸다는 이유로 게이지가 좋아지면 안 된다
+    //     (KPI_RETENTION_EXCLUDED_EVENTS 와 같은 규율). 이 리텐션의 분자는
+    //     `tasks_completed > 0` **하나**라 이벤트 종류가 늘어도 움직이지 않는다.
+    //  3) 비용. 파생표는 240행이라 스캔이 BQ 최소 과금(10MB)에 걸린다 —
+    //     `events` 전량 스캔을 한 번도 늘리지 않고 11개 지표를 다 만든다.
+    //
+    // ★축은 익명 **설치**다. 티켓 본문과 그 정정 지시가 둘 다 "task_outcomes 는
+    //   사람 축" 이라고 적었지만 실측은 다르다 — task_outcomes.userId 는 전부
+    //   LENGTH 36(uuid36) = 익명 설치 ID 이고 계정 uid 는 28자다. 같은 정의로
+    //   여기 파생표에서 돌리면 task_outcomes 결과가 한 자리도 안 틀리고
+    //   재현된다(코호트 7 / D7 3 / D14 4 / D30 3). 같은 축이기 때문이다.
+    //   그 사실은 숨기지 않고 순수 빌더의 axisNote 가 화면에 그대로 띄운다.
+    //
+    // ★운영자 제외절(`ex.clause`)을 여기 붙이지 마라 — 그 절은 events 전용
+    //   (JSON_VALUE(metadata,'$.accountUserId'))이고 익명축 파생표에는 계정
+    //   컬럼 자체가 없다(#930 교훈, analyticsProfiles.ts 헤더의 "운영자 본인
+    //   활동 제외는 포기했습니다"). 그래서 이 쿼리는 @days 만 참조한다.
+    const dailyTable = `\`${PERSON_AXIS_PROJECT_ID}.${ANALYTICS_DATASET}.${TABLE_USER_DAILY}\``;
+    const scorecardQuery = `
+      WITH d AS (
+        SELECT install_key AS k, day, active, tasks_completed
+        FROM ${dailyTable}
+      ),
+      task_day AS (SELECT k, day FROM d WHERE tasks_completed > 0),
+      first_task AS (SELECT k, MIN(day) AS d0 FROM task_day GROUP BY k),
+      -- ★코호트 기준일은 '첫 완료 task 가 있던 날' 이다(가입일이 아니다).
+      --   창은 누적이라 D7 ≤ D14 ≤ D30 이 정의상 보장된다 — 기존 코크핏 잔존이
+      --   세 칸을 같은 정의로 두어 단조성을 사실로 만든 것과 같은 규약이다.
+      horizon AS (
+        SELECT
+          f.k,
+          DATE_DIFF(CURRENT_DATE(), f.d0, DAY) AS age_days,
+          ${[7, 14, 30]
+            .map(
+              (n) => `(SELECT COUNT(*) FROM task_day t
+             WHERE t.k = f.k AND t.day > f.d0
+               AND t.day <= DATE_ADD(f.d0, INTERVAL ${n} DAY)) AS r${n}`
+            )
+            .join(",\n          ")}
+        FROM first_task f
+      ),
+      -- 주 3일+ 또는 주 10 task+ (월요일 시작 주). 최근 4주 안에 한 번이라도.
+      weekly AS (
+        SELECT
+          k,
+          DATE_TRUNC(day, WEEK(MONDAY)) AS w,
+          COUNTIF(tasks_completed > 0) AS task_days,
+          SUM(tasks_completed) AS wt
+        FROM d
+        WHERE day >= DATE_SUB(CURRENT_DATE(), INTERVAL 28 DAY)
+        GROUP BY k, w
+      ),
+      lifetime AS (SELECT k, SUM(tasks_completed) AS total FROM d GROUP BY k)
+      SELECT
+        (SELECT COUNT(DISTINCT k) FROM d WHERE active) AS d_active_installs,
+        -- ★Activated 정본 = 누적 완료 task ≥ N (사장님 최종 확정).
+        --   "첫 스폰" 으로 잠시 바뀌었다가 3 Task 로 되돌아왔다.
+        -- ★임계값을 손으로 적지 않는다. 광고 퍼널 티켓(O5JPlh4FSiCsNpZ4E9VJ)이
+        --   activatedDefinition.ts 를 정본으로 세웠으므로 그 상수를 읽는다 —
+        --   여기에 3 을 리터럴로 박으면 정의가 두 벌이 되고, 임계값이 바뀌는 날
+        --   광고 퍼널과 KPI 화면이 서로 다른 Activated 를 말하게 된다.
+        (SELECT COUNTIF(total >= ${ACTIVATED_MIN_TASKS_COMPLETED}) FROM lifetime)
+          AS d_activated,
+        -- ★첫 스폰 = **광고 최적화용 선행지표**다. Activated 가 아니다.
+        --   광고는 빠른 신호가 필요한데(클릭→3 Task 는 며칠 걸린다) 스폰은 설치
+        --   당일에 찍힌다. analytics_install_profile.first_spawn_at 을 읽는 이유는
+        --   비용이다 — events 의 agent:spawned 를 직접 세면 23MB, 파생표는 10MB 고
+        --   실측상 값이 정확히 같다(둘 다 18).
+        (SELECT COUNTIF(first_spawn_at IS NOT NULL)
+         FROM \`${PERSON_AXIS_PROJECT_ID}.${ANALYTICS_DATASET}.${TABLE_INSTALL_PROFILE}\`)
+          AS d_first_spawn,
+        (SELECT SUM(tasks_completed) FROM d
+          WHERE day >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY))
+          AS n_monthly_tasks,
+        (SELECT COUNT(DISTINCT k) FROM weekly
+          WHERE task_days >= 3 OR wt >= 10) AS d_power,
+        ${[7, 14, 30]
+          .map(
+            (n) => `(SELECT COUNTIF(age_days >= ${n}) FROM horizon) AS d${n}_cohort,
+        (SELECT COUNTIF(age_days >= ${n} AND r${n} > 0) FROM horizon)
+          AS d${n}_retained`
+          )
+          .join(",\n        ")},
+        -- ★아직 D+30 이 오지 않아 분모에서 뺀 설치 수. 화면이 이걸 말해야
+        --   "왜 분모가 코호트보다 작나" 가 설명된다.
+        (SELECT COUNTIF(age_days < 30) FROM horizon) AS d30_pending
+    `;
+
+    // ── (13) ★사람 축 원수 — 비율로 접지 않는다 ────────────────────────────
+    //
+    // 진짜 사람 축은 personAxis.ts 의 링크표 + `v_person_since_link` 다. 여기서
+    // 세는 것은 **원수 세 개뿐**이고 비율은 만들지 않는다: 실측 커버리지가 사람
+    // 2명이고 그중 task 를 한 번이라도 한 사람이 1명이라, 그 분모로 D7/D14/D30 을
+    // 그리면 한 명이 움직일 때마다 100%p 가 흔들린다.
+    //
+    // ★게이트가 닫혀 있으면 **쿼리 자체를 하지 않는다**(personAxis.ts §1 규약).
+    //   닫힘은 장애가 아니라 정상 상태이므로 0 과 사유로 끝난다.
+    // ★뷰는 이미 daily 를 조인해 만든 것이라, tasks_completed 를 얻으려고 daily 로
+    //   되돌아가는 조인은 새 다리를 놓는 것이 아니다(뷰가 쓰는 것과 같은 키).
+    const personGate = resolvePersonAxisGate();
+    const personCountsQuery = `
+      SELECT
+        COUNT(DISTINCT v.user_key) AS d_linked_people,
+        COUNT(DISTINCT IF(d.tasks_completed > 0, v.user_key, NULL))
+          AS d_people_with_task,
+        COUNT(DISTINCT IF(
+          d.active AND d.day >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY),
+          v.user_key, NULL)) AS d_active_people
+      FROM \`${PERSON_AXIS_PROJECT_ID}.${IDENTITY_DATASET}.${VIEW_PERSON_SINCE_LINK}\` v
+      JOIN ${dailyTable} d
+        ON d.install_key_hmac = v.install_key AND d.day = v.day
+    `;
+
     // 대부분 쿼리는 @days(윈도우)+제외절 파라미터를 참조한다. 단 weeklyQuery 는
     // 고정 7일 창(@days 미참조)이라, 미참조 파라미터를 넘기면 BQ 가 거부하므로
     // (위 getAdminModelSummary 의 uid/client 분리와 동일 사유) 제외절 파라미터만
@@ -11901,6 +12066,25 @@ export const getAdminKpiCockpit = functions
         query: weeklyTwicePlusQuery,
         params: ex.params,
       },
+      // ★스코어카드 두 벌은 파생표만 읽는다(events 스캔 증가 0). 제외절
+      //   파라미터를 안 참조하므로 @days 만 넘긴다 — 미참조 파라미터는 BQ 가
+      //   거부한다(weeklyQuery 와 반대 방향의 같은 함정).
+      {
+        name: "kpi.scorecard",
+        query: scorecardQuery,
+        params: { days: rangeDays },
+      },
+      // ★게이트가 닫혀 있으면 스펙 자체를 넣지 않는다 — 조회하지 않는 것이
+      //   personAxis.ts §1 의 규약이다. 자리는 남겨야 아래 구조분해가 안 밀린다.
+      ...(personGate.open
+        ? [
+            {
+              name: "kpi.personCounts",
+              query: personCountsQuery,
+              params: { days: rangeDays },
+            },
+          ]
+        : []),
     ]);
     const [
       headRows,
@@ -11918,6 +12102,9 @@ export const getAdminKpiCockpit = functions
       stallBlockReasonRows,
       zeroFrictionRows,
       weeklyTwicePlusRows,
+      scorecardRows,
+      // ★게이트가 닫히면 이 자리는 undefined 다(스펙을 안 넣었으므로).
+      personCountRows,
     ] = kpiQueryResults.map((r) => r.rows);
     const kpiQueryErrors = kpiQueryResults
       .filter((r) => r.error != null)
@@ -11938,6 +12125,18 @@ export const getAdminKpiCockpit = functions
     const stallRow = first(stallRows);
     const zeroFrictionRow = first(zeroFrictionRows);
     const weeklyTwicePlusRow = first(weeklyTwicePlusRows);
+    // ★조회 실패를 제품 실패로 그리지 않는다. 이 러너는 실패를 삼키고 빈 배열을
+    //   주므로, 실패를 여기서 잡아 순수 빌더에 null 을 넘긴다 — 그러면 해당 축의
+    //   지표가 전부 '미상' 이 되고 0 이 화면으로 나갈 길이 없다.
+    const queryFailed = (name: string): boolean =>
+      kpiQueryResults.some((r) => r.name === name && r.error != null);
+    const scorecardFailed = queryFailed("kpi.scorecard");
+    const scorecardRow = first(scorecardRows);
+    const personCountsFailed =
+      personGate.open && queryFailed("kpi.personCounts");
+    const personCountRow = personGate.open
+      ? ((personCountRows ?? [])[0] as Record<string, unknown> | undefined)
+      : undefined;
 
     // CLI 셋업 단계 요약 → 게이지의 CLI 인증/첫프로젝트 분자·분모 파생.
     const cliRows = (cliSetupRows as Array<Record<string, unknown>>).map(
@@ -12069,6 +12268,43 @@ export const getAdminKpiCockpit = functions
         errors: kpiQueryErrors,
       },
       ...cockpit,
+      // ★베타 종료 KPI 스코어카드(티켓 6jeXDBQ1xoH0FoXwjqAL). 기존 코크핏 필드는
+      //   한 글자도 건드리지 않고 봉투 하나를 **더한다** — 구버전 web 은 이 키를
+      //   모르므로 그대로 동작하고(하위호환), 신버전 web 은 없으면 '배선 전' 으로
+      //   접는다. 게이지를 조용히 옮기지 않는다는 규율이 여기에도 적용된다.
+      betaScorecard: buildBetaScorecard({
+        installUnavailableReason: scorecardFailed
+          ? "설치 축 조회(kpi.scorecard)가 실패했습니다. 0 으로 접지 않고 '미상'으로 둡니다 — 사유는 queryStatus.errors 를 보세요."
+          : null,
+        install: scorecardFailed
+          ? null
+          : {
+              activeInstalls: scorecardRow.d_active_installs,
+              activatedInstalls: scorecardRow.d_activated,
+              firstSpawnInstalls: scorecardRow.d_first_spawn,
+              monthlyTasks: scorecardRow.n_monthly_tasks,
+              powerUsers: scorecardRow.d_power,
+              d7Cohort: scorecardRow.d7_cohort,
+              d7Retained: scorecardRow.d7_retained,
+              d14Cohort: scorecardRow.d14_cohort,
+              d14Retained: scorecardRow.d14_retained,
+              d30Cohort: scorecardRow.d30_cohort,
+              d30Retained: scorecardRow.d30_retained,
+              d30Pending: scorecardRow.d30_pending,
+            },
+        person: personCountRow
+          ? {
+              linkedPeople: personCountRow.d_linked_people,
+              peopleWithTask: personCountRow.d_people_with_task,
+              activePeople: personCountRow.d_active_people,
+            }
+          : null,
+        personUnavailableReason: personGate.open
+          ? personCountsFailed
+            ? "사람 축 조회가 실패했습니다. 0 으로 접지 않고 '미상'으로 둡니다 — 사유는 queryStatus.errors 의 kpi.personCounts 를 보세요."
+            : "사람 축 뷰에 아직 행이 없습니다(링크가 닿은 설치의 daily 행이 발효일 이후 구간에 없음). 소급 재작성하지 않으므로 시간이 지나며 채워집니다."
+          : personGate.reason,
+      }),
     };
   });
 

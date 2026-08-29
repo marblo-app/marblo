@@ -252,16 +252,27 @@ test("식별자 교체 경계는 구간 안에 있을 때만 선이 된다", () 
 
 // ── 탭 = 질문 ───────────────────────────────────────────────────────────────
 
-test("6탭이 각각 한 질문에 대응하고 tablist 로 노출된다", () => {
+test("7탭이 각각 한 질문에 대응하고 tablist 로 노출된다", () => {
+  // ★⓪ KPI 가 앞에 하나 붙었다(티켓 6jeXDBQ1xoH0FoXwjqAL). 기존 6개는 id·순서
+  //   모두 그대로다 — 새 탭이 기존 탭을 밀어내지 않았다는 것이 이 단언의 요점이다.
   assert.deepEqual(
     P.ANALYTICS_TABS.map((t) => t.id),
-    ["acquisition", "ads", "activation", "retention", "revenue", "operations"]
+    [
+      "kpi",
+      "acquisition",
+      "ads",
+      "activation",
+      "retention",
+      "revenue",
+      "operations",
+    ]
   );
   const html = renderToStaticMarkup(
     <P.AnalyticsTabBar tab="retention" onChange={() => {}} />
   );
   assert.match(html, /role="tablist"/);
-  assert.equal((html.match(/role="tab"/g) ?? []).length, 6);
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 7);
+  assert.match(html, /베타를 끝내도 되나/);
   assert.match(
     html,
     /aria-selected="true"[^>]*aria-controls="analytics-panel-retention"/
@@ -562,12 +573,15 @@ test("★아래 표의 최근 14일 스파크라인은 그대로다 (이미 좋�
 // 흉내낸 트리가 아니라 화면이 쓰는 그 컴포넌트를 SSR 로 세운다. useEffect 는
 // 서버 렌더에서 돌지 않으므로 콜러블은 나가지 않고, 초기 탭의 골격만 나온다.
 
-test("패널은 6탭 tablist 를 세우고 선택된 탭만 렌더한다", () => {
+test("패널은 7탭 tablist 를 세우고 선택된 탭만 렌더한다", () => {
   const html = renderToStaticMarkup(<P.default />);
   assert.match(html, /role="tablist"/);
-  assert.equal((html.match(/role="tab"/g) ?? []).length, 6);
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 7);
   // 기본 탭 = ① 획득. 나머지 탭 패널은 DOM 에 없다(숨김이 아니라 미렌더).
+  // ★⓪ KPI 를 앞에 붙였지만 **기본 탭은 옮기지 않았다** — 기본값을 바꾸면 기존
+  //   북마크·습관이 조용히 다른 화면을 연다.
   assert.match(html, /id="analytics-panel-acquisition"/);
+  assert.doesNotMatch(html, /id="analytics-panel-kpi"/);
   assert.doesNotMatch(html, /id="analytics-panel-ads"/);
   assert.doesNotMatch(html, /id="analytics-panel-activation"/);
   assert.doesNotMatch(html, /id="analytics-panel-retention"/);
@@ -580,6 +594,29 @@ test("패널은 6탭 tablist 를 세우고 선택된 탭만 렌더한다", () =>
   assert.match(html, /광고 탭/);
   // ★삭제 대상(계획 §2-1 A11 "획득 비용 회수" 플레이스홀더)이 실제로 사라졌다.
   assert.doesNotMatch(html, /획득 비용 회수/);
+});
+
+test("★⓪ KPI 탭은 봉투가 없으면 0 이 아니라 '연결 전' 으로 선다", () => {
+  // SSR 에서는 useEffect 가 돌지 않아 콜러블이 안 나가고 kpi 는 loading 이다 —
+  // 그래서 여기서 확인하는 것은 값이 아니라 **탭이 실제로 선다**는 사실이다.
+  // (봉투가 실린 뒤의 렌더 규약은 BetaScorecard.test.tsx 가 못박는다.)
+  const html = renderToStaticMarkup(<P.default initialTab="kpi" />);
+  assert.match(html, /id="analytics-panel-kpi"/);
+  assert.match(
+    html,
+    /aria-selected="true"[^>]*aria-controls="analytics-panel-kpi"/
+  );
+  // 기존 6개 탭 패널은 하나도 렌더되지 않는다(회귀 0 의 실물 확인).
+  for (const id of [
+    "acquisition",
+    "ads",
+    "activation",
+    "retention",
+    "revenue",
+    "operations",
+  ]) {
+    assert.doesNotMatch(html, new RegExp(`id="analytics-panel-${id}"`));
+  }
 });
 
 test("운영자 제외가 기본값이다 (체크박스 off)", () => {
@@ -1113,12 +1150,13 @@ test("★브리지 적재 배너는 마지막 동기 시각을 보인다", () =>
 
 test("initialTab 은 선택된 탭만 렌더한다는 기존 규약을 깨지 않는다", () => {
   const html = renderToStaticMarkup(<P.default initialTab="revenue" />);
+  assert.doesNotMatch(html, /id="analytics-panel-kpi"/);
   assert.doesNotMatch(html, /id="analytics-panel-acquisition"/);
   assert.doesNotMatch(html, /id="analytics-panel-ads"/);
   assert.doesNotMatch(html, /id="analytics-panel-activation"/);
   assert.doesNotMatch(html, /id="analytics-panel-retention"/);
   assert.doesNotMatch(html, /id="analytics-panel-operations"/);
-  assert.equal((html.match(/role="tab"/g) ?? []).length, 6);
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 7);
   assert.match(
     html,
     /aria-selected="true"[^>]*aria-controls="analytics-panel-revenue"/
