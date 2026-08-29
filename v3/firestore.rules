@@ -46,6 +46,15 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/memberRoles/$(projectId + '_' + userId));
     }
 
+    // ★문서가 없으면 'member' — 서버의 normalizeMemberRole(functions/src/
+    //   githubApp.ts)과 **같은 기본값**이다. 한쪽만 바꾸면 화면이 허용하는 것과
+    //   토큰이 허용하는 것이 갈린다.
+    //
+    // ★★viewer 로 뒤집기 전에 백필이 선행돼야 한다(티켓 uhkQrRBgeBRddWb6OeDa).
+    //   역할 문서 없이 멤버가 되던 경로(초대 수락)는 막혔지만, 그 이전에 들어온
+    //   문서 없는 멤버들에게는 이 기본값이 유일한 권한 근거다.
+    //   순서: 누수 차단(완료) → functions/scripts/backfill-member-roles.mjs →
+    //   기본값 전환(룰 + githubApp.normalizeMemberRole 동시에).
     function getMemberRole(projectId, userId) {
       return memberRoleExists(projectId, userId)
         ? getMemberRoleDoc(projectId, userId).role
@@ -150,6 +159,56 @@ service cloud.firestore {
         && request.resource.data.members.hasOnly(resource.data.members.concat([request.auth.uid]))
         && request.auth.uid in request.resource.data.members
         && hasValidPendingInvite(projectId);
+    }
+
+    // B2-R: 초대 수락자가 **자기** memberRoles 문서를 초대장의 역할로 못 박는
+    // 단일 전이 (티켓 uhkQrRBgeBRddWb6OeDa, P1).
+    //
+    // ★왜 필요한가: 아래 memberRoles 게이트는 create/update 를 `isAdminOrOwner`
+    //   에게만 연다. 그런데 수락자는 admin/owner 가 아니다 — 그래서 수락 경로는
+    //   역할 문서를 **아예 쓰지 못했고**, 수락한 사람은 문서 없는 멤버가 됐다.
+    //   문서가 없으면 아래 getMemberRole 과 서버의 normalizeMemberRole 이 그를
+    //   기본값 `member` 로 접는다. 즉 **viewer 로 초대해도 저장소 write 토큰이
+    //   나갔다**(라이브 확인: 역할 문서 없는 계정 → ok/role=member/access=write).
+    //
+    // ★자기 승격이 아니다. 쓰는 role 이 **초대 문서의 role 과 같아야** 하고,
+    //   초대 문서는 admin/owner 만 만들 수 있다. 즉 값의 출처는 여전히 관리자다.
+    //   isInvitedSelfJoin(members self-join)과 정확히 대칭이며 같은 근거
+    //   (결정적 id 로 get 한 pending 초대)를 쓴다.
+    //
+    // 함께 금지되는 것:
+    //  - 남의 문서 쓰기(docId·userId 가 request.auth.uid 로 결속)
+    //  - 'owner' 자칭(owner 는 projects.ownerId 로만 된다)
+    //  - 초대에 없던 필드 심기(keys().hasOnly — grants 등 확장 필드 봉쇄)
+    //  - 초대 만료·수락 후 재사용(status=='pending' + expiresAt 검사)
+    function invitedSelfRoleMatchesInvite() {
+      let projectId = request.resource.data.projectId;
+      let inv = get(/databases/$(database)/documents/invitations/$(projectId + '_' + request.auth.token.email.lower())).data;
+      return inv.projectId == projectId
+        && inv.invitedEmail.lower() == request.auth.token.email.lower()
+        && inv.status == 'pending'
+        && request.time < inv.expiresAt
+        && inv.role == request.resource.data.role
+        // ★admin 은 **owner 가 낸 초대장**으로만 못 박힌다. 위 invitations
+        //   create 게이트가 이미 admin 초대를 owner 전용으로 막지만, 그 게이트
+        //   이전에 만들어진 초대장이 남아 있으면 여기가 두 번째 문이다.
+        //   "admin 승격은 owner 전용"은 이 파일이 memberRoles 에서 지키는
+        //   불변식이고, 우회로를 하나라도 열면 그 게이트가 장식이 된다.
+        && (inv.role != 'admin' || inv.invitedBy == getProject(projectId).ownerId);
+    }
+
+    // ★아래 `role != 'owner'` 는 오늘 기준 **중복**이다 — memberRoles 의
+    //   create/update 게이트가 이미 같은 검사를 바깥에서 한다(뮤테이션으로 확인:
+    //   여기만 지우면 어떤 테스트도 안 깨지고, 바깥 것까지 지워야 깨진다).
+    //   지우지 말 것: 이 함수는 self-write 라는 별도의 문이고, 바깥 게이트가
+    //   재구성돼도 owner 자칭은 여기서 한 번 더 막혀야 한다. 반대로 **바깥
+    //   게이트를 "여기서 막으니까"라며 지우면 안 된다** — 하중은 바깥이 받는다.
+    function isInvitedSelfRoleWrite(docId) {
+      return request.resource.data.userId == request.auth.uid
+        && docId == request.resource.data.projectId + '_' + request.auth.uid
+        && request.resource.data.keys().hasOnly(['projectId', 'userId', 'role'])
+        && request.resource.data.role != 'owner'
+        && invitedSelfRoleMatchesInvite();
     }
 
     // ===== projects 필드별 쓰기 권한 (티켓 wWl44fSBwmQ4vRylmHsF, P1) =====
@@ -772,11 +831,30 @@ service cloud.firestore {
         && (isProjectMember(resource.data.projectId)
             || resource.data.invitedEmail == request.auth.token.email);
 
-      // Only admin+ of the project can create invitations
+      // Only admin+ of the project can create invitations.
+      //
+      // ★role 게이트 (티켓 uhkQrRBgeBRddWb6OeDa) — `teamRoles.assignableRolesFor`
+      //   (owner→admin/member/viewer, admin→member/viewer)와 **같은 판정**이다.
+      //   화면은 이미 이대로 막고 있었지만 룰은 안 막고 있었다: admin 이
+      //   `role:'admin'` 초대를 만들 수 있었다.
+      //
+      //   ★이전엔 무해했다 — 수락이 invitation.role 을 버려서 그 값이
+      //   아무 역할 문서도 만들지 않았기 때문이다. 지금은 수락이 그 값을
+      //   그대로 memberRoles 로 못 박으므로(isInvitedSelfRoleWrite), 이 구멍은
+      //   **admin 이 admin 을 만드는 승격 통로**가 된다 —
+      //   memberRoles 의 "admin 승격은 owner 전용" 게이트를 우회해서.
+      //   그래서 초대를 만드는 문에서 같은 불변식을 강제한다.
+      //
+      //   'owner' 초대도 막는다: owner 는 부여할 수 있는 역할이 아니고
+      //   (projects.ownerId 가 유일한 진실원), 그런 초대가 존재하면
+      //   수락 자체가 영영 불가능해진다(못 박는 역할 = 진행 불가).
       allow create: if isAuthenticated()
         && isAdminOrOwner(request.resource.data.projectId)
         && request.resource.data.invitedBy == request.auth.uid
-        && request.resource.data.status == 'pending';
+        && request.resource.data.status == 'pending'
+        && request.resource.data.role in ['admin', 'member', 'viewer']
+        && (request.resource.data.role != 'admin'
+            || isProjectOwner(request.resource.data.projectId));
 
       // The invited user can accept/reject, project admin+ can cancel (update status)
       // B2 하드닝: 초대 대상자는 status 필드만 바꿀 수 있다(role/projectId 조작
@@ -836,20 +914,33 @@ service cloud.firestore {
 
       allow create: if isAuthenticated()
         && memberRoleDocIdMatches(docId)
-        && isAdminOrOwner(request.resource.data.projectId)
         && request.resource.data.role != 'owner'
-        && (request.resource.data.role != 'admin'
-            || isProjectOwner(request.resource.data.projectId));
+        && (
+          (isAdminOrOwner(request.resource.data.projectId)
+            && (request.resource.data.role != 'admin'
+                || isProjectOwner(request.resource.data.projectId)))
+          // B2-R: 초대 수락자가 자기 문서를 초대장의 역할로 만드는 경로.
+          || isInvitedSelfRoleWrite(docId)
+        );
 
       allow update: if isAuthenticated()
         && memberRoleDocIdMatches(docId)
         && request.resource.data.projectId == resource.data.projectId
         && request.resource.data.userId == resource.data.userId
-        && isAdminOrOwner(resource.data.projectId)
         && request.resource.data.role != 'owner'
-        && ((request.resource.data.role != 'admin'
-             && resource.data.get('role', '') != 'admin')
-            || isProjectOwner(resource.data.projectId));
+        && (
+          (isAdminOrOwner(resource.data.projectId)
+            && ((request.resource.data.role != 'admin'
+                 && resource.data.get('role', '') != 'admin')
+                || isProjectOwner(resource.data.projectId)))
+          // B2-R: 수락 재시도의 멱등성. addMember 나 status 전이가 실패해
+          // 사용자가 수락을 다시 누르면 문서가 이미 있어 create 가 아니라
+          // update 가 된다 — 여기를 막으면 수락이 영영 못 끝난다.
+          // ★기존 admin 문서는 이 경로로 못 건드린다: admin 강등은 owner 전용인데
+          //   (admin 이 admin 을 viewer 로 초대해 수락시키는) 우회 강등이 열린다.
+          || (resource.data.get('role', '') != 'admin'
+              && isInvitedSelfRoleWrite(docId))
+        );
 
       allow delete: if isAuthenticated()
         && isAdminOrOwner(resource.data.projectId)

@@ -292,6 +292,14 @@ export function roleCanMerge(role: ProjectRole): boolean {
  * `getMemberRole` 이 문서가 없을 때 'member' 를 쓰는 것과 정확히 같다. 여기서
  * viewer 로 접으면 룰이 허용하는 사람을 코드가 막고, owner 로 접으면 그 반대다.
  *
+ * ★★이 기본값을 viewer 로 뒤집고 싶다면 **먼저 백필해야 한다**
+ * (티켓 uhkQrRBgeBRddWb6OeDa). 역할 문서 없이 멤버가 되는 경로가 하나 있었고
+ * (초대 수락이 `invitation.role` 을 버렸다 — teamService.acceptInvitation),
+ * 그래서 문서 없는 기존 멤버가 남아 있다. 그들에게 이 기본값이 유일한 권한
+ * 근거이므로, 백필 전에 viewer 로 접으면 **기존 멤버 전원이 push 를 잃는다**.
+ * 순서: 누수 차단(완료) → `scripts/backfill-member-roles.mjs` 백필 → 기본값 전환.
+ * ★전환할 때는 firestore.rules 의 `getMemberRole` 과 **반드시 같이** 바꾼다.
+ *
  * ★`owner` 는 이 문서로 얻지 않는다 — 프로젝트 `ownerId` 가 진실원이다
  * (룰의 `isProjectOwner` 와 같다). 멤버가 자기 memberRoles 문서에 'owner' 를
  * 써 넣어 승격하는 경로를 여기서 끊는다.

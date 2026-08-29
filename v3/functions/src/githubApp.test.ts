@@ -765,6 +765,72 @@ test("member/admin/owner 는 write 를 받는다", () => {
   }
 });
 
+// ── v2-2b. ★역할 문서가 **없는** 멤버 (티켓 uhkQrRBgeBRddWb6OeDa) ──────────
+//
+// 이게 이번 P1 의 실제 사고 모양이다. 초대 수락이 `invitation.role` 을 버려서
+// 역할 문서 없는 멤버가 생겼고, 기본값 member 로 접혀 저장소 write 가 나갔다.
+// 라이브 확인: 문서 없는 계정 → {"ok":true,"role":"member","access":"write"}.
+//
+// ★기본값은 지금도 member 다(백필 전에 viewer 로 뒤집으면 기존 멤버 전원이 push
+//   를 잃는다). 이 테스트는 그 값을 **못 박아** 둔다 — 룰의 getMemberRole 과 함께
+//   바꾸지 않고 한쪽만 뒤집는 변경이 여기서 깨진다.
+
+test("★역할 문서 없음 × read/write — 기본값 member 로 접힌다 (룰과 같은 값)", () => {
+  for (const missing of [undefined, null, ""] as const) {
+    const read = issueV2(MEMBER, {
+      memberRole: missing,
+      requestedAccess: "read",
+    });
+    assert.equal(read.ok, true);
+    assert.equal(read.ok === true && read.role, "member");
+    assert.equal(read.ok === true && read.access, "read");
+
+    const write = issueV2(MEMBER, {
+      memberRole: missing,
+      requestedAccess: "write",
+    });
+    assert.equal(write.ok, true, `memberRole=${String(missing)} 는 member 로 접힌다`);
+    assert.equal(write.ok === true && write.role, "member");
+    assert.equal(write.ok === true && write.access, "write");
+  }
+});
+
+test("★역할 문서 없음 — 기본 브랜치는 못 민다 (member 와 같은 선)", () => {
+  const d = evaluateInstallationTokenRequest({
+    uid: MEMBER,
+    project: projectWithRoles(),
+    ownerPlan: "team",
+    memberRole: undefined,
+    requestedAccess: "write",
+  });
+  assert.equal(d.ok, true);
+  assert.equal(d.ok === true && roleCanMerge(d.role), false);
+});
+
+test("★문서없음/viewer/member/admin × read·write 전수", () => {
+  // 행: 역할 문서의 raw 값. 열: read 결과 / write 결과.
+  const cases: Array<[unknown, string, boolean]> = [
+    [undefined, "member", true], // 문서 없음 → 기본값
+    ["viewer", "viewer", false],
+    ["member", "member", true],
+    ["admin", "admin", true],
+  ];
+  for (const [raw, expectedRole, canWrite] of cases) {
+    const read = issueV2(MEMBER, { memberRole: raw, requestedAccess: "read" });
+    assert.equal(read.ok, true, `${String(raw)} 는 read 를 받아야 한다`);
+    assert.equal(read.ok === true && read.role, expectedRole);
+
+    const write = issueV2(MEMBER, { memberRole: raw, requestedAccess: "write" });
+    if (canWrite) {
+      assert.equal(write.ok, true, `${String(raw)} 는 write 를 받아야 한다`);
+      assert.equal(write.ok === true && write.access, "write");
+    } else {
+      assert.equal(write.ok, false, `${String(raw)} 는 write 를 거부당해야 한다`);
+      assert.equal(write.ok === false && write.code, "role-cannot-write");
+    }
+  }
+});
+
 test("access 를 안 주면 read — v1 호출부가 그대로 동작한다", () => {
   const d = issueV2(MEMBER, { memberRole: "member" });
   assert.equal(d.ok === true && d.access, "read");

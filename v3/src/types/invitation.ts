@@ -1,6 +1,17 @@
 export type InvitationRole = "owner" | "admin" | "member" | "viewer";
 export type InvitationStatus = "pending" | "accepted" | "rejected" | "expired";
 
+/**
+ * `memberRoles/{projectId}_{uid}.role` 에 **실제로 저장될 수 있는** 역할.
+ *
+ * ★`owner` 가 빠진 것이 핵심이다. owner 는 `projects.ownerId` 하나로만 판정되며
+ * (서버 `resolveProjectRole`, 룰 `isProjectOwner`), 역할 문서에 'owner' 를 써서
+ * 승격하는 통로는 서버(`normalizeMemberRole`)와 룰(`memberRoles` create/update)
+ * 양쪽에서 막혀 있다. 타입으로도 그 구분을 남긴다 — 저장 경로에서 'owner' 를
+ * 다룰 수 있는 것처럼 보이면 다음 사람이 그 통로를 다시 연다.
+ */
+export type StoredMemberRole = Exclude<InvitationRole, "owner">;
+
 export interface Invitation {
   id: string;
   projectId: string;

@@ -1,5 +1,9 @@
 import { where } from "firebase/firestore";
-import type { Invitation, InvitationRole } from "../types/invitation";
+import type {
+  Invitation,
+  InvitationRole,
+  StoredMemberRole,
+} from "../types/invitation";
 import type { User } from "../types/user";
 import { USER_DATE_FIELDS } from "../types/user";
 import { ROLE_PERMISSIONS } from "../types/invitation";
@@ -19,6 +23,12 @@ import { sanitizeGitRemoteUrl } from "../lib/gitUrlSafety";
 import { t } from "../lib/i18n";
 
 const INVITATIONS = "invitations";
+const MEMBER_ROLES = "memberRoles";
+
+function memberRoleDocId(projectId: string, userId: string): string {
+  return `${projectId}_${userId}`;
+}
+
 const USERS = "users";
 const INVITATION_DATE_FIELDS = ["createdAt", "expiresAt"];
 // `users` 날짜 필드 목록은 types/user 의 USER_DATE_FIELDS 하나뿐이다 —
@@ -231,6 +241,49 @@ function assertInvitationTargetsOneProject(
   }
 }
 
+/**
+ * 초대장에 적힌 역할을 `memberRoles` 문서에 못 박기 전에 정규화한다.
+ *
+ * ★서버의 `normalizeMemberRole`(functions/src/githubApp.ts) 과 **같은 접기**다:
+ * 모르는 값과 `owner` 는 `member` 로 접는다. owner 는 `projects.ownerId` 로만
+ * 되며 역할 문서로 승격되지 않는다 — 여기서 'owner' 를 그대로 쓰면 룰이
+ * 거부해서 수락 자체가 죽고, 룰이 없더라도 승격 통로가 열린다.
+ */
+export function memberRoleFromInvitation(raw: unknown): StoredMemberRole {
+  if (typeof raw !== "string") return "member";
+  const t = raw.trim().toLowerCase();
+  return t === "admin" || t === "viewer" || t === "member"
+    ? (t as StoredMemberRole)
+    : "member";
+}
+
+/**
+ * 수락자가 **자기 역할 문서**를 초대장의 역할로 만든다.
+ *
+ * 자기 승격이 아니다 — 값의 출처가 초대 문서이고, 초대는 admin/owner 만 만들 수
+ * 있다. `firestore.rules` 의 `isInvitedSelfRoleWrite` 가 서버 쪽에서 같은 것을
+ * 강제한다(초대의 role 과 일치하지 않으면 거부). 이 함수 하나가 "역할 문서 없는
+ * 멤버"가 새로 생기는 유일한 경로를 막는다.
+ *
+ * 실패하면 던진다. 삼키면 멤버십만 생기고 역할이 비어 기본값 member 로 접히는
+ * — 고치려는 그 사고가 그대로 남는다.
+ */
+async function pinInvitedMemberRole(
+  invitation: Invitation,
+  userId: string,
+): Promise<void> {
+  const role = memberRoleFromInvitation(invitation.role);
+  await setDocument(
+    MEMBER_ROLES,
+    memberRoleDocId(invitation.projectId, userId),
+    {
+      projectId: invitation.projectId,
+      userId,
+      role,
+    },
+  );
+}
+
 export async function acceptInvitation(
   invitationId: string,
   userId: string,
@@ -250,6 +303,20 @@ export async function acceptInvitation(
     await updateDocument(INVITATIONS, invitationId, { status: "expired" });
     throw new Error(t("common.team.inviteExpired"));
   }
+
+  // ★역할 문서를 members 추가보다 **먼저** 쓴다 (티켓 uhkQrRBgeBRddWb6OeDa, P1).
+  //
+  // 예전 순서는 addMember 만 했고 `invitation.role` 을 그대로 버렸다. 그래서
+  // 수락한 사람은 `memberRoles/{projectId}_{uid}` 문서가 **없는 멤버**가 됐고,
+  // 서버(githubApp.normalizeMemberRole)와 룰(getMemberRole)이 그를 기본값
+  // `member` 로 접어 **저장소 write 토큰을 내줬다** — viewer 로 초대해도.
+  // 라이브 확인: 역할 문서 없는 계정이 `{"ok":true,"role":"member","access":"write"}`.
+  //
+  // 순서를 뒤집는 이유: addMember 를 먼저 하면 역할 쓰기가 실패했을 때 이미
+  // "문서 없는 멤버"가 되어 그 사고가 그대로 재현된다. 역할이 못 박히지 않으면
+  // 애초에 멤버가 되지 않는 편이 안전하다 — 초대는 pending 으로 남고 재시도가
+  // 멱등하게 성립한다.
+  await pinInvitedMemberRole(invitation, userId);
 
   // B2: 순서가 중요하다 — members 추가를 먼저, status 전이를 나중에.
   // 보안룰의 self-join 허용(hasValidPendingInvite)은 "status=pending 인 초대"를
@@ -330,12 +397,6 @@ export function subscribeToMyInvitations(
 }
 
 // --- 멤버 관리 ---
-
-const MEMBER_ROLES = "memberRoles";
-
-function memberRoleDocId(projectId: string, userId: string): string {
-  return `${projectId}_${userId}`;
-}
 
 export async function updateMemberRole(
   projectId: string,

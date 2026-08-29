@@ -2757,6 +2757,354 @@ describe("memberRoles — admin 승격/강등 owner 전용 + docId 결속", () =
   });
 });
 
+// ===== memberRoles — 초대 수락 self-role-write (티켓 uhkQrRBgeBRddWb6OeDa) =====
+//
+// 수락자는 admin/owner 가 아니라 기존 게이트로는 자기 역할 문서를 쓸 수 없었다.
+// 그래서 수락 경로가 `invitation.role` 을 버렸고, 문서 없는 멤버가 기본값
+// member 로 접혀 **viewer 로 초대해도 저장소 write 토큰이 나갔다**.
+// 여기서 여는 통로는 "초대장에 적힌 역할과 **같은 값**"만 허용한다.
+
+describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
+  /** OUTSIDER 앞으로 온 결정적 ID 초대의 role 을 바꾼다(룰 우회 시드). */
+  async function seedInviteRole(role: string, over: Record<string, unknown> = {}) {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(context.firestore(), "invitations", `${PROJECT_ID}_${OUTSIDER_EMAIL}`),
+        {
+          projectId: PROJECT_ID,
+          invitedEmail: OUTSIDER_EMAIL,
+          invitedBy: OWNER_ID,
+          role,
+          status: "pending",
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          ...over,
+        },
+      );
+    });
+  }
+
+  function selfRoleDoc(role: string) {
+    return { projectId: PROJECT_ID, userId: OUTSIDER_ID, role };
+  }
+
+  it("★viewer 초대를 수락하면 자기 role 문서를 viewer 로 만들 수 있다", async () => {
+    await seedInviteRole("viewer");
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(
+        doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
+        selfRoleDoc("viewer"),
+      ),
+    );
+  });
+
+  it("★초대가 viewer 인데 member 로 쓰면 거부 — 자기 승격 통로가 아니다", async () => {
+    await seedInviteRole("viewer");
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
+        selfRoleDoc("member"),
+      ),
+    );
+  });
+
+  it("★초대가 member 인데 admin 으로 쓰면 거부", async () => {
+    await seedInviteRole("member");
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
+        selfRoleDoc("admin"),
+      ),
+    );
+  });
+
+  it("★owner 자칭은 초대가 owner 여도 거부 — owner 는 ownerId 로만 된다", async () => {
+    await seedInviteRole("owner");
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
+        selfRoleDoc("owner"),
+      ),
+    );
+  });
+
+  // ★이 테스트는 두 가지를 동시에 증명한다.
+  //  (1) docId·userId 결속 — 남의 역할 문서는 못 만든다.
+  //  (2) ★위 assertSucceeds 케이스들이 **초대장 때문에** 통과한다는 것.
+  //      OUTSIDER 가 PROJECT_ID 에서 admin/owner 였다면 이 쓰기는 create 첫
+  //      분기(isAdminOrOwner)로 성공했을 것이다. 실패한다는 것이 곧
+  //      "OUTSIDER 에게는 이 프로젝트에서 관리자 권한이 없다"의 증명이고,
+  //      따라서 성공 케이스의 근거는 self-role-write 분기뿐이다.
+  //  ★대상 uid 는 역할 문서가 **없는** 신규 uid 다. MEMBER_ID 를 쓰면 시드에
+  //    이미 문서가 있어 create 가 아니라 update 규칙을 타서, 검증하려던
+  //    create 게이트를 지나치게 된다.
+  //  ★초대장의 role 과 **같은 값**(member)을 쓴다. 다른 값을 쓰면 role 불일치
+  //    조건이 먼저 걸려서, uid 결속을 통째로 지워도 테스트가 초록으로 남는다
+  //    — 가드를 검증하지 못하는 테스트가 된다(뮤테이션으로 확인했다).
+  it("★남의 역할 문서는 못 만든다 — 동시에 OUTSIDER 가 이 프로젝트 관리자가 아님을 증명", async () => {
+    await seedInviteRole("member");
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(doc(db, "memberRoles", `${PROJECT_ID}_stranger-user`), {
+        projectId: PROJECT_ID,
+        userId: "stranger-user",
+        role: "member",
+      }),
+    );
+  });
+
+  it("★초대가 이미 수락됨(status!=pending)이면 거부 — 재사용 통로 차단", async () => {
+    await seedInviteRole("admin", { status: "accepted" });
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
+        selfRoleDoc("admin"),
+      ),
+    );
+  });
+
+  it("★만료된 초대로는 거부", async () => {
+    await seedInviteRole("member", {
+      expiresAt: new Date(Date.now() - 60 * 1000),
+    });
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
+        selfRoleDoc("member"),
+      ),
+    );
+  });
+
+  it("★초대에 없던 필드를 심을 수 없다 (grants 등 확장 필드 봉쇄)", async () => {
+    await seedInviteRole("viewer");
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`), {
+        ...selfRoleDoc("viewer"),
+        grants: { viewProjectLedger: true },
+      }),
+    );
+  });
+
+  it("수락 재시도는 멱등하다 — 같은 값 재기록(update)이 통과한다", async () => {
+    await seedInviteRole("viewer");
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    const ref = doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`);
+    await assertSucceeds(setDoc(ref, selfRoleDoc("viewer")));
+    await assertSucceeds(setDoc(ref, selfRoleDoc("viewer")));
+  });
+
+  it("★기존 admin 문서는 이 경로로 강등되지 않는다 — admin 강등은 owner 전용", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(context.firestore(), "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
+        { projectId: PROJECT_ID, userId: OUTSIDER_ID, role: "admin" },
+      );
+    });
+    await seedInviteRole("viewer");
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
+        selfRoleDoc("viewer"),
+      ),
+    );
+  });
+
+  it("★초대가 없으면 거부 — 아무나 자기 역할 문서를 못 만든다", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await deleteDoc(
+        doc(
+          context.firestore(),
+          "invitations",
+          `${PROJECT_ID}_${OUTSIDER_EMAIL}`,
+        ),
+      );
+    });
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
+        selfRoleDoc("member"),
+      ),
+    );
+  });
+
+  // ── ★크로스 프로젝트 차단 ────────────────────────────────────────────────
+  //
+  // ★이전 판(OTHER_PROJECT_ID 사용)은 아무것도 증명하지 못했다:
+  //   OTHER_PROJECT_ID 의 ownerId 가 OUTSIDER_ID 라(firestore.rules.test.ts:336)
+  //   OUTSIDER 는 그 프로젝트의 **오너**였고, create 첫 분기
+  //   isAdminOrOwner(대상 projectId) 가 정당하게 참이 돼 통과했다. 초대장과는
+  //   무관한 통과였다. 크로스 프로젝트 차단을 증명하려면 행위자가 **대상
+  //   프로젝트에서 오너도 admin 도 아니어야** 한다.
+  //
+  // FOREIGN_PROJECT_ID: OWNER_ID 소유, 멤버도 OWNER_ID 뿐. OUTSIDER 는 무권한.
+  const FOREIGN_PROJECT_ID = "foreign-project";
+
+  async function seedForeignProject() {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), "projects", FOREIGN_PROJECT_ID), {
+        name: "Foreign Tenant",
+        ownerId: OWNER_ID,
+        members: [OWNER_ID],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+  }
+
+  it("★다른 프로젝트 초대로는 이 프로젝트 역할을 만들 수 없다 (무권한 행위자)", async () => {
+    await seedForeignProject();
+    // OUTSIDER 는 PROJECT_ID 에 유효한 pending 초대를 들고 있다. 그걸 근거로
+    // FOREIGN_PROJECT_ID 의 역할 문서를 만들려 한다 — 막혀야 한다.
+    await seedInviteRole("admin");
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(doc(db, "memberRoles", `${FOREIGN_PROJECT_ID}_${OUTSIDER_ID}`), {
+        projectId: FOREIGN_PROJECT_ID,
+        userId: OUTSIDER_ID,
+        role: "member",
+      }),
+    );
+  });
+
+  // ★위 실패가 "엉뚱한 이유"가 아님을 못 박는 대조군. 같은 행위자·같은 쓰기
+  //   모양인데 **대상 프로젝트에 초대장이 생기면** 통과한다. 즉 룰이 보는 것은
+  //   `invitations/{대상 projectId}_{이메일}` 이고, 다른 프로젝트의 초대장은
+  //   근거가 되지 못한다는 뜻이다.
+  it("★대조군: 같은 쓰기라도 그 프로젝트의 초대장이 있으면 통과한다", async () => {
+    await seedForeignProject();
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(
+          context.firestore(),
+          "invitations",
+          `${FOREIGN_PROJECT_ID}_${OUTSIDER_EMAIL}`,
+        ),
+        {
+          projectId: FOREIGN_PROJECT_ID,
+          invitedEmail: OUTSIDER_EMAIL,
+          invitedBy: OWNER_ID,
+          role: "member",
+          status: "pending",
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+      );
+    });
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(doc(db, "memberRoles", `${FOREIGN_PROJECT_ID}_${OUTSIDER_ID}`), {
+        projectId: FOREIGN_PROJECT_ID,
+        userId: OUTSIDER_ID,
+        role: "member",
+      }),
+    );
+  });
+
+  // ── ★admin 승격 우회 차단 (감사 중 발견한 실제 룰 구멍) ──────────────────
+  //
+  // memberRoles 는 "admin 승격/강등은 owner 전용"을 지킨다. 그런데 invitations
+  // create 는 isAdminOrOwner 만 봤다 — admin 이 `role:'admin'` 초대를 만들 수
+  // 있었다. 수락이 role 을 버리던 때는 무해했지만, 이제 수락이 그 값을 그대로
+  // 역할 문서로 못 박으므로 **admin 이 admin 을 만드는 우회로**가 된다.
+  // 문을 둘 다 닫았다: (1) invitations create 의 role 게이트,
+  // (2) self-role-write 의 "admin 은 owner 가 낸 초대장만" 조건.
+
+  it("★admin 은 admin 역할 초대를 만들 수 없다 (owner 전용)", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertFails(
+      setDoc(doc(db, "invitations", `${PROJECT_ID}_new-admin@test.com`), {
+        projectId: PROJECT_ID,
+        invitedEmail: "new-admin@test.com",
+        invitedBy: ADMIN_ID,
+        role: "admin",
+        status: "pending",
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      }),
+    );
+  });
+
+  it("owner 는 admin 역할 초대를 만들 수 있다 — 대조군", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(doc(db, "invitations", `${PROJECT_ID}_new-admin@test.com`), {
+        projectId: PROJECT_ID,
+        invitedEmail: "new-admin@test.com",
+        invitedBy: OWNER_ID,
+        role: "admin",
+        status: "pending",
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      }),
+    );
+  });
+
+  it("admin 은 member/viewer 초대는 만들 수 있다 — 게이트가 과하지 않다", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    for (const role of ["member", "viewer"]) {
+      await assertSucceeds(
+        setDoc(doc(db, "invitations", `${PROJECT_ID}_new-${role}@test.com`), {
+          projectId: PROJECT_ID,
+          invitedEmail: `new-${role}@test.com`,
+          invitedBy: ADMIN_ID,
+          role,
+          status: "pending",
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        }),
+      );
+    }
+  });
+
+  it("★owner 역할 초대는 owner 조차 만들 수 없다 — owner 는 ownerId 로만", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      setDoc(doc(db, "invitations", `${PROJECT_ID}_new-owner@test.com`), {
+        projectId: PROJECT_ID,
+        invitedEmail: "new-owner@test.com",
+        invitedBy: OWNER_ID,
+        role: "owner",
+        status: "pending",
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      }),
+    );
+  });
+
+  it("★admin 이 낸 admin 초대장이 남아 있어도 못 박히지 않는다 (2차 방어)", async () => {
+    // invitations create 게이트 이전에 만들어졌을 수 있는 초대장을 룰 우회로
+    // 심는다. self-role-write 는 invitedBy 가 ownerId 일 때만 admin 을 받는다.
+    await seedInviteRole("admin", { invitedBy: ADMIN_ID });
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
+        selfRoleDoc("admin"),
+      ),
+    );
+  });
+
+  it("owner 가 낸 admin 초대장은 못 박힌다 — 대조군", async () => {
+    await seedInviteRole("admin", { invitedBy: OWNER_ID });
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(
+        doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
+        selfRoleDoc("admin"),
+      ),
+    );
+  });
+});
+
 // ===== Subscriptions =====
 
 describe("subscriptions collection", () => {
