@@ -20,6 +20,8 @@ import {
   buildChannelSql,
   buildCountryRows,
   buildCountrySql,
+  buildExternalityRows,
+  buildExternalitySql,
   buildHygiene,
   buildHygieneSql,
   buildInstallClassSql,
@@ -31,7 +33,10 @@ import {
   buildNotes,
   dateStr,
   describeChannelReason,
+  describeExternalityReason,
+  EXTERNALITY_REASON_COPY,
   normalizeRangeDays,
+  toExternality,
   num,
   ratio,
   str,
@@ -125,17 +130,130 @@ test("사유표는 건수 내림차순이고 hasGa4Row 를 그대로 싣는다",
 
 // ── ★규율 3: 분모는 방문이 아니라 설치다 ────────────────────────────────────
 
-test("모든 표의 모집단이 설치(NOT isDevInstall)다 — 방문 축이 섞이지 않는다", () => {
+test("모든 표의 모집단이 설치다 — 방문 축이 섞이지 않는다", () => {
   for (const sql of [
     buildChannelSql(PROJECT),
     buildMissingReasonSql(PROJECT),
     buildCountrySql(PROJECT),
     buildInstallsByDaySql(PROJECT),
   ]) {
-    assert.match(sql, /NOT isDevInstall/, "외부 설치 필터가 빠졌다");
+    // ★내부만 뺀다. 예전의 `NOT isDevInstall` 은 미상을 외부로 반올림했다(#1310).
+    assert.match(sql, /externality != 'internal'/, "내부 제외 필터가 빠졌다");
+    assert.doesNotMatch(sql, /isDevInstall/, "불리언 필터가 되살아났다");
     assert.match(sql, /v_install_unified/, "통합 뷰가 아닌 표를 읽고 있다");
     assert.doesNotMatch(sql, /visitors|user_pseudo_id/, "방문 축이 섞였다");
   }
+});
+
+// ── ★규율 5: '외부' 와 '모름' 을 가른다 (#1310) ─────────────────────────────
+
+test("★분모의 정본은 external 만이다 — unknown 이 분모에 안 들어간다", () => {
+  const sql = buildHygieneSql(PROJECT);
+  assert.match(sql, /COUNTIF\(u\.externality = 'external'\)\s+AS installsExternal/);
+  assert.match(sql, /AS installsExternalityUnknown/);
+  // ★분자도 external 로만 잰다. 미상을 분자에 넣으면 비율이 뒤집힌다.
+  assert.match(sql, /u\.externality = 'external' AND u\.hasGa4Row/);
+  assert.match(sql, /u\.externality = 'external' AND u\.hasSpawned/);
+  // 불리언이 되살아나지 않았다.
+  assert.doesNotMatch(sql, /isDevInstall/);
+});
+
+test("★미상이 화면에서 다시 2값으로 접히지 않는다 — 자기 칸으로 나온다", () => {
+  const h = buildHygiene(
+    {
+      installsTotal: 608,
+      installsExternal: 12,
+      installsInternal: 31,
+      installsExternalityUnknown: 565,
+      distinctBrowsers: 5,
+      unknownBrowserInstalls: 0,
+    },
+    [],
+    [
+      { externality: "unknown", reason: "no_ledger_row", installs: 565 },
+      { externality: "internal", reason: "dev_build_channel", installs: 31 },
+      { externality: "external", reason: "non_dev_build_channel", installs: 12 },
+    ]
+  );
+  assert.equal(h.installsExternal, 12);
+  assert.equal(h.installsExternalityUnknown, 565);
+  // 셋의 합이 전체다 — 어느 칸도 삼키지 않았다.
+  assert.equal(
+    h.installsExternal + h.installsInternal + h.installsExternalityUnknown,
+    h.installsTotal
+  );
+  // ★미상을 외부에 더한 옛 값(577)이 어디에도 없다.
+  assert.notEqual(h.installsExternal, 577);
+  const notes = buildNotes(h, 0, 0);
+  assert.ok(
+    notes.some((n) => /외부성 미상 565/.test(n)),
+    "미상 경보가 없다"
+  );
+  assert.ok(notes.some((n) => /하한/.test(n)), "외부 수를 실측으로 말하고 있다");
+  assert.ok(
+    notes.some((n) => /no_ledger_row|링크백 원장/.test(n)),
+    "가장 많은 사유를 안 적었다"
+  );
+});
+
+test("★판정 근거가 값과 같이 실린다 — 미상이 맨 위로 온다", () => {
+  const rows = buildExternalityRows([
+    { externality: "external", reason: "non_dev_build_channel", installs: 999 },
+    { externality: "unknown", reason: "no_ledger_row", installs: 1 },
+  ]);
+  assert.equal(rows[0].externality, "unknown", "모름이 맨 아래면 아무도 안 본다");
+  for (const r of rows) {
+    assert.ok(r.reason.length > 0, "근거 없는 행이 표에 올라갔다");
+    assert.ok(r.label.length > 0);
+    assert.ok(r.action.length > 0);
+  }
+});
+
+test("★화면이 모르는 사유는 external 이 아니라 unknown 으로 떨어진다", () => {
+  const copy = describeExternalityReason("brand_new_reason", "external");
+  assert.equal(copy.externality, "external", "뷰의 판정을 화면이 뒤집지 않는다");
+  assert.match(copy.action, /EXTERNALITY_REASON_COPY/);
+  // 값 자체를 못 읽으면 낙관하지 않는다.
+  assert.equal(toExternality(undefined), "unknown");
+  assert.equal(toExternality("EXTERNAL"), "external");
+  assert.equal(toExternality("weird"), "unknown");
+});
+
+test("★외부성 분해표는 필터 없이 전체를 센다 — 합이 전체 설치다", () => {
+  const sql = buildExternalitySql(PROJECT);
+  assert.match(sql, /GROUP BY externality, reason/);
+  assert.doesNotMatch(sql, /WHERE/, "분해표에 필터가 붙으면 합이 전체가 아니다");
+});
+
+test("외부성 사유 어휘에 결정 문장이 빠진 칸이 없다", () => {
+  for (const c of EXTERNALITY_REASON_COPY) {
+    assert.ok(c.action.trim().length > 0, c.reason);
+    assert.ok(c.label.trim().length > 0, c.reason);
+  }
+  // ★미상 칸에는 "외부로 세지 마라" 가 반드시 있다.
+  for (const c of EXTERNALITY_REASON_COPY.filter(
+    (x) => x.externality === "unknown"
+  )) {
+    assert.match(c.action, /외부로 세지 마라/, c.reason);
+  }
+});
+
+test("★행별 미상 건수를 칸으로 싣는다 — 행을 지우지도 외부로 세지도 않는다", () => {
+  for (const sql of [buildChannelSql(PROJECT), buildCountrySql(PROJECT), buildInstallsByDaySql(PROJECT)]) {
+    assert.match(sql, /COUNTIF\(externality = 'unknown'\)\s+AS externalityUnknown/);
+  }
+  const ch = buildChannelRows([
+    { source: "s", medium: "m", installs: 10, externalityUnknown: 7, spawned: 1, completed: 0 },
+  ]);
+  assert.equal(ch.rows[0].externalityUnknown, 7);
+  const co = buildCountryRows([
+    { country: "KR", installs: 10, externalityUnknown: 7, channelKnown: 5, spawned: 1 },
+  ]);
+  assert.equal(co.rows[0].externalityUnknown, 7);
+  const day = buildInstallsByDay([
+    { day: "2026-08-01", installs: 5, externalityUnknown: 4, channelKnown: 3 },
+  ]);
+  assert.equal(day[0].externalityUnknown, 4);
 });
 
 test("★채널표는 캠페인이 실재하는 행만 센다 (channelMissingReason IS NULL)", () => {
@@ -216,12 +334,12 @@ test("install_class 를 못 읽으면 0 이 아니라 사유가 붙는다", () =
 
 test("재설치 루프는 주석이 아니라 표 밑 한 줄로 나온다", () => {
   const h = buildHygiene(
-    { installsTotal: 608, installsExternal: 577, installsDev: 31, distinctBrowsers: 5, unknownBrowserInstalls: 0, maxInstallsPerBrowser: 539 },
+    { installsTotal: 608, installsExternal: 12, installsInternal: 31, installsExternalityUnknown: 565, distinctBrowsers: 5, unknownBrowserInstalls: 0, maxInstallsPerBrowser: 539 },
     []
   );
   const notes = buildNotes(h, 0, 0);
   assert.ok(notes.some((n) => /재설치 루프/.test(n)), "위생 경보가 없다");
-  assert.ok(notes.some((n) => /숨기지 않았다/.test(n)), "dev 설치를 조용히 뺐다");
+  assert.ok(notes.some((n) => /숨기지 않았다/.test(n)), "내부 설치를 조용히 뺐다");
 });
 
 test("헤드라인은 뷰 단독으로 읽고 프로필 보조 컬럼이 없어도 죽지 않는다", () => {

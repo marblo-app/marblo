@@ -396,6 +396,189 @@ export const REVENUE_DIVERGENCE_REASONS: ReadonlyArray<
 /** 활성화 사유 — 경과일을 못 세는 경우만이다. "안 썼다" 는 사유가 아니라 0 이다. */
 export const ACTIVATION_REASON_NO_FIRST_RUN = "no_first_run";
 
+/**
+ * ★이정표 순서가 뒤집혔다 — `first_run_at` 이 `first_spawn_at`(또는
+ * `first_completed_at`)보다 **뒤**다. 그러면 경과일이 음수가 된다.
+ *
+ * 실측(2026-08-29, `sole-persistent-user-is-not-external` §7): `daysToFirstSpawn`
+ * 이 A −38 · B −15 · C −42 였다. 원인은 데이터가 이상해서가 아니라 **`first_run_at`
+ * 의 출처가 늦게 생겼기** 때문이다 — `app:first_run` 이벤트의 전역 최초 발화가
+ * 2026-07-21 이라, 그 전에 설치해 이미 스폰까지 한 설치는 "첫 실행" 이 "첫 스폰"
+ * 보다 뒤로 찍힌다(`analyticsProfiles.FIRST_RUN_SOURCE_DEFINITION`).
+ *
+ * ★그래서 0 으로 **클램프하지 않는다.** 클램프하면 "같은 날 스폰했다" 는 없는
+ *   사실이 만들어지고, 활성화 속도 중앙값이 통째로 낙관 편향된다. 값은 NULL 로
+ *   비우고 **왜 비었는지를 이 사유가 말한다.**
+ */
+export const ACTIVATION_REASON_FIRST_RUN_AFTER_MILESTONE =
+  "first_run_after_milestone";
+
+/** 활성화 사유 판정에 필요한 사실. 날짜는 전부 `YYYY-MM-DD`(UTC) 다. */
+export interface ActivationFacts {
+  readonly firstRunDay: string | null;
+  readonly firstSpawnDay: string | null;
+  readonly firstCompletedDay: string | null;
+}
+
+/**
+ * 활성화 사유 사다리. **별칭 규약**: `p` = 설치 프로필.
+ *
+ * ★`daysToFirstSpawn`·`daysToFirstCompleted` 가 NULL 인 이유는 항상 이 한 칸이
+ *   답한다. 사유가 NULL 이면 그 숫자는 **실수**다(0 이면 같은 날이다).
+ */
+export const ACTIVATION_REASONS: ReadonlyArray<ReasonRung<ActivationFacts>> = [
+  {
+    reason: ACTIVATION_REASON_NO_FIRST_RUN,
+    sql: "p.first_run_at IS NULL",
+    test: (f) => f.firstRunDay === null,
+    kind: "unknown",
+  },
+  {
+    reason: ACTIVATION_REASON_FIRST_RUN_AFTER_MILESTONE,
+    // ★날짜 알갱이로 비교한다. 같은 날 안에서 시각만 앞서는 것은 DATE_DIFF 가
+    //   0 으로 떨어지므로 음수가 아니고, 그건 사유가 아니라 정상값이다.
+    sql:
+      "DATE(p.first_spawn_at) < DATE(p.first_run_at) OR " +
+      "DATE(p.first_completed_at) < DATE(p.first_run_at)",
+    test: (f) =>
+      (f.firstSpawnDay !== null &&
+        f.firstRunDay !== null &&
+        f.firstSpawnDay < f.firstRunDay) ||
+      (f.firstCompletedDay !== null &&
+        f.firstRunDay !== null &&
+        f.firstCompletedDay < f.firstRunDay),
+    kind: "unknown",
+  },
+];
+
+/** 활성화 사유. `null` 이면 경과일이 실수다(0 이면 같은 날이다). */
+export function resolveActivationMissingReason(
+  f: ActivationFacts,
+): string | null {
+  return resolveReason(ACTIVATION_REASONS, f);
+}
+
+// ── ★외부성(externality) — 이 티켓이 고치는 자리 ──────────────────────────────
+//
+// ── 왜 불리언을 버리나 (실제로 난 사고) ─────────────────────────────────────
+//   `isDevInstall` 은 `buildChannel='dev'` 하나만 보는 불리언이라 **"모른다" 를
+//   담을 칸이 없다.** 귀속 원장 행이 아예 없는 설치는 `COALESCE(…, FALSE)` 를
+//   지나며 조용히 `false` = 외부로 떨어진다.
+//
+//   실측(2026-08-29, `docs/wiki/30-investigations/sole-persistent-user-is-not-external.md`):
+//   설치 A·B·C·D 넷 다 `isDevInstall=false` 인데 넷 다
+//   `channelMissingReason='no_ledger_row'` 였다 — **근거가 한 줄도 없다는 뜻**이다.
+//   그래서 오너의 프로젝트 안에서 일하던 설치가 "외부 지속 사용자" 로 사장님께
+//   보고됐고 기각당했다.
+//
+// ── ★이 세 값이 뜻하는 것을 정확히 적는다 (과장하지 않는다) ────────────────
+//   · `internal` — **dev 빌드 채널을 봤다.** 이건 안다.
+//   · `external` — **dev 가 아닌 빌드 채널을 봤다.** ★"우리 팀 사람이 아니다" 를
+//     뜻하지 **않는다.** 설치 축에는 "누구" 가 없고(축 순수성), 우리가 아는 것은
+//     "배포본을 받아 실행했다" 까지다. 오너가 배포본을 켜도 여기 들어온다.
+//   · `unknown` — 빌드 채널을 **한 번도 못 봤다.** 외부도 내부도 아니고 **모른다.**
+//
+// ★`unknown` 을 어느 쪽으로도 반올림하지 마라. 지표는 `unknown` 을 분모에서
+//   빼거나 별도 칸으로 그린다(adminInstallUnified 의 `installsExternalityUnknown`).
+//   3값으로 바꿔 놓고 화면에서 다시 2값으로 접으면 아무것도 안 고친 것이다.
+//
+// ★계정 축(`accountClass='internal'`)으로 `unknown` 을 좁힐 수는 있지만 **여기서는
+//   하지 않는다.** 이 뷰는 익명 설치 축이고 계정 축을 끌어오는 순간 축 경계가
+//   무너진다(`assertAxisPurity` 가 막는 그 다리다). 결제 완전체 뷰
+//   `v_install_unified_revenue` 에는 게이트 아래에서 이미 `isInternal` 이 있으므로
+//   그 좁히기는 **그 뷰에서 별도 티켓으로** 한다 — 미룬다는 사실을 여기 적어 둔다.
+
+/** 설치의 외부성. ★`unknown` 은 값이지 결측이 아니다. */
+export type Externality = "external" | "internal" | "unknown";
+
+/** 외부성 판정에 필요한 사실. 전부 조인 결과에서 읽히는 값이다. */
+export interface ExternalityFacts {
+  /** `install_attribution` 에 이 설치의 행이 있나. */
+  readonly hasLedgerRow: boolean;
+  /** 원장이 적어 둔 빌드 채널. 없으면 null. */
+  readonly ledgerBuildChannel: string | null;
+  /** 앱이 first-touch 로 직접 표시한 빌드 채널(#1071 이후). 없으면 null. */
+  readonly ftBuildChannel: string | null;
+}
+
+/** 사다리 한 칸 + **그 칸이 내리는 판정**. 사유와 판정이 갈릴 수 없게 한 쌍이다. */
+export interface ExternalityRung {
+  readonly reason: string;
+  /** BigQuery WHEN 절. 별칭: `p` = 프로필, `a` = 원장(dedup 후). */
+  readonly sql: string;
+  readonly test: (f: ExternalityFacts) => boolean;
+  readonly externality: Externality;
+}
+
+/** dev 빌드 채널을 봤다. ★이건 안다. */
+export const EXTERNALITY_REASON_DEV_BUILD_CHANNEL = "dev_build_channel";
+
+/**
+ * ★사다리를 다 통과했을 때의 사유 — dev 가 **아닌** 빌드 채널을 봤다.
+ *
+ * 이름을 `external` 이 아니라 근거로 지은 이유: 이 값이 말하는 것은 "외부인이다"
+ * 가 아니라 "배포 채널이 dev 가 아니었다" 다. 다음 사람이 컬럼만 보고 과장하지
+ * 못하게 근거를 이름에 박는다.
+ */
+export const EXTERNALITY_REASON_NON_DEV_BUILD_CHANNEL = "non_dev_build_channel";
+
+/**
+ * 외부성 사다리(위에서부터 첫 번째 해당). 다 통과하면
+ * `external` / `non_dev_build_channel` 이다.
+ *
+ * ★`no_ledger_row` 와 `no_build_channel` 을 반드시 가른다. 전자는 링크백 자체가
+ *   안 왔다는 뜻이라 앱 배포·`linkInstallAttribution` 을 봐야 하고, 후자는 원장은
+ *   왔는데 채널 칸이 비어 있다는 뜻이라 #1071 이전 앱이거나 원장 스키마 드리프트다
+ *   (`index.ts` 의 `FIRST_TOUCH_OPTIONAL_COLUMNS` 주석 참조). 합치면 무엇을 고쳐야
+ *   하는지 알 수 없다.
+ */
+export const EXTERNALITY_REASONS: ReadonlyArray<ExternalityRung> = [
+  {
+    reason: EXTERNALITY_REASON_DEV_BUILD_CHANNEL,
+    sql:
+      "COALESCE(a.buildChannel = 'dev', FALSE) OR " +
+      "COALESCE(p.ft_build_channel = 'dev', FALSE)",
+    test: (f) => f.ledgerBuildChannel === "dev" || f.ftBuildChannel === "dev",
+    externality: "internal",
+  },
+  {
+    // ★A·B·C·D 넷이 떨어진 칸이다. 근거가 한 줄도 없다.
+    reason: "no_ledger_row",
+    sql: "a.installId IS NULL AND p.ft_build_channel IS NULL",
+    test: (f) => !f.hasLedgerRow && f.ftBuildChannel === null,
+    externality: "unknown",
+  },
+  {
+    reason: "no_build_channel",
+    sql: "a.buildChannel IS NULL AND p.ft_build_channel IS NULL",
+    test: (f) => f.ledgerBuildChannel === null && f.ftBuildChannel === null,
+    externality: "unknown",
+  },
+];
+
+/** 외부성 판정 결과 — **값과 근거는 항상 같이 다닌다.** */
+export interface ExternalityVerdict {
+  readonly externality: Externality;
+  /** 어느 칸이 이 판정을 내렸나. ★NULL 이 없다 — 판정에는 항상 근거가 있다. */
+  readonly reason: string;
+}
+
+/**
+ * 외부성 + 근거. ★근거 없는 판정을 만들지 않는다 — 왜 그렇게 분류했는지가 붙어
+ * 있어야 다음 사람이 검증한다(이번 사고가 정확히 그 검증이 불가능해서 났다).
+ */
+export function resolveExternality(f: ExternalityFacts): ExternalityVerdict {
+  for (const rung of EXTERNALITY_REASONS) {
+    if (rung.test(f)) {
+      return { externality: rung.externality, reason: rung.reason };
+    }
+  }
+  return {
+    externality: "external",
+    reason: EXTERNALITY_REASON_NON_DEV_BUILD_CHANNEL,
+  };
+}
+
 /** 리텐션 사유 — 일별 행이 하나도 없어 창을 셀 수 없다. 0 이 아니라 미상이다. */
 export const RETENTION_REASON_NO_DAILY_ROWS = "no_daily_rows";
 
@@ -469,6 +652,36 @@ export function buildReasonCase<F>(
     lines.push(`${indent}  WHEN ${r.sql} THEN ${sqlString(r.reason)}`);
   }
   lines.push(`${indent}  ELSE NULL`);
+  lines.push(`${indent}END`);
+  return lines.join("\n");
+}
+
+/**
+ * 외부성 사다리 → `CASE`. `pick` 이 값 컬럼(`externality`)을 만들지 근거
+ * 컬럼(`externalityReason`)을 만들지 고른다.
+ *
+ * ★두 컬럼이 **같은 배열의 같은 순서**에서 나온다. 손으로 두 벌 적으면
+ *   "external 인데 사유는 no_ledger_row" 같은 설명 불가능한 조합이 표에 나온다.
+ * ★`ELSE NULL` 이 아니라 `ELSE <터미널>` 이다 — 외부성에는 결측이 없다.
+ *   모르면 `'unknown'` 이라고 **말한다.**
+ */
+export function buildExternalityCase(
+  pick: "externality" | "reason",
+  indent = "    ",
+): string {
+  const value = (r: ExternalityRung): string =>
+    sqlString(pick === "externality" ? r.externality : r.reason);
+  const lines = ["CASE"];
+  for (const r of EXTERNALITY_REASONS) {
+    lines.push(`${indent}  WHEN ${r.sql} THEN ${value(r)}`);
+  }
+  lines.push(
+    `${indent}  ELSE ${sqlString(
+      pick === "externality"
+        ? "external"
+        : EXTERNALITY_REASON_NON_DEV_BUILD_CHANNEL,
+    )}`,
+  );
   lines.push(`${indent}END`);
   return lines.join("\n");
 }
@@ -660,19 +873,24 @@ SELECT
   -- ── 활성화 ──────────────────────────────────────────────────────────────
   p.first_spawn_at                    AS firstSpawnAt,
   p.first_completed_at                AS firstCompletedAt,
+  -- ★음수를 내지 않는다. first_run 이 first_spawn 보다 뒤면(#1310 §7: A −38 ·
+  --   B −15 · C −42) 경과일이 성립하지 않는다. 0 으로 클램프하면 "같은 날 스폰"
+  --   이라는 없는 사실이 생기므로 **NULL 로 비우고 사유가 말한다.**
   IF(
-    p.first_run_at IS NULL OR p.first_spawn_at IS NULL,
+    p.first_run_at IS NULL OR p.first_spawn_at IS NULL
+      OR DATE(p.first_spawn_at) < DATE(p.first_run_at),
     NULL,
     DATE_DIFF(DATE(p.first_spawn_at), DATE(p.first_run_at), DAY)
   )                                   AS daysToFirstSpawn,
   IF(
-    p.first_run_at IS NULL OR p.first_completed_at IS NULL,
+    p.first_run_at IS NULL OR p.first_completed_at IS NULL
+      OR DATE(p.first_completed_at) < DATE(p.first_run_at),
     NULL,
     DATE_DIFF(DATE(p.first_completed_at), DATE(p.first_run_at), DAY)
   )                                   AS daysToFirstCompleted,
   -- ★NOT NULL. false 는 "안 썼다"(진짜 0)이지 "모른다" 가 아니다.
   p.first_spawn_at IS NOT NULL        AS hasSpawned,
-  IF(p.first_run_at IS NULL, ${sqlString(ACTIVATION_REASON_NO_FIRST_RUN)}, NULL)
+  ${buildReasonCase(ACTIVATION_REASONS, "  ")}
                                       AS activationMissingReason,
 
   -- ── 리텐션 ──────────────────────────────────────────────────────────────
@@ -698,11 +916,25 @@ SELECT
   a.platform                          AS platform,
   a.buildChannel                      AS buildChannel,
   p.ft_build_channel                  AS ftBuildChannel,
-  -- ★플래그일 뿐이다. 이 뷰는 내부·테스트를 **기본 필터로 숨기지 않는다** —
-  --   숨기면 왜 숫자가 다른지 아무도 모른다.
+  -- ★★DEPRECATED. 새 코드는 아래 externality 를 써라.
+  --   이 불리언은 "모른다" 를 담을 칸이 없어 **미지를 외부(false)로 반올림한다.**
+  --   그 반올림 때문에 오너 프로젝트에서 일하던 설치가 "외부 지속 사용자" 로
+  --   보고됐다(#1310). BQ 컬럼은 삭제·타입변경이 사실상 불가하므로 **남겨 두되**
+  --   집계는 전부 externality 로 옮겼다(adminInstallUnified.ts).
   COALESCE(a.buildChannel = 'dev', FALSE)
     OR COALESCE(p.ft_build_channel = 'dev', FALSE)
                                       AS isDevInstall,
+  -- ── ★외부성 3값 — 이 티켓이 고치는 자리 ─────────────────────────────────
+  --   'internal'(dev 빌드 채널을 봤다) / 'external'(dev 아닌 빌드 채널을 봤다) /
+  --   'unknown'(빌드 채널을 한 번도 못 봤다).
+  --   ★'external' 은 "우리 팀이 아니다" 가 아니라 "배포본을 실행했다" 까지다.
+  --   ★'unknown' 을 어느 쪽으로도 반올림하지 마라 — 분모에서 빼거나 별도 칸이다.
+  ${buildExternalityCase("externality", "  ")}
+                                      AS externality,
+  -- ★판정 근거. 값과 근거는 항상 같이 다닌다 — 왜 그렇게 분류했는지가 붙어
+  --   있어야 다음 사람이 검증한다. 이번 사고가 정확히 그 검증 불가에서 났다.
+  ${buildExternalityCase("reason", "  ")}
+                                      AS externalityReason,
   p.built_at                          AS builtAt
 FROM ${profile} p
 -- ★원시 = 원시. install_key(UUID) 와 installId(UUID) 는 같은 공간이다.
@@ -972,7 +1204,11 @@ export function buildRevenueViewDdl(
  *   반복 배수는 `installRowsRepresented` 로 남긴다.
  */
 export function buildRevenuePersonViewSql(projectId: string): string {
-  const revenue = table(projectId, IDENTITY_DATASET, VIEW_INSTALL_UNIFIED_REVENUE);
+  const revenue = table(
+    projectId,
+    IDENTITY_DATASET,
+    VIEW_INSTALL_UNIFIED_REVENUE,
+  );
   return `-- ★생성물이다. 손으로 고치지 마라 — v3/functions/src/installUnified.ts 가 정본이다.
 -- ★사람 단위 안전 경로. 설치 뷰에서 SUM(revenueLedger) 하지 말고 이 뷰를 읽어라.
 SELECT

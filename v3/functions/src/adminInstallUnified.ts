@@ -31,7 +31,13 @@
 //     재설치 루프다(#1198 analyticsProfiles.INSTALL_CLASS_DEFINITION). 전체 설치와
 //     사람 추정치를 **같이** 낸다. 하나만 내면 반드시 오독된다.
 
-import { TELEMETRY_DATASET, VIEW_INSTALL_UNIFIED } from "./installUnified";
+import {
+  EXTERNALITY_REASON_DEV_BUILD_CHANNEL,
+  EXTERNALITY_REASON_NON_DEV_BUILD_CHANNEL,
+  TELEMETRY_DATASET,
+  VIEW_INSTALL_UNIFIED,
+  type Externality,
+} from "./installUnified";
 
 /** #1198 이 `install_class`·`ft_browser_installs` 를 붙인 표. 뷰의 알갱이 원본. */
 export const SOURCE_INSTALL_PROFILE = "analytics_install_profile";
@@ -89,7 +95,8 @@ export const CHANNEL_REASON_COPY: ReadonlyArray<ChannelReasonCopy> = [
     reason: "no_ledger_row",
     kind: "unknown",
     label: "모름 — 링크백 원장에 이 설치가 없다",
-    action: "앱이 링크백을 못 보냈다. 배포 버전과 linkInstallAttribution 을 본다.",
+    action:
+      "앱이 링크백을 못 보냈다. 배포 버전과 linkInstallAttribution 을 본다.",
   },
   {
     reason: "no_ga_client_id",
@@ -113,19 +120,22 @@ export const CHANNEL_REASON_COPY: ReadonlyArray<ChannelReasonCopy> = [
     reason: "no_utm",
     kind: "true_zero",
     label: "★안다 — 캠페인이 없었다(자연·직접 유입)",
-    action: "진짜 0 이다. 백필할 것이 없다. 이 수를 결측으로 읽으면 채널 판단이 뒤집힌다.",
+    action:
+      "진짜 0 이다. 백필할 것이 없다. 이 수를 결측으로 읽으면 채널 판단이 뒤집힌다.",
   },
 ];
 
 const REASON_COPY_BY_KEY = new Map(
-  CHANNEL_REASON_COPY.map((c) => [c.reason, c] as const)
+  CHANNEL_REASON_COPY.map((c) => [c.reason, c] as const),
 );
 
 /**
  * 사유 → 화면 어휘. 모르는 사유가 와도 **버리지 않는다** — 뷰가 사다리에 칸을
  * 추가했는데 화면이 조용히 삼키면, 그 설치들은 어느 표에도 안 나온 채 사라진다.
  */
-export function describeChannelReason(reason: string | null): ChannelReasonCopy {
+export function describeChannelReason(
+  reason: string | null,
+): ChannelReasonCopy {
   const key = reason ?? CHANNEL_REASON_KNOWN;
   const found = REASON_COPY_BY_KEY.get(key);
   if (found) return found;
@@ -133,8 +143,110 @@ export function describeChannelReason(reason: string | null): ChannelReasonCopy 
     reason: key,
     kind: "unknown",
     label: `모름 — 화면이 모르는 사유(${key})`,
-    action: "뷰의 사유 사다리가 늘었다. adminInstallUnified.CHANNEL_REASON_COPY 에 칸을 추가하라.",
+    action:
+      "뷰의 사유 사다리가 늘었다. adminInstallUnified.CHANNEL_REASON_COPY 에 칸을 추가하라.",
   };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 1-B. 외부성 어휘 — ★'모름' 을 '외부' 로 반올림하지 않는 자리
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ── 이 절이 왜 생겼나 (실제로 난 사고) ──────────────────────────────────────
+//   `isDevInstall` 은 불리언이라 "모른다" 를 담을 칸이 없었고, 귀속 원장 행이 없는
+//   설치가 조용히 `false`=외부로 떨어졌다. 그 결과 오너 프로젝트에서 일하던 설치가
+//   "외부 지속 사용자 1명" 으로 사장님께 보고됐다가 기각됐다
+//   (docs/wiki/30-investigations/sole-persistent-user-is-not-external.md, #1310).
+//
+// ★그래서 이 모듈의 규율이 하나 늘었다(머리말 4개 + 이것):
+//   5) **'외부' 와 '모름' 을 가른다.** `unknown` 은 어느 쪽으로도 반올림하지 않고
+//      **분모에서 빼고 별도 칸으로 센다.** 3값으로 바꿔 놓고 화면에서 다시 2값으로
+//      접으면 아무것도 안 고친 것이다.
+
+/** 외부성별 설치 수 + **그 판정의 근거**. 근거 없는 판정을 화면에 올리지 않는다. */
+export interface ExternalityRow {
+  externality: Externality;
+  reason: string;
+  /** 화면 라벨. */
+  label: string;
+  /** ★이 사유가 많으면 **우리가 무엇을 하나**. */
+  action: string;
+  installs: number;
+}
+
+export interface ExternalityReasonCopy {
+  readonly reason: string;
+  readonly externality: Externality;
+  readonly label: string;
+  readonly action: string;
+}
+
+/**
+ * 외부성 사유 → 화면 어휘. ★뷰의 `EXTERNALITY_REASONS` 와 **같은 사유 키**를 쓴다.
+ *
+ * 사유 키가 뷰에서 오고 라벨만 여기 있는 이유는 채널 사유표와 같다 — 사유 문자열을
+ * 두 벌 적으면 반드시 갈리고, 갈리면 설치들이 어느 표에도 안 나온 채 사라진다.
+ */
+export const EXTERNALITY_REASON_COPY: ReadonlyArray<ExternalityReasonCopy> = [
+  {
+    reason: EXTERNALITY_REASON_NON_DEV_BUILD_CHANNEL,
+    externality: "external",
+    label: "외부 — dev 가 아닌 빌드 채널을 봤다",
+    action:
+      "★'우리 팀이 아니다' 가 아니라 '배포본을 실행했다' 까지만 뜻한다. 설치 축에는 '누구' 가 없다.",
+  },
+  {
+    reason: EXTERNALITY_REASON_DEV_BUILD_CHANNEL,
+    externality: "internal",
+    label: "내부 — dev 빌드 채널을 봤다",
+    action: "분모에서 뺐지만 숨기지 않았다. 전체 설치에는 그대로 있다.",
+  },
+  {
+    reason: "no_ledger_row",
+    externality: "unknown",
+    label: "★모름 — 링크백 원장에 이 설치가 없다",
+    action:
+      "★외부로 세지 마라. 앱이 링크백을 못 보냈다 — 배포 버전과 linkInstallAttribution 을 본다. #1310 의 A·B·C·D 가 전부 이 칸이었다.",
+  },
+  {
+    reason: "no_build_channel",
+    externality: "unknown",
+    label: "★모름 — 원장은 있는데 빌드 채널 칸이 비었다",
+    action:
+      "★외부로 세지 마라. #1071 이전 앱이거나 install_attribution 스키마 드리프트다(index.ts FIRST_TOUCH_OPTIONAL_COLUMNS). 채널을 적재하면 채워진다.",
+  },
+];
+
+const EXTERNALITY_COPY_BY_KEY = new Map(
+  EXTERNALITY_REASON_COPY.map((c) => [c.reason, c] as const),
+);
+
+/**
+ * 사유 → 어휘. 모르는 사유가 와도 **버리지 않는다.** ★그리고 모르는 사유는
+ * `unknown` 으로 떨어뜨린다 — 화면이 모르는 사유를 외부로 낙관하면 이 티켓이
+ * 고친 결함이 이름만 바꿔 되살아난다.
+ */
+export function describeExternalityReason(
+  reason: string | null,
+  externality: Externality,
+): ExternalityReasonCopy {
+  const key = reason ?? "(missing)";
+  const found = EXTERNALITY_COPY_BY_KEY.get(key);
+  if (found) return found;
+  return {
+    reason: key,
+    externality,
+    label: `모름 — 화면이 모르는 외부성 사유(${key})`,
+    action:
+      "뷰의 외부성 사다리가 늘었다. adminInstallUnified.EXTERNALITY_REASON_COPY 에 칸을 추가하라.",
+  };
+}
+
+/** 뷰가 돌려준 문자열을 3값으로 좁힌다. ★못 읽으면 `unknown` 이다 — 외부가 아니다. */
+export function toExternality(v: unknown): Externality {
+  const t = typeof v === "string" ? v.trim().toLowerCase() : "";
+  if (t === "external" || t === "internal") return t;
+  return "unknown";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -222,10 +334,32 @@ export function ratio(numerator: number, denominator: number): UnifiedRatio {
  */
 export interface InstallHygiene {
   installsTotal: number;
-  /** ★분모의 정본. `NOT isDevInstall`. 화면 맨 위에 못 박는다(계획 §4-1). */
+  /**
+   * ★분모의 정본. `externality = 'external'` — **`unknown` 은 안 들어온다.**
+   *
+   * 예전에는 `NOT isDevInstall` 이었고, 그게 "모른다" 를 외부로 반올림해 사고를
+   * 냈다(#1310). 이 수가 갑자기 줄었다면 데이터가 사라진 게 아니라 **원래
+   * 몰랐던 것이 이제 미상 칸으로 옮겨간 것**이다.
+   */
   installsExternal: number;
-  installsDev: number;
-  /** 사람 추정치 하한 = 고유 브라우저(gaKey) 수. */
+  /** `externality = 'internal'` — dev 빌드 채널을 본 설치. */
+  installsInternal: number;
+  /**
+   * ★`externality = 'unknown'` — 외부인지 내부인지 **모르는** 설치.
+   *
+   * 분모에 넣지 마라. 이 수가 크다는 것 자체가 "우리는 아직 외부 사용자를 못
+   * 센다" 는 정보이고, 그게 지금 화면이 말해야 할 사실이다.
+   */
+  installsExternalityUnknown: number;
+  /** 외부성 판정의 **근거별** 분해. 합이 installsTotal 이다 — 어느 칸도 삼키지 않는다. */
+  externalityRows: ExternalityRow[];
+  /**
+   * 사람 추정치 하한 = 고유 브라우저(gaKey) 수.
+   *
+   * ★모집단은 `externality <> 'internal'`(외부 + 미상)이다. 브라우저 중복제거는
+   *   외부성과 다른 축의 질문이라 미상을 여기서 버리면 사람 수가 통째로 사라진다.
+   *   대신 그 사실을 필드 주석과 화면 note 에 적는다 — 조용히 섞지 않는다.
+   */
   humanEstimateMin: number;
   /** 상한 = 하한 + 브라우저를 모르는 설치 수. */
   humanEstimateMax: number;
@@ -254,6 +388,11 @@ export interface ChannelRow {
   campaign: string | null;
   content: string | null;
   installs: number;
+  /**
+   * ★이 행의 설치 중 외부성이 **미상**인 건수. 0 이 아니면 이 행을 "외부 유입"
+   * 으로 읽으면 안 된다. 행을 지우지도, 조용히 외부로 세지도 않고 **칸으로 적는다.**
+   */
+  externalityUnknown: number;
   spawned: UnifiedRatio;
   completed: UnifiedRatio;
 }
@@ -267,6 +406,8 @@ export interface MissingReasonRow extends ChannelReasonCopy {
 export interface CountryRow {
   country: string | null;
   installs: number;
+  /** ★이 행의 설치 중 외부성 미상 건수. ChannelRow 와 같은 규약이다. */
+  externalityUnknown: number;
   channelKnown: UnifiedRatio;
   spawned: UnifiedRatio;
 }
@@ -274,6 +415,8 @@ export interface CountryRow {
 export interface InstallDayPoint {
   date: string;
   installs: number;
+  /** ★그 날 설치 중 외부성 미상 건수. 추이를 '외부 유입 추이' 로 읽지 못하게 한다. */
+  externalityUnknown: number;
   channelKnown: number;
 }
 
@@ -306,7 +449,10 @@ export const PENDING_VIEW_COLUMNS: ReadonlyArray<{
   column: string;
   blocks: string;
 }> = [
-  { column: "retainedD7 / retainedD14 / retainedD30", blocks: "채널별 D7·D30 잔존" },
+  {
+    column: "retainedD7 / retainedD14 / retainedD30",
+    blocks: "채널별 D7·D30 잔존",
+  },
   { column: "cohortWeek", blocks: "주간 코호트" },
   { column: "minutesToFirstSpawn", blocks: "첫 스폰까지 중앙 소요(분)" },
 ];
@@ -352,16 +498,39 @@ function profileRef(projectId: string): string {
 export function buildHygieneSql(projectId: string): string {
   return `SELECT
   COUNT(*)                                              AS installsTotal,
-  COUNTIF(NOT u.isDevInstall)                           AS installsExternal,
-  COUNTIF(u.isDevInstall)                               AS installsDev,
-  COUNTIF(NOT u.isDevInstall AND u.hasGa4Row)           AS channelKnownInstalls,
-  COUNTIF(NOT u.isDevInstall AND u.hasSpawned)          AS spawnedExternal,
-  -- ★사람 추정치 하한. 브라우저를 아는 외부 설치를 gaKey 로 접는다.
-  COUNT(DISTINCT IF(NOT u.isDevInstall, u.gaKeyHmac, NULL)) AS distinctBrowsers,
+  -- ★분모의 정본. 'unknown' 은 여기 안 들어온다 — 그게 이 티켓의 요점이다.
+  COUNTIF(u.externality = 'external')                   AS installsExternal,
+  COUNTIF(u.externality = 'internal')                   AS installsInternal,
+  -- ★미상은 별도 칸이다. 어느 쪽으로도 반올림하지 않는다.
+  COUNTIF(u.externality = 'unknown')                    AS installsExternalityUnknown,
+  COUNTIF(u.externality = 'external' AND u.hasGa4Row)   AS channelKnownInstalls,
+  COUNTIF(u.externality = 'external' AND u.hasSpawned)  AS spawnedExternal,
+  -- ★사람 추정치 하한. 브라우저 중복제거는 외부성과 **다른 축의 질문**이라
+  --   모집단이 '내부가 아닌 설치'(외부 + 미상)다. 그 사실은 note 로 화면에 적는다.
+  COUNT(DISTINCT IF(u.externality != 'internal', u.gaKeyHmac, NULL)) AS distinctBrowsers,
   -- ★상한을 만드는 항. 브라우저를 모르는 설치는 조용히 1명으로도 0명으로도 치지 않는다.
-  COUNTIF(NOT u.isDevInstall AND u.gaKeyHmac IS NULL)   AS unknownBrowserInstalls,
+  COUNTIF(u.externality != 'internal' AND u.gaKeyHmac IS NULL) AS unknownBrowserInstalls,
   MAX(u.gaKeyInstallCount)                              AS maxInstallsPerBrowser
 FROM ${viewRef(projectId)} u`;
+}
+
+/**
+ * ★외부성 × 판정근거 분해표. 이 티켓의 핵심 신설물이다.
+ *
+ * "외부 설치가 몇이냐" 보다 먼저 답해야 하는 것이 **"그 판정의 근거가 있느냐"** 다.
+ * 근거 컬럼이 없어서 A·B·C·D 넷이 근거 0 인 채로 외부에 섞였고, 그게 검증 불가능
+ * 했기 때문에 잘못된 보고가 사장님까지 올라갔다(#1310).
+ *
+ * 합이 `installsTotal` 이다 — 어느 칸도 삼키지 않는다.
+ */
+export function buildExternalitySql(projectId: string): string {
+  return `SELECT
+  externality           AS externality,
+  externalityReason     AS reason,
+  COUNT(*)              AS installs
+FROM ${viewRef(projectId)}
+GROUP BY externality, reason
+ORDER BY installs DESC`;
 }
 
 /** #1198 분모 위생 등급 분해. 합이 installsTotal 이다 — 어느 등급도 삼키지 않는다. */
@@ -388,10 +557,14 @@ export function buildChannelSql(projectId: string): string {
   channelCampaign                        AS campaign,
   channelContent                         AS content,
   COUNT(*)                               AS installs,
+  -- ★이 행에 섞인 '외부성 미상' 건수. 행을 지우지도, 외부로 세지도 않는다.
+  COUNTIF(externality = 'unknown')       AS externalityUnknown,
   COUNTIF(hasSpawned)                    AS spawned,
   COUNTIF(firstCompletedAt IS NOT NULL)  AS completed
 FROM ${viewRef(projectId)}
-WHERE channelMissingReason IS NULL AND NOT isDevInstall
+-- ★내부만 뺀다. 미상을 여기서 지우면 '캠페인 유입이 없다' 로 읽히고, 외부로
+--   세면 이 티켓이 고친 반올림이 되살아난다 — 그래서 남기고 옆 칸에 센다.
+WHERE channelMissingReason IS NULL AND externality != 'internal'
 GROUP BY source, medium, campaign, content
 ORDER BY installs DESC
 LIMIT ${CHANNEL_ROW_LIMIT + 1}`;
@@ -404,7 +577,8 @@ export function buildMissingReasonSql(projectId: string): string {
   hasGa4Row                                               AS hasGa4Row,
   COUNT(*)                                                AS installs
 FROM ${viewRef(projectId)}
-WHERE NOT isDevInstall
+-- ★내부만 뺀다(외부성 분해는 buildExternalitySql 이 따로 한다).
+WHERE externality != 'internal'
 GROUP BY reason, hasGa4Row
 ORDER BY installs DESC`;
 }
@@ -412,12 +586,13 @@ ORDER BY installs DESC`;
 /** 국가별. 다운로드 0 국가는 방문 축(getAdminCountryFunnel)이 계속 말한다. */
 export function buildCountrySql(projectId: string): string {
   return `SELECT
-  channelCountry       AS country,
-  COUNT(*)             AS installs,
-  COUNTIF(hasGa4Row)   AS channelKnown,
-  COUNTIF(hasSpawned)  AS spawned
+  channelCountry                    AS country,
+  COUNT(*)                          AS installs,
+  COUNTIF(externality = 'unknown')  AS externalityUnknown,
+  COUNTIF(hasGa4Row)                AS channelKnown,
+  COUNTIF(hasSpawned)               AS spawned
 FROM ${viewRef(projectId)}
-WHERE NOT isDevInstall
+WHERE externality != 'internal'
 GROUP BY country
 ORDER BY installs DESC
 LIMIT ${COUNTRY_ROW_LIMIT + 1}`;
@@ -429,11 +604,12 @@ LIMIT ${COUNTRY_ROW_LIMIT + 1}`;
  */
 export function buildInstallsByDaySql(projectId: string): string {
   return `SELECT
-  DATE(firstRunAt)      AS day,
-  COUNT(*)              AS installs,
-  COUNTIF(hasGa4Row)    AS channelKnown
+  DATE(firstRunAt)                  AS day,
+  COUNT(*)                          AS installs,
+  COUNTIF(externality = 'unknown')  AS externalityUnknown,
+  COUNTIF(hasGa4Row)                AS channelKnown
 FROM ${viewRef(projectId)}
-WHERE NOT isDevInstall
+WHERE externality != 'internal'
   AND firstRunAt IS NOT NULL
   AND DATE(firstRunAt) >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)
 GROUP BY day
@@ -441,7 +617,7 @@ ORDER BY day`;
 }
 
 export function buildInstallUnifiedParitySql(
-  projectId: string
+  projectId: string,
 ): InstallUnifiedParitySql {
   return {
     installRows: `SELECT
@@ -464,20 +640,52 @@ export function buildInstallUnifiedParitySql(
 
 export type BqRow = Record<string, unknown>;
 
+/**
+ * 외부성 분해표. ★`installs` 내림차순이되 **미상을 먼저** 올린다 — 이 표를 보는
+ * 이유가 "얼마나 모르나" 이기 때문이다. 모름이 맨 아래 있으면 아무도 안 본다.
+ */
+export function buildExternalityRows(
+  rows: ReadonlyArray<BqRow> | null,
+): ExternalityRow[] {
+  const order: Record<Externality, number> = {
+    unknown: 0,
+    external: 1,
+    internal: 2,
+  };
+  return (rows ?? [])
+    .map((r) => {
+      const externality = toExternality(r.externality);
+      const copy = describeExternalityReason(str(r.reason), externality);
+      return {
+        externality: copy.externality,
+        reason: copy.reason,
+        label: copy.label,
+        action: copy.action,
+        installs: num(r.installs),
+      };
+    })
+    .sort(
+      (a, b) =>
+        order[a.externality] - order[b.externality] || b.installs - a.installs,
+    );
+}
+
 export function buildHygiene(
   headRow: BqRow | undefined,
-  classRows: ReadonlyArray<BqRow> | null
+  classRows: ReadonlyArray<BqRow> | null,
+  externalityRows: ReadonlyArray<BqRow> | null = null,
 ): InstallHygiene {
   const h = headRow ?? {};
   const distinctBrowsers = num(h.distinctBrowsers);
   const unknownBrowserInstalls = num(h.unknownBrowserInstalls);
-  const maxPerBrowser = h.maxInstallsPerBrowser == null
-    ? null
-    : num(h.maxInstallsPerBrowser);
+  const maxPerBrowser =
+    h.maxInstallsPerBrowser == null ? null : num(h.maxInstallsPerBrowser);
   return {
     installsTotal: num(h.installsTotal),
     installsExternal: num(h.installsExternal),
-    installsDev: num(h.installsDev),
+    installsInternal: num(h.installsInternal),
+    installsExternalityUnknown: num(h.installsExternalityUnknown),
+    externalityRows: buildExternalityRows(externalityRows),
     humanEstimateMin: distinctBrowsers,
     humanEstimateMax: distinctBrowsers + unknownBrowserInstalls,
     unknownBrowserInstalls,
@@ -508,6 +716,7 @@ export function buildChannelRows(rows: ReadonlyArray<BqRow>): {
         campaign: str(r.campaign),
         content: str(r.content),
         installs,
+        externalityUnknown: num(r.externalityUnknown),
         spawned: ratio(num(r.spawned), installs),
         completed: ratio(num(r.completed), installs),
       };
@@ -520,12 +729,16 @@ export function buildChannelRows(rows: ReadonlyArray<BqRow>): {
  * 문자열을 다시 해석하게 두면 두 벌이 갈린다.
  */
 export function buildMissingReasonRows(
-  rows: ReadonlyArray<BqRow>
+  rows: ReadonlyArray<BqRow>,
 ): MissingReasonRow[] {
   return rows
     .map((r) => {
       const copy = describeChannelReason(str(r.reason));
-      return { ...copy, hasGa4Row: bool(r.hasGa4Row), installs: num(r.installs) };
+      return {
+        ...copy,
+        hasGa4Row: bool(r.hasGa4Row),
+        installs: num(r.installs),
+      };
     })
     .sort((a, b) => b.installs - a.installs);
 }
@@ -542,6 +755,7 @@ export function buildCountryRows(rows: ReadonlyArray<BqRow>): {
       return {
         country: str(r.country),
         installs,
+        externalityUnknown: num(r.externalityUnknown),
         channelKnown: ratio(num(r.channelKnown), installs),
         spawned: ratio(num(r.spawned), installs),
       };
@@ -550,7 +764,7 @@ export function buildCountryRows(rows: ReadonlyArray<BqRow>): {
 }
 
 export function buildInstallsByDay(
-  rows: ReadonlyArray<BqRow>
+  rows: ReadonlyArray<BqRow>,
 ): InstallDayPoint[] {
   const points: InstallDayPoint[] = [];
   for (const r of rows) {
@@ -560,17 +774,24 @@ export function buildInstallsByDay(
     points.push({
       date,
       installs: num(r.installs),
+      externalityUnknown: num(r.externalityUnknown),
       channelKnown: num(r.channelKnown),
     });
   }
-  return points.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  return points.sort((a, b) =>
+    a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
+  );
 }
 
 /**
  * ★화면이 스스로 알 수 없는 caveat 을 서버가 적어 보낸다. 주석은 안 읽히고
  *   문서는 안 열리지만, 표 밑의 한 줄은 읽힌다.
  */
-export function buildNotes(hygiene: InstallHygiene, byDayRows: number, byDay: number): string[] {
+export function buildNotes(
+  hygiene: InstallHygiene,
+  byDayRows: number,
+  byDay: number,
+): string[] {
   const notes: string[] = [];
   if (
     hygiene.maxInstallsPerBrowser != null &&
@@ -578,25 +799,50 @@ export function buildNotes(hygiene: InstallHygiene, byDayRows: number, byDay: nu
   ) {
     notes.push(
       `★분모 위생 경보 — 한 브라우저가 만든 설치가 최대 ${hygiene.maxInstallsPerBrowser}건이다. ` +
-        "사람 수가 아니라 재설치 루프를 세고 있을 가능성이 높다(#1198 install_class)."
+        "사람 수가 아니라 재설치 루프를 세고 있을 가능성이 높다(#1198 install_class).",
     );
   }
   if (hygiene.unknownBrowserInstalls > 0) {
     notes.push(
       `브라우저를 모르는 설치 ${hygiene.unknownBrowserInstalls}건은 사람 추정치의 하한에도 상한에도 ` +
-        "한쪽으로만 들어간다 — 그래서 추정치를 범위로 낸다."
+        "한쪽으로만 들어간다 — 그래서 추정치를 범위로 낸다.",
     );
   }
-  if (hygiene.installsDev > 0) {
+  if (hygiene.installsInternal > 0) {
     notes.push(
-      `개발·dev 태깅 설치 ${hygiene.installsDev}건은 분모에서 뺐지만 숨기지 않았다 — ` +
-        "전체는 위 '전체 설치' 에 그대로 있다."
+      `내부(dev 빌드 채널) 설치 ${hygiene.installsInternal}건은 분모에서 뺐지만 숨기지 않았다 — ` +
+        "전체는 위 '전체 설치' 에 그대로 있다.",
+    );
+  }
+  // ★이 티켓이 심은 경보. 미상이 남아 있는 한 "외부 사용자 N명" 은 하한이지
+  //   실측이 아니다 — 그 사실을 표 밑 한 줄로 못 박는다.
+  if (hygiene.installsExternalityUnknown > 0) {
+    const share =
+      hygiene.installsTotal > 0
+        ? Math.round(
+            (hygiene.installsExternalityUnknown / hygiene.installsTotal) * 100,
+          )
+        : 0;
+    const top = hygiene.externalityRows.find(
+      (r) => r.externality === "unknown",
+    );
+    notes.push(
+      `★외부성 미상 ${hygiene.installsExternalityUnknown}건(전체의 ${share}%)은 ` +
+        "외부에도 내부에도 넣지 않고 분모에서 뺐다 — 그래서 위 '설치 (외부)' 는 " +
+        "실측이 아니라 **하한**이다. 이 수를 외부로 세면 #1310 의 오분류가 되살아난다." +
+        (top ? ` 가장 많은 사유: ${top.label} (${top.installs}건) — ${top.action}` : ""),
+    );
+  }
+  if (hygiene.installsExternalityUnknown > 0 || hygiene.installsInternal > 0) {
+    notes.push(
+      "사람 추정 범위의 모집단은 '내부가 아닌 설치'(외부 + 외부성 미상)다 — " +
+        "브라우저 중복제거는 외부성과 다른 축의 질문이라 미상을 여기서 버리지 않았다.",
     );
   }
   if (byDayRows > byDay) {
     notes.push(
       `일별 추이에서 ${byDayRows - byDay}일치를 뺐다 — 날짜(firstRunAt)가 없는 행이다. ` +
-        "없는 날짜를 오늘로 몰지 않는다."
+        "없는 날짜를 오늘로 몰지 않는다.",
     );
   }
   return notes;
@@ -607,7 +853,7 @@ export function unavailable(
   projectId: string,
   rangeDays: number,
   reason: string,
-  generatedAt: string
+  generatedAt: string,
 ): AcquisitionUnified {
   return {
     generatedAt,

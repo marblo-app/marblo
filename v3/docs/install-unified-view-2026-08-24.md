@@ -153,8 +153,38 @@ analytics_identity 의 distinct ga_key = 3개
 | `platform` | STRING | 원장 `.platform` | |
 | `buildChannel` | STRING | 원장 `.buildChannel` | `dev` / `prod` / NULL(표식 이전 앱) |
 | `ftBuildChannel` | STRING | 프로필 `.ft_build_channel` | |
-| `isDevInstall` | BOOL | 파생 | 둘 중 하나라도 `dev`. ★**기본 필터로 숨기지 않는다** |
+| `isDevInstall` | BOOL | 파생 | 둘 중 하나라도 `dev`. ★**DEPRECATED — `externality` 를 써라**(아래 §3-1-A) |
+| `externality` | STRING | 파생 | ★`external` / `internal` / `unknown` 3값. **`unknown` 을 어느 쪽으로도 반올림하지 마라** |
+| `externalityReason` | STRING | 파생 | ★판정 근거. `dev_build_channel` / `no_ledger_row` / `no_build_channel` / `non_dev_build_channel`. **NULL 이 없다** |
 | `builtAt` | TIMESTAMP | 프로필 `.built_at` | 프로필이 계산된 시각 |
+
+#### 3-1-A. ★`isDevInstall` 이 왜 죽었나 — 실제로 난 사고 (#1310, 2026-08-29)
+
+`isDevInstall` 은 **불리언이라 "모른다" 를 담을 칸이 없다.** 귀속 원장 행이 없는
+설치는 `COALESCE(…, FALSE)` 를 지나며 조용히 `false` = 외부로 떨어진다.
+
+실측: 설치 A·B·C·D 넷 다 `isDevInstall=false` 인데 넷 다
+`channelMissingReason='no_ledger_row'` 였다 — **근거가 한 줄도 없다는 뜻**이다.
+그래서 오너 프로젝트 안에서 일하던 설치가 "외부 지속 사용자 1명" 으로 보고됐다가
+기각됐다([[sole-persistent-user-is-not-external]] §7).
+
+**세 값이 뜻하는 것 (과장하지 않는다):**
+
+| 값 | 근거 | 뜻 |
+| --- | --- | --- |
+| `internal` | `dev_build_channel` | dev 빌드 채널을 **봤다** |
+| `external` | `non_dev_build_channel` | dev 가 **아닌** 빌드 채널을 봤다. ★"우리 팀이 아니다" 가 **아니다** — 설치 축에는 "누구" 가 없고, 아는 것은 "배포본을 실행했다" 까지다 |
+| `unknown` | `no_ledger_row` | 링크백 원장에 이 설치가 없다 |
+| `unknown` | `no_build_channel` | 원장은 있는데 빌드 채널 칸이 비었다(#1071 이전 앱 / 원장 스키마 드리프트) |
+
+★**`unknown` 을 어느 쪽으로도 반올림하지 마라.** 지표는 `unknown` 을 분모에서
+빼거나 별도 칸으로 그린다. 3값으로 바꿔 놓고 화면에서 다시 2값으로 접으면 아무것도
+안 고친 것이다.
+
+★계정 축(`accountClass='internal'`)으로 `unknown` 을 좁힐 수는 있지만 이 뷰에서는
+하지 **않는다** — 익명 설치 축이 계정 축을 끌어오는 순간 `assertAxisPurity` 가 막는
+경계를 넘는다. 그 좁히기는 `v_install_unified_revenue`(게이트 아래)에서 별도
+티켓으로 한다.
 
 ### 3-2. `marblo_identity.v_install_unified_revenue` — 위 전부 + 결제
 
@@ -411,7 +441,8 @@ SELECT
   hasGa4Row,
   COUNT(*)                              AS installs,
   COUNTIF(channelCampaign IS NOT NULL)  AS with_campaign,
-  COUNTIF(isDevInstall)                 AS dev_installs
+  COUNTIF(externality = 'internal')     AS internal_installs,
+  COUNTIF(externality = 'unknown')      AS externality_unknown
 FROM `marblo-2253d.marblo_telemetry.v_install_unified`
 GROUP BY 1, 2 ORDER BY installs DESC;
 -- ★기대(배포 직후·백필 전): key_mismatch 565 / no_ledger_row 43. 그게 정상이다.
@@ -429,10 +460,12 @@ GROUP BY 1 ORDER BY 1 DESC;
 
 ```sql
 -- (d) 내부·테스트가 숨겨지지 않았는지 (숨기지 않는 게 규약이다)
-SELECT isDevInstall, isInternal, accountClass, COUNT(*) AS installs, SUM(revenueTotal) AS revenue
+SELECT externality, externalityReason, isInternal, accountClass,
+       COUNT(*) AS installs, SUM(revenueTotal) AS revenue
 FROM `marblo-2253d.marblo_identity.v_install_unified_revenue`
-GROUP BY 1, 2, 3 ORDER BY installs DESC;
+GROUP BY 1, 2, 3, 4 ORDER BY installs DESC;
 -- ★행이 사라지지 않고 플래그로만 갈려야 한다.
+-- ★그리고 externality 별 합이 전체 설치와 같아야 한다 — 어느 칸도 삼키면 안 된다.
 ```
 
 ```sql
@@ -445,7 +478,7 @@ SELECT
   SUM(IFNULL(revenueTotal, 0))              AS revenue_known
 FROM `marblo-2253d.marblo_identity.v_install_unified_revenue`
 WHERE channelMissingReason IS NULL          -- ★캠페인이 실재하는 행만
-  AND NOT isDevInstall
+  AND externality != 'internal'             -- ★내부만 뺀다. 미상은 남기고 옆 칸에 센다
 GROUP BY 1, 2, 3, 4
 ORDER BY installs DESC;
 -- ★2026-08-24 현재 이 쿼리는 0행이다. 그건 버그가 아니라 §6-1 그대로다 —
@@ -560,7 +593,7 @@ npm run provision:install-unified -- --apply --replace-views   # 본문 교체
   (BQ 는 쿼리 본문을 job 히스토리에 수개월 보관한다).
 - PII 를 넣지 않는다 — `uid`·이메일·IP 컬럼이 없다. 식별자는 앱이 만든 익명 설치
   UUID 와 가명키(`ga_`/`us_`)뿐이다.
-- 내부·테스트를 **기본 필터로 숨기지 않는다.** `isDevInstall`·`isInternal`·
+- 내부·테스트를 **기본 필터로 숨기지 않는다.** `externality`·`isInternal`·
   `accountClass` 는 컬럼이고, 거르는 판단은 읽는 쪽이 한다. 지금 외부 실사용자가
   4명이라 한 건만 섞여도 표가 바뀐다 — 그러니 더더욱 **보이게** 둔다.
 - 새 내부계정 판정 규약을 만들지 않는다. `analyticsPurchase.ts` 의 `account_class`
@@ -585,6 +618,25 @@ npm run provision:install-unified -- --apply --replace-views   # 본문 교체
 
 ★1~5 는 전부 "이미 있는 것을 돌리는" 일이고 새 설계가 필요 없다. **6 만은
 되돌릴 수 없다** — 광고를 켠 뒤에 수집을 시작하면 그 전 구간은 복구되지 않는다.
+
+### 9-A. ★`externality` 3값(#1310)의 배포 순서 — **코드 머지만으로는 아무것도 안 바뀐다**
+
+이 변경은 뷰 정의·콜러블·화면을 같이 고쳤고, 셋 다 **별개의 배포 단계**다. 순서를
+지키지 않으면 어드민이 "뷰를 읽지 못했다" 로 접힌다(0 을 그리지는 않는다 — 그건
+설계대로다).
+
+| # | 무엇 | 명령 | 안 하면 |
+| --- | --- | --- | --- |
+| 1 | **뷰 재프로비저닝** — `v_install_unified` 에 `externality`·`externalityReason` 컬럼이 생긴다 | `cd v3/functions && npm run provision:install-unified -- --apply` | 콜러블이 `externality` 를 SELECT 하다 실패 → 획득 탭 전체가 `unavailable` |
+| 2 | **함수 배포** — `getAdminInstallUnified` 가 새 SQL·응답을 쓴다 | `cd v3/functions && npm run deploy` | 화면이 `installsInternal`/`installsExternalityUnknown` 을 못 받아 0 으로 그린다 |
+| 3 | **marblo-web 배포** — 미상 칸·근거표가 화면에 생긴다 | 웹 배포 파이프라인 | 3값이 서버에만 있고 화면은 여전히 2값이다 |
+| 4 | **프로필 재적재**(`first_completed_at` 소급) — `ANALYTICS_MILESTONES_SQL` 이 `task_outcomes` 를 같이 읽는다 | 2번 배포 후 프로필 빌드 잡이 한 번 돌면 된다 | `firstCompletedAt` 이 계속 NULL(#1310 §7) |
+
+★**BQ 원본 테이블은 만들지도 고치지도 않는다.** 1번은 `CREATE OR REPLACE VIEW`
+뿐이고 컬럼 **추가**만 한다 — 기존 `isDevInstall` 은 삭제도 타입 변경도 하지
+않았다(BQ 에서 사실상 불가하고, 다른 곳이 아직 읽고 있을 수 있다).
+
+★1→2 순서를 뒤집지 마라. 반대로 하면 콜러블이 없는 컬럼을 읽는 창이 생긴다.
 
 ### 어드민 화면을 이 PR 에서 잇지 않는 이유
 

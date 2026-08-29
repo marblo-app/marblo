@@ -328,7 +328,7 @@ marblo_identity.v_install_unified_revenue     위 전부 + 사람·결제 컬럼
 | 활성화 (첫스폰·첫완주) | 〃 | `hasSpawned` · `firstSpawnAt` · `firstCompletedAt` · `daysToFirstSpawn` · `daysToFirstCompleted` · `activationMissingReason` |
 | 리텐션 | 〃 | `activeDays7/14/30` · `firstActiveDay` · `lastActiveDate` · `observedDays` · `activeDaysTotal` · `retentionElapsedDays` · `retentionMissingReason` |
 | 좀비·활동일 | 〃 | `activeDaysTotal` vs `observedDays` |
-| 내부·개발 분리 | 〃 | `isDevInstall` · `buildChannel` · `ftBuildChannel` |
+| 내부·개발 분리 | 〃 | ★`externality`(3값) · `externalityReason` · `buildChannel` · `ftBuildChannel`. `isDevInstall` 은 DEPRECATED(#1310) |
 | 버전·플랫폼 | 〃 | `appVersion` · `platform` |
 | 사람 축 대조 | `v_install_unified_revenue` | `personKey` · `personLinkCount` · `personInstallCount` |
 | 실매출 | 〃 | `revenueTotal` · `revenueCurrency` · `revenueAmountUnknownCount` |
@@ -345,7 +345,7 @@ marblo_identity.v_install_unified_revenue     위 전부 + 사람·결제 컬럼
 | `retainedD7` · `retainedD14` · `retainedD30` | BOOL | `activeDaysN` 은 **횟수**고 리텐션은 **복귀 여부**다. 창이 안 닫혔으면(`retentionElapsedDays < N`) **NULL** 이어야 하는데, 그 규칙을 화면 네 군데가 각자 구현하면 오늘과 똑같아진다 |
 | `cohortWeek` | DATE | 주간 코호트가 GROUP BY 한 줄이 된다. 클라이언트 날짜 연산(타임존)이 사라진다 |
 | `minutesToFirstSpawn` | INT64 | "10분 내 첫 성공"(B6 를 대체) 은 **분** 단위다. `daysToFirstSpawn` 은 일 단위라 답을 못 한다 |
-| `isBotInstall` | BOOL | 3.1% 분모 오염의 나머지 절반. `isDevInstall` 은 `buildChannel='dev'` 만 잡고 CI 러너를 못 잡는다. 판정은 티켓 `IU1KDbYA...`(봇 판별) 소관 — 뷰는 그 결과를 **컬럼으로 노출만** 한다 |
+| `isBotInstall` | BOOL | 3.1% 분모 오염의 나머지 절반. `externality`(구 `isDevInstall`)는 `buildChannel='dev'` 만 잡고 CI 러너를 못 잡는다. 판정은 티켓 `IU1KDbYA...`(봇 판별) 소관 — 뷰는 그 결과를 **컬럼으로 노출만** 한다 |
 
 ★네 개 다 **파생**이고 원천 테이블을 안 건드린다. `L8RvsReu` 티켓에 델타로
 요청한다(§9).
@@ -395,9 +395,10 @@ GA4 설치-이전 단계는 설치 알갱이에 접히지 않는다. 억지로 �
 
 | | 값 | 근거 |
 | --- | --- | --- |
-| 1 | **설치 (외부)** — `608 중 외부 N` | `COUNT(*) WHERE NOT isDevInstall AND NOT isBotInstall`. ★분모를 화면 맨 위에 못 박는다. 3.1% 사고의 재발 방지 |
-| 2 | **채널을 아는 설치** — `481 / 608 (79%)` 🟡 | `COUNTIF(hasGa4Row)`. "유입 0" 과 "모름" 을 가르는 한 칸 |
-| 3 | **획득 CAC** — `광고비 ÷ 외부 설치` | 광고비 원장(#1193) ÷ 1번. 광고 전이면 "지출 0 — 산출 불가" |
+| 1 | **설치 (외부 · 하한)** — `608 중 외부 N` | `COUNTIF(externality = 'external')`. ★분모를 화면 맨 위에 못 박는다. 3.1% 사고의 재발 방지 |
+| 1-B | ★**외부성 미상** — `M` | `COUNTIF(externality = 'unknown')`. ★1번과 **같은 크기로** 그린다. 미상을 sub 로 밀면 3값이 화면에서 다시 2값으로 접힌다(#1310) |
+| 2 | **채널을 아는 설치** — `N 중 K` 🟡 | `COUNTIF(hasGa4Row)` / 외부 설치. "유입 0" 과 "모름" 을 가르는 한 칸 |
+| 3 | **획득 CAC** — `광고비 ÷ 외부 설치` | 광고비 원장(#1193) ÷ 1번. ★미상을 분모에 더하면 CAC 가 낙관 편향된다. 광고 전이면 "지출 0 — 산출 불가" |
 
 **표 순서**
 

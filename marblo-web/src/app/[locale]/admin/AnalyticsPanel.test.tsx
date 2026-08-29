@@ -1701,9 +1701,36 @@ function unifiedFixture(
     smallSampleMinDenominator: 5,
     headline: {
       hygiene: {
+        // ★#1310 이후의 모양: 608 중 외부라고 **말할 근거가 있는** 것은 12건뿐이고
+        //   565건은 외부성 미상이다. 예전 모양(577 외부)은 그 565건을 외부로
+        //   반올림한 값이었다.
         installsTotal: 608,
-        installsExternal: 577,
-        installsDev: 31,
+        installsExternal: 12,
+        installsInternal: 31,
+        installsExternalityUnknown: 565,
+        externalityRows: [
+          {
+            externality: "unknown",
+            reason: "no_ledger_row",
+            label: "★모름 — 링크백 원장에 이 설치가 없다",
+            action: "★외부로 세지 마라. 앱이 링크백을 못 보냈다.",
+            installs: 565,
+          },
+          {
+            externality: "internal",
+            reason: "dev_build_channel",
+            label: "내부 — dev 빌드 채널을 봤다",
+            action: "분모에서 뺐지만 숨기지 않았다.",
+            installs: 31,
+          },
+          {
+            externality: "external",
+            reason: "non_dev_build_channel",
+            label: "외부 — dev 가 아닌 빌드 채널을 봤다",
+            action: "'배포본을 실행했다' 까지만 뜻한다.",
+            installs: 12,
+          },
+        ],
         humanEstimateMin: 5,
         humanEstimateMax: 47,
         unknownBrowserInstalls: 42,
@@ -1717,12 +1744,12 @@ function unifiedFixture(
         hygieneMissingReason: null,
       },
       channelKnown: {
-        numerator: 481,
-        denominator: 577,
-        rate: 481 / 577,
+        numerator: 9,
+        denominator: 12,
+        rate: 9 / 12,
         smallSample: false,
       },
-      spawned: { numerator: 18, denominator: 577, rate: 18 / 577, smallSample: false },
+      spawned: { numerator: 2, denominator: 12, rate: 2 / 12, smallSample: false },
     },
     channelRows: [],
     channelRowsTruncated: false,
@@ -1748,18 +1775,22 @@ function unifiedFixture(
       {
         country: "KR",
         installs: 12,
+        externalityUnknown: 7,
         channelKnown: { numerator: 9, denominator: 12, rate: 0.75, smallSample: false },
         spawned: { numerator: 2, denominator: 12, rate: 2 / 12, smallSample: false },
       },
       {
         country: null,
         installs: 3,
+        externalityUnknown: 3,
         channelKnown: { numerator: 0, denominator: 3, rate: null, smallSample: true },
         spawned: { numerator: 1, denominator: 3, rate: null, smallSample: true },
       },
     ],
     countryRowsTruncated: false,
-    installsByDay: [{ date: "2026-08-01", installs: 5, channelKnown: 3 }],
+    installsByDay: [
+      { date: "2026-08-01", installs: 5, externalityUnknown: 4, channelKnown: 3 },
+    ],
     pendingColumns: [
       { column: "retainedD7 / retainedD14 / retainedD30", blocks: "채널별 D7·D30 잔존" },
     ],
@@ -1783,8 +1814,8 @@ test("★뷰가 없으면 0 을 그리지 않고 사유를 적는다 (설치 0 �
   assert.match(html, /수치가 0 인 게 아니라 소스가 없습니다/);
   // ★사유를 그대로 적는다 — "알 수 없는 오류" 면 다음 사람이 원인을 못 찾는다.
   assert.match(html, /provision 필요/);
-  // ★숫자를 한 개도 그리지 않는다. 0 도, 픽스처의 608·577 도 없다.
-  assert.doesNotMatch(html, /608|577|사람 추정/);
+  // ★숫자를 한 개도 그리지 않는다. 0 도, 픽스처의 608·12 도 없다.
+  assert.doesNotMatch(html, /608|사람 추정|외부성 미상/);
 });
 
 test("★상단 3줄은 설치 수 옆에 사람 추정치를 같이 낸다 (재설치 루프 분리)", () => {
@@ -1792,7 +1823,7 @@ test("★상단 3줄은 설치 수 옆에 사람 추정치를 같이 낸다 (재
     <P.AcquisitionHeadlineView unified={unifiedFixture()} cac={null} />
   );
   // 전체와 외부가 둘 다 남는다 — 분모를 화면 맨 위에 못 박는다.
-  assert.match(html, /577 \/ 608/);
+  assert.match(html, /12 \/ 608/);
   // ★사람 추정치는 범위다. 폭 자체가 "아직 못 센다" 는 정보다.
   assert.match(html, /사람 추정 5~47명/);
   // 위생 경보가 주석이 아니라 화면에 있다.
@@ -1800,13 +1831,55 @@ test("★상단 3줄은 설치 수 옆에 사람 추정치를 같이 낸다 (재
   assert.match(html, /재설치 루프 539/);
 });
 
+// ── ★외부성 3값 (#1310) ─────────────────────────────────────────────────────
+//   이 칸이 망가져서 오케가 내부 사람을 "외부 지속 사용자" 로 사장님께 보고했다가
+//   기각당했다. 아래 세 테스트가 그 재발을 막는 자리다.
+
+test("★외부성 미상을 외부로 접지 않는다 — 화면에 자기 칸으로 나온다", () => {
+  const html = renderToStaticMarkup(
+    <P.AcquisitionHeadlineView unified={unifiedFixture()} cac={null} />
+  );
+  // 외부는 근거가 있는 12건뿐이다. 565 를 더해 577 로 그리면 안 된다.
+  assert.match(html, /12 \/ 608/);
+  assert.doesNotMatch(html, /577/);
+  // ★미상이 자기 칸으로 있다. sub 로 밀어 넣으면 아무도 안 읽는다.
+  assert.match(html, /외부성 미상/);
+  assert.match(html, /565/);
+  // 외부 수가 실측이 아니라 하한이라는 사실을 화면이 말한다.
+  assert.match(html, /하한/);
+});
+
+test("★판정 근거가 값과 같이 나온다 — 근거 없으면 다음 사람이 검증을 못 한다", () => {
+  const html = renderToStaticMarkup(
+    <P.AcquisitionHeadlineView unified={unifiedFixture()} cac={null} />
+  );
+  assert.match(html, /외부성 판정 근거/);
+  // 사유 키가 그대로 실린다 — 라벨만 있으면 뷰와 대조할 수 없다.
+  assert.match(html, /no_ledger_row/);
+  assert.match(html, /dev_build_channel/);
+  // "무엇을 하나" 가 붙어 있다.
+  assert.match(html, /외부로 세지 마라/);
+});
+
+test("★CAC 분모는 외부만이다 — 미상을 분모에 넣으면 CAC 가 낙관 편향된다", () => {
+  // 픽스처: 외부 12 · 미상 565. 미상을 더한 577 로 나누면 CAC 가 48배 싸 보인다.
+  assert.equal(
+    P.acquisitionCac({ spendKrw: 1200000, installsExternal: 12 }).cacKrw,
+    100000
+  );
+  assert.equal(
+    P.acquisitionCac({ spendKrw: 1200000, installsExternal: 577 }).cacKrw,
+    1200000 / 577
+  );
+});
+
 test("★CAC 는 지출 0 일 때 0원이 아니라 '산출 불가' 다", () => {
   assert.equal(
-    P.acquisitionCac({ spendKrw: 0, installsExternal: 577 }).cacKrw,
+    P.acquisitionCac({ spendKrw: 0, installsExternal: 12 }).cacKrw,
     null
   );
   assert.match(
-    P.acquisitionCac({ spendKrw: 0, installsExternal: 577 }).reason ?? "",
+    P.acquisitionCac({ spendKrw: 0, installsExternal: 12 }).reason ?? "",
     /산출 불가/
   );
   assert.equal(

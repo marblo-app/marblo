@@ -1240,12 +1240,35 @@ export type UnifiedRevenueReasonKind =
   | "true_zero"
   | "known";
 
+/** 설치의 외부성 3값. ★`unknown` 은 결측이 아니라 **값**이다. */
+export type Externality = "external" | "internal" | "unknown";
+
+/** 외부성별 설치 수 + 판정 근거. 근거 없는 판정은 화면에 올리지 않는다. */
+export type ExternalityRow = {
+  externality: Externality;
+  reason: string;
+  label: string;
+  action: string;
+  installs: number;
+};
+
 export type InstallHygiene = {
   installsTotal: number;
-  /** ★분모의 정본 — 개발·dev 태깅을 뺀 설치. */
+  /**
+   * ★분모의 정본 — `externality === "external"` 인 설치**만**이다.
+   *
+   * 예전에는 `NOT isDevInstall`(불리언)이었고 그게 "모른다" 를 외부로 반올림했다.
+   * 그 반올림 때문에 오너 프로젝트에서 일하던 설치가 "외부 지속 사용자" 로
+   * 보고됐다가 기각됐다(#1310). ★이 수는 실측이 아니라 **하한**이다.
+   */
   installsExternal: number;
-  installsDev: number;
-  /** 사람 추정치 하한 = 고유 브라우저(gaKey) 수. */
+  /** dev 빌드 채널을 본 설치. */
+  installsInternal: number;
+  /** ★외부인지 내부인지 **모르는** 설치. 어느 쪽 분모에도 넣지 마라. */
+  installsExternalityUnknown: number;
+  /** 외부성 판정의 근거별 분해. 합이 installsTotal 이다. */
+  externalityRows: ExternalityRow[];
+  /** 사람 추정치 하한 = 고유 브라우저(gaKey) 수. 모집단은 외부 + 미상이다. */
   humanEstimateMin: number;
   /** 상한 = 하한 + 브라우저를 모르는 설치. ★폭 자체가 "아직 못 센다" 는 정보다. */
   humanEstimateMax: number;
@@ -1262,6 +1285,8 @@ export type AcquisitionChannelRow = {
   campaign: string | null;
   content: string | null;
   installs: number;
+  /** ★이 행에 섞인 '외부성 미상' 건수. 0 이 아니면 외부 유입으로 읽지 마라. */
+  externalityUnknown: number;
   spawned: UnifiedRatio;
   completed: UnifiedRatio;
 };
@@ -1279,6 +1304,8 @@ export type AcquisitionMissingReasonRow = {
 export type AcquisitionCountryRow = {
   country: string | null;
   installs: number;
+  /** ★이 행에 섞인 '외부성 미상' 건수. */
+  externalityUnknown: number;
   channelKnown: UnifiedRatio;
   spawned: UnifiedRatio;
 };
@@ -1421,7 +1448,13 @@ export type AcquisitionUnified = {
   missingReasonRows: AcquisitionMissingReasonRow[];
   countryRows: AcquisitionCountryRow[];
   countryRowsTruncated: boolean;
-  installsByDay: Array<{ date: string; installs: number; channelKnown: number }>;
+  installsByDay: Array<{
+    date: string;
+    installs: number;
+    /** ★그 날 설치 중 외부성 미상 건수. 추이를 '외부 유입 추이' 로 읽지 마라. */
+    externalityUnknown: number;
+    channelKnown: number;
+  }>;
   activation?: UnifiedActivationSummary;
   retention?: UnifiedRetentionSummary;
   revenue?: UnifiedRevenueSummary;
@@ -4268,16 +4301,43 @@ export function AcquisitionHeadlineView({
   });
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         {/* ① 분모의 정본. ★전체와 사람 추정치를 같이 낸다 — 하나만 내면
-            반드시 오독된다(실측: 설치 631행이 브라우저 5개, #1198). */}
+            반드시 오독된다(실측: 설치 631행이 브라우저 5개, #1198).
+            ★★그리고 '외부' 옆에 **'미상'을 같은 크기로** 둔다. 미상을 작게
+            적거나 sub 로 밀어 넣으면 아무도 안 읽고, 그 순간 3값이 화면에서
+            다시 2값으로 접힌다 — 그게 #1310 의 결함 그 자체다. */}
         <StatCard
-          label="설치 (외부)"
+          label="설치 (외부 · 하한)"
           value={`${fmtInt(h.installsExternal)} / ${fmtInt(h.installsTotal)}`}
           sub={`사람 추정 ${fmtInt(h.humanEstimateMin)}~${fmtInt(
             h.humanEstimateMax
-          )}명 · dev ${fmtInt(h.installsDev)} 제외`}
+          )}명 · 내부 ${fmtInt(h.installsInternal)} 제외`}
         />
+        {/* ①-B ★'외부' 와 같은 크기의 '모름'. 이 칸이 이 티켓의 요점이다. */}
+        <div
+          data-testid="externality-unknown"
+          className={`rounded-xl border p-4 ${
+            h.installsExternalityUnknown > 0
+              ? "border-amber-900/60 bg-amber-950/20"
+              : "border-zinc-800 bg-zinc-950/60"
+          }`}
+        >
+          <p className="text-xs text-zinc-500">★외부성 미상</p>
+          <p
+            className={`mt-1.5 text-lg font-semibold tabular-nums ${
+              h.installsExternalityUnknown > 0
+                ? "text-amber-200"
+                : "text-zinc-100"
+            }`}
+          >
+            {fmtInt(h.installsExternalityUnknown)}
+          </p>
+          <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+            외부에도 내부에도 넣지 않고 <b>분모에서 뺐습니다</b>. 이 수가 0 이 될
+            때까지 왼쪽 &lsquo;설치 (외부)&rsquo; 는 실측이 아니라 하한입니다.
+          </p>
+        </div>
         {/* ② "유입 0" 과 "모름" 을 가르는 한 칸. */}
         <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
           <p className="text-xs text-zinc-500">채널을 아는 설치</p>
@@ -4322,6 +4382,7 @@ export function AcquisitionHeadlineView({
       {h.hygieneMissingReason && (
         <p className="text-[11px] text-zinc-500">· {h.hygieneMissingReason}</p>
       )}
+      <ExternalityEvidenceTable rows={h.externalityRows} />
       {h.byInstallClass.length > 0 && (
         <p className="text-[11px] text-zinc-500">
           분모 위생 등급(#1198):{" "}
@@ -4335,6 +4396,52 @@ export function AcquisitionHeadlineView({
             .join(" · ")}
         </p>
       )}
+    </div>
+  );
+}
+
+const EXTERNALITY_TONE: Record<Externality, string> = {
+  unknown: "text-amber-200",
+  external: "text-zinc-100",
+  internal: "text-zinc-400",
+};
+
+const EXTERNALITY_LABEL: Record<Externality, string> = {
+  unknown: "모름",
+  external: "외부",
+  internal: "내부",
+};
+
+/**
+ * ★외부성 판정 **근거표**. 이 티켓의 핵심 신설물이다.
+ *
+ * "외부 N명" 보다 먼저 답해야 하는 것이 **"그 판정의 근거가 있느냐"** 다. 근거
+ * 컬럼이 없어서 설치 넷이 근거 0 인 채로 외부에 섞였고, 검증할 방법이 없었기
+ * 때문에 잘못된 보고가 사장님까지 올라갔다(#1310). 그래서 값 옆에 항상 근거를
+ * 같이 그린다 — 다음 사람이 표만 보고 검증할 수 있어야 한다.
+ */
+export function ExternalityEvidenceTable({
+  rows,
+}: {
+  rows: ExternalityRow[] | undefined;
+}) {
+  if (!rows || rows.length === 0) return null;
+  return (
+    <div data-testid="externality-evidence" className="space-y-1">
+      <p className="text-[11px] font-medium text-zinc-400">
+        외부성 판정 근거 — ★모름을 외부로 세지 않습니다
+      </p>
+      <ul className="space-y-1 text-[11px] leading-relaxed">
+        {rows.map((r) => (
+          <li key={`${r.externality}|${r.reason}`} className="text-zinc-500">
+            <span className={`tabular-nums ${EXTERNALITY_TONE[r.externality]}`}>
+              {EXTERNALITY_LABEL[r.externality]} {fmtInt(r.installs)}
+            </span>{" "}
+            <span className="text-zinc-400">{r.label}</span>{" "}
+            <span className="text-zinc-600">({r.reason})</span> — {r.action}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -4407,6 +4514,10 @@ export function AcquisitionChannelTable({
             <th className="py-2 pr-3 font-medium">캠페인</th>
             <th className="py-2 pr-3 font-medium">소재</th>
             <th className="py-2 pr-3 text-right font-medium">설치</th>
+            {/* ★행을 지우지도 외부로 세지도 않고 칸으로 적는다(#1310). */}
+            <th className="py-2 pr-3 text-right font-medium">
+              <span className="text-amber-300/80">★외부성 미상</span>
+            </th>
             <th className="py-2 pr-3 text-right font-medium">
               첫 스폰 <span className="text-zinc-600">/설치</span>
             </th>
@@ -4428,6 +4539,13 @@ export function AcquisitionChannelTable({
               <td className="py-2 pr-3">{r.content ?? "—"}</td>
               <td className="py-2 pr-3 text-right tabular-nums">
                 {fmtInt(r.installs)}
+              </td>
+              <td
+                className={`py-2 pr-3 text-right tabular-nums ${
+                  r.externalityUnknown > 0 ? "text-amber-200" : "text-zinc-600"
+                }`}
+              >
+                {fmtInt(r.externalityUnknown)}
               </td>
               <td className="py-2 pr-3 text-right">
                 <UnifiedRatioCell value={r.spawned} />
@@ -4583,6 +4701,9 @@ export function AcquisitionCountryTable({
             <th className="py-2 pr-3 font-medium">국가</th>
             <th className="py-2 pr-3 text-right font-medium">설치</th>
             <th className="py-2 pr-3 text-right font-medium">
+              <span className="text-amber-300/80">★외부성 미상</span>
+            </th>
+            <th className="py-2 pr-3 text-right font-medium">
               채널 앎 <span className="text-zinc-600">/설치</span>
             </th>
             <th className="py-2 pr-3 text-right font-medium">
@@ -4608,6 +4729,13 @@ export function AcquisitionCountryTable({
               </td>
               <td className="py-2 pr-3 text-right tabular-nums">
                 {fmtInt(r.installs)}
+              </td>
+              <td
+                className={`py-2 pr-3 text-right tabular-nums ${
+                  r.externalityUnknown > 0 ? "text-amber-200" : "text-zinc-600"
+                }`}
+              >
+                {fmtInt(r.externalityUnknown)}
               </td>
               <td className="py-2 pr-3 text-right">
                 <UnifiedRatioCell value={r.channelKnown} />
@@ -5206,10 +5334,12 @@ export function UnifiedPersonAxisComparison({
     <div className="space-y-3">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         <StatCard
-          label="설치"
+          label="설치 (외부 · 하한)"
           value={fmtInt(hygiene.installsExternal)}
-          sub={`전체 ${fmtInt(hygiene.installsTotal)} · dev ${fmtInt(
-            hygiene.installsDev
+          sub={`전체 ${fmtInt(hygiene.installsTotal)} · 내부 ${fmtInt(
+            hygiene.installsInternal
+          )} 제외 · ★외부성 미상 ${fmtInt(
+            hygiene.installsExternalityUnknown
           )} 제외`}
         />
         <StatCard

@@ -9,8 +9,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  ACTIVATION_REASONS,
+  ACTIVATION_REASON_FIRST_RUN_AFTER_MILESTONE,
   ACTIVATION_REASON_NO_FIRST_RUN,
   CHANNEL_REASONS,
+  EXTERNALITY_REASONS,
+  EXTERNALITY_REASON_DEV_BUILD_CHANNEL,
+  EXTERNALITY_REASON_NON_DEV_BUILD_CHANNEL,
   GA4_CAMPAIGN_SENTINELS,
   GA4_ECOMMERCE_REASONS,
   GA4_JOIN_REASONS,
@@ -25,6 +30,7 @@ import {
   VIEW_INSTALL_UNIFIED,
   VIEW_INSTALL_UNIFIED_REVENUE,
   VIEW_INSTALL_UNIFIED_REVENUE_PERSON,
+  buildExternalityCase,
   buildReasonCase,
   buildRevenuePersonViewDdl,
   buildRevenuePersonViewSql,
@@ -33,7 +39,9 @@ import {
   buildUnifiedViewDdl,
   buildUnifiedViewSql,
   findForbiddenTokens,
+  resolveActivationMissingReason,
   resolveChannelMissingReason,
+  resolveExternality,
   resolveGa4EcommerceMissingReason,
   resolveGa4RevenueMissingReason,
   resolveRevenueDivergenceReason,
@@ -469,6 +477,9 @@ test("설계 문서가 약속한 컬럼이 실제로 나온다", () => {
     "platform",
     "buildChannel",
     "isDevInstall",
+    // ★#1310 이 심은 두 칸. 값과 근거는 항상 같이 다닌다.
+    "externality",
+    "externalityReason",
   ];
   const found = new Set(aliases(sql));
   for (const col of promised) assert.ok(found.has(col), `누락: ${col}`);
@@ -1003,5 +1014,186 @@ test("생성된 뷰 SQL 에 새 사유 문자열이 전부 들어 있다", () =>
   const revenue = buildRevenueViewSql(PROJECT, OPEN_GATE);
   for (const r of REVENUE_DIVERGENCE_REASONS) {
     assert.ok(revenue.includes(sqlString(r.reason)), r.reason);
+  }
+});
+
+// ── 10. ★외부성 3값 (#1310) ────────────────────────────────────────────────
+//
+//   이 칸이 불리언이라 "모름" 이 "외부(false)" 로 반올림됐고, 그래서 오너
+//   프로젝트에서 일하던 설치가 "외부 지속 사용자" 로 보고됐다가 기각됐다.
+//   아래 테스트가 그 재발을 막는 자리다.
+
+test("★A·B·C·D 의 실측 조합 — 원장 행이 없으면 external 이 아니라 unknown 이다", () => {
+  // #1310 §7 의 실측: 넷 다 isDevInstall=false 인데 넷 다 no_ledger_row 였다.
+  const v = resolveExternality({
+    hasLedgerRow: false,
+    ledgerBuildChannel: null,
+    ftBuildChannel: null,
+  });
+  assert.equal(v.externality, "unknown");
+  assert.equal(v.reason, "no_ledger_row");
+  // ★예전 불리언은 이 입력에 false(=외부)를 줬다. 그 반올림이 사고였다.
+  assert.notEqual(v.externality, "external");
+});
+
+test("★원장은 있는데 빌드 채널이 비면 unknown 이다 — 사유가 다르다", () => {
+  const v = resolveExternality({
+    hasLedgerRow: true,
+    ledgerBuildChannel: null,
+    ftBuildChannel: null,
+  });
+  assert.equal(v.externality, "unknown");
+  // no_ledger_row 와 합치면 무엇을 고쳐야 하는지 알 수 없다.
+  assert.equal(v.reason, "no_build_channel");
+});
+
+test("dev 빌드 채널은 원장·앱 어느 쪽에서 와도 internal 이다", () => {
+  for (const f of [
+    { hasLedgerRow: true, ledgerBuildChannel: "dev", ftBuildChannel: null },
+    { hasLedgerRow: false, ledgerBuildChannel: null, ftBuildChannel: "dev" },
+  ]) {
+    const v = resolveExternality(f);
+    assert.equal(v.externality, "internal");
+    assert.equal(v.reason, EXTERNALITY_REASON_DEV_BUILD_CHANNEL);
+  }
+});
+
+test("dev 가 아닌 빌드 채널을 봐야만 external 이다", () => {
+  const v = resolveExternality({
+    hasLedgerRow: true,
+    ledgerBuildChannel: "prod",
+    ftBuildChannel: null,
+  });
+  assert.equal(v.externality, "external");
+  assert.equal(v.reason, EXTERNALITY_REASON_NON_DEV_BUILD_CHANNEL);
+});
+
+test("★판정에는 항상 근거가 붙는다 — 사유가 빈 판정이 없다", () => {
+  const channels: Array<string | null> = [null, "dev", "prod", "beta", ""];
+  for (const hasLedgerRow of [true, false]) {
+    for (const ledgerBuildChannel of channels) {
+      for (const ftBuildChannel of channels) {
+        const v = resolveExternality({
+          hasLedgerRow,
+          ledgerBuildChannel,
+          ftBuildChannel,
+        });
+        assert.ok(v.reason.length > 0, "근거 없는 판정이 나왔다");
+        assert.ok(
+          ["external", "internal", "unknown"].includes(v.externality),
+          `3값 밖: ${v.externality}`,
+        );
+      }
+    }
+  }
+});
+
+test("★SQL 의 CASE 두 벌이 같은 사다리에서 나온다 — 값과 근거가 갈릴 수 없다", () => {
+  const valueCase = buildExternalityCase("externality");
+  const reasonCase = buildExternalityCase("reason");
+  // WHEN 절이 순서까지 같다.
+  const whens = (sql: string) =>
+    sql.split("\n").filter((l) => l.includes("WHEN ")).map((l) =>
+      l.slice(l.indexOf("WHEN "), l.indexOf(" THEN ")),
+    );
+  assert.deepEqual(whens(valueCase), whens(reasonCase));
+  assert.equal(whens(valueCase).length, EXTERNALITY_REASONS.length);
+  // ★ELSE NULL 이 아니다 — 외부성에는 결측이 없다.
+  assert.ok(!valueCase.includes("ELSE NULL"));
+  assert.ok(!reasonCase.includes("ELSE NULL"));
+  assert.ok(valueCase.includes(`ELSE ${sqlString("external")}`));
+  assert.ok(
+    reasonCase.includes(
+      `ELSE ${sqlString(EXTERNALITY_REASON_NON_DEV_BUILD_CHANNEL)}`,
+    ),
+  );
+});
+
+test("★뷰가 외부성으로 행을 숨기지 않는다 — 컬럼이되 필터가 아니다", () => {
+  const unified = buildUnifiedViewSql(PROJECT);
+  assert.ok(unified.includes("AS externality"));
+  assert.ok(unified.includes("AS externalityReason"));
+  assert.ok(!/WHERE[^)]*externality/i.test(unified));
+  for (const r of EXTERNALITY_REASONS) {
+    assert.ok(unified.includes(sqlString(r.reason)), r.reason);
+  }
+  assert.ok(
+    unified.includes(sqlString(EXTERNALITY_REASON_NON_DEV_BUILD_CHANNEL)),
+  );
+  // 3값이 전부 SQL 안에 있다.
+  for (const v of ["external", "internal", "unknown"]) {
+    assert.ok(unified.includes(sqlString(v)), v);
+  }
+});
+
+// ── 11. ★음수 daysToFirstSpawn (#1310 §7) ──────────────────────────────────
+
+test("★first_run 이 first_spawn 보다 뒤면 사유가 붙는다 — 0 으로 클램프하지 않는다", () => {
+  // 실측: A −38 · B −15 · C −42. first_run 이벤트가 2026-07-21 에야 생겨서다.
+  assert.equal(
+    resolveActivationMissingReason({
+      firstRunDay: "2026-07-21",
+      firstSpawnDay: "2026-06-13",
+      firstCompletedDay: null,
+    }),
+    ACTIVATION_REASON_FIRST_RUN_AFTER_MILESTONE,
+  );
+  // 완료 쪽만 뒤집혀도 잡는다(task_outcomes 소급으로 실제로 생기는 모양이다).
+  assert.equal(
+    resolveActivationMissingReason({
+      firstRunDay: "2026-07-21",
+      firstSpawnDay: "2026-07-22",
+      firstCompletedDay: "2026-06-15",
+    }),
+    ACTIVATION_REASON_FIRST_RUN_AFTER_MILESTONE,
+  );
+});
+
+test("정상 순서면 사유가 없다 — 같은 날(0일)은 사유가 아니라 값이다", () => {
+  assert.equal(
+    resolveActivationMissingReason({
+      firstRunDay: "2026-08-01",
+      firstSpawnDay: "2026-08-01",
+      firstCompletedDay: "2026-08-01",
+    }),
+    null,
+  );
+  assert.equal(
+    resolveActivationMissingReason({
+      firstRunDay: "2026-08-01",
+      firstSpawnDay: null,
+      firstCompletedDay: null,
+    }),
+    null,
+  );
+});
+
+test("first_run 이 없으면 그쪽 사유가 먼저다", () => {
+  assert.equal(
+    resolveActivationMissingReason({
+      firstRunDay: null,
+      firstSpawnDay: "2026-08-01",
+      firstCompletedDay: null,
+    }),
+    ACTIVATION_REASON_NO_FIRST_RUN,
+  );
+});
+
+test("★SQL 도 음수를 만들지 않는다 — 두 경과일 칸에 순서 가드가 있다", () => {
+  const sql = buildUnifiedViewSql(PROJECT);
+  assert.ok(
+    sql.includes("DATE(p.first_spawn_at) < DATE(p.first_run_at)"),
+    "daysToFirstSpawn 가드 누락",
+  );
+  assert.ok(
+    sql.includes("DATE(p.first_completed_at) < DATE(p.first_run_at)"),
+    "daysToFirstCompleted 가드 누락",
+  );
+  // ★GREATEST/ABS 로 0 이나 양수로 접지 않는다 — 없는 사실을 만들면 안 된다.
+  assert.ok(!/GREATEST\(\s*0/i.test(sql));
+  assert.ok(!/ABS\(\s*DATE_DIFF/i.test(sql));
+  // 사유 사다리 두 칸이 다 SQL 에 있다.
+  for (const r of ACTIVATION_REASONS) {
+    assert.ok(sql.includes(sqlString(r.reason)), r.reason);
   }
 });

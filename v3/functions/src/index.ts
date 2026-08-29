@@ -349,6 +349,7 @@ import {
   buildChannelSql,
   buildCountryRows,
   buildCountrySql,
+  buildExternalitySql,
   buildHygiene,
   buildHygieneSql,
   buildInstallClassSql,
@@ -14873,8 +14874,29 @@ FROM \`${ANALYTICS_DATASET}.${BQ_ATTRIBUTION_TABLE}\`
 WHERE installId IS NOT NULL AND installId != ''`;
 }
 
+/**
+ * ★`first_completed_at` 의 **원천 라벨**. events 의 이벤트명이 아니다 —
+ * `task_outcomes` 에서 success=true 인 행을 뜻한다(#1310 §7).
+ */
+const MILESTONE_SOURCE_TASK_OUTCOMES_SUCCESS = "task_outcomes:success";
+
 // 이정표. 이벤트 이름은 ACTIVATION_GATE_STEPS 규약을 그대로 쓴다 — 여기서
 // 새 이름을 만들면 퍼널 화면과 프로필이 다른 사람을 세게 된다.
+//
+// ── ★first_completed_at 이 왜 두 소스에서 오나 (#1310 §7 이 찾은 결함) ──────
+//   실측(2026-08-29): 성공 task 가 17건인데 `firstCompletedAt` 이 NULL 인 설치가
+//   있었다. 원인은 이 칸이 `events` 의 `task:completed` **하나만** 봤기 때문이다 —
+//   그 이벤트는 역사상 **설치 2개 · 43건**만 발화했다([[post-spawn-telemetry-gap]]
+//   과 같은 계열의 유실). 같은 사실의 정본은 `task_outcomes`(1,714행)에 있고,
+//   이 프로젝트는 이미 "완료·실패는 task_outcomes 단일 소스" 를 규약으로 쓴다
+//   (ANALYTICS_DAILY_OUTCOMES_SQL 주석, getBetaScorecard 주석 ①).
+//
+// ★축은 그대로 익명 설치다. `task_outcomes.userId` 는 전부 LENGTH 36(uuid36) =
+//   익명 설치 ID 이고 계정 uid 는 28자다(index.ts 의 베타 스코어카드 주석에 실측이
+//   적혀 있다). 계정 축을 끌어오지 않았으므로 `assertAxisPurity` 경계를 넘지 않는다.
+// ★UNION ALL 로 붙이는 이유: `foldMilestones` 가 설치키별로 **각 칸의 가장 이른
+//   값**을 취한다. 그래서 두 소스를 한 행으로 합칠 필요가 없고, 한쪽이 비어도
+//   다른 쪽이 그대로 산다. 값이 겹치면 더 이른 쪽이 이긴다 — 그게 '최초' 의 정의다.
 const ANALYTICS_MILESTONES_SQL = `
 SELECT
   userId AS installKey,
@@ -14883,6 +14905,19 @@ SELECT
   FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%E3SZ', MIN(IF(event = 'task:completed', TIMESTAMP(timestamp), NULL))) AS firstCompletedAt
 FROM \`${ANALYTICS_DATASET}.${BQ_EVENTS_TABLE}\`
 WHERE userId IS NOT NULL AND userId != '' AND userId != 'anon'
+GROUP BY installKey
+UNION ALL
+-- ★완료의 정본. 성공한 task 의 가장 이른 completedAt 이다.
+--   실패(success=false)는 '완료' 가 아니므로 여기 들어오지 않는다.
+SELECT
+  userId AS installKey,
+  CAST(NULL AS STRING) AS firstRunAt,
+  CAST(NULL AS STRING) AS firstSpawnAt,
+  FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%E3SZ', MIN(SAFE_CAST(completedAt AS TIMESTAMP))) AS firstCompletedAt
+FROM \`${ANALYTICS_DATASET}.task_outcomes\`
+WHERE userId IS NOT NULL AND userId != '' AND userId != 'anon'
+  AND success IS TRUE
+  AND SAFE_CAST(completedAt AS TIMESTAMP) IS NOT NULL
 GROUP BY installKey`;
 
 /**
@@ -14903,6 +14938,21 @@ FROM \`${ANALYTICS_DATASET}.${BQ_EVENTS_TABLE}\`
 WHERE TIMESTAMP(timestamp) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
   AND userId IS NOT NULL AND userId != '' AND userId != 'anon'
   AND event IN ('app:first_run', 'agent:spawned', 'task:completed')
+GROUP BY event, week
+UNION ALL
+-- ★first_completed_at 의 원천이 바뀌었으므로 커버리지 검사의 **원천측**도 같이
+--   옮긴다. 파생은 task_outcomes 를 보는데 원천 비교는 task:completed(전체 43건)
+--   를 보고 있으면, 그 검사는 영원히 "판정할 근거가 없다" 만 말한다.
+--   ★'event' 컬럼에 실리는 이 이름은 events 테이블의 이벤트명이 아니라 **원천
+--     라벨**이다. 라벨과 이벤트명이 같은 공간에 있으면 안 되므로 접두어를 다르게 뒀다.
+SELECT
+  '${MILESTONE_SOURCE_TASK_OUTCOMES_SUCCESS}' AS event,
+  FORMAT_DATE('%Y-%m-%d', DATE_TRUNC(DATE(SAFE_CAST(completedAt AS TIMESTAMP), 'Asia/Seoul'), WEEK(MONDAY))) AS week,
+  COUNT(DISTINCT userId) AS eventKeys
+FROM \`${ANALYTICS_DATASET}.task_outcomes\`
+WHERE SAFE_CAST(completedAt AS TIMESTAMP) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+  AND userId IS NOT NULL AND userId != '' AND userId != 'anon'
+  AND success IS TRUE
 GROUP BY event, week`;
 
 // ── 계정축 소스 쿼리 ────────────────────────────────────────────────────────
@@ -15031,8 +15081,10 @@ function evaluateProfileCoverage(
       pick: (r) => r.first_spawn_at,
     },
     {
+      // ★원천이 task:completed 가 아니다. 그 이벤트는 역사상 설치 2개·43건만
+      //   발화했고, 완료의 정본은 task_outcomes 다(#1310 §7 / ANALYTICS_MILESTONES_SQL).
       field: "first_completed_at",
-      sourceEvent: "task:completed",
+      sourceEvent: MILESTONE_SOURCE_TASK_OUTCOMES_SUCCESS,
       pick: (r) => r.first_completed_at,
     },
   ];
@@ -17822,20 +17874,31 @@ export const getAdminInstallUnified = functions
     let missing: BqRow[];
     let country: BqRow[];
     let byDay: BqRow[];
+    let externality: BqRow[];
     try {
-      const [headRows, channelRows, missingRows, countryRows, dayRows] =
-        await Promise.all([
+      const [
+        headRows,
+        channelRows,
+        missingRows,
+        countryRows,
+        dayRows,
+        externalityQueryRows,
+      ] = await Promise.all([
           run(buildHygieneSql(BQ_PROJECT)),
           run(buildChannelSql(BQ_PROJECT)),
           run(buildMissingReasonSql(BQ_PROJECT)),
           run(buildCountrySql(BQ_PROJECT)),
           run(buildInstallsByDaySql(BQ_PROJECT), { days: rangeDays }),
+          // ★외부성 × 근거 분해. 헤드라인과 **같은 배치**로 던진다 — 이게 실패해
+          //   비면 '외부 N명' 만 남고 근거가 사라지는데, 그 상태가 정확히 #1310 이다.
+          run(buildExternalitySql(BQ_PROJECT)),
         ]);
       head = headRows[0] as BqRow[];
       channel = channelRows[0] as BqRow[];
       missing = missingRows[0] as BqRow[];
       country = countryRows[0] as BqRow[];
       byDay = dayRows[0] as BqRow[];
+      externality = externalityQueryRows[0] as BqRow[];
     } catch (err) {
       // ★사유를 그대로 화면에 보낸다. "알 수 없는 오류" 는 다음 사람이 원인을
       //   못 찾게 만들고, 그 상태가 며칠 가면 아무도 이 탭을 안 믿게 된다.
@@ -17863,7 +17926,7 @@ export const getAdminInstallUnified = functions
       });
     }
 
-    const hygiene = buildHygiene(head[0], classRows);
+    const hygiene = buildHygiene(head[0], classRows, externality);
     const channelBuilt = buildChannelRows(channel);
     const countryBuilt = buildCountryRows(country);
     const installsByDay = buildInstallsByDay(byDay);
