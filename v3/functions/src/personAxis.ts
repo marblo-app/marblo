@@ -193,6 +193,11 @@ export const FORBIDDEN_ON_LINK_AXIS: ReadonlyArray<string> = [
   "uid",
   "user_id",
   "userid",
+  // ★camelCase 철자. assertAxisPurity 는 컬럼명을 소문자화해 대조하므로
+  //   `gaKey`/`installId` 같은 철자는 snake_case 항목에 안 걸린다
+  //   (analyticsProfiles.FORBIDDEN_ON_ANONYMOUS_AXIS 의 "userkey" 와 같은 이유).
+  "ga_key",
+  "gakey",
   "account_id",
   "account_label",
   "email",

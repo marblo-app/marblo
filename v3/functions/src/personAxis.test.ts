@@ -8,7 +8,13 @@
 //   1) 게이트가 unset 이면 **0행 + 사유**다. 던지지도, 전체를 보여주지도 않는다.
 //   2) 소급은 저장이 아니라 조회다 — **링크표를 지우면 소급이 즉시 취소된다.**
 //   3) 공용 기기는 값을 만들지 않고 **센다.**
-//   4) 이벤트 행에는 user_key 컬럼이 없다(있으면 되돌릴 수 없어진다).
+//   4) 이 모듈(링크축)은 이벤트 행을 한 줄도 건드리지 않는다.
+//      ★2026-08-29 정정: "이벤트 행에는 user_key 컬럼이 **없다**" 였던 문장이다.
+//      그 뒤 각인(personAxisStamp.ts, ticket VZ0K2FIeASLrWy9bwvN1)이 `events` 에
+//      `userKey` 컬럼을 더했으므로 지금은 틀린 말이다. 지금 참인 문장은 이것이다 —
+//      **링크축은 여전히 저장 소급을 하지 않는다.** 각인은 forward-only 이고,
+//      과거 43만 행을 사람에게 붙이는 유일한 경로는 여전히 이 링크표다.
+//      각인 쪽 되돌리기는 buildEventStampEraseSql 이 짝으로 맡는다.
 //   5) 권한 분리는 데이터셋 이름이 아니라 **IAM** 으로 갈려야 한다.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -246,6 +252,10 @@ test("★이벤트 행은 통과해도 변하지 않는다 — 저장 소급이 
   }
 });
 
+// ★이 테스트가 지키는 것은 "이벤트에 사람키가 없다" 가 아니라 "**이 모듈의**
+//   삭제 SQL 은 링크표만 건드린다" 다. 각인 컬럼을 NULL 로 되돌리는 것은 짝인
+//   personAxisStamp.buildEventStampEraseSql 이고, 삭제요청은 **둘 다** 불러야
+//   반쪽이 남지 않는다(personAxisStamp.ts §5).
 test("★삭제 SQL 은 링크표 한 줄 — 이벤트 테이블을 건드리지 않는다", () => {
   const sql = buildPersonAxisEraseSql(PROJECT);
   assert.match(sql, new RegExp(TABLE_USER_INSTALL));

@@ -207,6 +207,11 @@ import {
   type PersonAxisCoverage,
 } from "./personAxis";
 import {
+  applyEventUserKeyStamp,
+  planEventUserKeyStamp,
+  resolveEventStampGate,
+} from "./personAxisStamp";
+import {
   TEAM_USAGE_CACHE_COLLECTION,
   TEAM_USAGE_CACHE_SCHEMA_VERSION,
   TEAM_USAGE_CACHE_TTL_SECONDS,
@@ -8190,8 +8195,27 @@ export const logTelemetryBatch = functions.https.onCall(
       anonymousReceiptIds
     );
 
+    // ── ★사람키 각인 (ticket VZ0K2FIeASLrWy9bwvN1, personAxisStamp.ts) ──────
+    // 배포 게이트(EVENTS_PERSON_STAMP_FROM)와 방침 게이트
+    // (PERSON_AXIS_EFFECTIVE_FROM)를 **둘 다** 통과할 때만 행에 `userKey` 가
+    // 붙는다. 둘 중 하나라도 닫혀 있으면 컬럼을 아예 언급하지 않으므로,
+    // BQ ALTER 전에 이 코드가 배포돼도 적재가 깨지지 않는다.
+    //
+    // ★한 배치 = 한 요청 = 한 uid 이므로 판정은 배치당 한 번이다. uid 는 여기서
+    //   소비되고 버려진다 — 행에 남는 것은 `us_` 가명뿐이다.
+    //
+    // ★미인증 경로(logAnonymousTelemetryBatch)는 이 블록을 지나지 않는다.
+    //   그쪽은 uid 가 아예 없어 원리적으로 각인할 수 없다 — 그래서 이벤트 축의
+    //   사람 커버리지는 어느 설계로도 100% 가 되지 않는다(화면이 말해야 한다).
+    const eventStampPlan = planEventUserKeyStamp({
+      uid: context.auth.uid,
+      salt: idSalt,
+      personGate: resolvePersonAxisGate(),
+      stampGate: resolveEventStampGate(),
+    });
+
     const rows = deduped.fresh.map((e) =>
-      toTelemetryBigQueryRow(e, now, idSalt)
+      applyEventUserKeyStamp(toTelemetryBigQueryRow(e, now, idSalt), eventStampPlan)
     );
 
     if (rows.length > 0) {
@@ -8226,6 +8250,11 @@ export const logTelemetryBatch = functions.https.onCall(
       inserted: rows.length,
       skippedAnonymousDuplicates: deduped.skipped,
       personAxisLink,
+      // ★각인 여부는 boolean + 사유만 돌려준다. 가명키 자체는 절대 응답에 싣지
+      //   않는다(개별 키를 밖으로 내보내지 않는다는 기존 코크핏 규율).
+      eventUserKeyStamp: eventStampPlan.stamped
+        ? "stamped"
+        : eventStampPlan.reason,
     };
   }
 );

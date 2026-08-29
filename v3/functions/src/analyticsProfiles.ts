@@ -70,6 +70,7 @@ import {
   LINK_AXIS_TABLES,
   TABLE_USER_INSTALL,
 } from "./personAxis";
+import { EVENT_USER_KEY_FIELD } from "./personAxisStamp";
 import { pseudonymizeAnalyticsId } from "./analyticsPseudonym";
 import {
   VIEW_TEAM_USAGE_DAILY,
@@ -116,6 +117,7 @@ export { VIEW_TEAM_USAGE_DAILY, VIEW_TEAM_USAGE_UNATTRIBUTED };
  */
 export { LINK_AXIS_TABLES, FORBIDDEN_ON_LINK_AXIS, TABLE_USER_INSTALL };
 
+
 /**
  * ★익명축 테이블에 **절대** 나타나면 안 되는 컬럼명(계정으로 되짚는 다리).
  * 스키마 상수를 이 목록으로 검사하는 테스트가 있다 — 새 컬럼을 추가할 때
@@ -123,6 +125,11 @@ export { LINK_AXIS_TABLES, FORBIDDEN_ON_LINK_AXIS, TABLE_USER_INSTALL };
  */
 export const FORBIDDEN_ON_ANONYMOUS_AXIS: ReadonlyArray<string> = [
   "user_key",
+  // ★camelCase 철자도 막는다. assertAxisPurity 는 컬럼명을 소문자화해서 이 목록과
+  //   대조하는데, `userKey` 는 소문자화하면 "userkey" 라 "user_key" 와 **안 걸린다.**
+  //   `events` 의 컬럼이 camelCase 라(personAxisStamp.EVENT_USER_KEY_FIELD) 그 철자가
+  //   실재하게 됐고, 그때부터 이 목록의 구멍이 이론이 아니라 경로가 됐다.
+  "userkey",
   "user_id",
   "userid",
   "uid",
@@ -154,7 +161,76 @@ export const FORBIDDEN_ON_ACCOUNT_AXIS: ReadonlyArray<string> = [
   "ga_key",
   "ga_client_id",
   "install_label",
+  // ★camelCase 철자(위 FORBIDDEN_ON_ANONYMOUS_AXIS 의 "userkey" 와 같은 이유).
+  "installkey",
+  "gakey",
+  "gaclientid",
 ];
+
+/**
+ * ★이벤트 축 — 원천 텔레메트리 표. (ticket VZ0K2FIeASLrWy9bwvN1)
+ *
+ * ── 왜 이 축이 뒤늦게 생겼나 (구멍이었다는 뜻이다) ──────────────────────────
+ * `assertAxisPurity` 는 등록되지 않은 표를 만나면 던진다. 그런데 지금까지
+ * `events`/`task_outcomes`/`agent_heartbeats` 는 **어느 목록에도 없었다** —
+ * 즉 아무도 이 표들에 대해 가드를 부르지 않았고, 부를 수도 없었다. 파생표
+ * (`analytics_user_daily` 등)만 검사받는 동안 원천 표는 무방비였다.
+ *
+ * 사람키 각인(personAxisStamp.ts)이 그 사실을 드러냈다: 이벤트 행에 계정 파생
+ * 키를 얹는 변경이 **가드를 한 번도 울리지 않고** 통과한다. 가드가 막지 않은
+ * 이유가 "안전해서" 가 아니라 "보고 있지 않아서" 였다면, 그건 설계 입력이다.
+ *
+ * ── 이 축이 허용하는 것 / 금지하는 것 ───────────────────────────────────────
+ * 허용: 익명 설치 ID(`userId`) · 가명 조인키(`projectId`/`agentId`/`taskId`/
+ *       `flowId` — 전부 `pseudonymizeAnalyticsRow` 가 바꾼 값) ·
+ *       ★사람키 `userKey` 한 벌(각인, 배포+방침 게이트가 둘 다 열렸을 때만).
+ * 금지: 원시 uid · 이메일 · 계정 라벨 · 금액 · `person_key` (아래 목록).
+ *
+ * ★`userid` 를 금지 목록에 올리지 **못한다.** `events.userId` 는 실재하는
+ * 컬럼이고 그 값은 계정 uid 가 아니라 **익명 설치 UUID**(36자)다
+ * (telemetryIdentityAxis.ts:30, 실측). 즉 이 축에서 그 이름은 정상이다.
+ * 그래서 가드는 "이 컬럼에 뭐가 들었나" 는 못 본다 — 이름만 본다. 그 한계의
+ * 해소는 컬럼 개명(`userId` → `installClientId`, telemetryIdentityAxis.ts 의
+ * `USERID_COLUMN_RENAME`)이고 이 티켓의 범위 밖이다. **한계를 알고 두는 것과
+ * 모르고 두는 것은 다르다.**
+ */
+export const TABLE_EVENTS = "events";
+export const TABLE_TASK_OUTCOMES = "task_outcomes";
+export const TABLE_AGENT_HEARTBEATS = "agent_heartbeats";
+
+export const EVENT_AXIS_TABLES: ReadonlyArray<string> = [
+  TABLE_EVENTS,
+  TABLE_TASK_OUTCOMES,
+  TABLE_AGENT_HEARTBEATS,
+];
+
+/**
+ * ★이벤트 축 표에 **절대** 나타나면 안 되는 컬럼명.
+ *
+ * `FORBIDDEN_ON_ANONYMOUS_AXIS` 에서 `user_key`/`userkey` 만 뺀 것이다 —
+ * 그 한 벌이 각인으로 허용된 유일한 계정 파생값이기 때문이다. 나머지 금지는
+ * 한 글자도 완화하지 않는다. ★여기에 `email` 이나 `uid` 를 더하고 싶어지면
+ * 그건 각인이 아니라 **원시 식별자 적재**다. 다른 일이다.
+ */
+const EVENT_AXIS_ALLOWED_FROM_ANONYMOUS_LIST: ReadonlyArray<string> = [
+  // 각인으로 허용된 유일한 계정 파생값(personAxisStamp.EVENT_USER_KEY_FIELD).
+  "user_key",
+  "userkey",
+  // ★허용이 아니라 **가드의 한계**다. `events.userId` 는 실재하는 컬럼이고 그
+  //   값은 계정 uid 가 아니라 익명 설치 UUID(36자)다 — 이름만 보는 가드는 그
+  //   구분을 못 한다(telemetryIdentityAxis.ts:30 실측). 목록에 두면 원천 표가
+  //   전부 즉시 실패해서 가드를 아예 못 켠다. 해소는 컬럼 개명이고
+  //   (telemetryIdentityAxis.USERID_COLUMN_RENAME) 별건이다.
+  "user_id",
+  "userid",
+];
+
+export const FORBIDDEN_ON_EVENT_AXIS: ReadonlyArray<string> =
+  FORBIDDEN_ON_ANONYMOUS_AXIS.filter(
+    (c) => !EVENT_AXIS_ALLOWED_FROM_ANONYMOUS_LIST.includes(c)
+  ).concat(["person_key", "personkey"]);
+
+export { EVENT_USER_KEY_FIELD };
 
 // ── ★D1/D3/D7/D14/D30 정의 — 문서로만 두지 않고 코드에 박는다 ───────────────
 //
@@ -1955,9 +2031,17 @@ export const ACCOUNT_PROFILE_SCHEMA: ReadonlyArray<BqField> = [
  * ensure*Table() 도 테이블을 만들기 전에 돌린다 — 잘못된 스키마가 BQ 에
  * **생성되기 전에** 막는 게 요점이다(생성 후엔 컬럼 삭제가 안 된다).
  *
- * 축은 셋이다: 익명축 / 계정축 / 링크축. 링크축(`analytics_user_install`)만
- * 두 키를 한 행에 담을 수 있고, 그래서 목록이 표 하나다 — 잇는 자리가 하나뿐인
- * 것이 "링크표를 지우면 사람 축이 통째로 사라진다" 의 근거다.
+ * 축은 넷이다: 익명축 / 계정축 / 링크축 / 이벤트축.
+ *
+ *  - 링크축(`analytics_user_install`)만 두 키를 **한 행에** 담을 수 있고, 그래서
+ *    목록이 표 하나다 — 잇는 자리가 하나뿐인 것이 "링크표를 지우면 사람 축이
+ *    통째로 사라진다" 의 근거다.
+ *  - ★이벤트축(`events` 등)은 2026-08-29 에 **뒤늦게** 등록됐다. 그전까지 원천
+ *    표는 어느 목록에도 없어서, 이 가드를 부르는 것 자체가 불가능했다(등록되지
+ *    않은 표는 던진다). 가드가 원천 표를 막지 않았던 이유는 안전해서가 아니라
+ *    **보고 있지 않아서**다. `EVENT_AXIS_TABLES` 주석 참조.
+ *  - 이벤트축은 사람키 한 벌(`userKey`)을 허용하되 나머지 계정축 컬럼은 익명축과
+ *    똑같이 금지한다. 각인과 원시 식별자 적재는 다른 일이다.
  */
 export function assertAxisPurity(
   table: string,
@@ -1969,12 +2053,14 @@ export function assertAxisPurity(
     ? FORBIDDEN_ON_ACCOUNT_AXIS
     : LINK_AXIS_TABLES.includes(table)
     ? FORBIDDEN_ON_LINK_AXIS
+    : EVENT_AXIS_TABLES.includes(table)
+    ? FORBIDDEN_ON_EVENT_AXIS
     : null;
   if (forbidden == null) {
     throw new Error(
       `[analyticsProfiles] 축이 선언되지 않은 테이블: ${table}. ` +
-        "ANONYMOUS_AXIS_TABLES / ACCOUNT_AXIS_TABLES / LINK_AXIS_TABLES 중 " +
-        "하나에 등록해라."
+        "ANONYMOUS_AXIS_TABLES / ACCOUNT_AXIS_TABLES / LINK_AXIS_TABLES / " +
+        "EVENT_AXIS_TABLES 중 하나에 등록해라."
     );
   }
   const walk = (fs: ReadonlyArray<BqField>, path: string): void => {

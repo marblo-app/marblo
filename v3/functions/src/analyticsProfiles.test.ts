@@ -34,7 +34,11 @@ import {
   PROFILE_HORIZONS,
   FORBIDDEN_ON_ANONYMOUS_AXIS,
   FORBIDDEN_ON_LINK_AXIS,
+  FORBIDDEN_ON_EVENT_AXIS,
+  EVENT_AXIS_TABLES,
+  EVENT_USER_KEY_FIELD,
   LINK_AXIS_TABLES,
+  TABLE_EVENTS,
   TABLE_USER_INSTALL,
   type BqField,
   type DailySourceRow,
@@ -218,6 +222,83 @@ test("★같은 스키마를 익명축 표에 넣으면 여전히 거부된다",
     () => assertAxisPurity(TABLE_USER_DAILY, USER_INSTALL_SCHEMA as BqField[]),
     /user_key/
   );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 이벤트 축 (ticket VZ0K2FIeASLrWy9bwvN1) — 가드가 원천 표를 **보게 됐다**
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("★events 는 이제 축이 선언된 표다 — 전에는 가드를 부를 수조차 없었다", () => {
+  // 등록 전에는 assertAxisPurity("events", …) 가 "축이 선언되지 않은 테이블" 로
+  // 던졌다. 즉 원천 표에 대해서는 이 가드가 한 번도 돈 적이 없다.
+  for (const t of EVENT_AXIS_TABLES) {
+    assertAxisPurity(t, [
+      { name: "event", type: "STRING", mode: "NULLABLE" },
+      { name: "userId", type: "STRING", mode: "NULLABLE" },
+      { name: "projectId", type: "STRING", mode: "NULLABLE" },
+      { name: EVENT_USER_KEY_FIELD, type: "STRING", mode: "NULLABLE" },
+    ]);
+  }
+});
+
+test("★이벤트 축은 사람키 한 벌만 허용한다 — 나머지 계정축 컬럼은 익명축과 똑같이 금지", () => {
+  for (const name of [
+    "uid",
+    "email",
+    "account_id",
+    "account_label",
+    "cost_usd",
+    "mrr_usd",
+    "is_admin",
+    "person_key",
+  ]) {
+    assert.throws(
+      () =>
+        assertAxisPurity(TABLE_EVENTS, [
+          { name: EVENT_USER_KEY_FIELD, type: "STRING", mode: "NULLABLE" },
+          { name, type: "STRING", mode: "NULLABLE" },
+        ]),
+      new RegExp(name),
+      `${name} 이 이벤트 축에서 통과했다`
+    );
+  }
+});
+
+test("★userKey 는 익명축 파생표에서는 여전히 거부된다 — 축이 넓어진 게 아니다", () => {
+  // camelCase 철자로도 막힌다. 소문자화 대조라 "user_key" 만으로는 안 걸렸다.
+  for (const name of ["user_key", "userKey", "USERKEY"]) {
+    assert.throws(
+      () =>
+        assertAxisPurity(TABLE_USER_DAILY, [
+          ...USER_DAILY_SCHEMA,
+          { name, type: "STRING", mode: "NULLABLE" },
+        ]),
+      /user_?key/i,
+      `${name} 이 익명축에서 통과했다`
+    );
+  }
+});
+
+test("★계정축에도 camelCase 익명 조인키가 못 들어온다", () => {
+  for (const name of ["installKey", "gaKey", "gaClientId"]) {
+    assert.throws(
+      () =>
+        assertAxisPurity(TABLE_ACCOUNT_PROFILE, [
+          ...ACCOUNT_PROFILE_SCHEMA,
+          { name, type: "STRING", mode: "NULLABLE" },
+        ]),
+      new RegExp(name, "i"),
+      `${name} 이 계정축에서 통과했다`
+    );
+  }
+});
+
+test("★가드의 알려진 한계를 문서가 아니라 테스트가 들고 있다 — events.userId 는 못 막는다", () => {
+  // `events.userId` 는 실재하고 그 값은 익명 설치 UUID 다. 이름만 보는 가드는
+  // "이 컬럼에 계정 uid 가 들어갔나" 를 볼 수 없다. 해소는 컬럼 개명이고
+  // (telemetryIdentityAxis.USERID_COLUMN_RENAME) 이 티켓 범위 밖이다.
+  assert.ok(!FORBIDDEN_ON_EVENT_AXIS.includes("userid"));
+  assert.ok(FORBIDDEN_ON_EVENT_AXIS.includes("uid"));
 });
 
 test("★링크표에 원시 식별자를 붙이면 즉시 실패한다 — 가명 매핑이지 명부가 아니다", () => {
