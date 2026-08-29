@@ -173,7 +173,9 @@ const KO_TAB_NOTES: TabNotes = {
   lanes:
     "퀵레인. 메인 작업을 멈추지 않고, 방금 눈에 띈 개선점을 독립 워크트리에서 병렬로 돌립니다. 레인마다 터미널이 붙고 미션도 여기서 관리합니다.",
   agents:
-    "에이전트 관리 대시보드 — 스폰된 에이전트의 상태 · 담당 티켓 · 비용을 보고 중지 / 재시작 / 삭제합니다. 터미널 화면 자체는 왼쪽 터미널 열에 있습니다.",
+    "마블로봇 — 봇 갤러리, 봇 실행 상태, 트리거 설정을 봅니다. 실행 목록은 봇으로 분류된 에이전트만 보여 줍니다.",
+  fleet:
+    "플릿 관리 — 스폰된 에이전트 전체의 상태 · 담당 티켓 · 비용을 보고 중지 / 재시작 / 삭제합니다. 터미널 화면 자체는 왼쪽 터미널 열에 있습니다.",
   project:
     "이 프로젝트의 ‘사람’ 쪽 — 멤버 · 역할 · 초대 · 멤버별 작업량. 초대와 역할 부여는 설정 › 팀과 같은 화면을 공유합니다(팀 기능은 유료 플랜).",
   worktrees:
@@ -650,7 +652,9 @@ const EN_TAB_NOTES: TabNotes = {
   lanes:
     "Quick Lanes. Run the improvement you just noticed in its own worktree, in parallel, without leaving your main work. Each lane gets a terminal, and missions are managed here too.",
   agents:
-    "The agent management dashboard — status, assigned ticket and cost per spawned agent, plus stop / restart / delete. The terminals themselves live in the left column.",
+    "Marblo Bots — bot gallery, bot run status and trigger settings. The run list only shows agents classified as bots.",
+  fleet:
+    "Fleet management — status, assigned ticket and cost for every spawned agent, plus stop / restart / delete. The terminals themselves live in the left column.",
   project:
     "The people side of the project — members, roles, invites and per-member workload. Invites and role assignment share the same screen as Settings → Team (team features are a paid plan).",
   worktrees:

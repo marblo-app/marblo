@@ -18,7 +18,7 @@ import { StoreTab } from "../store/StoreTab";
 import { MissionsTab } from "../tabs/MissionsTab";
 import { DeployTab } from "../tabs/DeployTab";
 import { FlowsTab } from "../tabs/FlowsTab";
-import { AgentsTab } from "../tabs/AgentsTab";
+import { AgentFleetTab, AgentsTab } from "../tabs/AgentsTab";
 import { ProjectTab } from "../project/ProjectTab";
 import { SettingsPage } from "../settings/SettingsPage";
 import { StartHereTab } from "../onboarding/StartHereTab";
@@ -56,6 +56,7 @@ const TAB_COMPONENTS: Record<RightTabId, () => JSX.Element> = {
   startHere: StartHereTab,
   board: BoardTab,
   agents: AgentsTab,
+  fleet: AgentFleetTab,
   // People side of the project: members, roles, invites, and per-member
   // workload. Shares TeamManagement with Settings → Team rather than
   // reimplementing the invite/role UI.
@@ -81,6 +82,7 @@ const TAB_LABEL_KEY: Record<RightTabId, MessageKey> = {
   startHere: "workspace.tab.startHere",
   board: "workspace.tab.board",
   agents: "workspace.tab.agents",
+  fleet: "workspace.tab.fleet",
   project: "workspace.tab.project",
   settings: "workspace.tab.settings",
   code: "workspace.tab.code",

@@ -2,7 +2,7 @@ import { memo } from "react";
 import type { Pane } from "../../stores/paneStore";
 import { BoardTab } from "../tabs/BoardTab";
 import { CodeTab } from "../tabs/CodeTab";
-import { AgentsTab } from "../tabs/AgentsTab";
+import { AgentFleetTab, AgentsTab } from "../tabs/AgentsTab";
 import { FlowsTab } from "../tabs/FlowsTab";
 import { MissionsTab } from "../tabs/MissionsTab";
 import { DeployTab } from "../tabs/DeployTab";
@@ -28,6 +28,8 @@ export const PaneContent = memo(function PaneContent({ pane }: { pane: Pane }) {
       return <CodeTab />;
     case "agents":
       return <AgentsTab />;
+    case "fleet":
+      return <AgentFleetTab />;
     case "flows":
       return (
         <PlanGate feature="flows">

@@ -18,6 +18,7 @@ export type PaneKind =
   | "board"
   | "code"
   | "agents"
+  | "fleet"
   | "flows"
   | "missions"
   | "deploy"
@@ -56,6 +57,7 @@ export const PANE_TITLES: Record<PaneKind, string> = {
   board: "Board",
   code: "Code",
   agents: "Agents",
+  fleet: "Fleet",
   flows: "Flows",
   missions: "Missions",
   deploy: "Deploy",

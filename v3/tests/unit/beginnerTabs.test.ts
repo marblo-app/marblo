@@ -64,12 +64,13 @@ describe("심플 큐레이트 탭 — 노출 목록", () => {
     }
   });
 
-  it("★엑스퍼트 나머지 5탭은 심플에 노출되지 않는다", () => {
+  it("★엑스퍼트 나머지 6탭은 심플에 노출되지 않는다", () => {
     // 프로덕션 기준(dev 전용 missions/flows/deploy 는 애초에 안 뜬다).
     const hidden = beginnerHiddenExpertTabs([]);
     expect(hidden).toEqual([
       "board",
       "lanes",
+      "fleet",
       "project",
       "history",
       "store",
@@ -130,7 +131,7 @@ describe("심플 큐레이트 탭 — 라벨", () => {
     }
   });
 
-  it("★일곱은 엑스퍼트 탭바와 **같은** 키를 읽는다 — 이름이 셸마다 다르면 안 된다", () => {
+  it("★여덟은 엑스퍼트 탭바와 **같은** 키를 읽는다 — 이름이 셸마다 다르면 안 된다", () => {
     for (const tab of BEGINNER_CURATED_TABS) {
       expect(BEGINNER_TAB_LABEL_KEY[tab]).toBe(`workspace.tab.${tab}`);
     }

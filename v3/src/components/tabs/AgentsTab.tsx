@@ -17,7 +17,17 @@ import * as agentService from "../../services/agentService";
 import { reportOnrampExecBlocked } from "../../services/onrampBlockSignal";
 import { useTranslation } from "../../lib/i18n";
 
+type AgentsTabMode = "marbloBots" | "fleet";
+
 export function AgentsTab() {
+  return <AgentsTabSurface mode="marbloBots" />;
+}
+
+export function AgentFleetTab() {
+  return <AgentsTabSurface mode="fleet" />;
+}
+
+function AgentsTabSurface({ mode }: { mode: AgentsTabMode }) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -211,36 +221,56 @@ export function AgentsTab() {
           )}
         </div>
       )}
-      <div
-        role="tablist"
-        aria-label={t("agents.marbloBots.tabAria")}
-        className="flex flex-shrink-0 items-center gap-1 border-b border-gray-700 bg-gray-900 px-4"
-      >
-        {sectionTabs.map(([id, label]) => {
-          const selected = activeSection === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              onClick={() =>
-                setActiveSection(id as "bots" | "agents" | "triggers")
-              }
-              className={`border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
-                selected
-                  ? "border-blue-500 text-gray-100"
-                  : "border-transparent text-gray-500 hover:text-gray-300"
-              }`}
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
+      {mode === "marbloBots" && (
+        <div
+          role="tablist"
+          aria-label={t("agents.marbloBots.tabAria")}
+          className="flex flex-shrink-0 items-center gap-1 border-b border-gray-700 bg-gray-900 px-4"
+        >
+          {sectionTabs.map(([id, label]) => {
+            const selected = activeSection === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() =>
+                  setActiveSection(id as "bots" | "agents" | "triggers")
+                }
+                className={`border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
+                  selected
+                    ? "border-blue-500 text-gray-100"
+                    : "border-transparent text-gray-500 hover:text-gray-300"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="flex-1 min-h-0">
-        {activeSection === "bots" ? (
+        {mode === "fleet" ? (
+          <AgentDashboard
+            agents={agents}
+            tasks={tasks}
+            projectId={projectId}
+            loading={loading}
+            scope="all"
+            onAddAgent={() => {
+              if (atLimit) {
+                useUiStore.getState().showUpgrade("agents", "pro");
+                return;
+              }
+              setShowAddModal(true);
+            }}
+            onStop={stopAgent}
+            onRestart={restartAgent}
+            onDelete={deleteAgent}
+          />
+        ) : activeSection === "bots" ? (
           user ? (
             <MarbloBotGallery project={selectedProject} ownerId={user.uid} />
           ) : (

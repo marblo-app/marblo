@@ -135,7 +135,7 @@ function HarnessTabPanel() {
   return <HarnessStore />;
 }
 
-/** 큐레이트 탭 id → 엑스퍼트 컴포넌트. 일곱 다 props 가 없다. */
+/** 큐레이트 탭 id → 엑스퍼트 컴포넌트. 여덟 다 props 가 없다. */
 const CURATED_TAB_COMPONENTS: Record<BeginnerCuratedTabId, () => JSX.Element> =
   {
     startHere: StartHereTab,
@@ -744,7 +744,7 @@ export function BeginnerShell() {
             </main>
           </div>
 
-          {/* 큐레이트 일곱 — 엑스퍼트 탭 컴포넌트 그대로. 지연 마운트라 켠 적 없는
+          {/* 큐레이트 여덟 — 엑스퍼트 탭 컴포넌트 그대로. 지연 마운트라 켠 적 없는
             탭은 여기 없다(각각 자기 구독·프로브를 들고 오므로 미리 태우지
             않는다). 스크롤은 엑스퍼트 탭바와 같은 규격으로 이 칸이 든다. */}
           {BEGINNER_CURATED_TABS.map((curated) => {

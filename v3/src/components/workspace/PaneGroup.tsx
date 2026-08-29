@@ -13,6 +13,7 @@ const ADDABLE_KINDS: PaneKind[] = [
   "board",
   "code",
   "agents",
+  "fleet",
   "flows",
   "missions",
   "deploy",

@@ -66,6 +66,7 @@ export const RIGHT_TABS = [
   "code",
   "lanes",
   "agents",
+  "fleet",
   "project",
   "worktrees",
   "history",

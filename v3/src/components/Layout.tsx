@@ -9,7 +9,7 @@ import OrchestratorPanel from "./orchestrator/OrchestratorPanel";
 import { BoardTab } from "./tabs/BoardTab";
 import { LanesTab } from "./lanes/LanesTab";
 import { CodeTab } from "./tabs/CodeTab";
-import { AgentsTab } from "./tabs/AgentsTab";
+import { AgentFleetTab, AgentsTab } from "./tabs/AgentsTab";
 import { UsagePage } from "./usage/UsagePage";
 import { FlowsTab } from "./tabs/FlowsTab";
 import { MissionsTab } from "./tabs/MissionsTab";
@@ -63,6 +63,7 @@ const tabComponents: Record<TabId, () => JSX.Element> = {
   missions: MissionsTab,
   code: CodeTab,
   agents: AgentsTab,
+  fleet: AgentFleetTab,
   usage: UsagePage,
   flows: GatedFlowsTab,
   deploy: DeployTab,

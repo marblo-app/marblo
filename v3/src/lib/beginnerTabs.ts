@@ -12,8 +12,8 @@
  * 재구현 0). 심플 모드의 약속은 "기능이 없다" 가 아니라 "고를 게 적다" 이므로,
  * 없앨 것은 화면이 아니라 **탭의 수**다.
  *
- * ★ 큐레이트 = 여덟이다. 프로덕션 엑스퍼트 탭은 13개이고 나머지 5개
- * (board·lanes·project·history·store)는 심플에 노출하지 않는다 —
+ * ★ 큐레이트 = 여덟이다. 프로덕션 엑스퍼트 탭은 14개이고 나머지 6개
+ * (board·lanes·fleet·project·history·store)는 심플에 노출하지 않는다 —
  * 보드는 심플 셸이 인라인 미니 뷰(라이브 스트립)로 이미 답하고 있고,
  * 레인·팀·기록·스토어는 승격의 이유 그 자체다. 시작하기는 설치/로그인 상태의
  * 원장이라 심플에서도 독립 탭으로 닿아야 한다.
@@ -50,7 +50,7 @@ import { visibleRightTabs, type RightTabId } from "./splitWorkspaceLayout";
  */
 export const BEGINNER_CHAT_TAB = "chat";
 
-/** 엑스퍼트에서 그대로 빌려오는 일곱. 전부 `RightTabId` 여야 한다(재구현 금지). */
+/** 엑스퍼트에서 그대로 빌려오는 여덟. 전부 `RightTabId` 여야 한다(재구현 금지). */
 export const BEGINNER_CURATED_TABS = [
   "startHere",
   "guide",
@@ -72,7 +72,7 @@ export const BEGINNER_TABS = [
 ] as const satisfies readonly BeginnerTabId[];
 
 /**
- * 라벨. 일곱은 엑스퍼트 탭바와 **같은 키**를 읽는다 — 같은 화면을 부르는 이름이
+ * 라벨. 여덟은 엑스퍼트 탭바와 **같은 키**를 읽는다 — 같은 화면을 부르는 이름이
  * 셸마다 다르면 그건 두 개의 기능처럼 읽힌다(번역도 두 벌이 된다).
  */
 export const BEGINNER_TAB_LABEL_KEY = {
