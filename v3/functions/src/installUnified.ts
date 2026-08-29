@@ -488,8 +488,28 @@ export function resolveActivationMissingReason(
 //   `v_install_unified_revenue` 에는 게이트 아래에서 이미 `isInternal` 이 있으므로
 //   그 좁히기는 **그 뷰에서 별도 티켓으로** 한다 — 미룬다는 사실을 여기 적어 둔다.
 
-/** 설치의 외부성. ★`unknown` 은 값이지 결측이 아니다. */
-export type Externality = "external" | "internal" | "unknown";
+/**
+ * 설치의 외부성. ★`unknown` 은 값이지 결측이 아니다.
+ *
+ * ★`synthetic` 은 **우리가 만든 트래픽**이다(자체 검증 유입 등). `internal` 과
+ *   따로 세는 이유: `internal` 은 "개발 빌드를 돌렸다" 는 관측이고 `synthetic` 은
+ *   "우리가 이 행을 만들려고 만들었다" 는 사실이다. 둘을 합치면 "내부 N" 이
+ *   무엇의 N 인지 다음 사람이 복원할 수 없다.
+ */
+export type Externality = "external" | "internal" | "unknown" | "synthetic";
+
+/**
+ * ★자체 검증 트래픽의 캠페인 이름 규약(`docs/utm-live-verification-2026-08-24.md`).
+ *
+ * 실측(2026-08-29): 원장 647행 중 유일한 `prod` 행이자 유일한 utm 행이
+ * `utm_campaign=utm_live_verify_q7kw_20260824` — 광고가 아니라 **우리가 콜러블을
+ * 직접 불러 만든 합성 설치**다. 그 한 행이 지금 화면에서 유일한 '외부 설치' 로
+ * 세어지고 있다.
+ *
+ * ★규약이지 탐지가 아니다. 앞으로의 자체 검증도 이 접두사를 쓴다 — 쓰지 않으면
+ *   실사용자로 세어진다. 그 계약을 코드에 박아 두는 것이 이 상수다.
+ */
+export const SELF_VERIFICATION_UTM_CAMPAIGN_PREFIX = "utm_live_verify_";
 
 /** 외부성 판정에 필요한 사실. 전부 조인 결과에서 읽히는 값이다. */
 export interface ExternalityFacts {
@@ -499,6 +519,19 @@ export interface ExternalityFacts {
   readonly ledgerBuildChannel: string | null;
   /** 앱이 first-touch 로 직접 표시한 빌드 채널(#1071 이후). 없으면 null. */
   readonly ftBuildChannel: string | null;
+  /** 원장이 적어 둔 utm 캠페인. 자체 검증 트래픽을 가르는 칸이다. 없으면 null. */
+  readonly ledgerUtmCampaign: string | null;
+  /**
+   * ★이 원장 행의 브라우저(원시 GA4 client_id)가 **`dev` 로 태그된 링크백을
+   * 남긴 적이 있는 브라우저**인가.
+   *
+   * 왜 이 사실이 필요한가(2026-08-29 실측): `buildChannel IS NULL` 551행의 고유
+   * 브라우저 3개가 `dev` 95행의 브라우저 5개에 **완전히 포함**된다(교집합 3 =
+   * null 쪽 전부). 즉 551행도 같은 개발 기기의 재실행이고, #1071(2026-08-21)
+   * 이전 앱이라 채널 표식만 없다. 채널 칸이 비었다는 이유로 '모름' 에 두면
+   * 화면은 영원히 그 551건을 "아직 모르는 유입" 으로 그린다 — 우리는 안다.
+   */
+  readonly ledgerBrowserSeenOnDevInstall: boolean;
 }
 
 /** 사다리 한 칸 + **그 칸이 내리는 판정**. 사유와 판정이 갈릴 수 없게 한 쌍이다. */
@@ -522,6 +555,18 @@ export const EXTERNALITY_REASON_DEV_BUILD_CHANNEL = "dev_build_channel";
  */
 export const EXTERNALITY_REASON_NON_DEV_BUILD_CHANNEL = "non_dev_build_channel";
 
+/** 우리가 콜러블을 직접 불러 만든 검증용 합성 설치. ★실사용자가 아니다. */
+export const EXTERNALITY_REASON_SELF_VERIFICATION = "self_verification_utm";
+
+/**
+ * #1071 이전 원장 행인데 **그 브라우저가 dev 링크백을 남긴 적이 있다.**
+ *
+ * 이름에 근거를 박는다: "오래된 행이라 내부로 친다" 가 아니라 "이 브라우저가
+ * 개발 빌드를 돌리는 것을 우리가 봤다" 다. 날짜로 자르지 않는 이유이기도 하다 —
+ * 날짜는 정황이고 브라우저 일치는 관측이다.
+ */
+export const EXTERNALITY_REASON_PRE_TAG_DEV_BROWSER = "pre_tag_dev_browser";
+
 /**
  * 외부성 사다리(위에서부터 첫 번째 해당). 다 통과하면
  * `external` / `non_dev_build_channel` 이다.
@@ -542,11 +587,38 @@ export const EXTERNALITY_REASONS: ReadonlyArray<ExternalityRung> = [
     externality: "internal",
   },
   {
+    // ★우리가 만든 검증 트래픽. dev 태그가 없어(prod 빌드로 불렀다) 위 칸을
+    //   빠져나가고, 아래로 내려가면 유일한 '외부 설치' 로 세어진다 — 실측
+    //   2026-08-29 의 그 1행이 정확히 이 경로였다.
+    reason: EXTERNALITY_REASON_SELF_VERIFICATION,
+    sql:
+      "STARTS_WITH(LOWER(a.utmCampaign), " +
+      `${sqlString(SELF_VERIFICATION_UTM_CAMPAIGN_PREFIX)})`,
+    test: (f) =>
+      (f.ledgerUtmCampaign ?? "")
+        .toLowerCase()
+        .startsWith(SELF_VERIFICATION_UTM_CAMPAIGN_PREFIX),
+    externality: "synthetic",
+  },
+  {
     // ★A·B·C·D 넷이 떨어진 칸이다. 근거가 한 줄도 없다.
     reason: "no_ledger_row",
     sql: "a.installId IS NULL AND p.ft_build_channel IS NULL",
     test: (f) => !f.hasLedgerRow && f.ftBuildChannel === null,
     externality: "unknown",
+  },
+  {
+    // ★채널 칸은 비었지만 **브라우저를 안다.** 아래 no_build_channel 보다 위에
+    //   있어야 한다 — 순서가 뒤집히면 551행이 다시 '모름' 으로 떨어진다.
+    reason: EXTERNALITY_REASON_PRE_TAG_DEV_BROWSER,
+    sql:
+      "a.buildChannel IS NULL AND p.ft_build_channel IS NULL AND " +
+      "COALESCE(a.ledgerDevBrowser, FALSE)",
+    test: (f) =>
+      f.ledgerBuildChannel === null &&
+      f.ftBuildChannel === null &&
+      f.ledgerBrowserSeenOnDevInstall,
+    externality: "internal",
   },
   {
     reason: "no_build_channel",
@@ -555,6 +627,28 @@ export const EXTERNALITY_REASONS: ReadonlyArray<ExternalityRung> = [
     externality: "unknown",
   },
 ];
+
+/**
+ * ★"우리 트래픽" — 유입 분모에서 빼는 외부성.
+ *
+ * `internal`(개발 빌드) 과 `synthetic`(우리가 만든 검증 행) 둘 다다. `unknown` 은
+ * **여기 없다** — 미상은 우리 것이라고 아는 게 아니라 모르는 것이고, 그것을
+ * 여기 넣는 순간 #1310 의 반올림이 방향만 바꿔 되살아난다.
+ */
+export const EXTERNALITY_OUR_OWN: ReadonlyArray<Externality> = [
+  "internal",
+  "synthetic",
+];
+
+/**
+ * `WHERE`/`COUNTIF` 에 쓰는 "우리 트래픽이 아니다" 조건. ★한 벌만 있다 —
+ * 여섯 개의 쿼리가 각자 `!= 'internal'` 를 적으면 한 곳만 빠뜨려도 검증 행이
+ * 유입으로 되살아난다.
+ */
+export function sqlNotOurOwnTraffic(alias = ""): string {
+  const col = alias ? `${alias}.externality` : "externality";
+  return `${col} NOT IN (${EXTERNALITY_OUR_OWN.map(sqlString).join(", ")})`;
+}
 
 /** 외부성 판정 결과 — **값과 근거는 항상 같이 다닌다.** */
 export interface ExternalityVerdict {
@@ -735,6 +829,19 @@ WITH ledger AS (
   WHERE TRUE
   QUALIFY ROW_NUMBER() OVER (PARTITION BY installId ORDER BY linkedAt ASC) = 1
 ),
+dev_browsers AS (
+  -- ★'dev' 로 태그된 링크백을 남긴 적이 있는 브라우저(원시 GA4 client_id).
+  --
+  --   왜 원시 gaClientId 인가: 가명 gaKeyHmac 은 #1195 배포(2026-08-28)
+  --   이후 행에만 있어 실측 647행 중 15행뿐이다. 이 판정은 **#1071 이전 행**을
+  --   가르는 것이 목적이라 가명 키로는 구조적으로 못 한다.
+  --
+  -- ★원시값은 이 CTE 밖으로 나가지 않는다 — 뷰가 내보내는 것은 불리언
+  --   ledgerDevBrowser 하나다. 뷰 머리말의 "PII 없음" 약속을 지킨다.
+  SELECT DISTINCT gaClientId
+  FROM ${attribution}
+  WHERE buildChannel = 'dev' AND gaClientId IS NOT NULL
+),
 ledger_scoped AS (
   SELECT
     l.*,
@@ -743,7 +850,14 @@ ledger_scoped AS (
       l.gaKeyHmac IS NULL,
       NULL,
       COUNT(*) OVER (PARTITION BY l.gaKeyHmac)
-    ) AS gaKeyInstallCount
+    ) AS gaKeyInstallCount,
+    -- ★외부성 사다리의 pre_tag_dev_browser 칸이 읽는 근거. 브라우저를 모르면
+    --   FALSE 가 아니라 **모르는 것**이라, 아래 사다리에서 이 행은 그대로
+    --   no_build_channel(=미상) 으로 떨어진다.
+    (
+      l.gaClientId IS NOT NULL
+        AND l.gaClientId IN (SELECT gaClientId FROM dev_browsers)
+    )                                   AS ledgerDevBrowser
   FROM ledger l
 ),
 ga4 AS (
@@ -916,6 +1030,9 @@ SELECT
   a.platform                          AS platform,
   a.buildChannel                      AS buildChannel,
   p.ft_build_channel                  AS ftBuildChannel,
+  -- ★외부성 판정의 원자료. 값 옆에 근거를 두는 규약대로, pre_tag_dev_browser
+  --   판정을 다음 사람이 직접 검산할 수 있게 불리언을 내보낸다.
+  a.ledgerDevBrowser                  AS ledgerDevBrowser,
   -- ★★DEPRECATED. 새 코드는 아래 externality 를 써라.
   --   이 불리언은 "모른다" 를 담을 칸이 없어 **미지를 외부(false)로 반올림한다.**
   --   그 반올림 때문에 오너 프로젝트에서 일하던 설치가 "외부 지속 사용자" 로
@@ -924,9 +1041,10 @@ SELECT
   COALESCE(a.buildChannel = 'dev', FALSE)
     OR COALESCE(p.ft_build_channel = 'dev', FALSE)
                                       AS isDevInstall,
-  -- ── ★외부성 3값 — 이 티켓이 고치는 자리 ─────────────────────────────────
-  --   'internal'(dev 빌드 채널을 봤다) / 'external'(dev 아닌 빌드 채널을 봤다) /
-  --   'unknown'(빌드 채널을 한 번도 못 봤다).
+  -- ── ★외부성 ─────────────────────────────────────────────────────────────
+  --   'internal'(dev 빌드 채널을 봤다 — 또는 그 브라우저가 dev 를 돌린 적이
+  --     있다) / 'external'(dev 아닌 빌드 채널을 봤다) /
+  --   'synthetic'(우리가 만든 검증 트래픽) / 'unknown'(아무것도 못 봤다).
   --   ★'external' 은 "우리 팀이 아니다" 가 아니라 "배포본을 실행했다" 까지다.
   --   ★'unknown' 을 어느 쪽으로도 반올림하지 마라 — 분모에서 빼거나 별도 칸이다.
   ${buildExternalityCase("externality", "  ")}

@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { AuthProvider } from "./auth";
 import { FirstRunFlow } from "./components/onboarding/FirstRunFlow";
 import { isFirstRunFlowPending } from "./lib/firstRunFlow";
-import { notifyInstallAttribution } from "./services/installAttribution";
+import {
+  notifyInstallAttribution,
+  notifyInstallAttributionOnLaunch,
+} from "./services/installAttribution";
 import { useAuth } from "./hooks/useAuth";
 import { LoginPage } from "./auth";
 import { Layout } from "./components/Layout";
@@ -635,6 +638,24 @@ function App() {
   useEffect(() => {
     markFirstRunIfNeeded();
   }, []);
+
+  // ★기존 설치용 링크백 발화(티켓 VfWJtnAl). 아래 FirstRunFlow.onComplete 는
+  //   `isFirstRunFlowPending()` 이 **기존 설치에 항상 false** 라 영원히 안 불린다
+  //   — 링크백 배포(2026-08-10) 전에 첫 실행을 마친 설치가 전부 거기 걸려 있었다.
+  //
+  // ★소급 백필이 아니다. 과거 행을 우리가 만드는 게 아니라, 그 설치들이 지금
+  //   실행되고 있으니 **스스로** 보내는 것이다. 안 켜는 설치는 안 보낸다.
+  //
+  // ★첫 실행 플로우가 떠 있으면 여기서 열지 않는다 — 그때는 동의 화면을 통과한
+  //   뒤 onComplete 가 연다. 마커가 하나라 두 경로가 겹쳐도 정확히 1회다.
+  // ★미동의·팝아웃·마커 있음은 전부 notifyInstallAttributionOnLaunch 안에서
+  //   접힌다(판정은 lib/attributionLink.decideLaunchLinkback — 순수 함수다).
+  useEffect(() => {
+    notifyInstallAttributionOnLaunch({
+      firstRunFlowPending: firstRunPending,
+      detachedWindow: resolveDetachedView() !== null,
+    });
+  }, [firstRunPending]);
 
   return (
     <ErrorBoundary>

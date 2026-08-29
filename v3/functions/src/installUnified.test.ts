@@ -26,6 +26,10 @@ import {
   REVENUE_REASON_GATE_CLOSED,
   RETENTION_REASON_NO_DAILY_ROWS,
   REVENUE_LEDGER_KINDS,
+  EXTERNALITY_OUR_OWN,
+  EXTERNALITY_REASON_PRE_TAG_DEV_BROWSER,
+  EXTERNALITY_REASON_SELF_VERIFICATION,
+  SELF_VERIFICATION_UTM_CAMPAIGN_PREFIX,
   TELEMETRY_DATASET,
   VIEW_INSTALL_UNIFIED,
   VIEW_INSTALL_UNIFIED_REVENUE,
@@ -46,8 +50,10 @@ import {
   resolveGa4RevenueMissingReason,
   resolveRevenueDivergenceReason,
   resolveRevenueMissingReason,
+  sqlNotOurOwnTraffic,
   sqlString,
   type ChannelFacts,
+  type ExternalityFacts,
   type Ga4EcommerceFacts,
   type RevenueDivergenceFacts,
   type RevenueFacts,
@@ -1029,6 +1035,8 @@ test("★A·B·C·D 의 실측 조합 — 원장 행이 없으면 external 이 �
     hasLedgerRow: false,
     ledgerBuildChannel: null,
     ftBuildChannel: null,
+    ledgerUtmCampaign: null,
+    ledgerBrowserSeenOnDevInstall: false,
   });
   assert.equal(v.externality, "unknown");
   assert.equal(v.reason, "no_ledger_row");
@@ -1041,6 +1049,9 @@ test("★원장은 있는데 빌드 채널이 비면 unknown 이다 — 사유�
     hasLedgerRow: true,
     ledgerBuildChannel: null,
     ftBuildChannel: null,
+    ledgerUtmCampaign: null,
+    // ★브라우저도 모른다. 이 칸이 true 면 아래 pre_tag_dev_browser 로 간다.
+    ledgerBrowserSeenOnDevInstall: false,
   });
   assert.equal(v.externality, "unknown");
   // no_ledger_row 와 합치면 무엇을 고쳐야 하는지 알 수 없다.
@@ -1048,9 +1059,10 @@ test("★원장은 있는데 빌드 채널이 비면 unknown 이다 — 사유�
 });
 
 test("dev 빌드 채널은 원장·앱 어느 쪽에서 와도 internal 이다", () => {
+  const base = { ledgerUtmCampaign: null, ledgerBrowserSeenOnDevInstall: false };
   for (const f of [
-    { hasLedgerRow: true, ledgerBuildChannel: "dev", ftBuildChannel: null },
-    { hasLedgerRow: false, ledgerBuildChannel: null, ftBuildChannel: "dev" },
+    { ...base, hasLedgerRow: true, ledgerBuildChannel: "dev", ftBuildChannel: null },
+    { ...base, hasLedgerRow: false, ledgerBuildChannel: null, ftBuildChannel: "dev" },
   ]) {
     const v = resolveExternality(f);
     assert.equal(v.externality, "internal");
@@ -1063,6 +1075,8 @@ test("dev 가 아닌 빌드 채널을 봐야만 external 이다", () => {
     hasLedgerRow: true,
     ledgerBuildChannel: "prod",
     ftBuildChannel: null,
+    ledgerUtmCampaign: null,
+    ledgerBrowserSeenOnDevInstall: false,
   });
   assert.equal(v.externality, "external");
   assert.equal(v.reason, EXTERNALITY_REASON_NON_DEV_BUILD_CHANNEL);
@@ -1070,19 +1084,33 @@ test("dev 가 아닌 빌드 채널을 봐야만 external 이다", () => {
 
 test("★판정에는 항상 근거가 붙는다 — 사유가 빈 판정이 없다", () => {
   const channels: Array<string | null> = [null, "dev", "prod", "beta", ""];
+  const campaigns: Array<string | null> = [
+    null,
+    "",
+    "spring_sale",
+    `${SELF_VERIFICATION_UTM_CAMPAIGN_PREFIX}q7kw_20260824`,
+  ];
   for (const hasLedgerRow of [true, false]) {
     for (const ledgerBuildChannel of channels) {
       for (const ftBuildChannel of channels) {
-        const v = resolveExternality({
-          hasLedgerRow,
-          ledgerBuildChannel,
-          ftBuildChannel,
-        });
-        assert.ok(v.reason.length > 0, "근거 없는 판정이 나왔다");
-        assert.ok(
-          ["external", "internal", "unknown"].includes(v.externality),
-          `3값 밖: ${v.externality}`,
-        );
+        for (const ledgerUtmCampaign of campaigns) {
+          for (const ledgerBrowserSeenOnDevInstall of [true, false]) {
+            const v = resolveExternality({
+              hasLedgerRow,
+              ledgerBuildChannel,
+              ftBuildChannel,
+              ledgerUtmCampaign,
+              ledgerBrowserSeenOnDevInstall,
+            });
+            assert.ok(v.reason.length > 0, "근거 없는 판정이 나왔다");
+            assert.ok(
+              ["external", "internal", "unknown", "synthetic"].includes(
+                v.externality,
+              ),
+              `4값 밖: ${v.externality}`,
+            );
+          }
+        }
       }
     }
   }
@@ -1120,8 +1148,8 @@ test("★뷰가 외부성으로 행을 숨기지 않는다 — 컬럼이되 필�
   assert.ok(
     unified.includes(sqlString(EXTERNALITY_REASON_NON_DEV_BUILD_CHANNEL)),
   );
-  // 3값이 전부 SQL 안에 있다.
-  for (const v of ["external", "internal", "unknown"]) {
+  // 4값이 전부 SQL 안에 있다.
+  for (const v of ["external", "internal", "unknown", "synthetic"]) {
     assert.ok(unified.includes(sqlString(v)), v);
   }
 });
@@ -1196,4 +1224,134 @@ test("★SQL 도 음수를 만들지 않는다 — 두 경과일 칸에 순서 �
   for (const r of ACTIVATION_REASONS) {
     assert.ok(sql.includes(sqlString(r.reason)), r.reason);
   }
+});
+
+// ── 10-B. ★"647 을 유입으로 읽는다" 를 멈추는 두 칸 (2026-08-29 조사) ────────
+//
+//   조사 결론: install_attribution 647행 안에 실사용자가 0명이다.
+//     · 551행(buildChannel NULL) — 브라우저 3개가 dev 95행의 브라우저 5개에
+//       **완전히 포함**된다. #1071(2026-08-21) 이전 앱이라 표식만 없다.
+//     ·   1행(prod)             — utm_live_verify_… 자체 검증 트래픽.
+//   ★원본 행은 하나도 지우지 않는다. 바뀌는 것은 **해석**뿐이고, 그 해석은
+//     전부 이 사다리 두 칸 안에 있다.
+
+const NO_EVIDENCE = {
+  hasLedgerRow: true,
+  ledgerBuildChannel: null,
+  ftBuildChannel: null,
+  ledgerUtmCampaign: null,
+  ledgerBrowserSeenOnDevInstall: false,
+} as const;
+
+test("★551행: 채널 칸은 비었어도 그 브라우저가 dev 를 돌렸으면 internal 이다", () => {
+  const v = resolveExternality({
+    ...NO_EVIDENCE,
+    ledgerBrowserSeenOnDevInstall: true,
+  });
+  assert.equal(v.externality, "internal");
+  assert.equal(v.reason, EXTERNALITY_REASON_PRE_TAG_DEV_BROWSER);
+  // ★이 칸이 없던 동안 551행은 '모름' 이었고, 화면은 그것을 "아직 모르는 유입"
+  //   으로 그렸다.
+  assert.notEqual(v.externality, "unknown");
+});
+
+test("★브라우저 근거가 없으면 여전히 unknown 이다 — 날짜로 반올림하지 않는다", () => {
+  const v = resolveExternality(NO_EVIDENCE);
+  assert.equal(v.externality, "unknown");
+  assert.equal(v.reason, "no_build_channel");
+});
+
+test("★1행: utm_live_verify_ 캠페인은 external 이 아니라 synthetic 이다", () => {
+  const v = resolveExternality({
+    hasLedgerRow: true,
+    ledgerBuildChannel: "prod",
+    ftBuildChannel: null,
+    ledgerUtmCampaign: `${SELF_VERIFICATION_UTM_CAMPAIGN_PREFIX}q7kw_20260824`,
+    ledgerBrowserSeenOnDevInstall: false,
+  });
+  assert.equal(v.externality, "synthetic");
+  assert.equal(v.reason, EXTERNALITY_REASON_SELF_VERIFICATION);
+  // ★고치기 전에는 이 1행이 원장의 유일한 '외부 설치' 였다.
+  assert.notEqual(v.externality, "external");
+});
+
+test("대소문자가 달라도 검증 캠페인은 잡힌다", () => {
+  const v = resolveExternality({
+    ...NO_EVIDENCE,
+    ledgerBuildChannel: "prod",
+    ledgerUtmCampaign: "UTM_LIVE_VERIFY_Q7KW_20260824",
+  });
+  assert.equal(v.externality, "synthetic");
+});
+
+test("★진짜 캠페인은 synthetic 으로 새지 않는다 — 접두사 규약이지 utm 전체가 아니다", () => {
+  const v = resolveExternality({
+    ...NO_EVIDENCE,
+    ledgerBuildChannel: "prod",
+    ledgerUtmCampaign: "spring_sale_2026",
+  });
+  assert.equal(v.externality, "external");
+});
+
+test("★dev 태그가 검증 캠페인보다 먼저다 — 사다리 순서가 뒤집히면 내부가 검증으로 샌다", () => {
+  const v = resolveExternality({
+    ...NO_EVIDENCE,
+    ledgerBuildChannel: "dev",
+    ledgerUtmCampaign: `${SELF_VERIFICATION_UTM_CAMPAIGN_PREFIX}x`,
+  });
+  assert.equal(v.externality, "internal");
+});
+
+test("★조사 모수 재현 — 551 internal + 95 internal + 1 synthetic = 외부 0", () => {
+  const rows: ExternalityFacts[] = [
+    // 551행: 채널 NULL, 브라우저는 dev 에서 봤다.
+    ...Array.from({ length: 551 }, () => ({
+      ...NO_EVIDENCE,
+      ledgerBrowserSeenOnDevInstall: true,
+    })),
+    // 95행: dev 태그가 붙었다.
+    ...Array.from({ length: 95 }, () => ({
+      ...NO_EVIDENCE,
+      ledgerBuildChannel: "dev",
+    })),
+    // 1행: 자체 검증.
+    {
+      ...NO_EVIDENCE,
+      ledgerBuildChannel: "prod",
+      ledgerUtmCampaign: `${SELF_VERIFICATION_UTM_CAMPAIGN_PREFIX}q7kw_20260824`,
+    },
+  ];
+  const tally = { external: 0, internal: 0, unknown: 0, synthetic: 0 };
+  for (const r of rows) tally[resolveExternality(r).externality] += 1;
+  assert.equal(rows.length, 647);
+  // ★이것이 이 티켓의 전부다: 647 이 유입 0 으로 읽힌다.
+  assert.equal(tally.external, 0);
+  assert.equal(tally.internal, 646);
+  assert.equal(tally.synthetic, 1);
+  assert.equal(tally.unknown, 0);
+});
+
+test("★'우리 트래픽' 에 unknown 이 없다 — 반올림이 방향만 바꿔 되살아나지 않게", () => {
+  assert.deepEqual([...EXTERNALITY_OUR_OWN].sort(), ["internal", "synthetic"]);
+  assert.ok(!EXTERNALITY_OUR_OWN.includes("unknown"));
+  assert.ok(!EXTERNALITY_OUR_OWN.includes("external"));
+});
+
+test("sqlNotOurOwnTraffic 은 내부와 검증을 둘 다 뺀다", () => {
+  assert.equal(
+    sqlNotOurOwnTraffic(),
+    "externality NOT IN ('internal', 'synthetic')",
+  );
+  assert.equal(
+    sqlNotOurOwnTraffic("u"),
+    "u.externality NOT IN ('internal', 'synthetic')",
+  );
+});
+
+test("★뷰가 dev 브라우저 근거를 컬럼으로 내보낸다 — 판정을 검산할 수 있어야 한다", () => {
+  const sql = buildUnifiedViewSql(PROJECT);
+  assert.ok(sql.includes("dev_browsers AS ("));
+  assert.ok(sql.includes("AS ledgerDevBrowser"));
+  // ★원시 gaClientId 는 CTE 안에서만 쓰이고 출력 컬럼이 되지 않는다.
+  assert.ok(!/gaClientId\s+AS\s/.test(sql));
 });

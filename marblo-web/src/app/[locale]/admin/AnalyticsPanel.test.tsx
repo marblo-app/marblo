@@ -1707,6 +1707,7 @@ function unifiedFixture(
         installsTotal: 608,
         installsExternal: 12,
         installsInternal: 31,
+        installsSynthetic: 0,
         installsExternalityUnknown: 565,
         externalityRows: [
           {
@@ -1859,6 +1860,83 @@ test("★판정 근거가 값과 같이 나온다 — 근거 없으면 다음 �
   assert.match(html, /dev_build_channel/);
   // "무엇을 하나" 가 붙어 있다.
   assert.match(html, /외부로 세지 마라/);
+});
+
+// ── ★"647 을 유입으로 읽는다" 를 멈춘 자리 (2026-08-29 조사) ────────────────
+//   원장 647행 안에 실사용자가 0명이었다 — 646 은 개발 기기 재실행, 1 은 우리가
+//   만든 검증 행. 화면이 그 647 을 유입으로 그리고 있었다.
+
+/** 조사 실측 모양 그대로의 픽스처. 외부 0 · 내부 646 · 검증 1 · 미상 0. */
+function zeroExternalFixture() {
+  const base = unifiedFixture();
+  return {
+    ...base,
+    headline: {
+      ...base.headline!,
+      hygiene: {
+        ...base.headline!.hygiene,
+        installsTotal: 647,
+        installsExternal: 0,
+        installsInternal: 646,
+        installsSynthetic: 1,
+        installsExternalityUnknown: 0,
+        humanEstimateMin: 0,
+        humanEstimateMax: 0,
+        unknownBrowserInstalls: 0,
+        externalityRows: [
+          {
+            externality: "internal" as const,
+            reason: "pre_tag_dev_browser",
+            label: "내부 — 채널 칸은 비었지만 그 브라우저가 dev 를 돌린 적이 있다",
+            action: "#1071 이전 앱이라 표식만 없다.",
+            installs: 551,
+          },
+          {
+            externality: "synthetic" as const,
+            reason: "self_verification_utm",
+            label: "검증 — 우리가 만든 합성 설치(utm_live_verify_…)",
+            action: "★유입이 아니다.",
+            installs: 1,
+          },
+        ],
+      },
+    },
+    notes: [
+      "★검증용 합성 설치 1건(utm_live_verify_… 캠페인)은 유입 분모에서 뺐다.",
+      "★외부(실사용자) 설치가 0 이고 미상도 0 이다 — 아직 실사용자 유입이 한 건도 없다는 뜻이다.",
+    ],
+  };
+}
+
+test("★647 을 유입으로 그리지 않는다 — 실사용자 0 · 내부 646 · 검증 1", () => {
+  const html = renderToStaticMarkup(
+    <P.AcquisitionHeadlineView unified={zeroExternalFixture()} cac={null} />
+  );
+  // ★분자가 0 이고 분모(전체 행)는 그대로 647 이다 — 행을 지운 게 아니다.
+  assert.match(html, /0 \/ 647/);
+  assert.match(html, /내부 646 제외/);
+  assert.match(html, /검증 1 제외/);
+  // ★0 을 0 이라고 **문장으로** 말한다. 빈 칸은 아무 말도 하지 않는다.
+  assert.match(html, /실사용자 유입이 한 건도 없다/);
+  // 검증 행이 '외부 유입' 으로 되살아나지 않았다.
+  assert.match(html, /검증 — 우리가 만든 합성 설치/);
+});
+
+test("★외부 0 은 '모름 0' 일 때만 강조한다 — 미상이 남으면 '없다' 가 아니다", () => {
+  const z = zeroExternalFixture();
+  assert.equal(P.zeroExternalAccent(z.headline!.hygiene), "#fbbf24");
+  assert.equal(
+    P.zeroExternalAccent({
+      ...z.headline!.hygiene,
+      installsExternalityUnknown: 60,
+    }),
+    undefined
+  );
+  // 데이터가 아직 없는 상태(전체 0)를 "유입 0" 이라고 단정하지 않는다.
+  assert.equal(
+    P.zeroExternalAccent({ ...z.headline!.hygiene, installsTotal: 0 }),
+    undefined
+  );
 });
 
 test("★CAC 분모는 외부만이다 — 미상을 분모에 넣으면 CAC 가 낙관 편향된다", () => {

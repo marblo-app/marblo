@@ -199,7 +199,18 @@ async function main(): Promise<void> {
   await requireSource(
     TELEMETRY_DATASET,
     SOURCE_INSTALL_ATTRIBUTION,
-    ["installId", "gaClientId", "gaKeyHmac", "utmContent", "utmTerm"],
+    // ★utmCampaign·buildChannel 은 외부성 사다리의 self_verification_utm /
+    //   pre_tag_dev_browser 칸이 읽는다. 없으면 뷰가 조용히 깨지는 게 아니라
+    //   여기서 멈춘다.
+    [
+      "installId",
+      "gaClientId",
+      "gaKeyHmac",
+      "utmCampaign",
+      "buildChannel",
+      "utmContent",
+      "utmTerm",
+    ],
     "★#1195 가 **배포**되어야 ensureAttributionTable() 이 이 컬럼들을 덧붙인다. " +
       "배포 전에는 뷰를 만들 수 없다(설계 §6-1).",
   );

@@ -137,8 +137,19 @@ test("모든 표의 모집단이 설치다 — 방문 축이 섞이지 않는다
     buildCountrySql(PROJECT),
     buildInstallsByDaySql(PROJECT),
   ]) {
-    // ★내부만 뺀다. 예전의 `NOT isDevInstall` 은 미상을 외부로 반올림했다(#1310).
-    assert.match(sql, /externality != 'internal'/, "내부 제외 필터가 빠졌다");
+    // ★우리 트래픽(내부 + 검증)만 뺀다. 예전의 `NOT isDevInstall` 은 미상을
+    //   외부로 반올림했고(#1310), `!= 'internal'` 만 쓰던 동안에는 자체 검증
+    //   1행이 유일한 '외부 유입' 으로 채널표에 올라갔다(2026-08-29 조사).
+    assert.match(
+      sql,
+      /externality NOT IN \('internal', 'synthetic'\)/,
+      "우리 트래픽 제외 필터가 빠졌다",
+    );
+    assert.doesNotMatch(
+      sql,
+      /externality != 'internal'/,
+      "검증 행을 빼지 않는 구 필터가 되살아났다",
+    );
     assert.doesNotMatch(sql, /isDevInstall/, "불리언 필터가 되살아났다");
     assert.match(sql, /v_install_unified/, "통합 뷰가 아닌 표를 읽고 있다");
     assert.doesNotMatch(sql, /visitors|user_pseudo_id/, "방문 축이 섞였다");
@@ -445,4 +456,106 @@ test("사유 어휘에 결정 문장이 빠진 칸이 없다 (계획 §2-5)", ()
     assert.ok(c.action.length > 0, `${c.reason} 에 '무슨 결정을 하나' 가 없다`);
     assert.ok(c.label.length > 0);
   }
+});
+
+// ── ★규율 6: '우리가 만든 트래픽' 을 유입으로 세지 않는다 (2026-08-29 조사) ──
+//
+//   원장 647행 안에 실사용자가 0명이었다. 646 은 개발 기기 재실행, 1 은 우리가
+//   콜러블을 직접 불러 만든 검증 행이다. 그 1행이 화면의 유일한 '외부 설치'
+//   였다 — 분모가 1 이면 CAC 도 전환율도 전부 그 한 행이 만든다.
+
+test("★검증 행이 자기 칸으로 나온다 — 내부와 합치지 않는다", () => {
+  const sql = buildHygieneSql(PROJECT);
+  assert.match(sql, /COUNTIF\(u\.externality = 'synthetic'\)\s+AS installsSynthetic/);
+  // 사람 추정 모집단에서도 검증 행이 빠진다.
+  assert.match(sql, /u\.externality NOT IN \('internal', 'synthetic'\)/);
+});
+
+test("★647 이 유입 0 으로 읽힌다 — 실사용자 0 · 내부 646 · 검증 1", () => {
+  const h = buildHygiene(
+    {
+      installsTotal: 647,
+      installsExternal: 0,
+      installsInternal: 646,
+      installsSynthetic: 1,
+      installsExternalityUnknown: 0,
+      distinctBrowsers: 0,
+      unknownBrowserInstalls: 0,
+    },
+    [],
+    [
+      { externality: "internal", reason: "pre_tag_dev_browser", installs: 551 },
+      { externality: "internal", reason: "dev_build_channel", installs: 95 },
+      { externality: "synthetic", reason: "self_verification_utm", installs: 1 },
+    ],
+  );
+  assert.equal(h.installsExternal, 0);
+  assert.equal(h.installsInternal, 646);
+  assert.equal(h.installsSynthetic, 1);
+  // 네 칸의 합이 전체다 — 어느 행도 삼키거나 지우지 않았다.
+  assert.equal(
+    h.installsExternal +
+      h.installsInternal +
+      h.installsSynthetic +
+      h.installsExternalityUnknown,
+    h.installsTotal,
+  );
+  // 분해표의 네 사유가 전부 어휘를 갖는다(모르는 사유로 떨어지지 않았다).
+  for (const r of h.externalityRows) {
+    assert.ok(!/화면이 모르는/.test(r.label), r.reason);
+  }
+  const notes = buildNotes(h, 0, 0);
+  assert.ok(
+    notes.some((n) => /검증용 합성 설치 1건/.test(n)),
+    "검증 행을 뺀 사실을 화면에 안 적었다",
+  );
+  assert.ok(
+    notes.some((n) => /실사용자 유입이 한 건도 없다/.test(n)),
+    "★0 을 0 이라고 말하지 않았다 — 빈 칸은 아무 말도 하지 않는다",
+  );
+  assert.ok(
+    notes.some((n) => /원본 행은 하나도 지우지 않았다/.test(n)),
+    "해석만 바뀌었다는 사실을 안 적었다",
+  );
+});
+
+test("★외부가 0 이어도 미상이 남아 있으면 '유입이 없다' 라고 말하지 않는다", () => {
+  const h = buildHygiene(
+    {
+      installsTotal: 100,
+      installsExternal: 0,
+      installsInternal: 40,
+      installsSynthetic: 0,
+      installsExternalityUnknown: 60,
+      distinctBrowsers: 0,
+      unknownBrowserInstalls: 0,
+    },
+    [],
+    [],
+  );
+  const notes = buildNotes(h, 0, 0);
+  assert.ok(
+    !notes.some((n) => /실사용자 유입이 한 건도 없다/.test(n)),
+    "★모르는 60건을 '없다' 로 반올림했다",
+  );
+});
+
+test("synthetic 은 뷰 값에서 그대로 읽힌다 — 모름으로 떨어지지 않는다", () => {
+  assert.equal(toExternality("synthetic"), "synthetic");
+  const copy = describeExternalityReason("self_verification_utm", "synthetic");
+  assert.equal(copy.externality, "synthetic");
+  assert.ok(!/화면이 모르는/.test(copy.label));
+});
+
+test("★분해표 정렬: 모름 → 외부 → 검증 → 내부", () => {
+  const rows = buildExternalityRows([
+    { externality: "internal", reason: "dev_build_channel", installs: 95 },
+    { externality: "synthetic", reason: "self_verification_utm", installs: 1 },
+    { externality: "external", reason: "non_dev_build_channel", installs: 2 },
+    { externality: "unknown", reason: "no_ledger_row", installs: 3 },
+  ]);
+  assert.deepEqual(
+    rows.map((r) => r.externality),
+    ["unknown", "external", "synthetic", "internal"],
+  );
 });

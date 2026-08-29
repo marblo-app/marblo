@@ -34,8 +34,12 @@
 import {
   EXTERNALITY_REASON_DEV_BUILD_CHANNEL,
   EXTERNALITY_REASON_NON_DEV_BUILD_CHANNEL,
+  EXTERNALITY_REASON_PRE_TAG_DEV_BROWSER,
+  EXTERNALITY_REASON_SELF_VERIFICATION,
+  SELF_VERIFICATION_UTM_CAMPAIGN_PREFIX,
   TELEMETRY_DATASET,
   VIEW_INSTALL_UNIFIED,
+  sqlNotOurOwnTraffic,
   type Externality,
 } from "./installUnified";
 
@@ -211,9 +215,23 @@ export const EXTERNALITY_REASON_COPY: ReadonlyArray<ExternalityReasonCopy> = [
   {
     reason: "no_build_channel",
     externality: "unknown",
-    label: "★모름 — 원장은 있는데 빌드 채널 칸이 비었다",
+    label: "★모름 — 원장은 있는데 빌드 채널 칸이 비었고 브라우저도 모른다",
     action:
       "★외부로 세지 마라. #1071 이전 앱이거나 install_attribution 스키마 드리프트다(index.ts FIRST_TOUCH_OPTIONAL_COLUMNS). 채널을 적재하면 채워진다.",
+  },
+  {
+    reason: EXTERNALITY_REASON_PRE_TAG_DEV_BROWSER,
+    externality: "internal",
+    label: "내부 — 채널 칸은 비었지만 그 브라우저가 dev 를 돌린 적이 있다",
+    action:
+      "#1071(2026-08-21) 이전 앱이라 표식만 없다. 브라우저 일치는 정황이 아니라 관측이다 — 실측 2026-08-29: null 채널 551행의 브라우저 3개가 dev 95행의 브라우저 5개에 완전히 포함된다.",
+  },
+  {
+    reason: EXTERNALITY_REASON_SELF_VERIFICATION,
+    externality: "synthetic",
+    label: `검증 — 우리가 만든 합성 설치(${SELF_VERIFICATION_UTM_CAMPAIGN_PREFIX}…)`,
+    action:
+      "★유입이 아니다. 콜러블을 직접 불러 만든 행이다(docs/utm-live-verification-2026-08-24.md). 앞으로의 자체 검증도 이 캠페인 접두사를 써야 유입에 섞이지 않는다.",
   },
 ];
 
@@ -245,7 +263,7 @@ export function describeExternalityReason(
 /** 뷰가 돌려준 문자열을 3값으로 좁힌다. ★못 읽으면 `unknown` 이다 — 외부가 아니다. */
 export function toExternality(v: unknown): Externality {
   const t = typeof v === "string" ? v.trim().toLowerCase() : "";
-  if (t === "external" || t === "internal") return t;
+  if (t === "external" || t === "internal" || t === "synthetic") return t;
   return "unknown";
 }
 
@@ -342,8 +360,16 @@ export interface InstallHygiene {
    * 몰랐던 것이 이제 미상 칸으로 옮겨간 것**이다.
    */
   installsExternal: number;
-  /** `externality = 'internal'` — dev 빌드 채널을 본 설치. */
+  /** `externality = 'internal'` — dev 빌드 채널을 봤거나 그 브라우저를 아는 설치. */
   installsInternal: number;
+  /**
+   * ★`externality = 'synthetic'` — **우리가 만든** 검증용 합성 설치.
+   *
+   * `internal` 과 따로 세는 이유: 저 수는 "개발 빌드를 돌렸다" 는 관측이고 이
+   * 수는 "이 행을 만들려고 만들었다" 는 사실이다. 합치면 '내부 N' 이 무엇의 N
+   * 인지 복원할 수 없다. ★분모에는 둘 다 안 들어간다.
+   */
+  installsSynthetic: number;
   /**
    * ★`externality = 'unknown'` — 외부인지 내부인지 **모르는** 설치.
    *
@@ -501,15 +527,17 @@ export function buildHygieneSql(projectId: string): string {
   -- ★분모의 정본. 'unknown' 은 여기 안 들어온다 — 그게 이 티켓의 요점이다.
   COUNTIF(u.externality = 'external')                   AS installsExternal,
   COUNTIF(u.externality = 'internal')                   AS installsInternal,
+  -- ★우리가 만든 검증 행. 내부와 합치지 않는다 — 근거가 다른 사실이다.
+  COUNTIF(u.externality = 'synthetic')                  AS installsSynthetic,
   -- ★미상은 별도 칸이다. 어느 쪽으로도 반올림하지 않는다.
   COUNTIF(u.externality = 'unknown')                    AS installsExternalityUnknown,
   COUNTIF(u.externality = 'external' AND u.hasGa4Row)   AS channelKnownInstalls,
   COUNTIF(u.externality = 'external' AND u.hasSpawned)  AS spawnedExternal,
   -- ★사람 추정치 하한. 브라우저 중복제거는 외부성과 **다른 축의 질문**이라
-  --   모집단이 '내부가 아닌 설치'(외부 + 미상)다. 그 사실은 note 로 화면에 적는다.
-  COUNT(DISTINCT IF(u.externality != 'internal', u.gaKeyHmac, NULL)) AS distinctBrowsers,
+  --   모집단이 '우리 트래픽이 아닌 설치'(외부 + 미상)다. 그 사실은 note 로 화면에 적는다.
+  COUNT(DISTINCT IF(${sqlNotOurOwnTraffic("u")}, u.gaKeyHmac, NULL)) AS distinctBrowsers,
   -- ★상한을 만드는 항. 브라우저를 모르는 설치는 조용히 1명으로도 0명으로도 치지 않는다.
-  COUNTIF(u.externality != 'internal' AND u.gaKeyHmac IS NULL) AS unknownBrowserInstalls,
+  COUNTIF(${sqlNotOurOwnTraffic("u")} AND u.gaKeyHmac IS NULL) AS unknownBrowserInstalls,
   MAX(u.gaKeyInstallCount)                              AS maxInstallsPerBrowser
 FROM ${viewRef(projectId)} u`;
 }
@@ -562,9 +590,11 @@ export function buildChannelSql(projectId: string): string {
   COUNTIF(hasSpawned)                    AS spawned,
   COUNTIF(firstCompletedAt IS NOT NULL)  AS completed
 FROM ${viewRef(projectId)}
--- ★내부만 뺀다. 미상을 여기서 지우면 '캠페인 유입이 없다' 로 읽히고, 외부로
---   세면 이 티켓이 고친 반올림이 되살아난다 — 그래서 남기고 옆 칸에 센다.
-WHERE channelMissingReason IS NULL AND externality != 'internal'
+-- ★우리 트래픽(내부 + 검증)만 뺀다. 미상을 여기서 지우면 '캠페인 유입이 없다'
+--   로 읽히고, 외부로 세면 이 티켓이 고친 반올림이 되살아난다 — 그래서 남기고
+--   옆 칸에 센다. ★검증 행을 빼지 않으면 자체 검증 utm 이 '광고 채널 1건' 으로
+--   표에 올라간다(실측 2026-08-29 의 그 1행).
+WHERE channelMissingReason IS NULL AND ${sqlNotOurOwnTraffic()}
 GROUP BY source, medium, campaign, content
 ORDER BY installs DESC
 LIMIT ${CHANNEL_ROW_LIMIT + 1}`;
@@ -577,8 +607,8 @@ export function buildMissingReasonSql(projectId: string): string {
   hasGa4Row                                               AS hasGa4Row,
   COUNT(*)                                                AS installs
 FROM ${viewRef(projectId)}
--- ★내부만 뺀다(외부성 분해는 buildExternalitySql 이 따로 한다).
-WHERE externality != 'internal'
+-- ★우리 트래픽(내부 + 검증)만 뺀다(외부성 분해는 buildExternalitySql 이 따로 한다).
+WHERE ${sqlNotOurOwnTraffic()}
 GROUP BY reason, hasGa4Row
 ORDER BY installs DESC`;
 }
@@ -592,7 +622,7 @@ export function buildCountrySql(projectId: string): string {
   COUNTIF(hasGa4Row)                AS channelKnown,
   COUNTIF(hasSpawned)               AS spawned
 FROM ${viewRef(projectId)}
-WHERE externality != 'internal'
+WHERE ${sqlNotOurOwnTraffic()}
 GROUP BY country
 ORDER BY installs DESC
 LIMIT ${COUNTRY_ROW_LIMIT + 1}`;
@@ -609,7 +639,7 @@ export function buildInstallsByDaySql(projectId: string): string {
   COUNTIF(externality = 'unknown')  AS externalityUnknown,
   COUNTIF(hasGa4Row)                AS channelKnown
 FROM ${viewRef(projectId)}
-WHERE externality != 'internal'
+WHERE ${sqlNotOurOwnTraffic()}
   AND firstRunAt IS NOT NULL
   AND DATE(firstRunAt) >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)
 GROUP BY day
@@ -650,7 +680,8 @@ export function buildExternalityRows(
   const order: Record<Externality, number> = {
     unknown: 0,
     external: 1,
-    internal: 2,
+    synthetic: 2,
+    internal: 3,
   };
   return (rows ?? [])
     .map((r) => {
@@ -684,6 +715,7 @@ export function buildHygiene(
     installsTotal: num(h.installsTotal),
     installsExternal: num(h.installsExternal),
     installsInternal: num(h.installsInternal),
+    installsSynthetic: num(h.installsSynthetic),
     installsExternalityUnknown: num(h.installsExternalityUnknown),
     externalityRows: buildExternalityRows(externalityRows),
     humanEstimateMin: distinctBrowsers,
@@ -810,8 +842,30 @@ export function buildNotes(
   }
   if (hygiene.installsInternal > 0) {
     notes.push(
-      `내부(dev 빌드 채널) 설치 ${hygiene.installsInternal}건은 분모에서 뺐지만 숨기지 않았다 — ` +
-        "전체는 위 '전체 설치' 에 그대로 있다.",
+      `내부(dev 빌드 채널이거나 그 브라우저를 아는) 설치 ${hygiene.installsInternal}건은 분모에서 뺐지만 ` +
+        "숨기지 않았다 — 전체는 위 '전체 설치' 에 그대로 있다. ★원본 행은 하나도 지우지 않았다. " +
+        "바뀐 것은 해석뿐이다.",
+    );
+  }
+  // ★검증 행을 '유입 1' 로 읽던 자리. 이 note 가 없으면 분모가 1 줄어든 이유를
+  //   다음 사람이 데이터 유실로 오해한다.
+  if (hygiene.installsSynthetic > 0) {
+    notes.push(
+      `★검증용 합성 설치 ${hygiene.installsSynthetic}건(${SELF_VERIFICATION_UTM_CAMPAIGN_PREFIX}… 캠페인)은 ` +
+        "우리가 콜러블을 직접 불러 만든 행이라 유입 분모에서 뺐다 — 광고 유입이 아니다. " +
+        "행은 그대로 있고 채널표에서만 빠진다.",
+    );
+  }
+  // ★"실사용자 0" 을 화면이 0 으로 말하게 하는 자리. 빈 칸은 아무 말도 하지
+  //   않지만, 이 문장은 "아직 한 명도 없다" 를 명시한다 — 그것이 지금의 사실이다.
+  if (
+    hygiene.installsExternal === 0 &&
+    hygiene.installsTotal > 0 &&
+    hygiene.installsExternalityUnknown === 0
+  ) {
+    notes.push(
+      "★외부(실사용자) 설치가 0 이고 미상도 0 이다 — 전체 설치가 전부 우리 것(내부 + 검증)으로 " +
+        "설명된다. 빈 칸이 아니라 **아직 실사용자 유입이 한 건도 없다**는 뜻이다.",
     );
   }
   // ★이 티켓이 심은 경보. 미상이 남아 있는 한 "외부 사용자 N명" 은 하한이지

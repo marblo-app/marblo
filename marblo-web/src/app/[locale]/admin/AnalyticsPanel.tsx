@@ -1240,8 +1240,15 @@ export type UnifiedRevenueReasonKind =
   | "true_zero"
   | "known";
 
-/** 설치의 외부성 3값. ★`unknown` 은 결측이 아니라 **값**이다. */
-export type Externality = "external" | "internal" | "unknown";
+/**
+ * 설치의 외부성 4값. ★`unknown` 은 결측이 아니라 **값**이다.
+ *
+ * ★`synthetic` = **우리가 만든** 검증 트래픽(utm_live_verify_… 캠페인). `internal`
+ *   과 따로 세는 이유: 저쪽은 "개발 빌드를 돌렸다" 는 관측이고 이쪽은 "이 행을
+ *   만들려고 만들었다" 는 사실이다. 2026-08-29 조사 전까지 이 1행이 원장의
+ *   유일한 '외부 설치' 였다 — 분모가 1 이면 CAC 도 전환율도 그 한 행이 만든다.
+ */
+export type Externality = "external" | "internal" | "unknown" | "synthetic";
 
 /** 외부성별 설치 수 + 판정 근거. 근거 없는 판정은 화면에 올리지 않는다. */
 export type ExternalityRow = {
@@ -1262,8 +1269,10 @@ export type InstallHygiene = {
    * 보고됐다가 기각됐다(#1310). ★이 수는 실측이 아니라 **하한**이다.
    */
   installsExternal: number;
-  /** dev 빌드 채널을 본 설치. */
+  /** dev 빌드 채널을 봤거나 그 브라우저가 dev 를 돌린 적이 있는 설치. */
   installsInternal: number;
+  /** ★우리가 만든 검증용 합성 설치. 내부와 합치지 않는다. 분모에는 둘 다 없다. */
+  installsSynthetic: number;
   /** ★외부인지 내부인지 **모르는** 설치. 어느 쪽 분모에도 넣지 마라. */
   installsExternalityUnknown: number;
   /** 외부성 판정의 근거별 분해. 합이 installsTotal 이다. */
@@ -4270,6 +4279,21 @@ export function acquisitionCac(input: {
  * 3.1% 사고(분자와 분모가 서로 다른 모집단)의 재발 방지 장치가 이 자리다.
  * 넷째 숫자부터는 표로 내려간다.
  */
+/**
+ * ★0 을 0 으로 그린다.
+ *
+ * 이 칸이 0 이면 "데이터가 없다" 로도 "차트가 깨졌다" 로도 읽힌다. 색으로 값이
+ * 살아 있다고 말하고, 문장은 서버 note 가 쓴다(buildNotes).
+ *
+ * ★미상이 남아 있으면 강조하지 않는다 — 그건 '없다' 가 아니라 '모른다' 이고,
+ *   그 둘을 섞는 것이 #1310 의 결함 그 자체다.
+ */
+export function zeroExternalAccent(h: InstallHygiene): string | undefined {
+  if (h.installsTotal <= 0) return undefined;
+  if (h.installsExternalityUnknown > 0) return undefined;
+  return h.installsExternal === 0 ? "#fbbf24" : undefined;
+}
+
 export function AcquisitionHeadlineView({
   unified,
   cac,
@@ -4310,11 +4334,14 @@ export function AcquisitionHeadlineView({
         <StatCard
           label="설치 (외부 · 하한)"
           value={`${fmtInt(h.installsExternal)} / ${fmtInt(h.installsTotal)}`}
+          accent={zeroExternalAccent(h)}
           sub={`사람 추정 ${fmtInt(h.humanEstimateMin)}~${fmtInt(
             h.humanEstimateMax
-          )}명 · 내부 ${fmtInt(h.installsInternal)} 제외`}
+          )}명 · 내부 ${fmtInt(h.installsInternal)} 제외 · 검증 ${fmtInt(
+            h.installsSynthetic
+          )} 제외`}
         />
-        {/* ①-B ★'외부' 와 같은 크기의 '모름'. 이 칸이 이 티켓의 요점이다. */}
+        {/* ①-B ★'외부' 와 같은 크기의 '모름'. 이 칸이 #1310 의 요점이다. */}
         <div
           data-testid="externality-unknown"
           className={`rounded-xl border p-4 ${
@@ -4403,12 +4430,14 @@ export function AcquisitionHeadlineView({
 const EXTERNALITY_TONE: Record<Externality, string> = {
   unknown: "text-amber-200",
   external: "text-zinc-100",
+  synthetic: "text-zinc-400",
   internal: "text-zinc-400",
 };
 
 const EXTERNALITY_LABEL: Record<Externality, string> = {
   unknown: "모름",
   external: "외부",
+  synthetic: "검증",
   internal: "내부",
 };
 
@@ -5336,8 +5365,11 @@ export function UnifiedPersonAxisComparison({
         <StatCard
           label="설치 (외부 · 하한)"
           value={fmtInt(hygiene.installsExternal)}
+          accent={zeroExternalAccent(hygiene)}
           sub={`전체 ${fmtInt(hygiene.installsTotal)} · 내부 ${fmtInt(
             hygiene.installsInternal
+          )} 제외 · 검증 ${fmtInt(
+            hygiene.installsSynthetic
           )} 제외 · ★외부성 미상 ${fmtInt(
             hygiene.installsExternalityUnknown
           )} 제외`}

@@ -25,13 +25,37 @@ import { useLocaleStore } from "../lib/i18n";
 import {
   INSTALL_LINK_SENT_KEY,
   buildInstallLinkUrl,
+  decideLaunchLinkback,
   resolveBuildChannel,
+  type LaunchLinkbackFacts,
+  type LinkbackSkipReason,
 } from "../lib/attributionLink";
 
-export { INSTALL_LINK_SENT_KEY, buildInstallLinkUrl, resolveBuildChannel };
+export {
+  INSTALL_LINK_SENT_KEY,
+  buildInstallLinkUrl,
+  decideLaunchLinkback,
+  resolveBuildChannel,
+};
 
-/** 설치당 1회 마커를 찍는다. 이미 찍혀 있으면 false. */
-function markOnce(): boolean {
+/** 설치당 1회 마커가 이미 찍혀 있나. 스토리지를 못 읽으면 "찍혔다" 로 본다. */
+export function hasSentInstallLink(): boolean {
+  try {
+    return localStorage.getItem(INSTALL_LINK_SENT_KEY) === "true";
+  } catch {
+    // ★못 읽으면 보수적으로 "보냈다" 로 답한다. 이 값이 발화를 여는 열쇠라
+    //   모르는 쪽으로 열면 매 부팅마다 브라우저가 튄다.
+    return true;
+  }
+}
+
+/**
+ * 설치당 1회 마커를 **여는 시도 직전에** 찍는다. 이미 찍혀 있으면 false.
+ *
+ * ★쓰기가 열기보다 먼저인 이유는 attributionLink.ts 머리말 "정확히 1회" 절에
+ *   있다 — 스토리지가 망가진 설치에서 매 실행마다 창이 튀는 것을 막는다.
+ */
+function markAttempt(): boolean {
   try {
     if (localStorage.getItem(INSTALL_LINK_SENT_KEY) === "true") return false;
     localStorage.setItem(INSTALL_LINK_SENT_KEY, "true");
@@ -39,6 +63,53 @@ function markOnce(): boolean {
   } catch {
     // 스토리지를 못 쓰면 "매 부팅마다 브라우저 열림" 위험이 있으므로 아예 안 연다.
     return false;
+  }
+}
+
+/**
+ * 열기가 **던졌을 때만** 마커를 되돌린다 — 다음 실행에서 재시도할 수 있게.
+ *
+ * ★`window.open` 의 반환값(보통 null)은 실패 신호가 아니다. main 의
+ *   `setWindowOpenHandler` 가 외부 브라우저로 넘기며 창 핸들을 주지 않기
+ *   때문이다. 그래서 되돌리는 조건은 오직 예외다.
+ */
+function rollbackAttempt(): void {
+  try {
+    localStorage.removeItem(INSTALL_LINK_SENT_KEY);
+  } catch {
+    // 되돌리기에 실패하면 재시도를 잃을 뿐, 중복 발화는 없다(안전한 쪽).
+  }
+}
+
+/**
+ * 링크백을 실제로 연다. ★동의 게이트 · 마커 · 되돌리기가 전부 여기 한 곳이다 —
+ * 첫 실행 경로와 실행 시점 경로가 같은 몸통을 쓴다.
+ */
+function openLinkbackOnce(): void {
+  if (!isTelemetryEnabled()) return;
+  const url = buildInstallLinkUrl({
+    installId: getClientId(),
+    locale: useLocaleStore.getState().locale,
+    platform:
+      (typeof navigator !== "undefined" && navigator.platform) || "unknown",
+    appVersion:
+      typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : undefined,
+    buildChannel: resolveBuildChannel({
+      dev: import.meta.env.DEV,
+      protocol:
+        typeof window !== "undefined" ? window.location.protocol : "file:",
+    }),
+  });
+  if (!url) return;
+  if (!markAttempt()) return;
+  try {
+    // main 의 setWindowOpenHandler 가 외부 https + _blank 를 shell.openExternal
+    // 로 넘긴다(새 IPC 없음 — WorktreeTab/ModelFactSheet 과 같은 경로).
+    window.open(url, "_blank");
+  } catch (err) {
+    // ★던졌다 = 못 열었다. 마커를 되돌려 다음 실행에서 다시 시도한다.
+    rollbackAttempt();
+    throw err;
   }
 }
 
@@ -52,26 +123,51 @@ function markOnce(): boolean {
  */
 export function notifyInstallAttribution(): void {
   try {
-    if (!isTelemetryEnabled()) return;
-    const url = buildInstallLinkUrl({
-      installId: getClientId(),
-      locale: useLocaleStore.getState().locale,
-      platform:
-        (typeof navigator !== "undefined" && navigator.platform) || "unknown",
-      appVersion:
-        typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : undefined,
-      buildChannel: resolveBuildChannel({
-        dev: import.meta.env.DEV,
-        protocol:
-          typeof window !== "undefined" ? window.location.protocol : "file:",
-      }),
-    });
-    if (!url) return;
-    if (!markOnce()) return;
-    // main 의 setWindowOpenHandler 가 외부 https + _blank 를 shell.openExternal
-    // 로 넘긴다(새 IPC 없음 — WorktreeTab/ModelFactSheet 과 같은 경로).
-    window.open(url, "_blank");
+    openLinkbackOnce();
   } catch {
     // 링크백은 부수효과다. 여기서 던지면 첫 실행이 죽는다.
+  }
+}
+
+/**
+ * ★기존 설치를 위한 발화 경로 — **아무 실행에서든 1회**(티켓 VfWJtnAl).
+ *
+ * 위 `notifyInstallAttribution()` 은 최초 실행 플로우 안에서만 불린다. 그런데
+ * `isFirstRunFlowPending()` 은 이미 로케일을 고른 설치에 **항상 false** 이므로,
+ * 링크백 배포(2026-08-10) 이전에 첫 실행을 마친 설치는 그 호출을 영원히 못 만난다
+ * — 이벤트를 보낸 설치 42개 중 39개가 그 상태였다.
+ *
+ * ★소급 백필이 아니다. 우리가 과거 행을 만드는 게 아니라, 그 설치들이 **다음에
+ *   켜질 때 스스로** 보낸다. 자세한 근거는 lib/attributionLink.ts 머리말에 있다.
+ *
+ * ★동의 판정의 시점 한계(정직하게 적어 둔다): 이 호출은 로그인 **전**에 일어나고,
+ *   그때 `isTelemetryEnabled()` 가 읽는 것은 localStorage 에 남은 값이다.
+ *   `PrivacyConsentGate` 와 `PrivacySettings` 가 동의가 바뀔 때마다 그 값을
+ *   저장하므로 **같은 기기에서의 옵트아웃은 정확히 반영된다.** 반영이 늦는
+ *   경우는 하나뿐이다 — 다른 기기에서 방금 옵트아웃하고 이 기기에서는 아직 한
+ *   번도 로그인하지 않은 경우. 그 창은 텔레메트리 flush 게이트가 이미 가진
+ *   것과 **같은 창**이고, 여기서만 다르게 굴면 두 게이트가 갈린다.
+ *
+ * @returns 접었으면 그 사유, 열었으면 null. ★사유를 돌려주는 이유: 호출부가
+ *   "안 열렸다" 를 관측할 수 있어야 테스트가 조합을 잠글 수 있다.
+ */
+export function notifyInstallAttributionOnLaunch(ctx: {
+  firstRunFlowPending: boolean;
+  detachedWindow: boolean;
+}): LinkbackSkipReason | null {
+  try {
+    const facts: LaunchLinkbackFacts = {
+      alreadySent: hasSentInstallLink(),
+      telemetryEnabled: isTelemetryEnabled(),
+      firstRunFlowPending: ctx.firstRunFlowPending,
+      detachedWindow: ctx.detachedWindow,
+    };
+    const skip = decideLaunchLinkback(facts);
+    if (skip) return skip;
+    openLinkbackOnce();
+    return null;
+  } catch {
+    // 링크백은 부수효과다. 앱 부팅을 여기서 죽이지 않는다.
+    return null;
   }
 }
