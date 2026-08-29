@@ -41,6 +41,7 @@ vi.mock("../../src/lib/i18n", () => ({
 
 vi.mock("../../src/services/agentAuthService", () => ({
   clearAgentFirebaseAuth: vi.fn(),
+  ensureUserProfile: vi.fn(),
   syncAgentFirebaseAuth: vi.fn(),
 }));
 

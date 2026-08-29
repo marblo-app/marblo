@@ -2,7 +2,7 @@
 title: 지표 전에 결정 문장을 먼저 써라
 tags: [domain/methodology, topic/observability, topic/bigquery, verdict/adopt, method/query-audit]
 status: verified
-date: 2026-08-26
+date: 2026-08-29
 links: [[counting-unit-first]], [[verify-result-row]], [[empty-query-first]]
 ---
 
@@ -52,4 +52,4 @@ links: [[counting-unit-first]], [[verify-result-row]], [[empty-query-first]]
 
 ## Backlinks
 
-- [[counting-unit-first]] · [[verify-result-row]] · [[empty-query-first]] · [[wiki-write-at-merge]] · [[artifact-scope-boundary]]
+- [[counting-unit-first]] · [[verify-result-row]] · [[empty-query-first]] · [[wiki-write-at-merge]] · [[artifact-scope-boundary]] · [[do-not-silently-drop-missing-join-targets]]

@@ -29,6 +29,7 @@ import { resetAccountScopedState } from "../lib/accountScope";
 import { t } from "../lib/i18n";
 import {
   clearAgentFirebaseAuth,
+  ensureUserProfile,
   syncAgentFirebaseAuth,
 } from "../services/agentAuthService";
 import telemetry from "../services/telemetryService";
@@ -250,6 +251,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(nextUser);
   }, []);
 
+  const recoverAdoptedUserProfile = useCallback(
+    (firebaseUser: User | null, source: string) => {
+      if (!firebaseUser) return;
+      ensureUserProfile(firebaseUser)
+        .then((result) => {
+          if (result === "unchanged") return;
+          console.info(`[auth] adopted user profile ${result} (${source})`);
+        })
+        .catch((e: unknown) => {
+          console.warn(`[auth] adopted user profile repair failed (${source})`, e);
+        });
+    },
+    [],
+  );
+
   useEffect(() => {
     // Test hatch — main process 가 MARBLO_TEST_BYPASS_AUTH=1 로 launch 된
     // 경우 Firebase Auth 를 건너뛰고 mock user 로 통과. Playwright e2e 에서
@@ -300,6 +316,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // drop the banner so recovery is seamless.
         setInitDegraded(false);
         adoptIdentity(firebaseUser);
+        recoverAdoptedUserProfile(firebaseUser, "late auth state");
         setFirebaseAuthReady(true);
         setLoading(false);
         return;
@@ -307,6 +324,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       settled = true;
       clearTimeout(timeout);
       adoptIdentity(firebaseUser);
+      recoverAdoptedUserProfile(firebaseUser, "auth state");
       setFirebaseAuthReady(true);
       setLoading(false);
     });
@@ -321,6 +339,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         settled = true;
         clearTimeout(timeout);
         adoptIdentity(auth.currentUser);
+        recoverAdoptedUserProfile(auth.currentUser, "authStateReady");
         setFirebaseAuthReady(true);
         setLoading(false);
       })
@@ -383,8 +402,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(timeout);
       unsubscribe();
     };
-    // adoptIdentity 는 useCallback([]) 으로 안정 참조 — 재실행을 유발하지 않는다.
-  }, [adoptIdentity]);
+    // adoptIdentity/recoverAdoptedUserProfile 는 useCallback([]) 으로 안정 참조 —
+    // 재실행을 유발하지 않는다.
+  }, [adoptIdentity, recoverAdoptedUserProfile]);
 
   useEffect(() => {
     if (window.electronAPI?.testMode?.bypassAuth) return;

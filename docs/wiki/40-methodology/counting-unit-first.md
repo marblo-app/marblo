@@ -2,7 +2,7 @@
 title: 세는 단위를 먼저 적어라
 tags: [domain/methodology, topic/observability, topic/identity, topic/attribution, verdict/adopt, method/query-audit]
 status: verified
-date: 2026-08-25
+date: 2026-08-29
 links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[decision-sentence-first]], [[routing-label-coverage]]
 ---
 
@@ -58,4 +58,4 @@ links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]]
 
 ## Backlinks
 
-- [[verify-result-row]] · [[empty-query-first]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]] · [[decision-sentence-first]] · [[routing-label-coverage]] · [[glossary]] · [[overview]]
+- [[verify-result-row]] · [[empty-query-first]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]] · [[decision-sentence-first]] · [[routing-label-coverage]] · [[glossary]] · [[overview]] · [[do-not-silently-drop-missing-join-targets]]

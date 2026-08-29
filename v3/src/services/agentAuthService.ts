@@ -13,6 +13,8 @@ interface SyncAgentFirebaseAuthOptions {
   forceRefreshIdToken?: boolean;
 }
 
+export type UserProfileSyncResult = "created" | "updated" | "unchanged";
+
 const issueAgentCustomToken = httpsCallable<
   Record<string, never>,
   IssueAgentCustomTokenResponse
@@ -20,6 +22,15 @@ const issueAgentCustomToken = httpsCallable<
 
 const SYNC_AGENT_AUTH_RETRY_DELAYS_MS = [0, 500, 1_500];
 const USERS_COLLECTION = "users";
+const USER_PROFILE_FIELDS = ["email", "displayName", "photoURL"] as const;
+const userProfileSyncQueues = new Map<string, Promise<UserProfileSyncResult>>();
+
+type UserProfileField = (typeof USER_PROFILE_FIELDS)[number];
+type UserProfileFields = Partial<Record<UserProfileField, string>>;
+type UserProfilePatch = UserProfileFields & {
+  createdAt?: ReturnType<typeof toTimestamp>;
+  updatedAt: ReturnType<typeof toTimestamp>;
+};
 
 function getAgentAuthApi() {
   return window.electronAPI?.auth;
@@ -44,33 +55,84 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function userProfilePatch(
-  user: User,
-  exists: boolean,
-): Record<string, unknown> {
-  const now = toTimestamp(new Date());
-  const patch: Record<string, unknown> = {
-    updatedAt: now,
-    ...(exists ? {} : { createdAt: now }),
-  };
-  if (user.email) patch.email = user.email;
-  if (user.displayName || user.email) {
-    patch.displayName = user.displayName ?? user.email;
+function userProfileFields(user: User): UserProfileFields {
+  const fields: UserProfileFields = {};
+  if (user.email) fields.email = user.email;
+  const displayName = user.displayName ?? user.email ?? undefined;
+  if (displayName) fields.displayName = displayName;
+  if (user.photoURL) fields.photoURL = user.photoURL;
+  return fields;
+}
+
+function changedProfileFields(
+  existing: Record<string, unknown>,
+  next: UserProfileFields,
+): UserProfileFields {
+  const patch: UserProfileFields = {};
+  for (const field of USER_PROFILE_FIELDS) {
+    const nextValue = next[field];
+    if (nextValue !== undefined && existing[field] !== nextValue) {
+      patch[field] = nextValue;
+    }
   }
-  if (user.photoURL) patch.photoURL = user.photoURL;
   return patch;
 }
 
-async function ensureUserProfile(user: User): Promise<void> {
+function userProfilePatch(
+  user: User,
+  existing: Record<string, unknown> | null,
+): UserProfilePatch | null {
+  const now = toTimestamp(new Date());
+  const fields = userProfileFields(user);
+
+  if (!existing) {
+    return {
+      ...fields,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  const changed = changedProfileFields(existing, fields);
+  if (Object.keys(changed).length === 0) return null;
+
+  return {
+    ...changed,
+    updatedAt: now,
+  };
+}
+
+async function ensureUserProfileOnce(
+  user: User,
+): Promise<UserProfileSyncResult> {
   const existing = await getDocument<Record<string, unknown>>(
     USERS_COLLECTION,
     user.uid,
   );
-  await mergeDocument(
-    USERS_COLLECTION,
-    user.uid,
-    userProfilePatch(user, !!existing),
-  );
+  const patch = userProfilePatch(user, existing);
+  if (!patch) return "unchanged";
+
+  await mergeDocument(USERS_COLLECTION, user.uid, patch);
+  return existing ? "updated" : "created";
+}
+
+export async function ensureUserProfile(
+  user: User,
+): Promise<UserProfileSyncResult> {
+  const previous = userProfileSyncQueues.get(user.uid);
+  const run = (previous ?? Promise.resolve("unchanged" as UserProfileSyncResult))
+    .catch(() => "unchanged" as UserProfileSyncResult)
+    .then(() => ensureUserProfileOnce(user));
+
+  userProfileSyncQueues.set(user.uid, run);
+
+  try {
+    return await run;
+  } finally {
+    if (userProfileSyncQueues.get(user.uid) === run) {
+      userProfileSyncQueues.delete(user.uid);
+    }
+  }
 }
 
 async function ensureOwnedProjectMembership(user: User): Promise<void> {

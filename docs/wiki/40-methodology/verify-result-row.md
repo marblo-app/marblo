@@ -2,7 +2,7 @@
 title: 조회 결과가 있어도 그게 네가 생각한 그 행인지 확인하라
 tags: [domain/methodology, topic/observability, topic/verification, topic/bigquery, verdict/adopt, method/query-audit, method/source-link]
 status: verified
-date: 2026-08-25
+date: 2026-08-29
 links: [[empty-query-first]], [[counting-unit-first]], [[telemetry-identity-axes]], [[do-not-retry]], [[decision-sentence-first]], [[routing-label-coverage]]
 ---
 
@@ -56,4 +56,4 @@ links: [[empty-query-first]], [[counting-unit-first]], [[telemetry-identity-axes
 
 ## Backlinks
 
-- [[empty-query-first]] · [[counting-unit-first]] · [[telemetry-identity-axes]] · [[do-not-retry]] · [[decision-sentence-first]] · [[routing-label-coverage]] · [[overview]] · [[artifact-scope-boundary]]
+- [[empty-query-first]] · [[counting-unit-first]] · [[telemetry-identity-axes]] · [[do-not-retry]] · [[decision-sentence-first]] · [[routing-label-coverage]] · [[overview]] · [[artifact-scope-boundary]] · [[do-not-silently-drop-missing-join-targets]]
