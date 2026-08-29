@@ -10,10 +10,13 @@ import {
   GapAccountFacts,
   GapFounderFacts,
   GapSubscriptionFacts,
+  GrantConsumptionFacts,
   SELECTED_GAP_BACKFILL_REASON,
   diagnoseGrantGap,
+  isGrantConsumed,
   isMissingAccess,
   planGrantBackfill,
+  resolveFounderGrantWindowAtMaterialization,
   resolveGrantWindowEndMs,
 } from "./founderGrantGap";
 
@@ -319,4 +322,250 @@ test("반려자는 백필 대상이 아니다", () => {
     FOUNDER_BETA_MONTHS,
   );
   assert.equal(plan.action === "skip" && plan.reason, "not_selected");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 3. ★근본 수리(R1) — 부여 시점 앵커
+// ════════════════════════════════════════════════════════════════════════════
+
+const GRANT_AT = Date.parse("2026-08-29T00:00:00.000Z");
+/** GRANT_AT + FOUNDER_BETA_MONTHS(3). 재앵커가 줘야 하는 값. */
+const REANCHORED = Date.parse("2026-11-29T00:00:00.000Z");
+
+function consumption(
+  over: Partial<GrantConsumptionFacts> = {},
+): GrantConsumptionFacts {
+  return {
+    proSubscriptionUid: null,
+    proSubscriptionGrantedAtMs: null,
+    hasFounderGrantSubscription: false,
+    ...over,
+  };
+}
+
+function decide(
+  f: GapFounderFacts,
+  c: GrantConsumptionFacts,
+  grantAtMs = GRANT_AT,
+) {
+  return resolveFounderGrantWindowAtMaterialization(
+    f,
+    c,
+    grantAtMs,
+    FOUNDER_LEGACY_BETA_MONTHS,
+    FOUNDER_BETA_MONTHS,
+  );
+}
+
+// ─── 소비 판정 ────────────────────────────────────────────────────────────
+
+test("소비 증거 3종은 각각 단독으로 '소비'를 뜻한다(OR)", () => {
+  assert.equal(isGrantConsumed(consumption()), false);
+  assert.equal(
+    isGrantConsumed(consumption({ proSubscriptionUid: "uid-1" })),
+    true,
+  );
+  assert.equal(
+    isGrantConsumed(consumption({ proSubscriptionGrantedAtMs: GRANT_AT })),
+    true,
+  );
+  assert.equal(
+    isGrantConsumed(consumption({ hasFounderGrantSubscription: true })),
+    true,
+  );
+});
+
+test("빈 문자열 proSubscriptionUid 는 소비가 아니다(스탬프 없음과 같다)", () => {
+  assert.equal(isGrantConsumed(consumption({ proSubscriptionUid: "" })), false);
+});
+
+// ─── ★미소비 × 창 닫힘 = 이 티켓의 본체 ────────────────────────────────────
+
+test("★미소비 + 창 닫힘 → 조용히 스킵하지 않고 가입 시점 앵커로 3개월을 준다", () => {
+  // 실측 18명의 모양: 07-14 선정 → legacy 창 08-14 마감 → 오늘 가입.
+  // 수리 전에는 window_expired 로 부여가 0이었다.
+  const d = decide(
+    founder({
+      accessGrantedAtMs: Date.parse("2026-07-14T00:00:00.000Z"),
+      betaExpiresAtMs: Date.parse("2026-08-14T00:00:00.000Z"),
+    }),
+    consumption(),
+  );
+  assert.equal(d.kind, "grant");
+  assert.equal(d.kind === "grant" && d.anchor, "signup_reanchor");
+  assert.equal(d.kind === "grant" && d.windowEndMs, REANCHORED);
+  assert.equal(
+    d.kind === "grant" && d.previousWindowEndMs,
+    Date.parse("2026-08-14T00:00:00.000Z"),
+  );
+});
+
+test("★미소비 + 창은 아직 열림이지만 잔여가 짧다 → 잔여가 아니라 3개월을 준다", () => {
+  // 실측 12명의 모양: 09-05 마감 창을 들고 오늘 가입. 수리 전에는 7일만 받았다.
+  const d = decide(
+    founder({
+      accessGrantedAtMs: Date.parse("2026-08-05T00:00:00.000Z"),
+      betaExpiresAtMs: Date.parse("2026-09-05T00:00:00.000Z"),
+    }),
+    consumption(),
+  );
+  assert.equal(d.kind === "grant" && d.anchor, "signup_reanchor");
+  assert.equal(d.kind === "grant" && d.windowEndMs, REANCHORED);
+});
+
+test("★미소비 + betaExpiresAt 없는 legacy 문서도 3개월을 받는다", () => {
+  // legacy 재구성 창은 accessGrantedAt + 1개월이라 이미 닫혀 있다.
+  const d = decide(
+    founder({
+      accessGrantedAtMs: Date.parse("2026-05-01T00:00:00.000Z"),
+      betaExpiresAtMs: null,
+    }),
+    consumption(),
+  );
+  assert.equal(d.kind === "grant" && d.anchor, "signup_reanchor");
+  assert.equal(d.kind === "grant" && d.windowEndMs, REANCHORED);
+});
+
+// ─── ★소비된 grant 의 앵커는 옮기지 않는다(티켓 제약) ──────────────────────
+
+test("★소비 + 창 열림 → 만료일이 뒤로 밀리지 않는다", () => {
+  // 08-20 선정, 11-20 마감. 재앵커였다면 11-29 로 9일 밀렸을 것이다.
+  const openEnd = Date.parse("2026-11-20T00:00:00.000Z");
+  const d = decide(
+    founder({
+      accessGrantedAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
+      betaExpiresAtMs: openEnd,
+    }),
+    consumption({ proSubscriptionUid: "uid-1" }),
+  );
+  assert.equal(d.kind === "grant" && d.anchor, "existing_window");
+  assert.equal(d.kind === "grant" && d.windowEndMs, openEnd);
+  assert.ok(
+    (d.kind === "grant" ? d.windowEndMs : 0) < REANCHORED,
+    "소비자의 창이 재앵커 값으로 늘어나면 승인 없는 소급 연장이다",
+  );
+});
+
+test("★소비 + 창 닫힘 → 부활시키지 않고 window_expired 로 스킵한다", () => {
+  const d = decide(
+    founder({
+      accessGrantedAtMs: Date.parse("2026-05-01T00:00:00.000Z"),
+      betaExpiresAtMs: Date.parse("2026-06-01T00:00:00.000Z"),
+    }),
+    consumption({ proSubscriptionUid: "uid-1" }),
+  );
+  assert.equal(d.kind, "skip");
+  assert.equal(d.kind === "skip" && d.reason, "window_expired");
+  // ★스킵해도 창 값은 돌려준다 — 로그·스탬프에 찍혀야 조용한 실패가 아니다.
+  assert.equal(
+    d.kind === "skip" && d.windowEndMs,
+    Date.parse("2026-06-01T00:00:00.000Z"),
+  );
+});
+
+test("★스탬프는 없고 구독만 있는 만료 grant 도 '소비'다 — 재앵커로 부활하지 않는다", () => {
+  // 옛 백필 경로가 남긴 모양. 이 증거를 안 보면 만료된 소비 grant 가 되살아난다.
+  const d = decide(
+    founder({
+      accessGrantedAtMs: Date.parse("2026-05-01T00:00:00.000Z"),
+      betaExpiresAtMs: Date.parse("2026-06-01T00:00:00.000Z"),
+      proSubscriptionUid: null,
+    }),
+    consumption({ hasFounderGrantSubscription: true }),
+  );
+  assert.equal(d.kind === "skip" && d.reason, "window_expired");
+});
+
+// ─── 기간을 줄이지 않는다 ─────────────────────────────────────────────────
+
+test("★미소비라도 기존 창이 더 길면 줄이지 않는다(설문 보상 5개월)", () => {
+  const surveyEnd = Date.parse("2027-01-01T00:00:00.000Z");
+  const d = decide(
+    founder({
+      accessGrantedAtMs: Date.parse("2026-08-01T00:00:00.000Z"),
+      proExpiresAtMs: surveyEnd,
+    }),
+    consumption(),
+  );
+  assert.equal(d.kind === "grant" && d.anchor, "existing_window");
+  assert.equal(d.kind === "grant" && d.windowEndMs, surveyEnd);
+});
+
+// ─── 정상 선정에서 재앵커 로그가 뜨지 않는다 ──────────────────────────────
+
+test("★신규 선정(창 = 부여시각 + 3개월)은 existing_window 다 — 재앵커 로그 노이즈 없음", () => {
+  // markFounderSelectedInternal 이 betaExpiresAt 을 betaStartedAt+3 으로 잡고
+  // 같은 betaStartedAt 을 grantStartedAt 으로 넘기므로 두 값이 정확히 같다.
+  const d = decide(
+    founder({ accessGrantedAtMs: GRANT_AT, betaExpiresAtMs: REANCHORED }),
+    consumption(),
+  );
+  assert.equal(d.kind === "grant" && d.anchor, "existing_window");
+  assert.equal(d.kind === "grant" && d.windowEndMs, REANCHORED);
+});
+
+// ─── 반려 게이트 ──────────────────────────────────────────────────────────
+
+test("★반려자는 재앵커로 되살아나지 않는다", () => {
+  // revokeFounderGrant 는 betaExpiresAt 을 즉시만료로 당겨 이중으로 막는데,
+  // 재앵커가 들어오면 만료는 더 이상 장벽이 아니다. status 게이트가 그 한 겹이다.
+  const d = decide(
+    founder({
+      status: "rejected",
+      accessGrantedAtMs: Date.parse("2026-07-14T00:00:00.000Z"),
+      betaExpiresAtMs: Date.parse("2026-07-20T00:00:00.000Z"),
+    }),
+    consumption(),
+  );
+  assert.equal(d.kind, "skip");
+  assert.equal(d.kind === "skip" && d.reason, "not_selected");
+});
+
+test("accessGrantedAt 이 없으면 대상이 아니다", () => {
+  const d = decide(
+    founder({ accessGrantedAtMs: null, betaExpiresAtMs: null }),
+    consumption(),
+  );
+  assert.equal(d.kind === "skip" && d.reason, "not_selected");
+});
+
+test("설문 제출(status=feedback_submitted)은 선정 상태를 잃지 않는다", () => {
+  const d = decide(
+    founder({
+      status: "feedback_submitted",
+      accessGrantedAtMs: Date.parse("2026-07-14T00:00:00.000Z"),
+      betaExpiresAtMs: Date.parse("2026-08-14T00:00:00.000Z"),
+    }),
+    consumption(),
+  );
+  assert.equal(d.kind === "grant" && d.anchor, "signup_reanchor");
+});
+
+// ─── 어떤 경우에도 만료일이 앞당겨지지 않는다(불변식) ──────────────────────
+
+test("★불변식: 부여 결정은 기존 창보다 이른 만료일을 절대 만들지 않는다", () => {
+  const windows = [
+    Date.parse("2026-06-01T00:00:00.000Z"), // 닫힘
+    Date.parse("2026-09-05T00:00:00.000Z"), // 열림·짧음
+    Date.parse("2027-06-01T00:00:00.000Z"), // 열림·김
+  ];
+  for (const w of windows) {
+    for (const c of [consumption(), consumption({ proSubscriptionUid: "u" })]) {
+      const d = decide(
+        founder({
+          accessGrantedAtMs: Date.parse("2026-05-01T00:00:00.000Z"),
+          betaExpiresAtMs: w,
+        }),
+        c,
+      );
+      if (d.kind === "grant") {
+        assert.ok(
+          d.windowEndMs >= w,
+          `창이 ${new Date(w).toISOString()} → ${new Date(
+            d.windowEndMs,
+          ).toISOString()} 로 앞당겨졌다`,
+        );
+      }
+    }
+  }
 });

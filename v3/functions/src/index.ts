@@ -438,6 +438,11 @@ import {
   FOUNDER_PRO_MONTHS,
   addMonths,
 } from "./founderLadder";
+import {
+  type GrantWindowAnchor,
+  type GrantWindowSkipReason,
+  resolveFounderGrantWindowAtMaterialization,
+} from "./founderGrantGap";
 
 function getFirebaseProjectId(): string | undefined {
   if (process.env.GCLOUD_PROJECT) return process.env.GCLOUD_PROJECT;
@@ -4789,39 +4794,81 @@ function timestampToDate(value: unknown): Date | null {
   return null;
 }
 
-function laterDate(a: Date | null, b: Date | null): Date | null {
-  if (!a) return b;
-  if (!b) return a;
-  return a > b ? a : b;
-}
-
-function resolveFounderGrantWindowEnd(
-  founder: Record<string, unknown>
-): Date | null {
-  const betaEnd = timestampToDate(founder.betaExpiresAt);
-  const proEnd = timestampToDate(founder.proExpiresAt);
-  const explicitWindowEnd = laterDate(betaEnd, proEnd);
-  if (explicitWindowEnd) return explicitWindowEnd;
-
-  // Legacy selected docs may have accessGrantedAt but no betaExpiresAt. The
-  // grant they were promised at selection time was one month, so reconstruct
-  // *that* — not today's policy.
-  //
-  // ★FOUNDER_BETA_MONTHS 를 쓰면 안 된다. 베타를 1→3 으로 올리는 순간 이 한 줄이
-  // legacy 선정자 전원의 창을 accessGrantedAt+3개월로 늘려 **승인 없는 소급
-  // 연장**이 된다(이미 만료된 사람이 되살아난다). 소급은 별도 판단·별도 실행이다.
-  const accessGrantedAt = timestampToDate(founder.accessGrantedAt);
-  return accessGrantedAt
-    ? addMonths(accessGrantedAt, FOUNDER_LEGACY_BETA_MONTHS)
-    : null;
-}
+// ─── 창 판정은 src/founderGrantGap.ts 가 단일 소스다 ────────────────────
+//
+// 예전엔 여기 `resolveFounderGrantWindowEnd` 가 있었고 founderGrantGap.ts 가
+// 그걸 **복제**했다. 두 벌이 갈리면 드라이런 숫자가 실행과 어긋나 판단 근거가
+// 되지 못한다(#1305 가 남긴 교훈). 그래서 본체를 순수 모듈로 옮기고 여기서는
+// import 해서 쓴다 — 유닛 테스트가 붙는 쪽이 본체여야 한다.
+//   · resolveGrantWindowEndMs                     (창 재구성, legacy 1개월)
+//   · resolveFounderGrantWindowAtMaterialization  (★부여 시점 앵커 판정)
 
 type FounderGrantMaterializationResult = {
   granted: boolean;
   uid: string;
   windowEnd: Date | null;
-  skippedReason: ProGrantOutcome["skippedReason"] | "window_expired";
+  skippedReason: ProGrantOutcome["skippedReason"] | GrantWindowSkipReason;
+  /** 창을 어디에 앵커했는가. 스킵이면 null. 호출부 보고·로그용. */
+  windowAnchor: GrantWindowAnchor | null;
 };
+
+/**
+ * founders/{email} 에서 창 판정에 필요한 사실만 뽑는다.
+ *
+ * ★markFounderSelectedInternal 은 아직 커밋되지 않은 `update` 를 섞어서 넘긴다
+ * (serverTimestamp 센티널 포함). timestampToDate 는 toDate 없는 값을 null 로
+ * 떨어뜨리므로 센티널은 자동으로 "없음"이 된다 — 그 경로가 accessGrantedAt·
+ * betaExpiresAt 만 실제 Timestamp 로 덮어 넘기는 이유다.
+ */
+function toGrantWindowFounderFacts(founder: Record<string, unknown>) {
+  return {
+    status: typeof founder.status === "string" ? founder.status : null,
+    accessGrantedAtMs:
+      timestampToDate(founder.accessGrantedAt)?.getTime() ?? null,
+    betaExpiresAtMs: timestampToDate(founder.betaExpiresAt)?.getTime() ?? null,
+    proExpiresAtMs: timestampToDate(founder.proExpiresAt)?.getTime() ?? null,
+    proSubscriptionUid:
+      typeof founder.proSubscriptionUid === "string" &&
+      founder.proSubscriptionUid
+        ? founder.proSubscriptionUid
+        : null,
+  };
+}
+
+/**
+ * ★R2 — 부여를 못 했으면 **반드시 흔적을 남긴다.**
+ *
+ * 이 결함(창이 닫히면 접근권이 소리 없이 증발)이 3개월간 안 보인 이유가 정확히
+ * "로그도 안 남겨서"다. 다음 사고는 다른 이유로 같은 자리에서 조용히 실패할
+ * 것이므로, 관측 가능성은 수리와 함께 가야 한다.
+ *
+ * PII: 이메일(=founderRef.id)은 로그에 찍지 않는다. uid 와 시각만 남긴다.
+ */
+async function stampFounderGrantSkip(
+  founderRef: admin.firestore.DocumentReference,
+  uid: string,
+  reason: string,
+  grantReason: string,
+  windowEnd: Date | null
+): Promise<void> {
+  console.warn(
+    `[materializeFounderProGrant] ★부여 스킵 — reason=${reason} uid=${uid} ` +
+      `grantReason=${grantReason} windowEnd=${
+        windowEnd ? windowEnd.toISOString() : "none"
+      }`
+  );
+  await founderRef.set(
+    {
+      lastGrantSkippedReason: reason,
+      lastGrantSkippedAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastGrantSkippedUid: uid,
+      lastGrantSkippedWindowEnd: windowEnd
+        ? admin.firestore.Timestamp.fromDate(windowEnd)
+        : null,
+    },
+    { merge: true }
+  );
+}
 
 async function materializeFounderProGrantForUid(
   founderRef: admin.firestore.DocumentReference,
@@ -4830,16 +4877,51 @@ async function materializeFounderProGrantForUid(
   reason: string,
   grantStartedAt: Date
 ): Promise<FounderGrantMaterializationResult> {
-  const windowEnd = resolveFounderGrantWindowEnd(founder);
-  if (!windowEnd || windowEnd <= new Date()) {
+  // ★구독 문서를 먼저 읽는 이유: "미소비" 판정의 세 번째 증거다. founders 스탬프
+  // 없이 구독만 있는 문서가 실재하므로(옛 백필 경로), 이걸 안 보면 만료된 소비
+  // grant 가 재앵커로 **부활**한다 — 티켓이 명시적으로 금지한 동작이다.
+  // 이 경로는 가입·선정 순간에만 타므로 read 1회 추가는 비용 문제가 아니다.
+  const existingSub = (
+    await db.collection("subscriptions").doc(uid).get()
+  ).data();
+
+  const decision = resolveFounderGrantWindowAtMaterialization(
+    toGrantWindowFounderFacts(founder),
+    {
+      proSubscriptionUid:
+        typeof founder.proSubscriptionUid === "string" &&
+        founder.proSubscriptionUid
+          ? founder.proSubscriptionUid
+          : null,
+      proSubscriptionGrantedAtMs:
+        timestampToDate(founder.proSubscriptionGrantedAt)?.getTime() ?? null,
+      hasFounderGrantSubscription: isFounderGrantSubscription(existingSub),
+    },
+    grantStartedAt.getTime(),
+    FOUNDER_LEGACY_BETA_MONTHS,
+    FOUNDER_BETA_MONTHS
+  );
+
+  if (decision.kind === "skip") {
+    const skippedWindowEnd =
+      decision.windowEndMs !== null ? new Date(decision.windowEndMs) : null;
+    await stampFounderGrantSkip(
+      founderRef,
+      uid,
+      decision.reason,
+      reason,
+      skippedWindowEnd
+    );
     return {
       granted: false,
       uid,
-      windowEnd,
-      skippedReason: "window_expired",
+      windowEnd: skippedWindowEnd,
+      skippedReason: decision.reason,
+      windowAnchor: null,
     };
   }
 
+  const windowEnd = new Date(decision.windowEndMs);
   const outcome = await upsertProSubscription(
     uid,
     windowEnd,
@@ -4850,13 +4932,50 @@ async function materializeFounderProGrantForUid(
   // 실제 founder_grant 구독을 만들었을 때만 grant 흔적을 남긴다. 현역 유료 구독
   // 스킵을 성공처럼 기록하면 반려/만료 경로가 유료 구독을 grant 로 오인한다.
   if (outcome.granted) {
-    await founderRef.set(
-      {
-        proSubscriptionUid: uid,
-        proSubscriptionEnd: admin.firestore.Timestamp.fromDate(windowEnd),
-        proSubscriptionGrantedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
+    const stamp: Record<string, unknown> = {
+      proSubscriptionUid: uid,
+      proSubscriptionEnd: admin.firestore.Timestamp.fromDate(windowEnd),
+      proSubscriptionGrantedAt: admin.firestore.FieldValue.serverTimestamp(),
+      proSubscriptionWindowAnchor: decision.anchor,
+      // 이전에 스킵으로 찍힌 흔적을 지운다 — 남겨 두면 운영자가 "아직 못 받았다"
+      // 로 읽는다. 스킵 스탬프는 **현재 상태**를 뜻해야 한다.
+      lastGrantSkippedReason: admin.firestore.FieldValue.delete(),
+      lastGrantSkippedAt: admin.firestore.FieldValue.delete(),
+      lastGrantSkippedUid: admin.firestore.FieldValue.delete(),
+      lastGrantSkippedWindowEnd: admin.firestore.FieldValue.delete(),
+    };
+    if (decision.anchor === "signup_reanchor") {
+      // ★founders 창도 함께 옮긴다. 구독은 3개월 뒤까지인데 founders 는 옛 만료일
+      // 그대로면 어드민 목록·getMyFounderAccess 가 서로 다른 사실을 말한다.
+      // (그리고 다음 호출의 창 재구성이 옛 값을 다시 읽는다.)
+      stamp.betaExpiresAt = admin.firestore.Timestamp.fromDate(windowEnd);
+      stamp.grantWindowReanchoredAt =
+        admin.firestore.FieldValue.serverTimestamp();
+      stamp.grantWindowReanchoredFrom =
+        decision.previousWindowEndMs !== null
+          ? admin.firestore.Timestamp.fromDate(
+              new Date(decision.previousWindowEndMs)
+            )
+          : null;
+      console.log(
+        `[materializeFounderProGrant] ★미소비 grant 창 재앵커 — uid=${uid} ` +
+          `grantReason=${reason} ${
+            decision.previousWindowEndMs !== null
+              ? new Date(decision.previousWindowEndMs).toISOString()
+              : "none"
+          } → ${windowEnd.toISOString()}`
+      );
+    }
+    await founderRef.set(stamp, { merge: true });
+  } else {
+    // 현역 유료 스킵(live_paid)도 관측 가능해야 한다. 정상 스킵이지만 "왜 grant
+    // 가 안 붙었나"를 나중에 물을 때 답이 있어야 한다.
+    await stampFounderGrantSkip(
+      founderRef,
+      uid,
+      outcome.skippedReason ?? "unknown",
+      reason,
+      windowEnd
     );
   }
 
@@ -4865,6 +4984,7 @@ async function materializeFounderProGrantForUid(
     uid,
     windowEnd,
     skippedReason: outcome.skippedReason,
+    windowAnchor: decision.anchor,
   };
 }
 
@@ -5572,6 +5692,17 @@ async function markFounderSelectedInternal(
     subscriptionUid = outcome.uid;
     subscriptionGranted = outcome.granted;
     subscriptionSkippedReason = outcome.skippedReason;
+    // ★재선정(resetWindow=false)에서 기존 창이 이미 닫혀 있으면 materialize 가
+    // 미소비 grant 를 **가입 시점 앵커**로 다시 잡는다. 그 값을 안 받아오면
+    // 어드민에 보고하는 만료일(과거)과 실제 부여(3개월 뒤)가 어긋난다.
+    // ※일반 신규 선정에서는 두 값이 정확히 같다(둘 다 betaStartedAt + 3개월).
+    if (
+      outcome.granted &&
+      outcome.windowEnd &&
+      outcome.windowEnd > betaExpiresAt
+    ) {
+      betaExpiresAt = outcome.windowEnd;
+    }
   }
 
   return {
@@ -9374,6 +9505,9 @@ export const betaTelegramWebhook = functions.https.onRequest(
 // 미가입이면 uid 가 없어 subscriptions/{uid} 를 만들 수 없다. 선정 후 접근 이메일을
 // 받고 유저가 가입하는 것이 일반적 순서이므로, 가입하는 순간 이 트리거가
 // founders/{email} 을 조회해 베타/예외 부여 창(window)만큼 Pro 를 부여한다.
+// ★그 창은 **미소비면 가입 시점 앵커**로 다시 잡힌다(materializeFounderProGrantForUid
+//  → resolveFounderGrantWindowAtMaterialization). 선정→가입 사이가 창보다 길어도
+//  3개월을 온전히 받는다. 예전엔 이 자리에서 접근권이 소리 없이 증발했다.
 // (선정 시점에 이미 계정이 있으면 markFounderSelectedInternal 이 즉시 부여하고,
 //  이 트리거는 그 케이스에서 발화하지 않는다 — 둘이 시점만 다른 동일 부여.)
 // non-throwing: 부여 실패가 가입 자체를 깨면 안 된다.

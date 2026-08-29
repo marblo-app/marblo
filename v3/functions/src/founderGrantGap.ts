@@ -20,14 +20,19 @@
 // 있는데 미부여 수렴 크론은 없다. 두 순간을 놓치면 영구히 안 붙는다.
 //
 // ── ★조용한 게이트: materializeFounderProGrantForUid 의 window_expired ─────
-// ①②는 모두 materializeFounderProGrantForUid 를 통과하고, 거기엔
+// ①②는 모두 materializeFounderProGrantForUid 를 통과하는데, 거기엔
 //   resolveFounderGrantWindowEnd(founder) <= now → skippedReason="window_expired"
-// 가 있다. 이 경로는 구독을 만들지 않고, founders 문서에 흔적도 남기지 않고,
-// **로그조차 남기지 않는다.** 게다가 betaExpiresAt 이 없는 legacy 문서의 창은
+// 가 있었다. 그 경로는 구독을 만들지 않고, founders 문서에 흔적도 남기지 않고,
+// **로그조차 남기지 않았다.** 게다가 betaExpiresAt 이 없는 legacy 문서의 창은
 // accessGrantedAt + FOUNDER_LEGACY_BETA_MONTHS(=1) 로 재구성된다.
-// → **선정 후 창이 닫힌 뒤에 가입한 사람은 가입해도 부여가 0이다.**
+// → **선정 후 창이 닫힌 뒤에 가입한 사람은 가입해도 부여가 0이었다.**
 // 이건 추론이 아니라 src/betaRetroExtend.ts 머리주석이 #1305 드라이런 실측으로
 // 이미 적어 둔 사실이다(계정 X 30명 = "가입해도 부여 0").
+//
+// ★이 결함은 **3절에서 고쳐졌다**(티켓 0fOIIVHEiQAVG3j85vIB / R1·R2).
+// 미소비 grant 의 앵커를 가입 시점으로 옮기고, 스킵에는 로그와 founders 스탬프를
+// 남긴다. 1·2절은 그 수리 **이전의 실측**을 재현하는 진단이므로 그대로 둔다 —
+// 수리 전/후를 같은 스크립트가 나란히 찍어야 근거가 된다(dryrun ⑥절).
 //
 // ── 왜 "갭 31" 을 곧바로 "못 쓰는 31" 로 세면 안 되는가 ────────────────────
 // 결제 웹훅(toss/paddle/portone)은 subscriptions.paymentProvider 를 덮어쓴다
@@ -351,5 +356,165 @@ export function planGrantBackfill(
     ),
     hadSubscription: Boolean(sub),
     addedDays: Math.max(0, Math.round((targetMs - baseMs) / DAY_MS)),
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 3. ★근본 수리(R1) — 부여 시점에 창을 어떻게 잡는가
+// ════════════════════════════════════════════════════════════════════════════
+//
+// 2절까지는 "이미 벌어진 갭을 어떻게 청소하나"였다. 이 절은 **갭이 다시 생기지
+// 않게 하는 판정**이다. 백필은 과거를 청소할 뿐이고, 여기가 미래를 막는다.
+//
+// ── 고치는 결함 ────────────────────────────────────────────────────────────
+// index.ts materializeFounderProGrantForUid 는 창이 닫혔으면
+//   `windowEnd <= now → skippedReason:"window_expired"` 로 **구독도, founders
+//   흔적도, 로그도 남기지 않고** 돌아선다. 그래서:
+//   · 선정 → 안내메일 → 가입 사이가 창보다 길면 접근권이 소리 없이 증발한다
+//   · 실측(2026-08-29): 계정 없는 30명 중 18명은 **오늘 가입해도 부여 0**,
+//     나머지 12명도 09-05~09-13 에 같은 상태가 된다
+//   · 그리고 우리는 그 사실을 **어떤 로그로도 모른다**
+//
+// ── 판단: 미소비 grant 의 앵커는 선정 시점이 아니라 부여(=가입) 시점이다 ────
+// 베타 3개월의 목적은 "3개월간 써 보게 하는 것"이다(#1304: D30 을 재는 시점에
+// 접근권이 살아 있어야 리텐션을 잰다). 한 번도 접속하지 않은 사람에게 흘러간
+// 달력 시간을 **소비로 치는 건 사실과 다르다.** 창의 시작은 실제 사용 시작이어야
+// 그 근거가 성립한다.
+//   → 미소비면 max(기존 창, 부여시각 + FOUNDER_BETA_MONTHS)
+//   → 소비했으면 기존 창 그대로. 닫혔으면 스킵(단, **흔적을 남기고** 스킵한다)
+//
+// ── ★왜 max 인가(단순 교체가 아니라) ───────────────────────────────────────
+// 앵커 이동이 **누구의 만료일도 앞당기지 않는다**는 불변식을 코드 모양으로
+// 보장한다. 설문 보상(FOUNDER_PRO_MONTHS=5)으로 창이 이미 3개월보다 길게 열린
+// 사람이 뒤늦게 이 경로를 타도 기간이 깎이지 않는다. upsertProSubscription 의
+// `periodEnd = max(기존, target)` 과 같은 이유·같은 방향이다.
+//
+// ── ★"미소비" 를 좁게 정의하는 이유 ────────────────────────────────────────
+// 티켓의 제약이 "**이미 소비된 grant 의 앵커를 옮기지 마라**" 다. 쓰고 있는
+// 사람의 만료일을 뒤로 미는 건 다른 종류의 선물이고 지금 결정된 게 아니다.
+// 그래서 소비 판정은 **증거가 하나라도 있으면 소비**로 본다(OR):
+//   ① founders.proSubscriptionUid    — materialize 성공 시에만 찍히는 스탬프
+//   ② founders.proSubscriptionGrantedAt — ①과 같은 순간 찍히는 짝
+//   ③ subscriptions/{uid} 가 무료 grant 문서 — **만료·해지 포함**
+// ③이 필요한 이유: 스탬프 없이 구독만 있는 문서가 실재한다(옛 백필 경로).
+// ③을 안 보면 만료된 소비 grant 가 재앵커로 **부활**한다 — 티켓이 금지한 바로 그
+// 동작이다. 오판은 안전쪽(=옮기지 않음)으로 둔다.
+
+/** 부여 시점에 "이 사람이 grant 를 이미 소비했는가"를 가르는 증거. */
+export interface GrantConsumptionFacts {
+  /** founders.proSubscriptionUid — materialize 성공 시에만 찍힌다. */
+  proSubscriptionUid: string | null;
+  /** founders.proSubscriptionGrantedAt(ms) — ①과 같은 순간 찍히는 짝. */
+  proSubscriptionGrantedAtMs: number | null;
+  /**
+   * subscriptions/{uid} 가 무료 grant 문서인가. ★status 를 보지 않는다 —
+   * 만료·해지된 grant 도 **한 번 소비된** grant 다.
+   */
+  hasFounderGrantSubscription: boolean;
+}
+
+/** 창을 어디에 앵커했는가. 로그·감사 흔적에 그대로 나간다. */
+export type GrantWindowAnchor =
+  /** 기존 창을 그대로 쓴다(정상 선정·소비자·기존 창이 더 긴 경우). */
+  | "existing_window"
+  /** ★미소비라 부여 시각 + FOUNDER_BETA_MONTHS 로 다시 잡았다. */
+  | "signup_reanchor";
+
+/** 부여를 못 하는 이유. ★전부 로그·founders 스탬프로 남는다(R2). */
+export type GrantWindowSkipReason =
+  /** 반려됐거나 accessGrantedAt 이 없다 — 애초에 대상이 아니다. */
+  | "not_selected"
+  /** 소비 이력은 있는데 창을 재구성할 근거가 없다. */
+  | "no_window"
+  /** ★소비한 grant 인데 창이 닫혔다. 앵커를 옮기지 않는다(티켓 제약). */
+  | "window_expired";
+
+export type FounderGrantWindowDecision =
+  | {
+      kind: "grant";
+      windowEndMs: number;
+      anchor: GrantWindowAnchor;
+      /** 재앵커 전 창(감사용). 없었으면 null. */
+      previousWindowEndMs: number | null;
+    }
+  | {
+      kind: "skip";
+      reason: GrantWindowSkipReason;
+      windowEndMs: number | null;
+    };
+
+/** 증거가 하나라도 있으면 소비. ★오판은 "옮기지 않음" 쪽으로 떨어진다. */
+export function isGrantConsumed(facts: GrantConsumptionFacts): boolean {
+  if (typeof facts.proSubscriptionUid === "string" && facts.proSubscriptionUid) {
+    return true;
+  }
+  if (typeof facts.proSubscriptionGrantedAtMs === "number") return true;
+  return facts.hasFounderGrantSubscription;
+}
+
+/**
+ * ★index.ts materializeFounderProGrantForUid 의 창 판정 본체. 순수 함수.
+ *
+ * `grantStartedAtMs` 는 "지금"이 아니라 **부여 시각**(index.ts 의 grantStartedAt)을
+ * 받는다. 선정 경로는 betaExpiresAt 을 `betaStartedAt + 3개월` 로 방금 계산해
+ * 두는데, 여기서 `Date.now()` 를 따로 읽으면 몇 밀리초 차이로 항상
+ * `signup_reanchor` 가 떠서 **정상 선정마다 재앵커 로그가 쌓인다.** 같은 기준
+ * 시각을 쓰면 두 값이 정확히 같아져 `existing_window` 로 떨어진다.
+ */
+export function resolveFounderGrantWindowAtMaterialization(
+  founder: GapFounderFacts,
+  consumption: GrantConsumptionFacts,
+  grantStartedAtMs: number,
+  legacyBetaMonths: number,
+  betaMonths: number,
+): FounderGrantWindowDecision {
+  // ★재앵커는 "창이 닫혔어도 부여한다"는 뜻이다. 그래서 반려 게이트를 여기서
+  // 명시적으로 막아야 한다 — revokeFounderGrant 는 betaExpiresAt 을 즉시만료로
+  // 당겨 이중으로 막는데, 만료가 더 이상 장벽이 아니게 되면 그 한 겹이 사라진다.
+  if (founder.status === "rejected") {
+    return { kind: "skip", reason: "not_selected", windowEndMs: null };
+  }
+  if (typeof founder.accessGrantedAtMs !== "number") {
+    return { kind: "skip", reason: "not_selected", windowEndMs: null };
+  }
+
+  const windowEndMs = resolveGrantWindowEndMs(founder, legacyBetaMonths);
+
+  if (isGrantConsumed(consumption)) {
+    // ★소비자의 앵커는 옮기지 않는다. 쓰고 있는 사람의 만료일이 뒤로 밀리면
+    // 그건 소급 연장이고, 별도 판단·별도 실행 사안이다(#1305).
+    if (typeof windowEndMs !== "number") {
+      return { kind: "skip", reason: "no_window", windowEndMs: null };
+    }
+    if (windowEndMs <= grantStartedAtMs) {
+      return { kind: "skip", reason: "window_expired", windowEndMs };
+    }
+    return {
+      kind: "grant",
+      windowEndMs,
+      anchor: "existing_window",
+      previousWindowEndMs: windowEndMs,
+    };
+  }
+
+  // 미소비 — 여기가 수리다.
+  const reanchoredMs = addMonths(
+    new Date(grantStartedAtMs),
+    betaMonths,
+  ).getTime();
+  if (typeof windowEndMs === "number" && windowEndMs >= reanchoredMs) {
+    // 기존 창이 더 길다(설문 보상 등). 줄이지 않는다.
+    return {
+      kind: "grant",
+      windowEndMs,
+      anchor: "existing_window",
+      previousWindowEndMs: windowEndMs,
+    };
+  }
+  return {
+    kind: "grant",
+    windowEndMs: reanchoredMs,
+    anchor: "signup_reanchor",
+    previousWindowEndMs: windowEndMs,
   };
 }

@@ -15,6 +15,10 @@
  *   (요약: 갭 30 = 계정 없음 30, 100%. 되살리기 대상이 #1305 와 동일 집합이라
  *    별도 백필 실행은 권하지 않는다. 진짜 결함은 window_expired 의 조용한 스킵.)
  *
+ * ★⑥절은 그 근본 수리(R1)의 전/후 시뮬레이션이다 — 배포본과 **같은 함수**
+ * (resolveFounderGrantWindowAtMaterialization)를 태워 "지금 가입하면 무엇을
+ * 받나"를 수리 전/후로 나란히 찍는다. 수리 리포트: docs/founder-grant-anchor-repair-2026-08-29.md
+ *
  * Auth: gcloud ADC OAuth + Firestore/Identity Toolkit REST
  *       (backfill-founder-pro-grants.mjs 와 동일).
  *
@@ -35,6 +39,7 @@ import {
   FOUNDER_LEGACY_BETA_MONTHS,
 } from "../src/founderLadder";
 import {
+  FounderGrantWindowDecision,
   GapAccountFacts,
   GapFounderFacts,
   GapSubscriptionFacts,
@@ -43,8 +48,10 @@ import {
   SELECTED_GAP_BACKFILL_AT_FIELD,
   SELECTED_GAP_BACKFILL_REASON,
   diagnoseGrantGap,
+  isFounderGrantSubscription,
   isMissingAccess,
   planGrantBackfill,
+  resolveFounderGrantWindowAtMaterialization,
   resolveGrantWindowEndMs,
 } from "../src/founderGrantGap";
 
@@ -56,6 +63,7 @@ const PROJECT_ID =
   "";
 const DATABASE_ID = process.env.FIRESTORE_DATABASE_ID || "(default)";
 const PAGE_SIZE = 300;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 if (!PROJECT_ID) {
   throw new Error(
@@ -289,6 +297,22 @@ interface Row {
   targetMs: number | null;
   planType: string | null;
   addedDays: number | null;
+  /**
+   * ★R1 시뮬레이션 — "이 사람이 **지금** 가입하면(=materialize 를 지금 태우면)
+   * 무엇을 받는가". 수리 전/후를 같은 입력으로 나란히 돌린다.
+   */
+  currentGrantDays: number | null;
+  repairedDecision: FounderGrantWindowDecision;
+}
+
+/** 수리 **전**(현재 배포본) materializeFounderProGrantForUid 의 판정 재현. */
+function currentGrantDaysIfSignupNow(
+  windowEndMs: number | null,
+  nowMs: number,
+): number | null {
+  // `!windowEnd || windowEnd <= new Date()` → 조용한 스킵(부여 0).
+  if (typeof windowEndMs !== "number" || windowEndMs <= nowMs) return null;
+  return Math.round((windowEndMs - nowMs) / DAY_MS);
 }
 
 async function main(): Promise<void> {
@@ -404,6 +428,23 @@ async function main(): Promise<void> {
             : null,
       planType: plan.action === "grant" ? plan.planType : null,
       addedDays: plan.action === "grant" ? plan.addedDays : null,
+      currentGrantDays: currentGrantDaysIfSignupNow(
+        resolveGrantWindowEndMs(founder, FOUNDER_LEGACY_BETA_MONTHS),
+        nowMs,
+      ),
+      // ★부여 경로가 실제로 쓰는 함수를 그대로 태운다. 여기서 규칙을 다시 적으면
+      // 드라이런 숫자가 배포본과 갈려 판단 근거가 되지 못한다.
+      repairedDecision: resolveFounderGrantWindowAtMaterialization(
+        founder,
+        {
+          proSubscriptionUid: founder.proSubscriptionUid,
+          proSubscriptionGrantedAtMs: ms(raw.proSubscriptionGrantedAt),
+          hasFounderGrantSubscription: isFounderGrantSubscription(sub),
+        },
+        nowMs,
+        FOUNDER_LEGACY_BETA_MONTHS,
+        FOUNDER_BETA_MONTHS,
+      ),
     });
   }
 
@@ -539,8 +580,93 @@ async function main(): Promise<void> {
     "    먼저 열어야 '가입하시면 쓰실 수 있습니다'가 참이 된다(#1305 와 같은 함정).",
   );
 
+  // ── ⑥ ★R1 시뮬레이션 — 수리 전/후, "지금 가입하면 무엇을 받나" ───────────
+  //
+  // 이 티켓의 완료 기준이자 #1305 발송의 선행조건이다. 창을 열지 않고 "가입
+  // 하세요" 메일을 보내면 사용자가 시키는 대로 해도 아무것도 안 생긴다.
   console.log(
-    "\n── ⑥ 회수 경로 ────────────────────────────────────────────────",
+    "\n── ⑥ ★R1 시뮬레이션: 지금 가입하면 무엇을 받나 (수리 전 → 후) ─",
+  );
+  const beta = `${FOUNDER_BETA_MONTHS}개월`;
+  const sim = missingRows;
+  const beforeZero = sim.filter((r) => r.currentGrantDays === null).length;
+  const beforeShort = sim.filter(
+    (r) => typeof r.currentGrantDays === "number" && r.currentGrantDays < 80,
+  ).length;
+  const afterReanchor = sim.filter(
+    (r) =>
+      r.repairedDecision.kind === "grant" &&
+      r.repairedDecision.anchor === "signup_reanchor",
+  ).length;
+  const afterSkip = sim.filter((r) => r.repairedDecision.kind === "skip").length;
+  const afterFull = sim.filter(
+    (r) =>
+      r.repairedDecision.kind === "grant" &&
+      r.repairedDecision.windowEndMs - nowMs >= 80 * DAY_MS,
+  ).length;
+
+  console.log(`  대상: 접근권을 못 쓰는 ${sim.length}명`);
+  console.log(
+    `  [수리 전] 부여 0(조용한 스킵): ${pad(beforeZero)}명 · 잔여만(<80일): ${pad(
+      beforeShort,
+    )}명`,
+  );
+  console.log(
+    `  [수리 후] 재앵커(=${beta} 전액): ${pad(afterReanchor)}명 · 스킵: ${pad(
+      afterSkip,
+    )}명`,
+  );
+  console.log(
+    `  ★${beta}(80일 이상) 를 받는 인원: 수리 전 ${
+      sim.length - beforeZero - beforeShort
+    }명 → 수리 후 ${afterFull}명`,
+  );
+  if (afterSkip > 0) {
+    console.log(
+      "  ⚠ 스킵이 남아 있다 — 소비 이력이 있는데 창이 닫힌 사람이다(앵커를 옮기지 않는 게 맞다).",
+    );
+  }
+  console.log("\n   id          진단                  수리전       → 수리후");
+  for (const r of sim.sort(
+    (a, b) => (a.accessGrantedAtMs || 0) - (b.accessGrantedAtMs || 0),
+  )) {
+    const before =
+      r.currentGrantDays === null ? "부여 0" : `${r.currentGrantDays}일`;
+    const after =
+      r.repairedDecision.kind === "skip"
+        ? `skip:${r.repairedDecision.reason}`
+        : `${Math.round(
+            (r.repairedDecision.windowEndMs - nowMs) / DAY_MS,
+          )}일 (${iso(r.repairedDecision.windowEndMs)}, ${
+            r.repairedDecision.anchor
+          })`;
+    console.log(
+      `   ${r.id}  ${r.diagnosis.padEnd(20)}  ${before.padEnd(10)} → ${after}`,
+    );
+  }
+
+  // ★불변식 검사 — 수리가 **누구의 만료일도 앞당기지 않는다**. 선정자 전수로 본다.
+  const shrunk = rows.filter(
+    (r) =>
+      r.repairedDecision.kind === "grant" &&
+      typeof r.windowEndMs === "number" &&
+      r.repairedDecision.windowEndMs < r.windowEndMs,
+  ).length;
+  const movedConsumed = rows.filter(
+    (r) =>
+      r.diagnosis === "grant_present" &&
+      r.repairedDecision.kind === "grant" &&
+      r.repairedDecision.anchor === "signup_reanchor",
+  ).length;
+  console.log(
+    `\n  ★불변식 ① 만료일이 앞당겨지는 사람: ${shrunk}명 (0이어야 한다)`,
+  );
+  console.log(
+    `  ★불변식 ② 이미 소비한(grant 보유) 사람의 앵커가 옮겨지는 건: ${movedConsumed}명 (0이어야 한다)`,
+  );
+
+  console.log(
+    "\n── ⑦ 회수 경로 ────────────────────────────────────────────────",
   );
   console.log(
     `  마커: subscriptions.founderGrantReason == "${SELECTED_GAP_BACKFILL_REASON}"`,
