@@ -1459,6 +1459,176 @@ describe("tasks — 머지성 write 게이트 (REVIEW→DONE)", () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// viewer 읽기전용 게이트 (티켓 aMVwzZY1QeJSFxDm4N4K)
+//
+// 이 블록은 원래 `isProjectMember` 만 봤다. 그래서 "읽기 전용"으로 초대한
+// viewer 가 보드 티켓을 만들고 지울 수 있었다(REVIEW→DONE 만 막혔다).
+// 역할표(`src/types/invitation.ts` ROLE_PERMISSIONS)는 viewer 에게 `read` 만
+// 준다 — 저장소 push 는 이미 같은 `write` 퍼미션으로 막혀 있었으므로
+// (`functions/src/githubApp.ts` roleCanWriteRepo) 룰 한쪽만 넓었던 드리프트다.
+//
+// 시드는 이 describe 안에서만 만든다 — 공용 beforeEach 를 건드리지 않는다
+// (같은 파일을 만지는 병렬 티켓과의 충돌면을 줄이려는 것).
+// ─────────────────────────────────────────────────────────────────────────
+describe("tasks — viewer 읽기전용 게이트 (aMVwzZY1QeJSFxDm4N4K)", () => {
+  const VIEWER_ID = "viewer-user";
+  const VIEWER_EMAIL = "viewer@test.com";
+  // memberRoles 문서가 아예 없는 레거시 멤버 — getMemberRole 이 'member' 로 접는다.
+  const LEGACY_MEMBER_ID = "legacy-member-user";
+  const LEGACY_MEMBER_EMAIL = "legacy@test.com";
+
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await updateDoc(doc(db, "projects", PROJECT_ID), {
+        members: arrayUnion(VIEWER_ID, LEGACY_MEMBER_ID),
+      });
+      await setDoc(doc(db, "memberRoles", `${PROJECT_ID}_${VIEWER_ID}`), {
+        projectId: PROJECT_ID,
+        userId: VIEWER_ID,
+        role: "viewer",
+      });
+      // viewer 로 강등되기 **전에** 그 계정이 만들어 둔 기존 티켓.
+      // 사후 차단이 이 문서를 무효화하면 그건 장애다.
+      await setDoc(doc(db, "tasks", "task-made-before-demotion"), {
+        projectId: PROJECT_ID,
+        title: "Made while still a member",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+  });
+
+  it("viewer 는 보드 티켓을 읽을 수 있다 — 읽기 전용이지 '안 보임'이 아니다", async () => {
+    const db = getContext(VIEWER_ID, VIEWER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "tasks", "task-1")));
+  });
+
+  it("viewer 는 보드 티켓을 만들 수 없다", async () => {
+    const db = getContext(VIEWER_ID, VIEWER_EMAIL).firestore();
+    await assertFails(
+      addDoc(collection(db, "tasks"), {
+        projectId: PROJECT_ID,
+        title: "viewer 가 만든 티켓",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("viewer 는 보드 티켓을 수정할 수 없다", async () => {
+    const db = getContext(VIEWER_ID, VIEWER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "tasks", "task-1"), { title: "retitled by viewer" }),
+    );
+  });
+
+  it("viewer 는 보드 티켓을 지울 수 없다", async () => {
+    const db = getContext(VIEWER_ID, VIEWER_EMAIL).firestore();
+    await assertFails(deleteDoc(doc(db, "tasks", "task-1")));
+  });
+
+  it("viewer 가 강등 전에 만든 기존 티켓은 살아 있고 다른 멤버가 계속 다룬다", async () => {
+    // 사후 차단은 **앞으로의 write** 만 막는다. 이미 있는 문서를 무효화하거나
+    // 다른 사람의 작업을 잠그면 그건 장애로 읽힌다.
+    const viewerDb = getContext(VIEWER_ID, VIEWER_EMAIL).firestore();
+    await assertSucceeds(
+      getDoc(doc(viewerDb, "tasks", "task-made-before-demotion")),
+    );
+
+    const memberDb = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(memberDb, "tasks", "task-made-before-demotion"), {
+        status: "IN_PROGRESS",
+      }),
+    );
+  });
+
+  it("member 는 여전히 티켓을 만들고 고치고 지울 수 있다(회귀 가드)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      addDoc(collection(db, "tasks"), {
+        projectId: PROJECT_ID,
+        title: "member 티켓",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db, "tasks", "task-1"), { title: "retitled by member" }),
+    );
+    await assertSucceeds(deleteDoc(doc(db, "tasks", "task-1")));
+  });
+
+  it("admin 도 여전히 티켓을 만들고 지울 수 있다(회귀 가드)", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertSucceeds(
+      addDoc(collection(db, "tasks"), {
+        projectId: PROJECT_ID,
+        title: "admin 티켓",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    await assertSucceeds(deleteDoc(doc(db, "tasks", "task-1")));
+  });
+
+  it("memberRoles 문서가 없는 레거시 멤버는 잠기지 않는다(문서 없음=member)", async () => {
+    // 여기서 viewer 로 접으면 역할 문서를 한 번도 안 만든 기존 팀이 통째로 잠긴다.
+    const db = getContext(LEGACY_MEMBER_ID, LEGACY_MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      addDoc(collection(db, "tasks"), {
+        projectId: PROJECT_ID,
+        title: "legacy member 티켓",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    await assertSucceeds(deleteDoc(doc(db, "tasks", "task-1")));
+  });
+
+  it("owner 는 자기 역할 문서가 'viewer' 로 잘못 써져 있어도 보드에 쓸 수 있다", async () => {
+    // ownerId 가 역할 문서를 이긴다(githubApp.resolveProjectRole 과 같은 규약).
+    // 오기입 한 줄로 프로젝트 주인이 자기 보드에서 잠기면 안 된다.
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(context.firestore(), "memberRoles", `${PROJECT_ID}_${OWNER_ID}`),
+        { projectId: PROJECT_ID, userId: OWNER_ID, role: "viewer" },
+      );
+    });
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      addDoc(collection(db, "tasks"), {
+        projectId: PROJECT_ID,
+        title: "owner 티켓",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    await assertSucceeds(deleteDoc(doc(db, "tasks", "task-1")));
+  });
+
+  it("남의 프로젝트 티켓은 viewer 든 아니든 여전히 못 만든다(테넌트 경계 유지)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      addDoc(collection(db, "tasks"), {
+        projectId: OTHER_PROJECT_ID,
+        title: "크로스테넌트 티켓",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+});
+
 // ===== Chat Messages (크로스테넌트 격리) =====
 
 describe("chatMessages collection", () => {

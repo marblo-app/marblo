@@ -20,6 +20,29 @@ export function canMergeAsRole(
 }
 
 /**
+ * 보드 티켓을 만들고/고치고/지울 수 있는가(= ROLE_PERMISSIONS 의 `write`).
+ *
+ * ★MIRROR — `firestore.rules` 의 `canWriteTasks(projectId)` 와 **같은 판정**이다.
+ * 룰이 최종 게이트고 이 함수는 화면의 1차 게이트다. 두 벌인 이유는 룰이 TS 를
+ * import 할 수 없어서고(TEAM_COLLAB_PLANS 와 같은 규약), drift 는
+ * `tests/unit/task-write-role-drift.test.ts` 가 소스 스캔으로 잡는다.
+ *
+ * 왜 생겼나: 룰이 원래 `isProjectMember` 만 봐서 "읽기 전용"으로 초대한 viewer
+ * 가 보드 티켓을 만들고 지울 수 있었다(REVIEW→DONE 만 막혔다). 역할표는 viewer
+ * 에게 `read` 만 준다. 저장소 push 는 이미 같은 `write` 퍼미션으로 막고 있었다
+ * (`functions/src/githubApp.ts` 의 `roleCanWriteRepo`) — 게이트를 하나로 맞춘다.
+ *
+ * ★삭제도 이 축이다. `ROLE_PERMISSIONS` 의 `delete` 는 티켓 삭제 축이 아니다
+ * (invitation.ts 주석 참조) — member 의 기존 보드 삭제 동작을 죽이지 않는다.
+ */
+export function canWriteTasksAsRole(
+  role: InvitationRole | null | undefined,
+): boolean {
+  if (!role) return false;
+  return ROLE_PERMISSIONS[role]?.includes("write") ?? false;
+}
+
+/**
  * 구성원별 작업량(프로젝트 탭)을 볼 수 있는가.
  *
  * 멤버 관리와 **같은 게이트**다 — 작업량 표는 "누가 무엇을 얼마나 했나" 라는

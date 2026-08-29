@@ -331,18 +331,44 @@ service cloud.firestore {
         && request.resource.data.get('status', '') == 'DONE';
     }
 
+    // 보드 티켓 write 게이트 — 역할표의 `write` 퍼미션 (티켓 aMVwzZY1QeJSFxDm4N4K).
+    //
+    // ★MIRROR — `v3/src/types/invitation.ts` 의 `ROLE_PERMISSIONS`(owner/admin/
+    //   member 에만 `write`), `v3/src/lib/teamRoles.ts` 의 `canWriteTasksAsRole`,
+    //   `v3/functions/src/githubApp.ts` 의 `roleCanWriteRepo` 와 **같은 집합**이다.
+    //   drift 는 `tests/unit/task-write-role-drift.test.ts`(소스 스캔) + 아래
+    //   firestore.rules.test.ts 의 viewer 게이트 describe 가 잡는다.
+    //
+    // 왜 필요했나: 이 블록은 원래 `isProjectMember` 만 봤다. 그래서 "읽기 전용"
+    // 으로 초대한 viewer 가 보드 티켓을 **만들고 지울 수** 있었다(REVIEW→DONE
+    // 만 막혔다). 역할표는 viewer 에게 `read` 만 준다. 룰이 역할표보다 넓었던
+    // 드리프트다 — 저장소 write 는 이미 같은 `write` 퍼미션으로 viewer 를 막고
+    // 있었으므로(githubApp), 화면이 막는 것과 데이터가 막는 것을 맞춘다.
+    //
+    // ★ownerId 가 역할 문서를 이긴다 — githubApp.resolveProjectRole 과 같은
+    //   규약. memberRoles 문서에 'viewer' 가 잘못 써져도 프로젝트 owner 는
+    //   자기 보드에서 잠기지 않는다.
+    // ★문서 없음 = member 로 접는 것은 getMemberRole 의 기존 규약 그대로다.
+    //   여기서 viewer 로 접으면 role 문서가 없는 레거시 멤버가 전부 잠긴다.
+    function canWriteTasks(projectId) {
+      return isProjectMember(projectId)
+        && (isProjectOwner(projectId)
+            || getMemberRole(projectId, request.auth.uid) != 'viewer');
+    }
+
     match /tasks/{taskId} {
+      // read 는 그대로 멤버 경계다 — viewer 는 "읽기 전용"이지 "안 보임"이 아니다.
       allow read: if isAuthenticated()
         && isProjectMember(resource.data.projectId);
       allow create: if isAuthenticated()
-        && isProjectMember(request.resource.data.projectId);
+        && canWriteTasks(request.resource.data.projectId);
       allow update: if isAuthenticated()
-        && isProjectMember(resource.data.projectId)
+        && canWriteTasks(resource.data.projectId)
         && request.resource.data.projectId == resource.data.projectId
         && (!isMergeCloseoutTransition()
             || isAdminOrOwner(resource.data.projectId));
       allow delete: if isAuthenticated()
-        && isProjectMember(resource.data.projectId);
+        && canWriteTasks(resource.data.projectId);
     }
 
     // ===== Agents =====

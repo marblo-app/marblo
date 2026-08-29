@@ -22,6 +22,16 @@ export interface Invitation {
 
 // 'merge' = 코드 머지(앱 내 Merge 버튼 + merged→DONE 완료 처리). owner/admin 전용 —
 // member 는 PR 제출(REVIEW)까지만. Firestore 룰의 REVIEW→DONE 게이트와 짝이다.
+//
+// 'write' = **쓸 수 있는 사람**의 정의다. 저장소 push(githubApp.roleCanWriteRepo)
+// 와 보드 티켓 create/update/delete(firestore.rules 의 canWriteTasks) 가 같은
+// 이 한 칸을 본다. viewer 에게 'write' 가 없다는 것이 "읽기 전용 초대"의 전부다.
+// 새 축을 만들지 말고 이 표를 고쳐라 — 룰만 고치면 조용히 갈라진다.
+//
+// ★'delete' 는 보드 티켓 삭제 축이 **아니다**. 지금 이 퍼미션을 읽는 코드는
+// 없고(프로젝트/멤버 삭제 같은 관리 행위를 뜻하는 자리로 남아 있다), 티켓 삭제는
+// 'write' 축에 있다. member 는 예나 지금이나 자기 보드의 티켓을 지울 수 있다 —
+// 여기서 'delete' 축으로 갈아타면 member 의 기존 보드 동작이 조용히 죽는다.
 export const ROLE_PERMISSIONS: Record<InvitationRole, string[]> = {
   owner: [
     "read",
