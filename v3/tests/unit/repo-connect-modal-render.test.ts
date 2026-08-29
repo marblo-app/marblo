@@ -186,6 +186,9 @@ describe("RepoConnectModal DOM wiring", () => {
     expect(
       await screen.findByText(ko["collab.repoConnect.title"]),
     ).toBeTruthy();
+    expect(
+      screen.getByText(ko["collab.repoConnect.status.readyToDownload.title"]),
+    ).toBeTruthy();
     expect(screen.getByText(REPO)).toBeTruthy();
 
     fireEvent.click(screen.getByText(ko["collab.repoConnect.later"]));
@@ -217,5 +220,58 @@ describe("RepoConnectModal DOM wiring", () => {
       });
     });
     expect(screen.queryByText(ko["collab.repoConnect.title"])).toBeNull();
+  });
+
+  it("shows the no-repository-address state in manual mode", async () => {
+    projectStoreMock.state.currentProject = makeProject(undefined, {
+      gitRemoteUrl: undefined,
+    });
+
+    renderModal();
+
+    fireEvent(
+      window,
+      new CustomEvent(REPO_CONNECT_OPEN_EVENT, { bubbles: false }),
+    );
+
+    expect(
+      await screen.findByText(ko["collab.repoConnect.status.noRepo.title"]),
+    ).toBeTruthy();
+    expect(
+      screen.getByPlaceholderText(ko["collab.repoConnect.urlPlaceholder"]),
+    ).toBeTruthy();
+  });
+
+  it("shows the downloading state while clone is pending", async () => {
+    const electronAPI = installElectronApiMock();
+    let resolveClone: (value: { ok: true; path: string }) => void = () => {};
+    const clonePromise = new Promise<{ ok: true; path: string }>((resolve) => {
+      resolveClone = resolve;
+    });
+    electronAPI.repo.clone.mockReturnValueOnce(clonePromise);
+    projectStoreMock.state.currentProject = makeProject(undefined);
+
+    renderModal();
+
+    fireEvent(
+      window,
+      new CustomEvent(REPO_CONNECT_OPEN_EVENT, { bubbles: false }),
+    );
+
+    expect(
+      await screen.findByText(ko["collab.repoConnect.title"]),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByText(ko["collab.repoConnect.cloneAndConnect"]));
+
+    expect(
+      await screen.findByText(ko["collab.repoConnect.status.downloading.title"]),
+    ).toBeTruthy();
+
+    resolveClone({ ok: true, path: "/Users/me/app" });
+    await waitFor(() => {
+      expect(editorStoreMock.state.setRootPath).toHaveBeenCalledWith(
+        "/Users/me/app",
+      );
+    });
   });
 });

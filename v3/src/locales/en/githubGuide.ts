@@ -111,7 +111,7 @@ export const githubGuide = {
   "githubGuide.member.notInstalled.body":
     "The Marblo App isn't connected to this project yet, so the code can't come through automatically. This is fixed on the owner's side, not yours.",
   "githubGuide.member.notInstalled.next":
-    "Ask the project owner to install the GitHub App from their [Project → Team] screen.",
+    "Wait for the project owner to install the GitHub App from the Project tab.",
   "githubGuide.member.notInstalled.also":
     "If the owner has already installed it and you still see this, ask them to check (1) that you've been given a role, and (2) that the plan includes team collaboration.",
 
@@ -138,7 +138,7 @@ export const githubGuide = {
   "githubGuide.member.ready.body":
     "You can pull this project's code and push branches. There's nothing to do on GitHub.",
   "githubGuide.member.ready.next":
-    "Open the [Code] tab, pull the repository, and get started.",
+    "Use [Connect repository] on the [Project] tab to download the repository on this computer, then get started.",
 
   // ── Legacy path (shown only while the App isn't connected) ─────────────
   "githubGuide.legacyCollaborator.notice":

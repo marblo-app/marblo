@@ -70,6 +70,25 @@ const XCODE_ISSUE_KEY: Record<string, MessageKey> = {
 /** 수동 재호출 진입점에서 보낼 커스텀 이벤트. */
 export const REPO_CONNECT_OPEN_EVENT = "marblo:open-repo-connect";
 
+type RepoConnectStatus = "noRepo" | "readyToDownload" | "downloading";
+
+const STATUS_TITLE_KEY: Record<RepoConnectStatus, MessageKey> = {
+  noRepo: "collab.repoConnect.status.noRepo.title",
+  readyToDownload: "collab.repoConnect.status.readyToDownload.title",
+  downloading: "collab.repoConnect.status.downloading.title",
+};
+
+const STATUS_BODY_KEY: Record<RepoConnectStatus, MessageKey> = {
+  noRepo: "collab.repoConnect.status.noRepo.body",
+  readyToDownload: "collab.repoConnect.status.readyToDownload.body",
+  downloading: "collab.repoConnect.status.downloading.body",
+};
+
+type GitHubMessage = {
+  key: MessageKey;
+  detail?: string;
+};
+
 /**
  * "터미널에 이 명령을 붙여넣으세요" 한 줄 + 복사 버튼.
  * 명령 원문은 항상 화면에 보이므로 클립보드가 막혀도 사용자가 직접 선택해
@@ -130,7 +149,9 @@ export function RepoConnectModal() {
   // manual 모드에서만 쓰는 주소 입력값(clone 모드에선 프로젝트 값이 이긴다).
   const [manualUrl, setManualUrl] = useState("");
   const [githubConnected, setGithubConnected] = useState(false);
-  const [githubMessage, setGithubMessage] = useState<string | null>(null);
+  const [githubMessage, setGithubMessage] = useState<GitHubMessage | null>(
+    null,
+  );
   const [deviceSession, setDeviceSession] = useState<{
     sessionId: string;
     userCode: string;
@@ -299,23 +320,30 @@ export function RepoConnectModal() {
           setDeviceSession(null);
           if (result.kind === "success") {
             setGithubConnected(true);
-            setGithubMessage(
-              "GitHub가 연결되었습니다. 이제 private 저장소를 clone할 수 있습니다.",
-            );
+            setGithubMessage({
+              key: "collab.repoConnect.github.message.connected",
+            });
           } else if (result.kind === "denied") {
-            setGithubMessage("GitHub 연결이 취소되었습니다.");
+            setGithubMessage({
+              key: "collab.repoConnect.github.message.denied",
+            });
           } else if (result.kind === "expired") {
-            setGithubMessage(
-              "GitHub 연결 코드가 만료되었습니다. 다시 시도하세요.",
-            );
+            setGithubMessage({
+              key: "collab.repoConnect.github.message.expired",
+            });
           } else {
-            setGithubMessage(result.message ?? "GitHub 연결에 실패했습니다.");
+            setGithubMessage({
+              key: "collab.repoConnect.github.message.failed",
+              detail: result.message ?? undefined,
+            });
           }
         })
         .catch(() => {
           if (!cancelled) {
             setDeviceSession(null);
-            setGithubMessage("GitHub 연결에 실패했습니다.");
+            setGithubMessage({
+              key: "collab.repoConnect.github.message.failed",
+            });
           }
         });
     }, deviceSession.intervalSeconds * 1000);
@@ -517,7 +545,10 @@ export function RepoConnectModal() {
       !result.verificationUri ||
       !result.interval
     ) {
-      setGithubMessage(result.error ?? "GitHub 연결을 시작하지 못했습니다.");
+      setGithubMessage({
+        key: "collab.repoConnect.github.message.startFailed",
+        detail: result.error ?? undefined,
+      });
       return;
     }
     setDeviceSession({
@@ -528,6 +559,12 @@ export function RepoConnectModal() {
       intervalSeconds: result.interval,
     });
   };
+
+  const status: RepoConnectStatus = busy
+    ? "downloading"
+    : connectMode === "manual"
+      ? "noRepo"
+      : "readyToDownload";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
@@ -546,6 +583,15 @@ export function RepoConnectModal() {
         </div>
 
         <div className="p-5 space-y-4">
+          <div className="rounded border border-blue-500/25 bg-blue-500/10 px-3 py-3">
+            <p className="text-sm font-medium text-blue-100">
+              {t(STATUS_TITLE_KEY[status])}
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-blue-100/80">
+              {t(STATUS_BODY_KEY[status])}
+            </p>
+          </div>
+
           <p className="text-sm text-gray-300">
             {ownIssue
               ? t(`collab.repoConnect.ownIssue.${ownIssue}`, { path: ownPath })
@@ -654,11 +700,13 @@ export function RepoConnectModal() {
 
           <div className="rounded border border-gray-700 bg-gray-900/60 px-3 py-3 text-sm text-gray-300">
             {githubConnected ? (
-              <span className="text-green-400">GitHub 연결됨</span>
+              <span className="text-green-400">
+                {t("collab.repoConnect.github.connected")}
+              </span>
             ) : deviceSession ? (
               <div className="space-y-2">
                 <div>
-                  GitHub에서 다음 코드를 입력하세요:{" "}
+                  {t("collab.repoConnect.github.enterCode")}{" "}
                   <strong className="font-mono text-white">
                     {deviceSession.userCode}
                   </strong>
@@ -672,7 +720,7 @@ export function RepoConnectModal() {
                   target="_blank"
                   rel="noreferrer"
                 >
-                  GitHub 열기
+                  {t("collab.repoConnect.github.open")}
                 </a>
               </div>
             ) : (
@@ -681,11 +729,16 @@ export function RepoConnectModal() {
                 disabled={busy || !user}
                 className="text-blue-400 hover:text-blue-300 disabled:opacity-50"
               >
-                GitHub 연결
+                {t("collab.repoConnect.github.connect")}
               </button>
             )}
             {githubMessage && (
-              <div className="mt-2 text-xs text-gray-400">{githubMessage}</div>
+              <div className="mt-2 text-xs text-gray-400">
+                {t(githubMessage.key)}
+                {githubMessage.detail && (
+                  <span className="ml-1 break-all">{githubMessage.detail}</span>
+                )}
+              </div>
             )}
           </div>
 

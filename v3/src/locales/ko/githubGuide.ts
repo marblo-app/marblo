@@ -117,7 +117,7 @@ export const githubGuide = {
   "githubGuide.member.notInstalled.body":
     "이 프로젝트에 마블로 App 이 아직 연결되어 있지 않아 자동으로 코드를 받을 수 없습니다. 이건 여러분이 아니라 오너 쪽에서 푸는 문제입니다.",
   "githubGuide.member.notInstalled.next":
-    "프로젝트 오너에게 [프로젝트 → 팀] 화면에서 GitHub App 을 설치해 달라고 요청하세요.",
+    "프로젝트 오너가 [프로젝트] 탭에서 GitHub App 을 설치할 때까지 기다려 주세요.",
   "githubGuide.member.notInstalled.also":
     "오너가 설치를 마쳤는데도 이 안내가 그대로라면, 오너에게 (1) 나에게 역할이 부여됐는지, (2) 팀 협업이 포함된 요금제인지 확인해 달라고 하세요.",
 
@@ -144,7 +144,7 @@ export const githubGuide = {
   "githubGuide.member.ready.body":
     "이 프로젝트의 코드를 받고 브랜치를 올릴 수 있습니다. GitHub 에서 따로 하실 일은 없습니다.",
   "githubGuide.member.ready.next":
-    "[코드] 탭에서 저장소를 받아 바로 시작하세요.",
+    "[프로젝트] 탭의 [저장소 연결] 로 이 컴퓨터에 저장소를 받은 뒤 시작하세요.",
 
   // ── 레거시 경로(App 이 없을 때만 보인다) ───────────────────────────────
   // ★App 이 붙으면 이 안내는 틀린 말이 되므로 ProjectTab 이 감춘다.

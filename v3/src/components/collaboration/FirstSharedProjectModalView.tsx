@@ -1,18 +1,75 @@
+import { useTranslation } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
+
+type SharedProjectRepoStatus =
+  | "noRepo"
+  | "notDownloaded"
+  | "downloading"
+  | "downloaded";
+
 export interface FirstSharedProjectModalViewProps {
   projectName: string;
   hasRepoRemote: boolean;
   needsRepoConnect: boolean;
+  isRepoConnecting?: boolean;
   onClose: () => void;
   onConnectRepo: () => void;
+}
+
+const FEATURE_KEYS: readonly MessageKey[] = [
+  "collab.firstShared.feature.board",
+  "collab.firstShared.feature.history",
+  "collab.firstShared.feature.activity",
+];
+
+const STATUS_TITLE_KEY: Record<SharedProjectRepoStatus, MessageKey> = {
+  noRepo: "collab.firstShared.repoStatus.noRepo.title",
+  notDownloaded: "collab.firstShared.repoStatus.notDownloaded.title",
+  downloading: "collab.firstShared.repoStatus.downloading.title",
+  downloaded: "collab.firstShared.repoStatus.downloaded.title",
+};
+
+const STATUS_BODY_KEY: Record<SharedProjectRepoStatus, MessageKey> = {
+  noRepo: "collab.firstShared.repoStatus.noRepo.body",
+  notDownloaded: "collab.firstShared.repoStatus.notDownloaded.body",
+  downloading: "collab.firstShared.repoStatus.downloading.body",
+  downloaded: "collab.firstShared.repoStatus.downloaded.body",
+};
+
+function repoStatus({
+  hasRepoRemote,
+  needsRepoConnect,
+  isRepoConnecting,
+}: Pick<
+  FirstSharedProjectModalViewProps,
+  "hasRepoRemote" | "needsRepoConnect" | "isRepoConnecting"
+>): SharedProjectRepoStatus {
+  if (isRepoConnecting) return "downloading";
+  if (!needsRepoConnect) return "downloaded";
+  return hasRepoRemote ? "notDownloaded" : "noRepo";
 }
 
 export function FirstSharedProjectModalView({
   projectName,
   hasRepoRemote,
   needsRepoConnect,
+  isRepoConnecting = false,
   onClose,
   onConnectRepo,
 }: FirstSharedProjectModalViewProps) {
+  const { t } = useTranslation();
+  const status = repoStatus({
+    hasRepoRemote,
+    needsRepoConnect,
+    isRepoConnecting,
+  });
+  const connectLabelKey: MessageKey =
+    status === "downloading"
+      ? "collab.firstShared.cta.downloading"
+      : status === "notDownloaded"
+        ? "collab.firstShared.cta.notDownloaded"
+        : "collab.firstShared.cta.noRepo";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4">
       <div
@@ -23,7 +80,7 @@ export function FirstSharedProjectModalView({
       >
         <div className="border-b border-gray-700 px-5 py-4">
           <p className="text-xs font-medium uppercase text-blue-300">
-            Shared project
+            {t("collab.firstShared.eyebrow")}
           </p>
           <h2
             id="first-shared-project-title"
@@ -35,53 +92,52 @@ export function FirstSharedProjectModalView({
 
         <div className="space-y-4 px-5 py-5">
           <p className="text-sm leading-6 text-gray-300">
-            You have access to the shared board, completion history, and
-            activity stream. Source code is not copied through Marblo: each
-            teammate keeps code local and syncs changes through git.
+            {t("collab.firstShared.body")}
           </p>
 
           <div className="grid gap-2 sm:grid-cols-3">
-            {["Board", "Done history", "Activity"].map((label) => (
+            {FEATURE_KEYS.map((key) => (
               <div
-                key={label}
+                key={key}
                 className="rounded border border-blue-500/25 bg-blue-500/10 px-3 py-2 text-sm text-blue-100"
               >
-                {label}
+                {t(key)}
               </div>
             ))}
           </div>
 
           <div className="rounded border border-gray-700 bg-gray-900/70 px-3 py-3">
             <p className="text-sm font-medium text-gray-200">
-              Code stays local
+              {t("collab.firstShared.localCode.title")}
             </p>
             <p className="mt-1 text-xs leading-5 text-gray-400">
-              Connect or clone the repo on this machine before using the Code
-              tab. Presence shows who is active, and same-file conflict warnings
-              help avoid overwriting a teammate's work.
+              {t("collab.firstShared.localCode.body")}
+            </p>
+          </div>
+
+          <div className="rounded border border-gray-700 bg-gray-900/70 px-3 py-3">
+            <p className="text-sm font-medium text-gray-200">
+              {t(STATUS_TITLE_KEY[status])}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-gray-400">
+              {t(STATUS_BODY_KEY[status])}
             </p>
           </div>
 
           <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-xs leading-5 text-amber-100">
-            Avoid conflicts by pulling before edits, keeping task ownership
-            clear on the board, and pushing changes through the shared git
-            remote.
+            {t("collab.firstShared.conflictHint")}
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-            <span className="text-xs text-gray-500">
-              {hasRepoRemote
-                ? "Repo remote is available for this project."
-                : "Ask the owner for the git remote if it is missing."}
-            </span>
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
             <div className="flex items-center gap-2">
               {needsRepoConnect && (
                 <button
                   type="button"
                   onClick={onConnectRepo}
+                  disabled={isRepoConnecting}
                   className="rounded border border-blue-500/60 px-3 py-2 text-sm font-medium text-blue-200 hover:bg-blue-500/10"
                 >
-                  Connect repo
+                  {t(connectLabelKey)}
                 </button>
               )}
               <button
@@ -89,7 +145,7 @@ export function FirstSharedProjectModalView({
                 onClick={onClose}
                 className="rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500"
               >
-                Got it
+                {t("collab.firstShared.gotIt")}
               </button>
             </div>
           </div>
