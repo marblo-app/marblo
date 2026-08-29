@@ -59,6 +59,7 @@ links: [[CONVENTION]], [[do-not-retry]], [[empty-query-first]]
 ## method/
 
 - `method/query-audit`
+- `method/experiment-design`
 - `method/vitest`
 - `method/ledger`
 - `method/source-link`

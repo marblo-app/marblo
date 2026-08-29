@@ -58,4 +58,4 @@ links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]]
 
 ## Backlinks
 
-- [[verify-result-row]] · [[empty-query-first]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]] · [[decision-sentence-first]] · [[routing-label-coverage]] · [[glossary]] · [[overview]] · [[do-not-silently-drop-missing-join-targets]] · [[2026-kpi-targets-pressure-test]] · [[sole-persistent-user-is-not-external]]
+- [[verify-result-row]] · [[empty-query-first]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]] · [[decision-sentence-first]] · [[routing-label-coverage]] · [[glossary]] · [[overview]] · [[do-not-silently-drop-missing-join-targets]] · [[2026-kpi-targets-pressure-test]] · [[sole-persistent-user-is-not-external]] · [[shared-project-retention-confounded-with-internality]]

@@ -3,7 +3,7 @@ title: 유일한 지속 사용자는 외부인이 아니다
 tags: [domain/investigations, topic/retention, topic/identity, topic/observability, topic/bigquery, verdict/no-go, method/query-audit]
 status: active
 date: 2026-08-29
-links: [[telemetry-identity-axes]], [[2026-kpi-targets-pressure-test]], [[post-spawn-telemetry-gap]], [[counting-unit-first]]
+links: [[telemetry-identity-axes]], [[2026-kpi-targets-pressure-test]], [[post-spawn-telemetry-gap]], [[counting-unit-first]], [[shared-project-retention-confounded-with-internality]]
 ---
 
 # 유일한 지속 사용자는 외부인이 아니다
@@ -153,6 +153,8 @@ D 의 첫 task 가 A 의 6주 된 프로젝트에서 실행됐다는 사실이 �
 
 **반증**: 초대 경로로 들어온 외부 설치의 D14 가 단독 설치와 같으면 이 가설은 죽는다. 반대로 단독 설치 중 정착 사례가 한 건이라도 나와도 죽는다.
 
+★**후속 (2026-08-29)**: 이 교락을 떼는 실험 설계는 [[shared-project-retention-confounded-with-internality]] 로 분리했다. 결론은 ★**지금은 못 한다** — 공유와 내부성을 가르려면 외부 설치만으로 3군(단독 / 내부와 공유 / 외부끼리 공유) 무작위배정이 필요하고 기준 시나리오에서 총 129 배정이 드는데, 2026-08 신규 설치는 5건/월이다. 대신 **단독 외부 설치 1건의 D14 통과**로 이 가설이 죽는다는 비대칭이 거기 정리돼 있다.
+
 ### 처방 3 — 첫 성공과 실패율을 activation·이탈 지표에서 내리고, "왜 멈췄나"를 묻는 계측을 넣는다
 
 두 지표 모두 이 표본에서 판별력이 0 이다. 첫 성공: task 도달 7개 중 6개가 첫 시도 성공, 그중 3개 즉시 이탈(§5). 실패율: C 는 마지막 이틀 33/33 성공, 크래시 0, 에러 0 으로 사라졌다(§6).
@@ -190,4 +192,4 @@ BQ 스캔 비용: 조회 15건, **처리 162.5MB · 과금 290.5MB**(질의당 1
 
 ## Backlinks
 
-- [[telemetry-identity-axes]] · [[2026-kpi-targets-pressure-test]] · [[post-spawn-telemetry-gap]] · [[counting-unit-first]] · [[do-not-silently-drop-missing-join-targets]]
+- [[telemetry-identity-axes]] · [[2026-kpi-targets-pressure-test]] · [[post-spawn-telemetry-gap]] · [[counting-unit-first]] · [[do-not-silently-drop-missing-join-targets]] · [[shared-project-retention-confounded-with-internality]]
