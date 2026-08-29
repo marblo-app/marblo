@@ -388,7 +388,8 @@ export const agents = {
     "5단계에서 '이 앱은 확인되지 않았습니다' 경고가 뜰 수 있습니다. 본인이 방금 붙여넣은 본인 스크립트이므로, 고급 → (프로젝트 이름)(으)로 이동을 눌러 진행하면 됩니다.",
   "agents.triggers.appsScript.friction3":
     "설치 직후에는 알림이 오지 않는 것이 정상입니다. 현재 상태를 기준선으로 잡고, 그 뒤에 늘어난 행부터 알립니다. 바로 확인하려면 행을 하나 추가한 뒤 marbloTestNow 를 실행하세요.",
-  "agents.triggers.appsScript.troubleshootTitle": "실패하면 (Apps Script 실행 기록)",
+  "agents.triggers.appsScript.troubleshootTitle":
+    "실패하면 (Apps Script 실행 기록)",
   "agents.triggers.appsScript.troubleshoot401":
     "401 — 서명이 맞지 않습니다. 시크릿을 재발급한 뒤 스크립트를 갱신하지 않은 경우가 대부분입니다. 여기서 새 스크립트를 복사해 다시 붙여넣으세요.",
   "agents.triggers.appsScript.troubleshoot403":
@@ -517,8 +518,17 @@ export const agents = {
   "agents.triggers.schedule.title": "정시 스케줄",
   "agents.triggers.schedule.enable": "매칭되는 분마다 일일 브리핑 실행",
   "agents.triggers.calendar.title": "Calendar 조건",
+  "agents.triggers.calendar.heldBadge": "보류됨",
+  "agents.triggers.calendar.heldNotice":
+    "이 조건은 지금 동작하지 않습니다. 연결이 끊긴 것이 아니라, 임박 일정을 읽는 데 필요한 캘린더 읽기 권한(calendar.readonly)을 더 이상 요청하지 않기로 했습니다. 대체 경로는 macOS 애플 캘린더(Calendar.app)로 지정돼 있지만 아직 연결되지 않았고, Windows·Linux 에는 대체가 없습니다 — 시간 조건이나 Webhook 조건으로 우회해 주세요. 아래 설정값은 지우지 않고 보관합니다.",
   "agents.triggers.calendar.enable": "임박 일정 감지",
-  "agents.triggers.gmail.title": "Gmail 조건 (이번 출시 미제공)",
+  // ★"(이번 출시 미제공)" 을 제목에서 뺐다. 아래 배지·안내가 같은 말을 더
+  // 정확히 하므로, 제목이 두 번 말할 필요가 없다. 보류가 풀리면 배지와 안내가
+  // 함께 사라지고 제목은 그대로 남는다.
+  "agents.triggers.gmail.title": "Gmail 조건",
+  "agents.triggers.gmail.heldBadge": "보류됨",
+  "agents.triggers.gmail.heldNotice":
+    "이 조건은 지금 동작하지 않습니다. 연결이 끊긴 것이 아니라, 받은 메일을 읽는 데 필요한 메일 읽기 권한(gmail.readonly)을 더 이상 요청하지 않기로 했습니다. 대체 경로는 macOS 애플 메일(Mail.app)로 지정돼 있지만 아직 연결되지 않았고, Windows·Linux 에는 대체가 없습니다 — 시간 조건이나 Webhook 조건으로 우회해 주세요. 아래 설정값은 지우지 않고 보관합니다.",
   "agents.triggers.gmail.enable": "메일 조건 감지",
   "agents.triggers.sheets.title": "구글 시트 조건",
   "agents.triggers.sheets.heldBadge": "보류됨",
@@ -558,10 +568,18 @@ export const agents = {
     "Telegram 채널 연결이 준비되지 않았습니다.",
   "agents.triggers.validation.invalidCron":
     "cron은 5필드 형식이어야 합니다. 예: 0 9 * * 1-5",
+  // ★아래 둘은 **보류가 풀린 뒤에만** 화면에 나온다(#1267 규율: 지우지 않고
+  // 되살아나게 둔다). 그래서 문구를 원래의 "연결이 필요하다" 로 되돌렸다 —
+  // 보류 사실은 이제 `*TriggerWithheld` 가 말한다. 두 문구가 같은 말을 하면
+  // 되살릴 때 어느 쪽이 참인지 알 수 없게 된다.
   "agents.triggers.validation.calendarConnectorRequired":
-    "Calendar 트리거는 지금 사용할 수 없습니다. Google Calendar scope는 더 이상 요청하지 않으며, Apple Calendar 지원은 후속 작업입니다.",
+    "Calendar 조건을 켜려면 Google Calendar readonly scope가 필요합니다. Harness 탭에서 Google 계정을 다시 연결해 주세요.",
   "agents.triggers.validation.gmailConnectorRequired":
-    "새 메일 감지 트리거는 이번 출시에서 제공하지 않습니다. 메일 읽기 권한(gmail.readonly)은 Google 이 restricted 로 분류해 별도 보안평가를 통과해야 요청할 수 있습니다. 시간 트리거는 그대로 동작하고, 스프레드시트 새 행 감지는 Webhook 조건의 Apps Script 로 합니다.",
+    "Gmail 조건을 켜려면 Gmail readonly scope가 필요합니다. Harness 탭에서 Google 계정을 다시 연결해 주세요.",
+  "agents.triggers.validation.calendarTriggerWithheld":
+    "Calendar 조건을 켠 채로는 저장할 수 없습니다. 임박 일정을 읽는 데 필요한 캘린더 읽기 권한(calendar.readonly)을 더 이상 요청하지 않아, 켜 두면 저장만 되고 영원히 돌지 않습니다. 대체 경로는 macOS 애플 캘린더(Calendar.app)로 지정돼 있지만 아직 연결되지 않았고, Windows·Linux 에는 대체가 없습니다 — 이 체크박스를 끄고 시간 조건이나 Webhook 조건을 써 주세요. 입력해 둔 값은 지우지 않고 보관합니다.",
+  "agents.triggers.validation.gmailTriggerWithheld":
+    "Gmail 조건을 켠 채로는 저장할 수 없습니다. 받은 메일을 읽는 데 필요한 메일 읽기 권한(gmail.readonly)을 더 이상 요청하지 않아, 켜 두면 저장만 되고 영원히 돌지 않습니다. 대체 경로는 macOS 애플 메일(Mail.app)로 지정돼 있지만 아직 연결되지 않았고, Windows·Linux 에는 대체가 없습니다 — 이 체크박스를 끄고 시간 조건이나 Webhook 조건을 써 주세요. 입력해 둔 값은 지우지 않고 보관합니다.",
   "agents.triggers.validation.calendarPollOutOfRange":
     "Calendar poll 간격은 1~60분이어야 합니다.",
   "agents.triggers.validation.gmailPollOutOfRange":

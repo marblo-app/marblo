@@ -67,24 +67,18 @@ describe("validateAssistantTriggerSettings", () => {
     expect(result.issues).toContain("outputs_required");
   });
 
-  it("폴링 간격 범위를 검증한다", () => {
+  it("폴링 간격 범위를 검증한다 — 보류되지 않은 웹훅 경로에서", () => {
     const result = validateAssistantTriggerSettings(
       {
         ...validSettings,
         schedule: { enabled: false, cron: "0 9 * * 1-5" },
-        calendar: { enabled: true, upcomingMinutes: 15, pollMinutes: 0 },
-        gmail: { enabled: true, query: "in:inbox", pollMinutes: 61 },
+        webhook: { enabled: true, webhookId: "awh_test", pollMinutes: 61 },
       },
       connectorsReady,
     );
 
     expect(result.ok).toBe(false);
-    expect(result.issues).toEqual(
-      expect.arrayContaining([
-        "calendar_poll_out_of_range",
-        "gmail_poll_out_of_range",
-      ]),
-    );
+    expect(result.issues).toContain("webhook_poll_out_of_range");
   });
 
   it("웹훅 조건은 커넥터 없이 켤 수 있지만 poll 범위는 검증한다", () => {
@@ -106,7 +100,38 @@ describe("validateAssistantTriggerSettings", () => {
     expect(result.issues).toEqual(["webhook_poll_out_of_range"]);
   });
 
-  it("캘린더와 지메일 조건이 커넥터 없이 켜진 경우 거부한다", () => {
+  /**
+   * ★이 티켓이 고친 비대칭. 시트는 회수를 감지해 저장을 막고 있었는데
+   * 캘린더·Gmail 은 스코프가 살아 있는 척 통과시켰다 — 사용자는 걸어놨다고
+   * 믿고, 트리거는 영원히 돌지 않았다. 조용히 저장되는 것이 조용히 실패하는
+   * 것보다 나쁘다.
+   *
+   * 커넥터가 붙어 있든 아니든 결과가 같아야 한다는 것이 요점이다. 지금 막는
+   * 이유는 연결이 아니라 우리가 회수한 스코프이기 때문이다.
+   */
+  it("캘린더·Gmail 조건은 회수됐다 — 커넥터가 붙어 있어도 '연결 필요' 가 아니라 '회수' 로 막는다", () => {
+    const result = validateAssistantTriggerSettings(
+      {
+        ...validSettings,
+        schedule: { enabled: false, cron: "0 9 * * 1-5" },
+        calendar: { enabled: true, upcomingMinutes: 15, pollMinutes: 5 },
+        gmail: { enabled: true, query: "in:inbox", pollMinutes: 5 },
+      },
+      connectorsReady,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        "calendar_trigger_withheld",
+        "gmail_trigger_withheld",
+      ]),
+    );
+    expect(result.issues).not.toContain("calendar_connector_required");
+    expect(result.issues).not.toContain("gmail_connector_required");
+  });
+
+  it("커넥터가 없어도 같은 이슈를 낸다 — 판정 근거가 연결이 아니기 때문이다", () => {
     const result = validateAssistantTriggerSettings(
       {
         ...validSettings,
@@ -121,11 +146,74 @@ describe("validateAssistantTriggerSettings", () => {
       },
     );
 
+    expect(result.issues).toEqual([
+      "calendar_trigger_withheld",
+      "gmail_trigger_withheld",
+    ]);
+  });
+
+  it("보류 중에는 캘린더·Gmail 형식 오류를 겹쳐 띄우지 않는다", () => {
+    const result = validateAssistantTriggerSettings(
+      {
+        ...validSettings,
+        schedule: { enabled: false, cron: "0 9 * * 1-5" },
+        calendar: { enabled: true, upcomingMinutes: 0, pollMinutes: 0 },
+        gmail: { enabled: true, query: "in:inbox", pollMinutes: 61 },
+      },
+      connectorsReady,
+    );
+
+    expect(result.issues).toEqual([
+      "calendar_trigger_withheld",
+      "gmail_trigger_withheld",
+    ]);
+  });
+
+  /**
+   * ★회수된 값 자체는 지우지 않는다 — 보류이지 삭제가 아니다. 검증은 순수
+   * 함수이므로 입력을 건드릴 수 없어야 하고, 그 계약을 여기서 못박는다.
+   */
+  it("저장된 값을 지우지 않는다", () => {
+    const settings: AssistantTriggerSettings = {
+      ...validSettings,
+      schedule: { enabled: false, cron: "0 9 * * 1-5" },
+      calendar: { enabled: true, upcomingMinutes: 30, pollMinutes: 7 },
+      gmail: { enabled: true, query: "in:inbox label:vip", pollMinutes: 9 },
+    };
+    const snapshot = JSON.parse(JSON.stringify(settings));
+
+    validateAssistantTriggerSettings(settings, connectorsReady);
+
+    expect(settings).toEqual(snapshot);
+  });
+
+  /**
+   * 세 트리거가 같은 규율 아래 있는지 한자리에서 본다 — 하나만 빠져 있던 것이
+   * 이 티켓의 결함이었으므로, 셋을 함께 보는 테스트가 그 재발을 막는다.
+   */
+  it("세 구글 트리거(sheets·gmail·calendar) 모두 회수 상태에서 이슈가 뜬다", () => {
+    const result = validateAssistantTriggerSettings(
+      {
+        ...validSettings,
+        schedule: { enabled: false, cron: "0 9 * * 1-5" },
+        calendar: { enabled: true, upcomingMinutes: 15, pollMinutes: 5 },
+        gmail: { enabled: true, query: "in:inbox", pollMinutes: 5 },
+        sheets: {
+          enabled: true,
+          spreadsheetId: "1BxiMVs0XRA5nFMdKvBd",
+          range: "A:Z",
+          pollMinutes: 5,
+        },
+      },
+      connectorsReady,
+    );
+
     expect(result.ok).toBe(false);
     expect(result.issues).toEqual(
       expect.arrayContaining([
-        "calendar_connector_required",
-        "gmail_connector_required",
+        "calendar_trigger_withheld",
+        "gmail_trigger_withheld",
+        "sheets_trigger_withheld",
       ]),
     );
   });

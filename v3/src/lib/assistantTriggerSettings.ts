@@ -56,6 +56,16 @@ export type AssistantTriggerValidationIssue =
   | "invalid_cron"
   | "calendar_connector_required"
   | "gmail_connector_required"
+  /**
+   * ★스코프 0 (설계 §3.5). 캘린더·Gmail 폴링 경로도 시트와 같이 보류됐다.
+   * `*_connector_required` 와 **다른 이슈로 둔 것이 요점**이다 — 문구가
+   * "연결이 필요하다" 면 사용자는 없는 연결을 찾아다닌다. 이건 연결 문제가
+   * 아니라 우리가 스코프를 회수한 것이고, 안내도 그렇게 끝나야 한다.
+   * 시트와 달리 대체가 아직 배선돼 있지 않아 문구는 "방식이 바뀌었다" 가
+   * 아니라 "지금은 못 쓴다 · 대체는 macOS 전용" 으로 끝난다.
+   */
+  | "calendar_trigger_withheld"
+  | "gmail_trigger_withheld"
   | "calendar_poll_out_of_range"
   | "gmail_poll_out_of_range"
   | "webhook_poll_out_of_range"
@@ -327,38 +337,54 @@ export function validateAssistantTriggerSettings(
     issues.push("invalid_cron");
   }
   if (calendarEnabled) {
-    if (!connectors.calendarConnected) {
-      issues.push("calendar_connector_required");
-    }
-    if (
-      !inIntegerRange(
-        settings.calendar?.pollMinutes ?? 0,
-        MIN_POLL_MINUTES,
-        MAX_POLL_MINUTES,
-      )
-    ) {
-      issues.push("calendar_poll_out_of_range");
-    }
-    if (
-      !inIntegerRange(
-        settings.calendar?.upcomingMinutes ?? 0,
-        MIN_UPCOMING_MINUTES,
-        MAX_UPCOMING_MINUTES,
-      )
-    ) {
-      issues.push("calendar_upcoming_out_of_range");
+    if (isCapabilityWithheld("calendar_trigger")) {
+      // ★보류된 경로를 켠 채 저장하게 두지 않는다. poll·upcoming 범위 검사를
+      // 같이 얹지 않는 것은 의도다 — 어차피 안 도는 경로의 형식 오류를 함께
+      // 띄우면 "무엇을 해야 하는가" 한 문장이 잡음에 묻힌다. 저장된 값 자체는
+      // 지우지 않는다(보류이지 삭제가 아니다).
+      issues.push("calendar_trigger_withheld");
+    } else {
+      // 아래는 스코프가 복구되면 그대로 되살아나는 경로다. `if/else` 로 남겨
+      // 두어야 컴파일러가 계속 지켜본다(#1267 규율).
+      if (!connectors.calendarConnected) {
+        issues.push("calendar_connector_required");
+      }
+      if (
+        !inIntegerRange(
+          settings.calendar?.pollMinutes ?? 0,
+          MIN_POLL_MINUTES,
+          MAX_POLL_MINUTES,
+        )
+      ) {
+        issues.push("calendar_poll_out_of_range");
+      }
+      if (
+        !inIntegerRange(
+          settings.calendar?.upcomingMinutes ?? 0,
+          MIN_UPCOMING_MINUTES,
+          MAX_UPCOMING_MINUTES,
+        )
+      ) {
+        issues.push("calendar_upcoming_out_of_range");
+      }
     }
   }
   if (gmailEnabled) {
-    if (!connectors.gmailConnected) issues.push("gmail_connector_required");
-    if (
-      !inIntegerRange(
-        settings.gmail?.pollMinutes ?? 0,
-        MIN_POLL_MINUTES,
-        MAX_POLL_MINUTES,
-      )
-    ) {
-      issues.push("gmail_poll_out_of_range");
+    if (isCapabilityWithheld("gmail_trigger")) {
+      // 위 캘린더 분기와 같은 판단이다 — 형식 검사를 겹쳐 띄우지 않고, 저장된
+      // 값은 지우지 않는다.
+      issues.push("gmail_trigger_withheld");
+    } else {
+      if (!connectors.gmailConnected) issues.push("gmail_connector_required");
+      if (
+        !inIntegerRange(
+          settings.gmail?.pollMinutes ?? 0,
+          MIN_POLL_MINUTES,
+          MAX_POLL_MINUTES,
+        )
+      ) {
+        issues.push("gmail_poll_out_of_range");
+      }
     }
   }
   if (

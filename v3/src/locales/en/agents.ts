@@ -527,8 +527,14 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.triggers.schedule.enable":
     "Run the daily briefing on matching minutes",
   "agents.triggers.calendar.title": "Calendar Condition",
+  "agents.triggers.calendar.heldBadge": "On hold",
+  "agents.triggers.calendar.heldNotice":
+    "This condition does not run right now. Nothing is disconnected - we no longer request the calendar read scope (calendar.readonly) that reading upcoming events needs. The designated replacement is Apple Calendar (Calendar.app) on macOS, but it is not wired up yet, and on Windows and Linux there is no replacement at all - use the schedule condition or the Webhook condition instead. The values below are kept, not erased.",
   "agents.triggers.calendar.enable": "Detect upcoming events",
-  "agents.triggers.gmail.title": "Gmail Condition (not in this release)",
+  "agents.triggers.gmail.title": "Gmail Condition",
+  "agents.triggers.gmail.heldBadge": "On hold",
+  "agents.triggers.gmail.heldNotice":
+    "This condition does not run right now. Nothing is disconnected - we no longer request the mail read scope (gmail.readonly) that reading incoming mail needs. The designated replacement is Apple Mail (Mail.app) on macOS, but it is not wired up yet, and on Windows and Linux there is no replacement at all - use the schedule condition or the Webhook condition instead. The values below are kept, not erased.",
   "agents.triggers.gmail.enable": "Detect mail conditions",
   "agents.triggers.sheets.title": "Google Sheets Condition",
   "agents.triggers.sheets.heldBadge": "On hold",
@@ -569,10 +575,16 @@ export const agents: Record<keyof typeof koAgents, string> = {
     "The Telegram channel connection is not ready.",
   "agents.triggers.validation.invalidCron":
     "cron must use the 5-field format. Example: 0 9 * * 1-5",
+  // These two surface only after the hold is lifted; the hold itself is now
+  // stated by the *TriggerWithheld messages.
   "agents.triggers.validation.calendarConnectorRequired":
-    "The Calendar trigger is not available right now. Google Calendar scopes are no longer requested; Apple Calendar support is a follow-up.",
+    "The Google Calendar readonly scope is required to enable the Calendar condition. Reconnect your Google account from the Harness tab.",
   "agents.triggers.validation.gmailConnectorRequired":
-    "The new-mail trigger is not offered in this release. Reading mail (gmail.readonly) is a restricted scope that would require a separate security assessment. Schedule triggers still work, and spreadsheet new rows now use Apps Script under the Webhook condition.",
+    "The Gmail readonly scope is required to enable the Gmail condition. Reconnect your Google account from the Harness tab.",
+  "agents.triggers.validation.calendarTriggerWithheld":
+    "Settings cannot be saved while the Calendar condition is on. We no longer request the calendar read scope (calendar.readonly) that reading upcoming events needs, so leaving it on would save but never run. The designated replacement is Apple Calendar (Calendar.app) on macOS, but it is not wired up yet, and on Windows and Linux there is no replacement at all - untick this box and use the schedule condition or the Webhook condition. The values you entered are kept, not erased.",
+  "agents.triggers.validation.gmailTriggerWithheld":
+    "Settings cannot be saved while the Gmail condition is on. We no longer request the mail read scope (gmail.readonly) that reading incoming mail needs, so leaving it on would save but never run. The designated replacement is Apple Mail (Mail.app) on macOS, but it is not wired up yet, and on Windows and Linux there is no replacement at all - untick this box and use the schedule condition or the Webhook condition. The values you entered are kept, not erased.",
   "agents.triggers.validation.calendarPollOutOfRange":
     "Calendar poll interval must be 1-60 minutes.",
   "agents.triggers.validation.gmailPollOutOfRange":

@@ -67,6 +67,18 @@ const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly";
  */
 const SHEETS_TRIGGER_WITHHELD = isCapabilityWithheld("sheets_trigger");
 
+/**
+ * ★캘린더·Gmail 폴링 경로의 보류 여부. 시트와 같은 모양이다 — 판정은
+ * `google-restricted-scopes.ts` 단일 진실원이 들고 화면은 읽기만 한다.
+ *
+ * 시트와 다른 점은 대체 경로뿐이다. 시트는 Apps Script 가 이미 배선돼 있어
+ * 문구가 "방식이 바뀌었다" 로 끝나지만, 이 둘은 macOS 전용 대체(애플 캘린더·
+ * 애플 메일)가 아직 붙지 않았고 Windows·Linux 에는 대체가 없다. 그 사실을
+ * 숨기지 않는 것이 heldNotice 의 일이다(설계 §6.1 능력표).
+ */
+const CALENDAR_TRIGGER_WITHHELD = isCapabilityWithheld("calendar_trigger");
+const GMAIL_TRIGGER_WITHHELD = isCapabilityWithheld("gmail_trigger");
+
 function issueKey(issue: AssistantTriggerValidationIssue): MessageKey {
   switch (issue) {
     case "no_trigger_enabled":
@@ -83,6 +95,10 @@ function issueKey(issue: AssistantTriggerValidationIssue): MessageKey {
       return "agents.triggers.validation.calendarConnectorRequired";
     case "gmail_connector_required":
       return "agents.triggers.validation.gmailConnectorRequired";
+    case "calendar_trigger_withheld":
+      return "agents.triggers.validation.calendarTriggerWithheld";
+    case "gmail_trigger_withheld":
+      return "agents.triggers.validation.gmailTriggerWithheld";
     case "calendar_poll_out_of_range":
       return "agents.triggers.validation.calendarPollOutOfRange";
     case "gmail_poll_out_of_range":
@@ -133,8 +149,15 @@ function connectorRows(connectors: AssistantTriggerConnectorState): Array<{
   return [
     { label: "Slack", ready: connectors.slackReady },
     { label: "Telegram", ready: connectors.telegramReady },
-    { label: "Calendar", ready: connectors.calendarConnected },
-    { label: "Gmail", ready: connectors.gmailConnected },
+    // ★시트와 같은 이유로 내린다. 앰버 "Calendar"·"Gmail" 배지는 화면에서
+    // "연결이 필요하다" 로 읽히는데, 지금 막고 있는 것은 연결이 아니라 우리가
+    // 회수한 스코프다. 보류가 풀리면 이 배지들도 그대로 돌아온다.
+    ...(CALENDAR_TRIGGER_WITHHELD
+      ? []
+      : [{ label: "Calendar", ready: connectors.calendarConnected }]),
+    ...(GMAIL_TRIGGER_WITHHELD
+      ? []
+      : [{ label: "Gmail", ready: connectors.gmailConnected }]),
     // ★시트 폴링이 보류된 동안은 이 배지를 내린다. 앰버 "Sheets" 배지는 화면에서
     // "연결이 필요하다" 로 읽히는데, 지금 필요한 것은 연결이 아니라 Apps Script 다.
     // 스코프가 복구되면 이 배지도 그대로 돌아온다.
@@ -537,7 +560,22 @@ export function AssistantTriggerSettingsPanel({
               <h3 className="text-sm font-semibold">
                 {t("agents.triggers.calendar.title")}
               </h3>
+              {CALENDAR_TRIGGER_WITHHELD && (
+                <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-100">
+                  {t("agents.triggers.calendar.heldBadge")}
+                </span>
+              )}
             </div>
+            {/*
+              ★"연결 필요" 가 아니라 "권한을 회수했다 · 대체는 이렇다" 로 말한다.
+              이미 이 조건을 켜 둔 사용자는 이 안내로 자기 설정이 왜 안 도는지를
+              알게 된다 — 설정 자체는 건드리지 않는다(사용자 데이터).
+            */}
+            {CALENDAR_TRIGGER_WITHHELD && (
+              <p className="mb-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                {t("agents.triggers.calendar.heldNotice")}
+              </p>
+            )}
             <label className="mb-3 flex items-center gap-2 text-sm text-gray-300">
               <input
                 type="checkbox"
@@ -576,7 +614,8 @@ export function AssistantTriggerSettingsPanel({
                     },
                   }))
                 }
-                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                disabled={CALENDAR_TRIGGER_WITHHELD}
+                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
               />
             </label>
             <label className="block">
@@ -600,7 +639,8 @@ export function AssistantTriggerSettingsPanel({
                     },
                   }))
                 }
-                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                disabled={CALENDAR_TRIGGER_WITHHELD}
+                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
               />
             </label>
           </section>
@@ -611,7 +651,17 @@ export function AssistantTriggerSettingsPanel({
               <h3 className="text-sm font-semibold">
                 {t("agents.triggers.gmail.title")}
               </h3>
+              {GMAIL_TRIGGER_WITHHELD && (
+                <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-100">
+                  {t("agents.triggers.gmail.heldBadge")}
+                </span>
+              )}
             </div>
+            {GMAIL_TRIGGER_WITHHELD && (
+              <p className="mb-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                {t("agents.triggers.gmail.heldNotice")}
+              </p>
+            )}
             <label className="mb-3 flex items-center gap-2 text-sm text-gray-300">
               <input
                 type="checkbox"
@@ -645,7 +695,8 @@ export function AssistantTriggerSettingsPanel({
                     },
                   }))
                 }
-                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                disabled={GMAIL_TRIGGER_WITHHELD}
+                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
               />
             </label>
             <label className="block">
@@ -669,7 +720,8 @@ export function AssistantTriggerSettingsPanel({
                     },
                   }))
                 }
-                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                disabled={GMAIL_TRIGGER_WITHHELD}
+                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
               />
             </label>
           </section>
@@ -857,7 +909,9 @@ export function AssistantTriggerSettingsPanel({
                       value={appsScriptInterval}
                       onChange={(event) =>
                         setAppsScriptInterval(
-                          Number(event.target.value) as AppsScriptIntervalMinutes,
+                          Number(
+                            event.target.value,
+                          ) as AppsScriptIntervalMinutes,
                         )
                       }
                       className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-lime-500"
