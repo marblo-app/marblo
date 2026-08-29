@@ -49,7 +49,12 @@
  * 둔다.
  */
 
-import { where, orderBy, limit as limitTo } from "firebase/firestore";
+import {
+  where,
+  orderBy,
+  limit as limitTo,
+  startAfter,
+} from "firebase/firestore";
 import type {
   ProjectAuditEvent,
   ProjectAuditLogQuery,
@@ -138,6 +143,12 @@ function auditTime(value: Date): number {
   return Number.isNaN(ms) ? 0 : ms;
 }
 
+function validCursorTime(value: Date | undefined): Date | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 /**
  * 현재 로그인 사용자. 캡처 지점이 uid 를 직접 들고 있지 않을 때 쓴다.
  *
@@ -214,6 +225,7 @@ export async function getProjectAuditLog(
   const max = normalizeAuditLimit(options.limit);
   const mock = testAuditOverride(projectId);
   if (mock) {
+    const cursor = validCursorTime(options.beforeCreatedAt);
     return (mock.human ?? [])
       .filter((event) => event.projectId === projectId)
       .filter(
@@ -221,16 +233,19 @@ export async function getProjectAuditLog(
       )
       .filter((event) => !options.type || event.type === options.type)
       .filter((event) => !options.taskId || event.taskId === options.taskId)
+      .filter((event) => !cursor || auditTime(event.createdAt) < +cursor)
       .sort((a, b) => auditTime(b.createdAt) - auditTime(a.createdAt))
       .slice(0, max);
   }
 
+  const cursor = validCursorTime(options.beforeCreatedAt);
   const constraints = [
     where("projectId", "==", projectId),
     ...(options.actorUid ? [where("actorUid", "==", options.actorUid)] : []),
     ...(options.type ? [where("type", "==", options.type)] : []),
     ...(options.taskId ? [where("taskId", "==", options.taskId)] : []),
     orderBy("createdAt", "desc"),
+    ...(cursor ? [startAfter(toTimestamp(cursor))] : []),
     limitTo(max),
   ];
 
@@ -288,6 +303,8 @@ export interface ProjectLedgerLogQuery {
   toolName?: string;
   /** 티켓 상세 패널(원장 상세)이 쓰는 축. 이 티켓에 속한 이벤트만. */
   taskId?: string;
+  /** 최신순 커서. 지정하면 이 시각보다 오래된 기록만 이어 읽는다. */
+  beforeCreatedAt?: Date;
   /** 기본 100, 상한 500 — 사람 쪽과 같은 정규화를 쓴다. */
   limit?: number;
 }
@@ -324,6 +341,7 @@ export async function getProjectLedgerLog(
   const max = normalizeAuditLimit(options.limit);
   const mock = testAuditOverride(projectId);
   if (mock) {
+    const cursor = validCursorTime(options.beforeCreatedAt);
     return (mock.agent ?? [])
       .filter((event) => event.projectId === projectId)
       .filter(
@@ -333,16 +351,19 @@ export async function getProjectLedgerLog(
         (event) => !options.toolName || event.toolName === options.toolName,
       )
       .filter((event) => !options.taskId || event.taskId === options.taskId)
+      .filter((event) => !cursor || auditTime(event.createdAt) < +cursor)
       .sort((a, b) => auditTime(b.createdAt) - auditTime(a.createdAt))
       .slice(0, max);
   }
 
+  const cursor = validCursorTime(options.beforeCreatedAt);
   const constraints = [
     where("projectId", "==", projectId),
     ...(options.actorUid ? [where("actorUid", "==", options.actorUid)] : []),
     ...(options.toolName ? [where("toolName", "==", options.toolName)] : []),
     ...(options.taskId ? [where("taskId", "==", options.taskId)] : []),
     orderBy("createdAt", "desc"),
+    ...(cursor ? [startAfter(toTimestamp(cursor))] : []),
     limitTo(max),
   ];
 

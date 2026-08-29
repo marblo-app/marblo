@@ -123,6 +123,7 @@ export async function fetchLedgerLogState(
     actorUid?: string;
     toolName?: string;
     taskId?: string;
+    beforeCreatedAt?: Date;
     limit?: number;
   } = {},
 ): Promise<{ state: AuditSourceState; events: AuditLog[] }> {
@@ -140,6 +141,16 @@ export interface UnifiedAuditQuery {
   typeFilter?: string;
   /** 티켓 상세 패널이 쓰는 축 — 이 티켓에 속한 이벤트만. 두 소스에 같이 걸린다. */
   taskId?: string;
+  /** 페이지네이션 커서. 두 소스가 독립적으로 끊기므로 각자 따로 들고 간다. */
+  cursors?: {
+    human?: Date | null;
+    agent?: Date | null;
+  };
+  /** 이미 끝난 소스는 다음 페이지에서 다시 읽지 않는다. */
+  skip?: {
+    human?: boolean;
+    agent?: boolean;
+  };
   limit?: number;
 }
 
@@ -164,8 +175,8 @@ export async function fetchUnifiedAuditSources(
   query: UnifiedAuditQuery = {},
 ): Promise<UnifiedAuditFetch> {
   const filter = parseAuditTypeFilter(query.typeFilter);
-  const wantHuman = filter.source !== "agent";
-  const wantAgent = filter.source !== "human";
+  const wantHuman = filter.source !== "agent" && !query.skip?.human;
+  const wantAgent = filter.source !== "human" && !query.skip?.agent;
 
   const [human, agent] = await Promise.all([
     wantHuman
@@ -173,6 +184,7 @@ export async function fetchUnifiedAuditSources(
           actorUid: query.actorUid,
           type: filter.source === "human" ? filter.type : undefined,
           taskId: query.taskId,
+          beforeCreatedAt: query.cursors?.human ?? undefined,
           limit: query.limit,
         })
       : Promise.resolve<AuditLoadState | null>(null),
@@ -181,6 +193,7 @@ export async function fetchUnifiedAuditSources(
           actorUid: query.actorUid,
           toolName: filter.source === "agent" ? filter.toolName : undefined,
           taskId: query.taskId,
+          beforeCreatedAt: query.cursors?.agent ?? undefined,
           limit: query.limit,
         })
       : Promise.resolve(null),
@@ -249,7 +262,115 @@ export interface UseProjectAuditLogResult {
   toolNames: string[];
   taskMetaById: Record<string, AuditTaskMeta>;
   missionMetaById: Record<string, AuditMissionMeta>;
+  hasMore: boolean;
+  loadingMore: boolean;
+  loadMore: () => void;
   reload: () => void;
+}
+
+interface AuditSourcePage {
+  cursor: Date | null;
+  hasMore: boolean;
+}
+
+interface AuditPagingState {
+  human: AuditSourcePage;
+  agent: AuditSourcePage;
+}
+
+const EMPTY_PAGING: AuditPagingState = {
+  human: { cursor: null, hasMore: false },
+  agent: { cursor: null, hasMore: false },
+};
+
+function lastCreatedAt<T extends { createdAt: Date }>(
+  events: readonly T[],
+): Date | null {
+  return events.length ? events[events.length - 1].createdAt : null;
+}
+
+function sourceHasMore<T>(
+  source: AuditSourceState,
+  events: readonly T[],
+  limit: number,
+): boolean {
+  return source.status === "ready" && events.length >= limit;
+}
+
+function pagingFromFetch(
+  fetch: UnifiedAuditFetch,
+  limit: number,
+): AuditPagingState {
+  return {
+    human: {
+      cursor: lastCreatedAt(fetch.human),
+      hasMore: sourceHasMore(fetch.sources.human, fetch.human, limit),
+    },
+    agent: {
+      cursor: lastCreatedAt(fetch.agent),
+      hasMore: sourceHasMore(fetch.sources.agent, fetch.agent, limit),
+    },
+  };
+}
+
+function appendById<T extends { id: string }>(
+  prior: readonly T[],
+  page: readonly T[],
+): T[] {
+  const seen = new Set(prior.map((event) => event.id));
+  const next = [...prior];
+  for (const event of page) {
+    if (seen.has(event.id)) continue;
+    seen.add(event.id);
+    next.push(event);
+  }
+  return next;
+}
+
+function appendSourceState(
+  prior: AuditSourceState,
+  page: AuditSourceState,
+  count: number,
+): AuditSourceState {
+  if (page.status === "skipped") return prior;
+  if (page.status === "ready") return { status: "ready", count };
+  return page;
+}
+
+function appendUnifiedAuditFetch(
+  prior: UnifiedAuditFetch,
+  page: UnifiedAuditFetch,
+): UnifiedAuditFetch {
+  const human = appendById(prior.human, page.human);
+  const agent = appendById(prior.agent, page.agent);
+  return {
+    human,
+    agent,
+    sources: {
+      human: appendSourceState(
+        prior.sources.human,
+        page.sources.human,
+        human.length,
+      ),
+      agent: appendSourceState(
+        prior.sources.agent,
+        page.sources.agent,
+        agent.length,
+      ),
+    },
+  };
+}
+
+function mergePagingAfterAppend(
+  prior: AuditPagingState,
+  page: UnifiedAuditFetch,
+  limit: number,
+): AuditPagingState {
+  const next = pagingFromFetch(page, limit);
+  return {
+    human: page.sources.human.status === "skipped" ? prior.human : next.human,
+    agent: page.sources.agent.status === "skipped" ? prior.agent : next.agent,
+  };
 }
 
 /**
@@ -276,9 +397,12 @@ export function useProjectAuditLog(
     taskMetaById: {},
     missionMetaById: {},
   });
+  const [paging, setPaging] = useState<AuditPagingState>(EMPTY_PAGING);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [nonce, setNonce] = useState(0);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
+  const pageLimit = PROJECT_AUDIT_MAX_LIMIT;
 
   useEffect(() => {
     if (!projectId) {
@@ -290,6 +414,7 @@ export function useProjectAuditLog(
           agent: { status: "ready", count: 0 },
         },
       });
+      setPaging(EMPTY_PAGING);
       return;
     }
     let cancelled = false;
@@ -297,15 +422,22 @@ export function useProjectAuditLog(
       ...prior,
       sources: { human: { status: "loading" }, agent: { status: "loading" } },
     }));
-    fetchUnifiedAuditSources(projectId, { actorUid, typeFilter }).then(
-      (next) => {
-        if (!cancelled) setFetched(next);
-      },
-    );
+    setPaging(EMPTY_PAGING);
+    setLoadingMore(false);
+    fetchUnifiedAuditSources(projectId, {
+      actorUid,
+      typeFilter,
+      limit: pageLimit,
+    }).then((next) => {
+      if (!cancelled) {
+        setFetched(next);
+        setPaging(pagingFromFetch(next, pageLimit));
+      }
+    });
     return () => {
       cancelled = true;
     };
-  }, [projectId, actorUid, typeFilter, nonce]);
+  }, [projectId, actorUid, typeFilter, nonce, pageLimit]);
 
   /**
    * 필터 옵션은 **필터와 무관하게** 프로젝트 단위로만 다시 읽는다. 필터를 걸
@@ -331,6 +463,30 @@ export function useProjectAuditLog(
     };
   }, [projectId, nonce]);
 
+  const loadMore = useCallback(() => {
+    if (!projectId || loadingMore) return;
+    if (!paging.human.hasMore && !paging.agent.hasMore) return;
+    setLoadingMore(true);
+    fetchUnifiedAuditSources(projectId, {
+      actorUid,
+      typeFilter,
+      cursors: {
+        human: paging.human.cursor,
+        agent: paging.agent.cursor,
+      },
+      skip: {
+        human: !paging.human.hasMore,
+        agent: !paging.agent.hasMore,
+      },
+      limit: pageLimit,
+    })
+      .then((page) => {
+        setFetched((prior) => appendUnifiedAuditFetch(prior, page));
+        setPaging((prior) => mergePagingAfterAppend(prior, page, pageLimit));
+      })
+      .finally(() => setLoadingMore(false));
+  }, [actorUid, loadingMore, pageLimit, paging, projectId, typeFilter]);
+
   // 병합은 순수함수라 렌더 중에 접어도 안전하다. 이름 메꿈이 members 에 걸려
   // 있어서 members 가 바뀌면 행 라벨만 다시 계산된다(재조회 없음).
   const rows = useMemo(
@@ -345,6 +501,9 @@ export function useProjectAuditLog(
     toolNames: options.toolNames,
     taskMetaById: options.taskMetaById,
     missionMetaById: options.missionMetaById,
+    hasMore: paging.human.hasMore || paging.agent.hasMore,
+    loadingMore,
+    loadMore,
     reload,
   };
 }

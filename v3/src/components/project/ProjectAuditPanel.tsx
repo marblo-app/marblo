@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { User } from "../../types/user";
 import type { TaskStatus } from "../../types/task";
+import type { Mission } from "../../types/mission";
 import { useTranslation } from "../../lib/i18n";
 import {
   PROJECT_AUDIT_EVENT_TYPES,
   PROJECT_AUDIT_SINCE_VERSION,
 } from "../../lib/projectAudit";
+import {
+  buildMissionMembership,
+  deriveWorkChain,
+  referencedTaskIds,
+  taskStatusLookupFrom,
+  type WorkChainItem,
+} from "../../lib/workChain";
 import {
   AUDIT_BOARD_SECTION_ID,
   agentTypeFilterValue,
@@ -28,11 +36,17 @@ import {
 import { useProjectAuditLog } from "../../hooks/useProjectAuditLog";
 import { useAuth } from "../../hooks/useAuth";
 import { useAgentStore } from "../../stores/agentStore";
+import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
+import { useTaskStore } from "../../stores/taskStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { routeInstructionToOrchestrator } from "../../services/orchestratorInstructionService";
+import {
+  subscribeWorkChain,
+  subscribeWorkChainMissions,
+} from "../../services/workChainService";
 import { ProjectAuditAttention } from "./ProjectAuditAttention";
-import { ProjectAuditMissionSectionView } from "./ProjectAuditMissionSection";
 import { ProjectAuditTicketDetail } from "./ProjectAuditTicketDetail";
+import { ProjectAuditTicketCard } from "./ProjectAuditTicketCard";
 import { ProjectAuditWorkloadStrip } from "./ProjectAuditWorkloadStrip";
 
 /**
@@ -41,7 +55,9 @@ import { ProjectAuditWorkloadStrip } from "./ProjectAuditWorkloadStrip";
  * ★이 화면은 세 질문에만 답한다(그 순서대로 배치돼 있다):
  *   1. 지금 손이 필요한 게 있나  → 맨 위 주의 필요 배너(필터 무시).
  *   2. 누가 무엇을 지고 있나      → 구성원 워크로드 스트립(= 구성원 필터).
- *   3. 이 티켓/미션은 어디까지 갔나 → 미션 → 티켓 카드 → (펼치면) 이벤트 타임라인.
+ *   3. 이 티켓/미션은 어디까지 갔나 → 티켓 카드 → (펼치면) 이벤트 타임라인.
+ *      미션은 상단 필터 축으로만 남긴다. 미션 섹션과 보드 섹션을 따로 그리면
+ *      "완료된 미션 일부 + 나머지" 로 갈라져 원장 목록이 비대칭으로 읽힌다.
  *
  * 예전에는 같은 데이터를 최신순 한 줄씩 쏟아냈고(firehose), 한 티켓이
  * created→claimed→dispatched→status→submitted 로 4~5줄씩 흩어져 위 셋 중
@@ -116,9 +132,9 @@ export function ProjectAuditPanel({
   const nameByUid = useMemo(
     () =>
       Object.fromEntries(
-        members.map((m) => [m.id, m.displayName || m.email || m.id])
+        members.map((m) => [m.id, m.displayName || m.email || m.id]),
       ),
-    [members]
+    [members],
   );
 
   const {
@@ -128,6 +144,9 @@ export function ProjectAuditPanel({
     toolNames,
     taskMetaById,
     missionMetaById,
+    hasMore,
+    loadingMore,
+    loadMore,
     reload,
   } = useProjectAuditLog(projectId, actorFilter, typeFilter, nameByUid);
 
@@ -144,7 +163,7 @@ export function ProjectAuditPanel({
   const agentsHydrated = useAgentStore((s) => s.hydrated);
   const liveAgentKeys = useMemo(
     () => (agentsHydrated ? auditAgentClaimKeys(agents) : null),
-    [agents, agentsHydrated]
+    [agents, agentsHydrated],
   );
 
   const notices = auditSourceNotices(sources);
@@ -156,7 +175,7 @@ export function ProjectAuditPanel({
   const signalRows = useMemo(
     () =>
       showLowSignal ? rows : rows.filter((row) => !isLowSignalAuditRow(row)),
-    [rows, showLowSignal]
+    [rows, showLowSignal],
   );
   const hiddenLowSignalCount = rows.length - signalRows.length;
 
@@ -167,7 +186,7 @@ export function ProjectAuditPanel({
       actorUid === UNATTRIBUTED
         ? signalRows.filter((row) => !row.actorUid)
         : signalRows,
-    [signalRows, actorUid]
+    [signalRows, actorUid],
   );
 
   const view = useMemo(
@@ -186,7 +205,7 @@ export function ProjectAuditPanel({
       actorKind,
       status,
       mission,
-    ]
+    ],
   );
 
   // 워크로드 타일은 **필터 전** 그룹으로 센다 — 필터를 걸면 타일이 그 필터의
@@ -196,18 +215,42 @@ export function ProjectAuditPanel({
     () =>
       auditWorkloadTiles(
         groupAuditRowsByTicket(signalRows, taskMetaById, { liveAgentKeys }),
-        actors
+        actors,
       ),
-    [signalRows, taskMetaById, liveAgentKeys, actors]
+    [signalRows, taskMetaById, liveAgentKeys, actors],
+  );
+
+  const missionOptionView = useMemo(
+    () =>
+      buildAuditAdminView(visibleRows, {
+        taskMetaById,
+        missionMetaById,
+        liveAgentKeys,
+        filters: { actorKind, status, mission: "all" },
+      }),
+    [
+      visibleRows,
+      taskMetaById,
+      missionMetaById,
+      liveAgentKeys,
+      actorKind,
+      status,
+    ],
   );
 
   const missionOptions = useMemo(
-    () => auditMissionOptions(view.sections),
-    [view.sections]
+    () => auditMissionOptions(missionOptionView.sections),
+    [missionOptionView.sections],
   );
 
+  const missionLabelById = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const option of missionOptions) out[option.missionId] = option.label;
+    return out;
+  }, [missionOptions]);
+
   const [expandedTickets, setExpandedTickets] = useState<Set<string>>(
-    () => new Set()
+    () => new Set(),
   );
   const toggleTicket = (key: string) =>
     setExpandedTickets((prior) => {
@@ -221,7 +264,7 @@ export function ProjectAuditPanel({
   // 여기 state 하나로만 열고 닫는다 — 목록의 필터와 무관.
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [reassigningTaskId, setReassigningTaskId] = useState<string | null>(
-    null
+    null,
   );
   const [reassignToast, setReassignToast] = useState<{
     tone: "success" | "error";
@@ -237,11 +280,17 @@ export function ProjectAuditPanel({
     const failedCalls = group.failedCount;
     const reason =
       failedCalls > 0
-        ? `실패(${failedCalls} failed calls)`
+        ? t("project.audit.admin.reassignReasonFailed", {
+            count: failedCalls,
+          })
         : group.attention?.kinds.includes("orphanedClaim")
-        ? "고아 클레임"
-        : "주의 필요";
-    const message = `티켓 #${taskId} ${reason} — 재배정/재디스패치 해줘. 제목: ${title}`;
+          ? t("project.audit.admin.reason.orphanedClaim")
+          : t("project.audit.admin.reassignReasonAttention");
+    const message = t("project.audit.admin.reassignInstruction", {
+      taskId,
+      reason,
+      title,
+    });
 
     setReassigningTaskId(taskId);
     try {
@@ -333,6 +382,11 @@ export function ProjectAuditPanel({
           onClear={() => setActorUid(ALL)}
         />
       )}
+
+      {/* 감사로그는 "무슨 일이 있었나"(과거·불변)이고, 워크체인은 "무엇을 할
+          것인가"(미래·가변)다. 축이 다르므로 원장 안에 체인 리스트를 복제하지
+          않고, 현재 체인은 요약 한 줄과 오케 패널 진입점만 둔다. */}
+      <ProjectAuditWorkChainSummary projectId={projectId} />
 
       {/* ③필터 바 — 축이 서로 다르다. 종류는 **소스를 가르는 서버 필터**,
           나머지 셋은 이미 불러온 것을 접는 클라이언트 필터다. */}
@@ -518,21 +572,39 @@ export function ProjectAuditPanel({
             </button>
           </div>
         ) : (
-          <div className="space-y-2">
-            {view.sections.map((section) => (
-              <ProjectAuditMissionSectionView
-                key={section.key}
-                section={section}
+          <div data-testid="audit-ledger-list" className="space-y-2">
+            {view.tickets.map((group) => (
+              <ProjectAuditTicketCard
+                key={group.key}
+                group={group}
                 locale={locale}
                 worktrees={worktrees}
-                expandedTickets={expandedTickets}
-                onToggleTicket={toggleTicket}
+                expanded={expandedTickets.has(group.key)}
+                onToggle={() => toggleTicket(group.key)}
+                missionLabel={
+                  group.missionId ? missionLabelById[group.missionId] : null
+                }
                 onOpenTicket={setSelectedTaskId}
                 onOpenBoard={requestReassign}
               />
             ))}
           </div>
         ))}
+
+      {!loading && rows.length > 0 && hasMore && (
+        <div className="mt-3 flex justify-center">
+          <button
+            type="button"
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="rounded border border-gray-700 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-800 disabled:cursor-wait disabled:opacity-60"
+          >
+            {loadingMore
+              ? t("project.audit.loadingMore")
+              : t("project.audit.loadMore")}
+          </button>
+        </div>
+      )}
 
       {selectedTaskId && (
         <ProjectAuditTicketDetail
@@ -543,14 +615,90 @@ export function ProjectAuditPanel({
             Object.fromEntries(
               Object.values(taskMetaById)
                 .filter((meta) => meta.title)
-                .map((meta) => [meta.id, meta.title as string])
-            )
+                .map((meta) => [meta.id, meta.title as string]),
+            ),
           )}
           nameByUid={nameByUid}
           onClose={() => setSelectedTaskId(null)}
         />
       )}
     </Shell>
+  );
+}
+
+type ProjectWorkChainSummaryLoad =
+  | { kind: "loading" }
+  | { kind: "ready"; items: WorkChainItem[] }
+  | { kind: "failed" };
+
+function ProjectAuditWorkChainSummary({ projectId }: { projectId: string }) {
+  const { t } = useTranslation();
+  const tasks = useTaskStore((s) => s.tasks);
+  const subscribeToTasks = useTaskStore((s) => s.subscribeToTasks);
+  const setTerminalCollapsed = useSplitWorkspaceStore(
+    (s) => s.setTerminalCollapsed,
+  );
+  const [load, setLoad] = useState<ProjectWorkChainSummaryLoad>({
+    kind: "loading",
+  });
+  const [missions, setMissions] = useState<Mission[]>([]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    return subscribeToTasks(projectId);
+  }, [projectId, subscribeToTasks]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    return subscribeWorkChainMissions(projectId, setMissions);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    setLoad({ kind: "loading" });
+    return subscribeWorkChain(projectId, (result) => {
+      if (result.kind === "error") {
+        setLoad({ kind: "failed" });
+        return;
+      }
+      setLoad({ kind: "ready", items: result.snapshot.items });
+    });
+  }, [projectId]);
+
+  const summary = useMemo(() => {
+    if (load.kind !== "ready") return null;
+    const membership = buildMissionMembership(missions, tasks);
+    const ids = referencedTaskIds(load.items, membership);
+    return deriveWorkChain(
+      load.items,
+      taskStatusLookupFrom(tasks, ids),
+      membership,
+    );
+  }, [load, missions, tasks]);
+
+  const summaryText =
+    summary != null
+      ? t("project.audit.workchainSummary", {
+          ready: summary.ready.length,
+          waiting: summary.waiting.length,
+        })
+      : load.kind === "failed"
+        ? t("project.audit.workchainUnavailable")
+        : t("project.audit.workchainLoading");
+
+  return (
+    <div className="mb-3 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded border border-gray-800 bg-gray-900/40 px-3 py-2 text-xs">
+      <span className="min-w-0 flex-1 truncate text-gray-400">
+        {summaryText}
+      </span>
+      <button
+        type="button"
+        onClick={() => setTerminalCollapsed(false)}
+        className="flex-shrink-0 text-blue-300 transition-colors hover:text-blue-200 hover:underline"
+      >
+        {t("project.audit.workchainOpen")}
+      </button>
+    </div>
   );
 }
 
@@ -575,8 +723,8 @@ function SourceNotice({
       ? t("project.audit.notice.humanDenied")
       : t("project.audit.notice.agentDenied")
     : notice.source === "human"
-    ? t("project.audit.notice.humanError")
-    : t("project.audit.notice.agentError");
+      ? t("project.audit.notice.humanError")
+      : t("project.audit.notice.agentError");
 
   return (
     <div

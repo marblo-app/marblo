@@ -369,6 +369,20 @@ describe("buildAuditAdminView — 미션 섹션 · 문제 우선 · 필터", () 
     expect(view.sections[1].ticketCount).toBe(1);
   });
 
+  it("원장 목록은 미션/보드 섹션으로 나누지 않고 최신 티켓순 한 목록이다", () => {
+    const view = buildAuditAdminView(rows, {
+      taskMetaById,
+      missionMetaById,
+      now: minutes(10),
+    });
+
+    expect(view.tickets.map((group) => group.taskId)).toEqual([
+      "t1",
+      "t2",
+      "t3",
+    ]);
+  });
+
   it("주의 필요는 심각도 → 최신순", () => {
     const view = buildAuditAdminView(rows, {
       taskMetaById,

@@ -238,6 +238,38 @@ describe("fetchUnifiedAuditSources — 두 소스 병렬", () => {
     );
   });
 
+  it("★페이지 커서는 두 소스에 각각 따로 전달한다", async () => {
+    const humanCursor = new Date("2026-08-01T09:00:00Z");
+    const agentCursor = new Date("2026-08-01T08:00:00Z");
+
+    await fetchUnifiedAuditSources("p1", {
+      cursors: { human: humanCursor, agent: agentCursor },
+      limit: 500,
+    });
+
+    expect(getProjectAuditLog).toHaveBeenCalledWith(
+      "p1",
+      expect.objectContaining({
+        beforeCreatedAt: humanCursor,
+        limit: 500,
+      }),
+    );
+    expect(getProjectLedgerLog).toHaveBeenCalledWith(
+      "p1",
+      expect.objectContaining({
+        beforeCreatedAt: agentCursor,
+        limit: 500,
+      }),
+    );
+  });
+
+  it("이미 끝난 소스는 다음 페이지에서 다시 읽지 않는다", async () => {
+    await fetchUnifiedAuditSources("p1", { skip: { human: true } });
+
+    expect(getProjectAuditLog).not.toHaveBeenCalled();
+    expect(getProjectLedgerLog).toHaveBeenCalled();
+  });
+
   it("사람 종류를 고르면 원장은 조회조차 하지 않고 skipped", async () => {
     const result = await fetchUnifiedAuditSources("p1", {
       typeFilter: "agent.spawned",

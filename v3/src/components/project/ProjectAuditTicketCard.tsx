@@ -27,6 +27,7 @@ export function ProjectAuditTicketCard({
   onToggle,
   locale,
   worktrees,
+  missionLabel,
   onOpenTicket,
   onOpenBoard,
 }: {
@@ -35,6 +36,7 @@ export function ProjectAuditTicketCard({
   onToggle: () => void;
   locale: string;
   worktrees: Worktree[];
+  missionLabel?: string | null;
   onOpenTicket: (taskId: string) => void;
   onOpenBoard: (group: AuditTicketGroup) => void;
 }) {
@@ -76,7 +78,7 @@ export function ProjectAuditTicketCard({
 
           <span
             className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${taskStatusPillClass(
-              group.status
+              group.status,
             )}`}
           >
             {group.status ?? t("project.audit.admin.statusUnknown")}
@@ -105,6 +107,15 @@ export function ProjectAuditTicketCard({
             failedCount={group.failedCount}
             claimedBy={group.claimedBy}
           />
+        )}
+
+        {missionLabel && (
+          <span
+            className="min-w-0 max-w-[14rem] flex-shrink truncate rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-400"
+            title={missionLabel}
+          >
+            {missionLabel}
+          </span>
         )}
 
         <span className="flex-shrink-0 text-[11px] text-gray-500">
@@ -187,7 +198,7 @@ export function ProjectAuditTicketCard({
                   row={display.row}
                   locale={locale}
                 />
-              )
+              ),
             )}
           </ul>
         </div>
@@ -313,7 +324,7 @@ function attentionReasonLabel(
   kind: AuditAttention["kinds"][number],
   attention: AuditAttention,
   failedCount: number,
-  t: (key: MessageKey, vars?: Record<string, string | number>) => string
+  t: (key: MessageKey, vars?: Record<string, string | number>) => string,
 ): string {
   switch (kind) {
     case "taskFailed":

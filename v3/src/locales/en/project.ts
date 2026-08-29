@@ -56,6 +56,12 @@ export const project: Record<keyof typeof koProject, string> = {
   "project.audit.lowSignalHiddenCount": " ({count} hidden)",
   "project.audit.lowSignalOnlyEmpty":
     "No high-signal events — {count} Telegram/memo events are hidden. Click to show.",
+  "project.audit.loadMore": "Load older records",
+  "project.audit.loadingMore": "Loading older records...",
+  "project.audit.workchainSummary": "Next work {ready} · waiting {waiting}",
+  "project.audit.workchainLoading": "Loading workchain summary",
+  "project.audit.workchainUnavailable": "Workchain summary unavailable",
+  "project.audit.workchainOpen": "View in orchestrator panel",
   // Human vs agent. Blur the two and "she moved 40 tickets" reads as her doing
   // it by hand, when an agent she dispatched did the moving.
   "project.audit.actor.human": "Person",
@@ -160,7 +166,7 @@ export const project: Record<keyof typeof koProject, string> = {
   "project.audit.worktreeArchivedTip":
     "The ledger records worktreeId ({worktreeId}), but the current worktree list has no live match. It may have been removed after merge/prune, so this button stays disabled.",
 
-  // Operator view — problems first, mission/ticket grouping, link cluster.
+  // Operator view — problems first, one ticket ledger list, link cluster.
   "project.audit.admin.attentionTitle": "{count} need attention",
   "project.audit.admin.attentionNone": "Nothing needs a human right now",
   "project.audit.admin.attentionScopeNote":
@@ -174,6 +180,10 @@ export const project: Record<keyof typeof koProject, string> = {
     "The agent that claimed this ticket ({agentId}) is not in the list of running agents.",
   "project.audit.admin.reason.stalled": "No change for {hours}h",
   "project.audit.admin.reassign": "Reassign on board",
+  "project.audit.admin.reassignReasonFailed": "failure ({count} failed calls)",
+  "project.audit.admin.reassignReasonAttention": "needs attention",
+  "project.audit.admin.reassignInstruction":
+    "Ticket #{taskId} {reason} — reassign or redispatch it. Title: {title}",
   "project.audit.admin.reassignSent":
     "Reassign request sent to the orchestrator.",
   "project.audit.admin.reassignQueued":

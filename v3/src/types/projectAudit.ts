@@ -60,6 +60,8 @@ export interface ProjectAuditLogQuery {
   type?: ProjectAuditEventType;
   /** 티켓 상세 패널(원장 상세)이 쓰는 축. 이 티켓에 속한 이벤트만. */
   taskId?: string;
+  /** 최신순 커서. 지정하면 이 시각보다 오래된 기록만 이어 읽는다. */
+  beforeCreatedAt?: Date;
   /** 기본 100, 상한 500(PROJECT_AUDIT_MAX_LIMIT). */
   limit?: number;
 }

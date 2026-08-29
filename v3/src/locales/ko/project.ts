@@ -53,6 +53,12 @@ export const project = {
   "project.audit.lowSignalHiddenCount": " ({count}건 숨김)",
   "project.audit.lowSignalOnlyEmpty":
     "고신호 기록이 없습니다 — 텔레그램·메모 {count}건이 숨겨져 있습니다. 눌러서 보기",
+  "project.audit.loadMore": "과거 기록 더 보기",
+  "project.audit.loadingMore": "과거 기록 불러오는 중...",
+  "project.audit.workchainSummary": "다음 할 일 {ready}건 · 대기 {waiting}건",
+  "project.audit.workchainLoading": "워크체인 요약 불러오는 중",
+  "project.audit.workchainUnavailable": "워크체인 요약을 볼 수 없습니다",
+  "project.audit.workchainOpen": "오케 패널에서 보기",
   // 사람/오케 구분 — 뭉개면 "이 사람이 티켓 40개를 옮겼다"로 읽히는데 실제로는
   // 그가 발주한 에이전트가 옮긴 것이다.
   "project.audit.actor.human": "사람",
@@ -154,7 +160,7 @@ export const project = {
   "project.audit.worktreeArchivedTip":
     "원장에는 worktreeId({worktreeId})가 있지만 현재 워크트리 목록에서 찾지 못했습니다. 머지/prune 후 제거된 워크트리일 수 있어 버튼을 비활성화합니다.",
 
-  // ── 관리자 뷰 — 문제 우선 · 미션/티켓 묶음 · 링크 클러스터 ────────
+  // ── 관리자 뷰 — 문제 우선 · 티켓 원장 단일 목록 · 링크 클러스터 ─────
   // 시간순 firehose 를 접고 "지금 무엇이 막혔나 / 누가 무엇을 지고 있나 /
   // 이 티켓은 어디까지 갔나" 세 질문에 답하는 화면.
   "project.audit.admin.attentionTitle": "주의 필요 {count}건",
@@ -170,6 +176,10 @@ export const project = {
     "이 티켓을 선점한 에이전트({agentId})가 현재 실행 중인 에이전트 목록에 없습니다.",
   "project.audit.admin.reason.stalled": "{hours}시간째 무변동",
   "project.audit.admin.reassign": "보드에서 재배정",
+  "project.audit.admin.reassignReasonFailed": "실패({count} failed calls)",
+  "project.audit.admin.reassignReasonAttention": "주의 필요",
+  "project.audit.admin.reassignInstruction":
+    "티켓 #{taskId} {reason} — 재배정/재디스패치 해줘. 제목: {title}",
   "project.audit.admin.reassignSent":
     "오케스트레이터에 재배정 지시를 전달했습니다.",
   "project.audit.admin.reassignQueued":

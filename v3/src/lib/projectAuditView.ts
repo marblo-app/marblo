@@ -133,7 +133,7 @@ export function toolRowLabel(toolName: string): AuditRowLabel {
  */
 export function resolveActorLabel(
   event: Pick<ProjectAuditEvent, "actorUid" | "actorName">,
-  nameByUid: Record<string, string> = {}
+  nameByUid: Record<string, string> = {},
 ): string {
   const name = event.actorName?.trim() || nameByUid[event.actorUid]?.trim();
   if (name) return name;
@@ -149,7 +149,7 @@ export function resolveActorLabel(
  */
 export function auditMetadataSummary(
   type: string,
-  metadata: ProjectAuditMetadata | undefined
+  metadata: ProjectAuditMetadata | undefined,
 ): string | null {
   if (!metadata) return null;
   const str = (key: string): string | null => {
@@ -165,7 +165,7 @@ export function auditMetadataSummary(
   }
   if (type === "agent.spawned") {
     const parts = [str("agentName"), str("model"), str("role")].filter(
-      (v): v is string => !!v
+      (v): v is string => !!v,
     );
     return parts.length ? parts.join(" · ") : null;
   }
@@ -431,11 +431,11 @@ function isSensitiveEvidenceKey(key: string): boolean {
 }
 
 function orderedObjectEntries(
-  obj: Record<string, unknown>
+  obj: Record<string, unknown>,
 ): [string, unknown][] {
   const priority = EVIDENCE_PRIORITY_KEYS.filter((key) => key in obj);
   const rest = Object.keys(obj)
-    .filter((key) => !priority.includes(key as typeof priority[number]))
+    .filter((key) => !priority.includes(key as (typeof priority)[number]))
     .sort((a, b) => a.localeCompare(b));
   return [...priority, ...rest].map((key) => [key, obj[key]]);
 }
@@ -496,7 +496,7 @@ function agentRowEvidence(
   event: Pick<
     AuditLog,
     "toolName" | "params" | "result" | "instructionRedacted"
-  >
+  >,
 ): AuditRowEvidence {
   const paramsJson = formatEvidenceValue(event.params);
   const resultText =
@@ -515,10 +515,10 @@ function agentRowEvidence(
       : null;
   const rawResolution =
     event.toolName === "submit_for_review"
-      ? stringFromPath(event.params, ["summary", "changes"]) ??
+      ? (stringFromPath(event.params, ["summary", "changes"]) ??
         stringFromPath(event.params, ["summary", "verification"]) ??
         stringFromPath(event.params, ["summary", "approach"]) ??
-        stringFromPath(event.params, ["summary", "problem"])
+        stringFromPath(event.params, ["summary", "problem"]))
       : null;
   return {
     paramsJson,
@@ -542,7 +542,7 @@ function agentRowEvidence(
  * 있다"는 오해를 만든다.
  */
 export function auditLedgerDetail(
-  event: Pick<AuditLog, "tier">
+  event: Pick<AuditLog, "tier">,
 ): string | null {
   const tier = event.tier?.trim();
   return tier ? tier : null;
@@ -569,7 +569,7 @@ const TASK_STATUS_VALUES = new Set([
  * 건드리지 않는 이 티켓의 제약상 화살표는 목표 쪽만 보여준다.
  */
 export function auditStatusTarget(
-  event: Pick<AuditLog, "toolName" | "params">
+  event: Pick<AuditLog, "toolName" | "params">,
 ): string | null {
   if (event.toolName !== "update_task_status") return null;
   const raw = event.params?.status;
@@ -578,7 +578,7 @@ export function auditStatusTarget(
 
 function stringFromPath(
   value: unknown,
-  path: readonly string[]
+  path: readonly string[],
 ): string | null {
   let cur: unknown = value;
   for (const key of path) {
@@ -590,7 +590,7 @@ function stringFromPath(
 
 function firstStringFromPaths(
   value: unknown,
-  paths: readonly (readonly string[])[]
+  paths: readonly (readonly string[])[],
 ): string | null {
   for (const path of paths) {
     const found = stringFromPath(value, path);
@@ -605,7 +605,7 @@ function truncateSummary(value: string, max = 96): string {
 }
 
 function auditStatusTransitionSummary(
-  event: Pick<AuditLog, "params">
+  event: Pick<AuditLog, "params">,
 ): string | null {
   const from = firstStringFromPaths(event.params, [["from"], ["previous"]]);
   const to =
@@ -616,7 +616,7 @@ function auditStatusTransitionSummary(
 }
 
 export function auditToolParamSummary(
-  event: Pick<AuditLog, "toolName" | "params" | "result" | "model" | "tier">
+  event: Pick<AuditLog, "toolName" | "params" | "result" | "model" | "tier">,
 ): string | null {
   const p = event.params;
   switch (event.toolName) {
@@ -660,12 +660,12 @@ export function auditToolParamSummary(
 
 /** 오케 행 detail 전체 — 액션별 핵심 요약(있으면) + 티어(있으면). */
 function agentRowDetail(
-  event: Pick<AuditLog, "tier" | "toolName" | "params" | "result" | "model">
+  event: Pick<AuditLog, "tier" | "toolName" | "params" | "result" | "model">,
 ): string | null {
   const summary = auditToolParamSummary(event);
   const tier = auditLedgerDetail(event);
   const parts = [summary ? truncateSummary(summary) : null, tier].filter(
-    (v): v is string => !!v
+    (v): v is string => !!v,
   );
   return parts.length ? parts.join(" · ") : null;
 }
@@ -673,7 +673,7 @@ function agentRowDetail(
 /** 사람 행위 한 건 → 통합 행. */
 export function humanAuditRow(
   event: ProjectAuditEvent,
-  nameByUid: Record<string, string> = {}
+  nameByUid: Record<string, string> = {},
 ): UnifiedAuditRow {
   return {
     key: `human:${event.id}`,
@@ -720,7 +720,7 @@ export function taskIdFromCreateTaskResult(result: string): string | null {
  */
 export function agentAuditRow(
   event: AuditLog,
-  nameByUid: Record<string, string> = {}
+  nameByUid: Record<string, string> = {},
 ): UnifiedAuditRow {
   const actorUid = event.actorUid?.trim() || null;
   const taskId =
@@ -782,11 +782,11 @@ export function mergeAuditRows(
 export function buildAuditRows(
   human: readonly ProjectAuditEvent[],
   agent: readonly AuditLog[],
-  nameByUid: Record<string, string> = {}
+  nameByUid: Record<string, string> = {},
 ): UnifiedAuditRow[] {
   return mergeAuditRows(
     human.map((event) => humanAuditRow(event, nameByUid)),
-    agent.map((event) => agentAuditRow(event, nameByUid))
+    agent.map((event) => agentAuditRow(event, nameByUid)),
   );
 }
 
@@ -826,7 +826,7 @@ export type AuditTypeFilter =
  * 읽는다. 실제로 이 드롭다운은 우리가 만든 값만 내보내므로 이 경로는 방어다.
  */
 export function parseAuditTypeFilter(
-  value: string | undefined | null
+  value: string | undefined | null,
 ): AuditTypeFilter {
   const raw = value?.trim();
   if (!raw) return { source: "both" };
@@ -963,7 +963,7 @@ export function mergeAuditActors(
  */
 export function resolveTaskLabel(
   taskId: string | null,
-  titleById: Record<string, string> = {}
+  titleById: Record<string, string> = {},
 ): string | null {
   if (!taskId) return null;
   const title = titleById[taskId]?.trim();
@@ -988,7 +988,7 @@ export type AuditBadgeKind =
   | "orchestratorControlPlane";
 
 export function auditBadgeKind(
-  row: Pick<UnifiedAuditRow, "actorKind" | "model">
+  row: Pick<UnifiedAuditRow, "actorKind" | "model">,
 ): AuditBadgeKind {
   if (row.actorKind === "human") return "human";
   return row.model ? "agentModel" : "orchestratorControlPlane";
@@ -1075,7 +1075,7 @@ type LedgerExtensionField =
  */
 export function ledgerFieldValue(
   event: AuditLog,
-  field: LedgerExtensionField
+  field: LedgerExtensionField,
 ): LedgerFieldValue {
   if (!(field in event)) return { state: "preLedger" };
   const raw = event[field];
@@ -1092,7 +1092,7 @@ export function ledgerFieldValue(
  * L3 가 배선되면 이 함수 하나만 바뀌면 되도록 판정을 여기 모아 둔다.
  */
 export function auditSealStatus(
-  event: Pick<AuditLog, "seq" | "prevHash" | "hash">
+  event: Pick<AuditLog, "seq" | "prevHash" | "hash">,
 ): "sealed" | "unsealed" {
   return event.seq != null && !!event.prevHash && !!event.hash
     ? "sealed"
@@ -1118,7 +1118,7 @@ export interface TicketLedgerRow extends UnifiedAuditRow {
 export function buildTicketLedgerRows(
   human: readonly ProjectAuditEvent[],
   agent: readonly AuditLog[],
-  nameByUid: Record<string, string> = {}
+  nameByUid: Record<string, string> = {},
 ): TicketLedgerRow[] {
   const humanRows: TicketLedgerRow[] = human.map((event) => ({
     ...humanAuditRow(event, nameByUid),
@@ -1145,7 +1145,7 @@ export function buildTicketLedgerRows(
  */
 export function foldAuditRows(
   rows: readonly UnifiedAuditRow[],
-  minGroupSize = 2
+  minGroupSize = 2,
 ): AuditDisplayRow[] {
   const out: AuditDisplayRow[] = [];
   let i = 0;
@@ -1289,7 +1289,7 @@ export const AUDIT_STALLED_AFTER_MS = 6 * 60 * 60 * 1000;
  * 렌더러 스토어가 없는 곳(웹 콘솔)에서도 돌아야 한다.
  */
 export function auditAgentClaimKeys(
-  agents: readonly { id: string; name: string }[]
+  agents: readonly { id: string; name: string }[],
 ): Set<string> {
   const keys = new Set<string>();
   for (const agent of agents) {
@@ -1354,7 +1354,7 @@ export interface AuditAttentionOptions {
  */
 export function auditAttention(
   input: AuditAttentionInput,
-  options: AuditAttentionOptions = {}
+  options: AuditAttentionOptions = {},
 ): AuditAttention | null {
   if (input.deleted || input.archived || input.status === "DONE") return null;
 
@@ -1448,7 +1448,7 @@ function latestActivity(rows: readonly UnifiedAuditRow[]): string | null {
 }
 
 function latestResolutionSummary(
-  rows: readonly UnifiedAuditRow[]
+  rows: readonly UnifiedAuditRow[],
 ): string | null {
   for (const row of rows) {
     const toolName = auditRowToolName(row);
@@ -1504,7 +1504,7 @@ function summarizeTicketGroup(
   taskId: string | null,
   rows: UnifiedAuditRow[],
   meta: AuditTaskMeta | undefined,
-  options: AuditAttentionOptions
+  options: AuditAttentionOptions,
 ): AuditTicketGroup {
   const latestAt = latestRowTime(rows);
   const failedCount = rows.filter((row) => row.failed).length;
@@ -1529,7 +1529,7 @@ function summarizeTicketGroup(
     // 않는다 — uid 로 셀 수 없을 뿐 누군가는 했다. 그런 행만 있으면 0 이고,
     // 호출부가 "미귀속"으로 그린다.
     actorCount: new Set(
-      rows.map((row) => row.actorUid).filter((uid): uid is string => !!uid)
+      rows.map((row) => row.actorUid).filter((uid): uid is string => !!uid),
     ).size,
     failedCount,
     latestAt,
@@ -1546,7 +1546,7 @@ function summarizeTicketGroup(
               failedCount,
               latestAt,
             },
-            options
+            options,
           )
         : auditAttention(
             {
@@ -1557,7 +1557,7 @@ function summarizeTicketGroup(
               failedCount,
               latestAt,
             },
-            options
+            options,
           ),
     rows,
     detail: {
@@ -1578,7 +1578,7 @@ function summarizeTicketGroup(
 export function groupAuditRowsByTicket(
   rows: readonly UnifiedAuditRow[],
   taskMetaById: Record<string, AuditTaskMeta> = {},
-  options: AuditAttentionOptions = {}
+  options: AuditAttentionOptions = {},
 ): AuditTicketGroup[] {
   const order: (string | null)[] = [];
   const byTask = new Map<string | null, UnifiedAuditRow[]>();
@@ -1596,8 +1596,8 @@ export function groupAuditRowsByTicket(
       taskId,
       byTask.get(taskId)!,
       taskId ? taskMetaById[taskId] : undefined,
-      options
-    )
+      options,
+    ),
   );
 }
 
@@ -1625,13 +1625,13 @@ export interface AuditMissionProgress {
 
 export function auditMissionProgress(
   mission: AuditMissionMeta,
-  taskMetaById: Record<string, AuditTaskMeta> = {}
+  taskMetaById: Record<string, AuditTaskMeta> = {},
 ): AuditMissionProgress | null {
   const counts = mission.statusCounts;
   if (counts) {
     const total = Object.values(counts).reduce<number>(
       (sum, value) => sum + (typeof value === "number" ? value : 0),
-      0
+      0,
     );
     if (total > 0) {
       return {
@@ -1689,7 +1689,7 @@ export const AUDIT_BOARD_SECTION_ID = "__board__";
 export type AuditActorKindFilter = "all" | "human" | "orchestrator" | "agent";
 
 export function auditActorKindOf(
-  row: Pick<UnifiedAuditRow, "actorKind" | "model">
+  row: Pick<UnifiedAuditRow, "actorKind" | "model">,
 ): Exclude<AuditActorKindFilter, "all"> {
   const kind = auditBadgeKind(row);
   if (kind === "human") return "human";
@@ -1706,7 +1706,7 @@ export interface AuditAdminFilters {
 
 function matchesActorKind(
   row: UnifiedAuditRow,
-  filter: AuditActorKindFilter | undefined
+  filter: AuditActorKindFilter | undefined,
 ): boolean {
   if (!filter || filter === "all") return true;
   return auditActorKindOf(row) === filter;
@@ -1714,7 +1714,7 @@ function matchesActorKind(
 
 function matchesTicketFilters(
   group: AuditTicketGroup,
-  filters: AuditAdminFilters
+  filters: AuditAdminFilters,
 ): boolean {
   if (filters.status && filters.status !== "all") {
     if (group.status !== filters.status) return false;
@@ -1738,6 +1738,8 @@ export interface BuildAuditAdminViewOptions extends AuditAttentionOptions {
 export interface AuditAdminView {
   /** 미션 → 보드 순. 필터가 적용된 결과. */
   sections: AuditMissionSection[];
+  /** 섹션 없는 단일 원장 목록. 미션/보드 여부와 무관하게 최신 활동순이다. */
+  tickets: AuditTicketGroup[];
   /**
    * 주의 필요 티켓, 심각도 → 최신순.
    *
@@ -1772,7 +1774,7 @@ function compareAttention(a: AuditTicketGroup, b: AuditTicketGroup): number {
  */
 export function buildAuditAdminView(
   rows: readonly UnifiedAuditRow[],
-  options: BuildAuditAdminViewOptions = {}
+  options: BuildAuditAdminViewOptions = {},
 ): AuditAdminView {
   const taskMetaById = options.taskMetaById ?? {};
   const missionMetaById = options.missionMetaById ?? {};
@@ -1790,20 +1792,20 @@ export function buildAuditAdminView(
   const allGroups = groupAuditRowsByTicket(
     rows,
     taskMetaById,
-    attentionOptions
+    attentionOptions,
   );
   const attention = allGroups
     .filter((group) => group.attention)
     .sort(compareAttention);
 
   const visibleRows = rows.filter((row) =>
-    matchesActorKind(row, filters.actorKind)
+    matchesActorKind(row, filters.actorKind),
   );
 
   const filteredGroups = groupAuditRowsByTicket(
     visibleRows,
     taskMetaById,
-    attentionOptions
+    attentionOptions,
   ).filter((group) => matchesTicketFilters(group, filters));
 
   const sections = foldTicketsIntoMissions(filteredGroups, missionMetaById, {
@@ -1812,11 +1814,14 @@ export function buildAuditAdminView(
 
   const actionCount = filteredGroups.reduce(
     (sum, group) => sum + group.actionCount,
-    0
+    0,
   );
 
   return {
     sections,
+    tickets: [...filteredGroups].sort(
+      (a, b) => auditTimeValue(b.latestAt) - auditTimeValue(a.latestAt),
+    ),
     attention,
     ticketCount: filteredGroups.length,
     actionCount,
@@ -1830,7 +1835,7 @@ export function buildAuditAdminView(
 function foldTicketsIntoMissions(
   groups: readonly AuditTicketGroup[],
   missionMetaById: Record<string, AuditMissionMeta>,
-  context: { taskMetaById: Record<string, AuditTaskMeta> }
+  context: { taskMetaById: Record<string, AuditTaskMeta> },
 ): AuditMissionSection[] {
   const order: (string | null)[] = [];
   const byMission = new Map<string | null, AuditTicketGroup[]>();
@@ -1863,7 +1868,7 @@ function foldTicketsIntoMissions(
           auditTimeValue(group.latestAt) > auditTimeValue(latest)
             ? group.latestAt
             : latest,
-        tickets[0]?.latestAt ?? new Date(0)
+        tickets[0]?.latestAt ?? new Date(0),
       ),
       tickets,
     };
@@ -1891,12 +1896,12 @@ export interface AuditMissionOption {
 }
 
 export function auditMissionOptions(
-  sections: readonly AuditMissionSection[]
+  sections: readonly AuditMissionSection[],
 ): AuditMissionOption[] {
   return sections
     .filter(
       (section): section is AuditMissionSection & { missionId: string } =>
-        section.missionId !== null
+        section.missionId !== null,
     )
     .map((section) => ({
       missionId: section.missionId,
@@ -1944,7 +1949,7 @@ export interface AuditWorkloadTile {
  */
 export function auditWorkloadTiles(
   groups: readonly AuditTicketGroup[],
-  actors: readonly AuditActorTally[] = []
+  actors: readonly AuditActorTally[] = [],
 ): AuditWorkloadTile[] {
   const byUid = new Map<string | null, AuditWorkloadTile>();
 
