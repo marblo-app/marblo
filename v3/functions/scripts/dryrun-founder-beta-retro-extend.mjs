@@ -4,9 +4,14 @@
  *
  * 사장님 지시(티켓 WTy5dfUmGGfJJa4GBAMA): 30일에 만료된 파운더를 되살릴지는
  * 승인 사안이다. 이 스크립트는 **읽기 전용**이다 — `--apply` 플래그가 아예 없고
- * Firestore 에 대한 쓰기 호출(PATCH/POST)을 하나도 하지 않는다. 승인이 나면
- * 별도 스크립트를 만들되, 그때도 backfill-founder-pro-grants.mjs 와 같은
- * `--apply --confirm=` 이중 게이트를 달아야 한다.
+ * Firestore 에 대한 쓰기 호출(PATCH/POST)을 하나도 하지 않는다.
+ *
+ * ★후속(티켓 F8PAS6bMofxjujDCgPfE): 실행본은 `scripts/send-beta-retro-extend.ts`
+ * 다. 소급 쓰기와 복귀 안내 메일을 함께 하되 각각 자기 확인 문구를 요구한다
+ * (`--apply --confirm-apply=` / `--send --confirm-send=`). 판정 로직의 단일
+ * 소스는 `src/betaRetroExtend.ts` 이고 실행본은 그걸 import 한다. 아래 classify
+ * 는 그 이전에 쓰인 .mjs 복제본이며, **판정 규칙을 고칠 일이 있으면 여기가 아니라
+ * src/betaRetroExtend.ts 를 고치고 이 파일은 그때 폐기한다.**
  *
  * 실행:
  *   GCLOUD_PROJECT=marblo-2253d node scripts/dryrun-founder-beta-retro-extend.mjs
