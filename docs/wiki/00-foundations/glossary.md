@@ -3,7 +3,7 @@ title: 같은 말이 다른 객체를 가리킨다
 tags: [domain/foundations, topic/identity, topic/agents, method/source-link]
 status: active
 date: 2026-08-26
-links: [[overview]], [[architecture]], [[progress]], [[telemetry-identity-axes]], [[counting-unit-first]], [[do-not-retry]]
+links: [[2026-kpi-targets]], [[overview]], [[architecture]], [[progress]], [[telemetry-identity-axes]], [[counting-unit-first]], [[do-not-retry]]
 ---
 
 # 글로서리 — 혼동 쌍
@@ -110,4 +110,5 @@ links: [[overview]], [[architecture]], [[progress]], [[telemetry-identity-axes]]
 
 ## Backlinks
 
+- [[2026-kpi-targets]] — Qualified·Activated·Retained 의 확정 정의
 - [[overview]] · [[architecture]] · [[progress]] · [[telemetry-identity-axes]] · [[counting-unit-first]]

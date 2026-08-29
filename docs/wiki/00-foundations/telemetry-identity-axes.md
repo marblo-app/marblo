@@ -3,7 +3,7 @@ title: userId 는 표마다 다른 사람이다
 tags: [domain/foundations, topic/identity, topic/observability, topic/bigquery]
 status: verified
 date: 2026-08-25
-links: [[do-not-retry]], [[empty-query-first]], [[post-spawn-telemetry-gap]], [[routing-label-coverage]], [[glossary]], [[overview]], [[architecture]]
+links: [[2026-kpi-targets]], [[do-not-retry]], [[empty-query-first]], [[post-spawn-telemetry-gap]], [[routing-label-coverage]], [[glossary]], [[overview]], [[architecture]]
 ---
 
 # userId 는 표마다 다른 사람이다
@@ -53,4 +53,5 @@ writer 가 다르다. 익명 설치 여정은 clientId 를 `userId` 칸에 넣�
 
 ## Backlinks
 
+- [[2026-kpi-targets]] — 이 축 구분이 왜 중요한지, 목표 숫자 쪽에서 본 것
 - [[do-not-retry]] · [[empty-query-first]] · [[post-spawn-telemetry-gap]] · [[verify-result-row]] · [[counting-unit-first]] · [[routing-label-coverage]] · [[glossary]] · [[overview]] · [[architecture]]

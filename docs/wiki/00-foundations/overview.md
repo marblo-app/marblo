@@ -3,7 +3,7 @@ title: 마블로는 AI-native 팀의 control plane 이다
 tags: [domain/foundations, topic/wiki, topic/agents, method/source-link]
 status: active
 date: 2026-08-26
-links: [[glossary]], [[architecture]], [[progress]], [[telemetry-identity-axes]], [[do-not-retry]]
+links: [[2026-kpi-targets]], [[glossary]], [[architecture]], [[progress]], [[telemetry-identity-axes]], [[do-not-retry]]
 ---
 
 # 마블로 오버뷰
@@ -63,4 +63,5 @@ links: [[glossary]], [[architecture]], [[progress]], [[telemetry-identity-axes]]
 
 ## Backlinks
 
+- [[2026-kpi-targets]] — 2026 목표 숫자와 그 측정 갭
 - [[glossary]] · [[architecture]] · [[progress]] · [[telemetry-identity-axes]] · [[empty-query-first]] · [[verify-result-row]] · [[counting-unit-first]] · [[no-live-gui-verify]]
