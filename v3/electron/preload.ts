@@ -159,11 +159,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // Persist this window's folder/project in main (keyed by webContents.id,
     // stable across a renderer reload) so it can reconnect after sleep/wake.
     // Only non-empty fields are stored; never cleared by transient nulls.
-    registerRestore: (state: { rootPath?: string; projectId?: string }) =>
-      ipcRenderer.invoke("window:registerRestore", state),
+    registerRestore: (state: {
+      uid: string;
+      rootPath?: string;
+      projectId?: string;
+    }) => ipcRenderer.invoke("window:registerRestore", state),
     // Read back this window's saved folder/project for reconnect on startup.
-    getRestoreState: () =>
-      ipcRenderer.invoke("window:getRestoreState") as Promise<{
+    getRestoreState: (uid: string) =>
+      ipcRenderer.invoke("window:getRestoreState", { uid }) as Promise<{
+        uid?: string;
         rootPath?: string;
         projectId?: string;
       }>,
@@ -247,6 +251,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       accessToken?: string;
       error?: string;
     }> => ipcRenderer.invoke("auth:googleLoopback"),
+    setAccountScope: (uid: string | null): void =>
+      ipcRenderer.send("auth:setAccountScope", { uid }),
     syncAgentCustomToken: (
       customToken: string
     ): Promise<{ ok: boolean; uid?: string; error?: string }> =>
@@ -865,14 +871,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
       }>,
   },
   appState: {
-    load: () =>
-      ipcRenderer.invoke("appState:load") as Promise<{
+    load: (input?: { accountUid?: string }) =>
+      ipcRenderer.invoke("appState:load", input) as Promise<{
+        uid?: string;
         lastProjectId?: string;
         lastRootPath?: string;
         wasOrchestratorRunning?: boolean;
         preventSleepWhileWorking?: boolean;
       }>,
     save: (state: {
+      accountUid?: string;
       lastProjectId?: string;
       lastRootPath?: string;
       wasOrchestratorRunning?: boolean;

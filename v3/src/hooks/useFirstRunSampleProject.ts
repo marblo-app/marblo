@@ -39,14 +39,14 @@ import telemetry from "../services/telemetryService";
  * (`useSessionRestore.resolveRestoreSource` 와 같은 우선순위. 새 창은 애초에
  * 시드 대상이 아니므로 isNewWindow 분기는 여기서 다시 볼 필요가 없다.)
  */
-async function readRestoreTarget(): Promise<string | null> {
+async function readRestoreTarget(accountUid: string): Promise<string | null> {
   try {
     const perWindow = await window.electronAPI.window
-      .getRestoreState()
+      .getRestoreState(accountUid)
       .catch(() => ({}) as { rootPath?: string });
     if (perWindow?.rootPath) return perWindow.rootPath;
     const global = await window.electronAPI.appState
-      .load()
+      .load({ accountUid })
       .catch(() => ({}) as { lastRootPath?: string });
     return global?.lastRootPath ?? null;
   } catch {
@@ -71,9 +71,10 @@ export function useFirstRunSampleProject(
 
   useEffect(() => {
     if (startedRef.current) return;
+    if (!user) return;
 
     const gate = {
-      signedIn: !!user,
+      signedIn: true,
       projectsHydrated,
       projectCount: projects.length,
       hasRootPath: !!rootPath,
@@ -103,7 +104,7 @@ export function useFirstRunSampleProject(
         // ★세션 복원이 정착하기 전에 결정하지 않는다. 복원은 main 으로 두 번
         // 왕복하므로 위 동기 판단 시점엔 rootPath 가 아직 비어 있다 — 그대로
         // 진행하면 폴더를 쓰던 창이 샘플로 갈아탄다(E2E Z6).
-        const restoreTarget = await readRestoreTarget();
+        const restoreTarget = await readRestoreTarget(user.uid);
         if (
           !shouldSeedSampleProject({
             ...gate,

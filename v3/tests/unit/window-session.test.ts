@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   isPathUnder,
+  mergeAccountWindowSession,
+  mergeAccountWindowSessionIntoState,
   resolveRestoreRoots,
   scrubRemovedRoots,
   selectPersistableWindows,
+  sessionForAccount,
 } from "../../electron/windowSession";
 
 /**
@@ -71,6 +74,80 @@ describe("selectPersistableWindows", () => {
       { rootPath: "/proj/a", projectId: "a" },
     ]);
     expect(result).toEqual([{ rootPath: "/proj/a", projectId: "a" }]);
+  });
+
+  it("filters persistable windows by explicit uid", () => {
+    const result = selectPersistableWindows(
+      [
+        { uid: "A", rootPath: "/proj/a", projectId: "pA" },
+        { uid: "B", rootPath: "/proj/b", projectId: "pB" },
+        { rootPath: "/proj/legacy", projectId: "legacy" },
+      ],
+      "B",
+    );
+    expect(result).toEqual([{ rootPath: "/proj/b", projectId: "pB" }]);
+  });
+});
+
+describe("account window sessions", () => {
+  it("keeps project restore slots separated by uid", () => {
+    const afterA = mergeAccountWindowSession(undefined, "A", {
+      lastRootPath: "/proj/a",
+      lastProjectId: "pA",
+      windows: [{ rootPath: "/proj/a", projectId: "pA" }],
+    });
+    const afterB = mergeAccountWindowSession(afterA, "B", {
+      lastRootPath: "/proj/b",
+      lastProjectId: "pB",
+      windows: [{ rootPath: "/proj/b", projectId: "pB" }],
+    });
+
+    expect(sessionForAccount(afterB, "B")).toEqual({
+      lastRootPath: "/proj/b",
+      lastProjectId: "pB",
+      windows: [{ rootPath: "/proj/b", projectId: "pB" }],
+    });
+    expect(sessionForAccount(afterB, "A")).toEqual({
+      lastRootPath: "/proj/a",
+      lastProjectId: "pA",
+      windows: [{ rootPath: "/proj/a", projectId: "pA" }],
+    });
+    expect(sessionForAccount(afterB, "C")).toEqual({});
+  });
+
+  it("does not attach A's folder to first-time B, but restores it when A returns", () => {
+    const sessions = mergeAccountWindowSession(undefined, "A", {
+      lastRootPath: "/proj/a",
+      lastProjectId: "pA",
+      windows: [{ rootPath: "/proj/a", projectId: "pA" }],
+    });
+
+    expect(sessionForAccount(sessions, "B")).toEqual({});
+    expect(sessionForAccount(sessions, "A")).toEqual({
+      lastRootPath: "/proj/a",
+      lastProjectId: "pA",
+      windows: [{ rootPath: "/proj/a", projectId: "pA" }],
+    });
+  });
+
+  it("preserves device-scoped app state while updating an account restore slot", () => {
+    const state = mergeAccountWindowSessionIntoState(
+      {
+        machineId: "machine-1",
+        staticServerPort: 48123,
+        preventSleepWhileWorking: false,
+      },
+      "A",
+      { lastRootPath: "/proj/a", lastProjectId: "pA" },
+    );
+
+    expect(state.machineId).toBe("machine-1");
+    expect(state.staticServerPort).toBe(48123);
+    expect(state.preventSleepWhileWorking).toBe(false);
+    expect(state.accountWindowSessions.A).toEqual({
+      lastRootPath: "/proj/a",
+      lastProjectId: "pA",
+    });
   });
 });
 

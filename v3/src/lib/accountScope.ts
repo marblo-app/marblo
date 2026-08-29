@@ -38,6 +38,7 @@
 import { useAgentStore } from "../stores/agentStore";
 import { useBeginnerModeStore } from "../stores/beginnerModeStore";
 import { useCoachmarkStore } from "../stores/coachmarkStore";
+import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
 import { useSubscriptionStore } from "../stores/subscriptionStore";
 import { useTaskStore } from "../stores/taskStore";
@@ -49,6 +50,13 @@ export function resetAccountScopedState(nextUid: string | null): void {
   // 프로젝트가 먼저다: 보드/에이전트 구독은 currentProject 에 매달려 있으므로
   // 여기서 끊어 두면 뒤따르는 클리어가 되살아나지 않는다.
   useProjectStore.getState().resetForAccountChange();
+  useEditorStore.setState({
+    rootPath: null,
+    openFiles: [],
+    activeFilePath: null,
+    showDiff: false,
+    saveError: null,
+  });
   useTaskStore.setState({ tasks: [], loading: false });
   useAgentStore.setState({
     agents: [],

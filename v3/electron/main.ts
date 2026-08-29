@@ -45,9 +45,13 @@ import {
 import { Updater } from "./updater";
 import {
   isPathUnder,
+  mergeAccountWindowSessionIntoState,
   resolveRestoreRoots,
   scrubRemovedRoots,
+  sessionForAccount,
   selectPersistableWindows,
+  type AccountWindowSession,
+  type WindowRestoreEntry,
 } from "./windowSession";
 import { describeRootPathFailure, diagnoseRootPath } from "./rootPathHealth";
 import { TaskDecomposer } from "./orchestrator/task-decomposer";
@@ -621,6 +625,8 @@ function maskKey(key: string): string {
 const APP_STATE_FILE = path.join(API_KEYS_DIR, "app-state.json");
 
 interface AppState {
+  // Legacy single-slot fields kept only for non-account/device settings
+  // compatibility. Account restore must use accountWindowSessions below.
   lastProjectId?: string;
   lastRootPath?: string;
   wasOrchestratorRunning?: boolean;
@@ -643,6 +649,10 @@ interface AppState {
   // Project windows open at last quit, so a full restart can reopen them all
   // (the single lastProjectId/lastRootPath above only covers one window).
   windows?: Array<{ rootPath?: string; projectId?: string }>;
+  // Account-scoped restore state. The app-state file itself is device-scoped
+  // (machineId, static server port, power settings), but project folders and
+  // window restore slots are account data and must not be read across uid.
+  accountWindowSessions?: Record<string, AccountWindowSession>;
   // Stable per-install identifier for this machine. Generated once on first
   // boot and persisted. Stamped onto agent docs this machine launches so
   // boot-restore / reap can be machine-scoped on a shared account (see
@@ -679,6 +689,92 @@ function writeAppState(state: AppState): void {
   const existing = readAppState();
   const merged = { ...existing, ...state };
   fs.writeFileSync(APP_STATE_FILE, JSON.stringify(merged, null, 2), "utf-8");
+}
+
+let activeAccountUid: string | null = null;
+
+function isValidAccountUid(uid: unknown): uid is string {
+  return (
+    typeof uid === "string" &&
+    uid.trim().length > 0 &&
+    uid.length <= 256 &&
+    uid !== "__proto__" &&
+    uid !== "constructor" &&
+    uid !== "prototype"
+  );
+}
+
+function accountUidFromInput(input: unknown): string | null {
+  if (!input || typeof input !== "object") return null;
+  const uid = (input as { accountUid?: unknown }).accountUid;
+  return isValidAccountUid(uid) ? uid : null;
+}
+
+function appStateVisibleToRenderer(state: AppState): AppState {
+  const visible: AppState = { ...state };
+  delete visible.accountWindowSessions;
+  return visible;
+}
+
+function appStateForAccount(uid: string): AppState & { uid: string } {
+  const state = readAppState();
+  const scoped = sessionForAccount(state.accountWindowSessions, uid);
+  return {
+    ...appStateVisibleToRenderer(state),
+    uid,
+    lastProjectId: scoped.lastProjectId,
+    lastRootPath: scoped.lastRootPath,
+    windows: scoped.windows,
+  };
+}
+
+function hasOwnKey<T extends object>(obj: T, key: keyof T): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function writeAccountAppState(
+  uid: string,
+  patch: Partial<AccountWindowSession>
+): void {
+  const state = readAppState();
+  writeAppState(mergeAccountWindowSessionIntoState(state, uid, patch));
+}
+
+function saveAppStateInput(input: Partial<AppState> & { accountUid?: unknown }) {
+  const accountUid = accountUidFromInput(input);
+  const globalPatch: AppState = { ...input };
+  delete (globalPatch as { accountUid?: unknown }).accountUid;
+
+  if (accountUid) {
+    const scopedPatch: Partial<AccountWindowSession> = {};
+    if (hasOwnKey(input, "lastProjectId")) {
+      scopedPatch.lastProjectId = input.lastProjectId;
+      delete globalPatch.lastProjectId;
+    }
+    if (hasOwnKey(input, "lastRootPath")) {
+      scopedPatch.lastRootPath = input.lastRootPath;
+      delete globalPatch.lastRootPath;
+    }
+    if (hasOwnKey(input, "windows")) {
+      scopedPatch.windows = input.windows as AccountWindowSession["windows"];
+      delete globalPatch.windows;
+    }
+
+    if (Object.keys(scopedPatch).length > 0) {
+      if (accountUid === activeAccountUid) {
+        writeAccountAppState(accountUid, scopedPatch);
+      } else {
+        console.warn(
+          `[AppState] Ignored stale account restore save for uid=${accountUid.slice(
+            0,
+            6
+          )} (active uid differs)`
+        );
+      }
+    }
+  }
+
+  writeAppState(globalPatch);
 }
 
 type WorkPowerSaveSource =
@@ -1772,10 +1868,7 @@ const windowProjects = new Map<number, string>(); // webContents.id → projectI
 // The global app-state.json holds a single slot, so it can't represent more
 // than one open project — this per-window map is what makes multi-window
 // reconnect correct. See src/lib/sessionRestore.ts for the precedence rules.
-const windowRestore = new Map<
-  number,
-  { rootPath?: string; projectId?: string; detached?: boolean }
->();
+const windowRestore = new Map<number, WindowRestoreEntry>();
 
 // Set on before-quit so per-window close handlers don't strip the saved
 // session on the way out — we want the set of windows open AT quit to persist.
@@ -1785,11 +1878,15 @@ let isQuitting = false;
 // reopen them all (see restoreWindowSession). Called whenever a window's
 // project changes or a window closes — cheap and infrequent.
 function persistWindowSession(): void {
+  if (!activeAccountUid) return;
   // Exclude detached pop-out windows and dedupe by rootPath — otherwise popping
   // out Board/Code tabs (which share the parent's rootPath) would reopen the
   // same project as extra full windows on restart. See windowSession.ts.
-  const windows = selectPersistableWindows(windowRestore.values());
-  writeAppState({ windows });
+  const windows = selectPersistableWindows(
+    windowRestore.values(),
+    activeAccountUid
+  );
+  writeAccountAppState(activeAccountUid, { windows });
 }
 
 /** Paths already reported this session — see notifyRootPathMissing below. */
@@ -1826,7 +1923,10 @@ function pickFallbackRoot(
     }
   }
 
-  const last = readAppState().lastRootPath;
+  const last = activeAccountUid
+    ? sessionForAccount(readAppState().accountWindowSessions, activeAccountUid)
+        .lastRootPath
+    : undefined;
   if (usable(last)) return last;
 
   for (const [key, entry] of windowRestore) {
@@ -1949,28 +2049,36 @@ function notifyRootPathMissing(rootPath: string, ownerKey?: number): void {
 // immediately — otherwise the dead path is written to app-state.json at quit and
 // faithfully reopened on the next launch, so the failure survives a restart.
 function invalidateRemovedWorktreeRoots(removedPaths: string[]): void {
-  // The global single slot has to be scrubbed too, and FIRST. It is the
+  // The account-scoped lastRootPath has to be scrubbed too, and FIRST. It is the
   // cold-start fallback for the primary window and the source of
   // `defaultRootPath` below, so leaving a reaped worktree in it means every
   // dead window falls back onto another dead path — which is exactly how a
   // reaped worktree survived #501 and kept the popup coming back each boot.
   // (#501 scrubbed `windows[]` only; `lastRootPath` was read but never fixed.)
-  const lastRootPath = readAppState().lastRootPath;
+  const lastRootPath = activeAccountUid
+    ? sessionForAccount(readAppState().accountWindowSessions, activeAccountUid)
+        .lastRootPath
+    : undefined;
   if (lastRootPath && removedPaths.some((r) => isPathUnder(lastRootPath, r))) {
     const replacement = pickFallbackRoot(lastRootPath);
     // Explicit `undefined` survives the spread in writeAppState and is then
     // dropped by JSON.stringify — i.e. the key is genuinely cleared, not left
     // holding the dead path.
-    writeAppState({ lastRootPath: replacement });
+    if (activeAccountUid) {
+      writeAccountAppState(activeAccountUid, { lastRootPath: replacement });
+    }
     console.warn(
-      `[Window] Worktree removed — global lastRootPath "${lastRootPath}" cleared` +
+      `[Window] Worktree removed — account lastRootPath "${lastRootPath}" cleared` +
         (replacement ? ` in favour of "${replacement}"` : " (no fallback)")
     );
   }
 
   const scrubs = scrubRemovedRoots(windowRestore.entries(), removedPaths, {
     exists: (p) => fs.existsSync(p),
-    defaultRootPath: readAppState().lastRootPath,
+    defaultRootPath: activeAccountUid
+      ? sessionForAccount(readAppState().accountWindowSessions, activeAccountUid)
+          .lastRootPath
+      : undefined,
   });
   if (scrubs.length === 0) return;
 
@@ -3246,6 +3354,48 @@ function getDecomposer(): TaskDecomposer {
 const missionOrchestrators = new Map<string, OrchestratorManager>();
 const missionOrchestratorOwners = new Map<string, number>(); // projectId → webContents.id
 
+function adoptMainAccountScope(nextUid: string | null, reason: string): void {
+  if (activeAccountUid === nextUid) return;
+  const prevUid = activeAccountUid;
+  activeAccountUid = nextUid;
+
+  // Explicit account-scoped runtime list. Do not add device-scoped state here:
+  // machineId, static server port, model defaults, and power settings stay on
+  // the install, not the signed-in account.
+  windowProjects.clear();
+  windowRestore.clear();
+  ptyOwners.clear();
+  ptyBuffers.clear();
+  orchestratorOwners.clear();
+  missionOrchestratorOwners.clear();
+  projectEnabledModels.clear();
+  pendingListener.detachAll();
+  for (const manager of orchestrators.values()) {
+    manager.stop();
+  }
+  orchestrators.clear();
+  for (const manager of missionOrchestrators.values()) {
+    manager.stop();
+  }
+  missionOrchestrators.clear();
+  for (const agent of agentManager.listAgents()) {
+    agentManager.remove(agent.id);
+  }
+  ptyManager.killAll();
+  fsManager.stopAllWatching();
+  refreshWorkPowerSaveBlocker();
+
+  console.info(
+    `[AccountScope] main runtime reset (${reason}) prev=${
+      prevUid ? "set" : "none"
+    } next=${nextUid ? "set" : "none"}`
+  );
+
+  if (nextUid) {
+    restoreWindowSession(nextUid);
+  }
+}
+
 // Mission orchestrator lookup — lets /notify-orchestrator route mission-context
 // task notifications (contextId=missionId) to the per-project MISSION
 // orchestrator instead of the board one, so mission progress stays out of the
@@ -3733,7 +3883,9 @@ function collectWorktreeProjectRoots(): WorktreeProjectRoot[] {
     addRoot(projectId, manager.getSession()?.rootPath);
   }
 
-  const state = readAppState();
+  const state: Partial<AppState> = activeAccountUid
+    ? appStateForAccount(activeAccountUid)
+    : {};
   addRoot(state.lastProjectId, state.lastRootPath);
   for (const connection of listProjectConnections()) {
     addRoot(connection.projectId, connection.localPath);
@@ -4039,7 +4191,9 @@ function resolveMissionRootPath(projectId: string, hint?: string): string {
   if (board) return board;
   const mission = missionOrchestrators.get(projectId)?.getSession()?.rootPath;
   if (mission) return mission;
-  const st = readAppState();
+  const st: Partial<AppState> = activeAccountUid
+    ? appStateForAccount(activeAccountUid)
+    : {};
   const fromState = norm(st.lastRootPath);
   if (fromState) return fromState;
   return process.env.MARBLO_PROJECT_ROOT ?? process.cwd();
@@ -5837,6 +5991,7 @@ function createDetachedWindow(
   // pop-out is never written into the persisted multi-window session — it's a
   // sub-panel of its parent project, not a standalone window to restore.
   windowRestore.set(win.webContents.id, {
+    ...(activeAccountUid ? { uid: activeAccountUid } : {}),
     ...(seed?.rootPath ? { rootPath: seed.rootPath } : {}),
     ...(seed?.projectId ? { projectId: seed.projectId } : {}),
     detached: true,
@@ -5850,11 +6005,11 @@ function createDetachedWindow(
 // restore record (windowRestore, keyed by webContents.id) so its renderer
 // reconnects to the right project instead of showing the folder picker —
 // see src/lib/sessionRestore.ts.
-function restoreWindowSession(): void {
+function restoreWindowSession(accountUid: string): void {
   // Dedupe on read too — an app-state.json written by an older build (before
   // detached windows were excluded) can hold the same project many times.
   // selectPersistableWindows collapses those so we never reopen duplicates.
-  const state = readAppState();
+  const state = appStateForAccount(accountUid);
   const persistable = selectPersistableWindows(state.windows ?? []);
 
   // Drop / re-point windows whose folder died while the app was closed —
@@ -5877,14 +6032,19 @@ function restoreWindowSession(): void {
     // picker instead of on their projects, then open one empty window.
     const firstDead = dropped[0]?.rootPath;
     if (firstDead) notifyRootPathMissing(firstDead);
-    createWindow();
+    if (allWindows.size === 0) createWindow();
     return;
   }
+  const reusableWindows = Array.from(allWindows).filter(
+    (candidate) => !candidate.isDestroyed()
+  );
   saved.forEach((w, i) => {
     // First window is primary; the rest open as additional windows. Their
     // seeded restore state makes them reconnect rather than show the picker.
-    const win = createWindow(i > 0);
+    const reusable = reusableWindows[i];
+    const win = reusable ?? createWindow(i > 0 || allWindows.size > 0);
     windowRestore.set(win.webContents.id, {
+      uid: accountUid,
       rootPath: w.rootPath,
       projectId: w.projectId,
     });
@@ -6125,6 +6285,11 @@ ipcMain.handle("auth:googleLoopback", () => {
   return runGoogleLoopbackOAuth();
 });
 
+ipcMain.on("auth:setAccountScope", (_event, input: { uid?: unknown }) => {
+  const uid = input?.uid === null ? null : input?.uid;
+  adoptMainAccountScope(isValidAccountUid(uid) ? uid : null, "renderer-auth");
+});
+
 ipcMain.handle(
   "auth:syncAgentCustomToken",
   async (_event, input: { customToken?: unknown }) => {
@@ -6156,11 +6321,17 @@ ipcMain.handle(
         })();
       }
     }
+    if (result.ok && result.customTokenAccepted && result.uid) {
+      adoptMainAccountScope(result.uid, "agent-custom-token");
+    }
     return result;
   }
 );
 
-ipcMain.handle("auth:clearAgentCustomToken", () => clearAgentCustomToken());
+ipcMain.handle("auth:clearAgentCustomToken", () => {
+  adoptMainAccountScope(null, "agent-custom-token-clear");
+  return clearAgentCustomToken();
+});
 
 // 학습데이터 캡처 상태(진단용). 원문/uid 는 절대 반환하지 않는다 — 켜졌는지,
 // 서버가 적격이라고 했는지, 스풀에 몇 건 남았는지만.
@@ -9259,8 +9430,17 @@ ipcMain.handle("window:registerProject", (event, projectId: string) => {
 // folder picker). Cleared only when the window closes.
 ipcMain.handle(
   "window:registerRestore",
-  (event, state: { rootPath?: string; projectId?: string }) => {
+  (
+    event,
+    state: { uid?: unknown; rootPath?: string; projectId?: string }
+  ) => {
+    if (!isValidAccountUid(state?.uid) || state.uid !== activeAccountUid) {
+      windowRestore.delete(event.sender.id);
+      persistWindowSession();
+      return;
+    }
     const next = { ...(windowRestore.get(event.sender.id) ?? {}) };
+    next.uid = state.uid;
     if (typeof state?.rootPath === "string" && state.rootPath) {
       next.rootPath = state.rootPath;
     }
@@ -9274,8 +9454,11 @@ ipcMain.handle(
   }
 );
 
-ipcMain.handle("window:getRestoreState", (event) => {
-  return windowRestore.get(event.sender.id) ?? {};
+ipcMain.handle("window:getRestoreState", (event, input?: { uid?: unknown }) => {
+  const uid = isValidAccountUid(input?.uid) ? input.uid : null;
+  const state = windowRestore.get(event.sender.id);
+  if (!uid || uid !== activeAccountUid || state?.uid !== uid) return {};
+  return state;
 });
 
 // Pop a tab (Board/Code) out into its own window. The new window inherits the
@@ -11004,10 +11187,23 @@ ipcMain.handle(
   }
 );
 
-ipcMain.handle("appState:load", () => readAppState());
+ipcMain.handle("appState:load", (_event, input?: unknown) => {
+  const accountUid = accountUidFromInput(input);
+  if (!accountUid) return appStateVisibleToRenderer(readAppState());
+  if (accountUid !== activeAccountUid) {
+    const state = appStateVisibleToRenderer(readAppState());
+    return {
+      ...state,
+      lastProjectId: undefined,
+      lastRootPath: undefined,
+      windows: undefined,
+    };
+  }
+  return appStateForAccount(accountUid);
+});
 
 ipcMain.handle("appState:save", (_event, state: Partial<AppState>) => {
-  writeAppState(state);
+  saveAppStateInput(state);
   if (typeof state.preventSleepWhileWorking === "boolean") {
     preventSleepWhileWorking = state.preventSleepWhileWorking;
     refreshWorkPowerSaveBlocker();
@@ -11503,9 +11699,11 @@ app.whenReady().then(async () => {
     console.error("[Main] Failed to start BridgeServer:", err);
   }
 
-  // Reopen all project windows that were open at last quit (multi-window
-  // session restore). Single default window when nothing was saved.
-  restoreWindowSession();
+  // Account-scoped project windows are restored only after renderer auth tells
+  // main which uid is active. Restoring here would attach a project folder
+  // before main knows the account, which is the cross-account leak this path
+  // must prevent.
+  createWindow();
 
   // Start the electron-owned Telegram poller: one getUpdates loop per active
   // channel, resuming from the persisted offset. Idempotent — safe even if no

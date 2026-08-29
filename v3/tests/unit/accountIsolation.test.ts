@@ -79,6 +79,7 @@ vi.mock("../../src/services/firestore", () => ({
 const { useProjectStore } = await import("../../src/stores/projectStore");
 const { useTaskStore } = await import("../../src/stores/taskStore");
 const { useAgentStore } = await import("../../src/stores/agentStore");
+const { useEditorStore } = await import("../../src/stores/editorStore");
 const { resetAccountScopedState } = await import("../../src/lib/accountScope");
 
 function projectDoc(id: string, ownerId: string) {
@@ -112,6 +113,13 @@ beforeEach(() => {
   });
   useTaskStore.setState({ tasks: [] });
   useAgentStore.setState({ agents: [], ownedAgents: [] });
+  useEditorStore.setState({
+    rootPath: null,
+    openFiles: [],
+    activeFilePath: null,
+    showDiff: false,
+    saveError: null,
+  });
 });
 
 describe("계정 전환 시 프로젝트 리스트 격리", () => {
@@ -219,6 +227,22 @@ describe("계정 귀속 상태 초크포인트", () => {
       agents: [{ id: "a1", projectId: "music-composer" }] as never,
       ownedAgents: [{ id: "a1", projectId: "music-composer" }] as never,
     });
+    useEditorStore.setState({
+      rootPath: "/Users/john/music-composer",
+      openFiles: [
+        {
+          path: "README.md",
+          name: "README.md",
+          content: "old",
+          originalContent: "old",
+          language: "markdown",
+          isModified: false,
+        },
+      ],
+      activeFilePath: "README.md",
+      showDiff: true,
+      saveError: null,
+    });
 
     // 인자는 **새로 채택하는** uid 다(티켓 E3ywX1ftbVr5f1TrFsgp에서 추가). 온보딩
     // 판정을 그 계정에 귀속시키기 위한 것이고, 여기서 보는 클리어 계약과는 무관.
@@ -230,6 +254,9 @@ describe("계정 귀속 상태 초크포인트", () => {
     expect(useTaskStore.getState().tasks).toEqual([]);
     expect(useAgentStore.getState().agents).toEqual([]);
     expect(useAgentStore.getState().ownedAgents).toEqual([]);
+    expect(useEditorStore.getState().rootPath).toBeNull();
+    expect(useEditorStore.getState().openFiles).toEqual([]);
+    expect(useEditorStore.getState().activeFilePath).toBeNull();
     unsub();
   });
 

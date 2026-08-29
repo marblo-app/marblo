@@ -44,6 +44,11 @@ export class OwnerRegistry<K> {
     this.owners.delete(key);
   }
 
+  /** Drop every owner mapping at once. Used by account-scope teardown. */
+  clear(): void {
+    this.owners.clear();
+  }
+
   /** Keys `senderId` currently owns. */
   keysOwnedBy(senderId: number): K[] {
     const owned: K[] = [];

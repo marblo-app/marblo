@@ -329,7 +329,10 @@ describe("resetAccountScopedState — 계정 전환 초크포인트", () => {
   async function bootScope(seed: Record<string, string> = {}) {
     const { map, storage } = makeStorageShim(seed);
     vi.resetModules();
-    vi.stubGlobal("window", {} as unknown as Window);
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as Window);
     vi.stubGlobal("localStorage", storage);
     vi.doMock("../../src/lib/firebase", () => ({
       db: {},

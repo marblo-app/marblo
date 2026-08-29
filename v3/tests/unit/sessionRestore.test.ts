@@ -65,4 +65,24 @@ describe("resolveRestoreSource", () => {
     });
     expect(out).toEqual({ rootPath: "/only/path", projectId: undefined });
   });
+
+  it("ignores a per-window restore record owned by another uid", () => {
+    const out = resolveRestoreSource({
+      perWindow: { uid: "A", rootPath: "/a", projectId: "pA" },
+      isNewWindow: false,
+      global: { uid: "B", lastRootPath: "/b", lastProjectId: "pB" },
+      currentUid: "B",
+    });
+    expect(out).toEqual({ rootPath: "/b", projectId: "pB" });
+  });
+
+  it("does not fall back to another uid's global restore slot", () => {
+    const out = resolveRestoreSource({
+      perWindow: {},
+      isNewWindow: false,
+      global: { uid: "A", lastRootPath: "/a", lastProjectId: "pA" },
+      currentUid: "B",
+    });
+    expect(out).toEqual({});
+  });
 });

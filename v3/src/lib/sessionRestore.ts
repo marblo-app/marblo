@@ -17,11 +17,13 @@
  *     (single slot — only adequate for cold start, not multi-window).
  */
 export interface PerWindowRestore {
+  uid?: string;
   rootPath?: string;
   projectId?: string;
 }
 
 export interface GlobalRestore {
+  uid?: string;
   lastRootPath?: string;
   lastProjectId?: string;
 }
@@ -37,12 +39,15 @@ export function resolveRestoreSource(input: {
   perWindow: PerWindowRestore;
   isNewWindow: boolean;
   global: GlobalRestore;
+  currentUid?: string | null;
 }): RestoreSource {
-  const { perWindow, isNewWindow, global } = input;
+  const { perWindow, isNewWindow, global, currentUid } = input;
+  const ownsCurrentAccount = (uid: string | undefined): boolean =>
+    currentUid === undefined || uid === currentUid;
 
   // 1. Per-window state survives a sleep/wake renderer reload. Window-specific,
   //    so it takes precedence over the global single-slot app-state.
-  if (perWindow.rootPath) {
+  if (perWindow.rootPath && ownsCurrentAccount(perWindow.uid)) {
     return { rootPath: perWindow.rootPath, projectId: perWindow.projectId };
   }
 
@@ -52,10 +57,12 @@ export function resolveRestoreSource(input: {
   }
 
   // 3. Primary window cold start → global app-state.
-  if (global.lastRootPath) {
+  if (global.lastRootPath && ownsCurrentAccount(global.uid)) {
     return {
       rootPath: global.lastRootPath,
-      projectId: perWindow.projectId ?? global.lastProjectId,
+      projectId: ownsCurrentAccount(perWindow.uid)
+        ? perWindow.projectId ?? global.lastProjectId
+        : global.lastProjectId,
     };
   }
 

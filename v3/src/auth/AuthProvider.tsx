@@ -246,6 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const nextUid = nextUser?.uid ?? null;
     if (lastIdentityRef.current !== nextUid) {
       lastIdentityRef.current = nextUid;
+      window.electronAPI?.auth?.setAccountScope?.(nextUid);
       resetAccountScopedState(nextUid);
     }
     setUser(nextUser);

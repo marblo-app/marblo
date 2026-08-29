@@ -8,6 +8,7 @@ import {
   type GlobalRestore,
 } from "../lib/sessionRestore";
 import { canBeGlobalRoot, isForeignPlatformPath } from "../lib/rootPathScope";
+import { useAuth } from "./useAuth";
 
 /**
  * Restores the last active rootPath + project on app startup / renderer reload.
@@ -28,6 +29,8 @@ import { canBeGlobalRoot, isForeignPlatformPath } from "../lib/rootPathScope";
  * woken window doesn't flash the picker before its project comes back.
  */
 export function useSessionRestore() {
+  const { user } = useAuth();
+  const accountUid = user?.uid ?? null;
   const setRootPath = useEditorStore((s) => s.setRootPath);
   const rootPath = useEditorStore((s) => s.rootPath);
   const projects = useProjectStore((s) => s.projects);
@@ -44,6 +47,7 @@ export function useSessionRestore() {
     null,
   );
   const phase1StartedRef = useRef(false);
+  const phase1UidRef = useRef<string | null>(null);
   const projectResolvedRef = useRef(false);
 
   // Legacy backup: main can flag a window as "new" at runtime. The argv-based
@@ -59,6 +63,14 @@ export function useSessionRestore() {
   // should reopen) as early as possible, independent of Firestore loading. This
   // is what decides folder-picker vs reconnect for a new window.
   useEffect(() => {
+    if (!accountUid) return;
+    if (phase1UidRef.current !== accountUid) {
+      phase1StartedRef.current = false;
+      projectResolvedRef.current = false;
+      phase1UidRef.current = accountUid;
+      setRestoreSource(null);
+      setRestoreSettled(false);
+    }
     if (phase1StartedRef.current) return;
     phase1StartedRef.current = true;
     let cancelled = false;
@@ -68,7 +80,7 @@ export function useSessionRestore() {
         // Per-window state survives a sleep/wake reload (kept in main).
         const perWindow: PerWindowRestore =
           (await window.electronAPI.window
-            .getRestoreState()
+            .getRestoreState(accountUid)
             .catch(() => ({}))) ?? {};
 
         // Global app-state is only a cold-start fallback for the primary
@@ -76,9 +88,16 @@ export function useSessionRestore() {
         const global: GlobalRestore =
           perWindow.rootPath || isNewWindow
             ? {}
-            : await window.electronAPI.appState.load().catch(() => ({}));
+            : await window.electronAPI.appState
+                .load({ accountUid })
+                .catch(() => ({}));
 
-        const source = resolveRestoreSource({ perWindow, isNewWindow, global });
+        const source = resolveRestoreSource({
+          perWindow,
+          isNewWindow,
+          global,
+          currentUid: accountUid,
+        });
         if (cancelled) return;
 
         setRestoreSource(source);
@@ -98,7 +117,7 @@ export function useSessionRestore() {
       cancelled = true;
     };
     // rootPath is read but guarded by phase1StartedRef; deps kept minimal.
-  }, [isNewWindow]);
+  }, [accountUid, isNewWindow]);
 
   // Phase 2 — once projects are loaded and we have a source folder, resolve it
   // to a project. Folder is the source of truth (path + git-remote match);
@@ -153,17 +172,19 @@ export function useSessionRestore() {
   // foreign-OS path never is: it can't become valid on this machine, so
   // persisting it just guarantees a dead window on the next launch.
   useEffect(() => {
+    if (!accountUid) return;
     if (!rootPath && !currentProject) return;
     const restorableRoot =
       rootPath && !isForeignPlatformPath(rootPath) ? rootPath : null;
     if (!restorableRoot && !currentProject) return;
     window.electronAPI.window
       .registerRestore({
+        uid: accountUid,
         ...(restorableRoot ? { rootPath: restorableRoot } : {}),
         ...(currentProject ? { projectId: currentProject.id } : {}),
       })
       .catch(() => {});
-  }, [rootPath, currentProject]);
+  }, [accountUid, rootPath, currentProject]);
 
   // Save state whenever rootPath or currentProject changes (global app-state —
   // the primary window's cold-start fallback).
@@ -175,16 +196,18 @@ export function useSessionRestore() {
   // per-window record above still takes the worktree, and gets scrubbed when the
   // worktree is removed; the global one has no such owner, so it must not.
   useEffect(() => {
+    if (!accountUid) return;
     if (!rootPath && !currentProject) return;
     const persistableRoot = canBeGlobalRoot(rootPath) ? rootPath : null;
     if (!persistableRoot && !currentProject) return;
     window.electronAPI.appState
       .save({
+        accountUid,
         ...(persistableRoot ? { lastRootPath: persistableRoot } : {}),
         ...(currentProject ? { lastProjectId: currentProject.id } : {}),
       })
       .catch(() => {});
-  }, [rootPath, currentProject]);
+  }, [accountUid, rootPath, currentProject]);
 
   return { isNewWindow, restoreSettled };
 }

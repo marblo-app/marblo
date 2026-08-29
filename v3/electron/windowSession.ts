@@ -9,6 +9,7 @@
 import path from "node:path";
 
 export interface WindowRestoreEntry {
+  uid?: string;
   rootPath?: string;
   projectId?: string;
   // Detached Board/Code pop-out windows are transient sub-panels of a parent
@@ -23,6 +24,12 @@ export interface PersistedWindow {
   projectId?: string;
 }
 
+export interface AccountWindowSession {
+  lastProjectId?: string;
+  lastRootPath?: string;
+  windows?: PersistedWindow[];
+}
+
 /**
  * Select which windows belong in the persisted multi-window session.
  *
@@ -33,11 +40,13 @@ export interface PersistedWindow {
  */
 export function selectPersistableWindows(
   entries: Iterable<WindowRestoreEntry | null | undefined>,
+  uid?: string,
 ): PersistedWindow[] {
   const seen = new Set<string>();
   const out: PersistedWindow[] = [];
   for (const e of entries) {
     if (!e || e.detached) continue;
+    if (uid !== undefined && e.uid !== uid) continue;
     if (!e.rootPath) continue;
     if (seen.has(e.rootPath)) continue;
     seen.add(e.rootPath);
@@ -47,6 +56,50 @@ export function selectPersistableWindows(
     });
   }
   return out;
+}
+
+export function sessionForAccount(
+  sessions: Record<string, AccountWindowSession> | null | undefined,
+  uid: string | null | undefined,
+): AccountWindowSession {
+  if (!uid) return {};
+  return sessions?.[uid] ?? {};
+}
+
+export function mergeAccountWindowSession(
+  sessions: Record<string, AccountWindowSession> | null | undefined,
+  uid: string,
+  patch: Partial<AccountWindowSession>,
+): Record<string, AccountWindowSession> {
+  const prev = sessions?.[uid] ?? {};
+  return {
+    ...(sessions ?? {}),
+    [uid]: {
+      ...prev,
+      ...patch,
+    },
+  };
+}
+
+export interface AccountWindowSessionContainer {
+  accountWindowSessions?: Record<string, AccountWindowSession>;
+}
+
+export function mergeAccountWindowSessionIntoState<
+  T extends AccountWindowSessionContainer,
+>(
+  state: T,
+  uid: string,
+  patch: Partial<AccountWindowSession>,
+): T & { accountWindowSessions: Record<string, AccountWindowSession> } {
+  return {
+    ...state,
+    accountWindowSessions: mergeAccountWindowSession(
+      state.accountWindowSessions,
+      uid,
+      patch,
+    ),
+  };
 }
 
 export interface ResolvedWindow extends PersistedWindow {

@@ -859,12 +859,14 @@ interface BridgeAPI {
 }
 
 interface AppStateAPI {
-  load: () => Promise<{
+  load: (input?: { accountUid?: string }) => Promise<{
+    uid?: string;
     lastProjectId?: string;
     lastRootPath?: string;
     wasOrchestratorRunning?: boolean;
   }>;
   save: (state: {
+    accountUid?: string;
     lastProjectId?: string;
     lastRootPath?: string;
     wasOrchestratorRunning?: boolean;
@@ -1047,11 +1049,16 @@ interface WindowAPI {
    * after a sleep/wake reload. Only non-empty fields are stored; the record is
    * never cleared by transient nulls (only when the window closes). */
   registerRestore: (state: {
+    uid: string;
     rootPath?: string;
     projectId?: string;
   }) => Promise<void>;
   /** Read back this window's saved folder/project for reconnect on startup. */
-  getRestoreState: () => Promise<{ rootPath?: string; projectId?: string }>;
+  getRestoreState: (uid: string) => Promise<{
+    uid?: string;
+    rootPath?: string;
+    projectId?: string;
+  }>;
   /** Pop a tab (Board/Code) out into its own detached window. The new window
    * inherits this window's folder/project so it opens on the same data. */
   popOutTab: (
@@ -1890,6 +1897,7 @@ interface AuthAPI {
     customToken: string
   ) => Promise<{ ok: boolean; uid?: string; error?: string }>;
   clearAgentCustomToken: () => Promise<{ ok: boolean; error?: string }>;
+  setAccountScope: (uid: string | null) => void;
 }
 
 /**
