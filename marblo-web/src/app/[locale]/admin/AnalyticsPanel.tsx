@@ -8408,9 +8408,24 @@ function ScorecardMetricCard({
  *
  * ★왜 D30 의 분모를 '그 시점에 접근권이 살아있던 사람'으로 보정하지 않았나 —
  *   할 수 없다. D30 은 **설치 축**(analytics_user_daily)이고 접근권은 **계정
- *   축**(Firestore subscriptions)이다. 두 축을 잇는 조인은 설계가 금지하고
- *   (`assertAxisPurity`) 처리방침이 "두 기록이 공유하는 조인 키는 없습니다"
- *   라고 이미 고지했다. 그래서 보정 대신 **나란히 놓고 사실을 적는다.**
+ *   축**(Firestore subscriptions)이다. 두 축을 잇는 조인은 설계가 금지한다
+ *   (`assertAxisPurity`). 그래서 보정 대신 **나란히 놓고 사실을 적는다.**
+ *
+ * ★인용 정정 (ticket UXG62ooEMza9kLfnGage) — 여기 원래 "처리방침이 '두 기록이
+ *   공유하는 조인 키는 없습니다' 라고 이미 고지했다" 라고만 적혀 있었다. 문장
+ *   자체는 실재하지만 **어느 방침인지가 빠져 있었고, 우리에겐 방침이 둘이다.**
+ *   전수 확인 결과:
+ *     - ✅ **데스크톱 앱 인앱 처리방침** `v3/src/components/legal/privacyContent.tsx`
+ *       (ko 본문 / en 본문) — 그 문장이 **있다.**
+ *     - ❌ **웹 처리방침** `marblo-web/src/app/[locale]/legal/privacy/page.tsx`
+ *       (§1~§14) — 그 문장은 **없다.** 웹 쪽 대응 문구는 §2 의 "서비스 개선을
+ *       위한 통계 분석(식별 가능 형태로 저장하지 않습니다)" 이고 문면이 다르다.
+ *   ★인용 **범위**도 좁혀 적는다. 앱 방침의 그 문장이 짝지은 상대는
+ *   **사용량·비용 기록**이지 Firestore `subscriptions` 가 아니다. 축 경계
+ *   (익명축 ↔ 계정축)라는 취지는 같지만, 그 문장이 subscriptions 를 이름으로
+ *   지목한 적은 없다. 화면에서 근거를 넓혀 말하면 그게 곧 과대인용이 된다.
+ *   ★행 번호로 인용하지 마라 — `privacyContent.tsx` 는 계속 움직인다. 문서
+ *   이름으로 가리키고, 문면을 손대면 이 주석부터 다시 맞춰라.
  */
 export function BetaAccessExpiryWarning({
   betaAccess,
@@ -8489,8 +8504,19 @@ export function BetaAccessExpiryWarning({
         <span className="font-mono">analytics_user_daily</span>)이고 접근권은 계정
         축(Firestore <span className="font-mono">subscriptions</span>)입니다. 두
         축을 잇는 조인은 <span className="font-mono">assertAxisPurity</span> 가
-        막고, 처리방침이 &ldquo;두 기록이 공유하는 조인 키는 없습니다&rdquo; 라고 이미
-        고지했습니다. 그래서 보정 대신 나란히 놓고 사실을 적습니다.
+        막습니다. 그래서 보정 대신 나란히 놓고 사실을 적습니다.
+      </p>
+      <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+        ★근거로 인용하던 &ldquo;두 기록이 공유하는 조인 키는 없습니다&rdquo; 는{" "}
+        <b>데스크톱 앱 개인정보처리방침</b>의 문장입니다(
+        <span className="font-mono">privacyContent.tsx</span>). 이 화면은 원래
+        출처를 안 밝히고 &lsquo;처리방침&rsquo; 이라고만 적었는데, <b>방침이 둘이라
+        그 말로는 어느 쪽인지 알 수 없었습니다</b> — 이 웹사이트의{" "}
+        <span className="font-mono">/legal/privacy</span> 방침에는 그 문장이{" "}
+        <b>없습니다</b>. 그리고 앱 방침의 그 문장이 짝지은 상대는{" "}
+        <b>사용량·비용 기록</b>이지 위의 Firestore{" "}
+        <span className="font-mono">subscriptions</span> 가 아닙니다. 축 경계라는
+        취지는 같지만 <b>그 문장을 접근권 축의 근거로 넓혀 읽지는 마십시오.</b>
       </p>
     </div>
   );
