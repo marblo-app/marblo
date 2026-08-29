@@ -12,13 +12,24 @@
 // `user_key`(계정)와 `install_key`(설치)를 나란히 두는 "통합 테이블" 이다.
 // 그 설계는 폐기됐다. 이유는 취향이 아니라 **우리가 이미 배포해 둔 약속**이다.
 //
-//   v3/src/components/legal/privacyContent.tsx:95  (한국어 · "사용량·비용 기록")
-//     "위 비식별 지표와는 별도 테이블이고, **두 기록이 공유하는 조인 키는
-//      없습니다**(위 기록의 내부 식별자는 가명입니다)."
-//   v3/src/components/legal/privacyContent.tsx:210 (English · 같은 문단)
-//     "It lives in a separate table from the de-identified metrics above, and
-//      **the two share no join key** (the internal ids on those rows are
-//      pseudonyms)."
+//   v3/src/components/legal/privacyContent.tsx · 항목 "사용량·비용 기록 (계정
+//   연결)" (ko 본문)
+//     "연결한 결과는 **통계 분석에만** 쓰이고, 특정 개인을 알아보거나 특정
+//      계정이 무엇을 했는지 **되짚는 데는 쓰지 않습니다**." 그리고 "그 값을
+//      원래 정보로 되돌리는 데 필요한 정보는 연결된 데이터가 저장되는 곳에
+//      두지 않고 따로 보관합니다."
+//   같은 항목 (en 본문)
+//     "used **only for statistical analysis**, never to identify a particular
+//      person or to **retrace what a particular account did**."
+//
+// ★2026-08-29 인용 이전(ticket O9iJMtgGy5glQ2oESvRN · 조사 #1316): 이 자리는
+//   원래 "두 기록이 공유하는 조인 키는 없습니다 / the two share no join key" 를
+//   인용했다. 사장님 결정(B안)으로 그 문장은 결합 고지로 **교체**됐다.
+//   ★**이 파일의 규칙은 그대로 산다.** 방침이 "연결하는 경우가 있다" 고 적었어도,
+//   그 연결이 허용되는 자리는 여전히 링크표 하나뿐이고 파생 프로필 테이블은
+//   아니다 — 방침이 동시에 "되짚는 데는 쓰지 않는다" 고 적었기 때문이다. 두
+//   프로필을 한 행에 합치면 되짚기가 상시 가능해지고 그 문장이 거짓이 된다.
+//   ★행 번호로 인용하지 마라 — privacyContent.tsx 는 계속 움직인다.
 //
 // `user_key` 와 `install_key` 를 한 행에 담는 순간 그 행 자체가 조인 키가 된다.
 // 가명화(analyticsPseudonym.ts)로 events↔cost_logs 다리를 끊어 놓고, 파생
@@ -37,7 +48,8 @@
 //
 // ★반대로, **계정축 안에서의 조인은 허용된다.**
 //   analytics_account_profile ↔ cost_logs ↔ analytics_purchase 는 정상이다.
-//   같은 방침 문단이 그 기록만은 계정에 붙는다고 명시한다(privacyContent.tsx:95):
+//   같은 방침 항목이 그 기록만은 계정에 붙는다고 명시한다
+//   (privacyContent.tsx · "사용량·비용 기록 (계정 연결)"):
 //     "이 기록만은 성격상 익명일 수 없습니다 — 본인 지출을 본인에게
 //      보여드리려면 계정과 이어져 있어야 하기 때문입니다."
 //   금지된 것은 딱 하나, **두 축을 잇는 것**이다.
@@ -1817,7 +1829,8 @@ export const INSTALL_PROFILE_SCHEMA: ReadonlyArray<BqField> = [
     mode: "REQUIRED",
     description:
       "익명 설치 축 키. ★이 테이블에 user_key/uid/이메일을 추가하지 마라 — " +
-      "그 순간 처리방침이 없다고 고지한 조인 키가 생긴다(privacyContent.tsx:95/210).",
+      "그 순간 처리방침이 '되짚는 데는 쓰지 않는다' 고 고지한 되짚기가 " +
+      "가능해진다(privacyContent.tsx · '사용량·비용 기록 (계정 연결)').",
   },
   {
     name: "id_scheme",
@@ -1961,7 +1974,7 @@ export const ACCOUNT_PROFILE_SCHEMA: ReadonlyArray<BqField> = [
     mode: "REQUIRED",
     description:
       "계정 uid. ★이 테이블에 install_key/ga_key 를 추가하지 마라 — 익명축과 " +
-      "잇는 조인 키가 된다(privacyContent.tsx:95/210).",
+      "잇는 조인 키가 된다(privacyContent.tsx · '사용량·비용 기록 (계정 연결)').",
   },
   {
     name: "is_admin",
@@ -2070,7 +2083,8 @@ export function assertAxisPurity(
         throw new Error(
           `[analyticsProfiles] ${table} 에 반대 축 컬럼 '${path}${f.name}' 이 ` +
             "있다. 두 축을 잇는 조인 키를 만들지 마라 — " +
-            "v3/src/components/legal/privacyContent.tsx:95/210 참조."
+            "v3/src/components/legal/privacyContent.tsx 의 항목 " +
+            "'사용량·비용 기록 (계정 연결)' 참조."
         );
       }
       if (f.fields) walk(f.fields, `${path}${f.name}.`);

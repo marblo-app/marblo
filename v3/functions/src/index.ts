@@ -14753,10 +14753,13 @@ export const mirrorMarketingContactsToBq = functions.https.onCall(
 // ════════════════════════════════════════════════════════════════════════════
 //
 // ★★ 축이 둘인 이유와 그 근거는 analyticsProfiles.ts 파일 머리에 있다.
-//    한 줄 요약: 배포된 개인정보처리방침이 "두 기록이 공유하는 조인 키는
-//    없습니다"(v3/src/components/legal/privacyContent.tsx:95, EN :210) 라고
-//    적었다. 그래서 익명축(install_key)과 계정축(user_key)은 **다른 테이블**이고
-//    서로 조인하지 않는다. 합치지 마라.
+//    한 줄 요약: 배포된 개인정보처리방침이 연결 결과를 "통계 분석에만 쓰고
+//    특정 계정이 무엇을 했는지 되짚는 데는 쓰지 않는다" 고 적었다
+//    (v3/src/components/legal/privacyContent.tsx · 항목 "사용량·비용 기록
+//    (계정 연결)"). 그래서 익명축(install_key)과 계정축(user_key)은 **다른
+//    테이블**이고 서로 조인하지 않는다. 합치지 마라.
+//    ★2026-08-29(ticket O9iJMtgGy5glQ2oESvRN): 인용 문장이 "두 기록이 공유하는
+//    조인 키는 없습니다" 에서 위 문장으로 **교체**됐다 — 규칙은 그대로다.
 //
 // ★원본은 건드리지 않는다. 아래 쿼리는 전부 읽기 전용 SELECT 다 —
 //  events / agent_heartbeats / task_outcomes / install_attribution / cost_logs.
@@ -15385,7 +15388,8 @@ export async function buildAnalyticsProfileTablesInternal(
   notes.push(
     "★익명축(analytics_user_daily / analytics_install_profile)과 계정축" +
       "(analytics_account_profile)은 조인하지 않는다. 조인 키를 만들지도 마라 — " +
-      "privacyContent.tsx:95(EN :210)."
+      "privacyContent.tsx 의 '사용량·비용 기록 (계정 연결)' 항목이 연결 결과를 " +
+      "'통계 분석에만 쓰고 되짚는 데는 쓰지 않는다' 고 고지한다."
   );
   notes.push(
     "first_visit_at(웹 첫 방문)은 GA4 export 리전이 달라 이 쿼리에서 채우지 " +

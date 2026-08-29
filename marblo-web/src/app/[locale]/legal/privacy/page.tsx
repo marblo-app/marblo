@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import LegalPageLayout from "@/components/LegalPageLayout";
 
-const LAST_UPDATED = "2026-07-14";
+const LAST_UPDATED = "2026-08-29";
 
 export default function PrivacyPolicyPage() {
   const t = useTranslations("footer");
@@ -51,9 +51,19 @@ export default function PrivacyPolicyPage() {
         <li>결제 처리 및 환불 처리</li>
         <li>법령상 의무 이행 (전자상거래법, 부가가치세법 등)</li>
         <li>
-          서비스 개선을 위한 통계 분석 (식별 가능 형태로 저장하지 않습니다)
+          서비스 개선을 위한 통계 분석 (개인을 알아볼 수 없도록 처리해
+          이용합니다)
         </li>
       </ul>
+      <p>
+        회사는 위 통계 분석을 위해 <b>서비스 이용 기록과 웹사이트 방문 기록을,
+        개인을 알아볼 수 없도록 처리한 식별값으로 연결해</b> 이용합니다. 어떤
+        경로로 서비스를 알게 되었고 그 경로가 실제로 도움이 되었는지를 전체
+        통계로 확인하기 위한 것이며, 특정 개인을 알아보거나 특정 회원이 무엇을
+        했는지 되짚는 데는 이용하지 않습니다. 연결에 쓰는 식별값을 원래 정보로
+        되돌리는 데 필요한 정보는 연결된 데이터가 저장되는 곳에 두지 않고 따로
+        보관합니다.
+      </p>
 
       <h2>3. 개인정보의 보유 및 이용 기간</h2>
       <ul>
@@ -271,6 +281,11 @@ export default function PrivacyPolicyPage() {
         <li>
           접근 권한 최소화: 개인정보에 접근 가능한 인원을 필요 최소한으로
           제한하며 정기적으로 권한을 점검합니다.
+        </li>
+        <li>
+          분리 보관: 통계 분석을 위해 연결한 기록(제2항)의 경우, 연결에 쓰인
+          식별값을 원래 정보로 되돌리는 데 필요한 정보를 그 데이터가 저장되는
+          곳과 분리해 보관합니다.
         </li>
       </ul>
 

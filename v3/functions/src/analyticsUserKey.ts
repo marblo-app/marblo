@@ -27,8 +27,13 @@
  * 마라. 두 축을 잇는 자리는 `marblo_identity.analytics_user_install` **하나뿐**
  * 이고(personAxis.ts), 그 자리는 `PERSON_AXIS_EFFECTIVE_FROM` 게이트가 열려
  * 있을 때만 채워진다. 근거: 배포된 처리방침
- * v3/src/components/legal/privacyContent.tsx:127 (EN :246 — "두 기록이 공유하는
- * 조인 키는 없습니다"). ★처리방침을 손대면 이 행 번호부터 다시 맞춰라.
+ * v3/src/components/legal/privacyContent.tsx 의 항목 "사용량·비용 기록 (계정
+ * 연결)" — "연결한 결과는 통계 분석에만 쓰이고, 특정 개인을 알아보거나 특정
+ * 계정이 무엇을 했는지 되짚는 데는 쓰지 않습니다".
+ * ★2026-08-29(ticket O9iJMtgGy5glQ2oESvRN): 원래 인용은 "두 기록이 공유하는
+ * 조인 키는 없습니다" 였다. 결합 고지(B안)로 **교체**됐다 — 근거 문장이 바뀐
+ * 것이고 축 경계 규칙 자체는 그대로다. ★행 번호로 인용하지 마라(항목 이름으로
+ * 가리킨다). 처리방침을 손대면 이 인용부터 다시 맞춰라.
  *
  * ★그 게이트는 **이 파일의 조건이 아니다.** 게이트가 닫혀 있으면 사람 축(링크표
  * ·뷰)이 0행이라는 사실은 그대로지만, analytics_purchase 는 성격상 익명일 수

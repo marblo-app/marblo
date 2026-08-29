@@ -1168,7 +1168,8 @@ export function buildPersonAxisEraseSql(projectId: string): string {
  * 링크가 만들어진 고지의 버전.
  *
  * ★정본은 `v3/src/services/privacyClarification.ts` 의
- * `PRIVACY_CLARIFICATION_VERSION` 이다(현재 "2026-08-21"). 렌더러 모듈이라
+ * `PRIVACY_CLARIFICATION_VERSION` 이다(현재 "2026-08-29" — 3차 결합 고지).
+ * 렌더러 모듈이라
  * functions 에서 import 할 수 없어 값을 한 벌 더 둔다 — **둘이 갈라지면
  * 링크가 어느 고지 하에서 만들어졌는지 표가 거짓말을 한다.** 저쪽을 올릴 때
  * 여기도 같이 올려라.
@@ -1176,7 +1177,7 @@ export function buildPersonAxisEraseSql(projectId: string): string {
  * ★`CURRENT_POLICY_VERSION`(동의 재프롬프트 축, "2026-06-01")이 아니다.
  * 이 링크를 정당화하는 것은 재동의가 아니라 1회성 고지다(설계 §5.4-a 거래 조건).
  */
-export const PERSON_AXIS_LINK_POLICY_VERSION = "2026-08-21";
+export const PERSON_AXIS_LINK_POLICY_VERSION = "2026-08-29";
 
 /**
  * ★배선 뒤에도 각 설치는 **다음에 인증할 때부터** 붙는다(forward-only).

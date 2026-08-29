@@ -464,7 +464,11 @@ test("★왜 D30 분모를 보정하지 않았는지 화면이 말한다 (축 �
   const t = textOf(render());
   assert.match(t, /보정하지 않았습니다/);
   assert.match(t, /assertAxisPurity/);
-  assert.match(t, /공유하는 조인 키는 없습니다/);
+  // ★2026-08-29(ticket O9iJMtgGy5glQ2oESvRN): 인용 문장이 "두 기록이 공유하는
+  //   조인 키는 없습니다" 에서 결합 고지 문면으로 교체됐다. 규칙이 아니라 근거
+  //   문장이 바뀐 것이므로, 여기서 고정하는 것도 **새 근거 문장**이다.
+  assert.match(t, /되짚는 데는 쓰지 않습니다/);
+  assert.match(t, /통계 분석에만/);
 });
 
 test("접근권 봉투가 없으면 0 이 아니라 무엇을 기다리는지 적는다", () => {

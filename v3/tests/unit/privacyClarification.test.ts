@@ -149,7 +149,7 @@ describe("★고지 배너는 동의를 받지 않는다 (구조 가드)", () =>
   });
 });
 
-describe("★2차 고지 — 버전을 안 올린 대신 배너가 뜬다 (ticket vilkbSrnzbAv4ezbZMRT)", () => {
+describe("★2·3차 고지 — 버전을 안 올린 대신 배너가 뜬다 (vilkbSrnzbAv4ezbZMRT / O9iJMtgGy5glQ2oESvRN)", () => {
   const SRC = path.resolve(__dirname, "../../src");
   const read = (rel: string) => readFileSync(path.join(SRC, rel), "utf-8");
 
@@ -168,28 +168,41 @@ describe("★2차 고지 — 버전을 안 올린 대신 배너가 뜬다 (ticke
     );
   });
 
-  it("ko·en 배너 문구가 같은 사실을 말한다 — 약속 철회 + 가명 구분값", () => {
+  it("ko·en 배너 문구가 같은 사실을 말한다 — 약속 철회 + 무엇을 하는지 + 1회 노출", () => {
     const ko = read("locales/ko/legal.ts");
     const en = read("locales/en/legal.ts");
-    const koBody = /"legal\.clarification\.body":\s*\n?\s*"([^"]+)"/.exec(ko)?.[1];
-    const enBody = /"legal\.clarification\.body":\s*\n?\s*"([^"]+)"/.exec(en)?.[1];
+    const koBody = /"legal\.clarification\.body":\s*\n?\s*"([^"]+)"/.exec(
+      ko,
+    )?.[1];
+    const enBody = /"legal\.clarification\.body":\s*\n?\s*"([^"]+)"/.exec(
+      en,
+    )?.[1];
     expect(koBody).toBeTruthy();
     expect(enBody).toBeTruthy();
 
     // (1) 약속을 거둔다는 사실이 양쪽에 있다.
     expect(koBody).toMatch(/거둡니다/);
     expect(enBody).toMatch(/taking that back/);
-    // (2) 무엇이 새로 적히는지가 양쪽에 있다.
-    expect(koBody).toMatch(/가명 구분값/);
-    expect(enBody).toMatch(/pseudonymous key/);
-    // (3) 과장 금지 — 계정 식별자 자체는 저장하지 않는다는 한 줄도 양쪽에 있다.
-    expect(koBody).toMatch(/계정 식별자 자체는 여전히 저장하지 않/);
-    expect(enBody).toMatch(/account identifier itself is still never stored/);
+    // (2) ★3차(결합 고지): 무엇을 하는지가 양쪽에 있다 — 두 기록을 "연결한다".
+    //     구현이 아니라 하는 일을 적는다(사장님 지시 2026-08-29). 용어 금지는
+    //     아래 "개발 용어로 새지 않는다" 가 따로 고정한다.
+    expect(koBody).toMatch(/연결/);
+    expect(enBody).toMatch(/connect/);
+    // (3) 과장 금지 — 새로 받는 정보는 없다는 한 줄도 양쪽에 있다.
+    expect(koBody).toMatch(/새로 받는 정보는 없/);
+    expect(enBody).toMatch(/collect nothing new/);
+    // (4) ★1회만 뜨고 다시 안 뜬다는 것이 문구에서 분명해야 한다.
+    expect(koBody).toMatch(/한 번만 보여드리고 다시 뜨지 않습니다/);
+    expect(enBody).toMatch(/once and it will not come back/);
   });
 
   it("문구가 개발 용어로 새지 않는다 (이용자 언어 — #1080 ③안 규약)", () => {
-    const bodies = [read("locales/ko/legal.ts"), read("locales/en/legal.ts")].map(
-      (f) => /"legal\.clarification\.body":\s*\n?\s*"([^"]+)"/.exec(f)?.[1] ?? "",
+    const bodies = [
+      read("locales/ko/legal.ts"),
+      read("locales/en/legal.ts"),
+    ].map(
+      (f) =>
+        /"legal\.clarification\.body":\s*\n?\s*"([^"]+)"/.exec(f)?.[1] ?? "",
     );
     for (const body of bodies) {
       expect(body).not.toMatch(/HMAC|솔트|\bsalt\b|조인 키|join key|user_key/i);
@@ -200,8 +213,10 @@ describe("★2차 고지 — 버전을 안 올린 대신 배너가 뜬다 (ticke
     // 본문 첫 절이 이번 고지의 전부다. 한 줄 truncate 로 돌리면 배너는 떠도
     // 알리는 일은 실패한다.
     const notice = read("components/legal/PrivacyClarificationNotice.tsx");
-    const bodySpan = /<span className="([^"]*)">\s*\{t\("legal\.clarification\.body"\)\}/
-      .exec(notice)?.[1];
+    const bodySpan =
+      /<span className="([^"]*)">\s*\{t\("legal\.clarification\.body"\)\}/.exec(
+        notice,
+      )?.[1];
     expect(bodySpan).toBeTruthy();
     expect(bodySpan).toMatch(/line-clamp-2/);
     expect(bodySpan).not.toMatch(/truncate/);

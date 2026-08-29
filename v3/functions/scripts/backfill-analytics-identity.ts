@@ -10,9 +10,16 @@
 //   링크축  analytics_user_install          (user_key, install_key) 쌍 ★단 하나
 //   ★두 축을 잇는 자리는 위 링크표 **하나뿐**이고, 그마저 PERSON_AXIS_EFFECTIVE_FROM
 //     게이트가 열려 있을 때만 채워진다(#1084). 그 밖에서는 잇지 않는다.
-//     근거: 배포된 처리방침 privacyContent.tsx:127 (EN :246)
-//           "두 기록이 공유하는 조인 키는 없습니다 / the two share no join key"
-//           — 이 문장은 개정(#1080)에서 지운 게 아니라 범위를 넓혀 유지했다.
+//     근거: 배포된 처리방침 privacyContent.tsx, 항목 "사용량·비용 기록 (계정
+//           연결)" — "연결한 결과는 통계 분석에만 쓰이고, 특정 개인을 알아보거나
+//           특정 계정이 무엇을 했는지 되짚는 데는 쓰지 않습니다"
+//           (EN: "used only for statistical analysis, never to identify a
+//            particular person or to retrace what a particular account did").
+//     ★2026-08-29(#1316 후속, ticket O9iJMtgGy5glQ2oESvRN): 이 자리는 원래
+//       "두 기록이 공유하는 조인 키는 없습니다 / the two share no join key" 를
+//       인용했다. 그 문장은 결합 고지(B안)로 **교체**됐다 — 규칙이 사라진 게
+//       아니라 근거 문장이 바뀐 것이다. 규칙은 그대로다.
+//     ★행 번호로 인용하지 마라. privacyContent.tsx 는 계속 움직인다.
 //
 // 이 스크립트는 `user_key` 를 만들지 않는다. 컬럼 자리도 만들지 않는다 —
 // 빈 컬럼이 있으면 다음 사람이 "채우면 되겠네" 로 읽는다. 왜 없는지는

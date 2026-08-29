@@ -27,7 +27,9 @@
 // `TeamAuditEvent` 에는 `text`/`message`/`instruction`/`result` 자리가 아예 없다.
 // null 로 두지 않는 이유: 자리가 있으면 언젠가 누가 채운다. 배포된 처리방침이
 // "코드 내용 · 사용자 작성 텍스트 · 파일 내용" 을 미수집 항목으로 고지하고 있고
-// (v3/src/components/legal/privacyContent.tsx:150), 응답에 실으면 그 문장이 거짓이 된다.
+// (v3/src/components/legal/privacyContent.tsx 의 항목 "미수집 항목" — ★행
+// 번호로 인용하지 마라, 그 파일은 계속 움직인다), 응답에 실으면 그 문장이
+// 거짓이 된다.
 //
 // ── ★금액·토큰 수치가 **하나도 없다** ────────────────────────────────────────
 // `projectAudit.buildProjectAudit` 는 `workload[].totalCost` 를 낸다. 그걸 그대로

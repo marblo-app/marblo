@@ -78,12 +78,46 @@
  *     :127 / :246 "두 기록이 공유하는 조인 키는 없습니다" 를 근거로 인용한다.
  *     그 문장은 이번에 지운 게 아니라 **범위를 넓혀 유지**했다(계정 파생 키까지
  *     전부 가명 + 솔트는 데이터가 저장되는 곳에 없음).
+ *     ★2026-08-29 무효: 그 문장은 **다섯**(아래)에서 교체됐다. 지금 축 경계의
+ *     근거 문장은 "연결한 결과는 통계 분석에만 쓰이고, 특정 개인을 알아보거나
+ *     특정 계정이 무엇을 했는지 되짚는 데는 쓰지 않습니다" 다.
  *   - ★정정(2026-08-21): 이 자리에는 원래 "AnalyticsIdKind 에서 `user` 를 뺐다"
  *     라고 적혀 있었다. 그 뒤 사람 축 구현(PR #1084)이 `user` kind 를 **추가**해
  *     지금은 틀린 말이다. 지금 참인 문장은 이것이다 — `user` kind 는 **있고**,
  *     다만 PERSON_AXIS_EFFECTIVE_FROM 게이트가 닫혀 있으면 사람 축 데이터가
  *     0행이며, 축 경계는 여전히 유효하다: 이벤트 행에는 `user_key` 컬럼이 없고
  *     두 축은 링크표(analytics_user_install) + 뷰로만 이어진다.
+ *
+ * ★변경 다섯(ticket O9iJMtgGy5glQ2oESvRN / 조사·초안 UXG62ooEMza9kLfnGage) —
+ * **결합 고지로 문면 교체(B안)**. 넷과 같은 종류다: 약속을 거두는 변경이라
+ * 판정을 이 파일 안에서 끝내지 않았고, 사장님이 직접 결정하셨다.
+ *   - 무엇이 바뀌었나: "두 기록이 공유하는 조인 키는 없습니다 / the two share
+ *     no join key" 를 **지우지 않고 교체**했다. 유입 경로의 효과를 통계로 보기
+ *     위해 서비스 이용 기록과 웹사이트 방문 기록을 **연결하는 경우가 있다**는
+ *     사실을, 그리고 그 연결에 쓰는 식별값을 원래 정보로 되돌리는 데 필요한
+ *     정보를 **분리 보관**한다는 사실을 적었다. 삭제(A안)를 택하지 않은 이유는
+ *     그게 "약속을 조용히 거두는" 모양이기 때문이다.
+ *   - ★문면에 구현 용어를 쓰지 않는다(사장님 지시 2026-08-29): "조인 키"·
+ *     "HMAC"·"솔트"·"가명키" 는 방침에 넣지 않는다. 이 문서는 사용자가 읽는
+ *     문서다 — **무엇을 하는지**를 일상어로 적고 어떻게 구현하는지는 적지
+ *     않는다. 대신 법정 기재사항 셋(무엇을·왜·어떻게 보호하나)은 일상어로라도
+ *     반드시 남긴다: 이용 기록·방문 기록 / 통계 분석 / 되돌리는 값 분리 보관.
+ *   - ★결정됨(사장님, 2026-08-29): **CURRENT_POLICY_VERSION 은 올리지 않는다.**
+ *     넷과 같은 선례를 따라 privacyClarification.ts 의
+ *     PRIVACY_CLARIFICATION_VERSION 만 "2026-08-29" 로 올려 **1회성 배너**로
+ *     알린다. 여기서도 배너는 이 결정의 **조건**이다 — 빠뜨리면 "약속을 거뒀는데
+ *     아무도 모르는" 상태가 된다.
+ *   - ★코드 인용을 같이 옮겼다. 옛 문장을 축 경계 규칙의 근거로 인용하던
+ *     자리(analyticsPseudonym.ts / analyticsUserKey.ts / analyticsProfiles.ts /
+ *     scripts/backfill-analytics-identity.ts / functions/src/index.ts /
+ *     marblo-web AnalyticsPanel.tsx·BetaScorecard.test.tsx)는 전부 새 문장을
+ *     가리킨다. ★**축 경계 규칙 자체는 그대로 살아 있다** — 사라진 것은 규칙이
+ *     아니라 근거 문장이다.
+ *   - ★인용은 행 번호가 아니라 **항목 이름**("사용량·비용 기록 (계정 연결)")으로
+ *     한다. 이 파일은 계속 움직이고, 행 번호 인용은 이미 두 번 어긋났다.
+ *   - ★웹 방침도 같은 커밋에서 고쳤다
+ *     (marblo-web/src/app/[locale]/legal/privacy/page.tsx §2 · §10).
+ *     방침이 둘이라 한쪽만 고치면 두 문서가 서로 다른 약속을 하게 된다.
  */
 
 export interface PrivacyRow {
@@ -106,9 +140,15 @@ const KO: PrivacyContent = {
       <b>제품 사용 분석에는 계정 식별자가 없습니다</b> — 익명 설치 ID 와,
       회원님을 다른 이용자와 구분하는 <b>가명 구분값</b>으로만 기록되고,
       프로젝트·에이전트·티켓 ID 같은 앱 내부 식별자도 그 기록에서는 가명으로
-      적혀 <b>사용량·비용 기록과 이어붙일 수 없습니다</b>. 다만{" "}
-      <b>토큰 사용량·비용 기록</b>은 계정에 연결됩니다: 회원님께 본인
-      사용량·요금을 되돌려 보여드리려면 그래야 하기 때문입니다. 정리하면{" "}
+      적힙니다. 어떤 경로로 마블로를 알게 되셨는지를 통계로 보기 위해{" "}
+      <b>
+        서비스 이용 기록과 웹사이트 방문 기록을 개인을 알아볼 수 없도록 처리한
+        식별값으로 연결하는 경우가 있고
+      </b>
+      , 그 식별값을 원래 정보로 되돌리는 데 필요한 정보는 연결된 데이터가
+      저장되는 곳과 분리해 보관합니다. 그리고 <b>토큰 사용량·비용 기록</b>은
+      계정에 연결됩니다: 회원님께 본인 사용량·요금을 되돌려 보여드리려면 그래야
+      하기 때문입니다. 정리하면{" "}
       <b>분석 기록은 식별 불가, 사용량·요금 기록은 본인 것</b>입니다. 동의하지
       않아도 모든 기능은 동일하게 작동하며, 어느 경로로도 코드·BYOK 키·사용자
       입력 텍스트는 전송되지 않습니다. (마블로 웹사이트는 앱과 별개로 GA4를
@@ -119,12 +159,12 @@ const KO: PrivacyContent = {
     {
       label: "비식별 1차 지표 (BigQuery)",
       value:
-        "마블로 자체 운영 품질을 위해 식별정보를 제거한 비식별 데이터만 우리 GCP(BigQuery)에 상시 수집합니다. 수집 항목: 익명 설치 ID(계정 UID 아님), 이벤트 종류, 토큰/지속시간 등 집계 지표. 계정 식별자·코드·입력 텍스트는 포함되지 않으며, 에러 메시지는 송신 전 PII 마스킹됩니다. ★계정 식별자(UID) 자체는 앱도 보내지 않고 서버도 저장하지 않습니다. 다만 기기 단위가 아니라 사람 단위로 볼 수 있어야 해서, 로그인한 계정의 식별자를 그대로 쓰지 않고 가명처리해 만든 가명 구분값을 이 기록에 함께 적습니다. 이 값은 회원님을 다른 이용자와 구분하는 데만 쓰이며, 이 값만으로는 회원님이 누구인지 알 수 없습니다 — 이 값을 원래의 계정 식별자로 되돌리는 데 필요한 정보(추가정보)를 이 데이터가 저장되는 곳에 두지 않고 분리해 보관하기 때문입니다. UID 자체는 이 기록 어디에도 남지 않습니다. ★이것은 수집 항목이 늘어나는 변경이 아닙니다: 회원님께 새로 받는 정보는 없으며, 이미 로그인 여부를 확인할 때만 쓰고 저장하지 않던 값을 가명처리한 것뿐입니다. 프로젝트·에이전트·티켓 ID 처럼 앱 내부에서 쓰는 식별자도 같은 방식으로 이 기록에는 가명으로만 적힙니다 — 그래서 이 기록과 아래 사용량·비용 기록을 이어 붙여 계정을 알아내는 일이 성립하지 않습니다. 이 가명 구분값으로 할 수 있게 되는 일은 두 가지입니다: 사람 단위로 이용 흐름을 보는 것과, 통계에서 운영자 본인의 활동을 빼는 것. 반대로 로그인하지 않은 상태의 사용은 여전히 사람 단위로 묶이지 않습니다 — 계정이 없어 구분값을 만들 근거가 없기 때문입니다. 설치 ID 는 기기·설치별로 새로 생성되며 앱 데이터를 지우면 새 값이 됩니다. 이용 목적: 서비스 품질 분석과 함께, 이 비식별 데이터에서 파생된 특징(모델·소요시간·성공 여부 등)을 모델 라우팅(어떤 작업을 어떤 모델에 배정할지) 품질 개선에 이용합니다 — 프롬프트·응답 원문은 여기에 포함되지 않습니다.",
+        "마블로 자체 운영 품질을 위해 식별정보를 제거한 비식별 데이터만 우리 GCP(BigQuery)에 상시 수집합니다. 수집 항목: 익명 설치 ID(계정 UID 아님), 이벤트 종류, 토큰/지속시간 등 집계 지표. 계정 식별자·코드·입력 텍스트는 포함되지 않으며, 에러 메시지는 송신 전 PII 마스킹됩니다. ★계정 식별자(UID) 자체는 앱도 보내지 않고 서버도 저장하지 않습니다. 다만 기기 단위가 아니라 사람 단위로 볼 수 있어야 해서, 로그인한 계정의 식별자를 그대로 쓰지 않고 가명처리해 만든 가명 구분값을 이 기록에 함께 적습니다. 이 값은 회원님을 다른 이용자와 구분하는 데만 쓰이며, 이 값만으로는 회원님이 누구인지 알 수 없습니다 — 이 값을 원래의 계정 식별자로 되돌리는 데 필요한 정보(추가정보)를 이 데이터가 저장되는 곳에 두지 않고 분리해 보관하기 때문입니다. UID 자체는 이 기록 어디에도 남지 않습니다. ★이것은 수집 항목이 늘어나는 변경이 아닙니다: 회원님께 새로 받는 정보는 없으며, 이미 로그인 여부를 확인할 때만 쓰고 저장하지 않던 값을 가명처리한 것뿐입니다. 프로젝트·에이전트·티켓 ID 처럼 앱 내부에서 쓰는 식별자도 같은 방식으로 이 기록에는 가명으로만 적힙니다 — 그래서 이 기록에 적힌 값만으로는 회원님이 누구인지 알 수 없습니다. 이 기록을 아래 사용량·비용 기록 및 웹사이트 방문 기록과 통계 목적으로 연결하는 경우는 아래 항목에 적어 두었습니다. 이 가명 구분값으로 할 수 있게 되는 일은 두 가지입니다: 사람 단위로 이용 흐름을 보는 것과, 통계에서 운영자 본인의 활동을 빼는 것. 반대로 로그인하지 않은 상태의 사용은 여전히 사람 단위로 묶이지 않습니다 — 계정이 없어 구분값을 만들 근거가 없기 때문입니다. 설치 ID 는 기기·설치별로 새로 생성되며 앱 데이터를 지우면 새 값이 됩니다. 이용 목적: 서비스 품질 분석과 함께, 이 비식별 데이터에서 파생된 특징(모델·소요시간·성공 여부 등)을 모델 라우팅(어떤 작업을 어떤 모델에 배정할지) 품질 개선에 이용합니다 — 프롬프트·응답 원문은 여기에 포함되지 않습니다.",
     },
     {
       label: "사용량·비용 기록 (계정 연결)",
       value:
-        "구독·요금 정산과 회원님 본인의 사용량 확인(설정 → 사용량)을 위해, 에이전트 실행의 토큰 수·추정 비용·모델명·시각을 계정에 연결해 기록합니다. 이 기록만은 성격상 익명일 수 없습니다 — 본인 지출을 본인에게 보여드리려면 계정과 이어져 있어야 하기 때문입니다. 위 비식별 지표와는 별도 테이블이고, 두 기록이 공유하는 조인 키는 없습니다 — 즉 두 기록을 서로 이어 붙일 수 있는 공통 항목이 없습니다. 위 기록에 적히는 식별자는 계정에서 만든 가명 구분값까지 포함해 전부 가명이고, 그것을 원래대로 되돌리는 데 필요한 정보는 그 데이터가 저장되는 곳에 두지 않기 때문입니다. 즉 이 기록은 회원님 본인에게 본인 사용량을 보여드리는 데 쓰이고, 위 분석 기록을 특정 계정으로 되짚는 데는 쓰이지 않습니다. 코드·프롬프트·응답 원문은 여기에도 포함되지 않습니다.",
+        "구독·요금 정산과 회원님 본인의 사용량 확인(설정 → 사용량)을 위해, 에이전트 실행의 토큰 수·추정 비용·모델명·시각을 계정에 연결해 기록합니다. 이 기록만은 성격상 익명일 수 없습니다 — 본인 지출을 본인에게 보여드리려면 계정과 이어져 있어야 하기 때문입니다. 이 기록은 위 비식별 지표와는 별도 테이블에 보관합니다. 다만 어떤 경로로 마블로를 알게 되셨고 그 경로가 실제로 도움이 됐는지를 통계로 확인하기 위해, 서비스 이용 기록과 웹사이트 방문 기록을 개인을 알아볼 수 없도록 처리한 식별값으로 연결하는 경우가 있습니다. 이때 쓰는 식별값은 원래 정보가 아니며, 그 값을 원래 정보로 되돌리는 데 필요한 정보는 연결된 데이터가 저장되는 곳에 두지 않고 따로 보관합니다. 연결한 결과는 통계 분석에만 쓰이고, 특정 개인을 알아보거나 특정 계정이 무엇을 했는지 되짚는 데는 쓰지 않습니다. 코드·프롬프트·응답 원문은 여기에도 포함되지 않습니다.",
     },
     {
       label: "학습데이터 기여 (선택 · 원문)",
@@ -223,9 +263,15 @@ const EN: PrivacyContent = {
       <b>Product usage analytics contain no account identifiers</b> — rows are
       keyed by an anonymous install ID and a <b>pseudonymous key</b> that only{" "}
       separates one person from another, and the app's own internal ids
-      (project, agent, ticket) appear there only as pseudonyms, so those rows{" "}
-      <b>cannot be joined to your usage and cost records</b>. One record works
-      differently: <b>token usage and cost</b> is linked to your account,
+      (project, agent, ticket) appear there only as pseudonyms. To see in
+      aggregate how people came to Marblo,{" "}
+      <b>
+        we sometimes connect service usage records with website visit records
+        using identifiers processed so that they cannot identify anyone
+      </b>
+      , and the information needed to turn those identifiers back into the
+      original is kept apart from where the connected data lives. One record
+      works differently: <b>token usage and cost</b> is linked to your account,
       because showing you your own usage and billing requires it. In short:{" "}
       <b>analytics cannot identify you; usage and billing records are yours</b>.
       Every feature works identically whether or not you consent, and on no path
@@ -238,12 +284,12 @@ const EN: PrivacyContent = {
     {
       label: "De-identified first-party metrics (BigQuery)",
       value:
-        "For Marblo's own operational quality, only de-identified data with identifiers removed is collected continuously into our GCP (BigQuery). Collected: anonymous install ID (not the account UID), event type, and aggregate metrics like tokens/duration. Account identifiers, code, and input text are not included, and error messages are PII-masked before send. ★The account UID itself is withheld by the app and is never stored by our receiving function. So that we can look at these rows per person rather than per device, we do not write your account identifier itself; we write a pseudonymous key made from it instead. That key only separates one person from another — on its own it does not tell us who you are, because the information needed to turn it back into your account identifier is kept separately and not where this data is stored. The UID itself appears nowhere in these rows. ★This is not an expansion of what we collect: nothing new is asked of you, only a pseudonym made from a value we already saw and did not store while checking that you were signed in. The app's own internal ids (project, agent, ticket) are written here as pseudonyms in the same way — so joining these rows to the usage and cost records below to recover an account does not work. What this pseudonymous key makes possible is exactly two things: seeing how one person moves through the product, and leaving our own operator activity out of the stats. What it does not do: use while signed out is still not counted per person, because with no account there is nothing to make a pseudonym from. The install ID is generated per device/installation and becomes a new value if you clear app data. Purpose of use: service quality analysis, plus improving model routing quality (which task is assigned to which model) from features derived from this de-identified data (model, duration, success) — raw prompts and responses are never part of this.",
+        "For Marblo's own operational quality, only de-identified data with identifiers removed is collected continuously into our GCP (BigQuery). Collected: anonymous install ID (not the account UID), event type, and aggregate metrics like tokens/duration. Account identifiers, code, and input text are not included, and error messages are PII-masked before send. ★The account UID itself is withheld by the app and is never stored by our receiving function. So that we can look at these rows per person rather than per device, we do not write your account identifier itself; we write a pseudonymous key made from it instead. That key only separates one person from another — on its own it does not tell us who you are, because the information needed to turn it back into your account identifier is kept separately and not where this data is stored. The UID itself appears nowhere in these rows. ★This is not an expansion of what we collect: nothing new is asked of you, only a pseudonym made from a value we already saw and did not store while checking that you were signed in. The app's own internal ids (project, agent, ticket) are written here as pseudonyms in the same way — so the values written here do not, on their own, tell anyone who you are. Where we connect these rows with the usage and cost records below and with website visit records for statistics, that is described in the entry below. What this pseudonymous key makes possible is exactly two things: seeing how one person moves through the product, and leaving our own operator activity out of the stats. What it does not do: use while signed out is still not counted per person, because with no account there is nothing to make a pseudonym from. The install ID is generated per device/installation and becomes a new value if you clear app data. Purpose of use: service quality analysis, plus improving model routing quality (which task is assigned to which model) from features derived from this de-identified data (model, duration, success) — raw prompts and responses are never part of this.",
     },
     {
       label: "Usage & cost records (account-linked)",
       value:
-        "For subscription/billing reconciliation and for showing you your own usage (Settings → Usage), we record each agent run's token counts, estimated cost, model name, and timestamp linked to your account. This record cannot be anonymous by nature — showing you your own spend requires it to be tied to your account. It lives in a separate table from the de-identified metrics above, and the two share no join key — that is, the two records have no field in common that anyone could match them up on. Every identifier on those rows, including the one made from your account, is a pseudonym, and the information needed to turn those pseudonyms back is not kept where that data is stored. So this record is used to show you your own usage — not to trace the analytics rows back to an account. Code and raw prompts/responses are not included here either.",
+        "For subscription/billing reconciliation and for showing you your own usage (Settings → Usage), we record each agent run's token counts, estimated cost, model name, and timestamp linked to your account. This record cannot be anonymous by nature — showing you your own spend requires it to be tied to your account. We keep it in a separate table from the de-identified metrics above. That said, to see in aggregate how people came to Marblo and whether those paths actually helped, we sometimes connect service usage records with website visit records using identifiers that have been processed so that they cannot identify anyone. The values used for that connection are not the original information, and the information needed to turn them back into the original is kept separately — not where the connected data is stored. What the connection produces is used only for statistical analysis, never to identify a particular person or to retrace what a particular account did. Code and raw prompts/responses are not included here either.",
     },
     {
       label: "Training-data contribution (optional · raw text)",

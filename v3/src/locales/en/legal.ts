@@ -75,7 +75,7 @@ export const legal: Record<keyof typeof koLegal, string> = {
   //   banner stores nothing.
   "legal.clarification.label": "Your privacy policy has changed",
   "legal.clarification.body":
-    "We previously wrote that we would not analyse usage per person — we are taking that back: product usage analytics now also carry a pseudonymous key that tells you apart from other users. Your account identifier itself is still never stored, and we collect nothing new from you. Token usage and cost records stay linked to your account so we can show you your own usage and billing, as before.",
+    "We previously wrote that the two records could not be matched up — we are taking that back: to see in aggregate how people came to Marblo, we sometimes connect service usage records with website visit records using identifiers processed so that they cannot identify anyone. The information needed to turn those identifiers back into the original is kept separately, and the result is used only for statistical analysis. We collect nothing new from you and are not asking you to consent again — you will see this notice once and it will not come back.",
   "legal.clarification.viewDetails": "Details",
   "legal.clarification.dismiss": "Dismiss",
 };

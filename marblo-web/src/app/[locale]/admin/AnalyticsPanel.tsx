@@ -8413,13 +8413,20 @@ function ScorecardMetricCard({
  *
  * ★인용 정정 (ticket UXG62ooEMza9kLfnGage) — 여기 원래 "처리방침이 '두 기록이
  *   공유하는 조인 키는 없습니다' 라고 이미 고지했다" 라고만 적혀 있었다. 문장
- *   자체는 실재하지만 **어느 방침인지가 빠져 있었고, 우리에겐 방침이 둘이다.**
- *   전수 확인 결과:
- *     - ✅ **데스크톱 앱 인앱 처리방침** `v3/src/components/legal/privacyContent.tsx`
- *       (ko 본문 / en 본문) — 그 문장이 **있다.**
- *     - ❌ **웹 처리방침** `marblo-web/src/app/[locale]/legal/privacy/page.tsx`
- *       (§1~§14) — 그 문장은 **없다.** 웹 쪽 대응 문구는 §2 의 "서비스 개선을
- *       위한 통계 분석(식별 가능 형태로 저장하지 않습니다)" 이고 문면이 다르다.
+ *   자체는 실재했지만 **어느 방침인지가 빠져 있었고, 우리에겐 방침이 둘이다.**
+ *
+ * ★그리고 그 문장은 이제 **없다** (ticket O9iJMtgGy5glQ2oESvRN, 2026-08-29).
+ *   사장님 결정(B안)으로 결합 고지 문면으로 **교체**됐다. 지금 이 화면이
+ *   인용해야 하는 문장은 이것이다:
+ *     - **데스크톱 앱 인앱 처리방침** `v3/src/components/legal/privacyContent.tsx`
+ *       항목 "사용량·비용 기록 (계정 연결)" — "연결한 결과는 통계 분석에만
+ *       쓰이고, 특정 개인을 알아보거나 특정 계정이 무엇을 했는지 되짚는 데는
+ *       쓰지 않습니다."
+ *     - **웹 처리방침** `marblo-web/src/app/[locale]/legal/privacy/page.tsx` §2 —
+ *       같은 취지를 적는다("특정 개인을 알아보거나 특정 회원이 무엇을 했는지
+ *       되짚는 데는 이용하지 않습니다"). 이제 두 방침이 같은 약속을 한다.
+ *   ★**축 경계 규칙 자체는 그대로 살아 있다** — 사라진 건 규칙이 아니라 옛
+ *   근거 문장이다.
  *   ★인용 **범위**도 좁혀 적는다. 앱 방침의 그 문장이 짝지은 상대는
  *   **사용량·비용 기록**이지 Firestore `subscriptions` 가 아니다. 축 경계
  *   (익명축 ↔ 계정축)라는 취지는 같지만, 그 문장이 subscriptions 를 이름으로
@@ -8508,15 +8515,17 @@ export function BetaAccessExpiryWarning({
       </p>
       <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
         ★근거로 인용하던 &ldquo;두 기록이 공유하는 조인 키는 없습니다&rdquo; 는{" "}
-        <b>데스크톱 앱 개인정보처리방침</b>의 문장입니다(
-        <span className="font-mono">privacyContent.tsx</span>). 이 화면은 원래
-        출처를 안 밝히고 &lsquo;처리방침&rsquo; 이라고만 적었는데, <b>방침이 둘이라
-        그 말로는 어느 쪽인지 알 수 없었습니다</b> — 이 웹사이트의{" "}
-        <span className="font-mono">/legal/privacy</span> 방침에는 그 문장이{" "}
-        <b>없습니다</b>. 그리고 앱 방침의 그 문장이 짝지은 상대는{" "}
-        <b>사용량·비용 기록</b>이지 위의 Firestore{" "}
-        <span className="font-mono">subscriptions</span> 가 아닙니다. 축 경계라는
-        취지는 같지만 <b>그 문장을 접근권 축의 근거로 넓혀 읽지는 마십시오.</b>
+        <b>2026-08-29 개정에서 교체됐습니다.</b> 지금 축 경계의 근거는{" "}
+        <b>데스크톱 앱 개인정보처리방침</b>(
+        <span className="font-mono">privacyContent.tsx</span>)의 &lsquo;사용량·비용
+        기록(계정 연결)&rsquo; 항목입니다 — <b>연결한 결과는 통계 분석에만 쓰이고,
+        특정 계정이 무엇을 했는지 되짚는 데는 쓰지 않습니다.</b> 이 웹사이트의{" "}
+        <span className="font-mono">/legal/privacy</span> 방침 §2 도 같은 약속을
+        적습니다(개정 전에는 이 문장이 웹에 없어 어느 방침인지 알 수 없었습니다).
+        그리고 그 문장이 짝지은 상대는 <b>이용 기록·방문 기록</b>이지 위의
+        Firestore <span className="font-mono">subscriptions</span> 가 아닙니다.
+        축 경계라는 취지는 같지만{" "}
+        <b>그 문장을 접근권 축의 근거로 넓혀 읽지는 마십시오.</b>
       </p>
     </div>
   );

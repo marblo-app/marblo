@@ -782,7 +782,7 @@ test("★고지 버전은 재동의 축(CURRENT_POLICY_VERSION)이 아니라 고
   // privacyClarification.ts 의 PRIVACY_CLARIFICATION_VERSION 과 같아야 한다.
   // 이 값이 "2026-06-01"(CURRENT_POLICY_VERSION)로 바뀌면 링크표가 "어느 고지
   // 하에서 만들어졌나" 를 틀리게 말한다 — 설계 §5.4-a 의 거래 조건이 그 고지다.
-  assert.equal(PERSON_AXIS_LINK_POLICY_VERSION, "2026-08-21");
+  assert.equal(PERSON_AXIS_LINK_POLICY_VERSION, "2026-08-29");
   assert.notEqual(PERSON_AXIS_LINK_POLICY_VERSION, "2026-06-01");
 });
 
