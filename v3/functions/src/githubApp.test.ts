@@ -38,6 +38,7 @@ import {
   repoSlugKey,
   signSetupState,
   TEAM_COLLAB_PLANS,
+  TEAM_SEAT_ENTITLEMENTS,
   verifyMintedToken,
   verifyRepoInstallationBinding,
   verifySetupState,
@@ -55,7 +56,7 @@ const PROJECT_ID = "proj-1";
 const INSTALLATION_ID = "12345678";
 
 function project(
-  over: Partial<ProjectSnapshotForIssue> = {}
+  over: Partial<ProjectSnapshotForIssue> = {},
 ): ProjectSnapshotForIssue {
   return {
     exists: true,
@@ -70,7 +71,7 @@ function project(
 function issue(
   uid: string,
   over: Partial<ProjectSnapshotForIssue> = {},
-  plan = "team"
+  plan = "team",
 ) {
   return evaluateInstallationTokenRequest({
     uid,
@@ -92,7 +93,7 @@ test("parseGitHubRepoSlug: 허용 형태를 전부 같은 슬러그로 도출한
     assert.deepEqual(
       parseGitHubRepoSlug(url),
       { owner: "acme", repo: "app" },
-      url
+      url,
     );
   }
 });
@@ -101,7 +102,7 @@ test("parseGitHubRepoSlug: 자격증명이 박힌 레거시 URL 도 슬러그만
   // 구버전이 Firestore 에 백필한 토큰 URL(결함 B). 토큰을 owner 로 오독하면 안 된다.
   assert.deepEqual(
     parseGitHubRepoSlug("https://oauth2:ghu_dummy@github.com/acme/app.git"),
-    { owner: "acme", repo: "app" }
+    { owner: "acme", repo: "app" },
   );
 });
 
@@ -200,6 +201,15 @@ test("planHasTeamCollab 은 planLimits.ts 의 hasTeamCollab 집합과 같다", (
   assert.equal(planHasTeamCollab(null), false);
 });
 
+test("TEAM_SEAT_ENTITLEMENTS 는 planLimits.ts 의 좌석 정책과 같다", () => {
+  // ★MIRROR 계약 — 좌석 수는 기능 불리언이 아니라 가격/초대 집행 단위다.
+  assert.deepEqual(TEAM_SEAT_ENTITLEMENTS, {
+    team: { includedSeats: 1, viewerConsumesSeat: false },
+    team_plus: { includedSeats: 5, viewerConsumesSeat: false },
+    enterprise: { includedSeats: Infinity, viewerConsumesSeat: false },
+  });
+});
+
 test("설치가 없으면 no-installation — 클라는 이걸 받고 device 경로로 간다", () => {
   for (const v of [null, undefined, "", "abc", 0]) {
     const d = issue(MEMBER, { githubInstallationId: v });
@@ -221,9 +231,9 @@ test("★installation id 가 일치할 때만 통과한다", () => {
     verifyRepoInstallationBinding(
       { id: 12345678, account: { login: "acme" } },
       INSTALLATION_ID,
-      SLUG
+      SLUG,
     ),
-    { ok: true }
+    { ok: true },
   );
 });
 
@@ -235,9 +245,9 @@ test("★크로스테넌트: gitRemoteUrl 을 남의 저장소로 바꿔도 거�
     verifyRepoInstallationBinding(
       { id: 99999999, account: { login: "victim" } },
       INSTALLATION_ID,
-      { owner: "victim", repo: "private" }
+      { owner: "victim", repo: "private" },
     ),
-    { ok: false, reason: "installation-mismatch" }
+    { ok: false, reason: "installation-mismatch" },
   );
 });
 
@@ -246,9 +256,9 @@ test("★계정이 슬러그 소유자와 다르면 거부 (이름 기반 다운
     verifyRepoInstallationBinding(
       { id: 12345678, account: { login: "other-org" } },
       INSTALLATION_ID,
-      SLUG
+      SLUG,
     ),
-    { ok: false, reason: "account-mismatch" }
+    { ok: false, reason: "account-mismatch" },
   );
 });
 
@@ -263,7 +273,7 @@ test("응답이 망가졌으면(=App 제거 후 빈 응답 등) 거부", () => {
     const r = verifyRepoInstallationBinding(
       bad as never,
       INSTALLATION_ID,
-      SLUG
+      SLUG,
     );
     assert.equal(r.ok, false, JSON.stringify(bad));
   }
@@ -293,7 +303,7 @@ test("★요청보다 넓은 토큰이 오면 버린다 — 저장소가 2개면
       ...OK_TOKEN,
       repositories: [{ full_name: "acme/app" }, { full_name: "acme/other" }],
     },
-    SLUG
+    SLUG,
   );
   assert.deepEqual(r, { ok: false, reason: "over-scoped-repos" });
 });
@@ -301,7 +311,7 @@ test("★요청보다 넓은 토큰이 오면 버린다 — 저장소가 2개면
 test("★엉뚱한 저장소로 풀린 토큰은 버린다", () => {
   const r = verifyMintedToken(
     { ...OK_TOKEN, repositories: [{ full_name: "victim/private" }] },
-    SLUG
+    SLUG,
   );
   assert.deepEqual(r, { ok: false, reason: "over-scoped-repos" });
 });
@@ -310,9 +320,9 @@ test("★contents:write 나 그 밖의 권한이 섞이면 버린다 (v1 은 rea
   assert.deepEqual(
     verifyMintedToken(
       { ...OK_TOKEN, permissions: { contents: "write" } },
-      SLUG
+      SLUG,
     ),
-    { ok: false, reason: "over-scoped-permissions" }
+    { ok: false, reason: "over-scoped-permissions" },
   );
   assert.deepEqual(
     verifyMintedToken(
@@ -320,9 +330,9 @@ test("★contents:write 나 그 밖의 권한이 섞이면 버린다 (v1 은 rea
         ...OK_TOKEN,
         permissions: { contents: "read", administration: "write" },
       },
-      SLUG
+      SLUG,
     ),
-    { ok: false, reason: "over-scoped-permissions" }
+    { ok: false, reason: "over-scoped-permissions" },
   );
   assert.deepEqual(verifyMintedToken({ ...OK_TOKEN, permissions: {} }, SLUG), {
     ok: false,
@@ -344,7 +354,7 @@ test("토큰/만료가 없으면 거부", () => {
     {
       ok: false,
       reason: "bad-expiry",
-    }
+    },
   );
 });
 
@@ -374,7 +384,7 @@ test("buildAppJwt: RS256 서명이 검증되고 iat/exp 가 GitHub 상한 안이
       .createVerify("RSA-SHA256")
       .update(`${h}.${p}`)
       .verify(publicKey, new Uint8Array(Buffer.from(s, "base64url"))),
-    true
+    true,
   );
 
   const header = JSON.parse(Buffer.from(h, "base64url").toString("utf8"));
@@ -389,7 +399,11 @@ test("buildAppJwt: RS256 서명이 검증되고 iat/exp 가 GitHub 상한 안이
 test("buildAppJwt: appId 가 숫자가 아니면 던진다", () => {
   const { privateKey } = testKeyPair();
   assert.throws(() =>
-    buildAppJwt({ appId: "not-a-number", privateKeyPem: privateKey, nowSec: 1 })
+    buildAppJwt({
+      appId: "not-a-number",
+      privateKeyPem: privateKey,
+      nowSec: 1,
+    }),
   );
 });
 
@@ -408,7 +422,7 @@ const SECRET = "dummy-setup-state-secret-for-tests";
 const NOW = 1_755_000_000_000;
 
 function state(
-  over: Partial<Parameters<typeof signSetupState>[0]> = {}
+  over: Partial<Parameters<typeof signSetupState>[0]> = {},
 ): string {
   return signSetupState(
     {
@@ -418,7 +432,7 @@ function state(
       exp: NOW + 60_000,
       ...over,
     },
-    SECRET
+    SECRET,
   );
 }
 
@@ -446,7 +460,7 @@ test("★state 위조 차단: 다른 시크릿·본문 변조는 bad-signature",
       projectId: "victim-project",
       exp: NOW + 60_000,
     }),
-    "utf8"
+    "utf8",
   ).toString("base64url");
   assert.equal(body !== tampered, true);
   assert.deepEqual(verifySetupState(`${v}.${tampered}.${sig}`, SECRET, NOW), {
@@ -469,7 +483,7 @@ test("buildInstallUrl: state 를 인코딩해 붙인다 / slug 미설정은 던�
   const url = buildInstallUrl("marblo", "v1.abc.def");
   assert.equal(
     url,
-    "https://github.com/apps/marblo/installations/new?state=v1.abc.def"
+    "https://github.com/apps/marblo/installations/new?state=v1.abc.def",
   );
   assert.throws(() => buildInstallUrl("", "s"));
   assert.throws(() => buildInstallUrl("bad slug", "s"));
@@ -526,7 +540,7 @@ test("★평시: 저장소가 설치에 있으면 통과하고 토큰이 발급�
   // permissions 가 없으므로 빈 맵 = "write 승인 없음" 으로 접힌다.
   assert.deepEqual(
     evaluateRepoInstallationLookup(200, LOOKUP_OK, INSTALLATION_ID, SLUG),
-    { ok: true, permissions: {} }
+    { ok: true, permissions: {} },
   );
   const mint = evaluateMintResponse(201, OK_TOKEN, SLUG);
   assert.equal(mint.ok, true);
@@ -541,9 +555,13 @@ test("★오너가 App 을 제거하면 GitHub 이 404 → 그 즉시 발급이 
 
 test("★설치에서 저장소만 뺀 경우도 같은 404 경로로 끊긴다", () => {
   assert.equal(
-    evaluateRepoInstallationLookup(404, { message: "Not Found" }, INSTALLATION_ID, SLUG)
-      .ok,
-    false
+    evaluateRepoInstallationLookup(
+      404,
+      { message: "Not Found" },
+      INSTALLATION_ID,
+      SLUG,
+    ).ok,
+    false,
   );
 });
 
@@ -554,7 +572,7 @@ test("★저장소가 org 로 이전되면 낡은 installation id 와 어긋나 
     200,
     { id: 87654321, account: { login: "acme-org" } },
     INSTALLATION_ID,
-    SLUG
+    SLUG,
   );
   assert.deepEqual(r, { ok: false, reason: "installation-mismatch" });
 });
@@ -563,7 +581,7 @@ test("★App JWT 가 죽으면(키 회전 사고) 접근 허용으로 위장하�
   for (const status of [401, 403]) {
     assert.deepEqual(
       evaluateRepoInstallationLookup(status, null, INSTALLATION_ID, SLUG),
-      { ok: false, reason: "app-unauthorized" }
+      { ok: false, reason: "app-unauthorized" },
     );
   }
 });
@@ -585,7 +603,7 @@ test("★201 이어도 요청보다 넓은 토큰이면 쓰지 않고 버린다"
   const r = evaluateMintResponse(
     201,
     { ...OK_TOKEN, permissions: { contents: "write" } },
-    SLUG
+    SLUG,
   );
   assert.deepEqual(r, { ok: false, reason: "over-scoped-permissions" });
 });
@@ -606,7 +624,10 @@ test("★차단 시나리오 전체 — 멤버 제거 → 발급 거부, 이미 
   assert.equal(mint.ok, true);
   if (mint.ok) {
     assert.equal("refreshToken" in mint.minted, false);
-    assert.equal(Object.keys(mint.minted).sort().join(","), "expiresAtMs,token");
+    assert.equal(
+      Object.keys(mint.minted).sort().join(","),
+      "expiresAtMs,token",
+    );
   }
 });
 
@@ -626,7 +647,7 @@ const ADMIN = "admin-uid";
 const VIEWER = "viewer-uid";
 
 function projectWithRoles(
-  over: Partial<ProjectSnapshotForIssue> = {}
+  over: Partial<ProjectSnapshotForIssue> = {},
 ): ProjectSnapshotForIssue {
   return project({ members: [OWNER, ADMIN, MEMBER, VIEWER], ...over });
 }
@@ -638,7 +659,7 @@ function issueV2(
     requestedAccess?: RepoAccess;
     over?: Partial<ProjectSnapshotForIssue>;
     plan?: string;
-  } = {}
+  } = {},
 ) {
   return evaluateInstallationTokenRequest({
     uid,
@@ -657,13 +678,13 @@ test("v2 역할 모델: write=owner/admin/member, merge=owner/admin (MIRROR)", (
   //   여기가 갈라지면 화면이 막는 것과 토큰이 막는 것이 달라진다.
   assert.deepEqual(
     (["owner", "admin", "member", "viewer"] as ProjectRole[]).map(
-      roleCanWriteRepo
+      roleCanWriteRepo,
     ),
-    [true, true, true, false]
+    [true, true, true, false],
   );
   assert.deepEqual(
     (["owner", "admin", "member", "viewer"] as ProjectRole[]).map(roleCanMerge),
-    [true, true, false, false]
+    [true, true, false, false],
   );
 });
 
@@ -690,7 +711,7 @@ test("resolveProjectRole: ownerId 가 역할 문서를 이긴다", () => {
       project: projectWithRoles(),
       memberRole: "viewer",
     }),
-    "owner"
+    "owner",
   );
 });
 
@@ -701,14 +722,14 @@ test("resolveProjectRole: 남이면 null — 역할도 알려주지 않는다", 
       project: projectWithRoles(),
       memberRole: "admin",
     }),
-    null
+    null,
   );
   assert.equal(
     resolveProjectRole({
       uid: MEMBER,
       project: projectWithRoles({ exists: false }),
     }),
-    null
+    null,
   );
 });
 
@@ -912,7 +933,7 @@ test("재승인 후: write 요청이 그대로 나간다", () => {
   assert.equal(n.downgraded, false);
   assert.deepEqual(
     { ...n.permissions },
-    { contents: "write", pull_requests: "write" }
+    { contents: "write", pull_requests: "write" },
   );
 });
 
@@ -941,7 +962,7 @@ test("evaluateRepoInstallationLookup 이 설치 승인 권한을 함께 돌려�
       permissions: { contents: "write", metadata: "read", junk: 7 },
     },
     INSTALLATION_ID,
-    { owner: "acme", repo: "app" }
+    { owner: "acme", repo: "app" },
   );
   assert.equal(r.ok, true);
   // 문자열이 아닌 값은 버린다 — 모르는 모양은 "없다" 로 접혀 read 로 내려간다.
@@ -956,12 +977,12 @@ test("permissions 가 없는 응답은 빈 맵 — write 요청이 read 로 강�
     200,
     { id: Number(INSTALLATION_ID), account: { login: "acme" } },
     INSTALLATION_ID,
-    { owner: "acme", repo: "app" }
+    { owner: "acme", repo: "app" },
   );
   assert.equal(r.ok, true);
   const n = negotiateInstallationAccess(
     "write",
-    r.ok === true ? r.permissions : {}
+    r.ok === true ? r.permissions : {},
   );
   assert.equal(n.downgraded, true);
 });
@@ -982,7 +1003,11 @@ function minted(permissions: Record<string, string>) {
 
 test("write 요청: 정확히 요청한 권한이면 통과한다", () => {
   const want = { contents: "write", pull_requests: "write" };
-  const r = verifyMintedToken(minted({ ...want, metadata: "read" }), V2_SLUG, want);
+  const r = verifyMintedToken(
+    minted({ ...want, metadata: "read" }),
+    V2_SLUG,
+    want,
+  );
   assert.equal(r.ok, true);
 });
 
@@ -990,15 +1015,15 @@ test("★write 요청이어도 요청보다 넓으면 버린다 (admin 승격·�
   const want = { contents: "write" };
   assert.equal(
     verifyMintedToken(minted({ contents: "admin" }), V2_SLUG, want).ok,
-    false
+    false,
   );
   assert.equal(
     verifyMintedToken(
       minted({ contents: "write", administration: "write" }),
       V2_SLUG,
-      want
+      want,
     ).ok,
-    false
+    false,
   );
 });
 
@@ -1006,7 +1031,7 @@ test("★read 요청에 write 토큰이 오면 버린다 — 다운스코프가 
   const r = verifyMintedToken(
     minted({ contents: "write" }),
     V2_SLUG,
-    INSTALLATION_TOKEN_PERMISSIONS
+    INSTALLATION_TOKEN_PERMISSIONS,
   );
   assert.equal(r.ok, false);
   assert.equal(r.ok === false && r.reason, "over-scoped-permissions");
@@ -1020,8 +1045,14 @@ test("요청한 권한이 응답에 없으면 버린다 — 있다고 믿고 pus
 });
 
 test("v1 호출부(기대권한 미지정)는 바이트 동일하게 동작한다", () => {
-  assert.equal(verifyMintedToken(minted({ contents: "read" }), V2_SLUG).ok, true);
-  assert.equal(verifyMintedToken(minted({ contents: "write" }), V2_SLUG).ok, false);
+  assert.equal(
+    verifyMintedToken(minted({ contents: "read" }), V2_SLUG).ok,
+    true,
+  );
+  assert.equal(
+    verifyMintedToken(minted({ contents: "write" }), V2_SLUG).ok,
+    false,
+  );
 });
 
 test("write 요청이어도 저장소는 여전히 1개로 다운스코프된다", () => {
@@ -1034,17 +1065,14 @@ test("write 요청이어도 저장소는 여전히 1개로 다운스코프된다
       repositories: [{ full_name: "acme/app" }, { full_name: "acme/other" }],
     },
     V2_SLUG,
-    want
+    want,
   );
   assert.equal(r.ok === false && r.reason, "over-scoped-repos");
 });
 
 test("evaluateMintResponse 가 기대권한을 그대로 넘긴다", () => {
   const want = { contents: "write", pull_requests: "write" };
-  assert.equal(
-    evaluateMintResponse(201, minted(want), V2_SLUG, want).ok,
-    true
-  );
+  assert.equal(evaluateMintResponse(201, minted(want), V2_SLUG, want).ok, true);
   assert.equal(evaluateMintResponse(201, minted(want), V2_SLUG).ok, false);
   // 재승인 전이면 GitHub 이 422 를 준다 — 그것도 거부로 접힌다.
   assert.equal(evaluateMintResponse(422, null, V2_SLUG, want).ok, false);
@@ -1094,7 +1122,7 @@ test("v1 경로는 role/access/branch 가 null 로 남는다", () => {
 test("write 권한 상수는 contents+pull_requests 뿐이다 — repo 전권으로 돌아가지 않는다", () => {
   assert.deepEqual(
     { ...INSTALLATION_TOKEN_PERMISSIONS_WRITE },
-    { contents: "write", pull_requests: "write" }
+    { contents: "write", pull_requests: "write" },
   );
   // administration 은 영구 거부 후보다(등록값 문서 §1.1).
   assert.equal("administration" in INSTALLATION_TOKEN_PERMISSIONS_WRITE, false);
@@ -1138,7 +1166,7 @@ test("★실측: 만료 시각을 못 읽으면 토큰을 쓰지 않는다 — �
         permissions: { contents: "read" },
         repositories: [{ full_name: "acme/app" }],
       },
-      V2_SLUG
+      V2_SLUG,
     );
     assert.equal(r.ok, false);
     assert.equal(r.ok === false && r.reason, "bad-expiry");

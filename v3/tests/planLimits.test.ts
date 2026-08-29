@@ -3,6 +3,7 @@ import type { Agent, AgentStatus } from "../src/types/agent";
 import {
   PLAN_LIMITS,
   PLAN_FEATURES,
+  TEAM_SEAT_ENTITLEMENTS,
   getPlanLimits,
   getAgentLimit,
   planCanUse,
@@ -66,6 +67,21 @@ describe("plan limits (single source of truth)", () => {
 
   it("getPlanLimits defaults unknown plans to free", () => {
     expect(getPlanLimits("mystery")).toEqual(PLAN_LIMITS.free);
+  });
+
+  it("team seat entitlements are explicit but not enforcement code", () => {
+    expect(TEAM_SEAT_ENTITLEMENTS.team).toEqual({
+      includedSeats: 1,
+      viewerConsumesSeat: false,
+    });
+    expect(TEAM_SEAT_ENTITLEMENTS.team_plus).toEqual({
+      includedSeats: 5,
+      viewerConsumesSeat: false,
+    });
+    expect(TEAM_SEAT_ENTITLEMENTS.enterprise).toEqual({
+      includedSeats: Infinity,
+      viewerConsumesSeat: false,
+    });
   });
 });
 

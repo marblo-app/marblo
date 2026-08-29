@@ -92,14 +92,50 @@ export const SETUP_STATE_TTL_MS = 10 * 60_000;
  * 둔다(entitlement.ts 의 MIRROR 규약과 동일). drift 는 githubApp.test.ts 가
  * 잡는다.
  */
-export const TEAM_COLLAB_PLANS: readonly string[] = [
+export type TeamCollabPlanMirror = "team" | "team_plus" | "enterprise";
+
+export const TEAM_COLLAB_PLANS: readonly TeamCollabPlanMirror[] = [
   "team",
   "team_plus",
   "enterprise",
 ];
 
+export interface TeamSeatEntitlementMirror {
+  includedSeats: number;
+  viewerConsumesSeat: boolean;
+}
+
+/**
+ * Team collaboration seat-count policy.
+ *
+ * ★MIRROR — same values as `v3/src/lib/planLimits.ts` `TEAM_SEAT_ENTITLEMENTS`.
+ * This file is the GitHub token authorization boundary, but seat enforcement is
+ * deliberately not done here: the follow-up implementation should block only new
+ * invites at the invitation/callable choke point so existing members are not
+ * retroactively locked out of repository access.
+ */
+export const TEAM_SEAT_ENTITLEMENTS: Readonly<
+  Record<TeamCollabPlanMirror, TeamSeatEntitlementMirror>
+> = Object.freeze({
+  team: Object.freeze({
+    includedSeats: 1,
+    viewerConsumesSeat: false,
+  }),
+  team_plus: Object.freeze({
+    includedSeats: 5,
+    viewerConsumesSeat: false,
+  }),
+  enterprise: Object.freeze({
+    includedSeats: Infinity,
+    viewerConsumesSeat: false,
+  }),
+});
+
 export function planHasTeamCollab(plan: unknown): boolean {
-  return typeof plan === "string" && TEAM_COLLAB_PLANS.includes(plan);
+  return (
+    typeof plan === "string" &&
+    (TEAM_COLLAB_PLANS as readonly string[]).includes(plan)
+  );
 }
 
 // ── 저장소 슬러그 ───────────────────────────────────────────────────────────
@@ -352,12 +388,16 @@ export interface IssueRequestInput {
  * "그 슬러그가 정말 이 installation 것" 임을 확인해야 한다(설계 §3.2 7번).
  */
 export function evaluateInstallationTokenRequest(
-  input: IssueRequestInput
+  input: IssueRequestInput,
 ): IssueDecision {
   const { uid, project, ownerPlan } = input;
   const requestedAccess: RepoAccess = input.requestedAccess ?? "read";
 
-  const role = resolveProjectRole({ uid, project, memberRole: input.memberRole });
+  const role = resolveProjectRole({
+    uid,
+    project,
+    memberRole: input.memberRole,
+  });
   if (!role) return { ok: false, code: "not-a-member" };
 
   if (!planHasTeamCollab(ownerPlan)) {
@@ -420,7 +460,7 @@ export function buildAppJwt(input: AppJwtInput): string {
     throw new Error("GitHub App id must be numeric");
   }
   const header = base64url(
-    Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" }), "utf8")
+    Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" }), "utf8"),
   );
   const payload = base64url(
     Buffer.from(
@@ -429,8 +469,8 @@ export function buildAppJwt(input: AppJwtInput): string {
         exp: nowSec + APP_JWT_TTL_SECONDS,
         iss: appId,
       }),
-      "utf8"
-    )
+      "utf8",
+    ),
   );
   const signingInput = `${header}.${payload}`;
   const signature = crypto
@@ -458,12 +498,12 @@ export interface SetupStatePayload {
  */
 export function signSetupState(
   payload: SetupStatePayload,
-  secret: string
+  secret: string,
 ): string {
   if (!secret) throw new Error("setup state secret is not configured");
   const body = base64url(Buffer.from(JSON.stringify(payload), "utf8"));
   const sig = base64url(
-    crypto.createHmac("sha256", secret).update(body).digest()
+    crypto.createHmac("sha256", secret).update(body).digest(),
   );
   return `v1.${body}.${sig}`;
 }
@@ -482,7 +522,7 @@ export type SetupStateResult =
 export function verifySetupState(
   token: unknown,
   secret: string,
-  nowMs: number
+  nowMs: number,
 ): SetupStateResult {
   if (typeof token !== "string" || !secret) {
     return { ok: false, reason: "malformed" };
@@ -493,7 +533,7 @@ export function verifySetupState(
   }
   const [, body, sig] = parts;
   const expected = base64url(
-    crypto.createHmac("sha256", secret).update(body).digest()
+    crypto.createHmac("sha256", secret).update(body).digest(),
   );
   const a = new Uint8Array(Buffer.from(sig, "utf8"));
   const b = new Uint8Array(Buffer.from(expected, "utf8"));
@@ -592,7 +632,7 @@ export type RepoBindingResult =
 export function verifyRepoInstallationBinding(
   response: RepoInstallationResponse | null | undefined,
   expectedInstallationId: string,
-  slug: RepoSlug
+  slug: RepoSlug,
 ): RepoBindingResult {
   if (!response) return { ok: false, reason: "malformed" };
   const actual = normalizeInstallationId(response.id);
@@ -650,7 +690,7 @@ export function verifyMintedToken(
    */
   expectedPermissions: Readonly<
     Record<string, string>
-  > = INSTALLATION_TOKEN_PERMISSIONS
+  > = INSTALLATION_TOKEN_PERMISSIONS,
 ): MintResult {
   if (!response || typeof response.token !== "string" || !response.token) {
     return { ok: false, reason: "no-token" };
@@ -686,7 +726,8 @@ export function verifyMintedToken(
     v === "admin" ? 3 : v === "write" ? 2 : v === "read" ? 1 : 0;
   for (const [key, value] of Object.entries(perms)) {
     if (key === "metadata") {
-      if (value !== "read") return { ok: false, reason: "over-scoped-permissions" };
+      if (value !== "read")
+        return { ok: false, reason: "over-scoped-permissions" };
       continue;
     }
     const want = expectedPermissions[key];
@@ -716,7 +757,8 @@ export function normalizePushRef(raw: unknown): string | null {
   let t = raw.trim();
   if (!t || t.length > 255) return null;
   if (t.startsWith("refs/heads/")) t = t.slice("refs/heads/".length);
-  if (!t || t.startsWith("-") || t.startsWith("/") || t.endsWith("/")) return null;
+  if (!t || t.startsWith("-") || t.startsWith("/") || t.endsWith("/"))
+    return null;
   if (t.endsWith(".lock") || t.endsWith(".")) return null;
   if (t.includes("..") || t.includes("@{")) return null;
   if (/[\s~^:?*[\\]/.test(t)) return null;
@@ -915,7 +957,7 @@ export const INSTALLATION_TOKEN_RULES_WRITE: ReadonlyArray<InstallationTokenRule
 
 /** 이 요청에 적용할 예산. */
 export function installationTokenRules(
-  access: TokenRateAccess
+  access: TokenRateAccess,
 ): ReadonlyArray<InstallationTokenRule> {
   return access === "write"
     ? INSTALLATION_TOKEN_RULES_WRITE
@@ -949,7 +991,7 @@ export function installationTokenRules(
 export function installationTokenRateKey(
   uid: string,
   projectId: string,
-  access: TokenRateAccess
+  access: TokenRateAccess,
 ): string {
   return `ghapp:${access}:${uid}:${projectId}`;
 }
@@ -980,7 +1022,7 @@ export interface InstallationTokenBudget {
 export function installationTokenBudgetFor(
   uid: string,
   projectId: string,
-  decision: AuthorizedIssueDecision
+  decision: AuthorizedIssueDecision,
 ): InstallationTokenBudget {
   const access: TokenRateAccess = decision.access;
   return {
@@ -1030,7 +1072,7 @@ export function evaluateRepoInstallationLookup(
   status: number,
   body: unknown,
   expectedInstallationId: string,
-  slug: RepoSlug
+  slug: RepoSlug,
 ): RepoAccessCheck {
   if (status === 401 || status === 403) {
     return { ok: false, reason: "app-unauthorized" };
@@ -1044,13 +1086,13 @@ export function evaluateRepoInstallationLookup(
   const binding = verifyRepoInstallationBinding(
     body as RepoInstallationResponse,
     expectedInstallationId,
-    slug
+    slug,
   );
   return binding.ok
     ? {
         ok: true,
         permissions: parseInstallationPermissions(
-          (body as RepoInstallationResponse | null)?.permissions
+          (body as RepoInstallationResponse | null)?.permissions,
         ),
       }
     : { ok: false, reason: binding.reason };
@@ -1064,7 +1106,7 @@ export function evaluateRepoInstallationLookup(
  * 안전한 쪽 오답이다.
  */
 export function parseInstallationPermissions(
-  raw: unknown
+  raw: unknown,
 ): Readonly<Record<string, string>> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const out: Record<string, string> = {};
@@ -1100,7 +1142,7 @@ export interface AccessNegotiation {
  */
 export function negotiateInstallationAccess(
   requested: RepoAccess,
-  installationPermissions: Readonly<Record<string, string>>
+  installationPermissions: Readonly<Record<string, string>>,
 ): AccessNegotiation {
   if (requested !== "write") {
     return {
@@ -1145,7 +1187,7 @@ export function evaluateMintResponse(
   /** 우리가 요청한 권한. 생략하면 v1 의 contents:read. */
   expectedPermissions: Readonly<
     Record<string, string>
-  > = INSTALLATION_TOKEN_PERMISSIONS
+  > = INSTALLATION_TOKEN_PERMISSIONS,
 ): MintHttpResult {
   if (status !== 201) {
     return { ok: false, reason: `mint-${status}` as MintHttpFailure };
@@ -1153,7 +1195,7 @@ export function evaluateMintResponse(
   const checked = verifyMintedToken(
     body as AccessTokenResponse,
     slug,
-    expectedPermissions
+    expectedPermissions,
   );
   return checked.ok
     ? { ok: true, minted: checked.minted }

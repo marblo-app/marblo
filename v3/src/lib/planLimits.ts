@@ -30,6 +30,23 @@
 import type { Agent, AgentStatus } from "../types/agent";
 import type { PlanType, PlanLimits } from "../types/subscription";
 
+export type TeamCollabPlan = Extract<
+  PlanType,
+  "team" | "team_plus" | "enterprise"
+>;
+
+export interface TeamSeatEntitlement {
+  /**
+   * Seats included before paid overage. This is not an enforcement hook yet; the
+   * invite callable follow-up must be the single choke point.
+   */
+  includedSeats: number;
+  /**
+   * Read-only viewers do not consume paid seats. Owner/admin/member do.
+   */
+  viewerConsumesSeat: boolean;
+}
+
 /**
  * Canonical per-plan limits. `Infinity` = unlimited.
  * 마스터플랜 §2.2 SKU 기능 매트릭스 + 대표 확정 티어 기준.
@@ -76,6 +93,34 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     hasPrioritySupport: true,
   },
 };
+
+/**
+ * Canonical seat-count policy for team collaboration.
+ *
+ * ★MIRROR — `v3/functions/src/githubApp.ts` keeps the same values because
+ * functions cannot import the desktop src package. Drift is pinned by
+ * `githubApp.test.ts` and `tests/planLimits.test.ts`.
+ *
+ * This is intentionally only a count/policy constant, not billing or enforcement
+ * code. Pricing amounts remain in the pricing/billing sources; the implementation
+ * ticket must enforce new invites at one server-side callable choke point.
+ */
+export const TEAM_SEAT_ENTITLEMENTS: Readonly<
+  Record<TeamCollabPlan, TeamSeatEntitlement>
+> = Object.freeze({
+  team: Object.freeze({
+    includedSeats: 1,
+    viewerConsumesSeat: false,
+  }),
+  team_plus: Object.freeze({
+    includedSeats: 5,
+    viewerConsumesSeat: false,
+  }),
+  enterprise: Object.freeze({
+    includedSeats: Infinity,
+    viewerConsumesSeat: false,
+  }),
+});
 
 /** Full limits for a plan, defaulting unknown / future plans to `free`. */
 export function getPlanLimits(plan: PlanType | string): PlanLimits {
