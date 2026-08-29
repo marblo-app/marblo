@@ -10,6 +10,7 @@ import {
   shell,
   safeStorage,
   Notification,
+  WebContentsView,
 } from "electron";
 import path from "path";
 import fs from "fs";
@@ -319,6 +320,13 @@ import {
 } from "./web-automation/browser-session-store";
 import { chromeBrowserSessionManager } from "./web-automation/browser-session-manager";
 import { BROWSER_SESSION_LEAKAGE_GUARDS } from "./web-automation/leakage-guards";
+import {
+  browserPaneNoticeForExternalReason,
+  classifyInAppBrowserNavigation,
+  IN_APP_BROWSER_SESSION_PARTITION,
+  normalizeBrowserPaneUrl,
+  type InAppBrowserExternalReason,
+} from "./in-app-browser-policy";
 // restricted 스코프를 뺀 결과 잠긴 기능들 — 조용히 401 을 내지 않고 이유를
 // 말하기 위한 단일 진실원(티켓 v5Phjv1WxndUpgFJyrIn).
 import { withheldCapabilityError } from "./google-restricted-scopes";
@@ -5211,7 +5219,7 @@ function applyExternalLinkHandling(webContents: Electron.WebContents): void {
   // keeps the default behavior.
   webContents.setWindowOpenHandler(({ url }) => {
     if (!isInternalNavigationUrl(url)) {
-      void shell.openExternal(url);
+      routeAppExternalLink(webContents, url);
       return { action: "deny" };
     }
     return { action: "allow" };
@@ -5224,9 +5232,363 @@ function applyExternalLinkHandling(webContents: Electron.WebContents): void {
   webContents.on("will-navigate", (event, url) => {
     if (!isInternalNavigationUrl(url)) {
       event.preventDefault();
-      void shell.openExternal(url);
+      routeAppExternalLink(webContents, url);
     }
   });
+}
+
+interface BrowserPaneBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface BrowserPaneState {
+  paneId: string;
+  url: string;
+  title: string;
+  isLoading: boolean;
+  notice?: {
+    code:
+      | "google-auth-external"
+      | "auth-external"
+      | "payment-external"
+      | "load-failed"
+      | "blocked-url";
+    message: string;
+  };
+  security: {
+    nodeIntegration: false;
+    contextIsolation: true;
+    partition: string;
+  };
+}
+
+interface BrowserPaneRecord {
+  ownerWebContentsId: number;
+  owner: Electron.WebContents;
+  win: BrowserWindow;
+  paneId: string;
+  view: WebContentsView;
+  currentUrl: string;
+  title: string;
+  isLoading: boolean;
+  notice?: BrowserPaneState["notice"];
+}
+
+const browserPaneRecords = new Map<string, BrowserPaneRecord>();
+const browserPaneOwnerCleanup = new Set<number>();
+const browserPaneOpenTargets = new Set<number>();
+
+function routeAppExternalLink(
+  owner: Electron.WebContents,
+  rawUrl: string
+): void {
+  const normalized = normalizeBrowserPaneUrl(rawUrl);
+  const decision = classifyInAppBrowserNavigation(normalized);
+  if (decision.action === "allow" && browserPaneOpenTargets.has(owner.id)) {
+    owner.send("browserPane:openUrl", { url: normalized });
+    return;
+  }
+  if (decision.action === "external" || decision.action === "allow") {
+    void shell.openExternal(normalized);
+  }
+}
+
+function browserPaneKey(ownerWebContentsId: number, paneId: string): string {
+  return `${ownerWebContentsId}:${paneId}`;
+}
+
+function browserPaneSecurity(): BrowserPaneState["security"] {
+  return {
+    nodeIntegration: false,
+    contextIsolation: true,
+    partition: IN_APP_BROWSER_SESSION_PARTITION,
+  };
+}
+
+function toBrowserPaneState(record: BrowserPaneRecord): BrowserPaneState {
+  return {
+    paneId: record.paneId,
+    url: record.currentUrl,
+    title: record.title,
+    isLoading: record.isLoading,
+    notice: record.notice,
+    security: browserPaneSecurity(),
+  };
+}
+
+function sendBrowserPaneState(record: BrowserPaneRecord): void {
+  if (record.owner.isDestroyed()) return;
+  record.owner.send("browserPane:state", toBrowserPaneState(record));
+}
+
+function cleanupBrowserPaneRecord(record: BrowserPaneRecord): void {
+  browserPaneRecords.delete(
+    browserPaneKey(record.ownerWebContentsId, record.paneId)
+  );
+  try {
+    record.win.contentView.removeChildView(record.view);
+  } catch {
+    // The owning window may already be tearing down.
+  }
+  try {
+    if (!record.view.webContents.isDestroyed()) {
+      record.view.webContents.close();
+    }
+  } catch {
+    // Ignore teardown races.
+  }
+}
+
+function cleanupBrowserPanesForOwner(ownerWebContentsId: number): void {
+  for (const record of browserPaneRecords.values()) {
+    if (record.ownerWebContentsId === ownerWebContentsId) {
+      cleanupBrowserPaneRecord(record);
+    }
+  }
+  browserPaneOwnerCleanup.delete(ownerWebContentsId);
+  browserPaneOpenTargets.delete(ownerWebContentsId);
+}
+
+function registerBrowserPaneOwnerCleanup(owner: Electron.WebContents): void {
+  if (browserPaneOwnerCleanup.has(owner.id)) return;
+  const ownerId = owner.id;
+  browserPaneOwnerCleanup.add(ownerId);
+  owner.once("destroyed", () => cleanupBrowserPanesForOwner(ownerId));
+}
+
+function parseBrowserPaneId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 120) return null;
+  if (!/^[A-Za-z0-9:_-]+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function parseBrowserPaneUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = normalizeBrowserPaneUrl(value);
+  const decision = classifyInAppBrowserNavigation(normalized);
+  return decision.action === "deny" ? null : normalized;
+}
+
+function parseBrowserPaneBounds(value: unknown): BrowserPaneBounds | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Partial<Record<keyof BrowserPaneBounds, unknown>>;
+  const x = numberOrNull(raw.x);
+  const y = numberOrNull(raw.y);
+  const width = numberOrNull(raw.width);
+  const height = numberOrNull(raw.height);
+  if (x === null || y === null || width === null || height === null) {
+    return null;
+  }
+  return {
+    x: Math.max(0, Math.round(x)),
+    y: Math.max(0, Math.round(y)),
+    width: Math.max(0, Math.round(width)),
+    height: Math.max(0, Math.round(height)),
+  };
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function findBrowserPaneRecord(
+  ownerWebContentsId: number,
+  paneId: unknown
+): BrowserPaneRecord | null {
+  const id = parseBrowserPaneId(paneId);
+  if (!id) return null;
+  return browserPaneRecords.get(browserPaneKey(ownerWebContentsId, id)) ?? null;
+}
+
+function setBrowserPaneNotice(
+  record: BrowserPaneRecord,
+  reason: InAppBrowserExternalReason
+): void {
+  const notice = browserPaneNoticeForExternalReason(reason);
+  if (notice) {
+    record.notice = notice;
+    sendBrowserPaneState(record);
+  }
+}
+
+function handleBrowserPaneExternalNavigation(
+  record: BrowserPaneRecord,
+  url: string,
+  reason: InAppBrowserExternalReason
+): void {
+  setBrowserPaneNotice(record, reason);
+  void shell.openExternal(url);
+}
+
+function loadBrowserPaneBlank(record: BrowserPaneRecord): void {
+  record.currentUrl = "about:blank";
+  record.isLoading = false;
+  record.notice = undefined;
+  void record.view.webContents.loadURL("about:blank").catch(() => {
+    sendBrowserPaneState(record);
+  });
+}
+
+function wireBrowserPaneWebContents(record: BrowserPaneRecord): void {
+  const child = record.view.webContents;
+
+  child.setWindowOpenHandler(({ url }) => {
+    const decision = classifyInAppBrowserNavigation(url);
+    if (decision.action === "allow") {
+      void child.loadURL(url).catch((err: unknown) => {
+        record.notice = {
+          code: "load-failed",
+          message: err instanceof Error ? err.message : "Failed to load URL.",
+        };
+        sendBrowserPaneState(record);
+      });
+    } else if (decision.action === "external") {
+      handleBrowserPaneExternalNavigation(record, url, decision.reason);
+    } else {
+      record.notice = {
+        code: "blocked-url",
+        message: "Marblo blocked this URL scheme inside the browser tab.",
+      };
+      sendBrowserPaneState(record);
+    }
+    return { action: "deny" };
+  });
+
+  child.on("will-navigate", (event, url) => {
+    const decision = classifyInAppBrowserNavigation(url);
+    if (decision.action === "allow") {
+      record.notice = undefined;
+      return;
+    }
+    event.preventDefault();
+    if (decision.action === "external") {
+      handleBrowserPaneExternalNavigation(record, url, decision.reason);
+      return;
+    }
+    record.notice = {
+      code: "blocked-url",
+      message: "Marblo blocked this URL scheme inside the browser tab.",
+    };
+    sendBrowserPaneState(record);
+  });
+
+  child.on("did-start-loading", () => {
+    record.isLoading = true;
+    record.notice = undefined;
+    sendBrowserPaneState(record);
+  });
+
+  child.on("did-stop-loading", () => {
+    record.isLoading = false;
+    record.currentUrl = child.getURL() || record.currentUrl;
+    record.title = child.getTitle() || record.title;
+    sendBrowserPaneState(record);
+  });
+
+  child.on("did-navigate", (_event, url) => {
+    record.currentUrl = url || record.currentUrl;
+    record.title = child.getTitle() || record.title;
+    sendBrowserPaneState(record);
+  });
+
+  child.on("did-navigate-in-page", (_event, url) => {
+    record.currentUrl = url || record.currentUrl;
+    record.title = child.getTitle() || record.title;
+    sendBrowserPaneState(record);
+  });
+
+  child.on("page-title-updated", (_event, title) => {
+    record.title = title;
+    sendBrowserPaneState(record);
+  });
+
+  child.on(
+    "did-fail-load",
+    (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (!isMainFrame || errorCode === -3) return;
+      record.isLoading = false;
+      record.currentUrl = validatedURL || record.currentUrl;
+      record.notice = {
+        code: "load-failed",
+        message: errorDescription || "Failed to load URL.",
+      };
+      sendBrowserPaneState(record);
+    }
+  );
+}
+
+function createBrowserPaneRecord(
+  owner: Electron.WebContents,
+  paneId: string,
+  url: string
+): BrowserPaneRecord | null {
+  const win = BrowserWindow.fromWebContents(owner);
+  if (!win || win.isDestroyed()) return null;
+
+  const view = new WebContentsView({
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      partition: IN_APP_BROWSER_SESSION_PARTITION,
+    },
+  });
+  view.setVisible(false);
+  view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+
+  const record: BrowserPaneRecord = {
+    ownerWebContentsId: owner.id,
+    owner,
+    win,
+    paneId,
+    view,
+    currentUrl: url,
+    title: "",
+    isLoading: false,
+  };
+
+  wireBrowserPaneWebContents(record);
+  win.contentView.addChildView(view);
+  browserPaneRecords.set(browserPaneKey(owner.id, paneId), record);
+  registerBrowserPaneOwnerCleanup(owner);
+  if (url !== "about:blank") {
+    void view.webContents.loadURL(url).catch((err: unknown) => {
+      record.notice = {
+        code: "load-failed",
+        message: err instanceof Error ? err.message : "Failed to load URL.",
+      };
+      sendBrowserPaneState(record);
+    });
+  }
+  return record;
+}
+
+function setBrowserPaneVisible(
+  record: BrowserPaneRecord,
+  visible: boolean,
+  bounds?: BrowserPaneBounds
+): void {
+  if (
+    !visible ||
+    !bounds ||
+    bounds.width < 8 ||
+    bounds.height < 8 ||
+    record.win.isMinimized()
+  ) {
+    record.view.setVisible(false);
+    record.view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    return;
+  }
+
+  record.view.setBounds(bounds);
+  record.view.setVisible(true);
 }
 
 function createWindow(isNewWindow = false, detachedView?: DetachedView) {
@@ -8916,6 +9278,119 @@ ipcMain.handle("window:popOutTab", (event, view: DetachedView) => {
   };
   createDetachedWindow(view, seed);
   return { success: true };
+});
+
+ipcMain.handle("browserPane:attach", (event, input: unknown) => {
+  const raw = input as { paneId?: unknown; url?: unknown } | null;
+  const paneId = parseBrowserPaneId(raw?.paneId);
+  const url = parseBrowserPaneUrl(raw?.url ?? "about:blank");
+  if (!paneId || !url) {
+    return { ok: false, error: "Invalid browser pane request." };
+  }
+
+  const key = browserPaneKey(event.sender.id, paneId);
+  const existing = browserPaneRecords.get(key);
+  const requestedDecision = classifyInAppBrowserNavigation(url);
+  const initialUrl =
+    requestedDecision.action === "external" ? "about:blank" : url;
+  const record =
+    existing ?? createBrowserPaneRecord(event.sender, paneId, initialUrl);
+  if (!record) return { ok: false, error: "No owning window for browser pane." };
+
+  if (requestedDecision.action === "external") {
+    handleBrowserPaneExternalNavigation(record, url, requestedDecision.reason);
+  } else if (record.currentUrl !== url) {
+    if (url === "about:blank") {
+      loadBrowserPaneBlank(record);
+    } else {
+      record.currentUrl = url;
+      record.notice = undefined;
+      void record.view.webContents.loadURL(url).catch((err: unknown) => {
+        record.notice = {
+          code: "load-failed",
+          message: err instanceof Error ? err.message : "Failed to load URL.",
+        };
+        sendBrowserPaneState(record);
+      });
+    }
+  }
+  return { ok: true, state: toBrowserPaneState(record) };
+});
+
+ipcMain.handle("browserPane:navigate", (event, input: unknown) => {
+  const raw = input as { paneId?: unknown; url?: unknown } | null;
+  const record = findBrowserPaneRecord(event.sender.id, raw?.paneId);
+  const url = parseBrowserPaneUrl(raw?.url);
+  if (!record || !url) {
+    return { ok: false, error: "Invalid browser navigation request." };
+  }
+
+  const decision = classifyInAppBrowserNavigation(url);
+  if (decision.action === "external") {
+    handleBrowserPaneExternalNavigation(record, url, decision.reason);
+    return { ok: true, state: toBrowserPaneState(record) };
+  }
+  if (decision.action === "deny") {
+    record.notice = {
+      code: "blocked-url",
+      message: "Marblo blocked this URL scheme inside the browser tab.",
+    };
+    sendBrowserPaneState(record);
+    return { ok: false, error: record.notice.message };
+  }
+
+  record.currentUrl = url;
+  record.notice = undefined;
+  if (url === "about:blank") {
+    loadBrowserPaneBlank(record);
+  } else {
+    void record.view.webContents.loadURL(url).catch((err: unknown) => {
+      record.isLoading = false;
+      record.notice = {
+        code: "load-failed",
+        message: err instanceof Error ? err.message : "Failed to load URL.",
+      };
+      sendBrowserPaneState(record);
+    });
+  }
+  return { ok: true, state: toBrowserPaneState(record) };
+});
+
+ipcMain.handle("browserPane:reload", (event, input: unknown) => {
+  const raw = input as { paneId?: unknown } | null;
+  const record = findBrowserPaneRecord(event.sender.id, raw?.paneId);
+  if (!record) return { ok: false, error: "Unknown browser pane." };
+  if (record.currentUrl !== "about:blank") record.view.webContents.reload();
+  return { ok: true, state: toBrowserPaneState(record) };
+});
+
+ipcMain.handle("browserPane:setBounds", (event, input: unknown) => {
+  const raw =
+    input as { paneId?: unknown; visible?: unknown; bounds?: unknown } | null;
+  const record = findBrowserPaneRecord(event.sender.id, raw?.paneId);
+  if (!record) return { ok: false, error: "Unknown browser pane." };
+  const visible = raw?.visible === true;
+  const bounds = parseBrowserPaneBounds(raw?.bounds);
+  setBrowserPaneVisible(record, visible, bounds ?? undefined);
+  return { ok: true };
+});
+
+ipcMain.handle("browserPane:release", (event, input: unknown) => {
+  const raw = input as { paneId?: unknown } | null;
+  const record = findBrowserPaneRecord(event.sender.id, raw?.paneId);
+  if (!record) return { ok: true };
+  cleanupBrowserPaneRecord(record);
+  return { ok: true };
+});
+
+ipcMain.handle("browserPane:registerOpenTarget", (event, enabled: unknown) => {
+  if (enabled === true) {
+    browserPaneOpenTargets.add(event.sender.id);
+    registerBrowserPaneOwnerCleanup(event.sender);
+  } else {
+    browserPaneOpenTargets.delete(event.sender.id);
+  }
+  return { ok: true };
 });
 
 ipcMain.handle("agent:remove", (_event, agentId: string) => {

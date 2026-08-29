@@ -176,6 +176,20 @@ export function WorkspaceShell() {
   const pendingJump = useNavigationStore((s) => s.pendingJump);
   const consumeJump = useNavigationStore((s) => s.consumeJump);
   const addPane = usePaneStore((s) => s.addPane);
+
+  useEffect(() => {
+    const api = window.electronAPI?.browserPane;
+    if (!api) return;
+    void api.registerOpenTarget(true).catch(() => {});
+    const offOpenUrl = api.onOpenUrl(({ url }) => {
+      addPane("browser", { url });
+    });
+    return () => {
+      offOpenUrl();
+      void api.registerOpenTarget(false).catch(() => {});
+    };
+  }, [addPane]);
+
   useEffect(() => {
     if (!pendingJump) return;
     if (pendingJump.type === "task") {

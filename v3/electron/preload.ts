@@ -174,6 +174,69 @@ contextBridge.exposeInMainWorld("electronAPI", {
         success: boolean;
       }>,
   },
+  browserPane: {
+    attach: (input: { paneId: string; url: string }) =>
+      ipcRenderer.invoke("browserPane:attach", input),
+    navigate: (input: { paneId: string; url: string }) =>
+      ipcRenderer.invoke("browserPane:navigate", input),
+    reload: (paneId: string) =>
+      ipcRenderer.invoke("browserPane:reload", { paneId }),
+    setBounds: (input: {
+      paneId: string;
+      visible: boolean;
+      bounds?: { x: number; y: number; width: number; height: number };
+    }) => ipcRenderer.invoke("browserPane:setBounds", input),
+    release: (paneId: string) =>
+      ipcRenderer.invoke("browserPane:release", { paneId }),
+    registerOpenTarget: (enabled: boolean) =>
+      ipcRenderer.invoke("browserPane:registerOpenTarget", enabled),
+    onOpenUrl: (callback: (payload: { url: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+        if (
+          payload &&
+          typeof payload === "object" &&
+          typeof (payload as { url?: unknown }).url === "string"
+        ) {
+          callback(payload as { url: string });
+        }
+      };
+      ipcRenderer.on("browserPane:openUrl", listener);
+      return () => ipcRenderer.removeListener("browserPane:openUrl", listener);
+    },
+    onState: (
+      callback: (state: {
+        paneId: string;
+        url: string;
+        title: string;
+        isLoading: boolean;
+        notice?: { code: string; message: string };
+        security: {
+          nodeIntegration: false;
+          contextIsolation: true;
+          partition: string;
+        };
+      }) => void
+    ) => {
+      const listener = (_event: Electron.IpcRendererEvent, state: unknown) => {
+        callback(
+          state as {
+            paneId: string;
+            url: string;
+            title: string;
+            isLoading: boolean;
+            notice?: { code: string; message: string };
+            security: {
+              nodeIntegration: false;
+              contextIsolation: true;
+              partition: string;
+            };
+          }
+        );
+      };
+      ipcRenderer.on("browserPane:state", listener);
+      return () => ipcRenderer.removeListener("browserPane:state", listener);
+    },
+  },
   // Packaged-app Google sign-in via system-browser loopback OAuth (B안,
   // ticket QvaYPAjAW822I0IDiwwZ). Returns the id_token (+ access_token) that the
   // renderer feeds to signInWithCredential. See docs/GOOGLE_LOGIN_PACKAGED.md.

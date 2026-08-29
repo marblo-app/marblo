@@ -1059,6 +1059,58 @@ interface WindowAPI {
   ) => Promise<{ success: boolean }>;
 }
 
+type BrowserPaneNoticeCode =
+  | "google-auth-external"
+  | "auth-external"
+  | "payment-external"
+  | "load-failed"
+  | "blocked-url";
+
+interface BrowserPaneBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface BrowserPaneState {
+  paneId: string;
+  url: string;
+  title: string;
+  isLoading: boolean;
+  notice?: {
+    code: BrowserPaneNoticeCode;
+    message: string;
+  };
+  security: {
+    nodeIntegration: false;
+    contextIsolation: true;
+    partition: string;
+  };
+}
+
+type BrowserPaneResult =
+  | { ok: true; state: BrowserPaneState }
+  | { ok: false; error: string };
+
+interface BrowserPaneAPI {
+  attach: (input: { paneId: string; url: string }) => Promise<BrowserPaneResult>;
+  navigate: (input: {
+    paneId: string;
+    url: string;
+  }) => Promise<BrowserPaneResult>;
+  reload: (paneId: string) => Promise<BrowserPaneResult>;
+  setBounds: (input: {
+    paneId: string;
+    visible: boolean;
+    bounds?: BrowserPaneBounds;
+  }) => Promise<{ ok: boolean; error?: string }>;
+  release: (paneId: string) => Promise<{ ok: boolean }>;
+  registerOpenTarget: (enabled: boolean) => Promise<{ ok: boolean }>;
+  onOpenUrl: (callback: (payload: { url: string }) => void) => () => void;
+  onState: (callback: (state: BrowserPaneState) => void) => () => void;
+}
+
 interface HarnessPackage {
   id: string;
   name: string;
@@ -1939,6 +1991,7 @@ interface ElectronAPI {
   getMachineId: () => Promise<string>;
   testMode: TestModeAPI;
   window: WindowAPI;
+  browserPane: BrowserPaneAPI;
   auth: AuthAPI;
   training: TrainingAPI;
   claude: ClaudeAPI;
