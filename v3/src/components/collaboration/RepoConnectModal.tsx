@@ -41,11 +41,13 @@ import {
  *    을 그대로 채택한다. 어느 쪽이든 확인된 주소를 프로젝트에 backfill 해
  *    다음 멤버부터는 clone 모드가 된다.
  *
- * ★수동 재호출 (티켓 r8vg9pMWCRtdnUzR3KyX):
+ * ★수동 재호출 (티켓 r8vg9pMWCRtdnUzR3KyX, dismissed 오버라이드
+ * b4Iw8qInqACF2Ba0UaYc):
  * `window.dispatchEvent(new CustomEvent("marblo:open-repo-connect"))` 로
- * dismissed 상태를 리셋해 모달을 띄울 수 있다. 모달을 닫았거나 빈 폴더
- * 자동 등록으로 own 인 사용자가 설정/프로젝트 메뉴에서 수동으로 다시
- * 들어올 때 쓴다.
+ * 모달을 띄울 수 있다. 모달을 닫았거나 빈 폴더 자동 등록으로 own 인
+ * 사용자가 설정/프로젝트 메뉴에서 수동으로 다시 들어올 때 쓴다.
+ * 이 경로는 `dismissed`([나중에]로 닫은 프로젝트)를 무시하고 연다 —
+ * 자동 경로(offered)만 dismissed 를 존중한다.
  */
 
 /** clone 실패 종류 → 안내 문구 키. */
@@ -238,10 +240,15 @@ export function RepoConnectModal() {
     machineId,
     ownValidity,
   );
+  // ★dismissed 는 자동 경로(offered)만 막는다. 수동 재호출(forceOpen)은
+  // dismissed 를 뚫고 연다 — 판정은 resolveRepoConnectVisible 한 곳에서만.
   const visible =
-    resolveRepoConnectVisible(offered, forceOpen) &&
     !!currentProject &&
-    !dismissed.has(currentProject.id);
+    resolveRepoConnectVisible(
+      offered,
+      forceOpen,
+      dismissed.has(currentProject.id),
+    );
 
   // 모달이 뜰 때 기본 clone 위치(~/Marblo)를 한 번 받아와 표시한다.
   useEffect(() => {
@@ -531,6 +538,9 @@ export function RepoConnectModal() {
 
   const handleLater = () => {
     setDismissed((prev) => new Set(prev).add(projectId));
+    // ★forceOpen 도 같이 내린다. dismissed 가 더 이상 수동 경로를 막지 않으
+    // 므로, 이걸 안 내리면 수동으로 연 모달에서 [나중에]/✕ 가 먹지 않는다.
+    setForceOpen(false);
     window.dispatchEvent(new CustomEvent(ONBOARDING_REPO_GUIDE_LATER_EVENT));
   };
 

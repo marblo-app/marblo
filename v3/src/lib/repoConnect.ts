@@ -57,15 +57,26 @@ export function shouldOfferRepoConnect(
 }
 
 /**
- * 모달 최종 노출 여부(offered/forceOpen 결합). 수동 재호출(forceOpen)은
- * project kind 와 무관하게 항상 모달을 열 수 있어야 한다 — own 에 묶으면
- * non-own/undefined 프로젝트에서 수동 재호출 버튼이 죽는다.
+ * 모달 최종 노출 여부(offered/forceOpen/dismissed 결합).
+ *
+ *  - 수동 재호출(`forceOpen`)은 project kind 와 무관하게 항상 모달을 열 수
+ *    있어야 한다 — own 에 묶으면 non-own/undefined 프로젝트에서 수동 재호출
+ *    버튼이 죽는다.
+ *  - ★`forceOpen` 은 `dismissed` 도 오버라이드한다(티켓 b4Iw8qInqACF2Ba0UaYc).
+ *    [나중에]로 한 번 닫은 프로젝트에서 '저장소 연결' 버튼을 다시 눌렀을 때
+ *    `!dismissed` 가 수동 경로까지 막아 무반응이 되던 버그를 막는다.
+ *  - ★반대로 자동 경로(`offered`)는 `dismissed` 를 계속 존중한다. dismiss 는
+ *    "이 창 세션 동안 자동으로 다시 묻지 않는다"는 의미이지, 사용자가 직접
+ *    부른 모달까지 막으라는 뜻이 아니다.
  */
 export function resolveRepoConnectVisible(
   offered: boolean,
   forceOpen: boolean,
+  // 기본값 false — dismissed 개념이 없는 호출부는 기존 의미 그대로다.
+  dismissed: boolean = false,
 ): boolean {
-  return offered || forceOpen;
+  if (forceOpen) return true;
+  return offered && !dismissed;
 }
 
 /**

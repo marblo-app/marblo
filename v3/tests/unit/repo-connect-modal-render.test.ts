@@ -7,6 +7,10 @@
  * visible → JSX 렌더 경로가 끊겨도 놓친다. 여기서는 컴포넌트를 실제로
  * 마운트하고 `marblo:open-repo-connect` 이벤트를 dispatch 해 전체 배선을
  * 검증한다.
+ *
+ * ★티켓 b4Iw8qInqACF2Ba0UaYc: dismiss 후 수동 재클릭 → 재렌더까지 못박는다.
+ * 예전엔 `!dismissed` 가 forceOpen 까지 막아 [나중에]로 닫은 프로젝트에서
+ * '저장소 연결' 버튼이 영구히 죽었다.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
@@ -38,9 +42,7 @@ const editorStoreMock = vi.hoisted(() => ({
 }));
 
 vi.mock("../../src/stores/projectStore", () => {
-  const useProjectStore = vi.fn((selector) =>
-    selector(projectStoreMock.state),
-  );
+  const useProjectStore = vi.fn((selector) => selector(projectStoreMock.state));
   return {
     useProjectStore: Object.assign(useProjectStore, {
       getState: () => projectStoreMock.state,
@@ -205,6 +207,85 @@ describe("RepoConnectModal DOM wiring", () => {
     await waitFor(() => {
       expect(screen.queryByText(ko["collab.repoConnect.title"])).toBeNull();
     });
+  });
+
+  it("reopens on the manual event after the project was dismissed, while the auto path keeps respecting dismissed", async () => {
+    projectStoreMock.state.currentProject = makeProject("unregistered");
+    const { rerender } = renderModal();
+
+    // 자동 노출(offered) — 연결 안 된 멤버에게는 그냥 뜬다.
+    expect(
+      await screen.findByText(ko["collab.repoConnect.title"]),
+    ).toBeTruthy();
+
+    // [나중에] → 닫힌다.
+    fireEvent.click(screen.getByText(ko["collab.repoConnect.later"]));
+    await waitFor(() => {
+      expect(screen.queryByText(ko["collab.repoConnect.title"])).toBeNull();
+    });
+
+    // ★회귀가드: 자동 경로는 dismissed 를 계속 존중한다 — 리렌더해도 안 뜬다.
+    rerender(createElement(RepoConnectModal));
+    expect(screen.queryByText(ko["collab.repoConnect.title"])).toBeNull();
+
+    // ★진범 회귀: 수동 버튼(이벤트)은 dismissed 를 뚫고 다시 띄운다.
+    fireEvent(
+      window,
+      new CustomEvent(REPO_CONNECT_OPEN_EVENT, { bubbles: false }),
+    );
+    expect(
+      await screen.findByText(ko["collab.repoConnect.title"]),
+    ).toBeTruthy();
+
+    // 수동으로 연 모달도 [나중에]로 정상적으로 닫혀야 한다(forceOpen 해제).
+    fireEvent.click(screen.getByText(ko["collab.repoConnect.later"]));
+    await waitFor(() => {
+      expect(screen.queryByText(ko["collab.repoConnect.title"])).toBeNull();
+    });
+
+    // 그리고 몇 번이든 다시 열린다 — 한 번 쓰고 죽는 신호가 아니다.
+    fireEvent(
+      window,
+      new CustomEvent(REPO_CONNECT_OPEN_EVENT, { bubbles: false }),
+    );
+    expect(
+      await screen.findByText(ko["collab.repoConnect.title"]),
+    ).toBeTruthy();
+  });
+
+  it("reopens a dismissed own-valid project on the manual event without auto-showing it (#699)", async () => {
+    const electronAPI = installElectronApiMock();
+    projectStoreMock.state.currentProject = makeProject("own");
+
+    renderModal();
+
+    await waitFor(() => {
+      expect(electronAPI.fs.checkFolderValidity).toHaveBeenCalled();
+    });
+    // 정상 own — 자동으로는 절대 안 뜬다.
+    expect(screen.queryByText(ko["collab.repoConnect.title"])).toBeNull();
+
+    // 수동으로 열고 닫아 dismissed 에 넣는다.
+    fireEvent(
+      window,
+      new CustomEvent(REPO_CONNECT_OPEN_EVENT, { bubbles: false }),
+    );
+    expect(
+      await screen.findByText(ko["collab.repoConnect.title"]),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByText(ko["collab.repoConnect.later"]));
+    await waitFor(() => {
+      expect(screen.queryByText(ko["collab.repoConnect.title"])).toBeNull();
+    });
+
+    // ★dismissed 가 된 뒤에도 수동 재호출은 계속 먹어야 한다.
+    fireEvent(
+      window,
+      new CustomEvent(REPO_CONNECT_OPEN_EVENT, { bubbles: false }),
+    );
+    expect(
+      await screen.findByText(ko["collab.repoConnect.title"]),
+    ).toBeTruthy();
   });
 
   it("does not auto-render for a normal own project after folder validity resolves (#699)", async () => {

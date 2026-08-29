@@ -135,6 +135,33 @@ describe("resolveRepoConnectVisible", () => {
   it("neither offered nor forceOpen keeps the modal closed", () => {
     expect(resolveRepoConnectVisible(false, false)).toBe(false);
   });
+
+  // ★회귀가드(티켓 b4Iw8qInqACF2Ba0UaYc): dismissed 는 자동 경로만 막는다.
+  // `!dismissed` 를 visible 전체에 걸면 [나중에]로 한 번 닫은 프로젝트에서
+  // '저장소 연결' 버튼이 영영 죽는다(forceOpen=true → visible=false →
+  // forceOpen 즉시 리셋 → 무반응).
+  it("forceOpen overrides dismissed so the manual button reopens the modal", () => {
+    expect(resolveRepoConnectVisible(false, true, true)).toBe(true);
+    expect(resolveRepoConnectVisible(true, true, true)).toBe(true);
+  });
+
+  // ★반대쪽 회귀가드(#699 own-valid 자동 미노출 유지): 자동 경로는 dismissed
+  // 를 계속 존중해야 한다. 여기가 true 로 뒤집히면 [나중에]가 무력화된다.
+  it("offered alone still respects dismissed", () => {
+    expect(resolveRepoConnectVisible(true, false, true)).toBe(false);
+    expect(resolveRepoConnectVisible(true, false, false)).toBe(true);
+  });
+
+  it("dismissed cannot open a modal that was never offered", () => {
+    expect(resolveRepoConnectVisible(false, false, true)).toBe(false);
+  });
+
+  // 세 번째 인자를 안 주는 기존 호출부는 의미가 바뀌지 않는다.
+  it("defaults dismissed to false for two-argument callers", () => {
+    expect(resolveRepoConnectVisible(true, false)).toBe(true);
+    expect(resolveRepoConnectVisible(false, true)).toBe(true);
+    expect(resolveRepoConnectVisible(false, false)).toBe(false);
+  });
 });
 
 describe("repoConnectMode", () => {
