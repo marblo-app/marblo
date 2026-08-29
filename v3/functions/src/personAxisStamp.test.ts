@@ -20,8 +20,11 @@ import {
   EVENT_USER_KEY_FIELD_SCHEMA,
   applyEventUserKeyStamp,
   buildEventStampBoundarySql,
+  buildEventStampEraseOutsideBufferSql,
   buildEventStampEraseSql,
   buildEventUserKeyAlterSql,
+  buildPersonErasePlan,
+  EVENT_STAMP_ERASE_BUFFER_MINUTES,
   planEventUserKeyStamp,
   resolveEventStampGate,
   summarizeEventStampCoverage,
@@ -299,4 +302,59 @@ test("★삭제 SQL 에 원시 uid 가 없다 — 파라미터는 가명 하나�
   const sql = buildEventStampEraseSql(PROJECT, DATASET, TABLE);
   assert.ok(!sql.includes(UID));
   assert.deepEqual([...sql.matchAll(/@(\w+)/g)].map((m) => m[1]), ["user_key"]);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7) ★삭제요청은 한 덩어리다 — 반쪽을 부를 수 있으면 언젠가 반쪽이 남는다
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 각인을 켜기 전 실측(2026-08-29): `buildPersonAxisEraseSql` 도
+// `buildEventStampEraseSql` 도 **호출자가 한 명도 없었다.** 짝이라는 사실이
+// 주석에만 있었다는 뜻이다. 아래 테스트가 그 사실을 코드로 옮긴다.
+
+test("★삭제 계획은 두 문장을 **같이** 돌려준다 — 링크표와 각인 중 하나만 나올 수 없다", () => {
+  const plan = buildPersonErasePlan(PROJECT, DATASET, TABLE);
+  assert.equal(plan.statements.length, 2);
+  const joined = plan.statements.map((s) => s.sql).join("\n");
+  // 각인 쪽: events 를 SET NULL 한다.
+  assert.match(joined, /UPDATE .*events`[\s\S]*SET userKey = NULL/);
+  // 링크표 쪽: analytics_user_install 에서 DELETE 한다.
+  assert.match(joined, /DELETE FROM .*analytics_user_install`/);
+});
+
+test("★깨지기 쉬운 문장이 먼저다 — 각인 UPDATE → 링크표 DELETE", () => {
+  const plan = buildPersonErasePlan(PROJECT, DATASET, TABLE);
+  // 링크를 먼저 지우고 각인이 스트리밍 버퍼로 거절되면 정확히 설계가 경고한
+  // 반쪽이 남는다(링크는 없는데 각인된 행이 그 사람을 계속 가리킨다).
+  assert.match(plan.statements[0].sql, /^UPDATE /);
+  assert.match(plan.statements[1].sql, /^DELETE FROM /);
+});
+
+test("★운영 문장은 스트리밍 버퍼를 피한다 — BQ 가 버퍼 행 UPDATE 를 문장째 거절한다", () => {
+  const sql = buildEventStampEraseOutsideBufferSql(PROJECT, DATASET, TABLE);
+  assert.match(
+    sql,
+    new RegExp(
+      `timestamp < TIMESTAMP_SUB\\(CURRENT_TIMESTAMP\\(\\), INTERVAL ${EVENT_STAMP_ERASE_BUFFER_MINUTES} MINUTE\\)`,
+    ),
+  );
+});
+
+test("★시간 가드를 붙였으면 잔여를 **세야** 한다 — 안 세면 그게 조용한 반쪽이다", () => {
+  const plan = buildPersonErasePlan(PROJECT, DATASET, TABLE);
+  assert.match(plan.residualCheck.sql, /^SELECT COUNT\(\*\) AS residual_rows/);
+  assert.match(plan.residualCheck.sql, /WHERE userKey = @user_key/);
+  // 잔여 카운트에는 시간 가드가 **없어야** 한다 — 버퍼 안에 남은 행까지 세야
+  // "아직 안 끝났다" 를 말할 수 있다.
+  assert.ok(!plan.residualCheck.sql.includes("TIMESTAMP_SUB"));
+});
+
+test("★삭제 계획 어느 문장에도 원시 uid·솔트가 없다 — 파라미터는 @user_key 하나뿐", () => {
+  const plan = buildPersonErasePlan(PROJECT, DATASET, TABLE);
+  for (const s of [...plan.statements, plan.residualCheck]) {
+    assert.ok(!s.sql.includes(UID), `${s.label} 에 원시 uid 가 있다`);
+    assert.ok(!s.sql.includes(SALT), `${s.label} 에 솔트가 있다`);
+    const params = new Set([...s.sql.matchAll(/@(\w+)/g)].map((m) => m[1]));
+    assert.deepEqual([...params], ["user_key"], `${s.label} 의 파라미터`);
+  }
 });

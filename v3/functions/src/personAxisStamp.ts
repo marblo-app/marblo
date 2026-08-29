@@ -36,7 +36,7 @@
 //   솔트도 없다. BQ 는 쿼리 본문을 job 히스토리에 수개월 보관한다.
 
 import { pseudonymizeAnalyticsId } from "./analyticsPseudonym";
-import type { PersonAxisGate } from "./personAxis";
+import { buildPersonAxisEraseSql, type PersonAxisGate } from "./personAxis";
 
 // ════════════════════════════════════════════════════════════════════════════
 // 1. 컬럼 이름 — 한 번 만들면 못 지운다
@@ -80,7 +80,7 @@ export const EVENT_USER_KEY_FIELD_SCHEMA = {
 export function buildEventUserKeyAlterSql(
   projectId: string,
   dataset: string,
-  table: string
+  table: string,
 ): string {
   return (
     `ALTER TABLE \`${projectId}.${dataset}.${table}\`\n` +
@@ -145,7 +145,7 @@ export type EventStampGate =
 
 /** ★던지지 않는다 — 꺼짐은 정상 상태다(personAxis 게이트와 같은 규율). */
 export function resolveEventStampGate(
-  env: Record<string, string | undefined> = process.env
+  env: Record<string, string | undefined> = process.env,
 ): EventStampGate {
   const raw = env[EVENTS_PERSON_STAMP_FROM_ENV];
   const trimmed = typeof raw === "string" ? raw.trim() : "";
@@ -204,7 +204,7 @@ export type PlanEventStampInput = {
  * ★`planUserInstallLink` 와 같은 모양이다(둘 다 "게이트 통과분만 돌려준다").
  */
 export function planEventUserKeyStamp(
-  input: PlanEventStampInput
+  input: PlanEventStampInput,
 ): EventStampPlan {
   if (!input.stampGate.on) {
     return { stamped: false, reason: "stamp_gate_off" };
@@ -233,7 +233,7 @@ export function planEventUserKeyStamp(
  */
 export function applyEventUserKeyStamp<T extends Record<string, unknown>>(
   row: T,
-  plan: EventStampPlan
+  plan: EventStampPlan,
 ): T {
   if (!plan.stamped) return row;
   return { ...row, [EVENT_USER_KEY_FIELD]: plan.userKey } as T;
@@ -253,7 +253,7 @@ export function applyEventUserKeyStamp<T extends Record<string, unknown>>(
 export function buildEventStampBoundarySql(
   projectId: string,
   dataset: string,
-  table: string
+  table: string,
 ): string {
   const t = `\`${projectId}.${dataset}.${table}\``;
   const k = EVENT_USER_KEY_FIELD;
@@ -316,7 +316,7 @@ function toStr(v: unknown): string | null {
  */
 export function summarizeEventStampCoverage(
   row: Record<string, unknown> | null | undefined,
-  gate: EventStampGate
+  gate: EventStampGate,
 ): EventStampCoverage {
   const stampedRows = toInt(row?.stamped_rows);
   const totalRows = toInt(row?.total_rows);
@@ -361,6 +361,58 @@ export function summarizeEventStampCoverage(
 export function buildEventStampEraseSql(
   projectId: string,
   dataset: string,
+  table: string,
+): string {
+  const t = `\`${projectId}.${dataset}.${table}\``;
+  const k = EVENT_USER_KEY_FIELD;
+  return [`UPDATE ${t}`, `SET ${k} = NULL`, `WHERE ${k} = @user_key`].join(
+    "\n",
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 6. ★삭제요청은 **한 덩어리**다 — 반쪽을 부를 수 있으면 언젠가 반쪽이 남는다
+// ════════════════════════════════════════════════════════════════════════════
+//
+// §5 는 "링크표 DELETE 와 각인 SET NULL 은 **짝**이다" 라고 적어 뒀다. 그런데
+// 2026-08-29 각인을 켜기 전 실측: **둘 다 호출자가 한 명도 없다.**
+// `buildPersonAxisEraseSql` 도 `buildEventStampEraseSql` 도 export 만 돼 있고
+// index.ts 에도, 스크립트에도, 어디에도 부르는 자리가 없다. 삭제요청 경로는
+// 사람이 손으로 SQL 을 붙여 넣는 것이고 — **그 사람이 짝의 존재를 아는지는
+// 주석에 달려 있었다.** 각인이 켜지는 순간 그 주석 하나가 PIPA 제36조와 우리
+// 사이의 유일한 방어선이 된다.
+//
+// 그래서 반쪽을 부를 수 없게 만든다: 아래 계획이 **두 문장을 한 배열로만**
+// 돌려준다. 개별 빌더는 테스트가 붙잡고 있어 그대로 두되, 운영 경로
+// (`scripts/erase-person-axis.ts`)는 이 계획만 쓴다.
+//
+// ── ★실측으로 드러난 두 번째 것: 각인 UPDATE 는 **실패할 수 있다** ──────────
+// `events` 는 `tabledata.insertAll`(스트리밍)로 적재된다. BigQuery 는 스트리밍
+// 버퍼에 걸린 행을 건드리는 UPDATE/DELETE 를 **거절한다.** 2026-08-29 실측
+// (격리 표에 스트리밍 insert 직후 UPDATE):
+//
+//   UPDATE or DELETE statement over table ... would affect rows in the
+//   streaming buffer, which is not supported
+//
+// ★부분 실행이 아니라 **문장째 거절**이라 조용히 반쪽이 되지는 않는다. 대신
+// "지금 활동 중인 사람" 의 삭제요청이 그냥 안 나간다. 계속 활동하면 계속 안 된다.
+// 그래서 운영 문장에는 버퍼 밖만 고르는 시간 가드를 붙이고, **남은 행 수를 세서
+// 보고한다.** 가드만 붙이고 세지 않으면 그게 진짜 반쪽이다 — 에러 없이 남는다.
+
+/**
+ * 스트리밍 버퍼를 피하는 여유. BQ 문서는 버퍼 체류를 "최대 90분" 으로 말한다.
+ * ★넉넉하게 잡는 쪽이 옳다: 짧으면 문장이 거절돼 삭제가 **안 나가고**, 길면
+ * 남은 행이 잔여로 잡혀 **재실행 대상이 될 뿐**이다. 실패의 값이 다르다.
+ */
+export const EVENT_STAMP_ERASE_BUFFER_MINUTES = 90;
+
+/**
+ * 각인 SET NULL — 스트리밍 버퍼 밖 구간만. ★`buildEventStampEraseSql` 의
+ * 운영판이다(그쪽은 이상적인 문장이고 이쪽은 실제로 나가는 문장이다).
+ */
+export function buildEventStampEraseOutsideBufferSql(
+  projectId: string,
+  dataset: string,
   table: string
 ): string {
   const t = `\`${projectId}.${dataset}.${table}\``;
@@ -369,5 +421,73 @@ export function buildEventStampEraseSql(
     `UPDATE ${t}`,
     `SET ${k} = NULL`,
     `WHERE ${k} = @user_key`,
+    `  AND timestamp < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${EVENT_STAMP_ERASE_BUFFER_MINUTES} MINUTE)`,
   ].join("\n");
+}
+
+/**
+ * 위 문장이 **못 지운 행**을 센다. ★0 이 아니면 삭제요청은 아직 안 끝난 것이다 —
+ * 재실행해야 한다. 이 수를 보고하지 않으면 시간 가드가 조용한 반쪽이 된다.
+ */
+export function buildEventStampEraseResidualSql(
+  projectId: string,
+  dataset: string,
+  table: string
+): string {
+  const t = `\`${projectId}.${dataset}.${table}\``;
+  const k = EVENT_USER_KEY_FIELD;
+  return [
+    `SELECT COUNT(*) AS residual_rows`,
+    `FROM ${t}`,
+    `WHERE ${k} = @user_key`,
+  ].join("\n");
+}
+
+export type PersonEraseStatement = {
+  /** 사람이 읽는 이름. 로그에 이것만 남는다 — 값은 안 남는다. */
+  readonly label: string;
+  readonly sql: string;
+};
+
+export type PersonErasePlan = {
+  /** ★실행 순서대로다. 배열을 쪼개 쓰지 마라 — 쪼갤 수 있으면 언젠가 쪼갠다. */
+  readonly statements: ReadonlyArray<PersonEraseStatement>;
+  /** 각인 UPDATE 뒤에 반드시 확인할 잔여 카운트. */
+  readonly residualCheck: PersonEraseStatement;
+};
+
+/**
+ * PIPA 제36조 삭제요청 한 덩어리.
+ *
+ * ★순서가 설계다: **각인 UPDATE 를 먼저, 링크표 DELETE 를 나중에** 한다.
+ * 각인 UPDATE 는 스트리밍 버퍼 때문에 거절될 수 있는 **깨지기 쉬운 문장**이고,
+ * 링크표는 스트리밍이 아니라 MERGE 로 쓰므로 그 제약이 없다. 링크를 먼저 지운
+ * 뒤 각인이 실패하면 남는 것이 정확히 설계가 경고한 반쪽이다 — 링크는 사라졌는데
+ * 각인된 행이 그 사람을 계속 가리킨다. 깨지기 쉬운 쪽을 앞에 두면 실패가
+ * "아무것도 안 한 상태" 로 끝난다.
+ *
+ * ★파라미터는 `@user_key` 하나다. 원시 uid 도 솔트도 문장에 없다 — BQ 는 쿼리
+ * 본문을 job 히스토리에 수개월 보관한다.
+ */
+export function buildPersonErasePlan(
+  projectId: string,
+  dataset: string,
+  table: string
+): PersonErasePlan {
+  return {
+    statements: [
+      {
+        label: "각인 SET NULL (events.userKey, 스트리밍 버퍼 밖)",
+        sql: buildEventStampEraseOutsideBufferSql(projectId, dataset, table),
+      },
+      {
+        label: "링크표 DELETE (analytics_user_install)",
+        sql: buildPersonAxisEraseSql(projectId),
+      },
+    ],
+    residualCheck: {
+      label: "잔여 각인 행 수 (0 이 아니면 재실행)",
+      sql: buildEventStampEraseResidualSql(projectId, dataset, table),
+    },
+  };
 }
