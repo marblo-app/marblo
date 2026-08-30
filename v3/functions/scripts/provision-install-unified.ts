@@ -5,6 +5,10 @@
 //   cd v3/functions && npm run provision:install-unified            # dry-run(기본)
 //   cd v3/functions && npm run provision:install-unified -- --apply # 실제 생성
 //
+//   ★게이트: PERSON_AXIS_EFFECTIVE_FROM=YYYY-MM-DD 를 **셸에 export** 하고 돌려라.
+//     이 스크립트는 .env.<project> 를 읽지 않는다. 닫힌 채 --apply 는 막힌다
+//     (--allow-closed-gate 로만 승인) — 2026-08-29 닫힌 본문 굳음 사고.
+//
 // ── ★이 스크립트가 하지 않는 것 ─────────────────────────────────────────────
 //   - DROP / ALTER / DELETE / TRUNCATE / INSERT 를 **한 줄도 내보내지 않는다.**
 //   - 원본 표를 만들지도 고치지도 않는다. **있는지, 그리고 필요한 컬럼이
@@ -21,7 +25,11 @@
 
 import { BigQuery } from "@google-cloud/bigquery";
 
-import { resolvePersonAxisGate } from "../src/personAxis";
+import {
+  assessProvisionGate,
+  PROVISION_ALLOW_CLOSED_GATE_FLAG,
+  resolvePersonAxisGate,
+} from "../src/personAxis";
 import {
   IDENTITY_DATASET,
   SOURCE_GA4_CURRENT,
@@ -48,6 +56,7 @@ const BQ_LOCATION = "US"; // index.ts 와 같아야 한다.
 
 const APPLY = process.argv.includes("--apply");
 const REPLACE_VIEWS = process.argv.includes("--replace-views");
+const ALLOW_CLOSED_GATE = process.argv.includes(PROVISION_ALLOW_CLOSED_GATE_FLAG);
 
 const bigquery = new BigQuery({ projectId: PROJECT_ID, location: BQ_LOCATION });
 
@@ -172,6 +181,18 @@ async function main(): Promise<void> {
     }`
   );
   note("");
+
+  // ★게이트가 닫힌 채 --apply 면 여기서 멈춘다 — 닫힌 본문이 DDL 로 굳는 사고(2026-08-29).
+  const gateVerdict = assessProvisionGate(gate, {
+    apply: APPLY,
+    allowClosedGate: ALLOW_CLOSED_GATE,
+  });
+  if (gateVerdict.message) note(`  ${gateVerdict.message}`);
+  if (!gateVerdict.ok) {
+    fail(gateVerdict.message ?? "사람 축 게이트가 닫혀 있다.");
+    console.error(`[fail] ${problems.length}건 — 조용히 넘어가지 않는다.`);
+    process.exit(1);
+  }
 
   const unifiedBody = buildUnifiedViewSql(PROJECT_ID);
   const revenueBody = buildRevenueViewSql(PROJECT_ID, gate);

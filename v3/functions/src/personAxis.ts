@@ -142,6 +142,56 @@ export function resolvePersonAxisGate(
   };
 }
 
+/**
+ * ★provision 가드 — 게이트가 닫힌 채로 뷰를 **굳히지** 않는다.
+ *
+ * 실측(2026-08-29 12:19Z): provision 스크립트는 `process.env` 만 읽고 `.env.<project>`
+ * 를 로드하지 않는다. 셸에 `PERSON_AXIS_EFFECTIVE_FROM` 이 없던 세션에서
+ * `--apply --replace-views` 가 돌아 `v_install_unified_revenue` 가
+ * `person_axis_closed` 본문으로 굳었고, 어드민은 "결제 0" 을 사실처럼 읽었다.
+ * 닫힘 자체는 정상 상태지만(런타임은 0행+사유로 답한다), **DDL 로 굳는 순간**
+ * 런타임 게이트와 무관하게 닫힌 채 남는다 — 그래서 굳히는 쪽만 막는다.
+ *
+ * 판정:
+ *   - 게이트 open           → 통과.
+ *   - dry-run(apply=false)  → 통과(경고만). 계획은 보여 줘야 한다.
+ *   - apply + closed        → `--allow-closed-gate` 가 없으면 **막는다**.
+ *   - apply + closed + 플래그 → 통과(경고). 의도적 닫힘 provision 은 남겨 둔다.
+ */
+export const PROVISION_ALLOW_CLOSED_GATE_FLAG = "--allow-closed-gate";
+
+export interface ProvisionGateVerdict {
+  /** false 면 provision 을 진행하지 않는다. */
+  readonly ok: boolean;
+  /** 사람이 읽을 사유·경고. ok=true 여도 경고가 있을 수 있다. */
+  readonly message: string | null;
+}
+
+export function assessProvisionGate(
+  gate: PersonAxisGate,
+  opts: { readonly apply: boolean; readonly allowClosedGate: boolean }
+): ProvisionGateVerdict {
+  if (gate.open) return { ok: true, message: null };
+  const why =
+    `사람 축 게이트가 닫혀 있다(${gate.reasonCode}) — 이대로 만들면 뷰가 ` +
+    "닫힌 본문으로 굳고 화면이 '결제 0' 을 사실처럼 답한다(2026-08-29 사고). " +
+    `${PERSON_AXIS_EFFECTIVE_FROM_ENV}=YYYY-MM-DD 를 셸에 export 하고 다시 돌려라` +
+    "(provision 스크립트는 .env.<project> 를 읽지 않는다).";
+  if (!opts.apply) {
+    return { ok: true, message: `[warn] ${why} (dry-run 이라 진행한다)` };
+  }
+  if (opts.allowClosedGate) {
+    return {
+      ok: true,
+      message: `[warn] ${why} ${PROVISION_ALLOW_CLOSED_GATE_FLAG} 로 의도적 닫힘 provision 을 승인했다.`,
+    };
+  }
+  return {
+    ok: false,
+    message: `${why} 정말 닫힌 채 만들려면 ${PROVISION_ALLOW_CLOSED_GATE_FLAG} 를 명시해라.`,
+  };
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // 2. 테이블 좌표 · 링크축 스키마
 // ════════════════════════════════════════════════════════════════════════════

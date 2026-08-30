@@ -20,6 +20,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  assessProvisionGate,
+  PROVISION_ALLOW_CLOSED_GATE_FLAG,
   FORBIDDEN_ON_LINK_AXIS,
   LINK_SOURCE_TELEMETRY_AUTH,
   LINK_SOURCE_UID28_INLINE,
@@ -903,4 +905,34 @@ test("★identity_linked_ratio SQL 은 링크표와 analytics_identity 를 읽�
   assert.match(sql, /install_key_hmac IS NOT NULL/);
   // ★읽기만 한다 — 커버리지가 원본을 고치면 그건 커버리지가 아니다.
   assert.ok(!/\b(INSERT|UPDATE|DELETE|MERGE|CREATE|DROP|ALTER)\b/.test(sql));
+});
+
+// ── provision 가드 ────────────────────────────────────────────────────────────
+
+test("★provision 가드: 게이트가 닫힌 채 --apply 는 막는다 — 뷰가 닫힌 본문으로 굳는 사고(2026-08-29)", () => {
+  const closed = resolvePersonAxisGate({});
+  const v = assessProvisionGate(closed, { apply: true, allowClosedGate: false });
+  assert.equal(v.ok, false);
+  assert.match(v.message ?? "", /PERSON_AXIS_EFFECTIVE_FROM/);
+  assert.match(v.message ?? "", new RegExp(PROVISION_ALLOW_CLOSED_GATE_FLAG));
+});
+
+test("provision 가드: dry-run 은 닫혀 있어도 진행한다(경고만) — 계획은 보여 줘야 한다", () => {
+  const closed = resolvePersonAxisGate({ PERSON_AXIS_EFFECTIVE_FROM: "2026-02-31" });
+  const v = assessProvisionGate(closed, { apply: false, allowClosedGate: false });
+  assert.equal(v.ok, true);
+  assert.match(v.message ?? "", /^\[warn\]/);
+  assert.match(v.message ?? "", /invalid/);
+});
+
+test("provision 가드: --allow-closed-gate 를 명시하면 닫힌 채 --apply 를 허용한다(경고 남김)", () => {
+  const closed = resolvePersonAxisGate({});
+  const v = assessProvisionGate(closed, { apply: true, allowClosedGate: true });
+  assert.equal(v.ok, true);
+  assert.match(v.message ?? "", /^\[warn\]/);
+});
+
+test("provision 가드: 게이트가 열려 있으면 조용히 통과한다", () => {
+  const open = resolvePersonAxisGate({ PERSON_AXIS_EFFECTIVE_FROM: "2026-04-01" });
+  assert.deepEqual(assessProvisionGate(open, { apply: true, allowClosedGate: false }), { ok: true, message: null });
 });

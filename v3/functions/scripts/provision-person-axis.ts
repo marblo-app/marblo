@@ -51,6 +51,8 @@ import {
   buildPersonAxisViewSql,
   buildUserInstallTableDdl,
   maskPrincipal,
+  assessProvisionGate,
+  PROVISION_ALLOW_CLOSED_GATE_FLAG,
   resolvePersonAxisGate,
   type PersonAxisBasis,
 } from "../src/personAxis";
@@ -60,6 +62,7 @@ const BQ_LOCATION = "US"; // index.ts:204 와 같아야 한다.
 
 const APPLY = process.argv.includes("--apply");
 const REPLACE_VIEWS = process.argv.includes("--replace-views");
+const ALLOW_CLOSED_GATE = process.argv.includes(PROVISION_ALLOW_CLOSED_GATE_FLAG);
 
 /**
  * ★링크표 데이터셋의 ACL. 기본값(projectOwners/projectWriters/projectReaders)을
@@ -339,6 +342,17 @@ async function main(): Promise<void> {
     }`
   );
   note("");
+
+  // ★게이트가 닫힌 채 --apply 면 여기서 멈춘다 — 0행 본문이 DDL 로 굳는 사고(2026-08-29).
+  const gateVerdict = assessProvisionGate(gate, {
+    apply: APPLY,
+    allowClosedGate: ALLOW_CLOSED_GATE,
+  });
+  if (gateVerdict.message) note(`  ${gateVerdict.message}`);
+  if (!gateVerdict.ok) {
+    console.error(`[fail] ${gateVerdict.message}`);
+    process.exit(1);
+  }
 
   // 원본은 확인만. ★analytics_identity 는 익명축 정본이고 여기서 안 건드린다.
   await requireSourceTable("analytics_identity");
