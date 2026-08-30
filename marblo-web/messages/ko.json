@@ -1439,6 +1439,7 @@
         "events": "사건",
         "tasksOpen": "열린 티켓",
         "tasksDone": "완료 티켓",
+        "tasksFailed": "실패 티켓",
         "merges": "머지",
         "agents": "에이전트",
         "missionsActive": "진행 중 미션",

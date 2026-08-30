@@ -1,7 +1,8 @@
 # 팀 오버뷰 설계 — 오너가 보는 멤버별·오케별 토큰 사용량
 
 작성일: 2026-08-21 · 티켓 `RpscJs0sc8IKFgdpSKKj` · 역할 backend
-상태: **설계 doc (구현 없음)** → eng-review 후 §10 구현 티켓으로 분해
+상태: **구현됨(2026-08-30 정정)** — 서버 `v3/functions/src/teamUsage.ts` + `index.ts getTeamUsageSummary` · 화면 `marblo-web/src/app/[locale]/team/*`(TeamUsageView · TeamAuditView · 계약/테스트). ★단 **게이트는 닫혀 있고 뷰는 적재 전**이다: 배포 env 에 `TEAM_USAGE_EFFECTIVE_FROM` 없음(08-29 13:12Z 배포 기준) · BQ `v_team_usage_daily`/`v_team_usage_unattributed` 미프로비저닝(08-30 실측). 지금 팀 스코프를 열면 `disabled` + 사유 문장만 보인다. 살아있음 판정표: `docs/team-analytics-liveness-audit-2026-08-30.md`
+(이전 상태 문구: "설계 doc (구현 없음) → eng-review 후 §10 구현 티켓으로 분해")
 
 관련 정본
 - 축 규율: `v3/functions/src/analyticsProfiles.ts` (`FORBIDDEN_ON_ANONYMOUS_AXIS` / `FORBIDDEN_ON_ACCOUNT_AXIS` / `assertAxisPurity`)

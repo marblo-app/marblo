@@ -1,7 +1,13 @@
 # 관리자 사업분석 대시보드 — 기획/스펙
 
 작성일: 2026-07-12
-상태: **기획/스펙 (승인 대기)** — 이 문서는 설계까지다. 구현 코드는 승인 후 별도 티켓으로 분해한다.
+상태: **기획/스펙 (승인 대기 · 전제 일부 낡음 — 2026-08-30 정정)** — 이 문서는 설계까지다. 구현 코드는 승인 후 별도 티켓으로 분해한다.
+
+> **★2026-08-30 정정 — 아래 본문의 전제 두 가지가 더 이상 사실이 아니다.** 본문은 작성 시점(07-12) 실측으로 남겨 두고, 여기서만 고친다.
+>
+> 1. **1차 텔레메트리는 기본 ON 이다(옵트인 아님).** `v3/src/lib/telemetry/firstPartyGate.ts` `firstPartyTelemetryDefaultEnabled()` 가 `true` 를 돌려준다 — 정당한 이익 근거, 2026-07-17 CEO 승인, PR#397 에서 전환. `VITE_FIRST_PARTY_TELEMETRY` 옵트인 플래그는 폐기됐고 `VITE_DISABLE_TELEMETRY=1` 만 kill-switch 다. 따라서 §0-1(B)·§1 게이트 줄·§2 리스크 "희소" 전제·🟡 "옵트인 편향" 라벨은 **"익명 설치 축(계정과 조인 불가)"** 으로 읽어야 한다. 희소성 문제는 옵트인 때문이 아니라 **외부 실사용자가 적어서**다(설치 7, 외부 4).
+> 2. **Sentry 는 설치돼 있다.** `v3/package.json` `@sentry/electron ^7.15.0` · `v3/electron/sentry-main.ts`(main 프로세스, 동의 게이트 + DSN 게이트 + PII 스크럽) · `v3/src/lib/telemetry/sentry.ts`(렌더러). 단 **동의 후에만 init** 되고 DSN 이 없으면 no-op 이므로 "크래시율 KPI 소스 0" 판정은 **"소스 있음 · 동의 표본"** 으로 바뀐다(§1.3 · T0-2 · T3-6).
+> 3. 그 사이 실제로 생긴 것: 팀 축 화면 `marblo-web /team`(사용량·감사 탭, `docs/team-usage-overview-design-2026-08-21.md`) · 어드민 콜러블군(`docs/analytics-admin-callables-api.md`) · 사람 축(`events.userKey`, 2026-08-29 13:14:19Z 이후) · `task_outcomes.outcomeMode`. §3 "시각화/집계 레이어만 없다" 는 어드민 쪽은 부분 해소됐고, **팀(B2B) 쪽 성공/실패는 여전히 없다** — 판정: `docs/team-analytics-liveness-audit-2026-08-30.md`.
 관련 티켓: `AfhbDvRPXfEsFoR943ON`
 
 > 이 문서의 모든 "있음/없음" 판정은 코드 실측 근거(파일:라인)를 붙였다. 근거 없는 추측은 넣지 않았고, 데이터가 없는 곳은 **공백으로 명시**했다.

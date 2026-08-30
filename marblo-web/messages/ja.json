@@ -1439,6 +1439,7 @@
         "events": "事象",
         "tasksOpen": "進行中チケット",
         "tasksDone": "完了チケット",
+        "tasksFailed": "失敗チケット",
         "merges": "マージ",
         "agents": "エージェント",
         "missionsActive": "進行中ミッション",

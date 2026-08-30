@@ -1439,6 +1439,7 @@
         "events": "Events",
         "tasksOpen": "Open tickets",
         "tasksDone": "Done tickets",
+        "tasksFailed": "Failed tickets",
         "merges": "Merges",
         "agents": "Agents",
         "missionsActive": "Active missions",

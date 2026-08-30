@@ -339,6 +339,17 @@ export function AuditSummaryTiles({
           label={t("audit.summary.tasksDone")}
           value={n(summary?.tasksDone ?? null)}
         />
+        {/* ★성공/실패는 계정 축(티켓 원장)의 FAILED 상태로만 센다. 익명 축
+            `task_outcomes` 의 success 는 이 화면으로 못 온다(축 가드). */}
+        <StatTile
+          label={t("audit.summary.tasksFailed")}
+          value={n(summary?.tasksFailed ?? null)}
+          tone={
+            summary?.tasksFailed != null && summary.tasksFailed > 0
+              ? "alert"
+              : "default"
+          }
+        />
         {/* ★머지는 사건 피드에도 나온다. 타일과 피드가 다른 스코프면 "머지 12건"
             이라 써 놓고 피드엔 0건인 화면이 된다(self 스코프에서 실제로 그랬다).
             보이는 것과 같은 출처를 쓴다. */}

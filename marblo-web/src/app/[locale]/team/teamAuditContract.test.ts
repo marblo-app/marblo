@@ -416,3 +416,35 @@ test("시각을 못 읽은 행은 버리지 않고 '모름' 으로 남는다", (
 test("프로토타입 오염된 사유 코드로 사전을 뚫지 못한다", () => {
   assert.equal(resolveAuditReason(null, null, {}, "폴백"), "폴백");
 });
+
+// ── ★성공/실패 — 계정 축(티켓 원장)의 FAILED 만 센다 ─────────────────────────
+//
+// `task_outcomes.success`(익명 축) 는 이 화면으로 오지 않는다 — 축 가드가 막는
+// 조인이다. 그래서 여기서 보는 성공/실패는 **티켓 상태**이고, 그 값은 서버
+// `summary.tasksByStatus` 에서만 온다.
+
+test("tasksByStatus.FAILED 가 tasksFailed 로 들어온다", () => {
+  const env = normalizeTeamAudit({
+    summary: { tasksByStatus: { DONE: 5, FAILED: 2, TODO: 1 } },
+  });
+  assert.equal(env.summary?.tasksFailed, 2);
+});
+
+test("tasksByStatus 가 없으면 tasksFailed 는 0 이 아니라 null(모름)", () => {
+  const env = normalizeTeamAudit({ summary: { tasksDone: 5 } });
+  assert.equal(env.summary?.tasksFailed, null);
+});
+
+test("tasksByStatus 는 있는데 FAILED 가 숫자가 아니면 null 로 접는다", () => {
+  const env = normalizeTeamAudit({
+    summary: { tasksByStatus: { FAILED: "2" } },
+  });
+  assert.equal(env.summary?.tasksFailed, null);
+});
+
+test("FAILED: 0 은 실제 0 이다(결측과 갈린다)", () => {
+  const env = normalizeTeamAudit({
+    summary: { tasksByStatus: { DONE: 3, FAILED: 0 } },
+  });
+  assert.equal(env.summary?.tasksFailed, 0);
+});

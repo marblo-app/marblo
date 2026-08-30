@@ -118,6 +118,13 @@ export type TeamAuditSummary = {
   tasksTotal: number | null;
   tasksOpen: number | null;
   tasksDone: number | null;
+  /**
+   * ★성공/실패 축 — 계정 축(프로젝트 티켓 원장)에서만 센다.
+   * 서버 `summary.tasksByStatus.FAILED` 를 받는다. `task_outcomes`(익명 축) 는
+   * 이 화면이 읽지 않는다 — 축 가드가 막는 조인이고, 우회하지 않는다.
+   * `null` = 서버가 상태별 집계를 안 보냈다(모름). `0` = 실패 티켓이 없다.
+   */
+  tasksFailed: number | null;
   attentionCount: number | null;
   criticalCount: number | null;
   agentsTotal: number | null;
@@ -479,6 +486,7 @@ function normalizeSummary(v: unknown): TeamAuditSummary | null {
     tasksTotal: num(r.tasksTotal),
     tasksOpen: num(r.tasksOpen),
     tasksDone: num(r.tasksDone),
+    tasksFailed: num(asRecord(r.tasksByStatus)?.FAILED),
     attentionCount: num(r.attentionCount),
     criticalCount: num(r.criticalCount),
     agentsTotal: num(r.agentsTotal),

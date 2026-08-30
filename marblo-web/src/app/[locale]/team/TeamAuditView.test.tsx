@@ -641,3 +641,31 @@ test("★위양성 짝: 엔티티 복원이 없으면 문구 검사가 죽는다
   // 복원된 텍스트에는 있다 — 다른 검사들이 이걸 딛고 선다.
   assert.ok(text.includes(bait), "엔티티 복원이 동작해야 한다");
 });
+
+// ── ★성공/실패 타일 — 계정 축 티켓 상태로만 그린다 ──────────────────────────
+
+for (const { locale, copy } of LOCALES) {
+  test(`[${locale}] 실패 티켓 타일이 tasksByStatus.FAILED 로 그려진다`, () => {
+    const env = envComplete({
+      summary: { tasksOpen: 3, tasksDone: 5, tasksByStatus: { FAILED: 2 } },
+    });
+    const { text } = render(
+      <TeamAuditView env={env} copy={copy} locale={locale} />
+    );
+    assert.ok(text.includes(copy.text["audit.summary.tasksFailed"]));
+    assert.ok(text.includes("2"));
+  });
+
+  test(`[${locale}] 실패 티켓 결측은 0 이 아니라 '모름' 이다`, () => {
+    const env = envComplete({ summary: { tasksOpen: 3, tasksDone: 5 } });
+    const { text } = render(
+      <TeamAuditView env={env} copy={copy} locale={locale} />
+    );
+    const label = copy.text["audit.summary.tasksFailed"];
+    const unknown = copy.text["audit.unknown"];
+    const idx = text.indexOf(label);
+    assert.ok(idx >= 0);
+    // 라벨 바로 뒤에 '모름' 이 온다(0 이 아니다).
+    assert.ok(text.slice(idx, idx + label.length + unknown.length + 8).includes(unknown));
+  });
+}
