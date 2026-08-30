@@ -54,6 +54,12 @@ export type AssistantTriggerValidationIssue =
   | "slack_output_unavailable"
   | "telegram_output_unavailable"
   | "invalid_cron"
+  /**
+   * ★스케줄 timezone 은 IANA 이름이어야 한다. 엔진은 `Intl.DateTimeFormat` 에
+   * 그대로 넘기는데, 잘못된 이름이면 매 분 RangeError 가 나서 스케줄이 **저장은
+   * 되지만 영원히 안 돈다** — #1298 과 같은 계열이라 저장 단계에서 막는다.
+   */
+  | "invalid_timezone"
   | "calendar_connector_required"
   | "gmail_connector_required"
   /**
@@ -69,6 +75,11 @@ export type AssistantTriggerValidationIssue =
   | "calendar_poll_out_of_range"
   | "gmail_poll_out_of_range"
   | "webhook_poll_out_of_range"
+  /**
+   * ★웹훅 조건은 URL 을 발급해야 성립한다. 엔진이 읽는 이벤트 큐는 발급된
+   * 웹훅 URL 로만 채워지므로, 발급 없이 켜 두면 저장은 되지만 영원히 안 돈다.
+   */
+  | "webhook_not_issued"
   | "sheets_connector_required"
   /**
    * ★스코프 0 (설계 §3.5). 시트 폴링 경로가 보류됐고 Apps Script 가 대신한다.
@@ -301,6 +312,21 @@ export function isValidCronExpression(expression: string): boolean {
   );
 }
 
+/**
+ * IANA timezone 이름 검사. 엔진(`assistant-triggers.ts`)과 같은 판정 —
+ * `Intl.DateTimeFormat` 이 받아들이는 이름만 참이다. 빈 값은 "로컬 시간" 이라
+ * 유효하다.
+ */
+export function isValidTimeZone(timeZone: string | undefined): boolean {
+  if (!timeZone || !timeZone.trim()) return true;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timeZone.trim() });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function validateAssistantTriggerSettings(
   settings: AssistantTriggerSettings,
   connectors: AssistantTriggerConnectorState,
@@ -335,6 +361,9 @@ export function validateAssistantTriggerSettings(
 
   if (scheduleEnabled && !isValidCronExpression(settings.schedule?.cron ?? "")) {
     issues.push("invalid_cron");
+  }
+  if (scheduleEnabled && !isValidTimeZone(settings.schedule?.timezone)) {
+    issues.push("invalid_timezone");
   }
   if (calendarEnabled) {
     if (isCapabilityWithheld("calendar_trigger")) {
@@ -387,15 +416,19 @@ export function validateAssistantTriggerSettings(
       }
     }
   }
-  if (
-    webhookEnabled &&
-    !inIntegerRange(
-      settings.webhook?.pollMinutes ?? 0,
-      MIN_POLL_MINUTES,
-      MAX_POLL_MINUTES,
-    )
-  ) {
-    issues.push("webhook_poll_out_of_range");
+  if (webhookEnabled) {
+    if (!settings.webhook?.webhookId?.trim()) {
+      issues.push("webhook_not_issued");
+    }
+    if (
+      !inIntegerRange(
+        settings.webhook?.pollMinutes ?? 0,
+        MIN_POLL_MINUTES,
+        MAX_POLL_MINUTES,
+      )
+    ) {
+      issues.push("webhook_poll_out_of_range");
+    }
   }
 
   if (sheetsEnabled) {

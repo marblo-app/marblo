@@ -575,6 +575,10 @@ export const agents: Record<keyof typeof koAgents, string> = {
     "The Telegram channel connection is not ready.",
   "agents.triggers.validation.invalidCron":
     "cron must use the 5-field format. Example: 0 9 * * 1-5",
+  "agents.triggers.validation.invalidTimezone":
+    "timezone must be an IANA name (e.g. Asia/Seoul). Saving an invalid name means the schedule never fires. Leave it empty to use this computer's local time.",
+  "agents.triggers.validation.webhookNotIssued":
+    "Issue a receiving URL before enabling the Webhook condition. Without one it would save but never receive an event - press 'Issue URL' below.",
   // These two surface only after the hold is lifted; the hold itself is now
   // stated by the *TriggerWithheld messages.
   "agents.triggers.validation.calendarConnectorRequired":

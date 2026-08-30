@@ -398,6 +398,7 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
     }
     setBusy({ key: "custom", action: "save" });
     setError(null);
+    setMessage(null);
     try {
       await createBotDefinition(draft);
       setCustom({
@@ -409,6 +410,14 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
         knowledgeEnabled: true,
       });
       setMessage(t("agents.marbloBots.savedCustom"));
+    } catch (err) {
+      // ★Firestore 쓰기 실패가 unhandled rejection 으로 사라지지 않게 — 화면에
+      // 이유를 남긴다.
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : t("agents.marbloBots.saveFailed"),
+      );
     } finally {
       setBusy(null);
     }
@@ -571,6 +580,9 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
                     type="button"
                     disabled={isBusy || !validation.ok}
                     onClick={async () => {
+                      // 저장 단계부터 바쁨 표시 — 저장 중 두 번 눌리지 않게.
+                      setBusy({ key, action: "run" });
+                      setError(null);
                       try {
                         const bot = await saveSeed(seed);
                         await dispatchBot(bot, key);

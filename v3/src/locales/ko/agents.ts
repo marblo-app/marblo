@@ -568,6 +568,10 @@ export const agents = {
     "Telegram 채널 연결이 준비되지 않았습니다.",
   "agents.triggers.validation.invalidCron":
     "cron은 5필드 형식이어야 합니다. 예: 0 9 * * 1-5",
+  "agents.triggers.validation.invalidTimezone":
+    "timezone은 IANA 이름이어야 합니다(예: Asia/Seoul). 잘못된 이름으로 저장하면 스케줄이 영원히 돌지 않습니다. 비워 두면 이 컴퓨터의 로컬 시간을 씁니다.",
+  "agents.triggers.validation.webhookNotIssued":
+    "Webhook 조건을 켜려면 먼저 수신 URL을 발급해야 합니다. 발급 없이 켜 두면 저장만 되고 이벤트가 영원히 오지 않습니다 — 아래 'URL 발급' 버튼을 눌러 주세요.",
   // ★아래 둘은 **보류가 풀린 뒤에만** 화면에 나온다(#1267 규율: 지우지 않고
   // 되살아나게 둔다). 그래서 문구를 원래의 "연결이 필요하다" 로 되돌렸다 —
   // 보류 사실은 이제 `*TriggerWithheld` 가 말한다. 두 문구가 같은 말을 하면

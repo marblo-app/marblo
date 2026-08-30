@@ -379,6 +379,22 @@ export function parseCronExpression(expression: string): CronMatcher {
   };
 }
 
+/**
+ * IANA timezone 이름 검사. 화면(`assistantTriggerSettings.ts`)과 같은 판정이다.
+ * ★잘못된 이름을 `Intl.DateTimeFormat` 에 넘기면 RangeError 가 나는데, 그것이
+ * setInterval 의 tick 안에서 매 분 터지면 스케줄은 **저장은 됐지만 영원히 안
+ * 도는** 상태가 된다(#1298 계열). 빈 값은 로컬 시간이라 유효하다.
+ */
+export function isValidTimeZone(timeZone: string | undefined): boolean {
+  if (!timeZone) return true;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function nextMinuteDelay(now: Date): number {
   const next = new Date(now.getTime());
   next.setSeconds(0, 0);
@@ -666,18 +682,44 @@ export class AssistantTriggerManager {
         `[AssistantTriggers] invalid cron for project=${item.project.id}: ${schedule.cron}`,
         err,
       );
+      // ★조용히 return 하지 않는다 — 켜 둔 설정이 왜 안 도는지 한 번은 말한다
+      // (gmail/calendar 보류 경로와 같은 규율).
+      void this.inject(
+        item,
+        `[Marblo 알림] 비서 스케줄의 cron 식이 잘못되어 스케줄이 돌지 않습니다: ${schedule.cron}\n` +
+          "비서 트리거 설정에서 cron 을 5필드 형식(예: 0 9 * * 1-5)으로 고쳐 저장해 주세요.",
+      );
+      return;
+    }
+    if (!isValidTimeZone(schedule.timezone)) {
+      this.options.warn?.(
+        `[AssistantTriggers] invalid timezone for project=${item.project.id}: ${schedule.timezone}`,
+      );
+      void this.inject(
+        item,
+        `[Marblo 알림] 비서 스케줄의 timezone 이 잘못되어 스케줄이 돌지 않습니다: ${schedule.timezone}\n` +
+          "비서 트리거 설정에서 IANA 이름(예: Asia/Seoul)으로 고치거나 비워서 저장해 주세요.",
+      );
       return;
     }
     const tick = (): void => {
       if (this.stopped) return;
-      const now = this.now();
-      if (matcher.matches(now, schedule.timezone)) {
-        void this.inject(item, formatDailyBriefingPrompt({
-          projectId: item.project.id,
-          projectName: item.project.name,
-          outputs: item.settings.outputs,
-          now,
-        }));
+      try {
+        const now = this.now();
+        if (matcher.matches(now, schedule.timezone)) {
+          void this.inject(item, formatDailyBriefingPrompt({
+            projectId: item.project.id,
+            projectName: item.project.name,
+            outputs: item.settings.outputs,
+            now,
+          }));
+        }
+      } catch (err) {
+        // setInterval 콜백에서 던지면 main 프로세스 uncaughtException 이다.
+        this.options.warn?.(
+          `[AssistantTriggers] schedule tick failed project=${item.project.id}`,
+          err,
+        );
       }
     };
     const first = this.setTimer(() => {
@@ -835,7 +877,14 @@ export class AssistantTriggerManager {
           item.project.id,
           WEBHOOK_POLL_LIMIT,
         );
-        if (result.ok !== true) return;
+        if (result.ok !== true) {
+          // ★조용히 삼키지 않는다 — 권한/규칙 오류로 매 폴링이 거절되면 그 사실이
+          // 로그에라도 남아야 "켜 뒀는데 안 온다" 의 원인을 찾을 수 있다.
+          this.options.warn?.(
+            `[AssistantTriggers] webhook poll rejected project=${item.project.id}: ${result.error}`,
+          );
+          return;
+        }
         for (const event of result.events) {
           if (runtime.seenWebhookIds.has(event.id)) continue;
           const claim = await this.options.workspace.claimWebhookEvent(

@@ -91,6 +91,10 @@ function issueKey(issue: AssistantTriggerValidationIssue): MessageKey {
       return "agents.triggers.validation.telegramOutputUnavailable";
     case "invalid_cron":
       return "agents.triggers.validation.invalidCron";
+    case "invalid_timezone":
+      return "agents.triggers.validation.invalidTimezone";
+    case "webhook_not_issued":
+      return "agents.triggers.validation.webhookNotIssued";
     case "calendar_connector_required":
       return "agents.triggers.validation.calendarConnectorRequired";
     case "gmail_connector_required":
