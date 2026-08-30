@@ -239,6 +239,7 @@ import {
   buildEventStampBoundarySql,
   planEventUserKeyStamp,
   resolveEventStampGate,
+  type EventStampPlan,
 } from "./personAxisStamp";
 import {
   buildBoundary as buildPersonAxisBoundary,
@@ -487,6 +488,12 @@ import {
   toTrainingRows,
   type TrainingConsentDoc,
 } from "./trainingCapture";
+import {
+  decideTelemetryIngest,
+  resolveTelemetryConsent,
+  type TelemetryConsentDoc,
+  type TelemetryConsentState,
+} from "./telemetryConsent";
 import {
   FOUNDER_BETA_MONTHS,
   FOUNDER_INTERVIEW_TOTAL_PRO_MONTHS,
@@ -8196,6 +8203,35 @@ async function reserveAnonymousTelemetryRows(
   return { acceptedRows, acceptedRefs, duplicateCount };
 }
 
+/**
+ * 1차 비식별 텔레메트리 옵트아웃을 서버에서 읽는다
+ * (판정 규칙은 telemetryConsent.ts, ticket tTtuwzkhL64CdPtoGaGN).
+ *
+ * ★캐시하지 않는다. 방침이 약속한 것은 "언제든 변경"(PIPA 제22조)이고,
+ *   인스턴스 캐시를 두면 그 "언제든" 이 TTL 만큼 늦어진다. 이 콜러블은 설치당
+ *   최소 10초 간격이라 문서 읽기 한 번이 붙는 비용은 이미 이 함수가 하는
+ *   영수증 조회(`db.getAll`)·중복 예약(`docRef.create`) 옆에서 무시할 만하다.
+ *
+ * ★읽기 실패는 `denied` 가 아니라 `unknown` 이다 — 둘의 처리가 다르다
+ *   (telemetryConsent.decideTelemetryIngest 참조).
+ */
+async function readFirstPartyTelemetryConsent(
+  uid: string,
+): Promise<TelemetryConsentState> {
+  try {
+    const snap = await db.collection("users").doc(uid).get();
+    return resolveTelemetryConsent(
+      snap.exists ? (snap.data() as TelemetryConsentDoc) : null,
+    );
+  } catch (err) {
+    functions.logger.warn(
+      "[telemetryConsent] 동의 조회 실패 — 사람 축을 만들지 않는다",
+      { message: safeAnalyticsErrorMessage(err) },
+    );
+    return "unknown";
+  }
+}
+
 export const logTelemetryBatch = functions.https.onCall(
   async (data, context) => {
     if (!context.auth) {
@@ -8236,6 +8272,32 @@ export const logTelemetryBatch = functions.https.onCall(
     // joined an "anonymous" event straight back to an account. The join keys
     // written here are now salted HMAC pseudonyms (analyticsPseudonym.ts); the
     // salt lives in the function env, never in BigQuery.
+
+    // ── ★옵트아웃 게이트 (ticket tTtuwzkhL64CdPtoGaGN) ─────────────────────
+    // 방침 항목 "변경 권리" 가 "Settings → Privacy 토글에서 언제든 변경
+    // (PIPA 제22조)" 을 약속한다. 그 약속이 지금까지 **앱 안에만** 있었다 —
+    // 서버는 `users/<uid>.privacyConsent.firstPartyTelemetry` 를 읽을 수 있는데도
+    // 한 번도 읽지 않았다. 클라 게이트를 지나쳐 여기 도달하는 요청(구버전 설치 /
+    // 옵트아웃 직전 큐에 남아 있던 배치 / 재시도 버퍼)은 그대로 적재됐다.
+    //
+    // ★이건 옵트인 전환이 아니다. 미설정은 여전히 granted(기본 ON)이고,
+    //   닫는 것은 사용자가 명시적으로 끈 경우 하나뿐이다.
+    //
+    // ★거절은 예외가 아니라 **조용한 0건**이다. HttpsError 를 던지면 클라가
+    //   배치를 재시도 버퍼에 되돌려 같은 요청을 계속 보낸다 — 끈 사용자의 앱이
+    //   서버를 두드리는 루프가 된다.
+    const consentState = await readFirstPartyTelemetryConsent(context.auth.uid);
+    const ingest = decideTelemetryIngest(consentState);
+    if (!ingest.writeEvents) {
+      return {
+        inserted: 0,
+        skippedAnonymousDuplicates: 0,
+        personAxisLink: ingest.reason,
+        eventUserKeyStamp: ingest.reason,
+        telemetryConsent: ingest.reason,
+      };
+    }
+
     const now = new Date().toISOString();
     const idSalt = getAnalyticsIdSalt();
     const anonymousReceiptIds = await findAnonymousTelemetryReceipts(events);
@@ -8256,12 +8318,16 @@ export const logTelemetryBatch = functions.https.onCall(
     // ★미인증 경로(logAnonymousTelemetryBatch)는 이 블록을 지나지 않는다.
     //   그쪽은 uid 가 아예 없어 원리적으로 각인할 수 없다 — 그래서 이벤트 축의
     //   사람 커버리지는 어느 설계로도 100% 가 되지 않는다(화면이 말해야 한다).
-    const eventStampPlan = planEventUserKeyStamp({
-      uid: context.auth.uid,
-      salt: idSalt,
-      personGate: resolvePersonAxisGate(),
-      stampGate: resolveEventStampGate(),
-    });
+    // ★동의를 확인하지 못했으면(consent_unknown) 각인하지 않는다 — 이벤트 행은
+    //   익명 설치 ID 로만 식별되지만 각인은 **계정에서 파생되는** 값이다.
+    const eventStampPlan: EventStampPlan = ingest.writePersonAxis
+      ? planEventUserKeyStamp({
+          uid: context.auth.uid,
+          salt: idSalt,
+          personGate: resolvePersonAxisGate(),
+          stampGate: resolveEventStampGate(),
+        })
+      : { stamped: false, reason: ingest.reason };
 
     const rows = deduped.fresh.map((e) =>
       applyEventUserKeyStamp(
@@ -8279,23 +8345,29 @@ export const logTelemetryBatch = functions.https.onCall(
     //   기능이라, 링크가 죽어도 이벤트는 들어가야 한다.
     // ★uid 는 여기서 소비되고 버려진다 — 이벤트 행에도, 응답에도 없다.
     let personAxisLink = "skipped";
-    try {
-      // 한 배치는 한 설치에서 온다(clientId 는 설치당 상수). 그래도 빈 값이
-      // 섞일 수 있어 **처음 비어 있지 않은 것**을 쓴다.
-      const batchClientId = events.find(
-        (e) => typeof e.clientId === "string" && e.clientId.trim().length > 0,
-      )?.clientId;
-      personAxisLink = await recordPersonAxisLink(
-        context.auth.uid,
-        batchClientId,
-        now,
-      );
-    } catch (err) {
-      // 조용히 삼키지 않는다 — 사유는 남기고 요청은 성공시킨다.
-      personAxisLink = "error";
-      functions.logger.error("[personAxis] 링크 MERGE 실패", {
-        message: safeAnalyticsErrorMessage(err),
-      });
+    if (!ingest.writePersonAxis) {
+      // ★각인과 링크는 **짝**이다(personAxisStamp.ts §5). 한쪽만 동의 게이트에
+      //   걸면 반쪽이 남는다 — 각인 없는 행이 링크표로 소급 귀속된다.
+      personAxisLink = ingest.reason;
+    } else {
+      try {
+        // 한 배치는 한 설치에서 온다(clientId 는 설치당 상수). 그래도 빈 값이
+        // 섞일 수 있어 **처음 비어 있지 않은 것**을 쓴다.
+        const batchClientId = events.find(
+          (e) => typeof e.clientId === "string" && e.clientId.trim().length > 0,
+        )?.clientId;
+        personAxisLink = await recordPersonAxisLink(
+          context.auth.uid,
+          batchClientId,
+          now,
+        );
+      } catch (err) {
+        // 조용히 삼키지 않는다 — 사유는 남기고 요청은 성공시킨다.
+        personAxisLink = "error";
+        functions.logger.error("[personAxis] 링크 MERGE 실패", {
+          message: safeAnalyticsErrorMessage(err),
+        });
+      }
     }
 
     return {
@@ -8307,6 +8379,9 @@ export const logTelemetryBatch = functions.https.onCall(
       eventUserKeyStamp: eventStampPlan.stamped
         ? "stamped"
         : eventStampPlan.reason,
+      // ★동의 판정도 사유 코드만 싣는다. 이 값이 "consent_unknown" 으로 계속
+      //   나오면 Firestore 조회가 죽은 것이지 사용자가 끈 것이 아니다.
+      telemetryConsent: ingest.reason,
     };
   },
 );
@@ -16906,6 +16981,35 @@ async function loadAnalyticsPurchaseInternal(
 
 // 갱신 크론(04:30 KST)과 마케팅 미러(04:45) 뒤에 둔다 — 그날 새로 생긴 청구
 // 원장이 이미 확정된 뒤에 읽기 위해서다.
+//
+// ── ★텔레메트리 옵트아웃과의 관계 (ticket tTtuwzkhL64CdPtoGaGN) ─────────────
+// 이 스케줄은 marblo_telemetry 데이터셋에 쓰는 경로 중 **앱과 무관하게 도는
+// 유일한 사람키 경로**다. 다른 셋은 전부 앱 요청에 업혀 있어 토글을 끄면 같이
+// 멈춘다:
+//   · events 사람키 각인 / analytics_user_install 링크 → logTelemetryBatch 안에서만
+//     불린다(각각 planEventUserKeyStamp / recordPersonAxisLink 의 유일 호출자).
+//     ★게다가 이제는 그 안에 서버측 동의 게이트가 있다(telemetryConsent.ts).
+//   · analytics_identity 동기화 → 스케줄이지만 읽는 소스가 BQ events +
+//     BQ install_attribution 둘뿐이라 **파생**이다. 새 사람이 거기 나타나려면
+//     먼저 앱이 보냈어야 한다.
+// 이 경로만 Firestore 결제 원장을 직접 읽으므로, 옵트아웃한 사용자가 결제하면
+// 그 다음 05:00 에 `user_key` 를 가진 행이 새로 생긴다.
+//
+// ★그래도 여기에 텔레메트리 동의 게이트를 걸지 않는다. 이유는 취향이 아니라
+//   방침 문면이다 — 이 표는 "비식별 1차 지표" 가 아니라 결제·정산 기록이고,
+//   그 축은 토글의 고지 범위 밖이다:
+//     · 항목 "사용량·비용 기록 (계정 연결)": "이 기록만은 성격상 익명일 수
+//       없습니다 — 본인 지출을 본인에게 보여드리려면 계정과 이어져 있어야 하기
+//       때문입니다."
+//     · 항목 "보유 기간": "…삭제 요청은 team@marblo.app 으로 처리하되, **정산
+//       근거로 보존이 필요한 기간은 예외**입니다."
+//   analyticsUserKey.ts 가 같은 판단을 이미 적어 뒀다("결제 원장 적재를 게이트에
+//   매달지 않는다 — 매달면 결제 기록이 사람 축 발효일 설정 여부에 따라 조용히
+//   사라진다"). 여기 거는 순간 매출이 사용자 토글에 따라 조용히 줄어든다.
+//
+// ★대신 넓히지 마라. 이 표에 `install_key`·`ga_key` 를 붙이거나 익명축과 잇는
+//   컬럼을 만들면 그때는 **토글이 지배하는 축**을 건드리는 것이고, 위 근거가
+//   더 이상 성립하지 않는다(축 경계는 analyticsUserKey.ts / analyticsProfiles.ts).
 export const scheduledLoadAnalyticsPurchase = functions
   .runWith({ timeoutSeconds: 540, memory: "512MB" })
   .pubsub.schedule("0 5 * * *")

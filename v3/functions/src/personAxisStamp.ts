@@ -172,13 +172,23 @@ export function resolveEventStampGate(
 // 3. 각인 판정 — 한 배치에 한 번
 // ════════════════════════════════════════════════════════════════════════════
 
-/** 각인을 안 한 사유. ★전부 "정상"이다 — 하나도 예외를 던지지 않는다. */
+/**
+ * 각인을 안 한 사유. ★전부 "정상"이다 — 하나도 예외를 던지지 않는다.
+ *
+ * ★뒤의 둘은 **동의 축**이다(telemetryConsent.ts, ticket tTtuwzkhL64CdPtoGaGN).
+ *   앞의 다섯과 달리 "우리가 만들 수 없다" 가 아니라 "만들면 안 된다" 이므로,
+ *   판정은 이 모듈이 아니라 호출부(index.ts logTelemetryBatch)가 먼저 하고
+ *   여기에는 그 결과가 사유 코드로만 들어온다. 합치지 마라 — 합치면 게이트
+ *   하나를 여는 것으로 동의 판단까지 통과된 것처럼 읽힌다(§3 의 같은 규율).
+ */
 export type StampSkipReason =
   | "stamp_gate_off"
   | "person_gate_closed"
   | "no_salt"
   | "no_uid"
-  | "pseudonym_failed";
+  | "pseudonym_failed"
+  | "telemetry_opt_out"
+  | "consent_unknown";
 
 export type EventStampPlan =
   | { readonly stamped: false; readonly reason: StampSkipReason }

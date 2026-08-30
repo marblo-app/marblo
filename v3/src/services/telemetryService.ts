@@ -349,12 +349,42 @@ const logAnonymousTelemetryBatch = httpsCallable(
 );
 const logHeartbeatFn = httpsCallable(functions, "logHeartbeat");
 
+/**
+ * 큐에 남아 있는 것을 통째로 버리고 무장된 타이머를 해제한다.
+ *
+ * ★"끄면 즉시 중단" 은 방침 문면이다(privacyContent.tsx · 항목 "변경 권리":
+ *   "Settings → Privacy 토글에서 언제든 변경 (PIPA 제22조)", 그리고
+ *   PrivacySettings.tsx 머리주석 "effects immediate (no delay)"). 게이트를
+ *   `logTelemetry` 의 **입구**에만 두면 그 약속이 깨진다: 이미 큐에 들어간
+ *   배치와 무장된 타이머(이벤트 10초 · 하트비트 30초 · pagehide 훅)가 끈
+ *   **뒤에** 그대로 나가고, 그 요청을 받은 서버는 events 적재 + 사람키 각인
+ *   (functions/src/personAxisStamp.ts) + 링크표 MERGE(analytics_user_install)
+ *   를 전부 수행한다. 서버 축이 옵트아웃 이후에 쓰게 되는 실제 입구가 바로
+ *   여기였다 (ticket tTtuwzkhL64CdPtoGaGN).
+ *
+ * ★보관이 아니라 **폐기**다. 남겨 뒀다가 다시 켤 때 보내면 그건 꺼져 있던
+ *   구간을 수집한 것이 된다 — 끈 동안의 활동은 되살아나면 안 된다.
+ */
+function discardQueuedTelemetry(): void {
+  eventQueue.length = 0;
+  heartbeatQueue.length = 0;
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  if (heartbeatFlushTimer) {
+    clearTimeout(heartbeatFlushTimer);
+    heartbeatFlushTimer = null;
+  }
+}
+
 export function setTelemetryEnabled(
   enabled: boolean,
   options: { persist?: boolean } = {}
 ) {
   const next = firstPartyTelemetryDefaultEnabled() && enabled;
   telemetryEnabled = next;
+  if (!next) discardQueuedTelemetry();
   if (options.persist !== false) {
     try {
       localStorage.setItem(TELEMETRY_ENABLED_KEY, String(enabled));
@@ -648,6 +678,13 @@ async function flushHeartbeats() {
     clearTimeout(heartbeatFlushTimer);
     heartbeatFlushTimer = null;
   }
+  // ★게이트는 입구(logTelemetry)와 **송신부** 양쪽에 선다. 입구만 막으면
+  //   `discardQueuedTelemetry()` 와 이 함수 사이에 낀 in-flight 타이머·
+  //   라이프사이클 훅(telemetryLifecycle.ts)이 그 틈으로 나간다.
+  if (!telemetryEnabled) {
+    heartbeatQueue.length = 0;
+    return;
+  }
   if (heartbeatQueue.length === 0) return;
   if (!auth.currentUser) return;
 
@@ -676,6 +713,13 @@ async function flushTelemetry() {
     flushTimer = null;
   }
 
+  // ★송신부 게이트 — flushHeartbeats 와 같은 이유다. `telemetry.flush` 는
+  //   pagehide/visibilitychange 훅(telemetryLifecycle.ts)과 외부 호출자가
+  //   게이트를 모르고 직접 부르는 자리이므로, 마지막 방어선이 여기 있어야 한다.
+  if (!telemetryEnabled) {
+    eventQueue.length = 0;
+    return;
+  }
   if (eventQueue.length === 0) return;
 
   const clientId = getClientId();
@@ -723,6 +767,12 @@ async function flushAnonymousTelemetry(
   clientId: string,
   appVersion: string | undefined
 ) {
+  // ★미로그인 경로도 같은 토글의 지배를 받는다. 여기에 게이트가 없으면
+  //   "로그인 전에는 못 끈다" 가 되고, 그건 방침 문면과 다르다.
+  if (!telemetryEnabled) {
+    eventQueue.length = 0;
+    return;
+  }
   const batch = takeAnonymousTelemetryBatch();
   if (batch.length === 0) return;
 
