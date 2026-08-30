@@ -743,17 +743,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
       }>,
     getPowerSave: () =>
       ipcRenderer.invoke("settings:getPowerSave") as Promise<{
+        mode: "off" | "working" | "remote";
         preventSleepWhileWorking: boolean;
         active: boolean;
         refCount: number;
         sources: string[];
       }>,
-    setPowerSave: (preventSleepWhileWorking: boolean) =>
+    setPowerSave: (mode: "off" | "working" | "remote") =>
       ipcRenderer.invoke("settings:setPowerSave", {
-        preventSleepWhileWorking,
+        mode,
       }) as Promise<{
         success: boolean;
         error?: string;
+        mode?: "off" | "working" | "remote";
         preventSleepWhileWorking?: boolean;
         active?: boolean;
         refCount?: number;

@@ -266,10 +266,142 @@ function ProfileSection() {
 
       {/* 워크스페이스 셸 토글은 없앴다 — 셸이 곧 제품이라 고를 축이 아니다
           (stores/workspaceModeStore 의 "프로덕션 항상 ON" 주석 참고). */}
+      <PowerSaveSection />
       <AgentNotificationSection />
       <BeginnerModeSection />
       <OnboardingPreviewSection />
     </div>
+  );
+}
+
+type PowerSaveMode = "off" | "working" | "remote";
+
+interface PowerSaveSnapshot {
+  mode: PowerSaveMode;
+  active: boolean;
+  sources: string[];
+}
+
+interface BatteryManagerLike {
+  charging: boolean;
+  addEventListener: (type: "chargingchange", listener: () => void) => void;
+  removeEventListener: (type: "chargingchange", listener: () => void) => void;
+}
+
+function PowerSaveSection() {
+  const { t } = useTranslation();
+  const [snapshot, setSnapshot] = useState<PowerSaveSnapshot | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [onBattery, setOnBattery] = useState(false);
+
+  const refresh = async () => {
+    const next = await window.electronAPI.settings.getPowerSave();
+    setSnapshot({ mode: next.mode, active: next.active, sources: next.sources });
+  };
+
+  useEffect(() => {
+    void refresh().catch(() => setError(t("settings.powerSave.loadFailed")));
+  }, [t]);
+
+  useEffect(() => {
+    const batteryApi = navigator as Navigator & {
+      getBattery?: () => Promise<BatteryManagerLike>;
+    };
+    let battery: BatteryManagerLike | null = null;
+    let cancelled = false;
+    const update = () => setOnBattery(battery?.charging === false);
+    void batteryApi.getBattery?.().then((manager) => {
+      if (cancelled) return;
+      battery = manager;
+      update();
+      manager.addEventListener("chargingchange", update);
+    });
+    return () => {
+      cancelled = true;
+      battery?.removeEventListener("chargingchange", update);
+    };
+  }, []);
+
+  const selectMode = async (mode: PowerSaveMode) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await window.electronAPI.settings.setPowerSave(mode);
+      if (!result.success) {
+        setError(result.error || t("settings.powerSave.saveFailed"));
+        return;
+      }
+      setSnapshot({
+        mode: result.mode || mode,
+        active: result.active === true,
+        sources: result.sources || [],
+      });
+    } catch {
+      setError(t("settings.powerSave.saveFailed"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const sourceLabels: Record<string, string> = {
+    "remote-wait": t("settings.powerSave.source.remoteWait"),
+    orchestrator: t("settings.powerSave.source.orchestrator"),
+    agent: t("settings.powerSave.source.agent"),
+    "telegram-poller": t("settings.powerSave.source.telegram"),
+    "slack-socket": t("settings.powerSave.source.slack"),
+  };
+  const mode = snapshot?.mode || "working";
+
+  return (
+    <section className="rounded-lg border border-gray-700 bg-gray-800 p-4" aria-labelledby="power-save-heading">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 id="power-save-heading" className="mb-1 text-sm font-medium text-gray-200">
+            {t("settings.powerSave.heading")}
+          </h3>
+          <p className="text-xs leading-relaxed text-gray-500">
+            {t("settings.powerSave.body")}
+          </p>
+        </div>
+        <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${snapshot?.active ? "bg-green-500/15 text-green-400" : "bg-gray-700 text-gray-400"}`}>
+          {snapshot?.active ? t("settings.powerSave.active") : t("settings.powerSave.inactive")}
+        </span>
+      </div>
+      <label className="mt-4 block text-xs font-medium text-gray-300" htmlFor="settings-power-save-mode">
+        {t("settings.powerSave.modeLabel")}
+      </label>
+      <select
+        id="settings-power-save-mode"
+        data-testid="settings-power-save-mode"
+        value={mode}
+        disabled={saving}
+        onChange={(event) => {
+          const value = event.target.value;
+          void selectMode(value === "off" || value === "remote" ? value : "working");
+        }}
+        className="mt-1 w-full rounded-md border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-gray-100 disabled:opacity-60"
+      >
+        <option value="off">{t("settings.powerSave.mode.off")}</option>
+        <option value="working">{t("settings.powerSave.mode.working")}</option>
+        <option value="remote">{t("settings.powerSave.mode.remote")}</option>
+      </select>
+      <p className="mt-2 text-xs text-gray-500">{t(`settings.powerSave.help.${mode}`)}</p>
+      <p className="mt-2 text-xs text-amber-300">{t("settings.powerSave.clamshell")}</p>
+      {onBattery && mode === "remote" && (
+        <p className="mt-2 text-xs text-amber-300">{t("settings.powerSave.battery")}</p>
+      )}
+      {snapshot && (
+        <p className="mt-3 text-xs text-gray-400" aria-live="polite">
+          {snapshot.active
+            ? snapshot.sources.length > 0
+              ? t("settings.powerSave.reason", { sources: snapshot.sources.map((source) => sourceLabels[source] || source).join(", ") })
+              : t("settings.powerSave.active")
+            : t("settings.powerSave.noReason")}
+        </p>
+      )}
+      {error && <p className="mt-2 text-xs text-red-400" role="alert">{error}</p>}
+    </section>
   );
 }
 

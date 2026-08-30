@@ -487,6 +487,22 @@ interface SettingsAPI {
   deleteVendorSecret: (
     envKey: string
   ) => Promise<{ success: boolean; snapshot: VendorSecretsSnapshot }>;
+  getPowerSave: () => Promise<{
+    mode: "off" | "working" | "remote";
+    preventSleepWhileWorking: boolean;
+    active: boolean;
+    refCount: number;
+    sources: string[];
+  }>;
+  setPowerSave: (mode: "off" | "working" | "remote") => Promise<{
+    success: boolean;
+    error?: string;
+    mode?: "off" | "working" | "remote";
+    preventSleepWhileWorking?: boolean;
+    active?: boolean;
+    refCount?: number;
+    sources?: string[];
+  }>;
 }
 
 /** 값 없는 벤더 크레덴셜 스냅샷(electron/vendor-secrets.ts 와 같은 모양). */
@@ -864,12 +880,14 @@ interface AppStateAPI {
     lastProjectId?: string;
     lastRootPath?: string;
     wasOrchestratorRunning?: boolean;
+    powerSaveMode?: "off" | "working" | "remote";
   }>;
   save: (state: {
     accountUid?: string;
     lastProjectId?: string;
     lastRootPath?: string;
     wasOrchestratorRunning?: boolean;
+    powerSaveMode?: "off" | "working" | "remote";
   }) => Promise<{ success: boolean }>;
 }
 

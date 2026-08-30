@@ -20,6 +20,13 @@ import crypto from "node:crypto";
 import { execFile, execSync, spawn } from "node:child_process";
 import dotenv from "dotenv";
 import { PtyManager, isBusySignal } from "./pty-manager";
+import {
+  isPowerSaveMode,
+  normalizePowerSaveMode,
+  powerSaveSources,
+  type PowerSaveMode,
+  type WorkPowerSaveSource,
+} from "./power-save-policy";
 import type { ComposerRefusal } from "./composer-gate";
 import {
   startMcpOrphanReaper,
@@ -669,6 +676,8 @@ interface AppState {
   // Keep background orchestrator / agent / Telegram work alive while active.
   // Defaults to true; false means never hold a powerSaveBlocker.
   preventSleepWhileWorking?: boolean;
+  // "remote" also holds the assertion while waiting for a remote trigger.
+  powerSaveMode?: PowerSaveMode;
 }
 
 function readAppState(): AppState {
@@ -777,14 +786,12 @@ function saveAppStateInput(input: Partial<AppState> & { accountUid?: unknown }) 
   writeAppState(globalPatch);
 }
 
-type WorkPowerSaveSource =
-  | "orchestrator"
-  | "agent"
-  | "telegram-poller"
-  | "slack-socket";
-
-let preventSleepWhileWorking =
-  readAppState().preventSleepWhileWorking !== false;
+const persistedPowerSaveState = readAppState();
+let powerSaveMode = normalizePowerSaveMode(
+  persistedPowerSaveState.powerSaveMode,
+  persistedPowerSaveState.preventSleepWhileWorking,
+);
+let preventSleepWhileWorking = powerSaveMode !== "off";
 let workPowerSaveBlockerId: number | null = null;
 let workPowerSaveRefCount = 0;
 
@@ -3796,8 +3803,8 @@ function logSlackRouteHealth(projectId: string, reason: string): void {
   );
 }
 
-function collectWorkPowerSaveSources(): WorkPowerSaveSource[] {
-  const sources: WorkPowerSaveSource[] = [];
+function collectWorkPowerSaveSources(): Exclude<WorkPowerSaveSource, "remote-wait">[] {
+  const sources: Exclude<WorkPowerSaveSource, "remote-wait">[] = [];
   const hasRunningOrchestrator = [
     ...orchestrators.values(),
     ...missionOrchestrators.values(),
@@ -3821,7 +3828,7 @@ function collectWorkPowerSaveSources(): WorkPowerSaveSource[] {
 }
 
 function refreshWorkPowerSaveBlocker(): void {
-  const sources = preventSleepWhileWorking ? collectWorkPowerSaveSources() : [];
+  const sources = powerSaveSources(powerSaveMode, collectWorkPowerSaveSources());
   const nextRefCount = sources.length;
   workPowerSaveRefCount = nextRefCount;
 
@@ -10879,31 +10886,39 @@ ipcMain.handle(
 
 ipcMain.handle("settings:getPowerSave", () => {
   return {
+    mode: powerSaveMode,
     preventSleepWhileWorking,
     active: workPowerSaveBlockerId !== null,
     refCount: workPowerSaveRefCount,
-    sources: collectWorkPowerSaveSources(),
+    sources: powerSaveSources(powerSaveMode, collectWorkPowerSaveSources()),
   };
 });
 
 ipcMain.handle(
   "settings:setPowerSave",
-  (_event, settings: { preventSleepWhileWorking?: unknown }) => {
-    if (typeof settings.preventSleepWhileWorking !== "boolean") {
+  (_event, settings: { mode?: unknown; preventSleepWhileWorking?: unknown }) => {
+    const requestedMode = isPowerSaveMode(settings.mode)
+      ? settings.mode
+      : typeof settings.preventSleepWhileWorking === "boolean"
+        ? normalizePowerSaveMode(undefined, settings.preventSleepWhileWorking)
+        : null;
+    if (!requestedMode) {
       return {
         success: false,
-        error: "preventSleepWhileWorking must be a boolean",
+        error: "mode must be off, working, or remote",
       };
     }
-    preventSleepWhileWorking = settings.preventSleepWhileWorking;
-    writeAppState({ preventSleepWhileWorking });
+    powerSaveMode = requestedMode;
+    preventSleepWhileWorking = powerSaveMode !== "off";
+    writeAppState({ powerSaveMode, preventSleepWhileWorking });
     refreshWorkPowerSaveBlocker();
     return {
       success: true,
+      mode: powerSaveMode,
       preventSleepWhileWorking,
       active: workPowerSaveBlockerId !== null,
       refCount: workPowerSaveRefCount,
-      sources: collectWorkPowerSaveSources(),
+      sources: powerSaveSources(powerSaveMode, collectWorkPowerSaveSources()),
     };
   }
 );
@@ -11204,8 +11219,13 @@ ipcMain.handle("appState:load", (_event, input?: unknown) => {
 
 ipcMain.handle("appState:save", (_event, state: Partial<AppState>) => {
   saveAppStateInput(state);
-  if (typeof state.preventSleepWhileWorking === "boolean") {
-    preventSleepWhileWorking = state.preventSleepWhileWorking;
+  if (isPowerSaveMode(state.powerSaveMode)) {
+    powerSaveMode = state.powerSaveMode;
+    preventSleepWhileWorking = powerSaveMode !== "off";
+    refreshWorkPowerSaveBlocker();
+  } else if (typeof state.preventSleepWhileWorking === "boolean") {
+    powerSaveMode = normalizePowerSaveMode(undefined, state.preventSleepWhileWorking);
+    preventSleepWhileWorking = powerSaveMode !== "off";
     refreshWorkPowerSaveBlocker();
   }
   return { success: true };
@@ -11563,6 +11583,10 @@ ipcMain.handle(
 
 app.whenReady().then(async () => {
   console.log("[Marblo] auth=redirect build");
+
+  // A persisted Remote mode must take effect before any inbound poller has
+  // work to report; otherwise the machine could sleep during an idle wait.
+  refreshWorkPowerSaveBlocker();
 
   // Global safety net: any webContents created anywhere in the app (including
   // child popups and any future windows) routes external http(s) links to the
