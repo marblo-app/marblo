@@ -1,8 +1,22 @@
-// analytics_identity 익명축 백필 (ticket dTpcKWwRw5DvEMKxpCZi).
+// analytics_identity 익명축 동기화 — 수동/1회성 실행용 CLI.
+// (원래 ticket dTpcKWwRw5DvEMKxpCZi, 멱등 append/upgrade 로 재설계: EFnVgBSdcjGVRRmNQ1dK)
 //
 // 실행:
 //   cd v3/functions && npm run backfill:analytics-identity -- --dry-run
 //   cd v3/functions && npm run backfill:analytics-identity -- --apply
+//
+// ★2026-08-30 개정: 이 스크립트가 유일하게 analytics_identity 를 채우는 경로
+//   였고, npm script(수동 실행)로만 존재했다 — 스케줄이 없어서 2026-08-20
+//   백필 이후 9일간 신규 원장행이 반영되지 않았다(#1321). 이제 같은 로직이
+//   `functions/src/index.ts` 의 `scheduledSyncAnalyticsIdentity`(일 1회
+//   15:40 KST)로도 돈다 — 이 스크립트는 스케줄의 대체가 아니라 수동 복구·
+//   국소 검증용으로 남는다. 행 조립·멱등 계획 로직은 전부
+//   `src/analyticsIdentitySync.ts`(순수 함수, 스케줄 함수와 공유)에 있다.
+// ★DELETE 하지 않는다 — 이전 판(전량 삭제 후 재적재)과 달리 이제
+//   append(새 install_key)/upgrade(unmapped→joined) 만 한다. 두 번 --apply
+//   해도 두 번째는 inserted=0·upgraded=0 이다(analyticsIdentitySync.test.ts
+//   의 idempotency 테스트로 단위검증, 이 스크립트 자체도 실행 로그로 실측
+//   가능하다).
 //
 // ── ★축 경계 ────────────────────────────────────────────────────────────────
 //   익명축  analytics_identity              install_key / ga_key / first_touch
@@ -15,10 +29,6 @@
 //           특정 계정이 무엇을 했는지 되짚는 데는 쓰지 않습니다"
 //           (EN: "used only for statistical analysis, never to identify a
 //            particular person or to retrace what a particular account did").
-//     ★2026-08-29(#1316 후속, ticket O9iJMtgGy5glQ2oESvRN): 이 자리는 원래
-//       "두 기록이 공유하는 조인 키는 없습니다 / the two share no join key" 를
-//       인용했다. 그 문장은 결합 고지(B안)로 **교체**됐다 — 규칙이 사라진 게
-//       아니라 근거 문장이 바뀐 것이다. 규칙은 그대로다.
 //     ★행 번호로 인용하지 마라. privacyContent.tsx 는 계속 움직인다.
 //
 // 이 스크립트는 `user_key` 를 만들지 않는다. 컬럼 자리도 만들지 않는다 —
@@ -41,109 +51,48 @@ import {
   readAnalyticsIdSalt,
 } from "../src/analyticsPseudonym";
 import {
-  classifyIdScheme,
-  isSharedSentinel,
-  resolveLinkConfidence,
-  type IdScheme,
+  ANALYTICS_IDENTITY_SCHEMA,
+  ANALYTICS_IDENTITY_SINCE,
+  ANALYTICS_IDENTITY_TABLE,
+  buildAnalyticsIdentityCandidates,
+  buildAttributionLedgerSql,
+  buildExistingIdentityRowsQuery,
+  buildTelemetryFirstVisitSql,
+  buildUpgradeIdentityRowParams,
+  buildUpgradeIdentityRowSql,
+  planAnalyticsIdentitySync,
+  type AttributionLedgerRow,
   type LinkConfidence,
-} from "../src/analyticsIdScheme";
+  type TelemetryFirstVisitRow,
+} from "../src/analyticsIdentitySync";
 
 const PROJECT_ID = "marblo-2253d";
 const BQ_LOCATION = "US"; // index.ts:183 과 동일해야 한다.
 const DATASET = "marblo_telemetry";
-const TABLE = "analytics_identity";
 
-/** 백필 하한 — 티켓 범위는 2026-04 ~ 08. 텔레메트리 최초행은 04-19. */
-const SINCE = "2026-04-01";
-
-/** ★익명축 전용 스키마. user_key 없음(자리도 없음). */
-const SCHEMA = [
-  { name: "install_key", type: "STRING", mode: "REQUIRED" },
-  { name: "ga_key", type: "STRING", mode: "NULLABLE" },
-  { name: "ft_source", type: "STRING", mode: "NULLABLE" },
-  { name: "ft_medium", type: "STRING", mode: "NULLABLE" },
-  { name: "ft_campaign", type: "STRING", mode: "NULLABLE" },
-  { name: "ft_referrer_host", type: "STRING", mode: "NULLABLE" },
-  { name: "ft_landing_path", type: "STRING", mode: "NULLABLE" },
-  { name: "ft_device", type: "STRING", mode: "NULLABLE" },
-  { name: "first_visit_at", type: "TIMESTAMP", mode: "NULLABLE" },
-  { name: "linked_at", type: "TIMESTAMP", mode: "NULLABLE" },
-  { name: "id_scheme", type: "STRING", mode: "REQUIRED" },
-  { name: "link_confidence", type: "STRING", mode: "REQUIRED" },
-] as const;
-
-interface TelemetryRow {
-  installId: string;
-  firstVisitAt: { value: string } | string | null;
+function unwrap(raw: unknown): unknown {
+  let cur: unknown = raw;
+  for (let i = 0; i < 4; i++) {
+    if (cur && typeof cur === "object" && "value" in cur) {
+      cur = (cur as { value: unknown }).value;
+      continue;
+    }
+    break;
+  }
+  return cur;
 }
 
-interface AttributionRow {
-  installId: string;
-  gaClientId: string | null;
-  utmSource: string | null;
-  utmMedium: string | null;
-  utmCampaign: string | null;
-  referrerHost: string | null;
-  landingPath: string | null;
-  platform: string | null;
-  linkedAt: { value: string } | string | null;
+function asString(raw: unknown): string | null {
+  const v = unwrap(raw);
+  return typeof v === "string" && v.length > 0 ? v : null;
 }
 
-interface IdentityRow {
-  install_key: string;
-  ga_key: string | null;
-  ft_source: string | null;
-  ft_medium: string | null;
-  ft_campaign: string | null;
-  ft_referrer_host: string | null;
-  ft_landing_path: string | null;
-  ft_device: string | null;
-  first_visit_at: string | null;
-  linked_at: string | null;
-  id_scheme: IdScheme;
-  link_confidence: LinkConfidence;
+function asTimestampIso(raw: unknown): string | null {
+  const v = unwrap(raw);
+  if (typeof v !== "string" || v.trim() === "") return null;
+  const d = new Date(v);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
 }
-
-function tsValue(v: { value: string } | string | null): string | null {
-  if (v === null || v === undefined) return null;
-  return typeof v === "string" ? v : v.value;
-}
-
-/**
- * 텔레메트리(익명 세계)에 등장한 설치와 **최초 등장 시각**.
- * first_touch 기준을 유입 시점으로 고정하기 위해 MIN 을 쓴다 — 나중 값으로
- * 덮지 않는다.
- */
-const TELEMETRY_SQL = `
-WITH u AS (
-  SELECT userId AS installId, timestamp AS ts
-  FROM \`${PROJECT_ID}.${DATASET}.agent_heartbeats\`
-  WHERE userId IS NOT NULL AND timestamp >= TIMESTAMP("${SINCE}")
-  UNION ALL
-  SELECT userId AS installId, timestamp AS ts
-  FROM \`${PROJECT_ID}.${DATASET}.events\`
-  WHERE userId IS NOT NULL AND timestamp >= TIMESTAMP("${SINCE}")
-)
-SELECT installId, MIN(ts) AS firstVisitAt
-FROM u GROUP BY installId
-`;
-
-/**
- * 어트리뷰션 첫 행(설치당 가장 이른 linkedAt).
- * ★first_touch 는 유입 시점 값으로 고정 — 뒤 행으로 덮지 않는다.
- */
-const ATTRIBUTION_SQL = `
-SELECT installId, gaClientId, utmSource, utmMedium, utmCampaign,
-       referrerHost, landingPath, platform, linkedAt
-FROM (
-  SELECT *, ROW_NUMBER() OVER (
-    PARTITION BY installId ORDER BY linkedAt ASC
-  ) AS rn
-  FROM \`${PROJECT_ID}.${DATASET}.install_attribution\`
-  WHERE installId IS NOT NULL
-)
-WHERE rn = 1
-`;
 
 async function main(): Promise<void> {
   const apply = process.argv.includes("--apply");
@@ -155,7 +104,7 @@ async function main(): Promise<void> {
     // 빈 표를 만드느니 멈춘다.
     throw new Error(
       "ANALYTICS_ID_SALT 미설정 — 가명키를 만들 수 없어 중단한다. " +
-        "8월 행과 같은 스킴이어야 하므로 임의 솔트로 대체하면 안 된다."
+        "8월 행과 같은 스킴이어야 하므로 임의 솔트로 대체하면 안 된다.",
     );
   }
 
@@ -164,132 +113,174 @@ async function main(): Promise<void> {
     location: BQ_LOCATION,
   });
 
-  const [telRows] = (await bigquery.query({
-    query: TELEMETRY_SQL,
+  const [telRowsRaw] = await bigquery.query({
+    query: buildTelemetryFirstVisitSql({
+      project: PROJECT_ID,
+      dataset: DATASET,
+    }),
+    // ★`types: { since: "DATE" }` 를 일부러 안 쓴다 — 실측(2026-08-30):
+    //   @google-cloud/bigquery 8.3.1 에서 STRING 값에 명시적 DATE 타입을
+    //   씌우면 파라미터가 조용히 NULL 로 바인딩된다(WHERE 절이 0행을 준다,
+    //   에러 없음). 타입을 생략하면 클라이언트가 STRING 으로 자동판정하고
+    //   `TIMESTAMP(@since)` 가 그 STRING 을 정상 캐스팅한다 — 그래서 뺐다.
+    params: { since: ANALYTICS_IDENTITY_SINCE },
     location: BQ_LOCATION,
-  })) as unknown as [TelemetryRow[]];
-  const [attRows] = (await bigquery.query({
-    query: ATTRIBUTION_SQL,
+  });
+  const [attRowsRaw] = await bigquery.query({
+    query: buildAttributionLedgerSql({ project: PROJECT_ID, dataset: DATASET }),
     location: BQ_LOCATION,
-  })) as unknown as [AttributionRow[]];
+  });
+
+  const telemetryRows: TelemetryFirstVisitRow[] = (
+    telRowsRaw as Array<{ installId: unknown; firstVisitAt: unknown }>
+  )
+    .filter((r) => asString(r.installId) !== null)
+    .map((r) => ({
+      installId: asString(r.installId) as string,
+      firstVisitAt: asTimestampIso(r.firstVisitAt),
+    }));
+
+  const attributionRows: AttributionLedgerRow[] = (
+    attRowsRaw as Array<Record<string, unknown>>
+  )
+    .filter((r) => asString(r.installId) !== null)
+    .map((r) => ({
+      installId: asString(r.installId) as string,
+      gaClientId: asString(r.gaClientId),
+      utmSource: asString(r.utmSource),
+      utmMedium: asString(r.utmMedium),
+      utmCampaign: asString(r.utmCampaign),
+      referrerHost: asString(r.referrerHost),
+      landingPath: asString(r.landingPath),
+      platform: asString(r.platform),
+      linkedAt: asTimestampIso(r.linkedAt),
+    }));
 
   console.log(
-    `[read] telemetry installs=${telRows.length} attribution installs=${attRows.length}`
+    `[read] telemetry installs=${telemetryRows.length} attribution installs=${attributionRows.length}`,
   );
 
-  const attById = new Map<string, AttributionRow>();
-  for (const r of attRows) attById.set(r.installId, r);
-  const telById = new Map<string, TelemetryRow>();
-  for (const r of telRows) telById.set(r.installId, r);
-
-  const allIds = new Set<string>([...telById.keys(), ...attById.keys()]);
-
-  const out: IdentityRow[] = [];
-  let skippedSharedSentinel = 0;
-
-  for (const rawId of allIds) {
-    // ★공유 리터럴('anon')만 제외한다 — 모든 설치가 같은 값을 쓰므로 키로
-    //   삼으면 전원이 한 사람으로 뭉쳐 인원이 왜곡된다. 세서 보고한다.
-    if (isSharedSentinel(rawId)) {
-      skippedSharedSentinel += 1;
-      continue;
-    }
-    // ★그 외 미분류 모양은 **버리지 않는다**(id_scheme='unknown').
-    //   빼면 인원이 줄어 보이고 그게 "이탈" 로 오독된다.
-    const scheme = classifyIdScheme(rawId);
-
-    const tel = telById.get(rawId) ?? null;
-    const att = attById.get(rawId) ?? null;
-
-    // ★joined = 익명축 양쪽(제품사용 + 유입)이 다 있다는 뜻이다.
-    //   계정축과는 무관하다 — 여기서 계정은 취급하지 않는다.
-    const confidence = resolveLinkConfidence(tel !== null && att !== null);
-
-    const installKey = pseudonymizeAnalyticsId("install", rawId, salt);
-    if (typeof installKey !== "string") {
-      throw new Error("install_key 생성 실패 — 솔트/입력을 확인해라.");
-    }
-
-    const gaRaw = att?.gaClientId ?? null;
-    const gaKey =
-      gaRaw && gaRaw.length > 0
-        ? pseudonymizeAnalyticsId("ga", gaRaw, salt)
-        : null;
-
-    out.push({
-      install_key: installKey,
-      ga_key: typeof gaKey === "string" ? gaKey : null,
-      ft_source: att?.utmSource ?? null,
-      ft_medium: att?.utmMedium ?? null,
-      ft_campaign: att?.utmCampaign ?? null,
-      ft_referrer_host: att?.referrerHost ?? null,
-      ft_landing_path: att?.landingPath ?? null,
-      ft_device: att?.platform ?? null,
-      first_visit_at: tsValue(tel?.firstVisitAt ?? null),
-      linked_at: tsValue(att?.linkedAt ?? null),
-      id_scheme: scheme,
-      link_confidence: confidence,
-    });
-  }
+  const built = buildAnalyticsIdentityCandidates({
+    telemetryRows,
+    attributionRows,
+    pseudonymizeInstall: (raw) => {
+      const v = pseudonymizeAnalyticsId("install", raw, salt);
+      return typeof v === "string" ? v : null;
+    },
+    pseudonymizeGa: (raw) => {
+      const v = pseudonymizeAnalyticsId("ga", raw, salt);
+      return typeof v === "string" ? v : null;
+    },
+  });
 
   // 집계만 출력한다 — 원시 id 도, 가명 전문도 찍지 않는다.
   const byConfidence = new Map<string, number>();
   const byScheme = new Map<string, number>();
-  for (const r of out) {
+  for (const r of built.rows) {
     byConfidence.set(
       r.link_confidence,
-      (byConfidence.get(r.link_confidence) ?? 0) + 1
+      (byConfidence.get(r.link_confidence) ?? 0) + 1,
     );
     byScheme.set(r.id_scheme, (byScheme.get(r.id_scheme) ?? 0) + 1);
   }
-  console.log(`[build] rows=${out.length}`);
+  console.log(`[build] candidates=${built.rows.length}`);
   console.log(
-    `[build] link_confidence=${JSON.stringify(
-      Object.fromEntries(byConfidence)
-    )}`
+    `[build] link_confidence=${JSON.stringify(Object.fromEntries(byConfidence))}`,
   );
   console.log(
-    `[build] id_scheme=${JSON.stringify(Object.fromEntries(byScheme))}`
+    `[build] id_scheme=${JSON.stringify(Object.fromEntries(byScheme))}`,
   );
   console.log(
-    `[build] ga_key present=${out.filter((r) => r.ga_key !== null).length}`
+    `[build] ga_key present=${built.rows.filter((r) => r.ga_key !== null).length}`,
   );
-  if (skippedSharedSentinel > 0) {
-    // ★조용히 빼지 않는다 — 몇 개를 왜 뺐는지 남긴다.
+  console.log(
+    `[build] ga_key null: no ledger row(원장 행 자체가 없음)=${built.gaKeyNullNoLedgerRow}, ` +
+      `ledger row but no gaClientId(원장은 있는데 GA client id 없음)=${built.gaKeyNullLedgerNoGaClientId}`,
+  );
+  if (built.skippedSharedSentinel > 0) {
     console.log(
-      `[build] skipped(공유 리터럴 'anon' — 키로 쓰면 인원이 뭉친다)=${skippedSharedSentinel}`
+      `[build] skipped(공유 리터럴 'anon' — 키로 쓰면 인원이 뭉친다)=${built.skippedSharedSentinel}`,
     );
   }
+
+  const dataset = bigquery.dataset(DATASET);
+  const table = dataset.table(ANALYTICS_IDENTITY_TABLE);
+  const [exists] = await table.exists();
+
+  if (!exists) {
+    console.log(
+      `[plan] ${ANALYTICS_IDENTITY_TABLE} 표가 없다 — 전량이 INSERT 대상이다.`,
+    );
+  }
+
+  const existing = exists
+    ? await (async () => {
+        const [rows] = await bigquery.query({
+          query: buildExistingIdentityRowsQuery({
+            project: PROJECT_ID,
+            dataset: DATASET,
+          }),
+          location: BQ_LOCATION,
+        });
+        const map = new Map<string, LinkConfidence>();
+        for (const r of rows as Array<{
+          install_key: unknown;
+          link_confidence: unknown;
+        }>) {
+          const key = asString(r.install_key);
+          const conf = asString(r.link_confidence);
+          if (key && (conf === "joined" || conf === "unmapped")) {
+            map.set(key, conf as LinkConfidence);
+          }
+        }
+        return map;
+      })()
+    : new Map<string, LinkConfidence>();
+
+  const plan = planAnalyticsIdentitySync(built.rows, existing);
+  console.log(
+    `[plan] existing=${existing.size} toInsert=${plan.toInsert.length} toUpgrade=${plan.toUpgrade.length}`,
+  );
 
   if (dryRun) {
     console.log("[dry-run] 적재하지 않았다. --apply 로 실행해라.");
     return;
   }
 
-  const dataset = bigquery.dataset(DATASET);
-  const table = dataset.table(TABLE);
-  const [exists] = await table.exists();
   if (!exists) {
-    await dataset.createTable(TABLE, {
-      schema: { fields: SCHEMA as unknown as object[] },
+    await dataset.createTable(ANALYTICS_IDENTITY_TABLE, {
+      schema: { fields: ANALYTICS_IDENTITY_SCHEMA as unknown as object[] },
       location: BQ_LOCATION,
     });
-    console.log(`[ddl] ${TABLE} 생성됨(익명축 전용, user_key 없음)`);
+    console.log(
+      `[ddl] ${ANALYTICS_IDENTITY_TABLE} 생성됨(익명축 전용, user_key 없음)`,
+    );
   }
 
-  // 재실행 안전: 가명은 결정적이라 같은 입력이면 같은 행이 된다.
-  // 중복 적재를 막기 위해 지우고 다시 넣는다(원본 테이블은 건드리지 않는다).
-  const [rows] = await table.getRows({ maxResults: 1 });
-  if (rows.length > 0) {
-    await bigquery.query({
-      query: `DELETE FROM \`${PROJECT_ID}.${DATASET}.${TABLE}\` WHERE TRUE`,
-      location: BQ_LOCATION,
+  if (plan.toInsert.length > 0) {
+    await table.insert(plan.toInsert);
+  }
+  console.log(`[apply] inserted=${plan.toInsert.length}`);
+
+  if (plan.toUpgrade.length > 0) {
+    const upgradeSql = buildUpgradeIdentityRowSql({
+      project: PROJECT_ID,
+      dataset: DATASET,
     });
-    console.log("[ddl] 기존 행 삭제(재실행 멱등)");
+    for (const row of plan.toUpgrade) {
+      const { params, types } = buildUpgradeIdentityRowParams(row);
+      await bigquery.query({
+        query: upgradeSql,
+        params,
+        types,
+        location: BQ_LOCATION,
+      });
+    }
   }
-
-  await table.insert(out);
-  console.log(`[apply] ${out.length}행 적재 완료.`);
+  console.log(`[apply] upgraded=${plan.toUpgrade.length}`);
+  console.log(
+    `[apply] 완료. inserted=${plan.toInsert.length} upgraded=${plan.toUpgrade.length} (0/0 이면 이미 최신 — 재실행 멱등)`,
+  );
 }
 
 main().catch((err: unknown) => {

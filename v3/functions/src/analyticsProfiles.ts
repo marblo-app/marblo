@@ -88,6 +88,7 @@ import {
   VIEW_TEAM_USAGE_DAILY,
   VIEW_TEAM_USAGE_UNATTRIBUTED,
 } from "./teamUsage";
+import { ANALYTICS_IDENTITY_TABLE } from "./ga4Bridge";
 
 // ── 테이블 좌표 ──────────────────────────────────────────────────────────────
 // 데이터셋은 원본과 같은 marblo_telemetry 다(cost_logs 가 여기 있어야 계정축
@@ -98,10 +99,23 @@ export const TABLE_USER_DAILY = "analytics_user_daily";
 export const TABLE_INSTALL_PROFILE = "analytics_install_profile";
 export const TABLE_ACCOUNT_PROFILE = "analytics_account_profile";
 
-/** 익명축 테이블 — 여기에 계정축 컬럼이 들어오면 안 된다. */
+/**
+ * 익명축 테이블 — 여기에 계정축 컬럼이 들어오면 안 된다.
+ *
+ * ★`ANALYTICS_IDENTITY_TABLE`(= `analytics_identity`, ga4Bridge.ts 정본)이
+ * 2026-08-30(ticket EFnVgBSdcjGVRRmNQ1dK)에 등재됐다. 그 전까지 이 표는 어느
+ * 목록에도 없어서 `assertAxisPurity()` 를 부를 수조차 없었다 — `events` 가
+ * 한동안 그랬던 것과 같은 구멍이다(EVENT_AXIS_TABLES 주석 참조). 스키마
+ * (install_key / ga_key / ft_source 등 유입 필드 / first_visit_at /
+ * linked_at / id_scheme / link_confidence)
+ * 는 계정축 컬럼을 담지 않으므로 등재는 순수 강화다 — 지금 통과하는 것이
+ * 앞으로도 계속 통과하되, 누가 나중에 이 표에 `user_key` 를 얹으면 여기서
+ * 던진다.
+ */
 export const ANONYMOUS_AXIS_TABLES: ReadonlyArray<string> = [
   TABLE_USER_DAILY,
   TABLE_INSTALL_PROFILE,
+  ANALYTICS_IDENTITY_TABLE,
 ];
 /**
  * 계정축 테이블·뷰.
@@ -128,7 +142,6 @@ export { VIEW_TEAM_USAGE_DAILY, VIEW_TEAM_USAGE_UNATTRIBUTED };
  * 에 `user_key` 를 넣으려는 시도는 여전히 여기서 던진다. 축이 셋이 된 것뿐이다.
  */
 export { LINK_AXIS_TABLES, FORBIDDEN_ON_LINK_AXIS, TABLE_USER_INSTALL };
-
 
 /**
  * ★익명축 테이블에 **절대** 나타나면 안 되는 컬럼명(계정으로 되짚는 다리).
@@ -239,7 +252,7 @@ const EVENT_AXIS_ALLOWED_FROM_ANONYMOUS_LIST: ReadonlyArray<string> = [
 
 export const FORBIDDEN_ON_EVENT_AXIS: ReadonlyArray<string> =
   FORBIDDEN_ON_ANONYMOUS_AXIS.filter(
-    (c) => !EVENT_AXIS_ALLOWED_FROM_ANONYMOUS_LIST.includes(c)
+    (c) => !EVENT_AXIS_ALLOWED_FROM_ANONYMOUS_LIST.includes(c),
   ).concat(["person_key", "personkey"]);
 
 export { EVENT_USER_KEY_FIELD };
@@ -393,7 +406,7 @@ export const ID_SCHEME_NOTE =
  */
 export function classifyIdScheme(
   key: string,
-  rawLength?: number | null
+  rawLength?: number | null,
 ): IdScheme {
   const len =
     typeof rawLength === "number" && rawLength > 0 ? rawLength : key.length;
@@ -430,7 +443,7 @@ function latest(a: string | null, b: string | null): string | null {
 /** 카운트 맵을 count 내림차순(동률은 키 오름차순)으로 정렬해 배열로. */
 function rankCounts(
   map: Map<string, number>,
-  limit?: number
+  limit?: number,
 ): Array<{ key: string; count: number }> {
   const out = Array.from(map.entries())
     .map(([key, count]) => ({ key, count }))
@@ -530,7 +543,7 @@ function parseModelUses(v: unknown): DailyModelUse[] {
     if (model === "") continue;
     merged.set(
       model,
-      (merged.get(model) ?? 0) + coerceNumber(o.calls ?? o.count)
+      (merged.get(model) ?? 0) + coerceNumber(o.calls ?? o.count),
     );
   }
   return rankCounts(merged).map(({ key, count }) => ({
@@ -573,7 +586,7 @@ function parseStringList(v: unknown): string[] {
  */
 export function buildUserDailyRows(
   rows: ReadonlyArray<DailySourceRow>,
-  analyticsIdSalt: string | null = null
+  analyticsIdSalt: string | null = null,
 ): UserDailyRow[] {
   type Acc = {
     installKey: string;
@@ -653,7 +666,7 @@ export function buildUserDailyRows(
     const installKeyHmac = pseudonymizeAnalyticsId(
       "install",
       a.installKey,
-      analyticsIdSalt
+      analyticsIdSalt,
     );
     out.push({
       install_key: a.installKey,
@@ -689,7 +702,7 @@ export function buildUserDailyRows(
   // 결정적 정렬 — 재빌드 diff 를 사람이 읽을 수 있게.
   out.sort(
     (x, y) =>
-      x.install_key.localeCompare(y.install_key) || x.day.localeCompare(y.day)
+      x.install_key.localeCompare(y.install_key) || x.day.localeCompare(y.day),
   );
   return out;
 }
@@ -850,7 +863,7 @@ export type InstallProfileRow = {
 };
 
 function foldFirstTouch(
-  rows: ReadonlyArray<InstallFirstTouchRow>
+  rows: ReadonlyArray<InstallFirstTouchRow>,
 ): Map<string, InstallFirstTouchRow> {
   // 설치당 1건이 원칙이다(linkInstallAttribution 이 create 로 선착 1건만 적재).
   // 그래도 중복이 오면 **가장 이른 linkedAt** 을 남긴다 — first-touch 니까.
@@ -871,7 +884,7 @@ function foldFirstTouch(
 }
 
 function foldMilestones(
-  rows: ReadonlyArray<InstallMilestoneRow>
+  rows: ReadonlyArray<InstallMilestoneRow>,
 ): Map<
   string,
   { run: string | null; spawn: string | null; done: string | null }
@@ -899,7 +912,7 @@ function foldMilestones(
  * 이 지표는 검증할 수 없다.
  */
 export function buildInstallProfileRows(
-  input: InstallProfileInput
+  input: InstallProfileInput,
 ): InstallProfileRow[] {
   const todayNum = dayNumber(input.today);
   const topErrorLimit = Math.max(1, Math.floor(input.topErrorLimit ?? 5));
@@ -1059,7 +1072,7 @@ export function buildInstallProfileRows(
         model: key,
         calls: count,
         share: totalCalls > 0 ? count / totalCalls : null,
-      })
+      }),
     );
 
     const attempted = a.tasksCompleted + a.tasksFailed;
@@ -1091,7 +1104,8 @@ export function buildInstallProfileRows(
     const activationObservable = a.observedDays > 0;
 
     const gaKey = ft == null ? null : nullableStr(ft.gaKey);
-    const browserCount = gaKey == null ? null : (browserInstalls.get(gaKey) ?? 1);
+    const browserCount =
+      gaKey == null ? null : (browserInstalls.get(gaKey) ?? 1);
     const buildChannel = ft == null ? null : nullableStr(ft.buildChannel);
     const installClass: InstallClass =
       buildChannel === "dev"
@@ -1216,12 +1230,12 @@ export type InstallRetentionSummary = {
 
 /** 설치 프로필 배열 → 지평별 분자/분모. */
 export function summarizeInstallRetention(
-  profiles: ReadonlyArray<InstallProfileRow>
+  profiles: ReadonlyArray<InstallProfileRow>,
 ): InstallRetentionSummary {
   const cohort = profiles.filter((p) => p.first_active_day != null);
   const pick = (
     p: InstallProfileRow,
-    key: ProfileHorizonKey
+    key: ProfileHorizonKey,
   ): { pending: boolean; exact: boolean | null; window: boolean | null } => {
     switch (key) {
       case "d1":
@@ -1289,7 +1303,7 @@ export function summarizeInstallRetention(
       .length,
     installsZombie: profiles.filter((p) => p.zombie).length,
     installsNeverRan: profiles.filter(
-      (p) => p.first_active_day == null && !p.zombie
+      (p) => p.first_active_day == null && !p.zombie,
     ).length,
     installsCohort: cohort.length,
     horizons,
@@ -1355,7 +1369,7 @@ export type FirstSpawnActivationOptions = {
  */
 export function summarizeFirstSpawnActivation(
   profiles: ReadonlyArray<InstallProfileRow>,
-  options: FirstSpawnActivationOptions = {}
+  options: FirstSpawnActivationOptions = {},
 ): FirstSpawnActivationSummary {
   const from = options.cohortFrom ?? null;
   const to = options.cohortTo ?? null;
@@ -1381,7 +1395,8 @@ export function summarizeFirstSpawnActivation(
   const counted = countedRate(spawned, denom.length);
 
   const browsers = new Set<string>();
-  for (const p of inWindow) browsers.add(p.ga_key ?? `install:${p.install_key}`);
+  for (const p of inWindow)
+    browsers.add(p.ga_key ?? `install:${p.install_key}`);
 
   const notes: string[] = [
     ACTIVATION_OBSERVABLE_DEFINITION,
@@ -1392,19 +1407,22 @@ export function summarizeFirstSpawnActivation(
     notes.push(
       `★분모에서 ${unobservable}행을 뺐다 — 인증 텔레메트리가 0이라 ` +
         "first_spawn_at 이 존재할 수 없는 행이다. 이 행들을 분모에 넣으면 " +
-        "비율이 '사람이 안 썼다' 가 아니라 '측정이 안 된다' 를 뜻하게 된다."
+        "비율이 '사람이 안 썼다' 가 아니라 '측정이 안 된다' 를 뜻하게 된다.",
     );
   }
-  if (inWindow.length > 0 && browsers.size * REINSTALL_LOOP_MIN_INSTALLS <= inWindow.length) {
+  if (
+    inWindow.length > 0 &&
+    browsers.size * REINSTALL_LOOP_MIN_INSTALLS <= inWindow.length
+  ) {
     notes.push(
       `★분모 위생 경보 — 설치 ${inWindow.length}행이 브라우저 ${browsers.size}개에서 ` +
-        "나왔다. 사람 수가 아니라 재설치 루프를 세고 있을 가능성이 높다."
+        "나왔다. 사람 수가 아니라 재설치 루프를 세고 있을 가능성이 높다.",
     );
   }
   if (denom.length > 0 && denom.length < 10) {
     notes.push(
       `★모수 ${denom.length}. 퍼센트로 인용하지 마라 — 한 건이 비율을 ` +
-        `${(100 / denom.length).toFixed(0)}%p 움직인다.`
+        `${(100 / denom.length).toFixed(0)}%p 움직인다.`,
     );
   }
 
@@ -1435,7 +1453,7 @@ export function weekStartMonday(day: string): string | null {
   if (n == null) return null;
   // dayNumber 는 1970-01-01 기준 일련번호이고 1970-01-01 은 목요일이다.
   // (n + 3) % 7 이 0 이면 월요일.
-  const offset = ((n + 3) % 7 + 7) % 7;
+  const offset = (((n + 3) % 7) + 7) % 7;
   return dayString(n - offset);
 }
 
@@ -1456,11 +1474,16 @@ export type WeeklyProfileCoverage = {
  */
 export function foldWeeklyProfileCoverage(
   profiles: ReadonlyArray<InstallProfileRow>,
-  pick: (row: InstallProfileRow) => string | null
+  pick: (row: InstallProfileRow) => string | null,
 ): WeeklyProfileCoverage[] {
   const acc = new Map<
     string,
-    { cohort: number; observable: number; filled: number; browsers: Set<string> }
+    {
+      cohort: number;
+      observable: number;
+      filled: number;
+      browsers: Set<string>;
+    }
   >();
   for (const p of profiles) {
     if (p.cohort_day == null) continue;
@@ -1573,7 +1596,7 @@ export type AccountProfileRow = {
 
 /** cost_logs(+구매) → analytics_account_profile 행. */
 export function buildAccountProfileRows(
-  input: AccountProfileInput
+  input: AccountProfileInput,
 ): AccountProfileRow[] {
   const adminUid = (input.adminUid ?? "").trim();
 
@@ -1819,7 +1842,7 @@ const HORIZON_FIELDS: ReadonlyArray<BqField> = PROFILE_HORIZONS.flatMap(
       mode: "NULLABLE",
       description: `D${days} · ${HORIZON_DEFINITION_PENDING}`,
     },
-  ]
+  ],
 );
 
 export const INSTALL_PROFILE_SCHEMA: ReadonlyArray<BqField> = [
@@ -2058,22 +2081,22 @@ export const ACCOUNT_PROFILE_SCHEMA: ReadonlyArray<BqField> = [
  */
 export function assertAxisPurity(
   table: string,
-  fields: ReadonlyArray<BqField>
+  fields: ReadonlyArray<BqField>,
 ): void {
   const forbidden = ANONYMOUS_AXIS_TABLES.includes(table)
     ? FORBIDDEN_ON_ANONYMOUS_AXIS
     : ACCOUNT_AXIS_TABLES.includes(table)
-    ? FORBIDDEN_ON_ACCOUNT_AXIS
-    : LINK_AXIS_TABLES.includes(table)
-    ? FORBIDDEN_ON_LINK_AXIS
-    : EVENT_AXIS_TABLES.includes(table)
-    ? FORBIDDEN_ON_EVENT_AXIS
-    : null;
+      ? FORBIDDEN_ON_ACCOUNT_AXIS
+      : LINK_AXIS_TABLES.includes(table)
+        ? FORBIDDEN_ON_LINK_AXIS
+        : EVENT_AXIS_TABLES.includes(table)
+          ? FORBIDDEN_ON_EVENT_AXIS
+          : null;
   if (forbidden == null) {
     throw new Error(
       `[analyticsProfiles] 축이 선언되지 않은 테이블: ${table}. ` +
         "ANONYMOUS_AXIS_TABLES / ACCOUNT_AXIS_TABLES / LINK_AXIS_TABLES / " +
-        "EVENT_AXIS_TABLES 중 하나에 등록해라."
+        "EVENT_AXIS_TABLES 중 하나에 등록해라.",
     );
   }
   const walk = (fs: ReadonlyArray<BqField>, path: string): void => {
@@ -2084,7 +2107,7 @@ export function assertAxisPurity(
           `[analyticsProfiles] ${table} 에 반대 축 컬럼 '${path}${f.name}' 이 ` +
             "있다. 두 축을 잇는 조인 키를 만들지 마라 — " +
             "v3/src/components/legal/privacyContent.tsx 의 항목 " +
-            "'사용량·비용 기록 (계정 연결)' 참조."
+            "'사용량·비용 기록 (계정 연결)' 참조.",
         );
       }
       if (f.fields) walk(f.fields, `${path}${f.name}.`);

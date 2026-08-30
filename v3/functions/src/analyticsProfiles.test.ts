@@ -52,6 +52,8 @@ import {
   VIEW_TEAM_USAGE_DAILY,
   VIEW_TEAM_USAGE_UNATTRIBUTED,
 } from "./teamUsage";
+import { ANALYTICS_IDENTITY_TABLE } from "./ga4Bridge";
+import { ANALYTICS_IDENTITY_SCHEMA } from "./analyticsIdentitySync";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 1) 축 분리 — 주석은 안 읽힐 수 있으니 기계가 읽는다
@@ -70,7 +72,7 @@ test("★install_profile 에 user_key 를 붙이면 즉시 실패한다", () => 
   ];
   assert.throws(
     () => assertAxisPurity(TABLE_INSTALL_PROFILE, tainted),
-    /조인 키를 만들지 마라/
+    /조인 키를 만들지 마라/,
   );
 });
 
@@ -81,7 +83,7 @@ test("★account_profile 에 install_key 를 붙이면 즉시 실패한다(반�
   ];
   assert.throws(
     () => assertAxisPurity(TABLE_ACCOUNT_PROFILE, tainted),
-    /조인 키를 만들지 마라/
+    /조인 키를 만들지 마라/,
   );
 });
 
@@ -100,7 +102,7 @@ test("중첩 RECORD 안에 숨긴 조인 키도 잡는다", () => {
   ];
   assert.throws(
     () => assertAxisPurity(TABLE_INSTALL_PROFILE, tainted),
-    /model_mix\.uid/
+    /model_mix\.uid/,
   );
 });
 
@@ -118,7 +120,7 @@ test("★비용·캐시 컬럼은 익명축에서 거부된다(계정축에서�
           { name, type: "FLOAT64", mode: "NULLABLE" },
         ]),
       new RegExp(name),
-      `${name} 이 익명축에서 통과했다`
+      `${name} 이 익명축에서 통과했다`,
     );
   }
 });
@@ -126,15 +128,43 @@ test("★비용·캐시 컬럼은 익명축에서 거부된다(계정축에서�
 test("축이 선언되지 않은 테이블은 통과시키지 않는다", () => {
   assert.throws(
     () => assertAxisPurity("analytics_something_new", []),
-    /축이 선언되지 않은 테이블/
+    /축이 선언되지 않은 테이블/,
   );
   // 목록 자체도 겹치지 않아야 한다.
   for (const t of ANONYMOUS_AXIS_TABLES) {
     assert.ok(!ACCOUNT_AXIS_TABLES.includes(t), `${t} 이 양쪽에 있다`);
-    assert.ok(!LINK_AXIS_TABLES.includes(t), `${t} 이 익명축과 링크축 양쪽에 있다`);
+    assert.ok(
+      !LINK_AXIS_TABLES.includes(t),
+      `${t} 이 익명축과 링크축 양쪽에 있다`,
+    );
   }
   for (const t of ACCOUNT_AXIS_TABLES) {
-    assert.ok(!LINK_AXIS_TABLES.includes(t), `${t} 이 계정축과 링크축 양쪽에 있다`);
+    assert.ok(
+      !LINK_AXIS_TABLES.includes(t),
+      `${t} 이 계정축과 링크축 양쪽에 있다`,
+    );
+  }
+});
+
+test("analytics_identity 가 익명축에 등재돼 있고 실제 스키마가 축 검사를 통과한다 (ticket EFnVgBSdcjGVRRmNQ1dK)", () => {
+  assert.ok(ANONYMOUS_AXIS_TABLES.includes(ANALYTICS_IDENTITY_TABLE));
+  assertAxisPurity(
+    ANALYTICS_IDENTITY_TABLE,
+    ANALYTICS_IDENTITY_SCHEMA as unknown as BqField[],
+  );
+});
+
+test("★analytics_identity 에 계정축 컬럼을 더하면 즉시 실패한다", () => {
+  for (const name of ["user_key", "uid", "cost_usd"]) {
+    assert.throws(
+      () =>
+        assertAxisPurity(ANALYTICS_IDENTITY_TABLE, [
+          ...(ANALYTICS_IDENTITY_SCHEMA as unknown as BqField[]),
+          { name, type: "STRING", mode: "NULLABLE" },
+        ]),
+      new RegExp(name),
+      `${name} 이 analytics_identity 에서 통과했다`,
+    );
   }
 });
 
@@ -149,7 +179,7 @@ test("팀 오버뷰 뷰 두 벌이 계정축에 등재돼 있고 축 검사를 �
   assertAxisPurity(VIEW_TEAM_USAGE_DAILY, TEAM_USAGE_DAILY_SCHEMA as BqField[]);
   assertAxisPurity(
     VIEW_TEAM_USAGE_UNATTRIBUTED,
-    TEAM_USAGE_UNATTRIBUTED_SCHEMA as BqField[]
+    TEAM_USAGE_UNATTRIBUTED_SCHEMA as BqField[],
   );
 });
 
@@ -162,7 +192,7 @@ test("★팀 오버뷰 뷰에 익명축 조인키를 더하면 즉시 실패한�
           { name, type: "STRING", mode: "NULLABLE" },
         ]),
       new RegExp(name),
-      `${name} 이 팀 오버뷰 뷰에서 통과했다`
+      `${name} 이 팀 오버뷰 뷰에서 통과했다`,
     );
   }
 });
@@ -172,7 +202,7 @@ test("★귀속 불가 뷰에는 금액·토큰 컬럼이 자리조차 없다 �
   // 규모(행 수)만 낸다는 약속을 스키마 상수로 못 박는다.
   assert.deepEqual(
     TEAM_USAGE_UNATTRIBUTED_SCHEMA.map((f) => f.name),
-    ["day", "account_uid", "rows_n"]
+    ["day", "account_uid", "rows_n"],
   );
 });
 
@@ -198,7 +228,7 @@ test("★★익명축 금지 목록은 사람 축이 생겨도 한 항목도 줄
   ]) {
     assert.ok(
       FORBIDDEN_ON_ANONYMOUS_AXIS.includes(name),
-      `${name} 이 익명축 금지 목록에서 사라졌다`
+      `${name} 이 익명축 금지 목록에서 사라졌다`,
     );
   }
   // 그리고 실제로 계속 잡는다(목록만 있고 검사가 안 도는 상태 방지).
@@ -208,7 +238,7 @@ test("★★익명축 금지 목록은 사람 축이 생겨도 한 항목도 줄
         ...USER_DAILY_SCHEMA,
         { name: "user_key", type: "STRING", mode: "NULLABLE" },
       ]),
-    /user_key/
+    /user_key/,
   );
 });
 
@@ -220,7 +250,7 @@ test("★같은 스키마를 익명축 표에 넣으면 여전히 거부된다",
   // 링크축이 허용됐다고 익명축이 함께 열린 게 아니라는 확인.
   assert.throws(
     () => assertAxisPurity(TABLE_USER_DAILY, USER_INSTALL_SCHEMA as BqField[]),
-    /user_key/
+    /user_key/,
   );
 });
 
@@ -259,7 +289,7 @@ test("★이벤트 축은 사람키 한 벌만 허용한다 — 나머지 계정
           { name, type: "STRING", mode: "NULLABLE" },
         ]),
       new RegExp(name),
-      `${name} 이 이벤트 축에서 통과했다`
+      `${name} 이 이벤트 축에서 통과했다`,
     );
   }
 });
@@ -274,7 +304,7 @@ test("★userKey 는 익명축 파생표에서는 여전히 거부된다 — 축
           { name, type: "STRING", mode: "NULLABLE" },
         ]),
       /user_?key/i,
-      `${name} 이 익명축에서 통과했다`
+      `${name} 이 익명축에서 통과했다`,
     );
   }
 });
@@ -288,7 +318,7 @@ test("★계정축에도 camelCase 익명 조인키가 못 들어온다", () => 
           { name, type: "STRING", mode: "NULLABLE" },
         ]),
       new RegExp(name, "i"),
-      `${name} 이 계정축에서 통과했다`
+      `${name} 이 계정축에서 통과했다`,
     );
   }
 });
@@ -310,7 +340,7 @@ test("★링크표에 원시 식별자를 붙이면 즉시 실패한다 — 가�
           { name, type: "STRING", mode: "NULLABLE" },
         ]),
       new RegExp(name),
-      `${name} 이 링크축에서 통과했다`
+      `${name} 이 링크축에서 통과했다`,
     );
     assert.ok(FORBIDDEN_ON_LINK_AXIS.includes(name));
   }
@@ -400,7 +430,7 @@ test("active 와 present_only 는 배타적이다", () => {
       [true, false],
       [false, true],
       [false, false], // 신호가 아예 없는 날은 둘 다 아니다
-    ]
+    ],
   );
 });
 
@@ -448,12 +478,12 @@ test("★daily 는 raw install_key 를 보존하고 HMAC 보조 컬럼을 새로
   const salt = "test-salt-not-a-real-secret";
   const [row] = buildUserDailyRows(
     [{ installKey: INSTALL_A, day: "2026-08-01", eventCount: 1 }],
-    salt
+    salt,
   );
   assert.equal(row.install_key, INSTALL_A);
   assert.equal(
     row.install_key_hmac,
-    pseudonymizeAnalyticsId("install", INSTALL_A, salt)
+    pseudonymizeAnalyticsId("install", INSTALL_A, salt),
   );
   assert.match(String(row.install_key_hmac), /^in_[0-9a-f]{24}$/);
 });
@@ -501,7 +531,7 @@ test("★가명 install_key 는 원시 길이를 받아야 스킴을 안다(모�
   assert.equal(classifyIdScheme("in_0123456789abcdef01234567"), "unknown");
   assert.equal(
     classifyIdScheme("in_0123456789abcdef01234567", 28),
-    "legacy_uid28"
+    "legacy_uid28",
   );
   assert.equal(classifyIdScheme("in_0123456789abcdef01234567", 36), "uuid36");
 });
@@ -514,7 +544,7 @@ test("★가명 install_key 는 원시 길이를 받아야 스킴을 안다(모�
 function dailyFor(
   installKey: string,
   activeDays: string[],
-  presentOnlyDays: string[] = []
+  presentOnlyDays: string[] = [],
 ): UserDailyRow[] {
   return buildUserDailyRows([
     ...activeDays.map((day) => ({ installKey, day, eventCount: 1 })),
@@ -571,7 +601,7 @@ test("★좀비는 first_active_day 가 null 이라 코호트에 못 들어간�
   const daily = dailyFor(
     INSTALL_A,
     [],
-    ["2026-08-01", "2026-08-02", "2026-08-03"]
+    ["2026-08-01", "2026-08-02", "2026-08-03"],
   );
   const [p] = buildInstallProfileRows({ today: "2026-08-21", daily });
   assert.equal(p.first_active_day, null);
@@ -585,7 +615,7 @@ test("active_days 와 present_only_days 는 겹치지 않는다", () => {
   const daily = dailyFor(
     INSTALL_A,
     ["2026-08-01", "2026-08-02"],
-    ["2026-08-03", "2026-08-04", "2026-08-05"]
+    ["2026-08-03", "2026-08-04", "2026-08-05"],
   );
   const [p] = buildInstallProfileRows({ today: "2026-08-21", daily });
   assert.equal(p.active_days, 2);
@@ -795,7 +825,7 @@ test("★pending 설치는 분모에서 빠진다 — 어제 들어온 신규가
     ...dailyFor("i-new-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", ["2026-08-20"]),
   ];
   const s = summarizeInstallRetention(
-    buildInstallProfileRows({ today: "2026-08-21", daily })
+    buildInstallProfileRows({ today: "2026-08-21", daily }),
   );
   const d7 = s.horizons.find((h) => h.key === "d7");
   assert.ok(d7);
@@ -822,11 +852,11 @@ test("좀비는 코호트 분모에 안 들어가고 따로 세어진다", () =>
     ...dailyFor(
       "i-zomb-bbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       [],
-      ["2026-08-01", "2026-08-02"]
+      ["2026-08-01", "2026-08-02"],
     ),
   ];
   const s = summarizeInstallRetention(
-    buildInstallProfileRows({ today: "2026-08-21", daily })
+    buildInstallProfileRows({ today: "2026-08-21", daily }),
   );
   assert.equal(s.installsObserved, 2);
   assert.equal(s.installsZombie, 1);
@@ -849,7 +879,7 @@ test("★어트리뷰션만 있고 활동이 없는 설치도 행이 생긴다(�
   });
   assert.equal(profiles.length, 2, "미실행 설치가 조용히 빠졌다");
   const never = profiles.find(
-    (p) => p.install_key === "i-never-ran-cccccccccccccccccccccc"
+    (p) => p.install_key === "i-never-ran-cccccccccccccccccccccc",
   );
   assert.ok(never);
   assert.equal(never.observed_days, 0);
@@ -879,7 +909,7 @@ test("★미실행과 좀비를 갈라서 센다(원인이 다르다)", () => {
   // 합이 맞아야 한다 — 어느 쪽에도 안 들어간 설치가 생기면 인원이 새는 것이다.
   assert.equal(
     s.installsZombie + s.installsNeverRan + s.installsCohort,
-    s.installsObserved
+    s.installsObserved,
   );
 });
 
@@ -893,7 +923,7 @@ test("★D7/D14 정의 문자열이 요약에 실려 나간다(화면이 그대�
   // 지평은 지시 스펙 그대로 다섯이다.
   assert.deepEqual(
     PROFILE_HORIZONS.map((h) => h.key),
-    ["d1", "d3", "d7", "d14", "d30"]
+    ["d1", "d3", "d7", "d14", "d30"],
   );
 });
 
@@ -1006,7 +1036,7 @@ test("결제 정보가 없으면 plan/mrr/ltv 는 0 이 아니라 null", () => {
   assert.equal(
     row.mrr_usd,
     null,
-    "무료 사용자와 '아직 모름' 이 같은 값이 됐다"
+    "무료 사용자와 '아직 모름' 이 같은 값이 됐다",
   );
   assert.equal(row.ltv_usd, null);
   assert.equal(row.first_paid_at, null);
@@ -1142,7 +1172,7 @@ test("★어트리뷰션만 있고 이벤트가 0 인 설치는 활성화 분모
   assert.equal(
     attr.activation_observable,
     false,
-    "인증 텔레메트리가 0인데 분자 자격이 있는 것으로 잡혔다"
+    "인증 텔레메트리가 0인데 분자 자격이 있는 것으로 잡혔다",
   );
   assert.equal(attr.first_spawn_at, null);
 
@@ -1188,7 +1218,7 @@ test("★고친 것: 종전 정의였다면 같은 데이터가 1/2 (50.0%) 로 
   assert.notEqual(
     fixed.rate,
     legacyNum / legacyDen,
-    "모집단을 갈랐는데도 종전과 같은 비율이 나온다"
+    "모집단을 갈랐는데도 종전과 같은 비율이 나온다",
   );
 });
 
@@ -1197,7 +1227,7 @@ test("★한 브라우저가 만든 재설치 루프는 install_class 로 갈리
   const ga = "2222222222.2222222222";
   const loopKeys = Array.from(
     { length: REINSTALL_LOOP_MIN_INSTALLS },
-    (_, i) => `dddddddd-1111-2222-3333-44444444440${i}`
+    (_, i) => `dddddddd-1111-2222-3333-44444444440${i}`,
   );
   const rows = buildInstallProfileRows({
     today: "2026-08-24",
@@ -1243,7 +1273,7 @@ test("dev 로 태깅된 설치는 dev_tagged 로 갈린다 — ft_build_channel 
   assert.equal(
     byKey.get(INSTALL_EVENT_ONLY)!.install_class,
     "distinct",
-    "채널 미태깅을 dev 로도 unknown 으로도 접으면 안 된다(ga_key 는 있다)"
+    "채널 미태깅을 dev 로도 unknown 으로도 접으면 안 된다(ga_key 는 있다)",
   );
 });
 
