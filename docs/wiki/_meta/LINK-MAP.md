@@ -2,8 +2,8 @@
 title: 링크 맵
 tags: [meta/linkmap, status/living]
 status: active
-date: 2026-08-29
-links: [[CONVENTION]], [[2026-kpi-targets-pressure-test]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[human-only-ops-backlog]], [[sole-persistent-user-is-not-external]], [[shared-project-retention-confounded-with-internality]]
+date: 2026-08-30
+links: [[CONVENTION]], [[2026-kpi-targets-pressure-test]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[telemetry-data-model-map]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[human-only-ops-backlog]], [[sole-persistent-user-is-not-external]], [[shared-project-retention-confounded-with-internality]]
 ---
 
 # 링크 맵
@@ -38,6 +38,7 @@ links: [[CONVENTION]], [[2026-kpi-targets-pressure-test]], [[empty-query-first]]
 | `do-not-silently-drop-missing-join-targets` | `40-methodology/do-not-silently-drop-missing-join-targets.md` | methodology | verified | adopt |
 | `no-live-gui-verify` | `20-constraints/no-live-gui-verify.md` | constraints | verified | adopt |
 | `telemetry-identity-axes` | `00-foundations/telemetry-identity-axes.md` | foundations | verified | — |
+| `telemetry-data-model-map` | `00-foundations/telemetry-data-model-map.md` | foundations | verified | adopt |
 | `2026-kpi-targets-pressure-test` | `00-foundations/2026-kpi-targets-pressure-test.md` | foundations | active | no-go |
 | `overview` | `00-foundations/overview.md` | foundations | active | — |
 | `architecture` | `00-foundations/architecture.md` | foundations | active | — |
@@ -99,6 +100,15 @@ links: [[CONVENTION]], [[2026-kpi-targets-pressure-test]], [[empty-query-first]]
 | `no-live-gui-verify` | `do-not-retry` |
 | `do-not-retry` | `empty-query-first` |
 | `do-not-retry` | `no-live-gui-verify` |
+| `telemetry-data-model-map` | `telemetry-identity-axes` |
+| `telemetry-data-model-map` | `glossary` |
+| `telemetry-data-model-map` | `do-not-retry` |
+| `telemetry-data-model-map` | `counting-unit-first` |
+| `telemetry-data-model-map` | `empty-query-first` |
+| `telemetry-data-model-map` | `verify-result-row` |
+| `telemetry-data-model-map` | `functions-deploy-env-and-bq-views` |
+| `telemetry-data-model-map` | `post-spawn-telemetry-gap` |
+| `telemetry-identity-axes` | `telemetry-data-model-map` |
 | `telemetry-identity-axes` | `do-not-retry` |
 | `telemetry-identity-axes` | `empty-query-first` |
 | `telemetry-identity-axes` | `post-spawn-telemetry-gap` |
@@ -206,6 +216,7 @@ links: [[CONVENTION]], [[2026-kpi-targets-pressure-test]], [[empty-query-first]]
 | `no-live-gui-verify` | [AGENTS.md](../../../AGENTS.md) |
 | `do-not-retry` | [v3/docs/web-app-join-attribution-design-2026-08-09.md](../../../v3/docs/web-app-join-attribution-design-2026-08-09.md) · [v3/docs/pseudonym-retro-measurement-2026-08-21.md](../../../v3/docs/pseudonym-retro-measurement-2026-08-21.md) · [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) |
 | `telemetry-identity-axes` | [v3/docs/post-spawn-telemetry-gap-2026-08-25.md](../../../v3/docs/post-spawn-telemetry-gap-2026-08-25.md) · [v3/functions/src/telemetryIdentityAxis.ts](../../../v3/functions/src/telemetryIdentityAxis.ts) |
+| `telemetry-data-model-map` | [v3/functions/src/analyticsProfiles.ts](../../../v3/functions/src/analyticsProfiles.ts) · [v3/functions/src/personAxis.ts](../../../v3/functions/src/personAxis.ts) · [v3/functions/src/installUnified.ts](../../../v3/functions/src/installUnified.ts) · [v3/docs/analytics-identity-sync-schedule-2026-08-30.md](../../../v3/docs/analytics-identity-sync-schedule-2026-08-30.md) · [v3/docs/person-axis-ga4-join-verification-2026-08-29.md](../../../v3/docs/person-axis-ga4-join-verification-2026-08-29.md) |
 | `2026-kpi-targets-pressure-test` | [docs/zero-friction-kpi-completion-2026-08-09.md](../../zero-friction-kpi-completion-2026-08-09.md) · [docs/beta-churn-root-cause-analysis-2026-07-21.md](../../beta-churn-root-cause-analysis-2026-07-21.md) · [docs/MVP/business-plan-3year.md](../../MVP/business-plan-3year.md) · [docs/MVP/PRICING_PLAN.md](../../MVP/PRICING_PLAN.md) |
 | `overview` | [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) · [v3/docs/COMMUNICATION-ARCHITECTURE.md](../../../v3/docs/COMMUNICATION-ARCHITECTURE.md) |
 | `architecture` | [v3/docs/COMMUNICATION-ARCHITECTURE.md](../../../v3/docs/COMMUNICATION-ARCHITECTURE.md) · [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) · [docs/supported-harnesses-and-architecture.md](../../supported-harnesses-and-architecture.md) |

@@ -3,7 +3,7 @@ title: 조회가 비면 대상이 아니라 조회를 먼저 의심하라
 tags: [domain/methodology, topic/observability, topic/bigquery, topic/identity, verdict/adopt, method/query-audit]
 status: verified
 date: 2026-08-24
-links: [[do-not-retry]], [[no-live-gui-verify]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[decision-sentence-first]]
+links: [[do-not-retry]], [[no-live-gui-verify]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[decision-sentence-first]], [[telemetry-data-model-map]]
 ---
 
 # 조회가 비면 대상이 아니라 조회를 먼저 의심하라
@@ -61,3 +61,4 @@ links: [[do-not-retry]], [[no-live-gui-verify]], [[telemetry-identity-axes]], [[
 ## Backlinks
 
 - [[do-not-retry]] · [[no-live-gui-verify]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]] · [[verify-result-row]] · [[counting-unit-first]] · [[decision-sentence-first]] · [[wiki-write-at-merge]] · [[overview]] · [[functions-deploy-env-and-bq-views]] · [[ci-empty-steps-is-billing]] · [[verify-without-gui]]
+- [[telemetry-data-model-map]] — 0행이 나오는 링크표·뷰 게이트의 지도

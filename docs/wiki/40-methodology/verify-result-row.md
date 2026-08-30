@@ -3,7 +3,7 @@ title: 조회 결과가 있어도 그게 네가 생각한 그 행인지 확인�
 tags: [domain/methodology, topic/observability, topic/verification, topic/bigquery, verdict/adopt, method/query-audit, method/source-link]
 status: verified
 date: 2026-08-29
-links: [[empty-query-first]], [[counting-unit-first]], [[telemetry-identity-axes]], [[do-not-retry]], [[decision-sentence-first]], [[routing-label-coverage]]
+links: [[empty-query-first]], [[counting-unit-first]], [[telemetry-identity-axes]], [[do-not-retry]], [[decision-sentence-first]], [[routing-label-coverage]], [[telemetry-data-model-map]]
 ---
 
 # 조회 결과가 있어도 그게 네가 생각한 그 행인지 확인하라
@@ -57,3 +57,4 @@ links: [[empty-query-first]], [[counting-unit-first]], [[telemetry-identity-axes
 ## Backlinks
 
 - [[empty-query-first]] · [[counting-unit-first]] · [[telemetry-identity-axes]] · [[do-not-retry]] · [[decision-sentence-first]] · [[routing-label-coverage]] · [[overview]] · [[artifact-scope-boundary]] · [[do-not-silently-drop-missing-join-targets]]
+- [[telemetry-data-model-map]] — 결제 뷰 0행이 `person_axis_closed` 사유였던 사례

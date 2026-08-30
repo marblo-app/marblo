@@ -3,7 +3,7 @@ title: 분석 변경은 함수 배포와 BigQuery 뷰 재생성이 한 세트다
 tags: [domain/operations, topic/deploy, topic/bigquery, topic/observability, method/source-link]
 status: verified
 date: 2026-08-26
-links: [[empty-query-first]], [[verify-without-gui]], [[ci-empty-steps-is-billing]], [[human-only-ops-backlog]]
+links: [[empty-query-first]], [[verify-without-gui]], [[ci-empty-steps-is-billing]], [[human-only-ops-backlog]], [[telemetry-data-model-map]]
 ---
 
 # 분석 변경은 함수 배포와 BigQuery 뷰 재생성이 한 세트다
@@ -93,3 +93,4 @@ npm run provision:team-usage -- --apply
 ## Backlinks
 
 - [[empty-query-first]] · [[verify-without-gui]] · [[ci-empty-steps-is-billing]] · [[human-only-ops-backlog]] · [[github-app-install-after-deploy]] · [[payment-live-key-pg-env-bundle]] · [[no-live-gui-verify]]
+- [[telemetry-data-model-map]] — 뷰끼리 게이트가 갈린 실측(결제 뷰 닫힘·사람 뷰 열림)

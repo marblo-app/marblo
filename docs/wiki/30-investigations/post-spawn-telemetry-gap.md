@@ -3,7 +3,7 @@ title: 스폰 이후 종료가 샌다
 tags: [domain/investigations, topic/observability, topic/identity, topic/bigquery, verdict/adopt]
 status: verified
 date: 2026-08-25
-links: [[telemetry-identity-axes]], [[empty-query-first]], [[do-not-retry]]
+links: [[telemetry-identity-axes]], [[empty-query-first]], [[do-not-retry]], [[telemetry-data-model-map]]
 ---
 
 # 스폰 이후 종료가 샌다
@@ -55,3 +55,4 @@ links: [[telemetry-identity-axes]], [[empty-query-first]], [[do-not-retry]]
 ## Backlinks
 
 - [[telemetry-identity-axes]] · [[empty-query-first]] · [[do-not-retry]] · [[counting-unit-first]] · [[2026-kpi-targets-pressure-test]] · [[sole-persistent-user-is-not-external]] · [[shared-project-retention-confounded-with-internality]]
+- [[telemetry-data-model-map]] — 표·키 지도

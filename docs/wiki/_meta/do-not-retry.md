@@ -3,7 +3,7 @@ title: 기각 원장 — 재시도하지 말 것
 tags: [meta/ledger, status/living]
 status: active
 date: 2026-08-24
-links: [[empty-query-first]], [[no-live-gui-verify]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]]
+links: [[empty-query-first]], [[no-live-gui-verify]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[telemetry-data-model-map]]
 ---
 
 # 기각 원장
@@ -47,3 +47,4 @@ links: [[empty-query-first]], [[no-live-gui-verify]], [[telemetry-identity-axes]
 ## Backlinks
 
 - [[empty-query-first]] · [[no-live-gui-verify]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]]
+- [[telemetry-data-model-map]] — DNR-04·05 가 걸리는 표와 키의 지도
