@@ -448,6 +448,26 @@ describe("경계 케이스", () => {
     ).resolves.toBe(`${PROJECT}_${INVITEE_EMAIL_NORM}`);
   });
 
+  it("이미 멤버인 이메일에는 초대장을 만들지 않고 안내한다", async () => {
+    seedProject([OWNER, INVITEE]);
+    backend.seed("users", INVITEE, {
+      email: "Invitee@Example.com",
+      displayName: "Invitee",
+      photoURL: "",
+      createdAt: new Date(),
+    });
+
+    await expect(
+      teamService.createInvitation(
+        PROJECT,
+        "invitee@example.COM",
+        "viewer",
+        OWNER,
+      ),
+    ).rejects.toThrow();
+    expect(backend.list("invitations")).toEqual([]);
+  });
+
   it("★만료된 초대는 status=expired 로 바뀌고 멤버·역할 문서가 생기지 않는다", async () => {
     seedProject([OWNER]);
     const id = `${PROJECT}_${INVITEE_EMAIL_NORM}`;
@@ -516,22 +536,23 @@ describe("경계 케이스", () => {
     expect(invitationDoc(id)!.status).toBe("pending");
   });
 
-  it("이미 멤버인 사람이 초대를 수락하면 members 는 중복되지 않고 역할은 초대장 값으로 못 박힌다", async () => {
-    // createInvitation 은 오늘 멤버십을 검사하지 않는다(문서 중복만 본다).
-    // 그래서 이 경로가 실제로 열려 있고, 여기서 보는 것은 그 경우에도
-    // 멤버십·역할 무결성이 깨지지 않는다는 것이다.
+  it("이미 멤버인 사람이 과거 초대를 수락해도 members 는 중복되지 않는다", async () => {
     seedProject([OWNER, INVITEE]);
     backend.seed("memberRoles", `${PROJECT}_${INVITEE}`, {
       projectId: PROJECT,
       userId: INVITEE,
       role: "admin",
     });
-    const id = await teamService.createInvitation(
-      PROJECT,
-      INVITEE_EMAIL,
-      "viewer",
-      OWNER,
-    );
+    const id = `${PROJECT}_${INVITEE_EMAIL_NORM}`;
+    backend.seed("invitations", id, {
+      projectId: PROJECT,
+      invitedEmail: INVITEE_EMAIL_NORM,
+      invitedBy: OWNER,
+      role: "viewer",
+      status: "pending",
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 86400_000),
+    });
     await teamService.acceptInvitation(id, INVITEE);
     expect(project().members).toEqual([OWNER, INVITEE]); // arrayUnion 멱등
     expect(roleDoc(INVITEE)!.role).toBe("viewer"); // 초대장이 최신 의사

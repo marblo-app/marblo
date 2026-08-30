@@ -35,6 +35,7 @@ export const common = {
 
   // — team / invitations (services/teamService, hooks/useTeam) —
   "common.team.duplicateInvite": "이미 대기 중인 초대가 있습니다.",
+  "common.team.alreadyMember": "이미 이 팀의 멤버입니다.",
   "common.team.inviteNotFound": "초대를 찾을 수 없습니다.",
   "common.team.inviteAlreadyHandled": "이미 처리된 초대입니다.",
   "common.team.inviteExpired": "만료된 초대입니다.",

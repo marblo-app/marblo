@@ -46,9 +46,9 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/memberRoles/$(projectId + '_' + userId));
     }
 
-    // ★문서가 없으면 'member' — 서버의 normalizeMemberRole(functions/src/
-    //   githubApp.ts)과 **같은 기본값**이다. 한쪽만 바꾸면 화면이 허용하는 것과
-    //   토큰이 허용하는 것이 갈린다.
+    // ★문서가 없으면 'member' — 기존 레거시 멤버의 권한을 보존한다. 반대로
+    //   문서는 있는데 role 필드가 없으면 'viewer'로 fail-closed한다. 서버의
+    //   normalizeMemberRole(functions/src/githubApp.ts)과 같은 판정이다.
     //
     // ★★viewer 로 뒤집기 전에 백필이 선행돼야 한다(티켓 uhkQrRBgeBRddWb6OeDa).
     //   역할 문서 없이 멤버가 되던 경로(초대 수락)는 막혔지만, 그 이전에 들어온
@@ -57,7 +57,7 @@ service cloud.firestore {
     //   기본값 전환(룰 + githubApp.normalizeMemberRole 동시에).
     function getMemberRole(projectId, userId) {
       return memberRoleExists(projectId, userId)
-        ? getMemberRoleDoc(projectId, userId).role
+        ? getMemberRoleDoc(projectId, userId).get('role', 'viewer')
         : 'member';
     }
 

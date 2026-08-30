@@ -288,9 +288,10 @@ export function roleCanMerge(role: ProjectRole): boolean {
 /**
  * `memberRoles/{projectId}_{uid}.role` 원문 → 역할.
  *
- * ★모르는 값·빈 문서는 **member** 로 접는다 — firestore.rules 의
- * `getMemberRole` 이 문서가 없을 때 'member' 를 쓰는 것과 정확히 같다. 여기서
- * viewer 로 접으면 룰이 허용하는 사람을 코드가 막고, owner 로 접으면 그 반대다.
+ * ★문서가 없으면 **member** 로 접는다 — 기존 레거시 멤버의 권한을 보존한다.
+ * 다만 문서는 있는데 역할 필드가 없으면 **viewer** 로 접는다. 이는 앱의
+ * `getMemberRole`이 역할을 확인할 수 없을 때 write를 열지 않는 동작 및
+ * firestore.rules의 `getMemberRole`과 같은 판정이다.
  *
  * ★★이 기본값을 viewer 로 뒤집고 싶다면 **먼저 백필해야 한다**
  * (티켓 uhkQrRBgeBRddWb6OeDa). 역할 문서 없이 멤버가 되는 경로가 하나 있었고
@@ -304,8 +305,15 @@ export function roleCanMerge(role: ProjectRole): boolean {
  * (룰의 `isProjectOwner` 와 같다). 멤버가 자기 memberRoles 문서에 'owner' 를
  * 써 넣어 승격하는 경로를 여기서 끊는다.
  */
-export function normalizeMemberRole(raw: unknown): ProjectRole {
-  if (typeof raw !== "string") return "member";
+export function normalizeMemberRole(
+  raw: unknown,
+  memberRoleDocumentExists = false,
+): ProjectRole {
+  // 문서가 없던 레거시 멤버는 기존 권한(member)을 보존한다. 반면 문서는 있으나
+  // role 필드가 없는 손상/레거시 문서는 앱 getMemberRole과 같이 fail-closed다.
+  if (typeof raw !== "string") {
+    return memberRoleDocumentExists ? "viewer" : "member";
+  }
   const t = raw.trim().toLowerCase();
   if (t === "owner") return "member"; // ownerId 로만 owner 가 된다(위 주석)
   return (PROJECT_ROLES as readonly string[]).includes(t)
@@ -321,12 +329,16 @@ export function resolveProjectRole(input: {
   uid: string;
   project: ProjectSnapshotForIssue;
   memberRole?: unknown;
+  memberRoleDocumentExists?: boolean;
 }): ProjectRole | null {
   const { uid, project } = input;
   if (!project.exists || !uid) return null;
   if (project.ownerId === uid) return "owner";
   if (!project.members.includes(uid)) return null;
-  return normalizeMemberRole(input.memberRole);
+  return normalizeMemberRole(
+    input.memberRole,
+    input.memberRoleDocumentExists === true,
+  );
 }
 
 // ── 인가 판정 (설계 §3.2 3~6번) ─────────────────────────────────────────────
@@ -374,6 +386,8 @@ export interface IssueRequestInput {
    * firestore.rules 의 `getMemberRole` 과 **같은 기본값**(member)으로 접힌다.
    */
   memberRole?: unknown;
+  /** 역할 문서 존재 여부. 없으면 기존 레거시 기본값(member)을 보존한다. */
+  memberRoleDocumentExists?: boolean;
   /** 이 요청이 원하는 접근 수준. 생략하면 read(= v1 동작 그대로). */
   requestedAccess?: RepoAccess;
 }
@@ -405,6 +419,7 @@ export function evaluateInstallationTokenRequest(
     uid,
     project,
     memberRole: input.memberRole,
+    memberRoleDocumentExists: input.memberRoleDocumentExists,
   });
   if (!role) return { ok: false, code: "not-a-member" };
 

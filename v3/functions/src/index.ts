@@ -19462,19 +19462,22 @@ async function ownerEntitledPlan(ownerId: string | null): Promise<string> {
  * ★역할 조회 — `memberRoles/{projectId}_{uid}` (티켓 DbAZ5C6gbO6nWNx9FZ4Q 가
  * 도입한 컬렉션 그대로). 새 권한 개념을 만들지 않는다.
  *
- * 문서가 없으면 undefined 를 돌려주고, `normalizeMemberRole` 이
- * firestore.rules 의 `getMemberRole` 과 **같은 기본값**(member)으로 접는다.
+ * 문서 존재 여부와 role 원문을 함께 돌려준다. 문서가 없으면 기존 기본값(member)을
+ * 보존하고, 문서는 있으나 role이 없으면 앱과 같이 fail-closed(viewer)로 접는다.
  * 조회 실패는 던진다 — 실패를 member 로 접으면 viewer 가 write 를 받는다.
  */
 async function readMemberRoleValue(
   projectId: string,
   uid: string,
-): Promise<unknown> {
+): Promise<{ exists: boolean; role: unknown }> {
   const snap = await db
     .collection("memberRoles")
     .doc(`${projectId}_${uid}`)
     .get();
-  return snap.exists ? (snap.data() || {}).role : undefined;
+  return {
+    exists: snap.exists,
+    role: snap.exists ? (snap.data() || {}).role : undefined,
+  };
 }
 
 /** 요청이 원하는 접근 수준. 생략·모르는 값은 read(= v1 동작). */
@@ -19799,8 +19802,11 @@ export const issueRepoInstallationToken = functions.https.onCall(
     // 않는다. 조회 실패는 흡수하지 않는다 — member 로 접히면 viewer 가
     // write 를 받게 된다.
     let memberRole: unknown;
+    let memberRoleDocumentExists = false;
     try {
-      memberRole = await readMemberRoleValue(projectId, uid);
+      const roleSnapshot = await readMemberRoleValue(projectId, uid);
+      memberRole = roleSnapshot.role;
+      memberRoleDocumentExists = roleSnapshot.exists;
     } catch (err) {
       functions.logger.error(
         "[issueRepoInstallationToken] 역할 조회 실패",
@@ -19813,6 +19819,7 @@ export const issueRepoInstallationToken = functions.https.onCall(
       project,
       ownerPlan: await ownerEntitledPlan(project.ownerId),
       memberRole,
+      memberRoleDocumentExists,
       requestedAccess,
     });
     if (!decision.ok) {
@@ -20054,8 +20061,11 @@ export const getGitHubAppStatus = functions.https.onCall(
     const snap = await db.collection("projects").doc(projectId).get();
     const project = projectSnapshotForIssue(snap);
     let memberRole: unknown;
+    let memberRoleDocumentExists = false;
     try {
-      memberRole = await readMemberRoleValue(projectId, uid);
+      const roleSnapshot = await readMemberRoleValue(projectId, uid);
+      memberRole = roleSnapshot.role;
+      memberRoleDocumentExists = roleSnapshot.exists;
     } catch {
       memberRole = undefined;
     }
@@ -20064,6 +20074,7 @@ export const getGitHubAppStatus = functions.https.onCall(
       project,
       ownerPlan: await ownerEntitledPlan(project.ownerId),
       memberRole,
+      memberRoleDocumentExists,
     });
     if (!decision.ok) {
       return { ...off, configured: true };

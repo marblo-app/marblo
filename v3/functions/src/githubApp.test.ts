@@ -656,6 +656,7 @@ function issueV2(
   uid: string,
   opts: {
     memberRole?: unknown;
+    memberRoleDocumentExists?: boolean;
     requestedAccess?: RepoAccess;
     over?: Partial<ProjectSnapshotForIssue>;
     plan?: string;
@@ -666,6 +667,7 @@ function issueV2(
     project: projectWithRoles(opts.over),
     ownerPlan: opts.plan ?? "team",
     memberRole: opts.memberRole,
+    memberRoleDocumentExists: opts.memberRoleDocumentExists,
     requestedAccess: opts.requestedAccess,
   });
 }
@@ -793,6 +795,24 @@ test("★역할 문서 없음 × read/write — 기본값 member 로 접힌다 (
     assert.equal(write.ok === true && write.role, "member");
     assert.equal(write.ok === true && write.access, "write");
   }
+});
+
+test("★role 없는 memberRoles 문서는 viewer로 fail-closed 된다", () => {
+  const read = issueV2(MEMBER, {
+    memberRole: undefined,
+    memberRoleDocumentExists: true,
+    requestedAccess: "read",
+  });
+  assert.equal(read.ok, true);
+  assert.equal(read.ok === true && read.role, "viewer");
+
+  const write = issueV2(MEMBER, {
+    memberRole: undefined,
+    memberRoleDocumentExists: true,
+    requestedAccess: "write",
+  });
+  assert.equal(write.ok, false);
+  assert.equal(write.ok === false && write.code, "role-cannot-write");
 });
 
 test("★역할 문서 없음 — 기본 브랜치는 못 민다 (member 와 같은 선)", () => {

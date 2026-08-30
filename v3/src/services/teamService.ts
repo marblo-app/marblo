@@ -190,6 +190,24 @@ export async function createInvitation(
     throw new Error(t("common.team.duplicateInvite"));
   }
 
+  // 역할 승격은 updateMemberRole 이 담당한다. 이미 프로젝트에 있는 사람에게
+  // 새 초대장을 만들면 수락 시 현재 역할을 초대장 역할로 덮어쓸 수 있고, 이미
+  // 멤버인 팀의 초대 알림도 다시 보낸다. 멤버 UID별 users 문서를 읽어 이메일을
+  // 정규화 비교한다 — Firestore 이메일 equality query는 이전 대소문자 데이터와
+  // 맞지 않을 수 있다.
+  const project = await projectService.getProject(projectId);
+  if (project) {
+    for (const memberId of project.members) {
+      const member = await getDocument<Record<string, unknown>>(USERS, memberId);
+      if (
+        typeof member?.email === "string" &&
+        normalizeInviteEmail(member.email) === invitedEmail
+      ) {
+        throw new Error(t("common.team.alreadyMember"));
+      }
+    }
+  }
+
   // owner 기기에서만 얻을 수 있는 값이라 초대를 쓰기 전에 확보한다.
   const gitRemoteUrl = await captureProjectRepoUrl(projectId);
 

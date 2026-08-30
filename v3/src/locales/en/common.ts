@@ -30,6 +30,7 @@ export const common: Record<keyof typeof koCommon, string> = {
 
   // — team / invitations —
   "common.team.duplicateInvite": "There's already a pending invitation.",
+  "common.team.alreadyMember": "This person is already a team member.",
   "common.team.inviteNotFound": "Invitation not found.",
   "common.team.inviteAlreadyHandled":
     "This invitation has already been handled.",

@@ -1477,18 +1477,26 @@ describe("tasks — viewer 읽기전용 게이트 (aMVwzZY1QeJSFxDm4N4K)", () =>
   // memberRoles 문서가 아예 없는 레거시 멤버 — getMemberRole 이 'member' 로 접는다.
   const LEGACY_MEMBER_ID = "legacy-member-user";
   const LEGACY_MEMBER_EMAIL = "legacy@test.com";
+  const ROLELESS_MEMBER_ID = "roleless-member-user";
+  const ROLELESS_MEMBER_EMAIL = "roleless@test.com";
 
   beforeEach(async () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
       await updateDoc(doc(db, "projects", PROJECT_ID), {
-        members: arrayUnion(VIEWER_ID, LEGACY_MEMBER_ID),
+        members: arrayUnion(VIEWER_ID, LEGACY_MEMBER_ID, ROLELESS_MEMBER_ID),
       });
       await setDoc(doc(db, "memberRoles", `${PROJECT_ID}_${VIEWER_ID}`), {
         projectId: PROJECT_ID,
         userId: VIEWER_ID,
         role: "viewer",
       });
+      // 문서는 존재하지만 role 필드가 없는 구/손상 데이터. 문서가 아예 없는
+      // LEGACY_MEMBER와 달리 fail-closed되어야 앱·서버와 같은 답을 낸다.
+      await setDoc(
+        doc(db, "memberRoles", `${PROJECT_ID}_${ROLELESS_MEMBER_ID}`),
+        { projectId: PROJECT_ID, userId: ROLELESS_MEMBER_ID },
+      );
       // viewer 로 강등되기 **전에** 그 계정이 만들어 둔 기존 티켓.
       // 사후 차단이 이 문서를 무효화하면 그건 장애다.
       await setDoc(doc(db, "tasks", "task-made-before-demotion"), {
@@ -1591,6 +1599,20 @@ describe("tasks — viewer 읽기전용 게이트 (aMVwzZY1QeJSFxDm4N4K)", () =>
       }),
     );
     await assertSucceeds(deleteDoc(doc(db, "tasks", "task-1")));
+  });
+
+  it("role 필드가 없는 memberRoles 문서는 보드 쓰기를 열지 않는다", async () => {
+    const db = getContext(ROLELESS_MEMBER_ID, ROLELESS_MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "tasks", "task-1")));
+    await assertFails(
+      addDoc(collection(db, "tasks"), {
+        projectId: PROJECT_ID,
+        title: "role 없는 멤버 티켓",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
   });
 
   it("owner 는 자기 역할 문서가 'viewer' 로 잘못 써져 있어도 보드에 쓸 수 있다", async () => {
