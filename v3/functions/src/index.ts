@@ -236,9 +236,31 @@ import {
 } from "./personAxis";
 import {
   applyEventUserKeyStamp,
+  buildEventStampBoundarySql,
   planEventUserKeyStamp,
   resolveEventStampGate,
 } from "./personAxisStamp";
+import {
+  buildBoundary as buildPersonAxisBoundary,
+  buildChain as buildPersonAxisChain,
+  buildChainSql as buildPersonAxisChainSql,
+  buildCohortRows as buildGa4PersonCohortRows,
+  buildDailyRows as buildPersonAxisDailyRows,
+  buildDailySql as buildPersonAxisDailySql,
+  buildGa4InstallFallbackSql,
+  buildGa4PersonCohortSql,
+  buildInstallFallbackRows as buildGa4InstallFallbackRows,
+  buildNotes as buildPersonAxisCohortNotes,
+  buildPersonScorecard,
+  buildPersonScorecardSql,
+  buildSinceBoundary as buildPersonAxisSinceBoundary,
+  buildSinceBoundarySql as buildPersonAxisSinceBoundarySql,
+  rangeStartDay as personAxisRangeStartDay,
+  unavailable as personAxisCohortUnavailable,
+  SOURCE_EVENTS as PERSON_AXIS_SOURCE_EVENTS,
+  type BqRow as PersonAxisBqRow,
+  type PersonAxisCohort,
+} from "./personAxisCohort";
 import {
   TEAM_USAGE_CACHE_COLLECTION,
   TEAM_USAGE_CACHE_SCHEMA_VERSION,
@@ -18150,6 +18172,161 @@ export const getAdminInstallUnified = functions
       installsByDay,
       pendingColumns: PENDING_VIEW_COLUMNS,
       notes: buildNotes(hygiene, byDay.length, installsByDay.length),
+    };
+  });
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★사람 축 코호트 읽기 경로 — getAdminPersonAxisCohort (티켓 ymfPL2AorfuEniHpVpCT)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// 순수 로직(SQL 조립·경계 판정·끊긴 자리 판정)은 전부 personAxisCohort.ts 에 있고,
+// 여기서는 **BigQuery I/O 와 실패 격리만** 한다(getAdminInstallUnified 와 같은 규약).
+//
+// ★경계를 하드코딩하지 않는다. 순서가 곧 규약이다:
+//   ① 각인 경계를 **데이터에서** 읽는다(buildEventStampBoundarySql, MIN(timestamp)).
+//   ② 그 실측 경계를 @boundary 로 넘겨 나머지를 센다. 경계가 없으면(각인 전)
+//      경계 이후 구간·사슬·코호트는 **쿼리하지 않고** null/빈 배열로 둔다.
+// ★사슬을 고치지 않는다 — analytics_identity 신선도는 읽기만 한다.
+// ★사람 축 게이트가 닫혀 있으면 v_person_since_link 도 읽지 않는다(personAxis §1).
+
+export const getAdminPersonAxisCohort = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .https.onCall(async (data, context): Promise<PersonAxisCohort> => {
+    requireAdmin(context);
+    const rangeDays = normalizeRangeDays(
+      (data as { days?: unknown } | undefined)?.days
+    );
+    const generatedAt = new Date().toISOString();
+    const stampGate = resolveEventStampGate();
+    const personGate = resolvePersonAxisGate();
+    const run = (query: string, params?: Record<string, unknown>) =>
+      bigquery.query({ query, params, location: BQ_LOCATION });
+    const errors: Array<{ name: string; error: string }> = [];
+    const soft = async <T,>(
+      name: string,
+      fn: () => Promise<T>
+    ): Promise<T | null> => {
+      try {
+        return await fn();
+      } catch (err) {
+        const message = safeAnalyticsErrorMessage(err);
+        errors.push({ name, error: message });
+        functions.logger.info("[person_axis_cohort] partial read failed", {
+          name,
+          message,
+        });
+        return null;
+      }
+    };
+
+    // ① 경계 — 실측. 게이트가 꺼져 있으면 각인 행이 있을 수 없으니 쿼리도 없다.
+    //    스캔 하한은 선언일이다: 각인은 게이트가 켜진 뒤에만 생기므로 그 이전
+    //    행에는 userKey 가 없다(이것은 경계를 정하는 게 아니라 읽을 범위다).
+    let boundaryRow: PersonAxisBqRow | null = null;
+    if (stampGate.on) {
+      try {
+        const [rows] = await run(
+          buildEventStampBoundarySql(
+            BQ_PROJECT,
+            UNIFIED_TELEMETRY_DATASET,
+            PERSON_AXIS_SOURCE_EVENTS
+          ),
+          { since: stampGate.stampFrom }
+        );
+        boundaryRow = ((rows as PersonAxisBqRow[])[0] ?? null) as PersonAxisBqRow | null;
+      } catch (err) {
+        // 경계를 못 읽으면 나머지는 전부 그 경계에 기대므로 통째로 unavailable.
+        return personAxisCohortUnavailable(
+          rangeDays,
+          `events.userKey 경계를 읽지 못했다: ${safeAnalyticsErrorMessage(err)}`,
+          stampGate,
+          generatedAt
+        );
+      }
+    }
+    const boundary = buildPersonAxisBoundary(boundaryRow, stampGate);
+    const firstStampedAt = boundary.firstStampedAt;
+
+    // ② 일별 두 축(조회 구간) — 경계 판정은 조립측이 실측 경계로 한다.
+    const dailyRows = await soft("daily", async () => {
+      const [rows] = await run(buildPersonAxisDailySql(BQ_PROJECT), {
+        since: personAxisRangeStartDay(rangeDays),
+      });
+      return rows as PersonAxisBqRow[];
+    });
+
+    // ③ 경계 이후 구간 · 사슬 · 코호트 — 경계가 있을 때만.
+    let sinceRow: PersonAxisBqRow | null = null;
+    let chainRow: PersonAxisBqRow | null = null;
+    let cohortRows: PersonAxisBqRow[] = [];
+    if (firstStampedAt) {
+      const params = { boundary: firstStampedAt };
+      const [sinceRes, chainRes, cohortRes] = await Promise.all([
+        soft("sinceBoundary", async () => {
+          const [rows] = await run(buildPersonAxisSinceBoundarySql(BQ_PROJECT), params);
+          return rows as PersonAxisBqRow[];
+        }),
+        soft("chain", async () => {
+          const [rows] = await run(buildPersonAxisChainSql(BQ_PROJECT), params);
+          return rows as PersonAxisBqRow[];
+        }),
+        soft("cohort", async () => {
+          const [rows] = await run(buildGa4PersonCohortSql(BQ_PROJECT), params);
+          return rows as PersonAxisBqRow[];
+        }),
+      ]);
+      sinceRow = sinceRes?.[0] ?? null;
+      chainRow = chainRes?.[0] ?? null;
+      cohortRows = cohortRes ?? [];
+    }
+
+    // ④ 설치 축 폴백(사람 축이 0 일 때 유입 자체가 있는지) — 경계와 무관.
+    const fallbackRows = await soft("installFallback", async () => {
+      const [rows] = await run(buildGa4InstallFallbackSql(BQ_PROJECT));
+      return rows as PersonAxisBqRow[];
+    });
+
+    // ⑤ 사람 축 Activated/D30 재계산 — 방침 게이트가 열렸을 때만 뷰를 읽는다.
+    let scorecardRow: PersonAxisBqRow | null = null;
+    let personScorecardReason: string | null = null;
+    if (personGate.open) {
+      const rows = await soft("personScorecard", async () => {
+        const [r] = await run(buildPersonScorecardSql(BQ_PROJECT));
+        return r as PersonAxisBqRow[];
+      });
+      scorecardRow = rows?.[0] ?? null;
+      if (!scorecardRow) {
+        personScorecardReason =
+          "사람 축 뷰(v_person_since_link) 조회가 실패했습니다. 0 으로 접지 않고 '미상'으로 둡니다 — 사유는 queryStatus.errors 의 personScorecard 를 보세요.";
+      }
+    } else {
+      personScorecardReason = personGate.reason;
+    }
+
+    const chain = buildPersonAxisChain(chainRow);
+    const cohort = buildGa4PersonCohortRows(cohortRows);
+    const sinceBoundary = buildPersonAxisSinceBoundary(sinceRow);
+    return {
+      generatedAt,
+      rangeDays,
+      state: "ready",
+      reason: null,
+      boundary,
+      sinceBoundary,
+      daily: buildPersonAxisDailyRows(dailyRows ?? [], firstStampedAt),
+      chain,
+      cohortRows: cohort.rows,
+      cohortRowsTruncated: cohort.truncated,
+      installFallbackRows: buildGa4InstallFallbackRows(fallbackRows ?? []),
+      personScorecard: buildPersonScorecard(scorecardRow, BQ_PROJECT),
+      personScorecardReason,
+      queryStatus: { ok: errors.length === 0, errors },
+      notes: buildPersonAxisCohortNotes({
+        boundary,
+        sinceBoundary,
+        chain,
+        cohortRowCount: cohort.rows.length,
+      }),
     };
   });
 

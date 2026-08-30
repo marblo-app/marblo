@@ -2070,7 +2070,10 @@ test("★활성화 분 단위 열이 없으면 daysToFirstSpawn 으로 지어내
     <P.UnifiedActivationHeadlineView data={unifiedFixture()} />
   );
   assert.match(html, /첫 스폰 도달/);
-  assert.match(html, /18\/577/);
+  // ★#1310 이후 분모는 '외부라고 말할 근거가 있는' 12건이다(픽스처 주석 참조).
+  //   예전 18/577 은 외부성 미상 565건을 외부로 반올림한 값이었다.
+  assert.match(html, /2\/12/);
+  assert.match(html, /12 \/ 608/);
   assert.match(html, /판단 대기/);
   assert.match(html, /minutesToFirstSpawn/);
   assert.doesNotMatch(html, />0분</);
@@ -2152,7 +2155,11 @@ test("★사람 축 대조는 설치 단일값 대신 사람 추정 범위를 �
   const html = renderToStaticMarkup(
     <P.UnifiedPersonAxisComparison data={unifiedFixture()} />
   );
-  assert.match(html, /577/);
+  // ★설치 단일값은 외부 하한(12)이고 전체(608)·미상(565)이 옆에 같이 찍힌다.
+  assert.match(html, /설치 \(외부 · 하한\)/);
+  assert.match(html, />12</);
+  assert.match(html, /전체 608/);
+  assert.match(html, /외부성 미상 565 제외/);
   assert.match(html, /5~47명/);
   assert.match(html, /범위의 폭이 정보/);
   assert.match(html, /identity_linked_ratio/);

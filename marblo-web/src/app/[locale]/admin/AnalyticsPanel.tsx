@@ -51,6 +51,13 @@ import {
   type AdFunnelRow,
 } from "./adFunnel";
 import {
+  CALLABLE_PERSON_AXIS_COHORT,
+  Ga4PersonCohortView,
+  PersonAxisBoundaryView,
+  PersonAxisScorecardView,
+  type PersonAxisCohort,
+} from "./PersonAxisCohortPanel";
+import {
   MultiSeriesChart,
   TimeSeriesChart,
   type ChartDataState,
@@ -9565,6 +9572,13 @@ export default function AnalyticsPanel({
     loading: true,
     error: null,
   });
+  // ★사람 축 코호트(티켓 ymfPL2AorfuEniHpVpCT). 경계·사슬·GA4×사람 코호트·
+  //   사람 축 Activated/D30 재계산이 전부 이 봉투 하나에서 온다. 화면은 세지 않는다.
+  const [personCohort, setPersonCohort] = useState<Loaded<PersonAxisCohort>>({
+    data: null,
+    loading: true,
+    error: null,
+  });
   const [adSpendForm, setAdSpendForm] = useState<ManualAdSpendForm>(() => ({
     spendDate: todayKstDate(),
     platform: "google_ads",
@@ -9746,6 +9760,10 @@ export default function AnalyticsPanel({
         { days: number },
         AcquisitionUnified
       >(fns, CALLABLE_INSTALL_UNIFIED);
+      const callPersonCohort = httpsCallable<
+        { days: number },
+        PersonAxisCohort
+      >(fns, CALLABLE_PERSON_AXIS_COHORT);
 
       setBiz((s) => ({ ...s, loading: true, error: null }));
       setUsage((s) => ({ ...s, loading: true, error: null }));
@@ -9756,6 +9774,7 @@ export default function AnalyticsPanel({
       setBetaSeg((s) => ({ ...s, loading: true, error: null }));
       setCountryFunnel((s) => ({ ...s, loading: true, error: null }));
       setCac((s) => ({ ...s, loading: true, error: null }));
+      setPersonCohort((s) => ({ ...s, loading: true, error: null }));
       setUnified((s) => ({
         ...s,
         loading: true,
@@ -9891,6 +9910,11 @@ export default function AnalyticsPanel({
         CALLABLE_INSTALL_UNIFIED,
         () => callUnified({ days: d }),
         (v) => setUnified(v)
+      );
+      runOptional(
+        CALLABLE_PERSON_AXIS_COHORT,
+        () => callPersonCohort({ days: d }),
+        (v) => setPersonCohort(v)
       );
     },
     [refreshCacSummary]
@@ -10112,6 +10136,40 @@ export default function AnalyticsPanel({
               )}
                 rangeDays={kpi.data.rangeDays}
               />
+              {/* ── ★사람 축 (티켓 ymfPL2AorfuEniHpVpCT) — 경계·재계산·GA4 코호트 ──
+                  위 스코어카드의 Activated/D30 은 설치 축이고 값을 바꾸지 않았다.
+                  아래는 같은 정의를 사람 단위로 다시 센 것이고, 경계 전후를 한
+                  선에 섞지 않는다. */}
+              <div className="space-y-3">
+                <SectionHeader
+                  icon={Link2}
+                  title="사람 축 경계 — 전환 시점 이전은 설치 축, 이후는 사람 축"
+                  trust={personCohort.data?.state === "ready" ? "yellow" : "unwired"}
+                >
+                  <p className="text-[11px] leading-relaxed text-zinc-500">
+                    경계는 env 선언이 아니라 <b>데이터</b>(events.userKey 첫 각인
+                    행)에서 읽습니다. 경계 왼쪽은 사람으로 셀 수 없는 구간이라
+                    설치 축으로만 그리고, 두 축을 한 선에 잇지 않습니다.
+                  </p>
+                </SectionHeader>
+                <PersonAxisBoundaryView load={personCohort} />
+              </div>
+              <div className="space-y-3">
+                <SectionHeader
+                  icon={UserCheck}
+                  title="Activated · D30 — 사람 축 재계산 (위 격자는 설치 축)"
+                  trust={personCohort.data?.personScorecard ? "yellow" : "unwired"}
+                />
+                <PersonAxisScorecardView load={personCohort} />
+              </div>
+              <div className="space-y-3">
+                <SectionHeader
+                  icon={Globe}
+                  title="GA4 유입 × 사람키 코호트 — 0행이면 왜 0 인지"
+                  trust={personCohort.data?.chain ? "yellow" : "unwired"}
+                />
+                <Ga4PersonCohortView load={personCohort} />
+              </div>
             </>
           ) : (
             // ★없으면 상태가 아니라 **배선 전**이다(구버전 functions). 0 을
@@ -10142,7 +10200,7 @@ export default function AnalyticsPanel({
               "★분모는 방문이 아니라 다운로드·설치입니다(#1200). 봇은 Electron 데스크톱을 내려받아 설치하고 실행하지 않으므로, 설치를 분모로 쓰는 순간 봇은 규칙 없이도 0 으로 셉니다. 방문 축에서 거른 '의심 유입' 은 삭제하지 않고 아래 방문 축 표에 따로 남깁니다.",
               "★이 탭에는 축이 둘 있습니다 — 설치 축(통합 뷰)과 방문 축(GA4 브라우저). 두 표의 분모가 다르므로 위아래로 놓고 곱해서 읽지 마세요. 광고비와 CAC 는 광고 탭에서 봅니다.",
               "★설치 수는 사람 수가 아닙니다. 실측(2026-08-24)으로 설치 631행이 브라우저 5대에서 나왔습니다(재설치 루프). 그래서 상단에 전체 설치와 사람 추정치를 같이 둡니다(#1198 install_class).",
-              "사람 축 스위치 없음 — 획득은 설치 first touch 와 방문 브라우저 축입니다. 구매 원장 사람 34명 중 링크 3명 상태로 채널별 사람 획득을 만들면 나머지 31명이 0으로 오독됩니다.",
+              "사람 축 스위치 없음 — 획득은 설치 first touch 와 방문 브라우저 축입니다. 구매 원장 사람 34명 중 링크 3명 상태로 채널별 사람 획득을 만들면 나머지 31명이 0으로 오독됩니다. 사람 축은 아래 'GA4 유입 × 사람키 코호트' 블록에만 있고 경계(각인 첫 행) 이후 활동만 셉니다.",
               "설치 축의 모든 수치는 marblo_telemetry.v_install_unified 한 표에서 나옵니다 — 화면은 GROUP BY 만 하고 다시 세지 않습니다. 콜러블 이름은 getAdminInstallUnified 이고, 그게 아직 없으면 0 대신 '적재 전' 이라고 적습니다.",
             ]}
           />
@@ -10170,6 +10228,22 @@ export default function AnalyticsPanel({
             ) : (
               <AcquisitionHeadlineView unified={unified.data} cac={cac.data} />
             )}
+            {/* ★GA4 유입 × 사람키 코호트 — 사람 축. 위 표(설치 축)와 더하지 않는다.
+                지금 0행이고, 왜 0 인지(사슬 어느 단계) 를 화면이 말한다. */}
+            <div className="space-y-3 pt-2">
+              <SectionHeader
+                icon={Link2}
+                title="GA4 유입 × 사람키 코호트 (사람 축 — 위 설치 축 표와 별개)"
+                trust={personCohort.data?.chain ? "yellow" : "unwired"}
+              >
+                <p className="text-[11px] leading-relaxed text-zinc-500">
+                  ga4_first_touch_current → analytics_identity →
+                  analytics_user_install → events.userKey 사슬입니다. 어느 조인에서
+                  몇이 남는지가 표보다 먼저 보입니다.
+                </p>
+              </SectionHeader>
+              <Ga4PersonCohortView load={personCohort} />
+            </div>
             {/* ★차트를 새로 만들지 않았다 — #1211 이 넣은 공용
                 MultiSeriesChart(recharts) 를 그대로 쓴다. 라이브러리는
                 ChartFrame 뒤에 갇혀 있어 이 호출부는 계약(NamedSeries)만 안다.
