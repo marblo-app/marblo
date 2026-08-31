@@ -565,15 +565,24 @@ interface RetroCopy {
   subject: string;
   /** 사실관계 — 무슨 일이 있었고 지금 어떤 상태인가. */
   situation: string[];
-  /** ★단 하나의 행동. 제목 + 두 단계. */
+  /** ★제안. 부탁이 아니다 — "이렇게 한번 해보세요". 제목 + 두 단계. */
   tryTitle: string;
   tryStep1: string;
   tryStep2: string;
+  /**
+   * ★해자 한 문단. 오케 → 티켓 → 워크트리 → 에이전트 → 오케브레인 미션
+   * 클로즈드 루프, 그리고 "단순 병렬이 아니라 의존성에 맞춰 동시에".
+   * ★여기 적힌 것은 전부 지금 도는 기능이다(WorktreeCoordinator.prepare 가
+   * 스폰 직전 워크트리를 보장하고, DAGResolver 가 ready/blocked 를 갈라
+   * dependsOnCompleted 로 풀며, orchestrator.chain.* 패널이 미션 진행을
+   * 보드 판정으로 닫는다). ★확인되지 않은 기능을 여기에 쓰지 마라.
+   */
+  chain: string;
   tryTime: string;
   /** 그 사이 실제로 고쳐진 것(출시된 빌드 기준). */
   changedTitle: string;
   changed: string[];
-  /** 계단 안내. */
+  /** 계단 안내. 계정 X 쪽은 "피드백 → 기간 연장"을 혜택으로 앞세운다. */
   ladder: string;
   /** 링크 라벨·URL. */
   ctaLabel: string;
@@ -596,6 +605,7 @@ function copyFor(
       "The orchestrator could be stuck while the screen still showed a green “running”. It now says what it is waiting on.",
       "On a fresh Mac the orchestrator could stall on the first-run screen and never start. It now gets past that on its own.",
     ];
+    const chain = `Orchestrator → ticket → worktree → agent, and the Orchestrator Brain closes all of it as one mission. <strong>This is not plain parallelism</strong> — one live mission is worked by several agents <strong>at the same time, in dependency order</strong>. Tickets that are ready go out at once; a ticket waiting on another one waits, then starts the moment that one clears. And done is decided by the board, not by an agent saying so.`;
     if (cohort === "account") {
       return {
         subject: `Your Marblo beta is now 3 months — your account is open again (until ${expiresOn})`,
@@ -603,15 +613,16 @@ function copyFor(
           "Your beta window closed after 30 days, and Marblo went back to Free.",
           `We changed the beta from 1 month to 3 months. That change applies to you retroactively — your account is open again until <strong>${expiresOn}</strong>. Sign in and it is there. Nothing to buy, nothing to claim.`,
         ],
-        tryTitle: "One thing to try — it takes about five minutes",
+        tryTitle: "Try it like this",
         tryStep1: `Open the orchestrator and type ${cmd(
           "/tf-add"
-        )} to create <strong>one</strong> ticket. Anything small in a repo you already have — a README fix, a rename, one failing test.`,
+        )} to put tickets on the board. One is fine. A few that depend on each other is better — that is where you see the difference.`,
         tryStep2: `Then type ${cmd(
           "/tf-spawn-agents"
-        )}. An agent picks that ticket up and works it on the board.`,
+        )}. Every ticket gets its own isolated git worktree, and an agent works inside it. They do not step on each other's files.`,
+        chain,
         tryTime:
-          "That is the whole ask. Not a tour of the product — one ticket, one agent, and you get to watch it actually run.",
+          "That is the part you will not get elsewhere. Five minutes of watching it run says more than we can.",
         changedTitle: "What actually changed while you were gone",
         changed,
         ladder: `The ladder also moved: <strong>3 months</strong> of beta, <strong>5 months total</strong> if you send a thoughtful beta survey that passes review, and <strong>9 months total</strong> if you also do a short video interview.`,
@@ -626,18 +637,19 @@ function copyFor(
         "You were selected as a Marblo founder, but our records show you never created an account — so there is nothing to restore, and this is not a “welcome back”.",
         `We changed the beta from 1 month to 3 months, and we have held your window open until <strong>${expiresOn}</strong>. Create an account with <em>this same email address</em> and the beta is applied automatically.`,
       ],
-      tryTitle: "Two steps — and only the second one is the point",
+      tryTitle: "Create your account, then try it like this",
       tryStep1: `Sign up at <a href="${signupUrl}" style="color:#4f46e5">${signupUrl}</a> with this email address, then download the app.`,
       tryStep2: `In the orchestrator, type ${cmd(
         "/tf-add"
-      )} to create <strong>one</strong> small ticket in a repo you already have, then ${cmd(
+      )} to put tickets on the board — a few that depend on each other is best — then ${cmd(
         "/tf-spawn-agents"
-      )}. An agent picks it up and works it on the board.`,
+      )}. Every ticket gets its own isolated git worktree, and an agent works inside it.`,
+      chain,
       tryTime:
-        "The second step is the one that matters. One ticket, one agent, and you get to watch it actually run.",
+        "Five minutes is enough to see what running agent work at this shape actually feels like.",
       changedTitle: "What used to break on a first spawn, and no longer does",
       changed,
-      ladder: `The ladder: <strong>3 months</strong> of beta, <strong>5 months total</strong> if you send a thoughtful beta survey that passes review, and <strong>9 months total</strong> if you also do a short video interview.`,
+      ladder: `<strong>Send us feedback and your window gets longer.</strong> <strong>3 months</strong> of beta to start, <strong>5 months total</strong> if you send a thoughtful beta survey that passes review, and <strong>9 months total</strong> if you also do a short video interview.`,
       ctaLabel: "Create your account →",
       ctaUrl: signupUrl,
       signoff: "Thank you,\nThe Marblo team",
@@ -650,6 +662,7 @@ function copyFor(
       "オーケストレーターが止まっているのに画面は緑の「実行中」のままだった問題を修正しました。今は何を待っているかを画面が伝えます。",
       "新しい Mac で初回起動画面のままオーケストレーターが起動しないことがありました。今は自動で通過します。",
     ];
+    const chain = `オーケストレーター → チケット → ワークツリー → エージェント、そして Orchestrator Brain がその全体を1つのミッションとして閉じます。<strong>単なる並列ではありません</strong> — 生きたミッション1つを、複数のエージェントが<strong>依存関係に沿って同時に</strong>処理します。準備できたチケットはすぐ着手され、前のチケットを待つものは待機し、解けた瞬間に入ります。完了はエージェントの自己申告ではなくボードが判定します。`;
     if (cohort === "account") {
       return {
         subject: `Marblo ベータが3ヶ月に延長 — アカウントが再び開きました（${expiresOn} まで）`,
@@ -657,15 +670,16 @@ function copyFor(
           "30日でベータ期間が終わり、アカウントは Free に戻っていました。",
           `ベータ期間を1ヶ月から3ヶ月に変更し、その変更を遡って適用しました。<strong>${expiresOn}</strong> までアカウントが再び開いています。ログインすればそのまま使えます。購入も申請も不要です。`,
         ],
-        tryTitle: "試していただきたいこと — 5分ほどです",
+        tryTitle: "こんなふうに試してみてください",
         tryStep1: `オーケストレーターで ${cmd(
           "/tf-add"
-        )} と入力し、チケットを<strong>1つ</strong>作ってください。手元のリポジトリの小さなもので構いません（README の修正、リネーム、失敗しているテスト1つ）。`,
+        )} と入力し、チケットをボードに載せてください。1つでも構いませんが、互いに依存する複数のチケットのほうが違いが見えます。`,
         tryStep2: `続けて ${cmd(
           "/tf-spawn-agents"
-        )} と入力します。エージェントがそのチケットを取り、ボード上で作業します。`,
+        )} と入力します。チケットごとに隔離された git ワークツリーが用意され、エージェントはその中で作業します。互いのファイルを踏みません。`,
+        chain,
         tryTime:
-          "お願いはこれだけです。製品ツアーではありません — チケット1つ、エージェント1体。実際に動くところをご覧ください。",
+          "ここが Marblo の違いです。説明より、5分動かしてご覧いただくほうが早いはずです。",
         changedTitle: "その間に実際に直ったこと",
         changed,
         ladder: `段階も変わりました。ベータ<strong>3ヶ月</strong>、審査を通過する丁寧なベータアンケートで<strong>合計5ヶ月</strong>、さらに短いビデオインタビューまで完了すると<strong>合計9ヶ月</strong>です。`,
@@ -680,18 +694,19 @@ function copyFor(
         "Marblo のファウンダーに選ばれていますが、記録上まだアカウントを作成されていません。したがって復元するものはなく、これは「おかえりなさい」のご案内ではありません。",
         `ベータ期間を1ヶ月から3ヶ月に変更し、<strong>${expiresOn}</strong> まで枠をお取りしています。<em>このメールアドレスと同じアドレス</em>でアカウントを作成いただくと、ベータが自動的に適用されます。`,
       ],
-      tryTitle: "2ステップ。意味があるのは2つ目だけです",
+      tryTitle: "アカウントを作成して、こんなふうに試してみてください",
       tryStep1: `<a href="${signupUrl}" style="color:#4f46e5">${signupUrl}</a> でこのメールアドレスを使って登録し、アプリをダウンロードしてください。`,
       tryStep2: `オーケストレーターで ${cmd(
         "/tf-add"
-      )} と入力して手元のリポジトリに小さなチケットを<strong>1つ</strong>作り、続けて ${cmd(
+      )} と入力してチケットをボードに載せ（互いに依存する複数だとなお良いです）、続けて ${cmd(
         "/tf-spawn-agents"
-      )} と入力します。エージェントがそれを取り、ボード上で作業します。`,
+      )} と入力します。チケットごとに隔離された git ワークツリーが用意され、エージェントがその中で作業します。`,
+      chain,
       tryTime:
-        "重要なのは2つ目です。チケット1つ、エージェント1体。実際に動くところをご覧ください。",
+        "より効率の高いエージェント業務がどういうものか、5分で実際にご覧いただけます。",
       changedTitle: "初回スポーンで詰まっていた点は、すでに直っています",
       changed,
-      ladder: `段階はこうです。ベータ<strong>3ヶ月</strong>、審査を通過する丁寧なベータアンケートで<strong>合計5ヶ月</strong>、さらに短いビデオインタビューまで完了すると<strong>合計9ヶ月</strong>。`,
+      ladder: `<strong>フィードバックをいただくと期間がさらに延びます。</strong>まずベータ<strong>3ヶ月</strong>、審査を通過する丁寧なベータアンケートで<strong>合計5ヶ月</strong>、さらに短いビデオインタビューまで完了すると<strong>合計9ヶ月</strong>。`,
       ctaLabel: "アカウントを作成する →",
       ctaUrl: signupUrl,
       signoff: "ありがとうございます。\nMarblo チーム",
@@ -704,6 +719,7 @@ function copyFor(
     "오케가 멈췄는데 화면은 계속 초록색 “실행 중”으로 보이던 문제를 고쳤습니다. 이제 무엇을 기다리는지 화면이 말합니다.",
     "새 맥에서 오케가 첫 실행 화면에 멈춰 아무것도 시작되지 않던 문제를 고쳤습니다. 이제 사람 손 없이 통과합니다.",
   ];
+  const chain = `오케 → 티켓 → 워크트리 → 에이전트, 그리고 오케브레인이 그 전부를 미션 하나로 닫습니다. <strong>단순 병렬이 아닙니다</strong> — 살아있는 미션 하나를 여러 에이전트가 <strong>의존성에 맞춰 동시에</strong> 처리합니다. 준비된 티켓은 바로 나가고, 앞 티켓을 기다려야 하는 것은 기다렸다가 풀리는 순간 들어갑니다. 완료는 에이전트가 그렇다고 말해서가 아니라 보드가 판정합니다.`;
   if (cohort === "account") {
     return {
       subject: `마블로 베타가 3개월로 늘었습니다 — 계정이 다시 열렸습니다 (${expiresOn}까지)`,
@@ -711,15 +727,16 @@ function copyFor(
         "30일 만에 베타 기간이 끝나 계정이 Free 로 돌아갔었습니다.",
         `베타 기간을 1개월에서 3개월로 바꿨고, 그 변경을 소급 적용했습니다. <strong>${expiresOn}</strong>까지 계정이 다시 열려 있습니다. 로그인하시면 그대로 쓰실 수 있습니다. 결제도, 신청도 필요 없습니다.`,
       ],
-      tryTitle: "딱 한 가지만 해보세요 — 5분이면 됩니다",
+      tryTitle: "이렇게 한번 해보세요",
       tryStep1: `오케에 ${cmd(
         "/tf-add"
-      )} 를 치고 티켓을 <strong>하나</strong>만 만드세요. 이미 갖고 계신 저장소의 아주 작은 것이면 됩니다 — README 오타, 이름 바꾸기, 깨진 테스트 하나.`,
+      )} 를 치고 티켓을 보드에 올리세요. 하나여도 되지만, 서로 물려 있는 여러 개일 때 차이가 보입니다.`,
       tryStep2: `이어서 ${cmd(
         "/tf-spawn-agents"
-      )} 를 치세요. 에이전트가 그 티켓을 집어 보드 위에서 작업합니다.`,
+      )} 를 치세요. 티켓마다 격리된 git 워크트리가 잡히고, 에이전트가 각자 그 안에서 작업합니다. 서로의 파일을 밟지 않습니다.`,
+      chain,
       tryTime:
-        "부탁은 이게 전부입니다. 제품 둘러보기가 아니라 — 티켓 하나, 에이전트 하나. 실제로 굴러가는 걸 보시면 됩니다.",
+        "마블로가 다른 지점이 여기입니다. 설명보다 5분 돌려 보시는 게 빠릅니다.",
       changedTitle: "그 사이 실제로 고쳐진 것",
       changed,
       ladder: `계단도 바뀌었습니다. 베타 <strong>3개월</strong>, 성실한 베타 설문이 검토를 통과하면 <strong>총 5개월</strong>, 짧은 화상 인터뷰까지 하시면 <strong>총 9개월</strong>입니다.`,
@@ -734,18 +751,19 @@ function copyFor(
       "마블로 파운더로 선정해 드렸지만, 기록상 아직 가입하신 적이 없습니다. 그래서 되살릴 것도 없고, 이 메일은 “돌아오셨습니다” 안내가 아닙니다.",
       `베타 기간을 1개월에서 3개월로 바꾸면서 회원님 몫의 창을 <strong>${expiresOn}</strong>까지 열어 뒀습니다. <em>이 메일을 받으신 바로 그 주소</em>로 가입하시면 베타가 자동으로 적용됩니다.`,
     ],
-    tryTitle: "두 단계인데, 의미 있는 건 두 번째 하나뿐입니다",
+    tryTitle: "가입하시고, 이렇게 한번 해보세요",
     tryStep1: `<a href="${signupUrl}" style="color:#4f46e5">${signupUrl}</a> 에서 이 주소로 가입하시고 앱을 받으세요.`,
     tryStep2: `오케에 ${cmd(
       "/tf-add"
-    )} 를 쳐서 갖고 계신 저장소에 작은 티켓을 <strong>하나</strong> 만들고, 이어서 ${cmd(
+    )} 를 쳐서 티켓을 보드에 올리고(서로 물려 있는 여러 개면 더 좋습니다), 이어서 ${cmd(
       "/tf-spawn-agents"
-    )} 를 치세요. 에이전트가 그 티켓을 집어 보드 위에서 작업합니다.`,
+    )} 를 치세요. 티켓마다 격리된 git 워크트리가 잡히고, 에이전트가 각자 그 안에서 작업합니다.`,
+    chain,
     tryTime:
-      "중요한 건 두 번째입니다. 티켓 하나, 에이전트 하나. 실제로 굴러가는 걸 보시면 됩니다.",
+      "더 효율 높은 에이전트 업무가 어떤 것인지, 5분이면 직접 보실 수 있습니다.",
     changedTitle: "첫 스폰에서 걸리던 것들은 그 사이 고쳤습니다",
     changed,
-    ladder: `계단은 이렇습니다. 베타 <strong>3개월</strong>, 성실한 베타 설문이 검토를 통과하면 <strong>총 5개월</strong>, 짧은 화상 인터뷰까지 하시면 <strong>총 9개월</strong>.`,
+    ladder: `<strong>써 보시고 피드백을 주시면 기간이 더 늘어납니다.</strong> 우선 베타 <strong>3개월</strong>, 성실한 베타 설문이 검토를 통과하면 <strong>총 5개월</strong>, 짧은 화상 인터뷰까지 하시면 <strong>총 9개월</strong>.`,
     ctaLabel: "가입하러 가기 →",
     ctaUrl: signupUrl,
     signoff: "감사합니다.\n마블로 팀 드림",
@@ -781,6 +799,8 @@ export function buildBetaRetroExtendEmail(
       ...c.situation.map(p),
       `<p style="margin:24px 0 10px;font-size:17px;font-weight:700">${c.tryTitle}</p>`,
       `<ol style="margin:0 0 14px;padding-left:20px"><li style="margin:0 0 8px">${c.tryStep1}</li><li>${c.tryStep2}</li></ol>`,
+      // ★해자 문단 — 제안의 알맹이라 본문에서 눈에 띄게 둔다.
+      `<p style="margin:0 0 14px;padding:12px 14px;background:#f5f5ff;border-left:3px solid #4f46e5;border-radius:6px">${c.chain}</p>`,
       p(`<span style="color:#555">${c.tryTime}</span>`),
       `<p style="margin:0 0 20px"><a href="${c.ctaUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:8px;font-weight:600;text-decoration:none">${c.ctaLabel}</a></p>`,
       `<p style="margin:24px 0 8px;font-weight:700">${c.changedTitle}</p>`,
@@ -798,6 +818,8 @@ export function buildBetaRetroExtendEmail(
     c.tryTitle,
     `1. ${plain(c.tryStep1)}`,
     `2. ${plain(c.tryStep2)}`,
+    "",
+    plain(c.chain),
     "",
     plain(c.tryTime),
     "",

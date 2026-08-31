@@ -501,3 +501,106 @@ test("text 파트에 HTML 태그가 새지 않는다", () => {
     }
   }
 });
+
+// ── 5. ★"부탁"이 아니라 "해자 제안" (티켓 NKrJXNqBYHxsLutfIRSb) ────────────
+//
+// 사장님 지시(2026-08-31): "부탁이라고 하지말고 그냥 이렇게 한번 해보세요 …
+// 부탁이 아니라 해자가 있으니 써보면 알거라는 내용으로". 아래 세 테스트가 그
+// 지시를 계약으로 고정한다. 문면을 손볼 때 이 계약을 먼저 읽어라.
+
+test("★겸양·부탁 표현이 어느 로케일에도 남아 있지 않다", () => {
+  // 교체 전 문면에 실제로 있던 구문들이다. 다시 기어들어오면 여기서 잡는다.
+  const banned = ["부탁", "お願い", "the whole ask", "That is the whole ask"];
+  for (const locale of LOCALES) {
+    for (const cohort of ["account", "no_account"] as const) {
+      const text = buildBetaRetroExtendEmail(locale, cohort, EXPIRES).text;
+      for (const word of banned) {
+        assert.ok(
+          !text.includes(word),
+          `${locale}/${cohort} 에 부탁 표현 "${word}" 가 있다`,
+        );
+      }
+    }
+  }
+});
+
+test("★체인이 두 코호트 × 세 로케일 전부에 들어간다 — 오케→티켓→워크트리→에이전트→오케브레인", () => {
+  // ★여기 적힌 것은 전부 지금 도는 기능이어야 한다(WorktreeCoordinator.prepare,
+  // DAGResolver ready/blocked, orchestrator.chain.* 패널). 확인 안 된 걸 넣지 마라.
+  const chainWords: Record<RetroLocale, string[]> = {
+    ko: ["오케", "티켓", "워크트리", "에이전트", "오케브레인", "미션"],
+    en: ["orchestrator", "ticket", "worktree", "agent", "Orchestrator Brain", "mission"],
+    ja: ["オーケストレーター", "チケット", "ワークツリー", "エージェント", "Orchestrator Brain", "ミッション"],
+  };
+  for (const locale of LOCALES) {
+    for (const cohort of ["account", "no_account"] as const) {
+      const text = buildBetaRetroExtendEmail(locale, cohort, EXPIRES).text;
+      for (const word of chainWords[locale]) {
+        assert.ok(
+          text.toLowerCase().includes(word.toLowerCase()),
+          `${locale}/${cohort} 에 체인 요소 "${word}" 가 없다`,
+        );
+      }
+    }
+  }
+});
+
+test("★핵심 차별점 한 문장 — '단순 병렬이 아니라 의존성에 맞춰 동시에'", () => {
+  const claim: Record<RetroLocale, string[]> = {
+    ko: ["단순 병렬이 아닙니다", "의존성에 맞춰 동시에"],
+    en: ["not plain parallelism", "at the same time, in dependency order"],
+    ja: ["単なる並列ではありません", "依存関係に沿って同時に"],
+  };
+  for (const locale of LOCALES) {
+    for (const cohort of ["account", "no_account"] as const) {
+      const text = buildBetaRetroExtendEmail(locale, cohort, EXPIRES).text;
+      for (const phrase of claim[locale]) {
+        assert.ok(
+          text.includes(phrase),
+          `${locale}/${cohort} 에 차별점 문구 "${phrase}" 가 없다`,
+        );
+      }
+    }
+  }
+});
+
+test("★계정 X 에만 피드백 → 기간 연장 혜택이 앞세워진다", () => {
+  const benefit: Record<RetroLocale, string> = {
+    ko: "피드백을 주시면 기간이 더 늘어납니다",
+    en: "Send us feedback and your window gets longer",
+    ja: "フィードバックをいただくと期間がさらに延びます",
+  };
+  for (const locale of LOCALES) {
+    const no = buildBetaRetroExtendEmail(locale, "no_account", EXPIRES).text;
+    assert.ok(
+      no.includes(benefit[locale]),
+      `${locale}/no_account 에 피드백 연장 혜택이 없다`,
+    );
+  }
+});
+
+test("★계정 X 문면에 복귀·재개 뉘앙스가 없다(가입한 적이 없는 30명이다)", () => {
+  const banned: Record<RetroLocale, string[]> = {
+    ko: ["돌아오셨", "다시 열", "복귀", "재개"],
+    en: ["welcome back", "open again", "come back"],
+    ja: ["おかえり", "再び開", "復帰"],
+  };
+  for (const locale of LOCALES) {
+    const mail = buildBetaRetroExtendEmail(locale, "no_account", EXPIRES);
+    for (const word of banned[locale]) {
+      assert.ok(
+        !mail.subject.includes(word),
+        `${locale}/no_account 제목에 복귀 표현 "${word}" 가 있다`,
+      );
+      // 본문의 "이 메일은 '돌아오셨습니다' 안내가 아닙니다" 는 부정문이라
+      // 허용된다 — 오히려 계정 X 코호트에 반드시 있어야 하는 문장이다.
+      const body = mail.text
+        .replace(/[“"「][^”"」]*[”"」]\s*(안내가 아닙니다|のご案内ではありません)/g, "")
+        .replace(/this is not a\s*[“"][^”"]*[”"]/gi, "");
+      assert.ok(
+        !body.includes(word),
+        `${locale}/no_account 본문에 복귀 표현 "${word}" 가 있다`,
+      );
+    }
+  }
+});
