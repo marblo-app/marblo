@@ -51,6 +51,12 @@ import {
   isPaddleCheckoutPlan,
   resolvePaddleCheckoutPrice,
 } from "@/lib/paddleCheckout";
+import {
+  acquirePaymentLock as acquireLock,
+  installPaymentLockPageHideRelease,
+  releasePaymentLock as releaseLock,
+  sessionPaymentLockStorage,
+} from "@/lib/paymentLock";
 
 interface PaddleSDK {
   Initialize(options: { token: string; environment?: string }): void;
@@ -638,36 +644,21 @@ export default function CheckoutPage() {
     billing,
   ]);
 
-  const PAYMENT_LOCK_KEY = "payment_in_progress";
-  const PAYMENT_LOCK_STALE_MS = 15 * 60 * 1000;
+  // 결제 중복 클릭 락. 구현은 @/lib/paymentLock 참고 — 여기서는 sessionStorage
+  // 핸들만 물려 준다. 호출부 동작은 이전과 동일하다.
+  const acquirePaymentLock = (): boolean =>
+    acquireLock(sessionPaymentLockStorage());
 
-  const acquirePaymentLock = (): boolean => {
-    try {
-      const raw = sessionStorage.getItem(PAYMENT_LOCK_KEY);
-      if (raw) {
-        const started = Number(raw);
-        if (
-          Number.isFinite(started) &&
-          Date.now() - started < PAYMENT_LOCK_STALE_MS
-        ) {
-          return false;
-        }
-      }
-      sessionStorage.setItem(PAYMENT_LOCK_KEY, String(Date.now()));
-      return true;
-    } catch {
-      // sessionStorage 불가 환경 — 탭 단위 loading 만 의존
-      return true;
-    }
-  };
+  const releasePaymentLock = () => releaseLock(sessionPaymentLockStorage());
 
-  const releasePaymentLock = () => {
-    try {
-      sessionStorage.removeItem(PAYMENT_LOCK_KEY);
-    } catch {
-      /* ignore */
-    }
-  };
+  // 페이지를 벗어나면 락을 푼다. 안 풀면 결제창을 띄운 채 새로고침한 사용자가
+  // 최대 15분간 "결제가 이미 진행 중입니다"로 막힌다(ticket YgA5uusd).
+  // 같은 페이지에서의 연타 방지는 그대로 남는다 — 이탈이 있어야만 풀린다.
+  useEffect(
+    () =>
+      installPaymentLockPageHideRelease(window, sessionPaymentLockStorage()),
+    []
+  );
 
   const applyMappedError = (err: unknown) => {
     const mapped = mapPaymentError(err);
